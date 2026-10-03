@@ -361,8 +361,16 @@ core_ownership:
 # (board.yaml core id m33_sm).  `candidates` lists only cores with a real
 # backend TODAY; widen it only when the backend lands.
 assignable:
+  # `linux_enable` (default false): whether the generated Linux fragment may
+  # turn the node on when the resolved owner is a55.  Flipping it needs
+  # `linux_evidence` (bench proof).  False keeps the vendor status, so the
+  # shipped image changes no behaviour.
   e1m_uart0:
     soc_instance: "UART0"
+    # No Linux enable: an alias-less rz-rsci port registers as ttySC0 and
+    # steals the SCIF console + getty (bench 2026-09-26, see
+    # e1m-v2n-som.dtsi serial4), and P51 (RXD0) floats without a Pmod.
+    linux_enable: false
     default: "a55"
     # "m33" is added once the P51 (UART0_RXD0) RX pull-up is bench-proven:
     # an unpulled RXD floats into the sci0 receive-error ISR (NVIC 114) and
@@ -391,8 +399,11 @@ assignable:
     hw_blocked:
       reason: "P90-P92 are not 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1) and the carrier parts on E1M SPI0 are not yet confirmed 1.8 V (audit IO-05 / IO-M2 / CM33-13)"
     default: "a55"
-    # m33: zephyr/drivers/spi/spi_renesas_rz_spi_b.c + hal_renesas rzv r_spi_b.
-    candidates: ["a55", "m33"]
+    # "m33" is added once the `m33:` devicetree block exists (the driver is
+    # zephyr/drivers/spi/spi_renesas_rz_spi_b.c + hal_renesas rzv r_spi_b, but
+    # the RSPI0 PFC codes, SPI_B CM33 interrupt routing and the Zephyr node
+    # are not in metadata) and hw_blocked is released.
+    candidates: ["a55"]
     rows:
       - { peripheral: "RSPI0_MISOA", pad: "P91" }
       - { peripheral: "RSPI0_MOSIA", pad: "P90" }

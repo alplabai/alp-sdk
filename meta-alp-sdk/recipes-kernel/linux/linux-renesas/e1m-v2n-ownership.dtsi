@@ -8,34 +8,20 @@
  * stay disabled.  Regenerate after editing either source.
  */
 
-&pinctrl {
-	e1m_uart0_pins: e1m-uart0 {
-		pinmux = <RZV2N_PORT_PINMUX(5, 1, 1)>, /* P51 = UART0_RXD0 */
-			 <RZV2N_PORT_PINMUX(5, 0, 1)>; /* P50 = UART0_TXD0 */
-	};
-};
+/* e1m_can0 (CANFD3, &canfd): owned by a55; left at the vendor status (no `linux_enable` in
+ * metadata/e1m_modules/v2n/core-ownership.yaml -- Linux enablement is not bench-evidenced). */
 
-/* e1m_can0 (CANFD3, &canfd): GAP -- no PFC function code in metadata/socs/renesas/rzv2n/n44.json
- * linux_dt.CANFD3.pinmux for ['CANFD3_CRX3', 'CANFD3_CTX3']; node left as the vendor
- * dtsi has it (disabled).  Not guessed. */
-
-/* e1m_can1 (CANFD2, &canfd): GAP -- no PFC function code in metadata/socs/renesas/rzv2n/n44.json
- * linux_dt.CANFD2.pinmux for ['CANFD2_CRX2', 'CANFD2_CTX2']; node left as the vendor
- * dtsi has it (disabled).  Not guessed. */
+/* e1m_can1 (CANFD2, &canfd): owned by a55; left at the vendor status (no `linux_enable` in
+ * metadata/e1m_modules/v2n/core-ownership.yaml -- Linux enablement is not bench-evidenced). */
 
 /* e1m_spi0 (RSPI0, &rspi0): left disabled -- hardware-blocked on every core:
  * P90-P92 are not 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1) and the carrier parts on E1M SPI0 are not yet confirmed 1.8 V (audit IO-05 / IO-M2 / CM33-13) */
 
-/* e1m_uart0 (UART0, &sci0): owned by a55. */
-&sci0 {
-	pinctrl-0 = <&e1m_uart0_pins>;
-	pinctrl-names = "default";
-	status = "okay";
-};
+/* e1m_uart0 (UART0, &sci0): owned by a55; left at the vendor status (no `linux_enable` in
+ * metadata/e1m_modules/v2n/core-ownership.yaml -- Linux enablement is not bench-evidenced). */
 
-/* e1m_uart1 (UART1, &sci1): GAP -- no PFC function code in metadata/socs/renesas/rzv2n/n44.json
- * linux_dt.UART1.pinmux for ['UART1_RXD1', 'UART1_TXD1']; node left as the vendor
- * dtsi has it (disabled).  Not guessed. */
+/* e1m_uart1 (UART1, &sci1): owned by a55; left at the vendor status (no `linux_enable` in
+ * metadata/e1m_modules/v2n/core-ownership.yaml -- Linux enablement is not bench-evidenced). */
 
 /*
  * Module clocks the Cortex-M33 uses (enabled supervisor links + CM33-owned

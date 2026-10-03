@@ -53,15 +53,19 @@ under `assignable:`, keyed by E1M instance (`e1m_uart0`, `e1m_uart1`,
 `e1m_spi0`, `e1m_can0`, `e1m_can1`), with a `default` (Linux/`a55`),
 `candidates` (only cores that have a real backend today) and `rows` that
 reference existing `(peripheral, pad)` pairs of `metadata/pinmux/v2n.yaml`.
-A project overrides a default in `board.yaml`:
+A project may name an instance in `board.yaml`:
 
 ```yaml
 ownership:
-  e1m_spi0: m33        # core token: a55 | m33 (board.yaml core id m33_sm)
+  e1m_uart0: a55       # core token: a55 | m33 (board.yaml core id m33_sm)
 ```
 
-The loader rejects an unknown instance or a core outside `candidates`,
-naming the instance and the allowed cores; the resolved map is emitted as
+The loader rejects an unknown instance, a core outside `candidates`, a
+`hw_blocked` instance, and -- for now -- ANY core that differs from the SoM
+default: the Linux fragment below is generated from the SoM default only, so a
+per-project override would change the CM33 side but leave Linux claiming the
+node and not holding its clocks (a CM33 bus fault).  To hand an instance to the
+M33 today, change its `default` here.  The resolved map is emitted as
 `ownership:` in `--emit system-manifest`.  Caveats: `e1m_uart0` stays
 `a55`-only until the P51 (UART0_RXD0) RX pull-up is bench-proven (a floating
 RXD triggers the sci0 receive-error ISR on the CM33); `e1m_uart1` has no CM33
@@ -81,7 +85,7 @@ report a gap.  `hw_blocked: {reason}` keeps an instance disabled on EVERY core
 Zephyr side: an entry may carry an `m33:` block (`dt_label`, `alias`,
 `kconfig`, `pinctrl` names).  `gen_zephyr_board.py` then emits that node
 `disabled` with the pinctrl group built from the rows + `linux_dt` codes, and
-only a project that assigns the instance to `m33` gets it `okay` + the alias
+only a project whose resolved owner is `m33` gets it `okay` + the alias
 + the `kconfig` lines from `--emit dts-overlay` / `zephyr-conf`.  No entry
 carries an `m33:` block yet: the PFC codes for the RSPI0 and CAN-FD pads and
 the SPI_B CM33 interrupt routing are not in metadata, so an `m33` assignment
@@ -90,18 +94,21 @@ of an instance without one fails at emit with a message saying so.
 Linux side: `scripts/gen_linux_ownership_dt.py` projects the SoM defaults into
 `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi`
 (generated, included from `e1m-v2n-som.dtsi`, installed by the linux-renesas
-bbappend).  An a55-owned instance with a complete PFC code set gets `status =
-"okay"` and a pinctrl group (today only `e1m_uart0` / `&sci0`); instances with
-missing codes (`e1m_uart1`, `e1m_can0`, `e1m_can1`) are a GAP comment and
-`e1m_spi0` stays disabled with its `hw_blocked` reason.  The fragment follows
-the SoM default, not a project's `ownership:` override.  `--vendor-dtsi
+bbappend).  An a55-owned instance gets `status =
+"okay"` and a pinctrl group only if its entry has `linux_enable: true` (which
+requires `linux_evidence`) and the SoC `linux_dt` has every PFC code; the
+default is false, so the shipped image changes no behaviour (an alias-less
+rz-rsci port would register as ttySC0 and steal the console -- bench
+2026-09-26).  No instance is enabled today: each is a "left at the vendor
+status" comment, `e1m_spi0` quotes its `hw_blocked` reason.  The fragment
+follows the SoM default.  `--vendor-dtsi
 <r9a09g056.dtsi>` verifies the referenced node labels exist in the kernel
 tree.
 
 CM33-owned clocks: the same fragment sets `renesas,cm33-owned-clocks` on the
 CPG node -- the `linux_dt[...].cpg_clocks` of every enabled supervisor link
-(RSCI7 for the GD32, always) and of each assignable instance owned by the
-M33 (never a `hw_blocked` one).  The kernel patch
+(RSCI7 for the GD32, always) and of each assignable instance whose SoM default
+owner is the M33 (never a `hw_blocked` one).  The kernel patch
 `0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks.patch` makes the CPG driver keep
 those clocks and their MSTOP gates on, so `clk_disable_unused` cannot stop a
 peripheral the CM33 is using.  The generic `protected-clocks` property is not

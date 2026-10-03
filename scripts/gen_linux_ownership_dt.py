@@ -22,7 +22,9 @@ Inputs (nothing is restated here; every value is read):
 
 For every assignable instance at its SoM default core:
 
-  * owned by the A55 and not hw_blocked: the node is enabled with a pinctrl
+  * owned by the A55, not hw_blocked and `linux_enable: true` (which needs
+    `linux_evidence`; the default is false, so nothing changes): the node is
+    enabled with a pinctrl
     group built from the rows' pads + the SoC linux_dt PFC codes -- but ONLY if
     the SoC carries a function code for every row.  A missing code is a GAP
     comment, never a guessed number, and the node stays as the vendor dtsi has it;
@@ -134,6 +136,12 @@ def render(doc: dict, soc: dict, links: dict,
             continue
         if own[inst] != "a55":
             nodes.append(f"{head}owned by {own[inst]}; Linux leaves it alone. */")
+            continue
+        if e.get("linux_enable") and not e.get("linux_evidence"):
+            raise GenError(f"assignable.{inst}: linux_enable needs linux_evidence")
+        if not e.get("linux_enable"):
+            nodes.append(f"{head}owned by a55; left at the vendor status (no `linux_enable` in\n"
+                         f" * {SRC} -- Linux enablement is not bench-evidenced). */")
             continue
         rows = instance_pfc(soc, e)
         gaps = [r["peripheral"] for r, p in rows if p is None]

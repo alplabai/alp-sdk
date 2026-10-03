@@ -40,6 +40,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["default", "candidates", "rows"],
+        "if": { "properties": { "linux_enable": { "const": true } }, "required": ["linux_enable"] },
+        "then": { "required": ["linux_evidence"] },
         "properties": {
           "default": { "$ref": "#/$defs/core" },
           "candidates": {
@@ -52,6 +54,8 @@
           "rows": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/ref" } },
           "note": { "type": "string" },
           "soc_instance": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$", "description": "Key of this instance in the SoC JSON `linux_dt` map: supplies the Linux node label, the PFC function codes (`pinmux`, by row peripheral name) and the CPG clock names (`cpg_clocks`).  Required for any Linux/Zephyr node emission." },
+          "linux_enable": { "type": "boolean", "default": false, "description": "Enable the node on Linux when this instance's resolved owner is a55.  False/absent = scripts/gen_linux_ownership_dt.py emits nothing for it (vendor status stands), so the shipped image changes no behaviour.  Flipping it to true needs `linux_evidence`." },
+          "linux_evidence": { "type": "string", "minLength": 1, "description": "Bench or manual evidence that enabling the node on Linux is safe (tty alias / console, pin states).  Required when linux_enable is true." },
           "hw_blocked": {
             "type": "object",
             "additionalProperties": false,

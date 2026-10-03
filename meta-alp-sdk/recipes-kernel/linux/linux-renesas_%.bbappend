@@ -235,6 +235,19 @@ do_configure:prepend() {
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
         "${ALP_DTS_DST}/"
 
+    # The generated ownership fragment must only name nodes THIS kernel's SoC
+    # dtsi defines, and must match the metadata.  --check never writes.  Skipped
+    # (with a warning) when the SDK scripts are not next to this layer or the
+    # host python lacks PyYAML.
+    ALP_OWN_GEN="${THISDIR}/../../../scripts/gen_linux_ownership_dt.py"
+    if [ -f "${ALP_OWN_GEN}" ] && python3 -c 'import yaml' 2>/dev/null; then
+        python3 "${ALP_OWN_GEN}" --check \
+            --vendor-dtsi "${S}/arch/arm64/boot/dts/renesas/r9a09g056.dtsi" \
+            || bbfatal "e1m-v2n-ownership.dtsi is stale or names a node r9a09g056.dtsi lacks"
+    else
+        bbwarn "gen_linux_ownership_dt.py or PyYAML unavailable: ownership fragment not verified against r9a09g056.dtsi"
+    fi
+
     # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
     # to the board dts or the cam0 dtb has no rule to build.
     if [ -n "${ALP_CAM0_SENSOR}" ]; then

@@ -43,6 +43,10 @@ def resolve_ownership(doc: Optional[dict],
                       declared_core_types: Optional[set[str]] = None) -> dict[str, str]:
     """{instance: core} = assignable defaults + validated overrides.
 
+    Until a per-project Linux fragment exists, an override may only restate
+    the SoM default (anything else needs a Linux change this build cannot
+    make); `hw_blocked` instances reject it with their reason.
+
     Fixed `core_ownership` rows are not in the result and cannot be
     overridden (they are not instances).  `declared_core_types` (SoC core
     types of the project's `cores:` keys; None = skip) rejects an override
@@ -60,11 +64,26 @@ def resolve_ownership(doc: Optional[dict],
             raise OrchestratorError(
                 f"board.yaml ownership: {inst} cannot be owned by {core!r}; "
                 f"allowed cores: {cands}")
+        blocked = assignable[inst].get("hw_blocked")
+        if blocked and core != assignable[inst]["default"]:
+            raise OrchestratorError(
+                f"board.yaml ownership: {inst} is hardware-blocked on every core: "
+                f"{blocked['reason']}")
         if (declared_core_types is not None
                 and CORE_TOKEN_TYPES[core] not in declared_core_types):
             raise OrchestratorError(
                 f"board.yaml ownership: {inst} is assigned to {core!r} but "
                 f"board.yaml `cores:` does not declare a {CORE_TOKEN_TYPES[core]} core")
+        default = assignable[inst]["default"]
+        if core != default:
+            raise OrchestratorError(
+                f"board.yaml ownership: {inst}: {core!r} differs from the SoM default "
+                f"{default!r}.  The Linux devicetree fragment (e1m-v2n-ownership.dtsi, "
+                f"including renesas,cm33-owned-clocks) is generated from the SoM default "
+                f"only, so a per-project override would leave Linux claiming the node and "
+                f"not holding its clocks.  Change the default in "
+                f"metadata/e1m_modules/v2n/core-ownership.yaml; a per-project Linux "
+                f"fragment is not implemented")
         out[inst] = core
     return out
 
@@ -73,8 +92,10 @@ def pad_pfc(pad: str, func: int) -> tuple[str, int, int]:
     """("P50", 1) -> ("PORT_05", 0, 1): the RZ/V2N PFC (port, pin, func) of a
     `P<port><pin>` pad.  The function code is a silicon fact from the SoC
     JSON `linux_dt[soc_instance].pinmux`; only the pad spelling is parsed."""
-    if len(pad) != 3 or pad[0] != "P" or not pad[2].isdigit():
-        raise OrchestratorError(f"pad {pad!r} is not a P<port><pin> pad")
+    if len(pad) != 3 or pad[0] != "P" or not pad[1].isdigit() or not pad[2].isdigit():
+        raise OrchestratorError(
+            f"pad {pad!r} is not a P<digit port><pin> pad (letter ports are not mapped "
+            "to a PORT_xx token: no source for it in this tree)")
     return f"PORT_0{pad[1]}", int(pad[2]), func
 
 
@@ -97,6 +118,8 @@ def validate_assignable(doc: dict, pinmux_pairs: set[tuple[str, str]],
     fixed = {(r["peripheral"], r["pad"]) for r in doc.get("core_ownership") or []}
     seen: dict[tuple[str, str], str] = {}
     for inst, e in (doc.get("assignable") or {}).items():
+        if e.get("hw_blocked") and e["default"] != "a55":
+            msgs.append(f"assignable.{inst}: hw_blocked instance must default to a55 (Linux leaves it disabled)")
         if e["default"] not in e["candidates"]:
             msgs.append(f"assignable.{inst}: default {e['default']!r} not in candidates {e['candidates']}")
         for c in e["candidates"]:
