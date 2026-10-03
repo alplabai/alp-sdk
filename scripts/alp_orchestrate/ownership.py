@@ -24,21 +24,30 @@ from .models import OrchestratorError
 CORE_TOKEN_TYPES = {"a55": "cortex-a55", "m33": "cortex-m33"}
 
 
-def ownership_doc_rel(metadata_root: Path, family_dir: Optional[str]) -> Optional[str]:
-    """Repo-relative path of the family's core-ownership.yaml (the V2M family
-    `v2n-m1` shares the V2N file), or None."""
+def _ownership_doc_path(metadata_root: Path, family_dir: Optional[str]) -> Optional[tuple[Path, str]]:
+    """(on-disk path under `metadata_root`, repo-relative spelling) of the
+    family's core-ownership.yaml (the V2M family `v2n-m1` shares the V2N
+    file), or None.  The repo-relative string is only for `src=` comments."""
     if not family_dir:
         return None
     for fam in (family_dir, "v2n" if family_dir.startswith("v2n") else None):
-        if fam and (metadata_root / "e1m_modules" / fam / "core-ownership.yaml").is_file():
-            return f"metadata/e1m_modules/{fam}/core-ownership.yaml"
+        p = metadata_root / "e1m_modules" / fam / "core-ownership.yaml" if fam else None
+        if p and p.is_file():
+            return p, f"metadata/e1m_modules/{fam}/core-ownership.yaml"
     return None
 
 
+def ownership_doc_rel(metadata_root: Path, family_dir: Optional[str]) -> Optional[str]:
+    """Repo-relative path of the family's core-ownership.yaml, or None."""
+    found = _ownership_doc_path(metadata_root, family_dir)
+    return found[1] if found else None
+
+
 def load_ownership_doc(metadata_root: Path, family_dir: Optional[str]) -> Optional[dict]:
-    """The family's core-ownership.yaml, or None."""
-    rel = ownership_doc_rel(metadata_root, family_dir)
-    return yaml.safe_load((metadata_root.parent / rel).read_text(encoding="utf-8")) if rel else None
+    """The family's core-ownership.yaml (read from `metadata_root`, whatever
+    that directory is called), or None."""
+    found = _ownership_doc_path(metadata_root, family_dir)
+    return yaml.safe_load(found[0].read_text(encoding="utf-8")) if found else None
 
 
 def resolve_ownership(doc: Optional[dict],

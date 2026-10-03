@@ -176,7 +176,12 @@ def find_problems(root: Path, ownership: "dict[str, str] | None" = None,
                   project_fragment: "str | None" = None) -> list[str]:
     """`ownership` / `project_fragment` (None = SoM default): the project's
     resolved ownership, and its generated Linux fragment, which stands in for
-    the committed default fragment."""
+    the committed default fragment.
+
+    Limit: the reverse pass (CM33 board enables a pad the A55 owns) reads the
+    committed CM33 board dts, not the project's CM33 overlay.  No default-m33
+    assignable instance exists, so a project cannot enable an a55-owned node
+    on the CM33 through `ownership:` today (resolve_ownership refuses it)."""
     problems: list[str] = []
     pinmux = root / PINMUX
     if not pinmux.is_file():
@@ -241,10 +246,15 @@ def main() -> int:
                         help="repository root to check (default: this repo)")
     parser.add_argument("--project", type=Path, action="append", default=[],
                         help="also run the full pass with this board.yaml's resolved "
-                             "ownership and generated Linux fragment; repeatable")
+                             "ownership and generated Linux fragment; repeatable "
+                             "(default: every V2N-family examples/**/board.yaml)")
     args = parser.parse_args()
 
     problems = find_problems(args.root)
+    if not args.project:
+        args.project = sorted(
+            b for b in (args.root / "examples").rglob("board.yaml")
+            if re.search(r"^\s*sku:\s*\"?E1M-V2[NM]", b.read_text(encoding="utf-8"), re.M))
     if args.project:
         from alp_orchestrate import load_board_yaml
         for b in args.project:

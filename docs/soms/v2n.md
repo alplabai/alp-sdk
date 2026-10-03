@@ -223,13 +223,13 @@ the `0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks.patch` kernel patch keeps on;
 the DT-driven form is not yet bench-validated.
 
 A project whose resolved ownership differs from the default gets its own Linux
-fragment from the same renderer, with no extra variable: when
-`ALP_SYSTEM_MANIFEST_PATH` is set (or `../alp-sdk/build/system-manifest.yaml`
-exists) the kernel `.bbappend` renders the fragment from that manifest's
-`ownership:`, label-checks it against `r9a09g056.dtsi` and byte-compares the
-installed file to a fresh render (`gen_linux_ownership_dt.py --manifest M
---output F` / `--installed F`). A set-but-missing manifest fails the build; with
-no manifest at all the build uses the SoM default and warns. `python3
+fragment from the same renderer, with no extra variable: the
+kernel `.bbappend` renders the fragment from the system-manifest's `ownership:`
+(`ALP_SYSTEM_MANIFEST_PATH`, default `../alp-sdk/build/system-manifest.yaml`,
+required exactly as for `alp-dts-reservations`: a missing manifest fails the
+build) and label-checks it against `r9a09g056.dtsi` (`gen_linux_ownership_dt.py
+--manifest M --output F --vendor-dtsi V`). The fragment is as fresh as the
+manifest, i.e. the last `tan build`. `python3
 scripts/alp_project.py --input board.yaml --emit linux-ownership-dts` prints
 the same fragment. An instance owned by the M33 is set `status = "disabled"` for
 Linux and its clocks join `renesas,cm33-owned-clocks`; the fragment is included

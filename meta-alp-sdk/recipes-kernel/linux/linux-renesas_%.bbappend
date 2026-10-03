@@ -222,16 +222,17 @@ ALP_DRPAI_DT_ENABLE[vardepvalue] = "${ALP_DRPAI_DT_ENABLE}"
 SRC_URI += "${@' file://e1m-v2n-drpai.dtsi' if d.getVar('ALP_DRPAI_DT_ENABLE') == '1' else ''}"
 
 # Per-project core ownership (#2660).  The committed e1m-v2n-ownership.dtsi is
-# the SoM-DEFAULT ownership.  do_configure replaces it with the fragment of the
-# project being built, rendered from the `ownership:` that the orchestrator's
-# system-manifest.yaml carries (the same resolved map the CM33 overlay uses):
-# the file ALP_SYSTEM_MANIFEST_PATH names, as alp-dts-reservations reads it, or
-# when that is unset ${TOPDIR}/../alp-sdk/build/system-manifest.yaml if it
-# exists.  Neither present = the SoM default.  A path that is SET but missing
-# fails the build rather than silently building the SoM default.
-ALP_SYSTEM_MANIFEST_PATH ??= ""
-ALP_OWN_MANIFEST = "${@d.getVar('ALP_SYSTEM_MANIFEST_PATH') or d.expand('${TOPDIR}/../alp-sdk/build/system-manifest.yaml')}"
-do_configure[file-checksums] += "${@'%s:%s' % (d.getVar('ALP_OWN_MANIFEST'), os.path.exists(d.getVar('ALP_OWN_MANIFEST')))}"
+# the SoM-DEFAULT ownership (kept in sync by the generated-files gate); do_configure
+# replaces it with the fragment of the project being built, rendered from the
+# `ownership:` that the orchestrator's system-manifest.yaml carries (the same
+# resolved map the CM33 overlay uses).  The manifest is REQUIRED, exactly like
+# alp-dts-reservations (same variable, same default, fatal when missing): the
+# image already needs it for the carve-outs, so it is always there.  Freshness
+# is the manifest's: it is only as current as the last `tan build`.
+ALP_SYSTEM_MANIFEST_PATH ??= "${TOPDIR}/../alp-sdk/build/system-manifest.yaml"
+ALP_OWN_SDK := "${THISDIR}/../../.."
+# Everything the render reads, so editing any of it re-runs do_configure.
+do_configure[file-checksums] += "${ALP_SYSTEM_MANIFEST_PATH}:${@os.path.exists(d.getVar('ALP_SYSTEM_MANIFEST_PATH'))}     ${ALP_OWN_SDK}/scripts/gen_linux_ownership_dt.py:True     ${ALP_OWN_SDK}/scripts/alp_orchestrate/linux_ownership.py:True     ${ALP_OWN_SDK}/scripts/alp_orchestrate/ownership.py:True     ${ALP_OWN_SDK}/metadata/e1m_modules/v2n/core-ownership.yaml:True     ${ALP_OWN_SDK}/metadata/e1m_modules/v2n/supervisor-links.yaml:True     ${ALP_OWN_SDK}/metadata/socs/renesas/rzv2n/n44.json:True"
 
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the
@@ -247,35 +248,16 @@ do_configure:prepend() {
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
         "${ALP_DTS_DST}/"
 
-    # Per-project ownership.  Rendered from the system-manifest's resolved
-    # `ownership:` over the default fragment installed above, then (1) every
-    # node it names must exist in THIS kernel's SoC dtsi and (2) the installed
-    # file must be byte-identical to a fresh render (stale = fatal).  No
-    # manifest: the committed SoM-default fragment, which must match the
-    # metadata (--check never writes); skipped with a warning when the SDK
-    # scripts or PyYAML are missing -- but never when a manifest is in play.
-    ALP_OWN_GEN="${THISDIR}/../../../scripts/gen_linux_ownership_dt.py"
-    ALP_OWN_VENDOR="${S}/arch/arm64/boot/dts/renesas/r9a09g056.dtsi"
-    ALP_OWN_M="${ALP_OWN_MANIFEST}"
-    if [ -n "${ALP_SYSTEM_MANIFEST_PATH}" ] && [ ! -f "${ALP_OWN_M}" ]; then
-        bbfatal "ALP_SYSTEM_MANIFEST_PATH=${ALP_OWN_M} does not exist: build with tan build first (or unset it for the SoM-default ownership)"
-    fi
-    if [ -f "${ALP_OWN_M}" ]; then
-        [ -f "${ALP_OWN_GEN}" ] && python3 -c 'import yaml' 2>/dev/null \
-            || bbfatal "gen_linux_ownership_dt.py or PyYAML unavailable: cannot render the ownership fragment for ${ALP_OWN_M}"
-        python3 "${ALP_OWN_GEN}" --manifest "${ALP_OWN_M}" --output "${ALP_DTS_DST}/e1m-v2n-ownership.dtsi" \
-            --vendor-dtsi "${ALP_OWN_VENDOR}" \
-            || bbfatal "per-project ownership fragment for ${ALP_OWN_M} is invalid or names a node r9a09g056.dtsi lacks"
-        python3 "${ALP_OWN_GEN}" --manifest "${ALP_OWN_M}" --installed "${ALP_DTS_DST}/e1m-v2n-ownership.dtsi" \
-            || bbfatal "installed ownership fragment is stale against ${ALP_OWN_M}"
-        bbnote "per-project ownership fragment rendered from ${ALP_OWN_M}"
-    elif [ -f "${ALP_OWN_GEN}" ] && python3 -c 'import yaml' 2>/dev/null; then
-        bbwarn "no system-manifest.yaml (ALP_SYSTEM_MANIFEST_PATH): using the SoM-default core ownership; a board.yaml ownership: override is NOT applied"
-        python3 "${ALP_OWN_GEN}" --check --vendor-dtsi "${ALP_OWN_VENDOR}" \
-            || bbfatal "ownership fragment is stale or names a node r9a09g056.dtsi lacks"
-    else
-        bbwarn "gen_linux_ownership_dt.py or PyYAML unavailable: ownership fragment not verified against r9a09g056.dtsi"
-    fi
+    # Per-project ownership: rendered from the system-manifest's resolved
+    # `ownership:` over the SoM-default fragment installed above, and every
+    # node it names must exist in THIS kernel's SoC dtsi.  Required: no
+    # manifest, no SDK scripts or no PyYAML is fatal.
+    ALP_OWN_GEN="${ALP_OWN_SDK}/scripts/gen_linux_ownership_dt.py"
+    ALP_OWN_M="${ALP_SYSTEM_MANIFEST_PATH}"
+    [ -f "${ALP_OWN_M}" ] || bbfatal "alp-sdk system-manifest.yaml not found at '${ALP_OWN_M}': build with tan build first or set ALP_SYSTEM_MANIFEST_PATH (the per-project core ownership is rendered from it)"
+    [ -f "${ALP_OWN_GEN}" ] && python3 -c 'import yaml' 2>/dev/null         || bbfatal "gen_linux_ownership_dt.py or PyYAML unavailable: cannot render the ownership fragment for ${ALP_OWN_M}"
+    python3 "${ALP_OWN_GEN}" --manifest "${ALP_OWN_M}" --output "${ALP_DTS_DST}/e1m-v2n-ownership.dtsi"         --vendor-dtsi "${S}/arch/arm64/boot/dts/renesas/r9a09g056.dtsi"         || bbfatal "per-project ownership fragment for ${ALP_OWN_M} is invalid or names a node r9a09g056.dtsi lacks"
+    bbnote "per-project ownership fragment rendered from ${ALP_OWN_M}"
 
     # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
     # to the board dts or the cam0 dtb has no rule to build.

@@ -168,16 +168,19 @@ def _project_manifest(tmp_path, override=None):
     return m
 
 
-def test_manifest_render_and_installed_byte_compare(tmp_path):
-    """The bbappend path: render from the manifest's resolved ownership, then
-    --installed byte-compares what was installed against a fresh render."""
-    m, out = _project_manifest(tmp_path), tmp_path / "o.dtsi"
+def test_manifest_render_equals_project_emit_for_an_override_project(tmp_path):
+    """The bbappend path (--manifest) and the CLI path (--emit
+    linux-ownership-dts) render the same bytes for the same board.yaml."""
+    m = _project_manifest(tmp_path, "\nownership:\n  e1m_uart0: a55\n")
+    out = tmp_path / "o.dtsi"
     assert subprocess.run([sys.executable, GEN, "--manifest", str(m), "--output", str(out)]).returncode == 0
+    emit = tmp_path / "e.dtsi"
+    r = subprocess.run([sys.executable, str(REPO / "scripts" / "alp_project.py"),
+                        "--input", str(tmp_path / "board.yaml"), "--emit", "linux-ownership-dts",
+                        "--output", str(emit)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert out.read_bytes() == emit.read_bytes()
     assert out.read_text(encoding="utf-8") == (REPO / g.OUT).read_text(encoding="utf-8")
-    cmd = [sys.executable, GEN, "--manifest", str(m), "--installed", str(out)]
-    assert subprocess.run(cmd).returncode == 0
-    out.write_text(out.read_text(encoding="utf-8") + "/* hand edit */\n", encoding="utf-8")
-    assert subprocess.run(cmd, capture_output=True, text=True).returncode == 1
 
 
 def test_manifest_with_a_stale_ownership_set_fails(tmp_path):

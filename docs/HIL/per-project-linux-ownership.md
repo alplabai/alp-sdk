@@ -24,7 +24,7 @@ instance whose hardware is cleared (not `e1m_spi0`: `hw_blocked`, P90-P92 not
 4. `python3 scripts/check_amp_pad_claims.py --project board.yaml` exits 0.
 5. Set `ALP_SYSTEM_MANIFEST_PATH` to that manifest in `local.conf`, rebuild the
    kernel (`do_configure` must print "per-project ownership fragment rendered
-   from ..."; the vendor-dtsi label check and the `--installed` byte-compare
+   from ..."; the vendor-dtsi label check
    must pass; the board dts includes the fragment last), flash. Also confirm a
    bogus `ALP_SYSTEM_MANIFEST_PATH` fails `do_configure`.
 6. Cold-cycle through the programmable PSU (not a warm reset). On the A55:

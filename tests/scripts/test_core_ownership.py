@@ -13,7 +13,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_orchestrate import emit_system_manifest, load_board_yaml  # noqa: E402
 from alp_orchestrate.models import OrchestratorError  # noqa: E402
-from alp_orchestrate.ownership import (load_ownership_doc, pad_pfc,  # noqa: E402
+from alp_orchestrate.ownership import (load_ownership_doc, ownership_doc_rel, pad_pfc,  # noqa: E402
                                        resolve_ownership, validate_assignable)
 
 DOC = load_ownership_doc(REPO / "metadata", "v2n")
@@ -258,3 +258,14 @@ def test_non_assignable_som_emits_a_stub():
     from alp_orchestrate.linux_ownership import emit_linux_ownership_dts
     out = emit_linux_ownership_dts(load_board_yaml(REPO / "examples/multicore/rpmsg-aen/board.yaml"))
     assert out.startswith("/* No assignable")
+
+
+def test_ownership_doc_is_read_from_the_given_metadata_root(tmp_path):
+    """A metadata root not named `metadata` (a project-local override tree)
+    resolves under the root itself, not under root.parent/'metadata'."""
+    root = tmp_path / "meta-override"
+    dst = root / "e1m_modules" / "v2n"
+    dst.mkdir(parents=True)
+    shutil.copy(REPO / "metadata/e1m_modules/v2n/core-ownership.yaml", dst)
+    assert load_ownership_doc(root, "v2n") == DOC
+    assert ownership_doc_rel(root, "v2n") == "metadata/e1m_modules/v2n/core-ownership.yaml"

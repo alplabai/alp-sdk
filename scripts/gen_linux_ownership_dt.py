@@ -52,7 +52,6 @@ Usage:
     # per project, straight from the orchestrator's system-manifest.yaml (its
     # resolved `ownership:`), as the linux-renesas bbappend does:
     python3 scripts/gen_linux_ownership_dt.py --manifest M --output F --vendor-dtsi PATH
-    python3 scripts/gen_linux_ownership_dt.py --manifest M --installed F   # byte-compare F to a fresh render
     python3 scripts/gen_linux_ownership_dt.py --vendor-dtsi PATH
 """
 
@@ -107,7 +106,11 @@ def render_manifest(root: Path, manifest: Path) -> tuple[str, set[str]]:
     if set(own) != set(doc["assignable"]):
         raise GenError(f"{manifest}: ownership instances {sorted(own)} != metadata "
                        f"{sorted(doc['assignable'])}; stale manifest, re-run the emit")
-    soc = json.loads((meta / "socs" / (hw["silicon"].replace(":", "/") + ".json")).read_text(encoding="utf-8"))
+    from alp_project_loader import resolve_soc_path
+    soc_path = resolve_soc_path(hw.get("silicon"), meta)
+    if soc_path is None:
+        raise GenError(f"{manifest}: hw_info.silicon {hw.get('silicon')!r} is not a vendor:family:part key")
+    soc = json.loads(soc_path.read_text(encoding="utf-8"))
     return render(doc, soc, load_supervisor_links(meta, fam), resolve_ownership(doc, own),
                   src=ownership_doc_rel(meta, fam))
 
@@ -148,11 +151,8 @@ def main() -> int:
                          "against --vendor-dtsi instead of writing/checking the SoM default")
     ap.add_argument("--manifest", type=Path,
                     help="render from this system-manifest.yaml's resolved ownership (per project) "
-                         "instead of the SoM default; needs --output or --installed")
+                         "instead of the SoM default; needs --output")
     ap.add_argument("--output", type=Path, help="with --manifest: write the fragment here")
-    ap.add_argument("--installed", type=Path,
-                    help="exit 1 unless this file is byte-identical to a fresh render "
-                         "(with --manifest: the project's; else the SoM default)")
     ap.add_argument("--vendor-dtsi", type=Path, help="verify referenced labels exist in this r9a09g056.dtsi")
     args = ap.parse_args()
     if args.fragment:
@@ -182,16 +182,9 @@ def main() -> int:
         if bad:
             return 1
         print(f"OK   every referenced node exists in {args.vendor_dtsi.name}: {sorted(labels)}")
-    if args.installed:
-        if not args.installed.is_file() or args.installed.read_text(encoding="utf-8") != text:
-            print(f"gen_linux_ownership_dt: {args.installed} differs from a fresh render -- stale",
-                  file=sys.stderr)
-            return 1
-        print(f"OK   {args.installed.name} is byte-identical to a fresh render")
-        return 0
     if args.manifest:
         if not args.output:
-            print("gen_linux_ownership_dt: --manifest needs --output or --installed", file=sys.stderr)
+            print("gen_linux_ownership_dt: --manifest needs --output", file=sys.stderr)
             return 1
         args.output.write_text(text, encoding="utf-8", newline="\n")
         print(f"wrote {args.output}")
