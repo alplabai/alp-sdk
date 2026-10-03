@@ -65,31 +65,27 @@ typedef struct {
  *
  * @par Supported silicon: deepx:dx:m1
  *
- * The core binding is fixed when the inference engine is built, so this
- * call rebuilds the engine for @p inf from the model bytes passed to
- * @ref alp_inference_open.  Useful to measure per-core throughput or to
- * move a model between cores at run time.  To pick the cores up front, set
+ * The core binding is fixed when the engine is built, so this rebuilds
+ * the engine for @p inf from the model bytes given to
+ * @ref alp_inference_open.  To pick cores up front, set
  * @ref alp_inference_config_t::accel_unit_mask on open instead.
  *
- * @warning @c model_data from @ref alp_inference_open must still be
- *          valid.  Output tensors fetched before this call are invalid
- *          after it; fetch them again.  Input buffers stay valid.  Blocks
- *          until any in-flight invoke on @p inf finishes.
+ * @warning @c model_data must still be valid.  Output tensors fetched
+ *          before this call are invalid after it.  Blocks until any
+ *          in-flight invoke on @p inf finishes.
  *
  * @warning At most three DISTINCT core sets can be live on one DX-M1
- *          (driver DX_NORMAL_QUEUE_MAX = 3; same-set engines share a
- *          queue; all three cores, mask 0 or 0x7, is a set).  A fourth makes
- *          dx-rt abort the process or kill `dxrtd`.  This process refuses
- *          it with @ref ALP_ERR_BUSY; across processes nothing guards it.
- *          This call holds the old and new set while it swaps: prefer
- *          @ref alp_inference_config_t::accel_unit_mask at open.  Two processes on dx-rt 3.2.0
- *          need the `dxrtd` service (#2398).
+ *          (driver DX_NORMAL_QUEUE_MAX = 3; mask 0 or 0x7 is a set).  A
+ *          fourth makes dx-rt abort or kill `dxrtd`.  This process refuses
+ *          it with @ref ALP_ERR_BUSY; other processes are not guarded.
+ *          The swap holds the old and new set at once.  Two processes on
+ *          dx-rt 3.2.0 need the `dxrtd` service (#2398).
  *
  * @param[in] inf    Handle from @ref alp_inference_open opened
  *                   against DEEPX silicon.
  * @param[in] mask   Core mask, same meaning as DX-M1 in
- *                   @ref alp_inference_config_t::accel_unit_mask: bits 0..2
- *                   are NPU cores 0..2; 0 or 0x7 is all three.
+ *                   @ref alp_inference_config_t::accel_unit_mask (bits 0..2
+ *                   are NPU cores 0..2; 0 or 0x7 is all three).
  *
  * @return  @ref ALP_OK on success.
  *          @ref ALP_ERR_INVAL on NULL handle.
