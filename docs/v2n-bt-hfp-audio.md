@@ -30,8 +30,8 @@ muxes a live pad), and `metadata/pinmux/v2n.yaml` carries no `func` field to
 generate from. Not done, in order:
 
 1. Read the function numbers for the four pads from the RZ/V2N hardware
-   manual PFC table; add them to metadata, then to a `sound_bt_pins` group.
-2. `&ssi7`/`&ssi8` under `&rcar_sound` (SSI8 as slave of SSI7's pins, the
+   manual PFC table; add them to `metadata/pinmux/v2n.yaml` (the pin function numbers live there, not in a dtsi), then generate the `sound_bt_pins` group from it into the V2N-family SoM dtsi `e1m-v2n-som.dtsi` (the CYW55513 is on-module, so not `e1m-x-evk.dtsi`).
+2. `&ssi7`/`&ssi8` under `&rcar_sound`, in `e1m-v2n-som.dtsi` (SSI8 as slave of SSI7's pins, the
    same mechanism as patch 0014), pad-side master/slave per step 3.
 3. Which side drives SCK/WS (module PCM master vs SoC) and I2S vs PCM mode
    with the shipped firmware: unverified (Murata firmware dependent).

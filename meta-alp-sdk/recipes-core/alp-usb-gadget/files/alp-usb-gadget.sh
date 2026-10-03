@@ -7,7 +7,7 @@
 # function (ACM). Usage: alp-usb-gadget.sh start|stop
 #
 # Needs usb-gadget.cfg in the kernel (configfs + f_ncm + f_acm) and the
-# port in the peripheral role -- see docs/v2n-usb-otg.md. 1d6b:0104 is the
+# port in the peripheral role -- see docs/e1m-x-evk-usb-otg.md. 1d6b:0104 is the
 # Linux Foundation "Multifunction Composite Gadget" id intended for
 # configfs gadgets; replace it with your own id for a shipped product.
 set -eu
@@ -39,7 +39,7 @@ start)
 	echo 0x01 > "$G/bDeviceProtocol"
 	mkdir -p "$G/strings/0x409"
 	echo "Alp Lab AB"   > "$G/strings/0x409/manufacturer"
-	echo "E1M-X EVK USB gadget" > "$G/strings/0x409/product"
+	echo "Alp USB gadget" > "$G/strings/0x409/product"
 	mkdir -p "$G/configs/c.1/strings/0x409"
 	echo "NCM+ACM" > "$G/configs/c.1/strings/0x409/configuration"
 	mkdir -p "$G/functions/ncm.usb0" "$G/functions/acm.GS0"

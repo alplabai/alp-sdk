@@ -692,14 +692,14 @@
 
 /* USB 2.0 OTG + USB 3.0 host.
  *
- * USB 2.0 roles (docs/v2n-usb-otg.md): per the private carrier netlist
+ * USB 2.0 roles (docs/e1m-x-evk-usb-otg.md): per the private carrier netlist
  * (not reproduced here, bench-unconfirmed) the receptacle has no VBUS
  * source and the SoC VBUS-sense input is not wired, so no ID/VBUS-detect
  * line reaches software.  Device (gadget) mode is expected to work, but
  * attach/detach is not detected automatically; host mode would need
  * externally powered VBUS.  The USB path-mux select is E1M IO24
- * (XEVK_PIN_USB_MUX_SEL): driven by the DX-M1 on V2M, nothing drives it
- * on V2N (metadata/e1m_modules/E1M-V2{M,N}101.yaml).  dr_mode = "otg" is
+ * (XEVK_PIN_USB_MUX_SEL; who drives it is SoM metadata, driven_by in
+ * pad_routes).  dr_mode = "otg" is
  * declared; the role is set by hand through the PHY's sysfs `role`
  * attribute.
  *
@@ -713,7 +713,7 @@
  * usb20 channel is instead suppressed at the controller: spurious-oc on
  * the EHCI (generic binding, in-tree) and on the OHCI (kernel patch
  * 0003 adds the same property).  OC processing is fully off for usb20
- * -- no per-port VBUS switching is exercised here (docs/v2n-usb-otg.md).
+ * -- no per-port VBUS switching is exercised here (docs/e1m-x-evk-usb-otg.md).
  *
  * usb30 has no VBUS pinmux and no OVC-disable GPIO hog: PB0 (VBUS,
  * func14) and PB1 (usb30 OVC) are on-module WLAN_SDIO.CLK and

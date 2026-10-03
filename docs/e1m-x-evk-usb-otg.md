@@ -11,9 +11,9 @@ whether the PHY forces it in the peripheral role is unverified).
   bench-confirmed): the USB 2.0 receptacle has no VBUS source and the SoC
   VBUS-sense input is not wired. No ID or VBUS-detect line reaches software.
 - The USB path-mux select is E1M IO24 (`XEVK_PIN_USB_MUX_SEL`,
-  `metadata/boards/e1m-x-evk.yaml`). On V2M it is driven by the DX-M1; on
-  V2N nothing drives it (`metadata/e1m_modules/E1M-V2M101.yaml`,
-  `E1M-V2N101.yaml`), so the mux position depends on the carrier default,
+  `metadata/boards/e1m-x-evk.yaml`). The SoM drives it or not per
+  `driven_by` on its IO24 `pad_routes` entry (`dxm1` on V2M, `none` on V2N);
+  the select polarity and default (`mux_select`) are `TBD`, so the mux position depends on the carrier default,
   which is not in this repo. That the receptacle is routed to the SoC at
   all is therefore a HIL step below, not an assumption.
 

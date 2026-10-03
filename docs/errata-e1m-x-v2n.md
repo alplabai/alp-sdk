@@ -95,7 +95,7 @@ in root-hub descriptor A). This removes both the boot lines and the
 functional OC side-effects (hub port power-cycling on OC events).
 Disabling OC processing is the workaround for the unusable OC sense
 wiring; the USB 2.0 VBUS/role situation is in
-[v2n-usb-otg.md](v2n-usb-otg.md).
+[e1m-x-evk-usb-otg.md](e1m-x-evk-usb-otg.md).
 *Cold-boot-verified on the bench 2026-06-12 (patched kernel +
 spurious-oc dtb): zero over-current lines from either controller.*
 
