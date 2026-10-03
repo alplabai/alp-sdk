@@ -292,6 +292,8 @@ def provision(cfg: Cfg) -> int:
     bootloader_only = bundle["status"].startswith("bootloader-only")
     image_skipped = False
     for comp in sorted(bundle["components"], key=lambda c: _FLASH_ORDER.get(c["role"], 9)):
+        if comp["role"] == "system_image_bmap":       # companion of system_image, never flashed itself
+            continue
         if comp["role"] == "system_image" and bootloader_only:
             steps.append(Step("flash:system_image", True, "skipped (bundle is bootloader-only)"))
             image_skipped = True
@@ -395,11 +397,9 @@ def _v2n_parser() -> argparse.ArgumentParser:
     work.add_argument("--flash-writer", type=Path, help="Flash Writer .mot (overrides bench.yaml)")
     work.add_argument("--gd32-fw", type=Path,
                       help="dir with bootloader.bin, ota-meta.bin, slot-a.bin")
-    work.add_argument("--enable-dxm1-flash", action="store_true",
-                      help="BENCH-PENDING: program the DX-M1 NPU's SPI-NAND over the UART "
-                           "recovery path (v2n-m1 only); needs bench.yaml dxm1.* -- has never "
-                           "run on silicon and cannot succeed on the first V2M bench unit yet "
-                           "-- default skip until bench-verified")
+    work.add_argument("--no-payload-store", action="store_true",
+                      help="do not cache payloads in /var/lib/alp-payload on the provisioning SD's "
+                           "root filesystem; push everything over SSH / the console")
     work.add_argument("--hw-rev", metavar="rN",
                       help="this unit's hardware revision key (e.g. r2) when it differs from "
                            "the bundle/preset default; a batch can mix revisions")
@@ -449,6 +449,9 @@ def _bundle_from_build_dir(d: Path) -> dict:
             raise ValueError(f"--build-dir: want exactly one {pat}, found {[h.name for h in hits]}")
         comps.append({"role": role, "file": hits[0].name, "sha256": _sha256(hits[0]),
                       "size_bytes": hits[0].stat().st_size, "flash_target": target})
+    if len(bm := sorted(d.glob("*.wic.bmap"))) == 1:
+        comps.append({"role": "system_image_bmap", "file": bm[0].name, "sha256": _sha256(bm[0]),
+                      "size_bytes": bm[0].stat().st_size, "flash_target": "emmc"})
     return {"status": "complete", "release_version": f"build-dir:{d.name}", "components": comps}
 
 
@@ -608,8 +611,9 @@ def v2n_main(argv: list[str]) -> int:
                     allow_tier_mismatch=a.allow_tier_mismatch,
                     accept_cid_change=a.accept_cid_change, reprovision_from=a.reprovision_from,
                     cold_cycles=a.cold_cycles, hil_spec=hil, flash_writer=a.flash_writer,
-                    gd32_fw=a.gd32_fw, dxm1_flash=a.enable_dxm1_flash,
+                    gd32_fw=a.gd32_fw,
                     transfer=a.transfer, station=a.station, by=a.by,
+                    payload_store_on=not a.no_payload_store,
                     ledger_xlsx=a.ledger_xlsx,
                     mfg_date_override=a.mfg_date if a.mfg_date and a.mfg_date != derived else None)
     ctx.state = steps.load_state(ctx.state_path)

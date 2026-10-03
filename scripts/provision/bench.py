@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import codecs
 import logging
+import math
 import os
 import re
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -267,6 +269,10 @@ class Power:
     _sleep = staticmethod(time.sleep)
     _last_on: float | None = None
     on_count = 0  # ON events issued; lets a step tell whether the unit was cycled since it looked
+    _defer_confirm = False  # cycle(): confirm the ON AFTER the console settle, not before
+
+    def confirm_on(self) -> None:
+        """Verify the ON took effect (subclasses that can read the output state back)."""
 
     @property
     def log(self) -> list[str]:
@@ -311,7 +317,14 @@ class Power:
             err = e
         if (rest := end - self._clock()) > 0:
             self._sleep(rest)
-        self.on()
+        # The ON read-back (a PSU round trip, up to ~30 s of reconnect backoff) must not run
+        # between the ON edge and the first console read: the ROM banner lands within ms. So
+        # on() only sends here, and the read-back follows the settle read below.
+        self._defer_confirm = True
+        try:
+            self.on()
+        finally:
+            self._defer_confirm = False
         # Read continuously across the ON edge (not just up to it): whatever the
         # unit prints right at power-up is buffered for the caller's expect().
         try:
@@ -319,53 +332,123 @@ class Power:
                 console.pump(ON_SETTLE_S)
         except BenchError as e:
             err = e
+        self.confirm_on()
         if err is not None:
             raise BenchError(f"console failed during the power cycle (power restored): {err}") from err
 
     def is_on(self) -> bool | None:  # None = unknowable
         return None
 
+    def current(self) -> float | None:
+        """Supply current in amps, one reading; None when this power kind cannot measure it."""
+        return None
+
 
 class ScpiPower(Power):
-    """SCPI over raw TCP, one connection per command.
+    """SCPI over ONE persistent raw TCP connection (the only SCPI socket in the tool).
+
+    The SPD3303X LAN stack hangs (resets, WinError 10054) after many short
+    connections and only a PSU power-cycle clears it, so the connection is
+    kept open, commands are serialised under a lock with a small gap between
+    them, and a failure reconnects with backoff before giving up.
 
     Command syntax is the bench-proven ``OUTP CH<n>,ON|OFF`` form, not the
     IEEE ``(@n)`` channel-list form; output state is read from ``SYST:STAT?``.
     """
 
+    GAP_S = 0.05  # minimum spacing between commands
+    BACKOFF_S = (3.0, 6.0, 9.0, 12.0)  # reconnect waits: 5 attempts over ~30 s
+
     def __init__(
         self, host: str, port: int, channel: int, connect=socket.create_connection
     ) -> None:
         self.host, self.port, self.channel = host, port, int(channel)
+        if self.channel not in (1, 2):
+            raise BenchError(f"SCPI power channel {channel}: only CH1 and CH2 have a SYST:STAT? "
+                             "output bit, so the output state cannot be confirmed; use 1 or 2")
         self._connect = connect
+        self._sock = None
+        self._lock = threading.Lock()
+        self._last_io: float | None = None
+
+    def close(self) -> None:
+        with self._lock:
+            self._drop()
+
+    def _drop(self) -> None:
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+
+    def _io(self, cmd: str, reply: bool) -> str:
+        if self._sock is None:
+            self._sock = self._connect((self.host, self.port), timeout=3)
+        if self._last_io is not None and (
+            rest := self.GAP_S - (self._clock() - self._last_io)
+        ) > 0:
+            self._sleep(rest)
+        self._sock.sendall((cmd + "\n").encode())
+        self._last_io = self._clock()
+        if not reply:
+            return ""
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = self._sock.recv(256)
+            if not chunk:
+                raise ConnectionResetError("PSU closed the connection")
+            data += chunk
+        self._last_io = self._clock()
+        return data.decode(errors="replace").strip()
 
     def _send(self, cmd: str, reply: bool = False) -> str:
         self._note(f"SCPI {cmd}")
-        try:
-            with self._connect((self.host, self.port), timeout=3) as s:
-                s.sendall((cmd + "\n").encode())
-                if not reply:
-                    self._sleep(0.2)  # let the PSU act before the socket closes
-                    return ""
-                data = b""
-                while not data.endswith(b"\n"):
-                    chunk = s.recv(256)
-                    if not chunk:
-                        break
-                    data += chunk
-                return data.decode(errors="replace").strip()
-        except OSError as e:
-            raise BenchError(f"SCPI {self.host}:{self.port} {cmd!r}: {e}") from e
+        with self._lock:
+            err: OSError | None = None
+            for attempt in range(len(self.BACKOFF_S) + 1):
+                try:
+                    return self._io(cmd, reply)
+                except OSError as e:
+                    err = e
+                    self._drop()
+                    if attempt < len(self.BACKOFF_S):
+                        self._note(f"SCPI reconnect in {self.BACKOFF_S[attempt]:g}s: {e}")
+                        self._sleep(self.BACKOFF_S[attempt])
+            raise BenchError(
+                f"SCPI {self.host}:{self.port} {cmd!r}: still failing after "
+                f"{len(self.BACKOFF_S) + 1} attempts: {err}"
+            ) from err
 
     def on(self) -> None:
         try:
             self._send(f"OUTP CH{self.channel},ON")
         finally:  # the PSU may have acted even if the reply path failed
             self._mark_on()
+        if not self._defer_confirm:
+            self._confirm(True)
+
+    def confirm_on(self) -> None:
+        self._confirm(True)
 
     def off(self) -> None:
         self._wait_min_on()
         self._send(f"OUTP CH{self.channel},OFF")
+        self._confirm(False)
+
+    def _confirm(self, want: bool) -> None:
+        """OUTP has no reply, so a half-dead socket can swallow it: read the
+        state back and resend once before giving up."""
+        for attempt in range(2):
+            if self.is_on() is want:
+                return
+            if attempt == 0:
+                self._send(f"OUTP CH{self.channel},{'ON' if want else 'OFF'}")
+                if want:        # the first ON was swallowed: the ON edge is now, not an extra ON event
+                    self._last_on = self._clock()
+        raise BenchError(f"SCPI {self.host}:{self.port}: CH{self.channel} did not read back "
+                         f"{'ON' if want else 'OFF'} after OUTP; check the PSU front panel")
 
     def is_on(self) -> bool | None:
         """Siglent SPD3303X has no ``OUTP?`` query (it times out); its output
@@ -379,6 +462,19 @@ class ScpiPower(Power):
         except (BenchError, ValueError):
             return None
         return bool(stat >> (3 + self.channel) & 1)
+
+    def current(self) -> float:
+        """One ``MEAS:CURR? CH<n>`` reading of the configured channel, in amps, over the
+        persistent socket. BenchError when the reply is not a number."""
+        reply = self._send(f"MEAS:CURR? CH{self.channel}", reply=True)
+        try:
+            amps = float(reply)
+        except ValueError:
+            amps = math.nan
+        if not math.isfinite(amps):
+            raise BenchError(f"SCPI {self.host}:{self.port} MEAS:CURR? CH{self.channel}: "
+                             f"not a number: {reply!r}")
+        return amps
 
 
 class LabgridPower(Power):

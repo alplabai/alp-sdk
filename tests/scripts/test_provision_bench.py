@@ -134,12 +134,19 @@ def test_manual_power_asks_operator():
 
 def test_scpi_power_commands_and_query():
     seen: list[bytes] = []
+    state = [True]
 
     def handler(conn):
-        data = conn.recv(100)
-        seen.append(data)
-        if data.startswith(b"SYST:STAT?"):
-            conn.sendall(b"0x24\n")   # SPD3303X: bit 5 = CH2 output on
+        buf = b""
+        while chunk := conn.recv(100):
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                seen.append(line + b"\n")
+                if line.startswith(b"OUTP CH2,"):
+                    state[0] = line.endswith(b"ON")
+                if line.startswith(b"SYST:STAT?"):   # SPD3303X: bit 5 = CH2 output on
+                    conn.sendall(b"0x24\n" if state[0] else b"0x4\n")
 
     srv, port = _serve_once(handler)
     try:
@@ -151,14 +158,14 @@ def test_scpi_power_commands_and_query():
         assert p.is_on() is True
     finally:
         srv.close()
-    assert seen == [b"OUTP CH2,OFF\n", b"OUTP CH2,ON\n", b"SYST:STAT?\n"]
+    assert seen == [b"OUTP CH2,OFF\n", b"SYST:STAT?\n", b"OUTP CH2,ON\n", b"SYST:STAT?\n", b"SYST:STAT?\n"]
 
 
 def test_scpi_power_is_on_reads_the_channel_bit():
     def serve(reply):
         def handler(conn):
-            conn.recv(100)
-            conn.sendall(reply)
+            while conn.recv(100):
+                conn.sendall(reply)
         return _serve_once(handler)
 
     srv, port = serve(b"0x14\n")                 # bench read: CH1 on, CH2 off
@@ -177,8 +184,94 @@ def test_scpi_power_unreachable_is_bench_error():
     def refuse(addr, timeout):
         raise ConnectionRefusedError("refused")
 
+    p = bench.ScpiPower("h", 1, 1, connect=refuse)
+    slept: list[float] = []
+    p._sleep = slept.append
     with pytest.raises(BenchError, match="OUTP CH1,ON"):
-        bench.ScpiPower("h", 1, 1, connect=refuse).on()
+        p.on()
+    assert len(slept) == len(p.BACKOFF_S) and sum(slept) >= 25   # ~30 s of retries, then a clear error
+
+
+class _PsuSock:
+    """A persistent fake PSU connection; `reset_next` makes the next sendall die once."""
+
+    def __init__(self, psu):
+        self.psu, self.closed = psu, False
+
+    def sendall(self, data):
+        if self.psu.reset_next:
+            self.psu.reset_next = False
+            raise ConnectionResetError(10054, "reset")
+        cmd = data.decode().strip()
+        self.psu.sent.append(cmd)
+        self.psu.last = cmd
+        if cmd.startswith("OUTP CH1,"):
+            if self.psu.swallow > 0:
+                self.psu.swallow -= 1
+            elif not (self.psu.stuck_on and cmd.endswith("OFF")):
+                self.psu.on = cmd.endswith("ON")
+
+    def recv(self, n):
+        if self.psu.last.startswith("MEAS:CURR?"):
+            return self.psu.amps.encode() + bytes([10])
+        return b"0x14" + bytes([10]) if self.psu.on else b"0x4" + bytes([10])
+
+    def close(self):
+        self.closed = True
+
+
+class _Psu:
+    def __init__(self):
+        self.sent, self.connects, self.reset_next, self.on = [], 0, False, False
+        self.swallow, self.stuck_on = 0, False   # OUTP commands eaten / OFF ignored
+        self.last, self.amps = "", "0.172"       # last command seen / the MEAS:CURR? reply
+
+    def connect(self, addr, timeout):
+        self.connects += 1
+        return _PsuSock(self)
+
+    def power(self, channel=1):
+        p = bench.ScpiPower("h", 1, channel, connect=self.connect)
+        t = [0.0]
+        p._clock = lambda: t[0]
+        p._sleep = lambda s: t.__setitem__(0, t[0] + s)
+        return p
+
+
+def test_scpi_reuses_one_connection_and_never_commands_ch2():
+    psu = _Psu()
+    p = psu.power(1)
+    p.on()
+    assert p.is_on() is True
+    p._clock = lambda: 1e6   # skip the min-ON wait
+    p.off()
+    assert psu.connects == 1
+    assert psu.sent == ["OUTP CH1,ON", "SYST:STAT?", "SYST:STAT?", "OUTP CH1,OFF", "SYST:STAT?"]
+    assert not any("CH2" in c for c in psu.sent)
+
+
+def test_scpi_spaces_commands_by_the_inter_command_gap():
+    psu = _Psu()
+    p = psu.power(1)
+    stamps = []
+    orig = _PsuSock.sendall
+    _PsuSock.sendall = lambda self, d: (stamps.append(p._clock()), orig(self, d))[1]
+    try:
+        p.is_on()
+        p.is_on()
+    finally:
+        _PsuSock.sendall = orig
+    assert stamps[1] - stamps[0] >= p.GAP_S
+
+
+def test_scpi_reconnects_after_a_reset_and_resends():
+    psu = _Psu()
+    p = psu.power(1)
+    p.on()
+    psu.reset_next = True
+    assert p.is_on() is True
+    assert psu.connects == 2
+    assert psu.sent == ["OUTP CH1,ON", "SYST:STAT?", "SYST:STAT?"]
 
 
 def _cp(rc=0, out="", err=""):
@@ -449,3 +542,113 @@ def test_fake_linux(tmp_path):
     src.write_bytes(b"abcdef")
     t.put(src, "/tmp/f.bin")
     assert t.md5("/tmp/f.bin", 2, 2) == __import__("hashlib").md5(b"cd").hexdigest()
+
+
+# --- ScpiPower._confirm --------------------------------------------------------------------------
+
+def test_scpi_confirm_resends_a_swallowed_on_without_a_second_on_event():
+    psu = _Psu()
+    p = psu.power(1)
+    psu.swallow = 1                      # the half-dead socket eats the first OUTP
+    p.on()
+    assert psu.sent == ["OUTP CH1,ON", "SYST:STAT?", "OUTP CH1,ON", "SYST:STAT?"]
+    assert p.is_on() is True
+    assert p.on_count == 1               # one ON event, however many times it was sent
+
+
+def test_scpi_resent_on_refreshes_the_min_on_clock():
+    psu = _Psu()
+    p = psu.power(1)
+    psu.swallow = 1
+    first = p._clock()
+    p.on()
+    assert p._last_on > first            # the ON edge is the resend, not the swallowed command
+
+
+def test_scpi_off_raises_when_the_output_stays_on():
+    psu = _Psu()
+    p = psu.power(1)
+    p.on()
+    psu.stuck_on = True                  # the PSU ignores OFF
+    with pytest.raises(BenchError, match="did not read back OFF"):
+        p.off()
+    assert psu.sent.count("OUTP CH1,OFF") == 2    # sent, resent once, then refused
+
+
+def test_scpi_on_raises_when_the_state_cannot_be_read():
+    def handler(conn):
+        try:
+            while conn.recv(100):
+                conn.sendall(b"garbage\n")
+        except OSError:                  # the client closed first
+            pass
+
+    srv, port = _serve_once(handler)
+    try:
+        p = bench.ScpiPower("127.0.0.1", port, 1)
+        p._sleep = lambda s: None
+        with pytest.raises(BenchError, match="did not read back ON"):
+            p.on()                       # is_on() is None: unknowable is not confirmed
+    finally:
+        srv.close()
+
+
+@pytest.mark.parametrize("channel", [0, 3, 4])
+def test_scpi_channel_without_a_status_bit_is_refused_up_front(channel):
+    with pytest.raises(BenchError, match="only CH1 and CH2"):
+        bench.ScpiPower("h", 1, channel)
+
+
+def test_cycle_confirms_the_on_only_after_the_console_settle_read():
+    """The ON read-back must not sit between the ON edge and the first console read."""
+    psu = _Psu()
+    p = psu.power(1)
+    order = []
+    orig = _PsuSock.sendall
+    _PsuSock.sendall = lambda self, d: (order.append(d.decode().strip()), orig(self, d))[1]
+
+    class Con:
+        def pump(self, seconds):
+            order.append(f"pump {seconds:g}")
+    try:
+        p._clock = lambda: 1e6
+        p.cycle(0, Con())
+    finally:
+        _PsuSock.sendall = orig
+    on = order.index("OUTP CH1,ON")
+    assert order[on + 1] == f"pump {bench.ON_SETTLE_S:g}"       # first thing after the ON edge: read
+    assert order[on + 2] == "SYST:STAT?"                       # then the read-back
+
+
+def test_scpi_current_is_one_measurement_of_the_configured_channel_over_the_open_socket():
+    psu = _Psu()
+    p = psu.power(1)
+    p.on()
+    psu.amps = "0.451"
+    assert p.current() == 0.451
+    assert psu.sent[-1] == "MEAS:CURR? CH1" and psu.connects == 1
+    assert not any("CH2" in c for c in psu.sent)
+    p2 = _Psu().power(2)
+    p2.current()
+    assert p2._connect.__self__.sent == ["MEAS:CURR? CH2"]
+
+
+def test_scpi_current_rejects_a_reply_that_is_not_a_number():
+    psu = _Psu()
+    psu.amps = "ERR"
+    with pytest.raises(BenchError, match="not a number"):
+        psu.power(1).current()
+
+
+def test_power_kinds_without_a_meter_return_none_for_current():
+    from .provision_fakes import FakePower
+    assert FakePower().current() is None
+    assert bench.LabgridPower("place").current() is None
+
+
+@pytest.mark.parametrize("reply", ["nan", "inf", "-inf", "ERR"])
+def test_scpi_current_rejects_a_non_finite_reading(reply):
+    psu = _Psu()
+    psu.amps = reply
+    with pytest.raises(BenchError, match="not a number"):
+        psu.power(1).current()

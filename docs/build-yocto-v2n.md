@@ -63,6 +63,10 @@ MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
 Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
 - `alp-image-edge-*.wic[.gz]` — full SD/eMMC image (bootloader excluded;
   it's already on xSPI).
+- `alp-image-edge-*.wic.bmap` — block map of the wic (`wic.bmap` in
+  `IMAGE_FSTYPES`); ship it as the bundle's `system_image_bmap` so the
+  provisioning tool writes only the used blocks
+  (see [provisioning-v2n.md](provisioning-v2n.md)).
 - `Image` + `renesas/e1m-v2n101-x-evk.dtb` — kernel + the **carrier
   dtb** (composed from the SoC + SoM + E1M-X-EVK carrier dtsi and selected
   via the machine's `KERNEL_DEVICETREE`, so this is the e1m-x carrier dtb
