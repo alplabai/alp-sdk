@@ -2043,9 +2043,27 @@ class ColdBootTest(Step):
         expected = {bus: a for bus, a in lt.expected_i2c(ctx.preset, ctx.bench.i2c_bus).items()
                     if bus is not None}
         pmic_bus = ctx.i2c("pmic")
+        ev["cold_boots_passed"] = f"0/{n}"
+        try:
+            return self._cycles(ctx, n, ev, expected, pmic_bus)
+        except Exception:
+            # a cycle that dies mid-way (console, ssh, i2c) must not drop what the earlier
+            # cycles proved: cold_boots_passed says 2/3, and their evidence stays
+            ctx.facts.update(ev)
+            raise
+
+    def _cycles(self, ctx, n, ev, expected, pmic_bus):
         for i in range(1, n + 1):
             text = ctx.mutate(f"cold cycle {i}/{n}", lambda: self._cold_boot(ctx, ev))
             probs = [f"BL2: {e}" for e in uboot.bl2_errors(text)]
+            # firmware versions from THIS cycle's transcript: the ledger takes the last passing
+            # cycle's, and a cycle that differs from the one before is a problem
+            vers = {**uboot.parse_bl2(text), **uboot.parse_bl31(text)}
+            vers.pop("bl2_boot_source", None)
+            if v := uboot.parse_uboot_version(text):
+                vers["uboot_version"] = v
+            probs += [f"{k} changed between cold cycles: {ev[k]!r} -> {v!r}"
+                      for k, v in vers.items() if k in ev and ev[k] != v]
             mib = uboot.parse_dram_banner(text)
             tier, tev = tier_gate(ctx, mib)
             if not tier.ok:
@@ -2097,6 +2115,7 @@ class ColdBootTest(Step):
             if probs:
                 ctx.facts.update(ev)
                 raise Refused(f"cold cycle {i}/{n}: " + "; ".join(probs))
+            ev.update(vers)
             if i == 1 and n >= 2 and (functest.config(ctx).get("fixtures") or {}).get("rtc_backup"):
                 # functional_test's rtc_retention then has the remaining cold cycles to judge
                 ev["rtc_set_boot_id"] = ctx.mutate(
