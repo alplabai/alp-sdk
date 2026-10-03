@@ -79,7 +79,6 @@ SRC_URI:append = " \
     file://0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch \
     file://0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch \
     file://0020-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
-    file://pcie-ep-trim.cfg \
     file://uio.cfg \
 "
 
@@ -130,9 +129,10 @@ SRC_URI:append = " \
 # CPG BUS_MSTOP bits (the rzv2h-cpg driver ties the two together), which
 # bus-faults the CM33 mid-operation ~15 s into every boot.  The patch
 # marks the five rsci_7_* clocks DEF_MOD_CRITICAL so both gates stay held
-# for the remote core.  The same patch holds the WDT0 clocks (wdt_0_clkp,
-# wdt_0_clk_loco) for the CM33 watchdog (not bench-verified).  Silicon-validated 2026-06-03 (two cold cycles +
+# for the remote core.  Silicon-validated 2026-06-03 (two cold cycles +
 # warm reboot, link autonomous from ~2 s after power-on, no intervention).
+# The same patch also holds the WDT0 clocks (wdt_0_clkp, wdt_0_clk_loco)
+# ahead of a planned CM33 watchdog (preemptive, not bench-verified).
 #
 # RIIC8 (BRD_I2C) is NOT in this patch: the maintainer decision that
 # Cortex-A55/Linux is RIIC8's sole master (metadata/e1m_modules/v2n/
@@ -279,6 +279,7 @@ do_configure:prepend() {
 SRC_URI:append = " \
     file://trim-unused-storage-net-fs.cfg \
     file://no-kernel-audit.cfg \
+    file://pcie-ep-trim.cfg \
 "
 
 # On-module RTC (all six V2N-family SKUs carry the same RV-3028-C7 --

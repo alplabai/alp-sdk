@@ -744,8 +744,8 @@
 &usb2_phy0 {
 	/* USB2.0 VBUS is always-on (hardwired) on the E1M-X carrier, so no
 	 * VBUS GPIO/pinmux is needed. The old usb20_pins hogged P95 (func 14),
-	 * which is the DEEPX PCIe mux-sel on V2M and MUST stay a GPIO — the
-	 * pinctrl claim collided with the deepx-pcie-mux-sel hog. Dropped. */
+	 * which is the DEEPX PCIe mux-sel on V2M and MUST stay a GPIO (U-Boot
+	 * drives it; no Linux hog or pinctrl claim). Dropped. */
 	vbus-supply = <&usb2_phy0_vbus_otg>;
 	status = "okay";
 };

@@ -44,7 +44,7 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
  	DEF_CSDIV(".pllcm33_adc_pclk", CLK_PLLCM33_ADC_PCLK, CLK_PLLCM33_DIV2, CSDIV1_DIVCTL0,
  		  dtable_8_10),
  	DEF_FIXED(".pllcm33_adc_pclk_div2", CLK_PLLCM33_ADC_PCLK_DIV2, CLK_PLLCM33_ADC_PCLK, 1, 2),
-@@ -655,6 +659,18 @@
+@@ -660,6 +664,18 @@
  						BUS_MSTOP(1, BIT(10))),
  	DEF_MOD("spdif_2_clkp",			CLK_PLLDTY_DIV16, 16, 0, 8, 0,
  						BUS_MSTOP(1, BIT(11))),
@@ -63,7 +63,7 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
  	DEF_MOD("adc_pclk",			CLK_PLLCM33_ADC_PCLK_DIV2, 16, 7, 8, 7,
  						BUS_MSTOP(3, BIT(9))),
  	DEF_MOD("adc_adclk",			CLK_PLLCM33_ADC_ADCLK, 16, 8, 8, 8,
-@@ -842,6 +858,10 @@
+@@ -847,6 +863,10 @@
  	DEF_RST(14, 15, 7, 0),		/* SPDIF_0_RST */
  	DEF_RST(15, 0, 7, 1),		/* SPDIF_1_RST */
  	DEF_RST(15, 1, 7, 2),		/* SPDIF_2_RST */
