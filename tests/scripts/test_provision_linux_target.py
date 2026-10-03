@@ -680,12 +680,8 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"cpuinfo_max_freq", "1800000\n"), (r"meminfo", "MemTotal:        3200000 kB\nMemFree: 1 kB\n"),
         (r"uname -r", "6.1.107-cip28\n"),
         (r"device-tree/compatible", "alp,e1m-v2m101-x-evk renesas,r9a09g056\n"),
-        (r"device-tree/model", "ALP E1M-V2M on E1M-X-EVK
-"),
-        (r"device/type", "mmcblk0 SD
-mmcblk1 MMC
-mmcblk1boot0 MMC
-"),
+        (r"device-tree/model", "ALP E1M-V2M on E1M-X-EVK\n"),
+        (r"device/type", "mmcblk0 SD\nmmcblk1 MMC\nmmcblk1boot0 MMC\n"),
         (r"mmcblk1/device/cid", CID + "\n"), (r"mmcblk1/size", "30535680\n"),
         (r"extcsd read", EXTCSD.format(a=2, b=8)),
         (r"/ios", "actual clock:\t200000000 Hz\ntiming spec:\t9 (mmc HS200)\n"),
