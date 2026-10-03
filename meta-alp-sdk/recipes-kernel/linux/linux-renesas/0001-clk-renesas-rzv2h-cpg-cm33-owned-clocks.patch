@@ -33,10 +33,20 @@ on the list is registered exactly like a DEF_MOD_CRITICAL one:
 CLK_IS_CRITICAL keeps it enabled so the unused-clock sweep skips it, and the
 critical-clock registration path seeds the MSTOP refcount, (re-)releasing
 the gates early in boot.  Every sharer of a BUS_MSTOP bit must be listed so
-the per-bit refcount cannot drop to zero through a non-listed sibling.  The
-generic `protected-clocks` property is not an option here: it is only
+the per-bit refcount cannot drop to zero through a non-listed sibling.
+
+The property fails loudly instead of silently leaving a CM33 peripheral
+unprotected: each held clock is logged (dev_info), a listed name that matches
+no module clock is a dev_err, and a missing property on r9a09g056 raises a
+one-time WARN.  rzv2h_cpg_register_mod_clk() is the only reader of the
+per-clock `critical` flag in drivers/clk/renesas/rzv2h-cpg.c (BSP 6717c06);
+r9a09g056-cpg.c only sets it through DEF_MOD_CRITICAL.
+
+The generic `protected-clocks` property is not an option here: it is only
 honoured by individual clock drivers (qcom), not by the clk framework or
-rzv2h-cpg, and it takes provider-specific indices rather than names.
+rzv2h-cpg, and it takes provider-specific indices rather than names.  The
+upstreamable alternative is a specifier-form list, `<&cpg CPG_MOD n>`, which
+needs no name table, but the names are what the ALP SoM metadata carries.
 
 RIIC8 (BRD_I2C) is not listed: Cortex-A55/Linux is its sole master, so
 Linux is a real consumer of riic_8_ckm and clk_disable_unused leaves it
@@ -50,9 +60,9 @@ upstream binding would need agreement on the property name and semantics]
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- .../bindings/clock/renesas,rzv2h-cpg.yaml          |  9 +++++++++
- drivers/clk/renesas/rzv2h-cpg.c                    | 20 +++++++++++++++++---
- 2 files changed, 26 insertions(+), 3 deletions(-)
+ .../bindings/clock/renesas,rzv2h-cpg.yaml          | 9 +++++++++
+ drivers/clk/renesas/rzv2h-cpg.c                    | 60 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++---
+ 2 files changed, 66 insertions(+), 3 deletions(-)
 
 diff --git a/Documentation/devicetree/bindings/clock/renesas,rzv2h-cpg.yaml b/Documentation/devicetree/bindings/clock/renesas,rzv2h-cpg.yaml
 index a3e0faf..1b98d64 100644
@@ -75,10 +85,10 @@ index a3e0faf..1b98d64 100644
      const: 0
  
 diff --git a/drivers/clk/renesas/rzv2h-cpg.c b/drivers/clk/renesas/rzv2h-cpg.c
-index 3bd4edb..2f8aaed 100644
+index 3bd4edb..a89556d 100644
 --- a/drivers/clk/renesas/rzv2h-cpg.c
 +++ b/drivers/clk/renesas/rzv2h-cpg.c
-@@ -1047,10 +1047,26 @@ static const struct clk_ops rzv2h_mod_clock_ops = {
+@@ -1047,10 +1047,60 @@ static const struct clk_ops rzv2h_mod_clock_ops = {
  	.is_enabled = rzv2h_mod_clock_is_enabled,
  };
  
@@ -97,24 +107,61 @@ index 3bd4edb..2f8aaed 100644
 +					"renesas,cm33-owned-clocks", name) >= 0;
 +}
 +
++/*
++ * Run after every module clock is registered: a name in the property that
++ * matched no module clock would silently leave a CM33 peripheral unprotected,
++ * and so would a missing property on r9a09g056, where the CM33 owns RSCI7.
++ */
++static void __init rzv2h_cpg_check_cm33_owned(struct rzv2h_cpg_priv *priv)
++{
++	struct device_node *np = priv->dev->of_node;
++	const struct rzv2h_cpg_info *info = priv->info;
++	const char *name;
++	unsigned int i;
++	int n, j;
++
++	n = of_property_count_strings(np, "renesas,cm33-owned-clocks");
++	if (n < 0) {
++		WARN_ONCE(of_device_is_compatible(np, "renesas,r9a09g056-cpg"),
++			  "rzv2h-cpg: no renesas,cm33-owned-clocks: the Cortex-M33 RSCI7 clocks are not held\n");
++		return;
++	}
++	for (j = 0; j < n; j++) {
++		if (of_property_read_string_index(np, "renesas,cm33-owned-clocks",
++						  j, &name))
++			continue;
++		for (i = 0; i < info->num_mod_clks; i++)
++			if (!strcmp(info->mod_clks[i].name, name))
++				break;
++		if (i == info->num_mod_clks)
++			dev_err(priv->dev,
++				"renesas,cm33-owned-clocks: %s is not a module clock\n",
++				name);
++	}
++}
++
  static void __init
  rzv2h_cpg_register_mod_clk(const struct rzv2h_mod_clk *mod,
  			   struct rzv2h_cpg_priv *priv)
  {
-+	bool critical = mod->critical || rzv2h_cpg_cm33_owned(priv, mod->name);
++	bool cm33_owned = rzv2h_cpg_cm33_owned(priv, mod->name);
++	bool critical = mod->critical || cm33_owned;
  	struct mod_clock *clock = NULL;
  	struct device *dev = priv->dev;
  	struct clk_init_data init;
-@@ -1079,7 +1095,7 @@ rzv2h_cpg_register_mod_clk(const struct rzv2h_mod_clk *mod,
+@@ -1079,8 +1129,10 @@ rzv2h_cpg_register_mod_clk(const struct rzv2h_mod_clk *mod,
  	init.name = mod->name;
  	init.ops = &rzv2h_mod_clock_ops;
  	init.flags = CLK_SET_RATE_PARENT;
 -	if (mod->critical)
 +	if (critical)
  		init.flags |= CLK_IS_CRITICAL;
++	if (cm33_owned)
++		dev_info(dev, "keeping %s on (owned by the Cortex-M33)\n", mod->name);
  
  	parent_name = __clk_get_name(parent);
-@@ -1110,9 +1126,9 @@ rzv2h_cpg_register_mod_clk(const struct rzv2h_mod_clk *mod,
+ 	init.parent_names = &parent_name;
+@@ -1110,9 +1162,9 @@ rzv2h_cpg_register_mod_clk(const struct rzv2h_mod_clk *mod,
  	 * turned ON in an earlier boot stage.
  	 */
  	if (clock->mstop_data != BUS_MSTOP_NONE &&
@@ -126,5 +173,14 @@ index 3bd4edb..2f8aaed 100644
  		unsigned long mstop_mask = FIELD_GET(BUS_MSTOP_BITS_MASK, clock->mstop_data);
  		u16 mstop_index = FIELD_GET(BUS_MSTOP_IDX_MASK, clock->mstop_data);
  		atomic_t *mstop = &priv->mstop_count[mstop_index * 16];
+@@ -1439,6 +1491,8 @@ static int __init rzv2h_cpg_probe(struct platform_device *pdev)
+ 	for (i = 0; i < info->num_mod_clks; i++)
+ 		rzv2h_cpg_register_mod_clk(&info->mod_clks[i], priv);
+ 
++	rzv2h_cpg_check_cm33_owned(priv);
++
+ 	error = of_clk_add_provider(np, rzv2h_cpg_clk_src_twocell_get, priv);
+ 	if (error)
+ 		return error;
 --
 2.43.0
