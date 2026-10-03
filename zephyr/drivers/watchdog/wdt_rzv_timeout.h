@@ -41,6 +41,12 @@ static inline uint32_t wdt_rzv_ceiling_ms(uint32_t clock_freq)
 	return clock_freq == 0 ? 0 : (uint32_t)((counts * 1000ULL + clock_freq - 1) / clock_freq);
 }
 
+/* True when a request of ms is at or below the longest encodable period (else the driver rejects it). */
+static inline bool wdt_rzv_timeout_in_range(uint32_t clock_freq, uint32_t ms)
+{
+	return ms <= wdt_rzv_ceiling_ms(clock_freq);
+}
+
 /* Longest period not exceeding max_ms; false when even the shortest is longer. */
 static inline bool wdt_rzv_pick(uint32_t clock_freq, uint32_t max_ms, uint8_t *tops, uint8_t *cks)
 {

@@ -106,7 +106,7 @@ static int wdt_rzv_install_timeout(const struct device *dev, const struct wdt_ti
 	if (atomic_test_bit(&data->state, WDT_RZV_ATOMIC_TIMEOUT_SET)) {
 		return -ENOMEM; /* a single channel */
 	}
-	if (config->window.max > wdt_rzv_ceiling_ms(cfg->clock_freq)) {
+	if (!wdt_rzv_timeout_in_range(cfg->clock_freq, config->window.max)) {
 		LOG_ERR("timeout %u ms exceeds the longest WDT0 period (%u ms)",
 		        config->window.max,
 		        wdt_rzv_ceiling_ms(cfg->clock_freq));
