@@ -40,10 +40,17 @@ ZTEST(alp_temperature, test_die_read_null_out_returns_inval)
 	zassert_equal(alp_temperature_read_die_milli_c(NULL), ALP_ERR_INVAL);
 }
 
-ZTEST(alp_temperature, test_die_read_returns_nosupport_without_die_temp0_alias)
+/* Whether the upstream native_sim tree declares `die-temp0` is not asserted
+ * here: the expectation follows the build's own devicetree. */
+ZTEST(alp_temperature, test_die_read_follows_die_temp0_alias)
 {
-	int32_t milli_c = 0x7EADBEEF; /* sentinel */
+	int32_t      milli_c = 0x7EADBEEF; /* sentinel */
+	alp_status_t rc      = alp_temperature_read_die_milli_c(&milli_c);
 
-	zassert_equal(alp_temperature_read_die_milli_c(&milli_c), ALP_ERR_NOSUPPORT);
+#if DT_HAS_ALIAS(die_temp0) && DT_NODE_HAS_STATUS_OKAY(DT_ALIAS(die_temp0))
+	zassert_true(rc == ALP_OK || rc == ALP_ERR_NOT_READY || rc == ALP_ERR_IO);
+#else
+	zassert_equal(rc, ALP_ERR_NOSUPPORT);
 	zassert_equal(milli_c, 0x7EADBEEF);
+#endif
 }

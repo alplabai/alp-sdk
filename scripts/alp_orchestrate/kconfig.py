@@ -2111,6 +2111,16 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _inference_auto_order(som_preset: dict) -> list[str]:
+    """The SoM preset's ordered AUTO accelerator preference, best first.
+
+    `inference.auto_order` is the single source: its first entry is the SoM's
+    preferred backend (`preferred_backend` is only used by presets that
+    declare no order).  Empty when the preset declares none.
+    """
+    return list((som_preset.get("inference") or {}).get("auto_order") or [])
+
+
 def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
     """Per-core local.conf snippet for a Yocto slice."""
     machine = slice_.machine or f"e1m-{project.sku.lower().replace('e1m-', '')}"
@@ -2158,6 +2168,13 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
     if library_pkgs:
         joined = " ".join(library_pkgs)
         lines.append(f'IMAGE_INSTALL:append = " {joined}"')
+    # SoM-declared AUTO accelerator preference.  Read by the alp-sdk recipe
+    # (EXTRA_OECMAKE -> -DALP_SDK_INFERENCE_AUTO_ORDER -> src/yocto
+    # resolve_auto() + the .alpmodel selector).  Weak `?=` so a hand-edited
+    # local.conf wins; emitted only for presets that declare it.
+    auto_order = _inference_auto_order(project.som_preset)
+    if auto_order:
+        lines.append(f'ALP_SDK_INFERENCE_AUTO_ORDER ?= "{",".join(auto_order)}"')
     if slice_.image:
         lines.append(f"# bitbake target: {slice_.image}")
 
@@ -2229,12 +2246,6 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
         lines.append("-DALP_SDK_USE_DRPAI_V2N=ON")
     if capabilities.get("deepx_dxm1"):
         lines.append("-DALP_SDK_USE_DEEPX_DXM1=ON")
-    # SoM-declared AUTO accelerator preference (consumed by
-    # src/yocto/inference_yocto.c + the .alpmodel loader).  Emitted only for
-    # presets that declare it, so every other SKU's output stays unchanged.
-    auto_order = (project.som_preset.get("inference") or {}).get("auto_order")
-    if auto_order:
-        lines.append(f"-DALP_SDK_INFERENCE_AUTO_ORDER={','.join(auto_order)}")
     # Project-wide curated third-party libraries (top-level `libraries:`,
     # ADR 0018) with a baremetal integration section.  Guard keeps a project
     # with no such libraries byte-identical.

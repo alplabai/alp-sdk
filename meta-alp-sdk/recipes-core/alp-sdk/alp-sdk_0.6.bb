@@ -51,6 +51,13 @@ EXTRA_OECMAKE = "-DALP_SDK_BUILD_SHARED=ON            \
                  -DALP_OS=yocto                       \
                  -DALP_SDK_MODEL_ZCBOR_REQUIRED=ON"
 
+# SoM-declared ALP_INFERENCE_BACKEND_AUTO accelerator order (comma list, best
+# first, e.g. "deepx_dxm1,drpai,cpu").  Generated from the SoM preset
+# `inference.auto_order` into local.conf by `--emit yocto-conf`; empty keeps
+# the built-in order in src/yocto/inference_yocto.c.
+ALP_SDK_INFERENCE_AUTO_ORDER ?= ""
+EXTRA_OECMAKE:append = "${@' -DALP_SDK_INFERENCE_AUTO_ORDER=' + d.getVar('ALP_SDK_INFERENCE_AUTO_ORDER') if d.getVar('ALP_SDK_INFERENCE_AUTO_ORDER') else ''}"
+
 # Regenerate the CMake toolchain file as a do_configure prefunc.
 #
 # cmake.bbclass sequences its generator as `addtask generate_toolchain_file

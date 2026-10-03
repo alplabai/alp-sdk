@@ -116,9 +116,10 @@ def main() -> int:
         preliminary, names = _collect_preset_names(path)
         inf = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("inference") or {}
         order = inf.get("auto_order") or []
-        if order and order[0] != inf.get("preferred_backend"):
-            errors.append(f"{rel}: inference.auto_order[0] = {order[0]!r} must equal "
-                          f"preferred_backend {inf.get('preferred_backend')!r}")
+        if order and inf.get("preferred_backend") is not None:
+            errors.append(f"{rel}: declares both inference.auto_order and "
+                          f"inference.preferred_backend; auto_order[0] is the preferred "
+                          f"backend, keep one source")
         if "cpu" in order and order[-1] != "cpu":
             errors.append(f"{rel}: inference.auto_order lists 'cpu' before an accelerator; "
                           f"cpu is the floor and must be last")

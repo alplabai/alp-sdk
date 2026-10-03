@@ -12,8 +12,8 @@ import check_pad_voltage as gate  # noqa: E402
 
 
 def _tree(tmp: Path, board: str) -> Path:
-    (tmp / "metadata/socs/v/f").mkdir(parents=True)
-    (tmp / "metadata/socs/v/f/p.json").write_text(json.dumps(
+    (tmp / "metadata/socs/renesas/rzv2n").mkdir(parents=True)
+    (tmp / "metadata/socs/renesas/rzv2n/p.json").write_text(json.dumps(
         {"pad_tolerance": {"max_signal_v": 1.89, "non_33v_tolerant_pads": ["P9[0-2]"]}}))
     (tmp / "metadata/pinmux").mkdir()
     (tmp / "metadata/pinmux/x.yaml").write_text(
@@ -48,8 +48,14 @@ def test_33v_without_shifter_fails_and_shifter_fixes(tmp_path):
     p = gate.find_problems(_tree(tmp_path, HEAD + "pad_levels:\n  - {pad: P91, signal_v: 3.3}\n"))
     assert len(p) == 1 and "level_shifter" in p[0]
     (tmp_path / "metadata/boards/b.yaml").write_text(
-        HEAD + "pad_levels:\n  - {pad: P91, signal_v: 3.3, level_shifter: U1}\n")
+        HEAD + "pad_levels:\n  - {pad: P91, signal_v: 3.3, level_shifter: translator}\n")
     assert gate.find_problems(tmp_path) == []
+
+
+def test_board_hosting_another_soc_is_not_checked(tmp_path):
+    board = ("name: B\nhosts_som_families: [alif-ensemble]\n" + SPI0
+             + "pad_levels:\n  - {pad: P91, signal_v: 3.3}\n")
+    assert gate.find_problems(_tree(tmp_path, board)) == []
 
 
 def test_real_tree_clean():

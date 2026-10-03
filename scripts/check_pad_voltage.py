@@ -37,13 +37,21 @@ def _load_yaml(p: Path):
 
 
 def _tolerance(root: Path):
-    """[(compiled non-tolerant regexes, max_signal_v)] per SoC JSON."""
-    out = []
+    """{"<vendor>-<family>": [(compiled non-tolerant regexes, max_signal_v)]}."""
+    out: dict[str, list] = {}
     for p in sorted((root / "metadata/socs").glob("*/*/*.json")):
         t = json.loads(p.read_text(encoding="utf-8")).get("pad_tolerance")
         if t:
-            out.append(([re.compile(r) for r in t["non_33v_tolerant_pads"]], t["max_signal_v"]))
+            out.setdefault(f"{p.parent.parent.name}-{p.parent.name}", []).append(
+                ([re.compile(r) for r in t["non_33v_tolerant_pads"]], t["max_signal_v"]))
     return out
+
+
+def _board_tolerance(tol: dict, families: list[str]) -> list:
+    """Tolerance of the SoCs a board hosts (a SoM family `renesas-rzv2n-deepx`
+    runs the `renesas-rzv2n` host SoC)."""
+    return [t for key, ts in tol.items()
+            if any(f == key or f.startswith(key + "-") for f in families) for t in ts]
 
 
 def _intolerant(pad: str, tol) -> float | None:
@@ -63,7 +71,7 @@ def _route_pads(inst: str, rows: list[dict]) -> list[dict]:
 
 
 def find_problems(root: Path) -> list[str]:
-    tol = _tolerance(root)
+    all_tol = _tolerance(root)
     rows = []
     for p in sorted((root / "metadata/pinmux").glob("*.yaml")):
         for r in _load_yaml(p).get("pads", []):
@@ -74,6 +82,7 @@ def find_problems(root: Path) -> list[str]:
         b = _load_yaml(bp)
         rel = bp.relative_to(root).as_posix()
         declared = {}
+        tol = _board_tolerance(all_tol, b.get("hosts_som_families") or [])
         for lv in b.get("pad_levels") or []:
             maxv = _intolerant(lv["pad"], tol)
             declared[lv["pad"]] = lv
@@ -81,7 +90,7 @@ def find_problems(root: Path) -> list[str]:
                 problems.append(
                     f"{rel}: pad_levels {lv['pad']} signal_v {lv['signal_v']} V exceeds the "
                     f"{maxv} V this pad tolerates; declare `level_shifter:` or lower signal_v")
-        if not any(f.startswith("renesas") for f in b.get("hosts_som_families", [])):
+        if not tol:
             continue
         for e in (b.get("e1m_routes") or {}).get("buses", []):
             for r in _route_pads(e["e1m"], rows):

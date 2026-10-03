@@ -30,6 +30,9 @@
  *      through the upstream Zephyr `die-temp0` alias; it is a SoC fact (the
  *      alias comes from the SoC / board devicetree), unlike the SoM-level
  *      ambient part above.
+ *      This repository's SoM board trees do not declare the alias; a SoC or
+ *      board tree must provide it (upstream or vendor tree), else the call
+ *      returns @ref ALP_ERR_NOSUPPORT.
  *
  * @par Today's coverage.
  *      Implemented on the Zephyr AEN backend only, binding the
