@@ -1141,6 +1141,38 @@ class WriteXspi(Step):
                            payload_store.evidence(store) if ctx.execute else None)
 
 
+class WriteCm33(Step):
+    """The CM33 image into mtd1 at 0x1A0000, where BL2 loads it from on an xSPI boot. The
+    bundle stores the padded image, so the md5 readback covers exactly what is written."""
+    name = "write_cm33"
+
+    @staticmethod
+    def _has_image(ctx) -> bool:
+        return any(c.get("role") == "cm33" for c in ctx.bundle.get("components", []))
+
+    def probe(self, ctx):
+        if not self._has_image(ctx):
+            return Satisfied(reason="bundle has no cm33 component")
+        t = ctx.need_linux()
+        if t is None:
+            return Unknown("no Linux target")
+        data = ctx.artefact_bytes("cm33")
+        got = t.md5("/dev/mtd1", gates.CM33_REGION_OFFSET, len(data))
+        if got != _md5(data):
+            return Unsatisfied(f"mtd1+{gates.CM33_REGION_OFFSET:#x} != bundle cm33")
+        return Satisfied({"xspi_cm33_md5": got, "xspi_cm33_size": str(len(data))})
+
+    def run(self, ctx):
+        t = ctx.need_linux()
+        store = ctx.open_payload_store(t)
+        p = ctx.artefact("cm33")
+        ctx.mutate(f"mtd1+{gates.CM33_REGION_OFFSET:#x} <- cm33 {p.name} ({p.stat().st_size} bytes): "
+                   "flash_erase, mtd_debug write, md5 readback",
+                   lambda: lt.mtd_write_verify(t, 1, p, store=store, offset=gates.CM33_REGION_OFFSET))
+        return self.result(ctx, f"cm33 -> mtd1+{gates.CM33_REGION_OFFSET:#x} (BL2 starts it on the next xSPI boot)",
+                           payload_store.evidence(store) if ctx.execute else None)
+
+
 class WriteEmmcBoot(Step):
     name = "write_emmc_boot"
 
@@ -2184,7 +2216,7 @@ class HilSmoke(Step):
         return self.result(ctx, "HiL smoke passed" if ctx.execute else "HiL spec validated", ev)
 
 
-FLASH_STEPS = ("write_xspi", "write_emmc_boot", "write_rootfs")
+FLASH_STEPS = ("write_xspi", "write_cm33", "write_emmc_boot", "write_rootfs")
 BUNDLE_FACTS = ("bl2_sha256", "rootfs_wic_sha256", "rootfs_bundle_version", "fip_sha256",
                 "fip_fdtfile", "fip_rail_string")
 
@@ -2357,7 +2389,7 @@ class SecurePageLock(Step):
 
 STEP_ORDER: list[type[Step]] = [
     Preflight, Detect, OpDsw1Scif, Bootstrap, OpDsw1EmmcInsertSd, BootSdLinux, Gd32Flash, WriteXspi,
-    WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Dxm1NpuFlash, PmicVerify,
+    WriteCm33, WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Dxm1NpuFlash, PmicVerify,
     SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, CensusFinal, ClkgenVerify, FunctionalTest, HilSmoke, Record,
 ]
 STEP_NAMES = [s.name for s in STEP_ORDER]

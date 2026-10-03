@@ -245,6 +245,7 @@ are not yet confirmed by a run of this code on a bench.
 | `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt. No IP is not a failure here: the checks run over the console and `gd32_flash` runs next |
 | `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, reset-and-run after every readback (see "The GD32 readback halts the MCU"), then `GET_VERSION` from the bridge at `0x70` (polled; the step fails if it never answers). With no network (the `boot_sd_linux` evidence says why: `network: none (gbeth DMA reset failed on <ports>)` or `none (no carrier)`) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
+| `write_cm33` | from Linux: the bundle's `cm33` image → `mtd1` at `0x1A0000`; md5 readback of exactly the image size; probe = the same md5. Skipped (`bundle has no cm33 component`) when the bundle carries none. See "CM33 image" |
 | `write_emmc_boot` | release `bl2_mmc` + `fip` into `mmcblk<N>boot1`, md5 readback, EXT_CSD via mmc-utils |
 | `write_rootfs` | stream the wic into the eMMC user area (refused while Linux runs from the eMMC), `fsck -n`, read-only mount (`-o ro,noload`, so the ext4 journal is never replayed), `/boot/<dtb>` present. With a `system_image_bmap` in the bundle only the mapped ranges are written and verified, see below |
 | `census` | read-only (one throwaway file in `/tmp`): every auto ledger key the unit can provide, plus the keys listed under "Census keys" below |
@@ -671,8 +672,8 @@ by `eeprom_manifest`.
 - **Wi-Fi / Bluetooth transmit, association, throughput.** A scan proves receive only.
 - **DRP-AI inference and GPU rendering.** The image carries no model and no headless render
   test; only driver and device node are checked.
-- **CM33 running and its RPC echo.** The flow programs no CM33 image (so `cm33_firmware`
-  reports a blank region on every unit today), the echo needs an example binary that is not in
+- **CM33 running and its RPC echo.** Without a `cm33` component in the bundle the flow programs
+  no CM33 image (so `cm33_firmware` reports a blank region), the echo needs an example binary that is not in
   the image, and the HiL spec says one attach per CM33 boot.
 - **Secure-element cryptography.** Needs the host-library example binary.
 - **Supply power under load.** One figure exists (0.42..0.44 A at 15 V, measured on the bench on
@@ -778,7 +779,7 @@ Nothing here has run on hardware. For the first run:
    `@@ALPFT-END <check>`.
 6. Expect three informational failures on today's units: `rtc_time_set` (nothing sets the RTC),
    `rtc_backup_mode` (backup switchover is disabled in the RTC's configuration) and
-   `cm33_firmware` (no step programs a CM33 image). Expect `dmesg_clean` to need its allowlist
+   `cm33_firmware` (no step programs a CM33 image while the bundle has no `cm33`). Expect `dmesg_clean` to need its allowlist
    adjusted (it was written from one boot log without levels).
 
 Output formats with **no real-log evidence yet**; compare each frame with what the judge
@@ -848,6 +849,16 @@ What the tool runs on the provisioning image (busybox is enough; checked on a Bu
 `functional_test` runs on the **shipping** image and additionally uses, where the check exists: `ping`, `iw`, `hciconfig` and `hcitool` (bluez, fixture only for the scan), `aplay`, `dxrt-cli`, `run_model` (fixture only), `systemctl`, `mktemp`, `setsid`, `awk`, `cut`, `sed`, `seq`, `sort`, `grep`. Each check names its tools and tests for them first: a missing one makes that check `unread (missing tool: <name>)`, never `pass` and never `fail`, which fails the step for a blocking check. That is how a missing tool is found on the first bench run.
 
 Not needed: `sfdisk`, `partx`, `findfs`, `parted`, `blockdev`, `bmaptool`, `mke2fs`, and `dd iflag=fullblock`.
+
+## CM33 image
+
+Every E1M-V2M103 is to ship with a CM33 firmware image (maintainer decision); which image is still open, so `cm33` is optional in the bundle and not in `V2N_REQUIRED_ROLES` yet (it becomes required once a bundle carries it).
+
+- **Where it lives.** xSPI byte `0x200000` = `mtd1` offset `0x1A0000` (`gates.CM33_REGION_OFFSET`). BL2 copies it raw to SRAM `0x08000000`; the CM33 starts at `0x08003000`.
+- **Padding.** The bundle's `cm33` component (`flash_target` `xspi:mtd1`) is the stored image: `0x3000` zero bytes followed by Zephyr's `zephyr.bin`, the same bytes the `rzv2n_mtd_flash` west runner writes. `write_cm33` and `cm33_firmware` md5 exactly these bytes.
+- **Size limit.** At most `0x30000` bytes in all; BL2 silently truncates a larger image. `preflight` and `check_som_bundle.py` refuse a `cm33` whose first `0x3000` bytes are not zero, whose initial SP (word at `0x3000`) is outside SRAM0 (`0x08xxxxxx`, the runner's test), whose reset vector (word at `0x3004`) lacks the Thumb bit or lies outside `0x08003000..0x08033000`, or that exceeds `0x30000`. The FIP must still end below `0x1A0000`; its erase never reaches the CM33 region.
+- **First run.** BL2 starts the CM33 only on an xSPI boot, so the image first runs in `cold_boot_test`. The CM33 cannot be restarted from Linux.
+- **No verification at boot.** No header, signature or checksum; only the tool's md5 readback and the blocking `cm33_firmware` check cover the image.
 
 ## Block-map write of the system image
 

@@ -294,17 +294,20 @@ def mtd_erasesize(t: LinuxTarget, mtd: int) -> int:
     return int(t.run(f"cat /sys/class/mtd/mtd{mtd}/erasesize").stdout.strip())
 
 
-def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = None, store=None) -> str:
-    """Erase ceil(size/erasesize) blocks from 0, write, read back, md5-compare."""
+def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = None, store=None,
+                     offset: int = 0) -> str:
+    """Erase ceil(size/erasesize) blocks from `offset` (erase-aligned), write, read back, md5-compare."""
     data_len = local.stat().st_size
     if data_len == 0:
         raise ValueError(f"{local} is empty")
     es = mtd_erasesize(t, mtd)
+    if offset % es:
+        raise ValueError(f"{local.name}: offset {offset:#x} is not aligned to the {es:#x} erase size of mtd{mtd}")
     blocks = -(-data_len // es)
-    if limit is not None and blocks * es > limit:
+    if limit is not None and offset + blocks * es > limit:
         raise ValueError(f"{local.name}: erase of {blocks * es:#x} bytes on mtd{mtd} would reach {limit:#x}")
     part = int(t.run(f"cat /sys/class/mtd/mtd{mtd}/size").stdout.strip())
-    if blocks * es > part:
+    if offset + blocks * es > part:
         raise ValueError(f"{local.name} ({data_len} bytes) does not fit mtd{mtd} ({part:#x})")
     want = _host_md5(local)
     remote = f"/tmp/{local.name}"
@@ -313,9 +316,9 @@ def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = 
         if t.md5(remote) != want:
             raise BenchError(f"{remote}: copy on the target does not match {local.name}")
         dev = f"/dev/mtd{mtd}"
-        t.run(f"flash_erase {dev} 0 {blocks}", timeout=600.0)
-        t.run(f"mtd_debug write {dev} 0 {data_len} {shlex.quote(remote)}", timeout=600.0)
-        got = t.md5(dev, 0, data_len)
+        t.run(f"flash_erase {dev} {offset} {blocks}", timeout=600.0)
+        t.run(f"mtd_debug write {dev} {offset} {data_len} {shlex.quote(remote)}", timeout=600.0)
+        got = t.md5(dev, offset, data_len)
     finally:
         t.run(f"rm -f {shlex.quote(remote)}", check=False)
     if got != want:

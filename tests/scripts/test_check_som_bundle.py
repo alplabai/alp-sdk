@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "check_som_bundle.py"
 EXAMPLE = REPO / "metadata" / "templates" / "som-release-bundle.example.json"
@@ -284,3 +286,45 @@ def test_system_image_bmap_valid_and_size_checked(tmp_path):
 def test_system_image_bmap_garbage_rejected(tmp_path):
     r = _run("--bundle", str(_bmap_bundle(tmp_path, 8192, "<bmap/>")))
     assert r.returncode == 1 and "not a valid bmap" in r.stdout
+
+
+def _cm33_image(**kw):
+    img = bytearray(0x3000) + (kw.get("sp", 0x08100000)).to_bytes(4, "little") + \
+        (kw.get("reset", 0x08003101)).to_bytes(4, "little") + b"\0" * 64
+    img[kw.get("dirty", 0)] |= kw.get("mark", 0)
+    return bytes(img) + b"\0" * kw.get("extra", 0)
+
+
+def _cm33_bundle(tmp_path, image, target="xspi:mtd1"):
+    d = tmp_path / "artifacts"
+    d.mkdir()
+    (d / "cm33.bin").write_bytes(image)
+    b = _valid_bundle()
+    b["components"].append({"role": "cm33", "file": "artifacts/cm33.bin", "sha256": "0" * 64,
+                            "size_bytes": len(image), "flash_target": target})
+    p = tmp_path / "bundle.json"
+    p.write_text(json.dumps(b), encoding="utf-8")
+    return p
+
+
+def test_cm33_valid_image_accepted(tmp_path):
+    r = _run("--bundle", str(_cm33_bundle(tmp_path, _cm33_image(sp=0x08FFFFFF))))
+    assert r.returncode == 0, r.stdout
+
+
+def test_cm33_must_target_mtd1(tmp_path):
+    r = _run("--bundle", str(_cm33_bundle(tmp_path, _cm33_image(), "xspi:mtd0")))
+    assert r.returncode == 1 and "flash_target" in r.stdout
+
+
+@pytest.mark.parametrize("kw, msg", [
+    ({"dirty": 5, "mark": 1}, "first 0x3000 bytes must be zero"),
+    ({"sp": 0x20000000}, "initial SP 0x20000000 is not in SRAM0 (0x08xxxxxx)"),
+    ({"reset": 0x08003100}, "reset vector 0x08003100 must have the Thumb bit"),
+    ({"reset": 0x08002FFF}, "reset vector 0x08002fff must have the Thumb bit"),
+    ({"reset": 0x08033001}, "reset vector 0x08033001 must have the Thumb bit"),
+    ({"extra": 0x30000}, "exceeds the 0x30000"),
+])
+def test_cm33_sanity_rejections(tmp_path, kw, msg):
+    r = _run("--bundle", str(_cm33_bundle(tmp_path, _cm33_image(**kw))))
+    assert r.returncode == 1 and msg in r.stdout, r.stdout
