@@ -48,9 +48,10 @@ static const char *const _avail_silicon[] = {
 #define N_AVAIL_SILICON (sizeof(_avail_silicon) / sizeof(_avail_silicon[0]) - 1u)
 
 /* SoM preset `inference.auto_order` (metadata/e1m_modules/<SKU>.yaml), passed
- * by the generated build config as -DALP_SDK_INFERENCE_AUTO_ORDER="a,b,cpu".
- * Absent -> empty: the selector falls back to the SoM preferred_backend
- * tiebreak (AUTO here). */
+ * by the generated build config as -DALP_SDK_INFERENCE_AUTO_ORDER="a,b,cpu"
+ * on every OS (Zephyr: CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER via
+ * zephyr/CMakeLists.txt; Yocto/baremetal: the CMake cache variable of the
+ * same name).  Absent -> empty: the tiebreak has no SoM order. */
 #if defined(ALP_SDK_INFERENCE_AUTO_ORDER)
 #define ALP_AUTO_ORDER_CSV ALP_SDK_INFERENCE_AUTO_ORDER
 #else

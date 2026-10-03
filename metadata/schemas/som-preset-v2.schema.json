@@ -206,23 +206,15 @@
     "inference": {
       "type": "object",
       "additionalProperties": false,
-      "anyOf": [
-        { "required": ["preferred_backend"] },
-        { "required": ["auto_order"] }
-      ],
-      "description": "Inference-accelerator selection.  One of `preferred_backend` or `auto_order` is required (`auto_order[0]` is the preferred backend; declare only one of them); `ethos_u_variant` (the primary variant) is required whenever the preferred backend is `ethos_u`.  Which Ethos-U variants the part carries is silicon-determined -- derived from the SoC JSON `npus[]` / capability counts -- so the SoM preset does NOT enumerate them.  Non-Ethos backends (drpai, deepx_dxm1) have no per-instance table.",
+      "required": ["auto_order"],
+      "description": "Inference-accelerator selection.  `auto_order` is required (its first entry is the preferred backend); `ethos_u_variant` (the primary variant) is required whenever the preferred backend is `ethos_u`.  Which Ethos-U variants the part carries is silicon-determined -- derived from the SoC JSON `npus[]` / capability counts -- so the SoM preset does NOT enumerate them.  Non-Ethos backends (drpai, deepx_dxm1) have no per-instance table.",
       "properties": {
-        "preferred_backend": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9_]*$",
-          "description": "Canonical backend key (`ethos_u`, `drpai`, `deepx_dxm1`, ...).  Cross-checked against the device dispatcher by scripts/check_inference_backend_parity.py."
-        },
         "auto_order": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-          "description": "Ordered accelerator preference for ALP_INFERENCE_BACKEND_AUTO, best first (canonical backend keys).  The first entry is the SoM's preferred backend, so a preset that declares `auto_order` omits `preferred_backend`; `cpu`, when listed, must be last (it is the floor, never chosen over an available NPU).  Generated into the Yocto build as ALP_SDK_INFERENCE_AUTO_ORDER (scripts/alp_orchestrate/kconfig.py, yocto-conf emit, forwarded by the alp-sdk recipe); absent means the SDK built-in order.  Cross-checked by scripts/check_inference_backend_parity.py."
+          "description": "Ordered accelerator preference for ALP_INFERENCE_BACKEND_AUTO, best first (canonical backend keys).  The first entry is the SoM's preferred backend; `cpu`, when listed, must be last (it is the floor, never chosen over an available NPU).  Generated into every OS build as ALP_SDK_INFERENCE_AUTO_ORDER (scripts/alp_orchestrate/kconfig.py: yocto-conf emit forwarded by the alp-sdk recipe, CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER for Zephyr); there is no SDK built-in order.  Cross-checked by scripts/check_inference_backend_parity.py."
         },
         "ethos_u_variant": {
           "type": "string",
@@ -234,12 +226,16 @@
         {
           "if": {
             "properties": {
-              "preferred_backend": {
-                "const": "ethos_u"
+              "auto_order": {
+                "prefixItems": [
+                  {
+                    "const": "ethos_u"
+                  }
+                ]
               }
             },
             "required": [
-              "preferred_backend"
+              "auto_order"
             ]
           },
           "then": {

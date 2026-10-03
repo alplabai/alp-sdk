@@ -298,8 +298,8 @@ static alp_inference_t *load_my_model(const void *vela_bytes, size_t n)
 
 Two things make this work portably:
 
-1. The SoM preset declares the preferred backend
-   (`inference.preferred_backend`) and any SoM-added
+1. The SoM preset declares the accelerator order, whose first entry is the
+   preferred backend (`inference.auto_order`, the single source) and any SoM-added
    `capabilities.*` in `metadata/e1m_modules/<SKU>.yaml`; which NPUs
    are physically present is silicon-determined (SoC JSON `npus[]` /
    capability counts).  Per

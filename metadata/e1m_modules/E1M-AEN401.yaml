@@ -132,7 +132,7 @@ memory:
   flash_mbit:           TBD
 
 inference:
-  preferred_backend:    ethos_u
+  auto_order:           [ethos_u, cpu]
   ethos_u_variant:      u85               # primary -- E4 ships one U85 alongside two U55s.
 
 capabilities:

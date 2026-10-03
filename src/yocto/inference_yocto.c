@@ -15,7 +15,7 @@
  *                                     backend in the SoM preset's
  *                                     `inference.auto_order` (build
  *                                     define ALP_SDK_INFERENCE_AUTO_ORDER),
- *                                     default DEEPX_DXM1, DRPAI, CPU.  CPU
+ *                                     no built-in default.  CPU
  *                                     is deliberately LAST -- an
  *                                     NPU-bearing SoM must never
  *                                     silently fall to CPU under AUTO.
@@ -161,6 +161,10 @@ static bool backend_compiled_in(alp_inference_backend_t be)
 	case ALP_INFERENCE_BACKEND_DRPAI:
 		return true;
 #endif
+#if defined(ALP_SDK_USE_ETHOS_U)
+	case ALP_INFERENCE_BACKEND_ETHOS_U:
+		return true;
+#endif
 #if defined(ALP_SDK_USE_ORT_CPU)
 	case ALP_INFERENCE_BACKEND_CPU:
 		return true;
@@ -172,14 +176,15 @@ static bool backend_compiled_in(alp_inference_backend_t be)
 
 /* SoM preset `inference.auto_order` (generated build config:
  * -DALP_SDK_INFERENCE_AUTO_ORDER="deepx_dxm1,drpai,cpu"): the first entry
- * compiled into this build wins.  Without it, the historical order applies
- * (DEEPX DX-M1, DRP-AI3, then the CPU floor).  CPU is deliberately LAST in
- * both: an NPU-bearing SoM must never silently fall to CPU under AUTO,
- * because that is a 10-100x throughput cliff the caller did not ask for. */
+ * compiled into this build wins.  There is no built-in order: a build with
+ * none resolves AUTO to "nothing available" and fails loudly.  CPU is
+ * deliberately LAST: an NPU-bearing SoM must never silently fall to CPU
+ * under AUTO, because that is a 10-100x throughput cliff the caller did not
+ * ask for. */
 #if defined(ALP_SDK_INFERENCE_AUTO_ORDER)
 #define ALP_AUTO_ORDER_CSV ALP_SDK_INFERENCE_AUTO_ORDER
 #else
-#define ALP_AUTO_ORDER_CSV "deepx_dxm1,drpai,cpu"
+#define ALP_AUTO_ORDER_CSV ""
 #endif
 
 static alp_inference_backend_t resolve_auto(void)

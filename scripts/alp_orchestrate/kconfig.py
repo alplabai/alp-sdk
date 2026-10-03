@@ -1424,6 +1424,13 @@ def _emit_inference(
     # M-class Zephyr slice cannot drive either (issues #58/#59), so it
     # gets TFLM only.  Their build wiring lives on the cmake-args /
     # Yocto emit paths (_slice_cmake_args below).
+    # SoM-declared AUTO accelerator order for the .alpmodel tiebreak
+    # (zephyr/CMakeLists.txt maps it to -DALP_SDK_INFERENCE_AUTO_ORDER, the
+    # same define name the Yocto and baremetal builds use).
+    auto_order = _inference_auto_order(project.som_preset)
+    if auto_order:
+        inference_lines.append(
+            f'CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER="{",".join(auto_order)}"')
     lines.append("# Inference dispatchers (from SoM capabilities -- "
                  "customer does not pick)")
     lines.extend(inference_lines)
@@ -2115,8 +2122,7 @@ def _inference_auto_order(som_preset: dict) -> list[str]:
     """The SoM preset's ordered AUTO accelerator preference, best first.
 
     `inference.auto_order` is the single source: its first entry is the SoM's
-    preferred backend (`preferred_backend` is only used by presets that
-    declare no order).  Empty when the preset declares none.
+    preferred backend.
     """
     return list((som_preset.get("inference") or {}).get("auto_order") or [])
 

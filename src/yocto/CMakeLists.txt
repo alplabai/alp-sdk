@@ -65,7 +65,7 @@ target_include_directories(alp_sdk PRIVATE ${_alp_sdk_yocto_root}/src)
 unset(_alp_sdk_yocto_root)
 
 set(ALP_SDK_INFERENCE_AUTO_ORDER "" CACHE STRING
-    "Comma-separated accelerator preference for ALP_INFERENCE_BACKEND_AUTO, best first (e.g. deepx_dxm1,drpai,cpu).  Generated from the SoM preset's inference.auto_order into local.conf (--emit yocto-conf) and forwarded by the alp-sdk recipe's EXTRA_OECMAKE.  Empty keeps the built-in order (deepx_dxm1,drpai,cpu).")
+    "Comma-separated accelerator preference for ALP_INFERENCE_BACKEND_AUTO, best first (e.g. deepx_dxm1,drpai,cpu).  Generated from the SoM preset's inference.auto_order into local.conf (--emit yocto-conf) and forwarded by the alp-sdk recipe's EXTRA_OECMAKE.   Empty: AUTO finds no accelerator and fails.")
 if(ALP_SDK_INFERENCE_AUTO_ORDER)
     target_compile_definitions(alp_sdk PRIVATE
         ALP_SDK_INFERENCE_AUTO_ORDER="${ALP_SDK_INFERENCE_AUTO_ORDER}")

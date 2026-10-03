@@ -40,3 +40,19 @@ def test_recipe_forwards_the_variable_to_cmake():
     bb = (root / "meta-alp-sdk/recipes-core/alp-sdk/alp-sdk_0.6.bb").read_text(encoding="utf-8")
     assert "-DALP_SDK_INFERENCE_AUTO_ORDER=" in bb
     assert 'd.getVar(\'ALP_SDK_INFERENCE_AUTO_ORDER\')' in bb
+
+
+def test_auto_order_reaches_zephyr_kconfig_for_an_inference_slice():
+    with tempfile.TemporaryDirectory() as td:
+        path = _write_board(Path(td), """
+            som:
+              sku: E1M-AEN801
+            cores:
+              m55_hp:
+                os: zephyr
+                inference:
+                  default_arena_kib: 512
+        """)
+        rv = _run_loader(input_path=path, emit="zephyr-conf", core="m55_hp")
+    assert rv.returncode == 0, rv.stderr
+    assert 'CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER="ethos_u,cpu"' in rv.stdout.splitlines()

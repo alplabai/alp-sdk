@@ -4,7 +4,7 @@
 """
 Inference backend/format <-> dispatcher canonicalisation gate.
 
-Every accelerator backend a SoM preset selects (`inference.preferred_backend`,
+Every accelerator backend a SoM preset selects (`inference.auto_order`,
 per-target `backend`) and every model `blob_format` it pins must be a string
 the device-side dispatcher actually decodes -- i.e. a literal in the
 `_backend_enum` / `_fmt_enum` switches of:
@@ -76,9 +76,6 @@ def _collect_preset_names(path: Path) -> tuple[bool, list[tuple[str, str, str]]]
     preliminary = isinstance(status, dict) and status.get("preliminary") is True
     inf = doc.get("inference") or {}
     out: list[tuple[str, str, str]] = []
-    pb = inf.get("preferred_backend")
-    if isinstance(pb, str):
-        out.append(("inference.preferred_backend", "backend", pb))
     for i, name in enumerate(inf.get("auto_order") or []):
         if isinstance(name, str):
             out.append((f"inference.auto_order[{i}]", "backend", name))
@@ -116,10 +113,9 @@ def main() -> int:
         preliminary, names = _collect_preset_names(path)
         inf = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("inference") or {}
         order = inf.get("auto_order") or []
-        if order and inf.get("preferred_backend") is not None:
-            errors.append(f"{rel}: declares both inference.auto_order and "
-                          f"inference.preferred_backend; auto_order[0] is the preferred "
-                          f"backend, keep one source")
+        if not order:
+            errors.append(f"{rel}: inference.auto_order is missing or empty; it is the "
+                          f"single source of the SoM's AUTO accelerator preference")
         if "cpu" in order and order[-1] != "cpu":
             errors.append(f"{rel}: inference.auto_order lists 'cpu' before an accelerator; "
                           f"cpu is the floor and must be last")
