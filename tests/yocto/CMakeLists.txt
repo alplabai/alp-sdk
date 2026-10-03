@@ -989,6 +989,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_camera
              COMMAND alp_test_peripheral_camera)
 
+    # ISP-fed colour path of the same backend (yocto_isp_capture.h, reached
+    # through y_open): scripted MPLANE ioctls, no /dev node.  Own executable
+    # because it #includes yocto_drv.c too.
+    add_executable(alp_test_peripheral_camera_isp
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_camera_isp.c
+    )
+    target_include_directories(alp_test_peripheral_camera_isp PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/camera
+    )
+    target_compile_features(alp_test_peripheral_camera_isp PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_camera_isp
+             COMMAND alp_test_peripheral_camera_isp)
+
     # Edge-config rollback regression for issue #746 (Yocto GPIO chardev-v2
     # backend): alp_gpio_irq_enable() must restore plain-input if the IRQ
     # dispatcher fails to start (eventfd()/pthread_create() failure),

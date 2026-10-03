@@ -85,6 +85,19 @@ ALP_RZ_DRPAI_INSTALL[vardepvalue] = "${ALP_RZ_DRPAI_INSTALL}"
 
 IMAGE_INSTALL += " ${ALP_RZ_DRPAI_INSTALL}"
 
+# RZ/V2N ISP (Arm Mali-C55) camera pipeline start-up: the alp-isp-init oneshot
+# from dynamic-layers/meta-rz-isp.  Gated on the package's meta-rz-isp LAYER
+# (the recipe only exists with it), ALP_ENABLE_ISP = "1" and "v2n" in
+# MACHINE_FEATURES -- the same layer + machine two-gate as ALP_RZ_DRPAI_INSTALL
+# above, for the same reason (a shared bblayers.conf building AEN/NX91 must not
+# gain a dependency with no provider there).  Settled by inspection only.
+ALP_RZ_ISP_INSTALL = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'meta-rz-isp', \
+    bb.utils.contains('MACHINE_FEATURES', 'v2n', \
+        ('alp-isp-init' if d.getVar('ALP_ENABLE_ISP') == '1' else ''), '', d), '', d)}"
+ALP_RZ_ISP_INSTALL[vardepvalue] = "${ALP_RZ_ISP_INSTALL}"
+
+IMAGE_INSTALL += " ${ALP_RZ_ISP_INSTALL}"
+
 # On-module Murata LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi + BT: the
 # out-of-tree cyw-fmac driver + firmware blobs (this layer, own
 # recipes -- no vendor-layer gate needed) plus the standard userspace

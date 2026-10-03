@@ -33,7 +33,16 @@
  *      little-endian word, 10 bits each, row pitch = bytesperline).
  *      Colour formats (RGB/YUV/NV12) are not produced by this backend: a
  *      sensor-to-colour conversion is the ISP/colour-processing layer's
- *      job, so they return ALP_ERR_NOSUPPORT.
+ *      job, so they return ALP_ERR_NOSUPPORT -- unless the Renesas ISP
+ *      stack is installed (see @par ISP), which produces RGB565 and NV12.
+ *
+ * @par ISP
+ *      When the opt-in RZ/V2N ISP Support Package is on the image, camera N
+ *      also has an ISP capture node /dev/video<N>fr.  An ALP_PIXFMT_RGB565
+ *      or ALP_PIXFMT_NV12 open is then served from that node (a Bayer
+ *      sensor streaming demosaiced colour); every other format, and every
+ *      image without the package, takes the media-controller path above.
+ *      See yocto_isp_capture.h and docs/v2n-isp.md.
  *
  * @par Frame rate
  *      fps 0 keeps the driver default.  Otherwise V4L2_CID_VBLANK on the
@@ -756,6 +765,8 @@ static alp_status_t cam_discover(uint32_t camera_id, cam_t *c)
 /* Ops                                                                 */
 /* ------------------------------------------------------------------ */
 
+#include "yocto_isp_capture.h"
+
 static void y_close(alp_camera_backend_state_t *st);
 
 static alp_status_t
@@ -763,6 +774,10 @@ y_open(const alp_camera_config_t *cfg, alp_camera_backend_state_t *st, alp_capab
 {
 	(void)caps_out;
 	if (cfg->width == 0u || cfg->height == 0u) return ALP_ERR_INVAL;
+	/* ISP stack present and the format is one it produces: serve it from
+	 * the ISP node.  NOSUPPORT = not the ISP path, fall through. */
+	alp_status_t isp_rc = isp_try_open(cfg, st);
+	if (isp_rc != ALP_ERR_NOSUPPORT) return isp_rc;
 	cam_t *c = calloc(1, sizeof(*c));
 	if (c == NULL) return ALP_ERR_NOMEM;
 	st->be_data = c;

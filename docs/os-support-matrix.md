@@ -103,7 +103,9 @@ plan in `VERSIONS.md`.
     `silicon_ref = "*"`, priority 100) is a real V4L2 + media-controller backend:
     it discovers the sensor -> CSI-2 -> capture-node chain from the media graph
     and works with any sensor that has a mainline V4L2 subdev driver (GREY8 /
-    RAW8 / RAW10 only; colour formats return `ALP_ERR_NOSUPPORT`).  It is
+    RAW8 / RAW10 only; colour formats return `ALP_ERR_NOSUPPORT`, except on an
+    image built with the opt-in Renesas ISP Support Package, where RGB565 /
+    NV12 come from the ISP node -- `docs/v2n-isp.md`).  It is
     unit-tested against an ioctl hook and **bench-unverified** as a backend; the
     sensor must be named by an `alp-camera<N>` devicetree alias (see
     `docs/v2n-camera-csi.md`).  The MIPI CSI-2 ISP-aware backend

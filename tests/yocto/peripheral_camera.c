@@ -191,6 +191,15 @@ static void fake_munmap(void *p, size_t len)
 	free(p);
 }
 
+/* No ISP node: the raw media-controller path under test must not depend on
+ * whether the machine running the test has /dev/video0fr. */
+static int fake_no_isp(uint32_t camera_id)
+{
+	(void)camera_id;
+	errno = ENOENT;
+	return -1;
+}
+
 static void reset(void)
 {
 	g_nsensor_codes = 0;
@@ -214,6 +223,7 @@ static void reset(void)
 	g_cam_poll                        = fake_poll;
 	g_cam_mmap                        = fake_mmap;
 	g_cam_munmap                      = fake_munmap;
+	g_cam_isp_open                    = fake_no_isp;
 }
 
 static void make_chain(cam_t *c)

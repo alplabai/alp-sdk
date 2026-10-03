@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 + E1M-X-EVK CAM0: an IMX219 (Raspberry Pi Camera Module 2,
+# 2-lane RAW10) streaming colour frames through the RZ/V2N Arm Mali-C55 ISP.
+#
+# NOT BENCH-VERIFIED.  Written from the Renesas ISP Support Package's
+# documented behaviour; it has never run on a board.
+#
+# PREREQUISITES (docs/v2n-isp.md):
+#   - image built with the ISP Support Package (meta-rz-isp) and the
+#     e1m-v2m101-x-evk-cam0-isp dtb selected by the bootloader;
+#   - an ISP sensor driver + calibration for the IMX219.  The package ships
+#     the IMX415 only, so this spec is EXPECTED TO FAIL (HIL_ISP_SENSOR /
+#     HIL_ISP_NODE) until that port exists.  The checks themselves are
+#     sensor-agnostic apart from the dmesg probe line;
+#   - kernel patch 0017 (CSI-2 lane polarity, needed on V2M103 + X-EVK J5)
+#     ported onto the package's CSI-2 receiver driver.  An ISP image drops
+#     0017, so this spec also fails on that carrier until the port exists.
+#
+# Read-only apart from streaming 30 frames to /dev/null.  Needs v4l-utils.
+
+schema_version: 1
+name: v2m103-isp-capture
+description: |
+  IMX219 probed, ISP node /dev/video0fr + userspace daemon up, NV12 1920x1080
+  negotiated, 30 frames streamed, no CSI/CRU errors in dmesg.
+
+flash_method: ssh-run
+ssh_command: |-
+  fail=0
+  dmesg | grep -qi imx219 && echo HIL_ISP_SENSOR_OK || { echo HIL_ISP_SENSOR_FAIL; fail=1; }
+  [ -c /dev/video0fr ] && echo HIL_ISP_NODE_OK || { echo HIL_ISP_NODE_FAIL; fail=1; }
+  ps | grep -q '[m]ali_iv021_isp' && echo HIL_ISP_DAEMON_OK || { echo HIL_ISP_DAEMON_FAIL; fail=1; }
+  v4l2-ctl -d /dev/video0fr --set-fmt-video=width=1920,height=1080,pixelformat=NV12 >/dev/null 2>&1 \
+    && echo HIL_ISP_FMT_OK || { echo HIL_ISP_FMT_FAIL; fail=1; }
+  n=$(v4l2-ctl -d /dev/video0fr --stream-mmap --stream-count=30 --stream-to=/dev/null 2>&1 | tr -cd '<' | wc -c)
+  echo "HIL_ISP_FRAMES $n"
+  [ "$n" -ge 30 ] && echo HIL_ISP_CAPTURE_OK || { echo HIL_ISP_CAPTURE_FAIL; fail=1; }
+  dmesg | grep -iE 'csi|cru|isp' | grep -iE 'err|fail|timeout' && { echo HIL_ISP_DMESG_FAIL; fail=1; } || echo HIL_ISP_DMESG_OK
+  [ "$fail" = 0 ] && echo HIL_ISP_ALL_OK
+
+serial:
+  duration_s: 90
+  expect_contains:
+    - "HIL_ISP_SENSOR_OK"
+    - "HIL_ISP_NODE_OK"
+    - "HIL_ISP_DAEMON_OK"
+    - "HIL_ISP_FMT_OK"
+    - "HIL_ISP_CAPTURE_OK"
+    - "HIL_ISP_DMESG_OK"
+    - "HIL_ISP_ALL_OK"

@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * ISP half of the CAM0 path (opt-in, ALP_ENABLE_ISP = "1"): routes the CAM0
+ * sensor through the RZ/V2N Arm Mali-C55 ISP instead of straight to a CRU
+ * capture node.  BENCH-UNVERIFIED and UNVALIDATED through dtc.
+ *
+ * Composes ON TOP of the CAM0 fragment (e1m-x-evk-cam0-sensor.dtsi), which
+ * the camera DT generator owns and which already wires
+ *   sensor -> &csi20 -> &cru0
+ * and labels the sensor `cam0_sensor`.  This file adds nothing to that
+ * graph: no sensor, lane, clock or pad is restated here.  It only turns on
+ * the ISP-side nodes and points them at the generated sensor.
+ *
+ * Every node below is created (status = "disabled") by the Renesas ISP
+ * Support Package's SoC dtsi patch (0001-ISP-support-package.patch, kernel
+ * source r9a09g056.dtsi): &input_video_control (IVC), &isp (arm,isp) and the
+ * sensor / lens / iq sub-driver nodes.  Their register bases, clocks, resets
+ * and interrupts live there and nowhere in this tree -- the labels are the
+ * whole contract.  The package's reference
+ * board dts does the same four steps for the EVK (&input_video_control,
+ * &isp, &sensor, &lens, &iq) with an IMX415 on &i2c0.
+ *
+ * The ISP frame buffers use isp_reserved (e1m-v2n-som.dtsi, 0x90000000,
+ * 384 MB), which the SoC dtsi patch already points &isp at; the CRU needs
+ * cru_func (cru_buffer@b4000000), set on &cru0 below exactly as the
+ * package's board dts does.  The DDR map is unchanged by the package.
+ *
+ * Sensor support: the package ships ISP support for one reference sensor
+ * only; any other sensor needs its own port (docs/v2n-isp.md).  The init
+ * script (alp-isp-init.service) selects the real mode at boot.
+ */
+
+&input_video_control {
+	crus = <&cru0>;
+	status = "okay";
+};
+
+&isp {
+	sensor-i2c = <&cam0_sensor>;
+	sensor-default-preset-mode = <0>;
+	status = "okay";
+};
+
+&sensor {
+	status = "okay";
+};
+
+&lens {
+	status = "okay";
+};
+
+&iq {
+	status = "okay";
+};
+
+&cru0 {
+	memory-region = <&cru_func>;
+};

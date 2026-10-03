@@ -8,6 +8,12 @@ path on the A55; the default dtb is unchanged.
 **Status: BENCH-UNVERIFIED.** No sensor was on the bench and the DT has
 not been through dtc. Nothing here is proof the pipeline streams.
 
+## Colour through the ISP
+
+This page is the raw CRU path (Bayer/mono frames, no colour). For demosaiced
+RGB565 / NV12 through the RZ/V2N Mali-C55 ISP (opt-in, licence-gated
+package, IMX415 only as shipped) see [`v2n-isp.md`](v2n-isp.md).
+
 ## What is wired
 
 | Piece | File (`meta-alp-sdk/recipes-kernel/linux/linux-renesas/`) |

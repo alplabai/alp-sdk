@@ -501,6 +501,28 @@ three are pulled in together by the `alp-sdk` recipe's
 the full procedure and section 3 for the separate `ALP_ENABLE_DRPAI`
 switch that enables the kernel-side node.
 
+### Camera ISP (Renesas ISP Support Package, opt-in)
+
+The RZ/V2N's Arm Mali-C55 ISP turns a Bayer sensor into colour frames for
+`<alp/camera.h>` (`ALP_PIXFMT_RGB565` / `NV12`). The package that drives it
+(Renesas RTK0EC0004S01004SJ: kernel drivers, a closed userspace daemon, init
+script) is **licence-gated and never in this repository**; Alp-built images
+take it from the private mirror in `alp-sdk-internal`
+(`vendors/renesas-rzv2n/isp-support-package-v1.31/`, with a
+`stage-isp-layer.sh` that extracts it to `ISP_LAYER_DIR`).
+
+Opt-in by layer presence, like `meta-rz-drpai`: add the package's
+`meta-rz-isp` layer to `bblayers.conf` (not together with `meta-econsys`) and
+`ALP_ENABLE_ISP` defaults to `1`; `0` opts out of our half. Everything of ours
+lives under `dynamic-layers/meta-rz-isp/` and is parsed only with that layer:
+the ISP half of the CAM0 dtb (`e1m-v2{n,m}101-x-evk-cam0-isp.dtb`, composed on
+the generated CAM0 sensor fragment), removal of kernel patches 0016/0017
+(they conflict with the package's CRU rewrite), and `alp-isp-init.service`
+(runs the vendor `v4l2-init.sh` at boot; installed into the image by
+`ALP_RZ_ISP_INSTALL` in `alp-image-common.inc`). The package supports the
+IMX415 only; see [`docs/v2n-isp.md`](../docs/v2n-isp.md) for the sensor
+caveat, the dropped patches and the status (BENCH-UNVERIFIED).
+
 ## OTA via Mender (opt-in)
 
 `meta-alp-sdk` ships an opt-in Mender integration at

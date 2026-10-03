@@ -46,8 +46,12 @@
  *     capture-node chain is discovered from the media graph, so any
  *     sensor with a mainline V4L2 subdev driver works with no
  *     per-sensor code.  Supports ALP_PIXFMT_GREY8 / RAW8 / RAW10 only
- *     (colour formats are ALP_ERR_NOSUPPORT).  Bench-unverified on
- *     this header's own CI; see docs/v2n-camera-csi.md.
+ *     (colour formats are ALP_ERR_NOSUPPORT) -- except on an image built
+ *     with the opt-in RZ/V2N ISP Support Package (`ALP_ENABLE_ISP`), where
+ *     ALP_PIXFMT_RGB565 / ALP_PIXFMT_NV12 are served demosaiced from the
+ *     ISP node `/dev/video<camera_id>fr` and alp_camera_configure_isp()
+ *     stays ALP_ERR_NOSUPPORT.  Bench-unverified on
+ *     this header's own CI; see docs/v2n-camera-csi.md and docs/v2n-isp.md.
  *   - **zephyr_stub** (silicon_ref `"*"`, priority 0): tracked
  *     fallback for silicon none of the above cover -- every op
  *     returns ALP_ERR_NOT_IMPLEMENTED (issue #223).
