@@ -42,8 +42,11 @@ def sys_lsi_spec(silicon: str) -> dict:
     """SYS_LSI register addresses and the MD_BOOT decode of a SoC, from its description
     (``boot_strap`` of metadata/socs/<vendor>/<family>/<part>.json); ``silicon`` is the preset's
     ``vendor:family:part``. The hardware-manual facts live there, not in this file."""
-    vendor, family, part = silicon.split(":")
-    doc = json.loads((REPO / "metadata" / "socs" / vendor / family / f"{part}.json").read_text(encoding="utf-8"))
+    from alp_project_loader import resolve_soc_path   # scripts/ is on sys.path
+    path = resolve_soc_path(silicon, REPO / "metadata")
+    if path is None:
+        raise ValueError(f"{silicon!r}: not a vendor:family:part silicon ref")
+    doc = json.loads(path.read_text(encoding="utf-8"))
     if "boot_strap" not in doc:
         raise ValueError(f"{silicon}: no boot_strap block in the SoC description")
     return doc["boot_strap"]
