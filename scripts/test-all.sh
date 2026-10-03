@@ -1379,7 +1379,7 @@ stage_generated_files() {
     # some of its artifacts is not a drift check.
     require_jsonschema_2020 stage_generated_files || return 99
     local gens=(gen_soc_caps gen_status_strings gen_board_header
-                gen_cc3501e_gpio_routes gen_power_tree
+                gen_cc3501e_gpio_routes gen_power_tree gen_linux_ownership_dt
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
                 gen_verification_status gen_chip_driver_classification)
@@ -1527,6 +1527,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
         include/alp docs/abi src/cap.c src/status_strings.c \
         metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
         metadata/socs/renesas/rzv2n/n44.json \
+        meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi \
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
         docs/verification-status.md \
         docs/chip-driver-classification.md \
@@ -1553,6 +1554,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             include/alp docs/abi src/cap.c src/status_strings.c \
             metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
             metadata/socs/renesas/rzv2n/n44.json \
+            meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
             docs/chip-driver-classification.md \
@@ -1564,6 +1566,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             include/alp docs/abi src/cap.c src/status_strings.c \
             metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
             metadata/socs/renesas/rzv2n/n44.json \
+            meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
             docs/chip-driver-classification.md \

@@ -2246,11 +2246,16 @@ def _v2n_spi_pfc_mnemonic(row: dict[str, Any], channel: str) -> str:
     return f"{_V2N_SPI_ROLE_MNEMONIC[role]}{channel}"
 
 
-def _v2n_assignable_m33(metadata_root: Path) -> list[tuple[str, dict[str, Any]]]:
-    """(instance, entry) for every `assignable:` instance of
-    core-ownership.yaml that carries an `m33:` devicetree block -- the
-    peripherals the CM33 board tree declares `disabled`, left for a project's
-    `--emit dts-overlay` / `zephyr-conf` to enable (board.yaml `ownership:`)."""
+def _v2n_assignable_m33(
+    metadata_root: Path, soc_spec: dict[str, Any],
+) -> list[tuple[str, dict[str, Any], list[tuple[dict[str, Any], tuple[str, int, int]]]]]:
+    """(instance, entry, [(row, (port, pin, func))]) for every `assignable:`
+    instance of core-ownership.yaml that carries an `m33:` devicetree block --
+    the peripherals the CM33 board tree declares `disabled`, left for a
+    project's `--emit dts-overlay` / `zephyr-conf` to enable (board.yaml
+    `ownership:`).  The PFC function codes are the SoC JSON's
+    `linux_dt[soc_instance].pinmux` -- one silicon-fact source for both cores."""
+    from alp_orchestrate.ownership import instance_pfc
     path = metadata_root / "e1m_modules" / "v2n" / "core-ownership.yaml"
     if not path.is_file():
         return []
@@ -2258,26 +2263,28 @@ def _v2n_assignable_m33(metadata_root: Path) -> list[tuple[str, dict[str, Any]]]
     for inst, e in sorted((_load_yaml(path).get("assignable") or {}).items()):
         if "m33" not in e:
             continue
-        for r in e["rows"]:
-            if "pfc_port" not in r:
+        rows = instance_pfc(soc_spec, e)
+        for r, pfc in rows:
+            if pfc is None:
                 raise ZephyrBoardEmitError(
-                    f"core-ownership.yaml assignable.{inst} has an m33: block but row "
-                    f"{r['peripheral']}/{r['pad']} carries no pfc_port/pfc_pin/pfc_func")
-        out.append((inst, e))
+                    f"core-ownership.yaml assignable.{inst} has an m33: block but the SoC "
+                    f"linux_dt.{e.get('soc_instance')}.pinmux has no function code for "
+                    f"{r['peripheral']}")
+        out.append((inst, e, rows))
     return out
 
 
-def _v2n_assignable_pinctrl(assignable: list[tuple[str, dict[str, Any]]]) -> str:
+def _v2n_assignable_pinctrl(assignable: list) -> str:
     """`&pinctrl { ... };` groups for the assignable instances (empty when
     none).  Pins are the rows' own pfc_* triples -- no literals here."""
     out = ""
-    for inst, e in assignable:
+    for inst, e, rows in assignable:
         pc = e["m33"]["pinctrl"]
-        rows = e["rows"]
         pins = "".join(
             ("\t\t\tpinmux = " if i == 0 else "\t\t\t\t ")
-            + f"<{_rzv_pinmux(r)}>{';' if i == len(rows) - 1 else ','} /* {r['peripheral']} {r['pad']} */\n"
-            for i, r in enumerate(rows))
+            + f"<RZV_PINMUX({port}, {pin}, {func})>{';' if i == len(rows) - 1 else ','} "
+            f"/* {r['peripheral']} {r['pad']} */\n"
+            for i, (r, (port, pin, func)) in enumerate(rows))
         out += (
             "\n&pinctrl {\n"
             f"\t/* {inst}: pad group for the CM33 when a project assigns it (board.yaml\n"
@@ -2289,11 +2296,11 @@ def _v2n_assignable_pinctrl(assignable: list[tuple[str, dict[str, Any]]]) -> str
     return out
 
 
-def _v2n_assignable_dts(assignable: list[tuple[str, dict[str, Any]]]) -> list[str]:
+def _v2n_assignable_dts(assignable: list) -> list[str]:
     """Board-dts lines declaring each assignable node `disabled` with its
     pinctrl group; the owning project's overlay flips it to `okay`."""
     lines: list[str] = []
-    for inst, e in assignable:
+    for inst, e, _rows in assignable:
         m = e["m33"]
         lines += [
             "/*",
@@ -2310,8 +2317,7 @@ def _v2n_assignable_dts(assignable: list[tuple[str, dict[str, Any]]]) -> list[st
     return lines
 
 
-def _v2n_pinctrl_dtsi(links: dict[str, Any],
-                      assignable: list[tuple[str, dict[str, Any]]] = ()) -> str:
+def _v2n_pinctrl_dtsi(links: dict[str, Any], assignable: list = ()) -> str:
     """`<board>-pinctrl.dtsi` for a V2N/V2M `m33_sm` board.
 
     Prose (the GD32 SPI block comment, the console/BRD_I2C one-liners)
@@ -2669,7 +2675,7 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
 def _v2n_dts(
     sku: str, dir_name: str, soc_spec: dict[str, Any], variant: dict[str, Any],
     sku_preset: dict[str, Any], links: dict[str, Any],
-    assignable: list[tuple[str, dict[str, Any]]] = (),
+    assignable: list = (),
 ) -> str:
     """Board `.dts` for a V2N/V2M `m33_sm` board (#655 slice 2).
 
@@ -3004,7 +3010,7 @@ def emit_zephyr_board(
         v2n_pinctrl_relpath = f"{dir_name}/{dir_name}-pinctrl.dtsi"
         v2n_defconfig_relpath = f"{dir_name}/{basename}_defconfig"
         v2n_dts_relpath = f"{dir_name}/{basename}.dts"
-        assignable = _v2n_assignable_m33(metadata_root)
+        assignable = _v2n_assignable_m33(metadata_root, soc_spec)
         files[v2n_pinctrl_relpath] = _v2n_pinctrl_dtsi(supervisor_links, assignable)
         files[v2n_defconfig_relpath] = _v2n_defconfig(supervisor_links)
         files[v2n_dts_relpath] = _v2n_dts(

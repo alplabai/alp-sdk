@@ -5,6 +5,8 @@
 #
 #   e1m-v2n-som.dtsi    on-module V2N: dual GbE PHYs, eMMC, xSPI NOR,
 #                       DRP-AI reserved memory, core rails.
+#   e1m-v2n-ownership.dtsi  GENERATED (scripts/gen_linux_ownership_dt.py): the
+#                       per-product core-ownership nodes (UART0/1, SPI0, CAN-FD).
 #   e1m-v2n-drpai.dtsi  the &drpai0 enable that claims that reserved memory.
 #                       Installed ONLY when meta-rz-drpai is in bblayers
 #                       (it creates the label); stubbed out otherwise --
@@ -61,6 +63,7 @@ export KBUILD_BUILD_HOST = "alp-sdk"
 
 SRC_URI:append = " \
     file://e1m-v2n-som.dtsi \
+    file://e1m-v2n-ownership.dtsi \
     file://e1m-x-evk.dtsi \
     file://e1m-v2m-deepx.dtsi \
     file://e1m-v2n101-x-evk.dts \
@@ -218,6 +221,7 @@ ALP_DTS_DST = "${S}/arch/arm64/boot/dts/renesas"
 do_configure:prepend() {
     install -m 0644 \
         "${WORKDIR}/e1m-v2n-som.dtsi" \
+        "${WORKDIR}/e1m-v2n-ownership.dtsi" \
         "${WORKDIR}/e1m-x-evk.dtsi" \
         "${WORKDIR}/e1m-v2m-deepx.dtsi" \
         "${WORKDIR}/e1m-v2n101-x-evk.dts" \

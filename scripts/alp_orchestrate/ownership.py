@@ -69,10 +69,30 @@ def resolve_ownership(doc: Optional[dict],
     return out
 
 
+def pad_pfc(pad: str, func: int) -> tuple[str, int, int]:
+    """("P50", 1) -> ("PORT_05", 0, 1): the RZ/V2N PFC (port, pin, func) of a
+    `P<port><pin>` pad.  The function code is a silicon fact from the SoC
+    JSON `linux_dt[soc_instance].pinmux`; only the pad spelling is parsed."""
+    if len(pad) != 3 or pad[0] != "P" or not pad[2].isdigit():
+        raise OrchestratorError(f"pad {pad!r} is not a P<port><pin> pad")
+    return f"PORT_0{pad[1]}", int(pad[2]), func
+
+
+def instance_pfc(soc: dict, entry: dict) -> list[tuple[dict, Optional[tuple[str, int, int]]]]:
+    """[(row, (port, pin, func) | None)] for an assignable entry; None where
+    the SoC `linux_dt` carries no function code for the row (never guessed)."""
+    pinmux = ((soc.get("linux_dt") or {}).get(entry.get("soc_instance")) or {}).get("pinmux") or {}
+    return [(r, pad_pfc(r["pad"], pinmux[r["peripheral"]]) if r["peripheral"] in pinmux else None)
+            for r in entry["rows"]]
+
+
 def validate_assignable(doc: dict, pinmux_pairs: set[tuple[str, str]],
-                        soc_core_types: set[str]) -> list[str]:
+                        soc_core_types: set[str],
+                        linux_dt: Optional[dict] = None) -> list[str]:
     """Metadata cross-checks: rows exist in pinmux, are not also FIXED rows,
-    default is a candidate, candidates exist on the SoM."""
+    default is a candidate, candidates exist on the SoM, `soc_instance`
+    resolves in the SoC `linux_dt` (when given), an `m33:` block has a PFC
+    function for every row."""
     msgs: list[str] = []
     fixed = {(r["peripheral"], r["pad"]) for r in doc.get("core_ownership") or []}
     seen: dict[tuple[str, str], str] = {}
@@ -91,13 +111,13 @@ def validate_assignable(doc: dict, pinmux_pairs: set[tuple[str, str]],
             if k in seen:
                 msgs.append(f"assignable.{inst}: row {k} already assigned to {seen[k]}")
             seen[k] = inst
-            if "pfc_port" in r:
-                pad = r["pad"]
-                if (len(pad) != 3 or r["pfc_port"] != f"PORT_0{pad[1]}"
-                        or str(r["pfc_pin"]) != pad[2]):
-                    msgs.append(f"assignable.{inst}: row {k} pfc_port/pfc_pin do not match the pad")
+        if linux_dt is not None:
+            if e.get("soc_instance") not in linux_dt:
+                msgs.append(f"assignable.{inst}: soc_instance {e.get('soc_instance')!r} is not a key of the SoC linux_dt")
             elif "m33" in e:
-                msgs.append(f"assignable.{inst}: has an m33: block but row {k} has no pfc_* triple")
+                missing = [r["peripheral"] for r, p in instance_pfc({"linux_dt": linux_dt}, e) if p is None]
+                if missing:
+                    msgs.append(f"assignable.{inst}: has an m33: block but linux_dt.{e['soc_instance']}.pinmux has no function for {missing}")
     return msgs
 
 
@@ -113,6 +133,10 @@ def m33_overlay(doc: Optional[dict], ownership: dict[str, str]) -> tuple[list[st
     for inst, core in sorted(ownership.items()):
         if core != "m33":
             continue
+        blocked = assignable[inst].get("hw_blocked")
+        if blocked:
+            raise OrchestratorError(
+                f"board.yaml ownership: {inst} is hardware-blocked on every core: {blocked['reason']}")
         b = assignable[inst].get("m33")
         if not b:
             raise OrchestratorError(

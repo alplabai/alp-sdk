@@ -13,7 +13,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_orchestrate import emit_system_manifest, load_board_yaml  # noqa: E402
 from alp_orchestrate.models import OrchestratorError  # noqa: E402
-from alp_orchestrate.ownership import (load_ownership_doc,  # noqa: E402
+from alp_orchestrate.ownership import (load_ownership_doc, pad_pfc,  # noqa: E402
                                        resolve_ownership, validate_assignable)
 
 DOC = load_ownership_doc(REPO / "metadata", "v2n")
@@ -108,14 +108,14 @@ def test_validate_assignable_catches_bad_metadata():
 
 def _meta_with_m33_uart0(tmp_path):
     """A metadata tree whose e1m_uart0 is m33-capable (the real one is not
-    until the P51 pull-up is bench-proven), with the PFC triples of its rows."""
+    until the P51 pull-up is bench-proven).  Its PFC functions come from the
+    real SoC linux_dt.UART0.pinmux."""
     root = tmp_path / "metadata"
     shutil.copytree(REPO / "metadata", root)
     f = root / "e1m_modules" / "v2n" / "core-ownership.yaml"
     doc = yaml.safe_load(f.read_text(encoding="utf-8"))
     e = doc["assignable"]["e1m_uart0"]
     e["candidates"] = ["a55", "m33"]
-    e["rows"] = [dict(r, pfc_port="PORT_05", pfc_pin=int(r["pad"][2]), pfc_func=1) for r in e["rows"]]
     e["m33"] = {"dt_label": "sci0", "alias": "alp-uart9", "kconfig": ["CONFIG_SERIAL=y"],
                 "pinctrl": {"group_label": "sci0_asg_pins", "node": "sci0_asg",
                             "child_node": "sci0-asg-pinmux"}}
@@ -156,20 +156,38 @@ def test_project_overlay_and_conf_enable_only_the_owner(tmp_path):
     assert project_m33_overlay(plain, "m33_sm") == ([], [])
 
 
-def test_m33_assignment_without_devicetree_block_is_a_clear_error(tmp_path):
+def test_m33_assignment_without_devicetree_block_is_a_clear_error():
+    from alp_orchestrate.ownership import m33_overlay
+    doc = {"assignable": {"e1m_x": {"default": "a55", "candidates": ["a55", "m33"]}}}
+    with pytest.raises(OrchestratorError, match="e1m_x.*no `m33:` devicetree block"):
+        m33_overlay(doc, {"e1m_x": "m33"})
+
+
+def test_real_spi0_override_to_m33_is_blocked_at_emit(tmp_path):
     from alp_orchestrate.ownership import project_m33_overlay
     proj = load_board_yaml(_project(tmp_path, {"e1m_spi0": "m33"}))
-    with pytest.raises(OrchestratorError, match="e1m_spi0.*no `m33:` devicetree block"):
+    with pytest.raises(OrchestratorError, match="e1m_spi0 is hardware-blocked"):
         project_m33_overlay(proj, "m33_sm")
 
 
-def test_validate_assignable_pfc_must_match_pad_and_exist_for_m33_blocks():
+def test_validate_assignable_soc_instance_and_m33_pfc():
     pairs = {("X", "P50")}
-    ok = {"assignable": {"i": {"default": "a55", "candidates": ["a55"],
-          "rows": [{"peripheral": "X", "pad": "P50", "pfc_port": "PORT_05", "pfc_pin": 0, "pfc_func": 1}]}}}
-    assert validate_assignable(ok, pairs, {"cortex-a55"}) == []
-    ok["assignable"]["i"]["rows"][0]["pfc_pin"] = 1
-    assert "do not match the pad" in "\n".join(validate_assignable(ok, pairs, {"cortex-a55"}))
-    m33 = {"assignable": {"i": {"default": "a55", "candidates": ["a55"], "m33": {},
+    doc = {"assignable": {"i": {"soc_instance": "UART0", "default": "a55", "candidates": ["a55"],
            "rows": [{"peripheral": "X", "pad": "P50"}]}}}
-    assert "no pfc_* triple" in "\n".join(validate_assignable(m33, pairs, {"cortex-a55"}))
+    ok = {"UART0": {"label": "sci0", "pinmux": {"X": 1}}}
+    assert validate_assignable(doc, pairs, {"cortex-a55"}, ok) == []
+    assert "not a key of the SoC linux_dt" in "\n".join(
+        validate_assignable(doc, pairs, {"cortex-a55"}, {}))
+    doc["assignable"]["i"]["m33"] = {}
+    assert "no function for ['X']" in "\n".join(
+        validate_assignable(doc, pairs, {"cortex-a55"}, {"UART0": {"label": "sci0"}}))
+    assert pad_pfc("P50", 1) == ("PORT_05", 0, 1) and pad_pfc("P96", 2) == ("PORT_09", 6, 2)
+
+
+def test_hw_blocked_instance_cannot_be_enabled_on_m33(tmp_path):
+    from alp_orchestrate.ownership import m33_overlay
+    doc = {"assignable": {"e1m_spi0": {"hw_blocked": {"reason": "P90-P92 not 3.3 V tolerant"},
+                                       "m33": {"dt_label": "rspi0", "alias": "alp-spi2"}}}}
+    with pytest.raises(OrchestratorError, match="hardware-blocked.*3.3 V"):
+        m33_overlay(doc, {"e1m_spi0": "m33"})
+    assert DOC["assignable"]["e1m_spi0"]["hw_blocked"]["reason"]

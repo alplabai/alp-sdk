@@ -201,10 +201,18 @@ not 3.3 V tolerant.
 
 Overrides naming a core the project does not declare under `cores:` are
 rejected. The CM33 board tree declares an assignable node `disabled` (pinctrl
-from the metadata rows) once the entry carries an `m33:` block; a project that
-assigns it to `m33` enables it through `--emit dts-overlay` / `zephyr-conf`.
-No entry has that block yet (RSPI0/CAN-FD PFC functions are not in metadata),
-so assigning `e1m_spi0` to `m33` stops at emit with an explicit error.
+from the metadata rows and the SoC `linux_dt` PFC codes) once the entry carries
+an `m33:` block; a project that assigns it to `m33` enables it through
+`--emit dts-overlay` / `zephyr-conf`. No entry has that block yet (RSPI0/CAN-FD
+PFC codes are not in metadata), so assigning an instance without one to `m33`
+stops at emit with an explicit error. `e1m_spi0` is additionally `hw_blocked`
+(P90-P92 not 3.3 V tolerant) and is refused on every core.
+
+The Linux tree follows the SoM defaults through the generated
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi`
+(`scripts/gen_linux_ownership_dt.py`): today `&sci0` is enabled for
+`e1m_uart0` on P50/P51; UART1 and both CAN-FD instances wait for their PFC
+function codes in `n44.json` `linux_dt`; `&rspi0` stays disabled.
 
 ## Boot + identification
 

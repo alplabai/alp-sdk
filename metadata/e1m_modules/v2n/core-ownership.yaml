@@ -362,6 +362,7 @@ core_ownership:
 # backend TODAY; widen it only when the backend lands.
 assignable:
   e1m_uart0:
+    soc_instance: "UART0"
     default: "a55"
     # "m33" is added once the P51 (UART0_RXD0) RX pull-up is bench-proven:
     # an unpulled RXD floats into the sci0 receive-error ISR (NVIC 114) and
@@ -373,6 +374,7 @@ assignable:
       - { peripheral: "UART0_TXD0", pad: "P50" }
     note: "Only one core's tree may carry the sci0 pin group on P50/P51 (audit IO-M3 / IO-04 / CM33-01)."
   e1m_uart1:
+    soc_instance: "UART1"
     default: "a55"
     # The CM33 board tree has no sci1 node or pinctrl group for P52/P53, so
     # there is no CM33 backend for this instance today.
@@ -382,6 +384,12 @@ assignable:
       - { peripheral: "UART1_TXD1", pad: "P52" }
     note: "Audit IO-M3 / CM33-01."
   e1m_spi0:
+    soc_instance: "RSPI0"
+    # P90-P92 are not 3.3 V tolerant (see note): no core may enable the node
+    # until the carrier is confirmed 1.8 V.  Drop this block (with evidence)
+    # to release it; the Linux and Zephyr generators both honour it.
+    hw_blocked:
+      reason: "P90-P92 are not 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1) and the carrier parts on E1M SPI0 are not yet confirmed 1.8 V (audit IO-05 / IO-M2 / CM33-13)"
     default: "a55"
     # m33: zephyr/drivers/spi/spi_renesas_rz_spi_b.c + hal_renesas rzv r_spi_b.
     candidates: ["a55", "m33"]
@@ -393,6 +401,7 @@ assignable:
       - { peripheral: "RSPI0_SSLA1", pad: "P94" }
     note: "P90-P92 are NOT 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1): never enable an rspi0 node on either core until the carrier parts on E1M SPI0 are confirmed not to drive 3.3 V (audit IO-05 / IO-M2 / CM33-13)."
   e1m_can0:
+    soc_instance: "CANFD3"
     default: "a55"
     # a55 only: hal_renesas rzv has no r_canfd module, so the CM33 cannot
     # drive CAN-FD.  E1M CAN0 = CANFD3 (B21/B22).
@@ -402,6 +411,7 @@ assignable:
       - { peripheral: "CANFD3_CTX3", pad: "P86" }
     note: "Audit CM33-07 / CAN-1; the Linux tree does not claim these pads yet."
   e1m_can1:
+    soc_instance: "CANFD2"
     default: "a55"
     candidates: ["a55"]
     rows:

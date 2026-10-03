@@ -2135,7 +2135,7 @@ def _check_core_ownership(path: Path) -> list:
                               source=SOM_PRESETS / "E1M-V2N101.yaml")
     soc = json.loads(resolve_soc_path(str(preset["silicon"]), SOM_PRESETS.parent).read_text(encoding="utf-8"))
     types = {c.get("type") for c in _dict_entries(soc.get("cores"))}
-    msgs = validate_assignable(doc, pairs, types)
+    msgs = validate_assignable(doc, pairs, types, soc.get("linux_dt") or {})
     if msgs:
         print(f"FAIL {rel}")
         for m in msgs:

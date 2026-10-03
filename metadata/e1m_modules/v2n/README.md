@@ -70,15 +70,33 @@ rzv); `e1m_spi0` pads P90-P92 are not 3.3 V tolerant -- enable no rspi0 node
 on either core until the carrier parts are confirmed safe.
 
 An override naming a core the project does not declare under `cores:` is
-rejected too.  Zephyr side: an entry may carry an `m33:` block (`dt_label`,
-`alias`, `kconfig`, `pinctrl` names) plus a `pfc_port`/`pfc_pin`/`pfc_func`
-triple on every row.  `gen_zephyr_board.py` then emits that node `disabled`
-with the pinctrl group built from the rows, and only a project that assigns
-the instance to `m33` gets it `okay` + the alias + the `kconfig` lines from
-`--emit dts-overlay` / `zephyr-conf`.  No entry carries an `m33:` block yet:
-the PFC function numbers for the RSPI0 and CAN-FD pads and the SPI_B CM33
-interrupt routing are not in metadata, so an `m33` assignment of `e1m_spi0`
-fails at emit with a message saying so.  The GD32 link (SCI7) stays enabled
+rejected too.  Each entry names its `soc_instance`, the key of the SoC JSON
+`linux_dt` map (`metadata/socs/renesas/rzv2n/n44.json`) that supplies the
+Linux node `label`, the PFC function codes (`pinmux`, by row peripheral name;
+the pad's port/pin is parsed from the row) and the CPG clock names
+(`cpg_clocks`).  A function code absent there is never guessed: the generators
+report a gap.  `hw_blocked: {reason}` keeps an instance disabled on EVERY core
+(`e1m_spi0` today: P90-P92 are not 3.3 V tolerant).
+
+Zephyr side: an entry may carry an `m33:` block (`dt_label`, `alias`,
+`kconfig`, `pinctrl` names).  `gen_zephyr_board.py` then emits that node
+`disabled` with the pinctrl group built from the rows + `linux_dt` codes, and
+only a project that assigns the instance to `m33` gets it `okay` + the alias
++ the `kconfig` lines from `--emit dts-overlay` / `zephyr-conf`.  No entry
+carries an `m33:` block yet: the PFC codes for the RSPI0 and CAN-FD pads and
+the SPI_B CM33 interrupt routing are not in metadata, so an `m33` assignment
+of an instance without one fails at emit with a message saying so.
+
+Linux side: `scripts/gen_linux_ownership_dt.py` projects the SoM defaults into
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi`
+(generated, included from `e1m-v2n-som.dtsi`, installed by the linux-renesas
+bbappend).  An a55-owned instance with a complete PFC code set gets `status =
+"okay"` and a pinctrl group (today only `e1m_uart0` / `&sci0`); instances with
+missing codes (`e1m_uart1`, `e1m_can0`, `e1m_can1`) are a GAP comment and
+`e1m_spi0` stays disabled with its `hw_blocked` reason.  The fragment follows
+the SoM default, not a project's `ownership:` override.  `--vendor-dtsi
+<r9a09g056.dtsi>` verifies the referenced node labels exist in the kernel
+tree.  The GD32 link (SCI7) stays enabled
 on the board, not per project: moving it to the overlay would break every
 plain `west build` that does not run the emitter.
 
