@@ -1,0 +1,114 @@
+From: Alp Lab AB
+Subject: [PATCH] rzv2n: read the CM33 image from xSPI in every boot mode
+
+With PLAT_M33_BOOT_SUPPORT=1 (patch 0001) BL2 starts the CM33 in every boot
+mode, but the vendor BL22 source follows the boot device: xSPI 0x200000 for
+xSPI boot, byte 0x200000 (sector 0x1000) of the enabled eMMC boot partition
+for eMMC boot, byte 0x200000 of the card for eSD boot. The ALP flow keeps the
+CM33 image only in xSPI (mtd1 + 0x1a0000) and never writes the eMMC boot
+partition there, so under eMMC boot (DSW1 mode 1, bl2_bp_mmc) BL2 loaded
+unwritten boot-partition bytes to SRAM 0x08000000 and released the CM33 at
+0x08003000 into them (#2658).
+
+Read BL22 from the memory-mapped xSPI window in every boot mode, and for
+eMMC/eSD boot also set up the xSPI controller and open the memmap device,
+which the vendor code did only for xSPI boot. cpg_setup() already releases the
+xSPI clock, reset and MSTOP in every boot mode, the BL2 MMU maps the xSPI
+window, and the xSPI TZC region is set in every boot mode.
+
+BL2 logs the result of xspi_setup() as "BL2: xSPI for BL22, id 0x%x": the
+flash device id (low 24 bits), 0 or 0xffffff when no device answered, or
+0xffffffff when the xSPI reset command failed. A bench log therefore shows
+whether xSPI came up in eMMC/eSD boot.
+
+Verification status:
+- Build-verified: compiles into bl2.bin for e1m-v2m103-a55 (bitbake,
+  alplab-gw); both bl2_bp_spi and bl2_bp_mmc are cut from that one bl2.bin.
+- NOT bench-verified: the CM33 running under eMMC boot (DSW1 mode 1) and
+  under eSD boot, and that xSPI boot (DSW1 mode 2) still starts the CM33.
+
+Upstream-Status: Inappropriate [ALP E1M-V2N/V2M SoM configuration]
+Signed-off-by: Alp Lab AB
+---
+--- a/plat/renesas/rz/soc/v2n/plat_storage.c
++++ b/plat/renesas/rz/soc/v2n/plat_storage.c
+@@ -167,31 +167,17 @@
+ 	.length = RZV2N_M33_FW_SIZE,
+ };
+ 
+-static const io_block_spec_t emmc_bl22_image_spec = {
+-	.offset = RZV2N_EMMC_M33_FW_BASE,
+-	.length = RZV2N_M33_FW_SIZE,
+-};
+-
+-static const io_block_spec_t sd_bl22_image_spec = {
+-	.offset = RZV2N_SD_M33_FW_BASE,
+-	.length = RZV2N_M33_FW_SIZE,
+-};
+-
+-static const struct plat_io_policy emmc_bl22_image_policy = {
+-	&emmcdrv_dev_handle,
+-	(uintptr_t) &emmc_bl22_image_spec,
+-	&open_emmcdrv
+-};
++/*
++ * The CM33 image has one home in every boot mode: xSPI 0x200000. The vendor
++ * eMMC/eSD policies read RZV2N_EMMC/SD_M33_FW_BASE (0x200000 of the boot
++ * device), which the ALP provisioning flow never writes, so BL2 released the
++ * CM33 into whatever bytes were there.
++ */
+ static const struct plat_io_policy spirom_bl22_image_policy = {
+ 	&memdrv_dev_handle,
+ 	(uintptr_t) &spirom_bl22_image_spec,
+ 	&open_memmap
+ };
+-static const struct plat_io_policy sd_bl22_image_policy = {
+-	&sddrv_dev_handle,
+-	(uintptr_t) &sd_bl22_image_spec,
+-	&open_sddrv
+-};
+ #endif /* PLAT_M33_BOOT_SUPPORT */
+ 
+ static struct plat_io_policy policies[MAX_NUMBER_IDS] = {
+@@ -313,7 +299,7 @@
+ 		policies[V2N_DDR_CONFIG_ID]	= emmc_ddr_config_policy;
+ #endif
+ #if PLAT_M33_BOOT_SUPPORT
+-		policies[BL22_IMAGE_ID]		= emmc_bl22_image_policy;
++		policies[BL22_IMAGE_ID]		= spirom_bl22_image_policy;
+ #endif
+ 		break;
+ 	case SYS_BOOT_MODE_ESD:
+@@ -322,7 +308,7 @@
+ 		policies[V2N_DDR_CONFIG_ID]	= sd_ddr_config_policy;
+ #endif
+ #if PLAT_M33_BOOT_SUPPORT
+-		policies[BL22_IMAGE_ID]		= sd_bl22_image_policy;
++		policies[BL22_IMAGE_ID]		= spirom_bl22_image_policy;
+ #endif
+ 		break;
+ 	default:
+@@ -385,6 +371,23 @@
+ 		panic();
+ 	}
+ 
++#if PLAT_M33_BOOT_SUPPORT
++	/*
++	 * eMMC/eSD boot: bring up the xSPI memory-mapped window for the BL22
++	 * read. cpg_setup() already released the xSPI clock, reset and MSTOP
++	 * in every boot mode; only the controller set-up was SPI-boot only.
++	 */
++	if (boot_mode != SYS_BOOT_MODE_SPI_1_8 &&
++		boot_mode != SYS_BOOT_MODE_SPI_3_3) {
++		/* xspi_setup() returns the device id (low 24 bits), or -1 if the reset failed */
++		unsigned int xspi_id = (unsigned int)xspi_setup();
++
++		NOTICE("BL2: xSPI for BL22, id 0x%x\n", xspi_id);
++		register_io_dev_memmap(&memmap);
++		io_dev_open(memmap, 0, &memdrv_dev_handle);
++	}
++#endif /* PLAT_M33_BOOT_SUPPORT */
++
+ 	update_dev_policies(boot_mode);
+ }
+ 
