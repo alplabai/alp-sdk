@@ -19,10 +19,12 @@ external-probe alternative see
 * SWDIO (`P70`) + SWCLK (`P71`) + **NRST (`P74`, mandatory)** routed from
   the Renesas RZ/V2N to the GD32's SWD pads.  The 2026-05-12 hardware
   decision committed the V2N board to this routing; the CM33 boards publish
-  the three pads in their `alp,gd32-pads` devicetree node, opened with
-  `alp_gpio_open(GD32G553_PAD_ID_SWDIO / _SWCLK / _NRST)` -- never by an
-  index into the positional pin array (index 0 of that array is the GD32 SPI
-  chip-select).
+  the three pads in their `alp,gd32-pads` devicetree node, reached through
+  the reserved ids `GD32G553_PAD_ID_*` -- never by an index into the
+  positional pin array (index 0 of that array is the GD32 SPI chip-select).
+  The portable `alp_gpio_open()` **refuses** those ids; only the SWD driver
+  (and the V2N supervisor, for ATTN) opens them, so application code passes
+  no pin handles.
 * A known-good bridge firmware ELF to flash.
 
 ## P71 has two roles -- why NRST comes first
@@ -34,19 +36,24 @@ granted.  The host therefore keeps `P71` an **input** (with a rising-edge
 interrupt) in every boot stage and drives it as an output only here, and only
 while `GD32_NRST` (`P74`) holds the GD32 in reset -- a reset clears every link
 feature and returns `PA14` to SWCLK.  Recovery without `NRST` is not
-supported: `gd32_swd_init()` returns `ALP_ERR_INVAL` for a NULL `nrst`.
+supported: the driver opens `P70`/`P71`/`P74` itself and `gd32_swd_init()`
+fails (`ALP_ERR_NOT_READY`) on a board that does not publish all three.
 
 The driver does this as **connect-under-reset**:
 
 1. `gd32_swd_init()` closes the SPI bridge link and keeps it closed (the
    V2N supervisor answers every bridge command `ALP_ERR_BUSY` and will not
    re-initialise or renegotiate until `gd32_swd_deinit()`), asserts `NRST`
-   (and fails if it cannot), and only then makes `P70`/`P71` outputs;
+   (switched to an output with an **initial low** level -- never driven high,
+   not even briefly -- and failing if it cannot), and only then makes
+   `P70`/`P71` outputs;
 2. `NRST` stays asserted through `gd32_swd_connect()`: line reset,
    JTAG-to-SWD switch, DPIDR, debug power-up, then `DHCSR.C_DEBUGEN` and
    `DEMCR.VC_CORERESET` (halt on the reset vector) -- and only then `NRST`
-   is released.  The core stops at its reset vector, `PA13`/`PA14` are still
-   SWD, no application code has run, so `ATTN` cannot have been granted;
+   is released and `DHCSR.S_HALT` is read back: if the core did not halt,
+   `NRST` is asserted again and the connect fails.  The core stops at its reset
+   vector, `PA13`/`PA14` are still SWD, no application code has run, so `ATTN`
+   cannot have been granted;
 3. `gd32_swd_deinit()` releases `NRST`, returns `P70`/`P71` to inputs and
    ends the session; the supervisor's next init re-arms `P71` as input +
    interrupt and renegotiates the bridge from scratch.
@@ -59,8 +66,8 @@ low to assert, input (hi-Z) to release -- and never drives the pad high.
 
 ```c
 gd32_swd_t swd;
-/* NRST is mandatory (NULL -> ALP_ERR_INVAL).  Asserts NRST FIRST. */
-gd32_swd_init(&swd, swdio_pin, swclk_pin, nrst_pin);
+/* No pin handles: the driver opens its own pads.  Asserts NRST FIRST. */
+gd32_swd_init(&swd);
 
 /* 1. Link up -- line reset + JTAG-to-SWD switch + DPIDR read, then halt-on-reset
  *    is armed and NRST released: the core stops at its reset vector. */
@@ -89,7 +96,8 @@ gd32_swd_flash_write(&swd, GD32_SWD_FMC_FLASH_BASE, image_bytes, image_size);
 /* 5. Read back and compare. */
 gd32_swd_flash_verify(&swd, GD32_SWD_FMC_FLASH_BASE, image_bytes, image_size);
 
-/* 6. Hand control back to the chip (disarms halt-on-reset, pulses NRST). */
+/* 6. Hand control back to the chip (disarms halt-on-reset; with NRST held the
+ *    pads go back to inputs, THEN NRST is released). */
 gd32_swd_reset_and_run(&swd);
 
 /* 7. End the session: P70/P71 back to inputs, bridge link allowed again. */

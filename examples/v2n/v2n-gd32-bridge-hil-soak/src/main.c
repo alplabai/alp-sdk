@@ -26,13 +26,12 @@
  * cycle and a cumulative table every 16 cycles; any FAIL line carries
  * the alp_status_t so a console log alone is diagnosable.
  *
- * Protocol v0.15 rows (adc_stream2, batch, attn) are SELF-GATING: the
- * driver negotiates the v0.15 link features at init (BIG_FRAME, BATCH,
- * ADC_STREAM2 and, when this example's P71 interrupt hook works, ATTN),
- * and a row whose feature the peer did not grant just passes -- so the
- * same binary soaks a v0.14 bridge (legacy rows only) and a v0.15 one
- * (legacy rows plus the new wire, with every command's reply awaited on
- * the ATTN edge instead of a timed staging gap).
+ * Protocol v0.15 rows (adc_stream2, batch) are SELF-GATING: the
+ * driver negotiates the v0.15 link features at init (STATUS_SEQ,
+ * BIG_FRAME, ADC_STREAM2, BATCH), and a row whose feature the peer did not
+ * grant just passes -- so the same binary soaks a v0.14 bridge (legacy
+ * rows only) and a v0.15 one (legacy rows plus the new wire).  ATTN is not
+ * requested here: see the note below.
  */
 
 #include <stdio.h>
@@ -62,96 +61,13 @@ static gd32g553_t ctx;
 
 /* ------------------------------------------------------------------ */
 /* ATTN (protocol v0.15): the GD32 raises PA14 -- Renesas P71 -- once a */
-/* reply is armed, so the host can wait for an edge instead of a timed  */
-/* staging gap.  The chip driver is platform-agnostic: it only wants    */
-/* three callbacks (clock, time-stamped edge wait, read the level),      */
-/* which this app builds from the portable GPIO API plus a Zephyr       */
-/* semaphore.  (The V2N supervisor singleton does the same for the     */
-/* portable peripherals; this soak drives the chip driver directly.)    */
-/*                                                                      */
-/* Rules the host must keep (docs/gd32-bridge-protocol.md section 3.17):*/
-/*   - P71 is an INPUT with a rising-edge IRQ BEFORE ATTN is requested; */
-/*   - P71 is never driven as an output here -- it is the GD32's SWCLK  */
-/*     whenever ATTN is off, and only the SWD recovery path may drive   */
-/*     it, with GD32_NRST asserted first.                               */
+/* reply is armed.  The data-ready line is NOT exercised here: the pad  */
+/* ids that name it (GD32G553_PAD_ID_*) are RESERVED for the V2N        */
+/* supervisor singleton and the SWD driver -- the portable GPIO open    */
+/* refuses them -- so this chip-driver soak registers no ATTN hook and  */
+/* runs on the staging-gap path.  ATTN rides under every portable       */
+/* alp_pwm / alp_adc / ... call through the supervisor instead.         */
 /* ------------------------------------------------------------------ */
-
-/* The ATTN pad comes from the board's dedicated `alp,gd32-pads` devicetree
- * node through a reserved id -- NOT from the positional alp_pins array, whose
- * index 0 is the GD32 SPI chip-select. */
-#define SOAK_ATTN_PAD_ID GD32G553_PAD_ID_ATTN
-
-static alp_gpio_t       *attn_pin;
-static bool              attn_hook_ready;
-static struct k_sem      attn_sem;    /* an ISR give, a thread take */
-static volatile uint32_t attn_edge_t; /* cycle counter at the last edge */
-
-static void attn_isr(alp_gpio_t *pin, void *user)
-{
-	(void)pin;
-	(void)user;
-	attn_edge_t = k_cycle_get_32(); /* stamp the edge, then wake the waiter */
-	k_sem_give(&attn_sem);          /* ISR-safe */
-}
-
-/* The clock the edges are stamped on.  The driver reads it just before it
- * clocks a request and ignores any edge stamped earlier: an event edge that
- * was still latched cannot be mistaken for the reply. */
-static uint32_t attn_now(void *user)
-{
-	(void)user;
-	return k_cycle_get_32();
-}
-
-/* Block until the next rising edge (interrupt + semaphore -- the driver
- * forbids polling) and report its time-stamp, or time out so the driver can
- * fall back to the 0.14 ladder. */
-static alp_status_t attn_wait(void *user, uint32_t timeout_ms, uint32_t *t_edge)
-{
-	(void)user;
-	if (k_sem_take(&attn_sem, K_MSEC(timeout_ms)) != 0) return ALP_ERR_TIMEOUT;
-	*t_edge = attn_edge_t;
-	return ALP_OK;
-}
-
-/* Optional: lets the driver spot a line stuck high. */
-static alp_status_t attn_level(void *user, bool *high)
-{
-	(void)user;
-	return alp_gpio_read(attn_pin, high);
-}
-
-static const gd32g553_attn_hook_t attn_hook = {
-	.now        = attn_now,
-	.wait       = attn_wait,
-	.read_level = attn_level,
-};
-
-/* Open P71 as an input + rising-edge IRQ.  Best effort: a platform GPIO
- * driver with no interrupt route for the pad just leaves ATTN off and the
- * soak runs on the staging-gap path. */
-static void attn_hook_setup(void)
-{
-	k_sem_init(&attn_sem, 0, 1);
-	attn_pin = alp_gpio_open(SOAK_ATTN_PAD_ID);
-	if (attn_pin == NULL) {
-		printf("[hil-soak] ATTN: pad not published by the board (err=%d) -- staging-gap path\n",
-		       (int)alp_last_error());
-		return;
-	}
-	if (alp_gpio_configure(attn_pin, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE) != ALP_OK ||
-	    alp_gpio_irq_enable(attn_pin, ALP_GPIO_EDGE_RISING, attn_isr, NULL) != ALP_OK) {
-		printf("[hil-soak] ATTN: no interrupt for P71 -- staging-gap path\n");
-		alp_gpio_close(attn_pin);
-		attn_pin = NULL;
-		return;
-	}
-	attn_hook_ready = true;
-}
-
-/* Was ATTN active after the last link init?  The attn row fails if it
- * silently turns off later. */
-static bool attn_was_active;
 
 /* Version captured at init -- GET_VERSION must keep matching it
  * (a mid-soak change would mean the GD32 silently rebooted). */
@@ -573,29 +489,6 @@ static bool t_batch(soak_stat_t *st)
 		          (int)ops[2].status,
 		          (unsigned)ops[1].reply_len,
 		          (unsigned)ops[2].reply_len);
-		return false;
-	}
-	return true;
-}
-
-/* v0.15 ATTN health.  Every command above is already AWAITED on the ATTN
- * edge when the line is active, so any breakage shows up as a lost edge
- * and a fallback to the 0.14 drain rule -- the driver counts it
- * (ctx.attn_timeouts) and after three in a row, or three stuck-high
- * readings, withdraws ATTN and renegotiates without it.  That recovery is
- * correct behaviour, but a SOAK should not let it pass silently: if ATTN
- * was active after init and is gone now, fail the row and say why. */
-static bool t_attn(soak_stat_t *st)
-{
-	if (!attn_was_active)
-		return true; /* never granted: v0.14 peer, debugger attached,
-	                                    * stub backend, or no P71 interrupt route */
-	if (!ctx.attn_active) {
-		SOAK_FAIL(st,
-		          "ATTN dropped mid-soak (lost edges=%u stuck-high=%u unusable=%d)",
-		          (unsigned)ctx.attn_timeouts,
-		          (unsigned)ctx.attn_stuck,
-		          (int)ctx.attn_unusable);
 		return false;
 	}
 	return true;
@@ -1043,7 +936,6 @@ static struct {
 	/* protocol v0.15 -- self-gating on the negotiated link features */
 	{ { "adc_stream2", 0, 0, 0 }, t_adc_stream2, false },
 	{ { "batch", 0, 0, 0 }, t_batch, false },
-	{ { "attn", 0, 0, 0 }, t_attn, false },
 };
 
 #define SOAK_TEST_COUNT (sizeof tests / sizeof tests[0])
@@ -1061,18 +953,16 @@ static void link_init_blocking(alp_spi_t *spi)
 	unsigned     attempt = 0;
 	alp_status_t s;
 	do {
-		/* init_ex = init + the v0.15 link-feature negotiation, with the
-		 * ATTN hook when one was set up (NULL = never request ATTN). */
-		s = gd32g553_init_ex(
-		    &ctx, spi, NULL, GD32G553_BRIDGE_DEFAULT_I2C_ADDR, attn_hook_ready ? &attn_hook : NULL);
+		/* init_ex = init + the v0.15 link-feature negotiation.  No ATTN hook
+		 * (see above): STATUS_SEQ | BIG_FRAME | ADC_STREAM2 | BATCH only. */
+		s = gd32g553_init_ex(&ctx, spi, NULL, GD32G553_BRIDGE_DEFAULT_I2C_ADDR, NULL);
 		if (s != ALP_OK) {
 			printf(
 			    "[hil-soak] init attempt %u failed: %d -- retrying in 200 ms\n", attempt++, (int)s);
 			k_msleep(200);
 		}
 	} while (s != ALP_OK);
-	boot_version    = ctx.version;
-	attn_was_active = ctx.attn_active;
+	boot_version = ctx.version;
 	printf("[hil-soak] link features granted=0x%02X max_payload=%u ATTN=%s\n",
 	       (unsigned)ctx.granted,
 	       (unsigned)ctx.max_payload,
@@ -1107,8 +997,6 @@ int main(void)
 		return 1;
 	}
 
-	/* P71 -> input + rising-edge IRQ BEFORE the first handshake (rule H2). */
-	attn_hook_setup();
 	link_init_blocking(spi);
 
 	/* Settle past the host's boot window before the heavy soak: during

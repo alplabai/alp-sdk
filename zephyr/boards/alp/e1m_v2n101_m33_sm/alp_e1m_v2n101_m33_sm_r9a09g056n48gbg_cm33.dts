@@ -68,8 +68,8 @@
 	/*
 	 * The GD32 control pads outside the SPI link (protocol v0.15, section 3.17).
 	 * A DEDICATED node, deliberately not entries of alp_pins above (whose index 0
-	 * is the GD32 SPI chip-select): resolved through
-	 * alp_gpio_open(GD32G553_PAD_ID_*) only.  All four are plain GPIO, inputs out of
+	 * is the GD32 SPI chip-select): resolved only through the INTERNAL pad opener
+	 * (the portable alp_gpio_open() refuses GD32G553_PAD_ID_*).  All four are plain GPIO, inputs out of
 	 * reset.  swclk and attn are the SAME pad (P71 = GD32 PA14): the host drives it
 	 * only inside an SWD session, with GD32_NRST asserted first, and otherwise uses
 	 * it as the bridge ATTN input with a rising-edge IRQ.  nrst is open-drain on the

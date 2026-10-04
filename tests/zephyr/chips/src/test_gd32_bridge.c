@@ -368,19 +368,9 @@ ZTEST(alp_chips, test_gd32g553_v02_invalid_args)
 
 ZTEST(alp_chips, test_gd32_swd_init_null_args)
 {
-	gd32_swd_t  ctx;
-	alp_gpio_t *bogus = (alp_gpio_t *)0xDEADBEEFu;
-
-	/* NULL ctx -> INVAL.  Even with non-NULL pin handles. */
-	zassert_equal(gd32_swd_init(NULL, bogus, bogus, NULL), ALP_ERR_INVAL);
-	/* NULL swdio -> INVAL. */
-	zassert_equal(gd32_swd_init(&ctx, NULL, bogus, NULL), ALP_ERR_INVAL);
-	/* NULL swclk -> INVAL. */
-	zassert_equal(gd32_swd_init(&ctx, bogus, NULL, NULL), ALP_ERR_INVAL);
-	/* NULL nrst is allowed (boards that don't route it work via
-     * AIRCR.SYSRESETREQ).  Not asserted here -- the gpio_emul-backed
-     * init would still try alp_gpio_configure on the two bogus
-     * pointers, which is not a contract this layer tests. */
+	/* The driver opens its own pads (the portable alp_gpio_open() refuses the
+	 * reserved GD32 pad ids), so the only argument is the context. */
+	zassert_equal(gd32_swd_init(NULL), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_chips, test_gd32_swd_calls_reject_uninitialised)

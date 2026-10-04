@@ -33,7 +33,9 @@ static struct alp_gpio P_SWDIO = { 0 }, P_SWCLK = { 1 }, P_NRST = { 2 };
 
 enum ev_type {
 	EV_NOTIFY,      /* val = active */
-	EV_CFG,         /* pin, val = direction (1 = output) */
+	EV_CFG,         /* pin, val = direction (1 = output): a PLAIN configure */
+	EV_CFG_LOW,     /* pin: switched to an OUTPUT with an INITIAL LOW level */
+	EV_CLOSE,       /* pin closed */
 	EV_NRST_WRITE,  /* val = level */
 	EV_SWCLK_FIRST, /* first SWCLK write of the session */
 	EV_MEMW,        /* pin = unused, addr/val of a target memory write */
@@ -46,7 +48,7 @@ struct ev {
 	uint32_t     val;
 };
 
-#define EV_MAX 64
+#define EV_MAX 16384
 static struct ev g_ev[EV_MAX];
 static unsigned  g_nev;
 static bool      g_swclk_seen;
@@ -78,7 +80,9 @@ static int find_memw(uint32_t addr)
 /* ---- failure injection ------------------------------------------------------ */
 
 static bool     g_fail_nrst_write;
-static bool     g_fail_mem; /* the target FAULTs writes to g_fail_addr */
+static bool     g_missing_pad; /* the board does not publish the pads */
+static bool     g_no_halt;     /* the core ignores halt-on-reset */
+static bool     g_fail_mem;    /* the target FAULTs writes to g_fail_addr */
 static uint32_t g_fail_addr;
 
 /* ---- bit-level SW-DP target -------------------------------------------------- */
@@ -104,6 +108,8 @@ static struct {
 	uint8_t    addr;
 	/* registers */
 	uint32_t ctrlstat, select, csw, tar, rdbuff;
+	bool     vc_armed; /* DEMCR.VC_CORERESET written */
+	bool     halted;   /* the core stopped at its reset vector */
 } T;
 
 static bool parity32_t(uint32_t v)
@@ -137,8 +143,9 @@ static void decode_header(void)
 			          : (T.addr == 0x0Cu) ? T.rdbuff
 			                              : 0u;
 		} else {
-			T.rdata  = 0u; /* AP reads are pipelined: the real value comes via RDBUFF */
-			T.rdbuff = 0u;
+			T.rdata = 0u; /* AP reads are pipelined: the real value comes via RDBUFF */
+			/* DHCSR reads S_HALT (bit 17) once the core stopped at the vector. */
+			T.rdbuff = (T.addr == 0x0Cu && T.tar == 0xE000EDF0u && T.halted) ? (1u << 17) | 1u : 0u;
 		}
 	}
 }
@@ -152,7 +159,10 @@ static void apply_write(void)
 	}
 	if (T.addr == 0x00u) T.csw = T.wdata;
 	if (T.addr == 0x04u) T.tar = T.wdata;
-	if (T.addr == 0x0Cu) log_ev(EV_MEMW, 0, T.tar, T.wdata);
+	if (T.addr == 0x0Cu) {
+		log_ev(EV_MEMW, 0, T.tar, T.wdata);
+		if (T.tar == 0xE000EDFCu && (T.wdata & 1u)) T.vc_armed = true;
+	}
 }
 
 static void on_rising(void)
@@ -267,6 +277,9 @@ alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pu
 	(void)pull;
 	log_ev(EV_CFG, pin->id, 0u, (dir == ALP_GPIO_OUTPUT) ? 1u : 0u);
 	if (pin == &P_SWDIO) T.host_drives = (dir == ALP_GPIO_OUTPUT);
+	/* NRST released (high-impedance): a core armed for halt-on-reset stops at
+	 * its vector (unless the test says it does not). */
+	if (pin == &P_NRST && dir == ALP_GPIO_INPUT) T.halted = T.vc_armed && !g_no_halt;
 	return ALP_OK;
 }
 
@@ -296,6 +309,40 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
 	return ALP_OK;
 }
 
+/* The platform pad seam (src/zephyr/gd32_swd_pads.c in the real tree): the
+ * driver opens its own pads, and switches NRST to an output with an INITIAL LOW
+ * level in one step so the shared open-drain net is never driven high. */
+static alp_gpio_t *mock_open_pad(uint32_t pad_id)
+{
+	if (g_missing_pad) return NULL;
+	return (pad_id == GD32G553_PAD_ID_SWDIO)   ? &P_SWDIO
+	       : (pad_id == GD32G553_PAD_ID_SWCLK) ? &P_SWCLK
+	       : (pad_id == GD32G553_PAD_ID_NRST)  ? &P_NRST
+	                                           : NULL;
+}
+
+static alp_status_t mock_configure_output_low(alp_gpio_t *pad)
+{
+	log_ev(EV_CFG_LOW, pad->id, 0u, 0u);
+	return ALP_OK;
+}
+
+static void mock_close_pad(alp_gpio_t *pad)
+{
+	log_ev(EV_CLOSE, pad->id, 0u, 0u);
+}
+
+static const gd32_swd_platform_t g_mock_platform = {
+	.open_pad             = mock_open_pad,
+	.configure_output_low = mock_configure_output_low,
+	.close_pad            = mock_close_pad,
+};
+
+const gd32_swd_platform_t *gd32_swd_platform(void)
+{
+	return &g_mock_platform;
+}
+
 /* The platform session hook (the V2N supervisor in the real tree). */
 void gd32_swd_session_notify(bool active)
 {
@@ -309,6 +356,8 @@ static void each_before(void *unused)
 	(void)unused;
 	g_nev             = 0u;
 	g_swclk_seen      = false;
+	g_missing_pad     = false;
+	g_no_halt         = false;
 	g_fail_nrst_write = false;
 	g_fail_mem        = false;
 	target_reset();
@@ -318,29 +367,47 @@ ZTEST_SUITE(gd32_swd_connect_under_reset, NULL, NULL, each_before, NULL, NULL);
 
 /* ---- tests --------------------------------------------------------------------- */
 
-/* Recovery without NRST is not supported: no attest flag, no fallback. */
-ZTEST(gd32_swd_connect_under_reset, test_init_refuses_a_null_nrst)
+/* The driver takes no pin handles: it opens its own pads, so application code
+ * has nothing to hand it (and cannot open those ids at all). */
+ZTEST(gd32_swd_connect_under_reset, test_init_refuses_a_null_context_and_touches_nothing)
 {
-	gd32_swd_t swd;
-	zassert_equal(gd32_swd_init(&swd, &P_SWDIO, &P_SWCLK, NULL), ALP_ERR_INVAL);
-	zassert_equal(g_nev, 0u, "refused before any pad or session was touched");
+	zassert_equal(gd32_swd_init(NULL), ALP_ERR_INVAL);
+	zassert_equal(g_nev, 0u);
 }
 
-/* NRST goes low BEFORE either SWD pad becomes an output, and the session is
- * announced before anything. */
+/* A board that publishes no pads: nothing may be driven, the session closes. */
+ZTEST(gd32_swd_connect_under_reset, test_init_without_published_pads_drives_nothing)
+{
+	g_missing_pad = true;
+	gd32_swd_t swd;
+	zassert_equal(gd32_swd_init(&swd), ALP_ERR_NOT_READY);
+	zassert_equal(find_ev(EV_CFG, -1, 1u, 0), -1);
+	zassert_equal(find_ev(EV_CFG_LOW, -1, 0u, 0), -1);
+	zassert_equal(find_ev(EV_NRST_WRITE, -1, 0u, 0), -1);
+	const int n_true  = find_ev(EV_NOTIFY, -1, 1u, 0);
+	const int n_false = find_ev(EV_NOTIFY, -1, 0u, 0);
+	zassert_true(n_true >= 0 && n_false > n_true);
+}
+
+/* NRST goes low BEFORE either SWD pad becomes an output, and it becomes an
+ * output only with an INITIAL LOW level -- a plain "configure as output" keeps the
+ * old latch (a pre-0.15 image left it high) and would drive the shared net high. */
 ZTEST(gd32_swd_connect_under_reset, test_nrst_is_asserted_before_swd_pads_are_driven)
 {
 	gd32_swd_t swd;
-	zassert_equal(gd32_swd_init(&swd, &P_SWDIO, &P_SWCLK, &P_NRST), ALP_OK);
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
 
 	const int i_notify = find_ev(EV_NOTIFY, -1, 1u, 0);
-	const int i_nrst_o = find_ev(EV_CFG, P_NRST.id, 1u, 0);
+	const int i_nrst_o = find_ev(EV_CFG_LOW, P_NRST.id, 0u, 0);
 	const int i_nrst_l = find_ev(EV_NRST_WRITE, -1, 0u, 0);
 	const int i_clk_o  = find_ev(EV_CFG, P_SWCLK.id, 1u, 0);
 	const int i_dio_o  = find_ev(EV_CFG, P_SWDIO.id, 1u, 0);
 	const int i_clk_w  = find_ev(EV_SWCLK_FIRST, -1, 0u, 0);
 	zassert_true(i_notify >= 0 && i_nrst_o > i_notify, "session announced first");
-	zassert_true(i_nrst_l > i_nrst_o, "NRST configured as an output, then driven low");
+	zassert_true(i_nrst_l > i_nrst_o, "NRST output-with-initial-LOW, then written low");
+	zassert_equal(find_ev(EV_CFG, P_NRST.id, 1u, 0),
+	              -1,
+	              "NRST is NEVER switched to an output by a plain configure (latch could be high)");
 	zassert_true(i_clk_o > i_nrst_l && i_dio_o > i_nrst_l,
 	             "SWCLK/SWDIO become outputs only after NRST is low");
 	zassert_true(i_clk_w > i_nrst_l, "no SWCLK edge before NRST is low");
@@ -355,7 +422,7 @@ ZTEST(gd32_swd_connect_under_reset, test_init_fails_without_touching_the_swd_pad
 {
 	g_fail_nrst_write = true;
 	gd32_swd_t swd;
-	zassert_equal(gd32_swd_init(&swd, &P_SWDIO, &P_SWCLK, &P_NRST), ALP_ERR_IO);
+	zassert_equal(gd32_swd_init(&swd), ALP_ERR_IO);
 	zassert_equal(find_ev(EV_CFG, P_SWCLK.id, 1u, 0), -1, "SWCLK never became an output");
 	zassert_equal(find_ev(EV_CFG, P_SWDIO.id, 1u, 0), -1, "SWDIO never became an output");
 	zassert_true(find_ev(EV_CFG, P_NRST.id, 0u, 0) >= 0, "NRST handed back to hi-Z");
@@ -365,12 +432,12 @@ ZTEST(gd32_swd_connect_under_reset, test_init_fails_without_touching_the_swd_pad
 }
 
 /* The connect-under-reset order on the wire: debug enable, then halt-on-reset,
- * and only THEN is NRST released. */
+ * only THEN is NRST released, and the core is proven halted afterwards. */
 ZTEST(gd32_swd_connect_under_reset,
       test_nrst_stays_asserted_through_connect_until_halt_on_reset_is_armed)
 {
 	gd32_swd_t swd;
-	zassert_equal(gd32_swd_init(&swd, &P_SWDIO, &P_SWCLK, &P_NRST), ALP_OK);
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
 	zassert_equal(gd32_swd_connect(&swd), ALP_OK);
 	zassert_equal(swd.idcode, 0x6BA02477u, "the DP answered under reset");
 
@@ -384,6 +451,25 @@ ZTEST(gd32_swd_connect_under_reset,
 	zassert_equal(g_ev[i_demcr].val, 0x1u, "DEMCR.VC_CORERESET: halt on the reset vector");
 	zassert_true(i_release > i_demcr, "NRST released only after halt-on-reset is armed");
 	zassert_false(swd.nrst_held);
+	zassert_true(T.halted, "the core stopped at its reset vector");
+	gd32_swd_deinit(&swd);
+}
+
+/* If the core did NOT halt after NRST was released it is running application code
+ * (and may grant ATTN): connect must fail and put it back under reset. */
+ZTEST(gd32_swd_connect_under_reset,
+      test_connect_fails_and_reasserts_nrst_when_the_core_did_not_halt)
+{
+	g_no_halt = true;
+	gd32_swd_t swd;
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
+	zassert_equal(gd32_swd_connect(&swd), ALP_ERR_IO);
+	const int i_release = find_ev(EV_CFG, P_NRST.id, 0u, 0);
+	zassert_true(i_release >= 0);
+	zassert_true(find_ev(EV_CFG_LOW, P_NRST.id, 0u, i_release) > i_release,
+	             "NRST driven low again (initial-low) after the failed halt");
+	zassert_true(find_ev(EV_NRST_WRITE, -1, 0u, i_release) > i_release);
+	zassert_true(swd.nrst_held, "left asserted");
 	gd32_swd_deinit(&swd);
 }
 
@@ -394,7 +480,7 @@ ZTEST(gd32_swd_connect_under_reset, test_nrst_stays_asserted_when_halt_on_reset_
 	g_fail_mem  = true;
 	g_fail_addr = 0xE000EDFCu; /* DEMCR */
 	gd32_swd_t swd;
-	zassert_equal(gd32_swd_init(&swd, &P_SWDIO, &P_SWCLK, &P_NRST), ALP_OK);
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
 	zassert_not_equal(gd32_swd_connect(&swd), ALP_OK);
 	zassert_equal(find_ev(EV_CFG, P_NRST.id, 0u, 0), -1, "NRST not released");
 	zassert_true(swd.nrst_held);
@@ -403,22 +489,47 @@ ZTEST(gd32_swd_connect_under_reset, test_nrst_stays_asserted_when_halt_on_reset_
 	zassert_true(find_ev(EV_CFG, P_NRST.id, 0u, 0) >= 0);
 }
 
+/* reset_and_run: NRST is asserted (initial-low), P70/P71 go back to inputs, and
+ * ONLY THEN is NRST released -- the booting GD32 may grant ATTN and drive PA14
+ * at once, which must not meet a host SWCLK output. */
+ZTEST(gd32_swd_connect_under_reset,
+      test_reset_and_run_returns_the_pads_to_inputs_before_releasing_nrst)
+{
+	gd32_swd_t swd;
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
+	zassert_equal(gd32_swd_connect(&swd), ALP_OK);
+	const int before = (int)g_nev;
+	zassert_equal(gd32_swd_reset_and_run(&swd), ALP_OK);
+
+	const int i_assert = find_ev(EV_CFG_LOW, P_NRST.id, 0u, before);
+	zassert_true(i_assert >= before, "NRST asserted (initial low)");
+	/* (SWDIO toggles direction during the best-effort halt-on-reset disarm that
+	 * precedes the assert, so look for the input switch AFTER the assert.) */
+	const int i_clk_in = find_ev(EV_CFG, P_SWCLK.id, 0u, i_assert);
+	const int i_dio_in = find_ev(EV_CFG, P_SWDIO.id, 0u, i_assert);
+	const int i_rel    = find_ev(EV_CFG, P_NRST.id, 0u, i_assert);
+	zassert_true(i_clk_in > i_assert && i_dio_in > i_assert, "pads to inputs while NRST is held");
+	zassert_true(i_rel > i_clk_in && i_rel > i_dio_in, "NRST released LAST");
+	gd32_swd_deinit(&swd);
+}
+
 /* deinit gives P70/P71 back as inputs (P71 is the bridge ATTN pin again),
- * releases NRST, and closes the session last. */
+ * releases NRST, closes the pads and ends the session last. */
 ZTEST(gd32_swd_connect_under_reset, test_deinit_returns_the_pads_to_inputs_and_closes_the_session)
 {
 	gd32_swd_t swd;
-	zassert_equal(gd32_swd_init(&swd, &P_SWDIO, &P_SWCLK, &P_NRST), ALP_OK);
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
 	zassert_equal(gd32_swd_connect(&swd), ALP_OK);
 	const unsigned before = g_nev;
 	gd32_swd_deinit(&swd);
 
 	const int i_clk_in = find_ev(EV_CFG, P_SWCLK.id, 0u, (int)before);
 	const int i_dio_in = find_ev(EV_CFG, P_SWDIO.id, 0u, (int)before);
-	const int i_close  = find_ev(EV_NOTIFY, -1, 0u, (int)before);
+	const int i_close  = find_ev(EV_CLOSE, P_NRST.id, 0u, (int)before);
+	const int i_end    = find_ev(EV_NOTIFY, -1, 0u, (int)before);
 	zassert_true(i_clk_in >= 0, "SWCLK (P71) back to an input");
 	zassert_true(i_dio_in >= 0, "SWDIO (P70) back to an input");
-	zassert_true(i_close > i_clk_in && i_close > i_dio_in,
-	             "session closed after the pads are inputs");
+	zassert_true(i_close > i_clk_in && i_close > i_dio_in, "pads closed after they are inputs");
+	zassert_true(i_end > i_close, "session closed last");
 	zassert_false(swd.initialised);
 }

@@ -37,40 +37,28 @@ on ADC) remain their own HIL-PLAN rows.
 | ota_get_state | 0xF5 | NOSUPPORT (unarmed build) or a sane state snapshot (armed build) |
 | adc_stream2 | 0x3B/0x3C/0x35 | v0.15, self-gating on the `ADC_STREAM2` grant: `BEGIN2` reports the realised rate exactly (1 MHz / 1000 ticks, full scale 4095); two `READ2` calls 50 ms apart at 1 kHz are contiguous (`first_index` advances by `got`, `dropped` 0, codes <= full scale), and the driver counts zero accounting gaps |
 | batch | 0x04 | v0.15, self-gating on the `BATCH` grant: `PING` + full-mask `GPIO_READ` + `COUNTER_READ` in one transaction pair, all three OK with their fixed 4-byte payloads |
-| attn | (edge on P71) | v0.15: passes unless `ATTN` was active after init and has been withdrawn since (3 lost edges or 3 stuck-high readings) -- recovery is correct behaviour, but a soak must not let it pass silently |
 
 ## Protocol v0.15 and the ATTN line
 
 `gd32g553_init_ex()` negotiates the v0.15 link features with a bridge
 that reports minor >= 15: `STATUS_SEQ`, `BIG_FRAME` (256-byte frames),
-`ADC_STREAM2` and `BATCH`, plus `ATTN` when this app registered an
-interrupt hook.  A v0.14 bridge keeps the legacy 1-byte `STATUS_SEQ`
-form, so the same binary soaks both: the three rows above pass on a
-link that did not grant their feature and the 20 legacy rows run
+`ADC_STREAM2` and `BATCH`.  A v0.14 bridge keeps the legacy 1-byte
+`STATUS_SEQ` form, so the same binary soaks both: the two rows above pass on
+a link that did not grant their feature and the 20 legacy rows run
 unchanged.
 
-`ATTN` is the GD32's data-ready output on `PA14`, wired to Renesas
-`P71`.  The app opens `P71` through the reserved id
-`GD32G553_PAD_ID_ATTN` (the `attn` pad of the board's `alp,gd32-pads`
-devicetree node -- not an index of the positional pin array, whose index 0 is
-the GD32 SPI chip-select) as an input with a rising-edge interrupt
-**before** the handshake, and gives the driver three callbacks built from
-`alp_gpio_*`, a semaphore and the cycle counter: the clock, a wait for an
-edge that returns the edge's time-stamp (never polling), and the level.  The
-driver reads the clock just before it clocks a request and discards any edge
-stamped earlier, so an event edge that was still latched cannot be mistaken
-for the reply.  With
-`ATTN` granted every reply is awaited on its edge instead of a
-35 µs staging gap; a lost edge falls back to the v0.14 drain rule for
-that command only.  `P71` is never driven as an output by this app --
-it is the GD32's `SWCLK` whenever `ATTN` is off, and only the SWD
-recovery path (with `GD32_NRST` asserted first) may drive it.  If the
-platform GPIO driver has no interrupt for the pad the soak says so and
-runs on the staging-gap path.
+`ATTN` -- the GD32's data-ready output on `PA14`, wired to Renesas `P71` -- is
+**not** requested by this soak.  The pad ids that name it
+(`GD32G553_PAD_ID_*`) are reserved for the V2N supervisor singleton and the
+SWD driver: the portable `alp_gpio_open()` refuses them, because `P71` is
+also the GD32's `SWCLK` and the neighbouring `NRST` is a net shared with the
+PMIC.  A chip-driver soak therefore runs on the staging-gap path; `ATTN`
+rides under every portable `alp_pwm` / `alp_adc` / ... call through the
+supervisor, whose hook time-stamps the edges the driver accepts.
 
 Link telemetry for the SWD reader (no console) is in
-`v015_forensics`: granted feature word, `ATTN` active, replies
-delivered on an edge, lost edges, stuck-high readings, `READ2`
+`v015_forensics`: granted feature word, `ATTN` active (always 0 here),
+replies delivered on an edge, lost edges, stuck-high readings, `READ2`
 accounting gaps.
 
 One-shot at boot (not per-cycle): `adc_dsp_chain_open` probe — the
@@ -105,7 +93,7 @@ quarantined entries.
 
 ## Reading the output
 
-Per cycle: `[hil-soak] cycle N | 23/23 PASS`.  Every 16 cycles a
+Per cycle: `[hil-soak] cycle N | 22/22 PASS`.  Every 16 cycles a
 cumulative per-test table prints, ending in a greppable verdict line:
 `SOAK-CLEAN` (zero failures everywhere) or `SOAK-DIRTY`.  Failures
 never halt the soak — they print one diagnosable line (test name +

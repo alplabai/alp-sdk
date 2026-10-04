@@ -80,7 +80,8 @@
  * master it, so there is no I2C transport branch here at all. */
 #define V2N_SPI_BUS_DISABLED (CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID < 0)
 
-#include "alp/chips/gd32_swd.h" /* gd32_swd_session_notify() */
+#include "alp/chips/gd32_swd.h"        /* gd32_swd_session_notify() */
+#include "../backends/gpio/gpio_ops.h" /* alp_z_gpio_open_internal() */
 
 static struct {
 	bool           tried_init;
@@ -93,8 +94,9 @@ static struct {
 	 * (input + rising-edge IRQ) on EVERY init. */
 	alp_gpio_t       *attn_pin;
 	struct k_sem      attn_sem;
-	volatile uint32_t attn_edge_t; /* cycle counter at the last edge (ISR-written) */
-	atomic_t          swd_session; /* an SWD session owns P70/P71/P74 */
+	volatile uint32_t attn_edge_t;  /* cycle counter at the last edge (ISR-written) */
+	atomic_t          swd_session;  /* an SWD session owns P70/P71/P74 */
+	bool              force_reinit; /* a session start could not close the link */
 } g_v2n;
 
 /* ---- ATTN hook (edge latch = semaphore) ------------------------------- */
@@ -130,10 +132,19 @@ static alp_status_t attn_read_level(void *user, bool *high)
 	return alp_gpio_read(g_v2n.attn_pin, high);
 }
 
+/* Discard every latched edge: called right before the driver reads the clock
+ * for a request, so no old stamp can alias a fresh one after a counter wrap. */
+static void attn_drain(void *user)
+{
+	(void)user;
+	k_sem_reset(&g_v2n.attn_sem);
+}
+
 static const gd32g553_attn_hook_t g_attn_hook = {
 	.now        = attn_now,
 	.wait       = attn_wait,
 	.read_level = attn_read_level,
+	.drain      = attn_drain,
 };
 
 /* Rules H1/H2: P71 is an input with a rising-edge IRQ before ATTN is ever
@@ -144,7 +155,8 @@ static bool attn_setup(void)
 {
 	if (!IS_ENABLED(CONFIG_ALP_SDK_V2N_SUPERVISOR_ATTN)) return false;
 	if (g_v2n.attn_pin == NULL) {
-		g_v2n.attn_pin = alp_gpio_open(GD32G553_PAD_ID_ATTN);
+		/* internal opener: the portable alp_gpio_open() refuses the GD32 pad ids */
+		g_v2n.attn_pin = alp_z_gpio_open_internal(GD32G553_PAD_ID_ATTN);
 		if (g_v2n.attn_pin == NULL) return false; /* board publishes no ATTN pad */
 	}
 	(void)alp_gpio_irq_disable(g_v2n.attn_pin);
@@ -175,6 +187,19 @@ SYS_INIT(v2n_supervisor_sys_init, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAU
 static alp_status_t try_init_locked(void)
 {
 	if (atomic_get(&g_v2n.swd_session) != 0) return ALP_ERR_BUSY; /* SWD owns P71 */
+	if (g_v2n.force_reinit) {
+		/* An SWD session started while a bridge command held the lock, so the
+		 * link could not be closed then.  The session may have reset the GD32 and
+		 * left P71 an output: drop the stale link and re-run the full init
+		 * (handshake, negotiation and attn_setup()) now. */
+		if (g_v2n.spi != NULL) {
+			alp_spi_close(g_v2n.spi);
+			g_v2n.spi = NULL;
+		}
+		g_v2n.tried_init   = false;
+		g_v2n.init_status  = ALP_ERR_NOT_READY;
+		g_v2n.force_reinit = false;
+	}
 	if (g_v2n.tried_init) return g_v2n.init_status;
 	/* A bridge that answered BUSY is alive but mid-OTA-trial; each
 	 * gd32g553_init() against it spends its whole ~2 s retry budget
@@ -326,6 +351,10 @@ void gd32_swd_session_notify(bool active)
 		g_v2n.tried_init  = false;
 		g_v2n.init_status = ALP_ERR_NOT_READY;
 		k_mutex_unlock(&g_v2n.lock);
+	} else {
+		/* Could not take the lock (a bridge command is in flight): remember
+		 * that the link is stale so the next use after the session re-inits. */
+		g_v2n.force_reinit = true;
 	}
 }
 

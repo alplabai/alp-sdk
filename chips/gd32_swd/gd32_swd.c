@@ -399,13 +399,24 @@ __attribute__((weak)) void gd32_swd_session_notify(bool active)
 	(void)active;
 }
 
+/* Platform pad seam: weak NULL here (a build with no platform glue cannot
+ * open the pads, so gd32_swd_init() answers NOSUPPORT); the Zephyr module
+ * overrides it (src/zephyr/gd32_swd_pads.c). */
+__attribute__((weak)) const gd32_swd_platform_t *gd32_swd_platform(void)
+{
+	return NULL;
+}
+
 /* GD32_NRST (P74) is wired open-drain onto a net shared with the primary
- * PMIC's reset-out, and the Renesas GPIO driver has no open-drain mode.
- * Emulate it: ASSERT = configure as output and drive low; RELEASE =
- * high-impedance input.  The pad is never driven high. */
+ * PMIC's reset-out (ACT88760 GPIO4), and the Renesas GPIO driver has no
+ * open-drain mode.  Emulate it: ASSERT = switch to an output whose INITIAL
+ * level is low (the platform's configure_output_low -- a plain "configure as
+ * output" would keep the old output latch, which a pre-0.15 image left HIGH, and
+ * the pad would drive the shared net high until the write below landed), then
+ * write low; RELEASE = high-impedance input.  The pad is never driven high. */
 static alp_status_t swd_nrst_assert(gd32_swd_t *ctx)
 {
-	alp_status_t s = alp_gpio_configure(ctx->nrst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	alp_status_t s = ctx->plat->configure_output_low(ctx->nrst);
 	if (s == ALP_OK) s = alp_gpio_write(ctx->nrst, false);
 	if (s != ALP_OK) {
 		(void)alp_gpio_configure(ctx->nrst, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
@@ -425,15 +436,36 @@ static void swd_nrst_release(gd32_swd_t *ctx)
 	ctx->nrst_held = false;
 }
 
-alp_status_t gd32_swd_init(gd32_swd_t *ctx, alp_gpio_t *swdio, alp_gpio_t *swclk, alp_gpio_t *nrst)
+/* Give P70/P71 back as inputs. */
+static void swd_pads_to_inputs(gd32_swd_t *ctx)
 {
-	/* NRST is mandatory: recovery without it is not supported (see below). */
-	if (ctx == NULL || swdio == NULL || swclk == NULL || nrst == NULL) return ALP_ERR_INVAL;
+	if (ctx->swclk != NULL) {
+		(void)alp_gpio_configure(ctx->swclk, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
+	}
+	if (ctx->swdio != NULL) {
+		(void)alp_gpio_configure(ctx->swdio, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
+	}
+}
+
+static void swd_close_pads(gd32_swd_t *ctx)
+{
+	if (ctx->plat == NULL) return;
+	if (ctx->swdio != NULL) ctx->plat->close_pad(ctx->swdio);
+	if (ctx->swclk != NULL) ctx->plat->close_pad(ctx->swclk);
+	if (ctx->nrst != NULL) ctx->plat->close_pad(ctx->nrst);
+}
+
+alp_status_t gd32_swd_init(gd32_swd_t *ctx)
+{
+	if (ctx == NULL) return ALP_ERR_INVAL;
+	const gd32_swd_platform_t *plat = gd32_swd_platform();
+	if (plat == NULL || plat->open_pad == NULL || plat->configure_output_low == NULL ||
+	    plat->close_pad == NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
 
 	memset(ctx, 0, sizeof(*ctx));
-	ctx->swdio       = swdio;
-	ctx->swclk       = swclk;
-	ctx->nrst        = nrst;
+	ctx->plat        = plat;
 	ctx->clock_delay = GD32_SWD_DEFAULT_CLOCK_DELAY;
 
 	/* GD32 bridge protocol 0.15 §3.17 rule H3: SWCLK (Renesas P71) is
@@ -445,30 +477,44 @@ alp_status_t gd32_swd_init(gd32_swd_t *ctx, alp_gpio_t *swdio, alp_gpio_t *swclk
 	 * NRST asserted through gd32_swd_connect(), and let connect() release it
 	 * only after the core is set to halt at its reset vector -- so no
 	 * application code ever runs during the session and ATTN cannot be
-	 * granted. */
+	 * granted.  The pads are the reserved GD32 ids, opened here through the
+	 * platform's INTERNAL opener: the portable alp_gpio_open() refuses them. */
 	gd32_swd_session_notify(true); /* the supervisor closes the bridge link first */
+
+	ctx->swdio = plat->open_pad(GD32G553_PAD_ID_SWDIO);
+	ctx->swclk = plat->open_pad(GD32G553_PAD_ID_SWCLK);
+	ctx->nrst  = plat->open_pad(GD32G553_PAD_ID_NRST);
+	if (ctx->swdio == NULL || ctx->swclk == NULL || ctx->nrst == NULL) {
+		/* The board does not publish the pads: nothing was driven. */
+		swd_close_pads(ctx);
+		gd32_swd_session_notify(false);
+		memset(ctx, 0, sizeof(*ctx));
+		return ALP_ERR_NOT_READY;
+	}
 
 	alp_status_t s = swd_nrst_assert(ctx);
 	if (s != ALP_OK) {
+		swd_close_pads(ctx);
 		gd32_swd_session_notify(false);
+		memset(ctx, 0, sizeof(*ctx));
 		return s;
 	}
 
 	/* SWCLK + SWDIO start as outputs driven high (the SWD idle
 	 * state per the spec).  SWDIO will toggle between input and
 	 * output at runtime in the bit-bang routines. */
-	s = alp_gpio_configure(swclk, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
-	if (s == ALP_OK) s = alp_gpio_configure(swdio, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	s = alp_gpio_configure(ctx->swclk, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (s == ALP_OK) s = alp_gpio_configure(ctx->swdio, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	if (s == ALP_OK) {
 		ctx->swdio_is_output = true;
-		s                    = alp_gpio_write(swclk, true);
+		s                    = alp_gpio_write(ctx->swclk, true);
 	}
-	if (s == ALP_OK) s = alp_gpio_write(swdio, true);
+	if (s == ALP_OK) s = alp_gpio_write(ctx->swdio, true);
 	if (s != ALP_OK) {
 		/* Back out: pads to inputs, reset released, session closed. */
-		(void)alp_gpio_configure(swclk, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
-		(void)alp_gpio_configure(swdio, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
+		swd_pads_to_inputs(ctx);
 		swd_nrst_release(ctx);
+		swd_close_pads(ctx);
 		gd32_swd_session_notify(false);
 		memset(ctx, 0, sizeof(*ctx));
 		return s;
@@ -534,9 +580,23 @@ alp_status_t gd32_swd_connect(gd32_swd_t *ctx)
 		s = swd_mem_write32(ctx, CM_DEMCR, CM_DEMCR_VC_CORERESET);
 		if (s != ALP_OK) return s;
 		swd_nrst_release(ctx);
-		/* Let the core leave reset and stop at the vector. */
+		/* Let the core leave reset and stop at the vector, then PROVE it did:
+		 * DHCSR.S_HALT must read set.  If halt-on-reset did not take, the core
+		 * is running application code (and may grant ATTN) -- put it back
+		 * under reset and fail. */
 		for (unsigned i = 0u; i < 4000u; ++i)
 			swd_clock_delay(ctx);
+		bool halted = false;
+		for (unsigned i = 0u; i < 64u && !halted; ++i) {
+			uint32_t dhcsr = 0u;
+			if (swd_mem_read32(ctx, CM_DHCSR, &dhcsr) != ALP_OK) break;
+			halted = (dhcsr & CM_DHCSR_S_HALT) != 0u;
+		}
+		if (!halted) {
+			(void)swd_nrst_assert(ctx);
+			ctx->connected = false;
+			return ALP_ERR_IO;
+		}
 	}
 	return ALP_OK;
 }
@@ -745,6 +805,10 @@ alp_status_t gd32_swd_reset_and_run(gd32_swd_t *ctx)
 	 * by the SW-DP power-up status, which the driver may have just torn
 	 * down, and recovery without NRST is not supported. */
 	if (swd_nrst_assert(ctx) != ALP_OK) return ALP_ERR_IO;
+	/* P70/P71 go back to inputs BEFORE the reset is released: the moment the
+	 * GD32 boots it may grant ATTN and drive PA14, which must not meet a host
+	 * SWCLK output. */
+	swd_pads_to_inputs(ctx);
 	swd_nrst_release(ctx);
 	ctx->connected = false;
 	return ALP_OK;
@@ -757,12 +821,8 @@ void gd32_swd_deinit(gd32_swd_t *ctx)
 		/* Never leave the GD32 held in reset, and give P70/P71 back: both
 		 * pads return to INPUT (P71 is the bridge's ATTN line again). */
 		if (ctx->nrst != NULL) swd_nrst_release(ctx);
-		if (ctx->swclk != NULL) {
-			(void)alp_gpio_configure(ctx->swclk, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
-		}
-		if (ctx->swdio != NULL) {
-			(void)alp_gpio_configure(ctx->swdio, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
-		}
+		swd_pads_to_inputs(ctx);
+		swd_close_pads(ctx);
 		gd32_swd_session_notify(false);
 	}
 	ctx->initialised = false;
@@ -770,4 +830,5 @@ void gd32_swd_deinit(gd32_swd_t *ctx)
 	ctx->swdio       = NULL;
 	ctx->swclk       = NULL;
 	ctx->nrst        = NULL;
+	ctx->plat        = NULL;
 }

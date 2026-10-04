@@ -10,8 +10,9 @@ description: |
   DELIBERATELY its own binding rather than entries of "alp,pin-array": that
   array is a single positional table whose index 0 is the GD32 SPI
   chip-select (Renesas P97 = GD32 PA8), so any id that drifted by one would
-  drive the chip-select.  These pads are resolved only through
-  alp_gpio_open(GD32G553_PAD_ID_SWDIO / _SWCLK / _NRST / _ATTN).
+  drive the chip-select.  These pads are resolved only through the INTERNAL
+  pad opener (GD32G553_PAD_ID_SWDIO / _SWCLK / _NRST / _ATTN) used by the SWD
+  driver and the V2N supervisor; the portable alp_gpio_open() refuses those ids.
 
   swclk-gpios and attn-gpios name the SAME pad (P71 = GD32 PA14) in two roles:
   GD32 SWCLK, which the host may drive only inside an SWD session with

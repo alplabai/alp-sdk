@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-04",
+  "generated": "2026-10-05",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -4258,8 +4258,12 @@
           "signature": "alp_status_t gd32_swd_halt(gd32_swd_t *ctx);"
         },
         "gd32_swd_init": {
-          "hash": "cac9234487457dce",
-          "signature": "alp_status_t gd32_swd_init(gd32_swd_t *ctx, alp_gpio_t *swdio, alp_gpio_t *swclk, alp_gpio_t *nrst);"
+          "hash": "93dc157b8620b057",
+          "signature": "alp_status_t gd32_swd_init(gd32_swd_t *ctx);"
+        },
+        "gd32_swd_platform": {
+          "hash": "6c0dffaf645b928a",
+          "signature": "const gd32_swd_platform_t * gd32_swd_platform(void);"
         },
         "gd32_swd_reset_and_run": {
           "hash": "2fe69170edfaedad",
@@ -4312,8 +4316,18 @@
           "hash": "03014058bcf50a7e",
           "kind": "enum"
         },
+        "gd32_swd_platform_t": {
+          "definition": "typedef struct gd32_swd_platform { alp_gpio_t *(*open_pad)(uint32_t pad_id); alp_status_t (*configure_output_low)(alp_gpio_t *pad); void (*close_pad)(alp_gpio_t *pad); } gd32_swd_platform_t;",
+          "fields": [
+            "alp_gpio_t *(*open_pad)(uint32_t pad_id)",
+            "alp_status_t (*configure_output_low)(alp_gpio_t *pad)",
+            "void (*close_pad)(alp_gpio_t *pad)"
+          ],
+          "hash": "4b86223cba9fa798",
+          "kind": "struct"
+        },
         "gd32_swd_t": {
-          "definition": "typedef struct { bool initialised; bool connected; alp_gpio_t *swdio; alp_gpio_t *swclk; alp_gpio_t *nrst; uint32_t clock_delay; uint32_t idcode; bool swdio_is_output; bool nrst_held; } gd32_swd_t;",
+          "definition": "typedef struct { bool initialised; bool connected; alp_gpio_t *swdio; alp_gpio_t *swclk; alp_gpio_t *nrst; uint32_t clock_delay; uint32_t idcode; bool swdio_is_output; bool nrst_held; const struct gd32_swd_platform *plat; } gd32_swd_t;",
           "fields": [
             "bool initialised",
             "bool connected",
@@ -4323,9 +4337,10 @@
             "uint32_t clock_delay",
             "uint32_t idcode",
             "bool swdio_is_output",
-            "bool nrst_held"
+            "bool nrst_held",
+            "const struct gd32_swd_platform *plat"
           ],
-          "hash": "be5866a2db709138",
+          "hash": "e2fbbb6f0f4fd0ba",
           "kind": "struct"
         }
       },
@@ -4740,14 +4755,15 @@
           "kind": "struct"
         },
         "gd32g553_attn_hook_t": {
-          "definition": "typedef struct { uint32_t (*now)(void *user); alp_status_t (*wait)(void *user, uint32_t timeout_ms, uint32_t *t_edge); alp_status_t (*read_level)(void *user, bool *high); void *user; } gd32g553_attn_hook_t;",
+          "definition": "typedef struct { uint32_t (*now)(void *user); alp_status_t (*wait)(void *user, uint32_t timeout_ms, uint32_t *t_edge); alp_status_t (*read_level)(void *user, bool *high); void (*drain)(void *user); void *user; } gd32g553_attn_hook_t;",
           "fields": [
             "uint32_t (*now)(void *user)",
             "alp_status_t (*wait)(void *user, uint32_t timeout_ms, uint32_t *t_edge)",
             "alp_status_t (*read_level)(void *user, bool *high)",
+            "void (*drain)(void *user)",
             "void *user"
           ],
-          "hash": "c5d8ad961ec3fc83",
+          "hash": "e0ef1d05e74fb673",
           "kind": "struct"
         },
         "gd32g553_batch_op_t": {

@@ -230,6 +230,17 @@ z_configure(alp_gpio_backend_state_t *st, alp_gpio_dir_t dir, alp_gpio_pull_t pu
 	return _errno_to_alp(err);
 }
 
+/* OUTPUT with the initial level LOW applied in the same call that switches the
+ * direction (GPIO_OUTPUT_INIT_LOW is the PHYSICAL low), so the pad never drives
+ * a stale high latch -- the RZ GPIO driver keeps the old output latch when no
+ * initial level is given. */
+static alp_status_t z_configure_output_low(alp_gpio_backend_state_t *st)
+{
+	alp_z_gpio_side_t *s = (alp_z_gpio_side_t *)st->be_data;
+	if (s == NULL) return ALP_ERR_NOT_READY;
+	return _errno_to_alp(gpio_pin_configure_dt(&s->spec, GPIO_OUTPUT_INIT_LOW));
+}
+
 static alp_status_t z_write(alp_gpio_backend_state_t *st, bool level)
 {
 	alp_z_gpio_side_t *s = (alp_z_gpio_side_t *)st->be_data;
@@ -291,13 +302,14 @@ static void z_close(alp_gpio_backend_state_t *st)
 }
 
 static const alp_gpio_ops_t _ops = {
-	.open        = z_open,
-	.configure   = z_configure,
-	.write       = z_write,
-	.read        = z_read,
-	.enable_irq  = z_irq_enable,
-	.disable_irq = z_irq_disable,
-	.close       = z_close,
+	.open                 = z_open,
+	.configure            = z_configure,
+	.write                = z_write,
+	.read                 = z_read,
+	.enable_irq           = z_irq_enable,
+	.disable_irq          = z_irq_disable,
+	.close                = z_close,
+	.configure_output_low = z_configure_output_low,
 };
 
 /* Delegation hook for the CC3501E GPIO proxy backend

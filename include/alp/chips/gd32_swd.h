@@ -52,6 +52,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "alp/chips/gd32g553.h" /* GD32G553_PAD_ID_* */
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -111,50 +112,71 @@ typedef enum {
 	GD32_SWD_ACK_PROTO = 0x7,
 } gd32_swd_ack_t;
 
+/**
+ * @brief Platform pad seam: how the driver opens the three GD32 pads.
+ *
+ * The pads (@ref GD32G553_PAD_ID_SWDIO / _SWCLK / _NRST) are NOT portable
+ * pins -- the portable `alp_gpio_open()` refuses those ids (`ALP_ERR_INVAL`),
+ * because they name the GD32 SWD / reset / ATTN pads and the shared open-drain
+ * NRST net.  The driver opens its own pads through this table, which the
+ * platform glue provides (src/zephyr/gd32_swd_pads.c) by overriding the weak
+ * @ref gd32_swd_platform; a build without glue answers
+ * `ALP_ERR_NOSUPPORT` from @ref gd32_swd_init.
+ */
+typedef struct gd32_swd_platform {
+	/** Open one reserved pad id; NULL when the board does not publish it. */
+	alp_gpio_t *(*open_pad)(uint32_t pad_id);
+	/** Switch the pad to an OUTPUT whose initial level is LOW in the same
+	 *  step -- never driven high, not even briefly (the NRST net is shared
+	 *  with the PMIC and open-drain). */
+	alp_status_t (*configure_output_low)(alp_gpio_t *pad);
+	/** Close a pad opened by @c open_pad. */
+	void (*close_pad)(alp_gpio_t *pad);
+} gd32_swd_platform_t;
+
+/** Platform glue entry: the pad seam, or NULL (weak default) when there is none. */
+const gd32_swd_platform_t *gd32_swd_platform(void);
+
 /** Driver context. */
 typedef struct {
-	bool        initialised;
-	bool        connected;
-	alp_gpio_t *swdio;
-	alp_gpio_t *swclk;
-	alp_gpio_t *nrst;
-	uint32_t    clock_delay;
-	uint32_t    idcode;
-	bool        swdio_is_output;
-	bool        nrst_held; /**< GD32_NRST asserted (connect-under-reset). */
+	bool                            initialised;
+	bool                            connected;
+	alp_gpio_t                     *swdio;
+	alp_gpio_t                     *swclk;
+	alp_gpio_t                     *nrst;
+	uint32_t                        clock_delay;
+	uint32_t                        idcode;
+	bool                            swdio_is_output;
+	bool                            nrst_held; /**< GD32_NRST asserted (connect-under-reset). */
+	const struct gd32_swd_platform *plat;      /**< Pad opener (internal). */
 } gd32_swd_t;
 
 /**
- * @brief Bind the controller to caller-supplied GPIO handles.
+ * @brief Open the GD32 pads and start an SWD session (connect-under-reset).
  *
- * CONNECT-UNDER-RESET.  `swclk` (Renesas `P71`) doubles as the bridge's
- * ATTN input (GD32 `PA14`), which the GD32 drives while the v0.15 ATTN
- * link feature is granted, so the host may only drive it as an output while
- * `GD32_NRST` (`P74`) holds the GD32 in reset (docs/gd32-bridge-protocol.md
- * §3.17 rule H3).  This call therefore:
- *   1. notifies the platform (@ref gd32_swd_session_notify) so the SPI
- *      bridge link is closed and stays closed until @ref gd32_swd_deinit;
- *   2. asserts `nrst` (output, driven low -- emulated open-drain: it is
- *      never driven high) and FAILS if that does not work;
- *   3. only then switches `swdio` / `swclk` to outputs at the SWD idle state.
- * `nrst` stays asserted through @ref gd32_swd_connect, which arms
- * DEMCR.VC_CORERESET and releases it so the core halts at its reset vector
- * with no application code run.  `nrst` is MANDATORY: recovery without it is
- * not supported, and a NULL `nrst` is @ref ALP_ERR_INVAL.  Ownership of the
- * handles stays with the caller.
+ * `swclk` (Renesas `P71`) doubles as the bridge's ATTN input (GD32 `PA14`),
+ * which the GD32 drives while the v0.15 ATTN link feature is granted, so the
+ * host may only drive it as an output while `GD32_NRST` (`P74`) holds the GD32
+ * in reset (docs/gd32-bridge-protocol.md §3.17 rule H3).  This call:
+ *   1. notifies the platform (@ref gd32_swd_session_notify) so the SPI bridge
+ *      link is closed and stays closed until @ref gd32_swd_deinit;
+ *   2. opens the three pads itself through the platform seam
+ *      (@ref gd32_swd_platform_t) -- the caller passes no handles, and
+ *      application code cannot open those ids;
+ *   3. asserts NRST as an output with an INITIAL LOW level (never driven high:
+ *      the net is shared with the PMIC's open-drain reset-out) and FAILS if it
+ *      cannot;
+ *   4. only then switches SWDIO / SWCLK to outputs at the SWD idle state.
+ * NRST stays asserted through @ref gd32_swd_connect, which arms halt-on-reset,
+ * releases it and verifies the core halted.  NRST is mandatory: recovery without
+ * it is not supported.
  *
- * On the V2N CM33 boards the three handles come from
- * @ref GD32G553_PAD_ID_SWDIO / @ref GD32G553_PAD_ID_SWCLK /
- * @ref GD32G553_PAD_ID_NRST via `alp_gpio_open()` (resolved from the
- * board's `alp,gd32-pads` devicetree node, never from the positional
- * `alp,pin-array`).
- *
- * @return @ref ALP_OK on success, @ref ALP_ERR_INVAL on a NULL ctx / swdio /
- *         swclk / nrst, or the GPIO error from asserting NRST or from the
- *         idle-state configuration (in which case the pads are back to
- *         inputs, NRST is released and the session is closed).
+ * @return @ref ALP_OK; @ref ALP_ERR_INVAL (NULL ctx); @ref ALP_ERR_NOSUPPORT (no
+ *         platform pad glue); @ref ALP_ERR_NOT_READY (the board does not publish
+ *         the pads); or the GPIO error from asserting NRST / configuring the
+ *         pads (then the pads are inputs again, NRST released, session closed).
  */
-alp_status_t gd32_swd_init(gd32_swd_t *ctx, alp_gpio_t *swdio, alp_gpio_t *swclk, alp_gpio_t *nrst);
+alp_status_t gd32_swd_init(gd32_swd_t *ctx);
 
 /** Override the per-half-bit clock-delay loop count.  Clamped to
  *  [0, 2048]. */
@@ -194,8 +216,8 @@ alp_status_t gd32_swd_flash_verify(gd32_swd_t *ctx, uint32_t addr, const uint8_t
 alp_status_t gd32_swd_reset_and_run(gd32_swd_t *ctx);
 
 /** Release the driver context: releases NRST, returns `swdio` and `swclk`
- *  (P70 / P71) to inputs and closes the session (@ref gd32_swd_session_notify
- *  with false).  Does NOT close the GPIO handles. */
+ *  (P70 / P71) to inputs, closes the pads and ends the session
+ *  (@ref gd32_swd_session_notify with false). */
 void gd32_swd_deinit(gd32_swd_t *ctx);
 
 /**
