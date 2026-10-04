@@ -231,3 +231,29 @@ IMAGE_LINGUAS = "en-us"
 # everything-on alp-image-edge so all variants share one Mender slot size.
 IMAGE_ROOTFS_EXTRA_SPACE = "1048576"
 IMAGE_ROOTFS_SIZE = "4194304"
+
+# U-Boot's vendor sd2load/emmcload env (bootcmd_check) still loads the stock
+# EVK dtb name boot/r9a09g056n44-dev.dtb before the ALP boot command loads the
+# real board dtb (boot/${CONFIG_ALP_E1M_FDTFILE}) over it at the same address.
+# No ALP MACHINE builds that name, so the vendor load printed
+# "Failed to load 'boot/r9a09g056n44-dev.dtb'" on every boot. Link the stock
+# name to the board dtb so the vendor load succeeds harmlessly; the ALP load
+# that follows still decides which dtb boots. The vendor env text is patched
+# by several vendor layers, so changing U-Boot's side would be fragile. The
+# link is relative, so a swap of the real dtb (provisioning's dxuart2 step)
+# is followed automatically. V2N/V2M (MACHINE_FEATURES "v2n") only.
+ALP_VENDOR_FDT_NAME = "r9a09g056n44-dev.dtb"
+ALP_BOARD_FDT_NAME  = "${@os.path.basename((d.getVar('KERNEL_DEVICETREE') or '').split()[0]) if (d.getVar('KERNEL_DEVICETREE') or '').split() else ''}"
+
+alp_link_vendor_fdt_name() {
+	# Either condition makes an unbootable image: CONFIG_BOOTCOMMAND refuses
+	# to boot when boot/${CONFIG_ALP_E1M_FDTFILE} does not load.
+	if [ -z "${ALP_BOARD_FDT_NAME}" ]; then
+		bbfatal "no KERNEL_DEVICETREE for ${MACHINE}; U-Boot would not find a board dtb"
+	elif [ ! -e "${IMAGE_ROOTFS}/boot/${ALP_BOARD_FDT_NAME}" ]; then
+		bbfatal "/boot/${ALP_BOARD_FDT_NAME} is not in the rootfs; U-Boot would not find a board dtb"
+	else
+		ln -sf "${ALP_BOARD_FDT_NAME}" "${IMAGE_ROOTFS}/boot/${ALP_VENDOR_FDT_NAME}"
+	fi
+}
+ROOTFS_POSTPROCESS_COMMAND:append = "${@' alp_link_vendor_fdt_name;' if 'v2n' in (d.getVar('MACHINE_FEATURES') or '').split() else ''}"
