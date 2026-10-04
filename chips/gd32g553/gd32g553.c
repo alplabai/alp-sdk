@@ -780,7 +780,11 @@ static alp_status_t cmd_send(gd32g553_t          *ctx,
 	alp_status_t s;
 	switch (t) {
 	case GD32G553_TRANSPORT_SPI:
-		spi_prepare(ctx); /* deferred ATTN fault / post-reset renegotiation */
+		/* Deferred ATTN fault / post-reset renegotiation.  GET_VERSION is the
+		 * exception: gd32g553_refresh_version() finishes a pending
+		 * renegotiation itself, from its own reply, so a version read after an
+		 * OTA reset costs one GET_VERSION on the wire, not two. */
+		if (cmd != GD32G553_CMD_GET_VERSION) spi_prepare(ctx);
 		s = spi_xfer(ctx, cmd, req_payload, req_payload_len, reply_payload, reply_payload_len);
 		break;
 	case GD32G553_TRANSPORT_I2C:
@@ -976,6 +980,13 @@ alp_status_t gd32g553_refresh_version(gd32g553_t *ctx, gd32g553_version_t *out)
 	out->patch          = reply[2];
 	ctx->version        = *out;
 	ctx->version_cached = true;
+	/* The reply is already copied out, so re-running the negotiation here (the
+	 * bridge reset under us, see spi_prepare()) cannot clobber anything. */
+	if (ctx->renegotiate_pending && ctx->spi != NULL) {
+		ctx->renegotiate_pending = false;
+		ctx->attn_unusable       = false;
+		spi_negotiate(ctx);
+	}
 	return ALP_OK;
 }
 
@@ -1589,9 +1600,9 @@ static size_t batch_reply_len(const uint8_t *p, size_t avail, const void *arg)
 		}
 		pos += len;
 	}
-	/* A batch that ran nothing, or that stopped short of `count` although
-	 * its last op succeeded, is not something the firmware produces. */
-	if (p[0] == 0u) return REPLY_LEN_INVALID;
+	/* A batch that stopped short of `count` although its last executed op
+	 * succeeded (including one that executed nothing: last_status stays 0)
+	 * is not something the firmware produces -- it only stops on an error. */
 	if (p[0] < plan->count && last_status == 0u) return REPLY_LEN_INVALID;
 	return pos;
 }

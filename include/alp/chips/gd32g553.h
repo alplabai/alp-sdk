@@ -77,6 +77,19 @@ extern "C" {
 /* and gd32-bridge-firmware:src/protocol.c on the firmware side.              */
 /* --------------------------------------------------------------- */
 
+/** `alp_gpio_open()` pad ids for the GD32 control pads on the V2N CM33
+ *  boards.  Resolved from the board's dedicated `alp,gd32-pads` devicetree
+ *  node (generated from `metadata/e1m_modules/v2n/supervisor-links.yaml`),
+ *  NEVER from the positional `alp,pin-array` -- index 0 of that array is the
+ *  GD32 SPI chip-select (P97 / GD32 PA8), so a shared index space would let
+ *  a stray id drive the chip-select.  The ids sit in a reserved high range.
+ *  @{ */
+#define GD32G553_PAD_ID_SWDIO 0xE1D32000u /**< P70 / GD32 PA13: SWD data.      */
+#define GD32G553_PAD_ID_SWCLK 0xE1D32001u /**< P71 / GD32 PA14: SWD clock.     */
+#define GD32G553_PAD_ID_NRST  0xE1D32002u /**< P74 / GD32 NRST (open-drain).   */
+#define GD32G553_PAD_ID_ATTN  0xE1D32003u /**< P71 / GD32 PA14: ATTN input.    */
+/** @} */
+
 /** Start-of-frame marker carried by every SPI frame. */
 #define GD32G553_BRIDGE_SOF 0xA5u
 
