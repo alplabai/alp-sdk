@@ -358,3 +358,32 @@ def test_sealed_frame_cannot_be_forged(write, read_len, addr):
     with pytest.raises(ValueError):
         gates.I2cFrame(addr, write, read_len, sealed=True)
     assert not gates.I2cFrame(addr, write, read_len).sealed  # unsealed is allowed; linux_target refuses it at 0x58
+
+
+def _cm33(sp=0x08100000, reset=0x08003101, pad=b"\0" * 0x3000, extra=0):
+    return pad + sp.to_bytes(4, "little") + reset.to_bytes(4, "little") + b"\0" * (64 + extra)
+
+
+def test_cm33_problems():
+    assert gates.cm33_problems(_cm33()) == []
+    assert gates.cm33_problems(_cm33(sp=0x080FFFFF, reset=0x0803_2FFF)) == []
+    assert "must be zero" in gates.cm33_problems(_cm33(pad=b"\0" * 0x2FFF + b"\1"))[0]
+    assert "initial SP 0x20000000" in gates.cm33_problems(_cm33(sp=0x20000000))[0]
+    assert gates.cm33_problems(_cm33(sp=0x09000000))[0].startswith("cm33: initial SP 0x09000000")
+    assert "Thumb bit" in gates.cm33_problems(_cm33(reset=0x08003100))[0]
+    assert "Thumb bit" in gates.cm33_problems(_cm33(reset=0x08033001))[0]
+    assert "exceeds the 0x30000" in gates.cm33_problems(_cm33(extra=gates.CM33_MAX))[0]
+    assert "too short" in gates.cm33_problems(b"\0" * 0x3000)[0]
+
+
+def test_artefacts_checks_the_cm33_component(tmp_path):
+    b = _bundle(tmp_path)
+    for image, target in ((_cm33(), "xspi:mtd1"), (_cm33(reset=0), "xspi:mtd1"), (_cm33(), "xspi:mtd0")):
+        (tmp_path / "artifacts" / "cm33.bin").write_bytes(image)
+        b["components"] = [c for c in b["components"] if c["role"] != "cm33"] + [
+            {"role": "cm33", "file": "artifacts/cm33.bin", "sha256": hashlib.sha256(image).hexdigest(),
+             "size_bytes": len(image), "flash_target": target}]
+        r = gates.artefacts(tmp_path, b)
+        assert r.ok == (image == _cm33() and target == "xspi:mtd1")
+        if not r.ok:
+            assert "cm33:" in r.detail

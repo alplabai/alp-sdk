@@ -578,6 +578,13 @@
 	bus-width = <4>;
 	sd-uhs-sdr50;
 	cd-gpios = <&pinctrl RZV2N_GPIO(A, 1) GPIO_ACTIVE_LOW>;
+	/* The RZ/V2N ICU has no both-edge TINT mode, so the card-detect GPIO
+	 * cannot be an interrupt (the MMC core asks for both edges and the request
+	 * failed with "Setting trigger mode 3 ... failed"). broken-cd sets
+	 * MMC_CAP_NEEDS_POLL: no interrupt is requested and the core polls the
+	 * cd-gpios line about once a second, so insertion and removal are still
+	 * detected within about a second. */
+	broken-cd;
 	status = "okay";
 };
 
