@@ -59,10 +59,14 @@
 	 * resolves its chip-select gpio_dt_spec from gpios[N] of this node (see the
 	 * SPI backend's alp_z_gpio_resolve()).  Index 0 = the GD32 SPI chip-select
 	 * on P97, matching the example's cs_pin_id = 0.
+	 * Index 1 = the bridge ATTN input (GD32 PA14 -> P71, protocol v0.15 section 3.17):
+	 * an INPUT with a rising-edge IRQ, never driven except by the SWD recovery
+	 * path with GD32_NRST asserted.
 	 */
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
-		gpios = <&gpio9 7 GPIO_ACTIVE_LOW>;
+		gpios = <&gpio9 7 GPIO_ACTIVE_LOW>,
+			<&gpio7 1 GPIO_ACTIVE_HIGH>;
 	};
 };
 
@@ -111,6 +115,10 @@
 };
 
 &gpio9 {
+	status = "okay";
+};
+
+&gpio7 {
 	status = "okay";
 };
 

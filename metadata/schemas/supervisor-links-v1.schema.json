@@ -40,7 +40,8 @@
               "minItems": 1,
               "items": { "$ref": "#/$defs/pin_row" }
             },
-            "gpio_chip_select": { "$ref": "#/$defs/gpio_chip_select" }
+            "gpio_chip_select": { "$ref": "#/$defs/gpio_chip_select" },
+            "gpio_attn": { "$ref": "#/$defs/gpio_chip_select" }
           }
         },
         "brd_i2c": {

@@ -2080,6 +2080,10 @@ def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
         if isinstance(gcs, dict):
             _check_pair(gcs.get("silicon_peripheral"), gcs.get("silicon_pad"),
                         f"supervisor_links.{link_name}.gpio_chip_select", expected_core)
+        gattn = link.get("gpio_attn")
+        if isinstance(gattn, dict):
+            _check_pair(gattn.get("silicon_peripheral"), gattn.get("silicon_pad"),
+                        f"supervisor_links.{link_name}.gpio_attn", expected_core)
 
     brd_i2c = links.get("brd_i2c")
     if isinstance(brd_i2c, dict) and "peer_address_7bit" in brd_i2c:

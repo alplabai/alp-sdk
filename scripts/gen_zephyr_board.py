@@ -2642,6 +2642,7 @@ def _v2n_dts(
     sda = _pin_by_peripheral(brd_i2c["pins"], "RIIC8_SDA8")
     scl = _pin_by_peripheral(brd_i2c["pins"], "RIIC8_SCL8")
     cs0 = gd32_spi["gpio_chip_select"]
+    attn = gd32_spi.get("gpio_attn")  # optional: GD32 ATTN input (protocol v0.15)
     peer_addr = brd_i2c["peer_address_7bit"]
     ch = _v2n_sci_channel(gd32_spi["dt_label"])  # "7"
 
@@ -2712,10 +2713,28 @@ def _v2n_dts(
         "\t * resolves its chip-select gpio_dt_spec from gpios[N] of this node (see the",
         "\t * SPI backend's alp_z_gpio_resolve()).  Index 0 = the GD32 SPI chip-select",
         f"\t * on {cs0['silicon_pad']}, matching the example's cs_pin_id = 0.",
+    ]
+    if attn:
+        lines += [
+            "\t * Index 1 = the bridge ATTN input (GD32 PA14 -> "
+            f"{attn['silicon_pad']}, protocol v0.15 section 3.17):",
+            "\t * an INPUT with a rising-edge IRQ, never driven except by the SWD recovery",
+            "\t * path with GD32_NRST asserted.",
+        ]
+    lines += [
         "\t */",
         "\talp_pins: alp-pins {",
         '\t\tcompatible = "alp,pin-array";',
-        f"\t\tgpios = <&{cs0['gpio_node']} {cs0['gpio_pin']} GPIO_ACTIVE_LOW>;",
+    ]
+    if attn:
+        attn_pol = "GPIO_ACTIVE_LOW" if attn["active_low"] else "GPIO_ACTIVE_HIGH"
+        lines += [
+            f"\t\tgpios = <&{cs0['gpio_node']} {cs0['gpio_pin']} GPIO_ACTIVE_LOW>,",
+            f"\t\t\t<&{attn['gpio_node']} {attn['gpio_pin']} {attn_pol}>;",
+        ]
+    else:
+        lines.append(f"\t\tgpios = <&{cs0['gpio_node']} {cs0['gpio_pin']} GPIO_ACTIVE_LOW>;")
+    lines += [
         "\t};",
         "};",
         "",
@@ -2768,6 +2787,15 @@ def _v2n_dts(
         '\tstatus = "okay";',
         "};",
         "",
+    ]
+    if attn and attn["gpio_node"] != cs0["gpio_node"]:
+        lines += [
+            f"&{attn['gpio_node']} {{",
+            '\tstatus = "okay";',
+            "};",
+            "",
+        ]
+    lines += [
         "/*",
         f" * {brd_i2c['peripheral']} / BRD_I2C is Cortex-A55/Linux-exclusive",
         " * (metadata/e1m_modules/v2n/core-ownership.yaml) -- the CM33 must never",
