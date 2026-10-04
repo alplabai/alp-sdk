@@ -12,9 +12,9 @@
 
 #include <zephyr/ztest.h>
 
-#include "alp/backend.h"        /* alp_backend_select / alp_backend_t */
-#include "alp/chips/gd32_swd.h" /* gd32_swd_session_notify */
-#include "alp/dac.h"            /* alp_dac_open / alp_dac_t / alp_dac_config_t */
+#include "alp/backend.h"                                  /* alp_backend_select / alp_backend_t */
+#include "../../../../chips/gd32_swd/gd32_swd_platform.h" /* gd32_swd_session_notify */
+#include "alp/dac.h" /* alp_dac_open / alp_dac_t / alp_dac_config_t */
 #include "alp/peripheral.h"
 #include "alp/soc_caps.h" /* ALP_SOC_DAC_COUNT / ALP_SOC_REF_STR */
 

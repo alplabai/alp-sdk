@@ -112,31 +112,6 @@ typedef enum {
 	GD32_SWD_ACK_PROTO = 0x7,
 } gd32_swd_ack_t;
 
-/**
- * @brief Platform pad seam: how the driver opens the three GD32 pads.
- *
- * The pads (@ref GD32G553_PAD_ID_SWDIO / _SWCLK / _NRST) are NOT portable
- * pins -- the portable `alp_gpio_open()` refuses those ids (`ALP_ERR_INVAL`),
- * because they name the GD32 SWD / reset / ATTN pads and the shared open-drain
- * NRST net.  The driver opens its own pads through this table, which the
- * platform glue provides (src/zephyr/gd32_swd_pads.c) by overriding the weak
- * @ref gd32_swd_platform; a build without glue answers
- * `ALP_ERR_NOSUPPORT` from @ref gd32_swd_init.
- */
-typedef struct gd32_swd_platform {
-	/** Open one reserved pad id; NULL when the board does not publish it. */
-	alp_gpio_t *(*open_pad)(uint32_t pad_id);
-	/** Switch the pad to an OUTPUT whose initial level is LOW in the same
-	 *  step -- never driven high, not even briefly (the NRST net is shared
-	 *  with the PMIC and open-drain). */
-	alp_status_t (*configure_output_low)(alp_gpio_t *pad);
-	/** Close a pad opened by @c open_pad. */
-	void (*close_pad)(alp_gpio_t *pad);
-} gd32_swd_platform_t;
-
-/** Platform glue entry: the pad seam, or NULL (weak default) when there is none. */
-const gd32_swd_platform_t *gd32_swd_platform(void);
-
 /** Driver context. */
 typedef struct {
 	bool                            initialised;
@@ -148,7 +123,8 @@ typedef struct {
 	uint32_t                        idcode;
 	bool                            swdio_is_output;
 	bool                            nrst_held; /**< GD32_NRST asserted (connect-under-reset). */
-	const struct gd32_swd_platform *plat;      /**< Pad opener (internal). */
+	const struct gd32_swd_platform *plat;
+	    /* opaque: internal pad seam */ /**< Pad opener (internal). */
 } gd32_swd_t;
 
 /**
@@ -158,10 +134,10 @@ typedef struct {
  * which the GD32 drives while the v0.15 ATTN link feature is granted, so the
  * host may only drive it as an output while `GD32_NRST` (`P74`) holds the GD32
  * in reset (docs/gd32-bridge-protocol.md §3.17 rule H3).  This call:
- *   1. notifies the platform (@ref gd32_swd_session_notify) so the SPI bridge
+ *   1. notifies the platform (`gd32_swd_session_notify`) so the SPI bridge
  *      link is closed and stays closed until @ref gd32_swd_deinit;
  *   2. opens the three pads itself through the platform seam
- *      (@ref gd32_swd_platform_t) -- the caller passes no handles, and
+ *      (internal seam) -- the caller passes no handles, and
  *      application code cannot open those ids;
  *   3. asserts NRST as an output with an INITIAL LOW level (never driven high:
  *      the net is shared with the PMIC's open-drain reset-out) and FAILS if it
@@ -217,20 +193,8 @@ alp_status_t gd32_swd_reset_and_run(gd32_swd_t *ctx);
 
 /** Release the driver context: releases NRST, returns `swdio` and `swclk`
  *  (P70 / P71) to inputs, closes the pads and ends the session
- *  (@ref gd32_swd_session_notify with false). */
+ *  (`gd32_swd_session_notify` with false). */
 void gd32_swd_deinit(gd32_swd_t *ctx);
-
-/**
- * @brief Session hook: an SWD session starts (true) or ends (false).
- *
- * Weak no-op in the driver; the platform glue that owns the GD32 bridge link
- * overrides it (src/zephyr/v2n_supervisor.c).  Called with true before
- * @ref gd32_swd_init touches any pad and with false when the pads are
- * inputs again, so the bridge can be closed, kept from re-initialising or
- * renegotiating, and answer BUSY for the whole session -- the bridge and
- * this driver share P71.
- */
-void gd32_swd_session_notify(bool active);
 
 #ifdef __cplusplus
 } /* extern "C" */

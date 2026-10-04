@@ -21,6 +21,7 @@
 #include <zephyr/ztest.h>
 
 #include "alp/chips/gd32_swd.h"
+#include "../../../../chips/gd32_swd/gd32_swd_platform.h"
 
 /* ---- the three opaque pad handles ---------------------------------------- */
 
@@ -272,9 +273,23 @@ static bool target_read_bit(void)
 
 /* ---- the GPIO mock the driver bit-bangs --------------------------------------- */
 
+/* Pad model: an output LATCH that survives direction changes (the GD32_NRST pad
+ * is left with a STALE-HIGH latch by a pre-0.15 image).  g_latch_at_flip records
+ * the latch at the instant a pad becomes an output; g_nrst_drove_high is set if
+ * the NRST pad is ever an output while its latch is high. */
+static bool g_latch[3];
+static bool g_is_out[3];
+static int  g_latch_at_flip[3];
+static bool g_nrst_drove_high;
+
 alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pull_t pull)
 {
 	(void)pull;
+	if (dir == ALP_GPIO_OUTPUT && !g_is_out[pin->id]) {
+		g_latch_at_flip[pin->id] = g_latch[pin->id] ? 1 : 0;
+		if (pin == &P_NRST && g_latch[pin->id]) g_nrst_drove_high = true;
+	}
+	g_is_out[pin->id] = (dir == ALP_GPIO_OUTPUT);
 	log_ev(EV_CFG, pin->id, 0u, (dir == ALP_GPIO_OUTPUT) ? 1u : 0u);
 	if (pin == &P_SWDIO) T.host_drives = (dir == ALP_GPIO_OUTPUT);
 	/* NRST released (high-impedance): a core armed for halt-on-reset stops at
@@ -285,6 +300,8 @@ alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pu
 
 alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
 {
+	g_latch[pin->id] = level; /* P latch: written whatever the direction */
+	if (pin == &P_NRST && g_is_out[pin->id] && level) g_nrst_drove_high = true;
 	if (pin == &P_NRST) {
 		log_ev(EV_NRST_WRITE, pin->id, 0u, level ? 1u : 0u);
 		return g_fail_nrst_write ? ALP_ERR_IO : ALP_OK;
@@ -321,9 +338,15 @@ static alp_gpio_t *mock_open_pad(uint32_t pad_id)
 	                                           : NULL;
 }
 
+/* The backend contract (src/backends/gpio/zephyr_drv.c z_configure_output_low):
+ * latch LOW while the pad is still an input, THEN switch the direction -- the RZ
+ * FSP writes PM before P, so a direction switch alone would drive the stale latch. */
 static alp_status_t mock_configure_output_low(alp_gpio_t *pad)
 {
 	log_ev(EV_CFG_LOW, pad->id, 0u, 0u);
+	g_latch[pad->id]         = false; /* 1. latch low (input) */
+	g_latch_at_flip[pad->id] = 0;     /* 2. direction flips  */
+	g_is_out[pad->id]        = true;
 	return ALP_OK;
 }
 
@@ -360,6 +383,11 @@ static void each_before(void *unused)
 	g_no_halt         = false;
 	g_fail_nrst_write = false;
 	g_fail_mem        = false;
+	memset(g_latch, 0, sizeof(g_latch));
+	memset(g_is_out, 0, sizeof(g_is_out));
+	g_latch[2]         = true; /* NRST: stale-high latch left by an older image */
+	g_latch_at_flip[0] = g_latch_at_flip[1] = g_latch_at_flip[2] = -1;
+	g_nrst_drove_high                                            = false;
 	target_reset();
 }
 
@@ -414,6 +442,10 @@ ZTEST(gd32_swd_connect_under_reset, test_nrst_is_asserted_before_swd_pads_are_dr
 	zassert_equal(find_ev(EV_NRST_WRITE, -1, 1u, 0), -1, "NRST is never driven high (open-drain)");
 	zassert_true(swd.nrst_held, "still asserted after init: connect releases it");
 	zassert_equal(find_ev(EV_CFG, P_NRST.id, 0u, 0), -1, "NRST not released yet");
+	/* The pad starts with a stale-high latch: it must read LOW at the moment the
+	 * direction flips to output, and the pad must never have driven high. */
+	zassert_equal(g_latch_at_flip[P_NRST.id], 0, "latch low BEFORE NRST became an output");
+	zassert_false(g_nrst_drove_high, "NRST pad never drove the shared net high");
 	gd32_swd_deinit(&swd);
 }
 
@@ -529,6 +561,9 @@ ZTEST(gd32_swd_connect_under_reset, test_deinit_returns_the_pads_to_inputs_and_c
 	const int i_end    = find_ev(EV_NOTIFY, -1, 0u, (int)before);
 	zassert_true(i_clk_in >= 0, "SWCLK (P71) back to an input");
 	zassert_true(i_dio_in >= 0, "SWDIO (P70) back to an input");
+	const int i_rel = find_ev(EV_CFG, P_NRST.id, 0u, (int)before);
+	zassert_true(i_rel > i_clk_in && i_rel > i_dio_in,
+	             "P70/P71 back to inputs BEFORE NRST is released (as in reset_and_run)");
 	zassert_true(i_close > i_clk_in && i_close > i_dio_in, "pads closed after they are inputs");
 	zassert_true(i_end > i_close, "session closed last");
 	zassert_false(swd.initialised);

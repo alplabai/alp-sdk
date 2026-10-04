@@ -9,7 +9,7 @@
  * open-drain NRST net; only the SWD driver reaches them, here.
  */
 
-#include "alp/chips/gd32_swd.h"
+#include "../../chips/gd32_swd/gd32_swd_platform.h"
 #include "../backends/gpio/gpio_ops.h"
 
 static alp_gpio_t *pad_open(uint32_t pad_id)

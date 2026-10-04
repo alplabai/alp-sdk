@@ -80,8 +80,8 @@
  * master it, so there is no I2C transport branch here at all. */
 #define V2N_SPI_BUS_DISABLED (CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID < 0)
 
-#include "alp/chips/gd32_swd.h"        /* gd32_swd_session_notify() */
-#include "../backends/gpio/gpio_ops.h" /* alp_z_gpio_open_internal() */
+#include "../../chips/gd32_swd/gd32_swd_platform.h" /* gd32_swd_session_notify() */
+#include "../backends/gpio/gpio_ops.h"              /* alp_z_gpio_open_internal() */
 
 static struct {
 	bool           tried_init;
@@ -96,7 +96,7 @@ static struct {
 	struct k_sem      attn_sem;
 	volatile uint32_t attn_edge_t;  /* cycle counter at the last edge (ISR-written) */
 	atomic_t          swd_session;  /* an SWD session owns P70/P71/P74 */
-	bool              force_reinit; /* a session start could not close the link */
+	atomic_t          force_reinit; /* a session start could not close the link */
 } g_v2n;
 
 /* ---- ATTN hook (edge latch = semaphore) ------------------------------- */
@@ -187,7 +187,7 @@ SYS_INIT(v2n_supervisor_sys_init, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAU
 static alp_status_t try_init_locked(void)
 {
 	if (atomic_get(&g_v2n.swd_session) != 0) return ALP_ERR_BUSY; /* SWD owns P71 */
-	if (g_v2n.force_reinit) {
+	if (atomic_cas(&g_v2n.force_reinit, 1, 0)) {
 		/* An SWD session started while a bridge command held the lock, so the
 		 * link could not be closed then.  The session may have reset the GD32 and
 		 * left P71 an output: drop the stale link and re-run the full init
@@ -196,9 +196,8 @@ static alp_status_t try_init_locked(void)
 			alp_spi_close(g_v2n.spi);
 			g_v2n.spi = NULL;
 		}
-		g_v2n.tried_init   = false;
-		g_v2n.init_status  = ALP_ERR_NOT_READY;
-		g_v2n.force_reinit = false;
+		g_v2n.tried_init  = false;
+		g_v2n.init_status = ALP_ERR_NOT_READY;
 	}
 	if (g_v2n.tried_init) return g_v2n.init_status;
 	/* A bridge that answered BUSY is alive but mid-OTA-trial; each
@@ -354,7 +353,7 @@ void gd32_swd_session_notify(bool active)
 	} else {
 		/* Could not take the lock (a bridge command is in flight): remember
 		 * that the link is stale so the next use after the session re-inits. */
-		g_v2n.force_reinit = true;
+		atomic_set(&g_v2n.force_reinit, 1);
 	}
 }
 

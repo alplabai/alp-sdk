@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include "alp/chips/gd32_swd.h"
+#include "gd32_swd_platform.h"
 
 /* ------------------------------------------------------------------ */
 /* SW-DP / AP register addresses (4-bit fields A[3:2] combined with    */
@@ -820,8 +821,10 @@ void gd32_swd_deinit(gd32_swd_t *ctx)
 	if (ctx->initialised) {
 		/* Never leave the GD32 held in reset, and give P70/P71 back: both
 		 * pads return to INPUT (P71 is the bridge's ATTN line again). */
-		if (ctx->nrst != NULL) swd_nrst_release(ctx);
+		/* Same order as reset_and_run(): P70/P71 back to inputs FIRST, then
+		 * release NRST -- the GD32 may boot and drive PA14 the moment it runs. */
 		swd_pads_to_inputs(ctx);
+		if (ctx->nrst != NULL) swd_nrst_release(ctx);
 		swd_close_pads(ctx);
 		gd32_swd_session_notify(false);
 	}

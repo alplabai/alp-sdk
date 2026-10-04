@@ -230,14 +230,21 @@ z_configure(alp_gpio_backend_state_t *st, alp_gpio_dir_t dir, alp_gpio_pull_t pu
 	return _errno_to_alp(err);
 }
 
-/* OUTPUT with the initial level LOW applied in the same call that switches the
- * direction (GPIO_OUTPUT_INIT_LOW is the PHYSICAL low), so the pad never drives
- * a stale high latch -- the RZ GPIO driver keeps the old output latch when no
- * initial level is given. */
+/* OUTPUT whose level is LOW from the first instant -- the pad must never drive a
+ * stale-high latch onto a shared net.  GPIO_OUTPUT_INIT_LOW alone is NOT enough on
+ * RZ/V2N: the FSP's r_ioport_port_mode_pin_config() writes PM (direction) BEFORE
+ * P (data), so the pad would drive the old latch for a few bus cycles.  So write
+ * the P latch FIRST while the pad is still an input: gpio_pin_set_raw(0) ->
+ * gpio_rz_port_clear_bits_raw (gpio_renesas_rz.c) -> R_IOPORT_PortWrite
+ * (r_ioport.c), which writes only the P register, whatever the direction.  Then
+ * switch the direction with GPIO_OUTPUT_INIT_LOW (physical low, redundant for the
+ * latch but correct on controllers that apply the level at the switch). */
 static alp_status_t z_configure_output_low(alp_gpio_backend_state_t *st)
 {
 	alp_z_gpio_side_t *s = (alp_z_gpio_side_t *)st->be_data;
 	if (s == NULL) return ALP_ERR_NOT_READY;
+	int err = gpio_pin_set_raw(s->spec.port, s->spec.pin, 0);
+	if (err != 0) return _errno_to_alp(err);
 	return _errno_to_alp(gpio_pin_configure_dt(&s->spec, GPIO_OUTPUT_INIT_LOW));
 }
 

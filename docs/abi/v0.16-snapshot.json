@@ -4261,17 +4261,9 @@
           "hash": "93dc157b8620b057",
           "signature": "alp_status_t gd32_swd_init(gd32_swd_t *ctx);"
         },
-        "gd32_swd_platform": {
-          "hash": "6c0dffaf645b928a",
-          "signature": "const gd32_swd_platform_t * gd32_swd_platform(void);"
-        },
         "gd32_swd_reset_and_run": {
           "hash": "2fe69170edfaedad",
           "signature": "alp_status_t gd32_swd_reset_and_run(gd32_swd_t *ctx);"
-        },
-        "gd32_swd_session_notify": {
-          "hash": "6ef8d60a086fcf4c",
-          "signature": "void gd32_swd_session_notify(bool active);"
         },
         "gd32_swd_set_clock_delay": {
           "hash": "b8e8236c0786b54a",
@@ -4315,16 +4307,6 @@
           ],
           "hash": "03014058bcf50a7e",
           "kind": "enum"
-        },
-        "gd32_swd_platform_t": {
-          "definition": "typedef struct gd32_swd_platform { alp_gpio_t *(*open_pad)(uint32_t pad_id); alp_status_t (*configure_output_low)(alp_gpio_t *pad); void (*close_pad)(alp_gpio_t *pad); } gd32_swd_platform_t;",
-          "fields": [
-            "alp_gpio_t *(*open_pad)(uint32_t pad_id)",
-            "alp_status_t (*configure_output_low)(alp_gpio_t *pad)",
-            "void (*close_pad)(alp_gpio_t *pad)"
-          ],
-          "hash": "4b86223cba9fa798",
-          "kind": "struct"
         },
         "gd32_swd_t": {
           "definition": "typedef struct { bool initialised; bool connected; alp_gpio_t *swdio; alp_gpio_t *swclk; alp_gpio_t *nrst; uint32_t clock_delay; uint32_t idcode; bool swdio_is_output; bool nrst_held; const struct gd32_swd_platform *plat; } gd32_swd_t;",
