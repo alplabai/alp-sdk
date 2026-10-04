@@ -124,7 +124,7 @@ ros2 topic echo /alp/soc_temperature      # sensor_msgs/Temperature, degC (SoC d
 ros2 topic echo /alp/som_temperature      # on-module sensor (see below)
 ```
 
-`/alp/soc_temperature` comes from `alp_temperature_read_soc_milli_c()`, whose
+`/alp/soc_temperature` comes from `alp_temperature_read_die_milli_c()`, whose
 Linux backend reads the thermal zones whose type starts with `cpu-thermal`
 ([`include/alp/temperature.h`](../include/alp/temperature.h)). The on-module
 sensor call `alp_temperature_read_milli_c()` is implemented on the Zephyr AEN

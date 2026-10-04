@@ -2,7 +2,7 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Plain-CMake tests for alp_temperature_read_soc_milli_c()
+ * Plain-CMake tests for alp_temperature_read_die_milli_c()
  * (src/yocto/temperature_yocto.c) against a fake sysfs thermal tree.
  *
  * The backend is compiled into this binary with ALP_THERMAL_SYSFS_ROOT
@@ -72,7 +72,7 @@ static void add_zone(int idx, const char *type, const char *temp)
 
 static void test_null_arg(void)
 {
-	ALP_ASSERT_EQ_INT(alp_temperature_read_soc_milli_c(NULL), ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(alp_temperature_read_die_milli_c(NULL), ALP_ERR_INVAL);
 }
 
 static void test_hottest_cpu_zone_wins_and_acpitz_ignored(void)
@@ -82,7 +82,7 @@ static void test_hottest_cpu_zone_wins_and_acpitz_ignored(void)
 	add_zone(0, "cpu-thermal0", "51000");
 	add_zone(1, "cpu-thermal1", "58250");
 	add_zone(2, "acpitz", "99000");
-	ALP_ASSERT_EQ_INT(alp_temperature_read_soc_milli_c(&v), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_temperature_read_die_milli_c(&v), ALP_OK);
 	ALP_ASSERT_EQ_INT(v, 58250);
 }
 
@@ -92,7 +92,7 @@ static void test_selection_is_by_type_not_index(void)
 	clear_tree();
 	add_zone(0, "acpitz", "99000");
 	add_zone(3, "cpu-thermal0", "47000"); /* hole at 1, 2 */
-	ALP_ASSERT_EQ_INT(alp_temperature_read_soc_milli_c(&v), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_temperature_read_die_milli_c(&v), ALP_OK);
 	ALP_ASSERT_EQ_INT(v, 47000);
 }
 
@@ -102,7 +102,7 @@ static void test_negative_temperature(void)
 	clear_tree();
 	add_zone(0, "cpu-thermal0", "-12500");
 	add_zone(1, "cpu-thermal1", "-20000");
-	ALP_ASSERT_EQ_INT(alp_temperature_read_soc_milli_c(&v), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_temperature_read_die_milli_c(&v), ALP_OK);
 	ALP_ASSERT_EQ_INT(v, -12500);
 }
 
@@ -112,7 +112,7 @@ static void test_unreadable_zone_skipped_when_another_reads(void)
 	clear_tree();
 	add_zone(0, "cpu-thermal0", NULL);
 	add_zone(1, "cpu-thermal1", "40000");
-	ALP_ASSERT_EQ_INT(alp_temperature_read_soc_milli_c(&v), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_temperature_read_die_milli_c(&v), ALP_OK);
 	ALP_ASSERT_EQ_INT(v, 40000);
 }
 
@@ -121,7 +121,7 @@ static void test_no_matching_zone_is_nosupport(void)
 	int32_t v = 1234;
 	clear_tree();
 	add_zone(0, "acpitz", "99000");
-	ALP_ASSERT_EQ_INT(alp_temperature_read_soc_milli_c(&v), ALP_ERR_NOSUPPORT);
+	ALP_ASSERT_EQ_INT(alp_temperature_read_die_milli_c(&v), ALP_ERR_NOSUPPORT);
 	ALP_ASSERT_EQ_INT(v, 1234); /* untouched on failure */
 }
 
@@ -131,7 +131,7 @@ static void test_all_matched_unreadable_is_io(void)
 	clear_tree();
 	add_zone(0, "cpu-thermal0", NULL);
 	add_zone(1, "cpu-thermal1", NULL);
-	ALP_ASSERT_EQ_INT(alp_temperature_read_soc_milli_c(&v), ALP_ERR_IO);
+	ALP_ASSERT_EQ_INT(alp_temperature_read_die_milli_c(&v), ALP_ERR_IO);
 	ALP_ASSERT_EQ_INT(v, 1234);
 }
 

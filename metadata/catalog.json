@@ -3284,7 +3284,7 @@
         ],
         "path": "examples/v2n/v2n-soc-temperature",
         "som": "E1M-V2N101",
-        "summary": "Prints the SoC die (junction) temperature once per second from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster, through the portable `alp_temperature_read_soc_milli_c()`."
+        "summary": "Prints the SoC die (junction) temperature once per second from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster, through the portable `alp_temperature_read_die_milli_c()`."
       },
       {
         "board": "e1m-x-evk",
@@ -4106,8 +4106,8 @@
     },
     {
       "functions": [
-        "alp_temperature_read_milli_c",
-        "alp_temperature_read_soc_milli_c"
+        "alp_temperature_read_die_milli_c",
+        "alp_temperature_read_milli_c"
       ],
       "header": "include/alp/temperature.h"
     },

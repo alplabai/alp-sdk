@@ -11,7 +11,7 @@ temperature API** from `<alp/temperature.h>` and republishes the values as
 > bench-verified.
 
 ```
-alp_temperature_read_soc_milli_c()  -->  /alp/soc_temperature
+alp_temperature_read_die_milli_c()  -->  /alp/soc_temperature
 alp_temperature_read_milli_c()      -->  /alp/som_temperature
    (portable Alp SDK API)                sensor_msgs/Temperature [degC]
 ```
@@ -27,7 +27,7 @@ alp_temperature_read_milli_c()      -->  /alp/som_temperature
 
 ## Coverage today
 
-`alp_temperature_read_soc_milli_c()` has a Linux backend (thermal zones
+`alp_temperature_read_die_milli_c()` has a Linux backend (thermal zones
 `cpu-thermal*`), so `/alp/soc_temperature` carries data on V2N/V2M.
 `alp_temperature_read_milli_c()` (on-module sensor) is implemented on the
 Zephyr AEN backend only; on V2N/V2M it returns `ALP_ERR_NOSUPPORT`, so the

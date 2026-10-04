@@ -2,7 +2,7 @@
 # v2n-ros2-som-temperature example.
 #
 # A ROS 2 (Humble) node on the V2N / V2M Cortex-A55 cluster (Yocto) that
-# republishes the portable alp_temperature_read_soc_milli_c() and
+# republishes the portable alp_temperature_read_die_milli_c() and
 # alp_temperature_read_milli_c() readings as sensor_msgs/Temperature.  Uses only <alp/temperature.h>; see README.md.
 #
 # The ROS 2 stack is NOT a `libraries:` entry here -- it arrives with the

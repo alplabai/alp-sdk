@@ -8,7 +8,7 @@
 # What this proves, in order:
 #   1. The node starts and registers on the ROS 2 graph (HIL_ROS2_NODE_OK).
 #   2. /alp/soc_temperature carries a sample (HIL_ROS2_SOC_TEMP_OK): the
-#      Linux backend of alp_temperature_read_soc_milli_c() reads the
+#      Linux backend of alp_temperature_read_die_milli_c() reads the
 #      cpu-thermal zones.
 #   3. /alp/som_temperature: the Linux build returns ALP_ERR_NOSUPPORT for
 #      alp_temperature_read_milli_c(), so the expected outcome is the one-time

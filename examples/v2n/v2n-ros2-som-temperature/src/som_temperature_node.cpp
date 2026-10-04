@@ -12,7 +12,7 @@
 //        <alp/temperature.h>                  ROS 2 graph
 //   alp_temperature_read_milli_c()     --> /alp/som_temperature
 //      (on-module sensor, ambient)         sensor_msgs/Temperature (degC)
-//   alp_temperature_read_soc_milli_c() --> /alp/soc_temperature
+//   alp_temperature_read_die_milli_c() --> /alp/soc_temperature
 //      (SoC die / junction)                sensor_msgs/Temperature (degC)
 //
 // The two are different physical quantities and are never folded together
@@ -92,8 +92,8 @@ class SomTemperatureNode : public rclcpp::Node
 		publish(
 		    som_, "alp_temperature_read_milli_c", alp_temperature_read_milli_c(&milli_c), milli_c);
 		publish(soc_,
-		        "alp_temperature_read_soc_milli_c",
-		        alp_temperature_read_soc_milli_c(&milli_c),
+		        "alp_temperature_read_die_milli_c",
+		        alp_temperature_read_die_milli_c(&milli_c),
 		        milli_c);
 	}
 
