@@ -30,6 +30,19 @@
  *     ALP_ERR_BUSY (bridge alive, mid-OTA-trial) arms a hold-off
  *     (CONFIG_ALP_SDK_V2N_SUPERVISOR_BUSY_HOLDOFF_MS) during which
  *     acquirers get ALP_ERR_BUSY without re-running the ~2 s init.
+ *
+ * ATTN (GD32 bridge protocol v0.15, docs/gd32-bridge-protocol.md §3.17):
+ *   The GD32 drives PA14 -- Renesas P71, alp_pins index
+ *   CONFIG_ALP_SDK_V2N_SUPERVISOR_ATTN_PIN_ID -- HIGH when a reply is armed.
+ *   This file opens P71 as an INPUT with a rising-edge IRQ BEFORE the first
+ *   gd32g553_init_ex() (host rules H1/H2) and registers an edge-wait hook
+ *   (ISR gives a semaphore, the hook takes it: no polling), so the chip
+ *   driver can request the ATTN link feature.  P71 is NEVER driven as an
+ *   output here; the only code that ever does is the SWD recovery path
+ *   (chips/gd32_swd), which asserts GD32_NRST (P74) first (rule H3).  When
+ *   the pad cannot be opened, or the platform GPIO driver has no interrupt
+ *   for it, the hook is simply absent and the link keeps the 0.14 staging
+ *   gap + re-read ladder.
  */
 
 #include <zephyr/kernel.h>
@@ -58,6 +71,10 @@
  * master it, so there is no I2C transport branch here at all. */
 #define V2N_SPI_BUS_DISABLED (CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID < 0)
 
+#ifndef CONFIG_ALP_SDK_V2N_SUPERVISOR_ATTN_PIN_ID
+#define CONFIG_ALP_SDK_V2N_SUPERVISOR_ATTN_PIN_ID (-1)
+#endif
+
 static struct {
 	bool           tried_init;
 	alp_status_t   init_status;
@@ -65,11 +82,76 @@ static struct {
 	alp_spi_t     *spi;
 	gd32g553_t     ctx;
 	struct k_mutex lock;
+	/* ATTN (P71) input: opened + IRQ-armed once, kept for the image's life. */
+	alp_gpio_t  *attn_pin;
+	bool         attn_ready;
+	struct k_sem attn_sem;
 } g_v2n;
+
+/* ---- ATTN hook (edge latch = semaphore) ------------------------------- */
+
+static void attn_isr(alp_gpio_t *pin, void *user)
+{
+	(void)pin;
+	(void)user;
+	k_sem_give(&g_v2n.attn_sem); /* ISR-safe */
+}
+
+/* Forget any edge seen before this request. */
+static void attn_arm(void *user)
+{
+	(void)user;
+	k_sem_reset(&g_v2n.attn_sem);
+}
+
+/* Block (IRQ + semaphore, never polling) until a rising edge was latched. */
+static alp_status_t attn_wait(void *user, uint32_t timeout_ms)
+{
+	(void)user;
+	return (k_sem_take(&g_v2n.attn_sem, K_MSEC(timeout_ms)) == 0) ? ALP_OK : ALP_ERR_TIMEOUT;
+}
+
+static alp_status_t attn_read_level(void *user, bool *high)
+{
+	(void)user;
+	return alp_gpio_read(g_v2n.attn_pin, high);
+}
+
+static const gd32g553_attn_hook_t g_attn_hook = {
+	.arm        = attn_arm,
+	.wait       = attn_wait,
+	.read_level = attn_read_level,
+};
+
+/* Rules H1/H2: P71 is an input with a rising-edge IRQ before ATTN is ever
+ * requested.  Best-effort -- any failure leaves the hook absent. */
+static bool attn_setup(void)
+{
+#if (CONFIG_ALP_SDK_V2N_SUPERVISOR_ATTN_PIN_ID >= 0)
+	if (g_v2n.attn_ready) return true;
+	if (g_v2n.attn_pin == NULL) {
+		g_v2n.attn_pin = alp_gpio_open((uint32_t)CONFIG_ALP_SDK_V2N_SUPERVISOR_ATTN_PIN_ID);
+		if (g_v2n.attn_pin == NULL) return false;
+	}
+	if (alp_gpio_configure(g_v2n.attn_pin, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE) != ALP_OK ||
+	    alp_gpio_irq_enable(g_v2n.attn_pin, ALP_GPIO_EDGE_RISING, attn_isr, NULL) != ALP_OK) {
+		/* No interrupt for this pad (the platform GPIO driver has no ICU
+		 * TINT route, or the id is not in alp_pins): ATTN stays off. */
+		alp_gpio_close(g_v2n.attn_pin);
+		g_v2n.attn_pin = NULL;
+		return false;
+	}
+	g_v2n.attn_ready = true;
+	return true;
+#else
+	return false;
+#endif
+}
 
 static int v2n_supervisor_sys_init(void)
 {
 	k_mutex_init(&g_v2n.lock);
+	k_sem_init(&g_v2n.attn_sem, 0, 1); /* before any ATTN IRQ can fire */
 	return 0;
 }
 SYS_INIT(v2n_supervisor_sys_init, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
@@ -118,8 +200,11 @@ static alp_status_t try_init_locked(void)
 		return g_v2n.init_status;
 	}
 
-	const alp_status_t s =
-	    gd32g553_init(&g_v2n.ctx, g_v2n.spi, NULL, GD32G553_BRIDGE_DEFAULT_I2C_ADDR);
+	const alp_status_t s = gd32g553_init_ex(&g_v2n.ctx,
+	                                        g_v2n.spi,
+	                                        NULL,
+	                                        GD32G553_BRIDGE_DEFAULT_I2C_ADDR,
+	                                        attn_setup() ? &g_attn_hook : NULL);
 	if (s != ALP_OK) {
 		/* Tear the bus handle back down -- a failed handshake means
          * we won't issue further bridge calls, and leaving the bus
