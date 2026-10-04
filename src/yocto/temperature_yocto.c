@@ -4,7 +4,7 @@
  *
  * <alp/temperature.h> -- Linux (Yocto) backend.
  *
- * alp_temperature_read_soc_milli_c() reads the kernel's thermal zones
+ * alp_temperature_read_die_milli_c() reads the kernel's thermal zones
  * (`/sys/class/thermal/thermal_zoneN/{type,temp}`), which is how the
  * RZ/V2N's two on-die TSU units surface on Linux.  Zones are picked by
  * their `type` string ("cpu-thermal0", "cpu-thermal1" in the vendor
@@ -40,7 +40,7 @@ alp_status_t alp_temperature_read_milli_c(int32_t *milli_c)
 	return ALP_ERR_NOSUPPORT;
 }
 
-alp_status_t alp_temperature_read_soc_milli_c(int32_t *milli_c)
+alp_status_t alp_temperature_read_die_milli_c(int32_t *milli_c)
 {
 	if (milli_c == NULL) return ALP_ERR_INVAL;
 

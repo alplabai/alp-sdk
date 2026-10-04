@@ -1554,7 +1554,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set_tests_properties(alp_test_can_gpio_asan_ubsan PROPERTIES TIMEOUT 600)
 endif()
 
-# alp_temperature_read_soc_milli_c() selection logic (audit SYS-08) --
+# alp_temperature_read_die_milli_c() selection logic (audit SYS-08) --
 # src/yocto/temperature_yocto.c compiled into the test against a fake
 # sysfs thermal tree under /tmp via ALP_THERMAL_SYSFS_ROOT.
 add_executable(alp_test_temperature_soc

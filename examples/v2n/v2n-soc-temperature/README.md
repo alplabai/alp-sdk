@@ -2,7 +2,7 @@
 
 Prints the SoC die (junction) temperature once per second from a
 Linux/Yocto user-space app on the V2N Cortex-A55 cluster, through the
-portable `alp_temperature_read_soc_milli_c()`.
+portable `alp_temperature_read_die_milli_c()`.
 
 This is **not** the on-module ambient sensor. That one is
 `alp_temperature_read_milli_c()` (a TMP112 on the SoM; see
@@ -11,7 +11,7 @@ entries on purpose (issue #2066).
 
 ## What it shows
 
-* `alp_temperature_read_soc_milli_c(&milli_c)` -- hottest die sensor,
+* `alp_temperature_read_die_milli_c(&milli_c)` -- hottest die sensor,
   signed milli-degrees Celsius.
 * `ALP_ERR_NOSUPPORT` handling -- returned when the build has no SoC
   thermal source (Zephyr / baremetal, or a kernel with no matching zone).

@@ -10,7 +10,7 @@
  *   - alp_temperature_read_milli_c()      the on-module AMBIENT sensor
  *                                         (see examples/v2n/v2n-temp-sensor
  *                                         for the chip-level read);
- *   - alp_temperature_read_soc_milli_c()  the processor's own JUNCTION
+ *   - alp_temperature_read_die_milli_c()  the processor's own JUNCTION
  *                                         temperature -- this example.
  *
  * Under Linux the SoC die temperature comes from the kernel's thermal
@@ -39,7 +39,7 @@ int main(void)
 	 * value to a fan curve, a logger, or an over-temperature alert. */
 	for (int i = 0; i < 10; ++i) {
 		int32_t      milli_c = 0;
-		alp_status_t s       = alp_temperature_read_soc_milli_c(&milli_c);
+		alp_status_t s       = alp_temperature_read_die_milli_c(&milli_c);
 
 		if (s == ALP_ERR_NOSUPPORT) {
 			/* No matching thermal zone: not a Linux build, or a

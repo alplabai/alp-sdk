@@ -14354,13 +14354,13 @@
     },
     "alp/temperature.h": {
       "functions": {
+        "alp_temperature_read_die_milli_c": {
+          "hash": "28c5834d47858af1",
+          "signature": "alp_status_t alp_temperature_read_die_milli_c(int32_t *milli_c);"
+        },
         "alp_temperature_read_milli_c": {
           "hash": "0c80f66773e1c9a3",
           "signature": "alp_status_t alp_temperature_read_milli_c(int32_t *milli_c);"
-        },
-        "alp_temperature_read_soc_milli_c": {
-          "hash": "33ebfb4a29acb9d6",
-          "signature": "alp_status_t alp_temperature_read_soc_milli_c(int32_t *milli_c);"
         }
       },
       "macros": {},
