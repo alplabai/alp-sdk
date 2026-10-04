@@ -64,7 +64,7 @@ static gd32g553_t ctx;
 /* ATTN (protocol v0.15): the GD32 raises PA14 -- Renesas P71 -- once a */
 /* reply is armed, so the host can wait for an edge instead of a timed  */
 /* staging gap.  The chip driver is platform-agnostic: it only wants    */
-/* three callbacks (clear the latch, wait for an edge, read the level), */
+/* three callbacks (clock, time-stamped edge wait, read the level),      */
 /* which this app builds from the portable GPIO API plus a Zephyr       */
 /* semaphore.  (The V2N supervisor singleton does the same for the     */
 /* portable peripherals; this soak drives the chip driver directly.)    */
@@ -76,34 +76,42 @@ static gd32g553_t ctx;
 /*     it, with GD32_NRST asserted first.                               */
 /* ------------------------------------------------------------------ */
 
-/* alp_pins index 1 = P71 on the V2N / V2M CM33 boards (index 0 = the SPI
- * chip-select; both are generated from supervisor-links.yaml). */
-#define SOAK_ATTN_PIN_ID 1u
+/* The ATTN pad comes from the board's dedicated `alp,gd32-pads` devicetree
+ * node through a reserved id -- NOT from the positional alp_pins array, whose
+ * index 0 is the GD32 SPI chip-select. */
+#define SOAK_ATTN_PAD_ID GD32G553_PAD_ID_ATTN
 
-static alp_gpio_t  *attn_pin;
-static bool         attn_hook_ready;
-static struct k_sem attn_sem; /* the "edge latch": an ISR give, a thread take */
+static alp_gpio_t       *attn_pin;
+static bool              attn_hook_ready;
+static struct k_sem      attn_sem;    /* an ISR give, a thread take */
+static volatile uint32_t attn_edge_t; /* cycle counter at the last edge */
 
 static void attn_isr(alp_gpio_t *pin, void *user)
 {
 	(void)pin;
 	(void)user;
-	k_sem_give(&attn_sem); /* ISR-safe */
+	attn_edge_t = k_cycle_get_32(); /* stamp the edge, then wake the waiter */
+	k_sem_give(&attn_sem);          /* ISR-safe */
 }
 
-/* Forget any edge seen before this request is clocked out. */
-static void attn_arm(void *user)
+/* The clock the edges are stamped on.  The driver reads it just before it
+ * clocks a request and ignores any edge stamped earlier: an event edge that
+ * was still latched cannot be mistaken for the reply. */
+static uint32_t attn_now(void *user)
 {
 	(void)user;
-	k_sem_reset(&attn_sem);
+	return k_cycle_get_32();
 }
 
 /* Block until the next rising edge (interrupt + semaphore -- the driver
- * forbids polling), or time out so it can fall back to the 0.14 ladder. */
-static alp_status_t attn_wait(void *user, uint32_t timeout_ms)
+ * forbids polling) and report its time-stamp, or time out so the driver can
+ * fall back to the 0.14 ladder. */
+static alp_status_t attn_wait(void *user, uint32_t timeout_ms, uint32_t *t_edge)
 {
 	(void)user;
-	return (k_sem_take(&attn_sem, K_MSEC(timeout_ms)) == 0) ? ALP_OK : ALP_ERR_TIMEOUT;
+	if (k_sem_take(&attn_sem, K_MSEC(timeout_ms)) != 0) return ALP_ERR_TIMEOUT;
+	*t_edge = attn_edge_t;
+	return ALP_OK;
 }
 
 /* Optional: lets the driver spot a line stuck high. */
@@ -114,7 +122,7 @@ static alp_status_t attn_level(void *user, bool *high)
 }
 
 static const gd32g553_attn_hook_t attn_hook = {
-	.arm        = attn_arm,
+	.now        = attn_now,
 	.wait       = attn_wait,
 	.read_level = attn_level,
 };
@@ -125,9 +133,9 @@ static const gd32g553_attn_hook_t attn_hook = {
 static void attn_hook_setup(void)
 {
 	k_sem_init(&attn_sem, 0, 1);
-	attn_pin = alp_gpio_open(SOAK_ATTN_PIN_ID);
+	attn_pin = alp_gpio_open(SOAK_ATTN_PAD_ID);
 	if (attn_pin == NULL) {
-		printf("[hil-soak] ATTN: P71 not in alp_pins (err=%d) -- staging-gap path\n",
+		printf("[hil-soak] ATTN: pad not published by the board (err=%d) -- staging-gap path\n",
 		       (int)alp_last_error());
 		return;
 	}

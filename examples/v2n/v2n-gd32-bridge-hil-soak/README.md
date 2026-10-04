@@ -50,10 +50,16 @@ link that did not grant their feature and the 20 legacy rows run
 unchanged.
 
 `ATTN` is the GD32's data-ready output on `PA14`, wired to Renesas
-`P71`.  The app opens `P71` (`alp_pins` index 1) as an input with a
-rising-edge interrupt **before** the handshake, and gives the driver
-three callbacks built from `alp_gpio_*` and a semaphore: clear the
-edge latch, wait for an edge (never polling), read the level.  With
+`P71`.  The app opens `P71` through the reserved id
+`GD32G553_PAD_ID_ATTN` (the `attn` pad of the board's `alp,gd32-pads`
+devicetree node -- not an index of the positional pin array, whose index 0 is
+the GD32 SPI chip-select) as an input with a rising-edge interrupt
+**before** the handshake, and gives the driver three callbacks built from
+`alp_gpio_*`, a semaphore and the cycle counter: the clock, a wait for an
+edge that returns the edge's time-stamp (never polling), and the level.  The
+driver reads the clock just before it clocks a request and discards any edge
+stamped earlier, so an event edge that was still latched cannot be mistaken
+for the reply.  With
 `ATTN` granted every reply is awaited on its edge instead of a
 35 µs staging gap; a lost edge falls back to the v0.14 drain rule for
 that command only.  `P71` is never driven as an output by this app --

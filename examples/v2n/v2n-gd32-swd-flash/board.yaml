@@ -12,6 +12,7 @@ cores:
 
 chips:
   - gd32_swd
+  - gd32g553   # GD32G553_PAD_ID_* (the pad ids the board's alp,gd32-pads node is opened by)
 
 diagnostics:
   log_level: info
