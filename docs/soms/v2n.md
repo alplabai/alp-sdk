@@ -293,12 +293,11 @@ the range a local administrator may assign without buying an IEEE block.
 
 The environment is a **redundant pair in eMMC boot partition 2** (Linux
 `/dev/mmcblk0boot1`): copy 1 at byte offset `0x220000`, copy 2 at
-`0x230000`, `0x10000` bytes each. Boot partition 1 (`mmcblk0boot0`) is the
-one `EXT_CSD[179] = 0x08` selects for boot, but the provisioning tool
-writes the bootloader into `mmcblk0boot1` today (`emmc_boot1_write_verify`).
-Either way the environment cannot collide with a boot image: the offsets
-sit above the end of the largest accepted bootloader image and the
-provisioning write refuses to reach them. The offsets are set in
+`0x230000`, `0x10000` bytes each. The provisioning tool writes the
+bootloader into boot partition 1 (`mmcblk0boot0`), the one
+`EXT_CSD[179] = 0x08` selects for boot (`emmc_boot_write_verify`), so the
+two never share a partition. The provisioning write also refuses any boot
+image that would reach offset `0x220000`, whichever partition it targets. The offsets are set in
 `meta-alp-sdk/recipes-bsp/u-boot/u-boot/uboot-env-emmc.cfg` and mirrored
 in the image's `/etc/fw_env.config`
 (`meta-alp-sdk/recipes-core/alp-system/files/fw_env.config`);
