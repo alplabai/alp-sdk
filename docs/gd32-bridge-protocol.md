@@ -1172,8 +1172,8 @@ answer `STATUS_NOSUPPORT`.
 | 8 | `full_scale` | u16 | `(1 << res_bits) − 1` captured at `BEGIN2` (4095/1023/255/63); oversampling does not change it |
 | 10 | `vref_mv` | u16 | `adc_vref_mv` captured at `BEGIN2` |
 | 12 | `flags` | u8 | bit0 `VREF_MEASURED` = a real `VREFINT` measurement in [1700, 1900] mV (not the 1800 fallback).  Bits 1..7 = 0 |
-| 13 | `watermark` | u16 | granted watermark (echo) |
-| 15 | `ring_depth` | u16 | `2 × watermark`, or 1024 when watermark = 0 — the overrun budget |
+| 13 | `watermark` | u16 | the **granted** watermark = `ring_depth / 2`.  It may be **larger** than the watermark requested (see below); the host uses this value, never the one it asked for |
+| 15 | `ring_depth` | u16 | the ring the firmware actually allocated, in samples: the smallest power of two ≥ `max(2 × watermark_req, ceil(realised_rate × 5 ms))`, capped at 1024 — the overrun budget (a request with `watermark = 0` asks for no events and keeps the 1024-deep ring) |
 
 `BEGIN2` rules beyond the legacy `BEGIN` checks (vref dead → `IO`, slot in
 use or shared converter → `INVAL`, converter claimed → `BUSY`, DMA or
@@ -1187,6 +1187,13 @@ calibration failure → `IO`):
   `BEGIN2` never reports a rate it cannot achieve.
 * `bridge_core_clock_matches == false` → `STATUS_IO`.
 * A late `VREF` re-measure pending → `STATUS_NOT_READY`; retry after ≥ 50 ms.
+* **The reply, not the request, is authoritative for `watermark` and
+  `ring_depth`.**  The ring is sized for at least 5 ms of samples at the
+  realised rate, so a fast stream with a small requested watermark gets a
+  larger one: 100 kHz with `watermark = 16` is granted `ring_depth` 512 and
+  `watermark` 256.  The host must never assume granted == requested; its
+  read schedule (below) and the overrun slack both derive from the echoed
+  values.  `gd32g553_adc_stream2_read_interval_us()` computes the interval.
 * A stream started with `BEGIN2` answers only `READ2` (legacy `0x34` →
   `INVAL`) and vice versa.  `0x35` `STREAM_END` ends either kind; `0x39`
   `CHAIN_BIND` and `0x3A` `SPECTRUM_READ` behave as in v0.14.
@@ -1233,9 +1240,12 @@ Framing: the CRC follows the last code directly (§4).  The host clocks
   code space.  FFT-bound: `NOSUPPORT`.  Sticky DSP faults keep their v0.14
   mapping (`dsp_cfg_bad` → `OUT_OF_RANGE`, `dsp_sat` → `IO`).
 * Watermark events come from HTF (W samples) and FTF (2W) on a raw ring of
-  length `2W`, or from the base-level pump when the processed backlog
-  reaches W.  Size W with `W ≥ rate × host round-trip`; the slack before
-  overrun is `W − GUARD` sample periods.
+  length `2W` (W = the granted watermark), or from the base-level pump when
+  the processed backlog reaches W.  Size the request with
+  `W ≥ rate × host round-trip`; the slack before overrun is `W − GUARD`
+  sample periods of the **granted** W.  Without `ATTN` granted, schedule
+  reads from a host timer at `granted_W / realised_rate` (not by
+  busy-polling).
 * Host conversion to mV: `(min(code, full_scale) × vref_mv) / full_scale`,
   integer truncation — bit-identical to the legacy `STREAM_READ` maths.
 

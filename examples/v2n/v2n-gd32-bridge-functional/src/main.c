@@ -296,8 +296,11 @@ static void t_link_features(void)
 /* ADC_STREAM2: BEGIN2 returns the REALISED rate exactly (tick_hz /
  * period_ticks, 1 MHz / 1000 = 1 kHz) and READ2 returns raw codes with a
  * sample index and a drop count.  A poll-driven consumer (watermark 0)
- * gives a 1024-deep ring, so 50 ms at 1 kHz drops nothing: the two reads
- * must be contiguous, first_index(2) == first_index(1) + got(1).  Without
+ * gets the deepest ring the firmware grants, so 50 ms at 1 kHz drops
+ * nothing: the two reads must be contiguous, first_index(2) ==
+ * first_index(1) + got(1).  (BEGIN2's reply carries the GRANTED watermark
+ * and ring depth, which can exceed the request at high rates -- always
+ * use the reply.)  Without
  * the grant, BEGIN2 must answer NOSUPPORT -- the 0x33/0x34 stream above
  * is then the only stream path. */
 static void t_adc_stream2(void)

@@ -439,7 +439,7 @@ static bool t_adc_stream(soak_stat_t *st)
  *
  *   first_index(n) == first_index(n-1) + got(n-1) + dropped(n)
  *
- * With a poll-driven consumer (watermark 0: no ATTN events, a 1024-deep
+ * With a poll-driven consumer (watermark 0: no ATTN events, the deepest
  * ring) and a 50 ms gap at 1 kHz there is nothing to drop, so every
  * `dropped` must be 0 and the realised rate must be EXACT: the reply
  * carries tick_hz and period_ticks (1 MHz / 1000 ticks = 1000.00 Hz).

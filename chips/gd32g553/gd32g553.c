@@ -1392,6 +1392,17 @@ alp_status_t gd32g553_adc_stream_begin2(gd32g553_t                  *ctx,
 	return ALP_OK;
 }
 
+uint32_t gd32g553_adc_stream2_read_interval_us(const gd32g553_adc_stream2_info_t *info)
+{
+	if (info == NULL || info->tick_hz == 0u || info->period_ticks == 0u) return 0u;
+	/* The ring the firmware GRANTED, not the watermark asked for: at high
+	 * rates it sizes the ring up (>= 5 ms of samples), so granted > requested. */
+	const uint32_t samples = (info->watermark != 0u) ? info->watermark : (info->ring_depth / 2u);
+	/* samples * period_ticks / tick_hz seconds -> microseconds, in 64 bit. */
+	const uint64_t us = ((uint64_t)samples * info->period_ticks * 1000000u) / info->tick_hz;
+	return (us > UINT32_MAX) ? UINT32_MAX : (uint32_t)us;
+}
+
 alp_status_t gd32g553_adc_stream_read2(gd32g553_t *ctx,
                                        uint8_t     stream_id,
                                        uint8_t     max_samples,

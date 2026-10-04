@@ -551,8 +551,11 @@ typedef struct {
 	uint16_t full_scale;   /**< `(1 << resolution_bits) - 1` at BEGIN2.          */
 	uint16_t vref_mv;      /**< ADC reference captured at BEGIN2.                */
 	uint8_t  flags;        /**< @ref GD32G553_STREAM2_FLAG_VREF_MEASURED.        */
-	uint16_t watermark;    /**< Granted watermark (echo).                        */
-	uint16_t ring_depth;   /**< Overrun budget: `2 * watermark`, or 1024 at 0.   */
+	uint16_t watermark;    /**< GRANTED watermark = `ring_depth / 2`; may exceed
+	                            the one requested -- always use this one.        */
+	uint16_t ring_depth;   /**< Ring the firmware allocated (overrun budget): the
+	                            smallest power of two >= max(2 * watermark_req,
+	                            ceil(rate * 5 ms)), capped at 1024.              */
 } gd32g553_adc_stream2_info_t;
 
 /** One sub-operation of a @ref gd32g553_batch call. */
@@ -963,8 +966,13 @@ alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id);
  *
  * The realised rate is exactly `info->tick_hz / info->period_ticks`
  * (300 Hz requested realises 300.03 Hz).  Pick @p watermark with
- * `watermark >= rate * host round-trip`; the slack before an overrun is
- * `watermark - @ref GD32G553_ADC_STREAM2_GUARD` sample periods.
+ * `watermark >= rate * host round-trip`.  The firmware sizes the ring for
+ * at least 5 ms of samples, so the GRANTED watermark and ring depth in
+ * @p info may be larger than requested (100 kHz with @p watermark 16 is
+ * granted ring 512 / watermark 256): schedule reads and judge the overrun
+ * slack (`granted_watermark - @ref GD32G553_ADC_STREAM2_GUARD` sample
+ * periods) from the values in @p info, never from the request.  See
+ * @ref gd32g553_adc_stream2_read_interval_us.
  *
  * @param[in]  ctx             Initialised context.
  * @param[in]  stream_id       0 .. @ref GD32G553_BRIDGE_ADC_STREAM_COUNT - 1.
@@ -984,6 +992,21 @@ alp_status_t gd32g553_adc_stream_begin2(gd32g553_t                  *ctx,
                                         uint32_t                     sample_rate_hz,
                                         uint16_t                     watermark,
                                         gd32g553_adc_stream2_info_t *info);
+
+/**
+ * @brief Read interval (microseconds) that keeps a BEGIN2 stream from
+ *        overrunning when ATTN is not granted.
+ *
+ * `granted_watermark / realised_rate`, from the BEGIN2 reply (@c watermark,
+ * or half the ring when no watermark was requested, divided by
+ * `tick_hz / period_ticks`).  Schedule reads from a host timer at this
+ * interval -- or sooner -- instead of busy-polling.
+ *
+ * @param[in] info  The reply @ref gd32g553_adc_stream_begin2 filled.
+ * @return The interval in microseconds, or 0 when @p info is NULL or carries
+ *         no pacing (`tick_hz` or `period_ticks` zero).
+ */
+uint32_t gd32g553_adc_stream2_read_interval_us(const gd32g553_adc_stream2_info_t *info);
 
 /**
  * @brief Drain a BEGIN2 stream (READ2): raw codes plus exact accounting.

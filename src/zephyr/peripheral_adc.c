@@ -192,7 +192,7 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 		return NULL;
 	}
 	/* v0.15 link with ADC_STREAM2 granted: BEGIN2 (lossless accounting,
-	 * 1024-deep ring at watermark 0).  This API is poll-driven, so no
+	 * the deepest ring the firmware grants at watermark 0).  This API is poll-driven, so no
 	 * watermark events are requested.  Otherwise the legacy BEGIN, which
 	 * the firmware keeps unchanged.  The choice is per stream and sticks
 	 * for its life: a BEGIN2 stream answers only READ2. */

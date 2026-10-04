@@ -415,9 +415,33 @@ alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 		}
 		memcpy(E.begin2_req, pl, 12);
 		E.stream_active[pl[0]] = true;
-		/* 1 kHz, watermark 256, as in the spec's reply vector. */
-		const uint8_t r[17] = { 0x40, 0x42, 0x0F, 0x00, 0xE8, 0x03, 0x00, 0x00, 0xFF,
-			                    0x0F, 0x08, 0x07, 0x01, 0x00, 0x01, 0x00, 0x02 };
+		/* The firmware sizes the ring for >= 5 ms of samples at the REALISED
+		 * rate: ring = smallest power of two >= max(2 * W, ceil(rate * 5 ms)),
+		 * capped at 1024, and the granted watermark is ring / 2 -- so it can
+		 * exceed the request.  W = 0 requests no events and keeps the full
+		 * 1024-deep ring.  (1 kHz, W 256 -> ring 512 / W 256, as in the
+		 * spec's reply vector.) */
+		const uint32_t rate   = rd32(&pl[4]);
+		const uint16_t wreq   = (uint16_t)(pl[8] | (pl[9] << 8));
+		const uint32_t tick   = (rate >= 16u) ? 1000000u : 10000u;
+		const uint32_t period = tick / rate;
+		const uint32_t need   = (tick * 5u + period * 1000u - 1u) / (period * 1000u);
+		uint32_t       ring   = 1u;
+		while (ring < ((2u * wreq > need) ? 2u * wreq : need) && ring < 1024u)
+			ring <<= 1;
+		if (wreq == 0u) ring = 1024u;
+		uint8_t r[17];
+		le32(&r[0], tick);
+		le32(&r[4], period);
+		r[8]  = 0xFF; /* full_scale 4095 */
+		r[9]  = 0x0F;
+		r[10] = 0x08; /* vref 1800 mV */
+		r[11] = 0x07;
+		r[12] = 0x01; /* VREF_MEASURED */
+		r[13] = (wreq == 0u) ? 0u : (uint8_t)((ring / 2u) & 0xFFu);
+		r[14] = (wreq == 0u) ? 0u : (uint8_t)((ring / 2u) >> 8);
+		r[15] = (uint8_t)(ring & 0xFFu);
+		r[16] = (uint8_t)(ring >> 8);
 		stage(0x00, r, sizeof(r));
 		break;
 	}
@@ -816,6 +840,44 @@ ZTEST(gd32_protocol_015, test_begin2_request_and_reply_match_vectors)
 	zassert_equal(info.flags, GD32G553_STREAM2_FLAG_VREF_MEASURED);
 	zassert_equal(info.watermark, 256u);
 	zassert_equal(info.ring_depth, 512u);
+}
+
+/* The reply, not the request, is authoritative: at 100 kHz a 16-sample
+ * watermark gets a 512-deep ring and a GRANTED watermark of 256.  The host
+ * must report the granted values and schedule reads from them. */
+ZTEST(gd32_protocol_015, test_begin2_granted_watermark_may_exceed_the_request)
+{
+	zassert_equal(bring_up(false), ALP_OK);
+	gd32g553_adc_stream2_info_t info;
+	zassert_equal(gd32g553_adc_stream_begin2(&C, 0u, 0u, 100000u, 16u, &info), ALP_OK);
+	zassert_equal(info.tick_hz, 1000000u);
+	zassert_equal(info.period_ticks, 10u);
+	zassert_equal(info.watermark, 256u, "granted watermark, not the 16 asked for");
+	zassert_equal(info.ring_depth, 512u);
+	zassert_true(info.watermark > 16u);
+	/* granted_W / realised_rate = 256 / 100 kHz = 2560 us */
+	zassert_equal(gd32g553_adc_stream2_read_interval_us(&info), 2560u);
+
+	/* A slow stream keeps the requested watermark (2W dominates). */
+	zassert_equal(gd32g553_adc_stream_end(&C, 0u), ALP_OK);
+	zassert_equal(gd32g553_adc_stream_begin2(&C, 0u, 0u, 1000u, 64u, &info), ALP_OK);
+	zassert_equal(info.watermark, 64u);
+	zassert_equal(info.ring_depth, 128u);
+	zassert_equal(gd32g553_adc_stream2_read_interval_us(&info), 64000u);
+}
+
+ZTEST(gd32_protocol_015, test_stream2_read_interval_edge_cases)
+{
+	zassert_equal(gd32g553_adc_stream2_read_interval_us(NULL), 0u);
+	gd32g553_adc_stream2_info_t info = {
+		.tick_hz = 1000000u, .period_ticks = 1000u, .watermark = 0u, .ring_depth = 1024u
+	};
+	/* no watermark requested: half the ring is the time budget (512 ms) */
+	zassert_equal(gd32g553_adc_stream2_read_interval_us(&info), 512000u);
+	info.period_ticks = 0u;
+	zassert_equal(gd32g553_adc_stream2_read_interval_us(&info), 0u, "no pacing, no interval");
+	info.period_ticks = 0xFFFFFFFFu; /* 512 * 2^32 us overflows u32: saturate */
+	zassert_equal(gd32g553_adc_stream2_read_interval_us(&info), UINT32_MAX);
 }
 
 ZTEST(gd32_protocol_015, test_begin2_local_argument_checks)
