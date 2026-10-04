@@ -35,7 +35,7 @@ has the identical reversal.
 **Symptom (if DT uses reg=0):** `RTL8211F … stmmac-N:00 phy_poll_reset
 failed: -110`, "Cannot attach to PHY".
 
-**Root cause:** the RTL8211F-VD PHYAD strap pins are shared with the MAC
+**Root cause:** the RTL8211F PHYAD strap pins are shared with the MAC
 RGMII RXD3/RXC/RXCTL lines. The MAC's push-pull drivers override the
 weak (~4.7k) strap pulls during the reset-latch window, so the PHY
 samples MAC-driven levels and latches **address 0** (with a mirror
@@ -46,6 +46,32 @@ the clean unicast alias where the PHY attaches as `stmmac-N:02`.
 **Software workaround (shipped):** device tree uses `reg = <2>` on both
 phy nodes (the `mdio0`/`mdio1` blocks in `e1m-v2n-som.dtsi`). Both PHYs
 then attach cleanly.
+
+**PHY id (follow-up, 2026-10-02):** the DT used to force
+`ethernet-phy-id001c.c878` (the RTL8211F-VD id), which made Linux bind the
+"RTL8211F-VD" driver. Raw MII registers 2/3 on both ports of the bench
+units read `0x001c`/`0xc916` (package marking not checked), so the forced id
+was wrong. The id was taken from the BOM part name when the board DT was
+created (c9e315805), not because reads at address 2 failed -- E2 only
+concerns the PHYAD latch.
+
+The DT now forces `ethernet-phy-id001c.c916` (with the generic c22
+fallback), the id the silicon reports, so driver selection does not depend on
+an id read at MDIO bus registration. The driver probe still reads PHYCR1 and
+PHYCR2 (page `0xa43`, registers `0x18`/`0x19`) at that moment and caches them
+for the life of the device.
+
+Behavioural delta in the 6.1 `realtek.c`: the c878 entry sets
+`has_phycr2 = false`, so its `config_init` skips the PHYCR2 CLKOUT
+read-modify-write and returns without a reset. The c916 entry performs the
+CLKOUT read-modify-write (preserving the bit unless
+`realtek,clkout-disable` is set) and ends `config_init` with
+`genphy_soft_reset()`, so every ifup/resume soft-resets the PHY and
+renegotiates. **Bench-gated:** confirm
+`PHY [stmmac-N:02] driver [RTL8211F Gigabit Ethernet]`, a clean link on
+both ports, that the renegotiation on ifup is acceptable, and, after a cold
+boot, that page `0xa43` registers `0x18` and `0x19` on both PHYs show the
+same ALDPS bits and CLKOUT_EN as a known-good boot.
 
 **Optional HW fix (deterministic address):** isolate the PHYAD straps
 from the MAC RGMII lines with series resistors, or hold the MAC RGMII
@@ -118,7 +144,7 @@ HW-verified when they land.
 - Chip BOM (TAS2563, RTL8211FDI, sensors, PMICs, GD32, etc.)
 - RIIC0/1/2/8 pad routing (renesas-peripheral-map.tsv) — RIIC3/6/7 are
   not bonded out (matches the map).
-- PHY identity RTL8211F-VD (`0x001c.c878`).
+- PHY family RTL8211F(I); the fitted id reads `0x001c.c916` (see E2 follow-up), not the `0x001c.c878` the DT used to force.
 - TAS2563 on I2S0 with the I2S path-mux GPIOs (IO4 EN / IO5 SEL).
 
 ### Excluded as unit-specific (not errata)
