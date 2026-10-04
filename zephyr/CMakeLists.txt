@@ -1236,8 +1236,9 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO
 # `alp-temp0` DT alias's own status, so it ships unconditionally on
 # Zephyr (issue #2066) and every build without that alias just takes the
 # ALP_ERR_NOSUPPORT branch.  Zephyr-ONLY -- it binds through Zephyr's own
-# devicetree/sensor API with no portable fallback, so baremetal/Yocto get
-# src/common/stub/stub_temperature.c instead (see that file + this one's
+# devicetree/sensor API with no portable fallback, so baremetal gets
+# src/common/stub/stub_temperature.c and Yocto gets
+# src/yocto/temperature_yocto.c instead (see that file + this one's
 # header comment for why this differs from hw_info_zephyr.c above, which
 # IS shared with plain CMake).
 zephyr_library_sources(
