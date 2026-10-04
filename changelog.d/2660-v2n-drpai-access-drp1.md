@@ -1,3 +1,5 @@
+### Added — V2N DRP-AI3 access tightened, DRP1 enabled
+
 V2N DRP-AI3 access is tightened and DRP1 is enabled. A new kernel patch
 (`0018`) requires `CAP_SYS_RAWIO` for the vendor driver's register ioctls
 64-69. `/dev/drpai*` moves from group `video` to a new `drpai` system group

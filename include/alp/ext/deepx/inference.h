@@ -63,8 +63,6 @@ typedef struct {
 /**
  * @brief Run this handle's model on a chosen set of DX-M1 NPU cores.
  *
- * @par Supported silicon: deepx:dx:m1
- *
  * The core binding is fixed when the inference engine is built, so this
  * call rebuilds the engine for @p inf from the model bytes passed to
  * @ref alp_inference_open.  Useful to measure per-core throughput or to
@@ -85,10 +83,12 @@ typedef struct {
  *          @ref alp_inference_config_t::accel_unit_mask at open.  Two processes on dx-rt 3.2.0
  *          need the `dxrtd` service (#2398).
  *
+ * @par Supported silicon: deepx:dx:m1
+ *
  * @param[in] inf    Handle from @ref alp_inference_open opened
  *                   against DEEPX silicon.
  * @param[in] mask   Core mask, same meaning as DX-M1 in
- *                   @ref alp_inference_config_t::accel_unit_mask: bits 0..2
+ *                   @ref alp_inference_config_t::accel_unit_mask -- bits 0..2
  *                   are NPU cores 0..2; 0 or 0x7 is all three.
  *
  * @return  @ref ALP_OK on success.
