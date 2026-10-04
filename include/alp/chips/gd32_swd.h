@@ -124,7 +124,7 @@ typedef struct {
 	bool                            swdio_is_output;
 	bool                            nrst_held; /**< GD32_NRST asserted (connect-under-reset). */
 	const struct gd32_swd_platform *plat;
-	    /* opaque: internal pad seam */ /**< Pad opener (internal). */
+	/* opaque: internal pad seam */ /**< Pad opener (internal). */
 } gd32_swd_t;
 
 /**
