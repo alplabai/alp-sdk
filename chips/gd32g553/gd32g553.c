@@ -204,15 +204,17 @@ static size_t link_max_payload(const gd32g553_t *ctx)
 #define GD32G553_ATTN_IDLE_EMPTY_LIMIT 8u
 
 /* Stop awaiting edges at once (so the rest of this command, e.g. its
- * resync PING, does not pay another 10 ms) and ask cmd_send() to
- * renegotiate ATTN off when the command ends. */
+ * resync PING, does not pay another 10 ms) and ask the NEXT command to
+ * renegotiate ATTN off.  Never renegotiate from inside the command that
+ * tripped the limit: ctx->spi_reply still holds that command's reply, and
+ * another frame would overwrite it before the caller has parsed it. */
 static void attn_fault(gd32g553_t *ctx)
 {
 	ctx->attn_active        = false;
 	ctx->attn_fault_pending = true;
 }
 
-/* Before each request: stuck-high check, then clear the edge latch.
+/* Before each request: the stuck-high check.
  *
  * The line must be LOW here unless a watermark stream has events pending
  * (the GD32 drops it at every CS fall and only raises it after arming a
@@ -235,19 +237,29 @@ static void attn_pre_request(gd32g553_t *ctx)
 			ctx->attn_stuck_run = 0u;
 		}
 	}
-	ctx->attn.arm(ctx->attn.user);
 }
 
-/* Wait for the reply edge of the request just clocked out.  Returns true
- * when it arrived.  A miss is not an error: the caller falls back to the
- * 0.14 staging gap + ladder for this command. */
-static bool attn_await_reply(gd32g553_t *ctx)
+/* Wait for the reply edge of the request that started at @p t_start (the
+ * hook's clock, read just before the first byte was clocked).  An edge
+ * stamped before t_start is stale -- an event edge that was still latched --
+ * and is discarded.  Returns true when a fresh edge arrived.  A miss is not
+ * an error: the caller falls back to the 0.14 staging gap + ladder for this
+ * command. */
+static bool attn_await_reply(gd32g553_t *ctx, uint32_t t_start)
 {
 	if (!ctx->attn_active) return false;
-	if (ctx->attn.wait(ctx->attn.user, GD32G553_BRIDGE_REPLY_TIMEOUT_MS) == ALP_OK) {
-		ctx->attn_edges++;
-		ctx->attn_timeout_run = 0u;
-		return true;
+	/* Each stale edge costs one more wait; a latch holds at most one. */
+	for (unsigned tries = 0u; tries < 3u; ++tries) {
+		uint32_t           t_edge = 0u;
+		const alp_status_t w =
+		    ctx->attn.wait(ctx->attn.user, GD32G553_BRIDGE_REPLY_TIMEOUT_MS, &t_edge);
+		if (w != ALP_OK) break;
+		if ((int32_t)(t_edge - t_start) >= 0) {
+			ctx->attn_edges++;
+			ctx->attn_timeout_run = 0u;
+			return true;
+		}
+		ctx->attn_stale_edges++;
 	}
 	ctx->attn_timeouts++;
 	if (++ctx->attn_timeout_run >= GD32G553_ATTN_FAULT_LIMIT) attn_fault(ctx);
@@ -399,6 +411,10 @@ static alp_status_t spi_xfer_core(gd32g553_t    *ctx,
 	 * Without the negotiated feature the loop body runs exactly once. */
 	for (unsigned send_attempt = 0u;; ++send_attempt) {
 		attn_pre_request(ctx);
+		/* Read the clock BEFORE the first byte goes out: any edge stamped
+		 * earlier cannot be this request's reply. */
+		const uint32_t t_start =
+		    (ctx->attn_active && ctx->attn.now != NULL) ? ctx->attn.now(ctx->attn.user) : 0u;
 		alp_status_t s = alp_spi_write(ctx->spi, req, crc_covered + 2u);
 		if (s != ALP_OK) return s;
 
@@ -411,7 +427,7 @@ static alp_status_t spi_xfer_core(gd32g553_t    *ctx,
 		 * than eating a wasted drain transaction + a ladder wait on
 		 * every command. */
 		const bool awaited  = ctx->attn_active;
-		const bool got_edge = attn_await_reply(ctx);
+		const bool got_edge = attn_await_reply(ctx, t_start);
 		ctx->attn_last_edge = awaited && got_edge;
 		if (!got_edge) {
 			alp_delay_us(reply_staging_gap_us(cmd, req_payload, req_payload_len, reply_max));
@@ -609,7 +625,7 @@ static void spi_negotiate(gd32g553_t *ctx)
 		uint32_t   want = GD32G553_LINK_FEAT_STATUS_SEQ | GD32G553_LINK_FEAT_BIG_FRAME |
 		                  GD32G553_LINK_FEAT_ADC_STREAM2 | GD32G553_LINK_FEAT_BATCH;
 		const bool want_attn =
-		    ctx->attn.arm != NULL && ctx->attn.wait != NULL && !ctx->attn_unusable;
+		    ctx->attn.now != NULL && ctx->attn.wait != NULL && !ctx->attn_unusable;
 		if (want_attn) {
 			want |= GD32G553_LINK_FEAT_ATTN;
 			/* Provisional: the reply that grants ATTN is the first
@@ -646,10 +662,33 @@ static void spi_negotiate(gd32g553_t *ctx)
 	}
 }
 
-/* ATTN fault limit hit: renegotiate with the ATTN bit cleared, which also
- * returns PA14 to SWCLK on the slave.  Called between commands. */
-static void attn_service_fault(gd32g553_t *ctx)
+/* Work deferred from the end of the previous command, run at the START of
+ * the next one -- never between receiving a reply and parsing it, because
+ * every frame here reuses ctx->spi_req / ctx->spi_reply:
+ *
+ *   - the bridge reset under us (OTA commit/rollback): re-read the version
+ *     and re-run the link negotiation (§8), so BEGIN2/BATCH handles and
+ *     ATTN are not left failing with NOSUPPORT.  While the bridge is still
+ *     rebooting (trial window answers BUSY) the flag stays set and the next
+ *     command retries;
+ *   - the ATTN fault limit was hit (3 lost / stuck edges): renegotiate with
+ *     the ATTN bit cleared, which also returns PA14 to SWCLK on the slave. */
+static void spi_prepare(gd32g553_t *ctx)
 {
+	if (ctx->spi == NULL) return;
+	if (ctx->renegotiate_pending) {
+		uint8_t v[3];
+		if (spi_xfer(ctx, GD32G553_CMD_GET_VERSION, NULL, 0u, v, sizeof(v)) == ALP_OK) {
+			ctx->renegotiate_pending = false;
+			ctx->version.major       = v[0];
+			ctx->version.minor       = v[1];
+			ctx->version.patch       = v[2];
+			ctx->version_cached      = true;
+			ctx->attn_unusable       = false;
+			spi_negotiate(ctx);
+		}
+		return;
+	}
 	if (!ctx->attn_fault_pending) return;
 	ctx->attn_fault_pending = false;
 	ctx->attn_active        = false;
@@ -741,6 +780,7 @@ static alp_status_t cmd_send(gd32g553_t          *ctx,
 	alp_status_t s;
 	switch (t) {
 	case GD32G553_TRANSPORT_SPI:
+		spi_prepare(ctx); /* deferred ATTN fault / post-reset renegotiation */
 		s = spi_xfer(ctx, cmd, req_payload, req_payload_len, reply_payload, reply_payload_len);
 		break;
 	case GD32G553_TRANSPORT_I2C:
@@ -753,9 +793,6 @@ static alp_status_t cmd_send(gd32g553_t          *ctx,
      * is in an unknown state and the caller will likely re-init: do not
      * keep vouching for a version read before it. */
 	if (s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT) ctx->version_cached = false;
-	/* A fault limit hit mid-command (3 lost / stuck ATTN edges) is acted on
-	 * here, between commands, never inside the one that tripped it. */
-	if (t == GD32G553_TRANSPORT_SPI) attn_service_fault(ctx);
 	return s;
 }
 
@@ -1298,7 +1335,8 @@ alp_status_t gd32g553_attn_wait_event(gd32g553_t *ctx, uint32_t timeout_ms)
 	if (ctx == NULL) return ALP_ERR_INVAL;
 	if (!ctx->initialised) return ALP_ERR_NOT_READY;
 	if (!ctx->attn_active) return ALP_ERR_NOSUPPORT;
-	if (ctx->attn.wait(ctx->attn.user, timeout_ms) != ALP_OK) return ALP_ERR_TIMEOUT;
+	uint32_t t_edge = 0u;
+	if (ctx->attn.wait(ctx->attn.user, timeout_ms, &t_edge) != ALP_OK) return ALP_ERR_TIMEOUT;
 	ctx->attn_event_edge = true;
 	return ALP_OK;
 }
@@ -1403,6 +1441,27 @@ uint32_t gd32g553_adc_stream2_read_interval_us(const gd32g553_adc_stream2_info_t
 	return (us > UINT32_MAX) ? UINT32_MAX : (uint32_t)us;
 }
 
+/* first_index(n) == first_index(n-1) + got(n-1) + dropped(n), except across a
+ * discontinuity sentinel (then first_index must not move).  Shared by
+ * standalone READ2 and READ2 sub-replies inside a BATCH, so the two paths
+ * keep one running index per stream. */
+static void stream2_account(gd32g553_t *ctx,
+                            uint8_t     stream_id,
+                            uint32_t    first_index,
+                            uint32_t    dropped,
+                            uint8_t     got)
+{
+	const uint8_t bit = (uint8_t)(1u << stream_id);
+	if ((ctx->stream2_seen & bit) != 0u) {
+		const uint32_t expect = (dropped == GD32G553_READ2_DROPPED_UNKNOWN)
+		                            ? ctx->stream2_next[stream_id]
+		                            : ctx->stream2_next[stream_id] + dropped;
+		if (first_index != expect) ctx->stream2_gaps++;
+	}
+	ctx->stream2_seen |= bit;
+	ctx->stream2_next[stream_id] = first_index + got;
+}
+
 alp_status_t gd32g553_adc_stream_read2(gd32g553_t *ctx,
                                        uint8_t     stream_id,
                                        uint8_t     max_samples,
@@ -1417,6 +1476,9 @@ alp_status_t gd32g553_adc_stream_read2(gd32g553_t *ctx,
 	}
 	if (stream_id >= GD32G553_BRIDGE_ADC_STREAM_COUNT) return ALP_ERR_INVAL;
 	if (max_samples == 0u) return ALP_ERR_INVAL;
+	/* Deferred ATTN fault / post-reset renegotiation runs HERE, before this
+	 * command's frame is built -- never after its reply is received. */
+	spi_prepare(ctx);
 	if (!stream2_granted(ctx)) return ALP_ERR_NOSUPPORT;
 	if (max_samples > read2_max_samples(ctx)) return ALP_ERR_OUT_OF_RANGE;
 
@@ -1435,7 +1497,6 @@ alp_status_t gd32g553_adc_stream_read2(gd32g553_t *ctx,
 	                               &max_samples,
 	                               &plen);
 	if (s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT) ctx->version_cached = false;
-	attn_service_fault(ctx);
 	if (s != ALP_OK) return s;
 
 	const uint8_t *p = &ctx->spi_reply[2];
@@ -1447,17 +1508,7 @@ alp_status_t gd32g553_adc_stream_read2(gd32g553_t *ctx,
 		                      ((uint16_t)p[GD32G553_READ2_HDR_BYTES + 2u * i + 1u] << 8));
 	}
 
-	/* first_index(n) == first_index(n-1) + got(n-1) + dropped(n), except
-	 * across a discontinuity sentinel (then first_index must not move). */
-	const uint8_t bit = (uint8_t)(1u << stream_id);
-	if ((ctx->stream2_seen & bit) != 0u) {
-		const uint32_t expect = (*dropped == GD32G553_READ2_DROPPED_UNKNOWN)
-		                            ? ctx->stream2_next[stream_id]
-		                            : ctx->stream2_next[stream_id] + *dropped;
-		if (*first_index != expect) ctx->stream2_gaps++;
-	}
-	ctx->stream2_seen |= bit;
-	ctx->stream2_next[stream_id] = *first_index + *got;
+	stream2_account(ctx, stream_id, *first_index, *dropped, *got);
 
 	/* Idle-path accounting (§4.6): an edge that READ2 answers with nothing
 	 * and no loss, eight times running, is a stuck line, not an event. */
@@ -1465,8 +1516,7 @@ alp_status_t gd32g553_adc_stream_read2(gd32g553_t *ctx,
 		ctx->attn_event_edge = false;
 		if (*got == 0u && *dropped == 0u) {
 			if (++ctx->attn_idle_run >= GD32G553_ATTN_IDLE_EMPTY_LIMIT) {
-				attn_fault(ctx);
-				attn_service_fault(ctx);
+				attn_fault(ctx); /* serviced at the start of the next command */
 			}
 		} else {
 			ctx->attn_idle_run = 0u;
@@ -1517,11 +1567,13 @@ static size_t batch_reply_len(const uint8_t *p, size_t avail, const void *arg)
 	const struct batch_plan *plan = arg;
 	if (avail < 1u || p[0] > plan->count) return REPLY_LEN_INVALID;
 
-	size_t pos = 1u;
+	size_t  pos         = 1u;
+	uint8_t last_status = 0u;
 	for (unsigned i = 0u; i < p[0]; ++i) {
 		if (pos + 2u > avail) return REPLY_LEN_INVALID;
 		const uint8_t status = p[pos] & GD32G553_STATUS_CODE_MASK;
-		const size_t  len    = p[pos + 1u];
+		last_status          = status;
+		const size_t len     = p[pos + 1u];
 		pos += 2u;
 		if (pos + len > avail || len > plan->reply_max[i]) return REPLY_LEN_INVALID;
 		if (status != 0u) {
@@ -1537,6 +1589,10 @@ static size_t batch_reply_len(const uint8_t *p, size_t avail, const void *arg)
 		}
 		pos += len;
 	}
+	/* A batch that ran nothing, or that stopped short of `count` although
+	 * its last op succeeded, is not something the firmware produces. */
+	if (p[0] == 0u) return REPLY_LEN_INVALID;
+	if (p[0] < plan->count && last_status == 0u) return REPLY_LEN_INVALID;
 	return pos;
 }
 
@@ -1547,6 +1603,7 @@ gd32g553_batch(gd32g553_t *ctx, gd32g553_batch_op_t *ops, uint8_t count, uint8_t
 	if (ops == NULL) return ALP_ERR_INVAL;
 	if (count == 0u) return ALP_ERR_INVAL;
 	if (count > GD32G553_BATCH_MAX_OPS) return ALP_ERR_OUT_OF_RANGE;
+	spi_prepare(ctx); /* before this command's frame is built (see READ2) */
 	if (ctx->spi == NULL || (ctx->granted & GD32G553_LINK_FEAT_BATCH) == 0u) {
 		return ALP_ERR_NOSUPPORT;
 	}
@@ -1574,6 +1631,13 @@ gd32g553_batch(gd32g553_t *ctx, gd32g553_batch_op_t *ops, uint8_t count, uint8_t
 		if (a->op == GD32G553_CMD_ADC_STREAM_READ2) {
 			const uint8_t max_samples = ops[i].args[1];
 			if (max_samples == 0u) return ALP_ERR_INVAL;
+			/* Two READ2s on one stream in a batch would split one backlog
+			 * between them, so the firmware rejects it: reject it here too,
+			 * before any bus traffic. */
+			if (ops[i].args[0] >= GD32G553_BRIDGE_ADC_STREAM_COUNT) return ALP_ERR_INVAL;
+			for (unsigned k = 0u; k < i; ++k) {
+				if (plan.variable[k] && ops[k].args[0] == ops[i].args[0]) return ALP_ERR_INVAL;
+			}
 			if (max_samples > read2_max_samples(ctx)) return ALP_ERR_OUT_OF_RANGE;
 			rmax             = (uint16_t)(GD32G553_READ2_HDR_BYTES + 2u * (uint16_t)max_samples);
 			plan.variable[i] = true;
@@ -1602,7 +1666,6 @@ gd32g553_batch(gd32g553_t *ctx, gd32g553_batch_op_t *ops, uint8_t count, uint8_t
 	alp_status_t s    = spi_xfer_core(
 	    ctx, GD32G553_CMD_BATCH, pl, w, NULL, worst_rply, batch_reply_len, &plan, &plen);
 	if (s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT) ctx->version_cached = false;
-	attn_service_fault(ctx);
 	if (s != ALP_OK) return s;
 
 	const uint8_t *p   = &ctx->spi_reply[2];
@@ -1616,6 +1679,12 @@ gd32g553_batch(gd32g553_t *ctx, gd32g553_batch_op_t *ops, uint8_t count, uint8_t
 		ops[i].status     = status_from_wire(p[pos] & GD32G553_STATUS_CODE_MASK);
 		ops[i].reply_len  = len;
 		if (len > 0u) memcpy(ops[i].reply, &p[pos + 2u], len);
+		if (ops[i].op == GD32G553_CMD_ADC_STREAM_READ2 && ops[i].status == ALP_OK) {
+			/* decode validated the length and `got`; keep the stream's running
+			 * index in step so the next standalone READ2 is not a false gap */
+			const uint8_t *r = &p[pos + 2u];
+			stream2_account(ctx, ops[i].args[0], get_le32(&r[0]), get_le32(&r[4]), r[8]);
+		}
 		pos += 2u + len;
 	}
 	if (executed != NULL) *executed = n;
@@ -2041,8 +2110,11 @@ static alp_status_t ota_reset_cmd(gd32g553_t *ctx, uint8_t cmd)
 		/* Sequencing, BIG_FRAME, ATTN, STREAM2, BATCH and every stream
 		 * handle are gone with the reset. */
 		spi_drop_negotiated(ctx);
-		/* The bridge reboots into a (possibly different) image. */
-		ctx->version_cached = false;
+		/* The bridge reboots into a (possibly different) image: the next
+		 * SPI command re-reads the version and re-runs the negotiation (§8)
+		 * instead of leaving BEGIN2 / BATCH / ATTN failing with NOSUPPORT. */
+		ctx->version_cached      = false;
+		ctx->renegotiate_pending = (ctx->spi != NULL);
 	}
 	return s;
 }

@@ -438,25 +438,36 @@ typedef struct {
  * The chip driver stays platform-agnostic: it never touches a GPIO or an
  * RTOS primitive itself.  A backend that has the GD32's ATTN line (PA14,
  * Renesas P71 on V2N) wired as an input with a rising-edge interrupt
- * builds these callbacks from `alp_gpio_irq_enable()` plus its own
- * semaphore, and passes the table to @ref gd32g553_init_ex.  Passing no
- * table (or a table with a NULL @c arm / @c wait) means ATTN is never
- * requested and the driver keeps the 0.14 staging-gap + re-read ladder.
+ * builds these callbacks from the interrupt plus its own semaphore and
+ * clock, and passes the table to @ref gd32g553_init_ex.  Passing no table
+ * (or one with a NULL @c now / @c wait) means ATTN is never requested and
+ * the driver keeps the 0.14 staging-gap + re-read ladder.
+ *
+ * **Edge time-stamping.**  The firmware drives ATTN LOW at CS falling and
+ * never raises it while CS is low, so every edge that belongs to a reply
+ * arrives AFTER the host starts clocking the request.  An edge older than
+ * that (an event raised just before the request, still latched) is stale.
+ * Rather than race a "clear the latch" call against the request, the
+ * backend time-stamps each edge in its interrupt handler and the driver
+ * compares: it reads @c now immediately before it starts clocking the
+ * request and accepts only an edge whose time is not earlier than that
+ * (wrap-safe 32-bit compare, so any free-running counter works --
+ * `k_cycle_get_32()` on Zephyr).  The unit is the backend's; only the
+ * ordering matters.
  *
  * The table and @c user must outlive the context (the driver keeps a
  * copy of the struct, not of what @c user points at).
  */
 typedef struct {
-	/** Clear the latched rising edge.  Called immediately before each
-	 *  request is clocked out (the portable SPI API does not expose the
-	 *  instant CS releases, so this is the closest safe point).  Must be
-	 *  cheap and ISR-free.  Required. */
-	void (*arm)(void *user);
-	/** Block until a rising edge has been latched since @c arm, then
-	 *  consume it.  Interrupt + semaphore, never polling.  Returns
-	 *  @ref ALP_OK on an edge, @ref ALP_ERR_TIMEOUT when @p timeout_ms
-	 *  passes with none.  Required. */
-	alp_status_t (*wait)(void *user, uint32_t timeout_ms);
+	/** Current time on the same free-running 32-bit clock the edge
+	 *  time-stamps use.  Cheap, callable from thread context.  Required. */
+	uint32_t (*now)(void *user);
+	/** Block until a rising edge has been latched, then consume it and
+	 *  store its time-stamp in @p t_edge.  Interrupt + semaphore, never
+	 *  polling.  Returns @ref ALP_OK on an edge, @ref ALP_ERR_TIMEOUT when
+	 *  @p timeout_ms passes with none.  The driver discards an edge older
+	 *  than the request and calls again.  Required. */
+	alp_status_t (*wait)(void *user, uint32_t timeout_ms, uint32_t *t_edge);
 	/** Optional: sample the line level (true = high), for the
 	 *  stuck-high check.  NULL disables that check. */
 	alp_status_t (*read_level)(void *user, bool *high);
@@ -493,48 +504,55 @@ typedef struct {
                                                  commit/rollback and link
                                                  errors.                 */
 	/* ---- v0.15 negotiated SPI link state (all zero / 65 on a 0.14 peer) ---- */
-	uint32_t             granted;            /**< LINK_FEAT_* bits armed on
+	uint32_t             granted;             /**< LINK_FEAT_* bits armed on
                                                  the SPI link.            */
-	uint32_t             supported;          /**< Bits the peer implements
+	uint32_t             supported;           /**< Bits the peer implements
                                                  (0 until a 6-byte
                                                  negotiation answered).   */
-	uint16_t             max_payload;        /**< Effective SPI payload
+	uint16_t             max_payload;         /**< Effective SPI payload
                                                  ceiling: 65, or 66..252
                                                  once BIG_FRAME granted.  */
-	gd32g553_attn_hook_t attn;               /**< Backend ATTN hook copy
+	gd32g553_attn_hook_t attn;                /**< Backend ATTN hook copy
                                                  (NULL callbacks = none). */
-	bool                 attn_active;        /**< ATTN granted + self-test
+	bool                 attn_active;         /**< ATTN granted + self-test
                                                  passed: replies are
                                                  awaited on an edge.      */
-	bool                 attn_unusable;      /**< ATTN failed its self-test
+	bool                 attn_unusable;       /**< ATTN failed its self-test
                                                  or hit the fault limit;
                                                  not requested again
                                                  until the next init.     */
-	bool                 attn_fault_pending; /**< Fault limit hit mid
+	bool                 attn_fault_pending;  /**< Fault limit hit mid
                                                  command; ATTN is dropped
                                                  once the command ends.   */
-	bool                 attn_event_edge;    /**< An idle-path edge was
+	bool                 attn_event_edge;     /**< An idle-path edge was
                                                  seen and no READ2 has
                                                  answered it yet.         */
-	bool                 attn_last_edge;     /**< The last SPI reply was
+	bool                 attn_last_edge;      /**< The last SPI reply was
                                                  awaited and its edge
                                                  arrived.                 */
-	uint8_t              attn_timeout_run;   /**< Consecutive lost edges.   */
-	uint8_t              attn_stuck_run;     /**< Consecutive stuck-high
+	bool                 renegotiate_pending; /**< The bridge reset under
+                                                 us (OTA commit/rollback):
+                                                 the next command re-reads
+                                                 the version and re-runs
+                                                 the link negotiation.    */
+	uint32_t             attn_stale_edges;    /**< Edges discarded for being
+                                                 older than the request.  */
+	uint8_t              attn_timeout_run;    /**< Consecutive lost edges.   */
+	uint8_t              attn_stuck_run;      /**< Consecutive stuck-high
                                                  readings.                */
-	uint8_t              attn_idle_run;      /**< Consecutive idle edges
+	uint8_t              attn_idle_run;       /**< Consecutive idle edges
                                                  whose READ2 was empty.   */
-	uint8_t              stream2_armed;      /**< Bitmask of streams
+	uint8_t              stream2_armed;       /**< Bitmask of streams
                                                  started with a nonzero
                                                  watermark (BEGIN2).      */
-	uint8_t              stream2_seen;       /**< Bitmask of streams whose
+	uint8_t              stream2_seen;        /**< Bitmask of streams whose
                                                  next_index is valid.     */
-	uint32_t             attn_edges;         /**< Replies delivered on an
+	uint32_t             attn_edges;          /**< Replies delivered on an
                                                  ATTN edge (telemetry).   */
-	uint32_t             attn_timeouts;      /**< Lost-edge fallbacks to the
+	uint32_t             attn_timeouts;       /**< Lost-edge fallbacks to the
                                                  0.14 drain rule.         */
-	uint32_t             attn_stuck;         /**< Stuck-high violations.    */
-	uint32_t             stream2_gaps;       /**< READ2 replies that broke
+	uint32_t             attn_stuck;          /**< Stuck-high violations.    */
+	uint32_t             stream2_gaps;        /**< READ2 replies that broke
                                                  the first_index
                                                  continuity invariant.    */
 	uint32_t             stream2_next[GD32G553_BRIDGE_ADC_STREAM_COUNT]; /**< Expected

@@ -77,29 +77,38 @@ static struct {
 	uint8_t  begin2_req[12];
 } E;
 
-/* The ATTN hook the test hands the driver (interrupt + semaphore in a real
- * backend; a latch here). */
+/* The ATTN hook the test hands the driver (interrupt + semaphore + a cycle
+ * counter in a real backend; a latch + a fake clock here).  Edges carry a
+ * time-stamp from the same clock the driver reads through now(). */
 static struct {
 	bool     latch;
-	uint32_t arms, waits;
+	uint32_t t_edge;       /* time-stamp of the latched edge */
+	uint32_t clock;        /* the fake free-running counter */
+	bool     inject_stale; /* now() also latches an edge older than the request */
+	uint32_t waits;
 } H;
 
 static uint64_t g_now_ms;
 
-static void hook_arm(void *u)
+static uint32_t hook_now(void *u)
 {
 	(void)u;
-	H.latch = false;
-	H.arms++;
+	if (H.inject_stale) {
+		/* An event edge that rose just before the request: it is latched
+		 * with a time-stamp earlier than the t_start now() returns. */
+		H.latch  = true;
+		H.t_edge = H.clock;
+	}
+	return ++H.clock;
 }
 
-static alp_status_t hook_wait(void *u, uint32_t timeout_ms)
+static alp_status_t hook_wait(void *u, uint32_t timeout_ms, uint32_t *t_edge)
 {
 	(void)u;
-	(void)timeout_ms;
 	H.waits++;
 	if (H.latch) {
 		H.latch = false;
+		*t_edge = H.t_edge;
 		return ALP_OK;
 	}
 	g_now_ms += timeout_ms;
@@ -114,7 +123,7 @@ static alp_status_t hook_level(void *u, bool *high)
 }
 
 static const gd32g553_attn_hook_t g_hook = {
-	.arm        = hook_arm,
+	.now        = hook_now,
 	.wait       = hook_wait,
 	.read_level = hook_level,
 };
@@ -154,8 +163,9 @@ static void stage(uint8_t code, const uint8_t *payload, size_t n)
 	E.staged_len         = 2u + n + 2u;
 	/* ATTN rises only once the fresh reply is armed. */
 	if (E.attn_on && E.attn_signal) {
-		E.level = true;
-		H.latch = true;
+		E.level  = true;
+		H.latch  = true;
+		H.t_edge = ++H.clock; /* the edge is stamped when it happens */
 	}
 }
 
@@ -638,7 +648,7 @@ ZTEST(gd32_protocol_015, test_negotiation_without_attn_hook_never_requests_attn)
 	zassert_equal(E.ext_req[6], 0xFCu);
 	zassert_equal(C.granted, 0x1Bu);
 	zassert_false(C.attn_active);
-	zassert_equal(H.arms, 0u, "no hook, no ATTN traffic");
+	zassert_equal(H.waits, 0u, "no hook, no ATTN traffic");
 }
 
 ZTEST(gd32_protocol_015, test_attn_refused_while_debugger_attached)
@@ -747,6 +757,9 @@ ZTEST(gd32_protocol_015, test_attn_lost_edge_falls_back_then_disables_after_thre
 
 	zassert_equal(gd32g553_ping(&C), ALP_OK);
 	zassert_false(C.attn_active, "third consecutive lost edge");
+	zassert_true(C.attn_fault_pending);
+	zassert_equal(E.ext_count, 1u, "never renegotiate inside the command that tripped it");
+	zassert_equal(gd32g553_ping(&C), ALP_OK); /* the deferred renegotiation runs first */
 	zassert_true(C.attn_unusable);
 	zassert_equal(E.ext_count, 2u, "renegotiated without ATTN");
 	zassert_equal(E.ext_req[2] & 0x04u, 0u);
@@ -782,6 +795,7 @@ ZTEST(gd32_protocol_015, test_attn_stuck_high_disables_after_three)
 	zassert_true(C.attn_active);
 	zassert_equal(gd32g553_ping(&C), ALP_OK);
 	zassert_false(C.attn_active, "third consecutive stuck-high reading");
+	zassert_equal(gd32g553_ping(&C), ALP_OK); /* deferred renegotiation */
 	zassert_equal(E.ext_count, 2u);
 	zassert_equal(E.ext_req[2] & 0x04u, 0u);
 	zassert_equal(C.attn_stuck, 3u);
@@ -810,6 +824,7 @@ ZTEST(gd32_protocol_015, test_attn_idle_edges_with_empty_read2_disable_after_eig
 	zassert_equal(gd32g553_attn_wait_event(&C, 10u), ALP_OK);
 	zassert_equal(gd32g553_adc_stream_read2(&C, 0u, 8u, &first, &dropped, &got, codes), ALP_OK);
 	zassert_false(C.attn_active, "eighth consecutive empty idle edge");
+	zassert_equal(gd32g553_ping(&C), ALP_OK); /* deferred renegotiation */
 	zassert_equal(E.ext_req[2] & 0x04u, 0u, "renegotiated without ATTN");
 	zassert_equal(gd32g553_attn_wait_event(&C, 10u), ALP_ERR_NOSUPPORT);
 }
@@ -1192,10 +1207,11 @@ ZTEST(gd32_protocol_015, test_batch_local_validation_costs_no_bus_traffic)
 		many[i] = (gd32g553_batch_op_t){ .op = 0x00 };
 	zassert_equal(gd32g553_batch(&C, many, 17u, NULL), ALP_ERR_OUT_OF_RANGE);
 	/* worst-case reply over the link ceiling (2 x READ2 x 121 codes = 2 * 253 + 1 > 252) */
-	const uint8_t       r2[2]  = { 0, 121 };
+	const uint8_t       r2a[2] = { 0, 121 };
+	const uint8_t       r2b[2] = { 1, 121 };
 	gd32g553_batch_op_t two[2] = {
-		{ .op = 0x3C, .args = r2, .args_len = 2, .reply = rep, .reply_cap = 251 },
-		{ .op = 0x3C, .args = r2, .args_len = 2, .reply = rep, .reply_cap = 251 },
+		{ .op = 0x3C, .args = r2a, .args_len = 2, .reply = rep, .reply_cap = 251 },
+		{ .op = 0x3C, .args = r2b, .args_len = 2, .reply = rep, .reply_cap = 251 },
 	};
 	zassert_equal(gd32g553_batch(&C, two, 2u, NULL), ALP_ERR_OUT_OF_RANGE);
 	zassert_equal(E.nreq, n0, "every rejection above was local");
@@ -1266,4 +1282,211 @@ ZTEST(gd32_protocol_015, test_stream_end_clears_event_arming)
 	zassert_equal(C.stream2_armed, 1u);
 	zassert_equal(gd32g553_adc_stream_end(&C, 0u), ALP_OK);
 	zassert_equal(C.stream2_armed, 0u);
+}
+
+/* ---- review fixes ----------------------------------------------------------- */
+
+/* The reviewer's repro: a W=0 stream (no watermark events, so the stuck-high
+ * check stays armed), the ATTN line forced high, two pings, then READ2.  The
+ * third stuck-high reading lands INSIDE the READ2 and trips the fault limit.
+ * The renegotiation used to run before READ2's payload was parsed and
+ * overwrote ctx->spi_reply with the LINK_FEATURES reply, so `got` came out as
+ * 252 and the code copy ran past the caller's buffer.  The fault must be
+ * serviced at the START of the next command instead. */
+ZTEST(gd32_protocol_015, test_attn_fault_inside_read2_does_not_clobber_the_reply)
+{
+	zassert_equal(bring_up(true), ALP_OK);
+	gd32g553_adc_stream2_info_t info;
+	zassert_equal(gd32g553_adc_stream_begin2(&C, 0u, 0u, 1000u, 0u, &info), ALP_OK);
+
+	E.level_forced = true;
+	zassert_equal(gd32g553_ping(&C), ALP_OK);
+	zassert_equal(gd32g553_ping(&C), ALP_OK);
+
+	E.r2_got   = 8u;
+	E.r2_first = 0u;
+	for (unsigned i = 0; i < 8u; i++)
+		E.r2_codes[i] = (uint16_t)(0x100u + i);
+	uint16_t codes[8 + 4];
+	memset(codes, 0xEE, sizeof(codes));
+	uint32_t first = 99u, dropped = 99u;
+	uint8_t  got = 0xEE;
+	zassert_equal(gd32g553_adc_stream_read2(&C, 0u, 8u, &first, &dropped, &got, codes), ALP_OK);
+	zassert_equal(got, 8u, "parsed from the READ2 reply, not from a LINK_FEATURES reply");
+	for (unsigned i = 0; i < 8u; i++)
+		zassert_equal(codes[i], 0x100u + i);
+	zassert_equal(codes[8], 0xEEEEu, "no write past the requested samples");
+	zassert_true(C.attn_fault_pending, "limit tripped, renegotiation deferred");
+	zassert_equal(E.ext_count, 1u, "no frame between receiving the reply and parsing it");
+
+	/* The deferred renegotiation runs at the start of the next command. */
+	zassert_equal(gd32g553_ping(&C), ALP_OK);
+	zassert_equal(E.ext_count, 2u);
+	zassert_equal(E.ext_req[2] & 0x04u, 0u);
+	zassert_false(C.attn_active);
+}
+
+ZTEST(gd32_protocol_015, test_attn_fault_inside_batch_does_not_clobber_the_reply)
+{
+	zassert_equal(bring_up(true), ALP_OK);
+	gd32g553_adc_stream2_info_t info;
+	zassert_equal(gd32g553_adc_stream_begin2(&C, 0u, 0u, 1000u, 0u, &info), ALP_OK);
+
+	E.level_forced = true;
+	zassert_equal(gd32g553_ping(&C), ALP_OK);
+	zassert_equal(gd32g553_ping(&C), ALP_OK);
+
+	E.r2_got                       = 3u;
+	E.r2_first                     = 0u;
+	E.r2_codes[0]                  = 0x0111u;
+	E.r2_codes[1]                  = 0x0222u;
+	E.r2_codes[2]                  = 0x0333u;
+	const uint8_t       r2_args[2] = { 0, 8 };
+	uint8_t             r2_rep[9 + 16];
+	gd32g553_batch_op_t ops[2] = {
+		{ .op = GD32G553_CMD_PING },
+		{ .op        = GD32G553_CMD_ADC_STREAM_READ2,
+		  .args      = r2_args,
+		  .args_len  = 2u,
+		  .reply     = r2_rep,
+		  .reply_cap = sizeof r2_rep },
+	};
+	uint8_t executed = 0;
+	zassert_equal(gd32g553_batch(&C, ops, 2u, &executed), ALP_OK);
+	zassert_equal(executed, 2u);
+	zassert_equal(ops[1].status, ALP_OK);
+	zassert_equal(ops[1].reply_len, 9u + 6u);
+	zassert_equal(r2_rep[8], 3u);
+	zassert_equal((uint16_t)(r2_rep[11] | (r2_rep[12] << 8)), 0x0222u);
+	zassert_true(C.attn_fault_pending);
+	zassert_equal(E.ext_count, 1u, "renegotiation never runs between reply and parse");
+	zassert_equal(gd32g553_ping(&C), ALP_OK);
+	zassert_equal(E.ext_count, 2u);
+}
+
+/* An edge stamped BEFORE the request started (an event edge latched a moment
+ * earlier) must not be taken for the reply.  Here the firmware raises no edge
+ * for the reply at all: the only latched edge is the stale one, so the driver
+ * must discard it, count the miss and fall back to the staging gap. */
+ZTEST(gd32_protocol_015, test_attn_stale_edge_is_not_the_reply_edge)
+{
+	zassert_equal(bring_up(true), ALP_OK);
+	E.attn_signal  = false;
+	H.inject_stale = true;
+
+	const uint64_t before_us = E.delay_us;
+	zassert_equal(gd32g553_ping(&C), ALP_OK);
+	zassert_equal(C.attn_stale_edges, 1u, "the older edge was discarded");
+	zassert_equal(C.attn_timeouts, 1u, "no fresh edge: a lost edge");
+	zassert_true(E.delay_us - before_us >= 35u, "fell back to the staging gap");
+}
+
+ZTEST(gd32_protocol_015, test_attn_fresh_edge_beats_a_stale_one)
+{
+	zassert_equal(bring_up(true), ALP_OK);
+	H.inject_stale           = true;
+	const uint64_t before_us = E.delay_us;
+	zassert_equal(gd32g553_ping(&C), ALP_OK);
+	zassert_equal(C.attn_timeouts, 0u);
+	zassert_equal(E.delay_us, before_us, "delivered on the fresh edge, no staging gap");
+}
+
+/* The comparison is a wrap-safe 32-bit one: a free-running counter rolling
+ * over 0xFFFFFFFF -> 0 mid-run must not turn fresh edges stale. */
+ZTEST(gd32_protocol_015, test_attn_edge_compare_is_wrap_safe)
+{
+	H.clock = 0xFFFFFFF0u;
+	zassert_equal(bring_up(true), ALP_OK);
+	for (int i = 0; i < 40; i++) {
+		zassert_equal(gd32g553_ping(&C), ALP_OK);
+	}
+	zassert_true(C.attn_active);
+	zassert_equal(C.attn_timeouts, 0u, "fresh edges across the rollover are not stale");
+	zassert_equal(C.attn_stale_edges, 0u);
+	zassert_true(H.clock < 0x1000u, "the counter really wrapped");
+}
+
+ZTEST(gd32_protocol_015, test_batch_rejects_two_read2_on_one_stream_locally)
+{
+	manual_link(0x1Fu, 252u);
+	const uint8_t       a[2] = { 0, 4 };
+	const uint8_t       b[2] = { 1, 4 };
+	uint8_t             ra[9 + 8], rb[9 + 8], rc[9 + 8];
+	gd32g553_batch_op_t dup[2] = {
+		{ .op = 0x3C, .args = a, .args_len = 2, .reply = ra, .reply_cap = sizeof ra },
+		{ .op = 0x3C, .args = a, .args_len = 2, .reply = rb, .reply_cap = sizeof rb },
+	};
+	gd32g553_batch_op_t two_streams[2] = {
+		{ .op = 0x3C, .args = a, .args_len = 2, .reply = ra, .reply_cap = sizeof ra },
+		{ .op = 0x3C, .args = b, .args_len = 2, .reply = rc, .reply_cap = sizeof rc },
+	};
+	const uint32_t n0 = E.nreq;
+	zassert_equal(gd32g553_batch(&C, dup, 2u, NULL), ALP_ERR_INVAL);
+	zassert_equal(E.nreq, n0, "rejected before any bus traffic");
+	E.stream_active[0] = E.stream_active[1] = true;
+	zassert_equal(gd32g553_batch(&C, two_streams, 2u, NULL), ALP_OK, "one per stream is fine");
+}
+
+/* READ2 sub-replies inside a BATCH move the stream's running index, so the
+ * next standalone READ2 is contiguous rather than a false accounting gap. */
+ZTEST(gd32_protocol_015, test_batched_read2_advances_the_stream_index)
+{
+	zassert_equal(bring_up(false), ALP_OK);
+	gd32g553_adc_stream2_info_t info;
+	zassert_equal(gd32g553_adc_stream_begin2(&C, 0u, 0u, 1000u, 0u, &info), ALP_OK);
+
+	E.r2_got                 = 3u;
+	E.r2_first               = 0u;
+	const uint8_t       a[2] = { 0, 8 };
+	uint8_t             rep[9 + 16];
+	gd32g553_batch_op_t op = {
+		.op = 0x3C, .args = a, .args_len = 2, .reply = rep, .reply_cap = sizeof rep
+	};
+	zassert_equal(gd32g553_batch(&C, &op, 1u, NULL), ALP_OK);
+
+	E.r2_first = 3u; /* the backlog continues where the batched read stopped */
+	E.r2_got   = 2u;
+	uint32_t first, dropped;
+	uint8_t  got;
+	uint16_t codes[8];
+	zassert_equal(gd32g553_adc_stream_read2(&C, 0u, 8u, &first, &dropped, &got, codes), ALP_OK);
+	zassert_equal(C.stream2_gaps, 0u, "a batched read must not look like a gap");
+}
+
+/* After an OTA commit/rollback the bridge is a fresh boot: the next command
+ * re-reads the version and re-runs the negotiation instead of leaving
+ * BEGIN2 / BATCH / ATTN failing with NOSUPPORT. */
+ZTEST(gd32_protocol_015, test_ota_commit_renegotiates_on_the_next_command)
+{
+	zassert_equal(bring_up(true), ALP_OK);
+	zassert_equal(gd32g553_ota_commit(&C), ALP_OK);
+	emu_reboot(); /* the bridge comes back un-negotiated */
+	zassert_equal(C.granted, 0u);
+	zassert_true(C.renegotiate_pending);
+
+	zassert_equal(gd32g553_ping(&C), ALP_OK);
+	zassert_false(C.renegotiate_pending);
+	zassert_equal(E.ext_count, 2u, "negotiation re-run");
+	zassert_equal(C.granted, 0x1Fu);
+	zassert_true(C.attn_active);
+	gd32g553_adc_stream2_info_t info;
+	zassert_equal(gd32g553_adc_stream_begin2(&C, 0u, 0u, 1000u, 0u, &info), ALP_OK);
+}
+
+/* A reply the request cannot explain: nothing executed, or the batch stopped
+ * short although the last op succeeded (the firmware only stops on an error). */
+ZTEST(gd32_protocol_015, test_batch_reply_executed_zero_or_short_without_error_is_io)
+{
+	zassert_equal(bring_up(false), ALP_OK);
+	gd32g553_batch_op_t one    = { .op = 0x00 };
+	const uint8_t       raw0[] = { 0 };
+	memcpy(E.batch_raw, raw0, sizeof raw0);
+	E.batch_raw_len = sizeof raw0;
+	zassert_equal(gd32g553_batch(&C, &one, 1u, NULL), ALP_ERR_IO, "executed == 0");
+
+	gd32g553_batch_op_t two[2] = { { .op = 0x00 }, { .op = 0x00 } };
+	const uint8_t       raw1[] = { 1, 0, 0 };
+	memcpy(E.batch_raw, raw1, sizeof raw1);
+	E.batch_raw_len = sizeof raw1;
+	zassert_equal(gd32g553_batch(&C, two, 2u, NULL), ALP_ERR_IO, "stopped early, last op OK");
 }
