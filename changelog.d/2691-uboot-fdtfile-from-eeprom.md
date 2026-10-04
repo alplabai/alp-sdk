@@ -1,4 +1,4 @@
-### Changed — U-Boot picks the kernel dtb from the on-module EEPROM manifest at boot
+### Changed — U-Boot picks the kernel dtb from the on-module EEPROM manifest at boot (#2691)
 
 The FIP's U-Boot used to load `boot/$CONFIG_ALP_E1M_FDTFILE`, a name fixed at
 build time per MACHINE. A blank E1M-V2N103 bootstrapped with a V2M FIP then
