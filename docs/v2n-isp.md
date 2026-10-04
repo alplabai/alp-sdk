@@ -105,7 +105,7 @@ but has no ISP nodes).
 - **Machine compatibility.** The package restricts its kernel append and
   its two userspace recipes to its own EVK machine; this layer widens that
   match to the Alp V2N/V2M machines (`v2n-isp-*_%.bbappend`).
-- **Boot.** `alp-isp-init.service` runs the package's `/root/v4l2-init.sh`
+- **Boot.** `alp-isp-init.service` runs the package's `v4l2-init.sh` (installed in root's home directory)
   (media pipeline, ISP sensor preset, crop, ISP userspace daemon). Mode
   defaults to `2k` (1920x1080); set `ISP_MODE` in `/etc/default/alp-isp`.
   The image gains it only when the layer, `ALP_ENABLE_ISP=1` and the `v2n`
