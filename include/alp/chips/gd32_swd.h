@@ -127,8 +127,15 @@ typedef struct {
  * @brief Bind the controller to caller-supplied GPIO handles.
  *
  * Configures `swdio` + `swclk` as outputs driven to the SWD idle
- * state, and -- when `nrst` is non-NULL -- releases the reset line.
- * Ownership of the handles stays with the caller.
+ * state.  When `nrst` is non-NULL it is **asserted first** and released
+ * only after the pads are outputs: `swclk` (Renesas `P71`) doubles as the
+ * bridge's ATTN input (GD32 `PA14`), which the GD32 drives while the
+ * v0.15 ATTN link feature is granted, so the host may only drive it as
+ * an output while `GD32_NRST` (`P74`) holds the GD32 in reset (a reset
+ * returns `PA14` to SWCLK; see docs/gd32-bridge-protocol.md §3.17 rule
+ * H3).  With `nrst == NULL` the caller must instead guarantee that its
+ * most recent SPI `LINK_FEATURES` reply did not grant ATTN and that it
+ * has sent none since.  Ownership of the handles stays with the caller.
  *
  * @return @ref ALP_OK on success, @ref ALP_ERR_INVAL on NULL ctx /
  *         swdio / swclk, or the @ref alp_gpio_write error from the

@@ -398,31 +398,45 @@ alp_status_t gd32_swd_init(gd32_swd_t *ctx, alp_gpio_t *swdio, alp_gpio_t *swclk
 	ctx->nrst        = nrst;
 	ctx->clock_delay = GD32_SWD_DEFAULT_CLOCK_DELAY;
 
-	/* SWCLK + SWDIO start as outputs driven high (the SWD idle
-     * state per the spec).  SWDIO will toggle between input and
-     * output at runtime in the bit-bang routines. */
-	alp_status_t s = alp_gpio_configure(swclk, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
-	if (s != ALP_OK) return s;
-	s = alp_gpio_configure(swdio, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
-	if (s != ALP_OK) return s;
-	ctx->swdio_is_output = true;
-
-	s = alp_gpio_write(swclk, true);
-	if (s != ALP_OK) return s;
-	s = alp_gpio_write(swdio, true);
-	if (s != ALP_OK) return s;
-
-	/* If NRST is wired, leave it in the released (HiZ on an open-drain
-     * net) state.  Driving low + releasing happens later inside
-     * reset_and_run. */
+	/* GD32 bridge protocol 0.15 §3.17 rule H3: SWCLK (Renesas P71) is
+	 * also the bridge's ATTN line (GD32 PA14), which the GD32 drives while
+	 * ATTN is granted.  The host may therefore drive P70/P71 as outputs
+	 * only after asserting GD32_NRST (P74) -- a reset clears every link
+	 * feature and returns PA14 to SWCLK -- so assert NRST FIRST, switch
+	 * the pads to outputs while the GD32 is held in reset (nothing can
+	 * be driving the net then), and only then release it.  The GD32
+	 * comes back up with ATTN off, so there is no contention afterwards.
+	 *
+	 * With nrst == NULL this driver cannot honour H3 itself: the caller
+	 * must instead know that its most recent SPI LINK_FEATURES reply did
+	 * not grant ATTN and that it has sent none since (H3(a)).  The
+	 * caller is responsible for the pin being configured open-drain at
+	 * the SoC level -- on the V2N this is a hard pad property because the
+	 * NRST line shares a net with the primary PMIC's reset-out
+	 * (coordinate with the maintainer for rail-level details). */
 	if (nrst != NULL) {
-		/* Caller is responsible for the pin being configured open-
-         * drain at the SoC level -- on the V2N this is a hard pad
-         * property because the NRST line shares a net with the
-         * primary PMIC's reset-out (coordinate with the maintainer
-         * for rail-level details). */
-		(void)alp_gpio_write(nrst, true);
+		(void)alp_gpio_write(nrst, false); /* assert (drive low) */
+		/* Hold reset for a few thousand clock-delay spins -- the
+		 * GD32G553 boot ROM honours reset pulses >= 10 us. */
+		for (unsigned i = 0u; i < 4000u; ++i)
+			swd_clock_delay(ctx);
 	}
+
+	/* SWCLK + SWDIO start as outputs driven high (the SWD idle
+	 * state per the spec).  SWDIO will toggle between input and
+	 * output at runtime in the bit-bang routines. */
+	alp_status_t s = alp_gpio_configure(swclk, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (s == ALP_OK) s = alp_gpio_configure(swdio, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (s == ALP_OK) {
+		ctx->swdio_is_output = true;
+		s                    = alp_gpio_write(swclk, true);
+	}
+	if (s == ALP_OK) s = alp_gpio_write(swdio, true);
+
+	/* Leave NRST released (HiZ on an open-drain net) whatever happened;
+	 * reset_and_run() pulses it again later. */
+	if (nrst != NULL) (void)alp_gpio_write(nrst, true);
+	if (s != ALP_OK) return s;
 
 	ctx->initialised = true;
 	return ALP_OK;
