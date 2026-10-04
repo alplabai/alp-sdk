@@ -154,11 +154,8 @@ Other operator rules:
   (recovery: power-cycle the supply). The tool keeps one connection and spaces
   commands by at least `bench.yaml` `power.min_gap_s` (default `0.3` s), retries
   after a connection reset with backoff, and only ever addresses the configured
-  channel. Keep any manual queries just as sparse. In `bench.yaml`:
-
-  ```yaml
-  power: {kind: scpi, host: <psu>, port: 5025, channel: 1, min_gap_s: 0.3}   # min_gap_s optional
-  ```
+  channel. Keep any manual queries just as sparse. In `bench.yaml`
+  (`min_gap_s` is optional): `power: {kind: scpi, host: PSU_HOST, port: 5025, channel: 1, min_gap_s: 0.3}`
 - **Prompt resync.** `cold_boot_test` tolerates a kernel message printed after the
   shell prompt: the prompt wait sends a newline so a fresh prompt appears.
 
