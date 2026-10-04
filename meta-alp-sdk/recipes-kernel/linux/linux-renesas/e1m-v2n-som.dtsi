@@ -8,7 +8,7 @@
  * metadata, NOT here.
  *
  * On-module hardware described here: DRP-AI/codec reserved memory, the
- * core fixed rails, the dual Realtek RTL8211F-VD GbE PHYs, on-module eMMC
+ * core fixed rails, the dual Realtek RTL8211F GbE PHYs, on-module eMMC
  * (SDHI0), and the on-module xSPI NOR. Carrier-facing enables live in the
  * carrier dtsi (e1m-x-evk.dtsi); each product board dts composes
  * SoC dtsi + this SoM dtsi + a carrier dtsi.
@@ -283,12 +283,18 @@
 /*
  * Dual on-module GbE PHYs. Each PHY is addressed at MDIO address 2 on its
  * bus (the on-module wiring makes address 2 the reliable address; address
- * 0 does not respond to phy_poll_reset). The compatible string carries the
- * PHY's IEEE OUI/model so the matching mainline driver binds.
+ * 0 does not respond to phy_poll_reset -- docs/errata-e1m-x-v2n.md E2).
+ *
+ * The PHY id is forced to what the fitted part reports, 0x001c.c916 (package
+ * marking not checked), so driver selection does not depend on an id read at
+ * MDIO bus registration. The driver's probe still snapshots PHYCR1/PHYCR2 at
+ * that moment. The earlier forced id 0x001c.c878 was the BOM name, not what
+ * the silicon reports; it bound the RTL8211F-VD driver entry, which skips
+ * PHYCR2 handling.
  */
 &mdio0 {
 	phy0: ethernet-phy@2 {
-		compatible = "ethernet-phy-id001c.c878",
+		compatible = "ethernet-phy-id001c.c916",
 			     "ethernet-phy-ieee802.3-c22";
 		reg = <2>;
 	};
@@ -296,7 +302,7 @@
 
 &mdio1 {
 	phy1: ethernet-phy@2 {
-		compatible = "ethernet-phy-id001c.c878",
+		compatible = "ethernet-phy-id001c.c916",
 			     "ethernet-phy-ieee802.3-c22";
 		reg = <2>;
 	};
