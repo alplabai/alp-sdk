@@ -28,6 +28,15 @@
  *   [40] staircase: current duty per-mille (live)
  *   [41] staircase: step counter (liveness)
  *
+ * Protocol v0.15 adds three tests (link_features, adc_stream2, batch).
+ * They are SELF-GATING: gd32g553_init() negotiates the v0.15 features
+ * (BIG_FRAME, ADC_STREAM2, BATCH) with a peer that reports minor >= 15,
+ * and each test checks the contract of the link it actually got -- a
+ * granted feature must work, an ungranted one must answer
+ * ALP_ERR_NOSUPPORT without touching the wire.  ATTN (the data-ready
+ * line on P71) needs an interrupt hook; the hil-soak example wires one
+ * and shows how, this example stays on the staging-gap path.
+ *
  * This is a maintainer bench tool in example form; like the soak it
  * exercises the gd32g553 chip driver directly (the documented
  * exception to the portable-API rule for dedicated bridge demos).
@@ -260,6 +269,123 @@ static void t_adc_all_channels(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Protocol v0.15: negotiated link features, lossless stream, BATCH    */
+/* ------------------------------------------------------------------ */
+
+/* What init() negotiated must agree with what the peer says it is: a
+ * minor >= 15 bridge grants STATUS_SEQ | BIG_FRAME | ADC_STREAM2 | BATCH
+ * (0x1B; ATTN would add 0x04 but needs a hook this example does not
+ * register) with the 252-byte BIG_FRAME ceiling; an older bridge keeps
+ * the legacy 1-byte STATUS_SEQ form and the 65-byte envelope, so the
+ * wire is byte-identical to v0.14. */
+static void t_link_features(void)
+{
+	const bool v015 = ctx.version.minor >= GD32G553_V015_MIN_PROTOCOL_MINOR;
+	bool       ok;
+
+	if (v015) {
+		const uint32_t want = GD32G553_LINK_FEAT_STATUS_SEQ | GD32G553_LINK_FEAT_BIG_FRAME |
+		                      GD32G553_LINK_FEAT_ADC_STREAM2 | GD32G553_LINK_FEAT_BATCH;
+		ok                  = ((ctx.granted & want) == want) && (ctx.max_payload == 252u);
+	} else {
+		ok = (ctx.granted == GD32G553_LINK_FEAT_STATUS_SEQ) && (ctx.max_payload == 65u);
+	}
+	record(ALP_OK, ok);
+}
+
+/* ADC_STREAM2: BEGIN2 returns the REALISED rate exactly (tick_hz /
+ * period_ticks, 1 MHz / 1000 = 1 kHz) and READ2 returns raw codes with a
+ * sample index and a drop count.  A poll-driven consumer (watermark 0)
+ * gives a 1024-deep ring, so 50 ms at 1 kHz drops nothing: the two reads
+ * must be contiguous, first_index(2) == first_index(1) + got(1).  Without
+ * the grant, BEGIN2 must answer NOSUPPORT -- the 0x33/0x34 stream above
+ * is then the only stream path. */
+static void t_adc_stream2(void)
+{
+	gd32g553_adc_stream2_info_t info;
+	const alp_status_t          s = gd32g553_adc_stream_begin2(&ctx, 0u, 0u, 1000u, 0u, &info);
+
+	if ((ctx.granted & GD32G553_LINK_FEAT_ADC_STREAM2) == 0u) {
+		record(ALP_OK, s == ALP_ERR_NOSUPPORT);
+		return;
+	}
+	if (s != ALP_OK) {
+		record(s, false);
+		return;
+	}
+
+	alp_delay_ms(50);
+
+	uint16_t           codes[GD32G553_READ2_MAX_SAMPLES_BIG];
+	const uint8_t      max    = (uint8_t)((ctx.max_payload - GD32G553_READ2_HDR_BYTES) / 2u);
+	uint32_t           first1 = 0, drop1 = 0, first2 = 0, drop2 = 0;
+	uint8_t            got1 = 0, got2 = 0;
+	const alp_status_t s1 = gd32g553_adc_stream_read2(&ctx, 0u, max, &first1, &drop1, &got1, codes);
+	const alp_status_t s2 = gd32g553_adc_stream_read2(&ctx, 0u, max, &first2, &drop2, &got2, codes);
+	const alp_status_t send = gd32g553_adc_stream_end(&ctx, 0u);
+
+	const alp_status_t worst    = (s1 != ALP_OK) ? s1 : (s2 != ALP_OK) ? s2 : send;
+	const bool         value_ok = (info.tick_hz == 1000000u) && (info.period_ticks == 1000u) &&
+	                              (info.full_scale == 4095u) && (got1 >= 30u) && (drop1 == 0u) &&
+	                              (first1 == 0u) && (drop2 == 0u) && (first2 == first1 + got1) &&
+	                              (ctx.stream2_gaps == 0u);
+	record(worst, value_ok);
+}
+
+/* BATCH: PING + a full-mask GPIO_READ + COUNTER_READ in ONE transaction
+ * pair.  The driver validates the request against the allow-list and the
+ * reply against the request (executed <= count, per-op lengths); here we
+ * only assert the outcome.  A second batch whose middle op fails (READ2
+ * on a stream that was never started) must STOP at that op: executed is
+ * 2, the third op never ran.  Without the grant: NOSUPPORT. */
+static void t_batch(void)
+{
+	const uint8_t       mask_all[4] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu };
+	const uint8_t       counter0[1] = { 0u };
+	const uint8_t       read2_s1[2] = { 1u, 4u }; /* stream 1, never started */
+	uint8_t             gpio_rep[4], counter_rep[4], read2_rep[GD32G553_READ2_HDR_BYTES + 2u * 4u];
+	gd32g553_batch_op_t good[3] = {
+		{ .op = GD32G553_CMD_PING },
+		{ .op        = GD32G553_CMD_GPIO_READ,
+		  .args      = mask_all,
+		  .args_len  = 4u,
+		  .reply     = gpio_rep,
+		  .reply_cap = sizeof gpio_rep },
+		{ .op        = GD32G553_CMD_COUNTER_READ,
+		  .args      = counter0,
+		  .args_len  = 1u,
+		  .reply     = counter_rep,
+		  .reply_cap = sizeof counter_rep },
+	};
+	gd32g553_batch_op_t stops[3] = {
+		{ .op = GD32G553_CMD_PING },
+		{ .op        = GD32G553_CMD_ADC_STREAM_READ2,
+		  .args      = read2_s1,
+		  .args_len  = 2u,
+		  .reply     = read2_rep,
+		  .reply_cap = sizeof read2_rep },
+		{ .op = GD32G553_CMD_PING },
+	};
+	uint8_t executed = 0;
+
+	if ((ctx.granted & GD32G553_LINK_FEAT_BATCH) == 0u) {
+		record(ALP_OK, gd32g553_batch(&ctx, good, 3u, &executed) == ALP_ERR_NOSUPPORT);
+		return;
+	}
+
+	alp_status_t s  = gd32g553_batch(&ctx, good, 3u, &executed);
+	bool         ok = (s == ALP_OK) && (executed == 3u) && (good[0].status == ALP_OK) &&
+	                  (good[1].status == ALP_OK) && (good[1].reply_len == 4u) &&
+	                  (good[2].status == ALP_OK) && (good[2].reply_len == 4u);
+	if (s == ALP_OK) {
+		s  = gd32g553_batch(&ctx, stops, 3u, &executed);
+		ok = ok && (s == ALP_OK) && (executed == 2u) && (stops[0].status == ALP_OK) &&
+		     (stops[1].status == ALP_ERR_INVAL) && (stops[2].status == ALP_ERR_NOT_READY);
+	}
+	record(s, ok);
+}
+
+/* ------------------------------------------------------------------ */
 /* DSP chain: pool lifecycle (the runtime FFT/FAC dispatch is a wired  */
 /* protocol surface whose HAL lands with wave-2 -- both outcomes are   */
 /* contract-checked)                                                   */
@@ -334,6 +460,11 @@ static void run_suite(void)
 	/* -- ADC ---------------------------------------------------------- */
 	t_adc_configure_error_path();
 	t_adc_all_channels();
+
+	/* -- protocol v0.15 (self-gating on the negotiated features) ------ */
+	t_link_features();
+	t_adc_stream2();
+	t_batch();
 
 	/* -- DSP chain pool ----------------------------------------------- */
 	t_dsp_chain_lifecycle();

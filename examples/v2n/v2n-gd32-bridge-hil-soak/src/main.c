@@ -25,6 +25,14 @@
  * count, recover, and keep hammering.  A cycle summary prints every
  * cycle and a cumulative table every 16 cycles; any FAIL line carries
  * the alp_status_t so a console log alone is diagnosable.
+ *
+ * Protocol v0.15 rows (adc_stream2, batch, attn) are SELF-GATING: the
+ * driver negotiates the v0.15 link features at init (BIG_FRAME, BATCH,
+ * ADC_STREAM2 and, when this example's P71 interrupt hook works, ATTN),
+ * and a row whose feature the peer did not grant just passes -- so the
+ * same binary soaks a v0.14 bridge (legacy rows only) and a v0.15 one
+ * (legacy rows plus the new wire, with every command's reply awaited on
+ * the ATTN edge instead of a timed staging gap).
  */
 
 #include <stdio.h>
@@ -46,8 +54,96 @@ typedef struct {
 	int         last_status; /* last failing alp_status_t (0 if none) */
 } soak_stat_t;
 
-/* One context for the whole soak; opened once, recovered on demand. */
+/* One context for the whole soak; opened once, recovered on demand.
+ * Static on purpose: the context carries the two 256-byte SPI frame
+ * buffers a BIG_FRAME exchange needs, which do not belong on a thread
+ * stack. */
 static gd32g553_t ctx;
+
+/* ------------------------------------------------------------------ */
+/* ATTN (protocol v0.15): the GD32 raises PA14 -- Renesas P71 -- once a */
+/* reply is armed, so the host can wait for an edge instead of a timed  */
+/* staging gap.  The chip driver is platform-agnostic: it only wants    */
+/* three callbacks (clear the latch, wait for an edge, read the level), */
+/* which this app builds from the portable GPIO API plus a Zephyr       */
+/* semaphore.  (The V2N supervisor singleton does the same for the     */
+/* portable peripherals; this soak drives the chip driver directly.)    */
+/*                                                                      */
+/* Rules the host must keep (docs/gd32-bridge-protocol.md section 3.17):*/
+/*   - P71 is an INPUT with a rising-edge IRQ BEFORE ATTN is requested; */
+/*   - P71 is never driven as an output here -- it is the GD32's SWCLK  */
+/*     whenever ATTN is off, and only the SWD recovery path may drive   */
+/*     it, with GD32_NRST asserted first.                               */
+/* ------------------------------------------------------------------ */
+
+/* alp_pins index 1 = P71 on the V2N / V2M CM33 boards (index 0 = the SPI
+ * chip-select; both are generated from supervisor-links.yaml). */
+#define SOAK_ATTN_PIN_ID 1u
+
+static alp_gpio_t  *attn_pin;
+static bool         attn_hook_ready;
+static struct k_sem attn_sem; /* the "edge latch": an ISR give, a thread take */
+
+static void attn_isr(alp_gpio_t *pin, void *user)
+{
+	(void)pin;
+	(void)user;
+	k_sem_give(&attn_sem); /* ISR-safe */
+}
+
+/* Forget any edge seen before this request is clocked out. */
+static void attn_arm(void *user)
+{
+	(void)user;
+	k_sem_reset(&attn_sem);
+}
+
+/* Block until the next rising edge (interrupt + semaphore -- the driver
+ * forbids polling), or time out so it can fall back to the 0.14 ladder. */
+static alp_status_t attn_wait(void *user, uint32_t timeout_ms)
+{
+	(void)user;
+	return (k_sem_take(&attn_sem, K_MSEC(timeout_ms)) == 0) ? ALP_OK : ALP_ERR_TIMEOUT;
+}
+
+/* Optional: lets the driver spot a line stuck high. */
+static alp_status_t attn_level(void *user, bool *high)
+{
+	(void)user;
+	return alp_gpio_read(attn_pin, high);
+}
+
+static const gd32g553_attn_hook_t attn_hook = {
+	.arm        = attn_arm,
+	.wait       = attn_wait,
+	.read_level = attn_level,
+};
+
+/* Open P71 as an input + rising-edge IRQ.  Best effort: a platform GPIO
+ * driver with no interrupt route for the pad just leaves ATTN off and the
+ * soak runs on the staging-gap path. */
+static void attn_hook_setup(void)
+{
+	k_sem_init(&attn_sem, 0, 1);
+	attn_pin = alp_gpio_open(SOAK_ATTN_PIN_ID);
+	if (attn_pin == NULL) {
+		printf("[hil-soak] ATTN: P71 not in alp_pins (err=%d) -- staging-gap path\n",
+		       (int)alp_last_error());
+		return;
+	}
+	if (alp_gpio_configure(attn_pin, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE) != ALP_OK ||
+	    alp_gpio_irq_enable(attn_pin, ALP_GPIO_EDGE_RISING, attn_isr, NULL) != ALP_OK) {
+		printf("[hil-soak] ATTN: no interrupt for P71 -- staging-gap path\n");
+		alp_gpio_close(attn_pin);
+		attn_pin = NULL;
+		return;
+	}
+	attn_hook_ready = true;
+}
+
+/* Was ATTN active after the last link init?  The attn row fails if it
+ * silently turns off later. */
+static bool attn_was_active;
 
 /* Version captured at init -- GET_VERSION must keep matching it
  * (a mid-soak change would mean the GD32 silently rebooted). */
@@ -332,6 +428,171 @@ static bool t_adc_stream(soak_stat_t *st)
 	return true;
 }
 
+/* v0.15 ADC_STREAM2 (0x3B BEGIN2 / 0x3C READ2) -- the lossless stream.
+ * Where the legacy rows above return millivolts and answer BUSY on an
+ * overrun, BEGIN2/READ2 hand back RAW CODES plus exact accounting:
+ *
+ *   first_index  sequence number of codes[0] since BEGIN2 (u32, wraps)
+ *   dropped      samples discarded just before codes[0]
+ *
+ * so a host can prove it lost nothing.  The invariant this row asserts:
+ *
+ *   first_index(n) == first_index(n-1) + got(n-1) + dropped(n)
+ *
+ * With a poll-driven consumer (watermark 0: no ATTN events, a 1024-deep
+ * ring) and a 50 ms gap at 1 kHz there is nothing to drop, so every
+ * `dropped` must be 0 and the realised rate must be EXACT: the reply
+ * carries tick_hz and period_ticks (1 MHz / 1000 ticks = 1000.00 Hz).
+ * Self-gating: a peer that did not grant ADC_STREAM2 passes (the legacy
+ * adc_stream row covers it). */
+static bool t_adc_stream2(soak_stat_t *st)
+{
+	if ((ctx.granted & GD32G553_LINK_FEAT_ADC_STREAM2) == 0u) return true;
+
+	gd32g553_adc_stream2_info_t info;
+	alp_status_t                s = gd32g553_adc_stream_begin2(&ctx, 0u, 0u, 1000u, 0u, &info);
+	if (s != ALP_OK) {
+		st->last_status = (int)s;
+		SOAK_FAIL(st, "begin2 status=%d", (int)s);
+		return false;
+	}
+
+	k_msleep(50); /* ~50 samples accumulate in the ring */
+
+	/* READ2 carries (max_payload - 9) / 2 codes: 121 on a BIG_FRAME link,
+	 * 28 on a 65-byte one.  The caller's buffer must hold that many. */
+	uint16_t           codes[GD32G553_READ2_MAX_SAMPLES_BIG];
+	const uint8_t      max    = (uint8_t)((ctx.max_payload - GD32G553_READ2_HDR_BYTES) / 2u);
+	uint32_t           first1 = 0, drop1 = 0, first2 = 0, drop2 = 0;
+	uint8_t            got1 = 0, got2 = 0;
+	const alp_status_t s1 = gd32g553_adc_stream_read2(&ctx, 0u, max, &first1, &drop1, &got1, codes);
+	const alp_status_t s2 = gd32g553_adc_stream_read2(&ctx, 0u, max, &first2, &drop2, &got2, codes);
+	const alp_status_t s_end = gd32g553_adc_stream_end(&ctx, 0u);
+
+	if (s1 != ALP_OK || s2 != ALP_OK) {
+		st->last_status = (int)((s1 != ALP_OK) ? s1 : s2);
+		SOAK_FAIL(st, "read2 status=%d/%d", (int)s1, (int)s2);
+		return false;
+	}
+	if (info.tick_hz != 1000000u || info.period_ticks != 1000u || info.full_scale != 4095u) {
+		SOAK_FAIL(st,
+		          "begin2 reply tick=%u period=%u full_scale=%u (want 1000000/1000/4095)",
+		          (unsigned)info.tick_hz,
+		          (unsigned)info.period_ticks,
+		          (unsigned)info.full_scale);
+		return false;
+	}
+	if (got1 < 30u || got1 > max) {
+		SOAK_FAIL(st,
+		          "read2 #1 got=%u (want 30..%u: ~50 samples after 50 ms @1 kHz)",
+		          (unsigned)got1,
+		          (unsigned)max);
+		return false;
+	}
+	if (first1 != drop1 || drop1 != 0u) {
+		SOAK_FAIL(
+		    st, "read2 #1 first_index=%u dropped=%u (want 0/0)", (unsigned)first1, (unsigned)drop1);
+		return false;
+	}
+	if (first2 != first1 + got1 + drop2 || drop2 == GD32G553_READ2_DROPPED_UNKNOWN) {
+		SOAK_FAIL(st,
+		          "read2 #2 first_index=%u (want %u + %u) dropped=%u",
+		          (unsigned)first2,
+		          (unsigned)first1,
+		          (unsigned)got1,
+		          (unsigned)drop2);
+		return false;
+	}
+	if (ctx.stream2_gaps != 0u) {
+		SOAK_FAIL(st, "driver counted %u accounting gaps", (unsigned)ctx.stream2_gaps);
+		return false;
+	}
+	for (uint8_t i = 0u; i < got1; ++i) {
+		if (codes[i] > info.full_scale) {
+			SOAK_FAIL(st, "code %u > full_scale %u", (unsigned)codes[i], (unsigned)info.full_scale);
+			return false;
+		}
+	}
+	if (s_end != ALP_OK) {
+		st->last_status = (int)s_end;
+		SOAK_FAIL(st, "end status=%d", (int)s_end);
+		return false;
+	}
+	return true;
+}
+
+/* v0.15 BATCH (0x04): up to 16 allow-listed sub-operations in ONE SPI
+ * transaction pair.  Here: PING + a full-mask GPIO_READ + COUNTER_READ,
+ * i.e. three opcodes for one round trip.  The reply is self-delimiting
+ * (executed:u8 then {status, len, payload} per op) and the driver has
+ * already cross-checked every length against the request, so the row only
+ * has to assert the outcome: all three ran, all three OK, with the fixed
+ * 4-byte payloads.  Self-gating on the BATCH grant. */
+static bool t_batch(soak_stat_t *st)
+{
+	if ((ctx.granted & GD32G553_LINK_FEAT_BATCH) == 0u) return true;
+
+	const uint8_t       gpio_args[4]    = { 0xFFu, 0xFFu, 0xFFu, 0xFFu }; /* mask: all lines */
+	const uint8_t       counter_args[1] = { 0u };
+	uint8_t             gpio_reply[4], counter_reply[4];
+	gd32g553_batch_op_t ops[3] = {
+		{ .op = GD32G553_CMD_PING },
+		{ .op        = GD32G553_CMD_GPIO_READ,
+		  .args      = gpio_args,
+		  .args_len  = sizeof gpio_args,
+		  .reply     = gpio_reply,
+		  .reply_cap = sizeof gpio_reply },
+		{ .op        = GD32G553_CMD_COUNTER_READ,
+		  .args      = counter_args,
+		  .args_len  = sizeof counter_args,
+		  .reply     = counter_reply,
+		  .reply_cap = sizeof counter_reply },
+	};
+	uint8_t            executed = 0;
+	const alp_status_t s        = gd32g553_batch(&ctx, ops, 3u, &executed);
+	if (s != ALP_OK) {
+		st->last_status = (int)s;
+		SOAK_FAIL(st, "status=%d", (int)s);
+		return false;
+	}
+	if (executed != 3u || ops[0].status != ALP_OK || ops[1].status != ALP_OK ||
+	    ops[2].status != ALP_OK || ops[1].reply_len != 4u || ops[2].reply_len != 4u) {
+		SOAK_FAIL(st,
+		          "executed=%u status=%d/%d/%d len=%u/%u (want 3 OK/OK/OK, 4/4)",
+		          (unsigned)executed,
+		          (int)ops[0].status,
+		          (int)ops[1].status,
+		          (int)ops[2].status,
+		          (unsigned)ops[1].reply_len,
+		          (unsigned)ops[2].reply_len);
+		return false;
+	}
+	return true;
+}
+
+/* v0.15 ATTN health.  Every command above is already AWAITED on the ATTN
+ * edge when the line is active, so any breakage shows up as a lost edge
+ * and a fallback to the 0.14 drain rule -- the driver counts it
+ * (ctx.attn_timeouts) and after three in a row, or three stuck-high
+ * readings, withdraws ATTN and renegotiates without it.  That recovery is
+ * correct behaviour, but a SOAK should not let it pass silently: if ATTN
+ * was active after init and is gone now, fail the row and say why. */
+static bool t_attn(soak_stat_t *st)
+{
+	if (!attn_was_active)
+		return true; /* never granted: v0.14 peer, debugger attached,
+	                                    * stub backend, or no P71 interrupt route */
+	if (!ctx.attn_active) {
+		SOAK_FAIL(st,
+		          "ATTN dropped mid-soak (lost edges=%u stuck-high=%u unusable=%d)",
+		          (unsigned)ctx.attn_timeouts,
+		          (unsigned)ctx.attn_stuck,
+		          (int)ctx.attn_unusable);
+		return false;
+	}
+	return true;
+}
+
 /* fw v0.2.8 converter-ownership guard -- the targeted probe for the
  * delta-review fix: while a stream owns an ADC converter, a single-
  * shot ADC_READ on EITHER logical channel of that converter must be
@@ -478,6 +739,11 @@ static volatile uint32_t counter_forensics[4]; /* [0]=last raw a, [1]=last raw b
  * residual hazard FIRING and being killed -- the raw counter pair
  * above should read equal in lockstep whenever [1] advances). */
 static volatile uint32_t seq_forensics[2];
+/* v0.15 link telemetry for the SWD reader: [0] granted feature word,
+ * [1] ATTN active, [2] replies delivered on an ATTN edge, [3] lost edges
+ * (fell back to the 0.14 drain rule), [4] stuck-high readings, [5] READ2
+ * accounting gaps. */
+static volatile uint32_t v015_forensics[6];
 static bool              t_counter(soak_stat_t *st)
 {
 	uint32_t     a = 0, raw_b = 0, b = 0;
@@ -766,6 +1032,10 @@ static struct {
 	{ { "power_mode", 0, 0, 0 }, t_power_mode, false },
 	{ { "da9292_sentinel", 0, 0, 0 }, t_da9292_sentinel, false },
 	{ { "ota_get_state", 0, 0, 0 }, t_ota_get_state, false },
+	/* protocol v0.15 -- self-gating on the negotiated link features */
+	{ { "adc_stream2", 0, 0, 0 }, t_adc_stream2, false },
+	{ { "batch", 0, 0, 0 }, t_batch, false },
+	{ { "attn", 0, 0, 0 }, t_attn, false },
 };
 
 #define SOAK_TEST_COUNT (sizeof tests / sizeof tests[0])
@@ -783,14 +1053,22 @@ static void link_init_blocking(alp_spi_t *spi)
 	unsigned     attempt = 0;
 	alp_status_t s;
 	do {
-		s = gd32g553_init(&ctx, spi, NULL, GD32G553_BRIDGE_DEFAULT_I2C_ADDR);
+		/* init_ex = init + the v0.15 link-feature negotiation, with the
+		 * ATTN hook when one was set up (NULL = never request ATTN). */
+		s = gd32g553_init_ex(
+		    &ctx, spi, NULL, GD32G553_BRIDGE_DEFAULT_I2C_ADDR, attn_hook_ready ? &attn_hook : NULL);
 		if (s != ALP_OK) {
 			printf(
 			    "[hil-soak] init attempt %u failed: %d -- retrying in 200 ms\n", attempt++, (int)s);
 			k_msleep(200);
 		}
 	} while (s != ALP_OK);
-	boot_version = ctx.version;
+	boot_version    = ctx.version;
+	attn_was_active = ctx.attn_active;
+	printf("[hil-soak] link features granted=0x%02X max_payload=%u ATTN=%s\n",
+	       (unsigned)ctx.granted,
+	       (unsigned)ctx.max_payload,
+	       ctx.attn_active ? "on" : (ctx.attn_unusable ? "self-test failed" : "off"));
 	printf("[hil-soak] link up after %u retr%s; firmware v%u.%u.%u\n",
 	       attempt,
 	       (attempt == 1u) ? "y" : "ies",
@@ -821,6 +1099,8 @@ int main(void)
 		return 1;
 	}
 
+	/* P71 -> input + rising-edge IRQ BEFORE the first handshake (rule H2). */
+	attn_hook_setup();
 	link_init_blocking(spi);
 
 	/* Settle past the host's boot window before the heavy soak: during
@@ -881,8 +1161,14 @@ int main(void)
 		       (cycle_fail != 0u) ? " <-- FAILURES THIS CYCLE" : "");
 
 		/* v0.7 link telemetry for the SWD reader (no console). */
-		seq_forensics[0] = ctx.seq_enabled ? 1u : 0u;
-		seq_forensics[1] = ctx.seq_stale_count;
+		seq_forensics[0]  = ctx.seq_enabled ? 1u : 0u;
+		seq_forensics[1]  = ctx.seq_stale_count;
+		v015_forensics[0] = ctx.granted;
+		v015_forensics[1] = ctx.attn_active ? 1u : 0u;
+		v015_forensics[2] = ctx.attn_edges;
+		v015_forensics[3] = ctx.attn_timeouts;
+		v015_forensics[4] = ctx.attn_stuck;
+		v015_forensics[5] = ctx.stream2_gaps;
 
 		/* Cumulative table every 16 cycles -- greppable soak verdict.
          * "SOAK-CLEAN" appears iff every ACTIVE test has zero failures
