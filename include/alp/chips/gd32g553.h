@@ -102,6 +102,10 @@ extern "C" {
  *  back-to-back reads don't lose samples. */
 #define GD32G553_BRIDGE_ADC_STREAM_READ_MAX 32u
 
+/** Highest `sample_rate_hz` @ref gd32g553_adc_stream_begin accepts
+ *  (firmware pacing timer range 1 Hz..100 kHz). */
+#define GD32G553_BRIDGE_ADC_STREAM_MAX_RATE_HZ 100000u
+
 /** Maximum FFT bins per @ref gd32g553_adc_spectrum_read chunk.  Bins are
  *  float32 (4 B); with the 7-byte reply header this keeps the reply
  *  inside the STREAM_READ wire envelope.  Must match the firmware's
@@ -375,6 +379,10 @@ typedef struct {
 	uint8_t              seq_last;          /**< Last accepted stamp.    */
 	uint32_t             seq_stale_count;   /**< Stale replies caught +
                                                  recovered (telemetry).  */
+	bool                 version_cached;    /**< @c version is trusted;
+                                                 cleared on re-init, OTA
+                                                 commit/rollback and link
+                                                 errors.                 */
 } gd32g553_t;
 
 /**
@@ -410,11 +418,29 @@ alp_status_t gd32g553_ping(gd32g553_t *ctx);
 /** @brief Probe over a specific transport (overrides ctx->default). */
 alp_status_t gd32g553_ping_via(gd32g553_t *ctx, gd32g553_transport_t t);
 
-/** @brief Read the bridge firmware version (cached at init by
- *         @ref gd32g553_init; this helper re-issues `GET_VERSION` so
- *         the host can confirm the firmware has not been swapped
- *         out-of-band, e.g. across a deep-sleep + OTA cycle). */
+/** @brief Read the bridge firmware version.
+ *
+ * Served from the cache filled by @ref gd32g553_init -- no bus traffic.
+ * The cache is dropped (and this call re-issues `GET_VERSION`) after
+ * re-init, @ref gd32g553_ota_commit / @ref gd32g553_ota_rollback, and any
+ * transport-level error (ALP_ERR_IO / ALP_ERR_TIMEOUT).
+ *
+ * @param ctx  Initialised context.
+ * @param out  Receives the version triple.
+ * @return ALP_OK / ALP_ERR_INVAL, or the transport status on a cache miss.
+ */
 alp_status_t gd32g553_get_version(gd32g553_t *ctx, gd32g553_version_t *out);
+
+/** @brief Re-issue `GET_VERSION` on the wire and refresh the cache.
+ *
+ * Use as a link probe or to confirm the firmware has not been swapped
+ * out-of-band; everyday callers want @ref gd32g553_get_version.
+ *
+ * @param ctx  Context (may be mid-init).
+ * @param out  Receives the version triple.
+ * @return ALP_OK / ALP_ERR_INVAL / the transport or firmware status.
+ */
+alp_status_t gd32g553_refresh_version(gd32g553_t *ctx, gd32g553_version_t *out);
 
 /** @brief Read the bridge firmware's truncated SHA-1 build-id.
  *

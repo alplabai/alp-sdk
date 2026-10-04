@@ -104,8 +104,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 1008 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 1018 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 1147 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 1157 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -142,10 +142,10 @@ index e331e951e..3ba5cc2f2 100644
  obj-$(CONFIG_GPIO_GRGPIO)		+= gpio-grgpio.o
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
 new file mode 100644
-index 000000000..b202babc2
+index 000000000..c9edf3c5a
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,1008 @@
+@@ -0,0 +1,1147 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -262,6 +262,25 @@ index 000000000..b202babc2
 +#define GD32_CMD_GPIO_WRITE	0x11
 +#define GD32_CMD_SE_RESET	0x41
 +#define GD32_STATUS_OK		0x00
++#define GD32_STATUS_INVAL	0x01
++#define GD32_STATUS_NOT_READY	0x02
++#define GD32_STATUS_BUSY	0x03
++#define GD32_STATUS_TIMEOUT	0x04
++#define GD32_STATUS_IO		0x05
++#define GD32_STATUS_NOSUPPORT	0x06
++#define GD32_STATUS_NOMEM	0x07
++#define GD32_STATUS_OUT_OF_RANGE 0x08
++#define GD32_STATUS_NO_PENDING	0x80	/* I2C: no command since last START */
++
++/*
++ * Bounded retry on STATUS_BUSY (and a lost-arbitration -EBUSY): the bridge
++ * answers BUSY while it is mid-reboot into a trial image or still busy with
++ * another transport. A few short retries ride that out without turning a
++ * gpiolib call into a long blocking wait; past that the caller sees -EBUSY.
++ */
++#define GD32_BUSY_RETRIES		4
++#define GD32_BUSY_RETRY_MIN_US		2000
++#define GD32_BUSY_RETRY_MAX_US		4000
 +
 +#define GD32_NGPIO_BASE		18
 +#define GD32_NGPIO_WIFI_BT	20
@@ -425,9 +444,37 @@ index 000000000..b202babc2
 +	return status;
 +}
 +
-+static int gd32_bridge_xfer(struct gd32_bridge_gpio *gd32, u8 cmd,
-+			    const u8 *req, unsigned int req_len,
-+			    u8 *rsp, unsigned int rsp_len)
++/* Bridge STATUS_* -> errno. STATUS_BUSY is -EBUSY (retried by the caller). */
++static int gd32_bridge_status_to_errno(u8 status)
++{
++	switch (status) {
++	case GD32_STATUS_OK:
++		return 0;
++	case GD32_STATUS_INVAL:
++		return -EINVAL;
++	case GD32_STATUS_NOT_READY:
++	case GD32_STATUS_NO_PENDING:
++		return -EAGAIN;
++	case GD32_STATUS_BUSY:
++		return -EBUSY;
++	case GD32_STATUS_TIMEOUT:
++		return -ETIMEDOUT;
++	case GD32_STATUS_IO:
++		return -EIO;
++	case GD32_STATUS_NOSUPPORT:
++		return -EOPNOTSUPP;
++	case GD32_STATUS_NOMEM:
++		return -ENOMEM;
++	case GD32_STATUS_OUT_OF_RANGE:
++		return -ERANGE;
++	default:
++		return -EIO;
++	}
++}
++
++static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
++				 const u8 *req, unsigned int req_len,
++				 u8 *rsp, unsigned int rsp_len)
 +{
 +	struct i2c_client *cl = gd32->client;
 +	u8 wbuf[2 + 8 + 2];	/* reg + cmd + max payload + crc */
@@ -465,6 +512,18 @@ index 000000000..b202babc2
 +	if (ret != 2)
 +		return -EIO;
 +
++	/*
++	 * An error reply is [STATUS][CRC] (3 bytes, no payload; GD32
++	 * transport_i2c.c stage_reply()), and the bytes clocked past it read
++	 * as idle 0xFF. Decode that short shape first, otherwise a BUSY
++	 * from the bridge would be misreported as a "reply CRC mismatch".
++	 */
++	if (rbuf[0] != GD32_STATUS_OK && rsp_len > 0) {
++		crc = crc_itu_t(0xFFFF, rbuf, 1);
++		if (rbuf[1] == (crc & 0xFF) && rbuf[2] == (crc >> 8))
++			return gd32_bridge_status_to_errno(rbuf[0]);
++	}
++
 +	crc = crc_itu_t(0xFFFF, rbuf, 1 + rsp_len);
 +	if (rbuf[1 + rsp_len] != (crc & 0xFF) ||
 +	    rbuf[2 + rsp_len] != (crc >> 8)) {
@@ -475,10 +534,26 @@ index 000000000..b202babc2
 +		return -EBADMSG;
 +	}
 +	if (rbuf[0] != GD32_STATUS_OK)
-+		return -EIO;
++		return gd32_bridge_status_to_errno(rbuf[0]);
 +	if (rsp_len)
 +		memcpy(rsp, &rbuf[1], rsp_len);
 +	return 0;
++}
++
++static int gd32_bridge_xfer(struct gd32_bridge_gpio *gd32, u8 cmd,
++			    const u8 *req, unsigned int req_len,
++			    u8 *rsp, unsigned int rsp_len)
++{
++	unsigned int attempt;
++	int ret;
++
++	for (attempt = 0; attempt < GD32_BUSY_RETRIES; attempt++) {
++		ret = gd32_bridge_xfer_once(gd32, cmd, req, req_len, rsp, rsp_len);
++		if (ret != -EBUSY)
++			return ret;
++		usleep_range(GD32_BUSY_RETRY_MIN_US, GD32_BUSY_RETRY_MAX_US);
++	}
++	return ret;
 +}
 +
 +static int gd32_bridge_gpio_get(struct gpio_chip *chip, unsigned int offset)
@@ -508,6 +583,39 @@ index 000000000..b202babc2
 +		return ret;
 +	levels = get_unaligned_le32(rsp);
 +	return !!(levels & mask);
++}
++
++/*
++ * One GPIO_READ for every requested line (gpiolib .get_multiple): a
++ * multi-line request is a single bridge transaction. Line 21 (SE_RST) has
++ * no wire read-back and is answered from the last level sent.
++ */
++static int gd32_bridge_gpio_get_multiple(struct gpio_chip *chip,
++					 unsigned long *mask,
++					 unsigned long *bits)
++{
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
++	u32 want = (u32)*mask;
++	u32 wire = want & ~BIT(GD32_SE_RST_LINE);
++	u32 levels = 0;
++	u8 req[4], rsp[4];
++	int ret;
++
++	if ((wire & GD32_WIFI_BT_LINE_MASK) && gd32_bridge_wifi_bt_status(gd32) != 0)
++		return -EAGAIN;
++
++	if (wire) {
++		put_unaligned_le32(wire, req);
++		ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_READ, req, 4, rsp, 4);
++		if (ret)
++			return ret;
++		levels = get_unaligned_le32(rsp) & wire;
++	}
++	if ((want & BIT(GD32_SE_RST_LINE)) && READ_ONCE(gd32->se_rst_asserted))
++		levels |= BIT(GD32_SE_RST_LINE);
++
++	*bits = (*bits & ~(unsigned long)want) | levels;
++	return 0;
 +}
 +
 +/* Line 21: CMD_SE_RESET instead of GPIO_WRITE; outside the replay mask. */
@@ -549,16 +657,25 @@ index 000000000..b202babc2
 +		 GD32_SE_RST_RELEASE_TRIES, ret);
 +}
 +
-+static int gd32_bridge_gpio_do_set(struct gd32_bridge_gpio *gd32,
-+				   unsigned int offset, int value)
++/*
++ * Drive every line in @mask to the matching bit of @vals with ONE
++ * GPIO_WRITE (plus a CMD_SE_RESET for line 21, which is not a GPIO_WRITE
++ * pad). Single-line .set()/.direction_output() are the one-bit case.
++ */
++static int gd32_bridge_gpio_do_set_mask(struct gd32_bridge_gpio *gd32,
++					u32 mask, u32 vals)
 +{
 +	u8 req[8];
-+	u32 mask = BIT(offset);
-+	bool is_wifi_bt = mask & GD32_WIFI_BT_LINE_MASK;
-+	int ret = 0;
++	u32 se_rst = mask & BIT(GD32_SE_RST_LINE);
++	u32 wire;
++	int ret = 0, se_ret = 0;
 +
-+	if (offset == GD32_SE_RST_LINE)
-+		return gd32_bridge_se_rst_set(gd32, value);
++	if (se_rst)
++		se_ret = gd32_bridge_se_rst_set(gd32, !!(vals & se_rst));
++	mask &= ~se_rst;
++	vals &= mask;
++	if (!mask)
++		return se_ret;
 +
 +	/*
 +	 * Latch the requested state and hold state_lock across the transfer
@@ -569,23 +686,22 @@ index 000000000..b202babc2
 +	 */
 +	mutex_lock(&gd32->state_lock);
 +	gd32->output_mask |= mask;
-+	if (value)
-+		gd32->output_vals |= mask;
-+	else
-+		gd32->output_vals &= ~mask;
++	gd32->output_vals = (gd32->output_vals & ~mask) | vals;
 +
 +	/*
 +	 * Defensive only: .request() refuses lines 18/19 until support is
-+	 * confirmed (gd32_bridge_gpio_request()), so do_set() should never
-+	 * actually reach this with is_wifi_bt true and status != 0. Skip the
-+	 * wire transfer for those bits anyway rather than assume that can
-+	 * never change -- the level is still latched above regardless, and
-+	 * gd32_bridge_replay_work() would re-issue the write if support were
-+	 * ever (re)confirmed, so nothing would be lost even if this were hit.
++	 * confirmed (gd32_bridge_gpio_request()), so this should never
++	 * see those bits with status != 0. Drop them from the wire transfer
++	 * anyway rather than assume that can never change -- the level is
++	 * still latched above regardless, and gd32_bridge_replay_work()
++	 * would re-issue the write if support were ever (re)confirmed.
 +	 */
-+	if (!is_wifi_bt || gd32_bridge_wifi_bt_status(gd32) == 0) {
-+		put_unaligned_le32(mask, &req[0]);
-+		put_unaligned_le32(value ? mask : 0, &req[4]);
++	wire = mask;
++	if (gd32_bridge_wifi_bt_status(gd32) != 0)
++		wire &= ~GD32_WIFI_BT_LINE_MASK;
++	if (wire) {
++		put_unaligned_le32(wire, &req[0]);
++		put_unaligned_le32(vals & wire, &req[4]);
 +		ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_WRITE, req, 8, NULL, 0);
 +		if (ret)
 +			gd32->replay_failing = true;
@@ -602,7 +718,28 @@ index 000000000..b202babc2
 +				   msecs_to_jiffies(GD32_REPLAY_PERIOD_MS));
 +	mutex_unlock(&gd32->state_lock);
 +
-+	return ret;
++	return ret ? ret : se_ret;
++}
++
++static int gd32_bridge_gpio_do_set(struct gd32_bridge_gpio *gd32,
++				   unsigned int offset, int value)
++{
++	return gd32_bridge_gpio_do_set_mask(gd32, BIT(offset),
++					    value ? BIT(offset) : 0);
++}
++
++/* gpiolib .set_multiple: one bridge transaction for the whole request. */
++static void gd32_bridge_gpio_set_multiple(struct gpio_chip *chip,
++					  unsigned long *mask,
++					  unsigned long *bits)
++{
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
++	int ret = gd32_bridge_gpio_do_set_mask(gd32, (u32)*mask, (u32)*bits);
++
++	if (ret)
++		dev_warn_ratelimited(chip->parent,
++				     "GPIO multi-write mask 0x%08lx failed (%d)\n",
++				     *mask, ret);
 +}
 +
 +static void gd32_bridge_gpio_set(struct gpio_chip *chip, unsigned int offset,
@@ -1073,6 +1210,8 @@ index 000000000..b202babc2
 +	gd32->chip.free		  = gd32_bridge_gpio_free;
 +	gd32->chip.get		  = gd32_bridge_gpio_get;
 +	gd32->chip.set		  = gd32_bridge_gpio_set;
++	gd32->chip.get_multiple	  = gd32_bridge_gpio_get_multiple;
++	gd32->chip.set_multiple	  = gd32_bridge_gpio_set_multiple;
 +	gd32->chip.direction_output = gd32_bridge_gpio_dir_out;
 +	gd32->chip.direction_input  = gd32_bridge_gpio_dir_in;
 +	gd32->chip.get_direction    = gd32_bridge_gpio_get_dir;

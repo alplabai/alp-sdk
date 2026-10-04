@@ -283,8 +283,8 @@ static void t_dsp_chain_lifecycle(void)
 static void t_version_stable(void)
 {
 	gd32g553_version_t v0, v1;
-	alp_status_t       s = gd32g553_get_version(&ctx, &v0);
-	if (s == ALP_OK) s = gd32g553_get_version(&ctx, &v1);
+	alp_status_t       s = gd32g553_refresh_version(&ctx, &v0);
+	if (s == ALP_OK) s = gd32g553_refresh_version(&ctx, &v1);
 	record(s,
 	       (s == ALP_OK) && (v0.major == v1.major) && (v0.minor == v1.minor) &&
 	           (v0.patch == v1.patch));
