@@ -26,3 +26,12 @@ def test_machine_dtb_matches_the_u_boot_fdtfile():
     for conf in confs:
         expected = v2m if "v2m" in conf.name else v2n
         assert _machine_dtb(conf) == expected, conf.name
+
+
+def test_alp_fdtfile_family_table_matches_the_machine_dtbs():
+    """Patch 0013's family -> dtb table must name the dtbs the images hold."""
+    patch = (UBOOT / "0013-rzv2n-dev-ALP-E1M-fdtfile-from-eeprom.patch").read_text(encoding="utf-8")
+    table = dict(re.findall(r'^\+	\{ "([a-z0-9-]+)",\s*"([^"]+\.dtb)" \},$', patch, re.M))
+    v2m = _machine_dtb(META / "conf" / "machine" / "e1m-v2m101-a55.conf")
+    v2n = _machine_dtb(META / "conf" / "machine" / "e1m-v2n101-a55.conf")
+    assert table == {"v2n-m1": v2m, "v2n": v2n}
