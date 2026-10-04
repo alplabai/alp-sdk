@@ -33,11 +33,12 @@
 static struct {
 	/* configuration */
 	uint8_t minor;
-	bool    ext_inval;    /* answer the 6-byte form with INVAL even at minor 15 */
-	bool    stub;         /* stub backend: supported 0x13 (no ATTN, no STREAM2) */
-	bool    debugger;     /* DHCSR.C_DEBUGEN set: refuse ATTN */
-	bool    attn_signal;  /* false = the edge is "lost" (or never wired) */
-	bool    level_forced; /* ATTN reads stuck high */
+	bool    ext_inval;        /* answer the 6-byte form with INVAL even at minor 15 */
+	bool    stub;             /* stub backend: supported 0x13 (no ATTN, no STREAM2) */
+	bool    debugger;         /* DHCSR.C_DEBUGEN set: refuse ATTN */
+	bool    attn_signal;      /* false = the edge is "lost" (or never wired) */
+	bool    level_forced;     /* ATTN reads stuck high */
+	bool    leak_beyond_read; /* RX buffer already holds bytes past the clocked length */
 	/* link state, as the firmware would hold it */
 	bool     seq;
 	uint8_t  counter;
@@ -460,6 +461,11 @@ alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len)
 	E.level = false; /* CS fall (a drain with no events) drops ATTN */
 	memset(rx, 0, len);
 	if (E.staged_len > 0u) memcpy(rx, E.staged, MIN(len, E.staged_len));
+	/* Bytes past the clocked length that happen to hold the rest of the
+	 * staged frame: stale RX-buffer content a parser must never trust. */
+	if (E.leak_beyond_read && E.staged_len > len) {
+		memcpy(rx + len, E.staged + len, MIN(E.staged_len, 256u) - len);
+	}
 	return ALP_OK; /* the reply is re-served until the next decode */
 }
 
@@ -901,7 +907,11 @@ ZTEST(gd32_protocol_015, test_read2_got_above_max_samples_is_io)
 	zassert_equal(bring_up(false), ALP_OK);
 	begin_stream0();
 	E.r2_force_got = 10; /* firmware claims 10 codes against max_samples 4 */
-	E.r2_got       = 10;
+	/* The claimed frame's CRC sits beyond what the host clocked, in bytes
+	 * that happen to be valid in the RX buffer: only the got > max_samples
+	 * check keeps the parser from trusting them. */
+	E.leak_beyond_read = true;
+	E.r2_got           = 10;
 	uint32_t first, dropped;
 	uint8_t  got = 0xEE;
 	uint16_t codes[4];
@@ -1077,8 +1087,10 @@ batch_io_case(const uint8_t *raw, size_t n, uint8_t op, const uint8_t *args, uin
 ZTEST(gd32_protocol_015, test_batch_reply_io_checks)
 {
 	const uint8_t gr_args[4] = { 1, 0, 0, 0 };
-	/* executed (2) > count (1) */
-	batch_io_case((const uint8_t[]){ 2, 0, 0, 0, 0 }, 5, 0x00, NULL, 0);
+	/* executed (2) > count (1), with entries short enough (two failing ops,
+	 * len 0) to fit the clocked worst case -- only the executed check can
+	 * reject this one */
+	batch_io_case((const uint8_t[]){ 2, 1, 0, 1, 0 }, 5, 0x10, gr_args, 4);
 	/* PING answers a payload byte: len 1 > its maximum 0 */
 	batch_io_case((const uint8_t[]){ 1, 0, 1, 0xAA }, 4, 0x00, NULL, 0);
 	/* GPIO_READ is a fixed 4-byte reply; 3 bytes is a mismatch */
