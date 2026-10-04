@@ -2,9 +2,9 @@
 
 The flat `provision_som.py --bundle` flow could only plan the V2N writes. The
 new subcommands drive a blank module end to end: SCIF download and the Flash
-Writer put a transient eMMC-boot BL2 and the FIP into eMMC boot1, U-Boot
+Writer put a transient eMMC-boot BL2 and the FIP into eMMC boot partition 1, U-Boot
 boots the release image from the microSD, and Linux then writes xSPI, eMMC
-boot1, the eMMC rootfs, the identity EEPROM, the GD32 and the Secure Data
+boot partition 1, the eMMC rootfs, the identity EEPROM, the GD32 and the Secure Data
 Page. The flow and its hazards are in `docs/provisioning-v2n.md`.
 
 - **Dry run by default.** `plan` and `run` without `--execute` run the
@@ -27,7 +27,7 @@ Page. The flow and its hazards are in `docs/provisioning-v2n.md`.
 - **Bundle schema.** New component role `bl2_mmc` (`emmc:boot1`) and an
   optional `memory_tier` (`dram_mbit`, `label`).
 - **Backend rename.** The `xspi_flashwriter` flash backend is now
-  `renesas_flashwriter_scif`. It plans xSPI and eMMC boot1 writes and refuses a
+  `renesas_flashwriter_scif`. It plans xSPI and eMMC boot partition 1 writes and refuses a
   confirmed write. The flat flow reports a `bl2_mmc` component as skipped.
 
 First bench run (E1M-V2M103 2026W38-0001, 2026-09-28) found the target's
@@ -42,7 +42,7 @@ power-cycles the unit.
 Review follow-ups: `boot_sd_linux` checks the live SoM (every
 non-optional on-module I2C device the preset declares must ACK) before the
 first xSPI write, and a resume refuses a Linux booted from the eMMC;
-`--pmic-expect` is checked in preflight under `--execute`; the boot1 write is
+`--pmic-expect` is checked in preflight under `--execute`; the boot partition 1 write is
 bounded by the partition size; `status` flags a state `run` would supersede
 and returns 1 only with `--require-shippable`; the FIP's dtb is read from its
 `bootcmd`; a `.py` bench probe wrapper runs under the current interpreter;
