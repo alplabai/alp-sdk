@@ -181,6 +181,16 @@ def test_fip_fdtfile_prefers_bootcmd_over_vendor_env_scripts():
         gates.fip_fdtfile(fip.replace(b"boot/Image\0", b"") + b"bootcmd=boot/other.dtb\0")
 
 
+def test_fip_fdtfile_returns_the_first_literal_of_the_fallback_chain():
+    # Patch 0013's bootcmd: ${fdtfile}, the build-time default, then every
+    # family-table dtb. Only the default (first literal) is the fallback name.
+    fip = (b"\0bootcmd=alp_fdtfile;if ext4load mmc ${alp_mmc} 0x48000000 boot/${fdtfile}"
+           b" || ext4load mmc ${alp_mmc} 0x48000000 boot/e1m-v2n101-x-evk.dtb"
+           b" || ext4load mmc ${alp_mmc} 0x48000000 boot/e1m-v2m101-x-evk.dtb"
+           b" || ext4load mmc ${alp_mmc} 0x48000000 boot/e1m-v2n101-x-evk.dtb; then run bootimage; fi\0")
+    assert gates.fip_fdtfile(fip) == "e1m-v2n101-x-evk.dtb"
+
+
 # --- rail ------------------------------------------------------------------------
 
 def test_fip_rail():

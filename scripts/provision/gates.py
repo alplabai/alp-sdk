@@ -221,14 +221,22 @@ _BOOTCMD_RE = re.compile(rb"bootcmd=[^\x00]*")
 
 
 def fip_fdtfile(fip: bytes) -> str:
-    """The dtb basename U-Boot loads (compiled in by patch 0002 as boot/<name>).
+    """The build-time FALLBACK dtb basename (``CONFIG_ALP_E1M_FDTFILE``, patch 0002).
+
+    Since patch 0013 the dtb a unit boots is picked at boot from its EEPROM
+    manifest family (``boot/${fdtfile}``, which this regex ignores), then this
+    fallback, then every dtb in the family table. The fallback is the FIRST
+    literal ``boot/*.dtb`` in ``bootcmd``; the table names that follow are not
+    returned. Using it for the ``fdt`` gate and the ``dxm1`` swap is right when
+    the bundle's family equals the SoM's family, which per-SKU bundles
+    guarantee.
 
     Read from the default ``bootcmd`` when the FIP carries one: the vendor
     env scripts (``emmcload``/``sd2load``) also name the stock EVK dtb, but
     only ``bootcmd`` runs at autoboot. Without a ``bootcmd`` every
     ``boot/*.dtb`` in the FIP must agree."""
-    in_bootcmd = {m.decode("ascii") for cmd in _BOOTCMD_RE.findall(fip)
-                  for m in _FDT_RE.findall(cmd)}
+    in_bootcmd = {m[0].decode("ascii") for cmd in _BOOTCMD_RE.findall(fip)
+                  if (m := _FDT_RE.findall(cmd))}
     names = in_bootcmd or {m.decode("ascii") for m in _FDT_RE.findall(fip)}
     if len(names) != 1:
         where = "the FIP's bootcmd" if in_bootcmd else "the FIP"

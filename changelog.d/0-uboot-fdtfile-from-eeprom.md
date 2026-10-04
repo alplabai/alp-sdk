@@ -10,11 +10,15 @@ command, run by `CONFIG_BOOTCOMMAND` right after `env default -a`, that sets
 `e1m-v2m101-x-evk.dtb`, `v2n` -> `e1m-v2n101-x-evk.dtb`. One U-Boot binary now
 boots the right dtb on whichever SoM it runs on.
 
-A missing or invalid manifest, or an unknown family, keeps the
-`CONFIG_ALP_E1M_FDTFILE` default (`fdtfile-v2m.cfg` still sets it for V2M
-MACHINEs) and prints one `ALP: fdtfile ...` line. If the derived dtb is absent
-from the image the load falls back to that default; a failure of that last
-attempt still stops at the prompt rather than booting a stale `0x48000000`.
+A unit with a valid manifest therefore picks its own family's dtb. A blank
+unit (no valid manifest, so no family; provisioning's `boot_sd_linux` runs
+before `eeprom_manifest`, so first boot is always blank) prints one
+`ALP: fdtfile ...` line, keeps the `CONFIG_ALP_E1M_FDTFILE` default
+(`fdtfile-v2m.cfg` sets it for V2M MACHINEs), and the load then falls through
+`boot/${fdtfile}`, that default, and every dtb in the one family table, so it
+boots whichever dtb its image ships (each image holds only its own MACHINE's
+dtb). If none loads, the boot stops at the prompt naming every name tried
+rather than booting a stale `0x48000000`.
 
 Built and inspected only (patch series applied in order on the pinned
 renesas-u-boot-cip `bcf29d98`, compiled for `rzv2n-dev`); not yet booted on

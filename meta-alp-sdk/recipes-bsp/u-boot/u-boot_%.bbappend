@@ -354,6 +354,11 @@ SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.
 # 'env default -a' wipe, which would erase anything board_late_init() set.
 # Before this, a blank E1M-V2N103 bootstrapped with a V2M FIP could not boot
 # its own V2N wic: the build-time name pointed at the V2M dtb.
+# What is fixed: a unit with a valid manifest picks its family's dtb; a
+# blank-EEPROM unit (no family -- provisioning's boot_sd_linux runs before
+# eeprom_manifest) falls through the bootcmd chain (${fdtfile}, the build
+# default, then every dtb in the one family table) to whichever dtb its image
+# ships, since each image holds only its own MACHINE's dtb.
 #
 # Lands after 0011: it edits board_late_init()'s helpers around 0009/0010's
 # alp_serial capture and the CONFIG_BOOTCOMMAND line 0010 left, so it must
@@ -364,7 +369,7 @@ SRC_URI:append:rzv2n-family = " file://0013-rzv2n-dev-ALP-E1M-fdtfile-from-eepro
 # Fallback dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  The dtb basename is
 # now derived at boot (0013); CONFIG_ALP_E1M_FDTFILE (patch 0002) is only
 # the fallback for a missing/invalid manifest, an unknown family, or a
-# derived file absent from the image.  Its default suits the V2N SKUs; the
+# derived file absent from the image (the chain above then tries the table).  Its default suits the V2N SKUs; the
 # V2M MACHINEs override it through the same *.cfg channel prod-boot.cfg uses
 # (u-boot-configure.inc's find_cfgs() + merge_config.sh pick up any *.cfg in
 # SRC_URI), so a V2M build with a blank EEPROM still boots its own image.
