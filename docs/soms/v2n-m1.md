@@ -175,16 +175,6 @@ and work unchanged against the running `dxrtd`; on dx-rt 3.2.0,
 processes sharing one DX-M1 must still bind the same NPU core set
 (see `<alp/ext/deepx/inference.h>`). See #2398.
 
-### DX-M1 NAND firmware provisioning
-
-The DX-M1's application firmware lives on its own SPI NAND, separate
-from the Yocto image, and is provisioned once, out of band, over
-DEEPX's UART boot path (`fw_update_uart` from DEEPX's own tooling)
-using firmware images obtained **from DEEPX** -- alp-sdk does not
-redistribute them. If an update is interrupted or the DX-M1 wedges
-afterward, cold-power-cycle the module (a warm reset is not
-sufficient) before retrying.
-
 ### Hardware prerequisites
 
 The bring-up above depends on these being true of the SoM:
@@ -193,8 +183,28 @@ The bring-up above depends on these being true of the SoM:
 * the DX-M1's crystal oscillator has its bias resistor populated;
 * SoMs without the DEEPX reference PMIC run DEEPX's no-PMIC firmware
   variant on the DX-M1;
-* the DX-M1's NAND has been programmed at least once over its UART
-  boot path (see above).
+* the DX-M1's NAND carries the factory-provisioned Alp firmware (see
+  "DX-M1 firmware is factory-provisioned" below).
+
+## DX-M1 firmware is factory-provisioned
+
+The DX-M1's application firmware lives on its own SPI NAND, separate
+from the Yocto image. Alp Lab provisions it at the factory with an
+Alp-specific build for this SoM (DEEPX's no-PMIC variant, fw 2.4.0).
+**Do not update it with stock DEEPX firmware**: that leaves the NPUs
+dead (`dxrt_polling_ack: timeout`), and recovering needs the ROM-UART
+path with the boot straps changed, which is not a field operation.
+
+The image does not block DX-M1 firmware or configuration commands. The
+shipped `dxrt-cli` prints a warning to stderr before `-u` (firmware
+update), `-w` (firmware upload) and `-C` (firmware config JSON), and then
+runs exactly as upstream: continue only with firmware supplied by Alp Lab
+for this module. The `-C` warning says the firmware configuration (including
+thermal throttling) is being changed and a wrong configuration can make the
+NPU unusable. The library calls (`Configuration::SetFWConfigWithJson`, the
+Python package, so voltage-monitor profiling) and the kernel driver are
+unmodified. Built into the `e1m-v2m103-a55` image in a container; not run on a
+board.
 
 ## Example apps targeting V2N-M1
 
