@@ -16,19 +16,54 @@ external-probe alternative see
 
 ## What you need
 
-* SWDIO + SWCLK + (optional) NRST routed from a Renesas RZ/V2N
-  GPIO bank to the GD32's SWD pads.  The 2026-05-12 hardware
-  decision committed the V2N board to this routing; specific pad
-  assignments are documented per-board.
+* SWDIO (`P70`) + SWCLK (`P71`) + **NRST (`P74`, mandatory)** routed from
+  the Renesas RZ/V2N to the GD32's SWD pads.  The 2026-05-12 hardware
+  decision committed the V2N board to this routing; the CM33 boards publish
+  the three pads in their `alp,gd32-pads` devicetree node, opened with
+  `alp_gpio_open(GD32G553_PAD_ID_SWDIO / _SWCLK / _NRST)` -- never by an
+  index into the positional pin array (index 0 of that array is the GD32 SPI
+  chip-select).
 * A known-good bridge firmware ELF to flash.
+
+## P71 has two roles -- why NRST comes first
+
+`P71` is the SWD clock **and**, since bridge protocol v0.15, the bridge's
+data-ready input: the GD32's `PA14` is `SWCLK` out of reset, but the GD32
+drives it as the active-high **ATTN** output while the `ATTN` link feature is
+granted.  The host therefore keeps `P71` an **input** (with a rising-edge
+interrupt) in every boot stage and drives it as an output only here, and only
+while `GD32_NRST` (`P74`) holds the GD32 in reset -- a reset clears every link
+feature and returns `PA14` to SWCLK.  Recovery without `NRST` is not
+supported: `gd32_swd_init()` returns `ALP_ERR_INVAL` for a NULL `nrst`.
+
+The driver does this as **connect-under-reset**:
+
+1. `gd32_swd_init()` closes the SPI bridge link and keeps it closed (the
+   V2N supervisor answers every bridge command `ALP_ERR_BUSY` and will not
+   re-initialise or renegotiate until `gd32_swd_deinit()`), asserts `NRST`
+   (and fails if it cannot), and only then makes `P70`/`P71` outputs;
+2. `NRST` stays asserted through `gd32_swd_connect()`: line reset,
+   JTAG-to-SWD switch, DPIDR, debug power-up, then `DHCSR.C_DEBUGEN` and
+   `DEMCR.VC_CORERESET` (halt on the reset vector) -- and only then `NRST`
+   is released.  The core stops at its reset vector, `PA13`/`PA14` are still
+   SWD, no application code has run, so `ATTN` cannot have been granted;
+3. `gd32_swd_deinit()` releases `NRST`, returns `P70`/`P71` to inputs and
+   ends the session; the supervisor's next init re-arms `P71` as input +
+   interrupt and renegotiates the bridge from scratch.
+
+`NRST` is open-drain on the board (shared with the primary PMIC's reset-out);
+the Renesas GPIO driver has no open-drain mode, so the driver emulates it --
+low to assert, input (hi-Z) to release -- and never drives the pad high.
 
 ## The flow
 
 ```c
 gd32_swd_t swd;
+/* NRST is mandatory (NULL -> ALP_ERR_INVAL).  Asserts NRST FIRST. */
 gd32_swd_init(&swd, swdio_pin, swclk_pin, nrst_pin);
 
-/* 1. Link up -- line reset + JTAG-to-SWD switch + DPIDR read. */
+/* 1. Link up -- line reset + JTAG-to-SWD switch + DPIDR read, then halt-on-reset
+ *    is armed and NRST released: the core stops at its reset vector. */
 gd32_swd_connect(&swd);
 if (swd.idcode != GD32_SWD_GENERIC_CM33_R0P1_IDCODE) {
     /* Log and CONTINUE -- do not abort here.  See the IDCODE
@@ -54,8 +89,11 @@ gd32_swd_flash_write(&swd, GD32_SWD_FMC_FLASH_BASE, image_bytes, image_size);
 /* 5. Read back and compare. */
 gd32_swd_flash_verify(&swd, GD32_SWD_FMC_FLASH_BASE, image_bytes, image_size);
 
-/* 6. Hand control back to the chip. */
+/* 6. Hand control back to the chip (disarms halt-on-reset, pulses NRST). */
 gd32_swd_reset_and_run(&swd);
+
+/* 7. End the session: P70/P71 back to inputs, bridge link allowed again. */
+gd32_swd_deinit(&swd);
 ```
 
 ## The IDCODE caveat -- read this before you trust step 1
@@ -121,7 +159,10 @@ whole procedure as paper-correct, not proven.
 SWD is a hardware debug bus.  It runs *underneath* the firmware --
 even a totally corrupt application can't disable the SW-DP because
 the SW-DP is implemented in silicon, not in firmware.  As long as
-the three GPIOs are wired and the GD32 has power, this path works.
+the three GPIOs are wired and the GD32 has power, this path works.  Holding
+the core in reset while the debug port is brought up is the standard
+connect-under-reset technique; the debug logic is not cleared by a system
+reset, so the DP answers while `NRST` is low.
 
 ## Pacing
 

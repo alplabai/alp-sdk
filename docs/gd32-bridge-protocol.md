@@ -1073,6 +1073,19 @@ Host rules:
   SWD and the bootloader never touches `PA14`.  (`gd32_swd_init()` asserts
   `NRST` before it configures the SWD pins as outputs.)
 * **H4.** Bench probes attach connect-under-reset only.
+* **H5 (host SWD session).**  The host's own SWD recovery is
+  connect-under-reset: `gd32_swd_init()` asserts `P74` first (and refuses a
+  NULL `NRST` — recovery without it is not supported), switches `P70`/`P71`
+  to outputs, keeps `NRST` asserted through `gd32_swd_connect()`, which sets
+  `DHCSR.C_DEBUGEN` and `DEMCR.VC_CORERESET` and only then releases `NRST`, so
+  the core halts at its reset vector with `PA13`/`PA14` still SWD and no
+  application code run (ATTN cannot be granted during the session).
+  `gd32_swd_deinit()` returns `P70`/`P71` to inputs.  For the whole session
+  the host's bridge link is closed and **blocked**: the V2N supervisor
+  answers every bridge command `ALP_ERR_BUSY` and does not re-initialise or
+  renegotiate until the session ends, after which the next init
+  re-configures `P71` as input + rising-edge IRQ (never trusting a setup from
+  before the session).
 
 Firmware rules:
 
@@ -1107,12 +1120,18 @@ are pending.
 
 **Host procedure.**
 
-1. Clock the request.  (The host clears the P71 edge latch immediately
-   before this: the portable SPI API does not expose the instant CS
-   releases, and no edge can legitimately arrive during the request
-   because the firmware drives `ATTN` low at CS falling.)
+1. Read the edge clock (`hook.now()`), then clock the request.  The
+   firmware drives `ATTN` low at CS falling and never raises it while CS is
+   low, so every edge that belongs to this reply is time-stamped at or after
+   that reading.  The backend's interrupt handler stamps each edge from the
+   same free-running 32-bit clock (`k_cycle_get_32()` on Zephyr); the driver
+   discards any edge stamped earlier (wrap-safe compare) — an event edge that
+   was still latched — instead of racing a "clear the latch" call against the
+   request, which the portable SPI API (no CS-release instant) cannot do
+   safely.
 2. Wait — interrupt plus semaphore, **never polling** — for a rising edge,
-   up to `T_ATTN` = `GD32G553_BRIDGE_REPLY_TIMEOUT_MS` (10 ms).
+   up to `T_ATTN` = `GD32G553_BRIDGE_REPLY_TIMEOUT_MS` (10 ms).  A stale edge
+   is discarded and the wait repeated; no fresh edge counts as a lost one.
 3. Clock the reply with no staging gap.
 4. Validate with `STATUS_SEQ`: `ATTN` is a hint, the stamp decides.  A
    stale stamp under `ATTN` triggers the same single re-send as §4.1.1; the
