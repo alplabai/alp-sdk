@@ -456,17 +456,19 @@ typedef struct {
  * (or one with a NULL @c now / @c wait) means ATTN is never requested and
  * the driver keeps the 0.14 staging-gap + re-read ladder.
  *
- * **Edge time-stamping.**  The firmware drives ATTN LOW at CS falling and
- * never raises it while CS is low, so every edge that belongs to a reply
- * arrives AFTER the host starts clocking the request.  An edge older than
- * that (an event raised just before the request, still latched) is stale.
- * Rather than race a "clear the latch" call against the request, the
- * backend time-stamps each edge in its interrupt handler and the driver
- * compares: it reads @c now immediately before it starts clocking the
- * request and accepts only an edge whose time is not earlier than that
- * (wrap-safe 32-bit compare, so any free-running counter works --
- * `k_cycle_get_32()` on Zephyr).  The unit is the backend's; only the
- * ordering matters.
+ * **Edge filtering.**  The firmware drives ATTN LOW at CS falling and never
+ * raises it while CS is low, so every edge that belongs to a reply arrives
+ * AFTER the host starts clocking the request, and a genuine reply leaves the
+ * line HIGH.  The driver calls @c drain, then reads @c now immediately before it
+ * clocks a request, and accepts an edge only if (1) its time-stamp is not
+ * earlier than that reading (wrap-safe 32-bit compare, any free-running counter
+ * works -- `k_cycle_get_32()` on Zephyr) AND (2) @c read_level reads HIGH when
+ * the edge is accepted.  The drain keeps an old stamp from aliasing a fresh one
+ * after a counter wrap; the level check rejects a stale rise inside the short
+ * window between the clock reading and the request's own CS falling (it is
+ * always followed by a LOW before the wait begins).  Both filters need the
+ * hook, so ATTN is only requested when @c now, @c wait, @c read_level and
+ * @c drain are all provided.
  *
  * The table and @c user must outlive the context (the driver keeps a
  * copy of the struct, not of what @c user points at).
@@ -481,9 +483,12 @@ typedef struct {
 	 *  @p timeout_ms passes with none.  The driver discards an edge older
 	 *  than the request and calls again.  Required. */
 	alp_status_t (*wait)(void *user, uint32_t timeout_ms, uint32_t *t_edge);
-	/** Optional: sample the line level (true = high), for the
-	 *  stuck-high check.  NULL disables that check. */
+	/** Sample the ATTN line level (true = high): the accept-time level check
+	 *  and the idle stuck-high check.  Required. */
 	alp_status_t (*read_level)(void *user, bool *high);
+	/** Discard every latched edge (and its stamp).  Called right before @c now
+	 *  is read for a request.  Required. */
+	void (*drain)(void *user);
 	/** Opaque pointer handed back to every callback. */
 	void *user;
 } gd32g553_attn_hook_t;

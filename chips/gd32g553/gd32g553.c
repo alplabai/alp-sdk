@@ -225,7 +225,7 @@ static void attn_fault(gd32g553_t *ctx)
 static void attn_pre_request(gd32g553_t *ctx)
 {
 	if (!ctx->attn_active) return;
-	if (ctx->attn.read_level != NULL && ctx->stream2_armed == 0u && !ctx->attn_event_edge) {
+	if (ctx->stream2_armed == 0u && !ctx->attn_event_edge) {
 		bool high = false;
 		if (ctx->attn.read_level(ctx->attn.user, &high) == ALP_OK && high) {
 			ctx->attn_stuck++;
@@ -240,11 +240,21 @@ static void attn_pre_request(gd32g553_t *ctx)
 }
 
 /* Wait for the reply edge of the request that started at @p t_start (the
- * hook's clock, read just before the first byte was clocked).  An edge
- * stamped before t_start is stale -- an event edge that was still latched --
- * and is discarded.  Returns true when a fresh edge arrived.  A miss is not
- * an error: the caller falls back to the 0.14 staging gap + ladder for this
- * command. */
+ * hook's clock, read just before the first byte was clocked).  Two filters:
+ *
+ *   - time: an edge stamped before t_start is stale (an event edge that was
+ *     still latched).  Wrap-safe, but a wrap-safe compare cannot tell "2^31+
+ *     ticks old" from "in the future", so the latch is drained right before
+ *     t_start is read (see the caller): nothing older than the drain exists;
+ *   - level: the firmware drives ATTN LOW at CS falling and never raises it
+ *     while CS is low, so a stale RISE inside the window between t_start and our
+ *     own CS falling is always followed by a LOW before this wait begins (the
+ *     wait starts after the request write returned), whereas a genuine reply
+ *     leaves ATTN HIGH.  An edge is accepted only if its stamp is not older than
+ *     t_start AND the line reads HIGH now; otherwise keep waiting (bounded).
+ *
+ * Returns true when a genuine edge arrived.  A miss is not an error: the
+ * caller falls back to the 0.14 staging gap + ladder for this command. */
 static bool attn_await_reply(gd32g553_t *ctx, uint32_t t_start)
 {
 	if (!ctx->attn_active) return false;
@@ -254,7 +264,9 @@ static bool attn_await_reply(gd32g553_t *ctx, uint32_t t_start)
 		const alp_status_t w =
 		    ctx->attn.wait(ctx->attn.user, GD32G553_BRIDGE_REPLY_TIMEOUT_MS, &t_edge);
 		if (w != ALP_OK) break;
-		if ((int32_t)(t_edge - t_start) >= 0) {
+		bool high = false;
+		if ((int32_t)(t_edge - t_start) >= 0 &&
+		    ctx->attn.read_level(ctx->attn.user, &high) == ALP_OK && high) {
 			ctx->attn_edges++;
 			ctx->attn_timeout_run = 0u;
 			return true;
@@ -413,8 +425,13 @@ static alp_status_t spi_xfer_core(gd32g553_t    *ctx,
 		attn_pre_request(ctx);
 		/* Read the clock BEFORE the first byte goes out: any edge stamped
 		 * earlier cannot be this request's reply. */
-		const uint32_t t_start =
-		    (ctx->attn_active && ctx->attn.now != NULL) ? ctx->attn.now(ctx->attn.user) : 0u;
+		uint32_t t_start = 0u;
+		if (ctx->attn_active) {
+			/* Drain first: every latched edge is older than the clock read
+			 * below, so none can alias a "fresh" stamp after a counter wrap. */
+			ctx->attn.drain(ctx->attn.user);
+			t_start = ctx->attn.now(ctx->attn.user);
+		}
 		alp_status_t s = alp_spi_write(ctx->spi, req, crc_covered + 2u);
 		if (s != ALP_OK) return s;
 
@@ -622,10 +639,11 @@ static void spi_negotiate(gd32g553_t *ctx)
 
 	if (ctx->version.major == GD32G553_HOST_PROTOCOL_MAJOR &&
 	    ctx->version.minor >= GD32G553_V015_MIN_PROTOCOL_MINOR) {
-		uint32_t   want = GD32G553_LINK_FEAT_STATUS_SEQ | GD32G553_LINK_FEAT_BIG_FRAME |
-		                  GD32G553_LINK_FEAT_ADC_STREAM2 | GD32G553_LINK_FEAT_BATCH;
-		const bool want_attn =
-		    ctx->attn.now != NULL && ctx->attn.wait != NULL && !ctx->attn_unusable;
+		uint32_t   want      = GD32G553_LINK_FEAT_STATUS_SEQ | GD32G553_LINK_FEAT_BIG_FRAME |
+		                       GD32G553_LINK_FEAT_ADC_STREAM2 | GD32G553_LINK_FEAT_BATCH;
+		const bool want_attn = ctx->attn.now != NULL && ctx->attn.wait != NULL &&
+		                       ctx->attn.read_level != NULL && ctx->attn.drain != NULL &&
+		                       !ctx->attn_unusable;
 		if (want_attn) {
 			want |= GD32G553_LINK_FEAT_ATTN;
 			/* Provisional: the reply that grants ATTN is the first

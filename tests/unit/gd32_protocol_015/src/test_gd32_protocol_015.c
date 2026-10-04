@@ -38,6 +38,7 @@ static struct {
 	bool    debugger;         /* DHCSR.C_DEBUGEN set: refuse ATTN */
 	bool    attn_signal;      /* false = the edge is "lost" (or never wired) */
 	bool    level_forced;     /* ATTN reads stuck high */
+	bool    attn_pending;     /* reply armed: ATTN rises on the next wait */
 	bool    leak_beyond_read; /* RX buffer already holds bytes past the clocked length */
 	/* link state, as the firmware would hold it */
 	bool     seq;
@@ -78,26 +79,43 @@ static struct {
 } E;
 
 /* The ATTN hook the test hands the driver (interrupt + semaphore + a cycle
- * counter in a real backend; a latch + a fake clock here).  Edges carry a
- * time-stamp from the same clock the driver reads through now(). */
+ * counter in a real backend; a small edge FIFO + a fake clock here).  Edges carry
+ * a time-stamp from the same clock the driver reads through now().  The
+ * firmware's reply edge is raised LATE -- on the first wait() that finds the FIFO
+ * empty -- because on silicon it rises ~30 us after CS releases, i.e. after the
+ * driver's write has returned and the wait has begun. */
 static struct {
-	bool     latch;
-	uint32_t t_edge;       /* time-stamp of the latched edge */
-	uint32_t clock;        /* the fake free-running counter */
-	bool     inject_stale; /* now() also latches an edge older than the request */
-	uint32_t waits;
+	uint32_t q[4]; /* latched edge time-stamps, oldest first */
+	unsigned nq;
+	uint32_t clock;         /* the fake free-running counter */
+	bool     inject_old;    /* now() latches an edge stamped BEFORE t_start */
+	bool     inject_window; /* now() latches an edge stamped AT t_start (the window
+	                         * before our own CS falling), the line then drops low */
+	uint32_t waits, drains;
 } H;
 
 static uint64_t g_now_ms;
 
+static void h_push(uint32_t t)
+{
+	if (H.nq < ARRAY_SIZE(H.q)) H.q[H.nq++] = t;
+}
+
+static void hook_drain(void *u)
+{
+	(void)u;
+	H.nq = 0u;
+	H.drains++;
+}
+
 static uint32_t hook_now(void *u)
 {
 	(void)u;
-	if (H.inject_stale) {
-		/* An event edge that rose just before the request: it is latched
-		 * with a time-stamp earlier than the t_start now() returns. */
-		H.latch  = true;
-		H.t_edge = H.clock;
+	const uint32_t t_start = H.clock + 1u;
+	if (H.inject_old) h_push(H.clock); /* older than t_start */
+	if (H.inject_window) {
+		h_push(t_start); /* a stale rise after t_start ... */
+		E.level = true;  /* ... the write below drops the line (CS falling) */
 	}
 	return ++H.clock;
 }
@@ -106,9 +124,16 @@ static alp_status_t hook_wait(void *u, uint32_t timeout_ms, uint32_t *t_edge)
 {
 	(void)u;
 	H.waits++;
-	if (H.latch) {
-		H.latch = false;
-		*t_edge = H.t_edge;
+	if (H.nq == 0u && E.attn_pending) { /* the reply is armed: ATTN rises */
+		E.attn_pending = false;
+		E.level        = true;
+		h_push(++H.clock);
+	}
+	if (H.nq > 0u) {
+		*t_edge = H.q[0];
+		for (unsigned i = 1u; i < H.nq; i++)
+			H.q[i - 1u] = H.q[i];
+		H.nq--;
 		return ALP_OK;
 	}
 	g_now_ms += timeout_ms;
@@ -126,6 +151,7 @@ static const gd32g553_attn_hook_t g_hook = {
 	.now        = hook_now,
 	.wait       = hook_wait,
 	.read_level = hook_level,
+	.drain      = hook_drain,
 };
 
 static void le32(uint8_t *p, uint32_t v)
@@ -162,11 +188,7 @@ static void stage(uint8_t code, const uint8_t *payload, size_t n)
 	E.staged[2u + n + 1] = (uint8_t)(crc >> 8);
 	E.staged_len         = 2u + n + 2u;
 	/* ATTN rises only once the fresh reply is armed. */
-	if (E.attn_on && E.attn_signal) {
-		E.level  = true;
-		H.latch  = true;
-		H.t_edge = ++H.clock; /* the edge is stamped when it happens */
-	}
+	if (E.attn_on && E.attn_signal) E.attn_pending = true;
 }
 
 static void fail(uint8_t code)
@@ -370,7 +392,8 @@ alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 	(void)bus;
 	zassert_true(len >= 4u && len <= 256u, "request frame %u B outside 4..256", (unsigned)len);
 	if (len > E.max_write) E.max_write = len;
-	E.level = false; /* CS fall drives ATTN low */
+	E.level        = false; /* CS fall drives ATTN low */
+	E.attn_pending = false;
 	if (tx[0] != SOF) return ALP_ERR_IO;
 	const uint16_t crc = alp_crc16_ccitt_false(tx, len - 2u);
 	if ((uint16_t)(tx[len - 2u] | (tx[len - 1u] << 8)) != crc) return ALP_OK; /* dropped */
@@ -813,14 +836,14 @@ ZTEST(gd32_protocol_015, test_attn_idle_edges_with_empty_read2_disable_after_eig
 	uint8_t  got;
 	uint16_t codes[8];
 	for (int i = 0; i < 7; i++) {
-		H.latch = true; /* an idle edge */
+		h_push(++H.clock); /* an idle edge */
 		zassert_equal(gd32g553_attn_wait_event(&C, 10u), ALP_OK);
 		zassert_equal(gd32g553_adc_stream_read2(&C, 0u, 8u, &first, &dropped, &got, codes), ALP_OK);
 		zassert_equal(got, 0u);
 		E.r2_first = first;
 	}
 	zassert_true(C.attn_active, "seven empty idle edges are tolerated");
-	H.latch = true;
+	h_push(++H.clock);
 	zassert_equal(gd32g553_attn_wait_event(&C, 10u), ALP_OK);
 	zassert_equal(gd32g553_adc_stream_read2(&C, 0u, 8u, &first, &dropped, &got, codes), ALP_OK);
 	zassert_false(C.attn_active, "eighth consecutive empty idle edge");
@@ -1371,8 +1394,8 @@ ZTEST(gd32_protocol_015, test_attn_fault_inside_batch_does_not_clobber_the_reply
 ZTEST(gd32_protocol_015, test_attn_stale_edge_is_not_the_reply_edge)
 {
 	zassert_equal(bring_up(true), ALP_OK);
-	E.attn_signal  = false;
-	H.inject_stale = true;
+	E.attn_signal = false;
+	H.inject_old  = true;
 
 	const uint64_t before_us = E.delay_us;
 	zassert_equal(gd32g553_ping(&C), ALP_OK);
@@ -1384,7 +1407,7 @@ ZTEST(gd32_protocol_015, test_attn_stale_edge_is_not_the_reply_edge)
 ZTEST(gd32_protocol_015, test_attn_fresh_edge_beats_a_stale_one)
 {
 	zassert_equal(bring_up(true), ALP_OK);
-	H.inject_stale           = true;
+	H.inject_old             = true;
 	const uint64_t before_us = E.delay_us;
 	zassert_equal(gd32g553_ping(&C), ALP_OK);
 	zassert_equal(C.attn_timeouts, 0u);
@@ -1489,4 +1512,75 @@ ZTEST(gd32_protocol_015, test_batch_reply_executed_zero_or_short_without_error_i
 	memcpy(E.batch_raw, raw1, sizeof raw1);
 	E.batch_raw_len = sizeof raw1;
 	zassert_equal(gd32g553_batch(&C, two, 2u, NULL), ALP_ERR_IO, "stopped early, last op OK");
+}
+
+/* ---- ATTN filter holes ------------------------------------------------------ */
+
+/* (a) A counter wrap can make an OLD stamp look fresh: a stamp 2^31 + 1 ticks
+ * before t_start compares as "in the future" in a wrap-safe signed compare.  The
+ * driver therefore drains the latch immediately before it reads t_start, so no
+ * such edge exists.  Here the line is also forced high (the level filter would
+ * otherwise mask the hole) and the firmware raises no reply edge: the old edge
+ * must never be seen, and the ping must fall back to the staging gap. */
+ZTEST(gd32_protocol_015, test_attn_drains_the_latch_before_reading_t_start)
+{
+	zassert_equal(bring_up(true), ALP_OK);
+	E.attn_signal               = false;
+	E.level_forced              = true;
+	const uint32_t t_start_next = H.clock + 1u;
+	h_push(t_start_next - 0x80000001u); /* t_start - 2^31 - 1: aliases "fresh" */
+
+	const uint64_t before_us = E.delay_us;
+	const uint32_t drains    = H.drains;
+	zassert_equal(gd32g553_ping(&C), ALP_OK);
+	zassert_true(H.drains > drains, "latch drained before the request");
+	zassert_equal(C.attn_edges, 1u, "only the init self-test edge was ever accepted");
+	zassert_equal(C.attn_timeouts, 1u, "no genuine edge for this ping");
+	zassert_true(E.delay_us - before_us >= 35u, "fell back to the staging gap");
+}
+
+/* (b) A stale RISE inside the window between t_start and our own CS falling:
+ * its stamp passes the time filter, but the firmware drives ATTN low at CS
+ * falling, so by the time the wait begins the line reads LOW.  The edge is
+ * rejected and the driver keeps waiting for the genuine rise, which it accepts. */
+ZTEST(gd32_protocol_015, test_attn_stale_rise_in_the_window_is_rejected_by_the_level)
+{
+	zassert_equal(bring_up(true), ALP_OK);
+	H.inject_window          = true;
+	const uint64_t before_us = E.delay_us;
+	zassert_equal(gd32g553_ping(&C), ALP_OK);
+	zassert_equal(C.attn_stale_edges, 1u, "the window edge was rejected (line LOW)");
+	zassert_equal(C.attn_timeouts, 0u, "the genuine rise was accepted");
+	zassert_equal(E.delay_us, before_us, "delivered on the genuine edge, no staging gap");
+}
+
+/* ... and with no genuine rise at all the stale one must not stand in for it:
+ * timeout, then the 0.14 drain-rule fallback. */
+ZTEST(gd32_protocol_015, test_attn_stale_rise_then_low_and_no_genuine_edge_times_out)
+{
+	zassert_equal(bring_up(true), ALP_OK);
+	E.attn_signal            = false;
+	H.inject_window          = true;
+	const uint64_t before_us = E.delay_us;
+	zassert_equal(gd32g553_ping(&C), ALP_OK, "the staging-gap fallback still delivers");
+	zassert_equal(C.attn_stale_edges, 1u);
+	zassert_equal(C.attn_timeouts, 1u);
+	zassert_true(E.delay_us - before_us >= 35u);
+}
+
+/* ATTN needs all four hook callbacks: without the level read or the drain the
+ * filters above cannot work, so ATTN is not requested. */
+ZTEST(gd32_protocol_015, test_attn_not_requested_without_a_complete_hook)
+{
+	gd32g553_attn_hook_t partial = g_hook;
+	partial.read_level           = NULL;
+	memset(&C, 0, sizeof(C));
+	zassert_equal(gd32g553_init_ex(&C, (alp_spi_t *)&g_spi_token, NULL, 0x70u, &partial), ALP_OK);
+	zassert_equal(E.ext_req[2] & 0x04u, 0u, "ATTN bit not requested");
+	zassert_false(C.attn_active);
+	partial       = g_hook;
+	partial.drain = NULL;
+	memset(&C, 0, sizeof(C));
+	zassert_equal(gd32g553_init_ex(&C, (alp_spi_t *)&g_spi_token, NULL, 0x70u, &partial), ALP_OK);
+	zassert_equal(E.ext_req[2] & 0x04u, 0u);
 }
