@@ -87,25 +87,24 @@ config ALP_SDK_V2N_SUPERVISOR_BUSY_HOLDOFF_MS
 	  ALP_ERR_BUSY immediately for this long instead of re-running
 	  the 2 s init each time.  0 disables the hold-off.
 
-config ALP_SDK_V2N_SUPERVISOR_ATTN_PIN_ID
-	int "alp_pins index of the GD32 ATTN input, Renesas P71 (-1 = disabled)"
-	default 1 if ALP_SOC_RENESAS_RZV2N_N44
-	default -1
+config ALP_SDK_V2N_SUPERVISOR_ATTN
+	bool "Request the GD32 ATTN link feature (P71 data-ready edge)"
+	default y
 	help
 	  GD32 bridge protocol v0.15 ATTN: the GD32 drives PA14 (Renesas P71)
-	  HIGH when a reply is armed or stream events are pending.  The
-	  singleton opens this alp_gpio pin as an INPUT with a rising-edge
-	  interrupt BEFORE the first handshake and, when that works, asks the
-	  bridge for the ATTN link feature so replies are awaited on the edge
-	  instead of a timed staging gap.  Index 1 of the board's alp,pin-array
-	  (alp_pins) is P71 on both in-tree V2N/V2M CM33 boards (generated from
-	  metadata/e1m_modules/v2n/supervisor-links.yaml gd32_spi.gpio_attn).
+	  HIGH when a reply is armed or stream events are pending.  When the
+	  board publishes the pad (the `attn` entry of its `alp,gd32-pads`
+	  devicetree node, generated from
+	  metadata/e1m_modules/v2n/supervisor-links.yaml), every singleton init
+	  opens it as an INPUT with a rising-edge interrupt BEFORE the handshake
+	  and, when that works, asks the bridge for the ATTN link feature so
+	  replies are awaited on the edge instead of a timed staging gap.
 
-	  If the platform GPIO driver has no interrupt route for the pad the
-	  hook is left out and the link keeps the v0.14 staging gap + re-read
-	  ladder.  P71 is never driven as an output by this singleton: it is
-	  the GD32's SWCLK when ATTN is off, and only the SWD recovery path
-	  (chips/gd32_swd, with GD32_NRST asserted first) may drive it.
-	  Set to -1 to never request ATTN.
+	  A board without the node, or a platform GPIO driver with no interrupt
+	  route for the pad, simply keeps the v0.14 staging gap + re-read ladder.
+	  P71 is never driven as an output by this singleton: it is the GD32's
+	  SWCLK whenever ATTN is off, and only the SWD recovery path (chips/gd32_swd,
+	  with GD32_NRST asserted first, and with the bridge link closed for the
+	  whole session) may drive it.  Say n to never request ATTN.
 
 endif # ALP_SDK_V2N_SUPERVISOR

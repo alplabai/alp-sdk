@@ -12,8 +12,9 @@
 
 #include <zephyr/ztest.h>
 
-#include "alp/backend.h" /* alp_backend_select / alp_backend_t */
-#include "alp/dac.h"     /* alp_dac_open / alp_dac_t / alp_dac_config_t */
+#include "alp/backend.h"        /* alp_backend_select / alp_backend_t */
+#include "alp/chips/gd32_swd.h" /* gd32_swd_session_notify */
+#include "alp/dac.h"            /* alp_dac_open / alp_dac_t / alp_dac_config_t */
 #include "alp/peripheral.h"
 #include "alp/soc_caps.h" /* ALP_SOC_DAC_COUNT / ALP_SOC_REF_STR */
 
@@ -87,5 +88,22 @@ ZTEST(alp_peripheral, test_dac_bridged_channel_admitted_despite_zero_soc_count)
 	              ALP_ERR_NOT_READY,
 	              "channel within the bridge's range must reach gd32_bridge's open() "
 	              "(supervisor NOT_READY), not a cap-table refusal");
+}
+
+/* While an SWD session owns the GD32 pads (P70/P71/P74 -- P71 is also the
+ * bridge ATTN line) every bridge command must answer BUSY and nothing may
+ * re-initialise the link; when the session ends the supervisor goes back to
+ * its normal behaviour (here: no bus configured -> NOT_READY). */
+ZTEST(alp_peripheral, test_v2n_supervisor_answers_busy_during_an_swd_session)
+{
+	gd32_swd_session_notify(true);
+	alp_dac_t *d = alp_dac_open(&(alp_dac_config_t){ .channel_id = 0u, .initial_mv = 0u });
+	zassert_is_null(d);
+	zassert_equal(alp_last_error(), ALP_ERR_BUSY, "bridge command during an SWD session");
+
+	gd32_swd_session_notify(false);
+	d = alp_dac_open(&(alp_dac_config_t){ .channel_id = 0u, .initial_mv = 0u });
+	zassert_is_null(d);
+	zassert_equal(alp_last_error(), ALP_ERR_NOT_READY, "session over: normal path again");
 }
 #endif /* CONFIG_ALP_SDK_V2N_SUPERVISOR */

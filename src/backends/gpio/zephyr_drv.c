@@ -25,6 +25,7 @@
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
+#include <alp/chips/gd32g553.h>
 #include <alp/soc_caps.h>
 
 #include "alp_errno.h"
@@ -52,10 +53,38 @@
 static const struct gpio_dt_spec alp_pins[] = { LISTIFY(ALP_PIN_COUNT, ALP_PIN_ENTRY, ()) };
 #endif
 
+/* GD32 control pads (SWD + the bridge ATTN input) live in their OWN
+ * `alp,gd32-pads` node and are reached only through the reserved ids
+ * GD32G553_PAD_ID_* -- never as positional alp_pins indices (index 0 of that
+ * array is the GD32 SPI chip-select, so a shared index space would let a
+ * stray id drive it).  See zephyr/dts/bindings/alp,gd32-pads.yaml. */
+#define ALP_GD32_PADS_NODE DT_INST(0, alp_gd32_pads)
+
+#if DT_NODE_EXISTS(ALP_GD32_PADS_NODE)
+static const struct gpio_dt_spec gd32_pads[] = {
+	[GD32G553_PAD_ID_SWDIO - GD32G553_PAD_ID_SWDIO] =
+	    GPIO_DT_SPEC_GET(ALP_GD32_PADS_NODE, swdio_gpios),
+	[GD32G553_PAD_ID_SWCLK - GD32G553_PAD_ID_SWDIO] =
+	    GPIO_DT_SPEC_GET(ALP_GD32_PADS_NODE, swclk_gpios),
+	[GD32G553_PAD_ID_NRST - GD32G553_PAD_ID_SWDIO] =
+	    GPIO_DT_SPEC_GET(ALP_GD32_PADS_NODE, nrst_gpios),
+	[GD32G553_PAD_ID_ATTN - GD32G553_PAD_ID_SWDIO] =
+	    GPIO_DT_SPEC_GET(ALP_GD32_PADS_NODE, attn_gpios),
+};
+#endif
+
 /* Exported for other backends (e.g. spi/zephyr_drv.c) that need to
  * resolve a chip-select gpio_dt_spec from the same alp,pin-array node. */
 bool alp_z_gpio_resolve(uint32_t pin_id, struct gpio_dt_spec *out)
 {
+	if (pin_id >= GD32G553_PAD_ID_SWDIO && pin_id <= GD32G553_PAD_ID_ATTN) {
+#if DT_NODE_EXISTS(ALP_GD32_PADS_NODE)
+		*out = gd32_pads[pin_id - GD32G553_PAD_ID_SWDIO];
+		return true;
+#else
+		return false; /* this board publishes no GD32 pads */
+#endif
+	}
 #if ALP_PIN_AVAILABLE
 	if (pin_id >= ARRAY_SIZE(alp_pins)) return false;
 	*out = alp_pins[pin_id];
