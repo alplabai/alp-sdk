@@ -462,7 +462,7 @@ def _clkgen_i2cget(image: bytes):
 
 def test_clkgen_read_image_matches_fixed_up_otp():
     image = bytearray(lt.CLKGEN_OTP_IMAGE)
-    image[0x21], image[0x24] = 0xC0, 0x8E
+    image[0x1F], image[0x21], image[0x24] = 0xC7, 0xC0, 0x8F
     t, _ = target([(r"i2cget -y -f \d+ 0x69 0x\w+", _clkgen_i2cget(bytes(image)))])
     got = lt.clkgen_read_image(t, 8)
     assert got == bytes(image)
@@ -472,7 +472,7 @@ def test_clkgen_read_image_matches_fixed_up_otp():
 def test_clkgen_diff_reports_mismatch_and_missing_fixup():
     factory = bytes(lt.CLKGEN_OTP_IMAGE)  # OTP image with the U-Boot fixup NOT applied
     bad = lt.clkgen_diff(factory)
-    assert any("reg 0x21" in b for b in bad) and any("reg 0x24" in b for b in bad)
+    assert all(any(f"reg {r}:" in b for b in bad) for r in ("0x1f", "0x21", "0x24"))
 
 
 def test_clkgen_diff_rejects_wrong_length():

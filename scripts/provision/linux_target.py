@@ -70,10 +70,12 @@ CLKGEN_OTP_IMAGE = bytes.fromhex(
     "a0 00 bb 04 32 08 cc 21 19 4c f2 16 5f 22 f0 3e 00 80 00 00 00 00 00 00 "
     "0e 0c 19 12 3f f0 90 46 a0 80 b0 b0 9c")
 CLKGEN_REG_COUNT = len(CLKGEN_OTP_IMAGE)  # 0x25 (37): reg 0x00..0x24 inclusive
-# U-Boot's 5L35023B fixup (U-Boot patch 0007, #2293) rewrites these two OTP
-# registers every boot; a post-boot read must expect the fixed-up values, not
-# the factory ones.
-CLKGEN_FIXUP_REGS = {0x21: 0xC0, 0x24: 0x8E}
+# U-Boot's 5L35023B fixup (U-Boot patches 0007, #2293, and 0012) rewrites these
+# three OTP registers every boot; a post-boot read must expect the fixed-up
+# values, not the factory ones. 0x1F = 0xC7 routes SE2 (the GD32 HXTAL input) from
+# DIV4 = 24.576 MHz (OTP 0x46 leaves it free-running at 32.768 kHz); 0x24 = 0x8F
+# is the old 0x8E plus bit 0 DIV4_CH2_EN, which SE2 needs.
+CLKGEN_FIXUP_REGS = {0x1F: 0xC7, 0x21: 0xC0, 0x24: 0x8F}
 # preset i2c_devices bus name -> bench.yaml i2c_bus key
 PRESET_BUS_TO_BENCH = {"e1m_i2c0": "eeprom", "brd_i2c": "brd"}
 
