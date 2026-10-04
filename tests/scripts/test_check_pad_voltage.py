@@ -16,12 +16,12 @@ def _tree(tmp: Path, board: str) -> Path:
                              ("other", "y1", None)):
         d = tmp / f"metadata/socs/{vendor}/{fam}"
         d.mkdir(parents=True)
-        (d / "p.json").write_text(json.dumps({"pad_tolerance": tol} if tol else {}))
+        (d / "p.json").write_text(json.dumps({"pad_tolerance": tol} if tol else {}), encoding="utf-8")
     (tmp / "metadata/e1m_modules").mkdir()
     (tmp / "metadata/e1m_modules/E1M-A1.yaml").write_text(
-        "family: acme-x1\nsilicon: acme:x1:p\n")
+        "family: acme-x1\nsilicon: acme:x1:p\n", encoding="utf-8")
     (tmp / "metadata/e1m_modules/E1M-B1.yaml").write_text(
-        "family: other-y1\nsilicon: other:y1:p\n")
+        "family: other-y1\nsilicon: other:y1:p\n", encoding="utf-8")
     (tmp / "metadata/pinmux").mkdir()
     (tmp / "metadata/pinmux/x.yaml").write_text(
         "som_families: [acme-x1]\n"
@@ -29,13 +29,13 @@ def _tree(tmp: Path, board: str) -> Path:
         "  - {e1m_pad: AD1, e1m_function: SPI0_MISO, owner: acme, silicon_peripheral: a, silicon_pad: P91}\n"
         "  - {e1m_pad: AD3, e1m_function: SPI1_MISO, owner: acme, silicon_peripheral: b, silicon_pad: P30}\n"
         "  - {e1m_pad: TBD, e1m_function: IO7, owner: acme, silicon_peripheral: c, silicon_pad: P5}\n"
-        "  - {e1m_pad: AD4, e1m_function: SPI0_MOSI, owner: sidechip, silicon_peripheral: d, silicon_pad: P90}\n")
+        "  - {e1m_pad: AD4, e1m_function: SPI0_MOSI, owner: sidechip, silicon_peripheral: d, silicon_pad: P90}\n", encoding="utf-8")
     (tmp / "metadata/pinmux/y.yaml").write_text(
         "som_families: [other-y1]\n"
         "pads:\n"
-        "  - {e1m_pad: AD1, e1m_function: SPI0_MISO, owner: other, silicon_peripheral: a, silicon_pad: P91}\n")
+        "  - {e1m_pad: AD1, e1m_function: SPI0_MISO, owner: other, silicon_peripheral: a, silicon_pad: P91}\n", encoding="utf-8")
     (tmp / "metadata/boards").mkdir()
-    (tmp / "metadata/boards/b.yaml").write_text(board)
+    (tmp / "metadata/boards/b.yaml").write_text(board, encoding="utf-8")
     return tmp
 
 
@@ -74,7 +74,7 @@ def test_33v_without_shifter_fails_and_shifter_fixes(tmp_path):
     p = gate.find_problems(_tree(tmp_path, HEAD + SPI0 + "pad_levels:\n  - {e1m: E1M_X_SPI0, signal_v: 3.3}\n"))
     assert len(p) == 1 and "level_shifter" in p[0]
     (tmp_path / "metadata/boards/b.yaml").write_text(
-        HEAD + SPI0 + "pad_levels:\n  - {e1m: E1M_X_SPI0, signal_v: 3.3, level_shifter: translator}\n")
+        HEAD + SPI0 + "pad_levels:\n  - {e1m: E1M_X_SPI0, signal_v: 3.3, level_shifter: translator}\n", encoding="utf-8")
     assert gate.find_problems(tmp_path) == []
 
 

@@ -34,6 +34,7 @@
 
 #define ALP_SDK_USE_DRPAI_V2N 1
 #define ALP_SDK_USE_ORT_CPU   1
+#define ALP_SDK_INFERENCE_AUTO_ORDER "drpai,cpu" /* the SoM preset order AUTO resolves through */
 #include "../../src/yocto/inference_yocto.c"
 
 static int g_drpai_open_calls;
