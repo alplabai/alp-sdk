@@ -58,15 +58,16 @@
 #define CSW_BASE_VALUE      (0x23000052u) /* DbgSwEnable | Priv | HPROT */
 
 /* Cortex-M debug register addresses (memory-mapped via the AHB-AP). */
-#define CM_DHCSR             0xE000EDF0u
-#define CM_DEMCR             0xE000EDFCu
-#define CM_AIRCR             0xE000ED0Cu
-#define CM_DHCSR_DBGKEY      0xA05F0000u
-#define CM_DHCSR_C_DEBUGEN   (1u << 0)
-#define CM_DHCSR_C_HALT      (1u << 1)
-#define CM_DHCSR_S_HALT      (1u << 17)
-#define CM_AIRCR_VECTKEY     0x05FA0000u
-#define CM_AIRCR_SYSRESETREQ (1u << 2)
+#define CM_DHCSR              0xE000EDF0u
+#define CM_DEMCR              0xE000EDFCu
+#define CM_AIRCR              0xE000ED0Cu
+#define CM_DHCSR_DBGKEY       0xA05F0000u
+#define CM_DHCSR_C_DEBUGEN    (1u << 0)
+#define CM_DHCSR_C_HALT       (1u << 1)
+#define CM_DHCSR_S_HALT       (1u << 17)
+#define CM_DEMCR_VC_CORERESET (1u << 0)
+#define CM_AIRCR_VECTKEY      0x05FA0000u
+#define CM_AIRCR_SYSRESETREQ  (1u << 2)
 
 /* GD32G553 FMC -- STM32G4-compatible register block @ 0x40022000. */
 #define FMC_BASE            0x40022000u
@@ -388,9 +389,46 @@ static alp_status_t swd_mem_read32(gd32_swd_t *ctx, uint32_t addr, uint32_t *out
 /* Public API                                                          */
 /* ------------------------------------------------------------------ */
 
+/* Session hook: weak no-op here, overridden by the platform glue that owns
+ * the bridge link (src/zephyr/v2n_supervisor.c).  Called with true before
+ * any pad is touched and with false once the pads are inputs again, so the
+ * SPI bridge can be closed and kept from re-initialising for the whole
+ * session (the bridge shares P71 with this driver). */
+__attribute__((weak)) void gd32_swd_session_notify(bool active)
+{
+	(void)active;
+}
+
+/* GD32_NRST (P74) is wired open-drain onto a net shared with the primary
+ * PMIC's reset-out, and the Renesas GPIO driver has no open-drain mode.
+ * Emulate it: ASSERT = configure as output and drive low; RELEASE =
+ * high-impedance input.  The pad is never driven high. */
+static alp_status_t swd_nrst_assert(gd32_swd_t *ctx)
+{
+	alp_status_t s = alp_gpio_configure(ctx->nrst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (s == ALP_OK) s = alp_gpio_write(ctx->nrst, false);
+	if (s != ALP_OK) {
+		(void)alp_gpio_configure(ctx->nrst, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
+		return s;
+	}
+	ctx->nrst_held = true;
+	/* Hold reset for a few thousand clock-delay spins -- the GD32G553 boot
+	 * ROM honours reset pulses >= 10 us. */
+	for (unsigned i = 0u; i < 4000u; ++i)
+		swd_clock_delay(ctx);
+	return ALP_OK;
+}
+
+static void swd_nrst_release(gd32_swd_t *ctx)
+{
+	(void)alp_gpio_configure(ctx->nrst, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
+	ctx->nrst_held = false;
+}
+
 alp_status_t gd32_swd_init(gd32_swd_t *ctx, alp_gpio_t *swdio, alp_gpio_t *swclk, alp_gpio_t *nrst)
 {
-	if (ctx == NULL || swdio == NULL || swclk == NULL) return ALP_ERR_INVAL;
+	/* NRST is mandatory: recovery without it is not supported (see below). */
+	if (ctx == NULL || swdio == NULL || swclk == NULL || nrst == NULL) return ALP_ERR_INVAL;
 
 	memset(ctx, 0, sizeof(*ctx));
 	ctx->swdio       = swdio;
@@ -401,42 +439,40 @@ alp_status_t gd32_swd_init(gd32_swd_t *ctx, alp_gpio_t *swdio, alp_gpio_t *swclk
 	/* GD32 bridge protocol 0.15 §3.17 rule H3: SWCLK (Renesas P71) is
 	 * also the bridge's ATTN line (GD32 PA14), which the GD32 drives while
 	 * ATTN is granted.  The host may therefore drive P70/P71 as outputs
-	 * only after asserting GD32_NRST (P74) -- a reset clears every link
-	 * feature and returns PA14 to SWCLK -- so assert NRST FIRST, switch
-	 * the pads to outputs while the GD32 is held in reset (nothing can
-	 * be driving the net then), and only then release it.  The GD32
-	 * comes back up with ATTN off, so there is no contention afterwards.
-	 *
-	 * With nrst == NULL this driver cannot honour H3 itself: the caller
-	 * must instead know that its most recent SPI LINK_FEATURES reply did
-	 * not grant ATTN and that it has sent none since (H3(a)).  The
-	 * caller is responsible for the pin being configured open-drain at
-	 * the SoC level -- on the V2N this is a hard pad property because the
-	 * NRST line shares a net with the primary PMIC's reset-out
-	 * (coordinate with the maintainer for rail-level details). */
-	if (nrst != NULL) {
-		(void)alp_gpio_write(nrst, false); /* assert (drive low) */
-		/* Hold reset for a few thousand clock-delay spins -- the
-		 * GD32G553 boot ROM honours reset pulses >= 10 us. */
-		for (unsigned i = 0u; i < 4000u; ++i)
-			swd_clock_delay(ctx);
+	 * only while GD32_NRST (P74) holds the GD32 in reset.  This is
+	 * CONNECT-UNDER-RESET: assert NRST first (and fail if that fails),
+	 * switch the pads to outputs while nothing can be driving the net, keep
+	 * NRST asserted through gd32_swd_connect(), and let connect() release it
+	 * only after the core is set to halt at its reset vector -- so no
+	 * application code ever runs during the session and ATTN cannot be
+	 * granted. */
+	gd32_swd_session_notify(true); /* the supervisor closes the bridge link first */
+
+	alp_status_t s = swd_nrst_assert(ctx);
+	if (s != ALP_OK) {
+		gd32_swd_session_notify(false);
+		return s;
 	}
 
 	/* SWCLK + SWDIO start as outputs driven high (the SWD idle
 	 * state per the spec).  SWDIO will toggle between input and
 	 * output at runtime in the bit-bang routines. */
-	alp_status_t s = alp_gpio_configure(swclk, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	s = alp_gpio_configure(swclk, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	if (s == ALP_OK) s = alp_gpio_configure(swdio, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	if (s == ALP_OK) {
 		ctx->swdio_is_output = true;
 		s                    = alp_gpio_write(swclk, true);
 	}
 	if (s == ALP_OK) s = alp_gpio_write(swdio, true);
-
-	/* Leave NRST released (HiZ on an open-drain net) whatever happened;
-	 * reset_and_run() pulses it again later. */
-	if (nrst != NULL) (void)alp_gpio_write(nrst, true);
-	if (s != ALP_OK) return s;
+	if (s != ALP_OK) {
+		/* Back out: pads to inputs, reset released, session closed. */
+		(void)alp_gpio_configure(swclk, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
+		(void)alp_gpio_configure(swdio, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
+		swd_nrst_release(ctx);
+		gd32_swd_session_notify(false);
+		memset(ctx, 0, sizeof(*ctx));
+		return s;
+	}
 
 	ctx->initialised = true;
 	return ALP_OK;
@@ -485,6 +521,23 @@ alp_status_t gd32_swd_connect(gd32_swd_t *ctx)
 	if (s != ALP_OK) return s;
 
 	ctx->connected = true;
+
+	/* 6. Connect-under-reset: the core is still held in reset (NRST has
+	 * been asserted since gd32_swd_init()).  Enable debug and arm
+	 * DEMCR.VC_CORERESET so the core halts on its reset vector, THEN release
+	 * NRST: it comes out of reset halted, PA13/PA14 still SWD, no application
+	 * code run.  If either write fails NRST stays asserted (the safe state)
+	 * and the error is returned; gd32_swd_deinit() releases it. */
+	if (ctx->nrst_held) {
+		s = swd_mem_write32(ctx, CM_DHCSR, CM_DHCSR_DBGKEY | CM_DHCSR_C_DEBUGEN);
+		if (s != ALP_OK) return s;
+		s = swd_mem_write32(ctx, CM_DEMCR, CM_DEMCR_VC_CORERESET);
+		if (s != ALP_OK) return s;
+		swd_nrst_release(ctx);
+		/* Let the core leave reset and stop at the vector. */
+		for (unsigned i = 0u; i < 4000u; ++i)
+			swd_clock_delay(ctx);
+	}
 	return ALP_OK;
 }
 
@@ -680,41 +733,37 @@ alp_status_t gd32_swd_reset_and_run(gd32_swd_t *ctx)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 
-	/* Prefer the hardware reset line when it's wired -- AIRCR.SYSRESETREQ
-     * is gated by the SW-DP power-up status, which the driver may have
-     * just torn down. */
-	if (ctx->nrst != NULL) {
-		(void)alp_gpio_write(ctx->nrst, false); /* drive low (open-drain assert) */
-		/* Hold reset for a few thousand clock-delay spins -- the
-         * GD32G553 boot ROM honours reset pulses >= 10 us. */
-		for (unsigned i = 0u; i < 4000u; ++i)
-			swd_clock_delay(ctx);
-		(void)alp_gpio_write(ctx->nrst, true); /* release (HiZ) */
-		ctx->connected = false;
-		return ALP_OK;
+	/* Disarm the halt-on-reset connect() set up and drop C_HALT, best effort
+	 * (the session may already be closed), so the core RUNS the new image
+	 * out of the reset below instead of halting at the vector again. */
+	if (ctx->connected) {
+		(void)swd_mem_write32(ctx, CM_DEMCR, 0u);
+		(void)swd_mem_write32(ctx, CM_DHCSR, CM_DHCSR_DBGKEY);
 	}
 
-	/* Software fall-back: clear DHCSR's halt + write AIRCR.SYSRESETREQ. */
-	if (!ctx->connected) return ALP_ERR_NOT_READY;
-	alp_status_t s = swd_mem_write32(ctx, CM_DEMCR, 0u);
-	if (s != ALP_OK) return s;
-	s = swd_mem_write32(ctx, CM_DHCSR, CM_DHCSR_DBGKEY); /* clear C_HALT */
-	if (s != ALP_OK) return s;
-	s = swd_mem_write32(ctx, CM_AIRCR, CM_AIRCR_VECTKEY | CM_AIRCR_SYSRESETREQ);
-	/* AIRCR write triggers reset; the SW-DP link drops underneath us.
-     * Don't expect the ACK to come back. */
+	/* The hardware reset line is the only reset: AIRCR.SYSRESETREQ is gated
+	 * by the SW-DP power-up status, which the driver may have just torn
+	 * down, and recovery without NRST is not supported. */
+	if (swd_nrst_assert(ctx) != ALP_OK) return ALP_ERR_IO;
+	swd_nrst_release(ctx);
 	ctx->connected = false;
-	return (s == ALP_OK || s == ALP_ERR_IO) ? ALP_OK : s;
+	return ALP_OK;
 }
 
 void gd32_swd_deinit(gd32_swd_t *ctx)
 {
 	if (ctx == NULL) return;
-	if (ctx->initialised && ctx->swclk != NULL) {
-		(void)alp_gpio_write(ctx->swclk, true);
-	}
-	if (ctx->initialised && ctx->swdio != NULL && ctx->swdio_is_output) {
-		(void)alp_gpio_write(ctx->swdio, true);
+	if (ctx->initialised) {
+		/* Never leave the GD32 held in reset, and give P70/P71 back: both
+		 * pads return to INPUT (P71 is the bridge's ATTN line again). */
+		if (ctx->nrst != NULL) swd_nrst_release(ctx);
+		if (ctx->swclk != NULL) {
+			(void)alp_gpio_configure(ctx->swclk, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
+		}
+		if (ctx->swdio != NULL) {
+			(void)alp_gpio_configure(ctx->swdio, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
+		}
+		gd32_swd_session_notify(false);
 	}
 	ctx->initialised = false;
 	ctx->connected   = false;
