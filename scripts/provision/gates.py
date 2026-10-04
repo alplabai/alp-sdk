@@ -402,15 +402,21 @@ def fdt(fip: bytes, wic_gz: Path) -> GateResult:
 
 # --- serial / mfg_date ----------------------------------------------------------
 
-_SERIAL_RE = re.compile(r"^(\d{4})W(\d{2})-(\d{4})$")
+# The index is 4 Crockford base32 characters (alp_eth_mac.CROCKFORD_ALPHABET,
+# no I/L/O/U): the printed labels run 0001..0009, 000A..000Z, ...
+_CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+_SERIAL_RE = re.compile(r"^(\d{4})W(\d{2})-([0-9A-HJKMNP-TV-Z]{4})$")
 
 
 def parse_serial(serial: str) -> tuple[int, int, int]:
-    """'YYYYWww-NNNN' -> (year, iso_week, seq). ValueError on a bad serial."""
+    """'YYYYWww-IIII' -> (year, iso_week, index). ValueError on a bad serial."""
     m = _SERIAL_RE.match(serial)
     if not m:
-        raise ValueError(f"serial {serial!r} is not YYYYWww-NNNN")
-    year, week, seq = (int(g) for g in m.groups())
+        raise ValueError(f"serial {serial!r} is not YYYYWww-IIII")
+    year, week = int(m.group(1)), int(m.group(2))
+    seq = 0
+    for c in m.group(3):
+        seq = seq * 32 + _CROCKFORD.index(c)
     if seq == 0:
         raise ValueError(f"serial {serial!r}: sequence starts at 0001")
     date.fromisocalendar(year, week, 1)  # ValueError for a week the year lacks
