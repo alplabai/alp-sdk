@@ -29,11 +29,11 @@ def _boot(path: Path) -> dict:
 
 
 def _cfg() -> dict[str, str]:
-    return dict(m.groups() for m in re.finditer(r"^(CONFIG_\w+)=(\S+)$", CFG.read_text(), re.M))
+    return dict(m.groups() for m in re.finditer(r"^(CONFIG_\w+)=(\S+)$", CFG.read_text(encoding="utf-8"), re.M))
 
 
 def _fw_env() -> list[tuple[str, int, int]]:
-    rows = [ln.split() for ln in FW_ENV.read_text().splitlines() if ln.strip() and not ln.startswith("#")]
+    rows = [ln.split() for ln in FW_ENV.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
     return [(dev, int(off, 0), int(size, 0)) for dev, off, size in rows]
 
 
@@ -57,15 +57,15 @@ def test_fw_env_config_and_cfg_match_the_preset(preset):
 
 def test_mender_offsets_match_the_preset():
     env = _boot(PRESETS[0])["uboot_env"]
-    got = dict(re.findall(r'^(MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_[12]) \?= "(\w+)"$', MENDER.read_text(), re.M))
+    got = dict(re.findall(r'^(MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_[12]) \?= "(\w+)"$', MENDER.read_text(encoding="utf-8"), re.M))
     assert {k: int(v, 0) for k, v in got.items()} == {
         "MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_1": env["offset"],
         "MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_2": env["offset_redund"]}
 
 
 def test_the_ev_som_alias_pins_mmc0_to_the_on_module_emmc():
-    som = (META / "recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi").read_text()
-    carrier = (META / "recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi").read_text()
+    som = (META / "recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi").read_text(encoding="utf-8")
+    carrier = (META / "recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi").read_text(encoding="utf-8")
     assert re.search(r"^\s*mmc0 = &sdhi0;", som, re.M)
     assert not re.search(r"^\s*mmc0 =", carrier, re.M)
 
@@ -93,7 +93,7 @@ def test_only_ota_variables_are_importable_from_the_saved_environment():
     """The write allowlist is what stops fw_setenv from changing how a unit
     boots: it must be on, and nothing that controls booting may be listed."""
     assert _cfg()["CONFIG_ENV_WRITEABLE_LIST"] == "y"
-    names = set(re.findall(r"(\w+):sw", PATCH_0014.read_text()))
+    names = set(re.findall(r"(\w+):sw", PATCH_0014.read_text(encoding="utf-8")))
     assert {"upgrade_available", "bootcount", "mender_boot_part"} <= names
     assert not names & {"bootcmd", "bootargs", "bootdelay", "bootdelaykey", "preboot",
                         "bootcmd_check", "emmcload", "sd2load"}

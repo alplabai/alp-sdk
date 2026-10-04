@@ -259,7 +259,7 @@ silicon; do them in order on a unit flashed with the new FIP and image.
 5. **An allowlisted variable survives a reboot.** At the U-Boot prompt:
    `setenv bootcount 3; saveenv`, `reset`, then `printenv bootcount` ->
    `bootcount=3`. A variable not on the allowlist must NOT come back:
-   `setenv alp_test 1; saveenv`, `reset`, `printenv alp_test` -> not defined.
+   `setenv scratch 1; saveenv`, `reset`, `printenv scratch` -> not defined.
 6. **Redundancy.** After `saveenv`, corrupt copy 2 from Linux
    (`echo 0 > /sys/block/mmcblk0boot1/force_ro`, `dd if=/dev/zero
    of=/dev/mmcblk0boot1 bs=1 seek=$((0x230000)) count=16`,
@@ -267,16 +267,16 @@ silicon; do them in order on a unit flashed with the new FIP and image.
    loads `bootcount`; the next `saveenv` repairs the copy.
 7. **Linux -> U-Boot.** In Linux: `fw_printenv bootcount` -> `3`;
    `fw_setenv bootcount 4`; reboot; U-Boot `printenv bootcount` -> `4`. If
-   `fw_setenv` fails with a read-only error, `mmcblk0boot1`'s `force_ro`
+   `fw_setenv` fails with a read-only error, the `force_ro` of `mmcblk0boot1`
    is set and the tool did not clear it; record it (the image then needs a
    udev rule or the OTA client must clear it).
-8. **Boot control is the firmware's.** `fw_setenv bootcmd 'echo old'`,
+8. **Boot control is the firmware's.** `fw_setenv bootcmd "echo old"`,
    `fw_setenv bootdelay 5`, reboot: the unit still boots Linux and
    `printenv bootcmd bootdelay` shows the binary's values (on a production
    build the console stays locked). Clean up with `fw_setenv bootcmd` and
    `fw_setenv bootdelay` (unset).
-9. **Provisioning does not clobber it.** Run the provisioning
-   `write_emmc_boot` step on this unit, reboot, and confirm
+9. **Provisioning does not clobber it.** Run the provisioning step
+   named `write_emmc_boot` on this unit, reboot, and confirm that
    `printenv bootcount` is still set.
 10. **Empty SD slot.** No card inserted, power-cycle, serial console: no
     `Card did not respond to voltage select! : -110` and no `mmc1`

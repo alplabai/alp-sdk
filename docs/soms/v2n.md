@@ -312,7 +312,7 @@ vendor default (end of the eMMC user area) is no longer used.
   `CFG_ENV_FLAGS_LIST_STATIC` (patch `0014`, `include/configs/rzv2n-dev.h`)
   are imported from the saved copy: Mender's `upgrade_available`,
   `bootcount`, `mender_boot_part`, `mender_boot_part_hex`,
-  `mender_saveenv_canary`, and the `alp_envinit` first-boot marker. At the
+  `mender_saveenv_canary`, and the first-boot marker variable. At the
   U-Boot prompt `setenv` / `saveenv` behave as before; a variable not on
   the list simply is not restored on the next boot. The Mender names come
   from Mender's documented U-Boot integration and are not yet checked
@@ -324,7 +324,7 @@ vendor default (end of the eMMC user area) is no longer used.
   the binary on every boot, so neither an older FIP's saved copy nor
   `fw_setenv` can change them. First boot (both copies unreadable) prints
   the usual `bad CRC, using default environment` once; patch `0014` then
-  writes the defaults and the `alp_envinit` marker.
+  writes the defaults and the first-boot marker.
 * **Linux sees the same variables.** The image carries `libubootenv`
   (`fw_printenv`, `fw_setenv`) and `/etc/fw_env.config`. This is groundwork
   for the OTA design: the boot flow reads no boot-slot variable yet.
@@ -357,7 +357,7 @@ same net Linux uses as `cd-gpios` for `&sdhi1` in `e1m-x-evk.dtsi`), and
 `CONFIG_BOOTCOMMAND` touches `mmc1` only when it succeeds; with the slot
 empty it runs the vendor eMMC loader directly. A card without
 `boot/Image` on partition 2 still falls back to the eMMC. Applies to the
-E1M-V2N/V2M builds that set `CONFIG_ALP_E1M_SD1_MICROSD`; other builds
+E1M-V2N/V2M builds that set the SD1 microSD Kconfig option; other builds
 keep the old behaviour.
 
 ### SoC OTP (not used by the SDK) {#soc-otp}
