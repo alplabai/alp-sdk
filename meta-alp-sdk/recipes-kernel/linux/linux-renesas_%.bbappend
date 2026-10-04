@@ -138,6 +138,8 @@ python () {
 # Cortex-M33 runs, group 0 bit 0 asserts, nobody acknowledges it, and the
 # line storms ("irq 14: nobody cared") until genirq disables it. The patch
 # unmasks only the GPT overflow bits the handler services.
+# The mask is written BEFORE the line is requested: requesting enables the
+# line, and a source already asserted at probe storms it inside the request.
 
 # AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
 # (GD32 supervisor SPI link).  Without this patch, Linux's

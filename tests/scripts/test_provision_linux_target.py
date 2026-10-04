@@ -147,6 +147,32 @@ def test_console_login_and_discover_host():
     assert lt.discover_host(con) == "10.0.0.7"
 
 
+KERNEL_LOG = "[   13.500308] Bluetooth: MGMT ver 1.22"
+
+
+def test_console_login_resyncs_when_a_printk_lands_after_the_prompt(monkeypatch):
+    """The real cold_boot_test cycle 3 failure: `root@e1m-v2m103:~# [   13.500308] Bluetooth: ...`
+    never ends in a prompt; a newline makes the shell print a fresh one."""
+    con = FakeConsole([
+        (r"^\r$", "\r\ne1m login: "),
+        (r"^root\r$", f"root\r\nroot@e1m-v2m103:~# {KERNEL_LOG}"),
+        (r"^\r$", "\r\nroot@e1m-v2m103:~# "),
+        (r"^export TERM=dumb", "export TERM=dumb\r\n# "),
+        (r"^systemctl is-system-running", "systemctl is-system-running\r\nrunning\r\n# "),
+    ])
+    monkeypatch.setattr(lt, "CONSOLE_SETTLE_S", 0.01)
+    lt.console_login(con, timeout=2.0)
+    assert con.written.count("\r") == 2          # the first newline and one resync
+
+
+def test_console_resync_is_bounded_and_a_prompt_in_a_log_line_still_never_matches():
+    con = FakeConsole([(r"^\r$", f"something # {KERNEL_LOG}")] * (lt.RESYNC_TRIES + 1))
+    con.send_line("")
+    with pytest.raises(BenchError, match="no match"):
+        lt._expect_answering_cpr(con, {"shell": lt._SHELL}, 0.4)
+    assert len(con.written) == 1 + lt.RESYNC_TRIES
+
+
 def test_console_login_refuses_password():
     con = FakeConsole([(r"^\r$", "login: "), (r"^root\r$", "Password: ")])
     with pytest.raises(BenchError, match="password"):
@@ -217,24 +243,24 @@ Extended CSD rev 1.8 [EXT_CSD_REV: 0x08]
 """
 
 
-def test_emmc_boot1_force_ro_restored_on_failure(tmp_path):
+def test_emmc_boot_force_ro_restored_on_failure(tmp_path):
     img = tmp_path / "bl2_mmc.bin"
     img.write_bytes(b"\x02" * 512)
-    t, fake = target([("boot1/size", "8192\n"), ("md5sum", f"{md5(img.read_bytes())}  -\n"), ("force_ro|rm -f", ""),
+    t, fake = target([("boot0/size", "8192\n"), ("md5sum", f"{md5(img.read_bytes())}  -\n"), ("force_ro|rm -f", ""),
                       (r"^dd ", (1, ""))])
     with pytest.raises(BenchError):
-        lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, 1)
-    assert "echo 1 > /sys/block/mmcblk1boot1/force_ro" in fake.commands
+        lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, 1)
+    assert "echo 1 > /sys/block/mmcblk1boot0/force_ro" in fake.commands
 
 
-def test_emmc_boot1_write_verify(tmp_path):
+def test_emmc_boot_write_verify(tmp_path):
     img = tmp_path / "fip.bin"
     img.write_bytes(b"\x03" * 1000)
     good = md5(img.read_bytes())
-    t, fake = target([("boot1/size", "8192\n"), ("md5sum", f"{good}  -\n"), ("force_ro|rm -f|^dd ", "")])
-    assert lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, 0x300) == good
-    assert "dd if=/tmp/fip.bin of=/dev/mmcblk1boot1 bs=512 seek=768 && sync" in fake.commands
-    assert "dd if=/dev/mmcblk1boot1 bs=1 skip=393216 count=1000 2>/dev/null | md5sum" in fake.commands
+    t, fake = target([("boot0/size", "8192\n"), ("md5sum", f"{good}  -\n"), ("force_ro|rm -f|^dd ", "")])
+    assert lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, 0x300) == good
+    assert "dd if=/tmp/fip.bin of=/dev/mmcblk1boot0 bs=512 seek=768 && sync" in fake.commands
+    assert "dd if=/dev/mmcblk1boot0 bs=1 skip=393216 count=1000 2>/dev/null | md5sum" in fake.commands
 
 
 def test_set_boot_config_verifies():
@@ -252,7 +278,7 @@ def test_rootfs_write_verify_streams_and_compares(tmp_path):
     wic = tmp_path / "rootfs.wic.gz"
     wic.write_bytes(gzip.compress(raw))
     t, fake = target([("gunzip", ""), ("rereadpt", ""), ("md5sum", f"{md5(raw)}  -\n")])
-    assert lt.rootfs_write_verify(t, "/dev/mmcblk1", wic) == md5(raw)
+    assert lt.rootfs_write_verify(t, "/dev/mmcblk1", wic)["rootfs_md5"] == md5(raw)
     assert fake.commands[0] == "gunzip -c | dd of=/dev/mmcblk1 bs=4M && sync"
     assert fake.commands[-1] == f"dd if=/dev/mmcblk1 bs=4096 skip=0 count={len(raw) // 4096} 2>/dev/null | md5sum"
 
@@ -596,14 +622,14 @@ def test_dxm1_reset_pulse_is_one_ssh_round_trip_chained_with_and():
         (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
         (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
         *_named_ownership_responses("/sys/class/gpio/PA6"),
-        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
+        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.5 && echo high > /sys/class/gpio/PA6/direction$", ""),
     ])
     lt.dxm1_reset_pulse(t, "10410000.pinctrl", 86)
     assert fake.commands[-1] == ("echo low > /sys/class/gpio/PA6/direction && "
-                                 "sleep 0.1 && echo high > /sys/class/gpio/PA6/direction")
+                                 "sleep 0.5 && echo high > /sys/class/gpio/PA6/direction")
 
 
-def test_dxm1_uart_boot_drives_p75_via_sysfs_and_releases_it_afterward():
+def test_dxm1_drive_high_exports_and_sets_direction_high():
     t, fake = target([
         (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
         (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
@@ -611,115 +637,48 @@ def test_dxm1_uart_boot_drives_p75_via_sysfs_and_releases_it_afterward():
         (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
         *_named_ownership_responses("/sys/class/gpio/P75"),
         (r"^echo high > /sys/class/gpio/P75/direction$", ""),
-        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/PA6"),
-        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
-        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", "bootloader ok\n"),
-        (r"^uart_boot -d /dev/ttySC1 -F fw\.bin -U -b 115200$", "app ok\n"),
-        (r"^echo low > /sys/class/gpio/P75/direction$", ""),
     ])
-    out = lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
-                            "fw_uart_boot.bin", "fw.bin")
-    assert out == "bootloader ok\napp ok\n"
-    assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"
+    assert lt.dxm1_drive_high(t, "10410000.pinctrl", 61) == "/sys/class/gpio/P75"
+    assert fake.commands[-1] == "echo high > /sys/class/gpio/P75/direction"
 
 
-def test_dxm1_uart_boot_releases_p75_even_if_the_transfer_fails():
-    t, fake = target([
-        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
-        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
-        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/P75"),
-        (r"^echo high > /sys/class/gpio/P75/direction$", ""),
-        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/PA6"),
-        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
-        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", (1, "", "no ROM response")),
-        (r"^echo low > /sys/class/gpio/P75/direction$", ""),
-    ])
-    with pytest.raises(BenchError, match="no ROM response"):
-        lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
-                          "fw_uart_boot.bin", "fw.bin")
-    assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"
+def test_dxm1_drive_high_refuses_the_deepx_rail_lines_before_any_command():
+    t, fake = target([])
+    with pytest.raises(BenchError, match="DEEPX 0.75 V rail"):
+        lt.dxm1_drive_high(t, "10410000.pinctrl", 52)
+    assert fake.commands == []
 
 
-def test_dxm1_uart_boot_raises_if_release_fails_and_no_earlier_exception():
-    t, fake = target([
-        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
-        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
-        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/P75"),
-        (r"^echo high > /sys/class/gpio/P75/direction$", ""),
-        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/PA6"),
-        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
-        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", "bootloader ok\n"),
-        (r"^uart_boot -d /dev/ttySC1 -F fw\.bin -U -b 115200$", "app ok\n"),
-        (r"^echo low > /sys/class/gpio/P75/direction$", (1, "", "write error")),
-    ])
-    with pytest.raises(BenchError, match="could not release"):
-        lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
-                          "fw_uart_boot.bin", "fw.bin")
-    assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"
+def test_dxm1_pcie_device_reads_the_endpoint_id():
+    t, _ = target([(r"^cat /sys/bus/pci/devices/0000:01:00\.0/device$", "0x0000\n")])
+    assert lt.dxm1_pcie_device(t) == "0x0000"
+    t, _ = target([(r"^cat /sys/bus/pci/devices/0000:01:00\.0/device$", "0x0001\n")])
+    assert lt.dxm1_pcie_device(t) == "0x0001"
+    t, _ = target([(r"^cat /sys/bus/pci/devices/0000:01:00\.0/device$", (1, ""))])
+    assert lt.dxm1_pcie_device(t) is None
 
 
-def test_dxm1_uart_boot_logs_but_does_not_mask_the_original_failure_when_release_also_fails():
-    t, fake = target([
-        (r"^for d in /sys/class/gpio/gpiochip\*", "/sys/class/gpio/gpiochip416 10410000.pinctrl\n"),
-        (r"^cat /sys/class/gpio/gpiochip416/base$", "416\n"),
-        (r"^test -e /sys/class/gpio/gpio477/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/P75/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/P75"),
-        (r"^echo high > /sys/class/gpio/P75/direction$", ""),
-        (r"^test -e /sys/class/gpio/gpio502/value$", (1, "")),
-        (r"^test -e /sys/class/gpio/PA6/value$", (0, "")),
-        *_named_ownership_responses("/sys/class/gpio/PA6"),
-        (r"^echo low > /sys/class/gpio/PA6/direction && sleep 0\.1 && echo high > /sys/class/gpio/PA6/direction$", ""),
-        (r"^uart_boot -d /dev/ttySC1 -f fw_uart_boot\.bin -b 115200$", (1, "", "no ROM response")),
-        (r"^echo low > /sys/class/gpio/P75/direction$", (1, "", "write error")),
-    ])
-    # the transfer's own error must win -- not the release failure.
-    with pytest.raises(BenchError, match="no ROM response"):
-        lt.dxm1_uart_boot(t, "10410000.pinctrl", 61, 86, "/dev/ttySC1", "uart_boot",
-                          "fw_uart_boot.bin", "fw.bin")
-    assert fake.commands[-1] == "echo low > /sys/class/gpio/P75/direction"
+DXRT_CLI_S = Path(__file__).parent / "fixtures" / "provision" / "dxrt-cli-s.txt"     # real `dxrt-cli -s` capture
 
 
-def test_dxm1_pcie_present_excludes_bridges_and_root_ports_by_pci_class():
-    # root port only (bridge class): no endpoint
-    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n"),
-                   ("0000:00:00.0/class", "0x060400\n")])
-    assert not lt.dxm1_pcie_present(t)
-    # root port + an intermediate switch port, both bridge-class: still no endpoint
-    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n"),
-                   ("0000:00:00.0/class", "0x060400\n"),
-                   ("0000:01:00.0/class", "0x060400\n")])
-    assert not lt.dxm1_pcie_present(t)
-    # a real (non-bridge) endpoint
-    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n"),
-                   ("0000:00:00.0/class", "0x060400\n"),
-                   ("0000:01:00.0/class", "0x020000\n")])
-    assert lt.dxm1_pcie_present(t)
-    t, _ = target([("ls /sys/bus/pci/devices", "")])
-    assert not lt.dxm1_pcie_present(t)
+def test_parse_dxm1_fw_version_on_the_real_dxrt_cli_capture():
+    # the capture also carries "DXRT v3.2.0", "RT Driver version : v1.8.0", "PCIe Driver version : v1.6.0"
+    assert lt.parse_dxm1_fw_version(DXRT_CLI_S.read_text(encoding="utf-8")) == "2.4.0"
 
 
-def test_dxm1_pcie_present_matches_vendor_id_when_given():
-    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n"),
-                   ("0000:00:00.0/class", "0x060400\n"),
-                   ("0000:01:00.0/class", "0x020000\n"),
-                   ("0000:01:00.0/vendor", "0x1f4b\n")])
-    assert lt.dxm1_pcie_present(t, "0x1f4b")
-    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n0000:01:00.0\n"),
-                   ("0000:00:00.0/class", "0x060400\n"),
-                   ("0000:01:00.0/class", "0x020000\n"),
-                   ("0000:01:00.0/vendor", "0xdead\n")])
-    assert not lt.dxm1_pcie_present(t, "0x1f4b")
+@pytest.mark.parametrize("text, want", [
+    (" * FW version          : v2.5.1-rc1\n", "2.5.1-rc1"),
+    ("DXRT v3.2.0\n * RT Driver version   : v1.8.0\n * PCIe Driver version : v1.6.0\n", None),
+    ("Firmware version : v2.4.0\n", None),             # not the line dxrt-cli prints
+    ("no version here\nrtos 7.8.9\n", None),
+])
+def test_parse_dxm1_fw_version_matches_only_the_fw_version_line(text, want):
+    assert lt.parse_dxm1_fw_version(text) == want
+
+
+def test_dxm1_fw_version_is_none_without_dxrt_cli():
+    t, _ = target([(r"^dxrt-cli -s$", (127, "", "not found"))])
+    assert lt.dxm1_fw_version(t) is None
 
 
 # --- census --------------------------------------------------------------------------
@@ -747,14 +706,16 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"cpuinfo_max_freq", "1800000\n"), (r"meminfo", "MemTotal:        3200000 kB\nMemFree: 1 kB\n"),
         (r"uname -r", "6.1.107-cip28\n"),
         (r"device-tree/compatible", "alp,e1m-v2m101-x-evk renesas,r9a09g056\n"),
-        (r"device-tree/model", "ALP E1M-V2M101 on E1M-X-EVK\n"),
-        (r"device/type", "mmcblk0 SD\nmmcblk1 MMC\nmmcblk1boot1 MMC\n"),
+        (r"device-tree/model", "ALP E1M-V2M on E1M-X-EVK\n"),
+        (r"device/type", "mmcblk0 SD\nmmcblk1 MMC\nmmcblk1boot0 MMC\n"),
         (r"mmcblk1/device/cid", CID + "\n"), (r"mmcblk1/size", "30535680\n"),
         (r"extcsd read", EXTCSD.format(a=2, b=8)),
         (r"/ios", "actual clock:\t200000000 Hz\ntiming spec:\t9 (mmc HS200)\n"),
-        (r"mmcblk1boot1 bs=1 skip=512 count=100 ", "11" * 16 + "  -\n"),
-        (r"mmcblk1boot1 bs=1 skip=393216 count=200 ", "22" * 16 + "  -\n"),
+        (r"mmcblk1boot0 bs=1 skip=512 count=100 ", "11" * 16 + "  -\n"),
+        (r"mmcblk1boot0 bs=1 skip=393216 count=200 ", "22" * 16 + "  -\n"),
         (r"spi-nor/jedec_id", "aabbcc\n"),
+        (r"pci/devices/0000:01:00\.0/device", "0x0000\n"),
+        (r"^dxrt-cli -s$", DXRT_CLI_S.read_text(encoding="utf-8")),
         (r"mtd\*; do", "393216\n66715648\n"),
         (r"if=/dev/mtd0 ", "33" * 16 + "  -\n"), (r"if=/dev/mtd1 bs=\d+ skip=0 ", "44" * 16 + "  -\n"),
         (r"if=/dev/mtd1 bs=\d+ skip=(416|1703936) ", "55" * 16 + "  -\n"),
@@ -769,6 +730,11 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"end0/carrier", "1\n"), (r"end0/speed", "1000\n"),
         (r"ethtool end0", "Settings for end0:\n\tLink partner advertised link modes:  1000baseT/Full\n"
                           "\t                                100baseT/Full\n"),
+        # the DT forces ethernet-phy-id001c.c878; the silicon's MII registers 2/3 say c916
+        (r"python3 /tmp/alp_mii_id\.py", "end0 0x001cc916\nend1 0x001cc916\n"),
+        (r"cat /sys/class/net/end\d/phydev/phy_id", "0x001cc878\n"),
+        (r"^rm -f /tmp/alp_mii_id\.py$", ""),
+        (r"^dmesg \| grep", (1, "")),
     ]
 
 
@@ -783,7 +749,7 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["secure_page_sha256"] == hashlib.sha256(b"\xff" * 64).hexdigest()
     assert "manifest_sha256" not in facts                      # blank array
     assert facts["soc_sys_lsi_mode"].startswith("0x3c06 (unverified")
-    assert facts["dtb_name"] == ("ALP E1M-V2M101 on E1M-X-EVK "
+    assert facts["dtb_name"] == ("ALP E1M-V2M on E1M-X-EVK "
                                  "(compatible alp,e1m-v2m101-x-evk renesas,r9a09g056)")
     assert facts["cpu_khz"] == "1800000" and facts["linux_memtotal_kb"] == "3200000"
     assert facts["emmc_cid_pnm"] == "EMMC01" and facts["emmc_cid_psn"] == "0x12345678"
@@ -792,6 +758,7 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["emmc_mode"] == "mmc HS200 200000000 Hz"
     assert (facts["emmc_ext_csd_177"], facts["emmc_ext_csd_179"]) == ("0x02", "0x08")
     assert facts["emmc_boot1_bl2_md5"] == "11" * 16 and facts["emmc_boot1_fip_md5"] == "22" * 16
+    assert (facts["dxm1_pcie_device"], facts["dxm1_fw_version"]) == ("0x0000", "2.4.0")
     assert facts["xspi_jedec_id"] == "0xaabbcc" and facts["xspi_size_bytes"] == str(393216 + 66715648)
     assert (facts["xspi_bl2_md5"], facts["xspi_fip_md5"], facts["xspi_cm33_md5"]) == \
         ("33" * 16, "44" * 16, "55" * 16)
@@ -805,6 +772,9 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["eth0_link"] == "up (end0) carrier=1 speed=1000 anlpar=1000baseT/Full"
     assert not [k for k in facts if k.startswith("end")]
     assert notes == ["end1: address/operstate unreadable"]
+    assert [facts[f"eth{i}_phy_id"] for i in (0, 1)] == ["0x001cc878"] * 2
+    assert [facts[f"eth{i}_phy_id_raw"] for i in (0, 1)] == ["0x001cc916"] * 2
+    assert facts["eth_phy_id_mismatch"] == "yes" and facts["eth_dma_reset_failed"] == "none"
     # read-only: no writes of any kind reached the unit
     assert not [c for c in fake.commands if re.search(r"i2cset|flash_erase|mtd_debug write|\bdd\b[^|]*\bof=|mmc boot", c)]
     assert not [c for c in fake.commands if re.search(r"w(?!2@)\d+@0x5[08]", c)]
@@ -826,12 +796,12 @@ def test_parse_emmc_cid_rejects_garbage():
         lt.parse_emmc_cid("xyz")
 
 
-def test_emmc_boot1_write_refuses_an_image_past_the_partition_end(tmp_path):
+def test_emmc_boot_write_refuses_an_image_past_the_partition_end(tmp_path):
     img = tmp_path / "fip.bin"
     img.write_bytes(b"\x03" * 1000)
-    t, fake = target([("boot1/size", "768\n")])     # 768 sectors: ends exactly at 0x300
+    t, fake = target([("boot0/size", "768\n")])     # 768 sectors: ends exactly at 0x300
     with pytest.raises(BenchError, match="does not fit"):
-        lt.emmc_boot1_write_verify(t, "/dev/mmcblk1", img, 0x300)
+        lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, 0x300)
     assert not any(c.startswith("dd ") and " of=" in c for c in fake.commands)
 
 
@@ -844,3 +814,123 @@ def test_gd32_bridge_version_frames_and_checks_crc():
     t, _ = target([("i2ctransfer -f", "0x00 0x00 0x0d 0x00 0x9c 0xf3\n")])
     with pytest.raises(BenchError, match="CRC mismatch"):
         lt.gd32_bridge_version(t, 8)
+
+
+# --- i2c_get retry / census unread keys / PHY id / gbeth DMA (#2624) ---------------------
+
+CENSUS_BUS = {"eeprom": 0, "pmic": 8, "brd": 8}
+
+
+def test_i2c_get_retries_a_transient_read_failure():
+    t, fake = target([("i2cget -y -f 8 0x25 0x10", [(2, "", "Error: Read failed"), (2, "", "Error: Read failed"),
+                                                    "0x08"])])
+    assert lt.i2c_get(t, 8, 0x25, 0x10) == 0x08
+    assert len(fake.commands) == 3
+
+
+def test_i2c_get_gives_up_after_three_attempts_and_says_so():
+    t, fake = target([("i2cget", (2, "", "Error: Read failed"))])
+    with pytest.raises(BenchError, match=r"Read failed.*after 3 attempts"):
+        lt.i2c_get(t, 8, 0x25, 0x10)
+    assert len(fake.commands) == 3
+
+
+def test_census_records_a_persistently_failing_read_as_unread_and_keeps_the_other_keys():
+    t, _ = target([(r"i2cget -y -f 8 0x25 0x10", (2, "", "Error: Read failed")),
+                   (r"i2cget -y -f 8 0x52 0x37", (2, "", "Error: Read failed"))] + _census_responses())
+    facts, notes = lt.census(t, CENSUS_BUS)
+    assert facts["act88760_gpio_regs"].startswith("unread (") and "Read failed" in facts["act88760_gpio_regs"]
+    assert facts["rtc_rv3028_reg_0x37"].startswith("unread (")
+    assert facts["da9292_ids"] == "0x19=0x92 0x1a=0x01 0x1b=0x02"       # the rest of the group is still read
+    assert facts["tps_vout"].startswith("0x44=0x5a")
+    assert any(n.startswith("act88760_gpio_regs:") for n in notes)
+    assert any(n.startswith("rtc_rv3028_reg_0x37:") for n in notes)
+
+
+def test_census_phy_id_matching_the_devicetree_is_no_mismatch():
+    t, _ = target([(r"python3 /tmp/alp_mii_id\.py", "end0 0x001cc878\nend1 0x001cc878\n")] + _census_responses())
+    facts, _ = lt.census(t, CENSUS_BUS)
+    assert facts["eth0_phy_id_raw"] == "0x001cc878" and facts["eth_phy_id_mismatch"] == "no"
+
+
+def test_census_phy_id_unreadable_is_not_a_silent_no():
+    t, _ = target([(r"python3 /tmp/alp_mii_id\.py", (1, "", "ioctl: Operation not supported"))] + _census_responses())
+    facts, notes = lt.census(t, CENSUS_BUS)
+    assert facts["eth0_phy_id_raw"].startswith("unread (") and facts["eth_phy_id_mismatch"] == "unread"
+    assert any("phy id not fully readable" in n for n in notes)
+
+
+def test_census_phy_id_helper_is_pushed_then_removed():
+    t, fake = target(_census_responses())
+    lt.census(t, CENSUS_BUS)
+    run = next(c for c in fake.commands if "alp_mii_id.py" in c)
+    assert run == "python3 /tmp/alp_mii_id.py end0 end1" and fake.commands[-1] != run
+    assert "rm -f /tmp/alp_mii_id.py" in fake.commands
+    assert any(a[0] == "scp" and a[-1].endswith(":/tmp/alp_mii_id.py") for a in fake.argvs)
+
+
+@pytest.mark.parametrize("dmesg, want", [
+    ("renesas-gbeth 15c30000.ethernet end0: Failed to reset the dma\n", "end0"),
+    ("renesas-gbeth 15c40000.ethernet end1: Failed to reset the dma\n", "end1"),
+    ("end1: Failed to reset the dma\nend0: Failed to reset the dma\n", "end0,end1"),
+    ("stmmac: Failed to reset the dma\n", "unknown"),
+])
+def test_census_records_the_gbeth_dma_reset_failure_ports(dmesg, want):
+    t, _ = target([(r"^dmesg \| grep", dmesg)] + _census_responses())
+    facts, _ = lt.census(t, CENSUS_BUS)
+    assert facts["eth_dma_reset_failed"] == want
+
+
+def test_census_phy_id_reads_a_port_that_answers_errno_as_unread_with_the_errno():
+    """A port that is down may answer EINVAL: that port is the interesting one."""
+    t, _ = target([(r"python3 /tmp/alp_mii_id\.py", (0, "end0 0x001cc916\n", "end1 errno 22\n"))]
+                  + _census_responses())
+    facts, _ = lt.census(t, CENSUS_BUS)
+    assert facts["eth0_phy_id_raw"] == "0x001cc916"
+    assert facts["eth1_phy_id_raw"] == "unread (end1 errno 22)"
+    assert facts["eth_phy_id_mismatch"] == "yes"            # end0 differs; end1 is unread but not hidden
+
+
+def test_the_mii_helper_reports_the_errno_on_stderr():
+    compile(lt.MII_ID_PY, "mii", "exec")
+    assert "e.errno" in lt.MII_ID_PY and "sys.stderr.write" in lt.MII_ID_PY and "pass" not in lt.MII_ID_PY
+
+
+def test_census_removes_the_phy_helper_even_when_it_fails():
+    t, fake = target([(r"python3 /tmp/alp_mii_id\.py", (1, "", "Traceback"))] + _census_responses())
+    lt.census(t, CENSUS_BUS)
+    assert fake.commands.index("rm -f /tmp/alp_mii_id.py") > \
+        next(i for i, c in enumerate(fake.commands) if c.startswith("python3 /tmp/alp_mii_id.py"))
+
+
+def test_unread_values_never_contain_a_newline_so_the_ledger_write_cannot_fail():
+    assert lt.unread("rc=2: i2cget -y -f 8 0x25 0x10:\n  Error: Read failed\r\n\tagain ") == \
+        "unread (rc=2: i2cget -y -f 8 0x25 0x10: Error: Read failed again)"
+    t, _ = target([(r"i2cget -y -f 8 0x25 0x10", (2, "", "Error:\nRead\nfailed")),
+                   (r"python3 /tmp/alp_mii_id\.py", (1, "", "Traceback:\n  File x\nOSError"))] + _census_responses())
+    facts, _ = lt.census(t, CENSUS_BUS)
+    bad = {k: v for k, v in facts.items() if v.startswith("unread")}
+    assert "act88760_gpio_regs" in bad and "eth0_phy_id_raw" in bad
+    assert not [k for k, v in facts.items() if "\n" in v or "\r" in v]
+
+
+def test_mtd_write_at_offset_erases_writes_and_reads_back_there(tmp_path):
+    img = tmp_path / "cm33.bin"
+    img.write_bytes(b"\x5a" * 0x5000)
+    good = md5(img.read_bytes())
+    t, fake = target([("erasesize", "65536\n"), ("mtd1/size", "4194304\n"),
+                      ("md5sum", f"{good}  -\n"), ("flash_erase|mtd_debug|rm -f", "")])
+    assert lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET) == good
+    assert "flash_erase /dev/mtd1 1703936 1" in fake.commands
+    assert "mtd_debug write /dev/mtd1 1703936 20480 /tmp/cm33.bin" in fake.commands
+
+
+def test_mtd_write_refuses_an_unaligned_offset_and_one_past_the_end(tmp_path):
+    img = tmp_path / "cm33.bin"
+    img.write_bytes(b"\0" * 16)
+    t, fake = target([("erasesize", "65536\n"), ("mtd1/size", "1703936\n")])
+    with pytest.raises(ValueError, match="not aligned"):
+        lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET + 4096)
+    with pytest.raises(ValueError, match="does not fit"):
+        lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET)
+    assert not any("flash_erase" in c for c in fake.commands)
