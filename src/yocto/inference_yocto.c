@@ -559,6 +559,8 @@ alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, uint32_t mask)
 	if (inf->backend == ALP_INFERENCE_BACKEND_DEEPX_DXM1) {
 		rc = alp_inference_deepx_bind_cores(inf, mask);
 	}
+#else
+	(void)mask;
 #endif
 	alp_handle_op_leave(&inf->active_ops);
 	return rc;
