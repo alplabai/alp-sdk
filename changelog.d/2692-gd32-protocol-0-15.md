@@ -1,4 +1,4 @@
-### Added — GD32 bridge wire protocol v0.15 on the host side: negotiated big frames, `BATCH`, lossless ADC streams and the `ATTN` line (#2691)
+### Added — GD32 bridge wire protocol v0.15 on the host side: negotiated big frames, `BATCH`, lossless ADC streams and the `ATTN` line (#2692)
 
 **`gd32g553_init()` now negotiates the v0.15 link features** with a bridge that reports minor >= 15, using the 6-byte `CMD_LINK_FEATURES` form: `STATUS_SEQ`, `BIG_FRAME` (256-byte SPI frames), `ADC_STREAM2` and `BATCH`. A v0.14 bridge, or one that answers the 6-byte form with `INVAL`/`NOSUPPORT`, gets the legacy 1-byte `STATUS_SEQ` form, so an un-negotiated link is byte-identical to v0.14 in all four host/firmware pairings. The compatibility rule in `docs/gd32-bridge-protocol.md` §8 changes from "pre-1.0 lockstep including minor" to negotiated compatibility. The 256-byte SPI buffers now live in `gd32g553_t` (a few hundred bytes larger), not on the caller's stack.
 
