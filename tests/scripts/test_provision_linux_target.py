@@ -147,6 +147,32 @@ def test_console_login_and_discover_host():
     assert lt.discover_host(con) == "10.0.0.7"
 
 
+KERNEL_LOG = "[   13.500308] Bluetooth: MGMT ver 1.22"
+
+
+def test_console_login_resyncs_when_a_printk_lands_after_the_prompt(monkeypatch):
+    """The real cold_boot_test cycle 3 failure: `root@e1m-v2m103:~# [   13.500308] Bluetooth: ...`
+    never ends in a prompt; a newline makes the shell print a fresh one."""
+    con = FakeConsole([
+        (r"^\r$", "\r\ne1m login: "),
+        (r"^root\r$", f"root\r\nroot@e1m-v2m103:~# {KERNEL_LOG}"),
+        (r"^\r$", "\r\nroot@e1m-v2m103:~# "),
+        (r"^export TERM=dumb", "export TERM=dumb\r\n# "),
+        (r"^systemctl is-system-running", "systemctl is-system-running\r\nrunning\r\n# "),
+    ])
+    monkeypatch.setattr(lt, "CONSOLE_SETTLE_S", 0.01)
+    lt.console_login(con, timeout=2.0)
+    assert con.written.count("\r") == 2          # the first newline and one resync
+
+
+def test_console_resync_is_bounded_and_a_prompt_in_a_log_line_still_never_matches():
+    con = FakeConsole([(r"^\r$", f"something # {KERNEL_LOG}")] * (lt.RESYNC_TRIES + 1))
+    con.send_line("")
+    with pytest.raises(BenchError, match="no match"):
+        lt._expect_answering_cpr(con, {"shell": lt._SHELL}, 0.4)
+    assert len(con.written) == 1 + lt.RESYNC_TRIES
+
+
 def test_console_login_refuses_password():
     con = FakeConsole([(r"^\r$", "login: "), (r"^root\r$", "Password: ")])
     with pytest.raises(BenchError, match="password"):
@@ -680,7 +706,7 @@ def _census_responses(array: bytes = b"\xff" * 128):
         (r"cpuinfo_max_freq", "1800000\n"), (r"meminfo", "MemTotal:        3200000 kB\nMemFree: 1 kB\n"),
         (r"uname -r", "6.1.107-cip28\n"),
         (r"device-tree/compatible", "alp,e1m-v2m101-x-evk renesas,r9a09g056\n"),
-        (r"device-tree/model", "ALP E1M-V2M101 on E1M-X-EVK\n"),
+        (r"device-tree/model", "ALP E1M-V2M on E1M-X-EVK\n"),
         (r"device/type", "mmcblk0 SD\nmmcblk1 MMC\nmmcblk1boot0 MMC\n"),
         (r"mmcblk1/device/cid", CID + "\n"), (r"mmcblk1/size", "30535680\n"),
         (r"extcsd read", EXTCSD.format(a=2, b=8)),
@@ -723,7 +749,7 @@ def test_census_collects_ledger_keys_read_only():
     assert facts["secure_page_sha256"] == hashlib.sha256(b"\xff" * 64).hexdigest()
     assert "manifest_sha256" not in facts                      # blank array
     assert facts["soc_sys_lsi_mode"].startswith("0x3c06 (unverified")
-    assert facts["dtb_name"] == ("ALP E1M-V2M101 on E1M-X-EVK "
+    assert facts["dtb_name"] == ("ALP E1M-V2M on E1M-X-EVK "
                                  "(compatible alp,e1m-v2m101-x-evk renesas,r9a09g056)")
     assert facts["cpu_khz"] == "1800000" and facts["linux_memtotal_kb"] == "3200000"
     assert facts["emmc_cid_pnm"] == "EMMC01" and facts["emmc_cid_psn"] == "0x12345678"

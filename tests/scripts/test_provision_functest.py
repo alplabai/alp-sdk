@@ -41,6 +41,23 @@ def _carrier_with_a_primary_backup_cell(monkeypatch):
 
 
 FIXTURES = REPO = Path(__file__).resolve().parent / "fixtures" / "provision"
+
+# The host clock the RTC-retention check compares against, frozen: a slow run (the gate
+# container took 32 s between building the answers and judging them) must not turn the
+# "RTC matches the host" fixture into a 30 s-tolerance failure.
+NOW = int(time.time())
+
+
+@pytest.fixture(autouse=True)
+def _frozen_host_clock(monkeypatch):
+    class _Clock:                     # the time module, with time() pinned to NOW
+        def __getattr__(self, name):
+            return getattr(time, name)
+
+        @staticmethod
+        def time():
+            return float(NOW)
+    monkeypatch.setattr(functest, "time", _Clock())
 ALL_FIXTURES = {"eth1_cable": True, "wifi_ap": {"ssid": "bench-ap", "min_signal_dbm": -70},
                 "ble_advertiser": {"address": "AA:BB:CC:DD:EE:FF"}, "dxm1_model": "/usr/share/model.dxnn",
                 "usb_stick": True, "sd_card": True, "rtc_backup": True, "ina228_rework": True,
@@ -102,7 +119,7 @@ def _good(ctx) -> dict[str, str]:
         "rtc_time_set": "1790000000",
         "rtc_backup_mode": "0x3f",
         "rtc_trickle": "0x1c",                                    # TCE off (no rechargeable element declared), BSM level
-        "rtc_retention": f"epoch={int(time.time())}\nboot=boot-now\nhctosys_failed=0",
+        "rtc_retention": f"epoch={NOW}\nboot=boot-now\nhctosys_failed=0",
         "board_temp": "0x2e 0xd0",                                 # 46.8 degC (the temperature one unit read)
         "secure_element": "HIL_OPTIGA_I2C_STATE 0x08 0x80 0x00 0x00\nHIL_OPTIGA_ACK",
         "gd32_bridge": "0x00 0x00 0x0e 0x00 0xcf 0xa7",           # real reply: protocol 0.14.0
@@ -413,10 +430,10 @@ def test_rtc_retention_needs_a_set_before_and_a_reboot_since(tmp_path):
     ctx.facts["rtc_set_boot_id"] = "boot-now"
     assert _val(_run(ctx), "rtc_retention") == "fail (no reboot since the RTC was set: nothing proven)"
     ctx.facts["rtc_set_boot_id"] = "boot-before"
-    unit.answers["rtc_retention"] = f"epoch={int(time.time()) - 3600}\nboot=boot-now\nhctosys_failed=0"
+    unit.answers["rtc_retention"] = f"epoch={NOW - 3600}\nboot=boot-now\nhctosys_failed=0"
     assert "from the host clock after the cold cycles" in _val(_run(ctx), "rtc_retention")
     # the clock reads fine now, but this boot's kernel could not read it at start-up: it was lost
-    unit.answers["rtc_retention"] = f"epoch={int(time.time())}\nboot=boot-now\nhctosys_failed=1"
+    unit.answers["rtc_retention"] = f"epoch={NOW}\nboot=boot-now\nhctosys_failed=1"
     assert "hctosys: unable to read the hardware clock" in _val(_run(ctx), "rtc_retention")
 
 
@@ -942,6 +959,57 @@ def test_cold_boot_test_leaves_the_rtc_alone_otherwise(tmp_path, monkeypatch, fi
     assert board.rtc_sets == [] and "rtc_set_boot_id" not in res[-1].evidence
 
 
+# --- cold_boot_test records the firmware versions and keeps the evidence of the cycles that passed ----
+
+FW_BANNERS = ("NOTICE:  BL2: v2.10.5(release):alp\nNOTICE:  BL31: v2.10.5(release):alp\n"
+              "U-Boot 2024.07-alp (Dec 16 2025 - 11:26:11 +0000)\n")
+
+
+def _good_boot():
+    from provision import gates
+    return FW_BANNERS + "NOTICE:  BL2: SYS_LSI_MODE: 0X3c06\nDRAM:  3.9 GiB\n" + gates.RAIL_PG + "\n"
+
+
+def _boot_texts(monkeypatch, texts):
+    it = iter(texts)
+    monkeypatch.setattr(steps.ColdBootTest, "_cold_boot", staticmethod(lambda ctx, ev: next(it)))
+
+
+def test_cold_boot_test_records_the_firmware_versions(tmp_path, monkeypatch):
+    ctx, _ = _cold_boot_ctx(tmp_path, monkeypatch, {}, 2)
+    _boot_texts(monkeypatch, [_good_boot()] * 2)
+    res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+    assert res[-1].status == "done", res[-1].detail
+    assert res[-1].evidence["bl2_version"] == "v2.10.5(release):alp"
+    assert res[-1].evidence["bl31_version"] == "v2.10.5(release):alp"
+    assert res[-1].evidence["uboot_version"] == "U-Boot 2024.07-alp (Dec 16 2025 - 11:26:11 +0000)"
+
+
+def test_cold_boot_test_flags_a_firmware_change_between_cycles(tmp_path, monkeypatch):
+    ctx, _ = _cold_boot_ctx(tmp_path, monkeypatch, {}, 3)
+    _boot_texts(monkeypatch, [_good_boot(), _good_boot().replace("BL31: v2.10.5", "BL31: v2.10.6")])
+    res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+    assert res[-1].status != "done" and "bl31_version changed between cold cycles" in res[-1].detail
+    # the passing cycle's values and the 1/3 count survive the failure
+    assert ctx.facts["cold_boots_passed"] == "1/3" and ctx.facts["bl31_version"] == "v2.10.5(release):alp"
+
+
+def test_cold_boot_test_keeps_the_passed_count_when_a_cycle_dies(tmp_path, monkeypatch):
+    from provision.bench import BenchError
+    ctx, _ = _cold_boot_ctx(tmp_path, monkeypatch, {}, 3)
+    texts = iter([_good_boot(), _good_boot()])
+
+    def boot(ctx, ev):
+        try:
+            return next(texts)
+        except StopIteration:
+            raise BenchError("no match for the shell prompt") from None
+    monkeypatch.setattr(steps.ColdBootTest, "_cold_boot", staticmethod(boot))
+    res = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])
+    assert res[-1].status != "done"
+    assert ctx.facts["cold_boots_passed"] == "2/3"
+
+
 # --- every criterion of the multi-criterion judges, one fault at a time ---------------------------
 
 MORE_BAD = [
@@ -1299,3 +1367,17 @@ def test_cm33_firmware_is_blocking_with_an_md5_compare_once_the_bundle_carries_a
     res = _run(ctx)
     assert _val(res, "cm33_firmware").startswith("fail (mtd1+0x1a0000 md5 0123")
     assert res.status == "failed" and res.evidence["test_functional"] == "fail (cm33_firmware)"
+
+
+def test_eth_phy_id_accepts_a_list_of_variants(tmp_path):
+    # RTL8211F (0x001cc916) and RTL8211F-VD (0x001cc878) both ship on V2M103 units
+    ctx, unit = _setup(tmp_path, {"eth_phy_id": "end0 0x001cc878\nend1 0x001cc878"})
+    over = tmp_path / "over.yaml"
+    over.write_text("schema: 1\neth_phy_id: [0x001CC916, 0x001CC878]\n", encoding="utf-8")
+    ctx.functest_expect = functest.load_expect(over)
+    res = _run(ctx)
+    assert _val(res, "eth_phy_id").startswith("pass"), _val(res, "eth_phy_id")
+    # the single-ID default still rejects the other variant
+    (tmp_path / "b").mkdir()
+    ctx2, _ = _setup(tmp_path / "b", {"eth_phy_id": "end0 0x001cc878\nend1 0x001cc878"})
+    assert "want 0x001cc916" in _val(_run(ctx2), "eth_phy_id")
