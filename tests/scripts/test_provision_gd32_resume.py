@@ -142,6 +142,13 @@ def test_run_resumes_after_write_and_verify_and_the_post_run_probe(tmp_path):
     assert "wedged" not in census.detail
 
 
+def test_run_that_flashes_records_the_firmware_version(tmp_path):
+    ctx, _probe, _ = _setup(tmp_path, flashed=False)
+    (ctx.gd32_fw / "VERSION").write_text("0.2.9\n", encoding="utf-8")
+    res = steps.Gd32Flash().run(ctx)
+    assert res.evidence["gd32_fw_version"] == "0.2.9"
+
+
 @pytest.mark.parametrize("fail", ["loadbin", "savebin"])
 def test_run_resumes_the_core_when_the_write_or_the_verify_dump_raises(tmp_path, fail):
     ctx, probe, _ = _setup(tmp_path, flashed=False)

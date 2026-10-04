@@ -125,6 +125,34 @@ it adopts the CID seen over SSH as the new anchor. The `emmc_cid_change`
 override (blocks shipping like the other overrides) is recorded only when a
 recorded CID existed and differed, not on first contact.
 
+## Operator flow: DSW1 and the microSD
+
+The unit stays in **xSPI boot mode** (`SYS_LSI_MODE` `0x3c06`) for the whole run;
+the boot switch is never moved to eMMC. U-Boot boots Linux from the microSD even
+in xSPI mode, so each unit takes two legs:
+
+1. **Leg 1, microSD in.** Insert the release microSD, then
+   `--from dsw1_emmc_insert_sd --only dsw1_emmc_insert_sd,boot_sd_linux,gd32_flash,write_xspi,write_cm33,write_emmc_boot,write_rootfs,census,eeprom_manifest,dxm1_npu_flash,pmic_verify,secure_page`
+   (drop the steps a bundle does not carry).
+2. **Leg 2, microSD out.** Remove the card, then `--from dsw1_xspi_remove_sd`.
+
+`SYS_LSI_MODE` `0x3c05` is the eMMC strap: wrong for leg 2, and `cold_boot_test`
+refuses it.
+
+Other operator rules:
+
+- **Identify a unit before provisioning it.** Compare the EEPROM manifest
+  (`i2c-0`, `0x50`, 128 bytes) with the recorded manifest, the eMMC CID with the
+  recorded one, and the U-Boot line `ALP: MAC ... (serial ...)` with the serial.
+  Never let the tool allocate a serial for a unit that already has one.
+- **Cable `end0`.** The tool discovers the Linux host over `end0`; a gigabit link
+  also shortens the rootfs transfer.
+- **Pace SCPI queries.** Send one query per connection, at least 1 s apart. A
+  burst of queries wedged the SPD3303X LAN socket (recovery: power-cycle the
+  supply). Use the channel `bench.yaml` names and leave the others alone.
+- **Prompt resync.** `cold_boot_test` tolerates a kernel message printed after the
+  shell prompt: the prompt wait sends a newline so a fresh prompt appears.
+
 ## Package `scripts/provision/`
 
 | module | responsibility |
@@ -241,7 +269,7 @@ are not yet confirmed by a run of this code on a bench.
 | `detect` | clean shutdown if Linux is up, then power cycle and classify the console: SCIF ROM, BL2, U-Boot, Linux login, silent. The ROM banner `SCI Download mode (Due to parameter error)` is the ROM's fallback to SCI download, taken when the selected boot source has no valid image (blank xSPI/eMMC, or DSW1 not in mode 3). It still offers `-- Load Program to SRAM`, but it is **refused**: "boot ROM fell back to SCI download because the selected boot source has no valid image (blank xSPI/eMMC, or DSW1 not in mode 3); set DSW1 to mode 3 for a clean SCIF bootstrap". Only `(Normal SCI boot)` proceeds |
 | `dsw1_scif` | operator: boot switch to SCIF download |
 | `bootstrap` | reuses the live SCIF ROM state `detect` left in this run (no second power cycle); cycles only if no ON has happened since. Flash Writer: `EM_W` area 1 (boot partition 1) sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
-| `dsw1_emmc_insert_sd` | operator: boot switch to eMMC, insert the release microSD; U-Boot must autoboot |
+| `dsw1_emmc_insert_sd` | operator: insert the release microSD; U-Boot must autoboot (see "Operator flow: DSW1 and the microSD" for the boot switch) |
 | `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt. No IP is not a failure here: the checks run over the console and `gd32_flash` runs next |
 | `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, reset-and-run after every readback (see "The GD32 readback halts the MCU"), then `GET_VERSION` from the bridge at `0x70` (polled; the step fails if it never answers). With no network (the `boot_sd_linux` evidence says why: `network: none (gbeth DMA reset failed on <ports>)` or `none (no carrier)`) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
@@ -253,7 +281,7 @@ are not yet confirmed by a run of this code on a bench.
 | `dxm1_npu_flash` | `v2n-m1` bundles that carry the DX-M1 set: firmware over the ROM UART path, probe = PCIe `0x0000` + `dxrt-cli -s` version, see below |
 | `pmic_verify` | compare registers against `--pmic-expect` |
 | `secure_page` | write the 64-byte Secure Data Page, read back, compare. Never locks |
-| `dsw1_xspi_remove_sd` | operator: boot switch to xSPI, remove the microSD |
+| `dsw1_xspi_remove_sd` | operator: boot switch in xSPI mode, remove the microSD |
 | `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, ACT88760 reg `0x10` after boot, I2C scans (GD32 exempted only while `0x10` still reads `0x88`). An `end0` without carrier (PHY latch, #2582) gets one extra cold cycle, noted as `end0_no_carrier_retries` in the step evidence (not a ledger key); it fails if `end0` is still down. With the `rtc_backup` fixture and N >= 2 it also sets the RTC from the host clock after the first cycle, so `functional_test` can judge `rtc_retention` |
 | `census_final` | the census again, on the unit as shipped (after the last cold boot: xSPI boot, eMMC root). Every key it reads replaces the first census's value. A key the first census recorded and this one could **not** produce (a census group that fails drops its keys) is set to `unread (not re-read by census_final)`, so a value read in the microSD boot never stands in for the shipping boot; an unread ship-required key blocks the ship check. The ACT88760 GPIO4 keys are `cold_boot_test`'s and are left alone |
 | `clkgen_verify` | the on-SoM 5L35023B (`BRD_I2C`, `0x69`) OTP image against U-Boot's fixup |
@@ -443,6 +471,7 @@ lock frame, only a re-read with bit 1 set counts.
   small python3 `SIOCGMIIPHY` / `SIOCGMIIREG` helper pushed to `/tmp` and removed again
   (the image has python3 and no `mii-tool`). A port the helper cannot read is
   `unread (<if> errno <n>)` (a port that is down may answer `EINVAL`).
+  Both RTL8211F (`0x001cc916`) and RTL8211F-VD (`0x001cc878`) ship on these SoMs: sysfs shows the DT-forced ID, MDIO shows the real one, and either is valid.
   `eth_phy_id_mismatch` is `yes` when a readable port's raw and sysfs IDs differ, `no` when
   both ports match, `unread` when a value could not be read and no readable port differs.
 - **gbeth DMA reset.** `eth_dma_reset_failed` is `none`, `end0`, `end1` or `end0,end1`
@@ -720,7 +749,7 @@ bounds for a hung command, not the expected time.
 | `emmc_read` | drop the page cache, then `dd` 64 MiB from 1 GiB into the user area | `64+0 records out`, >= 20 MiB/s | 20 s | 2 s |
 | `xspi` | `/proc/mtd`, spi-nor `jedec_id` | `mtd0` and `mtd1` with a size, a real JEDEC ID | 5 s | 0.1 s |
 | `boot_mode` | `SYS_LSI_MODE` word (address and decode from the SoC description `boot_strap`) | debug-enable bit (MD_BOOT3) = `boot_mode.debug_enable` (0), `MD_BOOT[1:0]` device = `boot_mode.boot_device` (`xspi`), bit 10 boot CPU = `boot_mode.boot_cpu` (`ca55`) | 5 s | 0.1 s |
-| `eth_phy_id` | MII registers 2/3 of both ports (python3 ioctl helper) | both `0x001cc916` | 5 s | 0.3 s |
+| `eth_phy_id` | MII registers 2/3 of both ports (python3 ioctl helper) | both `0x001cc916`; a list is accepted (`eth_phy_id: [0x001cc916, 0x001cc878]` in `--functest-expect`: RTL8211F and RTL8211F-VD) | 5 s | 0.3 s |
 | `eth_mac` | `/sys/class/net/{if}/address` | both = the MACs derived from the serial | 5 s | 0.1 s |
 | `eth0_link`, `eth1_link` | carrier, speed, duplex, `ping -c 2 -I {if}` the gateway, RX counter | carrier, 100 or 1000 Mbit/s, full duplex, ping ok, >= 2 packets received on that port | 10 s | 1.5 s |
 | `wifi_present` | `wlan0`, `/sys/bus/sdio/devices`, `dmesg` | all present, firmware banner, no firmware failure | 5 s | 0.1 s |

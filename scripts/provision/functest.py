@@ -493,9 +493,13 @@ def build(ctx, x: dict | None = None) -> list[Check]:
         ids = dict(re.findall(r"^(\w+) (0x[0-9a-f]{8})$", o, re.M))
         if len(ids) < nports:
             raise Unread(f"{len(ids)} of {nports} ports readable: {' '.join(o.split())[-80:]!r}")
-        bad = {n: v for n, v in ids.items() if int(v, 16) != _want(x, "eth_phy_id")}
+        # one ID, or a list of accepted IDs (the same PHY ships in more than one variant,
+        # e.g. RTL8211F 0x001cc916 and RTL8211F-VD 0x001cc878)
+        want = _want(x, "eth_phy_id")
+        wants = {int(str(w), 0) for w in (want if isinstance(want, (list, tuple)) else [want])}
+        bad = {n: v for n, v in ids.items() if int(v, 16) not in wants}
         if bad:
-            raise Fail(f"PHY ID {bad}, want {x['eth_phy_id']:#010x}")
+            raise Fail(f"PHY ID {bad}, want {' or '.join(f'{w:#010x}' for w in sorted(wants))}")
         return " ".join(f"{n}={v}" for n, v in sorted(ids.items()))
     add("eth_phy_id", "both PHYs answer on MDIO with the right ID (MII registers 2/3)",
         'python3 "$D/mii.py" $NETS 2>&1', j_phy, est_s=0.3, files={"mii.py": lt.MII_ID_PY}, tools=("python3",))

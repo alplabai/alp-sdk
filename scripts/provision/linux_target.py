@@ -199,16 +199,32 @@ _CPR_REPLY = b"\x1b[24;80R"
 CONSOLE_SETTLE_S = 0.5
 
 
+RESYNC_TRIES = 3     # newlines sent to a silent console before the wait gives up
+
+
 def _expect_answering_cpr(console: Console, patterns: dict[str, str], timeout: float) -> str:
     """expect_any(), but a cursor-position query on the way is answered (an
-    unanswered resize leaves the shell busy and garbles the next commands)."""
-    deadline = time.monotonic() + timeout
+    unanswered resize leaves the shell busy and garbles the next commands).
+
+    A kernel printk can land right after the prompt on the same line
+    (`root@unit:~# [   13.5] Bluetooth: ...`), so the prompt never ends the text. The wait is
+    split in RESYNC_TRIES + 1 windows; a window with no match sends a newline, which makes
+    the shell print a fresh prompt at the start of a line. The patterns stay anchored
+    (a prompt must END the text), so a `# ` in the middle of a log line still never matches."""
     pats = {**patterns, "cpr": re.escape(_CPR_QUERY)}
-    while True:
-        key, _ = console.expect_any(pats, max(deadline - time.monotonic(), 0.1))
-        if key != "cpr":
-            return key
-        console.write(_CPR_REPLY)
+    window = timeout / (RESYNC_TRIES + 1)
+    for attempt in range(RESYNC_TRIES + 1):
+        deadline = time.monotonic() + window
+        try:
+            while True:
+                key, _ = console.expect_any(pats, max(deadline - time.monotonic(), 0.1))
+                if key != "cpr":
+                    return key
+                console.write(_CPR_REPLY)
+        except ExpectTimeout:
+            if attempt == RESYNC_TRIES:
+                raise
+            console.send_line("")
 
 
 def _settle(console: Console) -> None:
@@ -279,7 +295,7 @@ def console_login(console: Console, user: str = "root", timeout: float = 120.0) 
     _settle(console)
     # no more escape-sequence queries from the shell or its profile
     send_checked(console, "export TERM=dumb")
-    console.expect(_SHELL, 10.0)
+    _expect_answering_cpr(console, {"shell": _SHELL}, 10.0)
     wait_system_settled(console)
 
 
