@@ -135,7 +135,9 @@ def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "
         # ship_required_for: manifest families (e.g. v2n-m1, whose DX-M1 must be flashed)
         # for which the key is required although the other families may leave it blank.
         required = spec.get("ship_required") or family in spec.get("ship_required_for", ())
-        if required and "*" not in key and not str(unit.get(key, "")).strip():
+        val = str(unit.get(key, "")).strip()
+        # `unread (<error>)` is the census's record of a read that failed: not a value
+        if required and "*" not in key and (not val or val == "unread" or val.startswith("unread (")):
             reasons.append(f"missing {key}")
     # The ACT88760 GPIO4 OTP default is an expected workaround, not a defect
     # (maintainer decision 2026-09-29) -- U-Boot releases it every boot. Block
@@ -144,6 +146,16 @@ def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "
     # itself a blocker any more.
     if str(unit.get("act88760_gpio4_after_boot", "")).strip().lower() == "0x88":
         reasons.append("act88760_gpio4_after_boot: 0x88 (image did not release GD32_NRST)")
+    # functional_test's summary. Its per-check test_ft_<check> keys are detail (informational
+    # failures and fixture skips never block).
+    # Only `pass` ships: a unit on which functional_test never ran, was skipped, crashed or failed
+    # has no proof that its interfaces work. (A unit provisioned before the step existed is
+    # blocked until the step has run on it: intended.)
+    functional = str(unit.get("test_functional", "")).strip()
+    if not functional:
+        reasons.append("missing test_functional (functional_test has not run on this unit)")
+    elif not functional.startswith("pass"):
+        reasons.append(f"test_functional: {functional}")
     disposition = str(unit.get("disposition", "")).strip()
     if disposition != "ship":
         reasons.append(f"disposition is {disposition or 'unset'}, not ship")

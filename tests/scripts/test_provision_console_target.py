@@ -6,6 +6,7 @@ import base64
 import hashlib
 import re
 import shlex
+from pathlib import Path
 
 import pytest
 
@@ -31,6 +32,7 @@ class ShellConsole(Console):
         self.lines: list[str] = []
         self.ran: list[str] = []
         self.corrupt = corrupt_pushes
+        self.garble_end = 0     # garble the end marker of the next N printf/md5sum commands
         self.flashed: dict[int, bytes] = {}
         self._out = b""
 
@@ -64,7 +66,10 @@ class ShellConsole(Console):
         out, rc = self._exec(cmd)
         begin = "" if getattr(self, "lose_begin", False) else f"ALPB{n}\r\n"   # RX corrupted the marker
         # the tty echoes what was typed first; markers in the echo are split by ""
-        self._out = (line + "\r\n").encode("latin-1") + f"{begin}{out}ALPE{n}:{rc}\r\n".encode()
+        end = f"ALPE{n}"
+        if self.garble_end > 0 and cmd.startswith(("printf", "md5sum")):
+            self.garble_end, end = self.garble_end - 1, "AL?E" + n
+        self._out = (line + "\r\n").encode("latin-1") + f"{begin}{out}{end}:{rc}\r\n".encode()
 
     def _exec(self, cmd: str) -> tuple[str, int]:
         self.ran.append(cmd)
@@ -83,11 +88,17 @@ class ShellConsole(Console):
         elif re.search(r"(^|[ |;&])base64 ", cmd):
             return "-sh: base64: command not found\n", 127      # the board image has none
         elif m := re.fullmatch(r"md5sum < (.+)", cmd):
+            if shlex.split(m[1])[0] not in self.files:
+                return f"-sh: {m[1]}: No such file or directory\n", 1
             return hashlib.md5(self.files[shlex.split(m[1])[0]]).hexdigest() + "  -\n", 0
         elif cmd.startswith("python3 -c ") and "encodebytes" in cmd:
             return base64.encodebytes(self.files[shlex.split(cmd)[3]]).decode(), 0
         elif cmd.startswith("mkdir -p"):
             pass
+        elif m := re.fullmatch(r"test -f (.+)", cmd):
+            return "", 0 if shlex.split(m[1])[0] in self.files else 1
+        elif cmd.startswith("sha256sum"):
+            return "-sh: sha256sum: not found\n", 127          # the board's busybox lacks the applet
         elif m := re.fullmatch(r"cd (\S+) && python3 swd_bb.py", cmd):
             return "SWD id=0x0be12477\n", 0
         elif m := re.fullmatch(r"cd (\S+) && python3 gd32_swd_flash.py dump (\S+) (\S+) (\S+)", cmd):
@@ -98,7 +109,7 @@ class ShellConsole(Console):
         elif "gd32_swd_flash.py" in cmd:
             pass
         else:
-            return f"unexpected: {cmd}\n", 127
+            return f"-sh: {cmd.split()[0]}: not found\n", 127
         return "", 0
 
 
@@ -191,6 +202,7 @@ def ct_tools():
 
 def test_boot_to_linux_without_ip_leaves_linux_unset_when_allowed(tmp_path, monkeypatch):
     monkeypatch.setattr(steps.lt, "console_login", lambda c, u: None)
+    monkeypatch.setattr(steps, "clean_shutdown", lambda ctx: None)    # covered in test_provision_clean_shutdown
 
     def no_ip(ctx, force=False, **kw):
         raise BenchError("no inet address")
@@ -275,18 +287,23 @@ def test_get_rejects_garbage_base64(tmp_path):
 
 def test_boot_sd_linux_without_ip_does_not_fail(tmp_path, monkeypatch):
     sh = ShellConsole()
-    ctx = _ctx(tmp_path, bench=_bench(console=sh), execute=True)
+    # a pending GD32 flash is the one reason a console-only boot may be done (its console path keeps the unit provisionable)
+    ctx = _ctx(tmp_path, bench=_bench(console=sh), execute=True, gd32_fw=tmp_path)
 
     def boot(ctx_, timeout=240.0, need_ip=True):
         assert need_ip is False
         ctx_.linux = None
         return "DRAM:  3.9 GiB\n"
     monkeypatch.setattr(steps, "boot_to_linux", boot)
+    monkeypatch.setattr(steps, "_phy_latch_evidence", lambda c: "")
+    monkeypatch.setattr(steps, "IP_WAIT_S", 0.05)
+    monkeypatch.setattr(steps.time, "sleep", lambda s: None)
+    monkeypatch.setattr(steps, "connect_linux", lambda c, force=False, rediscover=False: (_ for _ in ()).throw(BenchError("no inet")))
     monkeypatch.setattr(steps.lt, "root_device", lambda t: "mmcblk0p2")
     monkeypatch.setattr(steps.lt, "resolve_emmc", lambda t: "/dev/mmcblk1")
     monkeypatch.setattr(steps, "som_presence_problems", lambda c, t=None: [])
     r = steps.BootSdLinux().run(ctx)
-    assert "no network yet" in r.detail and r.evidence["network"].startswith("none yet")
+    assert "no network yet" in r.detail and r.evidence["network"].startswith("none (no IPv4 on end0")
 
 
 # --- gd32_flash over the console ----------------------------------------------------------------------
@@ -509,3 +526,152 @@ def test_lost_begin_marker_with_the_end_marker_present_does_not_rerun(monkeypatc
     monkeypatch.setattr(ct, "BEGIN_WINDOW_S", 0.05)
     r = ct.ConsoleTarget(sh).run("mkdir -p /x", check=False)
     assert r.rc == 0 and len(sh.ran) == 1
+
+
+def _put_setup(tmp_path, monkeypatch):
+    _fast(monkeypatch)
+    monkeypatch.setattr(ct, "CHUNK_WAIT_S", 0.2)
+    data = bytes(range(256)) * 6
+    src = tmp_path / "img.bin"
+    src.write_bytes(data)
+    return data, src, ShellConsole()
+
+
+def test_garbled_end_marker_resyncs_reverifies_the_chunk_and_succeeds(tmp_path, monkeypatch):
+    data, src, sh = _put_setup(tmp_path, monkeypatch)
+    sh.garble_end = 1
+    ct.ConsoleTarget(sh).put(src, "/tmp/x/img.bin")
+    assert sh.files["/tmp/x/img.bin"] == data
+    # the printf ran once, then the part was re-verified (md5sum) instead of re-sent
+    assert sum(c.startswith("printf") for c in sh.ran) == len(range(0, len(data), ct.RAW_CHUNK))
+    assert any(c.startswith("md5sum < /tmp/x/img.bin.p00000") for c in sh.ran)
+
+
+def test_garbled_end_marker_with_missing_part_resends_the_chunk(tmp_path, monkeypatch):
+    data, src, sh = _put_setup(tmp_path, monkeypatch)
+    sh.garble_end = 1
+    orig = sh._exec
+
+    def lose_part(cmd):          # the garbled command never wrote the part file
+        out = orig(cmd)
+        if cmd.startswith("printf") and not getattr(sh, "dropped", 0):
+            sh.dropped = 1
+            sh.files.pop(next(iter(sh.files)))
+        return out
+    monkeypatch.setattr(sh, "_exec", lose_part)
+    ct.ConsoleTarget(sh).put(src, "/tmp/x/img.bin")
+    assert sh.files["/tmp/x/img.bin"] == data
+    assert sum(c.startswith("printf") for c in sh.ran) == len(range(0, len(data), ct.RAW_CHUNK)) + 1
+
+
+def test_repeated_end_marker_garbling_fails_after_the_bound(tmp_path, monkeypatch):
+    _, src, sh = _put_setup(tmp_path, monkeypatch)
+    sh.garble_end = 1000
+    with pytest.raises(BenchError, match="chunk 0 still corrupted after 3 tries"):
+        ct.ConsoleTarget(sh).put(src, "/tmp/x/img.bin")
+    assert sum(c.startswith("printf") for c in sh.ran) == ct.RUN_ATTEMPTS
+
+
+def test_markers_are_alphanumeric_and_unique_per_attempt(monkeypatch):
+    _fast(monkeypatch)
+    sh = ShellConsole()
+    t = ct.ConsoleTarget(sh)
+    t.run("mkdir -p /x")
+    t.run("mkdir -p /x")
+    ids = [re.search(r'"ALPB""(\w+)"', ln)[1] for ln in sh.lines]
+    assert len(set(ids)) == 2 and all(i.isalnum() for i in ids)
+
+
+# --- md5 over the console, the 127 retry, long-running commands -------------------------------------
+
+def test_console_target_md5_serves_the_payload_store_when_sha256sum_is_missing(tmp_path):
+    from provision import payload_store as ps
+    sh = ShellConsole()
+    t = ct.ConsoleTarget(sh)
+    local = tmp_path / "fip.bin"
+    local.write_bytes(b"fip payload")
+    sh.files["/var/lib/alp-payload/x/fip.bin"] = b"fip payload"
+    store = ps.PayloadStore(t, "/var/lib/alp-payload/x")
+    assert t.md5("/var/lib/alp-payload/x/fip.bin") == hashlib.md5(b"fip payload").hexdigest()
+    assert store._good("/var/lib/alp-payload/x/fip.bin", local, hashlib.sha256(b"fip payload").hexdigest())
+    sh.files["/var/lib/alp-payload/x/fip.bin"] = b"corrupted"
+    assert not store._good("/var/lib/alp-payload/x/fip.bin", local, hashlib.sha256(b"fip payload").hexdigest())
+    assert t.md5("/nope") == ""
+
+
+def test_rc127_after_the_begin_marker_is_the_command_failing_and_is_not_resent(monkeypatch):
+    sh = ShellConsole()
+    t = ct.ConsoleTarget(sh)
+    with pytest.raises(BenchError, match="rc=127"):
+        t._run_unannounced("no-such-tool --x")          # the shell answers 127 AFTER the begin marker
+    assert sh.ran == ["no-such-tool --x"] and t.last_began
+
+
+def test_rc127_without_a_begin_marker_is_resent(monkeypatch):
+    sh = ShellConsole()
+    orig, flipped = sh._write_raw, []
+
+    def garble(data):
+        if data.startswith(b"echo") and not flipped:
+            flipped.append(1)
+            data = b"ecXo" + data[4:]
+        orig(data)
+    monkeypatch.setattr(sh, "_write_raw", garble)
+    monkeypatch.setattr(ct, "BEGIN_WINDOW_S", 0.05)
+    t = ct.ConsoleTarget(sh)
+    t._run_unannounced("mkdir -p /x")
+    assert sh.ran == ["mkdir -p /x"]                    # the garbled attempt never ran it; the resend did
+
+
+def _drop_first_command(sh, monkeypatch):
+    orig, dropped, writes = sh._write_raw, [], []
+
+    def write(data):
+        writes.append(data)
+        if data.startswith(b"echo") and not dropped:
+            dropped.append(1)                           # the whole command line is lost on the way in
+            return
+        orig(data)
+    monkeypatch.setattr(sh, "_write_raw", write)
+    monkeypatch.setattr(ct, "BEGIN_WINDOW_S", 0.05)
+    return writes
+
+
+def test_a_lost_command_is_retried_with_ctrl_c_by_default(monkeypatch):
+    sh = ShellConsole()
+    writes = _drop_first_command(sh, monkeypatch)
+    ct.ConsoleTarget(sh).run("mkdir -p /x")
+    assert b"\x03" in writes and sh.ran == ["mkdir -p /x"]
+
+
+def test_a_long_running_command_is_never_ctrl_c_ed_or_resent(monkeypatch):
+    sh = ShellConsole()
+    writes = _drop_first_command(sh, monkeypatch)
+    with pytest.raises(BenchError, match="long-running: never re-sent"):
+        ct.ConsoleTarget(sh).run("cd /x && python3 gd32_swd_flash.py write 0x0 /tmp/f", long_running=True)
+    assert b"\x03" not in writes and sh.ran == []
+    assert len([w for w in writes if w.startswith(b"echo")]) >= 1
+
+
+def test_swd_flash_write_is_long_running_but_reads_are_not(tmp_path):
+    calls = []
+
+    class T:
+        def run(self, cmd, **kw):
+            calls.append((cmd, kw.get("long_running", False)))
+            return type("R", (), {"stdout": ""})()
+
+        def put(self, local, remote):
+            pass
+
+        def get(self, remote, local):
+            Path(local).write_bytes(b"\0" * 16)
+
+    for f in ct_tools():
+        (tmp_path / f).write_bytes(b"x")
+    probe = ct.ConsoleSwdProbe(T(), tmp_path, ct_tools())
+    probe.loadbin(tmp_path / "img.bin", 0x08000000)
+    probe.savebin(tmp_path / "rb.bin", 0x08000000, 16)
+    writes = {c: lr for c, lr in calls if "gd32_swd_flash.py" in c}
+    assert [lr for c, lr in writes.items() if " write " in c] == [True]
+    assert [lr for c, lr in writes.items() if " dump " in c] == [False]

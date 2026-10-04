@@ -100,6 +100,7 @@ into the topic-specific docs.
 - [v2n-mali-gpu.md](v2n-mali-gpu.md) — the RZ/V2N Mali-G31: kernel +
   vendor EGL/GLES stack, the `<alp/gpu2d.h>` GPU backend, image wiring,
   licence placement, build steps. Bench-unverified.
+- [boot-log-v2n.md](boot-log-v2n.md) — what each V2N/V2M boot warning means.
 - [bring-up-drpai-v2n.md](bring-up-drpai-v2n.md) — the RZ/V2N on-die
   DRP-AI3 NPU: host toolchain, the DT override the driver needs,
   image wiring, model compile and microSD deploy. Kernel driver
