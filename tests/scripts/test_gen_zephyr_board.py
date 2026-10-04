@@ -177,6 +177,30 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
     def test_v2n101_m33_sm_family_agnostic_files(self) -> None:
         self._parity("e1m_v2n101_m33_sm")
 
+    def test_v2n_gd32_pads_are_a_dedicated_node_not_alp_pins_entries(self) -> None:
+        # P71 (SWCLK / bridge ATTN), P70 (SWDIO) and P74 (NRST) must NEVER be
+        # entries of the positional alp,pin-array: its index 0 is the GD32 SPI
+        # chip-select (P97 = GD32 PA8), so a drifted shared index would drive
+        # it.  They are published as the dedicated alp,gd32-pads node.
+        for sku in ("E1M-V2N101", "E1M-V2M101"):
+            files = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)
+            dts = next(c for r, c in files.items() if r.endswith(".dts"))
+            pins = re.search(r"alp_pins: alp-pins \{(.*?)\n\t\};", dts, re.S)
+            self.assertIsNotNone(pins, sku)
+            self.assertEqual(
+                re.findall(r"<&gpio\d+ \d+ [A-Z_]+>", pins.group(1)),
+                ["<&gpio9 7 GPIO_ACTIVE_LOW>"],
+                f"{sku}: alp_pins must still hold only the SPI chip-select")
+            node = re.search(r"gd32_pads: gd32-pads \{(.*?)\n\t\};", dts, re.S)
+            self.assertIsNotNone(node, f"{sku}: no alp,gd32-pads node")
+            self.assertIn('compatible = "alp,gd32-pads"', node.group(1))
+            for prop, spec in (("swdio", "<&gpio7 0 GPIO_ACTIVE_HIGH>"),
+                               ("swclk", "<&gpio7 1 GPIO_ACTIVE_HIGH>"),
+                               ("nrst", "<&gpio7 4 GPIO_ACTIVE_HIGH>"),
+                               ("attn", "<&gpio7 1 GPIO_ACTIVE_HIGH>")):
+                self.assertIn(f"{prop}-gpios = {spec};", node.group(1))
+            self.assertIn("&gpio7 {", dts)
+
     def test_v2m101_m33_sm_family_agnostic_files(self) -> None:
         self._parity("e1m_v2m101_m33_sm")
 

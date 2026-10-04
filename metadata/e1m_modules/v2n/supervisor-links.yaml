@@ -96,26 +96,62 @@ supervisor_links:
         gd32_pads.cs = PA8; master Simple-SPI has no hardware
         slave-select, so P97 stays GPIO for per-transaction framing of
         the GD32's PA8 CS-EXTI
-    # GD32 -> host ATTN (data-ready) line, protocol v0.15 section 3.17.
-    # GD32 PA14 (net GD32_SWCLK) drives Renesas P71 while the ATTN link
-    # feature is granted, so P71 is an INPUT with a rising-edge IRQ owned
-    # by the CM33 (maintainer decision 2026-10-04) and is NOT muxed to
-    # anything.  It is emitted as alp_pins index 1; the SWD recovery path
-    # (the only place the host ever drives P71) asserts GD32_NRST (P74)
-    # first.  Whether Zephyr can raise a GPIO interrupt on this pad (ICU
-    # TSSEL 0x31, inferred from the RZ/V2N TINT table) is a bench item; a
-    # build without the IRQ falls back to the staging-gap reply timing.
-    gpio_attn:
+
+  # The four GD32 control pads the CM33 drives or watches outside the SPI link,
+  # published as the dedicated `alp,gd32-pads` devicetree node (NEVER as
+  # entries of the positional `alp,pin-array`: its index 0 is the GD32 SPI
+  # chip-select, GD32 PA8).  P70/P71/P74 carry no pinmux function on the CM33
+  # board, so they are plain GPIO and an INPUT out of reset (protocol v0.15
+  # rule H1).  Consumed through alp_gpio_open(GD32G553_PAD_ID_*).
+  #
+  #   swdio  P70 <-> GD32 PA13   SWD data (SWD recovery only)
+  #   swclk  P71 <-> GD32 PA14   SWD clock (SWD recovery only)
+  #   nrst   P74 <-> GD32 NRST   reset, open-drain (emulated: low = assert,
+  #                              input = release -- the Renesas GPIO driver has
+  #                              no open-drain mode)
+  #   attn   P71 <-> GD32 PA14   bridge ATTN input: input + rising-edge IRQ.
+  #                              The SAME pad as swclk, a different role: the
+  #                              host drives it only inside an SWD session,
+  #                              with GD32_NRST asserted first.
+  gd32_pads:
+    swdio:
+      silicon_peripheral: "GD32_SWDIO"
+      silicon_pad: "P70"
+      gpio_node: gpio7
+      gpio_pin: 0
+      active_low: false
+      evidence: >-
+        metadata/chips/gd32_swd.yaml signals SWDIO = Renesas P70 <-> GD32
+        PA13; maintainer decision 2026-05-12 (SWD routed to the Renesas host)
+    swclk:
       silicon_peripheral: "GD32_SWCLK"
       silicon_pad: "P71"
       gpio_node: gpio7
       gpio_pin: 1
       active_low: false
       evidence: >-
-        metadata/chips/gd32g553.yaml signals GD32_SWCLK (Renesas P71 <->
-        GD32 PA14); docs/gd32-bridge-protocol.md section 3.17 (ATTN is
-        PA14, active HIGH, host P71 input + rising-edge IRQ); maintainer
-        decision 2026-10-04 (CM33 owns P71 as input + IRQ)
+        metadata/chips/gd32_swd.yaml signals SWCLK = Renesas P71 <-> GD32
+        PA14; maintainer decision 2026-05-12
+    nrst:
+      silicon_peripheral: "GD32_NRST"
+      silicon_pad: "P74"
+      gpio_node: gpio7
+      gpio_pin: 4
+      active_low: false
+      evidence: >-
+        metadata/chips/gd32_swd.yaml signals NRST = P74 <-> GD32 NRST, shared
+        with the primary PMIC reset-out (open-drain); the pad is never driven
+        high
+    attn:
+      silicon_peripheral: "GD32_SWCLK"
+      silicon_pad: "P71"
+      gpio_node: gpio7
+      gpio_pin: 1
+      active_low: false
+      evidence: >-
+        docs/gd32-bridge-protocol.md section 3.17: ATTN is GD32 PA14, active
+        HIGH, host P71 input + rising-edge IRQ (CM33-owned, maintainer decision
+        2026-10-04); PA14 is SWCLK whenever ATTN is off
 
   # RIIC8 / BRD_I2C -- Cortex-A55/Linux-exclusive (maintainer decision,
   # metadata/e1m_modules/v2n/core-ownership.yaml); the CM33 must never

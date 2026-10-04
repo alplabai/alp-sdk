@@ -59,14 +59,29 @@
 	 * resolves its chip-select gpio_dt_spec from gpios[N] of this node (see the
 	 * SPI backend's alp_z_gpio_resolve()).  Index 0 = the GD32 SPI chip-select
 	 * on P97, matching the example's cs_pin_id = 0.
-	 * Index 1 = the bridge ATTN input (GD32 PA14 -> P71, protocol v0.15 section 3.17):
-	 * an INPUT with a rising-edge IRQ, never driven except by the SWD recovery
-	 * path with GD32_NRST asserted.
 	 */
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
-		gpios = <&gpio9 7 GPIO_ACTIVE_LOW>,
-			<&gpio7 1 GPIO_ACTIVE_HIGH>;
+		gpios = <&gpio9 7 GPIO_ACTIVE_LOW>;
+	};
+
+	/*
+	 * The GD32 control pads outside the SPI link (protocol v0.15, section 3.17).
+	 * A DEDICATED node, deliberately not entries of alp_pins above (whose index 0
+	 * is the GD32 SPI chip-select): resolved through
+	 * alp_gpio_open(GD32G553_PAD_ID_*) only.  All four are plain GPIO, inputs out of
+	 * reset.  swclk and attn are the SAME pad (P71 = GD32 PA14): the host drives it
+	 * only inside an SWD session, with GD32_NRST asserted first, and otherwise uses
+	 * it as the bridge ATTN input with a rising-edge IRQ.  nrst is open-drain on the
+	 * board; the Renesas GPIO driver has no open-drain mode, so the SWD driver
+	 * emulates it (low = assert, input = release) and never drives the pad high.
+	 */
+	gd32_pads: gd32-pads {
+		compatible = "alp,gd32-pads";
+		swdio-gpios = <&gpio7 0 GPIO_ACTIVE_HIGH>;
+		swclk-gpios = <&gpio7 1 GPIO_ACTIVE_HIGH>;
+		nrst-gpios = <&gpio7 4 GPIO_ACTIVE_HIGH>;
+		attn-gpios = <&gpio7 1 GPIO_ACTIVE_HIGH>;
 	};
 };
 
