@@ -412,8 +412,8 @@ already, via the `CONFIG_BOOTCOMMAND` override in
 `meta-alp-sdk/recipes-bsp/u-boot/u-boot/0002-rzv2n-dev-ALP-E1M-production-boot.patch`
 (#1186):
 
-- The vendor env loads `boot/r9a09g056n44-dev.dtb`, a filename no ALP image
-  builds, on **both** the SD and eMMC paths. `CONFIG_BOOTCOMMAND` re-loads the
+- The vendor env loads `boot/r9a09g056n44-dev.dtb`, a filename no ALP machine
+  builds as a dtb (the image links it to the board dtb, #2637), on **both** the SD and eMMC paths. `CONFIG_BOOTCOMMAND` re-loads the
   correct dtb after the leading `env default -a` on both branches.
 - The microSD root device was wrong. **Confirmed on hardware:** `mmcblk2`
   does not exist on this silicon at all — the board has exactly two SDHI

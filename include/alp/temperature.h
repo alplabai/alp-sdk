@@ -98,7 +98,7 @@ alp_status_t alp_temperature_read_milli_c(int32_t *milli_c);
 /**
  * @brief Read the SoC die (junction) temperature.
  *
- * Distinct from @ref alp_temperature_read_milli_c: that is a SoM-level
+ * Distinct from @ref alp_temperature_read_milli_c -- that is a SoM-level
  * ambient sensor, this is the processor's own thermal sensing.  Units
  * and sign match: integer milli-degrees Celsius, signed.  When the SoC
  * has several die sensors the hottest one is reported -- the figure a

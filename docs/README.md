@@ -100,6 +100,7 @@ into the topic-specific docs.
 - [bring-up-ros2.md](bring-up-ros2.md) — ROS 2 Humble on the V2N/V2M A55
   (upstream meta-ros + Renesas rzv_ros, opt-in `ALP_ENABLE_ROS2`,
   portable-API example node).  BENCH-UNVERIFIED.
+- [boot-log-v2n.md](boot-log-v2n.md) — what each V2N/V2M boot warning means.
 - [bring-up-drpai-v2n.md](bring-up-drpai-v2n.md) — the RZ/V2N on-die
   DRP-AI3 NPU: host toolchain, the DT override the driver needs,
   image wiring, model compile and microSD deploy. Kernel driver

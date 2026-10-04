@@ -48,8 +48,12 @@ meta-alp-sdk/
 │   │   └── recipes-kernel/linux/
 │   │       └── linux-alif_%.bbappend    # E1M-AEN console routing (parsed only when meta-alif-ensemble is in bblayers.conf).
 │   └── meta-deepx-m1/
-│       └── recipes-runtime/dx-driver/
-│           └── dx-driver_%.bbappend     # Tightens the 99-dx-dma.rules udev MODE (parsed only when meta-deepx-m1 is in bblayers.conf).
+│       └── recipes-runtime/
+│           ├── dx-driver/
+│           │   └── dx-driver_%.bbappend # Tightens the 99-dx-dma.rules udev MODE (parsed only when meta-deepx-m1 is in bblayers.conf).
+│           └── dx-rt/
+│               ├── dx-rt_%.bbappend     # dxrtd service mode, dxrt-cli sub-package fix, and a stderr warning before dxrt-cli -u / -w / -C.
+│               └── dx-rt/alp_fw_warning.cpp  # The warning text (Alp code; the bbappend inserts one call per command).
 ├── recipes-core/
 │   ├── alp-sdk/
 │   │   └── alp-sdk_0.6.bb               # libalp_sdk.so + headers.
