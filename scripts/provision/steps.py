@@ -55,7 +55,7 @@ GD32_IMAGES = (("bootloader.bin", 0x08000000, "gd32_bootloader_md5"),
                ("ota-meta.bin", 0x08008000, "gd32_ota_meta_md5"),
                ("slot-a.bin", 0x0800A000, "gd32_slot_a_md5"))
 GD32_BRIDGE_ADDR = 0x70
-SYS_LSI_MODE_XSPI = "0x3c06"
+SYS_LSI_MODE_XSPI = "0x3c06"   # DSW1 label only; the boot-mode judgement decodes via the SoC description
 LOGIN_RE = r"login: *$"
 IP_WAIT_S = 120.0     # boot_sd_linux: how long a console login may wait for DHCP
 IP_POLL_S = 5.0
@@ -1404,7 +1404,8 @@ class Census(Step):
                  if any(c.get("role") == r for c in ctx.bundle.get("components", []))}
         if why := leftover_dxuart2_swap(ctx):
             raise Refused(why)
-        facts, notes = lt.census(t, bus, sizes, dxm1_present=ctx.family == "v2n-m1")
+        facts, notes = lt.census(t, bus, sizes, dxm1_present=ctx.family == "v2n-m1",
+                                  silicon=ctx.preset.get("silicon"))
         if bus["pmic"] is not None and self.reads_gpio4_otp:
             try:
                 # gd32_flash runs BEFORE census. When it applied the volatile
@@ -2167,8 +2168,18 @@ class ColdBootTest(Step):
             if ctx.family == "v2n-m1" and not uboot.has_rail_pg(text):
                 probs.append(f"no {uboot.RAIL_PG!r}")
             mode = uboot.parse_sys_lsi(text).get("soc_sys_lsi_mode")
-            if mode != SYS_LSI_MODE_XSPI:
-                probs.append(f"SYS_LSI_MODE {mode} != {SYS_LSI_MODE_XSPI}")
+            # the latched boot-strap word, judged like functional_test's boot_mode (one expectation)
+            try:
+                if not mode:
+                    raise ValueError("no SYS_LSI_MODE notice from BL2")
+                got, ok = functest.judge_boot_mode(int(mode, 16), str(ctx.preset["silicon"]),
+                                                       ctx.functest_expect or functest.load_expect())
+                if not ok:
+                    probs.append(f"SYS_LSI_MODE {mode} ({functest.describe_boot_mode(got)}) is not the expected boot mode")
+                    if got["soc_boot_debug_en"] == "1":
+                        probs.append(ledger_out.DEBUG_MODE_REASON)
+            except (KeyError, ValueError, OSError, functest.NoExpect) as e:
+                probs.append(f"SYS_LSI_MODE {mode or 'unread'} not judged: {e}")
             # ACT88760 reg 0x10 after this (plain, tool-uninvolved) cold boot:
             # most units' OTP is already 0x08 (production/fixed); an early-OTP
             # unit (OTP 0x88, e.g. E1M-V2M103 2026W38-0001) needs U-Boot's

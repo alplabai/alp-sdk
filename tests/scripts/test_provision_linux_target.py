@@ -701,8 +701,8 @@ def _census_responses(array: bytes = b"\xff" * 128):
         return f"0x{pmic_regs[reg]:02x}"
 
     return [
-        (r"devmem 0x10430300", "0x00003C06\n"), (r"devmem 0x10430304", "0x00000001\n"),
-        (r"devmem 0x10430308", "0x00000002\n"),
+        (r"\nr 0x10430300", "0x00003C06\n"), (r"\nr 0x10430304", "0x00000001\n"),
+        (r"\nr 0x10430308", "0x00000002\n"),
         (r"cpuinfo_max_freq", "1800000\n"), (r"meminfo", "MemTotal:        3200000 kB\nMemFree: 1 kB\n"),
         (r"uname -r", "6.1.107-cip28\n"),
         (r"device-tree/compatible", "alp,e1m-v2m101-x-evk renesas,r9a09g056\n"),
@@ -738,17 +738,29 @@ def _census_responses(array: bytes = b"\xff" * 128):
     ]
 
 
+def test_decode_lsi_mode_seeded_debug_value():
+    spec = lt.sys_lsi_spec("renesas:rzv2n:n44")
+    assert spec["registers"]["soc_sys_lsi_mode"] == "0x10430300"
+    assert lt.decode_lsi_mode(0x3C06, spec) == {"soc_boot_debug_en": "0", "soc_md_boot": "0x6", "soc_boot_device": "xspi",
+                                          "soc_boot_cpu": "ca55"}
+    # the same unit with MD_BOOT3 strapped high (bit 9) and MD_BOOT[1:0] = eMMC
+    assert lt.decode_lsi_mode(0x3E05, spec) == {"soc_boot_debug_en": "1", "soc_md_boot": "0x5", "soc_boot_device": "emmc", "soc_boot_cpu": "ca55"}
+    assert lt.decode_lsi_mode(0x3806, spec)["soc_boot_cpu"] == "cm33"      # bit 10 cleared
+
+
 def test_census_collects_ledger_keys_read_only():
     t, fake = target(_census_responses())
     facts, notes = lt.census(t, {"eeprom": 0, "pmic": 8, "brd": 8},
-                             sizes={"bl2_mmc": 100, "fip": 200, "bl2": 300, "cm33": 400})
+                             sizes={"bl2_mmc": 100, "fip": 200, "bl2": 300, "cm33": 400},
+                             silicon="renesas:rzv2n:n44")
     assert facts["eeprom_unique_id"] == UNIQUE_ID
     assert facts["eeprom_lock_status"] == "0xfd"
     assert facts["eeprom_device_config"] == "0x1d"
     assert facts["secure_page_state"] == "blank"
     assert facts["secure_page_sha256"] == hashlib.sha256(b"\xff" * 64).hexdigest()
     assert "manifest_sha256" not in facts                      # blank array
-    assert facts["soc_sys_lsi_mode"].startswith("0x3c06 (unverified")
+    assert facts["soc_sys_lsi_mode"] == "0x3c06"
+    assert (facts["soc_boot_debug_en"], facts["soc_md_boot"], facts["soc_boot_device"]) == ("0", "0x6", "xspi")
     assert facts["dtb_name"] == ("ALP E1M-V2M on E1M-X-EVK "
                                  "(compatible alp,e1m-v2m101-x-evk renesas,r9a09g056)")
     assert facts["cpu_khz"] == "1800000" and facts["linux_memtotal_kb"] == "3200000"

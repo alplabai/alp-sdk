@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import json
 import re
 import shlex
 import subprocess
@@ -34,11 +35,37 @@ EEPROM_SIZE = 0x4000           # N24S128: 16 KiB, 2-byte word address
 EEPROM_DEVICE_PAGE = 64        # hardware page; a page write must not cross it
 MANIFEST_LEN = 128
 
-# SoC SYS block. Offsets follow the RZ/V2H-family SYS layout (LSI_MODE / DEVID /
-# PRR at 0x300 / 0x304 / 0x308). UNVERIFIED for RZ/V2N against the hardware
-# manual -- every census value from here carries that marker.
-SYS_REGS = {"soc_sys_lsi_mode": 0x10430300, "soc_lsi_devid": 0x10430304, "soc_prr": 0x10430308}
-SYS_REGS_NOTE = "unverified addr"
+REPO = Path(__file__).resolve().parents[2]
+
+
+def sys_lsi_spec(silicon: str) -> dict:
+    """SYS_LSI register addresses and the MD_BOOT decode of a SoC, from its description
+    (``boot_strap`` of metadata/socs/<vendor>/<family>/<part>.json); ``silicon`` is the preset's
+    ``vendor:family:part``. The hardware-manual facts live there, not in this file."""
+    from alp_project_loader import resolve_soc_path   # scripts/ is on sys.path
+    path = resolve_soc_path(silicon, REPO / "metadata")
+    if path is None:
+        raise ValueError(f"{silicon!r}: not a vendor:family:part silicon ref")
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if "boot_strap" not in doc:
+        raise ValueError(f"{silicon}: no boot_strap block in the SoC description")
+    return doc["boot_strap"]
+
+
+def decode_lsi_mode(value: int, spec: dict) -> dict[str, str]:
+    """Ledger keys decoded from a SYS_LSI_MODE read: the latched debug-mode strap (MD_BOOT3,
+    1 = debug mode), MD_BOOT[2:0], the boot device MD_BOOT[1:0] selects and the boot CPU the BOOTSELCPU strap selects."""
+    m = spec["strap_word"]
+    md = (value >> m["boot_pins_shift"]) & ((1 << m["boot_pins_width"]) - 1)
+    dev = md & ((1 << m["boot_device_pins_width"]) - 1)
+    names = m["boot_device_names"]
+    cpus = m["boot_cpu_names"]
+    cpu = (value >> m["boot_cpu_bit"]) & 1
+    return {"soc_boot_debug_en": str((value >> m["debug_enable_bit"]) & 1),
+            "soc_md_boot": f"{md:#x}",
+            "soc_boot_device": names[dev] if dev < len(names) else "unknown",
+            "soc_boot_cpu": cpus[cpu] if cpu < len(cpus) else "unknown"}
+
 
 ACT88760_ADDR = 0x25
 ACT88760_GPIO_REG = 0x10
@@ -948,13 +975,23 @@ def _reg_dump(t: LinuxTarget, bus: int, addr: int, regs) -> str:
     return " ".join(f"{r:#04x}={i2c_get(t, bus, addr, r):#04x}" for r in regs)
 
 
+_DEVMEM_PY = ("import mmap,os,struct,sys;a=int(sys.argv[1],16);"
+              "m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC),4096,mmap.MAP_SHARED,mmap.PROT_READ,offset=a&~4095);"
+              "print(hex(struct.unpack_from('<I',m,a&4095)[0]))")
+# Shell prelude defining `r <addr>` (one 32-bit /dev/mem word, read-only): devmem when present, else
+# python3; with neither, the whole script prints ALPUNREAD (the functional test's "cannot judge").
+DEVMEM_READ_FN = ("if command -v devmem >/dev/null 2>&1; then r() { devmem $1 32 2>&1; }\n"
+                  f"elif py=$(command -v python3); then r() {{ \"$py\" -c {shlex.quote(_DEVMEM_PY)} $1 2>&1 | tail -n1; }}\n"
+                  'else echo "ALPUNREAD missing tool: devmem or python3"; exit 0; fi\n')
+
+
+def devmem_cmd(addr: int) -> str:
+    """Shell script printing the 32-bit word at physical ``addr`` as ``0x...``."""
+    return f"{DEVMEM_READ_FN}r {addr:#x}"
+
+
 def _devmem(t: LinuxTarget, addr: int) -> int:
-    page, off = addr & ~0xFFF, addr & 0xFFF
-    py = ("import mmap,os,struct;f=os.open('/dev/mem',os.O_RDONLY|os.O_SYNC);"
-          f"m=mmap.mmap(f,4096,mmap.MAP_SHARED,mmap.PROT_READ,offset={page});"
-          f"print(hex(struct.unpack_from('<I',m,{off})[0]))")
-    out = t.run(f"devmem {addr:#x} 32 2>/dev/null || python3 -c {shlex.quote(py)}").stdout.strip()
-    return int(out, 16)
+    return int(t.run(devmem_cmd(addr)).stdout.strip(), 16)
 
 
 # Raw MII registers 2/3 of each port, through SIOCGMIIPHY / SIOCGMIIREG (the image has python3 and no
@@ -996,7 +1033,8 @@ def net_carrier(t, name: str) -> bool:
 
 
 def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None = None,
-           emmc: str | None = None, dxm1_present: bool = True) -> tuple[dict[str, str], list[str]]:
+           emmc: str | None = None, dxm1_present: bool = True,
+           silicon: str | None = None) -> tuple[dict[str, str], list[str]]:
     """Read-only. Returns (auto ledger keys, notes on what could not be read).
 
     `sizes` = artefact byte lengths keyed by bundle role ("bl2", "fip",
@@ -1017,8 +1055,12 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             notes.append(f"{name}: {e}")
 
     def soc():
-        for key, addr in SYS_REGS.items():
-            facts[key] = f"{_devmem(t, addr):#x} ({SYS_REGS_NOTE} {addr:#x})"
+        if not silicon:
+            raise ValueError("no SoC reference (preset silicon:), SYS_LSI registers not read")
+        spec = sys_lsi_spec(silicon)
+        for key, addr in spec["registers"].items():
+            facts[key] = f"{_devmem(t, int(addr, 16)):#x}"
+        facts.update(decode_lsi_mode(int(facts["soc_sys_lsi_mode"], 16), spec))
 
     def cpu_mem():
         facts["cpu_khz"] = t.run("cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").stdout.strip()
