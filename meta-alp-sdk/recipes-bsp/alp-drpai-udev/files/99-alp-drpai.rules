@@ -2,6 +2,10 @@
 # Copyright (c) 2026 Alp Lab AB
 #
 # RZ/V2N DRP-AI3 NPU node: without this it comes up root-only (0600), so a
-# non-root <alp/inference.h> DRP-AI app fails to open it (#2381).  Same policy
-# as the DEEPX /dev/dxrt* nodes (dx-driver_%.bbappend): group video, 0660.
-KERNEL=="drpai[0-9]*", MODE="0660", GROUP="video"
+# non-root <alp/inference.h> DRP-AI app fails to open it (#2381).
+#
+# Group "drpai" (created by alp-drpai-udev), NOT "video": the node's DMA
+# reaches any physical address, so membership is a privilege grant (see
+# docs/bring-up-drpai-v2n.md "Access control").  The register ioctls are
+# additionally gated on CAP_SYS_RAWIO by kernel patch 0018.
+KERNEL=="drpai[0-9]*", MODE="0660", GROUP="drpai"

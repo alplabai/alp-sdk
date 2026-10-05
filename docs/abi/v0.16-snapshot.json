@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-01",
+  "generated": "2026-10-03",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -10996,8 +10996,8 @@
     "alp/ext/deepx/inference.h": {
       "functions": {
         "alp_deepx_inference_bind_cores": {
-          "hash": "b08ac660deb57b62",
-          "signature": "alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_cores_t cores);"
+          "hash": "f48dfc2ca4912d1b",
+          "signature": "alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, uint32_t mask);"
         },
         "alp_deepx_inference_get_status": {
           "hash": "da530b42aff7691c",
@@ -11025,20 +11025,6 @@
           ],
           "hash": "a7fb24a6fb286785",
           "kind": "struct"
-        },
-        "alp_deepx_npu_cores_t": {
-          "definition": "typedef enum { ALP_DEEPX_NPU_CORES_ALL = 0u, ALP_DEEPX_NPU_CORE_0 = 1u, ALP_DEEPX_NPU_CORE_1 = 2u, ALP_DEEPX_NPU_CORE_2 = 3u, ALP_DEEPX_NPU_CORES_01 = 4u, ALP_DEEPX_NPU_CORES_12 = 5u, ALP_DEEPX_NPU_CORES_02 = 6u, } alp_deepx_npu_cores_t;",
-          "enumerators": [
-            "ALP_DEEPX_NPU_CORES_ALL = 0u",
-            "ALP_DEEPX_NPU_CORE_0 = 1u",
-            "ALP_DEEPX_NPU_CORE_1 = 2u",
-            "ALP_DEEPX_NPU_CORE_2 = 3u",
-            "ALP_DEEPX_NPU_CORES_01 = 4u",
-            "ALP_DEEPX_NPU_CORES_12 = 5u",
-            "ALP_DEEPX_NPU_CORES_02 = 6u"
-          ],
-          "hash": "0dd48c5241689c31",
-          "kind": "enum"
         }
       },
       "variables": {}
@@ -11655,8 +11641,8 @@
       },
       "macros": {
         "ALP_INFERENCE_CONFIG_DEFAULT": {
-          "hash": "22d1014030488022",
-          "value": "(id) ((alp_inference_config_t){ .model_data = (id), .model_size = 0u, .format = ALP_INFERENCE_MODEL_TFLITE, .backend = ALP_INFERENCE_BACKEND_AUTO, .arena_bytes = 0u, .arena = NULL })"
+          "hash": "8410b08ba879f466",
+          "value": "(id) ((alp_inference_config_t){ .model_data = (id), .model_size = 0u, .format = ALP_INFERENCE_MODEL_TFLITE, .backend = ALP_INFERENCE_BACKEND_AUTO, .arena_bytes = 0u, .arena = NULL, .accel_unit_mask = 0u })"
         }
       },
       "typedefs": {
@@ -11673,16 +11659,17 @@
           "kind": "enum"
         },
         "alp_inference_config_t": {
-          "definition": "typedef struct { const void *model_data; size_t model_size; alp_inference_model_format_t format; alp_inference_backend_t backend; size_t arena_bytes; void *arena; } alp_inference_config_t;",
+          "definition": "typedef struct { const void *model_data; size_t model_size; alp_inference_model_format_t format; alp_inference_backend_t backend; size_t arena_bytes; void *arena; uint32_t accel_unit_mask; } alp_inference_config_t;",
           "fields": [
             "const void *model_data",
             "size_t model_size",
             "alp_inference_model_format_t format",
             "alp_inference_backend_t backend",
             "size_t arena_bytes",
-            "void *arena"
+            "void *arena",
+            "uint32_t accel_unit_mask"
           ],
-          "hash": "83bdb43e5a3d1e5c",
+          "hash": "b4bc562ce2d55e38",
           "kind": "struct"
         },
         "alp_inference_dtype_t": {

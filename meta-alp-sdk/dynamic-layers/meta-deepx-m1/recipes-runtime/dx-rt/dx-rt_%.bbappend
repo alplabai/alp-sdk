@@ -25,8 +25,9 @@ FILES:${PN}:remove = "${bindir}/*"
 # but ships only a SysV init script (its dxrt.service is commented out);
 # this image runs systemd, so install upstream's unit instead.  The
 # PREFERRED_VERSION pin in e1m-v2m-deepx.inc stays on 3.2.0 (firmware
-# lockstep).  Limit on dx-rt 3.2.0 even with dxrtd: processes sharing
-# one DX-M1 must use the same NPU core set (see <alp/ext/deepx/inference.h>).
+# lockstep).  Limit, even with dxrtd: at most 3 DISTINCT NPU core sets
+# live on one DX-M1 at a time (kernel driver DX_NORMAL_QUEUE_MAX = 3; a 4th
+# makes dx-rt abort / kill dxrtd).  See <alp/ext/deepx/inference.h>.
 EXTRA_OECMAKE:remove = "-DUSE_SERVICE=OFF"
 EXTRA_OECMAKE += "-DUSE_SERVICE=ON"
 
