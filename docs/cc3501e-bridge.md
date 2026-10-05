@@ -712,7 +712,12 @@ reply's `radio_ok_out` to learn whether the *previous* apply was realised.
 > probes, then warm-resets via `cc3501e_recover()` below, with no application
 > code required. `cc3501e_recover()` remains the manual escape hatch (`alp
 > companion recover` on the console) for a caller that wants it by hand — a
-> warm reset has recovered every observed wedge. Not power-related — it
+> warm reset has recovered every observed wedge. Before that reset the probe
+> first tries an in-band resync (#2699): a burst of three `0xFF` request
+> headers on their own, then (if PING still fails) a stall header (`00 01 10 00`
+> followed by 300 ms of silence, which trips the bridge's 250 ms stall watchdog)
+> plus a burst, then one more burst. The transport lock is held for the whole
+> resync, so a concurrent single-shot caller may see `ALP_ERR_BUSY`. Not power-related — it
 > reproduces with no power policy applied at all.
 
 ### Long gaps: cut the supply (`cc3501e_power_off()`)

@@ -37,7 +37,15 @@
  * Pick conservatively long enough that legitimate worst-case
  * latency (say, a slow flash erase) doesn't trip a false reset,
  * but short enough that a genuine hang doesn't leave the
- * device unresponsive for too long.  5 seconds is typical. */
+ * device unresponsive for too long.  5 seconds is typical.
+ * A watchdog with a short hardware ceiling (the RZ/V2N Cortex-M33 WDT0,
+ * 174.8 ms) does not reject a longer timeout: above 174.8 ms that
+ * backend extends in software, so a missed deadline resets the SoM
+ * 0..87.4 ms AFTER timeout_ms.  The catch: the software part runs from
+ * the system timer ISR, so an app that is still feeding is reset anyway
+ * when interrupts stay masked (irq_lock(), a long critical section) for
+ * more than ~67 ms, regardless of WDT_TIMEOUT_MS.  Keep interrupt-off
+ * sections short on such a SoM. */
 #define WDT_TIMEOUT_MS 5000
 
 /* Feed every 500 ms -- 10x safety margin against the 5 s timeout.
