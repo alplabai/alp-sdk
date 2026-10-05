@@ -18,7 +18,7 @@ include/configs/rzv2n-dev.h) expanded into the C lookup array
 The choice FAILS CLOSED. A provisioned unit (valid manifest, known family)
 gets fdtfile = its family's dtb and no fdtfile_alt; if the image lacks that
 dtb the bootcmd prints "dtb for family <f> (<dtb>) missing from image --
-refusing to boot another SoM's device tree" and stops at the prompt, never
+refusing to boot the device tree of another SoM" and stops at the prompt, never
 loading the other family's dtb. Only a unit with no usable family (missing
 or invalid manifest, or unknown family: the blank-EEPROM bootstrap) takes
 the build default passed to alp_fdtfile (CONFIG_ALP_E1M_FDTFILE) and sets
@@ -268,7 +268,7 @@ index 1786e337..a14afb11 100644
 +	"setenv alp_dtb_ok 1; " \
 +	"elif test -z \"${fdtfile_alt}\"; then " \
 +	"echo \"ALP: dtb for family ${alp_fdt_family} (${fdtfile}) missing " \
-+	"from image -- refusing to boot another SoM's device tree\"; " \
++	"from image -- refusing to boot the device tree of another SoM\"; " \
 +	"elif ext4load mmc ${alp_mmc} 0x48000000 boot/${fdtfile_alt}; then " \
 +	"setenv alp_dtb_ok 1; fi; fi;" \
 +	"if test ${alp_dtb_ok} = 1; then " \

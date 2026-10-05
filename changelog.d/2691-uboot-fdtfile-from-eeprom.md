@@ -13,7 +13,7 @@ boots the right dtb on whichever SoM it runs on.
 The choice fails closed. A unit with a valid manifest and a known family loads
 only its own family's dtb (`fdtfile_alt` stays empty); if the image lacks it
 the boot prints "dtb for family <f> (<dtb>) missing from image -- refusing to
-boot another SoM's device tree" and stops at the prompt, never falling through
+boot the device tree of another SoM" and stops at the prompt, never falling through
 to the other family's dtb. Only a blank unit (no valid manifest or an unknown
 family; provisioning's `boot_sd_linux` runs before `eeprom_manifest`, so first
 boot is always blank) prints one `ALP: fdtfile ...` line, keeps the

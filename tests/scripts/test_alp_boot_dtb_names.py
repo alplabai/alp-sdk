@@ -52,6 +52,23 @@ def test_fdtfile_chain_fails_closed_for_a_known_family():
     """A known family sets no fdtfile_alt and the bootcmd refuses on an empty one."""
     patch = (UBOOT / "0013-rzv2n-dev-ALP-E1M-fdtfile-from-eeprom.patch").read_text(encoding="utf-8")
     assert 'elif test -z \\"${fdtfile_alt}\\"; then' in patch
-    assert "refusing to boot another SoM's device tree" in patch
+    assert "refusing to boot the device tree of another SoM" in patch
     assert "if (!known) {" in patch  # fdtfile_alt is computed only for the no-family case
     assert "CMD_RET_FAILURE" in patch
+
+
+def test_no_single_quote_in_any_patched_bootcmd_line():
+    """U-Boot's old hush parser treats ' as a quote even inside a double-quoted
+    echo: an apostrophe in CONFIG_BOOTCOMMAND gives 'syntax error' and, on the
+    autoboot path, a Synchronous Abort reset loop (bench, E1M-V2M103, #2694)."""
+    for patch in sorted(UBOOT.glob("*.patch")):
+        text = patch.read_text(encoding="utf-8")
+        added = [l for l in text.splitlines() if l.startswith("+") and not l.startswith("+++")]
+        in_bootcmd = False
+        for line in added:
+            if "CONFIG_BOOTCOMMAND" in line or "bootcmd=" in line:
+                in_bootcmd = True
+            if in_bootcmd:
+                assert "'" not in line, f"{patch.name}: {line}"
+                if not line.rstrip().endswith("\\"):
+                    in_bootcmd = False

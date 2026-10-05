@@ -442,7 +442,7 @@ already, via the `CONFIG_BOOTCOMMAND` override in
 > `e1m-v2m101-x-evk.dtb`, `v2n` -> `e1m-v2n101-x-evk.dtb`), so one U-Boot boots
 > the right dtb on either SoM. It fails closed: a known family loads only its
 > own dtb and, if the image lacks it, the boot refuses ("dtb for family <f>
-> missing from image -- refusing to boot another SoM's device tree") instead of
+> missing from image -- refusing to boot the device tree of another SoM") instead of
 > loading the other family's dtb. Only a missing or invalid manifest or an
 > unknown family (a blank unit) keeps the `CONFIG_ALP_E1M_FDTFILE` default (the
 > bootcmd passes it as the command's argument), sets `fdtfile_alt` to the other
