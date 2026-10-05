@@ -61,6 +61,23 @@ Link telemetry for the SWD reader (no console) is in
 replies delivered on an edge, lost edges, stuck-high readings, `READ2`
 accounting gaps.
 
+## Reading the verdict from Linux (no J-Link)
+
+SRAM0 is readable only through a CM33 J-Link.  The same verdict is also
+published as a compact, versioned 20-word record in the `rsctbl` window,
+A55 `0x4F700F00` (CM33-NS `0x9F700F00`), right below the liveness beacon
+at `0x4F700FF0` that provisioning's `cm33_running` reads.  Layout and
+field meanings: `include/alp/protocol/gd32_bridge_results.h`.  On the
+A55 (root, `/dev/mem`):
+
+```bash
+python3 read_gd32_results.py          # scripts/bench/v2n/read_gd32_results.py
+```
+
+`tests/hil/v2m103-x-evk/v2m103-gd32-bridge-results.yaml` asserts it.
+The soak refreshes the record once per cycle; `soak_cycles`, `soak_errors`, `soak_timeouts` (lost `ATTN` edges) and `soak_elapsed_s` are the soak counters, `tests_skip` counts self-gating v0.15 rows skipped on a bridge that did not grant the feature.
+
+
 One-shot at boot (not per-cycle): `adc_dsp_chain_open` probe — the
 4-chain pool has no close opcode yet, so looping it would exhaust the
 pool and poison the stats.

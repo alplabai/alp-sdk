@@ -37,6 +37,16 @@
  * line on P71) needs an interrupt hook; the hil-soak example wires one
  * and shows how, this example stays on the staging-gap path.
  *
+ * Linux-readable copy of the verdict: SRAM0 is readable only through a
+ * CM33 J-Link, and Linux cannot see it.  So the same verdict is ALSO
+ * published as a compact, versioned record in the `rsctbl` window
+ * (A55 0x4F700F00, CM33-NS 0x9F700F00), right below the liveness
+ * beacon the provisioning `cm33_running` check reads at 0x4F700FF0.
+ * The layout lives in <alp/protocol/gd32_bridge_results.h>; read it
+ * on the A55 with scripts/bench/v2n/read_gd32_results.py or the
+ * tests/hil/v2m103-x-evk/v2m103-gd32-bridge-results.yaml spec.  The
+ * SRAM0 block above is unchanged for J-Link users.
+ *
  * This is a maintainer bench tool in example form; like the soak it
  * exercises the gd32g553 chip driver directly (the documented
  * exception to the portable-API rule for dedicated bridge demos).
@@ -44,8 +54,67 @@
 
 #include <string.h>
 
+#include <zephyr/kernel.h>
+
 #include "alp/chips/gd32g553.h"
 #include "alp/peripheral.h"
+#include "alp/protocol/gd32_bridge_results.h"
+
+/* ------------------------------------------------------------------ */
+/* Linux-readable record + liveness beacon (rsctbl window)             */
+/* ------------------------------------------------------------------ */
+
+/* The board DTS reserves the OpenAMP window and names its first page
+ * `rsctbl`; the A55 DT keeps the same range `no-map`, so Linux never
+ * hands it out and can read it through /dev/mem.  This app runs no
+ * OpenAMP, so the page holds no resource table and the top 0x100 bytes
+ * are ours.  A build for a core without that node (the native_sim
+ * build-only test) writes a throwaway buffer instead. */
+#if DT_NODE_EXISTS(DT_NODELABEL(rsctbl))
+#define RESULTS_WINDOW ((void *)(uintptr_t)DT_REG_ADDR(DT_NODELABEL(rsctbl)))
+#else
+static uint8_t window_stub[0x1000] __aligned(16);
+#define RESULTS_WINDOW ((void *)window_stub)
+#endif
+
+/* The working copy; every change is pushed to Linux with publish(). */
+static alp_gd32_results_t rec;
+
+static void publish(void)
+{
+	alp_gd32_results_publish(RESULTS_WINDOW, &rec);
+}
+
+/* The beacon heartbeat ticks from a timer, not from the test loop: a
+ * BIG_FRAME exchange or the 50 ms stream wait can block the main thread
+ * for longer than the 1..4 counts per 2 s `cm33_running` accepts.  A
+ * k_timer expiry only does a plain store, so it never touches the bridge. */
+static void beacon_tick(struct k_timer *t)
+{
+	ARG_UNUSED(t);
+	alp_gd32_results_beacon_tick(RESULTS_WINDOW);
+}
+K_TIMER_DEFINE(beacon_timer, beacon_tick, NULL);
+
+/* Snapshot what init() negotiated: the bridge firmware version, the
+ * granted feature word, the payload ceiling and the ATTN state.  ATTN
+ * "granted but not active" means its self-test failed and the link fell
+ * back to the 0.14 drain rule.  (This example registers no ATTN hook, so
+ * ATTN stays off here; the soak shows the same fields.) */
+static void publish_link(const gd32g553_t *c)
+{
+	rec.fw_version  = ((uint32_t)c->version.major << 16) | ((uint32_t)c->version.minor << 8) |
+	                  (uint32_t)c->version.patch;
+	rec.features    = c->granted;
+	rec.max_payload = c->max_payload;
+	rec.flags &= ~(ALP_GD32_RESULTS_FLAG_ATTN_GRANTED | ALP_GD32_RESULTS_FLAG_ATTN_ACTIVE |
+	               ALP_GD32_RESULTS_FLAG_ATTN_FALLBACK);
+	if ((c->granted & GD32G553_LINK_FEAT_ATTN) != 0u)
+		rec.flags |= ALP_GD32_RESULTS_FLAG_ATTN_GRANTED;
+	if (c->attn_active) rec.flags |= ALP_GD32_RESULTS_FLAG_ATTN_ACTIVE;
+	if (c->attn_unusable) rec.flags |= ALP_GD32_RESULTS_FLAG_ATTN_FALLBACK;
+	publish();
+}
 
 /* ------------------------------------------------------------------ */
 /* Verdict block                                                       */
@@ -57,8 +126,13 @@ volatile uint32_t func_results[44] = { 0xF07C7E57u, 0u };
 
 static gd32g553_t ctx;
 static unsigned   test_idx; /* cursor into func_results[4..] */
+static uint32_t   skipped;  /* self-gating tests that passed by "not granted" */
 
-static void record(alp_status_t s, bool value_ok)
+/* `skip` marks a self-gating test whose feature the peer did not grant:
+ * its NOSUPPORT contract held, which is a pass in the SRAM0 block (the
+ * J-Link layout is unchanged) but is reported to Linux as a SKIP, not a
+ * PASS, so a v0.14 bridge cannot look like it exercised v0.15. */
+static void record_ex(alp_status_t s, bool value_ok, bool skip)
 {
 	uint32_t cell;
 	if (s == ALP_OK && value_ok) {
@@ -75,6 +149,16 @@ static void record(alp_status_t s, bool value_ok)
 		func_results[4u + test_idx] = cell;
 	}
 	test_idx++;
+	if (skip && s == ALP_OK && value_ok) skipped++;
+	rec.tests_pass = func_results[2] - skipped;
+	rec.tests_fail = func_results[3];
+	rec.tests_skip = skipped;
+	publish();
+}
+
+static void record(alp_status_t s, bool value_ok)
+{
+	record_ex(s, value_ok, false);
 }
 
 /* ------------------------------------------------------------------ */
@@ -309,7 +393,7 @@ static void t_adc_stream2(void)
 	const alp_status_t          s = gd32g553_adc_stream_begin2(&ctx, 0u, 0u, 1000u, 0u, &info);
 
 	if ((ctx.granted & GD32G553_LINK_FEAT_ADC_STREAM2) == 0u) {
-		record(ALP_OK, s == ALP_ERR_NOSUPPORT);
+		record_ex(ALP_OK, s == ALP_ERR_NOSUPPORT, true);
 		return;
 	}
 	if (s != ALP_OK) {
@@ -332,6 +416,16 @@ static void t_adc_stream2(void)
 	                              (info.full_scale == 4095u) && (got1 >= 30u) && (drop1 == 0u) &&
 	                              (first1 == 0u) && (drop2 == 0u) && (first2 == first1 + got1) &&
 	                              (ctx.stream2_gaps == 0u);
+	/* What Linux gets to see: the last READ2 index, how many samples the
+	 * bridge reported lost (UNKNOWN is a sentinel, not a count) and the
+	 * host-side continuity breaks. */
+	rec.read2_first = first2;
+	if (drop1 != GD32G553_READ2_DROPPED_UNKNOWN) rec.read2_dropped += drop1;
+	if (drop2 != GD32G553_READ2_DROPPED_UNKNOWN) rec.read2_dropped += drop2;
+	rec.read2_gaps = ctx.stream2_gaps;
+	if (worst == ALP_OK && value_ok) {
+		rec.flags |= ALP_GD32_RESULTS_FLAG_STREAM2_OK;
+	}
 	record(worst, value_ok);
 }
 
@@ -372,7 +466,7 @@ static void t_batch(void)
 	uint8_t executed = 0;
 
 	if ((ctx.granted & GD32G553_LINK_FEAT_BATCH) == 0u) {
-		record(ALP_OK, gd32g553_batch(&ctx, good, 3u, &executed) == ALP_ERR_NOSUPPORT);
+		record_ex(ALP_OK, gd32g553_batch(&ctx, good, 3u, &executed) == ALP_ERR_NOSUPPORT, true);
 		return;
 	}
 
@@ -384,6 +478,9 @@ static void t_batch(void)
 		s  = gd32g553_batch(&ctx, stops, 3u, &executed);
 		ok = ok && (s == ALP_OK) && (executed == 2u) && (stops[0].status == ALP_OK) &&
 		     (stops[1].status == ALP_ERR_INVAL) && (stops[2].status == ALP_ERR_NOT_READY);
+	}
+	if (s == ALP_OK && ok) {
+		rec.flags |= ALP_GD32_RESULTS_FLAG_BATCH_OK;
 	}
 	record(s, ok);
 }
@@ -511,6 +608,13 @@ static void pwm7_staircase_forever(void)
 
 int main(void)
 {
+	/* Start the Linux-visible record and the heartbeat before anything
+	 * can block, so `cm33_running` and the reader see this image from
+	 * the first second -- even while it waits for the GD32 to answer. */
+	alp_gd32_results_init(RESULTS_WINDOW, ALP_GD32_RESULTS_KIND_FUNCTIONAL);
+	alp_gd32_results_beacon_init(RESULTS_WINDOW);
+	k_timer_start(&beacon_timer, K_SECONDS(1), K_SECONDS(1));
+
 	alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
 	    .bus_id        = 1u,
 	    .freq_hz       = 25000000u,
@@ -520,6 +624,8 @@ int main(void)
 	});
 	if (spi == NULL) {
 		func_results[1] = 0xDEADu;
+		rec.state       = ALP_GD32_RESULTS_STATE_NO_LINK;
+		publish();
 		return 1;
 	}
 
@@ -530,14 +636,19 @@ int main(void)
 		s = gd32g553_init(&ctx, spi, NULL, GD32G553_BRIDGE_DEFAULT_I2C_ADDR);
 		if (s != ALP_OK) alp_delay_ms(200);
 	} while (s != ALP_OK);
+	publish_link(&ctx);
 
 	/* Settle past the host's boot window (same rationale as the soak:
      * A55 storage/pinmux bring-up can glitch shared board state). */
 	alp_delay_ms(20000);
 
 	func_results[1] = 1u;
+	rec.state       = ALP_GD32_RESULTS_STATE_RUNNING;
+	publish();
 	run_suite();
 	func_results[1] = 2u;
+	rec.state       = ALP_GD32_RESULTS_STATE_DONE;
+	publish();
 
 	pwm7_staircase_forever();
 	return 0;
