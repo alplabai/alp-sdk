@@ -904,9 +904,9 @@ stub backend).
 
 `BOOT_CONFIG` (`0x42`) reads or stores a small persistent flag word in GD32
 flash.  Request `op:u8 flags:u32` (little-endian, 5 bytes): `op` `0` = GET
-(`flags` ignored), `1` = SET.  The reply is the stored `flags:u32` (after
-a SET, the value now stored).  **Allowed on the I2C link as well as SPI**,
-because provisioning runs from Linux.
+(`flags` ignored), `1` = SET.  The reply is always the **stored** `flags:u32`
+(on a SET, the value stored *before* the commit).  **Allowed on the I2C link
+as well as SPI**, because provisioning runs from Linux.
 
 | Flag (bit) | Name | Effect |
 |------------|------|--------|
@@ -919,14 +919,25 @@ because provisioning runs from Linux.
   host that wants the SD out now also writes `IO29` high with `GPIO_WRITE`.
   Clearing the flag does not release a pad that is already driven (that
   needs a GD32 reset).
-* **Cost.**  A SET that changes the value blocks the GD32 for one flash page
-  erase (up to 20 ms); a SET equal to the stored value is a no-op.
+* **Asynchronous SET.**  The firmware never touches flash inside the
+  transport interrupt.  A SET is queued and answered at once; the main loop
+  then commits it (one flash page erase, up to 20 ms, interrupts masked for
+  that window).  The host leaves the link idle for ~30 ms and then polls GET
+  until the stored value equals the request; `gd32g553_boot_config_set()`
+  does exactly that.  A SET equal to the stored value is a no-op (no queue,
+  no erase).  A different SET while one is still queued answers
+  `STATUS_BUSY`.  If the commit fails the GET poll never matches; the host
+  re-sends the SET.
+* **Power-loss safe.**  The flag lives in two A/B record pages (counter +
+  CRC, commit doubleword last) outside every image; a cut at any point of a
+  SET leaves either the old or the new value, never a fault: the boot-time
+  read checks the flash ECC flags and treats an uncorrectable doubleword as
+  "absent".  With no valid record every flag is off.
 * Returns `STATUS_INVAL` for an unknown `flags` bit, `op` > 1 or a wrong
-  length; `STATUS_BUSY` while an OTA page-erase walk owns the flash (retry);
-  `STATUS_IO` / `STATUS_TIMEOUT` on a flash fault; `STATUS_NOSUPPORT` on
-  firmware that predates the opcode, a build without the flash HAL, a
-  single-bank part (`OBCTL.DBS` = 0) or an image running from slot B.
-  The host helpers map it to `ALP_ERR_NOSUPPORT`.
+  length; `STATUS_BUSY` as above; `STATUS_NOSUPPORT` on firmware that
+  predates the opcode, a build without the flash HAL, a single-bank part
+  (`OBCTL.DBS` = 0) or an image running from slot B.  The host helpers map
+  it to `ALP_ERR_NOSUPPORT`.
 
 Host API: `gd32g553_boot_config_get()` / `gd32g553_boot_config_set()` with
 `GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH`.

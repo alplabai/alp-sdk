@@ -805,9 +805,27 @@ alp_status_t gd32g553_boot_config_get(gd32g553_t *ctx, uint32_t *flags)
 	return boot_config_xfer(ctx, 0u, 0u, flags);
 }
 
+/* The firmware accepts a SET at once and commits it from its main loop: one
+ * flash page erase, <= 20 ms, with interrupts masked for that window, so the
+ * link must stay idle for it.  Wait that out, then poll GET (a transport
+ * error inside a late window just costs one more poll) until the stored value
+ * equals the request.  ~30 ms + 10 ms steps, 250 ms in all. */
+#define BOOT_CONFIG_APPLY_WAIT_MS 30u
+#define BOOT_CONFIG_POLL_STEP_MS  10u
+#define BOOT_CONFIG_POLL_TRIES    22u
+
 alp_status_t gd32g553_boot_config_set(gd32g553_t *ctx, uint32_t flags)
 {
-	return boot_config_xfer(ctx, 1u, flags, NULL);
+	uint32_t     stored = 0u;
+	alp_status_t s      = boot_config_xfer(ctx, 1u, flags, &stored);
+	if (s != ALP_OK) return s;
+	if (stored == flags) return ALP_OK; /* already stored: the firmware skipped the write */
+
+	for (unsigned i = 0u; i < BOOT_CONFIG_POLL_TRIES; i++) {
+		alp_delay_ms(i == 0u ? BOOT_CONFIG_APPLY_WAIT_MS : BOOT_CONFIG_POLL_STEP_MS);
+		if (boot_config_xfer(ctx, 0u, 0u, &stored) == ALP_OK && stored == flags) return ALP_OK;
+	}
+	return ALP_ERR_TIMEOUT;
 }
 
 alp_status_t gd32g553_dac_set(gd32g553_t *ctx, uint8_t channel, uint16_t value_mv)
