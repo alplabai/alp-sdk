@@ -78,9 +78,19 @@ SRC_URI:append = " \
     file://0015-gpiolib-sysfs-reject-export-of-a-number-in-a-chipless-gpio_device.patch \
     file://0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch \
     file://0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch \
+    file://0020-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
     file://uio.cfg \
 "
 
+# 0020 (PDM clocks, audit MM-02/MM-X2): the V2N CPG driver had no PDM0/PDM1
+# module clocks or resets, so no pdm node could bind.  The patch adds them
+# with V2N parents from the RZ/V2N hardware manual (PCLK = PLLCM33 gear / 2,
+# CCLK = QEXTAL / 5 = 4.8 MHz).  No devicetree node uses them yet.
+#
+# pcie-ep-trim.cfg (audit PCIE-5): drops the PCIe endpoint-mode and test
+# options the Renesas defconfig enables for the EVK; E1M-V2M is root-complex
+# only.
+#
 # 0016 (CRU greyscale, #2612): rzg2l-csi2 had no Y10/Y8 entry, so a mono
 # sensor's Y10_1X10 (OV9281 via ov9282) read back as UYVY8_1X16 on the
 # csi20 pad and STREAMON failed -EPIPE.  The patch adds Y10_1X10 (-> CR10,
@@ -109,7 +119,9 @@ SRC_URI:append = " \
 # only for GPT overflow bits, but group 0 resets fully unmasked; once the
 # Cortex-M33 runs, group 0 bit 0 asserts, nobody acknowledges it, and the
 # line storms ("irq 14: nobody cared") until genirq disables it. The patch
-# unmasks only the GPT overflow bits the handler services.
+# unmasks only the GPT overflow bits the handler services.  It also logs and
+# clears the ICU bus-error factors (ICU_BEISR0-3 / ICU_BECLR0-3) at probe and
+# names MCPU_LOCKUP, so a masked source is not a silent one.
 # The mask is written BEFORE the line is requested: requesting enables the
 # line, and a source already asserted at probe storms it inside the request.
 
@@ -267,6 +279,7 @@ do_configure:prepend() {
 SRC_URI:append = " \
     file://trim-unused-storage-net-fs.cfg \
     file://no-kernel-audit.cfg \
+    file://pcie-ep-trim.cfg \
 "
 
 # On-module RTC (all six V2N-family SKUs carry the same RV-3028-C7 --
@@ -297,6 +310,12 @@ SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 # included, carries that override (conf/machine/e1m-v2m10*-a55.conf), so a
 # second :e1m-v2m101 append would add the patch twice and do_patch fails.
 SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch file://0014-ASoC-rsnd-let-SSI2-share-SSI1-SCK-WS-on-RZ-V2N.patch"
+
+# USB device (gadget) mode on the E1M-X-EVK USB 2.0 port (docs/e1m-x-evk-usb-otg.md).
+# OPT-IN, BENCH-UNVERIFIED: usb-gadget.cfg builds the Renesas USBHS driver
+# in, which binds the otg &hsusb node, so it is merged ONLY when
+# ALP_ENABLE_USB_GADGET = "1" (machines with the `usbgadget` MACHINE_FEATURES flag, the same gate as the image install).
+SRC_URI:append = "${@' file://usb-gadget.cfg' if d.getVar('ALP_ENABLE_USB_GADGET') == '1' and bb.utils.contains('MACHINE_FEATURES', 'usbgadget', True, False, d) else ''}"
 
 # Camera (#1149): OPT-IN IMX219 on the E1M-X-EVK CAM0 connector ->
 # CSI-2 receiver -> CRU0.  BENCH-UNVERIFIED.  Off by default: the shipped

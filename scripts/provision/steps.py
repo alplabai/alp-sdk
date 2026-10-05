@@ -126,6 +126,7 @@ class Ctx:
     allow_tier_mismatch: str | None = None
     accept_cid_change: str | None = None  # operator escape: the eMMC was legitimately replaced
     reprovision_from: Path | None = None
+    replace_identity: bool = False       # --replace-identity: archive the old manifest / secure page
     cold_cycles: int = 3
     hil_spec: Path | None = None
     facts: dict[str, str] = field(default_factory=dict)
@@ -164,6 +165,9 @@ class Ctx:
     # CR-terminated lines may be sent there).
     halted_on_count: int | None = None
     halted_outcome: str = ""             # clean_shutdown's outcome for that power-on
+    halted_console_chars: int = 0        # console transcript size when that halt was seen
+    discover_tried_on_count: int | None = None   # need_linux's one console discovery per power-on
+    unit_proved: tuple | None = None     # (host, on_count) a console nonce already proved to be this unit
     rom_console_on_count: int | None = None
     # one line per power cut (clean_shutdown outcome); run_one copies them into the step evidence
     power_cuts: list[str] = field(default_factory=list)
@@ -251,6 +255,20 @@ class Ctx:
                 connect_linux(self, force=True)
             except BenchError:
                 self.linux = None
+        if self.linux is None and self.execute and self.bench is not None \
+                and self.discover_tried_on_count != self.bench.power.on_count:
+            # no pinned host and no login on this boot (--only functional_test,record): do what
+            # boot_sd_linux does, log in on the console and read the address
+            n = self.bench.power.on_count
+            self.discover_tried_on_count = n
+            # a unit in U-Boot / the SCIF ROM / halted must not get an Enter: _probe_console
+            # sends Ctrl-C only until a U-Boot prompt is ruled out
+            if PROBE_UNKNOWN_CONSOLE and n not in (self.rom_console_on_count, self.halted_on_count):
+                try:
+                    if isinstance(_probe_console(self), ConsoleTarget):
+                        connect_linux(self, force=True)
+                except BenchError:
+                    self.linux = None
         if self.linux is None and self.execute:
             if self.bench is not None and self.console_linux_on_count == self.bench.power.on_count:
                 raise Refused("Linux is up on the console but has no reachable IPv4 host (no DHCP lease on "
@@ -280,9 +298,10 @@ class Ctx:
         """Refuse to mutate a Linux target whose eMMC is not this serial's (stale IP).
         Read fresh on every call, never cached: a power cycle or DHCP renewal can put
         another unit behind the same address. First contact with nothing recorded is
-        unchecked (bootstrap's EM_DCID records the CID on the normal blank-unit path)."""
+        proved by a console nonce (_prove_first_contact) before anything is written."""
         want = self.recorded_cid()
         if not want and not self.accept_cid_change:
+            self._prove_first_contact(t)
             return
         seen = lt.read_emmc_cid(t)
         if want and lt.cid_identity(seen) == lt.cid_identity(want):
@@ -298,6 +317,24 @@ class Ctx:
                       f"recorded {want.strip().lower()}: another unit is behind this address "
                       "(stale DHCP lease?). Fix the address in bench.yaml and re-run, or "
                       "--accept-cid-change REASON if the eMMC was replaced.")
+
+    def _prove_first_contact(self, t) -> None:
+        """No CID recorded yet (a run that starts past bootstrap, e.g. --from dsw1_emmc_insert_sd):
+        before the first write, prove over this unit's own console that the SSH host is it (#2687).
+        Once per (host, power-on); a console that is not at a shell cannot prove it, and the
+        write is then refused rather than risked on a stale lease."""
+        b = self.bench
+        if b is None or not self.execute:
+            return
+        key = (getattr(t, "host", None), b.power.on_count)
+        if self.unit_proved == key:
+            return
+        if not _same_unit(self, t):
+            raise Refused(f"{getattr(t, 'host', '?')} did not echo this unit's console nonce and unit {self.serial} "
+                          "has no recorded eMMC CID: it may be another unit (stale DHCP lease, wrong "
+                          "bench.yaml linux.host). Nothing was written. Fix the address, or log the "
+                          "console in so the nonce proof can run, then re-run.")
+        self.unit_proved = key
 
     def linux_up(self) -> bool:
         # --only/--from can start past detect, which is what normally attaches
@@ -458,6 +495,26 @@ def halt_note(outcome: str) -> str:
             "a mounted microSD root may be dirty.")
 
 
+def _console_chars(console) -> int:
+    return sum(len(x) for x in getattr(console, "transcript", ()))
+
+
+def _forget_halt_if_console_spoke(ctx: Ctx) -> None:
+    """After an operator prompt the halt marker survives unless the console shows output past
+    the halt: a halted unit is silent, so only a power-on (boot text) invalidates it."""
+    b = ctx.bench
+    try:
+        b.console.drain()
+        spoke = _console_chars(b.console) > ctx.halted_console_chars
+    except (BenchError, AttributeError):
+        spoke = True
+    if spoke:
+        ctx.halted_on_count = None
+
+
+_FS_FAULT_RE = re.compile(r"(?m)^.*(?:EXT4-fs error|error -5\b).*$")
+
+
 def _same_unit(ctx: Ctx, t) -> bool:
     """Prove that the SSH host is the unit on THIS console: it must write a nonce to its
     /dev/console and we must read it on our serial line (a stale DHCP lease may point at
@@ -540,6 +597,7 @@ def clean_shutdown(ctx: Ctx) -> str:
         return _record_cut(ctx, "blind", skipped + "no console shell and no proven ssh path; "
                            "if Linux is up this cut is hard")
     b.console.drain()
+    mark = len(b.console.transcript)
     if via == "ssh":
         try:
             r = t.run("sync; echo ALPSYNC:$?; poweroff", check=False, timeout=POWEROFF_TIMEOUT_S)
@@ -576,6 +634,16 @@ def clean_shutdown(ctx: Ctx) -> str:
         except ExpectTimeout:
             halted = False
     ctx.halted_on_count, ctx.console_login_on_count = count, None   # once per power-on
+    if halted:
+        b.console.drain()
+        ctx.halted_console_chars = _console_chars(b.console)
+    faults = [ln.strip() for ln in _FS_FAULT_RE.findall(_since(b.console, mark))][:5]
+    if sync_rc == "127" or faults:
+        # the cause, verbatim: a sync that cannot run or an ext4/I-O error on the root means the
+        # root is unreadable, not "no halt line"
+        ctx.halted_outcome = f"unreadable (sync rc={sync_rc}; {' | '.join(faults) or 'sync not found'})"
+        return _record_cut(ctx, ctx.halted_outcome, f"{via}: root filesystem unreadable; "
+                           f"halt line {'seen' if halted else 'not seen'}; console: {' | '.join(faults) or '-'}")
     if halted:
         # `clean` means halted AND the first sync returned 0; any other rc is its own outcome
         outcome = "clean" if sync_rc == "0" else f"clean (sync rc={sync_rc})"
@@ -972,7 +1040,7 @@ class OpDsw1EmmcInsertSd(_PreLinux):
             note = halt_note(clean_shutdown(ctx))
             b.operator.confirm(f"{note} Power OFF, insert the provisioning microSD (DSW1 may stay on xSPI). "
                                "Leave it OFF until the tool asks.")
-            ctx.halted_on_count = None     # the operator may have powered it back on: never trust the marker now
+            _forget_halt_if_console_spoke(ctx)
         ctx.mutate("clean shutdown; operator: insert the provisioning microSD (DSW1 may stay on xSPI)", prompt)
 
         def check():
@@ -1468,6 +1536,7 @@ class EepromManifest(Step):
         ev = {"manifest_staged_crc32": _crc(blob[:0x7C]),
               "manifest_staged_sha256": hashlib.sha256(blob).hexdigest()}
         bus = ctx.i2c("eeprom")
+        _archive_old_identity(ctx, "manifest", blob)
         ctx.mutate(f"stage {ctx.serial}.manifest.staged.bin in the ledger",
                    lambda: _stage(ctx, f"{ctx.serial}.manifest.staged.bin", blob))
         ctx.mutate(f"write 128-byte manifest: 8 x 16-byte pages, i2c-{bus} @0x50, ACK poll, readback",
@@ -1486,6 +1555,19 @@ class EepromManifest(Step):
         if ctx.execute:
             ev.update(_manifest_ev(blob))
         return self.result(ctx, f"manifest for {ctx.serial}, mfg_date {ctx.mfg_date}", ev)
+
+
+def _archive_old_identity(ctx: Ctx, kind: str, blob: bytes) -> None:
+    """--replace-identity: archive the old committed/staged blobs of ``kind`` before the new
+    one is staged (else _stage / promote_manifest refuse AFTER the EEPROM was written)."""
+    if not ctx.replace_identity:
+        return
+    old = Path(ctx.reprovision_from).read_bytes()
+    hw = old[48:56].split(b"\0", 1)[0].decode("ascii", "replace") or "unknown"
+    ctx.mutate(f"--replace-identity: archive the old {ctx.serial}.{kind} blobs as "
+               f"{ctx.serial}.{kind}.{hw}-{date.today().isoformat()}[.staged].bin",
+               lambda: ledger_out.archive_identity(ctx.unit_dir, ctx.serial, kind, hw,
+                                                   date.today().isoformat(), blob))
 
 
 def _manifest_ev(arr: bytes) -> dict[str, str]:
@@ -1990,6 +2072,7 @@ class SecurePage(Step):
                 raise Refused(f"identity header locked (lock status {lock:#04x}); secure page cannot change")
         blob = _build_blob(ctx, "program_eeprom_secure_page.py", "secure-page.bin")
         ev = {"secure_page_staged_crc32": _crc(blob), "secure_page_staged_sha256": hashlib.sha256(blob).hexdigest()}
+        _archive_old_identity(ctx, "secure-page", blob)
         ctx.mutate(f"stage {ctx.serial}.secure-page.staged.bin in the ledger",
                    lambda: _stage(ctx, f"{ctx.serial}.secure-page.staged.bin", blob))
         got = ctx.mutate(f"write the 64-byte Secure Data Page (0x58 selector 0x00) on i2c-{bus}, read back, compare",
@@ -2019,7 +2102,7 @@ class OpDsw1XspiRemoveSd(Step):
             note = halt_note(clean_shutdown(ctx))
             b.operator.confirm(f"{note} Power OFF, set DSW1 to xSPI boot, REMOVE the microSD. "
                                "Leave it OFF until the tool asks.")
-            ctx.halted_on_count = None     # the operator may have powered it back on: never trust the marker now
+            _forget_halt_if_console_spoke(ctx)
         ctx.mutate("clean shutdown; operator: set DSW1 to xSPI boot and remove the microSD", prompt)
         return self.result(ctx, "DSW1 on xSPI, microSD removed")
 
@@ -2161,7 +2244,8 @@ class ClkgenVerify(Step):
         image = lt.clkgen_read_image(t, bus)
         bad = lt.clkgen_diff(image)
         line = uboot.parse_clkgen_line(ctx.boot_text)
-        if line is None:
+        no_capture = line is None and not ctx.boot_text.strip()
+        if line is None and not no_capture:
             bad.append(f"U-Boot lacks the 5L35023B clkgen fixup (patch 0007, #2293): no "
                        f"{uboot.CLKGEN_LINE_PREFIX!r} line in the last boot console capture")
         ctx.step_logs[self.name] = "\n".join(bad) if bad else f"OTP image ok; boot line: {line!r}"
@@ -2169,6 +2253,11 @@ class ClkgenVerify(Step):
             raise Refused("5L35023B verification failed: " + "; ".join(bad))
         ev = {"clkgen_otp_raw": " ".join(f"{b:02x}" for b in image),
               "clkgen_i2c_addr": f"{lt.CLKGEN_5L35023B_ADDR:#04x}"}
+        ev["clkgen_uboot_fixup"] = "unread (no boot console captured in this run)" if no_capture else f"seen: {line}"
+        if no_capture:      # --only runs / resumed runs: nothing to read the U-Boot fixup line from
+            return self.result(ctx, "not verified: no boot console captured in this run (the OTP image "
+                               f"matches, dash code {image[0x01]:#04x}; the U-Boot fixup line was not read)",
+                               ev, status="skipped")
         return self.result(ctx, f"5L35023B OTP image matches (dash code {image[0x01]:#04x}); "
                            f"boot line: {line!r}", ev, status="done")
 
