@@ -292,6 +292,8 @@ def provision(cfg: Cfg) -> int:
     bootloader_only = bundle["status"].startswith("bootloader-only")
     image_skipped = False
     for comp in sorted(bundle["components"], key=lambda c: _FLASH_ORDER.get(c["role"], 9)):
+        if comp["role"] == "system_image_bmap":       # companion of system_image, never flashed itself
+            continue
         if comp["role"] == "system_image" and bootloader_only:
             steps.append(Step("flash:system_image", True, "skipped (bundle is bootloader-only)"))
             image_skipped = True
@@ -392,14 +394,15 @@ def _v2n_parser() -> argparse.ArgumentParser:
     work.add_argument("--tier-markers", type=Path, help="PRIVATE DDR tier markers JSON")
     work.add_argument("--pmic-expect", type=Path,
                       help="PRIVATE expected PMIC registers (YAML or JSON)")
+    work.add_argument("--functest-expect", type=Path,
+                      help="PRIVATE expected values of functional_test (YAML), merged over "
+                           "scripts/provision/functest-expect-v2n.yaml")
     work.add_argument("--flash-writer", type=Path, help="Flash Writer .mot (overrides bench.yaml)")
     work.add_argument("--gd32-fw", type=Path,
                       help="dir with bootloader.bin, ota-meta.bin, slot-a.bin")
-    work.add_argument("--enable-dxm1-flash", action="store_true",
-                      help="BENCH-PENDING: program the DX-M1 NPU's SPI-NAND over the UART "
-                           "recovery path (v2n-m1 only); needs bench.yaml dxm1.* -- has never "
-                           "run on silicon and cannot succeed on the first V2M bench unit yet "
-                           "-- default skip until bench-verified")
+    work.add_argument("--no-payload-store", action="store_true",
+                      help="do not cache payloads in /var/lib/alp-payload on the provisioning SD's "
+                           "root filesystem; push everything over SSH / the console")
     work.add_argument("--hw-rev", metavar="rN",
                       help="this unit's hardware revision key (e.g. r2) when it differs from "
                            "the bundle/preset default; a batch can mix revisions")
@@ -422,6 +425,9 @@ def _v2n_parser() -> argparse.ArgumentParser:
     work.add_argument("--only", help="STEP[,STEP] (preflight always runs)")
     work.add_argument("--from", dest="start", metavar="STEP")
     work.add_argument("--skip", help="STEP[,STEP]")
+    work.add_argument("--linux-host", metavar="HOST",
+                      help="sets the target host for this run (overrides bench.yaml linux.host; an EEPROM MAC "
+                           "change still forces rediscovery)")
     work.add_argument("--force-step", help="STEP[,STEP]: run even if its probe is satisfied")
     sub.add_parser("plan", parents=[common, work], help="dry run; read-only probes with --bench")
     r = sub.add_parser("run", parents=[common, work], help="dry run unless --execute")
@@ -449,6 +455,9 @@ def _bundle_from_build_dir(d: Path) -> dict:
             raise ValueError(f"--build-dir: want exactly one {pat}, found {[h.name for h in hits]}")
         comps.append({"role": role, "file": hits[0].name, "sha256": _sha256(hits[0]),
                       "size_bytes": hits[0].stat().st_size, "flash_target": target})
+    if len(bm := sorted(d.glob("*.wic.bmap"))) == 1:
+        comps.append({"role": "system_image_bmap", "file": bm[0].name, "sha256": _sha256(bm[0]),
+                      "size_bytes": bm[0].stat().st_size, "flash_target": "emmc"})
     return {"status": "complete", "release_version": f"build-dir:{d.name}", "components": comps}
 
 
@@ -533,7 +542,7 @@ def _check_hw_rev(family: str, key: str) -> None:
 def v2n_main(argv: list[str]) -> int:
     import yaml
     from provision import bench as bench_mod
-    from provision import gates, steps
+    from provision import functest, gates, steps
 
     try:
         a = _v2n_parser().parse_args(argv)
@@ -563,9 +572,12 @@ def v2n_main(argv: list[str]) -> int:
             bundle = {**bundle, "hw_rev": a.hw_rev}
         markers = json.loads(a.tier_markers.read_text(encoding="utf-8")) if a.tier_markers else None
         regs = yaml.safe_load(a.pmic_expect.read_text(encoding="utf-8")) if a.pmic_expect else None
+        expect = functest.load_expect(a.functest_expect)
         if a.cmd == "run" and not a.bench:
             raise ValueError("run needs --bench")
         bench = bench_mod.load_bench(a.bench) if a.bench else None
+        if bench is not None and a.linux_host:
+            bench.linux_host = a.linux_host
         names = (_csv(a.only) or []) + (_csv(a.skip) or []) + (_csv(a.force_step) or [])
         for n in names + ([a.start] if a.start else []):
             if n not in steps.STEP_NAMES:
@@ -604,12 +616,13 @@ def v2n_main(argv: list[str]) -> int:
         hil = REPO / "tests" / "hil" / f"{a.sku.lower().removeprefix('e1m-')}-{a.carrier}"
     ctx = steps.Ctx(sku=a.sku, serial=serial, bundle_dir=bundle_dir, bundle=bundle, preset=preset,
                     ledger_root=a.ledger_root, execute=execute, lock=getattr(a, "lock", False),
-                    bench=bench, tier_markers=markers, expected_registers=regs,
+                    bench=bench, tier_markers=markers, expected_registers=regs, functest_expect=expect,
                     allow_tier_mismatch=a.allow_tier_mismatch,
                     accept_cid_change=a.accept_cid_change, reprovision_from=a.reprovision_from,
                     cold_cycles=a.cold_cycles, hil_spec=hil, flash_writer=a.flash_writer,
-                    gd32_fw=a.gd32_fw, dxm1_flash=a.enable_dxm1_flash,
+                    gd32_fw=a.gd32_fw,
                     transfer=a.transfer, station=a.station, by=a.by,
+                    payload_store_on=not a.no_payload_store,
                     ledger_xlsx=a.ledger_xlsx,
                     mfg_date_override=a.mfg_date if a.mfg_date and a.mfg_date != derived else None)
     ctx.state = steps.load_state(ctx.state_path)

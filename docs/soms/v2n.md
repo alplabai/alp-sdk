@@ -33,8 +33,8 @@ All three SKUs share the same silicon + PCB.  Pick by memory budget.
 | Wi-Fi 6 + BLE 5.4       | Murata LBEE5HY2FY-922      | SDIO + UART + I2S | [`<alp/chips/murata_lbee5hy2fy.h>`](../../include/alp/chips/murata_lbee5hy2fy.h) |
 | Ethernet PHY 0          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | [`<alp/chips/rtl8211fdi.h>`](../../include/alp/chips/rtl8211fdi.h) |
 | Ethernet PHY 1          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | (same driver, second instance)          |
-| eMMC                    | (variant per SKU)          | Renesas SD0      | Zephyr SD subsystem                     |
-| NOR flash               | (variant per SKU)          | Renesas xSPI0    | Zephyr flash subsystem                  |
+| eMMC                    | (variant per SKU)          | Renesas SD0      | A55 Linux mmc (A55-owned)               |
+| NOR flash               | (variant per SKU)          | Renesas xSPI0    | A55 Linux mtd (A55-owned)               |
 
 Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
@@ -196,7 +196,13 @@ kernel as `/chosen/alp,sku`; the `alp-hostname` unit in every ALP image
 turns it into the hostname. U-Boot patch 0010 also publishes the unit
 serial as `/chosen/alp,serial`, which the unit appends so each board gets
 its own name (for example `e1m-v2m103-2026w38-0001`; the whole serial,
-since its index restarts every ISO week). An unprovisioned
+since its index restarts every ISO week). The root shell prompt does not
+show the serial (`root@e1m-v2m103:~#`: `/etc/profile.d/alp-prompt.sh`
+strips it from the hostname for interactive shells), and the pre-login
+banner gains a `Module: <SKU>  Serial: <serial>` line: the same unit writes
+`/run/alp-module.issue` and the image links `/etc/issue.d/10-alp-module.issue`
+to it (agetty appends `/etc/issue.d/*.issue` to `/etc/issue`; the line is
+absent on a blank module). The hostname itself is unchanged. An unprovisioned
 module, or a bootloader older than u-boot patch 0009, publishes nothing
 and keeps the distro default hostname `alp-e1m`.
 
@@ -422,13 +428,10 @@ Both files are tab-delimited; consume directly or via
 |----------------------------------|-------------------------------------------------------------|
 | `v2n-gd32-bridge-ping`           | Round-trip PING + GET_VERSION on both transports.           |
 | `v2n-board-id-readout`           | SoM EEPROM manifest read + SKU assertion.                   |
-| `v2n-ethernet-dual`              | Bring up both RTL8211FDI PHYs (ET0 + ET1); WoL configuration.|
 | `v2n-eeprom-manifest-dump`       | Hexdump + decode the 128-byte EEPROM manifest.              |
 | `v2n-temp-sensor`                | TMP112 read loop -- classic starter app.                    |
 | `v2n-pwm-fan-control`            | Ramp a GD32-side PWM channel along a five-stop fan curve.   |
 | `v2n-secure-element-sign`        | OPTIGA Trust M probe, Coprocessor UID read and raw APDU session (host library). |
-| `v2n-xspi-flash-readwrite`       | Erase + write + verify one page on the on-module xSPI NOR.  |
-| `v2n-emmc-block-stat`            | Read on-module eMMC geometry + first block via disk-access. |
 | `v2n-gd32-swd-flash`             | Host-driven SWD bit-bang -- IDCODE read, halt, erase/write/verify, reset. |
 
 Plus every cross-family example
