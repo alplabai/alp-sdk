@@ -177,7 +177,7 @@ def test_selector_picks_the_twin_fragment_when_it_exists(app_dir, tmp_path):
     assert _selected_conf(cm, tmp_path, "native_sim/native/64", ("aen803",)) == "generated/alp.conf"
 
 
-def test_stale_twin_fragment_is_removed(tmp_path):
+def test_stale_twin_fragment_is_removed(tmp_path, monkeypatch):
     src = _example("examples/peripheral-io/alp-console")
     d = tmp_path / "alp-console"
     shutil.copytree(src, d, ignore=shutil.ignore_patterns("generated", "build*"))
@@ -185,5 +185,8 @@ def test_stale_twin_fragment_is_removed(tmp_path):
     twin = d / "generated" / "aen803" / "alp.conf"
     twin.parent.mkdir(parents=True)
     twin.write_text("CONFIG_STALE=y\n", encoding="utf-8")
+    # Force the twin to converge with the base: no twin is written, so only the
+    # pre-regeneration unlink can remove the planted file.
+    monkeypatch.setattr(GEN, "_slice_alp_conf", lambda *_a, **_k: "CONFIG_SAME=y\n")
     GEN.generate(d, board, next(c[2] for c in CASES if c[0] == src))
-    assert not twin.exists() or "CONFIG_STALE" not in twin.read_text(encoding="utf-8")
+    assert not twin.exists()
