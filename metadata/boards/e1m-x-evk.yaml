@@ -165,7 +165,8 @@ e1m_routes:
         doc: "Camera-0 reset (active-low)." }
     # --- USB / SD-card path muxes ---
     - { e1m: E1M_X_GPIO_IO24, macro: XEVK_PIN_USB_MUX_SEL,
-        doc: "USB path-mux select." }
+        mux_select: { polarity: TBD, default_level: TBD },
+        doc: "USB path-mux select. Driven by the DX-M1 on V2M, undriven on V2N (driven_by in the SoM pad_routes); polarity/default pending carrier-netlist confirmation." }
     - { e1m: E1M_X_GPIO_IO27, macro: XEVK_PIN_SDIO_MUX_SEL,
         doc: "SDIO path-mux select." }
     - { e1m: E1M_X_GPIO_IO29, macro: XEVK_PIN_SDIO_MUX_EN,
