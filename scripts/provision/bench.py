@@ -16,11 +16,15 @@ See docs/provisioning-v2n.md.
 from __future__ import annotations
 
 import codecs
+import logging
+import math
+import os
 import re
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,11 +71,23 @@ class Console:
         pass
 
     # -- shared behaviour --------------------------------------------------
-    def write(self, data: bytes) -> None:
-        self._write_raw(data)
+    # A real UART RX (the board's console under a login shell) overruns on a burst:
+    # bytes get corrupted (spaces turned into '@' on silicon). Interactive command
+    # lines are therefore sent in small chunks with a short gap; bulk streams
+    # (Flash Writer image) stay unpaced.
+    PACE_CHUNK = 64
+    PACE_GAP_S = 0.003
 
-    def send_line(self, line: str, eol: str = "\r") -> None:
-        self._write_raw((line + eol).encode())
+    def write(self, data: bytes, paced: bool = False) -> None:
+        if not paced:
+            self._write_raw(data)
+            return
+        for i in range(0, len(data), self.PACE_CHUNK):
+            self._write_raw(data[i : i + self.PACE_CHUNK])
+            time.sleep(self.PACE_GAP_S)
+
+    def send_line(self, line: str, eol: str = "\r", paced: bool = False) -> None:
+        self.write((line + eol).encode(), paced)
 
     def _pull(self, timeout: float) -> bool:
         data = self._read_raw(timeout)
@@ -82,6 +98,10 @@ class Console:
             self.transcript.append(text)
             self._buf += text
         return True
+
+    def peek(self) -> str:
+        """The unconsumed console text, without consuming it."""
+        return self._buf
 
     def expect(self, pattern: str | re.Pattern[str], timeout: float) -> re.Match[str]:
         """Wait until `pattern` matches the unconsumed console text.
@@ -115,6 +135,12 @@ class Console:
                 shown = " | ".join(rx.pattern for rx in compiled.values())
                 raise ExpectTimeout(shown, self._buf[-_TAIL:], timeout)
             self._pull(min(remaining, 0.5))
+
+    def pump(self, seconds: float) -> None:
+        """Read into the buffer for `seconds` (opens the port if needed); nothing is discarded."""
+        deadline = time.monotonic() + seconds
+        while (remaining := deadline - time.monotonic()) > 0:
+            self._pull(min(remaining, 0.2))
 
     def drain(self, quiet_s: float = 0.2, max_s: float = 10.0) -> str:
         """Read until the console is quiet for `quiet_s`; return and consume
@@ -229,57 +255,204 @@ class Operator:
 # --------------------------------------------------------------------------
 
 
+# RTL8211F(I) datasheet Rev 1.7 Table 53 notes 1-2: toggling the 3.3 V source
+# needs both 3.3 V and the PHY 1.0 V at 0 V with a toggle period > 100 ms. A
+# short OFF dwell or a sub-second ON blip violates it, so both are enforced here
+# and not left to bench.yaml or to the step order.
+MIN_OFF_S = 10.0
+MIN_ON_S = 5.0
+ON_SETTLE_S = 1.0  # keep reading this long after ON: the ROM banner lands within ms of the edge
+
+
 class Power:
+    _clock = staticmethod(time.monotonic)
+    _sleep = staticmethod(time.sleep)
+    _last_on: float | None = None
+    on_count = 0  # ON events issued; lets a step tell whether the unit was cycled since it looked
+    _defer_confirm = False  # cycle(): confirm the ON AFTER the console settle, not before
+
+    def confirm_on(self) -> None:
+        """Verify the ON took effect (subclasses that can read the output state back)."""
+
+    @property
+    def log(self) -> list[str]:
+        """Every PSU command with a monotonic timestamp, for the step evidence."""
+        return self.__dict__.setdefault("_log", [])
+
+    def _note(self, what: str) -> None:
+        self.log.append(f"[t={self._clock():.3f}] POWER {what}")
+
+    def _mark_on(self) -> None:
+        self._last_on = self._clock()
+        self.on_count += 1
+
+    def _wait_min_on(self) -> None:
+        """Never cut power before the unit has been ON for MIN_ON_S."""
+        if self._last_on is None:
+            # A fresh Power may belong to a run started right after another run's
+            # ON (state does not survive the process): assume it was just switched on.
+            self._last_on = self._clock()
+        if (rest := self._last_on + MIN_ON_S - self._clock()) > 0:
+            self._note(f"waiting {rest:.3f}s (min ON {MIN_ON_S:g}s)")
+            self._sleep(rest)
+
     def on(self) -> None:
         raise NotImplementedError
 
     def off(self) -> None:
         raise NotImplementedError
 
-    def cycle(self, off_s: float = 3.0) -> None:
+    def cycle(self, off_s: float = MIN_OFF_S, console: Console | None = None) -> None:
+        off_s = max(off_s, MIN_OFF_S)
         self.off()
-        time.sleep(off_s)
-        self.on()
+        # Keep reading the console while off: a one-shot ROM banner can land
+        # right at power-on, and an unread port may deliver nothing afterwards.
+        # A console error must not leave the unit off: finish the dwell, power
+        # on, then report it.
+        end, err = self._clock() + off_s, None
+        try:
+            if console is not None:
+                console.pump(off_s)
+        except BenchError as e:
+            err = e
+        if (rest := end - self._clock()) > 0:
+            self._sleep(rest)
+        # The ON read-back (a PSU round trip, up to ~30 s of reconnect backoff) must not run
+        # between the ON edge and the first console read: the ROM banner lands within ms. So
+        # on() only sends here, and the read-back follows the settle read below.
+        self._defer_confirm = True
+        try:
+            self.on()
+        finally:
+            self._defer_confirm = False
+        # Read continuously across the ON edge (not just up to it): whatever the
+        # unit prints right at power-up is buffered for the caller's expect().
+        try:
+            if console is not None and err is None:
+                console.pump(ON_SETTLE_S)
+        except BenchError as e:
+            err = e
+        self.confirm_on()
+        if err is not None:
+            raise BenchError(f"console failed during the power cycle (power restored): {err}") from err
 
     def is_on(self) -> bool | None:  # None = unknowable
         return None
 
+    def current(self) -> float | None:
+        """Supply current in amps, one reading; None when this power kind cannot measure it."""
+        return None
+
+    def voltage(self) -> float | None:
+        """Supply voltage in volts, one reading; None when this power kind cannot measure it."""
+        return None
+
 
 class ScpiPower(Power):
-    """SCPI over raw TCP, one connection per command.
+    """SCPI over ONE persistent raw TCP connection (the only SCPI socket in the tool).
+
+    The SPD3303X LAN stack hangs (resets, WinError 10054) after many short
+    connections and only a PSU power-cycle clears it, so the connection is
+    kept open, commands are serialised under a lock with a small gap between
+    them, and a failure reconnects with backoff before giving up.
 
     Command syntax is the bench-proven ``OUTP CH<n>,ON|OFF`` form, not the
     IEEE ``(@n)`` channel-list form; output state is read from ``SYST:STAT?``.
     """
 
+    GAP_S = 0.05  # minimum spacing between commands
+    BACKOFF_S = (3.0, 6.0, 9.0, 12.0)  # reconnect waits: 5 attempts over ~30 s
+
     def __init__(
         self, host: str, port: int, channel: int, connect=socket.create_connection
     ) -> None:
         self.host, self.port, self.channel = host, port, int(channel)
+        if self.channel not in (1, 2):
+            raise BenchError(f"SCPI power channel {channel}: only CH1 and CH2 have a SYST:STAT? "
+                             "output bit, so the output state cannot be confirmed; use 1 or 2")
         self._connect = connect
+        self._sock = None
+        self._lock = threading.Lock()
+        self._last_io: float | None = None
+
+    def close(self) -> None:
+        with self._lock:
+            self._drop()
+
+    def _drop(self) -> None:
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+
+    def _io(self, cmd: str, reply: bool) -> str:
+        if self._sock is None:
+            self._sock = self._connect((self.host, self.port), timeout=3)
+        if self._last_io is not None and (
+            rest := self.GAP_S - (self._clock() - self._last_io)
+        ) > 0:
+            self._sleep(rest)
+        self._sock.sendall((cmd + "\n").encode())
+        self._last_io = self._clock()
+        if not reply:
+            return ""
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = self._sock.recv(256)
+            if not chunk:
+                raise ConnectionResetError("PSU closed the connection")
+            data += chunk
+        self._last_io = self._clock()
+        return data.decode(errors="replace").strip()
 
     def _send(self, cmd: str, reply: bool = False) -> str:
-        try:
-            with self._connect((self.host, self.port), timeout=3) as s:
-                s.sendall((cmd + "\n").encode())
-                if not reply:
-                    time.sleep(0.2)  # let the PSU act before the socket closes
-                    return ""
-                data = b""
-                while not data.endswith(b"\n"):
-                    chunk = s.recv(256)
-                    if not chunk:
-                        break
-                    data += chunk
-                return data.decode(errors="replace").strip()
-        except OSError as e:
-            raise BenchError(f"SCPI {self.host}:{self.port} {cmd!r}: {e}") from e
+        self._note(f"SCPI {cmd}")
+        with self._lock:
+            err: OSError | None = None
+            for attempt in range(len(self.BACKOFF_S) + 1):
+                try:
+                    return self._io(cmd, reply)
+                except OSError as e:
+                    err = e
+                    self._drop()
+                    if attempt < len(self.BACKOFF_S):
+                        self._note(f"SCPI reconnect in {self.BACKOFF_S[attempt]:g}s: {e}")
+                        self._sleep(self.BACKOFF_S[attempt])
+            raise BenchError(
+                f"SCPI {self.host}:{self.port} {cmd!r}: still failing after "
+                f"{len(self.BACKOFF_S) + 1} attempts: {err}"
+            ) from err
 
     def on(self) -> None:
-        self._send(f"OUTP CH{self.channel},ON")
+        try:
+            self._send(f"OUTP CH{self.channel},ON")
+        finally:  # the PSU may have acted even if the reply path failed
+            self._mark_on()
+        if not self._defer_confirm:
+            self._confirm(True)
+
+    def confirm_on(self) -> None:
+        self._confirm(True)
 
     def off(self) -> None:
+        self._wait_min_on()
         self._send(f"OUTP CH{self.channel},OFF")
+        self._confirm(False)
+
+    def _confirm(self, want: bool) -> None:
+        """OUTP has no reply, so a half-dead socket can swallow it: read the
+        state back and resend once before giving up."""
+        for attempt in range(2):
+            if self.is_on() is want:
+                return
+            if attempt == 0:
+                self._send(f"OUTP CH{self.channel},{'ON' if want else 'OFF'}")
+                if want:        # the first ON was swallowed: the ON edge is now, not an extra ON event
+                    self._last_on = self._clock()
+        raise BenchError(f"SCPI {self.host}:{self.port}: CH{self.channel} did not read back "
+                         f"{'ON' if want else 'OFF'} after OUTP; check the PSU front panel")
 
     def is_on(self) -> bool | None:
         """Siglent SPD3303X has no ``OUTP?`` query (it times out); its output
@@ -293,6 +466,27 @@ class ScpiPower(Power):
         except (BenchError, ValueError):
             return None
         return bool(stat >> (3 + self.channel) & 1)
+
+    def _measure(self, what: str) -> float:
+        """One ``MEAS:<what>? CH<n>`` reading of the configured channel only, over the
+        persistent socket. BenchError when the reply is not a finite number."""
+        cmd = f"MEAS:{what}? CH{self.channel}"
+        reply = self._send(cmd, reply=True)
+        try:
+            value = float(reply)
+        except ValueError:
+            value = math.nan
+        if not math.isfinite(value):
+            raise BenchError(f"SCPI {self.host}:{self.port} {cmd}: not a number: {reply!r}")
+        return value
+
+    def current(self) -> float:
+        """One ``MEAS:CURR? CH<n>`` reading, in amps."""
+        return self._measure("CURR")
+
+    def voltage(self) -> float:
+        """One ``MEAS:VOLT? CH<n>`` reading, in volts (same parsing rules as current())."""
+        return self._measure("VOLT")
 
 
 class LabgridPower(Power):
@@ -308,7 +502,7 @@ class LabgridPower(Power):
     def _lg(self, action: str) -> str:
         argv = [self._exe, "-p", self.place, "power", action]
         try:
-            r = self._runner(argv, capture_output=True, text=True, timeout=60)
+            r = self._runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
         except (OSError, subprocess.TimeoutExpired) as e:
             raise BenchError(f"{' '.join(argv)}: {e}") from e
         if r.returncode != 0:
@@ -318,9 +512,15 @@ class LabgridPower(Power):
         return r.stdout
 
     def on(self) -> None:
-        self._lg("on")
+        self._note("labgrid on")
+        try:
+            self._lg("on")
+        finally:
+            self._mark_on()
 
     def off(self) -> None:
+        self._wait_min_on()
+        self._note("labgrid off")
         self._lg("off")
 
     def is_on(self) -> bool | None:
@@ -334,14 +534,20 @@ class ManualPower(Power):
 
     def on(self) -> None:
         self.operator.confirm("Switch the unit's power ON.")
+        self._mark_on()
 
     def off(self) -> None:
+        self._wait_min_on()
         self.operator.confirm("Switch the unit's power OFF.")
 
-    def cycle(self, off_s: float = 3.0) -> None:
+    def cycle(self, off_s: float = MIN_OFF_S, console: Console | None = None) -> None:
+        off_s = max(off_s, MIN_OFF_S)
+        self._wait_min_on()
+        self._note("manual cycle")
         self.operator.confirm(
             f"Power-cycle the unit: OFF, wait at least {off_s:g} s, then ON."
         )
+        self._mark_on()
 
 
 # --------------------------------------------------------------------------
@@ -413,7 +619,7 @@ class JLinkProbe(Probe):
                 "-CommanderScript", str(cmdfile),
             ]  # fmt: skip
             try:
-                r = self._runner(argv, capture_output=True, text=True, timeout=300)
+                r = self._runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
             except (OSError, subprocess.TimeoutExpired) as e:
                 raise BenchError(f"J-Link {self.serial_no}: {e}") from e
         out = (r.stdout or "") + (r.stderr or "")
@@ -459,6 +665,7 @@ class ScriptProbe(Probe):
     def __init__(self, wrapper: Path, runner=subprocess.run) -> None:
         self.wrapper = Path(wrapper)
         self._runner = runner
+        self.env: dict[str, str] = {}   # e.g. ALP_PROVISION_HOST, set once the unit's IP is known
 
     def _call(self, *args: str) -> str:
         interp = {".sh": ["bash"], ".py": [sys.executable]}.get(self.wrapper.suffix, [])
@@ -467,7 +674,8 @@ class ScriptProbe(Probe):
             *args,
         ]
         try:
-            r = self._runner(argv, capture_output=True, text=True, timeout=300)
+            extra = {"env": {**os.environ, **self.env}} if self.env else {}
+            r = self._runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300, **extra)
         except (OSError, subprocess.TimeoutExpired) as e:
             raise BenchError(f"{' '.join(argv)}: {e}") from e
         if r.returncode != 0:
@@ -501,6 +709,11 @@ class ScriptProbe(Probe):
 # --------------------------------------------------------------------------
 
 
+DEFAULT_OFF_S = 15.0  # the V2N rails and the 5L35023B need this long to discharge
+_log = logging.getLogger(__name__)
+CONSOLE_SWD_TOOLS = ("swd_bb.py", "gd32_swd_flash.py")
+
+
 @dataclass
 class Bench:
     console: Console
@@ -512,6 +725,19 @@ class Bench:
     i2c_bus: dict[str, int]  # values may be None while TBD
     scif: dict  # {"flash_writer": Path, "baud": int, "program_start": {"bl2_mmc": int|None, "fip": int|None}}
     raw: dict
+    # (dir, tool filenames) the console-push SWD fallback copies to the board
+    console_swd: tuple[Path, tuple[str, ...]] | None = None
+
+    @property
+    def off_s(self) -> float:
+        """Power-off dwell for a cold cycle: bench.yaml power.off_s (clamped UP to
+        MIN_OFF_S; a config may not shorten it), else DEFAULT_OFF_S."""
+        v = float((self.raw.get("power") or {}).get("off_s", DEFAULT_OFF_S))
+        if v < MIN_OFF_S:
+            _log.warning("bench.yaml power.off_s=%g is below the %g s safety minimum "
+                         "(RTL8211F power rules); using %g s", v, MIN_OFF_S, MIN_OFF_S)
+            return MIN_OFF_S
+        return v
 
 
 def _need(d: dict, key: str, where: str):
@@ -584,6 +810,13 @@ def load_bench(path: Path, operator: Operator | None = None) -> Bench:
                 f"bench.yaml: probe.kind must be jlink|script, got {kind!r}"
             )
 
+    console_swd = None
+    if pr and pr.get("kind") == "script":
+        console_swd = (
+            rel(pr["wrapper"]).parent,
+            tuple(pr.get("console_tools") or CONSOLE_SWD_TOOLS),
+        )
+
     linux = raw.get("linux") or {}
 
     ib = _need(raw, "i2c_bus", "")
@@ -615,4 +848,5 @@ def load_bench(path: Path, operator: Operator | None = None) -> Bench:
         i2c_bus=i2c_bus,
         scif=scif,
         raw=raw,
+        console_swd=console_swd,
     )

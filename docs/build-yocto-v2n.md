@@ -63,6 +63,10 @@ MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
 Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):
 - `alp-image-edge-*.wic[.gz]` — full SD/eMMC image (bootloader excluded;
   it's already on xSPI).
+- `alp-image-edge-*.wic.bmap` — block map of the wic (`wic.bmap` in
+  `IMAGE_FSTYPES`); ship it as the bundle's `system_image_bmap` so the
+  provisioning tool writes only the used blocks
+  (see [provisioning-v2n.md](provisioning-v2n.md)).
 - `Image` + `renesas/e1m-v2n101-x-evk.dtb` — kernel + the **carrier
   dtb** (composed from the SoC + SoM + E1M-X-EVK carrier dtsi and selected
   via the machine's `KERNEL_DEVICETREE`, so this is the e1m-x carrier dtb
@@ -84,7 +88,7 @@ differ only in posture:
 
 Build the production image against the **`alp` distro** so the rootfs
 carries an Alp identity (`/etc/os-release`, `/etc/issue`, the login
-banner say `Alp SDK 6.30`) instead of the upstream
+banner say `Alp SDK <version>`, read from `include/alp/version.h`) instead of the upstream
 `Poky (Yocto Project Reference Distro)` reference-distro banner:
 
 ```bash
@@ -134,8 +138,9 @@ MACHINE's `KERNEL_DEVICETREE` reuses its x101 sibling's dtb by design --
 see the memory-tier rationale in `e1m-v2n103-a55.conf` /
 `e1m-v2m103-a55.conf`) (issue #1175, closed as
 #1252). The vendor env's hardcoded `boot/r9a09g056n44-dev.dtb` is a
-filename **no Alp image builds**, on the eMMC branch as well as the SD
-one, which is why the reload exists. If the dtb is missing from
+filename **no Alp machine builds as a dtb**, on the eMMC branch as well as the
+SD one, which is why the reload exists (the image links that name to the board
+dtb so the vendor load succeeds harmlessly, #2637). If the dtb is missing from
 `/boot`, the bootloader prints an error and **stops** — it does not
 fall through and boot whatever devicetree is left in RAM.
 

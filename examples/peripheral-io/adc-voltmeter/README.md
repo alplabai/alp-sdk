@@ -20,8 +20,10 @@ fails at `alp_adc_open` with `ALP_ERR_OUT_OF_RANGE`.
 ## Build (standalone, native_sim)
 
 ```bash
+# writes examples/peripheral-io/adc-voltmeter/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/adc-voltmeter
 west build -b native_sim/native/64 examples/peripheral-io/adc-voltmeter \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 ```
 

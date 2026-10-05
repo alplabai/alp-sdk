@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -87,7 +88,7 @@ def _dict_entries(value) -> list[dict]:
 
 
 SCHEMA = REPO / "metadata" / "schemas" / "soc-spec-v1.schema.json"
-SOM_SCHEMA = REPO / "metadata" / "schemas" / "som-preset-v1.schema.json"
+SOM_SCHEMA = REPO / "metadata" / "schemas" / "som-preset-v2.schema.json"
 HWREV_SCHEMA = REPO / "metadata" / "schemas" / "hw-revisions-v1.schema.json"
 SILICON_KCONFIG_SCHEMA = REPO / "metadata" / "schemas" / "silicon-kconfig-v1.schema.json"
 SILICON_KCONFIG_REGISTRY = REPO / "metadata" / "registries" / "silicon-kconfig.json"
@@ -104,6 +105,10 @@ BOARD_PRESETS = REPO / "metadata" / "boards"
 LIBRARIES = REPO / "metadata" / "libraries"
 CHIP_SCHEMA = REPO / "metadata" / "schemas" / "chip-v1.schema.json"
 CHIPS = REPO / "metadata" / "chips"
+CAMERA_MODULE_SCHEMA = REPO / "metadata" / "schemas" / "camera-module-v1.schema.json"
+CAMERA_MODULES = REPO / "metadata" / "camera_modules"
+LINUX_KERNEL_DRIVERS_SCHEMA = REPO / "metadata" / "schemas" / "linux-kernel-drivers-v1.schema.json"
+LINUX_KERNEL_DRIVERS = REPO / "metadata" / "os" / "linux-kernel-drivers.yaml"
 # The V2N/V2M on-module GD32G553 supervisor pin-wiring source
 # scripts/gen_zephyr_board.py's `_v2n_pinctrl_dtsi()` / `_v2n_defconfig()`
 # read (#655).  There is NO auto-discovery in this script -- an
@@ -122,6 +127,23 @@ NPU_OPS_SCHEMA = REPO / "metadata" / "schemas" / "npu-ops-v1.schema.json"
 NPU_OPS = REPO / "metadata" / "npu_ops"
 MODEL_PERF_SCHEMA = REPO / "metadata" / "schemas" / "model-perf-v1.schema.json"
 MODEL_PERF = REPO / "metadata" / "model_perf"
+# Model-zoo manifests (ADR-0028: alp-sdk owns the schema + the data, tan owns
+# the engine that reads it -- scripts/alp_model/zoo.py and its tests are
+# ported into tan-cli, not here, tan-cli#1286). One file per model under
+# metadata/model_zoo/ (top-level *.yaml only -- NOT the starters/ subdir,
+# which holds the bundled binaries the `bundled:` source field references).
+MODEL_ZOO_SCHEMA = REPO / "metadata" / "schemas" / "model-zoo-v1.schema.json"
+MODEL_ZOO = REPO / "metadata" / "model_zoo"
+MODEL_ZOO_STARTERS = MODEL_ZOO / "starters"
+# The one root-level non-.yaml file this tree tolerates (its own doc),
+# mirroring `_MODEL_PERF_ALLOWED_ROOT_FILES`'s same allowance.
+_MODEL_ZOO_ALLOWED_ROOT_FILES = {"README.md"}
+# Mechanical "genuinely tiny, no weight redistribution" guard (#2539 review):
+# a byte-size ceiling on every starters/* file, not a human's judgment call
+# on review. 64 KiB is generous headroom over the real example-tiny.tflite
+# smoke fixture (712 B) while still ruling out anything that could plausibly
+# be a real model's weights.
+_MODEL_ZOO_STARTER_MAX_BYTES = 64 * 1024
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
 # .yaml whose `identifier:` is the fully-qualified <board>/<soc>/<cpucluster>
 # triple `west build -b` resolves).  Ground truth for the board-target check.
@@ -436,7 +458,7 @@ def _check_som_slot0_address_resolved(som_files) -> list:
     preset already gets feedback.
 
     JSON Schema can express that `base:` is `integer | "TBD"`
-    (`metadata/schemas/som-preset-v1.schema.json`'s `memory_region`) but
+    (`metadata/schemas/som-preset-v2.schema.json`'s `memory_region`) but
     not "declares itself a `*_slot0` region, so `base` may not be the
     `TBD` half of that union" -- that's a semantic rule over the region's
     OWN `name:`, not a shape constraint. Returns a failure list shaped
@@ -756,68 +778,6 @@ def _check_som_memory_population(som_files) -> list:
     return failures
 
 
-def _check_som_write_authority_present(som_files) -> list:
-    """Refuse a `memory_map:` region that carries no `write_authority`
-    (#1365 split A).
-
-    `metadata/schemas/som-preset-v1.schema.json`'s `memory_region.
-    write_authority` is deliberately NOT in `required` for som-preset v1
-    (`docs/porting-new-som.md` is a public porting guide; making it
-    `required` there would break a customer-ported preset on upgrade --
-    see the field's own description). That means the schema alone cannot
-    catch an author who forgets it, so this is the semantic gate the
-    schema defers, exactly like `_check_som_slot0_address_resolved` above
-    is the semantic gate for `*_slot0` regions the schema can't express.
-
-    Per ADR-0034 clause 4 ("no `default` or catch-all entry -- absence is
-    a validation failure"), an authored region with no `write_authority`
-    is UNRESOLVED, never `customer_runtime` -- the schema's own
-    description says so in terms ("ABSENT MEANS UNRESOLVED, NEVER
-    `customer_runtime`") a consumer must honour, and this check is what
-    makes that non-negotiable instead of a comment nobody reads. Returns
-    a failure list shaped like `_check_files()`. Presets with no
-    `memory_map:` are skipped.
-    """
-    failures: list[tuple[str, list[str]]] = []
-    for path in som_files:
-        rel = path.relative_to(REPO).as_posix()
-        try:
-            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
-        except Exception:
-            continue  # parse errors already reported by the schema pass
-        if not isinstance(doc, dict):
-            continue
-        memory_map = doc.get("memory_map")
-        if not isinstance(memory_map, list):
-            continue
-
-        msgs: list[str] = []
-        checked = 0
-        for region in memory_map:
-            if not isinstance(region, dict):
-                continue
-            name = region.get("name")
-            checked += 1
-            if "write_authority" not in region:
-                msgs.append(
-                    f"memory_map: region `{name}` carries no "
-                    f"`write_authority` -- absence means UNRESOLVED, "
-                    f"never `customer_runtime` (ADR-0034 clause 4); a "
-                    f"consumer must treat this region as ineligible for "
-                    f"both IPC carve-out and runtime write until the "
-                    f"field is authored")
-
-        if msgs:
-            print(f"FAIL {rel}")
-            for m in msgs:
-                print(f"  · {m}")
-            failures.append((rel, msgs))
-        elif checked:
-            print(f"OK   {rel}  (memory_map: {checked} region(s) all "
-                  f"carry write_authority)")
-    return failures
-
-
 def _check_silicon_kconfig() -> list:
     """Validate the silicon->Kconfig registry and its socs/ correspondence.
 
@@ -943,6 +903,94 @@ def _check_peripheral_kconfig() -> list:
     return failures
 
 
+def _check_board_camera_connectors(board_files) -> list:
+    """Every macro a `camera_connectors:` entry names (`i2c`, `enable`,
+    `reset`, `select[].gpio`) must be declared in the same preset's
+    `e1m_routes:`, and `lane_polarity` must hold `lanes + 1` flags.  The rules
+    live in `alp_cli.validator.camera_connector_problems`, shared with the
+    inline-project-board check.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    from alp_cli.validator import camera_connector_problems  # noqa: E402
+
+    failures: list[tuple[Path, list[str]]] = []
+    for path in board_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        msgs = camera_connector_problems(doc.get("camera_connectors"),
+                                         doc.get("e1m_routes"))
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+def _check_soc_linux_dt(soc_files, *, peripheral_map=None) -> list:
+    """Cross-check a SoC's `linux_dt` map (camera DT generators read it):
+
+      1. each instance's `label` must be a `label` in the same SoC's
+         `peripheral_instances` (the dtsi node the generator will reference);
+      2. each `pinmux` key is a peripheral-signal name that must exist in the
+         SoM peripheral map TSV (`renesas-peripheral-map.tsv`) -- the pin the
+         pinmux applies to is RESOLVED from that file, never restated here;
+    A capture-only entry (CSI receiver) has no `pinmux`, and capture units are
+    not modelled in `peripheral_instances`, so check 1 skips it.
+    """
+    tsv = peripheral_map or (REPO / "metadata" / "e1m_modules" / "v2n"
+                             / "renesas-peripheral-map.tsv")
+    signals: set[str] = set()
+    if tsv.is_file():
+        for line in tsv.read_text(encoding="utf-8").splitlines()[1:]:
+            cols = line.split("\t")
+            if cols and cols[0]:
+                signals.add(cols[0])
+    failures: list[tuple[Path, list[str]]] = []
+    for path in soc_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        linux_dt = doc.get("linux_dt") if isinstance(doc, dict) else None
+        if not isinstance(linux_dt, dict):
+            continue
+        labels = {inst.get("label")
+                  for insts in (doc.get("peripheral_instances") or {}).values()
+                  if isinstance(insts, list)
+                  for inst in insts if isinstance(inst, dict)}
+        msgs: list[str] = []
+        for name, ent in linux_dt.items():
+            if not isinstance(ent, dict):
+                continue
+            label = ent.get("label")
+            if ent.get("pinmux") and label not in labels:
+                msgs.append(f"linux_dt.{name}.label: `{label}` is not a label in peripheral_instances")
+            for sig in (ent.get("pinmux") or {}):
+                if signals and sig not in signals:
+                    msgs.append(f"linux_dt.{name}.pinmux: signal `{sig}` is not in "
+                                f"{tsv.name}")
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def _check_board_i2c_address_collisions(board_files) -> list:
     """Reject two on-board I2C device instances sharing an address.
 
@@ -1063,6 +1111,42 @@ def _check_chip_semantics(chip_files) -> list:
                 f"chip_id: `{chip_id}` must match the manifest filename `{path.stem}` "
                 f"-- chip_id lookups resolve by filename")
 
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+def _check_camera_module_semantics(module_files, *, chips_dir=None) -> list:
+    """Cross-check beyond schema: `module_id` == filename stem and `chip`
+    names a real chip manifest.
+
+    The lane/address parity against the chip manifest is deliberately NOT
+    here, nor is the `zephyr_shield` directory check: both belong to the
+    camera parity gate that lands with the generators.  Returns a failure list shaped like `_check_files()`.
+    """
+    chips_dir = chips_dir or CHIPS
+    failures: list[tuple[Path, list[str]]] = []
+    for path in module_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        msgs: list[str] = []
+        mid = doc.get("module_id")
+        if isinstance(mid, str) and mid != path.stem:
+            msgs.append(f"module_id: `{mid}` must match the filename `{path.stem}`")
+        chip = doc.get("chip")
+        if isinstance(chip, str) and not (chips_dir / f"{chip}.yaml").is_file():
+            msgs.append(f"chip: `{chip}` has no metadata/chips/{chip}.yaml")
         if msgs:
             print(f"FAIL {rel}")
             for m in msgs:
@@ -3017,6 +3101,273 @@ def _check_model_perf_semantics(model_perf_files) -> list:
     return failures
 
 
+def _collect_model_zoo_files(root: Path) -> tuple[list[Path], list[Path], list[tuple[str, list[str]]]]:
+    """Collect metadata/model_zoo/<id>.yaml entries + metadata/model_zoo/
+    starters/<file> data, and FAIL loudly on anything that doesn't fit
+    that exact two-tier shape (#2539 review), mirroring
+    `_collect_model_perf_files()`'s own structural-violation-as-failure
+    design rather than a bare glob that silently never opens a
+    misplaced file.
+
+      * `root/README.md` is the tree's own doc -- the one root-level
+        non-`.yaml` file allowed, silently skipped;
+      * `root/<id>.yaml` (exactly one path segment below `root`) is a
+        real entry candidate;
+      * `root/starters/<file>` (exactly two path segments, first segment
+        `starters`) is a real starter-data candidate;
+      * anything else -- a stray root-level non-`.yaml` file, a file
+        nested a level too deep under `starters/`, a second top-level
+        subdirectory -- is a structural violation and comes back as a
+        FAILURE, not a silent skip.
+
+    Returns (entries, starters, failures) -- entries/starters are sorted
+    `Path` lists, failures is shaped like `_check_files()`.
+    """
+    entries: list[Path] = []
+    starters: list[Path] = []
+    failures: list[tuple[str, list[str]]] = []
+    if not root.is_dir():
+        return entries, starters, failures
+    for path in sorted(root.rglob("*")):
+        if path.is_dir():
+            continue
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        parts = path.relative_to(root).parts
+        if len(parts) == 1:
+            if path.name in _MODEL_ZOO_ALLOWED_ROOT_FILES:
+                continue
+            if path.suffix == ".yaml":
+                entries.append(path)
+                continue
+            failures.append((rel, [
+                f"stray file directly under metadata/model_zoo/ -- a real "
+                f"entry is a top-level *.yaml; binary/data files belong "
+                f"under starters/, never loose at the root"]))
+            continue
+        if len(parts) == 2 and parts[0] == "starters":
+            starters.append(path)
+            continue
+        failures.append((rel, [
+            f"sits {len(parts)} path segment(s) below metadata/model_zoo/ "
+            f"in a shape collection doesn't recognise -- a real entry is "
+            f"exactly <id>.yaml (1 segment) and a real starter is exactly "
+            f"starters/<file> (2 segments); nothing else is opened by the "
+            f"schema/semantic passes below"]))
+    return entries, starters, failures
+
+
+def _bundled_case_exact(name: str, directory: Path) -> bool:
+    """True iff `name` is a byte-exact (case-sensitive) match for a real
+    entry in `directory`'s listing.
+
+    A case-insensitive host filesystem (macOS APFS default, Windows)
+    happily resolves a wrong-case `source.bundled` path to the real file
+    locally, while a case-sensitive CI runner (Linux ext4) 404s the exact
+    same string -- `Path.is_file()` alone cannot distinguish "matched
+    correctly" from "matched despite wrong case" on the former, so this
+    always re-checks against `os.listdir()`, which is never case-folding
+    regardless of the host filesystem's own behaviour.
+    """
+    try:
+        return name in os.listdir(directory)
+    except OSError:
+        return False
+
+
+def _check_model_zoo_semantics(model_zoo_files) -> list:
+    """`metadata/model_zoo/<id>.yaml` cross-checks a JSON Schema shape pass
+    can't express (ADR-0028, alp-sdk#2539):
+
+      1. `id:` matches the manifest filename (`<id>.yaml`), the same
+         join-key invariant `_check_library_semantics()` enforces for
+         libraries -- a `tan model zoo` lookup by id always resolves.
+      2. a `source.bundled` path resolves to a real file, and resolves
+         STRICTLY INSIDE `metadata/model_zoo/starters/` -- never outside it
+         (a `../` escape) and never to a missing file.  The schema can only
+         check that the field is a non-empty string shaped like
+         `starters/<file>`; it has no way to stat the filesystem or
+         resolve symlinks/`..`.  Without this, a typo'd or wandering
+         `bundled:` path validates clean and fails only later, opaquely,
+         whenever something actually tries to read the model.
+      3. every `validated_soms[]` entry names a SoM preset that actually
+         exists (`metadata/e1m_modules/<sku>.yaml`), mirroring
+         `_check_model_perf_semantics()`'s own SKU-existence check. The
+         schema's pattern only bounds the SKU to the real family/digit
+         vocabulary -- it cannot know which SKUs within that vocabulary
+         are actually shipped (e.g. `E1M-AEN899` is pattern-valid but no
+         such preset exists) -- so a well-formed but fictitious SKU would
+         otherwise validate clean and read as a real hardware claim.
+      4. `kind: fixture` implies `validated_soms == []` AND a `bundled`
+         source -- a fixture is a wiring/smoke entry by definition and
+         must never carry a hardware claim or an unreviewed upstream
+         link. The schema's own `if`/`then` ALSO enforces this now (so a
+         violation is caught even by a bare jsonschema validate with no
+         Python involved) -- this repeats the check only to give a
+         friendlier, specific message ("kind: fixture but validated_soms
+         is non-empty") than jsonschema's own if/then error text.
+      5. a resolved `source.bundled` path is a byte-exact (case-sensitive)
+         match against the real starters/ directory listing -- see
+         `_bundled_case_exact()`'s own docstring for why `is_file()` alone
+         is not enough.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[str, list[str]]] = []
+    for path in model_zoo_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+
+        entry_id = doc.get("id")
+        if isinstance(entry_id, str) and entry_id != path.stem:
+            msgs.append(
+                f"id: `{entry_id}` does not match filename `{path.name}` -- "
+                f"a `tan model zoo` lookup by id would not resolve this file")
+
+        source = doc.get("source") if isinstance(doc.get("source"), dict) else {}
+        bundled = source.get("bundled")
+        if isinstance(bundled, str) and bundled:
+            resolved = (MODEL_ZOO / bundled).resolve()
+            try:
+                resolved.relative_to(MODEL_ZOO_STARTERS.resolve())
+                inside_starters = True
+            except ValueError:
+                inside_starters = False
+            if not inside_starters:
+                msgs.append(
+                    f"source.bundled `{bundled}` resolves outside "
+                    f"metadata/model_zoo/starters/ -- a bundled path must "
+                    f"stay inside the starters/ directory it is meant to "
+                    f"ship from")
+            elif not resolved.is_file():
+                try:
+                    resolved_rel = resolved.relative_to(REPO).as_posix()
+                except ValueError:
+                    resolved_rel = resolved.as_posix()
+                msgs.append(
+                    f"source.bundled `{bundled}` does not resolve to a "
+                    f"real file at {resolved_rel}")
+            else:
+                written_name = bundled.rsplit("/", 1)[-1]
+                if not _bundled_case_exact(written_name, resolved.parent):
+                    msgs.append(
+                        f"source.bundled `{bundled}`'s filename "
+                        f"`{written_name}` is not a byte-exact "
+                        f"(case-sensitive) match in the real starters/ "
+                        f"directory listing -- a case-insensitive "
+                        f"filesystem (macOS APFS, Windows) can resolve "
+                        f"this locally while case-sensitive CI (Linux) "
+                        f"404s the identical path")
+
+        validated_soms = doc.get("validated_soms")
+        if isinstance(validated_soms, list):
+            for sku in validated_soms:
+                if isinstance(sku, str) and not (SOM_PRESETS / f"{sku}.yaml").is_file():
+                    msgs.append(
+                        f"validated_soms: `{sku}`: no metadata/e1m_modules/"
+                        f"{sku}.yaml preset -- this is not a real, shipped SKU")
+
+        if doc.get("kind") == "fixture":
+            if validated_soms:
+                msgs.append(
+                    f"kind: fixture but validated_soms is non-empty "
+                    f"({validated_soms!r}) -- a fixture is never a "
+                    f"bench-validated hardware claim")
+            if "bundled" not in source:
+                msgs.append(
+                    f"kind: fixture but source is not `bundled` -- a "
+                    f"fixture never links an external, unreviewed "
+                    f"upstream model")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+def _check_model_zoo_starters(model_zoo_files, starter_files) -> list:
+    """Cross-check the whole `metadata/model_zoo/starters/` tree against
+    every entry's `source.bundled` reference (#2539 review):
+
+      1. every file under `starters/` is referenced by at least one
+         entry's `source.bundled` -- an unreferenced ("orphan") starter is
+         untracked, unreviewable payload sitting in the published tree
+         with no entry accounting for its provenance.
+      2. every starter is small enough to mechanically back the
+         "genuinely tiny, no weight redistribution" contract (#2539) --
+         a hard byte-size ceiling (`_MODEL_ZOO_STARTER_MAX_BYTES`), not a
+         human's judgment call on review.
+
+    (The case-exact filename check lives in `_check_model_zoo_semantics`
+    instead, since it is meaningful per ENTRY-REFERENCE, not per starter
+    file on disk.)
+
+    Returns a failure list shaped like `_check_files()`, keyed per
+    starter file.
+    """
+    referenced: set[Path] = set()
+    for path in model_zoo_files:
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        source = doc.get("source") if isinstance(doc.get("source"), dict) else {}
+        bundled = source.get("bundled")
+        if isinstance(bundled, str) and bundled:
+            referenced.add((MODEL_ZOO / bundled).resolve())
+
+    failures: list[tuple[str, list[str]]] = []
+    for starter in starter_files:
+        try:
+            rel = starter.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = starter.as_posix()
+        msgs: list[str] = []
+
+        if starter.resolve() not in referenced:
+            msgs.append(
+                f"orphan starter: not referenced by any metadata/model_zoo/"
+                f"*.yaml entry's source.bundled -- untracked payload with "
+                f"no entry accounting for its provenance")
+
+        try:
+            size = starter.stat().st_size
+        except OSError as e:
+            msgs.append(
+                f"stat() failed ({e}) -- cannot confirm this file is "
+                f"under the {_MODEL_ZOO_STARTER_MAX_BYTES}-byte starter "
+                f"cap; treated as a failure, not silently skipped")
+            size = None
+        if size is not None and size > _MODEL_ZOO_STARTER_MAX_BYTES:
+            msgs.append(
+                f"{size} byte(s) exceeds the {_MODEL_ZOO_STARTER_MAX_BYTES}-"
+                f"byte starter cap -- #2539's mechanical guard for "
+                f"\"genuinely tiny, no weight redistribution\"")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def main() -> int:
     # SoC files (JSON) against soc-spec v1.
     soc_schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
@@ -3032,6 +3383,7 @@ def main() -> int:
     )
     # Semantic cross-ref the schema can't express: npus[].paired_core -> cores[].
     soc_failures += _check_soc_npu_pairing(soc_files)
+    soc_failures += _check_soc_linux_dt(soc_files)
     # #1470: npu_toolchain.vela vs npus[] / external_memory_interfaces on the SAME spec.
     soc_failures += _check_soc_vela_memory_profile(soc_files)
     # Semantic cross-ref the schema can't express: variants[].debug.jlink_device keys -> cores[].
@@ -3095,6 +3447,7 @@ def main() -> int:
             # #1845: two chips declaring the same (bus, address) reaches
             # silicon as two devices answering one address.
             board_failures += _check_board_i2c_address_collisions(board_files)
+            board_failures += _check_board_camera_connectors(board_files)
 
     # Chip manifests (YAML) against chip-v1 schema.
     chip_failures: list = []
@@ -3112,6 +3465,34 @@ def main() -> int:
             )
             chip_failures += _check_chip_semantics(chip_files)
             chip_failures += _check_chip_physical(chip_files)
+
+    # Camera modules (YAML) against camera-module-v1.
+    camera_module_failures: list = []
+    camera_module_files: list = []
+    if CAMERA_MODULE_SCHEMA.is_file():
+        camera_module_schema = json.loads(CAMERA_MODULE_SCHEMA.read_text(encoding="utf-8"))
+        camera_module_validator = jsonschema.Draft202012Validator(camera_module_schema)
+        camera_module_files = sorted(CAMERA_MODULES.glob("*.yaml"))
+        if camera_module_files:
+            print()
+            camera_module_failures = _check_files(
+                "YAML", camera_module_files, camera_module_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "module_id",
+            )
+            camera_module_failures += _check_camera_module_semantics(camera_module_files)
+
+    # Per-BSP-kernel Linux sensor-driver availability (linux-kernel-drivers-v1).
+    kernel_driver_failures: list = []
+    if LINUX_KERNEL_DRIVERS_SCHEMA.is_file() and LINUX_KERNEL_DRIVERS.is_file():
+        kd_validator = jsonschema.Draft202012Validator(
+            json.loads(LINUX_KERNEL_DRIVERS_SCHEMA.read_text(encoding="utf-8")))
+        print()
+        kernel_driver_failures = _check_files(
+            "YAML", [LINUX_KERNEL_DRIVERS], kd_validator,
+            lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+            "schema_version",
+        )
 
     # V2N/V2M on-module GD32G553 supervisor pin-wiring source (#655)
     # against supervisor-links-v1.
@@ -3251,6 +3632,38 @@ def main() -> int:
             )
             model_perf_failures += _check_model_perf_semantics(model_perf_files)
 
+    # Model-zoo manifests (YAML) against model-zoo v1 (ADR-0028, #2539).
+    # One top-level *.yaml per model -- NOT the starters/ subdir, which
+    # holds the bundled binaries `source.bundled` references (a starter is
+    # data, not a manifest, and has no schema of its own).
+    # `_collect_model_zoo_files` (not a bare glob) so a stray/misplaced file
+    # is a FAILURE, not silently invisible to every check below.
+    model_zoo_failures: list = []
+    model_zoo_files: list = []
+    model_zoo_starter_files: list = []
+    if MODEL_ZOO_SCHEMA.is_file():
+        model_zoo_schema = json.loads(MODEL_ZOO_SCHEMA.read_text(encoding="utf-8"))
+        model_zoo_validator = jsonschema.Draft202012Validator(model_zoo_schema)
+        model_zoo_files, model_zoo_starter_files, model_zoo_collector_failures = (
+            _collect_model_zoo_files(MODEL_ZOO))
+        if model_zoo_files or model_zoo_starter_files or model_zoo_collector_failures:
+            print()
+        for rel, msgs in model_zoo_collector_failures:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+        model_zoo_failures = list(model_zoo_collector_failures)
+        if model_zoo_files:
+            model_zoo_failures += _check_files(
+                "YAML", model_zoo_files, model_zoo_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "id",
+            )
+            model_zoo_failures += _check_model_zoo_semantics(model_zoo_files)
+        if model_zoo_starter_files:
+            model_zoo_failures += _check_model_zoo_starters(
+                model_zoo_files, model_zoo_starter_files)
+
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []
     library_semantic_failures: list = []
@@ -3298,12 +3711,6 @@ def main() -> int:
         print()
         memory_population_failures = _check_som_memory_population(som_files)
 
-    # SoM `memory_map:` regions must all carry `write_authority` (#1365).
-    write_authority_failures: list = []
-    if som_files:
-        print()
-        write_authority_failures = _check_som_write_authority_present(som_files)
-
     # SoM `on_module.i2c_devices.<bus>.devices[]` (bus, address_7bit) uniqueness (#1845).
     i2c_collision_failures: list = []
     if som_files:
@@ -3322,16 +3729,17 @@ def main() -> int:
     print()
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures) + len(chip_failures)
+                      + len(camera_module_failures) + len(kernel_driver_failures)
                       + len(block_failures)
                       + len(npu_ops_failures)
                       + len(model_perf_failures)
+                      + len(model_zoo_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(board_target_failures)
                       + len(restriction_failures)
                       + len(instance_uniqueness_failures)
                       + len(slot0_address_failures)
                       + len(memory_population_failures)
-                      + len(write_authority_failures)
                       + len(i2c_collision_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)
@@ -3341,8 +3749,10 @@ def main() -> int:
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
+          f"{len(camera_module_files)} camera module(s) + "
           f"{len(block_files)} block file(s) + {len(npu_ops_files)} npu-ops file(s) + "
           f"{len(model_perf_files)} model-perf point(s) + "
+          f"{len(model_zoo_files)} model-zoo entry(ies) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
           f"tier-a-library-ci registry + "
           f"{len(supervisor_links_files)} supervisor-links file(s) + "

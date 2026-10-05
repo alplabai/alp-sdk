@@ -44,8 +44,10 @@ today is the `#else` fallback branch only.
 
 ```bash
 # Standalone, native_sim (host binary; no hardware needed):
+# writes examples/power-timing/littlefs-keyvalue/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/power-timing/littlefs-keyvalue
 west build -b native_sim/native/64 examples/power-timing/littlefs-keyvalue \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 ```
 

@@ -201,8 +201,8 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
     sku_prop["pattern"] = sku_prop["pattern"][:-2] + "|TST[0-9]{3})$"
     (schemas / "board.schema.json").write_text(
         _json.dumps(bc_schema), encoding="utf-8")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
+    shutil.copy(real_meta / "schemas" / "som-preset-v2.schema.json",
+                schemas / "som-preset-v2.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
                 schemas / "soc-spec-v1.schema.json")
     # Copy the renesas n44 SoC JSON so silicon refs resolve in the temp root.
@@ -391,8 +391,8 @@ def test_slice_alp_conf_deduplicate_som_vs_board(tmp_path: Path) -> None:
     sku_prop["pattern"] = sku_prop["pattern"][:-2] + "|TST[0-9]{3})$"
     (schemas / "board.schema.json").write_text(
         _json2.dumps(bc_schema), encoding="utf-8")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
+    shutil.copy(real_meta / "schemas" / "som-preset-v2.schema.json",
+                schemas / "som-preset-v2.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
                 schemas / "soc-spec-v1.schema.json")
     # Copy SoC JSON so silicon ref renesas:rzv2n:n44 resolves in temp root.
@@ -549,8 +549,8 @@ def test_slice_alp_conf_real_v2n101(tmp_path: Path) -> None:
     real_meta = REPO / "metadata"
     shutil.copy(real_meta / "schemas" / "board.schema.json",
                 schemas / "board.schema.json")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
+    shutil.copy(real_meta / "schemas" / "som-preset-v2.schema.json",
+                schemas / "som-preset-v2.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
                 schemas / "soc-spec-v1.schema.json")
     shutil.copy(real_meta / "socs" / "renesas" / "rzv2n" / "n44.json",
@@ -648,8 +648,8 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
     real_meta = REPO / "metadata"
     shutil.copy(real_meta / "schemas" / "board.schema.json",
                 schemas / "board.schema.json")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
+    shutil.copy(real_meta / "schemas" / "som-preset-v2.schema.json",
+                schemas / "som-preset-v2.schema.json")
     shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
                 schemas / "soc-spec-v1.schema.json")
     # AEN SoC JSON for capability resolution.

@@ -242,6 +242,21 @@ static uint32_t g_get_version_io_down_remaining; /* fail the transaction outrigh
  * assert BOTH that recovery was attempted (the link healed) and that it was
  * attempted at most once (the cooldown -- see ctx->recover_count). */
 static bool g_all_io_down;
+/* #2699: 4-byte all-0xFF transfers seen by the stub -- the resync burst
+ * cc3501e_link_resync() clocks before any warm reset. */
+static unsigned g_resync_ff_count;
+
+/* Every 4-byte TX seen at PH_REQ_HDR, with its fake-clock stamp, so a test can
+ * pin the ORDER and spacing of the #2699 resync, not just the FF count.
+ * Cleared by slave_reset(). */
+struct hdr_log_entry {
+	uint8_t  b[4];
+	uint64_t t_ms;
+};
+#define HDR_LOG_LEN 512u
+static struct hdr_log_entry g_hdr_log[HDR_LOG_LEN];
+static unsigned             g_hdr_log_n;
+static uint64_t             g_fake_now_ms; /* defined with the clock fakes below */
 
 /* #2136 mutant controls: force the two wire patterns the link-failure ring
  * must tell apart (test_link_log_distinguishes_deaf_armed_from_desynced_2136).
@@ -570,6 +585,8 @@ static uint32_t g_sock_recv_busy_polls_remaining;
 
 static void slave_reset(void)
 {
+	g_resync_ff_count = 0u;
+	g_hdr_log_n       = 0u;
 	memset(&slave, 0, sizeof(slave));
 	slave.phase                        = PH_REQ_HDR;
 	slave.wifi_conn_state              = ALP_CC3501E_WIFI_CONNECTED; /* preserves the pre-#1376
@@ -1398,6 +1415,16 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	if (len == 0u) {
 		return ALP_OK;
 	}
+	if (slave.phase == PH_REQ_HDR && len == 4u && tx != NULL && g_hdr_log_n < HDR_LOG_LEN) {
+		memcpy(g_hdr_log[g_hdr_log_n].b, tx, 4u);
+		g_hdr_log[g_hdr_log_n].t_ms = g_fake_now_ms;
+		g_hdr_log_n++;
+	}
+	/* Only at the request-header phase: reply reads also clock 0xFF dummies. */
+	if (slave.phase == PH_REQ_HDR && len == 4u && tx != NULL && tx[0] == 0xFFu && tx[1] == 0xFFu &&
+	    tx[2] == 0xFFu && tx[3] == 0xFFu) {
+		g_resync_ff_count++;
+	}
 	/* #2126: a genuinely dead link -- see g_all_io_down's own comment.
 	 * Checked before every per-opcode down-window below, same PRE-DECODE
 	 * shape (fails outright, so rx_scratch[0] is left poisoned to
@@ -1547,7 +1574,6 @@ static cc3501e_t fw;
  * separately from the running total above for a test that only cares about
  * the sum. Cleared by delay_log_reset() at the top of each test that
  * inspects either. */
-static uint64_t g_fake_now_ms;
 static uint64_t g_fake_delay_us_total;
 
 #define DELAY_LOG_CAP 8u
@@ -1932,6 +1958,47 @@ ZTEST(cc3501e_host_driver, test_stream_write_large_request_gates_ceiling)
 	          * default RESP_ERR_INVALID); only the gate timing is under test here. */
 }
 
+/* ---- mid-size REQUESTS: the request-side floor (customer SOCK_SEND 390..600 B)
+ *
+ * v0.9.0 firmware arms the reply header ~54 us + 0.426 us per request wire
+ * byte after the request ends; the old size gate stayed at a flat 200 us up
+ * to 536 B, so a 400 B request was read too early and the link desynced.
+ * This fixture runs legacy-major (no CRC trailer), so 400 B is also the wire
+ * length.  Mutation check: dropping cc3501e_request_gate_floor_us() from the
+ * call site turns this RED (200 us instead of 80 + 400/2 = 280 us). */
+ZTEST(cc3501e_host_driver, test_stream_write_mid_request_gets_request_floor)
+{
+	static uint8_t data[400];
+	memset(data, 0xAA, sizeof(data));
+
+	delay_log_reset();
+	(void)cc3501e_stream_write(&fw, data, sizeof(data));
+	zassert_equal(g_delay_us_count, 4u, "4 gated phases (a 400 B request has a payload phase)");
+	zassert_equal(g_delay_us_log[2], 280u, "400 wire bytes -> 80 + 400/2 us, not the 200 us floor");
+
+	/* Past ~1.3 KiB the size gate is the larger one: 1000 B -> floor 580 us,
+	 * size gate 200 + (1000 - 536) * 1800 / 1512 = 752 us.  Guards the max()
+	 * direction. */
+	static uint8_t mid[1000];
+	delay_log_reset();
+	(void)cc3501e_stream_write(&fw, mid, sizeof(mid));
+	zassert_equal(g_delay_us_log[2], 752u, "the size gate wins at 1000 B");
+
+	/* At the 4092 B ceiling the uncapped floor would be 80 + 4092/2 = 2126 us;
+	 * the cap holds it at the proven 2000 us plateau. */
+	static uint8_t big[ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES];
+	delay_log_reset();
+	(void)cc3501e_stream_write(&fw, big, sizeof(big));
+	zassert_equal(g_delay_us_log[2], 2000u, "the request floor is capped at 2000 us");
+
+	/* FAST_REPLY firmware arms in ~0.1 us/B and keeps its own table. */
+	fw.fw_fast_reply = 1u;
+	delay_log_reset();
+	(void)cc3501e_stream_write(&fw, data, sizeof(data));
+	zassert_equal(g_delay_us_log[2], 200u, "FAST_REPLY firmware gets no request floor");
+	fw.fw_fast_reply = 0u;
+}
+
 /* ---- SPI1_TRANSFER: expected reply is derived from len/NO_RX, not rx_cap -- */
 ZTEST(cc3501e_host_driver, test_spi1_transfer_large_no_rx_tx_gates_by_tx_size)
 {
@@ -2129,6 +2196,50 @@ ZTEST(cc3501e_host_driver, test_reset_tolerates_transport_failure_during_probe_1
 	uint16_t v = 0u;
 	zassert_equal(cc3501e_get_version(&fw, &v), ALP_OK, "a following GET_VERSION works");
 	zassert_equal(v, (uint16_t)ALP_CC3501E_PROTOCOL_VERSION, "and reads the real value");
+}
+
+/* #1937: a missed reset-time GET_VERSION is retried (bounded), and on a FRESH
+ * context a reset that never negotiated a MAJOR must fail, not return ALP_OK
+ * with fw_proto_major == 0 / initialised == true (silicon: every later PING
+ * failed -5 while a bare GET_VERSION kept answering). */
+ZTEST(cc3501e_host_driver, test_reset_retries_dropped_get_version_1937)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	g_get_version_io_down_remaining = 2u; /* first two replies dropped, third lands */
+
+	zassert_equal(cc3501e_reset(&fw), ALP_OK, "retries ride out dropped GET_VERSIONs");
+	zassert_true(fw.initialised, "negotiated -> usable");
+	zassert_equal(
+	    fw.fw_proto_major, (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR, "MAJOR negotiated, not left at 0");
+	zassert_equal(g_get_version_io_down_remaining, 0u, "both drops were consumed by retries");
+}
+
+ZTEST(cc3501e_host_driver, test_reset_fresh_ctx_all_get_version_dropped_fails_1937)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	g_get_version_io_down_remaining = 1000u; /* never answers */
+
+	zassert_equal(cc3501e_reset(&fw),
+	              ALP_ERR_TIMEOUT,
+	              "no MAJOR negotiated on a fresh ctx -> reset must not claim success");
+	zassert_false(fw.initialised, "left down");
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_NOT_READY, "later calls: NOT_READY, not -5");
+}
+
+ZTEST(cc3501e_host_driver, test_reset_keeps_prior_major_when_get_version_dropped_1937)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	zassert_equal(cc3501e_reset(&fw), ALP_OK, "first reset negotiates");
+	g_get_version_io_down_remaining = 1000u;
+	zassert_equal(cc3501e_reset(&fw), ALP_OK, "same ctx keeps its negotiated MAJOR");
+	zassert_true(fw.initialised, NULL);
+	zassert_equal(fw.fw_proto_major, (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR, NULL);
 }
 
 /* ---- ADR 0033: MAJOR.MINOR wire versioning --------------------------------
@@ -3221,6 +3332,19 @@ ZTEST(cc3501e_host_driver, test_wifi_ap_start_confirms_via_diag_role_1696)
 	zassert_equal(slave.ap_start_submit_count,
 	              1u,
 	              "confirmation must poll a non-disturbing opcode, never re-submit AP_START");
+}
+
+/* #2699: after the AP role confirms, the driver stays quiet for
+ * CC3501E_AP_START_SETTLE_MS (300 ms) -- v0.9.0 firmware publishes the role
+ * before its post-AP_START SPI re-open, and a request fired into that window
+ * failed 3-5/20 on silicon. */
+ZTEST(cc3501e_host_driver, test_wifi_ap_start_settles_after_role_confirm_2699)
+{
+	g_diag_role = ALP_CC3501E_ROLE_WIFI_AP;
+
+	const uint64_t before = g_fake_now_ms;
+	zassert_equal(cc3501e_wifi_ap_start(&fw, "AP", 0u, "", 1000u), ALP_OK);
+	zassert_true(g_fake_now_ms - before >= 300u, "ap_start returns only after the 300 ms settle");
 }
 
 /* #1985: cc3501e_wifi_ap_start()'s role-confirmation loop replaces its
@@ -5008,6 +5132,34 @@ ZTEST(cc3501e_host_driver, test_link_dead_triggers_exactly_one_recovery_2126)
 
 	zassert_equal(s, ALP_ERR_TIMEOUT, "a dead link still fails the op that discovered it");
 	zassert_equal(fw.recover_count, 1u, "exactly one warm-reset recovery ran");
+	zassert_equal(g_resync_ff_count,
+	              9u,
+	              "#2699: burst, stall chain + burst, burst, before the warm reset (saw %u)",
+	              g_resync_ff_count);
+
+	/* Pin the ORDER (the dead state needs the burst alone first; the lagged
+	 * state needs the chain second) and the stall quiet window. */
+	static const uint8_t stall[4] = { ALP_CC3501E_CMD_PING, 0x01u, 0x10u, 0x00u };
+	uint8_t              seq[16];
+	uint64_t             t[16];
+	unsigned             n = 0u;
+	for (unsigned k = 0; k < g_hdr_log_n && n < ARRAY_SIZE(seq); k++) {
+		const uint8_t *h = g_hdr_log[k].b;
+		if (h[0] == 0xFFu && h[1] == 0xFFu && h[2] == 0xFFu && h[3] == 0xFFu) {
+			seq[n] = 0xFFu;
+		} else if (memcmp(h, stall, 4u) == 0) {
+			seq[n] = 0x00u; /* stall header */
+		} else {
+			continue;
+		}
+		t[n++] = g_hdr_log[k].t_ms;
+	}
+	static const uint8_t want[10] = { 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+	zassert_equal(n, sizeof(want), "resync header count (saw %u)", n);
+	zassert_mem_equal(seq, want, sizeof(want), "resync order: burst, stall, burst, burst");
+	zassert_true(t[4] - t[3] >= 300u,
+	             "stall header -> next burst gap %u ms must be >= 300",
+	             (unsigned)(t[4] - t[3]));
 
 	/* And the recovery actually worked: alp_gpio_write()'s fake heals
 	 * g_all_io_down the moment cc3501e_hard_reset() releases reset_pin, so

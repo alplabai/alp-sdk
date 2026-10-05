@@ -8,7 +8,7 @@
 # purpose: that job pins Zephyr via `west init -m ... --mr v4.4.1` as the
 # FULL twister oracle, so any future version bump that happens to touch
 # dts/arm/renesas/rz/rzv/r9a09g056.dtsi would make `--check` return STALE,
-# failing `twister-shard 1/6`, which fails the required aggregator
+# failing `twister-shard 1/8`, which fails the required aggregator
 # `twister · native_sim/native/64` on `dev` branch protection -- blocking
 # every PR in the repo, not just V2N ones, under a context name that says
 # nothing about metadata, and not unblockable by anyone without a

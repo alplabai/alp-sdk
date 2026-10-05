@@ -178,6 +178,13 @@ def cross_check(tree: dict, chips: dict, som_presets: dict[str, dict],
     """Semantic checks beyond the schema.  som_presets: {sku: preset doc};
     ownership: the family's core-ownership.yaml (see load_ownership())."""
     errs: list[str] = _check_boot_modes(tree, ownership)
+    # the tree's act8760 addresses must equal the chip manifest's add1/add2 rows
+    manifest = {a["slave"]: a["addr_7bit"] for a in chips["act8760"]["i2c"]["addresses"]}
+    for slave in ("add1", "add2"):
+        have = tree["chips"]["act8760"][f"addr_{slave}"]
+        if have != manifest.get(slave):
+            errs.append(f"power-tree chips.act8760.addr_{slave} 0x{have:02X} != "
+                        f"metadata/chips/act8760.yaml {slave} addr_7bit {manifest.get(slave)!r}")
     pct = tree["window_policy"]["default_tolerance_pct"]
     families = set(tree["families"])
     seen_ids: set[str] = set()

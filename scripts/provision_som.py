@@ -292,6 +292,8 @@ def provision(cfg: Cfg) -> int:
     bootloader_only = bundle["status"].startswith("bootloader-only")
     image_skipped = False
     for comp in sorted(bundle["components"], key=lambda c: _FLASH_ORDER.get(c["role"], 9)):
+        if comp["role"] == "system_image_bmap":       # companion of system_image, never flashed itself
+            continue
         if comp["role"] == "system_image" and bootloader_only:
             steps.append(Step("flash:system_image", True, "skipped (bundle is bootloader-only)"))
             image_skipped = True
@@ -392,18 +394,25 @@ def _v2n_parser() -> argparse.ArgumentParser:
     work.add_argument("--tier-markers", type=Path, help="PRIVATE DDR tier markers JSON")
     work.add_argument("--pmic-expect", type=Path,
                       help="PRIVATE expected PMIC registers (YAML or JSON)")
+    work.add_argument("--functest-expect", type=Path,
+                      help="PRIVATE expected values of functional_test (YAML), merged over "
+                           "scripts/provision/functest-expect-v2n.yaml")
     work.add_argument("--flash-writer", type=Path, help="Flash Writer .mot (overrides bench.yaml)")
     work.add_argument("--gd32-fw", type=Path,
                       help="dir with bootloader.bin, ota-meta.bin, slot-a.bin")
-    work.add_argument("--enable-dxm1-flash", action="store_true",
-                      help="BENCH-PENDING: program the DX-M1 NPU's SPI-NAND over the UART "
-                           "recovery path (v2n-m1 only); needs bench.yaml dxm1.* -- has never "
-                           "run on silicon and cannot succeed on the first V2M bench unit yet "
-                           "-- default skip until bench-verified")
+    work.add_argument("--no-payload-store", action="store_true",
+                      help="do not cache payloads in /var/lib/alp-payload on the provisioning SD's "
+                           "root filesystem; push everything over SSH / the console")
+    work.add_argument("--hw-rev", metavar="rN",
+                      help="this unit's hardware revision key (e.g. r2) when it differs from "
+                           "the bundle/preset default; a batch can mix revisions")
     work.add_argument("--mfg-date", type=date.fromisoformat,
                       help="default: Monday of the serial's ISO week (a different date is "
                            "recorded as an override)")
     work.add_argument("--allow-tier-mismatch", metavar="REASON")
+    work.add_argument("--accept-cid-change", metavar="REASON",
+                      help="the unit's eMMC was legitimately replaced: adopt the CID now behind the "
+                           "address as this serial's identity (recorded as an override; blocks shipping)")
     work.add_argument("--reprovision-from", type=Path, metavar="MANIFEST")
     work.add_argument("--cold-cycles", type=_positive_int, default=3)
     work.add_argument("--transfer", choices=("sd", "xmodem"), default="sd")
@@ -443,6 +452,9 @@ def _bundle_from_build_dir(d: Path) -> dict:
             raise ValueError(f"--build-dir: want exactly one {pat}, found {[h.name for h in hits]}")
         comps.append({"role": role, "file": hits[0].name, "sha256": _sha256(hits[0]),
                       "size_bytes": hits[0].stat().st_size, "flash_target": target})
+    if len(bm := sorted(d.glob("*.wic.bmap"))) == 1:
+        comps.append({"role": "system_image_bmap", "file": bm[0].name, "sha256": _sha256(bm[0]),
+                      "size_bytes": bm[0].stat().st_size, "flash_target": "emmc"})
     return {"status": "complete", "release_version": f"build-dir:{d.name}", "components": comps}
 
 
@@ -493,7 +505,10 @@ def _status(a) -> int:
     for o in state.get("overrides", []):
         print(f"  override {o['gate']}: {o['reason']} ({o['at']})")
     cat = ledger_out.load_catalogue(a.catalogue or a.ledger_root / "schema" / "v2n.keys.yaml")
-    blockers = ledger_out.ship_check(ledger_out.read_unit_yaml(d / f"{a.serial}.unit.yaml"), cat)
+    import yaml
+    preset = yaml.safe_load((REPO / "metadata" / "e1m_modules" / f"{a.sku}.yaml").read_text(encoding="utf-8"))
+    blockers = ledger_out.ship_check(ledger_out.read_unit_yaml(d / f"{a.serial}.unit.yaml"), cat,
+                                     steps.expected_family(preset))
     failed = [n for n, v in state.get("steps", {}).items() if v.get("status") == "failed"]
     print("ship check: " + ("SHIPPABLE" if not blockers and not failed else "blocked"))
     for b in blockers:
@@ -507,10 +522,24 @@ def _status(a) -> int:
     return 0
 
 
+def _check_hw_rev(family: str, key: str) -> None:
+    """--hw-rev must be a `production` key of the family's hw-revisions.yaml (exact case)."""
+    import yaml
+    path = REPO / "metadata" / "e1m_modules" / family / "hw-revisions.yaml"
+    if not path.is_file():
+        raise ValueError(f"no {path.relative_to(REPO).as_posix()} to validate --hw-rev against")
+    revs = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("hw_revisions") or {}
+    status = (revs.get(key) or {}).get("status")
+    if status != "production":
+        ok = ", ".join(k for k, v in revs.items() if (v or {}).get("status") == "production")
+        raise ValueError(f"--hw-rev {key!r} is {'not a known key' if key not in revs else 'status ' + repr(status)} "
+                         f"for family {family}; production keys: {ok}")
+
+
 def v2n_main(argv: list[str]) -> int:
     import yaml
     from provision import bench as bench_mod
-    from provision import gates, steps
+    from provision import functest, gates, steps
 
     try:
         a = _v2n_parser().parse_args(argv)
@@ -535,8 +564,12 @@ def v2n_main(argv: list[str]) -> int:
             bundle.update(sku=a.sku, family=steps.expected_family(preset),
                           hw_rev=preset.get("default_hw_rev", "r1"))
             bundle_sha = hashlib.sha256(json.dumps(bundle, sort_keys=True).encode()).hexdigest()
+        if a.hw_rev:
+            _check_hw_rev(steps.expected_family(preset), a.hw_rev)
+            bundle = {**bundle, "hw_rev": a.hw_rev}
         markers = json.loads(a.tier_markers.read_text(encoding="utf-8")) if a.tier_markers else None
         regs = yaml.safe_load(a.pmic_expect.read_text(encoding="utf-8")) if a.pmic_expect else None
+        expect = functest.load_expect(a.functest_expect)
         if a.cmd == "run" and not a.bench:
             raise ValueError("run needs --bench")
         bench = bench_mod.load_bench(a.bench) if a.bench else None
@@ -578,11 +611,13 @@ def v2n_main(argv: list[str]) -> int:
         hil = REPO / "tests" / "hil" / f"{a.sku.lower().removeprefix('e1m-')}-{a.carrier}"
     ctx = steps.Ctx(sku=a.sku, serial=serial, bundle_dir=bundle_dir, bundle=bundle, preset=preset,
                     ledger_root=a.ledger_root, execute=execute, lock=getattr(a, "lock", False),
-                    bench=bench, tier_markers=markers, expected_registers=regs,
-                    allow_tier_mismatch=a.allow_tier_mismatch, reprovision_from=a.reprovision_from,
+                    bench=bench, tier_markers=markers, expected_registers=regs, functest_expect=expect,
+                    allow_tier_mismatch=a.allow_tier_mismatch,
+                    accept_cid_change=a.accept_cid_change, reprovision_from=a.reprovision_from,
                     cold_cycles=a.cold_cycles, hil_spec=hil, flash_writer=a.flash_writer,
-                    gd32_fw=a.gd32_fw, dxm1_flash=a.enable_dxm1_flash,
+                    gd32_fw=a.gd32_fw,
                     transfer=a.transfer, station=a.station, by=a.by,
+                    payload_store_on=not a.no_payload_store,
                     ledger_xlsx=a.ledger_xlsx,
                     mfg_date_override=a.mfg_date if a.mfg_date and a.mfg_date != derived else None)
     ctx.state = steps.load_state(ctx.state_path)
@@ -607,7 +642,15 @@ def v2n_main(argv: list[str]) -> int:
     return 1 if any(r.status == "failed" for r in results) else 0
 
 
+def _robust_output() -> None:
+    """Serial text can carry U+FFFD; a cp1252 Windows console must not crash printing it."""
+    for stream in (sys.stdout, sys.stderr):
+        if reconf := getattr(stream, "reconfigure", None):
+            reconf(errors="replace")
+
+
 def _dispatch() -> int:
+    _robust_output()
     if len(sys.argv) > 1 and sys.argv[1] in V2N_SUBCOMMANDS:
         return v2n_main(sys.argv[1:])
     return main()

@@ -712,7 +712,12 @@ reply's `radio_ok_out` to learn whether the *previous* apply was realised.
 > probes, then warm-resets via `cc3501e_recover()` below, with no application
 > code required. `cc3501e_recover()` remains the manual escape hatch (`alp
 > companion recover` on the console) for a caller that wants it by hand — a
-> warm reset has recovered every observed wedge. Not power-related — it
+> warm reset has recovered every observed wedge. Before that reset the probe
+> first tries an in-band resync (#2699): a burst of three `0xFF` request
+> headers on their own, then (if PING still fails) a stall header (`00 01 10 00`
+> followed by 300 ms of silence, which trips the bridge's 250 ms stall watchdog)
+> plus a burst, then one more burst. The transport lock is held for the whole
+> resync, so a concurrent single-shot caller may see `ALP_ERR_BUSY`. Not power-related — it
 > reproduces with no power policy applied at all.
 
 ### Long gaps: cut the supply (`cc3501e_power_off()`)
@@ -914,9 +919,10 @@ occupied — a fresh `BEGIN`/`FINISH` short-circuits and can never re-arm
 the swap request.  `OTA_PROMOTE` arms the same deferred swap-reboot
 `FINISH` would, promoting the pending image without a new session.  If
 nothing is pending the reboot is a clean no-op.
-helpers: `cc3501e_ota_update()` (whole-image convenience) plus the
-granular `cc3501e_ota_begin/_write/_finish/_abort/_status()` in
-[`include/alp/chips/cc3501e.h`](../include/alp/chips/cc3501e.h).
+Host helpers: `cc3501e_ota_update()` (whole-image convenience) plus the
+granular `cc3501e_ota_begin/_write/_finish/_abort/_status()` and
+`cc3501e_ota_promote()` in
+[`include/alp/chips/cc3501e/ota.h`](../include/alp/chips/cc3501e/ota.h).
 
 Each OTA payload is itself a signed vendor image whose version must
 exceed the running primary (monotonic anti-rollback).  Build, signing,

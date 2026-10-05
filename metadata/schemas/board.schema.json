@@ -11,7 +11,7 @@
   },
   "allOf": [
     {
-      "description": "`preset:` is mutually exclusive with inline `name:` / `populated:` / `e1m_routes:`.  Projects without any board declaration (headless / inference-only builds) are also valid -- they get no chip drivers and no E1M-pad routes header.",
+      "description": "`preset:` is mutually exclusive with inline `name:` / `populated:` / `e1m_routes:` / `camera_connectors:`.  Projects without any board declaration (headless / inference-only builds) are also valid -- they get no chip drivers and no E1M-pad routes header.",
       "not": {
         "anyOf": [
           {
@@ -30,6 +30,12 @@
             "allOf": [
               { "required": ["preset"] },
               { "required": ["e1m_routes"] }
+            ]
+          },
+          {
+            "allOf": [
+              { "required": ["preset"] },
+              { "required": ["camera_connectors"] }
             ]
           }
         ]
@@ -109,6 +115,38 @@
       "description": "Inline mode only.  Board-side chip-driver / block-helper population.  Keys match chip-driver / block names; each `true` enables the corresponding CONFIG_ALP_SDK_{CHIP,BLOCK}_<name>=y.  Mutually exclusive with `preset:`."
     },
 
+    "camera_connectors": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^CAM[0-9]+$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/camera_connector"
+      },
+      "description": "Camera connectors this board exposes, keyed CAM0, CAM1, ...  A project's `cameras:` entries name one of these keys."
+    },
+    "cameras": {
+      "type": "array",
+      "description": "Camera modules fitted to the board's camera connectors.  Validators reject an unknown `connector` (not in the resolved board's camera_connectors) or an unknown `module` (no metadata/camera_modules/<module>.yaml).  The sensor chip is implied by the module; camera_id is the connector index.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "connector",
+          "module"
+        ],
+        "properties": {
+          "connector": {
+            "type": "string",
+            "pattern": "^CAM[0-9]+$"
+          },
+          "module": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          }
+        }
+      }
+    },
     "e1m_routes": {
       "$ref": "#/$defs/e1m_routes",
       "description": "Inline mode only.  Authoritative board-side E1M-pad routing.  scripts/gen_board_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.  Mutually exclusive with `preset:`."
@@ -472,6 +510,93 @@
   },
 
   "$defs": {
+    "camera_connector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "refdes",
+        "csi",
+        "lanes",
+        "i2c"
+      ],
+      "description": "One camera connector on the carrier.  Every signal is a reference to a macro or E1M identifier already declared in this board's e1m_routes (never restate pads).",
+      "properties": {
+        "refdes": {
+          "type": "string",
+          "description": "Connector reference designator on the carrier, e.g. J5."
+        },
+        "csi": {
+          "type": "string",
+          "pattern": "^E1M(_X)?_CSI[0-9]+$",
+          "description": "E1M CSI-2 receiver instance the connector's lanes are routed to."
+        },
+        "lanes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "description": "CSI-2 data lanes the connector routes."
+        },
+        "i2c": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Macro of the e1m_routes `buses` entry that carries the camera control bus."
+        },
+        "select": {
+          "type": "array",
+          "description": "GPIO levels that route this connector through any carrier CSI mux.  `value` is the raw pad level (not affected by the route's `active_low`).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "gpio",
+              "value"
+            ],
+            "properties": {
+              "gpio": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]*$"
+              },
+              "value": {
+                "type": "integer",
+                "enum": [
+                  0,
+                  1
+                ]
+              }
+            }
+          }
+        },
+        "enable": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Macro of the e1m_routes `gpio` entry that enables the camera.  The referenced route's `active_low` is NORMATIVE here (generators emit GPIO_ACTIVE_LOW from it): an asserted enable means 'camera on', so a route behind an inverting stage (e.g. an N-FET pulling the module enable low) must carry `active_low: true`."
+        },
+        "reset": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Macro of the e1m_routes `gpio` entry that resets the camera.  As for `enable`, the route's `active_low` is normative: asserted means 'held in reset'."
+        },
+        "supply": {
+          "type": "string",
+          "pattern": "^fixed-[0-9]+v[0-9]+$",
+          "description": "What feeds the module's supply pin on this connector.  `fixed-3v3` = a fixed, always-on 3.3 V pin (the module generates its own sensor rails), so a generator binds every sensor `*-supply` to one fixed-regulator node instead of a controllable regulator.  Omit when the connector has no modelled supply."
+        },
+        "lane_polarity": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ]
+          },
+          "description": "Per-lane P/N inversion flags, clock lane first then data lanes (1 = inverted), as Linux `lane-polarities`."
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
     "populated": {
       "type": "object",
       "additionalProperties": { "type": "boolean" }
@@ -734,7 +859,7 @@
         },
         "cacheable": {
           "type": "boolean",
-          "description": "Override the default cacheable hint.  Default carve-out is non-cacheable (cf. spec §6.8)."
+          "description": "Override the default cacheable hint.  Default carve-out is non-cacheable (cf. spec §6.8) and the generator emits CONFIG_DCACHE=n for its endpoint cores.  `true` is the `raw_shmem` opt-out for applications that own cache maintenance themselves (the SDK does none); rejected on `rpmsg`."
         },
         "address": {
           "type": "integer",

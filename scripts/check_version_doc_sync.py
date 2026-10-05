@@ -24,6 +24,10 @@ any miss a CI failure instead of a silent drift.  Verified copies:
      checked, never its prose content -- VERSIONS.md's per-version summary is
      free-form and reviewed by hand, same as every other row already in the
      table.
+  5. meta-alp-sdk/ -- Yocto DISTRO_VERSION must be DERIVED (an inline
+     `${@...}` reading include/alp/version.h), never a hardcoded literal.  The
+     literal "0.7.0" sat unbumped in conf/distro/alp.conf across many releases
+     and stamped the wrong version into /etc/os-release and the login banner.
 
 The README / docs current-state prose is de-versioned: its status lines were
 rewritten to carry no version label ("Partially silicon-verified", "Current
@@ -167,6 +171,29 @@ def check_versions_md(repo: pathlib.Path, want_str: str) -> list[str]:
     return []
 
 
+_DISTRO_VERSION_ASSIGN_RE = re.compile(
+    r'^\s*DISTRO_VERSION(?::\w+)?\s*(?:\?\??|:|\+|\.)?=\s*(.*)$', re.MULTILINE)
+
+
+def check_yocto_distro_version(repo: pathlib.Path) -> list[str]:
+    """No meta-alp-sdk conf may assign DISTRO_VERSION a literal; it must use
+    an inline `${@...}` (or reference another variable)."""
+    layer = repo / "meta-alp-sdk"
+    if not layer.is_dir():
+        return []
+    drifts: list[str] = []
+    for f in sorted(layer.rglob("*")):
+        if f.suffix not in (".conf", ".inc", ".bb", ".bbappend", ".bbclass") or not f.is_file():
+            continue
+        text = f.read_text(encoding="utf-8", errors="replace")
+        for m in _DISTRO_VERSION_ASSIGN_RE.finditer(text):
+            if re.fullmatch(r"[\"']\s*\d[^$]*[\"']\s*(?:#.*)?", m.group(1).strip()):
+                drifts.append(f"  HARDCODED {f.relative_to(repo).as_posix()}: DISTRO_VERSION = "
+                              f"{m.group(1).strip()} -- derive it from include/alp/version.h "
+                              f"(see conf/distro/alp.conf)")
+    return drifts
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1] if __doc__ else "")
     ap.add_argument("--root", default=None,
@@ -184,6 +211,7 @@ def main() -> int:
         + check_pyproject(repo, want_str)
         + check_banner_c(repo, want_str)
         + check_versions_md(repo, want_str)
+        + check_yocto_distro_version(repo)
     )
 
     if drifts:

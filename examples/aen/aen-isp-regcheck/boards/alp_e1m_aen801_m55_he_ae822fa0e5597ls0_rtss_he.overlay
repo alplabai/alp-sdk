@@ -39,4 +39,15 @@
 	tpg-image-idx = "3x3-Color-Block";
 	tpg-pix-width = <1>;
 	tpg-bayer-pattern = "BGGR";
+	/*
+	 * The 3x3-Color-Block TPG always emits 1920x1080 active video: libisp's
+	 * VSI_ISP_CoreSetTpg writes fixed timing whatever size is requested
+	 * (TPG_ACT_IN 0x508 = 0x01e00438 -> 1920 x 1080, read back on
+	 * E1M-AEN803 2026W36-0001), and the acquisition window follows these
+	 * values (ACQ_H/V_SIZE 0x410/0x414 = 0x780/0x438). 1280x720 made
+	 * SetChnAttr succeed but can never match the pattern. INTR_SIZE_ERR
+	 * still fires with the geometry matched -- see changelog.d/2256.md.
+	 */
+	tpg-width = <1920>;
+	tpg-height = <1080>;
 };

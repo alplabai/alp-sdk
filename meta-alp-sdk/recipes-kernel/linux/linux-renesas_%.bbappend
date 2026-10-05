@@ -75,10 +75,27 @@ SRC_URI:append = " \
     file://0010-mmc-renesas_sdhi-bounce-multi-segment-requests-in-internal-dmac.patch \
     file://0011-irqchip-renesas-rzv2h-mask-the-ICU-error-sources-the-handler-cannot-ack.patch \
     file://0012-uio-pdrv-genirq-default-of_id-to-generic-uio.patch \
+    file://0015-gpiolib-sysfs-reject-export-of-a-number-in-a-chipless-gpio_device.patch \
+    file://0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch \
+    file://0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch \
     file://uio.cfg \
     file://0013-can-rcar_canfd-report-the-channel-number-in-dev_port.patch \
 "
 
+# 0016 (CRU greyscale, #2612): rzg2l-csi2 had no Y10/Y8 entry, so a mono
+# sensor's Y10_1X10 (OV9281 via ov9282) read back as UYVY8_1X16 on the
+# csi20 pad and STREAMON failed -EPIPE.  The patch adds Y10_1X10 (-> CR10,
+# RAW10) and Y8_1X8 (-> GREY, RAW8) to the CSI-2 and CRU tables; no other
+# sensor's behaviour changes, so it applies unconditionally.
+#
+# 0017 (CSI-2 lane polarity, #2612): the RZ/V2H-family D-PHY swaps a lane's
+# DP/DN pair through CRUm_SWAPCTL, but the driver always wrote 0 and ignored
+# the DT lane-polarities property.  On E1M-V2M103 + X-EVK J5 the CSI0 pairs
+# arrive swapped (ErrControl on the data lanes, no packets) until SWAPCTL =
+# 0x30.  The patch programs it from lane-polarities (all data lanes or none);
+# the cam0 dtsi fragments set <1 1 1> on the csi20 endpoint.  Applied
+# unconditionally: with no lane-polarities the register is still written 0.
+#
 # 0012 (UIO default match, #2374): uio_pdrv_genirq binds no DT node until
 # of_id is set, and the stored U-Boot bootargs cannot be relied on to carry
 # uio_pdrv_genirq.of_id=generic-uio; the patch defaults it to "generic-uio".
@@ -94,6 +111,8 @@ SRC_URI:append = " \
 # Cortex-M33 runs, group 0 bit 0 asserts, nobody acknowledges it, and the
 # line storms ("irq 14: nobody cared") until genirq disables it. The patch
 # unmasks only the GPT overflow bits the handler services.
+# The mask is written BEFORE the line is requested: requesting enables the
+# line, and a source already asserted at probe storms it inside the request.
 
 # AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
 # (GD32 supervisor SPI link).  Without this patch, Linux's
@@ -210,8 +229,9 @@ do_configure:prepend() {
 
     # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
     # to the board dts or the cam0 dtb has no rule to build.
-    if [ "${ALP_ENABLE_CAM0_IMX219}" = "1" ]; then
-        install -m 0644             "${WORKDIR}/e1m-x-evk-cam0-imx219.dtsi"             "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts"             "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts"             "${ALP_DTS_DST}/"
+    if [ -n "${ALP_CAM0_SENSOR}" ]; then
+        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAM0_SENSOR}.dtsi"             "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
+        install -m 0644             "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts"             "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts"             "${ALP_DTS_DST}/"
     fi
 
     # Branch on the bitbake variable, not on the presence of the unpacked
@@ -288,6 +308,18 @@ SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-
 # sensor + assumed CSI/CRU labels: see e1m-x-evk-cam0-imx219.dtsi and
 # docs/v2n-camera-csi.md.
 ALP_ENABLE_CAM0_IMX219 ??= "0"
+# Camera (#2612): OPT-IN OV9281 (mono, RPi-style module) on the same CAM0
+# connector (J5).  Mutually exclusive with the IMX219 switch.  Adds
+# camera-csi.cfg (CONFIG_VIDEO_OV9282) and the same cam0 dtb; see
+# e1m-x-evk-cam0-ov9281.dtsi and docs/v2n-camera-csi.md.
+ALP_ENABLE_CAM0_OV9281 ??= "0"
+python () {
+    imx219 = d.getVar('ALP_ENABLE_CAM0_IMX219') == '1'
+    ov9281 = d.getVar('ALP_ENABLE_CAM0_OV9281') == '1'
+    if imx219 and ov9281:
+        bb.fatal("ALP_ENABLE_CAM0_IMX219 and ALP_ENABLE_CAM0_OV9281 are mutually exclusive: both are CAM0 sensors")
+    d.setVar('ALP_CAM0_SENSOR', 'imx219' if imx219 else 'ov9281' if ov9281 else '')
+}
 ALP_CAM0_DTB = "${@'e1m-v2m101-x-evk-cam0' if 'v2m' in d.getVar('MACHINE') else 'e1m-v2n101-x-evk-cam0'}"
-KERNEL_DEVICETREE:append = "${@' renesas/' + d.getVar('ALP_CAM0_DTB') + '.dtb' if d.getVar('ALP_ENABLE_CAM0_IMX219') == '1' else ''}"
-SRC_URI += "${@' file://camera-csi.cfg file://e1m-x-evk-cam0-imx219.dtsi file://e1m-v2n101-x-evk-cam0.dts file://e1m-v2m101-x-evk-cam0.dts' if d.getVar('ALP_ENABLE_CAM0_IMX219') == '1' else ''}"
+KERNEL_DEVICETREE:append = "${@' renesas/' + d.getVar('ALP_CAM0_DTB') + '.dtb' if d.getVar('ALP_CAM0_SENSOR') else ''}"
+SRC_URI += "${@' file://camera-csi.cfg file://e1m-x-evk-cam0-' + d.getVar('ALP_CAM0_SENSOR') + '.dtsi file://e1m-v2n101-x-evk-cam0.dts file://e1m-v2m101-x-evk-cam0.dts' if d.getVar('ALP_CAM0_SENSOR') else ''}"

@@ -140,3 +140,22 @@ def test_committed_header_in_sync(real, tmp_path):
     tree, _, _ = real
     fresh = clang_format_text(tmp_path, "v2n_power_tree.h", g.render(tree, "v2n"))
     assert HEADER.read_text(encoding="utf-8") == fresh, "run: python3 scripts/gen_power_tree.py"
+
+
+def test_act8760_tree_address_disagreeing_with_manifest_is_rejected(real):
+    tree, chips, presets = real
+    tree = copy.deepcopy(tree)
+    tree["chips"]["act8760"]["addr_add2"] = 0x27
+    assert any("chips.act8760.addr_add2" in e for e in g.cross_check(tree, chips, presets))
+
+
+def test_power_tree_chips_block_schema_rejects_out_of_range_identity(real):
+    import json
+    import jsonschema
+    tree, _, _ = real
+    schema = json.loads((REPO / "metadata" / "schemas" / "power-tree-v1.schema.json").read_text(encoding="utf-8"))
+    v = jsonschema.Draft202012Validator(schema)
+    assert not list(v.iter_errors(tree))
+    bad = copy.deepcopy(tree)
+    bad["chips"]["da9292"]["identity"]["dev_id"] = 256
+    assert list(v.iter_errors(bad))

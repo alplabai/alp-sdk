@@ -414,6 +414,61 @@ void cc3501e_set_recover_callback(cc3501e_t *ctx, cc3501e_recover_cb_t cb, void 
 	ctx->recover_cb_user = user;
 }
 
+/* In-band link resync for cc3501e-bridge-firmware v0.9.0 (#2699), tried before
+ * any warm reset.  One host transfer that clocks before the bridge has armed
+ * its phase leaves the bridge's TX one whole transfer late: requests still
+ * execute, but every reply lands in the next exchange, forever -- no amount
+ * of waiting or re-PINGing realigns it, and the firmware's own heals cannot
+ * see it.  Two of the firmware's heals CAN be driven from here, in order:
+ *   1. a request header declaring a payload, then silence: the bridge parks
+ *      in its request-payload phase and its 250 ms stall watchdog reinits
+ *      the SPI (on v0.9.0 that reinit leaves the bridge TX dead -- step 2
+ *      repairs exactly that state);
+ *   2. three 0xFF headers back to back: the bridge's resync-burst heal
+ *      reinits it cleanly at idle.
+ * The caller runs step 2 alone first and the full chain only if that fails:
+ * measured on E1M-AEN803 2026W36-0009, fw 0x0900, the dead state (request-
+ * header MISO 00000000) recovered 60/60 PINGs after step 2 alone but 0/4
+ * after the full chain, while the lagged state needs the full chain (100/100
+ * PINGs).  It does NOT repair the state seen right after WIFI_AP_START (see
+ * cc3501e_wifi_ap_start()'s settle) -- the warm reset after this still
+ * covers that.  Costs ~0.5 s; a warm reset costs ~3.5 s and drops every
+ * association and socket.
+ *
+ * The transport lock is held for the whole resync (up to ~450 ms with the
+ * chain), past CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS (100 ms
+ * default), so a concurrent single-shot caller may see ALP_ERR_BUSY.  That is
+ * deliberate: nothing else may clock the bus while the bridge is being
+ * reinitialised.
+ *
+ * Returns true if the resync ran, false if the lock was not acquired (the
+ * caller then falls through to its normal probe gap). */
+#define CC3501E_RESYNC_STALL_QUIET_MS 300u /* > firmware CC3501E_REPLY_STALL_MS (250) */
+#define CC3501E_RESYNC_SETTLE_MS      150u /* resync-burst reinit + re-arm */
+
+static bool cc3501e_link_resync(cc3501e_t *ctx, bool stall_first)
+{
+	/* PING header (flags RESP_REQUIRED) declaring a 16 B payload that never comes --
+	 * the exact bytes bench-proven above. */
+	static const uint8_t stall_hdr[ALP_CC3501E_HEADER_BYTES] = {
+		(uint8_t)ALP_CC3501E_CMD_PING, (uint8_t)ALP_CC3501E_FLAG_RESP_REQUIRED, 0x10u, 0x00u
+	};
+	static const uint8_t resync_hdr[ALP_CC3501E_HEADER_BYTES] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu };
+	uint8_t              rx[ALP_CC3501E_HEADER_BYTES];
+
+	if (cc3501e_lock_acquire(ctx) != ALP_OK) return false;
+	if (stall_first) {
+		(void)alp_spi_transceive(ctx->bus, stall_hdr, rx, sizeof(stall_hdr));
+		alp_delay_ms(CC3501E_RESYNC_STALL_QUIET_MS);
+	}
+	for (int i = 0; i < 3; i++) {
+		(void)alp_spi_transceive(ctx->bus, resync_hdr, rx, sizeof(resync_hdr));
+	}
+	alp_delay_ms(CC3501E_RESYNC_SETTLE_MS);
+	cc3501e_lock_release(ctx);
+	return true;
+}
+
 /* See <alp/chips/cc3501e/core.h> for cc3501e_recover(); this is declared
  * only in cc3501e_internal.h -- see its comment there for why. */
 alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
@@ -483,9 +538,16 @@ alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
 	 * another thread -- cc3501e_recover()'s own CAS (ctx->recovering) is
 	 * the hard guarantee against a second RESET; this just avoids the
 	 * common case of redundant probing too. A narrow window can still let
-	 * two threads both pass this peek and both probe -- harmless (PINGs
-	 * only, correctly serialised by the transport lock); their subsequent
-	 * cc3501e_recover() calls still correctly exclude each other. */
+	 * two threads both pass this peek and both probe -- the PINGs are
+	 * serialised by the transport lock, and so are the in-band resyncs
+	 * below (each one a deliberate stall chain, not a bare PING); their
+	 * subsequent cc3501e_recover() calls still correctly exclude each other.
+	 *
+	 * RESIDUAL v0.9.0 RISK: if the bridge task loop is frozen, the resync's
+	 * stall header parks the slave in PH_REQ_PAYLOAD; the FFs and the next
+	 * PING are then eaten as payload, the stall reinit leaves TX dead, and
+	 * the probe ends in a warm reset.  The trailing burst-only resync
+	 * (i == 2) is the one extra attempt to repair that before giving up. */
 	if (ctx->recovering) return ALP_OK;
 
 	/* Probe before concluding the link is dead: most ALP_ERR_IO/TIMEOUT
@@ -516,6 +578,12 @@ alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
 			link_ok = true;
 			break;
 		}
+		/* In-band resync (#2699) before any further PINGs, which on a stuck
+		 * bridge never realign by themselves: the resync burst alone first,
+		 * then -- only if that PING still fails -- the full stall chain,
+		 * then one more burst if the chain left TX dead.  A lock failure
+		 * falls through to the normal gap instead. */
+		if (i < 3u && cc3501e_link_resync(ctx, i == 1u)) continue;
 		if (i + 1u < CC3501E_LINK_PROBE_TRIES) alp_delay_ms(CC3501E_LINK_PROBE_GAP_MS);
 	}
 	ctx->link_log_suppress = false;
@@ -576,6 +644,10 @@ bool cc3501e_fw_major_is_acceptable(uint8_t fw_major)
 	return fw_major == (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR ||
 	       fw_major == (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY;
 }
+
+/* #1937: bounded retry of the reset-time GET_VERSION. */
+#define CC3501E_RESET_VERSION_ATTEMPTS   3u
+#define CC3501E_RESET_VERSION_BACKOFF_MS 200u
 
 alp_status_t cc3501e_reset(cc3501e_t *ctx)
 {
@@ -722,17 +794,30 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
      * the context usable and let the caller's own retry loop keep trying. */
 	uint16_t     fw_version = 0u;
 	alp_status_t vs         = cc3501e_get_version(ctx, &fw_version);
+	/* #1937 (silicon, 1 of 5 cold boots): one missed GET_VERSION right after the
+	 * boot settle is common (slave not armed yet), so retry a bounded number of
+	 * times with a short back-off before concluding anything.  Each retry stays
+	 * CRC-less (fw_proto_major is still 0 here), which is correct: nothing is
+	 * negotiated yet. */
+	for (unsigned attempt = 1u; vs != ALP_OK && attempt < CC3501E_RESET_VERSION_ATTEMPTS;
+	     attempt++) {
+		alp_delay_ms(CC3501E_RESET_VERSION_BACKOFF_MS);
+		vs = cc3501e_get_version(ctx, &fw_version);
+	}
 	if (vs != ALP_OK) {
-		/* Transport hiccup reading the version, not a version disagreement:
-		 * restore the prior fw_proto_major/minor (zeroed a few lines up for
-		 * GET_VERSION's own framing) so the context really is left as it was,
-		 * and let the caller retry (the soaks treat GET_VERSION as a liveness
-		 * probe, not a compat gate). Without this restore a healthy MAJOR-4
-		 * peer whose GET_VERSION round trip misses -- the common case
-		 * immediately after this reset -- is left with fw_proto_major == 0
-		 * and initialised == true: want_req_crc() then frames every later
-		 * request CRC-less, and that firmware rejects each one until some
-		 * later reset happens to get a version through. */
+		/* Transport miss, not a version disagreement. */
+		if (prior_major == 0u) {
+			/* Fresh context: nothing was ever negotiated, so returning ALP_OK
+			 * would leave fw_proto_major == 0 with initialised == true -- every
+			 * later request framed CRC-less against a MAJOR-4 peer, failing -5
+			 * forever while a bare GET_VERSION still answers (the #1937 half-
+			 * working link).  Fail loudly and leave the ctx down instead; the
+			 * caller's hard-reset/reset retry loop re-arms it. */
+			ctx->initialised = false;
+			return ALP_ERR_TIMEOUT;
+		}
+		/* This context negotiated a major earlier (same peer, warm re-reset):
+		 * keep it, so the context really is left as it was. */
 		ctx->fw_proto_major = prior_major;
 		ctx->fw_proto_minor = prior_minor;
 		return ALP_OK;
@@ -1911,6 +1996,34 @@ static uint32_t cc3501e_reply_header_gate_us(const cc3501e_t *ctx, uint32_t byte
 	return CC3501E_REPLY_GATE_FLOOR_US + (over_bytes * span_us) / span_bytes;
 }
 
+/* Request-side floor for the reply-header gate.  Firmware WITHOUT FAST_REPLY
+ * (cc3501e-bridge-firmware v0.9.0, fw_version 0x0900, per-frame path in XIP
+ * flash) arms the reply header only after time proportional to the REQUEST
+ * in its transfer-complete ISR (request CRC + worker-job copy).  The size
+ * gate's flat 200 us zone was proven for REPLY size (SOCK_RECV want 512),
+ * never for request size, and under-gated SOCK_SEND: 400..610 B read the
+ * reply header before the slave armed it, and the link stayed desynced until
+ * cc3501e_recover().  Measured on E1M-AEN803 2026W36-0009 (25 MHz, PACK32,
+ * all-PIO): the bridge needs ~54 us + 0.426 us per request wire byte for
+ * SOCK_SEND, ~38 us + 0.337 us for STREAM_WRITE.  This floor leaves ~55 us of
+ * margin at 400 B and ~180 us at 2 KiB; with it SOCK_SEND and STREAM_WRITE
+ * each ran 207/207 clean from 200 to 4086 B.  Keyed on the request bytes, so
+ * a reply-sized key (SOCK_RECV want 512, 536 B) keeps its proven 200 us.  The
+ * caller takes max(this, size gate), so no exchange waits less than before.
+ * Capped at the 2000 us plateau: uncapped it would pass 2000 us from ~3840 B
+ * (2128 us at 4096 B), and the fit's ~1800 us at the 4096 B ceiling already
+ * fits inside 2000 us (stock gate ran 3/3 clean at 3000..4086 B). */
+#define CC3501E_REPLY_GATE_REQ_BASE_US 80u /* + 1 us per 2 wire bytes */
+
+static uint32_t cc3501e_request_gate_floor_us(const cc3501e_t *ctx, uint32_t wire_tx_len)
+{
+	if (ctx->fw_fast_reply) {
+		return 0u;
+	}
+	const uint32_t floor_us = CC3501E_REPLY_GATE_REQ_BASE_US + wire_tx_len / 2u;
+	return (floor_us < CC3501E_REPLY_GATE_LARGE_US) ? floor_us : CC3501E_REPLY_GATE_LARGE_US;
+}
+
 static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 {
 	if (ctx->ready_pin != NULL && g_ready_ignored) {
@@ -2347,7 +2460,9 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	const uint32_t expected_reply = cc3501e_expected_reply_bytes(cmd, tx_payload, tx_len, rx_cap);
 	const uint32_t gate_bytes =
 	    (expected_reply > (uint32_t)wire_tx_len) ? expected_reply : (uint32_t)wire_tx_len;
-	cc3501e_reply_gate(ctx, cc3501e_reply_header_gate_us(ctx, gate_bytes));
+	const uint32_t size_gate_us = cc3501e_reply_header_gate_us(ctx, gate_bytes);
+	const uint32_t req_floor_us = cc3501e_request_gate_floor_us(ctx, wire_tx_len);
+	cc3501e_reply_gate(ctx, (req_floor_us > size_gate_us) ? req_floor_us : size_gate_us);
 
 	/* Dummies for the read transactions (MOSI is don't-care on a read). */
 	/* Only the bytes each read phase clocks: the reply header now, the reply

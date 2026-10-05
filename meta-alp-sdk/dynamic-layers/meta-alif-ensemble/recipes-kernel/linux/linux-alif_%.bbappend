@@ -7,9 +7,13 @@
 # `UART2_STATUS "okay"`, so serial@4901a000 (UART2) enumerates as ttyS0
 # and wins `console=ttyS0` no matter what `aliases.serial0` names -- the
 # 8250 driver assigns ttySN by probe order, not by the DT alias. See
-# recipes-kernel/linux/linux-alif/e1m-aen-evk-console.dtsi for the fix
+# dynamic-layers/meta-alif-ensemble/recipes-kernel/linux/linux-alif/e1m-aen-evk-console.dtsi for the fix
 # (disable &uart2, enable &uart5, alias serial0 -> &uart5, stdout-path
 # serial0) and its TBD(alif-hw-config) label-confirmation note.
+#
+# Lives under dynamic-layers/meta-alif-ensemble/ (BBFILES_DYNAMIC in
+# conf/layer.conf) so it is parsed only when that collection is in bblayers;
+# a plain recipes-kernel/ bbappend dangled on every non-AEN MACHINE (#2504).
 #
 # INERT TODAY, same reason as the TF-A half (see that bbappend's own
 # header): no Scarthgap meta-alif-ensemble exists publicly (#1968), and

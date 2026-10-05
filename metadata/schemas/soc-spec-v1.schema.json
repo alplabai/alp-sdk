@@ -34,6 +34,20 @@
       "enum": ["released", "preliminary", "deprecated"],
       "default": "released"
     },
+    "linux_dt": {
+      "type": "object",
+      "description": "Linux devicetree facts for on-die peripherals the Linux DT generators need, keyed by the instance name used in SoM `pad_routes` `dispatch_pin` (e.g. RIIC2, CSI0).  `label` is the SoC dtsi node label; `pinmux` maps a peripheral SIGNAL name (a key of the SoM peripheral map, e.g. RIIC2_SDA2 in v2n/renesas-peripheral-map.tsv; the port pin is resolved from that file) to its pinmux function code (the third argument of the vendor PORT_PINMUX macro); `capture` is the label of the capture unit a CSI receiver feeds.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label"],
+        "properties": {
+          "label": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "pinmux": { "type": "object", "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }, "additionalProperties": { "type": "integer", "minimum": 0 } },
+          "capture": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        }
+      }
+    },
     "pending_alif_datasheet": {
       "type": "boolean",
       "default": false,
@@ -401,7 +415,7 @@
         },
         "system_config": {
           "type": "string",
-          "description": "OPTIONAL vela `--system-config`. A System_Config section describes ONE accelerator's -- on Alif, one CORE SUBSYSTEM's -- memory view, never a whole die, so validate_metadata.py permits it only on a SoC carrying exactly one distinct Ethos-U `(type, subtype)`. The Alif Ensemble parts each carry two or three and are therefore left without one: the E8's U85 wants `Ethos_U85_SRAM_Only` (examples/aen/aen-npu-inference-alp/CMakeLists.txt:42-43) while its M55-HE-paired U55 wants `RTSS_HE_SRAM_Only` (examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:39-40), and one scalar would be wrong for whichever accelerator it does not describe. Express those per-accelerator, in a slice that has a consumer for them; do not guess a scalar here."
+          "description": "OPTIONAL vela `--system-config`. A System_Config section describes ONE accelerator's -- on Alif, one CORE SUBSYSTEM's -- memory view, never a whole die, so validate_metadata.py permits it only on a SoC carrying exactly one distinct Ethos-U `(type, subtype)`. The Alif Ensemble parts each carry two or three and are therefore left without one: the E8's U85 wants `Ethos_U85_SRAM_Only` (examples/aen/aen-npu-inference-alp/CMakeLists.txt:42-43) while its M55-HE-paired U55 wants `RTSS_HE_SRAM_Only` (examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:32), and one scalar would be wrong for whichever accelerator it does not describe. Express those per-accelerator, in a slice that has a consumer for them; do not guess a scalar here."
         },
         "system_config_requires_vendor_config": {
           "type": "boolean",

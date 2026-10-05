@@ -67,7 +67,7 @@ arm_fir_f32(&fir, in, out, 256);
 Enable: `CONFIG_CMSIS_DSP=y` in board.yaml-generated alp.conf
 (triggered automatically when the SoM's `capabilities:` block
 declares a backend that needs CMSIS-DSP, or when you explicitly
-add `cmsis_dsp` to a core's `libraries:` list).
+add `cmsis-dsp` to the `libraries:` list).
 
 ### ETLCPP
 
@@ -112,7 +112,7 @@ if (!doc.is_discarded()) {
 }
 ```
 
-Enable: `libraries: [nlohmann_json]`.  Profile sets
+Enable: `libraries: [nlohmann-json]`.  Profile sets
 `JSON_NOEXCEPTION=1` so `parse(...)` returns a discarded sentinel
 on malformed input instead of throwing.
 
@@ -191,7 +191,7 @@ needs one, a compile-time profile header under
 `json_config.h`, `doctest_config.h`) -- low friction once the case is
 made.
 
-## HW-backend profiles (per-library accelerator binding)
+## HW-backend bindings (per-library accelerator selection)
 
 Alongside the compile-time profile header (`etl_profile.h`,
 `fmt_config.h`, ...), 22 of the 35 library manifests under
@@ -314,9 +314,17 @@ When a new library candidate shows up:
 
 1. **Scope test** — does it sit cleanly above the SDK's existing
    abstractions, or does it overlap them?  Overlap = no.
-2. **License test** — Apache-2.0, MIT, BSD, Zlib, ISC, Boost.
-   No GPL/LGPL in headers; LGPL is OK if linked dynamically on
-   Yocto-only targets.
+2. **License test** — the SPDX id must be on the permissive allowlist
+   in `metadata/libraries/README.md` ("Licence allowlist"), which
+   `metadata/schemas/library-v1.schema.json` enforces.  Anything
+   outside it (ISC, any GPL/LGPL, proprietary) needs a maintainer
+   legal review that extends the allowlist first.
+   LGPL is the one case with a narrower path: it is acceptable as a
+   dynamically linked binary package in a Yocto image, built by its
+   own recipe.  It is not acceptable where its source is compiled or
+   statically linked into firmware, or its headers are vendored.  A
+   `libraries:` manifest cannot express that path today, because the
+   schema rejects LGPL ids.
 3. **Maintenance test** — commit activity in the last 12 months,
    no single-bus-factor maintainers.
 4. **Footprint test** — sub-50 KB ROM / sub-4 KB RAM at typical
