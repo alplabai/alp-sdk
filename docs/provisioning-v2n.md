@@ -72,7 +72,10 @@ python scripts/provision_som.py status --sku <SKU> --serial <serial> --ledger-ro
 ```
 
 Step selection: `--only`, `--from`, `--skip`, `--force-step` (`preflight`
-always runs). `--build-dir` builds an unsigned bundle from a deploy
+always runs). `--linux-host HOST` sets the target host for this run (it
+overrides `bench.yaml` `linux.host`; an EEPROM MAC change still forces rediscovery). An
+`--only` run that starts past `boot_sd_linux` has no console login to discover a host from, so it
+needs `--linux-host` or `linux.host`. `--build-dir` builds an unsigned bundle from a deploy
 directory for bench work; such a unit is recorded `bench-only` and the ship
 check refuses it.
 
@@ -116,9 +119,13 @@ mismatch is refused:
     another unit is behind this address (stale DHCP lease?). Fix the address in
     bench.yaml and re-run, or --accept-cid-change REASON if the eMMC was replaced.
 
-Limitation: first contact with no recorded CID is unchecked. On the normal
-blank-unit path `bootstrap`'s `EM_DCID` records the CID, so every later step is
-checked.
+First contact with no recorded CID (a run that starts past `bootstrap`, for
+example `--from dsw1_emmc_insert_sd`) is proved over this unit's own console
+before the first write: the SSH host must echo a nonce to its `/dev/console` and
+the tool must read it on its serial line (once per host and power-on). A host
+that does not is refused with "Nothing was written". On the normal blank-unit
+path `bootstrap`'s `EM_DCID` records the CID, so every later step is checked by
+CID instead.
 
 `run --accept-cid-change REASON` is the escape for a legitimately replaced eMMC:
 it adopts the CID seen over SSH as the new anchor. The `emmc_cid_change`
@@ -147,9 +154,12 @@ Other operator rules:
   Never let the tool allocate a serial for a unit that already has one.
 - **Cable `end0`.** The tool discovers the Linux host over `end0`; a gigabit link
   also shortens the rootfs transfer.
-- **Pace SCPI queries.** Send one query per connection, at least 1 s apart. A
-  burst of queries wedged the SPD3303X LAN socket (recovery: power-cycle the
-  supply). Use the channel `bench.yaml` names and leave the others alone.
+- **Pace SCPI queries.** A burst of queries wedged the SPD3303X LAN socket
+  (recovery: power-cycle the supply). The tool keeps one connection and spaces
+  commands by at least `bench.yaml` `power.min_gap_s` (default `0.3` s), retries
+  after a connection reset with backoff, and only ever addresses the configured
+  channel. Keep any manual queries just as sparse. In `bench.yaml`
+  (`min_gap_s` is optional): `power: {kind: scpi, host: PSU_HOST, port: 5025, channel: 1, min_gap_s: 0.3}`
 - **Prompt resync.** `cold_boot_test` tolerates a kernel message printed after the
   shell prompt: the prompt wait sends a newline so a fresh prompt appears.
 
@@ -233,10 +243,11 @@ Then it waits up to 120 s for the console halt line (`reboot: Power down` or
 The PSU current is not a halt signal. The OFF dwell is unchanged, so a clean poweroff
 followed by it is still a cold boot, and `cold_boot_test` keeps its `--cold-cycles` (3).
 
-The "already halted on this power-on" marker is cleared when the operator prompt of
-`dsw1_emmc_insert_sd` or `dsw1_xspi_remove_sd` returns: the operator may have powered the
-unit back on before pressing Enter, which the tool's ON count cannot see (this applies to
-SCPI power too). Both prompts say "Leave it OFF until the tool asks."
+The "already halted on this power-on" marker survives the operator prompt of
+`dsw1_emmc_insert_sd` or `dsw1_xspi_remove_sd`: the tool saw the halt line itself, so a cut
+after the prompt is not logged as `blind`. It is cleared only if the console printed
+something after the halt (a halted unit is silent, so boot text means it was powered back
+on). Both prompts say "Leave it OFF until the tool asks."
 
 Every cut is recorded as the step evidence key `power_cut` (and in the step log and the
 plan log), one entry per cut:
@@ -246,6 +257,7 @@ plan log), one entry per cut:
 | `clean` | halted: `poweroff` sent, the halt line seen (`(late)` if it came in the extra 5 s) **and the first `sync` returned 0** |
 | `clean (sync rc=<n>)` | halted, but the first `sync` returned `<n>` (non-zero, or unknown): the operator prompt says so and the card should be checked |
 | `fallback` | no halt line. Over SSH a second `sync` ran and its rc (or error) is recorded; on the console no second command is sent (the first may still be running, and a new command would Ctrl-C it) |
+| `unreadable (sync rc=<n>; <lines>)` | the `sync` returned rc `127` (not found), or the console showed `EXT4-fs error` / `error -5` lines: the root is treated as unreadable and those lines are quoted verbatim in the entry, the step failure and the operator prompt |
 | `blind` | no console shell and no SSH path proven to be this unit. If Linux is up the cut is hard; the entry says so |
 | `not-needed` | PSU already off, U-Boot prompt, SCIF ROM / Flash Writer, or already halted (plain `clean`) on this power-on |
 
@@ -269,7 +281,7 @@ are not yet confirmed by a run of this code on a bench.
 | `detect` | clean shutdown if Linux is up, then power cycle and classify the console: SCIF ROM, BL2, U-Boot, Linux login, silent. The ROM banner `SCI Download mode (Due to parameter error)` is the ROM's fallback to SCI download, taken when the selected boot source has no valid image (blank xSPI/eMMC, or DSW1 not in mode 3). It still offers `-- Load Program to SRAM`, but it is **refused**: "boot ROM fell back to SCI download because the selected boot source has no valid image (blank xSPI/eMMC, or DSW1 not in mode 3); set DSW1 to mode 3 for a clean SCIF bootstrap". Only `(Normal SCI boot)` proceeds |
 | `dsw1_scif` | operator: boot switch to SCIF download |
 | `bootstrap` | reuses the live SCIF ROM state `detect` left in this run (no second power cycle); cycles only if no ON has happened since. Flash Writer: `EM_W` area 1 (boot partition 1) sector `0x1` ← `bl2_mmc`, sector `0x300` ← `fip`; `EM_SECSD` EXT_CSD `[177]=0x02` (BOOT_BUS_CONDITIONS), `[179]=0x08` (PARTITION_CONFIG); `EM_DCID` |
-| `dsw1_emmc_insert_sd` | operator: insert the release microSD; U-Boot must autoboot (see "Operator flow: DSW1 and the microSD" for the boot switch) |
+| `dsw1_emmc_insert_sd` | operator: insert the provisioning microSD (DSW1 may stay on xSPI); U-Boot must autoboot (see "Operator flow: DSW1 and the microSD"). The result names the boot mode BL2 reported (`xSPI` for `SYS_LSI_MODE` `0x3c06`, else the observed value, or "boot mode not reported by BL2") |
 | `boot_sd_linux` | U-Boot boots the wic from microSD; log in, find the host, confirm the root is on the SD, then the live SoM check: every non-optional on-module I2C device the SoM preset declares must ACK (the GD32 excepted) before any destructive step runs. Fallback `--transfer xmodem`: `loadx` + `gzwrite` the wic from the U-Boot prompt. No IP is not a failure here: the checks run over the console and `gd32_flash` runs next |
 | `gd32_flash` | applies the ACT88760 GPIO4 volatile release if still at the OTP default, DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, reset-and-run after every readback (see "The GD32 readback halts the MCU"), then `GET_VERSION` from the bridge at `0x70` (polled; the step fails if it never answers). With no network (the `boot_sd_linux` evidence says why: `network: none (gbeth DMA reset failed on <ports>)` or `none (no carrier)`) it pushes the SWD tools and the three images over the console (base64, md5-checked on the board), then cold-cycles and re-checks the IP; SSH is used when it is up |
 | `write_xspi` | from Linux: `bl2` → `mtd0`, `fip` → `mtd1`; md5 readback. A FIP whose erase would reach the CM33 image at `mtd1` + `0x1A0000` is refused |
@@ -325,6 +337,14 @@ Selector `0x06` (device configuration) is only ever read, as one combined
 
 ### `clkgen_verify`: the 5L35023B clock generator (`0x69`)
 
+A run that captured no cold-boot console (`--only` / resumed runs) cannot read the U-Boot
+fixup line. The step then reports `skipped` with "not verified: no boot console captured in
+this run", records `clkgen_uboot_fixup: unread (...)` in its evidence (a captured run
+records `seen: <line>`), and does not fail; an OTP image mismatch still fails.
+`need_linux` on such a run, with no `linux.host` pinned, logs in on the console and reads the
+address like `boot_sd_linux` does, once per power-on; it first sends Ctrl-C only and sends
+no Enter to a unit at a U-Boot prompt, in the SCIF ROM / Flash Writer, or halted.
+
 The on-SoM Renesas 5L35023B (`BRD_I2C` / Linux `i2c-8` on the reference
 bench, 7-bit `0x69`) ships with a fixed factory OTP image that cannot be
 re-burned in-system. U-Boot patches 0007 (#2293) and 0012 rewrite reg `0x1f`
@@ -338,7 +358,9 @@ confirms the boot console showed U-Boot's own `ALP: 5L35023B clock:` line.
 **A boot log without that line means the unit's U-Boot lacks patch 0007
 (#2293)** -- the step keeps failing (a production unit without the fixup is
 a real defect, not a soft warning it can look past). Ledger facts:
-`clkgen_otp_raw` (all 37 bytes as read, hex), `clkgen_i2c_addr`.
+`clkgen_otp_raw` (all 37 bytes as read, hex), `clkgen_i2c_addr`,
+`clkgen_uboot_fixup` (`seen: <the boot-log line>`, or `unread (...)` when no
+boot console was captured).
 
 ### `dxm1_npu_flash`: the DX-M1 NPU firmware (V2M only)
 
@@ -443,7 +465,9 @@ followed: it is appended to it ("... ALSO the reset-and-run failed, GD32 core le
 and when it happens in the probe before the step, the step itself fails with "core left halted
 by the pre-run probe's readback" and writes nothing. **`SCL is stuck low` on that bus during provisioning points at a GD32 left halted over
 SWD**; a census that finds unread keys says so when the kernel log carries that line.
-`census_final` reads the same keys again after the final cold boot. That the halt is the cause
+`census_final` reads the same keys again after the final cold boot. A wedge left by the
+probe's own readback clears on the next power cycle; the tool does not skip the readback on a
+ledger match, because nothing ties that match to the bytes on this unit's chip. That the halt is the cause
 is inferred from the probe tool's behaviour and from log timing on two units; it has not been
 reproduced on a bench, and neither has this fix.
 
@@ -855,7 +879,7 @@ assumes and fix the fragment, the judge or the expected value:
 
 Without it, every payload crosses a wire: the GD32 images go base64 over the 115200-baud console (about 13 min on 2026W38-0002 when the board has no network), and the DX-M1 files, the DTBs and the 210 MB `wic.gz` go over SSH on a 100 Mbit switch. The board boots Linux from the provisioning SD for every write step, so the first unit caches each payload on the SD and every later unit reads it locally.
 
-The store is a directory on the SD's root filesystem, `/var/lib/alp-payload/<bundle sha256>/`. It needs no SD preparation and no partition: the root has several GB free. It is used only when the board runs from the SD, never when its root is the eMMC, and it is on by default (`--no-payload-store` disables it). `plan` never touches it.
+The store is a directory on the SD's root filesystem, `/var/lib/alp-payload/<bundle sha256>/`. It needs no SD preparation and no partition: the root has several GB free. It is used only when the board runs from the SD, never when its root is the eMMC, and it is on by default (`--no-payload-store` disables it). `plan` never touches it. The card must carry the marker file `/var/lib/alp-payload/.provisioning-sd` (`touch` it on the internal provisioning SD only): without it the store stays off and every file is pushed, so the license-gated `dxm1_*` files never land on a release card.
 
 For each file `run --execute` looks in the directory before any push:
 
@@ -921,6 +945,11 @@ Unmapped blocks are not touched: the eMMC outside the mapped ranges keeps whatev
   `boot_sd_linux` refuses because the root is not on the SD.
 - **The EEPROM array is written only when blank** or equal to
   `--reprovision-from`, and never while the identity header is locked.
+  `--replace-identity` (needs `--reprovision-from`) archives the committed and
+  staged blobs as `<serial>.manifest.<old-hwrev>-<date>.bin` and
+  `<serial>.secure-page.<old-hwrev>-<date>.bin` (`.staged.bin` for the staged
+  ones) before the new ones are staged and promoted, instead of failing after
+  the EEPROM write.
 - **The 5L35023B cannot be re-burned in-system.** `clkgen_verify` only reads;
   a bad OTP image means a bad unit, not a fixable one.
 - **`dxm1_npu_flash` swaps the release DTB while it runs.** The release DTB is backed up as `/boot/<fdtfile>.release` and restored (md5-verified) on success and on failure; if a run is killed, the next run restores it first. The BOOT_CFG straps (E1M `IO17`/`IO19`/`IO20` low) are a carrier property the tool cannot measure.

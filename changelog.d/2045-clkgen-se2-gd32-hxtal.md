@@ -5,7 +5,7 @@ supervisor's OSCIN (net `GD32_OSC`). The as-shipped OTP has register `0x1F`
 = `0x46`; its bit 7 `SE2_Freerun_32K` = 0 makes SE2 free-run at 32.768 kHz,
 which is why the GD32 HXTAL never starts.
 
-U-Boot patch `0012-rzv2n-dev-ALP-E1M-clkgen-se2-gd32-hxtal.patch` extends
+U-Boot patch `0013-rzv2n-dev-ALP-E1M-clkgen-se2-gd32-hxtal.patch` extends
 `alp_clk5l_fixup()` with two more volatile register writes (never OTP; register
 `0x00` is never written), in this order, each read back and skipped when
 already correct:

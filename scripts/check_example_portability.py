@@ -205,7 +205,7 @@ def _is_non_chip_header(chip: str) -> bool:
 # portable <alp/*.h> surface to route through today.  Keyed by the example's
 # path relative to examples/ (matches how check_example()/main() identify
 # examples), each mapping to a per-DRIVER reason (the driver stem
-# `_ZEPHYR_DRIVER_INCLUDE_RE` captures, e.g. "mdio", "pwm" -- not the whole
+# `_ZEPHYR_DRIVER_INCLUDE_RE` captures, e.g. "mbox", "pwm" -- not the whole
 # example).  This is issue #1129: an allowlist entry only excuses the
 # specific driver(s) it names, so an unrelated `#include
 # <zephyr/drivers/...>` landing in an already-allowlisted example still
@@ -236,12 +236,6 @@ _ZEPHYR_DRIVER_INCLUDE_ALLOWLIST: dict[str, dict[str, str]] = {
             "and out of its Display/LVGL scope."
         ),
     },
-    "v2n/v2n-ethernet-dual": {
-        "mdio": (
-            "raw PHY register access for a link-diagnostics demo; no "
-            "portable <alp/*.h> MDIO surface exists."
-        ),
-    },
     "connectivity/camera-mjpeg-stream": {
         "gpio": (
             "src/aen_eth_phy.c, INTERIM AEN-only PHY power/reset -- the "
@@ -253,11 +247,6 @@ _ZEPHYR_DRIVER_INCLUDE_ALLOWLIST: dict[str, dict[str, str]] = {
         "pinctrl": (
             "src/aen_eth_phy.c, same INTERIM PHY bring-up -- pad-mux "
             "selection for the same two SoC-internal PHY-control GPIOs."
-        ),
-    },
-    "v2n/v2n-xspi-flash-readwrite": {
-        "flash": (
-            "no portable <alp/flash.h> surface exists yet."
         ),
     },
 }
