@@ -7,7 +7,7 @@ import struct
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-HDR = (ROOT / "include/alp/protocol/gd32_bridge_results.h").read_text()
+HDR = (ROOT / "include/alp/protocol/gd32_bridge_results.h").read_text(encoding="utf-8")
 _spec = importlib.util.spec_from_file_location(
     "reader", ROOT / "scripts/bench/v2n/read_gd32_results.py")
 reader = importlib.util.module_from_spec(_spec)
