@@ -544,10 +544,10 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # against the real RUHMI headers.  A separate hand-run host link probe then
 # stopped with "skipping incompatible ... when searching for
 # -lmera2_runtime" -- an architecture mismatch against the aarch64
-# obj/build_runtime/v2h libraries, not a symbol error.  No BitBake task ran.
-# Whether do_compile reaches a real aarch64 link, whether packaging passes
-# do_package_qa, and whether the symbols resolve against the real aarch64
-# payload are all UNTESTED.  docs/bring-up-drpai-v2n.md's status banner is
+# obj/build_runtime/v2h libraries, not a symbol error.  Since then do_compile
+# and packaging have run in a drpai-enabled alp-image-edge bake (#2400, which
+# found and fixed the missing -lfmt link gap).  Running inference from a baked
+# image on a board is UNTESTED.  docs/bring-up-drpai-v2n.md's status banner is
 # the authority for the current bake state.
 #
 # The kernel side is proven independently of this recipe: /dev/drpai0 probes

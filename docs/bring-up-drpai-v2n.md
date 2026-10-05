@@ -22,7 +22,9 @@ How to get the RZ/V2N's on-die DRP-AI3 NPU running a real model through
 > Not yet confirmed: an `alp-image-edge` baked from this tree producing the
 > same result on its own. That needs the defaults in §4 (node on with
 > meta-rz-drpai, backend on with `RUHMI_DRPAI_TVM_DIR`) and a real
-> `mera2-drpai-tvm` BitBake run, which has not happened. `docs/test-plan.md`
+> `mera2-drpai-tvm` BitBake run on an image baked from this tree; the
+> recipe's `do_compile` and packaging have run in a `drpai`-enabled bake
+> (#2400), but nothing was run from that image on a board. `docs/test-plan.md`
 > carries the verification rows this gates.
 
 For the base V2N board bring-up see [bring-up-v2n.md](bring-up-v2n.md); for the
@@ -264,12 +266,10 @@ compile command later encoded in the recipe's `do_compile` was run only by
 hand on an x86_64 dev host against a real RUHMI checkout's headers (system
 spdlog/asio standing in for meta-oe's). That host-side probe compiled the
 wrapper source, but could not link against the real aarch64
-`obj/build_runtime/v2h` libraries; no
-`bitbake` run of this recipe — with or without `do_compile` — has happened at
-all. A full `alp-image-edge` bake has completed on this host (12118 tasks,
-producing a 716 MB `.wic.gz`, the first ever here) but with `drpai` OFF (the
-base image); a `drpai`-enabled bake on the real aarch64 Yocto cross-toolchain
-is the step that would confirm the link and packaging end to end.
+`obj/build_runtime/v2h` libraries; the
+recipe's `do_compile` and packaging have since run in a `drpai`-enabled
+`alp-image-edge` bake (#2400), which also found and fixed the missing `-lfmt`
+link gap. Inference from a baked image on a real board is still unverified.
 
 **`meta-rz-drpai` on `bblayers.conf` is necessary but not sufficient for the
 image.** That layer ships its payload through a `core-image-%.bbappend`, and

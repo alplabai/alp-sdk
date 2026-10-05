@@ -270,14 +270,11 @@ python () {
 # it has run on DX-M1 silicon (#1262), auto-enabled only on a MACHINE
 # that carries `deepx-dxm1` in MACHINE_FEATURES with
 # ALP_ENABLE_DEEPX_DXM1 = "1").
-# No `drpai`-enabled alp-image-edge bake has completed yet, and no
-# `bitbake` run of mera2-drpai-tvm_2.7.0.bb -- with or without
-# `do_compile` -- has happened at all; see docs/bring-up-drpai-v2n.md
-# section 4 and mera2-drpai-tvm_2.7.0.bb for exactly what IS and is NOT
-# established (a hand-run g++ against RUHMI's real headers on an x86_64
-# dev host proved MeraDrpRuntimeWrapper.cpp compiles clean with every
-# needed symbol defined; the final aarch64 link, packaging QA and
-# symbol resolution against the real payload are all UNTESTED). Treat
+# mera2-drpai-tvm's do_compile and packaging have run in a `drpai`-enabled
+# alp-image-edge bake (#2400, which also found and fixed the missing -lfmt
+# link gap there); see docs/bring-up-drpai-v2n.md section 4 and
+# mera2-drpai-tvm_2.7.0.bb for exactly what IS and is NOT established.
+# Inference from a baked image on a real board is still UNTESTED. Treat
 # the backend as BENCH-UNVERIFIED.
 # Where a per-machine NPU userspace runtime package exists it is
 # installed by the *image* recipe (DEEPX's dx-rt/dx-driver are opted in

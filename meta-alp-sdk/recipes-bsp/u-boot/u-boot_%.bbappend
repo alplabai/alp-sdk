@@ -315,9 +315,8 @@ SRC_URI:append:e1m-v2n101 = " file://sd1-microsd.cfg"
 # CONFIG_OF_SYSTEM_SETUP; ft_board_setup() is already taken by rcar-common's
 # v2-common.c). recipes-core/alp-hostname turns it into the hostname.
 # Context: 0001's alp_som_is_v2n_m1() and the tail of 0007's
-# alp_clk5l_fixup(). 0008 is reserved for the SDHI1 microSD patch on the
-# provisioning branch; its hunks are disjoint from this one's, so keep its
-# SRC_URI line ahead of this one when both land.
+# alp_clk5l_fixup(). 0008 (the SDHI1 microSD patch) is applied before this
+# one; its hunks are disjoint from this one's.
 SRC_URI:append:rzv2n-family = " file://0009-rzv2n-dev-ALP-E1M-publish-sku-to-chosen.patch"
 
 # Derive ethaddr/eth1addr from the same validated manifest's serial --
@@ -344,7 +343,12 @@ SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth
 # board_late_init() clears bit 7 (0x88 -> 0x08) on every boot, before the
 # kernel, so the gpio-gd32-bridge driver finds the GD32 at probe. Production
 # OTP already reads 0x08, so the step is a no-op there; see the patch header.
-SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.patch"
+# ALP E1M machines only (a plain Renesas EVK has no ACT88760 at RIIC8 0x25 to
+# touch), and the patch itself writes only when reg 0x10 reads exactly 0x88.
+# Kept in the rzv2n-family scope with a MACHINE test, not an :e1m-v2n101
+# append, so it still applies after 0001-0010 (MACHINEOVERRIDES lists
+# e1m-v2n101 ahead of rzv2n-family, which would reorder the append).
+SRC_URI:append:rzv2n-family = "${@' file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.patch' if d.getVar('MACHINE').startswith(('e1m-v2n', 'e1m-v2m')) else ''}"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string
