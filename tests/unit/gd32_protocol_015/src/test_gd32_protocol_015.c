@@ -82,6 +82,7 @@ static struct {
 	uint8_t  pm_mode, pm_flags;
 	bool     pm_busy; /* answer STATUS_BUSY to modes 2 / 3 */
 	bool     asleep;
+	bool     drop_all; /* every frame is lost (a dead or unreachable bridge) */
 	uint32_t lost_frames;
 } E;
 
@@ -405,6 +406,11 @@ alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 	const uint16_t crc = alp_crc16_ccitt_false(tx, len - 2u);
 	if ((uint16_t)(tx[len - 2u] | (tx[len - 1u] << 8)) != crc) return ALP_OK; /* dropped */
 
+	if (E.drop_all) {
+		E.lost_frames++;
+		E.staged_len = 0u;
+		return ALP_OK;
+	}
 	if (E.asleep) { /* woken by this CS edge on IRC8M: the frame is lost */
 		E.asleep = false;
 		E.lost_frames++;
@@ -1612,14 +1618,15 @@ ZTEST(gd32_protocol_015, test_attn_not_requested_without_a_complete_hook)
 /* ---- low-power modes -------------------------------------------------------- */
 
 /* The firmware repo's generated vector spi_power_mode_set_deepsleep_wake_i2c_request
- * (mode 2, flags WAKE_I2C, no timer): CRC 0x7304 (wire: low byte first). */
+ * (mode 2, flags WAKE_I2C, wake_after_ms 100): the CRC goes on the wire low byte first. */
 static const uint8_t V_POWER_DEEPSLEEP_WAKE_I2C[] = { 0xA5, 0x28, 0x02, 0x01, 0x00, 0x00, 0x00,
-	                                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x73 };
+	                                                  0x00, 0x64, 0x00, 0x00, 0x00, 0x27, 0xE0 };
 
 ZTEST(gd32_protocol_015, test_set_power_mode_encodes_flags_like_the_firmware_vector)
 {
 	zassert_equal(bring_up(false), ALP_OK);
-	const gd32g553_power_opts_t o = { .flags = GD32G553_POWER_FLAG_WAKE_I2C };
+	const gd32g553_power_opts_t o = { .flags         = GD32G553_POWER_FLAG_WAKE_I2C,
+		                              .wake_after_ms = 100u };
 	zassert_equal(gd32g553_set_power_mode(&C, 2u, &o), ALP_OK);
 	zassert_equal(E.last_req_len, sizeof(V_POWER_DEEPSLEEP_WAKE_I2C));
 	zassert_mem_equal(E.last_req, V_POWER_DEEPSLEEP_WAKE_I2C, sizeof(V_POWER_DEEPSLEEP_WAKE_I2C));
@@ -1628,13 +1635,15 @@ ZTEST(gd32_protocol_015, test_set_power_mode_encodes_flags_like_the_firmware_vec
 ZTEST(gd32_protocol_015, test_set_power_mode_validates_before_the_wire)
 {
 	zassert_equal(bring_up(false), ALP_OK);
-	const uint32_t before = E.pm_count;
+	const uint32_t              before   = E.pm_count;
 	const gd32g553_power_opts_t bad_flag = { .flags = 0x02u };
 	const gd32g553_power_opts_t i2c      = { .flags = GD32G553_POWER_FLAG_WAKE_I2C };
 	zassert_equal(gd32g553_set_power_mode(&C, 4u, NULL), ALP_ERR_INVAL);
 	zassert_equal(gd32g553_set_power_mode(&C, 2u, &bad_flag), ALP_ERR_INVAL);
-	zassert_equal(gd32g553_set_power_mode(&C, 3u, &i2c), ALP_ERR_INVAL, "I2C wake is Deep-sleep only");
+	zassert_equal(
+	    gd32g553_set_power_mode(&C, 3u, &i2c), ALP_ERR_INVAL, "I2C wake is Deep-sleep only");
 	zassert_equal(gd32g553_set_power_mode(&C, 1u, &i2c), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_set_power_mode(&C, 2u, &i2c), ALP_ERR_OUT_OF_RANGE, "untimed WAKE_I2C");
 	zassert_equal(E.pm_count, before, "nothing reached the bridge");
 	gd32g553_t idle = { 0 };
 	zassert_equal(gd32g553_set_power_mode(&idle, 1u, NULL), ALP_ERR_NOT_READY);
@@ -1643,7 +1652,7 @@ ZTEST(gd32_protocol_015, test_set_power_mode_validates_before_the_wire)
 ZTEST(gd32_protocol_015, test_set_power_mode_busy_changes_nothing)
 {
 	zassert_equal(bring_up(false), ALP_OK);
-	E.pm_busy = true;
+	E.pm_busy                     = true;
 	const gd32g553_power_opts_t o = { .wake_after_ms = 100u };
 	zassert_equal(gd32g553_set_power_mode(&C, 2u, &o), ALP_ERR_BUSY);
 	zassert_false(C.power_asleep, "a refused request is not a sleep");
@@ -1662,17 +1671,18 @@ ZTEST(gd32_protocol_015, test_deep_sleep_wake_pulse_latency_and_run_before_the_n
 	const gd32g553_power_opts_t o = { .wake_after_ms = 100u, .wake_latency_us = 3000u };
 	zassert_equal(gd32g553_set_power_mode(&C, 2u, &o), ALP_OK);
 	zassert_true(C.power_asleep);
-	E.asleep      = true; /* the bridge really slept: the first frame is lost */
-	E.delay_us    = 0u;
-	E.pm_count    = 0u;
-	E.pm_mode     = 0xFFu;
+	E.asleep             = true; /* the bridge really slept: the first frame is lost */
+	E.delay_us           = 0u;
+	E.pm_count           = 0u;
+	E.pm_mode            = 0xFFu;
 	const uint32_t pings = E.cmd_count[GD32G553_CMD_PING];
 
 	zassert_equal(gd32g553_ping(&C), ALP_OK, "the command after a sleep succeeds");
 	zassert_equal(E.lost_frames, 1u, "the wake pulse took the loss, not the command");
 	zassert_equal(E.pm_count, 1u, "RUN confirms the wake");
 	zassert_equal(E.pm_mode, 0u);
-	zassert_equal(E.cmd_count[GD32G553_CMD_PING], pings + 1u, "one real PING (the pulse never decoded)");
+	zassert_equal(
+	    E.cmd_count[GD32G553_CMD_PING], pings + 1u, "one real PING (the pulse never decoded)");
 	zassert_true(E.delay_us >= 3000u, "the requested wake latency was waited");
 	zassert_false(C.power_asleep);
 
@@ -1701,4 +1711,31 @@ ZTEST(gd32_protocol_015, test_standby_wake_renegotiates_like_a_reset)
 	zassert_true(C.renegotiate_pending);
 	zassert_false(C.seq_enabled, "negotiated state dropped with the reset");
 	zassert_false(C.power_asleep, "STANDBY re-inits instead of waking");
+}
+
+ZTEST(gd32_protocol_015, test_wake_that_never_gets_through_keeps_the_sleep_assumption)
+{
+	zassert_equal(bring_up(false), ALP_OK);
+	const gd32g553_power_opts_t o = { .wake_after_ms = 100u, .wake_retries = 1u };
+	zassert_equal(gd32g553_set_power_mode(&C, 2u, &o), ALP_OK);
+	E.drop_all           = true;
+	const alp_status_t s = gd32g553_ping(&C);
+	zassert_true(s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT, "the transport error is returned: %d", s);
+	zassert_true(C.power_asleep, "still assumed asleep: the next command retries the wake");
+	zassert_true(E.lost_frames >= 4u, "pulse + RUN on each of the 2 attempts");
+
+	E.drop_all = false;
+	zassert_equal(gd32g553_ping(&C), ALP_OK, "the wake succeeds once the bridge answers");
+	zassert_false(C.power_asleep);
+}
+
+ZTEST(gd32_protocol_015, test_wake_retry_count_of_255_terminates)
+{
+	zassert_equal(bring_up(false), ALP_OK);
+	const gd32g553_power_opts_t o = { .wake_after_ms = 100u, .wake_retries = 255u };
+	zassert_equal(gd32g553_set_power_mode(&C, 2u, &o), ALP_OK);
+	E.drop_all = true;
+	zassert_not_equal(gd32g553_power_wake(&C), ALP_OK);
+	zassert_true(C.power_asleep);
+	zassert_true(E.lost_frames >= 2u * 256u, "256 attempts, not an endless loop");
 }

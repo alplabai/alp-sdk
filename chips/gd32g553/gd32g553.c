@@ -1946,7 +1946,8 @@ alp_status_t gd32g553_power_wake(gd32g553_t *ctx)
 	 * back on failure so the next command retries it. */
 	ctx->power_asleep = false;
 	alp_status_t s    = ALP_ERR_IO;
-	for (uint8_t attempt = 0u; attempt <= ctx->power_wake_retries; ++attempt) {
+	/* uint32_t: a uint8_t counter never exceeds a retry count of 255. */
+	for (uint32_t attempt = 0u; attempt <= (uint32_t)ctx->power_wake_retries; ++attempt) {
 		/* Wake pulse.  A CS wake loses the frame clocked during it (it fails
 		 * its CRC on IRC8M and never reaches a handler), so the answer, or
 		 * the lack of one, means nothing. */
@@ -1971,6 +1972,14 @@ gd32g553_set_power_mode(gd32g553_t *ctx, uint8_t mode, const gd32g553_power_opts
 	if (opts == NULL) opts = &zero;
 	if ((opts->flags & (uint8_t)~GD32G553_POWER_FLAG_WAKE_I2C) != 0u) return ALP_ERR_INVAL;
 	if (opts->flags != 0u && mode != 2u) return ALP_ERR_INVAL;
+	/* WAKE_I2C only adds an early wake to a TIMED sleep: the firmware refuses an
+	 * untimed one (OUT_OF_RANGE) until the I2C0 wake line is bench-proven, and a
+	 * firmware that predates the flags would ignore it and answer INVAL.  Same
+	 * answer here, without the wire trip. ALP_POWER_WAKE_RTC | _TIMER = 0x9. */
+	if ((opts->flags & GD32G553_POWER_FLAG_WAKE_I2C) != 0u && opts->wake_after_ms == 0u &&
+	    (opts->wake_bitmap & 0x9u) == 0u) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
 
 	/* The bridge may still be asleep from an earlier request. */
 	alp_status_t s = gd32g553_power_wake(ctx);
@@ -1980,12 +1989,12 @@ gd32g553_set_power_mode(gd32g553_t *ctx, uint8_t mode, const gd32g553_power_opts
 	if (s != ALP_OK) return s;
 
 	if (mode == 2u) {
-		ctx->power_asleep = true;
-		ctx->power_wake_latency_us =
-		    (opts->wake_latency_us != 0u) ? opts->wake_latency_us
-		                                  : GD32G553_POWER_WAKE_LATENCY_US_DEFAULT;
-		ctx->power_wake_retries = (opts->wake_retries != 0u) ? opts->wake_retries
-		                                                     : GD32G553_POWER_WAKE_RETRIES_DEFAULT;
+		ctx->power_asleep          = true;
+		ctx->power_wake_latency_us = (opts->wake_latency_us != 0u)
+		                                 ? opts->wake_latency_us
+		                                 : GD32G553_POWER_WAKE_LATENCY_US_DEFAULT;
+		ctx->power_wake_retries =
+		    (opts->wake_retries != 0u) ? opts->wake_retries : GD32G553_POWER_WAKE_RETRIES_DEFAULT;
 	} else if (mode == 3u) {
 		/* The wake is a reset: link features, sequencing and streams are gone. */
 		spi_drop_negotiated(ctx);

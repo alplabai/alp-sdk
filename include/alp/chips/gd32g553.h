@@ -575,15 +575,15 @@ typedef struct {
                                                  continuity invariant.    */
 	uint32_t             stream2_next[GD32G553_BRIDGE_ADC_STREAM_COUNT]; /**< Expected
                                                  next first_index.        */
-	bool                 power_asleep;        /**< A Deep-sleep request was
+	bool                 power_asleep;                        /**< A Deep-sleep request was
                                                  accepted: the bridge may be
                                                  asleep, so the next command
                                                  runs the wake procedure
                                                  (@ref gd32g553_power_wake). */
-	uint32_t             power_wake_latency_us; /**< Wake wait of that request. */
-	uint8_t              power_wake_retries;  /**< Wake retries of that request. */
-	uint8_t              spi_req[GD32G553_SPI_FRAME_BYTES];              /**< SPI TX scratch. */
-	uint8_t              spi_reply[GD32G553_SPI_FRAME_BYTES];            /**< SPI RX scratch. */
+	uint32_t             power_wake_latency_us;               /**< Wake wait of that request. */
+	uint8_t              power_wake_retries;                  /**< Wake retries of that request. */
+	uint8_t              spi_req[GD32G553_SPI_FRAME_BYTES];   /**< SPI TX scratch. */
+	uint8_t              spi_reply[GD32G553_SPI_FRAME_BYTES]; /**< SPI RX scratch. */
 } gd32g553_t;
 
 /** Result of @ref gd32g553_adc_stream_begin2 (the 17-byte BEGIN2 reply). */
@@ -1308,9 +1308,12 @@ alp_status_t gd32g553_pwm_single_pulse(gd32g553_t *ctx, uint8_t channel, uint32_
  */
 alp_status_t gd32g553_timer_sync(gd32g553_t *ctx, uint8_t master, uint8_t slave, uint8_t mode);
 
-/** `flags` bit: a BRD_I2C address match (address 0x70) also ends a Deep-sleep.
- *  Lets a Deep-sleep request carry no timer; the firmware runs I2C0 from IRC8M
- *  while it is armed.  Valid for mode 2 only. */
+/** `flags` bit: a BRD_I2C address match (address 0x70) also ends a Deep-sleep
+ *  early.  Valid for mode 2 only and only with a timer (`wake_after_ms` or the
+ *  RTC/TIMER bit): an untimed request answers ALP_ERR_OUT_OF_RANGE until the
+ *  I2C0 wake line is bench-proven.  The firmware runs I2C0 from IRC8M while it
+ *  is armed.  A firmware that predates the flags ignores the bit (the timer
+ *  and SPI CS still wake it). */
 #define GD32G553_POWER_FLAG_WAKE_I2C 0x01u
 
 /** Default wake wait: pause between the wake pulse and the real frame.  Covers
@@ -1324,11 +1327,11 @@ alp_status_t gd32g553_timer_sync(gd32g553_t *ctx, uint8_t master, uint8_t slave,
 /** Options of @ref gd32g553_set_power_mode.  A zeroed struct (or NULL) is a
  *  valid "no wake sources, defaults" request. */
 typedef struct {
-	uint32_t wake_bitmap;      /**< ALP_POWER_WAKE_* bits (RTC / TIMER only on the GD32). */
-	uint32_t wake_after_ms;    /**< Timed wake, 0 = none (max ~32.7 s; FWDGT may cap it). */
-	uint8_t  flags;            /**< GD32G553_POWER_FLAG_* (0 for a pre-flags firmware). */
-	uint32_t wake_latency_us;  /**< Wake wait, 0 = @ref GD32G553_POWER_WAKE_LATENCY_US_DEFAULT. */
-	uint8_t  wake_retries;     /**< Wake retries, 0 = @ref GD32G553_POWER_WAKE_RETRIES_DEFAULT. */
+	uint32_t wake_bitmap;     /**< ALP_POWER_WAKE_* bits (RTC / TIMER only on the GD32). */
+	uint32_t wake_after_ms;   /**< Timed wake, 0 = none (max ~32.7 s; FWDGT may cap it). */
+	uint8_t  flags;           /**< GD32G553_POWER_FLAG_* (0 for a pre-flags firmware). */
+	uint32_t wake_latency_us; /**< Wake wait, 0 = @ref GD32G553_POWER_WAKE_LATENCY_US_DEFAULT. */
+	uint8_t  wake_retries;    /**< Wake retries, 0 = @ref GD32G553_POWER_WAKE_RETRIES_DEFAULT. */
 } gd32g553_power_opts_t;
 
 /**
@@ -1344,8 +1347,8 @@ typedef struct {
  * The firmware answers @c ALP_ERR_BUSY (nothing changed) for modes 2 and 3 while
  * an ADC stream, a PWM output or capture, a DAC output, an OTA session or an
  * unconfirmed trial is live: stop it, or use mode 1.  @c ALP_ERR_INVAL for a
- * request it cannot honour (no timer and no I2C wake in mode 3 / mode 2 without
- * the flag, an unknown flag), @c ALP_ERR_OUT_OF_RANGE for a timer the watchdog
+ * request it cannot honour (no timer in mode 2 or 3, an unknown flag),
+ * @c ALP_ERR_OUT_OF_RANGE for an untimed WAKE_I2C or a timer the watchdog
  * would cut short, @c ALP_ERR_NOSUPPORT on firmware without the mode (and for a
  * wake source the GD32 cannot arm).
  *

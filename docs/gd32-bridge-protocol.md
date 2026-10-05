@@ -83,7 +83,7 @@ allow-list.  Command opcodes are 1 byte; their numeric encoding is:
 | `0x25` | `PWM_CAPTURE_END`     | `channel:u8`                                          | _empty_                                            |
 | `0x26` | `PWM_SINGLE_PULSE`    | `channel:u8 reserved:u8 reserved:u16 pulse_ns:u32`    | _empty_                                            |
 | `0x27` | `TIMER_SYNC`          | `master:u8 slave:u8 mode:u8`                          | _empty_                                            |
-| `0x28` | `POWER_MODE_SET`      | `mode:u8 flags:u8 wake_bitmap:u32 wake_after_ms:u32` | _empty_ (see §3.z -- SPI only; `flags` bit0 = `WAKE_I2C`; modes 2/3 answer `STATUS_BUSY` while an ADC stream, PWM, DAC or OTA session is live; `wake_bitmap` bits `GPIO`/`UART_RX`/`USB`/`ETH_LINK` return `STATUS_NOSUPPORT`) |
+| `0x28` | `POWER_MODE_SET`      | `mode:u8 flags:u8 wake_bitmap:u32 wake_after_ms:u32` | _empty_ (see §3.z -- SPI only; `flags` bit0 = `WAKE_I2C` (timed requests only); modes 2/3 answer `STATUS_BUSY` while an ADC stream, PWM, DAC or OTA session is live; `wake_bitmap` bits `GPIO`/`UART_RX`/`USB`/`ETH_LINK` return `STATUS_NOSUPPORT`) |
 | `0x81` | `LINK_FEATURES` (v0.7) | `features:u8` (wanted; bit0 = `STATUS_SEQ`) **or** (v0.15, 6 bytes) `want:u32 max_payload_req:u16` | `features:u8` (granted + armed) **or** (v0.15, 10 bytes) `granted:u32 supported:u32 max_payload:u16`; see §3.14 / §4.1.1 |
 
 Opcodes `0x82..0xEF` are **reserved** for future Alp-defined
@@ -113,7 +113,7 @@ not on the v0.15 I2C opcode allow-list.
 |---|---|---|
 | `0` RUN | no-op; cancels an accepted `2`/`3` still waiting for its quiet-link window (and stops its RTC timer) | -- |
 | `1` SLEEP | accepted; the core already idles in `__WFI()` between interrupts, every clock and peripheral keeps running; never refused | any interrupt |
-| `2` DEEP_SLEEP | RAM and registers kept, core/PLL/IRC8M gated; resumes in place; the PLL is re-locked (IRC8M/2 x 108 / 2, the in-tree clock-override configuration) before any handler runs | SPI CS falling edge (EXTI 8), BRD_I2C address match (`flags` bit0, EXTI 31), RTC timer (EXTI 19) |
+| `2` DEEP_SLEEP | RAM and registers kept, core/PLL/IRC8M gated; resumes in place; the PLL is re-locked (IRC8M/2 x 108 / 2, the in-tree clock-override configuration) before any handler runs | SPI CS falling edge (EXTI 8), BRD_I2C address match (`flags` bit0, early wake of a timed sleep; EXTI line unconfirmed), RTC timer (EXTI 19) |
 | `3` STANDBY | SRAM lost; the wake is a **reset** (all link features cleared, v0.15 design F5); re-handshake required | NRST, RTC timer.  No WKUP pad is free on this SoM |
 
 * **Entry is deferred.**  The request is accepted (`STATUS_OK`) and latched;
@@ -125,18 +125,22 @@ not on the v0.15 I2C opcode allow-list.
   erase running) or an unconfirmed trial / boot-config commit is live.  Nothing
   is changed or latched; stop the feature or use mode 1.  A request that was
   accepted and is overtaken by such activity before the entry is dropped.
-* **Bounded sleep.**  Mode 3 needs a timer (`wake_after_ms > 0` or the
-  `RTC`/`TIMER` bit); mode 2 needs one unless `WAKE_I2C` is set.  Otherwise
-  `STATUS_INVAL`.  An unbounded mode 2 is refused with `STATUS_OUT_OF_RANGE`
-  while the FWDGT keeps counting in Deep-sleep, and so is a timer longer than
-  300 ms in that case.  `RTC`/`TIMER` arm the RTC wakeup timer (IRC32K / DIV16,
+* **Bounded sleep.**  Modes 2 and 3 always need a timer (`wake_after_ms > 0` or
+  the `RTC`/`TIMER` bit), else `STATUS_INVAL`.  `WAKE_I2C` (mode 2 only) adds an
+  early wake on a BRD_I2C address match; an **untimed** `WAKE_I2C` request is
+  refused with `STATUS_OUT_OF_RANGE` until the I2C0 wake line is bench-proven.
+  A timer longer than 300 ms is `STATUS_OUT_OF_RANGE` while the FWDGT keeps
+  counting in the mode.  `RTC`/`TIMER` arm the RTC wakeup timer (IRC32K / DIV16,
   nominally 0.5 ms LSB, up to ~32.7 s; IRC32K is 28-36 kHz so the real wait is
   -11 % / +14 %); `GPIO`, `UART_RX`, `USB`, `ETH_LINK` and unknown bits return
-  `STATUS_NOSUPPORT` -- there is no hardware path for them.
-* **`WAKE_I2C`** (mode 2 only) runs I2C0 from CK_IRC8M with WUEN armed, because
-  the APB1 kernel clock is gated in Deep-sleep.  SCL is stretched until the CPU
-  is back, so the I2C transaction that woke the part completes.  Not yet
-  bench-validated: keep a timer fallback until it is.
+  `STATUS_NOSUPPORT` -- there is no hardware path for them.  RUN and SLEEP both
+  cancel a latched mode 2/3 request.
+* **`WAKE_I2C`** runs I2C0 from CK_IRC8M with WUEN armed, because the APB1
+  kernel clock is gated in Deep-sleep.  SCL is stretched until the CPU is back,
+  so the I2C transaction that woke the part completes; I2C0 returns to APB1 at
+  base level once idle.  The EXTI line number is not confirmed against the
+  user manual and the path is not bench-validated.  A firmware that predates the
+  `flags` byte ignores it (benign: it still demands a timer).
 * **Host wake rule** (implemented by `gd32g553_set_power_mode()` /
   `gd32g553_power_wake()`).  A CS wake runs the waking transaction on IRC8M, so
   the frame clocked during it is lost; it fails its CRC and never reaches a
