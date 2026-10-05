@@ -74,7 +74,7 @@ do_configure:prepend() {
 			{ print }
 			call != "" && $0 == "{" { print "    void AlpWarnFwWrite(int); AlpWarnFwWrite(" call ");"; call = "" }
 		' ${S}/lib/cli.cpp > ${S}/lib/cli.cpp.alp
-		n=$(grep -c "AlpWarnFwWrite(" ${S}/lib/cli.cpp.alp)
+		n=$(grep -c "AlpWarnFwWrite(" ${S}/lib/cli.cpp.alp || true)
 		if [ "$n" != "3" ]; then
 			bbfatal "dx-rt: expected the three CLI command constructors in lib/cli.cpp (inserted $n of 3 calls); update this bbappend for the new dx-rt version"
 		fi

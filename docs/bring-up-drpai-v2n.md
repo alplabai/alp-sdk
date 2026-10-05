@@ -177,9 +177,9 @@ no-op on hardware seen so far, not as validated for that case.
 
 **The two-switch contract, authoritative here — every other mention in this
 repo is a pointer to this paragraph, not a restatement of it.** Two
-independent switches, both default OFF, deliberately not merged into one
-(the released v0.15.0 contract, `CHANGELOG.md`: "Two independent switches,
-both default OFF, deliberately not merged into one"):
+independent switches, deliberately not merged into one (the released
+v0.15.0 contract, `CHANGELOG.md`), each off unless its own conditions
+below hold:
 
 - **`PACKAGECONFIG[drpai]`** on the `alp-sdk` recipe compiles the DRP-AI3
   backend into `libalp_sdk`.  It turns on by itself on an `rzv2n-family`

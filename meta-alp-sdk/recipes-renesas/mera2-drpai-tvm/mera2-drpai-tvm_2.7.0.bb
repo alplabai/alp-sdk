@@ -521,23 +521,17 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # incompatible ... when searching for -lmera2_runtime" is an
 # architecture mismatch, not a symbol error).
 #
-# THAT FINAL STEP HAS NOT BEEN TAKEN.  This recipe is correct on paper and
-# nothing more.
+# The final link and packaging have since been exercised: do_compile and
+# packaging ran in a drpai-enabled alp-image-edge bake (#2400, which found
+# and fixed the missing -lfmt link gap).  What has NOT been done is running
+# inference from a baked image on a board.
 #
 # An earlier revision of this comment claimed a `drpai`-ENABLED
 # alp-image-edge bake had completed (12118 tasks, DT_NEEDED resolved, 0
-# unresolved symbols, ten libraries in the rootfs).  That claim was removed
-# rather than softened, for two reasons:
-#
-#   1. docs/bring-up-drpai-v2n.md, in the same change, states that no
-#      bitbake run of this recipe -- with or without do_compile -- has
-#      happened at all, and that the 12118-task bake it refers to ran with
-#      `drpai` OFF.  Same task count, opposite verdict.  Both cannot be
-#      true.
-#   2. The bake it described could not have run: it names
-#      `PACKAGECONFIG:append:pn-alp-sdk = " drpai"`, and until #1145 no
-#      PACKAGECONFIG[drpai] existed in alp-sdk_0.6.bb.  OE errors out on an
-#      append naming an undefined flag.
+# unresolved symbols, ten libraries in the rootfs) before PACKAGECONFIG[drpai]
+# existed in alp-sdk_0.6.bb (until #1145); that claim was removed because OE
+# errors out on an append naming an undefined flag.  The bake status is now
+# the #2400 one below.
 #
 # So what is actually established, and nothing beyond it: a hand-run host
 # g++ command modelled on do_compile compiled apps/MeraDrpRuntimeWrapper.cpp

@@ -31,13 +31,13 @@ Each outcome prints one "ALP:" line.
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  board/renesas/rzv2n-dev/rzv2n-dev.c | 67 +++++++++++++++++++++++++++++
- 1 file changed, 67 insertions(+)
+ 1 file changed, 66 insertions(+)
 
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
 index 669b86ee..8aac493a 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
-@@ -1172,11 +1172,78 @@ U_BOOT_CMD(alp_eth_mac, 1, 0, do_alp_eth_mac,
+@@ -1172,11 +1172,77 @@ U_BOOT_CMD(alp_eth_mac, 1, 0, do_alp_eth_mac,
  	   ""
  );
  
@@ -89,8 +89,7 @@ index 669b86ee..8aac493a 100644
 +		return;
 +	}
 +	if (before != ALP_ACT88760_GPIO_OTP_EARLY) {
-+		printf("ALP: ACT88760 reg 0x%02x reads unexpected 0x%02x; GD32_NRST not released
-+",
++		printf("ALP: ACT88760 reg 0x%02x reads unexpected 0x%02x; GD32_NRST not released\n",
 +		       ALP_ACT88760_GPIO_REG, before);
 +		return;
 +	}

@@ -603,7 +603,8 @@ DEEPX section for the full licensing detail.
   SKU #264 lands first also await the maintainer's AEN HW config (the
   `# TBD(alif-hw-config)` overrides in the machine confs).
 - The DRP-AI3 backend (`PACKAGECONFIG[drpai]`) is auto-enabled by
-  `alp-sdk_0.6.bb` when `RUHMI_DRPAI_TVM_DIR` is set;
+  `alp-sdk_0.6.bb` on an `rzv2n-family` MACHINE when `ALP_ENABLE_DRPAI` is
+  `"1"` and `RUHMI_DRPAI_TVM_DIR` is set;
   `mera2-drpai-tvm_2.7.0.bb`'s `do_compile` and packaging have run in a
   `drpai`-enabled `alp-image-edge` bake (#2400, which found and fixed the
   missing `-lfmt` link gap there).  See

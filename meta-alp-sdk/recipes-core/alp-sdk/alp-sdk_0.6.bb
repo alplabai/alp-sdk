@@ -108,7 +108,10 @@ PACKAGECONFIG[mqtt]     = ",,mosquitto"
 PACKAGECONFIG[security] = ",,openssl"
 PACKAGECONFIG[audio]    = ",,alsa-lib"
 PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
-# DRP-AI3 NPU backend (RZ/V2N on-die), default OFF.  Unlike the four
+# DRP-AI3 NPU backend (RZ/V2N on-die), off by default; the block at the
+# PACKAGECONFIG:append below turns it on automatically when its three
+# conditions hold (rzv2n-family MACHINE, ALP_ENABLE_DRPAI == "1",
+# RUHMI_DRPAI_TVM_DIR set).  Unlike the four
 # above this one is NOT a silent degrade and NOT dep-free: when
 # ALP_SDK_USE_DRPAI_V2N=ON, src/yocto/inference_drpai.cpp is added to the
 # target, #includes <linux/drpai.h> + MeraDrpRuntimeWrapper.h and links
