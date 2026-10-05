@@ -12,7 +12,7 @@ keyword the schema currently uses (`minimum`/`maximum`, `minItems`,
 `minProperties`, `uniqueItems`, `oneOf`, `not`, and any other keyword a
 future schema revision adds). `anyOf`, `allOf`, and `if`/`then` never reach
 ALP-B099: `board.schema.json`'s only `if`/`then` site
-(`board.schema.json:40-48`) surfaces its violation as `required` --
+(`board.schema.json:46-54`) surfaces its violation as `required` --
 [ALP-B001](ALP-B001.md) -- and its two `anyOf` sites
 (`board.schema.json:16`, under a `not:`, and `:47`, under that `if`) are
 evaluated by `jsonschema` with `is_valid()` rather than `iter_errors()` -- neither yields an

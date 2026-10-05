@@ -60,7 +60,7 @@ silicon.** Bench sign-off is tracked as #1268.
   incompatible ... when searching for -lmera2_runtime", an architecture
   mismatch, not proof of symbol resolution).
 
-**Reviewer question, resolved in this round:** the four RZ/V2N-family
+**Redundant per-machine DRP-AI appends removed:** the four RZ/V2N-family
 machine confs' own `ALP_ENABLE_DRPAI`-gated `IMAGE_INSTALL:append`
 (`lib-tvm kernel-module-mmngr`) overlapped `dev`'s existing
 `ALP_RZ_DRPAI_INSTALL` in `alp-image-common.inc` (#1176) — both installed
@@ -87,7 +87,7 @@ pull in `lib-tvm` + `kernel-module-mmngr` must now add that pair itself
 bbappend for it -- no such bbappend exists anywhere in this tree today, so
 there is currently no fallback install path for a non-alp image here.
 
-**Reviewer finding, resolved in this round:** the example's README and
+**Dead `alp_model build` command dropped:** the example's README and
 `main.c` taught `python3 -m alp_model build --target drpai --product V2N
 <model.onnx>` as the way to produce the `drpai_dir` bundle `argv[1]` loads,
 but `scripts/alp_model` has no `__main__`, so the command fails outright —

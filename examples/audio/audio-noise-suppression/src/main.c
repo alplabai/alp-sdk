@@ -56,7 +56,7 @@
  *      this M33 slice; only an A55/Yocto app reaches the DX-M1.
  *   3. "Where does the SW fallback live?"  CMSIS-DSP on the host
  *      CPU.  On native_sim that's the reference C kernels, on a
- *      real A55 build of a different project the Neon path.  The portable
+ *      an A55/Yocto build (a separate project) it is the Neon path.  The portable
  *      <alp/dsp.h> chain swap-in costs the customer zero lines.
  *
  *
