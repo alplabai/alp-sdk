@@ -15,10 +15,11 @@ unit (no valid manifest, so no family; provisioning's `boot_sd_linux` runs
 before `eeprom_manifest`, so first boot is always blank) prints one
 `ALP: fdtfile ...` line, keeps the `CONFIG_ALP_E1M_FDTFILE` default
 (`fdtfile-v2m.cfg` sets it for V2M MACHINEs), and the load then falls through
-`boot/${fdtfile}`, that default, and every dtb in the one family table, so it
-boots whichever dtb its image ships (each image holds only its own MACHINE's
-dtb). If none loads, the boot stops at the prompt naming every name tried
-rather than booting a stale `0x48000000`.
+`boot/${fdtfile}` then `boot/${fdtfile_alt}` (the other dtb in the one family
+table; the default is always one of the two, so no name is tried or reported
+failed twice), so it boots whichever dtb its image ships (each image holds
+only its own MACHINE's dtb). If neither loads, the boot stops at the prompt
+naming both rather than booting a stale `0x48000000`.
 
 Built and inspected only (patch series applied in order on the pinned
 renesas-u-boot-cip `bcf29d98`, compiled for `rzv2n-dev`); not yet booted on

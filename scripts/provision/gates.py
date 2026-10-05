@@ -214,20 +214,20 @@ def fip_rail(fip: bytes, family: str) -> GateResult:
     return GateResult("fip_rail", True, f"not required for family {family} (present={present})")
 
 
-_FDT_RE = re.compile(rb"boot/([A-Za-z0-9_.,+-]+\.dtb)")
+_FDT_RE = re.compile(rb"(?:boot/|alp_fdtfile )([A-Za-z0-9_.,+-]+\.dtb)")
 
 
 _BOOTCMD_RE = re.compile(rb"bootcmd=[^\x00]*")
 
 
 def fip_fdtfile(fip: bytes) -> str:
-    """The build-time FALLBACK dtb basename (``CONFIG_ALP_E1M_FDTFILE``, patch 0002).
+    """The build-time FALLBACK dtb basename (``CONFIG_ALP_E1M_FDTFILE``).
 
     Since patch 0013 the dtb a unit boots is picked at boot from its EEPROM
-    manifest family (``boot/${fdtfile}``, which this regex ignores), then this
-    fallback, then every dtb in the family table. The fallback is the FIRST
-    literal ``boot/*.dtb`` in ``bootcmd``; the table names that follow are not
-    returned. Using it for the ``fdt`` gate and the ``dxm1`` swap is right when
+    manifest family (``boot/${fdtfile}``, which this regex ignores), then the
+    other dtb in the family table (``${fdtfile_alt}``). The fallback is the
+    default the bootcmd passes to ``alp_fdtfile <name>.dtb``. Using it for the
+    ``fdt`` gate and the ``dxm1`` swap is right when
     the bundle's family equals the SoM's family, which per-SKU bundles
     guarantee.
 

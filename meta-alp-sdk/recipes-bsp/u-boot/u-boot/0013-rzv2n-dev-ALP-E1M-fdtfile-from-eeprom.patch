@@ -13,25 +13,28 @@ alp_som_is_v2n_m1() now caches the validated manifest family, and a new
 alp_fdtfile command maps it to a dtb basename and sets env fdtfile. The
 family -> dtb table is one X-macro (ALP_FDTFILE_FAMILY_TABLE in
 include/configs/rzv2n-dev.h) expanded both into the C lookup array and
-into the bootcmd fallback chain ("v2n-m1" -> e1m-v2m101-x-evk.dtb, "v2n"
--> e1m-v2n101-x-evk.dtb). A missing or invalid manifest, or an unknown
-family, keeps the CONFIG_ALP_E1M_FDTFILE default; each case prints one
-"ALP:" line.
+the fallback ("v2n-m1" -> e1m-v2m101-x-evk.dtb, "v2n" ->
+e1m-v2n101-x-evk.dtb). A missing or invalid manifest, or an unknown
+family, keeps the default dtb; each case prints one "ALP:" line.
 
-CONFIG_BOOTCOMMAND runs alp_fdtfile right after "env default -a" (which
-would wipe anything board_late_init() set) and loads, in order,
-boot/${fdtfile}, the CONFIG_ALP_E1M_FDTFILE default, then every table dtb.
-A unit with a blank EEPROM has no family, but its image ships only its
-own MACHINE's dtb, so whichever table entry exists is the right one. A
-failure of the last attempt still stops at the prompt, naming every dtb
-tried, instead of booting a stale 0x48000000.
+CONFIG_BOOTCOMMAND runs "alp_fdtfile CONFIG_ALP_E1M_FDTFILE" right after
+"env default -a" (which would wipe anything board_late_init() set). The
+command sets env fdtfile (the family dtb, else the default passed as its
+argument) and env fdtfile_alt (the first table dtb that differs from
+fdtfile), and the bootcmd loads boot/${fdtfile} then boot/${fdtfile_alt}.
+The default is one of the table dtbs, so fdtfile + fdtfile_alt are every
+distinct name and none is tried (or printed as failed) twice. A unit with a
+blank EEPROM has no family, but its image ships only its own MACHINE's dtb,
+so whichever of the two exists is the right one. A failure of the last
+attempt still stops at the prompt, naming both dtbs, instead of booting a
+stale 0x48000000.
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  board/renesas/rzv2n-dev/Kconfig     | 20 +++++------
- board/renesas/rzv2n-dev/rzv2n-dev.c | 56 +++++++++++++++++++++++++++++
- include/configs/rzv2n-dev.h         | 46 +++++++++++++++---------
- 3 files changed, 95 insertions(+), 27 deletions(-)
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 74 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ include/configs/rzv2n-dev.h         | 44 +++++++++++++++++-----------------
+ 3 files changed, 111 insertions(+), 27 deletions(-)
 
 diff --git a/board/renesas/rzv2n-dev/Kconfig b/board/renesas/rzv2n-dev/Kconfig
 index 9751e049..dcffe02d 100644
@@ -90,15 +93,14 @@ index 96fe07ef..36b8dceb 100644
  	memcpy(alp_serial, &buf[0x38], 24);
  	alp_serial[24] = '\0';
  	memcpy(alp_sku, &buf[0x18], 24);
-@@ -1172,6 +1180,54 @@ U_BOOT_CMD(alp_eth_mac, 1, 0, do_alp_eth_mac,
+@@ -1172,6 +1180,72 @@ U_BOOT_CMD(alp_eth_mac, 1, 0, do_alp_eth_mac,
  	   ""
  );
  
 +/*
 + * Family -> board dtb basename (the file the image holds at boot/<name>).
 + * The ONE place this mapping lives is ALP_FDTFILE_FAMILY_TABLE in
-+ * include/configs/rzv2n-dev.h, which CONFIG_BOOTCOMMAND also expands into
-+ * its fallback chain.  The V2M family reports "v2n-m1";
++ * include/configs/rzv2n-dev.h.  The V2M family reports "v2n-m1";
 + * v2m102/v2m103 reuse the v2m101 dtb today (see meta-alp-sdk
 + * conf/machine/e1m-v2m10*-a55.conf).
 + */
@@ -112,17 +114,28 @@ index 96fe07ef..36b8dceb 100644
 +};
 +
 +/*
-+ * Set env "fdtfile" for CONFIG_BOOTCOMMAND.  Like alp_eth_mac it must run
-+ * after bootcmd's leading "env default -a", which wipes anything
-+ * board_late_init() put in env.  A missing/invalid manifest or an unknown
-+ * family leaves the build-time CONFIG_ALP_E1M_FDTFILE default.
++ * alp_fdtfile <default.dtb>: set env "fdtfile" and "fdtfile_alt" for
++ * CONFIG_BOOTCOMMAND, which loads boot/${fdtfile} then boot/${fdtfile_alt}.
++ * fdtfile is the manifest family's dtb; a missing/invalid manifest or an
++ * unknown family keeps <default.dtb> (CONFIG_ALP_E1M_FDTFILE, passed by the
++ * bootcmd).  fdtfile_alt is the first table dtb that is not fdtfile.  The
++ * default is one of the table dtbs and the table has two rows, so the two
++ * names are every distinct dtb: nothing is tried twice, and an absent file
++ * is reported once.  A third row or a default outside the table needs a
++ * third variable (test_alp_boot_dtb_names.py pins both).
++ * Like alp_eth_mac it must run after bootcmd's leading "env default -a",
++ * which wipes anything board_late_init() put in env.
 + */
 +static int do_alp_fdtfile(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
 +{
-+	const char *dtb = CONFIG_ALP_E1M_FDTFILE;
++	const char *dtb = argv[1];
++	const char *alt = "";
 +	const char *why = alp_family[0] ? "unknown SoM family, build default" :
 +					  "no valid SoM manifest, build default";
 +	int i;
++
++	if (argc != 2)
++		return CMD_RET_USAGE;
 +
 +	for (i = 0; alp_family[0] && i < ARRAY_SIZE(alp_fdtfile_map); i++) {
 +		if (!strcmp(alp_family, alp_fdtfile_map[i].family)) {
@@ -132,14 +145,22 @@ index 96fe07ef..36b8dceb 100644
 +		}
 +	}
 +
++	for (i = 0; i < ARRAY_SIZE(alp_fdtfile_map); i++) {
++		if (strcmp(dtb, alp_fdtfile_map[i].dtb)) {
++			alt = alp_fdtfile_map[i].dtb;
++			break;
++		}
++	}
++
 +	env_set("fdtfile", dtb);
-+	printf("ALP: fdtfile %s (%s)\n", dtb, why);
++	env_set("fdtfile_alt", alt);
++	printf("ALP: fdtfile %s (%s), then %s\n", dtb, why, alt);
 +	return 0;
 +}
 +
-+U_BOOT_CMD(alp_fdtfile, 1, 0, do_alp_fdtfile,
-+	   "set env fdtfile from the SoM manifest family",
-+	   ""
++U_BOOT_CMD(alp_fdtfile, 2, 0, do_alp_fdtfile,
++	   "set env fdtfile/fdtfile_alt from the SoM manifest family",
++	   "<default.dtb>"
 +);
 +
  /*
@@ -167,34 +188,34 @@ index b3bbbd7b..e8b3c404 100644
 - * file it does not contain. */
 + * Per-SKU dtb: picked at boot from the EEPROM manifest family by the
 + * alp_fdtfile command (board/renesas/rzv2n-dev/rzv2n-dev.c), which sets
-+ * env fdtfile.  CONFIG_ALP_E1M_FDTFILE (a Kconfig string, V2M MACHINEs
-+ * override it via fdtfile-v2m.cfg) is only the fallback for a board
-+ * with no valid manifest.  alp_fdtfile has to run AFTER the leading
++ * env fdtfile and fdtfile_alt.  CONFIG_ALP_E1M_FDTFILE (a Kconfig
++ * string, V2M MACHINEs override it via fdtfile-v2m.cfg) is only the
++ * fallback for a board with no valid manifest, passed to alp_fdtfile.  alp_fdtfile has to run AFTER the leading
 + * "env default -a" wipe, so CONFIG_BOOTCOMMAND invokes it. */
 +/* ALP: family -> board dtb basename, the ONE table (an X-macro).  The
-+ * C side (alp_fdtfile, rzv2n-dev.c) expands it into a lookup array; the
-+ * bootcmd below expands it into a fallback chain, so there is no second
-+ * literal list.  v2m102/v2m103 reuse the v2m101 dtb today. */
++ * C side (alp_fdtfile, rzv2n-dev.c) expands it into a lookup array, so
++ * there is no second literal list.  v2m102/v2m103 reuse the v2m101 dtb
++ * today. */
 +#define ALP_FDTFILE_FAMILY_TABLE(X) \
 +	X("v2n-m1", "e1m-v2m101-x-evk.dtb") \
 +	X("v2n", "e1m-v2n101-x-evk.dtb")
-+#define ALP_FDTFILE_TRY(family, dtb) " || ext4load mmc ${alp_mmc} 0x48000000 boot/" dtb
-+#define ALP_FDTFILE_NAME(family, dtb) " " dtb
 +
-+/* ALP: dtb load order: ${fdtfile} (alp_fdtfile: manifest family), then the
-+ * CONFIG_ALP_E1M_FDTFILE build default, then every table dtb.  A unit with
-+ * a blank EEPROM has no family, and its image ships only its own
-+ * MACHINE's dtb, so whichever table entry exists is the right one.  Only
-+ * a failure of the LAST attempt reaches the failure branch below. */
++/* ALP: dtb load order: ${fdtfile} (alp_fdtfile: manifest family, else the
++ * CONFIG_ALP_E1M_FDTFILE default it is passed), then ${fdtfile_alt} (the
++ * other table dtb).  Those are every distinct name, so none is tried
++ * twice.  A unit with a blank EEPROM has no family, and its image ships
++ * only its own MACHINE's dtb, so whichever of the two exists is the right
++ * one.  Only a failure of the LAST attempt reaches the failure branch
++ * below. */
  
  /* ALP: the loads are now FATAL, and that is the point of this block.
   * Every load here used to be ';'-chained, i.e. non-fatal: a missing
-@@ -164,15 +173,18 @@
+@@ -164,15 +173,16 @@
   * fdt_fixup_ethernet() (boot/image-fdt.c's image_setup_libfdt(), which
   * runs it BEFORE ft_system_setup() -- confirmed by reading this BSP's
   * actual 2024.07 source, not assumed). */
 -#define CONFIG_BOOTCOMMAND	"env default -a;alp_eth_mac;run bootcmd_check;" \
-+#define CONFIG_BOOTCOMMAND	"env default -a;alp_eth_mac;alp_fdtfile;run bootcmd_check;" \
++#define CONFIG_BOOTCOMMAND	"env default -a;alp_eth_mac;alp_fdtfile " CONFIG_ALP_E1M_FDTFILE ";run bootcmd_check;" \
  	"if mmc dev 1 && ext4size mmc 1:2 boot/Image; then " \
  	"setenv alp_mmc 1:2;setenv alp_root /dev/mmcblk1p2; else " \
  	"setenv alp_mmc 0:2;setenv alp_root /dev/mmcblk0p2; fi;" \
@@ -202,14 +223,12 @@ index b3bbbd7b..e8b3c404 100644
 -	" && ext4load mmc ${alp_mmc} 0x48000000 boot/" CONFIG_ALP_E1M_FDTFILE "; then " \
 +	"if ext4load mmc ${alp_mmc} 0x48080000 boot/Image; then " \
 +	"if ext4load mmc ${alp_mmc} 0x48000000 boot/${fdtfile}" \
-+	" || ext4load mmc ${alp_mmc} 0x48000000 boot/" CONFIG_ALP_E1M_FDTFILE \
-+	ALP_FDTFILE_FAMILY_TABLE(ALP_FDTFILE_TRY) "; then " \
++	" || ext4load mmc ${alp_mmc} 0x48000000 boot/${fdtfile_alt}; then " \
  	"setenv bootargs " ALP_BOOTARGS_BASE " root=${alp_root};" \
 -	"run bootimage; fi;" \
 -	"echo ALP: kernel Image or " CONFIG_ALP_E1M_FDTFILE " failed to load" \
 +	"run bootimage; fi; fi;" \
-+	"echo ALP: kernel Image or dtb (${fdtfile} " CONFIG_ALP_E1M_FDTFILE \
-+	ALP_FDTFILE_FAMILY_TABLE(ALP_FDTFILE_NAME) ") failed to load" \
++	"echo ALP: kernel Image or dtb (${fdtfile} ${fdtfile_alt}) failed to load" \
  	" from boot/ on mmc ${alp_mmc} -- NOT booting a stale RAM image"
  
  /* For board */

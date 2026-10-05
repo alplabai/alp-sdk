@@ -35,3 +35,14 @@ def test_alp_fdtfile_family_table_matches_the_machine_dtbs():
     v2m = _machine_dtb(META / "conf" / "machine" / "e1m-v2m101-a55.conf")
     v2n = _machine_dtb(META / "conf" / "machine" / "e1m-v2n101-a55.conf")
     assert table == {"v2n-m1": v2m, "v2n": v2n}
+
+
+def test_fdtfile_chain_has_one_alt_and_the_default_is_in_the_table():
+    """bootcmd loads ${fdtfile} then ${fdtfile_alt}: that covers every distinct dtb
+    only while the table has two rows and both build defaults are table dtbs."""
+    patch = (UBOOT / "0013-rzv2n-dev-ALP-E1M-fdtfile-from-eeprom.patch").read_text(encoding="utf-8")
+    table = re.findall(r'^\+	X\("[a-z0-9-]+", "([^"]+\.dtb)"\)', patch, re.M)
+    v2m = re.search(r'CONFIG_ALP_E1M_FDTFILE="([^"]+)"', (UBOOT / "fdtfile-v2m.cfg").read_text(encoding="utf-8")).group(1)
+    v2n = re.search(r'default "(e1m-v2n[^"]+\.dtb)"', (UBOOT / "0002-rzv2n-dev-ALP-E1M-production-boot.patch").read_text(encoding="utf-8")).group(1)
+    assert len(table) == 2 and {v2m, v2n} <= set(table)
+    assert "boot/${fdtfile_alt}; then" in patch and "ALP_FDTFILE_TRY" not in patch

@@ -356,9 +356,10 @@ SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.
 # its own V2N wic: the build-time name pointed at the V2M dtb.
 # What is fixed: a unit with a valid manifest picks its family's dtb; a
 # blank-EEPROM unit (no family -- provisioning's boot_sd_linux runs before
-# eeprom_manifest) falls through the bootcmd chain (${fdtfile}, the build
-# default, then every dtb in the one family table) to whichever dtb its image
-# ships, since each image holds only its own MACHINE's dtb.
+# eeprom_manifest) falls through the bootcmd chain (boot/${fdtfile}, then
+# boot/${fdtfile_alt}, the other dtb in the one family table; the build
+# default is always one of the two) to whichever dtb its image ships, since
+# each image holds only its own MACHINE's dtb.
 #
 # Lands after 0011: it edits board_late_init()'s helpers around 0009/0010's
 # alp_serial capture and the CONFIG_BOOTCOMMAND line 0010 left, so it must
