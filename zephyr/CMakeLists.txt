@@ -1312,6 +1312,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TCAL9538
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tcal9538/tcal9538.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TAS2563
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tas2563/tas2563.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_INA228
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ina228/ina228.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_INA236
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ina236/ina236.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ACT8760

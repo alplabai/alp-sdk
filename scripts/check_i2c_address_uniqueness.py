@@ -96,21 +96,7 @@ import yaml
 # (repo-relative file, bus id, "0xNN" 7-bit address) -> why this collision is
 # real hardware ambiguity, not a bug in the gate. Each entry must name the
 # tracking issue -- see the module docstring.
-ALLOWLIST: dict[tuple[str, str, str], tuple[tuple[str, ...], str]] = {
-    (
-        "metadata/boards/e1m-x-evk.yaml",
-        "E1M_X_I2C0",
-        "0x48",
-    ): ((
-        "chip=tas2563 broadcast",
-        "part=ina236 macro=XEVK_I2C_ADDR_INA236_VCAM2",
-    ), (
-        "#2343: U32 (INA236B, VCAM2) is strapped to the TAS2563 global-call "
-        "address on the E1M-X EVK V2. The maintainer's call is to remove U32 "
-        "on the current build batch and re-strap it to 0x4A/0x4B on the next "
-        "carrier revision; the metadata keeps it at its V2 strap until then."
-    )),
-}
+ALLOWLIST: dict[tuple[str, str, str], tuple[tuple[str, ...], str]] = {}
 
 # Synthetic bus id for metadata/boards/*.yaml's top-level i2c_devices: block
 # -- see the module docstring's "What it scans" section on why this list has
