@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-03",
+  "generated": "2026-10-04",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -30,6 +30,10 @@
         "alp_adc_read_raw": {
           "hash": "46239a90badd99fe",
           "signature": "alp_status_t alp_adc_read_raw(alp_adc_t *adc, int32_t *raw_out);"
+        },
+        "alp_adc_read_raw_n": {
+          "hash": "9a3fb1da36d956ad",
+          "signature": "alp_status_t alp_adc_read_raw_n(alp_adc_t *adc, int32_t *raw_out, size_t n);"
         },
         "alp_adc_read_uv": {
           "hash": "213e09e41ba37d00",
@@ -4488,6 +4492,10 @@
           "hash": "5648f3dad09fce82",
           "signature": "alp_status_t gd32g553_qenc_reset(gd32g553_t *ctx, uint8_t encoder);"
         },
+        "gd32g553_refresh_version": {
+          "hash": "38043ff3d144c538",
+          "signature": "alp_status_t gd32g553_refresh_version(gd32g553_t *ctx, gd32g553_version_t *out);"
+        },
         "gd32g553_se_reset": {
           "hash": "b307a115c22b20b0",
           "signature": "alp_status_t gd32g553_se_reset(gd32g553_t *ctx, bool assert);"
@@ -4537,6 +4545,10 @@
         "GD32G553_BRIDGE_ADC_STREAM_COUNT": {
           "hash": "174fe58f6c5bcbca",
           "value": "2u"
+        },
+        "GD32G553_BRIDGE_ADC_STREAM_MAX_RATE_HZ": {
+          "hash": "0530e286dab73515",
+          "value": "100000u"
         },
         "GD32G553_BRIDGE_ADC_STREAM_READ_MAX": {
           "hash": "39b14e829341c6af",
@@ -4738,7 +4750,7 @@
           "kind": "enum"
         },
         "gd32g553_t": {
-          "definition": "typedef struct { bool initialised; alp_spi_t *spi; alp_i2c_t *i2c; uint8_t i2c_addr; gd32g553_transport_t default_transport; gd32g553_version_t version; bool seq_enabled; uint8_t seq_last; uint32_t seq_stale_count; } gd32g553_t;",
+          "definition": "typedef struct { bool initialised; alp_spi_t *spi; alp_i2c_t *i2c; uint8_t i2c_addr; gd32g553_transport_t default_transport; gd32g553_version_t version; bool seq_enabled; uint8_t seq_last; uint32_t seq_stale_count; bool version_cached; } gd32g553_t;",
           "fields": [
             "bool initialised",
             "alp_spi_t *spi",
@@ -4748,9 +4760,10 @@
             "gd32g553_version_t version",
             "bool seq_enabled",
             "uint8_t seq_last",
-            "uint32_t seq_stale_count"
+            "uint32_t seq_stale_count",
+            "bool version_cached"
           ],
-          "hash": "49879c12074387f8",
+          "hash": "fed41888c0821307",
           "kind": "struct"
         },
         "gd32g553_tmu_format_t": {

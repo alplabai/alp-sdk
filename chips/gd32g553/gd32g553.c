@@ -449,14 +449,22 @@ static alp_status_t cmd_send(gd32g553_t          *ctx,
                              size_t               reply_payload_len)
 {
 	if (t == GD32G553_TRANSPORT_DEFAULT) t = ctx->default_transport;
+	alp_status_t s;
 	switch (t) {
 	case GD32G553_TRANSPORT_SPI:
-		return spi_xfer(ctx, cmd, req_payload, req_payload_len, reply_payload, reply_payload_len);
+		s = spi_xfer(ctx, cmd, req_payload, req_payload_len, reply_payload, reply_payload_len);
+		break;
 	case GD32G553_TRANSPORT_I2C:
-		return i2c_xfer(ctx, cmd, req_payload, req_payload_len, reply_payload, reply_payload_len);
+		s = i2c_xfer(ctx, cmd, req_payload, req_payload_len, reply_payload, reply_payload_len);
+		break;
 	default:
 		return ALP_ERR_INVAL;
 	}
+	/* A transport-level failure means the link (or the bridge behind it)
+     * is in an unknown state and the caller will likely re-init: do not
+     * keep vouching for a version read before it. */
+	if (s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT) ctx->version_cached = false;
+	return s;
 }
 
 /* ----------------------------------------------------------------- */
@@ -562,7 +570,7 @@ alp_status_t gd32g553_init(gd32g553_t *ctx, alp_spi_t *spi, alp_i2c_t *i2c, uint
 
 	gd32g553_version_t v;
 	for (;;) {
-		s = gd32g553_get_version(ctx, &v);
+		s = gd32g553_refresh_version(ctx, &v);
 		if (s == ALP_ERR_BUSY) saw_busy = true;
 		if (!gd32g553_init_status_is_transient(s, saw_busy)) break;
 		if (!gd32g553_init_retry_wait(&attempt, deadline_ms)) break;
@@ -575,7 +583,7 @@ alp_status_t gd32g553_init(gd32g553_t *ctx, alp_spi_t *spi, alp_i2c_t *i2c, uint
 		ctx->initialised = false;
 		return ALP_ERR_NOSUPPORT;
 	}
-	ctx->version = v;
+	/* gd32g553_refresh_version() filled ctx->version and armed the cache. */
 
 	/* v0.7 link-feature negotiation (best-effort, SPI only -- the
      * STATUS_SEQ stamp is an SPI-framing feature).  Old firmware
@@ -618,17 +626,29 @@ alp_status_t gd32g553_ping_via(gd32g553_t *ctx, gd32g553_transport_t t)
 	return cmd_send(ctx, t, GD32G553_CMD_PING, NULL, 0u, NULL, 0u);
 }
 
-alp_status_t gd32g553_get_version(gd32g553_t *ctx, gd32g553_version_t *out)
+alp_status_t gd32g553_refresh_version(gd32g553_t *ctx, gd32g553_version_t *out)
 {
 	if (ctx == NULL || out == NULL) return ALP_ERR_INVAL;
 	uint8_t      reply[3];
 	alp_status_t s = cmd_send(
 	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_GET_VERSION, NULL, 0u, reply, sizeof(reply));
 	if (s != ALP_OK) return s;
-	out->major = reply[0];
-	out->minor = reply[1];
-	out->patch = reply[2];
+	out->major          = reply[0];
+	out->minor          = reply[1];
+	out->patch          = reply[2];
+	ctx->version        = *out;
+	ctx->version_cached = true;
 	return ALP_OK;
+}
+
+alp_status_t gd32g553_get_version(gd32g553_t *ctx, gd32g553_version_t *out)
+{
+	if (ctx == NULL || out == NULL) return ALP_ERR_INVAL;
+	if (ctx->initialised && ctx->version_cached) {
+		*out = ctx->version;
+		return ALP_OK;
+	}
+	return gd32g553_refresh_version(ctx, out);
 }
 
 alp_status_t gd32g553_get_build_id(gd32g553_t *ctx, char build_id[GD32G553_BUILD_ID_LEN + 1])
@@ -1390,6 +1410,8 @@ static alp_status_t ota_reset_cmd(gd32g553_t *ctx, uint8_t cmd)
 	if (s == ALP_OK) {
 		ctx->seq_enabled = false;
 		ctx->seq_last    = 0u;
+		/* The bridge reboots into a (possibly different) image. */
+		ctx->version_cached = false;
 	}
 	return s;
 }
@@ -1442,7 +1464,8 @@ void gd32g553_deinit(gd32g553_t *ctx)
 {
 	if (ctx == NULL) return;
 	/* Bus handles are owned by the caller -- don't close them. */
-	ctx->initialised = false;
-	ctx->spi         = NULL;
-	ctx->i2c         = NULL;
+	ctx->initialised    = false;
+	ctx->version_cached = false;
+	ctx->spi            = NULL;
+	ctx->i2c            = NULL;
 }
