@@ -57,7 +57,8 @@ extern "C" {
 /** @c kind: HIL soak app. */
 #define ALP_GD32_RESULTS_KIND_SOAK 2u
 
-/** @c state 0: the app started but the bridge link is not up yet (init retries). */
+/** @c state: the app started but the bridge link is not up yet (init retries). */
+#define ALP_GD32_RESULTS_STATE_LINK_PENDING 0u
 /** @c state: tests running (functional) / settling past the host boot (soak). */
 #define ALP_GD32_RESULTS_STATE_RUNNING 1u
 /** @c state: functional tests done, PWM staircase running / soak cycling. */
@@ -107,15 +108,25 @@ typedef struct {
 	uint32_t reserved;       /**< 0. */
 } alp_gd32_results_t;
 
+#ifdef __cplusplus
+static_assert(sizeof(alp_gd32_results_t) == ALP_GD32_RESULTS_WORDS * 4u,
+              "alp_gd32_results_t must stay 20 words");
+#else
 _Static_assert(sizeof(alp_gd32_results_t) == ALP_GD32_RESULTS_WORDS * 4u,
                "alp_gd32_results_t must stay 20 words");
+#endif
 
 /** Byte offset of the liveness beacon inside the `rsctbl` window. */
 #define ALP_GD32_RESULTS_BEACON_OFFSET 0xFF0u
 /** Beacon magic the provisioning `cm33_running` check reads. */
 #define ALP_GD32_RESULTS_BEACON_MAGIC 0xA10D0683u
-/** Beacon image kind the `cm33_running` check accepts (the idle-shim value, 0x100). */
-#define ALP_GD32_RESULTS_BEACON_KIND 0x100u
+/**
+ * Beacon image kind of these test images: kind 2, rev 0.  Deliberately NOT the
+ * idle shim's 0x100: these images own the GD32 SPI link and drive PWM7, so
+ * `cm33_running` must reject them as "not the stock shim", and the HIL spec
+ * uses the kind to tie a surviving record to the image now running.
+ */
+#define ALP_GD32_RESULTS_BEACON_KIND 0x200u
 
 /**
  * @brief Clear the record and publish an empty one for @p kind.

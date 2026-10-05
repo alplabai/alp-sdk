@@ -25,6 +25,7 @@ def test_constants_match_header():
     assert reader.BEACON_OFFSET == _define("ALP_GD32_RESULTS_BEACON_OFFSET")
     assert reader.BEACON_MAGIC == _define("ALP_GD32_RESULTS_BEACON_MAGIC")
     assert reader.WORDS == _define("ALP_GD32_RESULTS_WORDS")
+    assert reader.LINK_PENDING == _define("ALP_GD32_RESULTS_STATE_LINK_PENDING")
     assert reader.RESULTS_OFFSET + reader.WORDS * 4 <= reader.BEACON_OFFSET
 
 
@@ -43,7 +44,7 @@ def test_decode_round_trip():
     words = [0] * reader.WORDS
     words[0], words[1], words[3], words[4] = reader.MAGIC, 1, 2, 2
     words[5], words[8], words[9], words[10], words[11] = 7, (0 << 16) | (15 << 8) | 1, 0x1B, 252, 0x18
-    rec = reader.decode(struct.pack("<20I", *words), (reader.BEACON_MAGIC, 0x100, 42))
+    rec = reader.decode(struct.pack("<20I", *words), (reader.BEACON_MAGIC, 0x200, 42))
     assert rec["fw"] == "0.15.1" and rec["kind_name"] == "soak" and rec["tests_pass"] == 7
     assert rec["flag_names"] == ["batch_ok", "stream2_ok"] and rec["beacon_heartbeat"] == 42
 

@@ -38,7 +38,8 @@ FIELDS = (
     "soak_errors", "soak_timeouts", "soak_elapsed_s", "reserved",
 )
 KINDS = {1: "functional", 2: "soak"}
-STATES = {0: "link-not-up", 1: "running", 2: "done", 0xDEAD: "no-link"}
+LINK_PENDING = 0
+STATES = {LINK_PENDING: "link-not-up", 1: "running", 2: "done", 0xDEAD: "no-link"}
 FLAGS = {
     1 << 0: "attn_granted", 1 << 1: "attn_active", 1 << 2: "attn_fallback",
     1 << 3: "batch_ok", 1 << 4: "stream2_ok",
@@ -61,14 +62,20 @@ def decode(raw, beacon=None):
     return rec
 
 
+def words(mm, off, n):
+    """n u32 at off, ONE aligned 32-bit load each: /dev/mem maps the no-map range
+    as Device memory, where a multi-word copy may fault (as cm33_running avoids)."""
+    return b"".join(struct.pack("<I", struct.unpack_from("<I", mm, off + 4 * i)[0]) for i in range(n))
+
+
 def read_record(mm, tries=20):
     """Seqlock read: retry while the writer is mid-update (odd seq) or seq moved."""
     for _ in range(tries):
-        a = mm[RESULTS_OFFSET:RESULTS_OFFSET + WORDS * 4]
-        b = mm[RESULTS_OFFSET:RESULTS_OFFSET + WORDS * 4]
+        a = words(mm, RESULTS_OFFSET, WORDS)
+        b = words(mm, RESULTS_OFFSET, WORDS)
         seq = struct.unpack_from("<I", a, 8)[0]
         if seq % 2 == 0 and a == b:
-            beacon = struct.unpack_from("<3I", mm, BEACON_OFFSET)
+            beacon = struct.unpack("<3I", words(mm, BEACON_OFFSET, 3))
             return decode(a, beacon)
         time.sleep(0.01)
     return None

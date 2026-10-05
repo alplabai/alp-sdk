@@ -87,8 +87,9 @@ static void publish(void)
 
 /* The beacon heartbeat ticks from a timer, not from the test loop: a
  * BIG_FRAME exchange or the 50 ms stream wait can block the main thread
- * for longer than the 1..4 counts per 2 s `cm33_running` accepts.  A
- * k_timer expiry only does a plain store, so it never touches the bridge. */
+ * for several seconds.  A k_timer expiry only does a plain store, so it
+ * never touches the bridge.  The beacon kind (0x200) is this image's own,
+ * not the idle shim's 0x100, so provisioning's `cm33_running` rejects it. */
 static void beacon_tick(struct k_timer *t)
 {
 	ARG_UNUSED(t);
@@ -609,7 +610,7 @@ static void pwm7_staircase_forever(void)
 int main(void)
 {
 	/* Start the Linux-visible record and the heartbeat before anything
-	 * can block, so `cm33_running` and the reader see this image from
+	 * can block, so the reader sees this image from
 	 * the first second -- even while it waits for the GD32 to answer. */
 	alp_gd32_results_init(RESULTS_WINDOW, ALP_GD32_RESULTS_KIND_FUNCTIONAL);
 	alp_gd32_results_beacon_init(RESULTS_WINDOW);

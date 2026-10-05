@@ -74,8 +74,11 @@ static uint8_t window_stub[0x1000] __aligned(16);
 
 /* The beacon heartbeat ticks from a timer, not from the soak loop: the
  * 60 s boot settle and a long BIG_FRAME exchange would otherwise stall it
- * past the 1..4 counts per 2 s `cm33_running` accepts.  A k_timer expiry
- * only does a plain store, so it never touches the bridge. */
+ * for many seconds.  A k_timer expiry only does a plain store, so it never
+ * touches the bridge -- which also means the heartbeat alone does not prove
+ * the soak is cycling; the HIL spec checks the soak counters for that.  The
+ * beacon kind (0x200) is this image's own, not the idle shim's 0x100, so
+ * provisioning's `cm33_running` rejects it. */
 static void beacon_tick(struct k_timer *t)
 {
 	ARG_UNUSED(t);
@@ -1075,7 +1078,7 @@ static void link_init_blocking(alp_spi_t *spi)
 int main(void)
 {
 	/* Start the Linux-visible record and the heartbeat before anything can
-	 * block, so `cm33_running` and the reader see this image from the
+	 * block, so the reader sees this image from the
 	 * first second -- even during the 60 s boot settle below. */
 	alp_gd32_results_init(RESULTS_WINDOW, ALP_GD32_RESULTS_KIND_SOAK);
 	alp_gd32_results_beacon_init(RESULTS_WINDOW);
