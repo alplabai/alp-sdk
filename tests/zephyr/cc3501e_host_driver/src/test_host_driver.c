@@ -242,6 +242,9 @@ static uint32_t g_get_version_io_down_remaining; /* fail the transaction outrigh
  * assert BOTH that recovery was attempted (the link healed) and that it was
  * attempted at most once (the cooldown -- see ctx->recover_count). */
 static bool g_all_io_down;
+/* #2699: 4-byte all-0xFF transfers seen by the stub -- the resync burst
+ * cc3501e_link_resync() clocks before any warm reset. */
+static unsigned g_resync_ff_count;
 
 /* #2136 mutant controls: force the two wire patterns the link-failure ring
  * must tell apart (test_link_log_distinguishes_deaf_armed_from_desynced_2136).
@@ -570,6 +573,7 @@ static uint32_t g_sock_recv_busy_polls_remaining;
 
 static void slave_reset(void)
 {
+	g_resync_ff_count = 0u;
 	memset(&slave, 0, sizeof(slave));
 	slave.phase                        = PH_REQ_HDR;
 	slave.wifi_conn_state              = ALP_CC3501E_WIFI_CONNECTED; /* preserves the pre-#1376
@@ -1312,7 +1316,7 @@ static void slave_dispatch(void)
 		const uint32_t freq_hz = (uint32_t)slave.req_pl[0] | ((uint32_t)slave.req_pl[1] << 8) |
 		                         ((uint32_t)slave.req_pl[2] << 16) |
 		                         ((uint32_t)slave.req_pl[3] << 24);
-		const uint8_t d[8] = {
+		const uint8_t  d[8]    = {
 			(uint8_t)(freq_hz & 0xFFu),
 			(uint8_t)((freq_hz >> 8) & 0xFFu),
 			(uint8_t)((freq_hz >> 16) & 0xFFu),
@@ -1397,6 +1401,11 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	(void)bus;
 	if (len == 0u) {
 		return ALP_OK;
+	}
+	/* Only at the request-header phase: reply reads also clock 0xFF dummies. */
+	if (slave.phase == PH_REQ_HDR && len == 4u && tx != NULL && tx[0] == 0xFFu && tx[1] == 0xFFu &&
+	    tx[2] == 0xFFu && tx[3] == 0xFFu) {
+		g_resync_ff_count++;
 	}
 	/* #2126: a genuinely dead link -- see g_all_io_down's own comment.
 	 * Checked before every per-opcode down-window below, same PRE-DECODE
@@ -3308,6 +3317,19 @@ ZTEST(cc3501e_host_driver, test_wifi_ap_start_confirms_via_diag_role_1696)
 	              "confirmation must poll a non-disturbing opcode, never re-submit AP_START");
 }
 
+/* #2699: after the AP role confirms, the driver stays quiet for
+ * CC3501E_AP_START_SETTLE_MS (300 ms) -- v0.9.0 firmware publishes the role
+ * before its post-AP_START SPI re-open, and a request fired into that window
+ * failed 3-5/20 on silicon. */
+ZTEST(cc3501e_host_driver, test_wifi_ap_start_settles_after_role_confirm_2699)
+{
+	g_diag_role = ALP_CC3501E_ROLE_WIFI_AP;
+
+	const uint64_t before = g_fake_now_ms;
+	zassert_equal(cc3501e_wifi_ap_start(&fw, "AP", 0u, "", 1000u), ALP_OK);
+	zassert_true(g_fake_now_ms - before >= 300u, "ap_start returns only after the 300 ms settle");
+}
+
 /* #1985: cc3501e_wifi_ap_start()'s role-confirmation loop replaces its
  * manual `remaining -=` budget with a real alp_uptime_ms() deadline (same
  * shape as poll_by_repeat()'s #1953 fix). Wedge GET_DIAG_INFO permanently
@@ -5093,6 +5115,10 @@ ZTEST(cc3501e_host_driver, test_link_dead_triggers_exactly_one_recovery_2126)
 
 	zassert_equal(s, ALP_ERR_TIMEOUT, "a dead link still fails the op that discovered it");
 	zassert_equal(fw.recover_count, 1u, "exactly one warm-reset recovery ran");
+	zassert_equal(g_resync_ff_count,
+	              3u,
+	              "#2699: the in-band resync burst runs once, before the warm reset (saw %u)",
+	              g_resync_ff_count);
 
 	/* And the recovery actually worked: alp_gpio_write()'s fake heals
 	 * g_all_io_down the moment cc3501e_hard_reset() releases reset_pin, so

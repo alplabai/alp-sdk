@@ -414,6 +414,48 @@ void cc3501e_set_recover_callback(cc3501e_t *ctx, cc3501e_recover_cb_t cb, void 
 	ctx->recover_cb_user = user;
 }
 
+/* In-band link resync for cc3501e-bridge-firmware v0.9.0 (#2699), tried before
+ * any warm reset.  One host transfer that clocks before the bridge has armed
+ * its phase leaves the bridge's TX one whole transfer late: requests still
+ * execute, but every reply lands in the next exchange, forever -- no amount
+ * of waiting or re-PINGing realigns it, and the firmware's own heals cannot
+ * see it.  Two of the firmware's heals CAN be driven from here, in order:
+ *   1. a request header declaring a payload, then silence: the bridge parks
+ *      in its request-payload phase and its 250 ms stall watchdog reinits
+ *      the SPI (on v0.9.0 that reinit leaves the bridge TX dead -- step 2
+ *      repairs exactly that state);
+ *   2. three 0xFF headers back to back: the bridge's resync-burst heal
+ *      reinits it cleanly at idle.
+ * Measured on E1M-AEN803 2026W36-0009, fw 0x0900: from the lagged state
+ * 100/100 PINGs after this chain; from the stall-dead state 60/60 after step
+ * 2 alone; on a healthy link it costs one failed PING, then recovers.  It
+ * does NOT repair the state seen right after WIFI_AP_START (see
+ * cc3501e_wifi_ap_start()'s settle) -- the warm reset after this still
+ * covers that.  Costs ~0.5 s; a warm reset costs ~3.5 s and drops every
+ * association and socket. */
+#define CC3501E_RESYNC_STALL_QUIET_MS 300u /* > firmware CC3501E_REPLY_STALL_MS (250) */
+#define CC3501E_RESYNC_SETTLE_MS      150u /* resync-burst reinit + re-arm */
+
+static void cc3501e_link_resync(cc3501e_t *ctx)
+{
+	/* PING header (flags 0x01) declaring a 16 B payload that never comes --
+	 * the exact bytes bench-proven above. */
+	static const uint8_t stall_hdr[ALP_CC3501E_HEADER_BYTES] = {
+		(uint8_t)ALP_CC3501E_CMD_PING, 0x01u, 0x10u, 0x00u
+	};
+	static const uint8_t resync_hdr[ALP_CC3501E_HEADER_BYTES] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu };
+	uint8_t              rx[ALP_CC3501E_HEADER_BYTES];
+
+	if (cc3501e_lock_acquire(ctx) != ALP_OK) return;
+	(void)alp_spi_transceive(ctx->bus, stall_hdr, rx, sizeof(stall_hdr));
+	alp_delay_ms(CC3501E_RESYNC_STALL_QUIET_MS);
+	for (int i = 0; i < 3; i++) {
+		(void)alp_spi_transceive(ctx->bus, resync_hdr, rx, sizeof(resync_hdr));
+	}
+	alp_delay_ms(CC3501E_RESYNC_SETTLE_MS);
+	cc3501e_lock_release(ctx);
+}
+
 /* See <alp/chips/cc3501e/core.h> for cc3501e_recover(); this is declared
  * only in cc3501e_internal.h -- see its comment there for why. */
 alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
@@ -515,6 +557,12 @@ alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
 		if (cc3501e_ping(ctx) == ALP_OK) {
 			link_ok = true;
 			break;
+		}
+		/* First probe failed: try the in-band resync (#2699) before any
+		 * further PINGs, which on a lagged slave never realign by themselves. */
+		if (i == 0u) {
+			cc3501e_link_resync(ctx);
+			continue;
 		}
 		if (i + 1u < CC3501E_LINK_PROBE_TRIES) alp_delay_ms(CC3501E_LINK_PROBE_GAP_MS);
 	}

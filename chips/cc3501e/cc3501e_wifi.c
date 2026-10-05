@@ -254,6 +254,8 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx)
  * polls a DIFFERENT opcode (WIFI_STATUS) than the one it is bounding
  * (WIFI_CONNECT_STA), so it cannot just call poll_by_repeat itself. */
 #define CC3501E_WIFI_STATUS_POLL_GAP_MS 50u
+/* Quiet time after the AP role confirms -- see cc3501e_wifi_ap_start(). */
+#define CC3501E_AP_START_SETTLE_MS 300u
 
 /* Single, non-retried WIFI_STATUS read (opcode 0x1B) -- decodes the same
  * fixed 4-byte wire layout as cc3501e_wifi_status() below, but WITHOUT its
@@ -672,6 +674,14 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 		const alp_status_t      ds = cc3501e_diag_info(ctx, &di);
 
 		if (ds == ALP_OK && di.role == (uint8_t)ALP_CC3501E_ROLE_WIFI_AP) {
+			/* cc3501e-bridge-firmware v0.9.0 publishes the AP role BEFORE
+			 * its post-AP_START SPI re-open, so a request fired the moment
+			 * the role reads AP can land in that re-open and leave the
+			 * bridge in a state only a warm reset clears (#2699).  Measured
+			 * on E1M-AEN803 2026W36-0009: SOCK_OPEN 0 ms after the role
+			 * confirm failed 3-5/20 (rc=-4), at 200, 300, 500 and 2000 ms
+			 * 0/20 each. */
+			alp_delay_ms(CC3501E_AP_START_SETTLE_MS);
 			return ALP_OK;
 		}
 		/* Role not up yet, or the read itself failed: either way this
