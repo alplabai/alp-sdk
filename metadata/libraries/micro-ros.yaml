@@ -21,8 +21,10 @@
 #   examples/multicore/rpmsg-v2n proves the A55<->M33 channel.  On V2N the
 #   A55 side is the UIO backend (src/backends/rpc/yocto_uio_drv.c), not
 #   kernel rpmsg.  examples/multicore/microros-ros2-v2n wires the XRCE custom
-#   transport onto it (ADR 0035 Option B); it has not been built or run on
-#   the bench yet, and no ROS 2 agent is packaged on the A side (#372).
+#   transport onto it (ADR 0035 Option B).  The M33 slice builds on Zephyr 4.4
+#   / zephyr-sdk 1.0.1 with the carried patches in its m33_sm/patches/; it has
+#   not been run on the bench yet, and no ROS 2 agent is packaged on the A
+#   side (#372).
 #
 # Version:  `humble` -- the micro-ROS Humble release line, chosen to pair with
 #   the meta-ros2-humble A-side that meta-alp-sdk already grounds (ros2.yaml).

@@ -35,20 +35,25 @@ list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 set(MICROROS_ZEPHYR_MODULE_DIR
     "$ENV{ZEPHYR_BASE}/../modules/lib/micro_ros_zephyr_module"
     CACHE PATH "micro_ros_zephyr_module checkout (west.yml path)")
-set(_microros_patch ${CMAKE_CURRENT_SOURCE_DIR}/patches/0001-microros-custom-transport-choice.patch)
-# The pinned module has no "bring your own transport" Kconfig choice (see the
-# patch header).  Apply it once; already-applied is detected by a reverse check.
-execute_process(
-    COMMAND git -C ${MICROROS_ZEPHYR_MODULE_DIR} apply --reverse --check ${_microros_patch}
-    RESULT_VARIABLE _microros_patched OUTPUT_QUIET ERROR_QUIET)
-if(NOT _microros_patched EQUAL 0)
+# Carried patches, applied in order (each file's header says why):
+#   0001  no "bring your own transport" Kconfig choice in the pinned module
+#   0002  the module's colcon cross-build and link on Zephyr 4.4 / picolibc
+# Apply each once; already-applied is detected by a reverse check.
+file(GLOB _microros_patches ${CMAKE_CURRENT_SOURCE_DIR}/patches/*.patch)
+list(SORT _microros_patches)
+foreach(_microros_patch IN LISTS _microros_patches)
     execute_process(
-        COMMAND git -C ${MICROROS_ZEPHYR_MODULE_DIR} apply ${_microros_patch}
-        RESULT_VARIABLE _microros_rv ERROR_VARIABLE _microros_err)
-    if(NOT _microros_rv EQUAL 0)
-        message(FATAL_ERROR "cannot apply ${_microros_patch} to ${MICROROS_ZEPHYR_MODULE_DIR}: ${_microros_err}")
+        COMMAND git -C ${MICROROS_ZEPHYR_MODULE_DIR} apply --reverse --check ${_microros_patch}
+        RESULT_VARIABLE _microros_patched OUTPUT_QUIET ERROR_QUIET)
+    if(NOT _microros_patched EQUAL 0)
+        execute_process(
+            COMMAND git -C ${MICROROS_ZEPHYR_MODULE_DIR} apply ${_microros_patch}
+            RESULT_VARIABLE _microros_rv ERROR_VARIABLE _microros_err)
+        if(NOT _microros_rv EQUAL 0)
+            message(FATAL_ERROR "cannot apply ${_microros_patch} to ${MICROROS_ZEPHYR_MODULE_DIR}: ${_microros_err}")
+        endif()
     endif()
-endif()
+endforeach()
 list(APPEND ZEPHYR_EXTRA_MODULES ${MICROROS_ZEPHYR_MODULE_DIR}/modules/libmicroros)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
