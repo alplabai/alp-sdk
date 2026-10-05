@@ -15,19 +15,8 @@ endif()
 # Python BEFORE Zephyr (Zephyr pins an interpreter on import).
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input ${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml
-            --emit zephyr-conf --core m33_sm
-            --output ${_alp_generated}
-    RESULT_VARIABLE _alp_rv
-    ERROR_VARIABLE  _alp_stderr
-)
-if(NOT _alp_rv EQUAL 0)
-    message(FATAL_ERROR "alp_project.py failed (rv=${_alp_rv}): ${_alp_stderr}")
-endif()
-list(APPEND EXTRA_CONF_FILE ${_alp_generated})
+# Per-core alp.conf (generated/alp.conf) is layered by the build plan /
+# scripts/gen_example_alp_conf.py via EXTRA_CONF_FILE, not by this file.
 
 # micro-ROS: the west project micro_ros_zephyr_module is NOT itself a Zephyr
 # module (no zephyr/module.yml at its root); the module proper is its

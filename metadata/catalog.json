@@ -1527,7 +1527,7 @@
         ],
         "path": "examples/multicore/microros-ros2-v2n",
         "som": "E1M-V2N101",
-        "summary": "> **Status: not yet built or run on hardware.** The A55 bridge compiles > warning-free on a Linux host; the M33 firmware has never been built (it > needs `micro_ros_zephyr_module`'s colcon cross-build, and a small patch > to that module, see `m33_sm/patches/`). See [What is untested](#what-is-untested). Nothing here is > bench evidence."
+        "summary": "> **Status: M33 slice builds; not yet run on hardware.** The A55 bridge > compiles warning-free on a Linux host; the M33 firmware builds to > `zephyr.elf` for the V2M101 and V2N101 CM33 targets on Zephyr 4.4 / > zephyr-sdk 1.0.1 (picolibc) with two carried patches to > `micro_ros_zephyr_module` (`m33_sm/patches/`). It has never been run. See > [What is untested](#what-is-untested). Nothing here is bench evidence."
       },
       {
         "board": "e1m-evk",
