@@ -42,6 +42,7 @@
 /* Read-only "EEPROM write in flight" bit -- never part of the
  * dispatchable RV3028_STATUS_FLAGS mask below. */
 #define RV3028_STATUS_EEBUSY 0x80
+#define RV3028_STATUS_FLAGS  0x7Fu /* every latchable flag, no EEBUSY */
 
 /* CONTROL_2 bits (RV-3028-C7 Application Manual Rev. 1.4, Table on
  * p.24).  All defaults are 0 at POR. */
@@ -371,15 +372,17 @@ alp_status_t rv3028c7_alarm_check_and_clear(rv3028c7_t *ctx, bool *fired)
 	alp_status_t s      = rv3028_read(ctx, RV3028_REG_STATUS, &status, 1);
 	if (s != ALP_OK) return s;
 	*fired = (status & RV3028_STATUS_AF) != 0;
-	if (status == 0) return ALP_OK;
+	if (!*fired) return ALP_OK;
 
-	/* Clear everything observed; if AF itself races the clear
-     * (fires again between the read above and the write landing),
-     * rv3028_status_ack() reports it back here and we don't miss
-     * it.  A raced bit is left latched in hardware rather than
-     * looping to re-drain it -- it self-heals on the next call. */
+	/* Clear ONLY AF: STATUS bits clear on a 0 write, so write 1 to every
+     * other flag bit (EEBUSY, bit 7, is read-only) so EVF/TF/UF/BSF/CLKF
+     * stay latched for rv3028c7_dispatch_irq().  AF re-latching after the
+     * write is read back so it is not missed. */
+	s = rv3028_write_reg(
+	    ctx, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_AF));
+	if (s != ALP_OK) return s;
 	uint8_t residual = 0;
-	s                = rv3028_status_ack(ctx, &residual);
+	s                = rv3028_read(ctx, RV3028_REG_STATUS, &residual, 1);
 	if (s == ALP_OK && (residual & RV3028_STATUS_AF) != 0) *fired = true;
 	return s;
 }
@@ -421,7 +424,6 @@ alp_status_t rv3028c7_register_handler(rv3028c7_t            *ctx,
 /* Dispatchable STATUS bits.  Bit 7 (EEBUSY) is a read-only "EEPROM write
  * in flight" indicator, not an event, and never takes part in an
  * acknowledge write. */
-#define RV3028_STATUS_FLAGS 0x7Fu
 
 alp_status_t rv3028c7_dispatch_irq(rv3028c7_t *ctx, uint8_t *status_seen)
 {

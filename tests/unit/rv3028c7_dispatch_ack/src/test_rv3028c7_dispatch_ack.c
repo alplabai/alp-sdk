@@ -84,8 +84,11 @@ alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, si
 	(void)bus;
 	(void)addr;
 	uint8_t reg = data[0];
-	for (size_t i = 1; i < len; ++i)
-		fake_regs[(reg + i - 1) & 0x3Fu] = data[i];
+	for (size_t i = 1; i < len; ++i) {
+		uint8_t *r = &fake_regs[(reg + i - 1) & 0x3Fu];
+		/* STATUS is write-0-to-clear: a 1 leaves the bit as it is. */
+		*r = (reg == REG_STATUS) ? (uint8_t)(*r & data[i]) : data[i];
+	}
 
 	if (reg == REG_STATUS && inject_armed) {
 		fake_regs[REG_STATUS] |= inject_bit;
@@ -185,18 +188,11 @@ ZTEST(rv3028c7_dispatch_ack, test_dispatch_irq_survives_a_flag_that_latches_duri
 	    fake_regs[REG_STATUS], 0, "STATUS not fully drained, regs=0x%02x", fake_regs[REG_STATUS]);
 }
 
-ZTEST(rv3028c7_dispatch_ack, test_alarm_check_and_clear_reports_a_race)
+ZTEST(rv3028c7_dispatch_ack, test_alarm_check_and_clear_leaves_other_flags_latched)
 {
-	/* Same race, narrower call site: AF has not latched at the
-	 * initial read (only UF has), but latches while the ack for UF
-	 * is in flight. *fired must still come back true.  Unlike
-	 * dispatch_irq() (which loops to fully drain), this call site
-	 * does a single ack pass, so the raced bit is reported but left
-	 * latched in hardware -- it self-heals on the next call instead
-	 * of being lost, which is the property under test. */
+	/* Only AF is acknowledged; UF must stay latched for dispatch_irq(). */
 	fake_reset();
-	fake_regs[REG_STATUS] = STATUS_UF;
-	fake_arm_race(STATUS_AF);
+	fake_regs[REG_STATUS] = STATUS_AF | STATUS_UF;
 
 	rv3028c7_t ctx = open_rtc();
 
@@ -204,9 +200,21 @@ ZTEST(rv3028c7_dispatch_ack, test_alarm_check_and_clear_reports_a_race)
 	alp_status_t s     = rv3028c7_alarm_check_and_clear(&ctx, &fired);
 
 	zassert_equal(s, ALP_OK, "alarm_check_and_clear rc=%d", (int)s);
-	zassert_true(fired, "AF that latched during the ack round trip was not reported");
-	zassert_equal(fake_regs[REG_STATUS] & STATUS_AF,
-	              STATUS_AF,
-	              "AF must remain latched in hardware (self-heal path), regs=0x%02x",
-	              fake_regs[REG_STATUS]);
+	zassert_true(fired, "AF not reported");
+	zassert_equal(fake_regs[REG_STATUS], STATUS_UF, "regs=0x%02x", fake_regs[REG_STATUS]);
+}
+
+ZTEST(rv3028c7_dispatch_ack, test_alarm_check_and_clear_without_af_touches_nothing)
+{
+	fake_reset();
+	fake_regs[REG_STATUS] = STATUS_UF;
+
+	rv3028c7_t ctx = open_rtc();
+
+	bool         fired = true;
+	alp_status_t s     = rv3028c7_alarm_check_and_clear(&ctx, &fired);
+
+	zassert_equal(s, ALP_OK, "rc=%d", (int)s);
+	zassert_false(fired, "AF reported with AF clear");
+	zassert_equal(fake_regs[REG_STATUS], STATUS_UF, "regs=0x%02x", fake_regs[REG_STATUS]);
 }
