@@ -779,6 +779,37 @@ alp_status_t gd32g553_se_reset(gd32g553_t *ctx, bool assert)
 	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_SE_RESET, &req, 1u, NULL, 0u);
 }
 
+/* BOOT_CONFIG request: op:u8 (0 = GET, 1 = SET) flags:u32 LE; reply flags:u32 LE. */
+static alp_status_t boot_config_xfer(gd32g553_t *ctx, uint8_t op, uint32_t flags, uint32_t *out)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	uint8_t req[5];
+	req[0] = op;
+	for (unsigned i = 0u; i < 4u; i++) {
+		req[1u + i] = (uint8_t)(flags >> (8u * i));
+	}
+	uint8_t      reply[4];
+	alp_status_t s = cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_BOOT_CONFIG, req, sizeof(req), reply, 4u);
+	if (s != ALP_OK) return s;
+	if (out != NULL) {
+		*out = (uint32_t)reply[0] | ((uint32_t)reply[1] << 8) | ((uint32_t)reply[2] << 16) |
+		       ((uint32_t)reply[3] << 24);
+	}
+	return ALP_OK;
+}
+
+alp_status_t gd32g553_boot_config_get(gd32g553_t *ctx, uint32_t *flags)
+{
+	if (flags == NULL) return ALP_ERR_INVAL;
+	return boot_config_xfer(ctx, 0u, 0u, flags);
+}
+
+alp_status_t gd32g553_boot_config_set(gd32g553_t *ctx, uint32_t flags)
+{
+	return boot_config_xfer(ctx, 1u, flags, NULL);
+}
+
 alp_status_t gd32g553_dac_set(gd32g553_t *ctx, uint8_t channel, uint16_t value_mv)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
