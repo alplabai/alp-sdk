@@ -141,13 +141,16 @@ State of this change, precisely:
   cross-build and link work on Zephyr 4.4 with picolibc (see
   `docs/upstream/micro-ros-zephyr-4.4.md`, an upstream PR draft for
   micro-ROS/micro_ros_zephyr_module#158). `m33_sm/CMakeLists.txt` applies
-  every `patches/*.patch` in order to the module checkout and adds
-  `modules/libmicroros` to `ZEPHYR_EXTRA_MODULES`. Once `west patch` can
+  every `patches/*.patch` in order to a per-build copy of the module
+  (under the build directory, so the shared west checkout is never touched;
+  `-DMICROROS_ZEPHYR_MODULE_DIR=<path>` patches that checkout in place
+  instead) and adds its `modules/libmicroros` to `ZEPHYR_EXTRA_MODULES`. Once `west patch` can
   target this nested module, the patches belong in `zephyr/patches.yml`.
-  The module builds into its own source directory, so after changing
-  Kconfig or the board, run `make -f libmicroros.mk clean` in
-  `modules/libmicroros` (or delete `micro_ros_src/build`): colcon caches the
-  CMake flags there.
+  The module builds into its own source directory (the per-build copy),
+  so a pristine build directory rebuilds it; with an in-place override, run
+  `make -f libmicroros.mk clean` in `modules/libmicroros` (or delete
+  `micro_ros_src/build`) after changing Kconfig or the board: colcon caches
+  the CMake flags there.
 - **Bridge on target.** `bridge.c` builds clean with `-Wall -Wextra
   -Wpedantic` on a Linux host; it has not run on the board or against a
   real agent.

@@ -32,9 +32,27 @@ list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 # micro-ROS: the west project micro_ros_zephyr_module is NOT itself a Zephyr
 # module (no zephyr/module.yml at its root); the module proper is its
 # modules/libmicroros subdirectory, so hand that to Zephyr explicitly.
-set(MICROROS_ZEPHYR_MODULE_DIR
+#
+# The carried patches below must never touch the shared west checkout (it is
+# one tree for every build and every example).  So the default is a PER-BUILD
+# COPY of the pinned module under this build directory, patched there:
+#   MICROROS_ZEPHYR_MODULE_SRC  the pinned checkout, read-only (west.yml path)
+#   MICROROS_ZEPHYR_MODULE_DIR  override: patch THIS checkout in place instead
+#                               (e.g. -DMICROROS_ZEPHYR_MODULE_DIR=/my/module)
+set(MICROROS_ZEPHYR_MODULE_SRC
     "$ENV{ZEPHYR_BASE}/../modules/lib/micro_ros_zephyr_module"
-    CACHE PATH "micro_ros_zephyr_module checkout (west.yml path)")
+    CACHE PATH "pinned micro_ros_zephyr_module checkout (west.yml path), never modified")
+set(MICROROS_ZEPHYR_MODULE_DIR "" CACHE PATH
+    "micro_ros_zephyr_module to patch in place; empty = per-build copy of MICROROS_ZEPHYR_MODULE_SRC")
+if(NOT MICROROS_ZEPHYR_MODULE_DIR)
+    set(MICROROS_ZEPHYR_MODULE_DIR ${CMAKE_BINARY_DIR}/micro_ros_zephyr_module)
+    if(NOT EXISTS ${MICROROS_ZEPHYR_MODULE_DIR}/modules/libmicroros)
+        # .git comes along so `git apply` below runs inside the copy's own
+        # repo, not inside whatever repository the build directory sits in.
+        file(COPY ${MICROROS_ZEPHYR_MODULE_SRC}/
+             DESTINATION ${MICROROS_ZEPHYR_MODULE_DIR})
+    endif()
+endif()
 # Carried patches, applied in order (each file's header says why):
 #   0001  no "bring your own transport" Kconfig choice in the pinned module
 #   0002  the module's colcon cross-build and link on Zephyr 4.4 / picolibc

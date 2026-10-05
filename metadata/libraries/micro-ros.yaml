@@ -49,7 +49,8 @@ requires:
   # Cortex-A / Yocto side (ros2.yaml).  `os: [zephyr]` rejects a selection on a
   # core that does not run Zephyr with a clear message; `core_class: m` pins the
   # deployment role.  (Unlike cmsis-nn there is no CPU_CORTEX_M `depends on` to
-  # cite -- the module is not pinned -- so this constraint encodes the alp-sdk
+  # cite -- the module is pinned in west.yml, but upstream declares no CPU
+  # dependency -- so this constraint encodes the alp-sdk
   # deployment model, not an upstream Kconfig dependency.)
   os: [zephyr]
   core_class: m

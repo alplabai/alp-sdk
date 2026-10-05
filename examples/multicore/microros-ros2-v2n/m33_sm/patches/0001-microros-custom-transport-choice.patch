@@ -1,7 +1,7 @@
 From: Alp Lab AB <contact@alplab.ai>
 Subject: libmicroros: add MICROROS_TRANSPORT_CUSTOM (no bundled transport)
 
-Pinned micro_ros_zephyr_module (cfbddc5e) always builds one of serial,
+Pinned micro_ros_zephyr_module (8477de12) always builds one of serial,
 serial-usb or udp; none is usable on a board that supplies its own
 transport. Add a choice entry that compiles no transport source.
 

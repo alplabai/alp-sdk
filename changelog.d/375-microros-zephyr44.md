@@ -5,5 +5,6 @@ cross-build (`unknown type name '__errno_t'`, then `strcasecmp`,
 `zephyr/posix/time.h`, `isatty`) and at link (`STATIC_INIT_GNU`) against
 Zephyr 4.4 with the picolibc toolchain. `microros-ros2-v2n/m33_sm/patches/0002`
 fixes the module's flag derivation and Kconfig; the example now applies every
-`patches/*.patch` in order. Upstream draft: `docs/upstream/micro-ros-zephyr-4.4.md`.
+`patches/*.patch` in order, to a per-build copy of the module under the build
+directory (the shared west checkout is left untouched). Upstream draft: `docs/upstream/micro-ros-zephyr-4.4.md`.
 Build only; not run on hardware.
