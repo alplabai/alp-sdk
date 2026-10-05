@@ -11,7 +11,7 @@
     "sku": { "type": "string", "pattern": "^E1M-(AEN|V2N|V2M|NX9)\\d{3}$" },
     "family": { "type": "string", "enum": ["aen", "v2n", "v2n-m1", "imx93"] },
     "hw_rev": { "type": "string", "minLength": 1 },
-    "release_version": { "type": "string", "pattern": "^som-\\d+\\.\\d+\\.\\d+$" },
+    "release_version": { "type": "string", "pattern": "^som-\\d+\\.\\d+\\.\\d+(-rc\\d+)?$", "description": "som-X.Y.Z for a release; som-X.Y.Z-rcN for a release candidate staged for bench provisioning before promotion." },
     "created": { "type": "string", "format": "date" },
     "status": { "type": "string", "enum": ["complete", "bootloader-only:image-pending-hw"] },
     "components": {

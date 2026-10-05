@@ -256,7 +256,8 @@ class Ctx:
                 raise Refused("Linux is up on the console but has no reachable IPv4 host (no DHCP lease on "
                               "end0 and no bench.yaml linux.host that answers); check cable/DHCP, then re-run")
             raise Refused("no Linux target attached: bench.yaml linux.host is unset or unreachable and this "
-                          "run has no console login to discover a host from; run boot_sd_linux (or set linux.host)")
+                          "run has no console login to discover a host from; run boot_sd_linux (or pass "
+                          "--linux-host / set linux.host)")
         if self.linux is not None and self.execute:
             self._check_unit_identity(self.linux)
         return self.linux
@@ -969,10 +970,10 @@ class OpDsw1EmmcInsertSd(_PreLinux):
             # halt first: the unit runs from the provisioning SD, and the operator is about
             # to switch it off and swap the card
             note = halt_note(clean_shutdown(ctx))
-            b.operator.confirm(f"{note} Power OFF, set DSW1 to eMMC boot, insert the release microSD. "
+            b.operator.confirm(f"{note} Power OFF, insert the provisioning microSD (DSW1 may stay on xSPI). "
                                "Leave it OFF until the tool asks.")
             ctx.halted_on_count = None     # the operator may have powered it back on: never trust the marker now
-        ctx.mutate("clean shutdown; operator: set DSW1 to eMMC boot and insert the release microSD", prompt)
+        ctx.mutate("clean shutdown; operator: insert the provisioning microSD (DSW1 may stay on xSPI)", prompt)
 
         def check():
             n = len(b.console.transcript)
@@ -981,8 +982,14 @@ class OpDsw1EmmcInsertSd(_PreLinux):
             b.console.expect(uboot.AUTOBOOT, 60.0)
             ctx.boot_text = _since(b.console, n)
             ctx.live_boot = (b.power.on_count, n)
-        ctx.mutate("cold cycle; expect U-Boot autoboot from eMMC", check)
-        return self.result(ctx, "U-Boot boots from eMMC boot partition 1")
+            return ctx.boot_text
+        text = ctx.mutate("cold cycle; expect U-Boot autoboot", check)
+        if text is None:
+            return self.result(ctx, "would expect U-Boot autoboot")
+        mode = uboot.parse_sys_lsi(text).get("soc_sys_lsi_mode")
+        seen = ("xSPI" if mode == SYS_LSI_MODE_XSPI else "SYS_LSI_MODE " + mode) if mode \
+            else "boot mode not reported by BL2"
+        return self.result(ctx, f"U-Boot autoboot seen ({seen})")
 
 
 def leftover_dxuart2_swap(ctx) -> str:

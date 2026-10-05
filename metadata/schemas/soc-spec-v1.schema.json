@@ -382,6 +382,17 @@
           "type": "string",
           "description": "Zephyr multi-image board qualifier for this core (e.g. \"rtss_hp\", \"cm33\") -- the `<board>/<soc>/<cpucluster>` third segment `scripts/alp_project.py --emit zephyr-board` uses to name per-core board artefacts. Distinct from `id` because upstream Zephyr's own cluster-naming convention doesn't always match the SDK's core id."
         },
+        "watchdog": {
+          "type": "object",
+          "required": ["base", "size", "counting_clock_hz"],
+          "additionalProperties": false,
+          "description": "The watchdog this core owns and can reach as a memory-mapped block (e.g. the RZ/V2N WDT0 'WDT for CM33'). Consumed by `--emit zephyr-board` to emit the core's watchdog devicetree node + the `alp-wdt0` alias; omit for cores whose watchdog the SoC devicetree already declares or that own none.",
+          "properties": {
+            "base": { "type": "string", "pattern": "^0x[0-9a-f]+$", "description": "Register window base address as seen by this core, lowercase 0x-prefixed hex." },
+            "size": { "type": "string", "pattern": "^0x[0-9a-f]+$", "description": "Register window size in bytes, lowercase 0x-prefixed hex." },
+            "counting_clock_hz": { "type": "integer", "minimum": 1, "description": "Frequency in Hz of the clock that drives the watchdog's down-counter, BEFORE the watchdog's own divider (RZ/V2N: WDT_0_clk_loco from the 24 MHz main oscillator, hardware manual Table 4.4-2)." }
+          }
+        },
         "itcm_global_base": {
           "type": "integer",
           "description": "System-bus-visible alias base address (decimal) of this core's ITCM window, when the vendor fork's devicetree exposes one (e.g. Alif Ensemble RTSS cores). Consumed by `--emit zephyr-board` to retarget the `&itcm` node's `global_base` property; omit for cores with no such alias."
