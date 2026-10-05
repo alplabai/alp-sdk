@@ -1234,11 +1234,15 @@ def script(checks: list[Check]) -> str:
             '  $SETSID sh "$D/$1.sh" >"$D/$1.out" 2>&1 </dev/null &',
             "  p=$!",
             # TERM first so the fragment's restore trap runs, then KILL; the group when the check
-            # leads one (setsid), else the process
-            '  ( sleep "$2"; : >"$D/$1.to"; gkill TERM "$p"; sleep 3; gkill KILL "$p" ) >/dev/null 2>&1 </dev/null &',
-            "  w=$!",
+            # leads one (setsid), else the process. The watcher polls once a second for the check's
+            # .rc file and leaves when it appears: nothing signals it, because a TERM that lands
+            # while the subshell is still starting is deferred past its sleep (dash) and the final
+            # `wait` then blocks for the whole timeout on a loaded host. The timeout counts sleeps, so on
+            # a loaded target it is a lower bound on the real elapsed time.
+            '  ( i=0; while [ ! -e "$D/$1.rc" ] && [ "$i" -lt "$2" ]; do sleep 1; i=$((i+1)); done',
+            '    [ -e "$D/$1.rc" ] && exit 0',
+            '    : >"$D/$1.to"; gkill TERM "$p"; sleep 3; [ -e "$D/$1.rc" ] || gkill KILL "$p" ) >/dev/null 2>&1 </dev/null &',
             '  wait "$p"; echo $? >"$D/$1.rc"',
-            '  kill "$w" 2>/dev/null; wait "$w" 2>/dev/null',
             # the fragment's shell is gone: reap whatever it left running (dd, aplay, a scan)
             '  [ -e "$D/$1.to" ] && gkill KILL "$p"',
             "  return 0",

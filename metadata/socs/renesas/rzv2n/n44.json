@@ -35,7 +35,12 @@
       "isa": "Armv8-M",
       "trustzone": true,
       "fpu": "single-precision",
-      "zephyr_cpucluster": "cm33"
+      "zephyr_cpucluster": "cm33",
+      "watchdog": {
+        "base": "0x41c00400",
+        "size": "0x10",
+        "counting_clock_hz": 24000000
+      }
     }
   ],
   "npus": [

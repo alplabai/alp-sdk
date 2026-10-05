@@ -360,13 +360,18 @@ class ScpiPower(Power):
     IEEE ``(@n)`` channel-list form; output state is read from ``SYST:STAT?``.
     """
 
-    GAP_S = 0.05  # minimum spacing between commands
+    GAP_S = 0.3  # minimum spacing between commands (bench.yaml power.min_gap_s overrides)
     BACKOFF_S = (3.0, 6.0, 9.0, 12.0)  # reconnect waits: 5 attempts over ~30 s
 
     def __init__(
-        self, host: str, port: int, channel: int, connect=socket.create_connection
+        self, host: str, port: int, channel: int, connect=socket.create_connection,
+        min_gap_s: float | None = None,
     ) -> None:
         self.host, self.port, self.channel = host, port, int(channel)
+        if min_gap_s is not None:
+            if min_gap_s < 0:
+                raise BenchError(f"power.min_gap_s {min_gap_s}: must be >= 0")
+            self.GAP_S = float(min_gap_s)
         if self.channel not in (1, 2):
             raise BenchError(f"SCPI power channel {channel}: only CH1 and CH2 have a SYST:STAT? "
                              "output bit, so the output state cannot be confirmed; use 1 or 2")
@@ -786,6 +791,7 @@ def load_bench(path: Path, operator: Operator | None = None) -> Bench:
             str(_need(p, "host", "power.")),
             int(_need(p, "port", "power.")),
             int(_need(p, "channel", "power.")),
+            min_gap_s=float(p["min_gap_s"]) if p.get("min_gap_s") is not None else None,
         )
     elif kind == "labgrid":
         power = LabgridPower(str(_need(p, "place", "power.")))
