@@ -64,7 +64,7 @@ core_ownership:
   - peripheral: "GD32_SWCLK"
     pad: "P71"
     core: "m33"
-    evidence: "BENCH-PENDING (source-verified): supervisor-links.yaml gd32_pads publishes P71 as a gpio7 pad of the alp,gd32-pads node in the generated CM33 board DT (SWD clock and, outside an SWD session, the bridge ATTN input whose rising-edge IRQ rides ICU TINT slot 31 (CM33-claimed; Linux must not take TINT31)); the CM33 SWD driver / V2N supervisor (src/zephyr/v2n_supervisor.c) is its only driver and no Linux DT claims it"
+    evidence: "BENCH-PENDING (source-verified): supervisor-links.yaml gd32_pads publishes P71 as a gpio7 pad of the alp,gd32-pads node in the generated CM33 board DT (SWD clock and, outside an SWD session, the bridge ATTN input whose rising-edge IRQ rides ICU TINT slot 31 (CM33-claimed). KNOWN CEILING, not enforced: Linux allocates the lowest free TINT slot, so it only reaches TINT31 once 31 slots are in use; no gate counts Linux TINT consumers. Shared-register hazard: TSSR7 (slots 28-31) and TITSR1 (slots 16-31) are read-modify-written by the CM33 with no lock shared with Linux); the CM33 SWD driver / V2N supervisor (src/zephyr/v2n_supervisor.c) is its only driver and no Linux DT claims it"
   - peripheral: "GD32_NRST"
     pad: "P74"
     core: "m33"

@@ -2804,6 +2804,8 @@ def _v2n_dts(
         "};",
         "",
     ]
+    if pads and pads["attn"].get("tint_slot") is not None and pads["swdio"]["gpio_node"] == cs0["gpio_node"]:
+        raise SystemExit("gd32_pads.attn.tint_slot set but the pads block is skipped (swdio shares CS0's gpio node)")
     if pads and pads["swdio"]["gpio_node"] != cs0["gpio_node"]:
         tint = pads["attn"].get("tint_slot")
         if tint is not None:
