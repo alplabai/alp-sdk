@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 from provision import bmap, payload_store
 from provision.bench import BenchError, ExpectTimeout
-from provision.gates import CM33_REGION_OFFSET
+from provision.gates import BOOT_ENV_OFFSET, CM33_REGION_OFFSET
 
 if TYPE_CHECKING:
     from provision.bench import Console
@@ -365,6 +365,9 @@ def emmc_boot_write_verify(t: LinuxTarget, emmc: str, local: Path, sector: int, 
     if sector * 512 + data_len > part:
         raise BenchError(f"{local.name} ({data_len} B) at sector {sector:#x} does not fit "
                          f"{dev} ({part} B)")
+    if sector * 512 + data_len > BOOT_ENV_OFFSET:
+        raise BenchError(f"{local.name} ({data_len} B) at sector {sector:#x} would reach the "
+                         f"U-Boot environment at {dev}+{BOOT_ENV_OFFSET:#x}")
     remote = f"/tmp/{local.name}"
     payload_store.stage(t, store, local, remote)
     try:

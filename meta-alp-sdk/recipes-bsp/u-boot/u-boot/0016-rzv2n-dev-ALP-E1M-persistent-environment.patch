@@ -1,0 +1,170 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Sat, 3 Oct 2026 11:43:38 +0200
+Subject: [PATCH] rzv2n-dev: ALP E1M: persistent environment with a write
+ allowlist, no "env default -a" every boot
+
+CONFIG_BOOTCOMMAND opened with "env default -a", so every saved variable
+was thrown away on every boot and saveenv could never stick.  Drop it.
+
+Persisting the whole environment would let a saved copy (or Linux's
+fw_setenv) replace bootcmd, bootargs, bootdelay/bootstopkey* and the
+vendor boot scripts bootcmd runs, so the environment is restricted with
+CONFIG_ENV_WRITEABLE_LIST: the built-in default is the baseline on every
+boot and only the variables in CFG_ENV_FLAGS_LIST_STATIC (the OTA
+variables and the alp_envinit marker) are read back from the saved copy.
+Everything that controls booting is therefore always rebuilt from this
+binary.  The console is unaffected: setenv/saveenv work as before, only
+the load filters.
+
+alp_env_check() (board_late_init) only handles the first boot: with no
+alp_envinit marker it writes the defaults out once so "bad CRC" is not
+printed again.  alp_eth_mac still overwrites ethaddr/eth1addr every boot.
+
+The environment's location (redundant pair in eMMC boot partition 2) and
+CONFIG_ENV_WRITEABLE_LIST are set by meta-alp-sdk's uboot-env-emmc.cfg,
+not here.
+
+Not verified on silicon.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 48 +++++++++++++++++++++++++++++++------
+ include/configs/rzv2n-dev.h         | 35 ++++++++++++++++++---------
+ 2 files changed, 65 insertions(+), 18 deletions(-)
+
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index 4ea3287e..1737e870 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -1051,15 +1051,14 @@ static void alp_eth_format_mac(const u8 mac[6], char out[18])
+  * a purchased IEEE OUI block).  See scripts/alp_eth_mac.py for the
+  * shared golden vector and docs/soms/v2n.md for the policy writeup.
+  *
+- * Always overwrites -- there is no env override slot on this board:
+- * CONFIG_BOOTCOMMAND opens with "env default -a", which wipes the
+- * whole environment back to its compiled-in defaults before Linux is
+- * ever reached, so a saved override could not survive to the next
+- * autoboot regardless of what this function did.  This is called both
++ * Always overwrites -- there is no env override slot on this board: the
++ * MAC is re-derived from the unit's identity on every boot, so a saved
++ * ethaddr/eth1addr does not survive to the next autoboot even though the
++ * rest of the environment now persists.  This is called both
+  * from board_late_init() (so U-Boot's own networking has a MAC before
+  * bootcmd runs) and from the "alp_eth_mac" command CONFIG_BOOTCOMMAND
+- * (include/configs/rzv2n-dev.h) runs immediately after "env default
+- * -a" -- the second call is the one that matters for Linux: boot/
++ * (include/configs/rzv2n-dev.h) runs first -- the second call is the
++ * one that matters for Linux: boot/
+  * image-fdt.c's image_setup_libfdt() calls fdt_fixup_ethernet() (which
+  * reads ethaddr/eth1addr straight out of env into the ethernet0/
+  * ethernet1 DT nodes' mac-address/local-mac-address properties)
+@@ -1224,11 +1223,46 @@ static void alp_gd32_nrst_release(void)
+ 	       ALP_ACT88760_GPIO_REG, before, after);
+ }
+ 
++/*
++ * Persistent environment (eMMC boot partition 2, two copies -- see
++ * meta-alp-sdk's uboot-env-emmc.cfg).  The previous bootcmd opened with
++ * "env default -a" and so threw away every saved variable on every boot.
++ *
++ * CONFIG_ENV_WRITEABLE_LIST (include/configs/rzv2n-dev.h lists the
++ * variables) makes the compiled-in default environment the baseline on
++ * every boot and imports only the listed OTA variables from the saved
++ * copy.  bootcmd, bootargs, bootdelay, the vendor boot scripts and every
++ * other variable are therefore always rebuilt from this binary, whatever
++ * Linux's fw_setenv (or an older U-Boot) wrote.
++ *
++ * What is left for this code is the first boot: both copies unreadable
++ * (blank or never written), U-Boot used the defaults and printed "bad CRC",
++ * so write them out once.  alp_envinit is on the writeable list, so from
++ * then on the saved copy carries it and "Loading Environment" is silent.
++ */
++static void alp_env_check(void)
++{
++	int ret;
++
++	if (env_get("alp_envinit"))
++		return;
++
++	ret = env_set("alp_envinit", "1");
++	if (!ret)
++		ret = env_save();
++	if (ret)
++		printf("ALP: WARNING: environment not saved (%d); it will "
++		       "not persist\n", ret);
++	else
++		printf("ALP: environment initialised\n");
++}
++
+ int board_late_init(void)
+ {
+ 	bool v2n_m1;
+ 	bool rail_ok = true;
+ 
++	alp_env_check();
+ 	alp_gd32_nrst_release();
+ 	alp_clk5l_fixup();
+ 
+diff --git a/include/configs/rzv2n-dev.h b/include/configs/rzv2n-dev.h
+index 4ee9d7e5..21d3547e 100644
+--- a/include/configs/rzv2n-dev.h
++++ b/include/configs/rzv2n-dev.h
+@@ -132,7 +132,7 @@
+  * prod-boot.cfg uses).  It is a BUILD-time selection, which is correct
+  * while one MACHINE produces one image.  An EEPROM-manifest-derived
+  * fdtfile -- one image booting on several SKUs -- remains future work
+- * and would have to be set AFTER the leading "env default -a" wipe. */
++ * and would have to be set at CONFIG_BOOTCOMMAND, not saved in the env. */
+ /* ALP: the dtb basename is a per-SKU Kconfig string, not a literal.
+  * V2N SKUs build e1m-v2n101-x-evk.dtb and V2M SKUs build
+  * e1m-v2m101-x-evk.dtb (meta-alp-sdk/conf/machine/e1m-v2{n,m}10*-a55.conf,
+@@ -160,22 +160,35 @@
+  * customer data card) must fall back to the eMMC, not stop at the
+  * prompt. */
+ /* ALP: alp_eth_mac (patch 0010, board/renesas/rzv2n-dev/rzv2n-dev.c) runs
+- * here, immediately after "env default -a" and before anything else --
+- * that leading env reset is why the per-unit ethaddr/eth1addr derivation
+- * cannot live in board_late_init() alone: board_late_init() runs once,
+- * long before bootcmd, so whatever it sets into env is wiped by this
+- * same "env default -a" a few tokens later.  Running the derivation
+- * again here, post-wipe, is what makes it visible to the booti path's
+- * fdt_fixup_ethernet() (boot/image-fdt.c's image_setup_libfdt(), which
+- * runs it BEFORE ft_system_setup() -- confirmed by reading this BSP's
+- * actual 2024.07 source, not assumed). */
++ * here, before anything else, so the per-unit ethaddr/eth1addr derived
++ * from the unit identity is what the booti path's fdt_fixup_ethernet()
++ * (boot/image-fdt.c's image_setup_libfdt(), which runs it BEFORE
++ * ft_system_setup() -- confirmed by reading this BSP's actual 2024.07
++ * source, not assumed) copies into the DT, whatever a saved environment
++ * holds.  It overwrites unconditionally, so a saved MAC never wins. */
+ /* ALP: "alp_sd_present" (patch 0013) reads the microSD card-detect pin.
+  * An empty slot goes straight to the vendor eMMC loader, i.e. what
+  * bootcmd_check ("if mmc dev 1; then run sd2load; else run emmcload; fi")
+  * would end up running, without mmc1 ever being probed: sh_sdhi cannot
+  * report card presence, so "mmc dev 1" on an empty slot spends its time
+  * failing "Card did not respond to voltage select! : -110". */
+-#define CONFIG_BOOTCOMMAND	"env default -a;alp_eth_mac;" \
++#ifdef CONFIG_ENV_WRITEABLE_LIST
++/* ALP: the only variables read back from the saved environment ("sw" =
++ * string, writeable): Mender's U-Boot integration (upgrade_available,
++ * bootcount, mender_boot_part, mender_boot_part_hex, mender_saveenv_canary)
++ * and the alp_envinit first-boot marker.  Everything else -- bootcmd,
++ * bootargs, bootdelay, bootstopkey*, preboot, the vendor boot scripts --
++ * is rebuilt from the built-in default on every boot. */
++#define CFG_ENV_FLAGS_LIST_STATIC \
++	"alp_envinit:sw,upgrade_available:sw,bootcount:sw," \
++	"mender_boot_part:sw,mender_boot_part_hex:sw,mender_saveenv_canary:sw"
++#endif
++
++/* ALP: no "env default -a" here any more -- the environment persists in
++ * eMMC boot partition 2, but CONFIG_ENV_WRITEABLE_LIST (above) makes the
++ * compiled-in default the baseline on every boot, so this command and the
++ * vendor scripts it runs can never be replaced by a saved copy. */
++#define CONFIG_BOOTCOMMAND	"alp_eth_mac;" \
+ 	"if alp_sd_present; then run bootcmd_check; else run emmcload; fi;" \
+ 	"if alp_sd_present && mmc dev 1 && ext4size mmc 1:2 boot/Image; then " \
+ 	"setenv alp_mmc 1:2;setenv alp_root /dev/mmcblk1p2; else " \
+-- 
+2.34.1
+
