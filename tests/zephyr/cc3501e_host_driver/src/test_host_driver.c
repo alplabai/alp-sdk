@@ -5116,8 +5116,8 @@ ZTEST(cc3501e_host_driver, test_link_dead_triggers_exactly_one_recovery_2126)
 	zassert_equal(s, ALP_ERR_TIMEOUT, "a dead link still fails the op that discovered it");
 	zassert_equal(fw.recover_count, 1u, "exactly one warm-reset recovery ran");
 	zassert_equal(g_resync_ff_count,
-	              3u,
-	              "#2699: the in-band resync burst runs once, before the warm reset (saw %u)",
+	              6u,
+	              "#2699: burst alone, then stall chain + burst, before the warm reset (saw %u)",
 	              g_resync_ff_count);
 
 	/* And the recovery actually worked: alp_gpio_write()'s fake heals

@@ -426,9 +426,11 @@ void cc3501e_set_recover_callback(cc3501e_t *ctx, cc3501e_recover_cb_t cb, void 
  *      repairs exactly that state);
  *   2. three 0xFF headers back to back: the bridge's resync-burst heal
  *      reinits it cleanly at idle.
- * Measured on E1M-AEN803 2026W36-0009, fw 0x0900: from the lagged state
- * 100/100 PINGs after this chain; from the stall-dead state 60/60 after step
- * 2 alone; on a healthy link it costs one failed PING, then recovers.  It
+ * The caller runs step 2 alone first and the full chain only if that fails:
+ * measured on E1M-AEN803 2026W36-0009, fw 0x0900, the dead state (request-
+ * header MISO 00000000) recovered 60/60 PINGs after step 2 alone but 0/4
+ * after the full chain, while the lagged state needs the full chain (100/100
+ * PINGs).  On a healthy link the chain costs one failed PING.  It
  * does NOT repair the state seen right after WIFI_AP_START (see
  * cc3501e_wifi_ap_start()'s settle) -- the warm reset after this still
  * covers that.  Costs ~0.5 s; a warm reset costs ~3.5 s and drops every
@@ -436,7 +438,7 @@ void cc3501e_set_recover_callback(cc3501e_t *ctx, cc3501e_recover_cb_t cb, void 
 #define CC3501E_RESYNC_STALL_QUIET_MS 300u /* > firmware CC3501E_REPLY_STALL_MS (250) */
 #define CC3501E_RESYNC_SETTLE_MS      150u /* resync-burst reinit + re-arm */
 
-static void cc3501e_link_resync(cc3501e_t *ctx)
+static void cc3501e_link_resync(cc3501e_t *ctx, bool stall_first)
 {
 	/* PING header (flags 0x01) declaring a 16 B payload that never comes --
 	 * the exact bytes bench-proven above. */
@@ -447,8 +449,10 @@ static void cc3501e_link_resync(cc3501e_t *ctx)
 	uint8_t              rx[ALP_CC3501E_HEADER_BYTES];
 
 	if (cc3501e_lock_acquire(ctx) != ALP_OK) return;
-	(void)alp_spi_transceive(ctx->bus, stall_hdr, rx, sizeof(stall_hdr));
-	alp_delay_ms(CC3501E_RESYNC_STALL_QUIET_MS);
+	if (stall_first) {
+		(void)alp_spi_transceive(ctx->bus, stall_hdr, rx, sizeof(stall_hdr));
+		alp_delay_ms(CC3501E_RESYNC_STALL_QUIET_MS);
+	}
 	for (int i = 0; i < 3; i++) {
 		(void)alp_spi_transceive(ctx->bus, resync_hdr, rx, sizeof(resync_hdr));
 	}
@@ -558,10 +562,11 @@ alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
 			link_ok = true;
 			break;
 		}
-		/* First probe failed: try the in-band resync (#2699) before any
-		 * further PINGs, which on a lagged slave never realign by themselves. */
-		if (i == 0u) {
-			cc3501e_link_resync(ctx);
+		/* In-band resync (#2699) before any further PINGs, which on a stuck
+		 * bridge never realign by themselves: the resync burst alone first,
+		 * then -- only if that PING still fails -- the full stall chain. */
+		if (i < 2u) {
+			cc3501e_link_resync(ctx, i == 1u);
 			continue;
 		}
 		if (i + 1u < CC3501E_LINK_PROBE_TRIES) alp_delay_ms(CC3501E_LINK_PROBE_GAP_MS);
