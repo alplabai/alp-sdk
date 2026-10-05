@@ -671,22 +671,13 @@
  * check (feed succeeds, no starvation attempted) does not prove this
  * (alp-sdk#1153).
  *
- * wdt0 (CM33): NOT enabled anywhere in this tree (alp-sdk#1153).
- * Checked against the exact pinned Zephyr v4.4.0 tag's own upstream
- * SoC devicetree (dts/arm/renesas/rz/rzv/r9a09g056.dtsi, zephyr west
- * module -- not vendored in this repo): it declares no watchdog node
- * and no watchdog driver binds this SoC at all yet, so there is no
- * label to reference from the CM33 board dts and no register base
- * address in this tree to hand-author one from (contrast the MHU-B
- * mbox1 node hand-authored at CM33 board level in
- * alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts -- that one had a
- * real vendored FSP register map, bsp_mhu_b.h, to draw from; no
- * equivalent WDT FSP module is vendored under zephyr/drivers/ here).
- * <alp/wdt.h> on the M33 therefore finds no matching backend
- * (src/wdt_dispatch.c returns ALP_ERR_NOT_PRESENT_ON_THIS_SOC) --
- * NOT the ALP_ERR_NOSUPPORT stub_wdt.c path, which is Yocto/baremetal-
- * only and never compiled into a Zephyr build (zephyr/CMakeLists.txt
- * has no reference to it). */
+ * wdt0 (CM33): not a Linux resource and not enabled here.  The CM33 side
+ * carries a `renesas,rzv-wdt` node (zephyr/drivers/watchdog/wdt_renesas_rzv.c,
+ * R_WDT0_BASE 0x41C00400) declared in its generated board dts, disabled by
+ * default; <alp/wdt.h> on the M33 reaches it through alias alp-wdt0 once a
+ * product enables it (alp-sdk#2660).  BENCH-UNVERIFIED -- see
+ * docs/bench/rzv-wdt0-cm33.md; enabling it also needs WDT0's CPG clocks held
+ * for the CM33 (renesas,cm33-owned-clocks, branch feat/v2n-assignable-ownership). */
 &wdt1 {
 	timeout-sec = <60>;
 	status = "okay";
