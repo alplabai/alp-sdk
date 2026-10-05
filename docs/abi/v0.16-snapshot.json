@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-01",
+  "generated": "2026-10-02",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -9171,6 +9171,61 @@
             "bool initialised"
           ],
           "hash": "40e059cf982add18",
+          "kind": "struct"
+        }
+      },
+      "variables": {}
+    },
+    "alp/cloud_transport.h": {
+      "functions": {
+        "alp_cloud_transport_close": {
+          "hash": "f4882d5ba7b37884",
+          "signature": "void alp_cloud_transport_close(alp_cloud_transport_t *t);"
+        },
+        "alp_cloud_transport_connect": {
+          "hash": "e36d2c1c22afe6c6",
+          "signature": "alp_status_t alp_cloud_transport_connect(alp_cloud_transport_t *t, const alp_cloud_transport_config_t *cfg);"
+        },
+        "alp_cloud_transport_recv": {
+          "hash": "546c11f0e90c0df0",
+          "signature": "int32_t alp_cloud_transport_recv(alp_cloud_transport_t *t, void *buf, size_t len);"
+        },
+        "alp_cloud_transport_send": {
+          "hash": "e6bf2e72a0047e99",
+          "signature": "int32_t alp_cloud_transport_send(alp_cloud_transport_t *t, const void *buf, size_t len);"
+        }
+      },
+      "macros": {
+        "ALP_CLOUD_TRANSPORT_INIT": {
+          "hash": "862161f5f8a4e6d9",
+          "value": "{ .fd = -1, .last_errno = 0 }"
+        }
+      },
+      "typedefs": {
+        "alp_cloud_transport_config_t": {
+          "definition": "typedef struct { const char *host; const char *server_name; uint16_t port; const int *sec_tags; size_t sec_tag_count; const char *const *alpn; size_t alpn_count; bool plaintext; uint32_t send_timeout_ms; uint32_t recv_timeout_ms; } alp_cloud_transport_config_t;",
+          "fields": [
+            "const char *host",
+            "const char *server_name",
+            "uint16_t port",
+            "const int *sec_tags",
+            "size_t sec_tag_count",
+            "const char *const *alpn",
+            "size_t alpn_count",
+            "bool plaintext",
+            "uint32_t send_timeout_ms",
+            "uint32_t recv_timeout_ms"
+          ],
+          "hash": "2cb4e019e9261f38",
+          "kind": "struct"
+        },
+        "alp_cloud_transport_t": {
+          "definition": "typedef struct { int fd; int last_errno; } alp_cloud_transport_t;",
+          "fields": [
+            "int fd",
+            "int last_errno"
+          ],
+          "hash": "8c31004de53c8f6e",
           "kind": "struct"
         }
       },

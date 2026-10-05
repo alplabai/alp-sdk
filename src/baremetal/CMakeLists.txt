@@ -45,6 +45,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_jpeg.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wifi.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_mqtt.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_cloud_transport.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_audio.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_ble.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_security.c

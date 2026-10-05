@@ -18,6 +18,12 @@ Zephyr build glue for the [Azure SDK for Embedded C][az] (MIT), pinned in
 - **Checkout location:** `${ZEPHYR_BASE}/../modules/lib/azure-sdk-for-c`, or the
   directory in `ALP_AZURE_IOT_SDK_DIR` (CMake or environment variable).
   Upstream has no `zephyr/module.yml`, so Zephyr does not register it as a module.
-- **Not provided:** the MQTT/TLS transport; the application supplies it.
+- **Transport:** the hub client builds topics and credentials only.
+  `CONFIG_ALP_CLOUD_TRANSPORT=y` builds the TLS socket,
+  `<alp/cloud_transport.h>`.  The MQTT client that runs over it is still the
+  application's: no MQTT stack ships with the Azure SDK.  coreMQTT
+  (`CONFIG_ALP_AWS_IOT`, see [`vendors/aws-iot/`](../aws-iot/README.md)) over
+  the same transport is one option.  Not verified: a connection to a live IoT
+  Hub.
 
 Smoke test: `tests/zephyr/cloud_sdks/`.
