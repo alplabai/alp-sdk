@@ -1134,6 +1134,89 @@ ZTEST(alp_chips, test_tas2563_load_tuning_restores_paging_after_a_bus_failure)
 	alp_i2c_close(bus);
 }
 
+/* I2C_CKSUM (B0/P0/0x7E) verified load.  The fake sums the data bytes
+ * of every non-paging write (a stand-in for the undocumented device
+ * algorithm), so 0xAA + 0xBB = 0x165 -> 0x65 plays the PPC3 PChkSum. */
+static const tas2563_tuning_reg_t tas_ck_records[] = {
+	{ 0u, 0u, 0x10u, 0xAAu },
+	{ 0u, 1u, 0x20u, 0xBBu },
+};
+
+ZTEST(alp_chips, test_tas2563_load_tuning_verified_passes_on_matching_checksum)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus    = tas_init(&ctx, 0x0Eu, NULL);
+	size_t     failed = SIZE_MAX;
+	uint8_t    got    = 0u;
+
+	fake_tas2563_set_reg(0x7Eu, 0x5Au); /* stale value: must be zeroed first */
+	zassert_equal(tas2563_load_tuning_verified(&ctx, tas_ck_records, 2u, 0x65u, &failed, &got),
+	              ALP_OK);
+	zassert_equal(got, 0x65u);
+	zassert_equal(fake_tas2563_cur_page(), 0u);
+	zassert_equal(fake_tas2563_cur_book(), 0u);
+
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_tas2563_load_tuning_verified_reports_checksum_mismatch)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus    = tas_init(&ctx, 0x0Eu, NULL);
+	size_t     failed = SIZE_MAX;
+	uint8_t    got    = 0u;
+
+	zassert_equal(tas2563_load_tuning_verified(&ctx, tas_ck_records, 2u, 0x66u, &failed, &got),
+	              ALP_ERR_IO);
+	zassert_equal(got, 0x65u, "the readback is reported");
+	zassert_equal(failed, 2u, "failed index == count marks a checksum mismatch");
+
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_tas2563_load_tuning_rejects_i2c_cksum_record)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus    = tas_init(&ctx, 0x0Eu, NULL);
+	size_t     failed = SIZE_MAX;
+
+	const tas2563_tuning_reg_t records[] = {
+		{ 0u, 0u, 0x10u, 0xAAu },
+		{ 0u, 0u, 0x7Eu, 0x00u }, /* would reset the checksum mid-load */
+	};
+	zassert_equal(tas2563_load_tuning(&ctx, records, 2u, &failed), ALP_ERR_INVAL);
+	zassert_equal(failed, 1u);
+	zassert_equal(tas2563_load_tuning_verified(&ctx, records, 2u, 0u, &failed, NULL),
+	              ALP_ERR_INVAL);
+	zassert_equal(fake_tas2563_log_len(), 0u, "rejected before any bus write");
+
+	/* The same register on another page is a DSP coefficient, not the checksum. */
+	const tas2563_tuning_reg_t other_page[] = { { 0u, 1u, 0x7Eu, 0x00u } };
+	zassert_equal(tas2563_load_tuning(&ctx, other_page, 1u, NULL), ALP_OK);
+
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_tas2563_read_tuning_mode_reports_rom_and_tuning)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus  = tas_init(&ctx, 0x0Eu, NULL);
+	bool       tune = true;
+
+	zassert_equal(tas2563_read_tuning_mode(&ctx, NULL), ALP_ERR_INVAL);
+	fake_tas2563_set_app_mode(0x00u);
+	zassert_equal(tas2563_read_tuning_mode(&ctx, &tune), ALP_OK);
+	zassert_false(tune, "0x00 = ROM mode");
+	fake_tas2563_set_app_mode(0x20u);
+	zassert_equal(tas2563_read_tuning_mode(&ctx, &tune), ALP_OK);
+	zassert_true(tune, "bit 5 = tuning mode");
+	zassert_equal(fake_tas2563_cur_page(), 0u, "page restored");
+	for (size_t i = 0; i < fake_tas2563_log_len(); ++i)
+		zassert_equal(fake_tas2563_log(i)->reg, 0x00u, "read-only: only PAGE writes");
+
+	alp_i2c_close(bus);
+}
+
 /* With no SD_N line there is no hardware shutdown to fall back on, so
  * deinit writes software shutdown instead of leaving a possibly
  * ACTIVE Class-D stage behind. */

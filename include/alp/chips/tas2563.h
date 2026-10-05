@@ -11,8 +11,9 @@
  *   sequencing, mode control, output level, tuning-blob replay, I2S/
  *   IV-sense configuration, fault-pin handling.  Not implemented:
  *   PPC3 export parsing (by design, see @ref tas2563_load_tuning) and
- *   write verification via `I2C_CKSUM` (algorithm undocumented, see
- *   the same function's doc).  Matches `driver_status: partial` in
+ *   a host-computed `I2C_CKSUM` (algorithm undocumented; verification
+ *   against a PPC3-supplied value is @ref tas2563_load_tuning_verified).
+ *   Matches `driver_status: partial` in
  *   `metadata/chips/tas2563.yaml`.
  *
  * @par Why an in-tree driver, not the upstream one: an upstream Zephyr
@@ -495,12 +496,9 @@ typedef struct {
  *      that long ago before calling this function -- it has no way to
  *      know when an externally-owned pin actually went high.
  *
- * @note This does not select, and cannot report, ROM vs Smart
- *   Amp/Tuning mode (see @ref tas2563_set_amp_level's note) -- not
- *   because it avoids touching the relevant registers (the software
- *   reset above touches every register), but because SLASET3D names
- *   no register for that distinction at all, so there is nothing this
- *   function could set even if it tried.
+ * @note This does not select ROM vs Smart Amp/Tuning mode, because
+ *   SLASET3D documents no select register.  The mode can be reported
+ *   with @ref tas2563_read_tuning_mode (undocumented B0/P1/0x02).
  *
  * @return ALP_OK on a successful probe.
  * @retval ALP_ERR_INVAL  ctx or bus is NULL, or addr_7bit is not one
@@ -604,13 +602,12 @@ alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
  *   change it, user must enter ROM mode in Test and Measurement panel
  *   in the Device Home page."  "Test and Measurement panel" and
  *   "Device Home page" are PPC3 GUI elements -- this is a PPC3-tool
- *   workflow note, not a documented register-level rule, and SLASET3D
- *   itself never mentions ROM mode or this restriction at all.  This
- *   function does not, and cannot, enforce or even detect it: SLASET3D's
- *   register map has no field this driver could read to tell ROM mode
- *   from Smart Amp/Tuning mode (searched exhaustively -- see @ref
- *   tas2563_load_tuning's write verification note for the same kind of
- *   gap; the one register whose name suggests it, `DSP Mode & TDM_DET`
+ *   workflow note, not a documented register-level rule.  SLASET3D
+ *   does mention ROM mode (PCM playback table, p.11, "Group Delay (ROM
+ *   MODE)") but not this restriction.  This function does not enforce
+ *   it.  It can only report the mode, via the unverified B0/P1/0x02
+ *   readback of @ref tas2563_read_tuning_mode; SLASET3D documents no
+ *   register that selects it (the one register whose name suggests it, `DSP Mode & TDM_DET`
  *   at 0x11 / §7.5.19, is read-only TDM clock-detection readback
  *   (`FS_RATIO`/`FS_RATE`, correctly documented, despite its title, and
  *   decoded by @ref tas2563_read_tdm_detect) and has no mode-select
@@ -1103,7 +1100,10 @@ alp_status_t tas2563_resume(const tas2563_t *ctx);
  *   depends on first confirming incremental multi-byte writes on real
  *   silicon.
  *
- * @par Write verification: not implemented, and not guessed at.
+ * @par Write verification: see @ref tas2563_load_tuning_verified.  This
+ *   function alone does not verify.
+ *
+ * @par Why no host-side checksum.
  *   SLASET3D §7.3.2 "Device Mode and Address Selection" (p.29) itself
  *   calls `I2C_CKSUM` a CRC and says it should be checked, over each
  *   device's own local address, after writing multiple devices via the
@@ -1144,8 +1144,9 @@ alp_status_t tas2563_resume(const tas2563_t *ctx);
  *                           a record targets one of the driver-owned
  *                           control registers in book 0 / page 0 --
  *                           `SW_RESET` (0x01), `PWR_CTL` (0x02),
- *                           `MISC` (0x32, `IRQZ_POL`) or `TG_CFG0`
- *                           (0x3F).  Each of those changes something
+ *                           `MISC` (0x32, `IRQZ_POL`), `TG_CFG0`
+ *                           (0x3F) or `I2C_CKSUM` (0x7E, a write
+ *                           resets the running checksum).  Each of those changes something
  *                           the caller believes it configured, with
  *                           no readback saying so: the operating mode,
  *                           a full register reset mid-load, the
@@ -1162,6 +1163,75 @@ alp_status_t tas2563_load_tuning(tas2563_t                  *ctx,
                                  const tas2563_tuning_reg_t *records,
                                  size_t                      count,
                                  size_t                     *failed_index_out);
+
+/**
+ * @brief @ref tas2563_load_tuning plus an `I2C_CKSUM` check against a
+ *        PPC3-supplied value.
+ *
+ * Mirrors Linux `tasdev_load_blk()` (sound/soc/codecs/tas2781-fmwlib.c)
+ * and TI's vendor driver: select B0/P0, write 0 to `I2C_CKSUM`
+ * (0x7E, SLASET3D §7.5.61 Table 7-161, p.93), replay the records, read
+ * 0x7E back, compare with @p expected_cksum.  The checksum algorithm is
+ * undocumented, so the expected byte is NOT computed here: it is the
+ * `PChkSum` PPC3 stores per block (PPC3 output, a .bin block header,
+ * or a value captured from a known-good load).
+ *
+ * @par Retry contract.  A mismatch returns ALP_ERR_IO with
+ *   @p failed_index_out == @p count and the readback in
+ *   @p cksum_read_out.  The caller retries the whole call -- Linux and
+ *   TI's driver do up to 6 attempts with a 2 ms pause; no retry is done
+ *   here.  Bus errors return their own status without touching
+ *   @p cksum_read_out.
+ *
+ * @warning Unverified on silicon: whether the explicit PAGE/BOOK writes
+ *   of @ref tas2563_load_tuning are counted by the device the same way
+ *   as PPC3's own paging is unknown.  A bench check against a block
+ *   with a known `PChkSum` is outstanding (#2580).
+ *
+ * @param[in]  ctx               Initialised context.
+ * @param[in]  records           Tuning records (same rules as @ref
+ *                               tas2563_load_tuning; a record writing
+ *                               B0/P0/0x7E is rejected).
+ * @param[in]  count             Number of records.  Zero is a no-op
+ *                               returning ALP_OK without a check.
+ * @param[in]  expected_cksum    PPC3-supplied expected `I2C_CKSUM`.
+ * @param[out] failed_index_out  Offending record index on a record
+ *                               error; @p count on a checksum mismatch.
+ *                               May be NULL.
+ * @param[out] cksum_read_out    Receives the value read from 0x7E once
+ *                               the readback succeeds.  May be NULL.
+ *
+ * @retval ALP_OK            Loaded and the checksum matched.
+ * @retval ALP_ERR_IO        Checksum mismatch (see above) or bus error.
+ * @retval ALP_ERR_NOT_READY ctx is NULL or not initialised.
+ * @retval ALP_ERR_INVAL     As @ref tas2563_load_tuning.
+ */
+alp_status_t tas2563_load_tuning_verified(tas2563_t                  *ctx,
+                                          const tas2563_tuning_reg_t *records,
+                                          size_t                      count,
+                                          uint8_t                     expected_cksum,
+                                          size_t                     *failed_index_out,
+                                          uint8_t                    *cksum_read_out);
+
+/**
+ * @brief Report whether a tuning (RAM) program or ROM mode is active.
+ *
+ * Read-only: reads B0/P1/0x02 and returns bit 5 (`0x20`) in
+ * @p tuning_out; `0x00` = ROM mode.  The register is NOT in SLASET3D.
+ * It comes from a TI E2E answer (thread URL still to be recorded;
+ * unverified) and from the first write of every PPC3 program block in
+ * linux-firmware (`0x20`).  Switching modes is deliberately not
+ * offered: TI's SLAA954 §3.5 requires HW+SW reset and a full program
+ * reload to leave tuning mode.  Restores page 0 before returning.
+ *
+ * @param[in]  ctx         Initialised context.
+ * @param[out] tuning_out  true = tuning/RAM program, false = ROM mode.
+ *
+ * @retval ALP_OK            @p tuning_out written.
+ * @retval ALP_ERR_NOT_READY ctx is NULL or not initialised.
+ * @retval ALP_ERR_INVAL     @p tuning_out is NULL.
+ */
+alp_status_t tas2563_read_tuning_mode(tas2563_t *ctx, bool *tuning_out);
 
 /**
  * @brief Release the driver context.  Drops SD_N before returning.
