@@ -205,7 +205,7 @@ typedef struct {
  *                            (better resolution).
  *
  * @return ALP_OK on success; ALP_ERR_NOT_READY when there is no ACK or
- *         MFG_ID != 0x5449; the bus status if the DEVICE_ID or CONFIG
+ *         MFG_ID != 0x5449; the bus status if any later register
  *         access fails; ALP_ERR_INVAL on bad parameters.
  */
 alp_status_t ina236_init(ina236_t         *ctx,

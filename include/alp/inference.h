@@ -48,8 +48,9 @@
  * knobs to bind to (DRP-AI3 is an A55/Linux-only engine), and wiring
  * it through to the Yocto handle is follow-up work (issue #58).  The
  * DEEPX hatch is implemented on the Yocto DX-M1 backend
- * (ALP_SDK_USE_DEEPX_DXM1) and returns ALP_ERR_NOT_PRESENT_ON_THIS_SOC on Zephyr.  The unification stance is "best-effort, not
- * absolute".
+ * (ALP_SDK_USE_DEEPX_DXM1) and returns
+ * ALP_ERR_NOT_PRESENT_ON_THIS_SOC on Zephyr.  The unification stance is
+ * "best-effort, not absolute".
  *
  * @par ABI status: [ABI-STABLE]
  *      Shape is frozen.  ALP_ERR_NOSUPPORT -- for a target/backend
