@@ -125,8 +125,7 @@ the `0x3a0b` band step; gain at the `0x3a19` ceiling) and a real image needed ~1
 RAW10 BGGR and demosaic is a downstream ISP job, so raw frames viewed as grey show the Bayer mosaic
 as fine stripes, which is not the column fixed-pattern noise above.
 
-The vendored driver's RETIREMENT note at `zephyr/drivers/video/ov5647.c:229` ("DIVERGENCE #1 (the
-LP-11 lane park), DIVERGENCE #2 (the") requires all three fixes -- lane park, PLL + MIPI-TX
+The vendored driver's RETIREMENT note in `zephyr/drivers/video/ov5647.c` requires all three fixes -- lane park, PLL + MIPI-TX
 pad-drive init, and this full-FOV/per-mode-HTS/AEC-band-step/common-init/exposure-default/
 frame-rate/flip-ctrl change -- to be confirmed present upstream before the vendored copy can be
 deleted.
