@@ -42,12 +42,13 @@
  * (DRP-AI3 pipeline-stage + AI-SRAM pinning) and
  * `<alp/ext/deepx/inference.h>` (DX-M1 NPU-core binding + device telemetry) --
  * remain available as escape hatches when the unified API can't
- * express what the vendor SDK offers.  Both currently return
- * ALP_ERR_NOSUPPORT on every call past the vendor-handle gate: the
- * Zephyr registry ships no DRP-AI/DEEPX inference backend for those
- * knobs to bind to (DRP-AI3 and DX-M1 are A55/Linux-only engines),
- * and wiring them through to the Yocto handle is follow-up work
- * (issues #58/#59).  The unification stance is "best-effort, not
+ * express what the vendor SDK offers.  The DRP-AI3 hatch currently
+ * returns ALP_ERR_NOSUPPORT on every call past the vendor-handle gate:
+ * the Zephyr registry ships no DRP-AI inference backend for those
+ * knobs to bind to (DRP-AI3 is an A55/Linux-only engine), and wiring
+ * it through to the Yocto handle is follow-up work (issue #58).  The
+ * DEEPX hatch is implemented on the Yocto DX-M1 backend
+ * (ALP_SDK_USE_DEEPX_DXM1) and returns ALP_ERR_NOT_PRESENT_ON_THIS_SOC on Zephyr.  The unification stance is "best-effort, not
  * absolute".
  *
  * @par ABI status: [ABI-STABLE]

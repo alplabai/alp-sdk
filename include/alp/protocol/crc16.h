@@ -35,9 +35,9 @@
  *      the 4096-byte ALP_CC3501E_MAX_PAYLOAD ceiling, and there that loop
  *      cost ~1.3 ms of M55-HE time per frame -- measured 561 -> 687 KB/s on
  *      4092-byte STREAM_WRITE frames when it was replaced by a byte-at-a-time
- *      shift form, and the 256-entry table below cut the rest to ~0.3 ms
- *      at -O2 on an M55-HE.  The table is 512 bytes of const data, emitted
- *      only in translation units that call the helper.
+ *      shift form, and the table-driven slicing-by-4 form below cut the
+ *      rest.  The four 256-entry uint16_t tables are 2 KiB of const data,
+ *      emitted only in translation units that call the helper.
  *   2. The ISR hazard is the real argument against it.  The firmware builds
  *      replies inside the SPI callback.  A CRC peripheral shared with
  *      application code touched from that context needs a lock or a
@@ -87,8 +87,8 @@ extern "C" {
  */
 static inline uint16_t alp_crc16_ccitt_false_update(uint16_t crc, const uint8_t *buf, size_t len)
 {
-	/* One table lookup per byte.  The bit loop this replaced cost ~1.3 ms
-	 * per 4 KiB frame on an M55; the CC3501E bridge CRCs every request. */
+	/* The bit loop this replaced cost ~1.3 ms per 4 KiB frame on an M55;
+	 * the CC3501E bridge CRCs every request. */
 	/* Slicing-by-4 over the 0x1021 polynomial: table[0][i] is the register
 	 * after folding byte i into a zero register, and table[k] is table[k-1]
 	 * advanced by one more zero byte.  Four bytes per step keeps the loop

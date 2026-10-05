@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-01",
+  "generated": "2026-10-06",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -5478,10 +5478,6 @@
         }
       },
       "macros": {
-        "INA236_DEVICE_ID": {
-          "hash": "f6ead01e002c5632",
-          "value": "0xA080u"
-        },
         "INA236_MFG_ID": {
           "hash": "203d0574be6c2569",
           "value": "0x5449u"

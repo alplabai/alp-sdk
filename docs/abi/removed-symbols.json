@@ -171,6 +171,15 @@
       "issue": 1165,
       "reason": "Unguarded raw write reaching VOUT/CONTROL; every documented register is now owned by a window/critical-guarded typed API.",
       "replacement": null
+    },
+    {
+      "header": "alp/chips/ina236.h",
+      "category": "macro",
+      "symbol": "INA236_DEVICE_ID",
+      "release": "v0.17.0",
+      "issue": 2716,
+      "reason": "DEVICE_ID (0x3F) varies by lot and is no longer an identity gate; the constant had no users.",
+      "replacement": "INA236_MFG_ID"
     }
   ]
 }
