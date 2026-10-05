@@ -142,3 +142,55 @@ is the wrong peripheral, and the RZ FSP ships no SCI-SPI module (only RA has
 binding (`zephyr/dts/bindings/spi/renesas,rz-sci-b-spi.yaml`), the DT SCI7 SPI
 child, and the corrected pinmux; SCI7 Simple-SPI is silicon-validated and is
 the permanent transport — see `docs/gd32-link-sci7-next-rev.md`.
+
+## Reset cause and watchdog-reset behaviour (U-Boot patch 0012, #1153)
+
+**Reset domains.** A watchdog (`WDT_CA55` / `WDT_CM33` `iwdt_nmiundf`) raises an
+*error system reset* of the SoC only. Everything outside the SoC keeps running
+through it: the DEEPX DX-M1 (its own reset line, M1_RESET = PA6), the GD32
+supervisor, the Ethernet PHYs and the PMICs. `CPG_ERROR_RST2` (CPG_base
+`0x1042_0000` + `0x0B40`; RZ/V2N manual R01UH1071EJ0120 Rev.1.20 §4.4.4.15
+p644) latches the cause (bit1 = WDT_CA55, bit0 = WDT_CM33) and is not reset by
+an error system reset (§4.4.6.5.4 p693). A flag is cleared by writing 1 to it
+together with its write enable (bit16+n).
+
+**What a WDT reset now does.** `board_late_init()` reads the register first,
+prints one line, clears the WDT flags and publishes the cause:
+
+| Cause | Console line | `/chosen/alp,reset-cause` |
+|---|---|---|
+| CA55 WDT | `ALP: reset cause: WDT CA55` | `wdt-ca55` |
+| CM33 WDT | `ALP: reset cause: WDT CM33` | `wdt-cm33` |
+| both | `ALP: reset cause: WDT CA55 + CM33` | `wdt-ca55-cm33` |
+| neither | `ALP: reset cause: power-on or software` | `por-or-sw` |
+
+**A software reboot reads as a CA55 watchdog reset.** The kernel restarts
+the SoC through the CA55 watchdog (`rzv2h_wdt_restart`), and U-Boot's `reset`
+does the same, so `reboot` sets `CPG_ERROR_RST2` bit1 exactly like a hang:
+bench, E1M-V2M103 2026W38-0008, 2026-10-06, `reboot` printed
+`ALP: reset cause: WDT CA55 (CPG_ERROR_RST2=0x00000002)`. `por-or-sw` therefore
+only ever means power-on, and `wdt-ca55` means "hang or ordinary reboot";
+the 10 ms DX-M1 hold runs on every reboot (harmless). Telling the two apart
+needs a kernel-side marker before the restart; not done.
+
+Env `alp_reset_cause` carries the same token at the U-Boot prompt but is cleared
+by bootcmd's `env default -a`; Linux and provisioning read the DT property. On
+a v2n-m1 SoM (EEPROM family gate) a WDT reset also drives M1_RESET low for 10 ms
+before the DEEPX rail (0004) and PCIe (0001) steps release it, so the DX-M1
+restarts from reset. The 10 ms is a placeholder pending the DEEPX datasheet
+minimum reset pulse width.
+
+**What it still does not do.** The GD32 is not reset (GD32_NRST is P74, shared
+with PMIC GPIO4; topology unconfirmed, so the SoC does not drive it). The PHYs
+and the PMICs are not touched (no PMIC MR, no PMIC watchdog). They keep their
+pre-reset state.
+
+**Bench test (hang injection, #1153; PASS on E1M-V2M103 2026W38-0008, 2026-10-06).**
+1. Boot normally; at the U-Boot console confirm `ALP: reset cause: power-on or
+   software`, and in Linux `tr -d '\0' < /proc/device-tree/chosen/alp,reset-cause`.
+2. Hang the A55 so the CA55 WDT expires (hang-injection procedure of #1153).
+3. On the next boot confirm `ALP: reset cause: WDT CA55` and, on a v2n-m1 SoM,
+   `ALP: DEEPX DX-M1 held in reset after WDT reset (10 ms)`.
+4. In Linux confirm the DT property reads `wdt-ca55` and the DX-M1 re-enumerates
+   on PCIe (`lspci`).
+5. Reboot once more; the cause must read `power-on or software` again (flags cleared).
