@@ -429,6 +429,9 @@ def _v2n_parser() -> argparse.ArgumentParser:
     work.add_argument("--only", help="STEP[,STEP] (preflight always runs)")
     work.add_argument("--from", dest="start", metavar="STEP")
     work.add_argument("--skip", help="STEP[,STEP]")
+    work.add_argument("--linux-host", metavar="HOST",
+                      help="sets the target host for this run (overrides bench.yaml linux.host; an EEPROM MAC "
+                           "change still forces rediscovery)")
     work.add_argument("--force-step", help="STEP[,STEP]: run even if its probe is satisfied")
     sub.add_parser("plan", parents=[common, work], help="dry run; read-only probes with --bench")
     r = sub.add_parser("run", parents=[common, work], help="dry run unless --execute")
@@ -579,6 +582,8 @@ def v2n_main(argv: list[str]) -> int:
         if a.replace_identity and a.reprovision_from is None:
             raise ValueError("--replace-identity needs --reprovision-from the manifest the EEPROM holds")
         bench = bench_mod.load_bench(a.bench) if a.bench else None
+        if bench is not None and a.linux_host:
+            bench.linux_host = a.linux_host
         names = (_csv(a.only) or []) + (_csv(a.skip) or []) + (_csv(a.force_step) or [])
         for n in names + ([a.start] if a.start else []):
             if n not in steps.STEP_NAMES:

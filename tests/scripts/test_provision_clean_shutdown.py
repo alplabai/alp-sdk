@@ -322,7 +322,7 @@ def test_dsw1_emmc_insert_sd_halts_before_it_asks_the_operator_to_power_off(tmp_
     ctx.bench.power.on_hook = lambda: ctx.bench.console.feed("Hit any key to stop autoboot: 3\r\n")
     steps.OpDsw1EmmcInsertSd().run(ctx)
     assert order[:3] == ["true", "ident", "poweroff"]
-    assert order[3].startswith("confirm: The unit has been halted (poweroff, halt line seen). Power OFF, set DSW1 to eMMC boot")
+    assert order[3].startswith("confirm: The unit has been halted (poweroff, halt line seen). Power OFF, insert the provisioning microSD (DSW1 may stay on xSPI)")
     assert order.index("psu-off") > 3                                # the cold cycle comes after the prompt
 
 
