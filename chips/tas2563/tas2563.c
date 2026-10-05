@@ -944,16 +944,24 @@ alp_status_t tas2563_load_tuning_verified(tas2563_t                  *ctx,
 		}
 	}
 
+	/* Bus errors outside the record loop report SIZE_MAX, so a caller can
+	 * tell them from a checksum mismatch (failed index == count). */
 	alp_status_t s = select_book0_page0(ctx);
 	if (s == ALP_OK) s = reg_write(ctx, TAS2563_REG_I2C_CKSUM, 0x00u);
-	if (s != ALP_OK) return s;
+	if (s != ALP_OK) {
+		if (failed_index_out != NULL) *failed_index_out = SIZE_MAX;
+		return s;
+	}
 
 	s = tas2563_load_tuning(ctx, records, count, failed_index_out);
 	if (s != ALP_OK) return s; /* load_tuning already restored B0/P0. */
 
 	uint8_t got = 0;
 	s           = reg_read(ctx, TAS2563_REG_I2C_CKSUM, &got);
-	if (s != ALP_OK) return s;
+	if (s != ALP_OK) {
+		if (failed_index_out != NULL) *failed_index_out = SIZE_MAX;
+		return s;
+	}
 	if (cksum_read_out != NULL) *cksum_read_out = got;
 	if (got != expected_cksum) {
 		if (failed_index_out != NULL) *failed_index_out = count;

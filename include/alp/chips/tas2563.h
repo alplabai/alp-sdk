@@ -1181,7 +1181,9 @@ alp_status_t tas2563_load_tuning(tas2563_t                  *ctx,
  *   @p cksum_read_out.  The caller retries the whole call -- Linux and
  *   TI's driver do up to 6 attempts with a 2 ms pause; no retry is done
  *   here.  Bus errors return their own status without touching
- *   @p cksum_read_out.
+ *   @p cksum_read_out; a bus error on the 0x7E reset or readback sets
+ *   @p failed_index_out to SIZE_MAX, so a mismatch (index == @p count)
+ *   is never confused with a bus failure.
  *
  * @warning Unverified on silicon: whether the explicit PAGE/BOOK writes
  *   of @ref tas2563_load_tuning are counted by the device the same way
@@ -1196,8 +1198,9 @@ alp_status_t tas2563_load_tuning(tas2563_t                  *ctx,
  *                               returning ALP_OK without a check.
  * @param[in]  expected_cksum    PPC3-supplied expected `I2C_CKSUM`.
  * @param[out] failed_index_out  Offending record index on a record
- *                               error; @p count on a checksum mismatch.
- *                               May be NULL.
+ *                               error; @p count on a checksum mismatch;
+ *                               SIZE_MAX on a bus error at the 0x7E
+ *                               reset or readback.  May be NULL.
  * @param[out] cksum_read_out    Receives the value read from 0x7E once
  *                               the readback succeeds.  May be NULL.
  *
