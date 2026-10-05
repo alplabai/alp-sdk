@@ -1932,6 +1932,32 @@ ZTEST(cc3501e_host_driver, test_stream_write_large_request_gates_ceiling)
 	          * default RESP_ERR_INVALID); only the gate timing is under test here. */
 }
 
+/* ---- mid-size REQUESTS: the request-side floor (customer SOCK_SEND 390..600 B)
+ *
+ * v0.9.0 firmware arms the reply header ~54 us + 0.426 us per request wire
+ * byte after the request ends; the old size gate stayed at a flat 200 us up
+ * to 536 B, so a 400 B request was read too early and the link desynced.
+ * This fixture runs legacy-major (no CRC trailer), so 400 B is also the wire
+ * length.  Mutation check: dropping cc3501e_request_gate_floor_us() from the
+ * call site turns this RED (200 us instead of 80 + 400/2 = 280 us). */
+ZTEST(cc3501e_host_driver, test_stream_write_mid_request_gets_request_floor)
+{
+	static uint8_t data[400];
+	memset(data, 0xAA, sizeof(data));
+
+	delay_log_reset();
+	(void)cc3501e_stream_write(&fw, data, sizeof(data));
+	zassert_equal(g_delay_us_count, 4u, "4 gated phases (a 400 B request has a payload phase)");
+	zassert_equal(g_delay_us_log[2], 280u, "400 wire bytes -> 80 + 400/2 us, not the 200 us floor");
+
+	/* FAST_REPLY firmware arms in ~0.1 us/B and keeps its own table. */
+	fw.fw_fast_reply = 1u;
+	delay_log_reset();
+	(void)cc3501e_stream_write(&fw, data, sizeof(data));
+	zassert_equal(g_delay_us_log[2], 200u, "FAST_REPLY firmware gets no request floor");
+	fw.fw_fast_reply = 0u;
+}
+
 /* ---- SPI1_TRANSFER: expected reply is derived from len/NO_RX, not rx_cap -- */
 ZTEST(cc3501e_host_driver, test_spi1_transfer_large_no_rx_tx_gates_by_tx_size)
 {
