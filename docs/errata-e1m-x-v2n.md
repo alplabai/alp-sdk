@@ -139,6 +139,56 @@ usb20 regression mechanism is from the 2026-06-12 boot-log audit
 — controller-level suppression + host-under-OC behavior to be
 HW-verified when they land.
 
+## E4: Capacitor on the Ethernet PHY regulator output overloads the PHY's switching regulator (SoM)
+
+**Symptom:** as soon as the PHYs leave reset, the module draws about
+0.45 A at 15 V (normal: about 0.12 A at the same point), both PHYs run
+hot, and their 1.0 V core rail sits near 0.3 V instead of its nominal
+level. Linux then logs `Failed to reset the dma` on both Ethernet ports
+and neither port works. Holding the PHYs in reset brings the current
+back to normal. There is no hard short: the rail measures several
+hundred ohms to ground with the board unpowered.
+
+**Root cause:** the RTL8211F(I) generates its core supply with an
+internal switching regulator. The module fits a 0.1 µF capacitor from
+the PHY's regulator output pin (`REG_OUT`) to ground, ahead of the
+regulator's inductor, on both PHYs. In Realtek's reference design that
+capacitor is not fitted for the switching-regulator configuration; it
+belongs to the LDO configuration only. On the switch node it is
+hard-charged every switching cycle. The bill of materials is the same
+on every module of this revision, and not every unit fails the same
+way, so units that work today are exposed as well. It is a likely
+contributor to the intermittent dead-PHY cold boots in #2582
+(unproven).
+
+**HW fix:** remove that capacitor on both PHYs. After the rework, the
+module draws normal current, the core rail is at its nominal level and
+both ports pass traffic. Next module revision: mark the part not fitted,
+and keep the core-rail bulk capacitance within Realtek's limits.
+
+**Software workaround:** none.
+
+**Confidence:** high. Current before and after the rework was measured
+on two units, and Ethernet worked after it on both (2026-10-02).
+
+## E5: Carrier link LED loads the PHY's LED0 configuration strap
+
+**Symptom:** the RJ45 green LED is driven from the PHY's `LED0` pin,
+which doubles as a configuration strap the PHY samples at reset. The
+module pulls that pin up through 4.7 kΩ. On the carrier, the LED's
+cathode resistor (1 kΩ to ground) loads the pin during the reset-latch
+window, so the strap can be sampled at the wrong level.
+
+**HW fix:** remove the LED's series resistor on the carrier, on both
+ports, so the strap is not loaded; the green LED then stays dark.
+Next carrier revision: drive the LED through a buffer, or from a
+different PHY LED pin that is not a strap.
+
+**Software workaround:** none.
+
+**Confidence:** medium. The rework is applied on the bench carrier
+(2026-10-02); the strap level before and after was not recorded.
+
 ---
 
 ### Already correct in the SDK metadata (no action — listed for closure)
