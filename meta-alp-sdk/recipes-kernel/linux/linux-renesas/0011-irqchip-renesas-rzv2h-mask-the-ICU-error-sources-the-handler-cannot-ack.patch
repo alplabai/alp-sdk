@@ -97,8 +97,7 @@ Signed-off-by: Alp Lab AB
 +
 +		/* Name the bus-error master/slave, then clear the bundled factor. */
 +		if (be) {
-+			dev_warn(&pdev->dev, "bus error factor ICU_BEISR%u 0x%08x at probe, cleared
-",
++			dev_warn(&pdev->dev, "bus error factor ICU_BEISR%u 0x%08x at probe, cleared\n",
 +				 grp, be);
 +			writel(be, rzv2h_icu_data->base + ERROR_BECLR_OFFSET(grp));
 +		}
@@ -114,8 +113,7 @@ Signed-off-by: Alp Lab AB
 +				 "error group %u status 0x%08x pending at probe, masked\n",
 +				 grp, stat & ~keep);
 +		if (!grp && (stat & ERROR_GR0_MCPU_LOCKUP))
-+			dev_warn(&pdev->dev, "Cortex-M33 is in lockup (MCPU_LOCKUP) at probe
-");
++			dev_warn(&pdev->dev, "Cortex-M33 is in lockup (MCPU_LOCKUP) at probe\n");
 +		writel(~keep, rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(grp));
 +	}
 +
