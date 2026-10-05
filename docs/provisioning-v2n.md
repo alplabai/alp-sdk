@@ -347,11 +347,13 @@ no Enter to a unit at a U-Boot prompt, in the SCIF ROM / Flash Writer, or halted
 
 The on-SoM Renesas 5L35023B (`BRD_I2C` / Linux `i2c-8` on the reference
 bench, 7-bit `0x69`) ships with a fixed factory OTP image that cannot be
-re-burned in-system. U-Boot patch 0007 (#2293) rewrites reg `0x21` and
-`0x24` every boot (a volatile fixup, not an OTP change); the step reads reg
+re-burned in-system. U-Boot patches 0007 (#2293) and 0012 rewrite reg `0x1f`
+(`0xc7`, SE2 = 24.576 MHz for the GD32 HXTAL), `0x21` (`0xc0`) and `0x24`
+(`0x8f`) every boot (a volatile fixup, not an OTP change); the step reads reg
 `0x00..0x24` **one byte at a time** (`i2cget`, never a combined
 `i2ctransfer` read -- this part bit-slips on those), compares against the
-OTP image with `0x21`/`0x24` expected at their post-fixup values, and
+OTP image with `0x1f`/`0x21`/`0x24` expected at their post-fixup values
+(and reports `SE2 24.576 MHz` in the step detail), and
 confirms the boot console showed U-Boot's own `ALP: 5L35023B clock:` line.
 **A boot log without that line means the unit's U-Boot lacks patch 0007
 (#2293)** -- the step keeps failing (a production unit without the fixup is

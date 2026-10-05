@@ -799,7 +799,7 @@ def test_gd32_probe_reads_nothing_from_a_wrong_debug_port(tmp_path):
 def test_clkgen_verify_pass(tmp_path):
     board = Board()
     image = bytearray(lt.CLKGEN_OTP_IMAGE)
-    image[0x21], image[0x24] = 0xC0, 0x8E
+    image[0x1F], image[0x21], image[0x24] = 0xC7, 0xC0, 0x8F
     for reg, val in enumerate(image):
         board.regs[(8, 0x69, reg)] = val
     ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True)
@@ -808,6 +808,7 @@ def test_clkgen_verify_pass(tmp_path):
     r = res[-1]
     assert r.name == "clkgen_verify" and r.status == "done", r.detail
     assert r.evidence["clkgen_i2c_addr"] == "0x69"
+    assert "SE2 24.576 MHz (0x1f=0xc7, 0x24=0x8f)" in r.detail
     assert r.evidence["clkgen_otp_raw"] == " ".join(f"{b:02x}" for b in image)
 
 
@@ -820,7 +821,7 @@ def test_clkgen_verify_fails_on_mismatch_and_missing_boot_line(tmp_path):
     res = steps.run_steps(ctx, only=["clkgen_verify"])
     r = res[-1]
     assert r.status == "failed"
-    assert "reg 0x21" in r.detail and "5L35023B clock" in r.detail
+    assert "reg 0x1f" in r.detail and "reg 0x21" in r.detail and "5L35023B clock" in r.detail
     assert "#2293" in r.detail and "patch 0007" in r.detail
 
 

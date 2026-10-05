@@ -2229,7 +2229,7 @@ class ColdBootTest(Step):
 
 class ClkgenVerify(Step):
     """The on-SoM 5L35023B (BRD_I2C, 0x69) OTP image against U-Boot's
-    fixup (U-Boot patch 0007, #2293). Read after the provisioned unit has
+    fixup (U-Boot patches 0007, #2293, and 0012: SE1/SE3/SE2). Read after the provisioned unit has
     booted: the fixup runs every boot, so a unit shipped without it (or with
     a wrong OTP image) is caught here rather than downstream."""
     name = "clkgen_verify"
@@ -2259,6 +2259,7 @@ class ClkgenVerify(Step):
                                f"matches, dash code {image[0x01]:#04x}; the U-Boot fixup line was not read)",
                                ev, status="skipped")
         return self.result(ctx, f"5L35023B OTP image matches (dash code {image[0x01]:#04x}); "
+                           f"SE2 24.576 MHz (0x1f={image[0x1F]:#04x}, 0x24={image[0x24]:#04x}); "
                            f"boot line: {line!r}", ev, status="done")
 
 
