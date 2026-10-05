@@ -222,17 +222,6 @@ ALP_DRP1_DT_ENABLE = "${@'1' if ('rz-opencva' in (d.getVar('BBFILE_COLLECTIONS')
 ALP_DRP1_DT_ENABLE[vardepvalue] = "${ALP_DRP1_DT_ENABLE}"
 SRC_URI += "${@' file://e1m-v2n-drp1.dtsi' if d.getVar('ALP_DRP1_DT_ENABLE') == '1' else ''}"
 
-# 0018 (DRP-AI register ioctls): the vendor drpai driver lets any opener of
-# /dev/drpai0 read/write the DRP, DRP-AI and CPG register blocks (ioctls
-# 64-69; WRITE_CPG_REG can gate CM33-owned clocks).  The runtime never calls
-# them, so the patch demands CAP_SYS_RAWIO.  It patches drivers/drpai/, which
-# meta-rz-drpai's own patch adds, so it is installed only with that layer
-# (and must apply after it: SRC_URI:append is resolved at finalisation, so it
-# lands after meta-rz-drpai's own SRC_URI appends whatever the layer order).
-# Residual risk (documented in docs/bring-up-drpai-v2n.md): DMA descriptors
-# from DRPAI_ASSIGN / DRPAI_START still reach any physical address.
-SRC_URI:append = "${@' file://0018-drpai-require-CAP_SYS_RAWIO-for-the-register-ioctls.patch' if d.getVar('ALP_DRPAI_LAYER') == '1' else ''}"
-
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the
 # SoC r9a09g056.dtsi and these dtsi by relative path).

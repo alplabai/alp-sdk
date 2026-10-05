@@ -15,8 +15,7 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=787726818c896f394f6627ab59d98d69"
 # Track the alp-sdk default branch; CI repins SRCREV to the release-tag
 # commit when alp-sdk tags a new release (same pattern as the other
 # alp-* recipes in this layer, e.g. alp-chips_0.6.bb).
-SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main \
-           file://alp-sdk-tmpfiles.conf"
+SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
 SRCREV  = "${AUTOREV}"
 PV      = "0.6.0"
 

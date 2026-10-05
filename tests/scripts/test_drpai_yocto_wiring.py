@@ -9,10 +9,14 @@ def _t(rel: str) -> str:
     return (L / rel).read_text(encoding="utf-8")
 
 
-def test_0018_appended_and_gated_on_rz_drpai():
-    s = _t("recipes-kernel/linux/linux-renesas_%.bbappend")
-    line = next(x for x in s.splitlines() if "file://0018-" in x)
-    assert line.startswith("SRC_URI:append") and "ALP_DRPAI_LAYER" in line
+def test_0018_appended_last_and_gated_on_rz_drpai():
+    # Must be an anonymous-python append in the 6.1 bbappend: the wildcard
+    # bbappend is evaluated before meta-rz-drpai's, so a SRC_URI:append there
+    # would put 0018 ahead of the vendor drpai driver patches.
+    s = _t("recipes-kernel/linux/linux-renesas_6.1.bbappend")
+    assert "python ()" in s and "d.appendVar('SRC_URI'" in s
+    assert "file://0018-" in s and "ALP_DRPAI_LAYER" in s
+    assert "0018-" not in _t("recipes-kernel/linux/linux-renesas_%.bbappend")
 
 
 def test_drp1_stub_or_real_switch():
