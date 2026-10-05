@@ -1,4 +1,4 @@
-### Removed — alp-sdk no longer redistributes the GigaDevice GD32G5x3 firmware library
+### Removed - alp-sdk no longer redistributes the GigaDevice GD32G5x3 firmware library (#2702)
 
 `vendors/gd32_firmware_library/` (the git submodule pointing at the
 `alplabai/gd32g5x3-firmware-library` mirror, its CMake wrapper, and the
