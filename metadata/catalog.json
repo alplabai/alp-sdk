@@ -2901,54 +2901,6 @@
           }
         ],
         "declares": {
-          "chips": false,
-          "ipc": false,
-          "models": false,
-          "peripherals": true
-        },
-        "name": "v2n-emmc-block-stat",
-        "osSet": [
-          "zephyr"
-        ],
-        "path": "examples/v2n/v2n-emmc-block-stat",
-        "som": "E1M-V2N101",
-        "summary": "Query the V2N module's on-module eMMC via Zephyr's disk-access (block-storage) subsystem. Reports sector count + sector size, reads the first 16 blocks (8 KiB) of the device, looks for the MBR signature, and asks the driver for any erase-block / wear-level data it caches."
-      },
-      {
-        "board": "e1m-x-evk",
-        "coreCount": 1,
-        "cores": [
-          {
-            "app": "./src",
-            "id": "m33_sm",
-            "os": "zephyr"
-          }
-        ],
-        "declares": {
-          "chips": true,
-          "ipc": false,
-          "models": false,
-          "peripherals": true
-        },
-        "name": "v2n-ethernet-dual",
-        "osSet": [
-          "zephyr"
-        ],
-        "path": "examples/v2n/v2n-ethernet-dual",
-        "som": "E1M-V2N101",
-        "summary": "Brings up both RTL8211FDI Ethernet PHYs on the V2N module (ET0 + ET1), exercises the management surface (MDIO probe, soft-reset, autoneg restart, link-status read), and configures Wake-on-LAN."
-      },
-      {
-        "board": "e1m-x-evk",
-        "coreCount": 1,
-        "cores": [
-          {
-            "app": "./src",
-            "id": "m33_sm",
-            "os": "zephyr"
-          }
-        ],
-        "declares": {
           "chips": true,
           "ipc": false,
           "models": false,
@@ -3255,30 +3207,6 @@
         "path": "examples/v2n/v2n-temp-sensor",
         "som": "E1M-V2N101",
         "summary": "Reads the on-module TMP112 once per second and prints the temperature in degrees Celsius (with 0.001 °C resolution), from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster. Classic V2N starter app -- one I²C bus open, one chip init, a ten-sample loop."
-      },
-      {
-        "board": "e1m-x-evk",
-        "coreCount": 1,
-        "cores": [
-          {
-            "app": "./src",
-            "id": "m33_sm",
-            "os": "zephyr"
-          }
-        ],
-        "declares": {
-          "chips": false,
-          "ipc": false,
-          "models": false,
-          "peripherals": true
-        },
-        "name": "v2n-xspi-flash-readwrite",
-        "osSet": [
-          "zephyr"
-        ],
-        "path": "examples/v2n/v2n-xspi-flash-readwrite",
-        "som": "E1M-V2N101",
-        "summary": "Erase one sector on the V2N module's on-module xSPI NOR, write a known pattern, read it back, and report the comparison. Exercises Zephyr's standard `flash` driver class against the board-facing xSPI bus."
       }
     ]
   },
