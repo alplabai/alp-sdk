@@ -581,6 +581,15 @@ def v2n_main(argv: list[str]) -> int:
         print(f"provision_som: {e}", file=sys.stderr)
         return 2
 
+    hil = a.hil_spec
+    if hil is None and a.carrier:
+        hil = REPO / "tests" / "hil" / f"{a.sku.lower().removeprefix('e1m-')}-{a.carrier}"
+    if hil is not None:
+        hil = hil if hil.is_absolute() else REPO / hil
+        if not hil.is_dir():
+            print(f"provision_som: HiL spec dir is not a directory: {hil}", file=sys.stderr)
+            return 2
+
     serial = a.serial
     if not serial:
         som_ledger = getattr(a, "som_ledger", None)
@@ -606,9 +615,6 @@ def v2n_main(argv: list[str]) -> int:
         print(f"provision_som: {e}", file=sys.stderr)
         return 2
 
-    hil = a.hil_spec
-    if hil is None and a.carrier:
-        hil = REPO / "tests" / "hil" / f"{a.sku.lower().removeprefix('e1m-')}-{a.carrier}"
     ctx = steps.Ctx(sku=a.sku, serial=serial, bundle_dir=bundle_dir, bundle=bundle, preset=preset,
                     ledger_root=a.ledger_root, execute=execute, lock=getattr(a, "lock", False),
                     bench=bench, tier_markers=markers, expected_registers=regs, functest_expect=expect,

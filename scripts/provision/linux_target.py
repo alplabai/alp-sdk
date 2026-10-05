@@ -103,7 +103,8 @@ class LinuxTarget:
     def _exec(self, argv: list[str], timeout: float, stdin_path: Path | None = None) -> CmdResult:
         try:
             if stdin_path is None:
-                p = self.runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+                p = self.runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=timeout)
             else:
                 with open(stdin_path, "rb") as f:
                     p = self.runner(argv, stdin=f, capture_output=True, text=True, timeout=timeout)

@@ -175,3 +175,15 @@ def test_selector_picks_the_twin_fragment_when_it_exists(app_dir, tmp_path):
     got = _selected_conf(cm, tmp_path, "alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp", ("aen803",))
     assert got == "generated/aen803/alp.conf"
     assert _selected_conf(cm, tmp_path, "native_sim/native/64", ("aen803",)) == "generated/alp.conf"
+
+
+def test_stale_twin_fragment_is_removed(tmp_path):
+    src = _example("examples/peripheral-io/alp-console")
+    d = tmp_path / "alp-console"
+    shutil.copytree(src, d, ignore=shutil.ignore_patterns("generated", "build*"))
+    board = next(c[1] for c in CASES if c[0] == src)
+    twin = d / "generated" / "aen803" / "alp.conf"
+    twin.parent.mkdir(parents=True)
+    twin.write_text("CONFIG_STALE=y\n", encoding="utf-8")
+    GEN.generate(d, board, next(c[2] for c in CASES if c[0] == src))
+    assert not twin.exists() or "CONFIG_STALE" not in twin.read_text(encoding="utf-8")
