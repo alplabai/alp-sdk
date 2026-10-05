@@ -8,5 +8,5 @@ the whole check timeout. The watcher now polls for the check's `.rc` file and
 leaves on its own, with nothing signalling it. Separately, the test left every
 check that must succeed on the 5 s default timeout, so a stalled runner turned
 `rc` or `nope` into the timeout marker `T`; those now carry an explicit 120 s
-margin and only `hang` keeps its 1 s timeout. Under a CPU burner the test failed
-11 of 12 runs before and passed 12 of 12 after, and 30 of 30 unloaded.
+margin and only `hang` keeps its 1 s timeout. The test failed 7 of 12 runs under a
+64-process CPU burner before, passed 12 of 12 under 24 burners after, and 30 of 30 unloaded.

@@ -813,7 +813,7 @@ def test_the_runner_frames_each_check_runs_lanes_concurrently_and_kills_an_overr
     checks = [C("a", "", "echo first; echo err >&2; pwd", lambda o: None, timeout_s=SAFE),
               C("slow1", "", "sleep 1; echo s1", lambda o: None, lane="x", timeout_s=SAFE),
               C("slow2", "", "sleep 1; echo s2", lambda o: None, lane="y", timeout_s=SAFE),
-              C("hang", "", f"( sleep 6; echo late > {late} ) &\necho started; sleep 30", lambda o: None,
+              C("hang", "", f"( sleep 6; echo late > {late} ) &\necho started; sleep 300", lambda o: None,
                 timeout_s=1, lane="z", setup="state=was-down", restore=f"echo restored $state > {mark}"),
               C("rc", "", "echo before; exit 3", lambda o: None, timeout_s=SAFE),
               C("nope", "", "definitely-not-a-command-xyz", lambda o: None, timeout_s=SAFE),
@@ -821,7 +821,7 @@ def test_the_runner_frames_each_check_runs_lanes_concurrently_and_kills_an_overr
     p = tmp_path / "s.sh"
     p.write_bytes(functest.script(checks).replace("/tmp/alp-ft.", (tmp_path / "ft.").as_posix()).encode())
     t0 = time.monotonic()
-    r = subprocess.run(["sh", str(p)], capture_output=True, text=True, encoding="utf-8", check=False, timeout=60)
+    r = subprocess.run(["sh", str(p)], capture_output=True, text=True, encoding="utf-8", check=False, timeout=280)
     took = time.monotonic() - t0
     got = functest.parse(r.stdout)
     assert list(got) == ["a", "slow1", "slow2", "hang", "rc", "nope", "tool"]    # catalogue order, not finish order
@@ -834,7 +834,7 @@ def test_the_runner_frames_each_check_runs_lanes_concurrently_and_kills_an_overr
     assert got["hang"][0] == "T" and got["hang"][1].splitlines()[0] == "started"
     assert got["rc"] == ("3", "before") and got["nope"][0] == "127"
     assert got["tool"] == ("0", "ALPUNREAD missing tool: definitely-not-a-tool-xyz")
-    assert took < 60, took                                                    # the hang was killed, not waited out (its sleep is 30 s)
+    assert took < 120, took                                                   # the hang was killed, not waited out (its sleep is 300 s)
     assert functest.judge(checks[3], got["hang"]) == "unread (timed out after 1 s)"
     assert functest.judge(checks[5], got["nope"]).startswith("unread (missing tool: ")
     assert functest.judge(checks[6], got["tool"]) == "unread (missing tool: definitely-not-a-tool-xyz)"
