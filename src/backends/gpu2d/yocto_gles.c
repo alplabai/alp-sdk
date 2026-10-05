@@ -420,8 +420,7 @@ out:
 		g->gpu_ops++;
 	} else {
 		if (g->gl_fallbacks++ == 0u) {
-			fprintf(stderr, "[gpu2d/gles] GL op failed, falling back to the CPU path
-");
+			fprintf(stderr, "[gpu2d/gles] GL op failed, falling back to the CPU path\n");
 		}
 	}
 	pthread_mutex_unlock(&g->lock);
@@ -450,8 +449,7 @@ static void gl_close(alp_gpu2d_backend_state_t *state)
 	if (state->be_data != NULL) {
 		gles_state_t *g = (gles_state_t *)state->be_data;
 		fprintf(stderr,
-		        "[gpu2d/gles] %u op(s) ran on the GPU, %u fell back to the CPU after a GL error
-		        ",
+		        "[gpu2d/gles] %u op(s) ran on the GPU, %u fell back to the CPU after a GL error\n",
 		        (unsigned)g->gpu_ops,
 		        (unsigned)g->gl_fallbacks);
 		egl_binding_t saved;
