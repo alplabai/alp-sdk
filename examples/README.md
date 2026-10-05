@@ -232,13 +232,10 @@ SoM EEPROM manifest).
 |---------------------------------|--------------------------------------------------------------------------|
 | `v2n/v2n-gd32-bridge-ping`      | PING + GET_VERSION round-trip on both SPI fast path + I2C management path.|
 | `v2n/v2n-board-id-readout`      | Read the SoM EEPROM manifest + assert the SKU matches the firmware build. |
-| `v2n/v2n-ethernet-dual`         | Bring up both RTL8211FDI PHYs (ET0 + ET1) -- probe, reset, autoneg, link, WoL. |
 | `v2n/v2n-eeprom-manifest-dump`  | Hexdump + decode the 128-byte EEPROM manifest at offset 0x0000.          |
 | `v2n/v2n-temp-sensor`           | Read the on-module TMP112 once per second; print degrees C.              |
 | `v2n/v2n-pwm-fan-control`       | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz board). |
 | `v2n/v2n-secure-element-sign`   | OPTIGA Trust M probe, Coprocessor UID read and raw APDU session. |
-| `v2n/v2n-xspi-flash-readwrite`  | Erase + write + read-back one page on the on-module xSPI NOR.            |
-| `v2n/v2n-emmc-block-stat`       | Disk-access ioctls + first-block read on the on-module eMMC.             |
 | `v2n/v2n-gd32-swd-flash`        | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
 | `v2n/v2n-brd-i2c-bringup`       | Patch-day diagnostic for the V2N SoM's BRD_I2C management bus (Renesas RIIC8) -- distinguishes a bus-level electrical fault from per-device failures; prints a PASS/FAIL/SKIP table. |
 | `v2n/v2n-gd32-bridge-functional` | Single-pass functional validation of the GD32G553 supervisor-MCU bridge, followed by a forever PWM7 duty staircase as a live oscilloscope observable. **(V2N-M1)** |

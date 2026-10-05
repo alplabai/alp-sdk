@@ -37,6 +37,18 @@
 #include <cstdint>
 #include <new>
 
+/* The TFLM headers go BEFORE any Zephyr header, and that order is
+ * load-bearing on native_sim.  They pull in libstdc++'s <memory>, which
+ * reaches the host's <pthread.h>; Zephyr's toolchain header defines
+ * `__unused` as an attribute macro, and glibc 2.43 names a member of
+ * struct __pthread_mutex_s exactly that (`short __unused;`, x86
+ * bits/struct_mutex.h).  With Zephyr first the member expands to a bare
+ * attribute and the TU dies with "declaration does not declare anything".
+ * Host headers first means glibc is parsed before the macro exists. */
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
+#include "tensorflow/lite/schema/schema_generated.h"
+
 #include <zephyr/logging/log.h>
 
 extern "C" {
@@ -62,10 +74,6 @@ extern "C" {
  * ethos_u_aen / ethos_u_n93 build fails to link with undefined
  * references to alp_inference_tflm_ops. */
 #include "tflm_shared.h"
-
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
-#include "tensorflow/lite/schema/schema_generated.h"
 
 #if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) || \
     defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
