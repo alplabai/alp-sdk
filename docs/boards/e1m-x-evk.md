@@ -83,6 +83,8 @@ deltas (verify when the HW config writeup lands):
 
 ## Display
 
+Per-path status and bench record: [display-support-matrix.md](../display-support-matrix.md).
+
 ### Display 1 (J6) — V2N primary display path
 
 | Item | Detail |
