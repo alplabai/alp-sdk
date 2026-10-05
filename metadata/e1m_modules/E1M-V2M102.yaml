@@ -192,17 +192,17 @@ mailbox:
 #     once their board trees generate; it does not need a
 #     soc_peripheral_instances entry to become visible.
 soc_peripheral_instances:
-  - { instance: i3c30,     class: i3c,  silicon_peripheral: "I3C_SCL30/SDA30",              driver_status: none }
-  - { instance: riic1,     class: i2c,  silicon_peripheral: "RIIC1_SCL1/SDA1",               driver_status: none }
+  - { instance: i3c30,     class: i3c,  silicon_peripheral: "I3C_SCL30/SDA30",              driver_status: none, notes: "P20/P21 (P2x) are NOT 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1); do not enable an i3c DT node until carrier parts on E1M I3C are confirmed not to drive 3.3 V. Audit IO-M2." }
+  - { instance: riic1,     class: i2c,  silicon_peripheral: "RIIC1_SCL1/SDA1",               driver_status: none, notes: "A55/Linux enables &i2c1 (P32/P33 f1, 400 kHz) in the Yocto DT; no CM33 driver. Audit finding IO-M1; not bench-verified by this entry." }
   - { instance: riic2,     class: i2c,  silicon_peripheral: "RIIC2_SCL2/SDA2",               driver_status: none }
-  - { instance: rspi0,     class: spi,  silicon_peripheral: "RSPI0_*",                       driver_status: none }
-  - { instance: sci_spi2,  class: spi,  silicon_peripheral: "SCI_SPI2_*",                    driver_status: none }
-  - { instance: sci_spi3,  class: spi,  silicon_peripheral: "SCI_SPI3_*",                    driver_status: none }
+  - { instance: rspi0,     class: spi,  silicon_peripheral: "RSPI0_*",                       driver_status: none, notes: "P90-P92 are NOT 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1); do not enable an rspi0 DT node until carrier parts on E1M SPI0 are confirmed not to drive 3.3 V. Audit IO-M2." }
+  - { instance: sci_spi2,  class: spi,  silicon_peripheral: "RSCI2_*",                       driver_status: none }
+  - { instance: sci_spi3,  class: spi,  silicon_peripheral: "RSCI3_*",                       driver_status: none }
   - { instance: pdm0,      class: pdm,  silicon_peripheral: "PDM0_PDMCLK0x/PDMDAT0x",         driver_status: none }
   - { instance: canfd2,    class: can,  silicon_peripheral: "CANFD2_CRX2/CTX2",               driver_status: none }
   - { instance: canfd3,    class: can,  silicon_peripheral: "CANFD3_CRX3/CTX3",               driver_status: none }
   - { instance: uart1,     class: uart, silicon_peripheral: "UART1_RXD1/TXD1",                driver_status: none }
-  - { instance: i2s0,      class: i2s,  silicon_peripheral: "SSIU1_SSI1_*/SSIU2_SSI2_SDATA",  driver_status: none }
+  - { instance: i2s0,      class: i2s,  silicon_peripheral: "SSIU1_SSI1_*/SSIU2_SSI2_SDATA",  driver_status: none, notes: "A55/Linux sound card uses SSIU1/SSIU2 in the Yocto DT; no CM33 driver. Audit finding IO-M1; not bench-verified by this entry." }
   - { instance: i2s1,      class: i2s,  silicon_peripheral: "SSIU3_SSI3_*/SSIU4_SSI4_SDATA",  driver_status: none }
   - { instance: sd1,       class: sdio, silicon_peripheral: "SD1CLK/SD1CMD/SD1DATx",          driver_status: none, notes: "SD1_SD1CD (tsv:109) + SD1_SD1PWEN (tsv:110) are this slot's control lines; SDCARD_RST (tsv:111) + µSD1_V_SEL (tsv:2) are the microSD socket's reset/voltage-select GPIOs, not a separate instance. #1170." }
 

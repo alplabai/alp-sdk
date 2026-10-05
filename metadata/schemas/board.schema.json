@@ -147,6 +147,12 @@
         }
       }
     },
+    "ownership": {
+      "type": "object",
+      "description": "Per-product core ownership override: {<E1M instance>: <core>}, e.g. `e1m_spi0: m33`. Only the instances a SoM family declares under `assignable:` in metadata/e1m_modules/<family>/core-ownership.yaml can appear, and the core must be one of that entry's `candidates` -- the loader rejects anything else naming the instance and the allowed cores. Absent = every assignable instance keeps its default. Fixed ownership facts cannot be overridden.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "type": "string", "enum": ["a55", "m33"] }
+    },
     "e1m_routes": {
       "$ref": "#/$defs/e1m_routes",
       "description": "Inline mode only.  Authoritative board-side E1M-pad routing.  scripts/gen_board_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.  Mutually exclusive with `preset:`."
