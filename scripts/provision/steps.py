@@ -55,6 +55,7 @@ GD32_IMAGES = (("bootloader.bin", 0x08000000, "gd32_bootloader_md5"),
                ("ota-meta.bin", 0x08008000, "gd32_ota_meta_md5"),
                ("slot-a.bin", 0x0800A000, "gd32_slot_a_md5"))
 GD32_BRIDGE_ADDR = 0x70
+SYS_LSI_MODE_XSPI = "0x3c06"   # DSW1 label only; the boot-mode judgement decodes via the SoC description
 LOGIN_RE = r"login: *$"
 IP_WAIT_S = 120.0     # boot_sd_linux: how long a console login may wait for DHCP
 IP_POLL_S = 5.0
