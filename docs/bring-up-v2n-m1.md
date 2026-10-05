@@ -170,8 +170,10 @@ upstream DEEPX troubleshooting docs at
 [`github.com/DEEPX-AI/dx_rt`](https://github.com/DEEPX-AI/dx_rt).
 
 > **Firmware must already be present on the DX-M1.** The SoM-specific
-> DEEPX-built firmware image is provisioned onto the DX-M1 separately
-> (not distributed with the SDK) before this hand-off. Verify the
+> DEEPX-built firmware image is factory-provisioned by Alp Lab onto the
+> DX-M1 (not distributed with the SDK) and must not be replaced with stock
+> DEEPX firmware (the shipped `dxrt-cli` warns before `-u`, `-w` and `-C`; it does not
+> block them). Verify the
 > on-module firmware matches the pinned runtime stack with
 > `dxrt-cli -s` and check the reported firmware version against
 > `PREFERRED_VERSION_dx-rt` / `PREFERRED_VERSION_dx-driver` in

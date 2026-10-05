@@ -285,7 +285,9 @@ source, three SoMs.
 >     source: models/mobilenet.onnx
 >     compile:
 >       drpai:
->         spec: models/mobilenet.drpai.yaml   # DRP-AI TVM compile spec
+>         input_shape: [1, 3, 224, 224]         # NCHW
+>         input_name: input                     # ONNX input tensor name
+>         images: models/calib/                 # calibration images
 >       deepx_dxm1:
 >         config:      models/mobilenet.deepx.json   # dxcom per-model JSON
 >         calibration: models/calib/                 # PTQ calibration dataset

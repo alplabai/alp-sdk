@@ -14,7 +14,7 @@
 # v2m103-gd32-getversion-i2c, v2m103-thermal-zones, v2m103-gd32-gpiochip,
 # v2m103-rtc-ticks, v2m103-wifi-present, v2m103-bt-hci-up, v2m103-dx-m1-pcie,
 # v2m103-audio-tas2563, v2m103-openamp-uio,
-# v2m103-optiga-se-rst-line; provisioning checks: v2m103-eeprom-manifest,
+# v2m103-optiga-se-rst-line, v2m103-drpai-present; provisioning checks: v2m103-eeprom-manifest,
 # v2m103-emmc-boot-config, v2m103-mac-provisioned, v2m103-chosen-sku,
 # v2m103-reset-cause
 # (GET_VERSION on 0x70 is v2m103-gd32-getversion-i2c); A55<->CM33 RPC over

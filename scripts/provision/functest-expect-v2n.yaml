@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Expected values of the provisioning functional test (`functional_test` step,
+# scripts/provision/functest.py). This is the ONE place its pass criteria live; the code
+# holds the commands only. `--functest-expect FILE` (private) is merged over this file,
+# key by key (mappings merge, anything else replaces).
+#
+# Every value says where it comes from:
+#   measured     seen on a unit or in a provisioning log
+#   datasheet    the part's datasheet or the SDK chip driver (include/alp/chips/<chip>.h)
+#   provisional  a band with no population data behind it yet: first bench runs must
+#                confirm or tighten it
+# Values the SoM preset, the SoC description, the carrier description, the release bundle
+# or `--pmic-expect` already carry are NOT repeated here: the code reads them there (DRAM
+# and eMMC size, CPU count, I2C addresses, shunt resistors, the DX-M1 firmware version,
+# the PMIC registers).
+#
+# NOT YET CONFIRMED ON A BENCH. See docs/provisioning-v2n.md, "Functional test coverage".
+schema: 1
+
+# Checks that are recorded but never fail the step or block shipping.
+informational:
+  - rtc_time_set        # nothing sets the RTC during provisioning today
+  - rtc_backup_mode     # reports the RV-3028 backup switchover mode
+  - cm33_running        # BLOCKING by itself once the bundle carries a cm33 image, like cm33_firmware
+  - cm33_firmware       # the flow programs no CM33 image today; BLOCKING by itself once the bundle carries one
+  - dmesg_clean         # the allowlist below comes from ONE boot log
+  - wifi_regdomain
+
+# --- SoM: CPU, memory, storage --------------------------------------------------------------
+kernel_release_regex: '^6\.1\.141-cip43'     # measured
+mem_total_fraction: [0.70, 1.00]             # provisional; MemTotal / SKU DRAM, one unit read 0.771
+emmc_size_fraction: [0.85, 1.00]             # provisional; user area / nominal size, one unit read 0.911
+emmc_life_time_max: 1                        # datasheet (JEDEC): 0x01 = 0..10 % of life used
+emmc_pre_eol: 1                              # datasheet (JEDEC): 0x01 = normal
+emmc_timing_regex: 'mmc HS200'               # measured
+emmc_read_mib: 64                            # the bounded read, as the HiL spec
+emmc_read_min_mib_s: 20                      # provisional
+xspi_jedec_regex: '^(?!0+$|f+$)[0-9a-f]{6,}$'   # any real JEDEC ID (not all-0 / all-f); pin the part privately
+
+# --- SoM: network ---------------------------------------------------------------------------
+eth_phy_id: 0x001cc916                       # measured: MII registers 2/3 of both PHYs
+eth_link_speeds: [100, 1000]                 # Mbit/s; the bench switch decides which
+wifi_firmware_regex: 'Firmware: BCM55500'    # measured
+wifi_country_regex: '^(00|[A-Z]{2})$'        # provisional: records the regulatory domain
+
+# --- SoM: NPU, GPU, DRP-AI ------------------------------------------------------------------
+dxm1_pcie_driver_regex: '^dx_dma_pcie$'      # measured
+dxm1_link_width: 2                           # measured ("PCIe x2: link up")
+dxm1_link_speed_regex: '^8\.0 GT/s'           # measured: kernel log "8.0 GT/s PCIe x2 link"
+dxm1_inference_loops: 30                     # provisional
+dxm1_inference_pass_regex: '(?i)fps'         # provisional: the run_model output format is not pinned
+platform_devices:                            # measured (kernel log)
+  drpai: 17000000.drpai
+  gpu: 14850000.gpu
+  sd: 15c10000.mmc
+gpu_device_node: /dev/mali0                  # measured ("Probed as mali0")
+
+# --- SoM: board-management I2C --------------------------------------------------------------
+rtc_name_regex: 'rv3028'                     # measured
+rtc_bsm_enabled: [1, 3]                      # datasheet: BSM 01 direct / 11 level switching; 00 and 10 = disabled
+rtc_max_error_s: 30                          # provisional: RTC vs host UTC after the cold cycles
+board_temp_c: [10, 85]                       # provisional; one unit read 46.8
+soc_temp_c: [10, 105]                        # the HiL spec's band
+gd32_protocol: '0.14.0'                      # measured
+gd32_gpio_lines_min: 20                      # the HiL spec's floor
+# ID / presence reads, by chip slug as in the SoM preset and the carrier description:
+# write `reg`, read `read` bytes; the ID is `width` bytes at offset `at` (big-endian).
+# No `value` = "the device answers". `values` pins one address.
+i2c_ids:
+  da9292:    {reg: 0x19, read: 1, value: 0xEA}            # measured (DEV_ID)
+  tps628640: {reg: 0x01, read: 1, values: {0x48: 0x5A}}   # measured: VOUT1 code 0x5A = 0.85 V
+  act8760:   {reg: 0x10, read: 1}                         # no ID register known: answers
+  rv3028c7:  {reg: 0x28, read: 1}                         # ID register, value not pinned
+  icm42670:  {reg: 0x75, read: 1, value: 0x67}            # datasheet (WHO_AM_I)
+  bmi323:    {reg: 0x00, read: 4, at: 2, width: 1, value: 0x43}   # datasheet (CHIP_ID after 2 dummy bytes)
+  bmp581:    {reg: 0x01, read: 1, value: 0x50}            # measured (CHIP_ID)
+  ina236:    {reg: 0x3E, read: 2, value: 0x5449}          # measured (manufacturer ID)
+  ina228:    {reg: 0x3E, read: 2, value: 0x5449}          # datasheet (manufacturer ID)
+  tcal9538:  {reg: 0x00, read: 1}                         # no ID register: input port answers
+
+# --- SoM: system ----------------------------------------------------------------------------
+usb_root_hubs_min: 4                         # measured (xHCI x2, OHCI, EHCI)
+# The beacon firmware/alp-stock-shim writes (A55 view of the rsctbl window, top 16 bytes): magic,
+# version, then a counter that grows ~1 per second. A re-read 2 s later must see it advance 1..4.
+cm33_beacon:                                 # the firmware's own layout (README); not yet seen on a bench
+  address: 0x4F700FF0
+  magic: 0xA10D0683
+  version: 0x100                             # image kind: < 0x100 = RPC firmware beacon version, 0x100 = idle shim (no RPC)
+  heartbeat_advance: [1, 4]
+openamp_uio_names: [rsctbl, mhu-shm, vring-ctl0, vring-ctl1, vring-shm0, vring-shm1, mhu-uio]
+systemd_failed_allow:
+  - systemd-networkd-wait-online.service     # end1 unplugged
+# Supply POWER at Linux idle, watts, per bundle family: volts x amps as the supply measures
+# them, so the band holds at any supply voltage. Derived from the measured 0.26..0.29 A at 15 V
+# with the DX-M1 (3.9..4.35 W), with 0.04 A (0.6 W) added each side. No band for `v2n` yet: the
+# check is `unread` there, which blocks, until one is measured.
+supply_power_idle_w:                         # provisional margin
+  v2n-m1: [3.30, 4.95]
+# Kernel log. `dmesg_deny`: any match fails `dmesg_fatal` (known real faults). `dmesg_allow`:
+# error-level lines a good unit prints; anything else at error level fails `dmesg_clean`.
+dmesg_error_regex: '(?i)\b(error|fail(ed|ure)?|unable|cannot|timed? ?out|nobody cared|bug|oops|panic)\b'
+dmesg_deny:
+  - 'SCL is stuck low'
+  - 'output state replay failed'
+  - 'Failed to reset the dma'
+  - 'DMA engine initialization failed'
+  - 'Hw setup failed'
+  - 'mmc_select_hs200 failed'
+  - 'I/O error'
+  - 'EXT4-fs error'
+  - 'JBD2: .*corrupt'
+  - 'Unable to handle kernel'
+  - 'Internal error'
+  - 'Kernel panic'
+  - '\bOops\b'
+dmesg_allow:                                 # measured: one cold boot of one unit
+  - 'irq 14: nobody cared'
+  - 'Disabling IRQ #14'
+  - 'rzv2h_icu .*error group 0 status .* pending at probe, masked'
+  - 'rtc-rv3028 .*hctosys: unable to read the hardware clock'
+  - 'rz-sci .*Failed to create device link'
+  - 'genirq: Setting trigger mode 3 for irq \d+ failed'
+  - "debugfs: Directory '0000:01:00.0' with parent 'dmaengine' already present"
+  - 'dx_dma_pcie .*Unbalanced pm_runtime_enable'
+  - 'Direct firmware load for .* failed with error -2'
+  - 'no board-specific nvram available'
+  - 'supply (vbat|vddio) not found, using dummy regulator'
+  - 'ASoC: driver name too long'
+  - 'ARCH_SOC_ID not implemented'
+  - 'HYP mode not available'
+  - 'no transceiver found'
+  - 'loading out-of-tree module taints kernel'
+
+# --- carrier (the fixture) ------------------------------------------------------------------
+# Keyed by the carrier name in bench.yaml `functional_test.carrier` (= metadata/boards/<name>.yaml,
+# which supplies the device list, addresses and shunt resistors).
+carriers:
+  e1m-x-evk:
+    # camera-rail monitor removed. A private file can add to this list, never shrink it; and 0x48,
+    # the amplifiers' shared address, is never addressed whatever these files say (the code reads
+    # that from the amplifier's chip description).
+    not_fitted: [0x48]
+    fixture: {0x42: ina228_rework}           # answers only on carriers with the hand rework
+    audio_card: e1m-x-evk-tas2563            # measured
+    audio_elapsed_s: [1.8, 2.5]              # the HiL spec's band for a 2 s playback
+    rails:                                   # monitor address -> bus-voltage band, volts
+      0x40: {name: 3v3, volts: [3.135, 3.465]}   # provisional: nominal +-5 %
+      0x41: {name: 1v8, volts: [1.710, 1.890]}   # provisional: nominal +-5 %
+      0x42: {name: 5v, volts: [4.75, 5.25]}      # provisional: nominal +-5 %
