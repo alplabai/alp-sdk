@@ -1908,22 +1908,6 @@ static uint32_t cc3501e_expected_reply_bytes(alp_cc3501e_cmd_t cmd,
  * 536 B to 450 us at the 4092 B frame ceiling. */
 #define CC3501E_REPLY_GATE_FAST_LARGE_US 450u
 
-/* Firmware WITHOUT FAST_REPLY (cc3501e-bridge-firmware v0.9.0, fw_version
- * 0x0900, per-frame path in XIP flash) arms the reply header only after
- * spending time proportional to the REQUEST in its transfer-complete ISR
- * (request CRC + worker-job copy).  The flat 200 us zone above was proven
- * for REPLY size (SOCK_RECV want 512), never for request size, and it
- * under-gated SOCK_SEND: a 400..610 B SOCK_SEND read the reply header before
- * the slave armed it, 0/2 at every length, and the link stayed desynced
- * until cc3501e_recover().  Measured minimum gates on E1M-AEN803 2026W36-0009
- * (2026-10-05, 25 MHz, PACK32, all-PIO): SOCK_SEND ~54 us + 0.426 us per wire
- * byte (233 us at 450 B, 303 us at 610 B, 930 us at 2058 B), STREAM_WRITE
- * ~38 us + 0.337 us per wire byte.  This floor adds ~50-75 us of margin over
- * that SOCK_SEND fit at 400..700 B and ~180 us at 2 KiB; with it SOCK_SEND
- * ran 345/345 clean from 200 to 4086 B.  It is only ever a FLOOR under the
- * size gate below, so no exchange gets less delay than before. */
-#define CC3501E_REPLY_GATE_REQ_BASE_US 80u /* + 1 us per 2 wire bytes */
-
 static uint32_t cc3501e_reply_header_gate_us(const cc3501e_t *ctx, uint32_t bytes)
 {
 	const uint32_t large_bytes =
@@ -1944,15 +1928,30 @@ static uint32_t cc3501e_reply_header_gate_us(const cc3501e_t *ctx, uint32_t byte
 	return CC3501E_REPLY_GATE_FLOOR_US + (over_bytes * span_us) / span_bytes;
 }
 
-/* Request-side floor for the reply-header gate (see CC3501E_REPLY_GATE_REQ_
- * BASE_US): keyed on the REQUEST bytes the host just clocked, because that is
- * what the measured arm time scales with -- a reply-sized key (SOCK_RECV want
- * 512, 536 B) keeps its proven 200 us.  Capped at the 2000 us plateau, which
- * covers the ~1800 us the fit projects at the 4096 B frame ceiling and ran
- * 3/3 clean for SOCK_SEND at 3000..4086 B. */
+/* Request-side floor for the reply-header gate.  Firmware WITHOUT FAST_REPLY
+ * (cc3501e-bridge-firmware v0.9.0, fw_version 0x0900, per-frame path in XIP
+ * flash) arms the reply header only after time proportional to the REQUEST
+ * in its transfer-complete ISR (request CRC + worker-job copy).  The size
+ * gate's flat 200 us zone was proven for REPLY size (SOCK_RECV want 512),
+ * never for request size, and under-gated SOCK_SEND: 400..610 B read the
+ * reply header before the slave armed it, and the link stayed desynced until
+ * cc3501e_recover().  Measured on E1M-AEN803 2026W36-0009 (25 MHz, PACK32,
+ * all-PIO): the bridge needs ~54 us + 0.426 us per request wire byte for
+ * SOCK_SEND, ~38 us + 0.337 us for STREAM_WRITE.  This floor leaves ~55 us of
+ * margin at 400 B and ~180 us at 2 KiB; with it SOCK_SEND and STREAM_WRITE
+ * each ran 207/207 clean from 200 to 4086 B.  Keyed on the request bytes, so
+ * a reply-sized key (SOCK_RECV want 512, 536 B) keeps its proven 200 us.  The
+ * caller takes max(this, size gate), so no exchange waits less than before.
+ * Capped at the 2000 us plateau: uncapped it would pass 2000 us from ~3840 B
+ * (2128 us at 4096 B), and the fit's ~1800 us at the 4096 B ceiling already
+ * fits inside 2000 us (stock gate ran 3/3 clean at 3000..4086 B). */
+#define CC3501E_REPLY_GATE_REQ_BASE_US 80u /* + 1 us per 2 wire bytes */
+
 static uint32_t cc3501e_request_gate_floor_us(const cc3501e_t *ctx, uint32_t wire_tx_len)
 {
-	if (ctx->fw_fast_reply) return 0u;
+	if (ctx->fw_fast_reply) {
+		return 0u;
+	}
 	const uint32_t floor_us = CC3501E_REPLY_GATE_REQ_BASE_US + wire_tx_len / 2u;
 	return (floor_us < CC3501E_REPLY_GATE_LARGE_US) ? floor_us : CC3501E_REPLY_GATE_LARGE_US;
 }
