@@ -122,6 +122,8 @@ SRC_URI:append = " \
 # unmasks only the GPT overflow bits the handler services.  It also logs and
 # clears the ICU bus-error factors (ICU_BEISR0-3 / ICU_BECLR0-3) at probe and
 # names MCPU_LOCKUP, so a masked source is not a silent one.
+# The mask is written BEFORE the line is requested: requesting enables the
+# line, and a source already asserted at probe storms it inside the request.
 
 # AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
 # (GD32 supervisor SPI link).  Without this patch, Linux's
