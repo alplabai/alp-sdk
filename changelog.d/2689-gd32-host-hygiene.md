@@ -1,4 +1,4 @@
-### Changed — GD32 bridge host-side hygiene: cached version, N-sample ADC burst, I2C error replies, multi-line GPIO
+### Changed — GD32 bridge host-side hygiene: cached version, N-sample ADC burst, I2C error replies, multi-line GPIO (#2689)
 
 **`gd32g553_get_version()` is served from the cache `gd32g553_init()` fills**,
 so the console `ver` command and portable-API callers no longer send
