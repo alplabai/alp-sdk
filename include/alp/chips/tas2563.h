@@ -1100,8 +1100,9 @@ alp_status_t tas2563_resume(const tas2563_t *ctx);
  *   depends on first confirming incremental multi-byte writes on real
  *   silicon.
  *
- * @par Write verification: see @ref tas2563_load_tuning_verified.  This
- *   function alone does not verify.
+ * @par Write verification.
+ *   See @ref tas2563_load_tuning_verified -- this function alone does
+ *   not verify.
  *
  * @par Why no host-side checksum.
  *   SLASET3D §7.3.2 "Device Mode and Address Selection" (p.29) itself
