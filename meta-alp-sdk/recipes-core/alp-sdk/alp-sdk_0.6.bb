@@ -203,7 +203,7 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # all -- and separately, ALP_SDK_DRPAI_REQUIRED itself is emitted by
 # NOTHING in the tree (kconfig.py emits only the USE flag), so REQUIRED
 # can never be auto-flipped ON regardless of which slice is building.)
-PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF -DALP_SDK_DRPAI_REQUIRED=OFF,drpai mera2-drpai-tvm,mera2-drpai-tvm alp-drpai-udev"
+PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF -DALP_SDK_DRPAI_REQUIRED=OFF,drpai mera2-drpai-tvm mmngr-user-module mmngrbuf-user-module,mera2-drpai-tvm alp-drpai-udev"
 
 # Warn when the image will carry the DRP-AI driver + runtime (ALP_ENABLE_DRPAI)
 # but this SDK build has no DRP-AI backend because RUHMI is not configured:
