@@ -114,6 +114,15 @@ prints one line, clears the WDT flags and publishes the cause:
 | both | `ALP: reset cause: WDT CA55 + CM33` | `wdt-ca55-cm33` |
 | neither | `ALP: reset cause: power-on or software` | `por-or-sw` |
 
+**A software reboot reads as a CA55 watchdog reset.** The kernel restarts
+the SoC through the CA55 watchdog (`rzv2h_wdt_restart`), and U-Boot's `reset`
+does the same, so `reboot` sets `CPG_ERROR_RST2` bit1 exactly like a hang:
+bench, E1M-V2M103 2026W38-0008, 2026-10-06, `reboot` printed
+`ALP: reset cause: WDT CA55 (CPG_ERROR_RST2=0x00000002)`. `por-or-sw` therefore
+only ever means power-on, and `wdt-ca55` means "hang or ordinary reboot";
+the 10 ms DX-M1 hold runs on every reboot (harmless). Telling the two apart
+needs a kernel-side marker before the restart; not done.
+
 Env `alp_reset_cause` carries the same token at the U-Boot prompt but is cleared
 by bootcmd's `env default -a`; Linux and provisioning read the DT property. On
 a v2n-m1 SoM (EEPROM family gate) a WDT reset also drives M1_RESET low for 10 ms
@@ -126,7 +135,7 @@ with PMIC GPIO4; topology unconfirmed, so the SoC does not drive it). The PHYs
 and the PMICs are not touched (no PMIC MR, no PMIC watchdog). They keep their
 pre-reset state.
 
-**Bench test (hang injection, #1153; not yet run).**
+**Bench test (hang injection, #1153; PASS on E1M-V2M103 2026W38-0008, 2026-10-06).**
 1. Boot normally; at the U-Boot console confirm `ALP: reset cause: power-on or
    software`, and in Linux `tr -d '\0' < /proc/device-tree/chosen/alp,reset-cause`.
 2. Hang the A55 so the CA55 WDT expires (hang-injection procedure of #1153).

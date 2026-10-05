@@ -15,6 +15,9 @@ for 10 ms before the existing DEEPX rail / PCIe sequence releases it.
 Not done, on purpose: GD32_NRST (P74, shared with PMIC GPIO4, topology
 unconfirmed), the Ethernet PHYs and the PMIC are untouched, so a WDT reset
 still leaves them in their prior state. The 10 ms hold is a placeholder until
-the DEEPX datasheet minimum is confirmed. Not bench-verified; see
+the DEEPX datasheet minimum is confirmed. Bench-verified on E1M-V2M103
+(hang injection: `WDT CA55`, DX-M1 held 10 ms, back at 8.0 GT/s x2). A plain
+Linux `reboot` also reports `WDT CA55`, because the kernel restarts through
+the CA55 watchdog, so `por-or-sw` means power-on only. See
 `docs/rzv2n-m33-secure-boot.md` ("Reset cause and watchdog-reset behaviour")
 for the test steps. New HIL spec `tests/hil/v2m103-x-evk/v2m103-reset-cause.yaml`.
