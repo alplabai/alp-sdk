@@ -201,6 +201,16 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
                 self.assertIn(f"{prop}-gpios = {spec};", node.group(1))
             self.assertIn("&gpio7 {", dts)
 
+    def test_v2n_attn_pad_is_routed_to_a_tint_slot(self) -> None:
+        # Without `irqs` on the port the RZ GPIO driver has no TINT route for P71
+        # and alp_gpio_irq_enable(ATTN) returns NOSUPPORT.
+        for sku in ("E1M-V2N101", "E1M-V2M101"):
+            files = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)
+            dts = next(c for r, c in files.items() if r.endswith(".dts"))
+            self.assertIn('&tint31 {\n\tstatus = "okay";\n};', dts, sku)
+            self.assertIn(
+                '&gpio7 {\n\tstatus = "okay";\n\tirqs = <&tint31 1>;\n};', dts, sku)
+
     def test_v2m101_m33_sm_family_agnostic_files(self) -> None:
         self._parity("e1m_v2m101_m33_sm")
 

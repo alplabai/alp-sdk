@@ -153,6 +153,10 @@ supervisor_links:
         docs/gd32-bridge-protocol.md section 3.17: ATTN is GD32 PA14, active
         HIGH, host P71 input + rising-edge IRQ (CM33-owned, maintainer decision
         2026-10-04); PA14 is SWCLK whenever ATTN is off
+      # TINT slot 31 (NVIC 384).  TSSR gpioint = port 7 base 48 + pin 1 = 49 (0x31),
+      # from the Zephyr r9a09g056 intc gpioint-table.  The top slot is the one a
+      # Linux ICU allocating TINT slots upward would reach last (unverified).
+      tint_slot: 31
 
   # RIIC8 / BRD_I2C -- Cortex-A55/Linux-exclusive (maintainer decision,
   # metadata/e1m_modules/v2n/core-ownership.yaml); the CM33 must never
