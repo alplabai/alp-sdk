@@ -74,8 +74,8 @@ NOT vendored (DEEPX EULA).  Default OFF."
 option(ALP_SDK_USE_DRPAI_V2N
     "Wire the Renesas DRP-AI backend hook (src/yocto/inference_drpai.cpp) for \
 <alp/inference.h>.  Enable on plain e1m-x-v2n (no DX-M1) builds.  Links the \
-EdgeCortix MERA2 + DRP-AI TVM runtime (mera2_runtime / drp_tvm_rt / \
-tvm_runtime) located via the RZ/V Yocto SDK sysroot; the prebuilt libs are \
+EdgeCortix MERA2 + DRP-AI TVM runtime (mera2_runtime / mera2_plan_io / \
+drp_tvm_rt) located via the RZ/V Yocto SDK sysroot; the prebuilt libs are \
 account-gated and NOT vendored.  Default OFF."
     OFF)
 
@@ -149,7 +149,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_i2s.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_can.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_rtc.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_temperature.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/temperature_yocto.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wdt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_display.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_camera.c
@@ -899,9 +899,12 @@ if(ALP_SDK_USE_DRPAI_V2N)
     # complete; otherwise warn/error and leave the dispatcher's other backends
     # to it.
     #
-    # Only tvm_runtime comes from a Yocto layer (meta-rz-drpai's lib-tvm
-    # recipe ships libtvm_runtime.so.2.5.1); mera2_runtime, drp_tvm_rt and
-    # mera2_plan_io exist ONLY in a built RUHMI / rzv_drp-ai_tvm checkout
+    # No libtvm_runtime on the link line: RUHMI's own V2N apps link only
+    # mera2_runtime, mera2_plan_io, drp_tvm_rt and pthread, and
+    # libdrp_tvm_rt.so already carries the tvm::runtime symbols it needs.
+    # Also linking meta-rz-drpai's libtvm_runtime.so.2.5.1 would load a
+    # second, older TVM runtime next to RUHMI's 2.7.0 one (audit NPU-02).
+    # mera2_runtime, drp_tvm_rt and mera2_plan_io exist ONLY in a built RUHMI / rzv_drp-ai_tvm checkout
     # (obj/build_runtime/<soc>/lib), as does MeraDrpRuntimeWrapper.h.  Point
     # ALP_DRPAI_TVM_APPS at that checkout's apps/ dir and put its lib/ on
     # CMAKE_LIBRARY_PATH.  One find_path for both cases: the env var is only a
@@ -927,7 +930,7 @@ if(ALP_SDK_USE_DRPAI_V2N)
     # detection and then die at compile on the tvm include, which is the
     # failure this block exists to prevent.  meta-rz-drpai does NOT cover
     # this: its lib-tvm recipe installs libtvm_runtime.so* and a LICENSE,
-    # no headers at all.  Fix on a bare checkout is
+    # no headers at all (and that library is deliberately not linked).  Fix on a bare checkout is
     # `git submodule update --init --recursive`.
     #
     # TRAP: this MUST resolve to the nested tvm/3rdparty/dlpack (and
@@ -948,7 +951,6 @@ if(ALP_SDK_USE_DRPAI_V2N)
     find_library(MERA2_RUNTIME_LIB mera2_runtime)
     find_library(MERA2_PLAN_IO_LIB mera2_plan_io)
     find_library(DRP_TVM_RT_LIB    drp_tvm_rt)
-    find_library(TVM_RUNTIME_LIB   tvm_runtime)
     # The tenth input (#1145's third correction): MeraDrpRuntimeWrapper's own
     # symbols (ctor, Run, SetInput, GetInputInfo, ...) are NOT in any of the
     # four libraries above -- they are application-side glue source
@@ -980,7 +982,7 @@ if(ALP_SDK_USE_DRPAI_V2N)
         list(APPEND _drpai_missing "dmlc/logging.h")
     endif()
     foreach(_drpai_lib
-            MERA2_RUNTIME_LIB MERA2_PLAN_IO_LIB DRP_TVM_RT_LIB TVM_RUNTIME_LIB
+            MERA2_RUNTIME_LIB MERA2_PLAN_IO_LIB DRP_TVM_RT_LIB
             MERA_DRPAI_WRAPPER_LIB)
         if(NOT ${_drpai_lib})
             list(APPEND _drpai_missing "${_drpai_lib}")
@@ -1009,9 +1011,8 @@ if(ALP_SDK_USE_DRPAI_V2N)
             "alp-sdk yocto: DRP-AI backend DISABLED -- not found: "
             "${_drpai_missing_txt}.  Set ALP_DRPAI_TVM_APPS to the apps/ "
             "directory of a built rzv_drp-ai_tvm (RUHMI) checkout and add its "
-            "obj/build_runtime/<soc>/lib to CMAKE_LIBRARY_PATH; tvm_runtime "
-            "comes from meta-rz-drpai's lib-tvm recipe and linux/drpai.h from "
-            "its drpai recipe, both on the Yocto sysroot; mera_drpai_wrapper "
+            "obj/build_runtime/<soc>/lib to CMAKE_LIBRARY_PATH; linux/drpai.h "
+            "comes from meta-rz-drpai's drpai recipe on the Yocto sysroot; mera_drpai_wrapper "
             "is COMPILED (not just staged) by meta-alp-sdk/recipes-renesas/"
             "mera2-drpai-tvm from that same RUHMI checkout's "
             "apps/MeraDrpRuntimeWrapper.cpp.  ${_drpai_verdict}")
@@ -1029,7 +1030,7 @@ if(ALP_SDK_USE_DRPAI_V2N)
         target_link_libraries(alp_sdk PRIVATE
             ${MERA_DRPAI_WRAPPER_LIB}
             ${MERA2_RUNTIME_LIB} ${MERA2_PLAN_IO_LIB}
-            ${DRP_TVM_RT_LIB} ${TVM_RUNTIME_LIB})
+            ${DRP_TVM_RT_LIB})
     endif()
 endif()
 

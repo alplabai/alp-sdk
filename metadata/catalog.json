@@ -3242,6 +3242,36 @@
           }
         ],
         "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
+        "name": "v2n-soc-temperature",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
+        "path": "examples/v2n/v2n-soc-temperature",
+        "som": "E1M-V2N101",
+        "summary": "Prints the SoC die (junction) temperature once per second from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster, through the portable `alp_temperature_read_die_milli_c()`."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
           "chips": true,
           "ipc": false,
           "models": false,
@@ -4070,6 +4100,7 @@
     },
     {
       "functions": [
+        "alp_temperature_read_die_milli_c",
         "alp_temperature_read_milli_c"
       ],
       "header": "include/alp/temperature.h"
