@@ -5157,7 +5157,8 @@ ZTEST(cc3501e_host_driver, test_link_dead_triggers_exactly_one_recovery_2126)
 	static const uint8_t want[10] = { 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 	zassert_equal(n, sizeof(want), "resync header count (saw %u)", n);
 	zassert_mem_equal(seq, want, sizeof(want), "resync order: burst, stall, burst, burst");
-	zassert_true(t[4] - t[3] >= 300u, "stall header -> next burst gap %u ms must be >= 300",
+	zassert_true(t[4] - t[3] >= 300u,
+	             "stall header -> next burst gap %u ms must be >= 300",
 	             (unsigned)(t[4] - t[3]));
 
 	/* And the recovery actually worked: alp_gpio_write()'s fake heals
