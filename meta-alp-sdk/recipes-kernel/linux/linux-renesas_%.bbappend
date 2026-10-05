@@ -12,7 +12,8 @@
 #   e1m-v2m-deepx.dtsi  V2M delta: DEEPX DXM1 NPU on PCIe + the on-module
 #                       lane mux + NPU reset release (gpio-hogs).
 #   e1m-x-evk.dtsi      E1M-X-EVK carrier: eth/i2c/usb/console enables,
-#                       USB-OVC hog. (Cameras/DSI/audio/CAN are TODO.)
+#                       USB-OVC hog, DSI display, TAS2563 audio. (CAN is TODO;
+#                       cameras are opt-in, see camera-csi.cfg.)
 #   e1m-v2n101-x-evk.dts / e1m-v2m101-x-evk.dts  product boards.
 #
 # These compose up from the upstream Renesas SoC dtsi (r9a09g056.dtsi,

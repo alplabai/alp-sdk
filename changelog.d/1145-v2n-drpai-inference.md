@@ -21,13 +21,10 @@ silicon.** Bench sign-off is tracked as #1268.
   `e1m-v2m101-a55.conf`, `e1m-v2m102-a55.conf`, `e1m-v2m103-a55.conf`) and
   does two things: it gates the `&drpai0` devicetree node, and -- on
   `alp-image-edge` only -- gates installing the demo binary below. It
-  installs no userspace runtime package itself. An earlier revision of this
-  change also had the four v2n101/102 + v2m101/102 confs gate a machine-conf
-  `IMAGE_INSTALL:append` (`lib-tvm kernel-module-mmngr`); review caught that
-  this duplicated `alp-image-common.inc`'s existing `ALP_RZ_DRPAI_INSTALL`
-  (#1176) pair-for-pair for every `alp-image-*` image, so it was always a
-  no-op there, never a drift guard -- the four appends are dropped from this
-  change, and `alp-image-common.inc` is the userspace pair's single
+  installs no userspace runtime package itself. The four v2n101/102 + v2m101/102 confs do not gate a machine-conf
+  `IMAGE_INSTALL:append` (`lib-tvm kernel-module-mmngr`): that would duplicate `alp-image-common.inc`'s existing `ALP_RZ_DRPAI_INSTALL`
+  (#1176) pair-for-pair for every `alp-image-*` image, so it would always be a
+  no-op there, never a drift guard -- `alp-image-common.inc` is the userspace pair's single
   packaging authority for `alp-image-*` builds. The demo binary, **`alp-drpai-inference`**,
   rides the same `ALP_ENABLE_DRPAI` opt-in but from a separate, IMAGE-level
   append in `alp-image-edge.bb` (not the machine confs), gated on the same
@@ -37,9 +34,8 @@ silicon.** Bench sign-off is tracked as #1268.
   alp-sdk backend's own `PACKAGECONFIG[drpai]` stays the released,
   independently-set second
   switch ("Two independent switches, both default OFF, deliberately not
-  merged into one" — `CHANGELOG.md`'s v0.15.0 entry). An earlier revision of
-  this branch coupled the two via `PACKAGECONFIG:append:pn-alp-sdk`; that
-  coupling is dropped from this change. `alp-image-edge.bb` gates a
+  merged into one" — `CHANGELOG.md`'s v0.15.0 entry). The two are not coupled via
+  `PACKAGECONFIG:append:pn-alp-sdk`. `alp-image-edge.bb` gates a
   `bb.fatal()` guard on the `rzv2n-family` `MACHINEOVERRIDES` override so
   opting in without `meta-rz-drpai` in `bblayers.conf` fails loudly at
   parse time instead of an obscure missing-recipe error.

@@ -165,10 +165,9 @@ busy!`, #2357). With kernel patch `0010` (bounce buffer for multi-segment
 requests) SDR50 writes 512 MiB in 20 s and HS in 29 s (E1M-V2M103, bench
 2026-09-27); before it every write was a single 4 KiB request (~2.7 MB/s).
 
-**U-Boot numbering differs from Linux.** In U-Boot, `mmc 1` is
-`mmc@15c20000` (SDHI2, the Wi-Fi SDIO controller), not this slot;
-U-Boot's device tree needs the same SD1 node before it can reach the
-microSD.
+**U-Boot numbering differs from Linux.** In ALP U-Boot (patch
+`0008`), `mmc0` = SDHI0 eMMC, `mmc1` = SDHI1 microSD (4-bit, 3.3 V, no
+UHS, no card-detect), `mmc2` = SDHI2 Wi-Fi SDIO.
 
 ## Pending from the user
 

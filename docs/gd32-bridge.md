@@ -385,8 +385,8 @@ the release is signed; a release without signatures is labelled `UNSIGNED`
 in its notes and proves integrity only. Its
 [`docs/RECOVERY.md`](https://github.com/alplabai/gd32-bridge-firmware/blob/dev/docs/RECOVERY.md)
 is the flashing guide for both routes above (external SWD probe, and
-host-driven SWD from the V2N A55, for which this repository carries the
-working master, `examples/v2n/v2n-gd32-swd-flash/`) and the `GET_VERSION`
+host-driven SWD, for which this repository carries a CM33 Zephyr
+master, `examples/v2n/v2n-gd32-swd-flash/`; it is not an A55/Linux tool) and the `GET_VERSION`
 check over BRD_I2C at `0x70`. Verify a signed release (`openssl dgst -sha256 -verify <key> -signature
 SHA256SUMS.sig SHA256SUMS`, then `sha256sum -c SHA256SUMS`) against
 [`keys/alp_release_signing_ecdsa_p256.pub.pem`](../keys/alp_release_signing_ecdsa_p256.pub.pem);

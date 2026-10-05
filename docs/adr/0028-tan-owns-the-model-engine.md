@@ -106,7 +106,7 @@ at alp-sdk `40bfc917` and tan-cli `57bb2fa1`:
 **Historical measurement — superseded by #1367/#1368/#1727.** The table above
 is the snapshot this ADR's reasoning was built on and is left as-is for that
 reasoning to stay legible. It no longer describes `dev`: #1727 already
-deleted `scripts/alp_cli/model.py` and the rest of `scripts/alp_cli/` outright
+deleted `scripts/alp_cli/model.py` and the other CLI command modules (`main.py`, `doctor.py`, `explain.py`, ...); `scripts/alp_cli/` remains as the validator/diagnostic library
 (tan-cli v0.6.0 carries native ports of every wrapped verb), and
 `scripts/alp_model/` itself has since shrunk to **12 modules, 938 lines**. The
 CLI row and the `_PATH_OPT_KEYS` defect discussed below are both history now;
@@ -133,7 +133,7 @@ _PATH_OPT_KEYS = {"config", "calibration", "images", "spec"}
 because resolving every value "corrupted a genuine shape string into a
 filesystem path, which then made the adapter's own shape check misfire" (the
 fix lived in `scripts/alp_cli/model.py`, since deleted by #1727 along with
-the rest of `scripts/alp_cli/`). tan's hand-ported counterpart
+the other `scripts/alp_cli/` command modules). tan's hand-ported counterpart
 (`model_cmd.py:128-140`) never received that fix and still resolves **every**
 string option. So `tan model build` currently path-mangles DRP-AI's
 `input_shape` (`"1,3,224,224"`), `input_name` (`"images"`) and `product`
@@ -225,7 +225,7 @@ departure from it.
 4. **No parity apparatus is created for this axis.** There is nothing to police
    because there is no second implementation: the engine moves, it is not
    forked. `scripts/alp_cli/model.py` is already gone — #1727 deleted it along
-   with the rest of `scripts/alp_cli/`, taking its `HAND_PORT_HASHES` entry
+   with the other CLI command modules, taking its `HAND_PORT_HASHES` entry
    with it — so this decision now only has `scripts/alp_model/` left to move.
 5. The nine unlanded verbs in alp-sdk#933 are written **once**, in tan. #933's
    Python becomes a port source of the same kind tan-cli#58's Rust already is.
@@ -243,7 +243,7 @@ departure from it.
 3. **alp-sdk deletes** `scripts/alp_model/`, with `git grep` evidence, and
    rehomes the cross-cutting tests that survive the move.
    (`scripts/alp_cli/model.py` no longer needs this step — #1727 already
-   deleted it along with the rest of `scripts/alp_cli/`.)
+   deleted it along with the other CLI command modules.)
 4. Verbs land in tan, cheapest-and-most-useful first: `check`, then the
    envelope set, then `zoo`/`add`, `prep`, and `run`/`ab`/`measure` last.
 
@@ -273,7 +273,7 @@ engine, plus cross-cutting tests that must be rehomed:
 `tests/scripts/test_silicon_ref_single_source.py:93,106`,
 `tests/scripts/test_resolve_generated_conflicts.py:54`. (A third,
 `tests/scripts/test_alp_cli_new_som.py:335`, no longer exists — #1727 removed
-it along with the rest of `scripts/alp_cli/`'s test coverage.)
+it along with the CLI command modules' test coverage.)
 
 **Risk.** The two real-model end-to-end tests
 (`tests/scripts/test_deepx_yolo_internal.py`,

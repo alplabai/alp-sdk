@@ -252,19 +252,22 @@ Walk-through: [`docs/bring-up-v2n.md`](bring-up-v2n.md) §5.
 
 ### V2N-M1: bring DEEPX up before opening PCIe
 
-Three steps in the V2N-M1 bring-up that V2N base skips:
+Three steps in the V2N-M1 bring-up that V2N base skips. U-Boot
+(patches `0004` and `0001`) runs steps 1 and 3 -- the 0.75 V DEEPX rail
+on the secondary PMIC's CH2 and the `M1_RESET` release -- before any
+application starts; application firmware must not re-run them (that
+would pulse `M1_RESET` on a DX-M1 Linux has already enumerated). App
+firmware only reads state:
 
-1. `da9292_ch2_sequence(&pmic, &cfg, &res)` -- the 0.75 V DEEPX rail on
-   the secondary PMIC's CH2 (run by U-Boot in A55-boot mode; needs
-   `da9292_set_limits()` with `V2N_M1_POWER_DA9292_CH_LIMITS_INIT`
-   first).
+1. The DEEPX rail (`da9292_ch2_sequence()` is the OS-agnostic reference;
+   U-Boot carries its own port). Read it back with `da9292_get_status()`.
 2. ACK-probe the DEEPX TPS628640 instances at `0x44 / 0x48 / 0x4F`
    to confirm population. `0x48` (`deepx_lpddr_0v85`) only ACKs once
    P64 (`DEEPX_CORE_0P75_EN`) is high, and reads back `0x5A` = 0.85 V
    there; the on-module TMP112 is at `0x40`, not `0x48`. See
    [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) §1.
-3. `deepx_dxm1_bring_up(&dxm1, DEEPX_DXM1_DEFAULT_BOOT_US)` -- the
-   PCIe muxes + M1_RESET sequencer.
+3. The PCIe muxes + `M1_RESET` sequencer. `deepx_dxm1_bring_up()` is
+   only for platforms where a portable caller owns `M1_RESET`.
 
 Full sequence with code: [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md).
 

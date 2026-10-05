@@ -35,10 +35,10 @@ pinctrl gap that used to be the operative blocker is closed:
 that proof is bind-level, since the pad-mux registers were not read
 back and nothing in tree makes an OSPI device-level transfer. The
 driver now registers a `flash_driver_api` (#915) with a working
-`read`/`read_jedec_id`/`sfdp_read` side; `write`/`erase` remain
-deliberate fail-closed `-ENOTSUP` stubs pending the fitted part's
-Octal-DDR mode switch, so there is still no write/erase path a
-partition could use -- recheck when #915 closes.
+`read`/`read_jedec_id`/`sfdp_read` side, and `write`/`erase` are
+implemented too (#915, bench-verified): the driver switches the part to
+Octal DDR first, writes in 2-byte granules and erases on 4 KiB
+alignment.
 Bench evidence for the physical fit is **NOR only**: [`docs/bring-up-aen.md`](../bring-up-aen.md)
 §0 reads the ISSI JEDEC ID off OSPI0 CS1 on the AEN803 bench module and
 says explicitly that result is silent on the HyperRAM's own behaviour
