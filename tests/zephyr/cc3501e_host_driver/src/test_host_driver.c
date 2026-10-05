@@ -246,6 +246,18 @@ static bool g_all_io_down;
  * cc3501e_link_resync() clocks before any warm reset. */
 static unsigned g_resync_ff_count;
 
+/* Every 4-byte TX seen at PH_REQ_HDR, with its fake-clock stamp, so a test can
+ * pin the ORDER and spacing of the #2699 resync, not just the FF count.
+ * Cleared by slave_reset(). */
+struct hdr_log_entry {
+	uint8_t  b[4];
+	uint64_t t_ms;
+};
+#define HDR_LOG_LEN 512u
+static struct hdr_log_entry g_hdr_log[HDR_LOG_LEN];
+static unsigned             g_hdr_log_n;
+static uint64_t             g_fake_now_ms; /* defined with the clock fakes below */
+
 /* #2136 mutant controls: force the two wire patterns the link-failure ring
  * must tell apart (test_link_log_distinguishes_deaf_armed_from_desynced_2136).
  * Cleared by slave_reset(). */
@@ -574,6 +586,7 @@ static uint32_t g_sock_recv_busy_polls_remaining;
 static void slave_reset(void)
 {
 	g_resync_ff_count = 0u;
+	g_hdr_log_n       = 0u;
 	memset(&slave, 0, sizeof(slave));
 	slave.phase                        = PH_REQ_HDR;
 	slave.wifi_conn_state              = ALP_CC3501E_WIFI_CONNECTED; /* preserves the pre-#1376
@@ -1402,6 +1415,11 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	if (len == 0u) {
 		return ALP_OK;
 	}
+	if (slave.phase == PH_REQ_HDR && len == 4u && tx != NULL && g_hdr_log_n < HDR_LOG_LEN) {
+		memcpy(g_hdr_log[g_hdr_log_n].b, tx, 4u);
+		g_hdr_log[g_hdr_log_n].t_ms = g_fake_now_ms;
+		g_hdr_log_n++;
+	}
 	/* Only at the request-header phase: reply reads also clock 0xFF dummies. */
 	if (slave.phase == PH_REQ_HDR && len == 4u && tx != NULL && tx[0] == 0xFFu && tx[1] == 0xFFu &&
 	    tx[2] == 0xFFu && tx[3] == 0xFFu) {
@@ -1556,7 +1574,6 @@ static cc3501e_t fw;
  * separately from the running total above for a test that only cares about
  * the sum. Cleared by delay_log_reset() at the top of each test that
  * inspects either. */
-static uint64_t g_fake_now_ms;
 static uint64_t g_fake_delay_us_total;
 
 #define DELAY_LOG_CAP 8u
@@ -5116,9 +5133,32 @@ ZTEST(cc3501e_host_driver, test_link_dead_triggers_exactly_one_recovery_2126)
 	zassert_equal(s, ALP_ERR_TIMEOUT, "a dead link still fails the op that discovered it");
 	zassert_equal(fw.recover_count, 1u, "exactly one warm-reset recovery ran");
 	zassert_equal(g_resync_ff_count,
-	              6u,
-	              "#2699: burst alone, then stall chain + burst, before the warm reset (saw %u)",
+	              9u,
+	              "#2699: burst, stall chain + burst, burst, before the warm reset (saw %u)",
 	              g_resync_ff_count);
+
+	/* Pin the ORDER (the dead state needs the burst alone first; the lagged
+	 * state needs the chain second) and the stall quiet window. */
+	static const uint8_t stall[4] = { ALP_CC3501E_CMD_PING, 0x01u, 0x10u, 0x00u };
+	uint8_t              seq[16];
+	uint64_t             t[16];
+	unsigned             n = 0u;
+	for (unsigned k = 0; k < g_hdr_log_n && n < ARRAY_SIZE(seq); k++) {
+		const uint8_t *h = g_hdr_log[k].b;
+		if (h[0] == 0xFFu && h[1] == 0xFFu && h[2] == 0xFFu && h[3] == 0xFFu) {
+			seq[n] = 0xFFu;
+		} else if (memcmp(h, stall, 4u) == 0) {
+			seq[n] = 0x00u; /* stall header */
+		} else {
+			continue;
+		}
+		t[n++] = g_hdr_log[k].t_ms;
+	}
+	static const uint8_t want[10] = { 0xFF, 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+	zassert_equal(n, sizeof(want), "resync header count (saw %u)", n);
+	zassert_mem_equal(seq, want, sizeof(want), "resync order: burst, stall, burst, burst");
+	zassert_true(t[4] - t[3] >= 300u, "stall header -> next burst gap %u ms must be >= 300",
+	             (unsigned)(t[4] - t[3]));
 
 	/* And the recovery actually worked: alp_gpio_write()'s fake heals
 	 * g_all_io_down the moment cc3501e_hard_reset() releases reset_pin, so

@@ -680,7 +680,9 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 			 * bridge in a state only a warm reset clears (#2699).  Measured
 			 * on E1M-AEN803 2026W36-0009: SOCK_OPEN 0 ms after the role
 			 * confirm failed 3-5/20 (rc=-4), at 200, 300, 500 and 2000 ms
-			 * 0/20 each. */
+			 * 0/20 each.  The settle is for bridge firmware <= v0.9.1;
+			 * v0.9.2 publishes the role after its reinit, so it can be
+			 * gated or removed once v0.9.0 units are retired. */
 			alp_delay_ms(CC3501E_AP_START_SETTLE_MS);
 			return ALP_OK;
 		}

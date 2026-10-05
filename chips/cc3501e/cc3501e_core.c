@@ -430,25 +430,33 @@ void cc3501e_set_recover_callback(cc3501e_t *ctx, cc3501e_recover_cb_t cb, void 
  * measured on E1M-AEN803 2026W36-0009, fw 0x0900, the dead state (request-
  * header MISO 00000000) recovered 60/60 PINGs after step 2 alone but 0/4
  * after the full chain, while the lagged state needs the full chain (100/100
- * PINGs).  On a healthy link the chain costs one failed PING.  It
- * does NOT repair the state seen right after WIFI_AP_START (see
+ * PINGs).  It does NOT repair the state seen right after WIFI_AP_START (see
  * cc3501e_wifi_ap_start()'s settle) -- the warm reset after this still
  * covers that.  Costs ~0.5 s; a warm reset costs ~3.5 s and drops every
- * association and socket. */
+ * association and socket.
+ *
+ * The transport lock is held for the whole resync (up to ~450 ms with the
+ * chain), past CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS (100 ms
+ * default), so a concurrent single-shot caller may see ALP_ERR_BUSY.  That is
+ * deliberate: nothing else may clock the bus while the bridge is being
+ * reinitialised.
+ *
+ * Returns true if the resync ran, false if the lock was not acquired (the
+ * caller then falls through to its normal probe gap). */
 #define CC3501E_RESYNC_STALL_QUIET_MS 300u /* > firmware CC3501E_REPLY_STALL_MS (250) */
 #define CC3501E_RESYNC_SETTLE_MS      150u /* resync-burst reinit + re-arm */
 
-static void cc3501e_link_resync(cc3501e_t *ctx, bool stall_first)
+static bool cc3501e_link_resync(cc3501e_t *ctx, bool stall_first)
 {
-	/* PING header (flags 0x01) declaring a 16 B payload that never comes --
+	/* PING header (flags RESP_REQUIRED) declaring a 16 B payload that never comes --
 	 * the exact bytes bench-proven above. */
 	static const uint8_t stall_hdr[ALP_CC3501E_HEADER_BYTES] = {
-		(uint8_t)ALP_CC3501E_CMD_PING, 0x01u, 0x10u, 0x00u
+		(uint8_t)ALP_CC3501E_CMD_PING, (uint8_t)ALP_CC3501E_FLAG_RESP_REQUIRED, 0x10u, 0x00u
 	};
 	static const uint8_t resync_hdr[ALP_CC3501E_HEADER_BYTES] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu };
 	uint8_t              rx[ALP_CC3501E_HEADER_BYTES];
 
-	if (cc3501e_lock_acquire(ctx) != ALP_OK) return;
+	if (cc3501e_lock_acquire(ctx) != ALP_OK) return false;
 	if (stall_first) {
 		(void)alp_spi_transceive(ctx->bus, stall_hdr, rx, sizeof(stall_hdr));
 		alp_delay_ms(CC3501E_RESYNC_STALL_QUIET_MS);
@@ -458,6 +466,7 @@ static void cc3501e_link_resync(cc3501e_t *ctx, bool stall_first)
 	}
 	alp_delay_ms(CC3501E_RESYNC_SETTLE_MS);
 	cc3501e_lock_release(ctx);
+	return true;
 }
 
 /* See <alp/chips/cc3501e/core.h> for cc3501e_recover(); this is declared
@@ -529,9 +538,16 @@ alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
 	 * another thread -- cc3501e_recover()'s own CAS (ctx->recovering) is
 	 * the hard guarantee against a second RESET; this just avoids the
 	 * common case of redundant probing too. A narrow window can still let
-	 * two threads both pass this peek and both probe -- harmless (PINGs
-	 * only, correctly serialised by the transport lock); their subsequent
-	 * cc3501e_recover() calls still correctly exclude each other. */
+	 * two threads both pass this peek and both probe -- the PINGs are
+	 * serialised by the transport lock, and so are the in-band resyncs
+	 * below (each one a deliberate stall chain, not a bare PING); their
+	 * subsequent cc3501e_recover() calls still correctly exclude each other.
+	 *
+	 * RESIDUAL v0.9.0 RISK: if the bridge task loop is frozen, the resync's
+	 * stall header parks the slave in PH_REQ_PAYLOAD; the FFs and the next
+	 * PING are then eaten as payload, the stall reinit leaves TX dead, and
+	 * the probe ends in a warm reset.  The trailing burst-only resync
+	 * (i == 2) is the one extra attempt to repair that before giving up. */
 	if (ctx->recovering) return ALP_OK;
 
 	/* Probe before concluding the link is dead: most ALP_ERR_IO/TIMEOUT
@@ -564,11 +580,10 @@ alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
 		}
 		/* In-band resync (#2699) before any further PINGs, which on a stuck
 		 * bridge never realign by themselves: the resync burst alone first,
-		 * then -- only if that PING still fails -- the full stall chain. */
-		if (i < 2u) {
-			cc3501e_link_resync(ctx, i == 1u);
-			continue;
-		}
+		 * then -- only if that PING still fails -- the full stall chain,
+		 * then one more burst if the chain left TX dead.  A lock failure
+		 * falls through to the normal gap instead. */
+		if (i < 3u && cc3501e_link_resync(ctx, i == 1u)) continue;
 		if (i + 1u < CC3501E_LINK_PROBE_TRIES) alp_delay_ms(CC3501E_LINK_PROBE_GAP_MS);
 	}
 	ctx->link_log_suppress = false;
