@@ -1928,6 +1928,34 @@ static uint32_t cc3501e_reply_header_gate_us(const cc3501e_t *ctx, uint32_t byte
 	return CC3501E_REPLY_GATE_FLOOR_US + (over_bytes * span_us) / span_bytes;
 }
 
+/* Request-side floor for the reply-header gate.  Firmware WITHOUT FAST_REPLY
+ * (cc3501e-bridge-firmware v0.9.0, fw_version 0x0900, per-frame path in XIP
+ * flash) arms the reply header only after time proportional to the REQUEST
+ * in its transfer-complete ISR (request CRC + worker-job copy).  The size
+ * gate's flat 200 us zone was proven for REPLY size (SOCK_RECV want 512),
+ * never for request size, and under-gated SOCK_SEND: 400..610 B read the
+ * reply header before the slave armed it, and the link stayed desynced until
+ * cc3501e_recover().  Measured on E1M-AEN803 2026W36-0009 (25 MHz, PACK32,
+ * all-PIO): the bridge needs ~54 us + 0.426 us per request wire byte for
+ * SOCK_SEND, ~38 us + 0.337 us for STREAM_WRITE.  This floor leaves ~55 us of
+ * margin at 400 B and ~180 us at 2 KiB; with it SOCK_SEND and STREAM_WRITE
+ * each ran 207/207 clean from 200 to 4086 B.  Keyed on the request bytes, so
+ * a reply-sized key (SOCK_RECV want 512, 536 B) keeps its proven 200 us.  The
+ * caller takes max(this, size gate), so no exchange waits less than before.
+ * Capped at the 2000 us plateau: uncapped it would pass 2000 us from ~3840 B
+ * (2128 us at 4096 B), and the fit's ~1800 us at the 4096 B ceiling already
+ * fits inside 2000 us (stock gate ran 3/3 clean at 3000..4086 B). */
+#define CC3501E_REPLY_GATE_REQ_BASE_US 80u /* + 1 us per 2 wire bytes */
+
+static uint32_t cc3501e_request_gate_floor_us(const cc3501e_t *ctx, uint32_t wire_tx_len)
+{
+	if (ctx->fw_fast_reply) {
+		return 0u;
+	}
+	const uint32_t floor_us = CC3501E_REPLY_GATE_REQ_BASE_US + wire_tx_len / 2u;
+	return (floor_us < CC3501E_REPLY_GATE_LARGE_US) ? floor_us : CC3501E_REPLY_GATE_LARGE_US;
+}
+
 static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 {
 	if (ctx->ready_pin != NULL && g_ready_ignored) {
@@ -2364,7 +2392,9 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	const uint32_t expected_reply = cc3501e_expected_reply_bytes(cmd, tx_payload, tx_len, rx_cap);
 	const uint32_t gate_bytes =
 	    (expected_reply > (uint32_t)wire_tx_len) ? expected_reply : (uint32_t)wire_tx_len;
-	cc3501e_reply_gate(ctx, cc3501e_reply_header_gate_us(ctx, gate_bytes));
+	const uint32_t size_gate_us = cc3501e_reply_header_gate_us(ctx, gate_bytes);
+	const uint32_t req_floor_us = cc3501e_request_gate_floor_us(ctx, wire_tx_len);
+	cc3501e_reply_gate(ctx, (req_floor_us > size_gate_us) ? req_floor_us : size_gate_us);
 
 	/* Dummies for the read transactions (MOSI is don't-care on a read). */
 	/* Only the bytes each read phase clocks: the reply header now, the reply
