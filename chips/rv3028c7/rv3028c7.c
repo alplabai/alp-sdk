@@ -239,10 +239,6 @@ alp_status_t rv3028c7_init(rv3028c7_t *ctx, alp_i2c_t *bus)
      * clearing so rv3028c7_was_cold_start() can report it. */
 	ctx->cold_start = (status & RV3028_STATUS_PORF) != 0;
 	if (ctx->cold_start) {
-		/* No handler is registered yet at init time, so any bit
-         * rv3028_status_ack() reports as still-latched (raced the
-         * clear) has nowhere to dispatch to; the next
-         * rv3028c7_dispatch_irq() call picks it up fresh. */
 		/* Clear PORF only: BSF/EVF/... latched before init stay set
          * for the first rv3028c7_dispatch_irq(). */
 		s = rv3028_write_reg(
@@ -375,8 +371,8 @@ alp_status_t rv3028c7_alarm_check_and_clear(rv3028c7_t *ctx, bool *fired)
 	if (!*fired) return ALP_OK;
 
 	/* Clear ONLY AF: STATUS bits clear on a 0 write and a 1 write leaves
-     * a flag unchanged (App Manual Rev. 1.4 Table 9; same semantics
-     * mainline Linux rtc-rv3028 relies on), so write 1 to every
+     * a flag unchanged (the semantics mainline Linux rtc-rv3028
+     * relies on: regmap_update_bits() on STATUS, see rv3028_status_ack()), so write 1 to every
      * other flag bit (EEBUSY, bit 7, is read-only) so EVF/TF/UF/BSF/CLKF
      * stay latched for rv3028c7_dispatch_irq().  *fired is already true, so
      * an AF that re-latches after the write needs no read-back. */

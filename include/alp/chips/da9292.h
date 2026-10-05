@@ -434,8 +434,9 @@ alp_status_t da9292_get_fault_pins(alp_gpio_t *int_n, alp_gpio_t *tw_n, uint8_t 
  * Enabling additionally refuses (::ALP_ERR_OUT_OF_RANGE) when either
  * setpoint (VSEL_LO or VSEL_HI -- the VSELx pin may select either),
  * decoded through the live VSTEP, lies outside the channel window, even
- * if the channel is already enabled -- an enable can never switch a channel on at an out-of-window
- * voltage (the VSTEP=1 OTP default on CH2 is exactly that case).  The
+ * if the channel is already enabled -- an enable can never switch a
+ * channel on at an out-of-window voltage (the VSTEP=1 OTP default on
+ * CH2 is exactly that case).  The
  * channel is the AND of this bit and the ENx pin where the pin is routed.
  *
  * @param ctx     DA9292 context handle (must be initialised first).
