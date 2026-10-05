@@ -59,6 +59,13 @@ def test_archive_identity_moves_old_blobs_aside_and_keeps_the_new_one(tmp_path):
     assert ledger_out.promote_manifest(tmp_path, SERIAL).read_bytes() == b"new"
 
 
+def test_archive_identity_refuses_a_path_traversing_hw_rev(tmp_path):
+    (tmp_path / f"{SERIAL}.manifest.bin").write_bytes(b"old")
+    with pytest.raises(ValueError):
+        ledger_out.archive_identity(tmp_path, SERIAL, "manifest", "../x", "2026-10-05", b"new")
+    assert [p.name for p in tmp_path.iterdir()] == [f"{SERIAL}.manifest.bin"]
+
+
 def test_replace_identity_archives_before_staging(tmp_path):
     ctx = _ctx(tmp_path)
     ctx.replace_identity = True

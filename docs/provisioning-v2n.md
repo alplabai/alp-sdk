@@ -350,7 +350,9 @@ confirms the boot console showed U-Boot's own `ALP: 5L35023B clock:` line.
 **A boot log without that line means the unit's U-Boot lacks patch 0007
 (#2293)** -- the step keeps failing (a production unit without the fixup is
 a real defect, not a soft warning it can look past). Ledger facts:
-`clkgen_otp_raw` (all 37 bytes as read, hex), `clkgen_i2c_addr`.
+`clkgen_otp_raw` (all 37 bytes as read, hex), `clkgen_i2c_addr`,
+`clkgen_uboot_fixup` (`seen: <the boot-log line>`, or `unread (...)` when no
+boot console was captured).
 
 ### `dxm1_npu_flash`: the DX-M1 NPU firmware (V2M only)
 

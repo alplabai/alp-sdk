@@ -755,6 +755,7 @@ def test_record_keeps_clkgen_and_dxm1_keys_when_the_catalogue_lists_them(tmp_pat
     new_keys = {
         "clkgen_otp_raw": {"group": "clocks_rtc", "source": "", "mode": "auto", "ship_required": False},
         "clkgen_i2c_addr": {"group": "clocks_rtc", "source": "", "mode": "auto", "ship_required": False},
+        "clkgen_uboot_fixup": {"group": "clocks_rtc", "source": "", "mode": "auto", "ship_required": False},
         "dxm1_fw_uart_boot_md5": {"group": "firmware", "source": "", "mode": "auto", "ship_required": False},
         "dxm1_fw_md5": {"group": "firmware", "source": "", "mode": "auto", "ship_required": False},
         "dxm1_fw_version": {"group": "firmware", "source": "", "mode": "auto", "ship_required": False},
@@ -763,6 +764,7 @@ def test_record_keeps_clkgen_and_dxm1_keys_when_the_catalogue_lists_them(tmp_pat
     (ctx.ledger_root / "schema" / "v2n.keys.yaml").write_text(
         yaml.safe_dump({"schema": 1, "family": "v2n", "keys": cat}), encoding="utf-8")
     ctx.facts.update(clkgen_otp_raw="aa bb cc", clkgen_i2c_addr="0x69",
+                     clkgen_uboot_fixup="seen: ALP: 5L35023B clock: success",
                      dxm1_fw_uart_boot_md5="b" * 32, dxm1_fw_md5="f" * 32, dxm1_fw_version="2.4.0")
     steps.run_steps(ctx, only=["record"])
     text = (ctx.unit_dir / f"{SERIAL}.unit.yaml").read_text(encoding="utf-8")
