@@ -895,7 +895,10 @@ def test_linux_up_attaches_the_configured_host_when_detect_was_skipped(tmp_path,
     assert not steps.Ctx.linux_up(_ctx(tmp_path / "b", bench=_bench()))
 
 
-def test_need_linux_attaches_the_configured_host_on_a_forced_step(tmp_path):
+def test_need_linux_attaches_the_configured_host_on_a_forced_step(tmp_path, monkeypatch):
+    def no_login(*a, **k):
+        raise steps.BenchError("no console login in this test")
+    monkeypatch.setattr(steps, "console_login_ctx", no_login)
     # --only gd32_flash --force-step gd32_flash on a board already up: the
     # step calls need_linux() without any probe having attached ctx.linux,
     # which refused with "boot_sd_linux has not run" (E1M-V2M103, 2026-09-29).
@@ -1385,3 +1388,26 @@ def test_fip_write_leaves_the_cm33_region_untouched(tmp_path):
     assert board.files["/dev/mtd1"][gates.CM33_REGION_OFFSET:] == mark
     blocks = int(next(c for c in board.commands if c.startswith("flash_erase /dev/mtd1 ")).split()[-1])
     assert blocks * 65536 <= gates.CM33_REGION_OFFSET                       # the erase stops below the region
+
+
+def test_clkgen_verify_without_a_boot_capture_is_not_verified_rather_than_failed(tmp_path):
+    board = Board()
+    image = bytearray(lt.CLKGEN_OTP_IMAGE)
+    image[0x21], image[0x24] = 0xC0, 0x8E
+    for reg, val in enumerate(image):
+        board.regs[(8, 0x69, reg)] = val
+    ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True)
+    ctx.boot_text = ""                                    # --only run: no cold boot in this process
+    r = steps.run_steps(ctx, only=["clkgen_verify"])[-1]
+    assert r.status == "skipped" and "not verified: no boot console captured in this run" in r.detail
+    ctx.boot_text = "NOTICE:  BL2: v2.10\nALP: 5L35023B clock: success\n"
+    assert steps.run_steps(ctx, only=["clkgen_verify"])[-1].status == "done"
+
+
+def test_need_linux_discovers_the_host_over_the_console_when_none_is_pinned(tmp_path, monkeypatch):
+    ctx = _ctx(tmp_path, bench=_bench(), execute=True)    # no bench.yaml linux.host
+    calls = []
+    monkeypatch.setattr(steps, "console_login_ctx", lambda c, **k: calls.append("login"))
+    monkeypatch.setattr(steps, "connect_linux",
+                        lambda c, force=False, **k: calls.append("connect") or setattr(c, "linux", FakeLinux()))
+    assert ctx.need_linux() is not None and calls == ["login", "connect"]

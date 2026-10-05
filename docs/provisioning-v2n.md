@@ -116,9 +116,13 @@ mismatch is refused:
     another unit is behind this address (stale DHCP lease?). Fix the address in
     bench.yaml and re-run, or --accept-cid-change REASON if the eMMC was replaced.
 
-Limitation: first contact with no recorded CID is unchecked. On the normal
-blank-unit path `bootstrap`'s `EM_DCID` records the CID, so every later step is
-checked.
+First contact with no recorded CID (a run that starts past `bootstrap`, for
+example `--from dsw1_emmc_insert_sd`) is proved over this unit's own console
+before the first write: the SSH host must echo a nonce to its `/dev/console` and
+the tool must read it on its serial line (once per host and power-on). A host
+that does not is refused with "Nothing was written". On the normal blank-unit
+path `bootstrap`'s `EM_DCID` records the CID, so every later step is checked by
+CID instead.
 
 `run --accept-cid-change REASON` is the escape for a legitimately replaced eMMC:
 it adopts the CID seen over SSH as the new anchor. The `emmc_cid_change`
@@ -853,7 +857,7 @@ assumes and fix the fragment, the judge or the expected value:
 
 Without it, every payload crosses a wire: the GD32 images go base64 over the 115200-baud console (about 13 min on 2026W38-0002 when the board has no network), and the DX-M1 files, the DTBs and the 210 MB `wic.gz` go over SSH on a 100 Mbit switch. The board boots Linux from the provisioning SD for every write step, so the first unit caches each payload on the SD and every later unit reads it locally.
 
-The store is a directory on the SD's root filesystem, `/var/lib/alp-payload/<bundle sha256>/`. It needs no SD preparation and no partition: the root has several GB free. It is used only when the board runs from the SD, never when its root is the eMMC, and it is on by default (`--no-payload-store` disables it). `plan` never touches it.
+The store is a directory on the SD's root filesystem, `/var/lib/alp-payload/<bundle sha256>/`. It needs no SD preparation and no partition: the root has several GB free. It is used only when the board runs from the SD, never when its root is the eMMC, and it is on by default (`--no-payload-store` disables it). `plan` never touches it. The card must carry the marker file `/var/lib/alp-payload/.provisioning-sd` (`touch` it on the internal provisioning SD only): without it the store stays off and every file is pushed, so the license-gated `dxm1_*` files never land on a release card.
 
 For each file `run --execute` looks in the directory before any push:
 
@@ -919,6 +923,11 @@ Unmapped blocks are not touched: the eMMC outside the mapped ranges keeps whatev
   `boot_sd_linux` refuses because the root is not on the SD.
 - **The EEPROM array is written only when blank** or equal to
   `--reprovision-from`, and never while the identity header is locked.
+  `--replace-identity` (needs `--reprovision-from`) archives the committed and
+  staged blobs as `<serial>.manifest.<old-hwrev>-<date>.bin` and
+  `<serial>.secure-page.<old-hwrev>-<date>.bin` (`.staged.bin` for the staged
+  ones) before the new ones are staged and promoted, instead of failing after
+  the EEPROM write.
 - **The 5L35023B cannot be re-burned in-system.** `clkgen_verify` only reads;
   a bad OTP image means a bad unit, not a fixable one.
 - **`dxm1_npu_flash` swaps the release DTB while it runs.** The release DTB is backed up as `/boot/<fdtfile>.release` and restored (md5-verified) on success and on failure; if a run is killed, the next run restores it first. The BOOT_CFG straps (E1M `IO17`/`IO19`/`IO20` low) are a carrier property the tool cannot measure.

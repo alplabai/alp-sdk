@@ -414,6 +414,10 @@ def _v2n_parser() -> argparse.ArgumentParser:
                       help="the unit's eMMC was legitimately replaced: adopt the CID now behind the "
                            "address as this serial's identity (recorded as an override; blocks shipping)")
     work.add_argument("--reprovision-from", type=Path, metavar="MANIFEST")
+    work.add_argument("--replace-identity", action="store_true",
+                      help="replace an already-committed identity (needs --reprovision-from): the old "
+                           "manifest and secure-page blobs are archived as <serial>.manifest.<old-hwrev>-<date>.bin "
+                           "/ <serial>.secure-page.<old-hwrev>-<date>.bin and the new ones are promoted")
     work.add_argument("--cold-cycles", type=_positive_int, default=3)
     work.add_argument("--transfer", choices=("sd", "xmodem"), default="sd")
     work.add_argument("--carrier", default="")
@@ -572,6 +576,8 @@ def v2n_main(argv: list[str]) -> int:
         expect = functest.load_expect(a.functest_expect)
         if a.cmd == "run" and not a.bench:
             raise ValueError("run needs --bench")
+        if a.replace_identity and a.reprovision_from is None:
+            raise ValueError("--replace-identity needs --reprovision-from the manifest the EEPROM holds")
         bench = bench_mod.load_bench(a.bench) if a.bench else None
         names = (_csv(a.only) or []) + (_csv(a.skip) or []) + (_csv(a.force_step) or [])
         for n in names + ([a.start] if a.start else []):
@@ -614,6 +620,7 @@ def v2n_main(argv: list[str]) -> int:
                     bench=bench, tier_markers=markers, expected_registers=regs, functest_expect=expect,
                     allow_tier_mismatch=a.allow_tier_mismatch,
                     accept_cid_change=a.accept_cid_change, reprovision_from=a.reprovision_from,
+                    replace_identity=a.replace_identity,
                     cold_cycles=a.cold_cycles, hil_spec=hil, flash_writer=a.flash_writer,
                     gd32_fw=a.gd32_fw,
                     transfer=a.transfer, station=a.station, by=a.by,

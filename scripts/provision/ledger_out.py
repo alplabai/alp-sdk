@@ -179,3 +179,22 @@ def promote_manifest(ledger_dir: Path, serial: str) -> Path:
         raise ValueError(f"{src} missing")
     os.replace(src, dst)
     return dst
+
+
+def archive_identity(ledger_dir: Path, serial: str, kind: str, old_hw_rev: str, day: str,
+                     keep: bytes) -> list[Path]:
+    """--replace-identity: move the committed and staged ``<serial>.<kind>.bin`` (kind is
+    ``manifest`` or ``secure-page``) aside as ``<serial>.<kind>.<old-hwrev>-<day>.bin`` (and
+    ``.staged.bin``), so the new blob can be staged and promoted. A file that already equals
+    ``keep`` (the new blob, from an interrupted run) stays where it is."""
+    moved = []
+    for suffix in ("", ".staged"):
+        src = Path(ledger_dir) / f"{serial}.{kind}{suffix}.bin"
+        if not src.is_file() or src.read_bytes() == keep:
+            continue
+        dst = Path(ledger_dir) / f"{serial}.{kind}.{old_hw_rev}-{day}{suffix}.bin"
+        if dst.exists():
+            raise ValueError(f"{dst} already exists; refusing to overwrite an archived identity")
+        os.replace(src, dst)
+        moved.append(dst)
+    return moved
