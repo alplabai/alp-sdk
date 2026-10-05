@@ -141,6 +141,8 @@ into the topic-specific docs.
   Zephyr shell (safety tiers, command list, companion binding, banner).
 - [v2n-camera-csi.md](v2n-camera-csi.md) — opt-in Linux MIPI CSI-2
   camera path (IMX219 placeholder), bench-unverified.
+- [v2n-isp.md](v2n-isp.md) -- opt-in RZ/V2N Mali-C55 ISP path (colour frames
+  for Bayer sensors through `<alp/camera.h>`), bench-unverified.
 - [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
 - [provisioning.md](provisioning.md) — provisioning a SoM from a

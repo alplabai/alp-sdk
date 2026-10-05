@@ -53,7 +53,12 @@
 			reg = <0x0 0x80000000 0x0 0x10000000>;
 		};
 
-		isp: isp@90000000 {
+		/* ISP frame/work buffers.  The label is isp_reserved, the name the
+		 * Renesas ISP Support Package (opt-in, ALP_ENABLE_ISP) expects: its
+		 * SoC dtsi patch creates the `isp:` label on the Mali-C55 node and
+		 * points that node's memory-region here, so a reserved-memory node
+		 * also labelled `isp` would be a duplicate label in dtc. */
+		isp_reserved: isp_reserved@90000000 {
 			compatible = "shared-dma-pool";
 			reusable;
 			reg = <0x0 0x90000000 0x0 0x18000000>;
