@@ -78,7 +78,10 @@ SRC_URI:append = " \
     file://0015-gpiolib-sysfs-reject-export-of-a-number-in-a-chipless-gpio_device.patch \
     file://0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch \
     file://0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch \
-    file://0020-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
+    file://0018-media-i2c-add-imx296-backport.patch \
+    file://0019-media-i2c-imx335-2-lane-10-bit-binned-mode.patch \
+    file://0020-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch \
+    file://0021-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
     file://uio.cfg \
 "
 
@@ -104,6 +107,24 @@ SRC_URI:append = " \
 # 0x30.  The patch programs it from lane-polarities (all data lanes or none);
 # the cam0 dtsi fragments set <1 1 1> on the csi20 endpoint.  Applied
 # unconditionally: with no lane-polarities the register is still written 0.
+#
+# 0018 (IMX296 driver, #2618): the 6.1 tree has no Sony IMX296 driver.  The
+# patch backports v6.6 imx296.c (1-lane 1456x1088, colour SBGGR10 / mono Y10;
+# .probe_new for the 6.1 i2c_driver API) with a 6.1-style Kconfig entry that
+# selects REGMAP_I2C.  A new driver: nothing else changes, so unconditional.
+#
+# 0019 (IMX335 2-lane, #2618): the 6.1 imx335 accepts four data lanes and one
+# 2592x1940 SRGGB12 mode.  The patch reads 2 or 4 lanes from the endpoint,
+# programs LANEMODE, adds a 1296x972 SRGGB10 2x2 binned mode and derives the
+# pixel rate from lanes and bit depth; on 2 lanes only the binned mode is
+# offered (the 12-bit full frame cannot fit the link at the default HMAX).
+# 4-lane behaviour is unchanged.
+#
+# 0020 (OV9282 v6.6 modes, #2618): replaces the 6.1 ov9282.c with the v6.6
+# one: 1280x800 and 640x400 modes next to the default 1280x720, Y8_1X8 next
+# to Y10_1X10, and the ovti,ov9281 compatible.  v6.6 only writes the gated
+# MIPI clock (0x4800 = 0x20) when the endpoint has clock-noncontinuous, which
+# the bench-proven 0016/0017 run used, so e1m-x-evk-cam0-ov9281.dtsi sets it.
 #
 # 0012 (UIO default match, #2374): uio_pdrv_genirq binds no DT node until
 # of_id is set, and the stored U-Boot bootargs cannot be relied on to carry
@@ -310,6 +331,13 @@ SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 # included, carries that override (conf/machine/e1m-v2m10*-a55.conf), so a
 # second :e1m-v2m101 append would add the patch twice and do_patch fails.
 SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch file://0014-ASoC-rsnd-let-SSI2-share-SSI1-SCK-WS-on-RZ-V2N.patch"
+
+# Sensor drivers (#2618): every camera driver the SDK supports is built in
+# (=y, the images install no kernel-modules) on every V2N/V2M machine, so any
+# camera works once its DT is selected, without ALP_ENABLE_CAM0_*.
+# Unconditional, unlike camera-csi.cfg below (opt-in receiver DT).  A follow-up PR generates
+# this file from metadata.
+SRC_URI:append = " file://camera-sensors.cfg"
 
 # Camera (#1149): OPT-IN IMX219 on the E1M-X-EVK CAM0 connector ->
 # CSI-2 receiver -> CRU0.  BENCH-UNVERIFIED.  Off by default: the shipped
