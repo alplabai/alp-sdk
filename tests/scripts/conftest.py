@@ -155,3 +155,14 @@ def _sandbox_tmpdir(tmp_path_factory, monkeypatch):
     `env=` did not arrive) still falls back to its own /tmp.
     """
     monkeypatch.setenv("TMPDIR", str(tmp_path_factory.mktemp("tmpdir")))
+
+
+@pytest.fixture(autouse=True)
+def _provision_first_contact_proof_off(request, monkeypatch):
+    """The provisioning tests drive Ctx with scripted fakes whose consoles do not echo the
+    first-contact nonce; the proof itself is tested in test_provision_first_contact.py."""
+    name = request.module.__name__.rpartition(".")[2]
+    if name.startswith("test_provision_") and name != "test_provision_first_contact":
+        from provision import steps
+
+        monkeypatch.setattr(steps.Ctx, "_prove_first_contact", lambda self, t: None)

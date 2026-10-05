@@ -303,22 +303,10 @@ argument. `tan model build` compiles every `models:` entry declared in
 comes from `models[].compile.drpai.product` (falling back to
 `accel_config`, then `"V2N"`), not a CLI flag.
 
-**`board.yaml`'s schema does not describe this config yet — use
-`tan model build` above anyway; it does not run schema validation.**
-`metadata/schemas/board.schema.json`'s `models[].compile.drpai` block only
-declares a `spec:` key (`additionalProperties: false`, `required: ["spec"]`)
-— a leftover from a design where an external spec file carried the model
-geometry. `scripts/alp_model/adapters/drpai.py` never reads `spec`; it reads
-`input_shape`, `input_name`, `images` and `product` straight out of the
-`compile.drpai` block, so `tan validate` rejects a `board.yaml` written this
-way. That does not block the command in step 5 above: `tan model build`
-reads `board.yaml` with a plain `yaml.safe_load` and never calls the schema
-validator itself — only the separate `tan validate` command does — so
-`compile.drpai.input_shape` / `input_name` / `images` / `product` reach the
-adapter unchanged through the documented CLI today. Until the schema is
-reconciled with what the adapter actually reads, `tan validate` cannot be
-used against a `board.yaml` with a `compile.drpai` block; `tan model build`
-can.
+`metadata/schemas/board.schema.json`'s `models[].compile.drpai` block declares exactly what
+`scripts/alp_model/adapters/drpai.py` reads: `input_shape` (comma string or integer list),
+`input_name` and `images` (all required), and an optional `product` (`V2N` or `V2H`), so
+`tan validate` accepts the block `tan model build` consumes.
 
 `scripts/alp_model/adapters/drpai.py` drives
 `$ALP_DRPAI_TVM_HOME/tutorials/compile_onnx_model_quant.py` with `PRODUCT` in the

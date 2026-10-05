@@ -33,6 +33,7 @@ class Store:
         self.cached: list[str] = []
         self.free_kib = free_kib
         self.cmp_missing = False
+        self.files[ps.STORE_MARKER] = b""      # the card is marked as the provisioning SD
 
     def put(self, local, remote):
         self.puts.append(remote)
