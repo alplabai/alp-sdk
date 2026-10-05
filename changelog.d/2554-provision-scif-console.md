@@ -12,4 +12,4 @@ Further changes in the same run, so the next unit goes through hands-off:
 - **`census` finds the real port names.** The gbeth ports are `end0`/`end1`, not `eth0`/`eth1`; the ledger keys stay `eth0_*`/`eth1_*` by port index, and carrier, speed and the link-partner advertisement are folded into the `eth*_link` value (`scripts/provision/linux_target.py:1019` ("the Renesas gbeth ports are end0/end1")).
 - **`cold_boot_test` retries a latched PHY once.** An `end0` without carrier (#2582) gets one extra cold cycle; the boot fails if `end0` is still down, whatever IP is present. The retry count is noted as `end0_no_carrier_retries` in the step evidence (it is not a ledger catalogue key).
 - **SSH, scp and probe children no longer read stdin**, so a piped operator answer reaches the prompt instead of being eaten by a child (`scripts/provision/linux_target.py:133` ("stdin=subprocess.DEVNULL")).
-- **`power.off_s` defaults to 15 s** when `bench.yaml` omits it (`scripts/provision/bench.py:712` ("DEFAULT_OFF_S = 15.0")).
+- **`power.off_s` defaults to 15 s** when `bench.yaml` omits it (`scripts/provision/bench.py:717` ("DEFAULT_OFF_S = 15.0")).
