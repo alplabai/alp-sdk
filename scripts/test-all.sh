@@ -1149,9 +1149,9 @@ fi
 
 stage_aen_trace_runner_host() {
     # examples/aen/aen-trace-runner host unit tests (CI: pr-plain-cmake.yml
-    # aen-trace-runner-host).  Needs a POSIX gcc; the script self-skips its
+    # aen-trace-runner-host).  Needs a POSIX cc; the script self-skips its
     # A32/qemu stage when the cross toolchain is absent.
-    command -v gcc >/dev/null 2>&1 || return 99
+    command -v cc >/dev/null 2>&1 || return 99
     bash examples/aen/aen-trace-runner/tests/host/runner.sh
 }
 
