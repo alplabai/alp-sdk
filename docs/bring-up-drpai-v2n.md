@@ -435,6 +435,20 @@ already, via the `CONFIG_BOOTCOMMAND` override in
 > MACHINE by `meta-alp-sdk/recipes-bsp/u-boot/u-boot/fdtfile-v2m.cfg` (#1252,
 > itself bench-gated). Treat that branch as recoverable history, not a live
 > option.
+>
+> That Kconfig string is now only the **fallback**. U-Boot patch 0013 adds an
+> `alp_fdtfile` command that `CONFIG_BOOTCOMMAND` runs right after `env default
+> -a`: it sets `fdtfile` from the validated EEPROM manifest family (`v2n-m1` ->
+> `e1m-v2m101-x-evk.dtb`, `v2n` -> `e1m-v2n101-x-evk.dtb`), so one U-Boot boots
+> the right dtb on either SoM. It fails closed: a known family loads only its
+> own dtb and, if the image lacks it, the boot refuses ("dtb for family <f>
+> missing from image -- refusing to boot another SoM's device tree") instead of
+> loading the other family's dtb. Only a missing or invalid manifest or an
+> unknown family (a blank unit) keeps the `CONFIG_ALP_E1M_FDTFILE` default (the
+> bootcmd passes it as the command's argument), sets `fdtfile_alt` to the other
+> family dtb, and loads `fdtfile` then `fdtfile_alt` (never the same name
+> twice); each case prints one `ALP: fdtfile ...` line. Bench-pending: built
+> and inspected, not booted.
 
 > **Operational trap.** The manual FIP flow has no `merge_config.sh` step, so it
 > builds from the Kconfig defaults — the vendor values — and will boot the
