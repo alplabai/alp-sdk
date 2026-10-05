@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
-Date: Sat, 3 Oct 2026 11:43:38 +0200
+Date: Mon, 5 Oct 2026 20:39:35 +0000
 Subject: [PATCH] rzv2n-dev: ALP E1M: persistent environment with a write
  allowlist, no "env default -a" every boot
 
@@ -29,15 +29,15 @@ Not verified on silicon.
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- board/renesas/rzv2n-dev/rzv2n-dev.c | 48 +++++++++++++++++++++++++++++++------
- include/configs/rzv2n-dev.h         | 35 ++++++++++++++++++---------
- 2 files changed, 65 insertions(+), 18 deletions(-)
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 48 ++++++++++++++++++++++++-----
+ include/configs/rzv2n-dev.h         | 37 ++++++++++++++--------
+ 2 files changed, 66 insertions(+), 19 deletions(-)
 
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
-index 4ea3287e..1737e870 100644
+index b51c3139..62965caa 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
-@@ -1051,15 +1051,14 @@ static void alp_eth_format_mac(const u8 mac[6], char out[18])
+@@ -1215,15 +1215,14 @@ static void alp_eth_format_mac(const u8 mac[6], char out[18])
   * a purchased IEEE OUI block).  See scripts/alp_eth_mac.py for the
   * shared golden vector and docs/soms/v2n.md for the policy writeup.
   *
@@ -59,7 +59,7 @@ index 4ea3287e..1737e870 100644
   * image-fdt.c's image_setup_libfdt() calls fdt_fixup_ethernet() (which
   * reads ethaddr/eth1addr straight out of env into the ethernet0/
   * ethernet1 DT nodes' mac-address/local-mac-address properties)
-@@ -1224,11 +1223,46 @@ static void alp_gd32_nrst_release(void)
+@@ -1473,11 +1472,46 @@ static void alp_gd32_nrst_release(void)
  	       ALP_ACT88760_GPIO_REG, before, after);
  }
  
@@ -103,23 +103,25 @@ index 4ea3287e..1737e870 100644
  	bool rail_ok = true;
  
 +	alp_env_check();
+ 	alp_reset_cause_init();
  	alp_gd32_nrst_release();
  	alp_clk5l_fixup();
- 
 diff --git a/include/configs/rzv2n-dev.h b/include/configs/rzv2n-dev.h
-index 4ee9d7e5..21d3547e 100644
+index 04eecbec..c3b1708d 100644
 --- a/include/configs/rzv2n-dev.h
 +++ b/include/configs/rzv2n-dev.h
-@@ -132,7 +132,7 @@
-  * prod-boot.cfg uses).  It is a BUILD-time selection, which is correct
-  * while one MACHINE produces one image.  An EEPROM-manifest-derived
-  * fdtfile -- one image booting on several SKUs -- remains future work
-- * and would have to be set AFTER the leading "env default -a" wipe. */
-+ * and would have to be set at CONFIG_BOOTCOMMAND, not saved in the env. */
- /* ALP: the dtb basename is a per-SKU Kconfig string, not a literal.
-  * V2N SKUs build e1m-v2n101-x-evk.dtb and V2M SKUs build
-  * e1m-v2m101-x-evk.dtb (meta-alp-sdk/conf/machine/e1m-v2{n,m}10*-a55.conf,
-@@ -160,22 +160,35 @@
+@@ -127,8 +127,8 @@
+  * env fdtfile and fdtfile_alt.  CONFIG_ALP_E1M_FDTFILE (a Kconfig
+  * string, V2M MACHINEs override it via fdtfile-v2m.cfg) is only the
+  * fallback for a board with no valid manifest or an unknown family,
+- * passed to alp_fdtfile.  alp_fdtfile has to run AFTER the leading
+- * "env default -a" wipe, so CONFIG_BOOTCOMMAND invokes it. */
++ * passed to alp_fdtfile.  CONFIG_BOOTCOMMAND invokes alp_fdtfile on every
++ * boot: its result is not saved in the environment. */
+ /* ALP: family -> board dtb basename, the ONE table (an X-macro).  The
+  * C side (alp_fdtfile, rzv2n-dev.c) expands it into a lookup array, so
+  * there is no second literal list.  v2m102/v2m103 reuse the v2m101 dtb
+@@ -171,22 +171,35 @@
   * customer data card) must fall back to the eMMC, not stop at the
   * prompt. */
  /* ALP: alp_eth_mac (patch 0010, board/renesas/rzv2n-dev/rzv2n-dev.c) runs
@@ -138,7 +140,7 @@ index 4ee9d7e5..21d3547e 100644
 + * ft_system_setup() -- confirmed by reading this BSP's actual 2024.07
 + * source, not assumed) copies into the DT, whatever a saved environment
 + * holds.  It overwrites unconditionally, so a saved MAC never wins. */
- /* ALP: "alp_sd_present" (patch 0013) reads the microSD card-detect pin.
+ /* ALP: "alp_sd_present" (patch 0015) reads the microSD card-detect pin.
   * An empty slot goes straight to the vendor eMMC loader, i.e. what
   * bootcmd_check ("if mmc dev 1; then run sd2load; else run emmcload; fi")
   * would end up running, without mmc1 ever being probed: sh_sdhi cannot
@@ -162,9 +164,6 @@ index 4ee9d7e5..21d3547e 100644
 + * compiled-in default the baseline on every boot, so this command and the
 + * vendor scripts it runs can never be replaced by a saved copy. */
 +#define CONFIG_BOOTCOMMAND	"alp_eth_mac;" \
+ 	"alp_fdtfile " CONFIG_ALP_E1M_FDTFILE ";" \
  	"if alp_sd_present; then run bootcmd_check; else run emmcload; fi;" \
  	"if alp_sd_present && mmc dev 1 && ext4size mmc 1:2 boot/Image; then " \
- 	"setenv alp_mmc 1:2;setenv alp_root /dev/mmcblk1p2; else " \
--- 
-2.34.1
-
