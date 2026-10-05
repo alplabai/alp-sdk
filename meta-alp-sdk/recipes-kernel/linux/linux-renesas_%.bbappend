@@ -298,6 +298,12 @@ SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 # second :e1m-v2m101 append would add the patch twice and do_patch fails.
 SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch file://0014-ASoC-rsnd-let-SSI2-share-SSI1-SCK-WS-on-RZ-V2N.patch"
 
+# USB device (gadget) mode on the E1M-X-EVK USB 2.0 port (docs/e1m-x-evk-usb-otg.md).
+# OPT-IN, BENCH-UNVERIFIED: usb-gadget.cfg builds the Renesas USBHS driver
+# in, which binds the otg &hsusb node, so it is merged ONLY when
+# ALP_ENABLE_USB_GADGET = "1" (machines with the `usbgadget` MACHINE_FEATURES flag, the same gate as the image install).
+SRC_URI:append = "${@' file://usb-gadget.cfg' if d.getVar('ALP_ENABLE_USB_GADGET') == '1' and bb.utils.contains('MACHINE_FEATURES', 'usbgadget', True, False, d) else ''}"
+
 # Camera (#1149): OPT-IN IMX219 on the E1M-X-EVK CAM0 connector ->
 # CSI-2 receiver -> CRU0.  BENCH-UNVERIFIED.  Off by default: the shipped
 # dtb does not change.  Set ALP_ENABLE_CAM0_IMX219 = "1" in local.conf to

@@ -144,6 +144,10 @@ into the topic-specific docs.
   Zephyr shell (safety tiers, command list, companion binding, banner).
 - [v2n-camera-csi.md](v2n-camera-csi.md) — opt-in Linux MIPI CSI-2
   camera path (IMX219 placeholder), bench-unverified.
+- [e1m-x-evk-usb-otg.md](e1m-x-evk-usb-otg.md) — E1M-X EVK USB 2.0 OTG: what works
+  (device mode), host/role limits, opt-in NCM+ACM gadget, HIL steps.
+- [v2n-bt-hfp-audio.md](v2n-bt-hfp-audio.md) — Bluetooth HFP/SCO audio
+  over the on-module PCM/I2S link: routing, open items, HIL steps.
 - [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
 - [provisioning.md](provisioning.md) — provisioning a SoM from a
