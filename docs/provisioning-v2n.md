@@ -237,10 +237,11 @@ Then it waits up to 120 s for the console halt line (`reboot: Power down` or
 The PSU current is not a halt signal. The OFF dwell is unchanged, so a clean poweroff
 followed by it is still a cold boot, and `cold_boot_test` keeps its `--cold-cycles` (3).
 
-The "already halted on this power-on" marker is cleared when the operator prompt of
-`dsw1_emmc_insert_sd` or `dsw1_xspi_remove_sd` returns: the operator may have powered the
-unit back on before pressing Enter, which the tool's ON count cannot see (this applies to
-SCPI power too). Both prompts say "Leave it OFF until the tool asks."
+The "already halted on this power-on" marker survives the operator prompt of
+`dsw1_emmc_insert_sd` or `dsw1_xspi_remove_sd`: the tool saw the halt line itself, so a cut
+after the prompt is not logged as `blind`. It is cleared only if the console printed
+something after the halt (a halted unit is silent, so boot text means it was powered back
+on). Both prompts say "Leave it OFF until the tool asks."
 
 Every cut is recorded as the step evidence key `power_cut` (and in the step log and the
 plan log), one entry per cut:
@@ -250,6 +251,7 @@ plan log), one entry per cut:
 | `clean` | halted: `poweroff` sent, the halt line seen (`(late)` if it came in the extra 5 s) **and the first `sync` returned 0** |
 | `clean (sync rc=<n>)` | halted, but the first `sync` returned `<n>` (non-zero, or unknown): the operator prompt says so and the card should be checked |
 | `fallback` | no halt line. Over SSH a second `sync` ran and its rc (or error) is recorded; on the console no second command is sent (the first may still be running, and a new command would Ctrl-C it) |
+| `unreadable (sync rc=<n>; <lines>)` | the `sync` returned rc `127` (not found), or the console showed `EXT4-fs error` / `error -5` lines: the root is treated as unreadable and those lines are quoted verbatim in the entry, the step failure and the operator prompt |
 | `blind` | no console shell and no SSH path proven to be this unit. If Linux is up the cut is hard; the entry says so |
 | `not-needed` | PSU already off, U-Boot prompt, SCIF ROM / Flash Writer, or already halted (plain `clean`) on this power-on |
 
@@ -328,6 +330,14 @@ Selector `0x06` (device configuration) is only ever read, as one combined
 `0x06 0x00` + read-1 transfer; a unit test asserts no frame writes it.
 
 ### `clkgen_verify`: the 5L35023B clock generator (`0x69`)
+
+A run that captured no cold-boot console (`--only` / resumed runs) cannot read the U-Boot
+fixup line. The step then reports `skipped` with "not verified: no boot console captured in
+this run", records `clkgen_uboot_fixup: unread (...)` in its evidence (a captured run
+records `seen: <line>`), and does not fail; an OTP image mismatch still fails.
+`need_linux` on such a run, with no `linux.host` pinned, logs in on the console and reads the
+address like `boot_sd_linux` does, once per power-on; it first sends Ctrl-C only and sends
+no Enter to a unit at a U-Boot prompt, in the SCIF ROM / Flash Writer, or halted.
 
 The on-SoM Renesas 5L35023B (`BRD_I2C` / Linux `i2c-8` on the reference
 bench, 7-bit `0x69`) ships with a fixed factory OTP image that cannot be

@@ -13,6 +13,7 @@ catalogue marks ``manual`` is never overwritten by the tool.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -187,6 +188,8 @@ def archive_identity(ledger_dir: Path, serial: str, kind: str, old_hw_rev: str, 
     ``manifest`` or ``secure-page``) aside as ``<serial>.<kind>.<old-hwrev>-<day>.bin`` (and
     ``.staged.bin``), so the new blob can be staged and promoted. A file that already equals
     ``keep`` (the new blob, from an interrupted run) stays where it is."""
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", old_hw_rev) or old_hw_rev in (".", ".."):
+        raise ValueError(f"old hw_rev {old_hw_rev!r} is not filename-safe; refusing to archive")
     moved = []
     for suffix in ("", ".staged"):
         src = Path(ledger_dir) / f"{serial}.{kind}{suffix}.bin"

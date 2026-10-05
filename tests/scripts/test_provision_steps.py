@@ -1405,7 +1405,8 @@ def test_clkgen_verify_without_a_boot_capture_is_not_verified_rather_than_failed
 
 
 def test_need_linux_discovers_the_host_over_the_console_when_none_is_pinned(tmp_path, monkeypatch):
-    ctx = _ctx(tmp_path, bench=_bench(), execute=True)    # no bench.yaml linux.host
+    monkeypatch.setattr(steps, "PROBE_UNKNOWN_CONSOLE", True)
+    ctx = _ctx(tmp_path, bench=_bench(FakeConsole([(r"", "")])), execute=True)    # no bench.yaml linux.host
     calls = []
     monkeypatch.setattr(steps, "console_login_ctx", lambda c, **k: calls.append("login"))
     monkeypatch.setattr(steps, "connect_linux",

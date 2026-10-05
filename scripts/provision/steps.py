@@ -259,12 +259,16 @@ class Ctx:
                 and self.discover_tried_on_count != self.bench.power.on_count:
             # no pinned host and no login on this boot (--only functional_test,record): do what
             # boot_sd_linux does, log in on the console and read the address
-            self.discover_tried_on_count = self.bench.power.on_count
-            try:
-                console_login_ctx(self)
-                connect_linux(self, force=True)
-            except BenchError:
-                self.linux = None
+            n = self.bench.power.on_count
+            self.discover_tried_on_count = n
+            # a unit in U-Boot / the SCIF ROM / halted must not get an Enter: _probe_console
+            # sends Ctrl-C only until a U-Boot prompt is ruled out
+            if PROBE_UNKNOWN_CONSOLE and n not in (self.rom_console_on_count, self.halted_on_count):
+                try:
+                    if isinstance(_probe_console(self), ConsoleTarget):
+                        connect_linux(self, force=True)
+                except BenchError:
+                    self.linux = None
         if self.linux is None and self.execute:
             if self.bench is not None and self.console_linux_on_count == self.bench.power.on_count:
                 raise Refused("Linux is up on the console but has no reachable IPv4 host (no DHCP lease on "
@@ -293,7 +297,7 @@ class Ctx:
         """Refuse to mutate a Linux target whose eMMC is not this serial's (stale IP).
         Read fresh on every call, never cached: a power cycle or DHCP renewal can put
         another unit behind the same address. First contact with nothing recorded is
-        unchecked (bootstrap's EM_DCID records the CID on the normal blank-unit path)."""
+        proved by a console nonce (_prove_first_contact) before anything is written."""
         want = self.recorded_cid()
         if not want and not self.accept_cid_change:
             self._prove_first_contact(t)
@@ -507,7 +511,7 @@ def _forget_halt_if_console_spoke(ctx: Ctx) -> None:
         ctx.halted_on_count = None
 
 
-_FS_FAULT_RE = re.compile(r"(?m)^.*(?:EXT4-fs error|error -5).*$")
+_FS_FAULT_RE = re.compile(r"(?m)^.*(?:EXT4-fs error|error -5\b).*$")
 
 
 def _same_unit(ctx: Ctx, t) -> bool:
@@ -1525,7 +1529,6 @@ class EepromManifest(Step):
               "manifest_staged_sha256": hashlib.sha256(blob).hexdigest()}
         bus = ctx.i2c("eeprom")
         _archive_old_identity(ctx, "manifest", blob)
-        _archive_old_identity(ctx, "secure-page", _build_blob(ctx, "program_eeprom_secure_page.py", "secure-page.bin"))
         ctx.mutate(f"stage {ctx.serial}.manifest.staged.bin in the ledger",
                    lambda: _stage(ctx, f"{ctx.serial}.manifest.staged.bin", blob))
         ctx.mutate(f"write 128-byte manifest: 8 x 16-byte pages, i2c-{bus} @0x50, ACK poll, readback",
@@ -2232,6 +2235,7 @@ class ClkgenVerify(Step):
             raise Refused("5L35023B verification failed: " + "; ".join(bad))
         ev = {"clkgen_otp_raw": " ".join(f"{b:02x}" for b in image),
               "clkgen_i2c_addr": f"{lt.CLKGEN_5L35023B_ADDR:#04x}"}
+        ev["clkgen_uboot_fixup"] = "unread (no boot console captured in this run)" if no_capture else f"seen: {line}"
         if no_capture:      # --only runs / resumed runs: nothing to read the U-Boot fixup line from
             return self.result(ctx, "not verified: no boot console captured in this run (the OTP image "
                                f"matches, dash code {image[0x01]:#04x}; the U-Boot fixup line was not read)",

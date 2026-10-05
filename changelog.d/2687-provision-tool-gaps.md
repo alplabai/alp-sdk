@@ -8,3 +8,5 @@
 - **`--only functional_test,record` finds the Linux host.** With no `bench.yaml` `linux.host` and no login on this boot, `need_linux` logs in on the console and reads the address, as `boot_sd_linux` does.
 - **`clkgen_verify` without a boot capture** reports `not verified: no boot console captured in this run` (skipped) instead of failing on a missing U-Boot line; with a capture it verifies as before. An OTP image mismatch still fails.
 - **Not done:** `dxm1_npu_flash` still has no NAND readback (the tool has no read-back command for the DX-M1 SPI-NAND; the dxrt-cli firmware version after the cold boot is the only check), and #2687 item 4 (unmapped bmap blocks) is untouched. Not yet benched.
+
+Review fixes (#2687): `need_linux` discovery goes through the Ctrl-C console probe and never sends an Enter to a U-Boot / SCIF ROM / halted unit; `clkgen_verify` records `clkgen_uboot_fixup: unread (...)` or `seen: <line>` so an unverified unit is distinguishable in the record; `eeprom_manifest` no longer archives the secure-page blobs (only `secure_page` does); the fs-fault match no longer catches `error -52`; the archived hw_rev must be filename-safe.

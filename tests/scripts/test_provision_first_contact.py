@@ -74,3 +74,55 @@ def test_replace_identity_archives_before_staging(tmp_path):
     steps._archive_old_identity(ctx, "manifest", b"new")
     assert not (ctx.unit_dir / f"{SERIAL}.manifest.bin").exists()
     assert list(ctx.unit_dir.glob(f"{SERIAL}.manifest.A1-*.bin"))
+
+
+def test_discovery_sends_no_enter_to_a_console_at_a_uboot_prompt(tmp_path, monkeypatch):
+    """need_linux's console discovery must not replay U-Boot's last command with a bare Enter."""
+    from .provision_fakes import FakeConsole
+
+    monkeypatch.setattr(steps, "PROBE_UNKNOWN_CONSOLE", True)
+    con = FakeConsole([(r"\x03", "\r\n=> ")])         # the ONLY write this fake accepts
+    b = _bench(console=con)
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    with pytest.raises(steps.Refused):
+        ctx.need_linux()
+    assert con.written == ["\x03"] and not any("\r" in w for w in con.written)
+
+
+def test_discovery_skips_a_console_known_to_sit_in_the_rom(tmp_path, monkeypatch):
+    from .provision_fakes import FakeConsole
+
+    monkeypatch.setattr(steps, "PROBE_UNKNOWN_CONSOLE", True)
+    con = FakeConsole([])
+    b = _bench(console=con)
+    ctx = _ctx(tmp_path, bench=b, execute=True)
+    ctx.rom_console_on_count = b.power.on_count
+    with pytest.raises(steps.Refused):
+        ctx.need_linux()
+    assert con.written == []
+
+
+@pytest.mark.parametrize("echoes", [True, False])
+def test_the_real_nonce_path_needs_the_unit_to_echo_on_this_console(tmp_path, monkeypatch, echoes):
+    """Un-patched _same_unit and the real first-contact proof, against a console that does or
+    does not carry the unit's ALPID<nonce> line."""
+    import re
+    from provision import linux_target as lt
+    from .provision_fakes import FakeConsole
+
+    con = FakeConsole([])
+
+    class Unit(FakeLinux):
+        def run(self, cmd, **kw):
+            if cmd.startswith("echo ALPID") and echoes:
+                con.feed(re.search(r"ALPID\w+", cmd).group(0))
+            return lt.CmdResult(0, "", "")
+
+    ctx = _ctx(tmp_path, bench=_bench(console=con), execute=True)
+    t = Unit(host="192.0.2.7")
+    if echoes:
+        ctx._prove_first_contact(t)
+        assert ctx.unit_proved[0] == "192.0.2.7"
+    else:
+        with pytest.raises(steps.Refused, match="Nothing was written"):
+            ctx._prove_first_contact(t)
