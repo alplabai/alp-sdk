@@ -281,10 +281,12 @@ applies to the other `meta-rz-*` feature layers.
 
 ### Access control
 
-`/dev/drpai0` is `0660 root:drpai` (udev rule in `alp-drpai-udev`, which also
+`/dev/drpai0`, `/dev/rgnmm` and `/dev/rgnmmbuf` are `0660 root:drpai` (udev rule in `alp-drpai-udev`, which also
 creates the `drpai` system group). The recipe is pulled in by alp-sdk's
 `PACKAGECONFIG[drpai]`, so the rule and the group exist only in images that
-carry the SDK DRP-AI backend. `/run/alp` (the one-process-per-board lock) uses
+carry the SDK DRP-AI backend. The Renesas mmngr nodes are included because the
+runtime allocates its buffers through them; without it a non-root member gets
+`MMI open: Permission denied`. `/run/alp` (the one-process-per-board lock) uses
 the same group.
 
 Nothing in the layer adds a user to `drpai`. A product's app user must opt in,
@@ -576,7 +578,7 @@ driver has no queue (a second `DRPAI_START` while a job runs returns
   process, so two processes would both load at the arena base and corrupt
   each other. The first DRP-AI handle in a process therefore takes an
   exclusive, non-blocking `flock()` on `/run/alp/drpai.lock` (the image
-  creates `/run/alp` at boot, `root:drpai 0775`, via a systemd tmpfiles.d
+  creates `/run/alp` at boot, `root:drpai 0775`, and pre-creates `drpai.lock` as `0660 root:drpai` so a second drpai member can open it, via a systemd tmpfiles.d
   snippet in the `alp-drpai-udev` recipe) and keeps it until the last DRP-AI handle
   in that process closes. A second process gets `ALP_ERR_BUSY` from
   `alp_inference_open()`. Several handles inside one process stay allowed.

@@ -30,3 +30,9 @@ def test_udev_package_rides_packageconfig_drpai():
     line = next(x for x in s.splitlines() if x.startswith("PACKAGECONFIG[drpai]"))
     assert "alp-drpai-udev" in line
     assert "root drpai" in _t("recipes-bsp/alp-drpai-udev/files/alp-drpai-tmpfiles.conf")
+    assert "f /run/alp/drpai.lock 0660 root drpai" in _t(
+        "recipes-bsp/alp-drpai-udev/files/alp-drpai-tmpfiles.conf"
+    )
+    assert 'KERNEL=="rgnmm|rgnmmbuf", MODE="0660", GROUP="drpai"' in _t(
+        "recipes-bsp/alp-drpai-udev/files/99-alp-drpai.rules"
+    )
