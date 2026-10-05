@@ -921,12 +921,13 @@ as well as SPI**, because provisioning runs from Linux.
   needs a GD32 reset).
 * **Asynchronous SET.**  The firmware never touches flash inside the
   transport interrupt.  A SET is queued and answered at once; the main loop
-  then commits it (one flash page erase, up to 20 ms, interrupts masked for
-  that window).  The host leaves the link idle for ~30 ms and then polls GET
-  until the stored value equals the request; `gd32g553_boot_config_set()`
+  then commits it (on dual-bank parts two 1 KB page erases, each up to 20 ms
+  with interrupts masked: 2 x 20 ms of blackout plus main-loop latency).
+  There is no fixed idle window; the host waits ~50 ms and then polls GET,
+  tolerating transport errors, until the stored value equals the request; `gd32g553_boot_config_set()`
   does exactly that.  A SET equal to the stored value is a no-op (no queue,
-  no erase).  A different SET while one is still queued answers
-  `STATUS_BUSY`.  If the commit fails the GET poll never matches; the host
+  no erase).  A different SET while one is still queued, or while an OTA
+  session is active, answers `STATUS_BUSY`.  If the commit fails the GET poll never matches; the host
   re-sends the SET.
 * **Power-loss safe.**  The flag lives in two A/B record pages (counter +
   CRC, commit doubleword last) outside every image; a cut at any point of a

@@ -26,17 +26,18 @@
 #define SOF 0xA5u
 
 static struct {
-	bool     stamping;       /* STATUS_SEQ granted on the slave */
-	uint8_t  counter;        /* 4-bit stamp counter */
-	uint32_t exec[256];      /* decodes per opcode (execution count) */
-	uint8_t  staged[16];     /* reply staged for the next read */
-	size_t   staged_len;     /* 0 = nothing staged */
-	uint32_t stored;         /* persisted boot-config flags */
-	bool     pending;        /* a SET is queued, the main loop has not committed it yet */
+	bool     stamping;   /* STATUS_SEQ granted on the slave */
+	uint8_t  counter;    /* 4-bit stamp counter */
+	uint32_t exec[256];  /* decodes per opcode (execution count) */
+	uint8_t  staged[16]; /* reply staged for the next read */
+	size_t   staged_len; /* 0 = nothing staged */
+	uint32_t stored;     /* persisted boot-config flags */
+	bool     pending;    /* a SET is queued, the main loop has not committed it yet */
 	uint32_t pending_flags;
 	uint64_t pending_at_ms;  /* when the SET was queued */
 	uint64_t apply_after_ms; /* the commit lands this long after the SET */
 	uint8_t  last_req[5];    /* last BOOT_CONFIG request payload */
+	uint32_t fail_polls;     /* GET polls that hit the erase blackout (transport error) */
 	uint8_t  fw_status;      /* non-zero: answer every BOOT_CONFIG with this status */
 } g_br;
 
@@ -66,6 +67,10 @@ alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 	if ((uint16_t)(tx[len - 2u] | (tx[len - 1u] << 8)) != crc) return ALP_OK; /* dropped */
 
 	const uint8_t cmd = tx[1];
+	if (cmd == GD32G553_CMD_BOOT_CONFIG && tx[2] == 0u && g_br.pending && g_br.fail_polls > 0u) {
+		g_br.fail_polls--; /* erase blackout: the link is dead for this poll */
+		return ALP_ERR_IO;
+	}
 	g_br.exec[cmd]++;
 	/* The firmware's main loop commits a queued SET once its flash erase is done. */
 	if (g_br.pending && g_now_ms >= g_br.pending_at_ms + g_br.apply_after_ms) {
@@ -97,8 +102,10 @@ alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 			g_br.pending_flags = flags;
 			g_br.pending_at_ms = g_now_ms;
 		}
-		const uint8_t r[4] = { (uint8_t)g_br.stored, (uint8_t)(g_br.stored >> 8),
-			                   (uint8_t)(g_br.stored >> 16), (uint8_t)(g_br.stored >> 24) };
+		const uint8_t r[4] = { (uint8_t)g_br.stored,
+			                   (uint8_t)(g_br.stored >> 8),
+			                   (uint8_t)(g_br.stored >> 16),
+			                   (uint8_t)(g_br.stored >> 24) };
 		stage(0x00u, r, sizeof(r));
 		break;
 	}
@@ -166,7 +173,7 @@ ZTEST_SUITE(gd32_boot_config, NULL, NULL, each_before, NULL, NULL);
 /* The request is `op:u8 flags:u32` little-endian; the reply is decoded LE. */
 ZTEST(gd32_boot_config, test_request_is_little_endian)
 {
-	uint32_t v = 0u;
+	uint32_t v  = 0u;
 	g_br.stored = 0x04030201u;
 	zassert_equal(gd32g553_boot_config_get(&g_ctx, &v), ALP_OK);
 	zassert_equal(v, 0x04030201u, "reply decoded little-endian");
@@ -183,16 +190,16 @@ ZTEST(gd32_boot_config, test_nosupport_maps_to_alp_err_nosupport)
 	uint32_t v;
 	g_br.fw_status = 0x06u; /* STATUS_NOSUPPORT */
 	zassert_equal(gd32g553_boot_config_get(&g_ctx, &v), ALP_ERR_NOSUPPORT);
-	zassert_equal(
-	    gd32g553_boot_config_set(&g_ctx, GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH), ALP_ERR_NOSUPPORT);
+	zassert_equal(gd32g553_boot_config_set(&g_ctx, GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH),
+	              ALP_ERR_NOSUPPORT);
 	zassert_equal(g_br.exec[GD32G553_CMD_BOOT_CONFIG], 2u, "no polling after a refused SET");
 }
 
 ZTEST(gd32_boot_config, test_busy_is_returned_without_polling)
 {
 	g_br.fw_status = 0x03u; /* STATUS_BUSY: a different SET is still being committed */
-	zassert_equal(
-	    gd32g553_boot_config_set(&g_ctx, GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH), ALP_ERR_BUSY);
+	zassert_equal(gd32g553_boot_config_set(&g_ctx, GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH),
+	              ALP_ERR_BUSY);
 	zassert_equal(g_br.exec[GD32G553_CMD_BOOT_CONFIG], 1u);
 }
 
@@ -207,6 +214,17 @@ ZTEST(gd32_boot_config, test_set_polls_until_the_value_is_applied)
 	zassert_true(g_br.exec[GD32G553_CMD_BOOT_CONFIG] >= 2u, "SET plus at least one GET poll");
 	zassert_true(g_now_ms - t0 >= 25u, "host waited out the flash erase before returning");
 	zassert_true(g_now_ms - t0 < 100u, "and did not wait much longer than needed");
+}
+
+/* A poll that lands in the erase blackout fails at the transport; it costs
+ * one extra poll, not the whole SET. */
+ZTEST(gd32_boot_config, test_transport_error_during_poll_costs_one_extra_poll)
+{
+	g_br.apply_after_ms = 0u;
+	g_br.fail_polls     = 1u;
+	zassert_equal(gd32g553_boot_config_set(&g_ctx, GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH), ALP_OK);
+	zassert_equal(g_br.fail_polls, 0u, "the blackout poll was hit");
+	zassert_equal(g_br.stored, GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH);
 }
 
 ZTEST(gd32_boot_config, test_noop_set_does_not_poll)

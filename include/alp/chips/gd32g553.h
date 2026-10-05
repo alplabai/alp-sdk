@@ -542,8 +542,9 @@ alp_status_t gd32g553_boot_config_get(gd32g553_t *ctx, uint32_t *flags);
  *  Survives power cycles and OTA slot swaps; takes effect at the next GD32
  *  reset and does NOT move any pad now (so a unit running from the SD is not
  *  cut off).  The firmware accepts the request at once and commits it from
- *  its main loop (one flash page erase, <= 20 ms, link idle meanwhile); this
- *  call waits ~30 ms and then polls GET until the stored value equals
+ *  its main loop (two 1 KB page erases, each <= 20 ms with interrupts masked, plus
+ *  main-loop latency; the link may black out meanwhile); this call waits
+ *  ~50 ms and then polls (retrying through transport errors) GET until the stored value equals
  *  @p flags, so ALP_OK means the value is stored.  A value equal to the
  *  stored one is a no-op.  To drive IO29 immediately as well, also write it
  *  with @ref gd32g553_gpio_write.
