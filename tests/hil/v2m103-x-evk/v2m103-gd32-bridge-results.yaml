@@ -56,9 +56,10 @@ ssh_command: |-
           if mp != 252: bad.append('max_payload %d' % mp)
           if flags & 0x18 != 0x18: bad.append('batch/stream2 flags %#x' % flags)
           if sk: bad.append('skipped %d' % sk)
-      time.sleep(5.2 if kind == 2 else 2.2)
+      wait = 5.2 if kind == 2 else 2.2
+      time.sleep(wait)
       r2, b2 = snap()
-      if r2 is None or not 1 <= (b2[2] - b[2]) & 0xFFFFFFFF <= 4: bad.append('beacon heartbeat did not advance 1..4 in 2 s')
+      if r2 is None or not 1 <= (b2[2] - b[2]) & 0xFFFFFFFF <= int(wait) + 2: bad.append('beacon heartbeat did not advance 1..%d in %.1f s' % (int(wait) + 2, wait))
       if kind == 2 and (r2 is None or r2[15] <= cyc or r2[18] <= el): bad.append('soak not cycling: cycles %d->%s elapsed_s %d->%s' % (cyc, r2 and r2[15], el, r2 and r2[18]))
       for x in bad: print('HIL_GD32R_BAD', x)
       print('HIL_GD32R kind=%d fw=%d.%d.%d pass=%d fail=%d skip=%d features=%#x max_payload=%d flags=%#x read2_first=%d dropped=%d gaps=%d cycles=%d errors=%d timeouts=%d elapsed_s=%d' % (kind, fw >> 16, (fw >> 8) & 255, fw & 255, p, f, sk, feat, mp, flags, first, drop, gaps, cyc, err, tmo, el))
