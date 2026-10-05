@@ -9,3 +9,9 @@
 # docs/bring-up-drpai-v2n.md "Access control").  The register ioctls are
 # additionally gated on CAP_SYS_RAWIO by kernel patch 0018.
 KERNEL=="drpai[0-9]*", MODE="0660", GROUP="drpai"
+
+# Renesas mmngr nodes: the DRP-AI runtime allocates its contiguous buffers
+# through /dev/rgnmm + /dev/rgnmmbuf, which come up root-only (0600), so a
+# non-root drpai member gets "MMI open: Permission denied".  Same group and
+# privilege grant as drpai*.
+KERNEL=="rgnmm|rgnmmbuf", MODE="0660", GROUP="drpai"
