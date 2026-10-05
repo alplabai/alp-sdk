@@ -51,7 +51,9 @@ framework with no hardware surface.
 ## Build
 
 ```bash
-west build -b native_sim/native/64 examples/testing/catch2-selftest
+# writes examples/testing/catch2-selftest/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/testing/catch2-selftest
+west build -b native_sim/native/64 examples/testing/catch2-selftest -- -DEXTRA_CONF_FILE=generated/alp.conf
 west build -t run
 ```
 

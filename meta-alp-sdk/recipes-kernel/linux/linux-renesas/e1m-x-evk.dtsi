@@ -50,7 +50,7 @@
  *     Two TAS2563 MONO amps share one physical I2S bus (one SCLK/WS/SDATA
  *     set), so the card is one audio-graph-card2 `multi` link
  *     (sound/soc/generic/audio-graph-card2.c, built in on this kernel):
- *     ONE cpu port (rcar_sound SSI1) fanned out to TWO codec ports in a
+ *     ONE cpu port (rcar_sound SSI2 data, SSI1 SCK/WS) fanned out to TWO codec ports in a
  *     single dai_link, so both amps get the same hw_params, format and
  *     DAPM power sequencing. Bench-verified on E1M-V2M103 (2026-09-27):
  *     both amps' PWR_CTL go software-shutdown -> active with the stream
@@ -117,6 +117,9 @@
  *     direct path until the bridge gains an I2C-master proxy.
  *   - 2x MIPI-CSI cameras (two separate, bare CSI connectors -- see
  *     docs/boards/e1m-x-evk.md's "Camera connectors" row).
+ *
+ *     An OPT-IN, bench-unverified IMX219 placeholder path now exists:
+ *     e1m-x-evk-cam0-imx219.dtsi / docs/v2n-camera-csi.md (#1149).
  *
  *     DATA-GATED, and gated on a product decision rather than on a
  *     document.  What the carrier DOES already carry is in tree: the
@@ -225,15 +228,12 @@
 	};
 
 	/* TAS2563 stereo pair (U27 left / U28 right), one shared I2S0 bus:
-	 * one audio-graph-card2 `multi` link, SSI1 -> both amps. See this
+	 * one audio-graph-card2 `multi` link, SSI2 -> both amps. See this
 	 * file's header comment for why not simple-audio-card. */
 	sound_card: sound {
 		compatible = "audio-graph-card2";
 		label = "e1m-x-evk-tas2563";
 		links = <&sound_multi_cpu>;
-		/* Off until playback moves to SSI2's data line (#2331): see
-		 * &rcar_sound below. */
-		status = "disabled";
 
 		multi {
 			#address-cells = <1>;
@@ -293,26 +293,143 @@
 
 /* SoC audio block (SCU/ADG/SSIU/SSI/AUDMAPP).
  *
- * KNOWN WRONG DATA LINE (#2331): per the SoM + carrier netlists, SSI1's
- * SDATA (P46) reaches E1M pad AQ4 I2S0_SDI -> TMUX1574 U46 -> the TAS2563
- * SDOUT pins (U27/U28 pin 10), and SSI2's SDATA (P47) reaches AR4
- * I2S0_SDO -> the TAS2563 SDIN pins (pin 11). Playback on ssi1 below
- * therefore drives the amps' SDOUT net, not their SDIN: no audio, and the
- * SoC and the amps' IV-sense transmit can contend on that net. The fix is
- * playback on SSI2's data line with SSI1's SCK/WS, which the BSP rsnd
- * driver's pin sharing (SSI0-parent only) does not cover yet.
+ * Data direction (#2331): per the SoM + carrier netlists, SSI1's SDATA
+ * (P46) reaches E1M pad AQ4 I2S0_SDI -> TMUX1574 U46 -> the TAS2563 SDOUT
+ * pins (U27/U28 pin 10), and SSI2's SDATA (P47) reaches AR4 I2S0_SDO ->
+ * the TAS2563 SDIN pins (pin 11). Playback therefore leaves on SSI2's
+ * data line, while SCK/WS come out of SSI1 (P44/P45). The RZ/V2N SSIU can
+ * do that: SSIU_SSI_MODE1.ssi2_pin{2,1,0} = 110b makes SSI1 the pin
+ * master and SSI2 its slave (RZ/V2N Group Hardware Manual Additional
+ * Document R01UH1072EJ0120, section 8.5.2.3.16; SSICR1.SCKD/SWSD = 1,1,
+ * SSICR2.SCKD/SWSD = 0,0). The stock rsnd driver only knows SSI0 as a
+ * clock parent, so meta-alp-sdk patch 0014 adds the SSI2-under-SSI1 case,
+ * selected by the `alp,shared-pin-ssi1` property on &ssi2 below.
  *
- * Until it does, the SSI block and the sound card above are disabled, so
- * no ALSA card exists and sound_pins is never applied: P44/P45/P46 stay
- * at their reset state and nothing on the SoC side can drive the amps'
- * SDOUT net. The TAS2563 codec nodes below still probe over I2C0. To
- * re-enable, fix the data line first, then set both nodes to "okay". */
+ * P46 (SSI1 SDATA, the amps' SDOUT net) is deliberately NOT muxed: the
+ * SoC must never drive it. There is no capture/IV-sense path in this card.
+ *
+ * STATUS: bench-unverified (no sound heard yet); the card is enabled
+ * because playback no longer drives the SDOUT net, but the first bench
+ * listen is still pending (see docs/boards/e1m-x-evk.md audio notes). */
 &rcar_sound {
 	pinctrl-0 = <&sound_pins>;
 	pinctrl-names = "default";
-	status = "disabled";
+	status = "okay";
 
 	#sound-dai-cells = <1>;
+
+	/* Clock list = the SoC dtsi's, minus clk_a (module 0xfb) and clk_c
+	 * (0xfd). Audio_CLKA is the AUDIO_EXTAL/AUDIO_XTAL oscillator input and
+	 * Audio_CLKC an unfed pad on this SoM/carrier: both stay at 0 Hz, and
+	 * the CPG only reports CLK_ON (CPG_CLKMON_7 bits 27/29) once a clock is
+	 * actually present, so rzv2h-cpg times out (-110) on the first runtime
+	 * resume of the card. rsnd falls back to a null clock for a clock name
+	 * that is absent (rsnd_adg_get_clkin), so dropping them is safe; the
+	 * card runs from Audio_CLKB (clk_b) only. Bench-confirmed on E1M-V2M103
+	 * (no -110; 2 s of 48 kHz audio plays in 2.06 s). Re-sync this list from
+	 * r9a09g056.dtsi's rcar_sound node on a BSP bump. */
+	clocks = <&cpg CPG_MOD 0xf5>,
+		 <&cpg CPG_MOD 0x18a>,
+		 <&cpg CPG_MOD 0x189>,
+		 <&cpg CPG_MOD 0x188>,
+		 <&cpg CPG_MOD 0x187>,
+		 <&cpg CPG_MOD 0x186>,
+		 <&cpg CPG_MOD 0x185>,
+		 <&cpg CPG_MOD 0x184>,
+		 <&cpg CPG_MOD 0x183>,
+		 <&cpg CPG_MOD 0x182>,
+		 <&cpg CPG_MOD 0x181>,
+		 <&cpg CPG_MOD 0x180>,
+		 <&cpg CPG_MOD 0xf6>,
+		 <&cpg CPG_MOD 0xf7>,
+		 <&cpg CPG_MOD 0x17d>,
+		 <&cpg CPG_MOD 0x17c>,
+		 <&cpg CPG_MOD 0x17b>,
+		 <&cpg CPG_MOD 0x17a>,
+		 <&cpg CPG_MOD 0x179>,
+		 <&cpg CPG_MOD 0x178>,
+		 <&cpg CPG_MOD 0x177>,
+		 <&cpg CPG_MOD 0x176>,
+		 <&cpg CPG_MOD 0x175>,
+		 <&cpg CPG_MOD 0x174>,
+		 <&cpg CPG_MOD 0x17e>,
+		 <&cpg CPG_MOD 0x173>,
+		 <&cpg CPG_MOD 0x172>,
+		 <&cpg CPG_MOD 0x173>,
+		 <&cpg CPG_MOD 0x172>,
+		 <&cpg CPG_MOD 0x170>,
+		 <&cpg CPG_MOD 0x171>,
+		 <&cpg CPG_MOD 0xf8>,
+		 <&cpg CPG_MOD 0xf9>,
+		 <&cpg CPG_MOD 0xfc>,
+		 <&cpg CPG_MOD 0xfa>,
+		 <&cpg CPG_MOD 0x169>,
+		 <&cpg CPG_MOD 0x168>,
+		 <&cpg CPG_MOD 0x167>,
+		 <&cpg CPG_MOD 0x166>,
+		 <&cpg CPG_MOD 0x165>,
+		 <&cpg CPG_MOD 0x164>,
+		 <&cpg CPG_MOD 0x163>,
+		 <&cpg CPG_MOD 0x162>,
+		 <&cpg CPG_MOD 0x161>,
+		 <&cpg CPG_MOD 0x160>,
+		 <&cpg CPG_MOD 0xfe>,
+		 <&cpg CPG_MOD 0xff>,
+		 <&cpg CPG_MOD 0x100>,
+		 <&cpg CPG_MOD 0x16a>,
+		 <&cpg CPG_MOD 0x16b>,
+		 <&cpg CPG_MOD 0x16c>;
+	clock-names = "ssi-all",
+		      "ssi.9",
+		      "ssi.8",
+		      "ssi.7",
+		      "ssi.6",
+		      "ssi.5",
+		      "ssi.4",
+		      "ssi.3",
+		      "ssi.2",
+		      "ssi.1",
+		      "ssi.0",
+		      "ssif_supply_clk",
+		      "scu_clk",
+		      "scu_clkx2",
+		      "src.9",
+		      "src.8",
+		      "src.7",
+		      "src.6",
+		      "src.5",
+		      "src.4",
+		      "src.3",
+		      "src.2",
+		      "src.1",
+		      "src.0",
+		      "scu_supply_clk",
+		      "mix.1",
+		      "mix.0",
+		      "ctu.1",
+		      "ctu.0",
+		      "dvc.0",
+		      "dvc.1",
+		      "audmac-pp",
+		      "adg_clk",
+		      "clk_b",
+		      "clk_i",
+		      "adg.ssi.9",
+		      "adg.ssi.8",
+		      "adg.ssi.7",
+		      "adg.ssi.6",
+		      "adg.ssi.5",
+		      "adg.ssi.4",
+		      "adg.ssi.3",
+		      "adg.ssi.2",
+		      "adg.ssi.1",
+		      "adg.ssi.0",
+		      "spdif.0",
+		      "spdif.1",
+		      "spdif.2",
+		      "adg.spdif.0",
+		      "adg.spdif.1",
+		      "adg.spdif.2";
 
 	ports {
 		#address-cells = <1>;
@@ -327,10 +444,15 @@
 				dai-format = "i2s";
 				bitclock-master;
 				frame-master;
-				playback = <&ssi1>;
+				playback = <&ssi2>;
 			};
 		};
 	};
+};
+
+/* SSI2 plays out of P47; its SCK/WS come from SSI1 (P44/P45), see above. */
+&ssi2 {
+	alp,shared-pin-ssi1;
 };
 
 /* TAS2563 smart-amp pair (I2C0 @0x4D/0x4E). SD_N (shutdown) and IRQ_N
@@ -457,6 +579,13 @@
 	bus-width = <4>;
 	sd-uhs-sdr50;
 	cd-gpios = <&pinctrl RZV2N_GPIO(A, 1) GPIO_ACTIVE_LOW>;
+	/* The RZ/V2N ICU has no both-edge TINT mode, so the card-detect GPIO
+	 * cannot be an interrupt (the MMC core asks for both edges and the request
+	 * failed with "Setting trigger mode 3 ... failed"). broken-cd sets
+	 * MMC_CAP_NEEDS_POLL: no interrupt is requested and the core polls the
+	 * cd-gpios line about once a second, so insertion and removal are still
+	 * detected within about a second. */
+	broken-cd;
 	status = "okay";
 };
 
@@ -628,8 +757,35 @@
 	status = "okay";
 };
 
-&usb3_phy0 {
-	status = "okay";
+/* USB 3.0 Type-A host VBUS: a carrier power switch whose enable net is
+ * USB30_VBUSEN = E1M-X pad AQ10 (I2S1_SDO) = RZ/V2N P15 (SSIU4_SSI4_SDATA,
+ * metadata/e1m_modules/v2n/renesas-peripheral-map.tsv).  Bench-proven
+ * 2026-10-01: with P15 unclaimed the port is unpowered and nothing
+ * enumerates; driving it high enumerates a stick on xhci.  Nothing else in
+ * the carrier/SoM/DEEPX dtsi claims P15 (the TAS2563 pair uses P12 and P04
+ * from the same I2S1 group).
+ *
+ * The 6.1 renesas usb3 PHY (phy-rz-usb3.c) and rzv2h xHCI driver consume no
+ * vbus supply, so there is no phy/xhci property to hang this on: the
+ * regulator is regulator-always-on + regulator-boot-on, which makes the
+ * regulator core drive the GPIO high at boot.  No OVC feedback is wired
+ * (see the usb30 note above).  The USB 2.0 VBUS enable (USB20_VBUSEN, pad
+ * AQ11 / P13) feeds an unused switch output on this carrier and is left
+ * alone. */
+/ {
+	reg_usb30_vbus: regulator-usb30-vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "usb30-vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpios = <&pinctrl RZV2N_GPIO(1, 5) GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+};
+
+&usb3_phy0 {	status = "okay";
 };
 
 &xhci0 {
@@ -698,14 +854,14 @@
 	 * this SoC's own stock RZ/V2N EVK reference dts `sound_pins` node.
 	 * Function 7 + P<port><pin> confirmed against that reference dts's
 	 * SSI3/4 + AUDIO_CLK pinctrl entries (RZV2N_PORT_PINMUX(port, pin,
-	 * 7)) -- see this file's header comment. SSIU2's extra SDATA (P47)
-	 * is left unclaimed: unused for this playback-only pair (see
-	 * &rcar_sound's comment). */
+	 * 7)) -- see this file's header comment. SSI1's own SDATA (P46) is
+	 * left unclaimed on purpose (it is the amps' SDOUT net); playback
+	 * uses SSI2's SDATA (P47). See &rcar_sound's comment. */
 	sound_pins: sound {
-		ssi1_pins: ssi1 {
+		ssi1_pins: ssi1 { /* SCK/WS from SSI1, data from SSI2 */
 			pinmux = <RZV2N_PORT_PINMUX(4, 4, 7)>, /* SSIU1_SSI1_SCK */
 				 <RZV2N_PORT_PINMUX(4, 5, 7)>, /* SSIU1_SSI1_WS */
-				 <RZV2N_PORT_PINMUX(4, 6, 7)>; /* SSIU1_SSI1_SDATA */
+				 <RZV2N_PORT_PINMUX(4, 7, 7)>; /* SSIU2_SSI2_SDATA */
 		};
 
 		audio_clkb_pins: audio_clkb {

@@ -74,6 +74,8 @@ into the topic-specific docs.
   Raspberry-Pi-style MIPI CSI-2 camera-module sensor drivers (OV5647,
   OV9281, IMX296, IMX335) and their Zephyr shields; build command form +
   supported modes.
+- [chip-driver-classification.md](chip-driver-classification.md) — every
+  non-complete chip driver with ADR 0017 tier, proposed owner and gap (#500).
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
   index (35 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
@@ -95,6 +97,7 @@ into the topic-specific docs.
   symptom + recovery.
 - [bring-up-v2n.md](bring-up-v2n.md) — Renesas RZ/V2N.
 - [bring-up-v2n-m1.md](bring-up-v2n-m1.md) — V2N + DEEPX.
+- [boot-log-v2n.md](boot-log-v2n.md) — what each V2N/V2M boot warning means.
 - [bring-up-drpai-v2n.md](bring-up-drpai-v2n.md) — the RZ/V2N on-die
   DRP-AI3 NPU: host toolchain, the DT override the driver needs,
   image wiring, model compile and microSD deploy. Kernel driver
@@ -106,6 +109,9 @@ into the topic-specific docs.
   into alp-sdk as the single source of truth.
 - [errata-e1m-x-v2n.md](errata-e1m-x-v2n.md) — hardware findings
   from E1M-X-EVK + V2N-M1 bench bring-up (with software workarounds).
+- [v2n-canfd-integration-data.md](v2n-canfd-integration-data.md) —
+  RZ/V2N CANFD2/3 base, SEL-slot events, PFC, clock/reset facts and the
+  open CM33 gap.
 - [rzv2n-m33-swd-debug.md](rzv2n-m33-swd-debug.md) — attaching to
   the V2N CM33 over the DAP (J-Link), status-block reads, gotchas.
 - [rzv2n-m33-secure-boot.md](rzv2n-m33-secure-boot.md) — the CM33
@@ -133,6 +139,8 @@ into the topic-specific docs.
   (wifi / ble / sock / diag) + the host-driver OTA + GPIO-proxy APIs.
 - [console.md](console.md) — the interactive `alp` command tree on the
   Zephyr shell (safety tiers, command list, companion binding, banner).
+- [v2n-camera-csi.md](v2n-camera-csi.md) — opt-in Linux MIPI CSI-2
+  camera path (IMX219 placeholder), bench-unverified.
 - [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
 - [provisioning.md](provisioning.md) — provisioning a SoM from a
@@ -151,12 +159,41 @@ into the topic-specific docs.
 
 ## Models / edge-AI
 
+- `metadata/model_zoo/<id>.yaml` (schema:
+  `metadata/schemas/model-zoo-v1.schema.json`, `schema_version: 1`) — the
+  model-zoo data asset: alp-sdk owns the schema + the manifests (`tan model
+  zoo`'s hardware truth), tan owns the engine that reads them
+  ([adr/0028-tan-owns-the-model-engine.md](adr/0028-tan-owns-the-model-engine.md)).
+  Every entry declares `kind: model` (a real, published entry) or `kind:
+  fixture` (a wiring/smoke entry, never a hardware claim — enforced:
+  `validated_soms` must be empty and `source` must be `bundled`). Every
+  entry's `source` is EXCLUSIVELY an upstream `{url, sha256}` (`https://`
+  only, sha256 required) or a genuinely clean, tiny `{bundled}` starter
+  under `metadata/model_zoo/starters/` (at most 64 KiB; `starters/<file>`
+  only, no subdirectory) — no weight redistribution either way. The
+  `kind: fixture` restriction is enforced both by the schema's own
+  `if`/`then` and, for a friendlier message, by
+  `_check_model_zoo_semantics`. An optional `compile` block is
+  structurally identical to `board.schema.json`'s `models[].compile` (the
+  shape `tan model add` writes into a project's board.yaml; its own
+  `description` is reworded for the zoo's context), guarded by a drift
+  test (with descriptions stripped before comparing) rather than a
+  cross-file `$ref` (no schema in this tree resolves those).
+  `scripts/validate_metadata.py` gates the entry's shape, that every
+  `validated_soms[]` SKU names a real, shipped SoM preset, that every
+  `starters/` file is referenced by some entry and at most the size cap
+  (a `stat()` failure is reported, never silently skipped), and that a
+  `bundled` path is a byte-exact (case-sensitive) match on disk; it does
+  NOT gate that the SoM was actually bench-run — a populated
+  `validated_soms` is a claim the entry's author is responsible for, same
+  as `metadata/model_perf/`'s bench-capture points.
 - [measuring-inference-energy.md](measuring-inference-energy.md) — the
   measured millijoules per inference on E1M-AEN801 silicon: the
   method (rail scan, conversion-ready sampling, idle-subtracted
   window integration), the whole-board PSU cross-check, a measured
   error budget, and the explicit list of what the figure is NOT
-  (not NPU energy, not silicon energy, not vendor-comparable).
+  (not NPU energy, not silicon energy, not vendor-comparable); also the
+  probe-based `scripts/alp_power.py` method (not yet validated on hardware).
 
 ## Security & release
 

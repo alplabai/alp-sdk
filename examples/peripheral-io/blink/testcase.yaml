@@ -10,6 +10,7 @@ sample:
 
 tests:
   alp_sdk.example.blink.e1m_x_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim
       - native_sim/native/64
@@ -27,7 +28,19 @@ tests:
         type: one_line
         regex:
           - "\\[blink\\] done"
+  alp_sdk.example.blink.aen:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
+    platform_allow:
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - gpio
+      - aen
+    build_only: true
   alp_sdk.example.blink.e1m_evk:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim
       - native_sim/native/64

@@ -106,6 +106,15 @@ Display 2, its LCD2_RST (E1M-X IO21), LCD2_PWR_EN (E1M-X IO22), and CTP2 sideban
 (IO17/IO19) are therefore **permanently unavailable on V2N/V2M** at this
 hardware revision.
 
+## Audio (TAS2563 playback card, V2N Linux)
+
+Linux plays through the ALSA card `e1m-x-evk-tas2563` (`e1m-x-evk.dtsi` in
+`meta-alp-sdk`): SSI2 carries the data (P47), with SCK/WS taken from SSI1
+(P44/P45) via the `alp,shared-pin-ssi1` property added by kernel patch 0014.
+P46 (SSI1 SDATA, the amps' SDOUT net) is deliberately left unmuxed so the SoC
+never drives it; there is no capture or IV-sense path.  Bench listen is still
+pending (#2331).
+
 ## I²C address collision (TAS2563 broadcast)
 
 INA236B (U32) sits at `0x48` on `XEVK_I2C_BUS_SENSORS`

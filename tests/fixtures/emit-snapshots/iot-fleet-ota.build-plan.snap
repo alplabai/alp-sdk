@@ -53,7 +53,8 @@
           "--sysbuild",
           "--",
           "-DPython3_EXECUTABLE=${PYTHON}",
-          "-DSB_CONF_FILE=${SDK_ROOT}/zephyr/sysbuild/aen/sysbuild.conf;${PROJECT_ROOT}/build/alp_sysbuild.conf"
+          "-DSB_CONF_FILE=${SDK_ROOT}/zephyr/sysbuild/aen/sysbuild.conf;${PROJECT_ROOT}/build/alp_sysbuild.conf",
+          "-Dalp-stock-shim_EXTRA_CONF_FILE=${PROJECT_ROOT}/build/m55_he-zephyr/alp.conf"
         ],
         "cwd": "build/m55_he-zephyr"
       },
@@ -110,7 +111,8 @@
           "--sysbuild",
           "--",
           "-DPython3_EXECUTABLE=${PYTHON}",
-          "-DSB_CONF_FILE=${SDK_ROOT}/zephyr/sysbuild/aen/sysbuild.conf;${PROJECT_ROOT}/build/alp_sysbuild.conf"
+          "-DSB_CONF_FILE=${SDK_ROOT}/zephyr/sysbuild/aen/sysbuild.conf;${PROJECT_ROOT}/build/alp_sysbuild.conf",
+          "-Diot-fleet-ota_EXTRA_CONF_FILE=${PROJECT_ROOT}/build/m55_hp-zephyr/alp.conf"
         ],
         "cwd": "build/m55_hp-zephyr"
       },

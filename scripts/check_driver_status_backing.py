@@ -4,7 +4,7 @@
 CI gate: driver_status declarations outside metadata/chips/*.yaml are bound
 to the artefact they claim to describe (issue #1216).
 
-metadata/schemas/som-preset-v1.schema.json's shared `$defs/driver_status`
+metadata/schemas/som-preset-v2.schema.json's shared `$defs/driver_status`
 vocabulary (`none` / `planned` / `partial` / `complete`) is reused by three
 fields in metadata/e1m_modules/<SKU>.yaml that had NO parity enforcement --
 only metadata/chips/<id>.yaml's driver_status was bound to anything (its

@@ -86,6 +86,34 @@ config ALP_SDK_ADC_SW_FALLBACK
 	  Off by default on real silicon; default on for native_sim
 	  builds so examples compile without a real ADC peripheral.
 
+config ALP_SDK_DAC_SW_FALLBACK
+	bool "Software DAC fallback (empty-caps stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles src/backends/dac/sw_fallback.c, a priority-0 wildcard
+	  whose open() succeeds with an empty capability set while
+	  write_mv / read_mv return ALP_ERR_NOSUPPORT.  For native_sim
+	  build / test only.  Off, alp_dac_open() never hands out a
+	  handle that drives nothing: the always-linked zephyr_drv backend
+	  returns its own open code (e.g. INVAL / NOT_READY, or NOSUPPORT
+	  when CONFIG_DAC is off).
+
+config ALP_SDK_I3C_SW_FALLBACK
+	bool "Software I3C fallback (empty-caps stub)"
+	depends on ALP_SDK
+	default y if BOARD_NATIVE_SIM || ARCH_POSIX
+	default n
+	help
+	  Compiles src/backends/i3c/sw_fallback.c, a priority-0 wildcard
+	  whose open() succeeds while every bus op returns
+	  ALP_ERR_NOSUPPORT.  For native_sim build / test only.
+	  Off, alp_i3c_open() never hands out a handle with no bus behind
+	  it: the always-linked zephyr_drv backend returns its own open
+	  code (INVAL / NOT_READY, or NOSUPPORT when CONFIG_I3C_CONTROLLER
+	  is off).
+
 config ALP_SDK_RTC_SW_FALLBACK
 	bool "Software RTC fallback (deterministic frozen clock)"
 	depends on ALP_SDK

@@ -1,7 +1,7 @@
 {
   "board": "E1M-X-EVK",
   "som": "E1M-V2N101",
-  "hw_rev": "r1",
+  "hw_rev": "r2",
   "silicon_variant": "R9A09G056N44GBG",
   "routes": [
     {
@@ -139,8 +139,9 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_CAM0_EN",
       "board_role": null,
-      "board_doc": "Camera-0 power enable.",
-      "dispatch": "direct"
+      "board_doc": "CAM0 module enable, active-low via N-FET on CAM_GPIO.",
+      "active_low": true,
+      "dispatch": "TBD"
     },
     {
       "e1m": "E1M_X_GPIO_IO20",
@@ -149,7 +150,7 @@
       "board_role": null,
       "board_doc": "Camera-0 reset (active-low).",
       "active_low": true,
-      "dispatch": "direct"
+      "dispatch": "TBD"
     },
     {
       "e1m": "E1M_X_GPIO_IO24",
@@ -235,7 +236,8 @@
       "board_macro": "XEVK_I2C_BUS_DSI_CSI0",
       "board_role": null,
       "board_doc": "Display/camera control I2C bank 0 (DSI panel + CSI camera-side config).",
-      "dispatch": "direct"
+      "dispatch": "direct",
+      "dispatch_pin": "RIIC2"
     },
     {
       "e1m": "E1M_X_I2C3",
@@ -456,6 +458,14 @@
       "board_role": null,
       "dispatch": "gd32_bridge",
       "dispatch_pin": "PA3"
+    },
+    {
+      "e1m": "E1M_X_CSI0",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "direct",
+      "dispatch_pin": "CSI0"
     },
     {
       "e1m": "E1M_X_ENC1",

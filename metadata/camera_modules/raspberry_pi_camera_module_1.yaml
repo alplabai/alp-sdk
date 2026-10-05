@@ -1,0 +1,10 @@
+# Alp SDK camera module: Raspberry Pi Camera Module 1 (OmniVision OV5647).
+# Values from zephyr/boards/shields/raspberry_pi_camera_module_1/raspberry_pi_camera_module_1.overlay.
+schema_version: 1
+module_id:      raspberry_pi_camera_module_1
+display_name:   "Raspberry Pi Camera Module 1 (OV5647, 2-lane CSI-2)"
+chip:           ov5647
+i2c_addr_7bit:  0x36
+xclk_hz:        25000000
+lanes:          2
+zephyr_shield:  raspberry_pi_camera_module_1

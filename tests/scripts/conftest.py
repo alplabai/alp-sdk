@@ -34,7 +34,6 @@ _CLANG_FORMAT_PIN = "22.1.5"
 _REPO_WRITER_MODULES = frozenset({
     "test_abi_snapshot_freeze_gate",  # docs/abi/v99.9x-snapshot.json
     "test_validate_metadata_slot0_address",  # metadata/e1m_modules/.test-*.yaml
-    "test_validate_metadata_memory_authority",  # metadata/e1m_modules/.test-*.yaml
     "test_validate_metadata_som_memory_population",  # metadata/e1m_modules/.test-*.yaml
     "test_validate_metadata_soc_peripheral_instance_uniqueness",  # metadata/e1m_modules/.test-*.yaml
     "test_validate_metadata_duplicate_keys",  # metadata/chips/.test-dup-*.{yaml,json}
@@ -117,3 +116,42 @@ def clang_format_text(tmp_path: Path, name: str, text: str) -> str:
         [exe, "-i", f"--style=file:{_CLANG_FORMAT_STYLE}", str(path)], check=True
     )
     return path.read_text(encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def _provision_no_real_waits(request, monkeypatch):
+    """The provisioning tool's clean-shutdown waits (up to 120 s each) and I2C retry gap run on a real
+    clock; a fake console that never prints a halt line must not stall a test for it."""
+    if not request.module.__name__.rsplit(".", 1)[-1].startswith("test_provision"):
+        return
+    from provision import linux_target, steps
+    for name, value in (("HALT_WAIT_S", 0.05), ("HALT_LATE_S", 0.01), ("POWEROFF_TIMEOUT_S", 0.05),
+                        ("PROBE_S", 0.01), ("ID_WAIT_S", 0.02), ("DETECT_WAIT_S", 0.05)):
+        monkeypatch.setattr(steps, name, value)
+    # the Ctrl-C probe of an unknown console writes to it: strict fake consoles opt in explicitly
+    monkeypatch.setattr(steps, "PROBE_UNKNOWN_CONSOLE", False)
+    monkeypatch.setattr(linux_target, "I2C_GET_GAP_S", 0.0)
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_tmpdir(tmp_path_factory, monkeypatch):
+    """Point TMPDIR at a per-test directory under pytest's own basetemp.
+
+    The bench scripts keep what they write under ${TMPDIR:-/tmp} on purpose
+    -- bench_atoc_replace_guard()'s `<tag>-atoc-before.<random>` transcript
+    is the audit record of what was resident before a destructive write, so
+    it is never removed. That is right on a bench and wrong in a unit test:
+    every test that sources bench-env.sh without exporting its own TMPDIR
+    left its files in the host's real /tmp, and one board-farm host
+    accumulated about 20,000 of them in three weeks. pytest prunes its
+    basetemp to the last three runs, so a sandbox there cleans itself up.
+
+    A test that exports TMPDIR inside the script it runs still wins: this
+    only changes what an unset TMPDIR falls back to. `tempfile` in the
+    pytest process itself is unaffected -- it caches gettempdir() once.
+
+    Measured on Linux only. A bash that does not inherit this process's
+    environment (test_bench_jlink_run.py documents an MSYS bash where
+    `env=` did not arrive) still falls back to its own /tmp.
+    """
+    monkeypatch.setenv("TMPDIR", str(tmp_path_factory.mktemp("tmpdir")))

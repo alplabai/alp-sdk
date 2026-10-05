@@ -3,11 +3,24 @@
 family: v2n-m1
 display_name: "E1M-X-V2N-M1 (Renesas RZ/V2N + DEEPX DX-M1)"
 
+# Altium board-number datecode (YYWW) shared by every revision of this module's
+# PCB (the board reads `2625-R2`). scripts/program_eeprom.py composes
+# `<board_datecode>-<rev key>` into the manifest's 8-byte hw_rev field, so a
+# provisioned unit can be tied back to its board number (see aen/hw-revisions.yaml).
+#
+# BUDGET: the manifest's hw_rev field is ALP_HW_INFO_HW_REV_LEN = 8 bytes, so the
+# composed string may be at most 7 characters plus its NUL.  `2625-r2` is exactly
+# 7 -- there is NO slack.  A future revision key of `r10` (`2625-r10`, 8 chars)
+# will not fit and program_eeprom.py will refuse to pack it.  Widening the field
+# is a schema_version bump; see docs/board-id.md.
+board_datecode: "2625"
+
 hw_revisions:
   r1:
     min_sdk_version: "0.3.0"
     max_sdk_version: ~
     status: production
+    board_rev: "R1"
     released: "2026-05-12"
     summary: |
       First production V2N-M1 revision (adds DEEPX DX-M1 NPU
@@ -18,7 +31,10 @@ hw_revisions:
   r2:
     min_sdk_version: ~
     max_sdk_version: ~
-    status: reserved
+    status: production
+    board_rev: "R2"
+    summary: |
+      Board rev `2625-R2`, provisioned from the 2026-W38 V2M103 batch onward.
   r3:
     min_sdk_version: ~
     max_sdk_version: ~

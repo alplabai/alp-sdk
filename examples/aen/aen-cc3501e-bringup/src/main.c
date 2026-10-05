@@ -1161,18 +1161,23 @@ int main(void)
 	/*
 	 * Step 5 -- read + check the protocol version.
 	 *
-	 * GET_VERSION returns the *protocol* version; it must match
-	 * ALP_CC3501E_PROTOCOL_VERSION for the wire contract to hold.
+	 * GET_VERSION returns the *protocol* version.  Only the MAJOR has to match
+	 * ALP_CC3501E_PROTOCOL_VERSION for the wire contract to hold; a MINOR skew is
+	 * additive and compatible (ADR 0033), so it is not reported as a mismatch.
 	 */
 	uint16_t version          = 0u;
 	s                         = cc3501e_get_version(&fw, &version);
 	g_cc3501e_witness.version = (uint32_t)version | ((uint32_t)(uint8_t)s << 16);
 	g_cc3501e_witness.phase   = CC3501E_PHASE_VERSION;
 	if (s == ALP_OK) {
+		const bool major_ok = ALP_CC3501E_PROTOCOL_VERSION_MAJOR(version) ==
+		                      ALP_CC3501E_PROTOCOL_VERSION_MAJOR(ALP_CC3501E_PROTOCOL_VERSION);
 		printf("[cc3501e-bringup] GET_VERSION -> protocol v%u (host expects v%u)%s\n",
 		       version,
 		       ALP_CC3501E_PROTOCOL_VERSION,
-		       (version == ALP_CC3501E_PROTOCOL_VERSION) ? " -- match" : " -- MISMATCH!");
+		       major_ok ? ((version == ALP_CC3501E_PROTOCOL_VERSION) ? " -- match"
+		                                                             : " -- match (MINOR skew ok)")
+		                : " -- MISMATCH!");
 	} else {
 		printf("[cc3501e-bringup] GET_VERSION -> %d\n", (int)s);
 	}

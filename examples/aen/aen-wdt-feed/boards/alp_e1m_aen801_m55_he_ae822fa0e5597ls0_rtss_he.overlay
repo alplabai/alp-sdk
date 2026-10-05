@@ -12,9 +12,10 @@
  * The driver reads its tick rate from the `clocks` phandle's `clock-frequency`
  * property at build time (DT_INST_PROP_BY_PHANDLE(0, clocks, clock_frequency)),
  * so we add a fixed-clock `rtss_he_clk` -- the same phandle the fork uses on the
- * HE core.  Its frequency is a TRM PLACEHOLDER: reload = timeout_ms * freq_khz,
- * so the API path is exact but the absolute timeout DURATION is unverified until
- * the real RTSS-HE watchdog clock is confirmed. [[project_pending_hw_configs]]
+ * HE core, at the fork's 160 MHz (ensemble_rtss_he.dtsi). Measured on
+ * E1M-AEN803: the watchdog counts at 160009 kHz, so reload = timeout_ms *
+ * freq_khz gives the requested timeout (the earlier 100 MHz placeholder made
+ * every timeout 0.625x too short).
  */
 
 / {
@@ -29,7 +30,7 @@
 	rtss_he_clk: rtss_he_clk {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
-		clock-frequency = <100000000>; /* PLACEHOLDER; confirm vs TRM */
+		clock-frequency = <160000000>; /* measured 160009 kHz */
 	};
 };
 

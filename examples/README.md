@@ -277,7 +277,7 @@ their filename (some of those internal dirs don't follow a
 
 ```
 examples/<name>/
-├── CMakeLists.txt    # invokes scripts/alp_project.py + delegates to west build
+├── CMakeLists.txt    # Zephyr app build (alp.conf comes from `tan build`)
 ├── prj.conf          # mostly empty -- feature selection is in board.yaml
 ├── board.yaml        # SoM + board + cores + peripherals + chip drivers
 ├── src/

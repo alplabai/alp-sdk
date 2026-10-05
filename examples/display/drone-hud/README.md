@@ -45,14 +45,18 @@ on-board sensor chips.
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/display/drone-hud
+# writes examples/display/drone-hud/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/display/drone-hud
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/display/drone-hud -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 
 Or in the desktop simulator:
 
 ```
-west build -b native_sim/native/64 examples/display/drone-hud
+# writes examples/display/drone-hud/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/display/drone-hud
+west build -b native_sim/native/64 examples/display/drone-hud -- -DEXTRA_CONF_FILE=generated/alp.conf
 build/zephyr/zephyr.exe
 ```
 

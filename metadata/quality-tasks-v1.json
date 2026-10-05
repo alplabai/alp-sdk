@@ -236,6 +236,21 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "chip-reg-parity",
+      "description": "act8760/da9292/tps628640 driver register-table <-> manifest parity gate -- fails when a driver's hand-written register table or raw-write allow-list drifts from metadata/chips/<part>.yaml.",
+      "runner": "check-script",
+      "script": "scripts/check_chip_reg_parity.py",
+      "gate": true,
+      "profiles": [
+        "quick",
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "chip-subsystems-parity",
       "description": "_CHIP_SUBSYSTEMS <-> Kconfig depends-on parity gate -- fails when a chip's Zephyr subsystem dependency isn't mirrored from zephyr/kconfigs/chips.kconfig.",
       "runner": "check-script",
@@ -1058,7 +1073,7 @@
     },
     {
       "id": "zephyr-conf-parity",
-      "description": "Byte-parity gate: an example CMakeLists.txt's --core-scoped alp_project.py --emit zephyr-conf and the planner's build-plan configArtefacts must materialise the identical alp.conf per Zephyr core.",
+      "description": "Byte-parity gate: the pre-generated per-core generated/alp.conf (gen_example_alp_conf.py), alp_project.py --emit zephyr-conf --core and the planner's build-plan configArtefacts must materialise the identical alp.conf per Zephyr example core; fails if an example CMakeLists.txt re-adds the configure-time bridge.",
       "runner": "check-script",
       "script": "scripts/check_zephyr_conf_parity.py",
       "gate": true,

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/camera-module-v1.schema.json",
+  "title": "alp-sdk camera module (v1)",
+  "description": "A purchasable camera module (sensor + FPC/board + oscillator) under metadata/camera_modules/<module_id>.yaml.  The sensor silicon lives in metadata/chips/<chip>.yaml; this file carries the module-level facts that the chip cannot know: which I2C address the module straps to, the oscillator it carries, and how many CSI-2 data lanes the module routes.  `module_id` reuses the Zephyr shield name where a shield exists.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "module_id", "display_name", "chip", "i2c_addr_7bit", "xclk_hz", "lanes"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "module_id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Unique id; must equal the file stem." },
+    "display_name": { "type": "string", "minLength": 1 },
+    "chip": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "chip_id of the sensor in metadata/chips/." },
+    "i2c_addr_7bit": { "type": "integer", "minimum": 0, "maximum": 127 },
+    "xclk_hz": { "type": "integer", "minimum": 1, "description": "Frequency of the module's own oscillator / sensor input clock." },
+    "lanes": { "type": "integer", "minimum": 1, "maximum": 4, "description": "CSI-2 data lanes the module routes to its connector." },
+    "zephyr_shield": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Name of the zephyr/boards/shields/<name> shield for this module, when one exists." },
+    "zephyr_host_overrides": {
+      "type": "object",
+      "description": "Properties a Zephyr shield generator must set on the SHARED capture-host nodes (not on the sensor node) for this module to stream, keyed by the host node's devicetree `compatible` (e.g. `snps,designware-csi` for `&csi`, `vsi,isp-pico` for `&isp`).  Values are DT scalars: integer, string or boolean (true = bare property).  Captures the per-module bench-proven CSI-2 host timing / ISP crop that is not derivable from the chip or the lane count.",
+      "propertyNames": { "pattern": "^[a-z0-9]+,[a-z0-9._-]+$" },
+      "additionalProperties": {
+        "type": "object",
+        "propertyNames": { "pattern": "^[a-z][a-z0-9-]*$" },
+        "additionalProperties": { "type": ["integer", "string", "boolean"] }
+      }
+    },
+    "notes": { "type": "string" }
+  }
+}

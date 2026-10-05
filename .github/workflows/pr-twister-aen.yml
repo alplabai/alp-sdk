@@ -55,12 +55,11 @@
 # across a handful of AEN-touching PRs (same graduation criteria as
 # pr-renode-aen-smoke.yml).
 #
-# Two known gaps this job does NOT paper over (both tracked, neither fixed
-# here -- neither has a testcase.yaml, so neither is selected today):
-# aen-npu-inference* (the tflite-micro/Ethos-U family) will need
-# `ethos-u-vela` on PATH once it gains a testcase.yaml -- tflite-micro and
-# hal_ethos_u are already unconditional west.yml groups, so no manifest
-# change, just a `pip install ethos-u-vela` step here. `aen-sdcard-readout`
+# aen-npu-inference-alp-u55 (the tflite-micro/Ethos-U family) has a
+# testcase.yaml since #916, so this job pip-installs `ethos-u-vela` below;
+# tflite-micro and hal_ethos_u are already unconditional west.yml groups.
+# Its build uses Vela's built-in system config (no proprietary Alif .ini in
+# CI), so it proves the build, not the bench command stream. `aen-sdcard-readout`
 # (renamed aen-sdhc-probe by #2051) was the one example #1095 left without a
 # testcase.yaml, because its driver
 # (zephyr/drivers/sdhc/sdhc_dwc.c) expanded
@@ -79,17 +78,21 @@
 # headroom left. Those ~50, plus 9 more scenarios that ship no boards/
 # directory at all (an app.overlay-only or overlay-free shape, safe to
 # declare AEN803 for without a matching boards/ file), are declared now,
-# taking a `--dry-run` count over examples/aen + firmware-update-log +
-# drone-autopilot to 153 configurations total (78 AEN801, 75 AEN803) --
-# past the single-job cap on any linear projection. The `twister-aen` job
-# below is now a 2-way SKU matrix (AEN801, AEN803) instead of one job
-# building all four board targets, so the two SKUs build in parallel and
-# each job's own twister step only ever selects its own SKU's two
-# platforms (`-p` flags). Neither is a required branch-protection check on
-# `dev` (the required contexts are `twister · native_sim/native/64`,
-# `clang-format · diff-only` and `distro install · all`), so the split
-# blocks nothing. The `--testsuite-root` list stays a single block below,
-# shared by both matrix legs, rather than duplicated per SKU.
+# taking a `--dry-run` count AT THAT TIME (#2209) over examples/aen +
+# firmware-update-log + drone-autopilot to 153 configurations total (78
+# AEN801, 75 AEN803) -- past the single-job cap on any linear projection.
+# This count is a historical snapshot, not current -- the tree has grown
+# since; the AUTHORITATIVE current count lives in the camera-mjpeg-stream
+# comment further down this job's twister step (search AUTHORITATIVE), not
+# here. The `twister-aen` job below is now a 2-way SKU matrix (AEN801,
+# AEN803) instead of one job building all four board targets, so the two
+# SKUs build in parallel and each job's own twister step only ever selects
+# its own SKU's two platforms (`-p` flags). Neither is a required
+# branch-protection check on `dev` (the required contexts are
+# `twister · native_sim/native/64` (aggregator of `twister-shard i/N`), `clang-format · diff-only` and `distro
+# install · all`), so the split blocks nothing. The `--testsuite-root`
+# list stays a single block below, shared by both matrix legs, rather than
+# duplicated per SKU.
 
 name: pr-twister-aen
 
@@ -100,18 +103,26 @@ on:
       - 'examples/aen/**'
       - 'examples/connectivity/camera-mjpeg-stream/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/connectivity/iot-dashboard/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
+      - 'examples/peripheral-io/alp-console/**'
+      - 'examples/peripheral-io/blink/**'
       - 'examples/peripheral-io/drone-autopilot/**'
+      - 'examples/peripheral-io/pwm-led-fade/**'
+      - 'examples/peripheral-io/qenc-readout/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_hp/**'
+      - 'zephyr/boards/shields/**'
       - 'zephyr/soc-bridge/**'
       - 'src/backends/mproc/**'
       - 'src/backends/power/alif_se_profile.c'
       - 'src/backends/soc_info/alif_se.c'
       - 'src/backends/update_log/**'
+      - 'zephyr/drivers/display/**'
+      - 'zephyr/drivers/mipi_dsi/**'
       - 'zephyr/drivers/sdhc/**'
       - 'zephyr/dts/alif/**'
       - 'zephyr/include/zephyr/dt-bindings/clock/**'
@@ -121,24 +132,33 @@ on:
       - 'west.yml'
       - 'metadata/toolchains.json'
       - '.github/workflows/pr-twister-aen.yml'
+      - 'scripts/select_aen_twister.py'
   push:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
       - 'examples/connectivity/camera-mjpeg-stream/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/connectivity/iot-dashboard/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
+      - 'examples/peripheral-io/alp-console/**'
+      - 'examples/peripheral-io/blink/**'
       - 'examples/peripheral-io/drone-autopilot/**'
+      - 'examples/peripheral-io/pwm-led-fade/**'
+      - 'examples/peripheral-io/qenc-readout/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_hp/**'
+      - 'zephyr/boards/shields/**'
       - 'zephyr/soc-bridge/**'
       - 'src/backends/mproc/**'
       - 'src/backends/power/alif_se_profile.c'
       - 'src/backends/soc_info/alif_se.c'
       - 'src/backends/update_log/**'
+      - 'zephyr/drivers/display/**'
+      - 'zephyr/drivers/mipi_dsi/**'
       - 'zephyr/drivers/sdhc/**'
       - 'zephyr/dts/alif/**'
       - 'zephyr/include/zephyr/dt-bindings/clock/**'
@@ -148,41 +168,72 @@ on:
       - 'west.yml'
       - 'metadata/toolchains.json'
   workflow_dispatch:
+  # #2541: nightly run on the default branch (dev), so the ccache PR runs
+  # restore is refreshed regardless of what changed. A dev push saves it
+  # only when it touches the path list above -- which does not list this
+  # file, so not even the merge that adds the cache would seed it -- while
+  # every alp-sdk source file compiled into these apps (src/**, chips/**)
+  # can move on dev without triggering a save. Offset from
+  # pr-twister.yml's 02:17 so the two nightly runs do not contend for the
+  # same runner slots. Best-effort: the concurrency group below is per
+  # ref, so a dev push landing mid-run cancels the nightly one (that push
+  # run then saves instead, if its paths matched).
+  schedule:
+    - cron: '47 2 * * *'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Per-SKU change-aware selection (#2541).  On a pull_request this drops the
+  # SKU whose legs cannot build anything the PR changed (see
+  # scripts/select_aen_twister.py); push, schedule and dispatch always run
+  # every leg.  Any error falls back to the full matrix.  This workflow is
+  # path-filtered, so it is not a required context: a zero-leg PR run simply
+  # skips `twister-aen`.
+  select:
+    name: twister-aen · select
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      # fetch-depth 2: HEAD^1 is the base tip of the merge commit.
+      - name: Checkout alp-sdk
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Select AEN SKU legs (scripts/select_aen_twister.py)
+        id: select
+        timeout-minutes: 5
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -u
+          base=
+          [ "$EVENT" = pull_request ] && base=HEAD^1
+          if ! python3 scripts/select_aen_twister.py ${base:+--base "$base"} --github-output; then
+            echo "::warning::select_aen_twister.py errored; running every AEN leg"
+            python3 - >> "$GITHUB_OUTPUT" <<'PY'
+          import sys
+          sys.path.insert(0, "scripts")
+          import json, select_aen_twister as s
+          print("matrix=" + json.dumps(s.matrix(list(s.SKUS))))
+          PY
+          fi
+
   twister-aen:
-    # #2209: one job per SKU, running in parallel, instead of one job
-    # building all four board targets. Each leg selects only its own SKU's
-    # two platforms (M55-HE + M55-HP) via matrix.platform_flags -- see the
-    # twister step below. A `--dry-run` over examples/aen +
-    # firmware-update-log + drone-autopilot on this tree counts 78 AEN801
-    # configurations and 75 AEN803 (153 total), against the pre-split
-    # single-job worst case of 92 that took 24m21s (#2198). Scaling that
-    # 1461s/92-build rate linearly, AEN801 (78 builds) projects to about
-    # 1240s/20.7min and AEN803 (75 builds) to about 1195s/19.9min -- both
-    # comfortably under the 30min twister-step cap and the 41min job
-    # ceiling below, so neither is tightened; a job-level timeout tighter
-    # than the shared 41min ceiling would need its own re-derivation per
-    # SKU for a margin this change does not need yet.
+    needs: select
+    if: needs.select.outputs.matrix != '[]'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - sku: aen801
-            label: AEN801 (M55-HE + M55-HP)
-            platform_flags: >-
-              -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
-              -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
-          - sku: aen803
-            label: AEN803 (M55-HE + M55-HP)
-            platform_flags: >-
-              -p alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
-              -p alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
-    name: twister · ${{ matrix.label }}
+        include: ${{ fromJSON(needs.select.outputs.matrix) }}
+    name: twister · ${{ matrix.label }} · ${{ matrix.subset }}/2
     runs-on: ubuntu-latest
     # #1477: raised from 30 -> 41 (corrected from a 3-run sample that
     # overstated this to 60). True worst observed job wall, pre-split, was
@@ -203,6 +254,28 @@ jobs:
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+      # #2541: Zephyr's cmake/modules/ccache.cmake launches every compile
+      # through ccache whenever the binary is on PATH (the apt step below
+      # installs it), so this job always filled a ccache -- in the runner's
+      # default $HOME/.cache/ccache, thrown away with the runner. Point it
+      # at a directory the restore/save steps below persist, per SKU leg and
+      # subset half.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      # Rewrite absolute paths under the workspace to relative ones before
+      # hashing, so an object compiled in one run's checkout still hits in
+      # the next run's.
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      # arm-zephyr-eabi compiles pass --specs=<file> (picolibc); leave it
+      # out of the hash the way upstream Zephyr's own twister.yaml does.
+      CCACHE_IGNOREOPTIONS: '-specs=* --specs=*'
+      # The repo's 10 GB Actions cache was already at 10.6 GB on
+      # 2026-09-30 (six native_sim shard caches, the tier-a caches and
+      # the Zephyr workspace caches), so each leg's set is capped
+      # tighter than pr-twister.yml's shards leave theirs. Measured on PR
+      # #2553's cold runs, a whole (pre-split) SKU leg filled 0.4-0.5 GB,
+      # so one subset half sits well under this cap; the stats step below
+      # keeps reporting the real size and hit rate.
+      CCACHE_MAXSIZE: 1G
 
     steps:
       - name: Checkout alp-sdk
@@ -304,6 +377,19 @@ jobs:
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements.txt"
 
+      # aen-npu-inference-alp-u55's testcase.yaml (#916) Vela-compiles its
+      # model at CMake time, so `vela` must be on PATH or every leg that
+      # selects it fails "vela not found". Same release pyproject.toml pins
+      # for the committed NPU op tables -- read from there, not repeated.
+      - name: pip install ethos-u-vela (pyproject.toml pin)
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          pin=$(grep -o '"ethos-u-vela==[0-9.]*"' "${GITHUB_WORKSPACE}/alp-sdk/pyproject.toml" | tr -d '"')
+          test -n "$pin"
+          pip3 install "$pin"
+          vela --version
+
       # metadata/toolchains.json (issue #949 item 3) is the single source
       # for the pinned Zephyr SDK version/URL/sha256 -- scripts/
       # check_toolchain_lock.py gates this file staying in lockstep with it.
@@ -345,17 +431,34 @@ jobs:
           "$HOME/zephyr-sdk/setup.sh" -t arm-zephyr-eabi -c
           echo "ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk" >> "$GITHUB_ENV"
 
+      # #2541: restore this SKU leg's ccache. Restore-only on PRs; the
+      # save step after twister runs on a dev push or the nightly run
+      # alone, the same split pr-twister.yml uses and for the same
+      # reason: a PR can only restore
+      # its own ref's, its base branch's and the default branch's caches,
+      # so a PR-saved set would only evict dev's from the 10 GB budget.
+      # restore-keys falls back to the newest dev set for this SKU.
+      - name: Restore ccache objects
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ runner.os }}-twister-aen-${{ matrix.sku }}-subset${{ matrix.subset }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-twister-aen-${{ matrix.sku }}-subset${{ matrix.subset }}-
+
       # Run twister against this matrix leg's own SKU only -- both its
       # M55-HE and M55-HP board targets (matrix.platform_flags, see the
       # job-level `strategy:` above). alp-sdk#2084 -- a board's generated
       # tree gets no real CI coverage without a -p flag AND a matching
       # platform_allow entry; a testcase.yaml change alone selects nothing
       # here. The --testsuite-root list below is scoped to examples/aen --
-      # the testcase.yaml files whose platform_allow names an AEN target
-      # are the entire point; nothing outside that tree is in scope for
-      # this job. examples/connectivity/firmware-update-log is a second,
-      # bounded root (issue #1101): it is the one non-examples/aen example
-      # with AEN801 platform_allow entries, kept as its own
+      # plus the bounded roots enumerated below; the testcase.yaml files
+      # whose platform_allow names an AEN target are the entire point;
+      # nothing outside these ten roots is in scope for this job.
+      # examples/connectivity/firmware-update-log is a second,
+      # bounded root (issue #1101): at #1101 it was the one non-examples/aen
+      # example with AEN801 platform_allow entries, kept as its own
       # --testsuite-root rather than widened to all of examples/ (this
       # job's stated disk-budget concern, see the header comment) or moved
       # under examples/aen (it is a portable <alp/update_log.h> demo, not
@@ -374,8 +477,9 @@ jobs:
       # its AEN hardware scenario named a board target it shipped no
       # overlay for, so the alp-i2c0/alp-uart1/alp-pwm0..3 aliases its
       # overlay wires were silently dropped and nothing built to notice.
-      # Bounded to this one example, not widened to examples/peripheral-io/
-      # -- every other example there is native_sim-only (see #2106).
+      # #2235 adds its AEN803 M55-HP boards/ overlay and widens that same
+      # scenario's platform_allow to name the AEN803 M55-HP target too, so
+      # this root now declares both SKUs.
       # examples/connectivity/mqtt-telemetry and .../iot-fleet-ota are the
       # fourth and fifth bounded roots (issue #2173). Neither had ANY AEN
       # coverage here: mqtt-telemetry shipped no AEN scenario at all, and
@@ -390,6 +494,17 @@ jobs:
       # matrix leg and select nothing on the AEN803 one -- these two apps
       # have no AEN803 coverage, and #2209's per-SKU declaration sweep did
       # not reach them (they sit outside examples/aen).
+      # examples/connectivity/iot-dashboard is the third `--testsuite-root`
+      # line below, also issue #2173 item (3): its AEN scenario named
+      # `ensemble_e8_dk/...` the same way iot-fleet-ota's did, and had no
+      # panel wired at all (LVGL needs a `zephyr,display` chosen node, and
+      # the ST7789 its board.yaml used to declare has no working SPI route
+      # on the EVK). The example's own
+      # CMakeLists.txt now applies the e1m_evk_rk055hdmipi4ma0 DSI shield
+      # (the #2204 panel) for the AEN M55-HP board targets, and the scenario
+      # names BOTH alp_e1m_aen801_m55_hp and alp_e1m_aen803_m55_hp -- unlike
+      # mqtt-telemetry/iot-fleet-ota above, this one contributes a scenario
+      # to BOTH matrix legs.
       # examples/connectivity/camera-mjpeg-stream is the sixth bounded root
       # (issue #2265): before this, its AEN801/AEN803 build-only scenario
       # (real camera + Hantro JPEG + interim Ethernet, needing both the
@@ -398,15 +513,48 @@ jobs:
       # board target for it, so a regression in that pipeline would only
       # surface on the next real bench flash. Same shape as the roots
       # above: one example, bounded, build_only, not widened to any other
-      # directory. `--dry-run` against this job's full root list, before
-      # vs. after adding this root: +1 AEN801 configuration (83 -> 84),
-      # +1 AEN803 configuration (78 -> 79) -- one testcase.yaml scenario
-      # with a two-entry platform_allow. NOT reconciled against the two
-      # older total counts above/below this step (153/144) -- both
-      # already predate this addition by an amount this change did not
-      # introduce (neither matches this measurement's own 83+78=161
-      # baseline either, so the drift is pre-existing, not new here).
-      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream
+      # directory.
+      # AUTHORITATIVE scenario count for this job's root list --
+      # re-derived 2026-10-01 (#2235, folding in #2521's qenc-readout root)
+      # with a single `--dry-run` per leg over the exact eleven roots +
+      # `-p` flags this step uses, at HEAD after the dev merge that brought
+      # in #2541's ccache/subset split: 107 AEN801 configurations
+      # (90 M55-HE + 17 M55-HP), 105 AEN803 (88 M55-HE + 17 M55-HP), 212
+      # total. This is the only current count in this file; every other
+      # scenario count in it (header, ADVISORY note, job comments)
+      # describes the tree when its cited issue landed, not HEAD -- trust
+      # this one.
+      # The timeout-minutes comment below does the latter -- it does not
+      # carry its own count.
+      # examples/peripheral-io/alp-console, .../blink and .../pwm-led-fade
+      # are the seventh, eighth and ninth bounded roots (issue #2235, the
+      # unlanded remainder of closed PR #2232). None of the three shipped
+      # an AEN803 boards/ overlay on dev -- each had only its AEN801
+      # boards/ files (blink and pwm-led-fade shipped HE + HP AEN801
+      # overlays; alp-console an overlay + .conf), and no testcase.yaml
+      # scenario ever selected even that, so the three examples were
+      # native_sim-only in CI and neither SKU's
+      # real-silicon build was gated. #2235 adds each example's AEN803
+      # boards/ twin (DT/Kconfig content held equal to the AEN801 file by
+      # check_example_board_overlay_content_parity.py) plus one build_only
+      # AEN scenario naming both SKUs for every core it ships an overlay
+      # for (alp-console: M55-HE; blink and pwm-led-fade: M55-HP only --
+      # both declare only cores.m55_hp in board.yaml, so no M55-HE twin).
+      # Bounded to these
+      # four examples (this trio plus drone-autopilot above), not widened to
+      # all of examples/peripheral-io/ -- every OTHER example there stays
+      # native_sim-only (see #2106).
+      # examples/peripheral-io/qenc-readout is the tenth bounded root
+      # (issue #2521, folded into #2235/#2239 on review): its AEN scenario
+      # (alp_sdk.example.qenc_readout.aen, landed by #2522) names all four
+      # AEN board targets -- both SKUs, both cores -- but no CI job ever
+      # selected it, since this was the only `--testsuite-root` list that
+      # reaches an AEN target and it had no entry for this example. It
+      # ships an AEN803 twin overlay/.conf pair for both cores already
+      # (`examples/peripheral-io/qenc-readout/boards/`), so adding the root
+      # here is a pure CI-coverage gap fix, not a new example change.
+      - name: twister · ${{ matrix.label }} · ${{ matrix.subset }}/2 on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard + alp-console + blink + pwm-led-fade + qenc-readout
+        id: twister
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -414,41 +562,102 @@ jobs:
         # #1477: worst observed successful run 1167s/19.45min across 10
         # sampled runs of the PRE-#2209 combined job (both SKUs, ~92
         # builds). 30min was already ~1.54x that, kept under the job's own
-        # 41min ceiling (see that job-level comment). Not re-derived per
-        # SKU post-split: a local `--dry-run` count on this tree gives 78
-        # AEN801 configurations and 66 AEN803 (144 total, up from 92) --
-        # scaled linearly off the 1461s/92-build #2198 measurement, AEN801
-        # projects to about 1240s/20.7min and AEN803 to about 1050s/17.5min,
-        # both still comfortably under this 30min cap. Revisit if a future
-        # scenario count pushes either leg close to it.
-        timeout-minutes: 30
+        # 41min ceiling (see that job-level comment). Scenario count is not
+        # re-derived here -- see the AUTHORITATIVE `--dry-run` count in the
+        # camera-mjpeg-stream comment above this step, not restated here.
+        # Scaled linearly off the 1461s/92-build #2198 measurement
+        # (15.9 s/build) at that count: AEN801 (103) projects to
+        # about 1638s/27.3min (~9% headroom under this 30min cap), AEN803
+        # (101) to about 1606s/26.8min (~11% headroom) -- inside the cap,
+        # but thin; #2541 tracks persisting ccache to win headroom back.
+        # Revisit if a future scenario count pushes either leg closer to
+        # it -- the AEN801 leg in particular has less room left than
+        # AEN803.
+        # #2541: that projection turned out optimistic. On PR #2239's
+        # merged head (103 AEN801 + 101 AEN803 configurations) the step
+        # measured 1730s/28.8min on AEN801 and 1659s/27.7min on AEN803,
+        # 70s under the old 30min cap. Raised to 34: with the ~3min of
+        # setup ahead of it that leaves ~4min under the 41min job ceiling
+        # for the stats, upload, trim and save steps behind it -- if the
+        # job ceiling fired first the run would count as cancelled and
+        # the timed-out leg would save nothing. Since the --subset split
+        # above (one half of a SKU leg per job) the cap has wide headroom;
+        # it stays at 34 as the ceiling a hang trips, not a performance
+        # target.
+        timeout-minutes: 34
         run: |
+          # Zero the counters so the summary below reports this run only.
+          ccache -z >/dev/null
+          # Each example's testcase.yaml points EXTRA_CONF_FILE at its
+          # generated/alp.conf; twister configures from the source tree, so
+          # write those fragments first (#866).
+          python3 "$GITHUB_WORKSPACE/alp-sdk/scripts/gen_example_alp_conf.py"
           python3 zephyr/scripts/twister \
             ${{ matrix.platform_flags }} \
+            --subset ${{ matrix.subset }}/2 \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/firmware-update-log" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-dashboard" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/drone-autopilot" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/mqtt-telemetry" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-fleet-ota" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/camera-mjpeg-stream" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/alp-console" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/blink" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/pwm-led-fade" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/qenc-readout" \
             --inline-logs \
             --no-detailed-test-id
 
+      # Hit rate in the log, so a cold or ineffective cache is visible,
+      # not guessed (#2541 decides its next step on this number). Its own
+      # step so it also prints after a red or timed-out twister run.
+      - name: ccache statistics
+        if: ${{ !cancelled() }}
+        timeout-minutes: 1
+        run: ccache -s -v
+
       # Persist the twister REPORTS regardless of pass/fail, same
       # rationale (and same NOT-the-whole-twister-out/-tree caveat) as
-      # pr-twister.yml. Named per SKU (twister-out-${{ matrix.sku }}) --
+      # pr-twister.yml. Named per SKU and subset
+      # (twister-out-${{ matrix.sku }}-${{ matrix.subset }}) --
       # `upload-artifact` names must be unique within a workflow run, and
-      # the matrix now runs two legs in the same run.
+      # the matrix runs four jobs in the same run.
       - name: Upload twister reports artefact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         # #1477: worst observed successful run 2s across 10 sampled runs.
         timeout-minutes: 1
         with:
-          name: twister-out-${{ matrix.sku }}
+          name: twister-out-${{ matrix.sku }}-${{ matrix.subset }}
           path: |
             twister-out/*.json
             twister-out/*.xml
             twister-out/*.log
           retention-days: 14
           if-no-files-found: ignore
+
+      # #2541: save this leg's ccache on a dev push or the nightly run
+      # only (see the restore step). `!cancelled()` rather than pr-twister.yml's implicit
+      # success(): a twister step that goes red or hits its cap has still
+      # compiled most of its configurations, and ccache is content-
+      # addressed, so a partial set is valid and is exactly what the next
+      # run needs to get back under the cap. The twister step must have
+      # run, though: a run that failed in setup restored a warm set it
+      # never touched, and trimming + saving that would publish a
+      # near-empty set as the newest key every later run restores. Trim to this run's working
+      # set first so the saved set does not grow across saves (ccache
+      # refreshes an entry's mtime on every hit).
+      - name: Trim ccache to this run's working set (dev push + nightly only)
+        if: ${{ !cancelled() && steps.twister.outcome != 'skipped' && github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+        timeout-minutes: 5
+        # 10800s, not 3h: ubuntu-latest's apt ccache (4.9.1) accepts only
+        # the d and s suffixes and exits 1 on "3h" (#2541).
+        run: ccache --evict-older-than 10800s
+      - name: Save ccache objects (dev push + nightly only)
+        if: ${{ !cancelled() && steps.twister.outcome != 'skipped' && github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-${{ runner.os }}-twister-aen-${{ matrix.sku }}-subset${{ matrix.subset }}-${{ github.sha }}

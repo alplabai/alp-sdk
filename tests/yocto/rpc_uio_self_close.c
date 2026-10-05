@@ -175,15 +175,20 @@ static void *fake_irq_worker(void *arg)
 		g_mailbox_full      = false;
 		pthread_mutex_unlock(&g_mailbox_lock);
 
+		/* Mirrors uio_rproc_notify_isr()'s own prologue/epilogue (the
+		 * whole-handler isr_active count y_shutdown() drains, and the
+		 * no-touch-after-decrement ordering) -- see this file's header
+		 * comment. */
+		atomic_fetch_add(&f.ch->isr_active, 1);
 		(void)uio_ept_cb(NULL, f.bytes, f.len, 0, f.ch);
 
-		/* Mirrors uio_rproc_notify_isr()'s own epilogue -- see this
-		 * file's header comment. */
 		pthread_mutex_lock(&f.ch->call_mutex);
 		bool close_from_worker = f.ch->close_from_worker;
 		pthread_mutex_unlock(&f.ch->call_mutex);
+		void *owner = f.ch->owner;
+		atomic_fetch_sub(&f.ch->isr_active, 1);
 		if (close_from_worker) {
-			alp_rpc_close_finalize(f.ch->owner);
+			alp_rpc_close_finalize(owner);
 			atomic_fetch_add(&g_worker_finalize_count, 1);
 		}
 	}
@@ -279,6 +284,7 @@ static struct rpc_be *make_test_channel(void)
 	strncpy(ch->name, "uio_selfclose", sizeof(ch->name) - 1);
 	pthread_mutex_init(&ch->tx_mutex, NULL);
 	pthread_mutex_init(&ch->sub_mutex, NULL);
+	pthread_mutex_init(&ch->call_serial, NULL);
 	pthread_mutex_init(&ch->call_mutex, NULL);
 	pthread_cond_init(&ch->call_cond, NULL);
 	ch->mhu_irq = -1;
@@ -500,6 +506,112 @@ static void test_call_vs_close_no_uaf(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* 4b. Callback-side lock/unsubscribe contracts.                        */
+/* ------------------------------------------------------------------ */
+
+static alp_rpc_backend_state_t g_cbt_state;
+static atomic_int              g_cbt_entered;
+static atomic_int              g_cbt_done;
+static alp_status_t            g_cbt_send_rc;
+static alp_status_t            g_cbt_call_rc;
+static alp_status_t            g_cbt_unsub_rc;
+
+static struct rpc_be *cbt_setup(const char *method, alp_rpc_method_cb_t cb)
+{
+	atomic_store(&g_cbt_entered, 0);
+	atomic_store(&g_cbt_done, 0);
+	struct rpc_be *ch   = make_test_channel();
+	g_cbt_state.be_data = ch;
+	g_cbt_state.ops     = &_ops;
+	g_cbt_state.owner   = &g_cbt_state;
+	ch->owner           = &g_cbt_state;
+	ALP_ASSERT_EQ_INT(y_subscribe(&g_cbt_state, method, cb, ch), ALP_OK);
+	return ch;
+}
+
+/* y_unsubscribe() must not return while the method's callback still runs. */
+static void on_slow_cb(const void *payload, size_t len, void *user)
+{
+	(void)payload;
+	(void)len;
+	(void)user;
+	atomic_store(&g_cbt_entered, 1);
+	sleep_ms(50);
+	atomic_store(&g_cbt_done, 1);
+}
+
+static void test_unsubscribe_waits_for_inflight_callback(void)
+{
+	struct rpc_be *ch = cbt_setup("slow", on_slow_cb);
+	deliver_frame_via_fake_irq_thread(ch, "slow", NULL, 0);
+	ALP_ASSERT_TRUE(wait_until(&g_cbt_entered, TEST_TIMEOUT_MS));
+
+	ALP_ASSERT_EQ_INT(y_unsubscribe(&g_cbt_state, "slow"), ALP_OK);
+	ALP_ASSERT_TRUE(atomic_load(&g_cbt_done) == 1);
+
+	do_close(&g_cbt_state);
+}
+
+/* ...but a callback unsubscribing itself on the IRQ thread must not wait on itself. */
+static void on_self_unsub_cb(const void *payload, size_t len, void *user)
+{
+	(void)payload;
+	(void)len;
+	(void)user;
+	g_cbt_unsub_rc = y_unsubscribe(&g_cbt_state, "selfunsub");
+	atomic_store(&g_cbt_done, 1);
+}
+
+static void test_unsubscribe_from_callback_does_not_hang(void)
+{
+	struct rpc_be *ch = cbt_setup("selfunsub", on_self_unsub_cb);
+	deliver_frame_via_fake_irq_thread(ch, "selfunsub", NULL, 0);
+	ALP_ASSERT_TRUE(wait_until(&g_cbt_done, 1000));
+	ALP_ASSERT_EQ_INT(g_cbt_unsub_rc, ALP_OK);
+
+	do_close(&g_cbt_state);
+}
+
+/* A callback's y_send() must not queue behind another thread's pending
+ * y_call(), and a callback's y_call() must be refused, not block. */
+static void on_send_and_call_cb(const void *payload, size_t len, void *user)
+{
+	(void)payload;
+	(void)len;
+	(void)user;
+	g_cbt_send_rc = y_send(&g_cbt_state, "x", NULL, 0);
+	g_cbt_call_rc = y_call(&g_cbt_state, "x", NULL, 0, NULL, NULL, UINT32_MAX);
+	atomic_store(&g_cbt_done, 1);
+}
+
+static void *pending_call_thread(void *arg)
+{
+	(void)arg;
+	uint8_t resp[8];
+	size_t  resp_len = sizeof resp;
+	(void)y_call(&g_cbt_state, "no_such_method", NULL, 0, resp, &resp_len, UINT32_MAX);
+	return NULL;
+}
+
+static void test_callback_send_and_call_do_not_block_on_pending_call(void)
+{
+	struct rpc_be *ch = cbt_setup("sendcall", on_send_and_call_cb);
+
+	pthread_t caller;
+	ALP_ASSERT_EQ_INT(pthread_create(&caller, NULL, pending_call_thread, NULL), 0);
+	sleep_ms(20); /* let it hold call_serial in its wait */
+
+	deliver_frame_via_fake_irq_thread(ch, "sendcall", NULL, 0);
+	ALP_ASSERT_TRUE(wait_until(&g_cbt_done, 1000));
+	ALP_ASSERT_EQ_INT(g_cbt_send_rc, ALP_OK);
+	ALP_ASSERT_EQ_INT(g_cbt_call_rc, ALP_ERR_BUSY);
+
+	ALP_ASSERT_TRUE(y_shutdown(&g_cbt_state) == ALP_RPC_SHUTDOWN_DONE);
+	ALP_ASSERT_EQ_INT(pthread_join(caller, NULL), 0);
+	y_destroy(&g_cbt_state);
+}
+
+/* ------------------------------------------------------------------ */
 /* 5. alp-sdk #735: ALP_UIO_MHU_KICK_SLOT override boundary checks.     */
 /* ------------------------------------------------------------------ */
 
@@ -707,6 +819,9 @@ int main(void)
 	test_external_close_without_callback_is_synchronous();
 	test_concurrent_external_vs_self_close_is_single_shot();
 	test_call_vs_close_no_uaf();
+	test_unsubscribe_waits_for_inflight_callback();
+	test_unsubscribe_from_callback_does_not_hang();
+	test_callback_send_and_call_do_not_block_on_pending_call();
 
 	test_mhu_kick_slot_default();
 	test_mhu_kick_slot_valid_override();

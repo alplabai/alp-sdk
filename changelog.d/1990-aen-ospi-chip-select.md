@@ -28,7 +28,7 @@ population) but nobody has probed OSPI0_SS0/OSPI0_SS1 on E3–E7 silicon to
 confirm it.
 
 The same audit found the five presets' `hyperram:` blocks omitted
-`assembled:` entirely — the exact key `som-preset-v1.schema.json`'s own
+`assembled:` entirely — the exact key `som-preset-v2.schema.json`'s own
 description calls "load-bearing" (defaults `true`, and E1M-AEN801 is on
 record for advertising 256 Mbit of external RAM it does not populate
 because of this same omission). This fragment's first pass made it
@@ -53,7 +53,7 @@ preset, including `E1M-AEN803.yaml`'s 2-CS OSPI0 controller, ever declares
 a third). Setting `chip_select: 9` on `E1M-AEN803.yaml` and re-running
 `validate_metadata.py` left every check green. Added
 `"maximum": 1` to both `$defs/ospi_memory.chip_select` and
-`$defs/hyperram.chip_select` in `metadata/schemas/som-preset-v1.schema.json`,
+`$defs/hyperram.chip_select` in `metadata/schemas/som-preset-v2.schema.json`,
 and `tests/scripts/test_ospi_chip_select_bound.py` to pin the boundary (0/1
 accepted, 2/9 rejected) so the next typo fails schema validation instead of
 shipping silently.
