@@ -247,7 +247,8 @@ ALP_BOARD_FDT_NAME  = "${@os.path.basename((d.getVar('KERNEL_DEVICETREE') or '')
 
 alp_link_vendor_fdt_name() {
 	# Either condition makes an unbootable image: CONFIG_BOOTCOMMAND refuses
-	# to boot when neither boot/${fdtfile} nor boot/${fdtfile_alt} loads.
+	# to boot when boot/${fdtfile} (and, for a unit with no known family,
+	# boot/${fdtfile_alt}) does not load.
 	if [ -z "${ALP_BOARD_FDT_NAME}" ]; then
 		bbfatal "no KERNEL_DEVICETREE for ${MACHINE}; U-Boot would not find a board dtb"
 	elif [ ! -e "${IMAGE_ROOTFS}/boot/${ALP_BOARD_FDT_NAME}" ]; then

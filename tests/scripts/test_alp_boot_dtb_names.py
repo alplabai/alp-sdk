@@ -46,3 +46,12 @@ def test_fdtfile_chain_has_one_alt_and_the_default_is_in_the_table():
     v2n = re.search(r'default "(e1m-v2n[^"]+\.dtb)"', (UBOOT / "0002-rzv2n-dev-ALP-E1M-production-boot.patch").read_text(encoding="utf-8")).group(1)
     assert len(table) == 2 and {v2m, v2n} <= set(table)
     assert "boot/${fdtfile_alt}; then" in patch and "ALP_FDTFILE_TRY" not in patch
+
+
+def test_fdtfile_chain_fails_closed_for_a_known_family():
+    """A known family sets no fdtfile_alt and the bootcmd refuses on an empty one."""
+    patch = (UBOOT / "0013-rzv2n-dev-ALP-E1M-fdtfile-from-eeprom.patch").read_text(encoding="utf-8")
+    assert 'elif test -z \\"${fdtfile_alt}\\"; then' in patch
+    assert "refusing to boot another SoM's device tree" in patch
+    assert "if (!known) {" in patch  # fdtfile_alt is computed only for the no-family case
+    assert "CMD_RET_FAILURE" in patch

@@ -354,12 +354,14 @@ SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.
 # 'env default -a' wipe, which would erase anything board_late_init() set.
 # Before this, a blank E1M-V2N103 bootstrapped with a V2M FIP could not boot
 # its own V2N wic: the build-time name pointed at the V2M dtb.
-# What is fixed: a unit with a valid manifest picks its family's dtb; a
-# blank-EEPROM unit (no family -- provisioning's boot_sd_linux runs before
-# eeprom_manifest) falls through the bootcmd chain (boot/${fdtfile}, then
-# boot/${fdtfile_alt}, the other dtb in the one family table; the build
-# default is always one of the two) to whichever dtb its image ships, since
-# each image holds only its own MACHINE's dtb.
+# The choice FAILS CLOSED: a unit with a valid manifest and a known family
+# loads boot/${fdtfile} only (fdtfile_alt is empty) and, if the image lacks
+# that dtb, refuses to boot rather than load another SoM's device tree. Only
+# a blank-EEPROM unit (no family -- provisioning's boot_sd_linux runs before
+# eeprom_manifest) takes the build default and falls through boot/${fdtfile}
+# then boot/${fdtfile_alt} (the other dtb in the one family table) to
+# whichever dtb its image ships, since each image holds only its own
+# MACHINE's dtb.
 #
 # Lands after 0011: it edits board_late_init()'s helpers around 0009/0010's
 # alp_serial capture and the CONFIG_BOOTCOMMAND line 0010 left, so it must

@@ -10,17 +10,20 @@ command, run by `CONFIG_BOOTCOMMAND` right after `env default -a`, that sets
 `e1m-v2m101-x-evk.dtb`, `v2n` -> `e1m-v2n101-x-evk.dtb`. One U-Boot binary now
 boots the right dtb on whichever SoM it runs on.
 
-A unit with a valid manifest therefore picks its own family's dtb. A blank
-unit (no valid manifest, so no family; provisioning's `boot_sd_linux` runs
-before `eeprom_manifest`, so first boot is always blank) prints one
-`ALP: fdtfile ...` line, keeps the `CONFIG_ALP_E1M_FDTFILE` default
-(`fdtfile-v2m.cfg` sets it for V2M MACHINEs), and the load then falls through
-`boot/${fdtfile}` then `boot/${fdtfile_alt}` (the other dtb in the one family
-table; the default is always one of the two, so no name is tried or reported
-failed twice), so it boots whichever dtb its image ships (each image holds
-only its own MACHINE's dtb). If neither loads, the boot stops at the prompt
-naming both rather than booting a stale `0x48000000`.
+The choice fails closed. A unit with a valid manifest and a known family loads
+only its own family's dtb (`fdtfile_alt` stays empty); if the image lacks it
+the boot prints "dtb for family <f> (<dtb>) missing from image -- refusing to
+boot another SoM's device tree" and stops at the prompt, never falling through
+to the other family's dtb. Only a blank unit (no valid manifest or an unknown
+family; provisioning's `boot_sd_linux` runs before `eeprom_manifest`, so first
+boot is always blank) prints one `ALP: fdtfile ...` line, keeps the
+`CONFIG_ALP_E1M_FDTFILE` default (`fdtfile-v2m.cfg` sets it for V2M MACHINEs),
+and falls through `boot/${fdtfile}` then `boot/${fdtfile_alt}` (the other dtb
+in the one family table; no name is tried twice), so it boots whichever dtb its
+image ships (each image holds only its own MACHINE's dtb). A failed load never
+boots a stale `0x48000000`. The `env_set` results are checked.
 
-Built and inspected only (patch series applied in order on the pinned
-renesas-u-boot-cip `bcf29d98`, compiled for `rzv2n-dev`); not yet booted on
+Built and inspected only (patch regenerated with `git format-patch` on the
+pinned renesas-u-boot-cip `bcf29d98` plus 0001..0011, applies with and without
+0003, compiled for `rzv2n-dev`); not yet booted on
 silicon.
