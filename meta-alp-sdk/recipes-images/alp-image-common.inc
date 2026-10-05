@@ -232,6 +232,10 @@ IMAGE_LINGUAS = "en-us"
 IMAGE_ROOTFS_EXTRA_SPACE = "1048576"
 IMAGE_ROOTFS_SIZE = "4194304"
 
+# E1M-X V2N family: name the on-module CAN-FD netdevs by E1M bus
+# (can_e1m0 = E1M_X_CAN0 = SoC channel 3), not by driver probe order (#2352).
+IMAGE_INSTALL += "${@bb.utils.contains('MACHINE_FEATURES', 'v2n', 'alp-canfd-udev', '', d)}"
+
 # U-Boot's vendor sd2load/emmcload env (bootcmd_check) still loads the stock
 # EVK dtb name boot/r9a09g056n44-dev.dtb before the ALP boot command loads the
 # real board dtb (boot/${CONFIG_ALP_E1M_FDTFILE}) over it at the same address.

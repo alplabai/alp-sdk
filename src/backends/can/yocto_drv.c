@@ -79,9 +79,14 @@
  *     calling this, about to return -- self-close path).
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE /* pipe2() */
+#endif
+
 #if defined(__linux__)
 
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -378,10 +383,78 @@ static void *_rx_loop(void *arg)
 	return NULL;
 }
 
-/**
- * @brief Open a CAN_RAW socket bound to canN and stash it in the handle.
+/* SoC CANFD channel behind E1M-X bus @p bus_id (E1M_X_CAN0 = ch 3 / U15,
+ * E1M_X_CAN1 = ch 2 / U16), or -1 for a bus with no such mapping. */
+static int can_e1m_soc_channel(uint32_t bus_id)
+{
+	return bus_id == 0u ? 3 : (bus_id == 1u ? 2 : -1);
+}
+
+/* Pure name choice (unit-tested without hardware).
  *
- * Resolves the "can<bus_id>" interface ifindex via SIOCGIFINDEX and
+ * @p e1m_present     can_e1m<N> exists (the BSP udev rule named it).
+ * @p plain_dev_port  dev_port of can<N> when it is an rcar_canfd netdev,
+ *                    else -1 (not rcar_canfd / unreadable).
+ *
+ * can_e1m<N> wins.  Otherwise the plain can<N> is used, EXCEPT when it
+ * is a rcar_canfd netdev whose dev_port (SoC channel, patch 0012) is not
+ * the channel of E1M bus N: rcar_canfd probe order swaps can0/can1
+ * against E1M numbering (#2352), so opening it would silently hit the
+ * other port.  That case is ALP_ERR_NOT_READY (the BSP naming rule is
+ * missing) rather than a wrong-port open.  This relies on patch 0012:
+ * without it rcar_canfd reports dev_port 0, which reads as "unknown"
+ * and the plain can<N> is opened as before. */
+static alp_status_t
+can_pick_ifname(uint32_t bus_id, bool e1m_present, int plain_dev_port, char *out, size_t cap)
+{
+	int k = snprintf(out, cap, e1m_present ? "can_e1m%u" : "can%u", (unsigned)bus_id);
+	if (k < 0 || (size_t)k >= cap) return ALP_ERR_INVAL;
+	if (!e1m_present && plain_dev_port > 0) {
+		int want = can_e1m_soc_channel(bus_id);
+		if (want >= 0 && plain_dev_port != want) return ALP_ERR_NOT_READY;
+	}
+	return ALP_OK;
+}
+
+/* Netdev for E1M bus @p bus_id.  On the E1M-X SoMs the BSP's udev rule
+ * (meta-alp-sdk alp-canfd-udev) names the netdevs can_e1m<N> by SoC
+ * channel, because rcar_canfd's probe-order can0/can1 are swapped
+ * against the E1M numbering (#2352).  Elsewhere (hosts, vcan, other
+ * SoMs) the plain can<N> name is the E1M bus. */
+static alp_status_t can_ifname(uint32_t bus_id, char *out, size_t cap)
+{
+	char e1m[IFNAMSIZ];
+	if (snprintf(e1m, sizeof(e1m), "can_e1m%u", (unsigned)bus_id) >= (int)sizeof(e1m))
+		return ALP_ERR_INVAL;
+	bool e1m_present = if_nametoindex(e1m) != 0u;
+
+	int   dev_port = -1;
+	char  path[128], drv[64];
+	FILE *f;
+	if (!e1m_present) {
+		snprintf(path, sizeof(path), "/sys/class/net/can%u/device/driver", (unsigned)bus_id);
+		ssize_t n = readlink(path, drv, sizeof(drv) - 1);
+		if (n > 0) {
+			drv[n]           = '\0';
+			const char *base = strrchr(drv, '/');
+			base             = base ? base + 1 : drv;
+			if (strcmp(base, "rcar_canfd") == 0) {
+				snprintf(path, sizeof(path), "/sys/class/net/can%u/dev_port", (unsigned)bus_id);
+				f = fopen(path, "r");
+				if (f != NULL) {
+					if (fscanf(f, "%d", &dev_port) != 1) dev_port = -1;
+					fclose(f);
+				}
+			}
+		}
+	}
+	return can_pick_ifname(bus_id, e1m_present, dev_port, out, cap);
+}
+
+/**
+ * @brief Open a CAN_RAW socket bound to the bus netdev; stash it in the handle.
+ *
+ * Resolves the bus netdev (can_ifname()) ifindex via SIOCGIFINDEX and
  * binds an AF_CAN raw socket to it.  For ALP_CAN_MODE_FD the socket is
  * switched to CAN_RAW_FD_FRAMES so it can carry 64-byte canfd_frames;
  * if the kernel/interface lacks FD support the setsockopt fails and we
@@ -399,9 +472,10 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 	(void)caps_out;
 	if (cfg == NULL) return ALP_ERR_INVAL;
 
-	char ifname[IFNAMSIZ];
-	int  k = snprintf(ifname, sizeof(ifname), "can%u", (unsigned)cfg->bus_id);
-	if (k < 0 || (size_t)k >= sizeof(ifname)) return ALP_ERR_INVAL;
+	char         ifname[IFNAMSIZ];
+	alp_status_t ns = can_ifname(cfg->bus_id, ifname, sizeof(ifname));
+	if (ns != ALP_OK) return ns;
+	size_t k = strlen(ifname);
 
 	int fd = socket(PF_CAN, SOCK_RAW | SOCK_CLOEXEC, CAN_RAW);
 	if (fd < 0) return _errno_to_alp(errno);
@@ -409,7 +483,7 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 	struct ifreq ifr;
 	memset(&ifr, 0, sizeof(ifr));
 	/* ifr_name is IFNAMSIZ; ifname already fits (checked above). */
-	memcpy(ifr.ifr_name, ifname, (size_t)k + 1u);
+	memcpy(ifr.ifr_name, ifname, k + 1u);
 	if (ioctl(fd, SIOCGIFINDEX, &ifr) < 0) {
 		int e = errno;
 		close(fd);
@@ -474,7 +548,7 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
      * time (cheap: two fds) even though the RX thread only spawns
      * lazily on the first add_filter(), matching
      * src/backends/rpc/yocto_drv.c's identical rx_wake_pipe. */
-	if (pipe(d->rx_wake_pipe) != 0) {
+	if (pipe2(d->rx_wake_pipe, O_CLOEXEC) != 0) {
 		int e = errno;
 		pthread_mutex_destroy(&d->lock);
 		close(fd);

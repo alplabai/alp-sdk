@@ -336,9 +336,15 @@
 };
 
 /* GD32G553 supervisor MCU bridge -- I2C slave transport on BRD_I2C.
- * Exposes the GD32-routed E1M IO pads (logical bridge map, 18 lines)
- * as a Linux gpiochip: line 5 = IO13/LCD1_RST, line 3 = IO11/CTP1_RST,
- * line 1 = IO9/CTP1_INT (input only -- the GT911 drives it).
+ * Exposes the GD32-routed E1M IO pads plus sideband control lines
+ * (logical bridge map, 22 lines incl. se-rst) as a Linux gpiochip: line 5 =
+ * IO13/LCD1_RST, line 3 = IO11/CTP1_RST, line 1 = IO9/CTP1_INT (input
+ * only -- the GT911 drives it), line 18 = bt-reg-on (the `bluetooth`
+ * node's shutdown-gpios below), line 19 = wl-reg-on (the
+ * mmc-pwrseq-simple node's reset-gpios below), line 20 = can-stby
+ * (sideband, not an E1M pad -- see the gpio-hog below; requires
+ * bridge protocol MINOR >= 13, gated at the wire, not in .request();
+ * see can-stby-hog below).
  * Same physical chip as the CM33's SCI7 SPI link peer; Linux only
  * issues short GPIO frames here.
  *
@@ -378,8 +384,35 @@
 			"IO8",  "IO9",  "IO10", "IO11", "IO12", "IO13",
 			"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
 			"IO29", "IO30", "IO31", "IO32", "IO34", "IO35",
-			"bt-reg-on", "wl-reg-on",
-			"" /* 20: reserved for can-stby, #2341 */, "se-rst";
+			"bt-reg-on", "wl-reg-on", "can-stby", "se-rst";
+
+		/* CAN_STBY (bridge line 20, GD32 PB13,
+		 * metadata/e1m_modules/v2n/gd32-io-mcu-map.csv:38): the
+		 * shared standby line for the two on-module TCAN1044 CAN-FD
+		 * transceivers (U15/U16). STB HIGH = standby, STB LOW =
+		 * normal -- the bridge firmware boots the pad HIGH (bus held
+		 * in standby) as its own safe default; this hog is Linux
+		 * actively taking the bus out of standby at boot.
+		 *
+		 * Requires bridge protocol MINOR >= 13 (firmware >= 0.2.16).
+		 * Unlike lines 18/19, this line is NOT gated in .request():
+		 * the only consumer is this hog on the same gpiochip, and
+		 * deferring a hog's request would fail the whole gpiochip
+		 * registration (bt-reg-on, wl-reg-on, RTC, Display-1). The
+		 * 0005 kernel patch instead grants the request immediately
+		 * and gates at the wire level (gd32_bridge_gate_blocked()):
+		 * on a bridge below MINOR 13 the line-20 write is never sent,
+		 * so CAN_STBY stays HIGH and BOTH transceivers sit in
+		 * standby indefinitely, with only a one-shot dev_warn.
+		 * There is no deferred probe. When the bridge is merely slow
+		 * to boot, the driver latches the level and replays it once
+		 * the bridge answers. */
+		can-stby-hog {
+			gpio-hog;
+			gpios = <20 GPIO_ACTIVE_HIGH>;
+			output-low;
+			line-name = "can-stby";
+		};
 	};
 
 	rv3028: rtc@52 {
@@ -811,5 +844,99 @@
 			 <RZV2N_PORT_PINMUX(4, 1, 2)>, /* P41 = RXD4 */
 			 <RZV2N_PORT_PINMUX(4, 2, 4)>, /* P42 = CTS4 */
 			 <RZV2N_PORT_PINMUX(4, 3, 2)>; /* P43 = RTS4 */
+	};
+
+	/* CAN-FD: two on-module TCAN1044 transceivers (U15/U16, SoM
+	 * rev 2625-R2 schematic sheet "CAN-BUS - Encoder"), each on its own
+	 * SoC canfd channel. Mapping is transceiver-to-channel, NOT
+	 * connector-to-channel-in-numeric-order:
+	 *   - U15 TxD/RxD = CANFD3_CTX3/CANFD3_CRX3 (P86/P87) -> CAN0_H/L
+	 *     -> carrier E1M_X_CAN0 (metadata/boards/e1m-x-evk.yaml).
+	 *   - U16 TxD/RxD = CANFD2_CTX2/CANFD2_CRX2 (P84/P85) -> CAN1_H/L
+	 *     -> carrier E1M_X_CAN1.
+	 * i.e. E1M_X_CAN0 is SoC channel3, E1M_X_CAN1 is SoC channel2.
+	 *
+	 * Linux netdev names: rcar_canfd names netdevs in channel probe
+	 * order (channel2 -> can0), which swaps the E1M numbering. The
+	 * 0013 kernel patch reports the channel in dev_port and the
+	 * alp-canfd-udev rule renames them: channel3 -> can_e1m0
+	 * (E1M_X_CAN0), channel2 -> can_e1m1 (E1M_X_CAN1). <alp/can.h>
+	 * opens can_e1m<N>.
+	 *
+	 * Series-0R links R290/R291/R347/R6 are fitted per BOM (not
+	 * checkable from this repo), so the PHY path is live. Pin syntax
+	 * follows Renesas's own RZ/V2N EVK reference dts (kernel-source
+	 * arch/arm64/boot/dts/renesas/r9a09g056n48-rzv2n-evk.dts,
+	 * can2_pins/can3_pins). Both transceivers share one STB net,
+	 * driven via the gd32_gpio can-stby-hog above -- see that comment
+	 * for the standby/normal polarity and the protocol-version gate.
+	 * TCAN1044 EN is not driven from Linux; UNCONFIRMED whether it is
+	 * strapped high on the SoM (the schematic is not in this repo) --
+	 * if a bench bus stays silent with STB low, check EN first. */
+	canfd_pins: can_pins {
+		can2_pins: can2 {
+			pinmux = <RZV2N_PORT_PINMUX(8, 4, 5)>, /* CANFD2_CTX2 (TX) */
+				 <RZV2N_PORT_PINMUX(8, 5, 5)>;  /* CANFD2_CRX2 (RX) */
+		};
+
+		can3_pins: can3 {
+			pinmux = <RZV2N_PORT_PINMUX(8, 6, 5)>, /* CANFD3_CTX3 (TX) */
+				 <RZV2N_PORT_PINMUX(8, 7, 5)>;  /* CANFD3_CRX3 (RX) */
+		};
+	};
+};
+
+/* CAN-FD controller: both on-module channels (see the canfd_pins
+ * comment above for the transceiver-to-channel mapping and the
+ * schematic source). No `phys` (transceiver PHY) property on either
+ * channel: the TCAN1044 is not in this kernel's
+ * Documentation/devicetree/bindings/phy/ti,tcan104x-can.yaml compatible
+ * enum (ti,tcan1042 / ti,tcan1043 only), so claiming one of those
+ * compatibles for a TCAN1044 would misrepresent the populated part.
+ * The gd32_gpio can-stby-hog above drives the shared STB line instead
+ * -- an honest static hog beats a dishonest phy binding.
+ *
+ * Bit timing is deliberately NOT in the DT. The controller's timing
+ * clock (the `can_clk`/`fck` inputs of the RZ/V2N CANFD block, sourced
+ * from the SoC's CPG via RZ_CLOCK_CANFD(ch) -- see the SoC dtsi
+ * `&canfd` node in the BSP kernel, not this repo) is inherited from the
+ * SoC dtsi -- 80 MHz on silicon (`rcar_canfd 12440000.can: can_clk rate
+ * is 80000000`, E1M-V2M103 bench 2026-09-30) -- and rcar_canfd derives
+ * NBTP/DBTP from it, so the bitrate is
+ * an operator step, not a DT property (a fixed `bitrate` here would
+ * also force one rate on every deployment). Until it is set the
+ * channel stays down and cannot disturb a live bus:
+ *   ip link set can_e1m0 type can bitrate 500000 dbitrate 2000000 fd on
+ * Let the driver pick the sample points (87.5 % / 75 % at 80 MHz).  Forcing
+ * sample-point 0.8 gives phase-seg2 32 and the controller then goes
+ * BUS-OFF on tx-dominant-bit-error with a healthy transceiver (E1M-V2M103
+ * bench 2026-09-30); the defaults sit at ERROR-PASSIVE (ACK errors only)
+ * on a lone node, as they should.
+ *   ip link set can_e1m0 up
+ * (repeat for can_e1m1). `ip -d link show can_e1m0` prints the clock
+ * the kernel is using and the achievable bitrate/sample-point limits.
+ *
+ * TDC is not a DT property and no kernel patch is needed: the BSP
+ * rcar_canfd already enables transmitter delay compensation (TDCE,
+ * TDCO = data sample point in clock periods - 1) whenever the data BRP
+ * is 1 or 2, and `ip ... tdc-mode auto|manual|off tdco N tdcv N`
+ * overrides it (RZ/V2N manual R01UH1071 section 7.9.4.1.5). At 2 Mbit/s
+ * the TCAN1044 loop delay (about 100-175 ns) is well inside the 375 ns
+ * data sample point, so TDC does not explain a lone-node BRS BUS-OFF; an
+ * ACK error alone cannot cause it either (error-passive nodes do not
+ * count ACK errors). docs/build-yocto-v2n.md "CAN-FD data phase: TDC and
+ * bus-off triage" has the discriminating bench steps.
+ * docs/build-yocto-v2n.md "CAN-FD bring-up" has the full procedure. */
+&canfd {
+	pinctrl-0 = <&canfd_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	channel2 {
+		status = "okay";
+	};
+
+	channel3 {
+		status = "okay";
 	};
 };
