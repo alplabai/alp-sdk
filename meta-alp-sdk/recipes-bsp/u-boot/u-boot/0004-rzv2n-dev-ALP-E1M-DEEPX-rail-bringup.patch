@@ -33,8 +33,8 @@ Sequence, over DM I2C bus 8 (RIIC8 / BRD_I2C) at 7-bit address 0x1E:
        clear both together with a read-modify-write (never a constant
        write -- preserves CH1_EN and everything else), then read back.
     4. Program both CH2 VSEL registers (0x0C, 0x0D) to 0x96 (0.75V at
-       VSTEP=0) -- VSEL2 pin routing is undocumented on this SoM
-       (da9292.yaml EN2/VSEL2 v2n_route: TBD), so both setpoints get
+       VSTEP=0) -- VSEL2 is strapped to ground on this SoM
+       (da9292.yaml VSEL2 v2n_route), so _LO is live; both setpoints get
        written defensively.
     5. Read back 0x0C/0x0D; confirm CH1's VOUT (0x0A) and CTRL_01 bit0
        (CH1_EN) are untouched.
@@ -336,8 +336,8 @@ index a20ccae8..689c3062 100644
 +			ctrl01 = got;
 +		}
 +
-+		/* 4. Program both VSEL setpoints -- VSEL2 pin routing is
-+		 * unknown (da9292.yaml EN2/VSEL2 v2n_route: TBD), so both
++		/* 4. Program both VSEL setpoints -- VSEL2 is strapped low
++		 * (da9292.yaml VSEL2 v2n_route), so _LO is live; both
 +		 * CH2 registers get the same 0.75V byte defensively. */
 +		ret = alp_da9292_reg_write(dev, DA9292_REG_VOUT_CH2_00, DA9292_VOUT_750MV_BYTE);
 +		ret |= alp_da9292_reg_write(dev, DA9292_REG_VOUT_CH2_01, DA9292_VOUT_750MV_BYTE);

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-01",
+  "generated": "2026-10-02",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -8877,8 +8877,8 @@
           "value": "{ [DA9292_CH1] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = false }, [DA9292_CH2] = { .min_mv = 715u, .max_mv = 785u, .critical = false, .voltage_writable = true, .enable_writable = true }, }"
         },
         "V2N_M1_POWER_DA9292_CH_NETS_INIT": {
-          "hash": "d5853154a6b928c7",
-          "value": "{ [DA9292_CH1] = \"TBD\", [DA9292_CH2] = \"VDD_0P75\", }"
+          "hash": "b496b65f3fe9f3f9",
+          "value": "{ [DA9292_CH1] = \"VDD3G_0P8\", [DA9292_CH2] = \"VDD_0P75\", }"
         },
         "V2N_M1_POWER_TPS628640_DDR5_VDD2H_1V05_ADDR": {
           "hash": "b771cc7501a38d29",
@@ -8957,8 +8957,8 @@
           "value": "{ [DA9292_CH1] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = false }, [DA9292_CH2] = { .min_mv = 0u, .max_mv = 0u, .critical = false, .voltage_writable = false, .enable_writable = false }, }"
         },
         "V2N_POWER_DA9292_CH_NETS_INIT": {
-          "hash": "ec96f934fbe2f9c4",
-          "value": "{ [DA9292_CH1] = \"TBD\", [DA9292_CH2] = \"\", }"
+          "hash": "8ee3e21597fe807d",
+          "value": "{ [DA9292_CH1] = \"VDD3G_0P8\", [DA9292_CH2] = \"\", }"
         },
         "V2N_POWER_DA9292_DEV_ID": {
           "hash": "2214578a2430e74e",
