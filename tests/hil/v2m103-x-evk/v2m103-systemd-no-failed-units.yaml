@@ -11,10 +11,13 @@ description: |
 
 flash_method: ssh-run
 ssh_command: >-
-  n=$(systemctl --failed --no-legend --plain | grep -vc systemd-networkd-wait-online);
+  out=$(systemctl --failed --no-legend --plain) && echo HIL_SYSTEMCTL_OK;
+  n=$(printf '%s
+' "$out" | grep -v systemd-networkd-wait-online | grep -c .);
   echo "HIL_UNEXPECTED_FAILED_UNITS=$n"
 
 serial:
   duration_s: 10
   expect_contains:
+    - "HIL_SYSTEMCTL_OK"
     - "HIL_UNEXPECTED_FAILED_UNITS=0"

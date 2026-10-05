@@ -225,16 +225,6 @@ _ZEPHYR_DRIVER_INCLUDE_ALLOWLIST: dict[str, dict[str, str]] = {
             "of its Display/LVGL scope; migrating the LED path to "
             "<alp/pwm.h> is tracked as separate follow-up work."
         ),
-        "gpio": (
-            "src/cc3501e_bridge.c, the on-module Wi-Fi/BLE bridge's own "
-            "control-transport HAL -- pre-existing gap predating #520 "
-            "and out of its Display/LVGL scope."
-        ),
-        "pinctrl": (
-            "src/cc3501e_bridge.c, the on-module Wi-Fi/BLE bridge's own "
-            "control-transport HAL -- pre-existing gap predating #520 "
-            "and out of its Display/LVGL scope."
-        ),
     },
     "v2n/v2n-ethernet-dual": {
         "mdio": (
