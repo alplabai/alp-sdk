@@ -203,7 +203,7 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # all -- and separately, ALP_SDK_DRPAI_REQUIRED itself is emitted by
 # NOTHING in the tree (kconfig.py emits only the USE flag), so REQUIRED
 # can never be auto-flipped ON regardless of which slice is building.)
-PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF -DALP_SDK_DRPAI_REQUIRED=OFF,drpai mera2-drpai-tvm,mera2-drpai-tvm"
+PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF -DALP_SDK_DRPAI_REQUIRED=OFF,drpai mera2-drpai-tvm mmngr-user-module mmngrbuf-user-module,mera2-drpai-tvm"
 
 # deepx-dxm1 -> dx-rt (DEEPX's own meta-deepx-m1 layer; see
 #               conf/machine/include/e1m-v2m-deepx.inc).  Same
