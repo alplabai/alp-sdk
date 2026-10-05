@@ -331,6 +331,22 @@ if(CONFIG_USE_RZ_FSP_MHU_B)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/r_mhu_b_ns)
 endif()
 
+# Renesas RZ/V2N CM33 watchdog (WDT0) -- vendored+adapted FSP r_wdt module.
+# hal_renesas ships r_wdt for rza/rzn/rzt only and upstream Zephyr's
+# wdt_renesas_rz.c cannot bind RZ/V2N (see wdt_renesas_rzv.c's header), so the rzt
+# r_wdt.c is carried here, adapted for the CM33's WDT0, under
+# zephyr/drivers/watchdog/r_wdt/ (gated by USE_RZ_FSP_WDT_RZV) with the Zephyr glue
+# zephyr/drivers/watchdog/wdt_renesas_rzv.c (compatible `renesas,rzv-wdt`, gated
+# by WDT_RENESAS_RZV).  BENCH-UNVERIFIED.
+zephyr_library_sources_ifdef(CONFIG_WDT_RENESAS_RZV
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/watchdog/wdt_renesas_rzv.c)
+if(CONFIG_USE_RZ_FSP_WDT_RZV)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/watchdog/r_wdt/r_wdt.c)
+    zephyr_library_include_directories(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/watchdog/r_wdt)
+endif()
+
 # Alif Ensemble ARM MHUv2 inter-core mailbox driver -- vendor-ext,
 # BENCH-UNVERIFIED.  Carried here (not upstream Zephyr) so it survives a
 # `west update`.  Standard Zephyr MBOX-class driver (DT_DRV_COMPAT
