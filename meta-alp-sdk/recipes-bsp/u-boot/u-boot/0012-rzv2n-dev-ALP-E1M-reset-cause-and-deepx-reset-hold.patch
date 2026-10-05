@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
-Date: Sat, 3 Oct 2026 10:00:00 +0000
+Date: Mon, 5 Oct 2026 20:19:16 +0000
 Subject: [PATCH] rzv2n-dev: ALP E1M report the SoC reset cause and hold the
  DX-M1 in reset after a watchdog reset
 
@@ -28,15 +28,17 @@ the PMIC are deliberately not touched.
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- 1 file changed, 110 insertions(+)
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 109 ++++++++++++++++++++++++++++
+ 1 file changed, 109 insertions(+)
 
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index 96fe07ef..043c66e9 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
-@@ -1,4 +1,106 @@
+@@ -903,6 +903,108 @@ done:
  	       CLK5L_SE1_DIV4_CTRL_WANT, CLK5L_SE3_CTRL_WANT);
-+}
-+
+ }
+ 
 +/*
 + * ALP E1M V2N family: record why the SoC last reset.
 + *
@@ -137,19 +139,21 @@ diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n
 +	ret = fdt_setprop_string(blob, node, "alp,reset-cause", alp_reset_cause);
 +	if (ret)
 +		printf("ALP: failed to publish /chosen/alp,reset-cause (%d)\n", ret);
- }
- 
++}
++
  /*
-@@ -10,6 +10,8 @@
- int ft_system_setup(void *blob, struct bd_info *bd)
+  * ft_board_setup() is already defined by rcar-common's v2-common.c, and
+  * EVT_FT_FIXUP never reaches the kernel blob without OFNODE_MULTI_TREE, so
+@@ -913,6 +1015,8 @@ int ft_system_setup(void *blob, struct bd_info *bd)
  {
  	int node, ret;
-+
-+	alp_publish_reset_cause(blob);
  
++	alp_publish_reset_cause(blob);
++
  	if (!alp_sku[0])
  		return 0;
-@@ -58,11 +58,16 @@
+ 
+@@ -1229,12 +1333,17 @@ int board_late_init(void)
  	bool v2n_m1;
  	bool rail_ok = true;
  
@@ -166,5 +170,4 @@ diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n
 +
  	if (IS_ENABLED(CONFIG_ALP_E1M_DEEPX_RAIL) || v2n_m1)
  		rail_ok = alp_deepx_rail_bringup();
--- 
-2.43.0
+ 
