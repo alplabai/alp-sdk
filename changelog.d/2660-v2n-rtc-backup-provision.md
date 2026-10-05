@@ -10,4 +10,5 @@ it back, and enables level-mode backup switchover through the driver's
 `RTC_PARAM_SET`. The census records `rtc_backup_switch_mode` and `rtc_trickle`;
 `rtc_time_set`, `rtc_backup_mode` and the new `rtc_trickle` functional checks
 (expected trickle from the carrier's `rtc_backup` in `metadata/boards/<carrier>.yaml`; the `rtc_backup` fixture is refused on a carrier that declares none) now block shipping. Bit meanings are from the RV-3028-C7 Application Manual
-Rev. 1.4. Bench verification is still pending.
+Rev. 1.4. Bench-verified on five E1M-V2M103 units (2026-10-03, reg `0x37` =
+`0xbf`); the supercap retention check across a full power-off is still unrun.
