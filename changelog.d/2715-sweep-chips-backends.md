@@ -1,4 +1,4 @@
-### Fixed — chip driver and backend sweep: RV-3028 alarm ack, DA9292 enable window, OPTIGA receive capacity, D/AVE 2D hang, ISP timestamp (#2716)
+### Fixed — chip driver and backend sweep: RV-3028 alarm ack, DA9292 enable window, OPTIGA receive capacity, D/AVE 2D hang, ISP timestamp (#2715)
 
 - **`rv3028c7_alarm_check_and_clear()`** now clears only the alarm flag; EVF, TF, UF, BSF and CLKF stay latched for `rv3028c7_dispatch_irq()`.
 - **`da9292_set_enable()`** applies the enable-time window check before the already-enabled early return, so an out-of-window channel is refused even when already on.

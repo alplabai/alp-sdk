@@ -36,6 +36,7 @@
 #define REG_CONTROL_2   0x10u
 #define STATUS_PORF     0x01u
 #define STATUS_AF       0x04u
+#define STATUS_BSF      0x20u
 #define STATUS_UF       0x10u
 #define CONTROL_2_12_24 0x02u /* 0 = 24h, 1 = 12h (App. Manual Rev. 1.4 p.24) */
 
@@ -217,4 +218,17 @@ ZTEST(rv3028c7_dispatch_ack, test_alarm_check_and_clear_without_af_touches_nothi
 	zassert_equal(s, ALP_OK, "rc=%d", (int)s);
 	zassert_false(fired, "AF reported with AF clear");
 	zassert_equal(fake_regs[REG_STATUS], STATUS_UF, "regs=0x%02x", fake_regs[REG_STATUS]);
+}
+
+ZTEST(rv3028c7_dispatch_ack, test_init_keeps_other_latched_flags_on_cold_start)
+{
+	/* A cold start clears PORF only; a BSF latched before init must
+	 * survive for the first rv3028c7_dispatch_irq(). */
+	fake_reset();
+	fake_regs[REG_STATUS] = STATUS_PORF | STATUS_BSF;
+
+	rv3028c7_t ctx = open_rtc();
+	(void)ctx;
+
+	zassert_equal(fake_regs[REG_STATUS], STATUS_BSF, "regs=0x%02x", fake_regs[REG_STATUS]);
 }

@@ -197,14 +197,15 @@ static alp_status_t rv3028_write_reg(rv3028c7_t *ctx, uint8_t reg, uint8_t val)
 /* Acknowledge whatever is latched in STATUS right now and hand back
  * anything that raced the acknowledge write in *status.
  *
- * STATUS is write-0-to-clear (RV-3028-C7 Application Manual v1.4,
+ * STATUS is write-0-to-clear (RV-3028-C7 Application Manual Rev. 1.4,
  * Table 9; comment above RV3028_STATUS_PORF): a byte write of 0x00
- * clears every bit latched at the moment the write lands.  That is
- * the one write mode this driver relies on -- it does NOT assume
- * anything about what writing a 1 does to a bit that currently
- * reads 0 (no App Manual table this driver cites settles that, and
- * this driver will not guess at undocumented hardware behaviour,
- * #1623).
+ * clears every bit latched at the moment the write lands, which is
+ * the one write mode this function uses.  Writing a 1 to a flag bit
+ * leaves it unchanged (the same flag semantics mainline Linux
+ * rtc-rv3028 depends on: it RMWs STATUS via regmap_update_bits()
+ * with RV3028_STATUS_AF, so every other flag is written back as read);
+ * rv3028c7_alarm_check_and_clear() relies on exactly that to clear AF
+ * alone.
  *
  * The post-write re-read NARROWS the race; it does not close it.
  * What it recovers is a flag that latches AFTER the 0x00 write has
@@ -213,10 +214,7 @@ static alp_status_t rv3028_write_reg(rv3028c7_t *ctx, uint8_t reg, uint8_t val)
  * STATUS read and the write landing is cleared by that write and
  * does NOT appear in the re-read, so it is genuinely lost.  Closing
  * that window needs a read-modify-write the part cannot offer
- * atomically, so it is documented rather than papered over.  The
- * previous code was strictly worse: it wrote `status & ~BIT`, i.e. a
- * 1 into every other observed bit, which relies on write-1 semantics
- * this driver deliberately does not assume. */
+ * atomically, so it is documented rather than papered over. */
 static alp_status_t rv3028_status_ack(rv3028c7_t *ctx, uint8_t *status)
 {
 	alp_status_t s = rv3028_write_reg(ctx, RV3028_REG_STATUS, 0x00);
@@ -245,8 +243,10 @@ alp_status_t rv3028c7_init(rv3028c7_t *ctx, alp_i2c_t *bus)
          * rv3028_status_ack() reports as still-latched (raced the
          * clear) has nowhere to dispatch to; the next
          * rv3028c7_dispatch_irq() call picks it up fresh. */
-		uint8_t residual = 0;
-		s                = rv3028_status_ack(ctx, &residual);
+		/* Clear PORF only: BSF/EVF/... latched before init stay set
+         * for the first rv3028c7_dispatch_irq(). */
+		s = rv3028_write_reg(
+		    ctx, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_PORF));
 		if (s != ALP_OK) return s;
 	}
 
@@ -374,17 +374,14 @@ alp_status_t rv3028c7_alarm_check_and_clear(rv3028c7_t *ctx, bool *fired)
 	*fired = (status & RV3028_STATUS_AF) != 0;
 	if (!*fired) return ALP_OK;
 
-	/* Clear ONLY AF: STATUS bits clear on a 0 write, so write 1 to every
+	/* Clear ONLY AF: STATUS bits clear on a 0 write and a 1 write leaves
+     * a flag unchanged (App Manual Rev. 1.4 Table 9; same semantics
+     * mainline Linux rtc-rv3028 relies on), so write 1 to every
      * other flag bit (EEBUSY, bit 7, is read-only) so EVF/TF/UF/BSF/CLKF
-     * stay latched for rv3028c7_dispatch_irq().  AF re-latching after the
-     * write is read back so it is not missed. */
-	s = rv3028_write_reg(
+     * stay latched for rv3028c7_dispatch_irq().  *fired is already true, so
+     * an AF that re-latches after the write needs no read-back. */
+	return rv3028_write_reg(
 	    ctx, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_AF));
-	if (s != ALP_OK) return s;
-	uint8_t residual = 0;
-	s                = rv3028_read(ctx, RV3028_REG_STATUS, &residual, 1);
-	if (s == ALP_OK && (residual & RV3028_STATUS_AF) != 0) *fired = true;
-	return s;
 }
 
 /* ---------------------------------------------------------------- */
@@ -420,10 +417,6 @@ alp_status_t rv3028c7_register_handler(rv3028c7_t            *ctx,
 	ctx->src_user[src]    = user;
 	return ALP_OK;
 }
-
-/* Dispatchable STATUS bits.  Bit 7 (EEBUSY) is a read-only "EEPROM write
- * in flight" indicator, not an event, and never takes part in an
- * acknowledge write. */
 
 alp_status_t rv3028c7_dispatch_irq(rv3028c7_t *ctx, uint8_t *status_seen)
 {
