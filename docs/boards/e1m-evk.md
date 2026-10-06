@@ -374,6 +374,7 @@ responder to 0 and back with `CAM_EN`.
   (roughly 1 in 8-10 boots, #2199, no recovery once it happens).  The
   capacitive-touch controller sits on `EVK_I2C_BUS_DSI_CSI`
   (`ALP_E1M_I2C1`) and is not driven yet.
+  Display status per SoM and path: [display-support-matrix.md](../display-support-matrix.md).
 - **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
   the PEC11R-4215K-S0024 quadrature signals.  The push-switch
   (SW) is on E1M `IO4` -- `EVK_PIN_ENCODER_SW`.

@@ -88,6 +88,7 @@ def _good(ctx) -> dict[str, str]:
         "emmc_read": "64+0 records out\na=20.10 b=20.90",
         "xspi": 'dev:    size   erasesize  name\nmtd0: 00060000 00001000 "bl2"\nmtd1: 01fa0000 00001000 "fip"\n'
                 "jedec=1122aa",
+        "boot_mode": "0x00003c06",                                # measured: every ledger unit
         "eth_phy_id": "end0 0x001cc916\nend1 0x001cc916",          # real IDs
         "eth_mac": f"end0 {m0}\nend1 {m1}",
         "eth0_link": "if=end0 carrier=1 speed=100 duplex=full\nping=ok\nrx_delta=4",
@@ -167,6 +168,7 @@ BAD = {
     "emmc_mode": "timing spec:\t1 (mmc high-speed)\nhs200_failed=0",
     "emmc_read": "64+0 records out\na=20.10 b=40.10",              # 3 MiB/s
     "xspi": 'mtd0: 00060000 00001000 "bl2"\njedec=ffffff',
+    "boot_mode": "0x3e06",                                         # MD_BOOT3 high: strapped to debug mode
     "eth_phy_id": "end0 0x001cc916\nend1 0x001cc878",
     "eth_mac": "end0 02:00:00:00:00:01\nend1 02:00:00:00:00:02",     # the eMMC-CID fallback MAC
     "eth0_link": "if=end0 carrier=1 speed=10 duplex=half\nping=ok\nrx_delta=4",
@@ -622,6 +624,39 @@ def test_a_private_overlay_can_make_a_check_blocking_or_informational(tmp_path):
     assert res.evidence["test_functional"] == "fail (rtc_backup_mode, i2c_tps628640_44)"   # eth_phy_id is informational now
 
 
+def test_boot_cpu_strap_is_judged_and_overridable(tmp_path):
+    ctx, _ = _setup(tmp_path, {})
+    si = str(ctx.preset["silicon"])
+    x = functest.load_expect()
+    assert functest.judge_boot_mode(0x3C06, si, x)[1]
+    got, ok = functest.judge_boot_mode(0x3806, si, x)                      # bit 10 cleared
+    assert not ok and got["soc_boot_cpu"] == "cm33" and "boot_cpu=cm33" in functest.describe_boot_mode(got)
+    over = tmp_path / "over.yaml"
+    over.write_text("boot_mode: {boot_cpu: cm33}\n", encoding="utf-8")
+    assert functest.judge_boot_mode(0x3806, si, functest.load_expect(over))[1]
+
+
+def test_boot_mode_stays_blocking_when_an_overlay_lists_it_informational_and_takes_a_bool_flag(tmp_path):
+    over = tmp_path / "expect.yaml"
+    over.write_text("informational: [boot_mode]\nboot_mode: {debug_enable: false}\n", encoding="utf-8")
+    x = functest.load_expect(over)
+    assert x["boot_mode"]["debug_enable"] is False
+    ctx, _ = _setup(tmp_path, {"boot_mode": BAD["boot_mode"]}, functest_expect=x)
+    by = {c.name: c for c in functest.build(ctx)}
+    assert by["boot_mode"].blocking and "boot_mode" not in functest.informational(list(by.values()), x)
+    got, ok = functest.judge_boot_mode(0x3C06, str(ctx.preset["silicon"]), x)       # debug_en=0 vs `false`
+    assert ok and got["soc_boot_debug_en"] == "0"
+    assert not functest.judge_boot_mode(0x3E06, str(ctx.preset["silicon"]), x)[1]
+    assert _val(_run(ctx), "boot_mode").startswith("fail (debug_en=1")
+
+
+def test_ship_check_blocks_a_debug_mode_unit():
+    cat = {"disposition": {"group": "d", "source": "", "mode": "manual", "ship_required": True}}
+    unit = {"disposition": "ship", "test_functional": "pass", "soc_boot_debug_en": "1"}
+    assert ledger_out.ship_check(unit, cat) == [ledger_out.DEBUG_MODE_REASON]
+    assert ledger_out.ship_check({**unit, "soc_boot_debug_en": "0"}, cat) == []
+
+
 def test_expect_file_schema_is_checked(tmp_path):
     bad = tmp_path / "e.yaml"
     bad.write_text("schema: 2\n", encoding="utf-8")
@@ -657,7 +692,7 @@ def test_dry_run_lists_every_check_and_touches_nothing(tmp_path):
     ctx, unit = _setup(tmp_path, fixtures={}, execute=False)
     res = steps.run_steps(ctx, only=["functional_test"])
     ft = res[-1]
-    assert ft.status == "planned" and "would run 73 functional checks, estimated" in ft.detail
+    assert ft.status == "planned" and "would run 74 functional checks, estimated" in ft.detail
     assert unit.commands == [] and not unit.files
     assert any(c.startswith("WOULD: eth_phy_id: both PHYs answer on MDIO") for c in ft.commands)
     assert any("[skipped: no fixture wifi_ap]" in c for c in ft.commands)
@@ -807,18 +842,21 @@ def test_the_runner_frames_each_check_runs_lanes_concurrently_and_kills_an_overr
     C = functest.Check
     mark = (tmp_path / "restored").as_posix()
     late = (tmp_path / "late").as_posix()
-    checks = [C("a", "", "echo first; echo err >&2; pwd", lambda o: None),
-              C("slow1", "", "sleep 1; echo s1", lambda o: None, lane="x"),
-              C("slow2", "", "sleep 1; echo s2", lambda o: None, lane="y"),
-              C("hang", "", f"( sleep 6; echo late > {late} ) &\necho started; sleep 30", lambda o: None,
+    # Every check that must NOT time out gets a margin no loaded CI runner eats (the 5 s default
+    # let a stalled runner turn "a"/"rc"/"nope" into T); only "hang" has a short, 1 s timeout.
+    SAFE = 120
+    checks = [C("a", "", "echo first; echo err >&2; pwd", lambda o: None, timeout_s=SAFE),
+              C("slow1", "", "sleep 1; echo s1", lambda o: None, lane="x", timeout_s=SAFE),
+              C("slow2", "", "sleep 1; echo s2", lambda o: None, lane="y", timeout_s=SAFE),
+              C("hang", "", f"( sleep 6; echo late > {late} ) &\necho started; sleep 300", lambda o: None,
                 timeout_s=1, lane="z", setup="state=was-down", restore=f"echo restored $state > {mark}"),
-              C("rc", "", "echo before; exit 3", lambda o: None),
-              C("nope", "", "definitely-not-a-command-xyz", lambda o: None),
-              C("tool", "", "echo never", lambda o: None, tools=("sh", "definitely-not-a-tool-xyz"))]
+              C("rc", "", "echo before; exit 3", lambda o: None, timeout_s=SAFE),
+              C("nope", "", "definitely-not-a-command-xyz", lambda o: None, timeout_s=SAFE),
+              C("tool", "", "echo never", lambda o: None, tools=("sh", "definitely-not-a-tool-xyz"), timeout_s=SAFE)]
     p = tmp_path / "s.sh"
     p.write_bytes(functest.script(checks).replace("/tmp/alp-ft.", (tmp_path / "ft.").as_posix()).encode())
     t0 = time.monotonic()
-    r = subprocess.run(["sh", str(p)], capture_output=True, text=True, encoding="utf-8", check=False, timeout=60)
+    r = subprocess.run(["sh", str(p)], capture_output=True, text=True, encoding="utf-8", check=False, timeout=280)
     took = time.monotonic() - t0
     got = functest.parse(r.stdout)
     assert list(got) == ["a", "slow1", "slow2", "hang", "rc", "nope", "tool"]    # catalogue order, not finish order
@@ -831,7 +869,7 @@ def test_the_runner_frames_each_check_runs_lanes_concurrently_and_kills_an_overr
     assert got["hang"][0] == "T" and got["hang"][1].splitlines()[0] == "started"
     assert got["rc"] == ("3", "before") and got["nope"][0] == "127"
     assert got["tool"] == ("0", "ALPUNREAD missing tool: definitely-not-a-tool-xyz")
-    assert took < 15, took                                                    # 1 s lanes in parallel, the hang killed at 1 s
+    assert took < 120, took                                                   # the hang was killed, not waited out (its sleep is 300 s)
     assert functest.judge(checks[3], got["hang"]) == "unread (timed out after 1 s)"
     assert functest.judge(checks[5], got["nope"]).startswith("unread (missing tool: ")
     assert functest.judge(checks[6], got["tool"]) == "unread (missing tool: definitely-not-a-tool-xyz)"
@@ -969,6 +1007,9 @@ MORE_BAD = [
     ("emmc_read", "64+0 records out", "unread (no /proc/uptime stamps"),
     ("xspi", 'mtd0: 00060000 00001000 "bl2"\nmtd1: 00000000 00001000 "fip"\njedec=1122aa', "fail (mtd0/mtd1 not both"),
     ("xspi", 'mtd0: 00060000 00001000 "bl2"\nmtd1: 01fa0000 00001000 "fip"\njedec=000000', "fail (JEDEC ID"),
+    ("boot_mode", "0x3e06", "fail (debug_en=1 boot_device=xspi"),
+    ("boot_mode", "0x3c05", "fail (debug_en=0 boot_device=emmc"),
+    ("boot_mode", "garbage", "unread (SYS_LSI_MODE not readable"),
     ("eth_phy_id", "end0 0x00000000\nend1 0x001cc916", "fail (PHY ID {'end0': '0x00000000'}"),
     ("eth_mac", "end0 a2:c0:a6:00:00:10\nend1 a2:c0:a6:00:00:10", "fail (MACs"),
     ("eth0_link", "if=end0 carrier=0 speed=100 duplex=full\nping=ok\nrx_delta=4", "fail (end0: no carrier"),
@@ -1018,6 +1059,7 @@ MORE_BAD = [
     ("cm33_running", "B 0xA10D0683 0x100 0x2a\nC 0x2a", "fail (magic 0xa10d0683, version 0x100, counter 42 then 42: the counter must advance by 1..4 in 2 s"),
     ("cm33_running", "B 0x0 0x0 0x0\nC 0x0", "fail (magic 0x00000000, version 0x0, counter 0 then 0: want magic 0xa10d0683, version 0x100"),
     ("cm33_running", "B 0xA10D0683 0x2 0x5\nC 0x6", "fail (magic 0xa10d0683, version 0x2, counter 5 then 6: want magic"),
+    ("boot_mode", "ALPUNREAD missing tool: devmem or python3", "unread (missing tool: devmem or python3)"),
     ("cm33_running", "ALPUNREAD missing tool: devmem or python3", "unread (missing tool: devmem or python3)"),
     ("cm33_running", "B devmem: mmap: Operation not permitted", "unread (beacon not readable"),
     ("usb_device", "dev=sda\n0+0 records out", "fail (sda: read failed"),

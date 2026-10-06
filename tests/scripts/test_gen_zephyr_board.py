@@ -255,6 +255,25 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
             },
         )
 
+    def test_v2n_family_dts_declares_the_cm33_watchdog(self) -> None:
+        """Both V2N-family CM33 boards emit `wdt0` DISABLED (an expiry resets
+        the whole SoM) with alias `alp-wdt0`, taking base/size/clock from the
+        SoC spec's `m33_sm` `watchdog` block instead of a generator literal."""
+        wdt = gzb._find_core(
+            json.loads((METADATA_ROOT / "socs/renesas/rzv2n/n44.json")
+                       .read_text(encoding="utf-8")), "m33_sm")["watchdog"]
+        for sku in ("E1M-V2N101", "E1M-V2M101"):
+            with self.subTest(sku=sku):
+                dts = next(c for r, c in emit_zephyr_board(
+                    sku, "m33_sm", METADATA_ROOT).items() if r.endswith(".dts"))
+                self.assertIn("alp-wdt0 = &wdt0;", dts)
+                node = dts.split("wdt0: watchdog@", 1)[1].split("};", 1)[0]
+                self.assertTrue(node.startswith(wdt["base"][2:] + " {"))
+                self.assertIn('compatible = "renesas,rzv-wdt";', node)
+                self.assertIn(f"reg = <{wdt['base']} {wdt['size']}>;", node)
+                self.assertIn(f"clock-freq = <{wdt['counting_clock_hz']}>;", node)
+                self.assertIn('status = "disabled";', node)
+
     def test_v2m_dts_carries_the_openamp_block(self) -> None:
         """E1M-V2M101 is the same RZ/V2N die as E1M-V2N101, so it sets
         `topology.m33_sm.openamp_ipc: true` too (#1948) and its `.dts`

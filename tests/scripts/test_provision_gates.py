@@ -182,7 +182,7 @@ def test_fip_fdtfile_prefers_bootcmd_over_vendor_env_scripts():
 
 
 def test_fip_fdtfile_returns_the_default_passed_to_alp_fdtfile():
-    # Patch 0013's bootcmd passes the build-time default to alp_fdtfile and loads
+    # Patch 0014's bootcmd passes the build-time default to alp_fdtfile and loads
     # boot/${fdtfile} then boot/${fdtfile_alt}; only the argument is a literal.
     fip = (b"\0bootcmd=alp_fdtfile e1m-v2n101-x-evk.dtb;if ext4load mmc ${alp_mmc} 0x48000000 boot/${fdtfile}"
            b" || ext4load mmc ${alp_mmc} 0x48000000 boot/${fdtfile_alt}; then run bootimage; fi\0"
@@ -318,7 +318,12 @@ def test_serial_and_mfg_date():
     assert gates.mfg_date_for_serial("2026W38-0001") == date(2026, 9, 14)
     assert gates.mfg_date_for_serial("2026W01-0003") == date(2025, 12, 29)  # ISO week 1 starts in 2025
     assert gates.mfg_date_for_serial("2026W53-0001") == date(2026, 12, 28)  # 2026 has 53 ISO weeks
-    for bad in ("2026w38-0001", "2026W38-1", "2026W38-0000", "2025W53-0001", "2026W00-0001", " 2026W38-0001"):
+    # Reserved label serials carry a Crockford base32 index (same decode as alp_eth_mac).
+    assert gates.parse_serial("2026W38-000K") == (2026, 38, 19)
+    assert gates.parse_serial("2026W38-000M") == (2026, 38, 20)
+    assert gates.mfg_date_for_serial("2026W38-000K") == date(2026, 9, 14)
+    for bad in ("2026w38-0001", "2026W38-1", "2026W38-0000", "2025W53-0001", "2026W00-0001", " 2026W38-0001",
+                "2026W38-000I", "2026W38-000L", "2026W38-000O", "2026W38-000U", "2026W38-000k"):
         with pytest.raises(ValueError):
             gates.parse_serial(bad)
 

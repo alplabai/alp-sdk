@@ -157,7 +157,7 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_USB_MUX_SEL",
       "board_role": null,
-      "board_doc": "USB path-mux select.",
+      "board_doc": "USB path-mux select. Driven by the DX-M1 on V2M, undriven on V2N (driven_by in the SoM pad_routes); polarity/default pending carrier-netlist confirmation.",
       "dispatch": "unrouted",
       "som_doc": "Not a GD32 pad; nothing drives it on V2N (no DX-M1 fitted). Bridge bit 8 answers STATUS_IO (#2453)."
     },

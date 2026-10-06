@@ -322,7 +322,7 @@ def test_dsw1_emmc_insert_sd_halts_before_it_asks_the_operator_to_power_off(tmp_
     ctx.bench.power.on_hook = lambda: ctx.bench.console.feed("Hit any key to stop autoboot: 3\r\n")
     steps.OpDsw1EmmcInsertSd().run(ctx)
     assert order[:3] == ["true", "ident", "poweroff"]
-    assert order[3].startswith("confirm: The unit has been halted (poweroff, halt line seen). Power OFF, set DSW1 to eMMC boot")
+    assert order[3].startswith("confirm: The unit has been halted (poweroff, halt line seen). Power OFF, insert the provisioning microSD (DSW1 may stay on xSPI)")
     assert order.index("psu-off") > 3                                # the cold cycle comes after the prompt
 
 
@@ -486,21 +486,29 @@ def test_a_second_call_after_a_clean_halt_is_still_not_needed(tmp_path):
     assert steps.clean_shutdown(ctx) == "not-needed"
 
 
-def test_an_operator_who_powers_the_unit_back_on_before_enter_does_not_hide_the_next_cut(tmp_path):
-    """The marker is cleared when the prompt returns: the operator may have powered the unit back
-    on, and on_count (the tool's own ON count) cannot tell."""
+def test_a_silent_console_keeps_the_halt_across_the_operator_prompt(tmp_path):
+    """The tool saw the halt line and a halted unit prints nothing: the prompt must not turn the
+    next cut into "blind"."""
     ctx, order = _setup(tmp_path)
     steps.OpDsw1XspiRemoveSd().run(ctx)
-    assert ctx.halted_on_count is None
+    assert ctx.halted_on_count == ctx.bench.power.on_count
     assert "Leave it OFF until the tool asks." in order[-1]
     n = len(order)
-    steps.clean_shutdown(ctx)                                       # the unit answers again: it is halted again
-    assert order[n:] == ["true", "ident", "poweroff"]
+    assert steps.clean_shutdown(ctx) == "not-needed"
+    assert order[n:] == []
     ctx2, order2 = _setup(tmp_path / "e")
     ctx2.bench.power.on_hook = lambda: ctx2.bench.console.feed("Hit any key to stop autoboot: 3\r\n")
     steps.OpDsw1EmmcInsertSd().run(ctx2)
     assert "Leave it OFF until the tool asks." in order2[3]
-    assert ctx2.halted_on_count is None
+    assert ctx2.halted_on_count != ctx2.bench.power.on_count      # the power-on after the halt
+
+
+def test_console_output_after_the_halt_invalidates_it_at_the_operator_prompt(tmp_path):
+    """The operator powered the unit back on before Enter: boot text on the console."""
+    ctx, order = _setup(tmp_path)
+    ctx.bench.operator.confirm = lambda msg: ctx.bench.console.feed("U-Boot 2025.01 (powered on)\r\n")
+    steps.OpDsw1XspiRemoveSd().run(ctx)
+    assert ctx.halted_on_count is None
 
 
 def test_a_clean_halt_with_a_failing_first_sync_is_its_own_outcome_on_the_console_path(tmp_path):
@@ -535,7 +543,18 @@ def test_a_sync_rc_split_across_reads_is_not_truncated(tmp_path):
     b.power = OrderedPower(order)
     ctx = _ctx(tmp_path, bench=b, execute=True)
     ctx.console_login_on_count = b.power.on_count
-    assert steps.clean_shutdown(ctx) == "clean (sync rc=127)"
+    out = steps.clean_shutdown(ctx)
+    assert out == "unreadable (sync rc=127; sync not found)"
+    assert ctx.halted_outcome == out and "unreadable" in ctx.power_cuts[-1]
+
+
+def test_ext4_errors_on_the_console_are_reported_verbatim_and_mark_the_root_unreadable(tmp_path):
+    err = "EXT4-fs error (device mmcblk1p2): ext4_find_entry:1455: reading directory lblock 0\r\n"
+    ctx, _ = _setup(tmp_path, ssh=False, script=[(POWEROFF_LINE, "ALPSabc12345:0\r\n" + err + HALT)])
+    ctx.console_login_on_count = ctx.bench.power.on_count
+    out = steps.clean_shutdown(ctx)
+    assert out.startswith("unreadable (") and "EXT4-fs error (device mmcblk1p2)" in out
+    assert "NOT cleanly halted" in steps.halt_note(out) and "EXT4-fs error" in steps.halt_note(out)
 
 
 def test_a_log_line_containing_the_uboot_prompt_text_is_not_a_uboot_prompt(tmp_path, monkeypatch):

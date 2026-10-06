@@ -4,7 +4,7 @@ The FIP's U-Boot used to load `boot/$CONFIG_ALP_E1M_FDTFILE`, a name fixed at
 build time per MACHINE. A blank E1M-V2N103 bootstrapped with a V2M FIP then
 looked for `e1m-v2m101-x-evk.dtb`, which the V2N image does not contain, and
 could not boot its own wic. New U-Boot patch
-`0013-rzv2n-dev-ALP-E1M-fdtfile-from-eeprom.patch` adds an `alp_fdtfile`
+`0014-rzv2n-dev-ALP-E1M-fdtfile-from-eeprom.patch` adds an `alp_fdtfile`
 command, run by `CONFIG_BOOTCOMMAND` right after `env default -a`, that sets
 `fdtfile` from the validated manifest family: `v2n-m1` ->
 `e1m-v2m101-x-evk.dtb`, `v2n` -> `e1m-v2n101-x-evk.dtb`. One U-Boot binary now

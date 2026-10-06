@@ -35,7 +35,12 @@
       "isa": "Armv8-M",
       "trustzone": true,
       "fpu": "single-precision",
-      "zephyr_cpucluster": "cm33"
+      "zephyr_cpucluster": "cm33",
+      "watchdog": {
+        "base": "0x41c00400",
+        "size": "0x10",
+        "counting_clock_hz": 24000000
+      }
     }
   ],
   "npus": [
@@ -263,6 +268,23 @@
     "CSI0":  {"label": "csi20", "capture": "cru0"}
   },
 
+  "boot_strap": {
+    "source": "RZ/V2N Hardware Manual R01UH1071EJ0120 Rev.1.20, 4.3.3.2.75-77 (SYS_LSI_MODE/DEVID/PRR), 1.9.3 (debug mode). SYS_LSI_MODE fields: [2:0] STAT_MD_BOOT (device = MD_BOOT[1:0]), [9] STAT_DEBUGEN (MD_BOOT3), [10] STAT_BOOTSELECTER (BOOTSELCPU), [12:11] STAT_BOOTPLLCA55, [13] STAT_MD_CLKS, [16] SEC_EN; [9], [2:0] and [10] are judged; [10]: 1 = CA55 boot (manual labels it CM55 cold boot) is the intended strap",
+    "registers": {
+      "soc_sys_lsi_mode": "0x10430300",
+      "soc_lsi_devid": "0x10430304",
+      "soc_prr": "0x10430308"
+    },
+    "strap_word": {
+      "debug_enable_bit": 9,
+      "boot_pins_shift": 0,
+      "boot_pins_width": 3,
+      "boot_device_pins_width": 2,
+      "boot_device_names": ["esd", "emmc", "xspi", "scif-download"],
+      "boot_cpu_bit": 10,
+      "boot_cpu_names": ["cm33", "ca55"]
+    }
+  },
   "notes": [
     "Datasheet: 137 pages, R01DS0466EJ0120 v1.20, Sep 2025.",
     "Single die with 8 orderable SKUs that toggle Mali-G31 GPU, Mali-C55 ISP (RZ/V2NP suffix), and security-crypto extensions on/off.  N41/N42/N45/N46 are RZ/V2N (no ISP); N43/N44/N47/N48 are RZ/V2NP (with ISP).",
