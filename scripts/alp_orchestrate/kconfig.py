@@ -2206,8 +2206,19 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         srv = ota.get("server") or {}
         if srv.get("url"):
             lines.append(f'MENDER_SERVER_URL ?= "{srv["url"]}"')
-        if srv.get("tenant"):
-            lines.append(f'MENDER_TENANT_TOKEN ?= "{srv["tenant"]}"')
+        tenant = str(srv.get("tenant") or "")
+        if "${" in tenant:
+            # A ${NAME} placeholder is never expanded by BitBake from the
+            # host environment, so a self-referencing `?=` would bake the
+            # literal text (or fail to expand).  Leave the token to the
+            # documented local.conf override instead.
+            lines.append(
+                "# MENDER_TENANT_TOKEN: set it in conf/local.conf "
+                "(meta-alp-sdk/README.md, Mender step 3); the board.yaml "
+                "placeholder is not expanded by BitBake."
+            )
+        elif tenant:
+            lines.append(f'MENDER_TENANT_TOKEN ?= "{tenant}"')
         sto = ota.get("storage") or {}
         if sto.get("device"):
             lines.append(f'MENDER_STORAGE_DEVICE_BASE ?= "{sto["device"]}"')
