@@ -402,9 +402,49 @@
 			"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
 			"IO29", "IO30", "IO31", "IO32", "IO34", "IO35",
 			"bt-reg-on", "wl-reg-on",
-			"" /* 20: reserved for can-stby, #2341 */, "se-rst",
+			"can-stby" /* 20: GD32 PB13, TCAN1044 STB (both transceivers) */,
+			"se-rst",
 			"IO15" /* 22: bridge bit 21, GD32 PB4 */,
-			"IO26" /* 23: bridge bit 22, GD32 PC2 */;
+			"IO26" /* 23: bridge bit 22, GD32 PC2 */,
+			/* 24..27: camera LDO enables on the SoM power-supply sheet
+			 * (not E1M-X pads), protocol 0.17.  REVIEWER: bridge bits
+			 * 23..26 are assumed contiguous after IO26; confirm against
+			 * the firmware GPIO pad map. */
+			"cam-en-ldo0" /* GD32 PC3  */,
+			"cam-en-ldo1" /* GD32 PE8  */,
+			"cam-en-ldo2" /* GD32 PE7  */,
+			"cam-en-ldo3" /* GD32 PE10 */;
+
+		/* The bridge gpiochip is also a POLLED interrupt controller (no
+		 * interrupt line reaches the SoC): GPIO_READ every 10 ms while
+		 * any line is unmasked.  Edges shorter than 10 ms are missed;
+		 * level lines re-fire every poll while asserted.  Lines that
+		 * are output (ever written) or gated off by an older firmware
+		 * cannot be interrupt sources. */
+		interrupt-controller;
+		#interrupt-cells = <2>;
+
+		/* PWM0..7 (GD32 PA11, PB1, PB14, PC5, PC10, PC11, PC12, PD0):
+		 * pwms = <&gd32_gpio CHANNEL PERIOD_NS FLAGS>, normal polarity
+		 * only (FLAGS = 0).  PWM0..3 share TIMER0 and PWM4..7 share
+		 * TIMER7: all enabled channels of a group must use the SAME
+		 * period; enabling one with a different period fails with
+		 * -EBUSY (see 0023-pwm-gd32-bridge-*.patch).  Pick one period
+		 * per group, e.g. a backlight and a fan on PWM0/PWM1 must agree. */
+		#pwm-cells = <3>;
+
+		/* E1M-X I2C3 (GD32 PC8 = SCL / pad A24, PC9 = SDA / pad A23),
+		 * proxied by the bridge (protocol >= 0.17, over this I2C link
+		 * only).  The SoM has NO pull-ups on I2C3: the carrier or the
+		 * attached module must provide them.  The pads stay hi-Z until
+		 * the first transfer.  clock-frequency is 100000 or 400000.
+		 * Children (display bridge, touch controller) are added by the
+		 * carrier dtsi: &e1m_x_i2c3 { ... }; */
+		e1m_x_i2c3: i2c {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clock-frequency = <100000>;
+		};
 	};
 
 	rv3028: rtc@52 {
@@ -419,6 +459,9 @@
 		 * carrier's own routed pins -- its Linux adapter alias lives here,
 		 * not in e1m-x-evk.dtsi's carrier-bus aliases block. */
 		i2c8 = &i2c8;
+		/* The bridge's I2C3 proxy adapter (a child of the gd32_gpio node,
+		 * not a SoC RIIC): a fixed number keeps /dev/i2c-3 stable. */
+		i2c3 = &e1m_x_i2c3;
 		/* The eMMC is on the module (SDHI0), so mmc0 is the SoM's whatever the
 		 * carrier: /etc/fw_env.config's /dev/mmcblk0boot1 depends on it. */
 		mmc0 = &sdhi0;
