@@ -75,7 +75,7 @@ class SomTemperatureNode : public rclcpp::Node
 			period_ms = 1;
 		}
 		RCLCPP_INFO(get_logger(), "publishing every %d ms", period_ms);
-		frame_id_            = declare_parameter<std::string>("frame_id", "som");
+		frame_id_ = declare_parameter<std::string>("frame_id", "som");
 
 		// Sensor-data QoS: best-effort, shallow queue -- a late temperature
 		// sample is worthless, so never block on a slow subscriber.
