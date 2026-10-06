@@ -431,10 +431,12 @@ alp_status_t da9292_get_fault_pins(alp_gpio_t *int_n, alp_gpio_t *tw_n, uint8_t 
 /**
  * @brief Set or clear a channel's register-side enable (`CHx_EN`) -- guarded.
  *
- * Enabling additionally refuses (::ALP_ERR_OUT_OF_RANGE) when the live
- * setpoint, decoded through the live VSTEP, lies outside the channel
- * window -- an enable can never switch a channel on at an out-of-window
- * voltage (the VSTEP=1 OTP default on CH2 is exactly that case).  The
+ * Enabling additionally refuses (::ALP_ERR_OUT_OF_RANGE) when either
+ * setpoint (VSEL_LO or VSEL_HI -- the VSELx pin may select either),
+ * decoded through the live VSTEP, lies outside the channel window, even
+ * if the channel is already enabled -- an enable can never switch a
+ * channel on at an out-of-window voltage (the VSTEP=1 OTP default on
+ * CH2 is exactly that case).  The
  * channel is the AND of this bit and the ENx pin where the pin is routed.
  *
  * @param ctx     DA9292 context handle (must be initialised first).
@@ -442,8 +444,9 @@ alp_status_t da9292_get_fault_pins(alp_gpio_t *int_n, alp_gpio_t *tw_n, uint8_t 
  * @param enable  true = set CHx_EN, false = clear it.
  * @return ALP_OK; ALP_ERR_NOT_READY if not initialised; ALP_ERR_INVAL on an
  *         invalid channel; ALP_ERR_NOSUPPORT if no table is installed, the
- *         channel is not enable-writable, or @p enable is false on a
- *         `critical` channel; ALP_ERR_OUT_OF_RANGE as above; the bus
+ *         channel is not enable-writable, @p enable is false on a
+ *         `critical` channel, or @p enable is true and the entry has no
+ *         window (`max_mv == 0`); ALP_ERR_OUT_OF_RANGE as above; the bus
  *         status on I2C failure.
  */
 alp_status_t da9292_set_enable(da9292_t *ctx, da9292_channel_t ch, bool enable);

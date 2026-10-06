@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <vector>
 
 #include "dxrt/inference_option.h"
 #include "dxrt/tensor.h"
@@ -30,6 +31,13 @@ inline dxrt::Tensors    g_declared_inputs;
 inline dxrt::Tensors    g_declared_outputs;
 inline dxrt::TensorPtrs g_run_outputs;
 inline bool             g_run_should_throw = false;
+
+/* boundOption of every engine constructed, in order, and how many engines
+ * are alive per boundOption (index 0..6): lets a test prove an engine was
+ * built directly on the requested cores and that core-set slots are
+ * released on close. */
+inline std::vector<uint32_t> g_ctor_bounds;
+inline int                   g_live_by_bound[8] = {};
 
 } /* namespace dxrt_test */
 
@@ -43,8 +51,18 @@ class InferenceEngine
 	{
 		(void)buf;
 		(void)size;
-		(void)opt;
+		bound_ = opt.boundOption;
+		dxrt_test::g_ctor_bounds.push_back(bound_);
+		++dxrt_test::g_live_by_bound[bound_ & 7u];
 	}
+
+	~InferenceEngine()
+	{
+		--dxrt_test::g_live_by_bound[bound_ & 7u];
+	}
+
+	InferenceEngine(const InferenceEngine &)            = delete;
+	InferenceEngine &operator=(const InferenceEngine &) = delete;
 
 	Tensors GetInputs()
 	{
@@ -63,6 +81,9 @@ class InferenceEngine
 		}
 		return dxrt_test::g_run_outputs;
 	}
+
+  private:
+	uint32_t bound_ = 0;
 };
 
 } /* namespace dxrt */

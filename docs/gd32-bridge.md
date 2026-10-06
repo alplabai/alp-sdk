@@ -79,7 +79,15 @@ takes its `SystemInit()` from the alp-sdk `overrides/system_gd32g5x3.c`
 (`__SYSTEM_CLOCK_216M_PLL_IRC8M`), not the vendor submodule's stock
 216M-PLL-HXTAL file -- on these SoMs the GD32 HXTAL input (fed by the
 5L35023B SE2) never starts, so the stock HXTAL init hangs forever
-before `main()` and the bridge never comes up. The firmware repo's
+before `main()` and the bridge never comes up. Root cause: the 5L35023B
+OTP image has reg `0x1F` = `0x46`, whose bit 7 `SE2_Freerun_32K` = 0, so SE2
+free-runs at 32.768 kHz instead of a MHz clock. U-Boot (patch `0012`) now
+writes reg `0x24` = `0x8F` then reg `0x1F` = `0xC7` on every boot, routing SE2
+from DIV4 = 24.576 MHz (see
+[`docs/soms/v2n.md`](soms/v2n.md#on-module-clock-generator-fixup)); that
+makes a HXTAL-based `SystemInit()` possible, but the IRC8M override stays
+until it is bench-verified. SE2 must not change after the GD32 locks its
+PLL to it. The firmware repo's
 `BRIDGE_ALLOW_STOCK_SYSTEM_INIT=ON` switch exists only to let CI
 compile the stock path for coverage; it must never be set for an image
 you intend to flash to a real board.
