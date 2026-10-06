@@ -262,6 +262,41 @@ extern "C" {
  *  See docs/gd32-bridge-protocol.md's version-history table. */
 #define GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR 15u
 
+/** GPIO expander bridge bits carrying the SoM camera LDO enables
+ *  (`CAM_EN_LDO0..3`, GD32 pads `PC3` / `PE8` / `PE7` / `PE10`; SoM
+ *  power-supply sheet, not E1M-X pads).  The bit numbers sit right after
+ *  @ref GD32G553_GPIO_LINE_E1M_IO26 and are meant to match the firmware
+ *  branch feat/i2c3-proxy-cam-ldo; confirm against that firmware before
+ *  relying on them.  Valid only on bridges advertising protocol minor
+ *  @ref GD32G553_I2CM_MIN_PROTOCOL_MINOR or newer.
+ *  @{ */
+#define GD32G553_GPIO_LINE_CAM_EN_LDO0 23u
+#define GD32G553_GPIO_LINE_CAM_EN_LDO1 24u
+#define GD32G553_GPIO_LINE_CAM_EN_LDO2 25u
+#define GD32G553_GPIO_LINE_CAM_EN_LDO3 26u
+/** @} */
+
+/** Minimum protocol MINOR that implements the I2CM opcodes
+ *  (@ref GD32G553_CMD_I2CM_CONFIG, @ref GD32G553_CMD_I2CM_XFER,
+ *  @ref GD32G553_CMD_I2CM_RESULT) and the CAM_EN_LDO GPIO bits
+ *  (firmware 0.17).  I2C-link only: the bridge refuses them on SPI and
+ *  the host has no CM33 helper for them.
+ *  See docs/gd32-bridge-protocol.md section 3.20. */
+#define GD32G553_I2CM_MIN_PROTOCOL_MINOR 17u
+
+/** I2CM_RESULT `result` byte (docs/gd32-bridge-protocol.md section 3.20).
+ *  The outer STATUS keeps its generic meaning; these report how the I2C3
+ *  transfer itself ended. */
+typedef enum {
+	GD32G553_I2CM_RES_OK        = 0, /**< Transfer completed (-> 0). */
+	GD32G553_I2CM_RES_NACK_ADDR = 1, /**< Address NACK (-> -ENXIO). */
+	GD32G553_I2CM_RES_NACK_DATA = 2, /**< Data NACK (-> -EIO). */
+	GD32G553_I2CM_RES_ARB_LOST  = 3, /**< Arbitration lost (-> -EAGAIN). */
+	GD32G553_I2CM_RES_BUS_ERROR = 4, /**< Bus error (-> -EIO). */
+	GD32G553_I2CM_RES_TIMEOUT   = 5, /**< Deadline hit (-> -ETIMEDOUT). */
+	GD32G553_I2CM_RES_BUS_STUCK = 6, /**< SDA held low after recovery (-> -EBUSY). */
+} gd32g553_i2cm_result_t;
+
 /** v0.7 link-feature bits (CMD_LINK_FEATURES payload).  STATUS_SEQ:
  *  once granted, every SPI reply's STATUS byte carries a 4-bit
  *  slave-side sequence stamp in bits [7:4] that advances per freshly
@@ -440,6 +475,14 @@ typedef enum {
      * gd32g553_init() negotiates automatically and records the
      * outcome in ctx->seq_enabled / ctx->granted. */
 	GD32G553_CMD_LINK_FEATURES = 0x81,
+	/* v0.17: I2C3 master proxy (I2C link only, never batched; no host
+     * helper -- the Linux gpio-gd32-bridge adapter is the sole caller).
+     * CONFIG `bus_khz:u16` (100|400, 0 = release PC8/PC9), XFER
+     * `tag addr7 flags wlen rlen wdata[]`, RESULT -> `tag result nread
+     * rdata[]`.  See section 3.20 of docs/gd32-bridge-protocol.md. */
+	GD32G553_CMD_I2CM_CONFIG = 0xA0,
+	GD32G553_CMD_I2CM_XFER   = 0xA1,
+	GD32G553_CMD_I2CM_RESULT = 0xA2,
 	/* Reserved range 0xF0..0xFF -- application-bootloader OTA. */
 	GD32G553_CMD_OTA_BEGIN       = 0xF0,
 	GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1,

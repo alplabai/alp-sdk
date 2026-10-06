@@ -131,9 +131,11 @@ e1m_routes:
         doc: "M.2 E-key UART-path wake (active-low)." }
     # --- Capacitive touch panels (on the two DSI displays) ---
     # CTP1 INT/RST (IO9/IO11): GT911 touch controller for Display 1. On V2N-family
-    # SoMs the GT911 I2C bus (DSI1_CSI_I2C = E1M-X I2C3) has no direct Linux
-    # I2C master today. Touch is deferred until the bridge I2C-proxy follow-up;
-    # see XEVK_I2C_BUS_DSI_CSI1.
+    # SoMs E1M-X I2C3 is served by the GD32 bridge I2C proxy (protocol v0.17).
+    # The V2 carrier netlist names the GT911 bus DSI1_CSI_I2C but J12/CAM1 is on
+    # DSI_CSI_I2C1, which is the net wired to E1M-X I2C3; the J6 display I2C is
+    # not wired to I2C3, so the GT911 is not reachable through the proxy.
+    # See XEVK_I2C_BUS_DSI_CSI1.
     # CTP2 INT/RST (IO17/IO19): Display 2 sideband -- unreachable on V2N/V2M SoMs
     # (DSI1 lane set unpopulated). Wired on the carrier for future dual-DSI SoMs.
     - { e1m: E1M_X_GPIO_IO9,  macro: XEVK_PIN_CTP1_INT,
@@ -212,9 +214,9 @@ e1m_routes:
         doc: "On-board sensor + IO-expander + INA236 bus (ICM-42670, BMI323, BMP581, TCAL9538, INA236)." }
     - { e1m: E1M_X_I2C2,  macro: XEVK_I2C_BUS_DSI_CSI0,
         doc: "Display/camera control I2C bank 0 (DSI panel + CSI camera-side config)." }
-    # On V2N-family SoMs, E1M-X I2C3 (DSI1_CSI_I2C) has no Linux I2C master
-    # today; the GT911 touch controller is accessed only after the bridge
-    # I2C-proxy follow-up is implemented.
+    # On V2N-family SoMs, E1M-X I2C3 is a Linux i2c_adapter provided by the
+    # GD32 bridge I2C proxy (100 kHz default; no SoM pull-ups, the carrier or
+    # module provides them).  CAM1 (J12) is on this bus.
     - { e1m: E1M_X_I2C3,  macro: XEVK_I2C_BUS_DSI_CSI1,
         doc: "Display/camera control I2C bank 1." }
     - { e1m: E1M_X_SPI1,  macro: XEVK_SPI_BUS_ARDUINO,

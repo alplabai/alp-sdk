@@ -31,6 +31,7 @@ build it, how to flash it, and what state the implementation is in.
 | HAL                 | Stub default; `BRIDGE_HAL_BACKEND=gd32` consumes the GigaDevice firmware library, fetched at build time from [GigaDevice's official repository](https://github.com/GigaDevice-GD32-MCU/GD32G5x3_Firmware_Library) by `tools/fetch_gd32_library.sh` in the firmware repo (this repo does not redistribute it) |
 | Protocol coverage   | `PING`, `GET_VERSION`, `GET_BUILD_ID` working end-to-end without HW dependency    |
 | Transport coverage  | SPI1 slave (25 MHz full-DMA, silicon-validated) + I2C0 slave in `hal/transport_hw_gd32.c` (gd32 backend) |
+| I2C3 master proxy   | Protocol v0.17: the bridge masters E1M-X I2C3 (`PC8` SCL / `PC9` SDA) for Linux over the I2C link only (`I2CM_CONFIG` / `I2CM_XFER` / `I2CM_RESULT`, [protocol section 3.20](gd32-bridge-protocol.md)); Linux exposes it as an `i2c_adapter` from `gpio-gd32-bridge`. |
 | Datasheet           | GD32G553 datasheet + user manual (held in the vendor datasheet) |
 | Flash size on chip  | 512 KB (per datasheet)                                                            |
 | RAM size on chip    | 128 KB                                                                            |
