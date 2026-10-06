@@ -24,18 +24,30 @@ from .models import OrchestratorError
 CORE_TOKEN_TYPES = {"a55": "cortex-a55", "m33": "cortex-m33"}
 
 
-def load_ownership_doc(metadata_root: Path, family_dir: Optional[str]) -> Optional[dict]:
-    """The family's core-ownership.yaml, or None.  The V2M family
-    (`v2n-m1`) shares the V2N file."""
+def _ownership_doc_path(metadata_root: Path, family_dir: Optional[str]) -> Optional[tuple[Path, str]]:
+    """(on-disk path under `metadata_root`, repo-relative spelling) of the
+    family's core-ownership.yaml (the V2M family `v2n-m1` shares the V2N
+    file), or None.  The repo-relative string is only for `src=` comments."""
     if not family_dir:
         return None
     for fam in (family_dir, "v2n" if family_dir.startswith("v2n") else None):
-        if fam is None:
-            continue
-        p = metadata_root / "e1m_modules" / fam / "core-ownership.yaml"
-        if p.is_file():
-            return yaml.safe_load(p.read_text(encoding="utf-8"))
+        p = metadata_root / "e1m_modules" / fam / "core-ownership.yaml" if fam else None
+        if p and p.is_file():
+            return p, f"metadata/e1m_modules/{fam}/core-ownership.yaml"
     return None
+
+
+def ownership_doc_rel(metadata_root: Path, family_dir: Optional[str]) -> Optional[str]:
+    """Repo-relative path of the family's core-ownership.yaml, or None."""
+    found = _ownership_doc_path(metadata_root, family_dir)
+    return found[1] if found else None
+
+
+def load_ownership_doc(metadata_root: Path, family_dir: Optional[str]) -> Optional[dict]:
+    """The family's core-ownership.yaml (read from `metadata_root`, whatever
+    that directory is called), or None."""
+    found = _ownership_doc_path(metadata_root, family_dir)
+    return yaml.safe_load(found[0].read_text(encoding="utf-8")) if found else None
 
 
 def resolve_ownership(doc: Optional[dict],
@@ -43,9 +55,10 @@ def resolve_ownership(doc: Optional[dict],
                       declared_core_types: Optional[set[str]] = None) -> dict[str, str]:
     """{instance: core} = assignable defaults + validated overrides.
 
-    Until a per-project Linux fragment exists, an override may only restate
-    the SoM default (anything else needs a Linux change this build cannot
-    make); `hw_blocked` instances reject it with their reason.
+    An override may differ from the SoM default only where both cores' trees
+    can follow it (candidates include m33 and an `m33:` block exists; the
+    Linux side is `--emit linux-ownership-dts`); handing a node to a55 also
+    needs `linux_enable`.  `hw_blocked` instances reject with their reason.
 
     Fixed `core_ownership` rows are not in the result and cannot be
     overridden (they are not instances).  `declared_core_types` (SoC core
@@ -74,16 +87,24 @@ def resolve_ownership(doc: Optional[dict],
             raise OrchestratorError(
                 f"board.yaml ownership: {inst} is assigned to {core!r} but "
                 f"board.yaml `cores:` does not declare a {CORE_TOKEN_TYPES[core]} core")
-        default = assignable[inst]["default"]
+        e = assignable[inst]
+        default = e["default"]
         if core != default:
-            raise OrchestratorError(
-                f"board.yaml ownership: {inst}: {core!r} differs from the SoM default "
-                f"{default!r}.  The Linux devicetree fragment (e1m-v2n-ownership.dtsi, "
-                f"including renesas,cm33-owned-clocks) is generated from the SoM default "
-                f"only, so a per-project override would leave Linux claiming the node and "
-                f"not holding its clocks.  Change the default in "
-                f"metadata/e1m_modules/v2n/core-ownership.yaml; a per-project Linux "
-                f"fragment is not implemented")
+            # A non-default owner needs BOTH sides to follow: the CM33 board
+            # tree/Kconfig (an `m33:` block) and the per-project Linux
+            # fragment (`--emit linux-ownership-dts`).  Handing a node TO
+            # Linux additionally needs `linux_enable` (bench-evidenced).
+            if "m33" not in cands or not e.get("m33"):
+                raise OrchestratorError(
+                    f"board.yaml ownership: {inst}: {core!r} differs from the SoM default "
+                    f"{default!r} but metadata/e1m_modules/<family>/core-ownership.yaml "
+                    f"carries no `m33:` devicetree block (and an m33 candidate) for it, so "
+                    f"only one core's tree could follow")
+            if core == "a55" and not e.get("linux_enable"):
+                raise OrchestratorError(
+                    f"board.yaml ownership: {inst}: Linux enablement is not bench-evidenced "
+                    f"(`linux_enable` unset in core-ownership.yaml); it cannot be handed to "
+                    f"'a55'")
         out[inst] = core
     return out
 

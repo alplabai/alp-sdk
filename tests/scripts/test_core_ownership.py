@@ -13,7 +13,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_orchestrate import emit_system_manifest, load_board_yaml  # noqa: E402
 from alp_orchestrate.models import OrchestratorError  # noqa: E402
-from alp_orchestrate.ownership import (load_ownership_doc, pad_pfc,  # noqa: E402
+from alp_orchestrate.ownership import (load_ownership_doc, ownership_doc_rel, pad_pfc,  # noqa: E402
                                        resolve_ownership, validate_assignable)
 
 DOC = load_ownership_doc(REPO / "metadata", "v2n")
@@ -53,10 +53,19 @@ def _doc(**entry):
     return {"assignable": {"e1m_x": e}}
 
 
-def test_override_differing_from_the_default_is_rejected_until_linux_can_follow():
-    with pytest.raises(OrchestratorError, match="e1m_x: 'm33' differs from the SoM default 'a55'.*Linux"):
+def test_override_needs_an_m33_candidate_and_block_so_both_trees_can_follow():
+    with pytest.raises(OrchestratorError, match="e1m_x: 'm33' differs from the SoM default 'a55'.*no `m33:`"):
         resolve_ownership(_doc(), {"e1m_x": "m33"})
     assert resolve_ownership(_doc(), {"e1m_x": "a55"}) == {"e1m_x": "a55"}
+    blk = {"m33": {"dt_label": "sci0", "alias": "alp-uart9"}}
+    assert resolve_ownership(_doc(**blk), {"e1m_x": "m33"}) == {"e1m_x": "m33"}
+
+
+def test_handing_a_node_to_linux_needs_linux_enable():
+    blk = {"default": "m33", "m33": {"dt_label": "sci0", "alias": "alp-uart9"}}
+    with pytest.raises(OrchestratorError, match="not bench-evidenced"):
+        resolve_ownership(_doc(**blk), {"e1m_x": "a55"})
+    assert resolve_ownership(_doc(linux_enable=True, **blk), {"e1m_x": "a55"}) == {"e1m_x": "a55"}
 
 
 def test_hw_blocked_instance_rejects_an_override_with_the_reason():
@@ -207,3 +216,56 @@ def test_hw_blocked_instance_cannot_be_enabled_on_m33(tmp_path):
     with pytest.raises(OrchestratorError, match="hardware-blocked.*3.3 V"):
         m33_overlay(doc, {"e1m_spi0": "m33"})
     assert DOC["assignable"]["e1m_spi0"]["hw_blocked"]["reason"]
+
+
+def test_override_flips_cm33_overlay_linux_fragment_and_pad_claims_consistently(tmp_path):
+    """One board.yaml override drives the CM33 node, the Linux node status and
+    the CM33 clock hold; the default project changes none of them."""
+    from alp_orchestrate.linux_ownership import emit_linux_ownership_dts
+    from alp_orchestrate.ownership import project_m33_overlay
+    root = _meta_with_m33_uart0(tmp_path)
+    f = root / "e1m_modules" / "v2n" / "core-ownership.yaml"
+    doc = yaml.safe_load(f.read_text(encoding="utf-8"))
+    doc["assignable"]["e1m_uart0"]["default"] = "a55"
+    f.write_text(yaml.safe_dump(doc), encoding="utf-8")
+
+    plain = load_board_yaml(_project(tmp_path / "d"), metadata_root=root)
+    own = load_board_yaml(_project(tmp_path / "o", {"e1m_uart0": "m33"}), metadata_root=root)
+    assert own.ownership["e1m_uart0"] == "m33" and plain.ownership["e1m_uart0"] == "a55"
+
+    sci0 = [r for r in doc["assignable"]["e1m_uart0"]["rows"]]
+    assert sci0
+    # CM33 side
+    assert project_m33_overlay(plain, "m33_sm") == ([], [])
+    assert "&sci0 {" in " ".join(project_m33_overlay(own, "m33_sm")[0])
+    # Linux side: same decision, plus the clock hold
+    lin_own, lin_plain = emit_linux_ownership_dts(own), emit_linux_ownership_dts(plain)
+    assert '&sci0 {\n\tstatus = "disabled";' in lin_own
+    assert '&sci0 {\n\tstatus = "disabled";' not in lin_plain
+    clk = own.soc_spec["linux_dt"]["UART0"]["cpg_clocks"]
+    assert all(f'"{c}"' in lin_own for c in clk)
+    assert not any(f'"{c}"' in lin_plain for c in clk)
+
+
+def test_default_project_fragment_equals_the_committed_som_default_fragment():
+    from alp_orchestrate.linux_ownership import emit_linux_ownership_dts
+    proj = load_board_yaml(SRC / "board.yaml")
+    committed = (REPO / "meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi")
+    assert emit_linux_ownership_dts(proj) == committed.read_text(encoding="utf-8")
+
+
+def test_non_assignable_som_emits_a_stub():
+    from alp_orchestrate.linux_ownership import emit_linux_ownership_dts
+    out = emit_linux_ownership_dts(load_board_yaml(REPO / "examples/multicore/rpmsg-aen/board.yaml"))
+    assert out.startswith("/* No assignable")
+
+
+def test_ownership_doc_is_read_from_the_given_metadata_root(tmp_path):
+    """A metadata root not named `metadata` (a project-local override tree)
+    resolves under the root itself, not under root.parent/'metadata'."""
+    root = tmp_path / "meta-override"
+    dst = root / "e1m_modules" / "v2n"
+    dst.mkdir(parents=True)
+    shutil.copy(REPO / "metadata/e1m_modules/v2n/core-ownership.yaml", dst)
+    assert load_ownership_doc(root, "v2n") == DOC
+    assert ownership_doc_rel(root, "v2n") == "metadata/e1m_modules/v2n/core-ownership.yaml"
