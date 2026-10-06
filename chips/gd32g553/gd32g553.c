@@ -1183,6 +1183,56 @@ alp_status_t gd32g553_se_reset(gd32g553_t *ctx, bool assert)
 	return cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_SE_RESET, &req, 1u, NULL, 0u);
 }
 
+/* BOOT_CONFIG request: op:u8 (0 = GET, 1 = SET) flags:u32 LE; reply flags:u32 LE. */
+static alp_status_t boot_config_xfer(gd32g553_t *ctx, uint8_t op, uint32_t flags, uint32_t *out)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	uint8_t req[5];
+	req[0] = op;
+	for (unsigned i = 0u; i < 4u; i++) {
+		req[1u + i] = (uint8_t)(flags >> (8u * i));
+	}
+	uint8_t      reply[4];
+	alp_status_t s = cmd_send(
+	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_BOOT_CONFIG, req, sizeof(req), reply, 4u);
+	if (s != ALP_OK) return s;
+	if (out != NULL) {
+		*out = (uint32_t)reply[0] | ((uint32_t)reply[1] << 8) | ((uint32_t)reply[2] << 16) |
+		       ((uint32_t)reply[3] << 24);
+	}
+	return ALP_OK;
+}
+
+alp_status_t gd32g553_boot_config_get(gd32g553_t *ctx, uint32_t *flags)
+{
+	if (flags == NULL) return ALP_ERR_INVAL;
+	return boot_config_xfer(ctx, 0u, 0u, flags);
+}
+
+/* The firmware accepts a SET at once and commits it from its main loop: on
+ * dual-bank parts two 1 KB page erases, each <= 20 ms with interrupts masked
+ * (2 x 20 ms of link blackout), starting up to ~40 ms late behind an OTA erase
+ * walk.  There is no fixed idle window: wait ~50 ms, then poll GET (a
+ * transport error inside a blackout just costs one more poll) until the stored
+ * value equals the request.  ~50 ms + 10 ms steps, ~260 ms in all. */
+#define BOOT_CONFIG_APPLY_WAIT_MS 50u
+#define BOOT_CONFIG_POLL_STEP_MS  10u
+#define BOOT_CONFIG_POLL_TRIES    22u
+
+alp_status_t gd32g553_boot_config_set(gd32g553_t *ctx, uint32_t flags)
+{
+	uint32_t     stored = 0u;
+	alp_status_t s      = boot_config_xfer(ctx, 1u, flags, &stored);
+	if (s != ALP_OK) return s;
+	if (stored == flags) return ALP_OK; /* already stored: the firmware skipped the write */
+
+	for (unsigned i = 0u; i < BOOT_CONFIG_POLL_TRIES; i++) {
+		alp_delay_ms(i == 0u ? BOOT_CONFIG_APPLY_WAIT_MS : BOOT_CONFIG_POLL_STEP_MS);
+		if (boot_config_xfer(ctx, 0u, 0u, &stored) == ALP_OK && stored == flags) return ALP_OK;
+	}
+	return ALP_ERR_TIMEOUT;
+}
+
 alp_status_t gd32g553_dac_set(gd32g553_t *ctx, uint8_t channel, uint16_t value_mv)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
