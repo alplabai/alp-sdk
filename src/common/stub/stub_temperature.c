@@ -12,7 +12,7 @@
  * alp_i2c primitives and so is genuinely one shared translation unit)
  * this class needs a real per-OS split.  This stub is that split's
  * baremetal half (Yocto has its own
- * src/yocto/temperature_yocto.c with a real SoC-die read); see issue #2066.
+ * src/yocto/temperature_yocto.c with a real SoC-die read; the Zephyr die read is `die-temp0`); see issue #2066.
  */
 
 #include <stddef.h>

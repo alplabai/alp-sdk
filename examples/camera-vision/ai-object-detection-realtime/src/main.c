@@ -13,7 +13,7 @@
  *     +-------+--------+                  +----------------+
  *             |  <alp/camera.h> hands the frame off to the
  *             |  inference pipeline (backend resolved from
- *             |  the SKU's preferred_backend by the
+ *             |  the SKU's inference.auto_order by the
  *             |  §D.lib.loader; no vendor symbols in app code).
  *             v
  *     +----------------------+
