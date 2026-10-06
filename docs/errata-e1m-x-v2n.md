@@ -90,13 +90,18 @@ its own MDIO bus with one PHY (id `0x001c`/`0xc916`): end0
 reads `0xffff`, so the fixed `reg = <2>` gives `phy_poll_reset failed: -110`
 on end1.
 
-**Fix (U-Boot patch 0017):** U-Boot scans MDIO addresses 1..31 (0 is the
-broadcast address) on both buses at boot, and when exactly one RTL8211F-family
-PHY (`0x001c` with `0xc916` or `0xc878`) answers at an address other than the
-DT's `reg`, rewrites that phy node's `reg` and unit-address in the booted DT
-before `booti` and prints `ALP: GBETH<n> PHY at MDIO addr <a> (DT had <b>) -
-fixed`. With no PHY found it prints an `ALP:` warning and leaves the DT alone.
-The DT default stays `reg = <2>`. Bench-gated: needs a reflashed FIP.
+**Fix (U-Boot patch 0017):** in `ft_system_setup()` U-Boot reads PHYID1/PHYID2
+for MDIO addresses 1..31 (0 is the broadcast address) on both buses by driving
+the DWC EQoS MDIO registers directly (GBETH0 `0x15c30000`, GBETH1
+`0x15c40000`; no U-Boot network device is probed and no clock/reset code is
+added, TF-A BL2 already enables both GBETH blocks). Each MDIO wait is bounded
+(10 ms) and a scan stops at the first read error, printing `ALP: warning:
+GBETH<n> MDIO read failed (<ret>), DT unchanged`. When exactly one
+RTL8211F-family PHY (`0x001c` with `0xc916` or `0xc878`) answers at an address
+other than the DT's `reg`, it rewrites that phy node's `reg` and unit-address
+in the booted DT before `booti` and prints `ALP: GBETH<n> PHY at MDIO addr <a>
+(DT had <b>) - fixed`. With none or several found it prints an `ALP:` warning
+and leaves the DT alone. The DT default stays `reg = <2>`. Bench-gated: needs a reflashed FIP.
 
 ## E3: USB2.0 over-current pins read permanently asserted
 

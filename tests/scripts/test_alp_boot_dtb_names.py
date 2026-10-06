@@ -85,4 +85,8 @@ def test_gbeth_phy_fixup_patch_is_in_the_series_and_skips_broadcast_address():
     assert "addr = 0;" not in patch
     assert "ALP_PHY_OUI_ID1		0x001c" in patch and "0xc916" in patch
     assert "PHY at MDIO addr %d (DT had %d) - fixed" in patch
-    assert "&eth1 {" in patch
+    assert "&eth1" not in patch
+    assert "CLKMON" not in patch and "RSTMON" not in patch
+    assert "get_timer(" in patch and "-ETIMEDOUT" in patch
+    scan = patch[patch.index("static int alp_scan_phy_addr"):]
+    assert "if (ret)\n+\t\t\treturn ret;" in scan

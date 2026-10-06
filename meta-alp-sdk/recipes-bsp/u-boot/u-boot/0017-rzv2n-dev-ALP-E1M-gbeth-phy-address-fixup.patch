@@ -1,6 +1,6 @@
-From 360751b98736a2d9168743fac64c1b7d48808795 Mon Sep 17 00:00:00 2001
+From 5ac882a1b41dd1fe538a0731cd87076f0a82b11c Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
-Date: Tue, 6 Oct 2026 12:00:00 +0000
+Date: Tue, 6 Oct 2026 16:51:25 +0000
 Subject: [PATCH] rzv2n-dev: ALP E1M: fix the Linux DT GBETH PHY address from
  an MDIO scan
 
@@ -10,96 +10,41 @@ hardcodes reg = <2> on both buses, so GBETH1 fails with phy_poll_reset
 -110.
 
 ft_system_setup() now scans MDIO addresses 1..31 (0 is the RTL8211F
-broadcast address) on both GBETH buses through the dwc_eth_qos driver mii
-bus and, when exactly one RTL8211F-family PHY (OUI 0x001c, id 0xc916 or
-0xc878) answers at an address other than the DT reg, rewrites the booted
-DT phy reg and node unit-address (phandle untouched) and prints
-"ALP: GBETH<n> PHY at MDIO addr <a> (DT had <b>) - fixed". With none
-found it prints an ALP: warning and leaves the DT unchanged.
+broadcast address) on both GBETH buses and, when exactly one RTL8211F-family
+PHY (OUI 0x001c, id 0xc916 or 0xc878) answers at an address other than the
+DT reg, rewrites the booted DT phy reg and node unit-address (phandle
+untouched) and prints "ALP: GBETH<n> PHY at MDIO addr <a> (DT had <b>) -
+fixed". With none or several found it prints an ALP: warning and leaves the
+DT unchanged.
 
-ethernet@15c40000 is enabled in the U-Boot DT so its MDIO bus is
-registered; board_init() releases GBETH1 reset and enables its clocks the
-way it already does for GBETH0 (bits per the Linux r9a09g056-cpg.c GBETH_1
-rows).
+The scan drives the DWC EQoS MDIO registers directly (GBETH0 0x15c30000,
+GBETH1 0x15c40000, MDIO_Address +0x200, MDIO_Data +0x204, CR 150-250 MHz as
+the dwc_eth_qos rzv2h config). TF-A BL2 already enables the GBETH clocks,
+releases the reset and clears the bus MSTOP, so no clock/reset code is added
+and no U-Boot network device is probed. Each MDIO wait is bounded to 10 ms
+and a scan stops at the first read error, printing "ALP: warning: GBETH<n>
+MDIO read failed (<ret>), DT unchanged".
 
 Not verified on silicon.
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- arch/arm/dts/rzv2n-dev.dts          |   7 ++
- board/renesas/rzv2n-dev/rzv2n-dev.c | 130 ++++++++++++++++++++++++++++
- 2 files changed, 137 insertions(+)
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 153 ++++++++++++++++++++++++++++
+ 1 file changed, 153 insertions(+)
 
-diff --git a/arch/arm/dts/rzv2n-dev.dts b/arch/arm/dts/rzv2n-dev.dts
-index db2f837b..d96f161c 100644
---- a/arch/arm/dts/rzv2n-dev.dts
-+++ b/arch/arm/dts/rzv2n-dev.dts
-@@ -207,6 +207,13 @@
- 	};
- };
- 
-+/* ALP: probed only so its MDIO bus exists for the PHY address scan in
-+ * ft_system_setup() (rzv2n-dev.c); no netboot over this port. */
-+&eth1 {
-+	status = "okay";
-+	phy-mode = "rgmii-id";
-+};
-+
- &xspi {
- 	status = "okay";
- 
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
-index e5bd6020..1af7aa91 100644
+index e5bd6020..79e7f4c8 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
-@@ -31,6 +31,9 @@
+@@ -31,6 +31,7 @@
  #include <env.h>
  #include <net.h>
  #include <fdt_support.h>
-+#include <miiphy.h>
 +#include <linux/mii.h>
-+#include <dm/uclass.h>
  
  DECLARE_GLOBAL_DATA_PTR;
  
-@@ -87,6 +90,8 @@ DECLARE_GLOBAL_DATA_PTR;
- #define CPG_SSEL1			(CPG_BASE + 0x0304)
- #define CPG_CLKON_ETH0			(CPG_BASE + 0x062C)
- #define CPG_CLKMON_ETH0			(CPG_BASE + 0x0814)
-+#define CPG_CLKON_ETH1			(CPG_BASE + 0x0630)
-+#define CPG_CLKMON_ETH1			(CPG_BASE + 0x0818)
- #define CPG_RESET_ETH			(CPG_BASE + 0x092C)
- #define CPG_RESETMON_ETH		(CPG_BASE + 0x0A14)
- 
-@@ -193,6 +198,27 @@ void s_init(void)
- 	while((*(volatile u32 *)(CPG_CLKMON_ETH0) & 0x3F000000) != 0x3F000000)
- 		;
- 
-+	/* ALP: GBETH1 (ethernet@15c40000) clocks and reset, so its MDIO bus
-+	 * is readable (ft_system_setup() scans it for the PHY address).
-+	 * Same layout as the ETH0 block above; bit positions are the GBETH_1
-+	 * rows of the Linux CPG table (drivers/clk/renesas/r9a09g056-cpg.c):
-+	 * clocks tx_i/rx_i = CLKON_11 bits 14/15 (CLKMON_5 bits 30/31),
-+	 * tx_180_i/rx_180_i/aclk_csr_i/aclk_i = CLKON_12 bits 0..3 (CLKMON_6
-+	 * bits 0..3); reset GBETH_1_ARESETN_I = RST_11 bit 1 (RSTMON_5 bit 2).
-+	 * Upper halfword = write-enable mask, as for ETH0. */
-+	*(volatile u32 *)(CPG_RESET_ETH) = 0x00020000;
-+	while ((*(volatile u32 *)(CPG_RESETMON_ETH) & 0x00000004) == 0x0)
-+		;
-+	*(volatile u32 *)(CPG_RESET_ETH) = 0x00020002;
-+	while ((*(volatile u32 *)(CPG_RESETMON_ETH) & 0x00000004) != 0x0)
-+		;
-+	*(volatile u32 *)(CPG_CLKON_ETH0) = 0xC000C000;
-+	*(volatile u32 *)(CPG_CLKON_ETH1) = 0x000F000F;
-+	while ((*(volatile u32 *)(CPG_CLKMON_ETH0) & 0xC0000000) != 0xC0000000)
-+		;
-+	while ((*(volatile u32 *)(CPG_CLKMON_ETH1) & 0x0000000F) != 0x0000000F)
-+		;
-+
- 	/* Enable ADC */
- 	*(volatile u32 *)(SYS_ADC_CFG) = 0;
- }
-@@ -1065,6 +1091,108 @@ static void alp_publish_reset_cause(void *blob)
+@@ -1065,6 +1066,156 @@ static void alp_publish_reset_cause(void *blob)
  		printf("ALP: failed to publish /chosen/alp,reset-cause (%d)\n", ret);
  }
  
@@ -112,28 +57,73 @@ index e5bd6020..1af7aa91 100644
 + * GBETH1 at 3). The Linux DT carries reg = <2> on both; scan each bus here
 + * and correct the booted DT when the PHY answers somewhere else.
 + *
-+ * MDIO goes through the U-Boot dwc_eth_qos driver's mii bus (named after the
-+ * device, "ethernet@15c30000" / "ethernet@15c40000"); probing the device
-+ * registers the bus. ID source: MII registers 2/3 read 0x001c/0xc916 on the
-+ * bench units (errata E2); 0x001c is the Realtek OUI and Linux realtek.c
-+ * binds 0x001cc916 (RTL8211F) and 0x001cc878 (RTL8211F-VD) -- both accepted.
-+ * Address 0 is the RTL8211F broadcast address (errata E2), so it is skipped.
++ * The scan drives the DWC EQoS MDIO registers directly (no U-Boot network
++ * device is probed). TF-A BL2 has already enabled the GBETH clocks, released
++ * the reset and cleared the bus MSTOP, so the registers are reachable; no
++ * clock/reset code is added here. ID source: MII registers 2/3 read
++ * 0x001c/0xc916 on the bench units (errata E2); 0x001c is the Realtek OUI
++ * and Linux realtek.c binds 0x001cc916 (RTL8211F) and 0x001cc878
++ * (RTL8211F-VD) -- both accepted. Address 0 is the RTL8211F broadcast
++ * address (errata E2), so it is skipped.
 + */
++#define ALP_GBETH0_BASE		0x15c30000
++#define ALP_GBETH1_BASE		0x15c40000
++#define ALP_EQOS_MDIO_ADDRESS	0x200
++#define ALP_EQOS_MDIO_DATA	0x204
++#define ALP_MDIO_GB		BIT(0)		/* GMII busy */
++#define ALP_MDIO_GOC_READ	(3 << 2)	/* clause 22 read */
++#define ALP_MDIO_CR_150_250	(4 << 8)	/* MDC divider, as dwc_eth_qos eqos_rzv2h_config */
++#define ALP_MDIO_RDA_SHIFT	16
++#define ALP_MDIO_PA_SHIFT	21
++#define ALP_MDIO_TIMEOUT_MS	10
++
 +#define ALP_PHY_OUI_ID1		0x001c
 +#define ALP_PHY_ID2_8211F	0xc916
 +#define ALP_PHY_ID2_8211F_VD	0xc878
 +
-+/* Returns the single matching address, -ENODEV for none, -EEXIST for several. */
-+static int alp_scan_phy_addr(const char *bus)
++/* Bounded wait for GB to clear; 0 when idle, -ETIMEDOUT otherwise. */
++static int alp_mdio_wait_idle(uintptr_t base)
 +{
-+	int addr, found = -ENODEV;
++	ulong start = get_timer(0);
++
++	while (readl((void *)(base + ALP_EQOS_MDIO_ADDRESS)) & ALP_MDIO_GB)
++		if (get_timer(start) > ALP_MDIO_TIMEOUT_MS)
++			return -ETIMEDOUT;
++	return 0;
++}
++
++static int alp_mdio_read(uintptr_t base, int addr, int reg, u16 *val)
++{
++	int ret = alp_mdio_wait_idle(base);
++
++	if (ret)
++		return ret;
++	writel((addr << ALP_MDIO_PA_SHIFT) | (reg << ALP_MDIO_RDA_SHIFT) |
++	       ALP_MDIO_CR_150_250 | ALP_MDIO_GOC_READ | ALP_MDIO_GB,
++	       (void *)(base + ALP_EQOS_MDIO_ADDRESS));
++	ret = alp_mdio_wait_idle(base);
++	if (ret)
++		return ret;
++	*val = readl((void *)(base + ALP_EQOS_MDIO_DATA)) & 0xffff;
++	return 0;
++}
++
++/*
++ * Returns the single matching address, -ENODEV for none, -EEXIST for several,
++ * or the MDIO read error (the scan stops at the first one).
++ */
++static int alp_scan_phy_addr(uintptr_t base)
++{
++	int addr, ret, found = -ENODEV;
 +
 +	for (addr = 1; addr < 32; addr++) {
-+		u16 id1 = 0xffff, id2 = 0xffff;
++		u16 id1, id2;
 +
-+		if (miiphy_read(bus, addr, MII_PHYSID1, &id1) ||
-+		    miiphy_read(bus, addr, MII_PHYSID2, &id2))
-+			continue;
++		ret = alp_mdio_read(base, addr, MII_PHYSID1, &id1);
++		if (!ret)
++			ret = alp_mdio_read(base, addr, MII_PHYSID2, &id2);
++		if (ret)
++			return ret;
 +		if (id1 != ALP_PHY_OUI_ID1 ||
 +		    (id2 != ALP_PHY_ID2_8211F && id2 != ALP_PHY_ID2_8211F_VD))
 +			continue;
@@ -144,9 +134,9 @@ index e5bd6020..1af7aa91 100644
 +	return found;
 +}
 +
-+static void alp_fixup_gbeth_phy(void *blob, int n, const char *mac_name)
++static void alp_fixup_gbeth_phy(void *blob, int n, const char *mac_name,
++				uintptr_t base)
 +{
-+	struct udevice *dev;
 +	const fdt32_t *regp;
 +	char name[24];
 +	int mac, mdio, phy, len, addr, had, ret;
@@ -173,47 +163,50 @@ index e5bd6020..1af7aa91 100644
 +		return;
 +	had = fdt32_to_cpu(*regp);
 +
-+	if (uclass_get_device_by_name(UCLASS_ETH, mac_name, &dev)) {
-+		printf("ALP: warning: GBETH%d MDIO bus unavailable, PHY address not probed (DT has %d)\n",
-+		       n, had);
-+		return;
-+	}
-+
-+	addr = alp_scan_phy_addr(mac_name);
++	addr = alp_scan_phy_addr(base);
 +	if (addr == -EEXIST) {
 +		printf("ALP: warning: GBETH%d several PHYs on the MDIO bus, DT unchanged (DT has %d)\n",
 +		       n, had);
 +		return;
 +	}
-+	if (addr < 0) {
++	if (addr == -ENODEV) {
 +		printf("ALP: warning: GBETH%d no RTL8211F PHY found on MDIO addresses 1..31, DT unchanged (DT has %d)\n",
 +		       n, had);
++		return;
++	}
++	if (addr < 0) {
++		printf("ALP: warning: GBETH%d MDIO read failed (%d), DT unchanged\n",
++		       n, addr);
 +		return;
 +	}
 +	if (addr == had)
 +		return;
 +
-+	snprintf(name, sizeof(name), "ethernet-phy@%x", addr);
 +	ret = fdt_setprop_u32(blob, phy, "reg", addr);
-+	if (!ret)
-+		ret = fdt_set_name(blob, phy, name);
 +	if (ret) {
 +		printf("ALP: warning: GBETH%d PHY at MDIO addr %d (DT had %d) but the DT fixup failed (%d)\n",
 +		       n, addr, had, ret);
 +		return;
 +	}
 +	printf("ALP: GBETH%d PHY at MDIO addr %d (DT had %d) - fixed\n", n, addr, had);
++
++	/* reg is what Linux uses; the unit-address rename is cosmetic. */
++	snprintf(name, sizeof(name), "ethernet-phy@%x", addr);
++	ret = fdt_set_name(blob, phy, name);
++	if (ret)
++		printf("ALP: warning: GBETH%d PHY node not renamed (%d), reg updated\n",
++		       n, ret);
 +}
 +
  /*
   * ft_board_setup() is already defined by rcar-common's v2-common.c, and
   * EVT_FT_FIXUP never reaches the kernel blob without OFNODE_MULTI_TREE, so
-@@ -1076,6 +1204,8 @@ int ft_system_setup(void *blob, struct bd_info *bd)
+@@ -1076,6 +1227,8 @@ int ft_system_setup(void *blob, struct bd_info *bd)
  	int node, ret;
  
  	alp_publish_reset_cause(blob);
-+	alp_fixup_gbeth_phy(blob, 0, "ethernet@15c30000");
-+	alp_fixup_gbeth_phy(blob, 1, "ethernet@15c40000");
++	alp_fixup_gbeth_phy(blob, 0, "ethernet@15c30000", ALP_GBETH0_BASE);
++	alp_fixup_gbeth_phy(blob, 1, "ethernet@15c40000", ALP_GBETH1_BASE);
  
  	if (!alp_sku[0])
  		return 0;
