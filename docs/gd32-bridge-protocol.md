@@ -390,7 +390,7 @@ bit numbers, not Linux gpiochip line numbers.
 At protocol minor `>= 17` (firmware `0.17`), the pad map grows from 23 to 27
 lines, adding the four SoM camera LDO enables right after `IO26` (SoM
 power-supply sheet signals, not E1M-X pads; no earlier bit moves).  The bit
-numbers below match firmware branch `feat/i2c3-proxy-cam-ldo`:
+numbers below are the v0.17 firmware assignment:
 
 | Bit | Signal         | GD32 pad | Host macro |
 |-----|----------------|----------|------------|

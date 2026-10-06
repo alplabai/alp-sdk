@@ -1,4 +1,4 @@
-### Added — GD32 bridge protocol v0.17 host mirrors: I2C3 master proxy opcodes and CAM_EN_LDO GPIO bits (alplabai/gd32-bridge-firmware#298)
+### Added — GD32 bridge protocol v0.17 host mirrors: I2C3 master proxy opcodes and CAM_EN_LDO GPIO bits
 
 `gd32-bridge-firmware` protocol v0.17 lets Linux use the bridge as the master
 of E1M-X I2C3 and adds the four SoM camera LDO enables to the GPIO expander.
