@@ -26,6 +26,8 @@ on_module:
   supervisor_mcu:       gd32g553
   ethernet_phy:         rtl8211fdi
   ethernet_phy_count:   2
+  # DX-M1 ROM-UART programming pads (provisioning): P75 = UART0 mux, PA6 = M1_RESET.
+  dxm1:                 {uart_mux_pin: P75, reset_pin: PA6, gpio_chip: "10410000.pinctrl"}
   # nor_flash / emmc are routing annotations (SoC controller the on-module
   # storage is wired to), not chip slugs -- no chips/<part>/ driver exists
   # for either (see scripts/alp_orchestrate/slugs.py

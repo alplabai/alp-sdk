@@ -19,6 +19,8 @@ notes: |
   audio).  The chip driver in alp-sdk owns only the side-channel
   GPIO management lines documented below.
 
+firmware_banner_regex: 'Firmware: BCM55500'   # brcmfmac/cyw kernel-log line the provisioning functional test expects
+
 bus:              gpio              # plus SDIO / UART / I2S not handled here
 
 side_channel_lines:

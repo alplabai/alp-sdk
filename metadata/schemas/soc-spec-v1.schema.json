@@ -163,6 +163,31 @@
       "type": "integer",
       "description": "Maximum on-die SRAM in KB across all variants. Per-variant overrides go into variants[].sram_kb."
     },
+    "cm33_boot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sram_base", "image_pad", "image_max", "xspi_offset"],
+      "properties": {
+        "sram_base": {"type": "integer", "description": "SRAM address BL2 copies the stored CM33 image to."},
+        "image_pad": {"type": "integer", "description": "Zero bytes before zephyr.bin in the stored image; the CM33 starts at sram_base + image_pad."},
+        "image_max": {"type": "integer", "description": "Largest stored image BL2 loads (it silently truncates more)."},
+        "xspi_offset": {"type": "integer", "description": "Offset in the xSPI NOR boot partition (mtd1) where the stored image lives."},
+        "note": {"type": "string"}
+      },
+      "description": "OPTIONAL. How BL2 loads the CM33 image on this SoC (RZ/V2N): the single source for the provisioning gate and the bundle schema text."
+    },
+    "openamp_carveout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a55_base", "size", "rsctbl_size"],
+      "properties": {
+        "a55_base": {"type": "integer", "description": "A55-view base of the OpenAMP reservation."},
+        "size": {"type": "integer", "description": "Bytes in the reservation."},
+        "rsctbl_size": {"type": "integer", "description": "Bytes of the resource-table window at the start of it."},
+        "note": {"type": "string"}
+      },
+      "description": "OPTIONAL. The OpenAMP/MHU-B reservation shared by the A55 (Linux UIO) and the CM33 board .dts; provisioning derives the CM33 liveness beacon address from it."
+    },
     "inference_arena_sram_kib": {
       "type": "integer",
       "minimum": 0,
