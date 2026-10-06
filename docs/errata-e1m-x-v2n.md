@@ -82,6 +82,22 @@ same ALDPS bits and CLKOUT_EN as a known-good boot.
 **Confidence:** high (datasheet; MDIO scan and driver attach, both
 ports, multiple sessions).
 
+**Per-unit address (2026-10-06, V2M103 unit 0008, R2 SoM):** the strap-latched
+address is not the same on every unit or on both ports. On 0008 each GBETH has
+its own MDIO bus with one PHY (id `0x001c`/`0xc916`): end0
+(`ethernet@15c30000`) answers at address 2 (and 0), end1
+(`ethernet@15c40000`) answers at address 3 (and 0). Address 2 on end1's bus
+reads `0xffff`, so the fixed `reg = <2>` gives `phy_poll_reset failed: -110`
+on end1.
+
+**Fix (U-Boot patch 0017):** U-Boot scans MDIO addresses 1..31 (0 is the
+broadcast address) on both buses at boot, and when exactly one RTL8211F-family
+PHY (`0x001c` with `0xc916` or `0xc878`) answers at an address other than the
+DT's `reg`, rewrites that phy node's `reg` and unit-address in the booted DT
+before `booti` and prints `ALP: GBETH<n> PHY at MDIO addr <a> (DT had <b>) -
+fixed`. With no PHY found it prints an `ALP:` warning and leaves the DT alone.
+The DT default stays `reg = <2>`. Bench-gated: needs a reflashed FIP.
+
 ## E3: USB2.0 over-current pins read permanently asserted
 
 **Symptom:** every boot logs `usb usb2-port1: over-current condition`
