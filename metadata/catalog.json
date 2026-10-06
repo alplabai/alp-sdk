@@ -3008,7 +3008,7 @@
         ],
         "path": "examples/v2n/v2n-gd32-swd-flash",
         "som": "E1M-V2N101",
-        "summary": "Demonstrate the host-driven SWD bit-bang controller ([`chips/gd32_swd/`](../../../chips/gd32_swd/)) by attaching from the Renesas RZ/V2N to the on-module GD32G553 over three GPIOs (SWDIO + SWCLK + optional NRST), reading the SW-DP IDCODE, halting the Cortex-M33, erasing a flash sector, writing + verifying a scratch pattern, and resetting."
+        "summary": "Demonstrate the host-driven SWD bit-bang controller ([`chips/gd32_swd/`](../../../chips/gd32_swd/)) by attaching from the Renesas RZ/V2N to the on-module GD32G553 over three GPIOs (SWDIO + SWCLK + NRST), reading the SW-DP IDCODE, halting the Cortex-M33, erasing a flash sector, writing + verifying a scratch pattern, and resetting."
       },
       {
         "board": "e1m-x-evk",

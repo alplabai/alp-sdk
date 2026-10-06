@@ -4258,8 +4258,8 @@
           "signature": "alp_status_t gd32_swd_halt(gd32_swd_t *ctx);"
         },
         "gd32_swd_init": {
-          "hash": "cac9234487457dce",
-          "signature": "alp_status_t gd32_swd_init(gd32_swd_t *ctx, alp_gpio_t *swdio, alp_gpio_t *swclk, alp_gpio_t *nrst);"
+          "hash": "93dc157b8620b057",
+          "signature": "alp_status_t gd32_swd_init(gd32_swd_t *ctx);"
         },
         "gd32_swd_reset_and_run": {
           "hash": "2fe69170edfaedad",
@@ -4309,7 +4309,7 @@
           "kind": "enum"
         },
         "gd32_swd_t": {
-          "definition": "typedef struct { bool initialised; bool connected; alp_gpio_t *swdio; alp_gpio_t *swclk; alp_gpio_t *nrst; uint32_t clock_delay; uint32_t idcode; bool swdio_is_output; } gd32_swd_t;",
+          "definition": "typedef struct { bool initialised; bool connected; alp_gpio_t *swdio; alp_gpio_t *swclk; alp_gpio_t *nrst; uint32_t clock_delay; uint32_t idcode; bool swdio_is_output; bool nrst_held; const struct gd32_swd_platform *plat; } gd32_swd_t;",
           "fields": [
             "bool initialised",
             "bool connected",
@@ -4318,9 +4318,11 @@
             "alp_gpio_t *nrst",
             "uint32_t clock_delay",
             "uint32_t idcode",
-            "bool swdio_is_output"
+            "bool swdio_is_output",
+            "bool nrst_held",
+            "const struct gd32_swd_platform *plat"
           ],
-          "hash": "79f74a4a238f85e3",
+          "hash": "e2fbbb6f0f4fd0ba",
           "kind": "struct"
         }
       },
@@ -4352,9 +4354,17 @@
           "hash": "29f4b81b15d34003",
           "signature": "alp_status_t gd32g553_adc_spectrum_read(gd32g553_t *ctx, uint8_t stream_id, uint16_t bin_offset, uint8_t max_bins, uint32_t *seq_out, uint16_t *total_bins_out, uint8_t *got_bins, float *bins);"
         },
+        "gd32g553_adc_stream2_read_interval_us": {
+          "hash": "a84555bd61c16867",
+          "signature": "uint32_t gd32g553_adc_stream2_read_interval_us(const gd32g553_adc_stream2_info_t *info);"
+        },
         "gd32g553_adc_stream_begin": {
           "hash": "a215af5298b1c8a5",
           "signature": "alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx, uint8_t stream_id, uint8_t channel, uint32_t sample_rate_hz);"
+        },
+        "gd32g553_adc_stream_begin2": {
+          "hash": "b4efd4632e26fc6e",
+          "signature": "alp_status_t gd32g553_adc_stream_begin2(gd32g553_t *ctx, uint8_t stream_id, uint8_t channel, uint32_t sample_rate_hz, uint16_t watermark, gd32g553_adc_stream2_info_t *info);"
         },
         "gd32g553_adc_stream_end": {
           "hash": "0ff3024887969a15",
@@ -4363,6 +4373,18 @@
         "gd32g553_adc_stream_read": {
           "hash": "9b9b58b960e36499",
           "signature": "alp_status_t gd32g553_adc_stream_read(gd32g553_t *ctx, uint8_t stream_id, uint8_t max_samples, uint8_t *got_samples, uint16_t *mv);"
+        },
+        "gd32g553_adc_stream_read2": {
+          "hash": "d315af3fe540a8e7",
+          "signature": "alp_status_t gd32g553_adc_stream_read2(gd32g553_t *ctx, uint8_t stream_id, uint8_t max_samples, uint32_t *first_index, uint32_t *dropped, uint8_t *got, uint16_t *codes);"
+        },
+        "gd32g553_attn_wait_event": {
+          "hash": "fd8eee073f361097",
+          "signature": "alp_status_t gd32g553_attn_wait_event(gd32g553_t *ctx, uint32_t timeout_ms);"
+        },
+        "gd32g553_batch": {
+          "hash": "8beb8bbab7f915c3",
+          "signature": "alp_status_t gd32g553_batch(gd32g553_t *ctx, gd32g553_batch_op_t *ops, uint8_t count, uint8_t *executed);"
         },
         "gd32g553_counter_read": {
           "hash": "05d5eb9f21aa2610",
@@ -4407,6 +4429,10 @@
         "gd32g553_init": {
           "hash": "0d7a937bc4dfa61c",
           "signature": "alp_status_t gd32g553_init(gd32g553_t *ctx, alp_spi_t *spi, alp_i2c_t *i2c, uint8_t i2c_addr_7bit);"
+        },
+        "gd32g553_init_ex": {
+          "hash": "14ebc071aa323769",
+          "signature": "alp_status_t gd32g553_init_ex(gd32g553_t *ctx, alp_spi_t *spi, alp_i2c_t *i2c, uint8_t i2c_addr_7bit, const gd32g553_attn_hook_t *attn);"
         },
         "gd32g553_ota_abort": {
           "hash": "926b54b8bb514289",
@@ -4518,6 +4544,18 @@
         }
       },
       "macros": {
+        "GD32G553_ADC_STREAM2_GUARD": {
+          "hash": "f2117e05729642b7",
+          "value": "8u"
+        },
+        "GD32G553_BATCH_MAX_OPS": {
+          "hash": "77ae8e9e904f5d20",
+          "value": "16u"
+        },
+        "GD32G553_BIG_MAX_PAYLOAD_BYTES": {
+          "hash": "8a310a639130f063",
+          "value": "252u"
+        },
         "GD32G553_BRIDGE_ADC_DSP_MAX_CHAINS": {
           "hash": "1778a3757f49f5ad",
           "value": "4u"
@@ -4622,6 +4660,22 @@
           "hash": "6146719067cb04dc",
           "value": "15u"
         },
+        "GD32G553_LINK_FEAT_ADC_STREAM2": {
+          "hash": "3d4c2f35654db723",
+          "value": "0x00000008u"
+        },
+        "GD32G553_LINK_FEAT_ATTN": {
+          "hash": "4d06e94bba29168a",
+          "value": "0x00000004u"
+        },
+        "GD32G553_LINK_FEAT_BATCH": {
+          "hash": "7bbf70ca9d7e6176",
+          "value": "0x00000010u"
+        },
+        "GD32G553_LINK_FEAT_BIG_FRAME": {
+          "hash": "ac4891683880410c",
+          "value": "0x00000002u"
+        },
         "GD32G553_LINK_FEAT_STATUS_SEQ": {
           "hash": "21952b50a552699a",
           "value": "0x01u"
@@ -4634,23 +4688,108 @@
           "hash": "3081a6e71ff41243",
           "value": "6u"
         },
+        "GD32G553_PAD_ID_ATTN": {
+          "hash": "0436368ff78dc7fa",
+          "value": "0xE1D32003u"
+        },
+        "GD32G553_PAD_ID_NRST": {
+          "hash": "7745911a0397ca23",
+          "value": "0xE1D32002u"
+        },
+        "GD32G553_PAD_ID_SWCLK": {
+          "hash": "47ec00cc1a5ec6f1",
+          "value": "0xE1D32001u"
+        },
+        "GD32G553_PAD_ID_SWDIO": {
+          "hash": "e1592b6924d04a0d",
+          "value": "0xE1D32000u"
+        },
+        "GD32G553_READ2_DROPPED_UNKNOWN": {
+          "hash": "3642da382b19575e",
+          "value": "0xFFFFFFFFu"
+        },
+        "GD32G553_READ2_HDR_BYTES": {
+          "hash": "deb9d386b3ad6664",
+          "value": "9u"
+        },
+        "GD32G553_READ2_MAX_SAMPLES_BIG": {
+          "hash": "d4a0714bd4d8557c",
+          "value": "121u"
+        },
         "GD32G553_REG_ON_MIN_PROTOCOL_MINOR": {
           "hash": "27d22c83de20f715",
           "value": "11u"
         },
+        "GD32G553_SPI_FRAME_BYTES": {
+          "hash": "6135c609b0b70829",
+          "value": "(GD32G553_BIG_MAX_PAYLOAD_BYTES + 4u)"
+        },
         "GD32G553_STATUS_CODE_MASK": {
           "hash": "5fac453e1d04fcbd",
           "value": "0x0Fu"
+        },
+        "GD32G553_STREAM2_FLAG_VREF_MEASURED": {
+          "hash": "25ae700576a67a07",
+          "value": "0x01u"
+        },
+        "GD32G553_STREAM2_TRIGGER_PACE_TIMER": {
+          "hash": "f1e4b4fc042e42ae",
+          "value": "0x00u"
+        },
+        "GD32G553_V015_MIN_PROTOCOL_MINOR": {
+          "hash": "3ff4d42490853596",
+          "value": "15u"
         }
       },
       "typedefs": {
+        "gd32g553_adc_stream2_info_t": {
+          "definition": "typedef struct { uint32_t tick_hz; uint32_t period_ticks; uint16_t full_scale; uint16_t vref_mv; uint8_t flags; uint16_t watermark; uint16_t ring_depth; } gd32g553_adc_stream2_info_t;",
+          "fields": [
+            "uint32_t tick_hz",
+            "uint32_t period_ticks",
+            "uint16_t full_scale",
+            "uint16_t vref_mv",
+            "uint8_t flags",
+            "uint16_t watermark",
+            "uint16_t ring_depth"
+          ],
+          "hash": "b0e9455399a04e29",
+          "kind": "struct"
+        },
+        "gd32g553_attn_hook_t": {
+          "definition": "typedef struct { uint32_t (*now)(void *user); alp_status_t (*wait)(void *user, uint32_t timeout_ms, uint32_t *t_edge); alp_status_t (*read_level)(void *user, bool *high); void (*drain)(void *user); void *user; } gd32g553_attn_hook_t;",
+          "fields": [
+            "uint32_t (*now)(void *user)",
+            "alp_status_t (*wait)(void *user, uint32_t timeout_ms, uint32_t *t_edge)",
+            "alp_status_t (*read_level)(void *user, bool *high)",
+            "void (*drain)(void *user)",
+            "void *user"
+          ],
+          "hash": "e0ef1d05e74fb673",
+          "kind": "struct"
+        },
+        "gd32g553_batch_op_t": {
+          "definition": "typedef struct { uint8_t op; const uint8_t *args; uint8_t args_len; uint8_t *reply; uint8_t reply_cap; alp_status_t status; uint8_t reply_len; } gd32g553_batch_op_t;",
+          "fields": [
+            "uint8_t op",
+            "const uint8_t *args",
+            "uint8_t args_len",
+            "uint8_t *reply",
+            "uint8_t reply_cap",
+            "alp_status_t status",
+            "uint8_t reply_len"
+          ],
+          "hash": "d61eba19291389dc",
+          "kind": "struct"
+        },
         "gd32g553_cmd_t": {
-          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_SE_RESET = 0x41, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_TMU_COMPUTE = 0x90, GD32G553_CMD_ADC_STREAM_CONFIGURE_DSP = 0x36, GD32G553_CMD_ADC_DSP_CHAIN_OPEN = 0x37, GD32G553_CMD_ADC_DSP_STAGE_PUSH = 0x38, GD32G553_CMD_ADC_DSP_CHAIN_BIND = 0x39, GD32G553_CMD_ADC_SPECTRUM_READ = 0x3A, GD32G553_CMD_PWM_CAPTURE_BEGIN = 0x23, GD32G553_CMD_PWM_CAPTURE_READ = 0x24, GD32G553_CMD_PWM_CAPTURE_END = 0x25, GD32G553_CMD_PWM_SINGLE_PULSE = 0x26, GD32G553_CMD_TIMER_SYNC = 0x27, GD32G553_CMD_POWER_MODE_SET = 0x28, GD32G553_CMD_LINK_FEATURES = 0x81, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
+          "definition": "typedef enum { GD32G553_CMD_PING = 0x00, GD32G553_CMD_GET_VERSION = 0x01, GD32G553_CMD_GET_BUILD_ID = 0x02, GD32G553_CMD_RESET_REASON = 0x03, GD32G553_CMD_BATCH = 0x04, GD32G553_CMD_GPIO_READ = 0x10, GD32G553_CMD_GPIO_WRITE = 0x11, GD32G553_CMD_PWM_SET = 0x20, GD32G553_CMD_PWM_GET = 0x21, GD32G553_CMD_ADC_READ = 0x30, GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40, GD32G553_CMD_SE_RESET = 0x41, GD32G553_CMD_DAC_SET = 0x50, GD32G553_CMD_DAC_GET = 0x51, GD32G553_CMD_QENC_READ = 0x60, GD32G553_CMD_QENC_RESET = 0x61, GD32G553_CMD_COUNTER_READ = 0x70, GD32G553_CMD_PWM_CONFIGURE = 0x22, GD32G553_CMD_ADC_CONFIGURE = 0x32, GD32G553_CMD_ADC_STREAM_BEGIN = 0x33, GD32G553_CMD_ADC_STREAM_READ = 0x34, GD32G553_CMD_ADC_STREAM_END = 0x35, GD32G553_CMD_TRNG_READ = 0x80, GD32G553_CMD_TMU_COMPUTE = 0x90, GD32G553_CMD_ADC_STREAM_CONFIGURE_DSP = 0x36, GD32G553_CMD_ADC_DSP_CHAIN_OPEN = 0x37, GD32G553_CMD_ADC_DSP_STAGE_PUSH = 0x38, GD32G553_CMD_ADC_DSP_CHAIN_BIND = 0x39, GD32G553_CMD_ADC_SPECTRUM_READ = 0x3A, GD32G553_CMD_ADC_STREAM_BEGIN2 = 0x3B, GD32G553_CMD_ADC_STREAM_READ2 = 0x3C, GD32G553_CMD_PWM_CAPTURE_BEGIN = 0x23, GD32G553_CMD_PWM_CAPTURE_READ = 0x24, GD32G553_CMD_PWM_CAPTURE_END = 0x25, GD32G553_CMD_PWM_SINGLE_PULSE = 0x26, GD32G553_CMD_TIMER_SYNC = 0x27, GD32G553_CMD_POWER_MODE_SET = 0x28, GD32G553_CMD_LINK_FEATURES = 0x81, GD32G553_CMD_OTA_BEGIN = 0xF0, GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1, GD32G553_CMD_OTA_VERIFY = 0xF2, GD32G553_CMD_OTA_COMMIT = 0xF3, GD32G553_CMD_OTA_ROLLBACK = 0xF4, GD32G553_CMD_OTA_GET_STATE = 0xF5, GD32G553_CMD_OTA_ABORT = 0xF6, } gd32g553_cmd_t;",
           "enumerators": [
             "GD32G553_CMD_PING = 0x00",
             "GD32G553_CMD_GET_VERSION = 0x01",
             "GD32G553_CMD_GET_BUILD_ID = 0x02",
             "GD32G553_CMD_RESET_REASON = 0x03",
+            "GD32G553_CMD_BATCH = 0x04",
             "GD32G553_CMD_GPIO_READ = 0x10",
             "GD32G553_CMD_GPIO_WRITE = 0x11",
             "GD32G553_CMD_PWM_SET = 0x20",
@@ -4675,6 +4814,8 @@
             "GD32G553_CMD_ADC_DSP_STAGE_PUSH = 0x38",
             "GD32G553_CMD_ADC_DSP_CHAIN_BIND = 0x39",
             "GD32G553_CMD_ADC_SPECTRUM_READ = 0x3A",
+            "GD32G553_CMD_ADC_STREAM_BEGIN2 = 0x3B",
+            "GD32G553_CMD_ADC_STREAM_READ2 = 0x3C",
             "GD32G553_CMD_PWM_CAPTURE_BEGIN = 0x23",
             "GD32G553_CMD_PWM_CAPTURE_READ = 0x24",
             "GD32G553_CMD_PWM_CAPTURE_END = 0x25",
@@ -4690,7 +4831,7 @@
             "GD32G553_CMD_OTA_GET_STATE = 0xF5",
             "GD32G553_CMD_OTA_ABORT = 0xF6"
           ],
-          "hash": "b0c686280cbcdf1c",
+          "hash": "6cbc11a27cb7c4a1",
           "kind": "enum"
         },
         "gd32g553_ota_err_t": {
@@ -4770,7 +4911,7 @@
           "kind": "enum"
         },
         "gd32g553_t": {
-          "definition": "typedef struct { bool initialised; alp_spi_t *spi; alp_i2c_t *i2c; uint8_t i2c_addr; gd32g553_transport_t default_transport; gd32g553_version_t version; bool seq_enabled; uint8_t seq_last; uint32_t seq_stale_count; bool version_cached; } gd32g553_t;",
+          "definition": "typedef struct { bool initialised; alp_spi_t *spi; alp_i2c_t *i2c; uint8_t i2c_addr; gd32g553_transport_t default_transport; gd32g553_version_t version; bool seq_enabled; uint8_t seq_last; uint32_t seq_stale_count; bool version_cached; uint32_t granted; uint32_t supported; uint16_t max_payload; gd32g553_attn_hook_t attn; bool attn_active; bool attn_unusable; bool attn_fault_pending; bool attn_event_edge; bool attn_last_edge; bool renegotiate_pending; uint32_t attn_stale_edges; uint8_t attn_timeout_run; uint8_t attn_stuck_run; uint8_t attn_idle_run; uint8_t stream2_armed; uint8_t stream2_seen; uint32_t attn_edges; uint32_t attn_timeouts; uint32_t attn_stuck; uint32_t stream2_gaps; uint32_t stream2_next[GD32G553_BRIDGE_ADC_STREAM_COUNT]; uint8_t spi_req[GD32G553_SPI_FRAME_BYTES]; uint8_t spi_reply[GD32G553_SPI_FRAME_BYTES]; } gd32g553_t;",
           "fields": [
             "bool initialised",
             "alp_spi_t *spi",
@@ -4781,9 +4922,32 @@
             "bool seq_enabled",
             "uint8_t seq_last",
             "uint32_t seq_stale_count",
-            "bool version_cached"
+            "bool version_cached",
+            "uint32_t granted",
+            "uint32_t supported",
+            "uint16_t max_payload",
+            "gd32g553_attn_hook_t attn",
+            "bool attn_active",
+            "bool attn_unusable",
+            "bool attn_fault_pending",
+            "bool attn_event_edge",
+            "bool attn_last_edge",
+            "bool renegotiate_pending",
+            "uint32_t attn_stale_edges",
+            "uint8_t attn_timeout_run",
+            "uint8_t attn_stuck_run",
+            "uint8_t attn_idle_run",
+            "uint8_t stream2_armed",
+            "uint8_t stream2_seen",
+            "uint32_t attn_edges",
+            "uint32_t attn_timeouts",
+            "uint32_t attn_stuck",
+            "uint32_t stream2_gaps",
+            "uint32_t stream2_next[GD32G553_BRIDGE_ADC_STREAM_COUNT]",
+            "uint8_t spi_req[GD32G553_SPI_FRAME_BYTES]",
+            "uint8_t spi_reply[GD32G553_SPI_FRAME_BYTES]"
           ],
-          "hash": "fed41888c0821307",
+          "hash": "ff3914ad5b0af9dd",
           "kind": "struct"
         },
         "gd32g553_tmu_format_t": {

@@ -90,7 +90,7 @@ header at [`<alp/chips/gd32_swd.h>`](../include/alp/chips/gd32_swd.h):
 
 ```c
 gd32_swd_t swd;
-gd32_swd_init(&swd, /*swdio*/ pin_swdio, /*swclk*/ pin_swclk, /*nrst*/ pin_nrst);
+gd32_swd_init(&swd);               /* opens P70/P71/P74 itself; asserts NRST first */
 gd32_swd_connect(&swd);            /* line-reset + JTAG-to-SWD + IDCODE read */
 gd32_swd_halt(&swd);               /* halt Cortex-M33 cleanly */
 gd32_swd_flash_erase(&swd, GD32_SWD_FMC_FLASH_BASE, image_size);
