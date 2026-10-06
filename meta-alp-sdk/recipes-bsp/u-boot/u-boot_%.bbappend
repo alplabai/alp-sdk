@@ -71,9 +71,9 @@ SRC_URI:append:rzv2n-family = " \
 #     dev cmdline keeps earlycon but gains console=ttySC0,115200,
 #     which stops the kernel replaying the early log across the
 #     console handover. The cmdline is rebuilt at CONFIG_BOOTCOMMAND
-#     (patch-safe vs the build-varying env block); the future per-SKU
-#     fdtfile derivation must also happen there, at
-#     CONFIG_BOOTCOMMAND too (the environment is not saved, see 0016).
+#     (patch-safe vs the build-varying env block); the per-SKU fdtfile
+#     derivation (0014 below) also runs there, at CONFIG_BOOTCOMMAND too
+#     (the environment is not saved, see 0016).
 # VALIDATION: bitbake-built dev + prod with config asserts; the FIP
 # (BL2+BL31+u-boot, manual flow) was built 2026-06-12 with both ALP
 # patches and the u-boot binary content-verified (alp_root bootcmd +
@@ -363,6 +363,29 @@ SRC_URI:append:rzv2n-family = " file://0012-rzv2n-dev-ALP-E1M-reset-cause-and-de
 # after 0007, 0009 and 0012 (whose hunk's context is the tail of that function).
 SRC_URI:append:rzv2n-family = " file://0013-rzv2n-dev-ALP-E1M-clkgen-se2-gd32-hxtal.patch"
 
+# 0014 (fdtfile from the EEPROM manifest): one U-Boot binary boots the
+# right board dtb on whichever SoM it runs on. alp_som_is_v2n_m1() caches
+# the validated manifest family and the alp_fdtfile command maps it to a
+# dtb basename (v2n-m1 -> e1m-v2m101-x-evk.dtb, v2n -> e1m-v2n101-x-evk.dtb)
+# and sets env fdtfile; CONFIG_BOOTCOMMAND runs it right after the leading
+# 'env default -a' wipe, which would erase anything board_late_init() set.
+# Before this, a blank E1M-V2N103 bootstrapped with a V2M FIP could not boot
+# its own V2N wic: the build-time name pointed at the V2M dtb.
+# The choice FAILS CLOSED: a unit with a valid manifest and a known family
+# loads boot/${fdtfile} only (fdtfile_alt is empty) and, if the image lacks
+# that dtb, refuses to boot rather than load another SoM's device tree. Only
+# a blank-EEPROM unit (no family -- provisioning's boot_sd_linux runs before
+# eeprom_manifest) takes the build default and falls through boot/${fdtfile}
+# then boot/${fdtfile_alt} (the other dtb in the one family table) to
+# whichever dtb its image ships, since each image holds only its own
+# MACHINE's dtb.
+#
+# Lands after 0011: it edits board_late_init()'s helpers around 0009/0010's
+# alp_serial capture and the CONFIG_BOOTCOMMAND line 0010 left, so it must
+# stay behind both. Its hunks stay out of alp_clk5l_fixup(), so the clkgen
+# patches (0007, 0013) may land before or after it.
+SRC_URI:append:rzv2n-family = " file://0014-rzv2n-dev-ALP-E1M-fdtfile-from-eeprom.patch"
+
 # 0015 (microSD card-detect): a new "alp_sd_present" command reads the SoM's
 # SD1_SD1CD pad and CONFIG_BOOTCOMMAND probes mmc1 only when it succeeds.
 # sh_sdhi has no get_cd op, so an empty slot used to cost a full init
@@ -397,15 +420,16 @@ SRC_URI:append:rzv2n-family = " file://0015-rzv2n-dev-ALP-E1M-sd-card-detect.pat
 # allowlist, so the patch and the cfg must travel together.
 SRC_URI:append:rzv2n-family = "     file://0016-rzv2n-dev-ALP-E1M-persistent-environment.patch     file://uboot-env-emmc.cfg "
 
-# Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
-# binary serves both families, so the dtb basename is a Kconfig string
-# (CONFIG_ALP_E1M_FDTFILE, patch 0002) whose default suits the V2N SKUs;
-# the V2M MACHINEs override it through the same *.cfg channel
-# prod-boot.cfg uses (u-boot-configure.inc's find_cfgs() +
-# merge_config.sh pick up any *.cfg in SRC_URI).
+# Fallback dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  The dtb basename is
+# now derived at boot (0014); CONFIG_ALP_E1M_FDTFILE (patch 0002) is only
+# the fallback for a missing/invalid manifest, an unknown family, or a
+# derived file absent from the image (the chain above then tries the table).  Its default suits the V2N SKUs; the
+# V2M MACHINEs override it through the same *.cfg channel prod-boot.cfg uses
+# (u-boot-configure.inc's find_cfgs() + merge_config.sh pick up any *.cfg in
+# SRC_URI), so a V2M build with a blank EEPROM still boots its own image.
 #
 # Scoped by MACHINE, not by rzv2n-family: the family override covers the
-# V2N SKUs too, and applying the V2M name there would invert the bug.
+# V2N SKUs too, and applying the V2M name there would invert the fallback.
 # Any new V2M MACHINE needs a line here -- there is no wildcard that is
 # safe, because "which dtb does this image contain" is a per-MACHINE fact
 # (KERNEL_DEVICETREE), not a family one.

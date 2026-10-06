@@ -33,11 +33,6 @@ ROLE_DTB = "dxm1_dtb"                 # dxuart2 DTB: sci1-dx pinctrl, serial@128
 ROLE_DXCLI = "dxm1_dxcli"             # dxcli.py, only needed to erase a NAND that already holds boot2nd
 REQUIRED_ROLES = (ROLE_FW, ROLE_UART_BOOT, ROLE_DXFLASH, ROLE_DTB)
 
-# V2N pinctrl: P75 = DX-M1 UART0 mux (sysfs 477), PA6 = M1_RESET (sysfs 502)
-DEFAULT_GPIO_CHIP = "10410000.pinctrl"
-DEFAULT_UART_MUX_LINE = 61
-DEFAULT_RESET_LINE = 86
-
 RESET_AFTER_S = 2.0       # dxflash must be listening before the reset
 RESET_HOLD_S = 0.5
 DXFLASH_TIMEOUT_S = 600.0   # a good run is 400 s+: dxflash sits out a 240 s window after SENT fw.bin
@@ -71,13 +66,22 @@ class StrapError(Exception):
     """The ROM output of a wrongly strapped DX-M1: operator action, not a retry."""
 
 
-def gpio_config(raw: dict) -> tuple[str, int, int]:
-    """(chip label, P75 line, PA6 line) from bench.yaml ``dxm1:`` over the board defaults.
+def pin_line(pin: str) -> int:
+    """gpiochip line of an RZ/V2 pin name: 8 x port + bit, the port a hex digit (P75 = 61, PA6 = 86)."""
+    return int(pin[1], 16) * 8 + int(pin[2])
+
+
+def gpio_config(raw: dict, preset: dict) -> tuple[str, int, int]:
+    """(chip label, UART-mux line, reset line) from the SoM preset's ``on_module.dxm1`` (pins by
+    name), with bench.yaml ``dxm1:`` as a per-bench override of the resolved line numbers.
     ValueError for the DEEPX 0.75 V rail lines, non-int or equal lines, before any export."""
     d = raw.get("dxm1") or {}
-    chip = d.get("gpio_chip") or DEFAULT_GPIO_CHIP
-    mux = d.get("uart_mux_line", DEFAULT_UART_MUX_LINE)
-    rst = d.get("reset_line", DEFAULT_RESET_LINE)
+    pins = (preset.get("on_module") or {}).get("dxm1")
+    if not pins:
+        raise ValueError("the SoM preset has no on_module.dxm1 (DX-M1 pad facts): not a DX-M1 module")
+    chip = d.get("gpio_chip") or pins["gpio_chip"]
+    mux = d.get("uart_mux_line", pin_line(pins["uart_mux_pin"]))
+    rst = d.get("reset_line", pin_line(pins["reset_pin"]))
     for key, line in (("uart_mux_line", mux), ("reset_line", rst)):
         if not isinstance(line, int) or isinstance(line, bool):
             raise ValueError(f"bench.yaml dxm1.{key} must be an int gpiochip line number, got {line!r}")

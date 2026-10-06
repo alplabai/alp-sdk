@@ -751,7 +751,7 @@ def test_decode_lsi_mode_seeded_debug_value():
 def test_census_collects_ledger_keys_read_only():
     t, fake = target(_census_responses())
     facts, notes = lt.census(t, {"eeprom": 0, "pmic": 8, "brd": 8},
-                             sizes={"bl2_mmc": 100, "fip": 200, "bl2": 300, "cm33": 400},
+                             sizes={"bl2_mmc": 100, "fip": 200, "bl2": 300, "cm33": 400}, rtc_addr=0x52,
                              silicon="renesas:rzv2n:n44")
     assert facts["eeprom_unique_id"] == UNIQUE_ID
     assert facts["eeprom_lock_status"] == "0xfd"
@@ -869,7 +869,7 @@ def test_i2c_get_gives_up_after_three_attempts_and_says_so():
 def test_census_records_a_persistently_failing_read_as_unread_and_keeps_the_other_keys():
     t, _ = target([(r"i2cget -y -f 8 0x25 0x10", (2, "", "Error: Read failed")),
                    (r"i2cget -y -f 8 0x52 0x37", (2, "", "Error: Read failed"))] + _census_responses())
-    facts, notes = lt.census(t, CENSUS_BUS)
+    facts, notes = lt.census(t, CENSUS_BUS, rtc_addr=0x52)
     assert facts["act88760_gpio_regs"].startswith("unread (") and "Read failed" in facts["act88760_gpio_regs"]
     assert facts["rtc_rv3028_reg_0x37"].startswith("unread (")
     assert facts["da9292_ids"] == "0x19=0x92 0x1a=0x01 0x1b=0x02"       # the rest of the group is still read
