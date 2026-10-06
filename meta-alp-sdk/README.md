@@ -446,8 +446,8 @@ See `docs/bring-up-drpai-v2n.md` section 4 for the full DRP-AI3 two-switch
 contract (what each of `ALP_ENABLE_DRPAI` / `PACKAGECONFIG[drpai]` actually
 controls -- `ALP_ENABLE_DRPAI` gates the `&drpai0` devicetree node and,
 `alp-image-edge` only, the demo install; `PACKAGECONFIG[drpai]` compiles the
-SDK backend; neither installs the `lib-tvm` + `kernel-module-mmngr`
-userspace pair, which is `alp-image-common.inc`'s job -- and what omitting
+SDK backend; neither installs the `kernel-module-mmngr`
+userspace package, which is `alp-image-common.inc`'s job -- and what omitting
 either switch does).
 
 Customer apps still pick the active backend per-handle at runtime via
@@ -473,7 +473,7 @@ gated on the layer's `BBFILE_COLLECTIONS` name (not on `MACHINE`, so
 builds that legitimately drop the RZ/V feature layers still parse):
 
 - **Runtime (target rootfs):** `alp-image-common.inc` installs
-  `lib-tvm` + `kernel-module-mmngr` into every `alp-image-*` build —
+  `kernel-module-mmngr` into every `alp-image-*` build —
   the DRP-AI3 userspace runtime the `<alp/inference.h>` Yocto backend
   dispatches into at runtime.
 - **SDK sysroot headers (`populate_sdk`):** `alp-image-common.inc`

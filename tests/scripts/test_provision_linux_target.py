@@ -462,7 +462,7 @@ def _clkgen_i2cget(image: bytes):
 
 def test_clkgen_read_image_matches_fixed_up_otp():
     image = bytearray(lt.CLKGEN_OTP_IMAGE)
-    image[0x21], image[0x24] = 0xC0, 0x8E
+    image[0x1F], image[0x21], image[0x24] = 0xC7, 0xC0, 0x8F
     t, _ = target([(r"i2cget -y -f \d+ 0x69 0x\w+", _clkgen_i2cget(bytes(image)))])
     got = lt.clkgen_read_image(t, 8)
     assert got == bytes(image)
@@ -472,7 +472,7 @@ def test_clkgen_read_image_matches_fixed_up_otp():
 def test_clkgen_diff_reports_mismatch_and_missing_fixup():
     factory = bytes(lt.CLKGEN_OTP_IMAGE)  # OTP image with the U-Boot fixup NOT applied
     bad = lt.clkgen_diff(factory)
-    assert any("reg 0x21" in b for b in bad) and any("reg 0x24" in b for b in bad)
+    assert all(any(f"reg {r}:" in b for b in bad) for r in ("0x1f", "0x21", "0x24"))
 
 
 def test_clkgen_diff_rejects_wrong_length():
@@ -701,8 +701,8 @@ def _census_responses(array: bytes = b"\xff" * 128):
         return f"0x{pmic_regs[reg]:02x}"
 
     return [
-        (r"devmem 0x10430300", "0x00003C06\n"), (r"devmem 0x10430304", "0x00000001\n"),
-        (r"devmem 0x10430308", "0x00000002\n"),
+        (r"\nr 0x10430300", "0x00003C06\n"), (r"\nr 0x10430304", "0x00000001\n"),
+        (r"\nr 0x10430308", "0x00000002\n"),
         (r"cpuinfo_max_freq", "1800000\n"), (r"meminfo", "MemTotal:        3200000 kB\nMemFree: 1 kB\n"),
         (r"uname -r", "6.1.107-cip28\n"),
         (r"device-tree/compatible", "alp,e1m-v2m101-x-evk renesas,r9a09g056\n"),
@@ -738,17 +738,29 @@ def _census_responses(array: bytes = b"\xff" * 128):
     ]
 
 
+def test_decode_lsi_mode_seeded_debug_value():
+    spec = lt.sys_lsi_spec("renesas:rzv2n:n44")
+    assert spec["registers"]["soc_sys_lsi_mode"] == "0x10430300"
+    assert lt.decode_lsi_mode(0x3C06, spec) == {"soc_boot_debug_en": "0", "soc_md_boot": "0x6", "soc_boot_device": "xspi",
+                                          "soc_boot_cpu": "ca55"}
+    # the same unit with MD_BOOT3 strapped high (bit 9) and MD_BOOT[1:0] = eMMC
+    assert lt.decode_lsi_mode(0x3E05, spec) == {"soc_boot_debug_en": "1", "soc_md_boot": "0x5", "soc_boot_device": "emmc", "soc_boot_cpu": "ca55"}
+    assert lt.decode_lsi_mode(0x3806, spec)["soc_boot_cpu"] == "cm33"      # bit 10 cleared
+
+
 def test_census_collects_ledger_keys_read_only():
     t, fake = target(_census_responses())
     facts, notes = lt.census(t, {"eeprom": 0, "pmic": 8, "brd": 8},
-                             sizes={"bl2_mmc": 100, "fip": 200, "bl2": 300, "cm33": 400}, rtc_addr=0x52)
+                             sizes={"bl2_mmc": 100, "fip": 200, "bl2": 300, "cm33": 400}, rtc_addr=0x52,
+                             silicon="renesas:rzv2n:n44")
     assert facts["eeprom_unique_id"] == UNIQUE_ID
     assert facts["eeprom_lock_status"] == "0xfd"
     assert facts["eeprom_device_config"] == "0x1d"
     assert facts["secure_page_state"] == "blank"
     assert facts["secure_page_sha256"] == hashlib.sha256(b"\xff" * 64).hexdigest()
     assert "manifest_sha256" not in facts                      # blank array
-    assert facts["soc_sys_lsi_mode"].startswith("0x3c06 (unverified")
+    assert facts["soc_sys_lsi_mode"] == "0x3c06"
+    assert (facts["soc_boot_debug_en"], facts["soc_md_boot"], facts["soc_boot_device"]) == ("0", "0x6", "xspi")
     assert facts["dtb_name"] == ("ALP E1M-V2M on E1M-X-EVK "
                                  "(compatible alp,e1m-v2m101-x-evk renesas,r9a09g056)")
     assert facts["cpu_khz"] == "1800000" and facts["linux_memtotal_kb"] == "3200000"
@@ -934,3 +946,19 @@ def test_mtd_write_refuses_an_unaligned_offset_and_one_past_the_end(tmp_path):
     with pytest.raises(ValueError, match="does not fit"):
         lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET)
     assert not any("flash_erase" in c for c in fake.commands)
+
+
+def test_runner_decodes_utf8_with_replacement(tmp_path):
+    seen = {}
+
+    def runner(argv, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    t = lt.LinuxTarget("unit", runner=runner)
+    t.run("true")
+    assert seen["encoding"] == "utf-8" and seen["errors"] == "replace"
+    seen.clear()
+    f = tmp_path / "in.bin"
+    f.write_bytes(b"x")
+    t.run("true", stdin_path=f)
+    assert seen["encoding"] == "utf-8" and seen["errors"] == "replace"

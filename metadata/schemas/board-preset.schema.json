@@ -271,6 +271,16 @@
           "type": "string",
           "description": "One-line Doxygen @brief documenting what the pad is wired to on this board."
         },
+        "mux_select": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["polarity", "default_level"],
+          "description": "For a carrier path-mux select pad: which pad level selects the SoC path and the level the carrier pulls it to when nothing drives it. `TBD` until bench/netlist-confirmed (no inventing values).",
+          "properties": {
+            "polarity": { "type": "string", "enum": ["soc_when_high", "soc_when_low", "TBD"] },
+            "default_level": { "type": "string", "enum": ["high", "low", "floating", "TBD"] }
+          }
+        },
         "active_low": {
           "type": "boolean",
           "description": "Board convention -- pressed/asserted = 0 V.  Documentation only; the app passes ALP_GPIO_ACTIVE_LOW at alp_gpio_open() time if it wants auto-inversion."

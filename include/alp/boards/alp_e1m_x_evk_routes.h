@@ -51,7 +51,7 @@ extern "C" {
 #define XEVK_PIN_CAM0_MUX_SEL  ALP_E1M_X_GPIO_IO16  /**< Camera-0 source/lane mux select. */
 #define XEVK_PIN_CAM0_EN       ALP_E1M_X_GPIO_IO18  /**< CAM0 module enable, active-low via N-FET on CAM_GPIO. Active-low. */
 #define XEVK_PIN_CAM0_RST      ALP_E1M_X_GPIO_IO20  /**< Camera-0 reset (active-low). Active-low. */
-#define XEVK_PIN_USB_MUX_SEL   ALP_E1M_X_GPIO_IO24  /**< USB path-mux select. */
+#define XEVK_PIN_USB_MUX_SEL   ALP_E1M_X_GPIO_IO24  /**< USB path-mux select. Driven by the DX-M1 on V2M, undriven on V2N (driven_by in the SoM pad_routes); polarity/default pending carrier-netlist confirmation. */
 #define XEVK_PIN_SDIO_MUX_SEL  ALP_E1M_X_GPIO_IO27  /**< SDIO path-mux select. */
 #define XEVK_PIN_SDIO_MUX_EN   ALP_E1M_X_GPIO_IO29  /**< SDIO path-mux enable. */
 #define XEVK_PIN_ENCODER_SW    ALP_E1M_X_GPIO_IO28  /**< Rotary encoder (PEC12R-4222F) push switch; pull-up + RC debounce. Active-low. */

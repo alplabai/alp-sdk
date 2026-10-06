@@ -88,21 +88,34 @@ for this SoM:
 | Output | Feeds                                    | As-shipped (wrong) | Corrected |
 |--------|-------------------------------------------|---------------------|-----------|
 | SE1    | SoC RTXIN (RTCA-3) + the Wi-Fi module's 32k LPO input | 24.576 MHz | 32.768 kHz |
+| SE2    | GD32 supervisor OSCIN / HXTAL (net `GD32_OSC`) | 32.768 kHz free-run | 24.576 MHz |
 | SE3    | On-module audio clock                      | 22.5792 MHz         | 24.576 MHz |
 
 Bench-confirmed (2026-09-24): with the as-shipped OTP values, the SoC
-RTC fails to start (`error -ETIMEDOUT: Failed to setup the RTC!`). Two
-volatile register writes fix it (register `0x24`: SE1 DCO select;
-register `0x21`: SE3 source select); after them the SoC RTC counts at
-32.768 kHz. Both registers are OTP-shadow registers -- the writes take
+RTC fails to start (`error -ETIMEDOUT: Failed to setup the RTC!`). Three
+volatile register writes fix it, in this order (register `0x24` `0x9c` ->
+`0x8f`: SE1 DCO select plus DIV4 channels 2 and 3 on; register `0x21`
+`0x80` -> `0xc0`: SE3 source select; register `0x1f` `0x46` -> `0xc7`: SE2
+source select); after them the SoC RTC counts at 32.768 kHz. SE2 is the
+GD32 HXTAL input: OTP `0x1F` bit 7 `SE2_Freerun_32K` = 0 leaves it at
+32.768 kHz, which is why the GD32 HXTAL never starts; bits 7 and 0
+(`SE2_CLKSEL1` = DIV4) route it from DIV4 = PLL2 / OUTDIV4 = 24.576 MHz.
+`VDD2_SEL` and `0x20` (`SE2_EN`) are not touched. The next build's
+corrected OTP image (ledger item 24) should carry `0x1F` = `0xC7` and
+`0x24` = `0x8F` so SE2 is valid from power-on-reset. SE2 must never change
+after this: once the host triggers the switch, the GD32 locks its PLL to it. Both registers are OTP-shadow registers -- the writes take
 effect immediately but **revert on power-cycle** (the OTP itself cannot
 be re-burned in-system) -- so U-Boot applies them on **every** boot,
 early in `board_late_init()`, before the DEEPX rail sequencing step and
 before Linux starts
 (`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch`).
-The fixup only writes when both registers read the exact as-shipped
-values; any other readback (already fixed, a differently configured
-part, or a communication error) is left untouched and only logged.
+Each register is written only when it reads its exact as-shipped value
+(already fixed: skipped); any other readback (a differently configured
+part, or a communication error) is left untouched and only logged. The
+log line is `ALP: 5L35023B clock: SE1 32.768 kHz, SE2 24.576 MHz, SE3
+24.576 MHz (0x24=0x8f 0x1f=0xc7 0x21=0xc0)`. Patch
+`0013-rzv2n-dev-ALP-E1M-clkgen-se2-gd32-hxtal.patch` adds the SE2 step.
+Bench-unverified until a scope on TP88 reads 24.576 MHz at 1.8 V.
 
 This is a runtime workaround. **Production builds should instead use a
 Renesas factory dash code that carries the corrected OTP image**,

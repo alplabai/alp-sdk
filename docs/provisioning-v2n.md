@@ -119,9 +119,13 @@ mismatch is refused:
     another unit is behind this address (stale DHCP lease?). Fix the address in
     bench.yaml and re-run, or --accept-cid-change REASON if the eMMC was replaced.
 
-Limitation: first contact with no recorded CID is unchecked. On the normal
-blank-unit path `bootstrap`'s `EM_DCID` records the CID, so every later step is
-checked.
+First contact with no recorded CID (a run that starts past `bootstrap`, for
+example `--from dsw1_emmc_insert_sd`) is proved over this unit's own console
+before the first write: the SSH host must echo a nonce to its `/dev/console` and
+the tool must read it on its serial line (once per host and power-on). A host
+that does not is refused with "Nothing was written". On the normal blank-unit
+path `bootstrap`'s `EM_DCID` records the CID, so every later step is checked by
+CID instead.
 
 `run --accept-cid-change REASON` is the escape for a legitimately replaced eMMC:
 it adopts the CID seen over SSH as the new anchor. The `emmc_cid_change`
@@ -239,10 +243,11 @@ Then it waits up to 120 s for the console halt line (`reboot: Power down` or
 The PSU current is not a halt signal. The OFF dwell is unchanged, so a clean poweroff
 followed by it is still a cold boot, and `cold_boot_test` keeps its `--cold-cycles` (3).
 
-The "already halted on this power-on" marker is cleared when the operator prompt of
-`dsw1_emmc_insert_sd` or `dsw1_xspi_remove_sd` returns: the operator may have powered the
-unit back on before pressing Enter, which the tool's ON count cannot see (this applies to
-SCPI power too). Both prompts say "Leave it OFF until the tool asks."
+The "already halted on this power-on" marker survives the operator prompt of
+`dsw1_emmc_insert_sd` or `dsw1_xspi_remove_sd`: the tool saw the halt line itself, so a cut
+after the prompt is not logged as `blind`. It is cleared only if the console printed
+something after the halt (a halted unit is silent, so boot text means it was powered back
+on). Both prompts say "Leave it OFF until the tool asks."
 
 Every cut is recorded as the step evidence key `power_cut` (and in the step log and the
 plan log), one entry per cut:
@@ -252,6 +257,7 @@ plan log), one entry per cut:
 | `clean` | halted: `poweroff` sent, the halt line seen (`(late)` if it came in the extra 5 s) **and the first `sync` returned 0** |
 | `clean (sync rc=<n>)` | halted, but the first `sync` returned `<n>` (non-zero, or unknown): the operator prompt says so and the card should be checked |
 | `fallback` | no halt line. Over SSH a second `sync` ran and its rc (or error) is recorded; on the console no second command is sent (the first may still be running, and a new command would Ctrl-C it) |
+| `unreadable (sync rc=<n>; <lines>)` | the `sync` returned rc `127` (not found), or the console showed `EXT4-fs error` / `error -5` lines: the root is treated as unreadable and those lines are quoted verbatim in the entry, the step failure and the operator prompt |
 | `blind` | no console shell and no SSH path proven to be this unit. If Linux is up the cut is hard; the entry says so |
 | `not-needed` | PSU already off, U-Boot prompt, SCIF ROM / Flash Writer, or already halted (plain `clean`) on this power-on |
 
@@ -383,18 +389,30 @@ Bench steps (first run on a unit; nothing here is bench-verified yet):
 
 ### `clkgen_verify`: the 5L35023B clock generator (`0x69`)
 
+A run that captured no cold-boot console (`--only` / resumed runs) cannot read the U-Boot
+fixup line. The step then reports `skipped` with "not verified: no boot console captured in
+this run", records `clkgen_uboot_fixup: unread (...)` in its evidence (a captured run
+records `seen: <line>`), and does not fail; an OTP image mismatch still fails.
+`need_linux` on such a run, with no `linux.host` pinned, logs in on the console and reads the
+address like `boot_sd_linux` does, once per power-on; it first sends Ctrl-C only and sends
+no Enter to a unit at a U-Boot prompt, in the SCIF ROM / Flash Writer, or halted.
+
 The on-SoM Renesas 5L35023B (`BRD_I2C` / Linux `i2c-8` on the reference
 bench, 7-bit `0x69`) ships with a fixed factory OTP image that cannot be
-re-burned in-system. U-Boot patch 0007 (#2293) rewrites reg `0x21` and
-`0x24` every boot (a volatile fixup, not an OTP change); the step reads reg
+re-burned in-system. U-Boot patches 0007 (#2293) and 0012 rewrite reg `0x1f`
+(`0xc7`, SE2 = 24.576 MHz for the GD32 HXTAL), `0x21` (`0xc0`) and `0x24`
+(`0x8f`) every boot (a volatile fixup, not an OTP change); the step reads reg
 `0x00..0x24` **one byte at a time** (`i2cget`, never a combined
 `i2ctransfer` read -- this part bit-slips on those), compares against the
-OTP image with `0x21`/`0x24` expected at their post-fixup values, and
+OTP image with `0x1f`/`0x21`/`0x24` expected at their post-fixup values
+(and reports `SE2 24.576 MHz` in the step detail), and
 confirms the boot console showed U-Boot's own `ALP: 5L35023B clock:` line.
 **A boot log without that line means the unit's U-Boot lacks patch 0007
 (#2293)** -- the step keeps failing (a production unit without the fixup is
 a real defect, not a soft warning it can look past). Ledger facts:
-`clkgen_otp_raw` (all 37 bytes as read, hex), `clkgen_i2c_addr`.
+`clkgen_otp_raw` (all 37 bytes as read, hex), `clkgen_i2c_addr`,
+`clkgen_uboot_fixup` (`seen: <the boot-log line>`, or `unread (...)` when no
+boot console was captured).
 
 ### `dxm1_npu_flash`: the DX-M1 NPU firmware (V2M only)
 
@@ -729,6 +747,7 @@ expected value; **data** = a data path was exercised end to end.
 | clock generator | `clkgen_verify`: full OTP image (data) | unchanged | - |
 | secure element | I2C scan with a wake retry (answers) | `secure_element`: protocol-level state read (ID) | - |
 | GD32 bridge | `gd32_flash`: md5 readback, `GET_VERSION` (data) | `gd32_bridge`: protocol version with CRC; `gd32_gpiochip` (ID) | - |
+| boot mode (debug strap) | census: `soc_sys_lsi_mode`, `soc_boot_debug_en`, `soc_md_boot`, `soc_boot_device`, `soc_boot_cpu`; `cold_boot_test` refuses a debug-mode unit (data) | `boot_mode` (value) | - |
 | SoC thermal zones | not tested | `thermal` (value) | - |
 | CM33 | not tested | `cm33_firmware` (informational: not blank; **blocking with an md5 compare once the bundle carries a `cm33` component**), `cm33_running` (the beacon counter advances; informational, **blocking once the bundle carries a `cm33` component**), `openamp_uio` (answers) | - |
 | USB host | not tested | `usb_host`: controllers probed (answers); `usb_device` (data) | `usb_stick` |
@@ -809,6 +828,7 @@ bounds for a hung command, not the expected time.
 | `emmc_mode` | mmc `ios` in debugfs, `dmesg` | timing `mmc HS200`, no `mmc_select_hs200 failed` | 5 s | 0.1 s |
 | `emmc_read` | drop the page cache, then `dd` 64 MiB from 1 GiB into the user area | `64+0 records out`, >= 20 MiB/s | 20 s | 2 s |
 | `xspi` | `/proc/mtd`, spi-nor `jedec_id` | `mtd0` and `mtd1` with a size, a real JEDEC ID | 5 s | 0.1 s |
+| `boot_mode` | `SYS_LSI_MODE` word (address and decode from the SoC description `boot_strap`) | debug-enable bit (MD_BOOT3) = `boot_mode.debug_enable` (0), `MD_BOOT[1:0]` device = `boot_mode.boot_device` (`xspi`), bit 10 boot CPU = `boot_mode.boot_cpu` (`ca55`) | 5 s | 0.1 s |
 | `eth_phy_id` | MII registers 2/3 of both ports (python3 ioctl helper) | both `0x001cc916`; a list is accepted (`eth_phy_id: [0x001cc916, 0x001cc878]` in `--functest-expect`: RTL8211F and RTL8211F-VD) | 5 s | 0.3 s |
 | `eth_mac` | `/sys/class/net/{if}/address` | both = the MACs derived from the serial | 5 s | 0.1 s |
 | `eth0_link`, `eth1_link` | carrier, speed, duplex, `ping -c 2 -I {if}` the gateway, RX counter | carrier, 100 or 1000 Mbit/s, full duplex, ping ok, >= 2 packets received on that port | 10 s | 1.5 s |
@@ -914,7 +934,7 @@ assumes and fix the fragment, the judge or the expected value:
 
 Without it, every payload crosses a wire: the GD32 images go base64 over the 115200-baud console (about 13 min on 2026W38-0002 when the board has no network), and the DX-M1 files, the DTBs and the 210 MB `wic.gz` go over SSH on a 100 Mbit switch. The board boots Linux from the provisioning SD for every write step, so the first unit caches each payload on the SD and every later unit reads it locally.
 
-The store is a directory on the SD's root filesystem, `/var/lib/alp-payload/<bundle sha256>/`. It needs no SD preparation and no partition: the root has several GB free. It is used only when the board runs from the SD, never when its root is the eMMC, and it is on by default (`--no-payload-store` disables it). `plan` never touches it.
+The store is a directory on the SD's root filesystem, `/var/lib/alp-payload/<bundle sha256>/`. It needs no SD preparation and no partition: the root has several GB free. It is used only when the board runs from the SD, never when its root is the eMMC, and it is on by default (`--no-payload-store` disables it). `plan` never touches it. The card must carry the marker file `/var/lib/alp-payload/.provisioning-sd` (`touch` it on the internal provisioning SD only): without it the store stays off and every file is pushed, so the license-gated `dxm1_*` files never land on a release card.
 
 For each file `run --execute` looks in the directory before any push:
 
@@ -980,6 +1000,11 @@ Unmapped blocks are not touched: the eMMC outside the mapped ranges keeps whatev
   `boot_sd_linux` refuses because the root is not on the SD.
 - **The EEPROM array is written only when blank** or equal to
   `--reprovision-from`, and never while the identity header is locked.
+  `--replace-identity` (needs `--reprovision-from`) archives the committed and
+  staged blobs as `<serial>.manifest.<old-hwrev>-<date>.bin` and
+  `<serial>.secure-page.<old-hwrev>-<date>.bin` (`.staged.bin` for the staged
+  ones) before the new ones are staged and promoted, instead of failing after
+  the EEPROM write.
 - **The 5L35023B cannot be re-burned in-system.** `clkgen_verify` only reads;
   a bad OTP image means a bad unit, not a fixable one.
 - **`dxm1_npu_flash` swaps the release DTB while it runs.** The release DTB is backed up as `/boot/<fdtfile>.release` and restored (md5-verified) on success and on failure; if a run is killed, the next run restores it first. The BOOT_CFG straps (E1M `IO17`/`IO19`/`IO20` low) are a carrier property the tool cannot measure.
@@ -991,3 +1016,13 @@ and `tests/scripts/test_provision_*.py`); no hardware is needed.
 `test_provision_functest.py` holds, for every functional check, a healthy
 answer and at least one wrong answer that must fail it, and runs the generated
 script's runner (framing, lanes, the timeout kill) on the host's own `sh`.
+
+## Debug-mode strap (MD_BOOT3)
+
+A production SoM boots in normal mode: MD_BOOT3 low. `SYS_LSI_MODE` (`0x10430300`, RZ/V2N hardware manual R01UH1071EJ0120 4.3.3.2.75) latches the pins on the rising edge of `PRST_N`: bit 9 `STAT_DEBUGEN` is 1 in debug mode, bits 2..0 are `MD_BOOT[2:0]`. The address, bit and device table are the `boot_strap` block of `metadata/socs/renesas/rzv2n/n44.json`; the expected values are `boot_mode` in `scripts/provision/functest-expect-v2n.yaml`. `ship_check` blocks a unit whose `soc_boot_debug_en` is `1`. All three SYS registers (`0x300`, `0x304`, `0x308`) are confirmed against the manual; the census no longer marks them unverified. Decoded fields of `SYS_LSI_MODE` (figure of 4.3.3.2.75): `[2:0] STAT_MD_BOOT`, `[9] STAT_DEBUGEN` and `[10] STAT_BOOTSELECTER` are judged; `[10] STAT_BOOTSELECTER` (latched from the BOOTSELCPU pin) is judged too: 1 = CA55 boot (the manual labels it CM55 cold boot) is the intended strap, the SoM boots CA55-first like the EVK default (`0x3c06`), so `boot_mode.boot_cpu` is `ca55` and a word with bit 10 cleared (`0x3806`, census `soc_boot_cpu: cm33`) is refused. The expectation is "for now": a private overlay overrides `boot_mode.boot_cpu` per product (e.g. `cm33` makes `0x3806` pass). `[16] SEC_EN`, `[13] STAT_MD_CLKS` and `[12:11] STAT_BOOTPLLCA55` are not judged (no criterion is defined). `cold_boot_test` and `functional_test` judge the same word through `functest.judge_boot_mode`.
+
+Bench steps (not yet run on hardware), in order:
+
+1. On a unit that reads `0x3c06` today, run `census` and confirm `soc_boot_debug_en: 0`, `soc_md_boot: 0x6`, `soc_boot_device: xspi`.
+2. Cold power-cycle the unit, run `functional_test`, confirm `test_ft_boot_mode: pass (debug_en=0 boot_device=xspi md_boot=0x6)`.
+3. On a sacrificial bench SoM only, strap MD_BOOT3 high, cold power-cycle (the strap is latched at `PRST_N`, a warm reset does not refresh it), run `census`: expect `soc_boot_debug_en: 1` and the register word `0x3e06`; `cold_boot_test` must refuse and `ship_check` must block with the debug-mode reason. Remove the strap afterwards.

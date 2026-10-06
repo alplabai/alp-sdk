@@ -907,6 +907,11 @@
           ],
           "description": "Mediator-local pin or bus identifier. Forms: integer (CC3501E GPIO index, e.g. `14`); single pad name (`\"PA11\"` for a GD32 port pad); bus pin (`\"SPI1.MISO\"`); or a slash-joined pair for multi-pin peripherals (`\"PA0/PB3\"` for a quadrature encoder's X/Y pads). Meaningless for `dispatch: unrouted` (there is no mediator pin to name); omit it there."
         },
+        "driven_by": {
+          "type": "string",
+          "enum": ["dxm1", "none"],
+          "description": "Who drives this pad when it is not a mediator pad. `dxm1` = the on-module DEEPX DX-M1 drives it; `none` = nothing on the SoM drives it (the carrier default decides). Machine-readable form of what `doc` says; carrier selects (e.g. XEVK_PIN_USB_MUX_SEL on E1M IO24) depend on it."
+        },
         "doc": {
           "type": "string",
           "description": "One-line free-form note (matches the e1m_routes entry shape on the board side). Required for `dispatch: unrouted` -- the whole point of that state is to record WHY the pad is dead (e.g. which revision/pin it moved from)."
