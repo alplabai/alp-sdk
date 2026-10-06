@@ -83,9 +83,9 @@ SRC_URI:append = " \
     file://0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch \
     file://0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch \
     file://0020-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
-    file://0021-gpio-gd32-bridge-add-cam-en-ldo-lines-and-make-can-stby-requestable.patch \
-    file://0022-gpio-gd32-bridge-i2c3-proxy-adapter-and-polled-irqchip.patch \
-    file://0023-pwm-gd32-bridge-provider-over-cmd-pwm-set-get.patch \
+    file://0025-gpio-gd32-bridge-add-cam-en-ldo-lines-and-make-can-stby-requestable.patch \
+    file://0026-gpio-gd32-bridge-i2c3-proxy-adapter-and-polled-irqchip.patch \
+    file://0027-pwm-gd32-bridge-provider-over-cmd-pwm-set-get.patch \
     file://uio.cfg \
     file://panic.cfg \
 "
@@ -93,17 +93,20 @@ SRC_URI:append = " \
 # panic.cfg (#2734): CONFIG_PANIC_TIMEOUT=10 -- a panic reboots the board after
 # 10 s instead of hanging forever (panic_timeout defaults to 0).
 #
-# 0021..0022 (GD32 bridge, bridge protocol 0.17; both patch gpio-gd32-bridge.c
+# 0025..0027 (GD32 bridge, bridge protocol 0.17; all patch gpio-gd32-bridge.c
 # that 0005 adds, so they apply strictly after it and in this order):
-#   0021  CAM_EN_LDO0..3 as gpio lines 24..27 (gated on minor >= 17) and
+#   0025  CAM_EN_LDO0..3 as gpio lines 24..27 (gated on minor >= 17) and
 #         can-stby (line 20) made requestable for a phy-can-transceiver
 #         standby-gpios.
-#   0022  an i2c_adapter for E1M-X I2C3 (GD32 PC8/PC9) from the bridge node's
+#   0026  an i2c_adapter for E1M-X I2C3 (GD32 PC8/PC9) from the bridge node's
 #         "i2c" child (label e1m_x_i2c3), checked lazily per transfer against
 #         minor >= 17, plus a polled irqchip on the bridge gpiochip (10 ms
 #         GPIO_READ while any line is unmasked).
+#   0027  a PWM provider for E1M PWM0..7 over PWM_SET/PWM_GET (minor >= 17,
+#         #pwm-cells = <2>), so pwm-backlight can drive a panel backlight;
+#         compiled in only when PWM is reachable (no select PWM).
 # The kernel option they need (GPIOLIB_IRQCHIP) is selected by the
-# GPIO_GD32_BRIDGE Kconfig entry.
+# GPIO_GD32_BRIDGE Kconfig entry.  (0021..0024 are the remoteproc patches.)
 
 # 0020 (PDM clocks, audit MM-02/MM-X2): the V2N CPG driver had no PDM0/PDM1
 # module clocks or resets, so no pdm node could bind.  The patch adds them
@@ -403,8 +406,8 @@ SRC_URI:append = " file://wifi-bt.cfg"
 
 # Display stack: RK055HDMIPI4MA0 panel on Display 1 (DSI + PWM backlight + GPT
 # + GD32-bridge GPIO for panel reset).
-SRC_URI:append:e1m-v2n101 = " file://display.cfg file://display-lvds.cfg"
-SRC_URI:append:e1m-v2m101 = " file://display.cfg file://display-lvds.cfg"
+SRC_URI:append:e1m-v2n101 = " file://display.cfg"
+SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 
 # Audio: TAS2563 smart-amp pair on the E1M-X-EVK carrier (see e1m-x-evk.dtsi's
 # header comment + &i2c0's tas2563_left/tas2563_right nodes). Per-carrier like

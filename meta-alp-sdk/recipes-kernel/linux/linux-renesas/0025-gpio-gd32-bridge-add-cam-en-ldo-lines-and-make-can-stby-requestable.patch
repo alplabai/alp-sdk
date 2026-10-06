@@ -1,8 +1,8 @@
-From 0ebd427c708f97ac691fd9ad595bb91b82e98d3a Mon Sep 17 00:00:00 2001
+From a4a33233877208690cdb5403689d6b07ea0e579e Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Tue, 6 Oct 2026 13:07:01 +0000
-Subject: [PATCH] gpio: gd32-bridge: add CAM_EN_LDO0..3 lines and make
- CAN_STBY requestable
+Subject: [PATCH] gpio: gd32-bridge: add CAM_EN_LDO0..3 lines and make CAN_STBY
+ requestable
 
 Copyright (c) 2026 Alp Lab AB
 SPDX-License-Identifier: GPL-2.0
@@ -15,6 +15,10 @@ and a transfer never carries bits of a line the firmware has not
 confirmed (gd32_bridge_unconfirmed_bits() replaces three copies of the
 per-feature mask logic).
 
+A silent bridge defers a kernel consumer's probe (-EPROBE_DEFER, from a
+kernel thread only); a userspace request gets -EAGAIN, never the
+kernel-internal errno 517.
+
 Line 20 (can-stby, GD32 PB13, the TCAN1044 STB shared by the two
 transceivers) was refused by .request(); a phy-can-transceiver node can
 now request it as standby-gpios.
@@ -23,14 +27,22 @@ Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- drivers/gpio/gpio-gd32-bridge.c |  145 ++++++++++++++++++++++++++++++---------
- 1 file changed, 111 insertions(+), 34 deletions(-)
+ drivers/gpio/gpio-gd32-bridge.c | 157 +++++++++++++++++++++++++-------
+ 1 file changed, 123 insertions(+), 34 deletions(-)
 
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
-index 0ee0eb0..e8bf851 100644
+index 0ee0eb0..cde6d5a 100644
 --- a/drivers/gpio/gpio-gd32-bridge.c
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -152,10 +152,6 @@
+@@ -105,6 +105,7 @@
+ #include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
++#include <linux/sched.h>
+ #include <linux/workqueue.h>
+ 
+ #define GD32_REG_CMD		0x00
+@@ -152,10 +153,6 @@
   * refuses it so a write can never land in the sticky output_mask and then be
   * replayed. */
  #define GD32_UNROUTED_LINE	8
@@ -41,7 +53,7 @@ index 0ee0eb0..e8bf851 100644
  #define GD32_SE_RST_LINE	21
  
  /*
-@@ -167,12 +163,32 @@
+@@ -167,12 +164,32 @@
   */
  #define GD32_LINE_IO15		22
  #define GD32_LINE_IO26		23
@@ -75,7 +87,7 @@ index 0ee0eb0..e8bf851 100644
  /* Bridge protocol minor at which lines 18/19 (bt-reg-on/wl-reg-on) first
   * exist. A bridge below this minor has no notion of them. */
  #define GD32_PROTO_MINOR_WIFI_BT	11
-@@ -285,6 +301,8 @@ struct gd32_bridge_gpio {
+@@ -285,6 +302,8 @@ struct gd32_bridge_gpio {
  	 * resolved by the same GET_VERSION as wifi_bt_reg_on_status, under
  	 * status_lock. */
  	int io_ext_status;
@@ -84,7 +96,7 @@ index 0ee0eb0..e8bf851 100644
  	struct mutex status_lock;
  	/*
  	 * Independent lines-18/19 resolver, NOT under state_lock (it has
-@@ -358,7 +376,40 @@ static int gd32_bridge_io_ext_status(struct gd32_bridge_gpio *gd32)
+@@ -358,7 +377,40 @@ static int gd32_bridge_io_ext_status(struct gd32_bridge_gpio *gd32)
  	return status;
  }
  
@@ -126,7 +138,7 @@ index 0ee0eb0..e8bf851 100644
   * their bit because line 21 is se-rst). Line 21 itself never reaches the
   * wire. */
  static u32 gd32_bridge_line_mask(unsigned int offset)
-@@ -367,18 +418,18 @@ static u32 gd32_bridge_line_mask(unsigned int offset)
+@@ -367,18 +419,18 @@ static u32 gd32_bridge_line_mask(unsigned int offset)
  }
  
  /* Line-offset MASK -> GPIO_READ/GPIO_WRITE bit mask, and back. Lines 0..20
@@ -148,7 +160,7 @@ index 0ee0eb0..e8bf851 100644
  }
  
  static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
-@@ -483,10 +534,8 @@ static int gd32_bridge_gpio_get(struct gpio_chip *chip, unsigned int offset)
+@@ -483,10 +535,8 @@ static int gd32_bridge_gpio_get(struct gpio_chip *chip, unsigned int offset)
  	 * happen. Gate anyway rather than reading bits the firmware may not
  	 * implement.
  	 */
@@ -161,7 +173,7 @@ index 0ee0eb0..e8bf851 100644
  		return -EAGAIN;
  
  	put_unaligned_le32(mask, req);
-@@ -513,9 +562,7 @@ static int gd32_bridge_gpio_get_multiple(struct gpio_chip *chip,
+@@ -513,9 +563,7 @@ static int gd32_bridge_gpio_get_multiple(struct gpio_chip *chip,
  	u8 req[4], rsp[4];
  	int ret;
  
@@ -172,7 +184,7 @@ index 0ee0eb0..e8bf851 100644
  		return -EAGAIN;
  
  	if (wire) {
-@@ -613,11 +660,7 @@ static int gd32_bridge_gpio_do_set_mask(struct gd32_bridge_gpio *gd32,
+@@ -613,11 +661,7 @@ static int gd32_bridge_gpio_do_set_mask(struct gd32_bridge_gpio *gd32,
  	 * still latched above regardless, and gd32_bridge_replay_work()
  	 * would re-issue the write if support were ever (re)confirmed.
  	 */
@@ -185,7 +197,7 @@ index 0ee0eb0..e8bf851 100644
  	if (wire) {
  		put_unaligned_le32(wire, &req[0]);
  		put_unaligned_le32(vals & wire, &req[4]);
-@@ -783,6 +826,15 @@ static int gd32_bridge_wifi_bt_poll_once(struct gd32_bridge_gpio *gd32)
+@@ -783,6 +827,15 @@ static int gd32_bridge_wifi_bt_poll_once(struct gd32_bridge_gpio *gd32)
  	} else {
  		gd32->io_ext_status = 0;
  	}
@@ -201,7 +213,7 @@ index 0ee0eb0..e8bf851 100644
  	mutex_unlock(&gd32->status_lock);
  
  	return 0;
-@@ -814,13 +866,16 @@ static int gd32_bridge_resolve_wifi_bt(struct gd32_bridge_gpio *gd32)
+@@ -814,13 +867,17 @@ static int gd32_bridge_resolve_wifi_bt(struct gd32_bridge_gpio *gd32)
  	return gd32_bridge_wifi_bt_status(gd32);
  }
  
@@ -215,7 +227,8 @@ index 0ee0eb0..e8bf851 100644
 + * cache that gates the line.  A silent bridge is -EAGAIN: libgpiod would see
 + * the kernel-internal errno 517 for -EPROBE_DEFER.  Lines with a kernel
 + * consumer (can-stby, CAM_EN_LDO0..3) map it to -EPROBE_DEFER in
-+ * gd32_bridge_gpio_request() so the consumer's probe is retried. */
++ * gd32_bridge_gpio_request() so the consumer's probe is retried, but only from
++ * a kernel thread (driver-core probe); a userspace request keeps -EAGAIN. */
 +static int gd32_bridge_resolve_late(struct gd32_bridge_gpio *gd32,
 +				    int (*peek)(struct gd32_bridge_gpio *))
  {
@@ -224,12 +237,22 @@ index 0ee0eb0..e8bf851 100644
  
  	if (cached != -EPROBE_DEFER)
  		return cached;
-@@ -828,19 +883,40 @@ static int gd32_bridge_resolve_io_ext(struct gd32_bridge_gpio *gd32)
+@@ -828,19 +885,50 @@ static int gd32_bridge_resolve_io_ext(struct gd32_bridge_gpio *gd32)
  	if (gd32_bridge_wifi_bt_poll_once(gd32))
  		return -EAGAIN;	/* still silent */
  
 -	return gd32_bridge_io_ext_status(gd32);
 +	return peek(gd32);
++}
++
++/* -EPROBE_DEFER means something only to a driver-core probe (a kernel thread);
++ * a libgpiod/sysfs/pwm-sysfs caller would see the kernel-internal errno 517,
++ * so outside a kernel thread a silent bridge stays -EAGAIN. */
++static int gd32_bridge_defer_or_again(int ret)
++{
++	if (ret == -EAGAIN && (current->flags & PF_KTHREAD))
++		return -EPROBE_DEFER;
++	return ret;
 +}
 +
 +static int gd32_bridge_resolve_io_ext(struct gd32_bridge_gpio *gd32)
@@ -247,7 +270,7 @@ index 0ee0eb0..e8bf851 100644
 +	 * (camera LDO regulators): a silent bridge defers their probe. */
 +	if (offset >= GD32_LINE_CAM_EN_LDO0) {
 +		ret = gd32_bridge_resolve_late(gd32, gd32_bridge_cam_ldo_status);
-+		return ret == -EAGAIN ? -EPROBE_DEFER : ret;
++		return gd32_bridge_defer_or_again(ret);
 +	}
 +
 +	/* can-stby exists from minor 13; gated on the minor >= 15 cache (a
@@ -255,7 +278,7 @@ index 0ee0eb0..e8bf851 100644
 +	 * consumer (phy-can-transceiver): defer on a silent bridge. */
 +	if (offset == GD32_CAN_STBY_LINE) {
 +		ret = gd32_bridge_resolve_late(gd32, gd32_bridge_io_ext_status);
-+		return ret == -EAGAIN ? -EPROBE_DEFER : ret;
++		return gd32_bridge_defer_or_again(ret);
 +	}
  
  	/* IO15/IO26: gated on protocol minor >= 15, like lines 18/19 on 11. */
@@ -267,7 +290,7 @@ index 0ee0eb0..e8bf851 100644
  		return -ENODEV;
  
  	/* Line 21 (se-rst) is not gated on the wifi/bt protocol minor. */
-@@ -924,11 +1000,7 @@ static void gd32_bridge_replay_work(struct work_struct *work)
+@@ -924,11 +1012,7 @@ static void gd32_bridge_replay_work(struct work_struct *work)
  	 * gd32_bridge_resolve_work()'s job, independent of this replay and
  	 * NOT run under state_lock.
  	 */
@@ -280,7 +303,7 @@ index 0ee0eb0..e8bf851 100644
  
  	if (xfer_mask) {
  		put_unaligned_le32(xfer_mask, &req[0]);
-@@ -1098,6 +1170,7 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -1098,6 +1182,7 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
  	INIT_DELAYED_WORK(&gd32->resolve_work, gd32_bridge_resolve_work);
  	gd32->wifi_bt_reg_on_status = -EPROBE_DEFER;	/* not yet resolved */
  	gd32->io_ext_status = -EPROBE_DEFER;
@@ -288,7 +311,7 @@ index 0ee0eb0..e8bf851 100644
  
  	gd32->chip.label	  = "gd32-bridge-gpio";
  	gd32->chip.parent	  = &client->dev;
-@@ -1148,6 +1221,10 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -1148,6 +1233,10 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
  			gd32->io_ext_status = -ENODEV;
  		else
  			gd32->io_ext_status = 0;
@@ -300,4 +323,5 @@ index 0ee0eb0..e8bf851 100644
  
  	gd32->chip.ngpio	  = GD32_NGPIO_TOTAL;
 -- 
-2.53.0
+2.38.1.windows.1
+

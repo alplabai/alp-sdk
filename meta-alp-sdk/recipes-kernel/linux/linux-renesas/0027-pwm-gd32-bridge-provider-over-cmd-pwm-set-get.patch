@@ -1,8 +1,7 @@
-From 3c1f0b7a2d9e4f6a8b5c7d1e0f2a3b4c5d6e7f80 Mon Sep 17 00:00:00 2001
+From db4040fb70beeb356d87e293645cbeba7ad4ad3c Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Tue, 6 Oct 2026 16:00:00 +0000
-Subject: [PATCH] gpio: gd32-bridge: add a PWM provider over
- CMD_PWM_SET/GET
+Subject: [PATCH] gpio: gd32-bridge: add a PWM provider over CMD_PWM_SET/GET
 
 Copyright (c) 2026 Alp Lab AB
 SPDX-License-Identifier: GPL-2.0
@@ -17,16 +16,19 @@ Protocol minor >= 17 only.  PWM_SET/GET are allowed on the I2C link from
 older firmware underflows the shared timer ARR on period 0, so it is
 never sent.  Enabling a channel on a bridge below 0.17 returns
 -EOPNOTSUPP, disabling one is a no-op and get_state reads as disabled;
-a silent bridge returns -EPROBE_DEFER from apply so the consumer is
-retried.
+a silent bridge returns -EPROBE_DEFER from apply to a probing consumer
+(retried) and -EAGAIN to anything else.  The provider is compiled in only
+when PWM is reachable (no select PWM).
 
 PWM0..3 share TIMER0 and PWM4..7 share TIMER7, and a period change on
 one channel retunes its siblings.  Policy: reject.  Enabling a channel
 with a period that differs from an enabled sibling returns -EBUSY; duty
 is independent, and a group's period is changed by disabling its
-channels first.
+channels first.  A period above 65536000 ns is rounded down to it (the
+firmware clamps it anyway) and that value is what is cached.
 
-Disable sends PWM_SET period 0 / duty 0.  get_state adopts a channel the
+Disable sends PWM_SET period 0 / duty 0.  get_state reads a stopped channel or one at 0% duty
+(the pad idles low) as disabled and adopts a channel the
 bridge is already driving (a Linux warm reboot does not reset the GD32)
 without blocking probe.
 
@@ -34,24 +36,11 @@ Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- drivers/gpio/Kconfig            |    1 
- drivers/gpio/gpio-gd32-bridge.c |  203 +++++++++++++++++++++++++++++++++++++++
- 2 files changed, 204 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 212 ++++++++++++++++++++++++++++++++
+ 1 file changed, 212 insertions(+)
 
-diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
-index c886d5f863f8..2e98c426bfbb 100644
---- a/drivers/gpio/Kconfig
-+++ b/drivers/gpio/Kconfig
-@@ -1013,6 +1013,7 @@ config GPIO_GD32_BRIDGE
- 	tristate "Alp Lab GD32 IO-MCU bridge GPIO expander"
- 	depends on I2C && OF
- 	select CRC_ITU_T
-+	select PWM
- 	select GPIOLIB_IRQCHIP
- 	help
- 	  GPIO support for E1M IO pads routed through the GD32G553
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
-index fb84b2e..c302ad6 100644
+index 436549f..97e13ce 100644
 --- a/drivers/gpio/gpio-gd32-bridge.c
 +++ b/drivers/gpio/gpio-gd32-bridge.c
 @@ -99,6 +99,11 @@
@@ -71,13 +60,13 @@ index fb84b2e..c302ad6 100644
  #include <linux/of.h>
  #include <linux/platform_device.h>
 +#include <linux/pwm.h>
+ #include <linux/sched.h>
  #include <linux/spinlock.h>
  #include <linux/workqueue.h>
- 
-@@ -382,6 +388,14 @@ struct gd32_bridge_gpio {
- 	 * reads the published copy.  irq_lock is the irqchip bus lock.
- 	 */
- 	struct mutex irq_lock;
+@@ -389,6 +395,14 @@ struct gd32_bridge_gpio {
+ 	u32 irq_prev;		/* last sampled levels, line space; worker only */
+ 	u32 irq_seeded;		/* lines whose irq_prev is valid; worker only */
+ 	struct delayed_work irq_work;
 +	/* PWM provider (see the comment above gd32_bridge_pwm_apply()).  pwm_on =
 +	 * enabled channels, pwm_period[g] = the period shared by the enabled
 +	 * channels of timer group g (PWM0..3 TIMER0, PWM4..7 TIMER7); both
@@ -86,10 +75,10 @@ index fb84b2e..c302ad6 100644
 +	struct mutex pwm_lock;
 +	u32 pwm_on;
 +	u32 pwm_period[2];
- 	spinlock_t irq_slock;
- 	u32 irq_en_stage, irq_rise_stage, irq_fall_stage, irq_high_stage, irq_low_stage;
- 	u32 irq_en, irq_rise, irq_fall, irq_high, irq_low;
-@@ -1705,6 +1719,191 @@ static void gd32_bridge_irq_work(struct work_struct *work)
+ 	/*
+ 	 * Independent lines-18/19 resolver, NOT under state_lock (it has
+ 	 * nothing to do with output_mask/output_vals or the replay above) --
+@@ -1730,6 +1744,200 @@ static void gd32_bridge_irq_work(struct work_struct *work)
  				   msecs_to_jiffies(GD32_IRQ_POLL_PERIOD_MS));
  }
  
@@ -104,7 +93,9 @@ index fb84b2e..c302ad6 100644
 + * there.  The chip registers whenever the DT declares #pwm-cells; enabling a
 + * channel on firmware below 0.17 returns -EOPNOTSUPP, disabling one is a
 + * no-op, and get_state reads as disabled.  A silent bridge returns
-+ * -EPROBE_DEFER from apply so a pwm-backlight probe is retried.
++ * -EPROBE_DEFER from apply to a probing consumer (pwm-backlight is retried)
++ * and -EAGAIN to anything else (pwm sysfs).  A period above 65536000 ns is
++ * rounded down to it, as the firmware would clamp it anyway.
 + *
 + * Shared-period constraint: PWM0..3 ride TIMER0 and PWM4..7 ride TIMER7, so
 + * every enabled channel of a group has the same period (the firmware keeps
@@ -122,6 +113,7 @@ index fb84b2e..c302ad6 100644
 +#define GD32_NPWM			8
 +#define GD32_PWM_GROUP_SIZE		4
 +#define GD32_PWM_TICK_NS		1000	/* firmware timer tick: 1 us */
++#define GD32_PWM_MAX_PERIOD_NS		65536000 /* firmware clamps above 65536 ticks */
 +
 +static struct gd32_bridge_gpio *gd32_from_pwm(struct pwm_chip *chip)
 +{
@@ -177,17 +169,20 @@ index fb84b2e..c302ad6 100644
 +
 +	ret = gd32_bridge_resolve_late(gd32, gd32_bridge_cam_ldo_status);
 +	if (ret == -EAGAIN)
-+		ret = -EPROBE_DEFER;	/* bridge silent: retry the consumer */
++		ret = gd32_bridge_defer_or_again(ret);	/* silent bridge: retry a probing consumer */
 +	else if (ret == -ENODEV)
 +		ret = -EOPNOTSUPP;	/* firmware older than protocol 0.17 */
 +	if (ret)
 +		goto out;
 +
-+	if (state->period < GD32_PWM_TICK_NS || state->period > U32_MAX) {
++	if (state->period < GD32_PWM_TICK_NS) {
 +		ret = -ERANGE;
 +		goto out;
 +	}
-+	period = state->period - state->period % GD32_PWM_TICK_NS;
++	/* The firmware silently clamps a longer period, so round down to the
++	 * maximum here (PWM convention) and cache what the hardware really runs. */
++	period = min_t(u64, state->period, GD32_PWM_MAX_PERIOD_NS);
++	period -= period % GD32_PWM_TICK_NS;
 +	duty = min_t(u64, state->duty_cycle, period);
 +
 +	if ((gd32->pwm_on & grp_mask & ~BIT(ch)) &&
@@ -212,8 +207,8 @@ index fb84b2e..c302ad6 100644
 +/*
 + * Adopt what the bridge is already driving (a Linux warm reboot does not
 + * reset the GD32).  Best effort and non-blocking: firmware below 0.17, a
-+ * version not yet confirmed, an unreachable bridge, or a channel that was
-+ * never programmed all read as disabled.
++ * version not yet confirmed, an unreachable bridge, or a channel that is
++ * stopped (period 0) or at 0% duty (the pad idles low) all read as disabled.
 + */
 +static int gd32_bridge_pwm_get_state(struct pwm_chip *chip,
 +				     struct pwm_device *pwm,
@@ -232,7 +227,8 @@ index fb84b2e..c302ad6 100644
 +		return 0;
 +	period = get_unaligned_le32(&rsp[0]);
 +	duty = get_unaligned_le32(&rsp[4]);
-+	if (!period)
++	/* Stop idles the pad low, so 0% duty is electrically disabled too. */
++	if (!period || !duty)
 +		return 0;
 +
 +	state->enabled = true;
@@ -267,7 +263,9 @@ index fb84b2e..c302ad6 100644
 +{
 +	struct device *dev = &gd32->client->dev;
 +
-+	if (!of_property_read_bool(dev->of_node, "#pwm-cells"))
++	/* IS_REACHABLE: with PWM=m and this driver built in there is no provider. */
++	if (!IS_REACHABLE(CONFIG_PWM) ||
++	    !of_property_read_bool(dev->of_node, "#pwm-cells"))
 +		return 0;
 +
 +	mutex_init(&gd32->pwm_lock);
@@ -281,7 +279,7 @@ index fb84b2e..c302ad6 100644
  /*
   * Unbind teardown, registered AFTER devm_gpiochip_add_data() so devm runs it
   * BEFORE gpiochip_remove(). Consumers (wlan-pwrseq, hci_bcm, panel reset,
-@@ -1882,6 +2081,10 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -1912,6 +2120,10 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
  		/* Not fatal: the GPIO lines (panel reset, Wi-Fi REG_ON) must
  		 * not depend on the proxy adapter registering. */
  		dev_err(&client->dev, "I2C3 proxy adapter not registered (%d)\n", ret);
@@ -293,5 +291,5 @@ index fb84b2e..c302ad6 100644
  }
  
 -- 
-2.53.0
+2.38.1.windows.1
 
