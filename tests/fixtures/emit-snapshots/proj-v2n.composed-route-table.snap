@@ -25,7 +25,7 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_PCIE0_I2C_EN",
       "board_role": null,
-      "board_doc": "Drive high to enable the I2C mux to the PCIe slot.",
+      "board_doc": "Drive LOW to enable the I2C switch to the PCIe/M.2 slots (TMUX121 EN is active-low, no pull on the net).",
       "dispatch": "direct"
     },
     {
