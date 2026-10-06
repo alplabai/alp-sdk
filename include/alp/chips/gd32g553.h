@@ -207,6 +207,20 @@ extern "C" {
  *  same "unattributable" state gh#101 fixed, just for older peers. */
 #define GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR 14u
 
+/** GPIO expander line for E1M IO24 (GD32 pad `PC14`).  NOT routed to the
+ *  GD32 on the SoM (gd32-bridge-firmware#298): the bridge answers
+ *  `STATUS_IO` for any mask naming it, so gd32g553_gpio_read() and
+ *  gd32g553_gpio_write() refuse it up front with `ALP_ERR_NOSUPPORT`
+ *  (the Linux gpio driver refuses line 8 the same way). */
+#define GD32G553_GPIO_LINE_E1M_IO24 8u
+
+/** Every routed bridge GPIO line (bits 0..22 minus
+ *  @ref GD32G553_GPIO_LINE_E1M_IO24).  Use it as the "all lines" mask for
+ *  GPIO_READ, including inside a BATCH sub-op, which bypasses the driver's
+ *  own refusal.  Bits above the cached protocol minor are dropped by
+ *  gd32g553_gpio_read(). */
+#define GD32G553_GPIO_ROUTED_MASK (0x007FFFFFu & ~(1u << GD32G553_GPIO_LINE_E1M_IO24))
+
 /** GPIO expander line carrying the on-module Murata LBEE5HY2FY-922
  *  (Infineon CYW55513) Bluetooth core's BT_REG_ON enable (GD32 pad
  *  `PE14`).  Valid only on bridges advertising protocol minor
@@ -295,6 +309,14 @@ typedef enum {
 	GD32G553_I2CM_RES_TIMEOUT   = 5, /**< Deadline hit (-> -ETIMEDOUT). */
 	GD32G553_I2CM_RES_BUS_STUCK = 6, /**< SDA held low after recovery (-> -EBUSY). */
 } gd32g553_i2cm_result_t;
+
+/** Minimum protocol MINOR that implements `PWM_SET` period 0 / duty 0 as
+ *  "stop + release the channel's timer claim" (see @ref gd32g553_pwm_stop).
+ *  Older firmware does NOT reject period 0: it computes `ARR = period - 1`
+ *  from it, retunes the timer's shared 16-bit ARR and answers success, so
+ *  sibling channels are silently re-timed.  Never send period 0 below this
+ *  minor; gd32g553_pwm_stop() returns `ALP_ERR_NOSUPPORT` instead. */
+#define GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR 17u
 
 /** v0.7 link-feature bits (CMD_LINK_FEATURES payload).  STATUS_SEQ:
  *  once granted, every SPI reply's STATUS byte carries a 4-bit
@@ -835,9 +857,29 @@ alp_status_t gd32g553_gpio_write(gd32g553_t *ctx, uint32_t mask, uint32_t levels
  *  Duty `0` shuts the channel off; `duty_ns == period_ns` drives it
  *  permanently high.  The firmware rounds to its hardware-achievable
  *  resolution; the caller can read back via @ref gd32g553_pwm_get to
- *  see what actually got programmed. */
+ *  see what actually got programmed.
+ *
+ *  @return ALP_ERR_INVAL for `period_ns == 0` (use @ref gd32g553_pwm_stop)
+ *          or `duty_ns > period_ns`. */
 alp_status_t
 gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t duty_ns);
+
+/** @brief Stop a PWM channel and release its timer claim.
+ *
+ *  Sends `PWM_SET` with `period_ns == 0` and `duty_ns == 0`.  The channel
+ *  goes idle and no longer counts as a live sibling, so a later
+ *  @ref gd32g553_pwm_single_pulse on another channel of the same timer
+ *  stops answering `STATUS_BUSY`.  Use it when an app leaves a channel
+ *  running and the GD32 is not reset before the next image.
+ *
+ *  @param ctx      GD32G553 bridge context (must be initialised first).
+ *  @param channel  E1M PWM channel index (0..7).
+ *  @return ALP_OK, or the firmware's error.  `ALP_ERR_NOSUPPORT`, with
+ *          nothing sent, when the bridge advertises a protocol minor below
+ *          @ref GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR -- stop/release ships in
+ *          protocol 0.17, and older firmware would treat period 0 as a
+ *          real period and retune the shared timer. */
+alp_status_t gd32g553_pwm_stop(gd32g553_t *ctx, uint8_t channel);
 
 /** @brief Read back what a PWM channel's timer is ACTUALLY generating.
  *

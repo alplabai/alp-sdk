@@ -1,0 +1,7 @@
+### Added — the CM33 GD32-bridge test apps leave a fatal-error block and the reader detects a frozen CM33 (#2692)
+
+`v2n-gd32-bridge-functional` and `v2n-gd32-bridge-hil-soak` froze silently after the protocol-0.15 rows on GD32 fw 0.15: the CM33 has no console, so a fatal error looked like a hang. Both now size `CONFIG_MAIN_STACK_SIZE=4096` (Zephyr's 1024-byte default is the leading suspect), enable `CONFIG_HW_STACK_PROTECTION=y`, and override `k_sys_fatal_error_handler` to store a 12-word fault block at `rsctbl + 0xF50` (A55 `0x4F700F50`; magic `"FLT1"`, reason, PC, LR, xPSR, `CFSR`/`HFSR`/`MMFAR`/`BFAR`, thread-name hash, uptime, frame address) before parking the core with IRQs off. The layout is `alp_gd32_fault_t` in `include/alp/protocol/gd32_bridge_results.h`; `alp_gd32_results_init` clears it so a previous run's fault is never shown.
+
+`scripts/bench/v2n/read_gd32_results.py` gains `--fault` (prints the block; exit 6 if none) and a liveness check: it samples the beacon heartbeat twice, 1.5 s apart, and exits 5 with `STALLED` if it did not advance, instead of reporting a frozen CM33's last record as current (`--no-live` skips it).
+
+The result record's last word (formerly `reserved`) is now `fail_mask` (layout version 2): bit `i` is set when test row `i` failed (functional: that test failed; soak: that row failed at least once), and the reader prints `fail_rows` plus the row names so a bench run says which rows failed, not just how many.
