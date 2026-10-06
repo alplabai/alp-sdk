@@ -1386,7 +1386,7 @@ Host API: `gd32g553_boot_config_get()` / `gd32g553_boot_config_set()` with
 
 The bridge is the bus master of E1M-X I2C3 (GD32 `PC8` = SCL, E1M-X pad A24;
 `PC9` = SDA, pad A23).  The 2625-R2 SoM has no pull-ups on I2C3; the carrier or
-module provides them.  The pads are hi-Z until the first `I2CM_CONFIG`.  The
+module provides them.  E1M-X I2C3 is the GD32 I2C2 peripheral on `PC8`/`PC9`, alternate function AF8 (GD32G553xx datasheet AF table).  On the X-EVK it carries the J6 display I2C (panel bridge and touch) and CAM1.  The pads are hi-Z until the first `I2CM_CONFIG`.  The
 opcodes are **I2C-link only** (Linux over `BRD_I2C`, address `0x70`, 65-byte
 payload cap): on SPI they answer `STATUS_NOSUPPORT`, they are on the §5.3
 allow-list, and they are **not** in the `BATCH` allow-list.  A transfer is

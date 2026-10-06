@@ -265,10 +265,9 @@ extern "C" {
 /** GPIO expander bridge bits carrying the SoM camera LDO enables
  *  (`CAM_EN_LDO0..3`, GD32 pads `PC3` / `PE8` / `PE7` / `PE10`; SoM
  *  power-supply sheet, not E1M-X pads).  The bit numbers sit right after
- *  @ref GD32G553_GPIO_LINE_E1M_IO26 and are meant to match the firmware
- *  branch feat/i2c3-proxy-cam-ldo; confirm against that firmware before
- *  relying on them.  Valid only on bridges advertising protocol minor
- *  @ref GD32G553_I2CM_MIN_PROTOCOL_MINOR or newer.
+ *  @ref GD32G553_GPIO_LINE_E1M_IO26 (bridge bits 23..26, Linux
+ *  lines 24..27), matching the firmware gpio.c.  Valid only on bridges
+ *  advertising protocol minor @ref GD32G553_I2CM_MIN_PROTOCOL_MINOR or newer.
  *  @{ */
 #define GD32G553_GPIO_LINE_CAM_EN_LDO0 23u
 #define GD32G553_GPIO_LINE_CAM_EN_LDO1 24u
