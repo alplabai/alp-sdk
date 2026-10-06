@@ -708,13 +708,15 @@ isp_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t
 		 * VBUF_COUNT-1 raw buffers stayed queued the whole time and
 		 * kept the MI fed during the conversion above (see isp_open()
 		 * and CONFIG_ALP_SDK_CAMERA_ALIF_ISP_VBUF_COUNT). */
+		const uint64_t ts_us =
+		    (uint64_t)vb->timestamp * 1000ull; /* vb is the driver's after enqueue */
 		err = video_enqueue(st->dev, vb);
 		if (err != 0) {
 			return _errno_to_alp(err);
 		}
 		out->data         = st->rgb565_vbuf->buffer;
 		out->size         = (size_t)st->fmt.width * st->fmt.height * sizeof(uint16_t);
-		out->timestamp_us = (uint64_t)vb->timestamp * 1000ull;
+		out->timestamp_us = ts_us;
 		return ALP_OK;
 	}
 

@@ -211,6 +211,17 @@ config ALP_SDK_INFERENCE_BACKEND_TFLM
 	  (no module) degrades TENSORFLOW_LITE_MICRO to n and falls back
 	  to sw_fallback.
 
+config ALP_SDK_INFERENCE_AUTO_ORDER
+	string "SoM accelerator order for ALP_INFERENCE_BACKEND_AUTO"
+	default ""
+	help
+	  Comma-separated accelerator preference, best first (e.g.
+	  "ethos_u,cpu"), generated from the SoM preset's
+	  inference.auto_order by the orchestrator.  zephyr/CMakeLists.txt
+	  passes it to the .alpmodel loader as -DALP_SDK_INFERENCE_AUTO_ORDER,
+	  the same define the Yocto and baremetal builds use.  Empty: no SoM
+	  order reaches the tiebreak.
+
 config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
 	bool "Ethos-U on Alif Ensemble (priority 100 on alif:ensemble:e*)"
 	default n

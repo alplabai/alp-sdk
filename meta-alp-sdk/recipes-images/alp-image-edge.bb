@@ -28,6 +28,18 @@ IMAGE_INSTALL += " \
     libdrm-tests                   \
 "
 
+# GPU stack (RZ/V2N Mali-G31).  The userspace (libEGL / libGLESv2 / libgbm) is
+# NOT listed here: the Renesas meta-rz-graphics layer already adds
+# `libegl libgles2` to every mali-family image (include/mali-graphics.inc,
+# IMAGE_INSTALL:append:mali-family) once `opengles` is in DISTRO_FEATURES,
+# and the alp-display group brings weston -- same shape as Renesas'
+# core-image-weston.  See docs/v2n-mali-gpu.md.  Not bench-verified.
+#
+# alp-gpu2d-compose (examples/v2n/v2n-gpu2d-compose) is installed on every
+# mali-family machine: it runs on the CPU fallback too and reports which
+# engine served the ops, so it doubles as the GPU backend's on-target check.
+IMAGE_INSTALL += "${@' alp-gpu2d-compose' if 'mali-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') else ''}"
+
 # LVGL dashboard example (Linux/DRM panel) -- dev-only bench example app.
 # weston/libdrm/DEEPX/rootfs sizing now come from alp-image-common.inc;
 # only the example package is edge-specific.
@@ -53,8 +65,8 @@ IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '
     'rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and \
     d.getVar('RUHMI_DRPAI_TVM_DIR') else ''}"
 
-# NOTE: the DRP-AI userspace RUNTIME PACKAGES (lib-tvm +
-# kernel-module-mmngr) and the SDK BACKEND compiled into libalp_sdk.so
+# NOTE: the DRP-AI userspace RUNTIME PACKAGES (kernel-module-mmngr;
+# lib-tvm is not installed explicitly) and the SDK BACKEND compiled into libalp_sdk.so
 # are two separate, independent concerns -- see
 # docs/bring-up-drpai-v2n.md section 4 for the full two-switch contract:
 #   1. alp-image-common.inc's ALP_RZ_DRPAI_INSTALL (issue #1176) is the
@@ -76,7 +88,7 @@ IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '
 # DEPENDS, which alp-sdk's PACKAGECONFIG[drpai] already carries. The
 # DRP-AI kernel driver itself is not a package either -- it is patched
 # into linux-renesas by the layer's 0002-enable-drpai-driver.patch.
-# mmngr{,buf}-user-module arrive via lib-tvm's own RDEPENDS.
+# mmngr{,buf}-user-module arrive via mera2-drpai-tvm's own RDEPENDS.
 #
 # meta-rz-codecs / meta-rz-opencva (hardware video codec, OpenCV-DRP
 # accel) are the other two members of the meta-rz-drpai/codecs/opencva
@@ -100,7 +112,7 @@ IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '
 # even though neither machine conf defines ALP_ENABLE_DRPAI at all and
 # neither wants the RZ layer.
 #
-# lib-tvm's install site is alp-image-common.inc alone (see the NOTE
+# kernel-module-mmngr's install site is alp-image-common.inc alone (see the NOTE
 # above), on every alp-image-* image; no RZ/V2N machine conf installs
 # it. The guard below still belongs in a recipe (for the ConfHandler
 # reason above), and this recipe is as good a place as any recipe that

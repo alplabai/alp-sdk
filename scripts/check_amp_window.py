@@ -67,7 +67,7 @@ def _node_reg(text: str, header: str) -> list[int] | None:
 def _geometry_problems(c: dict) -> list[str]:
     """The metadata itself: every region lies inside the carveout, none overlap."""
     out, spans = [], []
-    for name, r in c["regions"].items():
+    for name, r in {**c["regions"], "ram_console": c["ram_console"]}.items():
         if r["offset"] + r["size"] > c["size"]:
             out.append(f"openamp_carveout.regions.{name} runs past the carveout size {c['size']:#x}")
         spans.append((r["offset"], r["offset"] + r["size"], name))
@@ -105,6 +105,9 @@ def find_problems(root: Path) -> list[str]:
     for n, (pa, sz) in regs.items():
         da = cm33 + (pa - a55)
         board.append((BOARD_LABEL[n], rf"{BOARD_LABEL[n]}:\s*memory@{da:x}", [da, sz]))
+    rc = c["ram_console"]
+    rc_da = cm33 + rc["offset"]
+    board.append(("ram_console", rf"ram_console:\s*memory@{rc_da:x}", [rc_da, rc["size"]]))
     for rel in BOARD_DTS:
         p = root / rel
         t = p.read_text(encoding="utf-8") if p.is_file() else ""

@@ -47,6 +47,11 @@ def render(c: dict) -> str:
             (f"ALP_AMP_{m}_SIZE", f"{size:#x}u"),
             (f"ALP_AMP_UIO_{m}_NAME", f'"{addr:x}.{name}"'),
         ]
+    rc = c["ram_console"]
+    rows += [
+        ("ALP_AMP_RAM_CONSOLE_A55_BASE", f"{c['a55_base'] + rc['offset']:#x}u"),
+        ("ALP_AMP_RAM_CONSOLE_SIZE", f"{rc['size']:#x}u"),
+    ]
     w = max(len(k) for k, _ in rows)
     defs = "\n".join(f"#define {k.ljust(w)} {v}" for k, v in rows)
     return f"""\
@@ -59,7 +64,8 @@ def render(c: dict) -> str:
  *
  * The CM33 OpenAMP shared window as the A55 sees it: each sub-region's
  * A55 base and size, and the sysfs name of its generic-uio node
- * ("<unit-address>.<node-name>").  The beacon words sit in the last
+ * ("<unit-address>.<node-name>"), plus the CM33 RAM console buffer (no UIO
+ * node; the A55 reads it post-mortem via /dev/mem).  The beacon words sit in the last
  * ALP_AMP_BEACON_SIZE bytes of the rsctbl page, laid out by
  * include/alp/protocol/amp_beacon.h.  CM33-NS address = A55 address +
  * ALP_AMP_A55_TO_CM33_NS_OFFSET.

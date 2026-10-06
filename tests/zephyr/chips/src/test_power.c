@@ -1360,6 +1360,12 @@ ZTEST(alp_chips, test_da9292_control_writes_are_limit_gated)
 	zassert_ok(da9292_set_enable(&r.ctx, DA9292_CH2, false));
 	zassert_equal(fake_da9292_get_reg(DX_REG_CTRL_01), 0x01u);
 
+	/* Window check precedes the already-enabled early return: CH2 on at 780 mV,
+	 * then an out-of-window setpoint forced behind the guard -> enable refuses. */
+	zassert_ok(da9292_set_enable(&r.ctx, DA9292_CH2, true));
+	fake_da9292_force_reg(0x0Cu, 0xFFu);
+	zassert_equal(da9292_set_enable(&r.ctx, DA9292_CH2, true), ALP_ERR_OUT_OF_RANGE);
+
 	zassert_ok(da9292_read_and_clear_events(&r.ctx, &ev));
 	zassert_equal(fake_da9292_get_reg(0x02u), 0x00u, "W1C cleared the event");
 	dx_close(&r);

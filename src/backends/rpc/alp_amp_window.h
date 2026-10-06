@@ -7,7 +7,8 @@
  *
  * The CM33 OpenAMP shared window as the A55 sees it: each sub-region's
  * A55 base and size, and the sysfs name of its generic-uio node
- * ("<unit-address>.<node-name>").  The beacon words sit in the last
+ * ("<unit-address>.<node-name>"), plus the CM33 RAM console buffer (no UIO
+ * node; the A55 reads it post-mortem via /dev/mem).  The beacon words sit in the last
  * ALP_AMP_BEACON_SIZE bytes of the rsctbl page, laid out by
  * include/alp/protocol/amp_beacon.h.  CM33-NS address = A55 address +
  * ALP_AMP_A55_TO_CM33_NS_OFFSET.
@@ -35,5 +36,7 @@
 #define ALP_AMP_VRING_SHM1_A55_BASE   0x4fc00000u
 #define ALP_AMP_VRING_SHM1_SIZE       0x300000u
 #define ALP_AMP_UIO_VRING_SHM1_NAME   "4fc00000.vring-shm1"
+#define ALP_AMP_RAM_CONSOLE_A55_BASE  0x4f710000u
+#define ALP_AMP_RAM_CONSOLE_SIZE      0x4000u
 
 #endif /* ALP_BACKENDS_RPC_ALP_AMP_WINDOW_H */

@@ -33,6 +33,7 @@
 
 	chosen {
 		zephyr,sram = &sram;
+		zephyr,ram-console = &ram_console;
 		/*
 		 * No CM33 serial console on this board.  The only console is the
 		 * A55's (Linux, on the shared debug UART); sci0 here is the EVK
@@ -40,18 +41,33 @@
 		 * Bringing it up enables RX on a floating RXD, whose receive-error
 		 * interrupt (sci0 eri = NVIC 114) escalates to a Zephyr fatal
 		 * (arch_system_halt) and hangs the CM33 before main() ever runs.
-		 * Leave the console unset (sci0 is disabled below).  Re-add these
-		 * and re-enable sci0 only when a Pmod USB-UART is attached.
+		 * Leave the UART console unset (sci0 is disabled below); only the
+		 * RAM console is chosen.  Re-add zephyr,console/zephyr,shell-uart and
+		 * re-enable sci0 only when a Pmod USB-UART is attached.
 		 */
 	};
 
 	aliases {
 		alp-spi1 = &gd32_spi;
+		alp-wdt0 = &wdt0;
 	};
 
 	sram: memory@8003000 {
 		compatible = "mmio-sram";
 		reg = <0x08003000 0xfbfff>;
+	};
+
+	/*
+	 * RAM console buffer (audit CM33-M2): 16 KiB at CM33-NS 0x9f710000 (A55
+	 * view 0x4f710000), from the SoC's openamp_carveout.ram_console: inside the
+	 * 9 MiB 0x9f700000 window Linux reserves no-map and clear of every
+	 * region listed there (rsctbl with the liveness beacon in its top 16
+	 * bytes, mhu-shm, the vring control and buffer areas).
+	 */
+	ram_console: memory@9f710000 {
+		compatible = "zephyr,memory-region";
+		zephyr,memory-region = "RAM_CONSOLE";
+		reg = <0x9f710000 0x4000>;
 	};
 
 	/*
@@ -63,6 +79,25 @@
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
 		gpios = <&gpio9 7 GPIO_ACTIVE_LOW>;
+	};
+
+	/*
+	 * The GD32 control pads outside the SPI link (protocol v0.15, section 3.17).
+	 * A DEDICATED node, deliberately not entries of alp_pins above (whose index 0
+	 * is the GD32 SPI chip-select): resolved only through the INTERNAL pad opener
+	 * (the portable alp_gpio_open() refuses GD32G553_PAD_ID_*).  All four are plain GPIO, inputs out of
+	 * reset.  swclk and attn are the SAME pad (P71 = GD32 PA14): the host drives it
+	 * only inside an SWD session, with GD32_NRST asserted first, and otherwise uses
+	 * it as the bridge ATTN input with a rising-edge IRQ.  nrst is open-drain on the
+	 * board; the Renesas GPIO driver has no open-drain mode, so the SWD driver
+	 * emulates it (low = assert, input = release) and never drives the pad high.
+	 */
+	gd32_pads: gd32-pads {
+		compatible = "alp,gd32-pads";
+		swdio-gpios = <&gpio7 0 GPIO_ACTIVE_HIGH>;
+		swclk-gpios = <&gpio7 1 GPIO_ACTIVE_HIGH>;
+		nrst-gpios = <&gpio7 4 GPIO_ACTIVE_HIGH>;
+		attn-gpios = <&gpio7 1 GPIO_ACTIVE_HIGH>;
 	};
 };
 
@@ -114,6 +149,10 @@
 	status = "okay";
 };
 
+&gpio7 {
+	status = "okay";
+};
+
 /*
  * RIIC8 / BRD_I2C is Cortex-A55/Linux-exclusive
  * (metadata/e1m_modules/v2n/core-ownership.yaml) -- the CM33 must never
@@ -127,17 +166,27 @@
 };
 
 /*
- * No wdt0 node here (alp-sdk#1153): the upstream Zephyr RZ/V2N SoC
- * devicetree (arm/renesas/rz/rzv/r9a09g056.dtsi, checked against the
- * pinned v4.4.0 tag) declares no watchdog node and no driver binds
- * this SoC's WDT hardware at all yet -- there is no label to
- * reference and no register base address in this tree to
- * hand-author one from (unlike mbox1 below, which had a real FSP
- * register map, bsp_mhu_b.h, to draw from).  Full analysis:
- * meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi's
- * &wdt1 comment block.  <alp/wdt.h> on this core returns
- * ALP_ERR_NOT_PRESENT_ON_THIS_SOC (src/wdt_dispatch.c).
+ * wdt0 = the Cortex-M33's own watchdog (base 0x41c00400 and counting clock
+ * from the SoC spec's m33_sm `watchdog` block; hal_renesas R9A09G056N
+ * wdt_iodefine.h R_WDT0_BASE).  The upstream SoC devicetree
+ * (arm/renesas/rz/rzv/r9a09g056.dtsi) declares no watchdog, and upstream's
+ * `renesas,rz-wdt` driver cannot bind RZ/V2N, so the node uses the alp-sdk
+ * driver zephyr/drivers/watchdog/wdt_renesas_rzv.c (compatible
+ * `renesas,rzv-wdt`; alp-sdk#2660).  DISABLED by default: an expiry resets the
+ * WHOLE SoM, not just the M33, so a product opts in with `&wdt0 { status =
+ * "okay"; };`.  <alp/wdt.h> then reaches it through alias alp-wdt0.  Enabling it
+ * also needs the CPG module clocks held for the CM33 (renesas,cm33-owned-clocks,
+ * docs/bench/rzv-wdt0-cm33.md).  clock-freq is the WDT0 counting clock
+ * (WDT_0_clk_loco, 24 MHz Main OSC; RZ/V2N hardware manual Table 4.4-2).
  */
+&{/soc} {
+	wdt0: watchdog@41c00400 {
+		compatible = "renesas,rzv-wdt";
+		reg = <0x41c00400 0x10>;
+		clock-freq = <24000000>;
+		status = "disabled";
+	};
+};
 
 /*
  * No &canfd node here (alp-sdk#1146): CAN-FD cannot be enabled on this

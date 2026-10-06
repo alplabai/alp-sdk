@@ -40,8 +40,7 @@ this is fiddly.
 | DRP-AI kernel driver | `meta-rz-drpai`, patched into the kernel by `0002-enable-drpai-driver.patch` | Not a package — do not look for a `.ko` |
 | `drpai0` DT node + label | `meta-rz-drpai`, `0001-add-drpai-property-to-devicetree.patch` | **Creates** the label; it does not exist in the pristine tree |
 | `<linux/drpai.h>` UAPI header | `meta-rz-drpai` recipe `drpai` (1.4.0) | Headers only |
-| `libtvm_runtime.so` | `meta-rz-drpai` recipe `lib-tvm` | |
-| The MERA2 runtime closure: headers + **nine** staged libraries (a tenth, `libtvm_runtime.so`, comes from `lib-tvm` above) | `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`, staged/compiled from a builder-supplied **`RUHMI_DRPAI_TVM_DIR`** checkout | The recipe vendors nothing — see §4. Note its `LICENSE = "CLOSED"`: the `rzv_drp-ai_tvm` **sources** are Apache-2.0, but the prebuilt MERA2 libraries staged alongside them are account-gated, so the package as a whole is not redistributable. Tracked as a licence-manifest gap. |
+| The MERA2 runtime closure: headers + **nine** staged libraries (the backend does not link `meta-rz-drpai`'s `libtvm_runtime.so`; `libdrp_tvm_rt.so` carries the `tvm::runtime` symbols) | `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`, staged/compiled from a builder-supplied **`RUHMI_DRPAI_TVM_DIR`** checkout | The recipe vendors nothing — see §4. Note its `LICENSE = "CLOSED"`: the `rzv_drp-ai_tvm` **sources** are Apache-2.0, but the prebuilt MERA2 libraries staged alongside them are account-gated, so the package as a whole is not redistributable. Tracked as a licence-manifest gap. |
 
 Baseline this was worked against: **AI SDK platform 7.1 on BSP v6.30**
 (`RTK0EF0189F06300SJ`, linux-renesas `6.1.141-cip43`).
@@ -199,14 +198,14 @@ both default OFF, deliberately not merged into one"):
   `alp-image-edge.bb`; `alp-image-prod` has none, so a prod build with
   `ALP_ENABLE_DRPAI = "1"` and no `meta-rz-drpai` silently gets the
   comment-only `&drpai0` stub.
-  `alp-image-common.inc`'s `ALP_RZ_DRPAI_INSTALL` (lines 81-85) is the
-  single packaging authority for the `lib-tvm` + `kernel-module-mmngr`
-  pair, on every `alp-image-*` image (the three recipes that `require
+  `alp-image-common.inc`'s `ALP_RZ_DRPAI_INSTALL` is the
+  single packaging authority for `kernel-module-mmngr` (`lib-tvm` is
+  no longer installed explicitly), on every `alp-image-*` image (the three recipes that `require
   alp-image-common.inc` — `alp-image-base`/`-edge`/`-prod`), gated only
   on `rz-drpai` being in `BBFILE_COLLECTIONS` and `v2n` being in
   `MACHINE_FEATURES` (issue #1176), independent of `ALP_ENABLE_DRPAI`. A
   non-`alp-image-*` build (a bare `core-image-*`) with
-  `ALP_ENABLE_DRPAI = "1"` does NOT get that pair from alp-sdk's tree at
+  `ALP_ENABLE_DRPAI = "1"` does NOT get that package from alp-sdk's tree at
   all — it would need its own install, or the vendor layer's own
   `core-image` bbappend (no such bbappend exists in this tree).
 
@@ -232,10 +231,9 @@ Enable the backend through the SDK recipe's PACKAGECONFIG:
 PACKAGECONFIG:append:pn-alp-sdk = " drpai"
 ```
 
-That switch (whose DEPENDS names `mera2-drpai-tvm`, `drpai` and `lib-tvm`)
+That switch (whose DEPENDS names `mera2-drpai-tvm` and `drpai`)
 flips `-DALP_SDK_USE_DRPAI_V2N=ON` and
-`-DALP_SDK_DRPAI_REQUIRED=ON`, and adds the `drpai` and `lib-tvm` build deps
-together.
+`-DALP_SDK_DRPAI_REQUIRED=ON`, and adds the `drpai` build dep.
 
 **The RUHMI libraries and wrapper header are now packaged**, closing the gap
 the earlier revision of this doc left as a manual staging step.
@@ -275,9 +273,63 @@ is the step that would confirm the link and packaging end to end.
 image.** That layer ships its payload through a `core-image-%.bbappend`, and
 that wildcard does not match `alp-image-edge`, so the bbappend never fires and
 the image comes out with no DRP-AI userspace at all — silently.
-`alp-image-common.inc` therefore installs `lib-tvm` and `kernel-module-mmngr`
+`alp-image-common.inc` therefore installs `kernel-module-mmngr`
 explicitly, gated on the layer being present. See issue #1176; the same trap
 applies to the other `meta-rz-*` feature layers.
+
+### Access control
+
+`/dev/drpai0`, `/dev/rgnmm` and `/dev/rgnmmbuf` are `0660 root:drpai` (udev rule in `alp-drpai-udev`, which also
+creates the `drpai` system group). The recipe is pulled in by alp-sdk's
+`PACKAGECONFIG[drpai]`, so the rule and the group exist only in images that
+carry the SDK DRP-AI backend. The Renesas mmngr nodes are included because the
+runtime allocates its buffers through them; without it a non-root member gets
+`MMI open: Permission denied`. `/run/alp` (the one-process-per-board lock) uses
+the same group.
+
+Nothing in the layer adds a user to `drpai`. A product's app user must opt in,
+e.g. `EXTRA_USERS_PARAMS += "usermod -a -G drpai <user>;"` in the image or
+`local.conf`; before this change `video` membership was enough.
+
+- **No IOMMU.** The driver's DMA descriptors can reach any physical DRAM
+  address, so treat any process that can open `/dev/drpai0` as able to read
+  and write DRAM.
+- **Register ioctls are privileged.** Kernel patch
+  `0018-drpai-require-CAP_SYS_RAWIO-for-the-register-ioctls.patch` makes the
+  vendor driver's ioctls 64-69 (`DRPAI_READ/WRITE_DRP_REG`,
+  `DRPAI_READ/WRITE_DRPAI_REG`, `DRPAI_READ/WRITE_CPG_REG`) return `-EPERM`
+  without `CAP_SYS_RAWIO`. The runtime does not use them (confirm with the
+  strace step below). It is installed only with `meta-rz-drpai`, which adds
+  `drivers/drpai/`.
+- **Residual risk: DMA.** The patch does not bound the descriptors passed to
+  `DRPAI_ASSIGN` / `DRPAI_START`, so a process that can open the node can still
+  make the NPU DMA to or from any physical address. Treat membership of
+  `drpai` as a privileged grant (root-equivalent for memory), not as an
+  ordinary device group.
+
+## DRP1 (OpenCVA + codec)
+
+`e1m-v2n-drp1.dtsi` enables `&drp1` (`memory-region = <&drp_codec>`,
+`memory-oca-region = <&opencva_reserved>`,
+`memory-shared-for-drpai-ext-cont = <&shared_drp_reserved>`), the same three
+properties as the vendor EVK. The `drp1` label is created by
+`meta-rz-opencva` / `meta-rz-codecs`, so the bbappend installs the real file
+only when one of them is in `bblayers.conf` and a comment-only stub otherwise.
+`drp1` and `drpai0` share the `0x17000000` register window, as on the vendor EVK.
+The vendor OpenCVA U-Boot change targets `rzv2n-evk.h`, not the
+`rzv2n-dev_defconfig` this build uses, so it may not take effect here; bench
+step 5 below is the gate.
+
+### Bench steps (not yet run)
+
+1. Run an inference under `strace -f -e trace=ioctl` as root and confirm no
+   ioctl with request number 64-69 on `/dev/drpai0` (`DRPAI_*_REG`).
+2. As a user outside the `drpai` group, `open("/dev/drpai0")` must fail with
+   `EACCES`; as a `drpai` member an inference must succeed.
+3. As a `drpai` member without `CAP_SYS_RAWIO`, issue ioctl 64: expect `EPERM`.
+4. `ls /dev/drp*` / `dmesg | grep -i drp`: the DRP1 device is present on an
+   image with `meta-rz-opencva` or `meta-rz-codecs`.
+5. Run an OpenCV `cv::resize` through OpenCVA and confirm it executes on the DRP.
 
 ## 5. Model compile
 
@@ -303,22 +355,10 @@ argument. `tan model build` compiles every `models:` entry declared in
 comes from `models[].compile.drpai.product` (falling back to
 `accel_config`, then `"V2N"`), not a CLI flag.
 
-**`board.yaml`'s schema does not describe this config yet — use
-`tan model build` above anyway; it does not run schema validation.**
-`metadata/schemas/board.schema.json`'s `models[].compile.drpai` block only
-declares a `spec:` key (`additionalProperties: false`, `required: ["spec"]`)
-— a leftover from a design where an external spec file carried the model
-geometry. `scripts/alp_model/adapters/drpai.py` never reads `spec`; it reads
-`input_shape`, `input_name`, `images` and `product` straight out of the
-`compile.drpai` block, so `tan validate` rejects a `board.yaml` written this
-way. That does not block the command in step 5 above: `tan model build`
-reads `board.yaml` with a plain `yaml.safe_load` and never calls the schema
-validator itself — only the separate `tan validate` command does — so
-`compile.drpai.input_shape` / `input_name` / `images` / `product` reach the
-adapter unchanged through the documented CLI today. Until the schema is
-reconciled with what the adapter actually reads, `tan validate` cannot be
-used against a `board.yaml` with a `compile.drpai` block; `tan model build`
-can.
+`metadata/schemas/board.schema.json`'s `models[].compile.drpai` block declares exactly what
+`scripts/alp_model/adapters/drpai.py` reads: `input_shape` (comma string or integer list),
+`input_name` and `images` (all required), and an optional `product` (`V2N` or `V2H`), so
+`tan validate` accepts the block `tan model build` consumes.
 
 `scripts/alp_model/adapters/drpai.py` drives
 `$ALP_DRPAI_TVM_HOME/tutorials/compile_onnx_model_quant.py` with `PRODUCT` in the
@@ -435,6 +475,20 @@ already, via the `CONFIG_BOOTCOMMAND` override in
 > MACHINE by `meta-alp-sdk/recipes-bsp/u-boot/u-boot/fdtfile-v2m.cfg` (#1252,
 > itself bench-gated). Treat that branch as recoverable history, not a live
 > option.
+>
+> That Kconfig string is now only the **fallback**. U-Boot patch 0014 adds an
+> `alp_fdtfile` command that `CONFIG_BOOTCOMMAND` runs right after `env default
+> -a`: it sets `fdtfile` from the validated EEPROM manifest family (`v2n-m1` ->
+> `e1m-v2m101-x-evk.dtb`, `v2n` -> `e1m-v2n101-x-evk.dtb`), so one U-Boot boots
+> the right dtb on either SoM. It fails closed: a known family loads only its
+> own dtb and, if the image lacks it, the boot refuses ("dtb for family <f>
+> missing from image -- refusing to boot the device tree of another SoM") instead of
+> loading the other family's dtb. Only a missing or invalid manifest or an
+> unknown family (a blank unit) keeps the `CONFIG_ALP_E1M_FDTFILE` default (the
+> bootcmd passes it as the command's argument), sets `fdtfile_alt` to the other
+> family dtb, and loads `fdtfile` then `fdtfile_alt` (never the same name
+> twice); each case prints one `ALP: fdtfile ...` line. Bench-pending: built
+> and inspected, not booted.
 
 > **Operational trap.** The manual FIP flow has no `merge_config.sh` step, so it
 > builds from the Kconfig defaults — the vendor values — and will boot the
@@ -481,9 +535,9 @@ In order:
    On the V2N bench unit this returns `ADDR=0x00000000d0000000
    SIZE=0x0000000020000000`, matching the driver's own boot print, the DT
    `reg`, and `/proc/iomem` (`d0000000-efffffff : reserved`).
-4. `ls /usr/lib/libtvm_runtime.so*` and `ls /usr/lib/libmera2_runtime.so*` —
+4. `ls /usr/lib/libmera2_runtime.so*` —
    absent means the image did not get the vendor payload (§4); on
-   the V2N bench unit's current image neither exists yet (`ls
+   the V2N bench unit's current image it does not exist yet (`ls
    /usr/lib/libdrpai*` also finds nothing) — that userspace gap is what this
    branch's packaging is meant to close, once run through a `drpai`-enabled
    bake (§4).
@@ -492,6 +546,84 @@ In order:
    in; `ALP_ERR_TIMEOUT` means the driver semaphore expired; `ALP_ERR_BUSY` means
    the shared-memory exclusion lock is contended. **Not yet reachable: no model
    has been compiled (§5).**
+
+## 8. Running more than one model
+
+DRP-AI3 is **time-shared**: the hardware runs one job at a time and the
+driver has no queue (a second `DRPAI_START` while a job runs returns
+`-EBUSY`). What the SDK does about it, in one process:
+
+- **Each open handle gets its own range of the arena.** Without that,
+  every handle loaded at the arena base (`0xd0000000`) and the second
+  model silently overwrote the first. The SDK now places each model after
+  the highest live one, using the runtime's `GetLastAddress()` (the
+  absolute end address of the model just loaded; `0` for a CPU-only model
+  that uses no DRP-AI memory), aligned to 16 MiB as Renesas' own tutorial
+  does, and keeps the last 32 MiB of the 512 MiB region free for DRP-AI
+  pre-processing (an estimate -- no compiled bundle exists to measure it,
+  #2236). A model that does not fit makes `alp_inference_open()` fail
+  with `ALP_ERR_NOMEM`. Closing a handle gives its range back: the next
+  model starts after the highest range still open (the arena base if none),
+  so closing a model and loading another reuses the space. A hole below a
+  still-open higher model is not reused.
+- **Jobs are serialised.** One process-wide mutex covers `SetInput` +
+  `Run` in `alp_inference_invoke()`, and also the model load in `open()`
+  and the runtime teardown in `close()`, so threads on different handles
+  wait their turn instead of colliding on the driver. Two models on DRP-AI
+  therefore cost the sum of their latencies.
+- **A failed job is not reported.** The runtime's `Run()` returns void,
+  so a rejected or timed-out job still returns `ALP_OK`. A driver status
+  query is not a cheap fix (it needs a second open of `/dev/drpai0`,
+  which takes the driver semaphore for up to 1000 ms and the
+  shared-memory lock), so the SDK makes none; sanity-check the outputs.
+- **DRP-AI is one process per board.** The arena placement above is per
+  process, so two processes would both load at the arena base and corrupt
+  each other. The first DRP-AI handle in a process therefore takes an
+  exclusive, non-blocking `flock()` on `/run/alp/drpai.lock` (the image
+  creates `/run/alp` at boot, `root:drpai 0775`, and pre-creates `drpai.lock` as `0660 root:drpai` so a second drpai member can open it, via a systemd tmpfiles.d
+  snippet in the `alp-drpai-udev` recipe) and keeps it until the last DRP-AI handle
+  in that process closes. A second process gets `ALP_ERR_BUSY` from
+  `alp_inference_open()`. Several handles inside one process stay allowed.
+  There is no fallback path: a root and a non-root process must lock the
+  same file, so if the lock file cannot be opened `alp_inference_open()`
+  fails with `ALP_ERR_IO`. The DX-M1 has no such limit: a second
+  process uses only the DX-M1, through `dxrtd`.
+
+### One model per NPU (V2M)
+
+An E1M-V2M has two NPUs, and they are independent hardware (own drivers,
+IRQs and DMA engines), so one model on each can run at the same time:
+open one handle with `.backend = ALP_INFERENCE_BACKEND_DRPAI` and one
+with `.backend = ALP_INFERENCE_BACKEND_DEEPX_DXM1`, and invoke each from
+its own thread. Do not use `ALP_INFERENCE_BACKEND_AUTO` -- it resolves to
+the same backend every time. `alp_inference_config_t.accel_unit_mask`
+chooses the unit(s) inside a backend (bit `n` = unit `n`, `0` = default):
+the DX-M1 handle can name NPU cores (`0x7` is all three), while DRP-AI3 is
+one unit and takes only `0` or `0x1`; any other mask fails the open with
+`ALP_ERR_NOSUPPORT`. `examples/v2n/v2n-two-models/` does exactly
+this and prints per-NPU latency and combined FPS.
+
+> **Not bench-verified.** The two backends have never run together. The
+> V2M machine configs already enable both stacks when their layers are
+> present (DEEPX with `meta-deepx-m1`, DRP-AI with `meta-rz-drpai`), so the
+> gap is RUHMI, not a switch: the SDK's DRP-AI backend is only compiled when
+> `RUHMI_DRPAI_TVM_DIR` points at an account-gated Renesas RUHMI checkout
+> (section 4). Without it the image carries the DRP-AI kernel driver and TVM
+> runtime but `libalp_sdk` has no DRP-AI backend, and
+> `.backend = ALP_INFERENCE_BACKEND_DRPAI` fails with `ALP_ERR_NOSUPPORT`
+> (the `alp-sdk` recipe warns at parse time when it sees this combination).
+> On a build with both backends, `ALP_INFERENCE_BACKEND_AUTO` resolves to
+> the DX-M1, so the DRP-AI handle must name `ALP_INFERENCE_BACKEND_DRPAI`
+> explicitly. Shared DDR bandwidth, CPU pre/post-processing, power and
+> thermal under both NPUs at full load are unmeasured.
+>
+> **CPU threads.** The DRP-AI TVM runtime starts a CPU worker pool
+> (`TVM_NUM_THREADS`, `TVM_BIND_THREADS`) and, by upstream TVM's default,
+> pins one worker per core (not confirmed for this build). The 4 A55 cores
+> are also used by dx-rt's worker threads, `dxrtd`, and both models'
+> pre/post-processing, so the example sets `TVM_NUM_THREADS=2` and
+> `TVM_BIND_THREADS=0` unless you already set them. The effect on latency
+> is unmeasured.
 
 ## Related
 

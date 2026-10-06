@@ -93,8 +93,7 @@
 extern "C" {
 #endif
 
-#define INA236_MFG_ID    0x5449u /**< "TI" — manufacturer ID const.   */
-#define INA236_DEVICE_ID 0xA080u /**< INA236 device ID const.         */
+#define INA236_MFG_ID 0x5449u /**< "TI" — manufacturer ID const.   */
 
 /** ADC range setting — affects shunt voltage LSB and full-scale.
  *  CONFIG bit 12 (SBOSA81D table 7-4).  Note this also rescales
@@ -171,7 +170,7 @@ typedef struct {
 } ina236_t;
 
 /**
- * @brief Probe the chip, verify mfg+device ID, and program the
+ * @brief Probe the chip, verify the manufacturer ID (0x5449), and program the
  *        calibration register for the rail's shunt resistance and
  *        expected maximum current.
  *
@@ -205,8 +204,9 @@ typedef struct {
  *                            current rarely exceeds 25 % of max
  *                            (better resolution).
  *
- * @return ALP_OK on success, ALP_ERR_NOT_READY on probe failure
- *         (wrong device ID), ALP_ERR_INVAL on bad parameters.
+ * @return ALP_OK on success; ALP_ERR_NOT_READY when there is no ACK or
+ *         MFG_ID != 0x5449; the bus status if any later register
+ *         access fails; ALP_ERR_INVAL on bad parameters.
  */
 alp_status_t ina236_init(ina236_t         *ctx,
                          alp_i2c_t        *bus,

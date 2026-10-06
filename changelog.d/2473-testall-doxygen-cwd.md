@@ -6,12 +6,12 @@ shell's current directory had drifted by the time this stage ran, so doxygen
 resolved the relative markdown links in `docs/**/*.md` against the wrong base
 and reported `unable to resolve reference to
 '<home>/vendors/alif/README.md'` for the link at
-`docs/boards/e1m-evk.md:419` ("](../../vendors/alif/README.md)") —
+`docs/boards/e1m-evk.md:420` ("](../../vendors/alif/README.md)") —
 a false FAIL, since a fresh `--depth 1` clone of the identical commit built
 with 0 warnings.
 
 The doxygen invocation now runs in its own subshell that `cd`s to
-`${REPO_ROOT}` first, at `scripts/test-all.sh:1311` ("cat docs/doxygen/Doxyfile"),
+`${REPO_ROOT}` first, at `scripts/test-all.sh:1319` ("cat docs/doxygen/Doxyfile"),
 so the stage's result no longer depends on whatever left the shell's cwd
 wherever it was before this stage ran.
 

@@ -58,14 +58,15 @@ whole chain by adding a shield; the shield defaults `CONFIG_ALP_SDK=y` itself
 - **Shield.** `e1m_evk_rk055hdmipi4ma0` (`zephyr/boards/shields/`, found through
   the module's `board_root`) sets `zephyr,display` and `alp-display0` to
   `&cdc200`; adds the panel-enable `regulator-fixed` on expander P0, the
-  `nxp,pca9538` expander at `0x73` on `&i2c2`, a 3 MiB `mmio-sram` framebuffer
-  region at `0x02100000` (the top of the 4 MiB SRAM0; a 720x1280 RGB888 layer
-  is 2,764,800 B), and the `himax,hx8394`
-  panel (reset on expander P1, `bl-gpios` on `&gpio5 5`, 2 lanes, RGB888); and
+  `nxp,pca9538` expander at `0x73` on `&i2c2`, a 2 MiB `mmio-sram` framebuffer
+  region (`lcd_fb`) at `0x02200000` (a 720x1280 RGB565 layer is 1,843,200 B),
+  and the `himax,hx8394`
+  panel (reset on expander P1, `bl-gpios` on `&gpio5 5`, 2 lanes, RGB888 DSI
+  link with an RGB565 framebuffer layer); and
   turns on `&dphy`, `&cdc200` (timings, `clock-frequency = <40000000>`,
   `memory-region`, layer 1), `&mipi_dsi` (`vid-pkt-size = <720>`) and `&gpio5`.
   It shrinks the SoC `sram0` (also the "SRAM0" linker region) to the bottom
-  1 MiB, `reg = <0x02000000 DT_SIZE_M(1)>`, so SRAM0 data reaching the
+  2 MiB, `reg = <0x02000000 DT_SIZE_M(2)>`, so SRAM0 data reaching the
   framebuffer is a link error rather than a silent overwrite. Its
   `Kconfig.defconfig` defaults on `DISPLAY`, `MIPI_DSI`, `HX8394`, `I2C`, `GPIO`,
   `GPIO_PCA_SERIES`, `REGULATOR`, `REGULATOR_FIXED`, and under `ALP_SDK`
@@ -80,8 +81,7 @@ and `prj.conf` drops what the shield provides, including
 `CONFIG_GPIO_PCA_SERIES_INIT_PRIORITY=60` and `CONFIG_HEAP_MEM_POOL_SIZE=4096`:
 the defaults already order I2C (50), the expander (50, after its bus by
 devicetree dependency), the regulator (75), the CDC and DSI host (85) and the
-panel (90). The RAM-run `zephyr.bin` size recorded at the time predates the
-RGB888/40 MHz shield config (`90d450387`) and is not restated here. Its
+panel (90). Its
 `testcase.yaml` now builds both the AEN801 and AEN803 HE targets.
 `aen-dsi-regcheck` now enables the SoC nodes instead of declaring its own
 copies. `aen-evk-demo` builds with or without the shield: with it, the TCAL9538
@@ -90,12 +90,10 @@ at `0x73` belongs to the GPIO driver, so its phase 4 checks for the shield's
 reports the display it can now open.
 
 Build-verified on E1M-AEN801 and E1M-AEN803. On the bench (E1M-AEN803 2026W36-0009,
-2026-09-18, still on the RGB565/57.142857 MHz shield config that predates
-`90d450387`) the RAM-run read back the expected registers -- `0x4903F004 =
+2026-09-18) the RAM-run read back the expected registers -- `0x4903F004 =
 0x00070001`, CDC L1 framebuffer `0x49031134 = 0x02200000`, backlight level 1,
 DSI `INT_ST1 = 0x00000000` over 100 ms of scanout; pixels on glass were not yet
-observed. The shield has since moved to RGB888 at 40 MHz (`90d450387`), which
-moves the framebuffer to `0x02100000`.
+observed.
 
 On 2026-09-21, on the same module (carrier 2626-R2), pixels appeared on glass
 for the first time. The root cause was hardware, not software: a jumper was

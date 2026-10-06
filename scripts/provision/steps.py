@@ -37,7 +37,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import TypeVar
 
-from provision import bmap, dxm1, functest, gates, ledger_out, payload_store, uboot
+from provision import bmap, dxm1, functest, gates, ledger_out, payload_store, rtc, uboot
 from provision import linux_target as lt
 from provision.bench import Bench, BenchError, ExpectTimeout
 from provision.console_target import ConsoleTarget
@@ -55,7 +55,7 @@ GD32_IMAGES = (("bootloader.bin", 0x08000000, "gd32_bootloader_md5"),
                ("ota-meta.bin", 0x08008000, "gd32_ota_meta_md5"),
                ("slot-a.bin", 0x0800A000, "gd32_slot_a_md5"))
 GD32_BRIDGE_ADDR = 0x70
-SYS_LSI_MODE_XSPI = "0x3c06"
+SYS_LSI_MODE_XSPI = "0x3c06"   # DSW1 label only; the boot-mode judgement decodes via the SoC description
 LOGIN_RE = r"login: *$"
 IP_WAIT_S = 120.0     # boot_sd_linux: how long a console login may wait for DHCP
 IP_POLL_S = 5.0
@@ -126,6 +126,7 @@ class Ctx:
     allow_tier_mismatch: str | None = None
     accept_cid_change: str | None = None  # operator escape: the eMMC was legitimately replaced
     reprovision_from: Path | None = None
+    replace_identity: bool = False       # --replace-identity: archive the old manifest / secure page
     cold_cycles: int = 3
     hil_spec: Path | None = None
     facts: dict[str, str] = field(default_factory=dict)
@@ -164,6 +165,9 @@ class Ctx:
     # CR-terminated lines may be sent there).
     halted_on_count: int | None = None
     halted_outcome: str = ""             # clean_shutdown's outcome for that power-on
+    halted_console_chars: int = 0        # console transcript size when that halt was seen
+    discover_tried_on_count: int | None = None   # need_linux's one console discovery per power-on
+    unit_proved: tuple | None = None     # (host, on_count) a console nonce already proved to be this unit
     rom_console_on_count: int | None = None
     # one line per power cut (clean_shutdown outcome); run_one copies them into the step evidence
     power_cuts: list[str] = field(default_factory=list)
@@ -251,12 +255,27 @@ class Ctx:
                 connect_linux(self, force=True)
             except BenchError:
                 self.linux = None
+        if self.linux is None and self.execute and self.bench is not None \
+                and self.discover_tried_on_count != self.bench.power.on_count:
+            # no pinned host and no login on this boot (--only functional_test,record): do what
+            # boot_sd_linux does, log in on the console and read the address
+            n = self.bench.power.on_count
+            self.discover_tried_on_count = n
+            # a unit in U-Boot / the SCIF ROM / halted must not get an Enter: _probe_console
+            # sends Ctrl-C only until a U-Boot prompt is ruled out
+            if PROBE_UNKNOWN_CONSOLE and n not in (self.rom_console_on_count, self.halted_on_count):
+                try:
+                    if isinstance(_probe_console(self), ConsoleTarget):
+                        connect_linux(self, force=True)
+                except BenchError:
+                    self.linux = None
         if self.linux is None and self.execute:
             if self.bench is not None and self.console_linux_on_count == self.bench.power.on_count:
                 raise Refused("Linux is up on the console but has no reachable IPv4 host (no DHCP lease on "
                               "end0 and no bench.yaml linux.host that answers); check cable/DHCP, then re-run")
             raise Refused("no Linux target attached: bench.yaml linux.host is unset or unreachable and this "
-                          "run has no console login to discover a host from; run boot_sd_linux (or set linux.host)")
+                          "run has no console login to discover a host from; run boot_sd_linux (or pass "
+                          "--linux-host / set linux.host)")
         if self.linux is not None and self.execute:
             self._check_unit_identity(self.linux)
         return self.linux
@@ -279,9 +298,10 @@ class Ctx:
         """Refuse to mutate a Linux target whose eMMC is not this serial's (stale IP).
         Read fresh on every call, never cached: a power cycle or DHCP renewal can put
         another unit behind the same address. First contact with nothing recorded is
-        unchecked (bootstrap's EM_DCID records the CID on the normal blank-unit path)."""
+        proved by a console nonce (_prove_first_contact) before anything is written."""
         want = self.recorded_cid()
         if not want and not self.accept_cid_change:
+            self._prove_first_contact(t)
             return
         seen = lt.read_emmc_cid(t)
         if want and lt.cid_identity(seen) == lt.cid_identity(want):
@@ -297,6 +317,24 @@ class Ctx:
                       f"recorded {want.strip().lower()}: another unit is behind this address "
                       "(stale DHCP lease?). Fix the address in bench.yaml and re-run, or "
                       "--accept-cid-change REASON if the eMMC was replaced.")
+
+    def _prove_first_contact(self, t) -> None:
+        """No CID recorded yet (a run that starts past bootstrap, e.g. --from dsw1_emmc_insert_sd):
+        before the first write, prove over this unit's own console that the SSH host is it (#2687).
+        Once per (host, power-on); a console that is not at a shell cannot prove it, and the
+        write is then refused rather than risked on a stale lease."""
+        b = self.bench
+        if b is None or not self.execute:
+            return
+        key = (getattr(t, "host", None), b.power.on_count)
+        if self.unit_proved == key:
+            return
+        if not _same_unit(self, t):
+            raise Refused(f"{getattr(t, 'host', '?')} did not echo this unit's console nonce and unit {self.serial} "
+                          "has no recorded eMMC CID: it may be another unit (stale DHCP lease, wrong "
+                          "bench.yaml linux.host). Nothing was written. Fix the address, or log the "
+                          "console in so the nonce proof can run, then re-run.")
+        self.unit_proved = key
 
     def linux_up(self) -> bool:
         # --only/--from can start past detect, which is what normally attaches
@@ -457,6 +495,26 @@ def halt_note(outcome: str) -> str:
             "a mounted microSD root may be dirty.")
 
 
+def _console_chars(console) -> int:
+    return sum(len(x) for x in getattr(console, "transcript", ()))
+
+
+def _forget_halt_if_console_spoke(ctx: Ctx) -> None:
+    """After an operator prompt the halt marker survives unless the console shows output past
+    the halt: a halted unit is silent, so only a power-on (boot text) invalidates it."""
+    b = ctx.bench
+    try:
+        b.console.drain()
+        spoke = _console_chars(b.console) > ctx.halted_console_chars
+    except (BenchError, AttributeError):
+        spoke = True
+    if spoke:
+        ctx.halted_on_count = None
+
+
+_FS_FAULT_RE = re.compile(r"(?m)^.*(?:EXT4-fs error|error -5\b).*$")
+
+
 def _same_unit(ctx: Ctx, t) -> bool:
     """Prove that the SSH host is the unit on THIS console: it must write a nonce to its
     /dev/console and we must read it on our serial line (a stale DHCP lease may point at
@@ -539,6 +597,7 @@ def clean_shutdown(ctx: Ctx) -> str:
         return _record_cut(ctx, "blind", skipped + "no console shell and no proven ssh path; "
                            "if Linux is up this cut is hard")
     b.console.drain()
+    mark = len(b.console.transcript)
     if via == "ssh":
         try:
             r = t.run("sync; echo ALPSYNC:$?; poweroff", check=False, timeout=POWEROFF_TIMEOUT_S)
@@ -575,6 +634,16 @@ def clean_shutdown(ctx: Ctx) -> str:
         except ExpectTimeout:
             halted = False
     ctx.halted_on_count, ctx.console_login_on_count = count, None   # once per power-on
+    if halted:
+        b.console.drain()
+        ctx.halted_console_chars = _console_chars(b.console)
+    faults = [ln.strip() for ln in _FS_FAULT_RE.findall(_since(b.console, mark))][:5]
+    if sync_rc == "127" or faults:
+        # the cause, verbatim: a sync that cannot run or an ext4/I-O error on the root means the
+        # root is unreadable, not "no halt line"
+        ctx.halted_outcome = f"unreadable (sync rc={sync_rc}; {' | '.join(faults) or 'sync not found'})"
+        return _record_cut(ctx, ctx.halted_outcome, f"{via}: root filesystem unreadable; "
+                           f"halt line {'seen' if halted else 'not seen'}; console: {' | '.join(faults) or '-'}")
     if halted:
         # `clean` means halted AND the first sync returned 0; any other rc is its own outcome
         outcome = "clean" if sync_rc == "0" else f"clean (sync rc={sync_rc})"
@@ -969,10 +1038,10 @@ class OpDsw1EmmcInsertSd(_PreLinux):
             # halt first: the unit runs from the provisioning SD, and the operator is about
             # to switch it off and swap the card
             note = halt_note(clean_shutdown(ctx))
-            b.operator.confirm(f"{note} Power OFF, set DSW1 to eMMC boot, insert the release microSD. "
+            b.operator.confirm(f"{note} Power OFF, insert the provisioning microSD (DSW1 may stay on xSPI). "
                                "Leave it OFF until the tool asks.")
-            ctx.halted_on_count = None     # the operator may have powered it back on: never trust the marker now
-        ctx.mutate("clean shutdown; operator: set DSW1 to eMMC boot and insert the release microSD", prompt)
+            _forget_halt_if_console_spoke(ctx)
+        ctx.mutate("clean shutdown; operator: insert the provisioning microSD (DSW1 may stay on xSPI)", prompt)
 
         def check():
             n = len(b.console.transcript)
@@ -981,8 +1050,14 @@ class OpDsw1EmmcInsertSd(_PreLinux):
             b.console.expect(uboot.AUTOBOOT, 60.0)
             ctx.boot_text = _since(b.console, n)
             ctx.live_boot = (b.power.on_count, n)
-        ctx.mutate("cold cycle; expect U-Boot autoboot from eMMC", check)
-        return self.result(ctx, "U-Boot boots from eMMC boot partition 1")
+            return ctx.boot_text
+        text = ctx.mutate("cold cycle; expect U-Boot autoboot", check)
+        if text is None:
+            return self.result(ctx, "would expect U-Boot autoboot")
+        mode = uboot.parse_sys_lsi(text).get("soc_sys_lsi_mode")
+        seen = ("xSPI" if mode == SYS_LSI_MODE_XSPI else "SYS_LSI_MODE " + mode) if mode \
+            else "boot mode not reported by BL2"
+        return self.result(ctx, f"U-Boot autoboot seen ({seen})")
 
 
 def leftover_dxuart2_swap(ctx) -> str:
@@ -1329,7 +1404,9 @@ class Census(Step):
                  if any(c.get("role") == r for c in ctx.bundle.get("components", []))}
         if why := leftover_dxuart2_swap(ctx):
             raise Refused(why)
-        facts, notes = lt.census(t, bus, sizes, dxm1_present=ctx.family == "v2n-m1")
+        facts, notes = lt.census(t, bus, sizes, dxm1_present=ctx.family == "v2n-m1",
+                                 rtc_addr=rtc.rv3028_addr(ctx.preset),
+                                 silicon=ctx.preset.get("silicon"))
         if bus["pmic"] is not None and self.reads_gpio4_otp:
             try:
                 # gd32_flash runs BEFORE census. When it applied the volatile
@@ -1460,6 +1537,7 @@ class EepromManifest(Step):
         ev = {"manifest_staged_crc32": _crc(blob[:0x7C]),
               "manifest_staged_sha256": hashlib.sha256(blob).hexdigest()}
         bus = ctx.i2c("eeprom")
+        _archive_old_identity(ctx, "manifest", blob)
         ctx.mutate(f"stage {ctx.serial}.manifest.staged.bin in the ledger",
                    lambda: _stage(ctx, f"{ctx.serial}.manifest.staged.bin", blob))
         ctx.mutate(f"write 128-byte manifest: 8 x 16-byte pages, i2c-{bus} @0x50, ACK poll, readback",
@@ -1478,6 +1556,19 @@ class EepromManifest(Step):
         if ctx.execute:
             ev.update(_manifest_ev(blob))
         return self.result(ctx, f"manifest for {ctx.serial}, mfg_date {ctx.mfg_date}", ev)
+
+
+def _archive_old_identity(ctx: Ctx, kind: str, blob: bytes) -> None:
+    """--replace-identity: archive the old committed/staged blobs of ``kind`` before the new
+    one is staged (else _stage / promote_manifest refuse AFTER the EEPROM was written)."""
+    if not ctx.replace_identity:
+        return
+    old = Path(ctx.reprovision_from).read_bytes()
+    hw = old[48:56].split(b"\0", 1)[0].decode("ascii", "replace") or "unknown"
+    ctx.mutate(f"--replace-identity: archive the old {ctx.serial}.{kind} blobs as "
+               f"{ctx.serial}.{kind}.{hw}-{date.today().isoformat()}[.staged].bin",
+               lambda: ledger_out.archive_identity(ctx.unit_dir, ctx.serial, kind, hw,
+                                                   date.today().isoformat(), blob))
 
 
 def _manifest_ev(arr: bytes) -> dict[str, str]:
@@ -1829,7 +1920,7 @@ class Dxm1NpuFlash(Step):
             return self.result(ctx, why, status="skipped")
         version = self._expected_version(ctx)
         try:
-            chip, mux, rst = dxm1.gpio_config(ctx.need_bench().raw)
+            chip, mux, rst = dxm1.gpio_config(ctx.need_bench().raw, ctx.preset)
         except ValueError as e:
             raise Refused(str(e)) from e
         t = ctx.need_linux()
@@ -1982,6 +2073,7 @@ class SecurePage(Step):
                 raise Refused(f"identity header locked (lock status {lock:#04x}); secure page cannot change")
         blob = _build_blob(ctx, "program_eeprom_secure_page.py", "secure-page.bin")
         ev = {"secure_page_staged_crc32": _crc(blob), "secure_page_staged_sha256": hashlib.sha256(blob).hexdigest()}
+        _archive_old_identity(ctx, "secure-page", blob)
         ctx.mutate(f"stage {ctx.serial}.secure-page.staged.bin in the ledger",
                    lambda: _stage(ctx, f"{ctx.serial}.secure-page.staged.bin", blob))
         got = ctx.mutate(f"write the 64-byte Secure Data Page (0x58 selector 0x00) on i2c-{bus}, read back, compare",
@@ -1993,27 +2085,48 @@ class SecurePage(Step):
         return self.result(ctx, "secure page written + verified (NOT locked)", ev)
 
 
-class OpDsw1XspiRemoveSd(Step):
-    name = "dsw1_xspi_remove_sd"
-    operator = True
+class SdOutEmmcBoot(Step):
+    """Take the provisioning microSD out of the SDIO path with no operator (#2697): persist the
+    GD32 `SDMUX_EN_HIGH` boot flag, cold-boot into the eMMC Linux, then drive IO29 high there
+    (write-only: a read of the pad moves the mux, #2701; the SD mux is refused while root is on
+    the SD). The flag keeps the SD out across every later cold cycle."""
+    name = "sd_out_emmc_boot"
     trust_run = True
 
     def probe(self, ctx):
         if ctx.state_done(self.name):
             return Satisfied({}, "state file: done")
-        return Unknown("boot source is checked by cold_boot_test")
+        return Unknown("the mux is write-only and never read back; the boot flag is checked by run")
 
     def run(self, ctx):
-        b = ctx.need_bench()
-        def prompt():
-            # Linux still runs from the provisioning SD here: halt it before the operator
-            # switches power off or pulls the card
-            note = halt_note(clean_shutdown(ctx))
-            b.operator.confirm(f"{note} Power OFF, set DSW1 to xSPI boot, REMOVE the microSD. "
-                               "Leave it OFF until the tool asks.")
-            ctx.halted_on_count = None     # the operator may have powered it back on: never trust the marker now
-        ctx.mutate("clean shutdown; operator: set DSW1 to xSPI boot and remove the microSD", prompt)
-        return self.result(ctx, "DSW1 on xSPI, microSD removed")
+        ev: dict[str, str] = {}
+        if not ctx.execute:
+            ctx.mutate("set the GD32 BOOT_CONFIG SDMUX_EN_HIGH flag, cold boot into the eMMC Linux, "
+                       "drive IO29 SDIO_MUX_EN high (write-only)", lambda: None)
+            return self.result(ctx, "would take the microSD out through the SDIO mux")
+        t = ctx.need_linux()
+        bus = ctx.i2c("brd")
+        # The SET moves no pad until the next GD32 reset, so it is safe on either root.
+        flags = ctx.mutate("persist the GD32 BOOT_CONFIG SDMUX_EN_HIGH flag (takes effect at the "
+                           "next GD32 reset)", lambda: lt.gd32_sd_out_flag_set(t, bus, GD32_BRIDGE_ADDR))
+        ev["gd32_boot_config"] = f"{flags:#010x}"
+        if "mmcblk1" in lt.root_device(t):
+            # Still on the provisioning SD: the cold cycle boots U-Boot without it.
+            ctx.mutate("cold cycle: the GD32 drives IO29 high, U-Boot boots the eMMC",
+                       lambda: cold_boot_phy_retry(ctx, ev))
+            t = ctx.need_linux()
+            root = lt.root_device(t)
+            if "mmcblk1" in root:
+                raise Refused(f"Linux root {root} is still the microSD after the cold cycle: "
+                              "the SD-out flag did not take (GD32 firmware older than protocol 0.15?)")
+        ctx.mutate("drive IO29 SDIO_MUX_EN high (SD disconnected), write-only",
+                   lambda: lt.sdio_mux_set(t, False))
+        flags = lt.gd32_boot_config(t, bus, None, GD32_BRIDGE_ADDR)
+        if not flags & lt.GD32_BOOT_CONFIG_SDMUX_EN_HIGH:
+            raise Refused(f"GD32 BOOT_CONFIG reads {flags:#010x}: SDMUX_EN_HIGH is not stored")
+        ev["gd32_boot_config"] = f"{flags:#010x}"
+        return self.result(ctx, "microSD disconnected by the SDIO mux, root on the eMMC, "
+                                "SD-out flag persisted", ev)
 
 
 class ColdBootTest(Step):
@@ -2077,8 +2190,18 @@ class ColdBootTest(Step):
             if ctx.family == "v2n-m1" and not uboot.has_rail_pg(text):
                 probs.append(f"no {uboot.RAIL_PG!r}")
             mode = uboot.parse_sys_lsi(text).get("soc_sys_lsi_mode")
-            if mode != SYS_LSI_MODE_XSPI:
-                probs.append(f"SYS_LSI_MODE {mode} != {SYS_LSI_MODE_XSPI}")
+            # the latched boot-strap word, judged like functional_test's boot_mode (one expectation)
+            try:
+                if not mode:
+                    raise ValueError("no SYS_LSI_MODE notice from BL2")
+                got, ok = functest.judge_boot_mode(int(mode, 16), str(ctx.preset["silicon"]),
+                                                       ctx.functest_expect or functest.load_expect())
+                if not ok:
+                    probs.append(f"SYS_LSI_MODE {mode} ({functest.describe_boot_mode(got)}) is not the expected boot mode")
+                    if got["soc_boot_debug_en"] == "1":
+                        probs.append(ledger_out.DEBUG_MODE_REASON)
+            except (KeyError, ValueError, OSError, functest.NoExpect) as e:
+                probs.append(f"SYS_LSI_MODE {mode or 'unread'} not judged: {e}")
             # ACT88760 reg 0x10 after this (plain, tool-uninvolved) cold boot:
             # most units' OTP is already 0x08 (production/fixed); an early-OTP
             # unit (OTP 0x88, e.g. E1M-V2M103 2026W38-0001) needs U-Boot's
@@ -2116,8 +2239,12 @@ class ColdBootTest(Step):
                 ctx.facts.update(ev)
                 raise Refused(f"cold cycle {i}/{n}: " + "; ".join(probs))
             ev.update(vers)
-            if i == 1 and n >= 2 and (functest.config(ctx).get("fixtures") or {}).get("rtc_backup"):
-                # functional_test's rtc_retention then has the remaining cold cycles to judge
+            rtc_addr = rtc.rv3028_addr(ctx.preset)
+            if i == 1 and n >= 2 and rtc_addr is not None and (functest.config(ctx).get("fixtures") or {}).get("rtc_backup"):
+                # functional_test's rtc_retention then has the remaining cold cycles to judge;
+                # switchover must be on before the first power cut it has to survive
+                ctx.mutate("enable the RTC's backup switchover (fixture rtc_backup)",
+                           lambda: rtc.enable_backup(ctx.linux, ctx.i2c("brd"), rtc_addr))
                 ev["rtc_set_boot_id"] = ctx.mutate(
                     "set the RTC from the host clock (fixture rtc_backup: retention is checked after "
                     "the remaining cold cycles)", lambda: functest.rtc_set(ctx.linux))
@@ -2128,7 +2255,7 @@ class ColdBootTest(Step):
 
 class ClkgenVerify(Step):
     """The on-SoM 5L35023B (BRD_I2C, 0x69) OTP image against U-Boot's
-    fixup (U-Boot patch 0007, #2293). Read after the provisioned unit has
+    fixup (U-Boot patches 0007, #2293, and 0012: SE1/SE3/SE2). Read after the provisioned unit has
     booted: the fixup runs every boot, so a unit shipped without it (or with
     a wrong OTP image) is caught here rather than downstream."""
     name = "clkgen_verify"
@@ -2143,7 +2270,8 @@ class ClkgenVerify(Step):
         image = lt.clkgen_read_image(t, bus)
         bad = lt.clkgen_diff(image)
         line = uboot.parse_clkgen_line(ctx.boot_text)
-        if line is None:
+        no_capture = line is None and not ctx.boot_text.strip()
+        if line is None and not no_capture:
             bad.append(f"U-Boot lacks the 5L35023B clkgen fixup (patch 0007, #2293): no "
                        f"{uboot.CLKGEN_LINE_PREFIX!r} line in the last boot console capture")
         ctx.step_logs[self.name] = "\n".join(bad) if bad else f"OTP image ok; boot line: {line!r}"
@@ -2151,8 +2279,54 @@ class ClkgenVerify(Step):
             raise Refused("5L35023B verification failed: " + "; ".join(bad))
         ev = {"clkgen_otp_raw": " ".join(f"{b:02x}" for b in image),
               "clkgen_i2c_addr": f"{lt.CLKGEN_5L35023B_ADDR:#04x}"}
+        ev["clkgen_uboot_fixup"] = "unread (no boot console captured in this run)" if no_capture else f"seen: {line}"
+        if no_capture:      # --only runs / resumed runs: nothing to read the U-Boot fixup line from
+            return self.result(ctx, "not verified: no boot console captured in this run (the OTP image "
+                               f"matches, dash code {image[0x01]:#04x}; the U-Boot fixup line was not read)",
+                               ev, status="skipped")
         return self.result(ctx, f"5L35023B OTP image matches (dash code {image[0x01]:#04x}); "
+                           f"SE2 24.576 MHz (0x1f={image[0x1F]:#04x}, 0x24={image[0x24]:#04x}); "
                            f"boot line: {line!r}", ev, status="done")
+
+
+class RtcSet(Step):
+    """The RV-3028-C7 on the shipped unit: system time from this host (UTC), `hwclock -w`, read
+    back; backup switchover to level mode through the driver's RTC_PARAM_SET (provision/rtc.py).
+    The trickle charger is the carrier devicetree's `trickle-resistor-ohms` (only for a carrier
+    with a rechargeable backup element); it is only read back here (`rtc_trickle`).
+    Runs after clkgen_verify (the SoM's clocks are known good) and before
+    functional_test, whose rtc_time_set / rtc_backup_mode checks are blocking.
+
+    When cold_boot_test already set the clock for the rtc_backup fixture (`rtc_set_boot_id`),
+    the time is left alone: setting it again would void the retention proof."""
+    name = "rtc_set"
+    always_run = True
+
+    def run(self, ctx):
+        t = ctx.need_linux()
+        if t is None:
+            return self.result(ctx, "no Linux target: RTC set deferred", status="skipped")
+        addr = rtc.rv3028_addr(ctx.preset)
+        if addr is None:
+            return self.result(ctx, "the SoM preset has no rv3028c7 (role: rtc) on brd_i2c: RTC set skipped",
+                               status="skipped")
+        bus = ctx.i2c("brd")
+        keep = bool(functest.rtc_set_boot_id(ctx))
+        if not keep:
+            ctx.mutate("set the system time from the host (UTC) and hwclock -w", lambda: rtc.set_time(t, time.time()))
+        reg = ctx.mutate("enable backup switchover (level mode) through the rtc-rv3028 driver",
+                         lambda: rtc.enable_backup(t, bus, addr))
+        if not ctx.execute:
+            return self.result(ctx, "would set the RTC time and enable backup switchover")
+        try:
+            err = rtc.verify_time(t)
+        except BenchError as e:
+            raise Refused(str(e)) from e
+        ev = rtc.decode(reg)
+        ev["rtc_time_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(rtc.rtc_epoch(t)))
+        ctx.step_logs[self.name] = "\n".join(f"{k}: {v}" for k, v in ev.items())
+        return self.result(ctx, f"RTC {err} s from host, {'time kept (rtc_backup fixture)' if keep else 'set'}; "
+                           f"switchover {ev['rtc_backup_switch_mode']}, trickle {ev['rtc_trickle']}", ev, status="done")
 
 
 class FunctionalTest(Step):
@@ -2409,7 +2583,7 @@ class SecurePageLock(Step):
 STEP_ORDER: list[type[Step]] = [
     Preflight, Detect, OpDsw1Scif, Bootstrap, OpDsw1EmmcInsertSd, BootSdLinux, Gd32Flash, WriteXspi,
     WriteCm33, WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Dxm1NpuFlash, PmicVerify,
-    SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, CensusFinal, ClkgenVerify, FunctionalTest, HilSmoke, Record,
+    SecurePage, SdOutEmmcBoot, ColdBootTest, CensusFinal, ClkgenVerify, RtcSet, FunctionalTest, HilSmoke, Record,
 ]
 STEP_NAMES = [s.name for s in STEP_ORDER]
 

@@ -206,9 +206,12 @@ take the board.yaml values as written:
   so `https://hosted.mender.io` emits
   `CONFIG_HAWKBIT_SERVER="hosted.mender.io"` plus `CONFIG_HAWKBIT_PORT=443`
   and `CONFIG_NET_SOCKETS_SOCKOPT_TLS=y` + `CONFIG_HAWKBIT_USE_TLS=y`. A value
-  with no `://` is taken as an already-bare host, so a whole-value `${VAR}`
-  placeholder passes through untouched. A base path, URL userinfo or a
-  non-HTTP scheme is refused — the DDI client has no knob for any of them.
+  with no `://` is taken as an already-bare host. A base path, URL userinfo or
+  a non-HTTP scheme is refused — the DDI client has no knob for any of them.
+  A `${VAR}` placeholder is refused too (#2696): Zephyr does not expand
+  environment variables in a Kconfig fragment, so the firmware would use the
+  text `${VAR}` itself as its server name. Write the real host, or set
+  `CONFIG_HAWKBIT_SERVER` in the app's own `prj.conf`.
 - **`poll_interval_s` is converted to MINUTES.** `CONFIG_HAWKBIT_POLL_INTERVAL`
   is declared in minutes with `range 1 43200`, so `poll_interval_s: 1800`
   emits `CONFIG_HAWKBIT_POLL_INTERVAL=30`. A value that is not a whole number

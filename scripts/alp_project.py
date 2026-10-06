@@ -247,6 +247,7 @@ def _run_v2_emit(args: argparse.Namespace) -> int:
             emit_system_manifest,
             load_board_yaml,
         )
+        from alp_orchestrate.linux_ownership import emit_linux_ownership_dts
     except ImportError as e:
         print(f"alp_project: failed to import alp_orchestrate: {e}",
               file=sys.stderr)
@@ -263,6 +264,8 @@ def _run_v2_emit(args: argparse.Namespace) -> int:
             out = emit_dts_reservations(project)
         elif args.emit == "os-topology":
             out = emit_os_topology(project)
+        elif args.emit == "linux-ownership-dts":
+            out = emit_linux_ownership_dts(project)
         else:
             print(f"alp_project: unknown v2 emit '{args.emit}'",
                   file=sys.stderr)
@@ -291,6 +294,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             _slice_local_conf,
             load_board_yaml,
         )
+        from alp_orchestrate.ownership import project_m33_overlay
     except ImportError as e:
         print(f"alp_project: failed to import alp_orchestrate: {e}",
               file=sys.stderr)
@@ -388,6 +392,16 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
                 v2_peripherals=sorted(union),
                 v2_core_ids=zephyr_core_ids,
             )
+        # Per-product core ownership: enable the assignable nodes this
+        # project assigned to the M33 (the board tree carries them disabled).
+        try:
+            own_dts, _ = project_m33_overlay(project, args.core)
+        except OrchestratorError as e:
+            print(f"alp_project: {e}", file=sys.stderr)
+            return 1
+        if own_dts:
+            out += ("\n/* Assignable peripherals owned by the M33 "
+                    "(board.yaml `ownership:`). */\n" + "\n".join(own_dts) + "\n")
         return _write_or_print(out, args.output)
 
     if args.emit == "native-sim-overlay":
@@ -538,7 +552,7 @@ def main() -> int:
                                  "hw-info-h", "west-libraries",
                                  # v2 orchestration emits (Phase 2):
                                  "system-manifest", "dts-reservations",
-                                 "ipc-contract-h",
+                                 "ipc-contract-h", "linux-ownership-dts",
                                  # Per-core natural-vs-effective OS facts (issue #95).
                                  "os-topology",
                                  # Carrier routing / Studio handoff JSON.
@@ -596,7 +610,7 @@ def main() -> int:
     # Project-wide v2 emit modes (system-manifest, dts-reservations,
     # ipc-contract-h) route through alp_orchestrate/ directly.
     if args.emit in ("system-manifest", "dts-reservations",
-                     "ipc-contract-h", "os-topology"):
+                     "ipc-contract-h", "os-topology", "linux-ownership-dts"):
         return _run_v2_emit(args)
 
     project = _validate_and_load(args.input, args.metadata_root)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import json
 import re
 import shlex
 import subprocess
@@ -23,7 +24,7 @@ from typing import TYPE_CHECKING
 
 from provision import bmap, payload_store
 from provision.bench import BenchError, ExpectTimeout
-from provision.gates import CM33_REGION_OFFSET
+from provision.gates import BOOT_ENV_OFFSET, CM33_REGION_OFFSET
 
 if TYPE_CHECKING:
     from provision.bench import Console
@@ -34,11 +35,37 @@ EEPROM_SIZE = 0x4000           # N24S128: 16 KiB, 2-byte word address
 EEPROM_DEVICE_PAGE = 64        # hardware page; a page write must not cross it
 MANIFEST_LEN = 128
 
-# SoC SYS block. Offsets follow the RZ/V2H-family SYS layout (LSI_MODE / DEVID /
-# PRR at 0x300 / 0x304 / 0x308). UNVERIFIED for RZ/V2N against the hardware
-# manual -- every census value from here carries that marker.
-SYS_REGS = {"soc_sys_lsi_mode": 0x10430300, "soc_lsi_devid": 0x10430304, "soc_prr": 0x10430308}
-SYS_REGS_NOTE = "unverified addr"
+REPO = Path(__file__).resolve().parents[2]
+
+
+def sys_lsi_spec(silicon: str) -> dict:
+    """SYS_LSI register addresses and the MD_BOOT decode of a SoC, from its description
+    (``boot_strap`` of metadata/socs/<vendor>/<family>/<part>.json); ``silicon`` is the preset's
+    ``vendor:family:part``. The hardware-manual facts live there, not in this file."""
+    from alp_project_loader import resolve_soc_path   # scripts/ is on sys.path
+    path = resolve_soc_path(silicon, REPO / "metadata")
+    if path is None:
+        raise ValueError(f"{silicon!r}: not a vendor:family:part silicon ref")
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if "boot_strap" not in doc:
+        raise ValueError(f"{silicon}: no boot_strap block in the SoC description")
+    return doc["boot_strap"]
+
+
+def decode_lsi_mode(value: int, spec: dict) -> dict[str, str]:
+    """Ledger keys decoded from a SYS_LSI_MODE read: the latched debug-mode strap (MD_BOOT3,
+    1 = debug mode), MD_BOOT[2:0], the boot device MD_BOOT[1:0] selects and the boot CPU the BOOTSELCPU strap selects."""
+    m = spec["strap_word"]
+    md = (value >> m["boot_pins_shift"]) & ((1 << m["boot_pins_width"]) - 1)
+    dev = md & ((1 << m["boot_device_pins_width"]) - 1)
+    names = m["boot_device_names"]
+    cpus = m["boot_cpu_names"]
+    cpu = (value >> m["boot_cpu_bit"]) & 1
+    return {"soc_boot_debug_en": str((value >> m["debug_enable_bit"]) & 1),
+            "soc_md_boot": f"{md:#x}",
+            "soc_boot_device": names[dev] if dev < len(names) else "unknown",
+            "soc_boot_cpu": cpus[cpu] if cpu < len(cpus) else "unknown"}
+
 
 ACT88760_ADDR = 0x25
 ACT88760_GPIO_REG = 0x10
@@ -61,7 +88,6 @@ DA9292_REGS = {
 }
 TPS628640_ADDRS = (0x44, 0x48, 0x4D, 0x4F)
 TPS628640_VOUT1 = 0x01
-RV3028_ADDR = 0x52
 CLKGEN_5L35023B_ADDR = 0x69
 # Bench-proven (2026-09-24/25) factory OTP image, reg 0x00..0x24 (37 bytes),
 # read ONE BYTE AT A TIME (i2cget): a combined i2ctransfer read bit-slips on
@@ -70,10 +96,12 @@ CLKGEN_OTP_IMAGE = bytes.fromhex(
     "a0 00 bb 04 32 08 cc 21 19 4c f2 16 5f 22 f0 3e 00 80 00 00 00 00 00 00 "
     "0e 0c 19 12 3f f0 90 46 a0 80 b0 b0 9c")
 CLKGEN_REG_COUNT = len(CLKGEN_OTP_IMAGE)  # 0x25 (37): reg 0x00..0x24 inclusive
-# U-Boot's 5L35023B fixup (U-Boot patch 0007, #2293) rewrites these two OTP
-# registers every boot; a post-boot read must expect the fixed-up values, not
-# the factory ones.
-CLKGEN_FIXUP_REGS = {0x21: 0xC0, 0x24: 0x8E}
+# U-Boot's 5L35023B fixup (U-Boot patches 0007, #2293, and 0012) rewrites these
+# three OTP registers every boot; a post-boot read must expect the fixed-up
+# values, not the factory ones. 0x1F = 0xC7 routes SE2 (the GD32 HXTAL input) from
+# DIV4 = 24.576 MHz (OTP 0x46 leaves it free-running at 32.768 kHz); 0x24 = 0x8F
+# is the old 0x8E plus bit 0 DIV4_CH2_EN, which SE2 needs.
+CLKGEN_FIXUP_REGS = {0x1F: 0xC7, 0x21: 0xC0, 0x24: 0x8F}
 # preset i2c_devices bus name -> bench.yaml i2c_bus key
 PRESET_BUS_TO_BENCH = {"e1m_i2c0": "eeprom", "brd_i2c": "brd"}
 
@@ -103,10 +131,12 @@ class LinuxTarget:
     def _exec(self, argv: list[str], timeout: float, stdin_path: Path | None = None) -> CmdResult:
         try:
             if stdin_path is None:
-                p = self.runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+                p = self.runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=timeout)
             else:
                 with open(stdin_path, "rb") as f:
-                    p = self.runner(argv, stdin=f, capture_output=True, text=True, timeout=timeout)
+                    p = self.runner(argv, stdin=f, capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace", timeout=timeout)
         except subprocess.TimeoutExpired as e:
             raise BenchError(f"timed out after {timeout}s: {argv[-1]}") from e
         except OSError as e:
@@ -363,6 +393,9 @@ def emmc_boot_write_verify(t: LinuxTarget, emmc: str, local: Path, sector: int, 
     if sector * 512 + data_len > part:
         raise BenchError(f"{local.name} ({data_len} B) at sector {sector:#x} does not fit "
                          f"{dev} ({part} B)")
+    if sector * 512 + data_len > BOOT_ENV_OFFSET:
+        raise BenchError(f"{local.name} ({data_len} B) at sector {sector:#x} would reach the "
+                         f"U-Boot environment at {dev}+{BOOT_ENV_OFFSET:#x}")
     remote = f"/tmp/{local.name}"
     payload_store.stage(t, store, local, remote)
     try:
@@ -676,6 +709,56 @@ def gd32_parse_version(out: str) -> tuple[int, int, int]:
     return rsp[1], rsp[2], rsp[3]
 
 
+GD32_CMD_BOOT_CONFIG = 0x42                 # include/alp/chips/gd32g553.h GD32G553_CMD_BOOT_CONFIG
+GD32_BOOT_CONFIG_SDMUX_EN_HIGH = 0x00000001  # GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH
+GD32_BOOT_CONFIG_POLLS = 100                # x GD32_BOOT_CONFIG_GAP_S: the async flash commit
+GD32_BOOT_CONFIG_GAP_S = 0.05
+
+
+def gd32_boot_config_cmd(bus: int, flags: int | None = None, addr: int = 0x70) -> str:
+    """BOOT_CONFIG over the bridge's I2C link (docs/gd32-bridge-protocol.md 3.19, 5): GET when
+    `flags` is None, else SET. Same frame as GET_VERSION: write [0x00 reg][0x42][op][flags
+    u32 LE][crc lo][crc hi], repeated-start read of 7 bytes [status][flags u32 LE][crc]."""
+    body = bytes((GD32_CMD_BOOT_CONFIG, 0 if flags is None else 1)) + (flags or 0).to_bytes(4, "little")
+    crc = _crc16_ccitt_false(body)
+    return xfer_cmd(bus, addr, b"\x00" + body + bytes((crc & 0xFF, crc >> 8)), 7, force=True)
+
+
+def gd32_parse_boot_config(out: str) -> int:
+    """The stored flag word of a BOOT_CONFIG reply (on a SET: the value before the commit)."""
+    rsp = _parse_bytes(out, 7)
+    if rsp[0] != 0:
+        hint = (" (NOSUPPORT: GD32 firmware predates the opcode, a build without the flash HAL, a "
+                "single-bank part, or the GD32 is running from slot B; if it is on slot B, OTA the "
+                "same image into slot A, then retry)") if rsp[0] == 0x06 else ""
+        raise BenchError(f"GD32 BOOT_CONFIG status {rsp[0]:#04x}{hint}")
+    if _crc16_ccitt_false(rsp[:5]) != rsp[5] | rsp[6] << 8:
+        raise BenchError(f"GD32 BOOT_CONFIG reply CRC mismatch: {rsp.hex(' ')}")
+    return int.from_bytes(rsp[1:5], "little")
+
+
+def gd32_boot_config(t: LinuxTarget, bus: int, flags: int | None = None, addr: int = 0x70) -> int:
+    return gd32_parse_boot_config(t.run(gd32_boot_config_cmd(bus, flags, addr)).stdout)
+
+
+def gd32_sd_out_flag_set(t: LinuxTarget, bus: int, addr: int = 0x70) -> int:
+    """Persist SDMUX_EN_HIGH (the GD32 drives IO29 high from every reset: SD out across cold
+    cycles) and wait until a GET returns it. Other stored bits are kept. A SET moves no pad."""
+    cur = gd32_boot_config(t, bus, None, addr)
+    want = cur | GD32_BOOT_CONFIG_SDMUX_EN_HIGH
+    if cur == want:
+        return cur
+    gd32_boot_config(t, bus, want, addr)
+    for _ in range(GD32_BOOT_CONFIG_POLLS):
+        time.sleep(GD32_BOOT_CONFIG_GAP_S)
+        try:
+            if gd32_boot_config(t, bus, None, addr) == want:
+                return want
+        except BenchError:
+            pass                              # the commit blacks the link out for ~40 ms
+    raise BenchError(f"GD32 BOOT_CONFIG never read back {want:#010x} after the SET")
+
+
 def i2c_scan(t: LinuxTarget, bus: int, span: tuple[int, int] | None = None,
              wake: bool = False) -> set[int]:
     """i2cdetect -r (read-byte probe, no quick-write), optionally limited to
@@ -879,6 +962,27 @@ def dxm1_drive_high(t: LinuxTarget, label: str, line: int) -> str:
     return d
 
 
+# EVK SDIO path mux (#2697). Bench, E1M-V2M103 2026W38-0008: gpiochip `gd32-bridge-gpio`
+# IO29 `SDIO_MUX_EN` (GD32 PD11) = line 12; the chip base is resolved by label at runtime
+# (it moves with the kernel: 394 on the older image, 392 on r3). Active-LOW (low = microSD
+# connected, high = disconnected). IO27 `SDIO_MUX_SEL` is never touched.
+GD32_GPIO_LABEL = "gd32-bridge-gpio"
+SDIO_MUX_EN_LINE = 12
+
+
+def sdio_mux_set(t: LinuxTarget, connected: bool) -> str:
+    """Drive IO29 `SDIO_MUX_EN` (write-only: a bridge GPIO READ reconfigures the pad as an
+    input with a pull-up and moved the mux on the bench, #2701, so this never reads the
+    value). Disconnecting is refused while `/` is on the SD (mmcblk1), which would pull the
+    root filesystem out. The pad stays push-pull until the GD32 resets, and the mux
+    survives a warm reboot but not a power cycle."""
+    if not connected and "mmcblk1" in root_device(t):
+        raise BenchError("refusing to disconnect the SD: Linux root is on it")
+    d = _sysfs_gpio_dir(t, GD32_GPIO_LABEL, SDIO_MUX_EN_LINE)
+    t.run(f"echo {'low' if connected else 'high'} > {d}/direction")
+    return d
+
+
 def dxm1_pcie_device(t: LinuxTarget) -> str | None:
     """The DX-M1's PCI device id ("0x0000" firmware running, "0x0001" ROM PCIe boot),
     None when no endpoint is enumerated at 0000:01:00.0. Read-only."""
@@ -946,13 +1050,23 @@ def _reg_dump(t: LinuxTarget, bus: int, addr: int, regs) -> str:
     return " ".join(f"{r:#04x}={i2c_get(t, bus, addr, r):#04x}" for r in regs)
 
 
+_DEVMEM_PY = ("import mmap,os,struct,sys;a=int(sys.argv[1],16);"
+              "m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC),4096,mmap.MAP_SHARED,mmap.PROT_READ,offset=a&~4095);"
+              "print(hex(struct.unpack_from('<I',m,a&4095)[0]))")
+# Shell prelude defining `r <addr>` (one 32-bit /dev/mem word, read-only): devmem when present, else
+# python3; with neither, the whole script prints ALPUNREAD (the functional test's "cannot judge").
+DEVMEM_READ_FN = ("if command -v devmem >/dev/null 2>&1; then r() { devmem $1 32 2>&1; }\n"
+                  f"elif py=$(command -v python3); then r() {{ \"$py\" -c {shlex.quote(_DEVMEM_PY)} $1 2>&1 | tail -n1; }}\n"
+                  'else echo "ALPUNREAD missing tool: devmem or python3"; exit 0; fi\n')
+
+
+def devmem_cmd(addr: int) -> str:
+    """Shell script printing the 32-bit word at physical ``addr`` as ``0x...``."""
+    return f"{DEVMEM_READ_FN}r {addr:#x}"
+
+
 def _devmem(t: LinuxTarget, addr: int) -> int:
-    page, off = addr & ~0xFFF, addr & 0xFFF
-    py = ("import mmap,os,struct;f=os.open('/dev/mem',os.O_RDONLY|os.O_SYNC);"
-          f"m=mmap.mmap(f,4096,mmap.MAP_SHARED,mmap.PROT_READ,offset={page});"
-          f"print(hex(struct.unpack_from('<I',m,{off})[0]))")
-    out = t.run(f"devmem {addr:#x} 32 2>/dev/null || python3 -c {shlex.quote(py)}").stdout.strip()
-    return int(out, 16)
+    return int(t.run(devmem_cmd(addr)).stdout.strip(), 16)
 
 
 # Raw MII registers 2/3 of each port, through SIOCGMIIPHY / SIOCGMIIREG (the image has python3 and no
@@ -994,9 +1108,12 @@ def net_carrier(t, name: str) -> bool:
 
 
 def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None = None,
-           emmc: str | None = None, dxm1_present: bool = True) -> tuple[dict[str, str], list[str]]:
+           emmc: str | None = None, dxm1_present: bool = True,
+           rtc_addr: int | None = None,
+           silicon: str | None = None) -> tuple[dict[str, str], list[str]]:
     """Read-only. Returns (auto ledger keys, notes on what could not be read).
 
+    `rtc_addr` = the RV-3028 address from the SoM preset (rtc.rv3028_addr); None skips the RTC read.
     `sizes` = artefact byte lengths keyed by bundle role ("bl2", "fip",
     "bl2_mmc", "cm33"); an md5 key is produced only when its size is known.
     Never writes to the unit's storage or devices (the only 0x58 frames are the sealed reads;
@@ -1015,8 +1132,12 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             notes.append(f"{name}: {e}")
 
     def soc():
-        for key, addr in SYS_REGS.items():
-            facts[key] = f"{_devmem(t, addr):#x} ({SYS_REGS_NOTE} {addr:#x})"
+        if not silicon:
+            raise ValueError("no SoC reference (preset silicon:), SYS_LSI registers not read")
+        spec = sys_lsi_spec(silicon)
+        for key, addr in spec["registers"].items():
+            facts[key] = f"{_devmem(t, int(addr, 16)):#x}"
+        facts.update(decode_lsi_mode(int(facts["soc_sys_lsi_mode"], 16), spec))
 
     def cpu_mem():
         facts["cpu_khz"] = t.run("cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").stdout.strip()
@@ -1124,7 +1245,11 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
 
     def clocks_rtc():
         brd = i2c_bus["brd"]
-        read_key("rtc_rv3028_reg_0x37", lambda: f"{i2c_get(t, brd, RV3028_ADDR, 0x37):#04x}")
+        if rtc_addr is not None:
+            read_key("rtc_rv3028_reg_0x37", lambda: f"{i2c_get(t, brd, rtc_addr, 0x37):#04x}")
+            if facts["rtc_rv3028_reg_0x37"].startswith("0x"):
+                from provision import rtc
+                facts.update(rtc.decode(int(facts["rtc_rv3028_reg_0x37"], 16)))
         facts["clkgen_5l35023b_regs"] = ("ack" if CLKGEN_5L35023B_ADDR in i2c_scan(t, brd) else "no ack")
         facts["clkgen_5l35023b_regs"] += f" at {CLKGEN_5L35023B_ADDR:#04x}"
 

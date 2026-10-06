@@ -36,6 +36,13 @@ DTS's `openamp_shm` reservation, CM33 view `0x9F700FF0`, which the A55 DT keeps
 | `0x4F700FF8` | heartbeat | 0 at boot, then +1 about every second (`k_sleep`) |
 | `0x4F700FFC` | attach epoch | `0` at boot, never changed (this image serves no RPC) |
 
+Other images use the same three words with their own kind: `0x200` is the
+GD32-bridge test images (`v2n-gd32-bridge-functional`, `v2n-gd32-bridge-hil-soak`),
+which also own the GD32 SPI link and publish a result record at
+`0x4F700F00..0x4F700F4F` (`include/alp/protocol/gd32_bridge_results.h`);
+`cm33_running` rejects them.  `0x4F700F00..0x4F700FEF` is otherwise unused by
+the shim.
+
 Read it from Linux (`devmem` if the image has it, otherwise python3):
 
 ```sh
@@ -43,6 +50,6 @@ devmem 0x4F700FF0 32; devmem 0x4F700FF4 32; devmem 0x4F700FF8 32
 python3 -c "import mmap,os,struct;m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC),4096,mmap.MAP_SHARED,mmap.PROT_READ,offset=0x4F700000);print([hex(x) for x in struct.unpack_from('<3I',m,0xFF0)])"
 ```
 
-Magic `0xA10D0683` means "a CM33 image with an Alp beacon is running"; the word at `+0xFF4` says which: values below `0x100` are RPC firmware beacon versions (`1` today, `2` after #2586), `0x100` is this idle shim. If both match and the heartbeat grows between two reads, the CM33
+Magic `0xA10D0683` means "a CM33 image with an Alp beacon is running"; the word at `+0xFF4` says which: values below `0x100` are RPC firmware beacon versions (`1` today, `2` after #2586), `0x100` is this idle shim, `0x200` the GD32-bridge test images. If both match and the heartbeat grows between two reads, the CM33
 is alive. Do not run this image together with an OpenAMP application: both
 use the same beacon words.

@@ -296,10 +296,12 @@ if(CONFIG_USE_RZ_FSP_SCI_B_SPI)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/r_sci_b_spi)
     # SCI7 DMA fast path: the rzv FSP DMAC-B transfer driver.  hal_renesas
     # ships it for rzv2n (src/rzv/r_dmac_b + the SCI7 RXI/TXI trigger events in
-    # bsp/mcu/rzv2n/bsp_dmac.h) but its rzv CMake does not compile it and the
+    # bsp/mcu/rzv2n/bsp_dmac.h) and does compile it under
+    # CONFIG_USE_RZ_FSP_DMAC_B, but that option is not selected here and the
     # rzv2n devicetree has no dmac node, so the glue driver hand-instantiates
-    # the transfer_instance_t pair and we build the FSP module here.  Its
-    # r_dmac_b_cfg.h shim lives in the r_sci_b_spi include dir above.
+    # the transfer_instance_t pair and we build the FSP module ourselves.  Its
+    # r_dmac_b_cfg.h shim lives in the r_sci_b_spi include dir above.  The DMA
+    # path stays gated off until the Renesas ER on SCI7+DMAC-B is answered.
     zephyr_library_sources(
         ${ZEPHYR_HAL_RENESAS_MODULE_DIR}/drivers/rz/fsp/src/rzv/r_dmac_b/r_dmac_b.c)
     zephyr_library_include_directories(
@@ -329,6 +331,22 @@ if(CONFIG_USE_RZ_FSP_MHU_B)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/r_mhu_b_ns/r_mhu_b_ns.c)
     zephyr_library_include_directories(
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/r_mhu_b_ns)
+endif()
+
+# Renesas RZ/V2N CM33 watchdog (WDT0) -- vendored+adapted FSP r_wdt module.
+# hal_renesas ships r_wdt for rza/rzn/rzt only and upstream Zephyr's
+# wdt_renesas_rz.c cannot bind RZ/V2N (see wdt_renesas_rzv.c's header), so the rzt
+# r_wdt.c is carried here, adapted for the CM33's WDT0, under
+# zephyr/drivers/watchdog/r_wdt/ (gated by USE_RZ_FSP_WDT_RZV) with the Zephyr glue
+# zephyr/drivers/watchdog/wdt_renesas_rzv.c (compatible `renesas,rzv-wdt`, gated
+# by WDT_RENESAS_RZV).  BENCH-UNVERIFIED.
+zephyr_library_sources_ifdef(CONFIG_WDT_RENESAS_RZV
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/watchdog/wdt_renesas_rzv.c)
+if(CONFIG_USE_RZ_FSP_WDT_RZV)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/watchdog/r_wdt/r_wdt.c)
+    zephyr_library_include_directories(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/watchdog/r_wdt)
 endif()
 
 # Alif Ensemble ARM MHUv2 inter-core mailbox driver -- vendor-ext,
@@ -483,9 +501,10 @@ endif()
 # zephyr_include_directories(include) fires when USE_ALIF_HAL_OSPI pulls the
 # subdirectory in), so no extra include path is needed here.  See the
 # OSPI_ALIF Kconfig help + flash_ospi_alif.c's own header for the current
-# read/write/erase coverage (#915: read/read_jedec_id/sfdp_read only, write/
-# erase are fail-closed stubs); examples/aen/aen-ospi-regcheck exercises the
-# controller-register path only and makes no flash_driver_api call.
+# read/write/erase coverage (#915: read, read_jedec_id, sfdp_read, write and
+# erase are implemented and bench-verified); examples/aen/aen-ospi-regcheck
+# proves the controller-register path by default and its opt-in #915
+# self-test erases, programs and restores one sector through flash_driver_api.
 zephyr_library_sources_ifdef(CONFIG_OSPI_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_ospi_alif.c)
 
@@ -1236,8 +1255,9 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO
 # `alp-temp0` DT alias's own status, so it ships unconditionally on
 # Zephyr (issue #2066) and every build without that alias just takes the
 # ALP_ERR_NOSUPPORT branch.  Zephyr-ONLY -- it binds through Zephyr's own
-# devicetree/sensor API with no portable fallback, so baremetal/Yocto get
-# src/common/stub/stub_temperature.c instead (see that file + this one's
+# devicetree/sensor API with no portable fallback, so baremetal gets
+# src/common/stub/stub_temperature.c and Yocto gets
+# src/yocto/temperature_yocto.c instead (see that file + this one's
 # header comment for why this differs from hw_info_zephyr.c above, which
 # IS shared with plain CMake).
 zephyr_library_sources(
@@ -1312,6 +1332,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TCAL9538
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tcal9538/tcal9538.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TAS2563
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tas2563/tas2563.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_INA228
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ina228/ina228.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_INA236
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ina236/ina236.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ACT8760
@@ -1340,7 +1362,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_MURATA_LBEE5HY2FY
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_DEEPX_DXM1
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/deepx_dxm1/deepx_dxm1.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GD32_SWD
-    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gd32_swd/gd32_swd.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gd32_swd/gd32_swd.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/gd32_swd_pads.c)
 
 # v0.5 §D.AI batch -- 18 vision / display / accelerator chips.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_OV2640
@@ -1637,6 +1660,12 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MODEL_READER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/alp_model_loader.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/alp_model_select.c
 )
+# SoM inference.auto_order (string Kconfig emitted by the orchestrator) ->
+# the one define name every OS build uses for the .alpmodel AUTO tiebreak.
+if(CONFIG_ALP_SDK_MODEL_READER AND CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER)
+    zephyr_library_compile_definitions(
+        ALP_SDK_INFERENCE_AUTO_ORDER="${CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER}")
+endif()
 
 # Backend registry selector (<alp/backend.h>).  Walks the per-class
 # linker sections emitted by ALP_BACKEND_REGISTER + ALP_BACKEND_DEFINE_CLASS

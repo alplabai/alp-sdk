@@ -462,7 +462,7 @@ def _clkgen_i2cget(image: bytes):
 
 def test_clkgen_read_image_matches_fixed_up_otp():
     image = bytearray(lt.CLKGEN_OTP_IMAGE)
-    image[0x21], image[0x24] = 0xC0, 0x8E
+    image[0x1F], image[0x21], image[0x24] = 0xC7, 0xC0, 0x8F
     t, _ = target([(r"i2cget -y -f \d+ 0x69 0x\w+", _clkgen_i2cget(bytes(image)))])
     got = lt.clkgen_read_image(t, 8)
     assert got == bytes(image)
@@ -472,7 +472,7 @@ def test_clkgen_read_image_matches_fixed_up_otp():
 def test_clkgen_diff_reports_mismatch_and_missing_fixup():
     factory = bytes(lt.CLKGEN_OTP_IMAGE)  # OTP image with the U-Boot fixup NOT applied
     bad = lt.clkgen_diff(factory)
-    assert any("reg 0x21" in b for b in bad) and any("reg 0x24" in b for b in bad)
+    assert all(any(f"reg {r}:" in b for b in bad) for r in ("0x1f", "0x21", "0x24"))
 
 
 def test_clkgen_diff_rejects_wrong_length():
@@ -701,8 +701,8 @@ def _census_responses(array: bytes = b"\xff" * 128):
         return f"0x{pmic_regs[reg]:02x}"
 
     return [
-        (r"devmem 0x10430300", "0x00003C06\n"), (r"devmem 0x10430304", "0x00000001\n"),
-        (r"devmem 0x10430308", "0x00000002\n"),
+        (r"\nr 0x10430300", "0x00003C06\n"), (r"\nr 0x10430304", "0x00000001\n"),
+        (r"\nr 0x10430308", "0x00000002\n"),
         (r"cpuinfo_max_freq", "1800000\n"), (r"meminfo", "MemTotal:        3200000 kB\nMemFree: 1 kB\n"),
         (r"uname -r", "6.1.107-cip28\n"),
         (r"device-tree/compatible", "alp,e1m-v2m101-x-evk renesas,r9a09g056\n"),
@@ -738,17 +738,29 @@ def _census_responses(array: bytes = b"\xff" * 128):
     ]
 
 
+def test_decode_lsi_mode_seeded_debug_value():
+    spec = lt.sys_lsi_spec("renesas:rzv2n:n44")
+    assert spec["registers"]["soc_sys_lsi_mode"] == "0x10430300"
+    assert lt.decode_lsi_mode(0x3C06, spec) == {"soc_boot_debug_en": "0", "soc_md_boot": "0x6", "soc_boot_device": "xspi",
+                                          "soc_boot_cpu": "ca55"}
+    # the same unit with MD_BOOT3 strapped high (bit 9) and MD_BOOT[1:0] = eMMC
+    assert lt.decode_lsi_mode(0x3E05, spec) == {"soc_boot_debug_en": "1", "soc_md_boot": "0x5", "soc_boot_device": "emmc", "soc_boot_cpu": "ca55"}
+    assert lt.decode_lsi_mode(0x3806, spec)["soc_boot_cpu"] == "cm33"      # bit 10 cleared
+
+
 def test_census_collects_ledger_keys_read_only():
     t, fake = target(_census_responses())
     facts, notes = lt.census(t, {"eeprom": 0, "pmic": 8, "brd": 8},
-                             sizes={"bl2_mmc": 100, "fip": 200, "bl2": 300, "cm33": 400})
+                             sizes={"bl2_mmc": 100, "fip": 200, "bl2": 300, "cm33": 400}, rtc_addr=0x52,
+                             silicon="renesas:rzv2n:n44")
     assert facts["eeprom_unique_id"] == UNIQUE_ID
     assert facts["eeprom_lock_status"] == "0xfd"
     assert facts["eeprom_device_config"] == "0x1d"
     assert facts["secure_page_state"] == "blank"
     assert facts["secure_page_sha256"] == hashlib.sha256(b"\xff" * 64).hexdigest()
     assert "manifest_sha256" not in facts                      # blank array
-    assert facts["soc_sys_lsi_mode"].startswith("0x3c06 (unverified")
+    assert facts["soc_sys_lsi_mode"] == "0x3c06"
+    assert (facts["soc_boot_debug_en"], facts["soc_md_boot"], facts["soc_boot_device"]) == ("0", "0x6", "xspi")
     assert facts["dtb_name"] == ("ALP E1M-V2M on E1M-X-EVK "
                                  "(compatible alp,e1m-v2m101-x-evk renesas,r9a09g056)")
     assert facts["cpu_khz"] == "1800000" and facts["linux_memtotal_kb"] == "3200000"
@@ -816,6 +828,25 @@ def test_gd32_bridge_version_frames_and_checks_crc():
         lt.gd32_bridge_version(t, 8)
 
 
+def test_emmc_boot1_write_refuses_an_image_that_reaches_the_uboot_env(tmp_path):
+    img = tmp_path / "fip.bin"
+    img.write_bytes(bytes([3]) * 1024)
+    t, fake = target([("boot0/size", "16384\n")])  # 8 MiB: the partition is not the limit here
+    with pytest.raises(BenchError, match="U-Boot environment"):
+        lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, gates.BOOT_ENV_OFFSET // 512 - 1)
+    assert not any(c.startswith("dd ") and " of=" in c for c in fake.commands)
+
+
+def test_emmc_boot1_write_accepts_an_image_ending_exactly_at_the_uboot_env(tmp_path):
+    img = tmp_path / "fip.bin"
+    img.write_bytes(bytes([3]) * 1024)
+    good = md5(img.read_bytes())
+    t, fake = target([("boot0/size", "16384\n"), ("md5sum", f"{good}  -\n"), ("force_ro|rm -f|^dd ", "")])
+    sector = gates.BOOT_ENV_OFFSET // 512 - 2           # 2 sectors * 512 B = the image, ends AT the env
+    assert lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, sector) == good
+    assert any(c.startswith("dd if=") and " of=" in c for c in fake.commands)
+
+
 # --- i2c_get retry / census unread keys / PHY id / gbeth DMA (#2624) ---------------------
 
 CENSUS_BUS = {"eeprom": 0, "pmic": 8, "brd": 8}
@@ -838,7 +869,7 @@ def test_i2c_get_gives_up_after_three_attempts_and_says_so():
 def test_census_records_a_persistently_failing_read_as_unread_and_keeps_the_other_keys():
     t, _ = target([(r"i2cget -y -f 8 0x25 0x10", (2, "", "Error: Read failed")),
                    (r"i2cget -y -f 8 0x52 0x37", (2, "", "Error: Read failed"))] + _census_responses())
-    facts, notes = lt.census(t, CENSUS_BUS)
+    facts, notes = lt.census(t, CENSUS_BUS, rtc_addr=0x52)
     assert facts["act88760_gpio_regs"].startswith("unread (") and "Read failed" in facts["act88760_gpio_regs"]
     assert facts["rtc_rv3028_reg_0x37"].startswith("unread (")
     assert facts["da9292_ids"] == "0x19=0x92 0x1a=0x01 0x1b=0x02"       # the rest of the group is still read
@@ -934,3 +965,100 @@ def test_mtd_write_refuses_an_unaligned_offset_and_one_past_the_end(tmp_path):
     with pytest.raises(ValueError, match="does not fit"):
         lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET)
     assert not any("flash_erase" in c for c in fake.commands)
+
+
+def test_runner_decodes_utf8_with_replacement(tmp_path):
+    seen = {}
+
+    def runner(argv, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    t = lt.LinuxTarget("unit", runner=runner)
+    t.run("true")
+    assert seen["encoding"] == "utf-8" and seen["errors"] == "replace"
+    seen.clear()
+    f = tmp_path / "in.bin"
+    f.write_bytes(b"x")
+    t.run("true", stdin_path=f)
+    assert seen["encoding"] == "utf-8" and seen["errors"] == "replace"
+
+
+def _mux_target(root_dev: str):
+    return target([
+        ("mountpoint -d /", "179:2\n"),
+        ("readlink -f /sys/dev/block", f"/sys/x/block/{root_dev}/{root_dev}p2\n"),
+        ("for d in /sys/class/gpio/gpiochip", "/sys/class/gpio/gpiochip394 gd32-bridge-gpio\n"),
+        ("cat /sys/class/gpio/gpiochip394/base", "394\n"),
+        ("test -e /sys/class/gpio/gpio406/value", (0, "")),
+        ("echo (high|low) > ", (0, "")),
+    ])
+
+
+def test_sdio_mux_set_drives_only_never_reads():
+    t, fake = _mux_target("mmcblk0")
+    lt.sdio_mux_set(t, False)
+    assert "echo high > /sys/class/gpio/gpio406/direction" in fake.commands
+    lt.sdio_mux_set(t, True)
+    assert "echo low > /sys/class/gpio/gpio406/direction" in fake.commands
+    assert not any(re.search(r"cat \S*/value", c) for c in fake.commands)
+
+
+def test_sdio_mux_refuses_to_pull_an_sd_root():
+    t, fake = _mux_target("mmcblk1")
+    with pytest.raises(BenchError, match="root is on it"):
+        lt.sdio_mux_set(t, False)
+    assert not any("direction" in c for c in fake.commands)
+
+
+def _bc_reply(flags: int, status: int = 0, bad_crc: bool = False) -> str:
+    body = bytes((status,)) + flags.to_bytes(4, "little")
+    crc = lt._crc16_ccitt_false(body) ^ (1 if bad_crc else 0)
+    return _hx(body + bytes((crc & 0xFF, crc >> 8)))
+
+
+def test_gd32_boot_config_frames_are_the_documented_i2c_envelope():
+    get = lt.gd32_boot_config_cmd(8)
+    assert get.startswith("i2ctransfer -f -y 8 w9@0x70 0x00 0x42 0x00 0x00 0x00 0x00 0x00 ")
+    assert get.endswith(" r7")
+    crc = lt._crc16_ccitt_false(bytes((0x42, 0, 0, 0, 0, 0)))
+    assert get.endswith(f"0x{crc & 0xFF:02x} 0x{crc >> 8:02x} r7")
+    assert "0x42 0x01 0x01 0x00 0x00 0x00" in lt.gd32_boot_config_cmd(8, lt.GD32_BOOT_CONFIG_SDMUX_EN_HIGH)
+
+
+def test_gd32_boot_config_reply_parsing():
+    assert lt.gd32_parse_boot_config(_bc_reply(1)) == 1
+    with pytest.raises(BenchError, match="CRC mismatch"):
+        lt.gd32_parse_boot_config(_bc_reply(1, bad_crc=True))
+    with pytest.raises(BenchError, match="status 0x06"):
+        lt.gd32_parse_boot_config(_bc_reply(0, status=6))
+    with pytest.raises(BenchError, match=r"NOSUPPORT.*single-bank.*slot B.*slot A"):
+        lt.gd32_parse_boot_config(_bc_reply(0, status=6))
+
+
+def test_gd32_sd_out_flag_set_keeps_other_bits_and_waits_for_the_commit(monkeypatch):
+    monkeypatch.setattr(lt.time, "sleep", lambda s: None)
+    calls = []
+    reads = iter([0x4, BenchError("link blackout"), 0x4, 0x5])    # GET, then polls: blackout, old, new
+
+    def fake(t, bus, flags=None, addr=0x70):
+        calls.append(flags)
+        if flags is not None:
+            return 0x4
+        r = next(reads)
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+    monkeypatch.setattr(lt, "gd32_boot_config", fake)
+    assert lt.gd32_sd_out_flag_set(None, 8) == 0x5
+    assert calls == [None, 0x5, None, None, None]
+    calls.clear()
+    monkeypatch.setattr(lt, "gd32_boot_config", lambda t, b, f=None, a=0x70: calls.append(f) or 0x1)
+    assert lt.gd32_sd_out_flag_set(None, 8) == 0x1 and calls == [None]     # already set: no SET
+
+
+def test_gd32_sd_out_flag_set_times_out_when_the_commit_never_lands(monkeypatch):
+    monkeypatch.setattr(lt.time, "sleep", lambda s: None)
+    monkeypatch.setattr(lt, "gd32_boot_config", lambda t, b, f=None, a=0x70: 0)
+    with pytest.raises(BenchError, match="never read back"):
+        lt.gd32_sd_out_flag_set(None, 8)

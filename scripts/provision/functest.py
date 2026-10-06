@@ -126,6 +126,15 @@ def load_expect(private: Path | None = None) -> dict:
     return doc
 
 
+def rtc_set_boot_id(ctx) -> str:
+    """Boot id at which cold_boot_test set the RTC for the rtc_backup fixture, or "". Facts first,
+    then the state file: on a resumed run cold_boot_test is satisfied from the state and leaves no
+    facts. rtc_set and rtc_retention must both use this, or rtc_set resets the clock in the current
+    boot and rtc_retention passes with no power cut tested."""
+    return str(ctx.facts.get("rtc_set_boot_id") or ((ctx.state.get("steps") or {}).get(
+        "cold_boot_test") or {}).get("evidence", {}).get("rtc_set_boot_id") or "")
+
+
 def _want(x: dict, key: str):
     """An expected value, or NoExpect: a criterion nobody has defined is not a pass."""
     cur = x
@@ -134,6 +143,22 @@ def _want(x: dict, key: str):
             raise NoExpect(key)
         cur = cur[part]
     return cur
+
+
+def describe_boot_mode(got: dict) -> str:
+    return f"debug_en={got['soc_boot_debug_en']} boot_device={got['soc_boot_device']} md_boot={got['soc_md_boot']} boot_cpu={got['soc_boot_cpu']}"
+
+
+def judge_boot_mode(word: int, silicon: str, x: dict) -> tuple[dict, bool]:
+    """(decoded ledger keys, matches the expectation) for a latched boot-strap word, judged against
+    ``boot_mode`` of the expectations file. The single judge of functional_test's boot_mode and
+    cold_boot_test. Raises on a missing description/expectation (NoExpect, KeyError, ValueError)."""
+    got = lt.decode_lsi_mode(word, lt.sys_lsi_spec(silicon))
+    # int(): an overlay may write the flag as bool or 0/1
+    ok = (int(got["soc_boot_debug_en"]) == int(_want(x, "boot_mode.debug_enable"))
+          and got["soc_boot_device"] == _want(x, "boot_mode.boot_device")
+          and got["soc_boot_cpu"] == _want(x, "boot_mode.boot_cpu"))
+    return got, ok
 
 
 # --------------------------------------------------------------------------
@@ -288,6 +313,43 @@ def _carrier(name: str) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
+def _chip(slug: str) -> dict:
+    """The chip manifest metadata/chips/<slug>.yaml ({} when there is none)."""
+    try:
+        return yaml.safe_load((REPO / "metadata" / "chips" / f"{slug}.yaml").read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
+def _preset_chip(preset: dict, key: str) -> dict:
+    """The manifest of the chip the SoM preset names under on_module.<key> ({} when it names none)."""
+    slug = (preset.get("on_module") or {}).get(key)
+    return _chip(str(slug)) if slug else {}
+
+
+def _rtc_trickle_ohms(cfg: dict) -> int | None:
+    """Expected RV-3028 trickle resistor from the carrier's declared VBACKUP element
+    (metadata/boards/<carrier>.yaml rtc_backup); None = charger off."""
+    name = cfg.get("carrier")
+    if not name:
+        raise Skip("no fixture: bench.yaml functional_test.carrier (the carrier declares its RTC backup element)")
+    rb = _carrier(str(name)).get("rtc_backup")
+    if not rb:
+        raise NoExpect(f"metadata/boards/{name}.yaml rtc_backup")
+    return rb.get("trickle_ohms") if rb.get("element") == "supercap" else None
+
+
+def _beacon_address(preset: dict) -> int | None:
+    """A55-view address of the CM33 liveness beacon, from the SoC description's openamp_carveout."""
+    try:
+        vendor, family, part = str(preset["silicon"]).split(":")
+        doc = json.loads((REPO / "metadata" / "socs" / vendor / family / f"{part}.json").read_text(encoding="utf-8"))
+        c = doc["openamp_carveout"]
+        return c["a55_base"] + c["regions"]["rsctbl"]["size"] - 16
+    except (KeyError, ValueError, OSError):
+        return None
+
+
 def _linux_bus(ctx, e1m_bus: str) -> int:
     """The Linux I2C bus number of an E1M bus the carrier description names (``E1M_X_I2C0``),
     through the same preset-bus -> bench.yaml key table the rest of the tool uses."""
@@ -323,6 +385,12 @@ def config(ctx) -> dict:
     raw = (ctx.bench.raw.get("functional_test") if ctx.bench is not None else None) or {}
     if not isinstance(raw, dict) or not isinstance(raw.get("fixtures") or {}, dict):
         raise ValueError("bench.yaml functional_test: want a mapping with an optional `fixtures` mapping")
+    if (raw.get("fixtures") or {}).get("rtc_backup") and raw.get("carrier"):
+        # bench.yaml only says the fixture is wired; whether the carrier fits a backup element is its own fact
+        rb = _carrier(str(raw["carrier"])).get("rtc_backup")
+        if not rb or rb.get("element") == "none":
+            raise ValueError("bench.yaml functional_test.fixtures.rtc_backup is on, but the carrier "
+                             "(metadata/boards/<carrier>.yaml rtc_backup.element) fits no RTC backup element")
     return raw
 
 
@@ -454,8 +522,26 @@ def build(ctx, x: dict | None = None) -> list[Check]:
         'cat /proc/mtd; echo "jedec=$(cat /sys/bus/spi/devices/*/spi-nor/jedec_id 2>/dev/null | head -n1)"', j_xspi,
         tools=("head",))
 
+    def j_boot_mode(o):
+        try:
+            got, ok = judge_boot_mode(int(o.strip().splitlines()[-1], 16), str(ctx.preset["silicon"]), x)
+        except (KeyError, ValueError, OSError, IndexError) as e:
+            raise Unread(f"SYS_LSI_MODE not readable or not described: {e}") from e
+        val = describe_boot_mode(got)
+        if not ok:
+            raise Fail(val)
+        return val
+    try:
+        _lsi_mode_cmd = lt.devmem_cmd(int(lt.sys_lsi_spec(str(ctx.preset["silicon"]))["registers"]["soc_sys_lsi_mode"], 16))
+    except (KeyError, ValueError, OSError):
+        _lsi_mode_cmd = "echo 'ALPUNREAD no sys_lsi description for this SoC'"
+    add("boot_mode", "the SoC latched normal boot mode, not debug mode (MD_BOOT3 low), from the boot device it ships with",
+        _lsi_mode_cmd, j_boot_mode, blocking=True)       # blocking: an overlay cannot demote the debug-mode check
+
     # ---- Ethernet -----------------------------------------------------------------------------
     nports = int((ctx.preset.get("on_module") or {}).get("ethernet_phy_count") or 2)
+    # the PHY the SoM preset names decides the ID; an expected-values file may override a measured one
+    phy_id = x.get("eth_phy_id") or _preset_chip(ctx.preset, "ethernet_phy").get("phy_id_pattern")
 
     def j_phy(o):
         ids = dict(re.findall(r"^(\w+) (0x[0-9a-f]{8})$", o, re.M))
@@ -463,7 +549,7 @@ def build(ctx, x: dict | None = None) -> list[Check]:
             raise Unread(f"{len(ids)} of {nports} ports readable: {' '.join(o.split())[-80:]!r}")
         # one ID, or a list of accepted IDs (the same PHY ships in more than one variant,
         # e.g. RTL8211F 0x001cc916 and RTL8211F-VD 0x001cc878)
-        want = _want(x, "eth_phy_id")
+        want = _want({"phy": phy_id}, "phy")
         wants = {int(str(w), 0) for w in (want if isinstance(want, (list, tuple)) else [want])}
         bad = {n: v for n, v in ids.items() if int(v, 16) not in wants}
         if bad:
@@ -517,8 +603,13 @@ def build(ctx, x: dict | None = None) -> list[Check]:
             raise Fail("firmware load failure: " + next(ln for ln in o.splitlines() if "FWBAD" in ln)[-80:])
         if not _kv(o).get("sdio"):
             raise Fail("no SDIO function enumerated")
-        return _rx(_want(x, "wifi_firmware_regex"), o, "firmware banner")[-48:]
-    add("wifi_present", "the Wi-Fi module enumerates on SDIO, its firmware loads, wlan0 exists",
+        return _rx(_want({"b": banner}, "b"), o, "firmware banner")[-48:]
+    wifi = _preset_chip(ctx.preset, "wifi_ble")
+    banner = wifi.get("firmware_banner_regex") or x.get("wifi_firmware_regex")
+    def no_wifi():
+        raise Skip("no Wi-Fi module in the SoM preset (on_module.wifi_ble)")
+    wifi_add = add if (ctx.preset.get("on_module") or {}).get("wifi_ble") else (lambda name, what, *_a, **_k: add(name, what, host=no_wifi))
+    wifi_add("wifi_present", "the Wi-Fi module enumerates on SDIO, its firmware loads, wlan0 exists",
         "[ -e /sys/class/net/wlan0 ] && echo wlan0=present; "
         'echo "sdio=$(ls /sys/bus/sdio/devices 2>/dev/null | head -n1)"; '
         "dmesg | grep -iE 'brcmfmac|cyw' | grep -v 'Direct firmware load' | "
@@ -706,10 +797,22 @@ def build(ctx, x: dict | None = None) -> list[Check]:
             add("rtc_backup_mode", "the RTC switches to its backup supply when power is cut",
                 f"i2cget -f -y {brd} {rtc:#04x} 0x37 2>&1", j_bsm, tools=("i2cget",))
 
+            def j_trickle(o):
+                from provision import rtc          # lazy: rtc imports this module
+                v = int(_num(o, r"^(0x[0-9a-fA-F]{2})$", "register 0x37"))
+                ohms = rtc.TCR_OHMS[v & 3] if v & 0x20 else None      # TCE bit 5, TCR bits 1:0
+                want = _rtc_trickle_ohms(cfg)
+                if ohms != want:
+                    raise Fail(f"trickle charger {'off' if ohms is None else f'{ohms} ohm'} "
+                               f"(reg 0x37={v:#04x}), want {'off' if want is None else f'{want} ohm'}: the "
+                               "carrier's backup element and its rtc@52 trickle-resistor-ohms disagree")
+                return "off" if ohms is None else f"{ohms} ohm"
+            add("rtc_trickle", "the RTC's trickle charger matches the carrier's backup element",
+                f"i2cget -f -y {brd} {rtc:#04x} 0x37 2>&1", j_trickle, tools=("i2cget",))
+
             def j_keep(o):
                 kv = _kv(o)
-                was = str(ctx.facts.get("rtc_set_boot_id") or ((ctx.state.get("steps") or {}).get(
-                    "cold_boot_test") or {}).get("evidence", {}).get("rtc_set_boot_id") or "")
+                was = rtc_set_boot_id(ctx)
                 if not was:
                     raise Fail("the RTC was not set before the last cold cycle (cold_boot_test sets it after "
                                "its first cycle when this fixture is on and --cold-cycles >= 2)")
@@ -773,8 +876,9 @@ def build(ctx, x: dict | None = None) -> list[Check]:
         for chip, a, optional in devs:
             if chip in ids and not optional:
                 _add_id(out, x, f"i2c_{chip}_{a:02x}", f"on-module {chip} at {a:#04x} answers"
-                        + (" with its ID" if "value" in ids[chip] or a in (ids[chip].get("values") or {}) else ""),
-                        brd, a, ids[chip])
+                        + (" with its ID" if "value" in ids[chip] or a in (ids[chip].get("values") or {})
+                           or _chip_id(chip) is not None else ""),
+                        brd, a, ids[chip], chip=chip)
 
         pm = ctx.expected_registers
 
@@ -877,14 +981,11 @@ def build(ctx, x: dict | None = None) -> list[Check]:
         if not lo <= (c1 - c0) & 0xFFFFFFFF <= hi:
             raise Fail(f"{got}: the counter must advance by {lo}..{hi} in 2 s")
         return f"counter {c0} then {c1}"
-    addr = (x.get("cm33_beacon") or {}).get("address", 0)      # the judge refuses a missing expectation
-    _rd = ("import mmap,os,struct,sys;a=int(sys.argv[1],16);"
-           "m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC),4096,mmap.MAP_SHARED,mmap.PROT_READ,offset=a&~4095);"
-           "print(hex(struct.unpack_from('<I',m,a&4095)[0]))")
+    # the firmware writes its beacon into the top 16 bytes of the rsctbl window of the SoC's OpenAMP
+    # carve-out; an expected-values file may pin another address
+    addr = (x.get("cm33_beacon") or {}).get("address") or _beacon_address(ctx.preset) or 0   # the judge refuses a missing expectation
     add("cm33_running", "the CM33 liveness beacon is present and its counter advances",
-        "if command -v devmem >/dev/null 2>&1; then r() { devmem $1 32 2>&1; }\n"
-        f"elif py=$(command -v python3); then r() {{ \"$py\" -c {q(_rd)} $1 2>&1 | tail -n1; }}\n"
-        'else echo "ALPUNREAD missing tool: devmem or python3"; exit 0; fi\n'
+        lt.DEVMEM_READ_FN +
         f'echo "B $(r {addr:#x}) $(r {addr + 4:#x}) $(r {addr + 8:#x})"; sleep 2; echo "C $(r {addr + 8:#x})"',
         j_cm33_running, timeout_s=15, est_s=2.2, blocking=cm33 is not None)
 
@@ -1035,10 +1136,18 @@ def build(ctx, x: dict | None = None) -> list[Check]:
     return out
 
 
-def _add_id(out: list[Check], x: dict, name: str, what: str, bus: int, addr: int, spec: dict, **kw) -> None:
+def _chip_id(chip: str):
+    """WHO_AM_I / CHIP_ID of a chip from its manifest (sensor.who_am_i), or None."""
+    return (_chip(chip).get("sensor") or {}).get("who_am_i")
+
+
+def _add_id(out: list[Check], x: dict, name: str, what: str, bus: int, addr: int, spec: dict, *,
+            chip: str = "", **kw) -> None:
+    """The expect file gives the read recipe (and measured overrides); the ID value is the
+    chip manifest's unless `value` / `values` pins one here."""
     n = int(spec["read"])
     at, width = int(spec.get("at", 0)), int(spec.get("width", n - int(spec.get("at", 0))))
-    want = (spec.get("values") or {}).get(addr, spec.get("value"))
+    want = (spec.get("values") or {}).get(addr, spec.get("value", _chip_id(chip)))
 
     def judge(o):
         got = int.from_bytes(_bytes(o, n)[at:at + width], "big")
@@ -1073,7 +1182,8 @@ def _carrier_checks(ctx, x: dict, cfg: dict) -> list[Check]:
             continue
         gate = (cx.get("fixture") or {}).get(a)
         _add_id(out, x, f"carrier_{part}_{a:02x}", f"carrier {part} at {a:#04x} answers"
-                + (" with its ID" if "value" in ids[part] else ""), bus, a, ids[part], fixture=gate)
+                + (" with its ID" if "value" in ids[part] or _chip_id(part) is not None else ""),
+                bus, a, ids[part], chip=part, fixture=gate)
         rail = (cx.get("rails") or {}).get(a)
         if not rail:
             continue
@@ -1234,11 +1344,15 @@ def script(checks: list[Check]) -> str:
             '  $SETSID sh "$D/$1.sh" >"$D/$1.out" 2>&1 </dev/null &',
             "  p=$!",
             # TERM first so the fragment's restore trap runs, then KILL; the group when the check
-            # leads one (setsid), else the process
-            '  ( sleep "$2"; : >"$D/$1.to"; gkill TERM "$p"; sleep 3; gkill KILL "$p" ) >/dev/null 2>&1 </dev/null &',
-            "  w=$!",
+            # leads one (setsid), else the process. The watcher polls once a second for the check's
+            # .rc file and leaves when it appears: nothing signals it, because a TERM that lands
+            # while the subshell is still starting is deferred past its sleep (dash) and the final
+            # `wait` then blocks for the whole timeout on a loaded host. The timeout counts sleeps, so on
+            # a loaded target it is a lower bound on the real elapsed time.
+            '  ( i=0; while [ ! -e "$D/$1.rc" ] && [ "$i" -lt "$2" ]; do sleep 1; i=$((i+1)); done',
+            '    [ -e "$D/$1.rc" ] && exit 0',
+            '    : >"$D/$1.to"; gkill TERM "$p"; sleep 3; [ -e "$D/$1.rc" ] || gkill KILL "$p" ) >/dev/null 2>&1 </dev/null &',
             '  wait "$p"; echo $? >"$D/$1.rc"',
-            '  kill "$w" 2>/dev/null; wait "$w" 2>/dev/null',
             # the fragment's shell is gone: reap whatever it left running (dd, aplay, a scan)
             '  [ -e "$D/$1.to" ] && gkill KILL "$p"',
             "  return 0",
