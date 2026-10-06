@@ -44,7 +44,7 @@ The policy is now graded by WHO asked, not by the errno a
     is unverified, and never logs it as an exact settle.
 
 `src/backends/camera/zephyr_video.c:275` ("fps AFTER format, never before:")
-and `src/backends/camera/v2n_n44_isp.c:285`
+and `src/backends/camera/v2n_n44_isp.c:282`
 ("fps AFTER format, same ordering rationale as zephyr_video.c (#2278).")
 call the shared helper unchanged from #2376's shape. `alif_isp_pico.c`
 keeps #2338's sensor-agnostic single `video_set_frmival(dev, ...)` on the
@@ -58,7 +58,7 @@ which sensor the request reaches.
 **Behaviour changes for existing callers:**
 
   - `ALP_CAMERA_CONFIG_DEFAULT`'s `fps` field changes from `30` to `0`
-    (`include/alp/camera.h:118` ("fps = 0u, .format = ALP_PIXFMT_RGB565"))
+    (`include/alp/camera.h:119` ("fps = 0u, .format = ALP_PIXFMT_RGB565"))
     -- any caller that left `cfg.fps` unset and relied on the implicit 30
     now gets "backend default" instead. `0` means "let the backend pick its
     own default" per the field's own doc.
