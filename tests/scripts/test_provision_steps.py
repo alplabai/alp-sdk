@@ -1480,10 +1480,10 @@ def test_sd_out_refuses_when_the_sd_is_still_the_root_after_the_cold_cycle(tmp_p
     assert "mux False" not in log
 
 
-def test_sd_out_on_an_emmc_root_skips_the_flag_and_the_cold_cycle(tmp_path, monkeypatch):
+def test_sd_out_on_an_emmc_root_still_sets_the_flag_but_skips_the_cold_cycle(tmp_path, monkeypatch):
     ctx, log = _sd_out(tmp_path, monkeypatch, ["/dev/mmcblk0p2"])
     steps.SdOutEmmcBoot().run(ctx)
-    assert log == ["mux False", "get"]
+    assert log == ["flag", "mux False", "get"]
 
 
 def test_sd_out_dry_run_touches_nothing(tmp_path, monkeypatch):

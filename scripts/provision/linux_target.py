@@ -728,7 +728,10 @@ def gd32_parse_boot_config(out: str) -> int:
     """The stored flag word of a BOOT_CONFIG reply (on a SET: the value before the commit)."""
     rsp = _parse_bytes(out, 7)
     if rsp[0] != 0:
-        raise BenchError(f"GD32 BOOT_CONFIG status {rsp[0]:#04x} (0x06 = firmware without the opcode)")
+        hint = (" (NOSUPPORT: GD32 firmware predates the opcode, a build without the flash HAL, a "
+                "single-bank part, or the GD32 is running from slot B; if it is on slot B, OTA the "
+                "same image into slot A, then retry)") if rsp[0] == 0x06 else ""
+        raise BenchError(f"GD32 BOOT_CONFIG status {rsp[0]:#04x}{hint}")
     if _crc16_ccitt_false(rsp[:5]) != rsp[5] | rsp[6] << 8:
         raise BenchError(f"GD32 BOOT_CONFIG reply CRC mismatch: {rsp.hex(' ')}")
     return int.from_bytes(rsp[1:5], "little")

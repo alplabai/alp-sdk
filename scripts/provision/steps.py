@@ -2106,12 +2106,12 @@ class SdOutEmmcBoot(Step):
             return self.result(ctx, "would take the microSD out through the SDIO mux")
         t = ctx.need_linux()
         bus = ctx.i2c("brd")
+        # The SET moves no pad until the next GD32 reset, so it is safe on either root.
+        flags = ctx.mutate("persist the GD32 BOOT_CONFIG SDMUX_EN_HIGH flag (takes effect at the "
+                           "next GD32 reset)", lambda: lt.gd32_sd_out_flag_set(t, bus, GD32_BRIDGE_ADDR))
+        ev["gd32_boot_config"] = f"{flags:#010x}"
         if "mmcblk1" in lt.root_device(t):
-            # Still on the provisioning SD. The SET moves no pad until the next GD32 reset,
-            # so it cannot pull the root; the cold cycle then boots U-Boot without the SD.
-            flags = ctx.mutate("persist the GD32 BOOT_CONFIG SDMUX_EN_HIGH flag (takes effect at the "
-                               "next GD32 reset)", lambda: lt.gd32_sd_out_flag_set(t, bus, GD32_BRIDGE_ADDR))
-            ev["gd32_boot_config"] = f"{flags:#010x}"
+            # Still on the provisioning SD: the cold cycle boots U-Boot without it.
             ctx.mutate("cold cycle: the GD32 drives IO29 high, U-Boot boots the eMMC",
                        lambda: cold_boot_phy_retry(ctx, ev))
             t = ctx.need_linux()

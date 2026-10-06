@@ -1031,6 +1031,8 @@ def test_gd32_boot_config_reply_parsing():
         lt.gd32_parse_boot_config(_bc_reply(1, bad_crc=True))
     with pytest.raises(BenchError, match="status 0x06"):
         lt.gd32_parse_boot_config(_bc_reply(0, status=6))
+    with pytest.raises(BenchError, match=r"NOSUPPORT.*single-bank.*slot B.*slot A"):
+        lt.gd32_parse_boot_config(_bc_reply(0, status=6))
 
 
 def test_gd32_sd_out_flag_set_keeps_other_bits_and_waits_for_the_commit(monkeypatch):
