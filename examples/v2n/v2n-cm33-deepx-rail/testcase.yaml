@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: v2n-cm33-deepx-rail
+  description: |
+    CM33-boot-mode DEEPX 0.75 V core-rail sequencer.  Calls the portable
+    da9292_ch2_sequence() chip driver directly over BRD_I2C/RIIC8, which
+    this app's own board overlay re-enables (the default AMP board
+    config -- CA55 cold boot -- leaves it disabled; see board.yaml).
+    build_only: native_sim has no RZ/V2N RIIC8 or the app's board
+    overlay, same as every other V2N CM33 example -- this checks the
+    app compiles + links, not that it runs.
+
+tests:
+  alp_sdk.examples.v2n.cm33_deepx_rail.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - v2n
+      - power
+      - deepx
+      - cm33-boot
+    build_only: true

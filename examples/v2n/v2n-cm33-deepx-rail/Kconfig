@@ -1,0 +1,21 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+config V2N_CM33_RELEASE_CA55
+	bool "Release CA55 core 0 after the DEEPX rail is up (CM33 cold boot only)"
+	help
+	  Calls v2n_cm33_release_ca55() once da9292_ch2_sequence() returned
+	  ALP_OK.  Off by default: the AWO to ALL_ON entry it depends on is
+	  still a TODO (alp-sdk#2289), so enabling it today only reaches the
+	  fail-closed ALP_ERR_NOSUPPORT path.  Never enable on a CA55-cold-boot
+	  unit (BOOTSELCPU high).
+
+config V2N_CA55_BL2_ENTRY_ADDR
+	hex "CA55 core 0 reset vector (RVBARADDR0) of the CM33-staged BL2"
+	depends on V2N_CM33_RELEASE_CA55
+	default 0x0
+	help
+	  Left at 0 on purpose: v2n_cm33_release_ca55() rejects it.  The staging
+	  address of BL2 is not decided yet (alp-sdk#2289 bench steps 4 and 6).
+
+source "Kconfig.zephyr"
