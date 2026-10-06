@@ -138,7 +138,7 @@ row says so.
 | I2C0, PCIe / M.2 branch | same bus, through a level shifter | `i2c-0` | 100 kHz | PCIe I/O expander, then a 2:1 switch to the M.2 E-key or M.2 M-key slot |
 | I2C1 | RZ/V2N RIIC1 | `i2c-1` | 400 kHz | 14-pin expansion header only; no fixed device |
 | I2C2 (`XEVK_I2C_BUS_DSI_CSI0`) | RZ/V2N RIIC2 | enabled only by the camera device trees; it has no alias, so read its number from `i2cdetect -l` | 400 kHz | Camera connectors (CAM0 pair and the parallel-camera connector); no fixed device |
-| I2C3 (`XEVK_I2C_BUS_DSI_CSI1`) | SoM bridge MCU (no RZ/V2N master) | none | n/a | CAM1 connector; no fixed device |
+| I2C3 (`XEVK_I2C_BUS_DSI_CSI1`) | SoM bridge MCU (no RZ/V2N master) | none | n/a | CAM1 connector; no fixed device; Linux reaches it only through the GD32 I2C3 proxy (bridge protocol 0.17), there is no Linux master.  Carrier gap, seen on an E1M-V2M103 on the X-EVK V2 on 2026-10-06: the J6 display I2C is not wired to I2C3 |
 | I3C | RZ/V2N I3C | none | n/a | 3-pin header, not fitted |
 | SoM-internal power / clock bus | RZ/V2N RIIC8 | `i2c-8` | 400 kHz | On-module parts only, see the last table |
 
@@ -176,7 +176,7 @@ amplifiers are the exception: the kernel owns them for ALSA.
 
 | Device | Part | Address | Status |
 |---|---|---|---|
-| Display 1 touch controller | Goodix GT911 (on the panel cable) | `0x5D` or `0x14`, chosen by the controller's reset sequence | Interrupt on E1M-X IO9, reset on IO11.  The bus is documented above as E1M-X I2C3, but which controller the touch lines reach has not been confirmed (#2645).  **Never seen on a real unit** |
+| Display 1 touch controller | Goodix GT911 (on the panel cable) | `0x5D` or `0x14`, chosen by the controller's reset sequence | Interrupt on E1M-X IO9, reset on IO11.  The bus is documented above as E1M-X I2C3, but which controller the touch lines reach has not been confirmed (#2645).  On the X-EVK V2 the J6 display I2C is not wired to I2C3 (carrier gap, 2026-10-06), so the touch controller is not reachable through the GD32 I2C3 proxy there.  The device answering at `0x41` on `i2c-0` on 2026-10-06 is not the Riverdi touch controller.  **Never seen on a real unit** |
 | mikroBUS socket I²C | plug-in | depends on the Click board | Controller not confirmed (#2645).  Never scanned |
 | M.2 E-key / M-key slot I²C | plug-in | depends on the card | Behind the PCIe / M.2 switch on I2C0.  Never scanned with a card fitted |
 | Camera modules | plug-in | depends on the sensor | On I2C2 (CAM0) or I2C3 (CAM1); see [`../v2n-camera-csi.md`](../v2n-camera-csi.md) |
