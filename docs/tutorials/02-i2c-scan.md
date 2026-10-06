@@ -179,9 +179,9 @@ nor `0x68`; both answered on 2026-10-02):
 0x49 ACK   -- INA236B U34, +VCAM3 rail current monitor
               (include/alp/boards/alp_e1m_x_evk_routes.h:133)
 0x4D ACK   -- TAS2563 U27 smart amp, left channel
-              (metadata/boards/e1m-x-evk.yaml:342)
+              (metadata/boards/e1m-x-evk.yaml:369)
 0x4E ACK   -- TAS2563 U28 smart amp, right channel
-              (metadata/boards/e1m-x-evk.yaml:343)
+              (metadata/boards/e1m-x-evk.yaml:370)
 0x50 ACK   -- 24C128 EEPROM, the SoM's `e1m_i2c0:` block
               (metadata/e1m_modules/E1M-V2N101.yaml:58-61)
 0x58 ACK   -- SAME 24C128 EEPROM, its second device-select header
@@ -218,7 +218,7 @@ does not reach it (see above).  RIIC8/BRD_I2C is Cortex-A55/Linux-
 exclusive (`metadata/e1m_modules/v2n/core-ownership.yaml`) -- there is
 no CM33/Zephyr path to it at all.  On Linux it is numeric bus 8
 (`/dev/i2c-8`), opened directly rather than through a `<alp/board.h>`
-alias (`examples/v2n/v2n-brd-i2c-bringup/src/main.c:79`) -- this
+alias (`examples/v2n/v2n-brd-i2c-bringup/src/main.c:459`) -- this
 tutorial's code does not scan it.  Use
 [`examples/v2n/v2n-brd-i2c-bringup`](../../examples/v2n/v2n-brd-i2c-bringup/)
 instead: a Linux/Yocto user-space app that opens `/dev/i2c-8` directly

@@ -499,9 +499,10 @@ endif()
 # zephyr_include_directories(include) fires when USE_ALIF_HAL_OSPI pulls the
 # subdirectory in), so no extra include path is needed here.  See the
 # OSPI_ALIF Kconfig help + flash_ospi_alif.c's own header for the current
-# read/write/erase coverage (#915: read/read_jedec_id/sfdp_read only, write/
-# erase are fail-closed stubs); examples/aen/aen-ospi-regcheck exercises the
-# controller-register path only and makes no flash_driver_api call.
+# read/write/erase coverage (#915: read, read_jedec_id, sfdp_read, write and
+# erase are implemented and bench-verified); examples/aen/aen-ospi-regcheck
+# proves the controller-register path by default and its opt-in #915
+# self-test erases, programs and restores one sector through flash_driver_api.
 zephyr_library_sources_ifdef(CONFIG_OSPI_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_ospi_alif.c)
 
@@ -1252,8 +1253,9 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO
 # `alp-temp0` DT alias's own status, so it ships unconditionally on
 # Zephyr (issue #2066) and every build without that alias just takes the
 # ALP_ERR_NOSUPPORT branch.  Zephyr-ONLY -- it binds through Zephyr's own
-# devicetree/sensor API with no portable fallback, so baremetal/Yocto get
-# src/common/stub/stub_temperature.c instead (see that file + this one's
+# devicetree/sensor API with no portable fallback, so baremetal gets
+# src/common/stub/stub_temperature.c and Yocto gets
+# src/yocto/temperature_yocto.c instead (see that file + this one's
 # header comment for why this differs from hw_info_zephyr.c above, which
 # IS shared with plain CMake).
 zephyr_library_sources(

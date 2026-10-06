@@ -34,3 +34,16 @@ ZTEST(alp_temperature, test_read_returns_nosupport_with_no_on_module_sensor)
 	 * alp_hw_info_read()'s out-struct; prove the sentinel survives. */
 	zassert_equal(milli_c, 0x7EADBEEF);
 }
+
+ZTEST(alp_temperature, test_soc_read_null_out_returns_inval)
+{
+	zassert_equal(alp_temperature_read_die_milli_c(NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_temperature, test_soc_read_returns_nosupport_off_linux)
+{
+	int32_t milli_c = 0x7EADBEEF; /* sentinel */
+
+	zassert_equal(alp_temperature_read_die_milli_c(&milli_c), ALP_ERR_NOSUPPORT);
+	zassert_equal(milli_c, 0x7EADBEEF);
+}
