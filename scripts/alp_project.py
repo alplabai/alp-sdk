@@ -291,6 +291,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             _slice_local_conf,
             load_board_yaml,
         )
+        from alp_orchestrate.ownership import project_m33_overlay
     except ImportError as e:
         print(f"alp_project: failed to import alp_orchestrate: {e}",
               file=sys.stderr)
@@ -388,6 +389,16 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
                 v2_peripherals=sorted(union),
                 v2_core_ids=zephyr_core_ids,
             )
+        # Per-product core ownership: enable the assignable nodes this
+        # project assigned to the M33 (the board tree carries them disabled).
+        try:
+            own_dts, _ = project_m33_overlay(project, args.core)
+        except OrchestratorError as e:
+            print(f"alp_project: {e}", file=sys.stderr)
+            return 1
+        if own_dts:
+            out += ("\n/* Assignable peripherals owned by the M33 "
+                    "(board.yaml `ownership:`). */\n" + "\n".join(own_dts) + "\n")
         return _write_or_print(out, args.output)
 
     if args.emit == "native-sim-overlay":

@@ -231,3 +231,10 @@ def test_output_survives_a_cp1252_console():
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, env=env, check=False)
     assert r.returncode == 0, r.stderr.decode(errors="replace")
     assert b"bad ?" in r.stdout
+
+
+def test_bad_carrier_refused_before_serial_alloc(tmp_path):
+    ledger, _ = _inputs(tmp_path)
+    r = _run("plan", "--sku", SKU, "--bundle", _bundle(tmp_path), "--ledger-root", ledger,
+             "--carrier", "no-such-carrier")
+    assert r.returncode == 2 and "HiL spec dir" in r.stderr
