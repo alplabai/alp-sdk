@@ -118,6 +118,22 @@ def test_content_only_mutation_passes():
     assert not _fails(oracle, mutated)
 
 
+def test_deferred_placeholders_is_not_diffed():
+    """#2696: derived from artefact contents, which are not diffed either."""
+    oracle = _load("multicore_rpmsg-aen")
+    mutated = copy.deepcopy(oracle)
+    mutated["deferredPlaceholders"] = ["MENDER_TENANT_TOKEN"]
+    assert not _fails(oracle, mutated)
+
+
+def test_other_new_top_level_key_still_fails():
+    """Dropping `deferredPlaceholders` must not become a blanket rule."""
+    oracle = _load("multicore_rpmsg-aen")
+    mutated = copy.deepcopy(oracle)
+    mutated["someNewTopLevelKey"] = []
+    assert _fails(oracle, mutated)
+
+
 def test_sysbuild_slice_wrongly_gaining_extra_conf_file_fails():
     """MINOR 5: the `-DEXTRA_CONF_FILE` strip is scoped to non-sysbuild
     slices only.  Both `connectivity_iot-fleet-ota` slices are sysbuild

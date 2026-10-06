@@ -3520,6 +3520,10 @@
       "script": "scripts/check_no_committed_doxygen_output.py"
     },
     {
+      "purpose": "Pad-voltage gate: a carrier must not drive a 3.3 V level onto an SoM pad whose SoC pad is not 3.3 V tolerant without declaring a level shifter.",
+      "script": "scripts/check_pad_voltage.py"
+    },
+    {
       "purpose": "Validate that every silicon pad referenced in the SoM peripheral maps is claimed by **exactly one** peripheral.",
       "script": "scripts/check_pin_conflicts.py"
     },

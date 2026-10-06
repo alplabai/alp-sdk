@@ -278,9 +278,11 @@
 #endif
 
 /*
- * Dual on-module GbE PHYs. Each PHY is addressed at MDIO address 2 on its
- * bus (the on-module wiring makes address 2 the reliable address; address
- * 0 does not respond to phy_poll_reset -- docs/errata-e1m-x-v2n.md E2).
+ * Dual on-module GbE PHYs. The PHY address is strap-latched and differs per
+ * unit (docs/errata-e1m-x-v2n.md E2), so reg = <2> is only the default:
+ * U-Boot patch 0017 scans each MDIO bus at boot and rewrites this `reg` in
+ * the booted DT when the PHY answers elsewhere. Address 0 is the broadcast
+ * address and does not respond to phy_poll_reset.
  *
  * The PHY id is forced to what the fitted part reports, 0x001c.c916 (package
  * marking not checked), so driver selection does not depend on an id read at
@@ -399,12 +401,48 @@
 		 * (alplabai/alp-sdk#2508). */
 		gpio-line-names =
 			"IO8",  "IO9",  "IO10", "IO11", "IO12", "IO13",
-			"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
+			"IO14", "IO16", "" /* 8: unrouted, gd32-bridge-firmware#298 */, "IO25", "IO27", "IO28",
 			"IO29", "IO30", "IO31", "IO32", "IO34", "IO35",
 			"bt-reg-on", "wl-reg-on",
-			"" /* 20: reserved for can-stby, #2341 */, "se-rst",
+			"can-stby" /* 20: GD32 PB13, TCAN1044 STB (both transceivers) */,
+			"se-rst",
 			"IO15" /* 22: bridge bit 21, GD32 PB4 */,
-			"IO26" /* 23: bridge bit 22, GD32 PC2 */;
+			"IO26" /* 23: bridge bit 22, GD32 PC2 */,
+			/* 24..27: camera LDO enables on the SoM power-supply sheet
+			 * (not E1M-X pads), bridge bits 23..26, protocol 0.17. */
+			"cam-en-ldo0" /* GD32 PC3  */,
+			"cam-en-ldo1" /* GD32 PE8  */,
+			"cam-en-ldo2" /* GD32 PE7  */,
+			"cam-en-ldo3" /* GD32 PE10 */;
+
+		/* The bridge gpiochip is also a POLLED interrupt controller (no
+		 * interrupt line reaches the SoC): GPIO_READ every 10 ms while
+		 * any line is unmasked.  Edges shorter than 10 ms are missed;
+		 * level lines re-fire every poll while asserted.  Lines that
+		 * are output (ever written) or gated off by an older firmware
+		 * cannot be interrupt sources. */
+		interrupt-controller;
+		#interrupt-cells = <2>;
+
+		/* E1M PWM0..7 over PWM_SET/GET (protocol >= 0.17; <channel
+		 * period-ns>).  PWM0..3 share one timer period, PWM4..7 another. */
+		#pwm-cells = <2>;
+
+		/* E1M-X I2C3 (GD32 PC8 = SCL / pad A24, PC9 = SDA / pad A23),
+		 * proxied by the bridge (protocol >= 0.17, over this I2C link
+		 * only).  The SoM has NO pull-ups on I2C3: the carrier or the
+		 * attached module must provide them.  The pads stay hi-Z until
+		 * the first transfer.  clock-frequency is 100000 or 400000.
+		 * On the E1M-X-EVK V2 this bus reaches only CAM1 (J12); the J6
+		 * display I2C is NOT wired to it (carrier fix or bench bodge
+		 * needed), though on a fixed carrier it is intended to be I2C3.
+		 * Children are added by the carrier dtsi:
+		 * &e1m_x_i2c3 { ... }; */
+		e1m_x_i2c3: i2c {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clock-frequency = <100000>;
+		};
 	};
 
 	rv3028: rtc@52 {
@@ -419,6 +457,9 @@
 		 * carrier's own routed pins -- its Linux adapter alias lives here,
 		 * not in e1m-x-evk.dtsi's carrier-bus aliases block. */
 		i2c8 = &i2c8;
+		/* The bridge's I2C3 proxy adapter (a child of the gd32_gpio node,
+		 * not a SoC RIIC): a fixed number keeps /dev/i2c-3 stable. */
+		i2c3 = &e1m_x_i2c3;
 		/* The eMMC is on the module (SDHI0), so mmc0 is the SoM's whatever the
 		 * carrier: /etc/fw_env.config's /dev/mmcblk0boot1 depends on it. */
 		mmc0 = &sdhi0;

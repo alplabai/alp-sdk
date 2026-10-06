@@ -296,10 +296,12 @@ if(CONFIG_USE_RZ_FSP_SCI_B_SPI)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/spi/r_sci_b_spi)
     # SCI7 DMA fast path: the rzv FSP DMAC-B transfer driver.  hal_renesas
     # ships it for rzv2n (src/rzv/r_dmac_b + the SCI7 RXI/TXI trigger events in
-    # bsp/mcu/rzv2n/bsp_dmac.h) but its rzv CMake does not compile it and the
+    # bsp/mcu/rzv2n/bsp_dmac.h) and does compile it under
+    # CONFIG_USE_RZ_FSP_DMAC_B, but that option is not selected here and the
     # rzv2n devicetree has no dmac node, so the glue driver hand-instantiates
-    # the transfer_instance_t pair and we build the FSP module here.  Its
-    # r_dmac_b_cfg.h shim lives in the r_sci_b_spi include dir above.
+    # the transfer_instance_t pair and we build the FSP module ourselves.  Its
+    # r_dmac_b_cfg.h shim lives in the r_sci_b_spi include dir above.  The DMA
+    # path stays gated off until the Renesas ER on SCI7+DMAC-B is answered.
     zephyr_library_sources(
         ${ZEPHYR_HAL_RENESAS_MODULE_DIR}/drivers/rz/fsp/src/rzv/r_dmac_b/r_dmac_b.c)
     zephyr_library_include_directories(
@@ -1658,6 +1660,12 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MODEL_READER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/alp_model_loader.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/alp_model_select.c
 )
+# SoM inference.auto_order (string Kconfig emitted by the orchestrator) ->
+# the one define name every OS build uses for the .alpmodel AUTO tiebreak.
+if(CONFIG_ALP_SDK_MODEL_READER AND CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER)
+    zephyr_library_compile_definitions(
+        ALP_SDK_INFERENCE_AUTO_ORDER="${CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER}")
+endif()
 
 # Backend registry selector (<alp/backend.h>).  Walks the per-class
 # linker sections emitted by ALP_BACKEND_REGISTER + ALP_BACKEND_DEFINE_CLASS

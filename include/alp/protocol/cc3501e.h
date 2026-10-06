@@ -557,14 +557,15 @@ typedef enum {
 	 * device-side Mender contract (the OTA server is a separate repo). */
 	ALP_CC3501E_CMD_OTA_BEGIN  = 0x40, /* req alp_cc3501e_ota_begin_t        */
 	ALP_CC3501E_CMD_OTA_WRITE  = 0x41, /* req alp_cc3501e_ota_write_t + bytes */
-	ALP_CC3501E_CMD_OTA_FINISH = 0x42, /* no payload; install + deferred reboot */
+	ALP_CC3501E_CMD_OTA_FINISH = 0x42, /* no payload; install to STAGED, no reboot */
 	ALP_CC3501E_CMD_OTA_ABORT  = 0x43, /* no payload; cancel the session      */
 	ALP_CC3501E_CMD_OTA_STATUS = 0x44, /* reply alp_cc3501e_ota_status_t      */
 	/* 0x45 is STREAM_WRITE (below), so OTA_PROMOTE takes the next free code.
-	 * Requests the swap-reboot for an image ALREADY committed to STAGED (e.g.
-	 * one left pending by a bare reset that carried no swap request) -- the
-	 * unjam/promote path FINISH cannot re-reach once a slot is occupied. */
-	ALP_CC3501E_CMD_OTA_PROMOTE = 0x46, /* no payload; request swap of a pending image */
+	 * Requests the swap-reboot for the image the last FINISH staged, and only
+	 * in the SAME CC3501E boot: the PSA-FWU swap request lives in RAM, so an
+	 * image left STAGED across a reset cannot be promoted (OTA_STATUS
+	 * reserved[0] = 119); it must be aborted and re-sent (#2741). */
+	ALP_CC3501E_CMD_OTA_PROMOTE = 0x46, /* no payload; swap the image FINISH staged this boot */
 
 	/* Enter / leave OTA UPDATE MODE.  req = mode(1) { 0 = the normal DMA/callback
 	 * bridge, 1 = the polled update mode }; reply = @ref alp_cc3501e_ota_update_mode_t.
@@ -2017,7 +2018,10 @@ typedef struct {
 	uint8_t state; /**< @ref alp_cc3501e_ota_state_t. */
 	/** reserved[0] = last swap-reboot rc: 0 = none requested / success (the device
 	 *  reboots on success and never reports it), non-zero = the swap was REFUSED
-	 *  (e.g. BL2 anti-rollback on a downgrade).
+	 *  (e.g. BL2 anti-rollback on a downgrade).  119 is `(int8_t)` of
+	 *  PSA_ERROR_BAD_STATE (-137): PROMOTE in a later boot than the FINISH that
+	 *  staged the image, after the RAM-held swap request was lost.  That image
+	 *  cannot be promoted; abort and re-send it (#2741).
 	 *
 	 *  reserved[1] = FLUSH PENDING (#1610), and reading it is MANDATORY for any
 	 *  host that streams OTA_WRITE.  Non-zero means the device has queued a
@@ -2069,7 +2073,9 @@ typedef enum {
 	ALP_CC3501E_OTA_PENDING_NONE = 0u,
 	/** Partially written -- a session opened the slot but never finished it. */
 	ALP_CC3501E_OTA_PENDING_CANDIDATE = 1u,
-	/** Fully staged and installable.  A PROMOTE will swap THIS image in. */
+	/** Fully staged.  A PROMOTE in the same boot as its FINISH swaps THIS image
+	 *  in; after a reset the image still reads STAGED but cannot be promoted
+	 *  (OTA_STATUS reserved[0] = 119) and must be re-sent (#2741). */
 	ALP_CC3501E_OTA_PENDING_STAGED = 2u,
 	/** Swapped in and running on trial, awaiting self-accept. */
 	ALP_CC3501E_OTA_PENDING_TRIAL = 3u,

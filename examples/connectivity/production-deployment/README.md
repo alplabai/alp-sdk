@@ -70,7 +70,7 @@ ota:
 `rollback.min_version: 1` is the anti-downgrade floor -- once v1.0
 ships, the device refuses any OTA claiming version < 1, even if
 it's signed correctly. `${MENDER_TENANT_TOKEN}` never lives in
-the repo; it's injected at provisioning.
+the repo; Yocto builds set it in `conf/local.conf`, Zephyr injects it at provisioning.
 
 ### `security.psa:` -- TF-M with an internal attestation root
 

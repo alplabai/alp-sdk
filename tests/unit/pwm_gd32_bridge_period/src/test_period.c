@@ -72,6 +72,26 @@ ZTEST(pwm_gd32_bridge_period, test_br_open_writes_dispatcher_period_ns)
 	              cfg.period_ns);
 }
 
+extern unsigned stub_pwm_stop_calls;
+extern uint8_t  stub_pwm_stop_last_channel;
+
+/* br_close() must release the channel's timer claim via gd32g553_pwm_stop(). */
+ZTEST(pwm_gd32_bridge_period, test_br_close_stops_the_channel)
+{
+	const alp_backend_t *be  = alp_backend_select("pwm", "renesas:rzv2n:n44");
+	const alp_pwm_ops_t *ops = (const alp_pwm_ops_t *)be->ops;
+
+	const alp_pwm_config_t cfg  = { .channel_id = 5u, .period_ns = 1000000u };
+	struct alp_pwm         h    = { 0 };
+	alp_capabilities_t     caps = { 0 };
+	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
+
+	stub_pwm_stop_calls = 0u;
+	ops->close(&h.state);
+	zassert_equal(stub_pwm_stop_calls, 1u, "br_close did not call gd32g553_pwm_stop");
+	zassert_equal(stub_pwm_stop_last_channel, 5u);
+}
+
 ZTEST(pwm_gd32_bridge_period, test_br_open_resolves_default_period_ns)
 {
 	/* ALP_PWM_CONFIG_DEFAULT() (include/alp/pwm.h) yields period_ns == 0
