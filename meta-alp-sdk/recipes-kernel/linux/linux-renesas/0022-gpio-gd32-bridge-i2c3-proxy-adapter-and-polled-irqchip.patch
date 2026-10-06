@@ -1,0 +1,810 @@
+From 542917d2d8c0d139fb0d03ef4badcf18faf3cc77 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Tue, 6 Oct 2026 13:10:30 +0000
+Subject: [PATCH] gpio: gd32-bridge: add the I2C3 proxy adapter and a
+ polled irqchip
+
+Copyright (c) 2026 Alp Lab AB
+SPDX-License-Identifier: GPL-2.0
+
+I2C3 proxy (bridge protocol 0.17, I2C link only).  The "i2c" child node
+of the bridge node registers an i2c_adapter that forwards transfers to
+the bridge as I2CM_CONFIG (0xA0, speed 100/400 kHz, 0 releases the
+pads) / I2CM_XFER (0xA1, queue a job) / I2CM_RESULT (0xA2, collect it),
+so devices on E1M-X I2C3 (GD32 PC8 SCL, PC9 SDA) become ordinary Linux
+I2C clients.
+
+ - master_xfer takes one message (write, read, zero-length quick write)
+   or a write-then-read pair to one address; 10-bit, RECV_LEN, NOSTART
+   and IGNORE_NAK are refused (quirks + func advertise exactly this).
+ - The adapter registers unconditionally.  The firmware version is
+   checked lazily per transfer (minor >= 17, else -EOPNOTSUPP): the
+   bridge is usually still booting when the driver probes, so the check
+   waits up to 1 s for GET_VERSION to answer before failing the
+   transfer.
+ - A job-still-running BUSY backs off for up to 30 ms instead of using
+   the generic 4-try ladder; NOT_READY (bridge forgot CONFIG after a
+   reset or wake) re-sends the cached speed once and retries; a RESULT
+   whose tag is not ours is -EAGAIN.
+ - The adapter has its own lock ops with a private mutex: its
+   master_xfer calls i2c_transfer() on the parent adapter and both
+   bus_locks share one lockdep class at depth 0.  The gd32 request lock
+   is still taken per request only.
+ - gd32_bridge_xfer_raw() grows the frame buffers to 69/68 bytes and
+   decodes the variable-length RESULT reply (3 + nread); the raw STATUS
+   is exposed so NOT_READY can be told apart from NO_PENDING.
+
+Polled irqchip.  The bridge has no interrupt line to the SoC, so the
+gpiochip is also an interrupt controller (#interrupt-cells = <2>)
+backed by a delayed work that runs GPIO_READ every 10 ms while any line
+is unmasked and fires nested threaded handlers on the configured edge
+or level.  Edges shorter than the period are missed; level lines are
+re-reported every period while asserted.
+
+Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ drivers/gpio/Kconfig            |   1 +
+ drivers/gpio/gpio-gd32-bridge.c | 627 +++++++++++++++++++++++++++++++-
+ 2 files changed
+
+diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
+index eefc447b2148..c886d5f863f8 100644
+--- a/drivers/gpio/Kconfig
++++ b/drivers/gpio/Kconfig
+@@ -1013,6 +1013,7 @@ config GPIO_GD32_BRIDGE
+ 	tristate "Alp Lab GD32 IO-MCU bridge GPIO expander"
+ 	depends on I2C && OF
+ 	select CRC_ITU_T
++	select GPIOLIB_IRQCHIP
+ 	help
+ 	  GPIO support for E1M IO pads routed through the GD32G553
+ 	  supervisor MCU on Alp Lab V2N-family SoMs, accessed over the
+diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
+--- a/drivers/gpio/gpio-gd32-bridge.c
++++ b/drivers/gpio/gpio-gd32-bridge.c
+@@ -92,6 +92,17 @@
+  * answers, so the consumer just cannot tell the line is actually driven
+  * until the next successful replay.
+  *
++ * I2C3 proxy (protocol 0.17, I2C link only): the DT child node "i2c" of the
++ * bridge node becomes an i2c_adapter whose transfers run on the bridge's
++ * PC8/PC9 (E1M-X I2C3) via I2CM_CONFIG / I2CM_XFER / I2CM_RESULT, so the
++ * display bridge and touch controller on that bus are ordinary Linux I2C
++ * clients.  The adapter registers unconditionally; each transfer checks the
++ * firmware version (minor >= 17, else -EOPNOTSUPP).
++ *
++ * Polled irqchip: the bridge has no interrupt line to the SoC, so the
++ * gpiochip doubles as an interrupt controller (#interrupt-cells = <2>) that
++ * samples GPIO_READ every GD32_IRQ_POLL_PERIOD_MS while any line is unmasked.
++ *
+  * Copyright (c) 2026 Alp Lab AB
+  */
+ 
+@@ -101,10 +112,13 @@
+ #include <linux/delay.h>
+ #include <linux/gpio/driver.h>
+ #include <linux/i2c.h>
++#include <linux/irq.h>
++#include <linux/jiffies.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
++#include <linux/spinlock.h>
+ #include <linux/workqueue.h>
+ 
+ #define GD32_REG_CMD		0x00
+@@ -113,6 +127,10 @@
+ #define GD32_CMD_GPIO_READ	0x10
+ #define GD32_CMD_GPIO_WRITE	0x11
+ #define GD32_CMD_SE_RESET	0x41
++/* v0.17 I2C3 master proxy (I2C link only): configure / queue a job / collect. */
++#define GD32_CMD_I2CM_CONFIG	0xA0
++#define GD32_CMD_I2CM_XFER	0xA1
++#define GD32_CMD_I2CM_RESULT	0xA2
+ #define GD32_STATUS_OK		0x00
+ #define GD32_STATUS_INVAL	0x01
+ #define GD32_STATUS_NOT_READY	0x02
+@@ -134,6 +152,44 @@
+ #define GD32_BUSY_RETRY_MIN_US		2000
+ #define GD32_BUSY_RETRY_MAX_US		4000
+ 
++/*
++ * I2C3 proxy limits (protocol 0.17).  The I2C-link payload tops out at 65 B:
++ * XFER = tag, addr7, flags, wlen, rlen + wdata[<=60]; RESULT = tag, result,
++ * nread + rdata[<=62].  With the reg byte, cmd and CRC the frame buffers are
++ * 69 B (write) / 68 B (read).
++ */
++#define GD32_I2CM_MAX_WLEN		60
++#define GD32_I2CM_MAX_RLEN		62
++#define GD32_MAX_REQ			65
++#define GD32_MAX_RSP			65
++#define GD32_I2CM_DEFAULT_KHZ		100
++/* Firmware job deadline is ~20 ms; collect for up to 30 ms before giving up. */
++#define GD32_I2CM_JOB_TIMEOUT_MS	30
++/* A client probing right after the adapter registers can beat the bridge's
++ * boot: wait this long for GET_VERSION to answer before failing the transfer. */
++#define GD32_I2CM_VERSION_WAIT_MS	1000
++#define GD32_I2CM_VERSION_RETRY_MS	20
++#define GD32_I2CM_POLL_MIN_US		300
++#define GD32_I2CM_POLL_MAX_US		600
++
++/* I2CM_RESULT.result byte */
++#define GD32_I2CM_OK			0
++#define GD32_I2CM_NACK_ADDR		1
++#define GD32_I2CM_NACK_DATA		2
++#define GD32_I2CM_ARB_LOST		3
++#define GD32_I2CM_BUS_ERROR		4
++#define GD32_I2CM_TIMEOUT		5
++#define GD32_I2CM_BUS_STUCK		6
++
++/*
++ * Polled irqchip: the bridge has no interrupt line to the SoC, so the
++ * irqchip samples GPIO_READ on a timer while any line is unmasked.  An edge
++ * shorter than the period is missed (ponytail: upgrade path is a bridge-side
++ * latched-edge opcode); level lines are re-reported every period while
++ * asserted.
++ */
++#define GD32_IRQ_POLL_PERIOD_MS		10
++
+ #define GD32_NGPIO_BASE		18
+ #define GD32_NGPIO_WIFI_BT	20
+ 
+@@ -297,9 +353,37 @@ struct gd32_bridge_gpio {
+ 	 * resolved by the same GET_VERSION as wifi_bt_reg_on_status, under
+ 	 * status_lock. */
+ 	int io_ext_status;
+-	/* Same rule for protocol minor >= 17: lines 24..27 (CAM_EN_LDO0..3). */
++	/* Same rule for protocol minor >= 17: lines 24..27 (CAM_EN_LDO0..3)
++	 * and the I2C3 proxy (gd32_bridge_i2c_xfer() gates on it per transfer). */
+ 	int cam_ldo_status;
+ 	struct mutex status_lock;
++	/*
++	 * I2C3 proxy.  The adapter's own lock ops use i2c_lock instead of the
++	 * core's rt_mutex: this adapter's master_xfer calls i2c_transfer() on
++	 * the PARENT adapter (BRD_I2C), and both bus_locks share one lockdep
++	 * class at depth 0 (the adapter's dev.parent is a client, not an
++	 * adapter), which lockdep reports as recursive locking.  i2c_lock
++	 * serializes whole jobs; the i2cm_* fields are touched only under it.
++	 * Lock order: i2c_lock -> gd32->lock (per request, in xfer()).
++	 */
++	struct i2c_adapter i2c;
++	struct mutex i2c_lock;
++	u16 i2cm_khz;
++	bool i2cm_configured;
++	u8 i2cm_tag;
++	/*
++	 * Polled irqchip.  *_stage fields are written by irq_mask/unmask/
++	 * set_type (atomic context, irq desc lock held) and published to the
++	 * poll worker by irq_bus_sync_unlock under irq_slock; the worker only
++	 * reads the published copy.  irq_lock is the irqchip bus lock.
++	 */
++	struct mutex irq_lock;
++	spinlock_t irq_slock;
++	u32 irq_en_stage, irq_rise_stage, irq_fall_stage, irq_high_stage, irq_low_stage;
++	u32 irq_en, irq_rise, irq_fall, irq_high, irq_low;
++	u32 irq_prev;		/* last sampled levels, line space; worker only */
++	u32 irq_seeded;		/* lines whose irq_prev is valid; worker only */
++	struct delayed_work irq_work;
+ 	/*
+ 	 * Independent lines-18/19 resolver, NOT under state_lock (it has
+ 	 * nothing to do with output_mask/output_vals or the replay above) --
+@@ -428,20 +512,35 @@ static u32 gd32_bridge_bits_to_lines(u32 bits)
+ 	       ((bits & GD32_HI_BIT_MASK) << (GD32_LINE_IO15 - 21));
+ }
+ 
+-static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
+-				 const u8 *req, unsigned int req_len,
+-				 u8 *rsp, unsigned int rsp_len)
++/*
++ * One cmd/reply pair.  @rsp_len is the reply payload length the opcode
++ * defines; with @result_frame it is instead the MAXIMUM, and the real length
++ * is read from the I2CM_RESULT header (3 + nread) -- the master clocks the
++ * maximum and the bytes past the CRC read as idle 0xFF.  @status, when
++ * non-NULL, gets the bridge's raw STATUS byte (0xFF if no reply was read), so
++ * a caller can tell NOT_READY from the NO_PENDING/arbitration -EAGAINs;
++ * @got gets the reply payload length actually copied to @rsp.
++ */
++static int gd32_bridge_xfer_raw(struct gd32_bridge_gpio *gd32, u8 cmd,
++				const u8 *req, unsigned int req_len,
++				u8 *rsp, unsigned int rsp_len,
++				bool result_frame, unsigned int *got, u8 *status)
+ {
+ 	struct i2c_client *cl = gd32->client;
+-	u8 wbuf[2 + 8 + 2];	/* reg + cmd + max payload + crc */
+-	u8 rbuf[1 + 4 + 2];	/* status + max payload + crc */
++	u8 wbuf[2 + GD32_MAX_REQ + 2];	/* reg + cmd + max payload + crc */
++	u8 rbuf[1 + GD32_MAX_RSP + 2];	/* status + max payload + crc */
+ 	unsigned int wlen = 2 + req_len + 2;
+ 	unsigned int rlen = 1 + rsp_len + 2;
++	unsigned int plen = rsp_len;
+ 	struct i2c_msg msgs[2];
+ 	u16 crc;
+ 	int ret;
+ 
+-	if (WARN_ON(req_len > 8 || rsp_len > 4))
++	if (status)
++		*status = 0xFF;
++	if (got)
++		*got = 0;
++	if (WARN_ON(req_len > GD32_MAX_REQ || rsp_len > GD32_MAX_RSP))
+ 		return -EINVAL;
+ 
+ 	wbuf[0] = GD32_REG_CMD;
+@@ -467,6 +566,8 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
+ 		return ret;
+ 	if (ret != 2)
+ 		return -EIO;
++	if (status)
++		*status = rbuf[0];
+ 
+ 	/*
+ 	 * An error reply is [STATUS][CRC] (3 bytes, no payload; GD32
+@@ -480,9 +581,16 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
+ 			return gd32_bridge_status_to_errno(rbuf[0]);
+ 	}
+ 
+-	crc = crc_itu_t(0xFFFF, rbuf, 1 + rsp_len);
+-	if (rbuf[1 + rsp_len] != (crc & 0xFF) ||
+-	    rbuf[2 + rsp_len] != (crc >> 8)) {
++	/* RESULT payload = tag, result, nread, rdata[nread]; nread is byte 3. */
++	if (result_frame && rbuf[0] == GD32_STATUS_OK) {
++		if (rsp_len < 3 || rbuf[3] > rsp_len - 3)
++			return -EBADMSG;
++		plen = 3 + rbuf[3];
++	}
++
++	crc = crc_itu_t(0xFFFF, rbuf, 1 + plen);
++	if (rbuf[1 + plen] != (crc & 0xFF) ||
++	    rbuf[2 + plen] != (crc >> 8)) {
+ 		/* Log the torn reply so a cold-boot -EBADMSG says which bytes
+ 		 * were wrong (gd32-bridge-firmware#295). */
+ 		dev_warn_ratelimited(&cl->dev, "cmd 0x%02x: reply CRC mismatch: %*ph\n",
+@@ -491,11 +599,21 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
+ 	}
+ 	if (rbuf[0] != GD32_STATUS_OK)
+ 		return gd32_bridge_status_to_errno(rbuf[0]);
+-	if (rsp_len)
+-		memcpy(rsp, &rbuf[1], rsp_len);
++	if (plen)
++		memcpy(rsp, &rbuf[1], plen);
++	if (got)
++		*got = plen;
+ 	return 0;
+ }
+ 
++static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
++				 const u8 *req, unsigned int req_len,
++				 u8 *rsp, unsigned int rsp_len)
++{
++	return gd32_bridge_xfer_raw(gd32, cmd, req, req_len, rsp, rsp_len,
++				    false, NULL, NULL);
++}
++
+ static int gd32_bridge_xfer(struct gd32_bridge_gpio *gd32, u8 cmd,
+ 			    const u8 *req, unsigned int req_len,
+ 			    u8 *rsp, unsigned int rsp_len)
+@@ -1120,6 +1238,466 @@ static void gd32_bridge_resolve_work(struct work_struct *work)
+ 			   &gd32->resolve_work, msecs_to_jiffies(period_ms));
+ }
+ 
++/* I2CM_RESULT.result byte -> errno (outer STATUS keeps its generic meaning). */
++static int gd32_i2cm_result_to_errno(u8 result)
++{
++	switch (result) {
++	case GD32_I2CM_OK:
++		return 0;
++	case GD32_I2CM_NACK_ADDR:
++		return -ENXIO;
++	case GD32_I2CM_NACK_DATA:
++	case GD32_I2CM_BUS_ERROR:
++		return -EIO;
++	case GD32_I2CM_ARB_LOST:
++		return -EAGAIN;
++	case GD32_I2CM_TIMEOUT:
++		return -ETIMEDOUT;
++	case GD32_I2CM_BUS_STUCK:
++		return -EBUSY;
++	default:
++		return -EIO;
++	}
++}
++
++/* khz 100 or 400 configures PC8/PC9 and runs the 9-clock recovery; 0 releases
++ * both pads to hi-Z.  The pads stay hi-Z until the first CONFIG. */
++static int gd32_i2cm_config(struct gd32_bridge_gpio *gd32, u16 khz)
++{
++	u8 req[2];
++
++	put_unaligned_le16(khz, req);
++	return gd32_bridge_xfer(gd32, GD32_CMD_I2CM_CONFIG, req, 2, NULL, 0);
++}
++
++/*
++ * One I2CM_XFER + I2CM_RESULT round trip.  The bridge only validates and
++ * queues the XFER; the transfer itself runs from its base-level tick, so the
++ * result is collected by polling.  A job-still-running BUSY (from XFER or
++ * RESULT) is backed off up to GD32_I2CM_JOB_TIMEOUT_MS -- deliberately not
++ * the generic GD32_BUSY_RETRIES ladder, which would give up in ~16 ms.
++ * @reconfig is set when the bridge answers NOT_READY (it forgot CONFIG:
++ * reset, or woke from sleep).
++ */
++static int gd32_i2cm_job(struct gd32_bridge_gpio *gd32, u8 addr,
++			 const u8 *wdata, unsigned int wlen,
++			 u8 *rdata, unsigned int rlen, bool *reconfig)
++{
++	u8 req[GD32_MAX_REQ], res[GD32_MAX_RSP];
++	u8 tag = ++gd32->i2cm_tag, st;
++	unsigned long deadline;
++	unsigned int got, bytes, us;
++	int ret;
++
++	req[0] = tag;
++	req[1] = addr;
++	req[2] = 0;		/* flags: reserved, must be 0 */
++	req[3] = wlen;
++	req[4] = rlen;
++	memcpy(&req[5], wdata, wlen);
++	deadline = jiffies + msecs_to_jiffies(GD32_I2CM_JOB_TIMEOUT_MS);
++
++	for (;;) {
++		ret = gd32_bridge_xfer_raw(gd32, GD32_CMD_I2CM_XFER, req,
++					   5 + wlen, NULL, 0, false, NULL, &st);
++		if (st == GD32_STATUS_NOT_READY) {
++			*reconfig = true;
++			return -EAGAIN;
++		}
++		if (ret != -EBUSY)
++			break;
++		if (time_after(jiffies, deadline))
++			return -EBUSY;
++		usleep_range(GD32_I2CM_POLL_MIN_US, GD32_I2CM_POLL_MAX_US);
++	}
++	if (ret)
++		return ret;
++
++	/* Sleep out the estimated wire time (9 bit times per byte, the address
++	 * byte included) so the first RESULT usually already has the answer. */
++	bytes = (wlen || !rlen ? 1 + wlen : 0) + (rlen ? 1 + rlen : 0);
++	us = bytes * 9 * 1000 / gd32->i2cm_khz;
++	usleep_range(us, us + 100);
++
++	for (;;) {
++		ret = gd32_bridge_xfer_raw(gd32, GD32_CMD_I2CM_RESULT, NULL, 0,
++					   res, GD32_MAX_RSP, true, &got, &st);
++		if (st == GD32_STATUS_NOT_READY) {
++			*reconfig = true;
++			return -EAGAIN;
++		}
++		if (ret != -EBUSY)
++			break;
++		if (time_after(jiffies, deadline))
++			return -ETIMEDOUT;
++		usleep_range(GD32_I2CM_POLL_MIN_US, GD32_I2CM_POLL_MAX_US);
++	}
++	if (ret)
++		return ret;
++	if (res[0] != tag)
++		return -EAGAIN;		/* a stale job's result */
++	ret = gd32_i2cm_result_to_errno(res[1]);
++	if (ret)
++		return ret;
++	if (res[2] != rlen)
++		return -EIO;
++	memcpy(rdata, &res[3], rlen);
++	return 0;
++}
++
++/* Runs under i2c_lock.  Configures lazily on the first job; re-CONFIGs the
++ * cached speed and retries once if the bridge lost its configuration. */
++static int gd32_i2cm_transfer(struct gd32_bridge_gpio *gd32, u8 addr,
++			      const u8 *wdata, unsigned int wlen,
++			      u8 *rdata, unsigned int rlen)
++{
++	unsigned int attempt;
++	bool reconfig;
++	int ret;
++
++	for (attempt = 0; attempt < 2; attempt++) {
++		if (!gd32->i2cm_configured) {
++			ret = gd32_i2cm_config(gd32, gd32->i2cm_khz);
++			if (ret)
++				return ret;
++			gd32->i2cm_configured = true;
++		}
++		reconfig = false;
++		ret = gd32_i2cm_job(gd32, addr, wdata, wlen, rdata, rlen,
++				    &reconfig);
++		if (!reconfig)
++			return ret;
++		gd32->i2cm_configured = false;
++	}
++	return -EIO;
++}
++
++/*
++ * master_xfer: one message (write, read, or a zero-length quick write) or two
++ * (write then read to the same address, S W.. Sr R.. P).  Everything else the
++ * wire format cannot express is refused.  Registered unconditionally; the
++ * firmware version is checked lazily here, per transfer, because the bridge
++ * is routinely still booting when this driver probes: the check waits up to
++ * GD32_I2CM_VERSION_WAIT_MS for the bridge to answer.
++ */
++static int gd32_bridge_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
++				int num)
++{
++	struct gd32_bridge_gpio *gd32 = i2c_get_adapdata(adap);
++	const u16 bad = I2C_M_TEN | I2C_M_RECV_LEN | I2C_M_NOSTART |
++			I2C_M_IGNORE_NAK | I2C_M_REV_DIR_ADDR | I2C_M_NO_RD_ACK;
++	const u8 *wdata = NULL;
++	u8 *rdata = NULL;
++	unsigned int wlen = 0, rlen = 0;
++	unsigned long deadline;
++	int i, ret;
++
++	if (num < 1 || num > 2)
++		return -EOPNOTSUPP;
++	for (i = 0; i < num; i++)
++		if (msgs[i].flags & bad)
++			return -EOPNOTSUPP;
++
++	if (num == 2) {
++		if ((msgs[0].flags & I2C_M_RD) || !(msgs[1].flags & I2C_M_RD) ||
++		    msgs[0].addr != msgs[1].addr || !msgs[0].len || !msgs[1].len)
++			return -EOPNOTSUPP;
++		wdata = msgs[0].buf;
++		wlen = msgs[0].len;
++		rdata = msgs[1].buf;
++		rlen = msgs[1].len;
++	} else if (msgs[0].flags & I2C_M_RD) {
++		/* A zero-length read (quick read) has no wire encoding. */
++		if (!msgs[0].len)
++			return -EOPNOTSUPP;
++		rdata = msgs[0].buf;
++		rlen = msgs[0].len;
++	} else {
++		wdata = msgs[0].buf;
++		wlen = msgs[0].len;
++	}
++	if (wlen > GD32_I2CM_MAX_WLEN || rlen > GD32_I2CM_MAX_RLEN)
++		return -EOPNOTSUPP;
++
++	/* ponytail: a silent bridge costs every transfer up to 1 s here;
++	 * make it a probe-time wait only if a client polls a dead bus. */
++	deadline = jiffies + msecs_to_jiffies(GD32_I2CM_VERSION_WAIT_MS);
++	while ((ret = gd32_bridge_resolve_late(gd32,
++					       gd32_bridge_cam_ldo_status)) == -EAGAIN) {
++		if (time_after(jiffies, deadline))
++			return -ETIMEDOUT;
++		msleep(GD32_I2CM_VERSION_RETRY_MS);
++	}
++	if (ret == -ENODEV)
++		return -EOPNOTSUPP;	/* firmware older than protocol 0.17 */
++	if (ret)
++		return ret;
++
++	ret = gd32_i2cm_transfer(gd32, msgs[0].addr, wdata, wlen, rdata, rlen);
++	return ret ? ret : num;
++}
++
++static u32 gd32_bridge_i2c_func(struct i2c_adapter *adap)
++{
++	return I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL;
++}
++
++static const struct i2c_algorithm gd32_bridge_i2c_algo = {
++	.master_xfer	= gd32_bridge_i2c_xfer,
++	.functionality	= gd32_bridge_i2c_func,
++};
++
++static const struct i2c_adapter_quirks gd32_bridge_i2c_quirks = {
++	.flags			= I2C_AQ_COMB_WRITE_THEN_READ,
++	.max_num_msgs		= 2,
++	.max_write_len		= GD32_I2CM_MAX_WLEN,
++	.max_read_len		= GD32_I2CM_MAX_RLEN,
++	.max_comb_1st_msg_len	= GD32_I2CM_MAX_WLEN,
++	.max_comb_2nd_msg_len	= GD32_I2CM_MAX_RLEN,
++};
++
++/* Own lock ops, see the i2c_lock comment in struct gd32_bridge_gpio. */
++static void gd32_bridge_i2c_lock_bus(struct i2c_adapter *adap,
++				     unsigned int flags)
++{
++	struct gd32_bridge_gpio *gd32 = i2c_get_adapdata(adap);
++
++	mutex_lock(&gd32->i2c_lock);
++}
++
++static int gd32_bridge_i2c_trylock_bus(struct i2c_adapter *adap,
++				       unsigned int flags)
++{
++	struct gd32_bridge_gpio *gd32 = i2c_get_adapdata(adap);
++
++	return mutex_trylock(&gd32->i2c_lock);
++}
++
++static void gd32_bridge_i2c_unlock_bus(struct i2c_adapter *adap,
++				       unsigned int flags)
++{
++	struct gd32_bridge_gpio *gd32 = i2c_get_adapdata(adap);
++
++	mutex_unlock(&gd32->i2c_lock);
++}
++
++static const struct i2c_lock_operations gd32_bridge_i2c_lock_ops = {
++	.lock_bus	= gd32_bridge_i2c_lock_bus,
++	.trylock_bus	= gd32_bridge_i2c_trylock_bus,
++	.unlock_bus	= gd32_bridge_i2c_unlock_bus,
++};
++
++/* Runs after the adapter is gone (devm LIFO): hand PC8/PC9 back to hi-Z. */
++static void gd32_bridge_i2c_release(void *data)
++{
++	struct gd32_bridge_gpio *gd32 = data;
++
++	mutex_lock(&gd32->i2c_lock);
++	if (gd32->i2cm_configured) {
++		gd32_i2cm_config(gd32, 0);
++		gd32->i2cm_configured = false;
++	}
++	mutex_unlock(&gd32->i2c_lock);
++}
++
++/*
++ * Register the I2C3 proxy adapter from the "i2c" child node of the bridge
++ * node (E1M-X I2C3: GD32 PC8 = SCL / pad A24, PC9 = SDA / pad A23; the SoM
++ * has no pull-ups, the carrier or module provides them).  No child node, no
++ * adapter.
++ */
++static int gd32_bridge_i2c_register(struct gd32_bridge_gpio *gd32)
++{
++	struct device *dev = &gd32->client->dev;
++	struct device_node *np;
++	u32 hz = GD32_I2CM_DEFAULT_KHZ * 1000;
++	int ret;
++
++	np = of_get_child_by_name(dev->of_node, "i2c");
++	if (!np)
++		return 0;
++
++	of_property_read_u32(np, "clock-frequency", &hz);
++	if (hz != 100000 && hz != 400000) {
++		dev_warn(dev, "I2C3 clock-frequency %u Hz unsupported (100000 or 400000); using 100 kHz\n",
++			 hz);
++		hz = 100000;
++	}
++	gd32->i2cm_khz = hz / 1000;
++
++	ret = devm_add_action_or_reset(dev, gd32_bridge_i2c_release, gd32);
++	if (ret) {
++		of_node_put(np);
++		return ret;
++	}
++
++	gd32->i2c.owner = THIS_MODULE;
++	gd32->i2c.algo = &gd32_bridge_i2c_algo;
++	gd32->i2c.quirks = &gd32_bridge_i2c_quirks;
++	gd32->i2c.lock_ops = &gd32_bridge_i2c_lock_ops;
++	gd32->i2c.dev.parent = dev;
++	gd32->i2c.dev.of_node = np;
++	strscpy(gd32->i2c.name, "gd32-bridge-i2c3", sizeof(gd32->i2c.name));
++	i2c_set_adapdata(&gd32->i2c, gd32);
++
++	ret = devm_i2c_add_adapter(dev, &gd32->i2c);
++	of_node_put(np);
++	return ret;
++}
++
++/*
++ * Polled irqchip (see GD32_IRQ_POLL_PERIOD_MS): while any line is unmasked a
++ * delayed work samples GPIO_READ and runs the nested handlers of the lines
++ * whose configured edge or level fired.  Lines whose firmware support is not
++ * confirmed (or that have no read-back, line 21) are skipped.
++ */
++static void gd32_bridge_irq_mask(struct irq_data *d)
++{
++	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(gc);
++	irq_hw_number_t hwirq = irqd_to_hwirq(d);
++
++	gd32->irq_en_stage &= ~BIT(hwirq);
++	gpiochip_disable_irq(gc, hwirq);
++}
++
++static void gd32_bridge_irq_unmask(struct irq_data *d)
++{
++	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(gc);
++	irq_hw_number_t hwirq = irqd_to_hwirq(d);
++
++	gpiochip_enable_irq(gc, hwirq);
++	gd32->irq_en_stage |= BIT(hwirq);
++}
++
++static int gd32_bridge_irq_set_type(struct irq_data *d, unsigned int type)
++{
++	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(gc);
++	u32 bit = BIT(irqd_to_hwirq(d));
++
++	if (type == IRQ_TYPE_NONE ||
++	    (type & ~(IRQ_TYPE_EDGE_BOTH | IRQ_TYPE_LEVEL_MASK)))
++		return -EINVAL;
++	if ((type & IRQ_TYPE_EDGE_BOTH) && (type & IRQ_TYPE_LEVEL_MASK))
++		return -EINVAL;
++
++	gd32->irq_rise_stage &= ~bit;
++	gd32->irq_fall_stage &= ~bit;
++	gd32->irq_high_stage &= ~bit;
++	gd32->irq_low_stage &= ~bit;
++	if (type & IRQ_TYPE_EDGE_RISING)
++		gd32->irq_rise_stage |= bit;
++	if (type & IRQ_TYPE_EDGE_FALLING)
++		gd32->irq_fall_stage |= bit;
++	if (type & IRQ_TYPE_LEVEL_HIGH)
++		gd32->irq_high_stage |= bit;
++	if (type & IRQ_TYPE_LEVEL_LOW)
++		gd32->irq_low_stage |= bit;
++	return 0;
++}
++
++static void gd32_bridge_irq_bus_lock(struct irq_data *d)
++{
++	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(gc);
++
++	mutex_lock(&gd32->irq_lock);
++}
++
++static void gd32_bridge_irq_bus_sync_unlock(struct irq_data *d)
++{
++	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
++	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(gc);
++	unsigned long flags;
++	u32 en;
++
++	spin_lock_irqsave(&gd32->irq_slock, flags);
++	gd32->irq_en = en = gd32->irq_en_stage;
++	gd32->irq_rise = gd32->irq_rise_stage;
++	gd32->irq_fall = gd32->irq_fall_stage;
++	gd32->irq_high = gd32->irq_high_stage;
++	gd32->irq_low = gd32->irq_low_stage;
++	spin_unlock_irqrestore(&gd32->irq_slock, flags);
++
++	/* No-op if already pending; the worker stops itself once en == 0. */
++	if (en && !READ_ONCE(gd32->removing))
++		queue_delayed_work(system_freezable_power_efficient_wq,
++				   &gd32->irq_work, 0);
++	mutex_unlock(&gd32->irq_lock);
++}
++
++static const struct irq_chip gd32_bridge_irq_chip = {
++	.name			= "gd32-bridge-gpio",
++	.irq_mask		= gd32_bridge_irq_mask,
++	.irq_unmask		= gd32_bridge_irq_unmask,
++	.irq_set_type		= gd32_bridge_irq_set_type,
++	.irq_bus_lock		= gd32_bridge_irq_bus_lock,
++	.irq_bus_sync_unlock	= gd32_bridge_irq_bus_sync_unlock,
++	.flags			= IRQCHIP_IMMUTABLE | IRQCHIP_SKIP_SET_WAKE,
++	GPIOCHIP_IRQ_RESOURCE_HELPERS,
++};
++
++static void gd32_bridge_irq_work(struct work_struct *work)
++{
++	struct gd32_bridge_gpio *gd32 = container_of(to_delayed_work(work),
++						     struct gd32_bridge_gpio,
++						     irq_work);
++	u32 en, rise, fall, high, low, avail, wire, cur, prev, seeded;
++	unsigned long flags, fire = 0;
++	unsigned int line;
++	u8 req[4], rsp[4];
++	int ret;
++
++	spin_lock_irqsave(&gd32->irq_slock, flags);
++	en = gd32->irq_en;
++	rise = gd32->irq_rise;
++	fall = gd32->irq_fall;
++	high = gd32->irq_high;
++	low = gd32->irq_low;
++	spin_unlock_irqrestore(&gd32->irq_slock, flags);
++
++	if (!en) {
++		gd32->irq_seeded = 0;	/* stopped; the next unmask restarts us */
++		return;
++	}
++
++	avail = en & ~BIT(GD32_SE_RST_LINE);
++	avail &= ~gd32_bridge_bits_to_lines(gd32_bridge_unconfirmed_bits(gd32));
++	wire = gd32_bridge_lines_to_bits(avail);
++	if (wire) {
++		put_unaligned_le32(wire, req);
++		ret = gd32_bridge_xfer(gd32, GD32_CMD_GPIO_READ, req, 4, rsp, 4);
++		if (ret) {
++			dev_warn_ratelimited(gd32->chip.parent,
++					     "irq poll GPIO_READ failed (%d)\n", ret);
++		} else {
++			cur = gd32_bridge_bits_to_lines(get_unaligned_le32(rsp) & wire);
++			prev = gd32->irq_prev;
++			/* A newly unmasked line has no previous sample: seed it,
++			 * no edge, but a level condition fires at once. */
++			seeded = gd32->irq_seeded & avail;
++			fire = seeded & ((cur & ~prev & rise) | (~cur & prev & fall));
++			fire |= avail & ((cur & high) | (~cur & low));
++			gd32->irq_prev = (prev & ~avail) | cur;
++			gd32->irq_seeded = avail;
++		}
++	}
++
++	for_each_set_bit(line, &fire, GD32_NGPIO_TOTAL) {
++		unsigned int virq = irq_find_mapping(gd32->chip.irq.domain, line);
++
++		if (virq)
++			handle_nested_irq(virq);
++	}
++
++	if (!READ_ONCE(gd32->removing))
++		queue_delayed_work(system_freezable_power_efficient_wq,
++				   &gd32->irq_work,
++				   msecs_to_jiffies(GD32_IRQ_POLL_PERIOD_MS));
++}
++
+ /*
+  * Unbind teardown, registered AFTER devm_gpiochip_add_data() so devm runs it
+  * BEFORE gpiochip_remove(). Consumers (wlan-pwrseq, hci_bcm, panel reset,
+@@ -1142,6 +1720,7 @@ static void gd32_bridge_teardown(void *data)
+ 
+ 	cancel_delayed_work_sync(&gd32->replay_work);
+ 	cancel_delayed_work_sync(&gd32->resolve_work);
++	cancel_delayed_work_sync(&gd32->irq_work);
+ }
+ 
+ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -1161,6 +1740,11 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+ 	mutex_init(&gd32->state_lock);
+ 	INIT_DELAYED_WORK(&gd32->replay_work, gd32_bridge_replay_work);
+ 	INIT_DELAYED_WORK(&gd32->resolve_work, gd32_bridge_resolve_work);
++	INIT_DELAYED_WORK(&gd32->irq_work, gd32_bridge_irq_work);
++	mutex_init(&gd32->i2c_lock);
++	mutex_init(&gd32->irq_lock);
++	spin_lock_init(&gd32->irq_slock);
++	gd32->i2cm_khz = GD32_I2CM_DEFAULT_KHZ;
+ 	gd32->wifi_bt_reg_on_status = -EPROBE_DEFER;	/* not yet resolved */
+ 	gd32->io_ext_status = -EPROBE_DEFER;
+ 	gd32->cam_ldo_status = -EPROBE_DEFER;
+@@ -1244,6 +1828,15 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+ 	gd32->chip.get_direction    = gd32_bridge_gpio_get_dir;
+ 	gd32->chip.can_sleep	  = true;
+ 
++	/* Polled irqchip with nested threaded handlers (no parent interrupt). */
++	gpio_irq_chip_set_chip(&gd32->chip.irq, &gd32_bridge_irq_chip);
++	gd32->chip.irq.parent_handler = NULL;
++	gd32->chip.irq.num_parents = 0;
++	gd32->chip.irq.parents = NULL;
++	gd32->chip.irq.default_type = IRQ_TYPE_NONE;
++	gd32->chip.irq.handler = handle_simple_irq;
++	gd32->chip.irq.threaded = true;
++
+ 	ret = devm_gpiochip_add_data(&client->dev, &gd32->chip, gd32);
+ 	if (ret)
+ 		return ret;
+@@ -1272,6 +1865,16 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+ 				   msecs_to_jiffies(GD32_RESOLVE_POLL_PERIOD_MS));
+ 
+ 	i2c_set_clientdata(client, gd32);
++
++	/*
++	 * Last, so devm unwinds it first: the adapter's child clients (touch
++	 * controller, DSI bridge) use this gpiochip and may probe immediately.
++	 */
++	ret = gd32_bridge_i2c_register(gd32);
++	if (ret)
++		/* Not fatal: the GPIO lines (panel reset, Wi-Fi REG_ON) must
++		 * not depend on the proxy adapter registering. */
++		dev_err(&client->dev, "I2C3 proxy adapter not registered (%d)\n", ret);
+ 	return 0;
+ }
+ 
+-- 
+2.53.0

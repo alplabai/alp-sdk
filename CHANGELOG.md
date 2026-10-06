@@ -7,6 +7,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Added — Linux GD32 bridge I2C3 proxy, polled irqchip, CAM_EN_LDO and CAN_STBY lines
+
+The kernel side of bridge protocol 0.17 for the V2N-family SoMs. `gpio-gd32-bridge`
+gains an I2C adapter for E1M-X I2C3 (GD32 `PC8`/`PC9`, `i2c3`), a polled
+interrupt controller (10 ms `GPIO_READ`, short edges are missed), `cam-en-ldo0..3`
+as gpio lines 24..27 and a requestable `can-stby` (line 20). Kernel consumers of
+those lines get `-EPROBE_DEFER` while the bridge is silent, and I2C3 transfers
+wait up to 1 s for the bridge to answer. A PWM provider is not included: the
+firmware's I2C link does not allow `PWM_SET`/`PWM_GET`. See
+`docs/gd32-bridge-protocol.md`.
+
 ### Fixed — `cc3501e_ble_enable()` honours the caller's timeout instead of flooring it to 90 s
 
 `cc3501e_ble_enable()` raised any budget below `CC3501E_BLE_ENABLE_WINDOW_MS`

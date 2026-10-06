@@ -32,8 +32,9 @@
  * enable / reset GPIOs (XEVK_PIN_CAM0_EN / _RST are E1M pads, SoC pins
  * TBD; the mux select IS hogged below via the GD32 bridge) and the GD32-owned camera LDO enables.  The
  * sensor is therefore not power-sequenced by Linux; it must come up from
- * the carrier defaults.  CAM1 is not wired: its control bus (E1M-X I2C3)
- * terminates on the GD32 bridge, not on a Linux I2C master.
+ * the carrier defaults.  CAM1 is not wired here: its control bus (E1M-X I2C3,
+ * shared with the J6 display I2C) is the GD32 bridge I2C proxy
+ * adapter (e1m_x_i2c3).
  *
  * The sensor node also omits VANA/VDIG/VDDL-supply, which the sony,imx219
  * binding requires (the real rails are the GD32-owned camera LDOs, not

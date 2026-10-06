@@ -69,6 +69,13 @@ SUDO=""
 if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo"; fi
 
 ACQ=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)
+# Optional .deb cache (#2429): a step that restores a cache dir points
+# APT_ARCHIVE_DIR at it, so `install` reuses the .debs instead of fetching them.
+# Unset = apt's default archive dir. A cold (empty) dir is just a normal fetch.
+if [ -n "${APT_ARCHIVE_DIR:-}" ]; then
+  mkdir -p "${APT_ARCHIVE_DIR}/partial"
+  ACQ+=(-o "Dir::Cache::archives=${APT_ARCHIVE_DIR}")
+fi
 
 rc=0
 attempts_made=0
