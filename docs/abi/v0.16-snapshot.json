@@ -14083,8 +14083,8 @@
           "value": "2u"
         },
         "ALP_GD32_RESULTS_LAYOUT": {
-          "hash": "8d770a4847b32c57",
-          "value": "1u"
+          "hash": "0046899763dbdb32",
+          "value": "2u"
         },
         "ALP_GD32_RESULTS_MAGIC": {
           "hash": "705b61e60eb77f97",
@@ -14140,7 +14140,7 @@
           "kind": "struct"
         },
         "alp_gd32_results_t": {
-          "definition": "typedef struct { uint32_t magic; uint32_t layout; uint32_t seq; uint32_t kind; uint32_t state; uint32_t tests_pass; uint32_t tests_fail; uint32_t tests_skip; uint32_t fw_version; uint32_t features; uint32_t max_payload; uint32_t flags; uint32_t read2_first; uint32_t read2_dropped; uint32_t read2_gaps; uint32_t soak_cycles; uint32_t soak_errors; uint32_t soak_timeouts; uint32_t soak_elapsed_s; uint32_t reserved; } alp_gd32_results_t;",
+          "definition": "typedef struct { uint32_t magic; uint32_t layout; uint32_t seq; uint32_t kind; uint32_t state; uint32_t tests_pass; uint32_t tests_fail; uint32_t tests_skip; uint32_t fw_version; uint32_t features; uint32_t max_payload; uint32_t flags; uint32_t read2_first; uint32_t read2_dropped; uint32_t read2_gaps; uint32_t soak_cycles; uint32_t soak_errors; uint32_t soak_timeouts; uint32_t soak_elapsed_s; uint32_t fail_mask; } alp_gd32_results_t;",
           "fields": [
             "uint32_t magic",
             "uint32_t layout",
@@ -14161,9 +14161,9 @@
             "uint32_t soak_errors",
             "uint32_t soak_timeouts",
             "uint32_t soak_elapsed_s",
-            "uint32_t reserved"
+            "uint32_t fail_mask"
           ],
-          "hash": "19f6b053a05647a0",
+          "hash": "a79a602fe5353848",
           "kind": "struct"
         }
       },

@@ -49,7 +49,7 @@ extern "C" {
 /** Record magic, ASCII "GD3R" read as a big-endian number. */
 #define ALP_GD32_RESULTS_MAGIC 0x47443352u
 /** Layout version; bumped when a word moves or changes meaning. */
-#define ALP_GD32_RESULTS_LAYOUT 1u
+#define ALP_GD32_RESULTS_LAYOUT 2u
 /** Record size in 32-bit words. */
 #define ALP_GD32_RESULTS_WORDS 20u
 
@@ -106,7 +106,9 @@ typedef struct {
 	uint32_t soak_errors;    /**< Soak: failed test executions (any status). */
 	uint32_t soak_timeouts;  /**< Soak: lost ATTN edges (fallbacks to the 0.14 drain rule). */
 	uint32_t soak_elapsed_s; /**< Soak: seconds since the first cycle began. */
-	uint32_t reserved;       /**< 0. */
+	uint32_t fail_mask;      /**< Bit i set = test row i (index into the app's test table) failed:
+	                              *   functional: that test failed; soak: that row failed at least once
+	                              *   since start.  Rows >= 32 are not reported. */
 } alp_gd32_results_t;
 
 #ifdef __cplusplus

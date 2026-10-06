@@ -34,6 +34,7 @@ WINDOW = 0x4F700000  # A55 view of the OpenAMP rsctbl window
 RESULTS_OFFSET = 0xF00
 BEACON_OFFSET = 0xFF0
 MAGIC = 0x47443352
+LAYOUT = 2
 BEACON_MAGIC = 0xA10D0683
 BEACON_KIND = 0x200  # a result-publishing image; the idle shim is 0x100
 WORDS = 20
@@ -47,7 +48,7 @@ FIELDS = (
     "magic", "layout", "seq", "kind", "state", "tests_pass", "tests_fail",
     "tests_skip", "fw_version", "features", "max_payload", "flags",
     "read2_first", "read2_dropped", "read2_gaps", "soak_cycles",
-    "soak_errors", "soak_timeouts", "soak_elapsed_s", "reserved",
+    "soak_errors", "soak_timeouts", "soak_elapsed_s", "fail_mask",
 )
 # Word order of alp_gd32_fault_t; the same test pins this to the C header.
 FAULT_FIELDS = (
@@ -57,6 +58,25 @@ FAULT_FIELDS = (
 KINDS = {1: "functional", 2: "soak"}
 LINK_PENDING = 0
 STATES = {LINK_PENDING: "link-not-up", 1: "running", 2: "done", 0xDEAD: "no-link"}
+# Row index -> name for fail_mask, in the order of each app's test table;
+# tests/scripts/test_gd32_results_reader.py pins both lists to the C sources.
+ROWS = {
+    "functional": (
+        "tmu_sqrt_4", "tmu_sqrt_2", "tmu_sin_0", "tmu_sin_pi_2", "tmu_sin_pi_6",
+        "tmu_cos_0", "tmu_cos_pi", "tmu_cos_pi_3", "tmu_atan", "tmu_atan2",
+        "tmu_hypot", "tmu_log", "tmu_sinh", "tmu_cosh", "tmu_tan_nosupport",
+        "tmu_exp_nosupport", "tmu_tanh_nosupport", "tmu_q31_sqrt", "trng_lengths",
+        "pwm_set_get", "pwm_configure", "adc_configure_error", "adc_all_channels",
+        "link_features", "adc_stream2", "batch", "dsp_chain", "version_stable",
+        "da9292_sentinel",
+    ),
+    "soak": (
+        "ping", "get_version", "get_build_id", "reset_reason", "gpio", "pwm_set_get",
+        "pwm_single_pulse", "pwm_capture", "adc_read", "adc_stream", "adc_stream_guard",
+        "dac", "qenc", "counter", "trng", "tmu", "timer_sync", "power_mode",
+        "da9292_sentinel", "ota_get_state", "adc_stream2", "batch",
+    ),
+}
 FLAGS = {
     1 << 0: "attn_granted", 1 << 1: "attn_active", 1 << 2: "attn_fallback",
     1 << 3: "batch_ok", 1 << 4: "stream2_ok",
@@ -66,12 +86,15 @@ FLAGS = {
 def decode(raw, beacon=None):
     """raw: 80 bytes of the record -> dict, or None when magic/layout is wrong."""
     rec = dict(zip(FIELDS, struct.unpack("<%dI" % WORDS, raw)))
-    if rec["magic"] != MAGIC or rec["layout"] != 1:
+    if rec["magic"] != MAGIC or rec["layout"] != LAYOUT:
         return None
     rec["kind_name"] = KINDS.get(rec["kind"], "unknown")
     rec["state_name"] = STATES.get(rec["state"], "unknown")
     v = rec["fw_version"]
     rec["fw"] = "%d.%d.%d" % (v >> 16, (v >> 8) & 0xFF, v & 0xFF)
+    rec["fail_rows"] = [i for i in range(32) if rec["fail_mask"] >> i & 1]
+    names = ROWS.get(rec["kind_name"], ())
+    rec["fail_row_names"] = [names[i] if i < len(names) else "row%d" % i for i in rec["fail_rows"]]
     rec["flag_names"] = [n for b, n in FLAGS.items() if rec["flags"] & b]
     if beacon is not None:
         rec["beacon_magic_ok"] = beacon[0] == BEACON_MAGIC
@@ -183,6 +206,8 @@ def main(argv):
     else:
         for k in FIELDS[3:-1]:
             print("%-16s %s" % (k, rec[k]))
+        print("%-16s %s" % ("fail_rows", rec["fail_rows"]))
+        print("%-16s %s" % ("fail_row_names", ",".join(rec["fail_row_names"]) or "-"))
         print("%-16s %s" % ("flag_names", ",".join(rec["flag_names"]) or "-"))
     return 0
 
