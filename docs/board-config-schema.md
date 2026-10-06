@@ -306,7 +306,7 @@ with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 #### Preset mode (SDK-internal shortcut)
 
 Most example projects under `examples/` target the EVK or X-EVK
-(102 do today — 76 on `e1m-evk`, 26 on `e1m-x-evk`), so they share a
+(103 do today — 76 on `e1m-evk`, 27 on `e1m-x-evk`), so they share a
 single board definition each via the `preset:` field:
 
 ```yaml
@@ -722,7 +722,7 @@ hidden:
   (no invented Kconfig); emit renders the selection tag with no
   `CONFIG_` line until the module is added to `west.yml`.
 - **ROS 2 is Tier B (recipe-only)**: its wiring is grounded in
-  `meta-alp-sdk` (`rclcpp`; `meta-ros2-humble` as a `LAYERRECOMMENDS`),
+  `meta-alp-sdk` (`rclcpp`; collection `ros2-humble-layer` as a `LAYERRECOMMENDS`),
   but alp-sdk CI does not build it, and a build must add
   `meta-ros2-humble` to `bblayers.conf`.
 - The **cross-core RMW bridge** that carries ROS topics between the two

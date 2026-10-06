@@ -12,7 +12,7 @@ flip between `allow`/`guarded`/`deny`, built and tested clean with no error.
 The new gate, `scripts/check_chip_reg_parity.py:4` ("Cross-check a chip"),
 hand-parses each driver's raw-write allow surface and per-rail/per-channel
 register `#define`s or macro-computed offsets and diffs them against the
-manifest, wired into `.github/workflows/pr-metadata-validate.yml:545` ("check_chip_reg_parity.py") and `metadata/quality-tasks-v1.json`'s `chip-reg-parity` task.
+manifest, wired into `.github/workflows/pr-metadata-validate.yml:548` ("check_chip_reg_parity.py") and `metadata/quality-tasks-v1.json`'s `chip-reg-parity` task.
 
 Not done here: `chip-v1.schema.json` typing `rails[]`/`channels[]`/
 `register_table[]` items (also proposed in #2347) touches all 88 chip

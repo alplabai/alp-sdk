@@ -268,6 +268,9 @@ jobs:
       # field (#1157), and neither side could see the other -- which is
       # how the usb20 OVC gpio-hog silently clobbered the CM33's live
       # SCK7 mux on P9.6 (errata E3) until a bench session found it.
+      # Also runs the full pass (resolved board.yaml `ownership:` + the
+      # generated Linux fragment) for every V2N-family examples/**/board.yaml
+      # (#2660).
       - name: Check no Linux DT pad claim lands on a CM33-owned pad
         run: python3 scripts/check_amp_pad_claims.py
 

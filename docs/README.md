@@ -100,6 +100,9 @@ into the topic-specific docs.
   symptom + recovery.
 - [bring-up-v2n.md](bring-up-v2n.md) — Renesas RZ/V2N.
 - [bring-up-v2n-m1.md](bring-up-v2n-m1.md) — V2N + DEEPX.
+- [bring-up-ros2.md](bring-up-ros2.md) — ROS 2 Humble on the V2N/V2M A55
+  (upstream meta-ros + Renesas rzv_ros, opt-in `ALP_ENABLE_ROS2`,
+  portable-API example node).  BENCH-UNVERIFIED.
 - [v2n-mali-gpu.md](v2n-mali-gpu.md) — the RZ/V2N Mali-G31: kernel +
   vendor EGL/GLES stack, the `<alp/gpu2d.h>` GPU backend, image wiring,
   licence placement, build steps. Bench-unverified.

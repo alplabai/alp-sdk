@@ -3188,6 +3188,36 @@
           }
         ],
         "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
+        "name": "v2n-ros2-som-temperature",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
+        "path": "examples/v2n/v2n-ros2-som-temperature",
+        "som": "E1M-V2N101",
+        "summary": "The smallest useful Alp SDK + ROS 2 node. It calls the **portable temperature API** from `<alp/temperature.h>` and republishes the values as `sensor_msgs/Temperature`: the SoC die temperature on `/alp/soc_temperature` (real on V2N/V2M Linux) and the on-module sensor on `/alp/som_temperature`."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
           "chips": true,
           "ipc": false,
           "models": false,
