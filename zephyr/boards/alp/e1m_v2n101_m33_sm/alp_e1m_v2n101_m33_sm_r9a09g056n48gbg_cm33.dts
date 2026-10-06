@@ -134,8 +134,19 @@
 	status = "okay";
 };
 
+/*
+ * ATTN (P71) interrupt: the RZ GPIO driver routes a pin to a TINT slot through
+ * the port's `irqs`; without it alp_gpio_irq_enable() has no route and the
+ * supervisor stays on the staging-gap fallback.  The slot is a shared ICU
+ * resource, claimed here for the CM33 (supervisor-links.yaml gd32_pads.attn).
+ */
+&tint31 {
+	status = "okay";
+};
+
 &gpio7 {
 	status = "okay";
+	irqs = <&tint31 1>;
 };
 
 /*
