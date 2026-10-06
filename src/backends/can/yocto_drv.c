@@ -385,10 +385,16 @@ static void *_rx_loop(void *arg)
  * which channel a netdev is.  The generated ownership dtsi
  * (scripts/gen_linux_ownership_dt.py, from core-ownership.yaml + the SoC
  * JSON linux_dt channels) therefore carries a root property
- * `alp,e1m-can-netdev = "can1", "can0";` indexed by E1M bus id.  Absent
- * (every SoM that does not publish it) or an empty/short entry falls back
- * to the literal "can<bus_id>".  Test hook: path pointer. */
-static const char *g_can_test_netdev_map_path = "/proc/device-tree/alp,e1m-can-netdev";
+ * `alp,e1m-can-netdev = "can1", "can0";` indexed by E1M bus id.
+ *
+ * Property ABSENT (every SoM that does not publish it): literal
+ * "can<bus_id>".  Property PRESENT: it is authoritative -- an empty or
+ * missing entry means "no netdev for this bus", never a fallback to
+ * can<bus_id>, which would reopen the swapped port.  The path is a
+ * compile-time constant; tests override it with -DALP_CAN_NETDEV_MAP_PATH. */
+#ifndef ALP_CAN_NETDEV_MAP_PATH
+#define ALP_CAN_NETDEV_MAP_PATH "/proc/device-tree/alp,e1m-can-netdev"
+#endif
 
 /* Pick entry @p bus_id from a NUL-separated string list.  0 = found and
  * non-empty (copied to out), -1 = no usable entry. */
@@ -407,16 +413,22 @@ static int y_can_netdev_from_map(const char *map, size_t len, unsigned bus_id, c
 	return -1;
 }
 
-static void y_can_netdev_name(unsigned bus_id, char *out, size_t cap)
+/* Resolve the netdev name for @p bus_id.  ALP_OK, ALP_ERR_NOT_READY (property
+ * present but no usable entry, or unreadable/oversized), or ALP_ERR_INVAL. */
+static alp_status_t y_can_netdev_name(unsigned bus_id, char *out, size_t cap)
 {
-	char map[64];
-	FILE *f = fopen(g_can_test_netdev_map_path, "rb");
-	if (f != NULL) {
-		size_t n = fread(map, 1, sizeof(map), f);
-		fclose(f);
-		if (y_can_netdev_from_map(map, n, bus_id, out, cap) == 0) return;
+	char  map[64]; /* 2 entries today; a longer property is rejected below */
+	FILE *f = fopen(ALP_CAN_NETDEV_MAP_PATH, "rb");
+	if (f == NULL) {
+		if (errno != ENOENT) return ALP_ERR_NOT_READY; /* present but unreadable */
+		int k = snprintf(out, cap, "can%u", bus_id);
+		return (k < 0 || (size_t)k >= cap) ? ALP_ERR_INVAL : ALP_OK;
 	}
-	snprintf(out, cap, "can%u", bus_id);
+	size_t n   = fread(map, 1, sizeof(map), f);
+	int    bad = ferror(f) || !feof(f); /* !feof: map longer than the buffer, truncated */
+	fclose(f);
+	if (bad) return ALP_ERR_NOT_READY;
+	return y_can_netdev_from_map(map, n, bus_id, out, cap) == 0 ? ALP_OK : ALP_ERR_NOT_READY;
 }
 
 /**
@@ -441,7 +453,8 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 	if (cfg == NULL) return ALP_ERR_INVAL;
 
 	char ifname[IFNAMSIZ];
-	y_can_netdev_name((unsigned)cfg->bus_id, ifname, sizeof(ifname));
+	alp_status_t ns = y_can_netdev_name((unsigned)cfg->bus_id, ifname, sizeof(ifname));
+	if (ns != ALP_OK) return ns;
 	size_t k = strlen(ifname);
 
 	int fd = socket(PF_CAN, SOCK_RAW | SOCK_CLOEXEC, CAN_RAW);

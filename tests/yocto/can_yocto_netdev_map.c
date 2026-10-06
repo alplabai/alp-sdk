@@ -4,9 +4,12 @@
  *
  * Issue #2352: the Yocto CAN backend must resolve an E1M bus id to the
  * Linux netdev published in the devicetree property
- * `alp,e1m-can-netdev` (a NUL-separated string list indexed by bus id),
- * and fall back to "can<bus_id>" when the property is absent or has no
- * usable entry for that bus.  #includes yocto_drv.c (no socket needed).
+ * `alp,e1m-can-netdev` (a NUL-separated string list indexed by bus id).
+ * It falls back to "can<bus_id>" ONLY when the property is absent; a
+ * present property with no usable entry for the bus is a failure
+ * (falling back would reopen the swapped port).  #includes yocto_drv.c
+ * (no socket needed); CMake points ALP_CAN_NETDEV_MAP_PATH at a file in
+ * the build dir, which this test rewrites per case.
  *
  * Build + run:
  *   cmake -B build -DALP_OS=yocto -DALP_BUILD_TESTS=ON
@@ -26,16 +29,18 @@ void alp_can_close_finalize(void *owner)
 	(void)owner;
 }
 
-static void name_via_file(const char *bytes, size_t n, unsigned bus, char *out, size_t cap)
+static void put_map(const char *bytes, size_t n)
 {
-	const char *path = "alp_can_netdev_map.tmp";
-	FILE       *f    = fopen(path, "wb");
+	FILE *f = fopen(ALP_CAN_NETDEV_MAP_PATH, "wb");
 	ALP_ASSERT_TRUE(f != NULL);
+	if (f == NULL) return;
 	fwrite(bytes, 1, n, f);
 	fclose(f);
-	g_can_test_netdev_map_path = path;
-	y_can_netdev_name(bus, out, cap);
-	remove(path);
+}
+
+static alp_status_t resolve(unsigned bus, char *out, size_t cap)
+{
+	return y_can_netdev_name(bus, out, cap);
 }
 
 int main(void)
@@ -55,17 +60,28 @@ int main(void)
 	ALP_ASSERT_EQ_INT(y_can_netdev_from_map(holey, sizeof(holey), 1, out, sizeof(out)), 0);
 	ALP_ASSERT_EQ_INT(y_can_netdev_from_map("can0", 4, 0, out, sizeof(out)), -1);
 
-	/* End to end through the file read. */
-	name_via_file(swapped, sizeof(swapped), 0, out, sizeof(out));
+	/* Property present: it is authoritative. */
+	put_map(swapped, sizeof(swapped));
+	ALP_ASSERT_EQ_INT(resolve(0, out, sizeof(out)), ALP_OK);
 	ALP_ASSERT_TRUE(strcmp(out, "can1") == 0);
-	name_via_file(holey, sizeof(holey), 0, out, sizeof(out)); /* empty -> fallback */
+	ALP_ASSERT_EQ_INT(resolve(1, out, sizeof(out)), ALP_OK);
 	ALP_ASSERT_TRUE(strcmp(out, "can0") == 0);
-	name_via_file(swapped, sizeof(swapped), 3, out, sizeof(out)); /* beyond map -> fallback */
-	ALP_ASSERT_TRUE(strcmp(out, "can3") == 0);
+	/* empty entry and a bus beyond the map: failure, NOT can<bus_id>. */
+	put_map(holey, sizeof(holey));
+	ALP_ASSERT_EQ_INT(resolve(0, out, sizeof(out)), ALP_ERR_NOT_READY);
+	put_map(swapped, sizeof(swapped));
+	ALP_ASSERT_EQ_INT(resolve(3, out, sizeof(out)), ALP_ERR_NOT_READY);
+	/* a map longer than the read buffer is rejected, not silently truncated. */
+	char big[200];
+	memset(big, 'x', sizeof(big));
+	put_map(big, sizeof(big));
+	ALP_ASSERT_EQ_INT(resolve(0, out, sizeof(out)), ALP_ERR_NOT_READY);
 
-	/* No property at all (non-V2N SoMs): literal can<bus_id>. */
-	g_can_test_netdev_map_path = "alp_can_netdev_map.does-not-exist";
-	y_can_netdev_name(1, out, sizeof(out));
+	/* Property absent (non-V2N SoMs): literal can<bus_id>. */
+	remove(ALP_CAN_NETDEV_MAP_PATH);
+	ALP_ASSERT_EQ_INT(resolve(1, out, sizeof(out)), ALP_OK);
 	ALP_ASSERT_TRUE(strcmp(out, "can1") == 0);
+	ALP_ASSERT_EQ_INT(resolve(3, out, sizeof(out)), ALP_OK);
+	ALP_ASSERT_TRUE(strcmp(out, "can3") == 0);
 	ALP_TEST_SUMMARY();
 }

@@ -1506,6 +1506,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
     )
     target_compile_features(alp_test_can_yocto_netdev_map PRIVATE c_std_99)
+    target_compile_definitions(alp_test_can_yocto_netdev_map PRIVATE
+        ALP_CAN_NETDEV_MAP_PATH="${CMAKE_CURRENT_BINARY_DIR}/can_netdev_map.tmp")
 
     add_test(NAME alp_test_can_yocto_netdev_map
              COMMAND alp_test_can_yocto_netdev_map)

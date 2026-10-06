@@ -77,21 +77,29 @@ def cm33_clocks(doc: dict, soc: dict, links: dict, own: dict[str, str]) -> list[
     return clocks
 
 
+def _can_channels(doc: dict, soc: dict, own: dict[str, str]) -> tuple[dict[int, int], str]:
+    """({E1M CAN bus id: SoC channel Linux drives}, shared controller label).
+    Driven = a55-owned and not hw_blocked (m33 ones are disabled, hw_blocked
+    ones untouched)."""
+    linux_dt = soc.get("linux_dt") or {}
+    cans: dict[int, int] = {}
+    label = ""
+    for inst, e in doc["assignable"].items():
+        m = re.fullmatch(r"e1m_can(\d+)", inst)
+        ld = linux_dt.get(e.get("soc_instance")) or {}
+        if m and ld.get("channel") is not None and own[inst] == "a55" and not e.get("hw_blocked"):
+            cans[int(m.group(1))], label = ld["channel"], ld["label"]
+    return cans, label
+
+
 def can_netdev_map(doc: dict, soc: dict, own: dict[str, str]) -> list[str]:
     """Linux netdev per E1M CAN bus id (index = N of `e1m_canN`), "" = none.
 
     rcar_canfd names netdevs `can0..` in probe order of the enabled channels
     (ascending channel), and exposes no channel id at runtime (#2352), so the
-    name is the rank of the instance's SoC channel among the channels Linux
-    drives here: a55-owned, not hw_blocked (m33/hw_blocked ones are disabled
-    or untouched).  Assumes the vendor dtsi enables no other channel."""
-    linux_dt = soc.get("linux_dt") or {}
-    cans: dict[int, int] = {}
-    for inst, e in doc["assignable"].items():
-        m = re.fullmatch(r"e1m_can(\d+)", inst)
-        chan = (linux_dt.get(e.get("soc_instance")) or {}).get("channel")
-        if m and chan is not None and own[inst] == "a55" and not e.get("hw_blocked"):
-            cans[int(m.group(1))] = chan
+    name is the rank of the instance's SoC channel among the driven channels.
+    `render` forces every OTHER channel node disabled, so rank == enabled order."""
+    cans, _ = _can_channels(doc, soc, own)
     if not cans:
         return []
     ranked = sorted(cans.values())
@@ -180,6 +188,16 @@ def render(doc: dict, soc: dict, links: dict,
     labels.add("cpg")
     nd = can_netdev_map(doc, soc, own)
     if nd:
+        cans, clabel = _can_channels(doc, soc, own)
+        off = [c for c in range(int((soc.get("peripherals") or {}).get("can_fd", 0)))
+               if c not in cans.values()]
+        if off:
+            body = "\n".join(f'\tchannel{c} {{\n\t\tstatus = "disabled";\n\t}};\n' for c in off)
+            out += ("\n/*\n * Every CAN-FD channel Linux does not drive is disabled explicitly: rcar_canfd\n"
+                    " * numbers netdevs by probe order of the ENABLED channels, so the netdev map\n"
+                    " * below holds only if no other channel is enabled (#2352).\n */\n"
+                    f"&{clabel} {{\n{body}}};\n")
+            labels.update(f"{clabel}/channel{c}" for c in off)
         names = ", ".join(f'"{n}"' for n in nd)
         out += ("\n/*\n * Linux netdev per E1M CAN bus id (index = N of E1M_X_CANN): rcar_canfd numbers\n"
                 " * netdevs by probe order, not by channel, so the SDK's SocketCAN backend reads\n"

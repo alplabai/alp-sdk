@@ -34,6 +34,29 @@
 };
 
 /*
+ * Every CAN-FD channel Linux does not drive is disabled explicitly: rcar_canfd
+ * numbers netdevs by probe order of the ENABLED channels, so the netdev map
+ * below holds only if no other channel is enabled (#2352).
+ */
+&canfd {
+	channel0 {
+		status = "disabled";
+	};
+
+	channel1 {
+		status = "disabled";
+	};
+
+	channel4 {
+		status = "disabled";
+	};
+
+	channel5 {
+		status = "disabled";
+	};
+};
+
+/*
  * Linux netdev per E1M CAN bus id (index = N of E1M_X_CANN): rcar_canfd numbers
  * netdevs by probe order, not by channel, so the SDK's SocketCAN backend reads
  * this instead of assuming can<N> (#2352).

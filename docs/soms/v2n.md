@@ -232,8 +232,9 @@ not readable at runtime (`dev_id`/`dev_port` read 0), so the generated ownership
 dtsi publishes the map as the root property `alp,e1m-can-netdev = "can1", "can0";`
 (index = E1M bus id; the rank of each a55-owned CAN instance's SoC channel in
 `metadata/socs/renesas/rzv2n/*.json` `linux_dt`), and `alp_can_open()` on Yocto
-reads `/proc/device-tree/alp,e1m-can-netdev`, falling back to `can<bus_id>` when
-it is absent. It assumes the vendor dtsi enables no other CANFD channel. Which
+reads `/proc/device-tree/alp,e1m-can-netdev`, falling back to `can<bus_id>` only when
+the property is absent (a present property with no entry for the bus fails the open).
+The same dtsi disables CANFD channels 0/1/4/5 explicitly so the rank equals the enabled order. Which
 physical port moves is not yet bench-verified.
 
 A `board.yaml` `ownership:` entry may differ from the SoM default only where

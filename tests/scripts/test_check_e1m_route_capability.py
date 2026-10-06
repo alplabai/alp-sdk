@@ -76,3 +76,9 @@ def test_live_route_capability_gate_passes() -> None:
 
     assert proc.returncode == 0, proc.stderr
     assert "e1m-x-evk <-> v2n" in proc.stdout
+
+
+def test_v2n_canfd_channels_map_to_the_right_e1m_bus() -> None:
+    """E1M CAN0 = CANFD3 (B21/B22), CAN1 = CANFD2 (B24/B25); see #2352."""
+    assert route_capability._v2n_function_aliases("CANFD3_CRX3") == ["CAN0_RX"]
+    assert route_capability._v2n_function_aliases("CANFD2_CTX2") == ["CAN1_TX"]
