@@ -3604,6 +3604,7 @@
         "alp_adc_filter_read_mv",
         "alp_adc_open",
         "alp_adc_read_raw",
+        "alp_adc_read_raw_n",
         "alp_adc_read_uv",
         "alp_adc_spectrum_close",
         "alp_adc_spectrum_open",

@@ -483,6 +483,15 @@ GD32 reset that also wedges or resets the Murata module itself still
 needs the normal Linux driver-level recovery, on top of the pin being
 re-asserted.
 
+**I2C error replies and multi-line requests (Linux driver):** an error
+reply on I2C is `[STATUS][CRC]` (3 bytes, no payload), so the driver decodes
+that short shape before judging the full-width CRC, and maps the status to an
+errno (`BUSY` -> `-EBUSY`, retried a bounded number of times; `NOT_READY` ->
+`-EAGAIN`; `TIMEOUT` -> `-ETIMEDOUT`; `NOSUPPORT` -> `-EOPNOTSUPP`). The
+gpiochip implements `.get_multiple` / `.set_multiple`, so a multi-line request
+is one `GPIO_READ` / `GPIO_WRITE` transaction (line 21, `SE_RST`, stays a
+separate `SE_RESET`).
+
 **Shared-bus caveat:** BRD_I2C (`i2c8`) may be multi-mastered -- the
 CM33 also owns a device on it (DA9292 @ `0x1E`). Arbitration loss on a
 contended bus surfaces to the replay as an ordinary transfer failure

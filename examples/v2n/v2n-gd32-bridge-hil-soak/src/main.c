@@ -89,7 +89,7 @@ static bool t_ping(soak_stat_t *st)
 static bool t_get_version(soak_stat_t *st)
 {
 	gd32g553_version_t v = { 0 };
-	const alp_status_t s = gd32g553_get_version(&ctx, &v);
+	const alp_status_t s = gd32g553_refresh_version(&ctx, &v);
 	if (s != ALP_OK) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "status=%d", (int)s);
@@ -504,7 +504,7 @@ static bool              t_counter(soak_stat_t *st)
      * stale-reply masquerade before the asserted second read. */
 	{
 		gd32g553_version_t v = { 0 };
-		(void)gd32g553_get_version(&ctx, &v);
+		(void)gd32g553_refresh_version(&ctx, &v);
 	}
 
 	s = gd32g553_counter_read(&ctx, 0u, &b);
