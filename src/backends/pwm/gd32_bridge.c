@@ -247,7 +247,8 @@ static void br_close(alp_pwm_backend_state_t *st)
 {
 	if (st->be_data != NULL) {
 		/* Release the timer claim so a sibling channel's single-pulse is not
-		 * left BUSY.  Old firmware answers an error; nothing to do about it. */
+		 * left BUSY.  Firmware below protocol 0.17 gives NOSUPPORT and
+		 * nothing is sent; any other error is not actionable here. */
 		gd32g553_t *ctx = NULL;
 		if (alp_z_v2n_supervisor_acquire(&ctx) == ALP_OK) {
 			(void)gd32g553_pwm_stop(ctx, ((gd32_pwm_state_t *)st->be_data)->channel_id);

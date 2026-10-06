@@ -104,8 +104,9 @@ K_TIMER_DEFINE(beacon_timer, beacon_tick, NULL);
  * k_sys_fatal_error_handler() lets us leave the faulting PC/LR/xPSR and the
  * SCB fault status in the `rsctbl` window (layout: alp_gd32_fault_t) for
  * `read_gd32_results.py --fault`, then park the core with IRQs off, exactly
- * as the default handler would.  Keep it free of kernel calls and locks: the
- * kernel state may be what is broken. */
+ * as the default handler would.  Keep it to low-risk reads (thread name, current
+ * thread, uptime) and take no locks and make no blocking calls: the kernel
+ * state may be what is broken. */
 static uint32_t fault_thread_hash(void)
 {
 	const char *n = k_thread_name_get(k_current_get());

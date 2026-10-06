@@ -276,6 +276,14 @@ extern "C" {
  *  See docs/gd32-bridge-protocol.md's version-history table. */
 #define GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR 15u
 
+/** Minimum protocol MINOR that implements `PWM_SET` period 0 / duty 0 as
+ *  "stop + release the channel's timer claim" (see @ref gd32g553_pwm_stop).
+ *  Older firmware does NOT reject period 0: it computes `ARR = period - 1`
+ *  from it, retunes the timer's shared 16-bit ARR and answers success, so
+ *  sibling channels are silently re-timed.  Never send period 0 below this
+ *  minor; gd32g553_pwm_stop() returns `ALP_ERR_NOSUPPORT` instead. */
+#define GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR 17u
+
 /** v0.7 link-feature bits (CMD_LINK_FEATURES payload).  STATUS_SEQ:
  *  once granted, every SPI reply's STATUS byte carries a 4-bit
  *  slave-side sequence stamp in bits [7:4] that advances per freshly
@@ -822,9 +830,11 @@ gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t 
  *
  *  @param ctx      GD32G553 bridge context (must be initialised first).
  *  @param channel  E1M PWM channel index (0..7).
- *  @return ALP_OK, or the firmware's error (typically ALP_ERR_INVAL)
- *          on firmware that predates stop/release -- harmless to ignore.
- *          Needs the firmware with `PWM_SET` period 0 support. */
+ *  @return ALP_OK, or the firmware's error.  `ALP_ERR_NOSUPPORT`, with
+ *          nothing sent, when the bridge advertises a protocol minor below
+ *          @ref GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR: stop/release ships in
+ *          protocol 0.17, and older firmware would treat period 0 as a
+ *          real period and retune the shared timer. */
 alp_status_t gd32g553_pwm_stop(gd32g553_t *ctx, uint8_t channel);
 
 /** @brief Read back what a PWM channel's timer is ACTUALLY generating.

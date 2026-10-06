@@ -38,10 +38,14 @@ gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t 
 	return ALP_OK;
 }
 
+unsigned stub_pwm_stop_calls;
+uint8_t  stub_pwm_stop_last_channel;
+
 alp_status_t gd32g553_pwm_stop(gd32g553_t *ctx, uint8_t channel)
 {
 	(void)ctx;
-	(void)channel;
+	stub_pwm_stop_calls++;
+	stub_pwm_stop_last_channel = channel;
 	return ALP_OK;
 }
 

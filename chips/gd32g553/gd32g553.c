@@ -1130,6 +1130,8 @@ gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t 
 alp_status_t gd32g553_pwm_stop(gd32g553_t *ctx, uint8_t channel)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	/* Older firmware reads period 0 as ARR = 0xFFFFFFFF and retunes the shared timer. */
+	if (ctx->version.minor < GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR) return ALP_ERR_NOSUPPORT;
 	return pwm_set_raw(ctx, channel, 0u, 0u);
 }
 

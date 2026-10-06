@@ -4716,6 +4716,10 @@
           "hash": "e1592b6924d04a0d",
           "value": "0xE1D32000u"
         },
+        "GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR": {
+          "hash": "484c19d018be4957",
+          "value": "17u"
+        },
         "GD32G553_READ2_DROPPED_UNKNOWN": {
           "hash": "3642da382b19575e",
           "value": "0xFFFFFFFFu"
