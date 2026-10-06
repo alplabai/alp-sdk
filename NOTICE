@@ -28,13 +28,16 @@ respective component (under vendors/<name>/ or the referenced upstream).
   the driver's file header); see that file's header for the source
   commit.
 
-- Arm CMSIS — Apache-2.0. Copyright (c) Arm Limited.
-  Bundled with the GD32 firmware library at
-  vendors/gd32_firmware_library/upstream/Firmware/CMSIS/.
-
-- GigaDevice GD32G5x3 Firmware Library — Apache-2.0.
-  Copyright (c) GigaDevice Semiconductor Inc.
-  Git submodule at vendors/gd32_firmware_library/upstream (mirror of v1.5.0).
+- GigaDevice GD32G5x3 Firmware Library (and the Arm CMSIS files bundled in
+  it) — NOT redistributed by this repository.  Copyright (c) GigaDevice
+  Semiconductor Inc. and Arm Limited.  It is a separate component under
+  GigaDevice's own terms (the per-file BSD-3-Clause / Apache-2.0 notices in
+  GigaDevice's official repository,
+  https://github.com/GigaDevice-GD32-MCU/GD32G5x3_Firmware_Library, and the
+  GigaDevice Software License Agreement SLA-GD0001 v1.1 that accompanies
+  GigaDevice's archive).  Alp Lab does not relicense it.  The GD32 bridge
+  firmware (alplabai/gd32-bridge-firmware) fetches it from GigaDevice at
+  build time; see that repository's THIRD_PARTY_NOTICES.md.
 
 - Renesas RZ/V2N DRP-AI TVM / RUHMI compiler — Apache-2.0.
   Copyright (c) Renesas Electronics Corporation.
