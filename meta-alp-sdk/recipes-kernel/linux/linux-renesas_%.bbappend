@@ -115,6 +115,9 @@ python () {
 }
 
 
+# panic.cfg (#2734): CONFIG_PANIC_TIMEOUT=10 -- a panic reboots the board after
+# 10 s instead of hanging forever (panic_timeout defaults to 0).
+#
 # 0020 (PDM clocks, audit MM-02/MM-X2): the V2N CPG driver had no PDM0/PDM1
 # module clocks or resets, so no pdm node could bind.  The patch adds them
 # with V2N parents from the RZ/V2N hardware manual (PCLK = PLLCM33 gear / 2,

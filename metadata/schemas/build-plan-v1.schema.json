@@ -28,6 +28,12 @@
       "enum": ["tokened"],
       "description": "Issue #865, additive under schemaVersion 1 (no bump): 'tokened' means every checkout/project-anchored absolute path this plan would otherwise embed is instead a literal `${SDK_ROOT}` / `${PROJECT_ROOT}` / `${PYTHON}` token (see `env.ALP_SDK_ROOT`, `envAppendPath`, `slices[].appDir`, and the `-DPython3_EXECUTABLE=`/`-DEXTRA_CONF_FILE=`/`-DSB_CONF_FILE=`/`west build`-appdir command args) -- tan-cli (PR #24) substitutes them at materialise time, rather than the SDK baking in this run's absolute checkout path. Required by tan-cli's substitution step; a consumer pinned to a pre-#865 plan shape simply won't see this key."
     },
+    "deferredPlaceholders": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+      "uniqueItems": true,
+      "description": "Issue #2696, additive under schemaVersion 1 (no bump): bare names of the `${NAME}` placeholders this plan leaves unresolved on purpose, sorted. Each is a value the user wrote as `${NAME}` in board.yaml and the planner copied verbatim into a `slices[].configArtefacts[].contents` whose `path` ends in `.conf` (a Kconfig fragment or `local.conf`), for the build host or the device to fill -- e.g. `ota.server.tenant: \"${MENDER_TENANT_TOKEN}\"`. Never a plan path token (`SDK_ROOT`, `PROJECT_ROOT`, `PYTHON`, `TOOLCHAIN_ROOT`), never in a non-`.conf` artefact (CMake would expand it), and never present in `command`, `env`, `envAppendPath`, `appDir`, `postCommands` or `sharedArtefacts`: the emitter refuses to produce a plan that breaks either rule. A consumer must leave these names unsubstituted and must not treat them as unresolved plan tokens. The reference emitter always writes the key (`[]` when there are none), so its absence marks a plan from an emitter that predates this field. A Zephyr config artefact carries a placeholder only on a commented line: Zephyr does not expand `${NAME}` in a Kconfig fragment, so the emitter refuses a live one."
+    },
     "boardYaml": {
       "type": "string",
       "description": "POSIX-style path to the board.yaml this plan was resolved from, as passed to emit_build_plan (issue #596: every relative path elsewhere in the plan is anchored on this file's own directory, never the emitting process's CWD)."

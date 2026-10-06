@@ -382,6 +382,11 @@ def normalize_plan(plan: dict) -> dict:
     # the #863/#871 command-arg addition above) -- drop it rather than diff
     # it; the token-vs-absolute SHAPE it flags is already reconciled above.
     normalized.pop("planPathMode", None)
+    # `deferredPlaceholders` (#2696) is another addition the oracle predates.
+    # It is derived purely from config-artefact CONTENTS, which this
+    # comparator deliberately no longer diffs (`_drop_artefact_contents`
+    # above; the emit-snapshot goldens pin them), so drop it too.
+    normalized.pop("deferredPlaceholders", None)
     return normalized
 
 
