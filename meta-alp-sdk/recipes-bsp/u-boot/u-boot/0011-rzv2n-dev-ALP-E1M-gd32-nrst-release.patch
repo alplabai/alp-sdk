@@ -25,12 +25,13 @@ prints "already released".
 The ACT88760 has no documented device-ID register, so the register
 value is the identity check: the write happens only when reg 0x10 reads
 exactly the early-OTP value 0x88. Any other value is left untouched and
-reported. The recipe applies this patch only on the ALP E1M MACHINEs.
-Each outcome prints one "ALP:" line.
+reported. The patch is applied on the whole rzv2n family (later patches use
+its code as context), so a plain Renesas EVK is only ever read from, never
+written. Each outcome prints one "ALP:" line.
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- board/renesas/rzv2n-dev/rzv2n-dev.c | 67 +++++++++++++++++++++++++++++
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 66 ++++++++++++++++++++++++++++
  1 file changed, 66 insertions(+)
 
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
@@ -57,8 +58,8 @@ index 669b86ee..8aac493a 100644
 + * itself is the identity check: the write happens only when reg 0x10
 + * reads exactly the known early-OTP value 0x88.  Any other value (a
 + * different part answering at 0x25, or an unexpected OTP image) is left
-+ * untouched and only reported.  The recipe applies this patch only on
-+ * the ALP E1M MACHINEs, never the plain Renesas EVK.
++ * untouched and only reported, so a plain Renesas EVK (no ACT88760 at
++ * RIIC8 0x25) is read from but never written to.
 + */
 +#define ALP_ACT88760_I2C_BUS   8	/* DM I2C bus for RIIC8 / BRD_I2C */
 +#define ALP_ACT88760_I2C_ADDR  0x25

@@ -25,6 +25,15 @@
  *      `<alp/soc_caps.h>` / `<alp/cap.h>`, which are generated per-SoC and
  *      would wrongly claim the sensor for every SoM sharing that die.
  *
+ * @par Die temperature.
+ *      alp_temperature_read_die_milli_c() reads the SoC's own junction sensor
+ *      through the upstream Zephyr `die-temp0` alias; it is a SoC fact (the
+ *      alias comes from the SoC / board devicetree), unlike the SoM-level
+ *      ambient part above.
+ *      This repository's SoM board trees do not declare the alias; a SoC or
+ *      board tree must provide it (upstream or vendor tree), else the call
+ *      returns @ref ALP_ERR_NOSUPPORT.
+ *
  * @par Today's coverage.
  *      Implemented on the Zephyr AEN backend only, binding the
  *      metadata-emitted `alp-temp0` devicetree alias through the upstream
@@ -37,6 +46,14 @@
  *      no board devicetree carries a tmp112 node and the SoM preset's own
  *      address is still unverified on real silicon -- returns
  *      @ref ALP_ERR_NOSUPPORT until a consumer needs it there.
+ *
+ * @par SoC die temperature is a separate entry.
+ *      @ref alp_temperature_read_die_milli_c reports the silicon's own
+ *      junction temperature (on V2N/V2M, the Linux thermal zones the
+ *      on-die TSU units feed).  It is a different physical quantity from
+ *      the on-module ambient sensor above and is never folded into
+ *      @ref alp_temperature_read_milli_c (issue #2066), so a SoM can
+ *      have either, both or neither.
  *
  * @code
  * int32_t milli_c;
@@ -86,6 +103,50 @@ extern "C" {
  *          @ref ALP_ERR_IO on a transfer fault while reading.
  */
 alp_status_t alp_temperature_read_milli_c(int32_t *milli_c);
+
+/**
+ * @brief Read the SoC die (junction) temperature, in milli-degrees C. [ABI-EXPERIMENTAL]
+ *
+ * Distinct from @ref alp_temperature_read_milli_c -- that is a SoM-level
+ * ambient sensor, this is the processor's own thermal sensing, which
+ * reads far above ambient under load.  Units and sign match: integer
+ * milli-degrees Celsius, signed.  When the SoC has several die sensors
+ * the hottest one is reported -- the figure a throttling or protection
+ * decision cares about.
+ *
+ * @par Linux (Yocto) reads the kernel thermal zones.
+ *      It reads `/sys/class/thermal/thermal_zone[N]/temp` for every
+ *      zone whose `type` begins with `cpu-thermal` (zones are chosen by
+ *      type, never by index: the index depends on probe order) and
+ *      returns the hottest.  The kernel owns the TSU; nothing here
+ *      touches its registers.
+ *
+ * @par Zephyr binds the UPSTREAM `die-temp0` devicetree alias.
+ *      It goes through the upstream sensor API (`SENSOR_CHAN_DIE_TEMP`),
+ *      so any SoC or board tree that declares an upstream
+ *      die-temperature node answers with no Alp driver.  Baremetal
+ *      builds return @ref ALP_ERR_NOSUPPORT.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      Function-granularity marker; see docs/abi-markers.md.
+ *
+ * @param[out] milli_c  Set to the reading on @ref ALP_OK.  Left
+ *                       untouched on any error.
+ *
+ * @return  @ref ALP_OK on a valid read.
+ *          @ref ALP_ERR_INVAL when @p milli_c is NULL.
+ *          @ref ALP_ERR_NOSUPPORT when this build has no thermal source:
+ *                                 baremetal, a Zephyr tree with no
+ *                                 `die-temp0` node (or no driver bound
+ *                                 to it), or a Linux kernel exposing no
+ *                                 matching zone.
+ *          @ref ALP_ERR_NOT_READY when the Zephyr device bound but did
+ *                                 not come up.
+ *          @ref ALP_ERR_IO on a transfer fault while reading (Zephyr),
+ *                          or when matching Linux zones exist but none
+ *                          could be read.
+ */
+alp_status_t alp_temperature_read_die_milli_c(int32_t *milli_c);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -50,6 +50,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <atomic>
 #include <cstring>
 #include <mutex>
 #include <new>
@@ -99,6 +100,11 @@ struct DeepxState {
 	const uint8_t *model      = nullptr;
 	size_t         model_size = 0u;
 
+	/* dxrt::InferenceOption::BOUND_OPTION this engine runs on, and whether
+	 * it holds a slot in the process-wide core-set table below. */
+	std::atomic<unsigned> bound{ 0u };
+	bool                  core_held = false;
+
 	/* Guards `engine`, `outputs` and `last_outputs` against a rebind:
 	 * get_output takes it shared; invoke (writes last_outputs) and
 	 * bind_cores take it exclusive. */
@@ -120,6 +126,87 @@ struct DeepxState {
      * after the first invoke. */
 	dxrt::TensorPtrs last_outputs;
 };
+
+/* ------------------------------------------------------------------ */
+/* Process-wide core-set admission.                                    */
+/*                                                                     */
+/* The DX-M1 kernel driver keeps one hardware request queue per        */
+/* DISTINCT core set and has DX_NORMAL_QUEUE_MAX = 3 of them.  Engines */
+/* on the same set share a queue (refcounted); a 4th distinct set is   */
+/* refused by the driver (-EBUSY), and dx_rt turns that into a         */
+/* DXRT_ASSERT -- it aborts the process (or kills dxrtd).  Count the   */
+/* sets this process holds and refuse the 4th ourselves with           */
+/* ALP_ERR_BUSY.  NPU_ALL (0) is a set like any other.  This only      */
+/* sees THIS process; across processes the limit is dxrtd's problem.   */
+/* ------------------------------------------------------------------ */
+
+constexpr unsigned kDeepxBoundCount  = 7u; /* BOUND_OPTION values 0..6 */
+constexpr unsigned kDeepxMaxCoreSets = 3u;
+
+/* alp_inference_config_t::accel_unit_mask (bit n = NPU core n) ->
+ * dxrt::InferenceOption::BOUND_OPTION.  This table is the ONLY place libdxrt's
+ * numbering appears; the public headers speak masks.  Index = mask.  Mask 0
+ * (backend default) and 0x7 both mean all three cores = BOUND_OPTION 0. */
+constexpr unsigned kMaskToBound[8] = {
+	0u, /* 0x0 default  -> all  */
+	1u, /* 0x1 core 0   -> NPU_0 */
+	2u, /* 0x2 core 1   -> NPU_1 */
+	4u, /* 0x3 cores 01 -> NPU_01 */
+	3u, /* 0x4 core 2   -> NPU_2 */
+	6u, /* 0x5 cores 02 -> NPU_02 */
+	5u, /* 0x6 cores 12 -> NPU_12 */
+	0u, /* 0x7 all      -> all  */
+};
+
+/** Translate @p mask to a BOUND_OPTION; ALP_ERR_NOSUPPORT for a bit past core 2. */
+alp_status_t mask_to_bound(uint32_t mask, unsigned &bound)
+{
+	if (mask >= (sizeof(kMaskToBound) / sizeof(kMaskToBound[0]))) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	bound = kMaskToBound[mask];
+	return ALP_OK;
+}
+
+std::mutex g_cores_mtx;
+unsigned   g_core_refs[kDeepxBoundCount];
+
+alp_status_t cores_acquire(unsigned bound)
+{
+	if (bound >= kDeepxBoundCount) {
+		return ALP_ERR_INVAL;
+	}
+	std::lock_guard<std::mutex> lk(g_cores_mtx);
+	if (g_core_refs[bound] == 0u) {
+		unsigned distinct = 0u;
+		for (unsigned i = 0; i < kDeepxBoundCount; ++i) {
+			distinct += (g_core_refs[i] != 0u) ? 1u : 0u;
+		}
+		if (distinct >= kDeepxMaxCoreSets) {
+			return ALP_ERR_BUSY;
+		}
+	}
+	++g_core_refs[bound];
+	return ALP_OK;
+}
+
+void cores_release(unsigned bound)
+{
+	std::lock_guard<std::mutex> lk(g_cores_mtx);
+	if (bound < kDeepxBoundCount && g_core_refs[bound] != 0u) {
+		--g_core_refs[bound];
+	}
+}
+
+/** Delete @p st with its engine and give back its core-set slot. */
+void destroy_state(DeepxState *st)
+{
+	delete st->engine;
+	if (st->core_held) {
+		cores_release(st->bound.load());
+	}
+	delete st;
+}
 
 /** Map a dx_rt DataType onto the alp_inference dtype enum.  dx_rt's enum
  *  (datatype.h) carries device-only structured types (BBOX/FACE/POSE)
@@ -219,22 +306,39 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
 {
 	struct alp_inference *h = h_;
 
+	unsigned     bound = 0u;
+	alp_status_t mrc   = mask_to_bound(cfg->accel_unit_mask, bound);
+	if (mrc != ALP_OK) {
+		return mrc;
+	}
+
+	/* Reserve the core-set slot BEFORE building the engine: the engine is
+	 * constructed directly on `bound`, so no transient all-cores engine
+	 * ever occupies one of the driver's 3 queues. */
+	alp_status_t adm = cores_acquire(bound);
+	if (adm != ALP_OK) {
+		return adm;
+	}
+
 	auto *st = new (std::nothrow) DeepxState();
 	if (st == nullptr) {
+		cores_release(bound);
 		return ALP_ERR_NOMEM;
 	}
+	st->bound     = bound;
+	st->core_held = true;
 
 	/* dx_rt reports load/device errors by throwing; a failed PCIe
      * enumeration or a bad .dxnn header surfaces as an exception, which
      * we translate to ALP_ERR_IO so the portable surface stays
      * exception-free for C callers. */
 	try {
-		st->engine =
-		    new (std::nothrow) dxrt::InferenceEngine(static_cast<const uint8_t *>(cfg->model_data),
-		                                             cfg->model_size,
-		                                             dxrt::DefaultInferenceOption);
+		dxrt::InferenceOption opt = dxrt::DefaultInferenceOption;
+		opt.boundOption           = bound;
+		st->engine                = new (std::nothrow) dxrt::InferenceEngine(
+		    static_cast<const uint8_t *>(cfg->model_data), cfg->model_size, opt);
 		if (st->engine == nullptr) {
-			delete st;
+			destroy_state(st);
 			return ALP_ERR_NOMEM;
 		}
 
@@ -249,8 +353,7 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
 			 * a shape silently truncated to the first 4 dims (issue
 			 * #1729). NOSUPPORT, not IO: the model loaded fine, it is this
 			 * portable descriptor that has no slot for its rank. */
-			delete st->engine;
-			delete st;
+			destroy_state(st);
 			return ALP_ERR_NOSUPPORT;
 		}
 
@@ -265,12 +368,11 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
 			 * DMA whatever unrelated heap memory follows it over PCIe to
 			 * the DX-M1 (issue #1645). Refuse rather than mis-run until a
 			 * real concatenating staging buffer lands -- this path is
-			 * compiled in under ALP_SDK_USE_DEEPX_DXM1 (on by default
-			 * under Yocto with meta-deepx-m1) and verified on DX-M1
-			 * silicon (#1262), so getting it wrong here would be read as
-			 * a hardware/model problem. */
-			delete st->engine;
-			delete st;
+			 * compiled in under ALP_SDK_USE_DEEPX_DXM1 (on deepx-dxm1
+			 * MACHINEs). The backend has run on DX-M1 silicon (#1262);
+			 * this multi-input path has not, so getting it wrong here
+			 * would be read as a hardware/model problem. */
+			destroy_state(st);
 			return ALP_ERR_NOSUPPORT;
 		}
 
@@ -284,8 +386,7 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
 			st->input_bufs[i].resize(static_cast<size_t>(st->inputs[i].size_in_bytes()));
 		}
 	} catch (...) {
-		delete st->engine;
-		delete st;
+		destroy_state(st);
 		return ALP_ERR_IO;
 	}
 
@@ -404,28 +505,48 @@ extern "C" alp_status_t alp_inference_deepx_invoke(struct alp_inference *h_)
  * alp_deepx_inference_* with the handle op-counted and the backend
  * already checked. */
 
-extern "C" alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h_, unsigned bound)
+extern "C" alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h_, uint32_t mask)
 {
 	auto *st = static_cast<DeepxState *>(h_->be_state);
 	if (st == nullptr || st->model == nullptr) {
 		return ALP_ERR_NOT_READY;
 	}
+	unsigned     bound = 0u;
+	alp_status_t mrc   = mask_to_bound(mask, bound);
+	if (mrc != ALP_OK) {
+		return mrc;
+	}
+	if (bound == st->bound.load()) {
+		return ALP_OK; /* already on this core set */
+	}
+
+	/* The new engine is built before the old one is deleted, so for that
+	 * window this handle holds BOTH core sets; admission therefore counts
+	 * the old one too and may answer ALP_ERR_BUSY.  Prefer
+	 * alp_inference_config_t::accel_unit_mask at open. */
+	alp_status_t adm = cores_acquire(bound);
+	if (adm != ALP_OK) {
+		return adm;
+	}
 	dxrt::InferenceOption opt = dxrt::DefaultInferenceOption;
-	opt.boundOption           = bound; /* alp_deepx_npu_cores_t == BOUND_OPTION order */
+	opt.boundOption           = bound;
 
 	/* Build the new engine first: on failure the old one keeps serving. */
 	dxrt::InferenceEngine *fresh = nullptr;
 	try {
 		fresh = new (std::nothrow) dxrt::InferenceEngine(st->model, st->model_size, opt);
 	} catch (...) {
+		cores_release(bound);
 		return ALP_ERR_IO;
 	}
 	if (fresh == nullptr) {
+		cores_release(bound);
 		return ALP_ERR_NOMEM;
 	}
 
 	std::unique_lock<std::shared_mutex> lk(st->engine_mtx); /* waits out in-flight invokes */
 	delete st->engine;
+	cores_release(st->bound.exchange(bound)); /* under engine_mtx */
 	st->engine  = fresh;
 	st->outputs = fresh->GetOutputs();
 	st->last_outputs.clear(); /* pointed into the old engine */
@@ -462,7 +583,6 @@ extern "C" void alp_inference_deepx_close(struct alp_inference *h_)
 	if (st == nullptr) {
 		return;
 	}
-	delete st->engine;
-	delete st;
+	destroy_state(st);
 	h->be_state = nullptr;
 }

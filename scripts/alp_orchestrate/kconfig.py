@@ -52,6 +52,7 @@ from . import libraries as _library_layer
 from . import sdk_compat as _sdk_compat
 from .loader import _library_alias_table
 from .models import BoardProject, OrchestratorError, Slice
+from .ownership import project_m33_overlay
 from .paths import REPO
 from .partition import resolve_storage_partitions
 from .slugs import (
@@ -1424,6 +1425,13 @@ def _emit_inference(
     # M-class Zephyr slice cannot drive either (issues #58/#59), so it
     # gets TFLM only.  Their build wiring lives on the cmake-args /
     # Yocto emit paths (_slice_cmake_args below).
+    # SoM-declared AUTO accelerator order for the .alpmodel tiebreak
+    # (zephyr/CMakeLists.txt maps it to -DALP_SDK_INFERENCE_AUTO_ORDER, the
+    # same define name the Yocto and baremetal builds use).
+    auto_order = _inference_auto_order(project.som_preset)
+    if auto_order:
+        inference_lines.append(
+            f'CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER="{",".join(auto_order)}"')
     lines.append("# Inference dispatchers (from SoM capabilities -- "
                  "customer does not pick)")
     lines.extend(inference_lines)
@@ -2107,8 +2115,25 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # only a real Kconfig symbol when THIS slice already switched the module
     # (and CONFIG_LOG) on -- see `_emit_diagnostics`.
     lines.extend(_emit_diagnostics(project, slice_, lines))
+    # Per-product core ownership: Kconfig for the assignable peripherals this
+    # project assigned to this (M33) core -- the board tree carries the nodes
+    # disabled, so only an owning project enables them.
+    own_kconfig = project_m33_overlay(project, slice_.core_id)[1]
+    if own_kconfig:
+        lines.append("# Assignable peripherals owned by this core (board.yaml "
+                     "`ownership:`).")
+        lines.extend(own_kconfig)
 
     return "\n".join(lines) + "\n"
+
+
+def _inference_auto_order(som_preset: dict) -> list[str]:
+    """The SoM preset's ordered AUTO accelerator preference, best first.
+
+    `inference.auto_order` is the single source: its first entry is the SoM's
+    preferred backend.
+    """
+    return list((som_preset.get("inference") or {}).get("auto_order") or [])
 
 
 def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
@@ -2158,6 +2183,13 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
     if library_pkgs:
         joined = " ".join(library_pkgs)
         lines.append(f'IMAGE_INSTALL:append = " {joined}"')
+    # SoM-declared AUTO accelerator preference.  Read by the alp-sdk recipe
+    # (EXTRA_OECMAKE -> -DALP_SDK_INFERENCE_AUTO_ORDER); only the
+    # .alpmodel selector (alp_model_select) consumes it, as a tiebreak.  Weak `?=` so a hand-edited
+    # local.conf wins; emitted only for presets that declare it.
+    auto_order = _inference_auto_order(project.som_preset)
+    if auto_order:
+        lines.append(f'ALP_SDK_INFERENCE_AUTO_ORDER ?= "{",".join(auto_order)}"')
     if slice_.image:
         lines.append(f"# bitbake target: {slice_.image}")
 

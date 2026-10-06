@@ -171,6 +171,69 @@
       "issue": 1165,
       "reason": "Unguarded raw write reaching VOUT/CONTROL; every documented register is now owned by a window/critical-guarded typed API.",
       "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk_routes.h",
+      "category": "macro",
+      "symbol": "XEVK_I2C_ADDR_INA236_VCAM2",
+      "release": "v0.17.0",
+      "issue": 2645,
+      "reason": "The camera-rail INA236B that was strapped to 0x48 on the E1M-X EVK is not fitted; 0x48 on I2C0 is the TAS2563 pair's shared address.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk_routes.h",
+      "category": "macro",
+      "symbol": "XEVK_INA236_SHUNT_VCAM2_OHMS",
+      "release": "v0.17.0",
+      "issue": 2645,
+      "reason": "The camera-rail INA236B that was strapped to 0x48 on the E1M-X EVK is not fitted; 0x48 on I2C0 is the TAS2563 pair's shared address.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk_routes.h",
+      "category": "macro",
+      "symbol": "XEVK_INA236_MAX_VCAM2_A",
+      "release": "v0.17.0",
+      "issue": 2645,
+      "reason": "The camera-rail INA236B that was strapped to 0x48 on the E1M-X EVK is not fitted; 0x48 on I2C0 is the TAS2563 pair's shared address.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk.h",
+      "category": "macro",
+      "symbol": "XEVK_I2C_ADDR_INA236_VCAM2",
+      "release": "v0.17.0",
+      "issue": 2645,
+      "reason": "The camera-rail INA236B that was strapped to 0x48 on the E1M-X EVK is not fitted; 0x48 on I2C0 is the TAS2563 pair's shared address.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk.h",
+      "category": "macro",
+      "symbol": "XEVK_INA236_SHUNT_VCAM2_OHMS",
+      "release": "v0.17.0",
+      "issue": 2645,
+      "reason": "The camera-rail INA236B that was strapped to 0x48 on the E1M-X EVK is not fitted; 0x48 on I2C0 is the TAS2563 pair's shared address.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk.h",
+      "category": "macro",
+      "symbol": "XEVK_INA236_MAX_VCAM2_A",
+      "release": "v0.17.0",
+      "issue": 2645,
+      "reason": "The camera-rail INA236B that was strapped to 0x48 on the E1M-X EVK is not fitted; 0x48 on I2C0 is the TAS2563 pair's shared address.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/ina236.h",
+      "category": "macro",
+      "symbol": "INA236_DEVICE_ID",
+      "release": "v0.17.0",
+      "issue": 2715,
+      "reason": "DEVICE_ID (0x3F) varies by lot and is no longer an identity gate (INA236_MFG_ID is); the constant had no users.",
+      "replacement": null
     }
   ]
 }

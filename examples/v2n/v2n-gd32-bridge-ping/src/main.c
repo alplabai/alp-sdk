@@ -97,9 +97,11 @@ int main(void)
      * want a wedged I2C transaction to stall the retry loop.
      */
 
-	gd32g553_t   ctx;
-	alp_status_t s;
-	unsigned     attempt = 0u;
+	/* static: gd32g553_t carries the two 256-byte SPI frame buffers a
+	 * BIG_FRAME exchange needs, which do not belong on a thread stack. */
+	static gd32g553_t ctx;
+	alp_status_t      s;
+	unsigned          attempt = 0u;
 
 	if (spi == NULL) {
 		printf("[gd32-bridge-ping] no SPI bus resolved -- cannot run the "
@@ -143,7 +145,7 @@ int main(void)
          * 7-byte path stays byte-aligned alongside the 4-byte PING. */
 		if ((i % 8u) == 0u) {
 			gd32g553_version_t v  = { 0 };
-			alp_status_t       vs = gd32g553_get_version(&ctx, &v);
+			alp_status_t       vs = gd32g553_refresh_version(&ctx, &v);
 			printf("[gd32-bridge-ping] SPI get_version #%u -> %d (v%u.%u.%u)\n",
 			       i,
 			       (int)vs,

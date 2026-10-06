@@ -177,6 +177,30 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
     def test_v2n101_m33_sm_family_agnostic_files(self) -> None:
         self._parity("e1m_v2n101_m33_sm")
 
+    def test_v2n_gd32_pads_are_a_dedicated_node_not_alp_pins_entries(self) -> None:
+        # P71 (SWCLK / bridge ATTN), P70 (SWDIO) and P74 (NRST) must NEVER be
+        # entries of the positional alp,pin-array: its index 0 is the GD32 SPI
+        # chip-select (P97 = GD32 PA8), so a drifted shared index would drive
+        # it.  They are published as the dedicated alp,gd32-pads node.
+        for sku in ("E1M-V2N101", "E1M-V2M101"):
+            files = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)
+            dts = next(c for r, c in files.items() if r.endswith(".dts"))
+            pins = re.search(r"alp_pins: alp-pins \{(.*?)\n\t\};", dts, re.S)
+            self.assertIsNotNone(pins, sku)
+            self.assertEqual(
+                re.findall(r"<&gpio\d+ \d+ [A-Z_]+>", pins.group(1)),
+                ["<&gpio9 7 GPIO_ACTIVE_LOW>"],
+                f"{sku}: alp_pins must still hold only the SPI chip-select")
+            node = re.search(r"gd32_pads: gd32-pads \{(.*?)\n\t\};", dts, re.S)
+            self.assertIsNotNone(node, f"{sku}: no alp,gd32-pads node")
+            self.assertIn('compatible = "alp,gd32-pads"', node.group(1))
+            for prop, spec in (("swdio", "<&gpio7 0 GPIO_ACTIVE_HIGH>"),
+                               ("swclk", "<&gpio7 1 GPIO_ACTIVE_HIGH>"),
+                               ("nrst", "<&gpio7 4 GPIO_ACTIVE_HIGH>"),
+                               ("attn", "<&gpio7 1 GPIO_ACTIVE_HIGH>")):
+                self.assertIn(f"{prop}-gpios = {spec};", node.group(1))
+            self.assertIn("&gpio7 {", dts)
+
     def test_v2m101_m33_sm_family_agnostic_files(self) -> None:
         self._parity("e1m_v2m101_m33_sm")
 
@@ -254,6 +278,25 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
                 "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts",
             },
         )
+
+    def test_v2n_family_dts_declares_the_cm33_watchdog(self) -> None:
+        """Both V2N-family CM33 boards emit `wdt0` DISABLED (an expiry resets
+        the whole SoM) with alias `alp-wdt0`, taking base/size/clock from the
+        SoC spec's `m33_sm` `watchdog` block instead of a generator literal."""
+        wdt = gzb._find_core(
+            json.loads((METADATA_ROOT / "socs/renesas/rzv2n/n44.json")
+                       .read_text(encoding="utf-8")), "m33_sm")["watchdog"]
+        for sku in ("E1M-V2N101", "E1M-V2M101"):
+            with self.subTest(sku=sku):
+                dts = next(c for r, c in emit_zephyr_board(
+                    sku, "m33_sm", METADATA_ROOT).items() if r.endswith(".dts"))
+                self.assertIn("alp-wdt0 = &wdt0;", dts)
+                node = dts.split("wdt0: watchdog@", 1)[1].split("};", 1)[0]
+                self.assertTrue(node.startswith(wdt["base"][2:] + " {"))
+                self.assertIn('compatible = "renesas,rzv-wdt";', node)
+                self.assertIn(f"reg = <{wdt['base']} {wdt['size']}>;", node)
+                self.assertIn(f"clock-freq = <{wdt['counting_clock_hz']}>;", node)
+                self.assertIn('status = "disabled";', node)
 
     def test_v2m_dts_carries_the_openamp_block(self) -> None:
         """E1M-V2M101 is the same RZ/V2N die as E1M-V2N101, so it sets

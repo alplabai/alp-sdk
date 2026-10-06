@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Stages the MERA2 / DRP-AI TVM runtime -- the RESIDUAL GAP named in
-# alp-sdk_0.6.bb's PACKAGECONFIG[drpai] comment (#1145).  `drpai` +
-# `lib-tvm` (meta-rz-drpai) cover <linux/drpai.h> and
-# libtvm_runtime.so; this recipe supplies the rest of what
+# alp-sdk_0.6.bb's PACKAGECONFIG[drpai] comment (#1145).  `drpai`
+# (meta-rz-drpai) covers <linux/drpai.h>; this recipe supplies the rest of what
 # src/yocto/CMakeLists.txt probes for -- the header tree, the eight
 # prebuilt RUHMI libraries (plus the runtime CLOSURE those need, not
 # just the three the link line names directly) -- AND, as of #1145's
@@ -276,19 +275,11 @@ python do_compile() {
         # mera2_runtime / mera2_plan_io / drp_tvm_rt: staged by do_install
         # into THIS package's own libdir, but not yet there at do_compile
         # time -- link straight against the checkout's copies, same as the
-        # header overlay above. tvm_runtime is deliberately NOT linked here:
-        # it comes from the separate, optional meta-rz-drpai `lib-tvm`
-        # recipe, and this recipe must not hard-DEPENDS on that layer (it
-        # is a soft LAYERRECOMMENDS on purpose -- AEN/NX91 have no DRP-AI
-        # silicon at all).  Any tvm::runtime::* reference this .cpp's
-        # ImplDrpTvm class leaves unresolved here is resolved later, at
-        # alp_sdk's OWN final link, which already links tvm_runtime
-        # directly (src/yocto/CMakeLists.txt's ALP_SDK_USE_DRPAI_V2N
-        # block) -- exactly the transitive-resolution shape --no-undefined
-        # (the durable fix, alp-sdk's own CMakeLists.txt) is designed to
-        # still permit: it only checks alp_sdk's OWN objects' undefined
-        # refs against ITS full link line, not what an intermediate .so
-        # left unresolved in ITS OWN build.
+        # header overlay above. tvm_runtime is deliberately NOT linked: RUHMI's
+        # own apps link only mera2_runtime, mera2_plan_io and drp_tvm_rt, and
+        # libdrp_tvm_rt.so already exports the tvm::runtime symbols the
+        # wrapper needs.  Linking meta-rz-drpai's older libtvm_runtime too
+        # would load two TVM runtimes in one process (audit NPU-02).
         "-lmera2_runtime", "-lmera2_plan_io", "-ldrp_tvm_rt",
         # fmt: with SPDLOG_FMT_EXTERNAL the wrapper calls fmt::v10::vformat*
         # directly (spdlog's header templates expand into this .so), and

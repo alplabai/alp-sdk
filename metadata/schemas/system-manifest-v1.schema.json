@@ -75,6 +75,11 @@
         }
       }
     },
+    "ownership": {
+      "type": "object",
+      "description": "Resolved per-product core ownership of the SoM's assignable resources: {<E1M instance>: <core>} = the SoM defaults from metadata/e1m_modules/<family>/core-ownership.yaml `assignable:` plus the board.yaml `ownership:` overrides. Fixed core_ownership rows are not listed. OMITTED when the SoM declares no assignable resources (an absent key means 'this SoM has none', not 'all default').",
+      "additionalProperties": { "type": "string", "enum": ["a55", "m33"] }
+    },
     "helper_mcus": {
       "type": "array",
       "description": "On-module helper MCUs (e.g. the GD32 bridge) that ship their own firmware image. Each key the SoM preset's `helper_firmware:` entry declares is projected here independently -- a helper may carry a field-update channel AND a local flash method at once (the GD32 bridge does), so a consumer must not read one key's presence as excluding another's.",

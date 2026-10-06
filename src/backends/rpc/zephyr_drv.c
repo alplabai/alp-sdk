@@ -237,6 +237,11 @@ struct rpc_be {
 	size_t       call_resp_len;
 	alp_status_t call_result;
 	bool         call_pending;
+	/* #2586: set (under `lock`) when a call gave up waiting after its
+	 * request went out.  Replies match on method name only, so that
+	 * call's late reply would be returned to the next call of the same
+	 * method; every later z_call() refuses instead.  Cleared on open. */
+	bool call_poisoned;
 
 	/* GHSA-xhm8-7f87-93q5 redesign: guards `closing`, `recv_thread` +
      * `recv_active` below, the check-and-count entry/exit of
@@ -824,6 +829,7 @@ z_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	k_sem_init(&be->call_sem, 0, 1);
 	be->closing           = false;
 	be->close_from_worker = false;
+	be->call_poisoned     = false;
 	be->owner             = st->owner;
 
 	/* The Zephyr DT overlay's chosen { zephyr,ipc = ... } picks the
@@ -1058,7 +1064,7 @@ static alp_status_t z_call(alp_rpc_backend_state_t *st,
 
 	/* Check-then-stage as ONE spinlock critical section. */
 	k_spinlock_key_t key = k_spin_lock(&be->lock);
-	if (be->closing) {
+	if (be->closing || be->call_poisoned) {
 		k_spin_unlock(&be->lock, key);
 		k_mutex_unlock(&be->tx_mutex);
 		return ALP_ERR_NOT_READY;
@@ -1096,11 +1102,32 @@ static alp_status_t z_call(alp_rpc_backend_state_t *st,
 	/* Wait for the response (or timeout). */
 	k_timeout_t to = (timeout_ms == UINT32_MAX) ? K_FOREVER : K_MSEC(timeout_ms);
 	int         rc = k_sem_take(&be->call_sem, to);
-	if (rc == -EAGAIN) {
-		key              = k_spin_lock(&be->lock);
-		be->call_pending = false;
+	if (rc != 0) {
+		/* -EAGAIN, or -EBUSY for timeout_ms == 0 (K_NO_WAIT), which the
+		 * old `== -EAGAIN` test missed, leaving the call slot staged.
+		 * Still pending under `lock` = no reply consumed: poison the
+		 * channel so the late reply can never reach a later call (#2586).
+		 * A reply that landed between the timeout and this lock cleared
+		 * call_pending and is returned instead. */
+		key           = k_spin_lock(&be->lock);
+		bool poisoned = be->call_pending;
+		if (poisoned) {
+			be->call_pending  = false;
+			be->call_poisoned = true;
+			s                 = ALP_ERR_TIMEOUT;
+		} else {
+			s = be->call_result;
+			if (s == ALP_OK && resp_len != NULL) {
+				*resp_len = be->call_resp_len;
+			}
+		}
 		k_spin_unlock(&be->lock, key);
-		s = ALP_ERR_TIMEOUT;
+		if (poisoned) {
+			LOG_ERR("rpc: call '%s' on %s timed out; replies match by method name only, so "
+			        "later calls fail with ALP_ERR_NOT_READY until the channel is reopened",
+			        method,
+			        be->name);
+		}
 	} else {
 		s = be->call_result;
 		if (s == ALP_OK && resp_len != NULL) {

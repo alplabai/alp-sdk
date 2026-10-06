@@ -1,0 +1,26 @@
+# board.yaml -- GPU2D layer-composition demo on V2N (Mali-G31 via the SDK).
+#
+# Customer workflow: build alp-image-edge with the Renesas meta-rz-graphics
+# layer in bblayers.conf (the alp-sdk recipe then turns PACKAGECONFIG[gles]
+# on by itself) and IMAGE_FEATURES += "alp-display", boot, run
+# `v2n-gpu2d-compose`.  Without the GPU stack the same binary runs on the
+# CPU fallback and says so.
+#
+# The Mali-G31 is present on every E1M-V2N / E1M-V2M SKU (all six map to the
+# R9A09G056N44GBG die variant, GPU + ISP populated -- metadata/socs/renesas/
+# rzv2n/n44.json), so the narrowest board.yaml is the plain V2N101 base SKU;
+# the others are not built or checked against this example.
+som:
+  sku: E1M-V2N101
+
+preset: e1m-x-evk
+
+cores:
+  a55_cluster:
+    app: ./src                   # Linux userspace app -- <alp/gpu2d.h> only
+    recipe: alp-gpu2d-compose    # meta-alp-sdk/recipes-examples/alp-gpu2d-compose
+  m33_sm:
+    os: "off"                    # the GPU is A55/Linux-owned; no M33 app here.
+
+diagnostics:
+  log_level: info

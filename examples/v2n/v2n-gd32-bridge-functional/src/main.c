@@ -28,6 +28,25 @@
  *   [40] staircase: current duty per-mille (live)
  *   [41] staircase: step counter (liveness)
  *
+ * Protocol v0.15 adds three tests (link_features, adc_stream2, batch).
+ * They are SELF-GATING: gd32g553_init() negotiates the v0.15 features
+ * (BIG_FRAME, ADC_STREAM2, BATCH) with a peer that reports minor >= 15,
+ * and each test checks the contract of the link it actually got -- a
+ * granted feature must work, an ungranted one must answer
+ * ALP_ERR_NOSUPPORT without touching the wire.  ATTN (the data-ready
+ * line on P71) needs an interrupt hook; the hil-soak example wires one
+ * and shows how, this example stays on the staging-gap path.
+ *
+ * Linux-readable copy of the verdict: SRAM0 is readable only through a
+ * CM33 J-Link, and Linux cannot see it.  So the same verdict is ALSO
+ * published as a compact, versioned record in the `rsctbl` window
+ * (A55 0x4F700F00, CM33-NS 0x9F700F00), right below the liveness
+ * beacon the provisioning `cm33_running` check reads at 0x4F700FF0.
+ * The layout lives in <alp/protocol/gd32_bridge_results.h>; read it
+ * on the A55 with scripts/bench/v2n/read_gd32_results.py or the
+ * tests/hil/v2m103-x-evk/v2m103-gd32-bridge-results.yaml spec.  The
+ * SRAM0 block above is unchanged for J-Link users.
+ *
  * This is a maintainer bench tool in example form; like the soak it
  * exercises the gd32g553 chip driver directly (the documented
  * exception to the portable-API rule for dedicated bridge demos).
@@ -35,8 +54,68 @@
 
 #include <string.h>
 
+#include <zephyr/kernel.h>
+
 #include "alp/chips/gd32g553.h"
 #include "alp/peripheral.h"
+#include "alp/protocol/gd32_bridge_results.h"
+
+/* ------------------------------------------------------------------ */
+/* Linux-readable record + liveness beacon (rsctbl window)             */
+/* ------------------------------------------------------------------ */
+
+/* The board DTS reserves the OpenAMP window and names its first page
+ * `rsctbl`; the A55 DT keeps the same range `no-map`, so Linux never
+ * hands it out and can read it through /dev/mem.  This app runs no
+ * OpenAMP, so the page holds no resource table and the top 0x100 bytes
+ * are ours.  A build for a core without that node (the native_sim
+ * build-only test) writes a throwaway buffer instead. */
+#if DT_NODE_EXISTS(DT_NODELABEL(rsctbl))
+#define RESULTS_WINDOW ((void *)(uintptr_t)DT_REG_ADDR(DT_NODELABEL(rsctbl)))
+#else
+static uint8_t window_stub[0x1000] __aligned(16);
+#define RESULTS_WINDOW ((void *)window_stub)
+#endif
+
+/* The working copy; every change is pushed to Linux with publish(). */
+static alp_gd32_results_t rec;
+
+static void publish(void)
+{
+	alp_gd32_results_publish(RESULTS_WINDOW, &rec);
+}
+
+/* The beacon heartbeat ticks from a timer, not from the test loop: a
+ * BIG_FRAME exchange or the 50 ms stream wait can block the main thread
+ * for several seconds.  A k_timer expiry only does a plain store, so it
+ * never touches the bridge.  The beacon kind (0x200) is this image's own,
+ * not the idle shim's 0x100, so provisioning's `cm33_running` rejects it. */
+static void beacon_tick(struct k_timer *t)
+{
+	ARG_UNUSED(t);
+	alp_gd32_results_beacon_tick(RESULTS_WINDOW);
+}
+K_TIMER_DEFINE(beacon_timer, beacon_tick, NULL);
+
+/* Snapshot what init() negotiated: the bridge firmware version, the
+ * granted feature word, the payload ceiling and the ATTN state.  ATTN
+ * "granted but not active" means its self-test failed and the link fell
+ * back to the 0.14 drain rule.  (This example registers no ATTN hook, so
+ * ATTN stays off here; the soak shows the same fields.) */
+static void publish_link(const gd32g553_t *c)
+{
+	rec.fw_version  = ((uint32_t)c->version.major << 16) | ((uint32_t)c->version.minor << 8) |
+	                  (uint32_t)c->version.patch;
+	rec.features    = c->granted;
+	rec.max_payload = c->max_payload;
+	rec.flags &= ~(ALP_GD32_RESULTS_FLAG_ATTN_GRANTED | ALP_GD32_RESULTS_FLAG_ATTN_ACTIVE |
+	               ALP_GD32_RESULTS_FLAG_ATTN_FALLBACK);
+	if ((c->granted & GD32G553_LINK_FEAT_ATTN) != 0u)
+		rec.flags |= ALP_GD32_RESULTS_FLAG_ATTN_GRANTED;
+	if (c->attn_active) rec.flags |= ALP_GD32_RESULTS_FLAG_ATTN_ACTIVE;
+	if (c->attn_unusable) rec.flags |= ALP_GD32_RESULTS_FLAG_ATTN_FALLBACK;
+	publish();
+}
 
 /* ------------------------------------------------------------------ */
 /* Verdict block                                                       */
@@ -48,8 +127,13 @@ volatile uint32_t func_results[44] = { 0xF07C7E57u, 0u };
 
 static gd32g553_t ctx;
 static unsigned   test_idx; /* cursor into func_results[4..] */
+static uint32_t   skipped;  /* self-gating tests that passed by "not granted" */
 
-static void record(alp_status_t s, bool value_ok)
+/* `skip` marks a self-gating test whose feature the peer did not grant:
+ * its NOSUPPORT contract held, which is a pass in the SRAM0 block (the
+ * J-Link layout is unchanged) but is reported to Linux as a SKIP, not a
+ * PASS, so a v0.14 bridge cannot look like it exercised v0.15. */
+static void record_ex(alp_status_t s, bool value_ok, bool skip)
 {
 	uint32_t cell;
 	if (s == ALP_OK && value_ok) {
@@ -66,6 +150,16 @@ static void record(alp_status_t s, bool value_ok)
 		func_results[4u + test_idx] = cell;
 	}
 	test_idx++;
+	if (skip && s == ALP_OK && value_ok) skipped++;
+	rec.tests_pass = func_results[2] - skipped;
+	rec.tests_fail = func_results[3];
+	rec.tests_skip = skipped;
+	publish();
+}
+
+static void record(alp_status_t s, bool value_ok)
+{
+	record_ex(s, value_ok, false);
 }
 
 /* ------------------------------------------------------------------ */
@@ -260,6 +354,139 @@ static void t_adc_all_channels(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Protocol v0.15: negotiated link features, lossless stream, BATCH    */
+/* ------------------------------------------------------------------ */
+
+/* What init() negotiated must agree with what the peer says it is: a
+ * minor >= 15 bridge grants STATUS_SEQ | BIG_FRAME | ADC_STREAM2 | BATCH
+ * (0x1B; ATTN would add 0x04 but needs a hook this example does not
+ * register) with the 252-byte BIG_FRAME ceiling; an older bridge keeps
+ * the legacy 1-byte STATUS_SEQ form and the 65-byte envelope, so the
+ * wire is byte-identical to v0.14. */
+static void t_link_features(void)
+{
+	const bool v015 = ctx.version.minor >= GD32G553_V015_MIN_PROTOCOL_MINOR;
+	bool       ok;
+
+	if (v015) {
+		const uint32_t want = GD32G553_LINK_FEAT_STATUS_SEQ | GD32G553_LINK_FEAT_BIG_FRAME |
+		                      GD32G553_LINK_FEAT_ADC_STREAM2 | GD32G553_LINK_FEAT_BATCH;
+		ok                  = ((ctx.granted & want) == want) && (ctx.max_payload == 252u);
+	} else {
+		ok = (ctx.granted == GD32G553_LINK_FEAT_STATUS_SEQ) && (ctx.max_payload == 65u);
+	}
+	record(ALP_OK, ok);
+}
+
+/* ADC_STREAM2: BEGIN2 returns the REALISED rate exactly (tick_hz /
+ * period_ticks, 1 MHz / 1000 = 1 kHz) and READ2 returns raw codes with a
+ * sample index and a drop count.  A poll-driven consumer (watermark 0)
+ * gets the deepest ring the firmware grants, so 50 ms at 1 kHz drops
+ * nothing: the two reads must be contiguous, first_index(2) ==
+ * first_index(1) + got(1).  (BEGIN2's reply carries the GRANTED watermark
+ * and ring depth, which can exceed the request at high rates -- always
+ * use the reply.)  Without
+ * the grant, BEGIN2 must answer NOSUPPORT -- the 0x33/0x34 stream above
+ * is then the only stream path. */
+static void t_adc_stream2(void)
+{
+	gd32g553_adc_stream2_info_t info;
+	const alp_status_t          s = gd32g553_adc_stream_begin2(&ctx, 0u, 0u, 1000u, 0u, &info);
+
+	if ((ctx.granted & GD32G553_LINK_FEAT_ADC_STREAM2) == 0u) {
+		record_ex(ALP_OK, s == ALP_ERR_NOSUPPORT, true);
+		return;
+	}
+	if (s != ALP_OK) {
+		record(s, false);
+		return;
+	}
+
+	alp_delay_ms(50);
+
+	uint16_t           codes[GD32G553_READ2_MAX_SAMPLES_BIG];
+	const uint8_t      max    = (uint8_t)((ctx.max_payload - GD32G553_READ2_HDR_BYTES) / 2u);
+	uint32_t           first1 = 0, drop1 = 0, first2 = 0, drop2 = 0;
+	uint8_t            got1 = 0, got2 = 0;
+	const alp_status_t s1 = gd32g553_adc_stream_read2(&ctx, 0u, max, &first1, &drop1, &got1, codes);
+	const alp_status_t s2 = gd32g553_adc_stream_read2(&ctx, 0u, max, &first2, &drop2, &got2, codes);
+	const alp_status_t send = gd32g553_adc_stream_end(&ctx, 0u);
+
+	const alp_status_t worst    = (s1 != ALP_OK) ? s1 : (s2 != ALP_OK) ? s2 : send;
+	const bool         value_ok = (info.tick_hz == 1000000u) && (info.period_ticks == 1000u) &&
+	                              (info.full_scale == 4095u) && (got1 >= 30u) && (drop1 == 0u) &&
+	                              (first1 == 0u) && (drop2 == 0u) && (first2 == first1 + got1) &&
+	                              (ctx.stream2_gaps == 0u);
+	/* What Linux gets to see: the last READ2 index, how many samples the
+	 * bridge reported lost (UNKNOWN is a sentinel, not a count) and the
+	 * host-side continuity breaks. */
+	rec.read2_first = first2;
+	if (drop1 != GD32G553_READ2_DROPPED_UNKNOWN) rec.read2_dropped += drop1;
+	if (drop2 != GD32G553_READ2_DROPPED_UNKNOWN) rec.read2_dropped += drop2;
+	rec.read2_gaps = ctx.stream2_gaps;
+	if (worst == ALP_OK && value_ok) {
+		rec.flags |= ALP_GD32_RESULTS_FLAG_STREAM2_OK;
+	}
+	record(worst, value_ok);
+}
+
+/* BATCH: PING + a full-mask GPIO_READ + COUNTER_READ in ONE transaction
+ * pair.  The driver validates the request against the allow-list and the
+ * reply against the request (executed <= count, per-op lengths); here we
+ * only assert the outcome.  A second batch whose middle op fails (READ2
+ * on a stream that was never started) must STOP at that op: executed is
+ * 2, the third op never ran.  Without the grant: NOSUPPORT. */
+static void t_batch(void)
+{
+	const uint8_t       mask_all[4] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu };
+	const uint8_t       counter0[1] = { 0u };
+	const uint8_t       read2_s1[2] = { 1u, 4u }; /* stream 1, never started */
+	uint8_t             gpio_rep[4], counter_rep[4], read2_rep[GD32G553_READ2_HDR_BYTES + 2u * 4u];
+	gd32g553_batch_op_t good[3] = {
+		{ .op = GD32G553_CMD_PING },
+		{ .op        = GD32G553_CMD_GPIO_READ,
+		  .args      = mask_all,
+		  .args_len  = 4u,
+		  .reply     = gpio_rep,
+		  .reply_cap = sizeof gpio_rep },
+		{ .op        = GD32G553_CMD_COUNTER_READ,
+		  .args      = counter0,
+		  .args_len  = 1u,
+		  .reply     = counter_rep,
+		  .reply_cap = sizeof counter_rep },
+	};
+	gd32g553_batch_op_t stops[3] = {
+		{ .op = GD32G553_CMD_PING },
+		{ .op        = GD32G553_CMD_ADC_STREAM_READ2,
+		  .args      = read2_s1,
+		  .args_len  = 2u,
+		  .reply     = read2_rep,
+		  .reply_cap = sizeof read2_rep },
+		{ .op = GD32G553_CMD_PING },
+	};
+	uint8_t executed = 0;
+
+	if ((ctx.granted & GD32G553_LINK_FEAT_BATCH) == 0u) {
+		record_ex(ALP_OK, gd32g553_batch(&ctx, good, 3u, &executed) == ALP_ERR_NOSUPPORT, true);
+		return;
+	}
+
+	alp_status_t s  = gd32g553_batch(&ctx, good, 3u, &executed);
+	bool         ok = (s == ALP_OK) && (executed == 3u) && (good[0].status == ALP_OK) &&
+	                  (good[1].status == ALP_OK) && (good[1].reply_len == 4u) &&
+	                  (good[2].status == ALP_OK) && (good[2].reply_len == 4u);
+	if (s == ALP_OK) {
+		s  = gd32g553_batch(&ctx, stops, 3u, &executed);
+		ok = ok && (s == ALP_OK) && (executed == 2u) && (stops[0].status == ALP_OK) &&
+		     (stops[1].status == ALP_ERR_INVAL) && (stops[2].status == ALP_ERR_NOT_READY);
+	}
+	if (s == ALP_OK && ok) {
+		rec.flags |= ALP_GD32_RESULTS_FLAG_BATCH_OK;
+	}
+	record(s, ok);
+}
+
+/* ------------------------------------------------------------------ */
 /* DSP chain: pool lifecycle (the runtime FFT/FAC dispatch is a wired  */
 /* protocol surface whose HAL lands with wave-2 -- both outcomes are   */
 /* contract-checked)                                                   */
@@ -283,8 +510,8 @@ static void t_dsp_chain_lifecycle(void)
 static void t_version_stable(void)
 {
 	gd32g553_version_t v0, v1;
-	alp_status_t       s = gd32g553_get_version(&ctx, &v0);
-	if (s == ALP_OK) s = gd32g553_get_version(&ctx, &v1);
+	alp_status_t       s = gd32g553_refresh_version(&ctx, &v0);
+	if (s == ALP_OK) s = gd32g553_refresh_version(&ctx, &v1);
 	record(s,
 	       (s == ALP_OK) && (v0.major == v1.major) && (v0.minor == v1.minor) &&
 	           (v0.patch == v1.patch));
@@ -335,6 +562,11 @@ static void run_suite(void)
 	t_adc_configure_error_path();
 	t_adc_all_channels();
 
+	/* -- protocol v0.15 (self-gating on the negotiated features) ------ */
+	t_link_features();
+	t_adc_stream2();
+	t_batch();
+
 	/* -- DSP chain pool ----------------------------------------------- */
 	t_dsp_chain_lifecycle();
 
@@ -377,6 +609,13 @@ static void pwm7_staircase_forever(void)
 
 int main(void)
 {
+	/* Start the Linux-visible record and the heartbeat before anything
+	 * can block, so the reader sees this image from
+	 * the first second -- even while it waits for the GD32 to answer. */
+	alp_gd32_results_init(RESULTS_WINDOW, ALP_GD32_RESULTS_KIND_FUNCTIONAL);
+	alp_gd32_results_beacon_init(RESULTS_WINDOW);
+	k_timer_start(&beacon_timer, K_SECONDS(1), K_SECONDS(1));
+
 	alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
 	    .bus_id        = 1u,
 	    .freq_hz       = 25000000u,
@@ -386,6 +625,8 @@ int main(void)
 	});
 	if (spi == NULL) {
 		func_results[1] = 0xDEADu;
+		rec.state       = ALP_GD32_RESULTS_STATE_NO_LINK;
+		publish();
 		return 1;
 	}
 
@@ -396,14 +637,19 @@ int main(void)
 		s = gd32g553_init(&ctx, spi, NULL, GD32G553_BRIDGE_DEFAULT_I2C_ADDR);
 		if (s != ALP_OK) alp_delay_ms(200);
 	} while (s != ALP_OK);
+	publish_link(&ctx);
 
 	/* Settle past the host's boot window (same rationale as the soak:
      * A55 storage/pinmux bring-up can glitch shared board state). */
 	alp_delay_ms(20000);
 
 	func_results[1] = 1u;
+	rec.state       = ALP_GD32_RESULTS_STATE_RUNNING;
+	publish();
 	run_suite();
 	func_results[1] = 2u;
+	rec.state       = ALP_GD32_RESULTS_STATE_DONE;
+	publish();
 
 	pwm7_staircase_forever();
 	return 0;

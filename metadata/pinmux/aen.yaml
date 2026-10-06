@@ -11,6 +11,7 @@
 schemaVersion: pinmux-capability-v1
 family: aen
 display_name: "E1M-AEN (Alif Ensemble)"
+som_families: [alif-ensemble]
 pads:
   - { e1m_pad: "A3", e1m_function: "PWM6", owner: "alif", silicon_peripheral: "UT3_T1_C", silicon_pad: "P10_7" }
   - { e1m_pad: "A4", e1m_function: "PWM4", owner: "alif", silicon_peripheral: "UT6_T1_C", silicon_pad: "P11_5" }
