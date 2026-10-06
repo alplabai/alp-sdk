@@ -109,11 +109,14 @@ be re-burned in-system) -- so U-Boot applies them on **every** boot,
 early in `board_late_init()`, before the DEEPX rail sequencing step and
 before Linux starts
 (`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch`).
-Each register is written only when it reads its exact as-shipped value
-(already fixed: skipped); any other readback (a differently configured
-part, or a communication error) is left untouched and only logged. The
-log line is `ALP: 5L35023B clock: SE1 32.768 kHz, SE2 24.576 MHz, SE3
-24.576 MHz (0x24=0x8f 0x1f=0xc7 0x21=0xc0)`. Patch
+The fixup gates on reg `0x00` == `0xa0`, then handles reg `0x24`, reg
+`0x21` and (patch `0013`) reg `0x1f` independently, in that order: OTP
+value -> write the fix and read it back; already the fixed value -> skip;
+any other value (a differently configured part, or a communication error)
+-> warn and stop, leaving the register untouched. If the `0x24` write
+fails, `0x21` is never touched. The log line is `ALP: 5L35023B clock: SE1
+32.768 kHz, SE2 24.576 MHz, SE3 24.576 MHz (0x24=0x8f 0x1f=0xc7
+0x21=0xc0)`. Patch
 `0013-rzv2n-dev-ALP-E1M-clkgen-se2-gd32-hxtal.patch` adds the SE2 step.
 Bench-unverified until a scope on TP88 reads 24.576 MHz at 1.8 V.
 
@@ -139,7 +142,7 @@ host driver speaks both transports:
 image:** `0x70` (`gpio-gd32-bridge`) and `0x52` (`rtc-rv3028`, see
 [Real-time clock](#real-time-clock) above). A standard userspace
 `i2c-tools` transaction against either address is refused because the
-kernel already owns it -- use `i2c -f` (force) from userspace, or go
+kernel already owns it -- use the force flag from userspace (for example `i2cget -f -y 8 0x52 0x00` or `i2ctransfer -f`; `i2c-tools` is not in the image by default, add it), or go
 through the owning kernel driver, rather than probing those two
 addresses directly.
 
@@ -196,8 +199,8 @@ for V2N-M1), and installed with `act8760_set_limits()` /
   `GD32_NRST` (MODE4 `0x10`: some units' OTP reads `0x88`, holding the
   GD32 in reset; the volatile fix is `0x08`).
 
-The DEEPX DA9292 CH2 sequence is `da9292_ch2_sequence()`, run by U-Boot
-(`board_late_init()`) in `a55_boot` mode; afterwards CA55/Linux is the sole
+The DEEPX DA9292 CH2 sequence is implemented in U-Boot (`board_late_init()`, a standalone port of
+`da9292_ch2_sequence()`) in `a55_boot` mode; afterwards CA55/Linux is the sole
 RIIC8 master (see above).  Boot-mode ownership is recorded in
 `metadata/e1m_modules/v2n/power-tree.yaml` (`boot_modes:`); `cm33_boot` is
 blocked there.
@@ -466,7 +469,7 @@ side has no Wi-Fi role):
 
 * `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi` --
   `&sdhi2` (WLAN, `mmc-pwrseq-simple` on line 19), `&sci4` (BT,
-  `brcm,bcm43438-bt` `shutdown-gpios` on line 18), the `sd2_wlan_pins` /
+  `infineon,cyw55572-bt` `shutdown-gpios` on line 18), the `sd2_wlan_pins` /
   `sci4_bt_pins` pinctrl groups.
 * `meta-alp-sdk/recipes-kernel/linux/linux-renesas/wifi-bt.cfg` --
   `CONFIG_CFG80211=m` + in-tree `CONFIG_BRCMFMAC` off (no CYW55513 ID
