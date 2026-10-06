@@ -252,7 +252,7 @@ pad_routes:
   - { e1m: E1M_X_GPIO_IO14, dispatch: gd32_bridge, dispatch_pin: PB5  }
   - { e1m: E1M_X_GPIO_IO15, dispatch: gd32_bridge, dispatch_pin: PB4, bridge_bit: 21, min_bridge_protocol: 15 }
   - { e1m: E1M_X_GPIO_IO16, dispatch: gd32_bridge, dispatch_pin: PC0  }
-  - { e1m: E1M_X_GPIO_IO24, dispatch: unrouted,
+  - { e1m: E1M_X_GPIO_IO24, dispatch: unrouted, driven_by: dxm1,
       doc: "Not a GD32 pad; driven by the DX-M1 on V2M. Bridge bit 8 answers STATUS_IO (#2453)." }
   - { e1m: E1M_X_GPIO_IO25, dispatch: gd32_bridge, dispatch_pin: PC15 }
 

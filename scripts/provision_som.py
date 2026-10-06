@@ -414,6 +414,10 @@ def _v2n_parser() -> argparse.ArgumentParser:
                       help="the unit's eMMC was legitimately replaced: adopt the CID now behind the "
                            "address as this serial's identity (recorded as an override; blocks shipping)")
     work.add_argument("--reprovision-from", type=Path, metavar="MANIFEST")
+    work.add_argument("--replace-identity", action="store_true",
+                      help="replace an already-committed identity (needs --reprovision-from): the old "
+                           "manifest and secure-page blobs are archived as <serial>.manifest.<old-hwrev>-<date>.bin "
+                           "/ <serial>.secure-page.<old-hwrev>-<date>.bin and the new ones are promoted")
     work.add_argument("--cold-cycles", type=_positive_int, default=3)
     work.add_argument("--transfer", choices=("sd", "xmodem"), default="sd")
     work.add_argument("--carrier", default="")
@@ -575,6 +579,8 @@ def v2n_main(argv: list[str]) -> int:
         expect = functest.load_expect(a.functest_expect)
         if a.cmd == "run" and not a.bench:
             raise ValueError("run needs --bench")
+        if a.replace_identity and a.reprovision_from is None:
+            raise ValueError("--replace-identity needs --reprovision-from the manifest the EEPROM holds")
         bench = bench_mod.load_bench(a.bench) if a.bench else None
         if bench is not None and a.linux_host:
             bench.linux_host = a.linux_host
@@ -585,6 +591,15 @@ def v2n_main(argv: list[str]) -> int:
     except (ValueError, OSError, json.JSONDecodeError, yaml.YAMLError) as e:
         print(f"provision_som: {e}", file=sys.stderr)
         return 2
+
+    hil = a.hil_spec
+    if hil is None and a.carrier:
+        hil = REPO / "tests" / "hil" / f"{a.sku.lower().removeprefix('e1m-')}-{a.carrier}"
+    if hil is not None:
+        hil = hil if hil.is_absolute() else REPO / hil
+        if not hil.is_dir():
+            print(f"provision_som: HiL spec dir is not a directory: {hil}", file=sys.stderr)
+            return 2
 
     serial = a.serial
     if not serial:
@@ -611,14 +626,12 @@ def v2n_main(argv: list[str]) -> int:
         print(f"provision_som: {e}", file=sys.stderr)
         return 2
 
-    hil = a.hil_spec
-    if hil is None and a.carrier:
-        hil = REPO / "tests" / "hil" / f"{a.sku.lower().removeprefix('e1m-')}-{a.carrier}"
     ctx = steps.Ctx(sku=a.sku, serial=serial, bundle_dir=bundle_dir, bundle=bundle, preset=preset,
                     ledger_root=a.ledger_root, execute=execute, lock=getattr(a, "lock", False),
                     bench=bench, tier_markers=markers, expected_registers=regs, functest_expect=expect,
                     allow_tier_mismatch=a.allow_tier_mismatch,
                     accept_cid_change=a.accept_cid_change, reprovision_from=a.reprovision_from,
+                    replace_identity=a.replace_identity,
                     cold_cycles=a.cold_cycles, hil_spec=hil, flash_writer=a.flash_writer,
                     gd32_fw=a.gd32_fw,
                     transfer=a.transfer, station=a.station, by=a.by,
