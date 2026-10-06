@@ -1,0 +1,293 @@
+From 3c1f0b7a2d9e4f6a8b5c7d1e0f2a3b4c5d6e7f80 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Tue, 6 Oct 2026 16:00:00 +0000
+Subject: [PATCH] gpio: gd32-bridge: add a PWM provider over
+ CMD_PWM_SET/GET
+
+Copyright (c) 2026 Alp Lab AB
+SPDX-License-Identifier: GPL-2.0
+
+Expose E1M PWM0..7 (GD32 PA11, PB1, PB14, PC5, PC10, PC11, PC12, PD0)
+as a pwm_chip on the bridge node (#pwm-cells = <2>: channel, period
+ns), so pwm-backlight can drive a panel backlight through the bridge.
+Normal polarity only; registered when the node declares #pwm-cells.
+
+Protocol minor >= 17 only.  PWM_SET/GET are allowed on the I2C link from
+0.17, and PWM_SET period 0 / duty 0 (stop + release) only exists there:
+older firmware underflows the shared timer ARR on period 0, so it is
+never sent.  Enabling a channel on a bridge below 0.17 returns
+-EOPNOTSUPP, disabling one is a no-op and get_state reads as disabled;
+a silent bridge returns -EPROBE_DEFER from apply so the consumer is
+retried.
+
+PWM0..3 share TIMER0 and PWM4..7 share TIMER7, and a period change on
+one channel retunes its siblings.  Policy: reject.  Enabling a channel
+with a period that differs from an enabled sibling returns -EBUSY; duty
+is independent, and a group's period is changed by disabling its
+channels first.
+
+Disable sends PWM_SET period 0 / duty 0.  get_state adopts a channel the
+bridge is already driving (a Linux warm reboot does not reset the GD32)
+without blocking probe.
+
+Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
+index c886d5f863f8..2e98c426bfbb 100644
+--- a/drivers/gpio/Kconfig
++++ b/drivers/gpio/Kconfig
+@@ -1013,6 +1013,7 @@ config GPIO_GD32_BRIDGE
+ 	tristate "Alp Lab GD32 IO-MCU bridge GPIO expander"
+ 	depends on I2C && OF
+ 	select CRC_ITU_T
++	select PWM
+ 	select GPIOLIB_IRQCHIP
+ 	help
+ 	  GPIO support for E1M IO pads routed through the GD32G553
+diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
+index 3a34cdef5304..99dc0a1522d4 100644
+--- a/drivers/gpio/gpio-gd32-bridge.c
++++ b/drivers/gpio/gpio-gd32-bridge.c
+@@ -99,6 +99,11 @@
+  * clients.  The adapter registers unconditionally; each transfer checks the
+  * firmware version (minor >= 17, else -EOPNOTSUPP).
+  *
++ * PWM provider: E1M PWM0..7 over CMD_PWM_SET/GET (#pwm-cells = <2>), for
++ * pwm-backlight and friends.  Protocol minor >= 17 only: enabling a channel on
++ * older firmware returns -EOPNOTSUPP; see the comment above
++ * gd32_bridge_pwm_apply() for the shared timer-period rule.
++ *
+  * Polled irqchip: the bridge has no interrupt line to the SoC, so the
+  * gpiochip doubles as an interrupt controller (#interrupt-cells = <2>) that
+  * samples GPIO_READ every GD32_IRQ_POLL_PERIOD_MS while any line is unmasked.
+@@ -118,6 +123,7 @@
+ #include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
++#include <linux/pwm.h>
+ #include <linux/spinlock.h>
+ #include <linux/workqueue.h>
+ 
+@@ -378,6 +384,14 @@ struct gd32_bridge_gpio {
+ 	 * reads the published copy.  irq_lock is the irqchip bus lock.
+ 	 */
+ 	struct mutex irq_lock;
++	/* PWM provider (see the comment above gd32_bridge_pwm_apply()).  pwm_on =
++	 * enabled channels, pwm_period[g] = the period shared by the enabled
++	 * channels of timer group g (PWM0..3 TIMER0, PWM4..7 TIMER7); both
++	 * guarded by pwm_lock, taken before gd32->lock. */
++	struct pwm_chip pwm;
++	struct mutex pwm_lock;
++	u32 pwm_on;
++	u32 pwm_period[2];
+ 	spinlock_t irq_slock;
+ 	u32 irq_en_stage, irq_rise_stage, irq_fall_stage, irq_high_stage, irq_low_stage;
+ 	u32 irq_en, irq_rise, irq_fall, irq_high, irq_low;
+@@ -1698,6 +1712,191 @@ static void gd32_bridge_irq_work(struct work_struct *work)
+ 				   msecs_to_jiffies(GD32_IRQ_POLL_PERIOD_MS));
+ }
+ 
++/*
++ * PWM provider over CMD_PWM_SET / CMD_PWM_GET: E1M PWM0..7 (GD32 PA11, PB1,
++ * PB14, PC5, PC10, PC11, PC12, PD0), #pwm-cells = <2> (channel, period ns).
++ * Normal polarity only.
++ *
++ * Protocol minor >= 17 gate: PWM_SET/GET are only allowed on the I2C link from
++ * 0.17, and period 0 / duty 0 (stop + release) only exists from 0.17 -- older
++ * firmware underflows the shared timer ARR on period 0, so it is never sent
++ * there.  The chip registers whenever the DT declares #pwm-cells; enabling a
++ * channel on firmware below 0.17 returns -EOPNOTSUPP, disabling one is a
++ * no-op, and get_state reads as disabled.  A silent bridge returns
++ * -EPROBE_DEFER from apply so a pwm-backlight probe is retried.
++ *
++ * Shared-period constraint: PWM0..3 ride TIMER0 and PWM4..7 ride TIMER7, so
++ * every enabled channel of a group has the same period (the firmware keeps
++ * one timer period per group and prescales to a 1 us tick), and changing the
++ * period on one channel would retune its siblings.  Policy: REJECT.  Enabling
++ * a channel with a period different from an enabled sibling returns -EBUSY.
++ * The duty cycle of each channel is independent; to change the shared period,
++ * disable every channel in the group first.
++ *
++ * Disabling sends period 0 / duty 0: stop the channel, idle its pad low and
++ * release its timer claim.
++ */
++#define GD32_CMD_PWM_SET		0x20
++#define GD32_CMD_PWM_GET		0x21
++#define GD32_NPWM			8
++#define GD32_PWM_GROUP_SIZE		4
++#define GD32_PWM_TICK_NS		1000	/* firmware timer tick: 1 us */
++
++static struct gd32_bridge_gpio *gd32_from_pwm(struct pwm_chip *chip)
++{
++	return container_of(chip, struct gd32_bridge_gpio, pwm);
++}
++
++static int gd32_bridge_pwm_send(struct gd32_bridge_gpio *gd32, unsigned int ch,
++				u32 period, u32 duty)
++{
++	u8 req[10] = { ch, 0 };		/* [1] is reserved padding */
++
++	put_unaligned_le32(period, &req[2]);
++	put_unaligned_le32(duty, &req[6]);
++	return gd32_bridge_xfer(gd32, GD32_CMD_PWM_SET, req, 10, NULL, 0);
++}
++
++/* Called with pwm_lock held, only for a channel in pwm_on. */
++static int gd32_bridge_pwm_stop(struct gd32_bridge_gpio *gd32, unsigned int ch)
++{
++	unsigned int grp = ch / GD32_PWM_GROUP_SIZE;
++	u32 grp_mask = GENMASK(grp * GD32_PWM_GROUP_SIZE + GD32_PWM_GROUP_SIZE - 1,
++			       grp * GD32_PWM_GROUP_SIZE);
++	int ret = gd32_bridge_pwm_send(gd32, ch, 0, 0);
++
++	if (ret)
++		return ret;
++
++	gd32->pwm_on &= ~BIT(ch);
++	if (!(gd32->pwm_on & grp_mask))
++		gd32->pwm_period[grp] = 0;
++	return 0;
++}
++
++static int gd32_bridge_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
++				 const struct pwm_state *state)
++{
++	struct gd32_bridge_gpio *gd32 = gd32_from_pwm(chip);
++	unsigned int ch = pwm->hwpwm, grp = ch / GD32_PWM_GROUP_SIZE;
++	u32 grp_mask = GENMASK(grp * GD32_PWM_GROUP_SIZE + GD32_PWM_GROUP_SIZE - 1,
++			       grp * GD32_PWM_GROUP_SIZE);
++	u32 period, duty;
++	int ret;
++
++	if (state->polarity != PWM_POLARITY_NORMAL)
++		return -EINVAL;
++
++	mutex_lock(&gd32->pwm_lock);
++	if (!state->enabled || !state->period) {
++		/* pwm_on is only ever set on firmware >= 0.17. */
++		ret = (gd32->pwm_on & BIT(ch)) ? gd32_bridge_pwm_stop(gd32, ch) : 0;
++		goto out;
++	}
++
++	ret = gd32_bridge_resolve_late(gd32, gd32_bridge_cam_ldo_status);
++	if (ret == -EAGAIN)
++		ret = -EPROBE_DEFER;	/* bridge silent: retry the consumer */
++	else if (ret == -ENODEV)
++		ret = -EOPNOTSUPP;	/* firmware older than protocol 0.17 */
++	if (ret)
++		goto out;
++
++	if (state->period < GD32_PWM_TICK_NS || state->period > U32_MAX) {
++		ret = -ERANGE;
++		goto out;
++	}
++	period = state->period - state->period % GD32_PWM_TICK_NS;
++	duty = min_t(u64, state->duty_cycle, period);
++
++	if ((gd32->pwm_on & grp_mask & ~BIT(ch)) &&
++	    gd32->pwm_period[grp] != period) {
++		dev_dbg(chip->dev,
++			"pwm%u: period %u ns conflicts with the %u ns shared by its timer group\n",
++			ch, period, gd32->pwm_period[grp]);
++		ret = -EBUSY;
++		goto out;
++	}
++
++	ret = gd32_bridge_pwm_send(gd32, ch, period, duty);
++	if (!ret) {
++		gd32->pwm_on |= BIT(ch);
++		gd32->pwm_period[grp] = period;
++	}
++out:
++	mutex_unlock(&gd32->pwm_lock);
++	return ret;
++}
++
++/*
++ * Adopt what the bridge is already driving (a Linux warm reboot does not
++ * reset the GD32).  Best effort and non-blocking: firmware below 0.17, a
++ * version not yet confirmed, an unreachable bridge, or a channel that was
++ * never programmed all read as disabled.
++ */
++static int gd32_bridge_pwm_get_state(struct pwm_chip *chip,
++				     struct pwm_device *pwm,
++				     struct pwm_state *state)
++{
++	struct gd32_bridge_gpio *gd32 = gd32_from_pwm(chip);
++	unsigned int ch = pwm->hwpwm;
++	u8 req = ch, rsp[8];
++	u32 period, duty;
++
++	state->polarity = PWM_POLARITY_NORMAL;
++	state->enabled = false;
++	if (gd32_bridge_cam_ldo_status(gd32))
++		return 0;	/* not >= 0.17, or bridge not seen yet */
++	if (gd32_bridge_xfer(gd32, GD32_CMD_PWM_GET, &req, 1, rsp, 8))
++		return 0;
++	period = get_unaligned_le32(&rsp[0]);
++	duty = get_unaligned_le32(&rsp[4]);
++	if (!period)
++		return 0;
++
++	state->enabled = true;
++	state->period = period;
++	state->duty_cycle = duty;
++	mutex_lock(&gd32->pwm_lock);
++	gd32->pwm_on |= BIT(ch);
++	gd32->pwm_period[ch / GD32_PWM_GROUP_SIZE] = period;
++	mutex_unlock(&gd32->pwm_lock);
++	return 0;
++}
++
++static void gd32_bridge_pwm_free(struct pwm_chip *chip, struct pwm_device *pwm)
++{
++	struct gd32_bridge_gpio *gd32 = gd32_from_pwm(chip);
++
++	mutex_lock(&gd32->pwm_lock);
++	if (gd32->pwm_on & BIT(pwm->hwpwm))
++		gd32_bridge_pwm_stop(gd32, pwm->hwpwm);
++	mutex_unlock(&gd32->pwm_lock);
++}
++
++static const struct pwm_ops gd32_bridge_pwm_ops = {
++	.apply		= gd32_bridge_pwm_apply,
++	.get_state	= gd32_bridge_pwm_get_state,
++	.free		= gd32_bridge_pwm_free,
++	.owner		= THIS_MODULE,
++};
++
++/* Only when the bridge node declares #pwm-cells. */
++static int gd32_bridge_pwm_register(struct gd32_bridge_gpio *gd32)
++{
++	struct device *dev = &gd32->client->dev;
++
++	if (!of_property_read_bool(dev->of_node, "#pwm-cells"))
++		return 0;
++
++	mutex_init(&gd32->pwm_lock);
++	gd32->pwm.dev = dev;
++	gd32->pwm.ops = &gd32_bridge_pwm_ops;
++	gd32->pwm.npwm = GD32_NPWM;
++	gd32->pwm.base = -1;
++	return devm_pwmchip_add(dev, &gd32->pwm);
++}
++
+ /*
+  * Unbind teardown, registered AFTER devm_gpiochip_add_data() so devm runs it
+  * BEFORE gpiochip_remove(). Consumers (wlan-pwrseq, hci_bcm, panel reset,
+@@ -1875,6 +2074,10 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+ 		/* Not fatal: the GPIO lines (panel reset, Wi-Fi REG_ON) must
+ 		 * not depend on the proxy adapter registering. */
+ 		dev_err(&client->dev, "I2C3 proxy adapter not registered (%d)\n", ret);
++
++	ret = gd32_bridge_pwm_register(gd32);
++	if (ret)
++		dev_err(&client->dev, "PWM provider not registered (%d)\n", ret);
+ 	return 0;
+ }
+ 
+-- 
+2.53.0
+

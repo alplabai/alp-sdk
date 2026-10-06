@@ -85,6 +85,7 @@ SRC_URI:append = " \
     file://0020-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
     file://0021-gpio-gd32-bridge-add-cam-en-ldo-lines-and-make-can-stby-requestable.patch \
     file://0022-gpio-gd32-bridge-i2c3-proxy-adapter-and-polled-irqchip.patch \
+    file://0023-pwm-gd32-bridge-provider-over-cmd-pwm-set-get.patch \
     file://uio.cfg \
 "
 
@@ -398,8 +399,8 @@ SRC_URI:append = " file://wifi-bt.cfg"
 
 # Display stack: RK055HDMIPI4MA0 panel on Display 1 (DSI + PWM backlight + GPT
 # + GD32-bridge GPIO for panel reset).
-SRC_URI:append:e1m-v2n101 = " file://display.cfg"
-SRC_URI:append:e1m-v2m101 = " file://display.cfg"
+SRC_URI:append:e1m-v2n101 = " file://display.cfg file://display-lvds.cfg"
+SRC_URI:append:e1m-v2m101 = " file://display.cfg file://display-lvds.cfg"
 
 # Audio: TAS2563 smart-amp pair on the E1M-X-EVK carrier (see e1m-x-evk.dtsi's
 # header comment + &i2c0's tas2563_left/tas2563_right nodes). Per-carrier like

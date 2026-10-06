@@ -422,14 +422,19 @@
 		interrupt-controller;
 		#interrupt-cells = <2>;
 
+		/* E1M PWM0..7 over PWM_SET/GET (protocol >= 0.17; <channel
+		 * period-ns>).  PWM0..3 share one timer period, PWM4..7 another. */
+		#pwm-cells = <2>;
+
 		/* E1M-X I2C3 (GD32 PC8 = SCL / pad A24, PC9 = SDA / pad A23),
 		 * proxied by the bridge (protocol >= 0.17, over this I2C link
 		 * only).  The SoM has NO pull-ups on I2C3: the carrier or the
 		 * attached module must provide them.  The pads stay hi-Z until
 		 * the first transfer.  clock-frequency is 100000 or 400000.
-		 * On the E1M-X-EVK this bus carries the J6 display I2C (panel
-		 * bridge, GT911 touch) and CAM1 (J12); children are added by
-		 * the carrier dtsi:
+		 * On the E1M-X-EVK V2 this bus reaches only CAM1 (J12); the J6
+		 * display I2C is NOT wired to it (carrier fix or bench bodge
+		 * needed), though on a fixed carrier it is intended to be I2C3.
+		 * Children are added by the carrier dtsi:
 		 * &e1m_x_i2c3 { ... }; */
 		e1m_x_i2c3: i2c {
 			#address-cells = <1>;

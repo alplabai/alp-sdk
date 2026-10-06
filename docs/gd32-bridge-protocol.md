@@ -412,11 +412,21 @@ Also at minor `>= 17` the Linux driver exposes, on the same gpio node:
   / `I2CM_XFER` / `I2CM_RESULT`, from the node's `i2c` child (label
   `e1m_x_i2c3`, alias `i2c3`, `clock-frequency` 100000 or 400000, default
   100 kHz).  I2C link only; the SoM has no pull-ups on I2C3, the carrier or
-  module provides them.  A transfer made before the bridge answers waits up to
+  module must provide them (with no pull the pads float low and the firmware
+  reports TIMEOUT / BUS_STUCK).  A transfer made before the bridge answers waits up to
   1 s for `GET_VERSION`.
 - a polled interrupt controller (`#interrupt-cells = <2>`): `GPIO_READ` every
   10 ms while any line is unmasked, so an edge shorter than 10 ms is missed
   and a level line re-fires every poll while asserted.
+- a PWM provider for E1M `PWM0`..`PWM7` over `PWM_SET` / `PWM_GET`
+  (`#pwm-cells = <2>`: channel, period in ns; normal polarity only).
+  Enabling a channel on a bridge below 0.17 returns `-EOPNOTSUPP`.  `PWM0..3`
+  share `TIMER0` and `PWM4..7` share `TIMER7`, so the enabled channels of a
+  group share one period: enabling a channel with a period different from an
+  enabled sibling returns `-EBUSY` (the sibling is never silently retuned);
+  disable the group's channels first to change it.  Disabling sends
+  `PWM_SET` period 0 / duty 0 (stop and release), which is why it needs 0.17:
+  older firmware underflows the shared timer reload on period 0.
 
 `PB4` resets as the JTAG `NJTRST` pin (alternate function, pull-up) on GD32
 parts, so firmware 0.3.1 parks it analog / no pull at boot; debug access on
