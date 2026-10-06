@@ -439,6 +439,21 @@ mis-rooted.  Additive under `schemaVersion 1` — see the
 `planPathMode` field in
 [`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json).
 
+**Deferred placeholders (`deferredPlaceholders`, #2696).**  A board.yaml
+value written as `${NAME}` (e.g. `ota.server.tenant: "${MENDER_TENANT_TOKEN}"`)
+is copied verbatim into a slice config artefact for the build host or the
+device to fill (on Zephyr it only ever lands on a commented hint line).  The
+plan does not resolve it and does not promise that anything downstream will.  The plan's top-level `deferredPlaceholders`
+lists those names (always present, `[]` when there are none) so a consumer
+leaves them alone instead of refusing them as unresolved plan tokens.  The
+emitter refuses a plan where such a name collides with a plan token
+(`SDK_ROOT`, `PROJECT_ROOT`, `PYTHON`, `TOOLCHAIN_ROOT`), is not upper-case
+(`[A-Z][A-Z0-9_]*`), does not appear as `${NAME}` in the project's
+board.yaml, sits in a config artefact that is not a `.conf` file (CMake would
+expand it), or appears outside `configArtefacts`.  A placeholder on a *live*
+Zephyr Kconfig line is refused as well: Zephyr does not expand `${NAME}` in a
+fragment, so the firmware would carry the literal text.
+
 Its shape is pinned by
 [`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json);
 `scripts/check_build_plan.py` validates the emitter's output against it,

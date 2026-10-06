@@ -72,3 +72,21 @@ def test_no_single_quote_in_any_patched_bootcmd_line():
                 assert "'" not in line, f"{patch.name}: {line}"
                 if not line.rstrip().endswith("\\"):
                     in_bootcmd = False
+
+
+def test_gbeth_phy_fixup_patch_is_in_the_series_and_skips_broadcast_address():
+    """Patch 0017 (#2582) scans MDIO 1..31, never the broadcast address 0, and
+    must be wired into the bbappend."""
+    name = "0017-rzv2n-dev-ALP-E1M-gbeth-phy-address-fixup.patch"
+    bbappend = (META / "recipes-bsp" / "u-boot" / "u-boot_%.bbappend").read_text(encoding="utf-8")
+    assert f"file://{name}" in bbappend
+    patch = (UBOOT / name).read_text(encoding="utf-8")
+    assert "for (addr = 1; addr < 32; addr++)" in patch
+    assert "addr = 0;" not in patch
+    assert "ALP_PHY_OUI_ID1		0x001c" in patch and "0xc916" in patch
+    assert "PHY at MDIO addr %d (DT had %d) - fixed" in patch
+    assert "&eth1" not in patch
+    assert "CLKMON" not in patch and "RSTMON" not in patch
+    assert "get_timer(" in patch and "-ETIMEDOUT" in patch
+    scan = patch[patch.index("static int alp_scan_phy_addr"):]
+    assert "if (ret)\n+\t\t\treturn ret;" in scan

@@ -80,7 +80,7 @@ memory:
   flash_mbit:           131072                 # 128 Gbit eMMC 5.1 (16 GB)
 
 inference:
-  preferred_backend:    drpai
+  auto_order:           [drpai, cpu]   # ALP_INFERENCE_BACKEND_AUTO preference, best first; first entry = preferred backend (DRP-AI3 on-die)
 
 capabilities:
   cau:                  true       # GD32G553 supervisor's CAU accessible via bridge.

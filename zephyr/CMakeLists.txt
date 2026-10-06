@@ -1360,7 +1360,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_MURATA_LBEE5HY2FY
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_DEEPX_DXM1
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/deepx_dxm1/deepx_dxm1.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GD32_SWD
-    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gd32_swd/gd32_swd.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gd32_swd/gd32_swd.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/gd32_swd_pads.c)
 
 # v0.5 §D.AI batch -- 18 vision / display / accelerator chips.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_OV2640
@@ -1657,6 +1658,12 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_MODEL_READER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/common/alp_model_loader.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/alp_model_select.c
 )
+# SoM inference.auto_order (string Kconfig emitted by the orchestrator) ->
+# the one define name every OS build uses for the .alpmodel AUTO tiebreak.
+if(CONFIG_ALP_SDK_MODEL_READER AND CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER)
+    zephyr_library_compile_definitions(
+        ALP_SDK_INFERENCE_AUTO_ORDER="${CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER}")
+endif()
 
 # Backend registry selector (<alp/backend.h>).  Walks the per-class
 # linker sections emitted by ALP_BACKEND_REGISTER + ALP_BACKEND_DEFINE_CLASS

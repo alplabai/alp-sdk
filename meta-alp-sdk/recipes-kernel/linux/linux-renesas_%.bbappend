@@ -85,6 +85,7 @@ SRC_URI:append = " \
     file://0020-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
     file://uio.cfg \
     file://e1m-v2n-doorbell.dtsi \
+    file://panic.cfg \
 "
 
 # CM33 -> CA55 doorbell SPI (decision Q52): "404" = MHU-B SWINT unit 12, the
@@ -114,7 +115,9 @@ python () {
         bb.fatal("ALP_V2N_REMOTEPROC must be 0 or 1")
 }
 
-
+# panic.cfg (#2734): CONFIG_PANIC_TIMEOUT=10 -- a panic reboots the board after
+# 10 s instead of hanging forever (panic_timeout defaults to 0).
+#
 # 0020 (PDM clocks, audit MM-02/MM-X2): the V2N CPG driver had no PDM0/PDM1
 # module clocks or resets, so no pdm node could bind.  The patch adds them
 # with V2N parents from the RZ/V2N hardware manual (PCLK = PLLCM33 gear / 2,
@@ -274,6 +277,29 @@ ALP_DRP1_DT_ENABLE = "${@'1' if ('rz-opencva' in (d.getVar('BBFILE_COLLECTIONS')
 ALP_DRP1_DT_ENABLE[vardepvalue] = "${ALP_DRP1_DT_ENABLE}"
 SRC_URI += "${@' file://e1m-v2n-drp1.dtsi' if d.getVar('ALP_DRP1_DT_ENABLE') == '1' else ''}"
 
+# Per-project core ownership (#2660).  The committed e1m-v2n-ownership.dtsi is
+# the SoM-DEFAULT ownership (kept in sync by the generated-files gate); do_configure
+# replaces it with the fragment of the project being built, rendered from the
+# `ownership:` that the orchestrator's system-manifest.yaml carries (the same
+# resolved map the CM33 overlay uses).  Two cases:
+#   1. manifest present -> render the project fragment from it.
+#   2. no manifest      -> bbwarn and keep the committed SoM-default fragment, so
+#                          a generic SoM image still builds.  The default fragment
+#                          carries the renesas,cm33-owned-clocks hold that keeps
+#                          the CM33's RSCI7 clocks on, so it is never absent.
+# The manifest path variable and default match alp-dts-reservations.  Freshness
+# is the manifest's: it is only as current as the last `tan build`.
+ALP_SYSTEM_MANIFEST_PATH ??= "${TOPDIR}/../alp-sdk/build/system-manifest.yaml"
+ALP_OWN_SDK := "${THISDIR}/../../.."
+# Everything the render reads, so editing any of it re-runs do_configure.
+do_configure[file-checksums] += "${ALP_SYSTEM_MANIFEST_PATH}:${@os.path.exists(d.getVar('ALP_SYSTEM_MANIFEST_PATH'))} \
+    ${ALP_OWN_SDK}/scripts/gen_linux_ownership_dt.py:True \
+    ${ALP_OWN_SDK}/scripts/alp_orchestrate/linux_ownership.py:True \
+    ${ALP_OWN_SDK}/scripts/alp_orchestrate/ownership.py:True \
+    ${ALP_OWN_SDK}/metadata/e1m_modules/v2n/core-ownership.yaml:True \
+    ${ALP_OWN_SDK}/metadata/e1m_modules/v2n/supervisor-links.yaml:True \
+    ${ALP_OWN_SDK}/metadata/socs/renesas/rzv2n/n44.json:True"
+
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the
 # SoC r9a09g056.dtsi and these dtsi by relative path).
@@ -308,32 +334,51 @@ do_configure:prepend() {
         chmod 0644 "${ALP_DTS_DST}/e1m-v2n-remoteproc.dtsi"
     fi
 
-    # The generated ownership fragment must only name nodes THIS kernel's SoC
-    # dtsi defines, and must match the metadata.  --check never writes.  Skipped
-    # (with a warning) when the SDK scripts are not next to this layer or the
-    # host python lacks PyYAML.
-    ALP_OWN_GEN="${THISDIR}/../../../scripts/gen_linux_ownership_dt.py"
-    if [ -f "${ALP_OWN_GEN}" ] && python3 -c 'import yaml' 2>/dev/null; then
-        python3 "${ALP_OWN_GEN}" --check \
+    # Per-project ownership (see the two cases above).  A manifest renders
+    # over the SoM-default fragment installed above, and every node it names
+    # must exist in THIS kernel's SoC dtsi.
+    ALP_OWN_GEN="${ALP_OWN_SDK}/scripts/gen_linux_ownership_dt.py"
+    ALP_OWN_M="${ALP_SYSTEM_MANIFEST_PATH}"
+    if [ -f "${ALP_OWN_M}" ]; then
+        [ -f "${ALP_OWN_GEN}" ] && python3 -c 'import yaml' 2>/dev/null \
+            || bbfatal "gen_linux_ownership_dt.py or PyYAML unavailable: cannot render the ownership fragment for ${ALP_OWN_M}"
+        python3 "${ALP_OWN_GEN}" --manifest "${ALP_OWN_M}" \
+            --output "${ALP_DTS_DST}/e1m-v2n-ownership.dtsi" \
             --vendor-dtsi "${S}/arch/arm64/boot/dts/renesas/r9a09g056.dtsi" \
-            || bbfatal "e1m-v2n-ownership.dtsi is stale or names a node r9a09g056.dtsi lacks"
+            || bbfatal "per-project ownership fragment for ${ALP_OWN_M} is invalid or names a node r9a09g056.dtsi lacks"
+        bbnote "per-project ownership fragment rendered from ${ALP_OWN_M}"
     else
-        bbwarn "gen_linux_ownership_dt.py or PyYAML unavailable: ownership fragment not verified against r9a09g056.dtsi"
+        bbwarn "no system-manifest at '${ALP_OWN_M}': using the committed SoM-default ownership fragment (pass ALP_SYSTEM_MANIFEST_PATH for a project build)"
+        # The committed fragment must still match the metadata and only name
+        # nodes THIS kernel's SoC dtsi defines; --check never writes.
+        if [ -f "${ALP_OWN_GEN}" ] && python3 -c 'import yaml' 2>/dev/null; then
+            python3 "${ALP_OWN_GEN}" --check                 --vendor-dtsi "${S}/arch/arm64/boot/dts/renesas/r9a09g056.dtsi"                 || bbfatal "e1m-v2n-ownership.dtsi is stale or names a node r9a09g056.dtsi lacks"
+        else
+            bbwarn "gen_linux_ownership_dt.py or PyYAML unavailable: ownership fragment not verified against r9a09g056.dtsi"
+        fi
     fi
 
     # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
     # to the board dts or the cam0 dtb has no rule to build.
     if [ -n "${ALP_CAM0_SENSOR}" ]; then
-        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAM0_SENSOR}.dtsi"             "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
-        install -m 0644             "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts"             "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts"             "${ALP_DTS_DST}/"
+        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAM0_SENSOR}.dtsi" \
+            "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
+        install -m 0644 \
+            "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts" \
+            "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts" \
+            "${ALP_DTS_DST}/"
     fi
 
     # DRP1: branch on the variable, same reasoning as the DRPAI branch below.
     if [ "${ALP_DRP1_DT_ENABLE}" = "1" ]; then
         install -m 0644 "${WORKDIR}/e1m-v2n-drp1.dtsi" "${ALP_DTS_DST}/"
     else
-        printf '%s
-'             '/* DRP1 (OpenCVA + codec) node not claimed in this build.'             ' * Needs meta-rz-opencva or meta-rz-codecs in bblayers.conf: it'             ' * supplies the &drp1 label.  See e1m-v2n-drp1.dtsi in'             ' * meta-alp-sdk/recipes-kernel/linux/linux-renesas/. */'             > "${ALP_DTS_DST}/e1m-v2n-drp1.dtsi"
+        printf '%s\n' \
+            '/* DRP1 (OpenCVA + codec) node not claimed in this build.' \
+            ' * Needs meta-rz-opencva or meta-rz-codecs in bblayers.conf: it' \
+            ' * supplies the &drp1 label.  See e1m-v2n-drp1.dtsi in' \
+            ' * meta-alp-sdk/recipes-kernel/linux/linux-renesas/. */' \
+            > "${ALP_DTS_DST}/e1m-v2n-drp1.dtsi"
         chmod 0644 "${ALP_DTS_DST}/e1m-v2n-drp1.dtsi"
     fi
 

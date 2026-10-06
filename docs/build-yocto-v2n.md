@@ -118,6 +118,14 @@ not the distro.
 > to `"6.1%"` (linux-renesas 6.1.141-cip43) for BSP v6.30.  Leaving it at
 > the template default causes a recipe mismatch and build failure.
 
+> **Core ownership (kernel `do_configure`):** the linux-renesas bbappend needs
+> to know which cores own the assignable peripherals. For a project build it
+> renders the Linux fragment from the system-manifest
+> (`ALP_SYSTEM_MANIFEST_PATH`, default `../alp-sdk/build/system-manifest.yaml`,
+> written by `tan build`). With no manifest (a generic SoM image) the build
+> warns and keeps the committed SoM-default fragment, which still carries the
+> `renesas,cm33-owned-clocks` hold for the CM33's RSCI7 clocks.
+
 > **Machine fragments:** `alp-image-edge` picks up per-machine `.cfg`
 > fragments from `meta-alp-sdk/recipes-kernel/linux/`.  Merged
 > unconditionally: `uio.cfg`, `rv3028-rtc.cfg`, `wifi-bt.cfg`,

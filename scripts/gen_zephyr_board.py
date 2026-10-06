@@ -2703,6 +2703,7 @@ def _v2n_dts(
     sda = _pin_by_peripheral(brd_i2c["pins"], "RIIC8_SDA8")
     scl = _pin_by_peripheral(brd_i2c["pins"], "RIIC8_SCL8")
     cs0 = gd32_spi["gpio_chip_select"]
+    pads = links.get("gd32_pads")  # optional: GD32 SWD + ATTN pads (alp,gd32-pads)
     peer_addr = brd_i2c["peer_address_7bit"]
     ch = _v2n_sci_channel(gd32_spi["dt_label"])  # "7"
 
@@ -2774,11 +2775,45 @@ def _v2n_dts(
         "\t * resolves its chip-select gpio_dt_spec from gpios[N] of this node (see the",
         "\t * SPI backend's alp_z_gpio_resolve()).  Index 0 = the GD32 SPI chip-select",
         f"\t * on {cs0['silicon_pad']}, matching the example's cs_pin_id = 0.",
+    ]
+    lines += [
         "\t */",
         "\talp_pins: alp-pins {",
         '\t\tcompatible = "alp,pin-array";',
         f"\t\tgpios = <&{cs0['gpio_node']} {cs0['gpio_pin']} GPIO_ACTIVE_LOW>;",
         "\t};",
+    ]
+    if pads:
+
+        def pol(pad: dict[str, Any]) -> str:
+            return "GPIO_ACTIVE_LOW" if pad["active_low"] else "GPIO_ACTIVE_HIGH"
+
+        def spec(role: str) -> str:
+            pad = pads[role]
+            return f"<&{pad['gpio_node']} {pad['gpio_pin']} {pol(pad)}>"
+
+        lines += [
+            "",
+            "\t/*",
+            "\t * The GD32 control pads outside the SPI link (protocol v0.15, section 3.17).",
+            "\t * A DEDICATED node, deliberately not entries of alp_pins above (whose index 0",
+            "\t * is the GD32 SPI chip-select): resolved only through the INTERNAL pad opener",
+            "\t * (the portable alp_gpio_open() refuses GD32G553_PAD_ID_*).  All four are plain GPIO, inputs out of",
+            "\t * reset.  swclk and attn are the SAME pad (P71 = GD32 PA14): the host drives it",
+            "\t * only inside an SWD session, with GD32_NRST asserted first, and otherwise uses",
+            "\t * it as the bridge ATTN input with a rising-edge IRQ.  nrst is open-drain on the",
+            "\t * board; the Renesas GPIO driver has no open-drain mode, so the SWD driver",
+            "\t * emulates it (low = assert, input = release) and never drives the pad high.",
+            "\t */",
+            "\tgd32_pads: gd32-pads {",
+            '\t\tcompatible = "alp,gd32-pads";',
+            f"\t\tswdio-gpios = {spec('swdio')};",
+            f"\t\tswclk-gpios = {spec('swclk')};",
+            f"\t\tnrst-gpios = {spec('nrst')};",
+            f"\t\tattn-gpios = {spec('attn')};",
+            "\t};",
+        ]
+    lines += [
         "};",
         "",
         "/*",
@@ -2830,6 +2865,15 @@ def _v2n_dts(
         '\tstatus = "okay";',
         "};",
         "",
+    ]
+    if pads and pads["swdio"]["gpio_node"] != cs0["gpio_node"]:
+        lines += [
+            f"&{pads['swdio']['gpio_node']} {{",
+            '\tstatus = "okay";',
+            "};",
+            "",
+        ]
+    lines += [
         "/*",
         f" * {brd_i2c['peripheral']} / BRD_I2C is Cortex-A55/Linux-exclusive",
         " * (metadata/e1m_modules/v2n/core-ownership.yaml) -- the CM33 must never",

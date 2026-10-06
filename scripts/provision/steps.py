@@ -2085,27 +2085,48 @@ class SecurePage(Step):
         return self.result(ctx, "secure page written + verified (NOT locked)", ev)
 
 
-class OpDsw1XspiRemoveSd(Step):
-    name = "dsw1_xspi_remove_sd"
-    operator = True
+class SdOutEmmcBoot(Step):
+    """Take the provisioning microSD out of the SDIO path with no operator (#2697): persist the
+    GD32 `SDMUX_EN_HIGH` boot flag, cold-boot into the eMMC Linux, then drive IO29 high there
+    (write-only: a read of the pad moves the mux, #2701; the SD mux is refused while root is on
+    the SD). The flag keeps the SD out across every later cold cycle."""
+    name = "sd_out_emmc_boot"
     trust_run = True
 
     def probe(self, ctx):
         if ctx.state_done(self.name):
             return Satisfied({}, "state file: done")
-        return Unknown("boot source is checked by cold_boot_test")
+        return Unknown("the mux is write-only and never read back; the boot flag is checked by run")
 
     def run(self, ctx):
-        b = ctx.need_bench()
-        def prompt():
-            # Linux still runs from the provisioning SD here: halt it before the operator
-            # switches power off or pulls the card
-            note = halt_note(clean_shutdown(ctx))
-            b.operator.confirm(f"{note} Power OFF, set DSW1 to xSPI boot, REMOVE the microSD. "
-                               "Leave it OFF until the tool asks.")
-            _forget_halt_if_console_spoke(ctx)
-        ctx.mutate("clean shutdown; operator: set DSW1 to xSPI boot and remove the microSD", prompt)
-        return self.result(ctx, "DSW1 on xSPI, microSD removed")
+        ev: dict[str, str] = {}
+        if not ctx.execute:
+            ctx.mutate("set the GD32 BOOT_CONFIG SDMUX_EN_HIGH flag, cold boot into the eMMC Linux, "
+                       "drive IO29 SDIO_MUX_EN high (write-only)", lambda: None)
+            return self.result(ctx, "would take the microSD out through the SDIO mux")
+        t = ctx.need_linux()
+        bus = ctx.i2c("brd")
+        # The SET moves no pad until the next GD32 reset, so it is safe on either root.
+        flags = ctx.mutate("persist the GD32 BOOT_CONFIG SDMUX_EN_HIGH flag (takes effect at the "
+                           "next GD32 reset)", lambda: lt.gd32_sd_out_flag_set(t, bus, GD32_BRIDGE_ADDR))
+        ev["gd32_boot_config"] = f"{flags:#010x}"
+        if "mmcblk1" in lt.root_device(t):
+            # Still on the provisioning SD: the cold cycle boots U-Boot without it.
+            ctx.mutate("cold cycle: the GD32 drives IO29 high, U-Boot boots the eMMC",
+                       lambda: cold_boot_phy_retry(ctx, ev))
+            t = ctx.need_linux()
+            root = lt.root_device(t)
+            if "mmcblk1" in root:
+                raise Refused(f"Linux root {root} is still the microSD after the cold cycle: "
+                              "the SD-out flag did not take (GD32 firmware older than protocol 0.15?)")
+        ctx.mutate("drive IO29 SDIO_MUX_EN high (SD disconnected), write-only",
+                   lambda: lt.sdio_mux_set(t, False))
+        flags = lt.gd32_boot_config(t, bus, None, GD32_BRIDGE_ADDR)
+        if not flags & lt.GD32_BOOT_CONFIG_SDMUX_EN_HIGH:
+            raise Refused(f"GD32 BOOT_CONFIG reads {flags:#010x}: SDMUX_EN_HIGH is not stored")
+        ev["gd32_boot_config"] = f"{flags:#010x}"
+        return self.result(ctx, "microSD disconnected by the SDIO mux, root on the eMMC, "
+                                "SD-out flag persisted", ev)
 
 
 class ColdBootTest(Step):
@@ -2562,7 +2583,7 @@ class SecurePageLock(Step):
 STEP_ORDER: list[type[Step]] = [
     Preflight, Detect, OpDsw1Scif, Bootstrap, OpDsw1EmmcInsertSd, BootSdLinux, Gd32Flash, WriteXspi,
     WriteCm33, WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Dxm1NpuFlash, PmicVerify,
-    SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, CensusFinal, ClkgenVerify, RtcSet, FunctionalTest, HilSmoke, Record,
+    SecurePage, SdOutEmmcBoot, ColdBootTest, CensusFinal, ClkgenVerify, RtcSet, FunctionalTest, HilSmoke, Record,
 ]
 STEP_NAMES = [s.name for s in STEP_ORDER]
 

@@ -33,8 +33,8 @@ All three SKUs share the same silicon + PCB.  Pick by memory budget.
 | Wi-Fi 6 + BLE 5.4       | Murata LBEE5HY2FY-922      | SDIO + UART + I2S | [`<alp/chips/murata_lbee5hy2fy.h>`](../../include/alp/chips/murata_lbee5hy2fy.h) |
 | Ethernet PHY 0          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | [`<alp/chips/rtl8211fdi.h>`](../../include/alp/chips/rtl8211fdi.h) |
 | Ethernet PHY 1          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | (same driver, second instance)          |
-| eMMC                    | (variant per SKU)          | Renesas SD0      | A55 Linux mmc (A55-owned)               |
-| NOR flash               | (variant per SKU)          | Renesas xSPI0    | A55 Linux mtd (A55-owned)               |
+| eMMC                    | (variant per SKU)          | Renesas SD0      | Linux (A55) `mmc` block device; no CM33 SDHI driver |
+| NOR flash               | (variant per SKU)          | Renesas xSPI0    | Linux (A55) `mtd`; no CM33 xSPI driver  |
 
 Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
@@ -225,10 +225,11 @@ accepts `m33`. UART0 stays `a55` until the P51 RX pull-up is bench-proven,
 UART1 has no CM33 node, CAN-FD has no CM33 driver, and SPI0 pads P90-P92 are
 not 3.3 V tolerant.
 
-A `board.yaml` `ownership:` entry is accepted only if it restates the SoM
-default: the Linux fragment follows the default alone, so any other override is
-rejected with an explanation (change the default in `core-ownership.yaml`
-instead). `hw_blocked` instances reject every override. The CM33 board tree declares an assignable node `disabled` (pinctrl
+A `board.yaml` `ownership:` entry may differ from the SoM default only where
+both cores' trees can follow it: the instance lists `m33` in `candidates` and
+carries an `m33:` block (handing a node to `a55` also needs `linux_enable`).
+Anything else is rejected with an explanation. `hw_blocked` instances reject
+every override. The CM33 board tree declares an assignable node `disabled` (pinctrl
 from the metadata rows and the SoC `linux_dt` PFC codes) once the entry carries
 an `m33:` block; a project whose resolved owner is `m33` enables it through
 `--emit dts-overlay` / `zephyr-conf`. No entry has that block yet (RSPI0/CAN-FD
@@ -246,6 +247,25 @@ changes (`&sci0` in particular: no tty alias, floating RXD0); `&rspi0` is
 plus each instance whose SoM default owner is the M33), which
 the `0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks.patch` kernel patch keeps on;
 the DT-driven form is not yet bench-validated.
+
+A project whose resolved ownership differs from the default gets its own Linux
+fragment from the same renderer, with no extra variable: the
+kernel `.bbappend` renders the fragment from the system-manifest's `ownership:`
+(`ALP_SYSTEM_MANIFEST_PATH`, default `../alp-sdk/build/system-manifest.yaml`).
+With no manifest (a generic SoM image such as a plain `alp-image-edge`) the
+build keeps the committed SoM-default fragment, which carries the
+`renesas,cm33-owned-clocks` hold, and logs a `bbwarn`.  The
+fragment is label-checked it against `r9a09g056.dtsi` (`gen_linux_ownership_dt.py
+--manifest M --output F --vendor-dtsi V`). The fragment is as fresh as the
+manifest, i.e. the last `tan build`. `python3
+scripts/alp_project.py --input board.yaml --emit linux-ownership-dts` prints
+the same fragment. An instance owned by the M33 is set `status = "disabled"` for
+Linux and its clocks join `renesas,cm33-owned-clocks`; the fragment is included
+last in the board dts so carrier nodes cannot re-enable it. `check_amp_pad_claims.py
+--project board.yaml` runs the Linux-DT-vs-CM33-pad pass over the SoM dtsi,
+carrier dtsi and the generated fragment with the project's resolved ownership. No
+instance lists `m33` as a candidate today, so this path is exercised by tests
+only until one does.
 
 ## Boot + identification
 
@@ -529,14 +549,37 @@ Re-run 2026-09-27 with the BT stack as modules: `bluetooth`/`hci_uart`/`btbcm`
 autoload after rootfs, the `brcm/BCM.hcd` patch loads (chip id 157), and
 `hci0` comes UP+RUNNING.
 
-## Linux UART ports (SCIF)
+## Linux UART ports (SCIF and RSCI)
 
-The on-module RZ/V2N SCIF UARTs enumerate as `/dev/ttySC<N>` (console on
-`ttySC0`, Bluetooth HCI on `ttySC4`). `alp_uart_open()` reaches them with
-`port_id = 300 + N` (300..399 -> `/dev/ttySC<N>`), so no hand-written tty
-wrapper is needed: `alp_uart_config_t cfg = ALP_UART_CONFIG_DEFAULT(300u + 1u);`
-opens `/dev/ttySC1`. Don't open a port the kernel already owns (the console or
-the BT UART).
+The A55 currently has exactly two UARTs, and they come from two different
+IP blocks (the RZ/V2N has both):
+
+| Linux node | Block | Device | Role |
+|------------|-------|--------|------|
+| `&scif` (alias `serial0`) | SCIF | `/dev/ttySC0` | console |
+| `&sci4` (alias `serial4`) | RSCI4 | `/dev/ttySC4` | on-module Bluetooth HCI |
+
+`alp_uart_open()` reaches `/dev/ttySC<N>` with `port_id = 300 + N`
+(300..399). Both ports above are owned by the kernel (console, BT), so do not
+open them. E1M UART0 (P50/P51) and UART1 (P52/P53) are RSCI0/RSCI1; no Linux
+device-tree node enables them yet, so `alp_uart_open(301)` finds no
+`/dev/ttySC1` today. They are unusable from the A55 until a node lands, and
+the pad metadata routes no RTS/CTS pad for either port, so hardware flow control is unavailable on both.
+
+## Pad voltage caveat (SPI0, I3C, SDIO)
+
+Per the RZ/V2N hardware manual (pin-function notes, 4.2.3.1.1 Note 1), every
+`Pxx` pin has 3.3 V tolerance except `P2x`, `P90`, `P91`, `P92` and `PBx`.
+The E1M-facing ones are E1M I3C (`P20`/`P21`), E1M SPI0 MOSI/MISO/SCLK (`P90`-`P92`) and
+the on-module SDIO pads. Before enabling an `rspi0` or `i3c` node, confirm
+that no carrier part on those buses drives 3.3 V into the pad; driving it
+can damage the SoC. The per-pad IO-group rail mapping is not recorded in the
+public metadata yet.
+
+## Not available on E1M-V2N / E1M-V2M
+
+SPDIF is not routed to any E1M pad (its candidate pins are used by the amp
+fault input, the BT host-wake line and the amp shutdown GPIO).
 
 ## Bring-up
 

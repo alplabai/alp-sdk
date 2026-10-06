@@ -167,6 +167,11 @@
     "vio_18_v": [1.71, 1.89],
     "vio_33_v": [3.0, 3.6]
   },
+  "pad_tolerance": {
+    "source": "RZ/V2N Group User's Manual: Hardware R01UH1071EJ0120 Rev.1.20, 4.2.3.1.1 List of IO blocks, Table 4.2-34 Note 1 (p.404): \"All Pxx pins (with the exceptions of P2x, P90, P91, P92, and PBx) have a 3.3-V tolerance.\" Verified against a text extraction of the manual, not against the PDF page image.",
+    "max_signal_v": 1.89,
+    "non_33v_tolerant_pads": ["P9[0-2]", "P2[0-9]", "PB[0-9]"]
+  },
   "operating_temp_c": {
     "junction": [-40, 125]
   },

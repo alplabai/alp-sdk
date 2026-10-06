@@ -12,6 +12,7 @@
 schemaVersion: pinmux-capability-v1
 family: v2n
 display_name: "E1M-V2N (Renesas RZ/V2N + GD32 IO MCU)"
+som_families: [renesas-rzv2n, renesas-rzv2n-deepx]
 pads:
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", silicon_peripheral: "µSD1_V_SEL", silicon_pad: "PA2" }
   - { e1m_pad: "TBD", e1m_function: "TBD", owner: "renesas", core: "a55", silicon_peripheral: "Audio_CLKB", silicon_pad: "P10" }

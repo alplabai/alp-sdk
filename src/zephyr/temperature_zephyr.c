@@ -100,8 +100,28 @@
  */
 #if defined(CONFIG_SENSOR) && DT_HAS_ALIAS(alp_temp0) && \
     DT_NODE_HAS_STATUS_OKAY(DT_ALIAS(alp_temp0))
-#include <zephyr/drivers/sensor.h>
 #define ALP_TEMPERATURE_SENSOR_ENABLED 1
+#else
+#define ALP_TEMPERATURE_SENSOR_ENABLED 0
+#endif
+
+/*
+ * The SoC die-temperature sensor, resolved the same way through the
+ * UPSTREAM Zephyr `die-temp0` alias (Tier-1, ADR 0017): the SoC / board
+ * devicetree that carries an upstream die-temp driver declares the alias
+ * and the upstream driver reports SENSOR_CHAN_DIE_TEMP.  We add no alias
+ * and no driver of our own -- a SoC whose tree has no such node returns
+ * ALP_ERR_NOSUPPORT.
+ */
+#if defined(CONFIG_SENSOR) && DT_HAS_ALIAS(die_temp0) && \
+    DT_NODE_HAS_STATUS_OKAY(DT_ALIAS(die_temp0))
+#define ALP_TEMPERATURE_DIE_ENABLED 1
+#else
+#define ALP_TEMPERATURE_DIE_ENABLED 0
+#endif
+
+#if ALP_TEMPERATURE_SENSOR_ENABLED || ALP_TEMPERATURE_DIE_ENABLED
+#include <zephyr/drivers/sensor.h>
 
 /*
  * Find the device by name without DEVICE_DT_GET()'s link-time ordinal
@@ -120,9 +140,8 @@
  * the same reason (subsys/shell/modules/device_service.c,
  * subsys/pm/device.c) -- this is not a first use of it.
  */
-static const struct device *find_temp_dev(void)
+static const struct device *find_dev(const char *name)
 {
-	const char          *name = DEVICE_DT_NAME(DT_ALIAS(alp_temp0));
 	const struct device *devlist;
 	size_t               devcnt = z_device_get_all_static(&devlist);
 
@@ -131,8 +150,31 @@ static const struct device *find_temp_dev(void)
 	}
 	return NULL;
 }
-#else
-#define ALP_TEMPERATURE_SENSOR_ENABLED 0
+
+/* find_dev() covers "no driver ever instantiated the node" (e.g.
+ * CONFIG_TMP112=n, #2043's board default); the explicit device_is_ready()
+ * covers "a driver did, but it never came up" (e.g. the TMP112 NACKs at
+ * its configured address, #1978) -- kept separate on purpose so a
+ * fitted-but-dead sensor doesn't read as "no sensor on this SoM". */
+static alp_status_t read_milli_c(const char *name, enum sensor_channel chan, int32_t *milli_c)
+{
+	const struct device *dev = find_dev(name);
+	if (dev == NULL) return ALP_ERR_NOSUPPORT;
+	if (!device_is_ready(dev)) return ALP_ERR_NOT_READY;
+
+	struct sensor_value val;
+	int                 rc = sensor_sample_fetch_chan(dev, chan);
+	if (rc == 0) {
+		rc = sensor_channel_get(dev, chan, &val);
+	}
+	if (rc != 0) return ALP_ERR_IO;
+
+	/* Integer milli-degrees C -- the same conversion
+     * examples/aen/aen-temp-sensor and the boot banner already use; no
+     * float printf anywhere in this path. */
+	*milli_c = (int32_t)sensor_value_to_milli(&val);
+	return ALP_OK;
+}
 #endif
 
 alp_status_t alp_temperature_read_milli_c(int32_t *milli_c)
@@ -147,35 +189,17 @@ alp_status_t alp_temperature_read_milli_c(int32_t *milli_c)
      * CONFIG_SENSOR. */
 	return ALP_ERR_NOSUPPORT;
 #else
-	/* find_temp_dev() (above) covers "no driver ever instantiated the
-	 * node" (e.g. CONFIG_TMP112=n, #2043's board default); the explicit
-	 * device_is_ready() below covers "a driver did, but it never came
-	 * up" (e.g. the TMP112 NACKs at its configured address, #1978) --
-	 * kept separate on purpose so a fitted-but-dead sensor doesn't read
-	 * as "no sensor on this SoM" on the banner. */
-	const struct device *dev = find_temp_dev();
-	if (dev == NULL) return ALP_ERR_NOSUPPORT;
-	if (!device_is_ready(dev)) return ALP_ERR_NOT_READY;
-
-	struct sensor_value val;
-	int                 rc = sensor_sample_fetch_chan(dev, SENSOR_CHAN_AMBIENT_TEMP);
-	if (rc == 0) {
-		rc = sensor_channel_get(dev, SENSOR_CHAN_AMBIENT_TEMP, &val);
-	}
-	if (rc != 0) return ALP_ERR_IO;
-
-	/* Integer milli-degrees C -- the same conversion
-     * examples/aen/aen-temp-sensor and the boot banner already use; no
-     * float printf anywhere in this path. */
-	*milli_c = (int32_t)sensor_value_to_milli(&val);
-	return ALP_OK;
+	return read_milli_c(DEVICE_DT_NAME(DT_ALIAS(alp_temp0)), SENSOR_CHAN_AMBIENT_TEMP, milli_c);
 #endif
 }
 
-/* SoC die temperature: only the Linux (Yocto) backend has a source today
- * (src/yocto/temperature_yocto.c reads the kernel thermal zones). */
 alp_status_t alp_temperature_read_die_milli_c(int32_t *milli_c)
 {
 	if (milli_c == NULL) return ALP_ERR_INVAL;
+
+#if !ALP_TEMPERATURE_DIE_ENABLED
 	return ALP_ERR_NOSUPPORT;
+#else
+	return read_milli_c(DEVICE_DT_NAME(DT_ALIAS(die_temp0)), SENSOR_CHAN_DIE_TEMP, milli_c);
+#endif
 }

@@ -1425,6 +1425,13 @@ def _emit_inference(
     # M-class Zephyr slice cannot drive either (issues #58/#59), so it
     # gets TFLM only.  Their build wiring lives on the cmake-args /
     # Yocto emit paths (_slice_cmake_args below).
+    # SoM-declared AUTO accelerator order for the .alpmodel tiebreak
+    # (zephyr/CMakeLists.txt maps it to -DALP_SDK_INFERENCE_AUTO_ORDER, the
+    # same define name the Yocto and baremetal builds use).
+    auto_order = _inference_auto_order(project.som_preset)
+    if auto_order:
+        inference_lines.append(
+            f'CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER="{",".join(auto_order)}"')
     lines.append("# Inference dispatchers (from SoM capabilities -- "
                  "customer does not pick)")
     lines.extend(inference_lines)
@@ -1624,11 +1631,11 @@ def _split_server_url(url: str) -> tuple[str, Optional[int], Optional[str]]:
     a DNS lookup that can never resolve (alplabai/tan-cli#558).
 
     A value carrying no `://` is taken as an already-bare host and returned
-    verbatim -- that covers a plain hostname and a whole-value `${VAR}`
-    placeholder, which the build system substitutes later.  Host case is
-    preserved (DNS is case-insensitive, a `${VAR}` placeholder is not), so
-    this parses the authority by hand rather than through `urlsplit`, whose
-    `.hostname` lowercases.
+    verbatim.  A `${VAR}` placeholder passes through here too, but
+    `_slice_alp_conf` then refuses it: nothing substitutes a placeholder in a
+    Kconfig fragment (issue #2696, `_refuse_live_kconfig_placeholders`).  Host
+    case is preserved (DNS is case-insensitive), so this parses the authority
+    by hand rather than through `urlsplit`, whose `.hostname` lowercases.
 
     Raises OrchestratorError on anything that cannot be expressed as those
     three parts rather than emitting a value the client cannot use.
@@ -1760,8 +1767,10 @@ def _emit_ota(project: "BoardProject") -> list[str]:
     `_slice_local_conf`.  This handles the Zephyr side: per-slice
     Kconfig that compiles the matching client in.  Settings (server URL,
     poll interval, tenant token) thread through Kconfig string values
-    when declared in `ota:`; placeholders (${VAR}) pass through verbatim
-    so the build system substitutes at link time.
+    when declared in `ota:`.  A `${VAR}` placeholder may only land on a
+    commented line here (the Mender hints): Zephyr does not expand one in a
+    Kconfig fragment, so `_slice_alp_conf` refuses it on a live line
+    (issue #2696).
     """
     lines: list[str] = []
     ota = project.ota or {}
@@ -2117,7 +2126,50 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
                      "`ownership:`).")
         lines.extend(own_kconfig)
 
-    return "\n".join(lines) + "\n"
+    text = "\n".join(lines) + "\n"
+    _refuse_live_kconfig_placeholders(text, slice_.core_id)
+    return text
+
+
+def _refuse_live_kconfig_placeholders(text: str, core_id: str) -> None:
+    """Refuse a `${NAME}` placeholder on a live line of a Zephyr fragment.
+
+    A board.yaml value written as a placeholder (`ota.server.tenant:
+    "${MENDER_TENANT_TOKEN}"`) is meant for the build host or the device to
+    fill.  A Zephyr Kconfig fragment can never do that: the pinned v4.4.1
+    `scripts/kconfig/kconfiglib.py` `_load_config` only unescapes a `.conf`
+    string value -- the `expandvars` call in that file belongs to the Kconfig
+    *source* tokenizer, not the `.conf` loader -- and nothing in Zephyr's CMake
+    expands a fragment either.  So a live `CONFIG_HAWKBIT_SERVER="${HOST}"`
+    would build firmware that carries the literal text `${HOST}` as its
+    server name, silently.  A commented line (the Mender-MCU-client hint lines
+    in `_emit_ota`) is inert and allowed.
+    """
+    # Imported here, not at the top: a new top-of-file line would shift every
+    # line number that changelog fragments cite in this module.
+    import re
+
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        match = re.search(r"\$\{[^}]*\}", line)
+        if match:
+            raise OrchestratorError(
+                f"core '{core_id}': the Zephyr config would carry the "
+                f"placeholder `{match.group(0)}` literally (`{line.strip()}`) "
+                f"-- Zephyr does not expand environment variables in a "
+                f"Kconfig fragment, so the firmware would use the text "
+                f"`{match.group(0)}` itself.  Write the real value in "
+                f"board.yaml, or set it in the app's own prj.conf")
+
+
+def _inference_auto_order(som_preset: dict) -> list[str]:
+    """The SoM preset's ordered AUTO accelerator preference, best first.
+
+    `inference.auto_order` is the single source: its first entry is the SoM's
+    preferred backend.
+    """
+    return list((som_preset.get("inference") or {}).get("auto_order") or [])
 
 
 def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
@@ -2167,6 +2219,13 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
     if library_pkgs:
         joined = " ".join(library_pkgs)
         lines.append(f'IMAGE_INSTALL:append = " {joined}"')
+    # SoM-declared AUTO accelerator preference.  Read by the alp-sdk recipe
+    # (EXTRA_OECMAKE -> -DALP_SDK_INFERENCE_AUTO_ORDER); only the
+    # .alpmodel selector (alp_model_select) consumes it, as a tiebreak.  Weak `?=` so a hand-edited
+    # local.conf wins; emitted only for presets that declare it.
+    auto_order = _inference_auto_order(project.som_preset)
+    if auto_order:
+        lines.append(f'ALP_SDK_INFERENCE_AUTO_ORDER ?= "{",".join(auto_order)}"')
     if slice_.image:
         lines.append(f"# bitbake target: {slice_.image}")
 
@@ -2183,8 +2242,19 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         srv = ota.get("server") or {}
         if srv.get("url"):
             lines.append(f'MENDER_SERVER_URL ?= "{srv["url"]}"')
-        if srv.get("tenant"):
-            lines.append(f'MENDER_TENANT_TOKEN ?= "{srv["tenant"]}"')
+        tenant = str(srv.get("tenant") or "")
+        if "${" in tenant:
+            # A ${NAME} placeholder is never expanded by BitBake from the
+            # host environment, so a self-referencing `?=` would bake the
+            # literal text (or fail to expand).  Leave the token to the
+            # documented local.conf override instead.
+            lines.append(
+                "# MENDER_TENANT_TOKEN: set it in conf/local.conf "
+                "(meta-alp-sdk/README.md, Mender step 3); the board.yaml "
+                "placeholder is not expanded by BitBake."
+            )
+        elif tenant:
+            lines.append(f'MENDER_TENANT_TOKEN ?= "{tenant}"')
         sto = ota.get("storage") or {}
         if sto.get("device"):
             lines.append(f'MENDER_STORAGE_DEVICE_BASE ?= "{sto["device"]}"')

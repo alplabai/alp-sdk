@@ -3008,7 +3008,7 @@
         ],
         "path": "examples/v2n/v2n-gd32-swd-flash",
         "som": "E1M-V2N101",
-        "summary": "Demonstrate the host-driven SWD bit-bang controller ([`chips/gd32_swd/`](../../../chips/gd32_swd/)) by attaching from the Renesas RZ/V2N to the on-module GD32G553 over three GPIOs (SWDIO + SWCLK + optional NRST), reading the SW-DP IDCODE, halting the Cortex-M33, erasing a flash sector, writing + verifying a scratch pattern, and resetting."
+        "summary": "Demonstrate the host-driven SWD bit-bang controller ([`chips/gd32_swd/`](../../../chips/gd32_swd/)) by attaching from the Renesas RZ/V2N to the on-module GD32G553 over three GPIOs (SWDIO + SWCLK + NRST), reading the SW-DP IDCODE, halting the Cortex-M33, erasing a flash sector, writing + verifying a scratch pattern, and resetting."
       },
       {
         "board": "e1m-x-evk",
@@ -3171,6 +3171,36 @@
         "path": "examples/v2n/v2n-pwm-fan-control",
         "som": "E1M-V2N101",
         "summary": "Drive a fan from `ALP_E1M_PWM0` on V2N. Walks duty cycle through a five-stop curve at a fixed 25 kHz board (above audible) using the portable `<alp/pwm.h>` surface, so the wave shape is observable on a scope."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
+        "name": "v2n-ros2-som-temperature",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
+        "path": "examples/v2n/v2n-ros2-som-temperature",
+        "som": "E1M-V2N101",
+        "summary": "The smallest useful Alp SDK + ROS 2 node. It calls the **portable temperature API** from `<alp/temperature.h>` and republishes the values as `sensor_msgs/Temperature`: the SoC die temperature on `/alp/soc_temperature` (real on V2N/V2M Linux) and the on-module sensor on `/alp/som_temperature`."
       },
       {
         "board": "e1m-x-evk",
@@ -3488,6 +3518,10 @@
     {
       "purpose": "No tracked file may live under the Doxygen OUTPUT_DIRECTORY (#1573).",
       "script": "scripts/check_no_committed_doxygen_output.py"
+    },
+    {
+      "purpose": "Pad-voltage gate: a carrier must not drive a 3.3 V level onto an SoM pad whose SoC pad is not 3.3 V tolerant without declaring a level shifter.",
+      "script": "scripts/check_pad_voltage.py"
     },
     {
       "purpose": "Validate that every silicon pad referenced in the SoM peripheral maps is claimed by **exactly one** peripheral.",

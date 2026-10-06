@@ -141,7 +141,9 @@ in xSPI mode, so each unit takes two legs:
 1. **Leg 1, microSD in.** Insert the release microSD, then
    `--from dsw1_emmc_insert_sd --only dsw1_emmc_insert_sd,boot_sd_linux,gd32_flash,write_xspi,write_cm33,write_emmc_boot,write_rootfs,census,eeprom_manifest,dxm1_npu_flash,pmic_verify,secure_page`
    (drop the steps a bundle does not carry).
-2. **Leg 2, microSD out.** Remove the card, then `--from dsw1_xspi_remove_sd`.
+2. **Leg 2, microSD out, no operator.** `--from sd_out_emmc_boot`: the tool disconnects the
+   card through the EVK SDIO mux (see `sd_out_emmc_boot` in the step table). The card may
+   stay in its slot.
 
 `SYS_LSI_MODE` `0x3c05` is the eMMC strap: wrong for leg 2, and `cold_boot_test`
 refuses it.
@@ -217,8 +219,8 @@ not promise that: it records what it did, and some cases are not covered.
 Where it runs: `detect`, `boot_to_linux` (so `boot_sd_linux`, the `eeprom_manifest`
 and `gd32_flash` cold cycles, every `cold_boot_test` cycle, `poweroff_and_cold_boot`),
 the `bootstrap` cycle, the xmodem path of `boot_sd_linux`, and, before the operator is
-asked to switch power off or pull the card, `dsw1_emmc_insert_sd` and
-`dsw1_xspi_remove_sd` (their prompts say whether the unit was halted).
+asked to switch power off, `dsw1_emmc_insert_sd` (its prompt says whether the unit was
+halted).
 
 How it reaches the unit, in this order:
 
@@ -244,10 +246,10 @@ The PSU current is not a halt signal. The OFF dwell is unchanged, so a clean pow
 followed by it is still a cold boot, and `cold_boot_test` keeps its `--cold-cycles` (3).
 
 The "already halted on this power-on" marker survives the operator prompt of
-`dsw1_emmc_insert_sd` or `dsw1_xspi_remove_sd`: the tool saw the halt line itself, so a cut
+`dsw1_emmc_insert_sd`: the tool saw the halt line itself, so a cut
 after the prompt is not logged as `blind`. It is cleared only if the console printed
 something after the halt (a halted unit is silent, so boot text means it was powered back
-on). Both prompts say "Leave it OFF until the tool asks."
+on). The prompt says "Leave it OFF until the tool asks."
 
 Every cut is recorded as the step evidence key `power_cut` (and in the step log and the
 plan log), one entry per cut:
@@ -293,7 +295,7 @@ are not yet confirmed by a run of this code on a bench.
 | `dxm1_npu_flash` | `v2n-m1` bundles that carry the DX-M1 set: firmware over the ROM UART path, probe = PCIe `0x0000` + `dxrt-cli -s` version, see below |
 | `pmic_verify` | compare registers against `--pmic-expect` |
 | `secure_page` | write the 64-byte Secure Data Page, read back, compare. Never locks |
-| `dsw1_xspi_remove_sd` | operator: boot switch in xSPI mode, remove the microSD |
+| `sd_out_emmc_boot` | no operator. On the provisioning SD Linux: persist the GD32 `BOOT_CONFIG` flag `SDMUX_EN_HIGH` (bridge I2C `0x70`, opcode `0x42`; the SET moves no pad until the next GD32 reset, so it cannot pull the root) and wait until a GET returns it; cold-boot into the eMMC Linux (refused if the root is still `mmcblk1`); drive IO29 `SDIO_MUX_EN` (active-low, `gd32-bridge-gpio` line 12) high; re-read the flag. The mux is **write-only**: reading the pad reconfigures it (#2701). `SDIO_MUX_SEL` is never touched. A unit already on the eMMC still SETs the flag and skips only the cold cycle. Precondition: the GD32 runs from slot A; a SET from slot B is refused with `NOSUPPORT` (`0x06`, docs/gd32-bridge-protocol.md 3.19), so OTA the same image into slot A first. The flag keeps the SD out across the cold cycles of `cold_boot_test`; the mux write alone would not survive a power cycle |
 | `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, ACT88760 reg `0x10` after boot, I2C scans (GD32 exempted only while `0x10` still reads `0x88`). An `end0` without carrier (PHY latch, #2582) gets one extra cold cycle, noted as `end0_no_carrier_retries` in the step evidence (not a ledger key); it fails if `end0` is still down. With the `rtc_backup` fixture and N >= 2 it also sets the RTC from the host clock after the first cycle, so `functional_test` can judge `rtc_retention` |
 | `census_final` | the census again, on the unit as shipped (after the last cold boot: xSPI boot, eMMC root). Every key it reads replaces the first census's value. A key the first census recorded and this one could **not** produce (a census group that fails drops its keys) is set to `unread (not re-read by census_final)`, so a value read in the microSD boot never stands in for the shipping boot; an unread ship-required key blocks the ship check. The ACT88760 GPIO4 keys are `cold_boot_test`'s and are left alone |
 | `clkgen_verify` | the on-SoM 5L35023B (`BRD_I2C`, `0x69`) OTP image against U-Boot's fixup |
@@ -969,8 +971,8 @@ Every E1M-V2M103 is to ship with a CM33 firmware image (maintainer decision); wh
 - **Padding.** The bundle's `cm33` component (`flash_target` `xspi:mtd1`) is the stored image: `0x3000` zero bytes followed by Zephyr's `zephyr.bin`, the same bytes the `rzv2n_mtd_flash` west runner writes. `write_cm33` and `cm33_firmware` md5 exactly these bytes.
 - **Size limit.** At most `0x30000` bytes in all; BL2 silently truncates a larger image. `preflight` and `check_som_bundle.py` refuse a `cm33` whose first `0x3000` bytes are not zero, whose initial SP (word at `0x3000`) is outside SRAM0 (`0x08xxxxxx`, the runner's test), whose reset vector (word at `0x3004`) lacks the Thumb bit or lies outside `0x08003000..0x08033000`, or that exceeds `0x30000`. The FIP must still end below `0x1A0000`; its erase never reaches the CM33 region.
 - **When it runs.** BL2 releases the CM33 in every boot mode. In eMMC or eSD boot today it loads the image from a location nothing wrote, so the CM33 faults and stays locked (harmless). With TF-A fix #2658 it loads the image from xSPI in every mode, so after `write_cm33` the CM33 image also runs alongside the provisioning Linux on later mode-1 boots, not only from `cold_boot_test` on. The CM33 cannot be restarted from Linux.
-- **No clash with the provisioning steps.** The shipping image is the idle shim: it writes only the DDR beacon at `0x4F700FF0..0x4F700FF8` and claims no peripheral (no GPIO, SPI, I2C, SCI, DMA). No provisioning step touches that window (the census reads only the SoC `SYS` registers at `0x10430300..0x10430308`; `cm33_running` only reads the beacon), and `write_xspi` / `write_cm33` erase xSPI while the CM33 runs from the SRAM copy BL2 made, not XIP. A different CM33 image that owns a peripheral a step uses (the GD32 bridge link, RIIC) would need its own check.
-- **Liveness beacon.** `firmware/alp-stock-shim` writes a magic (`0xA10D0683`, written last), an image kind (`0x00000100`, the idle shim; RPC firmware uses values below `0x100`) and a counter (+1 about every second) into the `rsctbl` window the A55 DT reserves, A55 `0x4F700FF0` / `0x4F700FF4` / `0x4F700FF8` (the `rpmsg-v2n` example's layout). The CM33 has no console here, so `cm33_running` reads the three words, waits 2 s and reads the counter again; magic and version must match and the counter must advance by 1..4 (expected values: `cm33_beacon` in `functest-expect-v2n.yaml`). Read-only. It proves the stock image runs; a different CM33 image fails the check unless it writes the same beacon.
+- **No clash with the provisioning steps.** The shipping image is the idle shim: it writes only the DDR beacon at `0x4F700FF0..0x4F700FF8` and claims no peripheral (no GPIO, SPI, I2C, SCI, DMA). The GD32-bridge test images (beacon kind `0x200`) are not the shipping image: they own the GD32 SPI link and also write a result record at `0x4F700F00..0x4F700F4F`. No provisioning step touches that window (the census reads only the SoC `SYS` registers at `0x10430300..0x10430308`; `cm33_running` only reads the beacon), and `write_xspi` / `write_cm33` erase xSPI while the CM33 runs from the SRAM copy BL2 made, not XIP. A different CM33 image that owns a peripheral a step uses (the GD32 bridge link, RIIC) would need its own check.
+- **Liveness beacon.** `firmware/alp-stock-shim` writes a magic (`0xA10D0683`, written last), an image kind (`0x00000100`, the idle shim; RPC firmware uses values below `0x100`; `0x00000200` is the GD32-bridge test images, which `cm33_running` rejects) and a counter (+1 about every second) into the `rsctbl` window the A55 DT reserves, A55 `0x4F700FF0` / `0x4F700FF4` / `0x4F700FF8` (the `rpmsg-v2n` example's layout). The CM33 has no console here, so `cm33_running` reads the three words, waits 2 s and reads the counter again; magic and version must match and the counter must advance by 1..4 (expected values: `cm33_beacon` in `functest-expect-v2n.yaml`). Read-only. It proves the stock image runs; a different CM33 image fails the check unless it writes the same beacon.
 - **No verification at boot.** No header, signature or checksum; only the tool's md5 readback and the blocking `cm33_firmware` check cover the image.
 
 ## Block-map write of the system image
