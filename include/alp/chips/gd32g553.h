@@ -832,7 +832,7 @@ gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t 
  *  @param channel  E1M PWM channel index (0..7).
  *  @return ALP_OK, or the firmware's error.  `ALP_ERR_NOSUPPORT`, with
  *          nothing sent, when the bridge advertises a protocol minor below
- *          @ref GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR: stop/release ships in
+ *          @ref GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR -- stop/release ships in
  *          protocol 0.17, and older firmware would treat period 0 as a
  *          real period and retune the shared timer. */
 alp_status_t gd32g553_pwm_stop(gd32g553_t *ctx, uint8_t channel);
