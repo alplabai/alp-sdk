@@ -134,10 +134,6 @@
 	status = "okay";
 };
 
-&gpio7 {
-	status = "okay";
-};
-
 /*
  * ATTN (P71) interrupt: the RZ GPIO driver routes a pin to a TINT slot through
  * the port's `irqs`; without it alp_gpio_irq_enable() has no route and the
