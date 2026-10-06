@@ -5,8 +5,9 @@ Issue #1149. The RZ/V2N has two MIPI CSI-2 receivers feeding the CRU
 carrier DT node wired one to a sensor. This adds an **opt-in** Linux
 path on the A55; the default dtb is unchanged.
 
-**Status: BENCH-UNVERIFIED.** No sensor was on the bench and the DT has
-not been through dtc. Nothing here is proof the pipeline streams.
+**Status:** the OV9281 path is bench-proven on E1M-V2M103; every other
+module is **BENCH-UNVERIFIED**. The generated fragments compile with dtc
+against both cam0 wrapper dts; bitbake has not been run on them.
 
 ## What is wired
 
@@ -36,8 +37,9 @@ fragment's header as not modelled. A module that routes more lanes than the
 connector carries gets no fragment.
 
 Bench status: the OV9281 path (`innomaker_cam_ov9281`) is bench-proven on
-E1M-V2M103; every other module is **BENCH-UNVERIFIED**. The generated
-fragments have not been through dtc or bitbake.
+E1M-V2M103; every other module is **BENCH-UNVERIFIED**. Each generated
+fragment compiles with dtc against both cam0 wrapper dts; bitbake has not
+been run on them.
 
 ## Enable
 
@@ -52,12 +54,22 @@ An unknown id aborts the bake and lists the available ones. Bake as usual
 it to use it; the stock dtb stays the fallback. Unset (the default) leaves
 the shipped dtb unchanged.
 
-The module ids and their sensors: `raspberry_pi_camera_module_1` (OV5647),
-`raspberry_pi_camera_module_2` (IMX219), `raspberry_pi_global_shutter_camera`
-(IMX296, 1 lane), `innomaker_cam_imx335` (IMX335, 2 lanes),
-`innomaker_cam_ov9281` (OV9281). The IMX296 and 2-lane IMX335 need the
-sensor-driver kernel patches that `metadata/os/linux-kernel-drivers.yaml`
-lists as pending; until they land those two modules do not probe.
+A module only gets a fragment (and its sensor driver a line in
+`camera-sensors.cfg`) when the BSP kernel can serve it, per
+`metadata/os/linux-kernel-drivers.yaml`: the driver is native, or the alp
+patch that adds it (or its lane count) exists in `linux-renesas/`. Today
+`raspberry_pi_camera_module_2` (IMX219), `raspberry_pi_camera_module_1`
+(OV5647) and `innomaker_cam_ov9281` (OV9281) qualify. The IMX296
+(`raspberry_pi_global_shutter_camera`, patch `0018`) and the 2-lane
+`innomaker_cam_imx335` (the native driver is 4-lane only; patch `0019`) get
+their fragments, and IMX296 its config line, the moment those patch files
+land and `gen_camera_dt.py` is re-run.
+
+`clock-noncontinuous` (the OV9281 endpoint): the native 6.1 `ov9282.c`
+ignores it and always writes the gated MIPI clock (`0x4800 = 0x20`); the
+v6.6 backport of patch `0020` writes it only when the endpoint sets the
+property. The chip's `endpoint_flags` carries it so the bench-proven gated
+clock survives the driver swap.
 
 ## Not modelled (open, see the CSI TODO in `e1m-x-evk.dtsi`)
 

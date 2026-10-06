@@ -29,7 +29,7 @@ def want():
 def tree(tmp_path):
     """A copy of just the files the generator reads, plus the committed output."""
     for sub in ("metadata/camera_modules", "metadata/chips", "metadata/boards", "metadata/socs/renesas/rzv2n",
-                "metadata/e1m_modules/v2n", OUT):
+                "metadata/e1m_modules/v2n", "metadata/os", OUT):
         shutil.copytree(REPO / sub, tmp_path / sub)
     for p in (REPO / "metadata/e1m_modules").glob("E1M-V2*.yaml"):
         shutil.copy(p, tmp_path / "metadata/e1m_modules" / p.name)
@@ -62,17 +62,38 @@ def test_imx219_on_cam0(want):
     assert "VANA-supply = <&cam0_supply>;" in t
 
 
-def test_one_lane_module_gets_one_lane_and_trimmed_polarity(want):
-    t = want[f"{OUT}/e1m-x-evk-cam0-raspberry_pi_global_shutter_camera.dtsi"]
+GS = f"{OUT}/e1m-x-evk-cam0-raspberry_pi_global_shutter_camera.dtsi"
+IMX335 = f"{OUT}/e1m-x-evk-cam0-innomaker_cam_imx335.dtsi"
+P0018 = "0018-media-i2c-add-imx296-backport.patch"
+P0019 = "0019-media-i2c-imx335-2-lane-10-bit-binned-mode.patch"
+
+
+def test_unserved_modules_have_no_fragment_and_no_kconfig(want):
+    """IMX296 is not in the 6.1 kernel (patch 0018 pending) and the native
+    IMX335 is 4-lane only (patch 0019 pending): no fragment, no config line."""
+    assert GS not in want and IMX335 not in want
+    cfg = want[CFG]
+    assert "IMX296" not in cfg
+    assert "CONFIG_VIDEO_IMX335=y" in cfg  # native driver, so built in
+    assert OV9281 in want and IMX219 in want
+
+
+def test_patch_presence_enables_driver_and_lane_count(tree):
+    assert GS not in g.generate(tree) and IMX335 not in g.generate(tree)
+    (tree / OUT / P0018).write_text("p", encoding="utf-8")
+    (tree / OUT / P0019).write_text("p", encoding="utf-8")
+    want = g.generate(tree)
+    assert "CONFIG_VIDEO_IMX296=y" in want[CFG]
+    t = want[GS]
     assert "data-lanes = <1>;" in t and "lane-polarities = <1 1>;" in t
     assert 'clock-names = "inck";' in t and "link-frequencies" not in t
+    assert "data-lanes = <1 2>;" in want[IMX335]
 
 
-def test_kernel_config_lists_receiver_and_every_sensor(want):
-    lines = want[CFG].splitlines()
-    assert {"CONFIG_VIDEO_RZG2L_CSI2=y", "CONFIG_VIDEO_RZG2L_CRU=y", "CONFIG_VIDEO_IMX219=y",
-            "CONFIG_VIDEO_IMX296=y", "CONFIG_VIDEO_IMX335=y", "CONFIG_VIDEO_OV5647=y",
-            "CONFIG_VIDEO_OV9282=y"} <= set(lines)
+def test_kernel_config_lists_receiver_and_available_sensors(want):
+    assert set(want[CFG].splitlines()) >= {
+        "CONFIG_VIDEO_RZG2L_CSI2=y", "CONFIG_VIDEO_RZG2L_CRU=y", "CONFIG_VIDEO_IMX219=y",
+        "CONFIG_VIDEO_OV5647=y", "CONFIG_VIDEO_OV9282=y"}
 
 
 def test_output_is_deterministic(want):
