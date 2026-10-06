@@ -358,7 +358,7 @@ int main(void)
 	cfg.format              = CAM_FORMAT;
 	/* ALP_CAMERA_CONFIG_DEFAULT leaves fps 0 (= sensor's own default, e.g. OV5647
 	 * 15 fps); ask for 30 explicitly to keep the pre-#2278 request. */
-	cfg.fps                 = 30;
+	cfg.fps = 30;
 
 	/* --- 1. open -------------------------------------------------- */
 	printk("[camfl] alp_camera_open(id=0, %ux%u) ...\n", cfg.width, cfg.height);
