@@ -23,3 +23,10 @@ overlay needed). It gives platform_def.h and devkit_e7_sp_min_setup.c
 a carrier whose console isn't on the Alif DevKit's UART2 doesn't need to hand-
 patch the vendor tree. Gated :e1m-aen801 in the bbappend, which is INERT today
 -- see that bbappend's comment for why.
+
+alif-s80ks5122-hyperram-init.patch (#1970) is also Alif-fork-only and fully
+PUBLIC (register values are transcribed from Alif's public CMSIS DFP and the
+public Infineon datasheet; the SoC pad names are already in
+metadata/e1m_modules/aen/alif-ospi.tsv). UNTESTED ON SILICON: it adds the
+opt-in S80K_HYPERRAM_EN driver, gated :e1m-aen803 in the bbappend and
+off by default in the patch, so E1M-AEN801 is unaffected.

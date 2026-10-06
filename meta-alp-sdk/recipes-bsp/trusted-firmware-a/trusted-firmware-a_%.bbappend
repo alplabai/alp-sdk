@@ -226,3 +226,33 @@ TF-A_EXTRA_OPTIONS:append:e1m-aen701 = " \
     ALIF_CONSOLE_TX_PORT=PORT_3 ALIF_CONSOLE_TX_PIN=PIN_5 \
     ALIF_CONSOLE_PIN_FUNC=PINMUX_ALTERNATE_FUNCTION_2 \
 "
+
+# ---- Alif Ensemble E1M-AEN803: S80KS5122 HyperRAM init (#1970) ----
+#
+# UNTESTED ON SILICON. alif-s80ks5122-hyperram-init.patch adds an opt-in
+# BL32 driver (S80K_HYPERRAM_EN, default 0 in the patch) for the Infineon/
+# Cypress S80KS5122 HyperRAM on OSPI0, transcribed from the Alif DFP
+# (ospi_psram_xip.c + S80K_HyperRAM.c; every write cites its DFP file:line in
+# plat/alif/common/drivers/ospi/s80k_hyperram.c). Verified by `git apply
+# --check` and an arm-zephyr-eabi PLAT=devkit_e7 bl32 build against
+# alifsemi/trusted-firmware-a_alif, branch alif_lts-v2.10.8 -- not run on a
+# board.
+#
+# AEN803 ONLY. E1M-AEN801 has no external memory (same PCB, memory
+# unpopulated), so it neither gets the patch nor the knob and its TF-A is
+# unchanged. The patch is also byte-identical to stock when the knob is unset.
+#
+# ALP_TFA_S80K_CLK_PAIR_CROSSED encodes the 2626-r2 board bug: CK/CK# are
+# crossed at the HyperRAM (bench 2026-09-06: bit-bang read ID0=0x0F86
+# ID1=0x0001 only with the pair inverted; no firmware lever, SCPOL is dead).
+# "1" (default) makes the driver log and leave the part untouched. Set "0" for
+# a corrected board (R3, or an r2 with the R17/R18 rework).
+#
+# INERT TODAY for the same reason as the console knobs above: no
+# e1m-aen803-a32 MACHINE exists yet.
+ALP_TFA_S80K_CLK_PAIR_CROSSED ?= "1"
+SRC_URI:append:e1m-aen803 = " file://alif-s80ks5122-hyperram-init.patch"
+TF-A_EXTRA_OPTIONS:append:e1m-aen803 = " \
+    S80K_HYPERRAM_EN=1 \
+    S80K_HYPERRAM_CLK_PAIR_CROSSED=${ALP_TFA_S80K_CLK_PAIR_CROSSED} \
+"
