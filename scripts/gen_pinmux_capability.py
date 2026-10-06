@@ -89,6 +89,7 @@ SCHEMA = REPO / "metadata" / "schemas" / "pinmux-capability-v1.schema.json"
 FAMILIES: dict[str, dict] = {
     "aen": {
         "display_name": "E1M-AEN (Alif Ensemble)",
+        "som_families": ["alif-ensemble"],
         "sources": [
             {"file": "aen/from-alif.tsv", "owner": "alif"},
             {"file": "aen/from-cc3501e.tsv", "owner": "cc3501e"},
@@ -96,6 +97,7 @@ FAMILIES: dict[str, dict] = {
     },
     "v2n": {
         "display_name": "E1M-V2N (Renesas RZ/V2N + GD32 IO MCU)",
+        "som_families": ["renesas-rzv2n", "renesas-rzv2n-deepx"],
         "sources": [
             {"file": "v2n/renesas-peripheral-map.tsv", "owner": "renesas",
              "shape": "pad_first"},
@@ -244,6 +246,7 @@ def _render(family: str, spec: dict, pads: list[dict[str, str]]) -> str:
         "schemaVersion: pinmux-capability-v1",
         f"family: {family}",
         f"display_name: {_yaml_quote(spec['display_name'])}",
+        f"som_families: [{', '.join(spec['som_families'])}]",
         "pads:",
     ]
     for p in pads:

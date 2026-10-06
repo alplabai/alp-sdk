@@ -51,6 +51,12 @@ EXTRA_OECMAKE = "-DALP_SDK_BUILD_SHARED=ON            \
                  -DALP_OS=yocto                       \
                  -DALP_SDK_MODEL_ZCBOR_REQUIRED=ON"
 
+# SoM-declared ALP_INFERENCE_BACKEND_AUTO accelerator order (comma list, best
+# first, e.g. "deepx_dxm1,drpai,cpu").  Generated from the SoM preset
+# `inference.auto_order` into local.conf by `--emit yocto-conf`; empty means no preset order.
+ALP_SDK_INFERENCE_AUTO_ORDER ?= ""
+EXTRA_OECMAKE:append = "${@' -DALP_SDK_INFERENCE_AUTO_ORDER=' + d.getVar('ALP_SDK_INFERENCE_AUTO_ORDER') if d.getVar('ALP_SDK_INFERENCE_AUTO_ORDER') else ''}"
+
 # Regenerate the CMake toolchain file as a do_configure prefunc.
 #
 # cmake.bbclass sequences its generator as `addtask generate_toolchain_file
@@ -90,13 +96,12 @@ do_configure[prefuncs] += "do_generate_toolchain_file"
 #   audio    -> alsa-lib   (oe-core; also enables the I2S backend)
 #   rpc      -> open-amp + libmetal (meta-openamp; default OFF because
 #               the layer is not in the standard alp bblayers set yet)
-#   drpai    -> mera2-drpai-tvm + drpai + lib-tvm (RZ/V2N on-die DRP-AI3
-#               NPU; default OFF).  All THREE are needed, and the flag sets
+#   drpai    -> mera2-drpai-tvm + drpai (RZ/V2N on-die DRP-AI3
+#               NPU; default OFF).  BOTH are needed, and the flag sets
 #               ALP_SDK_DRPAI_REQUIRED=ON, so a missing one is a configure
 #               error rather than a silently backend-less library:
 #               src/yocto/CMakeLists.txt probes <linux/drpai.h> (from
-#               meta-rz-drpai's `drpai`), libtvm_runtime (its `lib-tvm`),
-#               and the MERA2 closure (mera2-drpai-tvm).  Requires
+#               meta-rz-drpai's `drpai`) and the MERA2 closure (mera2-drpai-tvm).  Requires
 #               meta-rz-drpai in bblayers.conf.  Turning this on is what
 #               makes src/yocto/inference_drpai.cpp compile in -- see #1145.
 #               Note this recipe carries BBCLASSEXTEND = "native nativesdk"
@@ -112,14 +117,13 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # above this one is NOT a silent degrade and NOT dep-free: when
 # ALP_SDK_USE_DRPAI_V2N=ON, src/yocto/inference_drpai.cpp is added to the
 # target, #includes <linux/drpai.h> + MeraDrpRuntimeWrapper.h and links
-# five vendor libraries.  The -D flags and the build deps therefore have to
+# four vendor libraries.  The -D flags and the build deps therefore have to
 # move together, which is why they are routed through one PACKAGECONFIG
 # switch.
 #
-# What this switch supplies -- all 10 inputs src/yocto/CMakeLists.txt
+# What this switch supplies -- all 9 inputs src/yocto/CMakeLists.txt
 # looks for, across two recipes:
 #   drpai            -> ${includedir}/linux/drpai.h  (meta-rz-drpai, drpai_1.4.0)
-#   lib-tvm          -> libtvm_runtime.so            (meta-rz-drpai)
 #   mera2-drpai-tvm  -> MeraDrpRuntimeWrapper.h, the tvm/runtime/profiling.h +
 #                       dlpack/dlpack.h + dmlc/logging.h header tree it
 #                       hard-includes, libmera2_runtime.so / libmera2_plan_io.so /
@@ -161,8 +165,7 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # -- they come from meta-rz-drpai's mmngr-user-module /
 # mmngrbuf-user-module recipes. mera2-drpai-tvm now stages all eight
 # RUHMI libraries in its main package (so OE's automatic shlibs pass
-# picks up their DT_NEEDED entries, the same way it already did for the
-# lib-tvm-provided libtvm_runtime.so) and RDEPENDS on the two mmngr
+# picks up their DT_NEEDED entries) and RDEPENDS on the two mmngr
 # packages explicitly, since nothing DEPENDS-time links against them for
 # shlibs to infer the RDEPENDS on its own. A first cut of this recipe
 # staged only the three libraries named above and shipped them into the
@@ -206,7 +209,22 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # all -- and separately, ALP_SDK_DRPAI_REQUIRED itself is emitted by
 # NOTHING in the tree (kconfig.py emits only the USE flag), so REQUIRED
 # can never be auto-flipped ON regardless of which slice is building.)
-PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF -DALP_SDK_DRPAI_REQUIRED=OFF,drpai lib-tvm mera2-drpai-tvm,mera2-drpai-tvm"
+PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF -DALP_SDK_DRPAI_REQUIRED=OFF,drpai mera2-drpai-tvm mmngr-user-module mmngrbuf-user-module,mera2-drpai-tvm alp-drpai-udev"
+
+# Warn when the image will carry the DRP-AI driver + runtime (ALP_ENABLE_DRPAI)
+# but this SDK build has no DRP-AI backend because RUHMI is not configured:
+# `.backend = ALP_INFERENCE_BACKEND_DRPAI` would then fail with NOSUPPORT.
+python () {
+    if ('rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':')
+            and d.getVar('ALP_ENABLE_DRPAI') == '1'
+            and not d.getVar('RUHMI_DRPAI_TVM_DIR')
+            and 'drpai' not in (d.getVar('PACKAGECONFIG') or '').split()):
+        bb.warn("alp-sdk: ALP_ENABLE_DRPAI = \"1\" but RUHMI_DRPAI_TVM_DIR is not "
+                "set, so libalp_sdk is built WITHOUT the DRP-AI backend "
+                "(alp_inference_open(.backend = ALP_INFERENCE_BACKEND_DRPAI) "
+                "returns ALP_ERR_NOSUPPORT). Set RUHMI_DRPAI_TVM_DIR to a "
+                "RUHMI rzv_drp-ai_tvm checkout, see docs/bring-up-drpai-v2n.md.")
+}
 
 # deepx-dxm1 -> dx-rt (DEEPX's own meta-deepx-m1 layer; see
 #               conf/machine/include/e1m-v2m-deepx.inc).  Same
@@ -229,6 +247,28 @@ PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=O
 # than failing the bake; set PACKAGECONFIG:append:pn-alp-sdk = " drpai"
 # to force it, or ALP_ENABLE_DRPAI = "0" to keep it out.
 PACKAGECONFIG:append = "${@' drpai' if ('rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and d.getVar('ALP_ENABLE_DRPAI') == '1' and d.getVar('RUHMI_DRPAI_TVM_DIR')) else ''}"
+
+# gles -> GPU backend for <alp/gpu2d.h> (src/backends/gpu2d/yocto_gles.c):
+#         fill/blit/blend on the Mali-G31 through the vendor EGL + GLES 3
+#         stack.  The userspace driver is the Renesas AI SDK's
+#         meta-rz-graphics `mali-library` (virtual/egl + virtual/libgles2,
+#         egl.pc/glesv2.pc); it is licence-gated and never copied into this
+#         layer -- Alp-built images take it from the private mirror, and
+#         ALP_ENABLE_GPU2D_GLES = "0" opts out.  REQUIRED rides with the
+#         enable (same shape as `drpai`): a bake that asked for the GPU
+#         backend must not silently ship a CPU-only libalp_sdk.
+#         Auto-on only when the GPU stack is really there: a `mali-family`
+#         MACHINE with `opengles` in DISTRO_FEATURES, which meta-rz-graphics
+#         (rz-graphics.inc) sets in DISTRO_FEATURES -- so a build without that
+#         layer keeps the CPU fallback and does not fail.  :class-target keeps
+#         the -native/-nativesdk variants (BBCLASSEXTEND below) off the GPU stack.
+#         BENCH-UNVERIFIED.
+#         Runtime: the Mali `wayland` userspace variant needs weston running
+#         (IMAGE_FEATURES += "alp-display"); without it open() degrades to the
+#         CPU path.
+PACKAGECONFIG[gles]     = "-DALP_SDK_USE_GPU2D_GLES=ON -DALP_SDK_GPU2D_GLES_REQUIRED=ON,-DALP_SDK_USE_GPU2D_GLES=OFF,virtual/libgles2 virtual/egl,libegl libgles2"
+ALP_ENABLE_GPU2D_GLES ?= "1"
+PACKAGECONFIG:append:class-target = "${@' gles' if ('mali-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and 'opengles' in (d.getVar('DISTRO_FEATURES') or '').split() and d.getVar('ALP_ENABLE_GPU2D_GLES') == '1') else ''}"
 
 # ort -> ONNX Runtime CPU floor (own recipe, recipes-devtools/onnxruntime).
 #       REQUIRED rides with the enable, same shape as `drpai`: a missing ORT
@@ -288,7 +328,7 @@ python () {
 # runtime install.
 #
 # DRP-AI3 is the exception, and only when PACKAGECONFIG[drpai] is on: its
-# DEPENDS field names `drpai` and `lib-tvm` explicitly.  That is required,
+# DEPENDS field names `drpai` explicitly.  That is required,
 # not belt-and-braces.  The userspace HEADERS (<linux/drpai.h>) do NOT
 # "come from meta-rz-drpai via the sysroot" merely by that layer being in
 # bblayers.conf -- meta-rz-drpai ships them through its own
@@ -303,6 +343,9 @@ python () {
 # build-time backend pinning either way; silicon is the source of truth
 # and apps pick per-handle at runtime via alp_inference_open(.backend =
 # ...).
+
+# The DRP-AI lock directory (/run/alp) is created by alp-drpai-udev, which
+# PACKAGECONFIG[drpai] pulls in; non-DRP-AI images get no such directory.
 
 FILES:${PN}     += "${libdir}/libalp_sdk.so.*"
 FILES:${PN}-dev += "${libdir}/libalp_sdk.so    \

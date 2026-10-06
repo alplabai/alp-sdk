@@ -308,6 +308,20 @@ config ALP_SDK_CHIP_TAS2563
 	  TAS2563RPP amps on I2C0 + I2S0 (0x4D and 0x4E); see
 	  <alp/boards/alp_e1m_evk.h>.
 
+config ALP_SDK_CHIP_INA228
+	bool "TI INA228 20-bit power / energy / charge monitor"
+	depends on I2C
+	help
+	  Compile chips/ina228/ina228.c.  Portable driver for the
+	  INA228 on a bus the SDK reads itself (on the E1M-X EVK, the
+	  +5V input monitor at 0x42 on E1M-X I2C0, read from Linux over
+	  i2c-dev).  For a bus a Zephyr core masters, upstream Zephyr's
+	  `ti,ina228` sensor driver is the path.  The driver verifies the
+	  manufacturer + die ID at init, programs SHUNT_CAL from a
+	  caller-supplied shunt resistance and max current, and reports
+	  voltage in uV, current in uA, power in uW, energy in uJ,
+	  charge in uC and die temperature in milli-degrees Celsius.
+
 config ALP_SDK_CHIP_INA236
 	bool "TI INA236 16-bit current / bus voltage / power monitor"
 	depends on I2C
@@ -477,7 +491,9 @@ config ALP_SDK_CHIP_GD32_SWD
 	  Compile chips/gd32_swd/gd32_swd.c.  Bit-banged SWD controller
 	  that lets the Renesas RZ/V2N host reflash the on-module
 	  GD32G553MEY7TR companion MCU using three GPIO lines
-	  (SWDIO + SWCLK + optional NRST) routed back to the V2N pads
+	  (SWDIO + SWCLK + NRST -- NRST is mandatory: SWCLK doubles as the
+	  bridge ATTN input, so the pads are driven connect-under-reset only)
+	  routed back to the V2N pads
 	  per the 2026-05-12 hardware decision.  Reference algorithm
 	  follows Arm DDI 0316C (ADIv5) + GD32G553 User Manual Rev 1.2
 	  §3 (FMC).  Pulls in no vendor SDK.  The driver exposes the

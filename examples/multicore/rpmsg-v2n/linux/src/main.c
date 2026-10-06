@@ -99,6 +99,16 @@ int main(void)
 			       i,
 			       (int)st,
 			       (int)alp_last_error());
+			/* A call that times out poisons the channel: replies are matched to
+			 * calls by method name only (no sequence id), so the late reply to
+			 * this call would be handed to the NEXT echo_test call -- every later
+			 * reply one call off.  The backend therefore refuses further calls
+			 * (ALP_ERR_NOT_READY) until the channel is closed and reopened, so
+			 * retrying here would only fail.  A real application would
+			 * alp_rpc_close() and alp_rpc_open() again; this demo just stops. */
+			if (st == ALP_ERR_TIMEOUT) {
+				break;
+			}
 			continue;
 		}
 		if (resp_len != (size_t)req_len || memcmp(req, resp, resp_len) != 0) {
