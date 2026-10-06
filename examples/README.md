@@ -127,6 +127,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `aen/edgeai-vision-aen`            | On-device vision inference with Ethos-U on an AEN SoM. **(AEN)**              |
 | `v2n/v2n-drpai-inference`          | DRP-AI3 on-die NPU still-frame inference through `<alp/inference.h>` -- the exhibition booth demo. **(V2N, Yocto)** |
 | `v2n/v2n-gpu2d-compose`            | Fill / blit / SRC_OVER-blend ARGB8888 layers through `<alp/gpu2d.h>` -- Mali-G31 via EGL/GLES when the image has it, CPU fallback otherwise; reports which. **(V2N, Yocto)** |
+| `v2n/v2n-two-models`               | DRP-AI3 and DX-M1 running at the same time -- one model per NPU, one thread each, per-NPU latency and combined FPS. **(V2M, Yocto, not bench-verified)** |
 | `v2n/v2n-m1-deepx-inference`       | DEEPX DX-M1 NPU bring-up + a single inference through `<alp/inference.h>`. **(V2N-M1)** |
 | `v2n/v2n-m1-ros-perception`        | ROS 2 perception node -- detection on DEEPX, DRP-AI3 fallback on plain V2N. **(V2N / V2N-M1, Yocto)** |
 | `cold-chain-monitor`               | Pharma/food cold-chain integrity monitor -- BME280 T/RH/P samples → anomaly classification; v0.9 paper-correct, HiL bench-gated. |

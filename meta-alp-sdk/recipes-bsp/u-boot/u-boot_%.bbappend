@@ -244,7 +244,7 @@ SRC_URI:append:rzv2n-family = " file://0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pul
 # at 22.5792 MHz instead of 24.576 MHz. Bench-confirmed (E1M-V2M103
 # board #1, 2026-09-24): with the OTP defaults the SoC RTC (RTCA-3)
 # fails to start ("Failed to setup the RTC!", -ETIMEDOUT); two volatile
-# register writes (reg 0x24: 0x9c->0x8e, reg 0x21: 0x80->0xc0) fix it,
+# register writes (reg 0x24: 0x9c->0x8e, reg 0x21: 0x80->0xc0; 0012 later makes reg 0x24 0x8f) fix it,
 # after which the RTC counts at 32.768 kHz. Both are OTP-shadow
 # registers and REVERT ON POWER-CYCLE (the OTP itself cannot be
 # re-burned in-system), so alp_clk5l_fixup() runs unconditionally,
@@ -345,6 +345,23 @@ SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth
 # kernel, so the gpio-gd32-bridge driver finds the GD32 at probe. Production
 # OTP already reads 0x08, so the step is a no-op there; see the patch header.
 SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.patch"
+
+# 0012 (reset cause + DX-M1 reset hold, alp-sdk#1153): board_late_init() first
+# reads CPG_ERROR_RST2 (survives an error system reset), prints "ALP: reset
+# cause: ...", clears the WDT flags and publishes env alp_reset_cause and
+# /chosen/alp,reset-cause. After a WDT reset on a v2n-m1 SoM it holds
+# M1_RESET (PA6) low before 0004/0001 release it. Applies after 0009 (shares
+# ft_system_setup()), 0010 and 0011 (board_late_init() context lines).
+SRC_URI:append:rzv2n-family = " file://0012-rzv2n-dev-ALP-E1M-reset-cause-and-deepx-reset-hold.patch"
+
+# 0013 (5L35023B SE2 -> GD32 HXTAL): SE2 of the on-module clock generator
+# drives the GD32 OSCIN (net GD32_OSC). The OTP has reg 0x1f = 0x46 (bit 7
+# SE2_Freerun_32K = 0), so SE2 free-runs at 32.768 kHz and the GD32 HXTAL
+# never starts. alp_clk5l_fixup() additionally writes reg 0x24 0x9c -> 0x8f
+# (DIV4 channel 2 on) then reg 0x1f 0x46 -> 0xc7 (SE2 from DIV4 =
+# 24.576 MHz). Edits the body of 0007's alp_clk5l_fixup(), so it must stay
+# after 0007, 0009 and 0012 (whose hunk's context is the tail of that function).
+SRC_URI:append:rzv2n-family = " file://0013-rzv2n-dev-ALP-E1M-clkgen-se2-gd32-hxtal.patch"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string

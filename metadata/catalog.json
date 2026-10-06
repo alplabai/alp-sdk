@@ -3231,6 +3231,30 @@
         "path": "examples/v2n/v2n-temp-sensor",
         "som": "E1M-V2N101",
         "summary": "Reads the on-module TMP112 once per second and prints the temperature in degrees Celsius (with 0.001 °C resolution), from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster. Classic V2N starter app -- one I²C bus open, one chip init, a ten-sample loop."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
+        "name": "v2n-two-models",
+        "osSet": [
+          "yocto"
+        ],
+        "path": "examples/v2n/v2n-two-models",
+        "som": "E1M-V2M103",
+        "summary": "Run two models at the same time on an E1M-V2M, one on the RZ/V2N's on-die **DRP-AI3** NPU and one on the **DEEPX DX-M1**, each in its own thread, through `<alp/inference.h>`. Prints per-NPU latency and combined FPS."
       }
     ]
   },

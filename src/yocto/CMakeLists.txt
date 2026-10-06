@@ -463,6 +463,14 @@ target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_INFERENCE=1
 )
 
+# Size of the static alp_inference_open() handle pool.  Four covers two NPU
+# models plus a CPU fallback and a spare; each slot is a few dozen bytes.
+set(ALP_SDK_MAX_INFERENCE_HANDLES 4 CACHE STRING
+    "Maximum simultaneously open alp_inference_t handles (Yocto backend)")
+target_compile_definitions(alp_sdk PRIVATE
+    ALP_SDK_MAX_INFERENCE_HANDLES=${ALP_SDK_MAX_INFERENCE_HANDLES}
+)
+
 # Mute the split stub backend definitions for every class whose dispatcher is
 # added UNCONDITIONALLY above (can/pwm/adc/i2s/counter/rtc/wdt + audio in/out).
 # These must live in the same unconditional scope as their dispatcher
