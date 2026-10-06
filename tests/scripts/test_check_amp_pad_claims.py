@@ -169,3 +169,32 @@ def test_linux_claim_on_assignable_pad_defaulting_to_m33_fails(tmp_path: Path) -
     assert len(problems) == 1 and "P50" in problems[0] and "CM33" in problems[0]
     _ownership(root, "a55")  # same claim, a55 default: clean
     assert gate.find_problems(root) == []
+
+
+def test_project_override_makes_a_carrier_claim_fail(tmp_path: Path) -> None:
+    """A carrier dtsi claims UART0's pad (P50).  Clean at the SoM default
+    (a55); a board.yaml `ownership: {e1m_uart0: m33}` moves the pad to the CM33,
+    so the real pass over carrier dtsi + generated fragment must fail.  No
+    patching: the project fragment comes from the real emitter."""
+    import shutil
+    from alp_orchestrate import load_board_yaml
+    root = tmp_path / "metadata"
+    shutil.copytree(REPO / "metadata", root)
+    f = root / "e1m_modules" / "v2n" / "core-ownership.yaml"
+    doc = yaml.safe_load(f.read_text(encoding="utf-8"))
+    doc["assignable"]["e1m_uart0"].update(
+        candidates=["a55", "m33"], m33={"dt_label": "sci0", "alias": "alp-uart9"})
+    f.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    dt = tmp_path / gate.LINUX_DT_DIR / "linux-renesas"
+    dt.mkdir(parents=True)
+    (dt / "e1m-x-evk.dtsi").write_text(
+        "&pinctrl { g { pinmux = <RZV2N_PORT_PINMUX(5, 0, 1)>; }; };\n", encoding="utf-8")
+    shutil.copytree(REPO / "examples" / "multicore" / "rpmsg-v2n", tmp_path / "p")
+    b = tmp_path / "p" / "board.yaml"
+    base = b.read_text(encoding="utf-8")
+    assert gate.find_project_problems(load_board_yaml(b, metadata_root=root)) == []
+    b.write_text(base + "\nownership:\n  e1m_uart0: m33\n", encoding="utf-8")
+    proj = load_board_yaml(b, metadata_root=root)
+    assert "P50" in gate._pads_by_core(tmp_path, "m33", proj.ownership)
+    problems = gate.find_project_problems(proj)
+    assert len(problems) == 1 and "e1m-x-evk.dtsi:1" in problems[0] and "P50" in problems[0]

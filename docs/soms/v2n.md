@@ -225,10 +225,11 @@ accepts `m33`. UART0 stays `a55` until the P51 RX pull-up is bench-proven,
 UART1 has no CM33 node, CAN-FD has no CM33 driver, and SPI0 pads P90-P92 are
 not 3.3 V tolerant.
 
-A `board.yaml` `ownership:` entry is accepted only if it restates the SoM
-default: the Linux fragment follows the default alone, so any other override is
-rejected with an explanation (change the default in `core-ownership.yaml`
-instead). `hw_blocked` instances reject every override. The CM33 board tree declares an assignable node `disabled` (pinctrl
+A `board.yaml` `ownership:` entry may differ from the SoM default only where
+both cores' trees can follow it: the instance lists `m33` in `candidates` and
+carries an `m33:` block (handing a node to `a55` also needs `linux_enable`).
+Anything else is rejected with an explanation. `hw_blocked` instances reject
+every override. The CM33 board tree declares an assignable node `disabled` (pinctrl
 from the metadata rows and the SoC `linux_dt` PFC codes) once the entry carries
 an `m33:` block; a project whose resolved owner is `m33` enables it through
 `--emit dts-overlay` / `zephyr-conf`. No entry has that block yet (RSPI0/CAN-FD
@@ -246,6 +247,25 @@ changes (`&sci0` in particular: no tty alias, floating RXD0); `&rspi0` is
 plus each instance whose SoM default owner is the M33), which
 the `0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks.patch` kernel patch keeps on;
 the DT-driven form is not yet bench-validated.
+
+A project whose resolved ownership differs from the default gets its own Linux
+fragment from the same renderer, with no extra variable: the
+kernel `.bbappend` renders the fragment from the system-manifest's `ownership:`
+(`ALP_SYSTEM_MANIFEST_PATH`, default `../alp-sdk/build/system-manifest.yaml`).
+With no manifest (a generic SoM image such as a plain `alp-image-edge`) the
+build keeps the committed SoM-default fragment, which carries the
+`renesas,cm33-owned-clocks` hold, and logs a `bbwarn`.  The
+fragment is label-checked it against `r9a09g056.dtsi` (`gen_linux_ownership_dt.py
+--manifest M --output F --vendor-dtsi V`). The fragment is as fresh as the
+manifest, i.e. the last `tan build`. `python3
+scripts/alp_project.py --input board.yaml --emit linux-ownership-dts` prints
+the same fragment. An instance owned by the M33 is set `status = "disabled"` for
+Linux and its clocks join `renesas,cm33-owned-clocks`; the fragment is included
+last in the board dts so carrier nodes cannot re-enable it. `check_amp_pad_claims.py
+--project board.yaml` runs the Linux-DT-vs-CM33-pad pass over the SoM dtsi,
+carrier dtsi and the generated fragment with the project's resolved ownership. No
+instance lists `m33` as a candidate today, so this path is exercised by tests
+only until one does.
 
 ## Boot + identification
 
