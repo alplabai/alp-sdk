@@ -33,8 +33,8 @@ All three SKUs share the same silicon + PCB.  Pick by memory budget.
 | Wi-Fi 6 + BLE 5.4       | Murata LBEE5HY2FY-922      | SDIO + UART + I2S | [`<alp/chips/murata_lbee5hy2fy.h>`](../../include/alp/chips/murata_lbee5hy2fy.h) |
 | Ethernet PHY 0          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | [`<alp/chips/rtl8211fdi.h>`](../../include/alp/chips/rtl8211fdi.h) |
 | Ethernet PHY 1          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | (same driver, second instance)          |
-| eMMC                    | (variant per SKU)          | Renesas SD0      | Zephyr SD subsystem                     |
-| NOR flash               | (variant per SKU)          | Renesas xSPI0    | Zephyr flash subsystem                  |
+| eMMC                    | (variant per SKU)          | Renesas SD0      | A55 Linux mmc (A55-owned)               |
+| NOR flash               | (variant per SKU)          | Renesas xSPI0    | A55 Linux mtd (A55-owned)               |
 
 Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
@@ -47,14 +47,24 @@ The on-module RV-3028-C7 is the RTC of record, bound as `/dev/rtc0`
 from userspace. **CA55 (Linux) is the sole master of the whole
 RIIC8/BRD_I2C bus** the RTC and every other BRD_I2C device sit on
 (`metadata/e1m_modules/v2n/core-ownership.yaml`); the CM33 must never
-issue I2C transactions there. **Confirmed 2026-09-29 on E1M-V2M103
-2026W38-0001:** the RV-3028-C7 has no time backup across a power cycle
-unless the carrier fits pad `P10` (VBACKUP); no `trickle-resistor-ohms`
-is configured for it. Without a backup source, the image resyncs the
-RTC on every boot: `systemd-timesyncd` pulls wall-clock over NTP once
-networked, and the kernel writes the result back to `rtc0`
-(`hwclock -w`-equivalent via `systemd-time-wait-sync` / `hwclock` unit)
-so `/dev/rtc0` reads the corrected time on the next cold boot. The
+issue I2C transactions there. **Backup:** Confirmed 2026-09-29 on E1M-V2M103 2026W38-0001: no time backup
+across a power cycle unless the carrier fits pad `P10` (VBACKUP). That unit read
+register `0x37` = `0x10`: BSM (bits 3:2) = `00`, i.e. backup switchover disabled,
+and TCE (bit 5) = 0, trickle off (RV-3028-C7 Application Manual Rev. 1.4, "EEPROM
+BACKUP REGISTER, 37h"). With switchover off the chip never moves to VBACKUP even when
+a source is present, so that observation shows no working backup path but cannot by
+itself tell a missing source from the disabled switchover. Whether the module carries
+its own VBACKUP supercapacitor is **unconfirmed** (it rests on netlist reading, not on
+a bench result or an approved schematic), so this page does not claim one. Provisioning's
+`rtc_set` step now enables switchover (level mode, VDD < 2.0 V) through `RTC_PARAM_SET`
+(the 6.1 driver has no devicetree property for it) and sets the time from the
+provisioning host (UTC) with `hwclock -w`; this is bench-unverified until the HIL steps
+in `docs/provisioning-v2n.md` are run. **Trickle charge is a carrier decision**: the SoM
+dtsi does not set `trickle-resistor-ohms`. A carrier with a rechargeable element (a
+supercap) adds it; **a primary lithium cell on VBACKUP must never be trickle-charged**.
+The property makes `rtc-rv3028` rewrite the RTC's configuration EEPROM at every boot
+(rated 10'000 cycles at 3.0 V / 25 C, 100 at 5.5 V / 85 C). The NTP resync on every
+boot (`systemd-timesyncd`, written back to `rtc0`) remains the fallback. The
 alarm INT line isn't wired to a kernel interrupt yet -- that remains an
 open follow-up.
 
@@ -78,21 +88,37 @@ for this SoM:
 | Output | Feeds                                    | As-shipped (wrong) | Corrected |
 |--------|-------------------------------------------|---------------------|-----------|
 | SE1    | SoC RTXIN (RTCA-3) + the Wi-Fi module's 32k LPO input | 24.576 MHz | 32.768 kHz |
+| SE2    | GD32 supervisor OSCIN / HXTAL (net `GD32_OSC`) | 32.768 kHz free-run | 24.576 MHz |
 | SE3    | On-module audio clock                      | 22.5792 MHz         | 24.576 MHz |
 
 Bench-confirmed (2026-09-24): with the as-shipped OTP values, the SoC
-RTC fails to start (`error -ETIMEDOUT: Failed to setup the RTC!`). Two
-volatile register writes fix it (register `0x24`: SE1 DCO select;
-register `0x21`: SE3 source select); after them the SoC RTC counts at
-32.768 kHz. Both registers are OTP-shadow registers -- the writes take
+RTC fails to start (`error -ETIMEDOUT: Failed to setup the RTC!`). Three
+volatile register writes fix it, in this order (register `0x24` `0x9c` ->
+`0x8f`: SE1 DCO select plus DIV4 channels 2 and 3 on; register `0x21`
+`0x80` -> `0xc0`: SE3 source select; register `0x1f` `0x46` -> `0xc7`: SE2
+source select); after them the SoC RTC counts at 32.768 kHz. SE2 is the
+GD32 HXTAL input: OTP `0x1F` bit 7 `SE2_Freerun_32K` = 0 leaves it at
+32.768 kHz, which is why the GD32 HXTAL never starts; bits 7 and 0
+(`SE2_CLKSEL1` = DIV4) route it from DIV4 = PLL2 / OUTDIV4 = 24.576 MHz.
+`VDD2_SEL` and `0x20` (`SE2_EN`) are not touched. The next build's
+corrected OTP image (ledger item 24) should carry `0x1F` = `0xC7` and
+`0x24` = `0x8F` so SE2 is valid from power-on-reset. SE2 must never change
+after this: once the host triggers the switch, the GD32 locks its PLL to it. Both registers are OTP-shadow registers -- the writes take
 effect immediately but **revert on power-cycle** (the OTP itself cannot
 be re-burned in-system) -- so U-Boot applies them on **every** boot,
 early in `board_late_init()`, before the DEEPX rail sequencing step and
 before Linux starts
 (`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch`).
-The fixup only writes when both registers read the exact as-shipped
-values; any other readback (already fixed, a differently configured
-part, or a communication error) is left untouched and only logged.
+The fixup gates on reg `0x00` == `0xa0`, then handles reg `0x24`, reg
+`0x21` and (patch `0013`) reg `0x1f` independently, in that order: OTP
+value -> write the fix and read it back; already the fixed value -> skip;
+any other value (a differently configured part, or a communication error)
+-> warn and stop, leaving the register untouched. If the `0x24` write
+fails, `0x21` is never touched. The log line is `ALP: 5L35023B clock: SE1
+32.768 kHz, SE2 24.576 MHz, SE3 24.576 MHz (0x24=0x8f 0x1f=0xc7
+0x21=0xc0)`. Patch
+`0013-rzv2n-dev-ALP-E1M-clkgen-se2-gd32-hxtal.patch` adds the SE2 step.
+Bench-unverified until a scope on TP88 reads 24.576 MHz at 1.8 V.
 
 This is a runtime workaround. **Production builds should instead use a
 Renesas factory dash code that carries the corrected OTP image**,
@@ -116,7 +142,7 @@ host driver speaks both transports:
 image:** `0x70` (`gpio-gd32-bridge`) and `0x52` (`rtc-rv3028`, see
 [Real-time clock](#real-time-clock) above). A standard userspace
 `i2c-tools` transaction against either address is refused because the
-kernel already owns it -- use `i2c -f` (force) from userspace, or go
+kernel already owns it -- use the force flag from userspace (for example `i2cget -f -y 8 0x52 0x00` or `i2ctransfer -f`; `i2c-tools` is not in the image by default, add it), or go
 through the owning kernel driver, rather than probing those two
 addresses directly.
 
@@ -173,8 +199,8 @@ for V2N-M1), and installed with `act8760_set_limits()` /
   `GD32_NRST` (MODE4 `0x10`: some units' OTP reads `0x88`, holding the
   GD32 in reset; the volatile fix is `0x08`).
 
-The DEEPX DA9292 CH2 sequence is `da9292_ch2_sequence()`, run by U-Boot
-(`board_late_init()`) in `a55_boot` mode; afterwards CA55/Linux is the sole
+The DEEPX DA9292 CH2 sequence is implemented in U-Boot (`board_late_init()`, a standalone port of
+`da9292_ch2_sequence()`) in `a55_boot` mode; afterwards CA55/Linux is the sole
 RIIC8 master (see above).  Boot-mode ownership is recorded in
 `metadata/e1m_modules/v2n/power-tree.yaml` (`boot_modes:`); `cm33_boot` is
 blocked there.
@@ -226,9 +252,9 @@ A project whose resolved ownership differs from the default gets its own Linux
 fragment from the same renderer, with no extra variable: the
 kernel `.bbappend` renders the fragment from the system-manifest's `ownership:`
 (`ALP_SYSTEM_MANIFEST_PATH`, default `../alp-sdk/build/system-manifest.yaml`).
-With no manifest the build fails unless `ALP_OWNERSHIP_SOM_DEFAULT = "1"` is set
-in `local.conf` (a generic SoM image such as a plain `alp-image-edge`, which
-then keeps the committed SoM-default fragment and logs a `bbnote`).  The
+With no manifest (a generic SoM image such as a plain `alp-image-edge`) the
+build keeps the committed SoM-default fragment, which carries the
+`renesas,cm33-owned-clocks` hold, and logs a `bbwarn`.  The
 fragment is label-checked it against `r9a09g056.dtsi` (`gen_linux_ownership_dt.py
 --manifest M --output F --vendor-dtsi V`). The fragment is as fresh as the
 manifest, i.e. the last `tan build`. `python3
@@ -257,7 +283,13 @@ kernel as `/chosen/alp,sku`; the `alp-hostname` unit in every ALP image
 turns it into the hostname. U-Boot patch 0010 also publishes the unit
 serial as `/chosen/alp,serial`, which the unit appends so each board gets
 its own name (for example `e1m-v2m103-2026w38-0001`; the whole serial,
-since its index restarts every ISO week). An unprovisioned
+since its index restarts every ISO week). The root shell prompt does not
+show the serial (`root@e1m-v2m103:~#`: `/etc/profile.d/alp-prompt.sh`
+strips it from the hostname for interactive shells), and the pre-login
+banner gains a `Module: <SKU>  Serial: <serial>` line: the same unit writes
+`/run/alp-module.issue` and the image links `/etc/issue.d/10-alp-module.issue`
+to it (agetty appends `/etc/issue.d/*.issue` to `/etc/issue`; the line is
+absent on a blank module). The hostname itself is unchanged. An unprovisioned
 module, or a bootloader older than u-boot patch 0009, publishes nothing
 and keeps the distro default hostname `alp-e1m`.
 
@@ -301,34 +333,30 @@ week and an index would otherwise collide on the same MAC.
   `end1 = A2:C0:A6:00:00:14`.
 * **Runs twice, on purpose:** once from `board_late_init()` (so U-Boot's
   own networking has a MAC before `bootcmd` runs), and again from a new
-  `alp_eth_mac` command that `CONFIG_BOOTCOMMAND` invokes immediately
-  after `env default -a`. The second call is the one that actually
-  reaches Linux: U-Boot's `image_setup_libfdt()` runs
-  `fdt_fixup_ethernet()` (which copies `ethaddr`/`eth1addr` into the
-  `ethernet0`/`ethernet1` DT nodes' `mac-address`/`local-mac-address`
-  properties) *before* `ft_system_setup()` ever runs. Deriving only in
-  `board_late_init()` would leave nothing for Linux to see: its value is
-  *wiped* by that same `env default -a` a few bootcmd tokens later.
-  Deriving only in `ft_system_setup()` would already be too late for
-  that same boot instead, since `fdt_fixup_ethernet()` has already run
-  by the time it executes.
-* **No env override, by construction, not by choice:** `CONFIG_BOOTCOMMAND`
-  opens with `env default -a`, which wipes the whole environment back to
-  its compiled-in defaults on every boot before Linux is reached -- so a
-  `setenv ethaddr <mac>; saveenv` would not survive to the next autoboot
-  regardless of what U-Boot's derivation code did. The honest rule this
-  SoM ships is: **the derived MAC always applies whenever the serial
-  parses**, unconditionally, every boot. There is no override slot --
+  `alp_eth_mac` command that `CONFIG_BOOTCOMMAND` invokes first. The
+  second call is the one that actually reaches Linux: U-Boot's
+  `image_setup_libfdt()` runs `fdt_fixup_ethernet()` (which copies
+  `ethaddr`/`eth1addr` into the `ethernet0`/`ethernet1` DT nodes'
+  `mac-address`/`local-mac-address` properties) *before*
+  `ft_system_setup()` ever runs. Deriving only in `ft_system_setup()`
+  would already be too late for that same boot, since
+  `fdt_fixup_ethernet()` has already run by the time it executes.
+* **No env override, by construction, not by choice:** the derivation
+  overwrites `ethaddr`/`eth1addr` on every boot, so a
+  `setenv ethaddr <mac>; saveenv` does not survive to the next autoboot
+  even though the rest of the environment now persists (see
+  [U-Boot environment](#uboot-environment)). The rule this SoM ships is:
+  **the derived MAC always applies whenever the serial parses**,
+  unconditionally, every boot. There is no override slot --
   **conditional on autoboot actually running the compiled-in
-  `CONFIG_BOOTCOMMAND`.** A unit carrying a *saved* `bootcmd` from an
-  older FIP (predating this `alp_eth_mac` command) or from a manual
-  `setenv bootcmd; saveenv` runs THAT saved command instead -- one with
-  no `alp_eth_mac` call. Its `env default -a` (still present in every
-  version of this bootcmd) then wipes whatever `board_late_init()` set,
-  and Linux sees the DRP-AI vendor default `02:11:22:33:44:55`/`66`
-  instead of the derived MAC. See `docs/provisioning.md`'s FIP-flash
-  step for the saved-env reset a FIP upgrade on a previously-provisioned
-  unit must carry.
+  `CONFIG_BOOTCOMMAND`.** the write allowlist (see
+  [U-Boot environment](#uboot-environment)) rebuilds `bootcmd` from the
+  binary every boot, so a `bootcmd` saved by an older FIP cannot keep
+  running; a unit still on an older FIP that carries a *saved*
+  `bootcmd` without the `alp_eth_mac` call (or from a manual
+  `setenv bootcmd; saveenv`) runs THAT command instead, and Linux sees
+  the DRP-AI vendor default `02:11:22:33:44:55`/`66` instead of the
+  derived MAC. See `docs/provisioning.md`'s FIP-flash step.
 * **Unprovisioned EEPROM (no serial, or one that does not parse):**
   U-Boot prints `ALP: WARNING: ... SoM EEPROM not provisioned` and
   derives the MACs from the on-module eMMC's CID instead: CRC-32 of the
@@ -347,6 +375,76 @@ week and an index would otherwise collide on the same MAC.
 Octet 0 `0xA2` has U/L=1, I/G=0 and IEEE 802c-2017 SLAP quadrant bits
 Z:Y=`00`, i.e. the *Administratively Assigned Identifier* (AAI) quadrant --
 the range a local administrator may assign without buying an IEEE block.
+
+### U-Boot environment {#uboot-environment}
+
+The environment is a **redundant pair in eMMC boot partition 2** (Linux
+`/dev/mmcblk0boot1`): copy 1 at byte offset `0x220000`, copy 2 at
+`0x230000`, `0x10000` bytes each. The provisioning tool writes the
+bootloader into boot partition 1 (`mmcblk0boot0`), the one
+`EXT_CSD[179] = 0x08` selects for boot (`emmc_boot_write_verify`), so the
+two never share a partition. The provisioning write also refuses any boot
+image that would reach offset `0x220000`, whichever partition it targets. The offsets are set in
+`meta-alp-sdk/recipes-bsp/u-boot/u-boot/uboot-env-emmc.cfg` and mirrored
+in the image's `/etc/fw_env.config`
+(`meta-alp-sdk/recipes-core/alp-system/files/fw_env.config`);
+`tests/scripts/test_uboot_env_layout.py` fails if they disagree. The
+vendor default (end of the eMMC user area) is no longer used.
+
+* **`saveenv` persists, but only the OTA variables are read back.**
+  `CONFIG_BOOTCOMMAND` no longer starts with `env default -a`. U-Boot is
+  built with `CONFIG_ENV_WRITEABLE_LIST`: the built-in default is the
+  baseline on every boot and only the variables listed in
+  `CFG_ENV_FLAGS_LIST_STATIC` (patch `0016`, `include/configs/rzv2n-dev.h`)
+  are imported from the saved copy: Mender's `upgrade_available`,
+  `bootcount`, `mender_boot_part`, `mender_boot_part_hex`,
+  `mender_saveenv_canary`, and the first-boot marker variable. At the
+  U-Boot prompt `setenv` / `saveenv` behave as before; a variable not on
+  the list simply is not restored on the next boot. The Mender names come
+  from Mender's documented U-Boot integration and are not yet checked
+  against the meta-mender release this repo will pin; a missing name is
+  ignored at boot, so check the list when wiring Mender.
+* **Everything that controls booting is the firmware's.** `bootcmd`,
+  `bootargs`, `bootdelay`, `bootstopkey*`, `preboot` and the vendor boot
+  scripts (`bootcmd_check`, `emmcload`, `sd2load`, ...) are rebuilt from
+  the binary on every boot, so neither an older FIP's saved copy nor
+  `fw_setenv` can change them. First boot (both copies unreadable) prints
+  the usual `bad CRC, using default environment` once; patch `0016` then
+  writes the defaults and the first-boot marker.
+* **Linux sees the same variables.** The image carries `libubootenv`
+  (`fw_printenv`, `fw_setenv`) and `/etc/fw_env.config`. This is groundwork
+  for the OTA design: the boot flow reads no boot-slot variable yet.
+* **Provisioning does not write the environment.** The Linux boot write
+  (`write_emmc_boot`) refuses an image that would reach offset `0x220000`
+  (`scripts/provision/gates.py`, `BOOT_ENV_OFFSET`).
+* **Mender:** an image built with `conf/distro/include/mender.inc` brings
+  its own `/etc/fw_env.config` and U-Boot environment integration. It is
+  not wired to the offsets above yet: point
+  `MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_*` at them and do not install
+  `alp-uboot-env` alongside it.
+* **Console lockdown:** a production boot (`prod-boot.cfg`) ignores any
+  saved `bootdelay` / `bootstopkey*`, so a root shell's `fw_setenv` cannot
+  reopen the console.
+
+* **Why persistent, not env-nowhere.** Issue #2637 first recorded
+  `CONFIG_ENV_IS_NOWHERE` as the fix for the `bad CRC` line; the
+  maintainer's later decision (work ledger Q2, 2026-10-03: redundant
+  environment on the eMMC boot partition plus `fw_setenv` for OTA)
+  supersedes it, and the allowlist keeps the part of env-nowhere that
+  mattered, that no saved variable can change how the unit boots.
+
+### microSD card-detect {#sd-card-detect}
+
+U-Boot's SD host cannot report card presence, so an empty slot used to
+print `Card did not respond to voltage select! : -110` on every boot.
+Patch `0015` adds an `alp_sd_present` command that reads the slot's
+card-detect switch (`SD1_SD1CD`, PA1, active-low: 0 = card present, the
+same net Linux uses as `cd-gpios` for `&sdhi1` in `e1m-x-evk.dtsi`), and
+`CONFIG_BOOTCOMMAND` touches `mmc1` only when it succeeds; with the slot
+empty it runs the vendor eMMC loader directly. A card without
+`boot/Image` on partition 2 still falls back to the eMMC. Applies to the
+E1M-V2N/V2M builds that set the SD1 microSD Kconfig option; other builds
+keep the old behaviour.
 
 ### SoC OTP (not used by the SDK) {#soc-otp}
 
@@ -391,7 +489,7 @@ side has no Wi-Fi role):
 
 * `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi` --
   `&sdhi2` (WLAN, `mmc-pwrseq-simple` on line 19), `&sci4` (BT,
-  `brcm,bcm43438-bt` `shutdown-gpios` on line 18), the `sd2_wlan_pins` /
+  `infineon,cyw55572-bt` `shutdown-gpios` on line 18), the `sd2_wlan_pins` /
   `sci4_bt_pins` pinctrl groups.
 * `meta-alp-sdk/recipes-kernel/linux/linux-renesas/wifi-bt.cfg` --
   `CONFIG_CFG80211=m` + in-tree `CONFIG_BRCMFMAC` off (no CYW55513 ID
@@ -483,13 +581,10 @@ Both files are tab-delimited; consume directly or via
 |----------------------------------|-------------------------------------------------------------|
 | `v2n-gd32-bridge-ping`           | Round-trip PING + GET_VERSION on both transports.           |
 | `v2n-board-id-readout`           | SoM EEPROM manifest read + SKU assertion.                   |
-| `v2n-ethernet-dual`              | Bring up both RTL8211FDI PHYs (ET0 + ET1); WoL configuration.|
 | `v2n-eeprom-manifest-dump`       | Hexdump + decode the 128-byte EEPROM manifest.              |
 | `v2n-temp-sensor`                | TMP112 read loop -- classic starter app.                    |
 | `v2n-pwm-fan-control`            | Ramp a GD32-side PWM channel along a five-stop fan curve.   |
 | `v2n-secure-element-sign`        | OPTIGA Trust M probe, Coprocessor UID read and raw APDU session (host library). |
-| `v2n-xspi-flash-readwrite`       | Erase + write + verify one page on the on-module xSPI NOR.  |
-| `v2n-emmc-block-stat`            | Read on-module eMMC geometry + first block via disk-access. |
 | `v2n-gd32-swd-flash`             | Host-driven SWD bit-bang -- IDCODE read, halt, erase/write/verify, reset. |
 
 Plus every cross-family example

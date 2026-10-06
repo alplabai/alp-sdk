@@ -14,7 +14,8 @@
 #   e1m-v2m-deepx.dtsi  V2M delta: DEEPX DXM1 NPU on PCIe + the on-module
 #                       lane mux + NPU reset release (gpio-hogs).
 #   e1m-x-evk.dtsi      E1M-X-EVK carrier: eth/i2c/usb/console enables,
-#                       USB-OVC hog. (Cameras/DSI/audio/CAN are TODO.)
+#                       USB-OVC hog, DSI display, TAS2563 audio. (CAN is TODO;
+#                       cameras are opt-in, see camera-csi.cfg.)
 #   e1m-v2n101-x-evk.dts / e1m-v2m101-x-evk.dts  product boards.
 #
 # These compose up from the upstream Renesas SoC dtsi (r9a09g056.dtsi,
@@ -81,9 +82,19 @@ SRC_URI:append = " \
     file://0015-gpiolib-sysfs-reject-export-of-a-number-in-a-chipless-gpio_device.patch \
     file://0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch \
     file://0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch \
+    file://0020-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
     file://uio.cfg \
 "
 
+# 0020 (PDM clocks, audit MM-02/MM-X2): the V2N CPG driver had no PDM0/PDM1
+# module clocks or resets, so no pdm node could bind.  The patch adds them
+# with V2N parents from the RZ/V2N hardware manual (PCLK = PLLCM33 gear / 2,
+# CCLK = QEXTAL / 5 = 4.8 MHz).  No devicetree node uses them yet.
+#
+# pcie-ep-trim.cfg (audit PCIE-5): drops the PCIe endpoint-mode and test
+# options the Renesas defconfig enables for the EVK; E1M-V2M is root-complex
+# only.
+#
 # 0016 (CRU greyscale, #2612): rzg2l-csi2 had no Y10/Y8 entry, so a mono
 # sensor's Y10_1X10 (OV9281 via ov9282) read back as UYVY8_1X16 on the
 # csi20 pad and STREAMON failed -EPIPE.  The patch adds Y10_1X10 (-> CR10,
@@ -112,7 +123,11 @@ SRC_URI:append = " \
 # only for GPT overflow bits, but group 0 resets fully unmasked; once the
 # Cortex-M33 runs, group 0 bit 0 asserts, nobody acknowledges it, and the
 # line storms ("irq 14: nobody cared") until genirq disables it. The patch
-# unmasks only the GPT overflow bits the handler services.
+# unmasks only the GPT overflow bits the handler services.  It also logs and
+# clears the ICU bus-error factors (ICU_BEISR0-3 / ICU_BECLR0-3) at probe and
+# names MCPU_LOCKUP, so a masked source is not a silent one.
+# The mask is written BEFORE the line is requested: requesting enables the
+# line, and a source already asserted at probe storms it inside the request.
 
 # AMP clock ownership: peripherals that belong to the Cortex-M33 system
 # manager (RSCI7 = the GD32 supervisor SPI link, always; any assignable block
@@ -221,20 +236,27 @@ ALP_DRPAI_DT_ENABLE = "${@'1' if (d.getVar('ALP_DRPAI_LAYER') == '1' and d.getVa
 ALP_DRPAI_DT_ENABLE[vardepvalue] = "${ALP_DRPAI_DT_ENABLE}"
 SRC_URI += "${@' file://e1m-v2n-drpai.dtsi' if d.getVar('ALP_DRPAI_DT_ENABLE') == '1' else ''}"
 
+# DRP1 (OpenCVA + hardware codec) overlay -- CONDITIONAL on meta-rz-opencva
+# or meta-rz-codecs, whichever supplies the `drp1` label (each ships the
+# 0001-add-drp-property-to-devicetree*.patch that creates it).  Same
+# stub-or-real shape as ALP_DRPAI_DT_ENABLE above; the node is on-die on
+# every V2N/V2M SKU, so the layer is the only axis.
+ALP_DRP1_DT_ENABLE = "${@'1' if ('rz-opencva' in (d.getVar('BBFILE_COLLECTIONS') or '').split() or 'meta-rz-codecs' in (d.getVar('BBFILE_COLLECTIONS') or '').split()) else '0'}"
+ALP_DRP1_DT_ENABLE[vardepvalue] = "${ALP_DRP1_DT_ENABLE}"
+SRC_URI += "${@' file://e1m-v2n-drp1.dtsi' if d.getVar('ALP_DRP1_DT_ENABLE') == '1' else ''}"
+
 # Per-project core ownership (#2660).  The committed e1m-v2n-ownership.dtsi is
 # the SoM-DEFAULT ownership (kept in sync by the generated-files gate); do_configure
 # replaces it with the fragment of the project being built, rendered from the
 # `ownership:` that the orchestrator's system-manifest.yaml carries (the same
-# resolved map the CM33 overlay uses).  Three cases, no silent fallback:
-#   1. manifest present                  -> render the project fragment from it.
-#   2. no manifest, ALP_OWNERSHIP_SOM_DEFAULT = "1"
-#                                        -> keep the committed SoM-default
-#                                           fragment (generic SoM image).
-#   3. neither                           -> bbfatal.
-# ALP_OWNERSHIP_SOM_DEFAULT is deliberately NOT defaulted here: set it in the
-# local.conf of a generic image build (a default would defeat case 3).  The
-# manifest path variable and default match alp-dts-reservations.  Freshness is
-# the manifest's: it is only as current as the last `tan build`.
+# resolved map the CM33 overlay uses).  Two cases:
+#   1. manifest present -> render the project fragment from it.
+#   2. no manifest      -> bbwarn and keep the committed SoM-default fragment, so
+#                          a generic SoM image still builds.  The default fragment
+#                          carries the renesas,cm33-owned-clocks hold that keeps
+#                          the CM33's RSCI7 clocks on, so it is never absent.
+# The manifest path variable and default match alp-dts-reservations.  Freshness
+# is the manifest's: it is only as current as the last `tan build`.
 ALP_SYSTEM_MANIFEST_PATH ??= "${TOPDIR}/../alp-sdk/build/system-manifest.yaml"
 ALP_OWN_SDK := "${THISDIR}/../../.."
 # Everything the render reads, so editing any of it re-runs do_configure.
@@ -260,7 +282,7 @@ do_configure:prepend() {
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
         "${ALP_DTS_DST}/"
 
-    # Per-project ownership (see the three cases above).  A manifest renders
+    # Per-project ownership (see the two cases above).  A manifest renders
     # over the SoM-default fragment installed above, and every node it names
     # must exist in THIS kernel's SoC dtsi.
     ALP_OWN_GEN="${ALP_OWN_SDK}/scripts/gen_linux_ownership_dt.py"
@@ -273,10 +295,8 @@ do_configure:prepend() {
             --vendor-dtsi "${S}/arch/arm64/boot/dts/renesas/r9a09g056.dtsi" \
             || bbfatal "per-project ownership fragment for ${ALP_OWN_M} is invalid or names a node r9a09g056.dtsi lacks"
         bbnote "per-project ownership fragment rendered from ${ALP_OWN_M}"
-    elif [ "${ALP_OWNERSHIP_SOM_DEFAULT}" = "1" ]; then
-        bbnote "no system-manifest at '${ALP_OWN_M}': using the committed SoM-default ownership fragment (ALP_OWNERSHIP_SOM_DEFAULT = 1)"
     else
-        bbfatal "no alp-sdk system-manifest.yaml at '${ALP_OWN_M}' and ALP_OWNERSHIP_SOM_DEFAULT is not 1: for a project build pass ALP_SYSTEM_MANIFEST_PATH (from tan build / alp_project emit), for a generic SoM image set ALP_OWNERSHIP_SOM_DEFAULT = \"1\" in local.conf"
+        bbwarn "no system-manifest at '${ALP_OWN_M}': using the committed SoM-default ownership fragment (pass ALP_SYSTEM_MANIFEST_PATH for a project build)"
     fi
 
     # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
@@ -288,6 +308,19 @@ do_configure:prepend() {
             "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts" \
             "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts" \
             "${ALP_DTS_DST}/"
+    fi
+
+    # DRP1: branch on the variable, same reasoning as the DRPAI branch below.
+    if [ "${ALP_DRP1_DT_ENABLE}" = "1" ]; then
+        install -m 0644 "${WORKDIR}/e1m-v2n-drp1.dtsi" "${ALP_DTS_DST}/"
+    else
+        printf '%s\n' \
+            '/* DRP1 (OpenCVA + codec) node not claimed in this build.' \
+            ' * Needs meta-rz-opencva or meta-rz-codecs in bblayers.conf: it' \
+            ' * supplies the &drp1 label.  See e1m-v2n-drp1.dtsi in' \
+            ' * meta-alp-sdk/recipes-kernel/linux/linux-renesas/. */' \
+            > "${ALP_DTS_DST}/e1m-v2n-drp1.dtsi"
+        chmod 0644 "${ALP_DTS_DST}/e1m-v2n-drp1.dtsi"
     fi
 
     # Branch on the bitbake variable, not on the presence of the unpacked
@@ -324,6 +357,7 @@ do_configure:prepend() {
 SRC_URI:append = " \
     file://trim-unused-storage-net-fs.cfg \
     file://no-kernel-audit.cfg \
+    file://pcie-ep-trim.cfg \
 "
 
 # On-module RTC (all six V2N-family SKUs carry the same RV-3028-C7 --
@@ -354,6 +388,12 @@ SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 # included, carries that override (conf/machine/e1m-v2m10*-a55.conf), so a
 # second :e1m-v2m101 append would add the patch twice and do_patch fails.
 SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch file://0014-ASoC-rsnd-let-SSI2-share-SSI1-SCK-WS-on-RZ-V2N.patch"
+
+# USB device (gadget) mode on the E1M-X-EVK USB 2.0 port (docs/e1m-x-evk-usb-otg.md).
+# OPT-IN, BENCH-UNVERIFIED: usb-gadget.cfg builds the Renesas USBHS driver
+# in, which binds the otg &hsusb node, so it is merged ONLY when
+# ALP_ENABLE_USB_GADGET = "1" (machines with the `usbgadget` MACHINE_FEATURES flag, the same gate as the image install).
+SRC_URI:append = "${@' file://usb-gadget.cfg' if d.getVar('ALP_ENABLE_USB_GADGET') == '1' and bb.utils.contains('MACHINE_FEATURES', 'usbgadget', True, False, d) else ''}"
 
 # Camera (#1149): OPT-IN IMX219 on the E1M-X-EVK CAM0 connector ->
 # CSI-2 receiver -> CRU0.  BENCH-UNVERIFIED.  Off by default: the shipped

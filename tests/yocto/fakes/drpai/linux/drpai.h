@@ -20,9 +20,47 @@
  */
 #pragma once
 
+#include <cerrno>
+#include <fcntl.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+#include "drpai_test_seam.h"
+
 typedef struct drpai_data {
 	unsigned long address;
 	unsigned long size;
 } drpai_data_t;
 
 #define DRPAI_GET_DRPAI_AREA 0x4010c401UL
+
+/* inference_drpai.cpp reaches the device with `::open("/dev/drpai0")` and
+ * `::ioctl()`.  Route both to the fakes below for the file that includes
+ * this header (it is included AFTER the real <fcntl.h>/<sys/ioctl.h>, so
+ * only later call sites are rewritten).  With drpai_test::g_device_present
+ * false they behave like a host with no DRP-AI: ENOENT. */
+inline int alp_fake_drpai_open(const char *path, int flags)
+{
+	(void)path;
+	if (!drpai_test::g_device_present) {
+		errno = ENOENT;
+		return -1;
+	}
+	return ::open("/dev/null", flags);
+}
+
+inline int alp_fake_drpai_ioctl(int fd, unsigned long req, drpai_data_t *area)
+{
+	(void)fd;
+	if (req != DRPAI_GET_DRPAI_AREA) {
+		errno = ENOTTY;
+		return -1;
+	}
+	area->address = static_cast<unsigned long>(drpai_test::g_area_base);
+	area->size    = static_cast<unsigned long>(drpai_test::g_area_size);
+	return 0;
+}
+
+#define open(path, flags) alp_fake_drpai_open((path), (flags))
+#define ioctl(fd, req, a) alp_fake_drpai_ioctl((fd), (req), (a))

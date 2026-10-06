@@ -131,6 +131,17 @@
         "ethernet_phy": {
           "$ref": "#/$defs/chip_ref"
         },
+        "dxm1": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["uart_mux_pin", "reset_pin", "gpio_chip"],
+          "properties": {
+            "uart_mux_pin": {"type": "string", "pattern": "^P[0-9A-F][0-7]$", "description": "SoC pin that muxes the DX-M1 UART0 onto the SoC (e.g. P75)."},
+            "reset_pin": {"type": "string", "pattern": "^P[0-9A-F][0-7]$", "description": "SoC pin that drives the DX-M1 M1_RESET (e.g. PA6)."},
+            "gpio_chip": {"type": "string", "description": "Linux gpiochip label of the SoC pin controller that owns those pins (RZ/V2N: 10410000.pinctrl); its line number is 8 x port + bit."}
+          },
+          "description": "DX-M1 NPU module pad facts the provisioning flow needs to program it over its ROM UART; only on SKUs that carry the DX-M1."
+        },
         "ethernet_phy_count": {
           "type": "integer",
           "minimum": 1,
@@ -151,6 +162,34 @@
         "emmc_driver_status": {
           "$ref": "#/$defs/driver_status",
           "description": "alp-sdk driver maturity for the on-module eMMC reached via `emmc:`. `emmc:` names the SoC controller, not a chip slug, so there is no `chips/<part>/` driver to tier -- `none` is the honest (not aspirational) value per ADR 0017 (#1169)."
+        },
+        "emmc_boot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bl2_mmc_sector", "fip_sector", "uboot_env"],
+          "description": "Where the on-module eMMC holds the boot images and the U-Boot environment (Linux boot partition `part` of the device `emmc:` names).  The one source for provisioning's boot-write ceiling (scripts/provision/gates.py), the U-Boot env cfg, /etc/fw_env.config and the Mender env offsets; tests/scripts/test_uboot_env_layout.py holds them equal to this block.",
+          "properties": {
+            "bl2_mmc_sector": { "type": "integer", "minimum": 0, "description": "512-byte sector of bl2_mmc in the boot partition." },
+            "fip_sector": { "type": "integer", "minimum": 0, "description": "512-byte sector of the FIP in the boot partition." },
+            "partition_bytes": {
+              "oneOf": [
+                { "type": "integer", "minimum": 1 },
+                { "type": "string", "const": "TBD" }
+              ],
+              "description": "Size of each eMMC boot partition (BOOT_SIZE_MULT x 128 KiB) of the populated part.  `TBD` until read from the part's datasheet / EXT_CSD[226]; an integer is checked against the env pair's end."
+            },
+            "uboot_env": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["part", "offset", "offset_redund", "size"],
+              "properties": {
+                "part": { "type": "integer", "enum": [1, 2], "description": "eMMC boot partition number (U-Boot CONFIG_SYS_MMC_ENV_PART; Linux mmcblk<N>boot<part-1>)." },
+                "offset": { "type": "integer", "minimum": 0, "description": "Byte offset of env copy 1 within the partition." },
+                "offset_redund": { "type": "integer", "minimum": 0, "description": "Byte offset of the redundant env copy." },
+                "size": { "type": "integer", "minimum": 512, "description": "Bytes per env copy." }
+              }
+            }
+          }
         },
         "npu": {
           "$ref": "#/$defs/chip_ref",
@@ -895,6 +934,22 @@
             }
           ],
           "description": "Mediator-local pin or bus identifier. Forms: integer (CC3501E GPIO index, e.g. `14`); single pad name (`\"PA11\"` for a GD32 port pad); bus pin (`\"SPI1.MISO\"`); or a slash-joined pair for multi-pin peripherals (`\"PA0/PB3\"` for a quadrature encoder's X/Y pads). Meaningless for `dispatch: unrouted` (there is no mediator pin to name); omit it there."
+        },
+        "bridge_bit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31,
+          "description": "`dispatch: gd32_bridge` only: the bridge GPIO-expander mask bit the pad occupies (docs/gd32-bridge-protocol.md).  Optional; present for pads added after the original 18 so the bit number has one metadata home (tests/scripts/test_gd32_bridge_route_parity.py pins the C header to it)."
+        },
+        "min_bridge_protocol": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "`dispatch: gd32_bridge` only: minimum bridge protocol MINOR that implements this pad; older firmware answers ALP_ERR_NOSUPPORT / -ENODEV for it."
+        },
+        "driven_by": {
+          "type": "string",
+          "enum": ["dxm1", "none"],
+          "description": "Who drives this pad when it is not a mediator pad. `dxm1` = the on-module DEEPX DX-M1 drives it; `none` = nothing on the SoM drives it (the carrier default decides). Machine-readable form of what `doc` says; carrier selects (e.g. XEVK_PIN_USB_MUX_SEL on E1M IO24) depend on it."
         },
         "doc": {
           "type": "string",

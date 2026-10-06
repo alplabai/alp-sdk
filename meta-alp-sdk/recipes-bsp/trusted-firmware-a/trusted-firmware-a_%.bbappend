@@ -110,6 +110,12 @@ SRC_URI:append:rzv2n-family = " file://${ALP_TFA_DDR_SRC}"
 # docs/rzv2n-m33-secure-boot.md.
 SRC_URI:append:rzv2n-family = " file://0001-rzv2n-boot-the-CM33-from-xSPI.patch"
 
+# The vendor BL22 source follows the boot device: under eMMC/eSD boot BL2
+# read the CM33 image from byte 0x200000 of the eMMC boot partition / card,
+# which nothing writes, so the CM33 never ran under DSW1 mode 1 (#2658).
+# 0002 reads it from the xSPI slot in every boot mode. Build-verified only.
+SRC_URI:append:rzv2n-family = " file://0002-rzv2n-read-the-CM33-image-from-xSPI-in-every-boot-mode.patch"
+
 # Reproducible / traceable BL2+BL31 version string.  TF-A's Makefile
 # derives BUILD_STRING from `git describe --always --dirty --tags` when
 # it is unset, which on our build is ALWAYS "-dirty": do_compile:prepend

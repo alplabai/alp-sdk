@@ -215,3 +215,32 @@ ZTEST(alp_pwm_registry, test_alp_pwm_set_period_public_dispatch)
 
 	ops->close(&h.state);
 }
+
+/* ---------- (h) alp_pwm_configure -- undefined break bits (#1648) ---------- */
+
+ZTEST(alp_pwm_registry, test_configure_rejects_undefined_break_bits)
+{
+	/* The dispatcher refuses a break_cfg bit outside ALP_PWM_BREAK_* with
+	 * INVAL before the backend's own NOSUPPORT.  Driven through the real
+	 * public entry point on a sw_fallback handle (wired by hand, as in (g))
+	 * so the assertion always executes -- the DT-alias zephyr_drv open
+	 * returns NULL on native_sim. */
+	const alp_pwm_ops_t *ops = _find_sw_fallback_ops();
+	zassert_not_null(ops);
+
+	struct alp_pwm h;
+	memset(&h, 0, sizeof(h));
+	alp_capabilities_t caps = { 0 };
+	alp_pwm_config_t   cfg  = { .channel_id = 0u, .period_ns = 1000000u };
+	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
+	h.state.ops = ops;
+	h.in_use    = true;
+	h.lifecycle = ALP_HANDLE_LC_OPEN;
+
+	zassert_equal(alp_pwm_configure(&h, ALP_PWM_ALIGN_EDGE, 0u, 0x80u), ALP_ERR_INVAL);
+	/* A defined value passes the check and reaches the sw backend. */
+	zassert_equal(alp_pwm_configure(&h, ALP_PWM_ALIGN_EDGE, 0u, ALP_PWM_BREAK_NONE),
+	              ALP_ERR_NOSUPPORT);
+
+	ops->close(&h.state);
+}
