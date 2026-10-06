@@ -142,18 +142,18 @@ reload exist only in an opt-in dev build, `ALP_V2N_CM33_SRAM_NS = "1"`
 
 Enable it with `ALP_V2N_REMOTEPROC = "1"` in `local.conf` (default `"0"`
 until the bench proves it).  That applies
-`meta-alp-sdk/recipes-kernel/linux/linux-renesas/0018`-`0021`, merges
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/0021`-`0024`, merges
 `remoteproc.cfg` and installs the `cm33_rproc` node
 (`e1m-v2n-remoteproc.dtsi`).  The driver is the Renesas RZ Multi-OS Package
-v4.2.0's (`rz_rproc.c`, GPL-2.0, patches `0019`/`0020` imported unmodified
-with Renesas authorship); the Alp changes are `0018` (CPG is a syscon) and
-`0021` (`alp,rz-userspace-ipc`, `alp,rz-attach-only`).
+v4.2.0's (`rz_rproc.c`, GPL-2.0, patches `0022`/`0023` imported unmodified
+with Renesas authorship); the Alp changes are `0021` (CPG is a syscon) and
+`0024` (`alp,rz-userspace-ipc`, `alp,rz-attach-only`).
 
 ### Production (default) vs dev (`ALP_V2N_CM33_SRAM_NS = "1"`)
 
 | | production, `"0"` | dev, `"1"` |
 |---|---|---|
-| TF-A | unchanged (SRAM 0/1 secure-only) | `0002-rzv2n-optional-non-secure-access-to-CM33-SRAM.patch`, `ALP_CM33_SRAM_NS=1`: TZC-400 region 0 of SRAM 0/1 also admits non-secure masters |
+| TF-A | unchanged (SRAM 0/1 secure-only) | `0003-rzv2n-optional-non-secure-access-to-CM33-SRAM.patch`, `ALP_CM33_SRAM_NS=1`: TZC-400 region 0 of SRAM 0/1 also admits non-secure masters |
 | `cm33_rproc` node | `alp,rz-attach-only`: the driver has no start/load and `stop` always fails with `-EPERM`; probe fails if the CM33 is not running or `alp,rz-userspace-ipc` is absent | flag removed: Renesas' stop/start/reload |
 | `/lib/firmware/m33_sm.elf` | not installed | `alp-cm33-firmware` installs `${ALP_CM33_ELF}` (alp-image-edge) |
 
