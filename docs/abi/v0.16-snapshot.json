@@ -4518,6 +4518,10 @@
           "hash": "c5bf159e47c4f802",
           "signature": "alp_status_t gd32g553_pwm_single_pulse(gd32g553_t *ctx, uint8_t channel, uint32_t pulse_ns);"
         },
+        "gd32g553_pwm_stop": {
+          "hash": "09aaba4776c58b40",
+          "signature": "alp_status_t gd32g553_pwm_stop(gd32g553_t *ctx, uint8_t channel);"
+        },
         "gd32g553_qenc_read": {
           "hash": "2b348fc8e2610dce",
           "signature": "alp_status_t gd32g553_qenc_read(gd32g553_t *ctx, uint8_t encoder, int32_t *position_out);"
@@ -4656,6 +4660,10 @@
           "hash": "da5265d7e1b745f7",
           "value": "21u"
         },
+        "GD32G553_GPIO_LINE_E1M_IO24": {
+          "hash": "0ec8e2260a0be3d8",
+          "value": "8u"
+        },
         "GD32G553_GPIO_LINE_E1M_IO26": {
           "hash": "dc1f5452a35a683a",
           "value": "22u"
@@ -4663,6 +4671,10 @@
         "GD32G553_GPIO_LINE_WL_REG_ON": {
           "hash": "02b7262b21b3b00f",
           "value": "19u"
+        },
+        "GD32G553_GPIO_ROUTED_MASK": {
+          "hash": "c42c8172d7f4ae79",
+          "value": "(0x007FFFFFu & ~(1u << GD32G553_GPIO_LINE_E1M_IO24))"
         },
         "GD32G553_HOST_PROTOCOL_MAJOR": {
           "hash": "8cbf9804b6cc9204",
@@ -4715,6 +4727,10 @@
         "GD32G553_PAD_ID_SWDIO": {
           "hash": "e1592b6924d04a0d",
           "value": "0xE1D32000u"
+        },
+        "GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR": {
+          "hash": "484c19d018be4957",
+          "value": "17u"
         },
         "GD32G553_READ2_DROPPED_UNKNOWN": {
           "hash": "3642da382b19575e",
@@ -14029,6 +14045,10 @@
           "hash": "c4d3fb31974cc964",
           "signature": "static inline void alp_gd32_results_beacon_tick(void *window);"
         },
+        "alp_gd32_results_fault_publish": {
+          "hash": "e613f055bf4f8bd8",
+          "signature": "static inline void alp_gd32_results_fault_publish(void *window, const alp_gd32_fault_t *f);"
+        },
         "alp_gd32_results_init": {
           "hash": "4e8386178161caad",
           "signature": "static inline void alp_gd32_results_init(void *window, uint32_t kind);"
@@ -14039,6 +14059,18 @@
         }
       },
       "macros": {
+        "ALP_GD32_FAULT_MAGIC": {
+          "hash": "7dc8b6d583edfaf7",
+          "value": "0x464C5431u"
+        },
+        "ALP_GD32_FAULT_OFFSET": {
+          "hash": "9917bfe632e1b6a7",
+          "value": "0xF50u"
+        },
+        "ALP_GD32_FAULT_WORDS": {
+          "hash": "db731b5c03c156d2",
+          "value": "12u"
+        },
         "ALP_GD32_RESULTS_BEACON_KIND": {
           "hash": "d4efbb0c194aa569",
           "value": "0x200u"
@@ -14080,8 +14112,8 @@
           "value": "2u"
         },
         "ALP_GD32_RESULTS_LAYOUT": {
-          "hash": "8d770a4847b32c57",
-          "value": "1u"
+          "hash": "0046899763dbdb32",
+          "value": "2u"
         },
         "ALP_GD32_RESULTS_MAGIC": {
           "hash": "705b61e60eb77f97",
@@ -14117,8 +14149,27 @@
         }
       },
       "typedefs": {
+        "alp_gd32_fault_t": {
+          "definition": "typedef struct { uint32_t magic; uint32_t reason; uint32_t pc; uint32_t lr; uint32_t xpsr; uint32_t cfsr; uint32_t hfsr; uint32_t mmfar; uint32_t bfar; uint32_t thread_hash; uint32_t uptime_ms; uint32_t sp; } alp_gd32_fault_t;",
+          "fields": [
+            "uint32_t magic",
+            "uint32_t reason",
+            "uint32_t pc",
+            "uint32_t lr",
+            "uint32_t xpsr",
+            "uint32_t cfsr",
+            "uint32_t hfsr",
+            "uint32_t mmfar",
+            "uint32_t bfar",
+            "uint32_t thread_hash",
+            "uint32_t uptime_ms",
+            "uint32_t sp"
+          ],
+          "hash": "d5d84c03d27eb643",
+          "kind": "struct"
+        },
         "alp_gd32_results_t": {
-          "definition": "typedef struct { uint32_t magic; uint32_t layout; uint32_t seq; uint32_t kind; uint32_t state; uint32_t tests_pass; uint32_t tests_fail; uint32_t tests_skip; uint32_t fw_version; uint32_t features; uint32_t max_payload; uint32_t flags; uint32_t read2_first; uint32_t read2_dropped; uint32_t read2_gaps; uint32_t soak_cycles; uint32_t soak_errors; uint32_t soak_timeouts; uint32_t soak_elapsed_s; uint32_t reserved; } alp_gd32_results_t;",
+          "definition": "typedef struct { uint32_t magic; uint32_t layout; uint32_t seq; uint32_t kind; uint32_t state; uint32_t tests_pass; uint32_t tests_fail; uint32_t tests_skip; uint32_t fw_version; uint32_t features; uint32_t max_payload; uint32_t flags; uint32_t read2_first; uint32_t read2_dropped; uint32_t read2_gaps; uint32_t soak_cycles; uint32_t soak_errors; uint32_t soak_timeouts; uint32_t soak_elapsed_s; uint32_t fail_mask; } alp_gd32_results_t;",
           "fields": [
             "uint32_t magic",
             "uint32_t layout",
@@ -14139,9 +14190,9 @@
             "uint32_t soak_errors",
             "uint32_t soak_timeouts",
             "uint32_t soak_elapsed_s",
-            "uint32_t reserved"
+            "uint32_t fail_mask"
           ],
-          "hash": "19f6b053a05647a0",
+          "hash": "a79a602fe5353848",
           "kind": "struct"
         }
       },

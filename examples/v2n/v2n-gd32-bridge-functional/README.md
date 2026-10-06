@@ -77,7 +77,16 @@ A55 (root, `/dev/mem`):
 
 ```bash
 python3 read_gd32_results.py          # scripts/bench/v2n/read_gd32_results.py
+python3 read_gd32_results.py --fault  # the fatal-error block, if the CM33 died
+python3 read_gd32_results.py --no-live  # skip the 1.5 s heartbeat check
 ```
+
+By default the beacon heartbeat is sampled twice, 1.5 s apart, so a frozen
+CM33's last words are not mistaken for a current result.  Output includes
+`fail_rows` (indices of failed rows) and `fail_row_names`.  Exit codes: `0`
+valid (and heartbeat advancing), `2` no valid record, `3` `/dev/mem`
+unreadable, `4` stale record (not a result-publishing image), `5` STALLED
+(heartbeat not advancing), `6` `--fault` and no fault block recorded.
 
 `tests/hil/v2m103-x-evk/v2m103-gd32-bridge-results.yaml` asserts it.
 The record's `tests_skip` counts the self-gating v0.15 tests that were skipped because the bridge did not grant the feature; the SRAM0 block still counts those as passes.

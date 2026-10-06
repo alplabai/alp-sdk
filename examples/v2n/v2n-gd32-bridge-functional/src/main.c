@@ -97,6 +97,54 @@ static void beacon_tick(struct k_timer *t)
 }
 K_TIMER_DEFINE(beacon_timer, beacon_tick, NULL);
 
+#ifdef CONFIG_CPU_CORTEX_M
+/* Fatal-error trail.  This image has no console, so a fault (the usual
+ * suspect: a stack overflow on the main thread) used to look like a silent
+ * freeze -- the heartbeat just stopped.  Overriding Zephyr's weak
+ * k_sys_fatal_error_handler() lets us leave the faulting PC/LR/xPSR and the
+ * SCB fault status in the `rsctbl` window (layout: alp_gd32_fault_t) for
+ * `read_gd32_results.py --fault`, then park the core with IRQs off, exactly
+ * as the default handler would.  Keep it to low-risk reads (thread name, current
+ * thread, uptime) and take no locks and make no blocking calls: the kernel
+ * state may be what is broken. */
+static uint32_t fault_thread_hash(void)
+{
+	const char *n = k_thread_name_get(k_current_get());
+	uint32_t    h = 2166136261u; /* FNV-1a 32 */
+
+	for (; n != NULL && *n != '\0'; ++n) {
+		h = (h ^ (uint8_t)*n) * 16777619u;
+	}
+	return h;
+}
+
+void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
+{
+	volatile const uint32_t *scb =
+	    (volatile const uint32_t *)0xE000ED28u; /* CFSR, HFSR, DFSR, MMFAR, BFAR */
+	alp_gd32_fault_t f = {
+		.reason      = reason,
+		.cfsr        = scb[0],
+		.hfsr        = scb[1],
+		.mmfar       = scb[3],
+		.bfar        = scb[4],
+		.thread_hash = fault_thread_hash(),
+		.uptime_ms   = (uint32_t)k_uptime_get(),
+		.sp          = (uint32_t)(uintptr_t)esf,
+	};
+
+	if (esf != NULL) {
+		f.pc   = esf->basic.pc;
+		f.lr   = esf->basic.lr;
+		f.xpsr = esf->basic.xpsr;
+	}
+	(void)irq_lock();
+	alp_gd32_results_fault_publish(RESULTS_WINDOW, &f);
+	for (;;) {
+	}
+}
+#endif /* CONFIG_CPU_CORTEX_M */
+
 /* Snapshot what init() negotiated: the bridge firmware version, the
  * granted feature word, the payload ceiling and the ATTN state.  ATTN
  * "granted but not active" means its self-test failed and the link fell
@@ -149,6 +197,9 @@ static void record_ex(alp_status_t s, bool value_ok, bool skip)
 	if (test_idx < FUNC_MAX_TESTS) {
 		func_results[4u + test_idx] = cell;
 	}
+	/* Row index -> bit: Linux learns WHICH row failed, not just how many.
+	 * Rows past 31 do not fit the 32-bit mask and are only counted. */
+	if (cell != 0u && test_idx < 32u) rec.fail_mask |= 1u << test_idx;
 	test_idx++;
 	if (skip && s == ALP_OK && value_ok) skipped++;
 	rec.tests_pass = func_results[2] - skipped;
@@ -430,7 +481,7 @@ static void t_adc_stream2(void)
 	record(worst, value_ok);
 }
 
-/* BATCH: PING + a full-mask GPIO_READ + COUNTER_READ in ONE transaction
+/* BATCH: PING + a routed-mask GPIO_READ + COUNTER_READ in ONE transaction
  * pair.  The driver validates the request against the allow-list and the
  * reply against the request (executed <= count, per-op lengths); here we
  * only assert the outcome.  A second batch whose middle op fails (READ2
@@ -438,7 +489,12 @@ static void t_adc_stream2(void)
  * 2, the third op never ran.  Without the grant: NOSUPPORT. */
 static void t_batch(void)
 {
-	const uint8_t       mask_all[4] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu };
+	/* Routed lines only: bit 8 (E1M IO24) is unrouted (gh#298), so an all-ones
+	 * mask makes the bridge answer STATUS_IO and the batch stops at op 2. */
+	const uint8_t       mask_all[4] = { (uint8_t)GD32G553_GPIO_ROUTED_MASK,
+		                                (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 8),
+		                                (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 16),
+		                                (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 24) };
 	const uint8_t       counter0[1] = { 0u };
 	const uint8_t       read2_s1[2] = { 1u, 4u }; /* stream 1, never started */
 	uint8_t             gpio_rep[4], counter_rep[4], read2_rep[GD32G553_READ2_HDR_BYTES + 2u * 4u];
@@ -529,6 +585,39 @@ static void t_da9292_sentinel(void)
 /* The single-pass table                                               */
 /* ------------------------------------------------------------------ */
 
+/* Row order, one record() per row.  read_gd32_results.py names the
+ * fail_mask bits from this list; tests/scripts/test_gd32_results_reader.py
+ * keeps the two in step:
+ *   row 0 tmu_sqrt_4
+ *   row 1 tmu_sqrt_2
+ *   row 2 tmu_sin_0
+ *   row 3 tmu_sin_pi_2
+ *   row 4 tmu_sin_pi_6
+ *   row 5 tmu_cos_0
+ *   row 6 tmu_cos_pi
+ *   row 7 tmu_cos_pi_3
+ *   row 8 tmu_atan
+ *   row 9 tmu_atan2
+ *   row 10 tmu_hypot
+ *   row 11 tmu_log
+ *   row 12 tmu_sinh
+ *   row 13 tmu_cosh
+ *   row 14 tmu_tan_nosupport
+ *   row 15 tmu_exp_nosupport
+ *   row 16 tmu_tanh_nosupport
+ *   row 17 tmu_q31_sqrt
+ *   row 18 trng_lengths
+ *   row 19 pwm_set_get
+ *   row 20 pwm_configure
+ *   row 21 adc_configure_error
+ *   row 22 adc_all_channels
+ *   row 23 link_features
+ *   row 24 adc_stream2
+ *   row 25 batch
+ *   row 26 dsp_chain
+ *   row 27 version_stable
+ *   row 28 da9292_sentinel
+ */
 static void run_suite(void)
 {
 	/* -- math: every native CORDIC primitive, value-asserted -------- */
