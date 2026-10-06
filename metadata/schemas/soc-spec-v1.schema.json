@@ -34,6 +34,30 @@
       "enum": ["released", "preliminary", "deprecated"],
       "default": "released"
     },
+    "boot_strap": {
+      "type": "object",
+      "description": "Boot-strap and identity registers a provisioning tool reads to judge a unit. `registers` maps a census ledger key to the register's absolute address. `strap_word` decodes the register holding the latched boot pins: `debug_enable_bit` is the bit that is 1 when the unit is strapped to debug mode (a production unit must read 0), `boot_pins_shift`/`boot_pins_width` locate the boot-mode pin field, the low `boot_device_pins_width` bits of which select the boot device, and `boot_device_names` names it (index = pin value). `boot_cpu_bit` is the bit latched from the boot-CPU-select pin and `boot_cpu_names` names the CPU it selects (index = bit value).",
+      "additionalProperties": false,
+      "required": ["source", "registers", "strap_word"],
+      "properties": {
+        "source": { "type": "string" },
+        "registers": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^0x[0-9a-f]{8}$" } },
+        "strap_word": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["debug_enable_bit", "boot_pins_shift", "boot_pins_width", "boot_device_pins_width", "boot_device_names", "boot_cpu_bit", "boot_cpu_names"],
+          "properties": {
+            "debug_enable_bit": { "type": "integer", "minimum": 0, "maximum": 31 },
+            "boot_pins_shift": { "type": "integer", "minimum": 0, "maximum": 31 },
+            "boot_pins_width": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "boot_device_pins_width": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "boot_device_names": { "type": "array", "items": { "type": "string" } },
+            "boot_cpu_bit": { "type": "integer", "minimum": 0, "maximum": 31 },
+            "boot_cpu_names": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
     "linux_dt": {
       "type": "object",
       "description": "Linux devicetree facts for on-die peripherals the Linux DT generators need, keyed by the instance name used in SoM `pad_routes` `dispatch_pin` (e.g. RIIC2, CSI0).  `label` is the SoC dtsi node label; `pinmux` maps a peripheral SIGNAL name (a key of the SoM peripheral map, e.g. RIIC2_SDA2 in v2n/renesas-peripheral-map.tsv; the port pin is resolved from that file) to its pinmux function code (the third argument of the vendor PORT_PINMUX macro); `capture` is the label of the capture unit a CSI receiver feeds.",
@@ -139,6 +163,31 @@
       "type": "integer",
       "description": "Maximum on-die SRAM in KB across all variants. Per-variant overrides go into variants[].sram_kb."
     },
+    "cm33_boot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sram_base", "image_pad", "image_max", "xspi_offset"],
+      "properties": {
+        "sram_base": {"type": "integer", "description": "SRAM address BL2 copies the stored CM33 image to."},
+        "image_pad": {"type": "integer", "description": "Zero bytes before zephyr.bin in the stored image; the CM33 starts at sram_base + image_pad."},
+        "image_max": {"type": "integer", "description": "Largest stored image BL2 loads (it silently truncates more)."},
+        "xspi_offset": {"type": "integer", "description": "Offset in the xSPI NOR boot partition (mtd1) where the stored image lives."},
+        "note": {"type": "string"}
+      },
+      "description": "OPTIONAL. How BL2 loads the CM33 image on this SoC (RZ/V2N): the single source for the provisioning gate and the bundle schema text."
+    },
+    "openamp_carveout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a55_base", "size", "rsctbl_size"],
+      "properties": {
+        "a55_base": {"type": "integer", "description": "A55-view base of the OpenAMP reservation."},
+        "size": {"type": "integer", "description": "Bytes in the reservation."},
+        "rsctbl_size": {"type": "integer", "description": "Bytes of the resource-table window at the start of it."},
+        "note": {"type": "string"}
+      },
+      "description": "OPTIONAL. The OpenAMP/MHU-B reservation shared by the A55 (Linux UIO) and the CM33 board .dts; provisioning derives the CM33 liveness beacon address from it."
+    },
     "inference_arena_sram_kib": {
       "type": "integer",
       "minimum": 0,
@@ -225,8 +274,8 @@
         "drp_ai":            { "type": "boolean", "description": "Renesas DRP-AI NPU on-die." },
         "helium_mve":        { "type": "boolean", "description": "Arm Helium MVE vector extension (Armv8.1-M)." },
         "neon":              { "type": "boolean", "description": "Arm Neon SIMD extension." },
-        "gpu2d":             { "type": "boolean", "description": "Vendor 2D GPU block." },
-        "dave2d":            { "type": "boolean", "description": "Renesas D/AVE 2D accelerator." },
+        "gpu2d":             { "type": "boolean", "description": "A GPU that serves the portable <alp/gpu2d.h> surface: a fixed-function 2D block (Alif D/AVE 2D, see dave2d) or a 3D GPU driven through GLES (Renesas Mali-G31 on the RZ/V2N die variants that populate it)." },
+        "dave2d":            { "type": "boolean", "description": "TES D/AVE 2D accelerator (Alif Ensemble E6/E7/E8)." },
         "cryptocell":        { "type": "boolean", "description": "Arm CryptoCell crypto subsystem." },
         "inline_aes":        { "type": "boolean", "description": "Inline AES extension on the host core." },
         "cau":               { "type": "boolean", "description": "Vendor CAU (cryptographic acceleration unit) on-die." },
@@ -356,6 +405,17 @@
         "zephyr_cpucluster": {
           "type": "string",
           "description": "Zephyr multi-image board qualifier for this core (e.g. \"rtss_hp\", \"cm33\") -- the `<board>/<soc>/<cpucluster>` third segment `scripts/alp_project.py --emit zephyr-board` uses to name per-core board artefacts. Distinct from `id` because upstream Zephyr's own cluster-naming convention doesn't always match the SDK's core id."
+        },
+        "watchdog": {
+          "type": "object",
+          "required": ["base", "size", "counting_clock_hz"],
+          "additionalProperties": false,
+          "description": "The watchdog this core owns and can reach as a memory-mapped block (e.g. the RZ/V2N WDT0 'WDT for CM33'). Consumed by `--emit zephyr-board` to emit the core's watchdog devicetree node + the `alp-wdt0` alias; omit for cores whose watchdog the SoC devicetree already declares or that own none.",
+          "properties": {
+            "base": { "type": "string", "pattern": "^0x[0-9a-f]+$", "description": "Register window base address as seen by this core, lowercase 0x-prefixed hex." },
+            "size": { "type": "string", "pattern": "^0x[0-9a-f]+$", "description": "Register window size in bytes, lowercase 0x-prefixed hex." },
+            "counting_clock_hz": { "type": "integer", "minimum": 1, "description": "Frequency in Hz of the clock that drives the watchdog's down-counter, BEFORE the watchdog's own divider (RZ/V2N: WDT_0_clk_loco from the 24 MHz main oscillator, hardware manual Table 4.4-2)." }
+          }
         },
         "itcm_global_base": {
           "type": "integer",

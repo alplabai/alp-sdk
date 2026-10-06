@@ -690,10 +690,40 @@ static uint32_t get_le32(const uint8_t *p)
 	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+/* Pads added after the original 18: an older bridge ignores their mask
+ * bits and still answers STATUS_OK, so the host refuses them itself.
+ * Bit numbers, minimum protocol minor (docs/gd32-bridge-protocol.md). */
+static const struct {
+	uint8_t bit;
+	uint8_t min_minor;
+} gpio_bit_min_minor[] = {
+	{ GD32G553_GPIO_LINE_BT_REG_ON, GD32G553_REG_ON_MIN_PROTOCOL_MINOR },
+	{ GD32G553_GPIO_LINE_WL_REG_ON, GD32G553_REG_ON_MIN_PROTOCOL_MINOR },
+	{ GD32G553_GPIO_LINE_CAN_STBY, GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR },
+	{ GD32G553_GPIO_LINE_E1M_IO15, GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR },
+	{ GD32G553_GPIO_LINE_E1M_IO26, GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR },
+};
+
+/* Subset of @p mask naming pads the cached protocol version does not have. */
+static uint32_t gpio_unsupported_bits(const gd32g553_t *ctx, uint32_t mask)
+{
+	uint32_t bad = 0u;
+	for (size_t i = 0; i < sizeof(gpio_bit_min_minor) / sizeof(gpio_bit_min_minor[0]); ++i) {
+		if (ctx->version.minor < gpio_bit_min_minor[i].min_minor)
+			bad |= (uint32_t)1u << gpio_bit_min_minor[i].bit;
+	}
+	return mask & bad;
+}
+
 alp_status_t gd32g553_gpio_read(gd32g553_t *ctx, uint32_t mask, uint32_t *levels)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (levels == NULL) return ALP_ERR_INVAL;
+	/* A read of pads this bridge lacks drops them (they read 0); only a
+	 * mask naming nothing but missing pads is refused. */
+	const uint32_t bad = gpio_unsupported_bits(ctx, mask);
+	if (bad != 0u && (mask & ~bad) == 0u) return ALP_ERR_NOSUPPORT;
+	mask &= ~bad;
 	uint8_t req[4];
 	put_le32(req, mask);
 	uint8_t      reply[4];
@@ -712,6 +742,7 @@ alp_status_t gd32g553_gpio_read(gd32g553_t *ctx, uint32_t mask, uint32_t *levels
 alp_status_t gd32g553_gpio_write(gd32g553_t *ctx, uint32_t mask, uint32_t levels)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (gpio_unsupported_bits(ctx, mask) != 0u) return ALP_ERR_NOSUPPORT;
 	uint8_t req[8];
 	put_le32(&req[0], mask);
 	put_le32(&req[4], levels);
