@@ -57,7 +57,7 @@ config CAMERA_MJPEG_STREAM_FPS
 	int "Requested camera capture frame rate for this example"
 	default 15 if CAMERA_MJPEG_STREAM_1280X960
 	default 30
-	range 0 255
+	range 1 255
 	help
 	  Passed as alp_camera_config_t::fps in src/main.c's ccfg.fps. 15 for the
 	  1280x960 path (OV5647/IMX296's own bench-proven rate, see the Kconfig

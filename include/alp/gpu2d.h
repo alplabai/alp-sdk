@@ -174,7 +174,8 @@ alp_gpu2d_t *alp_gpu2d_open(void);
  * @param[in] argb_color  Colour in ARGB8888 (backend converts).
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
- *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT.
+ *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_TIMEOUT (engine did not go idle; backend-dependent).
  */
 alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t               *handle,
                                  const alp_gpu2d_surface_t *dst,
@@ -205,7 +206,8 @@ alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t               *handle,
  * @param[in] w, h    Rect size (pixels).
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
- *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT.
+ *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_TIMEOUT (engine did not go idle; backend-dependent).
  */
 alp_status_t alp_gpu2d_blit(alp_gpu2d_t               *handle,
                             const alp_gpu2d_surface_t *src,
@@ -232,7 +234,8 @@ alp_status_t alp_gpu2d_blit(alp_gpu2d_t               *handle,
  * @param[in] mode    One of @ref alp_gpu2d_blend_mode_t.
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
- *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT.
+ *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_TIMEOUT (engine did not go idle; backend-dependent).
  */
 alp_status_t alp_gpu2d_blend(alp_gpu2d_t               *handle,
                              const alp_gpu2d_surface_t *src,
