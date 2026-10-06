@@ -33,9 +33,20 @@ portable-API rule for dedicated bridge demos.
 4. **ADC** -- the illegal 14-bit / no-oversampling combination must
    be *rejected* (`INVAL`/`NOSUPPORT`), then all 8 channels are
    swept against the physical ceiling.
-5. **DSP chain pool** -- lifecycle open, accepting the documented
+5. **Protocol v0.15** (self-gating on what `gd32g553_init()`
+   negotiated): `link_features` -- a minor >= 15 bridge must grant
+   `STATUS_SEQ | BIG_FRAME | ADC_STREAM2 | BATCH` with the 252-byte
+   ceiling, an older one the legacy 65-byte `STATUS_SEQ` link;
+   `adc_stream2` -- `BEGIN2` reports the realised rate exactly
+   (1 MHz / 1000 ticks) and two `READ2` calls are contiguous
+   (`first_index` advances by `got`, `dropped` 0), or `BEGIN2` answers
+   `NOSUPPORT` when not granted; `batch` -- `PING` + `GPIO_READ` +
+   `COUNTER_READ` in one transaction pair, and a second batch whose
+   middle op fails must stop there (`executed` = 2).  `ATTN` needs an
+   interrupt hook and is exercised by the hil-soak instead.
+6. **DSP chain pool** -- lifecycle open, accepting the documented
    pre-wave-2 `NOSUPPORT` contract.
-6. **Identity** -- `GET_VERSION` twice (stable), and the DA9292
+7. **Identity** -- `GET_VERSION` twice (stable), and the DA9292
    status forward returns the 0xFF "no nets on this HW rev"
    sentinel.
 

@@ -140,7 +140,7 @@ extern "C" {
 #define EVK_I2C_ADDR_INA236_5V                   0x4Au  /**< U30 INA236B, +5V rail (20 mOhm shunt, 4.0 A max). A0 = SDA. A MISSING INA236 IS PER-UNIT, NOT A BATCH TRAIT -- an earlier reading of this data claimed 'five-of-six looks batch-wide' and that is DISPROVEN: E1M-AEN803 serial 2026W36-0002 answers on ALL SIX (2026-09-07), each reading MFG_ID(0x3E)=0x5449. The two prior boards each missed a different one: 0x4A (U30) not observed on 2026W36-0001 (alp-sdk#1975), 0x41 (U31, +1V8) not observed on 2026W36-0003. So six-of-six is achievable on this batch, 'U30 unpopulated' explains neither absence, and power characterisation must check which rails actually answer on the board in hand rather than assuming one is always missing. RE-CONFIRMED 2026-09-12, same physical unit (still serial 2026W36-0002): a read-only I2C census again found all six INA236 answering -- 0x40, 0x41, 0x42, 0x49, 0x4A, 0x4B -- each confirmed by reading MFG_ID(0x3E)=0x5449 (part identity, not a bare ACK), which is what makes the condition demonstrably PER-UNIT rather than batch-wide or design-level. Two boards, not the whole batch: serial 2026W36-0001 (the #1975 board) was not censused in this round. */
 
 /* ------------------------------------------------------------------ */
-/* INA236 calibration constants (from `i2c_devices[].calibration`) */
+/* INA2xx calibration constants (from `i2c_devices[].calibration`) */
 /* ------------------------------------------------------------------ */
 
 #define EVK_INA236_SHUNT_3V3_OHMS   0.020f  /**< Shunt for EVK_I2C_ADDR_INA236_3V3. */

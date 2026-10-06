@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2N101 Mali-G31 (RZ/V2N die variant R9A09G056N44GBG): the kbase
+# kernel module (Renesas meta-rz-graphics kernel-module-mali + the
+# meta-alp-sdk 0005 genpd clock patch) created /dev/mali0 and the vendor
+# EGL/GLES userspace is installed.  Read-only; does not open the GPU.
+# Not bench-run by the change that added it.
+
+schema_version: 1
+name: v2n101-mali-gpu-present
+description: |
+  /dev/mali0 exists, mali_kbase is loaded, libEGL + libGLESv2 are present.
+
+flash_method: ssh-run
+ssh_command: >-
+  test -c /dev/mali0 && echo HIL_MALI_DEV_OK;
+  lsmod | grep -q '^mali_kbase' && echo HIL_MALI_KBASE_OK;
+  ls /usr/lib/libEGL.so* >/dev/null 2>&1 && ls /usr/lib/libGLESv2.so* >/dev/null 2>&1 && echo HIL_GLES_LIBS_OK
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_MALI_DEV_OK"
+    - "HIL_MALI_KBASE_OK"
+    - "HIL_GLES_LIBS_OK"

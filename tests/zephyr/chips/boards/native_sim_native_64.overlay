@@ -85,6 +85,11 @@
                 compatible = "alp,fake-ina236";
                 reg = <0x40>;
             };
+            /* 0x42 = the E1M-X EVK's INA228 (A1 = GND, A0 = SDA). */
+            fake_ina228: fake_ina228@42 {
+                compatible = "alp,fake-ina228";
+                reg = <0x42>;
+            };
             /* 0x30 = OPTIGA Trust M default address; NACKs while asleep. */
             fake_optiga: fake_optiga@30 {
                 compatible = "alp,fake-optiga";

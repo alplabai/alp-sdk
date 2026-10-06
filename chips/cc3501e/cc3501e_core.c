@@ -414,6 +414,61 @@ void cc3501e_set_recover_callback(cc3501e_t *ctx, cc3501e_recover_cb_t cb, void 
 	ctx->recover_cb_user = user;
 }
 
+/* In-band link resync for cc3501e-bridge-firmware v0.9.0 (#2699), tried before
+ * any warm reset.  One host transfer that clocks before the bridge has armed
+ * its phase leaves the bridge's TX one whole transfer late: requests still
+ * execute, but every reply lands in the next exchange, forever -- no amount
+ * of waiting or re-PINGing realigns it, and the firmware's own heals cannot
+ * see it.  Two of the firmware's heals CAN be driven from here, in order:
+ *   1. a request header declaring a payload, then silence: the bridge parks
+ *      in its request-payload phase and its 250 ms stall watchdog reinits
+ *      the SPI (on v0.9.0 that reinit leaves the bridge TX dead -- step 2
+ *      repairs exactly that state);
+ *   2. three 0xFF headers back to back: the bridge's resync-burst heal
+ *      reinits it cleanly at idle.
+ * The caller runs step 2 alone first and the full chain only if that fails:
+ * measured on E1M-AEN803 2026W36-0009, fw 0x0900, the dead state (request-
+ * header MISO 00000000) recovered 60/60 PINGs after step 2 alone but 0/4
+ * after the full chain, while the lagged state needs the full chain (100/100
+ * PINGs).  It does NOT repair the state seen right after WIFI_AP_START (see
+ * cc3501e_wifi_ap_start()'s settle) -- the warm reset after this still
+ * covers that.  Costs ~0.5 s; a warm reset costs ~3.5 s and drops every
+ * association and socket.
+ *
+ * The transport lock is held for the whole resync (up to ~450 ms with the
+ * chain), past CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS (100 ms
+ * default), so a concurrent single-shot caller may see ALP_ERR_BUSY.  That is
+ * deliberate: nothing else may clock the bus while the bridge is being
+ * reinitialised.
+ *
+ * Returns true if the resync ran, false if the lock was not acquired (the
+ * caller then falls through to its normal probe gap). */
+#define CC3501E_RESYNC_STALL_QUIET_MS 300u /* > firmware CC3501E_REPLY_STALL_MS (250) */
+#define CC3501E_RESYNC_SETTLE_MS      150u /* resync-burst reinit + re-arm */
+
+static bool cc3501e_link_resync(cc3501e_t *ctx, bool stall_first)
+{
+	/* PING header (flags RESP_REQUIRED) declaring a 16 B payload that never comes --
+	 * the exact bytes bench-proven above. */
+	static const uint8_t stall_hdr[ALP_CC3501E_HEADER_BYTES] = {
+		(uint8_t)ALP_CC3501E_CMD_PING, (uint8_t)ALP_CC3501E_FLAG_RESP_REQUIRED, 0x10u, 0x00u
+	};
+	static const uint8_t resync_hdr[ALP_CC3501E_HEADER_BYTES] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu };
+	uint8_t              rx[ALP_CC3501E_HEADER_BYTES];
+
+	if (cc3501e_lock_acquire(ctx) != ALP_OK) return false;
+	if (stall_first) {
+		(void)alp_spi_transceive(ctx->bus, stall_hdr, rx, sizeof(stall_hdr));
+		alp_delay_ms(CC3501E_RESYNC_STALL_QUIET_MS);
+	}
+	for (int i = 0; i < 3; i++) {
+		(void)alp_spi_transceive(ctx->bus, resync_hdr, rx, sizeof(resync_hdr));
+	}
+	alp_delay_ms(CC3501E_RESYNC_SETTLE_MS);
+	cc3501e_lock_release(ctx);
+	return true;
+}
+
 /* See <alp/chips/cc3501e/core.h> for cc3501e_recover(); this is declared
  * only in cc3501e_internal.h -- see its comment there for why. */
 alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
@@ -483,9 +538,16 @@ alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
 	 * another thread -- cc3501e_recover()'s own CAS (ctx->recovering) is
 	 * the hard guarantee against a second RESET; this just avoids the
 	 * common case of redundant probing too. A narrow window can still let
-	 * two threads both pass this peek and both probe -- harmless (PINGs
-	 * only, correctly serialised by the transport lock); their subsequent
-	 * cc3501e_recover() calls still correctly exclude each other. */
+	 * two threads both pass this peek and both probe -- the PINGs are
+	 * serialised by the transport lock, and so are the in-band resyncs
+	 * below (each one a deliberate stall chain, not a bare PING); their
+	 * subsequent cc3501e_recover() calls still correctly exclude each other.
+	 *
+	 * RESIDUAL v0.9.0 RISK: if the bridge task loop is frozen, the resync's
+	 * stall header parks the slave in PH_REQ_PAYLOAD; the FFs and the next
+	 * PING are then eaten as payload, the stall reinit leaves TX dead, and
+	 * the probe ends in a warm reset.  The trailing burst-only resync
+	 * (i == 2) is the one extra attempt to repair that before giving up. */
 	if (ctx->recovering) return ALP_OK;
 
 	/* Probe before concluding the link is dead: most ALP_ERR_IO/TIMEOUT
@@ -516,6 +578,12 @@ alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
 			link_ok = true;
 			break;
 		}
+		/* In-band resync (#2699) before any further PINGs, which on a stuck
+		 * bridge never realign by themselves: the resync burst alone first,
+		 * then -- only if that PING still fails -- the full stall chain,
+		 * then one more burst if the chain left TX dead.  A lock failure
+		 * falls through to the normal gap instead. */
+		if (i < 3u && cc3501e_link_resync(ctx, i == 1u)) continue;
 		if (i + 1u < CC3501E_LINK_PROBE_TRIES) alp_delay_ms(CC3501E_LINK_PROBE_GAP_MS);
 	}
 	ctx->link_log_suppress = false;
@@ -722,8 +790,10 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
      * case immediately after this reset -- the Puya cold-boot flash bug
      * documented above routinely needs a second, caller-driven
      * cc3501e_hard_reset() before the slave answers anything) is NOT a
-     * version verdict: only an ANSWERED request can be compared, so leave
-     * the context usable and let the caller's own retry loop keep trying. */
+     * version verdict: only an ANSWERED request can be compared.  A fresh
+     * context (no major negotiated yet) fails closed: initialised = false and
+     * ALP_ERR_TIMEOUT, for the caller's retry loop.  A warm re-reset keeps the
+     * earlier fw_proto_major/minor and returns ALP_OK. */
 	uint16_t     fw_version = 0u;
 	alp_status_t vs         = cc3501e_get_version(ctx, &fw_version);
 	/* #1937 (silicon, 1 of 5 cold boots): one missed GET_VERSION right after the

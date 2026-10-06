@@ -73,6 +73,8 @@ on:
       - 'scripts/gen_cc3501e_gpio_routes.py'
       - 'src/backends/gpio/cc3501e_rev_dependent_pins.c'
       - 'scripts/gen_power_tree.py'
+      - 'scripts/gen_linux_ownership_dt.py'
+      - 'meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi'
       # The portability matrix re-runs the som.sku swap-test through
       # scripts/alp_project.py + the alp_orchestrate/ package, so any
       # emit-pipeline change can move its generated block.
@@ -195,6 +197,12 @@ jobs:
       # scripts/gen_power_tree.py.  Needs clang-format (installed above).
       - name: Regenerate PMIC power-tree guard tables from metadata
         run: python3 scripts/gen_power_tree.py
+
+      # Linux ownership fragment: e1m-v2n-ownership.dtsi is projected from
+      # metadata/e1m_modules/v2n/core-ownership.yaml + the SoC linux_dt by
+      # scripts/gen_linux_ownership_dt.py (#2660).
+      - name: Regenerate the Linux core-ownership devicetree fragment from metadata
+        run: python3 scripts/gen_linux_ownership_dt.py
 
       - name: Regenerate pin-mux capability tables from the pinout TSVs
         run: python3 scripts/gen_pinmux_capability.py
@@ -329,7 +337,8 @@ jobs:
                      docs/chip-driver-classification.md \
                         examples/aen \
                         src/backends/gpio/cc3501e_rev_dependent_pins.c \
-                        include/alp/chips/*_power_tree.h
+                        include/alp/chips/*_power_tree.h \
+                        meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi
           # No line-mask here: abi_snapshot.py's own write-skip guard
           # (above) is what keeps a no-op rerun from touching the
           # "generated" line at all, so this diff sees zero lines
@@ -352,13 +361,15 @@ jobs:
                      docs/chip-driver-classification.md \
                      examples/aen \
                      src/backends/gpio/cc3501e_rev_dependent_pins.c \
-                     include/alp/chips/*_power_tree.h; then
+                     include/alp/chips/*_power_tree.h \
+                     meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/gen_status_strings.py"
             echo "::error::  python3 scripts/gen_board_header.py"
             echo "::error::  python3 scripts/gen_cc3501e_gpio_routes.py"
             echo "::error::  python3 scripts/gen_power_tree.py"
+            echo "::error::  python3 scripts/gen_linux_ownership_dt.py"
             echo "::error::  python3 scripts/gen_pinmux_capability.py"
             echo "::error::  python3 scripts/gen_support_matrix.py"
             echo "::error::  python3 scripts/gen_portability_matrix.py"

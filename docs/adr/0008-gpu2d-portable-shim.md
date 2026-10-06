@@ -73,7 +73,15 @@ Backends (as implemented per issue #24):
   to the software path by the backend itself, via the internal
   `alp_gpu2d_sw_ops()` hook -- the "write once" contract holds
   op-by-op, not just SoM-by-SoM.
-- **V2N / V2N-M1 / i.MX 93 / native_sim / other**
+- **RZ/V2N family Linux (Mali-G31)**
+  (`src/backends/gpu2d/yocto_gles.c`) -- the Mali-G31 is a 3D GPU, not a
+  2D engine, so the three ops run as EGL + OpenGL ES 3 draws on a pbuffer
+  context (ADR 0017 Tier-1.5, standard Khronos headers only).  A wildcard
+  at priority 50, linked only under `ALP_SDK_USE_GPU2D_GLES`; it delegates
+  small rects, non-ARGB8888 formats and any GL failure -- or the whole handle
+  when no context can be created -- to the CPU path.  Bench-unverified.  See
+  `docs/v2n-mali-gpu.md`.
+- **i.MX 93 / native_sim / every target without a GPU backend**
   (`src/backends/gpu2d/sw_fallback.c`) -- the portable software
   fallback, wildcard `"*"` at priority 0.  It does the *real* CPU
   fill / blit / blend rather than returning `ALP_ERR_NOSUPPORT`, so
