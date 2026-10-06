@@ -427,8 +427,9 @@
 		 * only).  The SoM has NO pull-ups on I2C3: the carrier or the
 		 * attached module must provide them.  The pads stay hi-Z until
 		 * the first transfer.  clock-frequency is 100000 or 400000.
-		 * The E1M-X-EVK routes this bus to J12 / CAM1 (net DSI_CSI_I2C1);
-		 * a camera-module child is added by the carrier dtsi:
+		 * On the E1M-X-EVK this bus carries the J6 display I2C (panel
+		 * bridge, GT911 touch) and CAM1 (J12); children are added by
+		 * the carrier dtsi:
 		 * &e1m_x_i2c3 { ... }; */
 		e1m_x_i2c3: i2c {
 			#address-cells = <1>;
