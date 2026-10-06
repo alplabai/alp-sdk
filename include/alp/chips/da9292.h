@@ -331,7 +331,8 @@ struct da9292_ch2_seq_result {
  * @param bus        BRD_I2C handle.
  * @param addr_7bit  7-bit slave address (DA9292_I2C_ADDR_V2N on V2N).
  * @return ALP_OK; ALP_ERR_INVAL on NULL args or an address > 0x7F;
- *         ALP_ERR_NOT_READY if the chip does not ACK.
+ *         ALP_ERR_NOT_READY if the chip does not ACK or PMC_DEV_ID reads
+ *         blank (0x00/0xFF); the bus status if the PMC_REV_ID read fails.
  */
 alp_status_t da9292_init(da9292_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);
 
