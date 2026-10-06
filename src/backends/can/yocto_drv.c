@@ -398,7 +398,8 @@ static void *_rx_loop(void *arg)
 
 /* Pick entry @p bus_id from a NUL-separated string list.  0 = found and
  * non-empty (copied to out), -1 = no usable entry. */
-static int y_can_netdev_from_map(const char *map, size_t len, unsigned bus_id, char *out, size_t cap)
+static int
+y_can_netdev_from_map(const char *map, size_t len, unsigned bus_id, char *out, size_t cap)
 {
 	size_t i = 0;
 	for (unsigned n = 0; i < len; ++n) {
@@ -452,7 +453,7 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 	(void)caps_out;
 	if (cfg == NULL) return ALP_ERR_INVAL;
 
-	char ifname[IFNAMSIZ];
+	char         ifname[IFNAMSIZ];
 	alp_status_t ns = y_can_netdev_name((unsigned)cfg->bus_id, ifname, sizeof(ifname));
 	if (ns != ALP_OK) return ns;
 	size_t k = strlen(ifname);
