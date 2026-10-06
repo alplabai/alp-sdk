@@ -275,9 +275,16 @@ the mhu-shm page (`0x9f701000..0x9f701fff`) and the vrings (from
 `0x9f800000`). The V2N101 and V2M101 CM33 board trees chose it as
 `zephyr,ram-console` with `CONFIG_RAM_CONSOLE=y`, because the CM33 has no
 UART console. Read it back from Linux after a CM33 boot:
-`devmem2`/`dd if=/dev/mem bs=4096 skip=$((0x4f710000/4096)) count=4` (needs
-`CONFIG_DEVMEM` and no `STRICT_DEVMEM` block on that range). Not
-bench-verified.
+map `/dev/mem` and copy the buffer out in 32-bit words (a plain `dd`
+`read()` on this `no-map` window fails with `Bad address`):
+
+```sh
+python3 -c "import mmap,os;m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC),0x4000,mmap.MAP_SHARED,mmap.PROT_READ,offset=0x4f710000);print(b''.join(m[i:i+4] for i in range(0,0x4000,4)).rstrip(b'\xff\x00').decode(errors='replace'))"
+```
+
+The board defconfigs set `CONFIG_LOG_PRINTK=n` so printk reaches the
+buffer even when an app enables `CONFIG_LOG`.  Bench-verified on an
+E1M-V2M103: the Zephyr and Alp SDK boot banners read back.
 
 For each `ipc:` entry, `tan build`
 emits a header both halves `#include`:

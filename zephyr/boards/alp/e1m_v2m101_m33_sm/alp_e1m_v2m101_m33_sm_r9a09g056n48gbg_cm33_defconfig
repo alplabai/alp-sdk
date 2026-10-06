@@ -27,6 +27,10 @@ CONFIG_UART_CONSOLE=n
 CONFIG_CONSOLE=y
 CONFIG_RAM_CONSOLE=y
 CONFIG_RAM_CONSOLE_BUFFER_SIZE=16384
+# With CONFIG_LOG=y, printk is routed into the logging core by default
+# (LOG_PRINTK), and no CM33 log backend reaches this buffer, so it would
+# stay empty.  Keep printk direct to the RAM console.
+CONFIG_LOG_PRINTK=n
 
 # On-module GD32G553 supervisor bridge transport.  SPI only: RIIC8/
 # BRD_I2C is Cortex-A55/Linux-exclusive, so no CONFIG_I2C here.

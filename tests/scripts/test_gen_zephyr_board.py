@@ -332,6 +332,7 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
             self.assertIn('zephyr,memory-region = "RAM_CONSOLE";', node)
             self.assertIn("reg = <0x9f710000 0x4000>;", node)
             self.assertIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=16384", cfg)
+            self.assertRegex(cfg, r"(?m)^CONFIG_LOG_PRINTK=n$")
 
     def test_v2n_ram_console_inside_openamp_window_and_clear_of_ipc(self) -> None:
         """The RAM console must sit inside `openamp_shm` and overlap none of
