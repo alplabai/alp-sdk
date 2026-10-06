@@ -57,7 +57,7 @@ allow-list.  Command opcodes are 1 byte; their numeric encoding is:
 | `0x04` | `BATCH` (v0.15)       | `count:u8 {op:u8 len:u8 args[len]}[count]`         | `executed:u8 {status:u8 len:u8 payload[len]}[executed]` (SPI only; needs the `BATCH` link feature -- see §3.16) |
 | `0x10` | `GPIO_READ`           | `mask:u32`                                         | `levels:u32` (masked subset)                       |
 | `0x11` | `GPIO_WRITE`          | `mask:u32 levels:u32`                              | _empty_                                            |
-| `0x20` | `PWM_SET`             | `channel:u8 reserved:u8 period_ns:u32 duty_ns:u32` | _empty_                                            |
+| `0x20` | `PWM_SET`             | `channel:u8 reserved:u8 period_ns:u32 duty_ns:u32` | _empty_ (`period_ns == 0 && duty_ns == 0` = stop + release the channel's timer claim; needs the firmware with stop/release, older firmware answers an error -- `gd32g553_pwm_stop`) |
 | `0x21` | `PWM_GET`             | `channel:u8`                                       | `period_ns:u32 duty_ns:u32`                        |
 | `0x30` | `ADC_READ`            | `channel:u8 samples:u8`                            | `mv[samples]:u16` (millivolt, raw averaged)        |
 | `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (always `0xFF` on this HW rev — see §3.4) |
@@ -153,6 +153,7 @@ V2N silicon is still ahead for all three groups below (see
   single-pulse until a subsequent `PWM_SET` restores repetitive
   mode.  Because the whole timer flips, the firmware answers
   `STATUS_BUSY` while a sibling channel on the same timer is live
+  (stop it first with `PWM_SET` period 0 / duty 0, which releases the claim)
   (e.g. PWM1 after `PWM_SET` on PWM0); use a channel on a timer no
   other channel holds (PWM4..PWM6 on `TIMER7`).
 * `CMD_TIMER_SYNC` (opcode `0x27`) links the GD32G5's `TIMER0` /

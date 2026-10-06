@@ -246,6 +246,13 @@ static void br_capture_close(alp_pwm_backend_state_t *st)
 static void br_close(alp_pwm_backend_state_t *st)
 {
 	if (st->be_data != NULL) {
+		/* Release the timer claim so a sibling channel's single-pulse is not
+		 * left BUSY.  Old firmware answers an error; nothing to do about it. */
+		gd32g553_t *ctx = NULL;
+		if (alp_z_v2n_supervisor_acquire(&ctx) == ALP_OK) {
+			(void)gd32g553_pwm_stop(ctx, ((gd32_pwm_state_t *)st->be_data)->channel_id);
+			alp_z_v2n_supervisor_release();
+		}
 		_free_state((gd32_pwm_state_t *)st->be_data);
 		st->be_data = NULL;
 	}

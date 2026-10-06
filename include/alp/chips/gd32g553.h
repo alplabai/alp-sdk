@@ -805,9 +805,27 @@ alp_status_t gd32g553_gpio_write(gd32g553_t *ctx, uint32_t mask, uint32_t levels
  *  Duty `0` shuts the channel off; `duty_ns == period_ns` drives it
  *  permanently high.  The firmware rounds to its hardware-achievable
  *  resolution; the caller can read back via @ref gd32g553_pwm_get to
- *  see what actually got programmed. */
+ *  see what actually got programmed.
+ *
+ *  @return ALP_ERR_INVAL for `period_ns == 0` (use @ref gd32g553_pwm_stop)
+ *          or `duty_ns > period_ns`. */
 alp_status_t
 gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t duty_ns);
+
+/** @brief Stop a PWM channel and release its timer claim.
+ *
+ *  Sends `PWM_SET` with `period_ns == 0` and `duty_ns == 0`.  The channel
+ *  goes idle and no longer counts as a live sibling, so a later
+ *  @ref gd32g553_pwm_single_pulse on another channel of the same timer
+ *  stops answering `STATUS_BUSY`.  Use it when an app leaves a channel
+ *  running and the GD32 is not reset before the next image.
+ *
+ *  @param ctx      GD32G553 bridge context (must be initialised first).
+ *  @param channel  E1M PWM channel index (0..7).
+ *  @return ALP_OK, or the firmware's error (typically ALP_ERR_INVAL)
+ *          on firmware that predates stop/release -- harmless to ignore.
+ *          Needs the firmware with `PWM_SET` period 0 support. */
+alp_status_t gd32g553_pwm_stop(gd32g553_t *ctx, uint8_t channel);
 
 /** @brief Read back what a PWM channel's timer is ACTUALLY generating.
  *

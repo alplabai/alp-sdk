@@ -337,9 +337,18 @@ static bool t_pwm_set_get(soak_stat_t *st)
  * STATUS_BUSY while a sibling on the same timer is live; PWM0..3 share
  * TIMER0 with the pwm_set_get row (which never releases PWM0), hence a
  * TIMER7 channel nothing else claims.  Status-only here; the pulse itself
- * is a scope row in the HIL-PLAN. */
+ * is a scope row in the HIL-PLAN.
+ *
+ * The GD32 is NOT reset between CM33 images, so a previous app may still
+ * hold the TIMER7 claim (the functional app's scope loop leaves PWM7
+ * running).  Stop PWM4..PWM7 first: PWM_SET with period 0 / duty 0
+ * releases the claim.  Firmware that predates stop answers an error;
+ * ignore it and let the row's own status check decide. */
 static bool t_pwm_single_pulse(soak_stat_t *st)
 {
+	for (uint8_t ch = 4u; ch <= 7u; ch++) {
+		(void)gd32g553_pwm_stop(&ctx, ch);
+	}
 	const alp_status_t s = gd32g553_pwm_single_pulse(&ctx, 4u, 1000u);
 	if (s != ALP_OK) {
 		st->last_status = (int)s;

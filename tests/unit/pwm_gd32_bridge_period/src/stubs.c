@@ -38,6 +38,13 @@ gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t 
 	return ALP_OK;
 }
 
+alp_status_t gd32g553_pwm_stop(gd32g553_t *ctx, uint8_t channel)
+{
+	(void)ctx;
+	(void)channel;
+	return ALP_OK;
+}
+
 alp_status_t gd32g553_pwm_configure(gd32g553_t          *ctx,
                                     uint8_t              channel,
                                     gd32g553_pwm_align_t align_mode,
