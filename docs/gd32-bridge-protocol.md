@@ -62,6 +62,7 @@ allow-list.  Command opcodes are 1 byte; their numeric encoding is:
 | `0x30` | `ADC_READ`            | `channel:u8 samples:u8`                            | `mv[samples]:u16` (millivolt, raw averaged)        |
 | `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (always `0xFF` on this HW rev — see §3.4) |
 | `0x41` | `SE_RESET` (v0.8)       | `assert:u8` (`0` = release, `1` = hold in reset) | _empty_ (see §3.15) |
+| `0x42` | `BOOT_CONFIG` (v0.15)   | `op:u8 flags:u32` (`op` 0 = GET, 1 = SET; `flags` ignored on GET) | `flags:u32` (the stored value; see §3.19) |
 | `0x50` | `DAC_SET`             | `channel:u8 reserved:u8 value_mv:u16`              | _empty_                                            |
 | `0x51` | `DAC_GET`             | `channel:u8`                                       | `value_mv:u16`                                     |
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
@@ -1363,6 +1364,49 @@ Framing: the CRC follows the last code directly (§4).  The host clocks
 
 Host API: `gd32g553_adc_stream_begin2()` / `gd32g553_adc_stream_read2()`.
 
+### 3.19 Persistent boot configuration (`v0.15+`)
+
+`BOOT_CONFIG` (`0x42`) reads or stores a small persistent flag word in GD32
+flash.  Request `op:u8 flags:u32` (little-endian, 5 bytes): `op` `0` = GET
+(`flags` ignored), `1` = SET.  The reply is always the **stored** `flags:u32`
+(on a SET, the value stored *before* the commit).  **Allowed on the I2C link
+as well as SPI**, because provisioning runs from Linux.
+
+| Flag (bit) | Name | Effect |
+|------------|------|--------|
+| 0 | `SDMUX_EN_HIGH` | From every GD32 reset the firmware drives `PD11` (E1M `IO29`, the EVK's `SDIO_MUX_EN`, active-low: low = microSD connected, high = disconnected) **high**, so a provisioning run keeps the SD out across cold power cycles. |
+
+* **Opt-in.**  `IO29`'s meaning is carrier-specific, so the default
+  (nothing stored) leaves the pad untouched; only a host SET changes that.
+* **SET never moves a pad.**  It takes effect at the next GD32 reset, so
+  setting it on a unit booted from the SD cannot pull its rootfs out.  A
+  host that wants the SD out now also writes `IO29` high with `GPIO_WRITE`.
+  Clearing the flag does not release a pad that is already driven (that
+  needs a GD32 reset).
+* **Asynchronous SET.**  The firmware never touches flash inside the
+  transport interrupt.  A SET is queued and answered at once; the main loop
+  then commits it (on dual-bank parts two 1 KB page erases, each up to 20 ms
+  with interrupts masked: 2 x 20 ms of blackout plus main-loop latency).
+  There is no fixed idle window; the host waits ~50 ms and then polls GET,
+  tolerating transport errors, until the stored value equals the request; `gd32g553_boot_config_set()`
+  does exactly that.  A SET equal to the stored value is a no-op (no queue,
+  no erase).  A different SET while one is still queued, or while an OTA
+  session is active, answers `STATUS_BUSY`.  If the commit fails the GET poll never matches; the host
+  re-sends the SET.
+* **Power-loss safe.**  The flag lives in two A/B record pages (counter +
+  CRC, commit doubleword last) outside every image; a cut at any point of a
+  SET leaves either the old or the new value, never a fault: the boot-time
+  read checks the flash ECC flags and treats an uncorrectable doubleword as
+  "absent".  With no valid record every flag is off.
+* Returns `STATUS_INVAL` for an unknown `flags` bit, `op` > 1 or a wrong
+  length; `STATUS_BUSY` as above; `STATUS_NOSUPPORT` on firmware that
+  predates the opcode, a build without the flash HAL, a single-bank part
+  (`OBCTL.DBS` = 0) or an image running from slot B.  The host helpers map
+  it to `ALP_ERR_NOSUPPORT`.
+
+Host API: `gd32g553_boot_config_get()` / `gd32g553_boot_config_set()` with
+`GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH`.
+
 ## 4. SPI framing
 
 Each command on SPI is a **request frame** sent by the host while CS
@@ -1585,6 +1629,10 @@ slave **can hold the bus** by clock-stretching, the firmware
 guarantees that the reply bytes are available before it releases
 SCL.  Hosts that don't support clock-stretching can poll the bus
 busy bit instead.
+
+The firmware's I2C allow-list is a subset of the opcode set; `BOOT_CONFIG`
+(`0x42`) is on it (§3.19), so the persistent boot flags can be set from
+Linux without the SPI link.
 
 If the host issues a `read` before any `write` since the last
 START, the firmware replies with one byte `STATUS = 0x80` (no

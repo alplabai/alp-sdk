@@ -348,6 +348,8 @@ typedef enum {
 	GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40,
 	/* v0.8: secure-element (OPTIGA Trust M) reset, SE_RST = GD32 PC13. */
 	GD32G553_CMD_SE_RESET = 0x41,
+	/* v0.15: persistent opt-in boot configuration (SDMUX_EN_HIGH flag). */
+	GD32G553_CMD_BOOT_CONFIG = 0x42,
 	/* v0.2 additions -- analog + counter peripherals routed via the
      * GD32 on V2N (see metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv). */
 	GD32G553_CMD_DAC_SET      = 0x50,
@@ -866,6 +868,49 @@ alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status);
  *          the HAL body) / transport error.
  */
 alp_status_t gd32g553_se_reset(gd32g553_t *ctx, bool assert);
+
+/** Boot-config flag: drive GD32 `PD11` (E1M IO29, the EVK's `SDIO_MUX_EN`,
+ *  active-low: low = microSD connected, high = disconnected) HIGH from the
+ *  next GD32 reset on.  Opt-in because IO29's meaning is carrier-specific. */
+#define GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH 0x00000001u
+
+/** @brief Read the GD32's persistent boot-config flags.
+ *
+ *  Allowed on both transports, so provisioning can use the I2C link from
+ *  Linux.  Never writes flash.
+ *
+ *  @param ctx    GD32G553 bridge context (must be initialised first).
+ *  @param flags  Out: stored `GD32G553_BOOT_CONFIG_*` bits (0 = every
+ *                flag off, the default for a unit never configured).
+ *
+ *  @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT (firmware predates
+ *          the opcode, or the build has no flash HAL) / transport error.
+ */
+alp_status_t gd32g553_boot_config_get(gd32g553_t *ctx, uint32_t *flags);
+
+/** @brief Store the GD32's persistent boot-config flags.
+ *
+ *  Survives power cycles and OTA slot swaps; takes effect at the next GD32
+ *  reset and does NOT move any pad now (so a unit running from the SD is not
+ *  cut off).  The firmware accepts the request at once and commits it from
+ *  its main loop (two 1 KB page erases, each <= 20 ms with interrupts masked, plus
+ *  main-loop latency; the link may black out meanwhile); this call waits
+ *  ~50 ms and then polls (retrying through transport errors) GET until the stored value equals
+ *  @p flags, so ALP_OK means the value is stored.  A value equal to the
+ *  stored one is a no-op.  To drive IO29 immediately as well, also write it
+ *  with @ref gd32g553_gpio_write.
+ *
+ *  @param ctx    GD32G553 bridge context (must be initialised first).
+ *  @param flags  `GD32G553_BOOT_CONFIG_*` bits; unknown bits are rejected.
+ *
+ *  @return ALP_OK / ALP_ERR_INVAL (unknown bit) / ALP_ERR_BUSY (a different
+ *          SET is still being committed; retry) / ALP_ERR_NOSUPPORT (older
+ *          firmware, no flash HAL, single-bank part, or running from slot B)
+ *          / ALP_ERR_TIMEOUT (accepted but the stored value never matched:
+ *          the flash write failed or was cut; send the SET again) /
+ *          transport error.
+ */
+alp_status_t gd32g553_boot_config_set(gd32g553_t *ctx, uint32_t flags);
 
 /** @brief Program a DAC channel's output voltage in millivolts.
  *
