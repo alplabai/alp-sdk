@@ -2,7 +2,8 @@
 #
 # E1M-V2M103 GD32 bridge, wire level: GET_VERSION frame to 0x70 on BRD_I2C
 # (i2c-8) via i2ctransfer; the reply's status byte must be 0x00 and bytes 2-4 the
-# protocol version 0x00 0x0e 0x00 (0.14.0; bench 2026-09-29 reply: 00 00 0e 00 cf a7).
+# protocol version 0x00 <minor> 0x00 with minor 0x0e (0.14.0; bench 2026-09-29 reply:
+# 00 00 0e 00 cf a7) or 0x0f (0.15.0, firmware 0.3.1+, IO15/IO26 bridge GPIO bits).
 # -f because the kernel
 # GD32 bridge driver already owns the address.  GET_VERSION is a pure read
 # command; nothing on the GD32 changes.
@@ -10,14 +11,14 @@
 schema_version: 1
 name: v2m103-gd32-getversion-i2c
 description: |
-  GD32 GET_VERSION over i2c-8 @0x70 returns status 0x00, protocol 0.14.0.
+  GD32 GET_VERSION over i2c-8 @0x70 returns status 0x00, protocol 0.14.0 or 0.15.0.
 
 flash_method: ssh-run
 ssh_command: |-
   r=$(i2ctransfer -f -y 8 w4@0x70 0x00 0x01 0xd1 0xf1 r6) || exit 0
   echo "HIL_GD32_REPLY $r"
   set -- $r
-  [ "$1" = 0x00 ] && [ "$2" = 0x00 ] && [ "$3" = 0x0e ] && [ "$4" = 0x00 ] && echo HIL_GD32_STATUS_OK
+  [ "$1" = 0x00 ] && [ "$2" = 0x00 ] && { [ "$3" = 0x0e ] || [ "$3" = 0x0f ]; } && [ "$4" = 0x00 ] && echo HIL_GD32_STATUS_OK
 
 serial:
   duration_s: 10

@@ -907,6 +907,17 @@
           ],
           "description": "Mediator-local pin or bus identifier. Forms: integer (CC3501E GPIO index, e.g. `14`); single pad name (`\"PA11\"` for a GD32 port pad); bus pin (`\"SPI1.MISO\"`); or a slash-joined pair for multi-pin peripherals (`\"PA0/PB3\"` for a quadrature encoder's X/Y pads). Meaningless for `dispatch: unrouted` (there is no mediator pin to name); omit it there."
         },
+        "bridge_bit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31,
+          "description": "`dispatch: gd32_bridge` only: the bridge GPIO-expander mask bit the pad occupies (docs/gd32-bridge-protocol.md).  Optional; present for pads added after the original 18 so the bit number has one metadata home (tests/scripts/test_gd32_bridge_route_parity.py pins the C header to it)."
+        },
+        "min_bridge_protocol": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "`dispatch: gd32_bridge` only: minimum bridge protocol MINOR that implements this pad; older firmware answers ALP_ERR_NOSUPPORT / -ENODEV for it."
+        },
         "driven_by": {
           "type": "string",
           "enum": ["dxm1", "none"],

@@ -245,7 +245,7 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_LCD1_PWR_EN",
       "board_role": null,
-      "dispatch": "direct",
+      "dispatch": "gd32_bridge",
       "endpoints": [
         {
           "kind": "e1m",
@@ -254,9 +254,15 @@
         {
           "kind": "board-macro",
           "ref": "XEVK_PIN_LCD1_PWR_EN"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB4"
         }
       ],
-      "board_doc": "DSI display panel 1 power enable."
+      "board_doc": "DSI display panel 1 power enable.",
+      "dispatch_pin": "PB4"
     },
     {
       "net_id": "XEVK_PIN_LCD2_RST",
@@ -1360,6 +1366,29 @@
         }
       ],
       "dispatch_pin": "PC15",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_GPIO_IO26",
+      "e1m": "E1M_X_GPIO_IO26",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO26"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC2"
+        }
+      ],
+      "dispatch_pin": "PC2",
       "caveats": [
         "som_only_no_carrier_role"
       ]
