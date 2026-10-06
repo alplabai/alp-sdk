@@ -65,6 +65,11 @@ def _has_error(errors: list, path: list, validator_name: str) -> bool:
 
 # --- positive controls -----------------------------------------------------
 
+def test_example_app_regex_matches_schema_pattern():
+    schema = json.loads(V.MODEL_ZOO_SCHEMA.read_text(encoding="utf-8"))
+    assert V._MODEL_ZOO_EXAMPLE_APP_RE.pattern == schema["properties"]["example_app"]["pattern"]
+
+
 def test_real_fixture_is_schema_valid():
     assert _schema_errors(_base()) == []
 
@@ -399,7 +404,7 @@ def test_main_fails_and_prints_an_orphan_starter(monkeypatch, capsys):
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-# --- schema_version (contract-freeze, #2539 adversarial review item 1) -----
+# --- schema_version (contract-freeze) ---------------------------------------
 
 def test_missing_schema_version_is_rejected():
     doc = _base()
@@ -422,7 +427,7 @@ def test_string_schema_version_is_rejected():
     assert errors, "schema_version must be an integer, not a string"
 
 
-# --- kind discriminator (item 2) --------------------------------------------
+# --- kind discriminator ------------------------------------------------------
 
 def test_missing_kind_is_rejected():
     doc = _base()
@@ -502,7 +507,7 @@ def test_model_kind_with_url_source_and_soms_is_accepted():
     assert _schema_errors(doc) == []
 
 
-# --- compile: aligned with board.schema.json's models[].compile (item 3) ---
+# --- compile: aligned with board.schema.json's models[].compile -------------
 
 def _strip_descriptions(obj):
     """Recursively drop every `description` key. `compile`'s `description`
@@ -584,14 +589,12 @@ def test_compile_deepx_dxm1_valid_block_is_accepted():
     assert _schema_errors(doc) == []
 
 
-# --- url: tightened pattern (item 4) ----------------------------------------
+# --- url: tightened pattern --------------------------------------------------
 
 def test_bare_https_scheme_with_nothing_after_is_rejected():
-    """kind: model AND a non-smoke task -- without the task fix, this test
-    was vacuous: the inherited fixture base's `task: smoke` trips the
-    `else` branch's `task != smoke` requirement regardless of the url
-    pattern, so `errors` was truthy even with the url pattern loosened to
-    accept anything."""
+    """kind: model AND a non-smoke task -- the fixture base's `task: smoke`
+    would trip the kind: model if/then's `task: not smoke` regardless of
+    the url pattern, so the task must be non-smoke for this to pin the url."""
     doc = _base()
     doc["kind"] = "model"
     doc["task"] = "object-detection"
@@ -658,7 +661,7 @@ def test_url_with_userinfo_credentials_is_rejected():
         "a url with embedded userinfo/credentials must be rejected")
 
 
-# --- bundled: tightened in-schema pattern (item 5) --------------------------
+# --- bundled: tightened in-schema pattern -----------------------------------
 
 def test_bundled_absolute_path_is_rejected_by_schema():
     doc = _base()
@@ -694,7 +697,7 @@ def test_bundled_well_formed_path_is_still_accepted_by_schema():
     assert _schema_errors(doc) == []
 
 
-# --- validator hardening (item 6) -------------------------------------------
+# --- validator hardening -----------------------------------------------------
 
 def test_stray_file_directly_under_model_zoo_root_is_rejected(tmp_path):
     (tmp_path / "stray.txt").write_text("x", encoding="utf-8")
@@ -866,7 +869,7 @@ def test_case_exact_wiring_fires_the_specific_message_on_any_host(tmp_path, monk
     assert any("case-sensitive" in m for m in failures[0][1])
 
 
-# --- license: closed permissive SPDX allowlist (maintainer decision #1) ----
+# --- license: closed permissive SPDX allowlist -------------------------------
 
 def test_license_apache2_is_accepted():
     doc = _base()
@@ -903,7 +906,7 @@ def test_license_enum_matches_readme_allowlist():
     assert readme_ids == schema["properties"]["license"]["enum"]
 
 
-# --- task: closed kebab-case enum, smoke tied to kind (maintainer decision #2)
+# --- task: closed kebab-case enum, smoke tied to kind ------------------------
 
 def test_fixture_with_non_smoke_task_is_rejected():
     doc = _base()
@@ -923,9 +926,9 @@ def test_model_with_smoke_task_is_rejected():
 
 
 # --- task<->kind cross-check ALSO gets the friendlier semantic message -----
-# (item 3: this was schema-only; _check_model_zoo_semantics now repeats it
-# for a specific, readable message, same pattern as the kind:fixture
-# validated_soms/source checks above.)
+# (_check_model_zoo_semantics repeats the schema's rule for a specific,
+# readable message, same pattern as the kind:fixture validated_soms/source
+# checks above.)
 
 def test_semantic_check_flags_fixture_with_non_smoke_task(tmp_path):
     doc = _base()
@@ -969,7 +972,7 @@ def test_real_fixture_declares_task_smoke():
     assert _base()["task"] == "smoke"
 
 
-# --- io_spec / perf_ref removed (maintainer decisions #3, #4) --------------
+# --- io_spec / perf_ref are not schema fields --------------------------------
 
 def test_io_spec_present_is_rejected():
     doc = _base()
@@ -985,7 +988,7 @@ def test_perf_ref_present_is_rejected():
     assert errors, "perf_ref was removed from the schema -- additionalProperties: false rejects it"
 
 
-# --- example_app: constrained pattern + existence/board.yaml check (#5) ----
+# --- example_app: constrained pattern + existence/board.yaml check ----------
 
 def test_example_app_trailing_slash_is_rejected():
     doc = _base()
@@ -1022,10 +1025,8 @@ def test_example_app_well_formed_is_accepted():
 
 
 def test_semantic_check_flags_nonexistent_example_app_dir(tmp_path):
-    """examples/ genuinely exists in every real alp-sdk checkout (this is
-    not a metadata-only scratch tree), so there is nothing to skip here --
-    a prior `pytest.skip` guard on `(V.REPO / "examples").is_dir()` could
-    never actually fire and was dead weight."""
+    """examples/ exists in every real alp-sdk checkout, so no skip guard is
+    needed."""
     doc = _base()
     doc["example_app"] = "examples/aen/does-not-exist-nobody-names-this"
     p = _write(tmp_path, doc)
@@ -1099,7 +1100,7 @@ def test_semantic_check_skips_disk_probe_for_a_schema_invalid_example_app(tmp_pa
                    ([] if not failures else [(p, failures[0][1])]) for m in msgs)
 
 
-# --- metadata/model_zoo/README.md (#7) --------------------------------------
+# --- metadata/model_zoo/README.md --------------------------------------------
 
 def test_readme_exists_and_is_not_treated_as_stray_by_the_collector():
     readme = V.MODEL_ZOO / "README.md"
@@ -1110,7 +1111,7 @@ def test_readme_exists_and_is_not_treated_as_stray_by_the_collector():
         "collector, same as model_perf's own README.md allowance")
 
 
-# --- trailing-newline pattern hole (adversarial review) --------------------
+# --- trailing-newline pattern hole -------------------------------------------
 #
 # jsonschema's `pattern` keyword validates with `re.search`, and Python's
 # `$` matches EITHER at the true end of string OR immediately before a

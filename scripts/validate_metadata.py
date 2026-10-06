@@ -140,7 +140,7 @@ MODEL_ZOO_STARTERS = MODEL_ZOO / "starters"
 # The one root-level non-.yaml file this tree tolerates (its own doc),
 # mirroring `_MODEL_PERF_ALLOWED_ROOT_FILES`'s same allowance.
 _MODEL_ZOO_ALLOWED_ROOT_FILES = {"README.md"}
-# Mechanical "genuinely tiny, no weight redistribution" guard (#2539 review):
+# Mechanical "genuinely tiny, no weight redistribution" guard:
 # a byte-size ceiling on every starters/* file, not a human's judgment call
 # on review. 64 KiB is generous headroom over the real example-tiny.tflite
 # smoke fixture (712 B) while still ruling out anything that could plausibly
@@ -149,7 +149,7 @@ _MODEL_ZOO_STARTER_MAX_BYTES = 64 * 1024
 # Mirrors model-zoo-v1.schema.json's `example_app` pattern exactly -- used
 # to guard the on-disk probe below so a schema-invalid value (caught by
 # the schema pass already) doesn't ALSO trigger a misleading disk-probe
-# message (#2539 review).
+# message.
 _MODEL_ZOO_EXAMPLE_APP_RE = re.compile(r"^examples/[a-z0-9_-]+/[a-z0-9_-]+$(?!\n)")
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
 # .yaml whose `identifier:` is the fully-qualified <board>/<soc>/<cpucluster>
@@ -3143,7 +3143,7 @@ def _check_model_perf_semantics(model_perf_files) -> list:
 def _collect_model_zoo_files(root: Path) -> tuple[list[Path], list[Path], list[tuple[str, list[str]]]]:
     """Collect metadata/model_zoo/<id>.yaml entries + metadata/model_zoo/
     starters/<file> data, and FAIL loudly on anything that doesn't fit
-    that exact two-tier shape (#2539 review), mirroring
+    that exact two-tier shape, mirroring
     `_collect_model_perf_files()`'s own structural-violation-as-failure
     design rather than a bare glob that silently never opens a
     misplaced file.
@@ -3380,7 +3380,7 @@ def _check_model_zoo_semantics(model_zoo_files) -> list:
 
 def _check_model_zoo_starters(model_zoo_files, starter_files) -> list:
     """Cross-check the whole `metadata/model_zoo/starters/` tree against
-    every entry's `source.bundled` reference (#2539 review):
+    every entry's `source.bundled` reference:
 
       1. every file under `starters/` is referenced by at least one
          entry's `source.bundled` -- an unreferenced ("orphan") starter is

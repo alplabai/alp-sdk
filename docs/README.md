@@ -201,8 +201,7 @@ into the topic-specific docs.
   `example_app` (`examples/<category>/<name>`, same shape as
   template-catalog-v1's `example`) must resolve to a real directory
   carrying a `board.yaml`, checked whenever this checkout has an
-  `examples/` tree. `io_spec` and `perf_ref` were removed (dead,
-  unenforced fields; `additionalProperties: false` now rejects them). An
+  `examples/` tree. An
   optional `compile` block is structurally identical to
   `board.schema.json`'s `models[].compile` (the shape `tan model add`
   writes into a project's board.yaml; its own `description` is reworded
