@@ -7,7 +7,9 @@ DRP-AI backend loaded two TVM runtimes. RUHMI's own V2N apps link only
 `libdrp_tvm_rt.so` already carries the `tvm::runtime` symbols it needs, so
 `TVM_RUNTIME_LIB` is gone from the link line and its `find_library`, and
 `PACKAGECONFIG[drpai]` in the alp-sdk recipe no longer DEPENDS on `lib-tvm`
-(`drpai` still supplies `<linux/drpai.h>`). Not yet built or run against a
+(`drpai` still supplies `<linux/drpai.h>`); it now DEPENDS on `mmngr-user-module` and
+`mmngrbuf-user-module` explicitly, because `libdrp_tvm_rt.so` needs `libmmngr.so.1` and
+`libmmngrbuf.so.1` and `lib-tvm` used to bring them into the sysroot transitively. Not yet built or run against a
 real RUHMI checkout: confirm with `readelf -d libalp_sdk.so` and
 `LD_DEBUG=bindings` during one inference. The image-level `lib-tvm` install in
 `alp-image-common.inc` is unchanged pending a maintainer decision.

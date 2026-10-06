@@ -4,7 +4,7 @@
   <version>0.6.0</version>
   <description>
     Minimal Alp SDK + ROS 2 node: publishes the SoM's on-module temperature
-    (portable alp_temperature_read_milli_c) as sensor_msgs/Temperature.
+    (portable alp_temperature_read_milli_c) and the SoC die temperature as sensor_msgs/Temperature.
     Teaching example -- uses only the portable alp/* API.
   </description>
 

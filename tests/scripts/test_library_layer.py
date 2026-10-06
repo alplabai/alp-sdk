@@ -356,10 +356,10 @@ def test_requires_min_ram_names_constraint(tmp_path: Path) -> None:
 
 def test_requires_capability_names_constraint(tmp_path: Path) -> None:
     project = load_board_yaml(_write_board(tmp_path, _V2N_NOLIB))
-    manifest = {"requires": {"capabilities": ["gpu2d"]}}  # V2N has no gpu2d cap
+    manifest = {"requires": {"capabilities": ["dave2d"]}}  # V2N has no dave2d cap
     with pytest.raises(OrchestratorError) as exc:
         liblayer._check_requires("needsgpu", manifest, project, liblayer.METADATA_ROOT)
-    assert "gpu2d" in str(exc.value)
+    assert "dave2d" in str(exc.value)
 
 
 def test_incompatible_selection_not_wireable(tmp_path: Path) -> None:

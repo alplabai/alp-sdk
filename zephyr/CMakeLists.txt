@@ -331,6 +331,22 @@ if(CONFIG_USE_RZ_FSP_MHU_B)
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/r_mhu_b_ns)
 endif()
 
+# Renesas RZ/V2N CM33 watchdog (WDT0) -- vendored+adapted FSP r_wdt module.
+# hal_renesas ships r_wdt for rza/rzn/rzt only and upstream Zephyr's
+# wdt_renesas_rz.c cannot bind RZ/V2N (see wdt_renesas_rzv.c's header), so the rzt
+# r_wdt.c is carried here, adapted for the CM33's WDT0, under
+# zephyr/drivers/watchdog/r_wdt/ (gated by USE_RZ_FSP_WDT_RZV) with the Zephyr glue
+# zephyr/drivers/watchdog/wdt_renesas_rzv.c (compatible `renesas,rzv-wdt`, gated
+# by WDT_RENESAS_RZV).  BENCH-UNVERIFIED.
+zephyr_library_sources_ifdef(CONFIG_WDT_RENESAS_RZV
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/watchdog/wdt_renesas_rzv.c)
+if(CONFIG_USE_RZ_FSP_WDT_RZV)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/watchdog/r_wdt/r_wdt.c)
+    zephyr_library_include_directories(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/watchdog/r_wdt)
+endif()
+
 # Alif Ensemble ARM MHUv2 inter-core mailbox driver -- vendor-ext,
 # BENCH-UNVERIFIED.  Carried here (not upstream Zephyr) so it survives a
 # `west update`.  Standard Zephyr MBOX-class driver (DT_DRV_COMPAT
@@ -483,9 +499,10 @@ endif()
 # zephyr_include_directories(include) fires when USE_ALIF_HAL_OSPI pulls the
 # subdirectory in), so no extra include path is needed here.  See the
 # OSPI_ALIF Kconfig help + flash_ospi_alif.c's own header for the current
-# read/write/erase coverage (#915: read/read_jedec_id/sfdp_read only, write/
-# erase are fail-closed stubs); examples/aen/aen-ospi-regcheck exercises the
-# controller-register path only and makes no flash_driver_api call.
+# read/write/erase coverage (#915: read, read_jedec_id, sfdp_read, write and
+# erase are implemented and bench-verified); examples/aen/aen-ospi-regcheck
+# proves the controller-register path by default and its opt-in #915
+# self-test erases, programs and restores one sector through flash_driver_api.
 zephyr_library_sources_ifdef(CONFIG_OSPI_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_ospi_alif.c)
 
@@ -1313,6 +1330,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TCAL9538
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tcal9538/tcal9538.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TAS2563
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tas2563/tas2563.c)
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_INA228
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ina228/ina228.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_INA236
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/ina236/ina236.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ACT8760
