@@ -85,7 +85,7 @@ SRC_URI:append = " \
     file://0020-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
     file://uio.cfg \
     file://e1m-v2n-doorbell.dtsi \
-    file://panic.cfg 
+    file://panic.cfg \
 "
 
 # CM33 -> CA55 doorbell SPI (decision Q52): "404" = MHU-B SWINT unit 12, the
