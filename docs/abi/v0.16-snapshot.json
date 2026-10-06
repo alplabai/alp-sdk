@@ -14016,6 +14016,10 @@
           "hash": "c4d3fb31974cc964",
           "signature": "static inline void alp_gd32_results_beacon_tick(void *window);"
         },
+        "alp_gd32_results_fault_publish": {
+          "hash": "e613f055bf4f8bd8",
+          "signature": "static inline void alp_gd32_results_fault_publish(void *window, const alp_gd32_fault_t *f);"
+        },
         "alp_gd32_results_init": {
           "hash": "4e8386178161caad",
           "signature": "static inline void alp_gd32_results_init(void *window, uint32_t kind);"
@@ -14026,6 +14030,18 @@
         }
       },
       "macros": {
+        "ALP_GD32_FAULT_MAGIC": {
+          "hash": "7dc8b6d583edfaf7",
+          "value": "0x464C5431u"
+        },
+        "ALP_GD32_FAULT_OFFSET": {
+          "hash": "9917bfe632e1b6a7",
+          "value": "0xF50u"
+        },
+        "ALP_GD32_FAULT_WORDS": {
+          "hash": "db731b5c03c156d2",
+          "value": "12u"
+        },
         "ALP_GD32_RESULTS_BEACON_KIND": {
           "hash": "d4efbb0c194aa569",
           "value": "0x200u"
@@ -14104,6 +14120,25 @@
         }
       },
       "typedefs": {
+        "alp_gd32_fault_t": {
+          "definition": "typedef struct { uint32_t magic; uint32_t reason; uint32_t pc; uint32_t lr; uint32_t xpsr; uint32_t cfsr; uint32_t hfsr; uint32_t mmfar; uint32_t bfar; uint32_t thread_hash; uint32_t uptime_ms; uint32_t sp; } alp_gd32_fault_t;",
+          "fields": [
+            "uint32_t magic",
+            "uint32_t reason",
+            "uint32_t pc",
+            "uint32_t lr",
+            "uint32_t xpsr",
+            "uint32_t cfsr",
+            "uint32_t hfsr",
+            "uint32_t mmfar",
+            "uint32_t bfar",
+            "uint32_t thread_hash",
+            "uint32_t uptime_ms",
+            "uint32_t sp"
+          ],
+          "hash": "d5d84c03d27eb643",
+          "kind": "struct"
+        },
         "alp_gd32_results_t": {
           "definition": "typedef struct { uint32_t magic; uint32_t layout; uint32_t seq; uint32_t kind; uint32_t state; uint32_t tests_pass; uint32_t tests_fail; uint32_t tests_skip; uint32_t fw_version; uint32_t features; uint32_t max_payload; uint32_t flags; uint32_t read2_first; uint32_t read2_dropped; uint32_t read2_gaps; uint32_t soak_cycles; uint32_t soak_errors; uint32_t soak_timeouts; uint32_t soak_elapsed_s; uint32_t reserved; } alp_gd32_results_t;",
           "fields": [

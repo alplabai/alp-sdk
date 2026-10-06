@@ -66,3 +66,32 @@ def test_record_left_by_an_earlier_image_is_stale():
     assert not reader.is_live(reader.decode(raw, (reader.BEACON_MAGIC, 0x100, 5)))
     assert not reader.is_live(reader.decode(raw, (0, 0x200, 5)))
     assert not reader.is_live(reader.decode(raw))
+
+
+def test_fault_block_matches_header():
+    assert reader.FAULT_OFFSET == _define("ALP_GD32_FAULT_OFFSET")
+    assert reader.FAULT_MAGIC == _define("ALP_GD32_FAULT_MAGIC")
+    assert reader.FAULT_WORDS == _define("ALP_GD32_FAULT_WORDS")
+    assert reader.RESULTS_OFFSET + reader.WORDS * 4 <= reader.FAULT_OFFSET
+    assert reader.FAULT_OFFSET + reader.FAULT_WORDS * 4 <= reader.BEACON_OFFSET
+    body = re.search(r"typedef struct \{([^{}]*)\} alp_gd32_fault_t;", HDR).group(1)
+    assert tuple(re.findall(r"uint32_t\s+(\w+);", body)) == reader.FAULT_FIELDS
+
+
+def test_decode_fault():
+    words = [0] * reader.FAULT_WORDS
+    words[0], words[1], words[2], words[4] = reader.FAULT_MAGIC, 4, 0x1234, 0x01000003
+    words[9] = reader.fnv1a("main")
+    f = reader.decode_fault(struct.pack("<12I", *words))
+    assert f["thread"] == "main" and f["pc"] == 0x1234 and f["exception"] == 3
+    assert reader.decode_fault(b"\0" * 48) is None
+
+
+def test_fnv1a_known_vector():
+    assert reader.fnv1a("") == 0x811C9DC5 and reader.fnv1a("a") == 0xE40C292C
+
+
+def test_frozen_heartbeat_is_stalled():
+    assert reader.heartbeat_stalled(7, 7)
+    assert not reader.heartbeat_stalled(7, 8)
+    assert not reader.heartbeat_stalled(0xFFFFFFFF, 0)
