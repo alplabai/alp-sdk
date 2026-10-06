@@ -41,6 +41,9 @@ meta-alp-sdk/
 │       └── include/
 │           └── e1m-v2m-deepx.inc        # Shared DEEPX block `require`d by the three V2M confs above.
 ├── dynamic-layers/
+│   ├── ros2-humble-layer/               # parsed ONLY with upstream meta-ros2-humble in bblayers.
+│   │   ├── recipes-core/packagegroups/packagegroup-alp-ros.bb
+│   │   └── recipes-ros/                 # alp-perception + alp-ros2-temperature nodes (ROS 2 Humble).
 │   ├── meta-alif-ensemble/
 │   │   └── recipes-kernel/linux/
 │   │       └── linux-alif_%.bbappend    # E1M-AEN console routing (parsed only when meta-alif-ensemble is in bblayers.conf).
@@ -84,9 +87,6 @@ meta-alp-sdk/
 │   ├── alp-image-common.inc            # Shared runtime for both images below.
 │   ├── alp-image-edge.bb                # Dev image: common + debug-tweaks + bench tooling.
 │   └── alp-image-prod.bb               # Production image: hardened, key-only SSH (DISTRO=alp).
-├── recipes-ros/
-│   └── alp-perception/
-│       └── alp-perception_0.6.bb        # examples/v2n/v2n-m1-ros-perception node.
 └── README.md                            # this file
 ```
 
@@ -240,13 +240,18 @@ bitbake-layers add-layer ../meta-rz-features/meta-rz-opencva
 bitbake-layers add-layer ../meta-rz-features/meta-rz-codecs
 bitbake-layers add-layer ../meta-econsys
 
-# 4b. ROS 2 layer -- ONLY for images that ship the alp-sdk ROS nodes
-#     (e.g. alp-image-edge).  meta-ros2-humble is a LAYERRECOMMENDS, not
-#     a hard dep: for a lean image (e.g. core-image-minimal) skip this
-#     step and BBMASK the ROS recipes.  It is not in the BSP tarball, so
-#     clone it from upstream meta-ros first:
+# 4b. ROS 2 (opt-in; docs/bring-up-ros2.md).  Upstream meta-ros is not in
+#     the BSP tarball.  Without these layers every alp-image-* still builds,
+#     ROS-free (ALP_ENABLE_ROS2 defaults to 0).  Optional Renesas compat layer
+#     from rzv_ros: add it ONLY together with meta-ros AND meta-rz-graphics
+#     (its bbappends are not dynamic and fail the parse otherwise; its licence
+#     is unasserted upstream -- docs/bring-up-ros2.md).
 git clone -b scarthgap https://github.com/ros/meta-ros ../meta-ros
+bitbake-layers add-layer ../meta-ros/meta-ros-common
+bitbake-layers add-layer ../meta-ros/meta-ros2
 bitbake-layers add-layer ../meta-ros/meta-ros2-humble
+git clone https://github.com/renesas-rz/rzv_ros ../rzv_ros
+bitbake-layers add-layer ../rzv_ros/yocto/meta-rz-features-ros/meta-rzv2-ros-humble
 
 # 5. Add meta-alp-sdk:
 git clone https://github.com/alplabai/alp-sdk ../alp-sdk
@@ -295,11 +300,12 @@ See the edge-vs-prod posture table + `DISTRO=alp` notes in
 
 The one supported command for a ROS 2-carrying image is steps 4b + 7 + 8
 above: `MACHINE = "e1m-v2n101-a55"` (or `e1m-v2m101-a55`), then
-`bitbake alp-image-edge`, with `meta-ros2-humble` added to `bblayers.conf`.
+`bitbake alp-image-edge`, with `meta-ros2-humble` added to `bblayers.conf`
+(`ALP_ENABLE_ROS2` then defaults to `1`).
 `alp-image-edge.bb` turns on `IMAGE_FEATURES += "alp-ros"`, which
 `alp-image-common.inc`'s `FEATURE_PACKAGES_alp-ros` maps to
 `packagegroup-alp-ros` -- whose `RDEPENDS:${PN}` names both `rclcpp` and
-`alp-perception` (`recipes-core/packagegroups/packagegroup-alp-ros.bb`).
+`alp-perception` (`dynamic-layers/ros2-humble-layer/recipes-core/packagegroups/packagegroup-alp-ros.bb`).
 Without a Yocto CI build lane in alp-sdk CI, that dependency chain --
 not a finished image manifest -- is the grounded proof this command puts
 both packages on the rootfs; `tests/scripts/test_library_layer.py`
