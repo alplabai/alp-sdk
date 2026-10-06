@@ -8,18 +8,17 @@
  * the alp-sdk host-path proof for issue #86 (the firmware side is proven
  * in alplabai/gd32-bridge-firmware#167).
  *
- * The kernel gpio-gd32-bridge driver binds the bridge's I2C address, and
- * i2c-dev refuses I2C_SLAVE on a bound address (EBUSY).  --unbind detaches
- * that driver through sysfs for the run (so its polling cannot interleave
- * with OTA frames) and re-binds it at exit.
+ * The kernel gpio-gd32-bridge driver stays bound for the whole run: every
+ * frame goes through alp_i2c_write_read() -> ioctl(I2C_RDWR), which i2c-dev
+ * allows on a bound address (only I2C_SLAVE needs the address free, and this
+ * flow never uses it).  Never unbind the driver: its consumers (wlan-pwrseq,
+ * hci_bcm, the panel) hold its lines, and unbinding panics the next reboot.
+ * After COMMIT the board must be rebooted (see the "reboot required" line).
  *
  * Usage: see README.md.  Exit 0 = every requested phase passed.
  */
 
 #include <errno.h>
-#include <fcntl.h>
-#include <libgen.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,71 +46,6 @@ static const char *ota_state_name(gd32g553_ota_state_t s)
 {
 	static const char *n[] = { "IDLE", "READY", "BUSY", "VERIFIED", "ERROR" };
 	return (unsigned)s < 5u ? n[s] : "?";
-}
-
-/* ---- sysfs unbind/rebind of the kernel driver holding the address ---- */
-
-static char g_drv[64], g_dev[32], g_bind[128];
-
-static int sysfs_write(const char *path, const char *val)
-{
-	int fd = open(path, O_WRONLY);
-	if (fd < 0) return -1;
-	size_t n  = strlen(val);
-	int    rc = (write(fd, val, n) == (ssize_t)n) ? 0 : -1;
-	if (close(fd) != 0) rc = -1;
-	return rc;
-}
-
-static void kernel_unbind(unsigned bus, unsigned addr)
-{
-	char link[128], tgt[256], path[256];
-	/* Block the signals across the detach so a signal cannot land between the
-	 * sysfs write and the state on_signal() needs to undo it. */
-	sigset_t all, old;
-	sigemptyset(&all);
-	sigaddset(&all, SIGINT);
-	sigaddset(&all, SIGTERM);
-	sigaddset(&all, SIGHUP);
-	sigprocmask(SIG_BLOCK, &all, &old);
-	snprintf(g_dev, sizeof(g_dev), "%u-%04x", bus, addr);
-	snprintf(link, sizeof(link), "/sys/bus/i2c/devices/%s/driver", g_dev);
-	ssize_t n = readlink(link, tgt, sizeof(tgt) - 1);
-	if (n < 0) {
-		printf("unbind: %s has no kernel driver bound\n", g_dev);
-		g_dev[0] = 0;
-		sigprocmask(SIG_SETMASK, &old, NULL);
-		return;
-	}
-	tgt[n] = 0;
-	snprintf(g_drv, sizeof(g_drv), "%s", basename(tgt));
-	snprintf(g_bind, sizeof(g_bind), "/sys/bus/i2c/drivers/%s/bind", g_drv);
-	snprintf(path, sizeof(path), "/sys/bus/i2c/drivers/%s/unbind", g_drv);
-	if (sysfs_write(path, g_dev) != 0) {
-		printf("unbind: %s from %s -> FAILED\n", g_dev, g_drv);
-		g_dev[0] = 0; /* nothing was detached, so nothing to re-bind */
-	} else {
-		printf("unbind: %s from %s -> ok\n", g_dev, g_drv);
-	}
-	sigprocmask(SIG_SETMASK, &old, NULL);
-}
-
-/* SIGINT/SIGTERM/SIGHUP mid-run: re-bind (async-signal-safe calls only) so the
- * bridge is not left without its kernel driver. */
-static void on_signal(int sig)
-{
-	if (g_dev[0] != 0) (void)sysfs_write(g_bind, g_dev);
-	_exit(128 + sig);
-}
-
-static void kernel_rebind(void)
-{
-	if (g_dev[0] == 0) return;
-	printf("rebind: %s to %s -> %s\n",
-	       g_dev,
-	       g_drv,
-	       sysfs_write(g_bind, g_dev) == 0 ? "ok" : "FAILED");
-	g_dev[0] = 0;
 }
 
 /* ---- OTA phases ---- */
@@ -194,7 +128,7 @@ static int usage(void)
 {
 	fprintf(stderr,
 	        "usage: gd32_ota_host --image slot.bin --version M.m.p [--bus 8] [--addr 0x70]\n"
-	        "                     [--unbind] [--no-commit] [--status]\n");
+	        "                     [--no-commit] [--status]\n");
 	return 2;
 }
 
@@ -202,7 +136,7 @@ int main(int argc, char **argv)
 {
 	const char *image = NULL;
 	unsigned    bus = 8, addr = 0x70, vm = 0, vn = 0, vp = 0;
-	int         have_ver = 0, do_unbind = 0, do_commit = 1, status_only = 0;
+	int         have_ver = 0, do_commit = 1, status_only = 0;
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--image") && i + 1 < argc)
@@ -213,8 +147,6 @@ int main(int argc, char **argv)
 			bus = (unsigned)strtoul(argv[++i], NULL, 0);
 		else if (!strcmp(argv[i], "--addr") && i + 1 < argc)
 			addr = (unsigned)strtoul(argv[++i], NULL, 0);
-		else if (!strcmp(argv[i], "--unbind"))
-			do_unbind = 1;
 		else if (!strcmp(argv[i], "--no-commit"))
 			do_commit = 0;
 		else if (!strcmp(argv[i], "--status"))
@@ -246,11 +178,6 @@ int main(int argc, char **argv)
 		fclose(f);
 	}
 
-	signal(SIGINT, on_signal);
-	signal(SIGTERM, on_signal);
-	signal(SIGHUP, on_signal);
-	if (do_unbind) kernel_unbind(bus, addr);
-
 	int        rc = 1;
 	gd32g553_t g;
 	if (open_link(&g, bus, addr)) goto out;
@@ -267,8 +194,7 @@ int main(int argc, char **argv)
 	}
 
 	/* A previous run killed mid-session (SIGINT) leaves the bridge's OTA session open until
-	 * OTA_ABORT.  ERROR is left alone: BEGIN restarts from it.  Never sent from the signal
-	 * handler: it runs here, on the normal path, at startup. */
+	 * OTA_ABORT.  ERROR is left alone: BEGIN restarts from it. */
 	if (before.state == GD32G553_OTA_STATE_READY || before.state == GD32G553_OTA_STATE_BUSY ||
 	    before.state == GD32G553_OTA_STATE_VERIFIED) {
 		printf("stale OTA session (state=%s): sending OTA_ABORT\n", ota_state_name(before.state));
@@ -384,6 +310,8 @@ int main(int argc, char **argv)
 	s = gd32g553_ota_commit(&g);
 	printf("COMMIT: status=%d (IO/TIMEOUT expected: bridge resets before the reply)\n", (int)s);
 	if (s != ALP_OK && s != ALP_ERR_IO && s != ALP_ERR_TIMEOUT) goto out;
+	/* The bridge resets twice and the Wi-Fi chip loses power: brcmfmac cannot recover. */
+	puts("reboot required: reboot the board now (the Wi-Fi chip lost power during COMMIT)");
 
 	/* Bridge resets twice (commit + trial confirm); re-init rides out BUSY. */
 	int up = 0;
@@ -422,7 +350,6 @@ int main(int argc, char **argv)
 	}
 	rc = 0;
 out:
-	kernel_rebind();
 	free(buf);
 	puts(rc == 0 ? "RESULT: PASS" : "RESULT: FAIL");
 	return rc;
