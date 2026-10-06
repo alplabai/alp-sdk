@@ -16,6 +16,7 @@
 #define ALP_BACKENDS_ADC_OPS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include <alp/adc.h>
@@ -54,6 +55,10 @@ struct alp_adc_ops {
 	/* One-shot raw read.  Signed for symmetry with differential
      * mode; single-ended SoCs return non-negative values. */
 	alp_status_t (*read_raw)(alp_adc_backend_state_t *state, int32_t *raw_out);
+
+	/* Optional native burst of n >= 1 back-to-back raw reads.  NULL =
+     * the dispatcher loops read_raw n times. */
+	alp_status_t (*read_raw_n)(alp_adc_backend_state_t *state, int32_t *raw_out, size_t n);
 
 	/* Tear down.  May be NULL for stateless backends. */
 	void (*close)(alp_adc_backend_state_t *state);

@@ -134,12 +134,9 @@ static void reset_call_counters(void)
 	g_ort_open_calls   = 0;
 }
 
-/* The issue's exact repro shape: AUTO resolves to DRP-AI (the only NPU
- * backend compiled in here besides CPU, so resolve_auto() picks it --
- * see that function's #elif ladder), and the caller's blob is ONNX.
- * Must fail INVAL, and DRP-AI's open() must NEVER be called -- the
- * format gate runs before the backend switch dispatches to it. */
-static void test_auto_resolves_to_drpai_and_rejects_onnx_format(void)
+/* AUTO resolves from the model FORMAT: an ONNX blob goes to the CPU/ORT
+ * backend, never into DRP-AI's tar extractor (the original repro). */
+static void test_auto_routes_onnx_format_to_cpu_not_drpai(void)
 {
 	reset_call_counters();
 
@@ -151,13 +148,31 @@ static void test_auto_resolves_to_drpai_and_rejects_onnx_format(void)
 	};
 	alp_inference_t *h = alp_inference_open(&cfg);
 
-	ALP_ASSERT_NULL(h);
-	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_INVAL);
+	ALP_ASSERT_TRUE(h != NULL);
+	ALP_ASSERT_EQ_INT(g_ort_open_calls, 1);
+	ALP_ASSERT_EQ_INT(g_drpai_open_calls, 0);
+	alp_inference_close(h);
+}
+
+/* A format whose NPU is not compiled in (DXNN, no DX-M1 here) is NOSUPPORT
+ * under AUTO -- it never falls through to another backend. */
+static void test_auto_dxnn_without_dxm1_is_nosupport(void)
+{
+	reset_call_counters();
+
+	alp_inference_config_t cfg = {
+		.model_data = k_model,
+		.model_size = sizeof(k_model),
+		.format     = ALP_INFERENCE_MODEL_DXNN,
+		.backend    = ALP_INFERENCE_BACKEND_AUTO,
+	};
+	ALP_ASSERT_NULL(alp_inference_open(&cfg));
+	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_NOSUPPORT);
 	ALP_ASSERT_EQ_INT(g_drpai_open_calls, 0);
 	ALP_ASSERT_EQ_INT(g_ort_open_calls, 0);
 }
 
-/* Same AUTO resolution, but a matching (DRPAI) format -- must still open
+/* Same AUTO resolution to DRP-AI via a DRPAI format -- must still open
  * normally through the resolved backend. */
 static void test_auto_resolves_to_drpai_and_accepts_matching_format(void)
 {
@@ -241,7 +256,8 @@ static void test_explicit_cpu_pin_with_drpai_format_rejected(void)
 
 int main(void)
 {
-	test_auto_resolves_to_drpai_and_rejects_onnx_format();
+	test_auto_routes_onnx_format_to_cpu_not_drpai();
+	test_auto_dxnn_without_dxm1_is_nosupport();
 	test_auto_resolves_to_drpai_and_accepts_matching_format();
 	test_explicit_cpu_pin_with_onnx_still_opens();
 	test_explicit_drpai_pin_with_onnx_rejected();

@@ -52,6 +52,7 @@ from . import libraries as _library_layer
 from . import sdk_compat as _sdk_compat
 from .loader import _library_alias_table
 from .models import BoardProject, OrchestratorError, Slice
+from .ownership import project_m33_overlay
 from .paths import REPO
 from .partition import resolve_storage_partitions
 from .slugs import (
@@ -2114,6 +2115,14 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # only a real Kconfig symbol when THIS slice already switched the module
     # (and CONFIG_LOG) on -- see `_emit_diagnostics`.
     lines.extend(_emit_diagnostics(project, slice_, lines))
+    # Per-product core ownership: Kconfig for the assignable peripherals this
+    # project assigned to this (M33) core -- the board tree carries the nodes
+    # disabled, so only an owning project enables them.
+    own_kconfig = project_m33_overlay(project, slice_.core_id)[1]
+    if own_kconfig:
+        lines.append("# Assignable peripherals owned by this core (board.yaml "
+                     "`ownership:`).")
+        lines.extend(own_kconfig)
 
     return "\n".join(lines) + "\n"
 

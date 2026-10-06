@@ -40,8 +40,9 @@ P64/P65.
 - `src/zephyr/v2n_power_mgmt.c`/`.h`, `CONFIG_ALP_SDK_V2N_POWER_MGMT`, and
   the V2N supervisor's BRD_I2C transport are deleted outright -- the
   CM33's only GD32 transport is SPI now.
-- `chips/da9292`'s driver stays, but `da9292_v2n_m1_enable_deepx_rail()`/
-  `da9292_v2n_base_init()` are documented diagnostic/read-only-only.
+- `chips/da9292`'s driver stays; the V2N helpers
+  `da9292_v2n_m1_enable_deepx_rail()`/`da9292_v2n_base_init()` were later
+  removed (#1165).
 - The generated CM33 Zephyr board files no longer claim RIIC8 (`&i2c8`
   `status = "disabled"`, `alp-i2c0` alias removed;
   `metadata/e1m_modules/v2n/supervisor-links.yaml`'s `brd_i2c` link

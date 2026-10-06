@@ -247,6 +247,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto
     )
     target_compile_features(alp_test_inference_drpai_regression PRIVATE cxx_std_17)
+    # The concurrent-invoke test starts std::threads.
+    find_package(Threads REQUIRED)
+    target_link_libraries(alp_test_inference_drpai_regression PRIVATE Threads::Threads)
 
     add_test(NAME alp_test_inference_drpai_regression
              COMMAND alp_test_inference_drpai_regression)
@@ -337,6 +340,25 @@ target_compile_features(alp_test_inference_format_gate PRIVATE c_std_99)
 
 add_test(NAME alp_test_inference_format_gate
          COMMAND alp_test_inference_format_gate)
+
+# alp_inference_config_t::accel_unit_mask at the dispatcher level (forwarded to
+# the backend, AUTO resolved to DEEPX, pool exhaustion).  Same #include-the-.c
+# technique as alp_test_inference_format_gate, with fake DEEPX hooks.
+add_executable(alp_test_inference_accel_unit_mask_dispatch
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_accel_unit_mask_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+)
+target_include_directories(alp_test_inference_accel_unit_mask_dispatch PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+)
+target_compile_features(alp_test_inference_accel_unit_mask_dispatch PRIVATE c_std_99)
+
+add_test(NAME alp_test_inference_accel_unit_mask_dispatch
+         COMMAND alp_test_inference_accel_unit_mask_dispatch)
 
 # Issue #1254 end-to-end regression: an "onnx" blob_format .alpmodel,
 # decoded by the REAL zcbor-backed alp_model_parse() (src/common/

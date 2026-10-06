@@ -203,3 +203,11 @@ alp_status_t alp_temperature_read_die_milli_c(int32_t *milli_c)
 	return read_milli_c(DEVICE_DT_NAME(DT_ALIAS(die_temp0)), SENSOR_CHAN_DIE_TEMP, milli_c);
 #endif
 }
+
+/* SoC die temperature: only the Linux (Yocto) backend has a source today
+ * (src/yocto/temperature_yocto.c reads the kernel thermal zones). */
+alp_status_t alp_temperature_read_die_milli_c(int32_t *milli_c)
+{
+	if (milli_c == NULL) return ALP_ERR_INVAL;
+	return ALP_ERR_NOSUPPORT;
+}

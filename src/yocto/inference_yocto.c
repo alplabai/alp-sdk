@@ -11,11 +11,12 @@
  * CMake option is on.
  *
  * Backend dispatch (Yocto / V2N-M1 priority)
- *   ALP_INFERENCE_BACKEND_AUTO     -> picks the first compiled-in
- *                                     backend in the SoM preset's
- *                                     `inference.auto_order` (build
- *                                     define ALP_SDK_INFERENCE_AUTO_ORDER),
- *                                     no built-in default.  CPU
+ *   ALP_INFERENCE_BACKEND_AUTO     -> picks the first available real
+ *                                     backend in this order: DEEPX_DX,
+ *                                     ETHOS_U, DRPAI, CPU.  DEEPX_DX
+ *                                     comes first on V2N-M1 builds
+ *                                     because that's the SoM's reason
+ *                                     for shipping a companion NPU; CPU
  *                                     is deliberately LAST -- an
  *                                     NPU-bearing SoM must never
  *                                     silently fall to CPU under AUTO.
@@ -55,12 +56,11 @@
 #include "alp/inference.h"
 
 #include "alp_internal.h"
-#include "backends/inference/alp_model_select.h"
 #include "common/alp_slot_claim.h"
 #include "inference_handle_internal.h"
 
 #ifndef ALP_SDK_MAX_INFERENCE_HANDLES
-#define ALP_SDK_MAX_INFERENCE_HANDLES 2
+#define ALP_SDK_MAX_INFERENCE_HANDLES 4 /* src/yocto/CMakeLists.txt overrides */
 #endif
 
 #ifndef ARRAY_SIZE
@@ -112,7 +112,7 @@ alp_status_t
 alp_inference_deepx_get_output(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
 alp_status_t alp_inference_deepx_invoke(struct alp_inference *h);
 void         alp_inference_deepx_close(struct alp_inference *h);
-alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, unsigned bound);
+alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, uint32_t mask);
 alp_status_t alp_inference_deepx_get_status(struct alp_inference      *h,
                                             alp_deepx_device_status_t *out);
 #endif
@@ -144,60 +144,34 @@ void         alp_inference_ort_close(struct alp_inference *h);
 /* ------------------------------------------------------------------ */
 /* Auto-select policy                                                  */
 /*                                                                     */
-/* On Yocto the prevailing reason for choosing AUTO is "use the NPU   */
-/* on this SoM."  DEEPX_DX wins first on V2N-M1.  Ethos-U / DRP-AI    */
-/* slots land alongside task #14.  CPU (ONNX Runtime) is last: an    */
-/* NPU-bearing SoM must never silently fall to the CPU floor.         */
+/* AUTO resolves from the model FORMAT: each compiled-in backend loads */
+/* exactly one format (see the open() switch below), so the format     */
+/* names the backend and the SoM's NPU set (the PACKAGECONFIG the      */
+/* machine selects) decides whether it is present.  No format is       */
+/* accepted by two backends, so there is no priority ladder to keep.   */
+/* A format whose backend is not compiled in resolves to AUTO, which   */
+/* the caller reports as ALP_ERR_NOSUPPORT -- an NPU-bearing SoM never */
+/* silently falls to CPU for an NPU model.                             */
 /* ------------------------------------------------------------------ */
 
-static bool backend_compiled_in(alp_inference_backend_t be)
+static alp_inference_backend_t resolve_auto(const alp_inference_config_t *cfg)
 {
-	switch (be) {
-#if defined(ALP_SDK_USE_DEEPX_DXM1)
-	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
-		return true;
-#endif
+	switch (cfg->format) {
 #if defined(ALP_SDK_USE_DRPAI_V2N)
-	case ALP_INFERENCE_BACKEND_DRPAI:
-		return true;
+	case ALP_INFERENCE_MODEL_DRPAI:
+		return ALP_INFERENCE_BACKEND_DRPAI;
 #endif
-#if defined(ALP_SDK_USE_ETHOS_U)
-	case ALP_INFERENCE_BACKEND_ETHOS_U:
-		return true;
+#if defined(ALP_SDK_USE_DEEPX_DXM1)
+	case ALP_INFERENCE_MODEL_DXNN:
+		return ALP_INFERENCE_BACKEND_DEEPX_DXM1;
 #endif
 #if defined(ALP_SDK_USE_ORT_CPU)
-	case ALP_INFERENCE_BACKEND_CPU:
-		return true;
+	case ALP_INFERENCE_MODEL_ONNX:
+		return ALP_INFERENCE_BACKEND_CPU;
 #endif
 	default:
-		return false;
+		return ALP_INFERENCE_BACKEND_AUTO; /* signals "nothing available" */
 	}
-}
-
-/* SoM preset `inference.auto_order` (generated build config:
- * -DALP_SDK_INFERENCE_AUTO_ORDER="deepx_dxm1,drpai,cpu"): the first entry
- * compiled into this build wins.  There is no built-in order: a build with
- * none resolves AUTO to "nothing available" and fails loudly.  CPU is
- * deliberately LAST: an NPU-bearing SoM must never silently fall to CPU
- * under AUTO, because that is a 10-100x throughput cliff the caller did not
- * ask for. */
-#if defined(ALP_SDK_INFERENCE_AUTO_ORDER)
-#define ALP_AUTO_ORDER_CSV ALP_SDK_INFERENCE_AUTO_ORDER
-#else
-#define ALP_AUTO_ORDER_CSV ""
-#endif
-
-static alp_inference_backend_t resolve_auto(void)
-{
-	alp_inference_backend_t order[ALP_AUTO_ORDER_MAX];
-	size_t                  n = alp_auto_order_parse(ALP_AUTO_ORDER_CSV, order, ALP_AUTO_ORDER_MAX);
-
-	for (size_t i = 0; i < n; ++i) {
-		if (backend_compiled_in(order[i])) {
-			return order[i];
-		}
-	}
-	return ALP_INFERENCE_BACKEND_AUTO; /* signals "nothing available" */
 }
 
 /* ------------------------------------------------------------------ */
@@ -225,7 +199,7 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 
 	alp_inference_backend_t backend = cfg->backend;
 	if (backend == ALP_INFERENCE_BACKEND_AUTO) {
-		backend = resolve_auto();
+		backend = resolve_auto(cfg);
 		if (backend == ALP_INFERENCE_BACKEND_AUTO) {
 			/* Nothing compiled in.  Honour the v0.1 contract: surface
              * is shipped so apps link cleanly; the runtime answer is
@@ -576,15 +550,17 @@ void alp_inference_close(alp_inference_t *inf)
 /* <alp/ext/deepx/inference.h> (#482)                                  */
 /* ------------------------------------------------------------------ */
 
-alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_cores_t cores)
+alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, uint32_t mask)
 {
-	if (inf == NULL || (unsigned)cores > (unsigned)ALP_DEEPX_NPU_CORES_02) return ALP_ERR_INVAL;
+	if (inf == NULL) return ALP_ERR_INVAL;
 	if (!alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) return ALP_ERR_NOT_READY;
 	alp_status_t rc = ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
 	if (inf->backend == ALP_INFERENCE_BACKEND_DEEPX_DXM1) {
-		rc = alp_inference_deepx_bind_cores(inf, (unsigned)cores);
+		rc = alp_inference_deepx_bind_cores(inf, mask);
 	}
+#else
+	(void)mask;
 #endif
 	alp_handle_op_leave(&inf->active_ops);
 	return rc;

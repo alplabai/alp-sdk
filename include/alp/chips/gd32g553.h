@@ -102,6 +102,10 @@ extern "C" {
  *  back-to-back reads don't lose samples. */
 #define GD32G553_BRIDGE_ADC_STREAM_READ_MAX 32u
 
+/** Highest `sample_rate_hz` @ref gd32g553_adc_stream_begin accepts
+ *  (firmware pacing timer range 1 Hz..100 kHz). */
+#define GD32G553_BRIDGE_ADC_STREAM_MAX_RATE_HZ 100000u
+
 /** Maximum FFT bins per @ref gd32g553_adc_spectrum_read chunk.  Bins are
  *  float32 (4 B); with the 7-byte reply header this keeps the reply
  *  inside the STREAM_READ wire envelope.  Must match the firmware's
@@ -211,6 +215,39 @@ extern "C" {
  *  against them would silently power nothing while reporting success.
  *  See docs/gd32-bridge-protocol.md's version-history table. */
 #define GD32G553_REG_ON_MIN_PROTOCOL_MINOR 11u
+
+/** GPIO expander line carrying the CAN transceiver standby (GD32 pad
+ *  `PB13`).  Valid only on bridges advertising protocol minor
+ *  @ref GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR or newer. */
+#define GD32G553_GPIO_LINE_CAN_STBY 20u
+
+/** Minimum protocol MINOR that implements
+ *  @ref GD32G553_GPIO_LINE_CAN_STBY. */
+#define GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR 13u
+
+/** GPIO expander bridge bit (not the Linux gpiochip line, which is 22)
+ *  carrying E1M IO15 (GD32 pad `PB4`).  Valid only on
+ *  bridges advertising protocol minor
+ *  @ref GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR or newer. */
+#define GD32G553_GPIO_LINE_E1M_IO15 21u
+
+/** GPIO expander bridge bit (not the Linux gpiochip line, which is 23)
+ *  carrying E1M IO26 (GD32 pad `PC2`).  Valid only on
+ *  bridges advertising protocol minor
+ *  @ref GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR or newer. */
+#define GD32G553_GPIO_LINE_E1M_IO26 22u
+
+/** Minimum protocol MINOR at which the bridge's GPIO expander grows from
+ *  21 to 23 lines, adding @ref GD32G553_GPIO_LINE_E1M_IO15 and
+ *  @ref GD32G553_GPIO_LINE_E1M_IO26 (firmware 0.3.1).  A bridge below this
+ *  minor ignores those bits and still answers success, so
+ *  gd32g553_gpio_write() returns `ALP_ERR_NOSUPPORT` for a mask naming
+ *  either bit on such a bridge (likewise for the REG_ON bits below minor
+ *  11 and CAN_STBY, bit 20, below minor 13); gd32g553_gpio_read() drops
+ *  the missing bits (they read 0) and refuses only a mask naming nothing
+ *  else.
+ *  See docs/gd32-bridge-protocol.md's version-history table. */
+#define GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR 15u
 
 /** v0.7 link-feature bits (CMD_LINK_FEATURES payload).  STATUS_SEQ:
  *  once granted, every SPI reply's STATUS byte carries a 4-bit
@@ -375,6 +412,10 @@ typedef struct {
 	uint8_t              seq_last;          /**< Last accepted stamp.    */
 	uint32_t             seq_stale_count;   /**< Stale replies caught +
                                                  recovered (telemetry).  */
+	bool                 version_cached;    /**< @c version is trusted;
+                                                 cleared on re-init, OTA
+                                                 commit/rollback and link
+                                                 errors.                 */
 } gd32g553_t;
 
 /**
@@ -410,11 +451,29 @@ alp_status_t gd32g553_ping(gd32g553_t *ctx);
 /** @brief Probe over a specific transport (overrides ctx->default). */
 alp_status_t gd32g553_ping_via(gd32g553_t *ctx, gd32g553_transport_t t);
 
-/** @brief Read the bridge firmware version (cached at init by
- *         @ref gd32g553_init; this helper re-issues `GET_VERSION` so
- *         the host can confirm the firmware has not been swapped
- *         out-of-band, e.g. across a deep-sleep + OTA cycle). */
+/** @brief Read the bridge firmware version.
+ *
+ * Served from the cache filled by @ref gd32g553_init -- no bus traffic.
+ * The cache is dropped (and this call re-issues `GET_VERSION`) after
+ * re-init, @ref gd32g553_ota_commit / @ref gd32g553_ota_rollback, and any
+ * transport-level error (ALP_ERR_IO / ALP_ERR_TIMEOUT).
+ *
+ * @param ctx  Initialised context.
+ * @param out  Receives the version triple.
+ * @return ALP_OK / ALP_ERR_INVAL, or the transport status on a cache miss.
+ */
 alp_status_t gd32g553_get_version(gd32g553_t *ctx, gd32g553_version_t *out);
+
+/** @brief Re-issue `GET_VERSION` on the wire and refresh the cache.
+ *
+ * Use as a link probe or to confirm the firmware has not been swapped
+ * out-of-band; everyday callers want @ref gd32g553_get_version.
+ *
+ * @param ctx  Context (may be mid-init).
+ * @param out  Receives the version triple.
+ * @return ALP_OK / ALP_ERR_INVAL / the transport or firmware status.
+ */
+alp_status_t gd32g553_refresh_version(gd32g553_t *ctx, gd32g553_version_t *out);
 
 /** @brief Read the bridge firmware's truncated SHA-1 build-id.
  *
@@ -436,10 +495,16 @@ alp_status_t gd32g553_get_reset_reason(gd32g553_t *ctx, gd32g553_reset_cause_t *
  *                 Mapping is documented in gd32-bridge-firmware:README.md;
  *                 the host MUST NOT assume bit `n` is `Pxn`.
  *  @param levels  Output: bit `i` set iff (mask bit i set) and
- *                 (the corresponding pad reads high). */
+ *                 (the corresponding pad reads high).
+ *  @return ALP_OK, or ALP_ERR_NOSUPPORT when @p mask names
+ *          @ref GD32G553_GPIO_LINE_E1M_IO15 / @ref GD32G553_GPIO_LINE_E1M_IO26
+ *          and the bridge's protocol minor is below
+ *          @ref GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR. */
 alp_status_t gd32g553_gpio_read(gd32g553_t *ctx, uint32_t mask, uint32_t *levels);
 
-/** @brief Atomically set/clear masked subset of GD32 pad outputs. */
+/** @brief Atomically set/clear masked subset of GD32 pad outputs.
+ *  @return ALP_OK, or ALP_ERR_NOSUPPORT for the same IO15/IO26 minor gate
+ *          as @ref gd32g553_gpio_read. */
 alp_status_t gd32g553_gpio_write(gd32g553_t *ctx, uint32_t mask, uint32_t levels);
 
 /** @brief Set a PWM channel's period + duty (nanoseconds).

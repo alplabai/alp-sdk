@@ -103,6 +103,20 @@ def test_bad_sha256_fails(tmp_path):
     assert proc.returncode != 0
 
 
+def test_release_version_accepts_rc_rejects_other_suffixes(tmp_path):
+    p = tmp_path / "bundle.json"
+    for good in ("som-0.2.2", "som-0.2.2-rc1", "som-1.0.0-rc12"):
+        b = _valid_bundle()
+        b["release_version"] = good
+        p.write_text(json.dumps(b), encoding="utf-8")
+        assert _run("--bundle", str(p)).returncode == 0, good
+    for bad in ("som-0.2.2-beta", "som-0.2.2-rc", "0.2.2-rc1"):
+        b = _valid_bundle()
+        b["release_version"] = bad
+        p.write_text(json.dumps(b), encoding="utf-8")
+        assert _run("--bundle", str(p)).returncode != 0, bad
+
+
 def test_bad_created_date_fails(tmp_path):
     # format:date must be enforced (format_checker), not just annotated:
     # an impossible date and a timestamp both have to be rejected.
