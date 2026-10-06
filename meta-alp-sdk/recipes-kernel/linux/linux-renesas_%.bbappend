@@ -88,6 +88,7 @@ SRC_URI:append = " \
     file://uio.cfg \
     file://e1m-v2n-doorbell.dtsi \
     file://panic.cfg \
+    file://display-lvds.cfg \
 "
 
 # CM33 -> CA55 doorbell SPI (decision Q52): "404" = MHU-B SWINT unit 12, the
