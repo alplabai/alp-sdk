@@ -71,9 +71,11 @@ BAD_RECOMMENDATIONS += " \
 # = "1" is the dev-only flag that lets a Linux root process rewrite CM33 code
 # memory (non-secure TZC access + remoteproc stop/reload); refuse to build a
 # shipped image with it.  The TF-A it controls is a separate recipe, so also
-# keep the flag out of any local.conf used for production builds.
+# keep the flag out of any local.conf used for production builds. Skip (not
+# bb.fatal) so a dev local.conf with the flag can still parse and build every
+# other recipe; `bitbake alp-image-prod` then reports this reason and stops.
 python () {
     if d.getVar('ALP_V2N_CM33_SRAM_NS') == '1':
-        bb.fatal('ALP_V2N_CM33_SRAM_NS = "1" makes CM33 code memory writable from '
-                 'Linux: dev images only, never alp-image-prod')
+        raise bb.parse.SkipRecipe('ALP_V2N_CM33_SRAM_NS = "1" makes CM33 code memory writable '
+                                  'from Linux: dev images only, never alp-image-prod')
 }

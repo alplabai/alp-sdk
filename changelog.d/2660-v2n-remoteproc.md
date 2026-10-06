@@ -26,7 +26,7 @@ ordered bench plan.
   `alp,rz-attach-only`, and installs `/lib/firmware/m33_sm.elf` through the new
   `alp-cm33-firmware` recipe on `alp-image-edge`. With the flag on, a Linux
   root process can rewrite CM33 code memory: dev images only, and
-  `alp-image-prod` now `bb.fatal`s if it is set, and the TF-A recipe `bb.warn`s on every build that sets it. No provisioning ship-check
+  `alp-image-prod` is skipped (`bb.parse.SkipRecipe`, so other recipes still build) if it is set, and the TF-A recipe `bb.warn`s on every build that sets it. No provisioning ship-check
   yet (the bundle carries no record of the flag).
 - **Window stays put.** The OpenAMP window remains A55 `0x4f700000` / CM33
   `0x9f700000` (9 MiB): Renesas' accepted range `0x40010000`–`0x43EFFFFF`
