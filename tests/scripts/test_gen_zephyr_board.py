@@ -322,7 +322,7 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
             self.assertIn("bias-pull-up;", pin)
             self.assertRegex(yml, r"supported:\s*- gpio\s*- spi\s")
             self.assertNotRegex(yml, r"-\s*(i2c|uart)\b")
-            self.assertIn("CONFIG_UART_INTERRUPT_DRIVEN=y", cfg)
+            self.assertNotRegex(cfg, r"(?m)^CONFIG_UART_INTERRUPT_DRIVEN=")
             self.assertIn("CONFIG_RAM_CONSOLE=y", cfg)
             self.assertIn("zephyr,ram-console = &ram_console;", dts)
             m = re.search(r"ram_console: memory@9f710000 \{(.*?)\};", dts, re.S)
