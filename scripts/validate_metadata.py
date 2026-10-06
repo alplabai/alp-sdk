@@ -2082,6 +2082,13 @@ def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
         if isinstance(gcs, dict):
             _check_pair(gcs.get("silicon_peripheral"), gcs.get("silicon_pad"),
                         f"supervisor_links.{link_name}.gpio_chip_select", expected_core)
+        if link_name == "gd32_pads":
+            # No `pins:` rows: four plain GPIO pads (SWD + ATTN), each a
+            # (silicon_peripheral, silicon_pad) pair that must resolve.
+            for role, pad in sorted(link.items()):
+                if isinstance(pad, dict):
+                    _check_pair(pad.get("silicon_peripheral"), pad.get("silicon_pad"),
+                                f"supervisor_links.gd32_pads.{role}", expected_core)
 
     brd_i2c = links.get("brd_i2c")
     if isinstance(brd_i2c, dict) and "peer_address_7bit" in brd_i2c:

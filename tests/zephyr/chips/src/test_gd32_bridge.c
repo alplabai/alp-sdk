@@ -410,19 +410,9 @@ ZTEST(alp_chips, test_gd32g553_v02_invalid_args)
 
 ZTEST(alp_chips, test_gd32_swd_init_null_args)
 {
-	gd32_swd_t  ctx;
-	alp_gpio_t *bogus = (alp_gpio_t *)0xDEADBEEFu;
-
-	/* NULL ctx -> INVAL.  Even with non-NULL pin handles. */
-	zassert_equal(gd32_swd_init(NULL, bogus, bogus, NULL), ALP_ERR_INVAL);
-	/* NULL swdio -> INVAL. */
-	zassert_equal(gd32_swd_init(&ctx, NULL, bogus, NULL), ALP_ERR_INVAL);
-	/* NULL swclk -> INVAL. */
-	zassert_equal(gd32_swd_init(&ctx, bogus, NULL, NULL), ALP_ERR_INVAL);
-	/* NULL nrst is allowed (boards that don't route it work via
-     * AIRCR.SYSRESETREQ).  Not asserted here -- the gpio_emul-backed
-     * init would still try alp_gpio_configure on the two bogus
-     * pointers, which is not a contract this layer tests. */
+	/* The driver opens its own pads (the portable alp_gpio_open() refuses the
+	 * reserved GD32 pad ids), so the only argument is the context. */
+	zassert_equal(gd32_swd_init(NULL), ALP_ERR_INVAL);
 }
 
 ZTEST(alp_chips, test_gd32_swd_calls_reject_uninitialised)
@@ -743,6 +733,108 @@ ZTEST(alp_chips, test_gd32g553_ota_get_state_v14_peer_decodes_err_cause)
 	              "a >= v0.14 peer must attribute the ERROR to its real cause (gh#101)");
 
 	alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* Protocol v0.15 -- host API contracts that need no SPI bridge model.  */
+/* The byte-level negotiation / READ2 / BATCH / ATTN behaviour (6-byte   */
+/* form + 1-byte fallback, variable-length parse, BATCH validation,      */
+/* ATTN timeout fallback) is pinned against a v0.14/v0.15 SPI model in   */
+/* tests/unit/gd32_protocol_015; this file covers the I2C side of the    */
+/* policy and the argument/NOT_READY surface of the new entry points.    */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32g553_v015_calls_reject_uninitialised)
+{
+	gd32g553_t                  ctx = { 0 };
+	gd32g553_adc_stream2_info_t info;
+	uint32_t                    first, dropped;
+	uint8_t                     got;
+	uint16_t                    codes[4];
+	gd32g553_batch_op_t         op = { .op = GD32G553_CMD_PING };
+
+	zassert_equal(gd32g553_adc_stream_begin2(&ctx, 0u, 0u, 1000u, 0u, &info), ALP_ERR_NOT_READY);
+	zassert_equal(gd32g553_adc_stream_read2(&ctx, 0u, 4u, &first, &dropped, &got, codes),
+	              ALP_ERR_NOT_READY);
+	zassert_equal(gd32g553_batch(&ctx, &op, 1u, NULL), ALP_ERR_NOT_READY);
+	zassert_equal(gd32g553_attn_wait_event(&ctx, 1u), ALP_ERR_NOT_READY);
+	zassert_equal(gd32g553_attn_wait_event(NULL, 1u), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_init_ex(NULL, NULL, NULL, 0u, NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_chips, test_gd32g553_v015_invalid_args)
+{
+	gd32g553_t ctx = { .initialised = true, .max_payload = 252u };
+	uint32_t   first, dropped;
+	uint8_t    got;
+	uint16_t   codes[4];
+
+	zassert_equal(gd32g553_adc_stream_read2(&ctx, 0u, 4u, NULL, &dropped, &got, codes),
+	              ALP_ERR_INVAL);
+	zassert_equal(gd32g553_adc_stream_read2(&ctx, 0u, 4u, &first, &dropped, &got, NULL),
+	              ALP_ERR_INVAL);
+	zassert_equal(gd32g553_adc_stream_read2(
+	                  &ctx, GD32G553_BRIDGE_ADC_STREAM_COUNT, 4u, &first, &dropped, &got, codes),
+	              ALP_ERR_INVAL);
+	zassert_equal(gd32g553_adc_stream_read2(&ctx, 0u, 0u, &first, &dropped, &got, codes),
+	              ALP_ERR_INVAL);
+	zassert_equal(gd32g553_adc_stream_begin2(&ctx, 0u, 0u, 0u, 0u, NULL), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_adc_stream_begin2(&ctx, 0u, 0u, 100001u, 0u, NULL),
+	              ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(gd32g553_adc_stream_begin2(&ctx, 0u, 0u, 1000u, 100u, NULL), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_batch(&ctx, NULL, 1u, NULL), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_batch(&ctx, (gd32g553_batch_op_t[]){ { .op = 0 } }, 0u, NULL),
+	              ALP_ERR_INVAL);
+}
+
+/* An I2C-only link negotiates nothing: the 6-byte LINK_FEATURES form is
+ * SPI-only in practice (I2C grants only STATUS_SEQ, which has no wire effect
+ * there), so init against a v0.15 bridge is still exactly PING + GET_VERSION,
+ * and every v0.15-gated API answers NOSUPPORT without a bus transfer. */
+ZTEST(alp_chips, test_gd32g553_v015_i2c_only_link_negotiates_nothing)
+{
+	fake_gd32bridge_reset();
+	fake_gd32bridge_set_version(GD32G553_HOST_PROTOCOL_MAJOR, 15u, 0u);
+
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	gd32g553_t ctx;
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu), ALP_OK);
+	zassert_equal(fake_gd32bridge_calls_seen(), 2u, "PING + GET_VERSION only -- no LINK_FEATURES");
+	zassert_equal(ctx.granted, 0u);
+	zassert_equal(ctx.max_payload, 65u);
+	zassert_false(ctx.attn_active);
+
+	gd32g553_adc_stream2_info_t info;
+	zassert_equal(gd32g553_adc_stream_begin2(&ctx, 0u, 0u, 1000u, 0u, &info), ALP_ERR_NOSUPPORT);
+	gd32g553_batch_op_t op = { .op = GD32G553_CMD_PING };
+	zassert_equal(gd32g553_batch(&ctx, &op, 1u, NULL), ALP_ERR_NOSUPPORT);
+	zassert_equal(fake_gd32bridge_calls_seen(), 2u, "gated APIs must not reach the bus");
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
+}
+
+/* I2C opcode policy (protocol 0.15 section 5.3): a v0.15 bridge answers any
+ * opcode outside the allow-list with an empty-payload STATUS_NOSUPPORT
+ * (spec vector `i2c_adc_read_ch0_4_write_denied`, read `06`).  The driver
+ * must surface that as ALP_ERR_NOSUPPORT, not as a transport failure. */
+ZTEST(alp_chips, test_gd32g553_v015_i2c_denied_opcode_surfaces_nosupport)
+{
+	fake_gd32bridge_reset();
+	fake_gd32bridge_set_version(GD32G553_HOST_PROTOCOL_MAJOR, 15u, 0u);
+
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	gd32g553_t ctx;
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu), ALP_OK);
+
+	fake_gd32bridge_arm_status_replies(FAKE_GD32BRIDGE_WIRE_STATUS_NOSUPPORT, 1u);
+	uint16_t mv[4];
+	zassert_equal(gd32g553_adc_read(&ctx, 0u, 4u, mv),
+	              ALP_ERR_NOSUPPORT,
+	              "a policy-denied I2C opcode is NOSUPPORT, not IO");
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
 }
 
 /* ------------------------------------------------------------------ */
