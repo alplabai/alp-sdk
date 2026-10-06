@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Sits next to m33_sm/CMakeLists.txt for the same reason rpmsg-v2n's does:
+# only this subtree is a self-contained Zephyr app twister can build.
+
+sample:
+  name: microros-ros2-v2n-m33_sm
+  description: |
+    micro-ROS node on the RZ/V2N Cortex-M33 publishing std_msgs/Int32 over
+    a custom Micro XRCE-DDS transport backed by the ADR 0016 RPMsg
+    endpoint (docs/adr/0035-micro-ros-cross-core-transport.md, Option B).
+    build_only against the real board: like ../rpmsg-v2n/m33_sm it needs
+    the V2N devicetree, the Renesas MHU/FSP driver and open-amp/libmetal,
+    and additionally micro_ros_zephyr_module, whose colcon cross-build
+    needs network access and a ROS 2 build toolchain at configure time.
+    No native_sim variant: the value of this example is the RPMsg link.
+
+tests:
+  alp_sdk.examples.microros_ros2_v2n.m33_sm:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
+    platform_allow:
+      - alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33
+    tags:
+      - alp-sdk
+      - example
+      - multiprocessor
+      - yocto
+      - heterogeneous
+      - rpmsg
+      - micro-ros
+      - v2n
+    build_only: true
