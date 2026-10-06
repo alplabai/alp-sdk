@@ -103,8 +103,10 @@ a rail fault.
 The same sequence exists as an OS-agnostic driver function,
 `da9292_ch2_sequence()` in `chips/da9292/` (caller-opened GPIOs + a delay
 callback; it also checks CH2 OV / OC after P64 goes high, because the OTP
-masks OV out of PG).  Only U-Boot runs it on the A55; do not run it from the
-CM33, which would be a second, uncoordinated writer of the PMIC U-Boot
+masks OV out of PG).  U-Boot patch `0004` carries a standalone port of the same sequence;
+the C function is the OS-agnostic reference, used on the A55 only by the
+guarded `v2n-pmic-inspect --deepx-rail-sequence` bench action. Do not run
+it from the CM33, which would be a second, uncoordinated writer of the PMIC U-Boot
 already programmed.
 
 The DA9292-AROVx OTP enables the EN2 / VSEL2 pin functions (PMC_CFG_00

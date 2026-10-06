@@ -31,6 +31,7 @@ on:
       # missing here until #1997: PR #1996 guarded a tests/yocto/ target
       # behind CMAKE_SYSTEM_NAME and this workflow did not run on it at all.
       - 'tests/**'
+      - 'examples/aen/aen-trace-runner/**'
       - '.github/workflows/pr-plain-cmake.yml'
   push:
     branches: [main, dev]
@@ -41,6 +42,7 @@ on:
       - 'cmake/**'
       - 'meta-alp-sdk/recipes-devtools/zcbor/**'
       - 'tests/**'
+      - 'examples/aen/aen-trace-runner/**'
   workflow_dispatch:
 
 concurrency:
@@ -63,6 +65,23 @@ jobs:
       - name: Build
         timeout-minutes: 3
         run: cmake --build build/baremetal --parallel
+
+  aen-trace-runner-host:
+    # The aen-trace-runner host unit tests (game logic, vision post-processing,
+    # renderer goldens, release interlocks) ran nowhere in CI before this job.
+    # The A32/qemu stage inside runner.sh skips itself when arm-none-eabi-gcc
+    # or qemu-arm is absent.
+    name: plain-cmake · aen-trace-runner host tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
+      - name: Run host tests
+        timeout-minutes: 5
+        run: bash examples/aen/aen-trace-runner/tests/host/runner.sh
 
   baremetal-aen:
     # ALP_OS=baremetal + ALP_SOM=aen activates the vendors/alif/
