@@ -234,7 +234,11 @@ struct rpc_be {
 	size_t          call_resp_len; /* actual response size on the wire */
 	alp_status_t    call_result;
 	bool            call_pending;
-	bool            closing;
+	/* #2586: a call gave up after its request went out; replies match on
+	 * method name only, so later calls refuse (ALP_ERR_NOT_READY) until
+	 * reopen instead of receiving that call's late reply. */
+	bool call_poisoned;
+	bool closing;
 
 	/* Set once by y_shutdown() (see its doc comment), read once by
      * rpc_rx_main()'s epilogue to decide whether THIS channel's single
@@ -707,6 +711,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	ch->dst_ept = cfg->dst_ept != 0u ? cfg->dst_ept : ch->src_ept + 1u;
 	ch->mbox_ch = cfg->mbox_ch != 0u ? cfg->mbox_ch : ALP_RPC_DEFAULT_MBOX_CH;
 	ch->call_pending      = false;
+	ch->call_poisoned     = false;
 	ch->closing           = false;
 	ch->close_from_worker = false;
 	ch->owner             = st->owner;
@@ -1048,7 +1053,7 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
      * call_pending, so y_shutdown()'s single cancel-and-broadcast pass
      * never needs to run again for a call staged after it. */
 	pthread_mutex_lock(&ch->call_mutex);
-	if (ch->closing) {
+	if (ch->closing || ch->call_poisoned) {
 		pthread_mutex_unlock(&ch->call_mutex);
 		pthread_mutex_unlock(&ch->tx_mutex);
 		return ALP_ERR_NOT_READY;
@@ -1110,6 +1115,7 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 		}
 	}
 
+	bool poisoned_now = false;
 	if (ch->closing) {
 		/* Sticky cancel wins regardless of how we got here (a normal
          * wake from y_shutdown()'s broadcast, or the late-staging case
@@ -1117,12 +1123,16 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
          * see this function's doc comment. */
 		ch->call_pending = false;
 		s                = ALP_ERR_NOT_READY;
-	} else if (rc == ETIMEDOUT) {
-		ch->call_pending = false;
-		s                = ALP_ERR_TIMEOUT;
-	} else if (rc != 0) {
-		ch->call_pending = false;
-		s                = ALP_ERR_IO;
+	} else if (ch->call_pending) {
+		/* Timeout or wait error with the request already sent and no
+		 * reply consumed: poison the channel so the late reply can never
+		 * reach a later call (#2586).  A reply that landed while the wait
+		 * reacquired call_mutex cleared call_pending and is returned
+		 * below instead. */
+		ch->call_pending  = false;
+		ch->call_poisoned = true;
+		poisoned_now      = true;
+		s                 = (rc == ETIMEDOUT) ? ALP_ERR_TIMEOUT : ALP_ERR_IO;
 	} else {
 		s = ch->call_result;
 		if (resp_len != NULL && (s == ALP_OK || s == ALP_ERR_NOMEM)) {
@@ -1130,6 +1140,16 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 		}
 	}
 	pthread_mutex_unlock(&ch->call_mutex);
+
+	if (poisoned_now) {
+		fprintf(stderr,
+		        "alp_rpc: call '%s' on channel '%s' got no reply (%s); replies are matched by "
+		        "method name only, so later calls on this channel now fail with "
+		        "ALP_ERR_NOT_READY until it is closed and reopened\n",
+		        method,
+		        ch->name,
+		        s == ALP_ERR_TIMEOUT ? "timeout" : "wait error");
+	}
 
 	pthread_mutex_unlock(&ch->tx_mutex);
 	return s;

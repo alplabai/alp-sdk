@@ -119,7 +119,7 @@ separately — see [`TRADEMARKS.md`](TRADEMARKS.md).)
   (e.g. `src/backends/gpio/cc3501e_proxy.c`,
   `src/backends/soc_info/alif_se.c`), and `firmware/<part>/`.
   Vendored upstream SDKs live under `vendors/<vendor>/` (e.g.
-  `vendors/alif/`, `vendors/gd32_firmware_library/`).  No `#ifdef
+  `vendors/alif/`, `vendors/deepx-dxm1/`).  No `#ifdef
   ALIF_*` in `include/alp/` or `src/common/` -- that boundary is the
   part that still holds.
 

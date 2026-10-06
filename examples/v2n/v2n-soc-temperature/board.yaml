@@ -1,0 +1,26 @@
+# board.yaml -- per-app project configuration for the
+# v2n-soc-temperature example.
+#
+# Reads the SoC die temperature through <alp/temperature.h> from a
+# Linux/Yocto user-space app on the V2N Cortex-A55 cluster.  The kernel
+# owns the on-die TSU units; the app only reads the thermal zones the
+# kernel exposes, so no peripheral is claimed.  See README.md for the
+# A55/Yocto build.
+som:
+  sku: E1M-V2N101
+
+preset: e1m-x-evk
+
+cores:
+  a55_cluster:
+    app: ./src
+    # Linux/Yocto user-space C app; links libalp_sdk.so only.
+    #
+    # No meta-alp-sdk recipe packages this app yet, so `--emit
+    # build-plan` / `tan build` block this slice with a
+    # `yocto-recipe-missing` warning rather than guess a bitbake
+    # target -- add `recipe: <name>` here once one exists.
+    peripherals: []
+
+diagnostics:
+  log_level: info

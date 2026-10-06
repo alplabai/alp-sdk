@@ -1,0 +1,29 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# BENCH-UNVERIFIED.  Renesas RZ/V2N watchdog (WDT0 is the Cortex-M33's own,
+# R_WDT0_BASE 0x41C00400).  Same register layout as the rzt/rzn WDT but NOT bound
+# by upstream `renesas,rz-wdt` (zephyr/drivers/watchdog/wdt_renesas_rz.c), whose
+# only two builds are RZ/A (overflow timer) and RZ/T2M-RZ/N2L (ICU) -- see
+# zephyr/drivers/watchdog/wdt_renesas_rzv.c's header.  A distinct compatible so
+# this never collides with a real `renesas,rz-wdt` node.
+
+description: Renesas RZ/V2N watchdog timer (reset-only, no interrupt line)
+
+compatible: "renesas,rzv-wdt"
+
+include: base.yaml
+
+properties:
+  reg:
+    required: true
+
+  clock-freq:
+    required: true
+    type: int
+    description: |
+      Counting clock of the watchdog in Hz, before the WDTCR divider.  Sets the
+      timeout the driver derives from wdt_install_timeout().  Generated from the
+      SoC spec's m33_sm `watchdog.counting_clock_hz` (24 MHz WDT_0_clk_loco, hardware
+      manual Table 4.4-2); not read back from the CPG and not yet measured on
+      silicon (docs/bench/rzv-wdt0-cm33.md).

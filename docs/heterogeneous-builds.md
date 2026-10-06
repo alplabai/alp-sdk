@@ -268,6 +268,24 @@ Bench-verified on E1M-V2M103 silicon (2026-09-30): all seven devices bind
 `0x10480000`/`0x1000`), `/proc/interrupts` shows `GICv3 436 Level mhu-uio`,
 and `0x4f700000-0x4fffffff` is listed `reserved` in `/proc/iomem`.
 
+The same window also holds the CM33 RAM console: 16 KiB (`0x4000`) at
+CM33-NS `0x9f710000` (A55 view `0x4f710000`), clear of the rsctbl page
+(`0x9f700000..0x9f700fff`, liveness beacon at `0x9f700ff0..0x9f700fff`),
+the mhu-shm page (`0x9f701000..0x9f701fff`) and the vrings (from
+`0x9f800000`). The V2N101 and V2M101 CM33 board trees chose it as
+`zephyr,ram-console` with `CONFIG_RAM_CONSOLE=y`, because the CM33 has no
+UART console. Read it back from Linux after a CM33 boot:
+map `/dev/mem` and copy the buffer out in 32-bit words (a plain `dd`
+`read()` on this `no-map` window fails with `Bad address`):
+
+```sh
+python3 -c "import mmap,os;m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC),0x4000,mmap.MAP_SHARED,mmap.PROT_READ,offset=0x4f710000);print(b''.join(m[i:i+4] for i in range(0,0x4000,4)).rstrip(b'\xff\x00').decode(errors='replace'))"
+```
+
+The board defconfigs set `CONFIG_LOG_PRINTK=n` so printk reaches the
+buffer even when an app enables `CONFIG_LOG`.  Bench-verified on an
+E1M-V2M103: the Zephyr and Alp SDK boot banners read back.
+
 For each `ipc:` entry, `tan build`
 emits a header both halves `#include`:
 
@@ -437,6 +455,21 @@ paired with an `appdir-unrooted` warning rather than silently
 mis-rooted.  Additive under `schemaVersion 1` — see the
 `planPathMode` field in
 [`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json).
+
+**Deferred placeholders (`deferredPlaceholders`, #2696).**  A board.yaml
+value written as `${NAME}` (e.g. `ota.server.tenant: "${MENDER_TENANT_TOKEN}"`)
+is copied verbatim into a slice config artefact for the build host or the
+device to fill (on Zephyr it only ever lands on a commented hint line).  The
+plan does not resolve it and does not promise that anything downstream will.  The plan's top-level `deferredPlaceholders`
+lists those names (always present, `[]` when there are none) so a consumer
+leaves them alone instead of refusing them as unresolved plan tokens.  The
+emitter refuses a plan where such a name collides with a plan token
+(`SDK_ROOT`, `PROJECT_ROOT`, `PYTHON`, `TOOLCHAIN_ROOT`), is not upper-case
+(`[A-Z][A-Z0-9_]*`), does not appear as `${NAME}` in the project's
+board.yaml, sits in a config artefact that is not a `.conf` file (CMake would
+expand it), or appears outside `configArtefacts`.  A placeholder on a *live*
+Zephyr Kconfig line is refused as well: Zephyr does not expand `${NAME}` in a
+fragment, so the firmware would carry the literal text.
 
 Its shape is pinned by
 [`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json);

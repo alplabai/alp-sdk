@@ -100,11 +100,10 @@ config ALP_SDK_CAMERA_V2N_N44_ISP
 	  Sensor pipeline (open / start / stop / capture / release /
 	  close) routes through the same Zephyr drivers/video/ API
 	  the portable zephyr_video backend uses; configure_isp
-	  validates + latches the requested config and returns
-	  ALP_OK -- the matching MMIO writes against the V2N N44
-	  ISP control registers land when the Renesas SoC port
-	  grows the ISP driver per the V2N Hardware User's Manual
-	  r01uh1003ej §18 "Image Signal Processor".
+	  validates the requested config and returns
+	  ALP_ERR_NOSUPPORT -- no ISP register is written (the CM33
+	  FSP has no CRU/CSI-2/ISP module and the A55 owns them;
+	  RZ/V2N Hardware User's Manual R01UH1071EJ0120 section 9.8).
 
 	  Off on non-V2N builds; the zephyr_video backend remains
 	  the default on every other supported SoC.

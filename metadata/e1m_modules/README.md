@@ -47,7 +47,7 @@ Every `E1M-<SKU>.yaml` preset validates against
 tightening the schema sets `additionalProperties: false` and pins
 **one canonical shape** per fact family — `memory:` (module DRAM /
 flash capacities), `on_module:` (incl. `pmic_main` and the
-`i2c_devices` address map), and `inference:` (`preferred_backend`
+`i2c_devices` address map), and `inference:` (`auto_order`
 always; `ethos_u_variant` where applicable — the Ethos-U
 instance list is silicon-derived, not authored) — so
 a preset can no longer carry a misspelled or family-idiosyncratic

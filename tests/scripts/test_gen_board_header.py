@@ -643,15 +643,15 @@ def test_real_xevk_header_covers_i2c_device_macros(real_headers):
     must_define = {
         "XEVK_I2C_ADDR_INA236_3V3": "0x40u",
         "XEVK_I2C_ADDR_INA236_1V8": "0x41u",
-        "XEVK_I2C_ADDR_INA236_VCAM2": "0x48u",
         "XEVK_I2C_ADDR_INA236_VCAM3": "0x49u",
         "XEVK_I2C_ADDR_INA228_5V": "0x42u",
+        "XEVK_INA228_SHUNT_5V_OHMS": "0.100f",
+        "XEVK_INA228_MAX_5V_A": "1.6384f",
+        "XEVK_INA228_ADCRANGE_5V": "0",
         "XEVK_INA236_SHUNT_3V3_OHMS": "0.020f",
         "XEVK_INA236_MAX_3V3_A": "4.0f",
         "XEVK_INA236_SHUNT_1V8_OHMS": "0.020f",
         "XEVK_INA236_MAX_1V8_A": "4.0f",
-        "XEVK_INA236_SHUNT_VCAM2_OHMS": "0.050f",
-        "XEVK_INA236_MAX_VCAM2_A": "1.6f",
         "XEVK_INA236_SHUNT_VCAM3_OHMS": "0.050f",
         "XEVK_INA236_MAX_VCAM3_A": "1.6f",
     }
@@ -775,3 +775,93 @@ def test_schema_rejects_xevk_overlay_pin_macro():
     }
     errors = list(validator.iter_errors(doc))
     assert errors, "XEVK_PIN_* overlay_pins macro must fail schema validation"
+
+
+def _ina228_board(max_a: str, adc_range: str = "163mv", shunt: str = "0.100") -> dict[str, Any]:
+    return {
+        "name": "TEST-INA228",
+        "e1m_routes": {},
+        "i2c_devices": [
+            {
+                "macro": "EVK_I2C_ADDR_MON",
+                "part": "ina228",
+                "address": "0x42",
+                "calibration": {
+                    "shunt_macro": "EVK_INA228_SHUNT_MON_OHMS",
+                    "shunt_ohms": shunt,
+                    "max_macro": "EVK_INA228_MAX_MON_A",
+                    "max_current_a": max_a,
+                    "adc_range_macro": "EVK_INA228_ADCRANGE_MON",
+                    "adc_range": adc_range,
+                },
+            },
+        ],
+    }
+
+
+def test_ina228_scale_macro_follows_adc_range(gen_module):
+    """The INA228 `adc_range` is emitted as the CONFIG.ADCRANGE bit value
+    (0 = 163.84 mV, 1 = 40.96 mV) next to the shunt / max-current macros."""
+    wide = gen_module.emit_board("TEST-INA228", _ina228_board("1.6384", "163mv"))
+    narrow = gen_module.emit_board("TEST-INA228", _ina228_board("0.4096", "40mv"))
+    assert wide is not None and narrow is not None
+    assert dict(re.findall(r"#define\s+(\S+)\s+(\S+)", wide))["EVK_INA228_ADCRANGE_MON"] == "0"
+    assert dict(re.findall(r"#define\s+(\S+)\s+(\S+)", narrow))["EVK_INA228_ADCRANGE_MON"] == "1"
+
+
+def test_ina228_max_current_above_the_range_full_scale_is_rejected(gen_module):
+    """Full scale = range voltage / shunt: 1.6384 A (163mv) or 0.4096 A (40mv)
+    for 100 mOhm.  The boundary passes, anything above fails the generation."""
+    gen_module.emit_board("TEST-INA228", _ina228_board("1.6384", "163mv"))
+    gen_module.emit_board("TEST-INA228", _ina228_board("0.4096", "40mv"))
+    with pytest.raises(SystemExit, match="above the 163mv range's full scale"):
+        gen_module.emit_board("TEST-INA228", _ina228_board("1.6385", "163mv"))
+    with pytest.raises(SystemExit, match="above the 40mv range's full scale"):
+        gen_module.emit_board("TEST-INA228", _ina228_board("0.4097", "40mv"))
+    # The narrow range's limit tracks the shunt: 10 mOhm -> 4.096 A.
+    gen_module.emit_board("TEST-INA228", _ina228_board("4.096", "40mv", shunt="0.010"))
+    with pytest.raises(SystemExit):
+        gen_module.emit_board("TEST-INA228", _ina228_board("4.1", "40mv", shunt="0.010"))
+
+
+def test_schema_rejects_an_unknown_ina228_range_or_a_range_without_its_macro():
+    schema = json.loads(
+        (REPO / "metadata" / "schemas" / "board-preset.schema.json").read_text(encoding="utf-8")
+    )
+    validator = jsonschema.Draft202012Validator(schema)
+
+    def errors(board: dict[str, Any]) -> list[Any]:
+        """Schema errors located inside a `calibration:` block only."""
+        board = {**board, "e1m_routes": {}}
+        return [e for e in validator.iter_errors(board) if "calibration" in list(e.absolute_path)]
+
+    good = _ina228_board("1.6384", "163mv")
+    assert not errors(good)
+    bad_enum = _ina228_board("1.6384", "81mv")
+    assert errors(bad_enum), "an unknown adc_range must fail schema validation"
+    no_macro = _ina228_board("1.6384", "163mv")
+    del no_macro["i2c_devices"][0]["calibration"]["adc_range_macro"]
+    assert errors(no_macro), "adc_range without adc_range_macro must fail schema validation"
+
+
+def test_adc_range_is_rejected_on_a_part_other_than_ina228(gen_module):
+    """`adc_range` is INA228-only: the generator and the schema both refuse it
+    on an `ina236` entry (whose range enum and full scales differ)."""
+    board = _ina228_board("1.0", "163mv")
+    board["i2c_devices"][0]["part"] = "ina236"
+    with pytest.raises(SystemExit, match="INA228-only"):
+        gen_module.emit_board("TEST-INA228", board)
+
+    schema = json.loads(
+        (REPO / "metadata" / "schemas" / "board-preset.schema.json").read_text(encoding="utf-8")
+    )
+    validator = jsonschema.Draft202012Validator(schema)
+    doc = {**board, "e1m_routes": {}}
+    errs = [e for e in validator.iter_errors(doc) if "i2c_devices" in list(e.absolute_path)]
+    assert errs, "adc_range on an ina236 entry must fail schema validation"
+    # The same entry as an ina228 is accepted.
+    doc["i2c_devices"][0]["part"] = "ina228"
+    assert not [e for e in validator.iter_errors(doc) if "i2c_devices" in list(e.absolute_path)]
+    # An entry with no part at all, carrying adc_range, is rejected too.
+    del doc["i2c_devices"][0]["part"]
+    assert [e for e in validator.iter_errors(doc) if "i2c_devices" in list(e.absolute_path)]

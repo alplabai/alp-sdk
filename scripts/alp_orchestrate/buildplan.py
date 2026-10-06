@@ -16,6 +16,7 @@ lazy-imported from the package (they stay inline until orchestrator.py).
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -27,7 +28,7 @@ from .kconfig import (
     _slice_alp_conf,
     _slice_local_conf,
 )
-from .models import BoardProject, Slice
+from .models import BoardProject, OrchestratorError, Slice
 from .paths import REPO
 from .secure import emit_sysbuild_conf, emit_tfm_sysbuild_conf
 
@@ -40,6 +41,89 @@ _EXECUTION_POLICY = {
     "missingTool":    "skip",
     "nullCommand":    "skip",
 }
+
+# The `${NAME}` tokens a plan consumer substitutes in a `planPathMode:
+# tokened` plan.  This emitter writes the first three; tan-cli also resolves
+# TOOLCHAIN_ROOT, so a board.yaml placeholder must not reuse that name either.
+PLAN_PATH_TOKENS = frozenset({"SDK_ROOT", "PROJECT_ROOT", "PYTHON", "TOOLCHAIN_ROOT"})
+
+# Any `${...}` in a plan field, and the names `deferredPlaceholders` may carry
+# (the schema's pattern; tan-cli matches the same).
+_PLAN_REF_RE = re.compile(r"\$\{([^}]*)\}")
+_DEFERRED_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]*")
+
+
+def _deferred_placeholders(
+    slices_out: list[dict[str, Any]],
+    shared: list[dict[str, str]],
+    board_yaml: Path,
+) -> list[str]:
+    """Names of the `${NAME}` placeholders this plan leaves unresolved on
+    purpose (issue #2696), sorted.
+
+    A deferred placeholder is a value the user wrote in board.yaml as
+    `${NAME}` and the planner copied verbatim into a slice config artefact,
+    for the build host or the device to fill
+    (`examples/connectivity/iot-fleet-ota`'s `ota.server.tenant`).  Who fills
+    it, and how, is outside the plan; the list only says the consumer must
+    leave it alone.  Listing
+    them lets a consumer tell them from a plan path token it must substitute,
+    instead of refusing the whole plan as an unresolved token.
+
+    Every other `${...}` is refused here, because a consumer cannot handle it
+    correctly:
+      * a plan path token in a config artefact -- a user value named like
+        `${SDK_ROOT}` would be silently replaced by a checkout path;
+      * a name not written as `${NAME}` in the project's board.yaml -- the
+        planner invented it, and tan would refuse it anyway;
+      * a name outside `[A-Z][A-Z0-9_]*`, the contract's name pattern;
+      * a placeholder in an artefact that is not a `.conf` file -- CMake
+        would expand it itself (the same rule tan-cli#1306 applies);
+      * any non-token `${...}` outside `configArtefacts` (command, env,
+        envAppendPath, appDir, postCommands, sharedArtefacts).
+    """
+    board_text = Path(board_yaml).read_text(encoding="utf-8")
+    deferred: set[str] = set()
+
+    def refuse(where: str, ref: str, why: str) -> None:
+        raise OrchestratorError(
+            f"build plan: `${{{ref}}}` in {where} {why} (issue #2696)")
+
+    for slice_ in slices_out:
+        core = slice_["coreId"]
+        for artefact in slice_["configArtefacts"]:
+            where = f"core '{core}' config artefact `{artefact['path']}`"
+            for ref in _PLAN_REF_RE.findall(artefact["contents"]):
+                if not artefact["path"].endswith(".conf"):
+                    refuse(where, ref, "is in a non-`.conf` artefact, which "
+                                       "its reader (e.g. CMake) would expand "
+                                       "itself -- a placeholder may only "
+                                       "reach a Kconfig fragment or local.conf")
+                if ref in PLAN_PATH_TOKENS:
+                    refuse(where, ref, "is a plan path token: a consumer would "
+                                       "replace it with a checkout path")
+                if not _DEFERRED_NAME_RE.fullmatch(ref):
+                    refuse(where, ref, "is not a valid placeholder name -- "
+                                       "use upper-case letters, digits and "
+                                       "`_`, starting with a letter")
+                if f"${{{ref}}}" not in board_text:
+                    refuse(where, ref, "does not come from board.yaml, so the "
+                                       "planner produced it -- an unresolved "
+                                       "token")
+                deferred.add(ref)
+        rest = {k: slice_[k] for k in ("command", "env", "envAppendPath",
+                                       "appDir", "postCommands")}
+        for ref in _PLAN_REF_RE.findall(json.dumps(rest)):
+            if ref not in PLAN_PATH_TOKENS:
+                refuse(f"core '{core}' command/env/appDir", ref,
+                       "is not a plan path token -- a placeholder may only "
+                       "appear in a config artefact")
+    for artefact in shared:
+        for ref in _PLAN_REF_RE.findall(artefact["contents"]):
+            refuse(f"shared artefact `{artefact['path']}`", ref,
+                   "cannot be resolved -- a placeholder may only appear in a "
+                   "slice config artefact")
+    return sorted(deferred)
 
 
 def _slice_build_dir(build_root: Path, slice_: Slice) -> Path:
@@ -622,6 +706,10 @@ def emit_build_plan(
             },
         })
 
+    shared_out = [
+        {"path": p.as_posix(), "contents": c}
+        for p, c in _shared_artefacts(project, build_root)
+    ]
     plan: dict[str, Any] = {
         "schemaVersion":   1,
         # Additive to schemaVersion 1 (issue #865): every path in this plan
@@ -633,6 +721,12 @@ def emit_build_plan(
         # both this plan's own comparator and a plan consumer use to locate
         # PROJECT_ROOT in the first place.
         "planPathMode":    "tokened",
+        # Additive (issue #2696): the `${NAME}` values left unresolved on
+        # purpose, so a consumer never mistakes one for a plan path token
+        # above. Always present, `[]` when there are none, so a consumer can
+        # tell "none" from a pre-#2696 plan that does not carry the field.
+        "deferredPlaceholders": _deferred_placeholders(
+            slices_out, shared_out, board_yaml),
         "generatedBy":     "scripts/alp_orchestrate.py",
         # Additive provenance (ADR 0014's additive rule -- no schemaVersion
         # bump): traces a cached/materialised plan back to the planner that
@@ -645,10 +739,7 @@ def emit_build_plan(
         "buildRoot":       build_root.as_posix(),
         "executionPolicy": _EXECUTION_POLICY,
         "slices":          slices_out,
-        "sharedArtefacts": [
-            {"path": p.as_posix(), "contents": c}
-            for p, c in _shared_artefacts(project, build_root)
-        ],
+        "sharedArtefacts": shared_out,
         "warnings":        warnings,
     }
     return json.dumps(plan, indent=2) + "\n"

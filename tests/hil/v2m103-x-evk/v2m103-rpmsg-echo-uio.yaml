@@ -13,9 +13,16 @@
 #     uio5 vring-shm1, uio6 mhu-uio.
 #   - The board boots DSW1 mode 2 (xSPI BL2). Under the mode 1 eMMC-boot
 #     BL2 the CM33 never starts (shared page all 0xFF); bench 2026-10-01.
-#   - One attach per CM33 boot: a second attach in the same CM33 boot
-#     times out, then replies arrive one call late. Cold-cycle between
-#     runs (open issue).
+#   - One attach per CM33 boot: cold-cycle between runs. #2586 adds an
+#     attach reset (CM33 beacon version 2 + yocto_uio_drv.c), so a second
+#     attach in the same CM33 boot should work, but it is NOT yet
+#     bench-verified; keep the cold cycle until it is.  Planned check:
+#     after one cold cycle, run this spec twice in the same CM33 boot;
+#     both runs must pass 4/4, and rsctbl+0xFFC (devmem 0x4f700ffc 32)
+#     must read 0x00000001 after the second run.  With version-1 CM33
+#     firmware the second run now fails at alp_rpc_open (ALP_ERR_BUSY,
+#     "still attached from an earlier session") instead of the old
+#     first-call timeout and one-call-late replies.
 # Runbook: examples/multicore/rpmsg-v2n/README.md, "Bench".
 #
 # The example directory is `linux`, so the prebuilt A55 binary must be

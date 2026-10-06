@@ -41,12 +41,19 @@ meta-alp-sdk/
 │       └── include/
 │           └── e1m-v2m-deepx.inc        # Shared DEEPX block `require`d by the three V2M confs above.
 ├── dynamic-layers/
+│   ├── ros2-humble-layer/               # parsed ONLY with upstream meta-ros2-humble in bblayers.
+│   │   ├── recipes-core/packagegroups/packagegroup-alp-ros.bb
+│   │   └── recipes-ros/                 # alp-perception + alp-ros2-temperature nodes (ROS 2 Humble).
 │   ├── meta-alif-ensemble/
 │   │   └── recipes-kernel/linux/
 │   │       └── linux-alif_%.bbappend    # E1M-AEN console routing (parsed only when meta-alif-ensemble is in bblayers.conf).
 │   └── meta-deepx-m1/
-│       └── recipes-runtime/dx-driver/
-│           └── dx-driver_%.bbappend     # Tightens the 99-dx-dma.rules udev MODE (parsed only when meta-deepx-m1 is in bblayers.conf).
+│       └── recipes-runtime/
+│           ├── dx-driver/
+│           │   └── dx-driver_%.bbappend # Tightens the 99-dx-dma.rules udev MODE (parsed only when meta-deepx-m1 is in bblayers.conf).
+│           └── dx-rt/
+│               ├── dx-rt_%.bbappend     # dxrtd service mode, dxrt-cli sub-package fix, and a stderr warning before dxrt-cli -u / -w / -C.
+│               └── dx-rt/alp_fw_warning.cpp  # The warning text (Alp code; the bbappend inserts one call per command).
 ├── recipes-core/
 │   ├── alp-sdk/
 │   │   └── alp-sdk_0.6.bb               # libalp_sdk.so + headers.
@@ -80,9 +87,6 @@ meta-alp-sdk/
 │   ├── alp-image-common.inc            # Shared runtime for both images below.
 │   ├── alp-image-edge.bb                # Dev image: common + debug-tweaks + bench tooling.
 │   └── alp-image-prod.bb               # Production image: hardened, key-only SSH (DISTRO=alp).
-├── recipes-ros/
-│   └── alp-perception/
-│       └── alp-perception_0.6.bb        # examples/v2n/v2n-m1-ros-perception node.
 └── README.md                            # this file
 ```
 
@@ -145,20 +149,19 @@ because V2N silicon support may not yet be on the corresponding
 | `meta-openembedded`                            | <https://github.com/openembedded/meta-openembedded>                            | Standard OE recipe collection.                             |
 | `meta-renesas`                                 | <https://github.com/renesas-rz/meta-renesas>                                   | Renesas RZ base BSP — provides `rzv2n-evk` MACHINE.        |
 | `meta-rz-features/meta-rz-graphics`            | (bundled in `meta-rz-features` under Renesas)                                  | Mali GPU drivers + Weston compositor wiring.               |
-| `meta-rz-features/meta-rz-drpai`               | (bundled in `meta-rz-features`)                                                | **DRP-AI kernel driver + `drpai0` DT label + `<linux/drpai.h>` + `libtvm_runtime.so`** (NOT the whole runtime — see below). |
+| `meta-rz-features/meta-rz-drpai`               | (bundled in `meta-rz-features`)                                                | **DRP-AI kernel driver + `drpai0` DT label + `<linux/drpai.h>`** (NOT the whole runtime — see below). |
 | `meta-rz-features/meta-rz-opencva`             | (bundled in `meta-rz-features`)                                                | OpenCV acceleration via DRP.                               |
 | `meta-rz-features/meta-rz-codecs`              | (bundled in `meta-rz-features`)                                                | Hardware video codec recipes.                              |
 | `meta-econsys`                                 | (bundled; vendored from e-con Systems)                                         | Camera drivers.  Contact e-con Systems for `e-CAM22_CURZH` patch. |
 
-`meta-rz-drpai` does **not** cover all of DRP-AI.  It supplies four
+`meta-rz-drpai` does **not** cover all of DRP-AI.  It supplies three
 things:
 
 1. the DRP-AI kernel driver (its `0002-*` patch),
 2. the `drpai0` DT node + label in `r9a09g056.dtsi` (its
    `0001-add-drpai-property-to-devicetree.patch`) — the label does
    **not** exist in the pristine linux-renesas tree,
-3. the `<linux/drpai.h>` UAPI header (recipe `drpai`, 1.4.0), and
-4. `libtvm_runtime.so` (recipe `lib-tvm`).
+3. the `<linux/drpai.h>` UAPI header (recipe `drpai`, 1.4.0).
 
 Everything else the alp-sdk DRP-AI3 backend compiles and links against
 — `MeraDrpRuntimeWrapper.h`, `mera2_runtime`, `mera2_plan_io`,
@@ -237,13 +240,18 @@ bitbake-layers add-layer ../meta-rz-features/meta-rz-opencva
 bitbake-layers add-layer ../meta-rz-features/meta-rz-codecs
 bitbake-layers add-layer ../meta-econsys
 
-# 4b. ROS 2 layer -- ONLY for images that ship the alp-sdk ROS nodes
-#     (e.g. alp-image-edge).  meta-ros2-humble is a LAYERRECOMMENDS, not
-#     a hard dep: for a lean image (e.g. core-image-minimal) skip this
-#     step and BBMASK the ROS recipes.  It is not in the BSP tarball, so
-#     clone it from upstream meta-ros first:
+# 4b. ROS 2 (opt-in; docs/bring-up-ros2.md).  Upstream meta-ros is not in
+#     the BSP tarball.  Without these layers every alp-image-* still builds,
+#     ROS-free (ALP_ENABLE_ROS2 defaults to 0).  Optional Renesas compat layer
+#     from rzv_ros: add it ONLY together with meta-ros AND meta-rz-graphics
+#     (its bbappends are not dynamic and fail the parse otherwise; its licence
+#     is unasserted upstream -- docs/bring-up-ros2.md).
 git clone -b scarthgap https://github.com/ros/meta-ros ../meta-ros
+bitbake-layers add-layer ../meta-ros/meta-ros-common
+bitbake-layers add-layer ../meta-ros/meta-ros2
 bitbake-layers add-layer ../meta-ros/meta-ros2-humble
+git clone https://github.com/renesas-rz/rzv_ros ../rzv_ros
+bitbake-layers add-layer ../rzv_ros/yocto/meta-rz-features-ros/meta-rzv2-ros-humble
 
 # 5. Add meta-alp-sdk:
 git clone https://github.com/alplabai/alp-sdk ../alp-sdk
@@ -292,11 +300,12 @@ See the edge-vs-prod posture table + `DISTRO=alp` notes in
 
 The one supported command for a ROS 2-carrying image is steps 4b + 7 + 8
 above: `MACHINE = "e1m-v2n101-a55"` (or `e1m-v2m101-a55`), then
-`bitbake alp-image-edge`, with `meta-ros2-humble` added to `bblayers.conf`.
+`bitbake alp-image-edge`, with `meta-ros2-humble` added to `bblayers.conf`
+(`ALP_ENABLE_ROS2` then defaults to `1`).
 `alp-image-edge.bb` turns on `IMAGE_FEATURES += "alp-ros"`, which
 `alp-image-common.inc`'s `FEATURE_PACKAGES_alp-ros` maps to
 `packagegroup-alp-ros` -- whose `RDEPENDS:${PN}` names both `rclcpp` and
-`alp-perception` (`recipes-core/packagegroups/packagegroup-alp-ros.bb`).
+`alp-perception` (`dynamic-layers/ros2-humble-layer/recipes-core/packagegroups/packagegroup-alp-ros.bb`).
 Without a Yocto CI build lane in alp-sdk CI, that dependency chain --
 not a finished image manifest -- is the grounded proof this command puts
 both packages on the rootfs; `tests/scripts/test_library_layer.py`
@@ -428,22 +437,29 @@ dependency of the recipe.
 
 | MACHINE              | NPU backend                          | Runtime source                                                        |
 |----------------------|--------------------------------------|-----------------------------------------------------------------------|
-| `e1m-v2n101-a55`     | DRP-AI3 — node on by default with `meta-rz-drpai`; backend (`PACKAGECONFIG[drpai]`) on when `RUHMI_DRPAI_TVM_DIR` is set; BENCH-UNVERIFIED | kernel driver + `<linux/drpai.h>` + `libtvm_runtime.so` from `meta-rz-drpai`; `mera2_runtime` / `mera2_plan_io` / `drp_tvm_rt` (staged) + `mera_drpai_wrapper` (compiled from `apps/MeraDrpRuntimeWrapper.cpp`) from a built RUHMI checkout |
+| `e1m-v2n101-a55`     | DRP-AI3 — node on by default with `meta-rz-drpai`; backend (`PACKAGECONFIG[drpai]`) on when `RUHMI_DRPAI_TVM_DIR` is set; BENCH-UNVERIFIED | kernel driver + `<linux/drpai.h>` from `meta-rz-drpai`; `mera2_runtime` / `mera2_plan_io` / `drp_tvm_rt` (staged) + `mera_drpai_wrapper` (compiled from `apps/MeraDrpRuntimeWrapper.cpp`) from a built RUHMI checkout |
 | `e1m-v2n102-a55`     | DRP-AI3 — node on by default with `meta-rz-drpai`; backend (`PACKAGECONFIG[drpai]`) on when `RUHMI_DRPAI_TVM_DIR` is set; BENCH-UNVERIFIED | Same as V2N101 (memory variant)                                       |
 | `e1m-v2n103-a55`     | DRP-AI3 — node on by default with `meta-rz-drpai`; backend (`PACKAGECONFIG[drpai]`) on when `RUHMI_DRPAI_TVM_DIR` is set; BENCH-UNVERIFIED | Same as V2N101 (memory variant)                                       |
 | `e1m-v2m101-a55`     | DRP-AI3 — node on by default with `meta-rz-drpai`; backend (`PACKAGECONFIG[drpai]`) on when `RUHMI_DRPAI_TVM_DIR` is set; BENCH-UNVERIFIED + DEEPX DX-M1 — opt-in (`ALP_ENABLE_DEEPX_DXM1`) | DRP-AI3 as above; `dx-driver`/`dx-rt` via `meta-deepx-m1` (`ALP_ENABLE_DEEPX_DXM1`) |
 | `e1m-v2m102-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
 | `e1m-v2m103-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
+
 | `e1m-nx9101-a55`     | Ethos-U65                            | NXP i.MX 93 Ethos-U userspace via the image                           |
 | `e1m-aen801-a32`     | Ethos-U85 + 2x U55                   | Ethos-U path inside the alp-sdk library                               |
 | `e1m-aen701-a32`     | 2x Ethos-U55                         | Ethos-U path inside the alp-sdk library                               |
+
+The Mali-G31 GPU backend of `<alp/gpu2d.h>` (`PACKAGECONFIG[gles]`) is on for
+the six RZ/V2N machines (`e1m-v2n101-a55`, `e1m-v2n102-a55`, `e1m-v2n103-a55`,
+`e1m-v2m101-a55`, `e1m-v2m102-a55`, `e1m-v2m103-a55`) when the Renesas
+`meta-rz-graphics` layer is in `bblayers.conf`; see
+[`docs/v2n-mali-gpu.md`](../docs/v2n-mali-gpu.md).
 
 See `docs/bring-up-drpai-v2n.md` section 4 for the full DRP-AI3 two-switch
 contract (what each of `ALP_ENABLE_DRPAI` / `PACKAGECONFIG[drpai]` actually
 controls -- `ALP_ENABLE_DRPAI` gates the `&drpai0` devicetree node and,
 `alp-image-edge` only, the demo install; `PACKAGECONFIG[drpai]` compiles the
-SDK backend; neither installs the `lib-tvm` + `kernel-module-mmngr`
-userspace pair, which is `alp-image-common.inc`'s job -- and what omitting
+SDK backend; neither installs the `kernel-module-mmngr`
+userspace package, which is `alp-image-common.inc`'s job -- and what omitting
 either switch does).
 
 Customer apps still pick the active backend per-handle at runtime via
@@ -469,7 +485,7 @@ gated on the layer's `BBFILE_COLLECTIONS` name (not on `MACHINE`, so
 builds that legitimately drop the RZ/V feature layers still parse):
 
 - **Runtime (target rootfs):** `alp-image-common.inc` installs
-  `lib-tvm` + `kernel-module-mmngr` into every `alp-image-*` build —
+  `kernel-module-mmngr` into every `alp-image-*` build —
   the DRP-AI3 userspace runtime the `<alp/inference.h>` Yocto backend
   dispatches into at runtime.
 - **SDK sysroot headers (`populate_sdk`):** `alp-image-common.inc`
@@ -491,8 +507,7 @@ install it on their workstation and ship the compiled output
 as a model asset.
 
 The image build needs more than `meta-rz-drpai` alone.  That layer
-supplies `<linux/drpai.h>` (recipe `drpai`) and `libtvm_runtime.so`
-(recipe `lib-tvm`), but the rest of the MERA2 runtime closure is
+supplies `<linux/drpai.h>` (recipe `drpai`), but the rest of the MERA2 runtime closure is
 staged by `recipes-renesas/mera2-drpai-tvm`, which reads it out of a
 BUILT `rzv_drp-ai_tvm` (RUHMI) checkout the builder points at with
 `RUHMI_DRPAI_TVM_DIR`.  That recipe fetches and vendors nothing.  All

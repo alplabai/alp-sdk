@@ -176,7 +176,7 @@ unusable -- empty, truncated above its `hw_revisions:` block, a bare
 scalar, or not valid YAML -- is refused by name rather than treated as
 absent, so a damaged table cannot silently skip the `--default-hw-rev`
 cross-check (alplabai/tan-cli#563).  The generated
-`preferred_backend: tbd` placeholder passes
+`auto_order: [tbd]` placeholder passes
 `scripts/check_inference_backend_parity.py` only while the preset
 declares `status.preliminary: true` -- replace `tbd` with the real
 silicon backend before clearing the flag.  Use `--dry-run` to see the

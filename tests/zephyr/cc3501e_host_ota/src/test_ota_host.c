@@ -90,6 +90,7 @@ static struct {
 	 * from ota_state on purpose: the whole point of the field is that it
 	 * stays true when the RAM session does not. */
 	uint8_t  ota_pending;
+	uint32_t promote_count; /* OTA_PROMOTE frames seen (#2728) */
 	uint32_t ota_total;  /* total_len from BEGIN     */
 	uint32_t ota_cursor; /* bytes accepted so far    */
 
@@ -194,6 +195,11 @@ static void slave_dispatch(void)
 		} else {
 			stage_status(ALP_CC3501E_RESP_ERR_NOT_READY);
 		}
+		break;
+	}
+	case ALP_CC3501E_CMD_OTA_PROMOTE: {
+		slave.promote_count++;
+		stage_status(ALP_CC3501E_RESP_OK);
 		break;
 	}
 	case ALP_CC3501E_CMD_OTA_ABORT: {
@@ -437,10 +443,11 @@ ZTEST(cc3501e_host_ota, test_write_encodes_offset_and_data)
 	zassert_mem_equal(slave.image, expect, 8u, "image reassembled in order");
 }
 
-/* #1818: a polled peer (update mode) gets a large buffer as <= 64 B frames at
- * advancing offsets; a 1024 B write is 16 frames and the image lands in order.
+/* #1818, #2728: a polled peer (update mode) gets a large buffer as <= 16 B
+ * frames at advancing offsets; a 1024 B write is 64 frames and the image lands
+ * in order.
  * Outside update mode the same write is one frame. */
-ZTEST(cc3501e_host_ota, test_polled_write_splits_into_64b_frames_1818)
+ZTEST(cc3501e_host_ota, test_polled_write_splits_into_16b_frames_2728)
 {
 	static uint8_t blob[1024];
 	for (size_t i = 0; i < sizeof blob; i++) {
@@ -450,17 +457,17 @@ ZTEST(cc3501e_host_ota, test_polled_write_splits_into_64b_frames_1818)
 	zassert_equal(cc3501e_ota_begin(&fw, sizeof blob, 100u), ALP_OK, "BEGIN");
 	slave.write_frames = 0u;
 	zassert_equal(cc3501e_ota_write(&fw, 0u, blob, sizeof blob, 100u), ALP_OK, "1024 B WRITE");
-	zassert_equal(slave.write_frames, 16u, "16 frames of 64 B");
-	zassert_equal(slave.write_max_req_len, 4u + CC3501E_POLLED_OTA_CHUNK, "frame <= 4 + 64 B");
+	zassert_equal(slave.write_frames, 64u, "64 frames of 16 B");
+	zassert_equal(slave.write_max_req_len, 4u + CC3501E_POLLED_OTA_CHUNK, "frame <= 4 + 16 B");
 	zassert_equal(slave.ota_cursor, sizeof blob, "cursor at end");
 	zassert_mem_equal(slave.image, blob, sizeof blob, "image in order (offsets advanced)");
 
-	/* Non-multiple tail: 130 B -> 64 + 64 + 2. */
+	/* Non-multiple tail: 130 B -> 8 x 16 + 2. */
 	slave_reset();
 	zassert_equal(cc3501e_ota_begin(&fw, 130u, 100u), ALP_OK, "BEGIN 130");
 	slave.write_frames = 0u;
 	zassert_equal(cc3501e_ota_write(&fw, 0u, blob, 130u, 100u), ALP_OK, "130 B WRITE");
-	zassert_equal(slave.write_frames, 3u, "64 + 64 + 2");
+	zassert_equal(slave.write_frames, 9u, "8 x 16 + 2");
 	zassert_mem_equal(slave.image, blob, 130u, "tail intact");
 }
 
@@ -553,6 +560,8 @@ ZTEST(cc3501e_host_ota, test_update_streams_full_blob_and_stages)
 	zassert_equal(slave.image_len, (uint32_t)sizeof blob, "every byte streamed");
 	zassert_mem_equal(slave.image, blob, sizeof blob, "reassembled image == source blob");
 	zassert_equal(slave.ota_state, ALP_CC3501E_OTA_STATE_STAGED, "ends STAGED");
+	/* #2728: the swap must be requested in the same boot as FINISH. */
+	zassert_equal(slave.promote_count, 1u, "PROMOTE issued once, right after FINISH");
 }
 
 /* #1610 hold-off, HAPPY path: the device answers BUSY for a whole window while
