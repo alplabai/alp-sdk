@@ -22,7 +22,7 @@ topics with ROS 2 on the Cortex-A55 (Yocto). What exists today:
   `cfbddc5e4334317a1036e883ce8f6af12b1da66a`, #370/#371), enabled by
   `CONFIG_MICROROS=y`. `metadata/libraries/micro-ros.yaml` is Tier B.
 - ROS 2 Humble on the A side is grounded in `meta-alp-sdk`
-  (`recipes-ros/alp-perception`). No micro-ROS **agent** is packaged; #372 is
+  (`dynamic-layers/ros2-humble-layer/recipes-ros/alp-perception`). No micro-ROS **agent** is packaged; #372 is
   the live blocker for the image path.
 - The A55<->M33 channel: `<alp/rpc.h>` (`alp_rpc_call` / `alp_rpc_send`,
   payload `method\0bytes`, opaque to the SDK), the ADR 0016 wire contract,

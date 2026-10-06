@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>alp_som_temperature</name>
+  <version>0.6.0</version>
+  <description>
+    Minimal Alp SDK + ROS 2 node: publishes the SoM's on-module temperature
+    (portable alp_temperature_read_milli_c) and the SoC die temperature as sensor_msgs/Temperature.
+    Teaching example -- uses only the portable alp/* API.
+  </description>
+
+  <maintainer email="contact@alplab.ai">Alp Lab AB</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
