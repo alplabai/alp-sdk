@@ -740,7 +740,7 @@ def test_dry_run_lists_every_check_and_touches_nothing(tmp_path):
     ctx, unit = _setup(tmp_path, fixtures={}, execute=False)
     res = steps.run_steps(ctx, only=["functional_test"])
     ft = res[-1]
-    assert ft.status == "planned" and "would run 74 functional checks, estimated" in ft.detail
+    assert ft.status == "planned" and "would run 75 functional checks, estimated" in ft.detail
     assert unit.commands == [] and not unit.files
     assert any(c.startswith("WOULD: eth_phy_id: both PHYs answer on MDIO") for c in ft.commands)
     assert any("[skipped: no fixture wifi_ap]" in c for c in ft.commands)
