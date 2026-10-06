@@ -273,7 +273,7 @@ extern "C" {
  *
  * Trailing comment = E1M-X connector pad (x-v1.json) -> V2N routing.
  * IO33's pad exists on x-v1.0 but has no V2N route. */
-#define ALP_E1M_X_GPIO_IO26 26u  /**< pad F64 */
+#define ALP_E1M_X_GPIO_IO26 26u  /**< pad F64  */
 #define ALP_E1M_X_GPIO_IO27 27u  /**< pad AN63 -> V2N PB11 via GD32 IO MCU */
 #define ALP_E1M_X_GPIO_IO28 28u  /**< pad AN64 -> V2N PE9  via GD32 IO MCU */
 #define ALP_E1M_X_GPIO_IO29 29u  /**< pad AO63 -> V2N PD11 via GD32 IO MCU */

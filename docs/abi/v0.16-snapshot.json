@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-05",
+  "generated": "2026-10-06",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1399,10 +1399,6 @@
           "hash": "db2f615e7a9f47af",
           "value": "0x40u"
         },
-        "XEVK_I2C_ADDR_INA236_VCAM2": {
-          "hash": "54c31cdcf2773108",
-          "value": "0x48u"
-        },
         "XEVK_I2C_ADDR_INA236_VCAM3": {
           "hash": "8398c2143398040c",
           "value": "0x49u"
@@ -1435,6 +1431,18 @@
           "hash": "bcf0934921854bb9",
           "value": "ALP_E1M_X_I2S0"
         },
+        "XEVK_INA228_ADCRANGE_5V": {
+          "hash": "ee8820caaa6bd18a",
+          "value": "0"
+        },
+        "XEVK_INA228_MAX_5V_A": {
+          "hash": "f3b5c1c9c06f806b",
+          "value": "1.6384f"
+        },
+        "XEVK_INA228_SHUNT_5V_OHMS": {
+          "hash": "dab30a657cadeda6",
+          "value": "0.100f"
+        },
         "XEVK_INA236_MAX_1V8_A": {
           "hash": "e731d428bed9c0fa",
           "value": "4.0f"
@@ -1442,10 +1450,6 @@
         "XEVK_INA236_MAX_3V3_A": {
           "hash": "230bcba87b062cad",
           "value": "4.0f"
-        },
-        "XEVK_INA236_MAX_VCAM2_A": {
-          "hash": "c59a2d78669ccdab",
-          "value": "1.6f"
         },
         "XEVK_INA236_MAX_VCAM3_A": {
           "hash": "e26ab29d67af4a26",
@@ -1458,10 +1462,6 @@
         "XEVK_INA236_SHUNT_3V3_OHMS": {
           "hash": "88f3faeabe5c8b6e",
           "value": "0.020f"
-        },
-        "XEVK_INA236_SHUNT_VCAM2_OHMS": {
-          "hash": "b15eb3300a05111b",
-          "value": "0.050f"
         },
         "XEVK_INA236_SHUNT_VCAM3_OHMS": {
           "hash": "9a8467d4d73bb732",
@@ -4628,9 +4628,25 @@
           "hash": "07af629c5c4972e8",
           "value": "20u"
         },
+        "GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR": {
+          "hash": "09d542540eed64a5",
+          "value": "13u"
+        },
         "GD32G553_GPIO_LINE_BT_REG_ON": {
           "hash": "a26a002ced48af2e",
           "value": "18u"
+        },
+        "GD32G553_GPIO_LINE_CAN_STBY": {
+          "hash": "2c0caf768c997369",
+          "value": "20u"
+        },
+        "GD32G553_GPIO_LINE_E1M_IO15": {
+          "hash": "da5265d7e1b745f7",
+          "value": "21u"
+        },
+        "GD32G553_GPIO_LINE_E1M_IO26": {
+          "hash": "dc1f5452a35a683a",
+          "value": "22u"
         },
         "GD32G553_GPIO_LINE_WL_REG_ON": {
           "hash": "02b7262b21b3b00f",
@@ -4639,6 +4655,10 @@
         "GD32G553_HOST_PROTOCOL_MAJOR": {
           "hash": "8cbf9804b6cc9204",
           "value": "0u"
+        },
+        "GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR": {
+          "hash": "6146719067cb04dc",
+          "value": "15u"
         },
         "GD32G553_LINK_FEAT_ADC_STREAM2": {
           "hash": "3d4c2f35654db723",
@@ -5578,6 +5598,233 @@
             "bool initialised"
           ],
           "hash": "e48122b33ff474de",
+          "kind": "struct"
+        }
+      },
+      "variables": {}
+    },
+    "alp/chips/ina228.h": {
+      "functions": {
+        "ina228_calibration_for": {
+          "hash": "3ac963876ed16c52",
+          "signature": "alp_status_t ina228_calibration_for(uint32_t shunt_micro_ohms, uint32_t max_current_ua, ina228_adcrange_t adcrange, uint16_t *shunt_cal_out, uint64_t *lsb_pa_out);"
+        },
+        "ina228_check_over_range": {
+          "hash": "ad9c53625f1b4925",
+          "signature": "alp_status_t ina228_check_over_range(ina228_t *ctx, bool *over_out);"
+        },
+        "ina228_configure": {
+          "hash": "75fd8225d1943cce",
+          "signature": "alp_status_t ina228_configure(ina228_t *ctx, ina228_avg_t avg, ina228_ct_t vbusct, ina228_ct_t vshct, ina228_ct_t vtct, ina228_mode_t mode);"
+        },
+        "ina228_deinit": {
+          "hash": "4b2658c887774acd",
+          "signature": "void ina228_deinit(ina228_t *ctx);"
+        },
+        "ina228_full_scale_ua": {
+          "hash": "b655fb5b94ced61f",
+          "signature": "uint64_t ina228_full_scale_ua(uint32_t shunt_micro_ohms, ina228_adcrange_t adcrange);"
+        },
+        "ina228_init": {
+          "hash": "ac570d51a1fc66b4",
+          "signature": "alp_status_t ina228_init(ina228_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, uint32_t shunt_micro_ohms, uint32_t max_current_ua, ina228_adcrange_t adcrange);"
+        },
+        "ina228_pick_adcrange": {
+          "hash": "5f3983a09345cc38",
+          "signature": "alp_status_t ina228_pick_adcrange(uint32_t shunt_micro_ohms, uint32_t max_current_ua, ina228_adcrange_t *range_out);"
+        },
+        "ina228_read_bus_uv": {
+          "hash": "21ef2a269cbed5ec",
+          "signature": "alp_status_t ina228_read_bus_uv(ina228_t *ctx, int32_t *uv_out);"
+        },
+        "ina228_read_charge_uc": {
+          "hash": "98de8a6d2fdd108b",
+          "signature": "alp_status_t ina228_read_charge_uc(ina228_t *ctx, int64_t *uc_out);"
+        },
+        "ina228_read_current_ua": {
+          "hash": "415e270fa0bf8aad",
+          "signature": "alp_status_t ina228_read_current_ua(ina228_t *ctx, int32_t *ua_out);"
+        },
+        "ina228_read_diag": {
+          "hash": "327dea0df46a0eb7",
+          "signature": "alp_status_t ina228_read_diag(ina228_t *ctx, uint16_t *flags_out);"
+        },
+        "ina228_read_energy_uj": {
+          "hash": "7aa6a0270580c029",
+          "signature": "alp_status_t ina228_read_energy_uj(ina228_t *ctx, uint64_t *uj_out);"
+        },
+        "ina228_read_power_uw": {
+          "hash": "510050b4ab67268f",
+          "signature": "alp_status_t ina228_read_power_uw(ina228_t *ctx, uint64_t *uw_out);"
+        },
+        "ina228_read_shunt_uv": {
+          "hash": "46e02f129aa24eec",
+          "signature": "alp_status_t ina228_read_shunt_uv(ina228_t *ctx, int32_t *uv_out);"
+        },
+        "ina228_read_temp_mdegc": {
+          "hash": "740ba6ecff2aab84",
+          "signature": "alp_status_t ina228_read_temp_mdegc(ina228_t *ctx, int32_t *mdegc_out);"
+        },
+        "ina228_reset": {
+          "hash": "1d327beefa0f1413",
+          "signature": "alp_status_t ina228_reset(ina228_t *ctx);"
+        },
+        "ina228_reset_accumulators": {
+          "hash": "a679c160d778dd1b",
+          "signature": "alp_status_t ina228_reset_accumulators(ina228_t *ctx);"
+        },
+        "ina228_set_shunt_range": {
+          "hash": "a5b8722ef27a9924",
+          "signature": "alp_status_t ina228_set_shunt_range(ina228_t *ctx, ina228_adcrange_t adcrange, uint32_t max_current_ua);"
+        }
+      },
+      "macros": {
+        "INA228_ADDR_MAX": {
+          "hash": "759cccc09d75b0d1",
+          "value": "0x4Fu"
+        },
+        "INA228_ADDR_MIN": {
+          "hash": "e3604dfd69486602",
+          "value": "0x40u"
+        },
+        "INA228_DIAG_BUSOL": {
+          "hash": "e5d07162c5e702bc",
+          "value": "(1u << 4)"
+        },
+        "INA228_DIAG_BUSUL": {
+          "hash": "5c16d8c2fc1e58d7",
+          "value": "(1u << 3)"
+        },
+        "INA228_DIAG_CHARGEOF": {
+          "hash": "fd1d391f86e8aebc",
+          "value": "(1u << 10)"
+        },
+        "INA228_DIAG_CNVRF": {
+          "hash": "cf7cfba99b7bb019",
+          "value": "(1u << 1)"
+        },
+        "INA228_DIAG_ENERGYOF": {
+          "hash": "69ad495228f5360e",
+          "value": "(1u << 11)"
+        },
+        "INA228_DIAG_MATHOF": {
+          "hash": "ea093df819b20db8",
+          "value": "(1u << 9)"
+        },
+        "INA228_DIAG_MEMSTAT": {
+          "hash": "a8271b2dc492959e",
+          "value": "(1u << 0)"
+        },
+        "INA228_DIAG_POL": {
+          "hash": "3849fb7a29e3204b",
+          "value": "(1u << 2)"
+        },
+        "INA228_DIAG_SHNTOL": {
+          "hash": "1b3bb1709b6966cf",
+          "value": "(1u << 6)"
+        },
+        "INA228_DIAG_SHNTUL": {
+          "hash": "f0baeb827be13a2c",
+          "value": "(1u << 5)"
+        },
+        "INA228_DIAG_TMPOL": {
+          "hash": "65dce04557d4f78e",
+          "value": "(1u << 7)"
+        },
+        "INA228_DIE_ID": {
+          "hash": "d23637dd0f7cac01",
+          "value": "0x228u"
+        },
+        "INA228_ERR_NOT_PRESENT": {
+          "hash": "46e77fb8c833d023",
+          "value": "ALP_ERR_NOT_FOUND"
+        },
+        "INA228_MAX_CURRENT_LIMIT_UA": {
+          "hash": "22953821a0ac2b00",
+          "value": "1000000000u"
+        },
+        "INA228_MFG_ID": {
+          "hash": "2c014856d38a52b5",
+          "value": "0x5449u"
+        },
+        "INA228_SATURATION_COUNTS": {
+          "hash": "dfead3c23c21363c",
+          "value": "8"
+        }
+      },
+      "typedefs": {
+        "ina228_adcrange_t": {
+          "definition": "typedef enum { INA228_ADCRANGE_163MV = 0, INA228_ADCRANGE_40MV = 1, } ina228_adcrange_t;",
+          "enumerators": [
+            "INA228_ADCRANGE_163MV = 0",
+            "INA228_ADCRANGE_40MV = 1"
+          ],
+          "hash": "78e5b7d1c1d78353",
+          "kind": "enum"
+        },
+        "ina228_avg_t": {
+          "definition": "typedef enum { INA228_AVG_1 = 0, INA228_AVG_4 = 1, INA228_AVG_16 = 2, INA228_AVG_64 = 3, INA228_AVG_128 = 4, INA228_AVG_256 = 5, INA228_AVG_512 = 6, INA228_AVG_1024 = 7, } ina228_avg_t;",
+          "enumerators": [
+            "INA228_AVG_1 = 0",
+            "INA228_AVG_4 = 1",
+            "INA228_AVG_16 = 2",
+            "INA228_AVG_64 = 3",
+            "INA228_AVG_128 = 4",
+            "INA228_AVG_256 = 5",
+            "INA228_AVG_512 = 6",
+            "INA228_AVG_1024 = 7"
+          ],
+          "hash": "6bb46c5de2ba3c7e",
+          "kind": "enum"
+        },
+        "ina228_ct_t": {
+          "definition": "typedef enum { INA228_CT_50US = 0, INA228_CT_84US = 1, INA228_CT_150US = 2, INA228_CT_280US = 3, INA228_CT_540US = 4, INA228_CT_1052US = 5, INA228_CT_2074US = 6, INA228_CT_4120US = 7, } ina228_ct_t;",
+          "enumerators": [
+            "INA228_CT_50US = 0",
+            "INA228_CT_84US = 1",
+            "INA228_CT_150US = 2",
+            "INA228_CT_280US = 3",
+            "INA228_CT_540US = 4",
+            "INA228_CT_1052US = 5",
+            "INA228_CT_2074US = 6",
+            "INA228_CT_4120US = 7"
+          ],
+          "hash": "1f27485bd8f93dda",
+          "kind": "enum"
+        },
+        "ina228_mode_t": {
+          "definition": "typedef enum { INA228_MODE_SHUTDOWN = 0x0, INA228_MODE_BUS_TRIG = 0x1, INA228_MODE_SHUNT_TRIG = 0x2, INA228_MODE_SHUNT_BUS_TRIG = 0x3, INA228_MODE_TEMP_TRIG = 0x4, INA228_MODE_ALL_TRIG = 0x7, INA228_MODE_SHUTDOWN_ALT = 0x8, INA228_MODE_BUS_CONT = 0x9, INA228_MODE_SHUNT_CONT = 0xA, INA228_MODE_SHUNT_BUS_CONT = 0xB, INA228_MODE_TEMP_CONT = 0xC, INA228_MODE_ALL_CONT = 0xF, } ina228_mode_t;",
+          "enumerators": [
+            "INA228_MODE_SHUTDOWN = 0x0",
+            "INA228_MODE_BUS_TRIG = 0x1",
+            "INA228_MODE_SHUNT_TRIG = 0x2",
+            "INA228_MODE_SHUNT_BUS_TRIG = 0x3",
+            "INA228_MODE_TEMP_TRIG = 0x4",
+            "INA228_MODE_ALL_TRIG = 0x7",
+            "INA228_MODE_SHUTDOWN_ALT = 0x8",
+            "INA228_MODE_BUS_CONT = 0x9",
+            "INA228_MODE_SHUNT_CONT = 0xA",
+            "INA228_MODE_SHUNT_BUS_CONT = 0xB",
+            "INA228_MODE_TEMP_CONT = 0xC",
+            "INA228_MODE_ALL_CONT = 0xF"
+          ],
+          "hash": "32d5627a94a8158c",
+          "kind": "enum"
+        },
+        "ina228_t": {
+          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; uint32_t shunt_micro_ohms; uint32_t max_current_ua; uint16_t shunt_cal; uint64_t current_lsb_pa; uint16_t config_cache; ina228_adcrange_t adcrange; } ina228_t;",
+          "fields": [
+            "bool initialised",
+            "alp_i2c_t *bus",
+            "uint8_t addr",
+            "uint32_t shunt_micro_ohms",
+            "uint32_t max_current_ua",
+            "uint16_t shunt_cal",
+            "uint64_t current_lsb_pa",
+            "uint16_t config_cache",
+            "ina228_adcrange_t adcrange"
+          ],
+          "hash": "9a565c8557227afb",
           "kind": "struct"
         }
       },
@@ -11173,8 +11420,8 @@
     "alp/ext/deepx/inference.h": {
       "functions": {
         "alp_deepx_inference_bind_cores": {
-          "hash": "b08ac660deb57b62",
-          "signature": "alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, alp_deepx_npu_cores_t cores);"
+          "hash": "f48dfc2ca4912d1b",
+          "signature": "alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, uint32_t mask);"
         },
         "alp_deepx_inference_get_status": {
           "hash": "da530b42aff7691c",
@@ -11202,20 +11449,6 @@
           ],
           "hash": "a7fb24a6fb286785",
           "kind": "struct"
-        },
-        "alp_deepx_npu_cores_t": {
-          "definition": "typedef enum { ALP_DEEPX_NPU_CORES_ALL = 0u, ALP_DEEPX_NPU_CORE_0 = 1u, ALP_DEEPX_NPU_CORE_1 = 2u, ALP_DEEPX_NPU_CORE_2 = 3u, ALP_DEEPX_NPU_CORES_01 = 4u, ALP_DEEPX_NPU_CORES_12 = 5u, ALP_DEEPX_NPU_CORES_02 = 6u, } alp_deepx_npu_cores_t;",
-          "enumerators": [
-            "ALP_DEEPX_NPU_CORES_ALL = 0u",
-            "ALP_DEEPX_NPU_CORE_0 = 1u",
-            "ALP_DEEPX_NPU_CORE_1 = 2u",
-            "ALP_DEEPX_NPU_CORE_2 = 3u",
-            "ALP_DEEPX_NPU_CORES_01 = 4u",
-            "ALP_DEEPX_NPU_CORES_12 = 5u",
-            "ALP_DEEPX_NPU_CORES_02 = 6u"
-          ],
-          "hash": "0dd48c5241689c31",
-          "kind": "enum"
         }
       },
       "variables": {}
@@ -11832,8 +12065,8 @@
       },
       "macros": {
         "ALP_INFERENCE_CONFIG_DEFAULT": {
-          "hash": "22d1014030488022",
-          "value": "(id) ((alp_inference_config_t){ .model_data = (id), .model_size = 0u, .format = ALP_INFERENCE_MODEL_TFLITE, .backend = ALP_INFERENCE_BACKEND_AUTO, .arena_bytes = 0u, .arena = NULL })"
+          "hash": "8410b08ba879f466",
+          "value": "(id) ((alp_inference_config_t){ .model_data = (id), .model_size = 0u, .format = ALP_INFERENCE_MODEL_TFLITE, .backend = ALP_INFERENCE_BACKEND_AUTO, .arena_bytes = 0u, .arena = NULL, .accel_unit_mask = 0u })"
         }
       },
       "typedefs": {
@@ -11850,16 +12083,17 @@
           "kind": "enum"
         },
         "alp_inference_config_t": {
-          "definition": "typedef struct { const void *model_data; size_t model_size; alp_inference_model_format_t format; alp_inference_backend_t backend; size_t arena_bytes; void *arena; } alp_inference_config_t;",
+          "definition": "typedef struct { const void *model_data; size_t model_size; alp_inference_model_format_t format; alp_inference_backend_t backend; size_t arena_bytes; void *arena; uint32_t accel_unit_mask; } alp_inference_config_t;",
           "fields": [
             "const void *model_data",
             "size_t model_size",
             "alp_inference_model_format_t format",
             "alp_inference_backend_t backend",
             "size_t arena_bytes",
-            "void *arena"
+            "void *arena",
+            "uint32_t accel_unit_mask"
           ],
-          "hash": "83bdb43e5a3d1e5c",
+          "hash": "b4bc562ce2d55e38",
           "kind": "struct"
         },
         "alp_inference_dtype_t": {
@@ -14531,6 +14765,10 @@
     },
     "alp/temperature.h": {
       "functions": {
+        "alp_temperature_read_die_milli_c": {
+          "hash": "28c5834d47858af1",
+          "signature": "alp_status_t alp_temperature_read_die_milli_c(int32_t *milli_c);"
+        },
         "alp_temperature_read_milli_c": {
           "hash": "0c80f66773e1c9a3",
           "signature": "alp_status_t alp_temperature_read_milli_c(int32_t *milli_c);"

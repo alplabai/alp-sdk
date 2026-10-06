@@ -315,6 +315,48 @@ ZTEST(alp_chips, test_gd32g553_post_init_calls_reject_uninitialised)
 	zassert_equal(gd32g553_counter_read(&ctx, 0u, &ticks), ALP_ERR_NOT_READY);
 }
 
+/* Bits newer than the cached protocol minor are refused before any wire
+ * traffic (an older bridge ignores them and reports success); bits the
+ * bridge does have are never gated.  default_transport is set to an
+ * invalid value so a call that passes the gate fails with ALP_ERR_INVAL
+ * instead of touching a bus. */
+ZTEST(alp_chips, test_gd32g553_gpio_new_pads_need_matching_minor)
+{
+	gd32g553_t ctx        = { 0 };
+	uint32_t   levels     = 0u;
+	ctx.initialised       = true;
+	ctx.default_transport = (gd32g553_transport_t)0x7Fu;
+
+	const uint32_t io15 = 1u << GD32G553_GPIO_LINE_E1M_IO15;
+	const uint32_t io26 = 1u << GD32G553_GPIO_LINE_E1M_IO26;
+	const uint32_t stby = 1u << 20;
+	const uint32_t rego = 1u << GD32G553_GPIO_LINE_BT_REG_ON;
+
+	/* minor 14: IO15/IO26 refused, REG_ON/CAN_STBY pass the gate. */
+	ctx.version.minor = GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR - 1u;
+	zassert_equal(gd32g553_gpio_read(&ctx, io15, &levels), ALP_ERR_NOSUPPORT);
+	zassert_equal(gd32g553_gpio_write(&ctx, io26, 0u), ALP_ERR_NOSUPPORT);
+	zassert_equal(gd32g553_gpio_write(&ctx, io15 | stby, 0u), ALP_ERR_NOSUPPORT);
+	zassert_equal(gd32g553_gpio_write(&ctx, stby, 0u), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_gpio_write(&ctx, rego, 0u), ALP_ERR_INVAL);
+	/* A read naming a missing pad plus a real one drops the missing pad. */
+	zassert_equal(gd32g553_gpio_read(&ctx, io15 | 1u, &levels), ALP_ERR_INVAL);
+
+	/* minor 15: IO15/IO26 pass the gate. */
+	ctx.version.minor = GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR;
+	zassert_equal(gd32g553_gpio_read(&ctx, io15 | io26, &levels), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_gpio_write(&ctx, io26, 0u), ALP_ERR_INVAL);
+
+	/* minor 12: CAN_STBY refused, REG_ON passes. */
+	ctx.version.minor = 12u;
+	zassert_equal(gd32g553_gpio_write(&ctx, stby, 0u), ALP_ERR_NOSUPPORT);
+	zassert_equal(gd32g553_gpio_write(&ctx, rego, 0u), ALP_ERR_INVAL);
+
+	/* minor 10: REG_ON refused. */
+	ctx.version.minor = 10u;
+	zassert_equal(gd32g553_gpio_write(&ctx, rego, 0u), ALP_ERR_NOSUPPORT);
+}
+
 ZTEST(alp_chips, test_gd32g553_pwm_set_invalid_duty)
 {
 	gd32g553_t ctx = { .initialised = true };

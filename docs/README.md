@@ -35,6 +35,9 @@ into the topic-specific docs.
   auto-generated SoM × peripheral-class presence matrix, projected
   from the single-source SoC metadata (presence only; driver
   maturity lives in the OS support matrix).
+- [display-support-matrix.md](display-support-matrix.md) — per SoM
+  family and display path: what exists in code, what has a recorded
+  bench run, and what is still open (issue #23).
 - [ADR 0011 — intra-family portability](adr/0011-intra-family-portability.md)
   — architectural decision: portability is INTRA-family;
   cross-form-factor is intentionally a separate product-line choice.
@@ -97,6 +100,9 @@ into the topic-specific docs.
   symptom + recovery.
 - [bring-up-v2n.md](bring-up-v2n.md) — Renesas RZ/V2N.
 - [bring-up-v2n-m1.md](bring-up-v2n-m1.md) — V2N + DEEPX.
+- [v2n-mali-gpu.md](v2n-mali-gpu.md) — the RZ/V2N Mali-G31: kernel +
+  vendor EGL/GLES stack, the `<alp/gpu2d.h>` GPU backend, image wiring,
+  licence placement, build steps. Bench-unverified.
 - [boot-log-v2n.md](boot-log-v2n.md) — what each V2N/V2M boot warning means.
 - [bring-up-drpai-v2n.md](bring-up-drpai-v2n.md) — the RZ/V2N on-die
   DRP-AI3 NPU: host toolchain, the DT override the driver needs,
@@ -141,6 +147,10 @@ into the topic-specific docs.
   Zephyr shell (safety tiers, command list, companion binding, banner).
 - [v2n-camera-csi.md](v2n-camera-csi.md) — opt-in Linux MIPI CSI-2
   camera path (IMX219 placeholder), bench-unverified.
+- [e1m-x-evk-usb-otg.md](e1m-x-evk-usb-otg.md) — E1M-X EVK USB 2.0 OTG: what works
+  (device mode), host/role limits, opt-in NCM+ACM gadget, HIL steps.
+- [v2n-bt-hfp-audio.md](v2n-bt-hfp-audio.md) — Bluetooth HFP/SCO audio
+  over the on-module PCM/I2S link: routing, open items, HIL steps.
 - [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
 - [provisioning.md](provisioning.md) — provisioning a SoM from a
