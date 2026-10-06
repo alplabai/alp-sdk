@@ -23,9 +23,11 @@ A minimal LVGL 9 dashboard on the E1M-X V2N MIPI-DSI panel
 - LCD panel (RK055HDMIPI4MA0) connected to the carrier's Display 1
   connector (J6).  The panel must be powered -- check the backlight
   enable line (GPT1 CH2 on the SoM, driven by the carrier DT).
-- For touch (optional): the J6 panel I2C (GT911) is not wired to
-  E1M-X I2C3 on X-EVK V2, so touch needs a carrier fix or bench bodge.
-  The dashboard runs display-only without it.
+- For touch (optional): the GT911 is on the J6 display I2C, which is
+  designed to be E1M-X I2C3 (GD32 bridge I2C3 proxy), but the X-EVK V2
+  carrier does not connect it (carrier fix needed; bench bodge from J12
+  pins 21 and 27).  I2C3 also has no pull-ups on the SoM or carrier
+  segment.  The dashboard runs display-only until touch is wired.
 
 ## Consumer path 1 -- Yocto image (recommended)
 
@@ -78,12 +80,13 @@ the SDK sysroot provides.
 
 ## Touch note
 
-On X-EVK V2, the J6 panel I2C (GT911) is not connected to E1M-X I2C3,
-the only bus the GD32 I2C proxy exposes to Linux (it reaches J12/CAM1).
-Until a carrier fix or bench bodge connects them,
-`/dev/input/event0` will not exist and the dashboard runs
-display-only.  The `access(2)` guard in `main.c` handles this
-gracefully -- no modification needed once touch is wired.
+On the X-EVK V2 carrier the GT911 sits on the J6 display I2C, which is
+designed to be E1M-X I2C3 (GD32 I2C proxy, protocol 0.17), but the
+carrier does not connect it (needs a fix) and the Linux touch
+binding is not wired yet, so `/dev/input/event0` will not exist and the
+dashboard runs display-only.  The `access(2)` guard in `main.c`
+handles this gracefully -- no modification needed once touch becomes
+available.
 
 ## Verification status
 
