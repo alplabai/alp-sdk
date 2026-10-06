@@ -480,7 +480,7 @@ static void t_adc_stream2(void)
 	record(worst, value_ok);
 }
 
-/* BATCH: PING + a full-mask GPIO_READ + COUNTER_READ in ONE transaction
+/* BATCH: PING + a routed-mask GPIO_READ + COUNTER_READ in ONE transaction
  * pair.  The driver validates the request against the allow-list and the
  * reply against the request (executed <= count, per-op lengths); here we
  * only assert the outcome.  A second batch whose middle op fails (READ2
@@ -488,7 +488,12 @@ static void t_adc_stream2(void)
  * 2, the third op never ran.  Without the grant: NOSUPPORT. */
 static void t_batch(void)
 {
-	const uint8_t       mask_all[4] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu };
+	/* Routed lines only: bit 8 (E1M IO24) is unrouted (gh#298), so an all-ones
+	 * mask makes the bridge answer STATUS_IO and the batch stops at op 2. */
+	const uint8_t       mask_all[4] = { (uint8_t)GD32G553_GPIO_ROUTED_MASK,
+		                                (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 8),
+		                                (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 16),
+		                                (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 24) };
 	const uint8_t       counter0[1] = { 0u };
 	const uint8_t       read2_s1[2] = { 1u, 4u }; /* stream 1, never started */
 	uint8_t             gpio_rep[4], counter_rep[4], read2_rep[GD32G553_READ2_HDR_BYTES + 2u * 4u];

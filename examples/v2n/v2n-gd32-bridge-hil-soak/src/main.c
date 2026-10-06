@@ -276,7 +276,9 @@ static bool t_reset_reason(soak_stat_t *st)
 	return true;
 }
 
-/* 0x10/0x11 GPIO_READ + GPIO_WRITE.  mask=0 makes the write a
+/* 0x10/0x11 GPIO_READ + GPIO_WRITE.  The read names every ROUTED line
+ * (GD32G553_GPIO_ROUTED_MASK): bit 8 = E1M IO24 is not wired to the GD32
+ * (gh#298), so a literal all-ones mask would draw STATUS_IO.  mask=0 makes the write a
  * provable no-op (atomically changes nothing) while still pushing the
  * full request/decode/dispatch path through the wire -- the soak must
  * not flip real supervisor pads (camera LDOs, REG_ONs, SE_RST live
@@ -284,7 +286,7 @@ static bool t_reset_reason(soak_stat_t *st)
 static bool t_gpio(soak_stat_t *st)
 {
 	uint32_t     levels = 0;
-	alp_status_t s      = gd32g553_gpio_read(&ctx, 0xFFFFFFFFu, &levels);
+	alp_status_t s      = gd32g553_gpio_read(&ctx, GD32G553_GPIO_ROUTED_MASK, &levels);
 	if (s != ALP_OK) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "read status=%d", (int)s);
@@ -330,11 +332,15 @@ static bool t_pwm_set_get(soak_stat_t *st)
 	return ok;
 }
 
-/* 0x26 PWM_SINGLE_PULSE -- one 1 us one-shot on PWM1.  Status-only
- * here; the pulse itself is a scope row in the HIL-PLAN. */
+/* 0x26 PWM_SINGLE_PULSE -- one 1 us one-shot on PWM4 (TIMER7, GD32 pad
+ * PC10).  Single-pulse flips the WHOLE timer, so the firmware answers
+ * STATUS_BUSY while a sibling on the same timer is live; PWM0..3 share
+ * TIMER0 with the pwm_set_get row (which never releases PWM0), hence a
+ * TIMER7 channel nothing else claims.  Status-only here; the pulse itself
+ * is a scope row in the HIL-PLAN. */
 static bool t_pwm_single_pulse(soak_stat_t *st)
 {
-	const alp_status_t s = gd32g553_pwm_single_pulse(&ctx, 1u, 1000u);
+	const alp_status_t s = gd32g553_pwm_single_pulse(&ctx, 4u, 1000u);
 	if (s != ALP_OK) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "status=%d", (int)s);
@@ -345,9 +351,9 @@ static bool t_pwm_single_pulse(soak_stat_t *st)
 
 /* 0x23/0x24/0x25 PWM capture begin/read/end on PWM2.  Nothing drives
  * the pad on the bench, so READ legitimately reports "no edges yet"
- * -- the firmware maps an empty capture ring to NOSUPPORT today (the
- * input pad routing is a known follow-up), so OK and NOSUPPORT both
- * pass; any other status (or a failing begin/end) is a real fault. */
+ * -- the firmware answers NOT_READY for an empty capture ring (and
+ * NOSUPPORT where the input pad routing is absent), so OK, NOT_READY
+ * and NOSUPPORT all pass; any other status (or a failing begin/end) is a real fault. */
 static bool t_pwm_capture(soak_stat_t *st)
 {
 	alp_status_t s = gd32g553_pwm_capture_begin(&ctx, 2u, 2u /* both edges */);
@@ -358,7 +364,7 @@ static bool t_pwm_capture(soak_stat_t *st)
 	}
 	uint32_t period = 0, pulse = 0;
 	s = gd32g553_pwm_capture_read(&ctx, 2u, &period, &pulse);
-	if (s != ALP_OK && s != ALP_ERR_NOSUPPORT) {
+	if (s != ALP_OK && s != ALP_ERR_NOT_READY && s != ALP_ERR_NOSUPPORT) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "read status=%d", (int)s);
 		(void)gd32g553_pwm_capture_end(&ctx, 2u);
@@ -554,7 +560,7 @@ static bool t_adc_stream2(soak_stat_t *st)
 }
 
 /* v0.15 BATCH (0x04): up to 16 allow-listed sub-operations in ONE SPI
- * transaction pair.  Here: PING + a full-mask GPIO_READ + COUNTER_READ,
+ * transaction pair.  Here: PING + a routed-mask GPIO_READ + COUNTER_READ,
  * i.e. three opcodes for one round trip.  The reply is self-delimiting
  * (executed:u8 then {status, len, payload} per op) and the driver has
  * already cross-checked every length against the request, so the row only
@@ -564,7 +570,12 @@ static bool t_batch(soak_stat_t *st)
 {
 	if ((ctx.granted & GD32G553_LINK_FEAT_BATCH) == 0u) return true;
 
-	const uint8_t       gpio_args[4]    = { 0xFFu, 0xFFu, 0xFFu, 0xFFu }; /* mask: all lines */
+	/* Routed lines only (little-endian): a batch sub-op bypasses the driver's
+	 * IO24 refusal, and the bridge would answer STATUS_IO and stop the batch. */
+	const uint8_t       gpio_args[4]    = { (uint8_t)GD32G553_GPIO_ROUTED_MASK,
+		                                    (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 8),
+		                                    (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 16),
+		                                    (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 24) };
 	const uint8_t       counter_args[1] = { 0u };
 	uint8_t             gpio_reply[4], counter_reply[4];
 	gd32g553_batch_op_t ops[3] = {
@@ -605,7 +616,7 @@ static bool t_batch(soak_stat_t *st)
 /* fw v0.2.8 converter-ownership guard -- the targeted probe for the
  * delta-review fix: while a stream owns an ADC converter, a single-
  * shot ADC_READ on EITHER logical channel of that converter must be
- * REFUSED (ALP_ERR_IO on the wire) instead of silently re-pointing
+ * REFUSED (STATUS_BUSY on the wire, ALP_ERR_BUSY) instead of silently re-pointing
  * routine rank 0 out from under the stream's DMA; a read on a
  * DIFFERENT converter must keep working; and the refusal must not be
  * sticky after STREAM_END.  Channel pairs per converter: ch0/1 ->
@@ -630,10 +641,10 @@ static bool t_adc_stream_guard(soak_stat_t *st)
 	const alp_status_t s_end   = gd32g553_adc_stream_end(&ctx, 0u);
 	const alp_status_t s_after = gd32g553_adc_read(&ctx, 1u, 1u, mv); /* unstuck?       */
 
-	if (s_sib != ALP_ERR_IO) {
+	if (s_sib != ALP_ERR_BUSY) {
 		st->last_status = (int)s_sib;
 		SOAK_FAIL(st,
-		          "sibling read during stream answered %d (want ALP_ERR_IO: converter owned)",
+		          "sibling read during stream answered %d (want ALP_ERR_BUSY: converter owned)",
 		          (int)s_sib);
 		return false;
 	}

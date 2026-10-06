@@ -19,13 +19,13 @@ on ADC) remain their own HIL-PLAN rows.
 | get_version | 0x01 | matches init version (7-byte odd-parity reply) |
 | get_build_id | 0x02 | non-empty + constant across the soak |
 | reset_reason | 0x03 | in-range cause |
-| gpio | 0x10/0x11 | full-mask read OK; mask=0 write (provable no-op) |
+| gpio | 0x10/0x11 | routed-mask read OK (bit 8 = E1M IO24 unrouted, excluded); mask=0 write (provable no-op) |
 | pwm_set_get | 0x20/0x21 | 1 kHz / 25 % readback within 1 %; parked at 0 % after |
-| pwm_single_pulse | 0x26 | status OK (waveform = scope row) |
-| pwm_capture | 0x23/24/25 | begin/end OK; read OK or NOSUPPORT (no edges on bench) |
+| pwm_single_pulse | 0x26 | status OK on PWM4 (TIMER7; PWM0..3 share a timer an earlier row holds -> BUSY) (waveform = scope row) |
+| pwm_capture | 0x23/24/25 | begin/end OK; read OK, NOT_READY (empty ring) or NOSUPPORT (no edges on bench) |
 | adc_read | 0x30 | 4 samples ≤ VREF |
 | adc_stream | 0x33/34/35 | two-read paced assertion: read 1 (after 50 ms @ 1 kHz) returns exactly the 32-sample cap; read 2, taken immediately after, returns 1–30 leftover samples — 32 again would mean free-running (rate ignored), 0 would mean a dead stream |
-| adc_stream_guard | 0x33/35 + 0x30 | while `adc_stream` owns a converter (ch0, ADC3), a single-shot `adc_read` on its sibling channel (ch1) must be refused (`ALP_ERR_IO`); a different converter's channel (ch4, ADC1) must still succeed; after `STREAM_END` the sibling read must succeed again (guard not sticky) |
+| adc_stream_guard | 0x33/35 + 0x30 | while `adc_stream` owns a converter (ch0, ADC3), a single-shot `adc_read` on its sibling channel (ch1) must be refused (`ALP_ERR_BUSY`); a different converter's channel (ch4, ADC1) must still succeed; after `STREAM_END` the sibling read must succeed again (guard not sticky) |
 | dac | 0x50/0x51 | 600 mV readback ± 16 mV (jumper-safe under the 1.8 V rail — DAC0 sits jumpered straight to the ADC0 pad on the X-EVK Tier-B bench); parked at 0 after |
 | qenc | 0x60/0x61 | reset OK, read OK — no encoder is attached on the bench, so the A/B inputs float and the position value isn't asserted, only the reset/read round-trip |
 | counter | 0x70 | strictly increasing across 200 µs |

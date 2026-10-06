@@ -1072,6 +1072,8 @@ alp_status_t gd32g553_gpio_read(gd32g553_t *ctx, uint32_t mask, uint32_t *levels
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (levels == NULL) return ALP_ERR_INVAL;
+	/* E1M IO24 is unrouted (gh#298): the bridge would answer STATUS_IO. */
+	if ((mask & (1u << GD32G553_GPIO_LINE_E1M_IO24)) != 0u) return ALP_ERR_NOSUPPORT;
 	/* A read of pads this bridge lacks drops them (they read 0); only a
 	 * mask naming nothing but missing pads is refused. */
 	const uint32_t bad = gpio_unsupported_bits(ctx, mask);
@@ -1096,6 +1098,7 @@ alp_status_t gd32g553_gpio_write(gd32g553_t *ctx, uint32_t mask, uint32_t levels
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (gpio_unsupported_bits(ctx, mask) != 0u) return ALP_ERR_NOSUPPORT;
+	if ((mask & (1u << GD32G553_GPIO_LINE_E1M_IO24)) != 0u) return ALP_ERR_NOSUPPORT;
 	uint8_t req[8];
 	put_le32(&req[0], mask);
 	put_le32(&req[4], levels);

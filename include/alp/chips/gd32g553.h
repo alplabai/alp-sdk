@@ -207,6 +207,20 @@ extern "C" {
  *  same "unattributable" state gh#101 fixed, just for older peers. */
 #define GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR 14u
 
+/** GPIO expander line for E1M IO24 (GD32 pad `PC14`).  NOT routed to the
+ *  GD32 on the SoM (gd32-bridge-firmware#298): the bridge answers
+ *  `STATUS_IO` for any mask naming it, so gd32g553_gpio_read() and
+ *  gd32g553_gpio_write() refuse it up front with `ALP_ERR_NOSUPPORT`
+ *  (the Linux gpio driver refuses line 8 the same way). */
+#define GD32G553_GPIO_LINE_E1M_IO24 8u
+
+/** Every routed bridge GPIO line (bits 0..22 minus
+ *  @ref GD32G553_GPIO_LINE_E1M_IO24).  Use it as the "all lines" mask for
+ *  GPIO_READ, including inside a BATCH sub-op, which bypasses the driver's
+ *  own refusal.  Bits above the cached protocol minor are dropped by
+ *  gd32g553_gpio_read(). */
+#define GD32G553_GPIO_ROUTED_MASK (0x007FFFFFu & ~(1u << GD32G553_GPIO_LINE_E1M_IO24))
+
 /** GPIO expander line carrying the on-module Murata LBEE5HY2FY-922
  *  (Infineon CYW55513) Bluetooth core's BT_REG_ON enable (GD32 pad
  *  `PE14`).  Valid only on bridges advertising protocol minor

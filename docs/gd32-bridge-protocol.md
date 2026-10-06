@@ -79,7 +79,7 @@ allow-list.  Command opcodes are 1 byte; their numeric encoding is:
 | `0x3B` | `ADC_STREAM_BEGIN2` (v0.15) | `stream_id:u8 channel:u8 trigger_src:u8 trigger_arg:u8 sample_rate_hz:u32 watermark:u16 reserved:u16` | `tick_hz:u32 period_ticks:u32 full_scale:u16 vref_mv:u16 flags:u8 watermark:u16 ring_depth:u16` (SPI only; needs `ADC_STREAM2` -- see §3.18) |
 | `0x3C` | `ADC_STREAM_READ2` (v0.15) | `stream_id:u8 max_samples:u8`                    | `first_index:u32 dropped:u32 got:u8 codes[got]:u16` (**variable length**, `9 + 2*got` bytes; SPI only; needs `ADC_STREAM2` -- see §3.18) |
 | `0x23` | `PWM_CAPTURE_BEGIN`   | `channel:u8 edge:u8`                                  | _empty_ (see §3.y -- reconfigures the pad as input-capture) |
-| `0x24` | `PWM_CAPTURE_READ`    | `channel:u8`                                          | `period_ns:u32 pulse_ns:u32` (see §3.y -- returns `STATUS_NOSUPPORT` ("ring empty") until an edge lands; no edges land on this V2N HW rev pending a pad-routing rework) |
+| `0x24` | `PWM_CAPTURE_READ`    | `channel:u8`                                          | `period_ns:u32 pulse_ns:u32` (see §3.y -- returns `STATUS_NOT_READY` ("ring empty") until an edge lands (`STATUS_NOSUPPORT` where the input pad is not routed); no edges land on this V2N HW rev pending a pad-routing rework) |
 | `0x25` | `PWM_CAPTURE_END`     | `channel:u8`                                          | _empty_                                            |
 | `0x26` | `PWM_SINGLE_PULSE`    | `channel:u8 reserved:u8 reserved:u16 pulse_ns:u32`    | _empty_                                            |
 | `0x27` | `TIMER_SYNC`          | `master:u8 slave:u8 mode:u8`                          | _empty_                                            |
@@ -143,7 +143,7 @@ V2N silicon is still ahead for all three groups below (see
   correctly switches the channel to input-capture mode, but no
   edges land on this hardware revision until a follow-up hardware
   bring-up commit reworks the pad routing; `READ` reports
-  `STATUS_NOSUPPORT` ("ring empty") in the meantime.
+  `STATUS_NOT_READY` ("ring empty") in the meantime.
 * `CMD_PWM_SINGLE_PULSE` (opcode `0x26`) drives a one-shot pulse
   of caller-specified width on a PWM channel then stops.  The
   host-side surface is `alp_pwm_single_pulse(pwm, pulse_ns)` in
@@ -151,7 +151,10 @@ V2N silicon is still ahead for all three groups below (see
   timer's one-pulse mode (OPM); the whole timer's SP bit flips, so
   sibling channels on the same `TIMER0`/`TIMER7` also run
   single-pulse until a subsequent `PWM_SET` restores repetitive
-  mode.
+  mode.  Because the whole timer flips, the firmware answers
+  `STATUS_BUSY` while a sibling channel on the same timer is live
+  (e.g. PWM1 after `PWM_SET` on PWM0); use a channel on a timer no
+  other channel holds (PWM4..PWM6 on `TIMER7`).
 * `CMD_TIMER_SYNC` (opcode `0x27`) links the GD32G5's `TIMER0` /
   `TIMER7` / `TIMER19` (wire ids `0`/`1`/`2`) in master-slave
   configuration for synchronised multi-channel output.
@@ -343,6 +346,14 @@ bit-to-pad mapping (bits 0..22) is documented in
 `gd32-bridge-firmware:README.md`; the host header names only bits 18/19
 and 21/22 (below).  The host MUST NOT assume that
 bit `n` corresponds to GD32 pad `Pxn`.
+
+Bit 8 (E1M IO24, `PC14`) is **not routed** to the GD32 on the SoM
+(gd32-bridge-firmware#298): the bridge answers `STATUS_IO` for any
+`GPIO_READ`/`GPIO_WRITE` mask naming it, which also stops a `BATCH` at that
+op.  Use `GD32G553_GPIO_ROUTED_MASK` (bits 0..22 minus bit 8) as the
+"all lines" mask; `gd32g553_gpio_read` / `gd32g553_gpio_write` return
+`ALP_ERR_NOSUPPORT` for a mask naming bit 8, as the Linux driver refuses
+line 8 with `-ENODEV`.
 
 `GPIO_WRITE` is atomic in the firmware: read-modify-write of the
 pad output register is done with interrupts disabled around the
@@ -541,14 +552,16 @@ host side.  Each `mv[i]` carries the firmware's internal-reference-
 corrected reading; the host treats the values as **ground truth**
 for telemetry purposes.
 
-Two converter-level guards (fw `v0.2.8+`) make `ADC_READ` answer
-`STATUS_IO` instead of serving unreliable data:
+Two converter-level guards (fw `v0.2.8+`) make `ADC_READ` refuse
+instead of serving unreliable data (`STATUS_BUSY` for the stream-owned
+converter, `STATUS_IO` for the dead reference):
 
 - **converter owned by a stream** -- two logical channels ride each
   ADC converter, and a running `ADC_STREAM_*` session owns its
   converter outright.  A single-shot read on either channel of a
   streaming converter is refused (it would corrupt the live stream's
-  ring AND return wrong data); retry after `STREAM_END`.
+  ring AND return wrong data) with `STATUS_BUSY` (`ALP_ERR_BUSY`);
+  retry after `STREAM_END`.
 - **analog reference not ready** -- if the on-chip reference buffer
   never reported ready at boot, every conversion would be garbage
   referenced to a dead node.  The firmware fails the read loudly
