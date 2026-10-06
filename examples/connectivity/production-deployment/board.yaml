@@ -140,7 +140,9 @@ boot:
 # ----------------------------------------------------------------
 # Mender HTTPS-poll fabric with anti-downgrade floor + automatic
 # rollback on health-check failure.  The tenant token stays
-# outside the repo; it's injected by the device provisioning step.
+# outside the repo: the `${MENDER_TENANT_TOKEN}` placeholder is
+# skipped by the Yocto emit; set the real token in conf/local.conf
+# (meta-alp-sdk/README.md) or the device provisioning step.
 ota:
   provider:        mender
   artifact_name:   production-deployment

@@ -18,8 +18,8 @@ build it, how to flash it, and what state the implementation is in.
 > supervisor out of the box.  Like the CC3501E bridge, the GD32 firmware is
 > **open**: the source lives in this repo (`gd32-bridge-firmware:`) and
 > the GigaDevice library
-> is a public submodule, so rebuilding or customizing needs no gated
-> download — see **Build** below.
+> is fetched from GigaDevice's public repository at build time, so
+> rebuilding or customizing needs no gated download — see **Build** below.
 
 ## At a glance
 
@@ -28,9 +28,10 @@ build it, how to flash it, and what state the implementation is in.
 | Firmware tree       | [`gd32-bridge-firmware:`](https://github.com/alplabai/gd32-bridge-firmware)                                                 |
 | Toolchain           | Arm GNU Toolchain (`arm-none-eabi-gcc`), Cortex-M33 + thumb                       |
 | Build system        | CMake (separate from the Zephyr-side `west build`)                                |
-| HAL                 | Stub default; `BRIDGE_HAL_BACKEND=gd32` consumes the GigaDevice firmware library via the [`alplabai/gd32g5x3-firmware-library`](https://github.com/alplabai/gd32g5x3-firmware-library) submodule at `vendors/gd32_firmware_library/upstream/` (run `git submodule update --init` once after cloning) |
+| HAL                 | Stub default; `BRIDGE_HAL_BACKEND=gd32` consumes the GigaDevice firmware library, fetched at build time from [GigaDevice's official repository](https://github.com/GigaDevice-GD32-MCU/GD32G5x3_Firmware_Library) by `tools/fetch_gd32_library.sh` in the firmware repo (this repo does not redistribute it) |
 | Protocol coverage   | `PING`, `GET_VERSION`, `GET_BUILD_ID` working end-to-end without HW dependency    |
 | Transport coverage  | SPI1 slave (25 MHz full-DMA, silicon-validated) + I2C0 slave in `hal/transport_hw_gd32.c` (gd32 backend) |
+| I2C3 master proxy   | Protocol v0.17: the bridge masters E1M-X I2C3 (`PC8` SCL / `PC9` SDA) for Linux over the I2C link only (`I2CM_CONFIG` / `I2CM_XFER` / `I2CM_RESULT`, [protocol section 3.20](gd32-bridge-protocol.md)); Linux exposes it as an `i2c_adapter` from `gpio-gd32-bridge`.  Silicon-verified (`CONFIG`, NACK).  I2C3 has no pull-ups on the SoM or X-EVK I2C3 segment; the X-EVK V2 J6 display I2C is designed to be I2C3 but not connected (carrier fix needed). |
 | Datasheet           | GD32G553 datasheet + user manual (held in the vendor datasheet) |
 | Flash size on chip  | 512 KB (per datasheet)                                                            |
 | RAM size on chip    | 128 KB                                                                            |
@@ -62,21 +63,21 @@ Output: `build/gd32-bridge.elf`, `.hex`, `.bin`.
   `BRIDGE_HW_ERR_NOTIMPL` which the protocol layer maps to wire
   `STATUS_IO`.  Useful for smoke-testing the protocol round-trip in
   a hardware-less unit-test environment.
-* `BRIDGE_HAL_BACKEND=gd32` -- builds against
-  [`vendors/gd32_firmware_library/`](../vendors/gd32_firmware_library/).
-  The wrapper consumes the GigaDevice **GD32G5x3 Firmware Library**
-  via a git submodule pointing at
-  [alplabai/gd32g5x3-firmware-library](https://github.com/alplabai/gd32g5x3-firmware-library)
-  (a verbatim mirror of v1.5.0 under SLA-GD0001 v1.1).  Run
-  `git submodule update --init --recursive vendors/gd32_firmware_library/upstream`
-  once after cloning, then the bridge build picks it up
-  automatically.  See
-  [`vendors/gd32_firmware_library/README.md`](../vendors/gd32_firmware_library/README.md)
-  for the licence-redistribution constraints + the version-bump procedure.
+* `BRIDGE_HAL_BACKEND=gd32` -- builds against the GigaDevice
+  **GD32G5x3 Firmware Library** v1.5.0.  alp-sdk does not vendor or
+  mirror it: run `tools/fetch_gd32_library.sh` in
+  [gd32-bridge-firmware](https://github.com/alplabai/gd32-bridge-firmware)
+  once after cloning.  It clones
+  [GigaDevice's official repository](https://github.com/GigaDevice-GD32-MCU/GD32G5x3_Firmware_Library)
+  at a pinned commit and refuses to continue unless the commit and the
+  `Firmware/` tree hash match.  The library stays under GigaDevice's
+  own terms (see that repository's `THIRD_PARTY_NOTICES.md` and this
+  repo's `NOTICE`); Alp Lab does not relicense it.
 
 **A flashable image must link the IRC8M clock override.** This build
-takes its `SystemInit()` from the alp-sdk `overrides/system_gd32g5x3.c`
-(`__SYSTEM_CLOCK_216M_PLL_IRC8M`), not the vendor submodule's stock
+takes its `SystemInit()` from the firmware repo's IRC8M clock patch
+(`__SYSTEM_CLOCK_216M_PLL_IRC8M`, applied at configure time to a copy
+of GigaDevice's file), not the vendor library's stock
 216M-PLL-HXTAL file -- on these SoMs the GD32 HXTAL input (fed by the
 5L35023B SE2) never starts, so the stock HXTAL init hangs forever
 before `main()` and the bridge never comes up. Root cause: the 5L35023B

@@ -95,7 +95,7 @@ without rewriting the layer above.
   │               │    │                                                                        │
   │               │    │  Inference  ──  the .alpmodel runtime (where on-device AI runs)        │
   │               │    │  ─ alp_inference_open_alpmodel()  loads the fat .alpmodel              │
-  │               │    │  ─ selects the blob: silicon-ref + SRAM-fit + preferred_backend        │
+  │               │    │  ─ selects the blob: silicon-ref + SRAM-fit + SoM auto_order          │
   │               │    │  ─ dispatches →  Ethos-U · DRP-AI3 · DEEPX DX-M1 · CPU / TFLM          │
   │               │    │                                                                        │
   │               │    │  IoT / BLE               Security               Storage                │

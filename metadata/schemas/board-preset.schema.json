@@ -43,6 +43,20 @@
       },
       "description": "Camera connectors this board exposes, keyed CAM0, CAM1, ...  A project's `cameras:` entries name one of these keys."
     },
+    "pad_levels": {
+      "type": "array",
+      "description": "Signal level this carrier puts on an E1M route, keyed on the route -- never on an SoC pad, so the carrier stays SoM-agnostic.  scripts/check_pad_voltage.py resolves each `e1m_routes` route to the silicon pads of every hosted SoM (pinmux + the host SoC's `pad_tolerance`) and requires an entry for each route that lands on a non-3.3 V-tolerant pad: `signal_v` at or below the SoC `max_signal_v`, or a `level_shifter` naming the part that translates a higher level.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["e1m", "signal_v"],
+        "properties": {
+          "e1m":           { "type": "string", "pattern": "^E1M(_X)?_[A-Z0-9_]+$", "description": "E1M route this entry describes (same spelling as in `e1m_routes`, e.g. E1M_X_SPI0)." },
+          "signal_v":      { "type": "number", "description": "Level the carrier drives or expects on the route, volts." },
+          "level_shifter": { "type": "string", "description": "Part or net group that translates signal_v down to the SoM pad's tolerated level." }
+        }
+      }
+    },
     "sd_slots": {
       "type": "object",
       "propertyNames": { "pattern": "^SD[0-9]+$" },
