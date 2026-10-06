@@ -8,10 +8,9 @@ the CM33 system-manager, in **CM33-boot mode only**.
 The RZ/V2N boot CPU is a hardware strap, not a software choice: pin
 `BOOTSELCPU` (RZ/V2N HW manual R01UH1071EJ0110 Rev.1.10 Sec.1.9 Table
 1.9-1) selects **LOW = CM33 cold boot, HIGH = CA55 cold boot**, driven by
-ACT88760 GPIO5 (net `V2N_BOOT_CPU_SEL`). The power sequencer's own CMI
-drives that net **HIGH by default**, ~8.6 ms after `MODULE_EN` — so
-CA55-cold-boot is the power-on default, and in that DEFAULT config
-U-Boot's `board_late_init()`
+ACT88760 GPIO5 (net `V2N_BOOT_CPU_SEL`); which GPIO5 level selects which
+CPU is not yet recorded in `power-tree.yaml` (TBD). In the DEFAULT
+(`a55_boot`) config U-Boot's `board_late_init()`
 (`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch`)
 sequences this same rail on the A55, and CA55/Linux is thereafter the
 sole master of RIIC8/BRD_I2C
@@ -26,10 +25,17 @@ Ownership is **time-sliced, never concurrent**: this app masters RIIC8
 only until it hands off to the CA55 (see "CA55 release" below); once the CA55
 starts, U-Boot 0004 runs again as a warm, idempotent **verify** (its
 program phase is a no-op when CH2 is already at target — no double
-sequencing). `metadata/e1m_modules/v2n/power-tree.yaml`'s
-`boot_modes.cm33_boot` and `core-ownership.yaml`'s `boot_mode_core`
-qualifier record this so `scripts/gen_power_tree.py`'s `cross_check()`
-still rejects a real dual-master (non-time-sliced) config.
+sequencing).
+
+**Metadata status.** `power-tree.yaml` `boot_modes.cm33_boot` is still
+`status: blocked` and `core-ownership.yaml` still gives RIIC8 and P64/P65 to
+the A55 (standing 2026-09-24 decision). This example does not unblock that:
+it needs a maintainer re-decision and the full slice `power-tree.yaml` lists.
+It therefore **fails closed**: the app refuses to touch RIIC8 unless
+`CONFIG_V2N_CM33_BOOT_CONFIRMED=y` is set, on a unit strapped for `cm33_boot`.
+`check_amp_pad_claims.py` reads committed board dts, not this overlay.
+TODO(alp-sdk#2289): replace the build-time acknowledgement with a runtime
+`BOOTSELCPU` read once the register is cited from the manual.
 
 ## What it does
 

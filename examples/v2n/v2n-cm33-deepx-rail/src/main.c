@@ -8,11 +8,11 @@
  * WHY THIS EXAMPLE EXISTS.  On the E1M-V2N / V2N-M1 SoM the boot-CPU is a
  * hardware strap: RZ/V2N pin BOOTSELCPU (RZ/V2N HW manual
  * R01UH1071EJ0110 Rev.1.10 Sec.1.9 Table 1.9-1) selects LOW = CM33 cold
- * boot, HIGH = CA55 cold boot, and is driven by ACT88760 GPIO5 (net
- * V2N_BOOT_CPU_SEL -- the power sequencer's own CMI drives it HIGH by
- * default, ~8.6 ms after MODULE_EN, so CA55-cold-boot is the power-on
- * default).  In the DEFAULT config, U-Boot's board_late_init() (the 0004
- * patch) sequences this same rail on the A55 before releasing M1_RESET,
+ * boot, HIGH = CA55 cold boot, and is strapped on ACT88760 GPIO5 (net
+ * V2N_BOOT_CPU_SEL; metadata/e1m_modules/v2n/power-tree.yaml).  Which GPIO5
+ * level selects which CPU is not yet recorded there (TBD), so this app
+ * states no power-on default.  In the DEFAULT (a55_boot) config, U-Boot's
+ * board_late_init() (the 0004 patch) sequences this same rail on the A55 before releasing M1_RESET,
  * and CA55/Linux is thereafter the sole master of RIIC8/BRD_I2C -- see
  * metadata/e1m_modules/v2n/core-ownership.yaml.
  *
@@ -26,10 +26,14 @@
  * this app's window ends (the CA55 release at the bottom) BEFORE the CA55
  * starts, at which point U-Boot 0004 runs again as a warm, idempotent
  * VERIFY (its program phase is a no-op when CH2 is already at target).
- * metadata/e1m_modules/v2n/power-tree.yaml's `boot_modes.cm33_boot` and
- * core-ownership.yaml's `boot_mode_core` qualifier record this so
- * scripts/gen_power_tree.py's cross_check() can still reject a real
- * dual-master (non-time-sliced) config.
+ * METADATA STATUS.  power-tree.yaml `boot_modes.cm33_boot` is still
+ * `status: blocked` and core-ownership.yaml still says the CM33 must not
+ * master RIIC8 or claim P64/P65 (standing 2026-09-24 decision).  This
+ * example does NOT unblock that; it needs a maintainer re-decision plus the
+ * full slice power-tree.yaml lists.  Until then it fails closed: it refuses
+ * to touch RIIC8 unless CONFIG_V2N_CM33_BOOT_CONFIRMED is set.
+ * TODO(alp-sdk#2289): replace that build-time acknowledgement with a
+ * runtime BOOTSELCPU read once the register is cited from the HW manual.
  *
  * DO NOT wire this app's board overlay into any OTHER CM33 example: it
  * re-enables &i2c8, which every other CM33 app must leave disabled
@@ -103,6 +107,14 @@ static const char *step_name(da9292_ch2_seq_step_t step)
 int main(void)
 {
 	printf("[cm33-deepx-rail] V2N-M1 CM33-boot DEEPX 0.75V rail sequencer\n");
+#if !defined(CONFIG_V2N_CM33_BOOT_CONFIRMED)
+	/* Fail closed: in a55_boot Linux also binds i2c8, and a second RIIC8
+	 * master can garble any PMIC register.  No RIIC8/P64/P65 access. */
+	printf("[cm33-deepx-rail] refusing to master RIIC8: set CONFIG_V2N_CM33_BOOT_CONFIRMED "
+	       "only on a unit strapped for cm33_boot (see the file header)
+");
+	return 0;
+#endif
 	printf("[cm33-deepx-rail] this app is ONLY correct if BOOTSELCPU strapped this boot "
 	       "as cm33_boot -- see the file header if you are not sure\n");
 
@@ -147,9 +159,8 @@ int main(void)
 		goto out_core_en; /* alp_gpio_close(NULL) is a safe no-op if open() itself failed */
 	}
 
-	/* P65 DEEPX_PWR_EN_REQ: input, no pull -- it's an ACT88760 GPIO7
-	 * push-pull output (Buck5 power-good), driven regardless of which
-	 * CPU is reading it. */
+	/* P65 DEEPX_PWR_EN_REQ: input, no pull -- the DEEPX power-enable
+	 * request, polled by da9292_ch2_sequence(). */
 	alp_gpio_t *pwr_en_req = alp_gpio_open(PIN_ID_DEEPX_PWR_EN_REQ);
 	s = (pwr_en_req != NULL) ? alp_gpio_configure(pwr_en_req, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE)
 	                         : ALP_ERR_NOT_READY;
@@ -222,8 +233,7 @@ int main(void)
 	/*
 	 * CA55 release (alp-sdk#2289).  Only on ALP_OK: a rail failure leaves
 	 * the CA55 held.  This app masters RIIC8 only until this handoff
-	 * (metadata/e1m_modules/v2n/power-tree.yaml boot_modes.cm33_boot's
-	 * `handover`) -- release the bus users in the order below: close the
+	 * -- release the bus users in the order below: close the
 	 * I2C/GPIO handles first, so nothing of ours touches RIIC8 once the CA55
 	 * (U-Boot 0004's idempotent verify pass, then Linux) can.  Default off:
 	 * the helper still lacks the AWO->ALL_ON entry, see ca55_release.c.

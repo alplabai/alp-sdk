@@ -1,6 +1,14 @@
 # Copyright (c) 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 
+config V2N_CM33_BOOT_CONFIRMED
+	bool "Acknowledge this image runs only on a cm33_boot unit"
+	help
+	  Without it main() refuses to master RIIC8 or touch P64/P65: in
+	  a55_boot Linux also binds i2c8 and two masters can garble any PMIC
+	  register.  power-tree.yaml cm33_boot is still `blocked`.  Replace
+	  with a runtime BOOTSELCPU read (TODO alp-sdk#2289).
+
 config V2N_CM33_RELEASE_CA55
 	bool "Release CA55 core 0 after the DEEPX rail is up (CM33 cold boot only)"
 	help

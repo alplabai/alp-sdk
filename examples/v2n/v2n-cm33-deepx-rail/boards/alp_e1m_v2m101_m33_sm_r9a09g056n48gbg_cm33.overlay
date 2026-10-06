@@ -10,13 +10,14 @@
  * (DEEPX_PWR_EN_REQ).
  *
  * Safe ONLY in cm33_boot mode, and ONLY before this app hands RIIC8 off
- * to the CA55 (metadata/e1m_modules/v2n/power-tree.yaml
- * boot_modes.cm33_boot; metadata/e1m_modules/v2n/core-ownership.yaml
- * boot_mode_core).  RZ/V2N HW manual R01UH1071EJ0110 Rev.1.10 S1.9 Table
+ * to the CA55 (power-tree.yaml boot_modes.cm33_boot is still `blocked`;
+ * core-ownership.yaml still gives RIIC8 and P64/P65 to the A55, so this
+ * overlay's claims are not recorded in metadata and
+ * check_amp_pad_claims.py does not read project overlays).  RZ/V2N HW manual R01UH1071EJ0110 Rev.1.10 S1.9 Table
  * 1.9-1: BOOTSELCPU low = CM33 cold boot (this app's own boot mode),
- * high = CA55 cold boot (the power-on DEFAULT -- BOOTSELCPU is driven by
- * ACT88760 GPIO5 net V2N_BOOT_CPU_SEL, which the CMI drives high at
- * ~8.6 ms after MODULE_EN).  In a55_boot mode, or after this app's own
+ * high = CA55 cold boot (BOOTSELCPU is strapped on ACT88760 GPIO5 net
+ * V2N_BOOT_CPU_SEL; the level-to-CPU mapping is TBD in power-tree.yaml).
+ * In a55_boot mode, or after this app's own
  * handoff, the A55/Linux is the SOLE master of this bus -- building this
  * overlay into any OTHER CM33 app would be exactly the dual-master
  * hazard core-ownership.yaml's cross_check() exists to catch at the

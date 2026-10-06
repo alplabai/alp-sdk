@@ -21,16 +21,25 @@
  * TODO(alp-sdk#2289): cross-check every constant against the FSP headers
  * before the first bench run; nothing here has run on silicon.
  *
- * The CM33 images of this SoM run non-secure (the board file uses the _NS
- * MHU bases), so the non-secure aliases are used.
+ * UNVERIFIED: the CM33 security state and whether CPG/SYS reset control is
+ * writable from non-secure.  The _NS aliases below are an assumption (the
+ * board file uses _NS MHU bases, which proves nothing about CPG/SYS), and
+ * tests/scripts/test_provision_uboot.py:123 uses SYS at 0x10430000.
+ * TODO(alp-sdk#2289): cite the manual table row for the 0x5042xxxx /
+ * 0x5043xxxx aliases and the CPG access attribute.
  */
 
 #include <zephyr/arch/cpu.h>
 
 #include "ca55_release.h"
 
-#define CPG_BASE_NS 0x50420000UL /* S4.4 Table 4.4-4, non-secure alias */
-#define SYS_BASE_NS 0x50430000UL /* S4.3 Table 4.3-1, non-secure alias */
+/* TODO(alp-sdk#2289): NS alias unverified (see file header). */
+#define CPG_BASE_NS 0x50420000UL /* S4.4 Table 4.4-4 */
+#define SYS_BASE_NS 0x50430000UL /* S4.3 Table 4.3-1 */
+
+/* Offsets/bits below: S4.3.3.2.89-90 (RVAL0/RVAH0), S4.4.4.11 (CPG_RST_m),
+ * S4.4.4.22 (CPG_LP_CA55_CTL1), S4.4.4.23 (CPG_LP_CA55_CTL2).  Taken from the
+ * issue comment; TODO(alp-sdk#2289): confirm each bit row vs the manual/FSP. */
 
 #define SYS_ACPU_CFG_RVAL0 (SYS_BASE_NS + 0x0624UL) /* [31:2] = RVBARADDR[31:2] */
 #define SYS_ACPU_CFG_RVAH0 (SYS_BASE_NS + 0x0628UL) /* [7:0]  = RVBARADDR[39:32] */
