@@ -1,0 +1,5 @@
+### Added — `v2n-two-models` example and HIL specs: DRP-AI3 and DX-M1 running at the same time on an E1M-V2M (#2398)
+
+**Not bench-verified; the two backends have never run together.** `examples/v2n/v2n-two-models/` opens one model on `ALP_INFERENCE_BACKEND_DRPAI` and one on `ALP_INFERENCE_BACKEND_DEEPX_DXM1` through `<alp/inference.h>`, runs each in its own thread (alone first, then both), and prints per-NPU latency, FPS and the combined FPS. It sets `TVM_NUM_THREADS=2` / `TVM_BIND_THREADS=0` unless exported, so the DRP-AI TVM worker pool does not pin all 4 A55 cores. Both model paths are arguments; no compiled model ships in-tree (#2236). The DRP-AI half needs a `libalp_sdk` built with RUHMI (`RUHMI_DRPAI_TVM_DIR`).
+
+`tests/hil/v2m103-x-evk/v2m103-two-npu-{one-process,two-process,soak}.yaml` cover one process, two processes (the second uses only the DX-M1, by design: DRP-AI is one process per board) and a 10-minute soak with SoC thermal readings. Supply current is not measured: the HIL harness has no PSU sampling yet.

@@ -10,7 +10,7 @@ trap 'rm -rf "$RUN_TMP"' EXIT
 # TR_RASTER_CHECKS: r3d_raster.c's invariant asserts (never in the A32 image).
 CHECKS="-DTR_RASTER_CHECKS"
 for t in tests/host/test_*.c; do
-	out="/tmp/tr-$(basename "$t" .c)"
+	out="$RUN_TMP/tr-$(basename "$t" .c)"
 	extra_cflags=""
 	# test_track_cam_orientation.c needs TR_CAM_MIRROR_X/TR_CAM_FLIP_Y compiled
 	# in as 1 (track.h #ifndef-guards both) to exercise the `1` state of the
@@ -45,7 +45,7 @@ done
 # times, the others that the logic holds at the 30 Hz counts.
 for t in test_panel_hz test_step test_pace test_tilt test_tilt_takeover test_attract test_mbox test_hud test_score test_react \
 	test_hiscore test_ramp; do
-	out="/tmp/tr-$t-30hz"
+	out="$RUN_TMP/tr-$t-30hz"
 	extra_cflags="-DTR_PANEL_HZ=30"
 	[ "$t" = test_tilt_takeover ] && extra_cflags="$extra_cflags -DTR_TILT_TAKEOVER=1"
 	if cc -std=c11 -Wall -Wextra -Werror -ffp-contract=off -g $extra_cflags -o "$out" "tests/host/$t.c" \
@@ -59,7 +59,7 @@ done
 # The synth's other builds (bench A/B): V1 (must keep golden 0xDBF70C58), V2
 # and V3 at 48 kHz, each with its own golden in test_audio.c.
 for f in "-DTR_AUDIO_V2=0" "-DTR_AUDIO_V3=0" "-DTR_AUDIO_RATE=48000u"; do
-	out="/tmp/tr-test_audio$(echo "$f" | tr -dc 'A-Za-z0-9_')"
+	out="$RUN_TMP/tr-test_audio$(echo "$f" | tr -dc 'A-Za-z0-9_')"
 	if cc -std=c11 -Wall -Wextra -Werror -ffp-contract=off -g $f -o "$out" tests/host/test_audio.c \
 		src/audio/tr_audio.c src/ipc/tr_aring.c -lm && "$out" >/dev/null; then
 		echo "PASS: tests/host/test_audio.c $f"
@@ -71,7 +71,7 @@ done
 # compiles it to analyse every capture), and the analyser's selftest must
 # pass. numpy is the one non-stdlib need; without it the stage is skipped
 # loudly below (TR_REQUIRE_CROSS=1 turns that into a failure).
-if cc -std=c11 -Wall -Wextra -Werror -O2 -Isrc -o /tmp/tr-audio_preview tools/audio_preview.c \
+if cc -std=c11 -Wall -Wextra -Werror -O2 -Isrc -o "$RUN_TMP/tr-audio_preview" tools/audio_preview.c \
 	src/audio/tr_audio.c; then
 	echo "PASS: tools/audio_preview.c builds"
 else
@@ -129,7 +129,7 @@ if [ -n "$A32_GCC" ] && [ -n "$QEMU_ARM" ]; then
 	"$A32_GCC" $WARN $A32_RASTER_OPT $CHECKS -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
 		-c -o "$RUN_TMP/r3d_raster.o" src/render/r3d_raster.c || { echo "BUILD FAIL (A32): r3d_raster.c"; rc=1; }
 	for t in tests/host/test_r3d_*.c tests/host/test_audio.c; do
-		out="/tmp/tr-a32-$(basename "$t" .c).elf"
+		out="$RUN_TMP/tr-a32-$(basename "$t" .c).elf"
 		if ! "$A32_GCC" $WARN -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
 			--specs=rdimon.specs -o "$out" "$t" $A32_R3D $AUDIO_SRC -lm; then
 			echo "BUILD FAIL (A32): $t"; rc=1; continue
@@ -137,7 +137,7 @@ if [ -n "$A32_GCC" ] && [ -n "$QEMU_ARM" ]; then
 		if "$QEMU_ARM" -cpu max "$out" >/dev/null; then echo "PASS (A32 qemu): $t"; else echo "FAIL (A32 qemu): $t"; rc=1; fi
 	done
 	for f in "-DTR_AUDIO_V2=0" "-DTR_AUDIO_V3=0" "-DTR_AUDIO_RATE=48000u"; do
-		out="/tmp/tr-a32-test_audio$(echo "$f" | tr -dc 'A-Za-z0-9_').elf"
+		out="$RUN_TMP/tr-a32-test_audio$(echo "$f" | tr -dc 'A-Za-z0-9_').elf"
 		if "$A32_GCC" $WARN -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard --specs=rdimon.specs \
 			$f -o "$out" tests/host/test_audio.c $AUDIO_SRC -lm && "$QEMU_ARM" -cpu max "$out" >/dev/null; then
 			echo "PASS (A32 qemu): tests/host/test_audio.c $f"

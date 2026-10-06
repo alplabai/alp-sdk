@@ -75,6 +75,12 @@ memory:
   write_authority: customer_runtime
   accessible_from:
   - m33_sm
+ownership:
+  e1m_uart0: a55
+  e1m_uart1: a55
+  e1m_spi0: a55
+  e1m_can0: a55
+  e1m_can1: a55
 
 # boot_order is empty -- add a `boot_order:` list to metadata/e1m_modules/E1M-V2N101.yaml when the
 # bring-up order is finalised.
