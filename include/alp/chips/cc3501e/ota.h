@@ -30,11 +30,15 @@ extern "C" {
 /**
  * @brief Push a complete signed CC3501E vendor image over the bridge + install.
  *
- * Runs the full cycle: OTA_BEGIN(len) -> chunked OTA_WRITE -> OTA_FINISH.  On
- * success the CC3501E has staged the image into its non-primary vendor slot and
- * reboots so BL2 swaps it to primary (TRIAL), after which it self-accepts.  THE
+ * Runs the full cycle: update mode -> OTA_BEGIN(len) -> chunked OTA_WRITE ->
+ * OTA_FINISH -> OTA_PROMOTE.  FINISH stages the image in the non-primary vendor
+ * slot; PROMOTE, issued in the same CC3501E boot (#2728), arms the swap-reboot,
+ * BL2 swaps the slot to primary (TRIAL), and the image self-accepts.  THE
  * BRIDGE LINK DROPS during that reboot: expect the link to go quiet, then
  * re-establish (cc3501e_reset / the soak) and confirm the new GET_VERSION.
+ * PROMOTE must not be split from FINISH by any reboot: the swap request lives
+ * in CC3501E RAM, so an image left STAGED across a reboot is refused by every
+ * later PROMOTE (OTA_STATUS reserved[0] = 119) and must be re-sent.
  *
  * Recovers from a missed per-chunk reply by re-syncing to the device's actual
  * write cursor (CMD_OTA_STATUS) rather than blindly re-sending (OTA_WRITE is
@@ -49,7 +53,7 @@ extern "C" {
  *                    Roughly a sixth of it is spent polling for the reboot, after
  *                    a fixed ~3.5 s settle, so a per-frame value under ~5 s buys
  *                    only one or two confirm polls.  The bench uses 20000.
- * @return ALP_OK once FINISH is acked (the device reboots afterwards);
+ * @return ALP_OK once PROMOTE is acked (the device swap-reboots afterwards);
  *         otherwise the first failing step's status (caller may
  *         cc3501e_ota_abort() to reset the device session).
  */
