@@ -987,3 +987,37 @@ cores:
     assert 'PACKAGECONFIG:append:pn-alp-sdk = " mqtt security"' in conf
 
 
+
+
+def _mender_local_conf(tmp_path: Path, tenant: str) -> str:
+    body = f"""
+som:
+  sku: E1M-V2N101
+
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+
+ota:
+  provider: mender
+  server:
+    url: "https://hosted.mender.io"
+    tenant: "{tenant}"
+"""
+    project = load_board_yaml(_write_board(tmp_path, body))
+    return _slice_local_conf(project, project.cores["a55_cluster"])
+
+
+def test_local_conf_mender_tenant_placeholder_not_emitted(tmp_path: Path) -> None:
+    """#2706: a ${NAME} tenant is not expanded by BitBake; emit no assignment."""
+    conf = _mender_local_conf(tmp_path, "${MENDER_TENANT_TOKEN}")
+    assert "MENDER_TENANT_TOKEN ?=" not in conf
+    assert "${MENDER_TENANT_TOKEN}" not in conf
+    assert 'MENDER_SERVER_URL ?= "https://hosted.mender.io"' in conf
+
+
+def test_local_conf_mender_tenant_literal_emitted(tmp_path: Path) -> None:
+    conf = _mender_local_conf(tmp_path, "abc123")
+    assert 'MENDER_TENANT_TOKEN ?= "abc123"' in conf
