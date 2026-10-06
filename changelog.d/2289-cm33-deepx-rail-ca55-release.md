@@ -14,7 +14,7 @@ no OTP is involved. `v2n_cm33_release_ca55()` in the example's
 release (`CPG_RST_1`, `CPG_RST_0`, `CPG_LP_CA55_CTL1/CTL2` handshakes), with the
 offsets and bit fields taken from the #2289 comment that checked them against
 RZ/V2N HW manual R01UH1071EJ0120 Rev.1.20, for example the vector register at
-`examples/v2n/v2n-cm33-deepx-rail/src/ca55_release.c:35` ("#define SYS_ACPU_CFG_RVAL0").
+`examples/v2n/v2n-cm33-deepx-rail/src/ca55_release.c:44` ("#define SYS_ACPU_CFG_RVAL0").
 The FSP headers are not in the tree, so a cross-check against them is marked
 `TODO(alp-sdk#2289)`.
 
@@ -22,7 +22,7 @@ It is called only after `da9292_ch2_sequence()` returns `ALP_OK`, behind the
 default-off `CONFIG_V2N_CM33_RELEASE_CA55`, and today always fails closed: the
 AWO to ALL_ON power-domain entry (Table 4.5-4) has no register offsets in the
 issue or the tree, so `all_on_entry()` at
-`examples/v2n/v2n-cm33-deepx-rail/src/ca55_release.c:102` ("static alp_status_t all_on_entry")
+`examples/v2n/v2n-cm33-deepx-rail/src/ca55_release.c:111` ("static alp_status_t all_on_entry")
 returns `ALP_ERR_NOSUPPORT` and nothing is written. The `CPG_RSTMON_0` CA55 bit
 mask is likewise missing and not guessed. Build-verified only; bench steps 1-6
 of the issue are still open.

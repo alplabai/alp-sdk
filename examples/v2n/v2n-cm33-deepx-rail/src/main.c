@@ -111,8 +111,7 @@ int main(void)
 	/* Fail closed: in a55_boot Linux also binds i2c8, and a second RIIC8
 	 * master can garble any PMIC register.  No RIIC8/P64/P65 access. */
 	printf("[cm33-deepx-rail] refusing to master RIIC8: set CONFIG_V2N_CM33_BOOT_CONFIRMED "
-	       "only on a unit strapped for cm33_boot (see the file header)
-");
+	       "only on a unit strapped for cm33_boot (see the file header)\n");
 	return 0;
 #endif
 	printf("[cm33-deepx-rail] this app is ONLY correct if BOOTSELCPU strapped this boot "
