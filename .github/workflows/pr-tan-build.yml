@@ -48,6 +48,13 @@ on:
     paths:
       - 'src/**'
       - 'include/**'
+      - 'firmware/**'
+      - 'blocks/**'
+      - 'vendors/**'
+      - 'tools/**'
+      - '.python-version'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - 'chips/**'
       - 'metadata/**'
       - 'scripts/**'
@@ -68,9 +75,12 @@ permissions:
 
 env:
   # The tan-cli release this gate installs. MUST move with the tan release:
-  # bump it when a new tan-cli tag ships (and re-run this job on the bump PR).
-  # A ref, not `dev`, so an unreleased tan-cli regression cannot redden
-  # unrelated alp-sdk PRs; the customer path is the released tan.
+  # bump it in the PR that follows every new tan-cli tag, and let this job run
+  # on that bump PR before merging it. A ref, not `dev`, so an unreleased
+  # tan-cli regression cannot redden unrelated alp-sdk PRs; the customer path
+  # is the released tan. onramp-clean-container.yml deliberately tracks tan
+  # `dev` instead (it is the early-warning lane for the quickstart), so the two
+  # pins differ on purpose.
   TAN_REF: v0.6.0
 
 jobs:
@@ -162,7 +172,7 @@ jobs:
           path: |
             zephyr
             modules
-          key: tan-build-zephyr-v4.4.1-${{ runner.os }}-${{ hashFiles('*/zephyr/patches.yml') }}
+          key: tan-build-zephyr-v4.4.1-${{ runner.os }}-${{ hashFiles('*/zephyr/patches.yml', '*/west.yml') }}
 
       - name: Cache Zephyr SDK
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
@@ -220,6 +230,7 @@ jobs:
         timeout-minutes: 5
         with:
           name: tan-build-envelope-${{ matrix.family }}
+          overwrite: true
           path: ${{ runner.temp }}/tan-build-envelope.json
           if-no-files-found: warn
 
@@ -256,9 +267,14 @@ jobs:
           print("tan build envelope ok:true; slices:",
                 {k: v.get("status") for k, v in slices.items()})
           PY
-          elf="$(find "${EXAMPLE}/build" -name zephyr.elf -size +0 -print -quit)"
-          if [ -z "${elf}" ]; then
-            echo "::error::no non-empty zephyr.elf under ${EXAMPLE}/build although the envelope said ok"
-            exit 1
-          fi
-          echo "Built: ${elf} ($(stat -c%s "${elf}") bytes)"
+          missing=0
+          for core in ${ZEPHYR_CORES}; do
+            elf="${EXAMPLE}/build/${core}-zephyr/build/zephyr/zephyr.elf"
+            if [ ! -s "${elf}" ]; then
+              echo "::error::slice ${core} of ${EXAMPLE}: no non-empty ${elf} although the envelope reported it built"
+              missing=1
+            else
+              echo "Built: ${elf} ($(stat -c%s "${elf}") bytes)"
+            fi
+          done
+          exit "${missing}"
