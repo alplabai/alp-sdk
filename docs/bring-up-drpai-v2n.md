@@ -291,6 +291,9 @@ Nothing in the layer adds a user to `drpai`. A product's app user must opt in,
 e.g. `EXTRA_USERS_PARAMS += "usermod -a -G drpai <user>;"` in the image or
 `local.conf`; before this change `video` membership was enough.
 
+- **No IOMMU.** The driver's DMA descriptors can reach any physical DRAM
+  address, so treat any process that can open `/dev/drpai0` as able to read
+  and write DRAM.
 - **Register ioctls are privileged.** Kernel patch
   `0018-drpai-require-CAP_SYS_RAWIO-for-the-register-ioctls.patch` makes the
   vendor driver's ioctls 64-69 (`DRPAI_READ/WRITE_DRP_REG`,
@@ -621,21 +624,6 @@ this and prints per-NPU latency and combined FPS.
 > pre/post-processing, so the example sets `TVM_NUM_THREADS=2` and
 > `TVM_BIND_THREADS=0` unless you already set them. The effect on latency
 > is unmeasured.
-
-## Security note: `/dev/drpai0` access is root-equivalent
-
-The image's udev rule (`meta-alp-sdk/recipes-bsp/alp-drpai-udev/files/99-alp-drpai.rules`) opens `/dev/drpai0` to the `video` group (mode `0660`),
-while the vendor driver creates the node root-only. Treat any process that can
-open it as root-equivalent:
-
-- the driver's DMA descriptors can reach any physical DRAM address (no IOMMU);
-- `DRPAI_WRITE_CPG_REG` writes CPG registers with only a bounds check, so a
-  caller can gate clocks of peripherals the CM33 owns or alter the bus
-  stop bits between the CM33 and the A55.
-
-The access policy (capability check in the driver versus a root-only node with
-a dedicated group) is under review. Until it is decided, add only trusted
-accounts to `video`. Not tested on silicon.
 
 ## Related
 

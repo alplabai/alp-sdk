@@ -19,7 +19,8 @@ Silicon evidence, recorded verbatim in
 with the Linux node enabled, "rz-dmac bound + 8 GIC IRQs claimed on the
 live system while the CM33 FSP was arming the same channels"
 (2026-06-06). The bench line under-counts: the SoC dtsi lists 17
-interrupts, error `GIC_SPI 499` plus ch0..15 `GIC_SPI 89..104`. The current mitigation is a whole-unit disable —
+interrupts, error `GIC_SPI 499` plus ch0..15 `GIC_SPI 89..104`. The
+current mitigation is a whole-unit disable —
 `&dmac0 { status = "disabled"; }` — landed against issue #84
 (`dev 1deb984`, per that issue's own "Fixed already" list).
 

@@ -224,8 +224,9 @@ reserved: `CPG_CLKON_1` bits 8-15, `CPG_CLKON_17` bits 0-2,
 
 **HW fix:** none.
 
-**Software workaround:** none. We do not hand-patch the vendor driver; ask
-Renesas whether the reserved-bit writes are safe on V2N.
+**Software workaround:** none for the reserved-bit writes in the clock-init
+routine; they are left unpatched. Ask Renesas whether they are safe on V2N.
+Kernel patch 0018 does gate the register ioctls on `CAP_SYS_RAWIO`.
 
 **Confidence:** high for the register list (read from the patch and the
 manual); safety of the writes is unconfirmed.
