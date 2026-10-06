@@ -173,11 +173,13 @@ alp_status_t cc3501e_ota_write(cc3501e_t     *ctx,
  *          FINISH ack drained, and an @ref cc3501e_ota_abort arriving after it
  *          had nothing left to revoke -- it could only race a reboot that was
  *          already armed (#1123). @ref cc3501e_ota_promote is now the ONLY
- *          thing that commits an image. A caller that wants the old one-shot
- *          behaviour issues FINISH then PROMOTE; a caller that wants to decide
- *          later can now do so, and can see the staged image in
- *          @ref alp_cc3501e_ota_status_t::pending in the meantime -- including
- *          after a reset that cleared the device's session.
+ *          thing that commits an image, and it must follow FINISH in the SAME
+ *          CC3501E boot: the swap request it needs lives in CC3501E RAM and
+ *          is lost by any reboot or reset in between (#2741). A caller can
+ *          wait between FINISH and PROMOTE, but not across a reboot. An image
+ *          still reported STAGED by @ref alp_cc3501e_ota_status_t::pending
+ *          after a reset cannot be promoted; see @ref cc3501e_ota_promote for
+ *          the recovery.
  *
  * @param ctx         Initialised bridge handle.
  * @param timeout_ms  Per-request poll-by-repeat budget.
@@ -198,16 +200,24 @@ alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms);
 alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms);
 
 /**
- * @brief Promote an already-committed pending image (OTA_PROMOTE, opcode 0x46).
+ * @brief Promote the image the last FINISH staged (OTA_PROMOTE, opcode 0x46).
  *
- * Requests the deferred swap-reboot for an image already installed to STAGED --
- * for example one left pending by a bare reset that carried no swap request. A
- * committed STAGED image survives a reset while the device's RAM session state
- * resets to IDLE, so a fresh @ref cc3501e_ota_finish is unreachable (a new
- * session is rejected while a slot is occupied). Since #1123 it is also the
- * ONLY path that commits ANY image: @ref cc3501e_ota_finish stages and stops.
- * The bridge link drops while the device reboots and BL2/MCUboot swaps the
- * pending slot to primary.
+ * Requests the deferred swap-reboot for the image @ref cc3501e_ota_finish just
+ * installed to STAGED. Since #1123 it is the ONLY path that commits ANY image:
+ * @ref cc3501e_ota_finish stages and stops. The bridge link drops while the
+ * device reboots and BL2/MCUboot swaps the pending slot to primary.
+ *
+ * SAME BOOT AS FINISH ONLY (#2741). The TI PSA-FWU swap request is held in
+ * CC3501E RAM and is set only by FINISH's install step. After any reboot or
+ * reset of the CC3501E it is gone: the image store still reports the image
+ * STAGED, but the firmware's swap request returns PSA_ERROR_BAD_STATE (-137),
+ * which it records as `reserved[0]` = 119 (`(uint8_t)(int8_t)-137`) in
+ * @ref alp_cc3501e_ota_status_t, and no swap happens. Bench-proven on bridge
+ * firmware v0.9.x (E1M-AEN803, #2728). An image found STAGED after a reset
+ * therefore cannot be promoted, by this call or by anything else; the only
+ * recovery is @ref cc3501e_ota_abort (or a new @ref cc3501e_ota_begin, which
+ * clears the slot) and a full re-send of the image, then FINISH and PROMOTE
+ * in one boot. @ref cc3501e_ota_update already issues them back to back.
  *
  * CONFIRMED BEFORE IT COMMITS. This reads @ref alp_cc3501e_ota_status_t::pending
  * first and only issues the promote when the image store actually reports a
@@ -224,7 +234,10 @@ alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms);
  * @param ctx         Initialised bridge handle.
  * @param timeout_ms  Per-request poll-by-repeat budget.
  * @return ALP_OK once the promote is acked (reboot follows), or immediately if
- *         the image is already TRIAL (the requested swap has happened);
+ *         the image is already TRIAL (the requested swap has happened). ALP_OK
+ *         is not proof that the swap happened: if the link does not drop,
+ *         read OTA_STATUS -- reserved[0] = 119 with pending still STAGED is
+ *         the STAGED-after-reset case above;
  *         ALP_ERR_NOT_READY if the store reports no installable image -- which
  *         includes both "nothing pending" and "could not be determined", since
  *         neither is consent to reboot; otherwise the mapped error.
