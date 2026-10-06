@@ -1843,14 +1843,14 @@ negotiates it.  `GET_VERSION`'s SPI reply for `0.15.0` is
 `A5 00 00 0F 00 01 08` (CRC from `tests/gen_protocol_vectors.py` in the
 firmware repo, wire order low byte first).
 IO15/IO26 are NOT a 0.15 feature, despite the mask growth shipping in the same
-firmware generation.  Several firmware branches report minor 15 with a 21-pad
+firmware generation.  A firmware reporting minor 15 may carry a 21-pad
 map (`GPIO_PAD_MAP_COUNT 21u`) that ignores bits 21/22 yet answers `STATUS_OK`,
 so minor 15 alone cannot prove the pads exist (#2725).  The host gate is minor
->= 16: a firmware that implements bits 21/22 MUST report 0.16 or newer, and no
-other firmware may.  Until such firmware ships, IO15/IO26 stay refused
+>= 16: a firmware that implements bits 21/22 MUST report 0.16 or newer, and a firmware
+without them MUST NOT.  Until such firmware ships, IO15/IO26 stay refused
 (`ALP_ERR_NOSUPPORT` / `-ENODEV`) -- a refusal, never a silent success.
 
-The same minor also grows the GPIO mask from 21 to 23 bits -- bit 21 = E1M IO15
+The 0.16 minor grows the GPIO mask from 21 to 23 bits -- bit 21 = E1M IO15
 (GD32 `PB4`), bit 22 = E1M IO26 (GD32 `PC2`), §3.1 -- and a host below
 `GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR` (16) never learns the two bits exist.
 
