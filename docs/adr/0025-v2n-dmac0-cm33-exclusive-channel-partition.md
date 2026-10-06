@@ -18,8 +18,8 @@ Silicon evidence, recorded verbatim in
 `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi:326-338`:
 with the Linux node enabled, "rz-dmac bound + 8 GIC IRQs claimed on the
 live system while the CM33 FSP was arming the same channels"
-(2026-06-06) [the bench line under-counted: the SoC dtsi lists 17
-interrupts, error `GIC_SPI 499` plus ch0..15 `GIC_SPI 89..104`]. The current mitigation is a whole-unit disable —
+(2026-06-06). The bench line under-counts: the SoC dtsi lists 17
+interrupts, error `GIC_SPI 499` plus ch0..15 `GIC_SPI 89..104`. The current mitigation is a whole-unit disable —
 `&dmac0 { status = "disabled"; }` — landed against issue #84
 (`dev 1deb984`, per that issue's own "Fixed already" list).
 

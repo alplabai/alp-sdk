@@ -3,21 +3,24 @@
 # E1M-V2M103 on E1M-X EVK, running Linux image alp-image-edge-e1m-v2m103-a55:
 # the kernel's GD32 bridge driver probed the supervisor MCU on BRD_I2C
 # (i2c-8, 0x70) and logged its GET_VERSION protocol (bench 2026-09-29:
-# protocol 0.14.0, reply 00 00 0e 00 cf a7).  Read-only: dmesg only.
+# protocol 0.14.0, reply 00 00 0e 00 cf a7; 0.15.x once firmware 0.3.1+ is flashed).
+# Read-only: dmesg only.
 #
 # ssh_command spec: no example binary, no scp.
 
 schema_version: 1
 name: v2m103-gd32-bridge-linux
 description: |
-  Kernel GD32 bridge driver answered GET_VERSION with protocol 0.14.0.
+  Kernel GD32 bridge driver answered GET_VERSION with protocol 0.14.x or 0.15.x.
 
 flash_method: ssh-run
-ssh_command: "dmesg | grep -i 'GD32 bridge'"
+ssh_command: |-
+  dmesg | grep -i 'GD32 bridge'
+  dmesg | grep -Eq 'GD32 bridge protocol 0\.(14|15)\.' && echo HIL_GD32_PROTOCOL_OK
 
 serial:
   duration_s: 10
   expect_contains:
-    - "GD32 bridge protocol 0.14.0"
+    - "HIL_GD32_PROTOCOL_OK"
   expect_absent:
     - "not answering"

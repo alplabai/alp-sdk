@@ -64,3 +64,15 @@ PREFERRED_PROVIDER_virtual/bootloader ?= "u-boot"
 # ssh once their bootstrap flow is in place.
 IMAGE_FEATURES:append = " ssh-server-openssh"
 IMAGE_INSTALL:append = " mender-client mender-connect"
+
+# mender-full generates /etc/fw_env.config itself; alp-uboot-env (installed
+# by alp-image-common.inc) ships one too and would conflict.  Point
+# meta-mender at the redundant pair U-Boot reads (the SoM preset's
+# on_module.emmc_boot.uboot_env; tests/scripts/test_uboot_env_layout.py holds
+# this and uboot-env-emmc.cfg equal to it).  U-Boot already imports Mender's
+# variables (upgrade_available, bootcount, mender_boot_part,
+# mender_boot_part_hex, mender_saveenv_canary) -- confirm that list against
+# the meta-mender release in use, anything missing is ignored at boot.
+MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_1 ?= "0x220000"
+MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_2 ?= "0x230000"
+IMAGE_INSTALL:remove = "alp-uboot-env"
