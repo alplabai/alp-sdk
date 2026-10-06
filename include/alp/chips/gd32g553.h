@@ -252,15 +252,16 @@ extern "C" {
 
 /** Minimum protocol MINOR at which the bridge's GPIO expander grows from
  *  21 to 23 lines, adding @ref GD32G553_GPIO_LINE_E1M_IO15 and
- *  @ref GD32G553_GPIO_LINE_E1M_IO26 (firmware 0.3.1).  A bridge below this
- *  minor ignores those bits and still answers success, so
+ *  @ref GD32G553_GPIO_LINE_E1M_IO26.  Minor 15 is NOT enough: several firmware
+ *  branches report 15 with a 21-pad map (#2725), so the pads belong to 16.
+ *  A bridge below this minor ignores those bits and still answers success, so
  *  gd32g553_gpio_write() returns `ALP_ERR_NOSUPPORT` for a mask naming
  *  either bit on such a bridge (likewise for the REG_ON bits below minor
  *  11 and CAN_STBY, bit 20, below minor 13); gd32g553_gpio_read() drops
  *  the missing bits (they read 0) and refuses only a mask naming nothing
  *  else.
  *  See docs/gd32-bridge-protocol.md's version-history table. */
-#define GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR 15u
+#define GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR 16u
 
 /** v0.7 link-feature bits (CMD_LINK_FEATURES payload).  STATUS_SEQ:
  *  once granted, every SPI reply's STATUS byte carries a 4-bit

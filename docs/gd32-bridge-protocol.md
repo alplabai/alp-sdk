@@ -385,11 +385,11 @@ this board is SWD only. The `GD32G553_GPIO_LINE_*` host macros are bridge
 bit numbers, not Linux gpiochip line numbers.
 
 Like every other E1M pad they stay undriven until a host first reads or writes
-them. `PC14` (E1M IO24) is not part of this change. A bridge below minor 15
+them. `PC14` (E1M IO24) is not part of this change. A bridge below minor 16
 ignores bits 21/22 and still answers success, so `gd32g553_gpio_read` /
 `gd32g553_gpio_write` return `ALP_ERR_NOSUPPORT` for a mask naming either bit
 when the cached protocol minor is below
-`GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR` (15), and the Linux
+`GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR` (16), and the Linux
 `gpio-gd32-bridge` driver refuses `.request()` of lines 22/23 (`-ENODEV`)
 until `GET_VERSION` confirms it (`-EAGAIN` while the bridge has not answered
 yet; no kernel consumer uses these lines, so `-EPROBE_DEFER` would only leak
@@ -1842,9 +1842,17 @@ allow-list (§5.3).  Nothing but the I2C policy is observable until a host
 negotiates it.  `GET_VERSION`'s SPI reply for `0.15.0` is
 `A5 00 00 0F 00 01 08` (CRC from `tests/gen_protocol_vectors.py` in the
 firmware repo, wire order low byte first).
+IO15/IO26 are NOT a 0.15 feature, despite the mask growth shipping in the same
+firmware generation.  Several firmware branches report minor 15 with a 21-pad
+map (`GPIO_PAD_MAP_COUNT 21u`) that ignores bits 21/22 yet answers `STATUS_OK`,
+so minor 15 alone cannot prove the pads exist (#2725).  The host gate is minor
+>= 16: a firmware that implements bits 21/22 MUST report 0.16 or newer, and no
+other firmware may.  Until such firmware ships, IO15/IO26 stay refused
+(`ALP_ERR_NOSUPPORT` / `-ENODEV`) -- a refusal, never a silent success.
+
 The same minor also grows the GPIO mask from 21 to 23 bits -- bit 21 = E1M IO15
 (GD32 `PB4`), bit 22 = E1M IO26 (GD32 `PC2`), §3.1 -- and a host below
-`GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR` (15) never learns the two bits exist.
+`GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR` (16) never learns the two bits exist.
 
 ## 9. Reference vectors
 
