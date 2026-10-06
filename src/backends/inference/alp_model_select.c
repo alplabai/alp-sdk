@@ -45,7 +45,7 @@ size_t alp_auto_order_parse(const char *csv, alp_inference_backend_t *out, size_
 }
 
 /* Tiebreak rank between two fitting NPU targets (lower wins): the SoM
- * auto_order position, else 0 for the SoM preferred_backend and 1 for the rest. */
+ * auto_order position; with no auto_order every backend ranks 0 (first fitting wins). */
 static size_t _rank(alp_inference_backend_t be, const alp_model_select_env_t *env)
 {
 	if (env->n_auto_order > 0u) {
@@ -56,9 +56,7 @@ static size_t _rank(alp_inference_backend_t be, const alp_model_select_env_t *en
 		}
 		return env->n_auto_order;
 	}
-	return (env->preferred_backend != ALP_INFERENCE_BACKEND_AUTO && be == env->preferred_backend)
-	           ? 0u
-	           : 1u;
+	return 0u;
 }
 
 /* Every format string the .alpmodel writer (scripts/alp_model/manifest.py)

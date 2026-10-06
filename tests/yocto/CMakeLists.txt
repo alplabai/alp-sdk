@@ -306,7 +306,6 @@ add_executable(alp_test_inference_latency
     ${CMAKE_CURRENT_SOURCE_DIR}/inference_latency.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/inference/alp_model_select.c
 )
 target_include_directories(alp_test_inference_latency PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -328,7 +327,6 @@ add_executable(alp_test_inference_format_gate
     ${CMAKE_CURRENT_SOURCE_DIR}/inference_format_gate.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/inference/alp_model_select.c
 )
 target_include_directories(alp_test_inference_format_gate PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -516,7 +514,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${CMAKE_CURRENT_SOURCE_DIR}/inference_invoke_close_race.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/inference/alp_model_select.c
     )
     target_link_libraries(alp_test_inference_invoke_close_race PRIVATE Threads::Threads)
     target_include_directories(alp_test_inference_invoke_close_race PRIVATE
@@ -541,7 +538,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${CMAKE_CURRENT_SOURCE_DIR}/inference_invoke_overlap_race.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/inference/alp_model_select.c
     )
     target_link_libraries(alp_test_inference_invoke_overlap_race PRIVATE Threads::Threads)
     target_include_directories(alp_test_inference_invoke_overlap_race PRIVATE

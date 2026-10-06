@@ -30,10 +30,9 @@ typedef struct {
 	size_t             n_avail_silicon;
 	uint32_t           arena_sram_kib; /* device NPU arena budget; 0 = unknown -> skip SRAM gate,
 					      loudly (see alp_model_select_result_t::arena_fit_unverified) */
-	alp_inference_backend_t preferred_backend; /* SoM preferred (tiebreak); AUTO if none */
 	/** SoM `inference.auto_order` (best first, from alp_auto_order_parse()).  When
-	 *  @c n_auto_order > 0 it ranks the tiebreak instead of @c preferred_backend:
-	 *  the lower index wins; a backend not listed ranks last. */
+	 *  @c n_auto_order > 0 it ranks the tiebreak: the lower index wins; a
+	 *  backend not listed ranks last.  Empty: the first fitting target wins. */
 	const alp_inference_backend_t *auto_order;
 	size_t                         n_auto_order;
 } alp_model_select_env_t;

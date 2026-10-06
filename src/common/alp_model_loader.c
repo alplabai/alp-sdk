@@ -96,12 +96,11 @@ alp_inference_t *alp_inference_open_alpmodel(const alp_model_open_opts_t *opts)
 #else
 		.soc_ref = NULL,
 #endif
-		.avail_silicon     = _avail_silicon,
-		.n_avail_silicon   = N_AVAIL_SILICON,
-		.arena_sram_kib    = (uint32_t)ALP_SOC_NPU_ARENA_SRAM_KIB,
-		.preferred_backend = ALP_INFERENCE_BACKEND_AUTO,
-		.auto_order        = order,
-		.n_auto_order      = n_order,
+		.avail_silicon   = _avail_silicon,
+		.n_avail_silicon = N_AVAIL_SILICON,
+		.arena_sram_kib  = (uint32_t)ALP_SOC_NPU_ARENA_SRAM_KIB,
+		.auto_order      = order,
+		.n_auto_order    = n_order,
 	};
 	alp_model_select_result_t sel;
 	rc = alp_model_select(&mdl, &env, opts->backend, &sel);

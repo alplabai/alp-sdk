@@ -2184,8 +2184,8 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         joined = " ".join(library_pkgs)
         lines.append(f'IMAGE_INSTALL:append = " {joined}"')
     # SoM-declared AUTO accelerator preference.  Read by the alp-sdk recipe
-    # (EXTRA_OECMAKE -> -DALP_SDK_INFERENCE_AUTO_ORDER -> src/yocto
-    # resolve_auto() + the .alpmodel selector).  Weak `?=` so a hand-edited
+    # (EXTRA_OECMAKE -> -DALP_SDK_INFERENCE_AUTO_ORDER); only the
+    # .alpmodel selector (alp_model_select) consumes it, as a tiebreak.  Weak `?=` so a hand-edited
     # local.conf wins; emitted only for presets that declare it.
     auto_order = _inference_auto_order(project.som_preset)
     if auto_order:
