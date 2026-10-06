@@ -219,6 +219,9 @@ void fake_tas2563_fail_write_at(uint8_t book, uint8_t page, uint8_t reg);
  *  log, the counters, the book/page selection and any armed fault. */
 void fake_tas2563_reset(void);
 
+/** Value the fake returns for a B0/P1/0x02 read (ROM/tuning select). */
+void fake_tas2563_set_app_mode(uint8_t val);
+
 /* ------------------------------------------------------------------ */
 /* fake GD32G553 supervisor-MCU bridge (PING/GET_VERSION/GET_STATE)    */
 /* ------------------------------------------------------------------ */
