@@ -508,7 +508,7 @@ def test_select_steps_rules():
     names = [s.name for s in steps.select_steps(only=["census"])]
     assert names == ["preflight", "census"]
     names = [s.name for s in steps.select_steps(start="secure_page", skip=["hil_smoke"])]
-    assert names == ["preflight", "secure_page", "dsw1_xspi_remove_sd", "cold_boot_test",
+    assert names == ["preflight", "secure_page", "sd_out_emmc_boot", "cold_boot_test",
                      "census_final", "clkgen_verify", "rtc_set", "functional_test", "record"]
     with pytest.raises(ValueError):
         steps.select_steps(only=["nope"])
@@ -1450,3 +1450,43 @@ def test_need_linux_discovers_the_host_over_the_console_when_none_is_pinned(tmp_
     monkeypatch.setattr(steps, "connect_linux",
                         lambda c, force=False, **k: calls.append("connect") or setattr(c, "linux", FakeLinux()))
     assert ctx.need_linux() is not None and calls == ["login", "connect"]
+
+
+# --- sd_out_emmc_boot (#2697) ---------------------------------------------------------------
+
+def _sd_out(tmp_path, monkeypatch, roots, execute=True):
+    log: list[str] = []
+    it = iter(roots)
+    monkeypatch.setattr(steps.lt, "root_device", lambda t: next(it))
+    monkeypatch.setattr(steps.lt, "gd32_sd_out_flag_set", lambda t, bus, addr: log.append("flag") or 1)
+    monkeypatch.setattr(steps.lt, "gd32_boot_config", lambda t, bus, f=None, addr=0x70: log.append("get") or 1)
+    monkeypatch.setattr(steps.lt, "sdio_mux_set", lambda t, connected: log.append(f"mux {connected}"))
+    monkeypatch.setattr(steps, "cold_boot_phy_retry", lambda ctx, ev: log.append("cold") or "")
+    ctx = _ctx(tmp_path, bench=_bench(), linux=Board(), execute=execute)
+    return ctx, log
+
+
+def test_sd_out_flags_cold_boots_into_emmc_then_drives_the_mux(tmp_path, monkeypatch):
+    ctx, log = _sd_out(tmp_path, monkeypatch, ["/dev/mmcblk1p2", "/dev/mmcblk0p2"])
+    res = steps.SdOutEmmcBoot().run(ctx)
+    assert res.status == "done"
+    assert log == ["flag", "cold", "mux False", "get"]              # flag before the cut, mux after
+
+
+def test_sd_out_refuses_when_the_sd_is_still_the_root_after_the_cold_cycle(tmp_path, monkeypatch):
+    ctx, log = _sd_out(tmp_path, monkeypatch, ["/dev/mmcblk1p2", "/dev/mmcblk1p2"])
+    with pytest.raises(steps.Refused, match="still the microSD"):
+        steps.SdOutEmmcBoot().run(ctx)
+    assert "mux False" not in log
+
+
+def test_sd_out_on_an_emmc_root_skips_the_flag_and_the_cold_cycle(tmp_path, monkeypatch):
+    ctx, log = _sd_out(tmp_path, monkeypatch, ["/dev/mmcblk0p2"])
+    steps.SdOutEmmcBoot().run(ctx)
+    assert log == ["mux False", "get"]
+
+
+def test_sd_out_dry_run_touches_nothing(tmp_path, monkeypatch):
+    ctx, log = _sd_out(tmp_path, monkeypatch, [], execute=False)
+    steps.SdOutEmmcBoot().run(ctx)
+    assert log == [] and any("WOULD" in x for x in ctx.plan_log)

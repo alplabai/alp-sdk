@@ -1624,7 +1624,7 @@ on either link still confirms a trial) and before the opcode switch:
 
 * **Allowed on I2C:** `0x00` PING, `0x01` GET_VERSION, `0x02`
   GET_BUILD_ID, `0x03` RESET_REASON, `0x10` GPIO_READ, `0x11` GPIO_WRITE,
-  `0x41` SE_RESET, `0x81` LINK_FEATURES (I2C grants only `STATUS_SEQ`, with
+  `0x41` SE_RESET, `0x42` BOOT_CONFIG, `0x81` LINK_FEATURES (I2C grants only `STATUS_SEQ`, with
   `mp` = 65, so the extended form is accepted but changes nothing) and
   `0xF0..0xFF` OTA.
 * **Any other opcode** answers `STATUS_NOSUPPORT` (`0x06`) with an empty

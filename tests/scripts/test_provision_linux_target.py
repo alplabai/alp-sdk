@@ -1008,3 +1008,55 @@ def test_sdio_mux_refuses_to_pull_an_sd_root():
     with pytest.raises(BenchError, match="root is on it"):
         lt.sdio_mux_set(t, False)
     assert not any("direction" in c for c in fake.commands)
+
+
+def _bc_reply(flags: int, status: int = 0, bad_crc: bool = False) -> str:
+    body = bytes((status,)) + flags.to_bytes(4, "little")
+    crc = lt._crc16_ccitt_false(body) ^ (1 if bad_crc else 0)
+    return _hx(body + bytes((crc & 0xFF, crc >> 8)))
+
+
+def test_gd32_boot_config_frames_are_the_documented_i2c_envelope():
+    get = lt.gd32_boot_config_cmd(8)
+    assert get.startswith("i2ctransfer -f -y 8 w9@0x70 0x00 0x42 0x00 0x00 0x00 0x00 0x00 ")
+    assert get.endswith(" r7")
+    crc = lt._crc16_ccitt_false(bytes((0x42, 0, 0, 0, 0, 0)))
+    assert get.endswith(f"0x{crc & 0xFF:02x} 0x{crc >> 8:02x} r7")
+    assert "0x42 0x01 0x01 0x00 0x00 0x00" in lt.gd32_boot_config_cmd(8, lt.GD32_BOOT_CONFIG_SDMUX_EN_HIGH)
+
+
+def test_gd32_boot_config_reply_parsing():
+    assert lt.gd32_parse_boot_config(_bc_reply(1)) == 1
+    with pytest.raises(BenchError, match="CRC mismatch"):
+        lt.gd32_parse_boot_config(_bc_reply(1, bad_crc=True))
+    with pytest.raises(BenchError, match="status 0x06"):
+        lt.gd32_parse_boot_config(_bc_reply(0, status=6))
+
+
+def test_gd32_sd_out_flag_set_keeps_other_bits_and_waits_for_the_commit(monkeypatch):
+    monkeypatch.setattr(lt.time, "sleep", lambda s: None)
+    calls = []
+    reads = iter([0x4, BenchError("link blackout"), 0x4, 0x5])    # GET, then polls: blackout, old, new
+
+    def fake(t, bus, flags=None, addr=0x70):
+        calls.append(flags)
+        if flags is not None:
+            return 0x4
+        r = next(reads)
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+    monkeypatch.setattr(lt, "gd32_boot_config", fake)
+    assert lt.gd32_sd_out_flag_set(None, 8) == 0x5
+    assert calls == [None, 0x5, None, None, None]
+    calls.clear()
+    monkeypatch.setattr(lt, "gd32_boot_config", lambda t, b, f=None, a=0x70: calls.append(f) or 0x1)
+    assert lt.gd32_sd_out_flag_set(None, 8) == 0x1 and calls == [None]     # already set: no SET
+
+
+def test_gd32_sd_out_flag_set_times_out_when_the_commit_never_lands(monkeypatch):
+    monkeypatch.setattr(lt.time, "sleep", lambda s: None)
+    monkeypatch.setattr(lt, "gd32_boot_config", lambda t, b, f=None, a=0x70: 0)
+    with pytest.raises(BenchError, match="never read back"):
+        lt.gd32_sd_out_flag_set(None, 8)
