@@ -67,7 +67,14 @@ class SomTemperatureNode : public rclcpp::Node
   public:
 	SomTemperatureNode() : Node("alp_som_temperature")
 	{
-		const auto period_ms = declare_parameter<int>("period_ms", 1000);
+		// A period below 1 ms would busy-spin a core (0) or make rclcpp throw
+		// out of this constructor (negative), so clamp it and say so.
+		auto period_ms = declare_parameter<int>("period_ms", 1000);
+		if (period_ms < 1) {
+			RCLCPP_WARN(get_logger(), "period_ms=%d is below 1; using 1 ms", period_ms);
+			period_ms = 1;
+		}
+		RCLCPP_INFO(get_logger(), "publishing every %d ms", period_ms);
 		frame_id_            = declare_parameter<std::string>("frame_id", "som");
 
 		// Sensor-data QoS: best-effort, shallow queue -- a late temperature
