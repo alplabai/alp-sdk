@@ -19,6 +19,18 @@
       "additionalProperties": false,
       "required": ["gd32_spi", "brd_i2c", "console"],
       "properties": {
+        "gd32_pads": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["swdio", "swclk", "nrst", "attn"],
+          "description": "GD32 control pads published as the dedicated alp,gd32-pads devicetree node (SWD + ATTN); plain GPIO, input out of reset.",
+          "properties": {
+            "swdio": { "$ref": "#/$defs/gpio_chip_select" },
+            "swclk": { "$ref": "#/$defs/gpio_chip_select" },
+            "nrst": { "$ref": "#/$defs/gpio_chip_select" },
+            "attn": { "$ref": "#/$defs/gpio_chip_select" }
+          }
+        },
         "gd32_spi": {
           "type": "object",
           "additionalProperties": false,

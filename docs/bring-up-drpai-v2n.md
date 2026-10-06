@@ -291,6 +291,9 @@ Nothing in the layer adds a user to `drpai`. A product's app user must opt in,
 e.g. `EXTRA_USERS_PARAMS += "usermod -a -G drpai <user>;"` in the image or
 `local.conf`; before this change `video` membership was enough.
 
+- **No IOMMU.** The driver's DMA descriptors can reach any physical DRAM
+  address, so treat any process that can open `/dev/drpai0` as able to read
+  and write DRAM.
 - **Register ioctls are privileged.** Kernel patch
   `0018-drpai-require-CAP_SYS_RAWIO-for-the-register-ioctls.patch` makes the
   vendor driver's ioctls 64-69 (`DRPAI_READ/WRITE_DRP_REG`,
