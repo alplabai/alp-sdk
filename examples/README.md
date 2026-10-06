@@ -235,6 +235,7 @@ SoM EEPROM manifest).
 | `v2n/v2n-board-id-readout`      | Read the SoM EEPROM manifest + assert the SKU matches the firmware build. |
 | `v2n/v2n-eeprom-manifest-dump`  | Hexdump + decode the 128-byte EEPROM manifest at offset 0x0000.          |
 | `v2n/v2n-temp-sensor`           | Read the on-module TMP112 once per second; print degrees C.              |
+| `v2n/v2n-soc-temperature`       | Read the SoC die temperature from the Linux thermal zones once per second. |
 | `v2n/v2n-pwm-fan-control`       | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz board). |
 | `v2n/v2n-secure-element-sign`   | OPTIGA Trust M probe, Coprocessor UID read and raw APDU session. |
 | `v2n/v2n-gd32-swd-flash`        | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
