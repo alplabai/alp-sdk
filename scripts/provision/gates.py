@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+import yaml
+
 
 @dataclass
 class GateResult:
@@ -52,10 +54,18 @@ CM33_REGION_OFFSET = _CM33_BOOT["xspi_offset"]
 CM33_SRAM_BASE = _CM33_BOOT["sram_base"]
 CM33_PAD = _CM33_BOOT["image_pad"]
 CM33_MAX = _CM33_BOOT["image_max"]        # BL2 silently truncates anything larger
-# eMMC boot partition 1 layout: bl2_mmc from sector 1, the FIP from sector 0x300.
-BL2_MMC_SECTOR = 0x1
-FIP_SECTOR = 0x300
+# eMMC boot-partition layout: the SoM preset's on_module.emmc_boot block (every
+# V2N/V2M SKU carries the same one; the V2N101 preset is read here).
+_EMMC_BOOT = yaml.safe_load(
+    (Path(__file__).resolve().parents[2] / "metadata/e1m_modules/E1M-V2N101.yaml").read_text(encoding="utf-8")
+)["on_module"]["emmc_boot"]
+BL2_MMC_SECTOR = _EMMC_BOOT["bl2_mmc_sector"]
+FIP_SECTOR = _EMMC_BOOT["fip_sector"]
 BL2_MMC_MAX = (FIP_SECTOR - BL2_MMC_SECTOR) * 512
+# The U-Boot environment (redundant pair) starts here in the boot partition
+# `uboot_env.part`. A boot write must end below it or it would erase the
+# saved environment.
+BOOT_ENV_OFFSET = min(_EMMC_BOOT["uboot_env"]["offset"], _EMMC_BOOT["uboot_env"]["offset_redund"])
 
 
 def _sha256(path: Path) -> str:

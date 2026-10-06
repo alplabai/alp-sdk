@@ -269,34 +269,30 @@ week and an index would otherwise collide on the same MAC.
   `end1 = A2:C0:A6:00:00:14`.
 * **Runs twice, on purpose:** once from `board_late_init()` (so U-Boot's
   own networking has a MAC before `bootcmd` runs), and again from a new
-  `alp_eth_mac` command that `CONFIG_BOOTCOMMAND` invokes immediately
-  after `env default -a`. The second call is the one that actually
-  reaches Linux: U-Boot's `image_setup_libfdt()` runs
-  `fdt_fixup_ethernet()` (which copies `ethaddr`/`eth1addr` into the
-  `ethernet0`/`ethernet1` DT nodes' `mac-address`/`local-mac-address`
-  properties) *before* `ft_system_setup()` ever runs. Deriving only in
-  `board_late_init()` would leave nothing for Linux to see: its value is
-  *wiped* by that same `env default -a` a few bootcmd tokens later.
-  Deriving only in `ft_system_setup()` would already be too late for
-  that same boot instead, since `fdt_fixup_ethernet()` has already run
-  by the time it executes.
-* **No env override, by construction, not by choice:** `CONFIG_BOOTCOMMAND`
-  opens with `env default -a`, which wipes the whole environment back to
-  its compiled-in defaults on every boot before Linux is reached -- so a
-  `setenv ethaddr <mac>; saveenv` would not survive to the next autoboot
-  regardless of what U-Boot's derivation code did. The honest rule this
-  SoM ships is: **the derived MAC always applies whenever the serial
-  parses**, unconditionally, every boot. There is no override slot --
+  `alp_eth_mac` command that `CONFIG_BOOTCOMMAND` invokes first. The
+  second call is the one that actually reaches Linux: U-Boot's
+  `image_setup_libfdt()` runs `fdt_fixup_ethernet()` (which copies
+  `ethaddr`/`eth1addr` into the `ethernet0`/`ethernet1` DT nodes'
+  `mac-address`/`local-mac-address` properties) *before*
+  `ft_system_setup()` ever runs. Deriving only in `ft_system_setup()`
+  would already be too late for that same boot, since
+  `fdt_fixup_ethernet()` has already run by the time it executes.
+* **No env override, by construction, not by choice:** the derivation
+  overwrites `ethaddr`/`eth1addr` on every boot, so a
+  `setenv ethaddr <mac>; saveenv` does not survive to the next autoboot
+  even though the rest of the environment now persists (see
+  [U-Boot environment](#uboot-environment)). The rule this SoM ships is:
+  **the derived MAC always applies whenever the serial parses**,
+  unconditionally, every boot. There is no override slot --
   **conditional on autoboot actually running the compiled-in
-  `CONFIG_BOOTCOMMAND`.** A unit carrying a *saved* `bootcmd` from an
-  older FIP (predating this `alp_eth_mac` command) or from a manual
-  `setenv bootcmd; saveenv` runs THAT saved command instead -- one with
-  no `alp_eth_mac` call. Its `env default -a` (still present in every
-  version of this bootcmd) then wipes whatever `board_late_init()` set,
-  and Linux sees the DRP-AI vendor default `02:11:22:33:44:55`/`66`
-  instead of the derived MAC. See `docs/provisioning.md`'s FIP-flash
-  step for the saved-env reset a FIP upgrade on a previously-provisioned
-  unit must carry.
+  `CONFIG_BOOTCOMMAND`.** the write allowlist (see
+  [U-Boot environment](#uboot-environment)) rebuilds `bootcmd` from the
+  binary every boot, so a `bootcmd` saved by an older FIP cannot keep
+  running; a unit still on an older FIP that carries a *saved*
+  `bootcmd` without the `alp_eth_mac` call (or from a manual
+  `setenv bootcmd; saveenv`) runs THAT command instead, and Linux sees
+  the DRP-AI vendor default `02:11:22:33:44:55`/`66` instead of the
+  derived MAC. See `docs/provisioning.md`'s FIP-flash step.
 * **Unprovisioned EEPROM (no serial, or one that does not parse):**
   U-Boot prints `ALP: WARNING: ... SoM EEPROM not provisioned` and
   derives the MACs from the on-module eMMC's CID instead: CRC-32 of the
@@ -315,6 +311,76 @@ week and an index would otherwise collide on the same MAC.
 Octet 0 `0xA2` has U/L=1, I/G=0 and IEEE 802c-2017 SLAP quadrant bits
 Z:Y=`00`, i.e. the *Administratively Assigned Identifier* (AAI) quadrant --
 the range a local administrator may assign without buying an IEEE block.
+
+### U-Boot environment {#uboot-environment}
+
+The environment is a **redundant pair in eMMC boot partition 2** (Linux
+`/dev/mmcblk0boot1`): copy 1 at byte offset `0x220000`, copy 2 at
+`0x230000`, `0x10000` bytes each. The provisioning tool writes the
+bootloader into boot partition 1 (`mmcblk0boot0`), the one
+`EXT_CSD[179] = 0x08` selects for boot (`emmc_boot_write_verify`), so the
+two never share a partition. The provisioning write also refuses any boot
+image that would reach offset `0x220000`, whichever partition it targets. The offsets are set in
+`meta-alp-sdk/recipes-bsp/u-boot/u-boot/uboot-env-emmc.cfg` and mirrored
+in the image's `/etc/fw_env.config`
+(`meta-alp-sdk/recipes-core/alp-system/files/fw_env.config`);
+`tests/scripts/test_uboot_env_layout.py` fails if they disagree. The
+vendor default (end of the eMMC user area) is no longer used.
+
+* **`saveenv` persists, but only the OTA variables are read back.**
+  `CONFIG_BOOTCOMMAND` no longer starts with `env default -a`. U-Boot is
+  built with `CONFIG_ENV_WRITEABLE_LIST`: the built-in default is the
+  baseline on every boot and only the variables listed in
+  `CFG_ENV_FLAGS_LIST_STATIC` (patch `0016`, `include/configs/rzv2n-dev.h`)
+  are imported from the saved copy: Mender's `upgrade_available`,
+  `bootcount`, `mender_boot_part`, `mender_boot_part_hex`,
+  `mender_saveenv_canary`, and the first-boot marker variable. At the
+  U-Boot prompt `setenv` / `saveenv` behave as before; a variable not on
+  the list simply is not restored on the next boot. The Mender names come
+  from Mender's documented U-Boot integration and are not yet checked
+  against the meta-mender release this repo will pin; a missing name is
+  ignored at boot, so check the list when wiring Mender.
+* **Everything that controls booting is the firmware's.** `bootcmd`,
+  `bootargs`, `bootdelay`, `bootstopkey*`, `preboot` and the vendor boot
+  scripts (`bootcmd_check`, `emmcload`, `sd2load`, ...) are rebuilt from
+  the binary on every boot, so neither an older FIP's saved copy nor
+  `fw_setenv` can change them. First boot (both copies unreadable) prints
+  the usual `bad CRC, using default environment` once; patch `0016` then
+  writes the defaults and the first-boot marker.
+* **Linux sees the same variables.** The image carries `libubootenv`
+  (`fw_printenv`, `fw_setenv`) and `/etc/fw_env.config`. This is groundwork
+  for the OTA design: the boot flow reads no boot-slot variable yet.
+* **Provisioning does not write the environment.** The Linux boot write
+  (`write_emmc_boot`) refuses an image that would reach offset `0x220000`
+  (`scripts/provision/gates.py`, `BOOT_ENV_OFFSET`).
+* **Mender:** an image built with `conf/distro/include/mender.inc` brings
+  its own `/etc/fw_env.config` and U-Boot environment integration. It is
+  not wired to the offsets above yet: point
+  `MENDER_UBOOT_ENV_STORAGE_DEVICE_OFFSET_*` at them and do not install
+  `alp-uboot-env` alongside it.
+* **Console lockdown:** a production boot (`prod-boot.cfg`) ignores any
+  saved `bootdelay` / `bootstopkey*`, so a root shell's `fw_setenv` cannot
+  reopen the console.
+
+* **Why persistent, not env-nowhere.** Issue #2637 first recorded
+  `CONFIG_ENV_IS_NOWHERE` as the fix for the `bad CRC` line; the
+  maintainer's later decision (work ledger Q2, 2026-10-03: redundant
+  environment on the eMMC boot partition plus `fw_setenv` for OTA)
+  supersedes it, and the allowlist keeps the part of env-nowhere that
+  mattered, that no saved variable can change how the unit boots.
+
+### microSD card-detect {#sd-card-detect}
+
+U-Boot's SD host cannot report card presence, so an empty slot used to
+print `Card did not respond to voltage select! : -110` on every boot.
+Patch `0015` adds an `alp_sd_present` command that reads the slot's
+card-detect switch (`SD1_SD1CD`, PA1, active-low: 0 = card present, the
+same net Linux uses as `cd-gpios` for `&sdhi1` in `e1m-x-evk.dtsi`), and
+`CONFIG_BOOTCOMMAND` touches `mmc1` only when it succeeds; with the slot
+empty it runs the vendor eMMC loader directly. A card without
+`boot/Image` on partition 2 still falls back to the eMMC. Applies to the
+E1M-V2N/V2M builds that set the SD1 microSD Kconfig option; other builds
+keep the old behaviour.
 
 ### SoC OTP (not used by the SDK) {#soc-otp}
 

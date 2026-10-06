@@ -828,6 +828,25 @@ def test_gd32_bridge_version_frames_and_checks_crc():
         lt.gd32_bridge_version(t, 8)
 
 
+def test_emmc_boot1_write_refuses_an_image_that_reaches_the_uboot_env(tmp_path):
+    img = tmp_path / "fip.bin"
+    img.write_bytes(bytes([3]) * 1024)
+    t, fake = target([("boot0/size", "16384\n")])  # 8 MiB: the partition is not the limit here
+    with pytest.raises(BenchError, match="U-Boot environment"):
+        lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, gates.BOOT_ENV_OFFSET // 512 - 1)
+    assert not any(c.startswith("dd ") and " of=" in c for c in fake.commands)
+
+
+def test_emmc_boot1_write_accepts_an_image_ending_exactly_at_the_uboot_env(tmp_path):
+    img = tmp_path / "fip.bin"
+    img.write_bytes(bytes([3]) * 1024)
+    good = md5(img.read_bytes())
+    t, fake = target([("boot0/size", "16384\n"), ("md5sum", f"{good}  -\n"), ("force_ro|rm -f|^dd ", "")])
+    sector = gates.BOOT_ENV_OFFSET // 512 - 2           # 2 sectors * 512 B = the image, ends AT the env
+    assert lt.emmc_boot_write_verify(t, "/dev/mmcblk1", img, sector) == good
+    assert any(c.startswith("dd if=") and " of=" in c for c in fake.commands)
+
+
 # --- i2c_get retry / census unread keys / PHY id / gbeth DMA (#2624) ---------------------
 
 CENSUS_BUS = {"eeprom": 0, "pmic": 8, "brd": 8}

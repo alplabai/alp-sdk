@@ -163,6 +163,34 @@
           "$ref": "#/$defs/driver_status",
           "description": "alp-sdk driver maturity for the on-module eMMC reached via `emmc:`. `emmc:` names the SoC controller, not a chip slug, so there is no `chips/<part>/` driver to tier -- `none` is the honest (not aspirational) value per ADR 0017 (#1169)."
         },
+        "emmc_boot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bl2_mmc_sector", "fip_sector", "uboot_env"],
+          "description": "Where the on-module eMMC holds the boot images and the U-Boot environment (Linux boot partition `part` of the device `emmc:` names).  The one source for provisioning's boot-write ceiling (scripts/provision/gates.py), the U-Boot env cfg, /etc/fw_env.config and the Mender env offsets; tests/scripts/test_uboot_env_layout.py holds them equal to this block.",
+          "properties": {
+            "bl2_mmc_sector": { "type": "integer", "minimum": 0, "description": "512-byte sector of bl2_mmc in the boot partition." },
+            "fip_sector": { "type": "integer", "minimum": 0, "description": "512-byte sector of the FIP in the boot partition." },
+            "partition_bytes": {
+              "oneOf": [
+                { "type": "integer", "minimum": 1 },
+                { "type": "string", "const": "TBD" }
+              ],
+              "description": "Size of each eMMC boot partition (BOOT_SIZE_MULT x 128 KiB) of the populated part.  `TBD` until read from the part's datasheet / EXT_CSD[226]; an integer is checked against the env pair's end."
+            },
+            "uboot_env": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["part", "offset", "offset_redund", "size"],
+              "properties": {
+                "part": { "type": "integer", "enum": [1, 2], "description": "eMMC boot partition number (U-Boot CONFIG_SYS_MMC_ENV_PART; Linux mmcblk<N>boot<part-1>)." },
+                "offset": { "type": "integer", "minimum": 0, "description": "Byte offset of env copy 1 within the partition." },
+                "offset_redund": { "type": "integer", "minimum": 0, "description": "Byte offset of the redundant env copy." },
+                "size": { "type": "integer", "minimum": 512, "description": "Bytes per env copy." }
+              }
+            }
+          }
+        },
         "npu": {
           "$ref": "#/$defs/chip_ref",
           "description": "Discrete on-module NPU chip (V2M's DEEPX DX-M1).  On-die NPUs (Ethos-U, DRP-AI) are silicon facts and do NOT appear here."

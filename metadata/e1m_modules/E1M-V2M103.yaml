@@ -39,6 +39,11 @@ on_module:
   nor_flash_driver_status: none
   emmc:                    sd0                 # on-module via Renesas SD0; no alp-sdk driver yet
   emmc_driver_status:      none
+  emmc_boot:                                  # boot-partition layout: provisioning, U-Boot env, fw_env.config, Mender
+    bl2_mmc_sector:        1
+    fip_sector:            0x300
+    partition_bytes:       TBD                  # per-part BOOT_SIZE_MULT, not yet read from the datasheet
+    uboot_env:             { part: 2, offset: 0x220000, offset_redund: 0x230000, size: 0x10000 }
   npu:                  deepx_dxm1                # V2N-M1 delta
   pcie_mux:             pi3dbs12212                # V2N-M1 delta (two instances)
 

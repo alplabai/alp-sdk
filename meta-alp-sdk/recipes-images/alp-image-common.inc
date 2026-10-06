@@ -227,6 +227,14 @@ IMAGE_INSTALL:remove:rzv2n-family = "rng-tools rng-tools-service"
 # E1M-V2M103 2026W38-0001: "mmc: command not found").
 IMAGE_INSTALL += " mmc-utils"
 
+# fw_printenv/fw_setenv + /etc/fw_env.config for the persistent U-Boot
+# environment (eMMC boot partition 2, redundant pair; u-boot patch 0016 +
+# uboot-env-emmc.cfg). Groundwork for the OTA design: only the OTA
+# variables persist (U-Boot write allowlist); nothing reads a boot-slot
+# variable yet. Mender builds get their own fw_env.config from
+# mender-full, so conf/distro/include/mender.inc removes this package.
+IMAGE_INSTALL:append:rzv2n-family = " alp-uboot-env"
+
 # Assert the network story: the vendor build template's
 # EXTRA_IMAGE_FEATURES (local.conf) includes tools-testapps, whose
 # packagegroup drags in connman -- a second DHCP manager fighting

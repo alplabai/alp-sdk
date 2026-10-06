@@ -43,6 +43,22 @@
       },
       "description": "Camera connectors this board exposes, keyed CAM0, CAM1, ...  A project's `cameras:` entries name one of these keys."
     },
+    "sd_slots": {
+      "type": "object",
+      "propertyNames": { "pattern": "^SD[0-9]+$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["card_detect"],
+        "properties": {
+          "card_detect": {
+            "type": "boolean",
+            "description": "True when the carrier wires a card-detect switch to the SoM's SDn card-detect pad (E1M-X SD1_SD1CD).  Gates U-Boot's CONFIG_ALP_E1M_SD1_CD (meta-alp-sdk ALP_CARRIER_SD1_CARD_DETECT): off = boot probes the slot without a presence check."
+          }
+        }
+      },
+      "description": "Per-slot facts of the carrier's removable-card slots, keyed SD1, ...  The pad each slot's card-detect lands on is the SoM's (metadata/e1m_modules/<family>/*-peripheral-map.tsv), never restated here."
+    },
     "e1m_routes": {
       "type": "object",
       "additionalProperties": false,

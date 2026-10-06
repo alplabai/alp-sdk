@@ -83,6 +83,11 @@ populated:
 # SoM-side dispatch (the V2N GD32 IO-MCU bridge, etc.) lives in the
 # SoM preset's `pad_routes:` block, NOT here -- this board YAML is
 # SoM-agnostic.
+# Removable-card slots.  SD1 is the microSD slot; its card-detect switch runs
+# to the SoM's SD1_SD1CD pad (U-Boot reads it to skip an empty slot).
+sd_slots:
+  SD1: { card_detect: true }
+
 # Camera connectors.  Signals reference macros declared in `e1m_routes:` below
 # (never restate pads).  CAM1 (E1M-X I2C3 = XEVK_I2C_BUS_DSI_CSI1) is not
 # modelled: its CSI receiver, lane count and select/enable lines are not

@@ -72,8 +72,8 @@ SRC_URI:append:rzv2n-family = " \
 #     which stops the kernel replaying the early log across the
 #     console handover. The cmdline is rebuilt at CONFIG_BOOTCOMMAND
 #     (patch-safe vs the build-varying env block); the per-SKU fdtfile
-#     derivation (0014 below) also runs there, AFTER the leading
-#     'env default -a' wipe -- see the comment in the patch.
+#     derivation (0014 below) also runs there, at CONFIG_BOOTCOMMAND too
+#     (the environment is not saved, see 0016).
 # VALIDATION: bitbake-built dev + prod with config asserts; the FIP
 # (BL2+BL31+u-boot, manual flow) was built 2026-06-12 with both ALP
 # patches and the u-boot binary content-verified (alp_root bootcmd +
@@ -334,8 +334,8 @@ SRC_URI:append:rzv2n-family = " file://0009-rzv2n-dev-ALP-E1M-publish-sku-to-cho
 # ethaddr/eth1addr to 02:11:22:33:44:55/66 in CFG_EXTRA_ENV_SETTINGS;
 # this patch derives the real per-unit MAC at boot instead, both in
 # board_late_init() and via a bootcmd hook this same patch adds to
-# CONFIG_BOOTCOMMAND (include/configs/rzv2n-dev.h), right after "env
-# default -a" -- see docs/soms/v2n.md#ethernet-mac-address-policy and
+# CONFIG_BOOTCOMMAND (include/configs/rzv2n-dev.h), first in the
+# command -- see docs/soms/v2n.md#ethernet-mac-address-policy and
 # scripts/alp_eth_mac.py.
 SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth-mac.patch"
 
@@ -385,6 +385,40 @@ SRC_URI:append:rzv2n-family = " file://0013-rzv2n-dev-ALP-E1M-clkgen-se2-gd32-hx
 # stay behind both. Its hunks stay out of alp_clk5l_fixup(), so the clkgen
 # patches (0007, 0013) may land before or after it.
 SRC_URI:append:rzv2n-family = " file://0014-rzv2n-dev-ALP-E1M-fdtfile-from-eeprom.patch"
+
+# 0015 (microSD card-detect): a new "alp_sd_present" command reads the SoM's
+# SD1_SD1CD pad and CONFIG_BOOTCOMMAND probes mmc1 only when it succeeds.
+# sh_sdhi has no get_cd op, so an empty slot used to cost a full init
+# attempt and print "Card did not respond to voltage select! : -110" on
+# every boot. Lands after 0008 (mmc1 = SDHI1, PA1..PA3 board_init) and
+# 0010 (it edits the CONFIG_BOOTCOMMAND form 0010 leaves).
+#
+# Whether a card-detect switch is wired to that pad is a CARRIER fact
+# (metadata/boards/<carrier>.yaml sd_slots.SD1.card_detect), so sd1-cd.cfg
+# (CONFIG_ALP_E1M_SD1_CD=y, pad = the SoM peripheral map's SD1_SD1CD) is
+# included only when ALP_CARRIER_SD1_CARD_DETECT is "1". The default "1" is
+# the E1M-X-EVK, the only carrier this layer builds for; a carrier without
+# the switch sets "0" and U-Boot boots from SD without a presence check.
+ALP_CARRIER_SD1_CARD_DETECT ?= "1"
+SRC_URI:append:e1m-v2n101 = "${@' file://sd1-cd.cfg' if d.getVar('ALP_CARRIER_SD1_CARD_DETECT') == '1' else ''}"
+SRC_URI:append:rzv2n-family = " file://0015-rzv2n-dev-ALP-E1M-sd-card-detect.patch"
+
+# 0016 + uboot-env-emmc.cfg (persistent environment): a redundant pair in
+# eMMC boot partition 2 (Linux mmcblk0boot1), and CONFIG_BOOTCOMMAND no
+# longer starts with "env default -a", so saveenv survives a reboot and
+# Linux fw_setenv (recipes-core/alp-system/alp-uboot-env, /etc/fw_env.config)
+# is seen by U-Boot. CONFIG_ENV_WRITEABLE_LIST makes the built-in default
+# the baseline every boot and imports only the OTA variables, so bootcmd,
+# bootargs, bootdelay and the vendor boot scripts are always rebuilt from the
+# binary. The cfg moves the environment off the vendor default (end of the
+# eMMC user area); its offsets and /etc/fw_env.config must agree
+# (tests/scripts/test_uboot_env_layout.py).
+#
+# Scoped to rzv2n-family, not e1m-v2n101 like sd1-microsd.cfg: patch 0016
+# edits CONFIG_BOOTCOMMAND for every family member, and without the cfg the
+# plain EVK would persist the whole vendor-location environment with no
+# allowlist, so the patch and the cfg must travel together.
+SRC_URI:append:rzv2n-family = "     file://0016-rzv2n-dev-ALP-E1M-persistent-environment.patch     file://uboot-env-emmc.cfg "
 
 # Fallback dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  The dtb basename is
 # now derived at boot (0014); CONFIG_ALP_E1M_FDTFILE (patch 0002) is only
