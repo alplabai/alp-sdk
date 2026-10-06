@@ -70,12 +70,20 @@ which sensor the request reaches.
     example that both enables `CONFIG_VIDEO` and requests a nonzero
     `FRAME_FPS`: its `testcase.yaml` scenarios cover OV5647 (default
     15 fps), IMX296 (fixed 60.3 fps, default 15 fps requested), and IMX335
-    (`CONFIG_CAMERA_MJPEG_STREAM_FPS=30`, bench-verified run 334: settles at
-    29.98 measured) -- all three sensor drivers implement `.set_frmival`
+    (`CONFIG_CAMERA_MJPEG_STREAM_FPS=30`; app-level MJPEG rate 29.98 fps in
+    bench run 334 per `docs/camera-shields.md`, which still lists the rate AT
+    THE SENSOR as UNVERIFIED) -- all three sensor drivers implement `.set_frmival`
     (`zephyr/drivers/video/ov5647.c`, `imx296.c`, and upstream Zephyr's
     `imx335.c`), so every one of these requests SETTLES through the ISP
     chain rather than declining; none of the three needed an edit. No
     other example sets a nonzero fps with `CONFIG_VIDEO` enabled.
+  - Rate audit: `examples/aen/aen-trace-runner` and
+    `examples/aen/aen-camera-firstlight` used `ALP_CAMERA_CONFIG_DEFAULT(0)`
+    and relied on the implicit 30 fps. Both open through the `zephyr_video`
+    backend (neither enables `CONFIG_ALP_SDK_CAMERA_ALIF_ISP`), where fps 0
+    leaves the sensor at its own default (OV5647: 15 fps), so both now set
+    `cfg.fps = 30` explicitly to keep the previous request. The
+    `alif_isp_pico` backend's own default is 10 fps (`default_fps 10u`).
 
 This lands alongside `alp_camera_get_fps()` / issue #2279 (merged to `dev`
 independently): `alp_camera_read_fps_x1000()` in `camera_frmival.h` is
@@ -96,8 +104,9 @@ the state-pool slot is released on EVERY decline), and a test-local
 `-EIO` (a non-`ENOSYS` error), called directly against `camera_apply_fps()`
 to cover the backend-default-tolerates-any-error and
 caller-request-maps-through-errno branches that `alp_camera_open()` alone
-can't reach cheaply. Verified end to end under QEMU on `mps2/an385`: 9/9
-cases pass. `alif_isp_pico.c`'s TPG-mode strictness and the IMX296/IMX335
+can't reach cheaply. Run under `native_sim` / `native_sim/native/64` via twister
+(the suite's `platform_allow`); no result is claimed here until the final gate
+runs it. `alif_isp_pico.c`'s TPG-mode strictness and the IMX296/IMX335
 paths through the ISP forward chain are **not** bench-verified on AEN
 silicon by this change (needs-silicon); `alif_isp_pico.c`'s OV5647 and
 IMX335 paths were already silicon-proven under #2276/#2327 and are

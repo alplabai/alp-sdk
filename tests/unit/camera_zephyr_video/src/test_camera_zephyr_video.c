@@ -27,11 +27,7 @@
  * case that touches alp-camera0's rate resets it explicitly rather than
  * assuming a fresh 30 fps default; see suite_before()/suite_after().
  *
- * native_sim / Linux-only via twister/CI (see scripts/test-all.sh); this
- * suite was additionally verified under QEMU on an ARM board (mps2/an385)
- * on the macOS dev host that cannot run native_sim's POSIX arch at all --
- * see the PR/changelog for the exact `west build ... -t run` invocation
- * and the resulting pass count.
+ * native_sim / Linux-only via twister/CI (see scripts/test-all.sh).
  */
 
 #include <errno.h>

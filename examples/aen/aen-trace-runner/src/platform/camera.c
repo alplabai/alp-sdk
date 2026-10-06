@@ -43,6 +43,8 @@ int tr_camera_open(void)
 	cfg.width  = TR_CAMERA_WIDTH;
 	cfg.height = TR_CAMERA_HEIGHT;
 	cfg.format = ALP_PIXFMT_GREY8;
+	/* Default fps is 0 (sensor's own default); the ~33 ms/frame below assumes 30. */
+	cfg.fps    = 30;
 
 	if (!IS_ENABLED(CONFIG_VIDEO)) {
 		/* Display-only build (TR_CAMERA=OFF): no camera is expected, so this
