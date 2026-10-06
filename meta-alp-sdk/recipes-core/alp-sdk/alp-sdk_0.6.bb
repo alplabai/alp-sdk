@@ -34,7 +34,7 @@ S = "${WORKDIR}/git"
 # layer's own recipes-devtools/zcbor/zcbor_0.9.1.bb.
 DEPENDS += "zcbor"
 
-inherit cmake
+inherit cmake pkgconfig
 
 # alp-sdk's repo-root CMakeLists.txt builds the plain-CMake
 # shared-library variant for Yocto consumers.  Zephyr-only
