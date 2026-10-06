@@ -60,6 +60,9 @@ notes: |
       bridge's active-HIGH ATTN data-ready output while ATTN is granted.  P71 is an INPUT
       with a rising-edge IRQ (CM33-owned) in every boot stage; the host drives it as an
       output only in the SWD recovery path, and only after asserting GD32_NRST (P74).
+    - E1M-X I2C3 (PC8 SCL / PC9 SDA): the bridge is the bus master.  Linux reaches
+      it over the BRD_I2C link with the v0.17 I2CM_CONFIG / I2CM_XFER / I2CM_RESULT
+      opcodes (docs/gd32-bridge-protocol.md §3.20); the CM33 SPI link does not.
     - SWD header (PA13/PA14) -- still accessible for external probes
       during dev / factory.
 
@@ -95,6 +98,10 @@ signals:
       notes: "host-driven SWD clock line; dual role -- GD32 PA14 drives it as the active-HIGH ATTN data-ready output while the v0.15 ATTN link feature is granted (host: input + rising-edge IRQ), SWCLK otherwise (host drives only with GD32_NRST asserted)" }
   - { name: GD32_NRST,   type: input,  v2n_route: "Renesas P74 (open-drain, shared with primary PMIC reset-out)",
       notes: "host pad configured open-drain; drive low to assert reset, HiZ to release" }
+  - { name: E1M_I2C3_SCL, type: bidir, v2n_route: "(GD32 PC8, E1M-X pad A24)",
+      notes: "I2C3 master proxy (bridge protocol v0.17, I2C link only): hi-Z until I2CM_CONFIG; no SoM pull-up on 2625-R2, carrier or module supplies them" }
+  - { name: E1M_I2C3_SDA, type: bidir, v2n_route: "(GD32 PC9, E1M-X pad A23)",
+      notes: "I2C3 master proxy (bridge protocol v0.17, I2C link only): hi-Z until I2CM_CONFIG; no SoM pull-up on 2625-R2, carrier or module supplies them" }
   - { name: GD32_SWDIO_HDR, type: bidir, v2n_route: "(programming header, GD32 PA13)" }
   - { name: GD32_SWCLK_HDR, type: input, v2n_route: "(programming header, GD32 PA14)" }
   - { name: VDDA,  type: power,  notes: "analog supply; datasheet ball J5" }

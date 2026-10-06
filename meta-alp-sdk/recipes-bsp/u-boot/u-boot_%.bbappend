@@ -420,6 +420,14 @@ SRC_URI:append:rzv2n-family = " file://0015-rzv2n-dev-ALP-E1M-sd-card-detect.pat
 # allowlist, so the patch and the cfg must travel together.
 SRC_URI:append:rzv2n-family = "     file://0016-rzv2n-dev-ALP-E1M-persistent-environment.patch     file://uboot-env-emmc.cfg "
 
+# 0017 (GBETH PHY address fixup, alplabai/alp-sdk#2582): the RTL8211F PHY address is
+# strap-latched and differs per unit (errata E2). U-Boot reads PHYID1/PHYID2 for
+# MDIO addresses 1..31 on both GBETH buses by driving the DWC EQoS MDIO
+# registers directly (bounded wait, no network device probed, no clock/reset
+# code: TF-A BL2 already enables GBETH0/1) and rewrites the booted Linux DT's
+# phy reg when the PHY is not where the DT says.
+SRC_URI:append:rzv2n-family = " file://0017-rzv2n-dev-ALP-E1M-gbeth-phy-address-fixup.patch"
+
 # Fallback dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  The dtb basename is
 # now derived at boot (0014); CONFIG_ALP_E1M_FDTFILE (patch 0002) is only
 # the fallback for a missing/invalid manifest, an unknown family, or a

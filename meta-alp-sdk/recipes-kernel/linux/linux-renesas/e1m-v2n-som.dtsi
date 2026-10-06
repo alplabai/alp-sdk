@@ -278,9 +278,11 @@
 #endif
 
 /*
- * Dual on-module GbE PHYs. Each PHY is addressed at MDIO address 2 on its
- * bus (the on-module wiring makes address 2 the reliable address; address
- * 0 does not respond to phy_poll_reset -- docs/errata-e1m-x-v2n.md E2).
+ * Dual on-module GbE PHYs. The PHY address is strap-latched and differs per
+ * unit (docs/errata-e1m-x-v2n.md E2), so reg = <2> is only the default:
+ * U-Boot patch 0017 scans each MDIO bus at boot and rewrites this `reg` in
+ * the booted DT when the PHY answers elsewhere. Address 0 is the broadcast
+ * address and does not respond to phy_poll_reset.
  *
  * The PHY id is forced to what the fitted part reports, 0x001c.c916 (package
  * marking not checked), so driver selection does not depend on an id read at
