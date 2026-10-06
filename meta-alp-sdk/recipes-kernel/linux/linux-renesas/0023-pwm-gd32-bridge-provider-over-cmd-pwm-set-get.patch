@@ -34,6 +34,10 @@ Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
+ drivers/gpio/Kconfig            |    1 
+ drivers/gpio/gpio-gd32-bridge.c |  203 +++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 204 insertions(+)
+
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
 index c886d5f863f8..2e98c426bfbb 100644
 --- a/drivers/gpio/Kconfig
@@ -47,7 +51,7 @@ index c886d5f863f8..2e98c426bfbb 100644
  	help
  	  GPIO support for E1M IO pads routed through the GD32G553
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
-index 3a34cdef5304..99dc0a1522d4 100644
+index fb84b2e..c302ad6 100644
 --- a/drivers/gpio/gpio-gd32-bridge.c
 +++ b/drivers/gpio/gpio-gd32-bridge.c
 @@ -99,6 +99,11 @@
@@ -70,7 +74,7 @@ index 3a34cdef5304..99dc0a1522d4 100644
  #include <linux/spinlock.h>
  #include <linux/workqueue.h>
  
-@@ -378,6 +384,14 @@ struct gd32_bridge_gpio {
+@@ -382,6 +388,14 @@ struct gd32_bridge_gpio {
  	 * reads the published copy.  irq_lock is the irqchip bus lock.
  	 */
  	struct mutex irq_lock;
@@ -85,7 +89,7 @@ index 3a34cdef5304..99dc0a1522d4 100644
  	spinlock_t irq_slock;
  	u32 irq_en_stage, irq_rise_stage, irq_fall_stage, irq_high_stage, irq_low_stage;
  	u32 irq_en, irq_rise, irq_fall, irq_high, irq_low;
-@@ -1698,6 +1712,191 @@ static void gd32_bridge_irq_work(struct work_struct *work)
+@@ -1705,6 +1719,191 @@ static void gd32_bridge_irq_work(struct work_struct *work)
  				   msecs_to_jiffies(GD32_IRQ_POLL_PERIOD_MS));
  }
  
@@ -277,7 +281,7 @@ index 3a34cdef5304..99dc0a1522d4 100644
  /*
   * Unbind teardown, registered AFTER devm_gpiochip_add_data() so devm runs it
   * BEFORE gpiochip_remove(). Consumers (wlan-pwrseq, hci_bcm, panel reset,
-@@ -1875,6 +2074,10 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -1882,6 +2081,10 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
  		/* Not fatal: the GPIO lines (panel reset, Wi-Fi REG_ON) must
  		 * not depend on the proxy adapter registering. */
  		dev_err(&client->dev, "I2C3 proxy adapter not registered (%d)\n", ret);

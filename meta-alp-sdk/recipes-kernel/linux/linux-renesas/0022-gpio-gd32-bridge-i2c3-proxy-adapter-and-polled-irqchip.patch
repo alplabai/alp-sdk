@@ -45,9 +45,9 @@ Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- drivers/gpio/Kconfig            |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 627 +++++++++++++++++++++++++++++++-
- 2 files changed
+ drivers/gpio/Kconfig            |    1 
+ drivers/gpio/gpio-gd32-bridge.c |  627 ++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 616 insertions(+), 12 deletions(-)
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
 index eefc447b2148..c886d5f863f8 100644
@@ -62,6 +62,7 @@ index eefc447b2148..c886d5f863f8 100644
  	  GPIO support for E1M IO pads routed through the GD32G553
  	  supervisor MCU on Alp Lab V2N-family SoMs, accessed over the
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
+index e8bf851..fb84b2e 100644
 --- a/drivers/gpio/gpio-gd32-bridge.c
 +++ b/drivers/gpio/gpio-gd32-bridge.c
 @@ -92,6 +92,17 @@
@@ -152,7 +153,7 @@ diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
  #define GD32_NGPIO_BASE		18
  #define GD32_NGPIO_WIFI_BT	20
  
-@@ -297,9 +353,37 @@ struct gd32_bridge_gpio {
+@@ -301,9 +357,37 @@ struct gd32_bridge_gpio {
  	 * resolved by the same GET_VERSION as wifi_bt_reg_on_status, under
  	 * status_lock. */
  	int io_ext_status;
@@ -191,7 +192,7 @@ diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
  	/*
  	 * Independent lines-18/19 resolver, NOT under state_lock (it has
  	 * nothing to do with output_mask/output_vals or the replay above) --
-@@ -428,20 +512,35 @@ static u32 gd32_bridge_bits_to_lines(u32 bits)
+@@ -432,20 +516,35 @@ static u32 gd32_bridge_bits_to_lines(u32 bits)
  	       ((bits & GD32_HI_BIT_MASK) << (GD32_LINE_IO15 - 21));
  }
  
@@ -233,7 +234,7 @@ diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
  		return -EINVAL;
  
  	wbuf[0] = GD32_REG_CMD;
-@@ -467,6 +566,8 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
+@@ -471,6 +570,8 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
  		return ret;
  	if (ret != 2)
  		return -EIO;
@@ -242,7 +243,7 @@ diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
  
  	/*
  	 * An error reply is [STATUS][CRC] (3 bytes, no payload; GD32
-@@ -480,9 +581,16 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
+@@ -484,9 +585,16 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
  			return gd32_bridge_status_to_errno(rbuf[0]);
  	}
  
@@ -262,7 +263,7 @@ diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
  		/* Log the torn reply so a cold-boot -EBADMSG says which bytes
  		 * were wrong (gd32-bridge-firmware#295). */
  		dev_warn_ratelimited(&cl->dev, "cmd 0x%02x: reply CRC mismatch: %*ph\n",
-@@ -491,11 +599,21 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
+@@ -495,11 +603,21 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
  	}
  	if (rbuf[0] != GD32_STATUS_OK)
  		return gd32_bridge_status_to_errno(rbuf[0]);
@@ -286,7 +287,7 @@ diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
  static int gd32_bridge_xfer(struct gd32_bridge_gpio *gd32, u8 cmd,
  			    const u8 *req, unsigned int req_len,
  			    u8 *rsp, unsigned int rsp_len)
-@@ -1120,6 +1238,466 @@ static void gd32_bridge_resolve_work(struct work_struct *work)
+@@ -1127,6 +1245,466 @@ static void gd32_bridge_resolve_work(struct work_struct *work)
  			   &gd32->resolve_work, msecs_to_jiffies(period_ms));
  }
  
@@ -753,7 +754,7 @@ diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
  /*
   * Unbind teardown, registered AFTER devm_gpiochip_add_data() so devm runs it
   * BEFORE gpiochip_remove(). Consumers (wlan-pwrseq, hci_bcm, panel reset,
-@@ -1142,6 +1720,7 @@ static void gd32_bridge_teardown(void *data)
+@@ -1149,6 +1727,7 @@ static void gd32_bridge_teardown(void *data)
  
  	cancel_delayed_work_sync(&gd32->replay_work);
  	cancel_delayed_work_sync(&gd32->resolve_work);
@@ -761,7 +762,7 @@ diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
  }
  
  static int gd32_bridge_gpio_probe(struct i2c_client *client)
-@@ -1161,6 +1740,11 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -1168,6 +1747,11 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
  	mutex_init(&gd32->state_lock);
  	INIT_DELAYED_WORK(&gd32->replay_work, gd32_bridge_replay_work);
  	INIT_DELAYED_WORK(&gd32->resolve_work, gd32_bridge_resolve_work);
@@ -773,7 +774,7 @@ diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
  	gd32->wifi_bt_reg_on_status = -EPROBE_DEFER;	/* not yet resolved */
  	gd32->io_ext_status = -EPROBE_DEFER;
  	gd32->cam_ldo_status = -EPROBE_DEFER;
-@@ -1244,6 +1828,15 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -1251,6 +1835,15 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
  	gd32->chip.get_direction    = gd32_bridge_gpio_get_dir;
  	gd32->chip.can_sleep	  = true;
  
@@ -789,7 +790,7 @@ diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
  	ret = devm_gpiochip_add_data(&client->dev, &gd32->chip, gd32);
  	if (ret)
  		return ret;
-@@ -1272,6 +1865,16 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -1279,6 +1872,16 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
  				   msecs_to_jiffies(GD32_RESOLVE_POLL_PERIOD_MS));
  
  	i2c_set_clientdata(client, gd32);
