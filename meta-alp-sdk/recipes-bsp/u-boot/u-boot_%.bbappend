@@ -73,7 +73,7 @@ SRC_URI:append:rzv2n-family = " \
 #     console handover. The cmdline is rebuilt at CONFIG_BOOTCOMMAND
 #     (patch-safe vs the build-varying env block); the future per-SKU
 #     fdtfile derivation must also happen there, at
-#     CONFIG_BOOTCOMMAND too (the environment is not saved, see 0014).
+#     CONFIG_BOOTCOMMAND too (the environment is not saved, see 0016).
 # VALIDATION: bitbake-built dev + prod with config asserts; the FIP
 # (BL2+BL31+u-boot, manual flow) was built 2026-06-12 with both ALP
 # patches and the u-boot binary content-verified (alp_root bootcmd +
@@ -244,7 +244,7 @@ SRC_URI:append:rzv2n-family = " file://0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pul
 # at 22.5792 MHz instead of 24.576 MHz. Bench-confirmed (E1M-V2M103
 # board #1, 2026-09-24): with the OTP defaults the SoC RTC (RTCA-3)
 # fails to start ("Failed to setup the RTC!", -ETIMEDOUT); two volatile
-# register writes (reg 0x24: 0x9c->0x8e, reg 0x21: 0x80->0xc0) fix it,
+# register writes (reg 0x24: 0x9c->0x8e, reg 0x21: 0x80->0xc0; 0012 later makes reg 0x24 0x8f) fix it,
 # after which the RTC counts at 32.768 kHz. Both are OTP-shadow
 # registers and REVERT ON POWER-CYCLE (the OTP itself cannot be
 # re-burned in-system), so alp_clk5l_fixup() runs unconditionally,
@@ -346,7 +346,24 @@ SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth
 # OTP already reads 0x08, so the step is a no-op there; see the patch header.
 SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.patch"
 
-# 0013 (microSD card-detect): a new "alp_sd_present" command reads the SoM's
+# 0012 (reset cause + DX-M1 reset hold, alp-sdk#1153): board_late_init() first
+# reads CPG_ERROR_RST2 (survives an error system reset), prints "ALP: reset
+# cause: ...", clears the WDT flags and publishes env alp_reset_cause and
+# /chosen/alp,reset-cause. After a WDT reset on a v2n-m1 SoM it holds
+# M1_RESET (PA6) low before 0004/0001 release it. Applies after 0009 (shares
+# ft_system_setup()), 0010 and 0011 (board_late_init() context lines).
+SRC_URI:append:rzv2n-family = " file://0012-rzv2n-dev-ALP-E1M-reset-cause-and-deepx-reset-hold.patch"
+
+# 0013 (5L35023B SE2 -> GD32 HXTAL): SE2 of the on-module clock generator
+# drives the GD32 OSCIN (net GD32_OSC). The OTP has reg 0x1f = 0x46 (bit 7
+# SE2_Freerun_32K = 0), so SE2 free-runs at 32.768 kHz and the GD32 HXTAL
+# never starts. alp_clk5l_fixup() additionally writes reg 0x24 0x9c -> 0x8f
+# (DIV4 channel 2 on) then reg 0x1f 0x46 -> 0xc7 (SE2 from DIV4 =
+# 24.576 MHz). Edits the body of 0007's alp_clk5l_fixup(), so it must stay
+# after 0007, 0009 and 0012 (whose hunk's context is the tail of that function).
+SRC_URI:append:rzv2n-family = " file://0013-rzv2n-dev-ALP-E1M-clkgen-se2-gd32-hxtal.patch"
+
+# 0015 (microSD card-detect): a new "alp_sd_present" command reads the SoM's
 # SD1_SD1CD pad and CONFIG_BOOTCOMMAND probes mmc1 only when it succeeds.
 # sh_sdhi has no get_cd op, so an empty slot used to cost a full init
 # attempt and print "Card did not respond to voltage select! : -110" on
@@ -361,9 +378,9 @@ SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.
 # the switch sets "0" and U-Boot boots from SD without a presence check.
 ALP_CARRIER_SD1_CARD_DETECT ?= "1"
 SRC_URI:append:e1m-v2n101 = "${@' file://sd1-cd.cfg' if d.getVar('ALP_CARRIER_SD1_CARD_DETECT') == '1' else ''}"
-SRC_URI:append:rzv2n-family = " file://0013-rzv2n-dev-ALP-E1M-sd-card-detect.patch"
+SRC_URI:append:rzv2n-family = " file://0015-rzv2n-dev-ALP-E1M-sd-card-detect.patch"
 
-# 0014 + uboot-env-emmc.cfg (persistent environment): a redundant pair in
+# 0016 + uboot-env-emmc.cfg (persistent environment): a redundant pair in
 # eMMC boot partition 2 (Linux mmcblk0boot1), and CONFIG_BOOTCOMMAND no
 # longer starts with "env default -a", so saveenv survives a reboot and
 # Linux fw_setenv (recipes-core/alp-system/alp-uboot-env, /etc/fw_env.config)
@@ -374,11 +391,11 @@ SRC_URI:append:rzv2n-family = " file://0013-rzv2n-dev-ALP-E1M-sd-card-detect.pat
 # eMMC user area); its offsets and /etc/fw_env.config must agree
 # (tests/scripts/test_uboot_env_layout.py).
 #
-# Scoped to rzv2n-family, not e1m-v2n101 like sd1-microsd.cfg: patch 0014
+# Scoped to rzv2n-family, not e1m-v2n101 like sd1-microsd.cfg: patch 0016
 # edits CONFIG_BOOTCOMMAND for every family member, and without the cfg the
 # plain EVK would persist the whole vendor-location environment with no
 # allowlist, so the patch and the cfg must travel together.
-SRC_URI:append:rzv2n-family = "     file://0014-rzv2n-dev-ALP-E1M-persistent-environment.patch     file://uboot-env-emmc.cfg "
+SRC_URI:append:rzv2n-family = "     file://0016-rzv2n-dev-ALP-E1M-persistent-environment.patch     file://uboot-env-emmc.cfg "
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string

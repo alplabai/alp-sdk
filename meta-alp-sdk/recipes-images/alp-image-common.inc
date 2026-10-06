@@ -36,7 +36,9 @@ IMAGE_INSTALL = " \
 "
 
 # meta-rz-drpai vendor payload (DRP-AI3 NPU userspace runtime + kernel
-# driver): lib-tvm + kernel-module-mmngr. Unlike meta-rz-codecs /
+# driver): kernel-module-mmngr (lib-tvm is deliberately NOT installed
+# explicitly: it only served a legacy DRP-AI TVM v2.5 path, but libalp_sdk.so's
+# tvm_runtime link still pulls it in via shlibs until the link fix lands). Unlike meta-rz-codecs /
 # meta-rz-opencva (whose RDEPENDS payload lives in
 # packagegroup-alp-camera.bb -- see that file), this is NOT
 # camera/display-tied -- DRP-AI3 is the SoC's core NPU accelerator,
@@ -51,8 +53,10 @@ IMAGE_INSTALL = " \
 # previously wired into alp-image-edge.bb only, silently omitted from
 # base/prod).
 #
-# mmngr-user-module / mmngrbuf-user-module ride in via lib-tvm's own
-# RDEPENDS. NOT ported from meta-rz-drpai's own vendor
+# mmngr-user-module / mmngrbuf-user-module ride in via mera2-drpai-tvm's
+# own RDEPENDS. The /dev/drpai* access rule (alp-drpai-udev) is NOT installed
+# here: alp-sdk's PACKAGECONFIG[drpai] pulls it, so it lands only in images
+# that carry the SDK DRP-AI backend. NOT ported from meta-rz-drpai's own vendor
 # core-image-%.bbappend: its python3-modules/-pip/-wheel/.../-opencv/
 # -pybind11 + sudo stack + libjpeg-turbo-dev (all serve the vendor's
 # Python demos; the Alp path is C through <alp/inference.h>, and a -dev
@@ -86,7 +90,7 @@ IMAGE_INSTALL = " \
 # citation that is the concrete failure this closes. Settled by
 # inspection only; unverified by an actual `bitbake` run.
 ALP_RZ_DRPAI_INSTALL = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'rz-drpai', \
-    bb.utils.contains('MACHINE_FEATURES', 'v2n', 'lib-tvm kernel-module-mmngr alp-drpai-udev', '', d), '', d)}"
+    bb.utils.contains('MACHINE_FEATURES', 'v2n', 'kernel-module-mmngr', '', d), '', d)}"
 ALP_RZ_DRPAI_INSTALL[vardepvalue] = "${ALP_RZ_DRPAI_INSTALL}"
 
 IMAGE_INSTALL += " ${ALP_RZ_DRPAI_INSTALL}"
@@ -114,6 +118,21 @@ ALP_V2N_WIFI_BT_INSTALL = "${@bb.utils.contains('MACHINE_FEATURES', 'v2n', \
 ALP_V2N_WIFI_BT_INSTALL[vardepvalue] = "${ALP_V2N_WIFI_BT_INSTALL}"
 
 IMAGE_INSTALL += " ${ALP_V2N_WIFI_BT_INSTALL}"
+
+# Opt-in USB gadget (NCM + ACM) helper for the E1M-X-EVK USB 2.0 device port
+# (docs/e1m-x-evk-usb-otg.md). Installed but not enabled at boot. Set
+# ALP_ENABLE_USB_GADGET = "1" in local.conf to include it (this also merges
+# the usb-gadget.cfg kernel fragment; default images are unchanged).
+ALP_ENABLE_USB_GADGET ??= "0"
+# Gated on the generic `usbgadget` MACHINE_FEATURES flag (set per machine conf);
+# the same flag selects the kernel fragment in linux-renesas_%.bbappend.
+# DX-M1 SoMs (`deepx-dxm1`) drive the E1M IO24 USB path-mux (driven_by: dxm1
+# in the SoM pad_routes), so warn there.
+IMAGE_INSTALL += "${@' alp-usb-gadget' if d.getVar('ALP_ENABLE_USB_GADGET') == '1' and bb.utils.contains('MACHINE_FEATURES', 'usbgadget', True, False, d) else ''}"
+python () {
+    if d.getVar('ALP_ENABLE_USB_GADGET') == '1' and bb.utils.contains('MACHINE_FEATURES', 'deepx-dxm1', True, False, d):
+        bb.warn('ALP_ENABLE_USB_GADGET: the DX-M1 on this SoM drives the E1M IO24 USB path-mux and can switch the USB 2.0 port away from the SoC (metadata/boards/e1m-x-evk.yaml XEVK_PIN_USB_MUX_SEL).')
+}
 
 # SDK sysroot headers (populate_sdk) -- ports the vendor bbappends'
 # TOOLCHAIN_TARGET_TASK:append mechanism, without which `bitbake
@@ -209,7 +228,7 @@ IMAGE_INSTALL:remove:rzv2n-family = "rng-tools rng-tools-service"
 IMAGE_INSTALL += " mmc-utils"
 
 # fw_printenv/fw_setenv + /etc/fw_env.config for the persistent U-Boot
-# environment (eMMC boot partition 2, redundant pair; u-boot patch 0014 +
+# environment (eMMC boot partition 2, redundant pair; u-boot patch 0016 +
 # uboot-env-emmc.cfg). Groundwork for the OTA design: only the OTA
 # variables persist (U-Boot write allowlist); nothing reads a boot-slot
 # variable yet. Mender builds get their own fw_env.config from

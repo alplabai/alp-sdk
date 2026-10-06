@@ -29,9 +29,8 @@ SensorPublishers::SensorPublishers(rclcpp::Node &parent) : parent_(parent)
 	};
 	i2c_ = alp_i2c_open(&i2c_cfg);
 	if (i2c_ != nullptr) {
-		// U12 ICM-42670, canonical primary IMU (0x69).  Caveat from the
-		// board metadata: an unreworked E1M-X EVK V2 also answers 0x69
-		// with its BMI323, so the two IMUs collide there.
+		// U12 ICM-42670, canonical primary IMU (0x69); the alternate
+		// IMU, BMI323, is at 0x68.
 		if (icm42670_init(&imu_, i2c_, XEVK_I2C_ADDR_ICM42670) == ALP_OK) {
 			// 100 Hz, +-2 g / +-250 dps -- icm42670_init() only binds the
 			// bus; the caller selects ODR + full-scale.  These are the

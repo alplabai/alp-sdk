@@ -33,8 +33,8 @@ All three SKUs share the same silicon + PCB.  Pick by memory budget.
 | Wi-Fi 6 + BLE 5.4       | Murata LBEE5HY2FY-922      | SDIO + UART + I2S | [`<alp/chips/murata_lbee5hy2fy.h>`](../../include/alp/chips/murata_lbee5hy2fy.h) |
 | Ethernet PHY 0          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | [`<alp/chips/rtl8211fdi.h>`](../../include/alp/chips/rtl8211fdi.h) |
 | Ethernet PHY 1          | Realtek RTL8211FDI-VD-CG   | RGMII + MDIO     | (same driver, second instance)          |
-| eMMC                    | (variant per SKU)          | Renesas SD0      | Zephyr SD subsystem                     |
-| NOR flash               | (variant per SKU)          | Renesas xSPI0    | Zephyr flash subsystem                  |
+| eMMC                    | (variant per SKU)          | Renesas SD0      | A55 Linux mmc (A55-owned)               |
+| NOR flash               | (variant per SKU)          | Renesas xSPI0    | A55 Linux mtd (A55-owned)               |
 
 Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
@@ -78,21 +78,34 @@ for this SoM:
 | Output | Feeds                                    | As-shipped (wrong) | Corrected |
 |--------|-------------------------------------------|---------------------|-----------|
 | SE1    | SoC RTXIN (RTCA-3) + the Wi-Fi module's 32k LPO input | 24.576 MHz | 32.768 kHz |
+| SE2    | GD32 supervisor OSCIN / HXTAL (net `GD32_OSC`) | 32.768 kHz free-run | 24.576 MHz |
 | SE3    | On-module audio clock                      | 22.5792 MHz         | 24.576 MHz |
 
 Bench-confirmed (2026-09-24): with the as-shipped OTP values, the SoC
-RTC fails to start (`error -ETIMEDOUT: Failed to setup the RTC!`). Two
-volatile register writes fix it (register `0x24`: SE1 DCO select;
-register `0x21`: SE3 source select); after them the SoC RTC counts at
-32.768 kHz. Both registers are OTP-shadow registers -- the writes take
+RTC fails to start (`error -ETIMEDOUT: Failed to setup the RTC!`). Three
+volatile register writes fix it, in this order (register `0x24` `0x9c` ->
+`0x8f`: SE1 DCO select plus DIV4 channels 2 and 3 on; register `0x21`
+`0x80` -> `0xc0`: SE3 source select; register `0x1f` `0x46` -> `0xc7`: SE2
+source select); after them the SoC RTC counts at 32.768 kHz. SE2 is the
+GD32 HXTAL input: OTP `0x1F` bit 7 `SE2_Freerun_32K` = 0 leaves it at
+32.768 kHz, which is why the GD32 HXTAL never starts; bits 7 and 0
+(`SE2_CLKSEL1` = DIV4) route it from DIV4 = PLL2 / OUTDIV4 = 24.576 MHz.
+`VDD2_SEL` and `0x20` (`SE2_EN`) are not touched. The next build's
+corrected OTP image (ledger item 24) should carry `0x1F` = `0xC7` and
+`0x24` = `0x8F` so SE2 is valid from power-on-reset. SE2 must never change
+after this: once the host triggers the switch, the GD32 locks its PLL to it. Both registers are OTP-shadow registers -- the writes take
 effect immediately but **revert on power-cycle** (the OTP itself cannot
 be re-burned in-system) -- so U-Boot applies them on **every** boot,
 early in `board_late_init()`, before the DEEPX rail sequencing step and
 before Linux starts
 (`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch`).
-The fixup only writes when both registers read the exact as-shipped
-values; any other readback (already fixed, a differently configured
-part, or a communication error) is left untouched and only logged.
+Each register is written only when it reads its exact as-shipped value
+(already fixed: skipped); any other readback (a differently configured
+part, or a communication error) is left untouched and only logged. The
+log line is `ALP: 5L35023B clock: SE1 32.768 kHz, SE2 24.576 MHz, SE3
+24.576 MHz (0x24=0x8f 0x1f=0xc7 0x21=0xc0)`. Patch
+`0013-rzv2n-dev-ALP-E1M-clkgen-se2-gd32-hxtal.patch` adds the SE2 step.
+Bench-unverified until a scope on TP88 reads 24.576 MHz at 1.8 V.
 
 This is a runtime workaround. **Production builds should instead use a
 Renesas factory dash code that carries the corrected OTP image**,
@@ -308,7 +321,7 @@ vendor default (end of the eMMC user area) is no longer used.
   `CONFIG_BOOTCOMMAND` no longer starts with `env default -a`. U-Boot is
   built with `CONFIG_ENV_WRITEABLE_LIST`: the built-in default is the
   baseline on every boot and only the variables listed in
-  `CFG_ENV_FLAGS_LIST_STATIC` (patch `0014`, `include/configs/rzv2n-dev.h`)
+  `CFG_ENV_FLAGS_LIST_STATIC` (patch `0016`, `include/configs/rzv2n-dev.h`)
   are imported from the saved copy: Mender's `upgrade_available`,
   `bootcount`, `mender_boot_part`, `mender_boot_part_hex`,
   `mender_saveenv_canary`, and the first-boot marker variable. At the
@@ -322,7 +335,7 @@ vendor default (end of the eMMC user area) is no longer used.
   scripts (`bootcmd_check`, `emmcload`, `sd2load`, ...) are rebuilt from
   the binary on every boot, so neither an older FIP's saved copy nor
   `fw_setenv` can change them. First boot (both copies unreadable) prints
-  the usual `bad CRC, using default environment` once; patch `0014` then
+  the usual `bad CRC, using default environment` once; patch `0016` then
   writes the defaults and the first-boot marker.
 * **Linux sees the same variables.** The image carries `libubootenv`
   (`fw_printenv`, `fw_setenv`) and `/etc/fw_env.config`. This is groundwork
@@ -350,7 +363,7 @@ vendor default (end of the eMMC user area) is no longer used.
 
 U-Boot's SD host cannot report card presence, so an empty slot used to
 print `Card did not respond to voltage select! : -110` on every boot.
-Patch `0013` adds an `alp_sd_present` command that reads the slot's
+Patch `0015` adds an `alp_sd_present` command that reads the slot's
 card-detect switch (`SD1_SD1CD`, PA1, active-low: 0 = card present, the
 same net Linux uses as `cd-gpios` for `&sdhi1` in `e1m-x-evk.dtsi`), and
 `CONFIG_BOOTCOMMAND` touches `mmc1` only when it succeeds; with the slot
@@ -494,13 +507,10 @@ Both files are tab-delimited; consume directly or via
 |----------------------------------|-------------------------------------------------------------|
 | `v2n-gd32-bridge-ping`           | Round-trip PING + GET_VERSION on both transports.           |
 | `v2n-board-id-readout`           | SoM EEPROM manifest read + SKU assertion.                   |
-| `v2n-ethernet-dual`              | Bring up both RTL8211FDI PHYs (ET0 + ET1); WoL configuration.|
 | `v2n-eeprom-manifest-dump`       | Hexdump + decode the 128-byte EEPROM manifest.              |
 | `v2n-temp-sensor`                | TMP112 read loop -- classic starter app.                    |
 | `v2n-pwm-fan-control`            | Ramp a GD32-side PWM channel along a five-stop fan curve.   |
 | `v2n-secure-element-sign`        | OPTIGA Trust M probe, Coprocessor UID read and raw APDU session (host library). |
-| `v2n-xspi-flash-readwrite`       | Erase + write + verify one page on the on-module xSPI NOR.  |
-| `v2n-emmc-block-stat`            | Read on-module eMMC geometry + first block via disk-access. |
 | `v2n-gd32-swd-flash`             | Host-driven SWD bit-bang -- IDCODE read, halt, erase/write/verify, reset. |
 
 Plus every cross-family example

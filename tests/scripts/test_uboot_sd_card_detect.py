@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""U-Boot's alp_sd_present (patch 0013) reads the SoM's SD1_SD1CD pad when the
+"""U-Boot's alp_sd_present (patch 0015) reads the SoM's SD1_SD1CD pad when the
 carrier wires a card-detect switch. The pad is the SoM peripheral map's, the
 switch is the carrier metadata's; sd1-cd.cfg, the bbappend gate and the Linux
 cd-gpios must agree with them."""
@@ -12,7 +12,7 @@ REPO = Path(__file__).resolve().parents[2]
 META = REPO / "meta-alp-sdk"
 UBOOT = META / "recipes-bsp/u-boot"
 CFG = UBOOT / "u-boot/sd1-cd.cfg"
-PATCH = UBOOT / "u-boot/0013-rzv2n-dev-ALP-E1M-sd-card-detect.patch"
+PATCH = UBOOT / "u-boot/0015-rzv2n-dev-ALP-E1M-sd-card-detect.patch"
 BBAPPEND = UBOOT / "u-boot_%.bbappend"
 DTSI = META / "recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi"
 PAD_MAP = REPO / "metadata/e1m_modules/v2n/renesas-peripheral-map.tsv"

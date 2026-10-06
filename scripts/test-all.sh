@@ -326,13 +326,13 @@ _decide_overlap() {
         return 1
     fi
     if [ -n "${ALP_TWISTER_JOBS:-}" ]; then
-        echo "test-all.sh: ALP_TWISTER_JOBS is set -- running stages serially (no overlap)."
+        echo "test-all.sh: ALP_TWISTER_JOBS is set -- running stages serially (no overlap)." >&2
         return 1
     fi
     local avail_kb min_kb="${ALP_GATE_MIN_MEM_KB:-12582912}"
     avail_kb="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
     if [ -n "${avail_kb}" ] && [ "${avail_kb}" -lt "${min_kb}" ]; then
-        echo "test-all.sh: MemAvailable ${avail_kb} kB < ${min_kb} kB -- running stages serially (no overlap)."
+        echo "test-all.sh: MemAvailable ${avail_kb} kB < ${min_kb} kB -- running stages serially (no overlap)." >&2
         return 1
     fi
     return 0

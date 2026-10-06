@@ -4,6 +4,6 @@
 - **Supersedes the env-nowhere note on #2637.** #2637 first recorded `CONFIG_ENV_IS_NOWHERE` for the `bad CRC, using default environment` line; the maintainer's later decision (work ledger Q2, 2026-10-03: redundant environment on the eMMC boot partition plus `fw_setenv` for OTA) replaces it, and the allowlist keeps what env-nowhere gave: nothing saved can change how the unit boots.
 - **Linux can read and write it.** Non-Mender images for the V2N family carry `libubootenv` (`fw_printenv`, `fw_setenv`) and an `/etc/fw_env.config` matching the offsets, as groundwork for the OTA design; the boot flow reads no boot-slot variable yet. Mender images (`conf/distro/include/mender.inc`) get Mender's own `fw_env.config` instead. `tests/scripts/test_uboot_env_layout.py` fails if the U-Boot config, `fw_env.config` and the provisioning ceiling disagree.
 - **Provisioning cannot erase it.** The Linux eMMC boot write refuses an image that would reach offset `0x220000`.
-- **Empty microSD slot is silent.** U-Boot patch `0013` reads the card-detect pin (PA1, active-low) and skips probing `mmc1` when no card is in, removing `Card did not respond to voltage select! : -110`.
+- **Empty microSD slot is silent.** U-Boot patch `0015` reads the card-detect pin (PA1, active-low) and skips probing `mmc1` when no card is in, removing `Card did not respond to voltage select! : -110`.
 
 Not run on silicon; the bench steps are in `docs/bring-up-v2n.md` section 7a. Design in `docs/soms/v2n.md#uboot-environment`.
