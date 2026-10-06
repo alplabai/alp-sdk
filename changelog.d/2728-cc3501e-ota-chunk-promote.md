@@ -16,6 +16,7 @@ but impossible to promote (`OTA_STATUS reserved[0]` = 119, i.e. `(int8_t)` of
 `PSA_ERROR_BAD_STATE`). With PROMOTE in the same boot, the swap-reboot fires
 (link drop and return in about 3.4 s).
 
-Still open: on that bench unit the bootloader then reported no swap and the
-slot was marked rejected, so the CC3501E kept its existing image. Updating
-the CC3501E firmware over XDS110 is unaffected.
+On the same unit the full path then updated the CC3501E end to end: the
+swapped-in image ran and survived a cold power cycle. After a successful
+update `OTA_STATUS pending` reads 4 (FAILED); that describes the old,
+now non-primary slot, not the new image (#2730).
