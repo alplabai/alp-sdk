@@ -698,7 +698,8 @@ static void cc3501e_demo_ota_promote(cc3501e_t *fw)
 		if (cc3501e_ota_status(fw, &st, CC3501E_OTA_DEMO_TIMEOUT_MS) == ALP_OK) {
 			printf("[cc3501e-bringup] OTA promote acked; OTA_STATUS reserved[0]=%u "
 			       "pending=%u (119 + STAGED = cannot promote; abort and re-send)\n",
-			       (unsigned)st.reserved[0], (unsigned)st.pending);
+			       (unsigned)st.reserved[0],
+			       (unsigned)st.pending);
 		} else {
 			printf("[cc3501e-bringup] OTA promote acked and the link dropped -- a swap "
 			       "reboot is in progress\n");
