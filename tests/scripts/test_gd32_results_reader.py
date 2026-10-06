@@ -24,6 +24,7 @@ def test_constants_match_header():
     assert reader.RESULTS_OFFSET == _define("ALP_GD32_RESULTS_OFFSET")
     assert reader.BEACON_OFFSET == _define("ALP_GD32_RESULTS_BEACON_OFFSET")
     assert reader.BEACON_MAGIC == _define("ALP_GD32_RESULTS_BEACON_MAGIC")
+    assert reader.BEACON_KIND == _define("ALP_GD32_RESULTS_BEACON_KIND")
     assert reader.WORDS == _define("ALP_GD32_RESULTS_WORDS")
     assert reader.LINK_PENDING == _define("ALP_GD32_RESULTS_STATE_LINK_PENDING")
     assert reader.RESULTS_OFFSET + reader.WORDS * 4 <= reader.BEACON_OFFSET
@@ -53,3 +54,15 @@ def test_decode_rejects_stale_or_foreign():
     assert reader.decode(b"\0" * 80) is None
     bad = list(struct.unpack("<20I", struct.pack("<20I", reader.MAGIC, 2, *[0] * 18)))
     assert reader.decode(struct.pack("<20I", *bad)) is None
+
+
+def test_record_left_by_an_earlier_image_is_stale():
+    """Bench, E1M-V2M103 0008: after the idle shim (beacon kind 0x100) replaced the
+    soak image, the old soak record was still in place and used to be reported."""
+    words = [0] * reader.WORDS
+    words[0], words[1], words[3], words[4] = reader.MAGIC, 1, 2, 2
+    raw = struct.pack("<20I", *words)
+    assert reader.is_live(reader.decode(raw, (reader.BEACON_MAGIC, 0x200, 5)))
+    assert not reader.is_live(reader.decode(raw, (reader.BEACON_MAGIC, 0x100, 5)))
+    assert not reader.is_live(reader.decode(raw, (0, 0x200, 5)))
+    assert not reader.is_live(reader.decode(raw))

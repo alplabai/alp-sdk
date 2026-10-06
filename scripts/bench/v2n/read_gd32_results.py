@@ -28,6 +28,7 @@ RESULTS_OFFSET = 0xF00
 BEACON_OFFSET = 0xFF0
 MAGIC = 0x47443352
 BEACON_MAGIC = 0xA10D0683
+BEACON_KIND = 0x200  # a result-publishing image; the idle shim is 0x100
 WORDS = 20
 # Word order of alp_gd32_results_t; tests/scripts/test_gd32_results_reader.py
 # pins this list to the C header.
@@ -58,8 +59,16 @@ def decode(raw, beacon=None):
     rec["flag_names"] = [n for b, n in FLAGS.items() if rec["flags"] & b]
     if beacon is not None:
         rec["beacon_magic_ok"] = beacon[0] == BEACON_MAGIC
+        rec["beacon_kind"] = beacon[1]
         rec["beacon_heartbeat"] = beacon[2]
     return rec
+
+
+def is_live(rec):
+    """The record survives a warm reboot and the idle shim does not clear it, so
+    only a running result-publishing image (beacon kind BEACON_KIND) makes it
+    current; anything else is a stale record from an earlier image."""
+    return rec.get("beacon_magic_ok") is True and rec.get("beacon_kind") == BEACON_KIND
 
 
 def words(mm, off, n):
@@ -93,6 +102,11 @@ def main(argv):
         print("no valid GD32 result record (magic 0x%08X) at 0x%X" % (MAGIC, WINDOW + RESULTS_OFFSET),
               file=sys.stderr)
         return 2
+    if not is_live(rec):
+        print("stale GD32 result record: the CM33 is not running a result-publishing image "
+              "(beacon magic %s, kind 0x%X)" % (rec.get("beacon_magic_ok"), rec.get("beacon_kind", 0)),
+              file=sys.stderr)
+        return 4
     if "--json" in argv:
         print(json.dumps(rec, sort_keys=True))
     else:
