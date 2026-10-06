@@ -88,8 +88,11 @@ M33 only, for iteration (needs a west workspace, network access, and the ROS 2
 colcon build prerequisites the module documents):
 
 ```bash
+# the per-core Kconfig fragment (git-ignored generated/alp.conf) must exist first
+python3 scripts/gen_example_alp_conf.py examples/multicore/microros-ros2-v2n
 west build -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 \
-    examples/multicore/microros-ros2-v2n/m33_sm
+    examples/multicore/microros-ros2-v2n/m33_sm -- \
+    -DEXTRA_CONF_FILE=generated/alp.conf
 ```
 
 ## Run
