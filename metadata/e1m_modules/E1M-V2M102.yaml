@@ -22,6 +22,8 @@ on_module:
   supervisor_mcu:       gd32g553
   ethernet_phy:         rtl8211fdi
   ethernet_phy_count:   2
+  # DX-M1 ROM-UART programming pads (provisioning): P75 = UART0 mux, PA6 = M1_RESET.
+  dxm1:                 {uart_mux_pin: P75, reset_pin: PA6, gpio_chip: "10410000.pinctrl"}
   # nor_flash / emmc are routing annotations (SoC controller the on-module
   # storage is wired to), not chip slugs -- no chips/<part>/ driver exists
   # for either (see scripts/alp_orchestrate/slugs.py
@@ -32,6 +34,11 @@ on_module:
   nor_flash_driver_status: none
   emmc:                    sd0                 # on-module via Renesas SD0; no alp-sdk driver yet
   emmc_driver_status:      none
+  emmc_boot:                                  # boot-partition layout: provisioning, U-Boot env, fw_env.config, Mender
+    bl2_mmc_sector:        1
+    fip_sector:            0x300
+    partition_bytes:       TBD                  # per-part BOOT_SIZE_MULT, not yet read from the datasheet
+    uboot_env:             { part: 2, offset: 0x220000, offset_redund: 0x230000, size: 0x10000 }
   npu:                  deepx_dxm1
   pcie_mux:             pi3dbs12212
 
@@ -81,7 +88,7 @@ memory:
   flash_mbit:           131072                 # 128 Gbit eMMC 5.1 (16 GB)
 
 inference:
-  preferred_backend:    deepx_dxm1
+  auto_order:           [deepx_dxm1, drpai, cpu]   # ALP_INFERENCE_BACKEND_AUTO preference, best first; first entry = preferred backend (DX-M1 on-module)
 
 capabilities:
   deepx_dxm1:           true       # DEEPX DX-M1 NPU on-module via PCIe.
@@ -187,17 +194,17 @@ mailbox:
 #     once their board trees generate; it does not need a
 #     soc_peripheral_instances entry to become visible.
 soc_peripheral_instances:
-  - { instance: i3c30,     class: i3c,  silicon_peripheral: "I3C_SCL30/SDA30",              driver_status: none }
-  - { instance: riic1,     class: i2c,  silicon_peripheral: "RIIC1_SCL1/SDA1",               driver_status: none }
+  - { instance: i3c30,     class: i3c,  silicon_peripheral: "I3C_SCL30/SDA30",              driver_status: none, notes: "P20/P21 (P2x) are NOT 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1); do not enable an i3c DT node until carrier parts on E1M I3C are confirmed not to drive 3.3 V. Audit IO-M2." }
+  - { instance: riic1,     class: i2c,  silicon_peripheral: "RIIC1_SCL1/SDA1",               driver_status: none, notes: "A55/Linux enables &i2c1 (P32/P33 f1, 400 kHz) in the Yocto DT; no CM33 driver. Audit finding IO-M1; not bench-verified by this entry." }
   - { instance: riic2,     class: i2c,  silicon_peripheral: "RIIC2_SCL2/SDA2",               driver_status: none }
-  - { instance: rspi0,     class: spi,  silicon_peripheral: "RSPI0_*",                       driver_status: none }
-  - { instance: sci_spi2,  class: spi,  silicon_peripheral: "SCI_SPI2_*",                    driver_status: none }
-  - { instance: sci_spi3,  class: spi,  silicon_peripheral: "SCI_SPI3_*",                    driver_status: none }
+  - { instance: rspi0,     class: spi,  silicon_peripheral: "RSPI0_*",                       driver_status: none, notes: "P90-P92 are NOT 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1); do not enable an rspi0 DT node until carrier parts on E1M SPI0 are confirmed not to drive 3.3 V. Audit IO-M2." }
+  - { instance: sci_spi2,  class: spi,  silicon_peripheral: "RSCI2_*",                       driver_status: none }
+  - { instance: sci_spi3,  class: spi,  silicon_peripheral: "RSCI3_*",                       driver_status: none }
   - { instance: pdm0,      class: pdm,  silicon_peripheral: "PDM0_PDMCLK0x/PDMDAT0x",         driver_status: none }
   - { instance: canfd2,    class: can,  silicon_peripheral: "CANFD2_CRX2/CTX2",               driver_status: none }
   - { instance: canfd3,    class: can,  silicon_peripheral: "CANFD3_CRX3/CTX3",               driver_status: none }
   - { instance: uart1,     class: uart, silicon_peripheral: "UART1_RXD1/TXD1",                driver_status: none }
-  - { instance: i2s0,      class: i2s,  silicon_peripheral: "SSIU1_SSI1_*/SSIU2_SSI2_SDATA",  driver_status: none }
+  - { instance: i2s0,      class: i2s,  silicon_peripheral: "SSIU1_SSI1_*/SSIU2_SSI2_SDATA",  driver_status: none, notes: "A55/Linux sound card uses SSIU1/SSIU2 in the Yocto DT; no CM33 driver. Audit finding IO-M1; not bench-verified by this entry." }
   - { instance: i2s1,      class: i2s,  silicon_peripheral: "SSIU3_SSI3_*/SSIU4_SSI4_SDATA",  driver_status: none }
   - { instance: sd1,       class: sdio, silicon_peripheral: "SD1CLK/SD1CMD/SD1DATx",          driver_status: none, notes: "SD1_SD1CD (tsv:109) + SD1_SD1PWEN (tsv:110) are this slot's control lines; SDCARD_RST (tsv:111) + µSD1_V_SEL (tsv:2) are the microSD socket's reset/voltage-select GPIOs, not a separate instance. #1170." }
 
@@ -250,14 +257,16 @@ pad_routes:
   - { e1m: E1M_X_GPIO_IO12, dispatch: gd32_bridge, dispatch_pin: PC1  }
   - { e1m: E1M_X_GPIO_IO13, dispatch: gd32_bridge, dispatch_pin: PF1  }
   - { e1m: E1M_X_GPIO_IO14, dispatch: gd32_bridge, dispatch_pin: PB5  }
+  - { e1m: E1M_X_GPIO_IO15, dispatch: gd32_bridge, dispatch_pin: PB4, bridge_bit: 21, min_bridge_protocol: 15 }
   - { e1m: E1M_X_GPIO_IO16, dispatch: gd32_bridge, dispatch_pin: PC0  }
-  - { e1m: E1M_X_GPIO_IO24, dispatch: unrouted,
+  - { e1m: E1M_X_GPIO_IO24, dispatch: unrouted, driven_by: dxm1,
       doc: "Not a GD32 pad; driven by the DX-M1 on V2M. Bridge bit 8 answers STATUS_IO (#2453)." }
   - { e1m: E1M_X_GPIO_IO25, dispatch: gd32_bridge, dispatch_pin: PC15 }
 
-  # E1M-X form-factor GPIO extensions (IO27..IO35, IO33 absent on V2N).
-  # See `E1M_X_GPIO_IO27..IO35` in <alp/e1m_x_pinout.h>.
+  # E1M-X form-factor GPIO extensions (IO26..IO35, IO33 absent on V2N).
+  # See `E1M_X_GPIO_IO26..IO35` in <alp/e1m_x_pinout.h>.
   # Source: metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv
+  - { e1m: E1M_X_GPIO_IO26, dispatch: gd32_bridge, dispatch_pin: PC2, bridge_bit: 22, min_bridge_protocol: 15 }
   - { e1m: E1M_X_GPIO_IO27, dispatch: gd32_bridge, dispatch_pin: PB11 }
   - { e1m: E1M_X_GPIO_IO28, dispatch: gd32_bridge, dispatch_pin: PE9  }
   - { e1m: E1M_X_GPIO_IO29, dispatch: gd32_bridge, dispatch_pin: PD11 }

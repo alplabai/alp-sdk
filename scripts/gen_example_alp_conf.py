@@ -84,6 +84,8 @@ def generate(app_dir: Path, board_yaml: Path, core_id: str) -> Path:
     out = app_dir / "generated" / "alp.conf"
     _write(out, text)
     for sku in _twin_skus(project.sku) if _has_hook(app_dir) else []:
+        # Drop a twin left by an earlier run: CMake prefers it whenever it exists.
+        (app_dir / "generated" / sku[4:].lower() / "alp.conf").unlink(missing_ok=True)
         try:
             twin = load_board_yaml(board_yaml, sku=sku)
             ttext = _slice_alp_conf(twin, twin.cores[core_id])

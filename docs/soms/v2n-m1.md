@@ -171,19 +171,51 @@ unit but commented out, and this image runs systemd rather than
 SysVinit, so the bbappend stages it directly rather than re-pinning).
 The `PREFERRED_VERSION_dx-rt = "3.2.0"` pin is unchanged (firmware
 lockstep). `run_model` and `dxrt-cli` still open the device directly
-and work unchanged against the running `dxrtd`; on dx-rt 3.2.0,
-processes sharing one DX-M1 must still bind the same NPU core set
-(see `<alp/ext/deepx/inference.h>`). See #2398.
+and work unchanged against the running `dxrtd`. The real limit is
+**at most 3 distinct NPU core sets live on one DX-M1 at a time**: the
+kernel driver keeps one hardware queue per distinct core set
+(`DX_NORMAL_QUEUE_MAX = 3`), engines on the same set share a queue,
+and "all cores" counts as a set. A fourth set is refused by the
+driver (`-EBUSY`) and dx-rt aborts the process (or kills `dxrtd`)
+instead of failing cleanly; the limit is unchanged in driver
+v2.6.0. Bench evidence (#2398): three processes on `CORE_0`,
+`CORE_0`, `CORE_0` work; three on `CORE_0`/`CORE_1`/`CORE_2` hit
+`Failed to set NPU bound 3 ... ret: -16` and killed `dxrtd`
+(hypothesis, not confirmed: the engine the SDK used to build on all
+cores before rebinding took a queue -- `alp_inference_open()` now builds
+the engine on the cores named by `accel_unit_mask` directly). Inside one
+process the SDK refuses a fourth distinct set with `ALP_ERR_BUSY`;
+across processes nothing guards it. See `<alp/ext/deepx/inference.h>`
+and #2398.
 
-### DX-M1 NAND firmware provisioning
+To run two models on the DX-M1 side by side, open them with
+`alp_inference_config_t::accel_unit_mask` set to disjoint core masks
+(bit `n` = NPU core `n`; e.g. `0x3` for cores 0+1 and `0x4` for core 2). To run one model on the DX-M1 and one on
+the on-die DRP-AI3 at the same time, see
+`examples/v2n/v2n-two-models/` (not bench-verified).
 
-The DX-M1's application firmware lives on its own SPI NAND, separate
-from the Yocto image, and is provisioned once, out of band, over
-DEEPX's UART boot path (`fw_update_uart` from DEEPX's own tooling)
-using firmware images obtained **from DEEPX** -- alp-sdk does not
-redistribute them. If an update is interrupted or the DX-M1 wedges
-afterward, cold-power-cycle the module (a warm reset is not
-sufficient) before retrying.
+### Running DX-M1 next to other code on a V2M
+
+- **`libdxrt` installs crash handlers at load.** A static initialiser in
+  `libdxrt` registers handlers for `SIGSEGV`, `SIGBUS` and `SIGABRT` that
+  call `exit(1)`. Because `libalp_sdk` links `libdxrt` on V2M, this
+  affects every SDK application there, DX-M1 users or not: a crash or
+  `abort()` in the app, the DRP-AI runtime or an `assert` ends as a silent
+  exit code 1 with no core dump, the `exit()` runs from inside a signal
+  handler (not async-signal-safe, can hang), and any `SIGSEGV`/`SIGABRT`
+  handler the app installed before the library loaded is replaced.
+  Handlers installed after load win, so an app that needs core dumps
+  reinstalls `SIG_DFL` at start-up. Read from the library's behaviour and
+  symbols; the hang risk and the DRP-AI-only-process case are unverified
+  on the bench.
+- **`ALP_INFERENCE_BACKEND_AUTO` means DX-M1 here.** On a build with both
+  NPU backends, AUTO resolves to DEEPX at compile time. A model for the
+  on-die DRP-AI3 must name `.backend = ALP_INFERENCE_BACKEND_DRPAI`.
+- **One model on each NPU at the same time** (DRP-AI3 + DX-M1) is what
+  `examples/v2n/v2n-two-models/` does. The two stacks share no driver,
+  device node, memory carve-out or IRQ; they do share the 4 A55 cores and
+  DDR. Not bench-verified, and its DRP-AI half needs a RUHMI-enabled
+  `libalp_sdk` (see `docs/bring-up-drpai-v2n.md`).
 
 ### Hardware prerequisites
 
@@ -193,8 +225,28 @@ The bring-up above depends on these being true of the SoM:
 * the DX-M1's crystal oscillator has its bias resistor populated;
 * SoMs without the DEEPX reference PMIC run DEEPX's no-PMIC firmware
   variant on the DX-M1;
-* the DX-M1's NAND has been programmed at least once over its UART
-  boot path (see above).
+* the DX-M1's NAND carries the factory-provisioned Alp firmware (see
+  "DX-M1 firmware is factory-provisioned" below).
+
+## DX-M1 firmware is factory-provisioned
+
+The DX-M1's application firmware lives on its own SPI NAND, separate
+from the Yocto image. Alp Lab provisions it at the factory with an
+Alp-specific build for this SoM (DEEPX's no-PMIC variant, fw 2.4.0).
+**Do not update it with stock DEEPX firmware**: that leaves the NPUs
+dead (`dxrt_polling_ack: timeout`), and recovering needs the ROM-UART
+path with the boot straps changed, which is not a field operation.
+
+The image does not block DX-M1 firmware or configuration commands. The
+shipped `dxrt-cli` prints a warning to stderr before `-u` (firmware
+update), `-w` (firmware upload) and `-C` (firmware config JSON), and then
+runs exactly as upstream: continue only with firmware supplied by Alp Lab
+for this module. The `-C` warning says the firmware configuration (including
+thermal throttling) is being changed and a wrong configuration can make the
+NPU unusable. The library calls (`Configuration::SetFWConfigWithJson`, the
+Python package, so voltage-monitor profiling) and the kernel driver are
+unmodified. Built into the `e1m-v2m103-a55` image in a container; not run on a
+board.
 
 ## Example apps targeting V2N-M1
 

@@ -43,6 +43,10 @@ struct alp_gpio_ops {
 	                           void                     *user);
 	alp_status_t (*disable_irq)(alp_gpio_backend_state_t *state);
 	void (*close)(alp_gpio_backend_state_t *state);
+	/* Optional: switch the pin to an OUTPUT whose initial level is LOW in the
+	 * same step (never driven high, not even briefly).  Internal use only
+	 * (alp_z_gpio_configure_output_low()). */
+	alp_status_t (*configure_output_low)(alp_gpio_backend_state_t *state);
 };
 
 /*
@@ -102,5 +106,17 @@ alp_status_t alp_z_gpio_open_owned(uint32_t                  pin_id,
                                    alp_gpio_backend_state_t *st,
                                    alp_capabilities_t       *caps_out,
                                    alp_gpio_backend_state_t *owner_state);
+
+/* INTERNAL opener for the reserved GD32 pad ids (GD32G553_PAD_ID_*).  The
+ * portable alp_gpio_open() REFUSES those ids (ALP_ERR_INVAL): they name the GD32
+ * SWD / reset / ATTN pads, which only the V2N supervisor and the gd32_swd driver
+ * (through src/zephyr/gd32_swd_pads.c) may drive, never application code or the
+ * console.  Any other id behaves exactly like alp_gpio_open(). */
+alp_gpio_t *alp_z_gpio_open_internal(uint32_t pin_id);
+
+/* Configure @p pin as an OUTPUT whose initial level is LOW (the shared
+ * open-drain GD32_NRST net must never be driven high).  ALP_ERR_NOSUPPORT when
+ * the backend cannot do it atomically. */
+alp_status_t alp_z_gpio_configure_output_low(alp_gpio_t *pin);
 
 #endif /* ALP_BACKENDS_GPIO_OPS_H */

@@ -160,6 +160,13 @@ struct alp_adc_stream {
 	uint8_t  channel;   /* hardware channel id */
 	uint32_t channel_id;
 	uint32_t sample_rate_hz;
+	/* GD32 bridge protocol v0.15: the stream was started with BEGIN2 (raw
+	 * codes + exact drop accounting, read through READ2) rather than the
+	 * legacy millivolt-and-BUSY BEGIN/READ.  full_scale / vref_mv are the
+	 * BEGIN2 reply's code-to-millivolt scaling for this stream. */
+	bool     stream2;
+	uint16_t full_scale;
+	uint16_t vref_mv;
 	/* lifecycle/active_ops drive the generic open/op/close guard in
 	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
 	 * begin_close_blocking, issue #629).  A read counted here holds the

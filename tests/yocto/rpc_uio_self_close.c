@@ -93,8 +93,10 @@
 
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "test_assert.h"
 
@@ -106,6 +108,21 @@
 
 static struct rpmsg_device g_fake_rdev;
 
+/* #2586 scenarios: every frame put on the wire is counted, and when
+ * g_fake_echo_ch is set it is echoed straight back to that channel through
+ * the fake IRQ thread (the m33_sm firmware's echo behaviour). */
+static atomic_int     g_fake_send_count;
+static struct rpc_be *g_fake_echo_ch;
+/* When set, every frame put on the wire makes the peer answer with the STALE
+ * reply of an earlier, timed-out call ("echo" / "A") instead of echoing. */
+static struct rpc_be *g_fake_stale_ch;
+
+static void deliver_frame_via_fake_irq_thread(struct rpc_be *ch,
+                                              const char    *method,
+                                              const void    *payload,
+                                              size_t         payload_len);
+static void deliver_raw_via_fake_irq_thread(struct rpc_be *ch, const void *bytes, size_t len);
+
 static int fake_send_offchannel_raw(struct rpmsg_device *rdev,
                                     uint32_t             src,
                                     uint32_t             dst,
@@ -116,9 +133,14 @@ static int fake_send_offchannel_raw(struct rpmsg_device *rdev,
 	(void)rdev;
 	(void)src;
 	(void)dst;
-	(void)data;
-	(void)len;
 	(void)wait;
+	atomic_fetch_add(&g_fake_send_count, 1);
+	if (g_fake_echo_ch != NULL && len > 0) {
+		deliver_raw_via_fake_irq_thread(g_fake_echo_ch, data, (size_t)len);
+	}
+	if (g_fake_stale_ch != NULL) {
+		deliver_frame_via_fake_irq_thread(g_fake_stale_ch, "echo", "A", 1);
+	}
 	/* Every scenario below only cares that y_call()/y_send() observe a
 	 * successful "on the wire" outcome -- the actual bytes never need
 	 * to go anywhere for a close-protocol test. A real reply (when a
@@ -204,6 +226,17 @@ static void deliver_frame_via_fake_irq_thread(struct rpc_be *ch,
 	g_mailbox.ch = ch;
 	g_mailbox.len =
 	    (size_t)frame_build(g_mailbox.bytes, sizeof g_mailbox.bytes, method, payload, payload_len);
+	g_mailbox_full = true;
+	pthread_cond_signal(&g_mailbox_cond);
+	pthread_mutex_unlock(&g_mailbox_lock);
+}
+
+static void deliver_raw_via_fake_irq_thread(struct rpc_be *ch, const void *bytes, size_t len)
+{
+	pthread_mutex_lock(&g_mailbox_lock);
+	g_mailbox.ch  = ch;
+	g_mailbox.len = len <= sizeof g_mailbox.bytes ? len : sizeof g_mailbox.bytes;
+	memcpy(g_mailbox.bytes, bytes, g_mailbox.len);
 	g_mailbox_full = true;
 	pthread_cond_signal(&g_mailbox_cond);
 	pthread_mutex_unlock(&g_mailbox_lock);
@@ -612,6 +645,253 @@ static void test_callback_send_and_call_do_not_block_on_pending_call(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* 4c. #2586: a timed-out call poisons the channel until reopen.        */
+/* ------------------------------------------------------------------ */
+
+static void test_timeout_poisons_channel_no_off_by_one_reply(void)
+{
+	struct rpc_be          *ch = make_test_channel();
+	alp_rpc_backend_state_t st = { .be_data = ch, .ops = &_ops };
+	ch->owner                  = &st;
+	atomic_store(&g_fake_send_count, 0);
+
+	/* Call A goes out, the peer is slow, the caller gives up. */
+	uint8_t resp[8] = { 0 };
+	size_t  n       = sizeof resp;
+	ALP_ASSERT_EQ_INT(y_call(&st, "echo", "A", 1, resp, &n, 50), ALP_ERR_TIMEOUT);
+
+	/* From here on the peer answers every frame it is sent with A's STALE
+	 * reply.  Pre-fix, call B put its request on the wire, the hook delivered
+	 * that stale "A" while B was pending, and B returned 'A' (replies match by
+	 * method name only): every reply one call late.  With the fix B is
+	 * refused before it is sent, so the hook never runs. */
+	g_fake_stale_ch = ch;
+	n               = sizeof resp;
+	ALP_ASSERT_EQ_INT(y_call(&st, "echo", "B", 1, resp, &n, 1000), ALP_ERR_NOT_READY);
+	ALP_ASSERT_EQ_INT(y_call(&st, "echo", "C", 1, resp, &n, 1000), ALP_ERR_NOT_READY);
+	g_fake_stale_ch = NULL;
+	sleep_ms(50);
+	ALP_ASSERT_EQ_INT(atomic_load(&g_fake_send_count), 1); /* only A went out */
+	ALP_ASSERT_TRUE(resp[0] != 'A');
+
+	/* ...while fire-and-forget sends are unaffected. */
+	ALP_ASSERT_EQ_INT(y_send(&st, "note", NULL, 0), ALP_OK);
+
+	do_close(&st);
+	ALP_ASSERT_NULL(rpc_be_data_load(&st));
+}
+
+static void test_reopen_after_poison_works(void)
+{
+	/* Poison one channel, close it... */
+	struct rpc_be          *ch = make_test_channel();
+	alp_rpc_backend_state_t st = { .be_data = ch, .ops = &_ops };
+	ch->owner                  = &st;
+	uint8_t resp[8]            = { 0 };
+	size_t  n                  = sizeof resp;
+	ALP_ASSERT_EQ_INT(y_call(&st, "echo", "A", 1, resp, &n, 20), ALP_ERR_TIMEOUT);
+	do_close(&st);
+
+	/* ...and the next open starts clean: y_open() callocs a fresh rpc_be,
+	 * make_test_channel() mirrors that. */
+	ch             = make_test_channel();
+	st.be_data     = ch;
+	ch->owner      = &st;
+	g_fake_echo_ch = ch;
+	n              = sizeof resp;
+	ALP_ASSERT_EQ_INT(y_call(&st, "echo", "B", 1, resp, &n, 1000), ALP_OK);
+	ALP_ASSERT_EQ_INT((int)n, 1);
+	ALP_ASSERT_EQ_INT(resp[0], 'B');
+	g_fake_echo_ch = NULL;
+	do_close(&st);
+}
+
+/* ------------------------------------------------------------------ */
+/* 4d. #2586: attach reset handshake / old-CM33 refusal.                */
+/* ------------------------------------------------------------------ */
+
+static void fake_region_init(struct metal_device *dev, void *virt, size_t size);
+
+/* rsctbl as the m33_sm firmware lays it out: resource table at 0 (one
+ * RSC_VDEV entry), beacon words at 0xFF0.. */
+#define T_RSCTBL_VDEV_OFF 0x14u
+
+struct fake_link {
+	uint32_t            rsctbl[0x1000 / 4];
+	uint8_t             mhu[0x1000];
+	uint8_t             shm[0x1000];
+	struct metal_device rsctbl_dev;
+	struct metal_device mhu_dev;
+	struct metal_device shm_dev;
+	struct rpc_be       ch;
+};
+
+static void fake_link_init(struct fake_link *l, uint32_t beacon_version, uint8_t status)
+{
+	memset(l, 0, sizeof *l);
+	uint8_t *t                                   = (uint8_t *)l->rsctbl;
+	l->rsctbl[0]                                 = 1u; /* ver */
+	l->rsctbl[1]                                 = 1u; /* num */
+	l->rsctbl[4]                                 = T_RSCTBL_VDEV_OFF;
+	struct fw_rsc_vdev *vdev                     = (struct fw_rsc_vdev *)(t + T_RSCTBL_VDEV_OFF);
+	vdev->type                                   = RSC_VDEV;
+	vdev->notifyid                               = 0xFFu;
+	vdev->status                                 = status;
+	l->rsctbl[ALP_RSCTBL_BEACON_MAGIC_OFF / 4]   = ALP_RSCTBL_BEACON_MAGIC;
+	l->rsctbl[ALP_RSCTBL_BEACON_VERSION_OFF / 4] = beacon_version;
+	l->rsctbl[ALP_RSCTBL_ATTACH_EPOCH_OFF / 4]   = 7u;
+
+	fake_region_init(&l->rsctbl_dev, l->rsctbl, sizeof l->rsctbl);
+	fake_region_init(&l->mhu_dev, l->mhu, sizeof l->mhu);
+	fake_region_init(&l->shm_dev, l->shm, sizeof l->shm);
+	l->ch.dev[UIO_RSCTBL]  = &l->rsctbl_dev;
+	l->ch.dev[UIO_MHU]     = &l->mhu_dev;
+	l->ch.dev[UIO_MHU_SHM] = &l->shm_dev;
+	l->ch.rproc.priv       = &l->ch;
+}
+
+static uint8_t fake_link_status(struct fake_link *l)
+{
+	struct fw_rsc_vdev *vdev = (struct fw_rsc_vdev *)((uint8_t *)l->rsctbl + T_RSCTBL_VDEV_OFF);
+	return __atomic_load_n(&vdev->status, __ATOMIC_SEQ_CST);
+}
+
+static uint32_t fake_link_doorbell(struct fake_link *l)
+{
+	uint32_t v;
+	memcpy(&v, l->mhu + ALP_MHU_NS_CH5_KICK_SLOT + ALP_MHU_NS_SLOT_MSG_INT_SET, sizeof v);
+	return v;
+}
+
+/* Runs `fn(arg)` with stderr redirected; returns what it printed. */
+static char g_stderr_buf[1024];
+
+static alp_status_t capture_stderr(alp_status_t (*fn)(struct rpc_be *), struct rpc_be *arg)
+{
+	fflush(stderr);
+	int   saved = dup(2);
+	FILE *tmp   = tmpfile();
+	dup2(fileno(tmp), 2);
+	alp_status_t rc = fn(arg);
+	fflush(stderr);
+	dup2(saved, 2);
+	close(saved);
+	rewind(tmp);
+	size_t got        = fread(g_stderr_buf, 1, sizeof g_stderr_buf - 1, tmp);
+	g_stderr_buf[got] = '\0';
+	fclose(tmp);
+	return rc;
+}
+
+static void test_attach_reset_refuses_old_cm33(void)
+{
+	static struct fake_link l;
+	fake_link_init(&l, 1u, VIRTIO_CONFIG_STATUS_DRIVER_OK);
+
+	ALP_ASSERT_EQ_INT(capture_stderr(uio_attach_reset, &l.ch), ALP_ERR_BUSY);
+	ALP_ASSERT_TRUE(strstr(g_stderr_buf, "still attached from an earlier session") != NULL);
+	ALP_ASSERT_TRUE(strstr(g_stderr_buf, "version 1") != NULL);
+	/* Refused before touching anything the CM33 reads. */
+	ALP_ASSERT_EQ_INT(fake_link_status(&l), VIRTIO_CONFIG_STATUS_DRIVER_OK);
+	ALP_ASSERT_EQ_INT((int)fake_link_doorbell(&l), 0);
+}
+
+static void test_attach_refuses_idle_shim(void)
+{
+	static struct fake_link l;
+	/* The idle stock shim with the heartbeat beacon (pending branch
+	 * feat/cm33-shim-heartbeat) publishes version 0x100 and no RPC; whatever
+	 * the rest of rsctbl holds, the open fails without a write or a kick.  A
+	 * shim without the beacon fails NOT_READY instead (no magic). */
+	fake_link_init(&l, 0x100u, VIRTIO_CONFIG_STATUS_DRIVER_OK);
+	ALP_ASSERT_EQ_INT(capture_stderr(uio_attach_reset, &l.ch), ALP_ERR_NOSUPPORT);
+	ALP_ASSERT_TRUE(strstr(g_stderr_buf, "image without RPC") != NULL);
+	ALP_ASSERT_EQ_INT(fake_link_status(&l), VIRTIO_CONFIG_STATUS_DRIVER_OK);
+	ALP_ASSERT_EQ_INT((int)fake_link_doorbell(&l), 0);
+
+	fake_link_init(&l, 0x100u, 0u); /* fresh boot: still no RPC */
+	ALP_ASSERT_EQ_INT(capture_stderr(uio_attach_reset, &l.ch), ALP_ERR_NOSUPPORT);
+}
+
+static void test_attach_refuses_missing_beacon(void)
+{
+	static struct fake_link l;
+	fake_link_init(&l, 2u, 0u);
+	l.rsctbl[ALP_RSCTBL_BEACON_MAGIC_OFF / 4] = 0xFFFFFFFFu; /* CM33 never ran */
+	ALP_ASSERT_EQ_INT(capture_stderr(uio_attach_reset, &l.ch), ALP_ERR_NOT_READY);
+	ALP_ASSERT_TRUE(strstr(g_stderr_buf, "no CM33 beacon") != NULL);
+	ALP_ASSERT_EQ_INT((int)fake_link_doorbell(&l), 0);
+}
+
+static void test_attach_reset_skipped_on_fresh_cm33(void)
+{
+	static struct fake_link l;
+	fake_link_init(&l, 1u, 0u); /* first attach after a CM33 boot */
+	ALP_ASSERT_EQ_INT(uio_attach_reset(&l.ch), ALP_OK);
+	ALP_ASSERT_EQ_INT((int)fake_link_doorbell(&l), 0);
+}
+
+/* Stands in for the v2 CM33: once status reads 0, ack by turning the epoch
+ * even (waiting).  It watches the status word rather than the doorbell (a
+ * plain MMIO store here, which ThreadSanitizer would flag); the test checks
+ * the doorbell after the join.  The real CM33 reset path (doorbell IRQ ->
+ * rpmsg_link_reset() -> cleanup -> epoch bump) is bench-only. */
+static void *fake_cm33_ack(void *arg)
+{
+	struct fake_link *l = (struct fake_link *)arg;
+	for (int i = 0; i < 2000; ++i) {
+		if (fake_link_status(l) == 0u) {
+			__atomic_store_n(&l->rsctbl[ALP_RSCTBL_ATTACH_EPOCH_OFF / 4], 8u, __ATOMIC_SEQ_CST);
+			return NULL;
+		}
+		sleep_ms(1);
+	}
+	return NULL;
+}
+
+static void test_attach_reset_handshake_with_v2_cm33(void)
+{
+	static struct fake_link l;
+	fake_link_init(&l, 2u, VIRTIO_CONFIG_STATUS_DRIVER_OK);
+	pthread_t cm33;
+	ALP_ASSERT_EQ_INT(pthread_create(&cm33, NULL, fake_cm33_ack, &l), 0);
+	ALP_ASSERT_EQ_INT(uio_attach_reset(&l.ch), ALP_OK);
+	ALP_ASSERT_EQ_INT(pthread_join(cm33, NULL), 0);
+	ALP_ASSERT_EQ_INT(fake_link_status(&l), 0);
+	ALP_ASSERT_EQ_INT((int)fake_link_doorbell(&l), 1);
+}
+
+static void test_attach_reset_odd_epoch_with_status_zero(void)
+{
+	static struct fake_link l;
+	/* A timed-out earlier open left vdev.status 0 but the CM33 is still bound
+	 * (epoch odd): the A55 must still reset, not skip on status. */
+	fake_link_init(&l, 2u, 0u);
+	pthread_t cm33;
+	ALP_ASSERT_EQ_INT(pthread_create(&cm33, NULL, fake_cm33_ack, &l), 0);
+	ALP_ASSERT_EQ_INT(uio_attach_reset(&l.ch), ALP_OK);
+	ALP_ASSERT_EQ_INT(pthread_join(cm33, NULL), 0);
+	ALP_ASSERT_EQ_INT((int)fake_link_doorbell(&l), 1);
+}
+
+static void test_attach_reset_skipped_on_even_epoch(void)
+{
+	static struct fake_link l;
+	fake_link_init(&l, 2u, VIRTIO_CONFIG_STATUS_DRIVER_OK);
+	l.rsctbl[ALP_RSCTBL_ATTACH_EPOCH_OFF / 4] = 8u; /* CM33 waiting for an attach */
+	ALP_ASSERT_EQ_INT(uio_attach_reset(&l.ch), ALP_OK);
+	ALP_ASSERT_EQ_INT((int)fake_link_doorbell(&l), 0);
+}
+
+static void test_attach_reset_times_out_without_ack(void)
+{
+	static struct fake_link l;
+	fake_link_init(&l, 2u, VIRTIO_CONFIG_STATUS_DRIVER_OK);
+	ALP_ASSERT_EQ_INT(capture_stderr(uio_attach_reset, &l.ch), ALP_ERR_TIMEOUT);
+	ALP_ASSERT_TRUE(strstr(g_stderr_buf, "did not acknowledge") != NULL);
+}
+
+/* ------------------------------------------------------------------ */
 /* 5. alp-sdk #735: ALP_UIO_MHU_KICK_SLOT override boundary checks.     */
 /* ------------------------------------------------------------------ */
 
@@ -822,6 +1102,16 @@ int main(void)
 	test_unsubscribe_waits_for_inflight_callback();
 	test_unsubscribe_from_callback_does_not_hang();
 	test_callback_send_and_call_do_not_block_on_pending_call();
+	test_timeout_poisons_channel_no_off_by_one_reply();
+	test_reopen_after_poison_works();
+	test_attach_reset_refuses_old_cm33();
+	test_attach_refuses_idle_shim();
+	test_attach_refuses_missing_beacon();
+	test_attach_reset_skipped_on_fresh_cm33();
+	test_attach_reset_handshake_with_v2_cm33();
+	test_attach_reset_odd_epoch_with_status_zero();
+	test_attach_reset_skipped_on_even_epoch();
+	test_attach_reset_times_out_without_ack();
 
 	test_mhu_kick_slot_default();
 	test_mhu_kick_slot_valid_override();

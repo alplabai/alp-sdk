@@ -156,7 +156,7 @@ memory:
   flash_mbit:           0
 
 inference:
-  preferred_backend:    ethos_u                # E8 ships Ethos-U85 alongside two U55s.
+  auto_order:           [ethos_u, cpu]                # E8 ships Ethos-U85 alongside two U55s.
   ethos_u_variant:      u85                    # primary.
 
 capabilities:

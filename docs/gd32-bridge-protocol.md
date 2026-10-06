@@ -16,7 +16,9 @@
 
 The GD32 supervisor is reachable on V2N over **two parallel physical
 buses**.  The bridge speaks the **same command-set** on both — only
-the framing layer differs.
+the framing layer differs (v0.15: the I2C link is restricted to a
+management allow-list, §5.3, and the SPI link gains negotiated big frames,
+`BATCH` and an `ATTN` line, §3.14 - §3.18).
 
 | Property              | SPI (fast path)                                                            | I2C (management path)                          |
 |-----------------------|----------------------------------------------------------------------------|------------------------------------------------|
@@ -41,8 +43,10 @@ field is declared `uint32_t` in the C structs, byte 0 is the LSB.
 
 ## 3. Common command set
 
-Both transports carry the same command set.  Command opcodes are 1
-byte; their numeric encoding is:
+Both transports carry the same command set, with two v0.15 exceptions:
+`BATCH`, `ADC_STREAM_BEGIN2` and `ADC_STREAM_READ2` are SPI-only, and the
+I2C link answers `STATUS_NOSUPPORT` to every opcode outside the §5.3
+allow-list.  Command opcodes are 1 byte; their numeric encoding is:
 
 | Opcode | Name                  | Payload (request)                                  | Reply payload                                      |
 |--------|-----------------------|----------------------------------------------------|----------------------------------------------------|
@@ -50,13 +54,15 @@ byte; their numeric encoding is:
 | `0x01` | `GET_VERSION`         | _empty_                                            | `major:u8 minor:u8 patch:u8` (`major.minor.patch`) |
 | `0x02` | `GET_BUILD_ID`        | _empty_                                            | `build_id:char[20]` (truncated SHA-1, ASCII hex)   |
 | `0x03` | `RESET_REASON`        | _empty_                                            | `cause:u8` (`gd32g553_reset_cause_t`)              |
+| `0x04` | `BATCH` (v0.15)       | `count:u8 {op:u8 len:u8 args[len]}[count]`         | `executed:u8 {status:u8 len:u8 payload[len]}[executed]` (SPI only; needs the `BATCH` link feature -- see §3.16) |
 | `0x10` | `GPIO_READ`           | `mask:u32`                                         | `levels:u32` (masked subset)                       |
 | `0x11` | `GPIO_WRITE`          | `mask:u32 levels:u32`                              | _empty_                                            |
-| `0x20` | `PWM_SET`             | `channel:u8 reserved:u8 period_ns:u32 duty_ns:u32` | _empty_                                            |
+| `0x20` | `PWM_SET`             | `channel:u8 reserved:u8 period_ns:u32 duty_ns:u32` | _empty_ (`period_ns == 0 && duty_ns == 0` = stop + release the channel's timer claim; requires protocol >= 0.17; `PWM_SET`/`PWM_GET` are I2C-capable from 0.17; never send period 0 to older firmware, which treats it as a real period and retunes the timer's shared ARR -- `gd32g553_pwm_stop` returns `ALP_ERR_NOSUPPORT` below 0.17 without sending) |
 | `0x21` | `PWM_GET`             | `channel:u8`                                       | `period_ns:u32 duty_ns:u32`                        |
 | `0x30` | `ADC_READ`            | `channel:u8 samples:u8`                            | `mv[samples]:u16` (millivolt, raw averaged)        |
 | `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (always `0xFF` on this HW rev — see §3.4) |
 | `0x41` | `SE_RESET` (v0.8)       | `assert:u8` (`0` = release, `1` = hold in reset) | _empty_ (see §3.15) |
+| `0x42` | `BOOT_CONFIG` (v0.15)   | `op:u8 flags:u32` (`op` 0 = GET, 1 = SET; `flags` ignored on GET) | `flags:u32` (the stored value; see §3.19) |
 | `0x50` | `DAC_SET`             | `channel:u8 reserved:u8 value_mv:u16`              | _empty_                                            |
 | `0x51` | `DAC_GET`             | `channel:u8`                                       | `value_mv:u16`                                     |
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
@@ -71,13 +77,18 @@ byte; their numeric encoding is:
 | `0x90` | `TMU_COMPUTE`         | `function:u8 format:u8 reserved:u16 in_a:u32 in_b:u32` | `result:u32`                                  |
 | `0x36` | `ADC_STREAM_CONFIGURE_DSP` | _(reserved tombstone -- see §3.x)_             | _(empty; returns `STATUS_NOSUPPORT` permanently -- use `CMD_ADC_DSP_CHAIN_*` instead)_ |
 | `0x3A` | `ADC_SPECTRUM_READ` (v0.9) | `stream_id:u8 bin_offset:u16 max_bins:u8`          | `seq:u32 total_bins:u16 got:u8 bins[max_bins]:f32` (see §3.x -- FFT-terminal chains; `STATUS_NOSUPPORT` if not FFT-bound, `STATUS_BUSY` before first frame) |
+| `0x3B` | `ADC_STREAM_BEGIN2` (v0.15) | `stream_id:u8 channel:u8 trigger_src:u8 trigger_arg:u8 sample_rate_hz:u32 watermark:u16 reserved:u16` | `tick_hz:u32 period_ticks:u32 full_scale:u16 vref_mv:u16 flags:u8 watermark:u16 ring_depth:u16` (SPI only; needs `ADC_STREAM2` -- see §3.18) |
+| `0x3C` | `ADC_STREAM_READ2` (v0.15) | `stream_id:u8 max_samples:u8`                    | `first_index:u32 dropped:u32 got:u8 codes[got]:u16` (**variable length**, `9 + 2*got` bytes; SPI only; needs `ADC_STREAM2` -- see §3.18) |
 | `0x23` | `PWM_CAPTURE_BEGIN`   | `channel:u8 edge:u8`                                  | _empty_ (see §3.y -- reconfigures the pad as input-capture) |
-| `0x24` | `PWM_CAPTURE_READ`    | `channel:u8`                                          | `period_ns:u32 pulse_ns:u32` (see §3.y -- returns `STATUS_NOSUPPORT` ("ring empty") until an edge lands; no edges land on this V2N HW rev pending a pad-routing rework) |
+| `0x24` | `PWM_CAPTURE_READ`    | `channel:u8`                                          | `period_ns:u32 pulse_ns:u32` (see §3.y -- returns `STATUS_NOT_READY` ("ring empty") until an edge lands (`STATUS_NOSUPPORT` where the input pad is not routed); no edges land on this V2N HW rev pending a pad-routing rework) |
 | `0x25` | `PWM_CAPTURE_END`     | `channel:u8`                                          | _empty_                                            |
 | `0x26` | `PWM_SINGLE_PULSE`    | `channel:u8 reserved:u8 reserved:u16 pulse_ns:u32`    | _empty_                                            |
 | `0x27` | `TIMER_SYNC`          | `master:u8 slave:u8 mode:u8`                          | _empty_                                            |
 | `0x28` | `POWER_MODE_SET`      | `mode:u8 reserved:u8 wake_bitmap:u32 wake_after_ms:u32` | _empty_ (see §3.z -- `wake_bitmap` bits `UART_RX`/`USB`/`ETH_LINK` return `STATUS_NOSUPPORT`; no HW path on GD32G5) |
-| `0x81` | `LINK_FEATURES` (v0.7) | `features:u8` (wanted; bit0 = `STATUS_SEQ`)          | `features:u8` (granted + armed; see §3.14 / §4.1.1) |
+| `0x81` | `LINK_FEATURES` (v0.7) | `features:u8` (wanted; bit0 = `STATUS_SEQ`) **or** (v0.15, 6 bytes) `want:u32 max_payload_req:u16` | `features:u8` (granted + armed) **or** (v0.15, 10 bytes) `granted:u32 supported:u32 max_payload:u16`; see §3.14 / §4.1.1 |
+| `0xA0` | `I2CM_CONFIG` (v0.17) | `bus_khz:u16` (`100` or `400`; `0` releases PC8/PC9 to hi-Z) | _empty_ (I2C link only; see §3.20) |
+| `0xA1` | `I2CM_XFER` (v0.17)   | `tag:u8 addr7:u8 flags:u8 wlen:u8 rlen:u8 wdata[wlen]` (`flags` = 0, `wlen` <= 60, `rlen` <= 62) | _empty_ (job queued; I2C link only; see §3.20) |
+| `0xA2` | `I2CM_RESULT` (v0.17) | _empty_ | _empty_ while `BUSY`, else `tag:u8 result:u8 nread:u8 rdata[nread]` (**variable length**; I2C link only; see §3.20) |
 
 Opcodes `0x82..0xEF` are **reserved** for future Alp-defined
 extensions (next slot: hardware AES via the CAU engine).  Boards
@@ -136,7 +147,7 @@ V2N silicon is still ahead for all three groups below (see
   correctly switches the channel to input-capture mode, but no
   edges land on this hardware revision until a follow-up hardware
   bring-up commit reworks the pad routing; `READ` reports
-  `STATUS_NOSUPPORT` ("ring empty") in the meantime.
+  `STATUS_NOT_READY` ("ring empty") in the meantime.
 * `CMD_PWM_SINGLE_PULSE` (opcode `0x26`) drives a one-shot pulse
   of caller-specified width on a PWM channel then stops.  The
   host-side surface is `alp_pwm_single_pulse(pwm, pulse_ns)` in
@@ -144,7 +155,11 @@ V2N silicon is still ahead for all three groups below (see
   timer's one-pulse mode (OPM); the whole timer's SP bit flips, so
   sibling channels on the same `TIMER0`/`TIMER7` also run
   single-pulse until a subsequent `PWM_SET` restores repetitive
-  mode.
+  mode.  Because the whole timer flips, the firmware answers
+  `STATUS_BUSY` while a sibling channel on the same timer is live
+  (stop it first with `PWM_SET` period 0 / duty 0, which releases the claim)
+  (e.g. PWM1 after `PWM_SET` on PWM0); use a channel on a timer no
+  other channel holds (PWM4..PWM6 on `TIMER7`).
 * `CMD_TIMER_SYNC` (opcode `0x27`) links the GD32G5's `TIMER0` /
   `TIMER7` / `TIMER19` (wire ids `0`/`1`/`2`) in master-slave
   configuration for synchronised multi-channel output.
@@ -332,10 +347,18 @@ indefinitely; host code SHOULD NOT call it.
 
 `mask` selects which GD32 pads the host wants to read or write.  The
 mask is a **logical** index space owned by the GD32 firmware — the
-bit-to-pad mapping (bits 0..19) is documented in
+bit-to-pad mapping (bits 0..26) is documented in
 `gd32-bridge-firmware:README.md`; the host header names only bits 18/19
-(below).  The host MUST NOT assume that
+and 21/22 (below).  The host MUST NOT assume that
 bit `n` corresponds to GD32 pad `Pxn`.
+
+Bit 8 (E1M IO24, `PC14`) is **not routed** to the GD32 on the SoM
+(gd32-bridge-firmware#298): the bridge answers `STATUS_IO` for any
+`GPIO_READ`/`GPIO_WRITE` mask naming it, which also stops a `BATCH` at that
+op.  Use `GD32G553_GPIO_ROUTED_MASK` (bits 0..22 minus bit 8) as the
+"all lines" mask; `gd32g553_gpio_read` / `gd32g553_gpio_write` return
+`ALP_ERR_NOSUPPORT` for a mask naming bit 8, as the Linux driver refuses
+line 8 with `-ENODEV`.
 
 `GPIO_WRITE` is atomic in the firmware: read-modify-write of the
 pad output register is done with interrupts disabled around the
@@ -361,6 +384,49 @@ reserved for `can-stby`, bridge bit 20, #2341), which is not a `GPIO_WRITE` pad:
 it is never replayed, so a bridge reset leaves the part released. Userspace
 pulses it through the gpiochip labelled `gd32-bridge-gpio` instead of opening
 the bridge itself (#2507).
+
+At protocol minor `>= 15` (firmware `0.3.1`), the pad map grows from 21 to 23
+lines, adding two ordinary E1M pads after the sideband block (no earlier bit
+moves; bit 20 is `CAN_STBY`):
+
+| Bit | E1M pad | GD32 pad | Boot state          | Host macro |
+|-----|---------|----------|---------------------|------------|
+| 21  | `IO15`  | `PB4`    | analog, no drive (PB4 parked explicitly) | `GD32G553_GPIO_LINE_E1M_IO15` |
+| 22  | `IO26`  | `PC2`    | analog, no drive    | `GD32G553_GPIO_LINE_E1M_IO26` |
+
+`PB4` resets as the JTAG `NJTRST` pin (alternate function, pull-up) on GD32
+parts, so firmware 0.3.1 parks it analog / no pull at boot; debug access on
+this board is SWD only. The `GD32G553_GPIO_LINE_*` host macros are bridge
+bit numbers, not Linux gpiochip line numbers.
+
+At protocol minor `>= 17` (firmware `0.17`), the pad map grows from 23 to 27
+lines, adding the four SoM camera LDO enables right after `IO26` (SoM
+power-supply sheet signals, not E1M-X pads; no earlier bit moves).  The bit
+numbers below are the v0.17 firmware assignment:
+
+| Bit | Signal         | GD32 pad | Host macro |
+|-----|----------------|----------|------------|
+| 23  | `CAM_EN_LDO0`  | `PC3`    | `GD32G553_GPIO_LINE_CAM_EN_LDO0` |
+| 24  | `CAM_EN_LDO1`  | `PE8`    | `GD32G553_GPIO_LINE_CAM_EN_LDO1` |
+| 25  | `CAM_EN_LDO2`  | `PE7`    | `GD32G553_GPIO_LINE_CAM_EN_LDO2` |
+| 26  | `CAM_EN_LDO3`  | `PE10`   | `GD32G553_GPIO_LINE_CAM_EN_LDO3` |
+
+A host below `GD32G553_I2CM_MIN_PROTOCOL_MINOR` (17) never learns these bits.
+
+Like every other E1M pad they stay undriven until a host first reads or writes
+them. `PC14` (E1M IO24) is not part of this change. A bridge below minor 15
+ignores bits 21/22 and still answers success, so `gd32g553_gpio_read` /
+`gd32g553_gpio_write` return `ALP_ERR_NOSUPPORT` for a mask naming either bit
+when the cached protocol minor is below
+`GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR` (15), and the Linux
+`gpio-gd32-bridge` driver refuses `.request()` of lines 22/23 (`-ENODEV`)
+until `GET_VERSION` confirms it (`-EAGAIN` while the bridge has not answered
+yet; no kernel consumer uses these lines, so `-EPROBE_DEFER` would only leak
+errno 517 to userspace). Linux line numbers are one above the bridge bit for
+these two pads because line 21 is `se-rst` (below): line 22 = IO15 (bit 21),
+line 23 = IO26 (bit 22). `se-rst` keeps line 21 because its line number is
+already consumed by the optiga reset DT and HIL spec; renumbering it would
+churn a stable userspace-visible line for no functional gain.
 
 A bridge below minor 11 never learned these two bits; a host driving
 `GPIO_WRITE` against them on such a bridge silently powers nothing
@@ -454,6 +520,15 @@ GD32 reset that also wedges or resets the Murata module itself still
 needs the normal Linux driver-level recovery, on top of the pin being
 re-asserted.
 
+**I2C error replies and multi-line requests (Linux driver):** an error
+reply on I2C is `[STATUS][CRC]` (3 bytes, no payload), so the driver decodes
+that short shape before judging the full-width CRC, and maps the status to an
+errno (`BUSY` -> `-EBUSY`, retried a bounded number of times; `NOT_READY` ->
+`-EAGAIN`; `TIMEOUT` -> `-ETIMEDOUT`; `NOSUPPORT` -> `-EOPNOTSUPP`). The
+gpiochip implements `.get_multiple` / `.set_multiple`, so a multi-line request
+is one `GPIO_READ` / `GPIO_WRITE` transaction (line 21, `SE_RST`, stays a
+separate `SE_RESET`).
+
 **Shared-bus caveat:** BRD_I2C (`i2c8`) may be multi-mastered -- the
 CM33 also owns a device on it (DA9292 @ `0x1E`). Arbitration loss on a
 contended bus surfaces to the replay as an ordinary transfer failure
@@ -496,14 +571,16 @@ host side.  Each `mv[i]` carries the firmware's internal-reference-
 corrected reading; the host treats the values as **ground truth**
 for telemetry purposes.
 
-Two converter-level guards (fw `v0.2.8+`) make `ADC_READ` answer
-`STATUS_IO` instead of serving unreliable data:
+Two converter-level guards (fw `v0.2.8+`) make `ADC_READ` refuse
+instead of serving unreliable data (`STATUS_BUSY` for the stream-owned
+converter, `STATUS_IO` for the dead reference):
 
 - **converter owned by a stream** -- two logical channels ride each
   ADC converter, and a running `ADC_STREAM_*` session owns its
   converter outright.  A single-shot read on either channel of a
   streaming converter is refused (it would corrupt the live stream's
-  ring AND return wrong data); retry after `STREAM_END`.
+  ring AND return wrong data) with `STATUS_BUSY` (`ALP_ERR_BUSY`);
+  retry after `STREAM_END`.
 - **analog reference not ready** -- if the on-chip reference buffer
   never reported ready at boot, every conversion would be garbage
   referenced to a dead node.  The firmware fails the read loudly
@@ -740,6 +817,11 @@ the lapped (corrupt) backlog and resynchronises the read cursor to
 the live write position, so the following `STREAM_READ` returns
 fresh, gap-free samples.
 
+On a v0.15 link that granted `ADC_STREAM2`, prefer `ADC_STREAM_BEGIN2` /
+`ADC_STREAM_READ2` (§3.18): raw codes, a drop count and a sample index
+instead of millivolts-and-`BUSY`.  The legacy opcodes stay available on
+every link and behave exactly as above.
+
 ### 3.11 TRNG read (`v0.3+`)
 
 `TRNG_READ` pulls true-random bytes from the GD32G5's NIST
@@ -840,26 +922,85 @@ in bounded time.  Apps that need alarms must either use a host-
 local timer or poll `COUNTER_READ` and synthesise the callback
 client-side.
 
-### 3.14 Link-feature negotiation (`v0.7+`)
+### 3.14 Link-feature negotiation (`v0.7+`, extended in `v0.15`)
 
 `LINK_FEATURES` (0x81) negotiates opt-in framing upgrades.  The host
-sends the feature set it wants (`features:u8`); the firmware grants
-the intersection with what it implements, **arms it immediately**,
-and echoes the granted set.  A request of `0` disables everything
-(idempotent both ways).  Pre-v0.7 firmware answers
-`STATUS_NOSUPPORT` through the dispatch default, so a new host
-degrades to the legacy framing automatically — and an un-negotiated
-v0.7 link is byte-identical to the old wire.
+sends the feature set it wants; the firmware grants the intersection
+with what it implements **on that link**, **arms it immediately**, and
+echoes the result.  Pre-v0.7 firmware answers `STATUS_NOSUPPORT`
+through the dispatch default, so a new host degrades to the legacy
+framing automatically — and an un-negotiated link is byte-identical to
+the v0.14 wire.
 
-Defined feature bits:
+The request has two accepted forms, chosen by the request payload
+length:
 
-| Bit | Name | Effect when granted |
-|-----|------|---------------------|
-| 0 | `STATUS_SEQ` | Every **SPI** reply STATUS byte carries a 4-bit slave-side sequence stamp in bits `[7:4]` (§4.1.1).  The reply to the negotiation itself is already stamped — the host takes that stamp as its baseline.  I2C replies are never stamped. |
+| `req_len` | Layout | Semantics |
+|-----------|--------|-----------|
+| 1 (legacy, v0.7+) | `features:u8` | The link's whole feature word becomes `features & 0x01`; every other bit (`BIG_FRAME`, `ATTN`, `ADC_STREAM2`, `BATCH`) is **cleared** on that link, so `features = 0` still disables everything.  `max_payload` becomes 65.  The reply is `granted:u8` (1 byte), byte-identical to v0.14. |
+| 6 (extended, v0.15) | `want:u32` @0, `max_payload_req:u16` @4 | Grant algorithm below.  The reply is 10 bytes. |
+| anything else | n/a | `STATUS_INVAL`, empty payload, link state unchanged. |
 
-After a firmware reboot the feature resets to off (replies revert to
-unstamped); the host's normal link-recovery path (re-init →
-`GET_VERSION`) re-negotiates.
+Defined feature bits (bits 5..31 are reserved: never granted, the host
+sends 0):
+
+| Bit | Mask | Name | Effect when granted |
+|-----|------|------|---------------------|
+| 0 | `0x00000001` | `STATUS_SEQ` | Every **SPI** reply STATUS byte carries a 4-bit slave-side sequence stamp in bits `[7:4]` (§4.1.1).  The reply to the negotiation itself is already stamped — the host takes that stamp as its baseline.  I2C replies are never stamped. |
+| 1 | `0x00000002` | `BIG_FRAME` | SPI only.  Raises the payload ceiling from 65 to `max_payload` (66..252) for **`BATCH` and the `ADC_STREAM_READ2` reply only** (§3.16, §3.18); every other opcode keeps 65.  The SPI frame is then at most 256 bytes (`1 SOF + 1 CMD/STATUS + 252 + 2 CRC`). |
+| 2 | `0x00000004` | `ATTN` | SPI only; needs `STATUS_SEQ`.  The GD32 drives `PA14` (Renesas `P71`) HIGH when a reply is armed or stream events are pending (§3.17). |
+| 3 | `0x00000008` | `ADC_STREAM2` | SPI only.  Gates `ADC_STREAM_BEGIN2` / `ADC_STREAM_READ2` (§3.18). |
+| 4 | `0x00000010` | `BATCH` | SPI only.  Gates `BATCH` (§3.16). |
+
+**Grant algorithm (extended form, arriving on link L).**
+
+1. `supported(L)` depends on the build and the link: SPI with the gd32
+   backend `0x0000001F`; SPI with the stub backend (no ATTN, no
+   `ADC_STREAM2`) `0x00000013`; I2C on any backend `0x00000001`
+   (`STATUS_SEQ` is echoed with no wire effect, preserving the v0.14
+   idempotent `features = 0` path).
+2. `g = want & supported(L)`.
+3. Drop `ATTN` from `g` if `STATUS_SEQ` is not in `g`, or if
+   `DHCSR.C_DEBUGEN` (`0xE000EDF0` bit 0) reads 1 — a debugger is
+   attached and may be driving SWCLK on the same pin.
+4. If `BIG_FRAME` is in `g`, `mp = clamp(max_payload_req, 65, 252)`; if
+   that gives 65, `BIG_FRAME` is dropped.  Without `BIG_FRAME`, `mp = 65`.
+5. **Arm before staging the reply**, as v0.7 already does: write L's
+   feature word and `max_payload`, and apply the `ATTN` pin transition
+   only if the `ATTN` bit actually changed (re-sending the same `want`
+   causes no pin activity).
+6. Stage the reply.  It is stamped if `STATUS_SEQ` is in `g`.  If `ATTN`
+   is in `g`, this reply is the first ATTN-signalled one (the host's
+   self-test, §3.17).  If `ATTN` was just removed, this reply is **not**
+   ATTN-signalled; the host reads it with the v0.14 drain rule.
+
+Removing a bit takes effect from the next request.  Removing
+`ADC_STREAM2` does not stop running streams (`0x3B`/`0x3C` then answer
+`STATUS_NOSUPPORT`, while `0x35` still ends a stream); removing
+`BIG_FRAME` restores the 65-byte limit; removing `ATTN` returns `PA14` to
+SWCLK.
+
+**Extended reply (10 bytes):**
+
+| Off | Field | Type | Meaning |
+|-----|-------|------|---------|
+| 0 | `granted` | u32 | bits now armed on L |
+| 4 | `supported` | u32 | bits this build implements on L.  A bit in `supported` but not in `granted` was refused (missing `STATUS_SEQ`, debugger attached, `mp` = 65). |
+| 8 | `max_payload` | u16 | effective payload ceiling on L (65, or 66..252) |
+
+**Older firmware** answers the 6-byte form with `STATUS_INVAL` (v0.7..v0.14:
+`req_len != 1`; a 4-byte error envelope, stamped if `STATUS_SEQ` was
+already armed, no state change) or `STATUS_NOSUPPORT` (< v0.7).  The host
+never sends the 6-byte form when `GET_VERSION` reports minor < 15 (§8);
+`INVAL` is only a safety net.
+
+After a firmware reboot every feature resets to off (replies revert to
+unstamped, `PA14` returns to SWCLK); the host's normal link-recovery path
+(re-init → `GET_VERSION` → negotiate) re-negotiates.  Any reset clears
+every link feature: `NRST`, `FWDGT`, OTA `COMMIT`/`ROLLBACK`/trial
+confirm, a fault reset, or a `STANDBY` wake.  During the OTA trial window
+every opcode, `LINK_FEATURES` included, answers `BUSY`, so `ATTN` cannot
+be enabled there.
 
 ### 3.15 Secure-element reset (`v0.8+`)
 
@@ -898,6 +1039,414 @@ I²C bus is held low, so the host can always command the reset.
 Returns `STATUS_INVAL` for an `assert` byte outside `{0, 1}` and
 `STATUS_NOSUPPORT` on firmware whose GD32 HAL body is not built (the
 stub backend).
+
+### 3.16 `BATCH` (`v0.15+`)
+
+`BATCH` (`0x04`) runs up to 16 bounded sub-operations in one SPI
+transaction pair.  It is SPI-only and needs the `BATCH` link feature
+(`STATUS_NOSUPPORT` otherwise).  On a `BIG_FRAME` link both the request
+and the reply may use up to `max_payload` (252) bytes of payload.
+
+**Request:** `count:u8` (1..16), followed by `count` entries
+`{op:u8, len:u8, args[len]}`.  The request payload length must equal
+`1 + Σ(2 + len_i)` exactly; any trailing byte is `STATUS_INVAL` (the
+defence against zero-extended captures).
+
+**Validation pass** (no side effects; a batch-level error is an
+empty-payload envelope and nothing executes):
+
+| Condition | Status |
+|-----------|--------|
+| `count == 0`, length mismatch, an op not on the allow-list (nested `0x04`, `0x81`, `0x28` and every `0xF0..0xFF` included), or `len_i` different from the op's fixed request length | `STATUS_INVAL` |
+| `count > 16`, or worst-case reply `1 + Σ(2 + maxreply_i) > max_payload` | `STATUS_OUT_OF_RANGE` |
+
+**Allow-list** (bounded, side-effect-local handlers):
+
+| Op | Request len | Max reply |
+|----|-------------|-----------|
+| `0x00` PING | 0 | 0 |
+| `0x10` GPIO_READ | 4 | 4 |
+| `0x11` GPIO_WRITE | 8 | 0 |
+| `0x20` PWM_SET | 10 | 0 |
+| `0x21` PWM_GET | 1 | 8 |
+| `0x24` PWM_CAPTURE_READ | 1 | 8 |
+| `0x3C` ADC_STREAM_READ2 | 2 | `9 + 2 * max_samples` |
+| `0x40` DA9292_STATUS_FORWARD | 0 | 1 |
+| `0x50` DAC_SET | 4 | 0 |
+| `0x51` DAC_GET | 1 | 2 |
+| `0x60` QENC_READ | 1 | 4 |
+| `0x61` QENC_RESET | 1 | 0 |
+| `0x70` COUNTER_READ | 1 | 4 |
+| `0x90` TMU_COMPUTE | 12 | 4 |
+
+Excluded: `ADC_READ` (up to 1 ms each), the stream `BEGIN`/`END` variants
+(calibration can spin for ~200000 iterations), `TRNG_READ` (budgeted
+`DRDY` polls), `SE_RESET` (needs host-timed gaps), the DSP chain opcodes
+(setup-time only), `LINK_FEATURES` (would change framing in the middle of a
+reply), `POWER_MODE_SET`, OTA and nested `BATCH`.
+
+**Execution.**  Ops run in order through the same handlers as standalone
+ops.  Execution **stops at the first non-OK** sub-status.  The budget is at
+most 16 ops × at most 20 µs per handler (to be measured per op before the
+allow-list is frozen) plus ≤ 30 µs framing, ≈ 350 µs in the CS-EXTI
+handler — below the 1000 µs `ADC_READ` budget; `I2C0` and base level stall
+for that window, so `BRD_I2C` may be clock-stretched by up to about 350 µs.
+
+**Reply.**  The outer `STATUS` is `OK` whenever the batch passed
+validation and carries the one `STATUS_SEQ` stamp (sub-statuses are never
+stamped).  Payload: `executed:u8` (ops attempted, including a failing one),
+then per executed op `{status:u8, len:u8, payload[len]}`.  A non-OK
+sub-status always has `len = 0`.  The length is self-delimiting and its
+maximum can be computed from the request: the host clocks the worst case,
+walks the entries to find the CRC (§4), and returns `ALP_ERR_IO` if
+`executed > count`, if `len_i > maxreply_i`, or if the length of an op with
+a fixed reply differs from its expected value.
+
+Host API: `gd32g553_batch()`, which validates against the allow-list and
+the link's ceiling before touching the bus.
+
+### 3.17 ATTN (`v0.15+`) — data-ready / attention line
+
+**Signal.**  GD32 `PA14` (net `GD32_SWCLK`, see
+`metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`) drives Renesas `P71`
+(`renesas-peripheral-map.tsv`).  Active **HIGH**, push-pull, a **level**
+(not a pulse); low means deasserted.  GD32 drive: slowest speed class
+(`GPIO_OSPEED_12MHZ`), no pull.  Fail-safe: whenever `ATTN` is not enabled,
+`PA14` is `SWCLK` with its reset pull-down, so the host reads it as
+deasserted.  `PA14` therefore has a **dual role**: `SWCLK` (debug / SWD
+recovery) when `ATTN` is off, `ATTN` when it is granted.
+
+**Ownership and the enable/disable handshake** (the GD32 never drives
+`PA14` while a debugger may drive `SWCLK`):
+
+Host rules:
+
+* **H1.** In every boot stage, A55 pinctrl and CM33 init included, `P71`
+  defaults to input (not driven).
+* **H2.** The host sets `P71` to input with a rising-edge IRQ *before* it
+  requests `ATTN`.
+* **H3.** The host may drive `P70`/`P71` as outputs (SWD bit-bang) only if
+  (a) its most recent CRC-valid `LINK_FEATURES` reply on SPI showed `ATTN`
+  not in `granted` and it has sent no `LINK_FEATURES` since, or (b)
+  `GD32_NRST` (`P74`, open-drain, shared with ACT88760 GPIO4) is held
+  asserted (connect-under-reset).  The recovery procedure is always: first
+  assert `P74`, then drive `P70`/`P71`.  Reset puts `PA13`/`PA14` back to
+  SWD and the bootloader never touches `PA14`.  (`gd32_swd_init()` asserts
+  `NRST` before it configures the SWD pins as outputs.)
+* **H4.** Bench probes attach connect-under-reset only.
+* **H5 (host SWD session).**  The host's own SWD recovery is
+  connect-under-reset: `gd32_swd_init()` asserts `P74` first (switched to an output with an
+  **initial low** level — the net is shared with the PMIC's open-drain
+  reset-out and is never driven high; recovery without `NRST` is not
+  supported), switches `P70`/`P71` to outputs, keeps `NRST` asserted through
+  `gd32_swd_connect()`, which sets `DHCSR.C_DEBUGEN` and `DEMCR.VC_CORERESET`,
+  releases `NRST` and reads `DHCSR.S_HALT` back (failing, with `NRST` asserted
+  again, if the core did not halt), so the core stops at its reset vector with
+  `PA13`/`PA14` still SWD and no application code run (ATTN cannot be granted
+  during the session).  `gd32_swd_reset_and_run()` returns `P70`/`P71` to
+  inputs **before** its final `NRST` release.  `gd32_swd_deinit()` returns
+  `P70`/`P71` to inputs.  The driver opens the three pads itself: the reserved
+  ids are refused by the portable `alp_gpio_open()`.  For the whole session
+  the host's bridge link is closed and **blocked**: the V2N supervisor
+  answers every bridge command `ALP_ERR_BUSY` and does not re-initialise or
+  renegotiate until the session ends, after which the next init
+  re-configures `P71` as input + rising-edge IRQ (never trusting a setup from
+  before the session).
+
+Firmware rules:
+
+* **F1.** The firmware drives `PA14` only while `ATTN` is in the SPI link's
+  feature word.
+* **F2.** `ATTN` is never granted while `DHCSR.C_DEBUGEN` = 1.
+* **F3.** Enable: write `GPIO_BC` for `PA14` (output low), then push-pull /
+  slowest speed / no pull, then mode = output (no high glitch).  Disable:
+  drive low, set `GPIO_AF_0`, then mode = AF with pull-down — restoring
+  `PA14`'s reset SWD configuration (confirm against UM Rev1.2 GPIOA reset
+  values).
+* **F4.** `PA14` must never be added to the GPIOA lock mask (today
+  `0x8700`; the lock is irreversible until reset).
+* **F5.** Any reset clears every link feature and returns `PA14` to `SWCLK`.
+
+**Semantics** (firmware state: `attn_on`, per-stream event bits `ev[0..1]`):
+
+| Trigger | ATTN action |
+|---------|-------------|
+| CS falling (`PA8`, EXTI8 handler, low-level branch) | drive LOW |
+| CS-rising handler entry | drive LOW (covers a coalesced falling edge; guarantees a low→high edge for every fresh reply) |
+| CS-rising handler exit, after a **fresh** reply was staged and the TX DMA armed | drive HIGH.  "Fresh" = any call to `stage_reply()`: a decoded request, an error envelope, the SPI transport-error `IO`, or the tar-pit breaker |
+| CS-rising handler exit with no fresh stage (drain / empty transaction / quiesce failure) | HIGH if any `ev[s]` is set, otherwise stay LOW |
+| Watermark reached (raw ring: DMA HTF/FTF; FIR/IIR ring: base-level pump) | set `ev[s]`; then, inside a PRIMASK section, drive HIGH only if `PA8` reads high **and** `EXTI_PD0` bit 8 is clear (otherwise the next CS-rising exit re-evaluates) |
+| `READ2` on stream `s` | clear `ev[s]`; set it again if the remaining backlog is still ≥ watermark |
+| `STREAM_END` on `s`, or `ATTN` disabled | clear `ev[s]`; disable drives LOW and releases the pin (F3) |
+| Any `POWER_MODE_SET` transition | drive LOW before entering (`STANDBY` is a reset) |
+
+What the host infers: `ATTN` goes high after its own request transaction →
+that reply is armed; `ATTN` goes high with no request outstanding → events
+are pending.
+
+**Host procedure.**
+
+1. Drain the backend's edge latch (`hook.drain()`), read the edge clock
+   (`hook.now()`), then clock the request.  The firmware drives `ATTN` low at
+   CS falling and never raises it while CS is low, so every edge that belongs
+   to this reply is time-stamped at or after that reading.  The backend's
+   interrupt handler stamps each edge from the same free-running 32-bit clock
+   (`k_cycle_get_32()` on Zephyr).  The drain keeps an old stamp from aliasing
+   a fresh one after a counter wrap (a wrap-safe compare cannot tell "2^31+
+   ticks old" from "in the future"); the portable SPI API has no CS-release
+   instant, so a latch clear cannot be raced against the request instead.
+2. Wait — interrupt plus semaphore, **never polling** — for a rising edge,
+   up to `T_ATTN` = `GD32G553_BRIDGE_REPLY_TIMEOUT_MS` (10 ms).  Accept an
+   edge only if (a) its stamp is not earlier than the clock reading **and** (b)
+   `hook.read_level()` reads `ATTN` **HIGH** at accept time.  Rationale for
+   (b): the firmware drives `ATTN` LOW at CS falling, so a stale rise in the
+   short window between the clock reading and our own CS falling is always
+   followed by a LOW before the wait begins (the wait starts after the request
+   write returned), whereas a genuine reply leaves the line HIGH.  A rejected
+   edge is discarded and the wait repeated (bounded); no accepted edge counts
+   as a lost one.
+3. Clock the reply with no staging gap.
+4. Validate with `STATUS_SEQ`: `ATTN` is a hint, the stamp decides.  A
+   stale stamp under `ATTN` triggers the same single re-send as §4.1.1; the
+   RESET signature (stamp 0 after a non-zero baseline) means drop all
+   negotiated state including `ATTN`, keep `P71` an input and re-run §8.
+
+**Self-test at enable.**  The `LINK_FEATURES` reply that grants `ATTN` must
+arrive on an edge.  If it does not, the host immediately re-sends the
+extended form with `ATTN` cleared and treats `ATTN` as unusable until the
+next `gd32g553_init()`.
+
+**Event path.**  An edge while idle: issue `READ2` for every stream with a
+watermark armed (one `BATCH` when two streams are armed).  See
+`gd32g553_attn_wait_event()`.
+
+**Lost or stuck ATTN.**
+
+* *Lost* (no edge within `T_ATTN`): continue that command with the v0.14
+  drain rule (25 µs → 1.6 ms re-read ladder) plus `STATUS_SEQ`.  After 3
+  consecutive timeouts the host stops waiting on `ATTN` and re-negotiates
+  without the `ATTN` bit, which also returns `PA14` to `SWCLK`.
+* *Stuck high:* a violation is `ATTN` reading high when no request is in
+  flight and no watermark stream is armed.  (The firmware spec defines it
+  as "high when CS releases on a request whose CS-low time was ≥ 20 µs";
+  the host driver samples the idle level before each request instead, as
+  the portable SPI API cannot see the CS release.)  After 3 consecutive
+  violations, or 8 consecutive idle-path edges where every armed stream
+  returns `got = 0`, `dropped = 0`, take the same action as for lost `ATTN`.
+
+Without `ATTN` the host's 35 µs staging gap grows by about 45 ns per byte
+of request plus reply on `BATCH` / `READ2` frames (an estimate; the re-read
+ladder covers the rest).
+
+### 3.18 ADC streaming with exact accounting: `BEGIN2` / `READ2` (`v0.15+`)
+
+Both opcodes are SPI-only and need `ADC_STREAM2` granted; otherwise they
+answer `STATUS_NOSUPPORT`.
+
+**`ADC_STREAM_BEGIN2` (`0x3B`) request (12 bytes):**
+
+| Off | Field | Type | Rules |
+|-----|-------|------|-------|
+| 0 | `stream_id` | u8 | 0..1, else `INVAL` |
+| 1 | `channel` | u8 | 0..7; an unmapped channel → `OUT_OF_RANGE` (as legacy) |
+| 2 | `trigger_src` | u8 | `0x00` `PACE_TIMER`: the firmware-programmed timer, TIMER5 for stream 0 and TIMER6 for stream 1 (today's behaviour).  Reserved: `0x01` TIMER0_CC, `0x02` TIMER7_CC (arg = CC channel 0..3), `0x03` TIMER5_TRGO shared, `0x04` TIMER6_TRGO shared, `0x05` EXTI (arg = line 0..15).  `0x01..0x05` → `NOSUPPORT`; `≥ 0x06` → `INVAL` |
+| 3 | `trigger_arg` | u8 | must be 0 for `PACE_TIMER`, else `INVAL` |
+| 4 | `sample_rate_hz` | u32 | `PACE_TIMER`: 1..100000.  0 → `INVAL`; > 100000 → `OUT_OF_RANGE` |
+| 8 | `watermark` | u16 | one of {0, 16, 32, 64, 128, 256, 512}, else `INVAL`.  0 = no events |
+| 10 | `reserved` | u16 | must be 0, else `INVAL` |
+
+**Reply (17 bytes):**
+
+| Off | Field | Type | Meaning |
+|-----|-------|------|---------|
+| 0 | `tick_hz` | u32 | pace-timer tick: 1000000 when rate ≥ 16, otherwise 10000; 0 for non-timer triggers |
+| 4 | `period_ticks` | u32 | `floor(tick_hz / sample_rate_hz)`.  **Realised rate = `tick_hz / period_ticks` exactly** (300 Hz → 3333 ticks = 300.03 Hz) |
+| 8 | `full_scale` | u16 | `(1 << res_bits) − 1` captured at `BEGIN2` (4095/1023/255/63); oversampling does not change it |
+| 10 | `vref_mv` | u16 | `adc_vref_mv` captured at `BEGIN2` |
+| 12 | `flags` | u8 | bit0 `VREF_MEASURED` = a real `VREFINT` measurement in [1700, 1900] mV (not the 1800 fallback).  Bits 1..7 = 0 |
+| 13 | `watermark` | u16 | the **granted** watermark = `ring_depth / 2`.  It may be **larger** than the watermark requested (see below); the host uses this value, never the one it asked for |
+| 15 | `ring_depth` | u16 | the ring the firmware actually allocated, in samples: the smallest power of two ≥ `max(2 × watermark_req, ceil(realised_rate × 5 ms))`, capped at 1024 — the overrun budget (a request with `watermark = 0` asks for no events and keeps the 1024-deep ring) |
+
+`BEGIN2` rules beyond the legacy `BEGIN` checks (vref dead → `IO`, slot in
+use or shared converter → `INVAL`, converter claimed → `BUSY`, DMA or
+calibration failure → `IO`):
+
+* **Conversion-time check.**  `STATUS_OUT_OF_RANGE` if
+  `ratio × (sample_cycles + 12.5) / 36 MHz ≥ period_ticks / tick_hz` (the
+  `ADC_READ` residency model in `hal/gd32/gd32_common.h`; the maintainer
+  chose that model over the 2.5-cycle figure in `protocol.h`, which the
+  firmware repo corrects).  Unlike legacy `BEGIN`, which silently degrades,
+  `BEGIN2` never reports a rate it cannot achieve.
+* `bridge_core_clock_matches == false` → `STATUS_IO`.
+* A late `VREF` re-measure pending → `STATUS_NOT_READY`; retry after ≥ 50 ms.
+* **The reply, not the request, is authoritative for `watermark` and
+  `ring_depth`.**  The ring is sized for at least 5 ms of samples at the
+  realised rate, so a fast stream with a small requested watermark gets a
+  larger one: 100 kHz with `watermark = 16` is granted `ring_depth` 512 and
+  `watermark` 256.  The host must never assume granted == requested; its
+  read schedule (below) and the overrun slack both derive from the echoed
+  values.  `gd32g553_adc_stream2_read_interval_us()` computes the interval.
+* A stream started with `BEGIN2` answers only `READ2` (legacy `0x34` →
+  `INVAL`) and vice versa.  `0x35` `STREAM_END` ends either kind; `0x39`
+  `CHAIN_BIND` and `0x3A` `SPECTRUM_READ` behave as in v0.14.
+
+**`ADC_STREAM_READ2` (`0x3C`).**  Request (2 bytes): `stream_id:u8`,
+`max_samples:u8`.  `max_samples` must be 1..`READ2_MAX(L) =
+floor((mp − 9) / 2)` — 28 at `mp` = 65, 121 at `mp` = 252; 0 → `INVAL`,
+above the ceiling → `OUT_OF_RANGE`.  Reply (**variable**, `9 + 2·got`
+bytes):
+
+| Off | Field | Type |
+|-----|-------|------|
+| 0 | `first_index` | u32: index of `codes[0]` in this stream's sample sequence since `BEGIN2`; wraps mod 2^32 |
+| 4 | `dropped` | u32: samples discarded immediately before `codes[0]` since the previous `READ2` reply |
+| 8 | `got` | u8: 0..`max_samples` |
+| 9 | `codes[got]` | u16 LE each: right-aligned raw ADC codes, clamped to `full_scale` |
+
+Framing: the CRC follows the last code directly (§4).  The host clocks
+`13 + 2·max_samples` bytes, reads `got`, and ignores bytes after the CRC
+(TX-underrun filler).  A non-OK `STATUS` means the 4-byte error envelope.
+`got > max_samples` → the host returns `ALP_ERR_IO`.
+
+**Accounting (normative).**
+
+* Each stream keeps a delivered index `D` (u32), 0 at `BEGIN2`.  Backlog =
+  (`total_written − total_read`) mod 2^32; ring index arithmetic uses the
+  stream's own `ring_depth` (a power of two).
+* **Overrun:** if backlog > `ring_depth − GUARD` (`GUARD` = 8), then
+  `skip = backlog − (ring_depth − GUARD)`; the read cursor advances by
+  `skip`, `dropped += skip`, and the reply is `STATUS_OK` with the freshest
+  contiguous samples.  **`READ2` never answers `BUSY` for overrun.**
+* `first_index = D_prev + dropped`, `got = min(max_samples, remaining
+  backlog)`, `D = first_index + got`.
+* Host invariant: `first_index(n) == first_index(n−1) + got(n−1) +
+  dropped(n)` (mod 2^32), except when `dropped` is the sentinel.  The
+  `gd32g553` driver counts violations in `ctx->stream2_gaps`.
+* `dropped` saturates at `0xFFFFFFFE`.  `0xFFFFFFFF` is a **discontinuity
+  of unknown length** with `got = 0` and `first_index = D_prev` (causes:
+  ROVF recovery, a DSP pump `proc_gap`, backlog > 2^31).  The V2N ADC
+  backend maps exactly this to `ALP_ERR_BUSY`.
+* The reply capacity is checked **before** the ring is consumed:
+  `9 + 2·max_samples > cap` → `NOMEM`, nothing consumed.
+* FIR/IIR-bound stream: `READ2` returns processed-ring codes in the same
+  code space.  FFT-bound: `NOSUPPORT`.  Sticky DSP faults keep their v0.14
+  mapping (`dsp_cfg_bad` → `OUT_OF_RANGE`, `dsp_sat` → `IO`).
+* Watermark events come from HTF (W samples) and FTF (2W) on a raw ring of
+  length `2W` (W = the granted watermark), or from the base-level pump when
+  the processed backlog reaches W.  Size the request with
+  `W ≥ rate × host round-trip`; the slack before overrun is `W − GUARD`
+  sample periods of the **granted** W.  Without `ATTN` granted, schedule
+  reads from a host timer at `granted_W / realised_rate` (not by
+  busy-polling).
+* Host conversion to mV: `(min(code, full_scale) × vref_mv) / full_scale`,
+  integer truncation — bit-identical to the legacy `STREAM_READ` maths.
+
+| | `BEGIN2` | `READ2` |
+|---|---|---|
+| `NOSUPPORT` | feature not granted; reserved trigger; stub HAL | feature not granted; FFT-bound; stub |
+| `INVAL` | length; stream_id; slot in use / shared converter; trigger ≥ `0x06`; arg / reserved ≠ 0; rate 0; watermark | length; stream_id; stream inactive or started with legacy `BEGIN` |
+| `OUT_OF_RANGE` | rate > 100000; unmapped channel; conversion time ≥ period | `max_samples` > ceiling; `dsp_cfg_bad` |
+| `NOT_READY` | `VREF` re-measure pending | n/a |
+| `BUSY` | converter claimed | n/a (dispatcher-level `BUSY` only) |
+| `IO` | vref dead; DMA disable or calibration failure; clock mismatch | DMA ERRIF; ROVF recalibration failure; `dsp_sat` |
+| `NOMEM` | n/a | reply exceeds capacity (nothing consumed) |
+
+Host API: `gd32g553_adc_stream_begin2()` / `gd32g553_adc_stream_read2()`.
+
+### 3.19 Persistent boot configuration (`v0.15+`)
+
+`BOOT_CONFIG` (`0x42`) reads or stores a small persistent flag word in GD32
+flash.  Request `op:u8 flags:u32` (little-endian, 5 bytes): `op` `0` = GET
+(`flags` ignored), `1` = SET.  The reply is always the **stored** `flags:u32`
+(on a SET, the value stored *before* the commit).  **Allowed on the I2C link
+as well as SPI**, because provisioning runs from Linux.
+
+| Flag (bit) | Name | Effect |
+|------------|------|--------|
+| 0 | `SDMUX_EN_HIGH` | From every GD32 reset the firmware drives `PD11` (E1M `IO29`, the EVK's `SDIO_MUX_EN`, active-low: low = microSD connected, high = disconnected) **high**, so a provisioning run keeps the SD out across cold power cycles. |
+
+* **Opt-in.**  `IO29`'s meaning is carrier-specific, so the default
+  (nothing stored) leaves the pad untouched; only a host SET changes that.
+* **SET never moves a pad.**  It takes effect at the next GD32 reset, so
+  setting it on a unit booted from the SD cannot pull its rootfs out.  A
+  host that wants the SD out now also writes `IO29` high with `GPIO_WRITE`.
+  Clearing the flag does not release a pad that is already driven (that
+  needs a GD32 reset).
+* **Asynchronous SET.**  The firmware never touches flash inside the
+  transport interrupt.  A SET is queued and answered at once; the main loop
+  then commits it (on dual-bank parts two 1 KB page erases, each up to 20 ms
+  with interrupts masked: 2 x 20 ms of blackout plus main-loop latency).
+  There is no fixed idle window; the host waits ~50 ms and then polls GET,
+  tolerating transport errors, until the stored value equals the request; `gd32g553_boot_config_set()`
+  does exactly that.  A SET equal to the stored value is a no-op (no queue,
+  no erase).  A different SET while one is still queued, or while an OTA
+  session is active, answers `STATUS_BUSY`.  If the commit fails the GET poll never matches; the host
+  re-sends the SET.
+* **Power-loss safe.**  The flag lives in two A/B record pages (counter +
+  CRC, commit doubleword last) outside every image; a cut at any point of a
+  SET leaves either the old or the new value, never a fault: the boot-time
+  read checks the flash ECC flags and treats an uncorrectable doubleword as
+  "absent".  With no valid record every flag is off.
+* Returns `STATUS_INVAL` for an unknown `flags` bit, `op` > 1 or a wrong
+  length; `STATUS_BUSY` as above; `STATUS_NOSUPPORT` on firmware that
+  predates the opcode, a build without the flash HAL, a single-bank part
+  (`OBCTL.DBS` = 0) or an image running from slot B.  The host helpers map
+  it to `ALP_ERR_NOSUPPORT`.
+
+Host API: `gd32g553_boot_config_get()` / `gd32g553_boot_config_set()` with
+`GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH`.
+
+### 3.20 I2C3 master proxy: `I2CM_CONFIG` / `I2CM_XFER` / `I2CM_RESULT` (`v0.17+`)
+
+The bridge is the bus master of E1M-X I2C3 (GD32 `PC8` = SCL, E1M-X pad A24;
+`PC9` = SDA, pad A23).  The 2625-R2 SoM has no pull-ups on I2C3, and neither does the X-EVK I2C3 segment, so a module or carrier must provide them (the firmware has a bench-only internal pull-up option; without any pull the pads float low and a transfer ends `TIMEOUT` / `BUS_STUCK`).  The proxy is silicon-verified (`CONFIG` ok, address NACK).  E1M-X I2C3 is the GD32 I2C2 peripheral on `PC8`/`PC9`, alternate function AF8 (GD32G553xx datasheet AF table).  On the X-EVK V2 it reaches CAM1 (J12); the J6 display I2C (panel bridge and touch) is designed to be I2C3 but the carrier does not connect it (carrier fix needed; bench bodge from J12 pins 21 and 27).  The pads are hi-Z until the first `I2CM_CONFIG`.  The
+opcodes are **I2C-link only** (Linux over `BRD_I2C`, address `0x70`, 65-byte
+payload cap): on SPI they answer `STATUS_NOSUPPORT`, they are on the §5.3
+allow-list, and they are **not** in the `BATCH` allow-list.  A transfer is
+three frames (queue, then poll) because the bus runs at base level and never
+blocks the request handler; there is no host helper in `chips/gd32g553` (no CM33
+caller).
+
+| Opcode | Request | Reply |
+|--------|---------|-------|
+| `0xA0` `I2CM_CONFIG` | `bus_khz:u16` | _empty_ |
+| `0xA1` `I2CM_XFER`   | `tag:u8 addr7:u8 flags:u8 wlen:u8 rlen:u8 wdata[wlen]` | _empty_ |
+| `0xA2` `I2CM_RESULT` | _empty_ | `tag:u8 result:u8 nread:u8 rdata[nread]` |
+
+* **`I2CM_CONFIG`**: `bus_khz` is `100` or `400`; `0` releases PC8/PC9 to hi-Z.
+  Any other value answers `STATUS_INVAL`.  It runs the 9-clock bus recovery
+  first.  The stub HAL answers `STATUS_NOSUPPORT`.
+* **`I2CM_XFER`**: `flags` must be `0` (else `STATUS_INVAL`), `wlen` <= 60,
+  `rlen` <= 62.  `wlen > 0 && rlen > 0` is `S W.. Sr R.. P`; one of them nonzero
+  is write-only or read-only; both zero is a quick-write address probe.  The
+  reply is empty with `STATUS_OK` (queued), `STATUS_BUSY` (a job is running) or
+  `STATUS_NOT_READY` (not configured).  A new `XFER` discards an uncollected
+  result.
+* **`I2CM_RESULT`**: `STATUS_BUSY` with an empty payload while the job runs;
+  `STATUS_OK` with `tag result nread rdata[nread]` once it finished;
+  `STATUS_NOT_READY` if no job has run since the last `CONFIG`.
+
+`result` byte (the outer `STATUS` keeps its generic §6 meaning; the Linux errno
+the proxy adapter returns is in parentheses):
+
+| `result` | Name | Meaning |
+|----------|------|---------|
+| 0 | `OK` | transfer completed |
+| 1 | `NACK_ADDR` (`-ENXIO`) | address not acknowledged |
+| 2 | `NACK_DATA` (`-EIO`) | data byte not acknowledged |
+| 3 | `ARB_LOST` (`-EAGAIN`) | arbitration lost |
+| 4 | `BUS_ERROR` (`-EIO`) | misplaced START/STOP |
+| 5 | `TIMEOUT` (`-ETIMEDOUT`) | SCL held low ~10 ms or the ~20 ms job deadline passed |
+| 6 | `BUS_STUCK` (`-EBUSY`) | SDA still low after recovery |
+
+Recovery drives PC8 as a GPIO open-drain for up to 9 SCL pulses at about
+100 kHz, then a STOP, then returns the pad to its alternate function.
+`POWER_MODE_SET` answers `STATUS_BUSY` while a job runs, and after a wake the
+bridge marks I2C3 unconfigured (the host re-sends `CONFIG`; `NOT_READY` is the
+cue).  The Linux flow is: `XFER`, wait for the estimated transfer time,
+`RESULT`; on `BUSY` back off up to 30 ms; on `NOT_READY` re-`CONFIG` the cached
+speed and retry once; a `tag` mismatch is `-EAGAIN`.  The default speed is
+100 kHz.  Register values and AF numbers live in the firmware, not here.
 
 ## 4. SPI framing
 
@@ -945,6 +1494,22 @@ fast-path overhead and avoids ambiguity at the SPI boundary
 Variable-length replies (`ADC_READ`, …) carry the length as the
 first byte of the payload (`samples` for `ADC_READ`) — same byte the
 host already sent in the request, **echoed back** before the data.
+
+**Self-delimiting replies (v0.15).**  Two replies are not padded to a
+fixed width: `ADC_STREAM_READ2` (`9 + 2·got` payload bytes, §3.18) and
+`BATCH` (`1 + Σ(2 + len_i)`, §3.16).  Their **CRC position depends on the
+reply's own bytes** — in a `READ2` SPI frame it sits at offset `11 + 2·got`
+(`SOF` @0, `STATUS` @1, `got` @10).  The host clocks the worst case
+(`13 + 2·max_samples` bytes for `READ2`, `4 + worst-case payload` for
+`BATCH`; never more than one 256-byte frame per CS window), checks `STATUS`
+first, then derives the payload length from the reply, validates it
+against the request (`got ≤ max_samples`; for `BATCH`
+`executed ≤ count`, `len_i ≤ maxreply_i`, fixed-reply ops exactly their
+length) and checks the CRC where that length puts it.  Bytes after the CRC
+are TX-underrun filler and ignored.  A non-OK `STATUS` is always the
+4-byte error envelope with the CRC at offset 2.  A reply whose length field
+is not legal for the request is `ALP_ERR_IO`.  On I2C these opcodes do not
+exist (§5.3), so I2C replies stay fixed-length.
 
 ### 4.1 SPI timing
 
@@ -1022,6 +1587,38 @@ stamp, and the one legitimate advance to 0 (from 0xF) is accepted.
 I2C replies are **never** stamped (`STATUS_NO_PENDING` owns bit 7
 on that transport, and the hazard is SPI-specific).
 
+### 4.1.2 ATTN-timed reply reads (`v0.15+`)
+
+When `ATTN` is granted and passed its self-test (§3.17) the host replaces
+the 35 µs staging gap and the ladder's first rung with a wait on the
+`ATTN` rising edge (interrupt + semaphore, never polling): the firmware
+raises the line only after the TX DMA holds the complete reply, so the host
+starts the reply transaction on the edge with no gap.  Provisional timing
+(bench-verify with `timing_stats` plus a scope on `P71`/`P97`):
+
+| Parameter | Guarantee |
+|-----------|-----------|
+| CS falling → `ATTN` low | ≤ 2 µs while the CS-EXTI vector is idle (prio 1, the highest configured) |
+| `ATTN` rise | Only after the TX DMA is armed with the complete reply; the host may start the reply transaction on the edge |
+| CS rising → `ATTN` high | `t_frame` (≤ ~30 µs on 256-byte frames) + `t_dispatch(op)`; `ADC_READ` is bounded by `ADC_READ_ISR_BUDGET_US` = 1000 |
+| Low time around each fresh stage | ≥ 1 µs (deassert at handler entry to assert at exit) |
+| Host `ATTN` timeout `T_ATTN` | `GD32G553_BRIDGE_REPLY_TIMEOUT_MS` (10 ms) |
+| CS setup (assert → first SCK) | Unchanged; the slave needs about 3 µs |
+| Reply-read CS rising → next request CS falling | ≥ 10 µs (a request falling edge that coalesces with the drain handler re-arms RX over bytes already captured) |
+
+On `BIG_FRAME` links the CS-rising handler works on frames up to 256 bytes
+(`BRIDGE_SPI_DMA_BUF_LEN` 72 → 260, `.bss` ≈ +1 KB, MSP stays 2 KB); the
+table-driven CRC costs about 9 instructions per byte (≈ 11 µs per 256-byte
+frame at 216 MHz, twice per round trip).  Legacy opcodes stay limited to
+65 bytes of payload on every link: the firmware answers `STATUS_INVAL` to
+`payload_len > 65` on any opcode but `BATCH` (and to a `BATCH` above
+`max_payload`), which restores the v0.14 exposure to a CS-edge-coalesced
+capture whose frame CRC is byte-palindromic.  The host never clocks more
+than 256 bytes in one CS window (the RX DMA count is 260; beyond that the
+4-frame RX FIFO overflows, `RXORERR` sets and the error seam replaces the
+staged reply with `STATUS_IO`) and never sends a request over 65 bytes
+before `BIG_FRAME` is granted.
+
 ### 4.2 CRC validation
 
 * On bad CRC the receiver returns `ALP_ERR_IO` and *does not* execute
@@ -1074,6 +1671,10 @@ guarantees that the reply bytes are available before it releases
 SCL.  Hosts that don't support clock-stretching can poll the bus
 busy bit instead.
 
+The firmware's I2C allow-list is a subset of the opcode set; `BOOT_CONFIG`
+(`0x42`) is on it (§3.19), so the persistent boot flags can be set from
+Linux without the SPI link.
+
 If the host issues a `read` before any `write` since the last
 START, the firmware replies with one byte `STATUS = 0x80` (no
 pending command) and an empty payload + CRC.
@@ -1098,6 +1699,31 @@ host code reads back the address from `GET_VERSION` reply payload
 in future protocol revisions (TODO; today the host has to know the
 configured address out-of-band).
 
+### 5.3 I2C opcode policy (`v0.15+`, unconditional)
+
+Firmware v0.15 enforces an **allow-list on the I2C link**, in
+`protocol_dispatch_inner()` after the OTA trial gate (any CRC-valid frame
+on either link still confirms a trial) and before the opcode switch:
+
+* **Allowed on I2C:** `0x00` PING, `0x01` GET_VERSION, `0x02`
+  GET_BUILD_ID, `0x03` RESET_REASON, `0x10` GPIO_READ, `0x11` GPIO_WRITE,
+  `0x41` SE_RESET, `0x42` BOOT_CONFIG, `0x20` PWM_SET / `0x21` PWM_GET (v0.17), `0xA0..0xA2` I2CM_* (v0.17, §3.20; I2C-only), `0x81` LINK_FEATURES (I2C grants only `STATUS_SEQ`, with
+  `mp` = 65, so the extended form is accepted but changes nothing) and
+  `0xF0..0xFF` OTA.
+* **Any other opcode** answers `STATUS_NOSUPPORT` (`0x06`) with an empty
+  payload; the handler never runs.  Host code treats it like any other
+  `NOSUPPORT`.
+* The firmware keeps SWD-readable diagnostics `bridge_i2c_denied_count:u32`
+  and `bridge_i2c_denied_last_cmd:u8` (same style as `bridge_i2c_rx_diag`).
+* SPI is unrestricted; no per-pad GPIO ownership between Linux (I2C) and the
+  CM33 (SPI) is enforced.
+
+The in-tree I2C callers were audited against the list and use only allowed
+opcodes: the kernel `gpio-gd32-bridge` driver (`0x00/0x01/0x10/0x11/0x41`),
+`tools/gd32-ota-host` (`gd32g553_init` + OTA `0xF0..0xF6`) and
+`examples/v2n/v2n-brd-i2c-bringup` (`PING`/`GET_VERSION`).  OTA stays
+reachable on I2C; SWD is for factory flashing and recovery.
+
 ## 6. Status codes (firmware → host)
 
 The status byte returned in every reply maps 1:1 onto a subset of
@@ -1114,13 +1740,25 @@ byte is naturally unsigned and human-readable on a logic analyser:
 | `0x04`        | `ALP_ERR_TIMEOUT`       | Sub-bus operation timed out (e.g. ADC/timer peripheral).|
 | `0x05`        | `ALP_ERR_IO`            | CRC failure or transport-layer error.                  |
 | `0x06`        | `ALP_ERR_NOSUPPORT`     | Opcode unknown to this firmware build, or a request the firmware understands but cannot service (e.g. DSP chain-pool exhaustion — see §3.x). |
-| `0x07`        | `ALP_ERR_NOMEM`         | Reserved.                                              |
+| `0x07`        | `ALP_ERR_NOMEM`         | v0.15: a `READ2` reply that would not fit the firmware's buffer (nothing consumed, §3.18).  Otherwise reserved. |
 | `0x08`        | `ALP_ERR_OUT_OF_RANGE`  | Parameter beyond hardware capability (e.g. PWM freq).  |
 | `0x80`        | _(I2C: no pending cmd)_ | I2C read before any write on this START — see §5.      |
 | Other         | `ALP_ERR_IO` (mapped)   | Unknown wire status → host returns `ALP_ERR_IO`.       |
 
 Hosts MUST translate the wire byte back to a negative `alp_status_t`
 via the table above before returning it from a public API call.
+
+**v0.15 I2C note:** on the I2C link an opcode outside the §5.3 allow-list
+answers `STATUS_NOSUPPORT` (`0x06`) with an empty payload — for example
+`ADC_READ`, or `PWM_SET`/`PWM_GET` below 0.17 (they are allowed on I2C
+from 0.17), over I2C against a v0.15 bridge.  Pre-v0.15 firmware serviced
+those opcodes on I2C; hosts that need them use SPI.  PWM stop (period 0
+and duty 0) over I2C needs >= 0.17 (`GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR`).
+
+**v0.17 I2CM note:** `I2CM_*` replies keep the generic meanings above
+(`STATUS_BUSY` = a job is running, `STATUS_NOT_READY` = unconfigured or no job
+yet); the outcome of the I2C3 transfer itself is the `result` byte in the
+`I2CM_RESULT` payload (§3.20), not the outer status.
 
 **v0.7 SPI note:** once `STATUS_SEQ` is negotiated (§3.14), the SPI
 status byte carries the sequence stamp in bits `[7:4]` — hosts mask
@@ -1158,7 +1796,14 @@ their own retry.
    the init returns `ALP_ERR_NOSUPPORT` and refuses to operate on
    incompatible firmware (avoids a host that speaks newer commands
    talking past an older firmware build).
-3. `GET_BUILD_ID` (optional, only if the host logs it) — useful in
+3. **Link-feature negotiation (SPI only; §8 has the full order).**  For a
+   peer reporting minor ≥ 15 the 6-byte `LINK_FEATURES` form
+   (`STATUS_SEQ | BIG_FRAME | ADC_STREAM2 | BATCH`, plus `ATTN` when the
+   backend registered an `ATTN` hook, `max_payload_req` 252), then the
+   `ATTN` self-test; a peer below 15, or one answering `INVAL` /
+   `NOSUPPORT`, gets the legacy 1-byte `STATUS_SEQ` form.  Best-effort: a
+   failure leaves the link on the legacy framing.
+4. `GET_BUILD_ID` (optional, only if the host logs it) — useful in
    production-test logs to confirm the GD32 has the firmware build
    that QC signed off on.
 
@@ -1182,22 +1827,55 @@ caller wants liveness confirmation.
 
 Until the bridge fleet ships in production, `major` stays at `0`
 and the host driver insists on **exact** major-number match.
-**Pre-1.0 the host and firmware additionally ship in lock-step
-including `minor`**: a pre-production minor may revise a
-pre-production opcode's payload (v0.6 did this to `OTA_WRITE_CHUNK`),
-and the major-only handshake cannot detect that — do not mix a v0.5
-host with v0.6 firmware or vice versa.
 
-Because that mismatch is undetectable by `major` alone yet corrupts a
-flashed image (v0.5 firmware reads the v0.6 chunk **length byte** as
+**Negotiated compatibility (v0.15).**  A different `minor` is no longer a
+lock-step violation: mixing a v0.14 host or firmware with a v0.15 one is
+supported in all four directions, because every v0.15 feature is gated on
+**negotiation**, not on the minor alone.  Everything new except the I2C
+opcode policy (§5.3) stays off until the host enables it on that link with
+the 6-byte `LINK_FEATURES` form (§3.14); an SPI link that has not
+negotiated is byte-identical to v0.14.  Features that change an existing
+opcode's payload without a feature bit remain minor-gated, as v0.6 did to
+`OTA_WRITE_CHUNK`, and the major-only handshake cannot see that.
+
+**Host discovery order** (`gd32g553_init()`):
+
+1. `PING`, using the BUSY-gated retry ladder (§6).
+2. `GET_VERSION`: `major` must equal `GD32G553_HOST_PROTOCOL_MAJOR`; record
+   `m` = minor.
+3. If SPI is open: (a) if `m ≥ 15`, send the 6-byte `LINK_FEATURES` with
+   `want` = `STATUS_SEQ | BIG_FRAME | ADC_STREAM2 | BATCH`, plus `ATTN` only
+   if the backend registered an `ATTN` hook with `P71` as input + IRQ, and
+   `max_payload_req` = 252; store `granted` / `mp`, take the stamp baseline
+   from the reply and run the `ATTN` self-test (§3.17); if the reply is
+   `INVAL` or `NOSUPPORT`, go to (b).  (b) if `m < 15`, send the 1-byte
+   `STATUS_SEQ` form, as in v0.7..v0.14.
+4. If I2C is open nothing is required (the I2C link grants only
+   `STATUS_SEQ`; a v0.15 host may send the 6-byte form there to read
+   `supported`, expecting `0x00000001` and `mp` 65).
+5. On the RESET signature (§4.1.1) or any reply showing an OTA
+   `COMMIT`/`ROLLBACK` reset: drop every negotiated item (sequence,
+   `BIG_FRAME`, `ATTN`, `STREAM2`, `BATCH`, stream handles) and repeat from
+   step 1.
+
+| Host | Firmware | Result |
+|------|----------|--------|
+| 0.14 | 0.14 | Unchanged. |
+| 0.14 | 0.15 | 1-byte negotiation, so the wire is byte-identical to v0.14 on SPI.  On I2C, opcodes outside §5.3 now answer `NOSUPPORT`; no in-tree caller is affected. |
+| 0.15 | 0.14 (or older) | Legacy 1-byte `STATUS_SEQ`; legacy `0x33`/`0x34` (mV, `BUSY` on overrun, `dropped` unknown); no `BATCH`; 65-byte frames; `P71` may stay input or SWD; `ATTN` never driven. |
+| 0.15 | 0.15, `ATTN` not granted (not requested, debugger attached, stub, self-test failed) | `BIG_FRAME` + `STREAM2` + `BATCH`.  Reply timing uses the v0.14 staging gap + ladder + `STATUS_SEQ`.  Reads are scheduled by a host timer at `W / realised_rate`, not by busy-polling. |
+| 0.15 | 0.15, `ATTN` granted | Everything.  Per-command fallback to the drain rule on timeout; disable after 3 consecutive faults (§3.17). |
+
+A v0.5 host driving v0.6 firmware (or the reverse) is undetectable by
+`major` alone yet corrupts a flashed image (v0.5 firmware reads the v0.6 chunk **length byte** as
 image data), the host driver **gates the OTA session on `minor`**: an
 OTA cannot start against a peer below `GD32G553_OTA_MIN_PROTOCOL_MINOR`
 (6). `gd32g553_ota_begin` / `gd32g553_ota_write_chunk` return
 `ALP_ERR_NOSUPPORT` **before any erase or program**, and
 `gd32g553_ota_supported()` lets a host check up front (#751). The
 REG_ON lines 18/19 of `GPIO_WRITE` are the second minor-gated surface
-(`GD32G553_REG_ON_MIN_PROTOCOL_MINOR`, §3.1). Other opcodes remain
-governed by the exact-lockstep rule above.
+(`GD32G553_REG_ON_MIN_PROTOCOL_MINOR`, §3.1). Every v0.15 surface is
+gated by negotiation (§3.14) instead; an older host simply never sends it.
 
 Version history (pre-1.0): **v0.7** adds `LINK_FEATURES` (0x81) +
 the negotiated `STATUS_SEQ` reply stamp (§3.14, §4.1.1) and the
@@ -1245,6 +1923,23 @@ opcode-derived-length rule, so a host below
 simply never learns the 6th byte exists. `GET_VERSION`'s SPI reply
 for `0.14.0` is `A5 00 00 0E 00 30 3B` (same field layout as v0.11's
 vector above; recompute from the algorithm rather than hand-copying).
+**v0.15** is a *negotiated* minor: it adds the 6-byte `LINK_FEATURES`
+form and the `BIG_FRAME` / `ATTN` / `ADC_STREAM2` / `BATCH` bits (§3.14),
+`BATCH` (`0x04`, §3.16), the `ATTN` data-ready line on `PA14`/`P71`
+(§3.17), `ADC_STREAM_BEGIN2` / `ADC_STREAM_READ2` (`0x3B`/`0x3C`, §3.18),
+self-delimiting reply framing (§4) and the unconditional I2C opcode
+allow-list (§5.3).  Nothing but the I2C policy is observable until a host
+negotiates it.  `GET_VERSION`'s SPI reply for `0.15.0` is
+`A5 00 00 0F 00 01 08` (CRC from `tests/gen_protocol_vectors.py` in the
+firmware repo, wire order low byte first).
+The same minor also grows the GPIO mask from 21 to 23 bits -- bit 21 = E1M IO15
+(GD32 `PB4`), bit 22 = E1M IO26 (GD32 `PC2`), §3.1 -- and a host below
+`GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR` (15) never learns the two bits exist.
+**v0.17** adds the I2C3 master proxy opcodes `I2CM_CONFIG` / `I2CM_XFER` /
+`I2CM_RESULT` (`0xA0..0xA2`, §3.20; I2C link only, outside `BATCH`) and the four
+`CAM_EN_LDO0..3` GPIO bits 23..26 (§3.1).  A host below
+`GD32G553_I2CM_MIN_PROTOCOL_MINOR` (17) never sends them; the Linux adapter
+refuses transfers with `-EOPNOTSUPP` against an older bridge.
 
 ## 9. Reference vectors
 
@@ -1258,14 +1953,39 @@ The per-opcode wire vectors (SPI `PING` round-trip, I2C `PING`
 round-trip, `GET_VERSION` reply for the firmware's declared
 version) are generated at firmware build time and stored in
 `gd32-bridge-firmware:tests/protocol_vectors.txt` by
-`gd32-bridge-firmware:tests/gen_protocol_vectors.py`.  No test
-currently consumes this file: `tests/zephyr/chips/src/test_gd32_bridge.c`
-covers argument checks and the `gd32g553_init()` BUSY/IO retry ladder
-against an `i2c-emul` fake bridge, but has zero references to
-`protocol_vectors`, and `gd32-bridge-firmware:tests/` holds only the
-generator script and the generated `.txt`.  A host<->firmware
-divergence test built on these vectors remains an open gap, not
-existing coverage.
+`gd32-bridge-firmware:tests/gen_protocol_vectors.py`; the hex is never
+hand-computed.  `tests/zephyr/chips/src/test_gd32_bridge.c` covers argument
+checks and the `gd32g553_init()` BUSY/IO retry ladder against an `i2c-emul`
+fake bridge.  For v0.15, `tests/unit/gd32_protocol_015` drives the real host
+driver against a byte-level SPI model of a v0.14 and a v0.15 bridge and pins
+the following vectors (bytes before the CRC; CRC-16/CCITT-FALSE appended
+low byte first):
+
+| Name | Bytes before CRC |
+|------|------------------|
+| `spi_get_version_reply_v0_15_0` | `A5 00 00 0F 00` |
+| `spi_link_features_ext_request_all` | `A5 81 1F000000 FC00` |
+| `spi_link_features_ext_reply_all_seq1` | `A5 10 1F000000 1F000000 FC00` |
+| `spi_link_features_ext_reply_stub_seq1` | `A5 10 13000000 13000000 FC00` |
+| `spi_reply_inval` (also the v0.14 answer to the 6-byte form) | `A5 01` |
+| `i2c_link_features_ext_write` | `00 81 1F000000 FC00` (CRC over `81..`) |
+| `i2c_link_features_ext_read` | `00 01000000 01000000 4100` |
+| `i2c_adc_read_ch0_4_write_denied` | `00 30 00 04`, read `06` |
+| `spi_adc_stream_begin2_s0_ch0_1khz_w256_request` | `A5 3B 00 00 00 00 E8030000 0001 0000` |
+| `spi_adc_stream_begin2_reply_1khz_w256` | `A5 00 40420F00 E8030000 FF0F 0807 01 0001 0002` |
+| `spi_adc_stream_read2_s0_max121_request` | `A5 3C 00 79` |
+| `spi_adc_stream_read2_reply_got3` | `A5 00 00010000 00000000 03 0008 0108 FF0F` |
+| `spi_adc_stream_read2_reply_empty` | `A5 00 03010000 00000000 00` |
+| `spi_adc_stream_read2_reply_overrun_dropped32` | `A5 00 23010000 20000000 02 0008 0108` |
+| `spi_adc_stream_read2_reply_discontinuity` | `A5 00 25010000 FFFFFFFF 00` |
+| `spi_batch_request_gpiow_pwmget_read2` | `A5 04 03 11 08 01000000 01000000 21 01 00 3C 02 00 10` |
+| `spi_batch_reply_stop_at_first_error` | `A5 00 02 00 00 01 00` |
+| `spi_batch_request_nested_rejected` | `A5 04 01 04 00`, reply = `spi_reply_inval` |
+| `spi_batch_request_trailing_byte_rejected` | `A5 04 01 00 00 00`, reply = `spi_reply_inval` |
+| `spi_ota_write_chunk_over_65_rejected_on_big_link` | `A5 F1` + 66-byte payload, reply = `spi_reply_inval` |
+
+The I2C and rejected-request rows are firmware-side vectors; the host test
+covers the rows that exercise the host's own framing and parsing.
 
 ## 10. Field upgrades of the bridge firmware
 
