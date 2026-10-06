@@ -84,7 +84,7 @@ allow-list.  Command opcodes are 1 byte; their numeric encoding is:
 | `0x25` | `PWM_CAPTURE_END`     | `channel:u8`                                          | _empty_                                            |
 | `0x26` | `PWM_SINGLE_PULSE`    | `channel:u8 reserved:u8 reserved:u16 pulse_ns:u32`    | _empty_                                            |
 | `0x27` | `TIMER_SYNC`          | `master:u8 slave:u8 mode:u8`                          | _empty_                                            |
-| `0x28` | `POWER_MODE_SET`      | `mode:u8 reserved:u8 wake_bitmap:u32 wake_after_ms:u32` | _empty_ (see §3.z -- `wake_bitmap` bits `UART_RX`/`USB`/`ETH_LINK` return `STATUS_NOSUPPORT`; no HW path on GD32G5) |
+| `0x28` | `POWER_MODE_SET`      | `mode:u8 flags:u8 wake_bitmap:u32 wake_after_ms:u32` | _empty_ (see §3.z -- SPI only; `flags` bit0 = `WAKE_I2C` (timed requests only); modes 2/3 answer `STATUS_BUSY` while an ADC stream, PWM, DAC or OTA session is live; `wake_bitmap` bits `GPIO`/`UART_RX`/`USB`/`ETH_LINK` return `STATUS_NOSUPPORT`) |
 | `0x81` | `LINK_FEATURES` (v0.7) | `features:u8` (wanted; bit0 = `STATUS_SEQ`) **or** (v0.15, 6 bytes) `want:u32 max_payload_req:u16` | `features:u8` (granted + armed) **or** (v0.15, 10 bytes) `granted:u32 supported:u32 max_payload:u16`; see §3.14 / §4.1.1 |
 
 Opcodes `0x82..0xEF` are **reserved** for future Alp-defined
@@ -105,22 +105,64 @@ the Renesas SoC on the configured wake source(s), then re-runs
 its own GD32 handshake so the bridge stays usable across deep-
 sleep cycles.
 
-The firmware-side dispatcher implements all four modes: `0` (run)
-and `1` (sleep) are accepted no-ops (the bridge's main loop already
-parks in `__WFI()` between transport interrupts), `2` (deep-sleep)
-calls `pmu_to_deepsleepmode()`, and `3` (standby) calls
-`pmu_to_standbymode()`.  Of the `wake_bitmap` bits, `RTC` and
-`TIMER` arm the RTC wakeup timer (IRC32K / DIV16, 0.5 ms LSB, up to
-~32.7 s; `wake_after_ms` also arms this same timer regardless of
-the bitmap, per the `<alp/power.h>` contract), and `GPIO` enables
-`PMU_WAKEUP_PIN0..4`.  `UART_RX` / `USB` / `ETH_LINK` return
-`STATUS_NOSUPPORT` -- the GD32G5 baseline has no LPUART wake, USB
-OTG, or MAC, so there is no hardware path for these bits on this
-SoC.  The portable surface in `<alp/power.h>` honours INVAL
-pre-checks (e.g. RUN mode, no wake sources + zero wake_after_ms)
-before falling through to the firmware.  HIL verification of the
-sleep transitions on real V2N silicon is still ahead (see
-`docs/v1.0-readiness.md` §1a).
+The firmware-side dispatcher implements all four modes.  Request byte 1
+was reserved padding and is now `flags` (0 from a host that predates it;
+unknown bits answer `STATUS_INVAL`).  The opcode is **SPI only** -- it is
+not on the v0.15 I2C opcode allow-list.
+
+| Mode | Behaviour | Wake sources |
+|---|---|---|
+| `0` RUN | no-op; cancels an accepted `2`/`3` still waiting for its quiet-link window (and stops its RTC timer) | -- |
+| `1` SLEEP | accepted; the core already idles in `__WFI()` between interrupts, every clock and peripheral keeps running; never refused | any interrupt |
+| `2` DEEP_SLEEP | RAM and registers kept, core/PLL/IRC8M gated; resumes in place; the PLL is re-locked (IRC8M/2 x 108 / 2, the in-tree clock-override configuration) before any handler runs | SPI CS falling edge (EXTI 8), BRD_I2C address match (`flags` bit0, early wake of a timed sleep; EXTI line unconfirmed), RTC timer (EXTI 19) |
+| `3` STANDBY | SRAM lost; the wake is a **reset** (all link features cleared, v0.15 design F5); re-handshake required | NRST, RTC timer.  No WKUP pad is free on this SoM |
+
+* **Entry is deferred.**  The request is accepted (`STATUS_OK`) and latched;
+  the entry runs at base level on the next quiet-link SysTick tick (<= 50 ms),
+  after the reply has drained.  ATTN is driven low when an accepted transition
+  starts and stays low until the next CS edge.
+* **`STATUS_BUSY`** for modes 2 and 3 while an ADC stream, a PWM output or
+  input-capture, a DAC output, an OTA session (BEGIN to COMMIT/ABORT, or an
+  erase running) or an unconfirmed trial / boot-config commit is live.  Nothing
+  is changed or latched; stop the feature or use mode 1.  A request that was
+  accepted and is overtaken by such activity before the entry is dropped.
+* **Bounded sleep.**  Modes 2 and 3 always need a timer (`wake_after_ms > 0` or
+  the `RTC`/`TIMER` bit), else `STATUS_INVAL`.  `WAKE_I2C` (mode 2 only) adds an
+  early wake on a BRD_I2C address match; an **untimed** `WAKE_I2C` request is
+  refused with `STATUS_OUT_OF_RANGE` until the I2C0 wake line is bench-proven.
+  A timer longer than 300 ms is `STATUS_OUT_OF_RANGE` while the FWDGT keeps
+  counting in the mode.  `RTC`/`TIMER` arm the RTC wakeup timer (IRC32K / DIV16,
+  nominally 0.5 ms LSB, up to ~32.7 s; IRC32K is 28-36 kHz so the real wait is
+  -11 % / +14 %); `GPIO`, `UART_RX`, `USB`, `ETH_LINK` and unknown bits return
+  `STATUS_NOSUPPORT` -- there is no hardware path for them.  RUN and SLEEP both
+  cancel a latched mode 2/3 request.
+* **`WAKE_I2C`** runs I2C0 from CK_IRC8M with WUEN armed, because the APB1
+  kernel clock is gated in Deep-sleep.  SCL is stretched until the CPU is back,
+  so the I2C transaction that woke the part completes; I2C0 returns to APB1 at
+  base level once idle.  The EXTI line number is not confirmed against the
+  user manual and the path is not bench-validated.  A firmware that predates the
+  `flags` byte ignores it (benign: it still demands a timer).
+* **Host wake rule** (implemented by `gd32g553_set_power_mode()` /
+  `gd32g553_power_wake()`).  A CS wake runs the waking transaction on IRC8M, so
+  the frame clocked during it is lost; it fails its CRC and never reaches a
+  handler, which makes resending any opcode safe.  Because the entry can happen
+  up to 50 ms after the reply, the host cannot tell whether the bridge is
+  asleep.  Before the next command it sends one throw-away `PING`, waits the wake
+  latency (default 2 ms), then `POWER_MODE_SET(RUN)` -- idempotent, it proves the
+  link is back and cancels a request that never reached the sleep -- and retries
+  on `ALP_ERR_IO` / `ALP_ERR_TIMEOUT`.  After mode 3 the host re-reads the version
+  and re-negotiates, as after an OTA reset.
+* **Link state** (`STATUS_SEQ`, the negotiated feature word, `max_payload`)
+  survives Deep-sleep because SRAM does.
+* **Diagnostics.**  The firmware keeps SWD-readable counters (`bridge_power_diag`:
+  entries, wakes, refusals, last wake source, wake restore cycles); see the
+  firmware README.
+
+The portable surface lives in [`<alp/power.h>`](../include/alp/power.h)
+(`alp_power_open / alp_power_configure_wake_source / alp_power_request_sleep /
+alp_power_close`); on V2N only the Renesas vendor extension reaches this opcode
+today.  HIL verification of the sleep transitions on real V2N silicon is still
+ahead (see `docs/v1.0-readiness.md` §1a).
 
 ### 3.y Advanced timer extras (v0.5+)
 
