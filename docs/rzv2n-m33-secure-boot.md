@@ -159,7 +159,7 @@ with Renesas authorship); the Alp changes are `0021` (CPG is a syscon) and
 
 **WARNING: with `"1"` any Linux root process can rewrite CM33 code memory.**
 Dev images only.  `alp-image-prod` refuses to build with the flag set
-(`bb.fatal`).  The TF-A it changes is a separate recipe, so also keep the flag
+(the recipe is skipped with that reason, so other recipes still build).  The TF-A it changes is a separate recipe, so also keep the flag
 out of any `local.conf` used for production builds.  There is no provisioning
 ship-check: the TF-A bundle carries no record of the flag (a bundle-metadata
 field plus a `check_som_bundle.py` rule is follow-up), so a provisioned unit
