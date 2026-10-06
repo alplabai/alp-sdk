@@ -227,8 +227,10 @@ IPC-enabled CM33 image through `yocto_uio_drv.c`.  The CM33 window is
    (`tests/hil/v2m103-x-evk/v2m103-rpmsg-echo-uio.yaml`, binary at
    `<artifact-dir>/linux`) or, with the static bench binary from
    `tests/yocto/build_rpc_uio_bench_aarch64.sh`, run it directly on the
-   board.  Pass = `[rpmsg-v2n] done (4/4 round trips verified)`; the
-   `/proc/interrupts` `mhu-uio` count rises.
+   board.  Pass = `[rpmsg-v2n] done (4/4 round trips verified)` from the
+   HIL binary, or `[PASS] echo: 0/4 payload sizes mismatched` from the
+   static bench binary; either way the `/proc/interrupts` `mhu-uio` count
+   rises.
 
 ## Reference
 
