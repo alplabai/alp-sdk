@@ -95,7 +95,7 @@ Per-path status and bench record: [display-support-matrix.md](../display-support
 | Backlight | SoM-side PWM exposed to Linux as a `pwm-backlight` device tree node; 5 kHz PWM. |
 | Panel reset | LCD1_RST = E1M-X IO13; Linux drives it via `gpio-gd32-bridge` on V2N-family SoMs. |
 | Panel power | LCD1_PWR_EN = E1M-X IO15 — pulled high on the carrier, so the panel powers by default without explicit firmware action. A SoM's route to the pad (the V2N family's bridge bit and minimum protocol minor) is in its `pad_routes` and `docs/gd32-bridge-protocol.md`. |
-| Touch controller | Goodix GT911 on DSI1_CSI_I2C = E1M-X I2C3. **Linux has no I2C master to this bus today on V2N-family SoMs**. Touch support is deferred to a bridge I2C-proxy follow-up; a goodix polled-mode patch ships dormant on the branch in the meantime. |
+| Touch controller | Goodix GT911 on DSI1_CSI_I2C = E1M-X I2C3. On V2N-family SoMs Linux reaches this bus through the GD32 bridge's I2C proxy (adapter `i2c3`, protocol >= 0.17, polled interrupts); the goodix polled-mode patch covers the missing interrupt line. |
 | Silicon note | Datasheet R01DS0466 rev 1.20 section `#AC0`/`#BC0` states those part suffixes do not support MIPI-DSI Display Command Set (DCS) control — HX8394 init (which uses DCS commands) is impossible on `#AC0` parts. The SoM is moving to a later-suffix DCS-capable part; older `#AC0` boards will fail at panel init by design. |
 | Bring-up status | Code complete on `feat/v2n-lcd-display1` (kernel patches 0004–0006, DT nodes, weston image, LVGL example); **HIL on silicon pending** (bench ladder G0–G8). |
 
@@ -138,7 +138,7 @@ row says so.
 | I2C0, PCIe / M.2 branch | same bus, through a level shifter | `i2c-0` | 100 kHz | PCIe I/O expander, then a 2:1 switch to the M.2 E-key or M.2 M-key slot |
 | I2C1 | RZ/V2N RIIC1 | `i2c-1` | 400 kHz | 14-pin expansion header only; no fixed device |
 | I2C2 (`XEVK_I2C_BUS_DSI_CSI0`) | RZ/V2N RIIC2 | enabled only by the camera device trees; it has no alias, so read its number from `i2cdetect -l` | 400 kHz | Camera connectors (CAM0 pair and the parallel-camera connector); no fixed device |
-| I2C3 (`XEVK_I2C_BUS_DSI_CSI1`) | SoM bridge MCU (no RZ/V2N master) | none | n/a | CAM1 connector; no fixed device |
+| I2C3 (`XEVK_I2C_BUS_DSI_CSI1`) | SoM bridge MCU (Linux adapter `i2c3` via `gpio-gd32-bridge`, protocol >= 0.17) | none | n/a | CAM1 connector; no fixed device |
 | I3C | RZ/V2N I3C | none | n/a | 3-pin header, not fitted |
 | SoM-internal power / clock bus | RZ/V2N RIIC8 | `i2c-8` | 400 kHz | On-module parts only, see the last table |
 

@@ -19,7 +19,9 @@ I2C clients.
    and IGNORE_NAK are refused (quirks + func advertise exactly this).
  - The adapter registers unconditionally.  The firmware version is
    checked lazily per transfer (minor >= 17, else -EOPNOTSUPP): the
-   bridge is usually still booting when the driver probes.
+   bridge is usually still booting when the driver probes, so the check
+   waits up to 1 s for GET_VERSION to answer before failing the
+   transfer.
  - A job-still-running BUSY backs off for up to 30 ms instead of using
    the generic 4-try ladder; NOT_READY (bridge forgot CONFIG after a
    reset or wake) re-sends the cached speed once and retries; a RESULT
@@ -44,8 +46,8 @@ Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 613 +++++++++++++++++++++++++++++++-
- 2 files changed, 602 insertions(+), 12 deletions(-)
+ drivers/gpio/gpio-gd32-bridge.c | 627 +++++++++++++++++++++++++++++++-
+ 2 files changed
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
 index eefc447b2148..c886d5f863f8 100644
@@ -60,7 +62,6 @@ index eefc447b2148..c886d5f863f8 100644
  	  GPIO support for E1M IO pads routed through the GD32G553
  	  supervisor MCU on Alp Lab V2N-family SoMs, accessed over the
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
-index c3d307cccce1..fe4c2c6fc869 100644
 --- a/drivers/gpio/gpio-gd32-bridge.c
 +++ b/drivers/gpio/gpio-gd32-bridge.c
 @@ -92,6 +92,17 @@
@@ -106,7 +107,7 @@ index c3d307cccce1..fe4c2c6fc869 100644
  #define GD32_STATUS_OK		0x00
  #define GD32_STATUS_INVAL	0x01
  #define GD32_STATUS_NOT_READY	0x02
-@@ -134,6 +152,40 @@
+@@ -134,6 +152,44 @@
  #define GD32_BUSY_RETRY_MIN_US		2000
  #define GD32_BUSY_RETRY_MAX_US		4000
  
@@ -123,6 +124,10 @@ index c3d307cccce1..fe4c2c6fc869 100644
 +#define GD32_I2CM_DEFAULT_KHZ		100
 +/* Firmware job deadline is ~20 ms; collect for up to 30 ms before giving up. */
 +#define GD32_I2CM_JOB_TIMEOUT_MS	30
++/* A client probing right after the adapter registers can beat the bridge's
++ * boot: wait this long for GET_VERSION to answer before failing the transfer. */
++#define GD32_I2CM_VERSION_WAIT_MS	1000
++#define GD32_I2CM_VERSION_RETRY_MS	20
 +#define GD32_I2CM_POLL_MIN_US		300
 +#define GD32_I2CM_POLL_MAX_US		600
 +
@@ -147,7 +152,7 @@ index c3d307cccce1..fe4c2c6fc869 100644
  #define GD32_NGPIO_BASE		18
  #define GD32_NGPIO_WIFI_BT	20
  
-@@ -306,9 +358,37 @@ struct gd32_bridge_gpio {
+@@ -297,9 +353,37 @@ struct gd32_bridge_gpio {
  	 * resolved by the same GET_VERSION as wifi_bt_reg_on_status, under
  	 * status_lock. */
  	int io_ext_status;
@@ -186,7 +191,7 @@ index c3d307cccce1..fe4c2c6fc869 100644
  	/*
  	 * Independent lines-18/19 resolver, NOT under state_lock (it has
  	 * nothing to do with output_mask/output_vals or the replay above) --
-@@ -437,20 +517,35 @@ static u32 gd32_bridge_bits_to_lines(u32 bits)
+@@ -428,20 +512,35 @@ static u32 gd32_bridge_bits_to_lines(u32 bits)
  	       ((bits & GD32_HI_BIT_MASK) << (GD32_LINE_IO15 - 21));
  }
  
@@ -228,7 +233,7 @@ index c3d307cccce1..fe4c2c6fc869 100644
  		return -EINVAL;
  
  	wbuf[0] = GD32_REG_CMD;
-@@ -476,6 +571,8 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
+@@ -467,6 +566,8 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
  		return ret;
  	if (ret != 2)
  		return -EIO;
@@ -237,7 +242,7 @@ index c3d307cccce1..fe4c2c6fc869 100644
  
  	/*
  	 * An error reply is [STATUS][CRC] (3 bytes, no payload; GD32
-@@ -489,9 +586,16 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
+@@ -480,9 +581,16 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
  			return gd32_bridge_status_to_errno(rbuf[0]);
  	}
  
@@ -257,7 +262,7 @@ index c3d307cccce1..fe4c2c6fc869 100644
  		/* Log the torn reply so a cold-boot -EBADMSG says which bytes
  		 * were wrong (gd32-bridge-firmware#295). */
  		dev_warn_ratelimited(&cl->dev, "cmd 0x%02x: reply CRC mismatch: %*ph\n",
-@@ -500,11 +604,21 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
+@@ -491,11 +599,21 @@ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
  	}
  	if (rbuf[0] != GD32_STATUS_OK)
  		return gd32_bridge_status_to_errno(rbuf[0]);
@@ -281,7 +286,7 @@ index c3d307cccce1..fe4c2c6fc869 100644
  static int gd32_bridge_xfer(struct gd32_bridge_gpio *gd32, u8 cmd,
  			    const u8 *req, unsigned int req_len,
  			    u8 *rsp, unsigned int rsp_len)
-@@ -1125,6 +1239,456 @@ static void gd32_bridge_resolve_work(struct work_struct *work)
+@@ -1120,6 +1238,466 @@ static void gd32_bridge_resolve_work(struct work_struct *work)
  			   &gd32->resolve_work, msecs_to_jiffies(period_ms));
  }
  
@@ -424,7 +429,8 @@ index c3d307cccce1..fe4c2c6fc869 100644
 + * (write then read to the same address, S W.. Sr R.. P).  Everything else the
 + * wire format cannot express is refused.  Registered unconditionally; the
 + * firmware version is checked lazily here, per transfer, because the bridge
-+ * is routinely still booting when this driver probes.
++ * is routinely still booting when this driver probes: the check waits up to
++ * GD32_I2CM_VERSION_WAIT_MS for the bridge to answer.
 + */
 +static int gd32_bridge_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 +				int num)
@@ -435,6 +441,7 @@ index c3d307cccce1..fe4c2c6fc869 100644
 +	const u8 *wdata = NULL;
 +	u8 *rdata = NULL;
 +	unsigned int wlen = 0, rlen = 0;
++	unsigned long deadline;
 +	int i, ret;
 +
 +	if (num < 1 || num > 2)
@@ -464,7 +471,15 @@ index c3d307cccce1..fe4c2c6fc869 100644
 +	if (wlen > GD32_I2CM_MAX_WLEN || rlen > GD32_I2CM_MAX_RLEN)
 +		return -EOPNOTSUPP;
 +
-+	ret = gd32_bridge_resolve_late(gd32, gd32_bridge_cam_ldo_status);
++	/* ponytail: a silent bridge costs every transfer up to 1 s here;
++	 * make it a probe-time wait only if a client polls a dead bus. */
++	deadline = jiffies + msecs_to_jiffies(GD32_I2CM_VERSION_WAIT_MS);
++	while ((ret = gd32_bridge_resolve_late(gd32,
++					       gd32_bridge_cam_ldo_status)) == -EAGAIN) {
++		if (time_after(jiffies, deadline))
++			return -ETIMEDOUT;
++		msleep(GD32_I2CM_VERSION_RETRY_MS);
++	}
 +	if (ret == -ENODEV)
 +		return -EOPNOTSUPP;	/* firmware older than protocol 0.17 */
 +	if (ret)
@@ -738,7 +753,7 @@ index c3d307cccce1..fe4c2c6fc869 100644
  /*
   * Unbind teardown, registered AFTER devm_gpiochip_add_data() so devm runs it
   * BEFORE gpiochip_remove(). Consumers (wlan-pwrseq, hci_bcm, panel reset,
-@@ -1147,6 +1711,7 @@ static void gd32_bridge_teardown(void *data)
+@@ -1142,6 +1720,7 @@ static void gd32_bridge_teardown(void *data)
  
  	cancel_delayed_work_sync(&gd32->replay_work);
  	cancel_delayed_work_sync(&gd32->resolve_work);
@@ -746,7 +761,7 @@ index c3d307cccce1..fe4c2c6fc869 100644
  }
  
  static int gd32_bridge_gpio_probe(struct i2c_client *client)
-@@ -1166,6 +1731,11 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -1161,6 +1740,11 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
  	mutex_init(&gd32->state_lock);
  	INIT_DELAYED_WORK(&gd32->replay_work, gd32_bridge_replay_work);
  	INIT_DELAYED_WORK(&gd32->resolve_work, gd32_bridge_resolve_work);
@@ -758,7 +773,7 @@ index c3d307cccce1..fe4c2c6fc869 100644
  	gd32->wifi_bt_reg_on_status = -EPROBE_DEFER;	/* not yet resolved */
  	gd32->io_ext_status = -EPROBE_DEFER;
  	gd32->cam_ldo_status = -EPROBE_DEFER;
-@@ -1249,6 +1819,15 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -1244,6 +1828,15 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
  	gd32->chip.get_direction    = gd32_bridge_gpio_get_dir;
  	gd32->chip.can_sleep	  = true;
  
@@ -774,7 +789,7 @@ index c3d307cccce1..fe4c2c6fc869 100644
  	ret = devm_gpiochip_add_data(&client->dev, &gd32->chip, gd32);
  	if (ret)
  		return ret;
-@@ -1277,6 +1856,16 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+@@ -1272,6 +1865,16 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
  				   msecs_to_jiffies(GD32_RESOLVE_POLL_PERIOD_MS));
  
  	i2c_set_clientdata(client, gd32);
@@ -793,4 +808,3 @@ index c3d307cccce1..fe4c2c6fc869 100644
  
 -- 
 2.53.0
-

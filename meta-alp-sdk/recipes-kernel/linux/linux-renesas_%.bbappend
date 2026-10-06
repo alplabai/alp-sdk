@@ -85,11 +85,10 @@ SRC_URI:append = " \
     file://0020-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
     file://0021-gpio-gd32-bridge-add-cam-en-ldo-lines-and-make-can-stby-requestable.patch \
     file://0022-gpio-gd32-bridge-i2c3-proxy-adapter-and-polled-irqchip.patch \
-    file://0023-pwm-gd32-bridge-provider-over-cmd-pwm-set-get.patch \
     file://uio.cfg \
 "
 
-# 0021..0023 (GD32 bridge, bridge protocol 0.17; all three patch gpio-gd32-bridge.c
+# 0021..0022 (GD32 bridge, bridge protocol 0.17; both patch gpio-gd32-bridge.c
 # that 0005 adds, so they apply strictly after it and in this order):
 #   0021  CAM_EN_LDO0..3 as gpio lines 24..27 (gated on minor >= 17) and
 #         can-stby (line 20) made requestable for a phy-can-transceiver
@@ -98,11 +97,8 @@ SRC_URI:append = " \
 #         "i2c" child (label e1m_x_i2c3), checked lazily per transfer against
 #         minor >= 17, plus a polled irqchip on the bridge gpiochip (10 ms
 #         GPIO_READ while any line is unmasked).
-#   0023  a PWM provider for PWM0..7 over CMD_PWM_SET/GET (pwm-backlight).
-#         PWM0..3 share TIMER0 and PWM4..7 TIMER7, so a conflicting period on
-#         an enabled sibling is refused with -EBUSY.
-# The kernel options they need (GPIOLIB_IRQCHIP, PWM) are selected by the
-# GPIO_GD32_BRIDGE Kconfig entry; the I2C3 clients' drivers are in display.cfg.
+# The kernel option they need (GPIOLIB_IRQCHIP) is selected by the
+# GPIO_GD32_BRIDGE Kconfig entry.
 
 # 0020 (PDM clocks, audit MM-02/MM-X2): the V2N CPG driver had no PDM0/PDM1
 # module clocks or resets, so no pdm node could bind.  The patch adds them
