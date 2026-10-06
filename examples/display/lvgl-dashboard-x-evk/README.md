@@ -23,8 +23,8 @@ A minimal LVGL 9 dashboard on the E1M-X V2N MIPI-DSI panel
 - LCD panel (RK055HDMIPI4MA0) connected to the carrier's Display 1
   connector (J6).  The panel must be powered -- check the backlight
   enable line (GPT1 CH2 on the SoM, driven by the carrier DT).
-- For touch (optional): the GT911 controller is available once the
-  GD32 I2C-proxy follow-up task adds a Linux master path to BRD_I2C.
+- For touch (optional): the J6 panel I2C (GT911) is not wired to
+  E1M-X I2C3 on X-EVK V2, so touch needs a carrier fix or bench bodge.
   The dashboard runs display-only without it.
 
 ## Consumer path 1 -- Yocto image (recommended)
@@ -78,12 +78,12 @@ the SDK sysroot provides.
 
 ## Touch note
 
-On current V2N hardware, the GT911's I2C bus terminates at the GD32
-IO-MCU (BRD_I2C), not directly at an RZ/V2N RIIC controller.  Until
-the GD32 I2C-proxy follow-up adds a Linux-visible I2C adapter,
+On X-EVK V2, the J6 panel I2C (GT911) is not connected to E1M-X I2C3,
+the only bus the GD32 I2C proxy exposes to Linux (it reaches J12/CAM1).
+Until a carrier fix or bench bodge connects them,
 `/dev/input/event0` will not exist and the dashboard runs
 display-only.  The `access(2)` guard in `main.c` handles this
-gracefully -- no modification needed once touch becomes available.
+gracefully -- no modification needed once touch is wired.
 
 ## Verification status
 

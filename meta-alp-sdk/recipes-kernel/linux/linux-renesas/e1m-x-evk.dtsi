@@ -112,8 +112,9 @@
  *   - Display 1 (J6): ported -- rk055hdmipi4ma0 panel on dsi0 (see below).
  *     Display 2 (J28) is permanently unavailable: it requires DSI1 lane
  *     set, which the V2N/V2M family does not populate.
- *     Touch (GT911 on the panel FFC): its I2C bus (the J6 display
- *     I2C) is E1M-X I2C3, served by the GD32 bridge I2C proxy.
+ *     Touch (GT911 on the panel FFC): E1M-X I2C3 (the GD32 bridge
+ *     I2C proxy) reaches only J12/CAM1 on X-EVK V2; the J6 panel I2C is
+ *     not wired to it, so touch needs a carrier fix or bench bodge.
  *   - 2x MIPI-CSI cameras (two separate, bare CSI connectors -- see
  *     docs/boards/e1m-x-evk.md's "Camera connectors" row).
  *
@@ -153,8 +154,8 @@
  *          regulator-fixed node -- but the LDO-to-connector pairing is
  *          a schematic fact this repo does not carry.  CAM1_RST is
  *          likewise still TBD (e1m-x-evk.yaml's `partial_hw_config`).
- *       4. For CAM1 specifically, a Linux I2C master: E1M-X I2C3 (shared
- *          with the J6 display I2C) is the GD32 bridge I2C proxy
+ *       4. For CAM1 specifically, a Linux I2C master: E1M-X I2C3 (which
+ *          reaches only J12/CAM1) is the GD32 bridge I2C proxy
  *          adapter (e1m_x_i2c3).
  *
  *     The Zephyr/CM33 side of this is a DIFFERENT and larger gap, not a
@@ -600,10 +601,10 @@
  * -- no power GPIO needed. How a given SoM reaches IO15 is in its
  * pad_routes (docs/gd32-bridge-protocol.md for the V2N family). Panel reset =
  * E1M-X IO13 via bridge GPIO line 5.
- * Touch (GT911 on the panel FFC) is NOT wired here yet: its bus
- * (the J6 display I2C = E1M-X I2C3) is the bridge I2C proxy adapter
- * (e1m_x_i2c3). Tracked as a follow-up; the goodix polled-mode patch
- * already ships dormant for that stack.
+ * Touch (GT911 on the panel FFC) is NOT wired here: the J6 panel I2C is
+ * not connected to E1M-X I2C3 on X-EVK V2 (I2C3, the bridge I2C proxy
+ * adapter e1m_x_i2c3, reaches only J12/CAM1), so it needs a carrier fix
+ * or bench bodge. The goodix polled-mode patch already ships dormant.
  */
 &du {
 	status = "okay";
