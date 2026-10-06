@@ -26,6 +26,10 @@ from pathlib import Path
 from provision.bench import BenchError
 
 STORE_ROOT = "/var/lib/alp-payload"
+# Operator-created file that marks THIS card as the internal provisioning SD (the one that
+# never ships): `touch /var/lib/alp-payload/.provisioning-sd`. Without it the store stays off,
+# so the license-gated dxm1_* files never land on a release card (#2687).
+STORE_MARKER = f"{STORE_ROOT}/.provisioning-sd"
 
 
 @lru_cache(maxsize=64)
@@ -149,4 +153,7 @@ def open_store(t, bundle_sha: str, components: list[dict], root: str, emmc: str)
     known = {Path(c["file"]).name: c["sha256"] for c in components if c.get("sha256") and c.get("file")}
     if root.startswith(emmc):
         return PayloadStore(t, None, known, f"store off: Linux runs from the eMMC {emmc}, not the provisioning SD")
+    if t.run(f"test -f {STORE_MARKER}", check=False).rc != 0:
+        return PayloadStore(t, None, known, f"store off: {STORE_MARKER} not on this card (not marked as the "
+                            "provisioning SD; touch it there to enable the store)")
     return PayloadStore(t, f"{STORE_ROOT}/{bundle_sha}", known)

@@ -339,9 +339,9 @@ indefinitely; host code SHOULD NOT call it.
 
 `mask` selects which GD32 pads the host wants to read or write.  The
 mask is a **logical** index space owned by the GD32 firmware — the
-bit-to-pad mapping (bits 0..19) is documented in
+bit-to-pad mapping (bits 0..22) is documented in
 `gd32-bridge-firmware:README.md`; the host header names only bits 18/19
-(below).  The host MUST NOT assume that
+and 21/22 (below).  The host MUST NOT assume that
 bit `n` corresponds to GD32 pad `Pxn`.
 
 `GPIO_WRITE` is atomic in the firmware: read-modify-write of the
@@ -368,6 +368,35 @@ reserved for `can-stby`, bridge bit 20, #2341), which is not a `GPIO_WRITE` pad:
 it is never replayed, so a bridge reset leaves the part released. Userspace
 pulses it through the gpiochip labelled `gd32-bridge-gpio` instead of opening
 the bridge itself (#2507).
+
+At protocol minor `>= 15` (firmware `0.3.1`), the pad map grows from 21 to 23
+lines, adding two ordinary E1M pads after the sideband block (no earlier bit
+moves; bit 20 is `CAN_STBY`):
+
+| Bit | E1M pad | GD32 pad | Boot state          | Host macro |
+|-----|---------|----------|---------------------|------------|
+| 21  | `IO15`  | `PB4`    | analog, no drive (PB4 parked explicitly) | `GD32G553_GPIO_LINE_E1M_IO15` |
+| 22  | `IO26`  | `PC2`    | analog, no drive    | `GD32G553_GPIO_LINE_E1M_IO26` |
+
+`PB4` resets as the JTAG `NJTRST` pin (alternate function, pull-up) on GD32
+parts, so firmware 0.3.1 parks it analog / no pull at boot; debug access on
+this board is SWD only. The `GD32G553_GPIO_LINE_*` host macros are bridge
+bit numbers, not Linux gpiochip line numbers.
+
+Like every other E1M pad they stay undriven until a host first reads or writes
+them. `PC14` (E1M IO24) is not part of this change. A bridge below minor 15
+ignores bits 21/22 and still answers success, so `gd32g553_gpio_read` /
+`gd32g553_gpio_write` return `ALP_ERR_NOSUPPORT` for a mask naming either bit
+when the cached protocol minor is below
+`GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR` (15), and the Linux
+`gpio-gd32-bridge` driver refuses `.request()` of lines 22/23 (`-ENODEV`)
+until `GET_VERSION` confirms it (`-EAGAIN` while the bridge has not answered
+yet; no kernel consumer uses these lines, so `-EPROBE_DEFER` would only leak
+errno 517 to userspace). Linux line numbers are one above the bridge bit for
+these two pads because line 21 is `se-rst` (below): line 22 = IO15 (bit 21),
+line 23 = IO26 (bit 22). `se-rst` keeps line 21 because its line number is
+already consumed by the optiga reset DT and HIL spec; renumbering it would
+churn a stable userspace-visible line for no functional gain.
 
 A bridge below minor 11 never learned these two bits; a host driving
 `GPIO_WRITE` against them on such a bridge silently powers nothing
@@ -1765,6 +1794,9 @@ allow-list (§5.3).  Nothing but the I2C policy is observable until a host
 negotiates it.  `GET_VERSION`'s SPI reply for `0.15.0` is
 `A5 00 00 0F 00 01 08` (CRC from `tests/gen_protocol_vectors.py` in the
 firmware repo, wire order low byte first).
+The same minor also grows the GPIO mask from 21 to 23 bits -- bit 21 = E1M IO15
+(GD32 `PB4`), bit 22 = E1M IO26 (GD32 `PC2`), §3.1 -- and a host below
+`GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR` (15) never learns the two bits exist.
 
 ## 9. Reference vectors
 

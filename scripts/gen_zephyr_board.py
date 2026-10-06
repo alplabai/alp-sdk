@@ -2246,7 +2246,78 @@ def _v2n_spi_pfc_mnemonic(row: dict[str, Any], channel: str) -> str:
     return f"{_V2N_SPI_ROLE_MNEMONIC[role]}{channel}"
 
 
-def _v2n_pinctrl_dtsi(links: dict[str, Any]) -> str:
+def _v2n_assignable_m33(
+    metadata_root: Path, soc_spec: dict[str, Any],
+) -> list[tuple[str, dict[str, Any], list[tuple[dict[str, Any], tuple[str, int, int]]]]]:
+    """(instance, entry, [(row, (port, pin, func))]) for every `assignable:`
+    instance of core-ownership.yaml that carries an `m33:` devicetree block --
+    the peripherals the CM33 board tree declares `disabled`, left for a
+    project's `--emit dts-overlay` / `zephyr-conf` to enable (board.yaml
+    `ownership:`).  The PFC function codes are the SoC JSON's
+    `linux_dt[soc_instance].pinmux` -- one silicon-fact source for both cores."""
+    from alp_orchestrate.ownership import instance_pfc
+    path = metadata_root / "e1m_modules" / "v2n" / "core-ownership.yaml"
+    if not path.is_file():
+        return []
+    out = []
+    for inst, e in sorted((_load_yaml(path).get("assignable") or {}).items()):
+        if "m33" not in e:
+            continue
+        rows = instance_pfc(soc_spec, e)
+        for r, pfc in rows:
+            if pfc is None:
+                raise ZephyrBoardEmitError(
+                    f"core-ownership.yaml assignable.{inst} has an m33: block but the SoC "
+                    f"linux_dt.{e.get('soc_instance')}.pinmux has no function code for "
+                    f"{r['peripheral']}")
+        out.append((inst, e, rows))
+    return out
+
+
+def _v2n_assignable_pinctrl(assignable: list) -> str:
+    """`&pinctrl { ... };` groups for the assignable instances (empty when
+    none).  Pins are the rows' own pfc_* triples -- no literals here."""
+    out = ""
+    for inst, e, rows in assignable:
+        pc = e["m33"]["pinctrl"]
+        pins = "".join(
+            ("\t\t\tpinmux = " if i == 0 else "\t\t\t\t ")
+            + f"<RZV_PINMUX({port}, {pin}, {func})>{';' if i == len(rows) - 1 else ','} "
+            f"/* {r['peripheral']} {r['pad']} */\n"
+            for i, (r, (port, pin, func)) in enumerate(rows))
+        out += (
+            "\n&pinctrl {\n"
+            f"\t/* {inst}: pad group for the CM33 when a project assigns it (board.yaml\n"
+            "\t * `ownership:`); unreferenced while the node stays disabled. */\n"
+            f"\t{pc['group_label']}: {pc['node']} {{\n"
+            f"\t\t{pc['child_node']} {{\n"
+            f"{pins}"
+            "\t\t};\n\t};\n};\n")
+    return out
+
+
+def _v2n_assignable_dts(assignable: list) -> list[str]:
+    """Board-dts lines declaring each assignable node `disabled` with its
+    pinctrl group; the owning project's overlay flips it to `okay`."""
+    lines: list[str] = []
+    for inst, e, _rows in assignable:
+        m = e["m33"]
+        lines += [
+            "/*",
+            f" * {inst} (assignable, metadata/e1m_modules/v2n/core-ownership.yaml): disabled on",
+            " * the board; a project that assigns it to m33 enables it in its own overlay.",
+            " */",
+            f"&{m['dt_label']} {{",
+            f"\tpinctrl-0 = <&{m['pinctrl']['group_label']}>;",
+            '\tpinctrl-names = "default";',
+            '\tstatus = "disabled";',
+            "};",
+            "",
+        ]
+    return lines
+
+
+def _v2n_pinctrl_dtsi(links: dict[str, Any], assignable: list = ()) -> str:
     """`<board>-pinctrl.dtsi` for a V2N/V2M `m33_sm` board.
 
     Prose (the GD32 SPI block comment, the console/BRD_I2C one-liners)
@@ -2325,7 +2396,7 @@ def _v2n_pinctrl_dtsi(links: dict[str, Any]) -> str:
         "\t\t};\n"
         "\t};\n"
         "};\n"
-    )
+    ) + _v2n_assignable_pinctrl(assignable)
 
 
 def _v2n_part_display(order_code: str) -> tuple[str, str]:
@@ -2346,24 +2417,6 @@ def _v2n_part_display(order_code: str) -> tuple[str, str]:
     base, variant_code, _pkg = m.groups()
     return f"{base}-{variant_code}", f"arm/renesas/rz/rzv/{base.lower()}.dtsi"
 
-
-_V2N_WDT0_MID_OPENAMP: tuple[str, ...] = (
-    ' * hand-author one from (unlike mbox1 below, which had a real FSP',
-    ' * register map, bsp_mhu_b.h, to draw from).  Full analysis:',
-)
-
-_V2N_WDT0_MID_PLAIN: tuple[str, ...] = (
-    " * hand-author one from (contrast the V2N101 sibling board's mbox1",
-    ' * node, which had a real FSP register map, bsp_mhu_b.h, to draw',
-    ' * from).  Full analysis:',
-)
-
-_V2N_WDT0_TAIL: tuple[str, ...] = (
-    " * meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi's",
-    ' * &wdt1 comment block.  <alp/wdt.h> on this core returns',
-    ' * ALP_ERR_NOT_PRESENT_ON_THIS_SOC (src/wdt_dispatch.c).',
-    ' */',
-)
 
 _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '',
@@ -2604,6 +2657,7 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
 def _v2n_dts(
     sku: str, dir_name: str, soc_spec: dict[str, Any], variant: dict[str, Any],
     sku_preset: dict[str, Any], links: dict[str, Any],
+    assignable: list = (),
 ) -> str:
     """Board `.dts` for a V2N/V2M `m33_sm` board (#655 slice 2).
 
@@ -2634,6 +2688,13 @@ def _v2n_dts(
     console = links["console"]
     gd32_spi = links["gd32_spi"]
     brd_i2c = links["brd_i2c"]
+    wdt = _find_core(soc_spec, "m33_sm").get("watchdog") or {}
+    if not wdt:
+        raise ZephyrBoardEmitError(
+            f"SoC spec {soc_spec.get('ref')} core m33_sm declares no `watchdog` "
+            "block (base/size/counting_clock_hz) -- the V2N/V2M board emits the "
+            "CM33 watchdog node and the alp-wdt0 alias from it")
+    wdt_base = wdt["base"]
     txd0 = _pin_by_peripheral(console["pins"], "UART0_TXD0")
     rxd0 = _pin_by_peripheral(console["pins"], "UART0_RXD0")
     mosi = _pin_by_peripheral(gd32_spi["pins"], "GD32_SPI.MOSI")
@@ -2701,6 +2762,7 @@ def _v2n_dts(
         "",
         "\taliases {",
         f"\t\t{gd32_spi['alias']} = &gd32_spi;",
+        "\t\talp-wdt0 = &wdt0;",
         "\t};",
         "",
         "\tsram: memory@8003000 {",
@@ -2840,15 +2902,30 @@ def _v2n_dts(
         '\tstatus = "disabled";',
         "};",
         "",
+    ] + _v2n_assignable_dts(assignable) + [
         "/*",
-        " * No wdt0 node here (alp-sdk#1153): the upstream Zephyr RZ/V2N SoC",
-        " * devicetree (arm/renesas/rz/rzv/r9a09g056.dtsi, checked against the",
-        " * pinned v4.4.0 tag) declares no watchdog node and no driver binds",
-        " * this SoC's WDT hardware at all yet -- there is no label to",
-        " * reference and no register base address in this tree to",
+        f" * wdt0 = the Cortex-M33's own watchdog (base {wdt_base} and counting clock",
+        " * from the SoC spec's m33_sm `watchdog` block; hal_renesas R9A09G056N",
+        " * wdt_iodefine.h R_WDT0_BASE).  The upstream SoC devicetree",
+        " * (arm/renesas/rz/rzv/r9a09g056.dtsi) declares no watchdog, and upstream's",
+        " * `renesas,rz-wdt` driver cannot bind RZ/V2N, so the node uses the alp-sdk",
+        " * driver zephyr/drivers/watchdog/wdt_renesas_rzv.c (compatible",
+        " * `renesas,rzv-wdt`; alp-sdk#2660).  DISABLED by default: an expiry resets the",
+        " * WHOLE SoM, not just the M33, so a product opts in with `&wdt0 { status =",
+        ' * "okay"; };`.  <alp/wdt.h> then reaches it through alias alp-wdt0.  Enabling it',
+        " * also needs the CPG module clocks held for the CM33 (renesas,cm33-owned-clocks,",
+        " * docs/bench/rzv-wdt0-cm33.md).  clock-freq is the WDT0 counting clock",
+        " * (WDT_0_clk_loco, 24 MHz Main OSC; RZ/V2N hardware manual Table 4.4-2).",
+        " */",
+        "&{/soc} {",
+        f"\twdt0: watchdog@{wdt_base[2:]} {{",
+        '\t\tcompatible = "renesas,rzv-wdt";',
+        f"\t\treg = <{wdt_base} {wdt['size']}>;",
+        f"\t\tclock-freq = <{wdt['counting_clock_hz']}>;",
+        '\t\tstatus = "disabled";',
+        "\t};",
+        "};",
     ]
-    lines += list(_V2N_WDT0_MID_OPENAMP if has_openamp else _V2N_WDT0_MID_PLAIN)
-    lines += list(_V2N_WDT0_TAIL)
     if has_openamp:
         lines += list(_V2N_OPENAMP_TAIL)
     lines.append("")
@@ -2997,10 +3074,12 @@ def emit_zephyr_board(
         v2n_pinctrl_relpath = f"{dir_name}/{dir_name}-pinctrl.dtsi"
         v2n_defconfig_relpath = f"{dir_name}/{basename}_defconfig"
         v2n_dts_relpath = f"{dir_name}/{basename}.dts"
-        files[v2n_pinctrl_relpath] = _v2n_pinctrl_dtsi(supervisor_links)
+        assignable = _v2n_assignable_m33(metadata_root, soc_spec)
+        files[v2n_pinctrl_relpath] = _v2n_pinctrl_dtsi(supervisor_links, assignable)
         files[v2n_defconfig_relpath] = _v2n_defconfig(supervisor_links)
         files[v2n_dts_relpath] = _v2n_dts(
-            sku, dir_name, soc_spec, variant, sku_preset, supervisor_links)
+            sku, dir_name, soc_spec, variant, sku_preset, supervisor_links,
+            assignable)
         # None of the three carries a single pad, PFC triple or I2C address
         # from sku_rel/soc_json_rel below -- every one of those facts comes
         # from supervisor-links.yaml, so its path is threaded into all three

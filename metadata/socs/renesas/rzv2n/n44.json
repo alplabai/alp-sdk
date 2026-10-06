@@ -35,7 +35,12 @@
       "isa": "Armv8-M",
       "trustzone": true,
       "fpu": "single-precision",
-      "zephyr_cpucluster": "cm33"
+      "zephyr_cpucluster": "cm33",
+      "watchdog": {
+        "base": "0x41c00400",
+        "size": "0x10",
+        "counting_clock_hz": 24000000
+      }
     }
   ],
   "npus": [
@@ -227,6 +232,10 @@
       "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
     }
   ],
+  "cm33_boot": {"sram_base": 134217728, "image_pad": 12288, "image_max": 196608, "xspi_offset": 1703936,
+    "note": "BL2 copies the stored CM33 image raw from mtd1 + xspi_offset (0x1A0000) to SRAM sram_base (0x08000000) and silently truncates past image_max (0x30000); the CM33 starts at sram_base + image_pad (0x08003000), so the stored image is image_pad zero bytes + zephyr.bin."},
+  "openamp_carveout": {"a55_base": 1332740096, "size": 9437184, "rsctbl_size": 4096,
+    "note": "OpenAMP/MHU-B reservation in the CM33-NS DDR alias, A55 view 0x4F700000..0x4FFFFFFF (CM33-NS 0x9F700000, A55 = CM33-NS - 0x50000000); rsctbl is its first rsctbl_size (0x1000) bytes. The stock firmware beacon sits in the top 16 bytes of the rsctbl window. The generated board .dts quotes the same region."},
   "memory_regions": [
     {
       "name":            "ddr_main",
@@ -260,9 +269,32 @@
 
   "linux_dt": {
     "RIIC2": {"label": "i2c2", "pinmux": {"RIIC2_SDA2": 1, "RIIC2_SCL2": 1}},
-    "CSI0":  {"label": "csi20", "capture": "cru0"}
+    "CSI0":  {"label": "csi20", "capture": "cru0"},
+    "UART0": {"label": "sci0", "pinmux": {"UART0_TXD0": 1, "UART0_RXD0": 1}, "cpg_clocks": ["rsci_0_pclk", "rsci_0_tclk", "rsci_0_ps_ps3_n", "rsci_0_ps_ps2_n", "rsci_0_ps_ps1_n"]},
+    "UART1": {"label": "sci1", "cpg_clocks": ["rsci_1_pclk", "rsci_1_tclk", "rsci_1_ps_ps3_n", "rsci_1_ps_ps2_n", "rsci_1_ps_ps1_n"]},
+    "SCI7":  {"label": "sci7", "cpg_clocks": ["rsci_7_pclk", "rsci_7_tclk", "rsci_7_ps_ps3_n", "rsci_7_ps_ps2_n", "rsci_7_ps_ps1_n"]},
+    "RSPI0": {"label": "rspi0", "cpg_clocks": ["rspi_0_pclk", "rspi_0_pclk_sfr", "rspi_0_tclk"]},
+    "CANFD2": {"label": "canfd", "channel": 2, "cpg_clocks": ["canfd_0_pclk", "canfd_0_clk_ram", "canfd_0_clkc"]},
+    "CANFD3": {"label": "canfd", "channel": 3, "cpg_clocks": ["canfd_0_pclk", "canfd_0_clk_ram", "canfd_0_clkc"]}
   },
 
+  "boot_strap": {
+    "source": "RZ/V2N Hardware Manual R01UH1071EJ0120 Rev.1.20, 4.3.3.2.75-77 (SYS_LSI_MODE/DEVID/PRR), 1.9.3 (debug mode). SYS_LSI_MODE fields: [2:0] STAT_MD_BOOT (device = MD_BOOT[1:0]), [9] STAT_DEBUGEN (MD_BOOT3), [10] STAT_BOOTSELECTER (BOOTSELCPU), [12:11] STAT_BOOTPLLCA55, [13] STAT_MD_CLKS, [16] SEC_EN; [9], [2:0] and [10] are judged; [10]: 1 = CA55 boot (manual labels it CM55 cold boot) is the intended strap",
+    "registers": {
+      "soc_sys_lsi_mode": "0x10430300",
+      "soc_lsi_devid": "0x10430304",
+      "soc_prr": "0x10430308"
+    },
+    "strap_word": {
+      "debug_enable_bit": 9,
+      "boot_pins_shift": 0,
+      "boot_pins_width": 3,
+      "boot_device_pins_width": 2,
+      "boot_device_names": ["esd", "emmc", "xspi", "scif-download"],
+      "boot_cpu_bit": 10,
+      "boot_cpu_names": ["cm33", "ca55"]
+    }
+  },
   "notes": [
     "Datasheet: 137 pages, R01DS0466EJ0120 v1.20, Sep 2025.",
     "Single die with 8 orderable SKUs that toggle Mali-G31 GPU, Mali-C55 ISP (RZ/V2NP suffix), and security-crypto extensions on/off.  N41/N42/N45/N46 are RZ/V2N (no ISP); N43/N44/N47/N48 are RZ/V2NP (with ISP).",

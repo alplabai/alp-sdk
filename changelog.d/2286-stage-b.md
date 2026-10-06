@@ -24,8 +24,7 @@ mode, `OV5647_HTS_1280X960_BINNED` at `zephyr/drivers/video/ov5647.c:549`
 ("#define OV5647_HTS_1280X960_BINNED 1896 /* 0x0768 */"), is used unscaled despite the PLL
 difference, which makes this mode's real line time 1896 / 58,333,333 = 32.503 us — 1.5x
 the reference's OWN binned-mode line time (1896 / 87,500,000 = 21.669 us), not a match to
-it (fix-first review correction: an earlier version of this note claimed the arithmetic
-"cancels" against the reference's own line time; it does not — 32.503 us instead coincides,
+it (the arithmetic does not "cancel" against the reference's own line time; 32.503 us instead coincides,
 by an unrelated numeric coincidence, with the reference's full-resolution line time, HTS
 2844 / pixel_rate 87,500,000 = 32.497 us, since 2844 = 1896 × 1.5 exactly). Because the real
 line time here is 32.503 us, the AEC 50/60 Hz band-step line counts are NOT the reference's

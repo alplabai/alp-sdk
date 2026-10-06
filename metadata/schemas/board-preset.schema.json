@@ -43,6 +43,22 @@
       },
       "description": "Camera connectors this board exposes, keyed CAM0, CAM1, ...  A project's `cameras:` entries name one of these keys."
     },
+    "sd_slots": {
+      "type": "object",
+      "propertyNames": { "pattern": "^SD[0-9]+$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["card_detect"],
+        "properties": {
+          "card_detect": {
+            "type": "boolean",
+            "description": "True when the carrier wires a card-detect switch to the SoM's SDn card-detect pad (E1M-X SD1_SD1CD).  Gates U-Boot's CONFIG_ALP_E1M_SD1_CD (meta-alp-sdk ALP_CARRIER_SD1_CARD_DETECT): off = boot probes the slot without a presence check."
+          }
+        }
+      },
+      "description": "Per-slot facts of the carrier's removable-card slots, keyed SD1, ...  The pad each slot's card-detect lands on is the SoM's (metadata/e1m_modules/<family>/*-peripheral-map.tsv), never restated here."
+    },
     "e1m_routes": {
       "type": "object",
       "additionalProperties": false,
@@ -107,6 +123,19 @@
       "type": "object",
       "additionalProperties": true,
       "description": "Carrier audio path (codecs + I2S bus + MCLK + I2S path-mux + amp control GPIOs) the Linux DT / audio-graph-card is generated from.  Captures device-instance facts (I2C addresses, L/R channel, mux + shutdown/IRQ GPIO macros) beyond the E1M-pad routing in e1m_routes."
+    },
+    "rtc_backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["element"],
+      "properties": {
+        "element": {"enum": ["none", "supercap", "primary"], "description": "What the carrier fits on the SoM's RTC VBACKUP pin.  `supercap` is rechargeable (trickle charge allowed); `primary` is a non-rechargeable cell (NEVER trickle charge)."},
+        "trickle_ohms": {"enum": [3000, 5000, 9000, 15000], "description": "RV-3028 trickle-charge series resistor; present only for `supercap`, and the carrier's `&rv3028 { trickle-resistor-ohms }` must equal it."}
+      },
+      "allOf": [
+        {"if": {"properties": {"element": {"const": "supercap"}}}, "then": {"required": ["trickle_ohms"]}, "else": {"not": {"required": ["trickle_ohms"]}}}
+      ],
+      "description": "The carrier's RTC backup element, declared once.  Provisioning's functional_test derives the expected trickle charger and whether the rtc_backup fixture can be on from it."
     },
     "default_hw_rev": {
       "type": "string",
@@ -257,6 +286,16 @@
         "doc": {
           "type": "string",
           "description": "One-line Doxygen @brief documenting what the pad is wired to on this board."
+        },
+        "mux_select": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["polarity", "default_level"],
+          "description": "For a carrier path-mux select pad: which pad level selects the SoC path and the level the carrier pulls it to when nothing drives it. `TBD` until bench/netlist-confirmed (no inventing values).",
+          "properties": {
+            "polarity": { "type": "string", "enum": ["soc_when_high", "soc_when_low", "TBD"] },
+            "default_level": { "type": "string", "enum": ["high", "low", "floating", "TBD"] }
+          }
         },
         "active_low": {
           "type": "boolean",
@@ -428,6 +467,18 @@
         "macro",
         "address"
       ],
+      "allOf": [
+        {
+          "if": {
+            "required": ["calibration"],
+            "properties": { "calibration": { "anyOf": [ { "required": ["adc_range"] }, { "required": ["adc_range_macro"] } ] } }
+          },
+          "then": {
+            "required": ["part"],
+            "properties": { "part": { "const": "ina228" } }
+          }
+        }
+      ],
       "description": "One on-board I2C device instance: schematic strap-selected address (+ optional current-monitor calibration).",
       "properties": {
         "macro": {
@@ -471,11 +522,11 @@
             "max_macro",
             "max_current_a"
           ],
-          "description": "INA236-style current-monitor calibration for this instance.",
+          "description": "INA236 / INA228 current-monitor calibration for this instance (shunt in ohms, max current in amps).",
           "properties": {
             "shunt_macro": {
               "type": "string",
-              "pattern": "^X?EVK_INA236_SHUNT_[A-Z0-9_]+_OHMS$"
+              "pattern": "^X?EVK_INA2(36|28)_SHUNT_[A-Z0-9_]+_OHMS$"
             },
             "shunt_ohms": {
               "type": "string",
@@ -484,13 +535,31 @@
             },
             "max_macro": {
               "type": "string",
-              "pattern": "^X?EVK_INA236_MAX_[A-Z0-9_]+_A$"
+              "pattern": "^X?EVK_INA2(36|28)_MAX_[A-Z0-9_]+_A$"
             },
             "max_current_a": {
               "type": "string",
               "pattern": "^[0-9]+\\.[0-9]+$",
-              "description": "Rail max current in amps, as a decimal string (see `shunt_ohms`)."
+              "description": "Reporting-scale max current in amps, as a decimal string (see `shunt_ohms`): the rail limit, or the shunt measurement full scale when the rail limit is not known."
+            },
+            "max_current_note": {
+              "type": "string",
+              "description": "Optional sentence appended to the generated doc comment of the max-current macro, e.g. to say the value is the shunt full scale rather than a rail limit."
+            },
+            "adc_range_macro": {
+              "type": "string",
+              "pattern": "^X?EVK_INA228_ADCRANGE_[A-Z0-9_]+$",
+              "description": "INA228 only. Macro emitted for the shunt measurement scale: the CONFIG.ADCRANGE bit value, 0 for `163mv`, 1 for `40mv`."
+            },
+            "adc_range": {
+              "type": "string",
+              "enum": ["163mv", "40mv"],
+              "description": "INA228 only (an `adc_range` / `adc_range_macro` on any other `part` fails validation). Shunt measurement scale: `163mv` = +/-163.84 mV full scale (312.5 nV/LSB, the wide range), `40mv` = +/-40.96 mV (78.125 nV/LSB, four times the resolution). scripts/gen_board_header.py rejects a `max_current_a` above this range's full scale for the shunt (full scale = range voltage / `shunt_ohms`)."
             }
+          },
+          "dependentRequired": {
+            "adc_range_macro": ["adc_range"],
+            "adc_range": ["adc_range_macro"]
           }
         },
         "assembled": {

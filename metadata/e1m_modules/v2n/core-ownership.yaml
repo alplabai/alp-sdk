@@ -8,12 +8,18 @@
 # that matches zero rows, or more than one, is a hard generator error --
 # see scripts/gen_pinmux_capability.py.
 #
-# Only silicon-verified pads belong here, with one explicit exception:
+# Rows whose evidence cites a Linux devicetree claim (or an audit finding
+# marked "not re-verified here") are BENCH-PENDING: source-verified against
+# the A55 tree, not a fresh bench result.  Otherwise only silicon-verified
+# pads belong here, with one explicit exception:
 # a row whose evidence is marked BENCH-PENDING is source-verified (the
 # driving code exists and applies/builds against its stated context) but
 # not yet compiled and/or run on real hardware -- callers must not treat
 # it as silicon-confirmed until the marker is removed.  Every row below
 # has a citation.
+# Carrier-only claims (the E1M-X EVK RIIC0/RIIC1, I2S0/I2S1, SD1 pads) are
+# NOT recorded here: this file is SoM-wide and a carrier's use of an E1M pad
+# must not fix policy on every carrier.  They wait for a per-board mechanism.
 # Absence means "not attributed" -- never "shared" and never "a55 by
 # elimination" (an earlier attempt derived unlisted pads as a55-by-default
 # from the CM33 devicetree and got 5 pads wrong: pads a chip driver or
@@ -40,7 +46,7 @@ core_ownership:
   - peripheral: "RIIC8_SCL8"
     pad: "P07"
     core: "a55"
-    evidence: "Maintainer decision 2026-09-24 (rv3028 RTC bring-up, alp-sdk fix/v2n-rtc-rv3028-linux): CA55/Linux is the sole master of the WHOLE RIIC8/BRD_I2C bus -- every device on it (rv3028c7 RTC @0x52, da9292 @0x1E, gd32g553 GD32 I2C slave @0x70, tmp112, clk_5l35023b, act8760), not just the one this SoM fix touches; the CM33 must not master RIIC8 at all. RESOLVED (feat/v2m-deepx-rail-uboot, same day): meta-alp-sdk/recipes-kernel/linux/linux-renesas/0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-on.patch dropped its riic_8_ckm hunk + retitled (RSCI7 only now); metadata/e1m_modules/v2n/supervisor-links.yaml's brd_i2c link is status: disabled and the CM33 Zephyr board no longer claims i2c8 or the alp-i2c0 alias (scripts/gen_zephyr_board.py _v2n_dts()); src/zephyr/v2n_power_mgmt.c (DA9292 bring-up) and examples/v2n/v2n-rtc-multi-alarm (both drove m33_sm i2c on this bus) are both retired."
+    evidence: "Maintainer decision 2026-09-24 (rv3028 RTC bring-up, alp-sdk fix/v2n-rtc-rv3028-linux): CA55/Linux is the sole master of the WHOLE RIIC8/BRD_I2C bus -- every device on it (rv3028c7 RTC @0x52, da9292 @0x1E, gd32g553 GD32 I2C slave @0x70, tmp112, clk_5l35023b, act8760), not just the one this SoM fix touches; the CM33 must not master RIIC8 at all. RESOLVED (feat/v2m-deepx-rail-uboot, same day): the CM33-owned CPG clock patch (now meta-alp-sdk/recipes-kernel/linux/linux-renesas/0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks.patch, DT-driven) dropped its riic_8_ckm clock (RSCI7 only); metadata/e1m_modules/v2n/supervisor-links.yaml's brd_i2c link is status: disabled and the CM33 Zephyr board no longer claims i2c8 or the alp-i2c0 alias (scripts/gen_zephyr_board.py _v2n_dts()); src/zephyr/v2n_power_mgmt.c (DA9292 bring-up) and examples/v2n/v2n-rtc-multi-alarm (both drove m33_sm i2c on this bus) are both retired."
   - peripheral: "RIIC8_SDA8"
     pad: "P06"
     core: "a55"
@@ -69,3 +75,400 @@ core_ownership:
     pad: "P74"
     core: "m33"
     evidence: "BENCH-PENDING (source-verified): supervisor-links.yaml gd32_pads publishes P74 as a gpio7 pad of the alp,gd32-pads node in the generated CM33 board DT (GD32 NRST, driven open-drain-emulated); the CM33 SWD driver / V2N supervisor (src/zephyr/v2n_supervisor.c) is its only driver and no Linux DT claims it"
+  - peripheral: "BT_UART.RXD"
+    pad: "P40"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sci4 (:593-597) with pinmux P40-P43 (:804-807). Listed as bench-proven by audit IO-10 (not re-verified here)"
+  - peripheral: "BT_UART.TXD"
+    pad: "P41"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sci4 (:593-597) with pinmux P40-P43 (:804-807). Listed as bench-proven by audit IO-10 (not re-verified here)"
+  - peripheral: "BT_UART.CTS"
+    pad: "P43"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sci4 (:593-597) with pinmux P40-P43 (:804-807). Listed as bench-proven by audit IO-10 (not re-verified here)"
+  - peripheral: "BT_UART.RTS"
+    pad: "P42"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sci4 (:593-597) with pinmux P40-P43 (:804-807). Listed as bench-proven by audit IO-10 (not re-verified here)"
+  - peripheral: "WIFI_SDIO.CLK"
+    pad: "PB0"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi2 (:514, status okay) with pinmux PB0-PB5 (:783-793). Listed as bench-proven by audit IO-10 (not re-verified here)"
+  - peripheral: "WIFI_SDIO.CMD"
+    pad: "PB5"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi2 (:514, status okay) with pinmux PB0-PB5 (:783-793). Listed as bench-proven by audit IO-10 (not re-verified here)"
+  - peripheral: "WIFI_SDIO.D0"
+    pad: "PB1"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi2 (:514, status okay) with pinmux PB0-PB5 (:783-793). Listed as bench-proven by audit IO-10 (not re-verified here)"
+  - peripheral: "WIFI_SDIO.D1"
+    pad: "PB2"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi2 (:514, status okay) with pinmux PB0-PB5 (:783-793). Listed as bench-proven by audit IO-10 (not re-verified here)"
+  - peripheral: "WIFI_SDIO.D2"
+    pad: "PB3"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi2 (:514, status okay) with pinmux PB0-PB5 (:783-793). Listed as bench-proven by audit IO-10 (not re-verified here)"
+  - peripheral: "WIFI_SDIO.D3"
+    pad: "PB4"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi2 (:514, status okay) with pinmux PB0-PB5 (:783-793). Listed as bench-proven by audit IO-10 (not re-verified here)"
+  - peripheral: "BL_PWM"
+    pad: "PA5"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi:770 PA5 func 9 (GTIOC10B, backlight boost control). Listed as bench-proven by audit IO-10 (not re-verified here)"
+  - peripheral: "Audio_CLKB"
+    pad: "P10"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi sound pinmux P44/P45/P47 func 7 (:855-857) and AUDIO_CLKB/P10 (:861). Listed as bench-proven by audit IO-10 (not re-verified here)"
+  - peripheral: "Audio_CLKB_OE"
+    pad: "P67"
+    core: "a55"
+    evidence: "BENCH-PENDING: Linux devicetree claim: meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi audio-clkb-oe-hog RZV2N_GPIO(6, 7) (:917). Audit IO-10 (not re-verified here)"
+  - peripheral: "ET0_MDC"
+    pad: "K27"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_MDIO"
+    pad: "J29"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_PHY_INTR"
+    pad: "M27"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_RXC_RXCLK"
+    pad: "K25"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_RXCTL_RXDV"
+    pad: "L24"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_RXD0"
+    pad: "L27"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_RXD1"
+    pad: "N28"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_RXD2"
+    pad: "N29"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_RXD3"
+    pad: "M29"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_TXC_TXCLK"
+    pad: "L25"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_TXCTL_TXEN"
+    pad: "J26"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_TXD0"
+    pad: "M25"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_TXD1"
+    pad: "M26"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_TXD2"
+    pad: "K29"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET0_TXD3"
+    pad: "M24"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_MDC"
+    pad: "N25"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_MDIO"
+    pad: "P29"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_PHY_INTR"
+    pad: "T29"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_RXC_RXCLK"
+    pad: "P24"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_RXCTL_RXDV"
+    pad: "N26"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_RXD0"
+    pad: "T27"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_RXD1"
+    pad: "T25"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_RXD2"
+    pad: "U29"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_RXD3"
+    pad: "T26"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_TXC_TXCLK"
+    pad: "P25"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_TXCTL_TXEN"
+    pad: "N27"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_TXD0"
+    pad: "R28"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_TXD1"
+    pad: "R24"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_TXD2"
+    pad: "T28"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "ET1_TXD3"
+    pad: "R26"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (GBETH ET0/ET1): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi &eth0 :644, &eth1 :652); the Renesas FSP rzv tree has no GBETH module and Zephyr's r9a09g056.dtsi has no such node (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "SD0CLK"
+    pad: "AC27"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (SDHI0, on-module eMMC): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi0 :319); the Renesas FSP rzv tree has no SDHI module (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "SD0CMD"
+    pad: "AC23"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (SDHI0, on-module eMMC): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi0 :319); the Renesas FSP rzv tree has no SDHI module (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "SD0DAT0"
+    pad: "AB24"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (SDHI0, on-module eMMC): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi0 :319); the Renesas FSP rzv tree has no SDHI module (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "SD0DAT1"
+    pad: "AB23"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (SDHI0, on-module eMMC): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi0 :319); the Renesas FSP rzv tree has no SDHI module (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "SD0DAT2"
+    pad: "AB26"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (SDHI0, on-module eMMC): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi0 :319); the Renesas FSP rzv tree has no SDHI module (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "SD0DAT3"
+    pad: "AC28"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (SDHI0, on-module eMMC): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi0 :319); the Renesas FSP rzv tree has no SDHI module (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "SD0DAT4"
+    pad: "AC29"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (SDHI0, on-module eMMC): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi0 :319); the Renesas FSP rzv tree has no SDHI module (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "SD0DAT5"
+    pad: "AB27"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (SDHI0, on-module eMMC): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi0 :319); the Renesas FSP rzv tree has no SDHI module (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "SD0DAT6"
+    pad: "AD24"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (SDHI0, on-module eMMC): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi0 :319); the Renesas FSP rzv tree has no SDHI module (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "SD0DAT7"
+    pad: "AC25"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (SDHI0, on-module eMMC): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi0 :319); the Renesas FSP rzv tree has no SDHI module (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "SD0RSTN"
+    pad: "AB25"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (SDHI0, on-module eMMC): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &sdhi0 :319); the Renesas FSP rzv tree has no SDHI module (audit OWN-1, XSPI-2). No CM33 board file may claim these pads"
+  - peripheral: "XSPI0_CKN"
+    pad: "AH19"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_CKP"
+    pad: "AJ19"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_CS0N"
+    pad: "AD19"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_DS"
+    pad: "AF19"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_ECS0N"
+    pad: "AJ18"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_INT0N"
+    pad: "AJ17"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_IO0"
+    pad: "AH20"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_IO1"
+    pad: "AG18"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_IO2"
+    pad: "AD18"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_IO3"
+    pad: "AG19"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_IO4"
+    pad: "AE18"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_IO5"
+    pad: "AJ20"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_IO6"
+    pad: "AC19"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_IO7"
+    pad: "AC18"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_RESET0N"
+    pad: "AF18"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+  - peripheral: "XSPI0_RSTO0N"
+    pad: "AH18"
+    core: "a55"
+    evidence: "BENCH-PENDING: A55-only block (xSPI0, on-module NOR): enabled by the Linux devicetree (meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi &xspi :607); the Renesas FSP rzv tree has no xSPI module. The CM33 image lives inside the mtd1 'fip' partition on this flash, so a CM33 erase here is a data-loss hazard (audit XSPI-2)"
+
+# Decisions still open (renesas-audit plan section 7) -- deliberately NO row
+# until the maintainer picks ONE owner, so nothing here is attributed by
+# guess:
+#   - DRP1 / OpenCVA: whether to enable it at all is open (audit NPU-03).
+#
+# Resources whose owner is a PER-PRODUCT choice are NOT `core_ownership`
+# facts (a default must never be frozen as fact) -- they live in
+# `assignable:` below.  A project overrides the default with a top-level
+# `ownership: {<instance>: <core>}` in board.yaml; the override is rejected
+# unless the core is in `candidates`.  Rows are REFERENCES to the
+# (peripheral, pad) pairs of metadata/pinmux/v2n.yaml, never copied pins,
+# and a pair listed here must NOT also be a `core_ownership` row.
+# Core tokens use the same vocabulary as `core_ownership`: "a55" = Linux on
+# the Cortex-A55 cluster, "m33" = Zephyr on the Cortex-M33 system manager
+# (board.yaml core id m33_sm).  `candidates` lists only cores with a real
+# backend TODAY; widen it only when the backend lands.
+assignable:
+  # `linux_enable` (default false): whether the generated Linux fragment may
+  # turn the node on when the resolved owner is a55.  Flipping it needs
+  # `linux_evidence` (bench proof).  False keeps the vendor status, so the
+  # shipped image changes no behaviour.
+  e1m_uart0:
+    soc_instance: "UART0"
+    # No Linux enable: an alias-less rz-rsci port registers as ttySC0 and
+    # steals the SCIF console + getty (bench 2026-09-26, see
+    # e1m-v2n-som.dtsi serial4), and P51 (RXD0) floats without a Pmod.
+    linux_enable: false
+    default: "a55"
+    # "m33" is added once the P51 (UART0_RXD0) RX pull-up is bench-proven:
+    # an unpulled RXD floats into the sci0 receive-error ISR (NVIC 114) and
+    # the CM33 takes a Zephyr fatal (see the sci0 note in the generated
+    # alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts).
+    candidates: ["a55"]
+    rows:
+      - { peripheral: "UART0_RXD0", pad: "P51" }
+      - { peripheral: "UART0_TXD0", pad: "P50" }
+    note: "Only one core's tree may carry the sci0 pin group on P50/P51 (audit IO-M3 / IO-04 / CM33-01)."
+  e1m_uart1:
+    soc_instance: "UART1"
+    default: "a55"
+    # The CM33 board tree has no sci1 node or pinctrl group for P52/P53, so
+    # there is no CM33 backend for this instance today.
+    candidates: ["a55"]
+    rows:
+      - { peripheral: "UART1_RXD1", pad: "P53" }
+      - { peripheral: "UART1_TXD1", pad: "P52" }
+    note: "Audit IO-M3 / CM33-01."
+  e1m_spi0:
+    soc_instance: "RSPI0"
+    # P90-P92 are not 3.3 V tolerant (see note): no core may enable the node
+    # until the carrier is confirmed 1.8 V.  Drop this block (with evidence)
+    # to release it; the Linux and Zephyr generators both honour it.
+    hw_blocked:
+      reason: "P90-P92 are not 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1) and the carrier parts on E1M SPI0 are not yet confirmed 1.8 V (audit IO-05 / IO-M2 / CM33-13)"
+    default: "a55"
+    # "m33" is added once the `m33:` devicetree block exists (the driver is
+    # zephyr/drivers/spi/spi_renesas_rz_spi_b.c + hal_renesas rzv r_spi_b, but
+    # the RSPI0 PFC codes, SPI_B CM33 interrupt routing and the Zephyr node
+    # are not in metadata) and hw_blocked is released.
+    candidates: ["a55"]
+    rows:
+      - { peripheral: "RSPI0_MISOA", pad: "P91" }
+      - { peripheral: "RSPI0_MOSIA", pad: "P90" }
+      - { peripheral: "RSPI0_RSPCKA", pad: "P92" }
+      - { peripheral: "RSPI0_SSLA0", pad: "P93" }
+      - { peripheral: "RSPI0_SSLA1", pad: "P94" }
+    note: "P90-P92 are NOT 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1): never enable an rspi0 node on either core until the carrier parts on E1M SPI0 are confirmed not to drive 3.3 V (audit IO-05 / IO-M2 / CM33-13)."
+  e1m_can0:
+    soc_instance: "CANFD3"
+    default: "a55"
+    # a55 only: hal_renesas rzv has no r_canfd module, so the CM33 cannot
+    # drive CAN-FD.  E1M CAN0 = CANFD3 (B21/B22).
+    candidates: ["a55"]
+    rows:
+      - { peripheral: "CANFD3_CRX3", pad: "P87" }
+      - { peripheral: "CANFD3_CTX3", pad: "P86" }
+    note: "Audit CM33-07 / CAN-1; the Linux tree does not claim these pads yet."
+  e1m_can1:
+    soc_instance: "CANFD2"
+    default: "a55"
+    candidates: ["a55"]
+    rows:
+      - { peripheral: "CANFD2_CRX2", pad: "P85" }
+      - { peripheral: "CANFD2_CTX2", pad: "P84" }
+    note: "E1M CAN1 = CANFD2 (B24/B25). Same backend limit as e1m_can0."
+
+# Resources with no row in v2n/renesas-peripheral-map.tsv (so they cannot be
+# a `core_ownership` entry above, which must match an emitted row) are
+# recorded under `a55_only_resources` instead.  Nothing consumes this list
+# yet: scripts/check_amp_pad_claims.py only compares port-pad claims (Linux DT
+# vs CM33-resolved pads, enabled CM33 board nodes vs A55-resolved pads) and
+# has no IRQ or address awareness, so a CM33
+# claim of the DRP-AI IRQSELs below is NOT caught by any gate today.
+a55_only_resources:
+  - resource: "DRP-AI3 AI-MAC + DRP0"
+    core: "a55"
+    irq: "GIC SPI 914-917 (FSP IRQSEL 571-574: DRPAI_NMLINT, DRPAI_ERRINT, DRPAI_MAC_NMLINT, DRPAI_MAC_ERRINT)"
+    evidence: "Audit NPU-15: manual memory map p.166 lists AI-MAC at 0x56800000 and DRP0 at 0x57000000 in the CM33 non-secure view, but Renesas ships DRP-AI only as a Linux driver (manual Table 2.3-1 p.228) and the FSP rzv tree has no DRP-AI module (hal_renesas bsp_irq_id.h:1107-1110 only defines the IRQ ids). No CM33 board file references DRP-AI. A CM33 claim of these IRQs or addresses is a conflict"
+  - resource: "P80 (PCIe.MUX_PD), PCIe0 lane mux"
+    core: "a55"
+    evidence: "U-Boot (A55, before Linux and the CM33 image) drives P80 low: meta-alp-sdk/recipes-bsp/u-boot/u-boot/0001-rzv2n-dev-EEPROM-gated-DEEPX-DX-M1-PCIe-bring-up.patch (alp_deepx_pcie_bringup, alp_gpio_output(8, 0, 0)); Linux re-hogs it in e1m-v2m-deepx.dtsi:47-52. V2M (v2n-m1 family) only; audit PCIE-4. The pad is in v2n-m1/m1-additions.tsv, not in the v2n pinmux table"
+  - resource: "P95 (PCIe.MUX_SEL)"
+    core: "a55"
+    evidence: "V2M only. U-Boot drives P95 low (same patch, alp_gpio_output(9, 5, 0)) and Linux re-hogs it (e1m-v2m-deepx.dtsi:61-66, deepx-pcie-mux-sel-hog). HAZARD kept visible (audit CM33-04 / IO-10): P95 shares the P9/PM9/PMC9/PFC9 byte registers and PWPR with the CM33-owned P96/P97 (GD32 SPI), and the Linux hog's non-atomic read-modify-write lands at ~1.9 s, inside the CM33 pin-setup window; the DT itself calls it a KNOWN RACE. Proposed fix (audit PCIE-4): drop the Linux hog, U-Boot already sets it"
+  - resource: "PA6 (M1_RESET)"
+    core: "a55"
+    evidence: "V2M only. Released by U-Boot board_late_init() only after the DA9292 CH2 rail is power-good (0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch); e1m-v2m-deepx.dtsi:69-73 documents that Linux must not hog it. Audit PCIE-4"
+  - resource: "USB (hsusb / usb3 phy)"
+    core: "a55"
+    evidence: "Linux devicetree enables &hsusb, &usb2_phy0, &usb3_phy0 (e1m-x-evk.dtsi:731-781); no FSP USB module in the Renesas rzv tree (audit XSPI-2, OWN-1)"
+  - resource: "PCIe0"
+    core: "a55"
+    evidence: "Linux node &pcie0 (disabled on V2N, e1m-v2n101-x-evk.dts:32; enabled for the DX-M1 on V2M, e1m-v2m-deepx.dtsi:36); no FSP PCIe module in the Renesas rzv tree (audit XSPI-2, OWN-1)"
+  - resource: "CRU / CSI-2 / ISP (cru0, csi20)"
+    core: "a55"
+    evidence: "Camera capture is the Linux rzg2l-cru / csi2 driver; the FSP rzv tree has no CRU, CSI or ISP module (audit MM-06). The CM33 camera/ISP backend (src/backends/camera/v2n_n44_isp.c) must not drive them"

@@ -469,12 +469,27 @@ extern "C" const OrtApiBase *OrtGetApiBase(void)
 	return &g_fake_api_base;
 }
 
+/* The CPU backend has no selectable accelerator unit: any non-zero
+ * accel_unit_mask is NOSUPPORT, before the model is touched. */
+void test_open_rejects_nonzero_accel_unit_mask()
+{
+	ort_test::reset();
+	struct alp_inference   h   = {};
+	alp_inference_config_t cfg = base_cfg();
+	for (uint32_t mask : { 0x1u, 0x2u, 0x80000000u }) {
+		cfg.accel_unit_mask = mask;
+		ALP_ASSERT_EQ_INT(alp_inference_ort_open(&h, &cfg), ALP_ERR_NOSUPPORT);
+		ALP_ASSERT_NULL(h.be_state);
+	}
+}
+
 int main(void)
 {
 	test_open_refuses_representable_rank_over_4();
 	test_open_rejects_hostile_rank_as_inval();
 	test_open_accepts_rank_at_4();
 	test_open_releases_every_ortvalue_on_throw();
+	test_open_rejects_nonzero_accel_unit_mask();
 
 	ALP_TEST_SUMMARY();
 }

@@ -34,17 +34,14 @@
  *     port landed; that undersold the gap by five separate missing
  *     facts -- see the DATA-GATED block below.
  *   - configure_isp() validates the input, latches the config into
- *     backend state, and returns ALP_OK -- the actual register
- *     poke (toggling the AE / AWB / AF enable bits in the N44 ISP
- *     control registers) is left as a TBD pending the Renesas RZ/V2N
- *     ISP register map (datasheet section 18 "Image Signal Processor"
- *     in the V2N Hardware User's Manual r01uh1003ej -- once
- *     available the latched config flows into the matching MMIO
- *     writes).
+ *     backend state, and returns ALP_ERR_NOSUPPORT: no ISP register
+ *     is written.  The ISP is section 9.8 of the RZ/V2N Hardware
+ *     User's Manual (R01UH1071EJ0120; details in R01UH1072EJ0120),
+ *     the CM33 FSP has no CRU/CSI/ISP module, and CRU/CSI-2 are
+ *     A55-owned (Linux cru0/csi20).
  *   - The Renesas vendor-ext surface (alp/ext/renesas/camera.h:
  *     3A window rectangles, per-channel gain tables, LSC LUT)
- *     routes through this backend's latched state today and grows
- *     real MMIO writes when the N44 port lands.
+ *     reads this backend's latched state; no MMIO is written.
  *
  * DATA-GATED -- what an alp-cameraN alias on V2N Zephyr still needs, and
  * why none of it can be written from this tree.  Tracked by alp-sdk #1149;
@@ -61,9 +58,10 @@
  *      carries no CRU entry; and metadata/socs/renesas/rzv2n/n44.json's
  *      peripheral_instances block covers i2c / uart / gpt / gtm only, so
  *      the board generator has no base to emit either.  Source for the
- *      real value: the RZ/V2N Hardware User's Manual r01uh1003ej, CRU +
- *      MIPI CSI-2 register chapters (the Renesas BSP reference dts also
- *      carries it -- neither ships in this repo).
+ *      real value: the RZ/V2N Hardware User's Manual R01UH1071EJ0120 (CRU +
+ *      MIPI CSI-2 register chapters; details in R01UH1072EJ0120).  The
+ *      Renesas BSP reference dts also carries it; neither ships in this
+ *      repo.
  *   3. Its CM33 interrupt, which is NOT a datasheet constant here.
  *      hal_renesas's rzv2n bsp_irq_id.h lists CRU0_CSI2_LINK_INT_IRQSELn
  *      = 494 and CRU1_CSI2_LINK_INT_IRQSELn = 500 in IRQSELn_Type -- the
@@ -91,8 +89,7 @@
  * Guessing any of 2-5 produces a devicetree that builds clean and binds to
  * nothing, which then reads as reviewed.  Leave it unwritten.
  *
- * The configure_isp register poke above is blocked on the same manual's
- * ISP chapter, and rides the same issue.
+ * configure_isp returns ALP_ERR_NOSUPPORT; see its note above.
  */
 
 #include <errno.h>
@@ -408,9 +405,8 @@ static alp_status_t isp_release(alp_camera_backend_state_t *state, alp_camera_fr
 }
 
 /* ============================================================== */
-/* ISP configure path -- latches the requested config into backend */
-/* state.  Real MMIO writes deferred to when the V2N N44 Zephyr    */
-/* SoC port grows the ISP control-register surface.                 */
+/* ISP configure path -- validates and reports ALP_ERR_NOSUPPORT    */
+/* (no register is written).                                        */
 /* ============================================================== */
 
 static alp_status_t isp_configure_isp(alp_camera_backend_state_t    *state,
@@ -420,21 +416,13 @@ static alp_status_t isp_configure_isp(alp_camera_backend_state_t    *state,
 	if (st == NULL) return ALP_ERR_NOT_READY;
 	if (isp == NULL) return ALP_ERR_INVAL;
 
-	/* Latch verbatim; once the N44 port lands an ISP driver, the
-     * latched values get translated into the matching control
-     * register writes (datasheet r01uh1003ej §18 "Image Signal
-     * Processor" -- TBD register addresses) at this point in the
-     * call.  The vendor-ext surface
-     * (include/alp/ext/renesas/camera.h) reads the same latched
-     * state for finer-grained knobs (3A windows / gain tables /
-     * LSC LUT). */
-	st->cfg            = *isp;
-	st->isp_configured = true;
-	/* TBD: poke the AE / AWB / AF enable bits into the ISP control
-     * register block when the V2N N44 Zephyr SoC port grows the
-     * matching driver.  Keep the call ALP_OK today so apps that
-     * configure the ISP eagerly during init don't fail. */
-	return ALP_OK;
+	/* Report ALP_ERR_NOSUPPORT: nothing is written to the ISP.
+     * The ISP is section 9.8 of the RZ/V2N Hardware User's Manual
+     * (R01UH1071EJ0120; details in the Additional Document
+     * R01UH1072EJ0120), the Renesas CM33 FSP has no CRU/CSI/ISP module,
+     * and CRU/CSI-2 belong to the A55 (Linux cru0/csi20).  Returning
+     * ALP_OK here would claim AE/AWB/AF took effect when they did not. */
+	return ALP_ERR_NOSUPPORT;
 }
 
 static void isp_close(alp_camera_backend_state_t *state)

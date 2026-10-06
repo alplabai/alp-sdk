@@ -586,8 +586,16 @@ def test_classify_wrong_strap_needs_pcie_failures_and_no_xmodem():
 ])
 def test_gpio_config_refuses_bad_lines(raw, match):
     with pytest.raises(ValueError, match=match):
-        dxm1.gpio_config(raw)
+        dxm1.gpio_config(raw, V2M_PRESET)
 
 
-def test_gpio_config_defaults_are_p75_and_pa6():
-    assert dxm1.gpio_config({}) == ("10410000.pinctrl", 61, 86)
+V2M_PRESET = {"on_module": {"dxm1": {"uart_mux_pin": "P75", "reset_pin": "PA6", "gpio_chip": "10410000.pinctrl"}}}
+
+
+def test_gpio_config_resolves_the_presets_pins_p75_and_pa6():
+    assert dxm1.gpio_config({}, V2M_PRESET) == ("10410000.pinctrl", 61, 86)
+
+
+def test_gpio_config_needs_a_dxm1_preset():
+    with pytest.raises(ValueError, match="no on_module.dxm1"):
+        dxm1.gpio_config({}, {"on_module": {}})
