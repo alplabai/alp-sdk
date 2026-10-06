@@ -981,3 +981,30 @@ def test_runner_decodes_utf8_with_replacement(tmp_path):
     f.write_bytes(b"x")
     t.run("true", stdin_path=f)
     assert seen["encoding"] == "utf-8" and seen["errors"] == "replace"
+
+
+def _mux_target(root_dev: str):
+    return target([
+        ("mountpoint -d /", "179:2\n"),
+        ("readlink -f /sys/dev/block", f"/sys/x/block/{root_dev}/{root_dev}p2\n"),
+        ("for d in /sys/class/gpio/gpiochip", "/sys/class/gpio/gpiochip394 gd32-bridge-gpio\n"),
+        ("cat /sys/class/gpio/gpiochip394/base", "394\n"),
+        ("test -e /sys/class/gpio/gpio406/value", (0, "")),
+        ("echo (high|low) > ", (0, "")),
+    ])
+
+
+def test_sdio_mux_set_drives_only_never_reads():
+    t, fake = _mux_target("mmcblk0")
+    lt.sdio_mux_set(t, False)
+    assert "echo high > /sys/class/gpio/gpio406/direction" in fake.commands
+    lt.sdio_mux_set(t, True)
+    assert "echo low > /sys/class/gpio/gpio406/direction" in fake.commands
+    assert not any(re.search(r"cat \S*/value", c) for c in fake.commands)
+
+
+def test_sdio_mux_refuses_to_pull_an_sd_root():
+    t, fake = _mux_target("mmcblk1")
+    with pytest.raises(BenchError, match="root is on it"):
+        lt.sdio_mux_set(t, False)
+    assert not any("direction" in c for c in fake.commands)

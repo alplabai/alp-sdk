@@ -1,0 +1,3 @@
+### Added — provisioning can drive the EVK SDIO mux instead of a manual microSD swap (#2697)
+
+- **`linux_target.sdio_mux_set()`.** Drives IO29 `SDIO_MUX_EN` (GD32 PD11, active-low) through the `gd32-bridge-gpio` gpiochip, line 12 (gpio-406 on the bench unit). It is write-only: a bridge GPIO read reconfigures the pad and moved the mux on the bench (#2701), so the value is never read, and `SDIO_MUX_SEL` is never touched. Disconnecting is refused while Linux runs from the SD. A mux-based SD-out survives a warm reboot but not a power cycle; surviving `cold_boot_test` needs the GD32 `BOOT_CONFIG` flag (`GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH`, #2712), which no provisioning step sets yet, so `dsw1_xspi_remove_sd` still asks the operator to pull the card. Not yet benched.

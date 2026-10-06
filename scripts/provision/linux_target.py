@@ -912,6 +912,26 @@ def dxm1_drive_high(t: LinuxTarget, label: str, line: int) -> str:
     return d
 
 
+# EVK SDIO path mux (#2697). Bench, E1M-V2M103 2026W38-0008: gpiochip `gd32-bridge-gpio`
+# base 394, IO29 `SDIO_MUX_EN` (GD32 PD11) = gpio-406 = line 12; active-LOW (low = microSD
+# connected, high = disconnected). IO27 `SDIO_MUX_SEL` is never touched.
+GD32_GPIO_LABEL = "gd32-bridge-gpio"
+SDIO_MUX_EN_LINE = 12
+
+
+def sdio_mux_set(t: LinuxTarget, connected: bool) -> str:
+    """Drive IO29 `SDIO_MUX_EN` (write-only: a bridge GPIO READ reconfigures the pad as an
+    input with a pull-up and moved the mux on the bench, #2701, so this never reads the
+    value). Disconnecting is refused while `/` is on the SD (mmcblk1), which would pull the
+    root filesystem out. The pad stays push-pull until the GD32 resets, and the mux
+    survives a warm reboot but not a power cycle."""
+    if not connected and "mmcblk1" in root_device(t):
+        raise BenchError("refusing to disconnect the SD: Linux root is on it")
+    d = _sysfs_gpio_dir(t, GD32_GPIO_LABEL, SDIO_MUX_EN_LINE)
+    t.run(f"echo {'low' if connected else 'high'} > {d}/direction")
+    return d
+
+
 def dxm1_pcie_device(t: LinuxTarget) -> str | None:
     """The DX-M1's PCI device id ("0x0000" firmware running, "0x0001" ROM PCIe boot),
     None when no endpoint is enumerated at 0000:01:00.0. Read-only."""
