@@ -87,8 +87,12 @@ SRC_URI:append = " \
     file://0022-gpio-gd32-bridge-i2c3-proxy-adapter-and-polled-irqchip.patch \
     file://0023-pwm-gd32-bridge-provider-over-cmd-pwm-set-get.patch \
     file://uio.cfg \
+    file://panic.cfg \
 "
 
+# panic.cfg (#2734): CONFIG_PANIC_TIMEOUT=10 -- a panic reboots the board after
+# 10 s instead of hanging forever (panic_timeout defaults to 0).
+#
 # 0021..0022 (GD32 bridge, bridge protocol 0.17; both patch gpio-gd32-bridge.c
 # that 0005 adds, so they apply strictly after it and in this order):
 #   0021  CAM_EN_LDO0..3 as gpio lines 24..27 (gated on minor >= 17) and

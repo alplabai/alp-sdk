@@ -399,7 +399,7 @@
 		 * (alplabai/alp-sdk#2508). */
 		gpio-line-names =
 			"IO8",  "IO9",  "IO10", "IO11", "IO12", "IO13",
-			"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
+			"IO14", "IO16", "" /* 8: unrouted, gd32-bridge-firmware#298 */, "IO25", "IO27", "IO28",
 			"IO29", "IO30", "IO31", "IO32", "IO34", "IO35",
 			"bt-reg-on", "wl-reg-on",
 			"can-stby" /* 20: GD32 PB13, TCAN1044 STB (both transceivers) */,

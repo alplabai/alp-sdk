@@ -104,8 +104,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 1248 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 1258 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 1258 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 1268 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -145,7 +145,7 @@ new file mode 100644
 index 000000000..0d3b6690f
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,1248 @@
+@@ -0,0 +1,1258 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -296,6 +296,10 @@ index 000000000..0d3b6690f
 + * does not touch it: the bridge releases SE_RST on its own reset, which is
 + * exactly the safe state, and a stale "asserted" must never be replayed.
 + */
++/* Line 8 is not routed on the SoM (gd32-bridge-firmware#298): .request()
++ * refuses it so a write can never land in the sticky output_mask and then be
++ * replayed. */
++#define GD32_UNROUTED_LINE	8
 +/* Line 20 is reserved for can-stby (bridge bit 20, protocol 0.13; the
 + * CAN-FD bring-up in alp-sdk#2341). Until that lands, .request() refuses
 + * it so nothing drives the transceivers' standby pad by accident. */
@@ -984,7 +988,7 @@ index 000000000..0d3b6690f
 +	if (offset >= GD32_LINE_IO15)
 +		return gd32_bridge_resolve_io_ext(gd32);
 +
-+	if (offset == GD32_RESERVED_LINE)
++	if (offset == GD32_RESERVED_LINE || offset == GD32_UNROUTED_LINE)
 +		return -ENODEV;
 +
 +	/* Line 21 (se-rst) is not gated on the wifi/bt protocol minor. */
@@ -1359,6 +1363,12 @@ index 000000000..0d3b6690f
 +	.driver = {
 +		.name = "gpio-gd32-bridge",
 +		.of_match_table = gd32_bridge_gpio_of_match,
++		/* Consumers (wlan-pwrseq, hci_bcm, the panel) hold lines of this
++		 * chip; a sysfs unbind force-unbinds them through fw_devlink and
++		 * frees mmc_pwrseq while &sdhi2 still points at it, so the next
++		 * reboot dereferences it (use-after-free panic).  Never unbindable.
++		 */
++		.suppress_bind_attrs = true,
 +	},
 +	.probe_new = gd32_bridge_gpio_probe,
 +};
