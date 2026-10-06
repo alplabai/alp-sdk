@@ -4669,8 +4669,8 @@
           "value": "0u"
         },
         "GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR": {
-          "hash": "6146719067cb04dc",
-          "value": "15u"
+          "hash": "7e1c816b43ed120f",
+          "value": "16u"
         },
         "GD32G553_LINK_FEAT_ADC_STREAM2": {
           "hash": "3d4c2f35654db723",

@@ -314,7 +314,7 @@ index 000000000..0d3b6690f
 +#define GD32_NGPIO_TOTAL	24
 +
 +/* Bridge protocol minor at which bits 21/22 (IO15/IO26) first exist. */
-+#define GD32_PROTO_MINOR_IO_EXT		15
++#define GD32_PROTO_MINOR_IO_EXT		16
 +#define GD32_IO_EXT_BIT_MASK		(BIT(21) | BIT(22))
 +
 +/* Bridge protocol minor at which lines 18/19 (bt-reg-on/wl-reg-on) first
@@ -425,7 +425,7 @@ index 000000000..0d3b6690f
 +	 * -- reusing one mutex for both would self-deadlock.
 +	 */
 +	int wifi_bt_reg_on_status;
-+	/* Same resolution rule for lines 22/23 (IO15/IO26, minor >= 15);
++	/* Same resolution rule for lines 22/23 (IO15/IO26, minor >= 16);
 +	 * resolved by the same GET_VERSION as wifi_bt_reg_on_status, under
 +	 * status_lock. */
 +	int io_ext_status;
@@ -980,7 +980,7 @@ index 000000000..0d3b6690f
 +{
 +	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
 +
-+	/* IO15/IO26: gated on protocol minor >= 15, like lines 18/19 on 11. */
++	/* IO15/IO26: gated on protocol minor >= 16, like lines 18/19 on 11. */
 +	if (offset >= GD32_LINE_IO15)
 +		return gd32_bridge_resolve_io_ext(gd32);
 +
