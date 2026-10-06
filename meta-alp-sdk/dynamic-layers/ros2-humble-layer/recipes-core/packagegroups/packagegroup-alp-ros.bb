@@ -8,6 +8,10 @@
 # alp-perception is the ALP ROS node; the rest is its rclcpp + message /
 # transport closure.
 #
+# Lives in dynamic-layers/ros2-humble-layer/: parsed only when upstream
+# meta-ros2-humble is in bblayers.conf (and gated by ALP_ENABLE_ROS2 in
+# alp-image-common.inc).
+#
 # Copyright (C) 2026 Alp Lab AB
 
 SUMMARY = "ROS 2 Humble perception runtime (rclcpp + alp-perception)"
@@ -22,3 +26,9 @@ RDEPENDS:${PN} = " \
     cv-bridge \
     alp-perception \
 "
+# alp-ros2-temperature is deliberately NOT here yet: its recipe fetches
+# branch=main at ${AUTOREV}, and the example it builds
+# (examples/v2n/v2n-ros2-som-temperature) is not on main until dev is
+# promoted, so do_configure would fail in every ROS-enabled image. Add it
+# here once the example is on main (or the recipe pins a SRCREV). Until then
+# build it explicitly: `bitbake alp-ros2-temperature`.
