@@ -210,12 +210,15 @@ def test_default_kernel_build_includes_the_ownership_fragment():
     assert "e1m-v2n-ownership.dtsi" in bb.split("do_configure:prepend", 1)[1].split("install", 1)[1].split("/\"", 1)[0]
     # no manifest -> warn and keep the committed fragment, never bbfatal
     no_manifest = bb.split("if [ -f \"${ALP_OWN_M}\" ]", 1)[1].split("    fi", 1)[0].split("    else", 1)[1]
-    assert "bbwarn" in no_manifest and "bbfatal" not in no_manifest
+    assert "bbwarn" in no_manifest
+    # ...but a stale committed fragment is still fatal on that path
+    assert "--check" in no_manifest and "--vendor-dtsi" in no_manifest and "bbfatal" in no_manifest
     assert "ALP_OWNERSHIP_SOM_DEFAULT" not in bb
-    # every V2N/V2M board dts reaches the fragment, and it holds RSCI7
+    # every V2N/V2M board dts includes the fragment exactly once (last), the
+    # SoM dtsi not at all, and the fragment holds RSCI7
     som = (KERNEL / "linux-renesas" / "e1m-v2n-som.dtsi").read_text(encoding="utf-8")
-    assert '#include "e1m-v2n-ownership.dtsi"' in som
+    assert "e1m-v2n-ownership.dtsi" not in som
     for dts in ("e1m-v2n101-x-evk.dts", "e1m-v2m101-x-evk.dts"):
-        assert '#include "e1m-v2n-ownership.dtsi"' in (KERNEL / "linux-renesas" / dts).read_text(encoding="utf-8")
+        assert (KERNEL / "linux-renesas" / dts).read_text(encoding="utf-8").count('#include "e1m-v2n-ownership.dtsi"') == 1
     frag = (REPO / g.OUT).read_text(encoding="utf-8")
     assert all(f'"{c}"' in frag for c in SOC["linux_dt"]["SCI7"]["cpg_clocks"])

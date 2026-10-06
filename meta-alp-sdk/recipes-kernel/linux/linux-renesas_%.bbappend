@@ -297,6 +297,13 @@ do_configure:prepend() {
         bbnote "per-project ownership fragment rendered from ${ALP_OWN_M}"
     else
         bbwarn "no system-manifest at '${ALP_OWN_M}': using the committed SoM-default ownership fragment (pass ALP_SYSTEM_MANIFEST_PATH for a project build)"
+        # The committed fragment must still match the metadata and only name
+        # nodes THIS kernel's SoC dtsi defines; --check never writes.
+        if [ -f "${ALP_OWN_GEN}" ] && python3 -c 'import yaml' 2>/dev/null; then
+            python3 "${ALP_OWN_GEN}" --check                 --vendor-dtsi "${S}/arch/arm64/boot/dts/renesas/r9a09g056.dtsi"                 || bbfatal "e1m-v2n-ownership.dtsi is stale or names a node r9a09g056.dtsi lacks"
+        else
+            bbwarn "gen_linux_ownership_dt.py or PyYAML unavailable: ownership fragment not verified against r9a09g056.dtsi"
+        fi
     fi
 
     # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
