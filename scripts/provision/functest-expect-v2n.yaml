@@ -87,7 +87,7 @@ usb_root_hubs_min: 4                         # measured (xHCI x2, OHCI, EHCI)
 # The beacon firmware/alp-stock-shim writes (A55 view of the rsctbl window, top 16 bytes): magic,
 # version, then a counter that grows ~1 per second. A re-read 2 s later must see it advance 1..4.
 cm33_beacon:                                 # the firmware's own layout (README); not yet seen on a bench
-  # address: derived from the SoC description's openamp_carveout (a55_base + rsctbl_size - 16 = 0x4F700FF0)
+  # address: derived from the SoC description's openamp_carveout (a55_base + regions.rsctbl.size - 16 = 0x4F700FF0)
   magic: 0xA10D0683
   version: 0x100                             # image kind: < 0x100 = RPC firmware beacon version, 0x100 = idle shim (no RPC)
   heartbeat_advance: [1, 4]

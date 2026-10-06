@@ -181,14 +181,28 @@
     "openamp_carveout": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["a55_base", "size", "rsctbl_size"],
+      "required": ["a55_base", "cm33_ns_base", "size", "regions"],
       "properties": {
-        "a55_base": {"type": "integer", "description": "A55-view base of the OpenAMP reservation."},
-        "size": {"type": "integer", "description": "Bytes in the reservation."},
-        "rsctbl_size": {"type": "integer", "description": "Bytes of the resource-table window at the start of it."},
+        "a55_base": {"type": "integer", "minimum": 0, "description": "A55-view base of the OpenAMP reservation."},
+        "cm33_ns_base": {"type": "integer", "minimum": 0, "description": "Base of the same reservation in the CM33 non-secure view (the board .dts openamp_shm address)."},
+        "size": {"type": "integer", "minimum": 1, "description": "Bytes in the reservation."},
+        "regions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rsctbl", "mhu-shm", "vring-ctl0", "vring-ctl1", "vring-shm0", "vring-shm1"],
+          "properties": {
+        "rsctbl": {"allOf": [{"$ref": "#/$defs/openamp_region"}, {"properties": {"size": {"minimum": 16}}}], "description": "Resource-table page."},
+        "mhu-shm": {"$ref": "#/$defs/openamp_region", "description": "MHU shared-memory page."},
+        "vring-ctl0": {"$ref": "#/$defs/openamp_region", "description": "Vring control area 0."},
+        "vring-ctl1": {"$ref": "#/$defs/openamp_region", "description": "Vring control area 1."},
+        "vring-shm0": {"$ref": "#/$defs/openamp_region", "description": "Vring buffer pool 0."},
+        "vring-shm1": {"$ref": "#/$defs/openamp_region", "description": "Vring buffer pool 1 (the rpmsg buffer pool)."}
+          },
+          "description": "Sub-regions of the reservation as offset + size from its base. rsctbl is the resource-table page; the AMP liveness beacon (include/alp/protocol/amp_beacon.h) is its top 16 bytes."
+        },
         "note": {"type": "string"}
       },
-      "description": "OPTIONAL. The OpenAMP/MHU-B reservation shared by the A55 (Linux UIO) and the CM33 board .dts; provisioning derives the CM33 liveness beacon address from it."
+      "description": "OPTIONAL. The OpenAMP/MHU-B reservation shared by the application core (Linux reserved-memory + UIO nodes, RPC backend) and the CM33 board .dts. gen_zephyr_board.py and scripts/gen_amp_window.py (the backend header) generate from it; scripts/check_amp_window.py pins the Linux DT nodes to it."
     },
     "inference_arena_sram_kib": {
       "type": "integer",
@@ -366,6 +380,15 @@
   },
 
   "$defs": {
+    "openamp_region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offset", "size"],
+      "properties": {
+        "offset": {"type": "integer", "minimum": 0, "description": "Bytes from the start of the OpenAMP reservation."},
+        "size": {"type": "integer", "minimum": 1, "description": "Bytes in the sub-region."}
+      }
+    },
     "access_windows": {
       "type": "object",
       "description": "OPTIONAL per-core addressable sub-window of the region, keyed by core id.  `accessible_from:` is a yes/no per core and cannot express \"this core reaches only PART of the region\" -- the RZ/V2N Cortex-M33 does exactly that (FSP bsp_slave_address.h: CM33-secure 0x80000000 / CM33-non-secure 0x90000000 -> A55 0x40000000, 256 MiB) while ddr_main spans 4 GiB.  Declare the reachable slice here and scripts/alp_orchestrate/carveout.py confines that core's IPC carve-outs to it instead of allocating at the region top, where the address does not exist for that core.  Omit for regions every accessible_from core reaches in full.",

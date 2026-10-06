@@ -9,6 +9,7 @@
 #   - Image built with ALP_V2N_REMOTEPROC = "1" (Renesas RZ remoteproc +
 #     cm33_rproc node), DSW1 mode 2 (xSPI BL2) cold boot, so TF-A started the
 #     CM33 (examples/multicore/rpmsg-v2n/m33_sm, beacon version 2).
+#   - Beacon layout: include/alp/protocol/amp_beacon.h.
 #   - /lib/firmware/m33_sm.elf is the same build's zephyr.elf.
 #   - For the stop/start half: TF-A grants Linux non-secure access to CM33
 #     SRAM (Renesas TF-A patch 0001-Change-MCPU-sram-to-unpriv.patch
