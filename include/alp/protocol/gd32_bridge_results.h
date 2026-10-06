@@ -133,8 +133,8 @@ _Static_assert(sizeof(alp_gd32_results_t) == ALP_GD32_RESULTS_WORDS * 4u,
  * used to look like a silent freeze: the heartbeat just stopped.  The apps
  * override Zephyr's `k_sys_fatal_error_handler`, store this block, then spin
  * with interrupts off.  A reader that finds @c magic set knows the CM33 died
- * rather than hung.  @c magic is cleared by @ref alp_gd32_results_init and
- * written last by @ref alp_gd32_results_fault_publish.
+ * rather than hung.  @c magic is cleared by alp_gd32_results_init() and
+ * written last by alp_gd32_results_fault_publish().
  *
  * Registers the core did not provide (no exception frame) are 0.
  */
