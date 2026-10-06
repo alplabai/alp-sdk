@@ -963,7 +963,8 @@ def dxm1_drive_high(t: LinuxTarget, label: str, line: int) -> str:
 
 
 # EVK SDIO path mux (#2697). Bench, E1M-V2M103 2026W38-0008: gpiochip `gd32-bridge-gpio`
-# base 394, IO29 `SDIO_MUX_EN` (GD32 PD11) = gpio-406 = line 12; active-LOW (low = microSD
+# IO29 `SDIO_MUX_EN` (GD32 PD11) = line 12; the chip base is resolved by label at runtime
+# (it moves with the kernel: 394 on the older image, 392 on r3). Active-LOW (low = microSD
 # connected, high = disconnected). IO27 `SDIO_MUX_SEL` is never touched.
 GD32_GPIO_LABEL = "gd32-bridge-gpio"
 SDIO_MUX_EN_LINE = 12
