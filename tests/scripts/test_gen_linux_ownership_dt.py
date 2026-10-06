@@ -222,3 +222,18 @@ def test_default_kernel_build_includes_the_ownership_fragment():
         assert (KERNEL / "linux-renesas" / dts).read_text(encoding="utf-8").count('#include "e1m-v2n-ownership.dtsi"') == 1
     frag = (REPO / g.OUT).read_text(encoding="utf-8")
     assert all(f'"{c}"' in frag for c in SOC["linux_dt"]["SCI7"]["cpg_clocks"])
+
+
+def test_can_netdev_map_is_rank_of_channel_not_bus_id():
+    """#2352: E1M CAN0 = CANFD3 -> can1, E1M CAN1 = CANFD2 -> can0."""
+    own = resolve_ownership(DOC)
+    assert lo.can_netdev_map(DOC, SOC, own) == ["can1", "can0"]
+    assert 'alp,e1m-can-netdev = "can1", "can0";' in lo.render(DOC, SOC, LINKS)[0]
+    # An M33-owned CAN0 leaves no Linux netdev for it; CAN1 is then the only channel.
+    assert lo.can_netdev_map(DOC, SOC, {**own, "e1m_can0": "m33"}) == ["", "can0"]
+    # No CAN instances -> no property.
+    doc = copy.deepcopy(DOC)
+    for k in ("e1m_can0", "e1m_can1"):
+        del doc["assignable"][k]
+    assert lo.can_netdev_map(doc, SOC, resolve_ownership(doc)) == []
+    assert "alp,e1m-can-netdev" not in lo.render(doc, SOC, LINKS)[0]

@@ -1,0 +1,3 @@
+### Fixed — `<alp/can.h>` opened the swapped CAN port on V2N-family Linux (#2352)
+
+`alp_can_open(E1M_X_CAN0)` bound `can0`, which `rcar_canfd` assigns to CANFD channel 2 (E1M CAN1); E1M CAN0 is channel 3 = `can1`. The channel is not exposed at runtime (`dev_id`/`dev_port` read 0), so the generated Linux ownership dtsi (`e1m-v2n-ownership.dtsi`, from `core-ownership.yaml` + the SoC JSON `linux_dt` channels) now carries `alp,e1m-can-netdev = "can1", "can0";` (index = E1M bus id, the rank of each a55-owned CAN channel), and the Yocto CAN backend reads `/proc/device-tree/alp,e1m-can-netdev`, falling back to the literal `can<bus_id>` when the property is absent (every other SoM). The portable API is unchanged. Bench check of which physical port moves is pending.

@@ -378,10 +378,51 @@ static void *_rx_loop(void *arg)
 	return NULL;
 }
 
+/* E1M bus id -> Linux netdev map, published by the kernel devicetree
+ * (issue #2352).  rcar_canfd names netdevs in probe order of the ENABLED
+ * channels, so on RZ/V2N E1M_X_CAN0 (CANFD3) is "can1" and E1M_X_CAN1
+ * (CANFD2) is "can0"; dev_id/dev_port read 0, so nothing at runtime says
+ * which channel a netdev is.  The generated ownership dtsi
+ * (scripts/gen_linux_ownership_dt.py, from core-ownership.yaml + the SoC
+ * JSON linux_dt channels) therefore carries a root property
+ * `alp,e1m-can-netdev = "can1", "can0";` indexed by E1M bus id.  Absent
+ * (every SoM that does not publish it) or an empty/short entry falls back
+ * to the literal "can<bus_id>".  Test hook: path pointer. */
+static const char *g_can_test_netdev_map_path = "/proc/device-tree/alp,e1m-can-netdev";
+
+/* Pick entry @p bus_id from a NUL-separated string list.  0 = found and
+ * non-empty (copied to out), -1 = no usable entry. */
+static int y_can_netdev_from_map(const char *map, size_t len, unsigned bus_id, char *out, size_t cap)
+{
+	size_t i = 0;
+	for (unsigned n = 0; i < len; ++n) {
+		size_t l = strnlen(map + i, len - i);
+		if (n == bus_id) {
+			if (l == 0 || l >= cap || i + l >= len) return -1;
+			memcpy(out, map + i, l + 1);
+			return 0;
+		}
+		i += l + 1;
+	}
+	return -1;
+}
+
+static void y_can_netdev_name(unsigned bus_id, char *out, size_t cap)
+{
+	char map[64];
+	FILE *f = fopen(g_can_test_netdev_map_path, "rb");
+	if (f != NULL) {
+		size_t n = fread(map, 1, sizeof(map), f);
+		fclose(f);
+		if (y_can_netdev_from_map(map, n, bus_id, out, cap) == 0) return;
+	}
+	snprintf(out, cap, "can%u", bus_id);
+}
+
 /**
  * @brief Open a CAN_RAW socket bound to canN and stash it in the handle.
  *
- * Resolves the "can<bus_id>" interface ifindex via SIOCGIFINDEX and
+ * Resolves the netdev (devicetree map, else "can<bus_id>") ifindex via SIOCGIFINDEX and
  * binds an AF_CAN raw socket to it.  For ALP_CAN_MODE_FD the socket is
  * switched to CAN_RAW_FD_FRAMES so it can carry 64-byte canfd_frames;
  * if the kernel/interface lacks FD support the setsockopt fails and we
@@ -400,8 +441,8 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 	if (cfg == NULL) return ALP_ERR_INVAL;
 
 	char ifname[IFNAMSIZ];
-	int  k = snprintf(ifname, sizeof(ifname), "can%u", (unsigned)cfg->bus_id);
-	if (k < 0 || (size_t)k >= sizeof(ifname)) return ALP_ERR_INVAL;
+	y_can_netdev_name((unsigned)cfg->bus_id, ifname, sizeof(ifname));
+	size_t k = strlen(ifname);
 
 	int fd = socket(PF_CAN, SOCK_RAW | SOCK_CLOEXEC, CAN_RAW);
 	if (fd < 0) return _errno_to_alp(errno);
@@ -409,7 +450,7 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 	struct ifreq ifr;
 	memset(&ifr, 0, sizeof(ifr));
 	/* ifr_name is IFNAMSIZ; ifname already fits (checked above). */
-	memcpy(ifr.ifr_name, ifname, (size_t)k + 1u);
+	memcpy(ifr.ifr_name, ifname, k + 1u);
 	if (ioctl(fd, SIOCGIFINDEX, &ifr) < 0) {
 		int e = errno;
 		close(fd);

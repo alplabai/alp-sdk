@@ -10,6 +10,7 @@ supervisor-links.yaml and the SoC JSON `linux_dt` block (`project.soc_spec`).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -74,6 +75,27 @@ def cm33_clocks(doc: dict, soc: dict, links: dict, own: dict[str, str]) -> list[
                                "has no cpg_clocks")
             add(ent["cpg_clocks"])
     return clocks
+
+
+def can_netdev_map(doc: dict, soc: dict, own: dict[str, str]) -> list[str]:
+    """Linux netdev per E1M CAN bus id (index = N of `e1m_canN`), "" = none.
+
+    rcar_canfd names netdevs `can0..` in probe order of the enabled channels
+    (ascending channel), and exposes no channel id at runtime (#2352), so the
+    name is the rank of the instance's SoC channel among the channels Linux
+    drives here: a55-owned, not hw_blocked (m33/hw_blocked ones are disabled
+    or untouched).  Assumes the vendor dtsi enables no other channel."""
+    linux_dt = soc.get("linux_dt") or {}
+    cans: dict[int, int] = {}
+    for inst, e in doc["assignable"].items():
+        m = re.fullmatch(r"e1m_can(\d+)", inst)
+        chan = (linux_dt.get(e.get("soc_instance")) or {}).get("channel")
+        if m and chan is not None and own[inst] == "a55" and not e.get("hw_blocked"):
+            cans[int(m.group(1))] = chan
+    if not cans:
+        return []
+    ranked = sorted(cans.values())
+    return [f"can{ranked.index(cans[b])}" if b in cans else "" for b in range(max(cans) + 1)]
 
 
 def _group(inst: str) -> tuple[str, str]:
@@ -156,4 +178,11 @@ def render(doc: dict, soc: dict, links: dict,
             " */\n"
             f"&cpg {{\n\trenesas,cm33-owned-clocks = {names};\n}};\n")
     labels.add("cpg")
+    nd = can_netdev_map(doc, soc, own)
+    if nd:
+        names = ", ".join(f'"{n}"' for n in nd)
+        out += ("\n/*\n * Linux netdev per E1M CAN bus id (index = N of E1M_X_CANN): rcar_canfd numbers\n"
+                " * netdevs by probe order, not by channel, so the SDK's SocketCAN backend reads\n"
+                " * this instead of assuming can<N> (#2352).\n */\n"
+                f"/ {{\n\talp,e1m-can-netdev = {names};\n}};\n")
     return out, labels

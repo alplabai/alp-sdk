@@ -225,6 +225,17 @@ accepts `m33`. UART0 stays `a55` until the P51 RX pull-up is bench-proven,
 UART1 has no CM33 node, CAN-FD has no CM33 driver, and SPI0 pads P90-P92 are
 not 3.3 V tolerant.
 
+**CAN netdev numbering.** On Linux, `rcar_canfd` names netdevs `can0..` in probe
+order of the enabled channels, so the E1M bus ids are swapped: `E1M_X_CAN0`
+(CANFD ch 3) is `can1` and `E1M_X_CAN1` (CANFD ch 2) is `can0`. The channel is
+not readable at runtime (`dev_id`/`dev_port` read 0), so the generated ownership
+dtsi publishes the map as the root property `alp,e1m-can-netdev = "can1", "can0";`
+(index = E1M bus id; the rank of each a55-owned CAN instance's SoC channel in
+`metadata/socs/renesas/rzv2n/*.json` `linux_dt`), and `alp_can_open()` on Yocto
+reads `/proc/device-tree/alp,e1m-can-netdev`, falling back to `can<bus_id>` when
+it is absent. It assumes the vendor dtsi enables no other CANFD channel. Which
+physical port moves is not yet bench-verified.
+
 A `board.yaml` `ownership:` entry may differ from the SoM default only where
 both cores' trees can follow it: the instance lists `m33` in `candidates` and
 carries an `m33:` block (handing a node to `a55` also needs `linux_enable`).
