@@ -57,7 +57,7 @@ allow-list.  Command opcodes are 1 byte; their numeric encoding is:
 | `0x04` | `BATCH` (v0.15)       | `count:u8 {op:u8 len:u8 args[len]}[count]`         | `executed:u8 {status:u8 len:u8 payload[len]}[executed]` (SPI only; needs the `BATCH` link feature -- see §3.16) |
 | `0x10` | `GPIO_READ`           | `mask:u32`                                         | `levels:u32` (masked subset)                       |
 | `0x11` | `GPIO_WRITE`          | `mask:u32 levels:u32`                              | _empty_                                            |
-| `0x20` | `PWM_SET`             | `channel:u8 reserved:u8 period_ns:u32 duty_ns:u32` | _empty_ (`period_ns == 0 && duty_ns == 0` = stop + release the channel's timer claim; requires protocol >= 0.17; never send period 0 to older firmware, which treats it as a real period and retunes the timer's shared ARR -- `gd32g553_pwm_stop` returns `ALP_ERR_NOSUPPORT` below 0.17 without sending) |
+| `0x20` | `PWM_SET`             | `channel:u8 reserved:u8 period_ns:u32 duty_ns:u32` | _empty_ (`period_ns == 0 && duty_ns == 0` = stop + release the channel's timer claim; requires protocol >= 0.17; `PWM_SET`/`PWM_GET` are I2C-capable from 0.17; never send period 0 to older firmware, which treats it as a real period and retunes the timer's shared ARR -- `gd32g553_pwm_stop` returns `ALP_ERR_NOSUPPORT` below 0.17 without sending) |
 | `0x21` | `PWM_GET`             | `channel:u8`                                       | `period_ns:u32 duty_ns:u32`                        |
 | `0x30` | `ADC_READ`            | `channel:u8 samples:u8`                            | `mv[samples]:u16` (millivolt, raw averaged)        |
 | `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (always `0xFF` on this HW rev — see §3.4) |
@@ -1707,7 +1707,7 @@ on either link still confirms a trial) and before the opcode switch:
 
 * **Allowed on I2C:** `0x00` PING, `0x01` GET_VERSION, `0x02`
   GET_BUILD_ID, `0x03` RESET_REASON, `0x10` GPIO_READ, `0x11` GPIO_WRITE,
-  `0x41` SE_RESET, `0xA0..0xA2` I2CM_* (v0.17, §3.20; I2C-only), `0x81` LINK_FEATURES (I2C grants only `STATUS_SEQ`, with
+  `0x41` SE_RESET, `0x20` PWM_SET / `0x21` PWM_GET (v0.17), `0xA0..0xA2` I2CM_* (v0.17, §3.20; I2C-only), `0x81` LINK_FEATURES (I2C grants only `STATUS_SEQ`, with
   `mp` = 65, so the extended form is accepted but changes nothing) and
   `0xF0..0xFF` OTA.
 * **Any other opcode** answers `STATUS_NOSUPPORT` (`0x06`) with an empty
@@ -1750,8 +1750,10 @@ via the table above before returning it from a public API call.
 
 **v0.15 I2C note:** on the I2C link an opcode outside the §5.3 allow-list
 answers `STATUS_NOSUPPORT` (`0x06`) with an empty payload — for example
-`ADC_READ` or `PWM_SET` over I2C against a v0.15 bridge.  Pre-v0.15
-firmware serviced those opcodes on I2C; hosts that need them use SPI.
+`ADC_READ`, or `PWM_SET`/`PWM_GET` below 0.17 (they are allowed on I2C
+from 0.17), over I2C against a v0.15 bridge.  Pre-v0.15 firmware serviced
+those opcodes on I2C; hosts that need them use SPI.  PWM stop (period 0
+and duty 0) over I2C needs >= 0.17 (`GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR`).
 
 **v0.17 I2CM note:** `I2CM_*` replies keep the generic meanings above
 (`STATUS_BUSY` = a job is running, `STATUS_NOT_READY` = unconfigured or no job

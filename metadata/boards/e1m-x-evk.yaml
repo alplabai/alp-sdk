@@ -132,9 +132,9 @@ e1m_routes:
     # --- Capacitive touch panels (on the two DSI displays) ---
     # CTP1 INT/RST (IO9/IO11): GT911 touch controller for Display 1. On V2N-family
     # SoMs E1M-X I2C3 is served by the GD32 bridge I2C proxy (protocol v0.17).
-    # The V2 carrier netlist names the GT911 bus DSI1_CSI_I2C but J12/CAM1 is on
-    # DSI_CSI_I2C1, which is the net wired to E1M-X I2C3; the J6 display I2C is
-    # not wired to I2C3, so the GT911 is not reachable through the proxy.
+    # The J6 display I2C is designed to be E1M-X I2C3 but the X-EVK V2 carrier
+    # does not connect it; only J12/CAM1 reaches I2C3, so the GT911 is not
+    # reachable through the proxy.
     # See XEVK_I2C_BUS_DSI_CSI1.
     # CTP2 INT/RST (IO17/IO19): Display 2 sideband -- unreachable on V2N/V2M SoMs
     # (DSI1 lane set unpopulated). Wired on the carrier for future dual-DSI SoMs.
