@@ -60,7 +60,7 @@
     },
     "linux_dt": {
       "type": "object",
-      "description": "Linux devicetree facts for on-die peripherals the Linux DT generators need, keyed by the instance name used in SoM `pad_routes` `dispatch_pin` (e.g. RIIC2, CSI0).  `label` is the SoC dtsi node label; `pinmux` maps a peripheral SIGNAL name (a key of the SoM peripheral map, e.g. RIIC2_SDA2 in v2n/renesas-peripheral-map.tsv; the port pin is resolved from that file) to its pinmux function code (the third argument of the vendor PORT_PINMUX macro); `capture` is the label of the capture unit a CSI receiver feeds.",
+      "description": "Per-instance silicon facts the Linux DT generators and the CM33 board generator need (the `pinmux` function codes are silicon facts and are read by both), keyed by the instance name used in SoM `pad_routes` `dispatch_pin` (e.g. RIIC2, CSI0).  `label` is the SoC dtsi node label; `pinmux` maps a peripheral SIGNAL name (a key of the SoM peripheral map, e.g. RIIC2_SDA2 in v2n/renesas-peripheral-map.tsv; the port pin is resolved from that file) to its pinmux function code (the third argument of the vendor PORT_PINMUX macro); `capture` is the label of the capture unit a CSI receiver feeds.",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
@@ -68,7 +68,9 @@
         "properties": {
           "label": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
           "pinmux": { "type": "object", "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_]*$" }, "additionalProperties": { "type": "integer", "minimum": 0 } },
-          "capture": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+          "capture": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "channel": { "type": "integer", "minimum": 0, "description": "Channel index of this instance inside a shared controller node (e.g. CANFD2 = channel2 of the one `canfd` node)." },
+          "cpg_clocks": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }, "description": "Linux CPG module-clock names (the DEF_MOD names of drivers/clk/renesas/<soc>-cpg.c) that gate this instance.  Consumed by scripts/gen_linux_ownership_dt.py to keep the clocks of a CM33-owned instance on." }
         }
       }
     },

@@ -206,6 +206,47 @@ RIIC8 master (see above).  Boot-mode ownership is recorded in
 blocked there.
 Bench tool: [`examples/v2n/v2n-pmic-inspect/`](../../examples/v2n/v2n-pmic-inspect/).
 
+## Core ownership: fixed vs assignable {#core-ownership}
+
+`metadata/e1m_modules/v2n/core-ownership.yaml` separates two kinds of fact.
+**Fixed** rows (`core_ownership:`) never change per product (GD32 SPI on the
+CM33, RIIC8/BRD_I2C on the A55). **Assignable** resources (`assignable:`) are
+a per-product choice with a Linux/A55 default: `e1m_uart0`, `e1m_uart1`,
+`e1m_spi0`, `e1m_can0`, `e1m_can1`. Override one in `board.yaml`:
+
+```yaml
+ownership:
+  e1m_spi0: m33   # allowed: the entry's `candidates`
+```
+
+A core outside `candidates` is rejected at load time, and the resolved map
+appears as `ownership:` in `--emit system-manifest`. Today only `e1m_spi0`
+accepts `m33`. UART0 stays `a55` until the P51 RX pull-up is bench-proven,
+UART1 has no CM33 node, CAN-FD has no CM33 driver, and SPI0 pads P90-P92 are
+not 3.3 V tolerant.
+
+A `board.yaml` `ownership:` entry is accepted only if it restates the SoM
+default: the Linux fragment follows the default alone, so any other override is
+rejected with an explanation (change the default in `core-ownership.yaml`
+instead). `hw_blocked` instances reject every override. The CM33 board tree declares an assignable node `disabled` (pinctrl
+from the metadata rows and the SoC `linux_dt` PFC codes) once the entry carries
+an `m33:` block; a project whose resolved owner is `m33` enables it through
+`--emit dts-overlay` / `zephyr-conf`. No entry has that block yet (RSPI0/CAN-FD
+PFC codes are not in metadata), so assigning an instance without one to `m33`
+stops at emit with an explicit error. `e1m_spi0` is additionally `hw_blocked`
+(P90-P92 not 3.3 V tolerant) and is refused on every core.
+
+The Linux tree follows the SoM defaults through the generated
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi`
+(`scripts/gen_linux_ownership_dt.py`): it enables an a55-owned node only with
+`linux_enable: true` + `linux_evidence`, and none has that today, so no node
+changes (`&sci0` in particular: no tty alias, floating RXD0); `&rspi0` is
+`hw_blocked`. The same fragment lists the M33-owned module clocks in
+`renesas,cm33-owned-clocks` on the CPG node (RSCI7 for the GD32 link always,
+plus each instance whose SoM default owner is the M33), which
+the `0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks.patch` kernel patch keeps on;
+the DT-driven form is not yet bench-validated.
+
 ## Boot + identification
 
 SoM identification is EEPROM-authoritative:

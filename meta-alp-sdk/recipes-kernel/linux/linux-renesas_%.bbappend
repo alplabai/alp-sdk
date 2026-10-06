@@ -5,6 +5,8 @@
 #
 #   e1m-v2n-som.dtsi    on-module V2N: dual GbE PHYs, eMMC, xSPI NOR,
 #                       DRP-AI reserved memory, core rails.
+#   e1m-v2n-ownership.dtsi  GENERATED (scripts/gen_linux_ownership_dt.py): the
+#                       per-product core-ownership nodes (UART0/1, SPI0, CAN-FD).
 #   e1m-v2n-drpai.dtsi  the &drpai0 enable that claims that reserved memory.
 #                       Installed ONLY when meta-rz-drpai is in bblayers
 #                       (it creates the label); stubbed out otherwise --
@@ -62,11 +64,12 @@ export KBUILD_BUILD_HOST = "alp-sdk"
 
 SRC_URI:append = " \
     file://e1m-v2n-som.dtsi \
+    file://e1m-v2n-ownership.dtsi \
     file://e1m-x-evk.dtsi \
     file://e1m-v2m-deepx.dtsi \
     file://e1m-v2n101-x-evk.dts \
     file://e1m-v2m101-x-evk.dts \
-    file://0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-on.patch \
+    file://0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks.patch \
     file://0002-drm-renesas-rzg2l-mipi-dsi-pm_runtime-guard-host-tra.patch \
     file://0003-usb-ohci-platform-add-spurious-oc-DT-property.patch \
     file://0004-drm-panel-add-himax-hx8394-with-rocktech-rk055hdmipi.patch \
@@ -126,20 +129,27 @@ SRC_URI:append = " \
 # The mask is written BEFORE the line is requested: requesting enables the
 # line, and a source already asserted at probe storms it inside the request.
 
-# AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
-# (GD32 supervisor SPI link).  Without this patch, Linux's
-# clk_disable_unused turns its module clocks off AND asserts the coupled
+# AMP clock ownership: peripherals that belong to the Cortex-M33 system
+# manager (RSCI7 = the GD32 supervisor SPI link, always; any assignable block
+# a product hands to the M33).  Without this patch, Linux's
+# clk_disable_unused turns their module clocks off AND asserts the coupled
 # CPG BUS_MSTOP bits (the rzv2h-cpg driver ties the two together), which
-# bus-faults the CM33 mid-operation ~15 s into every boot.  The patch
-# marks the five rsci_7_* clocks DEF_MOD_CRITICAL so both gates stay held
-# for the remote core.  Silicon-validated 2026-06-03 (two cold cycles +
-# warm reboot, link autonomous from ~2 s after power-on, no intervention).
+# bus-faults the CM33 mid-operation ~15 s into every boot.  The patch makes
+# the CPG driver keep every module clock named in the CPG node's
+# `renesas,cm33-owned-clocks` property critical, so both gates stay held for
+# the remote core.  The list is not hand-written: it is generated into
+# e1m-v2n-ownership.dtsi (scripts/gen_linux_ownership_dt.py) from the SoM
+# ownership metadata -- RSCI7 for the GD32 link, plus the clocks of each
+# assignable instance owned by the M33.  The earlier hard-coded
+# DEF_MOD_CRITICAL form of this fix was silicon-validated 2026-06-03 (two
+# cold cycles + warm reboot, link autonomous from ~2 s after power-on); this
+# DT-driven form applies to the BSP kernel (6717c06) but is NOT yet
+# bench-validated -- re-run that cold-cycle check on the first build.
 #
-# RIIC8 (BRD_I2C) is NOT in this patch: the maintainer decision that
+# RIIC8 (BRD_I2C) is not listed: the maintainer decision that
 # Cortex-A55/Linux is RIIC8's sole master (metadata/e1m_modules/v2n/
 # core-ownership.yaml) makes Linux the real consumer -- its own
-# clk_disable_unused correctly leaves riic_8_ckm alone.  See the
-# patch's own RETITLED note for the 2026-09-24 history.
+# clk_disable_unused correctly leaves riic_8_ckm alone.
 
 # 0002 (DSI shutdown SError): rzg2l_mipi_dsi's host transfer touched DSI
 # registers while the host was runtime-suspended (held in reset).  A panel
@@ -242,11 +252,25 @@ ALP_DTS_DST = "${S}/arch/arm64/boot/dts/renesas"
 do_configure:prepend() {
     install -m 0644 \
         "${WORKDIR}/e1m-v2n-som.dtsi" \
+        "${WORKDIR}/e1m-v2n-ownership.dtsi" \
         "${WORKDIR}/e1m-x-evk.dtsi" \
         "${WORKDIR}/e1m-v2m-deepx.dtsi" \
         "${WORKDIR}/e1m-v2n101-x-evk.dts" \
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
         "${ALP_DTS_DST}/"
+
+    # The generated ownership fragment must only name nodes THIS kernel's SoC
+    # dtsi defines, and must match the metadata.  --check never writes.  Skipped
+    # (with a warning) when the SDK scripts are not next to this layer or the
+    # host python lacks PyYAML.
+    ALP_OWN_GEN="${THISDIR}/../../../scripts/gen_linux_ownership_dt.py"
+    if [ -f "${ALP_OWN_GEN}" ] && python3 -c 'import yaml' 2>/dev/null; then
+        python3 "${ALP_OWN_GEN}" --check \
+            --vendor-dtsi "${S}/arch/arm64/boot/dts/renesas/r9a09g056.dtsi" \
+            || bbfatal "e1m-v2n-ownership.dtsi is stale or names a node r9a09g056.dtsi lacks"
+    else
+        bbwarn "gen_linux_ownership_dt.py or PyYAML unavailable: ownership fragment not verified against r9a09g056.dtsi"
+    fi
 
     # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
     # to the board dts or the cam0 dtb has no rule to build.

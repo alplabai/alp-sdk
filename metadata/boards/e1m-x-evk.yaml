@@ -391,7 +391,7 @@ audio:
     - { chip: tas2563, designator: U28, channel: right, i2c_bus: E1M_X_I2C0, i2c_address: "0x4E" }   # AD0: 10k -> VIO
   i2s_bus: E1M_X_I2S0              # SCLK / WS / SDI / SDO; codecs are bit-clock + frame slaves
   mclk:
-    source:  e1m_audio_clk        # E1M AUDIO_CLK = Audio_CLKB: the SoC ADG/SSI reference clock. The TAS2563 has no MCLK pin.
+    source:  on_module_audio_clkb  # The SoC ADG/SSI reference clock. NOTE the E1M AUDIO_CLK pad (AR9) maps to the SoC's Audio_CLKC (P11, renesas-peripheral-map.tsv); the 24.576 MHz feed this carrier uses is the on-module Audio_CLKB (P10) from the 5L35023B, not that pad (audit MM-X1). The TAS2563 has no MCLK pin.
     # CONFIRMED 2026-09-26: the Renesas RZ/V2N EVK reference dts
     # (r9a09g056n48-rzv2n-evk.dts, kernel-source SHA 6717c06) sets
     # `&audio_clkb { clock-frequency = <24576000>; };` for the identical
