@@ -17,7 +17,8 @@
 # v2m103-optiga-se-rst-line, v2m103-drpai-present; bench-observed identity values:
 # v2m103-pmic-i2c (ACT88760 0x25, DA9292 0x1E), v2m103-ethernet-phy-id (MII ID 001c.c916 x2),
 # v2m103-kernel-version (6.1.141-cip43); provisioning checks: v2m103-eeprom-manifest,
-# v2m103-emmc-boot-config, v2m103-mac-provisioned, v2m103-chosen-sku
+# v2m103-emmc-boot-config, v2m103-mac-provisioned, v2m103-chosen-sku,
+# v2m103-reset-cause
 # (GET_VERSION on 0x70 is v2m103-gd32-getversion-i2c); A55<->CM33 RPC over
 # UIO: v2m103-rpmsg-echo-uio (needs the CM33 rpmsg-v2n image flashed and a
 # DSW1 mode 2 (xSPI) boot -- the mode 1 eMMC-boot BL2 does not start the CM33).

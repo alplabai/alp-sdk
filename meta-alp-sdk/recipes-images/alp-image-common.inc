@@ -115,6 +115,21 @@ ALP_V2N_WIFI_BT_INSTALL[vardepvalue] = "${ALP_V2N_WIFI_BT_INSTALL}"
 
 IMAGE_INSTALL += " ${ALP_V2N_WIFI_BT_INSTALL}"
 
+# Opt-in USB gadget (NCM + ACM) helper for the E1M-X-EVK USB 2.0 device port
+# (docs/e1m-x-evk-usb-otg.md). Installed but not enabled at boot. Set
+# ALP_ENABLE_USB_GADGET = "1" in local.conf to include it (this also merges
+# the usb-gadget.cfg kernel fragment; default images are unchanged).
+ALP_ENABLE_USB_GADGET ??= "0"
+# Gated on the generic `usbgadget` MACHINE_FEATURES flag (set per machine conf);
+# the same flag selects the kernel fragment in linux-renesas_%.bbappend.
+# DX-M1 SoMs (`deepx-dxm1`) drive the E1M IO24 USB path-mux (driven_by: dxm1
+# in the SoM pad_routes), so warn there.
+IMAGE_INSTALL += "${@' alp-usb-gadget' if d.getVar('ALP_ENABLE_USB_GADGET') == '1' and bb.utils.contains('MACHINE_FEATURES', 'usbgadget', True, False, d) else ''}"
+python () {
+    if d.getVar('ALP_ENABLE_USB_GADGET') == '1' and bb.utils.contains('MACHINE_FEATURES', 'deepx-dxm1', True, False, d):
+        bb.warn('ALP_ENABLE_USB_GADGET: the DX-M1 on this SoM drives the E1M IO24 USB path-mux and can switch the USB 2.0 port away from the SoC (metadata/boards/e1m-x-evk.yaml XEVK_PIN_USB_MUX_SEL).')
+}
+
 # SDK sysroot headers (populate_sdk) -- ports the vendor bbappends'
 # TOOLCHAIN_TARGET_TASK:append mechanism, without which `bitbake
 # alp-image-* -c populate_sdk` produces NO <linux/drpai.h> / <linux/drp.h>

@@ -934,3 +934,19 @@ def test_mtd_write_refuses_an_unaligned_offset_and_one_past_the_end(tmp_path):
     with pytest.raises(ValueError, match="does not fit"):
         lt.mtd_write_verify(t, 1, img, offset=lt.CM33_REGION_OFFSET)
     assert not any("flash_erase" in c for c in fake.commands)
+
+
+def test_runner_decodes_utf8_with_replacement(tmp_path):
+    seen = {}
+
+    def runner(argv, **kw):
+        seen.update(kw)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    t = lt.LinuxTarget("unit", runner=runner)
+    t.run("true")
+    assert seen["encoding"] == "utf-8" and seen["errors"] == "replace"
+    seen.clear()
+    f = tmp_path / "in.bin"
+    f.write_bytes(b"x")
+    t.run("true", stdin_path=f)
+    assert seen["encoding"] == "utf-8" and seen["errors"] == "replace"
