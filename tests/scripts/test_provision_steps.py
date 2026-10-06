@@ -509,7 +509,7 @@ def test_select_steps_rules():
     assert names == ["preflight", "census"]
     names = [s.name for s in steps.select_steps(start="secure_page", skip=["hil_smoke"])]
     assert names == ["preflight", "secure_page", "dsw1_xspi_remove_sd", "cold_boot_test",
-                     "census_final", "clkgen_verify", "functional_test", "record"]
+                     "census_final", "clkgen_verify", "rtc_set", "functional_test", "record"]
     with pytest.raises(ValueError):
         steps.select_steps(only=["nope"])
 
@@ -1430,7 +1430,8 @@ def test_cold_boot_without_a_boot_strap_description_is_a_problem_not_a_crash(tmp
 def test_clkgen_verify_without_a_boot_capture_is_not_verified_rather_than_failed(tmp_path):
     board = Board()
     image = bytearray(lt.CLKGEN_OTP_IMAGE)
-    image[0x21], image[0x24] = 0xC0, 0x8E
+    for reg, val in lt.CLKGEN_FIXUP_REGS.items():         # the U-Boot-fixed values (#2293, #2686)
+        image[reg] = val
     for reg, val in enumerate(image):
         board.regs[(8, 0x69, reg)] = val
     ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True)

@@ -6,7 +6,7 @@
 # in this dir: v2n-gd32-bridge-ping, v2n-temp-sensor (on-module TMP112,
 # A55 app run over ssh-run), and the v2n101-* ssh-run set (bt-hci-up,
 # eeprom-read, emmc-block, ethernet-link, gd32-getversion-i2c,
-# gd32-gpiochip, optiga-present, rtc-ticks, systemd-no-failed-units,
+# gd32-gpiochip, gd32-io15-io26-gpio, optiga-present, rtc-ticks, systemd-no-failed-units,
 # thermal-zones, wifi-present, xspi-mtd, drpai-present).  The v2n101-* set is derived
 # from the v2m103 specs and is UNVERIFIED on a V2N unit.  V2N102/V2N103
 # runs must target this directory explicitly.

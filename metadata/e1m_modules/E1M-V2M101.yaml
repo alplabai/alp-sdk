@@ -26,6 +26,8 @@ on_module:
   supervisor_mcu:       gd32g553
   ethernet_phy:         rtl8211fdi
   ethernet_phy_count:   2
+  # DX-M1 ROM-UART programming pads (provisioning): P75 = UART0 mux, PA6 = M1_RESET.
+  dxm1:                 {uart_mux_pin: P75, reset_pin: PA6, gpio_chip: "10410000.pinctrl"}
   # nor_flash / emmc are routing annotations (SoC controller the on-module
   # storage is wired to), not chip slugs -- no chips/<part>/ driver exists
   # for either (see scripts/alp_orchestrate/slugs.py
@@ -266,14 +268,16 @@ pad_routes:
   - { e1m: E1M_X_GPIO_IO12, dispatch: gd32_bridge, dispatch_pin: PC1  }
   - { e1m: E1M_X_GPIO_IO13, dispatch: gd32_bridge, dispatch_pin: PF1  }
   - { e1m: E1M_X_GPIO_IO14, dispatch: gd32_bridge, dispatch_pin: PB5  }
+  - { e1m: E1M_X_GPIO_IO15, dispatch: gd32_bridge, dispatch_pin: PB4, bridge_bit: 21, min_bridge_protocol: 15 }
   - { e1m: E1M_X_GPIO_IO16, dispatch: gd32_bridge, dispatch_pin: PC0  }
   - { e1m: E1M_X_GPIO_IO24, dispatch: unrouted, driven_by: dxm1,
       doc: "Not a GD32 pad; driven by the DX-M1 on V2M. Bridge bit 8 answers STATUS_IO (#2453)." }
   - { e1m: E1M_X_GPIO_IO25, dispatch: gd32_bridge, dispatch_pin: PC15 }
 
-  # E1M-X form-factor GPIO extensions (IO27..IO35, IO33 absent on V2N).
-  # See `E1M_X_GPIO_IO27..IO35` in <alp/e1m_x_pinout.h>.
+  # E1M-X form-factor GPIO extensions (IO26..IO35, IO33 absent on V2N).
+  # See `E1M_X_GPIO_IO26..IO35` in <alp/e1m_x_pinout.h>.
   # Source: metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv
+  - { e1m: E1M_X_GPIO_IO26, dispatch: gd32_bridge, dispatch_pin: PC2, bridge_bit: 22, min_bridge_protocol: 15 }
   - { e1m: E1M_X_GPIO_IO27, dispatch: gd32_bridge, dispatch_pin: PB11 }
   - { e1m: E1M_X_GPIO_IO28, dispatch: gd32_bridge, dispatch_pin: PE9  }
   - { e1m: E1M_X_GPIO_IO29, dispatch: gd32_bridge, dispatch_pin: PD11 }

@@ -253,7 +253,7 @@ IMAGE_ROOTFS_SIZE = "4194304"
 
 # U-Boot's vendor sd2load/emmcload env (bootcmd_check) still loads the stock
 # EVK dtb name boot/r9a09g056n44-dev.dtb before the ALP boot command loads the
-# real board dtb (boot/${CONFIG_ALP_E1M_FDTFILE}) over it at the same address.
+# real board dtb (boot/${fdtfile}, chosen from the EEPROM manifest family) over it at the same address.
 # No ALP MACHINE builds that name, so the vendor load printed
 # "Failed to load 'boot/r9a09g056n44-dev.dtb'" on every boot. Link the stock
 # name to the board dtb so the vendor load succeeds harmlessly; the ALP load
@@ -266,7 +266,8 @@ ALP_BOARD_FDT_NAME  = "${@os.path.basename((d.getVar('KERNEL_DEVICETREE') or '')
 
 alp_link_vendor_fdt_name() {
 	# Either condition makes an unbootable image: CONFIG_BOOTCOMMAND refuses
-	# to boot when boot/${CONFIG_ALP_E1M_FDTFILE} does not load.
+	# to boot when boot/${fdtfile} (and, for a unit with no known family,
+	# boot/${fdtfile_alt}) does not load.
 	if [ -z "${ALP_BOARD_FDT_NAME}" ]; then
 		bbfatal "no KERNEL_DEVICETREE for ${MACHINE}; U-Boot would not find a board dtb"
 	elif [ ! -e "${IMAGE_ROOTFS}/boot/${ALP_BOARD_FDT_NAME}" ]; then

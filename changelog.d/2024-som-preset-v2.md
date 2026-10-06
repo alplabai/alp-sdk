@@ -5,7 +5,7 @@
 There is no v1 compatibility path: a preset still declaring `schema_version: 1` fails validation.
 
 `memory_region` now lists `write_authority` in `required`
-(`metadata/schemas/som-preset-v2.schema.json:618` ("write_authority")), so a `memory_map:` row
+(`metadata/schemas/som-preset-v2.schema.json:692` ("write_authority")), so a `memory_map:` row
 that omits it is rejected by the schema itself, per ADR-0034 clause 4 (absence is a validation
 failure, never a permissive default). The semantic gate `_check_som_write_authority_present` in
 `scripts/validate_metadata.py` existed only to cover the v1 gap and is deleted with its test.

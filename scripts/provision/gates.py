@@ -17,6 +17,7 @@ from __future__ import annotations
 import enum
 import gzip
 import hashlib
+import json
 import math
 import re
 import struct
@@ -42,12 +43,15 @@ V2N_REQUIRED_ROLES = ("bl2", "bl2_mmc", "fip", "system_image")
 XSPI_LIMIT = 16 * 1024 * 1024  # an xSPI component must be strictly smaller
 # mtd1 + 0x1a0000 onward is the CM33 image; the FIP at mtd1 offset 0 must end
 # before it. linux_target re-checks with the real erase-size rounding.
-CM33_REGION_OFFSET = 0x1A0000
-# BL2 copies the stored image raw to SRAM 0x08000000; the CM33 starts at 0x08003000, so the
-# bundle's cm33 component is 0x3000 zero bytes + zephyr.bin (what rzv2n_mtd_flash writes).
-CM33_SRAM_BASE = 0x08000000
-CM33_PAD = 0x3000
-CM33_MAX = 0x30000        # BL2 silently truncates anything larger
+# BL2 copies the stored image raw to SRAM; the CM33 starts image_pad later, so the bundle's cm33
+# component is image_pad zero bytes + zephyr.bin (what rzv2n_mtd_flash writes). The numbers are
+# the SoC description's `cm33_boot` (metadata/socs/renesas/rzv2n/n44.json), not repeated here.
+_CM33_BOOT = json.loads((Path(__file__).resolve().parents[2] / "metadata" / "socs" / "renesas" / "rzv2n"
+                         / "n44.json").read_text(encoding="utf-8"))["cm33_boot"]
+CM33_REGION_OFFSET = _CM33_BOOT["xspi_offset"]
+CM33_SRAM_BASE = _CM33_BOOT["sram_base"]
+CM33_PAD = _CM33_BOOT["image_pad"]
+CM33_MAX = _CM33_BOOT["image_max"]        # BL2 silently truncates anything larger
 # eMMC boot partition 1 layout: bl2_mmc from sector 1, the FIP from sector 0x300.
 BL2_MMC_SECTOR = 0x1
 FIP_SECTOR = 0x300
@@ -214,21 +218,30 @@ def fip_rail(fip: bytes, family: str) -> GateResult:
     return GateResult("fip_rail", True, f"not required for family {family} (present={present})")
 
 
-_FDT_RE = re.compile(rb"boot/([A-Za-z0-9_.,+-]+\.dtb)")
+_FDT_RE = re.compile(rb"(?:boot/|alp_fdtfile )([A-Za-z0-9_.,+-]+\.dtb)")
 
 
 _BOOTCMD_RE = re.compile(rb"bootcmd=[^\x00]*")
 
 
 def fip_fdtfile(fip: bytes) -> str:
-    """The dtb basename U-Boot loads (compiled in by patch 0002 as boot/<name>).
+    """The build-time FALLBACK dtb basename (``CONFIG_ALP_E1M_FDTFILE``).
+
+    Since patch 0013 the dtb a unit boots is picked at boot from its EEPROM
+    manifest family (``boot/${fdtfile}``, which this regex ignores); only a
+    unit with no usable family also tries the other dtb in the family table
+    (``${fdtfile_alt}``), a known family fails closed. The fallback is the
+    default the bootcmd passes to ``alp_fdtfile <name>.dtb``. Using it for the
+    ``fdt`` gate and the ``dxm1`` swap is right when
+    the bundle's family equals the SoM's family, which per-SKU bundles
+    guarantee.
 
     Read from the default ``bootcmd`` when the FIP carries one: the vendor
     env scripts (``emmcload``/``sd2load``) also name the stock EVK dtb, but
     only ``bootcmd`` runs at autoboot. Without a ``bootcmd`` every
     ``boot/*.dtb`` in the FIP must agree."""
-    in_bootcmd = {m.decode("ascii") for cmd in _BOOTCMD_RE.findall(fip)
-                  for m in _FDT_RE.findall(cmd)}
+    in_bootcmd = {m[0].decode("ascii") for cmd in _BOOTCMD_RE.findall(fip)
+                  if (m := _FDT_RE.findall(cmd))}
     names = in_bootcmd or {m.decode("ascii") for m in _FDT_RE.findall(fip)}
     if len(names) != 1:
         where = "the FIP's bootcmd" if in_bootcmd else "the FIP"

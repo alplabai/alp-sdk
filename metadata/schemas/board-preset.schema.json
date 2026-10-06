@@ -108,6 +108,19 @@
       "additionalProperties": true,
       "description": "Carrier audio path (codecs + I2S bus + MCLK + I2S path-mux + amp control GPIOs) the Linux DT / audio-graph-card is generated from.  Captures device-instance facts (I2C addresses, L/R channel, mux + shutdown/IRQ GPIO macros) beyond the E1M-pad routing in e1m_routes."
     },
+    "rtc_backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["element"],
+      "properties": {
+        "element": {"enum": ["none", "supercap", "primary"], "description": "What the carrier fits on the SoM's RTC VBACKUP pin.  `supercap` is rechargeable (trickle charge allowed); `primary` is a non-rechargeable cell (NEVER trickle charge)."},
+        "trickle_ohms": {"enum": [3000, 5000, 9000, 15000], "description": "RV-3028 trickle-charge series resistor; present only for `supercap`, and the carrier's `&rv3028 { trickle-resistor-ohms }` must equal it."}
+      },
+      "allOf": [
+        {"if": {"properties": {"element": {"const": "supercap"}}}, "then": {"required": ["trickle_ohms"]}, "else": {"not": {"required": ["trickle_ohms"]}}}
+      ],
+      "description": "The carrier's RTC backup element, declared once.  Provisioning's functional_test derives the expected trickle charger and whether the rtc_backup fixture can be on from it."
+    },
     "default_hw_rev": {
       "type": "string",
       "pattern": "^[a-z0-9_-]+$"

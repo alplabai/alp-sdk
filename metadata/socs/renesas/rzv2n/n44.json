@@ -232,6 +232,10 @@
       "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
     }
   ],
+  "cm33_boot": {"sram_base": 134217728, "image_pad": 12288, "image_max": 196608, "xspi_offset": 1703936,
+    "note": "BL2 copies the stored CM33 image raw from mtd1 + xspi_offset (0x1A0000) to SRAM sram_base (0x08000000) and silently truncates past image_max (0x30000); the CM33 starts at sram_base + image_pad (0x08003000), so the stored image is image_pad zero bytes + zephyr.bin."},
+  "openamp_carveout": {"a55_base": 1332740096, "size": 9437184, "rsctbl_size": 4096,
+    "note": "OpenAMP/MHU-B reservation in the CM33-NS DDR alias, A55 view 0x4F700000..0x4FFFFFFF (CM33-NS 0x9F700000, A55 = CM33-NS - 0x50000000); rsctbl is its first rsctbl_size (0x1000) bytes. The stock firmware beacon sits in the top 16 bytes of the rsctbl window. The generated board .dts quotes the same region."},
   "memory_regions": [
     {
       "name":            "ddr_main",

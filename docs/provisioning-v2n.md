@@ -297,6 +297,7 @@ are not yet confirmed by a run of this code on a bench.
 | `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, ACT88760 reg `0x10` after boot, I2C scans (GD32 exempted only while `0x10` still reads `0x88`). An `end0` without carrier (PHY latch, #2582) gets one extra cold cycle, noted as `end0_no_carrier_retries` in the step evidence (not a ledger key); it fails if `end0` is still down. With the `rtc_backup` fixture and N >= 2 it also sets the RTC from the host clock after the first cycle, so `functional_test` can judge `rtc_retention` |
 | `census_final` | the census again, on the unit as shipped (after the last cold boot: xSPI boot, eMMC root). Every key it reads replaces the first census's value. A key the first census recorded and this one could **not** produce (a census group that fails drops its keys) is set to `unread (not re-read by census_final)`, so a value read in the microSD boot never stands in for the shipping boot; an unread ship-required key blocks the ship check. The ACT88760 GPIO4 keys are `cold_boot_test`'s and are left alone |
 | `clkgen_verify` | the on-SoM 5L35023B (`BRD_I2C`, `0x69`) OTP image against U-Boot's fixup |
+| `rtc_set` | the RV-3028-C7: system time from this host (UTC), `hwclock -w`, read back (within 30 s of the host, else refused); backup switchover to level mode through the driver's `RTC_PARAM_SET`; trickle read back |
 | `functional_test` | every interface the tool can reach, on the unit as shipped: one generated script, one remote invocation, one `test_ft_<check>` value per check; a failing or unreadable check fails the step unless it is listed informational, and only `test_functional: pass` ships. See "Functional test coverage" |
 | `hil_smoke` | optional `tests/hil/run_smoke.py` |
 | `record` | merge auto keys into `<serial>.unit.yaml` (manual keys never touched), append `<serial>.md`, logs, xlsx, ship check |
@@ -334,6 +335,57 @@ transfer:
 
 Selector `0x06` (device configuration) is only ever read, as one combined
 `0x06 0x00` + read-1 transfer; a unit test asserts no frame writes it.
+
+### `rtc_set`: RV-3028-C7 time, backup switchover, trickle charge
+
+Runs after `clkgen_verify` (the SoM's clocks are known good) and before
+`functional_test`. Order: `date -u -s @<host epoch>`, `hwclock --systohc --utc`
+(the `rtc0` ioctl when the image has no `hwclock`), `RTC_PARAM_SET` /
+`RTC_PARAM_BACKUP_SWITCH_MODE` = level on `/dev/rtc0`, then read back
+`rtc0/since_epoch` (refused beyond 30 s of the host) and register `0x37`.
+When `cold_boot_test` already set the clock for the `rtc_backup` fixture the
+time is left alone (re-setting it would void the retention proof); the
+switchover is enabled there too, before the first power cut.
+
+Nothing here writes the RTC's configuration EEPROM directly. The kernel's
+`rtc-rv3028` driver (mainline v6.1 `rv3028_param_set`, `rv3028_update_cfg`)
+enters EERD, edits the field and commits it, and only when switchover is not
+already level: `rv3028_param_set` issues the EEPROM update command on every
+call, and the configuration EEPROM is rated 10'000 write cycles at 3.0 V / 25 C
+but only 100 at 5.5 V / 85 C (Application Manual Rev. 1.4, section 6.2, p. 98).
+The trickle charger is the devicetree property `trickle-resistor-ohms` on
+`rtc@52`, set only by a carrier dtsi whose VBACKUP element is rechargeable (a
+supercap); the SoM dtsi leaves it unset. **Trickle-charging a primary
+(non-rechargeable) lithium cell is forbidden: it can vent or burn.** With the
+property set, `rtc-rv3028` (6.1) commits the configuration EEPROM at every
+probe, one write per boot, and offers no once-at-provisioning parameter for the
+trickle bits; a reboot loop therefore consumes endurance. Register `0x37` (RV-3028-C7 Application Manual Rev. 1.4,
+"EEPROM BACKUP REGISTER, 37h"): bit 5 TCE (1 = trickle on), bit 4 FEDE (keep 1),
+bits 3:2 BSM (`00`/`10` off, `01` direct, `11` level, switch when VDD < 2.0 V),
+bits 1:0 TCR (`00` 3 k, `01` 5 k, `10` 9 k, `11` 15 k). A fully set unit reads
+`0x3f` (switchover level and 15 kOhm trickle). Census facts:
+`rtc_rv3028_reg_0x37`, `rtc_backup_switch_mode` (`disabled`/`direct`/`level`),
+`rtc_trickle` (`disabled`/`<n> kOhm`), and `rtc_time_utc` in the step evidence;
+they reach `<serial>.unit.yaml` only once the ledger's `schema/v2n.keys.yaml`
+lists them as `auto`. The expected trickle comes from the carrier's
+`rtc_backup` in `metadata/boards/<carrier>.yaml` (`element: none|supercap|primary`,
+`trickle_ohms: 3000|5000|9000|15000` only for `supercap`); the carrier dtsi's
+`&rv3028 { trickle-resistor-ohms }` must equal it. `none` and `primary` expect the
+charger off. The resistor value for a
+supercap carrier is provisional until step 5 measures the charge current.
+
+Bench steps (first run on a unit; nothing here is bench-verified yet):
+
+1. Read register `0x37` on `i2c-8` (`i2cget -f -y 8 0x52 0x37`) before the new image and
+   record it (`0x10` seen so far).
+2. Only for a carrier with a rechargeable VBACKUP element and `trickle-resistor-ohms` in its
+   dtsi: boot it and confirm `0x37` bit 5 (TCE) is set and bits 1:0 match the resistor.
+3. Run the flow through `rtc_set`; confirm `0x37` bit 3:2 reads `11` (and `0x3f` with a trickle
+   carrier) and `since_epoch` is within 30 s of the host.
+4. Cut power for a known interval (start with minutes, then hours), power on and compare
+   `since_epoch` with the host clock; `dmesg` must not show `hctosys: unable to read the
+   hardware clock`. Use `--cold-cycles 3` with the `rtc_backup` fixture for the automated form.
+5. Supercap carriers only: measure the supercap voltage rise before relying on a resistor value.
 
 ### `clkgen_verify`: the 5L35023B clock generator (`0x69`)
 
@@ -433,7 +485,8 @@ holds firmware takes the `sf_erase` path first, the proven `dx_update.sh` step 1
    `MIN_ON_S` / `MIN_OFF_S` rules of `Power.cycle`), log in;
 8. verify PCIe device `0x0000` and the `dxrt-cli -s` version.
 
-`P75`/`PA6` are lines `61`/`86` on `10410000.pinctrl` by default; a bench.yaml
+`P75`/`PA6` come from the SoM preset's `on_module.dxm1` (`uart_mux_pin`, `reset_pin`,
+`gpio_chip`; line = 8 x port + bit, so lines `61`/`86` on `10410000.pinctrl`); a bench.yaml
 `dxm1:` block may override `gpio_chip`, `uart_mux_line`, `reset_line` (distinct
 ints; `52`/`53` = `P64`/`P65`, the DEEPX 0.75 V rail, are refused before any
 export, here and again in `_sysfs_gpio_dir`). The `dxrt-cli -s` parser reads only
@@ -639,7 +692,8 @@ functional_test:
     dxm1_model: /path/on/the/unit/model.dxnn        # a compiled model present on the unit
     usb_stick: true             # a USB mass-storage device in the host port
     sd_card: true               # a NON-bootable card in the SD slot (a bootable one boots instead of the eMMC)
-    rtc_backup: true            # a backup supply for the RTC; needs --cold-cycles >= 2
+    rtc_backup: true            # the retention fixture is wired at this station; needs --cold-cycles >= 2 and a
+                                # carrier whose metadata/boards/<carrier>.yaml rtc_backup.element is not `none`
     ina228_rework: true         # this carrier has the input-monitor rework
     camera: <regex>             # a camera is fitted; the regex names its sensor driver
     can_loopback: true          # CAN0 wired to CAN1, terminated
@@ -684,7 +738,7 @@ expected value; **data** = a data path was exercised end to end.
 | DX-M1 inference | not tested | `dxm1_inference` (data) | `dxm1_model` |
 | DRP-AI | not tested | `drpai`: driver bound, device node (answers) | - |
 | GPU | not tested | `gpu`: driver bound, device node (answers) | - |
-| RTC | I2C scan (answers); census records one register | `rtc_device`, `rtc_ticks` (value: the seconds register advances), `rtc_time_set`, `rtc_backup_mode` (informational) | - |
+| RTC | I2C scan (answers); census records one register | `rtc_device`, `rtc_ticks` (value: the seconds register advances), `rtc_time_set`, `rtc_backup_mode`, `rtc_trickle` (all blocking: the unit must ship with a valid time, switchover on and the trickle charger as the carrier expects: off by default) | - |
 | RTC keeps time | not tested | `rtc_retention` (data) | `rtc_backup` |
 | main PMIC | `pmic_verify` (value, in the microSD boot); `cold_boot_test` reads reg `0x10` | `pmic_registers`: the same compare after a plain cold boot (value) | - |
 | second PMIC | `pmic_verify`, census (ID) | `i2c_da9292_1e` (ID `0xEA`) + `pmic_registers` | - |
@@ -740,9 +794,9 @@ by `eeprom_manifest`.
   software can observe.
 - **The GD32's own peripherals** (PWM, ADC, DAC, encoder inputs on the carrier headers), the
   microphones, the M.2 sockets, touch. No loopback exists for them on the bare carrier.
-- **The RTC keeping time** unless the `rtc_backup` fixture is on. Note `rtc_backup_mode`: a unit
-  read on the bench has backup switchover disabled in the RTC's configuration, so retention
-  would fail even with a backup supply until something enables it.
+- **The RTC keeping time** unless the `rtc_backup` fixture is on. `rtc_set` enables switchover
+  and a supercap carrier sets the trickle resistor, but only the retention check across real
+  power cuts proves the backup element holds.
 
 ### What an RP2040-based fixture would unlock
 
@@ -789,8 +843,9 @@ bounds for a hung command, not the expected time.
 | `drpai`, `gpu` | platform driver link, device node | driver bound, node exists | 5 s | 0.1 s |
 | `rtc_device` | `/sys/class/rtc/rtc0/name` | names the RV-3028 | 5 s | 0.1 s |
 | `rtc_ticks` | the seconds register twice, 2 s apart | valid BCD, advanced by 1..4 s | 8 s | 2.2 s |
-| `rtc_time_set` | `rtc0/since_epoch` | readable (informational) | 5 s | 0.1 s |
-| `rtc_backup_mode` | register `0x37` | backup switchover enabled (informational) | 5 s | 0.1 s |
+| `rtc_time_set` | `rtc0/since_epoch` | readable (the power-on flag is clear: `rtc_set` ran) | 5 s | 0.1 s |
+| `rtc_backup_mode` | register `0x37` | BSM is `01` or `11` | 5 s | 0.1 s |
+| `rtc_trickle` | register `0x37` | TCE = 0 when the carrier's `rtc_backup` is not a `supercap`, else TCE = 1 and TCR gives its `trickle_ohms` | 5 s | 0.1 s |
 | `rtc_retention` | `rtc0/since_epoch`, boot id, `dmesg` | set by `cold_boot_test` on an earlier boot, no `hctosys: unable to read the hardware clock` in this boot's log, within 30 s of the host clock | 5 s | 0.1 s |
 | `board_temp` | TMP112 temperature register | 10..85 degC | 5 s | 0.1 s |
 | `secure_element` | the state-register read, up to 100 tries | an answer | 12 s | 0.5 s |
@@ -835,9 +890,7 @@ Nothing here has run on hardware. For the first run:
 5. Keep the step log `logs/<serial>/functional_test-<stamp>.log`: every check's value, then
    the raw script output after `--- script output ---`, framed `@@ALPFT <check> <rc>` ...
    `@@ALPFT-END <check>`.
-6. Expect three informational failures on today's units: `rtc_time_set` (nothing sets the RTC),
-   `rtc_backup_mode` (backup switchover is disabled in the RTC's configuration) and
-   `cm33_firmware` (no step programs a CM33 image while the bundle has no `cm33`). Expect `dmesg_clean` to need its allowlist
+6. Expect an informational failure on today's units: `cm33_firmware` (no step programs a CM33 image while the bundle has no `cm33`). Expect `dmesg_clean` to need its allowlist
    adjusted (it was written from one boot log without levels).
 
 Output formats with **no real-log evidence yet**; compare each frame with what the judge
@@ -912,7 +965,7 @@ Not needed: `sfdisk`, `partx`, `findfs`, `parted`, `blockdev`, `bmaptool`, `mke2
 
 Every E1M-V2M103 is to ship with a CM33 firmware image (maintainer decision); which image is still open, so `cm33` is optional in the bundle and not in `V2N_REQUIRED_ROLES` yet (it becomes required once a bundle carries it).
 
-- **Where it lives.** xSPI byte `0x200000` = `mtd1` offset `0x1A0000` (`gates.CM33_REGION_OFFSET`). BL2 copies it raw to SRAM `0x08000000`; the CM33 starts at `0x08003000`.
+- **Where it lives.** xSPI byte `0x200000` = `mtd1` offset `0x1A0000` (`gates.CM33_REGION_OFFSET`). BL2 copies it raw to SRAM `0x08000000`; the CM33 starts at `0x08003000`. These figures, the pad and the size limit below are the SoC description's `cm33_boot` (`metadata/socs/renesas/rzv2n/n44.json`); `gates.py` reads them there.
 - **Padding.** The bundle's `cm33` component (`flash_target` `xspi:mtd1`) is the stored image: `0x3000` zero bytes followed by Zephyr's `zephyr.bin`, the same bytes the `rzv2n_mtd_flash` west runner writes. `write_cm33` and `cm33_firmware` md5 exactly these bytes.
 - **Size limit.** At most `0x30000` bytes in all; BL2 silently truncates a larger image. `preflight` and `check_som_bundle.py` refuse a `cm33` whose first `0x3000` bytes are not zero, whose initial SP (word at `0x3000`) is outside SRAM0 (`0x08xxxxxx`, the runner's test), whose reset vector (word at `0x3004`) lacks the Thumb bit or lies outside `0x08003000..0x08033000`, or that exceeds `0x30000`. The FIP must still end below `0x1A0000`; its erase never reaches the CM33 region.
 - **When it runs.** BL2 releases the CM33 in every boot mode. In eMMC or eSD boot today it loads the image from a location nothing wrote, so the CM33 faults and stays locked (harmless). With TF-A fix #2658 it loads the image from xSPI in every mode, so after `write_cm33` the CM33 image also runs alongside the provisioning Linux on later mode-1 boots, not only from `cold_boot_test` on. The CM33 cannot be restarted from Linux.

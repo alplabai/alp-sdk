@@ -28,6 +28,18 @@ IMAGE_INSTALL += " \
     libdrm-tests                   \
 "
 
+# GPU stack (RZ/V2N Mali-G31).  The userspace (libEGL / libGLESv2 / libgbm) is
+# NOT listed here: the Renesas meta-rz-graphics layer already adds
+# `libegl libgles2` to every mali-family image (include/mali-graphics.inc,
+# IMAGE_INSTALL:append:mali-family) once `opengles` is in DISTRO_FEATURES,
+# and the alp-display group brings weston -- same shape as Renesas'
+# core-image-weston.  See docs/v2n-mali-gpu.md.  Not bench-verified.
+#
+# alp-gpu2d-compose (examples/v2n/v2n-gpu2d-compose) is installed on every
+# mali-family machine: it runs on the CPU fallback too and reports which
+# engine served the ops, so it doubles as the GPU backend's on-target check.
+IMAGE_INSTALL += "${@' alp-gpu2d-compose' if 'mali-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') else ''}"
+
 # LVGL dashboard example (Linux/DRM panel) -- dev-only bench example app.
 # weston/libdrm/DEEPX/rootfs sizing now come from alp-image-common.inc;
 # only the example package is edge-specific.
