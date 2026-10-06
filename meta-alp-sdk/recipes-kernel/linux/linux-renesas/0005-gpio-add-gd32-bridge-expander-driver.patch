@@ -104,8 +104,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 1248 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 1258 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 1252 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 1262 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -296,13 +296,13 @@ index 000000000..0d3b6690f
 + * does not touch it: the bridge releases SE_RST on its own reset, which is
 + * exactly the safe state, and a stale "asserted" must never be replayed.
 + */
++/* Line 8 is not routed on the SoM (gd32-bridge-firmware#298): .request()
++ * refuses it so a write can never land in the sticky output_mask and then be
++ * replayed. */
++#define GD32_UNROUTED_LINE	8
 +/* Line 20 is reserved for can-stby (bridge bit 20, protocol 0.13; the
 + * CAN-FD bring-up in alp-sdk#2341). Until that lands, .request() refuses
 + * it so nothing drives the transceivers' standby pad by accident. */
-+/* Line 8 ("IO24" in the old name table) is not routed on the SoM
-+ * (gd32-bridge-firmware gh#298): .request() refuses it so a write can never
-+ * land in the sticky output_mask and then be replayed. */
-+#define GD32_UNROUTED_LINE	8
 +#define GD32_RESERVED_LINE	20
 +#define GD32_SE_RST_LINE	21
 +
