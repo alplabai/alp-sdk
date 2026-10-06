@@ -987,8 +987,6 @@ cores:
     assert 'PACKAGECONFIG:append:pn-alp-sdk = " mqtt security"' in conf
 
 
-
-
 def _mender_local_conf(tmp_path: Path, tenant: str) -> str:
     body = f"""
 som:
