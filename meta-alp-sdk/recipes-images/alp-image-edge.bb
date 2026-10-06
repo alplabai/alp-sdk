@@ -160,3 +160,7 @@ python () {
                  'meta-rz-drpai to bblayers.conf or set '
                  'ALP_ENABLE_DRPAI = "0".')
 }
+
+# Dev-only CM33 reload payload (/lib/firmware/m33_sm.elf), present only with
+# ALP_V2N_CM33_SRAM_NS = "1" (see alp-cm33-firmware_0.1.bb); never in prod.
+IMAGE_INSTALL += "${@' alp-cm33-firmware' if d.getVar('ALP_V2N_CM33_SRAM_NS') == '1' else ''}"

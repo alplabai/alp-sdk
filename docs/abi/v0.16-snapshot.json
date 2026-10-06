@@ -14134,6 +14134,97 @@
       },
       "variables": {}
     },
+    "alp/protocol/v2n_mhu_doorbell.h": {
+      "functions": {},
+      "macros": {
+        "ALP_MHU_NS_CH5_KICK_SLOT": {
+          "hash": "1e72143f86d9ebc0",
+          "value": "ALP_MHU_NS_SLOT(5u)"
+        },
+        "ALP_MHU_NS_SLOT": {
+          "hash": "9e67bdec73984ec4",
+          "value": "(ch) ((ch) * ALP_MHU_NS_SLOT_STRIDE)"
+        },
+        "ALP_MHU_NS_SLOT_MSG_INT_CLR": {
+          "hash": "391678dfb027f0fb",
+          "value": "0x08u"
+        },
+        "ALP_MHU_NS_SLOT_MSG_INT_SET": {
+          "hash": "21eb62a9cbb33451",
+          "value": "0x04u"
+        },
+        "ALP_MHU_NS_SLOT_MSG_INT_STS": {
+          "hash": "56ae38f56384d51d",
+          "value": "0x00u"
+        },
+        "ALP_MHU_NS_SLOT_RSP_INT_CLR": {
+          "hash": "5ce2390b8e83acce",
+          "value": "0x18u"
+        },
+        "ALP_MHU_NS_SLOT_RSP_INT_SET": {
+          "hash": "74cba8573b354b2e",
+          "value": "0x14u"
+        },
+        "ALP_MHU_NS_SLOT_RSP_INT_STS": {
+          "hash": "7c17669d51a5dc18",
+          "value": "0x10u"
+        },
+        "ALP_MHU_NS_SLOT_STRIDE": {
+          "hash": "cb1e4021bbce1186",
+          "value": "0x20u"
+        },
+        "ALP_MHU_SWINT_BASE": {
+          "hash": "abe76060481debbd",
+          "value": "0x800u"
+        },
+        "ALP_MHU_SWINT_CLR": {
+          "hash": "519e03f9205386ab",
+          "value": "0x08u"
+        },
+        "ALP_MHU_SWINT_SET": {
+          "hash": "3fd54133ede34c13",
+          "value": "0x04u"
+        },
+        "ALP_MHU_SWINT_UNIT": {
+          "hash": "0e3ea11243f24715",
+          "value": "(n) (ALP_MHU_SWINT_BASE + (n) * ALP_MHU_SWINT_UNIT_STRIDE)"
+        },
+        "ALP_MHU_SWINT_UNIT_STRIDE": {
+          "hash": "96aeeb37cd4e055d",
+          "value": "0x10u"
+        },
+        "ALP_V2N_DOORBELL_CLR_OFF": {
+          "hash": "3d8aef7b39d22985",
+          "value": "(ALP_MHU_SWINT_UNIT(ALP_V2N_DOORBELL_SWINT_UNIT) + ALP_MHU_SWINT_CLR)"
+        },
+        "ALP_V2N_DOORBELL_GIC_SPI": {
+          "hash": "a5ca998067a41955",
+          "value": "404u"
+        },
+        "ALP_V2N_DOORBELL_RSP_CH": {
+          "hash": "0ddd631480761620",
+          "value": "8u"
+        },
+        "ALP_V2N_DOORBELL_SET_OFF": {
+          "hash": "6e27a58ba0663739",
+          "value": "(ALP_MHU_SWINT_UNIT(ALP_V2N_DOORBELL_SWINT_UNIT) + ALP_MHU_SWINT_SET)"
+        },
+        "ALP_V2N_DOORBELL_SWINT_UNIT": {
+          "hash": "20119af8812c2e62",
+          "value": "12u"
+        },
+        "ALP_V2N_MHU_B_A55_BASE": {
+          "hash": "d858a6ffe95be7bb",
+          "value": "0x10480000u"
+        },
+        "ALP_V2N_MHU_B_CM33_BASE": {
+          "hash": "5f704a59c3e1ae72",
+          "value": "0x50480000u"
+        }
+      },
+      "typedefs": {},
+      "variables": {}
+    },
     "alp/pwm.h": {
       "functions": {
         "alp_pwm_capabilities": {

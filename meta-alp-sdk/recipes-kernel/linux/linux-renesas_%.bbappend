@@ -84,7 +84,36 @@ SRC_URI:append = " \
     file://0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch \
     file://0020-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
     file://uio.cfg \
+    file://e1m-v2n-doorbell.dtsi \
 "
+
+# CM33 -> CA55 doorbell SPI (decision Q52): "404" = MHU-B SWINT unit 12, the
+# path bench-proven in #697 (default until the bench proves 385); "385" =
+# Renesas' documented rsp_ch8_ns.  This rewrites e1m-v2n-doorbell.dtsi; the
+# CM33 firmware (CONFIG_ALP_V2N_DOORBELL_RSP_CH8) and libalp_sdk
+# (ALP_SDK_V2N_DOORBELL_RSP_CH8, alp-sdk recipe) must be built to match --
+# one bitbake variable drives all three, offsets live in
+# include/alp/protocol/v2n_mhu_doorbell.h.
+ALP_V2N_DOORBELL_SPI ??= "404"
+
+# CM33 remoteproc, OPT-IN until the bench proves attach + stop/start/reload
+# (docs/rzv2n-m33-secure-boot.md "Lifecycle").  "1" applies the Renesas RZ
+# remoteproc driver (0022/0023, GPL-2.0, Renesas authorship kept), the Alp
+# changes on top (0021 CPG syscon, 0024 userspace-owned vrings),
+# remoteproc.cfg, and the real cm33_rproc node in e1m-v2n-remoteproc.dtsi.
+ALP_V2N_REMOTEPROC ??= "0"
+# Dev-only (decision Q53): "1" lets Linux stop/reload the CM33 -- the node
+# loses alp,rz-attach-only.  Needs the matching TF-A (same variable, see
+# trusted-firmware-a_%.bbappend); production images refuse it.
+ALP_V2N_CM33_SRAM_NS ??= "0"
+SRC_URI += "${@' file://0021-arm64-dts-r9a09g056-make-the-CPG-a-syscon.patch file://0022-dt-bindings-remoteproc-add-Renesas-RZ-remoteproc.patch file://0023-remoteproc-add-Renesas-RZ-remoteproc-driver.patch file://0024-remoteproc-rz-let-userspace-own-the-vrings.patch file://remoteproc.cfg file://e1m-v2n-remoteproc.dtsi' if d.getVar('ALP_V2N_REMOTEPROC') == '1' else ''}"
+python () {
+    if d.getVar('ALP_V2N_DOORBELL_SPI') not in ('404', '385'):
+        bb.fatal("ALP_V2N_DOORBELL_SPI must be 404 or 385")
+    if d.getVar('ALP_V2N_REMOTEPROC') not in ('0', '1'):
+        bb.fatal("ALP_V2N_REMOTEPROC must be 0 or 1")
+}
+
 
 # 0020 (PDM clocks, audit MM-02/MM-X2): the V2N CPG driver had no PDM0/PDM1
 # module clocks or resets, so no pdm node could bind.  The patch adds them
@@ -280,7 +309,27 @@ do_configure:prepend() {
         "${WORKDIR}/e1m-v2m-deepx.dtsi" \
         "${WORKDIR}/e1m-v2n101-x-evk.dts" \
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
+        "${WORKDIR}/e1m-v2n-doorbell.dtsi" \
         "${ALP_DTS_DST}/"
+    sed -i 's/^#define ALP_V2N_DOORBELL_SPI .*/#define ALP_V2N_DOORBELL_SPI ${ALP_V2N_DOORBELL_SPI}/' \
+        "${ALP_DTS_DST}/e1m-v2n-doorbell.dtsi"
+
+    # CM33 remoteproc node: real body only when opted in (same branch-on-the-
+    # variable rule as the DRP-AI block below).
+    if [ "${ALP_V2N_REMOTEPROC}" = "1" ]; then
+        install -m 0644 "${WORKDIR}/e1m-v2n-remoteproc.dtsi" "${ALP_DTS_DST}/"
+        # Stop/reload only on dev builds whose TF-A opens CM33 SRAM to Linux.
+        if [ "${ALP_V2N_CM33_SRAM_NS}" = "1" ]; then
+            sed -i '/alp,rz-attach-only;/d' "${ALP_DTS_DST}/e1m-v2n-remoteproc.dtsi"
+        fi
+    else
+        printf '%s\n' \
+            '/* CM33 remoteproc node not claimed: set ALP_V2N_REMOTEPROC = "1".' \
+            ' * See e1m-v2n-remoteproc.dtsi in' \
+            ' * meta-alp-sdk/recipes-kernel/linux/linux-renesas/. */' \
+            > "${ALP_DTS_DST}/e1m-v2n-remoteproc.dtsi"
+        chmod 0644 "${ALP_DTS_DST}/e1m-v2n-remoteproc.dtsi"
+    fi
 
     # Per-project ownership (see the two cases above).  A manifest renders
     # over the SoM-default fragment installed above, and every node it names

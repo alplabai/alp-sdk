@@ -226,3 +226,20 @@ TF-A_EXTRA_OPTIONS:append:e1m-aen701 = " \
     ALIF_CONSOLE_TX_PORT=PORT_3 ALIF_CONSOLE_TX_PIN=PIN_5 \
     ALIF_CONSOLE_PIN_FUNC=PINMUX_ALTERNATE_FUNCTION_2 \
 "
+
+# Dev-only: non-secure access to CM33 SRAM (decision Q53).  BL2 loads the CM33
+# image into SRAM 0/1, which TZC-400 leaves secure-only; with "1" the patch
+# below also admits non-secure masters so Linux remoteproc can stop/reload the
+# CM33 (ALP_V2N_REMOTEPROC = "1").  WARNING: any Linux root process can then
+# rewrite CM33 code memory -- NEVER in production (alp-image-prod refuses it).
+# Default "0" applies no patch and passes no flag: the build is unchanged.
+ALP_V2N_CM33_SRAM_NS ??= "0"
+SRC_URI:append:rzv2n-family = "${@' file://0003-rzv2n-optional-non-secure-access-to-CM33-SRAM.patch' if d.getVar('ALP_V2N_CM33_SRAM_NS') == '1' else ''}"
+EXTRA_OEMAKE:append:rzv2n-family = "${@' ALP_CM33_SRAM_NS=1' if d.getVar('ALP_V2N_CM33_SRAM_NS') == '1' else ''}"
+
+# A local.conf that sets the flag gets the open-SRAM TF-A with nothing else to
+# say so (only alp-image-prod checks it), so make every such build say it.
+python () {
+    if d.getVar('ALP_V2N_CM33_SRAM_NS') == '1' and 'rzv2n-family' in (d.getVar('OVERRIDES') or '').split(':'):
+        bb.warn("ALP_V2N_CM33_SRAM_NS=1: this TF-A lets any non-secure master (any Linux root process) rewrite CM33 code memory. Dev builds only; alp-image-prod refuses it.")
+}
