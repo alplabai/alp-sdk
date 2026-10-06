@@ -41,7 +41,7 @@
  * CM33 J-Link, and Linux cannot see it.  So the same verdict is ALSO
  * published as a compact, versioned record in the `rsctbl` window
  * (A55 0x4F700F00, CM33-NS 0x9F700F00), right below the liveness
- * beacon the provisioning `cm33_running` check reads at 0x4F700FF0.
+ * beacon the provisioning `cm33_running` check reads at the AMP beacon address.
  * The layout lives in <alp/protocol/gd32_bridge_results.h>; read it
  * on the A55 with scripts/bench/v2n/read_gd32_results.py or the
  * tests/hil/v2m103-x-evk/v2m103-gd32-bridge-results.yaml spec.  The

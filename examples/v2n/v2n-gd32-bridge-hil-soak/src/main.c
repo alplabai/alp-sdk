@@ -39,7 +39,7 @@
  * (test pass/fail/skip, negotiated features and payload ceiling, ATTN
  * state, READ2 index/dropped/gaps, soak cycles/errors/timeouts/elapsed) in
  * the `rsctbl` window (A55 0x4F700F00), just below the liveness beacon the
- * provisioning `cm33_running` check reads at 0x4F700FF0.  Layout:
+ * provisioning `cm33_running` check reads at the AMP beacon address.  Layout:
  * <alp/protocol/gd32_bridge_results.h>; reader:
  * scripts/bench/v2n/read_gd32_results.py or the
  * tests/hil/v2m103-x-evk/v2m103-gd32-bridge-results.yaml spec.  The SRAM0

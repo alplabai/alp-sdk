@@ -14146,8 +14146,8 @@
           "value": "0x200u"
         },
         "ALP_GD32_RESULTS_BEACON_MAGIC": {
-          "hash": "484addcab984718a",
-          "value": "0xA10D0683u"
+          "hash": "5520b50a61ef2afd",
+          "value": "ALP_AMP_BEACON_MAGIC"
         },
         "ALP_GD32_RESULTS_BEACON_OFFSET": {
           "hash": "f89ac98ced339433",
