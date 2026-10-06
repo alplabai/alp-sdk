@@ -41,14 +41,14 @@ ssh_command: |-
       return None, None
   r, b = snap()
   bad = []
-  if r is None or r[0] != 0x47443352 or r[1] != 1:
+  if r is None or r[0] != 0x47443352 or r[1] != 2:
       print('HIL_GD32R_BAD no valid record (magic/layout)')
   else:
-      (magic, layout, seq, kind, state, p, f, sk, fw, feat, mp, flags, first, drop, gaps, cyc, err, tmo, el, _) = r
+      (magic, layout, seq, kind, state, p, f, sk, fw, feat, mp, flags, first, drop, gaps, cyc, err, tmo, el, fmask) = r
       if b[0] != 0xA10D0683 or b[1] != 0x200: bad.append('beacon magic/kind %#x/%#x (want 0xA10D0683/0x200: not the test image)' % (b[0], b[1]))
       if kind not in (1, 2): bad.append('kind %d' % kind)
       if state != 2: bad.append('state %#x (want 2)' % state)
-      if f or (kind == 2 and err): bad.append('failures fail=%d err=%d' % (f, err))
+      if f or (kind == 2 and err): bad.append('failures fail=%d err=%d fail_rows=%s' % (f, err, [i for i in range(32) if fmask >> i & 1]))
       if p == 0: bad.append('no test passed')
       if gaps: bad.append('read2 gaps %d' % gaps)
       if (fw >> 16, (fw >> 8) & 0xFF) >= (0, 15):
