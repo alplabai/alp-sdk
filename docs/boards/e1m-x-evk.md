@@ -142,9 +142,10 @@ row says so.
 | I3C | RZ/V2N I3C | none | n/a | 3-pin header, not fitted |
 | SoM-internal power / clock bus | RZ/V2N RIIC8 | `i2c-8` | 400 kHz | On-module parts only, see the last table |
 
-The PCIe / M.2 switch is enabled by `XEVK_PIN_PCIE0_I2C_EN` and its
-direction is set by line P0 of the PCIe I/O expander.  The enable polarity
-recorded for that pin has not been checked on a board (#2645).
+The PCIe / M.2 switch is a TI TMUX121 enabled by `XEVK_PIN_PCIE0_I2C_EN`
+(E1M-X IO2) and steered by line P0 of the PCIe I/O expander.  Its EN input
+is active-low and the net has no pull resistor, so drive the pin low to
+connect the M.2 slots and do not leave it floating.
 
 ### Fixed devices on I2C0 (`i2c-0`)
 
@@ -176,8 +177,8 @@ amplifiers are the exception: the kernel owns them for ALSA.
 
 | Device | Part | Address | Status |
 |---|---|---|---|
-| Display 1 touch controller | Goodix GT911 (on the panel cable) | `0x5D` or `0x14`, chosen by the controller's reset sequence | Interrupt on E1M-X IO9, reset on IO11.  The bus is documented above as E1M-X I2C3, but which controller the touch lines reach has not been confirmed (#2645).  On the X-EVK V2 the J6 display I2C is not wired to I2C3 (carrier gap, 2026-10-06), so the touch controller is not reachable through the GD32 I2C3 proxy there.  The device answering at `0x41` on `i2c-0` on 2026-10-06 is not the Riverdi touch controller.  **Never seen on a real unit** |
-| mikroBUS socket I²C | plug-in | depends on the Click board | Controller not confirmed (#2645).  Never scanned |
+| Display 1 touch controller | Goodix GT911 (on the panel cable) | `0x5D` or `0x14`, chosen by the controller's reset sequence | Interrupt on E1M-X IO9, reset on IO11.  On the X-EVK V2 the J6 display I²C is an isolated level-shifted segment with its own pull-ups and is not wired to E1M-X I2C3 or any other module bus (carrier gap, #2645), so neither the touch controller nor the panel bridge is reachable from the SoM.  Touch INT and RST are wired through.  The device answering at `0x41` on `i2c-0` on 2026-10-06 is not the Riverdi touch controller.  **Never seen on a real unit** |
+| mikroBUS socket I²C | plug-in | depends on the Click board | Not reachable from the SoM on the X-EVK V2: the socket I²C sits behind its own level shifter whose module side is not wired to any E1M-X I²C bus (I2C0..I2C3).  Carrier fix needed (#2645) |
 | M.2 E-key / M-key slot I²C | plug-in | depends on the card | Behind the PCIe / M.2 switch on I2C0.  Never scanned with a card fitted |
 | Camera modules | plug-in | depends on the sensor | On I2C2 (CAM0) or I2C3 (CAM1); see [`../v2n-camera-csi.md`](../v2n-camera-csi.md) |
 | USB-PD sink controller | CYPD3177 | n/a | Its I²C port is not connected to any host bus; it runs from its strap resistors |
@@ -262,8 +263,7 @@ UHS, no card-detect), `mmc2` = SDHI2 Wi-Fi SDIO.
 - Authoritative pad-by-pad routing (which E1M-X pad maps to which
   feature on the board).
 - The open I²C items listed under "Not on a scannable bus, or not
-  resolved" above (touch controller bus, mikroBUS I²C, PCIe / M.2 switch
-  enable polarity).
+  resolved" above (the J6 display and mikroBUS I²C carrier gaps).
 - Boot-strap dipswitch positions for V2N vs V2N-M1.
 
 When that lands, this doc becomes the SDK-side cheat sheet for
