@@ -1,6 +1,9 @@
 {
   "schemaVersion": 1,
   "planPathMode": "tokened",
+  "deferredPlaceholders": [
+    "MENDER_TENANT_TOKEN"
+  ],
   "generatedBy": "scripts/alp_orchestrate.py",
   "sdkVersion": "0.16.0",
   "sdkCommit": "<SDK_COMMIT>",

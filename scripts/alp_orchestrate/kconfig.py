@@ -1631,11 +1631,11 @@ def _split_server_url(url: str) -> tuple[str, Optional[int], Optional[str]]:
     a DNS lookup that can never resolve (alplabai/tan-cli#558).
 
     A value carrying no `://` is taken as an already-bare host and returned
-    verbatim -- that covers a plain hostname and a whole-value `${VAR}`
-    placeholder, which the build system substitutes later.  Host case is
-    preserved (DNS is case-insensitive, a `${VAR}` placeholder is not), so
-    this parses the authority by hand rather than through `urlsplit`, whose
-    `.hostname` lowercases.
+    verbatim.  A `${VAR}` placeholder passes through here too, but
+    `_slice_alp_conf` then refuses it: nothing substitutes a placeholder in a
+    Kconfig fragment (issue #2696, `_refuse_live_kconfig_placeholders`).  Host
+    case is preserved (DNS is case-insensitive), so this parses the authority
+    by hand rather than through `urlsplit`, whose `.hostname` lowercases.
 
     Raises OrchestratorError on anything that cannot be expressed as those
     three parts rather than emitting a value the client cannot use.
@@ -1767,8 +1767,10 @@ def _emit_ota(project: "BoardProject") -> list[str]:
     `_slice_local_conf`.  This handles the Zephyr side: per-slice
     Kconfig that compiles the matching client in.  Settings (server URL,
     poll interval, tenant token) thread through Kconfig string values
-    when declared in `ota:`; placeholders (${VAR}) pass through verbatim
-    so the build system substitutes at link time.
+    when declared in `ota:`.  A `${VAR}` placeholder may only land on a
+    commented line here (the Mender hints): Zephyr does not expand one in a
+    Kconfig fragment, so `_slice_alp_conf` refuses it on a live line
+    (issue #2696).
     """
     lines: list[str] = []
     ota = project.ota or {}
@@ -2124,7 +2126,41 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
                      "`ownership:`).")
         lines.extend(own_kconfig)
 
-    return "\n".join(lines) + "\n"
+    text = "\n".join(lines) + "\n"
+    _refuse_live_kconfig_placeholders(text, slice_.core_id)
+    return text
+
+
+def _refuse_live_kconfig_placeholders(text: str, core_id: str) -> None:
+    """Refuse a `${NAME}` placeholder on a live line of a Zephyr fragment.
+
+    A board.yaml value written as a placeholder (`ota.server.tenant:
+    "${MENDER_TENANT_TOKEN}"`) is meant for the build host or the device to
+    fill.  A Zephyr Kconfig fragment can never do that: the pinned v4.4.1
+    `scripts/kconfig/kconfiglib.py` `_load_config` only unescapes a `.conf`
+    string value -- the `expandvars` call in that file belongs to the Kconfig
+    *source* tokenizer, not the `.conf` loader -- and nothing in Zephyr's CMake
+    expands a fragment either.  So a live `CONFIG_HAWKBIT_SERVER="${HOST}"`
+    would build firmware that carries the literal text `${HOST}` as its
+    server name, silently.  A commented line (the Mender-MCU-client hint lines
+    in `_emit_ota`) is inert and allowed.
+    """
+    # Imported here, not at the top: a new top-of-file line would shift every
+    # line number that changelog fragments cite in this module.
+    import re
+
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        match = re.search(r"\$\{[^}]*\}", line)
+        if match:
+            raise OrchestratorError(
+                f"core '{core_id}': the Zephyr config would carry the "
+                f"placeholder `{match.group(0)}` literally (`{line.strip()}`) "
+                f"-- Zephyr does not expand environment variables in a "
+                f"Kconfig fragment, so the firmware would use the text "
+                f"`{match.group(0)}` itself.  Write the real value in "
+                f"board.yaml, or set it in the app's own prj.conf")
 
 
 def _inference_auto_order(som_preset: dict) -> list[str]:
@@ -2206,8 +2242,19 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         srv = ota.get("server") or {}
         if srv.get("url"):
             lines.append(f'MENDER_SERVER_URL ?= "{srv["url"]}"')
-        if srv.get("tenant"):
-            lines.append(f'MENDER_TENANT_TOKEN ?= "{srv["tenant"]}"')
+        tenant = str(srv.get("tenant") or "")
+        if "${" in tenant:
+            # A ${NAME} placeholder is never expanded by BitBake from the
+            # host environment, so a self-referencing `?=` would bake the
+            # literal text (or fail to expand).  Leave the token to the
+            # documented local.conf override instead.
+            lines.append(
+                "# MENDER_TENANT_TOKEN: set it in conf/local.conf "
+                "(meta-alp-sdk/README.md, Mender step 3); the board.yaml "
+                "placeholder is not expanded by BitBake."
+            )
+        elif tenant:
+            lines.append(f'MENDER_TENANT_TOKEN ?= "{tenant}"')
         sto = ota.get("storage") or {}
         if sto.get("device"):
             lines.append(f'MENDER_STORAGE_DEVICE_BASE ?= "{sto["device"]}"')

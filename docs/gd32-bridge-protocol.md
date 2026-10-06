@@ -57,11 +57,12 @@ allow-list.  Command opcodes are 1 byte; their numeric encoding is:
 | `0x04` | `BATCH` (v0.15)       | `count:u8 {op:u8 len:u8 args[len]}[count]`         | `executed:u8 {status:u8 len:u8 payload[len]}[executed]` (SPI only; needs the `BATCH` link feature -- see §3.16) |
 | `0x10` | `GPIO_READ`           | `mask:u32`                                         | `levels:u32` (masked subset)                       |
 | `0x11` | `GPIO_WRITE`          | `mask:u32 levels:u32`                              | _empty_                                            |
-| `0x20` | `PWM_SET`             | `channel:u8 reserved:u8 period_ns:u32 duty_ns:u32` | _empty_                                            |
+| `0x20` | `PWM_SET`             | `channel:u8 reserved:u8 period_ns:u32 duty_ns:u32` | _empty_ (`period_ns == 0 && duty_ns == 0` = stop + release the channel's timer claim; requires protocol >= 0.17; never send period 0 to older firmware, which treats it as a real period and retunes the timer's shared ARR -- `gd32g553_pwm_stop` returns `ALP_ERR_NOSUPPORT` below 0.17 without sending) |
 | `0x21` | `PWM_GET`             | `channel:u8`                                       | `period_ns:u32 duty_ns:u32`                        |
 | `0x30` | `ADC_READ`            | `channel:u8 samples:u8`                            | `mv[samples]:u16` (millivolt, raw averaged)        |
 | `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (always `0xFF` on this HW rev — see §3.4) |
 | `0x41` | `SE_RESET` (v0.8)       | `assert:u8` (`0` = release, `1` = hold in reset) | _empty_ (see §3.15) |
+| `0x42` | `BOOT_CONFIG` (v0.15)   | `op:u8 flags:u32` (`op` 0 = GET, 1 = SET; `flags` ignored on GET) | `flags:u32` (the stored value; see §3.19) |
 | `0x50` | `DAC_SET`             | `channel:u8 reserved:u8 value_mv:u16`              | _empty_                                            |
 | `0x51` | `DAC_GET`             | `channel:u8`                                       | `value_mv:u16`                                     |
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
@@ -79,7 +80,7 @@ allow-list.  Command opcodes are 1 byte; their numeric encoding is:
 | `0x3B` | `ADC_STREAM_BEGIN2` (v0.15) | `stream_id:u8 channel:u8 trigger_src:u8 trigger_arg:u8 sample_rate_hz:u32 watermark:u16 reserved:u16` | `tick_hz:u32 period_ticks:u32 full_scale:u16 vref_mv:u16 flags:u8 watermark:u16 ring_depth:u16` (SPI only; needs `ADC_STREAM2` -- see §3.18) |
 | `0x3C` | `ADC_STREAM_READ2` (v0.15) | `stream_id:u8 max_samples:u8`                    | `first_index:u32 dropped:u32 got:u8 codes[got]:u16` (**variable length**, `9 + 2*got` bytes; SPI only; needs `ADC_STREAM2` -- see §3.18) |
 | `0x23` | `PWM_CAPTURE_BEGIN`   | `channel:u8 edge:u8`                                  | _empty_ (see §3.y -- reconfigures the pad as input-capture) |
-| `0x24` | `PWM_CAPTURE_READ`    | `channel:u8`                                          | `period_ns:u32 pulse_ns:u32` (see §3.y -- returns `STATUS_NOSUPPORT` ("ring empty") until an edge lands; no edges land on this V2N HW rev pending a pad-routing rework) |
+| `0x24` | `PWM_CAPTURE_READ`    | `channel:u8`                                          | `period_ns:u32 pulse_ns:u32` (see §3.y -- returns `STATUS_NOT_READY` ("ring empty") until an edge lands (`STATUS_NOSUPPORT` where the input pad is not routed); no edges land on this V2N HW rev pending a pad-routing rework) |
 | `0x25` | `PWM_CAPTURE_END`     | `channel:u8`                                          | _empty_                                            |
 | `0x26` | `PWM_SINGLE_PULSE`    | `channel:u8 reserved:u8 reserved:u16 pulse_ns:u32`    | _empty_                                            |
 | `0x27` | `TIMER_SYNC`          | `master:u8 slave:u8 mode:u8`                          | _empty_                                            |
@@ -143,7 +144,7 @@ V2N silicon is still ahead for all three groups below (see
   correctly switches the channel to input-capture mode, but no
   edges land on this hardware revision until a follow-up hardware
   bring-up commit reworks the pad routing; `READ` reports
-  `STATUS_NOSUPPORT` ("ring empty") in the meantime.
+  `STATUS_NOT_READY` ("ring empty") in the meantime.
 * `CMD_PWM_SINGLE_PULSE` (opcode `0x26`) drives a one-shot pulse
   of caller-specified width on a PWM channel then stops.  The
   host-side surface is `alp_pwm_single_pulse(pwm, pulse_ns)` in
@@ -151,7 +152,11 @@ V2N silicon is still ahead for all three groups below (see
   timer's one-pulse mode (OPM); the whole timer's SP bit flips, so
   sibling channels on the same `TIMER0`/`TIMER7` also run
   single-pulse until a subsequent `PWM_SET` restores repetitive
-  mode.
+  mode.  Because the whole timer flips, the firmware answers
+  `STATUS_BUSY` while a sibling channel on the same timer is live
+  (stop it first with `PWM_SET` period 0 / duty 0, which releases the claim)
+  (e.g. PWM1 after `PWM_SET` on PWM0); use a channel on a timer no
+  other channel holds (PWM4..PWM6 on `TIMER7`).
 * `CMD_TIMER_SYNC` (opcode `0x27`) links the GD32G5's `TIMER0` /
   `TIMER7` / `TIMER19` (wire ids `0`/`1`/`2`) in master-slave
   configuration for synchronised multi-channel output.
@@ -343,6 +348,14 @@ bit-to-pad mapping (bits 0..22) is documented in
 `gd32-bridge-firmware:README.md`; the host header names only bits 18/19
 and 21/22 (below).  The host MUST NOT assume that
 bit `n` corresponds to GD32 pad `Pxn`.
+
+Bit 8 (E1M IO24, `PC14`) is **not routed** to the GD32 on the SoM
+(gd32-bridge-firmware#298): the bridge answers `STATUS_IO` for any
+`GPIO_READ`/`GPIO_WRITE` mask naming it, which also stops a `BATCH` at that
+op.  Use `GD32G553_GPIO_ROUTED_MASK` (bits 0..22 minus bit 8) as the
+"all lines" mask; `gd32g553_gpio_read` / `gd32g553_gpio_write` return
+`ALP_ERR_NOSUPPORT` for a mask naming bit 8, as the Linux driver refuses
+line 8 with `-ENODEV`.
 
 `GPIO_WRITE` is atomic in the firmware: read-modify-write of the
 pad output register is done with interrupts disabled around the
@@ -541,14 +554,16 @@ host side.  Each `mv[i]` carries the firmware's internal-reference-
 corrected reading; the host treats the values as **ground truth**
 for telemetry purposes.
 
-Two converter-level guards (fw `v0.2.8+`) make `ADC_READ` answer
-`STATUS_IO` instead of serving unreliable data:
+Two converter-level guards (fw `v0.2.8+`) make `ADC_READ` refuse
+instead of serving unreliable data (`STATUS_BUSY` for the stream-owned
+converter, `STATUS_IO` for the dead reference):
 
 - **converter owned by a stream** -- two logical channels ride each
   ADC converter, and a running `ADC_STREAM_*` session owns its
   converter outright.  A single-shot read on either channel of a
   streaming converter is refused (it would corrupt the live stream's
-  ring AND return wrong data); retry after `STREAM_END`.
+  ring AND return wrong data) with `STATUS_BUSY` (`ALP_ERR_BUSY`);
+  retry after `STREAM_END`.
 - **analog reference not ready** -- if the on-chip reference buffer
   never reported ready at boot, every conversion would be garbage
   referenced to a dead node.  The firmware fails the read loudly
@@ -1321,6 +1336,49 @@ Framing: the CRC follows the last code directly (§4).  The host clocks
 
 Host API: `gd32g553_adc_stream_begin2()` / `gd32g553_adc_stream_read2()`.
 
+### 3.19 Persistent boot configuration (`v0.15+`)
+
+`BOOT_CONFIG` (`0x42`) reads or stores a small persistent flag word in GD32
+flash.  Request `op:u8 flags:u32` (little-endian, 5 bytes): `op` `0` = GET
+(`flags` ignored), `1` = SET.  The reply is always the **stored** `flags:u32`
+(on a SET, the value stored *before* the commit).  **Allowed on the I2C link
+as well as SPI**, because provisioning runs from Linux.
+
+| Flag (bit) | Name | Effect |
+|------------|------|--------|
+| 0 | `SDMUX_EN_HIGH` | From every GD32 reset the firmware drives `PD11` (E1M `IO29`, the EVK's `SDIO_MUX_EN`, active-low: low = microSD connected, high = disconnected) **high**, so a provisioning run keeps the SD out across cold power cycles. |
+
+* **Opt-in.**  `IO29`'s meaning is carrier-specific, so the default
+  (nothing stored) leaves the pad untouched; only a host SET changes that.
+* **SET never moves a pad.**  It takes effect at the next GD32 reset, so
+  setting it on a unit booted from the SD cannot pull its rootfs out.  A
+  host that wants the SD out now also writes `IO29` high with `GPIO_WRITE`.
+  Clearing the flag does not release a pad that is already driven (that
+  needs a GD32 reset).
+* **Asynchronous SET.**  The firmware never touches flash inside the
+  transport interrupt.  A SET is queued and answered at once; the main loop
+  then commits it (on dual-bank parts two 1 KB page erases, each up to 20 ms
+  with interrupts masked: 2 x 20 ms of blackout plus main-loop latency).
+  There is no fixed idle window; the host waits ~50 ms and then polls GET,
+  tolerating transport errors, until the stored value equals the request; `gd32g553_boot_config_set()`
+  does exactly that.  A SET equal to the stored value is a no-op (no queue,
+  no erase).  A different SET while one is still queued, or while an OTA
+  session is active, answers `STATUS_BUSY`.  If the commit fails the GET poll never matches; the host
+  re-sends the SET.
+* **Power-loss safe.**  The flag lives in two A/B record pages (counter +
+  CRC, commit doubleword last) outside every image; a cut at any point of a
+  SET leaves either the old or the new value, never a fault: the boot-time
+  read checks the flash ECC flags and treats an uncorrectable doubleword as
+  "absent".  With no valid record every flag is off.
+* Returns `STATUS_INVAL` for an unknown `flags` bit, `op` > 1 or a wrong
+  length; `STATUS_BUSY` as above; `STATUS_NOSUPPORT` on firmware that
+  predates the opcode, a build without the flash HAL, a single-bank part
+  (`OBCTL.DBS` = 0) or an image running from slot B.  The host helpers map
+  it to `ALP_ERR_NOSUPPORT`.
+
+Host API: `gd32g553_boot_config_get()` / `gd32g553_boot_config_set()` with
+`GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH`.
+
 ## 4. SPI framing
 
 Each command on SPI is a **request frame** sent by the host while CS
@@ -1543,6 +1601,10 @@ slave **can hold the bus** by clock-stretching, the firmware
 guarantees that the reply bytes are available before it releases
 SCL.  Hosts that don't support clock-stretching can poll the bus
 busy bit instead.
+
+The firmware's I2C allow-list is a subset of the opcode set; `BOOT_CONFIG`
+(`0x42`) is on it (§3.19), so the persistent boot flags can be set from
+Linux without the SPI link.
 
 If the host issues a `read` before any `write` since the last
 START, the firmware replies with one byte `STATUS = 0x80` (no

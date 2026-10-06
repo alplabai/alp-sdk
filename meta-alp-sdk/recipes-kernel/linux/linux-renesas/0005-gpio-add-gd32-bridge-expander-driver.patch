@@ -104,8 +104,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 1252 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 1262 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 1258 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 1268 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -145,7 +145,7 @@ new file mode 100644
 index 000000000..0d3b6690f
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,1252 @@
+@@ -0,0 +1,1258 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -1363,6 +1363,12 @@ index 000000000..0d3b6690f
 +	.driver = {
 +		.name = "gpio-gd32-bridge",
 +		.of_match_table = gd32_bridge_gpio_of_match,
++		/* Consumers (wlan-pwrseq, hci_bcm, the panel) hold lines of this
++		 * chip; a sysfs unbind force-unbinds them through fw_devlink and
++		 * frees mmc_pwrseq while &sdhi2 still points at it, so the next
++		 * reboot dereferences it (use-after-free panic).  Never unbindable.
++		 */
++		.suppress_bind_attrs = true,
 +	},
 +	.probe_new = gd32_bridge_gpio_probe,
 +};
