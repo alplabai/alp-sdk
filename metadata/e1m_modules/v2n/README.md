@@ -16,10 +16,10 @@ modules without the DEEPX DX-M1 NPU).
 | `core-ownership.yaml`             | `core_ownership:` FIXED `(peripheral, pad) -> core` facts, cited; `assignable:` per-product choices by E1M instance; `a55_only_resources` for blocks with no TSV row |
 | `supervisor-links.yaml`           | `supervisor-links-v1`                      |
 
-Not in `gd32-io-mcu-map.*` (they are not bridge-controllable GPIOs): E1M IO26 and
-E1M IO15 are physically routed to GD32 PC2 and PB4, but the bridge firmware has no
-bitmap bit for them yet, so the SDK does not expose them through the bridge. E1M IO24
-is not a GD32 pad at all (driven by the DX-M1 on V2M, undriven on V2N).
+E1M IO15 and IO26 are routed to GD32 PB4 and PC2 and are bridge GPIO bits 21/22
+(bridge protocol minor >= 15, firmware 0.3.1); older bridge firmware ignores them.
+Not in `gd32-io-mcu-map.*`: E1M IO24 is not a GD32 pad at all (driven by the DX-M1
+on V2M, undriven on V2N).
 
 ## Two MCUs on the module
 

@@ -103,6 +103,7 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
     "optiga_trust_m":     ("I2C",),
     "eeprom_24c128":      ("I2C",),
     "tcal9538":           ("I2C",),
+    "ina228":             ("I2C",),
     "ina236":             ("I2C",),
     # pdm_mic helper has no subsystem dep declared in Kconfig
     # (uses <alp/i2s.h> when enabled at v0.2+).

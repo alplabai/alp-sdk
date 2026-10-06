@@ -1,0 +1,14 @@
+### Added -- provisioning sets the V2N RTC time and enables its backup switchover and trickle charge (#2660)
+
+The RV-3028-C7 on the E1M-V2N/V2M SoM shipped with no time and with backup
+switchover and trickle charge off (register `0x37` = `0x10`). The SoM device
+tree leaves `trickle-resistor-ohms` unset: trickle charge is a carrier decision
+(a rechargeable supercap only, never a primary lithium cell), and the property
+makes `rtc-rv3028` rewrite the configuration EEPROM at every boot. A new `rtc_set` provisioning step
+sets the system time from the provisioning host (UTC), runs `hwclock -w`, reads
+it back, and enables level-mode backup switchover through the driver's
+`RTC_PARAM_SET`. The census records `rtc_backup_switch_mode` and `rtc_trickle`;
+`rtc_time_set`, `rtc_backup_mode` and the new `rtc_trickle` functional checks
+(expected trickle from the carrier's `rtc_backup` in `metadata/boards/<carrier>.yaml`; the `rtc_backup` fixture is refused on a carrier that declares none) now block shipping. Bit meanings are from the RV-3028-C7 Application Manual
+Rev. 1.4. Bench-verified on five E1M-V2M103 units (2026-10-03, reg `0x37` =
+`0xbf`); the supercap retention check across a full power-off is still unrun.

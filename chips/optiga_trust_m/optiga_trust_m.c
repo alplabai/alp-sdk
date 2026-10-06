@@ -264,10 +264,10 @@ alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
 	/* The library writes the received length when the op completes, which
 	 * after a timeout is a later call: keep it in ctx, not on the stack.
 	 * resp is the caller's and must stay valid until the next call. */
-	ctx->xfer_len = resp_cap > UINT16_MAX ? UINT16_MAX : (uint16_t)resp_cap;
-
 	alp_status_t s = session_open(ctx, SESSION_RAW);
 	if (s != ALP_OK) return s;
+	/* After session_open(): its drain of a timed-out op rewrites xfer_len. */
+	ctx->xfer_len  = resp_cap > UINT16_MAX ? UINT16_MAX : (uint16_t)resp_cap;
 	ctx->op_status = OPTIGA_LIB_BUSY;
 	if (optiga_comms_transceive(ctx->comms, apdu, (uint16_t)apdu_len, resp, &ctx->xfer_len) !=
 	    OPTIGA_LIB_SUCCESS) {

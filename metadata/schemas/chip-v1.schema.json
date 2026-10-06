@@ -160,6 +160,7 @@
     "mdio": { "type": "object" },
     "oui": { "type": "integer" },
     "phy_id_pattern": { "type": "integer" },
+    "firmware_banner_regex": { "type": "string" },
     "instances_per_v2n": { "type": "integer" },
     "instances": { "type": "array" },
     "power": { "type": "object" },
