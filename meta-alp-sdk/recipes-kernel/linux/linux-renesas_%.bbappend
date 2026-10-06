@@ -99,22 +99,21 @@ ALP_V2N_DOORBELL_SPI ??= "404"
 
 # CM33 remoteproc, OPT-IN until the bench proves attach + stop/start/reload
 # (docs/rzv2n-m33-secure-boot.md "Lifecycle").  "1" applies the Renesas RZ
-# remoteproc driver (0019/0020, GPL-2.0, Renesas authorship kept), the Alp
-# changes on top (0018 CPG syscon, 0021 userspace-owned vrings),
+# remoteproc driver (0022/0023, GPL-2.0, Renesas authorship kept), the Alp
+# changes on top (0021 CPG syscon, 0024 userspace-owned vrings),
 # remoteproc.cfg, and the real cm33_rproc node in e1m-v2n-remoteproc.dtsi.
 ALP_V2N_REMOTEPROC ??= "0"
 # Dev-only (decision Q53): "1" lets Linux stop/reload the CM33 -- the node
 # loses alp,rz-attach-only.  Needs the matching TF-A (same variable, see
 # trusted-firmware-a_%.bbappend); production images refuse it.
 ALP_V2N_CM33_SRAM_NS ??= "0"
-SRC_URI += "${@' file://0018-arm64-dts-r9a09g056-make-the-CPG-a-syscon.patch file://0019-dt-bindings-remoteproc-add-Renesas-RZ-remoteproc.patch file://0020-remoteproc-add-Renesas-RZ-remoteproc-driver.patch file://0021-remoteproc-rz-let-userspace-own-the-vrings.patch file://remoteproc.cfg file://e1m-v2n-remoteproc.dtsi' if d.getVar('ALP_V2N_REMOTEPROC') == '1' else ''}"
+SRC_URI += "${@' file://0021-arm64-dts-r9a09g056-make-the-CPG-a-syscon.patch file://0022-dt-bindings-remoteproc-add-Renesas-RZ-remoteproc.patch file://0023-remoteproc-add-Renesas-RZ-remoteproc-driver.patch file://0024-remoteproc-rz-let-userspace-own-the-vrings.patch file://remoteproc.cfg file://e1m-v2n-remoteproc.dtsi' if d.getVar('ALP_V2N_REMOTEPROC') == '1' else ''}"
 python () {
     if d.getVar('ALP_V2N_DOORBELL_SPI') not in ('404', '385'):
         bb.fatal("ALP_V2N_DOORBELL_SPI must be 404 or 385")
     if d.getVar('ALP_V2N_REMOTEPROC') not in ('0', '1'):
         bb.fatal("ALP_V2N_REMOTEPROC must be 0 or 1")
 }
-
 
 # panic.cfg (#2734): CONFIG_PANIC_TIMEOUT=10 -- a panic reboots the board after
 # 10 s instead of hanging forever (panic_timeout defaults to 0).

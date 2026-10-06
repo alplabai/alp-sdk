@@ -142,24 +142,24 @@ reload exist only in an opt-in dev build, `ALP_V2N_CM33_SRAM_NS = "1"`
 
 Enable it with `ALP_V2N_REMOTEPROC = "1"` in `local.conf` (default `"0"`
 until the bench proves it).  That applies
-`meta-alp-sdk/recipes-kernel/linux/linux-renesas/0018`-`0021`, merges
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/0021`-`0024`, merges
 `remoteproc.cfg` and installs the `cm33_rproc` node
 (`e1m-v2n-remoteproc.dtsi`).  The driver is the Renesas RZ Multi-OS Package
-v4.2.0's (`rz_rproc.c`, GPL-2.0, patches `0019`/`0020` imported unmodified
-with Renesas authorship); the Alp changes are `0018` (CPG is a syscon) and
-`0021` (`alp,rz-userspace-ipc`, `alp,rz-attach-only`).
+v4.2.0's (`rz_rproc.c`, GPL-2.0, patches `0022`/`0023` imported unmodified
+with Renesas authorship); the Alp changes are `0021` (CPG is a syscon) and
+`0024` (`alp,rz-userspace-ipc`, `alp,rz-attach-only`).
 
 ### Production (default) vs dev (`ALP_V2N_CM33_SRAM_NS = "1"`)
 
 | | production, `"0"` | dev, `"1"` |
 |---|---|---|
-| TF-A | unchanged (SRAM 0/1 secure-only) | `0002-rzv2n-optional-non-secure-access-to-CM33-SRAM.patch`, `ALP_CM33_SRAM_NS=1`: TZC-400 region 0 of SRAM 0/1 also admits non-secure masters |
-| `cm33_rproc` node | `alp,rz-attach-only`: the driver has no start/stop/load; probe fails if the CM33 is not running | flag removed: Renesas' stop/start/reload |
+| TF-A | unchanged (SRAM 0/1 secure-only) | `0003-rzv2n-optional-non-secure-access-to-CM33-SRAM.patch`, `ALP_CM33_SRAM_NS=1`: TZC-400 region 0 of SRAM 0/1 also admits non-secure masters |
+| `cm33_rproc` node | `alp,rz-attach-only`: the driver has no start/load and `stop` always fails with `-EPERM`; probe fails if the CM33 is not running or `alp,rz-userspace-ipc` is absent | flag removed: Renesas' stop/start/reload |
 | `/lib/firmware/m33_sm.elf` | not installed | `alp-cm33-firmware` installs `${ALP_CM33_ELF}` (alp-image-edge) |
 
 **WARNING: with `"1"` any Linux root process can rewrite CM33 code memory.**
 Dev images only.  `alp-image-prod` refuses to build with the flag set
-(`bb.fatal`).  The TF-A it changes is a separate recipe, so also keep the flag
+(the recipe is skipped with that reason, so other recipes still build).  The TF-A it changes is a separate recipe, so also keep the flag
 out of any `local.conf` used for production builds.  There is no provisioning
 ship-check: the TF-A bundle carries no record of the flag (a bundle-metadata
 field plus a `check_som_bundle.py` rule is follow-up), so a provisioned unit
@@ -201,7 +201,7 @@ Rules that follow from the design:
   metadata: a generator from `memory_map:` is follow-up.
 - **TZC.**  Attach touches no memory.  `stop` and reload write CM33 SRAM from
   Linux, which needs the dev TF-A above; without it a blocked write is a bus
-  error, which is why production has no stop operation at all.
+  error, which is why production's stop operation only refuses (`-EPERM`).
 - Reload payload: `alp-cm33-firmware` (dev only) installs
   `/lib/firmware/m33_sm.elf` from `ALP_CM33_ELF`, the `zephyr.elf` of the same
   build as the xSPI image.
@@ -228,7 +228,7 @@ Register offsets: `include/alp/protocol/v2n_mhu_doorbell.h` (CM33 SET
 Run in this order; stop at the first failure.  Steps 1-3 use the production
 configuration; 4-8 need a dev build (`ALP_V2N_CM33_SRAM_NS = "1"`, TF-A
 included).  First check, on the production build, that `echo stop` is refused
-(`Invalid argument`) and the CM33 keeps running.
+(`Operation not permitted`, state stays `attached`) and the CM33 keeps running.
 
 1. Build with `ALP_V2N_REMOTEPROC = "1"`, flash, cold-cycle.  `dmesg | grep
    rz-rproc` shows `probed`; `cat $RP/state` is `detached`; the CM33 beacon

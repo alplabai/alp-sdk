@@ -4,7 +4,7 @@
  *
  * TF-A/BL2 starts the CM33 at power-on from the xSPI image (factory
  * default, docs/rzv2n-m33-secure-boot.md).  The Renesas RZ remoteproc
- * driver (patches 0019/0020, Alp changes 0021) probes with the CM33
+ * driver (patches 0022/0023, Alp changes 0024) probes with the CM33
  * already out of reset, so the rproc comes up DETACHED:
  *
  *     echo start > /sys/class/remoteproc/remoteproc0/state    # attach
