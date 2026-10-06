@@ -66,6 +66,23 @@ over the DAP:
 | `[40]`  | staircase: current duty per-mille (live)                    |
 | `[41]`  | staircase: step counter (liveness)                          |
 
+## Reading the verdict from Linux (no J-Link)
+
+SRAM0 is readable only through a CM33 J-Link.  The same verdict is also
+published as a compact, versioned 20-word record in the `rsctbl` window,
+A55 `0x4F700F00` (CM33-NS `0x9F700F00`), right below the liveness beacon
+at `0x4F700FF0` that provisioning's `cm33_running` reads.  Layout and
+field meanings: `include/alp/protocol/gd32_bridge_results.h`.  On the
+A55 (root, `/dev/mem`):
+
+```bash
+python3 read_gd32_results.py          # scripts/bench/v2n/read_gd32_results.py
+```
+
+`tests/hil/v2m103-x-evk/v2m103-gd32-bridge-results.yaml` asserts it.
+The record's `tests_skip` counts the self-gating v0.15 tests that were skipped because the bridge did not grant the feature; the SRAM0 block still counts those as passes.
+
+
 ## The scope observable
 
 After the suite the app parks in a forever **PWM7 duty staircase**:

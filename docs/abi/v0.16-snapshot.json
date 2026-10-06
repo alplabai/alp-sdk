@@ -14006,6 +14006,134 @@
       "typedefs": {},
       "variables": {}
     },
+    "alp/protocol/gd32_bridge_results.h": {
+      "functions": {
+        "alp_gd32_results_beacon_init": {
+          "hash": "5fac75dbc5d890ec",
+          "signature": "static inline void alp_gd32_results_beacon_init(void *window);"
+        },
+        "alp_gd32_results_beacon_tick": {
+          "hash": "c4d3fb31974cc964",
+          "signature": "static inline void alp_gd32_results_beacon_tick(void *window);"
+        },
+        "alp_gd32_results_init": {
+          "hash": "4e8386178161caad",
+          "signature": "static inline void alp_gd32_results_init(void *window, uint32_t kind);"
+        },
+        "alp_gd32_results_publish": {
+          "hash": "1e37dc3d0fa56335",
+          "signature": "static inline void alp_gd32_results_publish(void *window, const alp_gd32_results_t *snap);"
+        }
+      },
+      "macros": {
+        "ALP_GD32_RESULTS_BEACON_KIND": {
+          "hash": "d4efbb0c194aa569",
+          "value": "0x200u"
+        },
+        "ALP_GD32_RESULTS_BEACON_MAGIC": {
+          "hash": "484addcab984718a",
+          "value": "0xA10D0683u"
+        },
+        "ALP_GD32_RESULTS_BEACON_OFFSET": {
+          "hash": "f89ac98ced339433",
+          "value": "0xFF0u"
+        },
+        "ALP_GD32_RESULTS_FLAG_ATTN_ACTIVE": {
+          "hash": "b7e6c7a62842cb55",
+          "value": "(1u << 1)"
+        },
+        "ALP_GD32_RESULTS_FLAG_ATTN_FALLBACK": {
+          "hash": "99c72a81c6970f6e",
+          "value": "(1u << 2)"
+        },
+        "ALP_GD32_RESULTS_FLAG_ATTN_GRANTED": {
+          "hash": "d8f72f35f56e8a7a",
+          "value": "(1u << 0)"
+        },
+        "ALP_GD32_RESULTS_FLAG_BATCH_OK": {
+          "hash": "aeb62dc95be35136",
+          "value": "(1u << 3)"
+        },
+        "ALP_GD32_RESULTS_FLAG_STREAM2_OK": {
+          "hash": "a123b144f64e22af",
+          "value": "(1u << 4)"
+        },
+        "ALP_GD32_RESULTS_KIND_FUNCTIONAL": {
+          "hash": "003a1427950cc2d2",
+          "value": "1u"
+        },
+        "ALP_GD32_RESULTS_KIND_SOAK": {
+          "hash": "1522eaa96afa7deb",
+          "value": "2u"
+        },
+        "ALP_GD32_RESULTS_LAYOUT": {
+          "hash": "8d770a4847b32c57",
+          "value": "1u"
+        },
+        "ALP_GD32_RESULTS_MAGIC": {
+          "hash": "705b61e60eb77f97",
+          "value": "0x47443352u"
+        },
+        "ALP_GD32_RESULTS_OFFSET": {
+          "hash": "2d36bef370c8342e",
+          "value": "0xF00u"
+        },
+        "ALP_GD32_RESULTS_STATE_DONE": {
+          "hash": "63e1d9960411d4e5",
+          "value": "2u"
+        },
+        "ALP_GD32_RESULTS_STATE_LINK_PENDING": {
+          "hash": "708eec24c5999764",
+          "value": "0u"
+        },
+        "ALP_GD32_RESULTS_STATE_NO_LINK": {
+          "hash": "cfd32df472c9017c",
+          "value": "0xDEADu"
+        },
+        "ALP_GD32_RESULTS_STATE_RUNNING": {
+          "hash": "e6923c0f1987eab2",
+          "value": "1u"
+        },
+        "ALP_GD32_RESULTS_WORDS": {
+          "hash": "08b419add3849485",
+          "value": "20u"
+        },
+        "ALP_PROTOCOL_GD32_BRIDGE_RESULTS_H_": {
+          "hash": "90a8766683ac934c",
+          "value": "#include <stddef.h>"
+        }
+      },
+      "typedefs": {
+        "alp_gd32_results_t": {
+          "definition": "typedef struct { uint32_t magic; uint32_t layout; uint32_t seq; uint32_t kind; uint32_t state; uint32_t tests_pass; uint32_t tests_fail; uint32_t tests_skip; uint32_t fw_version; uint32_t features; uint32_t max_payload; uint32_t flags; uint32_t read2_first; uint32_t read2_dropped; uint32_t read2_gaps; uint32_t soak_cycles; uint32_t soak_errors; uint32_t soak_timeouts; uint32_t soak_elapsed_s; uint32_t reserved; } alp_gd32_results_t;",
+          "fields": [
+            "uint32_t magic",
+            "uint32_t layout",
+            "uint32_t seq",
+            "uint32_t kind",
+            "uint32_t state",
+            "uint32_t tests_pass",
+            "uint32_t tests_fail",
+            "uint32_t tests_skip",
+            "uint32_t fw_version",
+            "uint32_t features",
+            "uint32_t max_payload",
+            "uint32_t flags",
+            "uint32_t read2_first",
+            "uint32_t read2_dropped",
+            "uint32_t read2_gaps",
+            "uint32_t soak_cycles",
+            "uint32_t soak_errors",
+            "uint32_t soak_timeouts",
+            "uint32_t soak_elapsed_s",
+            "uint32_t reserved"
+          ],
+          "hash": "19f6b053a05647a0",
+          "kind": "struct"
+        }
+      },
+      "variables": {}
+    },
     "alp/pwm.h": {
       "functions": {
         "alp_pwm_capabilities": {
