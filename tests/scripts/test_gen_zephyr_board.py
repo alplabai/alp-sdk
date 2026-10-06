@@ -333,6 +333,29 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
             self.assertIn("reg = <0x9f710000 0x4000>;", node)
             self.assertIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=16384", cfg)
 
+    def test_v2n_ram_console_inside_openamp_window_and_clear_of_ipc(self) -> None:
+        """The RAM console must sit inside `openamp_shm` and overlap none of
+        the rsctbl / mhu1_shm / vring_* regions (parsed from the same dts,
+        so a moved IPC region fails here, not on silicon)."""
+        for sku, d in (("E1M-V2N101", "e1m_v2n101_m33_sm"),
+                       ("E1M-V2M101", "e1m_v2m101_m33_sm")):
+            dts = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)[
+                f"alp_{d}/alp_{d}_r9a09g056n48gbg_cm33.dts"]
+            regs = {
+                label: (int(base, 16), int(base, 16) + int(size, 16))
+                for label, base, size in re.findall(
+                    r"(\w+): memory@\w+ \{[^}]*?reg = <(0x[0-9a-f]+) (0x[0-9a-f]+)>;",
+                    dts)
+            }
+            lo, hi = regs.pop("ram_console")
+            win_lo, win_hi = regs.pop("openamp_shm")
+            self.assertTrue(win_lo <= lo and hi <= win_hi, sku)
+            ipc = {k: v for k, v in regs.items()
+                   if k in ("rsctbl", "mhu1_shm") or k.startswith("vring_")}
+            self.assertEqual(len(ipc), 6, f"{sku}: {sorted(ipc)}")
+            for label, (a, b) in ipc.items():
+                self.assertTrue(hi <= a or b <= lo, f"{sku}: ram_console overlaps {label}")
+
     def test_openamp_ipc_false_drops_the_block(self) -> None:
         """No committed board sets `openamp_ipc: false` any more, so the
         shorter path is exercised on a preset with the flag cleared: it must
