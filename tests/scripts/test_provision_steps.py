@@ -799,7 +799,7 @@ def test_gd32_probe_reads_nothing_from_a_wrong_debug_port(tmp_path):
 def test_clkgen_verify_pass(tmp_path):
     board = Board()
     image = bytearray(lt.CLKGEN_OTP_IMAGE)
-    image[0x21], image[0x24] = 0xC0, 0x8E
+    image[0x1F], image[0x21], image[0x24] = 0xC7, 0xC0, 0x8F
     for reg, val in enumerate(image):
         board.regs[(8, 0x69, reg)] = val
     ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True)
@@ -808,6 +808,7 @@ def test_clkgen_verify_pass(tmp_path):
     r = res[-1]
     assert r.name == "clkgen_verify" and r.status == "done", r.detail
     assert r.evidence["clkgen_i2c_addr"] == "0x69"
+    assert "SE2 24.576 MHz (0x1f=0xc7, 0x24=0x8f)" in r.detail
     assert r.evidence["clkgen_otp_raw"] == " ".join(f"{b:02x}" for b in image)
 
 
@@ -820,7 +821,7 @@ def test_clkgen_verify_fails_on_mismatch_and_missing_boot_line(tmp_path):
     res = steps.run_steps(ctx, only=["clkgen_verify"])
     r = res[-1]
     assert r.status == "failed"
-    assert "reg 0x21" in r.detail and "5L35023B clock" in r.detail
+    assert "reg 0x1f" in r.detail and "reg 0x21" in r.detail and "5L35023B clock" in r.detail
     assert "#2293" in r.detail and "patch 0007" in r.detail
 
 
@@ -1391,6 +1392,40 @@ def test_fip_write_leaves_the_cm33_region_untouched(tmp_path):
     blocks = int(next(c for c in board.commands if c.startswith("flash_erase /dev/mtd1 ")).split()[-1])
     assert blocks * 65536 <= gates.CM33_REGION_OFFSET                       # the erase stops below the region
 
+
+@pytest.mark.parametrize("word,why", [("0X3e06", "debug mode"), ("0X3c05", "emmc"), ("0X3806", "boot_cpu=cm33")])
+def test_cold_boot_refuses_a_wrong_boot_strap_word(tmp_path, word, why):
+    board = Board(act_0x10=0x08)
+    board.host = "10.0.0.2"
+    board._answer_orig = board._answer
+    board._answer = lambda cmd: (0, _everyone_acks()) if cmd.startswith("i2cdetect") else board._answer_orig(cmd)
+    console = _login_console()
+    bench = _bench(console=console)
+    bench.power.on_hook = lambda: console.feed(
+        f"NOTICE:  BL2: v2.10\nNOTICE:  BL2: SYS_LSI_MODE: {word}\nDRAM:  3.9 GiB\n"
+        f"{gates.RAIL_PG}\n\ne1m login: ")
+    ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True, cold_cycles=1)
+    cb = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])[-1]
+    assert cb.status != "done" and "not the expected boot mode" in cb.detail, cb.detail
+    assert (ledger_out.DEBUG_MODE_REASON in cb.detail) == (why == "debug mode")
+    if why == "boot_cpu=cm33":
+        assert why in cb.detail
+
+
+def test_cold_boot_without_a_boot_strap_description_is_a_problem_not_a_crash(tmp_path):
+    board = Board(act_0x10=0x08)
+    board.host = "10.0.0.2"
+    board._answer_orig = board._answer
+    board._answer = lambda cmd: (0, _everyone_acks()) if cmd.startswith("i2cdetect") else board._answer_orig(cmd)
+    console = _login_console()
+    bench = _bench(console=console)
+    bench.power.on_hook = lambda: console.feed(
+        f"NOTICE:  BL2: v2.10\nNOTICE:  BL2: SYS_LSI_MODE: 0X3c06\nDRAM:  3.9 GiB\n"
+        f"{gates.RAIL_PG}\n\ne1m login: ")
+    ctx = _ctx(tmp_path, bench=bench, linux=board, execute=True, cold_cycles=1)
+    ctx.preset = {**ctx.preset, "silicon": "renesas:rzv2n:nonexistent"}
+    cb = steps.run_steps(ctx, only=["cold_boot_test"], force=["cold_boot_test"])[-1]
+    assert cb.status != "done" and "not judged" in cb.detail, cb.detail
 
 def test_clkgen_verify_without_a_boot_capture_is_not_verified_rather_than_failed(tmp_path):
     board = Board()

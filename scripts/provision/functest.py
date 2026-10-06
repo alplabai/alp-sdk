@@ -136,6 +136,22 @@ def _want(x: dict, key: str):
     return cur
 
 
+def describe_boot_mode(got: dict) -> str:
+    return f"debug_en={got['soc_boot_debug_en']} boot_device={got['soc_boot_device']} md_boot={got['soc_md_boot']} boot_cpu={got['soc_boot_cpu']}"
+
+
+def judge_boot_mode(word: int, silicon: str, x: dict) -> tuple[dict, bool]:
+    """(decoded ledger keys, matches the expectation) for a latched boot-strap word, judged against
+    ``boot_mode`` of the expectations file. The single judge of functional_test's boot_mode and
+    cold_boot_test. Raises on a missing description/expectation (NoExpect, KeyError, ValueError)."""
+    got = lt.decode_lsi_mode(word, lt.sys_lsi_spec(silicon))
+    # int(): an overlay may write the flag as bool or 0/1
+    ok = (int(got["soc_boot_debug_en"]) == int(_want(x, "boot_mode.debug_enable"))
+          and got["soc_boot_device"] == _want(x, "boot_mode.boot_device")
+          and got["soc_boot_cpu"] == _want(x, "boot_mode.boot_cpu"))
+    return got, ok
+
+
 # --------------------------------------------------------------------------
 # judge helpers
 # --------------------------------------------------------------------------
@@ -453,6 +469,22 @@ def build(ctx, x: dict | None = None) -> list[Check]:
     add("xspi", "the xSPI flash is identified and partitioned (its content is census_final's md5)",
         'cat /proc/mtd; echo "jedec=$(cat /sys/bus/spi/devices/*/spi-nor/jedec_id 2>/dev/null | head -n1)"', j_xspi,
         tools=("head",))
+
+    def j_boot_mode(o):
+        try:
+            got, ok = judge_boot_mode(int(o.strip().splitlines()[-1], 16), str(ctx.preset["silicon"]), x)
+        except (KeyError, ValueError, OSError, IndexError) as e:
+            raise Unread(f"SYS_LSI_MODE not readable or not described: {e}") from e
+        val = describe_boot_mode(got)
+        if not ok:
+            raise Fail(val)
+        return val
+    try:
+        _lsi_mode_cmd = lt.devmem_cmd(int(lt.sys_lsi_spec(str(ctx.preset["silicon"]))["registers"]["soc_sys_lsi_mode"], 16))
+    except (KeyError, ValueError, OSError):
+        _lsi_mode_cmd = "echo 'ALPUNREAD no sys_lsi description for this SoC'"
+    add("boot_mode", "the SoC latched normal boot mode, not debug mode (MD_BOOT3 low), from the boot device it ships with",
+        _lsi_mode_cmd, j_boot_mode, blocking=True)       # blocking: an overlay cannot demote the debug-mode check
 
     # ---- Ethernet -----------------------------------------------------------------------------
     nports = int((ctx.preset.get("on_module") or {}).get("ethernet_phy_count") or 2)
@@ -878,13 +910,8 @@ def build(ctx, x: dict | None = None) -> list[Check]:
             raise Fail(f"{got}: the counter must advance by {lo}..{hi} in 2 s")
         return f"counter {c0} then {c1}"
     addr = (x.get("cm33_beacon") or {}).get("address", 0)      # the judge refuses a missing expectation
-    _rd = ("import mmap,os,struct,sys;a=int(sys.argv[1],16);"
-           "m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC),4096,mmap.MAP_SHARED,mmap.PROT_READ,offset=a&~4095);"
-           "print(hex(struct.unpack_from('<I',m,a&4095)[0]))")
     add("cm33_running", "the CM33 liveness beacon is present and its counter advances",
-        "if command -v devmem >/dev/null 2>&1; then r() { devmem $1 32 2>&1; }\n"
-        f"elif py=$(command -v python3); then r() {{ \"$py\" -c {q(_rd)} $1 2>&1 | tail -n1; }}\n"
-        'else echo "ALPUNREAD missing tool: devmem or python3"; exit 0; fi\n'
+        lt.DEVMEM_READ_FN +
         f'echo "B $(r {addr:#x}) $(r {addr + 4:#x}) $(r {addr + 8:#x})"; sleep 2; echo "C $(r {addr + 8:#x})"',
         j_cm33_running, timeout_s=15, est_s=2.2, blocking=cm33 is not None)
 

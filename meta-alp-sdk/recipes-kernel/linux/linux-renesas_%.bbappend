@@ -226,6 +226,15 @@ ALP_DRPAI_DT_ENABLE = "${@'1' if (d.getVar('ALP_DRPAI_LAYER') == '1' and d.getVa
 ALP_DRPAI_DT_ENABLE[vardepvalue] = "${ALP_DRPAI_DT_ENABLE}"
 SRC_URI += "${@' file://e1m-v2n-drpai.dtsi' if d.getVar('ALP_DRPAI_DT_ENABLE') == '1' else ''}"
 
+# DRP1 (OpenCVA + hardware codec) overlay -- CONDITIONAL on meta-rz-opencva
+# or meta-rz-codecs, whichever supplies the `drp1` label (each ships the
+# 0001-add-drp-property-to-devicetree*.patch that creates it).  Same
+# stub-or-real shape as ALP_DRPAI_DT_ENABLE above; the node is on-die on
+# every V2N/V2M SKU, so the layer is the only axis.
+ALP_DRP1_DT_ENABLE = "${@'1' if ('rz-opencva' in (d.getVar('BBFILE_COLLECTIONS') or '').split() or 'meta-rz-codecs' in (d.getVar('BBFILE_COLLECTIONS') or '').split()) else '0'}"
+ALP_DRP1_DT_ENABLE[vardepvalue] = "${ALP_DRP1_DT_ENABLE}"
+SRC_URI += "${@' file://e1m-v2n-drp1.dtsi' if d.getVar('ALP_DRP1_DT_ENABLE') == '1' else ''}"
+
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the
 # SoC r9a09g056.dtsi and these dtsi by relative path).
@@ -244,6 +253,15 @@ do_configure:prepend() {
     if [ -n "${ALP_CAM0_SENSOR}" ]; then
         install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAM0_SENSOR}.dtsi"             "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
         install -m 0644             "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts"             "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts"             "${ALP_DTS_DST}/"
+    fi
+
+    # DRP1: branch on the variable, same reasoning as the DRPAI branch below.
+    if [ "${ALP_DRP1_DT_ENABLE}" = "1" ]; then
+        install -m 0644 "${WORKDIR}/e1m-v2n-drp1.dtsi" "${ALP_DTS_DST}/"
+    else
+        printf '%s
+'             '/* DRP1 (OpenCVA + codec) node not claimed in this build.'             ' * Needs meta-rz-opencva or meta-rz-codecs in bblayers.conf: it'             ' * supplies the &drp1 label.  See e1m-v2n-drp1.dtsi in'             ' * meta-alp-sdk/recipes-kernel/linux/linux-renesas/. */'             > "${ALP_DTS_DST}/e1m-v2n-drp1.dtsi"
+        chmod 0644 "${ALP_DTS_DST}/e1m-v2n-drp1.dtsi"
     fi
 
     # Branch on the bitbake variable, not on the presence of the unpacked

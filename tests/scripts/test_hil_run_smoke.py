@@ -698,3 +698,32 @@ def test_ssh_command_spec_runs_plain_ssh_and_asserts_output(tmp_path: Path) -> N
         encoding="utf-8")
     with pytest.raises(run_smoke.SpecError):
         run_smoke.parse_spec(d / "bad.yaml")
+
+
+# ---------------------------------------------------------------------
+# V2M103 bench-observed identity values (#1160)
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "spec_name, needles",
+    [
+        ("v2m103-pmic-i2c", ("HIL_ACT88760_ACK_0x25", "HIL_DA9292_ACK_0x1E")),
+        ("v2m103-ethernet-phy-id", ("HIL_PHY_ID_OK",)),
+        ("v2m103-kernel-version", ("HIL_KERNEL_OK",)),
+        ("v2m103-rtc-ticks", ("HIL_RTC_I2C_8_0052", "HIL_RTC_TICKS_OK")),
+    ],
+)
+def test_v2m103_observed_value_specs(spec_name: str, needles: tuple) -> None:
+    spec = run_smoke.parse_spec(
+        _SHIPPED_HIL_DIR / "v2m103-x-evk" / f"{spec_name}.yaml")
+    assert spec.flash_method == run_smoke.SSH_RUN
+    assert set(needles) <= set(spec.serial.expect_contains)
+    # The observed literal is encoded in the command, not just the marker.
+    literal = {
+        "v2m103-pmic-i2c": "0x25",
+        "v2m103-ethernet-phy-id": "001cc916",
+        "v2m103-kernel-version": "6.1.141-cip43-yocto-standard",
+        "v2m103-rtc-ticks": "8-0052",
+    }[spec_name]
+    assert literal in spec.ssh_command

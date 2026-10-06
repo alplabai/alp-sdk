@@ -128,6 +128,10 @@ def regen_xlsx(ledger_root: Path, tool: Path, output: Path) -> subprocess.Comple
         env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
+DEBUG_MODE_REASON = ("SoC is strapped to debug mode (MD_BOOT3 high, SYS_LSI_MODE debug bit set): "
+                     "a production SoM must boot in normal mode (MD_BOOT3 low)")
+
+
 def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "") -> list[str]:
     """Why this unit cannot ship; [] = shippable. Same rules as the private
     ledger_xlsx.py Ship check (minus its staged-manifest leg)."""
@@ -147,6 +151,12 @@ def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "
     # itself a blocker any more.
     if str(unit.get("act88760_gpio4_after_boot", "")).strip().lower() == "0x88":
         reasons.append("act88760_gpio4_after_boot: 0x88 (image did not release GD32_NRST)")
+    # The latched MD_BOOT3 strap (census/census_final: soc_boot_debug_en). Debug mode is for
+    # bring-up benches only; the register facts are in the SoC description (boot_strap).
+    # No `missing soc_boot_debug_en` leg: functional_test's blocking boot_mode check reads the same
+    # word, so `test_functional: pass` below already proves the strap was read and judged.
+    if str(unit.get("soc_boot_debug_en", "")).strip() == "1":
+        reasons.append(DEBUG_MODE_REASON)
     # functional_test's summary. Its per-check test_ft_<check> keys are detail (informational
     # failures and fixture skips never block).
     # Only `pass` ships: a unit on which functional_test never ran, was skipped, crashed or failed

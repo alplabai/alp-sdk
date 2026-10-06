@@ -88,7 +88,9 @@ extern "C" {
  *  Vela picks at model-compile time and the runtime dispatches via
  *  the matching driver shim emitted by `scripts/alp_project.py`. */
 typedef enum {
-	ALP_INFERENCE_BACKEND_AUTO    = 0,
+	ALP_INFERENCE_BACKEND_AUTO    = 0, /**< Whichever backend loads cfg->format on this SoM
+					 *   (a DRP-AI model goes to DRP-AI, a DXNN model to
+					 *   DX-M1); ::ALP_ERR_NOSUPPORT if the SoM has none. */
 	ALP_INFERENCE_BACKEND_CPU     = 1, /**< Portable CPU floor: TFLM reference
 					    *   kernels on M-class/Zephyr, ONNX
 					    *   Runtime on the A55s under Yocto.
@@ -173,6 +175,28 @@ typedef struct {
 	 *  sized to the model.  @c arena = NULL for such a model is rejected
 	 *  with @ref ALP_ERR_INVAL (see examples/aen/aen-npu-inference-alp). */
 	void *arena;
+	/**
+	 * @brief Which accelerator unit(s) of the selected backend run the model.
+	 *        [ABI-EXPERIMENTAL]
+	 *
+	 * 0 = the backend's default (every unit it can use).  Bit @c n selects
+	 * accelerator unit @c n of the backend @c backend resolves to; a mask may
+	 * name several units where the backend supports it.  A mask the selected
+	 * backend cannot honour makes @ref alp_inference_open return NULL with
+	 * @ref ALP_ERR_NOSUPPORT -- it is never silently ignored or narrowed.
+	 *
+	 * Per backend:
+	 *  - DEEPX DX-M1: bits 0..2 are NPU cores 0..2; any non-empty subset
+	 *    (0x1..0x7) is valid.  0 and 0x7 both mean all three cores.  At most
+	 *    three DISTINCT core sets can be live in one process; a fourth makes
+	 *    open return @ref ALP_ERR_BUSY.
+	 *  - Renesas DRP-AI3: one unit; only 0 or 0x1 is valid.
+	 *  - Arm Ethos-U (Alif): the NPU instance visible to the calling core;
+	 *    only bit 0 is valid, on single-NPU cores.  Multi-NPU parts are
+	 *    unverified -- do not rely on bits above 0 there.
+	 *  - TFLM, ONNX Runtime and CPU backends: only 0.
+	 */
+	uint32_t accel_unit_mask;
 } alp_inference_config_t;
 
 /**
@@ -201,12 +225,13 @@ typedef struct {
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_INFERENCE_CONFIG_DEFAULT(id) \
-	((alp_inference_config_t){ .model_data  = (id), \
-	                           .model_size  = 0u, \
-	                           .format      = ALP_INFERENCE_MODEL_TFLITE, \
-	                           .backend     = ALP_INFERENCE_BACKEND_AUTO, \
-	                           .arena_bytes = 0u, \
-	                           .arena       = NULL })
+	((alp_inference_config_t){ .model_data      = (id), \
+	                           .model_size      = 0u, \
+	                           .format          = ALP_INFERENCE_MODEL_TFLITE, \
+	                           .backend         = ALP_INFERENCE_BACKEND_AUTO, \
+	                           .arena_bytes     = 0u, \
+	                           .arena           = NULL, \
+	                           .accel_unit_mask = 0u })
 
 /**
  * @brief Load a compiled model and prepare it for invocation.
@@ -329,6 +354,24 @@ alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tenso
  * Dispatches to the bound backend.  On Ethos-U / DRP-AI / DX-M1
  * backends this offloads to the NPU and blocks the calling thread
  * until the result lands; on the CPU backend it executes in-thread.
+ *
+ * @par One job per NPU at a time
+ * Each NPU runs one job at a time.  Invokes on different handles that
+ * sit on the SAME NPU take turns: DRP-AI3 jobs are serialised by the SDK
+ * with a process-wide lock (the driver rejects a concurrent job instead
+ * of queueing it), and the DX-M1 time-shares between engines.  To get
+ * real concurrency run one model per NPU -- give each handle
+ * its own model format (AUTO then picks that format's NPU) and invoke
+ * from one thread per NPU.  See
+ * `examples/v2n/v2n-two-models/`.
+ *
+ * @par DRP-AI3 is one process per board
+ * DRP-AI3-only; see ext/renesas/inference.h.  The DX-M1 has no such limit.
+ *
+ * @par DRP-AI3 failures are not reported
+ * The DRP-AI3 runtime's `Run()` returns void, so a job the driver
+ * rejected or that timed out still returns @ref ALP_OK here.  Check the
+ * output tensors if that matters to the application.
  *
  * @param[in] inf  Handle from @ref alp_inference_open.
  *
