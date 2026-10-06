@@ -35,6 +35,56 @@ Applied by `trusted-firmware-a_%.bbappend` on every `rzv2n-family` MACHINE, so
    memory-mapped window (`0x20000000` + 256 MB) covers `0x20200000`, and the
    suspend-only `xspidrv` device stays out of the cold-boot path.
 
+## Every boot mode reads the CM33 image from xSPI — `0002-rzv2n-read-the-CM33-image-from-xSPI-in-every-boot-mode.patch`
+`bl2_bp_spi` and `bl2_bp_mmc` are the same `bl2.bin` behind different `bptool`
+headers, so both start the CM33. The vendor BL22 *source* follows the boot
+device, though: under eMMC boot (DSW1 mode 1) it is byte `0x200000` of the
+enabled eMMC boot partition, under eSD boot byte `0x200000` of the card. Nothing
+writes either, so under eMMC boot BL2 released the CM33 into unwritten
+boot-partition bytes (#2658). Patch 0002 points BL22 at the xSPI slot in every
+boot mode and, for eMMC/eSD boot, also runs `xspi_setup()` and opens the memmap
+device (the xSPI clock, reset and MSTOP are already released by `cpg_setup()` in
+every mode). The CM33 image has one home: xSPI `0x200000`. Not yet bench-verified.
+
+**xSPI0 pin outputs.** The boot ROM configures the xSPI0 pins only for xSPI boot.
+`PFC_OEN` (PFC base `0x10410000` + `0x3C40`) is expected to reset to `0x0000003F` (RZ/V2N UM 4.2.2.31, OEN reset value; to be confirmed by the `md.l 0x10413c40 1` read below), which would leave the
+xSPI0 output enables OFF (1 = OFF): `OEN_XSPI_CLKP` bit 5, `OEN_XSPI_CS0N` bit 3,
+`OEN_XSPI_RESET0N` bit 2. Under eMMC/eSD boot that would leave xSPI0 unconnected to the flash (the observed symptom):
+bench 2026-10-03 (E1M-V2M103, `SYS_LSI_MODE` `0x3c05`) printed
+`BL2: xSPI for BL22, id 0x0` and the CM33 did not start; xSPI boot (`0x3c06`) was fine.
+Before `xspi_setup()` patch 0002 sets `PFC_PWPR` (`PFC_BASE` + `0x3C04`) `REGWE_B`
+(bit 5), clears **only** bits 5, 3 and 2 of `PFC_OEN`, restores `PFC_PWPR`, and waits 1 ms
+for the flash to leave reset (a conservative margin; the GD25 datasheet value is not in
+the repo). `OEN_ET1`/`OEN_ET0` (bits 1/0, ET1/ET0 TXC direction) are never touched, since
+that would break Ethernet. If U-Boot already switched ET0/ET1 to RGMII, bits 1/0 may read
+differently from the reset value; only bits 5, 3 and 2 matter here. If no flash answers (id `0x0`, `0xffffff`, `0xffffffff`, or a first RDID byte of `0x00`/`0xff`) BL2
+prints `BL2: no xSPI flash answered, CM33 NOT started`, skips loading BL22 and does not
+release the CM33.
+
+Bench check (read-only first, then write; boot0 only). The `PFC_OEN` values below are
+expectations from the reset value, not yet measured:
+
+1. In U-Boot, cold boot in DSW1 mode 1 and again in mode 2: `md.l 0x10413c40 1`. Expect
+   `0x0000003f` in mode 1 before this patch; with the patched BL2 in mode 1 U-Boot reads
+   `0x00000013` (bits 5, 3, 2 cleared, bits 4, 1, 0 as at reset). Mode 2 is whatever the ROM
+   left; the patch does not touch that path.
+2. Write the rebuilt `bl2_bp_mmc` to eMMC **boot0 only** and read it back byte-for-byte. Boot1
+   is **not** an automatic fallback. Recovery for a bad boot0: boot DSW1 mode 2 (xSPI) and
+   rewrite boot0.
+3. Cold boot in mode 1 and confirm on the console:
+   - `BL2: xSPI for BL22, id 0x<id>` shows the flash device id (not `0x0`).
+   - With the shim in `mtd1` + `0x1A0000`, Linux up: `devmem 0x4F700FF0 32` reads
+     `0xA10D0683` (the beacon magic) and `devmem 0x4F700FF8 32` advances between two reads.
+   - Ethernet and the NOR flash (`mtd`) still work.
+4. Regression: cold boot in mode 2; the CM33 still starts and the beacon increments.
+
+If the beacon is absent, check at least that the A55 still boots normally (Linux login),
+which shows the xSPI window setup did not disturb the eMMC boot.
+
+The FIP plays no part: BL22 is not a FIP image, and BL2 starts the CM33 in
+`bl2_el3_plat_prepare_exit()` before handing off to BL31. A FIP ToC with two
+entries (BL31, BL33) is the normal layout.
+
 ## The M33 firmware image
 `zephyr.bin` is linked at `0x08003000` (board `alp_e1m_v2m101_m33_sm`,
 `sram: memory@8003000`). BL2 loads the raw image at `0x08000000`, so the image is
@@ -104,7 +154,7 @@ with Renesas authorship); the Alp changes are `0018` (CPG is a syscon) and
 | | production, `"0"` | dev, `"1"` |
 |---|---|---|
 | TF-A | unchanged (SRAM 0/1 secure-only) | `0002-rzv2n-optional-non-secure-access-to-CM33-SRAM.patch`, `ALP_CM33_SRAM_NS=1`: TZC-400 region 0 of SRAM 0/1 also admits non-secure masters |
-| `cm33_rproc` node | `alp,rz-attach-only`: the driver has no start/stop/load; probe fails if the CM33 is not running | flag removed: Renesas' stop/start/reload |
+| `cm33_rproc` node | `alp,rz-attach-only`: the driver has no start/load and `stop` always fails with `-EPERM`; probe fails if the CM33 is not running or `alp,rz-userspace-ipc` is absent | flag removed: Renesas' stop/start/reload |
 | `/lib/firmware/m33_sm.elf` | not installed | `alp-cm33-firmware` installs `${ALP_CM33_ELF}` (alp-image-edge) |
 
 **WARNING: with `"1"` any Linux root process can rewrite CM33 code memory.**
@@ -151,7 +201,7 @@ Rules that follow from the design:
   metadata: a generator from `memory_map:` is follow-up.
 - **TZC.**  Attach touches no memory.  `stop` and reload write CM33 SRAM from
   Linux, which needs the dev TF-A above; without it a blocked write is a bus
-  error, which is why production has no stop operation at all.
+  error, which is why production's stop operation only refuses (`-EPERM`).
 - Reload payload: `alp-cm33-firmware` (dev only) installs
   `/lib/firmware/m33_sm.elf` from `ALP_CM33_ELF`, the `zephyr.elf` of the same
   build as the xSPI image.
@@ -178,7 +228,7 @@ Register offsets: `include/alp/protocol/v2n_mhu_doorbell.h` (CM33 SET
 Run in this order; stop at the first failure.  Steps 1-3 use the production
 configuration; 4-8 need a dev build (`ALP_V2N_CM33_SRAM_NS = "1"`, TF-A
 included).  First check, on the production build, that `echo stop` is refused
-(`Invalid argument`) and the CM33 keeps running.
+(`Operation not permitted`, state stays `attached`) and the CM33 keeps running.
 
 1. Build with `ALP_V2N_REMOTEPROC = "1"`, flash, cold-cycle.  `dmesg | grep
    rz-rproc` shows `probed`; `cat $RP/state` is `detached`; the CM33 beacon
@@ -225,3 +275,55 @@ is the wrong peripheral, and the RZ FSP ships no SCI-SPI module (only RA has
 binding (`zephyr/dts/bindings/spi/renesas,rz-sci-b-spi.yaml`), the DT SCI7 SPI
 child, and the corrected pinmux; SCI7 Simple-SPI is silicon-validated and is
 the permanent transport — see `docs/gd32-link-sci7-next-rev.md`.
+
+## Reset cause and watchdog-reset behaviour (U-Boot patch 0012, #1153)
+
+**Reset domains.** A watchdog (`WDT_CA55` / `WDT_CM33` `iwdt_nmiundf`) raises an
+*error system reset* of the SoC only. Everything outside the SoC keeps running
+through it: the DEEPX DX-M1 (its own reset line, M1_RESET = PA6), the GD32
+supervisor, the Ethernet PHYs and the PMICs. `CPG_ERROR_RST2` (CPG_base
+`0x1042_0000` + `0x0B40`; RZ/V2N manual R01UH1071EJ0120 Rev.1.20 §4.4.4.15
+p644) latches the cause (bit1 = WDT_CA55, bit0 = WDT_CM33) and is not reset by
+an error system reset (§4.4.6.5.4 p693). A flag is cleared by writing 1 to it
+together with its write enable (bit16+n).
+
+**What a WDT reset now does.** `board_late_init()` reads the register first,
+prints one line, clears the WDT flags and publishes the cause:
+
+| Cause | Console line | `/chosen/alp,reset-cause` |
+|---|---|---|
+| CA55 WDT | `ALP: reset cause: WDT CA55` | `wdt-ca55` |
+| CM33 WDT | `ALP: reset cause: WDT CM33` | `wdt-cm33` |
+| both | `ALP: reset cause: WDT CA55 + CM33` | `wdt-ca55-cm33` |
+| neither | `ALP: reset cause: power-on or software` | `por-or-sw` |
+
+**A software reboot reads as a CA55 watchdog reset.** The kernel restarts
+the SoC through the CA55 watchdog (`rzv2h_wdt_restart`), and U-Boot's `reset`
+does the same, so `reboot` sets `CPG_ERROR_RST2` bit1 exactly like a hang:
+bench, E1M-V2M103 2026W38-0008, 2026-10-06, `reboot` printed
+`ALP: reset cause: WDT CA55 (CPG_ERROR_RST2=0x00000002)`. `por-or-sw` therefore
+only ever means power-on, and `wdt-ca55` means "hang or ordinary reboot";
+the 10 ms DX-M1 hold runs on every reboot (harmless). Telling the two apart
+needs a kernel-side marker before the restart; not done.
+
+Env `alp_reset_cause` carries the same token at the U-Boot prompt but is cleared
+by bootcmd's `env default -a`; Linux and provisioning read the DT property. On
+a v2n-m1 SoM (EEPROM family gate) a WDT reset also drives M1_RESET low for 10 ms
+before the DEEPX rail (0004) and PCIe (0001) steps release it, so the DX-M1
+restarts from reset. The 10 ms is a placeholder pending the DEEPX datasheet
+minimum reset pulse width.
+
+**What it still does not do.** The GD32 is not reset (GD32_NRST is P74, shared
+with PMIC GPIO4; topology unconfirmed, so the SoC does not drive it). The PHYs
+and the PMICs are not touched (no PMIC MR, no PMIC watchdog). They keep their
+pre-reset state.
+
+**Bench test (hang injection, #1153; PASS on E1M-V2M103 2026W38-0008, 2026-10-06).**
+1. Boot normally; at the U-Boot console confirm `ALP: reset cause: power-on or
+   software`, and in Linux `tr -d '\0' < /proc/device-tree/chosen/alp,reset-cause`.
+2. Hang the A55 so the CA55 WDT expires (hang-injection procedure of #1153).
+3. On the next boot confirm `ALP: reset cause: WDT CA55` and, on a v2n-m1 SoM,
+   `ALP: DEEPX DX-M1 held in reset after WDT reset (10 ms)`.
+4. In Linux confirm the DT property reads `wdt-ca55` and the DX-M1 re-enumerates
+   on PCIe (`lspci`).
+5. Reboot once more; the cause must read `power-on or software` again (flags cleared).

@@ -1551,8 +1551,9 @@ config CAN_RBUF_AFWL
 # (JEDEC ID / SFDP / addressed read) matches issue #915's own bench capture
 # against it (CS1 @ 20 MHz) -- not yet re-run from this tree, see
 # zephyr/drivers/flash/flash_ospi_alif.c and examples/aen/aen-ospi-regcheck.
-# write/erase remain fail-closed stubs (#915): the bench evidence is that
-# they need the fitted part's Octal-DDR mode switch, not 1-1-1 SPI.
+# write/erase (#915) are real: the driver switches the part to Octal DDR
+# first (1-1-1 SPI never sets WEL on it), then programs/erases; see the
+# header of flash_ospi_alif.c.
 # ---------------------------------------------------------------------------
 config USE_ALIF_HAL_OSPI
 	bool

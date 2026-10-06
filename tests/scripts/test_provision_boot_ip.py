@@ -229,7 +229,12 @@ def test_need_linux_picks_up_a_lease_that_arrived_after_boot_sd_linux(tmp_path, 
     assert ctx.need_linux() is board
 
 
+def _no_login(*a, **k):
+    raise BenchError("no console login in this test")
+
+
 def test_need_linux_error_is_accurate_after_a_console_only_boot(tmp_path, monkeypatch):
+    monkeypatch.setattr(steps, "console_login_ctx", _no_login)
     b = _console_bench()
     ctx = _ctx(tmp_path, bench=b, execute=True)
     ctx.console_linux_on_count = b.power.on_count
@@ -241,7 +246,8 @@ def test_need_linux_error_is_accurate_after_a_console_only_boot(tmp_path, monkey
     assert "has not run" not in str(e.value)
 
 
-def test_write_rootfs_without_a_target_names_the_real_cause(tmp_path):
+def test_write_rootfs_without_a_target_names_the_real_cause(tmp_path, monkeypatch):
+    monkeypatch.setattr(steps, "console_login_ctx", _no_login)
     ctx = _ctx(tmp_path, bench=_bench(), execute=True)          # nothing ran, nothing pinned
     res = steps.run_steps(ctx, only=["write_rootfs"])[-1]
     assert res.status == "failed" and "no Linux target attached" in res.detail

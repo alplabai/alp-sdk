@@ -17,8 +17,8 @@ ordered bench plan.
   resource table, because the userspace OpenAMP master keeps the vrings. The
   driver already supports attach; no attach patch was needed.
 - **Production is attach-only (Q53).** The default `cm33_rproc` node carries
-  `alp,rz-attach-only` (new in `0021`): no start/stop/load, so a Linux root
-  process cannot stop or reload the CM33, whose SRAM stays secure. The opt-in
+  `alp,rz-attach-only` (new in `0021`): no start/load and a `stop` that always
+  fails with `-EPERM`, so a Linux root process cannot stop or reload the CM33, whose SRAM stays secure. The opt-in
   dev flag `ALP_V2N_CM33_SRAM_NS = "1"` (default `"0"`, no change) applies the
   new TF-A patch `0002-rzv2n-optional-non-secure-access-to-CM33-SRAM.patch`
   (`ALP_CM33_SRAM_NS=1`, TZC-400 SRAM 0/1 region 0 admits non-secure masters;

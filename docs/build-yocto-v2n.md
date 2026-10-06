@@ -119,10 +119,11 @@ not the distro.
 > the template default causes a recipe mismatch and build failure.
 
 > **Machine fragments:** `alp-image-edge` picks up per-machine `.cfg`
-> fragments from `meta-alp-sdk/recipes-kernel/linux/`.  For V2N with the
-> display feature enabled, the active fragment list is `display.cfg`.
-> (There is no audio fragment: the carrier TAS2563 codec has no DT node
-> yet, so nothing would bind — see the audio TODO in `e1m-x-evk.dtsi`.)
+> fragments from `meta-alp-sdk/recipes-kernel/linux/`.  Merged
+> unconditionally: `uio.cfg`, `rv3028-rtc.cfg`, `wifi-bt.cfg`,
+> `trim-unused-storage-net-fs.cfg`, `no-kernel-audit.cfg`. Per carrier:
+> `display.cfg` and `tas2563-audio.cfg` (with kernel patches `0009` and
+> `0014`). Opt-in: `camera-csi.cfg`.
 > To build a minimal image without
 > Weston/display, remove the `alp-lvgl-dashboard`, `weston`, and
 > `weston-init` packages from `IMAGE_INSTALL` in your `local.conf` and
@@ -145,12 +146,14 @@ dtb so the vendor load succeeds harmlessly, #2637). If the dtb is missing from
 fall through and boot whatever devicetree is left in RAM.
 
 The boot medium is auto-detected **per boot**: if an SD card is
-present, root = `/dev/mmcblk1p2` (the carrier microSD, `&sdhi1` — see
+present and holds `boot/Image` on partition 2, root = `/dev/mmcblk1p2` (the carrier microSD, `&sdhi1` — see
 `e1m-x-evk.dtsi`), otherwise eMMC `/dev/mmcblk0p2`
 (`ALP_BOOT_DEVICE ?= "emmc"` names the provisioning default, not a
 build split). **Bench-confirmed 2026-09-29 on E1M-V2M103
-2026W38-0001:** U-Boot prefers a present microSD unconditionally --
-this selection is independent of the DSW1 boot-mode switch. DSW1
+2026W38-0001:** U-Boot takes the SD branch only when `mmc dev 1`
+succeeds AND `boot/Image` exists on partition 2, otherwise it boots the
+eMMC (a data card in the slot boots the eMMC); this selection is
+independent of the DSW1 boot-mode switch. DSW1
 (BOOT 2 = xSPI) only selects where **BL2/FIP** load from at boot ROM
 time; it does not choose the Linux root device. Removing the microSD
 falls through to eMMC (`root=/dev/mmcblk0p2`, HS200) with no DSW1

@@ -51,6 +51,14 @@ ssh_command: |-
   [ "$(cat $RP/state)" = attached ] || bad "state after attach $(cat $RP/state)"
   adv || bad "heartbeat stopped by attach"
   [ -z "$(ls /sys/bus/virtio/devices 2>/dev/null)" ] || bad "kernel virtio device present"
+  # Attach-only (production) node: stop must be refused, state stays attached,
+  # CM33 keeps running.  Never tried on a node without the property (it would
+  # really stop the CM33).
+  if [ -e /proc/device-tree/remoteproc-cm33/alp,rz-attach-only ]; then
+    echo stop > $RP/state 2>/dev/null && bad "stop accepted in attach-only mode"
+    [ "$(cat $RP/state)" = attached ] || bad "state after refused stop $(cat $RP/state)"
+    adv || bad "heartbeat stopped by refused stop"
+  fi
   # stop writes CM33 SRAM from Linux: only after the operator proved TF-A
   # grants that access and left the marker (docs bench step 4).
   [ -e /etc/alp-hil-rproc-stop ] || { echo "HIL_RPROC_DONE attach only, no /etc/alp-hil-rproc-stop"; exit 0; }

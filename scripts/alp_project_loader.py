@@ -636,6 +636,14 @@ def resolve_capabilities(
     # SoM side wins on collision (bridge / add-on overrides silicon default).
     merged: dict[str, Any] = {**soc_caps, **som_caps}
 
+    # GPU: a per-die fact (variants[].optional_features.gpu_mali_g31, the one
+    # source) -- the SoC-level capabilities block cannot carry it because
+    # four of the eight RZ/V2N dies are fused without the Mali-G31.
+    variant = _resolve_silicon_variant(sku_preset, metadata_root)
+    mali = ((variant or {}).get("optional_features") or {}).get("gpu_mali_g31")
+    if mali is not None:
+        merged["gpu2d"] = bool(mali)
+
     # SKU-level restriction: capabilities the silicon offers but this SKU
     # leaves unpopulated (per-SKU granularity -- one family, many SKUs).
     # Preserve the value class so count-style caps (ethos_u55_count, ...)
