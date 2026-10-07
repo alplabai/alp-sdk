@@ -98,9 +98,10 @@ system manifest.  In summary:
 
 1. A55 cluster reads U-Boot from xSPI, hands off to Linux.
 2. systemd reaches its basic target.
-3. The remoteproc driver loads
-   `/lib/firmware/alp/E1M-V2N101/m33_sm.elf` into the M33-SM core
-   and starts it.
+3. TF-A BL2 starts the M33-SM core from the xSPI image at power-on
+   (`docs/rzv2n-m33-secure-boot.md`).  With the opt-in remoteproc
+   (`ALP_V2N_REMOTEPROC = "1"`) Linux then attaches to the running core
+   and can stop, start and reload it (`/lib/firmware/m33_sm.elf`).
 4. Both sides bring up the rpmsg link over OpenAMP: the M33 slice
    creates its raw endpoint directly (`rpmsg_create_ept()`), not
    through `alp_rpc_open()`; the Linux side attaches to that fixed
@@ -175,8 +176,10 @@ IPC-enabled CM33 image through `yocto_uio_drv.c`.  The CM33 window is
    mtd_debug read  /dev/mtd1 0x1a0000 $SZ /tmp/rb.bin && md5sum /tmp/rb.bin /tmp/m33_fw.bin
    ```
 
-   The two md5s must match.  The CM33 cannot be restarted from Linux:
-   do a full SoC reboot (or PSU cold-cycle).
+   The two md5s must match.  Restarting the CM33 without a SoC reboot
+   needs the dev-only remoteproc stop/reload (`ALP_V2N_CM33_SRAM_NS = "1"`, `docs/rzv2n-m33-secure-boot.md`,
+   "Lifecycle", bench-pending); otherwise do a full SoC reboot (or PSU
+   cold-cycle).
    The board must boot in DSW1 mode 2 (xSPI BL2): under the mode 1
    eMMC-boot BL2 the CM33 never starts.
 

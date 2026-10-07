@@ -210,7 +210,7 @@
  * `y_open()` with ALP_ERR_BUSY rather than pretending to support
  * multiple simultaneous UIO/OpenAMP links this hardware doesn't have.
  *
- * @par A55 receive line = GIC_SPI 404 (MHU-B SWINT unit 12)
+ * @par A55 receive line = GIC_SPI 404 (MHU-B SWINT unit 12) or 385 (rsp_ch8_ns)
  * `uio_rproc_notify()`/`uio_mhu_ack()` below poke the MHU channel-1
  * scratch (`mhu-shm`) + the MHU-B NS message registers inside `mhu-uio`.
  * CORRECTED (alp-sdk #683/#697 bench cycle 2): earlier revisions aimed first
@@ -221,9 +221,10 @@
  * fw's channel 5 actually uses, R_MHU_NS5 (MSG_INT_SET, A55 0x104800A4, see
  * the comment below).  The ACK clears SWINT unit 12 CLR (A55 0x104808C8),
  * not an NS slot.  The A55 receive line is
- * declared by `mhu-uio@10480000` in e1m-v2n-som.dtsi as GIC_SPI 404
- * (INTID 436, MHU-B SWINT unit 12, GIC-measured in #697 cycle 10); the M33
- * rings the A55 through that SWINT unit, and `uio_mhu_ack()` clears it.
+ * declared by `mhu-uio@10480000` in e1m-v2n-som.dtsi as GIC_SPI 404 by
+ * default (INTID 436, MHU-B SWINT unit 12, GIC-measured in #697 cycle 10) or
+ * 385 (Renesas rsp_ch8_ns, ALP_V2N_DOORBELL_RSP_CH8, bench-pending); the M33
+ * rings the A55 through the matching register and `uio_mhu_ack()` clears it.
  *
  * @par What is NOT vendored here
  * The Renesas Multi-OS Package's `meta-rz-multi-os` layer (the Linux
@@ -287,6 +288,8 @@
 #include <metal/irq.h>
 #include <metal/sys.h>
 #include <openamp/open_amp.h>
+
+#include <alp/protocol/v2n_mhu_doorbell.h>
 
 #include "alp_checked_arith.h"
 
@@ -397,9 +400,11 @@ static const char *uio_dev_name(enum uio_region_id id)
  *   - KICK the M33 (raise MHU_MSG5_NS_IRQn=293) = MSG_INT_SET on R_MHU_NS5
  *                                                 -> A55 0x104800A4.
  *   - RECEIVE/ack the M33's send: R_MHU_NS5's RSP half (MHU_RSP5_NS_IRQn=299)
- *     does not reach the CA55.  The A55 line is SWINT unit 12 = GIC_SPI 404,
- *     and the ack is SWINT unit 12 CLR (ALP_MHU_SWINT_RECV_CLR_OFF =
- *     0x800 + 12*0x10 + 0x08 -> A55 0x104808C8), see uio_mhu_ack().
+ *     does not reach the CA55.  The A55 line is SWINT unit 12 = GIC_SPI 404
+ *     (ack: SWINT unit 12 CLR, A55 0x104808C8) or, with
+ *     ALP_V2N_DOORBELL_RSP_CH8, rsp_ch8_ns = GIC_SPI 385 (ack: RSP_INT_CLR of
+ *     NS slot 8, A55 0x10480118); see ALP_V2N_DOORBELL_CLR_OFF and
+ *     uio_mhu_ack().
  * The M33 side must correspondingly bind its ch5 RX/TX to R_MHU_NS5 (see the
  * r_mhu_b_ns.c port's channel-5 override) -- otherwise its ISR clears the
  * wrong register and the interrupt storms.  Earlier revisions aimed the kick
@@ -410,32 +415,20 @@ static const char *uio_dev_name(enum uio_region_id id)
  * (uio0 rsctbl 0x4f700000/0x1000 ... uio6 mhu-uio 0x10480000/0x1000),
  * /proc/interrupts shows "GICv3 436 Level mhu-uio", and
  * 0x4f700000-0x4fffffff is listed "reserved" in /proc/iomem. */
-/* R_MHU0_Type layout (hal_renesas mhu_iodefine.h): MSG_INT STS/SET/CLR at
- * +0x00/04/08, then a RESERVED[4] word at +0x0C, then RSP_INT STS/SET/CLR at
- * +0x10/14/18.  The RESERVED gap was silicon-confirmed on the #697 cycle-9
- * bench (writing +0x18 cleared the M33's reply STS at +0x10; +0x0C read 0). */
-#define ALP_MHU_NS_SLOT_MSG_INT_STS 0x00u
-#define ALP_MHU_NS_SLOT_MSG_INT_SET 0x04u
-#define ALP_MHU_NS_SLOT_MSG_INT_CLR 0x08u
-#define ALP_MHU_NS_SLOT_RSP_INT_STS 0x10u
-#define ALP_MHU_NS_SLOT_RSP_INT_SET 0x14u
-#define ALP_MHU_NS_SLOT_RSP_INT_CLR 0x18u
-
-/* Channel-5 register slot within the A55-mapped MHU-B block: R_MHU_NS5, the
- * channel-numbered slot (bench-proven, #697 cycle 5).  Both directions share
- * it -- MSG half = A55->M33 kick, RSP half = M33->A55. */
-#define ALP_MHU_NS_CH5_KICK_SLOT 0xA0u /* R_MHU_NS5.MSG -- A55->M33 kick (fires IRQ 293) */
-
-/* M33->A55 REVERSE doorbell is ASYMMETRIC to the forward one.  #697 cycle 10
- * (GIC-measured): the NS-channel RSP interrupt does NOT reach the A55 GIC on any
- * SPI -- only the MHU-B CA55-routed SWINT units 12-15 do (SWINT unit N SET ->
- * INTID 436+(N-12) = GIC_SPI 404+(N-12); units 0-11 don't reach CA55).  So the
- * M33 rings the A55 by asserting SWINT unit 12 (m33_sm/main.c mailbox_notify),
- * the A55 mhu-uio DT interrupt MUST be GIC_SPI 404, and the receive ack clears
- * SWINT unit 12's CLR.  SWINT block @ MHU +0x800, 0x10 stride, STS/SET/CLR @
- * +0x00/04/08. */
-#define ALP_MHU_SWINT_RECV_UNIT    12u
-#define ALP_MHU_SWINT_RECV_CLR_OFF (0x800u + ALP_MHU_SWINT_RECV_UNIT * 0x10u + 0x08u)
+/* NS-slot register offsets, the channel-5 kick slot (R_MHU_NS5.MSG,
+ * bench-proven #697 cycle 5: MSG half = A55->M33 kick, fires M33 IRQ 293) and
+ * the reverse-doorbell offsets are shared with the CM33 firmware and live in
+ * <alp/protocol/v2n_mhu_doorbell.h>.
+ *
+ * The M33->A55 reverse doorbell is ASYMMETRIC to the forward one.  #697
+ * cycle 10 (GIC-measured): the RSP interrupt of NS slot 5 does NOT reach the
+ * A55 GIC on any SPI -- only the MHU-B CA55-routed SWINT units 12-15 do, so
+ * by default the M33 asserts SWINT unit 12 (GIC_SPI 404) and the ack clears
+ * its CLR.  Renesas documents a second line, rsp_ch8_ns = RSP of NS slot 8 =
+ * GIC_SPI 385 (ALP_V2N_DOORBELL_RSP_CH8 / ALP_SDK_V2N_DOORBELL_RSP_CH8,
+ * bench-pending); the header picks the ack register for whichever is built.
+ * The A55 mhu-uio DT interrupt MUST be the matching SPI
+ * (ALP_V2N_DOORBELL_SPI in meta-alp-sdk's e1m-v2n-doorbell.dtsi). */
 
 static volatile uint32_t *
 mhu_ns_reg(struct metal_io_region *mhu, uint32_t slot_offset, uint32_t reg_offset)
@@ -772,9 +765,9 @@ static const struct remoteproc_ops g_rproc_ops = {
 /* Notification worker -- runs on libmetal's SHARED linux IRQ thread    */
 /* ------------------------------------------------------------------ */
 
-/* Ack the M33->A55 doorbell by clearing SWINT unit 12's CLR -- the CA55-routed
- * reverse doorbell (GIC_SPI 404).  See the ALP_MHU_SWINT_RECV_* comment above
- * for why the reverse path uses a SWINT unit, not the NS-channel RSP register. */
+/* Ack the M33->A55 doorbell (GIC_SPI ALP_V2N_DOORBELL_GIC_SPI): SWINT unit 12
+ * CLR by default, RSP_INT_CLR of NS slot 8 with ALP_V2N_DOORBELL_RSP_CH8.  See
+ * the doorbell comment above for why. */
 static void uio_mhu_ack(struct rpc_be *ch)
 {
 	struct metal_io_region *mhu = metal_device_io_region(ch->dev[UIO_MHU], 0);
@@ -782,7 +775,7 @@ static void uio_mhu_ack(struct rpc_be *ch)
 		return;
 	}
 	volatile uint32_t *clr_reg =
-	    (volatile uint32_t *)((uint8_t *)mhu->virt + ALP_MHU_SWINT_RECV_CLR_OFF);
+	    (volatile uint32_t *)((uint8_t *)mhu->virt + ALP_V2N_DOORBELL_CLR_OFF);
 	*clr_reg = 1u;
 }
 

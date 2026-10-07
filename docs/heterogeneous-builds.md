@@ -259,7 +259,8 @@ The same file declares the seven `generic-uio` nodes the `alp_rpc` UIO
 backend opens, named for their sysfs `name` (`4f700000.rsctbl`,
 `4f701000.mhu-shm`, `4f800000.vring-ctl0`, `4f850000.vring-ctl1`,
 `4f900000.vring-shm0`, `4fc00000.vring-shm1` and `10480000.mhu-uio`).
-Only `mhu-uio` carries an interrupt (`GIC_SPI 404`). `uio.cfg` enables
+Only `mhu-uio` carries an interrupt (`GIC_SPI 404` by default, `385` with
+`ALP_V2N_DOORBELL_SPI`, see `docs/rzv2n-m33-secure-boot.md`). `uio.cfg` enables
 `CONFIG_UIO` and `CONFIG_UIO_PDRV_GENIRQ`, and patch 0012 makes
 `generic-uio` the default `uio_pdrv_genirq` match, so
 `uio_pdrv_genirq.of_id=generic-uio` no longer has to be in the bootargs.
