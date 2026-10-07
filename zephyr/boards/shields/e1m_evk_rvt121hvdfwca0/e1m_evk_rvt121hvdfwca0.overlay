@@ -39,9 +39,9 @@
  *
  * WIRING (EVK-03, maintainer-confirmed): the bridge EN is on the mikroBUS
  * INT pin (CK_INT = E1M_I2S1_SDI = pad AH6 = Alif P13_4, metadata/pinmux/
- * aen.yaml:58) and the backlight enable is on the mikroBUS PWM pin (CK_PWM0 =
- * E1M_PWM6 = pad A3 = Alif P10_7, aen.yaml:15) -- both plain SoC GPIOs.  (CK_CS
- * = E1M_SPI1_CS0 is CC3501E-owned, aen.yaml:100, so it cannot carry EN.)  The
+ * aen.yaml:58) and the backlight PWM is on the mikroBUS PWM pin (CK_PWM0 =
+ * E1M_PWM6 = pad A3 = Alif P10_7, aen.yaml:15): EN is a plain SoC GPIO, the
+ * backlight a UTIMER PWM.  (CK_CS = E1M_SPI1_CS0 is CC3501E-owned, aen.yaml:100, so it cannot carry EN.)  The
  * ILI2511 touch RESET is still UNVERIFIED: it assumes the adapter reuses the
  * e1m_evk_rk055hdmipi4ma0 shield's GPIO-expander role map (lcd_exp P3).
  *
@@ -133,6 +133,7 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
 
 / {
 	chosen {
@@ -191,25 +192,40 @@
 };
 
 /*
- * Backlight enable, P10_7 = E1M_PWM6 = the mikroBUS PWM pin (CK_PWM0), wired to
- * the panel backlight on EVK-03.  First bring-up: held HIGH as a plain GPIO
- * (100% backlight) by a gpio-hog -- no PWM device.  A real PWM backlight
- * (P10_7 = UT3_T1_C, PIN_P10_7__UT3_T1_C, via <alp/pwm.h>) comes later.
- * The pad is muxed to GPIO in pinctrl_i2c1_dsi below, because
- * snps,designware-gpio applies no pad mux of its own.
+ * Backlight, P10_7 = E1M_PWM6 = the mikroBUS PWM pin (CK_PWM0), wired to the
+ * panel backlight on EVK-03.  P10_7 is pad A3 = UT3_T1_C: UTIMER3 driver B,
+ * i.e. channel 1 of pwm3 (pwm_alif_utimer.c: "E1M PWM6 = UT3_T1_C (utimer3,
+ * driver B / channel 1)").  main.c sets 30% duty at boot through pwm_set_dt()
+ * on the `backlight` node below.  The `pwm-leds` wrapper exists only so
+ * PWM_DT_SPEC_GET has a consumer `pwms` phandle to dereference (see
+ * examples/aen/aen-pwm-utimer-pwmleds' overlay for why the controller node
+ * cannot be used directly).
  *
- * NOTE (real hardware): the Riverdi panel's own PWM pin (its connector pin
- * 18) is a TPS61500 dimming input, 200 Hz-1 kHz; static high is full
- * brightness.
+ * 500 Hz period (2 ms), inside the panel backlight dimming input's specified
+ * 200 Hz-1 kHz range (connector pin 18, a TPS61500 dimming input).  The 32-bit
+ * UTIMER reload fits it easily:
+ * 2 ms * 100 MHz = 200000 cycles.  Retune the period here if the brightness does not follow the duty on the bench.  pwm_alif_utimer.c is
+ * not silicon-proven and its tick rate is the 100 MHz placeholder (utimer3 has
+ * no clock-frequency), so the DUTY RATIO (30%) is right but the actual
+ * frequency may be off by the real/placeholder clock ratio.
  */
-&gpio10 {
+/ {
+	backlight_pwm: pwm-leds {
+		compatible = "pwm-leds";
+
+		backlight: backlight {
+			pwms = <&pwm3 1 PWM_MSEC(2) PWM_POLARITY_NORMAL>;
+		};
+	};
+};
+
+&utimer3 {
 	status = "okay";
 
-	bl_en_hog: bl-en-hog {
-		gpio-hog;
-		gpios = <7 GPIO_ACTIVE_HIGH>;
-		output-high;
-		line-name = "lcd-bl-en";
+	pwm3 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_bl_pwm>;
+		pinctrl-names = "default";
 	};
 };
 
@@ -239,14 +255,21 @@
 		};
 
 		/*
-		 * Bridge EN (P13_4, default alt is LPI2S_SDI_C) and backlight enable
-		 * (P10_7) as plain GPIOs.  Muxed here because snps,designware-gpio has
+		 * Bridge EN (P13_4, default alt is LPI2S_SDI_C) as a plain GPIO.  Muxed here because snps,designware-gpio has
 		 * no pinctrl-0 (same trick as e1m_evk_rpi_csi's CAM_MUX_SEL).  No
 		 * LPI2S/I2S node is enabled by this shield, so nothing else claims
 		 * either pad.
 		 */
 		group1 {
-			pinmux = <PIN_P13_4__GPIO>, <PIN_P10_7__GPIO>;
+			pinmux = <PIN_P13_4__GPIO>;
+		};
+	};
+
+	/* UT3_T1_C -> P10_7 (E1M PWM6, driver B).  A PWM output pad: no input
+	 * enable / bias needed. */
+	pinctrl_bl_pwm: pinctrl_bl_pwm {
+		group0 {
+			pinmux = <PIN_P10_7__UT3_T1_C>;
 		};
 	};
 };
