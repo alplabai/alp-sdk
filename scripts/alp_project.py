@@ -293,6 +293,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             _slice_cmake_args,
             _slice_dts_overlay,
             _slice_local_conf,
+            _v1_shaped_project,
             load_board_yaml,
         )
         from alp_orchestrate.ownership import project_m33_overlay
@@ -320,17 +321,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
     # hw-info-h, west-libraries).  The public board.yaml schema no
     # longer uses this wrapper, but it's a convenient internal
     # representation for the emitters' read paths.
-    project_v1_shaped: dict[str, Any] = {
-        "som": {
-            "sku":    project.sku,
-            "hw_rev": project.hw_rev,
-        },
-        "pins": list(project.raw.get("pins") or []),
-        "board": ({
-            "name":   project.board_name,
-            "hw_rev": project.board_hw_rev,
-        } if project.board_name else None),
-    }
+    project_v1_shaped: dict[str, Any] = _v1_shaped_project(project)
 
     # --- zephyr-board: writes a directory of files, not a single stream --
     if args.emit == "zephyr-board":

@@ -92,7 +92,7 @@ slice's `cmake-args.txt` configArtefact, so `tan` does not re-render it. It is *
 shell-pipeable recipe -- `cmake -B build $(... --emit cmake-args) .` fails
 CMake's own argument parser today, for two independent reasons: the CLI's
 leading `# --- core: <id> (<os>) ---` section marker
-(`scripts/alp_project.py:515` prepends it unconditionally for
+(`scripts/alp_project.py:522` prepends it unconditionally for
 `cmake-args`, unlike the `zephyr-conf` branch, which only adds it in the
 unscoped multi-core sum case), and the board-facade selector's bare
 `-DALP_BOARD_<SLUG>` (a compile-time `#if defined(...)` guard consumed by

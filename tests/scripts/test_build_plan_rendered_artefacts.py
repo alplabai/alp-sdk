@@ -89,3 +89,45 @@ def test_primary_config_artefact_stays_first() -> None:
             assert sl["configArtefacts"][0]["path"].endswith("/alp.conf")
         elif sl["backend"] == "yocto":
             assert sl["configArtefacts"][0]["path"].endswith("/local.conf")
+
+
+# --- the one downgrade: `dts-overlay-unavailable` ---------------------------
+
+
+def _plan_with_missing_header(monkeypatch, tmp_path: Path) -> dict:
+    import alp_project_emit.dts as dts
+
+    monkeypatch.setattr(dts, "_board_header_path",
+                        lambda name, root: tmp_path / "no-such-header.h")
+    # `relative_to(REPO)` in the emitter's message needs a path under REPO.
+    monkeypatch.setattr(dts, "REPO", tmp_path)
+    return _plan(REPO / "examples/multicore/rpmsg-aen/board.yaml")
+
+
+def test_missing_board_header_downgrades_to_a_warning(monkeypatch, tmp_path):
+    plan = _plan_with_missing_header(monkeypatch, tmp_path)
+    jsonschema.Draft202012Validator(
+        json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))).validate(plan)
+
+    warned = {w["coreId"] for w in plan["warnings"]
+              if w["code"] == "dts-overlay-unavailable"}
+    carriers = {sl["coreId"] for sl in plan["slices"]
+                if sl["backend"] in ("zephyr", "baremetal")}
+    assert carriers and warned == carriers
+    for sl in plan["slices"]:
+        names = {a["path"].rsplit("/", 1)[-1] for a in sl["configArtefacts"]}
+        assert "alp.overlay" not in names
+        if sl["backend"] in ("zephyr", "baremetal"):
+            assert "cmake-args.txt" in names
+
+
+def test_any_other_overlay_failure_still_fails_the_plan(monkeypatch):
+    import alp_orchestrate.buildplan as bp
+    from alp_orchestrate import OrchestratorError
+
+    def broken(project, core_id):
+        raise OrchestratorError("M33 ownership defect")
+
+    monkeypatch.setattr(bp, "project_m33_overlay", broken)
+    with pytest.raises(OrchestratorError, match="M33 ownership defect"):
+        _plan(REPO / "examples/multicore/rpmsg-aen/board.yaml")
