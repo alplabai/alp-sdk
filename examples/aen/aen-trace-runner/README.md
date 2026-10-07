@@ -121,7 +121,7 @@ bridge and the touch controller live on I2C1). The panel runs at its native ~30.
 west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d build/rvt121 . --     -DTR_PANEL=rvt121 -DTR_RENDER=M55 -DTR_PANEL_HZ=30
 ```
 
-Wiring: bridge EN = `CK_INT` (P13_4), backlight = `CK_PWM0` (P10_7), and P9 powers +1V8.
+Wiring: bridge EN = `CK_INT` (P13_4), backlight = `CK_PWM0` (P10_7), and P9 powers +1V8.  The backlight is a 30% duty, 500 Hz UTIMER3 PWM set once at boot by `tr_panel_up()`.
 
 Phase 1 limits: `TR_RENDER=M55` with IMU steering only. The front framebuffer is the shield's
 `lcd_fb` (`0x02200000`, 2 MiB) and the back buffer is the base of SRAM0; a frame is 2,048,000 B.

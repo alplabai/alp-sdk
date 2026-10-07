@@ -47,11 +47,27 @@
 
 #ifdef TR_PANEL_RVT121
 /* Riverdi RVT121 (CMake -DTR_PANEL=rvt121): the shield's SN65DSI83 driver
- * brings the panel up at boot; there is no HX8394 and no lcd_panel node. */
+ * brings the panel up at boot; there is no HX8394 and no lcd_panel node. The
+ * only job left is the backlight: the shield's `backlight` pwm-leds node is a
+ * UTIMER3 PWM on P10_7 (500 Hz), set to 30% duty here, once, as in
+ * aen-lvds-display. */
+#include <zephyr/drivers/pwm.h>
+
+#define TR_BACKLIGHT_DUTY_PERCENT 30U
+
 volatile uint32_t tr_panel_init_tries;
+
+static const struct pwm_dt_spec backlight = PWM_DT_SPEC_GET(DT_NODELABEL(backlight));
 
 uint32_t tr_panel_up(void)
 {
+	int rc = -ENODEV;
+
+	if (pwm_is_ready_dt(&backlight)) {
+		rc = pwm_set_dt(
+		    &backlight, backlight.period, backlight.period * TR_BACKLIGHT_DUTY_PERCENT / 100U);
+	}
+	printk("panel   : backlight %u%% duty -> %d\n", TR_BACKLIGHT_DUTY_PERCENT, rc);
 	tr_panel_init_tries = TR_PANEL_OK | 1u;
 	return tr_panel_init_tries;
 }
