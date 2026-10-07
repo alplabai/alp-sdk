@@ -407,7 +407,6 @@ SRC_URI:append = " file://wifi-bt.cfg"
 # Display stack: RK055HDMIPI4MA0 panel on Display 1 (DSI + PWM backlight + GPT
 # + GD32-bridge GPIO for panel reset).
 SRC_URI:append:e1m-v2n101 = " file://display.cfg"
-SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 
 # Audio: TAS2563 smart-amp pair on the E1M-X-EVK carrier (see e1m-x-evk.dtsi's
 # header comment + &i2c0's tas2563_left/tas2563_right nodes). Per-carrier like

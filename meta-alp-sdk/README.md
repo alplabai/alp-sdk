@@ -613,17 +613,16 @@ DEEPX section for the full licensing detail.
   the carrier DTB + TF-A memory map + full image-bake for whichever
   SKU #264 lands first also await the maintainer's AEN HW config (the
   `# TBD(alif-hw-config)` overrides in the machine confs).
-- The DRP-AI3 backend (`PACKAGECONFIG[drpai]`) ships OFF, and NO
-  `drpai`-enabled `alp-image-edge` bake has completed on any host yet;
-  no `bitbake` run of `mera2-drpai-tvm_2.7.0.bb` -- with or without
-  `do_compile` -- has happened at all.  See
+- The DRP-AI3 backend (`PACKAGECONFIG[drpai]`) is auto-enabled by
+  `alp-sdk_0.6.bb` on an `rzv2n-family` MACHINE when `ALP_ENABLE_DRPAI` is
+  `"1"` and `RUHMI_DRPAI_TVM_DIR` is set;
+  `mera2-drpai-tvm_2.7.0.bb`'s `do_compile` and packaging have run in a
+  `drpai`-enabled `alp-image-edge` bake (#2400, which found and fixed the
+  missing `-lfmt` link gap there).  See
   [`docs/bring-up-drpai-v2n.md`](../docs/bring-up-drpai-v2n.md) section 4
-  for exactly what IS established (a hand-run `g++` against RUHMI's real
-  headers on an x86_64 dev host proved `MeraDrpRuntimeWrapper.cpp`
-  compiles clean with every needed symbol defined) and what is UNTESTED
-  (the final aarch64 link against the real RUHMI payload, packaging QA,
-  symbol resolution, and everything downstream of it — including
-  on-silicon inference; no compiled YOLOX-S/VOC bundle exists yet
+  for exactly what IS established and what is still UNTESTED (everything
+  downstream of the bake — including on-silicon inference from a baked
+  image; no compiled YOLOX-S/VOC bundle exists yet
   either, since the documented compile path can't calibrate a
   1,3,640,640 detector against real images (RUHMI's 200 calibration
   images ship as 129-byte Git LFS pointer stubs in this checkout, and
