@@ -729,17 +729,17 @@ struct fake_link {
 static void fake_link_init(struct fake_link *l, uint32_t beacon_version, uint8_t status)
 {
 	memset(l, 0, sizeof *l);
-	uint8_t *t                                   = (uint8_t *)l->rsctbl;
-	l->rsctbl[0]                                 = 1u; /* ver */
-	l->rsctbl[1]                                 = 1u; /* num */
-	l->rsctbl[4]                                 = T_RSCTBL_VDEV_OFF;
-	struct fw_rsc_vdev *vdev                     = (struct fw_rsc_vdev *)(t + T_RSCTBL_VDEV_OFF);
-	vdev->type                                   = RSC_VDEV;
-	vdev->notifyid                               = 0xFFu;
-	vdev->status                                 = status;
-	l->rsctbl[ALP_RSCTBL_BEACON_MAGIC_OFF / 4]   = ALP_RSCTBL_BEACON_MAGIC;
-	l->rsctbl[ALP_RSCTBL_BEACON_VERSION_OFF / 4] = beacon_version;
-	l->rsctbl[ALP_RSCTBL_ATTACH_EPOCH_OFF / 4]   = 7u;
+	uint8_t *t               = (uint8_t *)l->rsctbl;
+	l->rsctbl[0]             = 1u; /* ver */
+	l->rsctbl[1]             = 1u; /* num */
+	l->rsctbl[4]             = T_RSCTBL_VDEV_OFF;
+	struct fw_rsc_vdev *vdev = (struct fw_rsc_vdev *)(t + T_RSCTBL_VDEV_OFF);
+	vdev->type               = RSC_VDEV;
+	vdev->notifyid           = 0xFFu;
+	vdev->status             = status;
+	l->rsctbl[ALP_AMP_BEACON_MAGIC_OFF(ALP_AMP_RSCTBL_SIZE) / 4]   = ALP_AMP_BEACON_MAGIC;
+	l->rsctbl[ALP_AMP_BEACON_VERSION_OFF(ALP_AMP_RSCTBL_SIZE) / 4] = beacon_version;
+	l->rsctbl[ALP_AMP_BEACON_EPOCH_OFF(ALP_AMP_RSCTBL_SIZE) / 4]   = 7u;
 
 	fake_region_init(&l->rsctbl_dev, l->rsctbl, sizeof l->rsctbl);
 	fake_region_init(&l->mhu_dev, l->mhu, sizeof l->mhu);
@@ -817,7 +817,7 @@ static void test_attach_refuses_missing_beacon(void)
 {
 	static struct fake_link l;
 	fake_link_init(&l, 2u, 0u);
-	l.rsctbl[ALP_RSCTBL_BEACON_MAGIC_OFF / 4] = 0xFFFFFFFFu; /* CM33 never ran */
+	l.rsctbl[ALP_AMP_BEACON_MAGIC_OFF(ALP_AMP_RSCTBL_SIZE) / 4] = 0xFFFFFFFFu; /* CM33 never ran */
 	ALP_ASSERT_EQ_INT(capture_stderr(uio_attach_reset, &l.ch), ALP_ERR_NOT_READY);
 	ALP_ASSERT_TRUE(strstr(g_stderr_buf, "no CM33 beacon") != NULL);
 	ALP_ASSERT_EQ_INT((int)fake_link_doorbell(&l), 0);
@@ -841,7 +841,9 @@ static void *fake_cm33_ack(void *arg)
 	struct fake_link *l = (struct fake_link *)arg;
 	for (int i = 0; i < 2000; ++i) {
 		if (fake_link_status(l) == 0u) {
-			__atomic_store_n(&l->rsctbl[ALP_RSCTBL_ATTACH_EPOCH_OFF / 4], 8u, __ATOMIC_SEQ_CST);
+			__atomic_store_n(&l->rsctbl[ALP_AMP_BEACON_EPOCH_OFF(ALP_AMP_RSCTBL_SIZE) / 4],
+			                 8u,
+			                 __ATOMIC_SEQ_CST);
 			return NULL;
 		}
 		sleep_ms(1);
@@ -878,7 +880,8 @@ static void test_attach_reset_skipped_on_even_epoch(void)
 {
 	static struct fake_link l;
 	fake_link_init(&l, 2u, VIRTIO_CONFIG_STATUS_DRIVER_OK);
-	l.rsctbl[ALP_RSCTBL_ATTACH_EPOCH_OFF / 4] = 8u; /* CM33 waiting for an attach */
+	l.rsctbl[ALP_AMP_BEACON_EPOCH_OFF(ALP_AMP_RSCTBL_SIZE) / 4] =
+	    8u; /* CM33 waiting for an attach */
 	ALP_ASSERT_EQ_INT(uio_attach_reset(&l.ch), ALP_OK);
 	ALP_ASSERT_EQ_INT((int)fake_link_doorbell(&l), 0);
 }

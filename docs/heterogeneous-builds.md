@@ -275,7 +275,10 @@ CM33-NS `0x9f710000` (A55 view `0x4f710000`), clear of the rsctbl page
 the mhu-shm page (`0x9f701000..0x9f701fff`) and the vrings (from
 `0x9f800000`). The V2N101 and V2M101 CM33 board trees chose it as
 `zephyr,ram-console` with `CONFIG_RAM_CONSOLE=y`, because the CM33 has no
-UART console. Read it back from Linux after a CM33 boot:
+UART console. Its offset and size are the SoC
+`openamp_carveout.ram_console` (`metadata/socs/renesas/rzv2n/n44.json`); the
+board `.dts` node, `CONFIG_RAM_CONSOLE_BUFFER_SIZE` and the backend's
+`ALP_AMP_RAM_CONSOLE_*` are generated from it. Read it back from Linux after a CM33 boot:
 map `/dev/mem` and copy the buffer out in 32-bit words (a plain `dd`
 `read()` on this `no-map` window fails with `Bad address`):
 

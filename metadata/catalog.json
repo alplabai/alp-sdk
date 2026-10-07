@@ -3358,6 +3358,10 @@
       "script": "scripts/check_amp_pad_claims.py"
     },
     {
+      "purpose": "Pin every copy of the CM33 OpenAMP shared window to its one declaration.",
+      "script": "scripts/check_amp_window.py"
+    },
+    {
       "purpose": "Reject a raw `apt-get update`/`apt-get install` in a workflow step.",
       "script": "scripts/check_apt_bounded.py"
     },

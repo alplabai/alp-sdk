@@ -62,6 +62,7 @@
 #include <metal/device.h>
 #include <openamp/open_amp.h>
 
+#include <alp/protocol/amp_beacon.h>
 #include <alp/protocol/v2n_mhu_doorbell.h>
 
 #include "resource_table.h"
@@ -94,13 +95,13 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
  * table itself gets memcpy'd into RSC_TABLE_ADDR by platform_init() below,
  * so it owns the low end of the `rsctbl` region -- the beacon lives at the
  * TOP of the region instead, out of the resource table's way.  A Linux-side
- * `devmem 0x4F700FF0` (rsctbl's A55 alias) read after this app boots proves,
+ * `devmem` of the beacon's A55 alias (see README.md) read after this app boots proves,
  * in one shot, that the M33 is alive, the DDR window is backed, and the
  * CM33<->A55 address translation in resource_table.h is correct -- and the
  * heartbeat word lets a re-read tell "alive" apart from "wrote once, then
  * faulted".
  *
- * Version 2 (#2586) adds the attach-epoch word at +0xFFC, which publishes
+ * Version 2 (#2586) adds the attach-epoch word (end-0x04 of the rsctbl page), which publishes
  * whether this firmware is bound to an A55 session: ODD = bound (bumped
  * after rpmsg_init_vdev() returned), EVEN = waiting for an attach (starts
  * at 0, bumped again after cleanup_system() on an A55 attach reset; see
@@ -109,13 +110,13 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
  * vdev.status says, and waits for EVEN.  It refuses a re-attach outright
  * when the version is below 2.
  */
-#define RSCTBL_BEACON_MAGIC_OFFSET     (0xFF0)
-#define RSCTBL_BEACON_VERSION_OFFSET   (0xFF4)
-#define RSCTBL_BEACON_HEARTBEAT_OFFSET (0xFF8)
-#define RSCTBL_ATTACH_EPOCH_OFFSET     (0xFFC)
-
-#define RSCTBL_BEACON_MAGIC   (0xA10D0683U) /* "Alp Lab, #683" -- arbitrary, just distinctive */
 #define RSCTBL_BEACON_VERSION (2U)
+
+/* The beacon: the top 16 bytes of the rsctbl page, laid out by
+ * <alp/protocol/amp_beacon.h> (shared with the A55 backend and the stock
+ * shim).  DT_REG_SIZE of `rsctbl` is that page's size, from the SoC
+ * metadata via the generated board .dts. */
+#define RSCTBL_BEACON ALP_AMP_BEACON_AT(RSC_TABLE_ADDR, DT_REG_SIZE(DT_NODELABEL(rsctbl)))
 
 /* 2048 not 1024: the RX callback + echo thread now hold a struct sc_frame (~520 B)
  * on the stack for the queued-echo path (#707); the deep OpenAMP rx call chain
@@ -561,46 +562,34 @@ static void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
 }
 
 /* Writes the one-shot magic+version half of the beacon -- see the
- * RSCTBL_BEACON_* macros' header comment. */
+ * header comment above. */
 static void rsctbl_beacon_publish(void)
 {
-	volatile uint32_t *magic = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_BEACON_MAGIC_OFFSET);
-	volatile uint32_t *version =
-	    (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_BEACON_VERSION_OFFSET);
-
-	volatile uint32_t *epoch = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_ATTACH_EPOCH_OFFSET);
-
-	*epoch   = 0U;
-	*version = RSCTBL_BEACON_VERSION;
+	RSCTBL_BEACON->attach_epoch = 0U;
+	RSCTBL_BEACON->version      = RSCTBL_BEACON_VERSION;
 	/* Magic last: the A55 trusts epoch + version only once it reads the magic. */
 	barrier_dsync_fence_full();
-	*magic = RSCTBL_BEACON_MAGIC;
+	RSCTBL_BEACON->magic = ALP_AMP_BEACON_MAGIC;
 	barrier_dsync_fence_full();
 }
 
-/* Flips the attach epoch's parity (even <-> odd) -- see the RSCTBL_BEACON_*
- * macros' header comment.  Called after the virtio device is bound (-> odd)
- * and after it is gone (-> even). */
+/* Flips the attach epoch's parity (even <-> odd).  Called after the virtio
+ * device is bound (-> odd) and after it is gone (-> even). */
 static void rsctbl_attach_epoch_bump(void)
 {
-	volatile uint32_t *epoch = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_ATTACH_EPOCH_OFFSET);
-
 	barrier_dsync_fence_full();
-	*epoch = *epoch + 1U;
+	RSCTBL_BEACON->attach_epoch = RSCTBL_BEACON->attach_epoch + 1U;
 	barrier_dsync_fence_full();
 }
 
-/* ~1 Hz heartbeat -- see the RSCTBL_BEACON_* macros' header comment. */
+/* ~1 Hz heartbeat -- see the header comment above. */
 static uint32_t rsctbl_heartbeat_count;
 
 static void rsctbl_heartbeat_expiry(struct k_timer *timer)
 {
-	volatile uint32_t *heartbeat =
-	    (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_BEACON_HEARTBEAT_OFFSET);
-
 	ARG_UNUSED(timer);
 	rsctbl_heartbeat_count++;
-	*heartbeat = rsctbl_heartbeat_count;
+	RSCTBL_BEACON->heartbeat = rsctbl_heartbeat_count;
 	barrier_dsync_fence_full();
 }
 

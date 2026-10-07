@@ -198,12 +198,14 @@ IPC-enabled CM33 image through `yocto_uio_drv.c`.  The CM33 window is
    replies.
 
    **CM33 beacon map** (top of `rsctbl`, A55 `0x4f700ff0`, CM33-NS
-   `0x9f700ff0`; read with `devmem`):
+   `0x9f700ff0`; read with `devmem`).  The layout is defined once in
+   `include/alp/protocol/amp_beacon.h` (offsets from the end of the rsctbl page);
+   the page itself is the SoC metadata's `openamp_carveout.regions.rsctbl`:
 
    | Offset  | A55 address  | Word                                                              |
    |---------|--------------|-------------------------------------------------------------------|
    | `+0xFF0`| `0x4f700ff0` | magic `0xA10D0683`                                                |
-   | `+0xFF4`| `0x4f700ff4` | version: `1` = RPC firmware without attach reset, `2` = with it; `>= 0x100` = image without RPC (`0x100` = idle stock shim *with the heartbeat beacon*, pending branch `feat/cm33-shim-heartbeat`) |
+   | `+0xFF4`| `0x4f700ff4` | version: `1` = RPC firmware without attach reset, `2` = with it; `>= 0x100` = image without RPC (`0x100` = idle stock shim *with the heartbeat beacon*) |
    | `+0xFF8`| `0x4f700ff8` | ~1 Hz heartbeat counter                                           |
    | `+0xFFC`| `0x4f700ffc` | attach epoch (version 2): `0` at boot; **odd = CM33 bound to a session, even = waiting for an attach** |
 
@@ -225,8 +227,10 @@ IPC-enabled CM33 image through `yocto_uio_drv.c`.  The CM33 window is
    (`tests/hil/v2m103-x-evk/v2m103-rpmsg-echo-uio.yaml`, binary at
    `<artifact-dir>/linux`) or, with the static bench binary from
    `tests/yocto/build_rpc_uio_bench_aarch64.sh`, run it directly on the
-   board.  Pass = `[rpmsg-v2n] done (4/4 round trips verified)`; the
-   `/proc/interrupts` `mhu-uio` count rises.
+   board.  Pass = `[rpmsg-v2n] done (4/4 round trips verified)` from the
+   HIL binary, or `[PASS] echo: 0/4 payload sizes mismatched` from the
+   static bench binary; either way the `/proc/interrupts` `mhu-uio` count
+   rises.
 
 ## Reference
 

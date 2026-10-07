@@ -13231,6 +13231,65 @@
       },
       "variables": {}
     },
+    "alp/protocol/amp_beacon.h": {
+      "functions": {},
+      "macros": {
+        "ALP_AMP_BEACON_AT": {
+          "hash": "55f5e1202895baa1",
+          "value": "(base, page_size) ((volatile struct alp_amp_beacon *)((uintptr_t)(base) + (page_size) - sizeof(struct alp_amp_beacon)))"
+        },
+        "ALP_AMP_BEACON_EPOCH_OFF": {
+          "hash": "1659cff27e69e1a7",
+          "value": "(page_size) ((page_size) - 0x04u)"
+        },
+        "ALP_AMP_BEACON_HEARTBEAT_OFF": {
+          "hash": "04d8f67c18622b3a",
+          "value": "(page_size) ((page_size) - 0x08u)"
+        },
+        "ALP_AMP_BEACON_MAGIC": {
+          "hash": "7ad073156cf9e16d",
+          "value": "0xA10D0683u"
+        },
+        "ALP_AMP_BEACON_MAGIC_OFF": {
+          "hash": "e5939a3f1326e418",
+          "value": "(page_size) ((page_size) - 0x10u)"
+        },
+        "ALP_AMP_BEACON_SIZE": {
+          "hash": "b36aa52354bccafc",
+          "value": "0x10u"
+        },
+        "ALP_AMP_BEACON_VERSION_ATTACH_ACK": {
+          "hash": "ba74b27285b5deec",
+          "value": "2u"
+        },
+        "ALP_AMP_BEACON_VERSION_IDLE_SHIM": {
+          "hash": "17dea3b99448850c",
+          "value": "0x100u"
+        },
+        "ALP_AMP_BEACON_VERSION_NO_RPC": {
+          "hash": "6c78914cdf95c452",
+          "value": "0x100u"
+        },
+        "ALP_AMP_BEACON_VERSION_OFF": {
+          "hash": "761eb0bf71ae6f22",
+          "value": "(page_size) ((page_size) - 0x0Cu)"
+        }
+      },
+      "typedefs": {
+        "struct alp_amp_beacon": {
+          "definition": "typedef struct alp_amp_beacon { uint32_t magic; uint32_t version; uint32_t heartbeat; uint32_t attach_epoch; } struct alp_amp_beacon;",
+          "fields": [
+            "uint32_t magic",
+            "uint32_t version",
+            "uint32_t heartbeat",
+            "uint32_t attach_epoch"
+          ],
+          "hash": "6601a14e88c32ba5",
+          "kind": "struct"
+        }
+      },
+      "variables": {}
+    },
     "alp/protocol/cc3501e.h": {
       "functions": {},
       "macros": {
@@ -14113,8 +14172,8 @@
           "value": "0x200u"
         },
         "ALP_GD32_RESULTS_BEACON_MAGIC": {
-          "hash": "484addcab984718a",
-          "value": "0xA10D0683u"
+          "hash": "5520b50a61ef2afd",
+          "value": "ALP_AMP_BEACON_MAGIC"
         },
         "ALP_GD32_RESULTS_BEACON_OFFSET": {
           "hash": "f89ac98ced339433",

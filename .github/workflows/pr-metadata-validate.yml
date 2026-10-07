@@ -66,6 +66,15 @@ on:
       - 'scripts/check_i2c_address_uniqueness.py'
       - 'scripts/check_e1m_pinout.py'
       - 'scripts/check_amp_pad_claims.py'
+      - 'scripts/check_amp_window.py'
+      - 'scripts/gen_amp_window.py'
+      - 'src/backends/rpc/alp_amp_window.h'
+      - 'include/alp/protocol/amp_beacon.h'
+      - 'firmware/**'
+      - 'tests/yocto/**'
+      - 'tests/hil/**'
+      - 'src/backends/rpc/**'
+      - 'examples/multicore/**'
       - 'scripts/check_pad_voltage.py'
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
@@ -160,6 +169,15 @@ on:
       - 'scripts/check_i2c_address_uniqueness.py'
       - 'scripts/check_e1m_pinout.py'
       - 'scripts/check_amp_pad_claims.py'
+      - 'scripts/check_amp_window.py'
+      - 'scripts/gen_amp_window.py'
+      - 'src/backends/rpc/alp_amp_window.h'
+      - 'include/alp/protocol/amp_beacon.h'
+      - 'firmware/**'
+      - 'tests/yocto/**'
+      - 'tests/hil/**'
+      - 'src/backends/rpc/**'
+      - 'examples/multicore/**'
       - 'scripts/check_pad_voltage.py'
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
@@ -274,6 +292,12 @@ jobs:
       - name: Check no Linux DT pad claim lands on a CM33-owned pad
         run: python3 scripts/check_amp_pad_claims.py
 
+      # The CM33 OpenAMP window is declared once (SoC `openamp_carveout`);
+      # the generated board .dts, the Linux reserved-memory/UIO nodes and the
+      # RPC backend header must agree (every sub-region), and the beacon magic
+      # and address must be defined only in include/alp/protocol/amp_beacon.h.
+      - name: Check the OpenAMP window agrees across metadata, DT and backend
+        run: python3 scripts/check_amp_window.py
       # RZ/V2N P90-P92, P2x and PBx are not 3.3 V tolerant (SoC
       # pad_tolerance); a board that routes 3.3 V there needs a level shifter.
       - name: Check non-3.3 V-tolerant pads carry a level declaration
