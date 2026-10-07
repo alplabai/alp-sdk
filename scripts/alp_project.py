@@ -291,7 +291,9 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             OrchestratorError,
             _slice_alp_conf,
             _slice_cmake_args,
+            _slice_dts_overlay,
             _slice_local_conf,
+            _v1_shaped_project,
             load_board_yaml,
         )
         from alp_orchestrate.ownership import project_m33_overlay
@@ -319,17 +321,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
     # hw-info-h, west-libraries).  The public board.yaml schema no
     # longer uses this wrapper, but it's a convenient internal
     # representation for the emitters' read paths.
-    project_v1_shaped: dict[str, Any] = {
-        "som": {
-            "sku":    project.sku,
-            "hw_rev": project.hw_rev,
-        },
-        "pins": list(project.raw.get("pins") or []),
-        "board": ({
-            "name":   project.board_name,
-            "hw_rev": project.board_hw_rev,
-        } if project.board_name else None),
-    }
+    project_v1_shaped: dict[str, Any] = _v1_shaped_project(project)
 
     # --- zephyr-board: writes a directory of files, not a single stream --
     if args.emit == "zephyr-board":
@@ -369,16 +361,14 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
         # fact.  v2 contributes only the peripherals list: union across
         # Zephyr/baremetal cores (or one core when --core is set).
         if args.core is not None:
-            slice_ = project.cores[args.core]
-            v2_peripherals = sorted(set(slice_.peripherals))
-            out = _emit_dts_overlay(
-                project_v1_shaped, project.som_preset,
-                project.board_preset,
-                v2_peripherals=v2_peripherals,
-                v2_core_id=args.core,
-                v2_core_os=slice_.os,
-                v2_core_ids=[args.core],
-            )
+            # Single source shared with the build plan's `alp.overlay`
+            # configArtefact (ADR-0026 §D), M33-ownership nodes included.
+            try:
+                out = _slice_dts_overlay(project, project.cores[args.core])
+            except OrchestratorError as e:
+                print(f"alp_project: {e}", file=sys.stderr)
+                return 1
+            return _write_or_print(out, args.output)
         else:
             union: set[str] = set()
             zephyr_core_ids: list[str] = []

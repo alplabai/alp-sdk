@@ -148,7 +148,7 @@ cores:
 def test_baremetal_slice_and_stock_image_appdir_null_conform(tmp_path: Path):
     """`os: baremetal` on m55_hp (with the SoM preset's other cores left
     at their defaults) exercises: the `baremetal` backend enum value, its
-    EMPTY `configArtefacts` on a project with NO `preset:` (this board
+    `configArtefacts` (no `alp-baremetal.cmake`) on a project with NO `preset:` (this board
     resolves no board name and E1M-AEN801 declares no restricted
     capabilities, so the slice has no `ALP_BOARD_<SLUG>`/`ALP_SOM_<SKU>`
     compile guard to carry and `alp-baremetal.cmake` is not emitted at
@@ -169,7 +169,10 @@ def test_baremetal_slice_and_stock_image_appdir_null_conform(tmp_path: Path):
     by_id = {s["coreId"]: s for s in plan["slices"]}
     baremetal = by_id["m55_hp"]
     assert baremetal["backend"] == "baremetal"
-    assert baremetal["configArtefacts"] == []
+    # No compile guard to carry, so no `alp-baremetal.cmake`; the rendered
+    # DTS overlay and `-D` listing (ADR-0026 §D) are the only artefacts.
+    assert [a["path"].rsplit("/", 1)[-1]
+            for a in baremetal["configArtefacts"]] == ["alp.overlay", "cmake-args.txt"]
     assert baremetal["command"]["tool"] == "cmake"
     assert "-S" in baremetal["command"]["args"]
     assert "-B" in baremetal["command"]["args"]
