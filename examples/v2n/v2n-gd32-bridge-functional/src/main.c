@@ -643,6 +643,14 @@ static void t_power_deep_sleep_wake(void)
 		record_ex(ALP_OK, true, true);
 		return;
 	}
+	/* The scope-channel PWM row leaves SCOPE_PWM_CH claimed, and a claimed
+	 * PWM makes Deep-sleep answer BUSY (that case is the next row's job).
+	 * Release it first so this row tests the plain sleep + wake path. */
+	s = gd32g553_pwm_stop(&ctx, SCOPE_PWM_CH);
+	if (s != ALP_OK) {
+		record(s, false);
+		return;
+	}
 	s = power_deep_sleep_timed();
 	if (s == ALP_ERR_NOSUPPORT) {
 		record_ex(ALP_OK, true, true);
