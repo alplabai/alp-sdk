@@ -170,9 +170,9 @@ def test_baremetal_slice_and_stock_image_appdir_null_conform(tmp_path: Path):
     baremetal = by_id["m55_hp"]
     assert baremetal["backend"] == "baremetal"
     # No compile guard to carry, so no `alp-baremetal.cmake`; the rendered
-    # DTS overlay (ADR-0026 §D) is the only artefact.
+    # DTS overlay and `-D` listing (ADR-0026 §D) are the only artefacts.
     assert [a["path"].rsplit("/", 1)[-1]
-            for a in baremetal["configArtefacts"]] == ["alp.overlay"]
+            for a in baremetal["configArtefacts"]] == ["alp.overlay", "cmake-args.txt"]
     assert baremetal["command"]["tool"] == "cmake"
     assert "-S" in baremetal["command"]["args"]
     assert "-B" in baremetal["command"]["args"]

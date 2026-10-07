@@ -86,7 +86,9 @@ version-detection work, not this loader's.
 
 `--emit cmake-args` renders a slice's would-be `-D` arguments as text: an
 on-request surface for inspecting what a baremetal build needs, or for a
-build system that parses the lines itself. It is **not** a directly
+build system that parses the lines itself. The same text (minus the section
+marker below) is also carried in the build plan as each zephyr/baremetal
+slice's `cmake-args.txt` configArtefact, so `tan` does not re-render it. It is **not** a directly
 shell-pipeable recipe -- `cmake -B build $(... --emit cmake-args) .` fails
 CMake's own argument parser today, for two independent reasons: the CLI's
 leading `# --- core: <id> (<os>) ---` section marker

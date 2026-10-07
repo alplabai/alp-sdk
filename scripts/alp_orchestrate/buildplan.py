@@ -26,6 +26,7 @@ from .headers import emit_dts_partitions, emit_dts_reservations, emit_ipc_contra
 from .kconfig import (
     _resolve_console,
     _slice_alp_conf,
+    _slice_cmake_args,
     _slice_local_conf,
 )
 from .models import BoardProject, OrchestratorError, Slice
@@ -155,8 +156,8 @@ def _slice_config_artefact(
     guards, loudly (alplabai/tan-cli#551). The `=`-bearing cache entries
     from the same source ride the configure command line directly and are
     NOT duplicated here. The full human-readable `-D` listing remains
-    available on request via `--emit cmake-args` (`_slice_cmake_args`,
-    unchanged) -- see docs/board-config-emit.md.
+    also published as the plan's `cmake-args.txt` artefact
+    (`_slice_cmake_args_artefact`) -- see docs/board-config-emit.md.
     """
     if slice_.os == "zephyr":
         return ("alp.conf", _slice_alp_conf(project, slice_))
@@ -178,11 +179,14 @@ def _slice_config_artefact(
 
 #: The os classes a slice's `alp.overlay` artefact is emitted for: the
 #: classes `alp_project.py --emit dts-overlay` unions over. A yocto slice has
-#: none.
+#: none. `cmake-args.txt` is emitted for the same two (`--emit cmake-args`).
 _DTS_OVERLAY_OS = ("zephyr", "baremetal")
 
 #: Filename of the rendered DTS overlay config artefact (under `buildDir`).
 DTS_OVERLAY_ARTEFACT = "alp.overlay"
+
+#: Filename of the rendered full `-D` listing config artefact.
+CMAKE_ARGS_ARTEFACT = "cmake-args.txt"
 
 
 def _slice_dts_overlay(project: BoardProject, slice_: Slice) -> str:
@@ -246,6 +250,26 @@ def _slice_dts_overlay_artefact(
     if slice_.os not in _DTS_OVERLAY_OS:
         return None
     return (DTS_OVERLAY_ARTEFACT, _slice_dts_overlay(project, slice_))
+
+
+def _slice_cmake_args_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's full `-D` listing -- exactly what
+    `alp_project.py --emit cmake-args --core <id>` prints after its
+    `# --- core ---` marker -- or None for an os that has none.
+
+    A rendered REFERENCE listing for consumers (ADR-0026 §D). The
+    `=`-bearing cache entries already ride the baremetal configure line and
+    the bare guards arrive via `alp-baremetal.cmake`; this file is not read
+    by any build command and so does not resurrect the dead `cmake-args.txt`
+    #1278 removed -- it is the same text, now published in the plan so `tan`
+    stops re-rendering it.
+    """
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    return (CMAKE_ARGS_ARTEFACT, _slice_cmake_args(project, slice_))
 
 
 def _shared_artefacts(
@@ -714,6 +738,7 @@ def emit_build_plan(
                     "message": (f"core '{slice_.core_id}': no `alp.overlay` "
                                 f"artefact -- {exc}"),
                 })
+            extras.append(_slice_cmake_args_artefact(project, slice_))
         for extra in extras:
             if extra is not None:
                 config_artefacts.append({

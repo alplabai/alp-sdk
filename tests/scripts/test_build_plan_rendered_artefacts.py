@@ -26,6 +26,7 @@ from alp_orchestrate import emit_build_plan, load_board_yaml  # noqa: E402
 #: emit mode -> (artefact file name, os classes that carry it)
 MODES = {
     "dts-overlay": ("alp.overlay", ("zephyr", "baremetal")),
+    "cmake-args": ("cmake-args.txt", ("zephyr", "baremetal")),
 }
 
 BOARDS = [
@@ -43,11 +44,17 @@ def _plan(board: Path) -> dict:
 
 
 def _standalone(board: Path, mode: str, core: str) -> str:
+    # `--emit cmake-args` prefixes each core with a `# --- core ---` marker the
+    # plan artefact does not carry; the rest is the same text.
     done = subprocess.run(
         [sys.executable, str(REPO / "scripts" / "alp_project.py"),
          "--input", str(board), "--emit", mode, "--core", core],
         capture_output=True, text=True, encoding="utf-8", check=True)
-    return done.stdout
+    out = done.stdout
+    if mode == "cmake-args":
+        marker, _, out = out.partition("\n")
+        assert marker.startswith("# --- core: ")
+    return out
 
 
 @pytest.mark.parametrize("mode", sorted(MODES))

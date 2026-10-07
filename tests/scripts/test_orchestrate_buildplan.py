@@ -390,6 +390,7 @@ def test_emit_build_plan_matches_materialiser(tmp_path: Path) -> None:
     import json as _json
     from alp_orchestrate import OrchestratorError, emit_build_plan
     from alp_orchestrate.buildplan import (_shared_artefacts,
+                                           _slice_cmake_args_artefact,
                                            _slice_config_artefact,
                                            _slice_dts_overlay_artefact)
 
@@ -416,6 +417,9 @@ def test_emit_build_plan_matches_materialiser(tmp_path: Path) -> None:
             extra = _slice_dts_overlay_artefact(project, slice_)
         except OrchestratorError:
             extra = None  # the plan carries a `dts-overlay-unavailable` warning
+        if extra is not None and s["command"] is not None:
+            want_confs[f"{s['buildDir']}/{extra[0]}"] = extra[1]
+        extra = _slice_cmake_args_artefact(project, slice_)
         if extra is not None and s["command"] is not None:
             want_confs[f"{s['buildDir']}/{extra[0]}"] = extra[1]
         got_confs = {a["path"]: a["contents"] for a in s["configArtefacts"]}

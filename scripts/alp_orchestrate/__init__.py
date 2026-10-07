@@ -138,6 +138,7 @@ from .manifest import emit_system_manifest  # noqa: E402,F401  (re-export: cli +
 # re-exported for cli + tests. (The shared materialise helpers are imported
 # directly by orchestrator.py now, not back through here.)
 from .buildplan import (  # noqa: E402
+    _slice_cmake_args_artefact,  # noqa: F401  (re-export: tests)
     _slice_dts_overlay,  # noqa: F401  (re-export: alp_project + tests)
     _slice_dts_overlay_artefact,  # noqa: F401  (re-export: tests)
     emit_build_plan,  # noqa: F401  (re-export: cli + tests)
