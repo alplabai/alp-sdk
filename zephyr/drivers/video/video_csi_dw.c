@@ -615,6 +615,17 @@ static int csi2_dw_validate_data(const struct device *dev)
 	}
 	if (ret) {
 		LOG_ERR("Failed to set CSI pixel clock rate! ret - %d", ret);
+		if (ret == -ENOTSUP) {
+			/*
+			 * Upstream clock_control_alif.c has no CSI pixel-clock
+			 * set_rate; alp-sdk zephyr/patches.yml patch zephyr/0001
+			 * adds it.  Name the cause: the symptom otherwise reads
+			 * as a hardware fault (#2766).
+			 */
+			LOG_ERR("Zephyr clock_control_alif lacks CSI pixel-clock set_rate -- "
+				"alp-sdk zephyr/patches.yml patch 0001 not applied; run "
+				"scripts/bootstrap.sh (or `west patch --dst-module zephyr apply`)");
+		}
 		return ret;
 	}
 
