@@ -30,12 +30,14 @@
  *   so we pass framing=false and each callback moves exactly one XRCE
  *   datagram.
  *
- * STATUS: NOT built or bench-run yet.  See README.md
+ * STATUS: builds on Zephyr 4.4.1 and boots past platform_init on an
+ * E1M-V2M103 (2026-10-07; main() ran and wrote the resource table).  NOT
+ * proven: a ROS 2 topic round-trip with a micro-ROS agent.  See README.md
  * ("What is untested").
  */
 
 #include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
+#include <zephyr/sys/printk.h>
 
 #include <rcl/error_handling.h>
 #include <rcl/rcl.h>
@@ -45,7 +47,11 @@
 
 #include "rpmsg_link.h"
 
-LOG_MODULE_REGISTER(microros_v2n, LOG_LEVEL_INF);
+/* Status lines go through printk, not LOG_*: the CM33 has no UART, its only
+ * console is the RAM console (docs/heterogeneous-builds.md), and the board
+ * defconfig sets CONFIG_LOG_PRINTK=n, so no log backend would ever carry a
+ * LOG_INF line there.  printk lands in the RAM console directly. */
+#define STATUS(fmt, ...) printk("microros_v2n: " fmt "\n", ##__VA_ARGS__)
 
 /* ------------------------------------------------------------------ */
 /* Custom XRCE transport: open / close / write / read over RPMsg       */
@@ -106,7 +112,7 @@ transport_read(struct uxrCustomTransport *t, uint8_t *buf, size_t len, int timeo
 	({ \
 		rcl_ret_t rc_ = (call); \
 		if (rc_ != RCL_RET_OK) { \
-			LOG_ERR("%s failed: %d (line %d)", #call, (int)rc_, __LINE__); \
+			STATUS("%s failed: %d (line %d)", #call, (int)rc_, __LINE__); \
 		} \
 		rc_ == RCL_RET_OK; \
 	})
@@ -133,23 +139,26 @@ static void run_session(void)
 		goto fini_node;
 	}
 
-	LOG_INF("publishing std_msgs/Int32 on /alp_counter every %d ms", PUBLISH_PERIOD_MS);
+	STATUS("publishing std_msgs/Int32 on /alp_counter every %d ms", PUBLISH_PERIOD_MS);
 	while (RC_OK(rcl_publish(&pub, &msg, NULL))) {
 		msg.data++;
 		k_msleep(PUBLISH_PERIOD_MS);
 	}
 
-	(void)rcl_publisher_fini(&pub, &node);
+	/* Teardown results are only reported: the session is over either way and
+	 * main() starts a fresh one.  GCC's warn_unused_result is not silenced by
+	 * a (void) cast, so the code is checked via RC_OK, which logs a failure. */
+	(void)RC_OK(rcl_publisher_fini(&pub, &node));
 fini_node:
-	(void)rcl_node_fini(&node);
+	(void)RC_OK(rcl_node_fini(&node));
 fini_support:
-	(void)rclc_support_fini(&support);
+	(void)RC_OK(rclc_support_fini(&support));
 }
 
 int main(void)
 {
 	if (rpmsg_link_start() != 0) {
-		LOG_ERR("rpmsg link bring-up failed");
+		STATUS("rpmsg link bring-up failed");
 		return -1;
 	}
 
@@ -164,12 +173,12 @@ int main(void)
 		 * order irrelevant -- the M33 boots first, the agent may come
 		 * up minutes later. */
 		if (rmw_uros_ping_agent(1000, 5) != RMW_RET_OK) {
-			LOG_INF("waiting for the micro-ROS agent (is the A55 bridge running?)");
+			STATUS("waiting for the micro-ROS agent (is the A55 bridge running?)");
 			continue;
 		}
-		LOG_INF("agent reachable, starting session");
+		STATUS("agent reachable, starting session");
 		run_session();
-		LOG_WRN("session ended, retrying");
+		STATUS("session ended, retrying");
 		k_msleep(1000);
 	}
 	return 0;

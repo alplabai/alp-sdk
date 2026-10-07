@@ -284,7 +284,9 @@ python3 -c "import mmap,os;m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC)
 
 The board defconfigs set `CONFIG_LOG_PRINTK=n` so printk reaches the
 buffer even when an app enables `CONFIG_LOG`.  Bench-verified on an
-E1M-V2M103: the Zephyr and Alp SDK boot banners read back.
+E1M-V2M103: the Zephyr and Alp SDK boot banners read back. An app's own
+status lines must use `printk` (e.g. `examples/multicore/microros-ros2-v2n`);
+`LOG_INF` and friends have no backend on this console and are lost.
 
 For each `ipc:` entry, `tan build`
 emits a header both halves `#include`:

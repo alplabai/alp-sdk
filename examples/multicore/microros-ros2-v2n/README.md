@@ -1,11 +1,14 @@
 # microros-ros2-v2n
 
-> **Status: M33 slice builds; not yet run on hardware.** The A55 bridge
-> compiles warning-free on a Linux host; the M33 firmware builds to
-> `zephyr.elf` for the V2M101 and V2N101 CM33 targets on Zephyr 4.4 /
+> **Status: M33 slice builds and boots; no ROS 2 round-trip yet.** The A55
+> bridge compiles warning-free on a Linux host; the M33 firmware builds to
+> `zephyr.elf` for the V2M101 and V2N101 CM33 targets on Zephyr 4.4.1 /
 > zephyr-sdk 1.0.1 (picolibc) with two carried patches to
-> `micro_ros_zephyr_module` (`m33_sm/patches/`). It has never been run. See
-> [What is untested](#what-is-untested). Nothing here is bench evidence.
+> `micro_ros_zephyr_module` (`m33_sm/patches/`). On an E1M-V2M103
+> (2026-10-07) the image booted on the CM33 and `main()` wrote the resource
+> table (rsctbl v1, 1 RPMSG vdev, vrings at `0x4f800000`), no SError. Not
+> proven: a ROS 2 topic round-trip with a micro-ROS agent. See
+> [What is untested](#what-is-untested).
 
 A **micro-ROS node on the RZ/V2N Cortex-M33** (Zephyr) publishes a
 `std_msgs/Int32` counter that **ROS 2 on the Cortex-A55** (Yocto) can
@@ -122,7 +125,7 @@ works but is outside the ADR's design.
 
 State of this change, precisely:
 
-- **M33 firmware: builds, never run.** The micro-ROS module build (colcon
+- **M33 firmware: builds and boots; the micro-ROS session never ran.** The micro-ROS module build (colcon
   cross-compile of rcl/rclc/rmw_microxrcedds at CMake configure time; needs
   network + the ROS 2 Python build tools) and the Zephyr link succeed
   against Zephyr 4.4 / zephyr-sdk 1.0.1 (picolibc). Not verified at runtime:
