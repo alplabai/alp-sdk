@@ -1,0 +1,327 @@
+From a4a33233877208690cdb5403689d6b07ea0e579e Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Tue, 6 Oct 2026 13:07:01 +0000
+Subject: [PATCH] gpio: gd32-bridge: add CAM_EN_LDO0..3 lines and make CAN_STBY
+ requestable
+
+Copyright (c) 2026 Alp Lab AB
+SPDX-License-Identifier: GPL-2.0
+
+Lines 24..27 are the four camera LDO enables (GD32 PC3, PE8, PE7, PE10),
+bridge GPIO bits 23..26 from protocol 0.17.  They sit one above their
+bridge bit like IO15/IO26 (line 21 is se-rst) and are gated the same
+way: .request() runs one GET_VERSION and refuses them below minor 17,
+and a transfer never carries bits of a line the firmware has not
+confirmed (gd32_bridge_unconfirmed_bits() replaces three copies of the
+per-feature mask logic).
+
+A silent bridge defers a kernel consumer's probe (-EPROBE_DEFER, from a
+kernel thread only); a userspace request gets -EAGAIN, never the
+kernel-internal errno 517.
+
+Line 20 (can-stby, GD32 PB13, the TCAN1044 STB shared by the two
+transceivers) was refused by .request(); a phy-can-transceiver node can
+now request it as standby-gpios.
+
+Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ drivers/gpio/gpio-gd32-bridge.c | 157 +++++++++++++++++++++++++-------
+ 1 file changed, 123 insertions(+), 34 deletions(-)
+
+diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
+index 0ee0eb0..cde6d5a 100644
+--- a/drivers/gpio/gpio-gd32-bridge.c
++++ b/drivers/gpio/gpio-gd32-bridge.c
+@@ -105,6 +105,7 @@
+ #include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
++#include <linux/sched.h>
+ #include <linux/workqueue.h>
+ 
+ #define GD32_REG_CMD		0x00
+@@ -152,10 +153,6 @@
+  * refuses it so a write can never land in the sticky output_mask and then be
+  * replayed. */
+ #define GD32_UNROUTED_LINE	8
+-/* Line 20 is reserved for can-stby (bridge bit 20, protocol 0.13; the
+- * CAN-FD bring-up in alp-sdk#2341). Until that lands, .request() refuses
+- * it so nothing drives the transceivers' standby pad by accident. */
+-#define GD32_RESERVED_LINE	20
+ #define GD32_SE_RST_LINE	21
+ 
+ /*
+@@ -167,12 +164,32 @@
+  */
+ #define GD32_LINE_IO15		22
+ #define GD32_LINE_IO26		23
+-#define GD32_NGPIO_TOTAL	24
++/*
++ * Line 20 (can-stby, GD32 PB13: the TCAN1044 STB pin shared by the two
++ * on-module CAN-FD transceivers) is requestable now, so a phy-can-transceiver
++ * node can use it as standby-gpios.
++ */
++#define GD32_CAN_STBY_LINE	20
++/*
++ * Lines 24..27: the four camera LDO enables CAM_EN_LDO0..3 (GD32 PC3, PE8,
++ * PE7, PE10; SoM power-supply sheet, not E1M-X pads), bridge GPIO bits
++ * 23..26 (protocol 0.17).  Like IO15/IO26 they sit one ABOVE their bridge
++ * bit.
++ */
++#define GD32_LINE_CAM_EN_LDO0	24
++#define GD32_NGPIO_TOTAL	28
+ 
+ /* Bridge protocol minor at which bits 21/22 (IO15/IO26) first exist. */
+ #define GD32_PROTO_MINOR_IO_EXT		15
+ #define GD32_IO_EXT_BIT_MASK		(BIT(21) | BIT(22))
+ 
++/* Bridge protocol minor at which bits 23..26 (CAM_EN_LDO0..3) first exist. */
++#define GD32_PROTO_MINOR_CAM_LDO	17
++#define GD32_CAM_LDO_BIT_MASK		GENMASK(26, 23)
++
++/* Every wire bit above the se-rst gap: lines 22..27 sit on bits 21..26. */
++#define GD32_HI_BIT_MASK		GENMASK(26, 21)
++
+ /* Bridge protocol minor at which lines 18/19 (bt-reg-on/wl-reg-on) first
+  * exist. A bridge below this minor has no notion of them. */
+ #define GD32_PROTO_MINOR_WIFI_BT	11
+@@ -285,6 +302,8 @@ struct gd32_bridge_gpio {
+ 	 * resolved by the same GET_VERSION as wifi_bt_reg_on_status, under
+ 	 * status_lock. */
+ 	int io_ext_status;
++	/* Same rule for protocol minor >= 17: lines 24..27 (CAM_EN_LDO0..3). */
++	int cam_ldo_status;
+ 	struct mutex status_lock;
+ 	/*
+ 	 * Independent lines-18/19 resolver, NOT under state_lock (it has
+@@ -358,7 +377,40 @@ static int gd32_bridge_io_ext_status(struct gd32_bridge_gpio *gd32)
+ 	return status;
+ }
+ 
+-/* Line offset -> GPIO_READ/GPIO_WRITE bridge bit (lines 22/23 sit one above
++/* Peek the cached lines-24..27 status; same contract as the wifi/bt one. */
++static int gd32_bridge_cam_ldo_status(struct gd32_bridge_gpio *gd32)
++{
++	int status;
++
++	mutex_lock(&gd32->status_lock);
++	status = gd32->cam_ldo_status;
++	mutex_unlock(&gd32->status_lock);
++
++	return status;
++}
++
++/*
++ * Wire bits of every late line this bridge firmware has NOT (yet) confirmed
++ * it implements: callers drop them from a transfer instead of sending bits the
++ * firmware would silently ignore.
++ */
++static u32 gd32_bridge_unconfirmed_bits(struct gd32_bridge_gpio *gd32)
++{
++	u32 bits = 0;
++
++	mutex_lock(&gd32->status_lock);
++	if (gd32->wifi_bt_reg_on_status != 0)
++		bits |= GD32_WIFI_BT_LINE_MASK;
++	if (gd32->io_ext_status != 0)
++		bits |= GD32_IO_EXT_BIT_MASK;
++	if (gd32->cam_ldo_status != 0)
++		bits |= GD32_CAM_LDO_BIT_MASK;
++	mutex_unlock(&gd32->status_lock);
++
++	return bits;
++}
++
++/* Line offset -> GPIO_READ/GPIO_WRITE bridge bit (lines 22..27 sit one above
+  * their bit because line 21 is se-rst). Line 21 itself never reaches the
+  * wire. */
+ static u32 gd32_bridge_line_mask(unsigned int offset)
+@@ -367,18 +419,18 @@ static u32 gd32_bridge_line_mask(unsigned int offset)
+ }
+ 
+ /* Line-offset MASK -> GPIO_READ/GPIO_WRITE bit mask, and back. Lines 0..20
+- * are identity; lines 22/23 sit on bits 21/22. Line 21 (se-rst) has no bridge
++ * are identity; lines 22..27 sit on bits 21..26. Line 21 (se-rst) has no bridge
+  * bit: callers strip it first. */
+ static u32 gd32_bridge_lines_to_bits(u32 lines)
+ {
+ 	return (lines & (BIT(GD32_SE_RST_LINE) - 1)) |
+-	       ((lines >> (GD32_LINE_IO15 - 21)) & GD32_IO_EXT_BIT_MASK);
++	       ((lines >> (GD32_LINE_IO15 - 21)) & GD32_HI_BIT_MASK);
+ }
+ 
+ static u32 gd32_bridge_bits_to_lines(u32 bits)
+ {
+ 	return (bits & (BIT(GD32_SE_RST_LINE) - 1)) |
+-	       ((bits & GD32_IO_EXT_BIT_MASK) << (GD32_LINE_IO15 - 21));
++	       ((bits & GD32_HI_BIT_MASK) << (GD32_LINE_IO15 - 21));
+ }
+ 
+ static int gd32_bridge_xfer_once(struct gd32_bridge_gpio *gd32, u8 cmd,
+@@ -483,10 +535,8 @@ static int gd32_bridge_gpio_get(struct gpio_chip *chip, unsigned int offset)
+ 	 * happen. Gate anyway rather than reading bits the firmware may not
+ 	 * implement.
+ 	 */
+-	if ((mask & GD32_WIFI_BT_LINE_MASK) && gd32_bridge_wifi_bt_status(gd32) != 0)
+-		return -EAGAIN;
+-	/* Same gate for IO15/IO26: older firmware reads them back as 0. */
+-	if ((mask & GD32_IO_EXT_BIT_MASK) && gd32_bridge_io_ext_status(gd32) != 0)
++	/* Same gate for IO15/IO26/CAM_EN_LDO: older firmware reads them as 0. */
++	if (mask & gd32_bridge_unconfirmed_bits(gd32))
+ 		return -EAGAIN;
+ 
+ 	put_unaligned_le32(mask, req);
+@@ -513,9 +563,7 @@ static int gd32_bridge_gpio_get_multiple(struct gpio_chip *chip,
+ 	u8 req[4], rsp[4];
+ 	int ret;
+ 
+-	if ((wire & GD32_WIFI_BT_LINE_MASK) && gd32_bridge_wifi_bt_status(gd32) != 0)
+-		return -EAGAIN;
+-	if ((wire & GD32_IO_EXT_BIT_MASK) && gd32_bridge_io_ext_status(gd32) != 0)
++	if (wire & gd32_bridge_unconfirmed_bits(gd32))
+ 		return -EAGAIN;
+ 
+ 	if (wire) {
+@@ -613,11 +661,7 @@ static int gd32_bridge_gpio_do_set_mask(struct gd32_bridge_gpio *gd32,
+ 	 * still latched above regardless, and gd32_bridge_replay_work()
+ 	 * would re-issue the write if support were ever (re)confirmed.
+ 	 */
+-	wire = mask;
+-	if (gd32_bridge_wifi_bt_status(gd32) != 0)
+-		wire &= ~GD32_WIFI_BT_LINE_MASK;
+-	if (gd32_bridge_io_ext_status(gd32) != 0)
+-		wire &= ~GD32_IO_EXT_BIT_MASK;
++	wire = mask & ~gd32_bridge_unconfirmed_bits(gd32);
+ 	if (wire) {
+ 		put_unaligned_le32(wire, &req[0]);
+ 		put_unaligned_le32(vals & wire, &req[4]);
+@@ -783,6 +827,15 @@ static int gd32_bridge_wifi_bt_poll_once(struct gd32_bridge_gpio *gd32)
+ 	} else {
+ 		gd32->io_ext_status = 0;
+ 	}
++	if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_CAM_LDO) {
++		if (gd32->cam_ldo_status != -ENODEV)
++			dev_warn(gd32->chip.parent,
++				 "bridge protocol %u.%u.%u has no CAM_EN_LDO lines (need major 0, minor >= %u); lines 24..27 will not be usable on this firmware\n",
++				 ver[0], ver[1], ver[2], GD32_PROTO_MINOR_CAM_LDO);
++		gd32->cam_ldo_status = -ENODEV;
++	} else {
++		gd32->cam_ldo_status = 0;
++	}
+ 	mutex_unlock(&gd32->status_lock);
+ 
+ 	return 0;
+@@ -814,13 +867,17 @@ static int gd32_bridge_resolve_wifi_bt(struct gd32_bridge_gpio *gd32)
+ 	return gd32_bridge_wifi_bt_status(gd32);
+ }
+ 
+-/* Lines 22/23: same single non-blocking attempt; the shared GET_VERSION in
+- * gd32_bridge_wifi_bt_poll_once() resolves both caches.  No kernel consumer
+- * exists, so a silent bridge is -EAGAIN (libgpiod would see -EPROBE_DEFER
+- * as the kernel-internal errno 517). */
+-static int gd32_bridge_resolve_io_ext(struct gd32_bridge_gpio *gd32)
++/* Lines 20, 22..27: same single non-blocking attempt; the shared GET_VERSION
++ * in gd32_bridge_wifi_bt_poll_once() resolves every cache.  @peek reads the
++ * cache that gates the line.  A silent bridge is -EAGAIN: libgpiod would see
++ * the kernel-internal errno 517 for -EPROBE_DEFER.  Lines with a kernel
++ * consumer (can-stby, CAM_EN_LDO0..3) map it to -EPROBE_DEFER in
++ * gd32_bridge_gpio_request() so the consumer's probe is retried, but only from
++ * a kernel thread (driver-core probe); a userspace request keeps -EAGAIN. */
++static int gd32_bridge_resolve_late(struct gd32_bridge_gpio *gd32,
++				    int (*peek)(struct gd32_bridge_gpio *))
+ {
+-	int cached = gd32_bridge_io_ext_status(gd32);
++	int cached = peek(gd32);
+ 
+ 	if (cached != -EPROBE_DEFER)
+ 		return cached;
+@@ -828,19 +885,50 @@ static int gd32_bridge_resolve_io_ext(struct gd32_bridge_gpio *gd32)
+ 	if (gd32_bridge_wifi_bt_poll_once(gd32))
+ 		return -EAGAIN;	/* still silent */
+ 
+-	return gd32_bridge_io_ext_status(gd32);
++	return peek(gd32);
++}
++
++/* -EPROBE_DEFER means something only to a driver-core probe (a kernel thread);
++ * a libgpiod/sysfs/pwm-sysfs caller would see the kernel-internal errno 517,
++ * so outside a kernel thread a silent bridge stays -EAGAIN. */
++static int gd32_bridge_defer_or_again(int ret)
++{
++	if (ret == -EAGAIN && (current->flags & PF_KTHREAD))
++		return -EPROBE_DEFER;
++	return ret;
++}
++
++static int gd32_bridge_resolve_io_ext(struct gd32_bridge_gpio *gd32)
++{
++	return gd32_bridge_resolve_late(gd32, gd32_bridge_io_ext_status);
+ }
+ 
+ static int gd32_bridge_gpio_request(struct gpio_chip *chip,
+ 				    unsigned int offset)
+ {
+ 	struct gd32_bridge_gpio *gd32 = gpiochip_get_data(chip);
++	int ret;
++
++	/* CAM_EN_LDO0..3: gated on protocol minor >= 17.  Kernel consumers
++	 * (camera LDO regulators): a silent bridge defers their probe. */
++	if (offset >= GD32_LINE_CAM_EN_LDO0) {
++		ret = gd32_bridge_resolve_late(gd32, gd32_bridge_cam_ldo_status);
++		return gd32_bridge_defer_or_again(ret);
++	}
++
++	/* can-stby exists from minor 13; gated on the minor >= 15 cache (a
++	 * bridge older than 0.15 predates the CAN-FD pad map work).  Kernel
++	 * consumer (phy-can-transceiver): defer on a silent bridge. */
++	if (offset == GD32_CAN_STBY_LINE) {
++		ret = gd32_bridge_resolve_late(gd32, gd32_bridge_io_ext_status);
++		return gd32_bridge_defer_or_again(ret);
++	}
+ 
+ 	/* IO15/IO26: gated on protocol minor >= 15, like lines 18/19 on 11. */
+ 	if (offset >= GD32_LINE_IO15)
+ 		return gd32_bridge_resolve_io_ext(gd32);
+ 
+-	if (offset == GD32_RESERVED_LINE || offset == GD32_UNROUTED_LINE)
++	if (offset == GD32_UNROUTED_LINE)
+ 		return -ENODEV;
+ 
+ 	/* Line 21 (se-rst) is not gated on the wifi/bt protocol minor. */
+@@ -924,11 +1012,7 @@ static void gd32_bridge_replay_work(struct work_struct *work)
+ 	 * gd32_bridge_resolve_work()'s job, independent of this replay and
+ 	 * NOT run under state_lock.
+ 	 */
+-	xfer_mask = mask;
+-	if (gd32_bridge_wifi_bt_status(gd32) != 0)
+-		xfer_mask &= ~GD32_WIFI_BT_LINE_MASK;
+-	if (gd32_bridge_io_ext_status(gd32) != 0)
+-		xfer_mask &= ~GD32_IO_EXT_BIT_MASK;
++	xfer_mask = mask & ~gd32_bridge_unconfirmed_bits(gd32);
+ 
+ 	if (xfer_mask) {
+ 		put_unaligned_le32(xfer_mask, &req[0]);
+@@ -1098,6 +1182,7 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+ 	INIT_DELAYED_WORK(&gd32->resolve_work, gd32_bridge_resolve_work);
+ 	gd32->wifi_bt_reg_on_status = -EPROBE_DEFER;	/* not yet resolved */
+ 	gd32->io_ext_status = -EPROBE_DEFER;
++	gd32->cam_ldo_status = -EPROBE_DEFER;
+ 
+ 	gd32->chip.label	  = "gd32-bridge-gpio";
+ 	gd32->chip.parent	  = &client->dev;
+@@ -1148,6 +1233,10 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+ 			gd32->io_ext_status = -ENODEV;
+ 		else
+ 			gd32->io_ext_status = 0;
++		if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_CAM_LDO)
++			gd32->cam_ldo_status = -ENODEV;
++		else
++			gd32->cam_ldo_status = 0;
+ 	}
+ 
+ 	gd32->chip.ngpio	  = GD32_NGPIO_TOTAL;
+-- 
+2.38.1.windows.1
+
