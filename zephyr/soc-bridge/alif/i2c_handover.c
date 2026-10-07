@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * ADR 0017: Tier-1.5 glue (ADJACENT to upstream: no upstream equivalent for a
+ * ADR-0017-ADJACENT glue (no upstream equivalent for a
  * controller shared between two cores of one SoC).
  *
  * Alif Ensemble: hand one DesignWare I2C controller from the core that

@@ -18,12 +18,22 @@
  *
  * A release is taken exactly once: the acquiring core takes it when state is
  * CLEAN or DIRTY and nonce differs from consumed, then records the nonce in
- * consumed and clears state. A magic left in SRAM0 by a release that was
- * already taken (or by a previous run: SRAM0 survives a warm reset) therefore
- * never satisfies a later wait.
+ * consumed and clears state. A release that was already taken therefore never
+ * satisfies a later wait.
  *
- * Known hazard: an acquiring core that is already past its wait is not told
- * when the releasing core resets and configures the bus again; reset both.
+ * Residual window, by design: a release that was published but NOT yet taken
+ * survives a warm reset (SRAM0 is always on). If the releasing core resets
+ * before the acquiring core took it, an acquiring core that reaches its wait
+ * before the releasing core's boot-time reset of the state can take that old
+ * release while the releasing core is about to configure the bus again. On a
+ * shield with no bridge (the releasing core keeps the bus disabled) this is
+ * harmless; with a bridge on the bus it needs the two cores to be reset
+ * separately, which the rule below forbids.
+ *
+ * Reset both cores together, and start the releasing core first. An acquiring
+ * core that is already past its wait is not told when the releasing core resets
+ * and configures the bus again; a restarted acquiring core waits for a release
+ * that will not come again.
  */
 #ifndef ALP_I2C_HANDOVER_H
 #define ALP_I2C_HANDOVER_H
@@ -73,6 +83,7 @@ static inline int alp_i2c_handover_try_acquire(alp_i2c_handover_t *w)
 {
 	uint32_t s = w->state;
 
+	ALP_I2C_HANDOVER_BARRIER(); /* the nonce is read after the state it belongs to */
 	if ((s != ALP_I2C_HANDOVER_CLEAN && s != ALP_I2C_HANDOVER_DIRTY) || w->nonce == w->consumed) {
 		return ALP_I2C_HANDOVER_NOT_YET;
 	}

@@ -21,13 +21,16 @@ description: |
     acquire  (the next owner): before ANY touch of the bus -- POST_KERNEL
              priority 0, ahead of every driver and of an app's pad recovery --
              waits for a release it has not taken yet, then consumes it (state
-             cleared, nonce recorded), so a magic left by an earlier run or an
-             already-taken release can never satisfy a later wait.
+             cleared, nonce recorded), so an already-taken release never
+             satisfies a later wait.
 
-  The release side clears the state first thing at boot. An image restarted
-  alone after it took the bus waits for a release that is not coming, and a
-  release-side reset while the acquire side is running reconfigures the bus under
-  it: restart both.
+  The release side clears the state first thing at boot. A release published
+  but not yet taken survives a warm reset (always-on SRAM), and an acquire side
+  that reaches its wait before the release side's boot-time clear can take it:
+  harmless where the release side keeps the bus disabled, a hazard with a bridge
+  on the bus. An image restarted alone after it took the bus waits for a release
+  that is not coming, and a release-side reset while the acquire side is running
+  reconfigures the bus under it: reset BOTH cores together, release side first.
 
 compatible: "alp,i2c-handover"
 
