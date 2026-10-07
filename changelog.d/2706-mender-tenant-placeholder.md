@@ -1,3 +1,0 @@
-### Fixed — a `${MENDER_TENANT_TOKEN}` placeholder is no longer emitted as a self-referencing BitBake assignment (#2706)
-
-The Yocto `local.conf` emit wrote `MENDER_TENANT_TOKEN ?= "${MENDER_TENANT_TOKEN}"` for a `${NAME}` tenant in `board.yaml`, but BitBake never expands that from the host environment. The line is now skipped for placeholders and replaced by a comment pointing at the `conf/local.conf` override documented in `meta-alp-sdk/README.md:551` ("MENDER_TENANT_TOKEN = "). A literal tenant value is still emitted as before. The `iot-fleet-ota` and `production-deployment` example comments no longer claim the build host expands it.
