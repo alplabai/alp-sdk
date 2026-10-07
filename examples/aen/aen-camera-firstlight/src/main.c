@@ -326,7 +326,7 @@ static bool trigger_capture_loop(alp_camera_t *cam)
  * 2592x1944, and alp_camera_open() below sets cfg.width/height from these constants, which
  * zephyr_video.c forwards as a video_set_format() call the driver honours before streaming
  * starts. RAW10 (SRGGB10P Bayer), 2 CSI-2 lanes. Bench-verified (runs 316-330, E1M-AEN803
- * 2026W36-0001): 6/6 consecutive clean 1296x972 RAW10 raw captures, 0 CSI/IPI errors -- see
+ * 2026W36-0001): 6/6 consecutive clean 1296x972 RAW10 raw captures, 0 CSI/IPI errors on the kept frame (the discarded first frame reports one SEQ_FRAME_FATAL) -- see
  * metadata/chips/imx335.yaml and zephyr/boards/shields/innomaker_cam_imx335/doc/index.rst for
  * the full bench history and what remains UNVERIFIED (frame rate/fps, ISP/AE/colour,
  * full-resolution mode). */

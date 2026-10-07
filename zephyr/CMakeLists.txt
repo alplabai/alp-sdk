@@ -5,6 +5,12 @@
 # Plain-CMake (add_subdirectory) consumers don't reach this file —
 # they use the repo root CMakeLists.txt instead.
 
+# Patch guard (#2766): fail configure when a feature this build enables needs a
+# zephyr/patches.yml patch the workspace lacks (opt-out -DALP_SKIP_PATCH_CHECK=ON).
+# Before the CONFIG_ALP_SDK early-return: the vendored CSI driver below builds
+# without it.
+include(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/cmake/alp_patch_guard.cmake)
+
 # Alif Ensemble build-bridge -- applied BEFORE the CONFIG_ALP_SDK early-return
 # because it is needed for *any* Ensemble Zephyr build, not just alp-feature
 # builds.  Upstream Zephyr v4.4's (minimal) Alif SoC layer omits
