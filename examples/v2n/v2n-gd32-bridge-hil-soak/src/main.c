@@ -926,7 +926,7 @@ static bool t_timer_sync(soak_stat_t *st)
  * own HIL rows (they tear down this very link). */
 static bool t_power_mode(soak_stat_t *st)
 {
-	const alp_status_t s = gd32g553_power_mode_set(&ctx, 0u, 0u, 0u);
+	const alp_status_t s = gd32g553_set_power_mode(&ctx, 0u, NULL);
 	if (s != ALP_OK) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "status=%d", (int)s);

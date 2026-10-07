@@ -234,6 +234,15 @@
       "issue": 2715,
       "reason": "DEVICE_ID (0x3F) varies by lot and is no longer an identity gate (INA236_MFG_ID is); the constant had no users.",
       "replacement": null
+    },
+    {
+      "header": "alp/chips/gd32g553.h",
+      "category": "function",
+      "symbol": "gd32g553_power_mode_set",
+      "release": "v0.17.0",
+      "issue": 2692,
+      "reason": "The raw one-shot POWER_MODE_SET wrapper never recorded that a Deep-sleep request had latched, so the next command's SPI frame was lost in the CS wake; gd32g553_set_power_mode() validates the request, gates it on the bridge protocol minor, tracks the asleep state and runs the wake procedure before the next command.",
+      "replacement": "gd32g553_set_power_mode"
     }
   ]
 }

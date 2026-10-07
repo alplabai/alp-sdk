@@ -47,6 +47,12 @@
  * tests/hil/v2m103-x-evk/v2m103-gd32-bridge-results.yaml spec.  The
  * SRAM0 block above is unchanged for J-Link users.
  *
+ * Rows 29-31 exercise the low-power host API through the same SPI link:
+ * a timed Deep-sleep + the documented wake + GET_VERSION, the BUSY gate
+ * (a claimed PWM channel refuses Deep-sleep), and the INVAL rejections.
+ * They SKIP on a bridge too old for CMD_POWER_MODE_SET; STANDBY is never
+ * requested (it resets the GD32 and cuts the Wi-Fi power).
+ *
  * This is a maintainer bench tool in example form; like the soak it
  * exercises the gd32g553 chip driver directly (the documented
  * exception to the portable-API rule for dedicated bridge demos).
@@ -582,6 +588,132 @@ static void t_da9292_sentinel(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Low-power modes: Deep-sleep + wake, BUSY gate, invalid requests      */
+/* ------------------------------------------------------------------ */
+
+/* CMD_POWER_MODE_SET with the flags byte, the BUSY gate and the timed-only
+ * rule ships with the firmware that also has PWM stop/release (minor 17):
+ * the BUSY row below needs that release, so one gate (the larger of
+ * GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR and GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR)
+ * serves all three rows.
+ * A peer below it, or one that answers NOSUPPORT, makes the row a SKIP.
+ *
+ * STANDBY (mode 3) is deliberately never requested: it resets the GD32 and
+ * cuts the Wi-Fi power rail, which would kill the link under test.
+ *
+ * 250 ms, not longer: with the FWDGT left running in Deep-sleep the firmware
+ * refuses a timer above 300 ms (ALP_ERR_OUT_OF_RANGE).
+ *
+ * The driver does not expose the wake source.  The firmware holds the
+ * Deep-sleep entry until the host has read the reply, so an early CS (the
+ * wake pulse) or the timer ends the sleep; either is fine, the pass
+ * criterion is that a GET_VERSION after the wake answers and matches. */
+#define POWER_TEST_MIN_MINOR \
+	(GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR > GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR \
+	     ? GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR \
+	     : GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR)
+#define POWER_SLEEP_MS 250u
+
+static bool power_unsupported(void)
+{
+	return ctx.version.minor < POWER_TEST_MIN_MINOR;
+}
+
+/* Wake (explicitly, so a failure is attributed here) and prove the link:
+ * GET_VERSION must succeed and agree with what init() read. */
+static alp_status_t power_wake_and_verify(bool *value_ok)
+{
+	gd32g553_version_t v;
+	alp_status_t       s = gd32g553_power_wake(&ctx);
+
+	if (s == ALP_OK) s = gd32g553_refresh_version(&ctx, &v);
+	*value_ok = (s == ALP_OK) && !ctx.power_asleep && (v.major == ctx.version.major) &&
+	            (v.minor == ctx.version.minor) && (v.patch == ctx.version.patch);
+	return s;
+}
+
+static alp_status_t power_deep_sleep_timed(void)
+{
+	const gd32g553_power_opts_t opts = { .wake_after_ms = POWER_SLEEP_MS };
+
+	return gd32g553_set_power_mode(&ctx, 2u, &opts);
+}
+
+static void t_power_deep_sleep_wake(void)
+{
+	bool         ok = false;
+	alp_status_t s;
+
+	if (power_unsupported()) {
+		record_ex(ALP_OK, true, true);
+		return;
+	}
+	/* The scope-channel PWM row leaves SCOPE_PWM_CH claimed, and a claimed
+	 * PWM makes Deep-sleep answer BUSY (that case is the next row's job).
+	 * Release it first so this row tests the plain sleep + wake path. */
+	s = gd32g553_pwm_stop(&ctx, SCOPE_PWM_CH);
+	if (s != ALP_OK) {
+		record(s, false);
+		return;
+	}
+	s = power_deep_sleep_timed();
+	if (s == ALP_ERR_NOSUPPORT) {
+		record_ex(ALP_OK, true, true);
+		return;
+	}
+	if (s == ALP_OK) {
+		alp_delay_ms(POWER_SLEEP_MS + 50u); /* past the timer: it is awake or waking */
+		s = power_wake_and_verify(&ok);
+	}
+	record(s, ok);
+}
+
+/* A claimed PWM channel makes Deep-sleep answer BUSY and change nothing;
+ * once released the same request is accepted and the wake works. */
+static void t_power_busy_gate(void)
+{
+	bool         ok = false;
+	alp_status_t s;
+
+	if (power_unsupported()) {
+		record_ex(ALP_OK, true, true);
+		return;
+	}
+	s = gd32g553_pwm_set(&ctx, SCOPE_PWM_CH, 1000000u, 500000u);
+	if (s == ALP_OK) {
+		const alp_status_t busy = power_deep_sleep_timed();
+
+		ok = (busy == ALP_ERR_BUSY) && !ctx.power_asleep;
+		s  = gd32g553_pwm_stop(&ctx, SCOPE_PWM_CH);
+	}
+	if (s == ALP_OK) {
+		s = power_deep_sleep_timed();
+	}
+	if (s == ALP_OK) {
+		bool woke;
+
+		alp_delay_ms(POWER_SLEEP_MS + 50u);
+		s  = power_wake_and_verify(&woke);
+		ok = ok && woke;
+	}
+	record(s, ok);
+}
+
+/* Requests the host/firmware must refuse: an untimed Deep-sleep and an
+ * unknown mode both answer INVAL.  Nothing is latched, so no wake follows. */
+static void t_power_invalid(void)
+{
+	if (power_unsupported()) {
+		record_ex(ALP_OK, true, true);
+		return;
+	}
+	const alp_status_t untimed = gd32g553_set_power_mode(&ctx, 2u, NULL);
+	const alp_status_t bad     = gd32g553_set_power_mode(&ctx, 4u, NULL);
+
+	record(ALP_OK, (untimed == ALP_ERR_INVAL) && (bad == ALP_ERR_INVAL));
+}
+
+/* ------------------------------------------------------------------ */
 /* The single-pass table                                               */
 /* ------------------------------------------------------------------ */
 
@@ -617,6 +749,9 @@ static void t_da9292_sentinel(void)
  *   row 26 dsp_chain
  *   row 27 version_stable
  *   row 28 da9292_sentinel
+ *   row 29 power_deep_sleep_wake
+ *   row 30 power_busy_gate
+ *   row 31 power_invalid
  */
 static void run_suite(void)
 {
@@ -662,6 +797,11 @@ static void run_suite(void)
 	/* -- identity ------------------------------------------------------ */
 	t_version_stable();
 	t_da9292_sentinel();
+
+	/* -- low power (self-gating on the peer's protocol minor) ---------- */
+	t_power_deep_sleep_wake();
+	t_power_busy_gate();
+	t_power_invalid();
 }
 
 /* ------------------------------------------------------------------ */

@@ -49,6 +49,16 @@ portable-API rule for dedicated bridge demos.
 7. **Identity** -- `GET_VERSION` twice (stable), and the DA9292
    status forward returns the 0xFF "no nets on this HW rev"
    sentinel.
+8. **Low power** (rows 29-31; SKIP when the bridge's protocol minor is
+   below 17 or the request answers `NOSUPPORT`) -- `power_deep_sleep_wake`:
+   a 250 ms timed Deep-sleep, the documented wake (`gd32g553_power_wake`)
+   and a `GET_VERSION` that must succeed; `power_busy_gate`: with PWM7
+   claimed the Deep-sleep request must answer `ALP_ERR_BUSY`, after
+   `gd32g553_pwm_stop` it is accepted and wakes; `power_invalid`: an
+   untimed mode 2 and mode 4 both answer `ALP_ERR_INVAL`.  250 ms stays
+   under the 300 ms watchdog cap.  STANDBY is never requested (it resets
+   the GD32 and cuts the Wi-Fi power).  The wake source (timer or an
+   early SPI CS wake) is not exposed by the driver and not asserted.
 
 ## Reading the verdict (no console on this SoM)
 
