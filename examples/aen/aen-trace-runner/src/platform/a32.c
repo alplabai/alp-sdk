@@ -16,6 +16,7 @@
 #include "../ipc/tr_flip.h"
 #include "../ipc/tr_memmap.h" /* TR_MEM_SRAM1_READY -- HP camera-pool gate, see tr_a32_boot() */
 #include "../ipc/tr_wd.h"
+#include "../render/panel_rot.h" /* TR_PANEL_ROTATE */
 #include "a32.h"
 #include "display.h"
 
@@ -24,6 +25,14 @@
  * (CRC-32 the stub checks over [entry, entry + len)). CMakeLists.txt passes
  * its path as TR_A32_LAUNCH_H. */
 #include TR_A32_LAUNCH_H
+/* The renderer's rotation is baked into the header (a32/renderer/Makefile's
+ * renderer-launch.h): an HE and a renderer built for different TR_PANEL_ROTATE
+ * would draw the 3D view and the HUD turned against each other. */
+#ifndef TR_A32_PANEL_ROTATE
+#error "TR_A32_LAUNCH_H lacks TR_A32_PANEL_ROTATE: use a32/renderer's renderer-launch.h"
+#endif
+_Static_assert(TR_A32_PANEL_ROTATE == TR_PANEL_ROTATE,
+               "the A32 renderer and this HE were built with different TR_PANEL_ROTATE");
 /* Marker + the payload identity this image LAUNCHes, in .rodata so the
  * release packaging (a32/release/build-release.sh) can check an HE image
  * against the renderer it ships with (nm + objdump, no guessing). */

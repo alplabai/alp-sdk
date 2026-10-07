@@ -80,6 +80,10 @@
                                         * mode reads as "HP stuck: SRAM1_NOT_READY" directly in the
                                         * HE console next time, not just "camera unresponsive". */
 #define TR_MEM_SRAM1_READY_MAGIC 0x52315352u /* 'RSR1' (SRAM1 Ready) */
+#define TR_MEM_I2C1_FREE \
+	0x0237FC94u /* HE -> HP: I2C1 handed over (tr_i2c1_flag.h, TR_PANEL=rvt121 +
+                                       * TR_INPUT_NPU only). The next word of TR_MEM_SRAM1_READY's reserved
+                                       * 16 B (0x0237FC90..0x0237FC9F), still clear of TR_MEM_HP_DBG. */
 #define TR_MEM_HP_DBG \
 	0x0237FCA0u /* hp_vision's bench-readable per-stage DWT timing block
                                        * (src/ipc/tr_hp_dbg.h hp_dbg_t, shared with the HE's HUD

@@ -49,7 +49,7 @@ itself, and tilting the board (IMU) steers. The steps below build the full exhib
    ```sh
    make -C a32/stub
    make -C a32/renderer
-   python3 a32/stub/mkpayload.py info a32/renderer/renderer.bin --c-header build/tr_launch.h
+   cp a32/renderer/renderer-launch.h build/tr_launch.h
    ```
 <!-- cross-platform-lint:resume -->
 
@@ -136,19 +136,35 @@ The panel is mounted on its side, so:
 <!-- cross-platform-lint:ignore -->
 ```sh
 make -C a32/stub
-make -C a32/renderer TR_PANEL_ROTATE=90
-python3 a32/stub/mkpayload.py info a32/renderer/renderer.bin --c-header build/tr_launch.h
-west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d build/rvt121 . -- \
-  -DTR_PANEL=rvt121 -DTR_PANEL_HZ=30 -DTR_PANEL_ROTATE=90 \
+make -C a32/renderer TR_PANEL_ROTATE=90   # also writes renderer-launch.h, rotation included
+cp a32/renderer/renderer-launch.h build/tr_launch.h
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d build/he . -- \
+  -DTR_PANEL=rvt121 -DTR_PANEL_HZ=30 -DTR_PANEL_ROTATE=90 -DTR_INPUT_NPU=ON -DTR_CAM_ROTATE=90 \
   -DTR_M55_AUTOLAUNCH=ON -DTR_A32_LAUNCH_H=$PWD/build/tr_launch.h
+west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp -d build/hp hp_vision -- \
+  -DTR_PANEL=rvt121 -DTR_CAM_ROTATE=90 -DTR_CAM_MIRROR=ON
 ```
 <!-- cross-platform-lint:resume -->
 
 Wiring: bridge EN = `CK_INT` (P13_4), backlight = `CK_PWM0` (P10_7), and P9 powers +1V8.  The backlight is a 30% duty, 500 Hz UTIMER3 PWM set once at boot by `tr_panel_up()`.
 
-Limits: `TR_RENDER=A32` only (the M55 2D renderer has no rotation), and CMake refuses `TR_CAMERA`
-and `TR_INPUT_NPU` with this panel (the HP's pose path takes I2C1, which carries the bridge and the
-touch controller). Touch is not used. Build-only: not yet run on hardware.
+I2C1 is shared. The shield's SN65DSI83 bridge is configured over I2C1 by the HE at boot, and with
+`TR_INPUT_NPU` the HP owns the same controller for the camera. After the bridge is up
+(`tr_panel_up()`), `src/platform/i2c1_handoff.c` masks the HE's I2C1 interrupt, stops its
+controller and writes `TR_I2C1_FREE_MAGIC` to `TR_MEM_I2C1_FREE` (`0x0237FC94`, SRAM0, the
+reserved block next to `TR_MEM_SRAM1_READY`; `src/ipc/tr_i2c1_flag.h`). The HP image built with
+`-DTR_PANEL=rvt121` waits for that word before it unsticks the pads or initialises the bus and
+the camera, reports every 20 s on its console while it is missing, and never touches the bus
+until it arrives. The HE clears the word first thing at every boot, and the touch controller is
+disabled, so nothing on the HE uses I2C1 afterwards. Start the HE first, then the HP; the HP
+build for RK055 does not wait. An HE-only reset while the HP is streaming would reconfigure the
+bridge on a bus the HP is using, so reset both.
+
+Limits: `TR_RENDER=A32` only (the M55 2D renderer has no rotation), and CMake refuses
+`TR_CAMERA`. `TR_CAM_ROTATE` is the camera's mounting rotation and is independent of
+`TR_PANEL_ROTATE`; the camera view and skeleton are drawn in the portrait video half and rotated
+with the rest of the frame. Touch is not used. The sound image is unaffected (it uses I2C bus 0
+and I2S3, not I2C1). Build-only: the full game on this panel is not yet verified on hardware.
 
 ## Sound (reworked carriers only)
 

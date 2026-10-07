@@ -13,3 +13,10 @@
 	win-y0-l1 = <40>;
 	win-y1-l1 = <760>;
 };
+
+/* The game does not use the ILI2511 touch controller (I2C1 0x41), and with
+ * TR_INPUT_NPU the HE hands I2C1 to the HP after the bridge is configured
+ * (src/platform/i2c1_handoff.c): no input driver may poll the bus. */
+&touch {
+	status = "disabled";
+};

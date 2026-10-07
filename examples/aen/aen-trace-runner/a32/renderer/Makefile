@@ -61,7 +61,8 @@ vpath %.c . ../../src/render ../../src/ipc ../common
 all: $(NAME).bin
 	$(SIZE) -A $(O)/$(NAME).elf | grep -E '^\.(image|data|bss) '
 	python3 ../stub/mkpayload.py info $(NAME).bin \
-		--launch-jlink $(NAME)-launch.jlink --halt-jlink halt.jlink $(JLINK_OPTS)
+		--launch-jlink $(NAME)-launch.jlink --halt-jlink halt.jlink \
+		--c-header $(NAME)-launch.h --panel-rotate $(or $(TR_PANEL_ROTATE),0) $(JLINK_OPTS)
 golden:
 	$(MAKE) V=golden
 prof:
@@ -80,4 +81,4 @@ $(O)/%.o: %.c $(HDRS) | $(O)
 $(O):
 	mkdir -p $@
 clean:
-	rm -rf build-scene build-golden build-prof build-*-r* renderer.bin renderer-golden.bin renderer-prof.bin *.jlink
+	rm -rf build-scene build-golden build-prof build-*-r* renderer.bin renderer-golden.bin renderer-prof.bin *.jlink *-launch.h

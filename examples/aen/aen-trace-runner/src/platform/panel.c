@@ -43,6 +43,7 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/sys_io.h>
 
+#include "platform/i2c1_handoff.h"
 #include "platform/panel_retry.h"
 
 #ifdef TR_PANEL_RVT121
@@ -50,7 +51,8 @@
  * brings the panel up at boot; there is no HX8394 and no lcd_panel node. The
  * only job left is the backlight: the shield's `backlight` pwm-leds node is a
  * UTIMER3 PWM on P10_7 (500 Hz), set to 30% duty here, once, as in
- * aen-lvds-display. */
+ * aen-lvds-display. With TR_INPUT_NPU it also hands I2C1 to the HP
+ * (i2c1_handoff.c). */
 #include <zephyr/drivers/pwm.h>
 
 #define TR_BACKLIGHT_DUTY_PERCENT 30U
@@ -68,6 +70,10 @@ uint32_t tr_panel_up(void)
 		    &backlight, backlight.period, backlight.period * TR_BACKLIGHT_DUTY_PERCENT / 100U);
 	}
 	printk("panel   : backlight %u%% duty -> %d\n", TR_BACKLIGHT_DUTY_PERCENT, rc);
+#if TR_I2C1_HANDOFF
+	/* The bridge was configured at boot and is never touched again: give I2C1 to the HP. */
+	(void)tr_i2c1_release();
+#endif
 	tr_panel_init_tries = TR_PANEL_OK | 1u;
 	return tr_panel_init_tries;
 }

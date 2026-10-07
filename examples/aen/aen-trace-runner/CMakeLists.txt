@@ -11,8 +11,9 @@ cmake_minimum_required(VERSION 3.20)
 # 1280x800 landscape LVDS panel behind an SN65DSI83 bridge (shield
 # e1m_evk_rvt121hvdfwca0), mounted on its side: the game stays 720x1280
 # portrait and is rotated into a 1280x720 scan-out window (TR_PANEL_ROTATE,
-# src/render/panel_rot.h). It needs TR_RENDER=A32 and has no camera and no NPU
-# input (README, "Riverdi RVT121").
+# src/render/panel_rot.h). It needs TR_RENDER=A32 and has no HE-local camera;
+# with TR_INPUT_NPU the HE hands I2C1 to the HP after the bridge is up
+# (README, "Riverdi RVT121").
 set(TR_PANEL rk055 CACHE STRING "Panel: rk055 or rvt121")
 set_property(CACHE TR_PANEL PROPERTY STRINGS rk055 rvt121)
 if(NOT TR_PANEL MATCHES "^(rk055|rvt121)$")
@@ -36,14 +37,12 @@ if(TR_PANEL STREQUAL "rvt121" AND TR_CAMERA)
 	message(FATAL_ERROR "TR_PANEL=rvt121 does not support TR_CAMERA: it needs TR_RENDER=M55, "
 			     "which has no rotation for this panel")
 endif()
-if(TR_PANEL STREQUAL "rvt121" AND TR_INPUT_NPU)
-	message(FATAL_ERROR "TR_PANEL=rvt121 does not support TR_INPUT_NPU: the HP pose path takes "
-			     "I2C1 (i2c1_off.overlay), which carries this panel's bridge and touch controller")
-endif()
-if(TR_INPUT_NPU)
+if(TR_INPUT_NPU AND NOT TR_PANEL STREQUAL "rvt121")
 	# The HP now owns I2C1 -- see i2c1_off.overlay's header for why the HE
 	# must stop touching the same controller (its own display shield
-	# enables it too, on the same pads).
+	# enables it too, on the same pads). The RVT121 shield needs I2C1 on the
+	# HE once, for its bridge: that build keeps the bus enabled and hands it
+	# to the HP after the bridge is up (src/platform/i2c1_handoff.c).
 	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/i2c1_off.overlay)
 endif()
 
@@ -166,6 +165,10 @@ target_sources(app PRIVATE
 if(TR_INPUT_NPU)
 	target_sources(app PRIVATE src/ipc/tr_pslot.c)
 	target_compile_definitions(app PRIVATE TR_INPUT_NPU=1)
+	if(TR_PANEL STREQUAL "rvt121")
+		target_sources(app PRIVATE src/platform/i2c1_handoff.c)
+		target_compile_definitions(app PRIVATE TR_I2C1_HANDOFF=1)
+	endif()
 	# The camera's mounting rotation (src/vision/cam_rot.h; empty = its
 	# default). The HE only needs 0 vs 90/270 (the upright frame's
 	# dimensions): keep it the same as the HP build's.

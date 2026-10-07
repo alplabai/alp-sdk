@@ -43,3 +43,9 @@ tests:
       - "TR_PANEL=rvt121"
       - "TR_PANEL_HZ=30"
       - "TR_PANEL_ROTATE=270"
+  alp_sdk.examples.aen.trace_runner.rvt121_a32_render_npu_input:
+    extra_args:
+      - "TR_PANEL=rvt121"
+      - "TR_PANEL_HZ=30"
+      - "TR_INPUT_NPU=ON"
+      - "TR_CAM_ROTATE=90"
