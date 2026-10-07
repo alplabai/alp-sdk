@@ -1115,6 +1115,15 @@ never bench-run); and the sensor's full-resolution (non-binned) mode
 through the ISP (Stage A's own non-binned-mode caveat is unchanged by
 Stage B).
 
+## Expected log line: one `SEQ_FRAME_FATAL` per stream start
+
+Each stream start prints one `E: Fatal Interrupt due to incorrect frame
+sequence for a specific VC. status - 0x1` (`SEQ_FRAME_FATAL`) on the
+discarded first frame -- bench-seen on 3/3 IMX335 runs on 2026-10-07, and also
+at ISP stream start. It is expected: the first frame is dropped and the kept
+frame has 0 CSI/IPI errors. Any other CSI/IPI error, or one on the kept frame,
+is a real fault.
+
 ## Troubleshooting: `ALP_ERR_NOSUPPORT` on `alp_camera_open`
 
 Log signature (CSI path, e.g. IMX335 on E1M-AEN803):

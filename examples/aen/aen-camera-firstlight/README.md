@@ -141,6 +141,15 @@ failure modes before trusting the capture.
 | `raspberry_pi_global_shutter_camera` | IMX296 | RAW10 1456x1088, 1 lane | ADR-0017-ADJACENT, written from the Sony datasheet (issue #2287). **Stage A + Stage B bench-verified** (Stage A through this app -- I2C identity, bench run 229, 2026-09-24: the module answers at CCI 0x1A and the undocumented SENSOR_INFO signature 0x3148/0x3149 = 0x4A00 matches the colour IMX296LQR-C variant this driver targets; and a real captured frame, bench run 292 -- mean 61.19, max 108, clean close, 0.98 correlation against a diag control capture; Stage B via `aen-isp-capture` / `camera-mjpeg-stream` -- ISP-Pico data path, AE, continuous MJPEG streaming) -- see `docs/camera-shields.md`'s IMX296 driver section for the full bench numbers. Still unverified: colour (AWB/CCM), fast-trigger mode. |
 | `innomaker_cam_imx335` | IMX335 | RAW10 1296x972 (2x2-binned), 2 lanes | ADR 0017 Tier 1, upstream-native, plus one repo patch (issue #2327 -- see `docs/camera-shields.md`'s IMX335 driver section). **Raw capture bench-verified** (E1M-AEN803 2026W36-0001, runs 316-331): 6/6 consecutive clean 1296x972 RAW10 frames (run 330), 0 CSI CRC errors, 0 IPI-fatal events on the kept frame (the discarded first frame shows one `SEQ_FRAME_FATAL`, status `0x1`, per start -- expected), correct stride, no overrun -- this also verifies 2-lane D-PHY lock at 1188 Mbps/lane on this unit/EVK through the SoM R2 pinout adapter. Run 331 re-confirmed this on the committed product code (patch 0004 only, no diag code). The first post-start frame was bad in 3 of the 4 first frames checked (run 329 and both run-331 loads; run 330's was clean); the kept second frame was clean every time, and is what this example reports -- this bench-justifies discarding the first frame. Still unverified: frame rate/fps, ISP/AE/colour, full-resolution mode, self-enable on a stock (non-reworked) carrier, D-PHY lock on other units/carriers. |
 
+## Expected log line: one `SEQ_FRAME_FATAL` per stream start
+
+Each stream start prints one `E: Fatal Interrupt due to incorrect frame
+sequence for a specific VC. status - 0x1` (`SEQ_FRAME_FATAL`) on the
+discarded first frame -- bench-seen on 3/3 IMX335 runs on 2026-10-07, and also
+at ISP stream start. It is expected: the first frame is dropped and the kept
+frame has 0 CSI/IPI errors. Any other CSI/IPI error, or one on the kept frame,
+is a real fault.
+
 ## Troubleshooting: `ALP_ERR_NOSUPPORT` on `alp_camera_open`
 
 Log signature (CSI path, e.g. IMX335 on E1M-AEN803):
