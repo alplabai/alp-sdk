@@ -1,7 +1,7 @@
 # iot-connected-camera
 
 Connected-camera reference application for the **E1M EVK** populated
-with an **E1M-V2N101 / E1M-V2N102** SoM (Renesas RZ/V2N).
+with an **E1M-V2N101 / E1M-V2N102 / E1M-V2N103** SoM (Renesas RZ/V2N).
 
 ```
         ┌──────────────────┐    ┌──────────────┐    ┌────────────────┐
@@ -52,8 +52,10 @@ iot-connected-camera/
 ## Build (v0.1, host smoke)
 
 ```bash
+# writes examples/connectivity/iot-connected-camera/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/iot-connected-camera
 west build -b native_sim/native/64 examples/connectivity/iot-connected-camera \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 ```
 
 The app prints which v0.1 SDK pieces it successfully initialised and
@@ -75,7 +77,9 @@ The board file ships in-tree at
 Once v0.3 of the SDK lands:
 
 ```bash
-west build -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 .
+# from the example directory; writes ./generated/alp.conf (#866)
+python3 ../../../scripts/gen_example_alp_conf.py .
+west build -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 . -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

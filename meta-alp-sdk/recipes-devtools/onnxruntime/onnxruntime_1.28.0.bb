@@ -10,13 +10,10 @@
 # Inheriting either would make metadata/libraries/onnxruntime.yaml's single
 # `version:` field untrue on one family or the other the moment a second
 # family enabled it. This recipe builds UPSTREAM at one version so the
-# manifest stays honest as Alp Lab adds SoC families -- see PR #1249
-# ("docs(plans): record the own-recipe decision and its architectural
-# rationale", branch docs/ai-gap-plans) for the full O(families) vs O(1)
-# "scaling argument"; the maintainer chose this path explicitly on
-# 2026-08-05 over the meta-imx-ml fallback. (That plan doc does not exist
-# on this branch -- it lands with PR #1249 -- so it is cited by PR number,
-# not by path, to stay resolvable for anyone reading this branch.)
+# manifest stays honest as Alp Lab adds SoC families -- see
+# docs/superpowers/plans/2026-08-05-onnxruntime-own-recipe.md for the full
+# O(families) vs O(1) "scaling argument"; the maintainer chose this path
+# explicitly on 2026-08-05 over the meta-imx-ml fallback.
 #
 # alp-sdk does NOT consume ORT's execution-provider mechanism at all -- NPU
 # dispatch happens one level up, in src/yocto/inference_yocto.c's
@@ -64,6 +61,12 @@ LICENSE = "MIT & Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=0f7e3b1308cb5c00b372a6e78835732d \
     file://../deps/onnx/onnx-1.22.0/LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57"
 
+# KleidiAI (#1258) is Apache-2.0 (every kai/ source carries that SPDX tag; the
+# BSD-3-Clause text in LICENSES/ only covers the bundled googletest, which
+# is not built).  md5 computed from the real v1.20.0 tarball.  Pinned only
+# when the knob is on, since only then is it linked into libonnxruntime.so.
+LIC_FILES_CHKSUM += "${@bb.utils.contains('PACKAGECONFIG', 'kleidiai', 'file://../deps/kleidiai/kleidiai-1.20.0/LICENSES/Apache-2.0.txt;md5=c846ebb396f8b174b10ded4771514fcc', '', d)}"
+
 DESCRIPTION = "ONNX Runtime -- cross-platform inference engine"
 HOMEPAGE = "https://onnxruntime.ai"
 
@@ -106,13 +109,26 @@ SRC_URI = "git://github.com/microsoft/onnxruntime.git;protocol=https;nobranch=1"
 SRCREV = "da9b5e364c465de65c49d91e696cd6485270757f"
 S = "${WORKDIR}/git"
 
-# Carried over from NXP's onnxruntime.inc, which proves these are the real
-# link-time deps for a shared-lib ORT build; protobuf-native is ADDED to
-# that set (NXP's fork does not need it the same way -- see the
-# ONNX_CUSTOM_PROTOC_EXECUTABLE comment below) because our build must not
-# let deps.txt's prebuilt protoc_linux_aarch64 binary stand in for a host
-# protoc during a cross-compile.
-DEPENDS = "zlib libpng protobuf protobuf-native"
+# PROTOBUF / ABSEIL ABI (#2500).  ORT is built against the FETCHED abseil
+# 20250814 (inline namespace lts_20250814, static inside libonnxruntime.so).
+# The first cut of this recipe listed the distro `protobuf` in DEPENDS, so
+# ORT compiled its generated ONNX *.pb.h against the distro protobuf 4.25.8
+# headers (which inline abseil types at the 20250814 layout) but linked the
+# distro libprotobuf-lite.so.25.8.0, built against distro abseil 20240116.
+# Result: SIGSEGV in RepeatedPtrFieldBase::MergeIntoClearedMessages on the
+# first model load (silicon-proven, E1M-V2M103).  The distro cannot supply
+# a matching abseil (only 20240116.3 exists in scarthgap) and ORT 1.28 wants
+# >= 20250814, so the system-abseil route is closed.
+#
+# FIX: ORT's own deps.txt pins protobuf v21.12, which predates protobuf's
+# abseil dependency entirely.  We stage that source (FETCHCONTENT_SOURCE_DIR_
+# PROTOBUF below, which also stops FetchContent's FIND_PACKAGE_ARGS from
+# finding the distro copy), so ORT links a private static libprotobuf-lite
+# and NEEDs no distro libprotobuf.  Its generated code needs a matching
+# protoc, supplied by protobuf-ort-native (not the distro protobuf-native,
+# whose 4.25.8 output the 21.12 headers reject).  deps.txt's prebuilt
+# protoc_linux_aarch64 stays unused: it cannot run on the build host.
+DEPENDS = "zlib libpng protobuf-ort-native"
 
 inherit cmake python3native
 
@@ -158,7 +174,7 @@ OECMAKE_SOURCEPATH = "${S}/cmake"
 # reading the FetchContent calls it makes for THIS EXACT EXTRA_OECMAKE
 # (BUILD_SHARED_LIB=ON, BUILD_UNIT_TESTS=OFF, ENABLE_PYTHON=OFF,
 # USE_XNNPACK unset/default, USE_MIMALLOC unset/default, USE_KLEIDIAI
-# unset/default).  That requires a working CMake configure against ORT's
+# explicitly OFF unless PACKAGECONFIG[kleidiai] is on).  That requires a working CMake configure against ORT's
 # real cmake/CMakeLists.txt, which this host cannot do (no bitbake, no
 # aarch64 cross toolchain, no point downloading the multi-hundred-MB
 # submodule tree just to watch what one `cmake` invocation asks for on a
@@ -213,11 +229,13 @@ OECMAKE_SOURCEPATH = "${S}/cmake"
 #                           INCLUDED; moved here and dropped from SRC_URI/
 #                           EXTRA_OECMAKE once the real configure proved it
 #                           unreachable.
-#   kleidiai, kleidiai-qmx - Arm Kleidi micro-kernel EP
-#                           (-Donnxruntime_USE_KLEIDIAI), default OFF; the
-#                           plan names this an explicit follow-up, not this
-#                           backend -- not enabled here even though the
-#                           dependency happens to already be pinned upstream
+#   kleidiai              - Arm Kleidi micro-kernel library, gated by
+#                           PACKAGECONFIG[kleidiai] below (#1258): fetched
+#                           and wired in only when the knob is on; default OFF
+#                           until a before/after on real E1M-V2N101 silicon.
+#   kleidiai-qmx          - Qualcomm KleidiAI fork
+#                           (-Donnxruntime_USE_QMX_KLEIDIAI_COEXIST), never
+#                           reached: that option stays OFF.
 #   googlexnnpack, fp16, fxdiv, psimd, pthreadpool - the XNNPACK EP
 #                           dependency chain (-Donnxruntime_USE_XNNPACK,
 #                           default OFF); this recipe requests the CPU EP's
@@ -254,6 +272,7 @@ OECMAKE_SOURCEPATH = "${S}/cmake"
 # convention, NOT verified by actually unzipping any of these 11 archives
 # on this host):
 SRC_URI += " \
+    https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip;downloadfilename=protobuf-21.12.zip;name=protobuf;subdir=deps/protobuf;sha1sum=7cf2733949036c7d52fda017badcab093fe73bfa \
     https://github.com/abseil/abseil-cpp/archive/refs/tags/20250814.0.zip;name=abseil_cpp;subdir=deps/abseil_cpp;sha1sum=a9eb1d648cbca4d4d788737e971a6a7a63726b07 \
     https://github.com/HowardHinnant/date/archive/refs/tags/v3.0.1.zip;name=date;subdir=deps/date;sha1sum=2dac0c81dc54ebdd8f8d073a75c053b04b56e159 \
     https://github.com/eigen-mirror/eigen/archive/1d8b82b0740839c0de7f1242a3585e3390ff5f33/eigen-1d8b82b0740839c0de7f1242a3585e3390ff5f33.zip;name=eigen;subdir=deps/eigen;sha1sum=05b19b49e6fbb91246be711d801160528c135e34 \
@@ -267,6 +286,10 @@ SRC_URI += " \
     https://github.com/dcleblanc/SafeInt/archive/refs/tags/3.0.28.zip;name=safeint;subdir=deps/safeint;sha1sum=23f252040ff6cb9f1fd18575b32fa8fb5928daac \
 "
 
+# KleidiAI (#1258) is fetched only when PACKAGECONFIG[kleidiai] is on, so a
+# default build downloads nothing extra.
+SRC_URI += "${@bb.utils.contains('PACKAGECONFIG', 'kleidiai', 'https://github.com/ARM-software/kleidiai/archive/refs/tags/v1.20.0.tar.gz;name=kleidiai;subdir=deps/kleidiai;sha1sum=6895e72b3d5cf1173358164cb3d64c9d7d33cc84', '', d)}"
+
 # BitBake's own fetcher requires a sha256sum in addition to the sha1sum
 # inline on each SRC_URI entry above -- sha1sum alone is not enough for
 # BitBake, even though it is what cmake/deps.txt itself carries and is
@@ -274,6 +297,7 @@ SRC_URI += " \
 # above cross-checks against upstream. These are NOT re-derived by hand;
 # they are BitBake's own `do_fetch` "Missing SRC_URI checksum" error output
 # on a real BitBake host, transcribed verbatim:
+SRC_URI[protobuf.sha256sum] = "6a31b662deaeb0ac35e6287bda2f3369b19836e6c9f8828d4da444346f420298"
 SRC_URI[abseil_cpp.sha256sum] = "b2bdcf6682d8cb53df365bcc5d6c318a22e55821d9978a10fdb61404c026daff"
 SRC_URI[date.sha256sum] = "f4300b96f7a304d4ef9bf6e0fa3ded72159f7f2d0f605bdde3e030a0dba7cf9f"
 SRC_URI[eigen.sha256sum] = "6a60d76351f97132669daeeb721d6bf14b008101883ad2d687a3201c5c461eb0"
@@ -285,6 +309,9 @@ SRC_URI[onnx.sha256sum] = "8dc1181d33529a1249e031226126d0699ac9bdfc571ee530ee3a1
 SRC_URI[pytorch_cpuinfo.sha256sum] = "2ed3ebc6c2656cc0aafc7af319e5cb0f97cc9b415eae180f566def84f1ca6a29"
 SRC_URI[re2.sha256sum] = "a835fe55fbdcd8e80f38584ab22d0840662c67f2feb36bd679402da9641dc71e"
 SRC_URI[safeint.sha256sum] = "3ffbd9a2fdff45da77da3e7269e9aa512ea43bed5c38ce8fd8f3d1068a032c3f"
+# kleidiai: sha256 computed locally from the v1.20.0 tarball (its sha1 matches
+# cmake/deps.txt); the other entries above are from a real do_fetch log.
+SRC_URI[kleidiai.sha256sum] = "e4b84c369f0f39af1660ac71c30f74038d4b89e1f20dde070bb96398382a111f"
 
 # FETCHCONTENT_SOURCE_DIR_<NAME> must match the name CMake's own
 # FetchContent_Declare() call used, upper-cased -- NOT the deps.txt/SRC_URI
@@ -417,13 +444,26 @@ CXXFLAGS:append = " \
     -fdebug-prefix-map=${WORKDIR}/deps=${TARGET_DBGSRC_DIR}/deps \
 "
 
+# KleidiAI EP (#1258).  Opt-in: `PACKAGECONFIG:append:pn-onnxruntime = " kleidiai"`
+# in local.conf/the image.  ORT's own default is OFF (cmake/CMakeLists.txt
+# @da9b5e3:97 `option(onnxruntime_USE_KLEIDIAI ... OFF)`; only tools/ci_build/
+# build.py turns it on for aarch64, and this recipe calls cmake directly), so
+# the explicit OFF below keeps the pre-change behaviour.  The FetchContent
+# name is `kleidiai` (cmake/external/onnxruntime_external_deps.cmake:871
+# `onnxruntime_fetchcontent_declare(kleidiai URL ...)`), hence
+# FETCHCONTENT_SOURCE_DIR_KLEIDIAI.  ORT itself downgrades to OFF with a warning on a
+# non-aarch64 target.  The FETCHCONTENT dir is only passed when enabled; the
+# archive unpacks to kleidiai-1.20.0/ (tarball top-level, verified).
+PACKAGECONFIG ??= ""
+PACKAGECONFIG[kleidiai] = "-Donnxruntime_USE_KLEIDIAI=ON -DFETCHCONTENT_SOURCE_DIR_KLEIDIAI=${WORKDIR}/deps/kleidiai/kleidiai-1.20.0,-Donnxruntime_USE_KLEIDIAI=OFF"
+
 EXTRA_OECMAKE += " \
     --compile-no-warning-as-error \
     -Donnxruntime_BUILD_SHARED_LIB=ON \
     -Donnxruntime_BUILD_UNIT_TESTS=OFF \
     -Donnxruntime_ENABLE_PYTHON=OFF \
     -DCMAKE_BUILD_TYPE=Release \
-    -DONNX_CUSTOM_PROTOC_EXECUTABLE=${STAGING_BINDIR_NATIVE}/protoc \
+    -DONNX_CUSTOM_PROTOC_EXECUTABLE=${STAGING_LIBDIR_NATIVE}/protobuf-ort/protoc \
     -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
     -DFETCHCONTENT_SOURCE_DIR_ABSEIL_CPP=${WORKDIR}/deps/abseil_cpp/abseil-cpp-20250814.0 \
     -DFETCHCONTENT_SOURCE_DIR_DATE=${WORKDIR}/deps/date/date-3.0.1 \
@@ -432,6 +472,7 @@ EXTRA_OECMAKE += " \
     -DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=${WORKDIR}/deps/json/json-3.11.3 \
     -DFETCHCONTENT_SOURCE_DIR_GSL=${WORKDIR}/deps/microsoft_gsl/GSL-4.2.1 \
     -DFETCHCONTENT_SOURCE_DIR_MP11=${WORKDIR}/deps/mp11/mp11-boost-1.82.0 \
+    -DFETCHCONTENT_SOURCE_DIR_PROTOBUF=${WORKDIR}/deps/protobuf/protobuf-21.12 \
     -DFETCHCONTENT_SOURCE_DIR_ONNX=${WORKDIR}/deps/onnx/onnx-1.22.0 \
     -DFETCHCONTENT_SOURCE_DIR_PYTORCH_CPUINFO=${WORKDIR}/deps/pytorch_cpuinfo/cpuinfo-4628dc060ce4e82345dc166bbac875609db4ff69 \
     -DFETCHCONTENT_SOURCE_DIR_RE2=${WORKDIR}/deps/re2/re2-2024-07-02 \

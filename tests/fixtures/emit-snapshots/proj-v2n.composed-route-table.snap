@@ -1,7 +1,7 @@
 {
   "board": "E1M-X-EVK",
   "som": "E1M-V2N101",
-  "hw_rev": "r1",
+  "hw_rev": "r2",
   "silicon_variant": "R9A09G056N44GBG",
   "routes": [
     {
@@ -25,7 +25,7 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_PCIE0_I2C_EN",
       "board_role": null,
-      "board_doc": "Drive high to enable the I2C mux to the PCIe slot.",
+      "board_doc": "Drive LOW to enable the I2C switch to the PCIe/M.2 slots (TMUX121 EN is active-low, no pull on the net).",
       "dispatch": "direct"
     },
     {
@@ -106,7 +106,8 @@
       "board_macro": "XEVK_PIN_LCD1_PWR_EN",
       "board_role": null,
       "board_doc": "DSI display panel 1 power enable.",
-      "dispatch": "direct"
+      "dispatch": "gd32_bridge",
+      "dispatch_pin": "PB4"
     },
     {
       "e1m": "E1M_X_GPIO_IO21",
@@ -139,8 +140,9 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_CAM0_EN",
       "board_role": null,
-      "board_doc": "Camera-0 power enable.",
-      "dispatch": "direct"
+      "board_doc": "CAM0 module enable, active-low via N-FET on CAM_GPIO.",
+      "active_low": true,
+      "dispatch": "TBD"
     },
     {
       "e1m": "E1M_X_GPIO_IO20",
@@ -149,16 +151,16 @@
       "board_role": null,
       "board_doc": "Camera-0 reset (active-low).",
       "active_low": true,
-      "dispatch": "direct"
+      "dispatch": "TBD"
     },
     {
       "e1m": "E1M_X_GPIO_IO24",
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_USB_MUX_SEL",
       "board_role": null,
-      "board_doc": "USB path-mux select.",
-      "dispatch": "gd32_bridge",
-      "dispatch_pin": "PC14"
+      "board_doc": "USB path-mux select. Driven by the DX-M1 on V2M, undriven on V2N (driven_by in the SoM pad_routes); polarity/default pending carrier-netlist confirmation.",
+      "dispatch": "unrouted",
+      "som_doc": "Not a GD32 pad; nothing drives it on V2N (no DX-M1 fitted). Bridge bit 8 answers STATUS_IO (#2453)."
     },
     {
       "e1m": "E1M_X_GPIO_IO27",
@@ -186,7 +188,7 @@
       "board_doc": "Rotary encoder (PEC12R-4222F) push switch; pull-up + RC debounce.",
       "active_low": true,
       "dispatch": "gd32_bridge",
-      "dispatch_pin": "PC2"
+      "dispatch_pin": "PE9"
     },
     {
       "e1m": "E1M_X_GPIO_IO32",
@@ -235,7 +237,8 @@
       "board_macro": "XEVK_I2C_BUS_DSI_CSI0",
       "board_role": null,
       "board_doc": "Display/camera control I2C bank 0 (DSI panel + CSI camera-side config).",
-      "dispatch": "direct"
+      "dispatch": "direct",
+      "dispatch_pin": "RIIC2"
     },
     {
       "e1m": "E1M_X_I2C3",
@@ -458,6 +461,14 @@
       "dispatch_pin": "PA3"
     },
     {
+      "e1m": "E1M_X_CSI0",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "direct",
+      "dispatch_pin": "CSI0"
+    },
+    {
       "e1m": "E1M_X_ENC1",
       "board_category": null,
       "board_macro": null,
@@ -512,6 +523,14 @@
       "board_role": null,
       "dispatch": "gd32_bridge",
       "dispatch_pin": "PC15"
+    },
+    {
+      "e1m": "E1M_X_GPIO_IO26",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "dispatch_pin": "PC2"
     },
     {
       "e1m": "E1M_X_GPIO_IO30",

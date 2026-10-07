@@ -34,6 +34,8 @@ Top-level fields:
 `e1m_routes:` (customer path).  Both omitted is also fine -- a
 headless / inference-only build with no board declaration.
 
+Board presets (`metadata/boards/*.yaml`, not a project `board.yaml`) may also declare `pad_levels:` -- `{e1m, signal_v, level_shifter?}` per E1M route, keyed on the route and never on an SoC pad, so the carrier stays SoM-agnostic.  `scripts/check_pad_voltage.py` resolves each `e1m_routes` route (any class) through the pinmux table and host SoC of every SoM family the preset hosts, and requires an entry when a route lands on a pad the SoC marks non-3.3 V tolerant (`pad_tolerance` in the SoC JSON; RZ/V2N: P90-P92, P2x, PBx, per the hardware manual's IO-block table, Note 1).  A `signal_v` above the SoC `max_signal_v` needs a `level_shifter`.  A project `board.yaml` carries no `pad_levels`.
+
 Per-core fields under `cores.<id>` (all optional, all inherit from
 the SoM preset's `topology.<id>` when omitted):
 
@@ -42,6 +44,7 @@ the SoM preset's `topology.<id>` when omitted):
 | `app`          | App source dir.  Required for `os: zephyr` / `os: baremetal`.  For `os: yocto` an app-only slice, pair with `recipe:` -- `app:` is a source path, never a bitbake target. |
 | `image`        | Yocto image recipe name (e.g. `alp-image-edge`).  Takes priority over `app:`/`recipe:` when both are set. |
 | `recipe`       | Yocto bitbake recipe packaging this slice's `app:` (e.g. `alp-lvgl-dashboard`).  Required for an app-only `os: yocto` slice -- otherwise the plan blocks the slice (`yocto-recipe-missing`) instead of emitting an invalid `bitbake <path>`. |
+| `toolchain`    | Override this slice's toolchain identifier (e.g. `llvm`), replacing the SoM preset's derived default (`arm-zephyr-eabi` for Zephyr, `poky-glibc` for Yocto).  Optional -- omitted keeps today's default.  Passed through verbatim into `--emit build-plan`'s `slices[].toolchain.id`/`system-manifest.yaml`'s `slices[].toolchain`. |
 | `os`           | NOT an OS picker — the runtime is class-derived (M→Zephyr, A→Yocto). Only `off` (skip slice) or `baremetal` (rare) are settable; a cross-class OS is rejected. |
 | `peripherals`  | Zephyr subsystem / Yocto package list for this slice.                                  |
 | `inference`    | App-level inference tuning (`default_arena_kib` only — backend set is silicon-driven). |
@@ -65,7 +68,7 @@ recipe `PACKAGECONFIG` tokens plus CA certificates.
 SoM presets under `metadata/e1m_modules/<MPN>.yaml` no longer
 declare `os: zephyr` / `os: yocto` per `topology.<core>` entry --
 the field is gone from every released preset and the schema
-([`metadata/schemas/som-preset-v1.schema.json`](../metadata/schemas/som-preset-v1.schema.json))
+([`metadata/schemas/som-preset-v2.schema.json`](../metadata/schemas/som-preset-v2.schema.json))
 no longer lists it under `topology_entry.required`.  Instead the
 loader picks the natural runtime from each core's `cores[].type`
 in the matching SoC JSON: `cortex-m*` -> `zephyr`, `cortex-a*`
@@ -73,16 +76,68 @@ in the matching SoC JSON: `cortex-m*` -> `zephyr`, `cortex-a*`
 `_default_os_from_core_type()` in
 [`scripts/alp_orchestrate/`](../scripts/alp_orchestrate/).
 
-The OS is **not** user-selectable: the runtime follows the core
-class, full stop.  A `board.yaml` may only **disable** a core
-(`os: off`) or drop it to **no-OS** (`os: baremetal`); selecting the
-*other* class's OS — `zephyr` on a Cortex-A, `yocto` on a Cortex-M —
-is **rejected by the loader** (`OrchestratorError`).  We support
-exactly two OSes — Yocto for Linux, Zephyr for the RTOS — mapped to
-the silicon class, not chosen.  (The check lives in the loader, not
-the schema, because it's cross-file: board.yaml `os:` vs the SoC
-`cores[].type`.)  Custom SoMs ported via
-[`docs/porting-new-som.md`](porting-new-som.md) get this for free as
+#### The refusal is a support policy, not a hardware limit
+
+Stated plainly, because the SDK's own wording has said otherwise and a
+customer reading "not selectable" deserves to know which kind of "not"
+it is.
+
+A `board.yaml` may **disable** a core (`os: off`) or drop it to **no-OS**
+(`os: baremetal`).  Selecting the *other* class's OS — `zephyr` on a
+Cortex-A, `yocto` on a Cortex-M — is **refused**, at
+`scripts/alp_orchestrate/validate.py:296`
+(`_enforce_os_matches_core_class`, raising at `:303-307`), with this exact message:
+
+```text
+core '<id>' (<type>): its runtime is determined by the core class
+(Cortex-A -> Yocto/Linux, Cortex-M -> Zephyr/RTOS) and is not
+selectable. Set os: 'off' to disable it or 'baremetal' for no-OS
+firmware -- got os: '<os>'.
+```
+
+**"Determined by the core class" is how the SDK reports it, not why it
+is true.**  Zephyr runs on Cortex-A: upstream Zephyr at the pinned
+[v4.4.1](zephyr-version-policy.md) ships `arch/arm/core/cortex_a_r/` and
+`include/zephyr/arch/arm/cortex_a_r/`.  So `zephyr` on an A-class core
+is not physically impossible — **alp-sdk has chosen not to support that
+combination**.  We carry exactly two OSes, Yocto for Linux and Zephyr
+for the RTOS, and pair one to each core class so that a SoM swap within
+a family keeps the same runtime per core.  That pairing is a product
+decision about what this SDK carries, tests and ships, and it is a
+defensible one; it is simply not a fact about the silicon.
+(`scripts/alp_orchestrate/topology.py:112`'s "A Cortex-A can't run
+Zephyr" overstates it the same way, and is inaccurate as written.)
+
+What that means in practice:
+
+- For a supported build, the refusal is telling you the truth about
+  **this SDK**: pick `off` or `baremetal`, or use the class's runtime.
+- A genuine Zephyr-on-Cortex-A requirement is a **support request**, not
+  a bug report, and it is decidable — file it rather than patching the
+  loader, because the pairing reaches board files, sysbuild, the Yocto
+  machine layer and the OS support matrix, not just this one check.
+
+Two mechanical notes:
+
+- The check lives in the loader, not the schema, because it is
+  cross-file: `board.yaml` `os:` against the SoC `cores[].type`.
+- An **unclassified** core type (empty, or matching neither prefix)
+  makes the refusal reject *both* real runtimes, because the "other
+  class's OS" set becomes `{yocto, zephyr}`; the error then reads
+  `(unclassified)`.  That is **deliberate, and it is what tan does too** —
+  `cross_class_os` carries no guard in either implementation, and
+  declining both runtimes for a core whose class nobody established is the
+  conservative answer on a refusal path.
+  [#1852](https://github.com/alplabai/alp-sdk/issues/1852) is a
+  *different* half of the same area and does not change this behaviour:
+  what diverged was the **advertised** `allowed_os` set, which offered
+  `["baremetal", "off"]` for such a core where tan offered `[]`, and a
+  non-string `cores[].type`, which raised `AttributeError` instead of
+  resolving to the unresolved sentinel.  Both were corrected in #1888,
+  merged 2026-09-01.
+
+Custom SoMs ported via
+[`docs/porting-new-som.md`](porting-new-som.md) inherit all of this as
 long as their SoC JSON declares core types correctly.
 
 **Querying it (for IDEs / tooling).**  Rather than re-deriving the
@@ -243,7 +298,7 @@ for the board-side C macros hand-written firmware uses
 entry binds an E1M-standard pad or peripheral instance
 (`ALP_E1M_GPIO_IO<N>`, `ALP_E1M_PWM<N>`, `ALP_E1M_I2C0/1` / `ALP_E1M_SPI0/1` /
 `ALP_E1M_UART0/1` / `ALP_E1M_I3C0`) to a board-side macro plus optional
-`doc:` / `active_low:` / `routes_via:` flags.
+`doc:` / `active_low:` / `pull:` / `debounce_ms:` / `board_alias:` flags.
 [`scripts/gen_board_header.py`](../scripts/gen_board_header.py)
 reads the block and emits `include/alp/boards/alp_<name>_routes.h`
 with one `#define <MACRO> ALP_E1M_<…>` line per entry.
@@ -251,7 +306,7 @@ with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 #### Preset mode (SDK-internal shortcut)
 
 Most example projects under `examples/` target the EVK or X-EVK
-(66 do today — 46 on `e1m-evk`, 20 on `e1m-x-evk`), so they share a
+(104 do today — 76 on `e1m-evk`, 28 on `e1m-x-evk`), so they share a
 single board definition each via the `preset:` field:
 
 ```yaml
@@ -263,6 +318,18 @@ supplies `name`, `populated`, `e1m_routes`, `default_hw_rev`,
 and `hw_revisions` wholesale.  When `preset:` is set, top-level
 `name:`, `populated:`, `e1m_routes:` are forbidden -- the schema
 rejects mixing.
+
+A preset file may also carry `i2c_devices:` (on-board I2C device
+addresses, and for power-monitor chips their shunt/max-current
+calibration), `overlay_pins:` (board-repurposed pads exposed
+past the standard E1M pinout to an `alp,pin-array` devicetree
+overlay), and `mux_enums:` (board mux-select / IO-expander-pin
+`typedef enum` blocks).  These aren't part of the customer-facing
+`board.yaml` schema -- `scripts/gen_board_header.py` reads them
+straight from the preset YAML and emits their macros/enums into
+the generated `alp_<preset>_routes.h` alongside the `e1m_routes:`
+ones.  See `metadata/boards/e1m-evk.yaml` for a worked example of
+all three.
 
 `preset:` is a shortcut for the SDK's own demos; customer
 projects don't need it -- the inline form keeps your `board.yaml`
@@ -294,6 +361,42 @@ is supplied it must match the board's macro for that pad
 (catches drift if the demo references `EVK_PIN_LED_RED` but the
 preset moved it).  Bare-string and object entries can mix in the
 same list.
+
+#### `cameras:` and `camera_connectors:` (camera modules)
+
+A camera is declared by naming the module in the connector it is plugged
+into; the sensor chip, I2C address, oscillator and lane count come from
+metadata, never from `board.yaml`:
+
+```yaml
+cameras:
+  - { connector: CAM0, module: innomaker_cam_ov9281 }
+```
+
+- `connector` must be a key of the resolved board's `camera_connectors:`
+  (CAM0, CAM1, ...); `module` must have a
+  `metadata/camera_modules/<module>.yaml` (schema
+  `camera-module-v1`).  Each connector appears at most once.
+- `camera_connectors:` is board data, next to `e1m_routes:` in a board
+  preset (`metadata/boards/<name>.yaml`) or inline at the top level of a
+  custom board's `board.yaml` (mutually exclusive with `preset:`, like
+  `populated:` and `e1m_routes:`).  Per connector: `refdes`, `csi` (E1M CSI
+  receiver), `lanes`, `i2c` (an `e1m_routes.buses` macro), and optionally
+  `select` (mux GPIO levels), `enable`, `reset` (`e1m_routes.gpio` macros),
+  `supply` (what feeds the module, e.g. `fixed-3v3`), `lane_polarity` and
+  `notes`.  Signals reference macros already declared in `e1m_routes:`;
+  pads are never restated.
+- The `active_low` flag of the route behind `enable` / `reset` is
+  **normative**: generators emit `GPIO_ACTIVE_LOW` from it.  An asserted
+  enable means "camera on", so on a carrier where the pad drives an N-FET
+  that pulls the module enable low (X-EVK CAM0), the route is
+  `active_low: true`.
+- `lane_polarity` holds one 0/1 inversion flag per lane, clock first:
+  `lanes + 1` entries.
+
+`tan validate` rejects an unknown connector, an unknown module, a
+duplicated connector, and (inline boards) an unresolvable macro or a wrong
+`lane_polarity` length, all as [ALP-B003](diagnostics/ALP-B003.md).
 
 #### Pin direction (NOT in `board.yaml`)
 
@@ -368,10 +471,13 @@ metadata/
 │   ├── E1M-AEN601.yaml      # partial_hw_config: true
 │   ├── E1M-AEN701.yaml      # lower-priority E7 preset
 │   ├── E1M-AEN801.yaml      # lead AEN E8 preset
+│   ├── E1M-AEN803.yaml      # AEN E8, dual external memory BOM; preliminary
 │   ├── E1M-V2N101.yaml      # v0.3 fully-populated worked example
 │   ├── E1M-V2N102.yaml      # partial_hw_config: true
+│   ├── E1M-V2N103.yaml      # 4 GB / 16 GB memory tier
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
 │   ├── E1M-V2M102.yaml      # V2N-M1 SKU
+│   ├── E1M-V2M103.yaml      # V2N-M1 SKU, 4 GB / 16 GB memory tier
 │   └── E1M-NX9101.yaml      # i.MX 93 placeholder MPN (production E1M-NX9xxx TBD)
 └── boards/
     ├── e1m-evk.yaml            # 35x35 EVK (AEN / N93)
@@ -542,13 +648,12 @@ Two curation tiers bound CI cost (ADR 0018):
   release.
 - **Tier B — recipe-only**: wiring + compatibility metadata are
   maintained and emitted, but the library is not built in alp-sdk CI.
-  `python -m alp_cli doctor` labels it.
+  `tan doctor` labels it.
 
-`python -m alp_cli doctor` reports the selected libraries for the
-project in scope (tier + licence + compatibility), reading the same
-manifests, so the CLI and alp-studio's library picker never disagree.
-(This is alp-sdk's own Python preflight, distinct from `tan doctor` --
-see [`docs/cli.md`](cli.md).)
+`tan doctor` reports the selected libraries for the project in scope
+(tier + licence + compatibility), reading the same manifests, so the CLI
+and alp-studio's library picker never disagree. See
+[`docs/cli.md`](cli.md).
 
 Scoping a library to specific cores (`cores: [<id>]`) folds in what
 earlier schema drafts spelled as a separate per-core
@@ -617,7 +722,7 @@ hidden:
   (no invented Kconfig); emit renders the selection tag with no
   `CONFIG_` line until the module is added to `west.yml`.
 - **ROS 2 is Tier B (recipe-only)**: its wiring is grounded in
-  `meta-alp-sdk` (`rclcpp`; `meta-ros2-humble` as a `LAYERRECOMMENDS`),
+  `meta-alp-sdk` (`rclcpp`; collection `ros2-humble-layer` as a `LAYERRECOMMENDS`),
   but alp-sdk CI does not build it, and a build must add
   `meta-ros2-humble` to `bblayers.conf`.
 - The **cross-core RMW bridge** that carries ROS topics between the two

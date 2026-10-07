@@ -88,6 +88,18 @@ def test_schema_rejects_bad_license() -> None:
     assert list(_validator().iter_errors(doc)), "GPL licence must be rejected"
 
 
+def test_license_enum_matches_readme_allowlist() -> None:
+    """metadata/libraries/README.md tells a maintainer to extend the schema
+    enum and its own allowlist block in the same change; this is what makes
+    that true rather than a convention."""
+    readme = (LIBRARIES_DIR / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## Licence allowlist", 1)[1]
+    block = section.split("```", 2)[1]
+    readme_ids = [i.strip() for i in block.replace("\n", " ").split(",")]
+    schema = json.loads(LIBRARY_SCHEMA.read_text(encoding="utf-8"))
+    assert readme_ids == schema["properties"]["license"]["enum"]
+
+
 def test_schema_requires_an_integration_section() -> None:
     doc = _valid_manifest()
     doc["integration"] = {}
@@ -344,10 +356,10 @@ def test_requires_min_ram_names_constraint(tmp_path: Path) -> None:
 
 def test_requires_capability_names_constraint(tmp_path: Path) -> None:
     project = load_board_yaml(_write_board(tmp_path, _V2N_NOLIB))
-    manifest = {"requires": {"capabilities": ["gpu2d"]}}  # V2N has no gpu2d cap
+    manifest = {"requires": {"capabilities": ["dave2d"]}}  # V2N has no dave2d cap
     with pytest.raises(OrchestratorError) as exc:
         liblayer._check_requires("needsgpu", manifest, project, liblayer.METADATA_ROOT)
-    assert "gpu2d" in str(exc.value)
+    assert "dave2d" in str(exc.value)
 
 
 def test_incompatible_selection_not_wireable(tmp_path: Path) -> None:
@@ -394,29 +406,14 @@ def test_emit_lvgl_yocto_image_install(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------
 # alp doctor
 # ---------------------------------------------------------------------
-
-def test_doctor_libraries_none_without_project(monkeypatch, tmp_path: Path) -> None:
-    from alp_cli import doctor
-    monkeypatch.chdir(tmp_path)  # no board.yaml here
-    assert doctor._check_libraries() is None
-
-
-def test_doctor_libraries_reports_selection(monkeypatch, tmp_path: Path) -> None:
-    from alp_cli import doctor
-    _write_board(tmp_path, _V2N_LVGL)
-    monkeypatch.chdir(tmp_path)
-    result = doctor._check_libraries()
-    assert result is not None
-    assert result.status == doctor.PASS
-    assert "lvgl" in result.message
-    assert "tier A" in result.message and "MIT" in result.message
-
-
-def test_doctor_libraries_none_when_empty(monkeypatch, tmp_path: Path) -> None:
-    from alp_cli import doctor
-    _write_board(tmp_path, _V2N_NOLIB)
-    monkeypatch.chdir(tmp_path)
-    assert doctor._check_libraries() is None
+#
+# `alp_cli.doctor._check_libraries()`'s three tests retired here alongside
+# `scripts/alp_cli/doctor.py` itself (alp-sdk#1368): tan's own
+# `tan/core/doctor_libraries.py` is the native, released port (tan-cli#629,
+# shipped in tan-cli v0.6.0) and carries its own tan-cli test coverage.
+# `scripts/alp_orchestrate/libraries.py`'s `resolve_selection()` -- the
+# selection logic both readers report on -- is untouched and still covered
+# directly by test_orchestrate_libraries.py.
 
 
 # ---------------------------------------------------------------------
@@ -577,6 +574,57 @@ def test_ros2_on_non_yocto_target_errors(tmp_path: Path) -> None:
     assert "ros2" in msg and "yocto" in msg
 
 
+def test_ros2_edge_image_pulls_rclcpp_and_alp_perception() -> None:
+    """#372: the README's exact documented command (MACHINE=e1m-v2n101-a55 /
+    e1m-v2m101-a55, `bitbake alp-image-edge`, meta-ros2-humble added to
+    bblayers.conf) must actually reach both rclcpp and alp-perception -- not
+    just document that it does. Pins the whole in-tree chain so a change to
+    any link (IMAGE_FEATURES, the feature->packagegroup map, or the
+    packagegroup's RDEPENDS) that drops either package fails this test
+    instead of silently drifting from the README's claim.
+    """
+    meta = REPO / "meta-alp-sdk"
+    edge_image = (meta / "recipes-images" / "alp-image-edge.bb").read_text(encoding="utf-8")
+    assert "alp-ros" in edge_image.split('IMAGE_FEATURES += "', 1)[1].split('"', 1)[0]
+
+    common_inc = (meta / "recipes-images" / "alp-image-common.inc").read_text(encoding="utf-8")
+    assert 'FEATURE_PACKAGES_alp-ros     = "packagegroup-alp-ros"' in common_inc
+
+    packagegroup = (
+        meta / "dynamic-layers" / "ros2-humble-layer" / "recipes-core" / "packagegroups" / "packagegroup-alp-ros.bb"
+    ).read_text(encoding="utf-8")
+    rdepends = packagegroup.split('RDEPENDS:${PN} = "', 1)[1].split('"', 1)[0]
+    assert "rclcpp" in rdepends
+    assert "alp-perception" in rdepends
+    # The node recipe floats on branch=main (AUTOREV) and its example is not on
+    # main until dev is promoted: keep it out of the image closure until then.
+    assert "alp-ros2-temperature" not in rdepends
+
+
+def test_ros2_is_opt_in_by_layer_presence() -> None:
+    """ROS recipes parse only with upstream meta-ros2-humble present, and
+    ALP_ENABLE_ROS2 defaults from that, so ROS-free builds stay ROS-free."""
+    meta = REPO / "meta-alp-sdk"
+    layer_conf = (meta / "conf" / "layer.conf").read_text(encoding="utf-8")
+    assert "ros2-humble-layer:${LAYERDIR}/dynamic-layers/ros2-humble-layer/" in layer_conf
+    # No static BBFILES glob may reach the dynamic layer (it would parse without meta-ros).
+    for line in layer_conf.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        if "BBFILES" in line and "BBFILES_DYNAMIC" not in line:
+            assert "dynamic-layers/ros2-humble-layer" not in line
+    assert not any(
+        "dynamic-layers" in ln and "BBFILES +=" in ln and "ros2-humble-layer" in ln
+        for ln in layer_conf.splitlines()
+        if not ln.lstrip().startswith("#")
+    )
+
+    common_inc = (meta / "recipes-images" / "alp-image-common.inc").read_text(encoding="utf-8")
+    assert "ALP_ENABLE_ROS2 ?=" in common_inc
+    assert "'ros2-humble-layer' in" in common_inc
+    assert "${ALP_ROS2_FEATURE_OFF}" in common_inc.split("IMAGE_FEATURES:remove", 1)[1].splitlines()[0]
+
+
 # ---------------------------------------------------------------------
 # ADR 0018 cloud / connectivity Tier-B group
 #
@@ -586,8 +634,10 @@ def test_ros2_on_non_yocto_target_errors(tmp_path: Path) -> None:
 # Grounding (2026-07-05):
 #   * CONFIG_LWM2M  $ZEPHYR_BASE/subsys/net/lib/lwm2m/Kconfig `menuconfig LWM2M`
 #   * CONFIG_COAP   $ZEPHYR_BASE/subsys/net/lib/coap/Kconfig  `config COAP`
-#   * aws-iot / azure-iot: no upstream Zephyr west module in `west list`; exact
-#     release pins live in integration.zephyr.west, no CONFIG is invented.
+#   * aws-iot / azure-iot: no upstream Zephyr module or Kconfig; exact release
+#     pins live in integration.zephyr.west and the enable symbols are alp-sdk's
+#     own (CONFIG_ALP_AWS_IOT / CONFIG_ALP_AZURE_IOT, zephyr/Kconfig.alp-libraries,
+#     glue in vendors/{aws-iot,azure-iot}/).
 # ---------------------------------------------------------------------
 
 CLOUD_LIBS = {"lwm2m", "coap", "aws-iot", "azure-iot"}
@@ -605,17 +655,17 @@ def test_lwm2m_coap_are_upstream_apache() -> None:
         assert doc["license"] == "Apache-2.0"
 
 
-def test_aws_azure_are_module_only_prerequisites() -> None:
-    """The cloud manifests name real upstream repos with exact west pins and NO
-    fabricated Kconfig (generic C SDKs, enable-by-presence)."""
+def test_aws_azure_pins_and_alp_enable_symbols() -> None:
+    """The cloud manifests name real upstream repos with exact west pins and the
+    alp-sdk-owned enable symbols that gate the in-tree vendors/ glue."""
     aws = yaml.safe_load((LIBRARIES_DIR / "aws-iot.yaml").read_text(encoding="utf-8"))
-    assert aws["license"] == "Apache-2.0"
-    assert aws["version"] == "v3.1.5"
+    assert aws["license"] == "MIT"
+    assert aws["version"] == "202412.00"
     zephyr = aws["integration"]["zephyr"]
     assert zephyr.get("module") == "aws-iot-device-sdk-embedded-C"
-    assert zephyr["west"]["revision"] == "v3.1.5"
+    assert zephyr["west"]["revision"] == "202412.00"
     assert zephyr["west"]["path"] == "modules/lib/aws-iot-device-sdk-embedded-C"
-    assert "kconfig" not in zephyr, "no Kconfig may be invented without a real symbol"
+    assert zephyr["kconfig"] == ["CONFIG_ALP_AWS_IOT=y"]
 
     azure = yaml.safe_load((LIBRARIES_DIR / "azure-iot.yaml").read_text(encoding="utf-8"))
     assert azure["license"] == "MIT"
@@ -624,7 +674,7 @@ def test_aws_azure_are_module_only_prerequisites() -> None:
     assert zephyr.get("module") == "azure-sdk-for-c"
     assert zephyr["west"]["revision"] == "1.5.0"
     assert zephyr["west"]["path"] == "modules/lib/azure-sdk-for-c"
-    assert "kconfig" not in zephyr
+    assert zephyr["kconfig"] == ["CONFIG_ALP_AZURE_IOT=y"]
 
 
 # --- emit: an upstream cloud lib lands its real CONFIG on a Zephyr M core ---
@@ -650,7 +700,7 @@ def test_emit_lwm2m_coap_zephyr_kconfig(tmp_path: Path) -> None:
     assert "lwm2m v4.4.1" in out  # version transcribed from the manifest
 
 
-# --- emit: a prerequisite cloud lib emits the tag with NO fabricated CONFIG ---
+# --- emit: aws-iot lands its alp-owned CONFIG alongside the selection tag ---
 
 _V2N_AWS = """
 som:
@@ -663,16 +713,15 @@ cores:
 """
 
 
-def test_emit_aws_iot_module_only_no_kconfig(tmp_path: Path) -> None:
+def test_emit_aws_iot_enable_symbol(tmp_path: Path) -> None:
     """aws-iot on the M33 emits the ADR 0018 selection tag naming the upstream
-    module and -- because the SDK has no confirmed enable symbol -- NO
-    fabricated CONFIG line."""
+    module plus the alp-sdk enable symbol."""
     project = load_board_yaml(_write_board(tmp_path, _V2N_AWS))
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "ADR 0018" in out
     assert "aws-iot-device-sdk-embedded-C" in out   # module named in the tag
-    assert "aws-iot v3.1.5" in out                   # version transcribed
-    assert "CONFIG_AWS" not in out                   # nothing invented
+    assert "aws-iot v202412.00" in out                  # version transcribed
+    assert "CONFIG_ALP_AWS_IOT=y" in out
 
 
 # --- os constraint on an upstream cloud lib names the failing constraint ---

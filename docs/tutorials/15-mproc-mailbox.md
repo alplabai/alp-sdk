@@ -55,7 +55,7 @@ Splitting work across cores buys:
   NPU-bound.
 
 The shape that makes this work: a hardware mailbox + a region
-of cache-coherent shared SRAM + a hardware semaphore.
+of non-cacheable shared SRAM + a hardware semaphore.
 
 ## 1. The three primitives
 
@@ -96,18 +96,22 @@ mailbox + put the actual bytes in shared SRAM.
 
 ### Shared memory (`alp_shmem_*`)
 
-A region of cache-coherent SRAM both cores can read/write.
+A region of non-cacheable SRAM both cores can read/write.
 @ref alp_shmem_view hands back the mapped base pointer + size;
 the caller reads and writes through that pointer directly
-(`memcpy`, struct stores).  Opening the region non-cacheable
-(`.cacheable = false`) lets the backend keep the two cores
-coherent without the caller issuing DSB / barrier instructions.
+(`memcpy`, struct stores).  Carve-outs are non-cacheable by design
+and the SDK performs no cache flush or invalidate.  For board.yaml
+`ipc:` endpoints the generator emits `CONFIG_DCACHE=n`; hand-written
+firmware must map the carve-out non-cacheable in the MPU.  (A
+`raw_shmem` entry can set `cacheable: true` when the application owns
+cache maintenance itself; that only drops the generated
+`CONFIG_DCACHE=n`, the SDK still does none.)  Ordering the payload
+stores before the mailbox doorbell is up to the mbox driver.
 
 ```c
 alp_shmem_t *shmem = alp_shmem_open(&(alp_shmem_config_t){
-    .name      = "alp_shmem0",     // DT-anchored region label
-    .size      = 4096u,
-    .cacheable = false,
+    .name = "alp_shmem0",     // DT-anchored region label
+    .size = 4096u,
 });
 void  *base = NULL;
 size_t size = 0u;
@@ -161,7 +165,7 @@ static void on_peer_msg(uint32_t channel, const void *data, size_t len,
 
 int main(void) {
     alp_shmem_t *shmem = alp_shmem_open(&(alp_shmem_config_t){
-        .name = "alp_shmem0", .size = 4096u, .cacheable = false,
+        .name = "alp_shmem0", .size = 4096u,
     });
     alp_mbox_t  *mbox  = alp_mbox_open(&(alp_mbox_config_t){
         .channel = 0u, .peer = ALP_CORE_M55_HE,
@@ -232,7 +236,7 @@ static void on_hp_msg(uint32_t channel, const void *data, size_t len,
 
 int main(void) {
     alp_shmem_t *shmem = alp_shmem_open(&(alp_shmem_config_t){
-        .name = "alp_shmem0", .size = 4096u, .cacheable = false,
+        .name = "alp_shmem0", .size = 4096u,
     });
     mbox = alp_mbox_open(&(alp_mbox_config_t){
         .channel = 0u, .peer = ALP_CORE_M55_HP,
@@ -288,13 +292,17 @@ Each core can also be built standalone with `west build` directly
 
 ```bash
 # HP side.
+# writes examples/multicore/mproc-mailbox/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox
 west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
-    examples/multicore/mproc-mailbox
+    examples/multicore/mproc-mailbox -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 
 # HE side.
+# writes examples/multicore/mproc-mailbox/peer/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox/peer
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-    examples/multicore/mproc-mailbox/peer
+    examples/multicore/mproc-mailbox/peer -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

@@ -15,15 +15,29 @@ below. Each is governed by its own license; the full terms ship with the
 respective component (under vendors/<name>/ or the referenced upstream).
 
 - Zephyr RTOS — Apache-2.0. Copyright the Zephyr Project and contributors.
-  Build-time dependency (west/Zephyr); not redistributed in this repository.
+  Build-time dependency (west/Zephyr); not redistributed in this repository,
+  except for zephyr/drivers/video/ov5647.c — a verbatim backport of a still-
+  open upstream Zephyr pull request, vendored ahead of merge; see that
+  file's header and docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
 
-- Arm CMSIS — Apache-2.0. Copyright (c) Arm Limited.
-  Bundled with the GD32 firmware library at
-  vendors/gd32_firmware_library/upstream/Firmware/CMSIS/.
+- Espressif esp-video-components — Apache-2.0.
+  Copyright (c) Espressif Systems (Shanghai) CO LTD.
+  Register addresses/values/per-mode init tables from
+  esp_cam_sensor/sensors/ov9281 are ported verbatim into
+  zephyr/drivers/video/ov9281.c, plus one Alp-derived 1280x800 table (see
+  the driver's file header); see that file's header for the source
+  commit.
 
-- GigaDevice GD32G5x3 Firmware Library — Apache-2.0.
-  Copyright (c) GigaDevice Semiconductor Inc.
-  Git submodule at vendors/gd32_firmware_library/upstream (mirror of v1.5.0).
+- GigaDevice GD32G5x3 Firmware Library (and the Arm CMSIS files bundled in
+  it) — NOT redistributed by this repository.  Copyright (c) GigaDevice
+  Semiconductor Inc. and Arm Limited.  It is a separate component under
+  GigaDevice's own terms (the per-file BSD-3-Clause / Apache-2.0 notices in
+  GigaDevice's official repository,
+  https://github.com/GigaDevice-GD32-MCU/GD32G5x3_Firmware_Library, and the
+  GigaDevice Software License Agreement SLA-GD0001 v1.1 that accompanies
+  GigaDevice's archive).  Alp Lab does not relicense it.  The GD32 bridge
+  firmware (alplabai/gd32-bridge-firmware) fetches it from GigaDevice at
+  build time; see that repository's THIRD_PARTY_NOTICES.md.
 
 - Renesas RZ/V2N DRP-AI TVM / RUHMI compiler — Apache-2.0.
   Copyright (c) Renesas Electronics Corporation.
@@ -38,6 +52,15 @@ respective component (under vendors/<name>/ or the referenced upstream).
 - nanopb — zlib license. Copyright (c) Petteri Aimonen.
   Integrated under vendors/nanopb/.
 
+- AWS IoT Device SDK for Embedded C (coreMQTT, coreJSON) — MIT.
+  Copyright (c) Amazon.com, Inc. or its affiliates.
+  Not redistributed; fetched at build time via west group `extras-cloud`
+  (see vendors/aws-iot/).
+
+- Azure SDK for Embedded C — MIT. Copyright (c) Microsoft Corporation.
+  Not redistributed; fetched at build time via west group `extras-cloud`
+  (see vendors/azure-iot/).
+
 --------------------------------------------------------------------------------
 Vendor BSPs and SDK binaries
 
@@ -46,3 +69,11 @@ i.MX93, DEEPX DX-M1) are NOT redistributed in this repository. They are
 obtained directly from the vendor under the vendor's own license. The
 vendors/<name>/ directories here contain only Alp Lab's own integration
 shims (Apache-2.0) plus instructions; see each vendors/<name>/README.md.
+
+One exception, carried under the vendor's own terms rather than Apache-2.0
+(ADR 0032): metadata/svd/alif/ contains Alif Semiconductor's CMSIS-SVD
+register descriptions for the Ensemble E8 (AE822) M55-HE and M55-HP cores,
+copied unmodified from alifsemi/alif_ensemble-cmsis-dfp, with Alif's
+unmodified License.txt beside them. Those files are not covered by this
+repository's Apache-2.0 LICENSE; use is restricted to Alif silicon. See
+metadata/svd/alif/README.md.

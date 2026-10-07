@@ -37,6 +37,18 @@
 #include <cstdint>
 #include <new>
 
+/* The TFLM headers go BEFORE any Zephyr header, and that order is
+ * load-bearing on native_sim.  They pull in libstdc++'s <memory>, which
+ * reaches the host's <pthread.h>; Zephyr's toolchain header defines
+ * `__unused` as an attribute macro, and glibc 2.43 names a member of
+ * struct __pthread_mutex_s exactly that (`short __unused;`, x86
+ * bits/struct_mutex.h).  With Zephyr first the member expands to a bare
+ * attribute and the TU dies with "declaration does not declare anything".
+ * Host headers first means glibc is parsed before the macro exists. */
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
+#include "tensorflow/lite/schema/schema_generated.h"
+
 #include <zephyr/logging/log.h>
 
 extern "C" {
@@ -44,6 +56,14 @@ extern "C" {
 #include <alp/cap_instance.h>
 #include <alp/inference.h>
 #include <alp/peripheral.h>
+}
+
+/* src/common/alp_slot_claim.h has no extern "C" guard of its own, and its
+ * out-of-line declarations (alp_slot_sleep_tick, the close-drain helpers)
+ * are compiled with C linkage in src/common/alp_slot_claim.c -- so the
+ * include is wrapped here rather than left to link by luck. */
+extern "C" {
+#include "alp_slot_claim.h"
 }
 
 #include "inference_ops.h"
@@ -54,10 +74,6 @@ extern "C" {
  * ethos_u_aen / ethos_u_n93 build fails to link with undefined
  * references to alp_inference_tflm_ops. */
 #include "tflm_shared.h"
-
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
-#include "tensorflow/lite/schema/schema_generated.h"
 
 #if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) || \
     defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
@@ -166,6 +182,12 @@ void register_default_ops(tflite::MicroMutableOpResolver<32> &r)
 #endif
 }
 
+/** Fill an alp tensor descriptor from a TFLM TfLiteTensor.
+ *
+ *  PRECONDITION: @p t's rank is <= 4 -- tflm_open() refuses
+ *  (ALP_ERR_NOSUPPORT) any model carrying a tensor that doesn't hold, via
+ *  the all_tensor_ranks_fit() walk below, so this never truncates a live
+ *  rank > 4 (issue #1729, same posture as the ORT/DEEPX backends). */
 void fill_tensor_descriptor(const TfLiteTensor *t, alp_inference_tensor_t *out)
 {
 	out->data       = t->data.raw;
@@ -183,6 +205,30 @@ void fill_tensor_descriptor(const TfLiteTensor *t, alp_inference_tensor_t *out)
 	    (t->quantization.type == kTfLiteAffineQuantization)
 	        ? static_cast<TfLiteAffineQuantization *>(t->quantization.params)->zero_point->data[0]
 	        : 0;
+}
+
+/** True when every tensor @p interp exposes (inputs + outputs) has rank <= 4
+ *  -- the maximum alp_inference_tensor_t's fixed shape[4] descriptor can
+ *  hold without truncating.  fill_tensor_descriptor() above used to
+ *  silently truncate a longer shape to the first 4 dims instead of saying
+ *  so; the caller read back a shape that no longer matched the model, with
+ *  no signal anything was wrong (issue #1729) -- same bug the ORT and DEEPX
+ *  backends carried and already fixed at their own open() time.  Called
+ *  from tflm_open() right after AllocateTensors() succeeds (the first point
+ *  the tensors' real dims are known), before state is handed to a caller. */
+bool all_tensor_ranks_fit(tflite::MicroInterpreter *interp)
+{
+	for (size_t i = 0; i < interp->inputs_size(); ++i) {
+		if (interp->input(i)->dims->size > 4) {
+			return false;
+		}
+	}
+	for (size_t i = 0; i < interp->outputs_size(); ++i) {
+		if (interp->output(i)->dims->size > 4) {
+			return false;
+		}
+	}
+	return true;
 }
 
 /* True when the model carries the Ethos-U custom op, i.e. it dispatches onto the
@@ -220,6 +266,7 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
                               alp_inference_backend_state_t *state,
                               alp_capabilities_t            *caps_out)
 {
+	(void)caps_out;
 	/* Pinned-backend gate (the dispatcher contract in
 	 * src/inference_dispatch.c: a pinned open the serving backend
 	 * cannot honour returns NOSUPPORT).  This vtable serves the CPU
@@ -238,6 +285,20 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		break;
 #endif
 	default:
+		return ALP_ERR_NOSUPPORT;
+	}
+
+	/* accel_unit_mask: the CPU executor has no selectable unit (0 only).  The
+	 * Ethos-U path serves the single NPU instance visible to this core, so bit
+	 * 0 is accepted when it is compiled in and the caller did not pin CPU.
+	 * Unverified for multi-NPU parts. */
+	uint32_t allowed_mask = 0u;
+#if defined(ALP_INFERENCE_TFLM_HAS_ETHOS_U)
+	if (cfg->backend != ALP_INFERENCE_BACKEND_CPU) {
+		allowed_mask = 1u;
+	}
+#endif
+	if ((cfg->accel_unit_mask & ~allowed_mask) != 0u) {
 		return ALP_ERR_NOSUPPORT;
 	}
 
@@ -304,14 +365,21 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		delete st;
 		return ALP_ERR_INVAL;
 	} else {
-		if (g_default_arena_in_use) {
+		/* Atomic claim of the single shared default arena
+		 * (src/common/alp_slot_claim.h, issue #1115).  The plain
+		 * check-then-set this replaces let two interpreters opening
+		 * concurrently BOTH win the one arena and run inference over
+		 * each other's activations -- silent corruption, where one of
+		 * them should have got a clean ALP_ERR_NOMEM.  No loop and no
+		 * array subscript here, which is why every array-shaped grep
+		 * in #1115's remediation walked past this site. */
+		if (!alp_slot_try_claim(&g_default_arena_in_use)) {
 			delete st;
 			return ALP_ERR_NOMEM;
 		}
-		g_default_arena_in_use = true;
-		st->arena_buf          = g_default_arena;
-		st->arena_size         = kDefaultArenaBytes;
-		st->own_arena          = true;
+		st->arena_buf  = g_default_arena;
+		st->arena_size = kDefaultArenaBytes;
+		st->own_arena  = true;
 	}
 
 	register_default_ops(st->resolver);
@@ -319,21 +387,37 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 	st->interp = new (std::nothrow)
 	    tflite::MicroInterpreter(st->model, st->resolver, st->arena_buf, st->arena_size);
 	if (st->interp == nullptr) {
-		if (st->own_arena) g_default_arena_in_use = false;
+		if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
 		delete st;
 		return ALP_ERR_NOMEM;
 	}
 
 	if (st->interp->AllocateTensors() != kTfLiteOk) {
 		delete st->interp;
-		if (st->own_arena) g_default_arena_in_use = false;
+		if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
 		delete st;
 		return ALP_ERR_IO;
 	}
 
-	state->be_data  = st;
-	state->dev      = nullptr;
-	caps_out->flags = 0u; /* per-instance flags layered by NPU backends */
+	if (!all_tensor_ranks_fit(st->interp)) {
+		/* alp_inference_tensor_t's shape[] has exactly 4 slots; refuse the
+		 * model rather than let tflm_get_input()/tflm_get_output() hand
+		 * back a shape silently truncated to the first 4 dims (issue
+		 * #1729). NOSUPPORT, not IO: the model loaded and allocated fine,
+		 * it is this portable descriptor that has no slot for its rank --
+		 * same posture the ORT and DEEPX backends already take. */
+		delete st->interp;
+		if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
+		delete st;
+		return ALP_ERR_NOSUPPORT;
+	}
+
+	/* Leave *caps_out untouched: the dispatcher has already pre-seeded it
+     * from the registry's base_caps/base_class_flags (#1640). Zeroing
+     * caps_out->flags here would clobber that pre-seed and turn a
+     * REPORTED descriptor back into "not reported". */
+	state->be_data = st;
+	state->dev     = nullptr;
 	return ALP_OK;
 }
 
@@ -382,7 +466,7 @@ static void tflm_close(alp_inference_backend_state_t *state)
 	if (st == nullptr) return;
 
 	delete st->interp;
-	if (st->own_arena) g_default_arena_in_use = false;
+	if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
 	delete st;
 	state->be_data = nullptr;
 }
@@ -408,6 +492,7 @@ ALP_BACKEND_REGISTER(inference,
                          /* .silicon_ref */ "*",
                          /* .vendor      */ "tflm",
                          /* .base_caps   */ 0u,
+                         /* .base_class_flags */ 0u,
                          /* .priority    */ 50,
                          /* .ops         */ &alp_inference_tflm_ops,
                          /* .probe       */ NULL,

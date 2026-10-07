@@ -100,9 +100,11 @@
  *   positive or the failure-contract path -- with "silicon lacks it"
  *   (cap false) distinguished from "no instance on this build".
  *
- * Beyond the table, three ZTESTs cover the v0.9 non-class surfaces:
+ * Beyond the table, four ZTESTs cover the v0.9 non-class surfaces:
  * alp_init/alp_deinit lifecycle idempotency, the alp_uart_rx_ringbuf_*
- * contract (feature on or off), and I2C-target config validation.
+ * contract (feature on or off), I2C-target config validation, and the
+ * dispatcher ops-vtable guard-mutation proof (issue #1641: NULLing one
+ * op slot on an open handle must return ALP_ERR_NOSUPPORT, not crash).
  *
  * ADDING VENDOR N+1 (or a new class): add ONE conf_class_t row to
  * conf_classes[] below -- three tiny open adapters, the class's
@@ -126,6 +128,13 @@
 #include "alp/pwm.h"
 #include "alp/rtc.h"
 #include "alp/wdt.h"
+
+/* Internal dispatcher/backend ABI, NOT part of the public <alp/...>
+ * surface -- pulled in only for the ops-vtable guard-mutation proof
+ * below (issue #1641), which needs the real struct layout to NULL one
+ * op slot on an already-open handle. See this test app's
+ * CMakeLists.txt for the extra include path this requires. */
+#include "uart/uart_ops.h"
 
 ZTEST_SUITE(alp_conformance, NULL, NULL, NULL, NULL, NULL);
 
@@ -1272,4 +1281,61 @@ ZTEST(alp_conformance, test_i2c_target_config_validation)
 	zassert_true(conf_status_in_enum(e),
 	             "conformance[i2c_target]: own-address rejection %d outside alp_status_t",
 	             (int)e);
+}
+
+/* ------------------------------------------------------------------ */
+/* Ops-vtable guard-mutation proof (issue #1641)                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief NULL one op slot on an otherwise-real, already-open handle and
+ *        prove the dispatcher refuses with @ref ALP_ERR_NOSUPPORT
+ *        instead of dereferencing the NULL slot.
+ *
+ * Every backend registered in-tree today populates every non-close op
+ * slot, so this can never fail against the current registry -- it is
+ * NOT a regression test for a live bug.  It proves the DISPATCHER's own
+ * guard exists (issue #1641: 41 call sites across 15 dispatchers used
+ * to trust every backend to populate the vtable fully), so the first
+ * partial vendor port that leaves an op unset gets a documented
+ * refusal instead of a crash.  UART is the representative: it is
+ * sim_backed (guaranteed to open on native_sim CI) and its `write` op
+ * is a plain, non-blocking call, so mutating it needs no lifecycle
+ * gymnastics around a blocking-op close drain.
+ */
+ZTEST(alp_conformance, test_ops_vtable_null_slot_returns_nosupport)
+{
+	alp_uart_t *port = (alp_uart_t *)uart_open_valid_();
+	if (port == NULL) {
+		TC_PRINT("conformance[ops_vtable_guard]: no UART instance 0 on this "
+		         "build; guard-mutation proof skipped\n");
+		ztest_test_skip(); /* reports SKIP, not a silent PASS -- this is the
+		                     * only test proving the ops-vtable guard. */
+	}
+
+	/* Mutate a LOCAL copy of the ops table (write == NULL), then point
+	 * this ONE handle's state.ops at it.  The real, shared backend ops
+	 * table (and every other open handle) is untouched. */
+	alp_uart_ops_t        mutated_ops = *port->state.ops;
+	const alp_uart_ops_t *saved_ops   = port->state.ops;
+	mutated_ops.write                 = NULL;
+	port->state.ops                   = &mutated_ops;
+
+	uint8_t      byte = 0xAA;
+	alp_status_t rc   = alp_uart_write(port, &byte, 1);
+
+	/* Restore before close() -- alp_uart_close() reads state.ops->close,
+	 * which the mutated copy still carries correctly, but restoring
+	 * first keeps this test's blast radius to exactly the write() call
+	 * under test. */
+	port->state.ops = saved_ops;
+
+	zassert_equal(rc,
+	              ALP_ERR_NOSUPPORT,
+	              "conformance[ops_vtable_guard]: alp_uart_write() with "
+	              "ops->write == NULL must return ALP_ERR_NOSUPPORT, not fault "
+	              "or silently succeed (got %d)",
+	              (int)rc);
+
+	uart_close_(port);
 }

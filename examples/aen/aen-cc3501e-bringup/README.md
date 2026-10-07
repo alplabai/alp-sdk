@@ -11,7 +11,7 @@ the carrier console. It is the AEN analog of
 GD32 supervisor bring-up) — same shape, different coprocessor.
 
 The CC3501E peer firmware is ALP-authored and lives in this repo at
-[`firmware/cc3501e/`](../../../firmware/cc3501e) (embedded, per ADR 0015 —
+[`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) (embedded, per ADR 0015 —
 like the gd32-bridge).
 
 ## Why this app is the gating step
@@ -32,14 +32,17 @@ reply-arming framing (the one fix that can't be checked off-silicon).
 | `SPI1.MOSI`  | `P14_5`      | out | `GPIO_28`               |
 | `SPI1.MISO`  | `P14_4`      | in  | `GPIO_29`               |
 
-This HW rev uses the dwc-ssi **hardware SS0** chip-select on P14_7 and a READY
-input for per-phase gating. The application still passes `ALP_SPI_NO_CS` so no
-software GPIO CS is installed; the SPI driver drives SS0 from the controller.
+This HW rev uses the dwc-ssi **hardware SS0** chip-select on P14_7 and an
+OPTIONAL READY input for per-phase gating -- opt-in only, and NULL (unwired)
+by default on the R2 module this app targets (see `src/cc3501e_bridge.c` and
+`src/main.c`'s READY probe for why). The application still passes
+`ALP_SPI_NO_CS` so no software GPIO CS is installed; the SPI driver drives
+SS0 from the controller.
 
 ## What it does
 
 1. Opens `WIFI_EN` + `E_WIFI.NRST` GPIOs (output).
-2. Opens SPI1 (`bus_id = 1`, mode 0, 14 MHz request / ~14.3 MHz derived SCLK, hardware SS0) — Alif is master.
+2. Opens SPI1 (`bus_id = 1`, mode 0, 25 MHz `CC3501E_BRIDGE_SPI_FREQ_HZ`, hardware SS0) — Alif is master.
 3. `cc3501e_reset()` — sequences `WIFI_EN` + `nRESET` (TI SWRU626) and
    blocks ~905 ms for the boot budget.
 4. Retries `PING` until the coprocessor answers.
@@ -49,6 +52,25 @@ software GPIO CS is installed; the SPI driver drives SS0 from the controller.
    (expected — it still proves the request round-trips).
 7. Liveness soak: `PING` every 500 ms (+ `GET_VERSION` every 8th cycle) so
    the link stays continuously verifiable over J-Link.
+8. Power: cuts the supply with `cc3501e_power_off()`, shows that calls then fail
+   fast with `ALP_ERR_NOT_READY` rather than timing out, and wakes the device with
+   `cc3501e_reset()` — the long-idle duty cycle a once-an-hour node would use.
+9. Power presets: walks `PERFORMANCE` / `LOW_POWER` / `DEEP_SLEEP` / `BALANCED`,
+   printing each policy's status, the `radio_ok` flag and a `PING`, then leaves the
+   device on `BALANCED`. A `PING` after each preset is the point — a preset that
+   wedged the inter-chip link would be far worse than one that saved nothing.
+
+   `radio_ok` is the field to read: a `RESP_OK` to `POWER_POLICY` means QUEUED, not
+   APPLIED, because the firmware defers the work to its task (neither the vendor
+   radio call nor the Power-manager switch is legal in the SPI-dispatch ISR).
+
+   > **[#1691](https://github.com/alplabai/alp-sdk/issues/1691):** repeated BLE
+   > advertise/stop cycles can wedge the bridge (not power-related — it reproduces
+   > with no power policy). `cc3501e_recover()` clears it; step 8 above shows it.
+
+   See [`docs/cc3501e-bridge.md`](../../../docs/cc3501e-bridge.md#power-management)
+   for the full model, including why there is no deeper sleep tier and how waking
+   works.
 
 ## Build + flash (bench)
 
@@ -56,7 +78,7 @@ Two J-Links: one on the Alif, one on the CC3501E.
 
 ```sh
 # 1. Build + flash the CC3501E peer firmware first (see firmware/cc3501e):
-#    powershell firmware/cc3501e/ti/build_ti.ps1   (after repinning the
+#    powershell cc3501e-bridge-firmware:ti/build_ti.ps1   (after repinning the
 #    SysConfig board file to the AEN GPIO_27/28/29 inter-chip pins)
 #    -> flash cc3501e-bridge.hex over the CC3501E J-Link.
 #    NOTE: the CC3501E reads VTref=0V until this app powers it, so flash it
@@ -64,7 +86,9 @@ Two J-Links: one on the Alif, one on the CC3501E.
 
 # 2. Build + flash this Alif app (use the FULL qualified board target so the
 #    per-board overlay boards/<target>.overlay is auto-applied):
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-cc3501e-bringup
+# writes examples/aen/aen-cc3501e-bringup/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/aen/aen-cc3501e-bringup
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-cc3501e-bringup -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash                      # over the Alif J-Link (AE822FA0E5597LS0_M55_HE)
 ```
 

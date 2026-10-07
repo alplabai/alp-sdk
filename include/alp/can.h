@@ -188,7 +188,11 @@ alp_status_t alp_can_stop(alp_can_t *can);
  * @param[in] timeout_ms  Max wait for a free TX mailbox.
  * @return ALP_OK on success;
  *         ALP_ERR_NOT_READY if @p can is NULL or stopped;
- *         ALP_ERR_INVAL if @p frame is NULL or @c payload_len out of range;
+ *         ALP_ERR_INVAL if @p frame is NULL, @c payload_len out of range for
+ *         the frame's own @c fd flag, or (backend-dependent) @c payload_len
+ *         exceeds what the underlying controller can carry on this build;
+ *         ALP_ERR_NOSUPPORT if @c frame.fd is set but @p can was not opened
+ *         @ref ALP_CAN_MODE_FD;
  *         ALP_ERR_TIMEOUT if all TX mailboxes are occupied;
  *         ALP_ERR_IO on bus error (e.g. error-passive state).
  */

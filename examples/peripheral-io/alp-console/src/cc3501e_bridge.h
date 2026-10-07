@@ -38,11 +38,20 @@
  * CC3501E's 15 MHz ceiling.  At >1 MHz the dwc-ssi master samples the incoming
  * MISO bit too early over the on-SoM traces (the earlier bare 8 MHz attempt
  * mis-sampled -> cold first-contact failed); this now pairs with the dwc-ssi
- * RX sample delay set via `rx-delay` on the cc3501e_spi node in the board
- * overlay (RX_SAMPLE_DLY reg 0xF0, in ssi_clk cycles).  GOAL: 15 MHz -- raise this
- * to 15000000u ONLY after 8 MHz is bench-clean AND the overlay `rx-delay` is
- * retuned for 15 MHz (see the overlay comment); MISO mis-sample shows up as a
- * -5 desync / garbage reply headers on the link.
+ * RX sample delay (RX_SAMPLE_DLY reg 0xF0, in ssi_clk cycles).  That delay is
+ * written from C regardless of what devicetree says; see
+ * CC3501E_BRIDGE_RX_SAMPLE_DLY in
+ * examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h, and the poke that
+ * applies it in the matching cc3501e_bridge.c.
+ *
+ * This example stays at 1 MHz because it does not perform that write.  The
+ * "raise to 15 MHz only after 8 MHz is bench-clean" plan this comment used to
+ * describe has already been carried out elsewhere: the aen-cc3501e-* examples
+ * run at 25 MHz, cold and warm, concurrently with Wi-Fi/BLE, with the RX
+ * sample delay silicon-swept at that rate.  To go faster here, port that write
+ * and re-sweep the delay on this example's own clock -- do not just raise the
+ * number, because MISO mis-sample shows up as a -5 desync / garbage reply
+ * headers on the link.
  * (Payload-request reliability is handled by the inter-phase settle in
  * cc3501e_request -- CC3501E_PHASE_SETTLE_US -- not the clock.) */
 #define CC3501E_BRIDGE_SPI_FREQ_HZ \

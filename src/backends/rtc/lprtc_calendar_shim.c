@@ -40,6 +40,74 @@
  * Separate TBD, tracked in the receipt.
  */
 
+/*
+ * SILICON CAVEAT (#1814) -- the LPRTC's accuracy across a reset is errata-bound
+ * on every Ensemble revision, and this shim is the AEN calendar path.
+ *
+ * AERR0012 v2.0 ER001 (Rev A0, the bench silicon; fixed in A1): "A Power On
+ * Reset event (assertion of the POR_N pin or wake from STOP mode) will reset
+ * the RTC (Real Time Counter) clock pre-scaler divider ... the RTC will revert
+ * to clock at the default rate of 32KHz ... the accuracy of the real time count
+ * will have already been lost."  Re-programming the divider afterwards does not
+ * recover the lost time.
+ *
+ * AERR0012 v2.0 ER002 (Rev A1, no fix planned): while POR_N is asserted the RTC
+ * clock source falls back from the 32 kHz LFXO to the ~5%-accurate LFRC --
+ * "it would take a 20 second assertion of POR_N to impose a 1 second loss of
+ * RTC accuracy."
+ *
+ * BENCH FACT (goes beyond the errata text above, and beyond POR_N entirely):
+ * the AEN bench module (E1M-AEN801 r1, serial 2617-0001) reports "[SES] No LF
+ * XTAL" on every SE boot (bench-captured 2026-08-30, re-confirmed 2026-08-31;
+ * see docs/aen-se-services.md, "SERAM version, per physical board") -- this
+ * board has no 32 kHz LFXO fitted at all.  ER002's LFXO->LFRC fallback is NOT
+ * confined to a POR_N assertion window on this module: LFRC is the LPRTC's
+ * clock source PERMANENTLY, on every boot, whether or not POR_N is currently
+ * asserted.  The calendar therefore drifts continuously at LFRC's ~5% offset
+ * from LFXO -- roughly 72 minutes per day -- for as long as this shim runs,
+ * not only across a reset.  This is the steady state on this module, not a
+ * transient startup condition or a warning that self-corrects.
+ *
+ * The counter keeps running; both the ELAPSED time across a reset AND the
+ * ongoing wall-clock drift described above are untrustworthy.  A caller that
+ * needs accuracy must periodically re-set the time from an external source --
+ * not just once, after a POR.
+ *
+ * Alif's stated ER002 workaround is "use an external real-time clock source",
+ * and the E1M-AEN801 carries one -- an rv3028c7 at 7-bit 0x52, with a working
+ * driver at chips/rv3028c7/rv3028c7.c.  It is deliberately NOT used here, but
+ * not for the reason an earlier draft of this comment gave: BRD_I2C is SoC
+ * I2C0 (function C, P7_0/P7_1), a master-capable Tier-1 upstream i2c_dw
+ * controller (ADTS0013 v1.2 Table 3-16 + HWRM Sec.15.4.1) -- not the
+ * slave-only LPI2C0 this bus was first believed to be (#1848).  The transport
+ * exists.
+ *
+ * The bus is no longer the blocker.  BENCH-SETTLED 2026-09-05 on 2626-R2
+ * silicon: BRD_I2C works on the SoC pad's internal pull-up alone, the rv3028c7
+ * ACKs at 0x52, its ID register 0x28 reads 0x44 (per RV-3028-C7 Application
+ * Manual Rev. 1.4 Sec. 3.14, only the high nibble -- HID 0x4 -- is a
+ * documented identity field; the low VID nibble is production-line, not
+ * identity) and its seconds register advances (0x01 -> 0x02), so the
+ * oscillator runs.  The earlier verdict here --
+ * "no usable pull-up, needs R93/R94 stuffed", bench-settled 2026-08-31 on the
+ * r1 module (serial 2617-0001) -- was measured on hardware where the rv3028c7
+ * sits on LPI2C0 (P7_4/P7_5) and NOTHING is attached to P7_0/P7_1, so it
+ * characterised two floating pins.  It does not carry to R2 and is withdrawn;
+ * see docs/soms/aen.md, "On-module housekeeping I2C (BRD_I2C)".
+ *
+ * What is left is a backend-SELECTION change, not an electrical one: on the E8
+ * this shim registers with silicon_ref "alif:ensemble:e8" and beats the
+ * wildcard zephyr_drv registration at equal priority, so alp_rtc_open() binds
+ * the LPRTC counter here regardless of any rv3028c7 node in the devicetree.
+ * Repointing the AEN calendar at the external part means changing that
+ * selection deliberately (#1814).
+ *
+ * And it is NOT a free upgrade: on this batch the rv3028c7's VDD_BAT/VBACKUP
+ * has no supply fitted (R4/R68 both DNP), so it loses the time on every power
+ * cycle just as the LPRTC does.  It buys ER001/ER002 accuracy while powered,
+ * not persistence across a cold boot.
+ */
+
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -160,6 +228,7 @@ static bool _fields_valid(const alp_rtc_time_t *t)
 static alp_status_t
 shim_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (rtc_id >= ALP_SOC_RTC_COUNT) return ALP_ERR_OUT_OF_RANGE;
 	if (_lprtc == NULL || !device_is_ready(_lprtc)) return ALP_ERR_NOT_READY;
 
@@ -181,10 +250,9 @@ shim_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps
 	if (rc != 0) return ALP_ERR_IO;
 	_state.set = false;
 
-	st->dev         = (void *)_lprtc;
-	st->rtc_id      = rtc_id;
-	st->be_data     = &_state;
-	caps_out->flags = 0u;
+	st->dev     = (void *)_lprtc;
+	st->rtc_id  = rtc_id;
+	st->be_data = &_state;
 	return ALP_OK;
 }
 

@@ -86,9 +86,12 @@ jobs:
   # Cheap path detector -- NOT a required context itself. Gated off on
   # `merge_group` (see the trigger comment above); always runs fast on
   # `pull_request` and `workflow_dispatch`. Its output gates the heavy
-  # matrix below.
+  # matrix below. Also off on a pull_request into `dev`: that PR's real
+  # run is its merge_group run, so the PR-time run only held runners the
+  # queue was waiting for (20 concurrent jobs on the free plan).
+  # `base_ref` is set only on pull_request events.
   detect:
-    if: github.event_name != 'merge_group'
+    if: github.event_name != 'merge_group' && github.base_ref != 'dev'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -105,7 +108,6 @@ jobs:
               - 'metadata/schemas/bootstrap-v1.schema.json'
               - 'scripts/bootstrap.sh'
               - 'scripts/bootstrap.ps1'
-              - 'scripts/alp_cli/doctor.py'
               - 'scripts/check_bootstrap_manifest.py'
               - '.github/workflows/pr-bootstrap-distro-install.yml'
 
@@ -131,8 +133,10 @@ jobs:
     # So: skip ONLY when detect genuinely ran, genuinely succeeded, AND
     # genuinely found no relevant path change. Anything else -- manual
     # dispatch, a merge-queue entry, a `detect` non-success, or a real
-    # manifest-path hit -- runs the real job.
-    if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || needs.detect.result != 'success' || needs.detect.outputs.manifest == 'true')
+    # manifest-path hit -- runs the real job. The one other skip is a
+    # pull_request into `dev` (the trailing `base_ref` term): it is
+    # deferred to that PR's merge_group run, which always runs this job.
+    if: always() && github.base_ref != 'dev' && (github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || needs.detect.result != 'success' || needs.detect.outputs.manifest == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -310,6 +314,7 @@ jobs:
       - name: Compute verdict from distro-install's + detect's results
         env:
           EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
           DETECT_RESULT: ${{ needs.detect.result }}
           DETECT_MANIFEST: ${{ needs.detect.outputs.manifest }}
           MATRIX_RESULT: ${{ needs.distro-install.result }}
@@ -325,6 +330,10 @@ jobs:
             skipped)
               if [ "${EVENT_NAME}" = "pull_request" ] && [ "${DETECT_RESULT}" = "success" ] && [ "${DETECT_MANIFEST}" != "true" ]; then
                 echo "PASS: distro-install legitimately skipped -- detect ran, succeeded, and found no metadata/bootstrap.json-relevant path changed"
+                exit 0
+              fi
+              if [ "${EVENT_NAME}" = "pull_request" ] && [ "${BASE_REF}" = "dev" ] && [ "${DETECT_RESULT}" = "skipped" ]; then
+                echo "PASS: pull_request into dev -- distro-install deferred to the merge_group run"
                 exit 0
               fi
               echo "::error::distro-install reported 'skipped' but event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.manifest=${DETECT_MANIFEST} does not match the one legitimate-skip condition -- treating this as a broken gate, not a pass"

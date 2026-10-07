@@ -18,6 +18,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_errno.h"
 #include "counter_ops.h"
 
 #define ALP_COUNTER_DEV_OR_NULL(idx) \
@@ -34,19 +35,13 @@ static const struct device *const _devs[] = {
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * BEHAVIOUR CHANGE: this switch had no -EAGAIN and/or no -ETIMEDOUT
+	 * arm, so a driver-reported deadline surfaced as ALP_ERR_IO.  Callers
+	 * can now receive ALP_ERR_TIMEOUT here, and ALP_ERR_NOT_READY /
+	 * ALP_ERR_NOMEM / ALP_ERR_NOSUPPORT for the other arms the switch
+	 * lacked.  Every arm it DID carry agreed with the baseline. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static void
@@ -63,12 +58,12 @@ static alp_status_t z_open(const alp_counter_config_t  *cfg,
                            alp_counter_backend_state_t *st,
                            alp_capabilities_t          *caps_out)
 {
+	(void)caps_out;
 	if (cfg->counter_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	const struct device *dev = _devs[cfg->counter_id];
 	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
-	st->dev         = (void *)dev;
-	st->counter_id  = cfg->counter_id;
-	caps_out->flags = 0u; /* Slice 4a: HW_ALARM cap flag deferred */
+	st->dev        = (void *)dev;
+	st->counter_id = cfg->counter_id;
 	return ALP_OK;
 }
 
@@ -119,6 +114,27 @@ static alp_status_t z_cancel_alarm(alp_counter_backend_state_t *st)
 static void z_close(alp_counter_backend_state_t *st)
 {
 	const struct device *dev = (const struct device *)st->dev;
+	/* Cancel any armed channel-0 alarm before stopping/releasing the
+	 * slot -- counter_stop() does not uninstall a channel alarm, and the
+	 * armed alarm's user_data is the dispatcher's pool slot, which is
+	 * released as soon as this returns.  A surviving alarm would fire
+	 * _alarm_trampoline from ISR context into whatever handle claims that
+	 * slot next, with the previous owner's tick value -- and on drivers
+	 * that reject a second alarm on an armed channel the new owner's
+	 * set_alarm would fail -EBUSY.  Same pool discipline as #629 -- no
+	 * backend callback outlives the slot. (#1627)
+	 *
+	 * On the canonical alp_counter_stop() + alp_counter_close() teardown
+	 * order the counter is already stopped here, and at least the
+	 * native_sim backend's cancel_channel_alarm refuses (-ENOTSUP) on a
+	 * stopped counter without clearing the pending alarm. If the first
+	 * cancel attempt fails, briefly restart the counter so the cancel
+	 * can actually take effect, then leave it stopped as the caller left
+	 * it. */
+	if (z_cancel_alarm(st) != ALP_OK) {
+		(void)counter_start(dev);
+		(void)z_cancel_alarm(st);
+	}
 	(void)counter_stop(dev);
 }
 

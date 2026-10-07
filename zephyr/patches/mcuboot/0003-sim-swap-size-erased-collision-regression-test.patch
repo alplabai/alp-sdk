@@ -1,0 +1,346 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] sim: add a host-simulator regression test for the
+ erased-swap_size collision (#1066)
+
+Adds a targeted case to the mcuboot host simulator (`sim/`, cargo +
+`cc`-compiled bootutil, no embedded toolchain needed) reproducing the
+erase-value collision the companion bootutil_misc.c patch closes.
+
+bootutil's own flash writes are call-atomic in this simulator, so the
+collision (a stale/erased swap_size reading identical to a legitimate 0)
+cannot be produced by interrupting boot_go() alone -- every interruption
+point still leaves either a real swap_size or a magic that is not yet
+GOOD (swap_size is written before magic within the same call, so the two
+never desync from a clean call-boundary cut). The test instead:
+
+  1. Starts a real upgrade and interrupts boot_go() at the first flash-op
+     count that leaves the primary slot's trailer with a GOOD magic but
+     not yet copy_done+image_ok SET -- a genuinely resumable in-progress
+     swap.
+  2. Forces the swap_size field (primary and scratch, since
+     boot_find_status() checks scratch's magic before the primary's) to
+     this device's erase value directly, via a new
+     corrupt_swap_size_field() C helper (mcuboot-sys/csupport/run.c) that
+     locates the real offset through boot_swap_info_off() -- the same
+     function boot_swap_size_off() itself is built from -- never a
+     hand-computed offset. Disables the simulator's write-verification
+     first (SimFlash::set_verify_writes, the same escape hatch
+     run_with_status_fails_with_reset()'s reset_bad_status() already
+     uses): MRAM is directly rewritable without a bulk erase
+     (flash_mram_alif.c's device_requires_erase() == false), which is
+     what makes a torn single-field write possible on real silicon in
+     the first place, unlike the NOR/NAND write-once assumption the
+     simulator's normal write check enforces.
+  3. Resumes and asserts on the property that actually matters: the
+     primary slot must never end up BOTH stamped complete (magic GOOD,
+     copy_done SET, image_ok SET) AND holding neither the original image
+     nor a complete upgrade. Declining the swap outright, or completing
+     it for real, are both fine outcomes; a trailer that claims done+ok
+     over a partial/corrupted copy is not.
+
+Verified against the pinned upstream mcuboot revision
+(6d3b3d2c38ab20c242e5b9abb04d050086383eb2, cargo 1.86.0 / gcc 13.3.0 on
+WSL Ubuntu 24.04, `ext/mbedtls` submodule fetched at its pinned commit
+2ca6c285a0dd3f33982dd57299012dacab1ff206):
+
+  * Pre-fix (bootutil_misc.c's erased-value check reverted, everything
+    else unchanged): SIGSEGV inside boot_read_image_header()'s wrong-slot
+    header substitution -- a stronger, previously unmeasured failure mode
+    than the "no-op forever" #1066 reported, confirming the
+    find_swap_count() sibling call site the fix's own commit message
+    describes.
+  * Post-fix: `cargo test --release --test core` -- 26 passed, 0 failed
+    (25 pre-existing cases plus this one), across every device/alignment/
+    erased_val combination `each_device()` sweeps ({0x00, 0xff} x nine
+    device profiles x up to four alignments).
+
+Not wired into alp-sdk's own CI: that would need a Rust + C toolchain
+plus the `ext/mbedtls` submodule provisioned for the vendored mcuboot
+checkout, which no alp-sdk workflow sets up today -- a separate,
+out-of-scope change. Reproducible by anyone with cargo and a C compiler:
+`cd bootloader/mcuboot/sim && cargo test --release --test core --
+swap_size_erased_collision`.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+diff --git a/sim/mcuboot-sys/csupport/run.c b/sim/mcuboot-sys/csupport/run.c
+index 3e360ee..fd4c347 100644
+--- a/sim/mcuboot-sys/csupport/run.c
++++ b/sim/mcuboot-sys/csupport/run.c
+@@ -416,6 +416,75 @@ int flash_area_write(const struct flash_area *area, uint32_t off, const void *sr
+     return sim_flash_write(area->fa_device_id, area->fa_off + off, src, len);
+ }
+ 
++/*
++ * Local copy of bootutil_misc.h's boot_swap_size_off(), which is a
++ * static-inline function private to each TU that includes that header --
++ * not included from here directly, since the header also declares
++ * boot_magic_decode() as a plain (non-inline) static function this TU
++ * never calls, which -Werror -Wunused-function turns into a hard build
++ * failure. boot_swap_info_off() itself is a real, externally-linked
++ * function (bootutil/bootutil_public.h, already visible via
++ * bootutil/bootutil.h), so only the final offset step needs mirroring --
++ * kept byte-for-byte identical to bootutil_misc.h's own chain.
++ */
++static uint32_t
++corrupt_helper_swap_size_off(const struct flash_area *fap)
++{
++#if defined(MCUBOOT_SWAP_USING_OFFSET)
++    return boot_swap_info_off(fap) - (2 * BOOT_MAX_ALIGN);
++#else
++    return boot_swap_info_off(fap) - BOOT_MAX_ALIGN;
++#endif
++}
++
++/*
++ * Test support for #1066: force an already-written primary-slot swap_size
++ * trailer field back to this flash device's erase value, independent of
++ * everything else in the trailer (magic included). bootutil's own writes
++ * are call-atomic in this simulator, so this collision (a stale/erased
++ * swap_size reading identical to a legitimate 0 on a 0x00-erase device)
++ * cannot be produced by interrupting boot_go alone -- it models what a
++ * torn sub-write on real MRAM would leave behind. Not a general-purpose
++ * corruption hook: it always targets exactly the swap_size field, at the
++ * same offset boot_read_swap_size()/boot_write_swap_size() use.
++ */
++int corrupt_swap_size_field(struct sim_context *ctx, struct area_desc *adesc,
++                            int image_index, int slot, uint8_t value)
++{
++    int res;
++    const struct flash_area *fa_p;
++    uint32_t off;
++    /*
++     * BOOT_MAX_ALIGN, not sizeof(uint32_t): swap_size occupies its own
++     * whole write-alignment unit in the trailer (see bootutil_misc.h's
++     * offset chain), and this device's write alignment may exceed 4
++     * bytes -- flash_area_write() requires a full-alignment-unit write.
++     * Filling the whole unit with `value` is exactly equivalent to that
++     * field never having been written at all, which is what this is
++     * simulating.
++     */
++    uint8_t buf[BOOT_MAX_ALIGN];
++
++    sim_set_flash_areas(adesc);
++    sim_set_context(ctx);
++
++    res = flash_area_open(flash_area_id_from_multi_image_slot(image_index, slot), &fa_p);
++    if (res != 0) {
++        goto out;
++    }
++
++    off = corrupt_helper_swap_size_off(fa_p);
++    memset(buf, value, sizeof(buf));
++    res = flash_area_write(fa_p, off, buf, sizeof(buf));
++
++    flash_area_close(fa_p);
++
++out:
++    sim_reset_flash_areas();
++    sim_reset_context();
++    return res;
++}
++
+ int flash_area_erase(const struct flash_area *area, uint32_t off, uint32_t len)
+ {
+     BOOT_LOG_SIM("%s: area=%d, off=%x, len=%x", __func__,
+diff --git a/sim/mcuboot-sys/src/c.rs b/sim/mcuboot-sys/src/c.rs
+index 015d91c..e45f741 100644
+--- a/sim/mcuboot-sys/src/c.rs
++++ b/sim/mcuboot-sys/src/c.rs
+@@ -137,6 +137,35 @@ pub fn boot_load_image_from_flash_to_sram(multiflash: &mut SimMultiFlash, areade
+     result == 0
+ }
+ 
++/// Test support for #1066 (see run.c corrupt_swap_size_field): force the
++/// primary or secondary slot's already-written swap_size trailer field to
++/// an arbitrary byte value, independent of the rest of the trailer. slot
++/// is 0 for primary, 1 for secondary, matching flash_area_id_from_multi_image_slot.
++/// Returns 0 on success, matching the C function's own return.
++pub fn corrupt_swap_size_field(multiflash: &mut SimMultiFlash, areadesc: &AreaDesc,
++                               image_index: i32, slot: i32, value: u8) -> i32 {
++    for (&dev_id, flash) in multiflash.iter_mut() {
++        api::set_flash(dev_id, flash);
++    }
++    let mut sim_ctx = api::CSimContext {
++        flash_counter: 0,
++        c_catch_asserts: 0,
++        .. Default::default()
++    };
++    let result: i32 = unsafe {
++        let adesc = areadesc.get_c();
++        raw::corrupt_swap_size_field(&mut sim_ctx as *mut _,
++                                     adesc.borrow() as *const _,
++                                     image_index as libc::c_int,
++                                     slot as libc::c_int,
++                                     value)
++    };
++    for &dev_id in multiflash.keys() {
++        api::clear_flash(dev_id);
++    }
++    result
++}
++
+ pub fn boot_trailer_sz(align: u32) -> u32 {
+     unsafe { raw::boot_trailer_sz(align) }
+ }
+@@ -206,6 +235,9 @@ mod raw {
+         pub fn invoke_boot_load_image_from_flash_to_sram(sim_ctx: *mut CSimContext,
+             areadesc: *const CAreaDesc) -> libc::c_int;
+ 
++        pub fn corrupt_swap_size_field(sim_ctx: *mut CSimContext, areadesc: *const CAreaDesc,
++            image_index: libc::c_int, slot: libc::c_int, value: u8) -> libc::c_int;
++
+         pub fn boot_trailer_sz(min_write_sz: u32) -> u32;
+         pub fn boot_status_sz(min_write_sz: u32) -> u32;
+ 
+diff --git a/sim/src/image.rs b/sim/src/image.rs
+index 286c1c3..97cddc6 100644
+--- a/sim/src/image.rs
++++ b/sim/src/image.rs
+@@ -1263,6 +1263,132 @@ impl Images {
+         }
+     }
+ 
++    /// Regression test for alp-sdk#1066: on a flash device whose erase value is
++    /// 0x00 (Alif Ensemble on-die MRAM), an erased swap_size trailer field is
++    /// bit-for-bit identical to a legitimate swap_size of 0. bootutil's own
++    /// flash writes are call-atomic in this simulator, so that specific
++    /// collision cannot be produced by interrupting boot_go alone -- every
++    /// interruption point still leaves either a real swap_size or a magic
++    /// that is not yet GOOD (never GOOD magic with an erased swap_size,
++    /// since swap_size is written before magic in the same call). Force the
++    /// collision directly instead, on top of an otherwise-genuine
++    /// in-progress swap, and confirm the bootloader refuses to treat
++    /// copy_size == 0 as "nothing to do" rather than a corrupt/degenerate
++    /// status worth failing loudly on.
++    pub fn run_swap_size_erased_collision(&self) -> bool {
++        if Caps::OverwriteUpgrade.present() || !Caps::modifies_flash() {
++            return false;
++        }
++
++        let total = self.total_count.unwrap();
++        let erased_val = self.flash.values().next().map(|f| f.erased_val()).unwrap_or(0xff);
++
++        // Find the first flash-op interruption count that leaves the
++        // primary slot's trailer with a GOOD magic -- i.e. a genuinely
++        // resumable in-progress swap, not a fresh/untouched one. Every
++        // later count also qualifies once this holds (the trailer is
++        // rewritten with the same GOOD magic on each subsequent pass), so
++        // the first hit is the earliest, most conservative reproduction.
++        for stop_after in 1..total {
++            let mut flash = self.flash.clone();
++            self.mark_permanent_upgrades(&mut flash, 1);
++
++            let mut count = stop_after;
++            let _ = c::boot_go(&mut flash, &self.areadesc, Some(&mut count), None, true);
++
++            // Magic GOOD (a status write pass has committed) but NOT also
++            // fully copy_done+image_ok (the swap has not yet finished) --
++            // otherwise this is a completed upgrade, not a resumable one,
++            // and corrupting its swap_size afterward tests nothing (a
++            // finished swap does not revisit it on the next boot either
++            // way).
++            if !self.verify_trailers(&flash, 0, BOOT_MAGIC_GOOD, None, None) {
++                continue;
++            }
++            if self.verify_trailers(&flash, 0, BOOT_MAGIC_GOOD, BOOT_FLAG_SET, BOOT_FLAG_SET) {
++                continue;
++            }
++
++            // Found a real in-progress swap with a GOOD primary magic.
++            // Force its swap_size field to the device's erase value --
++            // what a torn sub-write on a 0x00-erase MRAM could leave
++            // behind, and what a call-atomic interruption alone cannot
++            // produce (magic and swap_size are both written, in that
++            // order, within the same call) -- and resume.
++            //
++            // The simulator's own write-verification would otherwise
++            // reject this as an illegal rewrite of an already-programmed
++            // (non-erased) NOR/NAND-style location. That check does not
++            // apply here: MRAM is directly rewritable without a bulk
++            // erase (flash_mram_alif.c reports device_requires_erase() ==
++            // false for exactly this reason), which is what makes a
++            // partial/torn write of a single field possible on real
++            // silicon in the first place. Same tool run_with_status_fails
++            // _with_reset()'s reset_bad_status() already uses for the
++            // same reason.
++            for dev in flash.values_mut() {
++                dev.set_verify_writes(false);
++            }
++
++            // boot_find_status() (bootutil_misc.c) checks the SCRATCH
++            // area's magic before the primary slot's, so whichever of the
++            // two is holding the GOOD magic at this interruption point is
++            // the one boot_read_swap_size() actually gets called against
++            // -- corrupt both swap_size fields so the reproduction does
++            // not depend on knowing which one boot_find_status() will
++            // pick. slot 0 = primary, slot 2 = scratch (mcuboot-sys
++            // flash_area_id_from_multi_image_slot()).
++            let rc_primary = c::corrupt_swap_size_field(&mut flash, &self.areadesc, 0, 0, erased_val);
++            let rc_scratch = c::corrupt_swap_size_field(&mut flash, &self.areadesc, 0, 2, erased_val);
++            if rc_primary != 0 && rc_scratch != 0 {
++                error!("swap_size_erased_collision: corrupt_swap_size_field failed on both \
++                        primary ({}) and scratch ({})", rc_primary, rc_scratch);
++                continue;
++            }
++
++            let _ = c::boot_go(&mut flash, &self.areadesc, None, None, true);
++
++            // The property that actually matters (and is what #1066's
++            // reviewed-and-rejected first fix got wrong): whatever the
++            // resume decided to do, it must never leave the primary slot
++            // BOTH stamped complete (magic GOOD, copy_done SET, image_ok
++            // SET -- "this is a good, bootable image") AND holding
++            // something other than a real, complete image. Declining the
++            // swap outright (primary untouched, still the original image)
++            // is safe. A genuine, complete swap is safe. A trailer that
++            // claims done+ok over a partial/corrupted copy is the one
++            // outcome that is not -- it is what let the reviewer's torn
++            // write turn a harmless reboot loop into a bootloader that
++            // signs off on a broken image.
++            let claims_done = self.verify_trailers(&flash, 0, BOOT_MAGIC_GOOD,
++                                                    BOOT_FLAG_SET, BOOT_FLAG_SET);
++            let is_original = self.verify_images(&flash, 0, 0);
++            let is_complete_upgrade = self.verify_images(&flash, 0, 1);
++
++            if claims_done && !is_original && !is_complete_upgrade {
++                error!("copy_size == 0 from an erased swap_size trailer (after {} flash ops) \
++                        left the primary slot stamped image_ok/copy_done over neither the \
++                        original image nor a complete upgrade -- corruption declared good",
++                       stop_after);
++                return true;
++            }
++
++            // This interruption point reproduced a resumable state and the
++            // corrupted resume did not sign off on a broken image -- the
++            // fix held here.  A later stop_after would only re-run the
++            // same already-GOOD trailer, so one witness is conclusive;
++            // stop here instead of re-proving it total-1 times.
++            return false;
++        }
++
++        // No interruption count ever left a GOOD primary magic for this
++        // device/config -- e.g. a single-sector image whose one status
++        // write pass is also its last, so it either fully completes or
++        // never starts. Not this bug's precondition; nothing to corrupt.
++        warn!("swap_size_erased_collision: no resumable in-progress state found, skipping");
++        false
++    }
++
+     /// Test the direct XIP configuration.  With this mode, flash images are never moved, and the
+     /// bootloader merely selects which partition is the proper one to boot.
+     pub fn run_direct_xip(&self) -> bool {
+diff --git a/sim/tests/core.rs b/sim/tests/core.rs
+index b7be753..1cc7faf 100644
+--- a/sim/tests/core.rs
++++ b/sim/tests/core.rs
+@@ -65,6 +65,7 @@ sim_test!(wrong_load_addr, make_bad_secondary_slot_image(ImageManipulation::Wron
+ 
+ sim_test!(status_write_fails_complete, make_image(&NO_DEPS, true), run_with_status_fails_complete());
+ sim_test!(status_write_fails_with_reset, make_image(&NO_DEPS, true), run_with_status_fails_with_reset());
++sim_test!(swap_size_erased_collision, make_image(&NO_DEPS, true), run_swap_size_erased_collision());
+ sim_test!(downgrade_prevention, make_image(&REV_DEPS, true), run_nodowngrade());
+ 
+ sim_test!(direct_xip_first, make_no_upgrade_image(&NO_DEPS, ImageManipulation::None), run_direct_xip());

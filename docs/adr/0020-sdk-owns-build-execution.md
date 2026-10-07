@@ -1,12 +1,75 @@
 # 0020. The SDK plans; a standalone `tan` CLI is the whole command surface (three repos, one executor)
 
-Status: Accepted — amended 2026-08-03 for the Python Tan port; the original
-Rust/plans-only mechanism below remains the historical Phase 1/4 record.
+Status: Accepted — amended 2026-08-03 for the Python Tan port, 2026-08-12,
+2026-08-26; the original Rust/plans-only mechanism below remains the
+historical Phase 1/4 record. Note: [0022](0022-python-executor-renode-retirement.md)
+narrowly supersedes this ADR's Rust-executor clause and its `renode`
+command-surface entries, and [0026](0026-tan-owns-the-planner-outright.md)
+amends amendment clause 3 (alp-sdk's `alp_orchestrate` is no longer "the
+reference producer").
 Date: 2026-07-18 (Caner) · 2026-07-20 (Hakan co-sign, this commit)
 Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode)
 Supersedes: [0014](0014-build-plan-emit-cli-contract.md) — its
 mechanism clause **and** its 84-87 consequence (`west alp-build` stays native).
 Pairs with RFC #837 (`alp` → `tan`).
+
+## Amendment (2026-08-26 — Amendment 7's cross-repo-trigger condition is now met)
+
+Corrects Amendment 7's third bullet (below, dated 2026-07-28: "**Cross-repo
+trigger — NOT done, and it is the one real gap.**") and the index row's
+matching present-tense clause in `docs/adr/README.md`. Both were accurate when
+written; the trigger shipped the same day, seven hours later.
+
+`.github/workflows/dispatch-tan-parity.yml` is the sender half: it fires a
+`repository_dispatch` (`event_type=alp-sdk-planner-change`) at
+`alplabai/tan-cli` on every push to `dev`/`main`, using a token minted at
+runtime from the org's GitHub App -- one of the two credential types
+Amendment 7's "cannot be built from either repo's CI without a PAT/App
+secret" already named. Item 7 was right about the credential; it was wrong
+that obtaining one made this a **maintainer action** -- the App token is
+minted automatically at workflow runtime, not provisioned by hand. Landed
+`6595d2a4` (2026-07-28, same day as the Amendment-7 commit `0c5cf608`). The
+receiver half is live in `tan-cli`: `parity.yml:69` and
+`planner-resync.yml:101`, both `types: [alp-sdk-planner-change]`.
+
+Re-running Amendment 7's grep today (`grep -rn repository_dispatch
+.github/workflows/*.yml`) no longer returns only the `pr-bitbake.yml` comment
+it cited — it also matches `dispatch-tan-parity.yml`, which carries the real
+trigger.
+
+One residual gap the workflow's own header documents and this correction
+does not close: `repository_dispatch` does not carry the sender's SHA into
+the receiver's run ref, so nothing in this repo can filter tan-cli's run list
+down to "the run this dispatch caused" versus a concurrent sender — recency
+plus `event=repository_dispatch` is the only correlation available
+(`dispatch-tan-parity.yml`'s own in-file NOTE, near its `dispatch-confirm.sh`
+step).
+
+## Amendment (2026-08-26 — PR alplabai/tan-cli#530 shipped in tan v0.6.0-rc1)
+
+Corrects the 2026-08-12 Amendment's closing paragraph (below): "**Not yet in
+a released `tan`.**" no longer holds. `alplabai/tan-cli#530` shipped in tan
+`v0.6.0-rc1` (tagged 2026-08-14; `TAN_VERSION` at `python/tan/version.py:49`),
+carried forward unchanged into the final `v0.6.0` (tagged 2026-08-24) — both
+are real, existing tags, not `dev`-branch-only. `python/tan/core/tool_lookup.py`'s
+`resolve_tool()` and `python/tan/commands/build/execute.py`'s `_spawn_step()`
+(the "`program` is always the RESOLVED absolute path (tan-cli#510)" docstring
+the paragraph below quotes) are both present at that tag.
+`build-plan-v1.schema.json:50`'s `missingTool` description, which cross-references
+this Amendment by date, now describes released behaviour rather than a
+both-ways hedge. The Amendment's five numbered technical claims and the
+Consequence paragraph are otherwise unaffected and stand.
+
+## Amendment (2026-08-26 — `crates/` retired, not just frozen)
+
+The "Amendment (2026-08-03)" section below says "the old `crates/` tree is
+frozen at v0.4.1 as a behaviour oracle, not the active implementation." That
+was accurate on 2026-08-03; it stopped being accurate on 2026-08-10, when
+`tan-cli`'s `2883cdf4` ("retire the Rust oracle -- delete crates/ and the
+oracle-parity suite (#269) (#601)") deleted the tree outright —
+`git ls-tree origin/dev -- crates` on `tan-cli` is now empty. The paragraph
+below stays as the dated record of the frozen-not-deleted interim state;
+read "frozen" there as superseded by deletion, not as the current state.
 
 ## Amendment (2026-08-12 — what the Security clause's "never PATH" means)
 
@@ -70,7 +133,8 @@ boundary changed during the Python port:
 1. The current Tan development implementation is Python. Until v0.5 is cut,
    alp-sdk `dev` installs `tan-cli/dev` with Python 3.12+; from v0.5, release
    archives are PyInstaller freezes. The old `crates/` tree is frozen at v0.4.1
-   as a behaviour oracle, not the active implementation.
+   as a behaviour oracle, not the active implementation. **`crates/` was
+   subsequently deleted outright — see "Amendment (2026-08-26)" above.**
 2. Normal `tan build` no longer spawns alp-sdk's planner. Tan owns a relocated
    in-process planner and executor that read alp-sdk metadata, schemas, examples,
    and selected tooling contracts.
@@ -149,13 +213,16 @@ blocked until the remediation is met. Tracked in #855.
    was originally handled the same probe-delta way (a bespoke strip inside
    the compared config-artefact CONTENT); that strip is now moot and
    deleted, because **seam-1 no longer compares config-artefact content at
-   all** — see the retune paragraph below. **Sysbuild slices deliberately
-   carry NO `-DEXTRA_CONF_FILE`** (Option A): a bare top-level
-   `-DEXTRA_CONF_FILE` under `--sysbuild` lands on the sysbuild image, not
-   the application image, so it would silently drop the per-core config on
-   `boot:`/OTA projects; those slices get the per-core `alp.conf` via the
-   app's `--core`-scoped `CMakeLists.txt` bridge (#870), and a plan-native
-   per-image sysbuild wiring stays #866. The seam-2 real-build proof of the
+   all** — see the retune paragraph below. **Sysbuild slices carry the
+   image-scoped `-D<image>_EXTRA_CONF_FILE`, never the bare form** (#866): a
+   bare top-level `-DEXTRA_CONF_FILE` under `--sysbuild` lands on the
+   sysbuild image, not the application image, and would silently drop the
+   per-core config on `boot:`/OTA projects; `<image>` is the basename of the
+   app directory handed to `west build` (sysbuild's own application image
+   name), so the plan wires the per-core `alp.conf` itself instead of via
+   the app's `--core`-scoped `CMakeLists.txt` bridge (#870). **#866, alp-sdk side done; tan-cli half pending:** every example `CMakeLists.txt` bridge is deleted, `scripts/check_zephyr_conf_parity.py` fails if one returns, and twister / a bare `west build` read `generated/alp.conf` from `scripts/gen_example_alp_conf.py`. tan plans in process with its own relocated planner, so `tan build` of a sysbuild project gets no `CONFIG_ALP_*` fragment until the tan-cli port (branch `fix/866-sysbuild-image-extra-conf`, no PR yet, unreleased; latest tan is v0.6.0) ships; #866 stays open until then. When the app
+   directory is the project root the name depends on the root's directory
+   name, so a consumer relocating a tokened plan must re-derive it. The seam-2 real-build proof of the
    sysbuild path (`iot-fleet-ota`) is the one deferred box on #871.
 
    **Seam-1 scope retune (2026-07-22, #874 follow-up — narrows this
@@ -247,7 +314,12 @@ blocked until the remediation is met. Tracked in #855.
    the two-seam gate + the cross-repo trigger, then tag."* Re-verified against
    the code rather than assumed:
 
-   - **Oracle frozen — done.** Six fixtures under `tests/parity/oracle/`,
+   - **Oracle frozen — done.** Five fixtures under `tests/parity/oracle/`
+     (`audio_i2s-tone`, `connectivity_iot-fleet-ota`,
+     `multicore_heterogeneous-offload`, `multicore_rpmsg-aen`,
+     `multicore_rpmsg-v2n`; the sixth, `multicore_rpmsg-imx93`, was later
+     DELETED rather than edited — E1M-NX9101 imx93 r1 is `status: tbd` and
+     unbuildable, recorded in `ORACLE-PROVENANCE.txt`),
      provenance and every hand-reviewed field correction recorded in
      `ORACLE-PROVENANCE.txt` (the #862 `-DSB_CONF_FILE` anchor, and the #999
      `multicore_rpmsg-imx93` slices[1] `command`→`null` + `board-tree-missing`
@@ -337,6 +409,22 @@ blocked until the remediation is met. Tracked in #855.
    the fixture.** Point 4's lockstep note is a real constraint, not a
    pleasantry; when the two copies disagree, re-vendor and record it, and treat
    a new comparator allowance as evidence the sync was skipped.
+
+8. **(2026-08-26) Point 6's "11 non-build verbs all still survive in the
+   `alp_cli` package" is now false — alp-sdk#1367/#1368 deleted the rest of
+   the command-line wrappers.** `scripts/alp_cli/main.py`, `__main__.py`,
+   `validate.py`, `doctor.py`, `emit.py`, `faultdecode.py`, `generate.py`,
+   `init.py`, `model.py`, `monitor.py`, `new_som.py`, and `run.py` are gone;
+   there is no `python -m alp_cli <verb>` front door left to run at all, and
+   every one of the 11 verbs point 6 enumerated is now a native `tan`
+   implementation only (all present in `tan-cli` `v0.6.0`). Point 6's "8
+   non-verb modules" list is also stale: `__main__.py` and `main.py` are
+   among the deleted, not the survivors. What remains under
+   `scripts/alp_cli/` is six library modules with real non-CLI callers
+   (`__init__.py`, `diagnostic.py`, `diagnostic_format.py`, `validator.py`,
+   `_workspace.py`, `yaml_pos.py`) — not a command surface of any kind.
+   alp-sdk's own command surface is now, in full, what §Decision-2 always
+   named as the end state: zero user commands.
 
 ## Context
 

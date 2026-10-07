@@ -66,6 +66,20 @@ bundle signed by **any** trusted public key. A rotation is therefore: publish th
 public key, sign new releases with the new key, and retire the old public key after the
 overlap window. Already-shipped bundles stay verifiable against the retained old key.
 
+## GD32 bridge firmware releases
+
+The public [`alplabai/gd32-bridge-firmware`](https://github.com/alplabai/gd32-bridge-firmware)
+release workflow signs its recovery images (`SHA256SUMS` and each `.bin`,
+detached ECDSA-P256/SHA-256 `.sig`) with the same release-signing key and
+verifies every signature against the published
+[`keys/alp_release_signing_ecdsa_p256.pub.pem`](../keys/alp_release_signing_ecdsa_p256.pub.pem)
+before publishing. Unlike a SoM bundle, the private half is supplied to that
+workflow as a repository secret, so the key's exposure is wider than the
+"restricted key file / hardware-backed signer" above; a release built without
+the secret is labelled `UNSIGNED` and carries checksums only. Verify with
+`openssl dgst -sha256 -verify keys/alp_release_signing_ecdsa_p256.pub.pem
+-signature SHA256SUMS.sig SHA256SUMS`, then `sha256sum -c SHA256SUMS`.
+
 ## What this is *not*
 
 This signs **release artifacts** (provenance/traceability), on a release host, across all

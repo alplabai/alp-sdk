@@ -13,7 +13,7 @@ parameters, test wiring); this module actually materialises one --
     files.user_owned path from the catalog record's canonical
     `example` directory into dest_dir, byte-for-byte, in sorted
     traversal order, never touching files.generated (those are
-    emitted later by scripts/alp_project.py at configure time, per
+    emitted later by `tan build` (or scripts/gen_example_alp_conf.py), per
     the catalog's own `generated_artifacts` note). Same inputs
     produce byte-identical output every time: no timestamps, no
     filesystem-metadata copy (shutil.copyfile-style, not copy2), no
@@ -40,7 +40,7 @@ parameters, test wiring); this module actually materialises one --
     non-buildable scaffold, for any `sku` whose topology doesn't have
     that core (every cross-SoM-family sku the catalog declares, e.g.
     E1M-V2N101 for the AEN-canonical `minimal` template). `board.yaml`'s
-    `cores:` key and CMakeLists.txt's `--core` flag are re-derived from
+    `cores:` key is re-derived from
     `sku`'s own `metadata/e1m_modules/<sku>.yaml` `topology:` (see
     `_derive_core_renames`) whenever the canonical core isn't already
     valid for `sku`; a no-op (byte-identical) when it already is -- the
@@ -111,7 +111,6 @@ try:
 except ImportError:
     sys.exit("alp_template: PyYAML is required.  Install via `pip install pyyaml`.")
 
-from alp_orchestrate.orchestrator import _zephyr_app_dir
 from alp_project_loader import METADATA_ROOT
 
 REPO = Path(__file__).resolve().parent.parent
@@ -148,6 +147,12 @@ class PathEscapeError(TemplateError):
     this is enforced at the point of use, not by schema validation
     alone -- containment is checked on the RESOLVED path (symlinks
     followed), not by pattern-matching for `..`."""
+
+
+class AmbiguousCoresError(TemplateError):
+    """`find_template_by_cores()`'s `cores` topology matches more than
+    one catalog record -- naming the candidates rather than guessing
+    which one the caller meant (use `--template` to disambiguate)."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -193,6 +198,49 @@ def find_template(doc: dict[str, Any], template_id: str) -> dict[str, Any]:
         f"no template {template_id!r} in catalog (known: {known})")
 
 
+def find_template_by_cores(
+    doc: dict[str, Any], cores: dict[str, str],
+) -> dict[str, Any]:
+    """Select the catalog record whose `cores:` topology (core id ->
+    os) is EXACTLY `cores` -- issue #1652's `--cores` scaffold input.
+
+    This is a SELECTOR over the catalog's existing templates, not a
+    generic skeleton renderer: an IDE wizard names the core/OS
+    topology it wants (e.g. `{"m55_hp": "zephyr", "m55_he":
+    "zephyr"}`) instead of naming a template id, and gets back
+    whichever already-gated example matches -- never an arbitrary,
+    never-built combination. See the issue's recorded decision: the
+    scaffold's value to a customer is that the generated app builds on
+    their SoM, which only holds for a topology this SDK already ships
+    and twister-gates.
+
+    No exact match -> TemplateNotFoundError naming the topologies that
+    ARE on offer. More than one exact match -> AmbiguousCoresError
+    naming the candidate ids (use --template to disambiguate; this can
+    happen when two templates share a core/OS shape but differ in
+    what they actually do, e.g. an RPMsg demo vs a compute-offload
+    demo on the same SoM).
+    """
+    def _topology(rec: dict[str, Any]) -> dict[str, str]:
+        return {c["id"]: c["os"] for c in rec.get("cores", [])}
+
+    matches = [rec for rec in doc.get("templates", [])
+               if _topology(rec) == cores]
+    if not matches:
+        known = sorted(
+            {tuple(sorted(_topology(rec).items()))
+             for rec in doc.get("templates", [])})
+        raise TemplateNotFoundError(
+            f"no template with cores topology {cores!r} in catalog "
+            f"(known topologies: {known})")
+    if len(matches) > 1:
+        ids = sorted(rec["id"] for rec in matches)
+        raise AmbiguousCoresError(
+            f"cores topology {cores!r} matches multiple templates "
+            f"{ids} -- use --template to disambiguate")
+    return matches[0]
+
+
 def _coerce(spec: dict[str, Any], raw: Any) -> Any:
     """Coerce a CLI-style string override to the parameter's declared
     type. Values already of the right type (e.g. an untouched default,
@@ -221,6 +269,19 @@ def _check_constraints(template_id: str, spec: dict[str, Any], value: Any) -> No
         raise ParameterError(
             f"{template_id}: {spec['name']}={value!r} not in "
             f"{constraints['enum']}")
+    for bound in ("minimum", "maximum"):
+        if bound not in constraints:
+            continue
+        # `minimum`/`maximum` only make sense for a numeric (integer)
+        # value -- on string/enum a bare `<`/`>` raises TypeError on a
+        # schema-VALID catalog record (#1916), and on boolean it silently
+        # never fires (bool < int never raises) but is still meaningless.
+        # Refuse with a curated error instead of crashing or no-opping.
+        if spec["type"] != "integer":
+            raise ParameterError(
+                f"{template_id}: {spec['name']}={value!r} is type "
+                f"{spec['type']!r}; constraints.{bound} "
+                f"({constraints[bound]}) only applies to type 'integer'")
     if "minimum" in constraints and value < constraints["minimum"]:
         raise ParameterError(
             f"{template_id}: {spec['name']}={value!r} < minimum "
@@ -373,8 +434,8 @@ def render(
     `example` directory into dest_dir, preserving the relative layout,
     byte-for-byte (shutil.copyfile-equivalent -- no filesystem metadata,
     no timestamp embedded in content). `files.generated` paths are never
-    copied -- those are emitted later, at build-configure time, by
-    scripts/alp_project.py.
+    copied -- those are emitted later, at build time, by `tan build`
+    (or scripts/gen_example_alp_conf.py for twister / a bare west build).
 
     Deterministic: given the same template_id/params, the file list and
     byte content written are identical on every call (sorted traversal,
@@ -393,10 +454,10 @@ def render(
     `sku` (issue #864 Fable-review MINOR G): when given, materialises
     the SAME scaffold-adapted content `render_to_envelope(template_id,
     sku, ...)` returns (core/CMakeLists.txt/README.md adaptation, no
-    testcase.yaml) instead of a byte-for-byte copy -- so the SDK's two
-    customer-facing scaffold front doors, `alp generate`
-    (scripts/alp_cli/generate.py) and `alp emit scaffold`, never
-    disagree on what a materialised project looks like. `None` (the
+    testcase.yaml) instead of a byte-for-byte copy -- so tan-cli's
+    customer-facing scaffold front doors (`tan init`, `tan scaffold`) never
+    disagree with `west alp-emit scaffold`, the SDK-side emit this module
+    backs, on what a materialised project looks like. `None` (the
     default) keeps this a pure byte-for-byte copy of the example -- the
     contract `validate()`'s in-tree twister self-test relies on, and
     every existing caller (`alp_template.py render`, the synthetic-
@@ -490,7 +551,7 @@ def _derive_core_renames(
     the shallow "byte-copy the example + swap som.sku" `render_to_
     envelope()` #864 shipped hard-coded the CANONICAL example's own
     core id -- e.g. `m55_hp`, an Alif-only Zephyr cluster -- into every
-    substituted board.yaml/CMakeLists.txt, emitting a non-buildable
+    substituted board.yaml, emitting a non-buildable
     scaffold for any cross-SoM-family sku: `alp_project.py --emit
     zephyr-conf --core m55_hp` against an E1M-V2N101 board.yaml fails
     with rc=1, "unknown core id ... did you mean ['a55_cluster',
@@ -512,8 +573,7 @@ def _derive_core_renames(
     replacement is `sku`'s own topology core sharing the same leading
     core-class letter (`m`/`a`), additionally requiring a Zephyr
     `board:` target for an `m`-class replacement (only that core is
-    ever `--core`-buildable, which is why CMakeLists.txt needs it too
-    -- see `_substitute_cmake_core`); an `a`-class utility core carries
+    ever `--core`-buildable); an `a`-class utility core carries
     no such requirement (it's only ever `os: off` in every template
     that declares one today).
 
@@ -781,7 +841,7 @@ def _derive_pin_doc_renames(
     entry's `doc:` field to the TARGET route's own `doc:` (issue #876
     review MAJOR 2) -- a renamed pin's `doc:` otherwise keeps
     describing the SOURCE board's physical pad/electricals (e.g.
-    e1m-evk's encoder-switch doc names a PEC12R-4222F-S0024 debounce
+    e1m-evk's encoder-switch doc names a PEC11R-4215K-S0024 debounce
     network; e1m-x-evk's own doc for the same role describes a
     different part with RC debounce), which is actively wrong prose
     once the pad itself has changed -- the same "copy the target's
@@ -1004,56 +1064,6 @@ def _substitute_board_yaml_pin_docs(text: str, renames: dict[str, str | None]) -
     return text
 
 
-def _substitute_cmake_core(text: str, old: str, new: str) -> str:
-    """Rewrite CMakeLists.txt's `alp_project.py --emit zephyr-conf
-    --core <old>` invocation to the re-derived core id."""
-    pattern = re.compile(rf"(--core\s+){re.escape(old)}\b")
-    new_text, n = pattern.subn(lambda m: f"{m.group(1)}{new}", text)
-    if n != 1:
-        raise TemplateError(
-            f"CMakeLists.txt must have exactly one `--core {old}` to "
-            f"re-derive to {new!r} (found {n})")
-    return new_text
-
-
-def _cmake_core_map(record: dict[str, Any], example_dir: Path) -> dict[str, str]:
-    """{CMakeLists.txt relpath (posix, example-root-relative): core_id}
-    for every ZEPHYR core the catalog's `cores` field declares (issue
-    #1275 item 1) -- the fix for the single-core assumption that used to
-    apply ONE re-derived `--core` rename to every `*CMakeLists.txt` file
-    a template happened to own, silently correct only by accident (every
-    shipped multi-CMakeLists template today has exactly one supported
-    sku, so the rename path was never actually exercised against a
-    second file -- see `_derive_core_renames`'s own docstring for the
-    same "unreachable but latently wrong" class of bug).
-
-    Reuses `alp_orchestrate.orchestrator._zephyr_app_dir` -- the SAME
-    function `west build`'s app-dir argument (and
-    `check_core_cmakelists_mapping.py`'s gate) resolve `cores.<id>.app`
-    through -- rather than re-deriving the "self-contained app dir vs.
-    sources-only dir whose CMakeLists.txt lives at the parent" rule a
-    second time; a resolver that disagreed would silently re-target the
-    wrong file. A non-Zephyr core (`os: yocto`/`off`/`baremetal`) is
-    skipped: it either has no `--core` literal to rewrite at all (a
-    Yocto CMakeLists.txt never invokes `--emit zephyr-conf`) or, for
-    `off`, no `dir` to resolve in the first place."""
-    out: dict[str, str] = {}
-    for core in record.get("cores", []):
-        if core.get("os") != "zephyr" or not core.get("dir"):
-            continue
-        # #1126 containment guard: validate core["dir"] the same way every
-        # other catalog-sourced path in this file is validated, BEFORE
-        # handing it to `_zephyr_app_dir` (which has no containment check
-        # of its own and would otherwise let `../x` walk out of
-        # `example_dir` and surface a bare ValueError from `.relative_to`
-        # below instead of PathEscapeError).
-        core_dir = _safe_join(example_dir, core["dir"], what="core dir")
-        app_dir = _zephyr_app_dir(str(core_dir), example_dir)
-        rel = (app_dir / "CMakeLists.txt").relative_to(example_dir).as_posix()
-        out[rel] = core["id"]
-    return out
-
-
 # ---------------------------------------------------------------------
 # --emit scaffold content adaptation (issue #864 follow-up)
 # ---------------------------------------------------------------------
@@ -1211,6 +1221,39 @@ def _scaffold_cmakelists(text: str) -> str:
 
 
 _RELATIVE_LINK_RE = re.compile(r"\]\((\.\./[^)\s]+)\)")
+
+# Issue #1855: `_RELATIVE_LINK_RE` above only rewrites a MARKDOWN-style
+# `](../docs/x.md)` link, and only inside README.md (the one file
+# `_scaffold_readme` runs on). A board.yaml/src/main.c comment names the
+# same kind of alp-sdk-tree-only path in prose instead -- no `[...](...)`
+# around it at all -- so it never matches and survives a scaffold
+# verbatim (e.g. i2c-master's board.yaml/src/main.c both say "see
+# examples/v2n/v2n-temp-sensor for ..." with no disclaimer that it isn't
+# part of this scaffolded project, unlike the DELIBERATELY-disclaimed
+# i2c-scanner mention two paragraphs above it in the same file). Narrow
+# on purpose: only the two prefixes actually found bare like this
+# (`docs/*.md`, `examples/<category>/<name>[/<subpath>]`) -- a
+# `scripts/`/`metadata/` mention is left alone, since every such mention
+# in the catalog today is either already `${ALP_SDK_ROOT}`-qualified in
+# a CMakeLists.txt or purely descriptive prose that names a script/file
+# by convention rather than telling the customer to open it.
+_BARE_REPO_PATH_RE = re.compile(
+    r"\b(?:docs/[\w./-]+\.md|examples/[\w-]+/[\w-]+(?:/[\w./-]+)?)\b")
+
+
+def _scaffold_bare_repo_paths(text: str, docs_ref: str) -> str:
+    """Rewrite a bare `docs/*.md` or `examples/<category>/<name>
+    [/<subpath>]` mention into the same absolute GitHub URL form
+    `_scaffold_readme`'s `_fix_link` gives a markdown-style link --
+    see `_BARE_REPO_PATH_RE`'s comment for why this exists as a
+    SEPARATE pass rather than widening that one. Best-effort / no-op
+    when neither prefix appears."""
+    def _sub(m: re.Match[str]) -> str:
+        target = m.group(0)
+        kind = "blob" if "." in target.rsplit("/", 1)[-1] else "tree"
+        return f"https://github.com/alplabai/alp-sdk/{kind}/{docs_ref}/{target}"
+
+    return _BARE_REPO_PATH_RE.sub(_sub, text)
 
 
 def _core_board(sku: str, core_id: str | None, metadata_root: Path) -> str | None:
@@ -1398,7 +1441,20 @@ def _scaffold_readme(
         return f"](https://github.com/alplabai/alp-sdk/{kind}/{docs_ref}/{target})"
 
     text = _RELATIVE_LINK_RE.sub(_fix_link, text)
-    text = re.sub(rf"(?<!\S){re.escape(example_path)}(?!\S)", ".", text)
+    # A bare (non-link) mention of the example's OWN path -- e.g. a
+    # `west build -b <board> <example_path>` argument -- becomes `.`
+    # (the scaffold IS the project root wherever it lands). Issue #1855:
+    # a MULTI-slice template's README also names a bare SUBPATH of its
+    # own example dir this way (mproc-mailbox's `west build -b
+    # <board> examples/multicore/mproc-mailbox/peer`, for the HE-side
+    # peer/ core) -- the plain `example_path` match above never fires
+    # for that (its `(?!\S)` boundary fails on the following `/peer`),
+    # so the `/peer` suffix survived verbatim, naming a path that
+    # exists only inside the alp-sdk tree. Capture + keep any trailing
+    # `/<subpath>` so it becomes `./<subpath>` instead of vanishing.
+    text = re.sub(
+        rf"(?<!\S){re.escape(example_path)}(/\S+)?(?!\S)",
+        lambda m: "." + (m.group(1) or ""), text)
     text = text.replace(
         "-DEXTRA_ZEPHYR_MODULES=$(pwd)", "-DEXTRA_ZEPHYR_MODULES=$ALP_SDK_ROOT")
     if source_board and target_board:
@@ -1473,19 +1529,24 @@ def render_to_envelope(
     and top-level `preset:` are substituted for `sku`'s own default
     board (metadata/e1m_modules/<sku>.yaml `default_board:`). The app
     CORE is re-derived too (`_derive_core_renames`): `board.yaml`'s
-    `cores:` key(s) and CMakeLists.txt's `--core` flag are rewritten
+    `cores:` key(s) are rewritten
     from the canonical example's own SoM core (e.g. `m55_hp`) to
     `sku`'s own Zephyr-buildable core (e.g. `m33_sm` for E1M-V2N101)
     whenever the canonical core isn't already valid for `sku` -- this
     is the fix for issue #864's follow-up: the shallow `som.sku`-only
     swap emitted a board.yaml `--emit zephyr-conf --core m55_hp` can't
-    build against for any cross-SoM-family sku. `board.yaml`/`prj.conf`
-    /`src/main.c` are a byte-identical passthrough when `sku` already
-    matches the example's own default (or shares its core ids);
-    CMakeLists.txt and README.md are ALSO scaffold-adapted regardless
-    of `sku` (`_scaffold_cmakelists` / `_scaffold_readme`) -- their
-    in-tree `ALP_SDK_ROOT` guess and SDK-tree-relative links/paths are
-    wrong for a copied-out scaffold no matter which sku was requested.
+    build against for any cross-SoM-family sku. `prj.conf` is a byte-
+    identical passthrough when `sku` already matches the example's own
+    default (or shares its core ids); `board.yaml`/`src/*.c`/`src/*.h`
+    keep their sku/core/pin substitutions scoped to that case but ALWAYS
+    get `_scaffold_bare_repo_paths` (issue #1855: a bare, non-markdown-
+    link `docs/*.md`/`examples/<...>` mention in a comment is wrong for
+    a copied-out scaffold regardless of which sku was requested, same
+    reasoning as the next sentence). CMakeLists.txt and README.md are
+    ALSO scaffold-adapted regardless of `sku` (`_scaffold_cmakelists` /
+    `_scaffold_readme`) -- their in-tree `ALP_SDK_ROOT` guess and SDK-
+    tree-relative links/paths are wrong for a copied-out scaffold no
+    matter which sku was requested.
     """
     doc = load_catalog(catalog_path)
     record = find_template(doc, template_id)
@@ -1544,14 +1605,6 @@ def render_to_envelope(
     target_board = _core_board(
         sku, app_core_sub[1] if app_core_sub else app_core_old, metadata_root)
     docs_ref = _docs_ref(base)
-    # CMakeLists.txt per-core map (issue #1275 item 1): each Zephyr core
-    # the catalog's `cores` field declares gets its OWN `--core` rename
-    # applied to its OWN CMakeLists.txt -- fixes the single-core
-    # assumption above (app_core_sub) blindly re-applying ONE rename to
-    # every `*CMakeLists.txt` file a multi-core template owns. See
-    # `_cmake_core_map`'s docstring.
-    cmake_core_for = _cmake_core_map(record, example_dir)
-
     out: list[tuple[str, str]] = []
     for rel, data in _rendered_bytes(template_id, record, render_plan.files, resolved, base):
         try:
@@ -1583,11 +1636,12 @@ def render_to_envelope(
             # core id (`_strip_stale_core_prose`).
             for old in (pin_renames or {}):
                 text = _strip_stale_core_prose(text, old)
+            # Issue #1855: board.yaml comments carry the same kind of
+            # bare alp-sdk-tree-only cross-reference README.md does
+            # (see `_BARE_REPO_PATH_RE`), but never went through any
+            # rewrite -- only README.md did.
+            text = _scaffold_bare_repo_paths(text, docs_ref)
         elif rel.endswith("CMakeLists.txt"):
-            this_core = cmake_core_for.get(rel)
-            if this_core and core_renames and this_core in core_renames:
-                text = _substitute_cmake_core(
-                    text, this_core, core_renames[this_core])
             text = _scaffold_cmakelists(text)
         elif rel == "README.md":
             text = _scaffold_readme(
@@ -1595,6 +1649,12 @@ def render_to_envelope(
                 example_sku=example_sku, sku=sku,
                 source_board=source_board, target_board=target_board,
                 pin_renames=pin_renames)
+        elif rel.endswith((".c", ".h")):
+            # Same issue #1855 gap as board.yaml above -- a source
+            # comment (e.g. cold-chain-monitor's src/main.c "(see
+            # examples/ai/cold-chain-monitor/models/README.md)") is
+            # never touched by any existing scaffold-adaptation pass.
+            text = _scaffold_bare_repo_paths(text, docs_ref)
         out.append((rel, text))
     return out
 
@@ -1669,8 +1729,15 @@ def validate(
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_bytes(src.read_bytes())
 
+        # The copied testcase.yaml loads `generated/alp.conf` via
+        # EXTRA_CONF_FILE; nothing else writes it in a temp tree.
+        import check_zephyr_conf_parity as _parity
+        import gen_example_alp_conf as _gen
+        for app_dir, board_yaml, core_id in _parity.find_cases(tmp):
+            _gen.generate(app_dir, board_yaml, core_id)
+
         outdir = tmp / "twister-out"
-        env = os.environ.copy()
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         env["ZEPHYR_BASE"] = zephyr_base
         # CMakeLists.txt resolves ALP_SDK_ROOT from this env var when set
         # (see examples/*/CMakeLists.txt) -- required here since the temp
@@ -1697,7 +1764,7 @@ def validate(
             "--outdir", str(outdir),
         ]
         proc = subprocess.run(
-            cmd, cwd=tmp, env=env, capture_output=True, text=True, check=False)
+            cmd, cwd=tmp, env=env, capture_output=True, text=True, encoding="utf-8", check=False)
         passed_count = _count_passed(outdir)
         return ValidateResult(
             template_id=template_id,

@@ -69,6 +69,7 @@ own error path is more informative.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
@@ -133,7 +134,8 @@ class ZephyrWestFlash:
             )
 
         proc = subprocess.run(cmd, check=False,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         elapsed = time.monotonic() - start
         if proc.returncode == 0:
             return FlashResult(

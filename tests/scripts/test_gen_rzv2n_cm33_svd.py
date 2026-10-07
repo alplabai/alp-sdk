@@ -15,6 +15,7 @@ check can actually fail, not just that the happy path is green.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,8 @@ def _run(fsp_dir: Path, *extra_args: str) -> subprocess.CompletedProcess:
         [sys.executable, str(SCRIPT), "--fsp-include-dir", str(fsp_dir), *extra_args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=30,
     )
 
@@ -101,6 +104,8 @@ def test_output_mode_requires_output_flag_unless_check():
         [sys.executable, str(SCRIPT), "--fsp-include-dir", str(FIXTURE_ROOT)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=30,
     )
     assert proc.returncode != 0
@@ -126,13 +131,13 @@ def test_a_disagreeing_pos_is_rejected(tmp_path):
     editing the generator from the test.)"""
     fsp_dir = _copy_fixture(tmp_path)
     bitmask = fsp_dir / "iobitmasks" / "gpio_iobitmask.h"
-    text = bitmask.read_text()
+    text = bitmask.read_text(encoding="utf-8")
     assert "R_GPIO_ELC_PEL_PSB_Pos          (0UL)" in text
     mutated = text.replace(
         "R_GPIO_ELC_PEL_PSB_Pos          (0UL)", "R_GPIO_ELC_PEL_PSB_Pos          (1UL)"
     )
     assert mutated != text
-    bitmask.write_text(mutated)
+    bitmask.write_text(mutated, encoding="utf-8")
 
     proc = _run(fsp_dir, "--check")
     assert proc.returncode != 0
@@ -145,10 +150,10 @@ def test_a_field_removed_from_iobitmasks_is_rejected(tmp_path):
     iodefine has but iobitmasks doesn't must be rejected by name."""
     fsp_dir = _copy_fixture(tmp_path)
     bitmask = fsp_dir / "iobitmasks" / "gpio_iobitmask.h"
-    lines = bitmask.read_text().splitlines(keepends=True)
+    lines = bitmask.read_text(encoding="utf-8").splitlines(keepends=True)
     kept = [ln for ln in lines if "PSM" not in ln]
     assert len(kept) < len(lines)
-    bitmask.write_text("".join(kept))
+    bitmask.write_text("".join(kept), encoding="utf-8")
 
     proc = _run(fsp_dir, "--check")
     assert proc.returncode != 0
@@ -160,12 +165,12 @@ def test_an_orphaned_iobitmask_macro_is_rejected(tmp_path):
     counterpart at all must also be rejected."""
     fsp_dir = _copy_fixture(tmp_path)
     bitmask = fsp_dir / "iobitmasks" / "gpio_iobitmask.h"
-    text = bitmask.read_text()
+    text = bitmask.read_text(encoding="utf-8")
     text += (
         "\n#define R_GPIO_NOSUCHREG_GHOST_Msk    (0x01UL)\n"
         "#define R_GPIO_NOSUCHREG_GHOST_Pos    (0UL)\n"
     )
-    bitmask.write_text(text)
+    bitmask.write_text(text, encoding="utf-8")
 
     proc = _run(fsp_dir, "--check")
     assert proc.returncode != 0
@@ -177,14 +182,14 @@ def test_a_uint64_member_is_rejected(tmp_path):
     docstring): introducing one must hard-fail, never silently truncate."""
     fsp_dir = _copy_fixture(tmp_path)
     iodefine = fsp_dir / "iodefines" / "gpio_iodefine.h"
-    text = iodefine.read_text()
+    text = iodefine.read_text(encoding="utf-8")
     assert "__IM uint8_t RESERVED[4];" in text
     mutated = text.replace(
         "__IM uint8_t RESERVED[4];",
         "__IM uint8_t RESERVED[4];\n    __IOM uint64_t GHOST64;",
     )
     assert mutated != text
-    iodefine.write_text(mutated)
+    iodefine.write_text(mutated, encoding="utf-8")
 
     proc = _run(fsp_dir, "--check")
     assert proc.returncode != 0
@@ -194,12 +199,12 @@ def test_a_uint64_member_is_rejected(tmp_path):
 def test_a_uint64_bitfield_is_rejected(tmp_path):
     fsp_dir = _copy_fixture(tmp_path)
     iodefine = fsp_dir / "iodefines" / "gpio_iodefine.h"
-    text = iodefine.read_text()
+    text = iodefine.read_text(encoding="utf-8")
     marker = "            __IOM uint8_t PSM : 2;\n"
     assert marker in text
     mutated = text.replace(marker, marker + "            __IOM uint64_t GHOST : 3;\n")
     assert mutated != text
-    iodefine.write_text(mutated)
+    iodefine.write_text(mutated, encoding="utf-8")
 
     proc = _run(fsp_dir, "--check")
     assert proc.returncode != 0
@@ -219,12 +224,12 @@ def test_a_deleted_pad_bit_is_rejected_by_the_width_sum_check(tmp_path):
     the generator from the test."""
     fsp_dir = _copy_fixture(tmp_path)
     iodefine = fsp_dir / "iodefines" / "gpio_iodefine.h"
-    text = iodefine.read_text()
+    text = iodefine.read_text(encoding="utf-8")
     marker = "            uint8_t           : 1;\n"
     assert marker in text
     mutated = text.replace(marker, "", 1)
     assert mutated != text
-    iodefine.write_text(mutated)
+    iodefine.write_text(mutated, encoding="utf-8")
 
     proc = _run(fsp_dir, "--check")
     assert proc.returncode != 0
@@ -245,12 +250,12 @@ def test_a_perturbed_size_hint_comment_is_rejected(tmp_path):
     editing the generator from the test."""
     fsp_dir = _copy_fixture(tmp_path)
     iodefine = fsp_dir / "iodefines" / "gpio_iodefine.h"
-    text = iodefine.read_text()
+    text = iodefine.read_text(encoding="utf-8")
     marker = "} R_ELC_PDBF_Type; /*!< Size = 4 (0x4) */"
     assert marker in text
     mutated = text.replace(marker, "} R_ELC_PDBF_Type; /*!< Size = 5 (0x5) */")
     assert mutated != text
-    iodefine.write_text(mutated)
+    iodefine.write_text(mutated, encoding="utf-8")
 
     proc = _run(fsp_dir, "--check")
     assert proc.returncode != 0

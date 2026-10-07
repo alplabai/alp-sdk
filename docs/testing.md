@@ -91,7 +91,7 @@ It does **not** prove:
 | `<alp/peripheral.h>` — UART       | `tests/yocto/peripheral_uart.c` + `tests/unit/uart_registry/` + `examples/peripheral-io/uart-echo/`                                   | AEN bench + Yocto bench       |
 | `<alp/peripheral.h>` — UART RX ringbuf | `tests/unit/uart_registry/` (rx_ringbuf scenario) + `examples/peripheral-io/uart-rx-ringbuf/`                              | AEN bench                     |
 | `<alp/peripheral.h>` — GPIO       | `tests/yocto/peripheral_gpio.c` + `tests/unit/gpio_registry/` + `examples/peripheral-io/gpio-button-led/`                             | AEN bench + Yocto bench       |
-| Portable-class lifecycle contract — every `alp_<class>_open/close/capabilities` (14 classes + I²C/SPI target modes, `alp_init`/`alp_deinit`, UART RX ringbuf) | `tests/zephyr/conformance/` — the data-driven conformance gate a new backend must pass; on real-SoM builds expectations derive from `alp_has()` (caps↔backend parity) and WDT arming is opt-in (`CONFIG_TEST_ALP_CONFORMANCE_WDT_ARM`); see the matrix in its `src/main.c` + `docs/porting-new-som.md` §11 | AEN bench (qualified boards in `platform_allow` build via `--build-only` today; CI runs native_sim) |
+| Portable-class lifecycle contract — every `alp_<class>_open/close/capabilities` (14 classes + I²C/SPI target modes, `alp_init`/`alp_deinit`, UART RX ringbuf, dispatcher ops-vtable NULL-slot guard) | `tests/zephyr/conformance/` — the data-driven conformance gate a new backend must pass; on real-SoM builds expectations derive from `alp_has()` (caps↔backend parity) and WDT arming is opt-in (`CONFIG_TEST_ALP_CONFORMANCE_WDT_ARM`); see the matrix in its `src/main.c` + `docs/porting-new-som.md` §11 | AEN bench (qualified boards in `platform_allow` build via `--build-only` today; CI runs native_sim) |
 | `<alp/pwm.h>`                     | `tests/unit/pwm_registry/` + `examples/peripheral-io/pwm-led-fade/`                                             | AEN bench                     |
 | `<alp/adc.h>`                     | `tests/unit/adc_registry/` + `examples/peripheral-io/adc-voltmeter/`                                                                 | AEN bench                     |
 | `<alp/dac.h>`                     | `tests/zephyr/conformance/` only (no `tests/unit/dac_registry/`) + `examples/peripheral-io/dac-waveform/` + `examples/aen/aen-dac-regcheck/`                                          | AEN bench                     |
@@ -116,7 +116,7 @@ It does **not** prove:
 | `<alp/display.h>` / `<alp/gui.h>` / `<alp/camera.h>` / `<alp/storage.h>` | compile-only via `tests/smoke.c` + headers-include test                                              | (real impls pending)                  |
 | Chip drivers (`chips/*/`)         | `tests/zephyr/chips/` with fakes for `lsm6dso`, `bme280`, `ssd1306`                                                    | per-chip on AEN bench         |
 | `<alp/soc_caps.h>` generation     | `pr-generated-files.yml` (drift gate)                                                                                  | n/a (generator-deterministic)         |
-| ABI snapshot                      | `scripts/abi_snapshot.py` + `docs/abi/v0.1-snapshot.json` (drift gate)                                                 | n/a                                   |
+| ABI snapshot                      | `scripts/abi_snapshot.py` + `docs/abi/v0.16-snapshot.json` (drift gate)                                                | n/a                                   |
 | `board.yaml` schema + loader      | `pr-metadata-validate.yml` smoke + `tests/scripts/test_project_*.py`                                                   | n/a                                   |
 
 ---
@@ -142,6 +142,8 @@ sudo apt-get install -y libmosquitto-dev libasound2-dev libssl-dev pkg-config
 
 ```bash
 export ZEPHYR_BASE="$PWD/../zephyr"
+# Examples load a pre-generated per-core Kconfig fragment (#866):
+python3 scripts/gen_example_alp_conf.py
 python3 "$ZEPHYR_BASE/scripts/twister" \
     --testsuite-root tests/zephyr \
     --testsuite-root examples \
@@ -177,7 +179,7 @@ twister --testsuite-root tests/zephyr -p native_sim/native/64 \
 bash scripts/setup-clang-format.sh
 
 # Diff-only clang-format (matches CI's pr-static-analysis behaviour).
-git diff -U0 HEAD~1 -- '*.c' '*.h' ':!zephyr/**' ':!vendors/**' | clang-format-diff.py -p1
+git diff -U0 "$(git merge-base origin/dev HEAD)" -- '*.c' '*.h' ':!zephyr/**' ':!vendors/**' ':!tests/scripts/fixtures/rzv2n_svd/**' | clang-format-diff.py -p1
 ```
 
 Skipping the pin step is the single most common cause of green-locally /
@@ -200,7 +202,7 @@ Every CI workflow has a local counterpart that runs the same coverage:
 | `pr-generated-files.yml`       | `python3 scripts/gen_soc_caps.py --check`                 |
 | `pr-metadata-validate.yml`     | `python3 scripts/validate_metadata.py` + alp_project.py   |
 | public/private classifier      | `python3 scripts/check_public_private.py`                 |
-| `pr-doxygen.yml`               | `doxygen Doxyfile` (zero-warnings)                        |
+| `pr-doxygen.yml`               | `bash scripts/test-all.sh` (doxygen stage; committed `docs/doxygen/Doxyfile`) |
 | (extension CI lives in `alplabai/alp-sdk-vscode`) | `cd ../alp-sdk-vscode && npm test`                     |
 | `coverity.yml`                 | none (Coverity Scan only)                                 |
 
@@ -237,8 +239,7 @@ The convention every new feature follows:
    the new function to its test(s).
 5. **CHANGELOG entry.**  Document the feature under `[Unreleased]`.
 
-The matching pull request template is at `.github/PULL_REQUEST_TEMPLATE.md`
-(when it lands).  The `CONTRIBUTING.md` walks through the same checklist.
+The matching pull request template is at `.github/PULL_REQUEST_TEMPLATE.md`.  The `CONTRIBUTING.md` walks through the same checklist.
 
 ---
 

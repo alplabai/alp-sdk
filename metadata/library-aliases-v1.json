@@ -5,7 +5,6 @@
     "bearssl": "bearssl",
     "catch2": "catch2",
     "cmsis_dsp": "cmsis-dsp",
-    "coremqtt_sn": "coremqtt-sn",
     "doctest": "doctest",
     "etl": "etl",
     "fmt": "fmt",

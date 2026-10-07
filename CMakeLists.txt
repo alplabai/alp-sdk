@@ -184,7 +184,7 @@ set(ALP_SDK_CHIP_LIST
     clk_5l35023b da9292 deepx_dxm1 drv8825 drv8833 eeprom_24c128
     es8388 gc2145 gd32g553 gd32_swd gdew0154t8 hailo_8l hx711
     icm42670 ics_43434 il3820 ili9341 ili9488 imx219 imx477
-    ina236 inmp441 lis2dw12 lps22hb lsm6dso max31855 max31865
+    ina228 ina236 inmp441 lis2dw12 lps22hb lsm6dso max31855 max31865
     max98357a maxim_max9295_9296 ms5611 mt6701 murata_lbee5hy2fy
     optiga_trust_m ov2640 ov5640 ov5645 ov7670 ov9281
     pca9451a pi3dbs12212 qmc5883l quectel_bg77 quectel_bg95 ra8875
@@ -234,6 +234,13 @@ if(ALP_BUILD_CHIPS_ONLY)
             list(APPEND _alp_chips_enabled ${_chip})
         endif()
     endforeach()
+    # OPTIGA Trust M runs Infineon's host library (#1164).
+    if(ALP_SDK_CHIP_OPTIGA_TRUST_M)
+        include(${CMAKE_CURRENT_SOURCE_DIR}/vendors/optiga-trust-m/sources.cmake)
+        target_sources(alp_chips PRIVATE ${ALP_OPTIGA_SOURCES})
+        target_include_directories(alp_chips PRIVATE ${ALP_OPTIGA_INCLUDE_DIRS})
+        target_compile_definitions(alp_chips PRIVATE ${ALP_OPTIGA_DEFINES})
+    endif()
     message(STATUS "alp-sdk: libalp_chips drivers: ${_alp_chips_enabled}")
     include(GNUInstallDirs)
     install(TARGETS alp_chips ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})

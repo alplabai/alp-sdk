@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Single source of truth for every `--emit` mode the SDK exposes across scripts/alp_project.py and scripts/alp_orchestrate/ (and re-exposed by scripts/alp_cli/emit.py's `alp emit` front door / `west alp-emit`). Frontends (alp-sdk-vscode, Alp Studio, IDE tooling) read THIS instead of hand-mirroring the argparse `choices=` lists in each CLI. A drift gate (scripts/check_emit_registry.py) asserts this file's mode set exactly matches the real `--emit` choices parsed out of alp_project.py and alp_orchestrate/cli.py, so a mode added to the code with no registry entry (or a phantom registry entry with no code) fails CI. Stability: additive-only per mode; a breaking change to an existing mode's shape ships as a new schemaVersion.",
+  "description": "Single source of truth for every `--emit` mode the SDK exposes across scripts/alp_project.py and scripts/alp_orchestrate/ (and re-exposed by `west alp-emit`). Frontends (alp-sdk-vscode, Alp Studio, IDE tooling) read THIS instead of hand-mirroring the argparse `choices=` lists in each CLI. A drift gate (scripts/check_emit_registry.py) asserts this file's mode set exactly matches the real `--emit` choices parsed out of alp_project.py and alp_orchestrate/cli.py, so a mode added to the code with no registry entry (or a phantom registry entry with no code) fails CI. Stability: additive-only per mode; a breaking change to an existing mode's shape ships as a new schemaVersion.",
   "modes": [
     {
       "mode": "zephyr-conf",
@@ -310,6 +310,28 @@
         "schema_id": null,
         "path": "build/generated/dts-reservations.dtsi",
         "consumer_hint": "Zephyr/kernel DT -- #include for cross-core shared-memory reserved-memory nodes"
+      }
+    },
+    {
+      "mode": "linux-ownership-dts",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_orchestrate/linux_ownership.py",
+        "function": "emit_linux_ownership_dts"
+      },
+      "scope": "system",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "dts",
+        "schema_id": null,
+        "path": "build/generated/linux-ownership.dtsi",
+        "consumer_hint": "Per-project A55 core-ownership fragment (inspection and check_amp_pad_claims --project; the linux-renesas bbappend renders the same fragment from the system-manifest ownership)"
       }
     },
     {

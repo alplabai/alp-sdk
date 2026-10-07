@@ -22,6 +22,10 @@
  *
  * Wraps `<alp/peripheral.h>` GPIO calls; portable across all three
  * OS targets.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      Caller-owned button+LED helper (`alp_button_led_*`).  See
+ *      docs/abi-markers.md.
  */
 
 #ifndef ALP_BLOCKS_BUTTON_LED_H

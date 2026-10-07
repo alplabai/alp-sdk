@@ -12,8 +12,10 @@ Per-peripheral example for `<alp/peripheral.h>` I²C.  Walks every
 ## Build
 
 ```bash
+# writes examples/peripheral-io/i2c-scanner/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/i2c-scanner
 west build -b native_sim/native/64 examples/peripheral-io/i2c-scanner \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 ```
 

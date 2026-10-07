@@ -12,7 +12,7 @@ GPIO** and **enables/disables the camera LDOs** over the bridge, using only
 the portable `cc3501e_*` host API.
 
 The CC3501E peer firmware is ALP-authored and lives in this repo at
-[`firmware/cc3501e/`](../../../firmware/cc3501e) (embedded, per ADR 0015 —
+[`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) (embedded, per ADR 0015 —
 like the gd32-bridge).
 
 ## What is the GPIO proxy?
@@ -73,9 +73,11 @@ The two camera-enable LDOs are `which=0` → CAM_EN_LDO0 (CC35 GPIO_1) and
 
 ## The r2 host-IRQ caveat (read before using interrupts)
 
-This HW rev uses hardware SS0 for SPI framing and a READY input for per-phase
-gating, but it still does not expose GPIO edge events as portable application
-callbacks. The Alif is always master; the CC3501E is always slave. Without a
+This HW rev uses hardware SS0 for SPI framing and an OPTIONAL READY input for
+per-phase gating (unwired, `fw->ready_pin` stays NULL, in this app -- see
+`src/cc3501e_bridge.c`), but it still does not expose GPIO edge events as
+portable application callbacks. The Alif is always master; the CC3501E is
+always slave. Without a
 dedicated async event delivery path, the slave cannot spontaneously tell the
 master "an edge happened on a GPIO".
 
@@ -128,6 +130,7 @@ On silicon with the CC3501E firmware up, expect `pass=8 fail=0`.
 ## Run under native_sim (CI gate)
 
 ```sh
+python3 scripts/gen_example_alp_conf.py examples/aen/aen-cc3501e-gpio   # writes generated/alp.conf (#866)
 west twister -T examples/aen/aen-cc3501e-gpio -p native_sim/native/64
 ```
 

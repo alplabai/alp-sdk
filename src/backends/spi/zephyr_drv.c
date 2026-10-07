@@ -29,6 +29,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_errno.h"
 #include "alp_slot_claim.h"
 #include "backends/gpio/gpio_resolve.h"
 #include "spi_ops.h"
@@ -104,28 +105,19 @@ static uint16_t _to_spi_op(const alp_spi_config_t *cfg)
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * BEHAVIOUR CHANGE: this switch had no -EAGAIN and/or no -ETIMEDOUT
+	 * arm, so a driver-reported deadline surfaced as ALP_ERR_IO.  Callers
+	 * can now receive ALP_ERR_TIMEOUT here, and ALP_ERR_NOT_READY /
+	 * ALP_ERR_NOMEM / ALP_ERR_NOSUPPORT for the other arms the switch
+	 * lacked.  Every arm it DID carry agreed with the baseline. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static alp_status_t
 z_open(const alp_spi_config_t *cfg, alp_spi_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg->bus_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (cfg->bus_id >= ALP_SOC_SPI_COUNT) return ALP_ERR_OUT_OF_RANGE;
 	const struct device *dev = _devs[cfg->bus_id];
@@ -160,10 +152,9 @@ z_open(const alp_spi_config_t *cfg, alp_spi_backend_state_t *st, alp_capabilitie
 		s->cs_present    = true;
 	}
 
-	st->dev         = (void *)dev;
-	st->bus_id      = cfg->bus_id;
-	st->be_data     = s;
-	caps_out->flags = 0u;
+	st->dev     = (void *)dev;
+	st->bus_id  = cfg->bus_id;
+	st->be_data = s;
 	return ALP_OK;
 }
 

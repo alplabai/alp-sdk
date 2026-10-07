@@ -1,0 +1,248 @@
+{
+  "$comment": "Record of INTENTIONAL public-symbol removals -- see docs/abi/README.md's \"Recording an INTENTIONAL removal\" section. Loaded by scripts/abi_snapshot.py's load_removed_allowlist(); diff() reports a matching removal as ALLOWED instead of REMOVED. Every entry MUST carry: header, category (function|typedef|macro|variable), symbol, release, issue, reason, replacement (a symbol name, or null if there truly is none).",
+  "removed": [
+    {
+      "header": "alp/boards/alp_e1m_evk_routes.h",
+      "category": "macro",
+      "symbol": "EVK_ADC_BOARD_ID",
+      "release": "v0.17.0",
+      "issue": 1622,
+      "reason": "No BOARD_ID net exists anywhere on the E1M-EVK -- the name described a divider that was never on the board.",
+      "replacement": "EVK_ADC_ARDUINO_A0"
+    },
+    {
+      "header": "alp/boards/alp_e1m_evk_routes.h",
+      "category": "macro",
+      "symbol": "EVK_ADC_MB_AN",
+      "release": "v0.17.0",
+      "issue": 1622,
+      "reason": "ANA_S6 is a DAC0 output loopback sense (R88/R89/C107), not a mikroBUS AN pin.",
+      "replacement": "EVK_ADC_DAC0_LOOPBACK"
+    },
+    {
+      "header": "alp/boards/alp_e1m_evk_routes.h",
+      "category": "macro",
+      "symbol": "EVK_ADC_VBAT_SENSE",
+      "release": "v0.17.0",
+      "issue": 1622,
+      "reason": "There is no VBAT net on the E1M-EVK -- ANA_S7 is a DAC1 output loopback sense (R90/R91/C108); reading it as a battery voltage would silently misreport a DAC output as VBAT.",
+      "replacement": "EVK_ADC_DAC1_LOOPBACK"
+    },
+    {
+      "header": "alp/chips/cc3501e/events.h",
+      "category": "function",
+      "symbol": "cc3501e_set_event_callback",
+      "release": "v0.17.0",
+      "issue": 1723,
+      "reason": "A single callback slot per context made registration silently destructive: the Zephyr console companion registers on the shared context from its init path, AFTER the application's main() has registered, so it displaced the application's callback and consumed every async event while cc3501e_poll_events() kept returning ALP_OK. Replaced by add/remove so events fan out to every subscriber; keeping a set-style entry point would preserve the exact 'last registration silently wins' semantics the fix exists to remove.",
+      "replacement": "cc3501e_add_event_callback"
+    },
+    {
+      "header": "alp/boards/alp_e1m_evk_routes.h",
+      "category": "macro",
+      "symbol": "EVK_I2C_ADDR_TCAL9538_PCIE",
+      "release": "v0.17.0",
+      "issue": 1980,
+      "reason": "U37 (the PCIe I/O expander this macro addresses) is `assembled: false` in metadata/boards/e1m-evk.yaml -- confirmed absent on both bench boards and from the maintainer's I2C schedule (#1974). gen_board_header.py now renames every macro an unfitted i2c_devices: entry contributes with a `_NOT_ASSEMBLED` suffix instead of emitting the plain name, so a reader can't reach for this macro and get a real-looking address for silicon that was never fitted.",
+      "replacement": "EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED"
+    },
+    {
+      "header": "alp/boards/alp_e1m_evk_routes.h",
+      "category": "macro",
+      "symbol": "EVK_I2C_ADDR_TCA6408A_MAIN",
+      "release": "v0.17.0",
+      "issue": 1980,
+      "reason": "The TCA6408ARSVR alt-population footprint (U35, R112 fitted / R145 DNP) is now `assembled: false` in metadata/boards/e1m-evk.yaml -- neither 2026-09-05 bench board answers at 0x20, and the maintainer's EVK I2C schedule places U35 at 0x73 (TCAL9538) instead (#1974). Same `_NOT_ASSEMBLED` rename gen_board_header.py already applies to EVK_I2C_ADDR_TCAL9538_PCIE.",
+      "replacement": "EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED"
+    },
+    {
+      "header": "alp/chips/gd32_swd.h",
+      "category": "macro",
+      "symbol": "GD32_SWD_EXPECTED_IDCODE",
+      "release": "v0.17.0",
+      "issue": 1440,
+      "reason": "The name and its paired metadata/chips/gd32_swd.yaml `target_expected_idcode` field both presented 0x6BA02477 as an armed wrong-board guard. It is not: that value is CHANGELOG.md's own record of a measurement of a DIFFERENT target on the same board (the V2N CM33 DAP on a V2N bench unit), and separately the generic ADIv5 Cortex-M33 r0p1 SW-DPv2 architectural default -- never measured on a GD32G553 with a probe attached (#1369). `target_expected_idcode` is now absent from the manifest entirely, matching the stance metadata/schemas/soc-spec-v1.schema.json's own `expect_dpidr` guidance takes: an absent key is the correct published 'unknown'. The macro is kept, renamed, as an informational-only reference nothing gates on.",
+      "replacement": "GD32_SWD_GENERIC_CM33_R0P1_IDCODE"
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk.h",
+      "category": "macro",
+      "symbol": "XEVK_I2C_ADDR_INA236_5V",
+      "release": "v0.17.0",
+      "issue": 2343,
+      "reason": "The E1M-X EVK V2 netlist shows U30, the +5V input monitor, is a TI INA228 strapped A1=GND A0=SDA (0x42), not an INA236 at 0x4A. The INA228 has a 20-bit register map that ina236_init() cannot drive, so an INA236 address and INA236 shunt/max-current calibration for it described a part that is not on the board. On the V2 build U30's SDA/SCL are also netted swapped, so it cannot answer until reworked.",
+      "replacement": "XEVK_I2C_ADDR_INA228_5V"
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk.h",
+      "category": "macro",
+      "symbol": "XEVK_INA236_SHUNT_5V_OHMS",
+      "release": "v0.17.0",
+      "issue": 2343,
+      "reason": "The E1M-X EVK V2 netlist shows U30, the +5V input monitor, is a TI INA228 strapped A1=GND A0=SDA (0x42), not an INA236 at 0x4A. The INA228 has a 20-bit register map that ina236_init() cannot drive, so an INA236 address and INA236 shunt/max-current calibration for it described a part that is not on the board. On the V2 build U30's SDA/SCL are also netted swapped, so it cannot answer until reworked.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk.h",
+      "category": "macro",
+      "symbol": "XEVK_INA236_MAX_5V_A",
+      "release": "v0.17.0",
+      "issue": 2343,
+      "reason": "The E1M-X EVK V2 netlist shows U30, the +5V input monitor, is a TI INA228 strapped A1=GND A0=SDA (0x42), not an INA236 at 0x4A. The INA228 has a 20-bit register map that ina236_init() cannot drive, so an INA236 address and INA236 shunt/max-current calibration for it described a part that is not on the board. On the V2 build U30's SDA/SCL are also netted swapped, so it cannot answer until reworked.",
+      "replacement": null
+    },
+    {
+      "header": "alp/ext/deepx/inference.h",
+      "category": "function",
+      "symbol": "alp_deepx_inference_slot_pin",
+      "release": "v0.17.0",
+      "issue": 482,
+      "reason": "The header modelled DX-M1 hardware that does not exist (four slots, a 256 MB DDR carve-out, DRAM-tile reservation) and every call returned NOSUPPORT; libdxrt offers NPU-core binding and DeviceStatus instead.",
+      "replacement": "alp_deepx_inference_bind_cores"
+    },
+    {
+      "header": "alp/ext/deepx/inference.h",
+      "category": "function",
+      "symbol": "alp_deepx_inference_dram_tile_reserve",
+      "release": "v0.17.0",
+      "issue": 482,
+      "reason": "The header modelled DX-M1 hardware that does not exist (four slots, a 256 MB DDR carve-out, DRAM-tile reservation) and every call returned NOSUPPORT; libdxrt offers NPU-core binding and DeviceStatus instead.",
+      "replacement": null
+    },
+    {
+      "header": "alp/ext/deepx/inference.h",
+      "category": "typedef",
+      "symbol": "alp_deepx_inference_slot_t",
+      "release": "v0.17.0",
+      "issue": 482,
+      "reason": "The header modelled DX-M1 hardware that does not exist (four slots, a 256 MB DDR carve-out, DRAM-tile reservation) and every call returned NOSUPPORT; libdxrt offers NPU-core binding and DeviceStatus instead.",
+      "replacement": "alp_deepx_npu_cores_t"
+    },
+    {
+      "header": "alp/ext/deepx/inference.h",
+      "category": "typedef",
+      "symbol": "alp_deepx_inference_status_t",
+      "release": "v0.17.0",
+      "issue": 482,
+      "reason": "The header modelled DX-M1 hardware that does not exist (four slots, a 256 MB DDR carve-out, DRAM-tile reservation) and every call returned NOSUPPORT; libdxrt offers NPU-core binding and DeviceStatus instead.",
+      "replacement": "alp_deepx_device_status_t"
+    },
+    {
+      "header": "alp/ext/deepx/inference.h",
+      "category": "macro",
+      "symbol": "ALP_DEEPX_INFERENCE_SLOT_COUNT",
+      "release": "v0.17.0",
+      "issue": 482,
+      "reason": "The header modelled DX-M1 hardware that does not exist (four slots, a 256 MB DDR carve-out, DRAM-tile reservation) and every call returned NOSUPPORT; libdxrt offers NPU-core binding and DeviceStatus instead.",
+      "replacement": "ALP_DEEPX_NPU_CORE_COUNT"
+    },
+    {
+      "header": "alp/chips/act8760.h",
+      "category": "function",
+      "symbol": "act8760_rail_set_vset",
+      "release": "v0.17.0",
+      "issue": 1165,
+      "reason": "Unguarded raw VSET write -- could program any code in any range on a rail the running SoC depends on.",
+      "replacement": "act8760_rail_set_voltage_mv"
+    },
+    {
+      "header": "alp/chips/da9292.h",
+      "category": "function",
+      "symbol": "da9292_v2n_base_init",
+      "release": "v0.17.0",
+      "issue": 1165,
+      "reason": "Cleared a live CH2_EN unconditionally -- drops the DEEPX rail on a warm reboot.",
+      "replacement": "da9292_ch2_sequence"
+    },
+    {
+      "header": "alp/chips/da9292.h",
+      "category": "function",
+      "symbol": "da9292_v2n_m1_enable_deepx_rail",
+      "release": "v0.17.0",
+      "issue": 1165,
+      "reason": "Diverged from the bench-proven U-Boot sequence (no identity / STATUS_01 / CH1 / DEEPX_PWR_EN_REQ checks, cleared a live CH2_EN).",
+      "replacement": "da9292_ch2_sequence"
+    },
+    {
+      "header": "alp/chips/tps628640.h",
+      "category": "function",
+      "symbol": "tps628640_write_reg",
+      "release": "v0.17.0",
+      "issue": 1165,
+      "reason": "Unguarded raw write reaching VOUT/CONTROL; every documented register is now owned by a window/critical-guarded typed API.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk_routes.h",
+      "category": "macro",
+      "symbol": "XEVK_I2C_ADDR_INA236_VCAM2",
+      "release": "v0.17.0",
+      "issue": 2645,
+      "reason": "The camera-rail INA236B that was strapped to 0x48 on the E1M-X EVK is not fitted; 0x48 on I2C0 is the TAS2563 pair's shared address.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk_routes.h",
+      "category": "macro",
+      "symbol": "XEVK_INA236_SHUNT_VCAM2_OHMS",
+      "release": "v0.17.0",
+      "issue": 2645,
+      "reason": "The camera-rail INA236B that was strapped to 0x48 on the E1M-X EVK is not fitted; 0x48 on I2C0 is the TAS2563 pair's shared address.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk_routes.h",
+      "category": "macro",
+      "symbol": "XEVK_INA236_MAX_VCAM2_A",
+      "release": "v0.17.0",
+      "issue": 2645,
+      "reason": "The camera-rail INA236B that was strapped to 0x48 on the E1M-X EVK is not fitted; 0x48 on I2C0 is the TAS2563 pair's shared address.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk.h",
+      "category": "macro",
+      "symbol": "XEVK_I2C_ADDR_INA236_VCAM2",
+      "release": "v0.17.0",
+      "issue": 2645,
+      "reason": "The camera-rail INA236B that was strapped to 0x48 on the E1M-X EVK is not fitted; 0x48 on I2C0 is the TAS2563 pair's shared address.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk.h",
+      "category": "macro",
+      "symbol": "XEVK_INA236_SHUNT_VCAM2_OHMS",
+      "release": "v0.17.0",
+      "issue": 2645,
+      "reason": "The camera-rail INA236B that was strapped to 0x48 on the E1M-X EVK is not fitted; 0x48 on I2C0 is the TAS2563 pair's shared address.",
+      "replacement": null
+    },
+    {
+      "header": "alp/boards/alp_e1m_x_evk.h",
+      "category": "macro",
+      "symbol": "XEVK_INA236_MAX_VCAM2_A",
+      "release": "v0.17.0",
+      "issue": 2645,
+      "reason": "The camera-rail INA236B that was strapped to 0x48 on the E1M-X EVK is not fitted; 0x48 on I2C0 is the TAS2563 pair's shared address.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/ina236.h",
+      "category": "macro",
+      "symbol": "INA236_DEVICE_ID",
+      "release": "v0.17.0",
+      "issue": 2715,
+      "reason": "DEVICE_ID (0x3F) varies by lot and is no longer an identity gate (INA236_MFG_ID is); the constant had no users.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/gd32g553.h",
+      "category": "function",
+      "symbol": "gd32g553_power_mode_set",
+      "release": "v0.17.0",
+      "issue": 2692,
+      "reason": "The raw one-shot POWER_MODE_SET wrapper never recorded that a Deep-sleep request had latched, so the next command's SPI frame was lost in the CS wake; gd32g553_set_power_mode() validates the request, gates it on the bridge protocol minor, tracks the asleep state and runs the wake procedure before the next command.",
+      "replacement": "gd32g553_set_power_mode"
+    }
+  ]
+}

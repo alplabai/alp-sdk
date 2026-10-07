@@ -153,6 +153,22 @@
  * the wait in alp_rpc_close_finalize() below is a no-op for them. */
 static atomic_int g_test_op_count;
 
+/* alp_rpc_notify_link() is normally defined by src/rpc_dispatch.c
+ * (declared in rpc_ops.h, issue #1643); this binary does not link
+ * alp::sdk.  The backend under test calls it on every link
+ * transition, so the symbol has to exist for this scenario to link at
+ * all.  Recording the last state is enough here -- this test exercises
+ * the close/open path, not link-callback delivery, which
+ * tests/unit/ covers.  Deliberately NOT gated through the reentrancy
+ * window: the real dispatcher does not gate it either (rpc_ops.h:214). */
+static alp_rpc_link_state_t g_last_link_state = ALP_RPC_LINK_UP;
+
+void alp_rpc_notify_link(void *owner, alp_rpc_link_state_t state)
+{
+	(void)owner;
+	g_last_link_state = state;
+}
+
 /* alp_rpc_close_finalize() is normally defined by src/rpc_dispatch.c;
  * this binary does not link alp::sdk.  `owner` is always the address
  * of the calling scenario's own alp_rpc_backend_state_t here.
@@ -493,6 +509,59 @@ static void test_external_close_without_callback_is_synchronous(void)
 	ALP_ASSERT_TRUE(wait_until(&worker_done, TEST_TIMEOUT_MS));
 
 	close(sv[1]);
+}
+
+/* ------------------------------------------------------------------ */
+/* 2b. Issue #1962: a torn-down/invalid endpoint fd reports            */
+/*     ALP_RPC_LINK_LOST and terminates the RX thread instead of       */
+/*     hot-spinning it forever.                                        */
+/* ------------------------------------------------------------------ */
+
+static void test_invalid_fd_reports_link_lost_instead_of_spinning(void)
+{
+	atomic_int worker_done;
+	g_last_link_state = ALP_RPC_LINK_UP;
+
+	/* A closed fd number reproduces POLLNVAL deterministically: poll()
+     * returns a POSITIVE rc with ONLY the error bit set in revents --
+     * never POLLIN -- exactly issue #1962's "torn down or invalid fd"
+     * shape.  Unlike a peer-closed socketpair (which also sets POLLIN,
+     * already handled by the existing n==0/read()-EOF branch below),
+     * this gives the pre-fix `!(fds[0].revents & POLLIN)` guard
+     * nothing to fall through on, so it `continue`s straight back into
+     * another immediate-return poll() -- the actual #1962 hot spin. */
+	int throwaway = socket(AF_UNIX, SOCK_DGRAM, 0);
+	ALP_ASSERT_TRUE(throwaway >= 0);
+
+	/* make_test_channel() must run BEFORE the close() below: it opens
+     * ch->rx_wake_pipe itself, and closing `throwaway` first would
+     * free its fd number for THAT pipe() call to immediately reuse --
+     * aliasing ept_fd onto the (perfectly valid) wake-pipe read end
+     * instead of leaving it invalid. */
+	struct rpc_be          *ch = make_test_channel(throwaway);
+	alp_rpc_backend_state_t st = { .be_data = ch, .ops = &_ops };
+	ch->owner                  = &st;
+	ALP_ASSERT_EQ_INT(close(throwaway), 0);
+
+	ALP_ASSERT_EQ_INT(spawn_rx_thread(ch, &worker_done), 0);
+
+	/* Pre-#1962 fix: this never fires within TEST_TIMEOUT_MS -- the RX
+     * thread spins poll() at 100% of a core forever instead. */
+	ALP_ASSERT_TRUE(wait_until(&worker_done, TEST_TIMEOUT_MS));
+	ALP_ASSERT_EQ_INT(g_last_link_state, ALP_RPC_LINK_LOST);
+
+	/* The thread returned on its own (fatal-error path, not a close),
+     * so it is still joinable and was never handed to y_destroy() --
+     * join and free it by hand instead of through do_close(), which
+     * would try to close(throwaway) a second time. */
+	ALP_ASSERT_EQ_INT(pthread_join(ch->rx_thread, NULL), 0);
+	close(ch->rx_wake_pipe[0]);
+	close(ch->rx_wake_pipe[1]);
+	pthread_mutex_destroy(&ch->tx_mutex);
+	pthread_mutex_destroy(&ch->sub_mutex);
+	pthread_cond_destroy(&ch->call_cond);
+	pthread_mutex_destroy(&ch->call_mutex);
+	free(ch);
 }
 
 /* ------------------------------------------------------------------ */
@@ -847,14 +916,130 @@ static void test_late_staging_call_is_cancelled(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* 7. #2586: a timed-out call poisons the channel until reopen.        */
+/* ------------------------------------------------------------------ */
+
+static int count_frames(int fd)
+{
+	uint8_t buf[ALP_RPC_TX_FRAME_MAX];
+	int     n = 0;
+	while (recv(fd, buf, sizeof buf, MSG_DONTWAIT) > 0) {
+		++n;
+	}
+	return n;
+}
+
+/* The m33_sm firmware's behaviour: echo every frame back verbatim. */
+static atomic_int g_echo_stop;
+
+static void *echo_peer(void *arg)
+{
+	int     fd = *(int *)arg;
+	uint8_t buf[ALP_RPC_TX_FRAME_MAX];
+	while (!atomic_load(&g_echo_stop)) {
+		struct pollfd pfd = { .fd = fd, .events = POLLIN };
+		if (poll(&pfd, 1, 10) > 0) {
+			ssize_t n = recv(fd, buf, sizeof buf, 0);
+			if (n > 0) {
+				(void)send(fd, buf, (size_t)n, 0);
+			}
+		}
+	}
+	return NULL;
+}
+
+/* A peer that answers EVERY frame it receives with call A's stale reply
+ * ("echo" / "A") and counts what it received. */
+static atomic_int g_stale_rx;
+
+static void *stale_peer(void *arg)
+{
+	int     fd = *(int *)arg;
+	uint8_t buf[ALP_RPC_TX_FRAME_MAX];
+	uint8_t late[16];
+	int     late_len = frame_build(late, sizeof late, "echo", "A", 1);
+	while (!atomic_load(&g_echo_stop)) {
+		struct pollfd pfd = { .fd = fd, .events = POLLIN };
+		if (poll(&pfd, 1, 10) > 0 && recv(fd, buf, sizeof buf, 0) > 0) {
+			atomic_fetch_add(&g_stale_rx, 1);
+			(void)send(fd, late, (size_t)late_len, 0);
+		}
+	}
+	return NULL;
+}
+
+static void test_timeout_poisons_until_reopen(void)
+{
+	int sv[2];
+	ALP_ASSERT_EQ_INT(socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+	struct rpc_be          *ch = make_test_channel(sv[0]);
+	alp_rpc_backend_state_t st = { .be_data = ch, .ops = &_ops };
+	ch->owner                  = &st;
+	atomic_int worker_done;
+	ALP_ASSERT_EQ_INT(spawn_rx_thread(ch, &worker_done), 0);
+
+	/* Call A goes out, nobody answers in time. */
+	uint8_t resp[8] = { 0 };
+	size_t  n       = sizeof resp;
+	ALP_ASSERT_EQ_INT(y_call(&st, "echo", "A", 1, resp, &n, 50), ALP_ERR_TIMEOUT);
+
+	ALP_ASSERT_EQ_INT(count_frames(sv[1]), 1); /* A went out */
+
+	/* From here on the peer answers every frame it receives with A's STALE
+	 * reply.  Pre-fix, call B was sent, the peer's stale "A" arrived while B
+	 * was pending, and B returned 'A' (replies match by method name only):
+	 * every reply one call late.  With the fix B is refused before it is
+	 * sent, so the peer never sees a frame. */
+	atomic_store(&g_echo_stop, 0);
+	atomic_store(&g_stale_rx, 0);
+	pthread_t stale;
+	ALP_ASSERT_EQ_INT(pthread_create(&stale, NULL, stale_peer, &sv[1]), 0);
+
+	n = sizeof resp;
+	ALP_ASSERT_EQ_INT(y_call(&st, "echo", "B", 1, resp, &n, 1000), ALP_ERR_NOT_READY);
+	ALP_ASSERT_TRUE(resp[0] != 'A');
+	sleep_ms(50);
+	atomic_store(&g_echo_stop, 1);
+	ALP_ASSERT_EQ_INT(pthread_join(stale, NULL), 0);
+	ALP_ASSERT_EQ_INT(atomic_load(&g_stale_rx), 0); /* B never went out */
+
+	do_close(&st);
+	ALP_ASSERT_TRUE(wait_until(&worker_done, TEST_TIMEOUT_MS));
+	close(sv[1]);
+
+	/* Reopen: a fresh channel calls normally. */
+	ALP_ASSERT_EQ_INT(socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+	ch         = make_test_channel(sv[0]);
+	st.be_data = ch;
+	ch->owner  = &st;
+	ALP_ASSERT_EQ_INT(spawn_rx_thread(ch, &worker_done), 0);
+	atomic_store(&g_echo_stop, 0);
+	pthread_t peer;
+	ALP_ASSERT_EQ_INT(pthread_create(&peer, NULL, echo_peer, &sv[1]), 0);
+
+	n = sizeof resp;
+	ALP_ASSERT_EQ_INT(y_call(&st, "echo", "C", 1, resp, &n, 1000), ALP_OK);
+	ALP_ASSERT_EQ_INT((int)n, 1);
+	ALP_ASSERT_EQ_INT(resp[0], 'C');
+
+	atomic_store(&g_echo_stop, 1);
+	ALP_ASSERT_EQ_INT(pthread_join(peer, NULL), 0);
+	do_close(&st);
+	ALP_ASSERT_TRUE(wait_until(&worker_done, TEST_TIMEOUT_MS));
+	close(sv[1]);
+}
+
+/* ------------------------------------------------------------------ */
 
 int main(void)
 {
 	test_self_close_no_uaf_no_selfjoin();
 	test_external_close_without_callback_is_synchronous();
+	test_invalid_fd_reports_link_lost_instead_of_spinning();
 	test_concurrent_external_vs_self_close_is_single_shot();
 	test_call_vs_close_no_uaf();
 	test_send_vs_close_no_uaf();
 	test_late_staging_call_is_cancelled();
+	test_timeout_poisons_until_reopen();
 	ALP_TEST_SUMMARY();
 }

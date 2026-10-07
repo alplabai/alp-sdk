@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2N101 OPTIGA Trust M (U33, BRD_I2C = i2c-8, 0x30): read the IFX
+# I2C protocol I2C_STATE register (address 0x82, 4 bytes).  The IFX I2C
+# protocol is register-addressed: a transaction writes the register
+# address, then reads.  A bare read, or i2cdetect's SMBus quick/read-byte
+# probe, is not a valid transaction and is NACKed (bench 2026-09-30,
+# #2507).  Writing 0x82 only selects the register to read; nothing is
+# written to the device's data or NVM.  The part NACKs the FIRST
+# transaction(s) after idle while it wakes from sleep (seconds after a
+# long idle), so the probe retries (see below).
+# The part NACKs the first transaction after idle and stays awake only a few
+# ms (bench 2026-10-07: gaps of 10-50 ms never ACK, 1 or 5 ms ACK on attempt
+# 2-3), so attempts are ~1 ms apart, capped at 100 (#2753).
+# Presence + protocol liveness only; the APDU-level check is
+# ../v2m103-x-evk/v2n-secure-element-sign.yaml.
+
+schema_version: 1
+name: v2n101-optiga-present
+description: |
+  OPTIGA Trust M answers the IFX I2C I2C_STATE read (reg 0x82) at 0x30 on i2c-8.
+
+flash_method: ssh-run
+ssh_command: |-
+  for i in $(seq 1 100); do
+    if i2ctransfer -f -y 8 w1@0x30 0x82 >/dev/null 2>&1; then
+      sleep 0.01
+      s=$(i2ctransfer -f -y 8 r4@0x30 2>/dev/null) && { echo "HIL_OPTIGA_I2C_STATE $s"; echo HIL_OPTIGA_ACK; break; }
+    fi
+    sleep 0.001
+  done
+
+serial:
+  duration_s: 15
+  expect_contains:
+    - "HIL_OPTIGA_ACK"

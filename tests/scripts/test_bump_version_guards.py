@@ -47,6 +47,9 @@ def bv(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "SDK_VERSION_YAML", tmp_path / "sdk_version.yaml")
     monkeypatch.setattr(module, "CHANGELOG", tmp_path / "CHANGELOG.md")
     monkeypatch.setattr(module, "CHANGELOG_D", tmp_path / "changelog.d")
+    monkeypatch.setattr(module, "VERSION_H", tmp_path / "version.h")
+    monkeypatch.setattr(module, "PYPROJECT", tmp_path / "pyproject.toml")
+    monkeypatch.setattr(module, "BANNER_C", tmp_path / "alp_banner.c")
     return module
 
 
@@ -159,6 +162,123 @@ def test_slicing_with_only_readme_in_changelog_d_is_not_blocked(bv):
     assert "## [v0.16.0]" in bv.CHANGELOG.read_text(encoding="utf-8")
 
 
+def test_a_full_bump_regenerates_the_emit_goldens_too(bv, monkeypatch, capsys):
+    """#1461: build-plan's `sdkVersion` and a released scaffold's README
+    doc links both bake in metadata/sdk_version.yaml's version, so a bump
+    must refresh tests/fixtures/emit-snapshots/ the same way it already
+    refreshes the ABI snapshot -- not leave a human to discover the drift
+    the next time check_emit_snapshots.py runs.
+
+    Regression-proof: comment out the `regenerate_emit_snapshots(...)`
+    call in `main()` and this test fails (no recorded --update call).
+    """
+    bv.SDK_VERSION_YAML.write_text("version: 0.15.0\nstatus:  released\n", encoding="utf-8")
+    bv.CHANGELOG.write_text(
+        "# Changelog\n\n## [Unreleased] - v0.16.0 candidate\n\nbody\n", encoding="utf-8"
+    )
+    # main() also rewrites these three -- point them at scratch files so
+    # the test can't touch the real repo checkout.
+    version_h = bv.REPO / "version.h"
+    version_h.write_text(
+        "#define ALP_VERSION_MAJOR 0\n"
+        "#define ALP_VERSION_MINOR 15\n"
+        "#define ALP_VERSION_PATCH 0\n"
+        '#define ALP_VERSION_STRING "0.15.0"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bv, "VERSION_H", version_h)
+    pyproject = bv.REPO / "pyproject.toml"
+    pyproject.write_text('[project]\nversion = "0.15.0"\n', encoding="utf-8")
+    monkeypatch.setattr(bv, "PYPROJECT", pyproject)
+    banner_c = bv.REPO / "alp_banner.c"
+    banner_c.write_text("/* Alp SDK 0.15.0 */\n", encoding="utf-8")
+    monkeypatch.setattr(bv, "BANNER_C", banner_c)
+    # regenerate_abi_snapshot() only prints a REPO-relative path after the
+    # (mocked) subprocess call -- ABI_DIR was computed at import time
+    # against the real REPO, so it must move too.
+    monkeypatch.setattr(bv, "ABI_DIR", bv.REPO / "docs" / "abi")
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(bv.subprocess, "check_call",
+                        lambda cmd, **kw: calls.append(list(cmd)))
+    monkeypatch.setattr(sys, "argv", ["bump_version.py", "--to", "0.16.0"])
+
+    rc = bv.main()
+
+    assert rc == 0
+    emit_calls = [c for c in calls if str(bv.EMIT_SNAPSHOT_TOOL) in c]
+    assert len(emit_calls) == 1, f"expected exactly one --emit-goldens refresh, got: {calls}"
+    assert "--update" in emit_calls[0]
+
+
+# ---------------------------------------------------------------------
+# alp-sdk#2350 round 2: `verify_changelog_citations()` is the release-time
+# hook that closes the drift window `slice_changelog()` would otherwise
+# open -- a drift left unresolved at exactly the moment [Unreleased]
+# freezes into history ships wrong forever, since a released section is
+# never rewritten by `--fix`.
+# ---------------------------------------------------------------------
+
+
+def test_verify_changelog_citations_passes_when_the_check_succeeds(
+        bv, monkeypatch, capsys):
+    """A clean `--strict-lines` run just reports OK and returns -- no raise."""
+    calls: list[list[str]] = []
+    kwargs: list[dict] = []
+    monkeypatch.setattr(
+        bv.subprocess, "check_call",
+        lambda cmd, **kw: (calls.append(list(cmd)), kwargs.append(kw)))
+
+    bv.verify_changelog_citations()
+
+    assert len(calls) == 1
+    assert calls[0][1:] == [str(bv.CHANGELOG_CITATIONS_TOOL), "--strict-lines"]
+    # Pinned to the repo root (alp-sdk#2350 round 3): the checker grades the
+    # tree its cwd resolves to, so an out-of-checkout bump must not leak in.
+    assert kwargs[0].get("cwd") == bv.REPO
+    assert "OK (--strict-lines)" in capsys.readouterr().out
+
+
+def test_verify_changelog_citations_refuses_when_the_check_fails(bv, monkeypatch):
+    """A drifted (or otherwise broken) citation must abort the bump before
+    anything is written -- naming `--fix` as the remedy, not running it."""
+    import subprocess as _subprocess
+
+    def _fail(cmd, **kw):
+        raise _subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(bv.subprocess, "check_call", _fail)
+
+    with pytest.raises(SystemExit) as excinfo:
+        bv.verify_changelog_citations()
+
+    assert "--strict-lines" in str(excinfo.value)
+    assert "check_changelog_citations.py --fix" in str(excinfo.value)
+
+
+def test_main_refuses_the_bump_before_writing_anything_on_a_citation_failure(
+        bv, monkeypatch):
+    """The hook runs FIRST in main(), before any file is touched -- a bump
+    that already wrote half its files then aborted would be worse than one
+    that never started."""
+    import subprocess as _subprocess
+
+    bv.SDK_VERSION_YAML.write_text("version: 0.15.0\n", encoding="utf-8")
+
+    def _fail(cmd, **kw):
+        raise _subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(bv.subprocess, "check_call", _fail)
+    monkeypatch.setattr(sys, "argv", ["bump_version.py", "--to", "0.16.0"])
+
+    with pytest.raises(SystemExit):
+        bv.main()
+
+    # sdk_version.yaml must be untouched -- the refusal happened before any
+    # write step ran.
+    assert bv.SDK_VERSION_YAML.read_text(encoding="utf-8") == "version: 0.15.0\n"
+
+
 def test_the_repo_changelog_has_exactly_one_heading_per_version():
     """The real CHANGELOG, not a fixture -- this is what release.yml slices."""
     import collections
@@ -169,3 +289,131 @@ def test_the_repo_changelog_has_exactly_one_heading_per_version():
     duplicates = [v for v, n in collections.Counter(headings).items() if n > 1]
 
     assert not duplicates, f"duplicate CHANGELOG version headings: {duplicates}"
+
+
+# ---------------------------------------------------------------------
+# #1902: a pre-release bump (`--to X.Y.Z-rcN`) must make the checkout
+# identify itself as an rc, not silently declare its eventual GA version.
+# ---------------------------------------------------------------------
+
+
+def test_prerelease_bump_skips_the_changelog_slice(bv):
+    """An rc has no GA CHANGELOG section of its own yet -- slicing one would
+    starve release.yml's documented `## [Unreleased]` pre-release fallback
+    of any content (it only ever searches for the CORE version's heading)."""
+    bv.CHANGELOG.write_text(
+        "# Changelog\n\n"
+        "## [Unreleased] - v0.16.0 candidate\n\n"
+        "work in progress\n",
+        encoding="utf-8",
+    )
+    before = bv.CHANGELOG.read_text(encoding="utf-8")
+
+    bv.slice_changelog("0.16.0-rc1", dry_run=False)
+
+    assert bv.CHANGELOG.read_text(encoding="utf-8") == before
+    assert "## [v0.16.0-rc1]" not in before  # sanity: really wasn't sliced
+
+
+def test_ga_bump_still_slices_the_changelog(bv):
+    """Regression: a bare (non-prerelease) `--to` must be unaffected."""
+    bv.CHANGELOG.write_text(
+        "# Changelog\n\n"
+        "## [Unreleased] - v0.16.0 candidate\n\n"
+        "work in progress\n",
+        encoding="utf-8",
+    )
+
+    bv.slice_changelog("0.16.0", dry_run=False)
+
+    assert "## [v0.16.0]" in bv.CHANGELOG.read_text(encoding="utf-8")
+
+
+def test_prerelease_bump_writes_the_full_string_to_version_h(bv):
+    """ALP_VERSION_STRING carries the suffix; MAJOR/MINOR/PATCH stay the
+    plain core integers -- this is the actual self-identification fix."""
+    bv.VERSION_H.write_text(
+        '#define ALP_VERSION_MAJOR 0\n'
+        '#define ALP_VERSION_MINOR 15\n'
+        '#define ALP_VERSION_PATCH 0\n'
+        '#define ALP_VERSION_STRING "0.15.0"\n',
+        encoding="utf-8",
+    )
+
+    bv.update_version_h("0.16.0-rc1", dry_run=False)
+
+    text = bv.VERSION_H.read_text(encoding="utf-8")
+    assert "#define ALP_VERSION_MAJOR 0" in text
+    assert "#define ALP_VERSION_MINOR 16" in text
+    assert "#define ALP_VERSION_PATCH 0" in text
+    assert '#define ALP_VERSION_STRING "0.16.0-rc1"' in text
+
+
+def test_prerelease_bump_pins_pyproject_and_banner_to_the_core_version(bv):
+    """PEP 440 doesn't accept a bare "-rc1" suffix, and neither file is the
+    self-identification surface -- both stay pinned to the core triple,
+    unlike version.h's ALP_VERSION_STRING above."""
+    bv.PYPROJECT.write_text('[project]\nname = "alp-sdk-cli"\nversion = "0.15.0"\n',
+                             encoding="utf-8")
+    bv.BANNER_C.write_text(
+        "/*\n * Sample banner:\n *\n"
+        " *   Alp SDK 0.15.0  |  E1M-AEN801  |  (c) Alp Lab AB\n */\n",
+        encoding="utf-8",
+    )
+
+    bv.update_pyproject("0.16.0-rc1", dry_run=False)
+    bv.update_banner_c("0.16.0-rc1", dry_run=False)
+
+    assert 'version = "0.16.0"' in bv.PYPROJECT.read_text(encoding="utf-8")
+    assert "-rc1" not in bv.PYPROJECT.read_text(encoding="utf-8")
+    assert "Alp SDK 0.16.0" in bv.BANNER_C.read_text(encoding="utf-8")
+    assert "-rc1" not in bv.BANNER_C.read_text(encoding="utf-8")
+
+
+def test_ga_bump_after_an_rc_slices_the_changelog_normally(bv):
+    """The two-step rc-then-GA workflow end to end: the rc bump leaves
+    [Unreleased] open (previous test), and the LATER bare bump does the
+    real slice with no leftover rc heading in the way."""
+    bv.CHANGELOG.write_text(
+        "# Changelog\n\n"
+        "## [Unreleased] - v0.16.0 candidate\n\n"
+        "work in progress\n",
+        encoding="utf-8",
+    )
+    bv.slice_changelog("0.16.0-rc1", dry_run=False)  # rc: no-op, per above
+
+    bv.slice_changelog("0.16.0", dry_run=False)  # later GA bump: real slice
+
+    text = bv.CHANGELOG.read_text(encoding="utf-8")
+    assert "## [v0.16.0]" in text
+    assert "## [v0.16.0-rc1]" not in text  # never created
+
+
+def _stub_bump_steps(bv, monkeypatch, calls):
+    monkeypatch.setattr(bv, "read_current_version", lambda: "0.0.0")
+    monkeypatch.setattr(bv, "verify_changelog_citations", lambda: calls.append("citations"))
+    for name in (
+        "update_sdk_version_yaml",
+        "slice_changelog",
+        "update_version_h",
+        "update_pyproject",
+        "update_banner_c",
+        "regenerate_abi_snapshot",
+        "regenerate_emit_snapshots",
+    ):
+        monkeypatch.setattr(bv, name, lambda *a, **k: None)
+
+
+@pytest.mark.parametrize(
+    "target, expected",
+    [("1.2.3", ["citations"]), ("1.2.3-rc1", [])],
+)
+def test_the_strict_citation_check_runs_only_on_ga_bumps(bv, monkeypatch, target, expected):
+    """A GA bump freezes [Unreleased] into history, so drifted citations must
+    be refused first; an rc bump freezes nothing (slice_changelog returns
+    early), so it must not be blocked by advisory drift (#2350)."""
+    calls: list[str] = []
+    _stub_bump_steps(bv, monkeypatch, calls)
+    monkeypatch.setattr(sys, "argv", ["bump_version.py", "--to", target, "--dry-run"])
+    assert bv.main() == 0
+    assert calls == expected

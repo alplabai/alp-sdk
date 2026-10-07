@@ -52,6 +52,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "alp/ext/deepx/inference.h"
 #include "alp/inference.h"
 
 #include "alp_internal.h"
@@ -59,7 +60,7 @@
 #include "inference_handle_internal.h"
 
 #ifndef ALP_SDK_MAX_INFERENCE_HANDLES
-#define ALP_SDK_MAX_INFERENCE_HANDLES 2
+#define ALP_SDK_MAX_INFERENCE_HANDLES 4 /* src/yocto/CMakeLists.txt overrides */
 #endif
 
 #ifndef ARRAY_SIZE
@@ -111,6 +112,9 @@ alp_status_t
 alp_inference_deepx_get_output(struct alp_inference *h, size_t index, alp_inference_tensor_t *out);
 alp_status_t alp_inference_deepx_invoke(struct alp_inference *h);
 void         alp_inference_deepx_close(struct alp_inference *h);
+alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, uint32_t mask);
+alp_status_t alp_inference_deepx_get_status(struct alp_inference      *h,
+                                            alp_deepx_device_status_t *out);
 #endif
 
 #if defined(ALP_SDK_USE_DRPAI_V2N)
@@ -140,30 +144,34 @@ void         alp_inference_ort_close(struct alp_inference *h);
 /* ------------------------------------------------------------------ */
 /* Auto-select policy                                                  */
 /*                                                                     */
-/* On Yocto the prevailing reason for choosing AUTO is "use the NPU   */
-/* on this SoM."  DEEPX_DX wins first on V2N-M1.  Ethos-U / DRP-AI    */
-/* slots land alongside task #14.  CPU (ONNX Runtime) is last: an    */
-/* NPU-bearing SoM must never silently fall to the CPU floor.         */
+/* AUTO resolves from the model FORMAT: each compiled-in backend loads */
+/* exactly one format (see the open() switch below), so the format     */
+/* names the backend and the SoM's NPU set (the PACKAGECONFIG the      */
+/* machine selects) decides whether it is present.  No format is       */
+/* accepted by two backends, so there is no priority ladder to keep.   */
+/* A format whose backend is not compiled in resolves to AUTO, which   */
+/* the caller reports as ALP_ERR_NOSUPPORT -- an NPU-bearing SoM never */
+/* silently falls to CPU for an NPU model.                             */
 /* ------------------------------------------------------------------ */
 
-static alp_inference_backend_t resolve_auto(void)
+static alp_inference_backend_t resolve_auto(const alp_inference_config_t *cfg)
 {
-#if defined(ALP_SDK_USE_DEEPX_DXM1)
-	/* DEEPX DX-M1 wins first on V2N-M1: the companion NPU is the SoM's
-     * reason for shipping. */
-	return ALP_INFERENCE_BACKEND_DEEPX_DXM1;
-#elif defined(ALP_SDK_USE_DRPAI_V2N)
-	/* Plain V2N (no DX-M1): the on-SoC DRP-AI3 is the NPU. */
-	return ALP_INFERENCE_BACKEND_DRPAI;
-#elif defined(ALP_SDK_USE_ORT_CPU)
-	/* No NPU compiled in: the A55s run the model on CPU via ONNX Runtime.
-	 * Deliberately LAST -- an NPU-bearing SoM must never silently fall to
-	 * CPU under AUTO, because that is a 10-100x throughput cliff the caller
-	 * did not ask for. */
-	return ALP_INFERENCE_BACKEND_CPU;
-#else
-	return ALP_INFERENCE_BACKEND_AUTO; /* signals "nothing available" */
+	switch (cfg->format) {
+#if defined(ALP_SDK_USE_DRPAI_V2N)
+	case ALP_INFERENCE_MODEL_DRPAI:
+		return ALP_INFERENCE_BACKEND_DRPAI;
 #endif
+#if defined(ALP_SDK_USE_DEEPX_DXM1)
+	case ALP_INFERENCE_MODEL_DXNN:
+		return ALP_INFERENCE_BACKEND_DEEPX_DXM1;
+#endif
+#if defined(ALP_SDK_USE_ORT_CPU)
+	case ALP_INFERENCE_MODEL_ONNX:
+		return ALP_INFERENCE_BACKEND_CPU;
+#endif
+	default:
+		return ALP_INFERENCE_BACKEND_AUTO; /* signals "nothing available" */
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -191,7 +199,7 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 
 	alp_inference_backend_t backend = cfg->backend;
 	if (backend == ALP_INFERENCE_BACKEND_AUTO) {
-		backend = resolve_auto();
+		backend = resolve_auto(cfg);
 		if (backend == ALP_INFERENCE_BACKEND_AUTO) {
 			/* Nothing compiled in.  Honour the v0.1 contract: surface
              * is shipped so apps link cleanly; the runtime answer is
@@ -214,21 +222,30 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 	 * comment for why every OTHER access to this field is atomic). */
 	h->last_invoke_latency_us = UINT64_MAX;
 
+	/* Each compiled-in backend loads exactly one model format.  Refuse a
+	 * mismatch HERE, before its open hook sees the bytes: on E1M-V2M103 an
+	 * `.onnx` blob opened under AUTO (DRP-AI resolved) went straight into
+	 * the DRP-AI tar extractor, which is the wrong parser and, before its
+	 * SIGPIPE guard, killed the app.  The header already documents
+	 * "unsupported model format" as ALP_ERR_INVAL. */
 	alp_status_t rc = ALP_ERR_NOSUPPORT;
 	switch (backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
 	case ALP_INFERENCE_BACKEND_DEEPX_DXM1:
-		rc = alp_inference_deepx_open(h, cfg);
+		rc = cfg->format == ALP_INFERENCE_MODEL_DXNN ? alp_inference_deepx_open(h, cfg)
+		                                             : ALP_ERR_INVAL;
 		break;
 #endif
 #if defined(ALP_SDK_USE_DRPAI_V2N)
 	case ALP_INFERENCE_BACKEND_DRPAI:
-		rc = alp_inference_drpai_open(h, cfg);
+		rc = cfg->format == ALP_INFERENCE_MODEL_DRPAI ? alp_inference_drpai_open(h, cfg)
+		                                              : ALP_ERR_INVAL;
 		break;
 #endif
 #if defined(ALP_SDK_USE_ORT_CPU)
 	case ALP_INFERENCE_BACKEND_CPU:
-		rc = alp_inference_ort_open(h, cfg);
+		rc = cfg->format == ALP_INFERENCE_MODEL_ONNX ? alp_inference_ort_open(h, cfg)
+		                                             : ALP_ERR_INVAL;
 		break;
 #endif
 	default:
@@ -527,4 +544,39 @@ void alp_inference_close(alp_inference_t *inf)
 	}
 	alp_lifecycle_set(&inf->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	pool_release(inf);
+}
+
+/* ------------------------------------------------------------------ */
+/* <alp/ext/deepx/inference.h> (#482)                                  */
+/* ------------------------------------------------------------------ */
+
+alp_status_t alp_deepx_inference_bind_cores(alp_inference_t *inf, uint32_t mask)
+{
+	if (inf == NULL) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) return ALP_ERR_NOT_READY;
+	alp_status_t rc = ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+#if defined(ALP_SDK_USE_DEEPX_DXM1)
+	if (inf->backend == ALP_INFERENCE_BACKEND_DEEPX_DXM1) {
+		rc = alp_inference_deepx_bind_cores(inf, mask);
+	}
+#else
+	(void)mask;
+#endif
+	alp_handle_op_leave(&inf->active_ops);
+	return rc;
+}
+
+alp_status_t alp_deepx_inference_get_status(alp_inference_t           *inf,
+                                            alp_deepx_device_status_t *status_out)
+{
+	if (inf == NULL || status_out == NULL) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) return ALP_ERR_NOT_READY;
+	alp_status_t rc = ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+#if defined(ALP_SDK_USE_DEEPX_DXM1)
+	if (inf->backend == ALP_INFERENCE_BACKEND_DEEPX_DXM1) {
+		rc = alp_inference_deepx_get_status(inf, status_out);
+	}
+#endif
+	alp_handle_op_leave(&inf->active_ops);
+	return rc;
 }

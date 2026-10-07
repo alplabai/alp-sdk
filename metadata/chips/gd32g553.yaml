@@ -10,13 +10,25 @@ driver_status:    partial               # host driver: full surface.
                                         # COUNTER/TRNG/TMU/PWM_CAPTURE/PWM_SINGLE_PULSE/
                                         # TIMER_SYNC/POWER_MODE_SET/ADC_STREAM/ADC_DSP_CHAIN_*
                                         # bodies landed (see docs/gd32-bridge-protocol.md +
-                                        # firmware/gd32-bridge/hal/gd32/init.c).  Still partial:
-                                        # PWM_CONFIGURE + ADC_CONFIGURE only accept defaults
-                                        # (#495 / #494); ADC DSP chains bind but don't yet
-                                        # transform stream samples (#496); PWM_CAPTURE edges
-                                        # pending a V2N pad-routing rework.  All of the above
-                                        # are still HiL-gated end to end -- see
-                                        # docs/v1.0-readiness.md §1a.
+                                        # firmware/gd32-bridge/hal/gd32/init.c).
+                                        #
+                                        # Still partial, for reasons that are NOT open issues
+                                        # -- #494, #495 and #496 all closed (#494/#495 via
+                                        # #730, #496 via #764).  What remains:
+                                        #   * PWM dead-time + break stay NOSUPPORT because the
+                                        #     V2N connector routes neither the complementary
+                                        #     CHxN pad nor a BRK pad.  A carrier-routing limit
+                                        #     needing a future carrier revision, not firmware
+                                        #     (#495's closing comment).
+                                        #   * ADC 14/16-bit is unsupported (DRES tops out at 12,
+                                        #     UM Rev1.2 p.434 section 17.4.16).
+                                        #   * End-to-end DSP-chain analog measurement is
+                                        #     deferred: the bench ADC pins float (#496's
+                                        #     closing comment).
+                                        #   * PWM_CAPTURE edges pending a V2N pad-routing
+                                        #     rework.
+                                        # All of the above are still HiL-gated end to end --
+                                        # see docs/v1.0-readiness.md §1a.
 display_name:     "GigaDevice GD32G553MEY7TR Cortex-M33 supervisor MCU"
 vendor:           gigadevice
 mpn_population:
@@ -43,6 +55,14 @@ notes: |
     - GD32_NRST  (P74; shared with primary PMIC reset-out -- open-drain)
     - GD32_SWDIO (P70; host drives SWD data; displaces former GPT0_GTIOC0A / E1M PWM2 Renesas-side drive)
     - GD32_SWCLK (P71; host drives SWD clock; displaces former GPT0_GTIOC0B / E1M PWM3 Renesas-side drive)
+      ** PA14 / P71 has a DUAL ROLE (bridge protocol v0.15, docs/gd32-bridge-protocol.md §3.17): **
+      SWCLK when the ATTN link feature is off (reset default, SWD pull-down), and the
+      bridge's active-HIGH ATTN data-ready output while ATTN is granted.  P71 is an INPUT
+      with a rising-edge IRQ (CM33-owned) in every boot stage; the host drives it as an
+      output only in the SWD recovery path, and only after asserting GD32_NRST (P74).
+    - E1M-X I2C3 (PC8 SCL / PC9 SDA): the bridge is the bus master.  Linux reaches
+      it over the BRD_I2C link with the v0.17 I2CM_CONFIG / I2CM_XFER / I2CM_RESULT
+      opcodes (docs/gd32-bridge-protocol.md §3.20); the CM33 SPI link does not.
     - SWD header (PA13/PA14) -- still accessible for external probes
       during dev / factory.
 
@@ -75,9 +95,13 @@ signals:
   - { name: GD32_SWDIO,  type: bidir,  v2n_route: "Renesas P70 (was GPT0_GTIOC0A / E1M PWM2)",
       notes: "host-driven SWD data line for in-field reflash + recovery" }
   - { name: GD32_SWCLK,  type: input,  v2n_route: "Renesas P71 (was GPT0_GTIOC0B / E1M PWM3)",
-      notes: "host-driven SWD clock line" }
+      notes: "host-driven SWD clock line; dual role -- GD32 PA14 drives it as the active-HIGH ATTN data-ready output while the v0.15 ATTN link feature is granted (host: input + rising-edge IRQ), SWCLK otherwise (host drives only with GD32_NRST asserted)" }
   - { name: GD32_NRST,   type: input,  v2n_route: "Renesas P74 (open-drain, shared with primary PMIC reset-out)",
       notes: "host pad configured open-drain; drive low to assert reset, HiZ to release" }
+  - { name: E1M_I2C3_SCL, type: bidir, v2n_route: "(GD32 PC8, E1M-X pad A24)",
+      notes: "I2C3 master proxy (bridge protocol v0.17, I2C link only): hi-Z until I2CM_CONFIG; no SoM pull-up on 2625-R2, carrier or module supplies them" }
+  - { name: E1M_I2C3_SDA, type: bidir, v2n_route: "(GD32 PC9, E1M-X pad A23)",
+      notes: "I2C3 master proxy (bridge protocol v0.17, I2C link only): hi-Z until I2CM_CONFIG; no SoM pull-up on 2625-R2, carrier or module supplies them" }
   - { name: GD32_SWDIO_HDR, type: bidir, v2n_route: "(programming header, GD32 PA13)" }
   - { name: GD32_SWCLK_HDR, type: input, v2n_route: "(programming header, GD32 PA14)" }
   - { name: VDDA,  type: power,  notes: "analog supply; datasheet ball J5" }
@@ -92,8 +116,12 @@ signals:
 # clock is the 216 MHz CK_TIMER (= CK_APB at DIV1 = the Cortex-M33
 # core clock; this part has NO separate timer PLL -- a long-standing
 # "240 MHz timer clock" claim here was invented and is corrected as
-# of fw v0.2.4); effective LSB ~4.63 ns; maximum period ~303 us at
-# full 16-bit count.  Firmware translates caller `period_ns` /
+# of fw v0.2.4).  UNPRESCALED that clock would give a ~4.63 ns LSB and a
+# ~303 us maximum period at full 16-bit count, and this file asserted
+# those as the achievable figures -- but the firmware always programs a
+# fixed 216:1 prescale to a 1 MHz tick, so the real numbers are a 1 us
+# LSB and a 65.536 ms maximum period (#1730).  Firmware translates caller
+# `period_ns` /
 # `duty_ns` from CMD_PWM_SET into the timer's CAR / CHnCV register
 # pair and reports the register-derived actual via CMD_PWM_GET.
 pwm_routing:
@@ -110,10 +138,15 @@ pwm_routing:
   notes: |
     Both TIMER0 and TIMER7 are 16-bit advanced-control timers with
     dead-time generation, complementary output, and break-input
-    support.  The 16-bit counter at the 216 MHz CK_TIMER gives
-    ~4.63 ns LSB; periods longer than ~303 us require the firmware's
-    repetition-counter / prescaler logic (firmware-internal, not
-    surfaced via CMD_PWM_SET).  Channel ordering matches the
+    support.  The 16-bit counter runs off the 216 MHz CK_TIMER, but
+    the firmware always applies a fixed 216:1 prescale to a 1 MHz
+    tick, so the surfaced resolution is a 1 us LSB and the longest
+    period is 65.536 ms -- NOT the ~4.63 ns / ~303 us unprescaled
+    figures this note previously gave, and not something a
+    repetition-counter path extends (#1730).  A period longer than
+    65.536 ms is currently clamped by the firmware and still reported
+    as success, so a caller cannot detect it from the return code
+    alone; read it back with CMD_PWM_GET.  Channel ordering matches the
     GD32G553 datasheet -- note that on TIMER0, MCH2 (not MCH1) maps
     to E1M PWM1 on V2N pad PB1; firmware honours the datasheet
     layout.
@@ -197,3 +230,5 @@ verification:
                                     # docs/test-plan.md "v0.6.0 -- V2N GD32-bridge
                                     # silicon campaign" and docs/verification-status.md.
   smoke_tests:    null_arg_guard
+tracking:
+  blocker: "ADR 0017 tier decision pending"

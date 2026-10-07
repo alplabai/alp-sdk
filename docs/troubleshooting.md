@@ -101,8 +101,8 @@ CMake Error: CMAKE_CXX_COMPILER not set, after EnableLanguage
 
 Despite what the first line suggests, the fix is not to pick a
 different build tool -- `ninja` is Zephyr's build generator on every
-host.  `scripts/bootstrap.sh` / `bootstrap.ps1` and `python -m alp_cli
-doctor` both check for it and FAIL with an install command when it's
+host.  `scripts/bootstrap.sh` / `bootstrap.ps1` and `tan doctor`
+both check for it and FAIL with an install command when it's
 missing; if you hit the raw CMake error above instead, check whether
 you resolved the `hostPrerequisites` finding from `tan doctor`. Installing it
 clears all three lines above (the
@@ -150,14 +150,14 @@ chips:
 
 ## Runtime errors (return codes)
 
-The SDK returns negative `alp_status_t` values; positive 0 is
-success.  Decode tips:
+The SDK returns negative `alp_status_t` values on failure; 0 is
+success (`ALP_OK`).  Decode tips:
 
 | Return                  | Meaning                                                            | First thing to check                                  |
 |-------------------------|--------------------------------------------------------------------|-------------------------------------------------------|
 | `ALP_OK` (0)            | Success.                                                           | —                                                     |
 | `ALP_ERR_INVAL` (-1)    | Invalid argument (NULL pointer, out-of-range value).               | Function args + caller's input validation.            |
-| `ALP_ERR_NOT_READY` (-2)| Peripheral not initialised or chip not ACKing.                     | Was `_open` / `_init` called?  Bus / address correct? |
+| `ALP_ERR_NOT_READY` (-2)| The handle is not in a state to perform this operation.            | Was `_open` / `_init` called?  Bus / address correct? |
 | `ALP_ERR_BUSY` (-3)     | Peripheral busy.                                                   | Concurrent access?  DMA still running?                |
 | `ALP_ERR_TIMEOUT` (-4)  | Transfer timed out.                                                | Slave not responding -- physical wiring?              |
 | `ALP_ERR_IO` (-5)       | Bus / line error.                                                  | CRC mismatch (GD32 bridge), I2C NACK, SPI mode wrong. |
@@ -201,9 +201,11 @@ Either:
 * The firmware is from a different protocol epoch -- rebuild
   the firmware from the matching alp-sdk commit.
 
-### `da9292_v2n_m1_enable_deepx_rail` returns `ALP_ERR_TIMEOUT`
+### `da9292_ch2_sequence` returns `ALP_ERR_TIMEOUT`
 
-The DEEPX rail (DA9292 CH2 to 0.75 V) isn't reaching power-good.
+The DEEPX rail (DA9292 CH2 to 0.75 V) isn't reaching power-good
+(`res.step == DA9292_SEQ_ERR_PG_TIMEOUT`; `res.status_00` / `res.event_00`
+hold the last reads).
 Likely a downstream short on the 0.75 V plane.  Probe:
 
 * CH2 output pin on the DA9292 -- should reach 0.75 V within a
@@ -309,7 +311,7 @@ The EEPROM-side hw_info reader isn't configured.  Set
 id carrying the on-module 24C128.  On V2N / V2N-M1 this is the bus
 matching `ALP_E1M_I2C0` (Renesas RIIC0, `P31`/`P30`); on AEN it's
 SoC I2C2 (DesignWare `i2c_dw`, `P5_6`/`P5_7`, bridge/DNP-selected --
-NOT the slave-only LPI2C0 / BRD_I2C).
+NOT BRD_I2C, a separate bus (SoC I2C0 on the E1M-AEN801 -- #1848)).
 
 ## CI / tooling issues
 

@@ -25,25 +25,44 @@ ALP_BACKEND_ANCHOR(wdt);
 
 #include "alp_z_last_error.h"
 
+/* The pool is indexed by wdt_id: one slot per watchdog INSTANCE, not
+ * one per caller.  The watchdog is the class where a second handle on
+ * the same instance is itself the defect: before #1637, the backend
+ * close path disabled the whole DEVICE rather than the handle's
+ * channel (src/backends/wdt/zephyr_drv.c z_close used to call
+ * wdt_disable(dev) with the error (void)-cast away), so two
+ * subsystems each holding ALP_E1M_WDT0 meant the first one to close
+ * silently removed the other's protection, with no error on any path.
+ * z_close() no longer calls wdt_disable(dev) at all -- see its own
+ * comment for what closing does and does not disarm now -- so it is
+ * indexing by id, below, that actually prevents this class of defect:
+ * making the existing atomic slot claim BE the exclusivity check, one
+ * compare-exchange, no scan of the pool, and no TOCTOU window between
+ * "is this instance taken?" and "take it".  Issue #1637.
+ *
+ * The pool size is therefore also the portable instance bound, which
+ * is exactly what the public surface names -- ALP_E1M_WDT0..1 /
+ * ALP_E1M_X_WDT0..1 are 0u and 1u (include/alp/e1m_pinout.h:165-166,
+ * include/alp/e1m_x_pinout.h:194-195). */
 #ifndef CONFIG_ALP_SDK_MAX_WDT_HANDLES
 #define CONFIG_ALP_SDK_MAX_WDT_HANDLES 2
 #endif
 
 static struct alp_wdt _pool[CONFIG_ALP_SDK_MAX_WDT_HANDLES];
 
-static struct alp_wdt *_alloc(void)
+/* Claim the slot belonging to @p wdt_id.  Caller has already bounded
+ * wdt_id against the pool.  NULL means the instance is already open. */
+static struct alp_wdt *_alloc(uint32_t wdt_id)
 {
-	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_WDT_HANDLES; ++i) {
-		/* Atomic claim: only the winner of the flag flip may touch the
-		 * slot's other fields (in_use is the struct's last member, so
-		 * zero everything before it -- incl. lifecycle/active_ops,
-		 * parking a fresh slot at LC_UNOPENED). Issue #629. */
-		if (alp_slot_try_claim(&_pool[i].in_use)) {
-			memset(&_pool[i], 0, offsetof(struct alp_wdt, in_use));
-			return &_pool[i];
-		}
+	/* Atomic claim: only the winner of the flag flip may touch the
+	 * slot's other fields (in_use is the struct's last member, so
+	 * zero everything before it -- incl. lifecycle/active_ops,
+	 * parking a fresh slot at LC_UNOPENED). Issue #629. */
+	if (!alp_slot_try_claim(&_pool[wdt_id].in_use)) {
+		return NULL;
 	}
-	return NULL;
+	memset(&_pool[wdt_id], 0, offsetof(struct alp_wdt, in_use));
+	return &_pool[wdt_id];
 }
 
 static void _free(struct alp_wdt *h)
@@ -54,7 +73,15 @@ static void _free(struct alp_wdt *h)
 alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg)
 {
 	alp_z_clear_last_error();
-	if (cfg == NULL || cfg->timeout_ms == 0u) {
+	if (cfg == NULL || cfg->timeout_ms == 0u ||
+	    cfg->wdt_id >= (uint32_t)CONFIG_ALP_SDK_MAX_WDT_HANDLES ||
+	    (cfg->on_timeout == ALP_WDT_INTERRUPT_ONLY && cfg->on_expire == NULL) ||
+	    cfg->window_min_ms >= cfg->timeout_ms ||
+	    (cfg->flags & ~(ALP_WDT_PAUSE_IN_SLEEP | ALP_WDT_PAUSE_HALTED_BY_DEBUG)) != 0u) {
+		/* The last arm rejects an INTERRUPT_ONLY request with no way to
+		 * observe the interrupt -- that combination neither resets the
+		 * SoC nor notifies anyone, which is strictly worse than not
+		 * offering the mode at all (#1637). */
 		alp_z_set_last_error(ALP_ERR_INVAL);
 		return NULL;
 	}
@@ -68,14 +95,17 @@ alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg)
 		alp_z_set_last_error(ALP_ERR_NOT_IMPLEMENTED);
 		return NULL;
 	}
-	struct alp_wdt *h = _alloc();
+	struct alp_wdt *h = _alloc(cfg->wdt_id);
 	if (h == NULL) {
-		alp_z_set_last_error(ALP_ERR_NOMEM);
+		/* The instance already has an owner.  Not NOMEM: the pool is
+		 * indexed by wdt_id, so a failed claim is always "this
+		 * watchdog is taken", never "no free slots". */
+		alp_z_set_last_error(ALP_ERR_BUSY);
 		return NULL;
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
 		(void)be->probe(cfg->wdt_id, &refined);
@@ -97,7 +127,12 @@ alp_status_t alp_wdt_feed(alp_wdt_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->feed(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->feed == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->feed(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -107,7 +142,12 @@ alp_status_t alp_wdt_disable(alp_wdt_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->disable(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->disable == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->disable(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }

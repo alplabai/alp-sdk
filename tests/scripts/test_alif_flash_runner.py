@@ -21,6 +21,10 @@ Run locally:
 
 from __future__ import annotations
 
+import json
+import logging
+import os
+import re
 import sys
 import types
 from pathlib import Path
@@ -42,12 +46,33 @@ if "runners.core" not in sys.modules:
     class _ZephyrBinaryRunner:
         def __init__(self, cfg):
             self.cfg = cfg
+            # do_run integration tests (below) exercise the #2262 ATOC
+            # guard end to end; they need a check_call that records
+            # rather than actually executing (so a real app-gen-toc /
+            # app-write-mram is never required) and a logger the real
+            # do_run/`_run_atoc_guard` can call unconditionally.
+            self.calls = []
+            self.logger = logging.getLogger("test_alif_flash_runner")
+
+        def check_call(self, cmd, cwd=None):
+            self.calls.append((list(cmd), cwd))
+            _fake_gen_toc_map(cmd, cwd)
 
     _fake_core.RunnerCaps = _RunnerCaps
     _fake_core.ZephyrBinaryRunner = _ZephyrBinaryRunner
     sys.modules["runners.core"] = _fake_core
 
 from runners import alif_flash  # noqa: E402
+
+
+def _fake_gen_toc_map(cmd, cwd):
+    """What a real app-gen-toc leaves behind: build/app-package-map.txt, here
+    with a package start inside the SE-reserved atoc band so the #2234
+    extent check (run before the #2262 guard) passes."""
+    if cmd and Path(str(cmd[0])).name == "app-gen-toc" and cwd:
+        m = Path(cwd) / "build" / "app-package-map.txt"
+        m.parent.mkdir(parents=True, exist_ok=True)
+        m.write_text("APP Package Start Address: 0x8057A000\n", encoding="utf-8", newline="")
 
 
 # ---------------------------------------------------------------------
@@ -192,6 +217,22 @@ def test_select_app_shape_vector_in_sibling_window_raises() -> None:
         alif_flash._select_app_shape(0x802b0000, "HE")
 
 
+def test_select_app_shape_vector_in_a32_window_margin_raises() -> None:
+    # scripts/aen_atoc.SLOT0_WINDOWS['A32_0'] (0x80002000..0x80578000)
+    # covers a margin above M55_HP's ceiling (0x80550000) that belongs to
+    # neither M55 window. Regression guard: this Zephyr-only runner must
+    # still refuse a vector landing in that margin, not silently mis-map
+    # it onto M55_HP's window base -- this is the gap the else-branch's
+    # old 'HE'-or-else-'HP' ternary left open the moment SLOT0_WINDOWS
+    # grew a third key. #1981 review: A32_0 is now excluded from this
+    # runner's window lookup entirely (it never stages an A32 image), so
+    # the refusal is the plain "outside every declared slot0 window"
+    # message, not an A32-specific one that used to mislabel a genuine
+    # M55 mis-link as "staged by a different flash path".
+    with pytest.raises(RuntimeError, match="outside every declared slot0 window"):
+        alif_flash._select_app_shape(0x80560000, "HP")
+
+
 def test_select_app_shape_vector_at_he_window_returns_unchanged_address() -> None:
     # HE keeps the pre-#1069 address unchanged (#1069 decided layout).
     shape = alif_flash._select_app_shape(0x80011F15, "HE")
@@ -235,3 +276,982 @@ def test_build_atoc_config_hp_uses_alp_hp_section() -> None:
     cfg = alif_flash._build_atoc_config("myapp", shape)
     assert '"ALP-HP"' in cfg
     assert '"cpu_id": "M55_HP"' in cfg
+
+
+# ---------------------------------------------------------------------
+# do_run's #2262 pre-burn ATOC guard -- end-to-end against the real
+# do_run/_run_atoc_guard, with only the SE-UART subprocess boundary
+# (alif_flash._run_maintenance) and check_call (see the fake
+# ZephyrBinaryRunner above) stubbed. This exercises the actual wiring:
+# _atoc_section_name -> allowed set, the guard running strictly before
+# app-write-mram, the verdict JSON, and --replace-atoc.
+# ---------------------------------------------------------------------
+
+def _boxed(body: str) -> str:
+    """Wrap raw `| Name | CPU | ... |`-shaped data row(s) in the top
+    separator + `| Name | CPU |` header row + separator + ... + closing
+    separator every real gettoc capture carries -- see
+    `aen_atoc._is_table_structurally_complete`. THIRD #2262 review round:
+    the structural-completeness check's boxless exemption is gone, so
+    every fixture standing in for a genuine "this table is complete and
+    trustworthy" outcome must carry both bookends explicitly now."""
+    sep = "+----------+--------+\n"
+    header = "|   Name   |  CPU   |\n"
+    if not body.endswith("\n"):
+        body += "\n"
+    return sep + header + sep + body + sep
+
+
+_CLEAN_HE_GETTOC = _boxed(
+    "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
+    "      312 |  0.5.0| u V  |\n"
+    "|   ALP-HE | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |"
+    "     4480 |  1.0.0| uLVB |\n"
+)
+
+_FOREIGN_GETTOC = _boxed(
+    "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
+    "      312 |  0.5.0| u V  |\n"
+    "| BOOTLOAD | A32_0  | 0x80002000 | 0x8057A8F0 | ---------- | 0x80002000 |"
+    "    28813 |  0.4.3| u VB |\n"
+    "|   A32_APP | A32_0  | 0x80020000 | 0x8057B2F0 | ---------- | ---------- |"
+    "  2290048 |  1.0.0| u V  |\n"
+    "|   HP_APP | M55-HP | 0x8057D230 | 0x8057C830 | 0x50000000 | 0x50000000 |"
+    "     4480 |  1.0.0| uLVB |\n"
+    "|   HE_APP | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |"
+    "     4480 |  1.0.0| uLVB |\n"
+)
+
+_NO_ATOC_TEXT = "No ATOC found on target device.\n"
+_COMPLIANT_BANNER = "SES A1 v1.110.0 Mar  4 2026 19:06:23\n"
+
+# A pre-provisioned module's factory ATOC (HIGH-2 review, #2262):
+# `zephyr/sysbuild/aen/README.md`'s "SoM-maker provisioning model" --
+# `| MCUBOOT- | M55-HE | ... | uLVB |`.
+_FACTORY_MCUBOOT_GETTOC = _boxed(
+    "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
+    "      312 |  0.5.0| u V  |\n"
+    "| MCUBOOT- | M55-HE | 0x8057D230 | 0x8057C830 | 0x58000000 | 0x58000000 |"
+    "     4480 |  1.0.0| uLVB |\n"
+)
+
+
+class _FakeCfg:
+    def __init__(self, bin_file, build_dir):
+        self.bin_file = bin_file
+        self.build_dir = build_dir
+
+
+def _bin_with_reset_vector_bytes(rv: int, sp: int = 0x20080000) -> bytes:
+    return sp.to_bytes(4, "little") + rv.to_bytes(4, "little") + b"\x00" * 8
+
+
+def _make_runner(tmp_path, device="AE822FA0E5597LS0_HE", reset_vector=0x58000401,
+                  maintenance_available=True, replace_atoc=False):
+    setools = tmp_path / "setools"
+    setools.mkdir()
+    (setools / "app-gen-toc").write_bytes(b"")
+    (setools / "app-write-mram").write_bytes(b"")
+    if maintenance_available:
+        maintenance = setools / "maintenance"
+        maintenance.write_bytes(b"")
+        maintenance.chmod(0o755)  # the guard now checks os.X_OK, not just is_file()
+
+    build_dir = tmp_path / "build"
+    (build_dir / "zephyr").mkdir(parents=True)
+    bin_file = build_dir / "zephyr" / "zephyr.bin"
+    bin_file.write_bytes(_bin_with_reset_vector_bytes(reset_vector))
+
+    cfg = _FakeCfg(bin_file=str(bin_file), build_dir=str(build_dir))
+    runner = alif_flash.AlifFlashBinaryRunner(
+        cfg, device, setools_dir=str(setools), se_uart="fake-uart",
+        se_uart_baud="57600", replace_atoc=replace_atoc)
+    # MEDIUM-4 review (#2262): set these on the INSTANCE, not just relying
+    # on whatever `runners.core` stub happened to install them via
+    # `__init__` above -- `test_rzv2n_mtd_flash_runner.py` installs its
+    # OWN minimal `runners.core` stub (cfg only, no calls/logger/
+    # check_call) guarded by the SAME `if "runners.core" not in
+    # sys.modules` pattern this file uses, so whichever test module
+    # imports first WINS the module-level stub for the whole pytest
+    # session. Measured: `pytest tests/scripts/test_rzv2n_mtd_flash_runner.py
+    # tests/scripts/test_alif_flash_runner.py` (that file first) gave 11
+    # AttributeErrors here (`'AlifFlashBinaryRunner' object has no
+    # attribute 'logger'/'calls'`) before this fix, since do_run's own
+    # `self.logger.warning(...)` a few lines into every real run hit the
+    # rzv2n stub's bare `self.cfg = cfg`. Setting these directly here
+    # makes every runner this helper builds self-sufficient regardless of
+    # import order.
+    runner.calls = []
+    runner.logger = logging.getLogger("test_alif_flash_runner")
+    def _cc(cmd, cwd=None):
+        runner.calls.append((list(cmd), cwd))
+        _fake_gen_toc_map(cmd, cwd)
+    runner.check_call = _cc
+    return runner
+
+
+def _stub_maintenance(monkeypatch, banner=(_COMPLIANT_BANNER, 0), gettoc=("", 0)):
+    def _fake(maintenance_path, se_uart, baud, opt):
+        return banner if opt == "getbanner" else gettoc
+    monkeypatch.setattr(alif_flash, "_run_maintenance", _fake)
+
+
+def _write_mram_was_called(runner) -> bool:
+    return any("app-write-mram" in cmd[0] for cmd, _cwd in runner.calls)
+
+
+def _verdict(runner) -> dict:
+    path = Path(runner.cfg.build_dir) / "alif_flash" / "atoc-guard.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_do_run_refuses_on_foreign_entry_and_never_burns(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_FOREIGN_GETTOC, 0))
+    with pytest.raises(RuntimeError, match="REPLACES every app ATOC entry"):
+        runner.do_run("flash")
+    assert not _write_mram_was_called(runner)
+    verdict = _verdict(runner)
+    assert verdict["status"] == "refused-foreign"
+    for entry in ("BOOTLOAD", "A32_APP", "HP_APP", "HE_APP"):
+        assert entry in verdict["foreign"]
+
+
+def test_do_run_refuses_on_factory_mcuboot_with_a_distinct_message(tmp_path, monkeypatch) -> None:
+    # HIGH-2 review (#2262): a resident factory `MCUBOOT-` entry (a
+    # pre-provisioned module) must NOT get the generic "re-run with
+    # --replace-atoc" refusal text -- that steers an operator straight at
+    # deleting the bootloader that makes the module boot at all. It must
+    # instead name the entry, say what breaks, and point at the supported
+    # Option B (plain J-Link, no ATOC) path.
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_FACTORY_MCUBOOT_GETTOC, 0))
+    with pytest.raises(RuntimeError) as excinfo:
+        runner.do_run("flash")
+    message = str(excinfo.value)
+    assert "MCUBOOT-" in message
+    assert "unable to boot" in message
+    assert "Option B" in message
+    assert not _write_mram_was_called(runner)
+    verdict = _verdict(runner)
+    assert verdict["status"] == "refused-foreign"
+    assert "MCUBOOT-" in verdict["foreign"]
+
+
+def test_do_run_replace_atoc_still_overrides_the_factory_mcuboot_refusal(
+        tmp_path, monkeypatch) -> None:
+    # --replace-atoc remains the explicit override even for a factory
+    # MCUBOOT- entry -- the guard warns, it does not hard-block.
+    runner = _make_runner(tmp_path, replace_atoc=True)
+    _stub_maintenance(monkeypatch, gettoc=(_FACTORY_MCUBOOT_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+    verdict = _verdict(runner)
+    assert verdict["status"] == "replaced"
+    assert "MCUBOOT-" in verdict["foreign"]
+
+
+def test_do_run_success_log_does_not_claim_boot_was_verified(
+        tmp_path, monkeypatch, caplog) -> None:
+    # Review finding (#2262, second round): "the SES has booted the image"
+    # was an unverified success claim -- this runner's only write is
+    # `app-write-mram -p` (never an erase), and the AEN bench notes
+    # document the SE preferring a STALE resident slot0 image over a
+    # freshly written ITCM-load ATOC. The post-burn log line must claim
+    # only what do_run actually knows: the ATOC write itself completed.
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    with caplog.at_level(logging.INFO):
+        runner.do_run("flash")
+    messages = " ".join(r.message for r in caplog.records)
+    assert "has booted" not in messages
+    assert "boot not verified" in messages
+
+
+def test_do_run_clean_board_proceeds_and_burns(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "clear"
+
+
+def test_do_run_verdict_transcript_path_is_absolute_even_with_a_relative_build_dir(
+        tmp_path, monkeypatch) -> None:
+    # Review finding (#2262, second round): the frozen v1 verdict contract
+    # says `transcript` is an "absolute path", but the code only ever built
+    # `Path(cfg.build_dir) / 'alif_flash' / 'atoc-before.txt'` -- absolute
+    # only when west's OWN build_dir happens to be. Drive `do_run` with a
+    # RELATIVE build_dir (chdir into tmp_path first) to prove the verdict's
+    # `transcript` field is resolved to an absolute path regardless.
+    monkeypatch.chdir(tmp_path)
+    runner = _make_runner(tmp_path)
+    runner.cfg.build_dir = os.path.relpath(runner.cfg.build_dir, tmp_path)
+    assert not os.path.isabs(runner.cfg.build_dir)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    verdict = _verdict(runner)
+    assert os.path.isabs(verdict["transcript"]), verdict["transcript"]
+
+
+def test_do_run_no_atoc_found_proceeds_and_burns(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_NO_ATOC_TEXT, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "empty"
+
+
+def test_do_run_refuses_when_maintenance_binary_missing(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path, maintenance_available=False)
+    with pytest.raises(RuntimeError, match="Confirm by hand what is resident"):
+        runner.do_run("flash")
+    assert not _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "refused-unverified"
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="POSIX file mode bits only")
+def test_do_run_refuses_when_maintenance_present_but_not_executable(
+        tmp_path, monkeypatch) -> None:
+    # Review finding (#2262, second round): the guard checked
+    # `maintenance.is_file()` where bash's own guard checks
+    # `[ -x "$SETOOLS_DIR/maintenance" ]` -- a present-but-not-executable
+    # file (bad permissions, a bad extract, ...) must be treated the same
+    # as "no maintenance binary at all", not as "available". Stub
+    # `_run_maintenance` with a CLEAN result: if `maintenance_available`
+    # were wrongly computed True (the `.is_file()`-only bug), this would
+    # burn on a "clear" verdict instead of refusing -- isolates the
+    # availability check itself from the fail-closed-by-coincidence
+    # OSError path a real subprocess exec of a non-executable file would
+    # otherwise take.
+    runner = _make_runner(tmp_path)
+    maintenance = Path(runner.setools_dir) / "maintenance"
+    maintenance.chmod(0o644)  # present, but not executable
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    with pytest.raises(RuntimeError, match="Confirm by hand what is resident"):
+        runner.do_run("flash")
+    assert not _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "refused-unverified"
+
+
+def test_do_run_aborts_on_any_refused_status_not_just_known_strings(
+        tmp_path, monkeypatch) -> None:
+    # Review finding (#2262): `_run_atoc_guard` branched on
+    # `verdict.status == 'refused-unverified'`/`'refused-foreign'`
+    # (stringly-typed), falling through to burn for ANY OTHER status even
+    # though `decide_atoc_guard` had already computed `refused=True` --
+    # every test in this suite and the parity suite asserts on `.refused`,
+    # but the runner was the one consumer that ignored it. A renamed or
+    # newly-added refused status must still abort; simulate one by
+    # monkeypatching `decide_atoc_guard`'s return.
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    fake_verdict = alif_flash._aen_atoc.AtocGuardVerdict(
+        status="refused-something-new", foreign=[], refused=True)
+    monkeypatch.setattr(
+        alif_flash._aen_atoc, "decide_atoc_guard", lambda *a, **k: fake_verdict)
+    with pytest.raises(RuntimeError):
+        runner.do_run("flash")
+    assert not _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "refused-something-new"
+
+
+def test_do_run_unrecognized_format_refusal_does_not_steer_to_replace_atoc(
+        tmp_path, monkeypatch) -> None:
+    # BLOCKER review (#2262, third round): a query that exited 0 with a
+    # valid banner and parsed row(s), but whose transcript carries NEITHER
+    # the header nor any separator, must refuse with a message that says
+    # the format wasn't recognised and asks for the transcript -- NOT the
+    # generic "confirm by hand, then --replace-atoc" wording, which
+    # wrongly implies a human already confirmed what's resident.
+    runner = _make_runner(tmp_path)
+    boxless = "|   BOOTLOAD |  A32_0  | 0x0 | 0x0 |\n"
+    _stub_maintenance(monkeypatch, gettoc=(boxless, 0))
+    with pytest.raises(RuntimeError) as excinfo:
+        runner.do_run("flash")
+    message = str(excinfo.value)
+    assert "matches no recognised gettoc table format" in message
+    assert "file this transcript" in message
+    # The flag name may appear only to say it does NOT apply here -- never
+    # as an instruction to re-run with it.
+    assert "re-run with --replace-atoc" not in message
+    assert "NOT the same situation --replace-atoc is for" in message
+    assert not _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "refused-unverified"
+
+
+def test_do_run_unverified_refusal_warns_about_factory_mcuboot(tmp_path, monkeypatch) -> None:
+    # Minor review fix (#2262): the unverified-read refusal must not
+    # blindly steer an operator at --replace-atoc without first warning
+    # that, on a pre-provisioned module, that flag can delist the factory
+    # MCUBOOT- entry with no chance to see it named (the read never
+    # succeeded, so refused-foreign's own naming never gets a chance to
+    # run).
+    runner = _make_runner(tmp_path, maintenance_available=False)
+    with pytest.raises(RuntimeError) as excinfo:
+        runner.do_run("flash")
+    message = str(excinfo.value)
+    assert "MCUBOOT-" in message
+    assert "aen-provisioning.md" in message
+
+
+def test_do_run_refuses_when_banner_is_missing_or_malformed(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, banner=("not a banner\n", 0), gettoc=(_CLEAN_HE_GETTOC, 0))
+    with pytest.raises(RuntimeError, match="Confirm by hand what is resident"):
+        runner.do_run("flash")
+    assert not _write_mram_was_called(runner)
+
+
+def test_do_run_refuses_when_gettoc_exits_nonzero(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 1))
+    with pytest.raises(RuntimeError, match="Confirm by hand what is resident"):
+        runner.do_run("flash")
+    assert not _write_mram_was_called(runner)
+
+
+def test_do_run_replace_atoc_overrides_foreign_entry_and_burns(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path, replace_atoc=True)
+    _stub_maintenance(monkeypatch, gettoc=(_FOREIGN_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "replaced"
+
+
+def test_do_run_replace_atoc_overrides_unverified_read_and_burns(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path, maintenance_available=False, replace_atoc=True)
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "replaced"
+
+
+def test_do_run_allowed_entry_is_alp_he_for_an_he_build(tmp_path, monkeypatch) -> None:
+    # A resident ALP-HP entry is foreign to an HE build's own write -- the
+    # allowed set must be exactly {'ALP-HE'}, derived from the build's own
+    # shape (_atoc_section_name), not a hardcoded/union set.
+    runner = _make_runner(tmp_path, device="AE822FA0E5597LS0_HE",
+                           reset_vector=0x58000401)
+    hp_only = _boxed(
+        "|   ALP-HP | M55-HP | 0x8057D230 | 0x8057C830 | 0x50000000 | 0x50000000 |"
+        "     4480 |  1.0.0| uLVB |\n"
+    )
+    _stub_maintenance(monkeypatch, gettoc=(hp_only, 0))
+    with pytest.raises(RuntimeError, match="REPLACES every app ATOC entry"):
+        runner.do_run("flash")
+    assert _verdict(runner)["foreign"] == ["ALP-HP"]
+    assert _verdict(runner)["allowed"] == ["ALP-HE"]
+
+
+def test_do_run_allowed_entry_is_alp_hp_for_an_hp_build(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path, device="AE822FA0E5597LS0_HP",
+                           reset_vector=0x50000401)
+    he_only = _boxed(
+        "|   ALP-HE | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |"
+        "     4480 |  1.0.0| uLVB |\n"
+    )
+    _stub_maintenance(monkeypatch, gettoc=(he_only, 0))
+    with pytest.raises(RuntimeError, match="REPLACES every app ATOC entry"):
+        runner.do_run("flash")
+    assert _verdict(runner)["foreign"] == ["ALP-HE"]
+    assert _verdict(runner)["allowed"] == ["ALP-HP"]
+
+
+def test_do_run_writes_transcript_before_the_burn_step(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    transcript = Path(runner.cfg.build_dir) / "alif_flash" / "atoc-before.txt"
+    assert transcript.is_file()
+    assert "ALP-HE" in transcript.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="POSIX file mode bits only")
+def test_do_run_wraps_transcript_write_failure_in_a_named_runtime_error(
+        tmp_path, monkeypatch) -> None:
+    # Review finding (#2262, second round): an unwritable build_dir (a
+    # read-only mount, a permissions mistake) previously surfaced as a
+    # bare, unhandled OSError from `Path.write_text` -- fail-closed (the
+    # burn is never reached) but the ONE abort path that raises something
+    # other than a RuntimeError naming the path, and the one abort path
+    # that writes no verdict.json at all, contradicting the "a refused run
+    # always leaves a verdict" contract (documented as the one honest
+    # exception to that contract in docs/aen-provisioning.md).
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    atoc_dir = (Path(runner.cfg.build_dir) / "alif_flash").resolve()
+    atoc_dir.mkdir(parents=True, exist_ok=True)
+    atoc_dir.chmod(0o500)  # read + execute only -- no write
+    try:
+        with pytest.raises(RuntimeError, match=re.escape(str(atoc_dir / "atoc-before.txt"))):
+            runner.do_run("flash")
+    finally:
+        atoc_dir.chmod(0o700)  # restore so tmp_path cleanup can remove it
+    assert not _write_mram_was_called(runner)
+    assert not (atoc_dir / "atoc-guard.json").exists()
+
+
+def test_do_run_removes_a_stale_verdict_file_when_it_fails_before_the_guard(
+        tmp_path, monkeypatch) -> None:
+    # MEDIUM-3 review (#2262): a run that fails BEFORE reaching the guard
+    # (here: SETOOLS_DIR missing app-write-mram) must not leave a PREVIOUS
+    # run's verdict.json behind for a caller to misread as this run's own
+    # outcome.
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    verdict_path = Path(runner.cfg.build_dir) / "alif_flash" / "atoc-guard.json"
+    assert verdict_path.is_file()  # first run's own clean verdict
+
+    # Second run: a failure AFTER the guard has already run once
+    # successfully but BEFORE this attempt reaches the guard again is not
+    # reachable here (the guard runs immediately before the burn, so
+    # nothing sits between a repeat guard run and the previous one) --
+    # simulate a failure that happens before do_run even gets to stage a
+    # config instead: delete app-gen-toc, so the very first SETOOLS-dir
+    # sanity check fails.
+    (Path(runner.setools_dir) / "app-gen-toc").unlink()
+    with pytest.raises(RuntimeError, match="does not look like a SETOOLS"):
+        runner.do_run("flash")
+    assert not verdict_path.exists(), (
+        "a run that fails before the guard step must not leave a stale "
+        "verdict.json from a PREVIOUS run behind"
+    )
+    # Deliberate contrast (nit review, #2262): the TRANSCRIPT is not
+    # removed the same way -- its audit-trail value is being the last
+    # successfully-read resident ATOC, whether or not this attempt got
+    # far enough to read a new one.
+    transcript_path = Path(runner.cfg.build_dir) / "alif_flash" / "atoc-before.txt"
+    assert transcript_path.is_file(), (
+        "atoc-before.txt from the previous successful read must survive "
+        "a later run that fails before reaching the guard"
+    )
+
+
+# ---------------------------------------------------------------------
+# _run_maintenance -- the SE-UART subprocess boundary (real executable,
+# no monkeypatching of subprocess itself)
+# ---------------------------------------------------------------------
+
+_SKIP_ON_WINDOWS = pytest.mark.skipif(
+    sys.platform.startswith("win"),
+    reason="a shebang script is not directly executable on Windows",
+)
+
+
+def _write_stub_script(path: Path, body: str) -> None:
+    path.write_text(f"#!/usr/bin/env python3\n{body}", encoding="utf-8")
+    path.chmod(0o755)
+
+
+@_SKIP_ON_WINDOWS
+def test_run_maintenance_passes_argv_and_cwd_and_merges_stderr(tmp_path) -> None:
+    setools = tmp_path / "setools"
+    setools.mkdir()
+    maint = setools / "maintenance"
+    _write_stub_script(maint, (
+        "import os, sys\n"
+        "print('cwd=' + os.getcwd())\n"
+        "print('argv=' + repr(sys.argv[1:]))\n"
+        "print('stderr line', file=sys.stderr)\n"
+    ))
+    text, rc = alif_flash._run_maintenance(maint, "fake-uart", "57600", "gettoc")
+    assert rc == 0
+    assert f"cwd={setools}" in text or f"cwd={setools.resolve()}" in text
+    assert "argv=['-b', '57600', '-c', 'fake-uart', '-opt', 'gettoc']" in text
+    assert "stderr line" in text  # stderr merged into the same transcript
+
+
+@_SKIP_ON_WINDOWS
+def test_run_maintenance_nonzero_exit_is_reported_verbatim(tmp_path) -> None:
+    setools = tmp_path / "setools"
+    setools.mkdir()
+    maint = setools / "maintenance"
+    _write_stub_script(maint, "import sys\nprint('partial')\nsys.exit(3)\n")
+    text, rc = alif_flash._run_maintenance(maint, "fake-uart", "57600", "getbanner")
+    assert rc == 3
+    assert "partial" in text
+
+
+def test_run_maintenance_value_error_from_subprocess_is_treated_as_failed_read(
+        tmp_path) -> None:
+    # Review finding (#2262, second round): `_run_maintenance` caught only
+    # `TimeoutExpired`/`OSError` -- a `ValueError` from `subprocess.run`
+    # (e.g. a NUL byte embedded in `se_uart`) would otherwise propagate
+    # uncaught out of `_run_atoc_guard` instead of being treated as a
+    # failed read (rc=1), which is what every other IO failure here
+    # becomes on its way to `compute_query_status`'s fail-closed
+    # "unverified".
+    setools = tmp_path / "setools"
+    setools.mkdir()
+    maint = setools / "maintenance"
+    maint.write_bytes(b"")
+    maint.chmod(0o755)
+    text, rc = alif_flash._run_maintenance(maint, "fake\x00uart", "57600", "gettoc")
+    assert rc == 1
+    assert text  # some diagnostic text, not a bare empty string
+
+
+def test_run_maintenance_missing_binary_returns_rc1_via_oserror(tmp_path) -> None:
+    missing = tmp_path / "setools" / "maintenance"
+    missing.parent.mkdir()
+    text, rc = alif_flash._run_maintenance(missing, "fake-uart", "57600", "gettoc")
+    assert rc == 1
+    assert text  # some diagnostic text, not a bare empty string
+
+
+@_SKIP_ON_WINDOWS
+def test_run_maintenance_timeout_returns_rc1_with_partial_output(tmp_path, monkeypatch) -> None:
+    # Fail-closed shape (MEDIUM-6 review, #2262): a wedged SE-UART must
+    # not hang `west flash` forever. Monkeypatch the timeout constant down
+    # so this test doesn't itself take 120s -- 1.5s (not e.g. 0.3s) to
+    # leave headroom for `#!/usr/bin/env python3` interpreter startup on a
+    # loaded CI host; measured flaky at 0.3s (the child's own flush never
+    # lands before the kill).
+    monkeypatch.setattr(alif_flash, "_MAINTENANCE_TIMEOUT_S", 1.5)
+    setools = tmp_path / "setools"
+    setools.mkdir()
+    maint = setools / "maintenance"
+    _write_stub_script(maint, (
+        "import sys, time\n"
+        "print('partial-before-hang')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n"
+    ))
+    text, rc = alif_flash._run_maintenance(maint, "fake-uart", "57600", "gettoc")
+    assert rc == 1
+    assert "partial-before-hang" in text
+    assert "TIMEOUT" in text
+
+
+# ---------------------------------------------------------------------
+# do_create -- --se-uart-baud > $SE_UART_BAUD > 57600 precedence
+# ---------------------------------------------------------------------
+
+
+def _args_namespace(**overrides):
+    base = dict(
+        device=None, dev_id=None, setools_dir=None, se_uart=None,
+        gen_toc="app-gen-toc", write_mram="app-write-mram",
+        se_uart_baud=None, replace_atoc=False,
+    )
+    base.update(overrides)
+    return types.SimpleNamespace(**base)
+
+
+def test_do_create_se_uart_baud_defaults_to_57600(monkeypatch) -> None:
+    monkeypatch.delenv("SE_UART_BAUD", raising=False)
+    runner = alif_flash.AlifFlashBinaryRunner.do_create(object(), _args_namespace())
+    assert runner.se_uart_baud == "57600"
+
+
+def test_do_create_se_uart_baud_env_overrides_default(monkeypatch) -> None:
+    monkeypatch.setenv("SE_UART_BAUD", "115200")
+    runner = alif_flash.AlifFlashBinaryRunner.do_create(object(), _args_namespace())
+    assert runner.se_uart_baud == "115200"
+
+
+def test_do_create_se_uart_baud_flag_overrides_env(monkeypatch) -> None:
+    monkeypatch.setenv("SE_UART_BAUD", "115200")
+    runner = alif_flash.AlifFlashBinaryRunner.do_create(
+        object(), _args_namespace(se_uart_baud="9600"))
+    assert runner.se_uart_baud == "9600"
+
+
+# ---------------------------------------------------------------------
+# Multi-domain sysbuild refusal (alp-sdk#2274)
+# ---------------------------------------------------------------------
+
+def _write_domains_yaml(top_build_dir: Path, domain_names, flash_order=None,
+                         build_dirs=None, default=None) -> None:
+    '''Write a `domains.yaml` matching share/sysbuild/cmake/domains.cmake's
+    generated shape at `top_build_dir` -- the sysbuild's TOP build dir,
+    the PARENT of each domain's own build_dir (see
+    `alif_flash._sysbuild_domains_path`).
+
+    `flash_order` defaults to `domain_names` (every domain flashable);
+    pass a SUBSET to simulate a BUILD_ONLY image domains.cmake:14-16
+    excludes from flash_order. `build_dirs` defaults to `{name:
+    top_build_dir/name}`; pass an override dict to simulate a STALE
+    domains.yaml whose recorded build_dir no longer matches where a domain
+    actually lives.'''
+    top_build_dir.mkdir(parents=True, exist_ok=True)
+    build_dirs = build_dirs or {n: top_build_dir / n for n in domain_names}
+    flash_order = domain_names if flash_order is None else flash_order
+    domains = "\n".join(
+        f"  - name: {name}\n    build_dir: {build_dirs[name]}"
+        for name in domain_names
+    )
+    text = (
+        f"default: {default or (domain_names[0] if domain_names else '')}\n"
+        f"build_dir: {top_build_dir}\n"
+        f"domains:\n{domains}\n"
+        "flash_order:\n"
+        + "\n".join(f"  - {name}" for name in flash_order)
+        + "\n"
+    )
+    (top_build_dir / "domains.yaml").write_text(text, encoding="utf-8")
+
+
+def test_parse_sysbuild_domains_yaml_returns_none_without_domains_yaml(
+        tmp_path) -> None:
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    assert alif_flash._parse_sysbuild_domains_yaml(str(build_dir)) is None
+
+
+def test_parse_sysbuild_domains_yaml_returns_lists_for_single_domain(
+        tmp_path) -> None:
+    top = tmp_path / "build"
+    _write_domains_yaml(top, ["app"])
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir(parents=True, exist_ok=True)
+    parsed = alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+    assert [e["name"] for e in parsed["all"]] == ["app"]
+    assert [e["name"] for e in parsed["flashable"]] == ["app"]
+
+
+def test_parse_sysbuild_domains_yaml_returns_lists_for_multiple_domains(
+        tmp_path) -> None:
+    top = tmp_path / "build"
+    _write_domains_yaml(top, ["mcuboot", "app"])
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir(parents=True, exist_ok=True)
+    parsed = alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+    assert [e["name"] for e in parsed["all"]] == ["mcuboot", "app"]
+    assert [e["name"] for e in parsed["flashable"]] == ["mcuboot", "app"]
+
+
+def test_parse_sysbuild_domains_yaml_flashable_excludes_build_only_domain(
+        tmp_path) -> None:
+    # domains.cmake:14-16 builds flash_order: from IMAGES_FLASHING_ORDER
+    # filtered to exclude each image's BUILD_ONLY property -- a domain
+    # present under domains: but absent from flash_order: is a build-only
+    # image that `west flash` never processes, so it must not count
+    # towards "how many domains would actually be flashed".
+    top = tmp_path / "build"
+    _write_domains_yaml(top, ["mcuboot", "app", "bootstrap"],
+                         flash_order=["mcuboot", "app"])
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir(parents=True, exist_ok=True)
+    parsed = alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+    assert [e["name"] for e in parsed["all"]] == ["mcuboot", "app", "bootstrap"]
+    assert [e["name"] for e in parsed["flashable"]] == ["mcuboot", "app"]
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_malformed_yaml(tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text("not: [valid, yaml:", encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="not valid YAML"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_wrong_shape(tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text("just: a mapping\n", encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="expected domains.yaml shape"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_empty_domains_list(
+        tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text(
+        "default: app\nbuild_dir: " + str(top) + "\ndomains: []\n"
+        "flash_order: []\n",
+        encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="empty domains: list"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_domain_entry_without_name(
+        tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text(
+        "default: app\nbuild_dir: " + str(top) + "\ndomains:\n"
+        "  - build_dir: " + str(top / "app") + "\n",
+        encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="missing 'name' or 'build_dir'"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_non_string_name(tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text(
+        "default: app\nbuild_dir: " + str(top) + "\ndomains:\n"
+        "  - name: 42\n    build_dir: " + str(top / "app") + "\n",
+        encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="is not a string"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_non_string_build_dir(
+        tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text(
+        "default: app\nbuild_dir: " + str(top) + "\ndomains:\n"
+        "  - name: app\n    build_dir: 42\n",
+        encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="is not a string"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_parse_sysbuild_domains_yaml_raises_on_duplicate_domain_name(
+        tmp_path) -> None:
+    top = tmp_path / "build"
+    top.mkdir()
+    (top / "domains.yaml").write_text(
+        "default: app\nbuild_dir: " + str(top) + "\ndomains:\n"
+        "  - name: app\n    build_dir: " + str(top / "app") + "\n"
+        "  - name: app\n    build_dir: " + str(top / "app2") + "\n",
+        encoding="utf-8")
+    domain_build_dir = top / "app"
+    domain_build_dir.mkdir()
+    with pytest.raises(RuntimeError, match="duplicate domains: entry"):
+        alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+
+
+def test_sysbuild_domains_path_does_not_follow_a_symlinked_domain_dir(
+        tmp_path) -> None:
+    # .absolute() (not .resolve()) locates domains.yaml relative to the
+    # SYMLINK itself, not its resolved target -- a symlinked per-domain
+    # build dir must still find the real top-level domains.yaml sitting
+    # next to the symlink.
+    top = tmp_path / "build"
+    top.mkdir()
+    real_app_dir = tmp_path / "elsewhere" / "real-app"
+    real_app_dir.mkdir(parents=True)
+    symlinked_app_dir = top / "app"
+    symlinked_app_dir.symlink_to(real_app_dir, target_is_directory=True)
+    assert alif_flash._sysbuild_domains_path(str(symlinked_app_dir)) == (
+        top / "domains.yaml")
+
+
+def test_do_run_proceeds_for_a_single_domain_sysbuild_via_a_symlinked_build_dir(
+        tmp_path, monkeypatch) -> None:
+    top = tmp_path / "build"
+    _write_domains_yaml(top, ["app"])
+    real_app_dir = tmp_path / "elsewhere" / "real-app"
+    (real_app_dir / "zephyr").mkdir(parents=True, exist_ok=True)
+    symlinked_app_dir = top / "app"
+    symlinked_app_dir.symlink_to(real_app_dir, target_is_directory=True)
+
+    runner = _make_runner(tmp_path)
+    bin_file = Path(runner.cfg.bin_file)
+    new_bin_file = real_app_dir / "zephyr" / bin_file.name
+    new_bin_file.write_bytes(bin_file.read_bytes())
+    runner.cfg.build_dir = str(symlinked_app_dir)
+    runner.cfg.bin_file = str(new_bin_file)
+
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+
+
+def test_parse_sysbuild_domains_yaml_handles_a_not_yet_built_domain_dir(
+        tmp_path) -> None:
+    # `.resolve()` is non-strict by default (no existence requirement) --
+    # a domain listed in domains.yaml whose build_dir hasn't been created
+    # on disk yet must still parse and resolve cleanly, not raise.
+    top = tmp_path / "build"
+    _write_domains_yaml(top, ["app"])
+    domain_build_dir = top / "app"  # deliberately never mkdir'd
+    parsed = alif_flash._parse_sysbuild_domains_yaml(str(domain_build_dir))
+    assert [e["name"] for e in parsed["all"]] == ["app"]
+
+
+def _make_sysbuild_domain_runner(tmp_path, domain_names, this_domain="app",
+                                  flash_order=None, build_dirs=None,
+                                  **kwargs):
+    '''Like `_make_runner`, but nests `cfg.build_dir` one level under a
+    sysbuild top build dir carrying a `domains.yaml` for `domain_names` --
+    the exact shape `west flash` hands a runner for one domain of a
+    sysbuild (see `alif_flash._sysbuild_domains_path`).'''
+    top = tmp_path / "build"
+    _write_domains_yaml(top, domain_names, flash_order=flash_order,
+                         build_dirs=build_dirs)
+    runner = _make_runner(tmp_path, **kwargs)
+    domain_build_dir = top / this_domain
+    (domain_build_dir / "zephyr").mkdir(parents=True, exist_ok=True)
+    bin_file = Path(runner.cfg.bin_file)
+    new_bin_file = domain_build_dir / "zephyr" / bin_file.name
+    new_bin_file.write_bytes(bin_file.read_bytes())
+    runner.cfg.build_dir = str(domain_build_dir)
+    runner.cfg.bin_file = str(new_bin_file)
+    return runner
+
+
+def _staging_dir_exists(runner) -> bool:
+    '''True if do_run got far enough to stage a signed-ATOC image/config
+    (scripts/west_commands/runners/alif_flash.py's `images_dir`/
+    `config_dir`, both under `<setools_dir>/build/`) -- the refusal must
+    fire BEFORE this, not just before the burn.'''
+    return (Path(runner.setools_dir) / "build").exists()
+
+
+def _seed_stale_verdict(runner) -> Path:
+    '''Pre-create a (deliberately stale) atoc-guard.json from a PREVIOUS
+    run, so a test can assert a #2274 refusal still clears it -- the
+    MEDIUM-3 (#2262) stale-verdict unlink runs BEFORE the #2274
+    multi-domain check (unlinking this runner's own prior output is not
+    an MRAM/ATOC side effect), so a refused run must never leave a
+    PREVIOUS run's verdict looking like its own.'''
+    atoc_dir = Path(runner.cfg.build_dir) / "alif_flash"
+    atoc_dir.mkdir(parents=True, exist_ok=True)
+    verdict_path = atoc_dir / "atoc-guard.json"
+    verdict_path.write_text('{"schema": "stale-from-a-previous-run"}',
+                             encoding="utf-8")
+    return verdict_path
+
+
+def test_do_run_proceeds_when_build_has_no_domains_yaml(
+        tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+
+
+def test_do_run_proceeds_for_a_single_domain_sysbuild(
+        tmp_path, monkeypatch) -> None:
+    runner = _make_sysbuild_domain_runner(tmp_path, ["app"])
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+
+
+def test_do_run_proceeds_when_the_other_domain_is_build_only(
+        tmp_path, monkeypatch) -> None:
+    # A domain present in domains: but excluded from flash_order: (a
+    # BUILD_ONLY image) must not trip the multi-domain refusal -- only
+    # flash_order:'s domains count.
+    runner = _make_sysbuild_domain_runner(
+        tmp_path, ["app", "bootstrap"], this_domain="app",
+        flash_order=["app"])
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+
+
+def test_do_run_refuses_a_two_domain_sysbuild_before_any_side_effect(
+        tmp_path, monkeypatch) -> None:
+    runner = _make_sysbuild_domain_runner(
+        tmp_path, ["mcuboot", "app"], this_domain="app")
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    stale_verdict = _seed_stale_verdict(runner)
+    with pytest.raises(RuntimeError, match="multi-domain sysbuild") as excinfo:
+        runner.do_run("flash")
+    assert runner.calls == []
+    assert not _staging_dir_exists(runner)
+    assert not _write_mram_was_called(runner)
+    # a #2274 refusal still runs the MEDIUM-3 (#2262) stale-verdict
+    # unlink first -- this run leaves NO verdict, not a previous run's.
+    assert not stale_verdict.exists()
+    assert not (Path(runner.cfg.build_dir) / "alif_flash" / "atoc-before.txt").exists()
+    # The Option B J-Link path this message points at writes the APP ONLY --
+    # MCUboot must already be resident, or provisioned via SETOOLS first.
+    message = str(excinfo.value)
+    assert "writes the APP ONLY" in message
+    assert "provision MCUboot with" in message
+
+
+def test_do_run_refuses_single_domain_flag_of_a_two_domain_sysbuild(
+        tmp_path, monkeypatch) -> None:
+    # Even a `--domain mcuboot`-style invocation that only ever PROCESSES
+    # one domain of this west command must refuse: the check is keyed on
+    # the build's own domains.yaml declaring >1 FLASHABLE domain, not on
+    # how many domains THIS invocation processes -- flashing only the
+    # mcuboot domain would still overwrite any ALP-HE entry a previous run
+    # of the app domain wrote, the same way (see module docstring).
+    runner = _make_sysbuild_domain_runner(
+        tmp_path, ["mcuboot", "app"], this_domain="mcuboot")
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    stale_verdict = _seed_stale_verdict(runner)
+    with pytest.raises(RuntimeError, match="multi-domain sysbuild"):
+        runner.do_run("flash")
+    assert runner.calls == []
+    assert not _staging_dir_exists(runner)
+    assert not _write_mram_was_called(runner)
+    # a #2274 refusal still runs the MEDIUM-3 (#2262) stale-verdict
+    # unlink first -- this run leaves NO verdict, not a previous run's.
+    assert not stale_verdict.exists()
+
+
+def test_do_run_refuses_on_malformed_domains_yaml_before_any_side_effect(
+        tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    top = Path(runner.cfg.build_dir).parent
+    top.mkdir(parents=True, exist_ok=True)
+    (top / "domains.yaml").write_text("not: [valid, yaml:", encoding="utf-8")
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    stale_verdict = _seed_stale_verdict(runner)
+    with pytest.raises(RuntimeError, match="not valid YAML"):
+        runner.do_run("flash")
+    assert runner.calls == []
+    assert not _staging_dir_exists(runner)
+    assert not _write_mram_was_called(runner)
+    # a #2274 refusal still runs the MEDIUM-3 (#2262) stale-verdict
+    # unlink first -- this run leaves NO verdict, not a previous run's.
+    assert not stale_verdict.exists()
+
+
+def test_do_run_refuses_on_empty_domains_list_before_any_side_effect(
+        tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    top = Path(runner.cfg.build_dir).parent
+    top.mkdir(parents=True, exist_ok=True)
+    (top / "domains.yaml").write_text(
+        "default: app\nbuild_dir: " + str(top) + "\ndomains: []\n"
+        "flash_order: []\n",
+        encoding="utf-8")
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    stale_verdict = _seed_stale_verdict(runner)
+    with pytest.raises(RuntimeError, match="empty domains: list"):
+        runner.do_run("flash")
+    assert runner.calls == []
+    assert not _staging_dir_exists(runner)
+    assert not _write_mram_was_called(runner)
+    # a #2274 refusal still runs the MEDIUM-3 (#2262) stale-verdict
+    # unlink first -- this run leaves NO verdict, not a previous run's.
+    assert not stale_verdict.exists()
+
+
+def test_do_run_refuses_when_domains_yaml_does_not_list_this_build_dir(
+        tmp_path, monkeypatch) -> None:
+    # A STALE domains.yaml -- e.g. a relocated/renamed build tree -- whose
+    # recorded build_dir for every domain points somewhere else must
+    # refuse with the distinct "does not list this build dir" message,
+    # fail-closed, even for what would otherwise look like a single-domain
+    # sysbuild.
+    elsewhere = tmp_path / "elsewhere" / "app"
+    runner = _make_sysbuild_domain_runner(
+        tmp_path, ["app"], this_domain="app",
+        build_dirs={"app": elsewhere})
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    stale_verdict = _seed_stale_verdict(runner)
+    with pytest.raises(RuntimeError, match="does not list this build dir"):
+        runner.do_run("flash")
+    assert runner.calls == []
+    assert not _staging_dir_exists(runner)
+    assert not _write_mram_was_called(runner)
+    # a #2274 refusal still runs the MEDIUM-3 (#2262) stale-verdict
+    # unlink first -- this run leaves NO verdict, not a previous run's.
+    assert not stale_verdict.exists()

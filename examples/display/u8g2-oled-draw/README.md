@@ -40,10 +40,12 @@ hand-picked core draw pipeline (setup, buffer, hvline, box, font,
 kerning, intersection -- plus the u8x8 glue those lean on), compiled
 into the build by the alp-sdk Zephyr module (`zephyr/CMakeLists.txt`)
 whenever `CONFIG_ALP_SDK_U8G2_VENDORED_CORE` is set (`board.yaml`'s
-`libraries: [u8g2]` -- see `scripts/alp_project_emit.py`'s
-`_LIBRARY_KCONFIG["u8g2"]`) -- the same auto-wire every other library
-gets; this example needs **no** manual CMake beyond its own `src/*.c`
-list. (`CONFIG_ALP_U8G2_SW_BLIT` is a separate `default y`
+`libraries: [u8g2]` -- see `metadata/libraries/u8g2.yaml`'s
+`integration.zephyr.kconfig`, transcribed into the slice's `alp.conf`
+by `scripts/alp_orchestrate/libraries.py`'s `zephyr_kconfig_lines()`)
+-- the same auto-wire every other library gets; this example needs
+**no** manual CMake beyond its own `src/*.c` list.
+(`CONFIG_ALP_U8G2_SW_BLIT` is a separate `default y`
 fallback-capability marker, true for every build regardless of this
 slice -- it does NOT gate the compiled sources; see
 `zephyr/CMakeLists.txt` for why.) This directory supplies its own
@@ -57,7 +59,9 @@ needs a second font or a real panel driver, extend
 ## Build
 
 ```bash
-west build -b native_sim/native/64 examples/display/u8g2-oled-draw
+# writes examples/display/u8g2-oled-draw/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/display/u8g2-oled-draw
+west build -b native_sim/native/64 examples/display/u8g2-oled-draw -- -DEXTRA_CONF_FILE=generated/alp.conf
 west build -t run
 ```
 

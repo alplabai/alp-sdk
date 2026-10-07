@@ -80,8 +80,10 @@ signatures), if you have one in mind.
    Run the pinned version locally to match CI exactly (`pyenv`/`uv`
    pick it up automatically); `tan doctor`'s `python` check is a
    presence probe only (no pin comparison).
-6. Open a PR; CI runs the AEN-Zephyr, AEN-baremetal, and V2N-Yocto
-   matrices.  CI green is necessary but not sufficient for tagging
+6. Open a PR; CI runs the AEN-Zephyr (`pr-twister-aen`) and
+   V2N-Yocto (`pr-bitbake`) matrices, the AEN-baremetal build
+   (`pr-plain-cmake`), plus the cross-platform
+   Zephyr build gate.  CI green is necessary but not sufficient for tagging
    a release -- the test-plan row also has to flip to `✅`.
 
 For the full branching topology, merge methods, PR gates,
@@ -117,7 +119,7 @@ separately — see [`TRADEMARKS.md`](TRADEMARKS.md).)
   (e.g. `src/backends/gpio/cc3501e_proxy.c`,
   `src/backends/soc_info/alif_se.c`), and `firmware/<part>/`.
   Vendored upstream SDKs live under `vendors/<vendor>/` (e.g.
-  `vendors/alif/`, `vendors/gd32_firmware_library/`).  No `#ifdef
+  `vendors/alif/`, `vendors/deepx-dxm1/`).  No `#ifdef
   ALIF_*` in `include/alp/` or `src/common/` -- that boundary is the
   part that still holds.
 

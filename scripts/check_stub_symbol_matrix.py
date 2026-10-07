@@ -44,6 +44,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import shutil
@@ -120,7 +121,7 @@ def stub_sources() -> list[Path]:
 def _public_syms(obj: Path) -> set[str]:
     """Public `alp_*` symbols an object file *defines* (global, any section)."""
     rv = subprocess.run(["nm", "-g", "--defined-only", str(obj)],
-                        capture_output=True, text=True, check=True)
+                        capture_output=True, text=True, encoding="utf-8", check=True)
     syms: set[str] = set()
     for line in rv.stdout.splitlines():
         parts = line.split()
@@ -130,7 +131,7 @@ def _public_syms(obj: Path) -> set[str]:
     return syms
 
 
-def _build_combo(cc: str, srcs: list[Path], macros: list[str],
+def _build_combo(cc: list[str], srcs: list[Path], macros: list[str],
                  workdir: Path) -> tuple[set[str], list[str]]:
     """Compile every source under `macros`; return (union symbols, duplicates)."""
     defs = [f"-D{m}=1" for m in macros]
@@ -139,8 +140,8 @@ def _build_combo(cc: str, srcs: list[Path], macros: list[str],
     union: set[str] = set()
     for i, src in enumerate(srcs):
         obj = workdir / f"{i}_{src.stem}.o"
-        rv = subprocess.run([cc, *CFLAGS, *defs, str(src), "-o", str(obj)],
-                            capture_output=True, text=True, check=False)
+        rv = subprocess.run([*cc, *CFLAGS, *defs, str(src), "-o", str(obj)],
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
         if rv.returncode != 0:
             raise SystemExit(
                 f"check_stub_symbol_matrix: compile failed for {src.name} "
@@ -169,11 +170,31 @@ def main() -> int:
     errors: list[str] = []
     with tempfile.TemporaryDirectory(prefix="alp-stub-matrix-") as tmp:
         work = Path(tmp)
-        for name, macros in _combos():
-            union, dups = _build_combo(cc, srcs, macros, work)
-            result[name] = sorted(union)
-            if dups:
-                errors.append(f"{name}: duplicate symbol(s): {'; '.join(dups)}")
+        # ccache (when present) turns every unchanged (source, macro-set)
+        # compile into a hit on the next run.
+        ccache = shutil.which("ccache")
+        # ...unless `cc` already resolves to ccache (a masquerade directory
+        # of compiler-named symlinks): wrapping it again is "Recursive
+        # invocation of ccache".
+        if ccache and Path(shutil.which(cc) or cc).resolve().name.startswith("ccache"):
+            ccache = None
+        driver = [ccache, cc] if ccache else [cc]
+        combos = _combos()
+        # ~30 combos x ~30 stub units of independent compiles: run the combos
+        # concurrently (subprocess releases the GIL).  Results are collected in
+        # combo order, so output and the golden stay deterministic.
+        jobs = int(os.environ.get("ALP_GATE_JOBS") or min(os.cpu_count() or 4, 8))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
+            futures = []
+            for i, (name, macros) in enumerate(combos):
+                sub = work / str(i)
+                sub.mkdir()
+                futures.append(pool.submit(_build_combo, driver, srcs, macros, sub))
+            for (name, _), fut in zip(combos, futures):
+                union, dups = fut.result()
+                result[name] = sorted(union)
+                if dups:
+                    errors.append(f"{name}: duplicate symbol(s): {'; '.join(dups)}")
 
     base = set(result["none"])
     # Structural invariants -- hold even if the golden is regenerated.

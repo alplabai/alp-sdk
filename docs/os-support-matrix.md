@@ -10,8 +10,8 @@ Status keys:
 - **planned** — declared roadmap, no code yet.
 - **n/a** — combination not targeted.
 
-> **Calibration note (2026-06-24; updated 2026-06-24).** v0.8.0 ships
-> silicon-verified silicon: V2N GD32-bridge campaign (since v0.6),
+> **Calibration note (2026-06-24).** v0.8.0 ships
+> silicon-verified work: V2N GD32-bridge campaign (since v0.6),
 > AEN801 (E8) peripheral matrix (15/17 apps PASS on real silicon, 2
 > PARTIAL hardware-gated), and cc3501e bridge (hardware SS0, real
 > BLE/Wi-Fi scan, GPIO proxy, production warm-program flow) — all on
@@ -26,13 +26,14 @@ HAL, so a single backend covers the whole family.  See
 [`README.md` § Supported hardware](../README.md#supported-hardware)
 for the SKU breakdown:
 
-- **E1M-AEN family** — `E1M-AEN301` … `E1M-AEN801` (Alif Ensemble
-  E3–E8).  E3 / E4 are RTOS-only (no A-class); E5..E8 carry an
+- **E1M-AEN family** — `E1M-AEN301` … `E1M-AEN801` and
+  `E1M-AEN803` (Alif Ensemble E3–E8; same E8 silicon as
+  AEN801).  E3 / E4 are RTOS-only (no A-class); E5..E8 carry an
   A32 cluster alongside the M55 pair.
-- **E1M-X V2N family** — `E1M-V2N101`, `E1M-V2N102` (Renesas RZ/V2N):
-  A55 cluster + M33-SM.
-- **E1M-X V2N-M1 family** — `E1M-V2M101`, `E1M-V2M102` (RZ/V2N +
-  DEEPX DX-M1): same topology as V2N.
+- **E1M-X V2N family** — `E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103`
+  (Renesas RZ/V2N): A55 cluster + M33-SM.
+- **E1M-X V2N-M1 family** — `E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103`
+  (RZ/V2N + DEEPX DX-M1): same topology as V2N.
 - **E1M-N93 family** — iMX93: A55 cluster + M33.
 
 Because the per-core matrix is 11 columns wide, the per-version
@@ -95,8 +96,17 @@ plan in `VERSIONS.md`.
 | **RTC** (`<alp/rtc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
 | **Watchdog** (`<alp/wdt.h>`) | code complete¹             | code complete¹         | code complete¹            | code complete¹            |
 | **Audio** (`<alp/audio.h>`) | code complete¹              | code complete¹         | code complete¹            | code complete¹            |
-| **Camera** (`<alp/camera.h>`) | planned                   | **GA** (MIPI CSI-2)    | **GA**                    | planned |
+| **Camera** (`<alp/camera.h>`) | planned                   | stub [^cam1]            | stub [^cam1]               | planned |
 | **IoT** (`<alp/iot.h>`)   | **GA**                        | **GA**                 | **GA**                    | planned |
+
+[^cam1]: The Yocto/A55 camera backend (`src/backends/camera/zephyr_stub.c`, linked
+    unconditionally at `src/yocto/CMakeLists.txt:323`, `silicon_ref = "*"`, priority
+    0) returns `ALP_ERR_NOT_IMPLEMENTED` for every op on every SoM, V2N/V2N-M1
+    included — that is a **stub** per the status key above, not GA.  The real
+    MIPI CSI-2 ISP-aware camera backend (`src/backends/camera/v2n_n44_isp.c`) is a
+    **Zephyr** backend for the V2N `m33_sm` core (`zephyr/CMakeLists.txt:812`,
+    opt-in via `CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP`); it does not link on Yocto and
+    does not back this Cortex-A cell.
 
 ### Cortex-M (Zephyr)
 
@@ -171,7 +181,7 @@ need v0.4 fall back cleanly to the v0.3 state above.
 | **IoT — MQTT TLS** (`mqtts://`)      | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) | planned |
 | **IoT — Wi-Fi station** (`<alp/iot.h>`) | sw_fallback by design (system-config via wpa_supplicant/NM) | sw_fallback by design (system-config via wpa_supplicant/NM) | sw_fallback by design | planned |
 | **Audio** (`<alp/audio.h>`)          | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) | planned |
-| **Security** (`<alp/security.h>`)    | code complete (KATs green; meta-alp-sdk build mechanics verified 2026-05-26, full bake pending) — OpenSSL `EVP_*` | code complete (KATs green; meta-alp-sdk build mechanics verified 2026-05-26, full bake pending) — OpenSSL `EVP_*` | code complete (KATs green) | planned |
+| **Security** (`<alp/security.h>`)    | code complete (KATs green; image bake pending) — OpenSSL `EVP_*` | code complete (KATs green; `drpai`-OFF `alp-image-edge` bake complete, image boot pending; see [`bring-up-drpai-v2n.md`](bring-up-drpai-v2n.md)) — OpenSSL `EVP_*` | code complete (KATs green) | planned |
 | **Mender OTA (meta-alp-sdk opt-in)**     | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) | planned |
 
 ### Cortex-M (Zephyr)
@@ -198,8 +208,8 @@ their own `pkg_check_modules` check (`libmosquitto`, `alsa`,
 without the matching `-dev` package on the sysroot degrade to the
 priority-0 `sw_fallback` backend of the class (not the old
 stub_backend.c NOSUPPORT stubs).  Per-class
-`ALP_VENDOR_OVERRIDES_<CLASS>` macros in
-`src/common/stub_backend.c` let each surface roll out independently
+`ALP_VENDOR_OVERRIDES_<CLASS>` macros in the per-class stub sources
+under `src/common/stub/` let each surface roll out independently
 across backends -- the currently-defined class gates include `I2C`,
 `SPI`, `UART`, `GPIO`, `MQTT`, `AUDIO_IN`, `AUDIO_OUT`, `SECURITY`,
 `WIFI`, `BLE`, `CAN`, `PWM`, `ADC`, `I2S`, `COUNTER`, `RTC`, `WDT`,
@@ -218,12 +228,12 @@ hasn't been measured.
 
 | Surface | Header(s) | Cores / backing | Status |
 |---------|-----------|-----------------|--------|
-| Display class | `display.h` | M (Zephyr `display_*` driver-class wrapper, `alp-display0..3` DT aliases, issue #23); A (Yocto) + baremetal: NOSUPPORT stub | Zephyr backend **code complete (untested on silicon)** — native_sim ZTESTs against the upstream dummy display cover open/get_caps/blit/clear/close + degrade paths; a build-only native_sim scenario instantiates Zephyr MIPI DBI Type C (`zephyr,mipi-dbi-spi`) with an ST7789V child panel and proves the DT/Kconfig/backend wiring.  No panel has been driven on real hardware through this class yet.  V2N DSI / parallel-RGB + Alif LCD-IF vendor backends still pending |
+| Display class | `display.h` | M (Zephyr `display_*` driver-class wrapper, `alp-display0..3` DT aliases, issue #23); A (Yocto) + baremetal: NOSUPPORT stub | Zephyr backend **code complete (untested on silicon)** — native_sim ZTESTs against the upstream dummy display cover open/get_caps/blit/clear/close + degrade paths; a build-only native_sim scenario instantiates Zephyr MIPI DBI Type C (`zephyr,mipi-dbi-spi`) with an ST7789V child panel and proves the DT/Kconfig/backend wiring.  No panel has been driven on real hardware through this class yet.  AEN (Alif E8): no vendor backend needed -- the `e1m_evk_rk055hdmipi4ma0` shield turns the CDC200 -> DesignWare MIPI-DSI -> D-PHY chain into a Zephyr display device behind `alp-display0` (build-verified on E1M-AEN801/803; pixels on glass not yet observed).  V2N DSI / parallel-RGB backends still pending |
 | GUI/LVGL bridge | `gui.h` (`alp_gui_lvgl_attach`, issue #23) | M (Zephyr): real LVGL v9 hand-off (`src/gui_lvgl.c`) — creates an `lv_display_t` over any `alp_display_t`, wires LVGL's flush callback to `alp_display_blit()`; `ALP_HAS_LVGL` auto-derives from `CONFIG_LVGL` via `CONFIG_ALP_SDK_HAS_LVGL`. A (Yocto) + baremetal / no-LVGL builds: guard-clause NOSUPPORT | **code complete, native_sim-tested** (`tests/zephyr/gui_lvgl/`) — a priority-255 test-double display backend proves a forced LVGL refresh reaches `alp_display_blit()`, plus NULL/unsupported-pixel-format/no-LVGL-build degrade paths. RGB565/RGB888/ARGB8888 mapped; `ALP_PIXFMT_MONO_VLSB` has no LVGL v9 equivalent and is refused. No real panel driven through this bridge yet — real-silicon bench run still pending |
-| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr): registry over `tflm` / `ethos_u`; A (Yocto): dispatcher over `ort` (CPU) / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** + **CPU (ONNX Runtime, `src/yocto/inference_ort.cpp`)** backend bodies are **real, bench-unverified** (link needs the Yocto sysroot; default-off CMake options — `ALP_SDK_USE_ORT_CPU` off by default); `resolve_auto()` orders CPU strictly last so an NPU-bearing SoM never silently falls back to it; the former M-class DRP-AI/DEEPX stubs are removed — all three A55 engines are A55-only, M-class runs TFLM (code-complete) — #58/#59; `tflm`/`ethos_u` paths still untested. No `.alpmodel` → ORT route exists yet (`CONFIG_ALP_SDK_MODEL_READER` undefined on Yocto): ORT is reachable only via a hand-built `alp_inference_config_t` |
+| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr): registry over `tflm` / `ethos_u`; A (Yocto): dispatcher over `ort` (CPU) / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** + **CPU (ONNX Runtime, `src/yocto/inference_ort.cpp`)** backend bodies are **real** (all three run on E1M-V2M103 silicon against a CPU reference: DeepX #1262, DRP-AI #1268, ORT #1255 -- ORT with the DEEPX layer's `libonnxruntime` 1.20.1, the own 1.28.0 recipe not yet on silicon; link needs the Yocto sysroot; default-off CMake options — `ALP_SDK_USE_ORT_CPU` off by default in CMake, on by default in the V2M101/V2M102/V2M103/V2N101/V2N102/V2N103 images via `ALP_ENABLE_ORT_CPU` (#1259; V2M with the DEEPX runtime builds against dx-rt's libonnxruntime instead of the layer's)); `resolve_auto()` orders CPU strictly last so an NPU-bearing SoM never silently falls back to it; the former M-class DRP-AI/DEEPX stubs are removed — all three A55 engines are A55-only, M-class runs TFLM (code-complete) — #58/#59; `tflm`/`ethos_u` paths still untested. No `.alpmodel` → ORT route exists yet (`CONFIG_ALP_SDK_MODEL_READER` undefined on Yocto): ORT is reachable only via a hand-built `alp_inference_config_t` |
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
-| 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim + **E8 bench PASS** (RAM-run, 2026-06-17); D/AVE 2D code-complete, bench-unverified (ADDITIVE/MULTIPLY blends delegate to the sw path).  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; i.MX 93 = **PXP**, no Vivante — N93 is served by the sw fallback today, now wired on `ALP_OS=yocto` plain-CMake builds too (dispatcher + sw_fallback replace the NOSUPPORT stub, ctest-covered); a Linux-side PXP/`libg2d` backend is future work gated on the `meta-imx` machine wiring + an in-repo API source, see #24) |
+| 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) + Linux **Mali-G31 EGL/GLES** backend for the RZ/V2N family (`yocto_gles.c`, opt-in `ALP_SDK_USE_GPU2D_GLES`, **bench-unverified**, see `docs/v2n-mali-gpu.md`) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim + **E8 bench PASS** (RAM-run, 2026-06-17); D/AVE 2D code-complete, bench-unverified (ADDITIVE/MULTIPLY blends delegate to the sw path).  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; i.MX 93 = **PXP**, no Vivante — N93 is served by the sw fallback today, now wired on `ALP_OS=yocto` plain-CMake builds too (dispatcher + sw_fallback replace the NOSUPPORT stub, ctest-covered); a Linux-side PXP/`libg2d` backend is future work gated on the `meta-imx` machine wiring + an in-repo API source, see #24) |
 | Power management | `power.h` | M (Zephyr `pm_*`) + A | surface present; **untested** |
 | Heterogeneous RPC | `rpc.h` (+ generated `system_ipc.h`) | A↔M over RPMsg / OpenAMP | surface + scaffold; **untested** |
 | DAC | `dac.h` (split out of `adc.h` in v0.8) | M (Zephyr `dac_*`) + A (Yocto registry backend, issue #33) | Zephyr backend real — **E8 bench PASS** (`dac_alif`, v0.8.0 campaign); Yocto code-complete, HIL-gated; `alp_dac_capabilities()` additive in v0.9 (conformance-suite covered on native_sim) |
@@ -234,7 +244,7 @@ hasn't been measured.
 | Peer-core boot | `mproc.h` (`alp_mproc_boot_core`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Alif SE-service boot authority on **AEN801 / `alif:ensemble:e8`**); NOSUPPORT where the platform boots peers by other means | surface + E8 SE backend; **bench-gated** |
 | SDK version / ABI feature-test | `version.h` (v0.9, `[ABI-STABLE]`) | all OSes (compile-time macros + `alp_version_string()`) | present; value-sync CI-gated (`check_version_doc_sync.py`) |
 | Update audit log | `update_log.h` (v0.7, `[ABI-EXPERIMENTAL]`) | M (Zephyr only today): hash-chain engine + SW tier — **NVS-persistent** when the board carves an `alp_ulog_partition` (`CONFIG_ALP_SDK_UPDATE_LOG_PERSIST`), RAM fallback otherwise; tamper-EVIDENT, not tamper-proof; Yocto/baremetal: not built | code complete (native_sim unit-tested: chain verdicts, persist-across-reinit, persisted mutation/delete tamper verdicts, full-log NOMEM-no-wrap, RAM fallback, tier selection + degrade); on-silicon persistence proof remains board-port-specific. Trusted boot-metadata append API present; provider defaults to NOSUPPORT until MCUboot shared-data / Alif SE facts are wired — #263 |
-| Update audit log — HW_ENFORCED tier | `update_log.h` `ALP_UPDATE_LOG_HW_ENFORCED` (`CONFIG_ALP_SDK_UPDATE_LOG_TFM`, `CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT`) | M: app-immutable tier — application client -> trusted owner. TF-M route uses PSA Protected Storage. AEN route uses an M55 owner that writes MRAM while the app M55 talks to it over MHU | TF-M client + PSA owner source present. AEN E4/E8 dual-M55 client/owner source present; the AEN client reports `HW_ENFORCED` only when the HP owner answers and `CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROVEN` is enabled for a board profile whose MRAM log partition has been firewall-locked against app-core writes. Firewall lock is OEM-authorable and **silicon-proven on E8 (2026-07-06)**: HE's master-side firewall (FC8) via the ATOC device config (allow-all + higher-priority HE-deny carve-out over the log window) makes HE bus-fault on a direct write while running normally — no SE audit-log or NV-counter mailbox needed. Remaining follow-up = board-profile provisioning + the NV monotonic-counter rollback anchor — #111 |
+| Update audit log — HW_ENFORCED tier | `update_log.h` `ALP_UPDATE_LOG_HW_ENFORCED` (`CONFIG_ALP_SDK_UPDATE_LOG_TFM`, `CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_CLIENT`) | M: app-immutable tier — application client -> trusted owner. TF-M route uses PSA Protected Storage. AEN route uses an M55 owner that writes MRAM while the app M55 talks to it over MHU | TF-M client + PSA owner source present. AEN E4/E8 dual-M55 client/owner source present; the AEN client reports `HW_ENFORCED` only when the HP owner answers and the provisioned app-immutable profile (`CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_APP_IMMUTABLE_PROFILE`, which derives `..._FIREWALL_PROVEN` and selects `CONFIG_ALP_SDK_UPDATE_LOG_REQUIRE_HW_ENFORCED`) is selected, which asserts (the build does not check at runtime) that the board's MRAM log partition has been firewall-locked against app-core writes -- only the negative probe verifies it; a documented deployment recipe lives in the `firmware-update-log` example README. Firewall lock is OEM-authorable and **silicon-proven on E8 (2026-07-06)**: HE's master-side firewall (FC8) via the ATOC device config (allow-all + higher-priority HE-deny carve-out over the log window) makes HE bus-fault on a direct write while running normally — no SE audit-log or NV-counter mailbox needed. App-immutable, not reflash-immutable: remaining follow-up = the NV monotonic-counter rollback anchor — #111 |
 
 ## CMSIS-DSP per-SoM validation
 

@@ -8,10 +8,21 @@ from alp_model.adapters import CompilerAdapter, Blob
 from alp_model.adapters.cpu import CpuAdapter
 from alp_model.adapters.drpai import DrpaiAdapter
 from alp_model.adapters.deepx import DeepxAdapter
-from alp_model.adapters.ethos_u import VelaAdapter, _parse_vela_summary
+from alp_model.adapters.ethos_u import VelaAdapter, _parse_vela_summary, _parse_vela_placement
 from alp_model.adapters.executorch import ExecutorchAdapter
+from alp_project_loader import TargetSpec
 
 _ROOT = Path(__file__).resolve().parents[2]
+
+#: The E1M-AEN801 (Alif Ensemble E8)'s real npu_toolchain.vela profile
+#: (metadata/socs/alif/ensemble/e8.json) -- issue #2312: a `TargetSpec` with
+#: no vela profile at all made vela fall back to its DRAM-backed built-in
+#: default and report zero SRAM for a model that DID place operators on the
+#: NPU, which is now a refusal (`_refuse_zero_sram_footprint`), not a silent
+#: pass. Real compiles below thread this so they exercise the fixed path.
+_E8_TARGET = TargetSpec(backend="ethos_u", silicon_ref="alif:ensemble:e8", accel_config="",
+                        vela_memory_mode="Sram_Only", vela_system_config=None,
+                        vela_vendor_config_filename="ensemble_vela.ini")
 
 
 def test_onnx_is_an_accepted_blob_format():
@@ -110,25 +121,46 @@ def test_vela_adapter_is_available_follows_path(monkeypatch):
     assert VelaAdapter().is_available() is True
 
 
+def _fake_run_writing_into_output_dir(payload: bytes = b"VELA-OUT",
+                                      stdout: str = "CPU operators = 0 (0.0%)\nNPU operators = 0 (0.0%)\n",
+                                      seen: dict | None = None):
+    """A fake `subprocess.run` that writes vela's `_vela.tflite` into whatever
+    `--output-dir` the real command line names -- required since #2312's
+    per-accel_config run-dir split means the caller no longer controls that
+    path directly."""
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
+        if seen is not None:
+            seen["cmd"] = cmd
+            seen["io"] = (encoding, env.get("PYTHONIOENCODING"))
+        run_dir = Path(cmd[cmd.index("--output-dir") + 1])
+        (run_dir / f"{Path(cmd[1]).stem}_vela.tflite").write_bytes(payload)
+
+        class _R:
+            returncode = 0
+            stderr = ""
+        _R.stdout = stdout
+        return _R()
+    return fake_run
+
+
 def test_vela_adapter_compile_invokes_cli_and_reads_output(tmp_path, monkeypatch):
     src = tmp_path / "m.tflite"
     src.write_bytes(b"TFL3-INPUT")
     seen = {}
 
-    def fake_run(cmd, capture_output, text, timeout):
-        seen["cmd"] = cmd
-        (tmp_path / "m_vela.tflite").write_bytes(b"VELA-OUT")   # emulate vela's output
-
-        class _R:
-            returncode = 0
-            stdout = ""
-            stderr = ""
-        return _R()
-
-    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run", fake_run)
-    blob = VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path)
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run",
+                        _fake_run_writing_into_output_dir(seen=seen))
+    blob = VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path,
+                                 target=_E8_TARGET)
     assert seen["cmd"][:2] == ["vela", str(src)]
     assert "--accelerator-config" in seen["cmd"] and "ethos-u55-128" in seen["cmd"]
+    # Each accel_config's compile output lives in its own subdirectory of
+    # out_dir, not out_dir itself (#2312: a shared out_dir let one target's
+    # summary CSV answer for another's).
+    assert Path(seen["cmd"][seen["cmd"].index("--output-dir") + 1]).parent == tmp_path
+    # vela is a Python child: the parent's decode and the child's write must
+    # both be UTF-8, or Windows cp1252 garbles its diagnostics (#2197).
+    assert seen["io"] == ("utf-8", "utf-8")
     assert blob.format == "vela_tflite"
     assert blob.payload == b"VELA-OUT"
     assert blob.compiler_version.startswith("vela")
@@ -138,7 +170,7 @@ def test_vela_adapter_compile_raises_on_vela_error(tmp_path, monkeypatch):
     src = tmp_path / "m.tflite"
     src.write_bytes(b"TFL3-INPUT")
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
         class _R:
             returncode = 1
             stdout = ""
@@ -147,14 +179,14 @@ def test_vela_adapter_compile_raises_on_vela_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run", fake_run)
     with pytest.raises(RuntimeError, match="vela failed"):
-        VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path)
+        VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path, target=_E8_TARGET)
 
 
 def test_vela_adapter_compile_raises_when_output_file_missing(tmp_path, monkeypatch):
     src = tmp_path / "m.tflite"
     src.write_bytes(b"TFL3-INPUT")
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
         class _R:
             returncode = 0
             stdout = ""
@@ -163,27 +195,83 @@ def test_vela_adapter_compile_raises_when_output_file_missing(tmp_path, monkeypa
 
     monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run", fake_run)
     with pytest.raises(RuntimeError, match="produced no output"):
-        VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path)
+        VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path, target=_E8_TARGET)
+
+
+def test_vela_adapter_compile_raises_when_target_carries_no_memory_mode(tmp_path):
+    # #2312 item 3: no memory profile at all must be a loud refusal, never a
+    # silent flagless invocation of vela's own DRAM-backed default.
+    src = tmp_path / "m.tflite"
+    src.write_bytes(b"TFL3-INPUT")
+    with pytest.raises(RuntimeError, match="no vela memory profile"):
+        VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path, target=None)
+    no_profile_target = TargetSpec(backend="ethos_u", silicon_ref="alif:ensemble:e8", accel_config="")
+    with pytest.raises(RuntimeError, match="no vela memory profile"):
+        VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path,
+                              target=no_profile_target)
 
 
 def test_parse_vela_summary_extracts_sram_and_arena(tmp_path):
+    # vela's sram_memory_used column is already KiB (real vela 5.x row, arena
+    # only -- see test_parse_vela_summary_real_vela5x_row below).
     (tmp_path / "m_summary_internal.csv").write_text(
-        "network,sram_memory_used,arena_cache_size\n"
-        "m,262144,131072\n", encoding="utf-8")
+        "network,sram_memory_used,on_chip_flash_memory_used\n"
+        "m,72.0,235.265625\n", encoding="utf-8")
     arena, sram_kib = _parse_vela_summary(tmp_path, "m")
-    assert sram_kib == 256        # 262144 bytes -> 256 KiB
-    assert arena == 131072
+    assert sram_kib == 72
+    assert arena == 73728          # 72 KiB * 1024, exact (arena_bytes uses round(), not ceil())
+
+
+def test_parse_vela_summary_rounds_kib_up_never_down(tmp_path):
+    # 0.03125 KiB (measured Sram_Only arena on tiny_int8.tflite) must NOT
+    # floor/truncate to 0 -- that would pass the on-device fit gate for free.
+    (tmp_path / "m_summary_internal.csv").write_text(
+        "network,sram_memory_used,on_chip_flash_memory_used\n"
+        "m,0.03125,0.234375\n", encoding="utf-8")
+    arena, sram_kib = _parse_vela_summary(tmp_path, "m")
+    assert sram_kib == 1
+
+
+def test_parse_vela_summary_never_counts_on_chip_flash(tmp_path):
+    # The const/weights region is carried in the model blob (sized by
+    # blob_len), never summed into req_sram_kib -- regardless of its size.
+    (tmp_path / "m_summary_internal.csv").write_text(
+        "network,sram_memory_used,on_chip_flash_memory_used\n"
+        "m,72.0,999999.0\n", encoding="utf-8")
+    _, sram_kib = _parse_vela_summary(tmp_path, "m")
+    assert sram_kib == 72
 
 
 def test_parse_vela_summary_absent_returns_zeros(tmp_path):
     assert _parse_vela_summary(tmp_path, "missing") == (0, 0)
 
 
+def test_parse_vela_summary_ambiguous_matches_are_refused_not_guessed(tmp_path):
+    # #2312 item 2: more than one `<stem>_summary_*.csv` in the same
+    # directory used to pick `sorted(matches)[0]` -- right only by accident
+    # of sort order. Two matches for the same stem must never be read.
+    (tmp_path / "m_summary_internal.csv").write_text(
+        "network,sram_memory_used\nm,72.0\n", encoding="utf-8")
+    (tmp_path / "m_summary_other.csv").write_text(
+        "network,sram_memory_used\nm,500.0\n", encoding="utf-8")
+    assert _parse_vela_summary(tmp_path, "m") == (0, 0)
+
+
+def test_parse_vela_summary_full_cpu_fallback_is_zero_zero(tmp_path):
+    # A full CPU fallback (no operators placed on the NPU) reports 0 SRAM;
+    # (0, 0) is the correct, consistent-with-tan reading, not a parse failure.
+    (tmp_path / "m_summary_internal.csv").write_text(
+        "network,sram_memory_used,on_chip_flash_memory_used\n"
+        "m,0.0,0.0\n", encoding="utf-8")
+    assert _parse_vela_summary(tmp_path, "m") == (0, 0)
+
+
 @pytest.mark.skipif(shutil.which("vela") is None, reason="vela (ethos-u-vela) not installed")
 def test_vela_real_compile_of_tiny_fixture(tmp_path):
     src = tmp_path / "tiny.tflite"
     shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite", src)
-    blob = VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path)
+    blob = VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path,
+                                 target=_E8_TARGET)
     assert blob.format == "vela_tflite"
     assert blob.payload[4:8] == b"TFL3"        # vela emits a .tflite flatbuffer
     assert blob.compiler_version.startswith("vela")
@@ -192,7 +280,10 @@ def test_vela_real_compile_of_tiny_fixture(tmp_path):
 @pytest.mark.skipif(shutil.which("vela") is None, reason="vela (ethos-u-vela) not installed")
 @pytest.mark.parametrize("accel_config", ["ethos-u85-256", "ethos-u55-256", "ethos-u55-128"])
 def test_vela_real_compile_for_e8_accel_configs(tmp_path, accel_config):
-    """Compile the committed fixture for each E1M-AEN801 (E8) accel config.
+    """Compile the committed fixture for each E1M-AEN801 (E8) accel config,
+    threading the E8's real vela profile (issue #2312 -- the U85 config in
+    particular places operators on the NPU and needs `--memory-mode
+    Sram_Only` or its footprint is refused, not silently zeroed).
 
     Proves the shipped Vela accepts every metadata-derived config string for
     the arriving part -- including the E8-only ``ethos-u85-256`` generative NPU
@@ -202,10 +293,226 @@ def test_vela_real_compile_for_e8_accel_configs(tmp_path, accel_config):
     """
     src = tmp_path / "tiny.tflite"
     shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite", src)
-    blob = VelaAdapter().compile(src, accel_config=accel_config, out_dir=tmp_path)
+    blob = VelaAdapter().compile(src, accel_config=accel_config, out_dir=tmp_path,
+                                 target=_E8_TARGET)
     assert blob.format == "vela_tflite"
     assert blob.payload[4:8] == b"TFL3"
     assert blob.compiler_version.startswith("vela")
+
+
+# --- issue #2312: the memory profile actually reaches vela's command line,
+# and a zero-SRAM-with-NPU-ops footprint is refused, not shipped as a zero
+# ("arena-only sram kib" -- the real bug: no --memory-mode/--system-config
+# meant vela's DRAM-backed built-in default reported sram_memory_used=0.0
+# for a model that DID place operators on the NPU, and that zero passed the
+# on-device fit gate against any arena). ---------------------------------
+
+@pytest.mark.skipif(shutil.which("vela") is None, reason="vela (ethos-u-vela) not installed")
+def test_vela_real_compile_with_alif_profile_reports_a_real_sram_footprint(tmp_path):
+    src = tmp_path / "tiny.tflite"
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite", src)
+    blob = VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path,
+                                 target=_E8_TARGET)
+    assert blob.req_sram_kib >= 1
+
+
+def _fake_run_with_summary(summary_csv: str | None = None,
+                           stdout: str = "CPU operators = 0 (0.0%)\nNPU operators = 0 (0.0%)\n",
+                           seen: dict | None = None):
+    """A fake `subprocess.run` writing vela's `_vela.tflite` AND (optionally)
+    a `<stem>_summary_*.csv` into whatever `--output-dir` the real command
+    line names."""
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
+        if seen is not None:
+            seen["cmd"] = cmd
+        run_dir = Path(cmd[cmd.index("--output-dir") + 1])
+        stem = Path(cmd[1]).stem
+        (run_dir / f"{stem}_vela.tflite").write_bytes(b"VELA-OUT")
+        if summary_csv is not None:
+            (run_dir / f"{stem}_summary_internal.csv").write_text(summary_csv, encoding="utf-8")
+
+        class _R:
+            returncode = 0
+            stderr = ""
+        _R.stdout = stdout
+        return _R()
+    return fake_run
+
+
+def test_vela_compile_passes_memory_mode_for_an_alif_target(tmp_path, monkeypatch):
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    seen = {}
+
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run",
+                        _fake_run_with_summary(seen=seen))
+    VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=_E8_TARGET)
+    assert "--memory-mode" in seen["cmd"] and "Sram_Only" in seen["cmd"]
+    # No vendor .ini on this host (ALP_VELA_CONFIG unset) -- the E8's
+    # system_config is unnamed anyway, but even a named one must never reach
+    # vela without a --config alongside it (a hard rc=1).
+    assert "--system-config" not in seen["cmd"] and "--config" not in seen["cmd"]
+
+
+def test_vela_compile_passes_a_built_in_system_config_unconditionally(tmp_path, monkeypatch):
+    # #2312 item 4: a system_config with system_config_requires_vendor_config
+    # false is an Arm BUILT-IN -- safe to pass alone, no vendor .ini needed.
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    seen = {}
+    builtin_target = TargetSpec(backend="ethos_u", silicon_ref="nxp:imx9:imx93", accel_config="",
+                                vela_memory_mode="Shared_Sram", vela_system_config="Ethos_U65_Embedded")
+
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run",
+                        _fake_run_with_summary(seen=seen))
+    monkeypatch.delenv("ALP_VELA_CONFIG", raising=False)
+    VelaAdapter().compile(src, accel_config="ethos-u65-256", out_dir=tmp_path, target=builtin_target)
+    assert seen["cmd"][seen["cmd"].index("--system-config") + 1] == "Ethos_U65_Embedded"
+    assert "--config" not in seen["cmd"]
+
+
+def test_vela_compile_withholds_a_vendor_gated_system_config_with_no_vendor_ini(tmp_path, monkeypatch):
+    # A profile whose system_config needs a vendor .ini and has none on this
+    # host must still withhold --system-config -- naming a vendor-only
+    # section with no --config is vela's own hard rc=1.
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    seen = {}
+    named_target = TargetSpec(backend="ethos_u", silicon_ref="alif:ensemble:e8", accel_config="",
+                              vela_memory_mode="Sram_Only", vela_vendor_system_config="Ethos_U85_SRAM_Only",
+                              vela_vendor_config_filename="ensemble_vela.ini")
+
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run",
+                        _fake_run_with_summary(seen=seen))
+    monkeypatch.delenv("ALP_VELA_CONFIG", raising=False)
+    VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=named_target)
+    assert "--system-config" not in seen["cmd"] and "--config" not in seen["cmd"]
+
+
+def test_vela_compile_passes_vendor_system_config_when_a_vendor_ini_is_supplied(tmp_path, monkeypatch):
+    ini = tmp_path / "ensemble_vela.ini"; ini.write_text("[Memory_Mode.Sram_Only]\n", encoding="utf-8")
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+    seen = {}
+    named_target = TargetSpec(backend="ethos_u", silicon_ref="alif:ensemble:e8", accel_config="",
+                              vela_memory_mode="Sram_Only", vela_vendor_system_config="Ethos_U85_SRAM_Only",
+                              vela_vendor_config_filename="ensemble_vela.ini")
+
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run",
+                        _fake_run_with_summary(seen=seen))
+    monkeypatch.setenv("ALP_VELA_CONFIG", str(ini))
+    VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=named_target)
+    assert seen["cmd"][seen["cmd"].index("--config") + 1] == str(ini)
+    assert seen["cmd"][seen["cmd"].index("--system-config") + 1] == "Ethos_U85_SRAM_Only"
+
+
+def test_vela_compile_refuses_a_zero_sram_footprint_when_npu_placed_ops(tmp_path, monkeypatch):
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+
+    monkeypatch.setattr(
+        "alp_model.adapters.ethos_u.subprocess.run",
+        _fake_run_with_summary(
+            summary_csv="network,sram_memory_used,dram_memory_used\nm,0.0,5.359375\n",
+            stdout="NPU operators = 6 (40.0%)\nCPU operators = 9 (60.0%)\n"))
+    with pytest.raises(RuntimeError, match="placed 6 operator"):
+        VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=_E8_TARGET)
+
+
+def test_parse_vela_placement_refuses_an_npu_line_with_no_matching_cpu_line():
+    # #2312 item 3: an "NPU operators = 0" line with no matching "CPU
+    # operators =" line is just as unreadable a shape as no placement lines
+    # at all -- reading the NPU line alone would ship that zero as a
+    # confirmed full CPU fallback on a guess.
+    assert _parse_vela_placement("NPU operators = 0 (0.0%)\n") is None
+
+
+def test_vela_compile_refuses_a_zero_sram_footprint_when_cpu_line_is_missing(tmp_path, monkeypatch):
+    # Same #2312 item 3 case, exercised through compile(): a summary with
+    # zero SRAM plus an NPU-only placement line must refuse, not ship 0 as
+    # a confirmed full CPU fallback.
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+
+    monkeypatch.setattr(
+        "alp_model.adapters.ethos_u.subprocess.run",
+        _fake_run_with_summary(
+            summary_csv="network,sram_memory_used,dram_memory_used\nm,0.0,5.359375\n",
+            stdout="NPU operators = 0 (0.0%)\n"))
+    with pytest.raises(RuntimeError, match="could not be read"):
+        VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=_E8_TARGET)
+
+
+def test_vela_compile_refuses_a_zero_sram_footprint_when_placement_line_is_unreadable(tmp_path, monkeypatch):
+    # #2312 item 1 (BLOCKING): no "NPU operators =" line at all must refuse,
+    # not be read as `if npu_ops:` (None/0 both falsy) skipping the refusal
+    # and shipping req_sram_kib=0 as if it were a confirmed full CPU fallback.
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+
+    monkeypatch.setattr(
+        "alp_model.adapters.ethos_u.subprocess.run",
+        _fake_run_with_summary(
+            summary_csv="network,sram_memory_used,dram_memory_used\nm,0.0,5.359375\n",
+            stdout="vela finished (no placement summary printed)\n"))
+    with pytest.raises(RuntimeError, match="could not be read"):
+        VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=_E8_TARGET)
+
+
+def test_vela_compile_keeps_the_zero_zero_full_cpu_fallback(tmp_path, monkeypatch):
+    # No operator placed on the NPU at all -- zero SRAM is the CORRECT
+    # reading (a full CPU fallback), never a refusal.
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+
+    monkeypatch.setattr(
+        "alp_model.adapters.ethos_u.subprocess.run",
+        _fake_run_with_summary(
+            summary_csv="network,sram_memory_used,dram_memory_used\nm,0.0,0.0\n",
+            stdout="NPU operators = 0 (0.0%)\nCPU operators = 15 (100.0%)\n"))
+    blob = VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=_E8_TARGET)
+    assert blob.req_sram_kib == 0
+    assert blob.arena_bytes == 0
+
+
+def test_vela_compile_does_not_read_a_stale_summary_from_another_accel_config(tmp_path, monkeypatch):
+    # #2312 item 2 (the reviewer's reproduction): out_dir already carries a
+    # summary CSV from a DIFFERENT accel_config's compile (planted directly
+    # in out_dir, simulating a prior target sharing it, pre-fix). Each
+    # accel_config now compiles into its own subdirectory, so this stale
+    # sibling must never be glob-matched into this run's footprint.
+    (tmp_path / "m_summary_internal.csv").write_text(
+        "network,sram_memory_used\nm,500.0\n", encoding="utf-8")
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+
+    monkeypatch.setattr(
+        "alp_model.adapters.ethos_u.subprocess.run",
+        _fake_run_with_summary(stdout="NPU operators = 0 (0.0%)\nCPU operators = 15 (100.0%)\n"))
+    blob = VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=_E8_TARGET)
+    assert blob.req_sram_kib == 0        # NOT 500 -- the stale sibling must not be read
+
+
+def test_vela_compile_does_not_read_a_stale_summary_left_by_a_prior_run_of_the_same_target(tmp_path, monkeypatch):
+    # #2312 item 6: `_run_dir` is per-accel-config, not per-invocation -- a
+    # REBUILD reuses the same run directory. Plant a stale summary CSV
+    # (as an earlier compile of this exact accel_config would have left
+    # behind) directly in the run dir this compile will use, before
+    # invoking vela; the fresh run must read only its own output, never
+    # the leftover.
+    run_dir = tmp_path / "vela-ethos-u85-256"
+    run_dir.mkdir(parents=True)
+    # A DIFFERENT filename than the fresh run's own `m_summary_internal.csv`
+    # (vela timestamps/suffixes these in practice) so that, absent the
+    # cleanup, two `m_summary_*.csv` files would coexist and trip
+    # `_parse_vela_summary`'s own ambiguity refusal ((0, 0)) rather than
+    # merely being overwritten -- proving the stale file was actually
+    # deleted, not just coincidentally clobbered by an identical filename.
+    (run_dir / "m_summary_stale.csv").write_text(
+        "network,sram_memory_used\nm,500.0\n", encoding="utf-8")
+    # A stale .tflite from a prior run too, per item 6.
+    (run_dir / "m_vela.tflite").write_bytes(b"STALE-VELA-OUT")
+    src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
+
+    monkeypatch.setattr(
+        "alp_model.adapters.ethos_u.subprocess.run",
+        _fake_run_with_summary(
+            summary_csv="network,sram_memory_used,dram_memory_used\nm,12.0,0.0\n",
+            stdout="NPU operators = 6 (40.0%)\nCPU operators = 9 (60.0%)\n"))
+    blob = VelaAdapter().compile(src, accel_config="ethos-u85-256", out_dir=tmp_path, target=_E8_TARGET)
+    assert blob.req_sram_kib == 12       # this run's own figure, NOT ambiguous/stale
+    assert blob.payload == b"VELA-OUT"   # this run's own .tflite, not the stale one
 
 
 def test_cpu_and_vela_do_not_require_compile_opts():
@@ -226,13 +533,9 @@ def test_cpu_compile_accepts_opts_kwarg(tmp_path):
 
 def test_vela_compile_accepts_opts_kwarg(tmp_path, monkeypatch):
     src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
-    def fake_run(cmd, capture_output, text, timeout):
-        (tmp_path / "m_vela.tflite").write_bytes(b"VELA-OUT")
-        class _R: returncode = 0; stdout = ""; stderr = ""
-        return _R()
-    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run", fake_run)
-    blob = VelaAdapter().compile(src, accel_config="ethos-u55-128",
-                                 out_dir=tmp_path, opts={"ignored": True})
+    monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run", _fake_run_with_summary())
+    blob = VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path,
+                                 target=_E8_TARGET, opts={"ignored": True})
     assert blob.payload == b"VELA-OUT"
 
 
@@ -254,7 +557,11 @@ def test_deepx_compile_invokes_dxcom_and_returns_dxnn(tmp_path, monkeypatch):
     cfg = tmp_path / "m.deepx.json"; cfg.write_text("{}", encoding="utf-8")
     seen = {}
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
+        # dxcom is a Python child: record the decode and the child's write
+        # encoding for both calls, the -v probe and the compile (#2197).
+        seen["probe_io" if "-v" in cmd else "compile_io"] = (
+            encoding, env.get("PYTHONIOENCODING"))
         if "-v" in cmd:                              # _dxcom_version() probe
             class _V:
                 returncode = 0
@@ -274,6 +581,7 @@ def test_deepx_compile_invokes_dxcom_and_returns_dxnn(tmp_path, monkeypatch):
         return _C()
 
     monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", fake_run)
+    monkeypatch.setattr("alp_model.adapters.deepx._dxcom_exe", lambda: "dxcom")
     blob = DeepxAdapter().compile(src, accel_config="", out_dir=tmp_path,
                                   opts={"config": str(cfg)})
     assert seen["cmd"][:3] == ["dxcom", "-m", str(src)]
@@ -282,13 +590,58 @@ def test_deepx_compile_invokes_dxcom_and_returns_dxnn(tmp_path, monkeypatch):
     assert blob.format == "dxnn"
     assert blob.payload.startswith(b"DXNN")          # raw .dxnn flatbuffer, not a tar
     assert blob.compiler_version == "DX-COM 2.3.0"
+    assert seen["probe_io"] == ("utf-8", "utf-8")
+    assert seen["compile_io"] == ("utf-8", "utf-8")
+
+
+def test_deepx_compile_uses_dxcom_from_sdk_home_when_not_on_path(tmp_path, monkeypatch):
+    # is_available() accepts ALP_DEEPX_SDK_HOME; compile() must run that same
+    # dxcom, not a bare 'dxcom' that raises FileNotFoundError off PATH (#2455).
+    import shutil
+    import sys
+    real_which = shutil.which
+    monkeypatch.setattr("alp_model.adapters.deepx.shutil.which",
+                        lambda n, path=None: real_which(n, path=path) if path else None)
+    bindir = tmp_path / "sdk" / "bin"; bindir.mkdir(parents=True)
+    exe = bindir / ("dxcom.bat" if sys.platform == "win32" else "dxcom")
+    exe.write_text("", encoding="utf-8"); exe.chmod(0o755)
+    monkeypatch.setenv("ALP_DEEPX_SDK_HOME", str(tmp_path / "sdk"))
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
+    cfg = tmp_path / "m.json"; cfg.write_text("{}", encoding="utf-8")
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd)
+        if "-v" not in cmd:
+            out = Path(cmd[cmd.index("-o") + 1]); out.mkdir(parents=True, exist_ok=True)
+            (out / "m.dxnn").write_bytes(b"DXNN")
+
+        class _R:
+            returncode = 0
+            stdout = "DX-COM 2.3.0"
+            stderr = ""
+        return _R()
+
+    monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", fake_run)
+    a = DeepxAdapter()
+    assert a.is_available() is True
+    assert a.compile(src, accel_config="", out_dir=tmp_path, opts={"config": str(cfg)}).payload == b"DXNN"
+    assert all(Path(c[0]) == exe for c in seen)
+
+
+def test_deepx_compile_raises_runtimeerror_when_dxcom_missing(tmp_path, monkeypatch):
+    monkeypatch.delenv("ALP_DEEPX_SDK_HOME", raising=False)
+    monkeypatch.setattr("alp_model.adapters.deepx.shutil.which", lambda n, path=None: None)
+    src = tmp_path / "m.onnx"; src.write_bytes(b"x")
+    with pytest.raises(RuntimeError, match="dxcom not found"):
+        DeepxAdapter().compile(src, accel_config="", out_dir=tmp_path, opts={"config": "c.json"})
 
 
 def test_deepx_compile_raises_when_no_dxnn_produced(tmp_path, monkeypatch):
     src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
     cfg = tmp_path / "m.deepx.json"; cfg.write_text("{}", encoding="utf-8")
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
         if "-v" in cmd:
             class _V:
                 returncode = 0
@@ -304,8 +657,50 @@ def test_deepx_compile_raises_when_no_dxnn_produced(tmp_path, monkeypatch):
         return _C()
 
     monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", fake_run)
+    monkeypatch.setattr("alp_model.adapters.deepx._dxcom_exe", lambda: "dxcom")
     with pytest.raises(RuntimeError, match="no .dxnn"):
         DeepxAdapter().compile(src, accel_config="", out_dir=tmp_path, opts={"config": str(cfg)})
+
+
+def _vendor_token(compiler_version: str) -> str:
+    """First whitespace-separated token of a compiler_version string --
+    the part downstream consumers (e.g. tan-cli) match a bench perf point
+    against a build by (case-folded)."""
+    return compiler_version.split()[0]
+
+
+def test_dxcom_version_fallback_matches_success_vendor_token(monkeypatch):
+    # Issue #1923: the probe-failure fallback used to emit the lowercase
+    # console-script name 'dxcom' while the success path emits 'DX-COM
+    # <version>' -- a perf point written during a probe failure carried a
+    # different vendor token and never matched downstream. Both paths must
+    # share the same first token.
+    from alp_model.adapters.deepx import _dxcom_version
+
+    def fail_run(cmd, capture_output, text, encoding, env, timeout):
+        raise OSError("dxcom not found on PATH")
+
+    monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", fail_run)
+    assert _vendor_token(_dxcom_version()) == "DX-COM"
+
+
+def test_vela_and_drpai_version_fallback_already_matches_success_token(monkeypatch):
+    # Sibling check requested by #1923: ethos_u.py and drpai.py were read and
+    # found NOT to share the same divergence -- their failure fallback is a
+    # bare vendor token (no version suffix), so the first token still matches
+    # the success path. Pinned here so a future edit can't reintroduce the
+    # deepx-style split.
+    from importlib.metadata import PackageNotFoundError
+    from alp_model.adapters.ethos_u import _vela_version
+    from alp_model.adapters.drpai import _compiler_version
+
+    def raise_not_found(pkg):
+        raise PackageNotFoundError(pkg)
+
+    monkeypatch.setattr("alp_model.adapters.ethos_u.version", raise_not_found)
+    assert _vendor_token(_vela_version()) == "vela"
+
+    assert _vendor_token(_compiler_version(Path("/nonexistent-tvm-home"))) == "drp-ai_tvm"
 
 
 @pytest.mark.skipif(shutil.which("dxcom") is None, reason="dxcom (dx-com wheel) not installed")
@@ -397,7 +792,7 @@ def test_drpai_compile_accepts_224_shape_as_yaml_list(tmp_path, monkeypatch):
     (calib / "0.png").write_bytes(b"PNG")
     seen = {}
 
-    def fake_run(cmd, capture_output, text, timeout, env):
+    def fake_run(cmd, capture_output, text, encoding, timeout, env):
         seen["cmd"] = cmd
         out = Path(cmd[cmd.index("-o") + 1])
         out.mkdir(parents=True, exist_ok=True)
@@ -477,9 +872,10 @@ def test_drpai_compile_invokes_tvm_and_returns_drpai_dir(tmp_path, monkeypatch):
     (calib / "0.png").write_bytes(b"PNG")
     seen = {}
 
-    def fake_run(cmd, capture_output, text, timeout, env):
+    def fake_run(cmd, capture_output, text, encoding, timeout, env):
         seen["cmd"] = cmd
         seen["product"] = env.get("PRODUCT")
+        seen["io"] = (encoding, env.get("PYTHONIOENCODING"))
         out = Path(cmd[cmd.index("-o") + 1])             # the -o object dir
         out.mkdir(parents=True, exist_ok=True)
         (out / "drp_desc.bin").write_bytes(b"DESC")      # required artifacts
@@ -506,6 +902,7 @@ def test_drpai_compile_invokes_tvm_and_returns_drpai_dir(tmp_path, monkeypatch):
     assert seen["cmd"][seen["cmd"].index("-i") + 1] == "input"
     assert "--images" in seen["cmd"] and str(calib) in seen["cmd"]
     assert seen["product"] == "V2N"
+    assert seen["io"] == ("utf-8", "utf-8")
     assert blob.format == "drpai_dir"
     assert blob.compiler_version.startswith("drp-ai_tvm")
     # The payload is a real tar carrying the object-dir files.
@@ -520,7 +917,7 @@ def test_drpai_compile_raises_when_artifacts_missing(tmp_path, monkeypatch):
     src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
     calib = tmp_path / "calib"; calib.mkdir()
 
-    def fake_run(cmd, capture_output, text, timeout, env):
+    def fake_run(cmd, capture_output, text, encoding, timeout, env):
         Path(cmd[cmd.index("-o") + 1]).mkdir(parents=True, exist_ok=True)   # "ok", no .bin
 
         class _R:
@@ -541,7 +938,7 @@ def test_drpai_compile_raises_on_tool_error(tmp_path, monkeypatch):
     src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
     calib = tmp_path / "calib"; calib.mkdir()
 
-    def fake_run(cmd, capture_output, text, timeout, env):
+    def fake_run(cmd, capture_output, text, encoding, timeout, env):
         class _R:
             returncode = 1
             stdout = ""
@@ -630,3 +1027,40 @@ def test_deepx_real_compile_of_tiny_fixture(tmp_path):
     assert blob.format == "dxnn"
     assert blob.payload[:4] == b"DXNN"        # self-describing .dxnn flatbuffer magic
     assert blob.compiler_version.startswith("DX-COM")
+
+
+def _drpai_block_schema():
+    import json
+    schema = json.loads((_ROOT / "metadata" / "schemas" / "board.schema.json")
+                        .read_text(encoding="utf-8"))
+    return schema["properties"]["models"]["items"]["properties"]["compile"][
+        "properties"]["drpai"]
+
+
+def test_drpai_compile_block_schema_matches_what_the_adapter_reads(tmp_path):
+    # NPU-05: the schema used to declare only `spec`, which the adapter never
+    # reads, so `tan validate` rejected every block the adapter accepts.
+    import jsonschema
+    schema = _drpai_block_schema()
+    for shape in ("1,3,224,224", [1, 3, 224, 224]):
+        opts = {**_drpai_opts(tmp_path), "input_shape": shape}
+        jsonschema.validate(opts, schema)
+    jsonschema.validate({k: v for k, v in _drpai_opts(tmp_path).items()
+                         if k != "product"}, schema)          # product optional
+    for bad in ({"spec": "x.yaml"},
+                {**_drpai_opts(tmp_path), "product": "V2X"},
+                {k: v for k, v in _drpai_opts(tmp_path).items() if k != "images"}):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(bad, schema)
+
+
+def test_drpai_ci_dry_run_skips_when_translator_absent(tmp_path, monkeypatch):
+    # CI has no DRP-AI TVM / Translator: a schema-valid compile block must end
+    # in a recorded coverage skip, never a compile attempt or a crash.
+    from alp_model.build import build_model
+    monkeypatch.delenv("ALP_DRPAI_TVM_HOME", raising=False)
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX")
+    with pytest.raises(ValueError, match=r"drpai:skipped \(drpai compiler not installed\)"):
+        build_model(sku="E1M-V2N101", name="m", source=src, out_dir=tmp_path / "out",
+                    metadata_root=_ROOT / "metadata", adapters=[DrpaiAdapter()],
+                    compile_opts={"drpai": _drpai_opts(tmp_path)})

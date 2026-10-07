@@ -149,7 +149,7 @@ def emit_header(vela_tflite: str, out_h: str, model_name: str,
 	lines.append("")
 
 	os.makedirs(os.path.dirname(out_h), exist_ok=True)
-	with open(out_h, "w") as f:
+	with open(out_h, "w", encoding="utf-8") as f:
 		f.write("\n".join(lines))
 	print("aen-npu-inference-alif: wrote", out_h,
 	      "(%d network bytes, arena %d B)" % (len(data), arena_bytes),

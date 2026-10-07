@@ -214,9 +214,9 @@ how much that check is worth:
   `.github/workflows/**`), and `python-smoke` is in neither branch's
   required-status-check list. `main` requires exactly
   `twister · native_sim/native/64` and `clang-format · diff-only`;
-  `dev` requires exactly `twister-shard 1/4`, `twister-shard 2/4`,
-  `twister-shard 3/4`, `twister-shard 4/4`, `clang-format · diff-only`
-  and `distro install · all`. A violation therefore posts a red,
+  `dev` requires exactly `twister · native_sim/native/64` (the
+  aggregator over the `twister-shard i/8` jobs, since 2026-09-29, #2429),
+  `clang-format · diff-only` and `distro install · all`. A violation therefore posts a red,
   non-required check; it does not block the merge.
 - **It covers the two direct source-text sinks, and nothing else.** `run:`
   bodies and `actions/github-script` `with: script:` bodies (alp-sdk#1529)

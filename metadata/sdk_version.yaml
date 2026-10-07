@@ -72,6 +72,29 @@
 # `scripts/validate_board_yaml.py` maps that failure to exit code 5.
 #
 # Bump in the same PR that lands the matching CHANGELOG.md entry.
+#
+# `version:` may carry a SemVer pre-release suffix during a release-
+# candidate window, e.g. `version: 0.16.0-rc1` for the commit that gets
+# tagged `v0.16.0-rc1` -- ordinary SemVer 2.0.0 grammar (semver.org), not a
+# bespoke field.  `scripts/bump_version.py --to <X.Y.Z-rcN>` writes it, and
+# every consumer above already parses it tolerantly: `scripts/alp_lock/
+# __init__.py`'s version regex has carried an optional `(?:-[\w.]+)?` group
+# since before this comment did, `scripts/alp_orchestrate/sdk_compat.py`'s
+# `_VERSION_RE` matches only the leading `X.Y.Z` and ignores anything after,
+# and `scripts/alp_cli/__init__.py` / `scripts/alp_orchestrate/buildplan.py`
+# both read the field as an opaque string.  `include/alp/version.h`'s
+# ALP_VERSION_MAJOR/MINOR/PATCH stay the plain core integers; only
+# ALP_VERSION_STRING (and this field) carry the suffix -- that's what lets a
+# build made from an rc checkout report itself as one instead of silently
+# claiming its eventual GA version (#1902).  `status:` below is a SEPARATE
+# axis and is deliberately NOT overloaded for this: flipping it for an rc
+# window was already proposed and rejected once (CHANGELOG.md's v0.15.0 and
+# #1508 entries -- "would churn alp.lock and every consumer that reads it");
+# the pre-release suffix is the narrower, additive fix instead.  Between an
+# rc cut and its GA tag `status:` still reads `released` and `version:`
+# still names the target GA release -- callers that only want "what will
+# this become" (e.g. `scripts/alp_orchestrate/sdk_compat.py`'s hw_rev range
+# checks) can keep reading the core X.Y.Z and ignore the suffix.
 
 version: 0.16.0
 status:  released        # released | development | preview

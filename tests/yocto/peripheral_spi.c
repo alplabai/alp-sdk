@@ -118,26 +118,33 @@ static void test_out_of_range_cs_is_not_confused_with_no_cs(void)
 	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_NOT_READY);
 }
 
-static void test_transceive_on_null_bus_returns_invalid(void)
+/* NULL `bus` is a lifecycle condition, not a malformed argument --
+ * ALP_ERR_NOT_READY, matching every Zephyr dispatcher and ADR-0002's
+ * 2026-08-27 amendment (issue #1834, same shape as #1734's GPIO fix).
+ * tests/yocto/peripheral_spi_closed_status.c covers the sharper
+ * non-NULL, closed-handle case and the INVAL-still-fires-on-a-good-
+ * handle counterpart, which this public-API-only file can't fabricate
+ * without a real /dev/spidevN.M. */
+static void test_transceive_on_null_bus_returns_not_ready(void)
 {
 	uint8_t      tx[1] = { 0x9F };
 	uint8_t      rx[3] = { 0 };
 	alp_status_t rc    = alp_spi_transceive(NULL, tx, rx, sizeof(tx));
-	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
-static void test_write_on_null_bus_returns_invalid(void)
+static void test_write_on_null_bus_returns_not_ready(void)
 {
 	uint8_t      buf[1] = { 0x00 };
 	alp_status_t rc     = alp_spi_write(NULL, buf, sizeof(buf));
-	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
-static void test_read_on_null_bus_returns_invalid(void)
+static void test_read_on_null_bus_returns_not_ready(void)
 {
 	uint8_t      buf[1] = { 0 };
 	alp_status_t rc     = alp_spi_read(NULL, buf, sizeof(buf));
-	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
 static void test_close_null_is_safe(void)
@@ -154,9 +161,9 @@ int main(void)
 	test_nonexistent_bus_returns_null_and_stamps_not_ready();
 	test_no_cs_returns_null_and_stamps_nosupport();
 	test_out_of_range_cs_is_not_confused_with_no_cs();
-	test_transceive_on_null_bus_returns_invalid();
-	test_write_on_null_bus_returns_invalid();
-	test_read_on_null_bus_returns_invalid();
+	test_transceive_on_null_bus_returns_not_ready();
+	test_write_on_null_bus_returns_not_ready();
+	test_read_on_null_bus_returns_not_ready();
 	test_close_null_is_safe();
 
 	ALP_TEST_SUMMARY();

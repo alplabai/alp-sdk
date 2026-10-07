@@ -43,6 +43,10 @@ struct alp_gpio_ops {
 	                           void                     *user);
 	alp_status_t (*disable_irq)(alp_gpio_backend_state_t *state);
 	void (*close)(alp_gpio_backend_state_t *state);
+	/* Optional: switch the pin to an OUTPUT whose initial level is LOW in the
+	 * same step (never driven high, not even briefly).  Internal use only
+	 * (alp_z_gpio_configure_output_low()). */
+	alp_status_t (*configure_output_low)(alp_gpio_backend_state_t *state);
 };
 
 /*
@@ -77,5 +81,42 @@ struct alp_gpio {
  * pins here so it reuses the real Zephyr pin I/O instead of re-implementing
  * it.  NULL is never returned. */
 const alp_gpio_ops_t *alp_z_gpio_ops(void);
+
+/* Platform-backend open that takes the owning portable handle EXPLICITLY.
+ *
+ * The Zephyr backend has to know which struct alp_gpio an interrupt belongs to,
+ * because the dispatcher stashes the user callback on the handle (pin->cb) and
+ * the ISR thunk invokes it from there.  Its own ops->open() recovers that owner
+ * with CONTAINER_OF(st, struct alp_gpio, state), which is correct only when the
+ * caller really did pass &handle->state.
+ *
+ * A delegating backend does not: the CC3501E proxy owns the handle's state and
+ * hands the platform backend a state object nested in its own per-handle
+ * sidecar.  CONTAINER_OF on that yields a pointer some bytes BEFORE a
+ * proxy_side_t, and the ISR thunk then loads a callback from whatever lies
+ * there and calls it -- from interrupt context (issue #1618).
+ *
+ * So a delegating caller must name the owner instead of having it inferred.
+ * Pass the OWNER'S state (&handle->state), not the handle: that keeps the
+ * CONTAINER_OF -- and every Zephyr header it needs -- inside the platform
+ * backend, so a delegating backend stays free of Zephyr types.  NULL is
+ * accepted and leaves the pin without a callback target, which is safer than
+ * fabricating one. */
+alp_status_t alp_z_gpio_open_owned(uint32_t                  pin_id,
+                                   alp_gpio_backend_state_t *st,
+                                   alp_capabilities_t       *caps_out,
+                                   alp_gpio_backend_state_t *owner_state);
+
+/* INTERNAL opener for the reserved GD32 pad ids (GD32G553_PAD_ID_*).  The
+ * portable alp_gpio_open() REFUSES those ids (ALP_ERR_INVAL): they name the GD32
+ * SWD / reset / ATTN pads, which only the V2N supervisor and the gd32_swd driver
+ * (through src/zephyr/gd32_swd_pads.c) may drive, never application code or the
+ * console.  Any other id behaves exactly like alp_gpio_open(). */
+alp_gpio_t *alp_z_gpio_open_internal(uint32_t pin_id);
+
+/* Configure @p pin as an OUTPUT whose initial level is LOW (the shared
+ * open-drain GD32_NRST net must never be driven high).  ALP_ERR_NOSUPPORT when
+ * the backend cannot do it atomically. */
+alp_status_t alp_z_gpio_configure_output_low(alp_gpio_t *pin);
 
 #endif /* ALP_BACKENDS_GPIO_OPS_H */

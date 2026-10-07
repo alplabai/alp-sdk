@@ -57,19 +57,25 @@ alp_status_t st7789_init(st7789_t   *dev,
 	dev->width  = width;
 	dev->height = height;
 
+	/* Every hold below is tens to hundreds of milliseconds, so the sequence
+	 * sleeps (alp_delay_ms) instead of spinning.  alp_delay_us never yields
+	 * (include/alp/peripheral.h) and this bring-up costs 820 ms in total --
+	 * that much non-yielding spin blocks every equal- or lower-priority
+	 * thread.  alp_delay_ms keeps the "at least" guarantee the ST7789V
+	 * datasheet minimums rely on. */
 	if (reset != NULL) {
 		(void)alp_gpio_write(reset, false);
-		alp_delay_us(20000);
+		alp_delay_ms(20);
 		(void)alp_gpio_write(reset, true);
-		alp_delay_us(150000);
+		alp_delay_ms(150);
 	}
 
 	alp_status_t s = st7789_cmd(dev, ST7789_CMD_SWRESET);
 	if (s != ALP_OK) return s;
-	alp_delay_us(150000);
+	alp_delay_ms(150);
 	s = st7789_cmd(dev, ST7789_CMD_SLPOUT);
 	if (s != ALP_OK) return s;
-	alp_delay_us(500000);
+	alp_delay_ms(500);
 
 	uint8_t colmod = 0x55; /* 16-bit/pixel RGB565 */
 	s              = st7789_cmd(dev, ST7789_CMD_COLMOD);

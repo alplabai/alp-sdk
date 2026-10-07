@@ -92,7 +92,7 @@ alp_pwm_t *alp_pwm_open(const alp_pwm_config_t *cfg)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
 		(void)be->probe(cfg->channel_id, &refined);
@@ -155,6 +155,12 @@ alp_status_t alp_pwm_configure(alp_pwm_t      *pwm,
 		return ALP_ERR_NOT_READY;
 	alp_status_t rc;
 	if ((unsigned)align_mode > (unsigned)ALP_PWM_ALIGN_CENTER_BOTH) {
+		rc = ALP_ERR_INVAL;
+	} else if ((break_cfg & (uint8_t)~ALP_PWM_BREAK_EXTERNAL) != 0u) {
+		/* #1648: an undefined break bit would reach the GD32 BKDT field
+		 * unchecked and be dropped or misread there -- refuse it here,
+		 * like an out-of-range align_mode, instead of returning ALP_OK
+		 * for a request no backend honours. */
 		rc = ALP_ERR_INVAL;
 	} else if (pwm->state.ops->configure == NULL) {
 		rc = ALP_ERR_NOSUPPORT;
@@ -238,7 +244,7 @@ alp_pwm_capture_t *alp_pwm_capture_open(const alp_pwm_capture_config_t *cfg)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
 		(void)be->probe(cfg->channel_id, &refined);

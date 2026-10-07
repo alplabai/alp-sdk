@@ -34,6 +34,8 @@
 #include <alp/peripheral.h>
 #include <alp/usb.h>
 
+#include "alp_errno.h"
+#include "alp_slot_claim.h"
 #include "usb_ops.h"
 
 #if defined(CONFIG_ALP_SDK_USB)
@@ -61,9 +63,13 @@ static bool              _be_pool_in_use[CONFIG_ALP_SDK_MAX_USB_DEV_HANDLES];
 static struct usb_dev_be *_be_alloc(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_be_pool); ++i) {
-		if (!_be_pool_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_be_pool_in_use[i])) {
 			memset(&_be_pool[i], 0, sizeof(_be_pool[i]));
-			_be_pool_in_use[i] = true;
 			return &_be_pool[i];
 		}
 	}
@@ -75,7 +81,7 @@ static void _be_free(struct usb_dev_be *p)
 	if (p == NULL) return;
 	for (size_t i = 0; i < ARRAY_SIZE(_be_pool); ++i) {
 		if (&_be_pool[i] == p) {
-			_be_pool_in_use[i] = false;
+			alp_slot_release(&_be_pool_in_use[i]);
 			return;
 		}
 	}
@@ -83,26 +89,11 @@ static void _be_free(struct usb_dev_be *p)
 
 static alp_status_t errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	case -ENOMEM:
-		return ALP_ERR_NOMEM;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 #endif /* CONFIG_ALP_SDK_USB */
 
@@ -114,6 +105,7 @@ static alp_status_t z_dev_open(const alp_usb_device_config_t *cfg,
                                alp_usb_dev_state_t           *st,
                                alp_capabilities_t            *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL) return ALP_ERR_INVAL;
 #if defined(CONFIG_ALP_SDK_USB)
 	if (cfg->device_class > ALP_USB_DEVICE_HID) return ALP_ERR_INVAL;
@@ -128,11 +120,9 @@ static alp_status_t z_dev_open(const alp_usb_device_config_t *cfg,
      * into the descriptors before usb_enable.  For now open
      * succeeds and enable() drives the stack with the
      * compile-time descriptors. */
-	caps_out->flags = 0u;
 	return ALP_OK;
 #else
 	(void)st;
-	caps_out->flags = 0u;
 	return ALP_ERR_NOSUPPORT;
 #endif
 }
@@ -233,7 +223,7 @@ USBH_CONTROLLER_DEFINE(alp_usbh, DEVICE_DT_GET(DT_NODELABEL(zephyr_uhc0)));
 
 static alp_status_t z_host_open(alp_usb_host_state_t *st, alp_capabilities_t *caps_out)
 {
-	caps_out->flags = 0u;
+	(void)caps_out;
 	if (usbh_init(&alp_usbh) != 0) {
 		return ALP_ERR_IO;
 	}
@@ -269,8 +259,8 @@ static void z_host_close(alp_usb_host_state_t *st)
 
 static alp_status_t z_host_open(alp_usb_host_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	(void)st;
-	caps_out->flags = 0u;
 	/* USB host ops require CONFIG_USB_HOST_STACK and an alif,xhci-uhc
 	 * node (label zephyr_uhc0) in the board DTS.  See the AEN401
 	 * bring-up plan for the bench-gated activation path. */

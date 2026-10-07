@@ -11,6 +11,8 @@ import hashlib
 import re
 from pathlib import Path
 
+from alp_project_loader import resolve_targets
+
 from .adapters import CompilerAdapter
 from .adapters.cpu import CpuAdapter
 from .adapters.ethos_u import VelaAdapter
@@ -19,7 +21,6 @@ from .adapters.deepx import DeepxAdapter
 from .adapters.executorch import ExecutorchAdapter
 from .manifest import Manifest, Target, Coverage
 from .package import write_package
-from .targets import resolve_targets
 from .tensorio import extract_io
 
 # Default adapter registry. Each is detect-and-skip (is_available() False when
@@ -33,8 +34,10 @@ _ADAPTERS: list[CompilerAdapter] = [
 
 # #1125: mirrors metadata/schemas/board.schema.json's `models[].name` pattern.
 # build_model() is called directly by non-CLI callers (tests, future tooling),
-# not just alp_cli.model's schema-validated path -- an allowlist here is the
-# root-cause guard, independent of whether the caller validated board.yaml.
+# not just tan model build's spawned driver (python/tan/commands/model_cmd.py
+# in tan-cli, which imports alp_model.build and calls build_model() itself)
+# -- an allowlist here is the root-cause guard, independent of whether the
+# caller validated board.yaml.
 _NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 
@@ -93,7 +96,8 @@ def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
             coverage.append(Coverage(spec.backend, spec.accel_config, "incompatible",
                                      f"{spec.backend} does not accept .{src_fmt}"))
             continue
-        blob = adapter.compile(source, accel_config=spec.accel_config, out_dir=out_dir, opts=backend_opts)
+        blob = adapter.compile(source, accel_config=spec.accel_config, out_dir=out_dir,
+                               opts=backend_opts, target=spec)
         targets.append(Target(
             backend=spec.backend, silicon_ref=spec.silicon_ref,
             blob_format=blob.format, accel_config=spec.accel_config,

@@ -301,3 +301,49 @@ ZTEST(alp_testing_spi_behavior, test_target_open_is_nosupport_on_this_double)
 	              "target_open() failure must surface ALP_ERR_NOSUPPORT (target_open left NULL "
 	              "in this double's ops table)");
 }
+
+/* Issues #1734/#1834's ordering half: alp_spi_write()/alp_spi_read()
+ * used to check "tx/rx NULL with len > 0" BEFORE delegating to
+ * alp_spi_transceive()'s lifecycle gate, so a NULL-or-closed bus with
+ * a NULL tx/rx and len > 0 answered ALP_ERR_INVAL instead of the
+ * documented ALP_ERR_NOT_READY -- the malformed-argument check must
+ * only run once the handle itself is known open. */
+ZTEST(alp_testing_spi_behavior, test_write_read_lifecycle_gate_precedes_arg_check)
+{
+	const uint32_t bus_id = 37;
+
+	/* NULL bus: NOT_READY wins even though tx/rx is also NULL with
+	 * len > 0 -- the lifecycle gate must run BEFORE the malformed-
+	 * argument check. */
+	zassert_equal(alp_spi_write(NULL, NULL, 1),
+	              ALP_ERR_NOT_READY,
+	              "write() on a NULL bus must answer NOT_READY, not INVAL");
+	zassert_equal(alp_spi_read(NULL, NULL, 1),
+	              ALP_ERR_NOT_READY,
+	              "read() on a NULL bus must answer NOT_READY, not INVAL");
+
+	/* Closed (non-NULL, previously-open) bus: same precedence. */
+	alp_spi_t *h = open_bus(bus_id);
+	zassert_not_null(h, "spi test double must open ANY instance");
+	alp_spi_close(h);
+
+	zassert_equal(alp_spi_write(h, NULL, 1),
+	              ALP_ERR_NOT_READY,
+	              "write() on a closed bus must answer NOT_READY, not INVAL");
+	zassert_equal(alp_spi_read(h, NULL, 1),
+	              ALP_ERR_NOT_READY,
+	              "read() on a closed bus must answer NOT_READY, not INVAL");
+
+	/* Once the handle is genuinely open, the malformed-argument check
+	 * still fires -- the ordering fix must not blanket every case to
+	 * NOT_READY. */
+	alp_spi_t *h2 = open_bus(bus_id + 1);
+	zassert_not_null(h2, "spi test double must open ANY instance");
+	zassert_equal(alp_spi_write(h2, NULL, 1),
+	              ALP_ERR_INVAL,
+	              "write() on an open bus with tx=NULL, len>0 must still answer INVAL");
+	zassert_equal(alp_spi_read(h2, NULL, 1),
+	              ALP_ERR_INVAL,
+	              "read() on an open bus with rx=NULL, len>0 must still answer INVAL");
+	alp_spi_close(h2);
+}

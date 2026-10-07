@@ -12,6 +12,14 @@ v0.6 block (`boot:`, `ota:`, `security.psa:`, `storage:`,
 `diagnostics.modules:`) appears in this `board.yaml` at the
 production stance the SDK recommends for shipping product.
 
+> **Randomness on AEN comes from the Secure Enclave TRNG (#2192).**
+> mbedTLS' PSA crypto core needs a cryptographically secure RNG;
+> every AEN board chooses the SE TRNG entropy driver (`alif,se-trng`,
+> bench-proven on both M55 cores) as `zephyr,entropy` by default, so
+> the TLS key material in this production stance is seeded from real
+> hardware entropy. The native_sim build has no such source and
+> acknowledges that explicitly in its own `native_sim.conf`.
+
 ## The v0.6 block walkthrough
 
 ### `boot:` -- signed bootloader
@@ -21,11 +29,13 @@ boot:
   method: mcuboot
   signing:
     algorithm: ecdsa_p256
-    key_file:  keys/mcuboot_dev_ecdsa_p256.pem
+    key_file:  keys/mcuboot_shared_dev_ecdsa_p256.pem
 ```
 
-Drives sysbuild's MCUboot child image. ECDSA-P256 ties to the
-OPTIGA Trust M production key (see `iot-fleet-ota`). `swap_algorithm:`
+Drives sysbuild's MCUboot child image. ECDSA-P256 matches the
+production signing-key flow in `iot-fleet-ota` (on a SKU with the
+OPTIGA Trust M fitted, that key can live in the secure element; it is
+DNP on E1M-AEN801). `swap_algorithm:`
 is intentionally omitted: E1M-AEN801's disjoint-slot0 `memory_map:`
 (#1069, #1413) has no slot1/scratch partition, so the SDK's per-target
 default resolves to single-app boot
@@ -60,26 +70,32 @@ ota:
 `rollback.min_version: 1` is the anti-downgrade floor -- once v1.0
 ships, the device refuses any OTA claiming version < 1, even if
 it's signed correctly. `${MENDER_TENANT_TOKEN}` never lives in
-the repo; it's injected at provisioning.
+the repo; Yocto builds set it in `conf/local.conf`, Zephyr injects it at provisioning.
 
-### `security.psa:` -- TF-M + OPTIGA attestation root
+### `security.psa:` -- TF-M with an internal attestation root
 
 ```yaml
 security:
   psa:
     persistent_slots: 32
     its_storage:      mram_main
-    ps_storage:       ospi0
+    ps_storage:       mram_main
     tfm:              true
-    attestation_root: optiga_trust_m
+    attestation_root: tfm_internal
 ```
 
 `tfm: true` lands TF-M's secure-partition image as a sysbuild
-child build. Internal Trusted Storage (PSA persistent keys) backs
-to the secure half of MRAM; Protected Storage (encrypted-at-rest
-app credentials) backs to the on-module OSPI. The attestation
-root is the OPTIGA Trust M -- single trust root with boot + OTA,
-fewer surfaces for an attacker to chip away at.
+child build. Internal Trusted Storage (PSA persistent keys) and
+Protected Storage (encrypted-at-rest app credentials) both back
+to on-die MRAM: E1M-AEN801 has no OSPI flash fitted (`ospi0`/
+`ospi1` are both `assembled: false` in its SoM preset), so
+`ps_storage` cannot point at `ospi0` on this SKU. The attestation
+root is TF-M's internal secure storage: E1M-AEN801 lists the OPTIGA
+Trust M under `on_module:` but the part is not fitted (`assembled:
+false`), and the loader refuses `attestation_root: optiga_trust_m` on a
+SKU that does not carry it (#2316). On a SKU with OPTIGA fitted
+(E1M-AEN501/601/701), `optiga_trust_m` gives a hardware trust root
+shared with boot + OTA.
 
 ### `storage:` -- explicit partition table
 
@@ -156,7 +172,9 @@ the rest stays quiet to save flash and console bandwidth.
 ### native_sim (framing test, no real ops)
 
 ```bash
-west build -b native_sim/native/64 examples/connectivity/production-deployment
+# writes examples/connectivity/production-deployment/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/production-deployment
+west build -b native_sim/native/64 examples/connectivity/production-deployment -- -DEXTRA_CONF_FILE=generated/alp.conf
 west build -t run
 ```
 

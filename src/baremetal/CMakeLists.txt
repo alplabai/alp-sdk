@@ -38,6 +38,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_i2s.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_can.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_rtc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_temperature.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wdt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_display.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_camera.c
@@ -75,6 +76,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../i3c_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/i3c/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_decimator.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dsp/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../ahrs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../pid.c
@@ -110,6 +112,16 @@ target_sources(alp_sdk PRIVATE
     # The Yocto backend already compiles this file; baremetal didn't (#593).
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/alp_model_loader.c
 )
+
+# SoM inference.auto_order for the .alpmodel AUTO tiebreak -- same define name
+# as the Yocto and Zephyr builds (the loader body is NOSUPPORT here until the
+# baremetal build compiles the model reader, but the wiring stays uniform).
+set(ALP_SDK_INFERENCE_AUTO_ORDER "" CACHE STRING
+    "Comma-separated accelerator preference for ALP_INFERENCE_BACKEND_AUTO, best first (e.g. ethos_u,cpu), from the SoM preset's inference.auto_order.")
+if(ALP_SDK_INFERENCE_AUTO_ORDER)
+    target_compile_definitions(alp_sdk PRIVATE
+        ALP_SDK_INFERENCE_AUTO_ORDER="${ALP_SDK_INFERENCE_AUTO_ORDER}")
+endif()
 
 target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_CAMERA=1

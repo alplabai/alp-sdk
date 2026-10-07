@@ -41,7 +41,7 @@ production firmware — there is no authentication on the serial port.
 ## Boot banner
 
 When `CONFIG_ALP_SDK_CONSOLE=y` is set, the boot-banner module
-(`src/zephyr/`, linked automatically) prints the SoM + SoC identity and a
+(`src/zephyr/alp_banner.c`, linked automatically) prints the SoM + SoC identity and a
 system summary before the shell prompt appears:
 
 ```
@@ -265,6 +265,16 @@ uart:~$ alp companion gpio write 3 1
 companion pin 3 <- 1
 ```
 
+### `alp companion spi1 configure|xfer|read|release` *(Alif/CC3501E only)*
+
+CC3501E SPI1 host passthrough: acquire/release the coprocessor's own SPI1
+controller and clock full-duplex chunks over it for a carrier device on the
+E1M connector's SPI1 pins. Four verbs (`configure`, `xfer`, `read`,
+`release`) — see
+[`cc3501e-companion-commands.md`](cc3501e-companion-commands.md#alp-companion-spi1)
+for the full reference; the companion `wifi` / `ble` / `sock` verb trees are
+documented there as well, not repeated in this command reference.
+
 ### `alp reboot` *(UNSAFE)*
 
 Soft-reset the SoC (calls `sys_reboot(SYS_REBOOT_WARM)`).
@@ -281,9 +291,18 @@ rebooting...
 ### V2N (RZ/V2N + GD32 supervisor)
 
 The GD32 supervisor is a **singleton** managed inside the SDK.  When
-`CONFIG_ALP_SDK_V2N_SUPERVISOR=y` is set (auto-enabled for V2N SoMs),
+`CONFIG_ALP_SDK_V2N_SUPERVISOR=y` is set (auto-enabled for V2N SoMs) **and**
+`CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID` names the bridge's SPI bus,
 `alp companion ver` / `alp companion ping` / `alp companion gpio *` work
-without any application code.
+without any application code.  SPI is the CM33's only transport to the
+GD32 -- RIIC8/BRD_I2C is Cortex-A55/Linux-exclusive, so there is no I2C
+bus ID to set here.  The SPI bus ID defaults to `-1` and no in-tree board
+sets it yet, so on a stock build these commands would fail with
+`supervisor acquire failed (-2)` (`ALP_ERR_NOT_READY`, per
+`src/zephyr/console/alp_console_companion.c` and
+`alp_console_companion_gpio.c`; derived from source, not observed on
+silicon -- the in-tree M33 boards also ship with no CM33 shell
+console by default).  Tracked in #2044.
 
 ### Alif (AEN801 + CC3501E)
 
@@ -331,15 +350,19 @@ It enables the console and (on Alif) binds the CC3501E companion.
 **Build for native_sim (host toolchain, no silicon):**
 
 ```sh
-west build -p -b native_sim/native/64 examples/peripheral-io/alp-console
+# writes examples/peripheral-io/alp-console/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/alp-console
+west build -p -b native_sim/native/64 examples/peripheral-io/alp-console -- -DEXTRA_CONF_FILE=generated/alp.conf
 ./build/zephyr/zephyr.exe
 ```
 
 **Build for the E1M-AEN801 bench board:**
 
 ```sh
+# writes examples/peripheral-io/alp-console/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/alp-console
 west build -p -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-    examples/peripheral-io/alp-console
+    examples/peripheral-io/alp-console -- -DEXTRA_CONF_FILE=generated/alp.conf
 ```
 
 After flashing (see [bring-up-aen.md](bring-up-aen.md)):
@@ -397,9 +420,6 @@ groups.  Dropping groups is most useful when code-size constraints are tight
 
 - **`alp pwm get`** — read back current PWM period/duty; blocked on
   portable `<alp/pwm.h>` having no duty-read surface (no `get` exists in v1).
-- **`alp companion ota status`** — query the CC3501E OTA slot state
-  (blocked on the PSA FWU session being owned by the OTA library;
-  re-enabling it from the shell needs a mutex, not yet wired).
 - **Full `alp clk` sub-tree** — per-node enable / rate-set verbs
   (SoC clock tree is read-only today; write verbs need the clock-control
   driver to expose a shell-safe rate-set path).

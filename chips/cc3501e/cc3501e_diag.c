@@ -36,10 +36,26 @@ alp_status_t cc3501e_soft_reset(cc3501e_t *ctx)
 alp_status_t cc3501e_diag_info(cc3501e_t *ctx, alp_cc3501e_diag_info_t *out)
 {
 	if (out == NULL) return ALP_ERR_INVAL;
-	/* GET_DIAG_INFO (0x04) reply = the 16-byte packed alp_cc3501e_diag_info_t:
+	/* GET_DIAG_INFO (0x04) reply = the packed alp_cc3501e_diag_info_t:
 	 * fw_version(LE16) | reset_cause(1) | role(1) | uptime_ms(LE32) |
-	 * free_heap_bytes(LE32) | last_error(1) | reserved(3). */
-	uint8_t      reply[16] = { 0 };
+	 * free_heap_bytes(LE32) | last_error(1) | reserved(3) | dhcp_state(1) |
+	 * netif_status(1).  The last two bytes grew ADDITIVELY (alp-sdk#2035);
+	 * a v2-firmware reply is only the first 16 bytes, so require at least 16
+	 * and treat the trailing two as "not reported" (0) when they are absent
+	 * -- a short-but-complete v2 reply must stay a SUCCESS, not ALP_ERR_IO.
+	 *
+	 * A length test cannot pick between the two firmwares, though: the
+	 * firmware zero-pads every reply payload to an ALP_CC3501E_REPLY_PAD (8 B)
+	 * multiple and folds pad + CRC into the wire payload_len, so BOTH the
+	 * v2 (16-byte) and current (18-byte) replies frame an IDENTICAL 24-byte
+	 * padded payload, and cc3501e_request() clamps `got` to this call's
+	 * rx_cap (18) -- `got` is only ever 7, 15 or 18, never 16 or 17. Once
+	 * the got<16 guard below passes, got==18 always. Backward compatibility
+	 * with a v2 bridge therefore works by accident of the pad: reply[16]/
+	 * reply[17] land on the firmware's zero-pad bytes ahead of the CRC
+	 * trailer, which is exactly the "not reported" encoding, so no explicit
+	 * length branch on 16 vs 18 is needed -- or even possible -- here. */
+	uint8_t      reply[18] = { 0 };
 	size_t       got       = 0;
 	alp_status_t s         = cc3501e_request(ctx,
 	                                         ALP_CC3501E_CMD_GET_DIAG_INFO,
@@ -50,7 +66,7 @@ alp_status_t cc3501e_diag_info(cc3501e_t *ctx, alp_cc3501e_diag_info_t *out)
 	                                         &got,
 	                                         CC3501E_REQ_TMO_MS);
 	if (s != ALP_OK) return s;
-	if (got < sizeof(reply)) return ALP_ERR_IO;
+	if (got < 16u) return ALP_ERR_IO;
 	out->fw_version  = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
 	out->reset_cause = reply[2];
 	out->role        = reply[3];
@@ -62,31 +78,50 @@ alp_status_t cc3501e_diag_info(cc3501e_t *ctx, alp_cc3501e_diag_info_t *out)
 	out->reserved[0]     = reply[13];
 	out->reserved[1]     = reply[14];
 	out->reserved[2]     = reply[15];
+	out->dhcp_state      = reply[16];
+	out->netif_status    = reply[17];
+	/* Issue #2136: track the last successful probe, so a bench run can
+	 * correlate the link-failure ring against firmware telemetry -- a
+	 * wedge-probe firmware build rides its own free-running word in
+	 * free_heap_bytes above rather than a real heap count. */
+	ctx->link_log_last_probe_word = out->free_heap_bytes;
+	ctx->link_log_last_probe_ms   = (uint32_t)alp_uptime_ms();
 	return ALP_OK;
 }
 
-alp_status_t cc3501e_diag_stats(cc3501e_t *ctx, uint32_t *frames_ok, uint32_t *frames_err)
+/** LE32 at @p b -- the DIAG_GET_STATS reply is a flat array of them. */
+static uint32_t le32(const uint8_t *b)
 {
-	if (frames_ok == NULL || frames_err == NULL) return ALP_ERR_INVAL;
-	/* DIAG_GET_STATS (0x70) reply = frames_ok(LE32) | frames_err(LE32).  The
-	 * protocol header carries the opcode but NO reply struct for these two frame
-	 * counters, so they are returned via out-params rather than a typedef. */
-	uint8_t      reply[8] = { 0 };
-	size_t       got      = 0;
-	alp_status_t s        = cc3501e_request(ctx,
-	                                        ALP_CC3501E_CMD_DIAG_GET_STATS,
-	                                        NULL,
-	                                        0,
-	                                        reply,
-	                                        sizeof(reply),
-	                                        &got,
-	                                        CC3501E_REQ_TMO_MS);
+	return (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+}
+
+alp_status_t cc3501e_diag_stats(cc3501e_t *ctx, cc3501e_diag_stats_t *out)
+{
+	if (out == NULL) return ALP_ERR_INVAL;
+	/* DIAG_GET_STATS (0x70) reply grew ADDITIVELY at protocol v8:
+	 *   v7  frames_ok(LE32) | frames_err(LE32)                =  8 B
+	 *   v8  ... | worker_execs(LE32) | retry_latch_hits(LE32) = 16 B
+	 * Ask for 16 and accept 8.  cc3501e_request() truncates a longer reply to
+	 * the cap and reports the truncated length, so the OPPOSITE pairing (a v7
+	 * host against v8 firmware) already worked -- this side just has to not
+	 * treat the short v7 reply as a fault. */
+	uint8_t      reply[16] = { 0 };
+	size_t       got       = 0;
+	alp_status_t s         = cc3501e_request(ctx,
+	                                         ALP_CC3501E_CMD_DIAG_GET_STATS,
+	                                         NULL,
+	                                         0,
+	                                         reply,
+	                                         sizeof(reply),
+	                                         &got,
+	                                         CC3501E_REQ_TMO_MS);
 	if (s != ALP_OK) return s;
-	if (got < sizeof(reply)) return ALP_ERR_IO;
-	*frames_ok  = (uint32_t)reply[0] | ((uint32_t)reply[1] << 8) | ((uint32_t)reply[2] << 16) |
-	              ((uint32_t)reply[3] << 24);
-	*frames_err = (uint32_t)reply[4] | ((uint32_t)reply[5] << 8) | ((uint32_t)reply[6] << 16) |
-	              ((uint32_t)reply[7] << 24);
+	if (got < 8u) return ALP_ERR_IO;
+	out->frames_ok           = le32(&reply[0]);
+	out->frames_err          = le32(&reply[4]);
+	out->has_worker_counters = (got >= 16u);
+	out->worker_execs        = out->has_worker_counters ? le32(&reply[8]) : 0u;
+	out->retry_latch_hits    = out->has_worker_counters ? le32(&reply[12]) : 0u;
 	return ALP_OK;
 }
 

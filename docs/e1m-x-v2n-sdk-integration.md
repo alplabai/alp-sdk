@@ -2,8 +2,7 @@
 
 Status of landing the bench-validated RZ/V2N (r9a09g056n48; AI SDK
 platform 7.1 / BSP v6.30, linux-renesas 6.1.141-cip43) carrier bring-up
-into alp-sdk so a clean checkout reproduces a working board. Branch:
-`feat/e1m-x-v2n-carrier-bringup`.
+into alp-sdk so a clean checkout reproduces a working board.
 
 ## Provisioning model (decided)
 
@@ -26,11 +25,11 @@ into alp-sdk so a clean checkout reproduces a working board. Branch:
 
 | # | Gap | State | Where |
 |---|-----|-------|-------|
-| 1 | Carrier device tree | **Staged, HW-validated content** | `meta-alp-sdk/recipes-kernel/linux/` (layered `e1m-v2n-som.dtsi` → `e1m-x-evk.dtsi` → per-board `e1m-v2n101-x-evk.dts`/`e1m-v2m101-x-evk.dts`, plus 3 kernel-source patches 0001–0003, via `linux-renesas_%.bbappend`); machine confs updated |
+| 1 | Carrier device tree | **Staged, HW-validated content** | `meta-alp-sdk/recipes-kernel/linux/` (layered `e1m-v2n-som.dtsi` → `e1m-x-evk.dtsi` → per-board `e1m-v2n101-x-evk.dts`/`e1m-v2m101-x-evk.dts`, plus kernel-source patches 0001–0007, 0010–0012 and 0015 for every machine and 0009 and 0014 for e1m-v2n101, via `linux-renesas_%.bbappend`); machine confs updated |
 | 2 | Bootloader (alp DDR in BL2) | **Recipe + binary + DDR.c → alp-sdk-internal** | not in public alp-sdk (licensing) |
 | 3 | Metadata values | **Audio + board_id captured**; `ti,tas2563` audio nodes + HW wiring pending | `metadata/boards/e1m-x-evk.yaml` |
 | 4 | Errata | **Done** | `docs/errata-e1m-x-v2n.md` |
-| 5 | Yocto build flow | **WSL-baked 2026-05-26** (core-image-minimal, bitbake-layers); full alp-image-edge pending | `meta-alp-sdk/README.md` |
+| 5 | Yocto build flow | **Base images bake**: `core-image-minimal` (2026-05-26) and `drpai`-OFF `alp-image-edge` (12118 tasks, 716 MB `.wic.gz`); `drpai`-enabled bake + on-bench boot pending | [`bring-up-drpai-v2n.md`](bring-up-drpai-v2n.md) status banner |
 
 ## What's validated vs not
 
@@ -43,14 +42,17 @@ into alp-sdk so a clean checkout reproduces a working board. Branch:
   USB2.0 host kept enabled), and the alp DDR
   in BL2 (DDR 7.9 GiB, boots). The carrier dtsi/dts were also dtc-clean
   rebuilt from source.
-- **WSL-baked 2026-05-26** (bitbake-layers, BSP v6.30): the carrier
+- **WSL-baked** (bitbake-layers, BSP v6.30): the carrier
   dtsi/dts + kernel patches apply cleanly to linux-renesas 6.1.141-cip43 (SHA 6717c06c —
   the exact kernel the BSP ships, so no regen), and `core-image-minimal`
   bakes a `.wic.gz` + the carrier dtb for `MACHINE=e1m-v2n101-a55`. A few
   overlay fixes the bake surfaced are staged separately pending bench
-  confirmation; a full `alp-image-edge` bake + on-bench boot are the
-  remaining steps. (The TF-A DDR-injection bbappend + its DDR overwrite
-  ordering live in alp-sdk-internal.)
+  confirmation. A later `alp-image-edge` bake also completed (12118 tasks,
+  716 MB `.wic.gz`), but with `drpai` OFF. A `drpai`-enabled
+  `alp-image-edge` bake and on-bench boot of an image from this branch remain
+  unverified. [`bring-up-drpai-v2n.md`](bring-up-drpai-v2n.md)'s status
+  banner is the authority for the current bake state. (The TF-A DDR-injection
+  bbappend + its DDR overwrite ordering live in alp-sdk-internal.)
 
 ## Audio + board_id (gap 3) — captured
 
@@ -60,10 +62,17 @@ TAS2563 amps on `ALP_E1M_X_I2C0`, I2S on `ALP_E1M_X_I2S0`, the TMUX1574 path
 mux, the `\SD_N` / `IRQ_N` control lines on E1M IOs, and `board_id` on
 `ALP_E1M_X_ADC7`.
 
-Still pending: add the `ti,tas2563` codec nodes + audio-graph-card to
-the carrier `e1m-x-evk.dtsi` (the `CONFIG_SND_SOC_TAS2562=y` fragment is
-already staged as `linux-renesas/tas2563-audio.cfg`), plus the on-board
-control-line wiring on the current PCB rev.
+Still pending, and **data-gated** rather than merely unwritten: adding the
+`ti,tas2563` codec nodes + audio-graph-card to the carrier
+`e1m-x-evk.dtsi` needs four SoC-side values this repo does not carry —
+the SSI/SSIU node label the linux-renesas 6.1.141-cip43 `r9a09g056` dtsi
+exposes, its binding, the PFC function for the SSIU pads
+(`metadata/pinmux/v2n.yaml` still reads `e1m_pad`/`e1m_function` `"TBD"`
+on every SSIU row), and the MCLK source + rate.  A
+`CONFIG_SND_SOC_TAS2562=y` kernel fragment used to be staged ahead of
+those nodes; it was removed in #1171 because a codec driver with no DT
+consumer cannot bind, and it lands again in the same change as the nodes.
+The on-board control-line wiring on the current PCB rev is also pending.
 
 ## Follow-ups (not blockers)
 

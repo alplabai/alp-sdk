@@ -31,6 +31,38 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 DEFAULT_PUBKEY = REPO / "keys" / "alp_release_signing_ecdsa_p256.pub.pem"
 
 
+def _bmap_problem(bundle_dir: Path, doc: dict) -> str | None:
+    """system_image_bmap must be a valid bmap whose ImageSize matches the gunzipped
+    system_image. Checked only when both files sit beside the bundle (a manifest
+    alone, like the shipped example, has nothing to open)."""
+    files = {c["role"]: bundle_dir / c["file"] for c in doc["components"]}
+    bm_path, img = files.get("system_image_bmap"), files.get("system_image")
+    if bm_path is None or not bm_path.is_file():
+        return None
+    from provision import bmap  # lazy: only bundles carrying a bmap need it
+    try:
+        bm = bmap.parse(bm_path)
+    except Exception as e:
+        return str(e)
+    if img is not None and img.is_file() and img.suffix == ".gz":
+        with open(img, "rb") as f:         # gzip ISIZE: uncompressed size mod 2**32 (cheap, no gunzip)
+            f.seek(-4, 2)
+            isize = int.from_bytes(f.read(4), "little")
+        if isize != bm.image_size % (1 << 32):
+            return f"ImageSize {bm.image_size} does not match the gunzipped {img.name} (ISIZE {isize})"
+    return None
+
+
+def _cm33_problem(bundle_dir: Path, doc: dict) -> str | None:
+    """cm33 is the stored (padded) image BL2 loads raw; run the flash runner's sanity checks on it.
+    Checked only when the file sits beside the bundle."""
+    c = next((c for c in doc["components"] if c["role"] == "cm33"), None)
+    if c is None or not (bundle_dir / c["file"]).is_file():
+        return None
+    from provision import gates  # lazy: only bundles carrying a cm33 image need it
+    return "; ".join(gates.cm33_problems((bundle_dir / c["file"]).read_bytes())) or None
+
+
 def _validate(path: Path, validator: jsonschema.Draft202012Validator, pubkey_path=None, require_signature=False) -> int:
     rel = path.name
     try:
@@ -44,6 +76,21 @@ def _validate(path: Path, validator: jsonschema.Draft202012Validator, pubkey_pat
         for err in errors:
             loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
             print(f"  · {loc}: {err.message}")
+        return 1
+    # JSON Schema cannot say "unique by role"; consumers look components up by role.
+    roles = [c["role"] for c in doc["components"]]
+    dupes = sorted({r for r in roles if roles.count(r) > 1})
+    if dupes:
+        print(f"FAIL {rel}")
+        print(f"  · components: duplicate role(s) {dupes}")
+        return 1
+    if (why := _bmap_problem(path.parent, doc)):
+        print(f"FAIL {rel}")
+        print(f"  · system_image_bmap: {why}")
+        return 1
+    if (why := _cm33_problem(path.parent, doc)):
+        print(f"FAIL {rel}")
+        print(f"  · cm33: {why}")
         return 1
     sig = doc.get("signature")
     if sig:

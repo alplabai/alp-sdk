@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-X EVK INA236 rail monitors on XEVK_I2C_BUS_SENSORS, read from the
+# E1M-V2M103's A55.  3V3 (U21, 0x40), 1V8 (U31, 0x41) and VCAM3 (U34,
+# 0x49) must initialise and print a row.  There is no VCAM2 monitor: 0x48 on
+# this bus is the TAS2563 pair's shared address.  The example loops forever;
+# the runner stops it after duration_s.
+#
+# The +5V input monitor (INA228 at 0x42, "5V" row) answers only on carriers
+# with the I2C bus-pin rework, so nothing is asserted about it: on a carrier
+# without the rework the example prints one "not present" line to stderr and
+# a "--" row, and the loop keeps running.
+#
+# A55/Linux app: flash_method ssh-run.
+
+schema_version: 1
+name: v2n-power-monitor
+description: |
+  E1M-X EVK INA236 rail table (3V3, 1V8, VCAM3) from the E1M-V2M103 A55.
+
+example: examples/v2n/v2n-power-monitor
+flash_method: ssh-run
+
+serial:
+  duration_s: 8
+  expect_contains:
+    - "rail     bus_V     I_mA       P_mW"
+    - "  3V3 "
+    - "  1V8 "
+    - "  VCAM3 "
+  expect_absent:
+    - "alp_i2c_open(sensor bus) failed"
+    - "INA236 3V3"
+    - "INA236 1V8"
+    - "INA236 VCAM3"

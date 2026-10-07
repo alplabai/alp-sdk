@@ -12,10 +12,10 @@ keyword the schema currently uses (`minimum`/`maximum`, `minItems`,
 `minProperties`, `uniqueItems`, `oneOf`, `not`, and any other keyword a
 future schema revision adds). `anyOf`, `allOf`, and `if`/`then` never reach
 ALP-B099: `board.schema.json`'s only `if`/`then` site
-(`board.schema.json:40-48`) surfaces its violation as `required` --
+(`board.schema.json:46-54`) surfaces its violation as `required` --
 [ALP-B001](ALP-B001.md) -- and its two `anyOf` sites
-(`board.schema.json:16`, `:41`) both sit inside a `not:`, which `jsonschema`
-evaluates with `is_valid()` rather than `iter_errors()` -- it never yields an
+(`board.schema.json:16`, under a `not:`, and `:47`, under that `if`) are
+evaluated by `jsonschema` with `is_valid()` rather than `iter_errors()` -- neither yields an
 `anyOf`/`allOf` error of its own, only the enclosing `not` (see the Cause
 bullet below). The `message` text is whatever `jsonschema` produced for the
 keyword that actually fired, forwarded verbatim; there is no `hint`.
@@ -43,17 +43,24 @@ keyword that actually fired, forwarded verbatim; there is no `hint`.
 
 ## Diagnose
 
-Read-only; validates the file without touching the build. Only the SDK's own
-CLI prints the full diagnostic frame with the `ALP-B099` code and the
-`= see:` pointer below:
+Read-only; validates the file without touching the build. In an alp-sdk
+checkout, `scripts/validate_board_yaml.py` prints the full diagnostic frame
+with the `ALP-B099` code and the `= see:` pointer below directly -- it is
+the script `tan validate` itself spawns:
 
 ```sh
-python3 -m alp_cli validate board.yaml
+python3 scripts/validate_board_yaml.py --input board.yaml
+```
+
+With a separate `tan` install:
+
+```sh
+tan validate --board-yaml board.yaml
 ```
 
 The diagnostic points at the offending block and carries the raw
 `jsonschema` message for the keyword that fired. For example, a
-`supported_boards:` list (`board.schema.json:470`) with a duplicate
+`supported_boards:` list (`board.schema.json:504`) with a duplicate
 `e1m-evk` entry:
 
 ```

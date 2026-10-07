@@ -32,6 +32,7 @@
 #include <alp/iot.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
 #include "wifi_ops.h"
 
 #if defined(CONFIG_ALP_SDK_IOT_WIFI)
@@ -65,26 +66,11 @@ static struct wifi_radio_be _radio_be;
 
 static alp_status_t errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	case -ENOMEM:
-		return ALP_ERR_NOMEM;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static void
@@ -116,13 +102,13 @@ wifi_event_handler(struct net_mgmt_event_callback *cb, uint32_t mgmt_event, stru
 
 static alp_status_t z_open(alp_wifi_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 #if defined(CONFIG_ALP_SDK_IOT_WIFI)
 	struct wifi_radio_be *be = &_radio_be;
 	memset(be, 0, sizeof(*be));
 
 	be->iface = net_if_get_default();
 	if (be->iface == NULL) {
-		caps_out->flags = 0u;
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -131,12 +117,10 @@ static alp_status_t z_open(alp_wifi_backend_state_t *st, alp_capabilities_t *cap
 	                             wifi_event_handler,
 	                             NET_EVENT_WIFI_CONNECT_RESULT | NET_EVENT_WIFI_DISCONNECT_RESULT);
 	net_mgmt_add_event_callback(&be->wifi_cb);
-	st->be_data     = be;
-	caps_out->flags = 0u;
+	st->be_data = be;
 	return ALP_OK;
 #else
 	(void)st;
-	caps_out->flags = 0u;
 	return ALP_ERR_NOSUPPORT;
 #endif
 }

@@ -66,9 +66,9 @@ SDK-shipped SoM presets (look under
 
 | Family            | MPNs (paste any into `som.sku`)                                              |
 |-------------------|------------------------------------------------------------------------------|
-| Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`               |
-| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`                                                       |
-| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                       |
+| Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`, `AEN803`     |
+| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`, `V2N103`                                            |
+| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`, `V2M103`                                            |
 | NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
 Stock board presets (paste into `preset:`):
@@ -101,14 +101,13 @@ by `scripts/alp_project.py`.
 Concretely:
 
 - **Don't edit `prj.conf` directly.**  The minimum-correct
-  `prj.conf` in a v0.3 alp-sdk app is empty (or carries only a
-  comment).  The application's `CMakeLists.txt` invokes
-  `scripts/alp_project.py` at configure time and layers the
-  generated `alp.conf` over `prj.conf` via Zephyr's
-  `EXTRA_CONF_FILE` cmake variable.  `rsource` is NOT valid in a
-  `.conf` file (it is a Kconfig-source directive only) -- see the
-  worked example at `examples/peripheral-io/gpio-button-led/CMakeLists.txt`
-  for the correct wiring.
+  `prj.conf` in an alp-sdk app is empty (or carries only a
+  comment).  `tan build` (or `scripts/gen_example_alp_conf.py` for twister
+  and a bare `west build`) generates `alp.conf` from `board.yaml` and
+  layers it over `prj.conf` via Zephyr's `EXTRA_CONF_FILE` cmake variable;
+  the application's `CMakeLists.txt` runs no loader step.  `rsource` is NOT
+  valid in a `.conf` file (it is a Kconfig-source directive only) -- see
+  [`board-config-emit.md`](board-config-emit.md) for the wiring.
 - **Don't pass extra `-D` flags to `cmake` for SDK options.**  The
   loader emits the right set; passing extra flags risks divergence
   from the declared config.
@@ -216,6 +215,17 @@ Rule 2 family-specific allow-list (built from the SoM preset's
 The warning rules (4 + 5) are informational: the build still
 succeeds.  Tightening one of them to ERROR is a v0.7+ tightening
 decision once enough field data confirms the heuristic.
+
+## Camera declarations
+
+`cameras:` (project) and `camera_connectors:` (board) are cross-checked by
+`tan validate` after the schema pass: a `cameras:` entry must name a connector
+the resolved board exposes and a module that exists under
+`metadata/camera_modules/`, a connector may be used once, and an inline
+board's connector macros must resolve in its own `e1m_routes:` with a
+`lane_polarity` of `lanes + 1` entries.  Violations are
+[ALP-B003](diagnostics/ALP-B003.md) errors.  Field reference:
+[board-config-schema.md](board-config-schema.md#cameras-and-camera_connectors-camera-modules).
 
 ## Versioning
 

@@ -13,7 +13,9 @@
  * (1/4/16/64 B) + the GHSA-xhm8 external concurrent-close all pass end-to-end.
  * The doorbell is asymmetric -- forward A55->M33 via R_MHU_NS5.MSG (M33 NVIC
  * IRQ 293), reverse M33->A55 via a CA55-routed MHU-B SWINT unit (12 -> GIC_SPI
- * 404); see mailbox_notify() below and yocto_uio_drv.c for the register map.
+ * 404) or, with CONFIG_ALP_V2N_DOORBELL_RSP_CH8, Renesas' rsp_ch8_ns (GIC_SPI
+ * 385, bench-pending); see mailbox_notify() below and
+ * <alp/protocol/v2n_mhu_doorbell.h> for the register map.
  *
  * Adapted near-verbatim from Renesas's own sample --
  * zephyr/samples/boards/renesas/openamp_linux_zephyr/src/main_remote.c --
@@ -54,10 +56,14 @@
 #include <zephyr/drivers/mbox.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/barrier.h>
 
 #include <metal/device.h>
 #include <openamp/open_amp.h>
+
+#include <alp/protocol/amp_beacon.h>
+#include <alp/protocol/v2n_mhu_doorbell.h>
 
 #include "resource_table.h"
 
@@ -89,18 +95,28 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
  * table itself gets memcpy'd into RSC_TABLE_ADDR by platform_init() below,
  * so it owns the low end of the `rsctbl` region -- the beacon lives at the
  * TOP of the region instead, out of the resource table's way.  A Linux-side
- * `devmem 0x4F700FF0` (rsctbl's A55 alias) read after this app boots proves,
+ * `devmem` of the beacon's A55 alias (see README.md) read after this app boots proves,
  * in one shot, that the M33 is alive, the DDR window is backed, and the
  * CM33<->A55 address translation in resource_table.h is correct -- and the
  * heartbeat word lets a re-read tell "alive" apart from "wrote once, then
  * faulted".
+ *
+ * Version 2 (#2586) adds the attach-epoch word (end-0x04 of the rsctbl page), which publishes
+ * whether this firmware is bound to an A55 session: ODD = bound (bumped
+ * after rpmsg_init_vdev() returned), EVEN = waiting for an attach (starts
+ * at 0, bumped again after cleanup_system() on an A55 attach reset; see
+ * rpmsg_link_reset()).  The A55 backend (src/backends/rpc/yocto_uio_drv.c,
+ * uio_attach_reset()) requests a reset whenever it reads ODD, whatever
+ * vdev.status says, and waits for EVEN.  It refuses a re-attach outright
+ * when the version is below 2.
  */
-#define RSCTBL_BEACON_MAGIC_OFFSET     (0xFF0)
-#define RSCTBL_BEACON_VERSION_OFFSET   (0xFF4)
-#define RSCTBL_BEACON_HEARTBEAT_OFFSET (0xFF8)
+#define RSCTBL_BEACON_VERSION (2U)
 
-#define RSCTBL_BEACON_MAGIC   (0xA10D0683U) /* "Alp Lab, #683" -- arbitrary, just distinctive */
-#define RSCTBL_BEACON_VERSION (1U)
+/* The beacon: the top 16 bytes of the rsctbl page, laid out by
+ * <alp/protocol/amp_beacon.h> (shared with the A55 backend and the stock
+ * shim).  DT_REG_SIZE of `rsctbl` is that page's size, from the SoC
+ * metadata via the generated board .dts. */
+#define RSCTBL_BEACON ALP_AMP_BEACON_AT(RSC_TABLE_ADDR, DT_REG_SIZE(DT_NODELABEL(rsctbl)))
 
 /* 2048 not 1024: the RX callback + echo thread now hold a struct sc_frame (~520 B)
  * on the stack for the queued-echo path (#707); the deep OpenAMP rx call chain
@@ -162,12 +178,19 @@ struct sc_frame {
 K_MSGQ_DEFINE(sc_frame_q, sizeof(struct sc_frame), 8, 4);
 
 static K_SEM_DEFINE(data_sem, 0, 1);
-/* data_sc_sem: one-shot "sc_ept is up, start echoing" handoff from the manager
- * thread (which now creates sc_ept itself, before its receive loop) to the
- * responder thread; per-frame delivery goes through sc_frame_q above. */
+/* data_sc_sem: "sc_ept is up, start echoing" handoff from the manager thread
+ * (which creates sc_ept itself, before its receive loop) to the responder
+ * thread, once per A55 attach; per-frame delivery goes through sc_frame_q
+ * above.  responder_stopped_sem is the reverse handoff on an attach reset. */
 static K_SEM_DEFINE(data_sc_sem, 0, 1);
+static K_SEM_DEFINE(responder_stopped_sem, 0, 1);
 
-static volatile int finish;
+/* sc_frame.len value that tells the responder to stop (#2586). */
+#define SC_FRAME_STOP ((size_t)-1)
+
+/* Set while rpmsg_link_reset() tears the link down: the responder drops a
+ * frame it was still holding instead of sending it onto the old vring. */
+static atomic_t link_resetting;
 
 /* Doorbell RX: the A55 side kicked our mailbox after touching a vring --
  * just wake the manager thread, which figures out which vring via
@@ -199,11 +222,23 @@ rpmsg_recv_cs_callback(struct rpmsg_endpoint *ept, void *data, size_t len, uint3
 	return RPMSG_SUCCESS;
 }
 
-static void receive_message(void)
+/* Returns false when the A55 asked for a link reset: it wrote vdev.status = 0
+ * (no DRIVER_OK) and kicked, ahead of re-creating its virtio driver and
+ * zeroing both vrings (#2586).  OpenAMP's rproc_virtio_notified() never looks
+ * at the status, so the check has to happen here, before it walks a ring the
+ * A55 is about to reset. */
+static bool receive_message(void)
 {
-	if (k_sem_take(&data_sem, K_FOREVER) == 0) {
-		rproc_virtio_notified(rvdev.vdev, VRING1_ID);
+	if (k_sem_take(&data_sem, K_FOREVER) != 0) {
+		return true;
 	}
+	uint8_t status = 0;
+	(void)virtio_get_status(rvdev.vdev, &status);
+	if ((status & VIRTIO_CONFIG_STATUS_DRIVER_OK) == 0U) {
+		return false;
+	}
+	rproc_virtio_notified(rvdev.vdev, VRING1_ID);
+	return true;
 }
 
 static void new_service_cb(struct rpmsg_device *rdev, const char *name, uint32_t src)
@@ -218,20 +253,21 @@ static void new_service_cb(struct rpmsg_device *rdev, const char *name, uint32_t
  * in shared memory -- the mailbox only ever carries a wakeup, never
  * data). */
 /* #697 cycle 10 (GIC-measured): the A55 GIC only receives the MHU-B CA55-routed
- * SWINT units 12-15 (-> INTID 436-439 = GIC_SPI 404-407); the NS-channel RSP
- * interrupt the FSP/mbox send raises (R_MHU_NS5.RSP) routes to NO A55 GIC line,
- * so a reply sent that way is never delivered.  Ring the A55 by asserting SWINT
- * unit 12's SET directly instead.  (Forward A55->M33 is unaffected: it uses
- * R_MHU_NS5.MSG -> the M33's own NVIC IRQ 293.)  SWINT units live in the MHU-B
- * block at +0x800, 0x10 stride, STS/SET/CLR @ +0x00/04/08; unit 12 SET =
- * CM33 0x50480000 + 0x800 + 12*0x10 + 0x04. */
-#define ALP_M33_MHU_SWINT12_SET (0x504808C4U)
+ * SWINT units 12-15 (-> INTID 436-439 = GIC_SPI 404-407); the RSP interrupt of
+ * NS slot 5, which the FSP/mbox send raises, routes to NO A55 GIC line, so a
+ * reply sent that way is never delivered.  Ring the A55 by writing the
+ * doorbell's SET register directly instead.  (Forward A55->M33 is unaffected:
+ * it uses R_MHU_NS5.MSG -> the M33's own NVIC IRQ 293.)  Which register that
+ * is -- SWINT unit 12 SET (default) or RSP_INT_SET of NS slot 8 with
+ * CONFIG_ALP_V2N_DOORBELL_RSP_CH8 -- and its offset come from
+ * <alp/protocol/v2n_mhu_doorbell.h>; the A55 must be built for the same line. */
+#define ALP_M33_DOORBELL_SET (ALP_V2N_MHU_B_CM33_BASE + ALP_V2N_DOORBELL_SET_OFF)
 
 int mailbox_notify(void *priv, uint32_t id)
 {
 	ARG_UNUSED(priv);
 	ARG_UNUSED(id);
-	*(volatile uint32_t *)ALP_M33_MHU_SWINT12_SET = 1U;
+	*(volatile uint32_t *)ALP_M33_DOORBELL_SET = 1U;
 	return 0;
 }
 
@@ -312,15 +348,20 @@ static void platform_deinit(void)
 	metal_finish();
 }
 
+static void rsctbl_attach_epoch_bump(void);
+
 static void cleanup_system(void)
 {
-	struct fw_resource_table *rsc_tbl = (struct fw_resource_table *)RSC_TABLE_ADDR;
+	/* rpmsg_deinit_vdev() NULLs rvdev.vdev, so take it first or
+	 * rproc_virtio_remove_vdev() frees nothing (#2586: this path now runs
+	 * once per A55 re-attach, so the leak would add up). */
+	struct virtio_device *vdev = rvdev.vdev;
 
 	rpmsg_deinit_vdev(&rvdev);
-	rproc_virtio_remove_vdev(rvdev.vdev);
-	/* The master doesn't always clear this on its own teardown path --
-	 * clear it here so a re-attach doesn't see a stale "live" vdev. */
-	rsc_tbl->vdev.status = 0;
+	rproc_virtio_remove_vdev(vdev);
+	/* vdev.status is deliberately NOT written here: on the reset path the
+	 * A55 already wrote 0 before kicking, and a store from this side could
+	 * overwrite a DRIVER_OK the A55 has since set for its next attach. */
 }
 
 struct rpmsg_device *platform_create_rpmsg_vdev(unsigned int vdev_index,
@@ -393,6 +434,7 @@ struct rpmsg_device *platform_create_rpmsg_vdev(unsigned int vdev_index,
 		goto failed;
 	}
 
+	rsctbl_attach_epoch_bump(); /* even -> odd: bound */
 	return rpmsg_virtio_get_rpmsg_device(&rvdev);
 
 failed:
@@ -409,31 +451,63 @@ static void app_rpmsg_client_sample(void *arg1, void *arg2, void *arg3)
 	ARG_UNUSED(arg2);
 	ARG_UNUSED(arg3);
 
-	/* Wait until the manager thread has created sc_ept (it does so inline, before
-	 * its receive loop, to avoid dropping the A55's first frame -- see
-	 * rpmsg_mng_task).  Then just drain the echo queue. */
-	k_sem_take(&data_sc_sem, K_FOREVER);
-	LOG_INF("rpmsg-v2n/m33_sm: Linux responder started");
+	/* One pass per A55 attach.  Wait until the manager thread has created
+	 * sc_ept (it does so inline, before its receive loop, to avoid dropping
+	 * the A55's first frame -- see rpmsg_mng_task).  Then drain the echo queue
+	 * until rpmsg_link_reset() queues the stop marker. */
+	for (;;) {
+		k_sem_take(&data_sc_sem, K_FOREVER);
+		LOG_INF("rpmsg-v2n/m33_sm: Linux responder started");
 
-	while (!finish) {
-		struct sc_frame f;
-		if (k_msgq_get(&sc_frame_q, &f, K_FOREVER) != 0) {
-			continue;
+		for (;;) {
+			struct sc_frame f;
+			if (k_msgq_get(&sc_frame_q, &f, K_FOREVER) != 0) {
+				continue;
+			}
+			if (f.len == SC_FRAME_STOP) {
+				break;
+			}
+			/* #697/#707 self-close-race harness: delay echoing any
+			 * "slow"-prefixed method so the A55's blocked UINT32_MAX call
+			 * stays in-flight while the fast "close_me" echo fires the
+			 * self-close, so the two actually race.  Both frames are QUEUED
+			 * (sc_frame_q) so neither is lost -- the fix for why #697 cycle 13
+			 * never opened the window.  Frame is <method>\0<payload>
+			 * (include/alp/rpc.h); normal echoes (echo_test) are unaffected. */
+			if (f.len >= 4 && memcmp(f.data, "slow", 4) == 0) {
+				k_sleep(K_MSEC(150));
+			}
+			if (atomic_get(&link_resetting) != 0) {
+				continue; /* the A55 is resetting the link: drop it */
+			}
+			rpmsg_send(&sc_ept, f.data, f.len);
 		}
-		/* #697/#707 self-close-race harness: delay echoing any "slow"-prefixed
-		 * method so the A55's blocked UINT32_MAX call stays in-flight while the
-		 * fast "close_me" echo fires the self-close, so the two actually race.
-		 * Both frames are QUEUED (sc_frame_q) so neither is lost -- the fix for
-		 * why #697 cycle 13 never opened the window.  Frame is <method>\0<payload>
-		 * (include/alp/rpc.h); normal echoes (echo_test) are unaffected. */
-		if (f.len >= 4 && memcmp(f.data, "slow", 4) == 0) {
-			k_sleep(K_MSEC(150));
-		}
-		rpmsg_send(&sc_ept, f.data, f.len);
+
+		LOG_INF("rpmsg-v2n/m33_sm: Linux responder stopped");
+		k_sem_give(&responder_stopped_sem);
 	}
+}
 
-	rpmsg_destroy_ept(&sc_ept);
-	LOG_INF("rpmsg-v2n/m33_sm: Linux responder ended");
+/* The A55 asked for a link reset (#2586): stop the responder, drop queued
+ * frames, tear the virtio device down and acknowledge, so the next attach
+ * starts from fresh ring indices on both sides. */
+static void rpmsg_link_reset(void)
+{
+	struct sc_frame stop = { .len = SC_FRAME_STOP };
+
+	atomic_set(&link_resetting, 1);
+	k_msgq_purge(&sc_frame_q);
+	(void)k_msgq_put(&sc_frame_q, &stop, K_FOREVER);
+	k_sem_take(&responder_stopped_sem, K_FOREVER);
+
+	/* An empty name skips the name-service destroy announcement
+	 * rpmsg_destroy_ept() would otherwise queue onto the old A55 ring (the
+	 * A55 is about to zero it); with no free TX buffer there rpmsg_send()
+	 * busy-waits up to 15 s and the A55 gives up on the ack. */
+	sc_ept.name[0] = '\0';
+	cleanup_system();
+	atomic_set(&link_resetting, 0);
+	rsctbl_attach_epoch_bump(); /* odd -> even: waiting; the A55 may proceed */
 }
 
 static void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
@@ -442,69 +516,80 @@ static void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
 	ARG_UNUSED(arg2);
 	ARG_UNUSED(arg3);
 
-	LOG_INF("rpmsg-v2n/m33_sm: bringing up the rpmsg virtio device");
+	/* One pass per A55 attach (#2586): the virtio device and endpoint are
+	 * re-created after every attach reset, because the A55 zeroes both vrings
+	 * whenever it re-attaches and OpenAMP keeps the ring indices in the
+	 * virtqueue objects. */
+	for (;;) {
+		LOG_INF("rpmsg-v2n/m33_sm: bringing up the rpmsg virtio device");
 
-	rpdev = platform_create_rpmsg_vdev(0, VIRTIO_DEV_DEVICE, NULL, new_service_cb);
-	if (!rpdev) {
-		LOG_ERR("failed to create rpmsg virtio device");
-		goto task_end;
+		rpdev = platform_create_rpmsg_vdev(0, VIRTIO_DEV_DEVICE, NULL, new_service_cb);
+		if (!rpdev) {
+			LOG_ERR("failed to create rpmsg virtio device");
+			return;
+		}
+
+		/* Create the responder endpoint HERE -- before the receive_message()
+		 * loop -- not in the responder thread.  The A55's first request sits on
+		 * the RX vring until receive_message() processes it below; if sc_ept
+		 * doesn't exist yet the rpmsg RX path drops that frame for want of a
+		 * matching endpoint, and the A55's first alp_rpc_call() times out
+		 * (#697: echo[1-byte] on a cold attach).  The old code created sc_ept
+		 * in app_rpmsg_client_sample() via data_sc_sem, which raced this loop
+		 * and lost.  Creating it inline, before the loop starts, guarantees
+		 * the endpoint is live for the very first frame. */
+		if (rpmsg_create_ept(&sc_ept,
+		                     rpdev,
+		                     "rpmsg-service-0",
+		                     APP_EPT_ADDR,
+		                     RPMSG_ADDR_ANY,
+		                     rpmsg_recv_cs_callback,
+		                     NULL) != 0) {
+			LOG_ERR("failed to create responder endpoint");
+			cleanup_system();
+			rsctbl_attach_epoch_bump(); /* odd -> even: no longer bound */
+			return;
+		}
+
+		/* Release the responder thread's echo loop now that sc_ept exists. */
+		k_sem_give(&data_sc_sem);
+		while (receive_message()) {
+		}
+
+		LOG_INF("rpmsg-v2n/m33_sm: A55 reset the link; waiting for the next attach");
+		rpmsg_link_reset();
 	}
-
-	/* Create the responder endpoint HERE -- before the receive_message() loop --
-	 * not in the responder thread.  The A55's first request sits on the RX vring
-	 * until receive_message() processes it below; if sc_ept doesn't exist yet the
-	 * rpmsg RX path drops that frame for want of a matching endpoint, and the A55's
-	 * first alp_rpc_call() times out (#697: echo[1-byte] on a cold attach).  The
-	 * old code created sc_ept in app_rpmsg_client_sample() via data_sc_sem, which
-	 * raced this loop and lost.  Creating it inline, before the loop starts,
-	 * guarantees the endpoint is live for the very first frame. */
-	if (rpmsg_create_ept(&sc_ept,
-	                     rpdev,
-	                     "rpmsg-service-0",
-	                     APP_EPT_ADDR,
-	                     RPMSG_ADDR_ANY,
-	                     rpmsg_recv_cs_callback,
-	                     NULL) != 0) {
-		LOG_ERR("failed to create responder endpoint");
-		goto task_end;
-	}
-
-	/* Release the responder thread's echo loop now that sc_ept exists. */
-	k_sem_give(&data_sc_sem);
-	while (!finish) {
-		receive_message();
-	}
-
-task_end:
-	cleanup_system();
-	LOG_INF("rpmsg-v2n/m33_sm: demo ended");
 }
 
 /* Writes the one-shot magic+version half of the beacon -- see the
- * RSCTBL_BEACON_* macros' header comment. */
+ * header comment above. */
 static void rsctbl_beacon_publish(void)
 {
-	volatile uint32_t *magic = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_BEACON_MAGIC_OFFSET);
-	volatile uint32_t *version =
-	    (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_BEACON_VERSION_OFFSET);
-
-	*magic   = RSCTBL_BEACON_MAGIC;
-	*version = RSCTBL_BEACON_VERSION;
-	/* Make the writes visible to the A55 side before anything else runs. */
+	RSCTBL_BEACON->attach_epoch = 0U;
+	RSCTBL_BEACON->version      = RSCTBL_BEACON_VERSION;
+	/* Magic last: the A55 trusts epoch + version only once it reads the magic. */
+	barrier_dsync_fence_full();
+	RSCTBL_BEACON->magic = ALP_AMP_BEACON_MAGIC;
 	barrier_dsync_fence_full();
 }
 
-/* ~1 Hz heartbeat -- see the RSCTBL_BEACON_* macros' header comment. */
+/* Flips the attach epoch's parity (even <-> odd).  Called after the virtio
+ * device is bound (-> odd) and after it is gone (-> even). */
+static void rsctbl_attach_epoch_bump(void)
+{
+	barrier_dsync_fence_full();
+	RSCTBL_BEACON->attach_epoch = RSCTBL_BEACON->attach_epoch + 1U;
+	barrier_dsync_fence_full();
+}
+
+/* ~1 Hz heartbeat -- see the header comment above. */
 static uint32_t rsctbl_heartbeat_count;
 
 static void rsctbl_heartbeat_expiry(struct k_timer *timer)
 {
-	volatile uint32_t *heartbeat =
-	    (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_BEACON_HEARTBEAT_OFFSET);
-
 	ARG_UNUSED(timer);
 	rsctbl_heartbeat_count++;
-	*heartbeat = rsctbl_heartbeat_count;
+	RSCTBL_BEACON->heartbeat = rsctbl_heartbeat_count;
 	barrier_dsync_fence_full();
 }
 
@@ -526,7 +611,6 @@ int main(void)
 		return -1;
 	}
 
-	finish = 0;
 	k_thread_create(&thread_mng_data,
 	                thread_mng_stack,
 	                APP_TASK_STACK_SIZE,

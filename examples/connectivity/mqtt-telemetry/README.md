@@ -29,34 +29,44 @@ template until that port lands.
 
 ## TLS status -- preview
 
-The `mqtts://` path is configured through the portable API (broker
-URI + a pinned CA), but **`CONFIG_MBEDTLS` is held OFF in the build
-today**. Zephyr v4.4's mbedtls 3.6 has an `ssl_misc.h`
-include-order bug (`unknown type name 'mbedtls_error_pair_t'`); full
-`tf-psa-crypto` wiring is a v0.6 work item. On real AEN silicon the
-build follows the TF-M stack and is unaffected; the native_sim leg
-turns mbedtls off (see [`native_sim.conf`](native_sim.conf)) so the
-framing path still builds and runs. This is why the catalog record
-is `preview`.
+The `mqtts://` path is configured through the portable API (broker URI + a
+pinned CA) and **mbedTLS is now built in on every target**, native_sim
+included. It used to be held off: with mbedTLS' PSA core disabled the pinned
+library's own `ssl_misc.h` does not compile (`unknown type name
+'mbedtls_error_pair_t'`), so the app turned mbedTLS off rather than fail. The
+SDK now turns that PSA core on wherever it builds mbedTLS without TF-M
+(`ALP_SDK_MBEDTLS_PSA_CRYPTO`, issue #2173), so this app carries no mbedTLS
+knobs at all any more (see [`prj.conf`](../mqtt-telemetry/prj.conf), which is
+empty by design) and the `native_sim.conf` that used to hold the workaround is
+deleted.
+
+AEN hardware builds seed the PSA core from the Secure Enclave TRNG entropy
+driver (`alif,se-trng`, bench-proven on both M55 cores, issue #2192), which
+every AEN board chooses as `zephyr,entropy` by default, so the AEN Twister
+scenario needs no weak-RNG opt-in. Only the native_sim scenario, which has no
+real entropy source, still sets `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y`.
 
 ## The "sensor reading"
 
 To keep the focus on the transport, this template publishes a
 **synthetic metric** (device uptime). Swap
 `read_telemetry_value()` for a real sensor read -- e.g. compose it
-with the [`sensor` template](../../peripheral-io/i2c-master/) (TMP112
-over `<alp/chips/tmp112.h>`) -- and the publish path is unchanged.
+with the [`sensor` template](../../peripheral-io/i2c-master/) (BMP581
+over `<alp/chips/bmp581.h>`) -- and the publish path is unchanged.
 
 ## Build
 
 ```bash
-# Standalone, native_sim (no radio; framing-only, mbedtls off):
+# Standalone, native_sim (no radio, so the app prints the framing it
+# would publish; mbedTLS is built in):
+# writes examples/connectivity/mqtt-telemetry/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/mqtt-telemetry
 west build -b native_sim/native/64 examples/connectivity/mqtt-telemetry \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd) -DEXTRA_CONF_FILE=native_sim.conf
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 
 # On real silicon (E1M-AEN801):
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/connectivity/mqtt-telemetry
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/connectivity/mqtt-telemetry -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

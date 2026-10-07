@@ -88,8 +88,9 @@
 		 * fails (-EINVAL) for the gateless dummy ALIF_SPI_CLK -> every
 		 * transceive returned ALP_ERR_INVAL with zero SCLK (witness fail_step=1,
 		 * zerr=-EINVAL). Providing the SSI input clock here makes the driver
-		 * use it directly and skip the failing clock-control path. SYST_HCLK =
-		 * AHB = 400 MHz (E8 HWRM); BAUDR = 400M/freq_hz (=50 for an 8 MHz SCLK).
+		 * use it directly and skip the failing clock-control path. The real
+		 * SSI functional clock (E8 HWRM) is 200 MHz, not the 400 MHz AHB/
+		 * SYST_HCLK rate; BAUDR = 200M/freq_hz (=25 for an 8 MHz SCLK).
 		 */
 		clock-frequency = <200000000>; /* real SSI functional clock (was mis-set 400M; proven via BAUDR scaling) */
 		dwc-ssi;
@@ -111,15 +112,19 @@
 	status = "okay";
 };
 
-/*
- * gpio2 for the host-IRQ/READY input (CC35 GPIO17 -> Alif P2_6, alp_pins[2]).
- * P2_6's reset-default mux is function 0 = GPIO (PIN_P2_6__GPIO), so no pinctrl
- * group is needed; gpio_dw defaults the pin to input, which the app confirms via
- * alp_gpio_configure(INPUT).  The READY line lets the host gate reply phases on
- * the slave's actual re-arm instead of a fixed settle gap. */
-&gpio2 {
-	status = "okay";
-};
+/* P2_6 (E1M AH7 / I2S1_SCLK) is NOT the CC3501E READY net on the R2 module this
+ * bridge targets -- it is E1M pad AH7 / I2S1_SCLK, which the E1M EVK carrier
+ * repurposes as the Arduino header's CK_RST (metadata/boards/e1m-evk.yaml);
+ * the real READY net lands on E1M pad G3 / IO16 instead
+ * (metadata/e1m_modules/aen/from-cc3501e.tsv). This app therefore does not
+ * enable &gpio2 or claim P2_6 as READY -- see src/cc3501e_bridge.c and
+ * chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate() comment. A board (or a
+ * hand-reworked r1 unit) that genuinely wires GPIO17 to P2_6 can opt back
+ * in: enable &gpio2, add a pinctrl group that enables P2_6's INPUT BUFFER --
+ * reset-default mux already IS GPIO, but GPIO function alone does not enable
+ * the input path; skip that group and cc3501e_reply_gate()'s read comes back
+ * a constant 0 forever, indistinguishable from a stuck-LOW pad -- add an
+ * alp_pins entry for it, and set fw->ready_pin in cc3501e_bridge_bringup(). */
 
 /*
  * Host-side peripheral DMA for continuous SPI streams over the CC3501E bridge.
@@ -131,32 +136,17 @@
  * is SYSTOP (already on -- the app drives SPI1/GPIO in the same region); its
  * PL330 boot-manager security latch (CLKCTRL_PER_MST) is in dma_alif_boot_latch.c.
  * The fork PL330 driver statically allocates the per-channel ucode + remaps it via
- * local_to_global(), so no external `microcode` prop is needed.  IRQs 299..306 =
- * the 8 DMA0 channel-done lines, 331 = abort (AE822 DFP rtss_he).
+ * local_to_global(), so no external `microcode` prop is needed.
+ *
+ * dma0 + evtrtr0 are now declared in ensemble_e8_peripherals.dtsi (disabled
+ * by default, alp-sdk issue #1815); this overlay only enables them.
  */
-&soc {
-	dma0: dma@49080000 {
-		compatible = "alif,dma-pl330";
-		reg = <0x49080000 0x1000>;
-		#dma-cells = <2>;
-		dma-channels = <8>;
-		interrupt-parent = <&nvic>;
-		interrupts = <299 3>, <300 3>, <301 3>, <302 3>, <303 3>,
-			     <304 3>, <305 3>, <306 3>, <331 3>;
-		interrupt-names = "channel0", "channel1", "channel2", "channel3",
-				  "channel4", "channel5", "channel6", "channel7", "abort";
-		status = "okay";
-	};
+&dma0 {
+	status = "okay";
+};
 
-	evtrtr0: event-router@49035000 {
-		compatible = "alif,dma-event-router";
-		reg = <0x49035000 0x100>;
-		dma-controller = <&dma0>;
-		channels = <32>;
-		dma-groups = <4>;  /* SYSTOP router: 4 ACK_TYPE groups (0-3); SPI1 uses group 2 */
-		#dma-cells = <2>;
-		status = "okay";
-	};
+&evtrtr0 {
+	status = "okay";
 };
 
 /*
@@ -179,17 +169,17 @@
 	};
 
 	/*
-	 * Compact 2-entry control array for the SoM-internal CC3501E nets, in
-	 * the order the app's CC3501E_PIN_* indices expect.  These are NOT E1M
-	 * edge pads, so this bring-up app intentionally does NOT use the
+	 * Compact 2-entry control array for the SoM-internal CC3501E control
+	 * nets, in the order the app's CC3501E_PIN_* indices expect.  These are
+	 * NOT E1M edge pads, so this bring-up app intentionally does NOT use the
 	 * 52-slot positional E1M map; a production board file appends such
-	 * SoM-internal control nets after the E1M pad slots.
+	 * SoM-internal control nets after the E1M pad slots.  No READY entry
+	 * here -- see the P2_6 comment above &gpio2's removal further up.
 	 */
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
-		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
-			<&lpgpio 1 GPIO_ACTIVE_HIGH>,   /* [1] E_WIFI.NRST (P15_1_FLEX) */
-			<&gpio2 6 GPIO_ACTIVE_HIGH>;    /* [2] host-IRQ/READY (P2_6 <- CC35 GPIO17) */
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>, /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>; /* [1] E_WIFI.NRST (P15_1_FLEX) */
 	};
 };
 

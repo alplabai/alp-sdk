@@ -33,18 +33,24 @@ alp_status_t il3820_wait_idle(il3820_t *dev, uint32_t timeout_ms)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	if (dev->busy == NULL) {
-		/* No busy pin — caller must use timing-based waits. */
-		alp_delay_us(100000);
+		/* No busy pin — caller must use timing-based waits.  Sleeps: a
+		 * 100 ms non-yielding spin (alp_delay_us) would hold the core
+		 * through a refresh nothing else is waiting on. */
+		alp_delay_ms(100);
 		return ALP_OK;
 	}
-	/* Poll BUSY (active high on most IL3820 modules). */
+	/* Poll BUSY (active high on most IL3820 modules).  The 10 ms step sleeps
+	 * so the poll releases the core for the seconds a full e-paper refresh can
+	 * take; spinning it would monopolise the CPU for that whole window.
+	 * waited_ms counts NOMINAL step time, and a sleep may overshoot to the OS
+	 * tick boundary, so timeout_ms bounds the accounted wait, not wall clock. */
 	uint32_t waited_ms = 0;
 	while (waited_ms < timeout_ms) {
 		bool         level = false;
 		alp_status_t s     = alp_gpio_read(dev->busy, &level);
 		if (s != ALP_OK) return s;
 		if (!level) return ALP_OK;
-		alp_delay_us(10000);
+		alp_delay_ms(10);
 		waited_ms += 10;
 	}
 	return ALP_ERR_TIMEOUT;
@@ -54,12 +60,15 @@ alp_status_t il3820_hw_reset(il3820_t *dev)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	if (dev->reset == NULL) return ALP_ERR_NOSUPPORT;
+	/* 10 ms low + 10 ms post-release settle.  Both sleep: alp_delay_us does
+	 * not yield (include/alp/peripheral.h) and neither hold is bus timing
+	 * that a scheduling gap could break. */
 	alp_status_t s = alp_gpio_write(dev->reset, false);
 	if (s != ALP_OK) return s;
-	alp_delay_us(10000);
+	alp_delay_ms(10);
 	s = alp_gpio_write(dev->reset, true);
 	if (s != ALP_OK) return s;
-	alp_delay_us(10000);
+	alp_delay_ms(10);
 	return ALP_OK;
 }
 

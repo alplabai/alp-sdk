@@ -73,8 +73,10 @@ trip is entirely in-RAM.
 ## Build
 
 ```bash
+# writes examples/connectivity/nanopb-encode-decode/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/nanopb-encode-decode
 west build -b native_sim/native/64 examples/connectivity/nanopb-encode-decode \
-    -- -DEXTRA_ZEPHYR_MODULES="$(pwd);<west-workspace>/modules/lib/nanopb"
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES="$(pwd);<west-workspace>/modules/lib/nanopb"
 west build -t run
 ```
 

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 import alp_quality  # noqa: E402
@@ -22,13 +23,42 @@ def _synthetic(profile="pr", *, gate_fail=False, info_fail=False):
     return rep
 
 
-def test_run_profile_pr_matches_registry_selection():
+def test_run_profile_pr_matches_registry_selection(monkeypatch):
     """Integration: the pr profile runs exactly the registry's pr tasks. This
-    checks WHICH tasks ran (env-independent) -- not whether they pass."""
+    checks WHICH tasks ran (env-independent) -- not whether they pass.
+
+    #2328: this used to let `run_profile` actually `subprocess.run` every one
+    of the pr profile's ~60 gate scripts for real (~200s -- 17% of the whole
+    tests/scripts run) just to read back which scripts got selected. What's
+    under test is `run_profile`'s own selection (`_tasks_for`) + iteration
+    logic, not whether the gates pass -- see the docstring above -- so the
+    one `subprocess.run` call inside its loop is replaced by a fake that
+    records each command and returns a synthetic result. The fake is swapped
+    in as alp_quality's own `subprocess` name, so the stdlib module other
+    code shares stays untouched. It still checks the command run_profile
+    builds, and one script's rc=1 must come back as a failed result."""
     import quality_tasks
+
+    calls = []
+    failing = "scripts/check_template_catalog.py"
+
+    def _fake_run(argv, **kw):
+        calls.append((argv, kw))
+        rc = 1 if argv[1] == str(REPO / failing) else 0
+        return SimpleNamespace(returncode=rc, stdout="", stderr="")
+
+    monkeypatch.setattr(alp_quality, "subprocess", SimpleNamespace(run=_fake_run))
     rep = alp_quality.run_profile("pr", REPO)
     ran = {r.script for r in rep.results}
     assert ran == set(quality_tasks.scripts_for_profile("pr"))
+    assert failing in ran, "pick a failing script the pr profile selects"
+
+    for argv, kw in calls:
+        assert argv[0] == sys.executable and Path(argv[1]).is_file(), argv
+        assert kw["cwd"] == REPO and kw["capture_output"] is True, kw
+    by_script = {r.script: r for r in rep.results}
+    assert by_script[failing].passed is False
+    assert all(r.passed for s, r in by_script.items() if s != failing)
 
 
 def test_ok_true_iff_no_gate_task_failed():
@@ -62,8 +92,14 @@ def test_sarif_shape():
 # ---------------------------------------------------------------------------
 # tan-cli#721: a profile that selects no task must not look like a clean run.
 # `all()` over an empty sequence is True, so `ok()` returned True and `main()`
-# returned 0 while printing `0/0 passed` + `complete.` -- and `quick` selects
-# exactly zero check-script tasks today, so that was every `--profile quick`.
+# returned 0 while printing `0/0 passed` + `complete.` -- and `quick` selected
+# exactly zero check-script tasks back then, so that was every `--profile
+# quick` invocation. #1463 populated `quick` (36 tasks), but the empty-
+# selection case this guards is still reachable by construction below, and
+# would be real again for ANY profile a future edit strips back to empty --
+# these two tests exercise `Report`/`main()` directly against a synthetic
+# empty result rather than the real registry, so they stay meaningful either
+# way.
 # ---------------------------------------------------------------------------
 
 

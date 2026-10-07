@@ -12,7 +12,7 @@ west build -p always --sysbuild \
     -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/aen/aen-mcuboot-smoke -d build/mcuboot-smoke -- \
     "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>" \
-    '-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="<abs>/keys/mcuboot_dev_ecdsa_p256.pem"'
+    '-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="<abs>/keys/mcuboot_shared_dev_ecdsa_p256.pem"'
 # Produces:  build/mcuboot-smoke/mcuboot/zephyr/zephyr.bin        (MCUboot, ITCM-linked)
 #            build/mcuboot-smoke/aen-mcuboot-smoke/zephyr/zephyr.signed.bin  (slot0 app)
 ```

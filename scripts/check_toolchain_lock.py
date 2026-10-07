@@ -262,7 +262,7 @@ def _pinned_zephyr_version() -> str | None:
 def _resolve_zephyr_dir() -> Path:
     """Same resolution order as `tests/scripts/test_hil_blocks_coverage.py`'s
     `_pinned_zephyr_sysbuild_kconfig_symbols`: `$ZEPHYR_BASE` (the
-    convention every `west` command and `scripts/alp_cli/doctor.py` use),
+    convention every `west` command and `tan doctor` use),
     falling back to the west-workspace topdir's conventional `zephyr/`
     project directory (`scripts/bootstrap.sh` does `west init -l <alp-sdk>`,
     so alp-sdk's parent is the topdir)."""
@@ -288,7 +288,7 @@ def _sdk_version_in_pinned_zephyr(zephyr_dir: Path, pinned_version: str) -> str 
     try:
         result = subprocess.run(
             ["git", "-C", str(zephyr_dir), "show", f"{pinned_version}:SDK_VERSION"],
-            capture_output=True, text=True, timeout=15, check=False,
+            capture_output=True, text=True, encoding="utf-8", timeout=15, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

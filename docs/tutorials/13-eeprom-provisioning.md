@@ -61,14 +61,13 @@ Hardware:
   **This is family-specific -- don't assume BRD_I²C:** on AEN
   the EEPROM is bridge/DNP-selected onto its own **SoC I2C2**
   (`P5_6 SCL_C` / `P5_7 SDA_C`), separate from BRD_I²C -- BRD_I²C
-  on AEN **is** the slave-only LPI2C0 (`P7_4`/`P7_5`) and carries
-  the RTC/TMP112/OPTIGA instead, a bus the silicon can only be a
-  slave on (see `docs/bring-up-aen.md` §5.1 and
+  on AEN **is** SoC I2C0 (`P7_0`/`P7_1`, function C) and carries
+  the RTC/TMP112/OPTIGA instead (see `docs/bring-up-aen.md` §5.1 and
   `examples/aen/aen-eeprom-manifest/README.md`); on V2N / V2N-M1
   the EEPROM sits on its own `e1m_i2c0` bus, separate from
   BRD_I²C (which carries the PMICs/RTC/OPTIGA/GD32 instead) --
-  see `metadata/e1m_modules/E1M-V2N101.yaml:56-59` /
-  `metadata/e1m_modules/E1M-V2M101.yaml:61-64`.
+  see `metadata/e1m_modules/E1M-V2N101.yaml:58-61` /
+  `metadata/e1m_modules/E1M-V2M101.yaml:68-71`.
 - Board in factory-test mode (no application running --
   either powered through the USB-I²C alone, or running a
   factory-test firmware that gives I²C bus access to the
@@ -99,8 +98,10 @@ project's `board.yaml`, not from individual CLI flags:
   resolves **family** automatically from the SKU's
   `metadata/e1m_modules/<SKU>.yaml` preset, and **hw_rev** from
   `som.hw_rev` if present, else the preset's `default_hw_rev`.
-- **`--serial`** (`A20260514-0001`) -- production-assigned, max 23
-  ASCII characters; recommend a date prefix + sequence number.
+- **`--serial`** (`YYYYWww-IIII`, e.g. `2026W20-0001`) -- production-assigned;
+  `YYYY` the manufacturing year, `ww` the ISO week, `IIII` a 4-character
+  Crockford base32 index. Validated against `scripts/alp_eth_mac.py`'s
+  parser -- a malformed serial fails the run before anything is written.
 - **`--mfg-date`** (`2026-05-14`) -- ISO `YYYY-MM-DD`, the calendar
   date the unit was tested.
 
@@ -120,7 +121,7 @@ YAML
 
 python3 scripts/program_eeprom.py \
     --board-yaml board.yaml \
-    --serial     A20260514-0001 \
+    --serial     2026W20-0001 \
     --mfg-date   2026-05-14 \
     --output     build/eeprom-manifest.bin
 ```
@@ -132,7 +133,7 @@ program_eeprom: wrote 128 bytes to build/eeprom-manifest.bin
   family   aen
   sku      E1M-AEN801
   hw_rev   r2
-  serial   A20260514-0001
+  serial   2026W20-0001
   mfg_date 2026-05-14
 ```
 
@@ -262,6 +263,35 @@ log together form the **per-device manufacturing record**.
 Archive them in a database keyed by serial; warranty claims
 get answered by looking up the record.
 
+## 8. Secure Data Page mirror + permanent lock (recovery copy)
+
+The same on-module 24C128 answers a **second** I²C address, `0x58` -- one
+physical part, not a second chip. Inside it, selector `0x00` is a separate
+64-byte **Secure Data Page** that can be permanently locked so it can never
+be overwritten again (not even by this same tooling). Alp Lab uses it to
+carry a *mirror* of this manifest's immutable core (`sku`, `hw_rev`,
+`serial`, mfg date, CRC) as a recovery copy, since the 128-byte manifest
+above has **no write protection at all** -- see `alp_secure_page_mirror_t`
+in [`include/alp/hw_info.h`](../../include/alp/hw_info.h) for the exact
+64-byte layout.
+
+This is a separate, later production step from §7 above, gated on this
+manifest already being written and verified, and its own read-back
+verify + explicit opt-in flag before the irreversible lock:
+`eeprom_24c128_secure_page_write()` / `eeprom_24c128_secure_page_lock()`
+in [`include/alp/chips/eeprom_24c128.h`](../../include/alp/chips/eeprom_24c128.h),
+demonstrated end-to-end by
+[`examples/aen/aen-eeprom-provision`](../../examples/aen/aen-eeprom-provision)'s
+three build modes. Its `README.md` covers the exact flags and the
+cold-power-cycle requirement between writing and locking; this section
+exists only so a reader of this tutorial knows the second address space
+is accounted for, not an undocumented device on the bus.
+
+A board populated with the approved footprint-compatible alternate part
+(STMicro `M24128-BFMH6TG`) has no second device-select header at all --
+`eeprom_24c128_read_identity()` reports that as an absent capability, not
+an error, and this manifest stays authoritative either way.
+
 ## See also
 
 - [`include/alp/hw_info.h`](../../include/alp/hw_info.h) -- the
@@ -272,3 +302,5 @@ get answered by looking up the record.
   BOARD_ID divider path.
 - [`tests/scripts/test_program_eeprom.py`](../../tests/scripts/test_program_eeprom.py)
   -- unit tests for the layout encoder.
+- [`examples/aen/aen-eeprom-provision`](../../examples/aen/aen-eeprom-provision)
+  -- the Secure Data Page mirror write + lock tool (§8 above).

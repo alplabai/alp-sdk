@@ -46,6 +46,26 @@ static const char *companion_reset_cause_name(uint8_t cause)
 	}
 }
 
+/* Map lwIP's dhcp_state (PLUS ONE on the wire -- see alp_cc3501e_dhcp_state_t)
+ * to a short label for `diag info`.  Only the values a host commonly branches
+ * on are named in the enum; anything else is a legal in-progress lwIP state
+ * this console simply doesn't spell out -- print it raw rather than guess. */
+static const char *companion_dhcp_state_name(uint8_t dhcp_state)
+{
+	switch (dhcp_state) {
+	case ALP_CC3501E_DHCP_STATE_NOT_REPORTED:
+		return "not-reported";
+	case ALP_CC3501E_DHCP_STATE_OFF:
+		return "off";
+	case ALP_CC3501E_DHCP_STATE_SELECTING:
+		return "selecting";
+	case ALP_CC3501E_DHCP_STATE_BOUND:
+		return "bound";
+	default:
+		return "other";
+	}
+}
+
 static const char *companion_role_name(uint8_t role)
 {
 	switch (role) {
@@ -100,6 +120,25 @@ static int cmd_companion_diag_info(const struct shell *sh, size_t argc, char **a
 	 * ever fired, which separates "the radio never got going" from "it came up
 	 * and stopped" without needing a second radio to watch for the SSID. */
 	shell_print(sh, "wifievt:%u", di.reserved[0]);
+	/* #1610: psa_status_t low byte of the last OTA flush fault; pairs with
+	 * `ota status`'s stage.  Quiet when nothing failed. */
+	if (di.reserved[1] != 0u) {
+		shell_print(sh, "otafault:psa 0x%02x", di.reserved[1]);
+	}
+	/* #2035: lwIP DHCP client state + netif flags/tries.  dhcp_state reads
+	 * "not-reported" both for genuinely-never-started DHCP AND for an older
+	 * (pre-#2035) bridge that never sends these two bytes at all -- the wire's
+	 * zero pad ahead of the CRC trailer delivers 0 either way, so this line
+	 * cannot itself tell those two cases apart; `fw:` above (the firmware
+	 * release version) is what disambiguates old firmware from "never
+	 * started" (see alp_cc3501e_diag_info_t's doc comment). */
+	shell_print(sh,
+	            "dhcp:   %s (%u)  netif: %s%s tries=%u",
+	            companion_dhcp_state_name(di.dhcp_state),
+	            di.dhcp_state,
+	            (di.netif_status & ALP_CC3501E_NETIF_UP) ? "up" : "down",
+	            (di.netif_status & ALP_CC3501E_NETIF_LINK_UP) ? "+link" : "",
+	            (unsigned int)ALP_CC3501E_NETIF_DHCP_TRIES(di.netif_status));
 	return 0;
 }
 
@@ -112,14 +151,25 @@ static int cmd_companion_diag_stats(const struct shell *sh, size_t argc, char **
 		return -ENODEV;
 	}
 
-	uint32_t     frames_ok = 0, frames_err = 0;
-	alp_status_t s = cc3501e_diag_stats(companion_cc3501e, &frames_ok, &frames_err);
+	cc3501e_diag_stats_t st = { 0 };
+	alp_status_t         s  = cc3501e_diag_stats(companion_cc3501e, &st);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "diag stats failed (%d)", (int)s);
 		return -EIO;
 	}
-	shell_print(sh, "frames ok=%u err=%u", (unsigned int)frames_ok, (unsigned int)frames_err);
+	shell_print(sh, "frames ok=%u err=%u", (unsigned int)st.frames_ok, (unsigned int)st.frames_err);
+	/* Print the v8 counters only when the firmware actually answered them.
+	 * Printing "worker execs=0" against v7 firmware would read as a measured
+	 * zero, which is the one thing a bench run must not be told. */
+	if (st.has_worker_counters) {
+		shell_print(sh,
+		            "worker execs=%u retry-latch hits=%u",
+		            (unsigned int)st.worker_execs,
+		            (unsigned int)st.retry_latch_hits);
+	} else {
+		shell_print(sh, "worker execs/retry-latch hits: not reported (firmware < protocol 8)");
+	}
 	return 0;
 }
 

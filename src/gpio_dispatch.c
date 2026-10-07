@@ -20,6 +20,8 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include <alp/chips/gd32g553.h> /* GD32G553_PAD_ID_* (reserved ids) */
+
 #include "alp_slot_claim.h"
 #include "backends/gpio/gpio_ops.h"
 
@@ -52,9 +54,21 @@ static void _free(struct alp_gpio *h)
 	alp_slot_release(&h->in_use);
 }
 
-alp_gpio_t *alp_gpio_open(uint32_t pin_id)
+/* The reserved GD32 pad ids are NOT portable pins: they name the GD32 SWD /
+ * reset / ATTN pads (P70 / P71 / P74), including the shared open-drain NRST net,
+ * and only the V2N supervisor and the gd32_swd driver may open them. */
+static bool pad_id_is_reserved(uint32_t pin_id)
+{
+	return pin_id >= GD32G553_PAD_ID_SWDIO && pin_id <= GD32G553_PAD_ID_ATTN;
+}
+
+static alp_gpio_t *gpio_open_impl(uint32_t pin_id, bool internal)
 {
 	alp_z_clear_last_error();
+	if (!internal && pad_id_is_reserved(pin_id)) {
+		alp_z_set_last_error(ALP_ERR_INVAL);
+		return NULL;
+	}
 	const alp_backend_t *be = alp_backend_select("gpio", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
@@ -72,7 +86,7 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
 		(void)be->probe(pin_id, &refined);
@@ -90,6 +104,35 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 	h->edge        = ALP_GPIO_EDGE_NONE;
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
+}
+
+alp_gpio_t *alp_gpio_open(uint32_t pin_id)
+{
+	return gpio_open_impl(pin_id, false);
+}
+
+alp_gpio_t *alp_z_gpio_open_internal(uint32_t pin_id)
+{
+	return gpio_open_impl(pin_id, true);
+}
+
+alp_status_t alp_z_gpio_configure_output_low(alp_gpio_t *pin)
+{
+	if (pin == NULL || !alp_handle_op_enter(&pin->lifecycle, &pin->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc;
+	if (pin->state.ops->configure_output_low == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = pin->state.ops->configure_output_low(&pin->state);
+		if (rc == ALP_OK) {
+			pin->dir  = ALP_GPIO_OUTPUT;
+			pin->pull = ALP_GPIO_PULL_NONE;
+		}
+	}
+	alp_handle_op_leave(&pin->active_ops);
+	return rc;
 }
 
 /* Every op below gates on the lifecycle byte via alp_handle_op_enter(),

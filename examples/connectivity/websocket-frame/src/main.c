@@ -14,7 +14,7 @@
  * [UNTESTED]: this example does not link against the real
  * libwebsockets library. Two compounding reasons, both confirmed by
  * reading the actual checkout at modules/lib/libwebsockets (real
- * files, ~230 KB source tree -- unlike coreMQTT-SN this module fetch
+ * files, ~230 KB source tree -- this module fetch
  * DID succeed):
  *
  *  1. libwebsockets ships no `zephyr/module.yml`, so west's module

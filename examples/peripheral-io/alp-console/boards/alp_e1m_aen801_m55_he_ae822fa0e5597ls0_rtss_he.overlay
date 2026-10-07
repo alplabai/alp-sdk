@@ -67,11 +67,6 @@
 	};
 };
 
-/* P2_6 (READY) is on gpio2 (defined in the SoC dtsi) -- just enable it. */
-&gpio2 {
-	status = "okay";
-};
-
 /* P14_7 (CS) is now muxed as SPI1_SS0_C in pinctrl_spi1 -- the dwc-ssi peripheral drives
  * it in hardware per transfer.  The old gpio14 GPIO-bodge controller node is removed: a
  * GPIO claim of P14_7 would fight the SS0 pinctrl mux. */
@@ -83,8 +78,9 @@
 &soc {
 	/* DWC_ssi SPI1 -- the on-SoM CC3501E inter-chip link (NOT the edge SPI0).
 	 * 4-wire: SCLK/MOSI/MISO + the hardware SS0 chip-select (P14_7 = SPI1_SS0_C,
-	 * declared in pinctrl_spi1 above); clock-frequency = SYST_HCLK (400 MHz) so
-	 * spi_dw_alif skips the failing clock-control path. */
+	 * declared in pinctrl_spi1 above); clock-frequency = 200 MHz, the real SSI
+	 * functional clock (E8 HWRM), so spi_dw_alif skips the failing
+	 * clock-control path. */
 	cc3501e_spi: spi@48104000 {
 		compatible = "alif,dwc-ssi-spi";
 		#address-cells = <1>;
@@ -92,14 +88,24 @@
 		reg = <0x48104000 0x1000>;
 		interrupts = <138 3>;          /* BENCH-TBD: SPI1 IRQ */
 		clocks = <&clockctrl ALIF_SPI_CLK>;
-		clock-frequency = <400000000>;
+		/* Real SSI functional clock (E8 HWRM).  Was mis-set to 400000000 here,
+		 * which is not a cosmetic error: spi_dw derives BAUDR =
+		 * clock-frequency / freq_hz, so a doubled input clock doubles the
+		 * divider and HALVES the real SCLK -- this node was running at
+		 * 500 kHz while asking for 1 MHz.  Proven via BAUDR scaling and
+		 * already corrected in the aen-cc3501e-* overlays. */
+		clock-frequency = <200000000>;
 		dwc-ssi;
 		fifo-depth = <16>;
-		/* RX sample delay (DWC_ssi RX_SAMPLE_DLY reg 0xF0, ssi_clk cycles @ 400MHz =
-		 * 2.5ns/cycle) -- recenter the master's MISO capture at higher SCLK.  CLOCK-
-		 * DEPENDENT: keep 0 (absent) at 1 MHz; raise only when CC3501E_BRIDGE_SPI_FREQ_HZ
-		 * is bumped to 8 MHz (try 2) / 15 MHz (sweep 2->4).  A nonzero rx-delay at the
-		 * 1 MHz cold first-contact was bench-implicated in an early-boot desync. */
+		/* `rx-delay` IS a real devicetree property
+		 * (zephyr/dts/bindings/spi/alif,dwc-ssi-spi.yaml, int, default 0),
+		 * left unset here so it resolves to 0. This app's own
+		 * src/cc3501e_bridge.c writes no RX_SAMPLE_DLY poke at all -- unlike
+		 * the aen-cc3501e-* overlays, which run the link faster and need one
+		 * (see their own rx-delay comment) -- because this console runs the
+		 * bridge at CC3501E_BRIDGE_SPI_FREQ_HZ = 1 MHz
+		 * (cc3501e_bridge.h), the bench-validated rate at which the default
+		 * 0-cycle RX sample point already works. */
 		pinctrl-0 = <&pinctrl_spi1>;
 		pinctrl-names = "default";
 		status = "okay";

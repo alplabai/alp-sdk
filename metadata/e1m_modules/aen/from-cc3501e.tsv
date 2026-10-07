@@ -3,6 +3,16 @@
 # through the CC3501E host-control surface (Alif drives SPI1 to the WiFi
 # MCU; see inter-chip.tsv), not through Alif GPIO peripherals.  Tracks
 # board rev R2 (2626-R2).
+#
+# NOT customer IO: IO16 and IO17 land on the two CC3501E pads the bridge
+# firmware owns and actively refuses.  cc3501e-bridge-firmware
+# hal/ti/cc3501e_hw_ti_gpio.c gpio_pad_reserved() rejects pads 16 and 17
+# from the GPIO proxy: GPIO_16 is the inter-chip SPI0 chip-select paired
+# with the Alif hardware SPI1_SS0_C, and GPIO_17 is the READY line that
+# gates every reply phase and carries the async-event attention edge.
+# Driving either would tear the link down mid-transfer, which is exactly
+# what the reservation prevents.  They are named here so the pinout stays
+# complete, with the claim recorded in the peripheral column (#1808).
 e1m_pad	e1m_function	cc3501e_function	cc3501e_pad
 A18	IO11	GPIO2
 AG8	SPI1_MISO	SPI1.MISO	GPIO_34
@@ -15,8 +25,8 @@ AH33	IO10	GPIO35
 AH34	IO9	GPIO12
 E3	IO13	GPIO13
 F3	IO15	GPIO14
-G3	IO16	GPIO17
-H3	IO17	GPIO16
+G3	IO16	BRIDGE_READY	GPIO17
+H3	IO17	BRIDGE_SPI_CSN	GPIO16
 I3	IO18	GPIO18
 J3	IO19	GPIO19
 K3	IO20	GPIO26

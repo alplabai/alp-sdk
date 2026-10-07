@@ -7,9 +7,11 @@ ADR-0020 (alp-sdk#855 amendment) requires a two-seam parity gate before the
 parity -- does a live `--emit build-plan` from the alp-sdk checkout under test
 still match the frozen oracle's command / env / appDir / skip-fail-decision
 shape, field for field? Seam 2 (materialise byte-check + a real build + a
-Renode smoke test) is a documented follow-up that needs a Linux toolchain
-runner -- see `tests/parity/README.md` and the `seam2` placeholder job in
-`.github/workflows/parity.yml`.
+Renode smoke test) is not seeded in alp-sdk -- see `tests/parity/README.md`;
+alp-sdk has no job for it. It IS implemented on the tan-cli side: tan-cli's
+own `.github/workflows/parity.yml` `seam2` job runs `tan build --materialise`,
+a real `west`/Zephyr build through `tan build`, and a Renode boot smoke test
+against alp-sdk's pinned tag.
 
 Seam-1 deliberately does NOT compare the materialised config-artefact
 CONTENT (`slices[*].configArtefacts[*].contents` / `sharedArtefacts[*].
@@ -87,6 +89,18 @@ slice's ``command`` runs with cwd=``buildDir`` and no ``-d``, so west
 appends its own default ``build`` level. Allowed ONLY for the six named
 fields and ONLY for that exact one-segment insertion -- see
 ``_NESTED_ARTIFACT_TAILS``.
+
+alp-sdk #1982 (the AEN801/AEN701 ``a32_cluster`` MACHINE refusal) is
+NOT a fourth allowance: it is the same class of change as alp-sdk#999
+above (a doomed command the planner now refuses to emit) and is handled
+the same way #999 was -- by re-freezing the two affected oracle
+fixtures (``multicore_rpmsg-aen.build-plan.json`` and
+``audio_i2s-tone.build-plan.json``, both ``a32_cluster`` slices)
+directly, recorded in ``ORACLE-PROVENANCE.txt``, rather than by adding
+a comparator tolerance. See ADR-0020's post-mortem of tan-cli's
+``_ALLOWED_COMMAND_TO_NULL`` for why a permanent comparator allowance
+standing in for a one-file oracle sync is the failure mode to avoid
+here.
 
 Any OTHER diff -- a changed command, a changed env value, a changed slice
 count, a probe change to anything other than that exact openocd->null
@@ -246,28 +260,51 @@ def _project_relpath(plan: dict) -> str:
 # This is a COMMAND-SHAPE delta (an arg present/absent), not a content delta,
 # so it stays even after content dropped out of scope below.
 #
-# Scoped to NON-sysbuild slices ONLY, detected the same way the emitter
-# itself decides (`orchestrator.py::_slice_command`): a sysbuild slice's
-# `command.args` carries the literal `--sysbuild` flag. Sysbuild slices
-# deliberately do NOT carry `-DEXTRA_CONF_FILE` (Option A, #871: a bare
-# -DEXTRA_CONF_FILE lands on the sysbuild image not the app, silently
-# dropping the per-core alp.conf on boot:/OTA projects -- ADR-0020 Amendment
-# item 4) -- stripping the arg unconditionally from EVERY slice, sysbuild
-# included, would silently hide exactly that regression (a sysbuild slice
-# wrongly gaining the arg) from the comparator instead of catching it.
+# Detected the same way the emitter itself decides
+# (`orchestrator.py::_slice_command`): a sysbuild slice's `command.args`
+# carries the literal `--sysbuild` flag. A NON-sysbuild slice carries the
+# bare `-DEXTRA_CONF_FILE=`; a sysbuild slice carries the image-scoped
+# `-D<image>_EXTRA_CONF_FILE=` instead (#866), where <image> is the basename
+# of the slice's west app-dir arg. A bare arg on a sysbuild slice (lands on
+# the sysbuild image, not the app) or a prefix naming another image (e.g.
+# mcuboot) is a regression and must still fail, so each form is stripped
+# only on the slice kind -- and, for sysbuild, the image -- it belongs to.
 # KEEP IN LOCKSTEP with tan-cli's vendored copy of this comparator.
+def _is_image_scoped_extra_conf(arg, image):
+    """`-D<image>_EXTRA_CONF_FILE=...` for exactly the app image `image`."""
+    return arg.split("=", 1)[0] == f"-D{image}_EXTRA_CONF_FILE"
+
+
+def _west_app_dir_basename(args):
+    """Basename of the `west build` app-dir arg (first non-option arg after
+    `build`), or None. Tokened paths use `/`."""
+    try:
+        i = args.index("build") + 1
+    except ValueError:
+        return None
+    while i < len(args) and args[i].startswith("-"):
+        i += 2 if args[i] in ("-b", "-d", "-p") else 1
+    if i >= len(args):
+        return None
+    return args[i].replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+
+
 def _strip_863_extra_conf_file_arg(plan):
-    """Remove the intended #863/#871 `-DEXTRA_CONF_FILE=` command arg from
-    every NON-sysbuild slice's command in a (normalized) plan dict."""
+    """Remove the intended #863/#866/#871 per-core EXTRA_CONF_FILE command
+    arg from every slice: bare on non-sysbuild, `-D<app image>_` on sysbuild."""
     for slice_ in plan.get("slices", []) or []:
         cmd = slice_.get("command")
         if not (isinstance(cmd, dict) and isinstance(cmd.get("args"), list)):
             continue
-        if "--sysbuild" in cmd["args"]:
-            continue
+        # A sysbuild slice carries the image-scoped form
+        # `-D<image>_EXTRA_CONF_FILE=` (#866); a bare `-DEXTRA_CONF_FILE=`
+        # there is the Option-A regression and must still fail.
+        sysbuild = "--sysbuild" in cmd["args"]
+        image = _west_app_dir_basename(cmd["args"]) if sysbuild else None
         cmd["args"] = [a for a in cmd["args"]
-                       if not (isinstance(a, str)
-                               and a.startswith("-DEXTRA_CONF_FILE="))]
+                       if not (isinstance(a, str) and (
+                           _is_image_scoped_extra_conf(a, image) if sysbuild
+                           else a.startswith("-DEXTRA_CONF_FILE=")))]
     return plan
 
 
@@ -345,6 +382,11 @@ def normalize_plan(plan: dict) -> dict:
     # the #863/#871 command-arg addition above) -- drop it rather than diff
     # it; the token-vs-absolute SHAPE it flags is already reconciled above.
     normalized.pop("planPathMode", None)
+    # `deferredPlaceholders` (#2696) is another addition the oracle predates.
+    # It is derived purely from config-artefact CONTENTS, which this
+    # comparator deliberately no longer diffs (`_drop_artefact_contents`
+    # above; the emit-snapshot goldens pin them), so drop it too.
+    normalized.pop("deferredPlaceholders", None)
     return normalized
 
 
@@ -441,12 +483,12 @@ def emit_live_plan(sdk_root: Path, board_yaml: str) -> dict:
     resolved relative to `cwd=sdk_root`, so `board_yaml` is passed as the
     same repo-relative path the oracle's own `boardYaml` field records.
     """
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env["PYTHONPATH"] = str(sdk_root / "scripts")
     proc = subprocess.run(
         [sys.executable, "-m", "alp_orchestrate",
          "--input", board_yaml, "--emit", "build-plan"],
-        cwd=sdk_root, env=env, capture_output=True, text=True,
+        cwd=sdk_root, env=env, capture_output=True, text=True, encoding="utf-8",
     )
     if proc.returncode != 0:
         raise ComparatorError(
@@ -474,7 +516,7 @@ def run(sdk: Path, oracle_dir: Path, boards: list[str]) -> bool:
             all_ok = False
             continue
 
-        oracle_plan = json.loads(oracle_path.read_text())
+        oracle_plan = json.loads(oracle_path.read_text(encoding="utf-8"))
         board_yaml = oracle_plan.get("boardYaml")
         if not board_yaml:
             print(f"FAIL {board}: oracle fixture has no boardYaml field")

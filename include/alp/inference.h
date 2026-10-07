@@ -31,23 +31,26 @@
  *   - **DEEPX DX-M1**: real A55/Yocto-side backend
  *     (`src/yocto/inference_deepx.cpp`) against the real
  *     `dxrt::InferenceEngine` runtime.  Gated
- *     `ALP_SDK_USE_DEEPX_DXM1` (default OFF); BENCH-UNVERIFIED
- *     (issue #59).
+ *     `ALP_SDK_USE_DEEPX_DXM1` (default OFF).  Verified on DX-M1
+ *     silicon, outputs matching an ONNX Runtime CPU reference
+ *     (issue #1262).
  *   - **sw_fallback** (priority 0): every call returns
  *     ALP_ERR_NOSUPPORT; wins only when no other backend links for
  *     the active silicon.
  *
  * Vendor-specific accelerator paths -- `<alp/ext/renesas/inference.h>`
  * (DRP-AI3 pipeline-stage + AI-SRAM pinning) and
- * `<alp/ext/deepx/inference.h>` (DX-M1 slot + DRAM-tile pinning) --
+ * `<alp/ext/deepx/inference.h>` (DX-M1 NPU-core binding + device telemetry) --
  * remain available as escape hatches when the unified API can't
- * express what the vendor SDK offers.  Both currently return
- * ALP_ERR_NOSUPPORT on every call past the vendor-handle gate: the
- * Zephyr registry ships no DRP-AI/DEEPX inference backend for those
- * knobs to bind to (DRP-AI3 and DX-M1 are A55/Linux-only engines),
- * and wiring them through to the Yocto handle is follow-up work
- * (issues #58/#59).  The unification stance is "best-effort, not
- * absolute".
+ * express what the vendor SDK offers.  The DRP-AI3 hatch currently
+ * returns ALP_ERR_NOSUPPORT on every call past the vendor-handle gate:
+ * the Zephyr registry ships no DRP-AI inference backend for those
+ * knobs to bind to (DRP-AI3 is an A55/Linux-only engine), and wiring
+ * it through to the Yocto handle is follow-up work (issue #58).  The
+ * DEEPX hatch is implemented on the Yocto DX-M1 backend
+ * (ALP_SDK_USE_DEEPX_DXM1) and returns
+ * ALP_ERR_NOT_PRESENT_ON_THIS_SOC on Zephyr.  The unification stance is
+ * "best-effort, not absolute".
  *
  * @par ABI status: [ABI-STABLE]
  *      Shape is frozen.  ALP_ERR_NOSUPPORT -- for a target/backend
@@ -87,7 +90,9 @@ extern "C" {
  *  Vela picks at model-compile time and the runtime dispatches via
  *  the matching driver shim emitted by `scripts/alp_project.py`. */
 typedef enum {
-	ALP_INFERENCE_BACKEND_AUTO    = 0,
+	ALP_INFERENCE_BACKEND_AUTO    = 0, /**< Whichever backend loads cfg->format on this SoM
+					 *   (a DRP-AI model goes to DRP-AI, a DXNN model to
+					 *   DX-M1); ::ALP_ERR_NOSUPPORT if the SoM has none. */
 	ALP_INFERENCE_BACKEND_CPU     = 1, /**< Portable CPU floor: TFLM reference
 					    *   kernels on M-class/Zephyr, ONNX
 					    *   Runtime on the A55s under Yocto.
@@ -106,14 +111,22 @@ typedef enum {
 	ALP_INFERENCE_MODEL_VELA       = 1, /**< Vela-compiled `.tflite`. */
 	ALP_INFERENCE_MODEL_DRPAI      = 2, /**< Renesas DRP-AI binary. */
 	ALP_INFERENCE_MODEL_DXNN       = 3, /**< DEEPX DXNN binary. */
-	ALP_INFERENCE_MODEL_EXECUTORCH = 4, /**< ExecuTorch program.  RESERVED --
-					     *   no adapter produces this format
-					     *   and no backend consumes it, so a
-					     *   blob claiming it is rejected with
-					     *   @ref ALP_ERR_INVAL -- the value
-					     *   is kept rather than removed to
-					     *   avoid renumbering; see issue
-					     *   #1260. */
+	ALP_INFERENCE_MODEL_EXECUTORCH = 4, /**< ExecuTorch program.  Write side is
+					     *   live: ExecutorchAdapter (issue #1260)
+					     *   produces this format from a .pte
+					     *   source.  No backend runtime consumes
+					     *   it yet.  Backend selection is
+					     *   silicon_ref+priority and never reads
+					     *   cfg->format, so the outcome depends on
+					     *   which backend wins: on a TFLM-linked
+					     *   build, alp_inference_open() falls
+					     *   through to the CPU/TFLM backend, whose
+					     *   flatbuffer verify rejects the raw .pte
+					     *   bytes, failing with @ref ALP_ERR_INVAL
+					     *   (not a deliberate format check); with no
+					     *   TFLM linked, sw_fallback (priority 0)
+					     *   wins instead and fails with @ref
+					     *   ALP_ERR_NOSUPPORT.  See issue #1260. */
 	ALP_INFERENCE_MODEL_ONNX       = 5  /**< Raw `.onnx` graph (ONNX Runtime CPU backend). */
 } alp_inference_model_format_t;
 
@@ -132,8 +145,13 @@ typedef struct {
 	void                 *data;       /**< Backend-owned buffer. */
 	size_t                size_bytes; /**< Total buffer size. */
 	alp_inference_dtype_t dtype;
-	uint8_t               rank;     /**< 0..4 typical. */
-	uint16_t              shape[4]; /**< Most-significant first. */
+	/** 0..4.  A model whose real rank exceeds this fixed width cannot be
+	 *  described here: @ref alp_inference_get_input / @ref
+	 *  alp_inference_get_output refuse it with ALP_ERR_NOSUPPORT instead
+	 *  of reporting it truncated to 4 (issue #1729). */
+	uint8_t  rank;
+	uint16_t shape[4]; /**< Most-significant first; valid through index
+	                    *   `rank - 1`, 0 past it. */
 	/** Quantisation params (only meaningful when dtype is integer). */
 	float   scale;
 	int32_t zero_point;
@@ -159,6 +177,28 @@ typedef struct {
 	 *  sized to the model.  @c arena = NULL for such a model is rejected
 	 *  with @ref ALP_ERR_INVAL (see examples/aen/aen-npu-inference-alp). */
 	void *arena;
+	/**
+	 * @brief Which accelerator unit(s) of the selected backend run the model.
+	 *        [ABI-EXPERIMENTAL]
+	 *
+	 * 0 = the backend's default (every unit it can use).  Bit @c n selects
+	 * accelerator unit @c n of the backend @c backend resolves to; a mask may
+	 * name several units where the backend supports it.  A mask the selected
+	 * backend cannot honour makes @ref alp_inference_open return NULL with
+	 * @ref ALP_ERR_NOSUPPORT -- it is never silently ignored or narrowed.
+	 *
+	 * Per backend:
+	 *  - DEEPX DX-M1: bits 0..2 are NPU cores 0..2; any non-empty subset
+	 *    (0x1..0x7) is valid.  0 and 0x7 both mean all three cores.  At most
+	 *    three DISTINCT core sets can be live in one process; a fourth makes
+	 *    open return @ref ALP_ERR_BUSY.
+	 *  - Renesas DRP-AI3: one unit; only 0 or 0x1 is valid.
+	 *  - Arm Ethos-U (Alif): the NPU instance visible to the calling core;
+	 *    only bit 0 is valid, on single-NPU cores.  Multi-NPU parts are
+	 *    unverified -- do not rely on bits above 0 there.
+	 *  - TFLM, ONNX Runtime and CPU backends: only 0.
+	 */
+	uint32_t accel_unit_mask;
 } alp_inference_config_t;
 
 /**
@@ -187,12 +227,13 @@ typedef struct {
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_INFERENCE_CONFIG_DEFAULT(id) \
-	((alp_inference_config_t){ .model_data  = (id), \
-	                           .model_size  = 0u, \
-	                           .format      = ALP_INFERENCE_MODEL_TFLITE, \
-	                           .backend     = ALP_INFERENCE_BACKEND_AUTO, \
-	                           .arena_bytes = 0u, \
-	                           .arena       = NULL })
+	((alp_inference_config_t){ .model_data      = (id), \
+	                           .model_size      = 0u, \
+	                           .format          = ALP_INFERENCE_MODEL_TFLITE, \
+	                           .backend         = ALP_INFERENCE_BACKEND_AUTO, \
+	                           .arena_bytes     = 0u, \
+	                           .arena           = NULL, \
+	                           .accel_unit_mask = 0u })
 
 /**
  * @brief Load a compiled model and prepare it for invocation.
@@ -210,9 +251,13 @@ typedef struct {
  *         ALP_ERR_NOT_IMPLEMENTED (registered backend has no open
  *         hook), ALP_ERR_NOSUPPORT (a pinned @c backend the selected
  *         backend can't serve, e.g. ETHOS_U pinned on a CPU-only
- *         build), ALP_ERR_NOMEM (handle-pool or arena allocation
- *         failure), or ALP_ERR_IO (backend's tensor-arena allocation
- *         failed).
+ *         build; OR, on the ONNX Runtime / DEEPX DX-M1 / TFLM backends,
+ *         any model tensor whose rank exceeds 4 -- @ref
+ *         alp_inference_tensor_t's @c shape has exactly 4 slots, and
+ *         a model that doesn't fit is refused rather than opened with
+ *         a silently-truncated shape), ALP_ERR_NOMEM (handle-pool or
+ *         arena allocation failure), or ALP_ERR_IO (backend's
+ *         tensor-arena allocation failed).
  */
 alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg);
 
@@ -276,7 +321,10 @@ size_t alp_inference_num_outputs(alp_inference_t *inf);
  * @param[out] out    Filled with the tensor descriptor.
  *                    Must be non-NULL.
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
- *         ALP_ERR_NOT_READY.
+ *         ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT (the model's real rank for
+ *         this tensor exceeds the fixed `shape[4]` -- the ORT, DEEPX, and
+ *         TFLM backends all refuse rather than silently truncate, issue
+ *         #1729).
  */
 alp_status_t
 alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out);
@@ -294,7 +342,10 @@ alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor
  * @param[out] out    Filled with the tensor descriptor.
  *                    Must be non-NULL.
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
- *         ALP_ERR_NOT_READY.
+ *         ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT (the model's real rank for
+ *         this tensor exceeds the fixed `shape[4]` -- the ORT, DEEPX, and
+ *         TFLM backends all refuse rather than silently truncate, issue
+ *         #1729).
  */
 alp_status_t
 alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out);
@@ -305,6 +356,24 @@ alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tenso
  * Dispatches to the bound backend.  On Ethos-U / DRP-AI / DX-M1
  * backends this offloads to the NPU and blocks the calling thread
  * until the result lands; on the CPU backend it executes in-thread.
+ *
+ * @par One job per NPU at a time
+ * Each NPU runs one job at a time.  Invokes on different handles that
+ * sit on the SAME NPU take turns: DRP-AI3 jobs are serialised by the SDK
+ * with a process-wide lock (the driver rejects a concurrent job instead
+ * of queueing it), and the DX-M1 time-shares between engines.  To get
+ * real concurrency run one model per NPU -- give each handle
+ * its own model format (AUTO then picks that format's NPU) and invoke
+ * from one thread per NPU.  See
+ * `examples/v2n/v2n-two-models/`.
+ *
+ * @par DRP-AI3 is one process per board
+ * DRP-AI3-only; see ext/renesas/inference.h.  The DX-M1 has no such limit.
+ *
+ * @par DRP-AI3 failures are not reported
+ * The DRP-AI3 runtime's `Run()` returns void, so a job the driver
+ * rejected or that timed out still returns @ref ALP_OK here.  Check the
+ * output tensors if that matters to the application.
  *
  * @param[in] inf  Handle from @ref alp_inference_open.
  *

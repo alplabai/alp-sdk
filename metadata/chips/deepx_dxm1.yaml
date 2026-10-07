@@ -61,5 +61,16 @@ families:
   - v2n-m1                            # NOT populated on V2N base
 
 verification:
-  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  hil_silicon:    untested        # this chip's OWN host-side C sequencer (deepx_dxm1_init/
+                                   # _bring_up) is untested -- on V2N-M1, U-Boot performs the
+                                   # equivalent PCIe-mux + M1_RESET sequencing itself with raw
+                                   # register pokes and never calls into chips/deepx_dxm1/ (see
+                                   # docs/soms/v2n-m1.md). The separate Yocto DEEPX RUNTIME path
+                                   # (dx-driver 1.8.0 + dx-rt 3.2.0 from meta-deepx-m1) IS
+                                   # bench-verified, 2026-09-26 on E1M-V2M103: PCIe 1ff4:0000
+                                   # Gen3 x2 enumerates, dxrt-cli -s rc=0 against FW 2.4.0 -- see
+                                   # docs/soms/v2n-m1.md's "DEEPX DX-M1 bring-up" section. Do not
+                                   # conflate the two: this field tracks the former only.
   smoke_tests:    null_arg_guard
+tracking:
+  blocker: "rail bring-up and runtime out of scope of the chip driver; no open tracker"

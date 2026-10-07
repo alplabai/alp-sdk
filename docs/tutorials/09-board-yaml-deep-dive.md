@@ -60,9 +60,9 @@ for production SoMs plus placeholder presets for active bring-up:
 
 | Family            | MPNs (paste any into `som.sku`)                                               |
 |-------------------|-------------------------------------------------------------------------------|
-| Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`                 |
-| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`                                                        |
-| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                        |
+| Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`, `AEN803`       |
+| Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`, `V2N103`                                             |
+| RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`, `V2M103`                                             |
 | NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
 `hw_rev` selects an entry from the family's `hw-revisions.yaml` to
@@ -254,8 +254,8 @@ heterogeneous build can declare different peripheral sets.
 Allowed values (exactly the schema enum):
 
 ```
-adc, can, counter, emmc, ethernet, flash, gpio, i2c, i2s,
-pwm, rtc, sensor, spi, uart, usb, watchdog
+adc, can, counter, dac, emmc, ethernet, flash, gpio, i2c,
+i2s, i3c, pwm, rtc, sensor, spi, uart, usb, watchdog
 ```
 
 Higher-level concerns ride other paths: audio is composed from
@@ -338,15 +338,14 @@ APIs):
 
 - `etl`         -- ETL (Embedded Template Library)
 - `fmt`         -- {fmt}
-- `nlohmann_json` -- JSON for Modern C++
+- `nlohmann-json` -- JSON for Modern C++
 - `doctest`     -- doctest unit-test framework
 - `lvgl`        -- LVGL
 - `mbedtls`     -- MbedTLS (exposed alongside `<alp/security.h>`)
-- `cmsis_dsp`   -- CMSIS-DSP (exposed alongside `<alp/dsp.h>`)
+- `cmsis-dsp`   -- CMSIS-DSP (exposed alongside `<alp/dsp.h>`)
 - `littlefs`    -- LittleFS
-- `tflite_micro`, `pid`, `modbus`, `nanopb`, ... -- see the
-  full enum in
-  [`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json).
+- `tflite-micro`, `pid`, `modbus`, `nanopb`, ... -- the valid
+  names are the manifests under `metadata/libraries/`.
 
 ### `cores.<id>.extra_libraries` -- open-set escape hatch (v0.6)
 
@@ -452,7 +451,7 @@ against either the SoM's `memory_map:` regions (auto-derived from
 the SoC variant when not overridden) or `on_module.ospi_memories:`
 keys (when the SoM ships with external OSPI flash).  A `memory_map:`
 region marked `carveout: false` is a partition *inside* a flash-class
-node rather than a flash device of its own (on E1M-AEN301..801 that's
+node rather than a flash device of its own (on E1M-AEN301..803 that's
 `mcuboot`, `he_slot0`, `hp_slot0`, `reserved`, `storage`, and `atoc`,
 all living inside the `mram_storage` flash node) and is refused as a
 `flash_device:` target with a reason (#1484).
@@ -596,6 +595,6 @@ orchestrator consistency error.
 - [`metadata/templates/board.yaml`](../../metadata/templates/board.yaml)
   -- a heavily-commented template you can copy as a starting
   point.
-- Tutorial [12: Mender OTA on Yocto](12-mender-ota.md) (TBD)
+- Tutorial [12: Mender OTA on Yocto](12-mender-ota.md)
   for how `board.yaml`'s OTA-config block threads through to
   meta-alp-sdk.

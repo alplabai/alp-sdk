@@ -160,8 +160,7 @@ static alp_status_t y_host_open(alp_usb_host_state_t *st, alp_capabilities_t *ca
 		return rc;
 	}
 
-	st->be_data     = d;
-	caps_out->flags = 0u;
+	st->be_data = d;
 	return ALP_OK;
 }
 

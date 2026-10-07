@@ -100,6 +100,14 @@ from .partition import resolve_storage_partitions  # noqa: E402,F401  (re-export
 
 
 # ---------------------------------------------------------------------
+# Memory-region view (#1365 item 3)
+# ---------------------------------------------------------------------
+# The manifest's `memory[]` pane -- the region table `ipc[]` and `storage[]`
+# refer INTO by name. Re-exported for the manifest emitter + tests.
+from .memory import resolve_memory_regions  # noqa: E402,F401  (re-export for tests)
+
+
+# ---------------------------------------------------------------------
 # Emitters
 # ---------------------------------------------------------------------
 

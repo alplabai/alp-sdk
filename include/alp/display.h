@@ -72,6 +72,17 @@ typedef struct {
 	 * So @ref alp_display_open returns @c ALP_ERR_INVAL unless the caller
 	 * sets this explicitly.  Taking over a display is a deliberate act,
 	 * not something a default-constructed config should do.
+	 *
+	 * **Honoured by the Yocto/Linux backend only; ignored elsewhere.**
+	 * The hazard above is specific to KMS: a Zephyr backend drives a
+	 * dedicated panel it already owns, with no DRM master to take from
+	 * and no VT-switched session to displace, so there is nothing for
+	 * the flag to protect.  A default-constructed config therefore opens
+	 * normally on Zephyr and is refused on Linux -- deliberate, and
+	 * stated here because the paragraph above otherwise reads as an
+	 * unconditional promise the MCU backends do not keep (issue #1648
+	 * tier 2).  `alp_storage_config_t.allow_unsafe_write` documents its
+	 * own Yocto-only scope the same way.
 	 */
 	bool allow_modeset;
 } alp_display_config_t;

@@ -24,6 +24,32 @@
 #include "alp_slot_claim.h"
 #include "backends/camera/camera_ops.h"
 
+/* Every Zephyr camera backend allocates its frames from the video buffer
+ * pool, a sys_heap, unless CONFIG_VIDEO_BUFFER_USE_SHARED_MULTI_HEAP routes
+ * allocation through the shared-multi-heap allocator instead (that path
+ * doesn't use CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE, so this check doesn't
+ * apply).  Zephyr picks SYS_HEAP_SMALL_ONLY by default when the kernel's
+ * SRAM is <= 256 KB (the Alif M55 DTCM), and a small heap cannot span more
+ * than 262136 bytes -- a bigger pool (2 MiB in SRAM0 is the norm for a
+ * camera) then misbehaves at run time instead of failing: allocations come
+ * back 4-byte aligned and the second frame buffer fails, so open() reports
+ * ALP_ERR_NOMEM.  Fail the build instead; the fix is CONFIG_SYS_HEAP_AUTO=y
+ * (or _BIG_ONLY) in the application's prj.conf.
+ * Only builds with a pool-allocating backend are checked.  ALP_SDK_CAMERA_
+ * ZEPHYR_VIDEO defaults to y whenever VIDEO=y, so an app that turns VIDEO on
+ * for another driver and wants to keep the camera stub must set
+ * CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO=n explicitly (as aen-evk-demo,
+ * aen-isp-regcheck and aen-jpeg-regcheck do) or size the heap instead. */
+#if defined(CONFIG_SYS_HEAP_SMALL_ONLY) && defined(CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE) && \
+    !defined(CONFIG_VIDEO_BUFFER_USE_SHARED_MULTI_HEAP) && \
+    (defined(CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO) || defined(CONFIG_ALP_SDK_CAMERA_ALIF_ISP) || \
+     defined(CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP))
+#include <zephyr/toolchain.h>
+BUILD_ASSERT(CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE <= 262136,
+             "video buffer pool is bigger than a small sys_heap can hold: "
+             "set CONFIG_SYS_HEAP_AUTO=y");
+#endif
+
 ALP_BACKEND_DEFINE_CLASS(camera);
 ALP_BACKEND_ANCHOR(camera);
 
@@ -84,7 +110,7 @@ alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	alp_status_t       rc   = ops->open(cfg, &h->state, &caps);
 	if (rc != ALP_OK) {
 		_free(h);
@@ -105,7 +131,12 @@ alp_status_t alp_camera_start(alp_camera_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->start(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->start == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->start(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -115,7 +146,12 @@ alp_status_t alp_camera_stop(alp_camera_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->stop(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->stop == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->stop(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -136,6 +172,8 @@ alp_status_t alp_camera_capture(alp_camera_t *h, alp_camera_frame_t *out, uint32
 	alp_status_t rc;
 	if (out == NULL) {
 		rc = ALP_ERR_INVAL;
+	} else if (h->state.ops->capture == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
 	} else {
 		rc = h->state.ops->capture(&h->state, out, timeout_ms);
 	}
@@ -152,7 +190,12 @@ alp_status_t alp_camera_release(alp_camera_t *h, alp_camera_frame_t *frame)
 		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
-	alp_status_t rc = h->state.ops->release(&h->state, frame);
+	alp_status_t rc;
+	if (h->state.ops->release == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->release(&h->state, frame);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -165,9 +208,31 @@ alp_status_t alp_camera_configure_isp(alp_camera_t *h, const alp_camera_isp_conf
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->configure_isp(&h->state, isp);
+	alp_status_t rc;
+	if (h->state.ops->configure_isp == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->configure_isp(&h->state, isp);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
+}
+
+alp_status_t alp_camera_get_fps(alp_camera_t *h, uint32_t *fps_x1000)
+{
+	if (fps_x1000 == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	const uint32_t v = h->state.fps_x1000;
+	alp_handle_op_leave(&h->active_ops);
+	if (v == 0u) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	*fps_x1000 = v;
+	return ALP_OK;
 }
 
 void alp_camera_close(alp_camera_t *h)

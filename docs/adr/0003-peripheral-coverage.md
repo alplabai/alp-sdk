@@ -1,6 +1,6 @@
 # 0003. Wrap 12 peripheral classes at v0.2, not just I2C/SPI/GPIO/UART
 
-Status: Accepted
+Status: Accepted — the **Ethernet** row (Deferred-classes table) partially superseded by [0023](0023-ethernet-out-of-the-alp-surface.md) (Proposed)
 Date: 2026-05-10
 
 ## Context

@@ -34,7 +34,7 @@ def test_committed_fixture_matches_generator():
     raw = build_fixture_bytes()
     on_disk = (_ROOT / "tests/fixtures/alpmodel/minimal.alpmodel").read_bytes()
     assert raw == on_disk, "regenerate: python -m alp_model._gen_fixture"
-    header = (_ROOT / "tests/unit/alpmodel_reader/src/fixture.h").read_text()
+    header = (_ROOT / "tests/unit/alpmodel_reader/src/fixture.h").read_text(encoding="utf-8")
     assert to_c_header(raw) == header, "regenerate: python -m alp_model._gen_fixture"
 
 
@@ -44,7 +44,7 @@ def test_committed_onnx_cpu_fixture_matches_generator():
     # bytes with a generation command parked only in a comment -- a
     # container-format change that forgets to regenerate it fails here.
     raw = build_onnx_cpu_fixture_bytes()
-    header = (_ROOT / "tests/yocto/onnx_cpu_fixture.h").read_text()
+    header = (_ROOT / "tests/yocto/onnx_cpu_fixture.h").read_text(encoding="utf-8")
     assert to_c_header(raw, array_name="k_onnx_cpu_alpmodel",
                         guard="ALP_MODEL_ONNX_CPU_FIXTURE_H") == header, \
         "regenerate: python -m alp_model._gen_fixture"

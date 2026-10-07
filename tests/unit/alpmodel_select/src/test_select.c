@@ -35,17 +35,45 @@ ZTEST(alp_model_select, test_auto_picks_matching_npu_over_cpu)
 	m.targets[0]           = T("ethos_u", "alif:ensemble:e7", "vela_tflite", 65536, 256, b0, 4);
 	m.targets[1]           = T("cpu", "*", "tflite", 131072, 0, b1, 4);
 	const char               *avail[] = { "alif:ensemble:e7" };
-	alp_model_select_env_t    env     = { .soc_ref           = "alif:ensemble:e7",
-		                                  .avail_silicon     = avail,
-		                                  .n_avail_silicon   = 1,
-		                                  .arena_sram_kib    = 4096,
-		                                  .preferred_backend = ALP_INFERENCE_BACKEND_AUTO };
+	alp_model_select_env_t    env     = { .soc_ref         = "alif:ensemble:e7",
+		                                  .avail_silicon   = avail,
+		                                  .n_avail_silicon = 1,
+		                                  .arena_sram_kib  = 4096 };
 	alp_model_select_result_t r       = { 0 };
 	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
 	zassert_equal(r.target_index, 0u);
 	zassert_equal(r.backend, ALP_INFERENCE_BACKEND_ETHOS_U);
 	zassert_equal(r.format, ALP_INFERENCE_MODEL_VELA);
 	zassert_equal(r.arena_bytes, 65536u);
+	/* A real, nonzero device budget was actually compared against --
+	 * this fit is VERIFIED, not a dead-check pass (#1731). */
+	zassert_false(r.arena_fit_unverified);
+}
+
+ZTEST(alp_model_select, test_zero_arena_budget_flags_result_unverified)
+{
+	/* #1731: ALP_SOC_NPU_ARENA_SRAM_KIB is 0 on every real SoC today (the
+	 * figure is an unpublished integration decision, not a datasheet
+	 * constant) -- _fits() still passes permissively so real hardware
+	 * keeps working, but the win must no longer look identical to a
+	 * verified fit: arena_fit_unverified must be set. */
+	static const uint8_t b0[4] = { 1 };
+	alp_model_t          m     = { 0 };
+	m.n_targets                = 1;
+	/* req_sram_kib=100000 -- would fail against ANY real budget; only a
+	 * dead (unverified) gate lets it through. */
+	m.targets[0] = T("ethos_u", "alif:ensemble:e7", "vela_tflite", 0, 100000, b0, 4);
+	const char            *avail[] = { "alif:ensemble:e7" };
+	alp_model_select_env_t env     = {
+		.soc_ref         = "alif:ensemble:e7",
+		.avail_silicon   = avail,
+		.n_avail_silicon = 1,
+		.arena_sram_kib  = 0, /* unknown/unpublished budget */
+	};
+	alp_model_select_result_t r = { 0 };
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
+	zassert_equal(r.backend, ALP_INFERENCE_BACKEND_ETHOS_U);
+	zassert_true(r.arena_fit_unverified);
 }
 
 ZTEST(alp_model_select, test_no_fit_falls_back_to_cpu)
@@ -57,11 +85,10 @@ ZTEST(alp_model_select, test_no_fit_falls_back_to_cpu)
 	m.targets[0]           = T("ethos_u", "alif:ensemble:e7", "vela_tflite", 0, 512, b0, 4);
 	m.targets[1]           = T("cpu", "*", "tflite", 0, 0, b1, 4);
 	const char               *avail[] = { "alif:ensemble:e7" };
-	alp_model_select_env_t    env     = { .soc_ref           = "alif:ensemble:e7",
-		                                  .avail_silicon     = avail,
-		                                  .n_avail_silicon   = 1,
-		                                  .arena_sram_kib    = 256,
-		                                  .preferred_backend = ALP_INFERENCE_BACKEND_AUTO };
+	alp_model_select_env_t    env     = { .soc_ref         = "alif:ensemble:e7",
+		                                  .avail_silicon   = avail,
+		                                  .n_avail_silicon = 1,
+		                                  .arena_sram_kib  = 256 };
 	alp_model_select_result_t r       = { 0 };
 	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
 	zassert_equal(r.backend, ALP_INFERENCE_BACKEND_CPU);
@@ -128,10 +155,9 @@ ZTEST(alp_model_select, test_discrete_deepx_available_via_avail_silicon)
 	m.targets[0]                      = T("deepx_dxm1", "deepx:dx:m1", "dxnn", 0, 0, b0, 4);
 	m.targets[1]                      = T("cpu", "*", "tflite", 0, 0, b1, 4);
 	const char               *avail[] = { "renesas:rzv2n:n44", "deepx:dx:m1" };
-	alp_model_select_env_t    env     = { .soc_ref           = "renesas:rzv2n:n44",
-		                                  .avail_silicon     = avail,
-		                                  .n_avail_silicon   = 2,
-		                                  .preferred_backend = ALP_INFERENCE_BACKEND_DEEPX_DXM1 };
+	alp_model_select_env_t    env     = { .soc_ref         = "renesas:rzv2n:n44",
+		                                  .avail_silicon   = avail,
+		                                  .n_avail_silicon = 2 };
 	alp_model_select_result_t r       = { 0 };
 	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
 	zassert_equal(r.backend, ALP_INFERENCE_BACKEND_DEEPX_DXM1);
@@ -164,33 +190,6 @@ ZTEST(alp_model_select, test_explicit_npu_no_fit_does_not_silently_use_cpu)
 		                                  .arena_sram_kib  = 256 };
 	alp_model_select_result_t r       = { 0 };
 	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_ETHOS_U, &r), ALP_ERR_NO_FIT);
-}
-
-ZTEST(alp_model_select, test_preferred_backend_breaks_tie_between_two_fitting_npus)
-{
-	/* Two NPUs both available + fitting (budget 0 = skip): the SoM
-     * preferred_backend decides; flipping it flips the winner. */
-	static const uint8_t b0[4] = { 1 }, b1[4] = { 2 }, b2[4] = { 3 };
-	alp_model_t          m = { 0 };
-	m.n_targets            = 3;
-	m.targets[0]           = T("ethos_u", "alif:ensemble:e7", "vela_tflite", 0, 0, b0, 4);
-	m.targets[1]           = T("deepx_dxm1", "deepx:dx:m1", "dxnn", 0, 0, b1, 4);
-	m.targets[2]           = T("cpu", "*", "tflite", 0, 0, b2, 4);
-	const char *avail[]    = { "deepx:dx:m1" };
-
-	alp_model_select_env_t    env_d = { .soc_ref           = "alif:ensemble:e7",
-		                                .avail_silicon     = avail,
-		                                .n_avail_silicon   = 1,
-		                                .arena_sram_kib    = 0,
-		                                .preferred_backend = ALP_INFERENCE_BACKEND_DEEPX_DXM1 };
-	alp_model_select_result_t r     = { 0 };
-	zassert_equal(alp_model_select(&m, &env_d, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
-	zassert_equal(r.backend, ALP_INFERENCE_BACKEND_DEEPX_DXM1);
-
-	alp_model_select_env_t env_e = env_d;
-	env_e.preferred_backend      = ALP_INFERENCE_BACKEND_ETHOS_U;
-	zassert_equal(alp_model_select(&m, &env_e, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
-	zassert_equal(r.backend, ALP_INFERENCE_BACKEND_ETHOS_U);
 }
 
 ZTEST(alp_model_select, test_null_env_and_out_return_inval)
@@ -380,4 +379,45 @@ ZTEST(alp_model_select, test_unrecognised_blob_format_returns_inval)
 	};
 	alp_model_select_result_t r = { 0 };
 	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_model_select, test_auto_order_parse_skips_unknown_and_stops_at_cpu)
+{
+	alp_inference_backend_t o[ALP_AUTO_ORDER_MAX];
+
+	zassert_equal(alp_auto_order_parse(NULL, o, ALP_AUTO_ORDER_MAX), 0u);
+	zassert_equal(alp_auto_order_parse("", o, ALP_AUTO_ORDER_MAX), 0u);
+	zassert_equal(alp_auto_order_parse("deepx_dxm1,bogus,drpai,cpu,ethos_u", o, ALP_AUTO_ORDER_MAX),
+	              3u);
+	zassert_equal(o[0], ALP_INFERENCE_BACKEND_DEEPX_DXM1);
+	zassert_equal(o[1], ALP_INFERENCE_BACKEND_DRPAI);
+	zassert_equal(o[2], ALP_INFERENCE_BACKEND_CPU);
+}
+
+ZTEST(alp_model_select, test_auto_order_ranks_two_fitting_npus)
+{
+	/* Two fitting NPU targets: the SoM auto_order decides, and flipping the
+	 * order flips the winner */
+	static const uint8_t b0[4] = { 1 }, b1[4] = { 2 };
+	alp_model_t          m = { 0 };
+	m.n_targets            = 2;
+	m.targets[0]           = T("deepx_dxm1", "deepx:dx:m1", "dxnn", 65536, 0, b0, 4);
+	m.targets[1]           = T("drpai", "renesas:rzv2n:n44", "drpai_dir", 65536, 0, b1, 4);
+	const char                   *avail[]       = { "deepx:dx:m1", "renesas:rzv2n:n44" };
+	const alp_inference_backend_t dx_first[]    = { ALP_INFERENCE_BACKEND_DEEPX_DXM1,
+		                                            ALP_INFERENCE_BACKEND_DRPAI };
+	const alp_inference_backend_t drpai_first[] = { ALP_INFERENCE_BACKEND_DRPAI,
+		                                            ALP_INFERENCE_BACKEND_DEEPX_DXM1 };
+	alp_model_select_env_t        env           = { .avail_silicon   = avail,
+		                                            .n_avail_silicon = 2,
+		                                            .arena_sram_kib  = 4096,
+		                                            .auto_order      = drpai_first,
+		                                            .n_auto_order    = 2 };
+	alp_model_select_result_t     r             = { 0 };
+
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
+	zassert_equal(r.backend, ALP_INFERENCE_BACKEND_DRPAI);
+	env.auto_order = dx_first;
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
+	zassert_equal(r.backend, ALP_INFERENCE_BACKEND_DEEPX_DXM1);
 }

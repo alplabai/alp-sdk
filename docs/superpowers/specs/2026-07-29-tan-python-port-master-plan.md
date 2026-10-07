@@ -66,6 +66,13 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
 west flash
 ```
 
+> **Correction (alp-sdk#2274, added after this plan was written):** the
+> `west flash` above now REFUSES — this is a 2-domain sysbuild (MCUboot +
+> app), and `alif_flash` refuses any multi-domain sysbuild flash outright.
+> See `zephyr/sysbuild/aen/README.md`'s Usage section and
+> `docs/aen-provisioning.md` §0.5 Option B for the current supported path.
+> This historical planning doc is left otherwise unchanged.
+
 What is true, and what is not:
 
 | Claim | Verdict |
@@ -516,8 +523,9 @@ survive the port.
   covers the alp-sdk-side doc/ADR record; `tan-cli`#448 covers the `tan
   renode` command removal, scheduled after the `tan` v0.5.0 tags. Retire the
   Rust crates last, and only for capabilities the parity harness has
-  confirmed — `crates/` is currently kept as the frozen v0.4.1
-  behaviour-oracle, not a development path (do not edit it going forward).
+  confirmed — done: `tan-cli`'s `2883cdf4` (2026-08-10) deleted `crates/`
+  and the oracle-parity suite outright (#269, #601); `git ls-tree
+  origin/dev -- crates` on `tan-cli` is empty.
 - **Repoint alp-sdk CI, `bootstrap.sh`/`.ps1`, `doctor`, and the following
   docs** (the original note said "~25 docs" without naming them; this
   reconciliation pass verified the ones below against current `dev` and

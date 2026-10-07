@@ -24,7 +24,10 @@ void bench_power_main(void)
 
 	/* The realistic per-iteration shape: open, declare wake source,
      * close.  Captures the dispatcher cost a typical guarded sleep
-     * path pays. */
+     * path pays.  On the stub backend this now returns
+     * ALP_ERR_NOSUPPORT (#1812/#1813 -- the stub can arm no real
+     * wake source), still a fixed-cost dispatcher round-trip either
+     * way, so the timing stays representative. */
 	BENCH_RUN("alp_power_configure_wake_source(RTC)", 1000000, {
 		alp_power_t *p = alp_power_open();
 		(void)alp_power_configure_wake_source(p, ALP_POWER_WAKE_RTC);

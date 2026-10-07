@@ -22,11 +22,24 @@
 family: v2n
 display_name: "E1M-X-V2N (Renesas RZ/V2N)"
 
+# Altium board-number datecode (YYWW) shared by every revision of this PCB.  The
+# V2N101/102 and V2M101/102 SKUs are ONE physical board (2625), variant-populated,
+# so the datecode matches v2n-m1.  scripts/program_eeprom.py composes
+# `<board_datecode>-<rev key>` into the manifest's hw_rev field.
+#
+# BUDGET: the manifest's hw_rev field is ALP_HW_INFO_HW_REV_LEN = 8 bytes, so the
+# composed string may be at most 7 characters plus its NUL.  `2625-r2` is exactly
+# 7 -- there is NO slack.  A future revision key of `r10` (`2625-r10`, 8 chars)
+# will not fit and program_eeprom.py will refuse to pack it.  Widening the field
+# is a schema_version bump; see docs/board-id.md.
+board_datecode: "2625"
+
 hw_revisions:
   r1:
     min_sdk_version: "0.3.0"
     max_sdk_version: ~
     status: production
+    board_rev: "R1"
     released: "2026-05-12"
     summary: |
       First production V2N revision.  See CHANGELOG.md for the
@@ -36,7 +49,10 @@ hw_revisions:
   r2:
     min_sdk_version: ~
     max_sdk_version: ~
-    status: reserved
+    status: production
+    board_rev: "R2"
+    summary: |
+      Board rev `2625-R2`, provisioned from the 2026-W38 V2M103 batch onward.
   r3:
     min_sdk_version: ~
     max_sdk_version: ~

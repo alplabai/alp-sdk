@@ -42,7 +42,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -84,7 +84,7 @@
           {
             "e1m": "E1M_GPIO_IO4",
             "macro": "EVK_PIN_ENCODER_SW",
-            "doc": "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce"
+            "doc": "Rotary encoder push switch (PEC11R-4215K-S0024), 10k pull-up + 0.1uF debounce"
           },
           {
             "e1m": "E1M_GPIO_PWM3",
@@ -112,7 +112,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -192,7 +192,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -259,16 +259,18 @@
       "files": {
         "user_owned": [
           "board.yaml",
+          "CMakeLists.txt",
           "m55_hp/prj.conf",
           "m55_hp/CMakeLists.txt",
           "m55_hp/src/main.c",
           "linux/CMakeLists.txt",
+          "linux/src/main.c",
           "README.md"
         ],
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           },
           {
             "path": "build/generated/alp/system_ipc.h",
@@ -280,7 +282,7 @@
         {
           "name": "rpmsg_carve_out_kb",
           "type": "integer",
-          "description": "Cross-core RPMsg shared-memory carve-out size, allocated from the SoM's mram_main region.",
+          "description": "Cross-core RPMsg shared-memory carve-out size, allocated from the SoM's mram_main region. Default kept well under the region's 5632 KiB (metadata/e1m_modules/E1M-AEN801.yaml) and under the 512 KiB ocram_low that resolve_carve_outs() (scripts/alp_orchestrate/carveout.py) resolves to on RZ/V2N/V2M boards using this same field -- see metadata/templates/board.yaml's ipc: comment (#1613).",
           "default": 256,
           "constraints": { "minimum": 16 }
         }
@@ -333,7 +335,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -407,7 +409,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -483,7 +485,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -541,12 +543,14 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
+          "src/cc3501e_bridge.c",
+          "src/cc3501e_bridge.h",
           "README.md"
         ],
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },
@@ -610,7 +614,7 @@
         "generated": [
           {
             "path": "build/generated/alp.conf",
-            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time (once per core); not committed."
+            "note": "Emitted by `tan build` (the build plan configArtefacts, once per core), or by scripts/gen_example_alp_conf.py for twister / bare west build; not committed."
           }
         ]
       },

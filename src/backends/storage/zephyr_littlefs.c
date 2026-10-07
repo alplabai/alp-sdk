@@ -38,7 +38,9 @@
 #include <alp/soc_caps.h>
 #include <alp/storage.h>
 
+#include "alp_errno.h"
 #include "alp_checked_arith.h"
+#include "alp_slot_claim.h"
 #include "storage_ops.h"
 
 typedef struct lfs_state {
@@ -58,9 +60,13 @@ static bool        _lfs_in_use[CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL];
 static lfs_state_t *_lfs_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL; ++i) {
-		if (!_lfs_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_lfs_in_use[i])) {
 			memset(&_lfs_pool[i], 0, sizeof(_lfs_pool[i]));
-			_lfs_in_use[i] = true;
 			return &_lfs_pool[i];
 		}
 	}
@@ -71,7 +77,7 @@ static void _lfs_free(lfs_state_t *s)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL; ++i) {
 		if (&_lfs_pool[i] == s) {
-			_lfs_in_use[i] = false;
+			alp_slot_release(&_lfs_in_use[i]);
 			return;
 		}
 	}
@@ -79,29 +85,13 @@ static void _lfs_free(lfs_state_t *s)
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENODEV:
-	case -ENOENT:
-		return ALP_ERR_NOT_READY;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	case -ERANGE:
-		return ALP_ERR_OUT_OF_RANGE;
-	case -ENOMEM:
-	case -ENOSPC:
-		return ALP_ERR_NOMEM;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * BEHAVIOUR CHANGE: this switch had no -EAGAIN and/or no -ETIMEDOUT
+	 * arm, so a driver-reported deadline surfaced as ALP_ERR_IO.  Callers
+	 * can now receive ALP_ERR_TIMEOUT here, and ALP_ERR_NOT_READY /
+	 * ALP_ERR_NOMEM / ALP_ERR_NOSUPPORT for the other arms the switch
+	 * lacked.  Every arm it DID carry agreed with the baseline. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 /*
@@ -135,6 +125,7 @@ static alp_status_t lfs_open(const alp_storage_config_t  *cfg,
                              alp_storage_backend_state_t *st,
                              alp_capabilities_t          *caps_out)
 {
+	(void)caps_out;
 	/* littlefs is layered on top of a flash partition -- only the
      * QSPI / OSPI / INTERNAL_FLASH kinds make sense here.  SD/MMC
      * routes to a different backend. */
@@ -158,10 +149,9 @@ static alp_status_t lfs_open(const alp_storage_config_t  *cfg,
 		_lfs_free(s);
 		return _errno_to_alp(err);
 	}
-	s->open         = true;
-	st->dev         = NULL;
-	st->be_data     = s;
-	caps_out->flags = 0u;
+	s->open     = true;
+	st->dev     = NULL;
+	st->be_data = s;
 	return ALP_OK;
 }
 
@@ -176,6 +166,17 @@ static alp_status_t lfs_get_info(alp_storage_backend_state_t *st, alp_storage_in
 	/* littlefs has no fixed block boundary at the SDK layer --
      * report 1-byte granularity so callers don't pad. */
 	info->block_size = 1u;
+	/* Deliberately 1u, not derived like the raw-flash sibling
+     * (src/backends/storage/zephyr_flash.c, which reads the real page
+     * size via flash_get_page_info_by_offs()).  This handle only ever
+     * touches the mount by path (fs_open/fs_stat above) -- it never
+     * gets a struct device or flash_area to query, and littlefs's own
+     * logical block is a wear-levelling unit the FS chooses, not the
+     * underlying physical erase geometry.  A byte granule is the
+     * honest answer to "what must I align to" once littlefs sits
+     * between the caller and the flash.  Two storage backends
+     * reporting different erase_size semantics here is deliberate,
+     * not drift (alp-sdk#1635). */
 	info->erase_size = 1u;
 	return ALP_OK;
 }

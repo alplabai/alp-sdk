@@ -24,6 +24,7 @@
 #include <stddef.h>
 
 #include "alp/gui.h"
+#include "backends/display/display_ops.h"
 
 #ifdef ALP_HAS_LVGL
 
@@ -91,15 +92,42 @@ static bool _map_pixfmt(alp_pixfmt_t fmt, lv_color_format_t *lv_fmt, size_t *byt
  * a dropped frame.  flush_ready() is always called so the render loop
  * never wedges on a failed rect.
  */
+/* What LVGL's user-data points at: the display AND the slot generation it had
+ * when alp_gui_lvgl_attach() ran.  A bare `alp_display_t *` is not a stable
+ * identity -- the handle pool is static, so after alp_display_close() followed
+ * by another alp_display_open() the same address is a DIFFERENT display
+ * (issue #1698).  Persistent for the process lifetime, same as the render
+ * buffer below and for the same reason: attach has no matching detach in the
+ * [ABI-STABLE] contract, so there is no hand-off point to free it at. */
+struct lvgl_binding {
+	alp_display_t *display;
+	uint32_t       epoch;
+};
+
 static void _flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
-	alp_display_t *display = (alp_display_t *)lv_display_get_user_data(disp);
-	uint16_t       x       = (uint16_t)area->x1;
-	uint16_t       y       = (uint16_t)area->y1;
-	uint16_t       w       = (uint16_t)(area->x2 - area->x1 + 1);
-	uint16_t       h       = (uint16_t)(area->y2 - area->y1 + 1);
+	struct lvgl_binding *bind    = (struct lvgl_binding *)lv_display_get_user_data(disp);
+	alp_display_t       *display = (bind != NULL) ? bind->display : NULL;
+	uint16_t             x       = (uint16_t)area->x1;
+	uint16_t             y       = (uint16_t)area->y1;
+	uint16_t             w       = (uint16_t)(area->x2 - area->x1 + 1);
+	uint16_t             h       = (uint16_t)(area->y2 - area->y1 + 1);
 
-	(void)alp_display_blit(display, x, y, w, h, px_map);
+	/* Drop the frame if this is no longer the display we attached to.
+	 *
+	 * A closed handle is already safe on its own -- alp_display_blit()
+	 * gates on the lifecycle byte and returns ALP_ERR_NOT_READY -- so the
+	 * hazard here is NOT a use-after-free.  It is slot REUSE: close then
+	 * open hands the same pool slot to a different display, whose
+	 * lifecycle reads OPEN, so the blit would succeed against somebody
+	 * else's screen.  Silent wrong-display corruption is worse than a
+	 * dropped frame, so compare generations and skip.
+	 *
+	 * flush_ready() is still called either way, so the render loop never
+	 * wedges on a skipped rect -- same contract as a failed blit. */
+	if (display != NULL && bind->epoch == alp_display_slot_epoch(display)) {
+		(void)alp_display_blit(display, x, y, w, h, px_map);
+	}
 
 	lv_display_flush_ready(disp);
 }
@@ -125,7 +153,6 @@ alp_status_t alp_gui_lvgl_attach(alp_display_t *display)
 		return ALP_ERR_NOMEM;
 	}
 
-	lv_display_set_user_data(disp, display);
 	lv_display_set_color_format(disp, lv_fmt);
 
 	/* Clamp to the panel height: a display shorter than the configured
@@ -147,6 +174,23 @@ alp_status_t alp_gui_lvgl_attach(alp_display_t *display)
 	 * hand-off point to free this at (mirrors the display handle's own
 	 * lifetime: one attach per boot). */
 	lv_display_set_buffers(disp, buf, NULL, buf_size, LV_DISPLAY_RENDER_MODE_PARTIAL);
+
+	/* Bind the display together with its CURRENT slot generation, so
+	 * _flush_cb can tell "still my display" from "my slot, someone else's
+	 * display" (issue #1698). */
+	struct lvgl_binding *bind = (struct lvgl_binding *)malloc(sizeof(*bind));
+	if (bind == NULL) {
+		/* free(buf) as well: the display is being deleted, so the
+		 * "persistent for the process lifetime" rationale above does not
+		 * apply to a bind-up that never completed -- leaking it here
+		 * would turn a recoverable NOMEM into a permanent one. */
+		lv_display_delete(disp);
+		free(buf);
+		return ALP_ERR_NOMEM;
+	}
+	bind->display = display;
+	bind->epoch   = alp_display_slot_epoch(display);
+	lv_display_set_user_data(disp, bind);
 	lv_display_set_flush_cb(disp, _flush_cb);
 
 	return ALP_OK;

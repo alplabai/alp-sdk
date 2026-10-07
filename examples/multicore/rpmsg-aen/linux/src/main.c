@@ -67,16 +67,12 @@ int main(void)
 
 	/* Endpoints are mirrored relative to the producer's config: this
 	 * side's src is the producer's dst and vice versa, so both ends
-	 * converge on the same pair of RPMsg endpoint ids. cacheable must
-	 * match the producer and the board.yaml `ipc:` block -- the AEN
-	 * carve-out lives in MRAM, which is cacheable on this SoM (spec
-	 * §6.8) because the M55 cores run with caches enabled. */
+	 * converge on the same pair of RPMsg endpoint ids. */
 	const alp_rpc_config_t cfg = {
-		.name      = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
-		.src_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
-		.dst_ept   = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
-		.mbox_ch   = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
-		.cacheable = true,
+		.name    = ALP_IPC_ALP_DEFAULT_RPMSG_NAME,
+		.src_ept = ALP_IPC_ALP_DEFAULT_RPMSG_DST_EPT,
+		.dst_ept = ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT,
+		.mbox_ch = ALP_IPC_ALP_DEFAULT_RPMSG_MBOX_CH,
 	};
 	alp_rpc_channel_t *ch = alp_rpc_open(&cfg);
 	if (ch == NULL) {

@@ -44,6 +44,7 @@
 
 **Interfaces:**
 - Produces: `metadata/model_zoo/<id>.yaml` files `{id, task, description, source, license, validated_soms, io_spec?, perf_ref?, compile?, example_app?}` loaded in Task 2.
+  Superseded: model-zoo-v1 as pinned in alp-sdk#2539 drops `io_spec`/`perf_ref`, uses a `task` enum incl. `smoke`, and a closed permissive `license` enum.
 
 - [ ] **Step 1: Write the failing data-integrity test**
 

@@ -133,6 +133,22 @@ void alp_inference_deepx_close(struct alp_inference *h)
 	h->be_state = NULL;
 }
 
+/* <alp/ext/deepx/inference.h> hooks -- unused here, present so the
+ * dispatcher links (see src/yocto/inference_yocto.c). */
+alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, uint32_t mask)
+{
+	(void)h;
+	(void)mask;
+	return ALP_ERR_NOSUPPORT;
+}
+
+alp_status_t alp_inference_deepx_get_status(struct alp_inference *h, alp_deepx_device_status_t *out)
+{
+	(void)h;
+	(void)out;
+	return ALP_ERR_NOSUPPORT;
+}
+
 static void *invoke_thread(void *arg)
 {
 	alp_inference_t *h  = arg;
@@ -167,6 +183,7 @@ static void test_close_races_invoke_never_sees_poison(void)
 		alp_inference_config_t cfg = {
 			.model_data = model,
 			.model_size = sizeof(model),
+			.format     = ALP_INFERENCE_MODEL_DXNN,
 			.backend    = ALP_INFERENCE_BACKEND_DEEPX_DXM1,
 		};
 		alp_inference_t *h = alp_inference_open(&cfg);

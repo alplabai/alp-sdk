@@ -98,9 +98,10 @@ system manifest.  In summary:
 
 1. A55 cluster reads U-Boot from xSPI, hands off to Linux.
 2. systemd reaches its basic target.
-3. The remoteproc driver loads
-   `/lib/firmware/alp/E1M-V2N101/m33_sm.elf` into the M33-SM core
-   and starts it.
+3. TF-A BL2 starts the M33-SM core from the xSPI image at power-on
+   (`docs/rzv2n-m33-secure-boot.md`).  With the opt-in remoteproc
+   (`ALP_V2N_REMOTEPROC = "1"`) Linux then attaches to the running core
+   and can stop, start and reload it (`/lib/firmware/m33_sm.elf`).
 4. Both sides bring up the rpmsg link over OpenAMP: the M33 slice
    creates its raw endpoint directly (`rpmsg_create_ept()`), not
    through `alp_rpc_open()`; the Linux side attaches to that fixed
@@ -150,6 +151,86 @@ Image + flash:
 tan image     # -> build/image-bundle/alp-system.zip + .swu
 tan flash     # walks boot_order: from the manifest
 ```
+
+## Bench: one RPC round trip over the UIO backend (V2N / V2M)
+
+Proves alp-sdk #2374's last item: an A55 `<alp/rpc.h>` call reaching an
+IPC-enabled CM33 image through `yocto_uio_drv.c`.  The CM33 window is
+`0x9f700000` (CM33-NS view) = `0x4f700000` (A55 view), 9 MiB.
+
+1. **Build the CM33 image** (V2M shown; use
+   `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33` on V2N):
+
+   ```bash
+   west build -p always -b alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33        examples/multicore/rpmsg-v2n/m33_sm
+   ```
+
+2. **Pad and flash to mtd1 @ 0x1a0000** (from the board, after copying
+   `zephyr.bin` over; size the erase from the file):
+
+   ```sh
+   head -c 12288 /dev/zero > /tmp/m33_fw.bin; cat /tmp/zephyr.bin >> /tmp/m33_fw.bin
+   SZ=$(stat -c %s /tmp/m33_fw.bin); BLKS=$(( (SZ + 4095) / 4096 ))
+   flash_erase /dev/mtd1 0x1a0000 $BLKS
+   mtd_debug write /dev/mtd1 0x1a0000 $SZ /tmp/m33_fw.bin
+   mtd_debug read  /dev/mtd1 0x1a0000 $SZ /tmp/rb.bin && md5sum /tmp/rb.bin /tmp/m33_fw.bin
+   ```
+
+   The two md5s must match.  Restarting the CM33 without a SoC reboot
+   needs the dev-only remoteproc stop/reload (`ALP_V2N_CM33_SRAM_NS = "1"`, `docs/rzv2n-m33-secure-boot.md`,
+   "Lifecycle", bench-pending); otherwise do a full SoC reboot (or PSU
+   cold-cycle).
+   The board must boot in DSW1 mode 2 (xSPI BL2): under the mode 1
+   eMMC-boot BL2 the CM33 never starts.
+
+   **Attach / detach without a cold cycle (#2586, not yet
+   bench-verified).**  With this firmware (beacon version 2) and the
+   matching `yocto_uio_drv.c`, every `alp_rpc_open()` after the first
+   one in a CM33 boot runs an attach reset: the A55 writes the
+   resource table's `vdev.status = 0`, kicks the CM33, and waits up to
+   500 ms for the attach-epoch word to change; the CM33 stops its
+   responder, drops queued frames, tears down its virtio device,
+   bumps the epoch, and waits for the next attach.  Until a bench run
+   confirms it, keep cold-cycling between runs.  A CM33 still running
+   the version-1 firmware cannot reset: the second open in the same
+   CM33 boot now fails with `ALP_ERR_BUSY` and a message naming the
+   reason, instead of the old first-call timeout and one-call-late
+   replies.
+
+   **CM33 beacon map** (top of `rsctbl`, A55 `0x4f700ff0`, CM33-NS
+   `0x9f700ff0`; read with `devmem`).  The layout is defined once in
+   `include/alp/protocol/amp_beacon.h` (offsets from the end of the rsctbl page);
+   the page itself is the SoC metadata's `openamp_carveout.regions.rsctbl`:
+
+   | Offset  | A55 address  | Word                                                              |
+   |---------|--------------|-------------------------------------------------------------------|
+   | `+0xFF0`| `0x4f700ff0` | magic `0xA10D0683`                                                |
+   | `+0xFF4`| `0x4f700ff4` | version: `1` = RPC firmware without attach reset, `2` = with it; `>= 0x100` = image without RPC (`0x100` = idle stock shim *with the heartbeat beacon*) |
+   | `+0xFF8`| `0x4f700ff8` | ~1 Hz heartbeat counter                                           |
+   | `+0xFFC`| `0x4f700ffc` | attach epoch (version 2): `0` at boot; **odd = CM33 bound to a session, even = waiting for an attach** |
+
+   `alp_rpc_open()` fails with `ALP_ERR_NOT_READY` when the magic is
+   missing (CM33 not running, or a stock shim without the heartbeat
+   beacon) and with `ALP_ERR_NOSUPPORT` on a version `>= 0x100`, without
+   writing anything the CM33 reads.  A second process opening while
+   another holds the link gets `ALP_ERR_BUSY` (the backend takes
+   `flock(LOCK_EX | LOCK_NB)` on the `rsctbl` UIO node).
+
+3. **Check the A55 half**: `cat /sys/class/uio/uio*/name` lists `rsctbl`,
+   `mhu-shm`, `vring-ctl0`, `vring-ctl1`, `vring-shm0`, `vring-shm1`,
+   `mhu-uio`; `/proc/iomem` shows `4f700000-4fffffff : reserved`.
+   The CM33 RAM console (16 KiB, A55 view `0x4f710000`) is read by mapping
+   `/dev/mem` (a plain `dd` fails on this window); the one-line reader is in
+   `docs/heterogeneous-builds.md`.
+
+4. **Run the round trip.**  Either the HIL spec
+   (`tests/hil/v2m103-x-evk/v2m103-rpmsg-echo-uio.yaml`, binary at
+   `<artifact-dir>/linux`) or, with the static bench binary from
+   `tests/yocto/build_rpc_uio_bench_aarch64.sh`, run it directly on the
+   board.  Pass = `[rpmsg-v2n] done (4/4 round trips verified)` from the
+   HIL binary, or `[PASS] echo: 0/4 payload sizes mismatched` from the
+   static bench binary; either way the `/proc/interrupts` `mhu-uio` count
+   rises.
 
 ## Reference
 

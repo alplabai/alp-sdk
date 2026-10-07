@@ -33,6 +33,8 @@ sys.path.insert(0, str(REPO / "scripts"))
 _UNCOVERED_SUFFIXES = {
     ".md": "documentation prose -- cannot change what a build produces",
     ".gitkeep": "empty placeholder marking a tracked-but-empty directory",
+    ".svd": "vendor CMSIS-SVD register map for debuggers (ADR 0032) -- no build step reads it",
+    "License.txt": "vendor licence text shipped beside vendored data (ADR 0032)",
 }
 
 
@@ -42,7 +44,7 @@ def _git_ls_files_metadata():
         return None
     try:
         out = subprocess.run([git, "-C", str(REPO), "ls-files", "metadata"],
-                             capture_output=True, text=True, check=True)
+                             capture_output=True, text=True, encoding="utf-8", check=True)
     except subprocess.CalledProcessError:
         return None
     return [line for line in out.stdout.splitlines() if line]
@@ -71,11 +73,11 @@ def test_every_tracked_metadata_file_is_covered_or_allowlisted():
 
 def _fixture_ws(tmp_path):
     (tmp_path / "scripts").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "scripts" / "requirements.txt").write_text("")
+    (tmp_path / "scripts" / "requirements.txt").write_text("", encoding="utf-8")
     (tmp_path / "metadata").mkdir(parents=True, exist_ok=True)
     (tmp_path / "metadata" / "sdk_version.yaml").write_text(
-        "version: 9.9.9\nstatus: released\n")
-    (tmp_path / "west.yml").write_text("manifest:\n  projects: []\n")
+        "version: 9.9.9\nstatus: released\n", encoding="utf-8")
+    (tmp_path / "west.yml").write_text("manifest:\n  projects: []\n", encoding="utf-8")
     return tmp_path
 
 
@@ -92,11 +94,11 @@ def test_metadata_digest_catches_soc_spec_drift(tmp_path):
     ws = _fixture_ws(tmp_path)
     socs = ws / "metadata" / "socs" / "alif" / "ensemble"
     socs.mkdir(parents=True)
-    (socs / "e8.json").write_text('{"variant": "e8", "cores": 1}')
+    (socs / "e8.json").write_text('{"variant": "e8", "cores": 1}', encoding="utf-8")
 
     locked = alp_lock.build_lock(ws)
     assert alp_lock.verify_lock(locked, ws) == []
 
-    (socs / "e8.json").write_text('{"variant": "e8", "cores": 2}')
+    (socs / "e8.json").write_text('{"variant": "e8", "cores": 2}', encoding="utf-8")
     drifts = alp_lock.verify_lock(locked, ws)
     assert any(d.path == "digests.metadata" for d in drifts), drifts

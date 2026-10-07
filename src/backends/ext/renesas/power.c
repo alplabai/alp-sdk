@@ -4,7 +4,7 @@
  * Renesas RZ/V2N power vendor-extension body.  Implements the
  * surface declared in <alp/ext/renesas/power.h> by routing through
  * the GD32G553 supervisor chip driver
- * (gd32g553_power_mode_set in chips/gd32g553/gd32g553.c:747).
+ * (gd32g553_set_power_mode in chips/gd32g553/gd32g553.c).
  *
  * Vendor-handle gate (mirrors src/backends/adc/alif_e7.c
  * vendor-ext bodies):
@@ -45,7 +45,8 @@ alp_renesas_power_supervisor_mode_set(alp_power_t                        *handle
 	if (handle == NULL) {
 		return ALP_ERR_INVAL;
 	}
-	if (handle->backend == NULL || strcmp(handle->backend->vendor, "renesas") != 0) {
+	if (handle->backend == NULL || handle->backend->vendor == NULL ||
+	    strcmp(handle->backend->vendor, "renesas") != 0) {
 		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
 	}
 
@@ -64,8 +65,10 @@ alp_renesas_power_supervisor_mode_set(alp_power_t                        *handle
      * pass.  wake_after_ms is 0 for this low-level entry point --
      * callers wanting timed wake should use the portable
      * alp_power_request_sleep instead. */
-	s = gd32g553_power_mode_set(
-	    ctx, supervisor_mode, handle->state.wake_bitmap, 0u /* no timed wake from this path */);
+	/* set_power_mode adds the Deep-sleep wake rule (wake pulse + RUN) the raw
+	 * opcode lacks. */
+	const gd32g553_power_opts_t opts = { .wake_bitmap = handle->state.wake_bitmap };
+	s = gd32g553_set_power_mode(ctx, (uint8_t)supervisor_mode, &opts);
 	alp_z_v2n_supervisor_release();
 	return s;
 }

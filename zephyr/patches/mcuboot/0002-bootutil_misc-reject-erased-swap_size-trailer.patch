@@ -1,0 +1,101 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] bootutil_misc: reject an erased swap_size trailer field
+ instead of returning 0 (#1066)
+
+boot_read_swap_size() is a raw, unchecked flash_area_read() -- it hands
+callers whatever bytes are at the trailer's swap_size offset, with no
+erased-value check.  Both of its callers (loader.c's boot_swap_image()
+resume branch, and swap_scratch.c's boot_read_image_header()) only reach
+it once a GOOD magic has already established that a swap trailer is
+present, so in every reachable case the field should hold a real,
+nonzero swap_size.
+
+On a flash device whose erase value is 0x00 (Alif Ensemble on-die MRAM,
+FLASH_MRAM_ERASE_VALUE in drivers/flash/flash_mram_alif.c), that erase
+value is bit-for-bit identical to a genuine swap_size of 0 -- unlike the
+obviously-invalid 0xffffffff a 0xFF-erase device would read back for the
+same "not really written" field.  A stale or partially/torn-written
+swap_size then reads back as 0 instead of as clearly-erased, and
+copy_size == 0 degenerates swap_scratch.c's algorithm silently:
+
+  * find_last_sector_idx(state, 0) returns -1 immediately (its break
+    condition is trivially satisfied at 0 >= 0 && 0 >= 0 && 0 == 0), so
+    swap_run()'s loop -- the only call site of boot_swap_sectors() --
+    never executes: a swap that should resume instead silently does
+    nothing for this image.  (This is NOT the mechanism behind #1066's
+    self-perpetuating re-swap loop -- that trace is unrelated to
+    swap_size and is fixed separately; see
+    0004-scramble-scratch-trailer-and-backward-scramble-off-by-one.patch.)
+
+  * find_swap_count(state, 0) (called from boot_read_image_header(),
+    earlier in the boot flow) also returns 0 for the same reason, which
+    unconditionally satisfies boot_read_image_header()'s
+    "bs->idx - BOOT_STATUS_IDX_0 >= swap_count" branch and substitutes
+    the WRONG slot's header for the one requested -- reproduced on the
+    mcuboot host simulator (see the companion sim/ regression patch):
+    the unpatched read segfaults when a genuinely in-progress swap's
+    swap_size field collides with the erase value this way.
+
+Make the read itself refuse the ambiguity: after a successful
+flash_area_read(), treat a swap_size field that reads as this device's
+erase value (bootutil_buffer_is_erased(), the same helper
+boot_read_flag() already uses for the image_ok/copy_done flags) as a
+read failure (BOOT_EBADSTATUS) rather than handing out a meaningless 0.
+Both existing call sites already fail safely on a nonzero return here
+without any further change: loader.c's boot_swap_image() resume branch
+has `assert(rc == 0)` immediately after the call, which -- one level up,
+in boot_prepare_status() -- makes boot_read_image_headers() fail and the
+swap is declined outright (BOOT_SWAP_TYPE_NONE, primary left untouched,
+BOOT_LOG_WRN'd) instead of proceeding on a 0; swap_scratch.c's
+boot_read_image_header() already turns any nonzero return here into
+BOOT_EFLASH before ever computing find_swap_count()'s wrong-slot
+substitution.  This is a single-choke-point fix rather than a per-call-
+site guard precisely so both consumers of the same ambiguous read are
+covered by one change, not just the one #1066 was filed against.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+diff --git a/boot/bootutil/src/bootutil_misc.c b/boot/bootutil/src/bootutil_misc.c
+index b64ceab..dce9003 100644
+--- a/boot/bootutil/src/bootutil_misc.c
++++ b/boot/bootutil/src/bootutil_misc.c
+@@ -211,8 +211,36 @@ boot_read_swap_size(const struct flash_area *fap, uint32_t *swap_size)
+ 
+     off = boot_swap_size_off(fap);
+     rc = flash_area_read(fap, off, swap_size, sizeof *swap_size);
++    if (rc != 0) {
++        return rc;
++    }
+ 
+-    return rc;
++    /*
++     * Both callers (loader.c boot_swap_image() resume branch and
++     * swap_scratch.c boot_read_image_header()) only reach this function
++     * once a GOOD magic has already established that a swap trailer is
++     * present -- a genuine swap in progress always carries a real,
++     * nonzero swap_size. On a flash device whose erase value is 0x00
++     * (e.g. Alif Ensemble on-die MRAM,
++     * drivers/flash/flash_mram_alif.c FLASH_MRAM_ERASE_VALUE), an
++     * erased -- or partially/never-written -- swap_size field is
++     * bit-for-bit identical to a legitimate swap_size of 0, unlike the
++     * obviously-invalid 0xffffffff a 0xFF-erase device would read back.
++     * Treat that ambiguity as a read failure rather than handing
++     * callers a 0: find_last_sector_idx()/find_swap_count() both
++     * degenerate a copy_size/swap_size of 0 into a silent no-op
++     * (find_last_sector_idx returns -1 immediately), so a genuinely
++     * in-progress swap could otherwise be reported as nothing to do
++     * instead of failing loudly. Both call sites already fail safely on
++     * a nonzero return here -- loader.c asserts, swap_scratch.c
++     * propagates BOOT_EFLASH -- so this adds no new error-handling
++     * surface, it only refuses to hand out a meaningless zero (#1066).
++     */
++    if (bootutil_buffer_is_erased(fap, swap_size, sizeof *swap_size)) {
++        return BOOT_EBADSTATUS;
++    }
++
++    return 0;
+ }
+ 
+ #ifdef MCUBOOT_SWAP_USING_OFFSET

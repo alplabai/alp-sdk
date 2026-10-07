@@ -74,8 +74,21 @@ extern "C" {
 
 /* --------------------------------------------------------------- */
 /* Wire constants — kept in sync with docs/gd32-bridge-protocol.md   */
-/* and firmware/gd32-bridge/src/protocol.c on the firmware side.              */
+/* and gd32-bridge-firmware:src/protocol.c on the firmware side.              */
 /* --------------------------------------------------------------- */
+
+/** `alp_gpio_open()` pad ids for the GD32 control pads on the V2N CM33
+ *  boards.  Resolved from the board's dedicated `alp,gd32-pads` devicetree
+ *  node (generated from `metadata/e1m_modules/v2n/supervisor-links.yaml`),
+ *  NEVER from the positional `alp,pin-array` -- index 0 of that array is the
+ *  GD32 SPI chip-select (P97 / GD32 PA8), so a shared index space would let
+ *  a stray id drive the chip-select.  The ids sit in a reserved high range.
+ *  @{ */
+#define GD32G553_PAD_ID_SWDIO 0xE1D32000u /**< P70 / GD32 PA13: SWD data.      */
+#define GD32G553_PAD_ID_SWCLK 0xE1D32001u /**< P71 / GD32 PA14: SWD clock.     */
+#define GD32G553_PAD_ID_NRST  0xE1D32002u /**< P74 / GD32 NRST (open-drain).   */
+#define GD32G553_PAD_ID_ATTN  0xE1D32003u /**< P71 / GD32 PA14: ATTN input.    */
+/** @} */
 
 /** Start-of-frame marker carried by every SPI frame. */
 #define GD32G553_BRIDGE_SOF 0xA5u
@@ -101,6 +114,10 @@ extern "C" {
  *  reply envelope; the firmware's ring buffer is sized larger so
  *  back-to-back reads don't lose samples. */
 #define GD32G553_BRIDGE_ADC_STREAM_READ_MAX 32u
+
+/** Highest `sample_rate_hz` @ref gd32g553_adc_stream_begin accepts
+ *  (firmware pacing timer range 1 Hz..100 kHz). */
+#define GD32G553_BRIDGE_ADC_STREAM_MAX_RATE_HZ 100000u
 
 /** Maximum FFT bins per @ref gd32g553_adc_spectrum_read chunk.  Bins are
  *  float32 (4 B); with the 7-byte reply header this keeps the reply
@@ -180,6 +197,136 @@ extern "C" {
  *  BEFORE any erase/program (#751).  See docs/gd32-bridge-protocol.md §8. */
 #define GD32G553_OTA_MIN_PROTOCOL_MINOR 6u
 
+/** Minimum protocol MINOR a peer must advertise before @ref
+ *  gd32g553_ota_get_state decodes a 6th (`err`) byte off the wire.
+ *  CMD_OTA_GET_STATE's reply widened 5 -> 6 bytes in v0.14 (gh#101);
+ *  the wire carries no length, so a host that read 6 bytes from an
+ *  older bridge would desync the CRC over a byte the firmware never
+ *  sent.  Below this minor, @ref gd32g553_ota_state_info_t::err reads
+ *  as @ref GD32G553_OTA_ERR_NONE regardless of the real cause -- the
+ *  same "unattributable" state gh#101 fixed, just for older peers. */
+#define GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR 14u
+
+/** GPIO expander line for E1M IO24 (GD32 pad `PC14`).  NOT routed to the
+ *  GD32 on the SoM (gd32-bridge-firmware#298): the bridge answers
+ *  `STATUS_IO` for any mask naming it, so gd32g553_gpio_read() and
+ *  gd32g553_gpio_write() refuse it up front with `ALP_ERR_NOSUPPORT`
+ *  (the Linux gpio driver refuses line 8 the same way). */
+#define GD32G553_GPIO_LINE_E1M_IO24 8u
+
+/** Every routed bridge GPIO line (bits 0..22 minus
+ *  @ref GD32G553_GPIO_LINE_E1M_IO24).  Use it as the "all lines" mask for
+ *  GPIO_READ, including inside a BATCH sub-op, which bypasses the driver's
+ *  own refusal.  Bits above the cached protocol minor are dropped by
+ *  gd32g553_gpio_read(). */
+#define GD32G553_GPIO_ROUTED_MASK (0x007FFFFFu & ~(1u << GD32G553_GPIO_LINE_E1M_IO24))
+
+/** GPIO expander line carrying the on-module Murata LBEE5HY2FY-922
+ *  (Infineon CYW55513) Bluetooth core's BT_REG_ON enable (GD32 pad
+ *  `PE14`).  Valid only on bridges advertising protocol minor
+ *  @ref GD32G553_REG_ON_MIN_PROTOCOL_MINOR or newer -- see that macro. */
+#define GD32G553_GPIO_LINE_BT_REG_ON 18u
+
+/** GPIO expander line carrying the on-module Murata LBEE5HY2FY-922
+ *  (Infineon CYW55513) Wi-Fi core's WL_REG_ON enable (GD32 pad
+ *  `PE15`).  Valid only on bridges advertising protocol minor
+ *  @ref GD32G553_REG_ON_MIN_PROTOCOL_MINOR or newer -- see that macro. */
+#define GD32G553_GPIO_LINE_WL_REG_ON 19u
+
+/** Minimum protocol MINOR at which the bridge's GPIO expander grows
+ *  from 18 to 20 lines, adding @ref GD32G553_GPIO_LINE_BT_REG_ON and
+ *  @ref GD32G553_GPIO_LINE_WL_REG_ON (firmware 0.2.12).  A bridge
+ *  reporting a lower minor -- or a nonzero major, which is a
+ *  wire-format change this driver cannot assume is backward
+ *  compatible -- never learned these two pads; issuing GPIO_WRITE
+ *  against them would silently power nothing while reporting success.
+ *  See docs/gd32-bridge-protocol.md's version-history table. */
+#define GD32G553_REG_ON_MIN_PROTOCOL_MINOR 11u
+
+/** GPIO expander line carrying the CAN transceiver standby (GD32 pad
+ *  `PB13`).  Valid only on bridges advertising protocol minor
+ *  @ref GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR or newer. */
+#define GD32G553_GPIO_LINE_CAN_STBY 20u
+
+/** Minimum protocol MINOR that implements
+ *  @ref GD32G553_GPIO_LINE_CAN_STBY. */
+#define GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR 13u
+
+/** GPIO expander bridge bit (not the Linux gpiochip line, which is 22)
+ *  carrying E1M IO15 (GD32 pad `PB4`).  Valid only on
+ *  bridges advertising protocol minor
+ *  @ref GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR or newer. */
+#define GD32G553_GPIO_LINE_E1M_IO15 21u
+
+/** GPIO expander bridge bit (not the Linux gpiochip line, which is 23)
+ *  carrying E1M IO26 (GD32 pad `PC2`).  Valid only on
+ *  bridges advertising protocol minor
+ *  @ref GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR or newer. */
+#define GD32G553_GPIO_LINE_E1M_IO26 22u
+
+/** Minimum protocol MINOR at which the bridge's GPIO expander grows from
+ *  21 to 23 lines, adding @ref GD32G553_GPIO_LINE_E1M_IO15 and
+ *  @ref GD32G553_GPIO_LINE_E1M_IO26 (firmware 0.3.1).  A bridge below this
+ *  minor ignores those bits and still answers success, so
+ *  gd32g553_gpio_write() returns `ALP_ERR_NOSUPPORT` for a mask naming
+ *  either bit on such a bridge (likewise for the REG_ON bits below minor
+ *  11 and CAN_STBY, bit 20, below minor 13); gd32g553_gpio_read() drops
+ *  the missing bits (they read 0) and refuses only a mask naming nothing
+ *  else.
+ *  See docs/gd32-bridge-protocol.md's version-history table. */
+#define GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR 15u
+
+/** GPIO expander bridge bits carrying the SoM camera LDO enables
+ *  (`CAM_EN_LDO0..3`, GD32 pads `PC3` / `PE8` / `PE7` / `PE10`; SoM
+ *  power-supply sheet, not E1M-X pads).  The bit numbers sit right after
+ *  @ref GD32G553_GPIO_LINE_E1M_IO26 (bridge bits 23..26, Linux
+ *  lines 24..27), matching the firmware gpio.c.  Valid only on bridges
+ *  advertising protocol minor @ref GD32G553_I2CM_MIN_PROTOCOL_MINOR or newer.
+ *  @{ */
+#define GD32G553_GPIO_LINE_CAM_EN_LDO0 23u
+#define GD32G553_GPIO_LINE_CAM_EN_LDO1 24u
+#define GD32G553_GPIO_LINE_CAM_EN_LDO2 25u
+#define GD32G553_GPIO_LINE_CAM_EN_LDO3 26u
+/** @} */
+
+/** Minimum protocol MINOR that implements the I2CM opcodes
+ *  (@ref GD32G553_CMD_I2CM_CONFIG, @ref GD32G553_CMD_I2CM_XFER,
+ *  @ref GD32G553_CMD_I2CM_RESULT) and the CAM_EN_LDO GPIO bits
+ *  (firmware 0.17).  I2C-link only: the bridge refuses them on SPI and
+ *  the host has no CM33 helper for them.
+ *  See docs/gd32-bridge-protocol.md section 3.20. */
+#define GD32G553_I2CM_MIN_PROTOCOL_MINOR 17u
+
+/** I2CM_RESULT `result` byte (docs/gd32-bridge-protocol.md section 3.20).
+ *  The outer STATUS keeps its generic meaning; these report how the I2C3
+ *  transfer itself ended. */
+typedef enum {
+	GD32G553_I2CM_RES_OK        = 0, /**< Transfer completed (-> 0). */
+	GD32G553_I2CM_RES_NACK_ADDR = 1, /**< Address NACK (-> -ENXIO). */
+	GD32G553_I2CM_RES_NACK_DATA = 2, /**< Data NACK (-> -EIO). */
+	GD32G553_I2CM_RES_ARB_LOST  = 3, /**< Arbitration lost (-> -EAGAIN). */
+	GD32G553_I2CM_RES_BUS_ERROR = 4, /**< Bus error (-> -EIO). */
+	GD32G553_I2CM_RES_TIMEOUT   = 5, /**< Deadline hit (-> -ETIMEDOUT). */
+	GD32G553_I2CM_RES_BUS_STUCK = 6, /**< SDA held low after recovery (-> -EBUSY). */
+} gd32g553_i2cm_result_t;
+
+/** Minimum protocol MINOR that implements `PWM_SET` period 0 / duty 0 as
+ *  "stop + release the channel's timer claim" (see @ref gd32g553_pwm_stop).
+ *  Older firmware does NOT reject period 0: it computes `ARR = period - 1`
+ *  from it, retunes the timer's shared 16-bit ARR and answers success, so
+ *  sibling channels are silently re-timed.  Never send period 0 below this
+ *  minor; gd32g553_pwm_stop() returns `ALP_ERR_NOSUPPORT` instead. */
+#define GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR 17u
+
+/** Minimum protocol MINOR that implements the `POWER_MODE_SET` flags byte
+ *  (@ref GD32G553_POWER_FLAG_WAKE_I2C), the `ALP_ERR_BUSY` gate for modes 2 / 3
+ *  while a stream / PWM / DAC / OTA session is live, and the
+ *  `ALP_ERR_OUT_OF_RANGE` answers (untimed WAKE_I2C, a timer the watchdog would
+ *  cut short).  An older firmware ignores the flags byte and enters the mode
+ *  regardless, so gd32g553_set_power_mode() returns `ALP_ERR_NOSUPPORT` below
+ *  this minor instead of sending the request. */
+#define GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR 17u
+
 /** v0.7 link-feature bits (CMD_LINK_FEATURES payload).  STATUS_SEQ:
  *  once granted, every SPI reply's STATUS byte carries a 4-bit
  *  slave-side sequence stamp in bits [7:4] that advances per freshly
@@ -191,12 +338,73 @@ extern "C" {
  *  (zero until STATUS_SEQ is negotiated). */
 #define GD32G553_STATUS_CODE_MASK 0x0Fu
 
+/** v0.15 link-feature bit: BIG_FRAME.  Raises the SPI payload ceiling
+ *  from 65 B to @ref GD32G553_BIG_MAX_PAYLOAD_BYTES, but only for the
+ *  `CMD_BATCH` request/reply and the `CMD_ADC_STREAM_READ2` reply; every
+ *  other opcode (OTA included) keeps the 65 B limit.  SPI only. */
+#define GD32G553_LINK_FEAT_BIG_FRAME 0x00000002u
+/** v0.15 link-feature bit: ATTN.  The GD32 drives PA14 (net GD32_SWCLK,
+ *  Renesas P71) HIGH while a reply is armed or stream events are
+ *  pending, so the host waits on an edge instead of a timed staging
+ *  gap.  Needs STATUS_SEQ; refused while a debugger is attached.
+ *  SPI only. */
+#define GD32G553_LINK_FEAT_ATTN 0x00000004u
+/** v0.15 link-feature bit: ADC_STREAM2.  Gates `CMD_ADC_STREAM_BEGIN2` /
+ *  `CMD_ADC_STREAM_READ2`.  SPI only. */
+#define GD32G553_LINK_FEAT_ADC_STREAM2 0x00000008u
+/** v0.15 link-feature bit: BATCH.  Gates `CMD_BATCH`.  SPI only. */
+#define GD32G553_LINK_FEAT_BATCH 0x00000010u
+
+/** BIG_FRAME payload ceiling: 1 SOF + 1 CMD/STATUS + 252 + 2 CRC = a
+ *  256 B SPI frame, the most the host may clock in one CS window. */
+#define GD32G553_BIG_MAX_PAYLOAD_BYTES 252u
+
+/** Fixed header ahead of the codes in a `READ2` reply
+ *  (`first_index:u32 dropped:u32 got:u8`). */
+#define GD32G553_READ2_HDR_BYTES 9u
+
+/** Most `READ2` codes one reply can carry on a BIG_FRAME link
+ *  (`(252 - 9) / 2`); 28 on a 65 B link. */
+#define GD32G553_READ2_MAX_SAMPLES_BIG 121u
+
+/** Most sub-operations in one `CMD_BATCH`. */
+#define GD32G553_BATCH_MAX_OPS 16u
+
+/** `READ2` overrun guard (samples) the firmware keeps between the read
+ *  cursor and the write cursor; the slack before an overrun is
+ *  `watermark - GD32G553_ADC_STREAM2_GUARD` sample periods. */
+#define GD32G553_ADC_STREAM2_GUARD 8u
+
+/** `dropped` value in a `READ2` reply meaning "discontinuity of unknown
+ *  length" (ROVF recovery, DSP gap, backlog > 2^31); `got` is 0.  The
+ *  portable ADC backend maps exactly this to @ref ALP_ERR_BUSY. */
+#define GD32G553_READ2_DROPPED_UNKNOWN 0xFFFFFFFFu
+
+/** `BEGIN2` reply flag bit 0: `vref_mv` came from a real VREFINT
+ *  measurement rather than the 1800 mV fallback. */
+#define GD32G553_STREAM2_FLAG_VREF_MEASURED 0x01u
+
+/** `BEGIN2` trigger source: the firmware-programmed pace timer
+ *  (TIMER5 for stream 0, TIMER6 for stream 1).  The only trigger the
+ *  host API exposes; `0x01..0x05` are reserved and answer NOSUPPORT. */
+#define GD32G553_STREAM2_TRIGGER_PACE_TIMER 0x00u
+
+/** Minimum protocol MINOR at which the host sends the 6-byte extended
+ *  `CMD_LINK_FEATURES` form.  Older firmware answers it with
+ *  STATUS_INVAL, so below this minor @ref gd32g553_init negotiates with
+ *  the legacy 1-byte STATUS_SEQ form and the wire stays byte-identical
+ *  to v0.14. */
+#define GD32G553_V015_MIN_PROTOCOL_MINOR 15u
+
 /** Wire opcodes -- mirror docs/gd32-bridge-protocol.md §3. */
 typedef enum {
-	GD32G553_CMD_PING                  = 0x00,
-	GD32G553_CMD_GET_VERSION           = 0x01,
-	GD32G553_CMD_GET_BUILD_ID          = 0x02,
-	GD32G553_CMD_RESET_REASON          = 0x03,
+	GD32G553_CMD_PING         = 0x00,
+	GD32G553_CMD_GET_VERSION  = 0x01,
+	GD32G553_CMD_GET_BUILD_ID = 0x02,
+	GD32G553_CMD_RESET_REASON = 0x03,
+	/* v0.15: batched sub-operations in one SPI frame (needs the BATCH
+	 * link feature; see gd32g553_batch()). */
+	GD32G553_CMD_BATCH                 = 0x04,
 	GD32G553_CMD_GPIO_READ             = 0x10,
 	GD32G553_CMD_GPIO_WRITE            = 0x11,
 	GD32G553_CMD_PWM_SET               = 0x20,
@@ -205,6 +413,8 @@ typedef enum {
 	GD32G553_CMD_DA9292_STATUS_FORWARD = 0x40,
 	/* v0.8: secure-element (OPTIGA Trust M) reset, SE_RST = GD32 PC13. */
 	GD32G553_CMD_SE_RESET = 0x41,
+	/* v0.15: persistent opt-in boot configuration (SDMUX_EN_HIGH flag). */
+	GD32G553_CMD_BOOT_CONFIG = 0x42,
 	/* v0.2 additions -- analog + counter peripherals routed via the
      * GD32 on V2N (see metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv). */
 	GD32G553_CMD_DAC_SET      = 0x50,
@@ -263,6 +473,10 @@ typedef enum {
 	GD32G553_CMD_ADC_DSP_STAGE_PUSH = 0x38,
 	GD32G553_CMD_ADC_DSP_CHAIN_BIND = 0x39,
 	GD32G553_CMD_ADC_SPECTRUM_READ  = 0x3A,
+	/* v0.15: lossless-accounting stream pair (needs the ADC_STREAM2
+	 * link feature; see gd32g553_adc_stream_begin2()). */
+	GD32G553_CMD_ADC_STREAM_BEGIN2 = 0x3B,
+	GD32G553_CMD_ADC_STREAM_READ2  = 0x3C,
 	/* v0.5 (§2B.2): advanced timer extras.  PWM_CAPTURE turns a PWM
      * channel's pin into an input-capture source for frequency / pulse-
      * width measurement; PWM_SINGLE_PULSE drives a one-shot pulse of
@@ -278,16 +492,27 @@ typedef enum {
 	GD32G553_CMD_PWM_CAPTURE_END   = 0x25,
 	GD32G553_CMD_PWM_SINGLE_PULSE  = 0x26,
 	GD32G553_CMD_TIMER_SYNC        = 0x27,
-	/* v0.5 (§2B.3): system-wide power-mode transition request.
-     * Portable surface in <alp/power.h>.  Reserved opcode at v0.5;
-     * firmware dispatcher returns STATUS_NOSUPPORT today. */
+	/* v0.5 (§2B.3): system-wide power-mode transition request
+     * (SPI only: not on the I2C opcode allow-list).  Portable surface in
+     * <alp/power.h>; host API @ref gd32g553_set_power_mode. */
 	GD32G553_CMD_POWER_MODE_SET = 0x28,
 	/* v0.7: link-feature negotiation (request `features:u8` wanted,
-     * reply `features:u8` granted+armed).  Older firmware answers
+     * reply `features:u8` granted+armed).  v0.15 adds a 6-byte request
+     * (`want:u32 max_payload_req:u16`) answered by a 10-byte reply
+     * (`granted:u32 supported:u32 max_payload:u16`); the host only sends
+     * it to a peer that reported minor >= 15.  Older firmware answers
      * STATUS_NOSUPPORT and the host stays on the legacy framing --
      * gd32g553_init() negotiates automatically and records the
-     * outcome in ctx->seq_enabled. */
+     * outcome in ctx->seq_enabled / ctx->granted. */
 	GD32G553_CMD_LINK_FEATURES = 0x81,
+	/* v0.17: I2C3 master proxy (I2C link only, never batched; no host
+     * helper -- the Linux gpio-gd32-bridge adapter is the sole caller).
+     * CONFIG `bus_khz:u16` (100|400, 0 = release PC8/PC9), XFER
+     * `tag addr7 flags wlen rlen wdata[]`, RESULT -> `tag result nread
+     * rdata[]`.  See section 3.20 of docs/gd32-bridge-protocol.md. */
+	GD32G553_CMD_I2CM_CONFIG = 0xA0,
+	GD32G553_CMD_I2CM_XFER   = 0xA1,
+	GD32G553_CMD_I2CM_RESULT = 0xA2,
 	/* Reserved range 0xF0..0xFF -- application-bootloader OTA. */
 	GD32G553_CMD_OTA_BEGIN       = 0xF0,
 	GD32G553_CMD_OTA_WRITE_CHUNK = 0xF1,
@@ -324,12 +549,69 @@ typedef struct {
 	uint8_t patch;
 } gd32g553_version_t;
 
+/** Size of the SPI scratch buffers kept in the context: the largest
+ *  frame the host may clock in one CS window (BIG_FRAME ceiling). */
+#define GD32G553_SPI_FRAME_BYTES (GD32G553_BIG_MAX_PAYLOAD_BYTES + 4u)
+
+/**
+ * @brief ATTN (data-ready) hook the platform backend supplies.
+ *
+ * The chip driver stays platform-agnostic: it never touches a GPIO or an
+ * RTOS primitive itself.  A backend that has the GD32's ATTN line (PA14,
+ * Renesas P71 on V2N) wired as an input with a rising-edge interrupt
+ * builds these callbacks from the interrupt plus its own semaphore and
+ * clock, and passes the table to @ref gd32g553_init_ex.  Passing no table
+ * (or one with a NULL @c now / @c wait) means ATTN is never requested and
+ * the driver keeps the 0.14 staging-gap + re-read ladder.
+ *
+ * **Edge filtering.**  The firmware drives ATTN LOW at CS falling and never
+ * raises it while CS is low, so every edge that belongs to a reply arrives
+ * AFTER the host starts clocking the request, and a genuine reply leaves the
+ * line HIGH.  The driver calls @c drain, then reads @c now immediately before it
+ * clocks a request, and accepts an edge only if (1) its time-stamp is not
+ * earlier than that reading (wrap-safe 32-bit compare, any free-running counter
+ * works -- `k_cycle_get_32()` on Zephyr) AND (2) @c read_level reads HIGH when
+ * the edge is accepted.  The drain keeps an old stamp from aliasing a fresh one
+ * after a counter wrap; the level check rejects a stale rise inside the short
+ * window between the clock reading and the request's own CS falling (it is
+ * always followed by a LOW before the wait begins).  Both filters need the
+ * hook, so ATTN is only requested when @c now, @c wait, @c read_level and
+ * @c drain are all provided.
+ *
+ * The table and @c user must outlive the context (the driver keeps a
+ * copy of the struct, not of what @c user points at).
+ */
+typedef struct {
+	/** Current time on the same free-running 32-bit clock the edge
+	 *  time-stamps use.  Cheap, callable from thread context.  Required. */
+	uint32_t (*now)(void *user);
+	/** Block until a rising edge has been latched, then consume it and
+	 *  store its time-stamp in @p t_edge.  Interrupt + semaphore, never
+	 *  polling.  Returns @ref ALP_OK on an edge, @ref ALP_ERR_TIMEOUT when
+	 *  @p timeout_ms passes with none.  The driver discards an edge older
+	 *  than the request and calls again.  Required. */
+	alp_status_t (*wait)(void *user, uint32_t timeout_ms, uint32_t *t_edge);
+	/** Sample the ATTN line level (true = high): the accept-time level check
+	 *  and the idle stuck-high check.  Required. */
+	alp_status_t (*read_level)(void *user, bool *high);
+	/** Discard every latched edge (and its stamp).  Called right before @c now
+	 *  is read for a request.  Required. */
+	void (*drain)(void *user);
+	/** Opaque pointer handed back to every callback. */
+	void *user;
+} gd32g553_attn_hook_t;
+
 /** Driver context.
  *
  *  At least one of @c spi / @c i2c MUST be non-NULL at @ref gd32g553_init
  *  time.  Passing both attaches the context to **both** transports and
  *  routes commands through @c default_transport unless a `*_via` helper
  *  is used.
+ *
+ *  The context also holds the two 256 B SPI frame buffers (so a
+ *  BIG_FRAME exchange never lands on a caller's thread stack) and is
+ *  therefore a few hundred bytes: keep it static or heap-held on small
+ *  stacks.
  */
 typedef struct {
 	bool                 initialised;
@@ -343,7 +625,102 @@ typedef struct {
 	uint8_t              seq_last;          /**< Last accepted stamp.    */
 	uint32_t             seq_stale_count;   /**< Stale replies caught +
                                                  recovered (telemetry).  */
+	bool                 version_cached;    /**< @c version is trusted;
+                                                 cleared on re-init, OTA
+                                                 commit/rollback and link
+                                                 errors.                 */
+	/* ---- v0.15 negotiated SPI link state (all zero / 65 on a 0.14 peer) ---- */
+	uint32_t             granted;             /**< LINK_FEAT_* bits armed on
+                                                 the SPI link.            */
+	uint32_t             supported;           /**< Bits the peer implements
+                                                 (0 until a 6-byte
+                                                 negotiation answered).   */
+	uint16_t             max_payload;         /**< Effective SPI payload
+                                                 ceiling: 65, or 66..252
+                                                 once BIG_FRAME granted.  */
+	gd32g553_attn_hook_t attn;                /**< Backend ATTN hook copy
+                                                 (NULL callbacks = none). */
+	bool                 attn_active;         /**< ATTN granted + self-test
+                                                 passed: replies are
+                                                 awaited on an edge.      */
+	bool                 attn_unusable;       /**< ATTN failed its self-test
+                                                 or hit the fault limit;
+                                                 not requested again
+                                                 until the next init.     */
+	bool                 attn_fault_pending;  /**< Fault limit hit mid
+                                                 command; ATTN is dropped
+                                                 once the command ends.   */
+	bool                 attn_event_edge;     /**< An idle-path edge was
+                                                 seen and no READ2 has
+                                                 answered it yet.         */
+	bool                 attn_last_edge;      /**< The last SPI reply was
+                                                 awaited and its edge
+                                                 arrived.                 */
+	bool                 renegotiate_pending; /**< The bridge reset under
+                                                 us (OTA commit/rollback):
+                                                 the next command re-reads
+                                                 the version and re-runs
+                                                 the link negotiation.    */
+	uint32_t             attn_stale_edges;    /**< Edges discarded for being
+                                                 older than the request.  */
+	uint8_t              attn_timeout_run;    /**< Consecutive lost edges.   */
+	uint8_t              attn_stuck_run;      /**< Consecutive stuck-high
+                                                 readings.                */
+	uint8_t              attn_idle_run;       /**< Consecutive idle edges
+                                                 whose READ2 was empty.   */
+	uint8_t              stream2_armed;       /**< Bitmask of streams
+                                                 started with a nonzero
+                                                 watermark (BEGIN2).      */
+	uint8_t              stream2_seen;        /**< Bitmask of streams whose
+                                                 next_index is valid.     */
+	uint32_t             attn_edges;          /**< Replies delivered on an
+                                                 ATTN edge (telemetry).   */
+	uint32_t             attn_timeouts;       /**< Lost-edge fallbacks to the
+                                                 0.14 drain rule.         */
+	uint32_t             attn_stuck;          /**< Stuck-high violations.    */
+	uint32_t             stream2_gaps;        /**< READ2 replies that broke
+                                                 the first_index
+                                                 continuity invariant.    */
+	uint32_t             stream2_next[GD32G553_BRIDGE_ADC_STREAM_COUNT]; /**< Expected
+                                                 next first_index.        */
+	bool                 power_asleep;                        /**< A Deep-sleep request was
+                                                 accepted: the bridge may be
+                                                 asleep, so the next command
+                                                 runs the wake procedure
+                                                 (@ref gd32g553_power_wake). */
+	uint32_t             power_wake_latency_us;               /**< Wake wait of that request. */
+	uint8_t              power_wake_retries;                  /**< Wake retries of that request. */
+	uint8_t              spi_req[GD32G553_SPI_FRAME_BYTES];   /**< SPI TX scratch. */
+	uint8_t              spi_reply[GD32G553_SPI_FRAME_BYTES]; /**< SPI RX scratch. */
 } gd32g553_t;
+
+/** Result of @ref gd32g553_adc_stream_begin2 (the 17-byte BEGIN2 reply). */
+typedef struct {
+	uint32_t tick_hz;      /**< Pace-timer tick (1000000, or 10000 below 16 Hz). */
+	uint32_t period_ticks; /**< `floor(tick_hz / sample_rate_hz)`; the realised
+	                            rate is exactly `tick_hz / period_ticks`.       */
+	uint16_t full_scale;   /**< `(1 << resolution_bits) - 1` at BEGIN2.          */
+	uint16_t vref_mv;      /**< ADC reference captured at BEGIN2.                */
+	uint8_t  flags;        /**< @ref GD32G553_STREAM2_FLAG_VREF_MEASURED.        */
+	uint16_t watermark;    /**< GRANTED watermark = `ring_depth / 2`; may exceed
+	                            the one requested -- always use this one.        */
+	uint16_t ring_depth;   /**< Ring the firmware allocated (overrun budget): the
+	                            smallest power of two >= max(2 * watermark_req,
+	                            ceil(rate * 5 ms)), capped at 1024.              */
+} gd32g553_adc_stream2_info_t;
+
+/** One sub-operation of a @ref gd32g553_batch call. */
+typedef struct {
+	uint8_t        op;        /**< Allow-listed opcode (see @ref gd32g553_batch). */
+	const uint8_t *args;      /**< Request args, exactly the op's fixed length.   */
+	uint8_t        args_len;  /**< Length of @p args.                             */
+	uint8_t       *reply;     /**< Caller buffer for the sub-reply payload.       */
+	uint8_t        reply_cap; /**< Size of @p reply; must cover the op's maximum
+	                               reply (9 + 2 * max_samples for READ2).           */
+	/* ---- outputs ---- */
+	alp_status_t status;    /**< Sub-op status; valid for executed ops only.    */
+	uint8_t      reply_len; /**< Bytes written to @p reply (0 on error).        */
+} gd32g553_batch_op_t;
 
 /**
  * @brief Probe + handshake the bridge over the chosen transport.
@@ -369,6 +746,63 @@ typedef struct {
  */
 alp_status_t gd32g553_init(gd32g553_t *ctx, alp_spi_t *spi, alp_i2c_t *i2c, uint8_t i2c_addr_7bit);
 
+/**
+ * @brief @ref gd32g553_init plus an ATTN hook registration.
+ *
+ * Identical to @ref gd32g553_init, then -- when the bridge reports
+ * protocol minor >= @ref GD32G553_V015_MIN_PROTOCOL_MINOR and SPI is open
+ * -- negotiates the v0.15 link features with the 6-byte
+ * `CMD_LINK_FEATURES` form: STATUS_SEQ | BIG_FRAME | ADC_STREAM2 | BATCH,
+ * plus ATTN when @p attn supplies both @c arm and @c wait.  The ATTN
+ * self-test runs at once: the negotiation reply that grants ATTN must
+ * itself arrive on an edge, otherwise ATTN is withdrawn (the link keeps
+ * every other feature) and @c ctx->attn_unusable is set.  A peer that
+ * answers the 6-byte form with INVAL / NOSUPPORT, or reports minor < 15,
+ * gets the legacy 1-byte STATUS_SEQ form and the wire stays byte-identical
+ * to v0.14.
+ *
+ * Once ATTN is active the driver waits on the hook's edge (bounded by
+ * @ref GD32G553_BRIDGE_REPLY_TIMEOUT_MS) instead of the timed staging
+ * gap.  A lost edge falls back, for that command only, to the 0.14 drain
+ * rule; three consecutive lost edges (or three stuck-high readings, or
+ * eight consecutive idle edges that each read back empty) renegotiate
+ * without ATTN.
+ *
+ * The caller must have the ATTN pin configured as an input with its
+ * rising-edge interrupt armed BEFORE calling this, and must never drive
+ * that pin as an output while ATTN is granted (it is the GD32's SWCLK
+ * when ATTN is off -- see docs/gd32-bridge-protocol.md §3.17).
+ *
+ * @param ctx           Context to initialise.
+ * @param spi           SPI handle, or NULL.
+ * @param i2c           I2C handle, or NULL.
+ * @param i2c_addr_7bit I2C address when @p i2c is non-NULL.
+ * @param attn          ATTN hook table, or NULL for none.  Copied.
+ * @return Same as @ref gd32g553_init.
+ */
+alp_status_t gd32g553_init_ex(gd32g553_t                 *ctx,
+                              alp_spi_t                  *spi,
+                              alp_i2c_t                  *i2c,
+                              uint8_t                     i2c_addr_7bit,
+                              const gd32g553_attn_hook_t *attn);
+
+/**
+ * @brief Wait for an ATTN edge with no request outstanding (event path).
+ *
+ * An edge while idle means a stream with a watermark has data pending:
+ * the caller then issues @ref gd32g553_adc_stream_read2 (or one
+ * @ref gd32g553_batch of READ2 ops when two streams are armed).  The
+ * driver counts consecutive idle edges whose READ2 comes back empty and
+ * drops ATTN after eight (stuck-line guard).
+ *
+ * @param ctx         Initialised context.
+ * @param timeout_ms  Longest wait.
+ * @return @ref ALP_OK on an edge, @ref ALP_ERR_TIMEOUT when none arrived,
+ *         @ref ALP_ERR_NOSUPPORT when ATTN is not active, or
+ *         @ref ALP_ERR_NOT_READY / @ref ALP_ERR_INVAL.
+ */
+alp_status_t gd32g553_attn_wait_event(gd32g553_t *ctx, uint32_t timeout_ms);
+
 /** @brief Pick which transport future commands ride by default. */
 alp_status_t gd32g553_set_default_transport(gd32g553_t *ctx, gd32g553_transport_t t);
 
@@ -378,11 +812,29 @@ alp_status_t gd32g553_ping(gd32g553_t *ctx);
 /** @brief Probe over a specific transport (overrides ctx->default). */
 alp_status_t gd32g553_ping_via(gd32g553_t *ctx, gd32g553_transport_t t);
 
-/** @brief Read the bridge firmware version (cached at init by
- *         @ref gd32g553_init; this helper re-issues `GET_VERSION` so
- *         the host can confirm the firmware has not been swapped
- *         out-of-band, e.g. across a deep-sleep + OTA cycle). */
+/** @brief Read the bridge firmware version.
+ *
+ * Served from the cache filled by @ref gd32g553_init -- no bus traffic.
+ * The cache is dropped (and this call re-issues `GET_VERSION`) after
+ * re-init, @ref gd32g553_ota_commit / @ref gd32g553_ota_rollback, and any
+ * transport-level error (ALP_ERR_IO / ALP_ERR_TIMEOUT).
+ *
+ * @param ctx  Initialised context.
+ * @param out  Receives the version triple.
+ * @return ALP_OK / ALP_ERR_INVAL, or the transport status on a cache miss.
+ */
 alp_status_t gd32g553_get_version(gd32g553_t *ctx, gd32g553_version_t *out);
+
+/** @brief Re-issue `GET_VERSION` on the wire and refresh the cache.
+ *
+ * Use as a link probe or to confirm the firmware has not been swapped
+ * out-of-band; everyday callers want @ref gd32g553_get_version.
+ *
+ * @param ctx  Context (may be mid-init).
+ * @param out  Receives the version triple.
+ * @return ALP_OK / ALP_ERR_INVAL / the transport or firmware status.
+ */
+alp_status_t gd32g553_refresh_version(gd32g553_t *ctx, gd32g553_version_t *out);
 
 /** @brief Read the bridge firmware's truncated SHA-1 build-id.
  *
@@ -401,13 +853,19 @@ alp_status_t gd32g553_get_reset_reason(gd32g553_t *ctx, gd32g553_reset_cause_t *
  *
  *  @param ctx     GD32G553 bridge context (must be initialised first).
  *  @param mask    Logical GD32 pad indices the caller cares about.
- *                 Mapping is documented in firmware/gd32-bridge/README.md;
+ *                 Mapping is documented in gd32-bridge-firmware:README.md;
  *                 the host MUST NOT assume bit `n` is `Pxn`.
  *  @param levels  Output: bit `i` set iff (mask bit i set) and
- *                 (the corresponding pad reads high). */
+ *                 (the corresponding pad reads high).
+ *  @return ALP_OK, or ALP_ERR_NOSUPPORT when @p mask names
+ *          @ref GD32G553_GPIO_LINE_E1M_IO15 / @ref GD32G553_GPIO_LINE_E1M_IO26
+ *          and the bridge's protocol minor is below
+ *          @ref GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR. */
 alp_status_t gd32g553_gpio_read(gd32g553_t *ctx, uint32_t mask, uint32_t *levels);
 
-/** @brief Atomically set/clear masked subset of GD32 pad outputs. */
+/** @brief Atomically set/clear masked subset of GD32 pad outputs.
+ *  @return ALP_OK, or ALP_ERR_NOSUPPORT for the same IO15/IO26 minor gate
+ *          as @ref gd32g553_gpio_read. */
 alp_status_t gd32g553_gpio_write(gd32g553_t *ctx, uint32_t mask, uint32_t levels);
 
 /** @brief Set a PWM channel's period + duty (nanoseconds).
@@ -415,9 +873,29 @@ alp_status_t gd32g553_gpio_write(gd32g553_t *ctx, uint32_t mask, uint32_t levels
  *  Duty `0` shuts the channel off; `duty_ns == period_ns` drives it
  *  permanently high.  The firmware rounds to its hardware-achievable
  *  resolution; the caller can read back via @ref gd32g553_pwm_get to
- *  see what actually got programmed. */
+ *  see what actually got programmed.
+ *
+ *  @return ALP_ERR_INVAL for `period_ns == 0` (use @ref gd32g553_pwm_stop)
+ *          or `duty_ns > period_ns`. */
 alp_status_t
 gd32g553_pwm_set(gd32g553_t *ctx, uint8_t channel, uint32_t period_ns, uint32_t duty_ns);
+
+/** @brief Stop a PWM channel and release its timer claim.
+ *
+ *  Sends `PWM_SET` with `period_ns == 0` and `duty_ns == 0`.  The channel
+ *  goes idle and no longer counts as a live sibling, so a later
+ *  @ref gd32g553_pwm_single_pulse on another channel of the same timer
+ *  stops answering `STATUS_BUSY`.  Use it when an app leaves a channel
+ *  running and the GD32 is not reset before the next image.
+ *
+ *  @param ctx      GD32G553 bridge context (must be initialised first).
+ *  @param channel  E1M PWM channel index (0..7).
+ *  @return ALP_OK, or the firmware's error.  `ALP_ERR_NOSUPPORT`, with
+ *          nothing sent, when the bridge advertises a protocol minor below
+ *          @ref GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR -- stop/release ships in
+ *          protocol 0.17, and older firmware would treat period 0 as a
+ *          real period and retune the shared timer. */
+alp_status_t gd32g553_pwm_stop(gd32g553_t *ctx, uint8_t channel);
 
 /** @brief Read back what a PWM channel's timer is ACTUALLY generating.
  *
@@ -484,6 +962,49 @@ alp_status_t gd32g553_da9292_status_forward(gd32g553_t *ctx, uint8_t *status);
  */
 alp_status_t gd32g553_se_reset(gd32g553_t *ctx, bool assert);
 
+/** Boot-config flag: drive GD32 `PD11` (E1M IO29, the EVK's `SDIO_MUX_EN`,
+ *  active-low: low = microSD connected, high = disconnected) HIGH from the
+ *  next GD32 reset on.  Opt-in because IO29's meaning is carrier-specific. */
+#define GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH 0x00000001u
+
+/** @brief Read the GD32's persistent boot-config flags.
+ *
+ *  Allowed on both transports, so provisioning can use the I2C link from
+ *  Linux.  Never writes flash.
+ *
+ *  @param ctx    GD32G553 bridge context (must be initialised first).
+ *  @param flags  Out: stored `GD32G553_BOOT_CONFIG_*` bits (0 = every
+ *                flag off, the default for a unit never configured).
+ *
+ *  @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT (firmware predates
+ *          the opcode, or the build has no flash HAL) / transport error.
+ */
+alp_status_t gd32g553_boot_config_get(gd32g553_t *ctx, uint32_t *flags);
+
+/** @brief Store the GD32's persistent boot-config flags.
+ *
+ *  Survives power cycles and OTA slot swaps; takes effect at the next GD32
+ *  reset and does NOT move any pad now (so a unit running from the SD is not
+ *  cut off).  The firmware accepts the request at once and commits it from
+ *  its main loop (two 1 KB page erases, each <= 20 ms with interrupts masked, plus
+ *  main-loop latency; the link may black out meanwhile); this call waits
+ *  ~50 ms and then polls (retrying through transport errors) GET until the stored value equals
+ *  @p flags, so ALP_OK means the value is stored.  A value equal to the
+ *  stored one is a no-op.  To drive IO29 immediately as well, also write it
+ *  with @ref gd32g553_gpio_write.
+ *
+ *  @param ctx    GD32G553 bridge context (must be initialised first).
+ *  @param flags  `GD32G553_BOOT_CONFIG_*` bits; unknown bits are rejected.
+ *
+ *  @return ALP_OK / ALP_ERR_INVAL (unknown bit) / ALP_ERR_BUSY (a different
+ *          SET is still being committed; retry) / ALP_ERR_NOSUPPORT (older
+ *          firmware, no flash HAL, single-bank part, or running from slot B)
+ *          / ALP_ERR_TIMEOUT (accepted but the stored value never matched:
+ *          the flash write failed or was cut; send the SET again) /
+ *          transport error.
+ */
+alp_status_t gd32g553_boot_config_set(gd32g553_t *ctx, uint32_t flags);
+
 /** @brief Program a DAC channel's output voltage in millivolts.
  *
  *  The firmware rounds to its hardware-achievable resolution
@@ -519,7 +1040,7 @@ alp_status_t gd32g553_qenc_reset(gd32g553_t *ctx, uint8_t encoder);
  *
  *  v0.2 of the protocol does not expose a counter-frequency opcode,
  *  so the caller must know the bridge counter's tick rate out-of-
- *  band (firmware-defined; see `firmware/gd32-bridge/README.md`).  A future
+ *  band (firmware-defined; see `gd32-bridge-firmware:README.md`).  A future
  *  minor revision will add `CMD_COUNTER_GET_FREQ` so the host can
  *  convert ticks ↔ microseconds without that out-of-band knowledge.
  *
@@ -581,18 +1102,17 @@ alp_status_t gd32g553_pwm_configure(gd32g553_t          *ctx,
  *  @param oversample_ratio   1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256.
  *                            Firmware rounds down to the nearest
  *                            power-of-two; 0 means "firmware default".
- *  @param sample_cycles      Sample-and-hold time in ADC cycles --
- *                            one of 2/6/12/24/47/92/247/640 (rounded
- *                            down on the firmware side).  0 means
- *                            "firmware default".
- *  @param resolution_bits    6 / 8 / 10 / 12 / 14 / 16.  14- and
- *                            16-bit modes require oversampling >= 4 /
- *                            16 respectively per the datasheet's
- *                            effective-resolution table.  0 means
+ *  @param sample_cycles      Raw RSMP value in ADCCK cycles (sample
+ *                            time = value + 2.5 cycles), not
+ *                            microseconds and not a rung selector.  Firmware clamps it to 2..638;
+ *                            0 means "firmware default" (240).
+ *  @param resolution_bits    6 / 8 / 10 / 12.  The GD32G553 hardware
+ *                            supports no wider width; 14 and 16 are
+ *                            rejected with ALP_ERR_NOSUPPORT.  0 means
  *                            "firmware default" (12-bit).
  *
  *  @return ALP_OK / ALP_ERR_INVAL (bad resolution) / ALP_ERR_OUT_OF_RANGE /
- *          ALP_ERR_NOSUPPORT (firmware HAL body not yet wired).
+ *          ALP_ERR_NOSUPPORT (14/16-bit resolution).
  */
 alp_status_t gd32g553_adc_configure(gd32g553_t *ctx,
                                     uint8_t     channel,
@@ -650,8 +1170,135 @@ alp_status_t gd32g553_adc_stream_read(gd32g553_t *ctx,
                                       uint8_t    *got_samples,
                                       uint16_t   *mv);
 
-/** Stop the named stream, free its DMA channel, flush the ring. */
+/** Stop the named stream, free its DMA channel, flush the ring.
+ *  Ends a stream started with either @ref gd32g553_adc_stream_begin or
+ *  @ref gd32g553_adc_stream_begin2. */
 alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id);
+
+/**
+ * @brief Start a v0.15 ADC stream with lossless accounting (BEGIN2).
+ *
+ * Requires the ADC_STREAM2 link feature (see @ref gd32g553_init_ex).
+ * Unlike the legacy @ref gd32g553_adc_stream_begin, BEGIN2 never reports
+ * a rate it cannot achieve: a conversion time at or above the period
+ * answers @ref ALP_ERR_OUT_OF_RANGE.  A stream started here answers only
+ * @ref gd32g553_adc_stream_read2 (legacy read returns INVAL).
+ *
+ * The realised rate is exactly `info->tick_hz / info->period_ticks`
+ * (300 Hz requested realises 300.03 Hz).  Pick @p watermark with
+ * `watermark >= rate * host round-trip`.  The firmware sizes the ring for
+ * at least 5 ms of samples, so the GRANTED watermark and ring depth in
+ * @p info may be larger than requested (100 kHz with @p watermark 16 is
+ * granted ring 512 / watermark 256): schedule reads and judge the overrun
+ * slack (`granted_watermark - @ref GD32G553_ADC_STREAM2_GUARD` sample
+ * periods) from the values in @p info, never from the request.  See
+ * @ref gd32g553_adc_stream2_read_interval_us.
+ *
+ * @param[in]  ctx             Initialised context.
+ * @param[in]  stream_id       0 .. @ref GD32G553_BRIDGE_ADC_STREAM_COUNT - 1.
+ * @param[in]  channel         ADC channel 0..7.
+ * @param[in]  sample_rate_hz  1..@ref GD32G553_BRIDGE_ADC_STREAM_MAX_RATE_HZ.
+ * @param[in]  watermark       0 (no events) or one of 16/32/64/128/256/512.
+ * @param[out] info            Reply fields; may be NULL.
+ * @return @ref ALP_OK; @ref ALP_ERR_NOSUPPORT (STREAM2 not granted);
+ *         @ref ALP_ERR_INVAL / @ref ALP_ERR_OUT_OF_RANGE (bad rate,
+ *         watermark, unmapped channel or conversion time);
+ *         @ref ALP_ERR_NOT_READY (VREF re-measure pending: retry after
+ *         50 ms); @ref ALP_ERR_BUSY (converter claimed); @ref ALP_ERR_IO.
+ */
+alp_status_t gd32g553_adc_stream_begin2(gd32g553_t                  *ctx,
+                                        uint8_t                      stream_id,
+                                        uint8_t                      channel,
+                                        uint32_t                     sample_rate_hz,
+                                        uint16_t                     watermark,
+                                        gd32g553_adc_stream2_info_t *info);
+
+/**
+ * @brief Read interval (microseconds) that keeps a BEGIN2 stream from
+ *        overrunning when ATTN is not granted.
+ *
+ * `granted_watermark / realised_rate`, from the BEGIN2 reply (@c watermark,
+ * or half the ring when no watermark was requested, divided by
+ * `tick_hz / period_ticks`).  Schedule reads from a host timer at this
+ * interval -- or sooner -- instead of busy-polling.
+ *
+ * @param[in] info  The reply @ref gd32g553_adc_stream_begin2 filled.
+ * @return The interval in microseconds, or 0 when @p info is NULL or carries
+ *         no pacing (`tick_hz` or `period_ticks` zero).
+ */
+uint32_t gd32g553_adc_stream2_read_interval_us(const gd32g553_adc_stream2_info_t *info);
+
+/**
+ * @brief Drain a BEGIN2 stream (READ2): raw codes plus exact accounting.
+ *
+ * The reply is variable length (`9 + 2 * got` bytes); on a BIG_FRAME link
+ * up to @ref GD32G553_READ2_MAX_SAMPLES_BIG codes fit, otherwise 28.  The
+ * firmware never answers BUSY for an overrun: it skips the oldest
+ * samples, counts them in @p dropped and returns the freshest ones.
+ * Between consecutive replies
+ * `first_index(n) == first_index(n-1) + got(n-1) + dropped(n)` (mod 2^32)
+ * except when @p dropped is @ref GD32G553_READ2_DROPPED_UNKNOWN, a
+ * discontinuity of unknown length (then @p got is 0).  A reply that
+ * breaks the invariant is still returned (the data is valid) and bumps
+ * @c ctx->stream2_gaps.
+ *
+ * Codes are right-aligned raw ADC counts clamped to the stream's
+ * `full_scale`; convert with `min(code, full_scale) * vref_mv / full_scale`.
+ *
+ * @param[in]  ctx          Initialised context.
+ * @param[in]  stream_id    A stream started with BEGIN2.
+ * @param[in]  max_samples  1 .. the link's READ2 ceiling; 0 is
+ *                          @ref ALP_ERR_INVAL, above it
+ *                          @ref ALP_ERR_OUT_OF_RANGE.
+ * @param[out] first_index  Sequence index of codes[0] since BEGIN2.
+ * @param[out] dropped      Samples discarded just before codes[0].
+ * @param[out] got          Codes returned (0..@p max_samples).
+ * @param[out] codes        Caller buffer, at least @p max_samples entries.
+ * @return @ref ALP_OK; @ref ALP_ERR_NOSUPPORT (STREAM2 not granted or an
+ *         FFT-bound stream); @ref ALP_ERR_INVAL (inactive or
+ *         legacy-started stream); @ref ALP_ERR_IO (transport, a
+ *         `got > max_samples` reply, DMA error, saturated DSP);
+ *         @ref ALP_ERR_NOMEM (reply would exceed the firmware's
+ *         buffer; nothing consumed).
+ */
+alp_status_t gd32g553_adc_stream_read2(gd32g553_t *ctx,
+                                       uint8_t     stream_id,
+                                       uint8_t     max_samples,
+                                       uint32_t   *first_index,
+                                       uint32_t   *dropped,
+                                       uint8_t    *got,
+                                       uint16_t   *codes);
+
+/**
+ * @brief Run up to @ref GD32G553_BATCH_MAX_OPS sub-operations in one SPI
+ *        transaction pair (CMD_BATCH).
+ *
+ * Requires the BATCH link feature.  Allow-listed ops and their fixed
+ * request lengths: PING 0, GPIO_READ 4, GPIO_WRITE 8, PWM_SET 10,
+ * PWM_GET 1, PWM_CAPTURE_READ 1, ADC_STREAM_READ2 2, DA9292_STATUS_FORWARD
+ * 0, DAC_SET 4, DAC_GET 1, QENC_READ 1, QENC_RESET 1, COUNTER_READ 1,
+ * TMU_COMPUTE 12.  Anything else (nested BATCH, LINK_FEATURES, ADC_READ,
+ * stream BEGIN/END, OTA, ...) is rejected here with @ref ALP_ERR_INVAL
+ * before any bus traffic.  The worst-case reply must fit the link's
+ * payload ceiling, else @ref ALP_ERR_OUT_OF_RANGE.
+ *
+ * The firmware runs the ops in order and stops at the first non-OK
+ * sub-status.  The outer call returns @ref ALP_OK whenever the batch
+ * itself was accepted; inspect each executed op's @c status.  Replies
+ * are validated against the request (executed <= count, each length
+ * within the op's maximum, fixed-reply ops exactly their length, a
+ * failing op with length 0); any violation is @ref ALP_ERR_IO.
+ *
+ * @param[in]     ctx       Initialised context.
+ * @param[in,out] ops       Sub-operations; outputs filled for executed ones.
+ * @param[in]     count     1..@ref GD32G553_BATCH_MAX_OPS.
+ * @param[out]    executed  Ops attempted (including a failing one); may be NULL.
+ * @return @ref ALP_OK; @ref ALP_ERR_NOSUPPORT (BATCH not granted);
+ *         @ref ALP_ERR_INVAL / @ref ALP_ERR_OUT_OF_RANGE (rejected
+ *         locally or by the firmware's validation pass); @ref ALP_ERR_IO.
+ */
+alp_status_t
+gd32g553_batch(gd32g553_t *ctx, gd32g553_batch_op_t *ops, uint8_t count, uint8_t *executed);
 
 /** Pull true-random bytes from the GD32G5's NIST SP800-90B
  *  pre-certified TRNG.
@@ -748,7 +1395,7 @@ alp_status_t gd32g553_tmu_compute(gd32g553_t             *ctx,
 /* All six opcodes return STATUS_NOSUPPORT today against the current  */
 /* firmware (the bridge_hw_* HAL bodies are the gating dep -- see     */
 /* the firmware-side comment block at the top of                      */
-/* firmware/gd32-bridge/src/protocol.h).  The host helpers below match the     */
+/* gd32-bridge-firmware:src/protocol.h).  The host helpers below match the     */
 /* contract: every call returns ALP_ERR_NOSUPPORT today and ALP_OK    */
 /* once the firmware-side HAL ships.  Portable surfaces in            */
 /* <alp/pwm.h> + <alp/counter.h> + <alp/power.h> dispatch through     */
@@ -838,31 +1485,98 @@ alp_status_t gd32g553_pwm_single_pulse(gd32g553_t *ctx, uint8_t channel, uint32_
  */
 alp_status_t gd32g553_timer_sync(gd32g553_t *ctx, uint8_t master, uint8_t slave, uint8_t mode);
 
+/** `flags` bit: a BRD_I2C address match (address 0x70) also ends a Deep-sleep
+ *  early.  Valid for mode 2 only and only with a timer (`wake_after_ms` or the
+ *  RTC/TIMER bit): an untimed request answers ALP_ERR_OUT_OF_RANGE until the
+ *  I2C0 wake line is bench-proven.  The firmware runs I2C0 from IRC8M while it
+ *  is armed.  A firmware that predates the flags ignores the bit (the timer
+ *  and SPI CS still wake it). */
+#define GD32G553_POWER_FLAG_WAKE_I2C 0x01u
+
+/** Default wake wait: pause between the wake pulse and the real frame.  Covers
+ *  IRC8M start-up plus the PLL relock (the firmware restores the clock before
+ *  any handler runs); bench-tune per carrier. */
+#define GD32G553_POWER_WAKE_LATENCY_US_DEFAULT 2000u
+
+/** Default number of times the wake procedure repeats before giving up. */
+#define GD32G553_POWER_WAKE_RETRIES_DEFAULT 2u
+
+/** Options of @ref gd32g553_set_power_mode.  A zeroed struct (or NULL) is a
+ *  valid "no wake sources, defaults" request. */
+typedef struct {
+	uint32_t wake_bitmap;     /**< ALP_POWER_WAKE_* bits (RTC / TIMER only on the GD32). */
+	uint32_t wake_after_ms;   /**< Timed wake, 0 = none (max ~32.7 s; FWDGT may cap it). */
+	uint8_t  flags;           /**< GD32G553_POWER_FLAG_* (0 for a pre-flags firmware). */
+	uint32_t wake_latency_us; /**< Wake wait, 0 = @ref GD32G553_POWER_WAKE_LATENCY_US_DEFAULT. */
+	uint8_t  wake_retries;    /**< Wake retries, 0 = @ref GD32G553_POWER_WAKE_RETRIES_DEFAULT. */
+} gd32g553_power_opts_t;
+
 /**
- * @brief Request the GD32 + the bridged Renesas SoC enter a sleep mode.
+ * @brief Move the GD32 bridge into a low-power mode (and handle its wake).
  *
- * Request payload: `mode:u8 reserved:u8 wake_bitmap:u32
- * wake_after_ms:u32`.  Reply: empty + STATUS.  The supervisor
- * configures the wake sources, signals the Renesas SoC to enter
- * the matching mode, and re-runs the bridge handshake on wakeup
- * (host-side reciprocal: call
- * @c alp_z_v2n_supervisor_invalidate() before this returns so
- * the next bridge acquire re-inits).
+ *   - 0 RUN: cancels a request still waiting for its quiet-link window.
+ *   - 1 SLEEP: core idle, every clock and peripheral running; never refused.
+ *   - 2 DEEP_SLEEP: RAM kept, clocks gated.  Woken by SPI CS, by a BRD_I2C
+ *     address match (@ref GD32G553_POWER_FLAG_WAKE_I2C) or by the timer.
+ *   - 3 STANDBY: SRAM lost; the wake is a reset, so the next command
+ *     re-reads the version and re-negotiates the link (like an OTA commit).
  *
- * Mirrors @ref alp_power_request_sleep in <alp/power.h>.
+ * Bridge protocol minor >= @ref GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR (0.17)
+ * is required: below it this returns @c ALP_ERR_NOSUPPORT without a wire trip,
+ * because an older firmware ignores the flags byte and has no BUSY gate.  From
+ * that minor on, the firmware answers @c ALP_ERR_BUSY (nothing changed) for modes 2 and 3 while
+ * an ADC stream, a PWM output or capture, a DAC output, an OTA session or an
+ * unconfirmed trial is live: stop it, or use mode 1.  @c ALP_ERR_INVAL for a
+ * request it cannot honour (no timer in mode 2 or 3, an unknown flag),
+ * @c ALP_ERR_OUT_OF_RANGE for an untimed WAKE_I2C or a timer the watchdog
+ * would cut short, @c ALP_ERR_NOSUPPORT on firmware without the mode (and for a
+ * wake source the GD32 cannot arm).
  *
- * @param[in] ctx            Initialised driver context.
- * @param[in] mode           Sleep mode: 0 = run (no-op),
- *                           1 = sleep, 2 = deep-sleep, 3 = standby.
- * @param[in] wake_bitmap    Bitmap of @c ALP_POWER_WAKE_* macros.
- * @param[in] wake_after_ms  Max wall-clock wait, or 0 for "no timer".
+ * STANDBY dead window: after an accepted mode 3 the call BLOCKS for
+ * @c wake_after_ms plus a fixed boot margin before returning, because the
+ * firmware enters STANDBY up to one 50 ms tick after its reply and a
+ * GET_VERSION in that window would still be answered by the old image, which
+ * would clear the pending renegotiation before the reset happens.  A timer is
+ * mandatory for mode 3, so the wait is bounded (max ~32.7 s).
  *
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
+ * Wake rule (after an accepted mode 2).  The entry happens up to one 50 ms tick
+ * AFTER the reply, when the link is quiet, so the host cannot tell whether the
+ * bridge is asleep.  The next command therefore runs @ref gd32g553_power_wake
+ * first: one throw-away PING (a CS wake loses the frame clocked during it, and
+ * a lost frame never reaches a handler, so nothing is applied twice), a wait of
+ * @c wake_latency_us, then RUN, which also cancels a request that never got to
+ * sleep.  An I2C wake instead completes the transaction that woke the part, with
+ * SCL stretched for the wake latency: allow it on the I2C master.
+ *
+ * Call it over SPI (the opcode is not on the I2C allow-list).
+ *
+ * @param[in] ctx   Initialised driver context.
+ * @param[in] mode  0 RUN, 1 SLEEP, 2 DEEP_SLEEP, 3 STANDBY.
+ * @param[in] opts  Wake sources and wake tuning; NULL = all defaults.
+ *
+ * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (mode > 3, unknown flag,
+ *         or a flag on a mode other than 2), ALP_ERR_BUSY, ALP_ERR_OUT_OF_RANGE,
+ *         ALP_ERR_NOSUPPORT (bridge below protocol 0.17, or no such mode),
+ *         ALP_ERR_IO / ALP_ERR_TIMEOUT (wake failed, or a mode-2 request whose
+ *         reply was lost: it may have latched, so the context assumes the
+ *         bridge is asleep and the next command retries the wake).
  */
-alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx,
-                                     uint8_t     mode,
-                                     uint32_t    wake_bitmap,
-                                     uint32_t    wake_after_ms);
+alp_status_t
+gd32g553_set_power_mode(gd32g553_t *ctx, uint8_t mode, const gd32g553_power_opts_t *opts);
+
+/**
+ * @brief Wake a bridge that may be in Deep-sleep.
+ *
+ * No-op unless an earlier @ref gd32g553_set_power_mode accepted mode 2.  Called
+ * automatically before every other command; call it directly to wake the bridge
+ * at a time of your choosing.  Sends a throw-away PING (result ignored), waits
+ * the wake latency, then a RUN request, repeating up to the retry count while
+ * the answer is @c ALP_ERR_IO / @c ALP_ERR_TIMEOUT.
+ *
+ * @param[in] ctx  Initialised driver context.
+ * @return ALP_OK once the bridge answers, else the last transport error.
+ */
+alp_status_t gd32g553_power_wake(gd32g553_t *ctx);
 
 /* ------------------------------------------------------------------ */
 /* v0.5 (§2B wave-2) -- chunked DSP-chain upload                       */
@@ -1029,6 +1743,11 @@ alp_status_t gd32g553_adc_spectrum_read(gd32g553_t *ctx,
 /* bridge long enough that the reply transaction can miss -- treat    */
 /* ALP_ERR_IO from those as "issued, confirm via GET_STATE" (or, for  */
 /* COMMIT/ROLLBACK, by re-initialising against the rebooted bridge).  */
+/*                                                                    */
+/* gd32g553_ota_image_crc32() computes the expected_crc32 BEGIN wants */
+/* (and the value to cross-check computed_crc32 against) -- Zephyr    */
+/* implementation in src/zephyr/gd32g553_ota_crc_zephyr.c, HW/SW dual */
+/* path, this header does not include <zephyr/...> to stay portable.  */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -1049,7 +1768,7 @@ bool gd32g553_ota_supported(const gd32g553_t *ctx);
 
 /** OTA state-machine snapshot returned by @ref gd32g553_ota_get_state.
  *  Values are the WIRE encoding from the firmware state machine
- *  (firmware/gd32-bridge/src/ota.c) -- keep numerically identical. */
+ *  (gd32-bridge-firmware:src/ota.c) -- keep numerically identical. */
 typedef enum {
 	GD32G553_OTA_STATE_IDLE     = 0, /**< No upgrade session open. */
 	GD32G553_OTA_STATE_READY    = 1, /**< Session open; accepting chunks. */
@@ -1059,13 +1778,39 @@ typedef enum {
 } gd32g553_ota_state_t;
 
 /** Slot id -- the WIRE encoding from the firmware's A/B metadata
- *  (firmware/gd32-bridge/src/ota_layout.h OTA_SLOT_A/B); 0xFF is the
+ *  (gd32-bridge-firmware:src/ota_layout.h OTA_SLOT_A/B); 0xFF is the
  *  GET_STATE "no pending slot" sentinel. */
 typedef enum {
 	GD32G553_OTA_SLOT_A    = 0u,
 	GD32G553_OTA_SLOT_B    = 1u,
 	GD32G553_OTA_SLOT_NONE = 0xFFu, /**< No slot (e.g. nothing pending). */
 } gd32g553_ota_slot_t;
+
+/** OTA failure cause -- the `err` byte CMD_OTA_GET_STATE's reply gained
+ *  in protocol v0.14 (gh#101).  Values are the WIRE encoding from the
+ *  firmware's `gd32_bridge_ota_err_t` (gd32-bridge-firmware:src/protocol.h)
+ *  -- keep numerically identical; do NOT renumber.  Meaningless (always
+ *  @ref GD32G553_OTA_ERR_NONE) against a peer below @ref
+ *  GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR, which never sends this byte. */
+typedef enum {
+	GD32G553_OTA_ERR_NONE               = 0x00, /**< No error recorded. */
+	GD32G553_OTA_ERR_SESSION_RANGE      = 0x01, /**< BEGIN/VERIFY/COMMIT image
+	                                              *   size out of range. */
+	GD32G553_OTA_ERR_ERASE_FAILED       = 0x02, /**< Background page erase failed. */
+	GD32G553_OTA_ERR_CHUNK_RANGE        = 0x03, /**< Chunk offset/length rejected. */
+	GD32G553_OTA_ERR_PROGRAM_FAILED     = 0x04, /**< Flash program failed
+	                                              *   (PGERR/PGSERR). */
+	GD32G553_OTA_ERR_VERIFY_CRC         = 0x05, /**< VERIFY's CRC comparison failed. */
+	GD32G553_OTA_ERR_COMMIT_FAILED      = 0x06, /**< COMMIT: bootability check or
+	                                              *   metadata commit failed. */
+	GD32G553_OTA_ERR_ERASE_TARGET       = 0x07, /**< Erase target would intersect
+	                                              *   the running slot. */
+	GD32G553_OTA_ERR_NOT_TRIAL_CAPABLE  = 0x08, /**< COMMIT refused: image has no
+	                                              *   valid trial marker. */
+	GD32G553_OTA_ERR_META_DEMOTE_FAILED = 0x09, /**< BEGIN: metadata commit that
+	                                              *   demotes the stale target
+	                                              *   slot failed. */
+} gd32g553_ota_err_t;
 
 /** Read-only telemetry of the OTA state machine. */
 typedef struct {
@@ -1076,6 +1821,11 @@ typedef struct {
                                         *   COMMIT); NONE when no session
                                         *   is open. */
 	uint16_t             boot_count;   /**< Monotonic boot counter from the metadata page. */
+	gd32g553_ota_err_t   err;          /**< @ref gd32g553_ota_err_t; cause of the
+                                        *   most recent OTA_ST_ERROR, or NONE.
+                                        *   Always NONE against a peer below
+                                        *   @ref GD32G553_OTA_ERR_MIN_PROTOCOL_MINOR
+                                        *   (gh#101). */
 } gd32g553_ota_state_info_t;
 
 /**
@@ -1093,6 +1843,27 @@ typedef struct {
  *                         legacy 8-byte BEGIN (version unknown) --
  *                         wire-compatible with pre-v0.7 firmware in
  *                         both pairings (protocol v0.7 additive form).
+ *                         The bridge treats an unknown version as a
+ *                         reason to boot the committed image into the
+ *                         TRIAL state (see @ref gd32g553_ota_commit) --
+ *                         desirable for a manual/dev flash where the
+ *                         version isn't tracked; @ref gd32g553_init
+ *                         rides out the resulting STATUS_BUSY window
+ *                         on its own.  This is only right for an
+ *                         INCOMING image that is ITSELF trial-capable
+ *                         (firmware release >= 0.2.14): an older image
+ *                         committed this way still boots into TRIAL,
+ *                         never confirms itself (it has no confirm
+ *                         logic to run), and the bootloader reverts it
+ *                         ~33 s later on FWDGT expiry.  To install an
+ *                         older image that must actually survive,
+ *                         pass its real, known version instead --
+ *                         a KNOWN version below 0.2.14 is a deliberate
+ *                         downgrade guard: the bridge commits/rolls
+ *                         back to it WITHOUT the TRIAL dance at all
+ *                         (no STATUS_BUSY window), since an image that
+ *                         predates the confirm protocol could never
+ *                         satisfy it.
  * @param chunk_max_bytes  Out: chunk size the firmware accepts in
  *                         a single @ref gd32g553_ota_write_chunk.
  * @param target_slot      Out: slot the bridge will write into.
@@ -1148,13 +1919,63 @@ alp_status_t gd32g553_ota_write_chunk(gd32g553_t    *ctx,
 alp_status_t gd32g553_ota_verify(gd32g553_t *ctx, bool *verified, uint32_t *computed_crc32);
 
 /**
+ * @brief Compute the CRC32 of an OTA image candidate the way the wire
+ *        protocol expects it: IEEE 802.3 reflected, zlib-compatible
+ *        (docs/gd32-bridge-protocol.md §10 -- the same value @ref
+ *        gd32g553_ota_begin's `expected_crc32` and @ref
+ *        gd32g553_ota_verify's `computed_crc32` both speak).
+ *
+ * Hardware-accelerated (Alif Ensemble E8 CRC engine, ADR 0017 Tier-1.5,
+ * `zephyr/drivers/crc/crc_alif.c`) on a platform that instantiates it and
+ * has it ready.  Every other case -- the accelerator absent from this
+ * build, not `status = "okay"` in the active devicetree, not
+ * `device_is_ready()` (PD-6 is not available in STANDBY/STOP, per HWRM
+ * Table 15-26; this call never blocks on that -- it just falls back), or
+ * an image length the engine's 32-bit word path cannot consume whole
+ * (HWRM 15.2.5.3.5/.6: `CRC_DATA_IN_32_n` only takes whole 4-byte
+ * words) -- computes the identical value in portable software instead.
+ * OTA image verification therefore never hard-depends on the
+ * accelerator being present or powered.
+ *
+ * @param image      Image bytes.
+ * @param len        Image length in bytes (need not be a multiple of 4;
+ *                   only the hardware fast path requires that).
+ * @param out_crc32  Out: CRC32 of @p image.
+ *
+ * @return ALP_OK, or ALP_ERR_INVAL if @p out_crc32 is NULL, or if
+ *         @p image is NULL while @p len is nonzero.
+ */
+alp_status_t gd32g553_ota_image_crc32(const uint8_t *image, size_t len, uint32_t *out_crc32);
+
+/**
  * @brief Stage a metadata-page flip and reset the bridge.
  *
  * On reboot the bootloader sees the pending flip, applies it
- * atomically, and starts the new slot.  The SPI / I2C link drops
- * during the reset; the host MUST re-issue @ref gd32g553_init after
- * a short delay (typically a few hundred milliseconds for the
- * bridge to come back online).
+ * atomically, and starts the new slot -- but not yet as CONFIRMED
+ * (only when the committed image is itself trial-capable, firmware
+ * release >= 0.2.14; see @ref gd32g553_ota_begin's @p fw_version
+ * doc for the downgrade-guard case that skips this entirely): the
+ * newly-booted image runs in a TRIAL state and answers STATUS_BUSY to
+ * every opcode (PING/GET_VERSION included) until it decodes its first
+ * CRC-valid frame, which confirms the trial and triggers a SECOND
+ * reset before the link comes back for good
+ * (docs/gd32-bridge-protocol.md §10).  If no valid frame lands within
+ * the bootloader's watchdog window the bootloader reverts to the
+ * previous slot instead -- but ONLY if the bootloader itself
+ * implements the watchdog-revert protection; an old bootloader paired
+ * with a new, trial-capable app still runs the TRIAL/BUSY dance (the
+ * app side alone drives that) but never reverts a hung image, so
+ * bootloader and app must ship together for the safety net to
+ * actually apply.  The SPI / I2C link drops during both resets; the
+ * host MUST re-issue @ref gd32g553_init after a short delay -- it
+ * already rides out the STATUS_BUSY / transient-transport window this
+ * produces (retrying ALP_ERR_IO/ALP_ERR_TIMEOUT only once it has
+ * itself observed at least one ALP_ERR_BUSY in the same init() call,
+ * so an absent bridge still fails fast), so a plain re-init is the
+ * whole contract.  Precondition: the delay must outlast the COMMIT
+ * reset itself.  A re-init whose very first PING lands inside that
+ * reset, before any ALP_ERR_BUSY is seen, returns ALP_ERR_IO /
+ * ALP_ERR_TIMEOUT at once; retry it after a further delay.
  */
 alp_status_t gd32g553_ota_commit(gd32g553_t *ctx);
 
@@ -1162,8 +1983,8 @@ alp_status_t gd32g553_ota_commit(gd32g553_t *ctx);
  * @brief Roll back to the previously-active slot (used after a
  *        committed upgrade bricks the application).
  *
- * Like @ref gd32g553_ota_commit, this resets the bridge and the host
- * must re-init the driver.
+ * Like @ref gd32g553_ota_commit, this resets the bridge into the same
+ * TRIAL-then-confirm sequence and the host must re-init the driver.
  */
 alp_status_t gd32g553_ota_rollback(gd32g553_t *ctx);
 
@@ -1174,6 +1995,13 @@ alp_status_t gd32g553_ota_rollback(gd32g553_t *ctx);
  * Safe to call at any time -- doesn't perturb the chip state.
  * Answers concretely today even on scaffold firmware: the firmware
  * handler reads its own in-RAM session struct + the metadata page.
+ *
+ * Unlike @ref gd32g553_init, this call does NOT retry on
+ * STATUS_BUSY/transient transport errors -- calling it inside the
+ * post-COMMIT/ROLLBACK trial window (docs/gd32-bridge-protocol.md
+ * §10) surfaces `ALP_ERR_BUSY` or `ALP_ERR_IO` exactly once. Re-init
+ * with @ref gd32g553_init first (which rides out that window), then
+ * call this to inspect the confirmed state.
  *
  * @param ctx  GD32G553 bridge context (must be initialised first).
  * @param out  Populated on @ref ALP_OK.  May not be NULL.

@@ -32,7 +32,7 @@ _ORACLE_DIR = Path(__file__).resolve().parent / "oracle"
 
 
 def _load(name: str) -> dict:
-    return json.loads((_ORACLE_DIR / f"{name}.build-plan.json").read_text())
+    return json.loads((_ORACLE_DIR / f"{name}.build-plan.json").read_text(encoding="utf-8"))
 
 
 def _fails(oracle: dict, mutated: dict) -> bool:
@@ -43,7 +43,10 @@ def _fails(oracle: dict, mutated: dict) -> bool:
 def test_mutated_command_fails():
     oracle = _load("multicore_rpmsg-aen")
     mutated = copy.deepcopy(oracle)
-    mutated["slices"][0]["command"]["tool"] = "not-cmake"
+    # slices[0] (a32_cluster) carries `command: null` -- issue #1982, the
+    # MACHINE is known-non-buildable; slices[1] (m55_he) is this fixture's
+    # real, non-null command.
+    mutated["slices"][1]["command"]["tool"] = "not-cmake"
     assert _fails(oracle, mutated)
 
 
@@ -115,6 +118,22 @@ def test_content_only_mutation_passes():
     assert not _fails(oracle, mutated)
 
 
+def test_deferred_placeholders_is_not_diffed():
+    """#2696: derived from artefact contents, which are not diffed either."""
+    oracle = _load("multicore_rpmsg-aen")
+    mutated = copy.deepcopy(oracle)
+    mutated["deferredPlaceholders"] = ["MENDER_TENANT_TOKEN"]
+    assert not _fails(oracle, mutated)
+
+
+def test_other_new_top_level_key_still_fails():
+    """Dropping `deferredPlaceholders` must not become a blanket rule."""
+    oracle = _load("multicore_rpmsg-aen")
+    mutated = copy.deepcopy(oracle)
+    mutated["someNewTopLevelKey"] = []
+    assert _fails(oracle, mutated)
+
+
 def test_sysbuild_slice_wrongly_gaining_extra_conf_file_fails():
     """MINOR 5: the `-DEXTRA_CONF_FILE` strip is scoped to non-sysbuild
     slices only.  Both `connectivity_iot-fleet-ota` slices are sysbuild
@@ -139,7 +158,9 @@ def test_non_sysbuild_slice_extra_conf_file_still_stripped():
     stripped and does not, on its own, fail the comparator."""
     oracle = _load("multicore_rpmsg-aen")
     mutated = copy.deepcopy(oracle)
-    sl = mutated["slices"][0]
+    # slices[0] (a32_cluster) carries `command: null` (#1982); slices[1]
+    # (m55_he) is this fixture's real, non-sysbuild command.
+    sl = mutated["slices"][1]
     assert "--sysbuild" not in (sl["command"].get("args") or [])
     sl["command"]["args"] = list(sl["command"]["args"]) + [
         "-DEXTRA_CONF_FILE=/some/path/alp.conf"]
@@ -297,4 +318,28 @@ def test_relocation_allowance_does_not_reach_outputdir_or_other_fields():
 
     mutated = _nest(oracle)
     mutated["slices"][1]["command"]["cwd"] = "build/m55_he-zephyr/build"
+    assert _fails(oracle, mutated)
+
+
+def test_sysbuild_slice_image_scoped_extra_conf_file_stripped():
+    """#866: a sysbuild slice's `-D<image>_EXTRA_CONF_FILE=` is the intended
+    plan-native delta and does not, on its own, fail the comparator."""
+    oracle = _load("connectivity_iot-fleet-ota")
+    mutated = copy.deepcopy(oracle)
+    sl = mutated["slices"][0]
+    args = list(sl["command"]["args"])
+    app = args[args.index("--sysbuild") - 1]
+    image = app.rstrip("/").rsplit("/", 1)[-1]
+    sl["command"]["args"] = args + [
+        f"-D{image}_EXTRA_CONF_FILE=/some/path/alp.conf"]
+    assert not _fails(oracle, mutated)
+
+
+def test_sysbuild_slice_wrong_image_extra_conf_file_still_fails():
+    """#866: a prefix naming another image (e.g. mcuboot) is a regression."""
+    oracle = _load("connectivity_iot-fleet-ota")
+    mutated = copy.deepcopy(oracle)
+    sl = mutated["slices"][0]
+    sl["command"]["args"] = list(sl["command"]["args"]) + [
+        "-Dmcuboot_EXTRA_CONF_FILE=/some/path/alp.conf"]
     assert _fails(oracle, mutated)

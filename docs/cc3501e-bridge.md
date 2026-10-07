@@ -66,31 +66,61 @@ customers trade pin count against Wi-Fi throughput differently:
 | Transport | Role | CC3501E pins | Availability |
 |-----------|------|--------------|--------------|
 | **SPI0 slave** (CC35; Alif master = SPI1) | **DEFAULT** + always-available baseline/fallback | `GPIO_27/28/29` | Always |
-| **SDIO slave** | OPTIONAL, higher throughput for Wi-Fi data | `GPIO_3/4/5/6/10/11` | Only when the board dedicates the Alif SDIO to the CC3501E |
+| **SDIO slave** | future only -- NOT usable today | `GPIO_3/4/5/6/10/11` | **Never on current boards**: the 0 ohm links to the Alif are not populated |
 
-The catch: the Alif Ensemble has a **single SDIO controller**, shared at
-board level (mux resistors) with the micro-SD slot.  So SDIO is
-available to the CC3501E **only on boards without an SD card** — when an
-SD card is populated, SDIO is blocked and the link **must use SPI**.
-SPI is therefore always wired and always the fallback.
+**SDIO is NOT AVAILABLE on any board built to date, and the reason is
+hardware, not configuration.**  The six CC3501E SDIO lines
+(`metadata/e1m_modules/aen/inter-chip.tsv`: `GPIO_3/4/5/6/10/11` ->
+`SD_CLK`/`SD_CMD`/`SD_D0..D3` -> Alif `P13_0..P13_3`, `P14_0`, `P14_1`)
+reach the Alif only through **0 ohm links that are not populated**.  No
+firmware option, and no software SDIO implementation, can work around an
+open circuit -- and bit-banging elsewhere is not possible either, because
+those six Alif pins are the only place the CC3501E's SDIO can land.
+
+Two further constraints stack behind that, both of which still apply if
+the links are ever populated: the Alif Ensemble has a **single SDIO
+controller**, shared at board level (a 74LVC157/74LV3257 mux,
+`SDIO_MUX_EN` = `GPIO_26` on both hw revisions; `SDIO_MUX_SEL` is
+firmware-drivable only on r1 (`GPIO_30`) -- on r2 it is NOT a CC3501E
+pin at all, it is hardware-strapped, see "Safe-default mux state"
+below) with the micro-SD slot -- so the CC3501E and an SD card can
+never use it at the same time, only time-share it -- and the Alif's
+single controller is committed to the SD card in the current product.
+**On the E1M-EVK 2626-R2 the microSD side of that same mux is
+additionally hardware-defective (#2051): the as-built 74LVC157 has no
+high-impedance state, so its SoC-facing outputs are held low whenever
+the mux is powered, regardless of `SDIO_MUX_EN`** -- see
+`docs/boards/e1m-evk.md` and `examples/aen/aen-sdhc-probe`'s README.
+The SD host controller stays disabled in the devicetree on this board
+revision as a result, independent of the "committed to the SD card"
+statement above.
+
+The practical consequence: **SPI is the only host-control link**, its
+ceiling is the CC3501E slave's ~15 MHz (see below), and any throughput
+target above that must be met inside the SPI budget, not by switching
+transport.  The `sdio` value of `CC3501E_CONTROL_TRANSPORT` builds and is
+kept for a future board that populates the links; it is not a runtime
+choice on current hardware.
 
 The choice is a per-board integration decision: in a studio build it
 comes from the customer `board.yaml`; for a hand-built firmware it's the
 `CC3501E_CONTROL_TRANSPORT` CMake option (default `spi`).  Either way the
 firmware brings up exactly one control transport, and both feed the same
 command dispatcher — see
-[`firmware/cc3501e/`](../firmware/cc3501e/) (`transport_spi.c` /
+[`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) (`transport_spi.c` /
 `transport_sdio.c`).
 
-### Current rev: hardware-CS SPI (SS0 + per-phase READY)
+### Current rev: hardware-CS SPI (SS0; optional READY)
 
 The current E1M-AEN board rev runs the inter-chip SPI as a **proper
 hardware-framed link**: SCLK/MOSI/MISO **plus a peripheral-driven
 chip-select** — Alif `P14_7` = `SPI1_SS0_C` ↔ the CC3501E SS pad.  The
 Alif dwc-ssi master asserts/deasserts **SS0 per transfer**, so every
-transaction is HW-framed by a real CS edge, and each of the four phases
-(request header → request payload → reply header → reply payload) is
-gated by a per-phase READY handshake.  This is **not** a CS-less /
+transaction is HW-framed by a real CS edge; each of the four phases
+(request header → request payload → reply header → reply payload) also
+runs a fixed inter-phase settle, OPTIONALLY extended by a host-IRQ READY
+read when a board wires one in (unwired, and READY is left NULL, by
+default — see "Bench-validated" below).  This is **not** a CS-less /
 clock-count scheme and **not** a GPIO bodge — the CS is the SPI
 peripheral's own slave-select.  Validated on silicon 2026-06-24 (E1M-AEN801
 EVK bench, fw v0.0.207.0).
@@ -101,25 +131,33 @@ work (see "Bench-validated" below) with no settle-gap dependence.
 
 #### Link speed
 
-The four AEN bridge examples request **14 MHz**, which is just under the
-**CC35 slave ceiling of ~15 MHz**.  Silicon-validated cold + warm on the
-E1M-AEN801 EVK, concurrently with Wi-Fi/BLE traffic.
+The AEN bridge examples request **25 MHz**, under the CC3501E's
+peripheral-mode maximum of **30 MHz** (SWRS343A §6.14.2.3.3).  Their
+predecessor ran at ~14.3 MHz, and that earlier rate is what the older
+silicon validation cold + warm on the E1M-AEN801 EVK, concurrently with
+Wi-Fi/BLE traffic, was taken at.
 
 The actual SCLK is the request quantised by the BAUDR divider, which
-`spi_dw` computes as an integer truncation of the SSI functional clock
-over the requested rate (`SPI_DW_CLK_DIVIDER`).  The overlay sets that
-functional clock to 200 MHz, so a 14 MHz request divides to 14 and the
-link runs at 200/14 ≈ **14.3 MHz** — slightly *above* the request, because
-truncating the divider rounds the clock up.  Treat that as derived from
-the driver's arithmetic, not as a scope measurement: no captured SCLK
-figure is recorded in-tree.
+`spi_dw` computes from the SSI functional clock over the requested rate.
+The overlay sets that functional clock to 200 MHz, and the divisor must be
+even, so a 25 MHz request lands exactly on `BAUDR = 0x00000008`.  The
+~14.3 MHz predecessor was scope-confirmed, which is what validates the
+200 MHz functional-clock figure the divider assumes; the 25 MHz step is
+derived from that arithmetic, not separately captured on a scope.
 
-Reaching that rate required tuning the master, not the slave: `spi_dw`
+Reaching those rates required tuning the master, not the slave: `spi_dw`
 leaves `RX_SAMPLE_DLY = 0`, and at 8 MHz and above the MISO round-trip
-over the on-SoM traces mis-samples.  Setting `RX_SAMPLE_DLY = 6` shifts
-the capture point past the round-trip, and the link then samples clean up
-to the slave ceiling — roughly 14× the throughput of the original 1 MHz
-bring-up setting.  The value is silicon-tuned, not derived; see
+over the on-SoM traces mis-samples.  Setting `RX_SAMPLE_DLY` shifts the
+capture point past the round-trip, and the link then samples clean up to
+the slave ceiling — roughly 14× the throughput of the original 1 MHz
+bring-up setting.  The value is silicon-tuned, not derived.  The current
+setting is **4**, chosen from a `0..10` sweep run at the examples' 25 MHz
+working point on `E1M-AEN803` serial `2026W36-0002`: `0..7` all passed,
+`8` hard-failed every run, and `9`/`10` passed again — so `4` sits in the
+middle of the measured-good span rather than near either edge, and
+anything above `7` is treated as unqualified.  A `RX_SAMPLE_DLY` set to
+`0` does not disable the delay, it hands the setting back to the SPI
+node's `rx-delay` devicetree property.  See
 `CC3501E_BRIDGE_SPI_FREQ_HZ` and the `RX_SAMPLE_DLY` note in the AEN
 bridge examples' `cc3501e_bridge.h` (e.g.
 [`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h`](../examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h)).
@@ -135,12 +173,14 @@ budgets above: the Alif is SPI master, so the CC3501E cannot initiate, and
 a host-IRQ is the standard SPI-coprocessor way to deliver those events
 without polling the bus.  It is an optional optimization on top of the
 working HW-CS transport, not a prerequisite for it.  See
-`firmware/cc3501e/DESIGN.md` "Next-rev hardening".
+`cc3501e-bridge-firmware:DESIGN.md` "Next-rev hardening".
 
 #### Bench-validated: HW-CS bridge survives radio ops + concurrent Wi-Fi/BLE (2026-06-24)
 
-With the hardware SS0 chip-select per transfer + per-phase READY gating,
-the link stays framed across every radio op — including the ~15 s STA
+With the hardware SS0 chip-select per transfer (READY is OPTIONAL and left
+unwired on the boards these numbers were taken on — see
+`chips/cc3501e/cc3501e_core.c`'s `cc3501e_reply_gate()` comment), the link
+stays framed across every radio op — including the ~15 s STA
 association — and Wi-Fi and BLE run **concurrently**.  Measured on silicon
 (E1M-AEN801 EVK):
 
@@ -148,7 +188,7 @@ association — and Wi-Fi and BLE run **concurrently**.  Measured on silicon
 |---|---|---|
 | `wifi scan` | ~3 s | survives |
 | `ble scan` / `ble enable` | scan/enable window | survives (NimBLE host up) |
-| `wifi connect` (STA associate) | **~15 s association**; worst case, a never-associating AP blocks `companion_conn_thread` for the console's full `ALP_COMPANION_WIFI_CONN_MS = 50000u` (50 s) before it reports the failure — accounting-derived, not bench-measured; it was ~16.7 s before the #1481 poll-budget fix | **survives** — async connect, shell stays live; `ver` after the connect still returns (no desync, no power-cycle) |
+| `wifi connect` (STA associate) | **~15 s association**; `companion_conn_thread` waits up to `ALP_COMPANION_WIFI_CONN_MS = 75000u` (75 s), above the bridge's 70 s worst case (role-up 10 s + association 30 s + DHCP 30 s); a failure the firmware reports returns sooner | **survives** — async connect, shell stays live; `ver` after the connect still returns (no desync, no power-cycle) |
 | Wi-Fi + BLE concurrent (`wifi scan` + `ble enable` + `wifi connect`) | continuous | survives — all succeed together, bridge does not desync |
 
 The earlier CS-less r1 limitation — a long radio op (the ~15 s
@@ -247,15 +287,15 @@ attempts for at least 1 s after `WIFI_EN`/`nRESET` release.  The
 inter-chip SPI handshake's first PING-reply also serves as the
 "boot is complete, firmware is alive" signal.
 
-### Where the firmware actually lives (4 MB xSPI flash)
+### Where the firmware actually lives (8 MB xSPI flash)
 
 The CC3501E exposes an internal xSPI bus (datasheet pinout:
 `XSPI_D0..3`, `XSPI_CLK`, `XSPI_CS`).  The E1M-AEN module
-populates a **4 MB external xSPI flash** on that bus carrying:
+populates an **8 MB external xSPI flash** on that bus carrying:
 
 - BL2 (TI-signed 2nd-stage bootloader)
 - Application image (SimpleLink + Wi-Fi stack + BLE stack +
-  the embedded `firmware/cc3501e/` SPI/SDIO-slave parser)
+  the embedded `cc3501e-bridge-firmware:` SPI/SDIO-slave parser)
 - Filesystem region (TI SimpleLink file system for certs,
   service-pack, profile data)
 
@@ -268,8 +308,8 @@ not through any strap-pin recovery mode (there isn't one).
 ## Where the firmware lives (embedded in alp-sdk)
 
 The firmware that runs on the CC3501E lives **in this repo** at
-[`firmware/cc3501e/`](../firmware/cc3501e/) -- exactly as the
-[`gd32-bridge`](../firmware/gd32-bridge/) firmware does.  Both are the
+[`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) -- exactly as the
+[`gd32-bridge`](https://github.com/alplabai/gd32-bridge-firmware) firmware does.  Both are the
 same class of artifact (an on-SoM helper-MCU bridge: custom binary
 protocol, host driver in alp-sdk, prebuilt blob shipped in alp-sdk, its
 own toolchain + version axis), so they are maintained the same way.  The
@@ -279,13 +319,54 @@ repo" plan was dropped -- is [ADR 0015](adr/0015-cc3501e-firmware-embedded.md).
 | Side | Lives in | Owns |
 |------|----------|------|
 | Host | `chips/cc3501e/` + `include/alp/protocol/cc3501e.h` | Alif-side SPI/SDIO client; `<alp/iot.h>` / `<alp/ble.h>` route-through. |
-| Device | `firmware/cc3501e/` | Firmware on the CC3501E: SPI/SDIO-slave parser + TI SimpleLink Wi-Fi/AP + BLE 5.4 + GPIO proxy + camera-enable drivers. |
+| Device | `cc3501e-bridge-firmware:` | Firmware on the CC3501E: SPI/SDIO-slave parser + TI SimpleLink Wi-Fi/AP + BLE 5.4 + GPIO proxy + camera-enable drivers. |
 
 The firmware `#include`s the wire-protocol header **directly** (no
 mirror), so a protocol change moves both sides + the wire-vector tests
 in one commit.  The Alif-side client still refuses to talk to a firmware
 whose `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the compile-time
 `ALP_CC3501E_PROTOCOL_VERSION`.
+
+**The wire version is `MAJOR.MINOR`, and only MAJOR gates the link** (ADR
+0033). The current wire is **4.0** (`ALP_CC3501E_PROTOCOL_MAJOR` / `_MINOR`,
+`<alp/protocol/cc3501e.h>`) — MAJOR 4 adds a CRC-16/CCITT-FALSE trailer to
+every frame except a CRC-less `GET_VERSION` request (see the normative rule
+below). The host is bilingual during the migration window: it also still
+accepts a MAJOR-**3** peer (`ALP_CC3501E_PROTOCOL_MAJOR_LEGACY`), because a
+board still on 3.1 firmware can only reach 4.0 by OTA, and that OTA has to
+run *through* this host — see "MIGRATION ORDER" above
+`ALP_CC3501E_PROTOCOL_MAJOR`. MAJOR moves only when an unchanged host
+would be *misread* — reusing a previously-reserved byte or flag bit, changing
+framing, changing a struct layout, changing what an existing field means.
+Everything additive is MINOR: new opcodes, new optional request fields whose
+absent form keeps its old meaning, new events. A MINOR difference does **not**
+refuse the link, so shipping a feature no longer forces a lockstep reflash.
+
+Ask `CMD_GET_CAPABILITIES` (`0x06`) rather than inferring a feature from the
+version: the bitmap is composed from the same compile-time switches that decide
+which HAL bodies link, so a build without Wi-Fi or without BLE reports the truth
+where its version number would not.
+
+`MAJOR 0` is reserved: a firmware built before ADR 0033 answers `GET_VERSION`
+with its raw v1..v9 integer, which decodes to major 0 — so "older than the
+scheme" stays distinguishable from "disagrees about the frame layout".
+
+The v1..v9 history below used a single raw integer. Retroactively: v5 = `1.0`,
+v6 = `1.1`, v7 = `2.0`, v8 = `3.0`, v9 = `3.1`. Only v7 and v8 could actually
+misread an old host; v6 and v9 were additive and need not have cost anyone a
+reflash. What each bump changed:
+
+| Version | Change |
+|---|---|
+| v5 | added `OTA_UPDATE_MODE`; raised `ALP_CC3501E_MAX_PAYLOAD` 512 -> 4096 |
+| v6 | SPI1 host-passthrough opcodes (`0x55`..`0x57`) |
+| v7 | request identity for `SOCK_SEND` only -- an 8-bit retry seq in a spare struct byte, so a lost reply could not make a retry look like a new send and re-transmit it |
+| v8 | request identity for EVERY worker-routed opcode -- a 5-bit retry seq in flags bits 3..7 of the frame header, costing zero wire bytes; and `DIAG_GET_STATS` grew additively 8 -> 16 bytes with `worker_execs` / `retry_latch_hits`, the two counters that distinguish "the retry was absorbed" from "the operation ran twice" |
+| v9 | the LISTENING path, so a host can **serve** over the module's soft-AP: `SOCK_BIND` (`0x25`), `SOCK_LISTEN` (`0x26`) and the async `EVT_SOCK_ACCEPTED` (`0x2C`); plus an optional interface-selector byte on `WIFI_GET_IP` (`0x17`) so a serving application can read the AP-side address instead of inferring it from a client's DHCP gateway. There is deliberately **no accept opcode** -- `accept()` blocks, and a worker-routed blocking body holds READY low across the whole bridge, so an inbound connection is delivered as an event on the existing polled queue instead |
+
+Seq `0` is reserved on the wire to mean "this request carries no identity",
+so the usable space is 1..31 and a pre-v8 host -- which leaves those bits
+clear -- can never be answered from a cached reply.
 
 ## Firmware: pre-flashed by Alp; updated via OTA; customer-flashable only to recover a bricked device
 
@@ -302,20 +383,20 @@ bricked device, using Alp Lab-supplied binaries — it is not a routine
 customer flash target.  The OTA channel is a separate fact and does not
 itself make a helper un-flashable (the GD32 bridge has both a channel
 and a recovery-only flash path).  The version-pinned prebuilt blob at
-`firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` is that OTA payload's
+`cc3501e-bridge-firmware:prebuilt/cc3501e-vX.Y.Z.bin` is that OTA payload's
 provenance and also the binary a recovery flash uses.
 
 Rebuilding or customizing the firmware is **optional and open** — the
 bridge firmware source is Alp's (public, like the GD32 bridge), in-tree
-at [`firmware/cc3501e/`](../firmware/cc3501e/), built on TI's
+at [`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware), built on TI's
 **BSD-3-licensed** SimpleLink Wi-Fi SDK.  The in-tree firmware:
 
 1. Vendors TI's **BSD-3-licensed** SimpleLink CC33xx SDK as an optional
-   git submodule under `firmware/cc3501e/vendor/simplelink-cc33xx/` —
+   git submodule under `cc3501e-bridge-firmware:vendor/simplelink-cc33xx/` —
    only the bench `ti` build pulls it; not recursed by default.  Same
    shape as the GD32 GigaDevice library.
 2. Builds with TI Code Composer Studio or the open `ticlang` toolchain
-   (`firmware/cc3501e/toolchain/ticlang.cmake`).
+   (`cc3501e-bridge-firmware:toolchain/ticlang.cmake`).
 3. `#include`s this repo's `include/alp/protocol/cc3501e.h` **directly**
    — no mirrored copy, so the two sides cannot drift.
 4. Wires commands into TI's SimpleLink Wi-Fi APIs (`sl_*`) and the BLE
@@ -323,7 +404,7 @@ at [`firmware/cc3501e/`](../firmware/cc3501e/), built on TI's
 5. Drives `GPIO_0`, `GPIO_1` (camera enables) and the GPIO-proxy pads
    (`GPIO_2`, `GPIO_13..30` per `from-cc3501e.tsv`) — v0.4.
 6. Tags releases `vX.Y.Z`; the signed binary lands at
-   `firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin`, the payload Alp ships
+   `cc3501e-bridge-firmware:prebuilt/cc3501e-vX.Y.Z.bin`, the payload Alp ships
    as the OTA update over the bridge SPI — not a customer rebuild-and-flash
    target.
 7. `flash.py` is Alp's internal release/bench tool that produces and
@@ -331,23 +412,72 @@ at [`firmware/cc3501e/`](../firmware/cc3501e/), built on TI's
    customer-facing utility and lives in `alp-sdk-internal`, not this
    public tree.
 
-See [`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) for the
-build + tree layout and `firmware/cc3501e/DESIGN.md`
+See [`cc3501e-bridge-firmware:README.md`](https://github.com/alplabai/cc3501e-bridge-firmware#readme) for the
+build + tree layout and `cc3501e-bridge-firmware:DESIGN.md`
 for the v0.1 scope + wire-reply contract.
 
 ## Versioning
 
-Three independent version axes (same model as the GD32 bridge) — track
-them separately:
+Four independent version axes — track them separately.  Conflating the
+first three with the fourth has repeatedly cost bench time:
 
 | Axis | Where | Bumps when |
 |------|-------|-----------|
-| **Firmware release** | `firmware/cc3501e/firmware-version.txt` (semver) | each firmware release — names the tag + the `cc3501e-vX.Y.Z.bin` prebuilt blob; the device reports it as `fw_version` via `GET_VERSION` / `GET_DIAG_INFO` |
-| **Wire protocol** | `ALP_CC3501E_PROTOCOL_VERSION` (`<alp/protocol/cc3501e.h>`) + `firmware/cc3501e/protocol-version.txt` | the wire format changes; the host refuses a mismatched version |
+| **Firmware release** | `cc3501e-bridge-firmware:firmware-version.txt` (semver) | each firmware release — names the tag + the `cc3501e-vX.Y.Z.bin` prebuilt blob; the device reports it as `fw_version` via `GET_VERSION` / `GET_DIAG_INFO` |
+| **Wire protocol** | `ALP_CC3501E_PROTOCOL_VERSION` (`<alp/protocol/cc3501e.h>`) + `cc3501e-bridge-firmware:protocol-version.txt` | the wire format changes; the host's MAJOR gate is **bilingual**, not a strict mismatch refusal — it accepts exactly `ALP_CC3501E_PROTOCOL_MAJOR` (4) and `ALP_CC3501E_PROTOCOL_MAJOR_LEGACY` (3), and refuses only anything else, so the OTA path from 3.x to 4.x always has a host that can still talk to the peer it is upgrading |
 | **Build / signature** | the signed binary's `.sha256` in `prebuilt/` | every build — pins the exact image |
+| **GPE anti-rollback stamp** | the `--version` the image is signed with (4-part, `major = 0`) | every flashed image — burned **irreversibly** into the part as a monotonic floor; it is *not* the SemVer |
 
 The firmware version moves on its own cadence — a release can ship
 without a protocol bump, and vice-versa.
+
+Three states are live at once here, and conflating them is the recurring
+mistake — track which one a given bench unit is actually running:
+
+- **`cc3501e-bridge-firmware:main`** carries nine merged fixes (widened DHCP
+  lease poll, the SPI re-init that wedged the link after fast operations
+  removed, bounded/non-stale SOCK_SEND, station power-up order + a
+  WIFI_STATUS reason byte, replay-safe SOCK_RECV, sticky EOF on the worker
+  path, a connect-failure-exit SPI reinit skip, in-line SPI self-heal, and
+  the stale `DEAUTH_LEAVING(3)` verdict fix) — merged, but not yet cut as a
+  release.
+- **v0.9.0** (firmware PR #151) has been **cut** carrying all nine — wire
+  protocol **4.0**, stamped GPE **`0.254.15.0`** — but it is **not yet
+  bench-verified** and not yet published to `prebuilt/`. Do not treat it as
+  available to flash.
+- **v0.8.0** (SemVer **0.8.0**, wire protocol **4.0**
+  (`ALP_CC3501E_PROTOCOL_MAJOR` 4, `_MINOR` 0), stamped GPE **`0.254.5.0`**,
+  `cc3501e-bridge-firmware:prebuilt/cc3501e-v0.8.0.bin`) is what `prebuilt/`
+  actually publishes today, and it carries **none** of the nine fixes.
+
+Every bench unit still flashed from `prebuilt/` is on v0.8.0, so host-side
+workarounds for the pre-fix behaviour stay in this driver until a fixed
+build is actually released.
+
+Two rules the stamp adds, both of which read as a dead part when broken:
+
+- **A stamp below the part's burned floor is refused.** The image streams
+  clean, the programmer reports success, and the device keeps the old image
+  (or refuses to boot). A unit used for OTA testing may already sit above a
+  release artifact's stamp — re-wrap the same `.out` at a legal stamp; the
+  binary is not bad.
+- **The stamp must match the version in the signed `programming_instructions`**
+  of the flash-set being programmed, because that file is generated from
+  `--version`. Regenerate both together (`cc3501e-bridge-firmware:ti/regen_flashset.sh`).
+
+`regen_flashset.sh`'s epoch-derived default is fine for same-day bench
+iteration and **not** a release scheme: its high byte wraps every ~194 days, so
+it is not monotonic over a part's lifetime.
+
+> **Unresolved contradiction — do not trust either claim blindly.**
+> `prebuilt/CHANGELOG.md` (0.3.0) states a GPE `major >= 1` fails BL2
+> secure-boot with `AUTH_ERROR`, and `regen_flashset.sh` uses `MAJOR=0`.
+> `ti/package_cc3501e_prod.ps1` and `ti/validate_gpio_bench.ps1` instead
+> default to a `major = 1` stamp and comment that major **must** be `>= 1` (for a bench
+> unit poisoned to `0.9.0.7`). These cannot both hold. Releases here use
+> `major = 0`, which is what the shipped artifacts and the bench flash-sets
+> actually use; resolve the contradiction on silicon before relying on the
+> `>= 1` path.
 
 ## Firmware-side GPIO behaviour contract
 
@@ -364,7 +494,23 @@ Required for M.2 E-key `W_DISABLE1` (CC3501E `GPIO_16` ↔ E1M
 E1M `IO16`, Bluetooth disable).  The current firmware also uses
 these raw CC3501E pins for the bridge (`GPIO16` as SPI0 CS and
 `GPIO17` as READY/host-IRQ), so the SoM metadata records the
-physical wiring while example-local proxy tables omit IO17.  Per
+physical wiring while the generated example proxy tables
+(`scripts/gen_cc3501e_gpio_routes.py`) omit both `IO16` and `IO17`
+(#1859 -- an earlier hand-maintained revision of these tables omitted
+only `IO17`).
+
+**On this board revision the bridge wins, and both pads are refused.**
+`hal/ti/cc3501e_hw_ti_gpio.c` `gpio_pad_reserved()` rejects pads 16 and
+17 from the GPIO proxy outright, so `alp_gpio_*` on E1M `IO16` or `IO17`
+returns an error rather than driving anything -- and that is the correct
+behaviour, since driving either would tear the inter-chip link down
+mid-transfer.  `metadata/e1m_modules/aen/from-cc3501e.tsv` now names the
+claim in the peripheral column (`BRIDGE_READY`, `BRIDGE_SPI_CSN`) so the
+generated pinmux capability carries it too; the open-drain contract below
+applies to the W_DISABLE role only if a future revision moves the bridge
+lines off these pads (#1808).
+
+Per
 the M.2 spec the W_DISABLE lines are open-drain active-low: write 0
 to assert, write 1 (or
 Hi-Z / release) to deassert.  Firmware must:
@@ -401,21 +547,230 @@ events don't sit in a queue).
 
 On boot, before the Alif-side has connected over SPI1, the
 firmware should drive its proxied mux-control pins to states
-that ISOLATE all the downstream buses:
+that ISOLATE all the downstream buses -- with the caveat below that
+"HIGH" does not mean isolation on every fit of these mux parts:
 
-- `SDIO_MUX_EN` (`GPIO_26`): HIGH (74LVC157 /E = 1 → Hi-Z).
-- `SDIO_MUX_SEL` (`GPIO_30`): don't-care while /E is high.
-- `I2S_MUX_SEL` (`GPIO_13`): don't-care (the /E pin is on the
-  Alif side and defaults to disable).
+- `SDIO_MUX_EN` (`GPIO_26`, both hw revisions): HIGH (active-low
+  enable, so HIGH disables the mux) -- but on the ORIGINAL 2626-R2
+  74LVC157 fit, neither `/E` state is a safe default, or a working
+  one: the mux's `Y` pins are wired to the SAME nets the SoC's own SD
+  host controller drives (CLK/CMD/RST), and a 74LVC157 always
+  actively drives `Y` -- the selected input at `/E` = LOW, forced LOW
+  at `/E` = HIGH -- so SD contends with the SoC either way and cannot
+  work through that part at all. Only a 3257-type bus-switch rework
+  (the standard fit going forward) is a genuine bidirectional switch:
+  HIGH is real Hi-Z, and LOW passes the SoC's own drive through
+  cleanly. See `include/alp/boards/alp_e1m_evk.h`'s SDIO mux block
+  for the exact net mapping.
+- `SDIO_MUX_SEL`: revision-dependent, not a single CC3501E pin.
+  r2: not a CC3501E pin at all -- `E1M_GPIO_IO21` is `dispatch:
+  unrouted` (#1854) and the select is hardware-strapped (microSD by
+  default on this EVK), so firmware has no control over it here
+  regardless of `/E`. r1: IS a CC3501E pin, `GPIO_30`
+  (`metadata/e1m_modules/aen/hw-revisions.yaml` `pad_route_overrides`),
+  and IS firmware-drivable -- but the same net also reaches header
+  P18 pin 2 (`NetP18_2`) through `R198` (0 ohm); P18's jumper, when
+  fitted, ties pin 1 (`+3V3`) to pin 2, so driving IO21 LOW while the
+  jumper is fitted makes `GPIO_30` sink the +3V3 rail. Fit the
+  jumper or drive the pin, never both.
+- `I2S_MUX_EN` (`GPIO_30` on r2 only -- on r1 `IO8` is a direct Alif
+  GPIO, not proxied through this coprocessor at all, per
+  `metadata/e1m_modules/aen/hw-revisions.yaml` `pad_route_overrides`
+  and `metadata/e1m_modules/aen/from-cc3501e.tsv`): on r2, HIGH
+  (active-low enable, so HIGH disables the mux); the same
+  neither-state-is-safe-or-working caveat as `SDIO_MUX_EN` above
+  applies to U46, the I2S mux this pin controls, on the stock
+  `74LVC157ABQ,115` fit -- whose `VCC` range (1.2-3.6 V) puts `+VIO`
+  at 1.8 V IN SPEC; the stock part fails by DIRECTION (a one-way mux
+  whose `Y` outputs drive the SoC side), not undervoltage, so it can
+  NEVER pass SoC-to-amp I2S at any `VCC`. A working U46 needs the part
+  REPLACED with a 3257-type bus switch AND that switch's `VCC` on a
+  rail within ITS spec (2.3-3.6 V), or a switch rated for 1.8 V VCC
+  (untested) -- a 3257-type swap alone, `VCC`
+  left on `+VIO`, is still out of spec and silent. `+VIO` is NOT a
+  carrier-selected rail, it is the plugged-in SoM's own `VIO_OUT`
+  (2626-R2 netlist: `E2` pins P1/P2 `VIO_OUT` feed `+VIO_C`, which
+  reaches `+VIO` through U33's shunt monitor). MEASURED with the
+  E1M-AEN SoM (serial 2026W36-0002): `+VIO` = 1.8 V, and with a
+  3257-type part fitted, the amps stayed silent. OBSERVED
+  (same unit, 2026-09-15 ~14:05Z): that 3257-type part's `VCC`
+  was re-wired from `+VIO` to `+3V3` between the silent run above and
+  a run where a continuous 1 kHz PROBE_LISTEN tone through I2S3 was
+  clearly audible on both TAS2563 amps. MEASURED: the `VCC` move
+  happened between the two runs. INFERRED, not established as the
+  only difference: that the `VCC` move is what made the tone audible;
+  not verified: that this was the only difference between the
+  silent and audible runs. Scope: only amp PLAYBACK audibility was
+  verified this way -- PDM mic capture and M.2 E-key I2S are
+  unverified. The same run also showed an open `INT_LTCH0` bit 2 (TDM
+  clock error) latch during playback and open issue #2146 (amps
+  auto-shut down ~1 s after I2S stops, stay off after restart).
+  CAVEAT, untested: at `VCC` = 3.3 V a CBT-type switch's control-input
+  VIH (~2.0 V) may not reliably register a 1.8 V HIGH from the
+  CC3501E, so disabling the mux (`/E` HIGH) or selecting M.2 (`S`
+  HIGH) may not switch reliably even though the all-LOW amp path does
+  (see `include/alp/boards/alp_e1m_evk.h`'s I2S mux block).
+- `I2S_MUX_SEL` (`GPIO_13`, both hw revisions): don't-care while
+  `I2S_MUX_EN` is disabled -- this select pin (unlike its enable
+  counterpart) is CC3501E-side on both revisions.
 - `USB2_MUX_SEL` (`GPIO_2`): default to 0 (USB-A connector
   routed; M.2 E-key USB isolated).
 
 The Alif's bring-up code then sequences enables once it's ready.
 
+### Revision-dependent pads (IO8/IO10/IO21)
+
+Three E1M pads physically sit on a DIFFERENT chip depending on the AEN
+module's hardware revision (`metadata/e1m_modules/aen/hw-revisions.yaml`
+r1 `pad_route_overrides:`): `IO8` and `IO10` are direct Alif GPIOs on r1
+but CC3501E `GPIO_30`/`GPIO_35` on r2; `IO21` reaches CC3501E `GPIO_30` on
+r1 but is physically unrouted (open) on r2. A route table is always
+compiled for ONE hw_rev, so opening one of these pins on a module of the
+OTHER revision would silently drive a different physical net than the
+caller asked for.
+
+`src/backends/gpio/cc3501e_proxy.c`'s `px_open()` refuses
+`alp_gpio_open()` on any of these three pads with `ALP_ERR_NOSUPPORT`
+UNLESS a CRC-valid identity-EEPROM manifest confirms the running
+module's hw_rev matches the build's `CONFIG_ALP_SDK_SOM_HW_REV` -- the
+hw_rev the calling board's own `cc3501e_gpio_routes[]` was built for.
+FAILS CLOSED, per pin: a missing, unprovisioned, or corrupt manifest
+refuses just these three pads, while a revision-independent proxied pad
+(e.g. `IO20`, the SD mux enable) keeps routing/delegating exactly as
+before regardless of the manifest. See issue
+[#2144](https://github.com/alplabai/alp-sdk/issues/2144); the
+revision-dependent pad list itself is generated once, from the same
+metadata, into `src/backends/gpio/cc3501e_rev_dependent_pins.c`
+(`scripts/gen_cc3501e_gpio_routes.py`) -- identical for every AEN board,
+never a per-app copy.
+
+Kconfig symbols needed for the manifest confirmation to succeed:
+
+- `CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` -- the I2C bus id carrying
+  the SoM's on-module identity EEPROM (AEN: SoC I2C2 / the E1M portable
+  I2C0 pads, bus id `0`). `< 0` (the default) disables the read path
+  entirely, so the guard fails closed on every revision-dependent pad.
+- `CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ` -- the bitrate for that
+  read (default 400 kHz/fast-mode). If the SAME physical bus also
+  carries another device whose bench-validated rate is lower (e.g.
+  `examples/aen/aen-evk-demo`'s TAS2563 amps at 100 kHz), set this to
+  match -- `src/backends/i2c/zephyr_drv.c`'s backend reconfigures the
+  shared controller's live bitrate on every `alp_i2c_open()` call and
+  never restores it (`.close = NULL`), so a manifest read at a higher
+  rate than a shared device supports leaves the bus misconfigured for
+  every subsequent open.
+- `CONFIG_ALP_SDK_SOM_HW_REV` -- the hw_rev this firmware build
+  resolved (board.yaml `som.hw_rev`, or set by hand on a standalone app
+  with no board.yaml). Must be the composed `"<board_datecode>-<rev
+  key>"` form the manifest itself carries (e.g. `"2626-r2"`), not the
+  bare revision key.
+
+## Power management
+
+Two mechanisms, for two very different idle lengths. Picking the wrong one is the
+usual mistake: the presets cannot approach an off chip, and powering off cannot be
+done for a gap of milliseconds.
+
+### Short gaps: power presets (`CMD_POWER_POLICY`, 0x62)
+
+`cc3501e_power_policy()` sets one of four presets. Each drives **both** halves of
+the device — the MCU's idle state and the Wi-Fi radio's power save. The radio is
+the dominant term: an associated station that never enters power save keeps its
+receiver up continuously, which costs far more than any core idle state saves.
+
+| preset | core | radio power save | sleep authorisation | listen interval |
+|---|---|---|---|---|
+| `PERFORMANCE` | WFI only (SLEEP + IDLE disallowed) | `ACTIVE_MODE` | `ALWAYS_ACTIVE_MODE` | — |
+| `BALANCED` (default) | opportunistic IDLE/SLEEP | `AUTO_PS_MODE` | `ELP_MODE` | — |
+| `LOW_POWER` | as BALANCED | `POWER_SAVE_MODE` | `ELP_MODE` | every DTIM |
+| `DEEP_SLEEP` | as BALANCED | `POWER_SAVE_MODE` | `ELP_MODE` | every Nth DTIM |
+
+`DEEP_SLEEP` does **not** turn the radios off, and the station stays *associated*
+in every preset. There is no deeper core tier to reach: the vendor Power driver
+exposes exactly one sleep state (`PowerWFF3_SLEEP`), and its `Power_shutdown()` is
+an unimplemented stub that returns `Power_SOK` without doing anything. The presets
+differ on the radio, not the core.
+
+`idle_ms_before_sleep` selects the long sleep interval under `DEEP_SLEEP` — the
+firmware converts it to a DTIM count clamped to `[2, 255]`. It does not set a core
+idle-hysteresis threshold; the Power driver exposes no such setter.
+
+**The ack means QUEUED, not APPLIED.** `handle_power_policy` runs in SPI-dispatch
+(ISR) context, where neither the vendor radio call nor the Power-manager policy
+switch is legal, so both halves are deferred to the firmware's task. Read the
+reply's `radio_ok_out` to learn whether the *previous* apply was realised.
+
+> **Known issue ([#1691](https://github.com/alplabai/alp-sdk/issues/1691)):**
+> repeated BLE advertise/stop cycles can wedge the bridge — requests time out,
+> then fail. Firmware diagnostics across the fault show the CC3501E healthy
+> the whole time (slave armed, READY high, transfers still completing, all
+> error counters zero), so the FIRMWARE cannot self-heal it — it has no way
+> to know anything is wrong. The HOST can, and does automatically since
+> issue [#2126](https://github.com/alplabai/alp-sdk/issues/2126):
+> `cc3501e_link_check_and_recover()` is wired into every worker-routed op's
+> own failure exit (`CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER`, default `y`) and
+> probes, then warm-resets via `cc3501e_recover()` below, with no application
+> code required. `cc3501e_recover()` remains the manual escape hatch (`alp
+> companion recover` on the console) for a caller that wants it by hand — a
+> warm reset has recovered every observed wedge. Before that reset the probe
+> first tries an in-band resync (#2699): a burst of three `0xFF` request
+> headers on their own, then (if PING still fails) a stall header (`00 01 10 00`
+> followed by 300 ms of silence, which trips the bridge's 250 ms stall watchdog)
+> plus a burst, then one more burst. The transport lock is held for the whole
+> resync, so a concurrent single-shot caller may see `ALP_ERR_BUSY`. Not power-related — it
+> reproduces with no power policy applied at all.
+
+### Long gaps: cut the supply (`cc3501e_power_off()`)
+
+For a node that uplinks once an hour or once a day, the sleep-state current is
+irrelevant next to simply having the chip off. `WIFI_EN` gates VPA (3.3 V) through
+the board's load switch, so `cc3501e_power_off()` removes the companion's power
+rather than idling it — far below anything a preset reaches.
+
+This is deliberately **not** a fifth preset: `CMD_POWER_POLICY` travels over the
+very link the action kills, so powering down is a host-side GPIO action that lives
+next to `cc3501e_reset()`.
+
+It is **explicit only**. Nothing in the driver, and no preset, powers the device
+down on its own — a duty cycle is a product decision, and only the application
+knows when the next uplink is due and whether anything is in flight.
+
+The costs, none of them small:
+
+- **All device state is lost** — association, the BLE host, every open socket.
+- Waking is a full cold boot: `cc3501e_reset()` runs the rail discharge, supply
+  ramp, reset release and boot budget, then re-association is the caller's job.
+- While off, every call returns `ALP_ERR_NOT_READY` immediately rather than
+  clocking frames at an unpowered slave and burning a timeout each.
+
+> **Never call it with an OTA in flight** — it destroys the partially staged
+> image, and the device cannot report that it happened.
+
+### Waking
+
+There is no wake command, because there is nothing to send one to that is not
+already awake enough to receive it. For `PowerWFF3_SLEEP`, any still-clocked
+peripheral IRQ wakes the core, and the bridge SPI slave is one — **the host
+clocking a frame is the wake**. That is why a low-power preset must keep
+`ALP_CC3501E_WAKE_HOST_SPI` set; the firmware rejects one that declares no wake
+source, since it would idle with no way back.
+
+The rest of the `ALP_CC3501E_WAKE_*` bitmap is validation only. A per-source sleep
+wake mask has no SDK surface: the Power driver hardwires RTC + `CSYSPWRUPREQ`, and
+`GPIO_CFG_SHUTDOWN_WAKE_*` is a per-pin *shutdown* knob, not a sleep one.
+
+READY (CC3501E `GPIO17`) cannot wake the device — it is an output *from* the
+CC3501E telling the host its slave is armed. (Which Alif pad carries it, if
+any, is board/revision-specific — see `chips/cc3501e/cc3501e_core.c`'s
+`cc3501e_reply_gate()` comment; it is not universally `P2_6`.) After
+`cc3501e_power_off()` the only way back is `cc3501e_reset()` driving
+`WIFI_EN`.
+
 ## Peripherals not proxied today
 
-Beyond the wire-protocol surfaces above (Wi-Fi, BLE, GPIO proxy, OTA), the
-CC3501E exposes several on-chip peripherals that are **not** reachable
+Beyond the wire-protocol surfaces above (Wi-Fi, BLE, GPIO proxy, SPI1
+passthrough, OTA — see below), the CC3501E exposes several on-chip
+peripherals that are **not** reachable
 through `<alp/protocol/cc3501e.h>` and have no host-visible surface. None
 of these has an allocated opcode group; if a future board variant needs
 one, add it under the reserved `0x80..0xFF` range.
@@ -437,9 +792,9 @@ one, add it under the reserved `0x80..0xFF` range.
 - **Timers / PWM** — 8 GPT/PWM channels. Not routed to any external pad
   on E1M-AEN; the Alif has its own timer/PWM surface via `<alp/pwm.h>`.
 - **I2C** — 2 on-chip I2C controllers. Not proxied: the E1M-AEN module's
-  I2C devices (OPTIGA Trust M, RV-3028-C7, TMP112 on the Alif's
-  slave-only LPI2C0; EEPROM N24S128 on the Alif's separate SoC I2C2;
-  see `docs/soms/aen.md`) hang off the Alif's own I2C controllers, not
+  I2C devices (OPTIGA Trust M, RV-3028-C7, TMP112 on the Alif's SoC I2C0
+  BRD_I2C bus; EEPROM N24S128 on the Alif's separate SoC I2C2; see
+  `docs/soms/aen.md`) hang off the Alif's own I2C controllers, not
   the CC3501E's.
 
 ## OTA
@@ -455,36 +810,130 @@ device installs + swap-boots it.  The wire contract lives in
 |--------|---------|---------|
 | `0x40` | `ALP_CC3501E_CMD_OTA_BEGIN`  | `alp_cc3501e_ota_begin_t` (`total_len` LE32) |
 | `0x41` | `ALP_CC3501E_CMD_OTA_WRITE`  | `alp_cc3501e_ota_write_t` (offset LE32) + 1..`ALP_CC3501E_OTA_MAX_CHUNK` image bytes |
-| `0x42` | `ALP_CC3501E_CMD_OTA_FINISH` | none — install + deferred swap reboot |
+| `0x42` | `ALP_CC3501E_CMD_OTA_FINISH` | none — install to STAGED; no reboot (PROMOTE commits) |
 | `0x43` | `ALP_CC3501E_CMD_OTA_ABORT`  | none — cancel the session |
 | `0x44` | `ALP_CC3501E_CMD_OTA_STATUS` | reply `alp_cc3501e_ota_status_t` (state / bytes_written / total_len) |
-| `0x46` | `ALP_CC3501E_CMD_OTA_PROMOTE` | none — request the swap-reboot for an already-committed pending image (`0x45` is `STREAM_WRITE`) |
+| `0x46` | `ALP_CC3501E_CMD_OTA_PROMOTE` | none — request the swap-reboot for the image `FINISH` staged in this same boot (`0x45` is `STREAM_WRITE`) |
+| `0x47` | `ALP_CC3501E_CMD_OTA_UPDATE_MODE` | `mode(1)` — 0 = normal DMA/callback bridge, 1 = polled OTA update mode.  Reply `alp_cc3501e_ota_update_mode_t` = `mode(1) | ota_state(1) | reserved(2)` |
 
 The flow is strictly sequential — `BEGIN(total_len)` →
-`WRITE(offset, bytes)`* → `FINISH` — and each `WRITE`'s `offset` must
-equal the device's running write cursor (out-of-order writes are
-rejected; a host that missed a reply re-syncs to the real cursor via
-`OTA_STATUS`).  On `FINISH` the device installs the staged image
-(`OTA_STATUS state` → 2/STAGED) and arms a deferred reboot: the CC35's
-OWN `psa_fwu_request_reboot()` fires once the FINISH ack has drained, the
+`WRITE(offset, bytes)`* → `FINISH` → `PROMOTE` — and each `WRITE`'s
+`offset` must equal the device's running write cursor (out-of-order
+writes are rejected; a host that missed a reply re-syncs to the real
+cursor via `OTA_STATUS`).  On `FINISH` the device installs the image
+(`OTA_STATUS state` → 2/STAGED) and stops; it does not reboot (#1123).
+`PROMOTE`, sent in the **same CC3501E boot**, makes the CC35's OWN
+`psa_fwu_request_reboot()` fire once the PROMOTE ack has drained: the
 bridge link **drops** while BL2/MCUboot swaps the slot to primary (TRIAL
 boot), and the swapped image accepts itself on its first housekeeping
 tick.  The payload's signed version must **exceed** the running primary —
 a downgrade is refused at install (`state` → 3/ERROR), a forward image is
 accepted.  `OTA_STATUS reserved[0]` carries the last swap-reboot rc
-(0 = success, non-zero = the swap was refused, e.g. anti-rollback).
+(0 = success, non-zero = the swap was refused, e.g. anti-rollback; 119 =
+`PSA_ERROR_BAD_STATE`, a PROMOTE in a later boot than its FINISH, see
+below).
+
+`OTA_STATUS reserved[1]` is **flush pending**, and every host that streams
+`OTA_WRITE` must read it.  Non-zero means the device has queued a
+staging-window flush to flash: it is about to tear down its bridge DMA and
+will not consume payload until the flag clears.  Clocking `OTA_WRITE` across
+that window desyncs the link permanently — the 2026-06-19 failure the
+windowed design exists to prevent.  Hold off **all** payload, poll this field
+with **header-only** `OTA_STATUS` frames until it reads 0, then re-send the
+same chunk.  Reconcile against `bytes_written` first: `OTA_WRITE` is not
+idempotent, so a chunk whose reply the blackout swallowed may already have
+landed, and re-sending it is rejected as out-of-order.
+
+`OTA_STATUS reserved[2]` is diagnostics in two encodings.  `1..0x3F` is the
+`psa_fwu_*` call that failed the last window flush.  `0x40|phase` (or
+`0xC0|phase` when the bridge is running polled) means *no* psa fault — the
+low six bits are the transport phase.  That second shape is what a **healthy**
+session reports, so a non-zero `reserved[2]` is not a fault on its own.
+
 Host-side
 
-`OTA_PROMOTE` (proto v4) exists for one recovery case: a bare reset
-(e.g. the Puya cold-boot host-reset workaround) can leave an image
-committed to STAGED but **un-promoted**, and — because a slot is now
-occupied — a fresh `BEGIN`/`FINISH` short-circuits and can never re-arm
-the swap request.  `OTA_PROMOTE` arms the same deferred swap-reboot
-`FINISH` would, promoting the pending image without a new session.  If
-nothing is pending the reboot is a clean no-op.
-helpers: `cc3501e_ota_update()` (whole-image convenience) plus the
-granular `cc3501e_ota_begin/_write/_finish/_abort/_status()` in
-[`include/alp/chips/cc3501e.h`](../include/alp/chips/cc3501e.h).
+### OTA update mode (`0x47`, proto v5)
+
+A callback/DMA `SPI_open()` on the bridge slave **permanently** prevents
+`psa_fwu_start()` and `psa_fwu_write()` from returning — bench-proven on
+silicon 2026-08-21 — and `SPI_close()` does not undo the claim.  So OTA runs
+in its own **boot mode**: `OTA_UPDATE_MODE` latches a flag in retained RAM and
+warm-reboots; on that boot the bridge slave is opened POLLED
+(`SPI_MODE_BLOCKING` / `SPI_WAIT_FOREVER`) and the device runs a loop that does
+nothing but service the bridge frame-by-frame and pump the OTA flush at frame
+boundaries.  One firmware image carries both modes — there is no build switch.
+
+Wire contract:
+
+* **Entry is device-initiated.**  The host drives **no pin**.
+* `RESP_OK` means **QUEUED**, not "update mode is live" — the same property
+  `OTA_BEGIN` has.  The reply's `mode` byte is the mode running *right now*, so
+  it still reads `0` on the entry ack.  Confirm by **re-issuing `0x47` until the
+  reply's `mode` matches**; the handler is idempotent and does not reboot for a
+  request that matches the current mode.
+* The 4-byte reply is not decoration.  On the legacy (MAJOR 3) wire a dead bus
+  phase clocks back literal `0x00` for every byte, and `0x00` is also
+  `ALP_CC3501E_RESP_OK_LEGACY` — **not** `ALP_CC3501E_RESP_OK`, which is
+  `0x5A` from MAJOR 4 on precisely so it can no longer alias a dead phase —
+  so on that wire a bare-OK reply to the one opcode whose job is to be the
+  last frame before a blackout would be byte-identical to a link that just
+  died.  MAJOR 4 also appends a CRC-16/CCITT-FALSE trailer, which a
+  genuinely dead all-zero phase fails, so this aliasing is a legacy-wire
+  concern.  Note the asymmetry that survives either way: only `mode == 1` is
+  real proof — an all-zero dead phase is indistinguishable from a genuine
+  "normal bridge, OTA idle" reply, so corroborate the **leave** poll
+  (e.g. `GET_DIAG_INFO`'s moving `uptime_ms`, or the next live command).
+* **Enter BEFORE `OTA_BEGIN`.**  The OTA session is RAM-only, so entering
+  mid-session throws the write cursor away and forces a full re-`BEGIN` — another
+  whole-slot erase (`0x002A2000` = 2,760,704 B = 674 sector erases, 22–181 s
+  measured).
+* In update mode only `PING` / `OTA_*` / `GET_DIAG_INFO` / `RESET` are serviced.
+  Worker-routed commands (Wi-Fi, BLE, `GET_MAC`) queue forever and answer BUSY
+  forever, because nothing drains the worker on that boot.
+* After a successful `OTA_FINISH` the device leaves update mode **by itself** —
+  the flag is cleared before the swap reboot is armed, so the freshly-swapped
+  image comes up on the normal DMA bridge rather than deaf to the radio.
+* A cold `WIFI_EN` / `nRESET` cycle **always** lands in normal mode: the flag
+  lives in RAM and is read-and-**cleared** at boot, so a wedged update-mode boot
+  can never become an update-mode boot loop.
+* **Bytes clocked outside a transfer are discarded, not absorbed.**  The polled
+  slave keeps latching host bytes while it is between transfers, and TI's polling
+  path counts FIFO reads rather than SCLK edges — so a stale byte used to satisfy
+  the *next* phase and left the device permanently one byte ahead of the host.
+  The firmware now resets the SPI RX+TX FIFOs at every frame boundary, so a
+  blackout (a window flush, or a whole-slot erase at `OTA_BEGIN`) costs the host
+  the frames it clocked into the gap and nothing more.  Those frames still fail —
+  the host must retry, which `poll_by_repeat` already does — and the tick's SPI
+  desync/arm-fail self-heals remain no-ops in update mode.
+
+`GET_DIAG_INFO reserved[2]` carries the proof channel — bit7 = this boot is
+update mode, bits[6:0] = warm-boot counter mod 128.  The counter incrementing
+across a warm reset is what proves the retained-RAM flag survived
+`NVIC_SystemReset`; stuck at 1 means the boot ROM scrubs that RAM.
+
+Host helper: `cc3501e_ota_update_mode(ctx, enable, timeout_ms)` — it sends once,
+blind-settles, then confirms by readback.  `cc3501e_ota_update()` already enters
+update mode as its first step.
+
+`OTA_PROMOTE` (proto v4) is the only command that commits an image, and
+it only works in the **same CC3501E boot** as the `FINISH` that staged
+it.  The TI PSA-FWU swap request (`Request_type[]`) lives only in
+CC3501E RAM and is set only by `psa_fwu_install()` at `FINISH`.  After
+any reboot or reset — a bare reset, the Puya cold-boot host-reset
+workaround, a power cycle — it is 0, so the firmware's
+`psa_fwu_request_reboot()` returns `PSA_ERROR_BAD_STATE` (-137), stored
+as `OTA_STATUS reserved[0]` = 119, and no swap happens.  The image store
+still reports the image as `pending` = STAGED, but it **cannot be
+promoted**.  Recovery is `OTA_ABORT` (or a new `BEGIN`, which clears the
+slot) and a full re-send, then `FINISH` and `PROMOTE` back to back.
+Bench-proven on bridge firmware v0.9.x, E1M-AEN803 2026W36-0009,
+2026-10-06 (#2728, #2741).  `cc3501e_ota_update()` issues `PROMOTE`
+right after `FINISH` (#2731), so the whole-image helper never splits
+them; a caller using the granular calls must not reboot in between.
+Host helpers: `cc3501e_ota_update()` (whole-image convenience) plus the
+granular `cc3501e_ota_begin/_write/_finish/_abort/_status()` and
+`cc3501e_ota_promote()` in
+[`include/alp/chips/cc3501e/ota.h`](../include/alp/chips/cc3501e/ota.h).
 
 Each OTA payload is itself a signed vendor image whose version must
 exceed the running primary (monotonic anti-rollback).  Build, signing,
@@ -496,6 +945,43 @@ host obtains the image via the device-side Mender contract
 ([`docs/ota-device-contract.md`](ota-device-contract.md)); the OTA
 server is a separate repo.
 
+## SPI1 host passthrough
+
+The E1M connector's SPI1 pins (AG10 SCK / AG9 MOSI / AG8 MISO / AH9 CS0 /
+AH8 CS1) land on the CC3501E, **not** the Alif — a carrier device on that
+bus is unreachable except by relay: the CC3501E is the SPI CONTROLLER, and
+these opcodes (proto v6, group `0x55..0x57`) hand it the host's bytes. This
+is a *second*, unrelated SPI instance from the inter-chip bridge link above
+(SPI0) — nothing here touches the bridge.
+
+| Opcode | Command | Payload |
+|--------|---------|---------|
+| `0x55` | `ALP_CC3501E_CMD_SPI1_CONFIGURE` | `alp_cc3501e_spi1_configure_t` (`freq_hz` LE32, `mode`, `bits_per_word`, `cs`) |
+| `0x56` | `ALP_CC3501E_CMD_SPI1_TRANSFER`  | `alp_cc3501e_spi1_transfer_t` (`len` LE16, `flags`, `seq`, `tx_fill`) + inline TX |
+| `0x57` | `ALP_CC3501E_CMD_SPI1_RELEASE`   | none |
+
+All three are worker-routed (a polled multi-KB transfer would stall the
+bridge slave's re-arm from inside its own ISR — the same wedge class every
+other worker-routed family exists to avoid), and re-init is skipped on
+these opcodes specifically because they drive a separate controller and
+make no `Wlan_*` call — the bridge slave's DMA was never touched.
+
+TRANSFER's `seq` byte is a wire-level duplicate-suppression counter: the
+firmware caches the last completed `(seq, result)` and replays it for a
+matching seq instead of re-clocking the bus, which is what makes the host's
+ordinary transport-level `ALP_ERR_IO` retry safe on a bus that can drive
+flash. The host driver additionally requires a CONFIGURE to have succeeded
+in the *current* session before it will send a TRANSFER — the firmware's
+`g_configured` latch and cached result are file statics that outlive an
+Alif reboot, so a freshly initialised host context is forced through a real
+round trip (which discards any stale cache from a session the firmware
+outlived) rather than risk its first TRANSFER colliding with one.
+
+Console: `alp companion spi1 configure|xfer|read|release` — see
+[`cc3501e-companion-commands.md`](cc3501e-companion-commands.md#alp-companion-spi1).
+Host API: `cc3501e_spi1_configure/_transfer/_release()` in
+[`<alp/chips/cc3501e/core.h>`](../include/alp/chips/cc3501e/core.h).
+
 ## v0.x roadmap
 
 | Step                                             | Where it lands                          |
@@ -503,12 +989,13 @@ server is a separate repo.
 | Wire protocol v1 frozen                          | `include/alp/protocol/cc3501e.h` ✅ |
 | Alif-side SPI client (`chips/cc3501e/`)          | ✅ landed in alp-sdk              |
 | `<alp/iot.h>` / `<alp/ble.h>` route via CC3501E  | ✅ landed: exact AEN backend selects the CC3501E route; bench-validated open/scan on E1M-AEN801 |
-| Firmware tree (embedded)                         | `firmware/cc3501e/` ✅ (per [ADR 0015](adr/0015-cc3501e-firmware-embedded.md)) |
-| Bring-up firmware (PING + GET_VERSION + GET_MAC + RESET) | `firmware/cc3501e/` v0.1 ✅ **silicon-validated** (E1M-AEN801 EVK bench) |
-| Wi-Fi station mode                               | `firmware/cc3501e/` v0.2 ✅ shipped (scan / STA connect / AP / RSSI / IP); scan + async STA connect **silicon-validated** |
-| BLE peripheral + advertise                       | `firmware/cc3501e/` v0.3 ✅ shipped (GAP advertise / scan / connect + GATT); NimBLE enable + scan **silicon-validated** |
-| GPIO proxy + camera-enable                       | `firmware/cc3501e/` v0.4 ✅ shipped + **silicon-validated** (`examples/aen/aen-cc3501e-gpio`, warm-boot harness pass=8 fail=0) |
-| OTA over the bridge (§ "OTA" above)              | `firmware/cc3501e/` ✅ shipped; **silicon-validated through install/STAGED** (cold swap-boot needs a cold-bootable unit — see [`cc3501e-production.md`](cc3501e-production.md)) |
+| Firmware tree (embedded)                         | `cc3501e-bridge-firmware:` ✅ (per [ADR 0015](adr/0015-cc3501e-firmware-embedded.md)) |
+| Bring-up firmware (PING + GET_VERSION + GET_MAC + RESET) | `cc3501e-bridge-firmware:` v0.1 ✅ **silicon-validated** (E1M-AEN801 EVK bench) |
+| Wi-Fi station mode                               | `cc3501e-bridge-firmware:` v0.2 ✅ shipped (scan / STA connect / AP / RSSI / IP); scan + async STA connect **silicon-validated** |
+| BLE peripheral + advertise                       | `cc3501e-bridge-firmware:` v0.3 ✅ shipped (GAP advertise / scan / connect + GATT); NimBLE enable + scan **silicon-validated** |
+| GPIO proxy + camera-enable                       | `cc3501e-bridge-firmware:` v0.4 ✅ shipped + **silicon-validated** (`examples/aen/aen-cc3501e-gpio`, warm-boot harness pass=8 fail=0) |
+| OTA over the bridge (§ "OTA" above)              | `cc3501e-bridge-firmware:` ✅ shipped; **silicon-validated through install/STAGED** (cold swap-boot needs a cold-bootable unit — see [`cc3501e-production.md`](cc3501e-production.md)) |
+| SPI1 host passthrough (§ "SPI1 host passthrough" above) | `cc3501e-bridge-firmware:` v0.5 ✅ shipped (configure / transfer / release); not yet silicon-validated |
 | Full feature parity with `<alp/iot.h>` /
   `<alp/ble.h>`                                    | Remaining v1.0 work: HOST_IRQ async-event delivery and full runtime GATT/event parity |
 

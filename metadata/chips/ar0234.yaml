@@ -19,6 +19,7 @@ i2c:
 
 mipi:
   lanes_supported: [1, 2, 4]
+  role:            csi2_tx
 
 resolutions:
   max:            [1920, 1200]
@@ -53,3 +54,5 @@ physical:
   dimension_mm: "9.995 x 5.595 (die/package outline only; height not public)"
   visibility:   public
   provenance:   web_provisional
+tracking:
+  blocker: "ADR 0017 tier decision pending"

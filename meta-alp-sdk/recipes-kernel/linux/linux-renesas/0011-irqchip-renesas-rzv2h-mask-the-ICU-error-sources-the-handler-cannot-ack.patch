@@ -1,0 +1,151 @@
+From: Alp Lab AB
+Subject: [PATCH] irqchip/renesas-rzv2h: mask the ICU error sources the handler cannot acknowledge
+
+gpt_irq_handler() services only the GPT overflow bits of error groups
+1 and 2 on the shared CA55 error line, but probe left group 0 (which
+resets fully unmasked) and every other bit of group 1 unmasked. Once a
+non-GPT error source asserts -- on an E1M-V2M103 group 0 bit 0 is set
+as soon as the Cortex-M33 runs -- nothing acknowledges it, the line
+storms ('irq 14: nobody cared') and genirq disables it, taking the GPT
+overflow interrupts with it. Also, the GPT unit-0 dead-time mask was
+written to group 2 instead of group 1.
+
+Unmask only the GPT overflow bits the handler services and mask
+everything else in groups 0-3, warning once about any error status
+already pending at probe. The mask is written BEFORE the line is
+requested: requesting enables it, and a source already asserted at
+probe storms it ('irq 14: nobody cared' inside
+devm_request_irq(), then genirq disables the line) if the mask comes
+after. The mask is also saved and restored across suspend/resume
+(ERINTMSK was not part of the register cache), so the storm cannot return
+after an ICU state loss.
+
+Masked is not hidden: before the masks are written, log the bus-error
+factor registers (ICU_BEISR0-3) to identify the master or slave behind
+BUS_ERR_INT, clear them through ICU_BECLR0-3 (the bundled BUS_ERR_INT is
+not cleared through the ERINTA55 clear register), and name MCPU_LOCKUP
+(group 0 bit 25) when the Cortex-M33 is already locked up. The masks stay
+as they are: the CA55 handler still services only the GPT overflow bits,
+so there is no runtime report of BUS_ERR_INT or MCPU_LOCKUP, and the
+MCPU_LOCKUP check only sees a lockup that is still latched at probe: it
+works on a cold boot, but ICU_ERINTA55CTLk does not latch masked sources
+and is not reset by PRESETn, so a reboot that does not assert ERROR_RESETn
+can miss it.
+
+Upstream-Status: Pending
+Signed-off-by: Alp Lab AB
+---
+--- a/drivers/irqchip/irq-renesas-rzv2h.c
++++ b/drivers/irqchip/irq-renesas-rzv2h.c
+@@ -103,6 +103,10 @@
+ #define ERROR_INTSTAT_OFFSET(x)			(0x338 + 0x4 * (x))
+ #define ERROR_INTCLR_OFFSET(x)			(0x348 + 0x4 * (x))
+ #define ERROR_ERINTMSK_OFFSET(x)		(0x358 + 0x4 * (x))
++/* Bus-error factor status / clear, ICU_BEISRk / ICU_BECLRk (k = 0..3). */
++#define ERROR_BEISR_OFFSET(x)			(0x70 + 0x4 * (x))
++#define ERROR_BECLR_OFFSET(x)			(0x80 + 0x4 * (x))
++#define ERROR_GR0_MCPU_LOCKUP			BIT(25)
+ 
+ /**
+  * struct rzv2h_hw_info - Interrupt Control Unit controller hardware info structure.
+@@ -199,6 +203,7 @@
+ 	u32		iptsr;
+ 	u32		titsr[2];
+ 	u32		tssr[16];
++	u32		erintmsk[4];
+ } *rzv2h_irqc_reg_cache_data;
+ 
+ static inline struct rzv2h_icu_priv *irq_data_to_priv(struct irq_data *data)
+@@ -481,6 +486,9 @@
+ 	for (u8 i = 0; i < 16; i++)
+ 		rzv2h_irqc_reg_cache_data->tssr[i] = readl_relaxed(base + ICU_TSSR(i));
+ 
++	for (u8 i = 0; i < 4; i++)
++		rzv2h_irqc_reg_cache_data->erintmsk[i] = readl_relaxed(base + ERROR_ERINTMSK_OFFSET(i));
++
+ 	return 0;
+ }
+ 
+@@ -502,6 +510,10 @@
+ 	writel_relaxed(rzv2h_irqc_reg_cache_data->nitsr, base + ICU_NITSR);
+ 	writel_relaxed(rzv2h_irqc_reg_cache_data->iitsr, base + ICU_IITSR);
+ 	writel_relaxed(rzv2h_irqc_reg_cache_data->iptsr, base + ICU_IPTSR);
++
++	/* Keep the non-GPT error sources masked (see rzv2h_icu_init_common()). */
++	for (u8 i = 0; i < 4; i++)
++		writel_relaxed(rzv2h_irqc_reg_cache_data->erintmsk[i], base + ERROR_ERINTMSK_OFFSET(i));
+ }
+ 
+ static struct syscore_ops rzv2h_irqc_syscore_ops = {
+@@ -743,6 +755,42 @@
+ 		return gpt_irq;
+ 	}
+ 
++	/*
++	 * The CA55 error line is shared by every ICU error source, but
++	 * gpt_irq_handler() only services the GPT overflow bits (groups 1
++	 * and 2). Any other source left unmasked -- group 0 resets fully
++	 * unmasked -- can never be acknowledged, so it storms the line until
++	 * genirq disables it, and the GPT overflow interrupts go with it.
++	 * Unmask the GPT overflow bits only; report anything already pending.
++	 * This must run before the request below: requesting the line
++	 * enables it, and a source already asserted at probe (group 0 on an
++	 * E1M-V2M103) would storm it before the mask is written.
++	 */
++	for (u8 grp = 0; grp <= 3; grp++) {
++		u32 be = readl(rzv2h_icu_data->base + ERROR_BEISR_OFFSET(grp));
++
++		/* Name the bus-error master/slave, then clear the bundled factor. */
++		if (be) {
++			dev_warn(&pdev->dev, "bus error factor ICU_BEISR%u 0x%08x at probe, cleared\n",
++				 grp, be);
++			writel(be, rzv2h_icu_data->base + ERROR_BECLR_OFFSET(grp));
++		}
++	}
++
++	for (u8 grp = 0; grp <= 3; grp++) {
++		u32 stat = readl(rzv2h_icu_data->base + ERROR_INTSTAT_OFFSET(grp));
++		u32 keep = grp == 1 ? GPT_OVF_MASK(0) :
++			   grp == 2 ? GPT_OVF_MASK(1) : 0;
++
++		if (stat & ~keep)
++			dev_warn(&pdev->dev,
++				 "error group %u status 0x%08x pending at probe, masked\n",
++				 grp, stat & ~keep);
++		if (!grp && (stat & ERROR_GR0_MCPU_LOCKUP))
++			dev_warn(&pdev->dev, "Cortex-M33 is in lockup (MCPU_LOCKUP) at probe\n");
++		writel(~keep, rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(grp));
++	}
++
+ 	ret = devm_request_irq(&pdev->dev, gpt_irq, gpt_irq_handler,
+ 					irq_flags, dev_name(&pdev->dev), rzv2h_icu_data);
+ 	if (ret < 0) {
+@@ -750,28 +798,6 @@
+ 		return -ENOENT;
+ 	}
+ 
+-	/* mask gpt overflow interrupt. */
+-	for (u8 ch = 0; ch <= 1; ch++) {
+-		int err_flag = readl(rzv2h_icu_data->base +
+-			((!ch) ? ERROR_ERINTMSK_OFFSET(1) : ERROR_ERINTMSK_OFFSET(2)));
+-
+-		/* Unmask gpt overflow interrupt. */
+-		writel(~GPT_CLR_ERINT_MASK(ch) & err_flag,
+-			rzv2h_icu_data->base +
+-			((!ch) ? ERROR_ERINTMSK_OFFSET(1) : ERROR_ERINTMSK_OFFSET(2)));
+-
+-		/* Mask gpt deadtime interrupt. */
+-		err_flag = readl(rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(2));
+-		if (ch) {
+-			writel(GPT1_2_ERINTMSK_DEI_MASK | err_flag,
+-				 rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(2));
+-			writel(GPT1_3_ERINTMSK_DEI_MASK,
+-				 rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(3));
+-		} else
+-			writel(GPT0_ERINTMSK_DEI_MASK | err_flag,
+-				 rzv2h_icu_data->base + ERROR_ERINTMSK_OFFSET(2));
+-	}
+-
+ 	/*
+ 	 * coccicheck complains about a missing put_device call before returning, but it's a false
+ 	 * positive. We still need &pdev->dev after successfully returning from this function.

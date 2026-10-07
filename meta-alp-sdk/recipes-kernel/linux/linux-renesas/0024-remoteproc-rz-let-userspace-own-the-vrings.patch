@@ -1,0 +1,197 @@
+From 87038a6bbd33f4d48e7e25a7a8fa34fa1e6c1f4f Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Sat, 3 Oct 2026 10:00:00 +0200
+Subject: [PATCH] remoteproc: rz: let userspace own the vrings
+
+Alp changes on top of the unmodified Renesas driver (0019/0020).  The CM33
+OpenAMP link is driven by a userspace master over UIO (alp-sdk
+src/backends/rpc/yocto_uio_drv.c), and the Renesas driver's kick op is a
+stub, so the kernel must not register a virtio rpmsg device over the same
+rings.
+
+New DT flag alp,rz-userspace-ipc:
+  - probe (CM33 already running, started by TF-A): do not map or hand the
+    loaded resource table to the core; the state is still DETACHED, so
+    `echo start > state` attaches.
+  - parse_fw (reload through stop/start): do not load the firmware's
+    .resource_table either.
+  - the binding documents the flag, no longer requires renesas,rz-rsctbl
+    and matches the driver's compatible "renesas,rz-cm33".
+
+New DT flag alp,rz-attach-only (production default, Q53): the driver
+registers without start/load, so Linux can attach to the TF-A-started
+CM33 but cannot reload it; probe fails if the CM33 is not running or if
+alp,rz-userspace-ipc is absent.  .stop is present only to refuse: `echo stop
+> state` returns -EPERM and the state stays attached.  Leaving .stop NULL is
+not enough: rproc_stop() guards it, but __rproc_attach()'s error path calls
+ops->stop unguarded.  Requiring userspace-ipc means there are no subdevices
+for rproc_stop() to tear down before the refusal.  Without the flag, attach,
+stop and reload semantics are Renesas'.
+---
+ .../bindings/remoteproc/renesas,rz-rproc.yaml | 21 +++++++-
+ drivers/remoteproc/rz_rproc.c                 | 51 ++++++++++++++++++-
+ 2 files changed, 68 insertions(+), 4 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml b/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml
+index 37505908c83d..e0a27fb15b2e 100644
+--- a/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml
++++ b/Documentation/devicetree/bindings/remoteproc/renesas,rz-rproc.yaml
+@@ -12,7 +12,7 @@ description:
+ 
+ properties:
+   compatible:
+-    const: renesas,rz
++    const: renesas,rz-cm33
+ 
+   reg:
+     description:
+@@ -55,8 +55,26 @@ properties:
+     description:
+       Physical address of resource table. When remote processor is already powered
+       up by u-boot, op-tee..., this value is used to parse the loaded resource table.
++      Not needed with alp,rz-userspace-ipc.
+     maxItems: 1
+ 
++  alp,rz-attach-only:
++    $ref: /schemas/types.yaml#/definitions/flag
++    description:
++      Only attach to a CM33 that TF-A already started. The driver registers
++      without start/load operations and its stop operation always fails with
++      -EPERM, so Linux cannot stop or reload the core (writing "stop" to the
++      state attribute is refused and the state stays attached). Probe fails if
++      the CM33 is not running or if alp,rz-userspace-ipc is absent.
++
++  alp,rz-userspace-ipc:
++    $ref: /schemas/types.yaml#/definitions/flag
++    description:
++      The vrings and the resource table are owned by a userspace OpenAMP master
++      (UIO), not by the kernel. The driver then neither parses the loaded
++      resource table nor the one in the firmware image, so no virtio rpmsg
++      device is registered over the same rings.
++
+   power-domains:
+     maxItems: 1
+ 
+@@ -67,7 +85,6 @@ required:
+   - renesas,rz-cpg
+   - renesas,rz-sysc 
+   - renesas,rz-bootaddrs
+-  - renesas,rz-rsctbl
+   - power-domains
+ 
+ additionalProperties: false
+diff --git a/drivers/remoteproc/rz_rproc.c b/drivers/remoteproc/rz_rproc.c
+index 05967b179e9c..5501fdbb4e08 100644
+--- a/drivers/remoteproc/rz_rproc.c
++++ b/drivers/remoteproc/rz_rproc.c
+@@ -37,6 +37,7 @@ struct rz_rproc_pdata {
+ 	struct regmap *cpg_regmap;
+ 	struct regmap *sysc_regmap;
+ 	u32 bootaddr[2];
++	bool userspace_ipc;
+ };
+ 
+ static int rz_rproc_mem_alloc(struct rproc *rproc,
+@@ -310,8 +311,13 @@ static void *rz_rproc_da_to_va(struct rproc *rproc, u64 da, size_t len, bool *is
+ 
+ static int rz_rproc_parse_fw(struct rproc *rproc, const struct firmware *fw)
+ {
++	struct rz_rproc_pdata *pdata = rproc->priv;
+ 	int ret;
+ 
++	/* Userspace owns the vrings: do not hand the table to the core. */
++	if (pdata->userspace_ipc)
++		return 0;
++
+ 	ret = rproc_elf_load_rsc_table(rproc, fw);
+ 	if (ret)
+ 		dev_warn(&rproc->dev, "no resource table found for this firmware\n");
+@@ -333,12 +339,37 @@ static const struct rproc_ops rz_rproc_ops = {
+ 	.get_boot_addr		= rproc_elf_get_boot_addr,
+ };
+ 
++/*
++ * alp,rz-attach-only: Linux can attach to a CM33 that TF-A started but never
++ * stop or reload it (production: CM33 SRAM stays secure, a write would take a
++ * bus error).  There is no .start/.load/.detach.  .stop exists only to refuse:
++ * `echo stop > state` returns -EPERM and leaves the state attached, and a
++ * failed attach cannot reach a NULL ->stop in __rproc_attach()'s error path.
++ * Safe only because attach-only requires alp,rz-userspace-ipc (probe enforces
++ * it), so there are no subdevices for rproc_stop() to tear down before it
++ * calls this.
++ */
++static int rz_rproc_stop_denied(struct rproc *rproc)
++{
++	dev_warn(&rproc->dev, "attach-only: stopping the CM33 is not permitted\n");
++	return -EPERM;
++}
++
++static const struct rproc_ops rz_rproc_attach_only_ops = {
++	.prepare		= rz_rproc_prepare,
++	.attach			= rz_rproc_attach,
++	.stop			= rz_rproc_stop_denied,
++	.kick			= rz_rproc_kick,
++	.da_to_va		= rz_rproc_da_to_va,
++};
++
+ static int rz_rproc_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+ 	struct device_node *np = dev->of_node;
+ 	struct rz_rproc_pdata *pdata;
+ 	struct rproc *rproc;
++	bool attach_only;
+ 	uint32_t val;
+ 	int ret;
+ 	int i;
+@@ -347,8 +378,10 @@ static int rz_rproc_probe(struct platform_device *pdev)
+ 	if (!pdata)
+ 		return -ENOMEM;
+ 
+-	rproc = devm_rproc_alloc(dev, np->name, &rz_rproc_ops, NULL,
+-				 sizeof(*pdata));
++	attach_only = of_property_read_bool(np, "alp,rz-attach-only");
++	rproc = devm_rproc_alloc(dev, np->name,
++				 attach_only ? &rz_rproc_attach_only_ops : &rz_rproc_ops,
++				 NULL, sizeof(*pdata));
+ 	if (!rproc)
+ 		return -ENOMEM;
+ 
+@@ -376,6 +409,12 @@ static int rz_rproc_probe(struct platform_device *pdev)
+ 		}
+ 	}
+ 
++	pdata->userspace_ipc = of_property_read_bool(np, "alp,rz-userspace-ipc");
++	if (attach_only && !pdata->userspace_ipc) {
++		dev_err(dev, "alp,rz-attach-only needs alp,rz-userspace-ipc\n");
++		return -EINVAL;
++	}
++
+ 	rproc->priv = pdata;
+ 	rproc->auto_boot = of_get_property(np, "renesas,rz-autoboot", NULL) ?
+ 			   true : false;
+@@ -395,6 +434,10 @@ static int rz_rproc_probe(struct platform_device *pdev)
+ 
+ 		pm_runtime_get_sync(dev);
+ 
++		/* Userspace IPC: leave the loaded table (and its vdev) alone */
++		if (pdata->userspace_ipc)
++			goto rproc_prepare;
++
+ 		/* Get loaded rsc table */
+ 		if (of_property_read_u32_index(np, "renesas,rz-rsctbl", 0, &rsc_pa)) {
+ 			dev_warn(dev, "detached processor's firmware has no resource table\n");
+@@ -421,6 +464,10 @@ static int rz_rproc_probe(struct platform_device *pdev)
+ rproc_prepare:
+ 		/* Parse memory regions */
+ 		rz_rproc_prepare(rproc);
++	} else if (attach_only) {
++		dev_err(dev, "attach-only: the CM33 is not running\n");
++		pm_runtime_disable(dev);
++		return -ENODEV;
+ 	}
+ 	
+ 	platform_set_drvdata(pdev, rproc);
+-- 
+2.53.0
+

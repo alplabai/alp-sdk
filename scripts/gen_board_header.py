@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Generate include/alp/boards/alp_<board>_routes.h from each
-metadata/boards/<name>.yaml `e1m_routes:` + `i2c_devices:` blocks.
+metadata/boards/<name>.yaml `e1m_routes:` + `i2c_devices:` +
+`overlay_pins:` + `mux_enums:` blocks.
 
 The generated header mirrors the YAML `e1m_routes:` block into plain
 `#define EVK_* ALP_E1M_*` lines so hand-written firmware can keep using
@@ -13,12 +14,26 @@ of truth.  The YAML carries the connector-namespace pad names
 the C token.  The `i2c_devices:` block does the same for on-board I2C
 device addresses (EVK_I2C_ADDR_*) and INA236 shunt/max-current
 calibration (EVK_INA236_SHUNT_*_OHMS / EVK_INA236_MAX_*_A) -- these
-carry a literal hex/float value rather than an `ALP_E1M_*` token.
+carry a literal hex/float value rather than an `ALP_E1M_*` token.  The
+`overlay_pins:` block emits `EVK_PIN_OVERLAY_BASE + N` pad indices for
+boards that expose repurposed pads past the standard E1M pinout to an
+`alp,pin-array` devicetree overlay; N is the entry's position in the
+YAML list (an ordinal, not a hardware fact), computed via `enumerate()`
+rather than read from the YAML.  The `mux_enums:` block emits
+mux-select / IO-expander-pin `typedef enum { ... }` blocks
+(evk_sdio_select_t, evk_pcie_ioexp_pin_t, ...) -- issue #637.  An
+`i2c_devices:` entry marked `assembled: false` gets every macro it
+contributes (address / alias / calibration) renamed with a
+`_NOT_ASSEMBLED` suffix (#1980) rather than omitted -- the plain name a
+caller would reach for out of habit does not exist, so accidental use is
+a compile error, while the address and the `doc:` reason stay reachable
+under the renamed macro for deliberate cross-revision probing.
 Idempotent: running twice produces byte-identical output.
 
-The remaining sections of `include/alp/boards/alp_<board>.h`
-(mux enums, overlay-pad indices, prose comments) stay hand-authored
-until follow-up slices lift them too.
+The remaining content of `include/alp/boards/alp_<board>.h` is prose
+explaining the hardware those generated macros/enums bind to (plus
+any board-specific enum a slice hasn't lifted yet, e.g.
+`evk_cam_select_t`).
 
 Run:
 
@@ -97,21 +112,82 @@ def _build_doc(entry: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+_NOT_ASSEMBLED_SUFFIX = "_NOT_ASSEMBLED"
+
+
+def _is_assembled(entry: dict[str, Any]) -> bool:
+    """`assembled:` defaults to true (metadata/schemas/board-preset.schema.json);
+    only an explicit `false` means the footprint is unpopulated on this board
+    revision."""
+    return bool(entry.get("assembled", True))
+
+
+# INA228 shunt scales (SLYS021A table 7-5): the ADCRANGE bit and the full-scale
+# shunt voltage in volts.
+_INA228_RANGE_BIT = {"163mv": 0, "40mv": 1}
+_INA228_RANGE_FULL_SCALE_V = {"163mv": 0.16384, "40mv": 0.04096}
+
+
+def _check_calibration_range(macro: str, cal: dict[str, Any], part: str | None) -> None:
+    """A calibration entry with an `adc_range` must not ask for a max current
+    the shunt cannot measure on that range: full scale = range voltage /
+    shunt resistance.  Fails the generation (the board YAML is wrong), the
+    same way the driver's ina228_calibration_for() rejects it."""
+    rng = cal.get("adc_range")
+    if (rng or cal.get("adc_range_macro")) and part != "ina228":
+        raise SystemExit(
+            f"gen_board_header: {macro}: adc_range / adc_range_macro are INA228-only, "
+            f"but part is {part!r}"
+        )
+    if not rng:
+        return
+    shunt_ohms = float(cal["shunt_ohms"])
+    max_a = float(cal["max_current_a"])
+    full_scale_a = _INA228_RANGE_FULL_SCALE_V[rng] / shunt_ohms
+    if max_a > full_scale_a * (1 + 1e-9):
+        raise SystemExit(
+            f"gen_board_header: {macro}: max_current_a {cal['max_current_a']} A is above the "
+            f"{rng} range's full scale for a {cal['shunt_ohms']} ohm shunt "
+            f"({full_scale_a:.6f} A) -- lower max_current_a or pick the wider range"
+        )
+
+
 def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
     """Emit the on-board I2C device address block (+ any `alias`) and,
     for entries carrying a `calibration:` block, the paired INA236
     shunt/max-current macros.  Mirrors `_emit_section`'s column-aligned
     style but the value is a literal hex/float, not an `ALP_E1M_*`
-    pinout token."""
+    pinout token.
+
+    An entry marked `assembled: false` (#1980) is NOT skipped outright --
+    firmware legitimately probes an address that only some board revisions
+    populate (see `examples/peripheral-io/i2c-device-hub` trying both
+    EVK_I2C_ADDR_TCA6408A_MAIN and EVK_I2C_ADDR_TCAL9538_MAIN for the same
+    footprint) -- but every macro the entry contributes (address, alias,
+    calibration) is renamed with a `_NOT_ASSEMBLED` suffix so the PLAIN
+    name a reader would reach for out of habit does not exist: any existing
+    caller of the plain name fails at compile time instead of silently
+    issuing a real bus transaction against silicon that was never fitted.
+    The address value and the `doc:` reason both survive under the renamed
+    macro for anyone who deliberately wants to probe for an earlier/other
+    revision's population."""
     if not devices:
         return []
 
+    def _tag(name: str, assembled: bool) -> str:
+        return name if assembled else f"{name}{_NOT_ASSEMBLED_SUFFIX}"
+
     addr_lines: list[tuple[str, str, str]] = []  # (macro, value, doc)
     for entry in devices:
-        macro = entry["macro"]
-        addr_lines.append((macro, f"{entry['address']}u", entry.get("doc", "")))
+        assembled = _is_assembled(entry)
+        macro = _tag(entry["macro"], assembled)
+        doc = entry.get("doc", "")
+        if not assembled and "NOT ASSEMBLED" not in doc:
+            doc = f"NOT ASSEMBLED on this board revision. {doc}".strip()
+        addr_lines.append((macro, f"{entry['address']}u", doc))
         alias = entry.get("alias")
         if alias:
+            alias = _tag(alias, assembled)
             addr_lines.append((alias, macro, f"Alias for {macro}."))
 
     calib_lines: list[tuple[str, str, str]] = []
@@ -119,12 +195,31 @@ def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
         cal = entry.get("calibration")
         if not cal:
             continue
-        macro = entry["macro"]
+        assembled = _is_assembled(entry)
+        macro = _tag(entry["macro"], assembled)
+        shunt_macro = _tag(cal["shunt_macro"], assembled)
+        max_macro = _tag(cal["max_macro"], assembled)
+        _check_calibration_range(macro, cal, entry.get("part"))
         calib_lines.append(
-            (cal["shunt_macro"], f"{cal['shunt_ohms']}f", f"Shunt for {macro}.")
+            (shunt_macro, f"{cal['shunt_ohms']}f", f"Shunt for {macro}.")
         )
+        if cal.get("adc_range_macro"):
+            rng = cal["adc_range"]
+            full_scale = _INA228_RANGE_FULL_SCALE_V[rng]
+            calib_lines.append(
+                (
+                    _tag(cal["adc_range_macro"], assembled),
+                    str(_INA228_RANGE_BIT[rng]),
+                    f"INA228 shunt scale for {macro}: CONFIG.ADCRANGE = "
+                    f"{_INA228_RANGE_BIT[rng]} (+/-{full_scale * 1000:.2f} mV full scale).",
+                )
+            )
         calib_lines.append(
-            (cal["max_macro"], f"{cal['max_current_a']}f", f"Max current for {macro}.")
+            (
+                max_macro,
+                f"{cal['max_current_a']}f",
+                f"Max current for {macro}." + (f" {cal['max_current_note']}" if cal.get("max_current_note") else ""),
+            )
         )
 
     out: list[str] = [
@@ -144,7 +239,7 @@ def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
     if calib_lines:
         out.extend([
             "/* ------------------------------------------------------------------ */",
-            "/* INA236 calibration constants (from `i2c_devices[].calibration`) */",
+            "/* INA2xx calibration constants (from `i2c_devices[].calibration`) */",
             "/* ------------------------------------------------------------------ */",
             "",
         ])
@@ -153,6 +248,84 @@ def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
             out.append(f"#define {macro:<{widest}} {value}  /**< {doc} */")
         out.append("")
 
+    return out
+
+
+def _emit_overlay_pins(entries: list[dict[str, Any]]) -> list[str]:
+    """Emit `EVK_PIN_OVERLAY_BASE` + the board's overlay-extended
+    `alp,pin-array` pad indices (`overlay_pins:`).  Each macro is
+    `EVK_PIN_OVERLAY_BASE + N`, where N is the entry's position in
+    THIS list (0-based) -- an ordinal, not an independent hardware
+    fact, so it is computed here via `enumerate()` rather than read
+    from the YAML.  See zephyr/dts/bindings/alp,pin-array.yaml for
+    the array-index convention this mirrors."""
+    if not entries:
+        return []
+
+    out: list[str] = [
+        "/* ------------------------------------------------------------------ */",
+        "/* Overlay-extended pin-array indices (from `overlay_pins:`) */",
+        "/* ------------------------------------------------------------------ */",
+        "",
+        "#define EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT",
+        "",
+    ]
+    widest = max(len(e["macro"]) for e in entries)
+    for idx, entry in enumerate(entries):
+        macro = entry["macro"]
+        doc = entry.get("doc", "")
+        value = f"(EVK_PIN_OVERLAY_BASE + {idx}u)"
+        if doc:
+            out.append(f"#define {macro:<{widest}} {value}  /**< {doc} */")
+        else:
+            out.append(f"#define {macro:<{widest}} {value}")
+    out.append("")
+    return out
+
+
+def _emit_mux_enums(enums: list[dict[str, Any]]) -> list[str]:
+    """Emit one `typedef enum { ... } <name>;` block per `mux_enums:`
+    entry.  Column-aligns each enum's `=` signs independently (resets
+    per enum, mirroring `Consecutive` clang-format alignment) so a
+    long enumerator name in one enum doesn't reflow a sibling enum."""
+    if not enums:
+        return []
+
+    out: list[str] = [
+        "/* ------------------------------------------------------------------ */",
+        "/* Board mux-select enums (from `mux_enums:`) */",
+        "/* ------------------------------------------------------------------ */",
+        "",
+    ]
+    for enum in enums:
+        name = enum["name"]
+        values = enum["values"]
+        doc = enum.get("doc")
+        # Duplicate enumerator values emit silently and read as a typo
+        # in the header; the schema cannot express cross-item
+        # uniqueness, so enforce it here rather than shipping two names
+        # bound to the same selector.
+        seen: dict[int, str] = {}
+        for v in values:
+            prev = seen.get(v["value"])
+            if prev is not None:
+                raise ValueError(
+                    f"{name}: {v['name']} and {prev} both use value "
+                    f"{v['value']} -- enumerator values must be unique"
+                )
+            seen[v["value"]] = v["name"]
+        if doc:
+            out.append(f"/** {doc} */")
+        out.append("typedef enum {")
+        widest = max(len(v["name"]) for v in values)
+        for v in values:
+            line = f"\t{v['name']:<{widest}} = {v['value']},"
+            vdoc = v.get("doc")
+            if vdoc:
+                line += f" /**< {vdoc} */"
+            out.append(line)
+        out.append(f"}} {name};")
+        out.append("")
     return out
 
 
@@ -210,12 +383,14 @@ def _emit_section(title: str, entries: list[dict[str, Any]]) -> list[str]:
 
 def emit_board(name: str, doc: dict[str, Any]) -> str | None:
     """Return the full text of the generated routes header for one board,
-    or `None` if the shared board YAML has neither an `e1m_routes:` nor
-    an `i2c_devices:` block.
+    or `None` if the shared board YAML has none of an `e1m_routes:`,
+    `i2c_devices:`, `overlay_pins:`, or `mux_enums:` block.
     """
     routes = doc.get("e1m_routes")
     i2c_devices = doc.get("i2c_devices")
-    if not routes and not i2c_devices:
+    overlay_pins = doc.get("overlay_pins")
+    mux_enums = doc.get("mux_enums")
+    if not routes and not i2c_devices and not overlay_pins and not mux_enums:
         return None
     routes = routes or {}
     slug = _board_slug(name)
@@ -263,6 +438,10 @@ def emit_board(name: str, doc: dict[str, Any]) -> str | None:
             lines.extend(_emit_section(section_title, entries))
 
     lines.extend(_emit_i2c_devices(doc.get("i2c_devices") or []))
+
+    lines.extend(_emit_overlay_pins(doc.get("overlay_pins") or []))
+
+    lines.extend(_emit_mux_enums(mux_enums or []))
 
     lines.extend(_emit_board_aliases(routes))
 

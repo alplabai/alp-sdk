@@ -33,7 +33,10 @@ alp_status_t ms5611_init(ms5611_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	uint8_t      cmd = MS5611_CMD_RESET;
 	alp_status_t s   = alp_i2c_write(bus, i2c_addr, &cmd, 1);
 	if (s != ALP_OK) return s;
-	alp_delay_us(3000);
+	/* PROM reload after a soft reset takes 2.8 ms; wait 3 ms.  Sleeps:
+	 * alp_delay_us never yields (include/alp/peripheral.h) and this sits
+	 * between two independent I2C transactions, not inside bus timing. */
+	alp_delay_ms(3);
 
 	/* Read all eight calibration PROM words. */
 	for (uint8_t i = 0; i < 8; i++) {

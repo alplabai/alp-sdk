@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "alp-sdk-cli"
 version = "0.16.0"
-description = "Command-line front-end for the Alp SDK"
+description = "Alp SDK internal/reference Python tooling: board.yaml validation, model build, and the alp-mcp server -- not a command surface (tan-cli is)"
 requires-python = ">=3.10"
 dependencies = [
     "PyYAML>=6.0",
@@ -22,7 +22,7 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-snapshot>=0.9",
-    "pytest-mock>=3.10",
+    "pytest-xdist>=3.5",
 ]
 # Lightweight TFLite read/parse deps (tensor-I/O extraction + the hermetic
 # fixture generator) -- pure-Python, no compiler.  CI installs this so the
@@ -32,8 +32,14 @@ model-io = [
     "flatbuffers>=23.1.21",
 ]
 # Full host model-compile toolchain (adds the Vela Ethos-U compiler).
+# Pinned exactly (not >=) -- metadata/npu_ops/ethos_u/*.json is keyed to a
+# specific vela release (see gen_npu_ops.py); an unpinned ">=" here is what
+# let CI silently install a newer vela than the committed tables and made
+# the real-vela freshness test in test_gen_npu_ops.py skip instead of run
+# (#2310, follow-up from #1470). Bump this deliberately, in lockstep with a
+# `python3 scripts/gen_npu_ops.py` regeneration, never on its own.
 model-compile = [
-    "ethos-u-vela>=3.9",
+    "ethos-u-vela==5.2.0",
     "tflite>=2.10",
     "flatbuffers>=23.1.21",
 ]
@@ -44,9 +50,12 @@ mcp = [
     "mcp>=1.2",
 ]
 
-# No `alp` console-script: standalone Python Tan is the user-facing command
-# surface (ADR-0020). The `alp_cli` package remains an SDK-internal reference
-# and parity CLI for direct maintenance, never a user-installed `alp` binary.
+# No `alp` console-script, and no `python -m alp_cli <verb>` front door
+# either: standalone Python Tan is the whole command surface (ADR-0020
+# end-state B). The `alp_cli` package remains, but only as SDK-internal
+# LIBRARY modules other scripts import (board.yaml validation/rendering,
+# diagnostic-v1/SARIF export) -- its command-line wrappers retired once
+# `tan` had ported every one of them (alp-sdk#1367, alp-sdk#1368).
 [project.scripts]
 alp-mcp = "alp_mcp.server:main"
 

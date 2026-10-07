@@ -3,7 +3,7 @@
 Demonstrate the host-driven SWD bit-bang controller
 ([`chips/gd32_swd/`](../../../chips/gd32_swd/)) by attaching from the
 Renesas RZ/V2N to the on-module GD32G553 over three GPIOs
-(SWDIO + SWCLK + optional NRST), reading the SW-DP IDCODE, halting
+(SWDIO + SWCLK + NRST), reading the SW-DP IDCODE, halting
 the Cortex-M33, erasing a flash sector, writing + verifying a
 scratch pattern, and resetting.
 
@@ -16,33 +16,54 @@ bridge image, factory first-flash, dev-board bring-up).
 
 ## What it shows
 
-1. Opening three `alp_gpio_t` handles for SWDIO, SWCLK, NRST.
-2. `gd32_swd_init` configures SWDIO + SWCLK as outputs at the SWD
-   idle state.
+1. `gd32_swd_init(&swd)` takes **no pin handles**: the driver opens its own
+   three pads (SWDIO, SWCLK, NRST -- all required) through the platform
+   glue, because the portable `alp_gpio_open()` refuses their reserved ids.
+2. `gd32_swd_init` **asserts NRST first** (switched to an output with an
+   initial LOW level, so the shared open-drain net is never driven high),
+   then configures SWDIO + SWCLK as outputs at the SWD idle state.  `P71` (SWCLK) is also the bridge's
+   ATTN input, so the host may drive it only while the GD32 is held in
+   reset; for the whole session the supervisor closes the SPI bridge link
+   and answers bridge commands `ALP_ERR_BUSY`.
 3. `gd32_swd_connect` line-resets the link, performs the
-   JTAG-to-SWD switch sequence, reads DPIDR.  Logs whether the
-   IDCODE matches the expected `0x6BA02477` (Cortex-M33 r0p1
-   SW-DPv2 — the GD32G553's documented value).
+   JTAG-to-SWD switch sequence, reads DPIDR, then sets
+   `DHCSR.C_DEBUGEN` + `DEMCR.VC_CORERESET`, releases NRST and reads
+   `DHCSR.S_HALT` back (failing, with NRST asserted again, if the core did not
+   halt), so the core stops at its reset vector with no application code run
+   (connect-under-reset).  Logs whether the
+   IDCODE matches `GD32_SWD_GENERIC_CM33_R0P1_IDCODE` (`0x6BA02477`) —
+   informational only.  That constant is the **generic** Cortex-M33
+   r0p1 SW-DPv2 architectural default, never measured on a GD32G553
+   with a probe attached (see the `@warning` on it in
+   `include/alp/chips/gd32_swd.h`) — whether a real GD32G553 matches
+   it is unknown, so neither a match nor a mismatch here is treated
+   as a pass/fail signal.
 4. `gd32_swd_halt` puts the Cortex-M33 into debug-halt via DHCSR
    DBGKEY + C_HALT.
 5. `gd32_swd_flash_erase` erases the enclosing 2 KiB sector.
 6. `gd32_swd_flash_write` programs a 64-byte ramp pattern.
 7. `gd32_swd_flash_verify` reads it back via AHB-AP memory reads
    and reports the comparison.
-8. `gd32_swd_reset_and_run` releases the core via HW NRST pulse
-   (when wired) or AIRCR.SYSRESETREQ otherwise.
+8. `gd32_swd_reset_and_run` disarms halt-on-reset and releases the core
+   via an NRST pulse (the only reset: recovery without NRST is not
+   supported); `gd32_swd_deinit` then returns SWDIO/SWCLK to inputs and
+   ends the session.
 
 ## Pin model + board dependency
 
 The SWD pin assignments on V2N are **resolved**: SWDIO -> Renesas
 `P70`, SWCLK -> Renesas `P71`, NRST -> Renesas `P74` (open-drain,
 shared with the primary PMIC reset-out) — see
-`metadata/chips/gd32_swd.yaml`.  `src/main.c` opens these via the
-board preset's pin ids (`V2N_GD32_SWDIO_PIN_ID` /
-`V2N_GD32_SWCLK_PIN_ID` / `V2N_GD32_NRST_PIN_ID`); `alp_gpio_open`
-returns NULL if an older board preset hasn't picked up the routing
-yet, and the example exits cleanly with a log message rather than
-wedging the host.
+`metadata/chips/gd32_swd.yaml`.  The driver opens them with the
+reserved pad ids `GD32G553_PAD_ID_SWDIO` / `_SWCLK` / `_NRST`, which the
+Zephyr GPIO backend resolves from the board's dedicated `alp,gd32-pads`
+devicetree node (generated from
+`metadata/e1m_modules/v2n/supervisor-links.yaml`) -- **not** from an index
+of the positional pin array, whose index 0 is the GD32 SPI chip-select
+(Renesas `P97` = GD32 `PA8`).  The portable `alp_gpio_open()` refuses those
+ids; `gd32_swd_init()` answers `ALP_ERR_NOT_READY` if the board does not
+publish the pads, and the example exits cleanly with a log message rather
+than wedging the host.
 
 If your board wires the SWD lines to non-default pads, override
 the three `pin_id` constants at the top of `src/main.c` (or extend
@@ -62,10 +83,11 @@ same SWD driver pointing at the right address.
 Adjust `WRITE_ADDR` and `WRITE_BYTES` for a different target
 sector; the driver rounds out to sector boundaries automatically.
 
-## Expected output (real silicon)
+## Illustrative output (real silicon -- the exact IDCODE line is unattested, #1440 / #1369)
 
 ```
-[swd] connected -- IDCODE = 0x6BA02477 (expected 0x6BA02477)
+[swd] connected -- IDCODE = 0x???????? (generic reference 0x6BA02477)
+[swd] note: IDCODE != generic reference -- this is not a wrong-board signal, the reference value is unattested on a GD32 (#1440, #1369)
 [swd] target halted
 [swd] flash_verify -> 0 (OK)
 [swd] target reset + running

@@ -32,8 +32,18 @@
  *   - legacy Bayer/greyscale pixfmt names (BGGR8.. / Y6P / Y7P) are aliased in
  *     the vendored <zephyr/drivers/video/video_alif.h>.
  * The driver now COMPILES against v4.4 (the ALP_VIDEO_ALIF_BROKEN gate is
- * retired).  vendor-ext, BENCH-UNVERIFIED, runtime capture HW-blocked on this
- * batch (no sensor wired).
+ * retired).  vendor-ext, BENCH-UNVERIFIED: the J5 camera shields are now
+ * described and build-tested, but no live frame capture has completed on this
+ * path.
+ *
+ * Alp Lab AB: the fork's alif_cam_work_helper() stopped the endpoint on
+ * IN-FIFO starvation and never restarted it -- the next enqueue() only ever
+ * called k_fifo_put(), so a consumer that held its one buffer for more than a
+ * frame period killed the stream for good (bench-proven 2026-09-21 on an
+ * E1M-AEN803 on the E1M-EVK, OV9281).  Added `starved` + a `lock` (struct
+ * video_cam_data, video_alif.h) so starvation now PAUSES capture and
+ * enqueue() RESUMES it; see the "Buffer-starvation/resume contract" comments
+ * at the work helper and at enqueue().
  *
  * The soc_memory_map.h include resolves via the hal_alif common/include dir
  * (gated on CONFIG_RTSS_HE/HP); the public CSI data-type + CPI-mode tables come
@@ -52,13 +62,55 @@
 #include <zephyr/drivers/video/video_alif.h>
 #include <soc_memory_map.h>
 #include <zephyr/cache.h>
+/* Upstream's private drivers/video/video_device.h (put on the include path by
+ * zephyr/CMakeLists.txt's ${ZEPHYR_BASE}/drivers/video dir) -- needed for
+ * VIDEO_DEVICE_DEFINE, below, so v4.4's control-registry walk
+ * (video_find_ctrl(), drivers/video/video_ctrls.c) can chain from this
+ * device to its upstream source (CSI bridge or parallel sensor). */
+#include "video_device.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(CPI, CONFIG_VIDEO_LOG_LEVEL);
 
-#define WORKQ_STACK_SIZE 512
+/* Alp Lab AB: on the E8, CAM_CFG.AXI_PORT_EN (gated by CONFIG_VIDEO_ALIF_CAM_EXTENDED,
+ * see alif_video_cam_set_config()) is what makes the CPI's AXI master actually write a
+ * captured frame to memory -- without it the CPI still raises STOP for every frame, so a
+ * capture silently "succeeds" over an untouched buffer instead of failing (the bug this
+ * driver's #226 fix chased). Catch a build that disables the option on an E8 target before
+ * it ships a camera path that never writes memory.
+ *
+ * Gated on CONFIG_VIDEO_ALIF_CAM too: this TU also builds standalone (see
+ * zephyr/CMakeLists.txt) to supply fourcc_to_plane_size()/fourcc_to_numplanes()/
+ * pix_fmt_bpp() to CONFIG_VIDEO_ISP_VSI when no "alif,cam" DT node is enabled at
+ * all (e.g. aen-isp-regcheck) -- DT_INST_FOREACH_STATUS_OKAY(CPI_DEFINE) then
+ * expands to nothing and CONFIG_VIDEO_ALIF_CAM_EXTENDED (which `depends on
+ * VIDEO_ALIF_CAM`) cannot be y regardless of the E8 default, with no CPI
+ * instance for the untouched-buffer bug to apply to.
+ */
+BUILD_ASSERT(!IS_ENABLED(CONFIG_VIDEO_ALIF_CAM) || !IS_ENABLED(CONFIG_SOC_SERIES_E8) ||
+		     IS_ENABLED(CONFIG_VIDEO_ALIF_CAM_EXTENDED),
+	     "CONFIG_VIDEO_ALIF_CAM_EXTENDED must stay on for the E8: without it the CPI "
+	     "never writes a captured frame to memory (CAM_CFG.AXI_PORT_EN stays clear), "
+	     "so alp_camera_capture() reports success over an untouched buffer");
+
+/* Alp Lab AB: 512 -> 1024, kept at 1024 (issue #2287): the helper still does
+ * register-level CPI work (hw_cam_cpi_only_stop()) plus logging on every
+ * buffer-starvation pause -- it no longer calls video_stream_stop() on the
+ * CSI endpoint (which would run sensor I2C traffic from this workqueue), but
+ * the stack headroom that added is still worth keeping. */
+#define WORKQ_STACK_SIZE 1024
 #define WORKQ_PRIORITY   7
 K_KERNEL_STACK_DEFINE(alif_isr_cb_workq, WORKQ_STACK_SIZE);
+
+/*
+ * Bug #2342 revision (bench run 341): bounded wait, in alif_cam_flush(cancel),
+ * for an armed capture to reach its frame-end STOP before soft-resetting the
+ * CPI -- see the wait's own comment. Not derived from a Kconfig frame-rate
+ * figure; plain constant chosen as generous margin over one frame period at
+ * the slowest frame rate any supported sensor runs at. If it elapses with no
+ * STOP seen, the DMA is idle (no pixels arriving) and resetting is safe.
+ */
+#define CPI_FLUSH_FRAME_END_TIMEOUT_MS 500
 
 extern size_t fourcc_to_plane_size(uint32_t fourcc, uint8_t plane_id, size_t buffer_size);
 extern int fourcc_to_numplanes(uint32_t fourcc);
@@ -94,6 +146,9 @@ size_t fourcc_to_plane_size(uint32_t fourcc, uint8_t plane_id, size_t buffer_siz
 	case VIDEO_PIX_FMT_YUYV:
 	case VIDEO_PIX_FMT_VYUY:
 	case VIDEO_PIX_FMT_UYVY:
+	case VIDEO_PIX_FMT_RGB565:
+	case VIDEO_PIX_FMT_RGB24:
+	case VIDEO_PIX_FMT_BGR24:
 		if (plane_id == 0) {
 			return buffer_size;
 		} else {
@@ -182,6 +237,9 @@ int fourcc_to_numplanes(uint32_t fourcc)
 	case VIDEO_PIX_FMT_YVYU:
 	case VIDEO_PIX_FMT_VYUY:
 	case VIDEO_PIX_FMT_UYVY:
+	case VIDEO_PIX_FMT_RGB565:
+	case VIDEO_PIX_FMT_RGB24:
+	case VIDEO_PIX_FMT_BGR24:
 		return 1;
 	case VIDEO_PIX_FMT_NV12:
 	case VIDEO_PIX_FMT_NV21:
@@ -271,24 +329,261 @@ static inline void hw_cam_soft_reset(uintptr_t regs)
 
 static inline void hw_cam_start_video_capture(const struct device *dev)
 {
-	const struct video_cam_config *config = dev->config;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 
 	/* Apply soft reset before starting capture */
 	hw_cam_soft_reset(regs);
 
-	/* Start video capture. */
-	if (config->capture_mode == CPI_CAPTURE_MODE_SNAPSHOT) {
-		sys_write32(CAM_CTRL_FIFO_CLK_SEL | CAM_CTRL_SNAPSHOT | CAM_CTRL_START,
-			    regs + CAM_CTRL);
-	} else {
-		sys_write32(CAM_CTRL_FIFO_CLK_SEL | CAM_CTRL_START, regs + CAM_CTRL);
+	((struct video_cam_data *)dev->data)->cpi_armed = true;
+
+	/* Start video capture. Snapshot is the only supported capture mode --
+	 * continuous is rejected at DT build time (alif,cam.yaml's
+	 * capture-mode enum has only "snapshot").
+	 */
+	sys_write32(CAM_CTRL_FIFO_CLK_SEL | CAM_CTRL_SNAPSHOT | CAM_CTRL_START, regs + CAM_CTRL);
+}
+
+/**
+ * @brief Quiesce the CPI: the only bench-proven way to safely stop a capture
+ *
+ * Bug #2342 (E1M-AEN803 2026W36-0001, register-level bench diag run 339):
+ * a bare `CAM_CTRL = 0` write while a SNAPSHOT capture is in flight does
+ * NOT stop the DMA. Mid-frame writes that clear FIFO_CLK_SEL (bit 12,
+ * incl. writing 0) let the DMA keep going for roughly another whole
+ * FCFG-bounded frame past the write (diag arm E: 510,247 B written for a
+ * 259,200 B frame -- one of the two canaries placed past the frame was
+ * overwritten). Clearing SNAPSHOT alone (bit 4) is worse: it turns the
+ * capture continuous with an incrementing address -- a genuine runaway
+ * (arm C: filled all 4 MiB of SRAM0 within 250 ms, BUSY stuck set, no STOP
+ * interrupt ever raised). Clearing START alone (bit 0) does nothing (arm
+ * B, identical to the no-op control, arm A). BUSY read back 0 immediately
+ * after the CAM_CTRL=0 write in arm E, while the DMA was still actively
+ * overrunning the buffer -- so a BUSY poll placed right after a CAM_CTRL
+ * write is not a valid signal that the write took hardware effect; it
+ * proves nothing about whether the capture actually stopped.
+ *
+ * The only sequence that bench-proved a frozen extent with both canaries
+ * intact is the full 3-step soft reset (hw_cam_soft_reset(): CAM_CTRL 0 ->
+ * SW_RESET 0x100 -> 0, diag arm F, 50 us after the runaway write). The Alif
+ * DFP has no mid-frame abort: CPIx_Stop() stops the source, then writes
+ * CAM_CTRL = 0 -- so this sequence had to be bench-derived rather than read
+ * out of the vendor driver.
+ *
+ * Every caller that needs to stop an in-flight (or possibly in-flight)
+ * capture goes through this helper instead of a standalone `CAM_CTRL = 0`.
+ * Ends at the soft reset's final CAM_CTRL = 0, the same end state as the
+ * Alif DFP's CPIx_Stop() (diag arm F) -- no further park write after it.
+ *
+ * Never write CAM_AXI_ERR_STAT (CPI+0x18) to "clear" it: bench-confirmed
+ * (#2342) that register is not writable on this CPI -- a write bus-faults.
+ *
+ * No BUSY poll here (see above for why one is meaningless right after a
+ * CAM_CTRL write) and no wait on the raw CAM_INTR STOP bit either: the
+ * soft reset is unconditional and bench-proved to freeze the DMA
+ * regardless of BUSY or STOP state, so there is nothing left to wait for.
+ *
+ * Bug #2342 revision (bench run 341): this is only safe with no AXI write
+ * burst in flight. Calling this while a capture is still actively writing
+ * mid-frame wedged the SRAM0 write path in 12 of 212 bench events (core
+ * stalls in/just after this call; AXI-AP reads still work but a write never
+ * completes). Every caller must first either stop the source (stream_stop's
+ * stop-source-first order: endpoint/sensor stopped before this call) or wait
+ * for the frame to end (alif_cam_flush(cancel)'s bounded poll on raw CAM_INTR
+ * STOP) before reaching here.
+ *
+ * @param regs CPI register base address
+ * @param irq_mask Interrupts to mask for the duration (0 to leave
+ *                 CAM_INTR_ENA untouched); whatever is already latched in
+ *                 CAM_INTR is cleared unconditionally below.
+ */
+static inline void hw_cam_quiesce(uintptr_t regs, uint32_t irq_mask)
+{
+	if (irq_mask) {
+		hw_disable_interrupts(regs, irq_mask);
 	}
+
+	hw_cam_soft_reset(regs);
+
+	/* Clear any stale latched interrupts after reset. */
+	sys_write32(sys_read32(regs + CAM_INTR), regs + CAM_INTR);
+}
+
+/**
+ * @brief Pause the CPI capture engine only, for a buffer-starvation stall
+ *
+ * Issue #2287 (IMX296 on E1M-AEN803 2026W36-0001): the starvation pause in
+ * alif_cam_work_helper() used to also call video_stream_stop()/_start() on
+ * the CSI-2 endpoint, which drives the sensor into STANDBY on every pause
+ * and back to RUN on every resume. The IMX296 datasheet (p54) says a
+ * normal image is output only from the 9th frame after STANDBY cancel, so
+ * every frame the app kept right after a resume was still an
+ * initialization-period frame; the endpoint restart is SUSPECTED (not
+ * confirmed) to also have left the CPI's frame-boundary tracking unsynced
+ * from the CSI-2 IPI stream, which would show up as IPI FIFO overflow and a
+ * RAW10 byte-phase slip (a 4-column contrast pattern in the captured
+ * image) -- that mechanism has not been independently isolated from the
+ * STANDBY-cycling effect above. Pausing only the CPI -- CAM_CTRL stop,
+ * BUSY poll, soft reset, clear latched interrupts, the same steps
+ * alif_cam_stream_stop() applies to the CPI side of its own teardown --
+ * leaves the CSI-2 endpoint and sensor streaming across the pause, so the
+ * resumed capture picks up mid-stream instead of restarting the sensor.
+ * Bench-observed on IMX296 only, diag run 285 (1 kept frame, 15 discarded;
+ * that diag build did NOT include the later 150 ms sensor init-period wait
+ * added to imx296_set_stream() -- see IMX296_INIT_PERIOD_MS): 0 IPI
+ * FIFO-overflow events over 32 VSYNCs and a clean Bayer frame vs. the
+ * 4-column slip pattern beforehand, counted by diag instrumentation
+ * (uncapped counters), not the shipped ISR (csi2_dw_irq(), which masks all
+ * IPI fatal reporting after CSI2_DW_IPI_FATAL_LOG_LIMIT events). While
+ * paused, the sensor, D-PHY and CSI-2 host keep running (and drawing
+ * power); frames the sensor sends during the pause are simply dropped at
+ * the stopped CPI. Whether a paused 2-lane sensor (OV5647, OV9281) can
+ * back-pressure the IPI into overflow during a longer pause is untested --
+ * they share this CPI but have not been re-benched against this change.
+ *
+ * alif_cam_stream_stop() is unaffected: a user stop()/close() still calls
+ * video_stream_stop() on the endpoint unconditionally, tearing down the
+ * sensor correctly even if a starvation pause is in effect when it runs.
+ *
+ * @param regs CPI register base address
+ */
+static inline void hw_cam_cpi_only_stop(uintptr_t regs)
+{
+	/* Soft reset via hw_cam_quiesce(); see it for why this is the only safe stop. */
+	hw_cam_quiesce(
+	    regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN | INTR_INFIFO_OVERRUN | INTR_STOP);
+}
+
+/*
+ * #2287 Stage B unit 3 (bench runs 298-306, root-caused by runs 307/308): this pair
+ * used to be pause+resume (alif_cam_cpi_pause() called hw_cam_cpi_only_stop() -- CAM_CTRL=0 +
+ * soft reset -- to actively interrupt an in-progress capture). That was WRONG for this CPI: it
+ * runs in SNAPSHOT mode (hw_cam_start_video_capture()'s CAM_CTRL_SNAPSHOT bit,
+ * ensemble_e8_peripherals.dtsi has no capture-mode override), which captures exactly ONE frame
+ * per START and then auto-stops itself in hardware -- there is nothing "in progress" to
+ * interrupt AT THE POINT isp_pico.c decides to pause, UNLESS something already re-armed the CPI
+ * for a frame the ISP never asked for. That something was alif_cam_work_helper()'s own non-AXI
+ * STOP-work branch (below), which used to re-arm the CPI unconditionally and immediately on
+ * every STOP interrupt -- racing isp_pico.c's own frame-end interrupt/bottom-half decision on
+ * whether to keep capturing. hw_cam_cpi_only_stop() then cut THAT unwanted, already-running
+ * capture mid-frame (no frame-boundary wait), and the ISP's own MI stayed targeting the buffer
+ * just handed to the app -- an extra frame partially overwrote it (bench runs 307/308:
+ * frame_end_count ~2x the app-visible frame count, and a captured frame visibly straddling two
+ * sensor frames, a real scene in one horizontal band, streaky texture elsewhere).
+ *
+ * The fix moves CPI re-arm responsibility to the ISP: alif_cam_work_helper()'s non-AXI branch no
+ * longer re-arms at all (see its own comment) -- only isp_pico.c calls alif_cam_cpi_resume() now,
+ * and only AFTER it has itself attached the NEXT destination buffer to its own MI
+ * (isp_attach_buffer_to_hw(), a pure register write, no VSI library call) -- so the CPI is never
+ * re-armed for a frame the ISP hasn't already prepared to receive. With nothing re-arming the CPI
+ * behind isp_pico.c's back, "pause" no longer needs an active register action at all -- it is
+ * simply isp_pico.c choosing not to call alif_cam_cpi_resume() (see isp_bottom_half()'s own
+ * starvation branch) -- so alif_cam_cpi_pause() and `data->cpi_paused` are GONE (both from this
+ * file and struct video_cam_data, video_alif.h): there is no longer a race for `cpi_paused` to
+ * guard against, since the thing that used to race it (the STOP-work branch's own re-arm) no
+ * longer exists.
+ *
+ * Deliberately NOT touching `data->starved`/`data->fifo_in` here: those belong to the memory-
+ * capture path's OWN buffer bookkeeping (alif_cam_enqueue()'s resume check, ~:1153) which the ISP
+ * consumer mode never exercises (ISP never calls video_enqueue() on this controller -- config->
+ * axi_bus_ep is unset/CONFIG_VIDEO_ALIF_CAM_EXTENDED is off on the ISP-consumer boards).
+ */
+int alif_cam_cpi_resume(const struct device *dev)
+{
+	struct video_cam_data *data = dev->data;
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	/* Re-arms the CPI for the frame isp_pico.c just attached a destination buffer for (via
+	 * isp_attach_buffer_to_hw(), which the caller is required to have already called -- see
+	 * this function's own header comment). Same register sequence alif_cam_enqueue()'s own
+	 * starved-resume uses (~:1163-1172) for the memory-capture path's equivalent re-arm, minus
+	 * the CAM_FRAME_ADDR reprogram: the ISP consumer mode never changes which buffer the CPI
+	 * writes into (that address is set once, at alif_cam_stream_start()) -- only the ISP's OWN
+	 * MI target (isp_attach_buffer_to_hw()) changes per frame.
+	 */
+	hw_enable_interrupts(regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN |
+					   INTR_INFIFO_OVERRUN | INTR_STOP);
+	/*
+	 * #2287 Stage B unit 3, reviewer fix (bench run 311 round, robustness): idempotent re-arm
+	 * -- if CAM_CTRL shows BUSY (a snapshot is still physically in progress) or START (already
+	 * armed, waiting for its snapshot to begin/complete), this call is a duplicate: two
+	 * callers both deciding to re-arm the same, already-armed/in-flight capture (e.g. the
+	 * stall-recovery error callback firing for an error that turns out not to have actually
+	 * stalled anything). hw_cam_start_video_capture()'s own soft reset would otherwise ABORT
+	 * that in-flight snapshot mid-capture -- exactly the mid-frame-cut bug this whole CPI
+	 * re-arm redesign exists to avoid (see this function's own header comment). Skipped, not
+	 * an error: the interrupt-enable write above still runs unconditionally (idempotent,
+	 * harmless) so a caller that only needed interrupts re-armed (not a fresh START) still
+	 * gets that.
+	 */
+	/*
+	 * #2499: the ISP's frame end can reach here before the CPI's own STOP
+	 * interrupt for that frame has been serviced. Dropping the re-arm then
+	 * left the CPI idle for good once the STOP handler rewrote CAM_CTRL, and
+	 * every later capture timed out. Latch it instead: the STOP handler starts
+	 * the next snapshot, so an in-flight one is still never soft-reset.
+	 */
+	unsigned int key = irq_lock();
+
+	if (data->cpi_armed || (sys_read32(regs + CAM_CTRL) & (CAM_CTRL_BUSY | CAM_CTRL_START))) {
+		data->rearm_pending = true;
+	} else {
+		hw_cam_start_video_capture(dev);
+	}
+	irq_unlock(key);
+	k_mutex_unlock(&data->lock);
+
+	return 0;
+}
+
+/*
+ * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap): see this function's own public
+ * header comment (video_alif.h) for the full rationale. Plain field assignment, no lock -- this
+ * is expected to run once, at ISP driver init, well before streaming starts (the ISR that reads
+ * these two fields can't be racing a call that hasn't happened yet); nothing here is ISR-unsafe
+ * either way.
+ */
+void alif_cam_register_error_cb(const struct device *dev, void (*cb)(void *user_data),
+				 void *user_data)
+{
+	struct video_cam_data *data = dev->data;
+
+	data->error_cb = cb;
+	data->error_cb_user_data = user_data;
 }
 
 static int32_t fourcc_to_csi_data_type(uint32_t fourcc)
 {
-	/* TODO: Add support for RGB formats. */
+	/*
+	 * RGB formats: data_mode_settings[] (video_alif.h) carries all five
+	 * CSI2_DT_RGB* entries, but only the ones below have a matching Zephyr
+	 * v4.4.1 fourcc with an IDENTICAL bit layout -- mapped here by bit
+	 * width/packing, never by name similarity:
+	 *   - CSI2_DT_RGB565 (16 bpp)  <- VIDEO_PIX_FMT_RGB565.
+	 *   - CSI2_DT_RGB888 (24 bpp, no pad -- see the table's bits_per_pixel
+	 *     field, NOT its CPI_COLOR_MODE_CONFIG_IPI48_XRGB888 name, which is
+	 *     the HW's internal 48-bit-IPI-datapath label, not a 32-bit pixel)
+	 *     <- VIDEO_PIX_FMT_RGB24 / VIDEO_PIX_FMT_BGR24 (24 bpp, no pad).
+	 *     The CSI-2 data-type field encodes bit depth only, not channel
+	 *     order -- exactly like CSI2_DT_RAW8 above already covering all
+	 *     four BGGR8/GBRG8/GRBG8/RGGB8 Bayer orders under one DT -- so
+	 *     both 24 bpp fourccs are accepted here.
+	 * Deliberately NOT mapped (no matching Zephyr v4.4.1 fourcc, or a
+	 * layout mismatch that would misconfigure the IPI bit width):
+	 *   - CSI2_DT_RGB444 (12 bpp), CSI2_DT_RGB555 (15 bpp), CSI2_DT_RGB666
+	 *     (18 bpp): Zephyr v4.4.1 <zephyr/drivers/video.h> defines no
+	 *     packed fourcc at these widths.
+	 *   - VIDEO_PIX_FMT_RGB565X (16 bpp, big-endian byte order): the
+	 *     table's RGB565 entry documents little-endian only; nothing here
+	 *     confirms the CPI IPI packs big-endian, so mapping it would risk
+	 *     a silent byte-swap.
+	 *   - VIDEO_PIX_FMT_{A,X}RGB32/{A,X}BGR32/RGBA32/RGBX32/BGRA32/BGRX32
+	 *     (32 bpp, alpha or padding byte): CSI2_DT_RGB888 is 24 bpp per
+	 *     the table; a 32-bit fourcc would misconfigure the IPI bit width
+	 *     and corrupt every captured frame's alignment.
+	 * Bench-unverified either way (#226) -- no sensor is wired on this
+	 * hardware batch to confirm any of the above against silicon.
+	 */
 	switch (fourcc) {
 	case VIDEO_PIX_FMT_Y6P:
 		return CSI2_DT_RAW6;
@@ -301,6 +596,10 @@ static int32_t fourcc_to_csi_data_type(uint32_t fourcc)
 	case VIDEO_PIX_FMT_RGGB8:
 		return CSI2_DT_RAW8;
 	case VIDEO_PIX_FMT_Y10P:
+	case VIDEO_PIX_FMT_SBGGR10P:
+	case VIDEO_PIX_FMT_SGBRG10P:
+	case VIDEO_PIX_FMT_SGRBG10P:
+	case VIDEO_PIX_FMT_SRGGB10P:
 		return CSI2_DT_RAW10;
 	case VIDEO_PIX_FMT_Y12P:
 		return CSI2_DT_RAW12;
@@ -310,10 +609,70 @@ static int32_t fourcc_to_csi_data_type(uint32_t fourcc)
 		return CSI2_DT_RAW16;
 	case VIDEO_PIX_FMT_RGB565:
 		return CSI2_DT_RGB565;
+	case VIDEO_PIX_FMT_RGB24:
+	case VIDEO_PIX_FMT_BGR24:
+		return CSI2_DT_RGB888;
 	}
 	return -ENOTSUP;
 }
 
+/*
+ * Alp Lab AB: MIPI-packed link fourcc -> the unpacked fourcc the CPI really
+ * writes to memory.  In CSI mode RAW10/12/14 use CPI_DATA_MODE_16_BIT
+ * (data_mode_settings[]): one pixel per LSB-aligned 16-bit half-word, upper
+ * bits zero (HWRM 17.1.4.8.4-6) -- upstream's unpacked SBGGR10/Y10/.. layout,
+ * NOT the 1.25/1.5/1.75 B/px the packed fourcc describes.  The sensor keeps
+ * seeing the packed fourcc; the application sees the unpacked one.
+ */
+static const struct {
+	uint32_t link;
+	uint32_t mem;
+} cpi_unpacked_fmts[] = {
+	{VIDEO_PIX_FMT_SBGGR10P, VIDEO_PIX_FMT_SBGGR10},
+	{VIDEO_PIX_FMT_SGBRG10P, VIDEO_PIX_FMT_SGBRG10},
+	{VIDEO_PIX_FMT_SGRBG10P, VIDEO_PIX_FMT_SGRBG10},
+	{VIDEO_PIX_FMT_SRGGB10P, VIDEO_PIX_FMT_SRGGB10},
+	{VIDEO_PIX_FMT_Y10P, VIDEO_PIX_FMT_Y10},
+	{VIDEO_PIX_FMT_Y12P, VIDEO_PIX_FMT_Y12},
+	{VIDEO_PIX_FMT_Y14P, VIDEO_PIX_FMT_Y14},
+};
+
+/*
+ * Alp Lab AB: in CSI mode, run the CPI pixel clock (CAMERA_PIXCLK_CTRL) at the
+ * rate the CSI bridge just programmed on its own pixel clock.  The HWRM prose
+ * names CAMERA_PIXCLK_CTRL as the CPI PIXEL_CLK source in CSI mode, while its
+ * block diagram and the fork sample (which uses it only as the sensor XVCLK)
+ * point at the CSI PIXCLK; matching the two rates is right under either
+ * reading.  No-op when the DT carries neither clock.
+ */
+static int alif_cam_sync_pixclk(const struct device *dev)
+{
+	const struct video_cam_config *config = dev->config;
+	uint32_t hz;
+	int ret;
+
+	if ((config->pix_cid == NULL) || (config->csi_pix_cid == NULL)) {
+		return 0;
+	}
+
+	ret = clock_control_get_rate(config->clk_dev, config->csi_pix_cid, &hz);
+	if (ret) {
+		LOG_ERR("Failed to read the CSI pixel clock! ret - %d", ret);
+		return ret;
+	}
+
+	ret = clock_control_set_rate(config->clk_dev, config->pix_cid,
+				     (clock_control_subsys_rate_t)hz);
+	if (ret) {
+		LOG_ERR("Failed to set the CPI pixel clock to %u Hz! ret - %d", hz, ret);
+		return ret;
+	}
+
+	/* set_rate programmed the divisor and CLK_SEL; enable last (DFP order). */
+	return clock_control_on(config->clk_dev, config->pix_cid);
+}
+
+/* Returns the CPI data mode programmed (>= 0), or a negative errno. */
 static int alif_cam_set_csi(const struct device *dev, uint32_t fourcc)
 {
 	const struct video_cam_config *config = dev->config;
@@ -346,6 +705,15 @@ static int alif_cam_set_csi(const struct device *dev, uint32_t fourcc)
 		}
 	}
 
+	/* No break taken means i == ARRAY_SIZE, and both uses below then read one
+	 * past the end of the table -- writing whatever follows it into
+	 * CAM_CSI_CMCFG[MODE] and CAM_CFG[DATA_MODE].  Reachable for any fourcc
+	 * mapping to a CSI data type the table lacks (#1825). */
+	if (i == ARRAY_SIZE(data_mode_settings)) {
+		LOG_ERR("CSI data type 0x%02x has no CPI colour-mode entry", tmp);
+		return -ENOTSUP;
+	}
+
 	sys_write32(data_mode_settings[i].col_mode, regs + CAM_CSI_CMCFG);
 
 	switch (tmp) {
@@ -371,7 +739,7 @@ static int alif_cam_set_csi(const struct device *dev, uint32_t fourcc)
 	reg_write_part(regs + CAM_CFG, data_mode_settings[i].data_mode, CAM_CFG_DATA_MODE_MASK,
 		       CAM_CFG_DATA_MODE_SHIFT);
 
-	return 0;
+	return data_mode_settings[i].data_mode;
 }
 
 /*
@@ -387,6 +755,20 @@ static void alif_cam_work_helper(const struct device *dev)
 	struct video_buffer *vbuf = NULL;
 
 	if (config->axi_bus_ep) {
+		k_mutex_lock(&data->lock, K_FOREVER);
+
+		/*
+		 * alif_cam_stream_stop() may have run (and quiesced the CPI)
+		 * between this STOP interrupt firing and this work item
+		 * running -- data->lock serializes against it, so this read
+		 * is race-free. Nothing left to do for a stream the user
+		 * already asked to stop; re-arming here would restart it.
+		 */
+		if (!data->is_streaming) {
+			k_mutex_unlock(&data->lock);
+			return;
+		}
+
 		vbuf = k_fifo_peek_head(&data->fifo_in);
 		if (vbuf == NULL) {
 			LOG_ERR("Unexpected condition! The IN-FIFO should have "
@@ -395,12 +777,14 @@ static void alif_cam_work_helper(const struct device *dev)
 			data->curr_vid_buf = 0;
 			data->is_streaming = false;
 			signal_status = VIDEO_BUF_ERROR;
+			k_mutex_unlock(&data->lock);
 			goto done;
 		}
 
 		if (data->curr_vid_buf != (uint32_t)vbuf->buffer) {
 			signal_status = VIDEO_BUF_ERROR;
 			LOG_ERR("Unknown Video Buffer assigned to CPI Controller.");
+			k_mutex_unlock(&data->lock);
 			goto done;
 		}
 
@@ -412,6 +796,7 @@ static void alif_cam_work_helper(const struct device *dev)
 			data->curr_vid_buf = 0;
 			data->is_streaming = false;
 			signal_status = VIDEO_BUF_ERROR;
+			k_mutex_unlock(&data->lock);
 			goto done;
 		}
 
@@ -421,15 +806,31 @@ static void alif_cam_work_helper(const struct device *dev)
 		/* Move finished buffer to OUT-FIFO. */
 		k_fifo_put(&data->fifo_out, vbuf);
 
-		/* Now assign a new framebuffer to the CPI Controller. */
+		/*
+		 * Buffer-starvation/resume contract (Alp Lab AB): this IN-FIFO
+		 * peek and alif_cam_enqueue()'s fifo_in put + `starved` check run
+		 * under the same data->lock, so a buffer racing this pause can
+		 * never be lost -- either this peek sees the buffer an in-flight
+		 * enqueue() just queued (capture continues below, no pause) or
+		 * enqueue() sees `starved` already set once this function
+		 * releases the lock (enqueue() then reprograms CAM_FRAME_ADDR and
+		 * restarts the CPI -- the endpoint + sensor stay streaming across
+		 * the pause, #2287). Capture must PAUSE here, not stop
+		 * for good -- a consumer holding its one buffer past a frame
+		 * period used to kill the stream permanently (bench-proven
+		 * 2026-09-21).
+		 */
 		vbuf = k_fifo_peek_head(&data->fifo_in);
 		if (vbuf == NULL) {
 			LOG_DBG("No more Empty buffers in the IN-FIFO."
-					"Stopping Video Capture. If Re-queued, restart stream.");
+					"Pausing Video Capture. Next enqueue() resumes it.");
 			data->curr_vid_buf = 0;
-			data->is_streaming = false;
-			video_stream_stop(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
+			data->starved = true;
+			/* CPI-only pause (#2287): leave the CSI-2 endpoint + sensor
+			 * streaming across the stall -- see hw_cam_cpi_only_stop(). */
+			hw_cam_cpi_only_stop(regs);
 			signal_status = VIDEO_BUF_DONE;
+			k_mutex_unlock(&data->lock);
 			goto done;
 		}
 
@@ -443,6 +844,8 @@ static void alif_cam_work_helper(const struct device *dev)
 		/* Restart video capture. */
 		hw_cam_start_video_capture(dev);
 
+		k_mutex_unlock(&data->lock);
+
 done:
 		LOG_DBG("cur_vid_buf - 0x%08x", data->curr_vid_buf);
 #if defined(CONFIG_POLL)
@@ -451,8 +854,23 @@ done:
 		}
 #endif /* defined(CONFIG_POLL) */
 	} else {
-		/* Restart video capture. */
-		hw_cam_start_video_capture(dev);
+		/*
+		 * #2287 Stage B unit 3 (bench runs 307/308): this branch used
+		 * to re-arm the CPI itself (hw_cam_start_video_capture()) unconditionally, on every
+		 * STOP interrupt -- racing isp_pico.c's own frame-end interrupt and bottom half,
+		 * which decides (per frame) whether there IS a next destination buffer to capture
+		 * into at all. In ISP-consumer mode (this branch, config->axi_bus_ep unset) the CPI
+		 * is in SNAPSHOT mode (one frame per START, auto-stopping itself in hardware after --
+		 * see alif_cam_cpi_resume()'s own comment) -- re-arming here, before the ISP has
+		 * decided and attached its next buffer, captured a frame the ISP never asked for and
+		 * partially overwrote the buffer just handed to the app (runs 307/308's horizontal-
+		 * band/streak symptom). This branch now does NOTHING: isp_pico.c's own bottom half
+		 * (isp_bottom_half(), isp_pico.c) is the ONLY thing that re-arms the CPI in this mode
+		 * now, via alif_cam_cpi_resume() -- and only after successfully attaching the next
+		 * buffer to its own MI first. This STOP interrupt itself is otherwise unused in
+		 * ISP-consumer mode (no fifo_in/fifo_out bookkeeping happens here either, see the
+		 * `if (config->axi_bus_ep)` branch above for that).
+		 */
 	}
 }
 
@@ -463,12 +881,37 @@ static void alif_isr_cb_work(struct k_work *work)
 	alif_cam_work_helper(data->dev);
 }
 
+/*
+ * Alp Lab AB: an absent sensor (or absent CSI-2 host) is caught HERE, at
+ * first USE, not at our own init. The CPI initializes at
+ * CONFIG_VIDEO_ALIF_CAM_INIT_PRIORITY (59 by default) -- strictly BEFORE a
+ * directly-attached sensor's own CONFIG_VIDEO_INIT_PRIORITY (60 by
+ * default) has run on the parallel-interface path. A device_is_ready()
+ * check made from OUR init would therefore always see that sensor as
+ * not-yet-initialized and reject a genuinely PRESENT one too -- confirmed
+ * on a built image's .z_init_POST_KERNEL_P_ link order (csi @ P_41, cam @
+ * P_59, ov9281 @ P_60). By the time an application calls
+ * alp_camera_open() -- after kernel POST_KERNEL init has fully completed
+ * -- every driver's own init has already run, so checking readiness HERE
+ * reflects the real, final state without depending on init-priority
+ * ordering between unrelated Kconfig symbols.
+ */
+static int alif_cam_endpoint_ready(const struct video_cam_config *config)
+{
+	if (!device_is_ready(config->endpoint_dev)) {
+		return -ENODEV;
+	}
+	return 0;
+}
+
 static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 {
 	const struct video_cam_config *config = dev->config;
 	int bits_pp = pix_fmt_bpp(fmt->pixelformat);
 	struct video_cam_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
+	struct video_format link = *fmt;
+	int mode = config->data_mode;
 	int ret;
 
 	/*
@@ -484,28 +927,73 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 		return -EINVAL;
 	}
 
-	data->current_format.pixelformat = fmt->pixelformat;
-	data->current_format.pitch = fmt->pitch;
-	data->current_format.width = fmt->width;
-	data->current_format.height = fmt->height;
+	ret = alif_cam_endpoint_ready(config);
+	if (ret) {
+		LOG_ERR("Endpoint device is not ready");
+		return ret;
+	}
+
+	/* An unpacked request (SBGGR10..) goes out on the link as its packed
+	 * twin. Each .mem value is unique in cpi_unpacked_fmts[], so this
+	 * forward lookup was already unambiguous without a break; added
+	 * anyway for symmetry with the reverse lookup below. */
+	for (size_t i = 0; i < ARRAY_SIZE(cpi_unpacked_fmts); i++) {
+		if ((config->interface == CAM_INTERFACE_SERIAL) &&
+		    (fmt->pixelformat == cpi_unpacked_fmts[i].mem)) {
+			link.pixelformat = cpi_unpacked_fmts[i].link;
+			break;
+		}
+	}
 
 	sys_write32((((fmt->height - 1) & CAM_VIDEO_FCFG_ROW_MASK) << CAM_VIDEO_FCFG_ROW_SHIFT) |
 			    ((fmt->width & CAM_VIDEO_FCFG_DATA_MASK) << CAM_VIDEO_FCFG_DATA_SHIFT),
 		    regs + CAM_VIDEO_FCFG);
 
-	ret = video_set_format(config->endpoint_dev, fmt);
+	ret = video_set_format(config->endpoint_dev, &link);
 	if (ret) {
 		LOG_ERR("Failed to set sensor Format.");
 		return ret;
 	}
 
 	if (config->interface == CAM_INTERFACE_SERIAL) {
-		ret = alif_cam_set_csi(dev, fmt->pixelformat);
-		if (ret) {
+		mode = alif_cam_set_csi(dev, link.pixelformat);
+		if (mode < 0) {
 			LOG_ERR("Failed to configure CAM as per the CSI.");
+			return mode;
+		}
+
+		ret = alif_cam_sync_pixclk(dev);
+		if (ret) {
 			return ret;
 		}
+
+		/*
+		 * ponytail: the 32-bit RGB888 container keeps its RGB24 fourcc
+		 * (only the pitch is corrected); remap it once a sensor needs it.
+		 */
+		fmt->pixelformat = link.pixelformat;
+		for (size_t i = 0; i < ARRAY_SIZE(cpi_unpacked_fmts); i++) {
+			if (link.pixelformat == cpi_unpacked_fmts[i].link) {
+				fmt->pixelformat = cpi_unpacked_fmts[i].mem;
+				break;
+			}
+		}
 	}
+
+	/*
+	 * Alp Lab AB: the CPI stores one data-mode sample per pixel (CSI: the
+	 * mode set above; parallel: the DT data-mode, 1..16 bits), whatever the
+	 * link bpp -- so 8/16/32-bit modes take 1/2/4 B per pixel.  The caller's
+	 * pitch (0 from the portable backend, width * 10 / 8 from a packed-RAW10
+	 * sensor) would under-size the enqueue guard's frame and let the DMA run
+	 * past the buffer.
+	 */
+	fmt->pitch = DIV_ROUND_UP(fmt->width << mode, BITS_PER_BYTE);
+
+	data->current_format.pixelformat = fmt->pixelformat;
+	data->current_format.pitch = fmt->pitch;
+	data->current_format.width = fmt->width;
+	data->current_format.height = fmt->height;
 
 	data->is_streaming = 0;
 	return 0;
@@ -524,22 +1012,25 @@ static int alif_cam_get_fmt(const struct device *dev, struct video_format *fmt)
 		return -EINVAL;
 	}
 
+	ret = alif_cam_endpoint_ready(config);
+	if (ret) {
+		LOG_ERR("Endpoint device is not ready");
+		return ret;
+	}
+
 	ret = video_get_format(config->endpoint_dev, fmt);
 	if (ret) {
 		LOG_ERR("Failed to get format from Video pipeline!");
 		return ret;
 	}
 
+	/* set_fmt also programs the CSI side and rewrites fmt to the in-memory
+	 * layout, so no second alif_cam_set_csi() here: it would now see the
+	 * unpacked fourcc, which is not a link format.
+	 */
 	ret = alif_cam_set_fmt(dev, fmt);
 	if (ret) {
 		return ret;
-	}
-
-	if (config->interface == CAM_INTERFACE_SERIAL) {
-		ret = alif_cam_set_csi(dev, fmt->pixelformat);
-		if (ret) {
-			return ret;
-		}
 	}
 
 	fmt->pixelformat = data->current_format.pixelformat;
@@ -550,6 +1041,41 @@ static int alif_cam_get_fmt(const struct device *dev, struct video_format *fmt)
 	return 0;
 }
 
+/*
+ * Bench run 76 (stage 5): same forwarding shape as alif_cam_get_fmt() above,
+ * extended to frame interval -- see video_csi_dw.c's csi2_dw_get_frmival()
+ * for why. Alp Lab AB.
+ */
+static int alif_cam_get_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct video_cam_config *config = dev->config;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	return video_get_frmival(config->endpoint_dev, frmival);
+}
+
+/*
+ * Issue #2338: same forwarding shape as alif_cam_get_frmival() above, for the
+ * SET side -- an app-level caller (e.g. src/backends/camera/alif_isp_pico.c)
+ * setting the rate through the ISP now reaches this device too
+ * (isp_pico.c's own new set_frmival forwards to `controller`, this device);
+ * forward it one more hop to the real endpoint (sensor, or the next CSI
+ * device downstream) exactly like the GET side already does. Alp Lab AB.
+ */
+static int alif_cam_set_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct video_cam_config *config = dev->config;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	return video_set_frmival(config->endpoint_dev, frmival);
+}
+
 static int alif_cam_stream_start(const struct device *dev)
 {
 	const struct video_cam_config *config = dev->config;
@@ -558,13 +1084,30 @@ static int alif_cam_stream_start(const struct device *dev)
 	struct video_buffer *vbuf;
 	int ret;
 
+	/* Alp Lab AB: reject a second start BEFORE cancelling the helper -- on a
+	 * live stream the pending helper is the one that hands a finished frame
+	 * to fifo_out, and cancelling it stalls the stream. */
+	k_mutex_lock(&data->lock, K_FOREVER);
+	if (data->is_streaming) {
+		k_mutex_unlock(&data->lock);
+		LOG_DBG("Already streaming.");
+		return -EBUSY;
+	}
+	k_mutex_unlock(&data->lock);
+
 	/* Cancel any stale work_helper from previous session before starting */
 	struct k_work_sync sync;
 
 	k_work_cancel_sync(&data->cb_work, &sync);
 
+	/* Alp Lab AB: k_work_cancel_sync() above must stay OUTSIDE the lock --
+	 * it blocks on alif_cam_work_helper() (which itself takes data->lock)
+	 * finishing, so taking data->lock first would deadlock against it. */
+	k_mutex_lock(&data->lock, K_FOREVER);
+
 	if (data->is_streaming) {
 		LOG_DBG("Already streaming.");
+		k_mutex_unlock(&data->lock);
 		return -EBUSY;
 	}
 
@@ -574,6 +1117,7 @@ static int alif_cam_stream_start(const struct device *dev)
 		vbuf = k_fifo_peek_head(&data->fifo_in);
 		if (!vbuf) {
 			LOG_ERR("No empty video-buffer. Aborting!!!");
+			k_mutex_unlock(&data->lock);
 			return -ENOBUFS;
 		}
 
@@ -590,6 +1134,7 @@ static int alif_cam_stream_start(const struct device *dev)
 	ret = video_stream_start(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (ret) {
 		LOG_ERR("Failed to start streaming of Video pipeline!");
+		k_mutex_unlock(&data->lock);
 		return -EIO;
 	}
 
@@ -597,6 +1142,9 @@ static int alif_cam_stream_start(const struct device *dev)
 	LOG_DBG("Stream started");
 
 	data->is_streaming = true;
+	data->starved = false;
+
+	k_mutex_unlock(&data->lock);
 
 	return 0;
 }
@@ -606,48 +1154,48 @@ static int alif_cam_stream_stop(const struct device *dev)
 	const struct video_cam_config *config = dev->config;
 	struct video_cam_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
-	uint32_t mask;
 	int ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
 
 	if (!data->is_streaming) {
 		LOG_DBG("Already stopped streaming.");
+		k_mutex_unlock(&data->lock);
 		return 0;
 	}
 
+	/*
+	 * Alp Lab AB (issue #2287): stop the endpoint even while `starved`. A
+	 * starvation pause (alif_cam_work_helper()) only stops the CPI, via
+	 * hw_cam_cpi_only_stop() -- the CSI-2 endpoint and sensor keep streaming
+	 * across it -- so this is the ONLY stop that ever reaches the endpoint
+	 * and sensor while `starved` is set; there is no earlier stop for this
+	 * one to be idempotent against. Clearing `starved` below is what keeps a
+	 * LATER enqueue() from mistaking this user stop for a starvation pause
+	 * and auto-restarting.
+	 */
 	ret = video_stream_stop(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (ret) {
 		LOG_ERR("Failed to stop streaming in Pipeline!");
+		k_mutex_unlock(&data->lock);
 		return ret;
 	}
 
-	/* Disable Interrupts. */
-	hw_disable_interrupts(regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN |
-					    INTR_INFIFO_OVERRUN | INTR_STOP);
-
-	/* Stop the Camera sensor to dump image. */
-	sys_write32(0, regs + CAM_CTRL);
+	/* The endpoint/sensor are already stopped above; see hw_cam_quiesce()
+	 * for why this is the only safe way to stop the CPI side.
+	 */
+	hw_cam_quiesce(
+	    regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN | INTR_INFIFO_OVERRUN | INTR_STOP);
 
 	/* Set the Current buffer state to NULL */
 	data->curr_vid_buf = 0;
 
-	/*
-	 * Poll on Busy flag of CPI to find out when the video buffer
-	 * is no longer accessed.
-	 */
-	mask = CAM_CTRL_BUSY;
-	for (int i = 0; (i < 1000) && (sys_read32(regs + CAM_CTRL) & mask) == mask; i++) {
-		k_msleep(1);
-	}
-
-	/* Apply soft reset to clear BUSY flag and leave CPI in clean state */
-	hw_cam_soft_reset(regs);
-
-	/* Clear any stale latched interrupts after reset */
-	sys_write32(sys_read32(regs + CAM_INTR), regs + CAM_INTR);
-
 	LOG_DBG("Stream stopped");
 
 	data->is_streaming = false;
+	data->starved = false;
+
+	k_mutex_unlock(&data->lock);
 
 	return 0;
 }
@@ -675,14 +1223,22 @@ static int alif_cam_flush(const struct device *dev, bool cancel)
 	struct video_cam_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	struct video_buffer *vbuf = NULL;
-	uint32_t mask;
 
 	if (!cancel) {
+		/*
+		 * Alp Lab AB: data->lock guards the curr_vid_buf read + the
+		 * non-blocking fifo_in drain below -- NOT the wait loop that
+		 * follows, which blocks on alif_cam_work_helper() making
+		 * progress and would deadlock against it (the helper needs
+		 * the same lock) if held across the wait.
+		 */
+		k_mutex_lock(&data->lock, K_FOREVER);
 		if (!data->curr_vid_buf) {
 			while ((vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT))) {
 				k_fifo_put(&data->fifo_out, vbuf);
 			}
 		}
+		k_mutex_unlock(&data->lock);
 
 		/*
 		 * In case the cancel option is not provided, put the thread to
@@ -693,26 +1249,99 @@ static int alif_cam_flush(const struct device *dev, bool cancel)
 			k_msleep(1);
 		}
 	} else {
-		/*
-		 * Disable interrupts to ensures that the current buffer is
-		 * not moved from IN-FIFO to OUT-FIFO on STOP interrupt.
-		 */
-		/* Disable the Stop interrupt. */
-		hw_disable_interrupts(regs, INTR_STOP);
-		/* Stop Video capture. */
-		sys_write32(0, regs + CAM_CTRL);
+		struct k_work_sync sync;
 
 		/*
-		 * Poll on Busy flag of CPI to find out when the video buffer
-		 * is no longer accessed.
+		 * Mask STOP before cancelling the in-flight work_helper --
+		 * same ordering as isp_flush() (zephyr/drivers/video/isp_pico.c).
+		 * Masking first closes the window where a STOP fires between
+		 * k_work_cancel_sync() returning and this function re-taking
+		 * the lock below: without the mask, that STOP can resubmit
+		 * cb_work, which then runs after hw_cam_quiesce() has already
+		 * reset the CPI, finds an empty IN-FIFO, hits the "Unexpected
+		 * condition" branch in alif_cam_work_helper(), clears
+		 * is_streaming and stalls the stream.
 		 */
-		mask = CAM_CTRL_BUSY;
-		for (int i = 0; (i < 1000) && (sys_read32(regs + CAM_CTRL) & mask) == mask; i++) {
-			k_msleep(1);
+		k_mutex_lock(&data->lock, K_FOREVER);
+		hw_disable_interrupts(regs, INTR_STOP);
+		k_mutex_unlock(&data->lock);
+
+		/*
+		 * Cancel any in-flight work_helper next, and OUTSIDE the
+		 * lock -- k_work_cancel_sync() blocks on alif_cam_work_helper()
+		 * (which itself takes data->lock) finishing, so taking the
+		 * lock first would deadlock against it (same reasoning as
+		 * alif_cam_stream_start()'s own cancel). Without this, the
+		 * work helper's STOP-driven re-arm (hw_cam_start_video_capture())
+		 * can race this flush's own hw_cam_quiesce() below and re-arm
+		 * a capture flush(cancel) just stopped.
+		 */
+		k_work_cancel_sync(&data->cb_work, &sync);
+
+		k_mutex_lock(&data->lock, K_FOREVER);
+
+		/*
+		 * Bug #2342 revision (bench run 341): a soft reset landing
+		 * mid-frame, while the CPI is still actively writing an AXI
+		 * burst, wedges the SRAM0 write path -- core stalls in/just
+		 * after hw_cam_quiesce() below, 12/212 runs, AXI-AP reads
+		 * still working but a write never completing. Frame-boundary
+		 * resets (0/120) and stream_stop's stop-source-first order
+		 * (0/50) never hung. If a capture is armed (CAM_CTRL START
+		 * set) and the frame hasn't ended yet (raw CAM_INTR STOP not
+		 * yet latched -- FCFG ROW bounds the frame in hardware, so an
+		 * armed capture always reaches STOP within one frame), wait
+		 * for that STOP instead of resetting into the burst.
+		 */
+		if ((sys_read32(regs + CAM_CTRL) & CAM_CTRL_START) &&
+		    !(sys_read32(regs + CAM_INTR) & INTR_STOP)) {
+			bool frame_ended = false;
+			int waited_ms = 0;
+
+			/*
+			 * data->lock dropped for this poll: INTR_STOP is
+			 * already masked and cb_work already cancelled above,
+			 * so nothing re-arms the CPI (hw_cam_start_video_capture())
+			 * behind this wait's back. The only other CAM_CTRL
+			 * writer is alif_cam_enqueue()'s starved-resume path,
+			 * and that only fires once `data->starved` is set,
+			 * which only happens after a capture has already been
+			 * fully stopped (hw_cam_cpi_only_stop()/hw_cam_quiesce())
+			 * -- never while CAM_CTRL START is still set, the very
+			 * condition guarding this branch. Holding the lock
+			 * across the poll would also block every other
+			 * data->lock caller for up to the full timeout.
+			 */
+			k_mutex_unlock(&data->lock);
+
+			while (waited_ms < CPI_FLUSH_FRAME_END_TIMEOUT_MS) {
+				if (sys_read32(regs + CAM_INTR) & INTR_STOP) {
+					frame_ended = true;
+					break;
+				}
+				k_msleep(1);
+				waited_ms++;
+			}
+
+			if (!frame_ended) {
+				LOG_WRN("Timed out waiting for frame end before "
+					"flush(cancel) reset (CAM_CTRL=0x%08x, "
+					"CAM_INTR=0x%08x)",
+					sys_read32(regs + CAM_CTRL),
+					sys_read32(regs + CAM_INTR));
+			}
+
+			k_mutex_lock(&data->lock, K_FOREVER);
 		}
 
-		/* Apply soft reset to clear BUSY flag and leave CPI in clean state */
-		hw_cam_soft_reset(regs);
+		/* See hw_cam_quiesce() for why this is the only safe way to
+		 * stop: soft reset via hw_cam_quiesce(). INTR_STOP is already
+		 * masked above; passing it again here is a harmless re-mask,
+		 * kept so this call matches every other hw_cam_quiesce() call
+		 * site. The wait above (if it ran) guarantees no AXI write
+		 * burst is in flight when this reset lands (#2342).
+		 */
+		hw_cam_quiesce(regs, INTR_STOP);
 
 		while ((vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT))) {
 			k_fifo_put(&data->fifo_out, vbuf);
@@ -723,10 +1352,28 @@ static int alif_cam_flush(const struct device *dev, bool cancel)
 			}
 #endif /* defined(CONFIG_POLL) */
 		}
+
+		/*
+		 * hw_cam_quiesce() above masked INTR_STOP and left the CPI
+		 * stopped without re-arming it. If the stream is still
+		 * nominally running (this flush(cancel) wasn't called from
+		 * alif_cam_stream_stop()), nothing else will ever restart it
+		 * -- mark `starved` so the next enqueue() takes the existing
+		 * starved-resume path (re-enables interrupts, reprograms
+		 * CAM_FRAME_ADDR, calls hw_cam_start_video_capture() -- see
+		 * alif_cam_enqueue()), instead of silently sitting parked.
+		 */
+		if (data->is_streaming) {
+			data->starved = true;
+		}
+
+		k_mutex_unlock(&data->lock);
 	}
 
 	/* Set current Video buffer to null address. */
+	k_mutex_lock(&data->lock, K_FOREVER);
 	data->curr_vid_buf = 0;
+	k_mutex_unlock(&data->lock);
 	return 0;
 }
 
@@ -737,13 +1384,18 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 {
 	const struct video_cam_config *config = dev->config;
 	struct video_cam_data *data = dev->data;
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	uint32_t to_read;
 	uint32_t tmp;
 
 	if (IS_ENABLED(CONFIG_VIDEO_ALIF_CAM_EXTENDED)) {
 		if (!config->axi_bus_ep) {
+			/* No AXI memory endpoint on this instance (e.g. ISP-fed CPI,
+			 * config->isp_ep) -- enqueueing a buffer here would never be
+			 * filled. -ENOTSUP, not 0: a silent "success" would let the
+			 * caller believe the buffer is queued. */
 			LOG_DBG("AXI Master interface of the IP is not enabled!");
-			return 0;
+			return -ENOTSUP;
 		}
 	}
 
@@ -756,14 +1408,83 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 	}
 
 	to_read = data->current_format.pitch * data->current_format.height;
+
+	/*
+	 * The frame has to FIT.  pitch and height come either from the caller's
+	 * struct video_format via alif_cam_set_fmt() or from the SENSOR via
+	 * video_get_format(), and the buffer address then goes straight to
+	 * CAM_FRAME_ADDR for the AXI master to DMA into.  The hardware imposes no
+	 * bound of its own -- HWRM 17.1.4.10.1: "The CPI controller hardware can
+	 * handle the AXI write crossing the 4KB boundary of AXI address space.
+	 * Thus, there is no limitation on software to allocate the memory space for
+	 * buffering the image data."
+	 *
+	 * So a 320x240x2 = 153600-byte pool with a sensor reporting 1280x720 had
+	 * 1843200 bytes written starting at the pool block, over whatever the
+	 * linker placed after it in SRAM0.  Alignment was validated here and size
+	 * was not, while the LOG_DBG below printed both next to each other without
+	 * comparing them (#1825).
+	 */
+	if (to_read > buf->size) {
+		LOG_ERR("Frame %ux%u needs %u bytes, buffer holds %u -- refusing to DMA "
+		        "past the end",
+		        data->current_format.pitch,
+		        data->current_format.height,
+		        to_read,
+		        buf->size);
+		return -ENOBUFS;
+	}
+
 	buf->bytesused = to_read;
+
+	/*
+	 * Buffer-starvation/resume contract (Alp Lab AB): a STOP interrupt
+	 * that found the IN-FIFO empty pauses capture instead of stopping it
+	 * for good (alif_cam_work_helper() sets `starved` and pauses the CPI
+	 * only, via hw_cam_cpi_only_stop() -- #2287). data->lock serializes
+	 * the put + `starved` check here against that empty-check + pause
+	 * decision, so a buffer racing the pause is never lost -- see the
+	 * comment at the work helper.
+	 */
+	/* Clean+invalidate BEFORE the buffer is handed to the hardware -- and on
+	 * the resume path below that hand-over starts the DMA immediately -- so no
+	 * dirty line is written back over the incoming frame.  The matching
+	 * post-DMA invalidate is in alif_cam_dequeue(), without which speculative
+	 * prefetch during the capture window can repopulate lines the DMA then
+	 * overwrites in memory and the application reads stale pixels (#1825). */
+	(void)sys_cache_data_flush_and_invd_range(buf->buffer, buf->size);
+
+	k_mutex_lock(&data->lock, K_FOREVER);
 
 	k_fifo_put(&data->fifo_in, buf);
 
+	if (data->starved) {
+		/* `starved` means the IN-FIFO was empty under this lock, so the
+		 * buffer just put is its head; program the head, as stream_start
+		 * does, so the head and CAM_FRAME_ADDR can never diverge. */
+		struct video_buffer *head = k_fifo_peek_head(&data->fifo_in);
+
+		data->curr_vid_buf = (uint32_t)head->buffer;
+		sys_write32(local_to_global(UINT_TO_POINTER(data->curr_vid_buf)),
+				regs + CAM_FRAME_ADDR);
+
+		/* CPI-only pause (#2287): the endpoint + sensor were never stopped
+		 * for this pause (see hw_cam_cpi_only_stop()), so only the CPI
+		 * needs restarting -- no video_stream_start() here. */
+
+		/* A flush(cancel) may have masked the interrupts while starved. */
+		hw_enable_interrupts(regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN |
+						   INTR_INFIFO_OVERRUN | INTR_STOP);
+
+		/* Restart video capture. */
+		hw_cam_start_video_capture(dev);
+		data->starved = false;
+	}
+
+	k_mutex_unlock(&data->lock);
+
 	LOG_DBG("Enqueued buffer: Addr - 0x%x, size - %d, bytesused - %d",
 		(uint32_t)buf->buffer, buf->size, buf->bytesused);
-
-	(void)sys_cache_data_flush_and_invd_range(buf->buffer, buf->size);
 
 	return 0;
 }
@@ -779,8 +1500,13 @@ static int alif_cam_dequeue(const struct device *dev, struct video_buffer **buf,
 
 	if (IS_ENABLED(CONFIG_VIDEO_ALIF_CAM_EXTENDED)) {
 		if (!config->axi_bus_ep) {
+			/* Same no-AXI-endpoint instance as alif_cam_enqueue() above.
+			 * -ENOTSUP, *buf left untouched -- this used to return 0
+			 * ("success") without ever setting *buf, which a caller
+			 * reading it on a 0 return would see as an uninitialized
+			 * pointer. */
 			LOG_DBG("AXI Master interface of the IP is not enabled!");
-			return 0;
+			return -ENOTSUP;
 		}
 	}
 
@@ -788,6 +1514,17 @@ static int alif_cam_dequeue(const struct device *dev, struct video_buffer **buf,
 	if (!(*buf)) {
 		return -EAGAIN;
 	}
+
+	/*
+	 * Invalidate what the CPI AXI master just wrote.  The enqueue path already
+	 * cleans the buffer before the transfer; nothing invalidated it afterwards,
+	 * so with CONFIG_DCACHE=y and no nocache placement the application could
+	 * read cache lines that speculative prefetch had pulled in during the
+	 * capture window -- stale pixels, no error (#1825).
+	 * (eth_dwmac_alif_ensemble.c enforces the same requirement with a
+	 * BUILD_ASSERT; this driver had no equivalent.)
+	 */
+	(void)sys_cache_data_invd_range((*buf)->buffer, (*buf)->bytesused);
 
 	LOG_DBG("Dequeued buffer: Addr - 0x%08x, size - %d, bytesused - %d",
 		(uint32_t)(*buf)->buffer, (*buf)->size, (*buf)->bytesused);
@@ -812,7 +1549,23 @@ static int alif_cam_dequeue(const struct device *dev, struct video_buffer **buf,
 static int alif_cam_get_caps(const struct device *dev, struct video_caps *caps)
 {
 	const struct video_cam_config *config = dev->config;
-	int err = -ENODEV;
+	int                            err;
+
+	err = alif_cam_endpoint_ready(config);
+	if (err) {
+		LOG_ERR("Endpoint device is not ready");
+		return err;
+	}
+
+	/* The endpoint (CSI-2 host or parallel sensor) may init after this CPI
+	 * (sensor priority 60 > CPI 59), so its readiness can only be checked at
+	 * call time.  An absent sensor fails its own chip-ID init; report that
+	 * as -ENODEV here instead of letting the first set_format NACK as -EIO
+	 * (#2249).
+	 */
+	if (!device_is_ready(config->endpoint_dev)) {
+		return -ENODEV;
+	}
 
 	err = video_get_caps(config->endpoint_dev, caps);
 	caps->min_vbuf_count = CPI_MIN_VBUF;
@@ -841,6 +1594,8 @@ static int alif_cam_set_signal(const struct device *dev,
 static DEVICE_API(video, cam_driver_api) = {
 	.set_format = alif_cam_set_fmt,
 	.get_format = alif_cam_get_fmt,
+	.get_frmival = alif_cam_get_frmival,
+	.set_frmival = alif_cam_set_frmival,
 	.set_stream = alif_cam_set_stream,
 	.flush = alif_cam_flush,
 	.enqueue = alif_cam_enqueue,
@@ -854,6 +1609,7 @@ static DEVICE_API(video, cam_driver_api) = {
 static void __maybe_unused alif_video_cam_isr(const struct device *dev)
 {
 	static bool is_not_corrupted_frame = true;
+	const struct video_cam_config *config = dev->config;
 	struct video_cam_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	uint32_t err_mask = INTR_OUTFIFO_OVERRUN | INTR_INFIFO_OVERRUN | INTR_BRESP_ERR;
@@ -887,13 +1643,62 @@ static void __maybe_unused alif_video_cam_isr(const struct device *dev)
 			k_poll_signal_raise(data->signal, VIDEO_BUF_ERROR);
 		}
 #endif /* defined(CONFIG_POLL) */
+		/*
+		 * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap; robustness fix,
+		 * bench run 311 round): this error never reaches the ISP's own frame-end
+		 * interrupt (the CPI/CSI side failed before a frame -- corrupted or otherwise --
+		 * got that far), so in ISP-consumer mode nothing else would ever re-arm the CPI
+		 * after it. Notify the registered callback (isp_pico.c's, via
+		 * alif_cam_register_error_cb()) if one is set -- the memory-capture path
+		 * (config->axi_bus_ep set) never registers one, so this is a no-op there,
+		 * matching its own existing "wait for user to handle" recovery model.
+		 *
+		 * Gated on `int_st & INTR_STOP` ALSO being set in this SAME readout (below, not
+		 * just eventually) -- an error alone does not mean the snapshot has actually
+		 * ended; firing the callback (and so alif_cam_cpi_resume(), isp_pico.c's
+		 * isp_cpi_rearm_error_cb()) while the CPI might still be mid-snapshot would
+		 * either race a legitimate in-flight capture or simply be redundant once it
+		 * does stop -- alif_cam_cpi_resume() is now idempotent against that (its own
+		 * CAM_CTRL BUSY/START check, above) as a second line of defence, but requiring
+		 * STOP here avoids relying on that defence being the only thing standing between
+		 * this callback and a mid-capture abort.
+		 */
+		if (!config->axi_bus_ep && data->error_cb && (int_st & INTR_STOP)) {
+			data->error_cb(data->error_cb_user_data);
+		}
 	}
 
 	if (int_st & INTR_STOP) {
-		sys_write32(0, regs + CAM_CTRL);
+		/*
+		 * Keep FIFO_CLK_SEL | SNAPSHOT here rather than following
+		 * hw_cam_quiesce()'s end state (bare CAM_CTRL = 0): this ISR
+		 * can run late, after alif_cam_cpi_resume() has already
+		 * re-armed the CPI for the next frame (see its own header
+		 * comment). If that race happens, a bare 0 here would clear
+		 * FIFO_CLK_SEL mid-capture, on the already re-armed frame --
+		 * bench: ~2x frame overrun, the same failure hw_cam_quiesce()
+		 * exists to avoid. Writing FIFO_CLK_SEL | SNAPSHOT is, relative
+		 * to that already-armed state, equivalent to clearing only
+		 * START -- bench-proven a no-op for a capture already in
+		 * progress (hw_cam_quiesce()'s header comment, arm B); for a
+		 * CPI armed but not yet started this is unproven, but the
+		 * write this replaced (a bare 0) also cleared START, so this
+		 * is not a regression either way. This write clears START
+		 * regardless, so alif_cam_cpi_resume()'s idempotency guard
+		 * (BUSY | START) still lets a genuinely finished capture
+		 * re-arm normally.
+		 */
+		sys_write32(CAM_CTRL_FIFO_CLK_SEL | CAM_CTRL_SNAPSHOT, regs + CAM_CTRL);
+		data->cpi_armed = false;
 		/* Guard: don't process stale STOP after stream was turned off */
 		if (!data->is_streaming) {
+			data->rearm_pending = false;
 			return;
+		}
+		if (data->rearm_pending) {
+			/* #2499: a re-arm that arrived while this snapshot was armed. */
+			data->rearm_pending = false;
+			hw_cam_start_video_capture(dev);
 		}
 		/* No corruption observed during dumping this frame. */
 		if (is_not_corrupted_frame) {
@@ -1061,6 +1866,9 @@ static int __maybe_unused alif_video_cam_init(const struct device *dev)
 
 	k_fifo_init(&data->fifo_in);
 	k_fifo_init(&data->fifo_out);
+	/* Alp Lab AB: guards the buffer-starvation/resume decision shared by
+	 * alif_cam_work_helper() and alif_cam_enqueue() (see video_alif.h). */
+	k_mutex_init(&data->lock);
 	data->dev = dev;
 
 	/* Setup the CPI-Controller hardware config. */
@@ -1126,18 +1934,28 @@ static int __maybe_unused alif_video_cam_init(const struct device *dev)
 	}
 
 	data->is_streaming = false;
+	data->starved = false;
 
 	return 0;
 }
 
+#define REMOTE_DEVICE(i, id) \
+	DT_NODE_REMOTE_DEVICE(DT_INST_ENDPOINT_BY_ID(i, id, 0))
+
+/* Alp Lab AB: pix_cid = this CPI's "pix_clk"; csi_pix_cid = the "pix_clk" of
+ * the port@0 source (the CSI bridge; a parallel sensor has none). */
 #define CAM_GET_CLK(i)                                                         \
 	IF_ENABLED(DT_INST_NODE_HAS_PROP(i, clocks),                           \
 		(.clk_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(i)),             \
 		 .cid = (clock_control_subsys_t)DT_INST_CLOCKS_CELL_BY_NAME(i, \
-			 cam_clk, clkid),))
-
-#define REMOTE_DEVICE(i, id) \
-	DT_NODE_REMOTE_DEVICE(DT_INST_ENDPOINT_BY_ID(i, id, 0))
+			 cam_clk, clkid),                                      \
+		 IF_ENABLED(DT_INST_CLOCKS_HAS_NAME(i, pix_clk),               \
+			(.pix_cid = (clock_control_subsys_t)                   \
+				DT_INST_CLOCKS_CELL_BY_NAME(i, pix_clk, clkid),)) \
+		 IF_ENABLED(DT_CLOCKS_HAS_NAME(REMOTE_DEVICE(i, 0), pix_clk),  \
+			(.csi_pix_cid = (clock_control_subsys_t)               \
+				DT_CLOCKS_CELL_BY_NAME(REMOTE_DEVICE(i, 0),    \
+						       pix_clk, clkid),))))
 
 #define CPI_DEFINE(i)                                                                              \
 	IF_ENABLED(CONFIG_PINCTRL,                                                                 \
@@ -1167,7 +1985,6 @@ static int __maybe_unused alif_video_cam_init(const struct device *dev)
 		.msb = DT_INST_PROP(i, msb),                                                       \
 		.vsync_en = DT_INST_PROP(i, vsync_en),                                             \
 		.wait_vsync = DT_INST_PROP(i, wait_vsync),                                         \
-		.capture_mode = DT_INST_ENUM_IDX(i, capture_mode),                                 \
 		.data_mode = DT_INST_ENUM_IDX(i, data_mode),                                       \
 		.data_mask = DT_INST_ENUM_IDX(i, data_mask),                                       \
 		.code10on8 = DT_INST_PROP(i, code_10_on_8),                                        \
@@ -1182,6 +1999,15 @@ static int __maybe_unused alif_video_cam_init(const struct device *dev)
 	static struct video_cam_data data_##i;                                                     \
 	DEVICE_DT_INST_DEFINE(i, &alif_video_cam_init, NULL, &data_##i, &config_##i,               \
 			      POST_KERNEL, CONFIG_VIDEO_ALIF_CAM_INIT_PRIORITY, &cam_driver_api);  \
+                                                                                                   \
+	/* Chains this device onto v4.4's control-registry walk (video_find_ctrl(),               \
+	 * drivers/video/video_ctrls.c): the CPI owns no controls of its own (see the             \
+	 * .set_ctrl/.get_ctrl drop note above), so a control request against it                  \
+	 * falls straight through to .src_dev, the port@0 endpoint device (CSI                    \
+	 * bridge, or a directly-wired parallel sensor) -- same device already                    \
+	 * resolved into config_##i.endpoint_dev, above. */                                       \
+	VIDEO_DEVICE_DEFINE(cam_vdev_##i, DEVICE_DT_INST_GET(i),                                   \
+			     DEVICE_DT_GET(REMOTE_DEVICE(i, 0)));                                  \
                                                                                                    \
 	static void cam_config_func_##i(const struct device *dev)                                  \
 	{                                                                                          \

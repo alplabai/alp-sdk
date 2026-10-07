@@ -19,6 +19,7 @@
 #include <alp/rtc.h>
 #include <alp/soc_caps.h>
 
+#include "alp_errno.h"
 #include "rtc_ops.h"
 
 #define ALP_RTC_DEV_OR_NULL(idx) \
@@ -33,31 +34,25 @@ static const struct device *const _devs[] = {
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * BEHAVIOUR CHANGE: this switch had no -EAGAIN and/or no -ETIMEDOUT
+	 * arm, so a driver-reported deadline surfaced as ALP_ERR_IO.  Callers
+	 * can now receive ALP_ERR_TIMEOUT here, and ALP_ERR_NOT_READY /
+	 * ALP_ERR_NOMEM / ALP_ERR_NOSUPPORT for the other arms the switch
+	 * lacked.  Every arm it DID carry agreed with the baseline. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static alp_status_t
 z_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (rtc_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (rtc_id >= ALP_SOC_RTC_COUNT) return ALP_ERR_OUT_OF_RANGE;
 	const struct device *dev = _devs[rtc_id];
 	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
-	st->dev         = (void *)dev;
-	st->rtc_id      = rtc_id;
-	caps_out->flags = 0u;
+	st->dev    = (void *)dev;
+	st->rtc_id = rtc_id;
 	return ALP_OK;
 }
 

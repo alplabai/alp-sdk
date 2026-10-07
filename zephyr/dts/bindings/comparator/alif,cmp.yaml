@@ -96,8 +96,15 @@ properties:
   filter_taps:
     type: int
     description: |
-      Number of comparator filter taps, 2..8 (CMP_FILTER_CTRL).  Enabling the
-      filter also sets CMP_FILTER_CONTROL_ENABLE (bit 0).
+      Number of comparator filter taps, 2..8 (CMP_FILTER_CTRL[11:8] NUM_TAPS,
+      HWRM 19.3.5.3.5).  The driver also sets CMP_FILTER_CONTROL_ENABLE (bit 0).
+
+      The filter is not optional: HWRM 19.3.5.3.8 defines BOTH comparator
+      interrupt sources as "Filter event has occurred for the programmed number
+      of taps", so a disabled filter means no callback ever fires.  Omitting
+      this property therefore defaults to 3 taps (the count HWRM 19.3.4.2 step 4
+      uses in its own example) rather than disabling the filter; a value outside
+      2..8 is rejected at init with -EINVAL.
 
   cmp-gpios:
     type: phandle-array
