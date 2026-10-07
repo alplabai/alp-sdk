@@ -29,10 +29,10 @@
  *
  * INIT ORDER (why this runs at CONFIG_APPLICATION_INIT_PRIORITY, matching
  * upstream Zephyr's himax,hx8394 panel driver): by the time this device
- * initializes, the I2C bus, the carrier's PCA9538 GPIO expander (this
- * bridge's EN pin lives behind it on this shield) and the DesignWare MIPI-DSI
- * host all need to be ready.  APPLICATION (90, kernel/Kconfig.device) is
- * after the expander (I2C bus priority, KERNEL_INIT_PRIORITY_DEVICE = 50,
+ * initializes, the I2C bus, the EN pin's GPIO controller (a plain SoC GPIO on
+ * this shield: P13_4, the mikroBUS INT pin, gpio13) and the DesignWare
+ * MIPI-DSI host all need to be ready.  APPLICATION (90, kernel/Kconfig.device) is
+ * after the GPIO and I2C controllers (I2C bus priority, KERNEL_INIT_PRIORITY_DEVICE = 50,
  * drivers/i2c/Kconfig), the fixed regulators (REGULATOR_FIXED_INIT_PRIORITY
  * = 75, drivers/regulator/Kconfig.fixed) and the DSI host + CDC200
  * (MIPI_DSI_INIT_PRIORITY / DISPLAY_INIT_PRIORITY = 85, drivers/mipi_dsi/
@@ -96,6 +96,9 @@
  * dsi_dw_attach() only ever ORs the host's flags onto whatever the
  * peripheral already set -- it never clears one.
  *
+ * BLANKING IS NOT SUPPORTED: an app must not call display_blanking_on() on
+ * the CDC200 behind this bridge (the first blanking_off(), which starts
+ * video, is the supported use).
  * ponytail: blanking_on() (cdc200_blanking_on -> dsi_dw_set_mode(COMMAND))
  * stops the HS clock lane, and this bridge's LVDS PLL is sourced from it
  * (HS_CLK_SRC=1) -- so a blanking_on/blanking_off cycle after this driver's
@@ -684,6 +687,12 @@ int sn65dsi83_read_errors(const struct device *dev, uint8_t *e5)
 	config = dev->config;
 	return i2c_reg_read_byte_dt(&config->i2c, SN65_REG_ERR_STAT, e5);
 }
+
+/* The bridge is driven through dsi_dw_set_mode(), which only the DesignWare DSI host provides. */
+#define SN65DSI83_ASSERT_HOST(inst) \
+	BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_INST_PHANDLE(inst, mipi_dsi), snps_designware_dsi), \
+	             "ti,sn65dsi83 mipi-dsi must point at a snps,designware-dsi host");
+DT_INST_FOREACH_STATUS_OKAY(SN65DSI83_ASSERT_HOST)
 
 #define SN65DSI83_INIT(inst) \
 	static const struct sn65dsi83_config sn65dsi83_config_##inst = { \
