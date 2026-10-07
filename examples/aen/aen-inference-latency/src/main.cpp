@@ -163,6 +163,31 @@ static void cycles_init(void)
 	g_dwt_in_use = (DWT->CYCCNT != a);
 }
 
+/* Re-arm the trace block and prove the counter still advances.  A debugger
+ * detaching after `go` can clear DEMCR.TRCENA / DWT_CTRL.CYCCNTENA mid-run
+ * (bench-seen: CYCCNT froze ~10 ms into window 0), after which every span
+ * reads 0 -- so this runs at every window start and before every inference,
+ * and a window that cannot prove the counter live is reported, never timed. */
+static inline void cycles_rearm(void)
+{
+	if (g_dwt_in_use) {
+		DCB->DEMCR |= DCB_DEMCR_TRCENA_Msk;
+		DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+	}
+}
+
+static bool cycles_advancing(void)
+{
+	cycles_rearm();
+	__DSB();
+	const uint32_t a = g_dwt_in_use ? DWT->CYCCNT : k_cycle_get_32();
+	for (volatile int i = 0; i < 64; i++) {
+		__NOP();
+	}
+	const uint32_t b = g_dwt_in_use ? DWT->CYCCNT : k_cycle_get_32();
+	return b != a;
+}
+
 static inline uint32_t cycles_now(void)
 {
 	return g_dwt_in_use ? DWT->CYCCNT : k_cycle_get_32();
@@ -182,13 +207,14 @@ volatile int      g_invoke_status = -1;
 volatile uint32_t g_total_inferences;
 
 struct window_result {
-	uint32_t inferences;  /* completed inferences                          */
-	uint32_t span_cycles; /* whole-window duration, cycle counter          */
-	uint32_t span_ms;     /* same window, kernel millisecond clock         */
-	uint32_t min_cycles;  /* fastest / slowest single inference            */
-	uint32_t max_cycles;
-	uint32_t detail_n; /* how many entries of g_detail are valid        */
-	bool     failed;   /* an Invoke() returned non-OK                   */
+	uint32_t    inferences;  /* completed inferences                          */
+	uint32_t    span_cycles; /* whole-window duration, cycle counter          */
+	uint32_t    span_ms;     /* same window, kernel millisecond clock         */
+	uint32_t    min_cycles;  /* fastest / slowest single inference            */
+	uint32_t    max_cycles;
+	uint32_t    detail_n; /* how many entries of g_detail are valid        */
+	bool        failed;   /* an Invoke() returned non-OK                   */
+	const char *reason;   /* NULL = window valid, else why it was rejected */
 };
 
 static uint32_t g_detail[LAT_DETAIL];
@@ -203,6 +229,13 @@ static void run_window(tflite::MicroInterpreter *interp, window_result *out)
 	uint32_t detail = 0;
 	bool     failed = false;
 
+	out->reason = nullptr;
+	if (!cycles_advancing()) {
+		*out        = {};
+		out->reason = "cycle counter not advancing at window start";
+		return;
+	}
+
 	const int64_t  t0_ms = k_uptime_get();
 	const uint32_t t0_c  = cycles_now();
 
@@ -214,6 +247,7 @@ static void run_window(tflite::MicroInterpreter *interp, window_result *out)
 		if (n >= INFERENCES && elapsed_ms >= (int64_t)WINDOW_MIN_MS) {
 			break;
 		}
+		cycles_rearm();
 		const uint32_t c0 = cycles_now();
 		TfLiteStatus   st = interp->Invoke();
 		const uint32_t dc = cycles_now() - c0;
@@ -243,6 +277,31 @@ static void run_window(tflite::MicroInterpreter *interp, window_result *out)
 	out->failed      = failed;
 }
 
+/* A window only counts if its numbers are internally consistent: a frozen or
+ * disabled counter gives span 0 / min 0, and a counter that stopped partway
+ * disagrees with the kernel millisecond clock by far more than 5 %. */
+static void validate_window(window_result *r, uint32_t cps)
+{
+	if (r->reason != nullptr) {
+		return;
+	}
+	if (r->failed) {
+		r->reason = "Invoke() failed";
+	} else if (r->inferences == 0U) {
+		r->reason = "no inference completed";
+	} else if (r->span_cycles == 0U) {
+		r->reason = "span_cycles == 0 (cycle counter stopped)";
+	} else if (r->min_cycles == 0U) {
+		r->reason = "an inference measured 0 cycles (cycle counter stopped)";
+	} else {
+		const double expect = (double)r->span_ms * (double)cps / 1000.0;
+		const double diff   = (double)r->span_cycles - expect;
+		if (expect <= 0.0 || (diff < 0 ? -diff : diff) > 0.05 * expect) {
+			r->reason = "span_cycles disagrees with span_ms x cycles_per_s by > 5 %";
+		}
+	}
+}
+
 static void emit_window(uint32_t w, uint32_t cps, const window_result &r)
 {
 	/* A span longer than the counter wrap is indistinguishable from a real
@@ -254,6 +313,18 @@ static void emit_window(uint32_t w, uint32_t cps, const window_result &r)
 	}
 	/* The parser rejects a zero span, so clamp a sub-millisecond window to 1. */
 	const unsigned span_ms = r.span_ms > 0U ? (unsigned)r.span_ms : 1U;
+	if (r.reason != nullptr) {
+		printk("ENERGY-WERR %u active timed_out=1 reason=\"%s\" invoke_status=%d "
+		       "completed=%u span_cycles=%u span_ms=%u min=%u\n",
+		       (unsigned)w,
+		       r.reason,
+		       g_invoke_status,
+		       (unsigned)r.inferences,
+		       (unsigned)r.span_cycles,
+		       (unsigned)r.span_ms,
+		       (unsigned)r.min_cycles);
+		return;
+	}
 	for (uint32_t j = 0; j < r.detail_n; j++) {
 		printk("LATENCY-I %u %u %u\n", (unsigned)w, (unsigned)j, (unsigned)g_detail[j]);
 	}
@@ -265,22 +336,11 @@ static void emit_window(uint32_t w, uint32_t cps, const window_result &r)
 		       (unsigned)r.max_cycles,
 		       (unsigned)(r.span_cycles / r.inferences));
 	}
-	/* A window that completed nothing has no meaningful span; emitting it would
-	 * feed a near-zero span to the parser's clock-agreement check.  Report it
-	 * through ENERGY-WERR only. */
-	if (r.inferences > 0U) {
-		printk("ENERGY-W %u active 0 %u %u %u\n",
-		       (unsigned)w,
-		       (unsigned)r.span_cycles,
-		       span_ms,
-		       (unsigned)r.inferences);
-	}
-	if (r.failed) {
-		printk("ENERGY-WERR %u active timed_out=1 invoke_status=%d completed=%u\n",
-		       (unsigned)w,
-		       g_invoke_status,
-		       (unsigned)r.inferences);
-	}
+	printk("ENERGY-W %u active 0 %u %u %u\n",
+	       (unsigned)w,
+	       (unsigned)r.span_cycles,
+	       span_ms,
+	       (unsigned)r.inferences);
 }
 
 int main(void)
@@ -382,15 +442,23 @@ int main(void)
 	       (unsigned)INFERENCES,
 	       g_dwt_in_use ? "dwt-cyccnt" : "k-cycle-get-32");
 
-	uint32_t total_inferences = 0;
-	uint64_t total_cycles     = 0;
-	uint32_t good_windows     = 0;
+	uint32_t    total_inferences = 0;
+	uint64_t    total_cycles     = 0;
+	uint32_t    good_windows     = 0;
+	const char *first_reason     = nullptr;
+	uint32_t    first_bad        = 0;
 
 	for (uint32_t w = 0; w < WINDOWS; w++) {
 		window_result r = {};
 		run_window(&interpreter, &r);
+		validate_window(&r, cps);
 		emit_window(w, cps, r);
-		if (!r.failed && r.inferences > 0U) {
+		if (r.reason != nullptr) {
+			if (first_reason == nullptr) {
+				first_reason = r.reason;
+				first_bad    = w;
+			}
+		} else {
 			good_windows++;
 			total_inferences += r.inferences;
 			total_cycles += r.span_cycles;
@@ -398,8 +466,12 @@ int main(void)
 	}
 	g_total_inferences = total_inferences;
 
-	if (good_windows == 0U || total_inferences == 0U) {
-		printk("RESULT FAIL: no window completed an inference -- see ENERGY-WERR above\n");
+	if (first_reason != nullptr || good_windows != WINDOWS || total_inferences == 0U) {
+		printk("RESULT FAIL: window %u: %s (windows ok %u/%u) -- see ENERGY-WERR above\n",
+		       (unsigned)first_bad,
+		       first_reason != nullptr ? first_reason : "no inference completed",
+		       (unsigned)good_windows,
+		       (unsigned)WINDOWS);
 		return 0;
 	}
 
@@ -414,7 +486,7 @@ int main(void)
 	       (unsigned)WINDOWS,
 	       arena_used);
 	printk("RESULT %s: %u cycles/inference (%f ms) n=%u windows=%u/%u arena_used=%u B\n",
-	       (good_windows == WINDOWS) ? "PASS" : "FAIL",
+	       "PASS",
 	       (unsigned)cyc_per_inf,
 	       ms_per_inf,
 	       (unsigned)total_inferences,
