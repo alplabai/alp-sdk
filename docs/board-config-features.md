@@ -117,8 +117,9 @@ diagnostics:
 (base `0x0`, global window `0x58000000`) so `tan flash --ram` can RAM-run it
 with no MRAM write. The planner (tan-cli, ADR-0026) emits the ITCM retarget
 Kconfig fragment + devicetree overlay beside the slice's `alp.conf`; the
-content mirrors `scripts/bench/aen/aen-flowc-itcm.{conf,overlay}`. HE-only:
-an M55-HP slice, any other core or a non-`alif-ensemble` SoM is refused
+content mirrors `scripts/bench/aen/aen-flowc-itcm.{conf,overlay}`. Proven on the
+E8 M55-HE (E1M-AEN801 / E1M-AEN803) and HE-only: a project with no M55-HE app
+(an M55-HP-only one included) or any other SKU is refused
 (`build.link-itcm-unsupported`), as is an explicit non-RAM
 `diagnostics.console:` (`build.link-itcm-console-conflict`). Details and the
 Flow C procedure: `docs/aen-bench-bringup.md`.
