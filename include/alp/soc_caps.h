@@ -312,26 +312,27 @@
 
 #elif defined(CONFIG_ALP_SOC_NXP_IMX9_IMX93)
 /* nxp:imx9:imx93 */
+/* UNVERIFIED (count not backed by a primary source): can_fd, ethernet_1g, i2c, i2s, spi, timer_tpm, uart, usb_2, watchdog */
 #define ALP_SOC_REF_STR                 "nxp:imx9:imx93"
-#define ALP_SOC_I2C_COUNT               0
+#define ALP_SOC_I2C_COUNT               8
 #define ALP_SOC_I3C_COUNT               0
-#define ALP_SOC_SPI_COUNT               0
-#define ALP_SOC_UART_COUNT              0
-#define ALP_SOC_I2S_COUNT               0
+#define ALP_SOC_SPI_COUNT               8
+#define ALP_SOC_UART_COUNT              2
+#define ALP_SOC_I2S_COUNT               1
 #define ALP_SOC_PDM_COUNT               0
 #define ALP_SOC_ADC_COUNT               0
 #define ALP_SOC_ADC_MAX_RESOLUTION_BITS 0
 #define ALP_SOC_DAC_COUNT               0
 #define ALP_SOC_DAC_MAX_RESOLUTION_BITS 0
-#define ALP_SOC_CAN_COUNT               0
-#define ALP_SOC_CAN_FD_SUPPORTED        0
+#define ALP_SOC_CAN_COUNT               2
+#define ALP_SOC_CAN_FD_SUPPORTED        1
 #define ALP_SOC_RTC_COUNT               0
-#define ALP_SOC_WDT_COUNT               0
+#define ALP_SOC_WDT_COUNT               2
 #define ALP_SOC_QENC_COUNT              0
-#define ALP_SOC_TIMER_COUNT             0
+#define ALP_SOC_TIMER_COUNT             6
 #define ALP_SOC_PWM_COUNT               0
-#define ALP_SOC_ETHERNET_COUNT          0
-#define ALP_SOC_USB_COUNT               0
+#define ALP_SOC_ETHERNET_COUNT          1
+#define ALP_SOC_USB_COUNT               2
 #define ALP_SOC_MIPI_CSI_COUNT          0
 #define ALP_SOC_MIPI_DSI_COUNT          1
 #define ALP_SOC_LCDIF_COUNT             1

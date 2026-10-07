@@ -35,7 +35,7 @@ Look for a `"severity": "warning"` entry with `"code": "ALP-B010"`; it
 names the core, the peripheral kind, and the resolved silicon reference:
 
 ```
-warning[ALP-B010]: core 'm33': peripheral kind 'can' is not listed on
+warning[ALP-B010]: core 'm33': peripheral kind 'dac' is not listed on
   silicon 'nxp:imx9:imx93' (SoC JSON may be incomplete or the peripheral
   is board-side)
 ```

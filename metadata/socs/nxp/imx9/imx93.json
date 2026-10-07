@@ -57,11 +57,30 @@
   "always_on_sram_kb": 0,
   "peripherals": {
     "mipi_dsi": 1,
-    "lcdif": 1
+    "lcdif": 1,
+    "i2c": 8,
+    "spi": 8,
+    "uart": 2,
+    "i2s": 1,
+    "can_fd": 2,
+    "watchdog": 2,
+    "timer_tpm": 6,
+    "ethernet_1g": 1,
+    "usb_2": 2
   },
   "pending_reference_manual_ingestion": true,
-  "_pending_reason": "IMX93RM.pdf ingestion against peripherals: pending; the full per-peripheral count table still defaults to zero -- ALP_SOC_*_COUNT ceilings on NX9101 under-report until it is populated. Exception: peripherals.mipi_dsi and peripherals.lcdif are both grounded ahead of the RM pass from the pinned Zephyr v4.4.0 dtsi (see notes), so the flag stays true for the rest of the block while `peripherals_unverified: []` below records that these two populated counts are NOT part of the gap (#936).",
-  "peripherals_unverified": [],
+  "_pending_reason": "IMX93RM.pdf ingestion against peripherals: pending (#380). No count in this block is cited against the reference manual yet. peripherals.mipi_dsi and peripherals.lcdif were grounded ahead of the RM pass from the pinned Zephyr v4.4.0 dtsi (see notes). The nine keys listed in `peripherals_unverified` below are node counts from the pinned Zephyr v4.4.0 (dtsi identical in v4.4.1) dtsi: a device tree lists what Zephyr describes, not everything on the die, so each is a LOWER BOUND and its ALP_SOC_*_COUNT ceiling on NX9101 may still under-report. Every key absent from the block still defaults to zero and must not be read as 'the silicon has none'. The flag stays true until the RM pass replaces these counts.",
+  "peripherals_unverified": [
+    "i2c",
+    "spi",
+    "uart",
+    "i2s",
+    "can_fd",
+    "watchdog",
+    "timer_tpm",
+    "ethernet_1g",
+    "usb_2"
+  ],
   "capabilities": {
     "ethos_u65_count": 1,
     "neon":            true,
@@ -99,7 +118,8 @@
   ],
   "notes": [
     "Orderable variant resolved to **i.MX 9352** (2026-05-11) per the design-doc inventory; the full order-code suffix (package code + temperature grade + qualification) is still pending the HW-config writeup.  i.MX 9352 is the top-of-line i.MX 93 SKU: dual A55 @ 1.7 GHz + M33 @ 250 MHz + Ethos-U65, no GPU.",
-    "Per-peripheral counts are still almost entirely pending -- ingestion against IMX93RM.pdf (5593 pages) is a separate dedicated pass and has not yet run.  The populated entries are `mipi_dsi: 1` and `lcdif: 1`, transcribed ahead of that pass from the pinned Zephyr v4.4.0 device tree (`dts/arm64/nxp/nxp_mimx93_a55.dtsi`, single `mipi_dsi: dsi@4ae10000` node compatible `nxp,mipi-dsi-dwc`, plus the LCDIF display-controller node -- see the next note), so HW_MIPI_DSI and HW_LCDIF report truthfully for the display path; every other count still defaults to zero and must not be inferred from its absence.",
+    "Per-peripheral counts are still pending the reference-manual pass -- ingestion against IMX93RM.pdf (5593 pages) is a separate dedicated pass and has not yet run (#380).  `mipi_dsi: 1` and `lcdif: 1` were transcribed ahead of that pass from the pinned Zephyr v4.4.0 device tree (`dts/arm64/nxp/nxp_mimx93_a55.dtsi`, single `mipi_dsi: dsi@4ae10000` node compatible `nxp,mipi-dsi-dwc`, plus the LCDIF display-controller node -- see the next note), so HW_MIPI_DSI and HW_LCDIF report truthfully for the display path.  A key absent from `peripherals` still defaults to zero and must not be inferred from its absence.",
+    "Interim counts from the pinned Zephyr v4.4.0 (dtsi identical in v4.4.1) device tree (#380), all listed in `peripherals_unverified` because a device tree is not a silicon inventory: each count is the number of nodes Zephyr describes, so it is a lower bound, not the reference-manual total.  Source `dts/arm64/nxp/nxp_mimx93_a55.dtsi` unless stated.  `i2c: 8` = `lpi2c1`..`lpi2c8` (`nxp,lpi2c`; the same eight are in `dts/arm/nxp/imx/nxp_imx93_m33.dtsi`).  `spi: 8` = `lpspi1`..`lpspi8` (`nxp,lpspi`); `flexspi1: spi@425e0000` (`nxp,imx-flexspi`) is a memory controller and is not counted, it is covered by `external_memory_interfaces`.  `uart: 2` = `lpuart1: serial@44380000`, `lpuart2: serial@44390000` (`nxp,imx-lpuart`).  `i2s: 1` = `sai3: dai@42660000` (`nxp,dai-sai`); `sai3_2: sai@42660000` (`nxp,mcux-i2s`) is a second binding of the same instance at the same address.  `can_fd: 2` = `flexcan1: can@443a0000`, `flexcan2: can@425b0000` (`nxp,flexcan-fd`).  `watchdog: 2` = `wdog3: watchdog@42490000`, `wdog4: watchdog@424a0000` (`nxp,wdog32`).  `timer_tpm: 6` = `tpm1`..`tpm6` (`nxp,tpm-timer`); the `pwm1`..`pwm6` nodes (`nxp,kinetis-tpm`) are PWM bindings of the same six TPM instances at the same addresses.  The key is `timer_tpm`, not `timer_32bit`, on purpose: gen_soc_caps.py falls PWM_COUNT back to `timer_32bit`, and no native PWM leg is claimed for NX9101 here, so ALP_SOC_PWM_COUNT stays 0 while ALP_SOC_TIMER_COUNT reports 6.  `ethernet_1g: 1` = `enet: enet@42890000` (`nxp,enet1g`).  `usb_2: 2` = `usb1: usbd@4c100000`, `usb2: usbd@4c200000` (`nxp,ehci`).  Seen in the device tree but deliberately NOT keyed: `sar_adc1: adc@44530000` (`nxp,sar-adc`, M33 dtsi only) because the `adc_<N>bit` key needs a resolution the device tree does not state; `gpio1`..`gpio4` (`nxp,imx-rgpio`) because the `gpio` key is a pin count and the nodes carry no `ngpios`; `usdhc1`/`usdhc2` (`nxp,imx-usdhc`) and `edma4` because no ALP_SOC_*_COUNT consumes them and `external_memory_interfaces` already describes SD/eMMC.",
     "i.MX 93 has *no GPU* -- that's a deliberate split with i.MX 95.  Display path is LCDIF (1x `nxp,imx-lcdifv3` display-controller@4ae30000 in the same pinned Zephyr dtsi) driving MIPI-DSI (no 2D GPU acceleration).  Both the MIPI-DSI and LCDIF instances are structured as `peripherals` counts (`mipi_dsi: 1`, `lcdif: 1`): gen_soc_caps.py consumes `lcdif` into ALP_SOC_LCDIF_COUNT / ALP_CAP_HW_LCDIF (issue #379), distinct from mipi_dsi. E8 models its parallel display path as `dpi_parallel`, an unrelated interface, so the LCDIF key stays imx-lcdifv3-specific.",
     "Companion silicon on the Alp Lab E1M-i.MX93 SoM (per the vendor datasheet): NXP PCA9451A PMIC; Murata Type 2DL / 2EL / 2KL / 2LL Wi-Fi 6 + BLE 5.x combo (variant TBD); IW610 Wi-Fi 6 module -- confirm which combo ships on which SKU when the user writes the exact HW config.",
     "Reference docs available locally: IMX93HDG.pdf (Hardware Design Guide, 42 p), IMX93RM.pdf (Reference Manual Rev. 6, 5593 p), AN14413.pdf (PCA9451A PMIC application note).  All cross-referenced in the `datasheet.source` field above.",

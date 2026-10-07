@@ -475,11 +475,11 @@ def extract_unverified_peripherals(soc: dict[str, Any]) -> list[str]:
     e.g. E5 inheriting from E7) is treated as ALL of its `peripherals` keys
     being unverified, so the header doesn't understate the gap -- UNLESS the
     file carries its own `peripherals_unverified` (even `[]`), which means
-    the file itself already grounds its populated keys individually (e.g.
-    i.MX93: `pending_reference_manual_ingestion` covers the still-zero rest
-    of the block, but `mipi_dsi`/`lcdif` are cited in `notes` and so are
-    correctly declared with `peripherals_unverified: []`).  An explicit
-    per-file list always wins over the wholesale fallback.
+    the file itself already sorts its populated keys individually (e.g.
+    i.MX93: `mipi_dsi`/`lcdif` are cited in `notes` and stay off the list,
+    while the #380 counts taken from the Zephyr device tree are on it, a
+    device tree being a lower bound and not the silicon total).  An
+    explicit per-file list always wins over the wholesale fallback.
     """
     if "peripherals_unverified" in soc:
         return sorted(str(k) for k in (soc.get("peripherals_unverified") or []))
