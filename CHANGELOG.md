@@ -7,6 +7,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Added — optional `slices[].flash_method_resolved` in system-manifest-v1
+
+A flasher can now record, in `build/system-manifest.yaml`, the flash backend it
+actually dispatched to when that differs from the declared `flash_method` (for
+example declared `zephyr_west_flash`, resolved `alif_mram_jlink` when
+`flash_args.jlink_flash_device` is set). The field is an optional string with
+the same type as `flash_method`; the emitter never writes it. Additive, no
+`schema_version` bump, and readers that predate it ignore it. Closes #2756.
+
 ### Fixed — `cc3501e_ble_enable()` honours the caller's timeout instead of flooring it to 90 s
 
 `cc3501e_ble_enable()` raised any budget below `CC3501E_BLE_ENABLE_WINDOW_MS`
