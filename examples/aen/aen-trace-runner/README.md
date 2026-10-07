@@ -100,11 +100,12 @@ rewrites whole 16 KiB sectors, and that read-back is the only way to restore the
 
 | CMake option | Default | Effect |
 | --- | --- | --- |
-| `TR_PANEL` | `rk055` | `rvt121` targets the Riverdi 12.1" LVDS panel (see below) |
+| `TR_PANEL` | `rk055` | `rvt121` targets the Riverdi 12.1" LVDS panel, A32 render only (see below) |
 | `TR_RENDER` | `A32` | `M55` renders on the HE instead (no A32 needed) |
 | `TR_INPUT_NPU` | `OFF` | Read the player's pose from the HP's pose slot |
 | `TR_CAMERA` | `OFF` | HE reads the camera itself (needs `TR_RENDER=M55`) |
 | `TR_PANEL_HZ` | `40` | `30` for the release panel timing (A32 render only; with `TR_PANEL=rvt121` it must be `30`) |
+| `TR_PANEL_ROTATE` | `90` | `TR_PANEL=rvt121` only: `90` or `270`, the direction the portrait frame is turned onto the panel |
 | `TR_M55_AUTOLAUNCH` | `OFF` | HE launches the A32 renderer at boot (release) |
 | `TR_TILT_TAKEOVER` | `OFF` | The IMU tilt takes over steering when no player is seen |
 
@@ -117,17 +118,37 @@ none of `panel_deferred.overlay`, `panel_30hz.overlay` or `i2c1_off.overlay` is 
 bridge and the touch controller live on I2C1). The panel runs at its native ~30.06 Hz
 (36.363636 MHz pixel clock, 1440x840 totals), hence `TR_PANEL_HZ=30`.
 
+The game is the same A32-rendered 720x1280 portrait game as on the RK055, rotated when it is
+written to the scan-out buffer (`src/render/panel_rot.h`, the one definition of the mapping).
+The panel is mounted on its side, so:
+
+- Layer 1 is a 1280x720 window centred on the 800 rows (`panel_rvt121_window.overlay`: rows
+  40..759, black bars above and below). 1280 x 720 x 2 B is the portrait frame's size exactly, so
+  no address in `src/ipc/tr_memmap.h` moves and the memory map is the RK055's.
+- The A32 renderer rotates each 32-row band as it copies it out to the framebuffer (NEON 8x8
+  transposes, whole 16-byte stores), the video half included.
+- The HUD (layer 2) becomes a 352x720 window at the panel edge the portrait top lands on, 40 rows
+  down, in the same buffer; `src/hud/hud.c` writes it rotated.
+- `TR_PANEL_ROTATE` is `90` (clockwise: the portrait top lands on the panel's right edge, the
+  default) or `270` (anticlockwise, the left edge). Pick the one that reads upright on the
+  mounted panel. The HE and the A32 renderer must be built with the same value.
+
+<!-- cross-platform-lint:ignore -->
 ```sh
-west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d build/rvt121 . --     -DTR_PANEL=rvt121 -DTR_RENDER=M55 -DTR_PANEL_HZ=30
+make -C a32/stub
+make -C a32/renderer TR_PANEL_ROTATE=90
+python3 a32/stub/mkpayload.py info a32/renderer/renderer.bin --c-header build/tr_launch.h
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d build/rvt121 . -- \
+  -DTR_PANEL=rvt121 -DTR_PANEL_HZ=30 -DTR_PANEL_ROTATE=90 \
+  -DTR_M55_AUTOLAUNCH=ON -DTR_A32_LAUNCH_H=$PWD/build/tr_launch.h
 ```
+<!-- cross-platform-lint:resume -->
 
 Wiring: bridge EN = `CK_INT` (P13_4), backlight = `CK_PWM0` (P10_7), and P9 powers +1V8.  The backlight is a 30% duty, 500 Hz UTIMER3 PWM set once at boot by `tr_panel_up()`.
 
-Phase 1 limits: `TR_RENDER=M55` with IMU steering only. The front framebuffer is the shield's
-`lcd_fb` (`0x02200000`, 2 MiB) and the back buffer is the base of SRAM0; a frame is 2,048,000 B.
-CMake refuses `TR_RENDER=A32`, `TR_CAMERA` and `TR_INPUT_NPU` with this panel (phase 2). Sprites
-keep their 720x1280 art sizes, and the lane bands scale with the width. Build-only: not yet run
-on hardware.
+Limits: `TR_RENDER=A32` only (the M55 2D renderer has no rotation), and CMake refuses `TR_CAMERA`
+and `TR_INPUT_NPU` with this panel (the HP's pose path takes I2C1, which carries the bridge and the
+touch controller). Touch is not used. Build-only: not yet run on hardware.
 
 ## Sound (reworked carriers only)
 

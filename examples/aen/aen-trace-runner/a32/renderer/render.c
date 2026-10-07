@@ -8,6 +8,7 @@
 
 #include "../../src/render/atlas.h"
 #include "../../src/render/cam_pip.h"
+#include "../../src/render/panel_rot.h"
 #include "../../src/render/r3d.h"
 #include "../../src/render/r3d_scene.h"
 #include "../../src/render/sprite.h"
@@ -20,6 +21,20 @@
 #include "../../src/ipc/tr_pslot.h"
 
 #define BAND_PX (TR_R3D_W * TR_BAND_H)
+
+/* TR_PANEL_ROTATE (panel_rot.h): the bands are still drawn portrait, 720 px
+ * wide, into the cores' cached scratch; only the copy out to the framebuffer
+ * turns them onto the landscape panel (a 1280 x 720 window = the same
+ * RENDER_FB_BYTES). The golden build's CRCs are of the portrait layout. */
+#if TR_PANEL_ROTATE && RENDER_DL_GOLDEN
+#error "RENDER_DL_GOLDEN checks portrait CRCs: build it without TR_PANEL_ROTATE"
+#endif
+_Static_assert(TR_R3D_W == TR_ROT_PORTRAIT_W && TR_R3D_H == TR_ROT_PORTRAIT_H,
+               "panel_rot.h: the portrait frame");
+_Static_assert((uint32_t)TR_ROT_L1_W * TR_ROT_L1_H * 2u == RENDER_FB_BYTES,
+               "panel_rot.h: the rotated window is the portrait frame's bytes");
+_Static_assert(TR_BAND_H % 8 == 0 && TR_BAND_H <= 32,
+               "panel_rot.h's NEON blit takes up to four 8-row groups");
 
 /* The A32 never writes the TF-A MHU0 window, and nothing here skips it any
  * more: no framebuffer may contain it (FB B moved to SRAM1). */
@@ -318,6 +333,9 @@ static inline void   dcache_inval_range(const void *addr, uint32_t bytes)
 typedef struct {
 	uint16_t *px;
 	int       x0, x1, y0, y1;
+#if TR_PANEL_ROTATE
+	int fb; /* nonzero: px is the (rotated) framebuffer itself, pixel (x, y) at tr_rot_idx() */
+#endif
 } vcv_t;
 
 static void cv_rect(const vcv_t *cv, int x, int y, int w, int h, uint16_t c)
@@ -325,6 +343,16 @@ static void cv_rect(const vcv_t *cv, int x, int y, int w, int h, uint16_t c)
 	int xa = x > cv->x0 ? x : cv->x0, xb = x + w < cv->x1 ? x + w : cv->x1;
 	int ya = y > cv->y0 ? y : cv->y0, yb = y + h < cv->y1 ? y + h : cv->y1;
 
+#if TR_PANEL_ROTATE
+	if (cv->fb) {
+		for (int yy = ya; yy < yb; yy++) {
+			for (int xx = xa; xx < xb; xx++) {
+				cv->px[tr_rot_idx(TR_PANEL_ROTATE, TR_ROT_L1_W, xx, yy)] = c;
+			}
+		}
+		return;
+	}
+#endif
 	for (int yy = ya; yy < yb; yy++) {
 		uint16_t *d = &cv->px[(uint32_t)(yy - cv->y0) * TR_R3D_W];
 
@@ -644,6 +672,22 @@ static void draw_strips(const vcv_t *cv)
 	video_text_c(cv, rcx, TR_VID_Y0 + 160, vid_hz, 5, vid_have_hz ? COLOR_KP : COLOR_LABEL);
 }
 
+#if TR_PANEL_ROTATE
+/* Band rows [y_lo, y_lo + rows) -> the rotated framebuffer (panel_rot.h).
+ * Whole bands take the NEON transpose; a ragged one the scalar blit. */
+static void copy_rows_rot(uint16_t *fb, const uint16_t *cband, int y_lo, int rows)
+{
+#if RENDER_A32 && (defined(__ARM_NEON) || defined(__ARM_NEON__))
+	if (rows % 8 == 0 && rows <= TR_BAND_H && y_lo % 8 == 0) {
+		tr_rot_blit_neon(
+		    TR_PANEL_ROTATE, fb, TR_ROT_L1_W, cband, TR_R3D_W, 0, y_lo, TR_R3D_W, rows);
+		return;
+	}
+#endif
+	tr_rot_blit(TR_PANEL_ROTATE, fb, TR_ROT_L1_W, cband, TR_R3D_W, 0, y_lo, TR_R3D_W, rows);
+}
+#endif
+
 static void fill_px(uint16_t *d, int n, uint16_t c)
 {
 	for (int i = 0; i < n; i++) {
@@ -656,12 +700,16 @@ static void fill_px(uint16_t *d, int n, uint16_t c)
  * write past TR_R3D_H. */
 static void copy_video_rows(uint16_t *fb, const uint16_t *cband, int y_lo, int rows)
 {
+#if TR_PANEL_ROTATE
+	copy_rows_rot(fb, cband, y_lo, rows);
+#else
 	uint16_t *d = &fb[(uint32_t)y_lo * TR_R3D_W];
 	uint32_t  n = (uint32_t)rows * TR_R3D_W;
 
 	for (uint32_t x = 0; x < n; x += 8) {
 		copy16(&d[x], &cband[x]);
 	}
+#endif
 }
 
 /* Video band vb: video-area rows [vb * TR_BAND_H, +TR_BAND_H). The camera
@@ -675,9 +723,19 @@ void render_video_band(uint32_t core, int vb, uint16_t *fb)
 	int       rows  = ly0 + TR_BAND_H <= TR_VID_H ? TR_BAND_H : TR_VID_H - ly0;
 
 #if TR_CAM_PIP_ENABLE
-	const vcv_t cv  = { cband, 0, TR_R3D_W, TR_VID_Y0 + ly0, TR_VID_Y0 + ly0 + rows };
-	int         rot = vid_cv.rotate, ix0 = tr_cam_img_x0(rot), uw = TR_CAM_UP_W(rot);
-	int         top = tr_cam_img_y0(rot), iy0 = 0, iy1 = 0; /* this band's image rows, area-local */
+	const vcv_t cv = {
+		cband,
+		0,
+		TR_R3D_W,
+		TR_VID_Y0 + ly0,
+		TR_VID_Y0 + ly0 + rows
+#if TR_PANEL_ROTATE
+		,
+		0 /* scratch, not the framebuffer */
+#endif
+	};
+	int rot = vid_cv.rotate, ix0 = tr_cam_img_x0(rot), uw = TR_CAM_UP_W(rot);
+	int top = tr_cam_img_y0(rot), iy0 = 0, iy1 = 0; /* this band's image rows, area-local */
 
 	if (vid_have_cv) {
 		iy0 = ly0 > top ? ly0 : top;
@@ -750,9 +808,13 @@ void render_video_overlay(uint16_t *fb)
 	if (vid_have_cv && tr_pslot_read(PIP_PSLOT_ADDR, 0u, &out, &seq, pip_barrier) &&
 	    out.hp_state == TR_HP_STATE_RUNNING) {
 		int rot = vid_cv.rotate, x0 = tr_cam_img_x0(rot), y0 = TR_VID_Y0 + tr_cam_img_y0(rot);
+#if TR_PANEL_ROTATE
+		const vcv_t cv = { fb, x0, x0 + TR_CAM_UP_W(rot), y0, y0 + TR_CAM_UP_H(rot), 1 };
+#else
 		const vcv_t cv = {
 			fb + (uint32_t)y0 * TR_R3D_W, x0, x0 + TR_CAM_UP_W(rot), y0, y0 + TR_CAM_UP_H(rot)
 		};
+#endif
 		int16_t px[TR_POSE_KP], py[TR_POSE_KP];
 		bool    ok[TR_POSE_KP];
 
@@ -781,11 +843,15 @@ void render_video_overlay(uint16_t *fb)
 /* Band rows -> FB, write-only, 16 B at a time (whole rows, contiguous). */
 static void copy_band(uint16_t *fb, const uint16_t *cband, int y_lo)
 {
+#if TR_PANEL_ROTATE
+	copy_rows_rot(fb, cband, y_lo, TR_BAND_H);
+#else
 	uint16_t *d = &fb[(uint32_t)y_lo * TR_R3D_W];
 
 	for (uint32_t x = 0; x < BAND_PX; x += 8) {
 		copy16(&d[x], &cband[x]);
 	}
+#endif
 }
 
 uint32_t render_front(const tr_frame_in_t *in)

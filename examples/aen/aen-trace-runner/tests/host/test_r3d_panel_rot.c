@@ -1,0 +1,185 @@
+/* tests/host/test_r3d_panel_rot.c -- src/render/panel_rot.h: the portrait
+ * game on the landscape RVT121 (TR_PANEL=rvt121). For rotate 90 and 270:
+ * the corners land where the direction says, the whole 720 x 1280 frame is a
+ * bijection onto the 1280 x 720 layer-1 window (and the HUD's 720 x 352
+ * onto its 352 x 720 layer-2 window), a blit equals the per-pixel mapping,
+ * and -- on the A32 build -- the NEON transpose blit is bit-exact against the
+ * scalar one. Named test_r3d_*.c so tests/host/runner.sh's "A32 qemu" stage
+ * cross-compiles and qemu-runs it too: the only place the NEON path runs off
+ * silicon. */
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "../../src/render/panel_rot.h"
+
+#define W  TR_ROT_PORTRAIT_W
+#define H  TR_ROT_PORTRAIT_H
+#define LW TR_ROT_L1_W
+#define LH TR_ROT_L1_H
+
+static uint16_t rot_px(int x, int y)
+{
+	return (uint16_t)(x * 31 + y * 7 + (x ^ y));
+}
+
+/* Landscape (X, Y) of the portrait pixel (x, y): the direction, stated
+ * independently of tr_rot_idx(). */
+static void land(int rot, int wl, int x, int y, int *X, int *Y)
+{
+	if (rot == 90) { /* clockwise: portrait top -> landscape right */
+		*X = wl - 1 - y;
+		*Y = x;
+	} else { /* 270, anticlockwise: portrait top -> landscape left */
+		*X = y;
+		*Y = W - 1 - x;
+	}
+}
+
+static void check_rotation(int rot)
+{
+	static uint8_t hit[LW * LH];
+	int            X, Y;
+
+	/* Corners and the direction: 90 puts the portrait's top-left at the
+	 * landscape top-right, 270 at the bottom-left. */
+	land(rot, LW, 0, 0, &X, &Y);
+	assert(tr_rot_idx(rot, LW, 0, 0) == (uint32_t)(Y * LW + X));
+	assert(rot == 90 ? (X == LW - 1 && Y == 0) : (X == 0 && Y == LH - 1));
+	land(rot, LW, W - 1, 0, &X, &Y);
+	assert(tr_rot_idx(rot, LW, W - 1, 0) == (uint32_t)(Y * LW + X));
+	assert(rot == 90 ? (X == LW - 1 && Y == LH - 1) : (X == 0 && Y == 0));
+	land(rot, LW, 0, H - 1, &X, &Y);
+	assert(rot == 90 ? (X == 0 && Y == 0) : (X == LW - 1 && Y == LH - 1));
+	assert(tr_rot_idx(rot, LW, 0, H - 1) == (uint32_t)(Y * LW + X));
+	land(rot, LW, W - 1, H - 1, &X, &Y);
+	assert(rot == 90 ? (X == 0 && Y == LH - 1) : (X == LW - 1 && Y == 0));
+	assert(tr_rot_idx(rot, LW, W - 1, H - 1) == (uint32_t)(Y * LW + X));
+
+	/* Every portrait pixel maps inside the window, no two to one cell. */
+	memset(hit, 0, sizeof(hit));
+	for (int y = 0; y < H; y++) {
+		for (int x = 0; x < W; x++) {
+			uint32_t i = tr_rot_idx(rot, LW, x, y);
+
+			land(rot, LW, x, y, &X, &Y);
+			assert(i == (uint32_t)(Y * LW + X) && i < (uint32_t)(LW * LH));
+			assert(!hit[i]);
+			hit[i] = 1;
+		}
+	}
+	for (int i = 0; i < LW * LH; i++) {
+		assert(hit[i]); /* onto, too: the whole 1280 x 720 window is covered */
+	}
+
+	/* The HUD: 720 x 352 portrait -> 352 x 720, a bijection too. */
+	{
+		static uint8_t hh[TR_ROT_HUD_W * LH];
+
+		memset(hh, 0, sizeof(hh));
+		for (int y = 0; y < TR_ROT_HUD_W; y++) {
+			for (int x = 0; x < W; x++) {
+				uint32_t i = tr_rot_idx(rot, TR_ROT_HUD_W, x, y);
+
+				land(rot, TR_ROT_HUD_W, x, y, &X, &Y);
+				assert(i == (uint32_t)(Y * TR_ROT_HUD_W + X) && i < sizeof(hh));
+				assert(!hh[i]);
+				hh[i] = 1;
+			}
+		}
+		for (unsigned i = 0; i < sizeof(hh); i++) {
+			assert(hh[i]);
+		}
+	}
+
+	/* The HUD window sits on the side the portrait top (rows 0..351) lands:
+	 * the layer-1 X of those rows is exactly the window's columns. */
+	{
+		int x0 = TR_ROT_HUD_X0(rot), lo = LW, hi = -1;
+
+		for (int y = 0; y < TR_ROT_HUD_W; y++) {
+			land(rot, LW, 0, y, &X, &Y);
+			lo = X < lo ? X : lo;
+			hi = X > hi ? X : hi;
+		}
+		assert(lo == x0 && hi == x0 + TR_ROT_HUD_W - 1);
+	}
+}
+
+/* tr_rot_blit() against the per-pixel mapping, for a band (720 x 32 at a
+ * 32-row boundary, what render_band() copies) and an odd block. */
+static void check_blit(int rot)
+{
+	static uint16_t src[W * 32], a[LW * LH], b[LW * LH];
+	static const struct {
+		int x0, y0, w, h;
+	} blk[] = { { 0, 0, W, 32 }, { 0, 640, W, 32 }, { 0, 1248, W, 32 }, { 3, 5, 100, 11 } };
+
+	for (unsigned k = 0; k < sizeof(blk) / sizeof(blk[0]); k++) {
+		memset(a, 0, sizeof(a));
+		memset(b, 0, sizeof(b));
+		for (int y = 0; y < blk[k].h; y++) {
+			for (int x = 0; x < blk[k].w; x++) {
+				src[y * W + x] = rot_px(blk[k].x0 + x, blk[k].y0 + y);
+				b[tr_rot_idx(rot, LW, blk[k].x0 + x, blk[k].y0 + y)] = src[y * W + x];
+			}
+		}
+		tr_rot_blit(rot, a, LW, src, W, blk[k].x0, blk[k].y0, blk[k].w, blk[k].h);
+		assert(memcmp(a, b, sizeof(a)) == 0);
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+		if (blk[k].w % 8 == 0 && blk[k].h % 8 == 0 && blk[k].x0 % 8 == 0 && blk[k].y0 % 8 == 0) {
+			static uint16_t n[LW * LH] __attribute__((aligned(16)));
+			static uint16_t s16[W * 32] __attribute__((aligned(16)));
+
+			memcpy(s16, src, sizeof(s16));
+			memset(n, 0, sizeof(n));
+			tr_rot_blit_neon(rot, n, LW, s16, W, blk[k].x0, blk[k].y0, blk[k].w, blk[k].h);
+			assert(memcmp(n, b, sizeof(n)) == 0);
+			printf("  neon block %u ok\n", k);
+		}
+#endif
+	}
+
+	/* The whole frame, band by band, round-trips: read each landscape cell
+	 * back through the inverse mapping and get the portrait pixel. */
+	{
+		static uint16_t frame[LW * LH], band[W * 32];
+
+		memset(frame, 0, sizeof(frame));
+		for (int b0 = 0; b0 < H; b0 += 32) {
+			for (int y = 0; y < 32; y++) {
+				for (int x = 0; x < W; x++) {
+					band[y * W + x] = rot_px(x, b0 + y);
+				}
+			}
+			tr_rot_blit(rot, frame, LW, band, W, 0, b0, W, 32);
+		}
+		for (int y = 0; y < H; y++) {
+			for (int x = 0; x < W; x++) {
+				int X, Y;
+
+				land(rot, LW, x, y, &X, &Y);
+				assert(frame[Y * LW + X] == rot_px(x, y));
+			}
+		}
+	}
+}
+
+int main(void)
+{
+	/* Rotation off: the plain portrait index. */
+	assert(tr_rot_idx(0, 0, 5, 7) == 7u * W + 5u);
+
+	assert(TR_ROT_HUD_X0(90) == 928 && TR_ROT_HUD_X0(270) == 0);
+	assert((uint32_t)LW * LH * 2u == 1843200u);          /* tr_mbox.h TR_FB_SIZE */
+	assert((uint32_t)TR_ROT_HUD_W * LH * 2u == 506880u); /* tr_mbox.h TR_HUD_FB_SIZE */
+	assert(TR_ROT_L1_Y0 * 2 + LH == 800);
+
+	check_rotation(90);
+	check_rotation(270);
+	check_blit(90);
+	check_blit(270);
+	puts("panel rotation ok");
+	return 0;
+}

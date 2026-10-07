@@ -9,6 +9,7 @@
 #include "../ipc/tr_mbox.h"            /* TR_BANNER_*, framebuffers, HUD, mailbox */
 #include "../ipc/tr_memmap.h"          /* the A32 build's fixed regions, shared with the renderer */
 #include "../game/zone.h"              /* zone names */
+#include "../render/panel_rot.h"       /* TR_PANEL_ROTATE: the layer-2 buffer's orientation */
 #include "../render/r3d.h"             /* the renderer's DL / setup / band sizes */
 #include "hud_assets.h"
 
@@ -16,6 +17,8 @@ _Static_assert(TR_HUD_FB_SIZE == TR_HUD_W * TR_HUD_H * 2, "tr_mbox.h TR_HUD_FB_S
 /* The layer-2 window (panel rows 0..TR_HUD_H-1) stays over the game
  * viewport, never over the video area below it (half/half layout). */
 _Static_assert(TR_HUD_H <= TR_VIEW_H, "the HUD layer 2 window runs into the video area");
+_Static_assert(TR_HUD_W == TR_ROT_PORTRAIT_W && TR_HUD_H == TR_ROT_HUD_W,
+               "panel_rot.h: the rotated HUD layer is TR_HUD_H px wide");
 
 /* ---------------------------------------------------------------- colours
  * 0x0RGB, 4 bits a channel (ARGB4444 without its alpha). */
@@ -791,9 +794,14 @@ static uint32_t paint_tile(uint16_t            *fb,
 
 		memset(strip, 0, (size_t)w * (size_t)h * sizeof(strip[0]));
 		paint(&cv, v, frame, popup_start, zone_start);
+#if TR_PANEL_ROTATE
+		/* fb is the 352 x 720 layer-2 buffer (render/panel_rot.h). */
+		tr_rot_blit(TR_PANEL_ROTATE, fb, TR_ROT_HUD_W, strip, (uint32_t)w, tl->x0, y, w, h);
+#else
 		for (int r = 0; r < h; r++) {
 			memcpy(&fb[(y + r) * TR_HUD_W + tl->x0], &strip[r * w], (size_t)w * sizeof(strip[0]));
 		}
+#endif
 	}
 	return (uint32_t)w * (uint32_t)(tl->y1 - tl->y0);
 }

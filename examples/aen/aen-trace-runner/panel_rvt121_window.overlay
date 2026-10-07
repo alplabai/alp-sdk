@@ -1,0 +1,15 @@
+/*
+ * panel_rvt121_window.overlay -- TR_PANEL=rvt121: layer 1 is a 1280 x 720
+ * window centred on the 1280 x 800 panel (rows 40..759, black bars above and
+ * below), not the shield's full-screen 1280 x 800. The game is 720 x 1280
+ * portrait and the A32 renderer writes it rotated into this window
+ * (src/render/panel_rot.h): 1280 * 720 * 2 B = 1,843,200 B is the portrait
+ * frame's size exactly, so every buffer address in src/ipc/tr_memmap.h stays
+ * where it is. The CDC200 driver derives the layer's fb_size (and so what
+ * cdc200_swap_fb() accepts) from this window.
+ */
+
+&cdc200 {
+	win-y0-l1 = <40>;
+	win-y1-l1 = <760>;
+};

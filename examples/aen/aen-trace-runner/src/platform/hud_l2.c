@@ -9,6 +9,11 @@
  * the layer is up. Everything drawn is src/hud/hud.c (host-tested); this
  * file is only the registers, the counters and the call.
  *
+ * Rotated panel (TR_PANEL_ROTATE 90 or 270, the RVT121): the layer is a 352 x 720
+ * window, TR_HUD_H landscape columns wide at the side the portrait top lands on
+ * (render/panel_rot.h), 40 rows down; same bytes, same buffer, and hud.c writes
+ * it rotated.
+ *
  * Register programming follows the Alif DFP driver's own sequence,
  * cdc_set_layer_cfg() in alif-dfp drivers/source/cdc.c (register map
  * drivers/include/cdc.h + soc.h CDC_CDC_LAYER_CFG_Type; offsets and bit
@@ -60,12 +65,29 @@
 #include "../ipc/tr_aring.h"
 #include "../ipc/tr_mbox.h"
 #include "../ipc/tr_memmap.h"
+#include "../render/panel_rot.h"
 #include "hud_l2.h"
 #include "rail5v_power.h"
 
 #define CDC_REGS DT_REG_ADDR(DT_NODELABEL(cdc200))
 BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(cdc200)) == 0x49031000u, "CDC200 base (soc.h CDC_BASE)");
+/* The layer-2 window on the panel, px: the HUD's 720 x 352 portrait, or its
+ * rotation. */
+#if TR_PANEL_ROTATE
+#define HUD_WIN_W  TR_ROT_HUD_W
+#define HUD_WIN_H  TR_ROT_L1_H
+#define HUD_WIN_X0 TR_ROT_HUD_X0(TR_PANEL_ROTATE)
+#define HUD_WIN_Y0 TR_ROT_L1_Y0
+BUILD_ASSERT(HUD_WIN_X0 + HUD_WIN_W <= DT_PROP(DT_NODELABEL(cdc200), width) &&
+                 HUD_WIN_Y0 + HUD_WIN_H <= DT_PROP(DT_NODELABEL(cdc200), height),
+             "the rotated HUD window runs off the panel");
+#else
+#define HUD_WIN_W  TR_HUD_W
+#define HUD_WIN_H  TR_HUD_H
+#define HUD_WIN_X0 0
+#define HUD_WIN_Y0 0
 BUILD_ASSERT(DT_PROP(DT_NODELABEL(cdc200), width) == TR_HUD_W, "the HUD spans the panel width");
+#endif
 BUILD_ASSERT(TR_HUD_FB_SIZE == TR_HUD_W * TR_HUD_H * 2u, "tr_mbox.h TR_HUD_FB_SIZE");
 BUILD_ASSERT(TR_HUD_FB % 64u == 0u,
              "CDC200 fetch address alignment (bus width 8 B; 64 B for burst)");
@@ -73,7 +95,7 @@ BUILD_ASSERT(TR_HUD_FB % 64u == 0u,
 BUILD_ASSERT(TR_HUD_FB >= TR_MHU0_WINDOW_HI && TR_HUD_FB >= TR_FB_A + TR_FB_SIZE,
              "HUD buffer placement");
 
-#define HUD_PITCH (TR_HUD_W * 2u)
+#define HUD_PITCH (HUD_WIN_W * 2u)
 
 /* Repaint cap per presented frame (tr_hud_t.budget). Host-counted M55
  * instructions (qemu-arm -cpu cortex-m55, tools/hud_preview.c's layouts):
@@ -130,8 +152,10 @@ bool tr_hud_l2_open(void)
 	memset(&g_view, 0, sizeof(g_view));
 
 	wr(CDC_L2_REL_CTRL, CDC_LN_REL_CTRL_SH_MASK);
-	wr(CDC_L2_WIN_HPOS, (hs + TR_HUD_W - 1u) << CDC_LN_WIN_HPOS_STOP_POS_SHIFT | hs);
-	wr(CDC_L2_WIN_VPOS, (vs + TR_HUD_H - 1u) << CDC_LN_WIN_VPOS_STOP_POS_SHIFT | vs);
+	hs += HUD_WIN_X0;
+	vs += HUD_WIN_Y0;
+	wr(CDC_L2_WIN_HPOS, (hs + HUD_WIN_W - 1u) << CDC_LN_WIN_HPOS_STOP_POS_SHIFT | hs);
+	wr(CDC_L2_WIN_VPOS, (vs + HUD_WIN_H - 1u) << CDC_LN_WIN_VPOS_STOP_POS_SHIFT | vs);
 	wr(CDC_L2_PIX_FORMAT, CDC_PIXEL_FORMAT_ARGB4444);
 	wr(CDC_L2_CONST_ALPHA, 255u);
 	wr(CDC_L2_BLEND_CFG,
@@ -139,7 +163,7 @@ bool tr_hud_l2_open(void)
 	       CDC_BLEND_PIXEL_ALPHA_X_CONST_ALPHA_INV);
 	wr(CDC_L2_CFB_ADDR, TR_HUD_FB);
 	wr(CDC_L2_CFB_LENGTH, HUD_PITCH << CDC_LN_CFB_LENGTH_PITCH_SHIFT | (HUD_PITCH + BUS_WIDTH));
-	wr(CDC_L2_CFB_LINES, TR_HUD_H);
+	wr(CDC_L2_CFB_LINES, HUD_WIN_H);
 	wr(CDC_L2_CTRL, CDC_LN_CTRL_LAYER_EN);
 	wr(CDC_L2_REL_CTRL, rd(CDC_L2_REL_CTRL) | CDC_LN_REL_CTRL_SH_VBLANK);
 
@@ -156,8 +180,8 @@ bool tr_hud_l2_open(void)
 	tr_hud_l2_regs[3] = rd(CDC_L2_CFB_ADDR);
 	tr_hud_l2_regs[4] = rd(CDC_L2_REL_CTRL);
 	printk("hud     : layer 2 %ux%u ARGB4444 @0x%08x win h 0x%08x v 0x%08x rel 0x%x (%d ms)\n",
-	       TR_HUD_W,
-	       TR_HUD_H,
+	       HUD_WIN_W,
+	       HUD_WIN_H,
 	       (unsigned)tr_hud_l2_regs[3],
 	       (unsigned)tr_hud_l2_regs[1],
 	       (unsigned)tr_hud_l2_regs[2],

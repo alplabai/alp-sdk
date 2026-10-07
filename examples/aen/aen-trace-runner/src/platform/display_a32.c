@@ -26,10 +26,21 @@
 #include <display_cdc200.h>
 
 #include "../ipc/tr_flip.h"
+#include "../render/panel_rot.h"
 #include "display.h"
 
+#ifdef TR_PANEL_RVT121
+/* The RVT121 scans out a 1280 x 720 window of its 1280 x 800 panel
+ * (panel_rvt121_window.overlay) while the game stays 720 x 1280 portrait; the
+ * A32 writes the frame rotated (render/panel_rot.h). Same bytes as RK055's frame. */
+#define TR_L1_NODE DT_NODELABEL(cdc200)
+#define TR_FB_BYTES \
+	((size_t)(DT_PROP(TR_L1_NODE, win_x1_l1) - DT_PROP(TR_L1_NODE, win_x0_l1)) * \
+	 (DT_PROP(TR_L1_NODE, win_y1_l1) - DT_PROP(TR_L1_NODE, win_y0_l1)) * 2u)
+#else
 #define TR_FB_BYTES \
 	((size_t)DT_PROP(DT_NODELABEL(cdc200), width) * DT_PROP(DT_NODELABEL(cdc200), height) * 2u)
+#endif
 
 /* FB A is the SRAM0 partition base (plan section 4); FB B is SRAM1
  * 0x02600000 (tr_mbox.h), outside every DT partition -- cdc200_swap_fb()
@@ -133,14 +144,24 @@ int tr_display_open(void)
 	return 0;
 }
 
+/* The game's own geometry: the panel's on RK055, always 720 x 1280 on the RVT121
+ * (whose caps are the unrotated 1280 x 800). */
 uint16_t tr_display_width(void)
 {
+#ifdef TR_PANEL_RVT121
+	return TR_ROT_PORTRAIT_W;
+#else
 	return g_caps.width;
+#endif
 }
 
 uint16_t tr_display_height(void)
 {
+#ifdef TR_PANEL_RVT121
+	return TR_ROT_PORTRAIT_H;
+#else
 	return g_caps.height;
+#endif
 }
 
 static uint32_t live_fb(void)

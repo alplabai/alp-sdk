@@ -9,8 +9,10 @@ cmake_minimum_required(VERSION 3.20)
 # Which panel the game runs on. rk055 (default): the RK055HDMIPI4MA0 720x1280
 # portrait MIPI-DSI panel (HX8394). rvt121: the Riverdi RVT121HVDFWCA0-B 12.1"
 # 1280x800 landscape LVDS panel behind an SN65DSI83 bridge (shield
-# e1m_evk_rvt121hvdfwca0). rvt121 is phase 1 only: TR_RENDER=M55, IMU steering,
-# no camera, no NPU input (README, "Riverdi RVT121").
+# e1m_evk_rvt121hvdfwca0), mounted on its side: the game stays 720x1280
+# portrait and is rotated into a 1280x720 scan-out window (TR_PANEL_ROTATE,
+# src/render/panel_rot.h). It needs TR_RENDER=A32 and has no camera and no NPU
+# input (README, "Riverdi RVT121").
 set(TR_PANEL rk055 CACHE STRING "Panel: rk055 or rvt121")
 set_property(CACHE TR_PANEL PROPERTY STRINGS rk055 rvt121)
 if(NOT TR_PANEL MATCHES "^(rk055|rvt121)$")
@@ -31,12 +33,12 @@ if(TR_INPUT_NPU AND TR_CAMERA)
 	message(FATAL_ERROR "TR_INPUT_NPU and TR_CAMERA are exclusive -- pick one body-detection source")
 endif()
 if(TR_PANEL STREQUAL "rvt121" AND TR_CAMERA)
-	message(FATAL_ERROR "TR_PANEL=rvt121 does not support TR_CAMERA yet (phase 2): the 1280x800 "
-			     "RGB565 frame plus the video pool is more than SRAM0")
+	message(FATAL_ERROR "TR_PANEL=rvt121 does not support TR_CAMERA: it needs TR_RENDER=M55, "
+			     "which has no rotation for this panel")
 endif()
 if(TR_PANEL STREQUAL "rvt121" AND TR_INPUT_NPU)
-	message(FATAL_ERROR "TR_PANEL=rvt121 does not support TR_INPUT_NPU yet (phase 2): the HP "
-			     "pose path needs I2C1, which carries the bridge and the touch controller")
+	message(FATAL_ERROR "TR_PANEL=rvt121 does not support TR_INPUT_NPU: the HP pose path takes "
+			     "I2C1 (i2c1_off.overlay), which carries this panel's bridge and touch controller")
 endif()
 if(TR_INPUT_NPU)
 	# The HP now owns I2C1 -- see i2c1_off.overlay's header for why the HE
@@ -66,8 +68,9 @@ if(TR_INPUT_NPU AND TR_RENDER STREQUAL "M55")
 	message(FATAL_ERROR "TR_INPUT_NPU needs TR_RENDER=A32 -- TR_RENDER=M55 runs CONFIG_DCACHE=y "
 			     "(m55_render.conf) and the pose slot has no cache maintenance")
 endif()
-if(TR_PANEL STREQUAL "rvt121" AND NOT TR_RENDER STREQUAL "M55")
-	message(FATAL_ERROR "TR_PANEL=rvt121 needs TR_RENDER=M55 (A32 renderer on this panel is phase 2)")
+if(TR_PANEL STREQUAL "rvt121" AND NOT TR_RENDER STREQUAL "A32")
+	message(FATAL_ERROR "TR_PANEL=rvt121 needs TR_RENDER=A32: only the A32 renderer rotates "
+			     "the portrait frame onto the landscape panel")
 endif()
 if(TR_RENDER STREQUAL "A32" AND TR_CAMERA)
 	# The camera pool sits at the base of SRAM0 -- on top of TR_FB_A -- until
@@ -94,10 +97,22 @@ if(TR_PANEL STREQUAL "rvt121")
 	# The shield's SN65DSI83 driver brings the panel up itself: there is no
 	# lcd_panel node, so no deferred-init overlay and no HX8394 retry (panel.c).
 	list(APPEND SHIELD e1m_evk_rvt121hvdfwca0)
+	# Layer 1 shrinks to a 1280x720 window, 40 rows down (the portrait frame's bytes).
+	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/panel_rvt121_window.overlay)
 else()
 	list(APPEND SHIELD e1m_evk_rk055hdmipi4ma0)
 	# The panel inits from main() with retries (src/platform/panel.c), not at boot.
 	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/panel_deferred.overlay)
+endif()
+
+# Which way the portrait frame is turned onto the RVT121: 90 clockwise (the
+# portrait top lands on the panel's right edge) or 270 anticlockwise. The panel
+# is mounted on its side; pick the one that reads upright. The A32 renderer
+# must be built with the same value (make -C a32/renderer TR_PANEL_ROTATE=...).
+set(TR_PANEL_ROTATE 90 CACHE STRING "RVT121 rotation of the portrait frame: 90 or 270")
+set_property(CACHE TR_PANEL_ROTATE PROPERTY STRINGS 90 270)
+if(TR_PANEL STREQUAL "rvt121" AND NOT TR_PANEL_ROTATE MATCHES "^(90|270)$")
+	message(FATAL_ERROR "TR_PANEL_ROTATE must be 90 or 270, got '${TR_PANEL_ROTATE}'")
 endif()
 
 # Panel refresh (P11a). 40: the shield's timing. 30: panel_30hz.overlay
@@ -206,7 +221,7 @@ endif()
 target_include_directories(app PRIVATE src)
 target_compile_definitions(app PRIVATE TR_PANEL_HZ=${TR_PANEL_HZ})
 if(TR_PANEL STREQUAL "rvt121")
-	target_compile_definitions(app PRIVATE TR_PANEL_RVT121=1)
+	target_compile_definitions(app PRIVATE TR_PANEL_RVT121=1 TR_PANEL_ROTATE=${TR_PANEL_ROTATE})
 endif()
 
 # No fused multiply-add: float code must compute the same bits as the host

@@ -25,6 +25,14 @@ NAME     = renderer
 VDEFS    = -DRENDER_DL_GOLDEN=0
 endif
 O        = build-$(V)
+# TR_PANEL_ROTATE=90|270: the Riverdi RVT121 build (src/render/panel_rot.h) --
+# the bands are turned onto the landscape panel as they are copied out. It must
+# equal the HE image's -DTR_PANEL_ROTATE. Its own build dir, so rotated and
+# portrait objects never mix; the output is still $(NAME).bin.
+ifneq ($(TR_PANEL_ROTATE),)
+VDEFS   += -DTR_PANEL_ROTATE=$(TR_PANEL_ROTATE)
+O        = build-$(V)-r$(TR_PANEL_ROTATE)
+endif
 # -ffp-contract=off on every renderer build (plan sec 5): no FMA drift vs host goldens.
 # ROPT: the image's optimisation; RASTER_OPT: r3d_raster.c's (the span / row /
 # setup kernels), -O3 -funroll-loops as measured on silicon (a32/payload-isa,
@@ -72,4 +80,4 @@ $(O)/%.o: %.c $(HDRS) | $(O)
 $(O):
 	mkdir -p $@
 clean:
-	rm -rf build-scene build-golden build-prof renderer.bin renderer-golden.bin renderer-prof.bin *.jlink
+	rm -rf build-scene build-golden build-prof build-*-r* renderer.bin renderer-golden.bin renderer-prof.bin *.jlink
