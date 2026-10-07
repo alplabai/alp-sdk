@@ -114,6 +114,18 @@ static constexpr uint32_t WINDOWS       = AEN_LATENCY_WINDOWS;
 static constexpr uint32_t INFERENCES    = AEN_LATENCY_INFERENCES;
 static constexpr uint32_t WINDOW_MAX_MS = AEN_LATENCY_WINDOW_MAX_MS;
 
+/* The DWT counter is a uint32: at 160 MHz it wraps after 26.843 s, so a window
+ * must close before that. */
+static_assert(AEN_LATENCY_WINDOW_MAX_MS >= 50 && AEN_LATENCY_WINDOW_MAX_MS < 26843,
+              "AEN_LATENCY_WINDOW_MAX_MS must be in [50, 26843) ms (32-bit DWT wrap at 160 MHz)");
+
+/* Worst-case console output per window is ~1 KB (32 LATENCY-I lines of up to
+ * 27 B, one LATENCY-WSTAT, one ENERGY-W, one ENERGY-WERR) plus ~1.2 KB of
+ * header and result lines; 6 windows stay under the 8 KiB RAM console in
+ * prj.conf.  Raise CONFIG_RAM_CONSOLE_BUFFER_SIZE before raising this. */
+static_assert(AEN_LATENCY_WINDOWS >= 1 && AEN_LATENCY_WINDOWS <= 6,
+              "AEN_LATENCY_WINDOWS must be 1..6 to fit the 8 KiB RAM console");
+
 /* A window also runs until it has lasted this long, so a model faster than the
  * 1 ms kernel clock still yields a span whose millisecond cross-check is within
  * ~2 % -- the parser compares the span-implied clock with the DT constant. */
@@ -253,11 +265,16 @@ static void emit_window(uint32_t w, uint32_t cps, const window_result &r)
 		       (unsigned)r.max_cycles,
 		       (unsigned)(r.span_cycles / r.inferences));
 	}
-	printk("ENERGY-W %u active 0 %u %u %u\n",
-	       (unsigned)w,
-	       (unsigned)r.span_cycles,
-	       span_ms,
-	       (unsigned)r.inferences);
+	/* A window that completed nothing has no meaningful span; emitting it would
+	 * feed a near-zero span to the parser's clock-agreement check.  Report it
+	 * through ENERGY-WERR only. */
+	if (r.inferences > 0U) {
+		printk("ENERGY-W %u active 0 %u %u %u\n",
+		       (unsigned)w,
+		       (unsigned)r.span_cycles,
+		       span_ms,
+		       (unsigned)r.inferences);
+	}
 	if (r.failed) {
 		printk("ENERGY-WERR %u active timed_out=1 invoke_status=%d completed=%u\n",
 		       (unsigned)w,
@@ -272,7 +289,13 @@ int main(void)
 	printk("model      : %s (%u bytes)\n", NETWORK_MODEL_NAME, (unsigned)NETWORK_MODEL_LEN);
 
 	cycles_init();
+	/* cycles_per_s is the kernel's hw cycle rate; the E8 M55-HE runs at
+	 * 160000000.  The host parser cross-checks it against the span-implied
+	 * rate, and the bench run must read exactly 160000000 here. */
 	const uint32_t cps = sys_clock_hw_cycles_per_sec();
+	if (cps != 160000000U) {
+		printk("WARN: cycles_per_s=%u is not the expected 160000000 (E8 M55-HE)\n", (unsigned)cps);
+	}
 	printk("clock      : %u Hz, timestamp source %s\n",
 	       (unsigned)cps,
 	       g_dwt_in_use ? "DWT CYCCNT" : "k_cycle_get_32 (DWT NOCYCCNT)");

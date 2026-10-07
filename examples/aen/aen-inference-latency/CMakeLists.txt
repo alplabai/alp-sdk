@@ -120,7 +120,7 @@ target_sources(app PRIVATE src/main.cpp)
 # forwarding.  Each is left EMPTY so src/main.cpp keeps its own #ifndef default.
 # --------------------------------------------------------------------------
 set(AEN_LATENCY_WINDOWS "" CACHE STRING
-    "Timed windows to run (default 5)")
+    "Timed windows to run (default 5, max 6: RAM console size)")
 set(AEN_LATENCY_INFERENCES "" CACHE STRING
     "Inferences per window (default 20)")
 set(AEN_LATENCY_WINDOW_MAX_MS "" CACHE STRING

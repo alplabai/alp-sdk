@@ -56,9 +56,23 @@ scripts/bench/aen/build.sh "$A" \
   -DAEN_NPU_MODEL=<model_int8>.tflite -DAEN_NPU_MODEL_NAME=<name>
 ```
 
-Then RAM-run it (`tan flash --ram`, or `scripts/bench/aen/ram-run.sh`) and save the
+The same build through tan:
+
+```sh
+tan build --project examples/aen/aen-inference-latency \
+  --board alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+  -D AEN_NPU_MODEL=<model_int8>.tflite
+```
+
+Then RAM-run it (`tan flash --ram`, or the AEN `ram-run.sh` helper) and save the
 console to a file; `tan model run --device --capture FILE` turns it into the host-tier
 envelope. Hold the labgrid reservation first, as for any bench work.
+
+`ram-run.sh` defaults (0x600 bytes, 1500 ms) capture only about one window of the
+roughly 3.5-4 KB this app prints. Call it as
+`ram-run.sh <build-dir> <sleep_ms >= expected run time> 0x2000`, and check the capture
+ends with a `RESULT PASS` line before trusting it (a truncated console reads as fewer
+windows). `tan flash --ram` reads the console symbol at its real size.
 
 ## Build + run — Flow D (models too big for ITCM)
 
@@ -69,7 +83,7 @@ The RAM console is still the capture source.
 
 ## Knobs
 
-`-DAEN_LATENCY_WINDOWS=<n>` (5), `-DAEN_LATENCY_INFERENCES=<n>` (20),
+`-DAEN_LATENCY_WINDOWS=<n>` (5, at most 6 so the output fits the 8 KiB RAM console), `-DAEN_LATENCY_INFERENCES=<n>` (20),
 `-DAEN_LATENCY_WINDOW_MAX_MS=<ms>` (10000; keep it under the 26.8 s cycle-counter wrap
 at 160 MHz).
 
