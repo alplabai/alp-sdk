@@ -39,7 +39,12 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["core_id", "os", "status", "flash_method", "flash_args"],
+        "required": ["core_id", "os", "status"],
+        "if": {
+          "properties": { "os": { "not": { "const": "off" } } },
+          "not": { "required": ["reason"] }
+        },
+        "then": { "required": ["flash_method", "flash_args"] },
         "properties": {
           "core_id": { "type": "string" },
           "os": { "type": "string", "description": "Resolved runtime (zephyr | yocto | baremetal | off); the value-set is owned by metadata/schemas/board.schema.json cores.<core>.os." },
@@ -54,8 +59,8 @@
           "status": { "type": "string", "enum": ["pending", "ok", "failed", "skipped"] },
           "log_path": { "type": "string" },
           "reason": { "type": "string", "description": "Why a slice was skipped/failed." },
-          "flash_method": { "type": "string", "description": "Backend the flasher dispatches to (e.g. zephyr_west_flash, yocto_wic_to_sd_or_emmc)." },
-          "flash_args": { "type": "object", "description": "Method-specific flash arguments (shape varies by flash_method)." },
+          "flash_method": { "type": "string", "description": "Backend the flasher dispatches to (e.g. zephyr_west_flash, yocto_wic_to_sd_or_emmc). REQUIRED, together with `flash_args`, on every slice that is not `os: off` and carries no `reason`; an `os: off` slice (nothing is built, so nothing is flashed) or a slice with a `reason` (skipped/failed/unflashable) may omit both. Reserved value `none`: the flasher (tan) cannot flash this slice -- an unknown target -- emitted with `flash_args: {}` and a `reason`; a consumer must treat it as \"nothing to flash\", not dispatch it to a backend." },
+          "flash_args": { "type": "object", "description": "Method-specific flash arguments (shape varies by flash_method). `{}` when `flash_method` is `none`. Required exactly when `flash_method` is (see there)." },
           "flash_method_resolved": { "type": "string", "description": "OPTIONAL, additive. The flash backend the flasher actually dispatched to, recorded by the flasher (tan) when it differs from the declared `flash_method` (e.g. declared `zephyr_west_flash`, resolved `alif_mram_jlink` because `flash_args.jlink_flash_device` is set). Same type as `flash_method` (an open string -- `flash_method` carries no enum). The emitter never writes it; absence means 'no override was recorded'. Readers that predate it ignore it." }
         }
       }

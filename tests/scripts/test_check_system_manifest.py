@@ -218,3 +218,41 @@ def test_slice_flash_method_resolved_wrong_type_rejected(tmp_path):
 def test_slice_other_unknown_key_still_rejected(tmp_path):
     proc = _run("--manifest", str(_write(tmp_path, _slice(flash_method_bogus="x"))))
     assert proc.returncode != 0
+
+
+def _bare(**kw):
+    row = {"core_id": "a32_cluster", "os": "off", "status": "pending"}
+    row.update(kw)
+    return row
+
+
+def test_off_slice_without_flash_fields_validates(tmp_path):
+    proc = _run("--manifest", str(_write(tmp_path, _bare())))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_zephyr_slice_without_flash_fields_rejected(tmp_path):
+    proc = _run("--manifest", str(_write(tmp_path, _bare(os="zephyr"))))
+    assert proc.returncode != 0
+
+
+def test_slice_with_reason_may_omit_flash_fields(tmp_path):
+    row = _bare(os="zephyr", status="skipped", reason="unflashable target")
+    proc = _run("--manifest", str(_write(tmp_path, row)))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_flash_method_none_validates(tmp_path):
+    row = _bare(os="zephyr", flash_method="none", flash_args={}, reason="unknown target")
+    proc = _run("--manifest", str(_write(tmp_path, row)))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_real_off_core_manifest_validates(tmp_path):
+    sys.path.insert(0, str(REPO / "scripts"))
+    from alp_orchestrate import emit_system_manifest, load_board_yaml
+    p = tmp_path / "m.yaml"
+    p.write_text(emit_system_manifest(
+        load_board_yaml(REPO / "examples/aen/edgeai-vision-aen/board.yaml")), encoding="utf-8")
+    proc = _run("--manifest", str(p))
+    assert proc.returncode == 0, proc.stdout + proc.stderr

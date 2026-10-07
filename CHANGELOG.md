@@ -7,6 +7,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Fixed — system-manifest-v1 no longer requires flash fields on `os: off` slices
+
+`slices[].flash_method` / `flash_args` are now required only when `os != "off"`
+and the slice carries no `reason` (JSON-schema `if`/`then`). An `os: off` core
+(nothing built, nothing flashed) and an unflashable target with a `reason` no
+longer fail `scripts/check_system_manifest.py`. The reserved
+`flash_method: "none"` (an unknown target, emitted with `flash_args: {}` and a
+`reason`) is documented. Additive, no `schema_version` bump. Closes #2768.
+
 ### Added — optional `slices[].flash_method_resolved` in system-manifest-v1
 
 A flasher can now record, in `build/system-manifest.yaml`, the flash backend it
