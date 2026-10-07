@@ -96,5 +96,5 @@
 # this become" (e.g. `scripts/alp_orchestrate/sdk_compat.py`'s hw_rev range
 # checks) can keep reading the core X.Y.Z and ignore the suffix.
 
-version: 0.16.0
+version: 0.17.0
 status:  released        # released | development | preview

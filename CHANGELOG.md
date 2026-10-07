@@ -5,7 +5,9 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.17.0 candidate
+## [Unreleased] - v0.18.0 candidate
+
+## [v0.17.0] - 2026-10-07
 
 ### Added — a display support matrix, so #23 can be narrowed to the remaining hardware proof (#23)
 
