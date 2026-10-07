@@ -19,6 +19,16 @@ Nothing prints inside a window.
 Peak SRAM is the tensor-arena high-water mark (`arena_used_bytes`, from the TFLM
 planner); `sram_peak_bytes` is that plus the model copy staged in SRAM0.
 
+## Clocks
+
+Every span (`ENERGY-W`, the mean, the `RESULT` line) uses `k_cycle_get_32()`, the
+SysTick-backed kernel counter (`CONFIG_CORTEX_M_SYSTICK=y`, 160000000 Hz), which keeps
+running when a debugger detaches. The DWT `CYCCNT` froze mid-window on the bench after a
+J-Link close, so it is used only for the per-inference `LATENCY-I` detail and min/max, is
+re-armed and checked at each window start, and is dropped (with a `LATENCY-WARN` and a
+`DWT-DIAG` register snapshot) for any window where it stalls or differs from the kernel
+span by more than 2 %. A DWT stall alone still ends in `RESULT PASS` with a WARN.
+
 ## Console protocol
 
 A strict subset of `aen-inference-energy`'s `ENERGY-*` protocol, so
@@ -38,7 +48,9 @@ latency only and no energy. Lines the parser skips as noise, kept for humans:
 
 ```
 LATENCY-I <window> <j> <cycles>                      first 32 inferences of each window
-LATENCY-WSTAT <window> n=.. min=.. max=.. mean=..    cycles per inference
+LATENCY-WSTAT <window> n=.. min=.. max=.. mean=.. cyccnt_stalled=0|1   cycles per inference
+LATENCY-WARN window <w>: DWT detail dropped (<why>)  per-inference detail unusable
+DWT-DIAG w=.. stalled=.. [first[..]] end[demcr= dwt_ctrl= cyccnt= dhcsr= dauth= dscsr=]
 LATENCY-RESULT {"cycles_per_inference":..,"ms_per_inference":..,...}
 RESULT PASS|FAIL: <cycles> cycles/inference (<ms> ms) ...
 ```

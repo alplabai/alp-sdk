@@ -37,13 +37,24 @@
  * the parser derives latency only and reports no energy -- by construction.
  *
  * Extra lines the parser skips as noise (never ENERGY-* prefixed):
- *   LATENCY-I <w> <j> <cycles>          one inference's own cycle count
- *   LATENCY-WSTAT <w> n=.. min=.. max=.. mean=..   per-window cycle stats
+ *   LATENCY-I <w> <j> <cycles>          one inference's own cycle count (DWT)
+ *   LATENCY-WSTAT <w> n=.. min=.. max=.. mean=.. cyccnt_stalled=0|1
+ *   LATENCY-WARN ...                    DWT detail dropped for a window
+ *   DWT-DIAG w=.. stalled=.. ...        trace-block register snapshot
  *   LATENCY-RESULT {json} / RESULT PASS|FAIL: ...
  *
- * The cycle counter is a uint32 that wraps every 2^32 / 160 MHz = 26.8 s, so a
- * window is closed at AEN_LATENCY_WINDOW_MAX_MS (default 10 s) even if fewer
- * than N inferences ran.  Only a SINGLE inference longer than the wrap is
+ * CLOCKS.  Every span (ENERGY-W span_cycles, the mean, the RESULT line) comes
+ * from k_cycle_get_32(): the SysTick-backed kernel cycle counter
+ * (CONFIG_CORTEX_M_SYSTICK=y, 160000000 Hz).  It keeps running when a debugger
+ * detaches.  The DWT CYCCNT froze mid-window on the bench (a J-Link close
+ * rewrites DEMCR / debug-domain gating), so firmware must not depend on it: it
+ * is used ONLY for the per-inference LATENCY-I detail and min/max, is re-armed
+ * and checked at every window start, and its numbers are dropped for any window
+ * where it stalls or disagrees with the kernel span by more than 2 %.
+ *
+ * Both counters are uint32 and wrap every 2^32 / 160 MHz = 26.8 s, so a window
+ * is closed at AEN_LATENCY_WINDOW_MAX_MS (default 10 s) even if fewer than N
+ * inferences ran.  Only a SINGLE inference longer than the wrap is
  * unmeasurable; that case is reported with an ENERGY-WARN line.
  */
 
@@ -136,61 +147,73 @@ static constexpr uint32_t WINDOW_MIN_MS = 50;
 static constexpr uint32_t LAT_DETAIL = 32;
 
 /* ------------------------------------------------------------------------- *
- * Cycle counter.  The DWT counter ticks once per CPU cycle; it is optional in
- * the architecture, so DWT_CTRL.NOCYCCNT is checked and k_cycle_get_32() is the
- * fallback -- a frozen zero timestamp would turn every duration into nonsense.
- * Both read as a uint32 that wraps; every use takes an unsigned difference.
+ * Clocks.  Kernel cycles (SysTick-backed) are authoritative; DWT CYCCNT is an
+ * optional per-inference detail source that must never gate the measurement.
  * ------------------------------------------------------------------------- */
 
-static bool g_dwt_in_use;
+static bool g_dwt_present; /* DWT_CTRL.NOCYCCNT clear at boot */
 
-static void cycles_init(void)
+static inline uint32_t kcycles(void)
 {
-	DCB->DEMCR |= DCB_DEMCR_TRCENA_Msk;
-	__DSB();
-	if (DWT->CTRL & DWT_CTRL_NOCYCCNT_Msk) {
-		g_dwt_in_use = false;
+	return k_cycle_get_32();
+}
+
+static inline uint32_t dwt_now(void)
+{
+	return DWT->CYCCNT;
+}
+
+/* Re-arm the trace block (a debugger detach can clear TRCENA / CYCCNTENA). */
+static void dwt_rearm(void)
+{
+	if (!g_dwt_present) {
 		return;
 	}
-	DWT->CYCCNT = 0U;
+	DCB->DEMCR |= DCB_DEMCR_TRCENA_Msk;
 	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 	__DSB();
-	/* Prove it advances before trusting it (a gated debug block reads frozen). */
-	uint32_t a = DWT->CYCCNT;
-	__NOP();
-	__NOP();
-	__NOP();
-	g_dwt_in_use = (DWT->CYCCNT != a);
 }
 
-/* Re-arm the trace block and prove the counter still advances.  A debugger
- * detaching after `go` can clear DEMCR.TRCENA / DWT_CTRL.CYCCNTENA mid-run
- * (bench-seen: CYCCNT froze ~10 ms into window 0), after which every span
- * reads 0 -- so this runs at every window start and before every inference,
- * and a window that cannot prove the counter live is reported, never timed. */
-static inline void cycles_rearm(void)
+/* True if CYCCNT advances across a short busy loop. */
+static bool dwt_advancing(void)
 {
-	if (g_dwt_in_use) {
-		DCB->DEMCR |= DCB_DEMCR_TRCENA_Msk;
-		DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+	if (!g_dwt_present) {
+		return false;
 	}
-}
-
-static bool cycles_advancing(void)
-{
-	cycles_rearm();
-	__DSB();
-	const uint32_t a = g_dwt_in_use ? DWT->CYCCNT : k_cycle_get_32();
+	const uint32_t a = dwt_now();
 	for (volatile int i = 0; i < 64; i++) {
 		__NOP();
 	}
-	const uint32_t b = g_dwt_in_use ? DWT->CYCCNT : k_cycle_get_32();
-	return b != a;
+	return dwt_now() != a;
 }
 
-static inline uint32_t cycles_now(void)
+static void dwt_init(void)
 {
-	return g_dwt_in_use ? DWT->CYCCNT : k_cycle_get_32();
+	DCB->DEMCR |= DCB_DEMCR_TRCENA_Msk;
+	__DSB();
+	g_dwt_present = !(DWT->CTRL & DWT_CTRL_NOCYCCNT_Msk);
+	if (g_dwt_present) {
+		DWT->CYCCNT = 0U;
+		dwt_rearm();
+	}
+}
+
+/* Privileged PPB reads for the DWT-DIAG line.  DAUTHSTATUS / DSCSR are
+ * ARMv8-M architected registers addressed directly (CMSIS names vary). */
+struct dwt_snap {
+	uint32_t demcr, dwt_ctrl, cyccnt, dhcsr, dauth, dscsr;
+	bool     taken;
+};
+
+static void dwt_snapshot(dwt_snap *d)
+{
+	d->demcr    = DCB->DEMCR;
+	d->dwt_ctrl = DWT->CTRL;
+	d->cyccnt   = DWT->CYCCNT;
+	d->dhcsr    = DCB->DHCSR;
+	d->dauth    = *(volatile uint32_t *)0xE000EFB8UL;
+	d->dscsr    = *(volatile uint32_t *)0xE000EE08UL;
+	d->taken    = true;
 }
 
 /* ------------------------------------------------------------------------- *
@@ -208,13 +231,17 @@ volatile uint32_t g_total_inferences;
 
 struct window_result {
 	uint32_t    inferences;  /* completed inferences                          */
-	uint32_t    span_cycles; /* whole-window duration, cycle counter          */
+	uint32_t    span_cycles; /* whole-window span, KERNEL cycles (authoritative) */
 	uint32_t    span_ms;     /* same window, kernel millisecond clock         */
-	uint32_t    min_cycles;  /* fastest / slowest single inference            */
+	uint32_t    min_cycles;  /* fastest / slowest inference, DWT (detail only) */
 	uint32_t    max_cycles;
-	uint32_t    detail_n; /* how many entries of g_detail are valid        */
-	bool        failed;   /* an Invoke() returned non-OK                   */
-	const char *reason;   /* NULL = window valid, else why it was rejected */
+	uint32_t    detail_n;    /* how many entries of g_detail are valid        */
+	bool        failed;      /* an Invoke() returned non-OK                   */
+	bool        dwt_ok;      /* DWT detail is trustworthy for this window     */
+	const char *dwt_why;     /* why not (NULL if dwt_ok)                      */
+	const char *reason;      /* NULL = window valid, else why it was rejected */
+	int         rearm_adv;   /* -1 none, else DWT advanced after the re-arm   */
+	dwt_snap    first, last; /* DWT-DIAG snapshots: first stall, window end   */
 };
 
 static uint32_t g_detail[LAT_DETAIL];
@@ -223,21 +250,28 @@ static uint32_t g_detail[LAT_DETAIL];
  * are met, or the maximum time is hit.  Nothing is printed in here. */
 static void run_window(tflite::MicroInterpreter *interp, window_result *out)
 {
+	*out           = {};
+	out->rearm_adv = -1;
+	out->dwt_ok    = true;
+
 	uint32_t n      = 0;
 	uint32_t lo     = UINT32_MAX;
 	uint32_t hi     = 0;
 	uint32_t detail = 0;
 	bool     failed = false;
 
-	out->reason = nullptr;
-	if (!cycles_advancing()) {
-		*out        = {};
-		out->reason = "cycle counter not advancing at window start";
-		return;
+	dwt_rearm();
+	if (!dwt_advancing()) {
+		out->dwt_ok  = false;
+		out->dwt_why = "CYCCNT not advancing at window start";
+		dwt_snapshot(&out->first);
+		dwt_rearm();
+		out->rearm_adv = dwt_advancing() ? 1 : 0;
 	}
 
 	const int64_t  t0_ms = k_uptime_get();
-	const uint32_t t0_c  = cycles_now();
+	const uint32_t t0_k  = kcycles();
+	const uint32_t t0_d  = dwt_now();
 
 	for (;;) {
 		const int64_t elapsed_ms = k_uptime_get() - t0_ms;
@@ -247,59 +281,82 @@ static void run_window(tflite::MicroInterpreter *interp, window_result *out)
 		if (n >= INFERENCES && elapsed_ms >= (int64_t)WINDOW_MIN_MS) {
 			break;
 		}
-		cycles_rearm();
-		const uint32_t c0 = cycles_now();
+		const uint32_t d0 = dwt_now();
 		TfLiteStatus   st = interp->Invoke();
-		const uint32_t dc = cycles_now() - c0;
+		const uint32_t dc = dwt_now() - d0;
 		g_invoke_status   = (int)st;
 		if (st != kTfLiteOk) {
 			failed = true; /* a failing invoke must not be averaged in */
 			break;
 		}
-		if (detail < LAT_DETAIL) {
-			g_detail[detail++] = dc;
+		if (out->dwt_ok && dc == 0U) {
+			/* A zero-cycle inference is a stalled counter, not a fast one. */
+			out->dwt_ok  = false;
+			out->dwt_why = "an inference read 0 DWT cycles";
+			dwt_snapshot(&out->first);
+			dwt_rearm();
+			out->rearm_adv = dwt_advancing() ? 1 : 0;
 		}
-		if (dc < lo) {
-			lo = dc;
-		}
-		if (dc > hi) {
-			hi = dc;
+		if (out->dwt_ok) {
+			if (detail < LAT_DETAIL) {
+				g_detail[detail++] = dc;
+			}
+			if (dc < lo) {
+				lo = dc;
+			}
+			if (dc > hi) {
+				hi = dc;
+			}
 		}
 		n++;
 	}
 
-	out->inferences  = n;
-	out->span_cycles = cycles_now() - t0_c;
-	out->span_ms     = (uint32_t)(k_uptime_get() - t0_ms);
-	out->min_cycles  = (n > 0) ? lo : 0U;
-	out->max_cycles  = hi;
-	out->detail_n    = detail;
-	out->failed      = failed;
-}
+	out->inferences         = n;
+	out->span_cycles        = kcycles() - t0_k;
+	const uint32_t dwt_span = dwt_now() - t0_d;
+	out->span_ms            = (uint32_t)(k_uptime_get() - t0_ms);
+	out->min_cycles         = (n > 0 && out->dwt_ok) ? lo : 0U;
+	out->max_cycles         = out->dwt_ok ? hi : 0U;
+	out->detail_n           = out->dwt_ok ? detail : 0U;
+	out->failed             = failed;
+	dwt_snapshot(&out->last);
 
-/* A window only counts if its numbers are internally consistent: a frozen or
- * disabled counter gives span 0 / min 0, and a counter that stopped partway
- * disagrees with the kernel millisecond clock by far more than 5 %. */
-static void validate_window(window_result *r, uint32_t cps)
-{
-	if (r->reason != nullptr) {
-		return;
-	}
-	if (r->failed) {
-		r->reason = "Invoke() failed";
-	} else if (r->inferences == 0U) {
-		r->reason = "no inference completed";
-	} else if (r->span_cycles == 0U) {
-		r->reason = "span_cycles == 0 (cycle counter stopped)";
-	} else if (r->min_cycles == 0U) {
-		r->reason = "an inference measured 0 cycles (cycle counter stopped)";
-	} else {
-		const double expect = (double)r->span_ms * (double)cps / 1000.0;
-		const double diff   = (double)r->span_cycles - expect;
-		if (expect <= 0.0 || (diff < 0 ? -diff : diff) > 0.05 * expect) {
-			r->reason = "span_cycles disagrees with span_ms x cycles_per_s by > 5 %";
+	/* Cross-check the two clocks over the whole window (2 %). */
+	if (out->dwt_ok && out->span_cycles > 0U) {
+		const double k    = (double)out->span_cycles;
+		const double diff = (double)dwt_span - k;
+		if ((diff < 0 ? -diff : diff) > 0.02 * k) {
+			out->dwt_ok  = false;
+			out->dwt_why = "DWT span disagrees with kernel span by > 2 %";
+			if (!out->first.taken) {
+				out->first = out->last;
+			}
+			out->min_cycles = 0U;
+			out->max_cycles = 0U;
+			out->detail_n   = 0U;
 		}
 	}
+
+	/* Kernel-only validity: the measurement is the kernel span. */
+	if (failed) {
+		out->reason = "Invoke() failed";
+	} else if (n == 0U) {
+		out->reason = "no inference completed";
+	} else if (out->span_cycles == 0U) {
+		out->reason = "kernel span_cycles == 0";
+	}
+}
+
+static void print_snap(const char *tag, const dwt_snap &d)
+{
+	printk(" %s[demcr=%08x dwt_ctrl=%08x cyccnt=%08x dhcsr=%08x dauth=%08x dscsr=%08x]",
+	       tag,
+	       (unsigned)d.demcr,
+	       (unsigned)d.dwt_ctrl,
+	       (unsigned)d.cyccnt,
+	       (unsigned)d.dhcsr,
+	       (unsigned)d.dauth,
+	       (unsigned)d.dscsr);
 }
 
 static void emit_window(uint32_t w, uint32_t cps, const window_result &r)
@@ -311,29 +368,46 @@ static void emit_window(uint32_t w, uint32_t cps, const window_result &r)
 		       "span_cycles is not meaningful; lower AEN_LATENCY_WINDOW_MAX_MS\n",
 		       (unsigned)r.span_ms);
 	}
-	/* The parser rejects a zero span, so clamp a sub-millisecond window to 1. */
-	const unsigned span_ms = r.span_ms > 0U ? (unsigned)r.span_ms : 1U;
+	if (!r.dwt_ok) {
+		printk("LATENCY-WARN window %u: DWT detail dropped (%s)\n",
+		       (unsigned)w,
+		       r.dwt_why != nullptr ? r.dwt_why : "?");
+		printk("DWT-DIAG w=%u stalled=1 rearm_advanced=%d", (unsigned)w, r.rearm_adv);
+		print_snap("first", r.first);
+		print_snap("end", r.last);
+		printk("\n");
+	} else {
+		printk("DWT-DIAG w=%u stalled=0", (unsigned)w);
+		print_snap("end", r.last);
+		printk("\n");
+	}
 	if (r.reason != nullptr) {
 		printk("ENERGY-WERR %u active timed_out=1 reason=\"%s\" invoke_status=%d "
-		       "completed=%u span_cycles=%u span_ms=%u min=%u\n",
+		       "completed=%u span_cycles=%u span_ms=%u\n",
 		       (unsigned)w,
 		       r.reason,
 		       g_invoke_status,
 		       (unsigned)r.inferences,
 		       (unsigned)r.span_cycles,
-		       (unsigned)r.span_ms,
-		       (unsigned)r.min_cycles);
+		       (unsigned)r.span_ms);
 		return;
 	}
+	/* The parser rejects a zero span, so clamp a sub-millisecond window to 1. */
+	const unsigned span_ms = r.span_ms > 0U ? (unsigned)r.span_ms : 1U;
 	for (uint32_t j = 0; j < r.detail_n; j++) {
 		printk("LATENCY-I %u %u %u\n", (unsigned)w, (unsigned)j, (unsigned)g_detail[j]);
 	}
-	if (r.inferences > 0U) {
-		printk("LATENCY-WSTAT %u n=%u min=%u max=%u mean=%u\n",
+	if (r.dwt_ok) {
+		printk("LATENCY-WSTAT %u n=%u min=%u max=%u mean=%u cyccnt_stalled=0\n",
 		       (unsigned)w,
 		       (unsigned)r.inferences,
 		       (unsigned)r.min_cycles,
 		       (unsigned)r.max_cycles,
+		       (unsigned)(r.span_cycles / r.inferences));
+	} else {
+		printk("LATENCY-WSTAT %u n=%u mean=%u cyccnt_stalled=1\n",
+		       (unsigned)w,
+		       (unsigned)r.inferences,
 		       (unsigned)(r.span_cycles / r.inferences));
 	}
 	printk("ENERGY-W %u active 0 %u %u %u\n",
@@ -348,7 +422,7 @@ int main(void)
 	printk("\n=== aen-inference-latency ===\n");
 	printk("model      : %s (%u bytes)\n", NETWORK_MODEL_NAME, (unsigned)NETWORK_MODEL_LEN);
 
-	cycles_init();
+	dwt_init();
 	/* cycles_per_s is the kernel's hw cycle rate; the E8 M55-HE runs at
 	 * 160000000.  The host parser cross-checks it against the span-implied
 	 * rate, and the bench run must read exactly 160000000 here. */
@@ -356,9 +430,9 @@ int main(void)
 	if (cps != 160000000U) {
 		printk("WARN: cycles_per_s=%u is not the expected 160000000 (E8 M55-HE)\n", (unsigned)cps);
 	}
-	printk("clock      : %u Hz, timestamp source %s\n",
+	printk("clock      : %u Hz, spans from k_cycle_get_32 (SysTick), detail from DWT CYCCNT (%s)\n",
 	       (unsigned)cps,
-	       g_dwt_in_use ? "DWT CYCCNT" : "k_cycle_get_32 (DWT NOCYCCNT)");
+	       g_dwt_present ? "present" : "absent");
 
 	const struct device *npu       = DEVICE_DT_GET(NPU_NODE);
 	const bool           npu_ready = device_is_ready(npu);
@@ -430,7 +504,8 @@ int main(void)
 	printk("ENERGY-CFG {\"mode\":\"latency-only\",\"cycles_per_s\":%u,"
 	       "\"npu_dispatched\":%s,\"model\":\"%s\",\"model_bytes\":%u,"
 	       "\"arena_used_bytes\":%u,\"arena_bytes\":%u,\"sram_peak_bytes\":%u,"
-	       "\"windows\":%u,\"inferences_per_window\":%u,\"timestamp_source\":\"%s\"}\n",
+	       "\"windows\":%u,\"inferences_per_window\":%u,\"timestamp_source\":\"k-cycle-get-32\","
+	       "\"detail_source\":\"%s\"}\n",
 	       (unsigned)cps,
 	       npu_ready ? "true" : "false",
 	       NETWORK_MODEL_NAME,
@@ -440,19 +515,22 @@ int main(void)
 	       sram_peak,
 	       (unsigned)WINDOWS,
 	       (unsigned)INFERENCES,
-	       g_dwt_in_use ? "dwt-cyccnt" : "k-cycle-get-32");
+	       g_dwt_present ? "dwt-cyccnt" : "none");
 
 	uint32_t    total_inferences = 0;
 	uint64_t    total_cycles     = 0;
 	uint32_t    good_windows     = 0;
 	const char *first_reason     = nullptr;
 	uint32_t    first_bad        = 0;
+	uint32_t    dwt_stalled      = 0;
 
 	for (uint32_t w = 0; w < WINDOWS; w++) {
 		window_result r = {};
 		run_window(&interpreter, &r);
-		validate_window(&r, cps);
 		emit_window(w, cps, r);
+		if (!r.dwt_ok) {
+			dwt_stalled++;
+		}
 		if (r.reason != nullptr) {
 			if (first_reason == nullptr) {
 				first_reason = r.reason;
@@ -485,13 +563,15 @@ int main(void)
 	       (unsigned)good_windows,
 	       (unsigned)WINDOWS,
 	       arena_used);
-	printk("RESULT %s: %u cycles/inference (%f ms) n=%u windows=%u/%u arena_used=%u B\n",
-	       "PASS",
+	/* Kernel-clock numbers are valid even when the DWT detail stalled, so that
+	 * is a PASS carrying a WARN, not a FAIL. */
+	printk("RESULT PASS: %u cycles/inference (%f ms) n=%u windows=%u/%u arena_used=%u B%s\n",
 	       (unsigned)cyc_per_inf,
 	       ms_per_inf,
 	       (unsigned)total_inferences,
 	       (unsigned)good_windows,
 	       (unsigned)WINDOWS,
-	       arena_used);
+	       arena_used,
+	       dwt_stalled > 0U ? " WARN: DWT CYCCNT detail dropped (see LATENCY-WARN/DWT-DIAG)" : "");
 	return 0;
 }
