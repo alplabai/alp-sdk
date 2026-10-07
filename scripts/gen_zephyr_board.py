@@ -2888,13 +2888,29 @@ def _v2n_dts(
         "};",
         "",
     ]
+    if pads and pads["attn"].get("tint_slot") is not None and pads["swdio"]["gpio_node"] == cs0["gpio_node"]:
+        raise SystemExit("gd32_pads.attn.tint_slot set but the pads block is skipped (swdio shares CS0's gpio node)")
     if pads and pads["swdio"]["gpio_node"] != cs0["gpio_node"]:
-        lines += [
-            f"&{pads['swdio']['gpio_node']} {{",
-            '\tstatus = "okay";',
-            "};",
-            "",
-        ]
+        tint = pads["attn"].get("tint_slot")
+        if tint is not None:
+            if pads["attn"]["gpio_node"] != pads["swdio"]["gpio_node"]:
+                raise SystemExit("gd32_pads.attn.tint_slot needs attn on the swdio gpio node")
+            lines += [
+                "/*",
+                " * ATTN (P71) interrupt: the RZ GPIO driver routes a pin to a TINT slot through",
+                " * the port's `irqs`; without it alp_gpio_irq_enable() has no route and the",
+                " * supervisor stays on the staging-gap fallback.  The slot is a shared ICU",
+                " * resource, claimed here for the CM33 (supervisor-links.yaml gd32_pads.attn).",
+                " */",
+                f"&tint{tint} {{",
+                '\tstatus = "okay";',
+                "};",
+                "",
+            ]
+        lines += [f"&{pads['swdio']['gpio_node']} {{", '\tstatus = "okay";']
+        if tint is not None:
+            lines.append(f"\tirqs = <&tint{tint} {pads['attn']['gpio_pin']}>;")
+        lines += ["};", ""]
     lines += [
         "/*",
         f" * {brd_i2c['peripheral']} / BRD_I2C is Cortex-A55/Linux-exclusive",
