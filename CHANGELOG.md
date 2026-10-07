@@ -7,7 +7,6 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
-<<<<<<< HEAD
 ### Fixed — `aen-inference-energy` no longer stalls when a J-Link session closes
 
 The app timestamped every INA236 poll slot and window span with the DWT cycle
@@ -18,7 +17,7 @@ uses `k_cycle_get_32()` throughout, as `aen-inference-latency` does since #2761,
 and reports `timestamp_source: "k-cycle-get-32"` in `ENERGY-CFG` (already handled
 by tan's capture parser). The `ENERGY-*` protocol and the INA236 path are
 unchanged. Closes #2764.
-=======
+
 ### Fixed — system-manifest-v1 no longer requires flash fields on `os: off` slices
 
 `slices[].flash_method` / `flash_args` are now required only when `os != "off"`
@@ -27,7 +26,6 @@ and the slice carries no `reason` (JSON-schema `if`/`then`). An `os: off` core
 longer fail `scripts/check_system_manifest.py`. The reserved
 `flash_method: "none"` (an unknown target, emitted with `flash_args: {}` and a
 `reason`) is documented. Additive, no `schema_version` bump. Closes #2768.
->>>>>>> origin/dev
 
 ### Added — optional `slices[].flash_method_resolved` in system-manifest-v1
 
