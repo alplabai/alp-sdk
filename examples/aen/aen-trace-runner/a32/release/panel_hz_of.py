@@ -14,12 +14,12 @@ PROPS = ("width", "height", "hsync-len", "hfront-porch", "hback-porch",
 
 
 def refresh_hz(dts_text):
-    m = re.search(r"\bcdc200: cdc200@[0-9a-fA-F]+ \{(.*?)\n\t\t\};", dts_text, re.S)
+    m = re.search(r"^[ \t]*cdc200: cdc200@[0-9a-fA-F]+ \{(.*?)^[ \t]*\};", dts_text, re.S | re.M)
     if not m:
         return None
     v = {}
     for p in PROPS:
-        pm = re.search(r"\b%s = < (0x[0-9a-fA-F]+|\d+) >;" % re.escape(p), m.group(1))
+        pm = re.search(r"^[ \t]*%s = < (0x[0-9a-fA-F]+|\d+) >;" % re.escape(p), m.group(1), re.M)
         if not pm:
             return None
         v[p] = int(pm.group(1), 0)

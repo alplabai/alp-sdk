@@ -43,6 +43,17 @@
 	 DT_PROP_OR(TR_L1_NODE, win_y0_l1, 0))
 #define TR_FB_BYTES ((size_t)TR_L1_W * TR_L1_H * 2u)
 
+/* The window is the 720 x 1280 portrait content as scanned (rotation 0) or turned
+ * (90 / 270: 1280 x 720): the right shape for the mount-rotation, not just the
+ * right byte count. */
+#define TR_MOUNT_ROT DT_PROP_OR(TR_L1_NODE, mount_rotation, 0)
+BUILD_ASSERT(TR_MOUNT_ROT == 0 || TR_MOUNT_ROT == 90 || TR_MOUNT_ROT == 270,
+             "mount-rotation must be 0, 90 or 270 (the renderer cannot produce 180)");
+BUILD_ASSERT(TR_MOUNT_ROT == 0 ? (TR_L1_W == TR_ROT_PORTRAIT_W && TR_L1_H == TR_ROT_PORTRAIT_H)
+                               : (TR_L1_W == TR_ROT_PORTRAIT_H && TR_L1_H == TR_ROT_PORTRAIT_W),
+             "layer-1 window is not 720x1280 (mount-rotation 0) / 1280x720 (90, 270): add or fix "
+             "the shield's shield-fit overlay");
+
 /* FB A is the SRAM0 partition base (plan section 4); FB B is SRAM1
  * 0x02600000 (tr_mbox.h), outside every DT partition -- cdc200_swap_fb()
  * checks only the size. */

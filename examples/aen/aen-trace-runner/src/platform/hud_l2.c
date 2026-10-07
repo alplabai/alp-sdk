@@ -92,7 +92,10 @@ BUILD_ASSERT(TR_HUD_FB >= TR_MHU0_WINDOW_HI && TR_HUD_FB >= TR_FB_A + TR_FB_SIZE
  * ~9.4 per repainted px on average, so 110,000 px is ~1.0 M instructions,
  * ~6-10 ms at 160 MHz -- well inside the ~20 ms the HE waits on the A32
  * every frame. Only a screen change hits it (spread over 3 frames); a
- * score + popup frame is ~101,000 px. */
+ * score + popup frame is ~101,000 px.
+ * ponytail: measured on the unrotated (RK055) copy; the rotated path (hud.c
+ * tr_rot_blit, a strided store per px) costs more per px on a panel mounted
+ * turned. Re-measure on the RVT121 and lower this cap if the HE misses frames. */
 #define HUD_PX_BUDGET 110000u
 
 static uint16_t *const g_fb = (uint16_t *)TR_HUD_FB;

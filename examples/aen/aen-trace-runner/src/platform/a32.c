@@ -86,8 +86,10 @@ static void dsb(void)
  * there -- if THIS boot's tr_a32_boot() has not run yet (or is still
  * retrying sram1_answers()), the HP could read a stale "ready" from the
  * last boot and touch CAM_POOL (SRAM1) before this boot has confirmed it
- * itself. PRE_KERNEL_1, priority 0: as early as tr_i2c1_unstick_init() is
- * on the HP side, before anything on this core could plausibly race it.
+ * itself. PRE_KERNEL_1, priority 0: the earliest init this core runs, before
+ * anything on it could plausibly race the HP's reads (the HP's own first bus
+ * touch, tr_i2c1_unstick_init(), is POST_KERNEL priority 1, behind its
+ * alp,i2c-handover wait).
  */
 static int tr_sram1_ready_clear_init(void)
 {

@@ -18,7 +18,7 @@
  * entities (matches state.h's TR_MAX_ENTITIES, no data loss) and widened the
  * `in` block by one 64 B block instead: tr_frame_in_t is 152 B, the `in`
  * block is 0x080..0x140 (192 B, still 64 B aligned), and every block after
- * it shifts by 0x040. Real totals: sizeof(tr_frame_in_t) == 152 (160 since P6, 168 since P16, 172 since P15, 176 since the rotation byte, see tr_frame_in_t),
+ * it shifts by 0x040. Real totals: sizeof(tr_frame_in_t) == 152 (160 since P6, 168 since P16, 172 since P15, 176 since the rotation field, see tr_frame_in_t),
  * sizeof(tr_mbox_t) == 0x200, blocks at +0x040 +0x080 +0x140 +0x180 +0x1C0.
  * Flag for the maintainer if the plan doc's numbers were meant to imply a
  * smaller entity count instead.
@@ -37,7 +37,7 @@
 
 #define TR_MBOX_ADDR  0x02401000u
 #define TR_MBOX_MAGIC 0x54524D42u /* 'TRMB' */
-/* 2: tr_frame_in_t grew a rotation byte (the `in` block 172 -> 176 B). The stub
+/* 2: tr_frame_in_t grew a rotation field (the `in` block 172 -> 176 B). The stub
  * writes its own TR_MBOX_VERSION at init and the renderer refuses to run
  * against a different one; the HE refuses a stub of another version too. */
 #define TR_MBOX_VERSION 2u
@@ -244,9 +244,10 @@ typedef struct {
 	int16_t gate_y;
 	/* Version 2: clockwise degrees the renderer turns the portrait frame by
 	 * when it writes the framebuffer (the display's mount-rotation,
-	 * alp_display_caps_t.rotation): 0, 90 or 270. Anything else is a fault in
+	 * alp_display_caps_t.rotation): 0, 90 or 270 (degrees, so 16 bits: 270 does
+	 * not fit a byte). Anything else (180 included) is a fault in
 	 * the renderer, never a silent fallback. */
-	uint8_t rotation;
+	uint16_t rotation;
 } tr_frame_in_t;
 _Static_assert(sizeof(tr_frame_in_t) == 176,
                "tr_frame_in_t layout drifted -- see file header note");

@@ -18,6 +18,12 @@
 
 #include <stdint.h>
 
+/* The refresh, Hz, rounded: pclk / (htotal * vtotal). ONE expression: the devicetree
+ * derivation below and tr_refresh_hz() (host-tested on the real shield overlays by
+ * tests/host/test_panel_hz.c) are both this. */
+#define TR_REFRESH_HZ(pclk, htotal, vtotal) \
+	(((pclk) + (htotal) * (vtotal) / 2) / ((htotal) * (vtotal)))
+
 #ifndef TR_PANEL_HZ
 #if defined(__ZEPHYR__)
 #include <zephyr/devicetree.h>
@@ -34,8 +40,7 @@
 	(DT_PROP(TR_CDC_NODE, height) + DT_PROP(TR_CDC_NODE, vsync_len) + \
 	 DT_PROP(TR_CDC_NODE, vback_porch) + DT_PROP(TR_CDC_NODE, vfront_porch))
 #define TR_PANEL_HZ \
-	((DT_PROP(TR_CDC_NODE, clock_frequency) + TR_CDC_HTOTAL * TR_CDC_VTOTAL / 2) / \
-	 (TR_CDC_HTOTAL * TR_CDC_VTOTAL))
+	TR_REFRESH_HZ(DT_PROP(TR_CDC_NODE, clock_frequency), TR_CDC_HTOTAL, TR_CDC_VTOTAL)
 #else
 #define TR_PANEL_HZ 40 /* host tests, tools and images with no display */
 #endif
@@ -44,14 +49,9 @@ _Static_assert(TR_PANEL_HZ == 40 || TR_PANEL_HZ == 30,
                "the display refreshes at 40 Hz or 30 Hz (cdc200 timings); the game's pacing "
                "tables are written for those two");
 
-/* The refresh, Hz, rounded, from a display's pixel clock and totals -- the same
- * arithmetic TR_PANEL_HZ does on the devicetree values (host-tested on the real
- * shield overlays by tests/host/test_panel_hz.c). */
 static inline uint32_t tr_refresh_hz(uint32_t pclk, uint32_t htotal, uint32_t vtotal)
 {
-	uint32_t t = htotal * vtotal;
-
-	return (pclk + t / 2u) / t;
+	return TR_REFRESH_HZ(pclk, htotal, vtotal);
 }
 
 /* One refresh, us (25000 / 33333). */

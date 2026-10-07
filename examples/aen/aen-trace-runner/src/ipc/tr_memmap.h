@@ -84,7 +84,8 @@
 	0x0237FC94u /* HE -> HP: I2C1 handed over (the alp,i2c-handover nodes, i2c_handover_he.overlay
                                        * and hp_vision's board overlay, carry this as flag-address; TR_INPUT_NPU
                                        * builds). The next word of TR_MEM_SRAM1_READY's reserved 16 B
-                                       * (0x0237FC90..0x0237FC9F), still clear of TR_MEM_HP_DBG. */
+                                       * (0x0237FC90..0x0237FC9F): three words, 0x0237FC94 state, +4 nonce, +8 consumed
+                                       * (zephyr/soc-bridge/alif/i2c_handover.h), still clear of TR_MEM_HP_DBG. */
 #define TR_MEM_HP_DBG \
 	0x0237FCA0u /* hp_vision's bench-readable per-stage DWT timing block
                                        * (src/ipc/tr_hp_dbg.h hp_dbg_t, shared with the HE's HUD

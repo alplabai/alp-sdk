@@ -238,7 +238,7 @@ static void ui_present(const tr_game_t *g, bool attract_active, bool paused)
 	tr_frame_in_from_game(&in, g, g_banner, attract_active, paused);
 	tr_frame_in_p16(&in, tr_tilt.character, &g_react, g_lobby.standing, g_lobby.idle_us);
 	in.track_h  = (int16_t)tr_display_height();
-	in.rotation = (uint8_t)tr_display_rotation(); /* the A32 turns the frame by it */
+	in.rotation = tr_display_rotation(); /* the A32 turns the frame by it */
 	in.phase    = (uint16_t)g_phase_q16;
 	in.pace_q8  = g_pace_q8;
 	if (in.phase != 0u) {

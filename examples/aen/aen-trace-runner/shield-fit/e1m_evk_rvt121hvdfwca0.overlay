@@ -25,3 +25,10 @@
 &touch {
 	status = "disabled";
 };
+
+/* The bridge is configured over I2C1 at boot: this shield needs the bus on the HE
+ * (i2c_handover_he.overlay switches it off for every shield), and the HE releases
+ * it to the HP once the bridge is up. */
+&i2c1 {
+	status = "okay";
+};

@@ -8,8 +8,16 @@
  * zephyr/soc-bridge/alif/i2c_handover.c and alp,i2c-handover.yaml in the SDK.
  *
  * flag-address: the reserved block next to TR_MEM_SRAM1_READY (tr_memmap.h
- * TR_MEM_I2C1_HANDOVER), SRAM0, always on. Both overlays carry the same value.
+ * TR_MEM_I2C1_HANDOVER, three words), SRAM0, always on. Both overlays carry the
+ * same value.
  */
+
+/* The HE does not use I2C1 unless its shield needs the bus (a bridge): off here, and
+ * a shield-fit overlay that does (shield-fit/e1m_evk_rvt121hvdfwca0.overlay) turns it
+ * back on. A disabled bus is released at once -- the HE never touches it. */
+&i2c1 {
+	status = "disabled";
+};
 
 / {
 	i2c1_handover: i2c1-handover {

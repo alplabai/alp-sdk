@@ -48,6 +48,10 @@
 #include "../../src/vision/movenet_mram.h"
 #include "../../src/vision/pose.h"
 
+/* The board overlay's side of the I2C1 handover names the same flag words the HE's does. */
+BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), flag_address) == TR_MEM_I2C1_HANDOVER,
+             "i2c1_handover flag-address != tr_memmap.h TR_MEM_I2C1_HANDOVER");
+
 /* ---- I2C1 SCCB unstick (task facts, silicon-proven on 2026W36-0009 today) --
  * I2C1 (0x49011000, the camera SCCB bus, shared with GT911 touch at 0x14)
  * latches stuck after boot: every transfer times out with rc -116. Cure:

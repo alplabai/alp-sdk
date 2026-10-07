@@ -2,10 +2,11 @@
 #
 # Build-only regressions for the M55-HE half of the Trace Runner game.
 # Twister has no bench, so these prove the game compiles in each render /
-# input mode, not that it runs. The M55-HP image (hp_vision/, needs the
-# tflite-micro module), the A32 renderer (a32/, arm-none-eabi Makefiles) and
-# the sound image (sound/, reworked carriers only) are not twister targets;
-# see README.md for their builds and tests/host/runner.sh for their tests.
+# input mode, not that it runs. The M55-HP image (hp_vision/testcase.yaml,
+# needs the tflite-micro module) is its own twister target. The A32 renderer
+# (a32/, arm-none-eabi Makefiles) and the sound image (sound/, reworked
+# carriers only) are not; see README.md for their builds and
+# tests/host/runner.sh for their tests.
 
 sample:
   name: aen-trace-runner

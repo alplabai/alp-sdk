@@ -1,7 +1,8 @@
-/* tests/host/test_panel_hz.c -- P11a, the 30 Hz panel option (src/game/panel_hz.h).
+/* tests/host/test_panel_hz.c -- the 30 Hz panel option (src/game/panel_hz.h).
  *
- * runner.sh builds this twice: default (TR_PANEL_HZ 40, the shield's timing)
- * and -DTR_PANEL_HZ=30 (CMake adds panel_30hz.overlay). Checks, per build:
+ * runner.sh builds this twice: default (TR_PANEL_HZ 40, the host default and
+ * the RK055 shield's timing) and -DTR_PANEL_HZ=30 (what the game derives for
+ * panel_30hz.overlay and the Riverdi shield). Checks, per build:
  *  1. the panel timing arithmetic -- refresh = pclk / (htotal * vtotal) --
  *     for the shield's timing and for panel_30hz.overlay as committed (the
  *     file is parsed, not copied), inside every limit the link has;
