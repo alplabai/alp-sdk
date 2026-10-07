@@ -75,6 +75,17 @@ static const struct device *const _devs[] = {
 	ALP_DISPLAY_DEV_OR_NULL(3),
 };
 
+/** The panel's `mount-rotation` (tes,cdc-2.1.yaml), per alias: clockwise degrees a
+ *  producer pre-rotates its image. 0 where the node does not carry the property. */
+#define ALP_DISPLAY_ROT(idx) 	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_display, idx)), okay), 	            (DT_PROP_OR(DT_ALIAS(_CONCAT(alp_display, idx)), mount_rotation, 0)), 	            (0))
+
+static const uint16_t _rots[] = {
+	ALP_DISPLAY_ROT(0),
+	ALP_DISPLAY_ROT(1),
+	ALP_DISPLAY_ROT(2),
+	ALP_DISPLAY_ROT(3),
+};
+
 /** Scratch buffer for the software clear fallback (drivers without a
  *  clear op).  Sized per-chunk, not per-frame: clear() walks the
  *  panel in scratch-sized display_write calls, so the static cost
@@ -199,6 +210,12 @@ static alp_status_t z_get_caps(alp_display_backend_state_t *state, alp_display_c
 	out->width  = zcaps.x_resolution;
 	out->height = zcaps.y_resolution;
 	out->format = fmt;
+	out->rotation = 0;
+	for (size_t i = 0; i < ARRAY_SIZE(_devs); i++) {
+		if (_devs[i] == dev) {
+			out->rotation = _rots[i];
+		}
+	}
 	return ALP_OK;
 }
 

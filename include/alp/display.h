@@ -105,10 +105,29 @@ typedef struct {
 #define ALP_DISPLAY_CONFIG_DEFAULT(id) \
 	((alp_display_config_t){ .display_id = (id), .allow_modeset = false })
 
+/**
+ * @brief A display's static capabilities.  Layout is [ABI-EXPERIMENTAL]
+ *        (@ref alp_display_caps_t::rotation was added after the first
+ *        snapshot).
+ */
 typedef struct {
 	uint16_t     width;
 	uint16_t     height;
 	alp_pixfmt_t format;
+	/**
+	 * Clockwise degrees (0, 90, 180 or 270) the application must rotate an
+	 * upright image by before writing it to the scan-out buffer, because
+	 * the panel is mounted turned from the way its controller scans it
+	 * (devicetree @c mount-rotation on the display controller).  0 for a
+	 * panel mounted the way it scans.  @ref width / @ref height are the
+	 * controller's own, unrotated geometry.
+	 *
+	 * This is the producer's pre-rotation, NOT a Zephyr current_orientation:
+	 * the controller scans as it always did, and a UI stack that rotated its
+	 * touch input from this value as well would rotate twice.  Backends
+	 * without the concept (Linux/KMS, stubs) report 0.
+	 */
+	uint16_t rotation;
 } alp_display_caps_t;
 
 /**

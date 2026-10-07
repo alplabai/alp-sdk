@@ -537,6 +537,7 @@ static alp_status_t y_get_caps(alp_display_backend_state_t *state, alp_display_c
 	out->width  = d->width;
 	out->height = d->height;
 	out->format = ALP_PIXFMT_ARGB8888;
+	out->rotation = 0; /* KMS scans the panel as mounted; no pre-rotation */
 	return ALP_OK;
 }
 
