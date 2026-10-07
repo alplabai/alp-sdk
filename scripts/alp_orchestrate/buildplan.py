@@ -29,6 +29,7 @@ from .kconfig import (
     _slice_local_conf,
 )
 from .models import BoardProject, OrchestratorError, Slice
+from .ownership import project_m33_overlay
 from .paths import REPO
 from .secure import emit_sysbuild_conf, emit_tfm_sysbuild_conf
 
@@ -173,6 +174,78 @@ def _slice_config_artefact(
             return None
         return (BAREMETAL_PROJECT_INCLUDE, contents)
     return None
+
+
+#: The os classes a slice's `alp.overlay` artefact is emitted for: the
+#: classes `alp_project.py --emit dts-overlay` unions over. A yocto slice has
+#: none.
+_DTS_OVERLAY_OS = ("zephyr", "baremetal")
+
+#: Filename of the rendered DTS overlay config artefact (under `buildDir`).
+DTS_OVERLAY_ARTEFACT = "alp.overlay"
+
+
+def _slice_dts_overlay(project: BoardProject, slice_: Slice) -> str:
+    """The slice's DTS overlay text -- exactly what
+    `alp_project.py --emit dts-overlay --core <id>` prints.
+
+    Single source for that standalone emit and the build plan's
+    `alp.overlay` config artefact (ADR-0026 §D: `tan` consumes these bytes
+    instead of re-rendering them). The overlay is shaped by the board
+    header (bus aliases + `alp,pin-array`), a SoM-mounting fact; the slice
+    contributes its peripheral list and, per-product, the assignable nodes
+    board.yaml `ownership:` gave the M33.
+    """
+    # Same lazy sys.path dance `kconfig._slice_alp_conf` does: the
+    # `alp_project_emit` package lives beside this one under scripts/ and a
+    # top-level import would cycle.
+    import sys as _sys
+    _scripts = Path(__file__).resolve().parent.parent
+    if str(_scripts) not in _sys.path:
+        _sys.path.insert(0, str(_scripts))
+    from alp_project_emit.dts import _emit_dts_overlay  # type: ignore
+
+    shaped: dict[str, Any] = {
+        "som": {"sku": project.sku, "hw_rev": project.hw_rev},
+        "pins": list(project.raw.get("pins") or []),
+        "board": ({
+            "name":   project.board_name,
+            "hw_rev": project.board_hw_rev,
+        } if project.board_name else None),
+    }
+    try:
+        out = _emit_dts_overlay(
+            shaped, project.som_preset, project.board_preset,
+            v2_peripherals=sorted(set(slice_.peripherals)),
+            v2_core_id=slice_.core_id,
+            v2_core_os=slice_.os,
+            v2_core_ids=[slice_.core_id],
+        )
+    except SystemExit as exc:
+        # The emitter `sys.exit`s with a message when the board names no
+        # header under include/alp/boards/. Surface it as the ordinary
+        # error type so a plan emit can degrade to a warning instead of
+        # dying, and the standalone emit still prints it and exits 1.
+        raise OrchestratorError(str(exc.code)) from None
+    except ValueError as exc:
+        # `_sku_family` rejects a SKU outside the production families.
+        raise OrchestratorError(str(exc)) from None
+    own_dts, _ = project_m33_overlay(project, slice_.core_id)
+    if own_dts:
+        out += ("\n/* Assignable peripherals owned by the M33 "
+                "(board.yaml `ownership:`). */\n" + "\n".join(own_dts) + "\n")
+    return out
+
+
+def _slice_dts_overlay_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's rendered DTS overlay, or None for
+    an os that has none (see `_DTS_OVERLAY_OS`)."""
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    return (DTS_OVERLAY_ARTEFACT, _slice_dts_overlay(project, slice_))
 
 
 def _shared_artefacts(
@@ -618,6 +691,35 @@ def emit_build_plan(
                 "path":     (build_dir / name).as_posix(),
                 "contents": contents,
             })
+        # Additive rendered-text artefacts (ADR-0026 §D, tan-cli#1216): the
+        # DTS overlay and the full `-D` listing, byte-identical to the
+        # standalone `--emit dts-overlay --core` / `--emit cmake-args`
+        # renders. Always AFTER the slice's primary config artefact, so a
+        # consumer that reads `configArtefacts[0]` is unaffected.
+        extras: list[Optional[tuple[str, str]]] = []
+        # Same dangling-path rule as `alp-baremetal.cmake` above: a baremetal
+        # slice whose command was blocked will never configure its build dir,
+        # so promise it nothing.
+        if not (cmd is None and slice_.os == "baremetal"):
+            try:
+                extras.append(_slice_dts_overlay_artefact(project, slice_))
+            except OrchestratorError as exc:
+                # Additive artefact: a board whose overlay cannot be
+                # rendered (no board header, unrecognised SKU) must not stop
+                # a plan that emitted fine before. The consumer sees the
+                # warning and falls back.
+                warnings.append({
+                    "code":    "dts-overlay-unavailable",
+                    "coreId":  slice_.core_id,
+                    "message": (f"core '{slice_.core_id}': no `alp.overlay` "
+                                f"artefact -- {exc}"),
+                })
+        for extra in extras:
+            if extra is not None:
+                config_artefacts.append({
+                    "path":     (build_dir / extra[0]).as_posix(),
+                    "contents": extra[1],
+                })
         # `appDir` retains the resolved source directory independent of
         # `command` -- tooling that wants the app source (e.g. to watch
         # it for incremental rebuilds) doesn't have to reverse-engineer

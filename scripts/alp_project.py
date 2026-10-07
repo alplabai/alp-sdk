@@ -291,6 +291,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             OrchestratorError,
             _slice_alp_conf,
             _slice_cmake_args,
+            _slice_dts_overlay,
             _slice_local_conf,
             load_board_yaml,
         )
@@ -369,16 +370,14 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
         # fact.  v2 contributes only the peripherals list: union across
         # Zephyr/baremetal cores (or one core when --core is set).
         if args.core is not None:
-            slice_ = project.cores[args.core]
-            v2_peripherals = sorted(set(slice_.peripherals))
-            out = _emit_dts_overlay(
-                project_v1_shaped, project.som_preset,
-                project.board_preset,
-                v2_peripherals=v2_peripherals,
-                v2_core_id=args.core,
-                v2_core_os=slice_.os,
-                v2_core_ids=[args.core],
-            )
+            # Single source shared with the build plan's `alp.overlay`
+            # configArtefact (ADR-0026 §D), M33-ownership nodes included.
+            try:
+                out = _slice_dts_overlay(project, project.cores[args.core])
+            except OrchestratorError as e:
+                print(f"alp_project: {e}", file=sys.stderr)
+                return 1
+            return _write_or_print(out, args.output)
         else:
             union: set[str] = set()
             zephyr_core_ids: list[str] = []
