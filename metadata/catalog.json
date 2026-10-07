@@ -1527,7 +1527,7 @@
         ],
         "path": "examples/multicore/microros-ros2-v2n",
         "som": "E1M-V2N101",
-        "summary": "> **Status: M33 slice builds; not yet run on hardware.** The A55 bridge > compiles warning-free on a Linux host; the M33 firmware builds to > `zephyr.elf` for the V2M101 and V2N101 CM33 targets on Zephyr 4.4 / > zephyr-sdk 1.0.1 (picolibc) with two carried patches to > `micro_ros_zephyr_module` (`m33_sm/patches/`). It has never been run. See > [What is untested](#what-is-untested). Nothing here is bench evidence."
+        "summary": "> **Status: M33 slice builds and boots; no ROS 2 round-trip yet.** The A55 > bridge compiles warning-free on a Linux host; the M33 firmware builds to > `zephyr.elf` for the V2M101 and V2N101 CM33 targets on Zephyr 4.4.1 / > zephyr-sdk 1.0.1 (picolibc) with two carried patches to > `micro_ros_zephyr_module` (`m33_sm/patches/`). On an E1M-V2M103 > (2026-10-07) the image booted on the CM33 and `main()` wrote the resource > table (rsctbl v1, 1 RPMSG vdev, vrings at `0x4f800000`), no SError. Not > proven: a ROS 2 topic round-trip with a micro-ROS agent. See > [What is untested](#what-is-untested)."
       },
       {
         "board": "e1m-evk",
