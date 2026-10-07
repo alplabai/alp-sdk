@@ -115,6 +115,12 @@ endif()
 zephyr_sources_ifdef(CONFIG_ALIF_FLEX_IO_1V8
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/flex_io_1v8_e8.c)
 
+# Ensemble I2C controller handover between the M55 cores (alp,i2c-handover DT
+# node): pure SoC glue, needed by a build that has the node whether or not it
+# sets CONFIG_ALP_SDK, so applied before the early-return.
+zephyr_sources_ifdef(CONFIG_ALIF_I2C_HANDOVER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/i2c_handover.c)
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()

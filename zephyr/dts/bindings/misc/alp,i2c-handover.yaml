@@ -1,0 +1,52 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  One I2C controller shared between two cores of the same SoC, handed from
+  the core that configures a peripheral at boot to the core that owns the bus
+  afterwards (Alif Ensemble: the M55-HE configures a display bridge over
+  I2C1, the M55-HP then owns the same controller for the camera).
+
+  Each image carries one node; the roles pair through a flag word in
+  always-on shared SRAM:
+
+    release  (the first owner): once its drivers have finished with the bus
+             (the last step of APPLICATION init, after the display bridge),
+             masks this core's interrupt for the controller, stops it and
+             writes the flag. A `bus` that is disabled in this image has
+             nothing to stop; the flag is written at once.
+    acquire  (the next owner): before ANY touch of the bus -- POST_KERNEL
+             priority 0, ahead of every driver and of an app's pad recovery --
+             waits for the flag, then clears it so a previous run's value can
+             never satisfy a later wait.
+
+  The release side also clears the flag first thing at boot. An image
+  restarted alone after it already took the bus waits for a flag that is not
+  coming: restart both, or write the magic by hand (see
+  zephyr/soc-bridge/alif/i2c_handover.c).
+
+compatible: "alp,i2c-handover"
+
+include: base.yaml
+
+properties:
+  role:
+    type: string
+    required: true
+    enum:
+      - release
+      - acquire
+    description: Which side of the handover this image is.
+
+  bus:
+    type: phandle
+    description: |
+      The shared I2C controller (a DesignWare instance). Required for
+      `release`; unused by `acquire`.
+
+  flag-address:
+    type: int
+    required: true
+    description: |
+      Address of the 32-bit flag word, in SRAM both cores see and that
+      survives a warm reset. The magic it carries is 0x31433249 ('I2C1').
