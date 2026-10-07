@@ -120,7 +120,7 @@ e1m_routes:
     - { e1m: E1M_X_GPIO_IO1,  macro: XEVK_PIN_PCIE_MUX_SEL,
         doc: "PCIe lane-mux routing select." }
     - { e1m: E1M_X_GPIO_IO2,  macro: XEVK_PIN_PCIE0_I2C_EN,
-        doc: "Drive high to enable the I2C mux to the PCIe slot." }
+        doc: "Drive LOW to enable the I2C switch to the PCIe/M.2 slots (TMUX121 EN is active-low, no pull on the net)." }
     # --- I2S audio path mux ---
     - { e1m: E1M_X_GPIO_IO4,  macro: XEVK_PIN_I2S_MUX_EN, active_low: true,
         doc: "I2S path-mux (TMUX1574 U46) enable -- active-low; drive LOW to enable." }
