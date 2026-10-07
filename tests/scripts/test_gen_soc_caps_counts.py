@@ -133,5 +133,40 @@ class TestNoCountRegressesToZero(unittest.TestCase):
                         f"false on silicon that has the peripheral (#1304)")
 
 
+class TestImx93DeviceTreeCounts(unittest.TestCase):
+    """#380: i.MX93 counts taken from the Zephyr device tree, ahead of the
+    reference-manual pass.  A device tree is a lower bound, so every one of
+    them must stay flagged until the RM replaces it."""
+
+    _REL = "nxp/imx9/imx93.json"
+    #: Cited in the file's `notes` before #380; never part of the dtsi batch.
+    _GROUNDED = {"mipi_dsi", "lcdif"}
+
+    def _soc(self) -> dict:
+        return json.loads((REPO / "metadata" / "socs" / self._REL).read_text(
+            encoding="utf-8"))
+
+    def test_every_device_tree_count_is_flagged_unverified(self):
+        soc = self._soc()
+        per = soc.get("peripherals") or {}
+        self.assertEqual(
+            sorted(set(per) - self._GROUNDED),
+            sorted(soc.get("peripherals_unverified") or []))
+
+    def test_reference_manual_pass_is_still_pending(self):
+        self.assertIs(True, self._soc().get("pending_reference_manual_ingestion"))
+
+    def test_tpm_counts_as_timer_but_claims_no_native_pwm(self):
+        """`timer_tpm`, not `timer_32bit`: PWM_COUNT falls back to
+        `timer_32bit`, and `alp_pwm_open()` is bounds-checked against it."""
+        per = _peripherals(self._REL)
+        self.assertEqual(6, _count("TIMER_COUNT", per))
+        self.assertEqual(0, _count("PWM_COUNT", per))
+
+    def test_flexspi_is_not_counted_as_an_spi_bus(self):
+        """Eight LPSPI instances; `flexspi1` is a memory controller."""
+        self.assertEqual(8, _count("SPI_COUNT", _peripherals(self._REL)))
+
+
 if __name__ == "__main__":
     unittest.main()
