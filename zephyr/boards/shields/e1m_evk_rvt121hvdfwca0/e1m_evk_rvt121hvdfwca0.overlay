@@ -201,10 +201,10 @@
  * examples/aen/aen-pwm-utimer-pwmleds' overlay for why the controller node
  * cannot be used directly).
  *
- * 20 kHz period (50 us), above audible.  NOTE: the Riverdi panel's own PWM pin
- * (connector pin 18) is a TPS61500 dimming input, 200 Hz-1 kHz per its
- * datasheet; a 20 kHz input may not dim linearly -- retune the period here if
- * the brightness does not follow the duty on the bench.  pwm_alif_utimer.c is
+ * 500 Hz period (2 ms), inside the panel backlight dimming input's specified
+ * 200 Hz-1 kHz range (connector pin 18, a TPS61500 dimming input).  The 32-bit
+ * UTIMER reload fits it easily:
+ * 2 ms * 100 MHz = 200000 cycles.  Retune the period here if the brightness does not follow the duty on the bench.  pwm_alif_utimer.c is
  * not silicon-proven and its tick rate is the 100 MHz placeholder (utimer3 has
  * no clock-frequency), so the DUTY RATIO (30%) is right but the actual
  * frequency may be off by the real/placeholder clock ratio.
@@ -214,7 +214,7 @@
 		compatible = "pwm-leds";
 
 		backlight: backlight {
-			pwms = <&pwm3 1 PWM_USEC(50) PWM_POLARITY_NORMAL>;
+			pwms = <&pwm3 1 PWM_MSEC(2) PWM_POLARITY_NORMAL>;
 		};
 	};
 };

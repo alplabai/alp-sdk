@@ -202,7 +202,7 @@ int main(void)
 	const struct device *disp   = DEVICE_DT_GET(DISPLAY_NODE);
 
 	/*
-	 * Backlight at 30%: pwm_set_dt() with the shield's 20 kHz period (50 us)
+	 * Backlight at 30%: pwm_set_dt() with the shield's 500 Hz period (2 ms)
 	 * and pulse = period * 30 / 100.  Not part of the PASS gate -- a dark panel
 	 * with a healthy bridge is a backlight wiring fact, not a chain failure.
 	 */
