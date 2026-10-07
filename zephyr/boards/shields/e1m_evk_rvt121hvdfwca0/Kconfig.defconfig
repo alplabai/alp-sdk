@@ -33,6 +33,10 @@ config GPIO
 config GPIO_PCA_SERIES
 	default y
 
+# Backlight: UTIMER3 PWM (pwm_alif_utimer.c) on P10_7, set to 30% by the app.
+config PWM
+	default y
+
 # The panel's ILI2511 touch controller (touch@41 on &i2c1).  Polled: the
 # carrier routes the touch INT line to a CC3501E-owned pad, not to the Alif.
 config INPUT
