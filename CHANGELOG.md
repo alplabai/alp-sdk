@@ -7,6 +7,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Fixed — `aen-inference-energy` no longer stalls when a J-Link session closes
+
+The app timestamped every INA236 poll slot and window span with the DWT cycle
+counter, set up once at boot. A J-Link close (the end of `tan flash --ram` /
+ram-run) clears `DEMCR.TRCENA` about 10 ms after `go`, freezing `CYCCNT`, so the
+poll gate never fired again and every window timed out with no samples. It now
+uses `k_cycle_get_32()` throughout, as `aen-inference-latency` does since #2761,
+and reports `timestamp_source: "k-cycle-get-32"` in `ENERGY-CFG` (already handled
+by tan's capture parser). The `ENERGY-*` protocol and the INA236 path are
+unchanged. Closes #2764.
+
 ### Added — optional `slices[].flash_method_resolved` in system-manifest-v1
 
 A flasher can now record, in `build/system-manifest.yaml`, the flash backend it
