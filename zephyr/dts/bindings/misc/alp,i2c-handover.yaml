@@ -7,23 +7,27 @@ description: |
   afterwards (Alif Ensemble: the M55-HE configures a display bridge over
   I2C1, the M55-HP then owns the same controller for the camera).
 
-  Each image carries one node; the roles pair through a flag word in
-  always-on shared SRAM:
+  Each image carries one node; the roles pair through three flag words in
+  always-on shared SRAM (protocol: zephyr/soc-bridge/alif/i2c_handover.h):
 
     release  (the first owner): once its drivers have finished with the bus
              (the last step of APPLICATION init, after the display bridge),
              masks this core's interrupt for the controller, stops it and
-             writes the flag. A `bus` that is disabled in this image has
-             nothing to stop; the flag is written at once.
+             publishes a per-boot nonce and CLEAN. A controller that will not go
+             idle is still released, as DIRTY, with a warning: the other core
+             runs its bus recovery rather than wait forever. A `bus` that is
+             DISABLED in this image has nothing to stop and is released at once
+             (a shield that never needs the bus on this core keeps it disabled).
     acquire  (the next owner): before ANY touch of the bus -- POST_KERNEL
              priority 0, ahead of every driver and of an app's pad recovery --
-             waits for the flag, then clears it so a previous run's value can
-             never satisfy a later wait.
+             waits for a release it has not taken yet, then consumes it (state
+             cleared, nonce recorded), so a magic left by an earlier run or an
+             already-taken release can never satisfy a later wait.
 
-  The release side also clears the flag first thing at boot. An image
-  restarted alone after it already took the bus waits for a flag that is not
-  coming: restart both, or write the magic by hand (see
-  zephyr/soc-bridge/alif/i2c_handover.c).
+  The release side clears the state first thing at boot. An image restarted
+  alone after it took the bus waits for a release that is not coming, and a
+  release-side reset while the acquire side is running reconfigures the bus under
+  it: restart both.
 
 compatible: "alp,i2c-handover"
 
@@ -41,12 +45,12 @@ properties:
   bus:
     type: phandle
     description: |
-      The shared I2C controller (a DesignWare instance). Required for
-      `release`; unused by `acquire`.
+      The shared I2C controller, a snps,designware-i2c instance (asserted at
+      build time). Required for `release`; unused by `acquire`.
 
   flag-address:
     type: int
     required: true
     description: |
-      Address of the 32-bit flag word, in SRAM both cores see and that
-      survives a warm reset. The magic it carries is 0x31433249 ('I2C1').
+      Address of the three 32-bit flag words (state, nonce, consumed: 12 bytes),
+      in SRAM both cores see and that survives a warm reset.
