@@ -210,8 +210,8 @@ struct cc3501e {
 	 *
 	 * Prefer @ref cc3501e_get_capabilities over reasoning from the minor: it
 	 * reports what the build IMPLEMENTS, not what its number implies. */
-	uint8_t     fw_proto_major;
-	uint8_t     fw_proto_minor;
+	uint8_t fw_proto_major;
+	uint8_t fw_proto_minor;
 	/* True when the firmware reported ALP_CC3501E_CAP_FAST_REPLY at the last
 	 * cc3501e_reset(); selects the shorter reply-header gate (#2052).  Sits
 	 * in the padding before @c bus, so the struct layout does not move. */
