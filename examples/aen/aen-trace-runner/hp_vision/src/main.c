@@ -89,7 +89,7 @@ static int tr_i2c1_unstick_init(void)
 	sys_write32(TR_I2C1_PAD_I2C1, TR_I2C1_PAD_P7_2);
 	return 0;
 }
-/* POST_KERNEL priority 1, after the alp,i2c-handover wait (priority 0, boards/*.overlay:
+/* POST_KERNEL priority 1, after the alp,i2c-handover wait (priority 0, boards/<board>.overlay:
  * the HE may be using this bus for a display bridge until it releases it) and
  * still ahead of every driver (the i2c_dw instance is POST_KERNEL priority 40). */
 SYS_INIT(tr_i2c1_unstick_init, POST_KERNEL, 1);
