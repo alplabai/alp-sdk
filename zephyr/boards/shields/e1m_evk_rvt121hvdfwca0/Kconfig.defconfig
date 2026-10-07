@@ -33,8 +33,15 @@ config GPIO
 config GPIO_PCA_SERIES
 	default y
 
-# Backlight: UTIMER3 PWM (pwm_alif_utimer.c) on P10_7, set to 30% by the app.
+# Backlight: UTIMER3 PWM (pwm_alif_utimer.c) on P10_7 through the LED API,
+# set to 30% at boot by the SDK (alp,display-backlight, src/zephyr/display_backlight.c).
 config PWM
+	default y
+
+config LED
+	default y
+
+config LED_PWM
 	default y
 
 # The panel's ILI2511 touch controller (touch@41 on &i2c1).  Polled: the

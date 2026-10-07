@@ -199,6 +199,11 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BANNER
 zephyr_library_sources_ifdef(CONFIG_DISPLAY
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/panel_init_retry.c)
 
+# Display backlight default brightness (alp,display-backlight DT node ->
+# led_set_brightness() at APPLICATION init): compiles to nothing without a node.
+zephyr_library_sources_ifdef(CONFIG_LED
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/display_backlight.c)
+
 # Alp SoM console (CONFIG_ALP_SDK_CONSOLE) -- the `alp` Zephyr-shell command
 # tree.  Each group is its own TU attaching to the `alp` root via the
 # decentralized SHELL_SUBCMD_ADD section mechanism, so they list here flat.

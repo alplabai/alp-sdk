@@ -195,11 +195,13 @@
  * Backlight, P10_7 = E1M_PWM6 = the mikroBUS PWM pin (CK_PWM0), wired to the
  * panel backlight on EVK-03.  P10_7 is pad A3 = UT3_T1_C: UTIMER3 driver B,
  * i.e. channel 1 of pwm3 (pwm_alif_utimer.c: "E1M PWM6 = UT3_T1_C (utimer3,
- * driver B / channel 1)").  main.c sets 30% duty at boot through pwm_set_dt()
- * on the `backlight` node below.  The `pwm-leds` wrapper exists only so
- * PWM_DT_SPEC_GET has a consumer `pwms` phandle to dereference (see
- * examples/aen/aen-pwm-utimer-pwmleds' overlay for why the controller node
- * cannot be used directly).
+ * driver B / channel 1)").  The SDK sets the duty at boot: the
+ * `display-backlight` node below (alp,display-backlight, src/zephyr/
+ * display_backlight.c) calls led_set_brightness() on the `backlight` LED at
+ * APPLICATION init, so an app does nothing.  The `pwm-leds` wrapper is what
+ * gives the LED API (and PWM_DT_SPEC_GET) a consumer `pwms` phandle to
+ * dereference (see examples/aen/aen-pwm-utimer-pwmleds' overlay for why the
+ * controller node cannot be used directly).
  *
  * 500 Hz period (2 ms), inside the panel backlight dimming input's specified
  * 200 Hz-1 kHz range (connector pin 18, a TPS61500 dimming input).  The 32-bit
@@ -216,6 +218,12 @@
 		backlight: backlight {
 			pwms = <&pwm3 1 PWM_MSEC(2) PWM_POLARITY_NORMAL>;
 		};
+	};
+
+	display_backlight {
+		compatible = "alp,display-backlight";
+		led = <&backlight>;
+		default-brightness = <30>;
 	};
 };
 
