@@ -37,7 +37,7 @@
  * regulator cannot express (EN must not go high until the DSI clock lane is
  * already running HS -- see the driver's header comment).
  *
- * WIRING (EVK-03, maintainer-confirmed): the bridge EN is on the mikroBUS
+ * WIRING (E1M-EVK, maintainer-confirmed): the bridge EN is on the mikroBUS
  * INT pin (CK_INT = E1M_I2S1_SDI = pad AH6 = Alif P13_4, metadata/pinmux/
  * aen.yaml:58) and the backlight PWM is on the mikroBUS PWM pin (CK_PWM0 =
  * E1M_PWM6 = pad A3 = Alif P10_7, aen.yaml:15): EN is a plain SoC GPIO, the
@@ -193,7 +193,7 @@
 
 /*
  * Backlight, P10_7 = E1M_PWM6 = the mikroBUS PWM pin (CK_PWM0), wired to the
- * panel backlight on EVK-03.  P10_7 is pad A3 = UT3_T1_C: UTIMER3 driver B,
+ * panel backlight on the E1M-EVK.  P10_7 is pad A3 = UT3_T1_C: UTIMER3 driver B,
  * i.e. channel 1 of pwm3 (pwm_alif_utimer.c: "E1M PWM6 = UT3_T1_C (utimer3,
  * driver B / channel 1)").  The SDK sets the duty at boot: the
  * `display-backlight` node below (alp,display-backlight, src/zephyr/
