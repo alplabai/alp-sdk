@@ -323,7 +323,7 @@ responder to 0 and back with `CAM_EN`.
   the same board); whether the IMX296 module self-enables without that
   rework is not established. IMX335 (issue #2327) has its raw capture
   bench-verified: 6/6 consecutive clean 1296x972 RAW10 frames (runs
-  316-330), 0 CSI/IPI errors -- see
+  316-330), 0 CSI/IPI errors on the kept frame (the discarded first frame of each start reports one `SEQ_FRAME_FATAL`, status `0x1`) -- see
   [`docs/camera-shields.md`](../camera-shields.md)'s IMX335 driver
   section. That bench also ran on the same E1M-AEN803 (serial
   2026W36-0001) on the same reworked E1M-EVK; whether the IMX335 module
@@ -393,6 +393,14 @@ responder to 0 and back with `CAM_EN`.
    set on the header (`+VIO`).
 6. Add peripherals one at a time — Ethernet → microSD → display →
    camera → M.2 modules.
+
+## Troubleshooting: camera `ALP_ERR_NOSUPPORT`
+
+`alp_camera_open FAILED: ALP_ERR_NOSUPPORT` preceded by
+`Failed to set CSI pixel clock rate! ret - -134` means the Zephyr workspace
+lacks alp-sdk's `zephyr/patches.yml` patches. Run `bash scripts/bootstrap.sh`
+(or `west patch --dst-module zephyr apply`) and rebuild; full write-up in
+[`docs/camera-shields.md`](../camera-shields.md).
 
 ## Known design notes (to track)
 

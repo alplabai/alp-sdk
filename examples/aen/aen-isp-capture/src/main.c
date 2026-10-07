@@ -98,8 +98,9 @@
  *     frame -- proof of what the writeback actually landed in the sensor, not just what the
  *     library computed as a target.
  *
- * IMX335 VARIANT (issue #2327 Stage B, -DAEN_ISP_IMX335=ON, off by default, BUILD-ONLY -- no
- * bench run backs this variant the way the IMX296 one above is bench-verified): the sensor's
+ * IMX335 VARIANT (issue #2327 Stage B, -DAEN_ISP_IMX335=ON, off by default; AE-on is bench-verified
+ * (run 332, re-confirmed 2026-10-07: 60 YUV420 1280x960 frames, ae_stable=1 from f45, Y mean 146),
+ * AE-off (overlay-no-ae.conf) is build-only): the sensor's
  * native 1296x972 2x2-binned SRGGB10P output, ISP-CROPPED down to 1280x960 -- unlike IMX296's ROI
  * crop (which happens IN the sensor, so its ISP input already matches its 1280x960 output),
  * IMX335 has no in-sensor crop this driver uses, so the ISP itself crops 8 px off each side and 6
@@ -196,7 +197,7 @@ extern volatile uint32_t isp_mi_frame_end_count;
 #define ISP_INPUT_FOURCC VIDEO_PIX_FMT_SRGGB10P
 #elif defined(AEN_ISP_IMX335)
 /*
- * issue #2327 Stage B (BUILD-ONLY): IMX335's native 2x2-binned output is 1296x972 -- the ISP
+ * issue #2327 Stage B (AE-on bench-verified, AE-off build-only): IMX335's native 2x2-binned output is 1296x972 -- the ISP
  * INPUT size -- but the OUTPUT (this app's queued YUV420 buffer, FRAME_WIDTH/HEIGHT) is cropped
  * to 1280x960 by the innomaker_cam_imx335 shield's own &isp crop-x0/crop-y0 (see that overlay's own
  * comment for the 8/6 derivation) -- the SAME output size IMX296's own ROI already uses, so this
@@ -484,7 +485,8 @@ int main(void)
 	       "AE=%s AWB=manual/off) ===\n",
 	       IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? "auto (unit 3)" : "manual/off");
 #elif defined(AEN_ISP_IMX335)
-	printk("\n=== aen-isp-capture (issue #2327 Stage B, BUILD-ONLY: real IMX335 2x2-binned "
+	printk("\n=== aen-isp-capture (issue #2327 Stage B, AE-on bench-verified / AE-off build-only: "
+	       "real IMX335 2x2-binned "
 	       "frame ISP-cropped to 1280x960, AE=%s AWB=manual/off) ===\n",
 	       IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? "auto" : "manual/off");
 #else
