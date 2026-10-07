@@ -124,8 +124,10 @@ typedef struct {
 	 *
 	 * This is the producer's pre-rotation, NOT a Zephyr current_orientation:
 	 * the controller scans as it always did, and a UI stack that rotated its
-	 * touch input from this value as well would rotate twice.  Backends
-	 * without the concept (Linux/KMS, stubs) report 0.
+	 * touch input from this value as well would rotate twice.  A backend
+	 * without the concept (Linux/KMS) reports 0; the stub backend reports
+	 * nothing at all (its @ref alp_display_get_caps returns
+	 * ALP_ERR_NOT_IMPLEMENTED like every one of its operations).
 	 */
 	uint16_t rotation;
 } alp_display_caps_t;

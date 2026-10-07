@@ -77,7 +77,10 @@ static const struct device *const _devs[] = {
 
 /** The panel's `mount-rotation` (tes,cdc-2.1.yaml), per alias: clockwise degrees a
  *  producer pre-rotates its image. 0 where the node does not carry the property. */
-#define ALP_DISPLAY_ROT(idx) 	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_display, idx)), okay), 	            (DT_PROP_OR(DT_ALIAS(_CONCAT(alp_display, idx)), mount_rotation, 0)), 	            (0))
+#define ALP_DISPLAY_ROT(idx) \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_display, idx)), okay), \
+	            (DT_PROP_OR(DT_ALIAS(_CONCAT(alp_display, idx)), mount_rotation, 0)), \
+	            (0))
 
 static const uint16_t _rots[] = {
 	ALP_DISPLAY_ROT(0),
@@ -207,9 +210,9 @@ static alp_status_t z_get_caps(alp_display_backend_state_t *state, alp_display_c
 		 * third party re-formatted the panel behind our back. */
 		return ALP_ERR_NOSUPPORT;
 	}
-	out->width  = zcaps.x_resolution;
-	out->height = zcaps.y_resolution;
-	out->format = fmt;
+	out->width    = zcaps.x_resolution;
+	out->height   = zcaps.y_resolution;
+	out->format   = fmt;
 	out->rotation = 0;
 	for (size_t i = 0; i < ARRAY_SIZE(_devs); i++) {
 		if (_devs[i] == dev) {
