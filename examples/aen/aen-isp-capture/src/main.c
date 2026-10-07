@@ -485,7 +485,8 @@ int main(void)
 	       "AE=%s AWB=manual/off) ===\n",
 	       IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? "auto (unit 3)" : "manual/off");
 #elif defined(AEN_ISP_IMX335)
-	printk("\n=== aen-isp-capture (issue #2327 Stage B, AE-on bench-verified / AE-off build-only: real IMX335 2x2-binned "
+	printk("\n=== aen-isp-capture (issue #2327 Stage B, AE-on bench-verified / AE-off build-only: "
+	       "real IMX335 2x2-binned "
 	       "frame ISP-cropped to 1280x960, AE=%s AWB=manual/off) ===\n",
 	       IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? "auto" : "manual/off");
 #else
