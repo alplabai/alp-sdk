@@ -11,7 +11,7 @@ STANDBY invalidates the negotiated link state like an OTA reset. The firmware an
 3 while an ADC stream, PWM output or capture, DAC output, OTA session or unconfirmed trial is live. The opcode is SPI
 only. Request byte 1 was reserved padding; a pre-flags host sends 0 and is unaffected.
 
-**Layout change:** `gd32g553_t` gains three fields at the end of the public struct (`power_asleep`,
+**Layout change:** `gd32g553_t` gains three fields before the SPI scratch buffers (`power_asleep`,
 `power_wake_latency_us`, `power_wake_retries`), so `sizeof(gd32g553_t)` grows; rebuild anything that embeds one. See
 `docs/gd32-bridge-protocol.md` §3.z.
 

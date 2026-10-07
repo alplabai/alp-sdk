@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-06",
+  "generated": "2026-10-07",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -4486,10 +4486,6 @@
           "hash": "831d5d02a16faf26",
           "signature": "alp_status_t gd32g553_ping_via(gd32g553_t *ctx, gd32g553_transport_t t);"
         },
-        "gd32g553_power_mode_set": {
-          "hash": "c6525d03bb449d80",
-          "signature": "alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx, uint8_t mode, uint32_t wake_bitmap, uint32_t wake_after_ms);"
-        },
         "gd32g553_power_wake": {
           "hash": "f166662309e4fcd4",
           "signature": "alp_status_t gd32g553_power_wake(gd32g553_t *ctx);"
@@ -4755,6 +4751,10 @@
         "GD32G553_PAD_ID_SWDIO": {
           "hash": "e1592b6924d04a0d",
           "value": "0xE1D32000u"
+        },
+        "GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR": {
+          "hash": "a9e4f2493465cffe",
+          "value": "17u"
         },
         "GD32G553_POWER_FLAG_WAKE_I2C": {
           "hash": "8fe202bcded05de0",

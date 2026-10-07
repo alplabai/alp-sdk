@@ -318,6 +318,15 @@ typedef enum {
  *  minor; gd32g553_pwm_stop() returns `ALP_ERR_NOSUPPORT` instead. */
 #define GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR 17u
 
+/** Minimum protocol MINOR that implements the `POWER_MODE_SET` flags byte
+ *  (@ref GD32G553_POWER_FLAG_WAKE_I2C), the `ALP_ERR_BUSY` gate for modes 2 / 3
+ *  while a stream / PWM / DAC / OTA session is live, and the
+ *  `ALP_ERR_OUT_OF_RANGE` answers (untimed WAKE_I2C, a timer the watchdog would
+ *  cut short).  An older firmware ignores the flags byte and enters the mode
+ *  regardless, so gd32g553_set_power_mode() returns `ALP_ERR_NOSUPPORT` below
+ *  this minor instead of sending the request. */
+#define GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR 17u
+
 /** v0.7 link-feature bits (CMD_LINK_FEATURES payload).  STATUS_SEQ:
  *  once granted, every SPI reply's STATUS byte carries a 4-bit
  *  slave-side sequence stamp in bits [7:4] that advances per freshly
@@ -1512,13 +1521,23 @@ typedef struct {
  *   - 3 STANDBY: SRAM lost; the wake is a reset, so the next command
  *     re-reads the version and re-negotiates the link (like an OTA commit).
  *
- * The firmware answers @c ALP_ERR_BUSY (nothing changed) for modes 2 and 3 while
+ * Bridge protocol minor >= @ref GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR (0.17)
+ * is required: below it this returns @c ALP_ERR_NOSUPPORT without a wire trip,
+ * because an older firmware ignores the flags byte and has no BUSY gate.  From
+ * that minor on, the firmware answers @c ALP_ERR_BUSY (nothing changed) for modes 2 and 3 while
  * an ADC stream, a PWM output or capture, a DAC output, an OTA session or an
  * unconfirmed trial is live: stop it, or use mode 1.  @c ALP_ERR_INVAL for a
  * request it cannot honour (no timer in mode 2 or 3, an unknown flag),
  * @c ALP_ERR_OUT_OF_RANGE for an untimed WAKE_I2C or a timer the watchdog
  * would cut short, @c ALP_ERR_NOSUPPORT on firmware without the mode (and for a
  * wake source the GD32 cannot arm).
+ *
+ * STANDBY dead window: after an accepted mode 3 the call BLOCKS for
+ * @c wake_after_ms plus a fixed boot margin before returning, because the
+ * firmware enters STANDBY up to one 50 ms tick after its reply and a
+ * GET_VERSION in that window would still be answered by the old image, which
+ * would clear the pending renegotiation before the reset happens.  A timer is
+ * mandatory for mode 3, so the wait is bounded (max ~32.7 s).
  *
  * Wake rule (after an accepted mode 2).  The entry happens up to one 50 ms tick
  * AFTER the reply, when the link is quiet, so the host cannot tell whether the
@@ -1537,8 +1556,10 @@ typedef struct {
  *
  * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (mode > 3, unknown flag,
  *         or a flag on a mode other than 2), ALP_ERR_BUSY, ALP_ERR_OUT_OF_RANGE,
- *         ALP_ERR_NOSUPPORT, ALP_ERR_IO / ALP_ERR_TIMEOUT (wake failed; the
- *         context still assumes the bridge is asleep and retries the wake).
+ *         ALP_ERR_NOSUPPORT (bridge below protocol 0.17, or no such mode),
+ *         ALP_ERR_IO / ALP_ERR_TIMEOUT (wake failed, or a mode-2 request whose
+ *         reply was lost: it may have latched, so the context assumes the
+ *         bridge is asleep and the next command retries the wake).
  */
 alp_status_t
 gd32g553_set_power_mode(gd32g553_t *ctx, uint8_t mode, const gd32g553_power_opts_t *opts);
@@ -1556,35 +1577,6 @@ gd32g553_set_power_mode(gd32g553_t *ctx, uint8_t mode, const gd32g553_power_opts
  * @return ALP_OK once the bridge answers, else the last transport error.
  */
 alp_status_t gd32g553_power_wake(gd32g553_t *ctx);
-
-/**
- * @brief Request the GD32 + the bridged Renesas SoC enter a sleep mode.
- *
- * Raw one-shot form of @ref gd32g553_set_power_mode (no flags, no wake
- * handling).  Prefer the latter.
- *
- * Request payload: `mode:u8 reserved:u8 wake_bitmap:u32
- * wake_after_ms:u32`.  Reply: empty + STATUS.  The supervisor
- * configures the wake sources, signals the Renesas SoC to enter
- * the matching mode, and re-runs the bridge handshake on wakeup
- * (host-side reciprocal: call
- * @c alp_z_v2n_supervisor_invalidate() before this returns so
- * the next bridge acquire re-inits).
- *
- * Mirrors @ref alp_power_request_sleep in <alp/power.h>.
- *
- * @param[in] ctx            Initialised driver context.
- * @param[in] mode           Sleep mode: 0 = run (no-op),
- *                           1 = sleep, 2 = deep-sleep, 3 = standby.
- * @param[in] wake_bitmap    Bitmap of @c ALP_POWER_WAKE_* macros.
- * @param[in] wake_after_ms  Max wall-clock wait, or 0 for "no timer".
- *
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT.
- */
-alp_status_t gd32g553_power_mode_set(gd32g553_t *ctx,
-                                     uint8_t     mode,
-                                     uint32_t    wake_bitmap,
-                                     uint32_t    wake_after_ms);
 
 /* ------------------------------------------------------------------ */
 /* v0.5 (§2B wave-2) -- chunked DSP-chain upload                       */

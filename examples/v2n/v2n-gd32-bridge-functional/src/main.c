@@ -593,7 +593,9 @@ static void t_da9292_sentinel(void)
 
 /* CMD_POWER_MODE_SET with the flags byte, the BUSY gate and the timed-only
  * rule ships with the firmware that also has PWM stop/release (minor 17):
- * the BUSY row below needs that release, so one gate serves all three rows.
+ * the BUSY row below needs that release, so one gate (the larger of
+ * GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR and GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR)
+ * serves all three rows.
  * A peer below it, or one that answers NOSUPPORT, makes the row a SKIP.
  *
  * STANDBY (mode 3) is deliberately never requested: it resets the GD32 and
@@ -602,12 +604,15 @@ static void t_da9292_sentinel(void)
  * 250 ms, not longer: with the FWDGT left running in Deep-sleep the firmware
  * refuses a timer above 300 ms (ALP_ERR_OUT_OF_RANGE).
  *
- * The driver does not expose the wake source.  The firmware's entry can
- * race the reply drain, so the host's own reply read may wake the part via
- * SPI CS instead of the timer; either is fine, the pass criterion is that
- * a GET_VERSION after the wake answers and matches. */
-#define POWER_TEST_MIN_MINOR GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR
-#define POWER_SLEEP_MS       250u
+ * The driver does not expose the wake source.  The firmware holds the
+ * Deep-sleep entry until the host has read the reply, so an early CS (the
+ * wake pulse) or the timer ends the sleep; either is fine, the pass
+ * criterion is that a GET_VERSION after the wake answers and matches. */
+#define POWER_TEST_MIN_MINOR \
+	(GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR > GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR \
+	     ? GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR \
+	     : GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR)
+#define POWER_SLEEP_MS 250u
 
 static bool power_unsupported(void)
 {

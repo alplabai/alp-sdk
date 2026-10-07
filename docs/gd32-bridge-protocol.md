@@ -164,8 +164,12 @@ not on the v0.15 I2C opcode allow-list.
 The portable surface lives in [`<alp/power.h>`](../include/alp/power.h)
 (`alp_power_open / alp_power_configure_wake_source / alp_power_request_sleep /
 alp_power_close`); on V2N only the Renesas vendor extension reaches this opcode
-today.  HIL verification of the sleep transitions on real V2N silicon is still
-ahead (see `docs/v1.0-readiness.md` §1a).
+today.  Bench-verified on E1M-V2M103 (2026-10-07): Deep-sleep entry/wake and the BUSY
+gate.  STANDBY and WAKE_I2C-from-host are not bench-verified through the host
+API (WAKE_I2C was verified from the A55 on firmware).  The flags byte, BUSY gate
+and OUT_OF_RANGE answers ship in bridge protocol 0.17
+(`GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR`); the host refuses with
+`ALP_ERR_NOSUPPORT` below it.  See `docs/v1.0-readiness.md` §1a.
 
 ### 3.y Advanced timer extras (v0.5+)
 
