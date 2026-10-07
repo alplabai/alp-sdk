@@ -33,3 +33,8 @@ tests:
   alp_sdk.examples.aen.trace_runner.m55_render:
     extra_args:
       - "TR_RENDER=M55"
+  alp_sdk.examples.aen.trace_runner.rvt121_m55_render:
+    extra_args:
+      - "TR_PANEL=rvt121"
+      - "TR_RENDER=M55"
+      - "TR_PANEL_HZ=30"

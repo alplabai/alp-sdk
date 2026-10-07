@@ -100,12 +100,34 @@ rewrites whole 16 KiB sectors, and that read-back is the only way to restore the
 
 | CMake option | Default | Effect |
 | --- | --- | --- |
+| `TR_PANEL` | `rk055` | `rvt121` targets the Riverdi 12.1" LVDS panel (see below) |
 | `TR_RENDER` | `A32` | `M55` renders on the HE instead (no A32 needed) |
 | `TR_INPUT_NPU` | `OFF` | Read the player's pose from the HP's pose slot |
 | `TR_CAMERA` | `OFF` | HE reads the camera itself (needs `TR_RENDER=M55`) |
-| `TR_PANEL_HZ` | `40` | `30` for the release panel timing (A32 render only) |
+| `TR_PANEL_HZ` | `40` | `30` for the release panel timing (A32 render only; with `TR_PANEL=rvt121` it must be `30`) |
 | `TR_M55_AUTOLAUNCH` | `OFF` | HE launches the A32 renderer at boot (release) |
 | `TR_TILT_TAKEOVER` | `OFF` | The IMU tilt takes over steering when no player is seen |
+
+## Riverdi RVT121 (12.1" LVDS)
+
+`-DTR_PANEL=rvt121` runs the game on the Riverdi RVT121HVDFWCA0-B, 1280x800 landscape RGB565,
+through the SN65DSI83 DSI-to-LVDS bridge adapter (shield `e1m_evk_rvt121hvdfwca0`). The shield's
+bridge driver brings the panel up, so the HX8394 retry in `src/platform/panel.c` is a no-op, and
+none of `panel_deferred.overlay`, `panel_30hz.overlay` or `i2c1_off.overlay` is applied (the
+bridge and the touch controller live on I2C1). The panel runs at its native ~30.06 Hz
+(36.363636 MHz pixel clock, 1440x840 totals), hence `TR_PANEL_HZ=30`.
+
+```sh
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d build/rvt121 . --     -DTR_PANEL=rvt121 -DTR_RENDER=M55 -DTR_PANEL_HZ=30
+```
+
+Wiring: bridge EN = `CK_INT` (P13_4), backlight = `CK_PWM0` (P10_7), and P9 powers +1V8.
+
+Phase 1 limits: `TR_RENDER=M55` with IMU steering only. The front framebuffer is the shield's
+`lcd_fb` (`0x02200000`, 2 MiB) and the back buffer is the base of SRAM0; a frame is 2,048,000 B.
+CMake refuses `TR_RENDER=A32`, `TR_CAMERA` and `TR_INPUT_NPU` with this panel (phase 2). Sprites
+keep their 720x1280 art sizes, and the lane bands scale with the width. Build-only: not yet run
+on hardware.
 
 ## Sound (reworked carriers only)
 

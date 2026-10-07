@@ -6,6 +6,17 @@ cmake_minimum_required(VERSION 3.20)
 # a 512 KiB video pool at the base of SRAM0 (camera.conf), which is exactly the
 # space the renderer's back buffer needs; without it the game double-buffers
 # in SRAM0 instead of reaching for SRAM1, which is unpowered at boot.
+# Which panel the game runs on. rk055 (default): the RK055HDMIPI4MA0 720x1280
+# portrait MIPI-DSI panel (HX8394). rvt121: the Riverdi RVT121HVDFWCA0-B 12.1"
+# 1280x800 landscape LVDS panel behind an SN65DSI83 bridge (shield
+# e1m_evk_rvt121hvdfwca0). rvt121 is phase 1 only: TR_RENDER=M55, IMU steering,
+# no camera, no NPU input (README, "Riverdi RVT121").
+set(TR_PANEL rk055 CACHE STRING "Panel: rk055 or rvt121")
+set_property(CACHE TR_PANEL PROPERTY STRINGS rk055 rvt121)
+if(NOT TR_PANEL MATCHES "^(rk055|rvt121)$")
+	message(FATAL_ERROR "TR_PANEL must be rk055 or rvt121, got '${TR_PANEL}'")
+endif()
+
 option(TR_CAMERA "Stack the OV9281 camera shields and the video buffer pool" OFF)
 
 # NPU body control (docs/superpowers/specs/2026-09-24-npu-body-control-design.md):
@@ -18,6 +29,14 @@ option(TR_CAMERA "Stack the OV9281 camera shields and the video buffer pool" OFF
 option(TR_INPUT_NPU "Read body position from the HP's pose slot instead of a local camera" OFF)
 if(TR_INPUT_NPU AND TR_CAMERA)
 	message(FATAL_ERROR "TR_INPUT_NPU and TR_CAMERA are exclusive -- pick one body-detection source")
+endif()
+if(TR_PANEL STREQUAL "rvt121" AND TR_CAMERA)
+	message(FATAL_ERROR "TR_PANEL=rvt121 does not support TR_CAMERA yet (phase 2): the 1280x800 "
+			     "RGB565 frame plus the video pool is more than SRAM0")
+endif()
+if(TR_PANEL STREQUAL "rvt121" AND TR_INPUT_NPU)
+	message(FATAL_ERROR "TR_PANEL=rvt121 does not support TR_INPUT_NPU yet (phase 2): the HP "
+			     "pose path needs I2C1, which carries the bridge and the touch controller")
 endif()
 if(TR_INPUT_NPU)
 	# The HP now owns I2C1 -- see i2c1_off.overlay's header for why the HE
@@ -47,6 +66,9 @@ if(TR_INPUT_NPU AND TR_RENDER STREQUAL "M55")
 	message(FATAL_ERROR "TR_INPUT_NPU needs TR_RENDER=A32 -- TR_RENDER=M55 runs CONFIG_DCACHE=y "
 			     "(m55_render.conf) and the pose slot has no cache maintenance")
 endif()
+if(TR_PANEL STREQUAL "rvt121" AND NOT TR_RENDER STREQUAL "M55")
+	message(FATAL_ERROR "TR_PANEL=rvt121 needs TR_RENDER=M55 (A32 renderer on this panel is phase 2)")
+endif()
 if(TR_RENDER STREQUAL "A32" AND TR_CAMERA)
 	# The camera pool sits at the base of SRAM0 -- on top of TR_FB_A -- until
 	# plan task T-A8 moves it to SRAM1 0x02480000.
@@ -68,9 +90,15 @@ if(TR_M55_AUTOLAUNCH AND NOT EXISTS "${TR_A32_LAUNCH_H}")
 	message(FATAL_ERROR "TR_M55_AUTOLAUNCH=ON needs -DTR_A32_LAUNCH_H=<header with TR_A32_ENTRY/LEN/CRC>")
 endif()
 
-list(APPEND SHIELD e1m_evk_rk055hdmipi4ma0)
-# The panel inits from main() with retries (src/platform/panel.c), not at boot.
-list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/panel_deferred.overlay)
+if(TR_PANEL STREQUAL "rvt121")
+	# The shield's SN65DSI83 driver brings the panel up itself: there is no
+	# lcd_panel node, so no deferred-init overlay and no HX8394 retry (panel.c).
+	list(APPEND SHIELD e1m_evk_rvt121hvdfwca0)
+else()
+	list(APPEND SHIELD e1m_evk_rk055hdmipi4ma0)
+	# The panel inits from main() with retries (src/platform/panel.c), not at boot.
+	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/panel_deferred.overlay)
+endif()
 
 # Panel refresh (P11a). 40: the shield's timing. 30: panel_30hz.overlay
 # stretches the vertical front porch (same pixel clock and DSI link) for
@@ -82,7 +110,13 @@ set_property(CACHE TR_PANEL_HZ PROPERTY STRINGS 40 30)
 if(NOT TR_PANEL_HZ MATCHES "^(40|30)$")
 	message(FATAL_ERROR "TR_PANEL_HZ must be 40 or 30, got '${TR_PANEL_HZ}'")
 endif()
-if(TR_PANEL_HZ STREQUAL "30")
+if(TR_PANEL STREQUAL "rvt121")
+	# The Riverdi shield natively runs ~30.06 Hz (36.363636 MHz, 1440x840
+	# totals); panel_30hz.overlay is RK055-specific and is never applied.
+	if(NOT TR_PANEL_HZ STREQUAL "30")
+		message(FATAL_ERROR "TR_PANEL=rvt121 runs ~30 Hz: pass -DTR_PANEL_HZ=30")
+	endif()
+elseif(TR_PANEL_HZ STREQUAL "30")
 	if(NOT TR_RENDER STREQUAL "A32")
 		message(FATAL_ERROR "TR_PANEL_HZ=30 needs TR_RENDER=A32")
 	endif()
@@ -171,6 +205,9 @@ else()
 endif()
 target_include_directories(app PRIVATE src)
 target_compile_definitions(app PRIVATE TR_PANEL_HZ=${TR_PANEL_HZ})
+if(TR_PANEL STREQUAL "rvt121")
+	target_compile_definitions(app PRIVATE TR_PANEL_RVT121=1)
+endif()
 
 # No fused multiply-add: float code must compute the same bits as the host
 # tests (tests/host/runner.sh passes the same flag; see the plan's section 5).

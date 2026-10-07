@@ -19,7 +19,7 @@
 #define TR_PANEL_HZ 40
 #endif
 _Static_assert(TR_PANEL_HZ == 40 || TR_PANEL_HZ == 30,
-               "TR_PANEL_HZ: 40 (shield timing) or 30 (panel_30hz.overlay)");
+               "TR_PANEL_HZ: 40 (shield timing) or 30 (panel_30hz.overlay / the rvt121 shield)");
 
 /* One refresh, us (25000 / 33333). */
 #define TR_PANEL_PERIOD_US (1000000u / TR_PANEL_HZ)

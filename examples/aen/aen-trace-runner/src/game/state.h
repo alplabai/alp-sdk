@@ -45,11 +45,16 @@ _Static_assert(TR_SPAWN_Y % TR_SCROLL_PX == 0, "the spawn row sits on the TR_SCR
  * it. */
 #define TR_RUN_CYCLE_TICKS 6
 
-/* Most entities alive at once on the 1280-row panel: one spawn every
+/* The tallest playfield any supported panel gives, px (RK055: 1280 rows; the
+ * RVT121 is 800). Capacity bounds below use it; the game itself runs on the
+ * runtime track_h (tr_display_height()), so shorter panels only get more slack. */
+#define TR_TRACK_H_MAX 1280
+
+/* Most entities alive at once on the TR_TRACK_H_MAX-row panel: one spawn every
  * TR_SPAWN_TICKS, each alive from TR_SPAWN_Y until it scrolls off the bottom
  * (step.c frees it at y >= track_h). A spawn with ents[] full is dropped, so
  * this must fit or a longer approach would quietly thin the parts out. */
-#define TR_ENT_LIFE_TICKS ((1280 - TR_SPAWN_Y + TR_SCROLL_PX - 1) / TR_SCROLL_PX)
+#define TR_ENT_LIFE_TICKS ((TR_TRACK_H_MAX - TR_SPAWN_Y + TR_SCROLL_PX - 1) / TR_SCROLL_PX)
 #define TR_ENT_ALIVE_MAX  ((TR_ENT_LIFE_TICKS + TR_SPAWN_TICKS - 1) / TR_SPAWN_TICKS)
 _Static_assert(TR_ENT_ALIVE_MAX <= TR_MAX_ENTITIES, "every spawn must find a free ents[] slot");
 

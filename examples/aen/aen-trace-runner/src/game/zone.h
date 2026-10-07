@@ -55,7 +55,8 @@
 #define TR_ZONE_GATE_Y (-1100)
 _Static_assert(TR_ZONE_GATE_Y % TR_SCROLL_PX == 0 && TR_ZONE_GATE_Y >= TR_SPAWN_Y,
                "the gate's spawn row");
-_Static_assert((1280 - TR_RUNNER_H - TR_RUNNER_GROUND_MARGIN - TR_ZONE_GATE_Y + TR_SCROLL_PX - 1) /
+_Static_assert((TR_TRACK_H_MAX - TR_RUNNER_H - TR_RUNNER_GROUND_MARGIN - TR_ZONE_GATE_Y +
+                TR_SCROLL_PX - 1) /
                            TR_SCROLL_PX +
                        TR_ZONE_GATE_TAIL <
                    TR_ZONE_STEPS_ATTRACT,

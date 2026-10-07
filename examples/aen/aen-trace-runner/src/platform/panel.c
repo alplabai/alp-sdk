@@ -45,6 +45,17 @@
 
 #include "platform/panel_retry.h"
 
+#ifdef TR_PANEL_RVT121
+/* Riverdi RVT121 (CMake -DTR_PANEL=rvt121): the shield's SN65DSI83 driver
+ * brings the panel up at boot; there is no HX8394 and no lcd_panel node. */
+volatile uint32_t tr_panel_init_tries;
+
+uint32_t tr_panel_up(void)
+{
+	tr_panel_init_tries = TR_PANEL_OK | 1u;
+	return tr_panel_init_tries;
+}
+#else
 #define PANEL_NODE DT_NODELABEL(lcd_panel)
 #define BL_NODE    DT_GPIO_CTLR(PANEL_NODE, bl_gpios)
 
@@ -55,8 +66,8 @@ BUILD_ASSERT(DT_PROP(PANEL_NODE, zephyr_deferred_init),
 #define TR_PANEL_RESET_HOLD_MS 10 /* RESX low before a retry; driver needs >= 10 us */
 
 /* DesignWare GPIO: port A data (DR) and direction (DDR) registers. */
-#define GPIO_DW_DR  0x00u
-#define GPIO_DW_DDR 0x04u
+#define GPIO_DW_DR             0x00u
+#define GPIO_DW_DDR            0x04u
 
 volatile uint32_t tr_panel_init_tries;
 
@@ -114,3 +125,4 @@ uint32_t tr_panel_up(void)
 	       (unsigned)w);
 	return w;
 }
+#endif /* TR_PANEL_RVT121 */
