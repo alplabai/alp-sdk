@@ -14,3 +14,8 @@ only. Request byte 1 was reserved padding; a pre-flags host sends 0 and is unaff
 **Layout change:** `gd32g553_t` gains three fields at the end of the public struct (`power_asleep`,
 `power_wake_latency_us`, `power_wake_retries`), so `sizeof(gd32g553_t)` grows; rebuild anything that embeds one. See
 `docs/gd32-bridge-protocol.md` §3.z.
+
+`v2n-gd32-bridge-functional` gains rows 29-31 (`power_deep_sleep_wake`, `power_busy_gate`, `power_invalid`): a 250 ms
+timed Deep-sleep with the documented wake and a `GET_VERSION` that must succeed, the `ALP_ERR_BUSY` gate with a PWM
+channel claimed, and the `ALP_ERR_INVAL` rejections of an untimed Deep-sleep and an unknown mode. They skip on a bridge
+below protocol minor 17 and never request STANDBY.
