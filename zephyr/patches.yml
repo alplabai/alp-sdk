@@ -1096,5 +1096,7 @@ patches:
       write-1-to-clear, so that writes every currently pending TSCTR bit and
       clears the pending status of ALL slots, including slots owned by the
       A55 under AMP (e.g. the Linux AMP.FAULT edge interrupt). Every CM33 TINT
-      ISR and every edge set_type would silently drop A55 interrupts. Write
-      only BIT(tint). Upstream to Zephyr then drop.
+      ISR and every edge set_type would silently drop the pending status of any
+      other slot pending at that moment, including A55 interrupts. Write
+      only BIT(tint). Upstream to Zephyr then drop. Upstream submission text:
+      zephyr/patches/zephyr/0005-UPSTREAM.md.

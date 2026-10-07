@@ -51,5 +51,5 @@ handler counts with the edge count.
 
 - Change is one line; no Kconfig or devicetree impact.
 - Not reproducible on parts without `STATUS_CLEAR_REG` (they use the `TSCR` path).
-- Not hardware-verified yet: bench confirmation of the lost-edge case is still pending, so
-  mark the PR accordingly or measure before posting.
+- The dropped-status loss is derived from the source (TSCLR is write-1-to-clear) and has not
+  been measured on silicon.

@@ -155,7 +155,12 @@ supervisor_links:
         2026-10-04); PA14 is SWCLK whenever ATTN is off
       # TINT slot 31 (NVIC 384).  TSSR gpioint = port 7 base 48 + pin 1 = 49 (0x31),
       # from the Zephyr r9a09g056 intc gpioint-table.  The top slot is the one a
-      # Linux ICU allocating TINT slots upward would reach last (unverified).
+      # Linux ICU allocating TINT slots upward would reach last.
+      # ATTN route bench-verified 2026-10-07 (E1M-V2M103): TSSR7 0xb1000000,
+      # TITSR1 0 (rising), INTSEL[10] to CM33 IRQ 384; 40/40 edges per 30 s set
+      # TSCR bit 31 and the CM33 handler cleared it within ~11 us.  NOT covered:
+      # own-bit-only clear with no other TINT slot active, Linux TINT slot
+      # allocation, lock-free TSSR/TITSR read-modify-write, driver edge counters.
       tint_slot: 31
 
   # RIIC8 / BRD_I2C -- Cortex-A55/Linux-exclusive (maintainer decision,
