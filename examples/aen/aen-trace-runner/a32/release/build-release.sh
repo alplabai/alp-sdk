@@ -138,7 +138,10 @@ r = open(rend, "rb").read()
 want = (0x02500000, len(r), zlib.crc32(r) & 0xFFFFFFFF)
 if got != want:
     sys.exit("build-release: HE LAUNCHes %s, this renderer is %s -- rebuild the HE with a fresh "
-             "mkpayload --c-header" % (tuple(hex(x) for x in got), tuple(hex(x) for x in want)))
+             "mkpayload --c-header from THIS renderer.bin. Build the whole release (renderer, launch "
+             "header, HE) on ONE machine with ONE arm-none-eabi toolchain: the same sources give "
+             "different renderer.bin bytes (so a different CRC) under different gcc packages."
+             % (tuple(hex(x) for x in got), tuple(hex(x) for x in want)))
 print("build-release: HE autolaunch id matches renderer (entry 0x%08X len %d crc 0x%08X)" % want)
 PY
 cp "$he" "$st/build/images/trace_runner_he.bin"

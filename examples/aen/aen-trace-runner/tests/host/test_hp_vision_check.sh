@@ -90,6 +90,9 @@ mk_build() { # dir board_line extra_i2c_status(okay|disabled) uart5_status lpgpi
 		# start refusing every board's own memory/clock/pin/NVIC/lptimer
 		# nodes now that they are actually looked at.
 		dts_plain_node memory 1a000000 NONE
+		# The core-local SE mailbox pair, okay on every image since #2192 (allow-listed).
+		dts_plain_node mhu 40040000 okay
+		dts_plain_node mhu 40050000 okay
 		dts_plain_node clock-controller 1a602000 NONE
 		dts_plain_node lptimer 42001000 NONE
 		[ -n "${7:-}" ] && dts_plain_node unowned "$7" NONE # bad: omitted status still defaults to okay
@@ -132,6 +135,10 @@ expect 1 "elf lacks tr_pslot_write" "$t/good" "$t/model.bin" "$t/nm-no-pslot"
 expect 1 "no model file" "$t/good" "$t/missing-model.bin" "$t/nm"
 expect 1 "wrong-size model" "$t/good" "$t/model-wrong.bin" "$t/nm"
 expect 0 "HP vision build + right-size model" "$t/good" "$t/model.bin" "$t/nm"
+# A Windows-built build dir: CRLF line ends in the cache, .config and zephyr.dts.
+cp -r "$t/good" "$t/good-crlf"
+for f in CMakeCache.txt zephyr/.config zephyr/zephyr.dts; do sed -i 's/$/\r/' "$t/good-crlf/$f"; done
+expect 0 "a CRLF (Windows-built) HP build dir" "$t/good-crlf" "$t/model.bin" "$t/nm"
 expect 1 "TR_CAM_ROTATE=180" "$t/bad-rot180" "$t/model.bin" "$t/nm"
 expect 1 "TR_CAM_ROTATE empty (the header default at build time)" "$t/bad-rot-empty" "$t/model.bin" "$t/nm"
 expect 0 "TR_CAM_ROTATE=270" "$t/rot270" "$t/model.bin" "$t/nm"
