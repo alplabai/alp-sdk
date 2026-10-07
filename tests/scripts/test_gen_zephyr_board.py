@@ -201,6 +201,28 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
                 self.assertIn(f"{prop}-gpios = {spec};", node.group(1))
             self.assertIn("&gpio7 {", dts)
 
+    def test_v2n_attn_pad_is_routed_to_a_tint_slot(self) -> None:
+        # Without `irqs` on the port the RZ GPIO driver has no TINT route for P71
+        # and alp_gpio_irq_enable(ATTN) returns NOSUPPORT.
+        for sku in ("E1M-V2N101", "E1M-V2M101"):
+            files = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)
+            dts = next(c for r, c in files.items() if r.endswith(".dts"))
+            self.assertIn('&tint31 {\n\tstatus = "okay";\n};', dts, sku)
+            self.assertIn(
+                '&gpio7 {\n\tstatus = "okay";\n\tirqs = <&tint31 1>;\n};', dts, sku)
+
+    def test_attn_tint_slot_refused_when_pads_block_is_skipped(self) -> None:
+        # swdio on CS0's gpio node skips the whole pads block, which would drop
+        # the TINT route silently; the generator must refuse instead.
+        real = gzb._load_supervisor_links(METADATA_ROOT)
+        links = copy.deepcopy(real)
+        links["gd32_pads"]["swdio"]["gpio_node"] = (
+            links["gd32_spi"]["gpio_chip_select"]["gpio_node"])
+        self.assertIsNotNone(links["gd32_pads"]["attn"].get("tint_slot"))
+        with mock.patch.object(gzb, "_load_supervisor_links", return_value=links):
+            with self.assertRaisesRegex(SystemExit, "pads block is skipped"):
+                emit_zephyr_board("E1M-V2N101", "m33_sm", METADATA_ROOT)
+
     def test_v2m101_m33_sm_family_agnostic_files(self) -> None:
         self._parity("e1m_v2m101_m33_sm")
 

@@ -1082,3 +1082,21 @@ patches:
       any host configures its D-PHY. Bench, E1M-AEN803 2026W36-0001,
       aen-camera-firstlight after a power cycle: 2/2 fail without it, 3/3
       clean captures with it.
+  - path: zephyr/0005-intc_renesas_rz_tint-clear-only-own-status-bit.patch
+    sha256sum: 531bf2c26ee8a08a9927fe11736310313ac5e6b3dc9546659f182c511d25dee7
+    module: zephyr
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-10-05
+    upstreamable: true
+    comments: |
+      Issue #2692. On the RZ/V2H/V2N path (CONFIG_RENESAS_RZ_TINT_SUPPORT_STATUS_CLEAR_REG)
+      intc_renesas_rz_tint.c clears a TINT status with
+      REG_TSCLR_WRITE(tint, TINT_STATUS_READ(tint) | BIT(tint)). TSCLR is
+      write-1-to-clear, so that writes every currently pending TSCTR bit and
+      clears the pending status of ALL slots, including slots owned by the
+      A55 under AMP (e.g. the Linux AMP.FAULT edge interrupt). Every CM33 TINT
+      ISR and every edge set_type would silently drop the pending status of any
+      other slot pending at that moment, including A55 interrupts. Write
+      only BIT(tint). Upstream to Zephyr then drop. Upstream submission text:
+      zephyr/patches/zephyr/0005-UPSTREAM.md.

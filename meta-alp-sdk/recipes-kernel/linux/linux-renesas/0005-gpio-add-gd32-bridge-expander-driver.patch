@@ -35,7 +35,8 @@ fail gracefully (dev_warn) and begin working once the bridge answers.
 Lines 18/19 (bt-reg-on/wl-reg-on): the bridge pad map grows two more
 lines at firmware 0.2.12 (PROTOCOL_VERSION_MINOR 11) for the on-module
 Murata LBEE5HY2FY-922 Wi-Fi+BT REG_ON pair. The chip always registers
-all 20 lines; lines 18/19 are gated per-consumer in a .request()
+all 24 lines (GD32_NGPIO_TOTAL; line 20 is refused in .request() until
+can-stby lands); lines 18/19 are gated per-consumer in a .request()
 callback that runs one non-blocking GET_VERSION attempt on demand and
 caches the result -- 0 once a confirmed minor >= 11 (major 0), -ENODEV
 once confirmed below that or on an unexpected major, -EPROBE_DEFER

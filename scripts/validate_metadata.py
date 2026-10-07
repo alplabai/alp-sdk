@@ -140,12 +140,17 @@ MODEL_ZOO_STARTERS = MODEL_ZOO / "starters"
 # The one root-level non-.yaml file this tree tolerates (its own doc),
 # mirroring `_MODEL_PERF_ALLOWED_ROOT_FILES`'s same allowance.
 _MODEL_ZOO_ALLOWED_ROOT_FILES = {"README.md"}
-# Mechanical "genuinely tiny, no weight redistribution" guard (#2539 review):
+# Mechanical "genuinely tiny, no weight redistribution" guard:
 # a byte-size ceiling on every starters/* file, not a human's judgment call
 # on review. 64 KiB is generous headroom over the real example-tiny.tflite
 # smoke fixture (712 B) while still ruling out anything that could plausibly
 # be a real model's weights.
 _MODEL_ZOO_STARTER_MAX_BYTES = 64 * 1024
+# Mirrors model-zoo-v1.schema.json's `example_app` pattern exactly -- used
+# to guard the on-disk probe below so a schema-invalid value (caught by
+# the schema pass already) doesn't ALSO trigger a misleading disk-probe
+# message.
+_MODEL_ZOO_EXAMPLE_APP_RE = re.compile(r"^examples/[a-z0-9_-]+/[a-z0-9_-]+$(?!\n)")
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
 # .yaml whose `identifier:` is the fully-qualified <board>/<soc>/<cpucluster>
 # triple `west build -b` resolves).  Ground truth for the board-target check.
@@ -3138,7 +3143,7 @@ def _check_model_perf_semantics(model_perf_files) -> list:
 def _collect_model_zoo_files(root: Path) -> tuple[list[Path], list[Path], list[tuple[str, list[str]]]]:
     """Collect metadata/model_zoo/<id>.yaml entries + metadata/model_zoo/
     starters/<file> data, and FAIL loudly on anything that doesn't fit
-    that exact two-tier shape (#2539 review), mirroring
+    that exact two-tier shape, mirroring
     `_collect_model_perf_files()`'s own structural-violation-as-failure
     design rather than a bare glob that silently never opens a
     misplaced file.
@@ -3235,17 +3240,31 @@ def _check_model_zoo_semantics(model_zoo_files) -> list:
          such preset exists) -- so a well-formed but fictitious SKU would
          otherwise validate clean and read as a real hardware claim.
       4. `kind: fixture` implies `validated_soms == []` AND a `bundled`
-         source -- a fixture is a wiring/smoke entry by definition and
-         must never carry a hardware claim or an unreviewed upstream
-         link. The schema's own `if`/`then` ALSO enforces this now (so a
+         source AND `task == "smoke"`; `kind: model` implies
+         `task != "smoke"` -- a fixture is a wiring/smoke entry by
+         definition and must never carry a hardware claim, an unreviewed
+         upstream link, or a real task. The schema's own `allOf` of two
+         `kind`-gated `if`/`then` pairs ALSO enforces this now (so a
          violation is caught even by a bare jsonschema validate with no
          Python involved) -- this repeats the check only to give a
          friendlier, specific message ("kind: fixture but validated_soms
-         is non-empty") than jsonschema's own if/then error text.
+         is non-empty", "kind: fixture but task is ...", "kind: model but
+         task is smoke") than jsonschema's own if/then error text.
       5. a resolved `source.bundled` path is a byte-exact (case-sensitive)
          match against the real starters/ directory listing -- see
          `_bundled_case_exact()`'s own docstring for why `is_file()` alone
          is not enough.
+      6. `example_app`, when present and schema-pattern-valid, names a
+         real directory under `examples/` that carries a `board.yaml`
+         (the board.yaml requirement is deliberate: only a tan-buildable
+         example is linkable today -- loosening it later is additive).
+         Only probed when `_MODEL_ZOO_EXAMPLE_APP_RE.fullmatch()` already
+         agrees with the schema's own pattern -- a schema-invalid value
+         is already reported by the schema pass and must not ALSO trigger
+         a misleading disk-probe message. Guarded by
+         `(REPO / "examples").is_dir()`: a metadata-only scratch checkout
+         (no `examples/` tree at all) skips this check rather than
+         failing every entry that names one.
 
     Returns a failure list shaped like `_check_files()`.
     """
@@ -3313,7 +3332,9 @@ def _check_model_zoo_semantics(model_zoo_files) -> list:
                         f"validated_soms: `{sku}`: no metadata/e1m_modules/"
                         f"{sku}.yaml preset -- this is not a real, shipped SKU")
 
-        if doc.get("kind") == "fixture":
+        kind = doc.get("kind")
+        task = doc.get("task")
+        if kind == "fixture":
             if validated_soms:
                 msgs.append(
                     f"kind: fixture but validated_soms is non-empty "
@@ -3324,6 +3345,30 @@ def _check_model_zoo_semantics(model_zoo_files) -> list:
                     f"kind: fixture but source is not `bundled` -- a "
                     f"fixture never links an external, unreviewed "
                     f"upstream model")
+            if task is not None and task != "smoke":
+                msgs.append(
+                    f"kind: fixture but task is `{task}`, not `smoke` -- "
+                    f"a fixture is always the reserved wiring/smoke task")
+        elif kind == "model" and task == "smoke":
+            msgs.append(
+                f"kind: model but task is `smoke` -- `smoke` is reserved "
+                f"for kind: fixture wiring entries, never a real model's "
+                f"claimed task")
+
+        example_app = doc.get("example_app")
+        if (isinstance(example_app, str)
+                and _MODEL_ZOO_EXAMPLE_APP_RE.fullmatch(example_app)
+                and (REPO / "examples").is_dir()):
+            example_dir = REPO / example_app
+            if not example_dir.is_dir():
+                msgs.append(
+                    f"example_app `{example_app}` is not a real directory "
+                    f"under examples/")
+            elif not (example_dir / "board.yaml").is_file():
+                msgs.append(
+                    f"example_app `{example_app}` has no board.yaml -- a "
+                    f"directory existing under examples/ is not proof it "
+                    f"is a real example app")
 
         if msgs:
             print(f"FAIL {rel}")
@@ -3335,7 +3380,7 @@ def _check_model_zoo_semantics(model_zoo_files) -> list:
 
 def _check_model_zoo_starters(model_zoo_files, starter_files) -> list:
     """Cross-check the whole `metadata/model_zoo/starters/` tree against
-    every entry's `source.bundled` reference (#2539 review):
+    every entry's `source.bundled` reference:
 
       1. every file under `starters/` is referenced by at least one
          entry's `source.bundled` -- an unreferenced ("orphan") starter is

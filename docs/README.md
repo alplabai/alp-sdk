@@ -173,33 +173,48 @@ into the topic-specific docs.
 ## Models / edge-AI
 
 - `metadata/model_zoo/<id>.yaml` (schema:
-  `metadata/schemas/model-zoo-v1.schema.json`, `schema_version: 1`) — the
-  model-zoo data asset: alp-sdk owns the schema + the manifests (`tan model
-  zoo`'s hardware truth), tan owns the engine that reads them
-  ([adr/0028-tan-owns-the-model-engine.md](adr/0028-tan-owns-the-model-engine.md)).
-  Every entry declares `kind: model` (a real, published entry) or `kind:
-  fixture` (a wiring/smoke entry, never a hardware claim — enforced:
+  `metadata/schemas/model-zoo-v1.schema.json`, `schema_version: 1`;
+  directory doc: `metadata/model_zoo/README.md`)
+  — the model-zoo data asset: per ADR-0028
+  ([adr/0028-tan-owns-the-model-engine.md](adr/0028-tan-owns-the-model-engine.md),
+  `Status: Proposed` — a working plan, not a decided architecture),
+  alp-sdk owns the schema + the manifests (`tan model zoo`'s hardware
+  truth), and tan is planned to own the engine that reads them.
+  `task` is a closed kebab-case enum (`object-detection`,
+  `person-detection`, … plus `smoke`, reserved for fixtures); `license` is
+  a closed, permissive SPDX allowlist with no `LicenseRef-*` escape
+  (`Apache-2.0`/`MIT`/`BSD-2-Clause`/`BSD-3-Clause`/`CC0-1.0` — extending
+  it is a maintainer legal-review decision recorded in
+  metadata/model_zoo/README.md, same as metadata/libraries/README.md's own
+  process; AGPLv3 and non-commercial/vendor-customer-only terms are
+  rejected until explicitly admitted). Every entry declares `kind: model`
+  (a real, published entry, `task` never `smoke`) or `kind: fixture` (a
+  wiring/smoke entry, `task` always `smoke`, never a hardware claim —
+  enforced BOTH by the schema's own `allOf` of two `kind`-gated `if`/`then`
+  pairs AND, for a friendlier message, by `_check_model_zoo_semantics`:
   `validated_soms` must be empty and `source` must be `bundled`). Every
-  entry's `source` is EXCLUSIVELY an upstream `{url, sha256}` (`https://`
-  only, sha256 required) or a genuinely clean, tiny `{bundled}` starter
-  under `metadata/model_zoo/starters/` (at most 64 KiB; `starters/<file>`
-  only, no subdirectory) — no weight redistribution either way. The
-  `kind: fixture` restriction is enforced both by the schema's own
-  `if`/`then` and, for a friendlier message, by
-  `_check_model_zoo_semantics`. An optional `compile` block is
-  structurally identical to `board.schema.json`'s `models[].compile` (the
-  shape `tan model add` writes into a project's board.yaml; its own
-  `description` is reworded for the zoo's context), guarded by a drift
-  test (with descriptions stripped before comparing) rather than a
-  cross-file `$ref` (no schema in this tree resolves those).
-  `scripts/validate_metadata.py` gates the entry's shape, that every
-  `validated_soms[]` SKU names a real, shipped SoM preset, that every
-  `starters/` file is referenced by some entry and at most the size cap
-  (a `stat()` failure is reported, never silently skipped), and that a
-  `bundled` path is a byte-exact (case-sensitive) match on disk; it does
-  NOT gate that the SoM was actually bench-run — a populated
-  `validated_soms` is a claim the entry's author is responsible for, same
-  as `metadata/model_perf/`'s bench-capture points.
+  entry's `source` is
+  EXCLUSIVELY an upstream `{url, sha256}` (`https://` only, no userinfo,
+  sha256 required) or a genuinely clean, tiny `{bundled}` starter under
+  `metadata/model_zoo/starters/` (at most 64 KiB; `starters/<file>` only,
+  no subdirectory) — no weight redistribution either way. An optional
+  `example_app` (`examples/<category>/<name>`, same shape as
+  template-catalog-v1's `example`) must resolve to a real directory
+  carrying a `board.yaml`, checked whenever this checkout has an
+  `examples/` tree. An
+  optional `compile` block is structurally identical to
+  `board.schema.json`'s `models[].compile` (the shape `tan model add`
+  writes into a project's board.yaml; its own `description` is reworded
+  for the zoo's context), guarded by a drift test (with descriptions
+  stripped before comparing) rather than a cross-file `$ref` (no schema in
+  this tree resolves those). `scripts/validate_metadata.py` gates the
+  entry's shape, that every `validated_soms[]` SKU names a real, shipped
+  SoM preset, that every `starters/` file is referenced by some entry and
+  at most the size cap (a `stat()` failure is reported, never silently
+  skipped), and that a `bundled` path is a byte-exact (case-sensitive)
+  match on disk; it does NOT gate that the SoM was actually bench-run — a
+  populated `validated_soms` is a claim the entry's author is responsible
+  for, same as `metadata/model_perf/`'s bench-capture points.
 - [measuring-inference-energy.md](measuring-inference-energy.md) — the
   measured millijoules per inference on E1M-AEN801 silicon: the
   method (rail scan, conversion-ready sampling, idle-subtracted
