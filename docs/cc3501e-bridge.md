@@ -810,25 +810,28 @@ device installs + swap-boots it.  The wire contract lives in
 |--------|---------|---------|
 | `0x40` | `ALP_CC3501E_CMD_OTA_BEGIN`  | `alp_cc3501e_ota_begin_t` (`total_len` LE32) |
 | `0x41` | `ALP_CC3501E_CMD_OTA_WRITE`  | `alp_cc3501e_ota_write_t` (offset LE32) + 1..`ALP_CC3501E_OTA_MAX_CHUNK` image bytes |
-| `0x42` | `ALP_CC3501E_CMD_OTA_FINISH` | none — install + deferred swap reboot |
+| `0x42` | `ALP_CC3501E_CMD_OTA_FINISH` | none — install to STAGED; no reboot (PROMOTE commits) |
 | `0x43` | `ALP_CC3501E_CMD_OTA_ABORT`  | none — cancel the session |
 | `0x44` | `ALP_CC3501E_CMD_OTA_STATUS` | reply `alp_cc3501e_ota_status_t` (state / bytes_written / total_len) |
-| `0x46` | `ALP_CC3501E_CMD_OTA_PROMOTE` | none — request the swap-reboot for an already-committed pending image (`0x45` is `STREAM_WRITE`) |
+| `0x46` | `ALP_CC3501E_CMD_OTA_PROMOTE` | none — request the swap-reboot for the image `FINISH` staged in this same boot (`0x45` is `STREAM_WRITE`) |
 | `0x47` | `ALP_CC3501E_CMD_OTA_UPDATE_MODE` | `mode(1)` — 0 = normal DMA/callback bridge, 1 = polled OTA update mode.  Reply `alp_cc3501e_ota_update_mode_t` = `mode(1) | ota_state(1) | reserved(2)` |
 
 The flow is strictly sequential — `BEGIN(total_len)` →
-`WRITE(offset, bytes)`* → `FINISH` — and each `WRITE`'s `offset` must
-equal the device's running write cursor (out-of-order writes are
-rejected; a host that missed a reply re-syncs to the real cursor via
-`OTA_STATUS`).  On `FINISH` the device installs the staged image
-(`OTA_STATUS state` → 2/STAGED) and arms a deferred reboot: the CC35's
-OWN `psa_fwu_request_reboot()` fires once the FINISH ack has drained, the
+`WRITE(offset, bytes)`* → `FINISH` → `PROMOTE` — and each `WRITE`'s
+`offset` must equal the device's running write cursor (out-of-order
+writes are rejected; a host that missed a reply re-syncs to the real
+cursor via `OTA_STATUS`).  On `FINISH` the device installs the image
+(`OTA_STATUS state` → 2/STAGED) and stops; it does not reboot (#1123).
+`PROMOTE`, sent in the **same CC3501E boot**, makes the CC35's OWN
+`psa_fwu_request_reboot()` fire once the PROMOTE ack has drained: the
 bridge link **drops** while BL2/MCUboot swaps the slot to primary (TRIAL
 boot), and the swapped image accepts itself on its first housekeeping
 tick.  The payload's signed version must **exceed** the running primary —
 a downgrade is refused at install (`state` → 3/ERROR), a forward image is
 accepted.  `OTA_STATUS reserved[0]` carries the last swap-reboot rc
-(0 = success, non-zero = the swap was refused, e.g. anti-rollback).
+(0 = success, non-zero = the swap was refused, e.g. anti-rollback; 119 =
+`PSA_ERROR_BAD_STATE`, a PROMOTE in a later boot than its FINISH, see
+below).
 
 `OTA_STATUS reserved[1]` is **flush pending**, and every host that streams
 `OTA_WRITE` must read it.  Non-zero means the device has queued a
@@ -912,13 +915,21 @@ Host helper: `cc3501e_ota_update_mode(ctx, enable, timeout_ms)` — it sends onc
 blind-settles, then confirms by readback.  `cc3501e_ota_update()` already enters
 update mode as its first step.
 
-`OTA_PROMOTE` (proto v4) exists for one recovery case: a bare reset
-(e.g. the Puya cold-boot host-reset workaround) can leave an image
-committed to STAGED but **un-promoted**, and — because a slot is now
-occupied — a fresh `BEGIN`/`FINISH` short-circuits and can never re-arm
-the swap request.  `OTA_PROMOTE` arms the same deferred swap-reboot
-`FINISH` would, promoting the pending image without a new session.  If
-nothing is pending the reboot is a clean no-op.
+`OTA_PROMOTE` (proto v4) is the only command that commits an image, and
+it only works in the **same CC3501E boot** as the `FINISH` that staged
+it.  The TI PSA-FWU swap request (`Request_type[]`) lives only in
+CC3501E RAM and is set only by `psa_fwu_install()` at `FINISH`.  After
+any reboot or reset — a bare reset, the Puya cold-boot host-reset
+workaround, a power cycle — it is 0, so the firmware's
+`psa_fwu_request_reboot()` returns `PSA_ERROR_BAD_STATE` (-137), stored
+as `OTA_STATUS reserved[0]` = 119, and no swap happens.  The image store
+still reports the image as `pending` = STAGED, but it **cannot be
+promoted**.  Recovery is `OTA_ABORT` (or a new `BEGIN`, which clears the
+slot) and a full re-send, then `FINISH` and `PROMOTE` back to back.
+Bench-proven on bridge firmware v0.9.x, E1M-AEN803 2026W36-0009,
+2026-10-06 (#2728, #2741).  `cc3501e_ota_update()` issues `PROMOTE`
+right after `FINISH` (#2731), so the whole-image helper never splits
+them; a caller using the granular calls must not reboot in between.
 Host helpers: `cc3501e_ota_update()` (whole-image convenience) plus the
 granular `cc3501e_ota_begin/_write/_finish/_abort/_status()` and
 `cc3501e_ota_promote()` in

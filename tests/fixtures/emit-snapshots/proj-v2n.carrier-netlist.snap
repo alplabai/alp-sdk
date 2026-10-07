@@ -245,7 +245,7 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_LCD1_PWR_EN",
       "board_role": null,
-      "dispatch": "direct",
+      "dispatch": "gd32_bridge",
       "endpoints": [
         {
           "kind": "e1m",
@@ -254,9 +254,15 @@
         {
           "kind": "board-macro",
           "ref": "XEVK_PIN_LCD1_PWR_EN"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB4"
         }
       ],
-      "board_doc": "DSI display panel 1 power enable."
+      "board_doc": "DSI display panel 1 power enable.",
+      "dispatch_pin": "PB4"
     },
     {
       "net_id": "XEVK_PIN_LCD2_RST",
@@ -391,7 +397,7 @@
           "ref": "unrouted"
         }
       ],
-      "board_doc": "USB path-mux select.",
+      "board_doc": "USB path-mux select. Driven by the DX-M1 on V2M, undriven on V2N (driven_by in the SoM pad_routes); polarity/default pending carrier-netlist confirmation.",
       "som_doc": "Not a GD32 pad; nothing drives it on V2N (no DX-M1 fitted). Bridge bit 8 answers STATUS_IO (#2453)."
     },
     {
@@ -1365,6 +1371,29 @@
       ]
     },
     {
+      "net_id": "E1M_X_GPIO_IO26",
+      "e1m": "E1M_X_GPIO_IO26",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO26"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC2"
+        }
+      ],
+      "dispatch_pin": "PC2",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
       "net_id": "E1M_X_GPIO_IO30",
       "e1m": "E1M_X_GPIO_IO30",
       "board_category": null,
@@ -1647,6 +1676,46 @@
           {
             "role": "pullup",
             "value": "10k",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
+        "item_id": "ina228",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/ina228.yaml",
+        "display_name": "TI INA228 85 V 20-bit power / energy / charge monitor",
+        "vendor": "ti",
+        "mpn_population": [
+          "INA228AIDGS"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "VSSOP-10",
+          "footprint": "vssop_10_3x3mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VS",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "4k7",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "4k7",
             "net": "SDA",
             "refdes_prefix": "R"
           }

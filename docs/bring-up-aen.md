@@ -77,13 +77,12 @@ Inventory check before powering anything:
 > back, though, so "pinctrl applied without error" is measured and "the
 > pads carry the intended function" is not. **Keep MCUboot slots and
 > any storage partition on MRAM regardless of SKU anyway** -- for a
-> reason that outlived the pinctrl one: `flash_ospi_alif.c` now registers
-> a `flash_driver_api` (#915), but only its `read`/`read_jedec_id`/
-> `sfdp_read` side; `write`/`erase` are deliberate fail-closed `-ENOTSUP`
-> stubs (the fitted IS25WX256 needs an Octal-DDR mode switch this driver
-> does not yet drive, see that file's own header). There is still no
-> write/erase path for a partition to sit on. That gap is
-> alp-sdk#915 -- recheck this paragraph when **that** issue closes.
+> reason that outlived the pinctrl one: `flash_ospi_alif.c` registers
+> a `flash_driver_api` (#915) with `read`/`read_jedec_id`/`sfdp_read`
+> and, since #915, `write`/`erase` over an Octal-DDR mode switch (2-byte
+> write granularity, 4 KiB erase alignment). The MRAM rule stands
+> because the driver exposes no `page_layout`, so a partition cannot be
+> laid over it yet.
 
 ## 1. First-power smoke test
 

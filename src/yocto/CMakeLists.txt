@@ -64,6 +64,13 @@ get_filename_component(_alp_sdk_yocto_root "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 target_include_directories(alp_sdk PRIVATE ${_alp_sdk_yocto_root}/src)
 unset(_alp_sdk_yocto_root)
 
+set(ALP_SDK_INFERENCE_AUTO_ORDER "" CACHE STRING
+    "Comma-separated accelerator preference for ALP_INFERENCE_BACKEND_AUTO, best first (e.g. deepx_dxm1,drpai,cpu).  Generated from the SoM preset's inference.auto_order into local.conf (--emit yocto-conf) and forwarded by the alp-sdk recipe's EXTRA_OECMAKE.   Consumed only by the .alpmodel selector tiebreak; empty: the first fitting target wins.")
+if(ALP_SDK_INFERENCE_AUTO_ORDER)
+    target_compile_definitions(alp_sdk PRIVATE
+        ALP_SDK_INFERENCE_AUTO_ORDER="${ALP_SDK_INFERENCE_AUTO_ORDER}")
+endif()
+
 option(ALP_SDK_USE_DEEPX_DXM1
     "Wire the DEEPX DX-M1 backend hook (src/yocto/inference_deepx.cpp) for \
 <alp/inference.h>.  Enable on e1m-x-v2n-m1 builds.  Links the proprietary \
@@ -74,8 +81,8 @@ NOT vendored (DEEPX EULA).  Default OFF."
 option(ALP_SDK_USE_DRPAI_V2N
     "Wire the Renesas DRP-AI backend hook (src/yocto/inference_drpai.cpp) for \
 <alp/inference.h>.  Enable on plain e1m-x-v2n (no DX-M1) builds.  Links the \
-EdgeCortix MERA2 + DRP-AI TVM runtime (mera2_runtime / drp_tvm_rt / \
-tvm_runtime) located via the RZ/V Yocto SDK sysroot; the prebuilt libs are \
+EdgeCortix MERA2 + DRP-AI TVM runtime (mera2_runtime / mera2_plan_io / \
+drp_tvm_rt) located via the RZ/V Yocto SDK sysroot; the prebuilt libs are \
 account-gated and NOT vendored.  Default OFF."
     OFF)
 
@@ -117,6 +124,14 @@ PACKAGECONFIG opt-in), so a silently NOSUPPORT alp_model_parse would be \
 the wrong answer."
     OFF)
 
+option(ALP_SDK_USE_GPU2D_GLES
+    "Wire the GPU backend for <alp/gpu2d.h> (src/backends/gpu2d/yocto_gles.c): fill / blit / blend on the SoC's 3D GPU through the vendor EGL + GLES 3 stack (RZ/V2N Mali-G31 via the Renesas meta-rz-graphics mali-library).  Located via pkg-config (egl, glesv2) in the Yocto sysroot; the GPU userspace driver is licence-gated and NOT vendored.  Default OFF; the CPU sw_fallback serves alp_gpu2d_* when it is off."
+    OFF)
+
+option(ALP_SDK_GPU2D_GLES_REQUIRED
+    "Treat a missing egl/glesv2 stack as a configure ERROR instead of warning and disabling the GPU backend.  Same rationale as ALP_SDK_DRPAI_REQUIRED: OFF (default) lets a plain-CMake builder degrade cleanly; the alp-sdk recipe's PACKAGECONFIG[gles] sets it ON."
+    OFF)
+
 option(ALP_SDK_USE_ORT_CPU
     "Wire the ONNX Runtime CPU backend hook (src/yocto/inference_ort.cpp) for \
 <alp/inference.h>'s ALP_INFERENCE_BACKEND_CPU slot.  The portable CPU floor, \
@@ -149,7 +164,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_i2s.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_can.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_rtc.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_temperature.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/temperature_yocto.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wdt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_display.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_camera.c
@@ -453,6 +468,14 @@ endif()
 # stamp errors + route to the active NPU adapter.
 target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_INFERENCE=1
+)
+
+# Size of the static alp_inference_open() handle pool.  Four covers two NPU
+# models plus a CPU fallback and a spare; each slot is a few dozen bytes.
+set(ALP_SDK_MAX_INFERENCE_HANDLES 4 CACHE STRING
+    "Maximum simultaneously open alp_inference_t handles (Yocto backend)")
+target_compile_definitions(alp_sdk PRIVATE
+    ALP_SDK_MAX_INFERENCE_HANDLES=${ALP_SDK_MAX_INFERENCE_HANDLES}
 )
 
 # Mute the split stub backend definitions for every class whose dispatcher is
@@ -786,6 +809,45 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 # ------------------------------------------------------------------ #
+# GPU2D over EGL + GLES 3 (Mali-G31 on RZ/V2N).  ADR 0017 Tier-1.5:   #
+# yocto_gles.c uses only standard Khronos headers, so any conformant   #
+# EGL/GLES3 stack builds it.  The registry entry is a wildcard at      #
+# priority 50 above the CPU fallback; open() degrades to the CPU path   #
+# at run time when no GPU context can be created.                      #
+# ------------------------------------------------------------------ #
+if(ALP_SDK_USE_GPU2D_GLES)
+    find_package(PkgConfig)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(ALP_EGL IMPORTED_TARGET egl)
+        pkg_check_modules(ALP_GLESV2 IMPORTED_TARGET glesv2)
+    endif()
+    if(ALP_EGL_FOUND AND ALP_GLESV2_FOUND)
+        target_sources(alp_sdk PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../backends/gpu2d/yocto_gles.c)
+        target_compile_definitions(alp_sdk PRIVATE ALP_SDK_USE_GPU2D_GLES=1)
+        # Same PRIVATE-when-shared / PUBLIC-when-static rule as the Linux backend
+        # libs above: a shared libalp_sdk resolves EGL/GLES itself.
+        if(ALP_SDK_BUILD_SHARED)
+            set(_alp_gles_vis PRIVATE)
+        else()
+            set(_alp_gles_vis PUBLIC)
+        endif()
+        target_link_libraries(alp_sdk ${_alp_gles_vis} PkgConfig::ALP_EGL PkgConfig::ALP_GLESV2)
+        unset(_alp_gles_vis)
+    elseif(ALP_SDK_GPU2D_GLES_REQUIRED)
+        message(FATAL_ERROR
+            "alp-sdk yocto: ALP_SDK_GPU2D_GLES_REQUIRED=ON but egl/glesv2 were not "
+            "found via pkg-config.  Provide virtual/egl + virtual/libgles2 "
+            "(Renesas meta-rz-graphics mali-library) on the sysroot.")
+    else()
+        message(WARNING
+            "alp-sdk yocto: ALP_SDK_USE_GPU2D_GLES=ON but egl/glesv2 were not found "
+            "via pkg-config -- the GPU backend is NOT compiled in; alp_gpu2d_* "
+            "uses the CPU fallback.")
+    endif()
+endif()
+
+# ------------------------------------------------------------------ #
 # [vendor-ext] DEEPX DX-M1 backend (proprietary dx_rt runtime).       #
 #                                                                     #
 # inference_deepx.cpp is written against the real DEEPX dx_rt C++ API #
@@ -886,9 +948,12 @@ if(ALP_SDK_USE_DRPAI_V2N)
     # complete; otherwise warn/error and leave the dispatcher's other backends
     # to it.
     #
-    # Only tvm_runtime comes from a Yocto layer (meta-rz-drpai's lib-tvm
-    # recipe ships libtvm_runtime.so.2.5.1); mera2_runtime, drp_tvm_rt and
-    # mera2_plan_io exist ONLY in a built RUHMI / rzv_drp-ai_tvm checkout
+    # No libtvm_runtime on the link line: RUHMI's own V2N apps link only
+    # mera2_runtime, mera2_plan_io, drp_tvm_rt and pthread, and
+    # libdrp_tvm_rt.so already carries the tvm::runtime symbols it needs.
+    # Also linking meta-rz-drpai's libtvm_runtime.so.2.5.1 would load a
+    # second, older TVM runtime next to RUHMI's 2.7.0 one (audit NPU-02).
+    # mera2_runtime, drp_tvm_rt and mera2_plan_io exist ONLY in a built RUHMI / rzv_drp-ai_tvm checkout
     # (obj/build_runtime/<soc>/lib), as does MeraDrpRuntimeWrapper.h.  Point
     # ALP_DRPAI_TVM_APPS at that checkout's apps/ dir and put its lib/ on
     # CMAKE_LIBRARY_PATH.  One find_path for both cases: the env var is only a
@@ -914,7 +979,7 @@ if(ALP_SDK_USE_DRPAI_V2N)
     # detection and then die at compile on the tvm include, which is the
     # failure this block exists to prevent.  meta-rz-drpai does NOT cover
     # this: its lib-tvm recipe installs libtvm_runtime.so* and a LICENSE,
-    # no headers at all.  Fix on a bare checkout is
+    # no headers at all (and that library is deliberately not linked).  Fix on a bare checkout is
     # `git submodule update --init --recursive`.
     #
     # TRAP: this MUST resolve to the nested tvm/3rdparty/dlpack (and
@@ -935,7 +1000,6 @@ if(ALP_SDK_USE_DRPAI_V2N)
     find_library(MERA2_RUNTIME_LIB mera2_runtime)
     find_library(MERA2_PLAN_IO_LIB mera2_plan_io)
     find_library(DRP_TVM_RT_LIB    drp_tvm_rt)
-    find_library(TVM_RUNTIME_LIB   tvm_runtime)
     # The tenth input (#1145's third correction): MeraDrpRuntimeWrapper's own
     # symbols (ctor, Run, SetInput, GetInputInfo, ...) are NOT in any of the
     # four libraries above -- they are application-side glue source
@@ -967,7 +1031,7 @@ if(ALP_SDK_USE_DRPAI_V2N)
         list(APPEND _drpai_missing "dmlc/logging.h")
     endif()
     foreach(_drpai_lib
-            MERA2_RUNTIME_LIB MERA2_PLAN_IO_LIB DRP_TVM_RT_LIB TVM_RUNTIME_LIB
+            MERA2_RUNTIME_LIB MERA2_PLAN_IO_LIB DRP_TVM_RT_LIB
             MERA_DRPAI_WRAPPER_LIB)
         if(NOT ${_drpai_lib})
             list(APPEND _drpai_missing "${_drpai_lib}")
@@ -996,9 +1060,8 @@ if(ALP_SDK_USE_DRPAI_V2N)
             "alp-sdk yocto: DRP-AI backend DISABLED -- not found: "
             "${_drpai_missing_txt}.  Set ALP_DRPAI_TVM_APPS to the apps/ "
             "directory of a built rzv_drp-ai_tvm (RUHMI) checkout and add its "
-            "obj/build_runtime/<soc>/lib to CMAKE_LIBRARY_PATH; tvm_runtime "
-            "comes from meta-rz-drpai's lib-tvm recipe and linux/drpai.h from "
-            "its drpai recipe, both on the Yocto sysroot; mera_drpai_wrapper "
+            "obj/build_runtime/<soc>/lib to CMAKE_LIBRARY_PATH; linux/drpai.h "
+            "comes from meta-rz-drpai's drpai recipe on the Yocto sysroot; mera_drpai_wrapper "
             "is COMPILED (not just staged) by meta-alp-sdk/recipes-renesas/"
             "mera2-drpai-tvm from that same RUHMI checkout's "
             "apps/MeraDrpRuntimeWrapper.cpp.  ${_drpai_verdict}")
@@ -1016,7 +1079,7 @@ if(ALP_SDK_USE_DRPAI_V2N)
         target_link_libraries(alp_sdk PRIVATE
             ${MERA_DRPAI_WRAPPER_LIB}
             ${MERA2_RUNTIME_LIB} ${MERA2_PLAN_IO_LIB}
-            ${DRP_TVM_RT_LIB} ${TVM_RUNTIME_LIB})
+            ${DRP_TVM_RT_LIB})
     endif()
 endif()
 

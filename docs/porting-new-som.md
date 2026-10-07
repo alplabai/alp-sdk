@@ -19,7 +19,7 @@
 > The scaffold is **mergeable as-is**: it passes the full
 > `pr-metadata-validate` command set (`validate_metadata.py` and
 > `check_inference_backend_parity.py`) the moment it is committed.
-> The `inference.preferred_backend: tbd` placeholder rides on the
+> The `inference.auto_order: [tbd]` placeholder rides on the
 > preset's `status.preliminary: true` marker -- the parity gate
 > accepts `tbd` *only* on preliminary presets, so the port cannot
 > graduate (clear `status.preliminary`) until the real silicon
@@ -308,7 +308,7 @@ on_module:
 # E8 (U85 + 2x U55) shape; tune to whatever the E9 silicon actually
 # carries once the datasheet lands.
 inference:
-  preferred_backend:    ethos_u
+  auto_order:           [ethos_u, cpu]   # best first; first entry = preferred backend
   # Primary variant only.  Which Ethos-U instances the part carries (and their
   # subtype / MAC / paired core) is silicon-determined -- the SDK derives it
   # from the SoC JSON npus[] / capabilities.ethos_uNN_count -- so the preset
@@ -401,7 +401,8 @@ status:
 | `silicon`              | Yes — must match an `e9.json`    | No                        | Loader fails fast if the triple-colon ref does not resolve to a SoC JSON.                                              |
 | `silicon_variant`      | Yes — must match a `variants[]`  | Yes (`"TBD"`)             | When `TBD`, the loader falls back to `alp_module_skus[]` reverse lookup.                                                |
 | `on_module:*`          | No — SoM extension                | Yes per field             | The set of keys is open; chip names match `chips/<part>/` driver dirs (driver-naming convention applies).               |
-| `inference`            | Mixed                             | Yes (omit when unsure)    | `preferred_backend` is silicon-determined; the customer cannot override it from `board.yaml` (per the v0.6 cleanup).    |
+| `inference`            | Mixed                             | Yes (omit when unsure)    | `auto_order` (its first entry, the preferred backend) is silicon-determined; the customer cannot override it from `board.yaml` (per the v0.6 cleanup).    |
+| `inference.auto_order` | SoM-determined                    | No (required on every preset) | Ordered accelerator preference for `ALP_INFERENCE_BACKEND_AUTO`, best first (e.g. `[deepx_dxm1, drpai, cpu]`); `cpu` (the floor) last.  Its first entry **is** the SoM's preferred backend; it is the single source (there is no `preferred_backend` field and no SDK built-in order).  Emitted into `local.conf` as `ALP_SDK_INFERENCE_AUTO_ORDER ?= "deepx_dxm1,drpai,cpu"` (`--emit yocto-conf`, Yocto slices) and forwarded to CMake by the alp-sdk recipe's `EXTRA_OECMAKE`; emitted as `CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER` on Zephyr inference slices and mapped by `zephyr/CMakeLists.txt`.  Its only reader is the `.alpmodel` selector (`src/common/alp_model_loader.c` -> `alp_model_select`), as the tiebreak between fitting targets; Yocto `resolve_auto()` picks by model format and does not read it. |
 | `capabilities`         | SoM extension only                | Yes                       | Only list keys the SoM **adds** to silicon caps (e.g., on-module CAU on V2N, `optiga_trust_m` on AEN/V2N).               |
 | `silicon_capabilities` | Silicon-determined (restriction)  | Omit when unrestricted    | Optional `unpopulated:` list of SoC `capabilities:` keys this SKU does **not** populate; can only remove what the silicon offers (`validate_metadata.py` cross-check). |
 | `topology`             | Silicon-determined (core ids)     | No                        | Keys must match `soc.cores[].id`; `app:` / `board:` / `machine:` / `toolchain:` are SoM-extension.                       |

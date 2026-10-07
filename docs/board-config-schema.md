@@ -34,6 +34,8 @@ Top-level fields:
 `e1m_routes:` (customer path).  Both omitted is also fine -- a
 headless / inference-only build with no board declaration.
 
+Board presets (`metadata/boards/*.yaml`, not a project `board.yaml`) may also declare `pad_levels:` -- `{e1m, signal_v, level_shifter?}` per E1M route, keyed on the route and never on an SoC pad, so the carrier stays SoM-agnostic.  `scripts/check_pad_voltage.py` resolves each `e1m_routes` route (any class) through the pinmux table and host SoC of every SoM family the preset hosts, and requires an entry when a route lands on a pad the SoC marks non-3.3 V tolerant (`pad_tolerance` in the SoC JSON; RZ/V2N: P90-P92, P2x, PBx, per the hardware manual's IO-block table, Note 1).  A `signal_v` above the SoC `max_signal_v` needs a `level_shifter`.  A project `board.yaml` carries no `pad_levels`.
+
 Per-core fields under `cores.<id>` (all optional, all inherit from
 the SoM preset's `topology.<id>` when omitted):
 
@@ -720,7 +722,7 @@ hidden:
   (no invented Kconfig); emit renders the selection tag with no
   `CONFIG_` line until the module is added to `west.yml`.
 - **ROS 2 is Tier B (recipe-only)**: its wiring is grounded in
-  `meta-alp-sdk` (`rclcpp`; `meta-ros2-humble` as a `LAYERRECOMMENDS`),
+  `meta-alp-sdk` (`rclcpp`; collection `ros2-humble-layer` as a `LAYERRECOMMENDS`),
   but alp-sdk CI does not build it, and a build must add
   `meta-ros2-humble` to `bblayers.conf`.
 - The **cross-core RMW bridge** that carries ROS topics between the two

@@ -113,6 +113,16 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/alp_model_loader.c
 )
 
+# SoM inference.auto_order for the .alpmodel AUTO tiebreak -- same define name
+# as the Yocto and Zephyr builds (the loader body is NOSUPPORT here until the
+# baremetal build compiles the model reader, but the wiring stays uniform).
+set(ALP_SDK_INFERENCE_AUTO_ORDER "" CACHE STRING
+    "Comma-separated accelerator preference for ALP_INFERENCE_BACKEND_AUTO, best first (e.g. ethos_u,cpu), from the SoM preset's inference.auto_order.")
+if(ALP_SDK_INFERENCE_AUTO_ORDER)
+    target_compile_definitions(alp_sdk PRIVATE
+        ALP_SDK_INFERENCE_AUTO_ORDER="${ALP_SDK_INFERENCE_AUTO_ORDER}")
+endif()
+
 target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_CAMERA=1
     ALP_VENDOR_OVERRIDES_JPEG=1

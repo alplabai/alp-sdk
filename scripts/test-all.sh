@@ -326,13 +326,13 @@ _decide_overlap() {
         return 1
     fi
     if [ -n "${ALP_TWISTER_JOBS:-}" ]; then
-        echo "test-all.sh: ALP_TWISTER_JOBS is set -- running stages serially (no overlap)."
+        echo "test-all.sh: ALP_TWISTER_JOBS is set -- running stages serially (no overlap)." >&2
         return 1
     fi
     local avail_kb min_kb="${ALP_GATE_MIN_MEM_KB:-12582912}"
     avail_kb="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
     if [ -n "${avail_kb}" ] && [ "${avail_kb}" -lt "${min_kb}" ]; then
-        echo "test-all.sh: MemAvailable ${avail_kb} kB < ${min_kb} kB -- running stages serially (no overlap)."
+        echo "test-all.sh: MemAvailable ${avail_kb} kB < ${min_kb} kB -- running stages serially (no overlap)." >&2
         return 1
     fi
     return 0
@@ -1147,6 +1147,14 @@ if [ "${LIST_REQUIRED_GATE_SCRIPTS}" -eq 1 ]; then
     exit 0
 fi
 
+stage_aen_trace_runner_host() {
+    # examples/aen/aen-trace-runner host unit tests (CI: pr-plain-cmake.yml
+    # aen-trace-runner-host).  Needs a POSIX cc; the script self-skips its
+    # A32/qemu stage when the cross toolchain is absent.
+    command -v cc >/dev/null 2>&1 || return 99
+    bash examples/aen/aen-trace-runner/tests/host/runner.sh
+}
+
 stage_required_gate_scripts() {
     if ! command -v python3 >/dev/null 2>&1; then
         return 99
@@ -1379,7 +1387,7 @@ stage_generated_files() {
     # some of its artifacts is not a drift check.
     require_jsonschema_2020 stage_generated_files || return 99
     local gens=(gen_soc_caps gen_status_strings gen_board_header
-                gen_cc3501e_gpio_routes gen_power_tree
+                gen_cc3501e_gpio_routes gen_power_tree gen_linux_ownership_dt
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
                 gen_verification_status gen_chip_driver_classification)
@@ -1527,6 +1535,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
         include/alp docs/abi src/cap.c src/status_strings.c \
         metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
         metadata/socs/renesas/rzv2n/n44.json \
+        meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi \
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
         docs/verification-status.md \
         docs/chip-driver-classification.md \
@@ -1553,6 +1562,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             include/alp docs/abi src/cap.c src/status_strings.c \
             metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
             metadata/socs/renesas/rzv2n/n44.json \
+            meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
             docs/chip-driver-classification.md \
@@ -1564,6 +1574,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             include/alp docs/abi src/cap.c src/status_strings.c \
             metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
             metadata/socs/renesas/rzv2n/n44.json \
+            meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
             docs/chip-driver-classification.md \
@@ -1671,6 +1682,7 @@ else
     fi
 
     launch "metadata-validate" stage_metadata_validate
+    launch "aen-trace-runner-host" stage_aen_trace_runner_host
 
     # Documentation lint -- cheap, always runnable, no special tooling.
     if [ -f scripts/lint_doc_yaml_fragments.py ]; then

@@ -52,6 +52,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "alp/chips/gd32g553.h" /* GD32G553_PAD_ID_* */
 #include "alp/peripheral.h"
 
 #ifdef __cplusplus
@@ -113,28 +114,45 @@ typedef enum {
 
 /** Driver context. */
 typedef struct {
-	bool        initialised;
-	bool        connected;
-	alp_gpio_t *swdio;
-	alp_gpio_t *swclk;
-	alp_gpio_t *nrst;
-	uint32_t    clock_delay;
-	uint32_t    idcode;
-	bool        swdio_is_output;
+	bool                            initialised;
+	bool                            connected;
+	alp_gpio_t                     *swdio;
+	alp_gpio_t                     *swclk;
+	alp_gpio_t                     *nrst;
+	uint32_t                        clock_delay;
+	uint32_t                        idcode;
+	bool                            swdio_is_output;
+	bool                            nrst_held; /**< GD32_NRST asserted (connect-under-reset). */
+	const struct gd32_swd_platform *plat;
+	/* opaque: internal pad seam */ /**< Pad opener (internal). */
 } gd32_swd_t;
 
 /**
- * @brief Bind the controller to caller-supplied GPIO handles.
+ * @brief Open the GD32 pads and start an SWD session (connect-under-reset).
  *
- * Configures `swdio` + `swclk` as outputs driven to the SWD idle
- * state, and -- when `nrst` is non-NULL -- releases the reset line.
- * Ownership of the handles stays with the caller.
+ * `swclk` (Renesas `P71`) doubles as the bridge's ATTN input (GD32 `PA14`),
+ * which the GD32 drives while the v0.15 ATTN link feature is granted, so the
+ * host may only drive it as an output while `GD32_NRST` (`P74`) holds the GD32
+ * in reset (docs/gd32-bridge-protocol.md §3.17 rule H3).  This call:
+ *   1. notifies the platform (`gd32_swd_session_notify`) so the SPI bridge
+ *      link is closed and stays closed until @ref gd32_swd_deinit;
+ *   2. opens the three pads itself through the platform seam
+ *      (internal seam) -- the caller passes no handles, and
+ *      application code cannot open those ids;
+ *   3. asserts NRST as an output with an INITIAL LOW level (never driven high:
+ *      the net is shared with the PMIC's open-drain reset-out) and FAILS if it
+ *      cannot;
+ *   4. only then switches SWDIO / SWCLK to outputs at the SWD idle state.
+ * NRST stays asserted through @ref gd32_swd_connect, which arms halt-on-reset,
+ * releases it and verifies the core halted.  NRST is mandatory: recovery without
+ * it is not supported.
  *
- * @return @ref ALP_OK on success, @ref ALP_ERR_INVAL on NULL ctx /
- *         swdio / swclk, or the @ref alp_gpio_write error from the
- *         idle-state configuration.
+ * @return @ref ALP_OK; @ref ALP_ERR_INVAL (NULL ctx); @ref ALP_ERR_NOSUPPORT (no
+ *         platform pad glue); @ref ALP_ERR_NOT_READY (the board does not publish
+ *         the pads); or the GPIO error from asserting NRST / configuring the
+ *         pads (then the pads are inputs again, NRST released, session closed).
  */
-alp_status_t gd32_swd_init(gd32_swd_t *ctx, alp_gpio_t *swdio, alp_gpio_t *swclk, alp_gpio_t *nrst);
+alp_status_t gd32_swd_init(gd32_swd_t *ctx);
 
 /** Override the per-half-bit clock-delay loop count.  Clamped to
  *  [0, 2048]. */
@@ -173,7 +191,9 @@ alp_status_t gd32_swd_flash_verify(gd32_swd_t *ctx, uint32_t addr, const uint8_t
  *  AIRCR.SYSRESETREQ + VECTKEY write. */
 alp_status_t gd32_swd_reset_and_run(gd32_swd_t *ctx);
 
-/** Release the driver context.  Does NOT close the GPIO handles. */
+/** Release the driver context: releases NRST, returns `swdio` and `swclk`
+ *  (P70 / P71) to inputs, closes the pads and ends the session
+ *  (`gd32_swd_session_notify` with false). */
 void gd32_swd_deinit(gd32_swd_t *ctx);
 
 #ifdef __cplusplus

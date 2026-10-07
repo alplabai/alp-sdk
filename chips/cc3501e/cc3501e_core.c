@@ -790,8 +790,10 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
      * case immediately after this reset -- the Puya cold-boot flash bug
      * documented above routinely needs a second, caller-driven
      * cc3501e_hard_reset() before the slave answers anything) is NOT a
-     * version verdict: only an ANSWERED request can be compared, so leave
-     * the context usable and let the caller's own retry loop keep trying. */
+     * version verdict: only an ANSWERED request can be compared.  A fresh
+     * context (no major negotiated yet) fails closed: initialised = false and
+     * ALP_ERR_TIMEOUT, for the caller's retry loop.  A warm re-reset keeps the
+     * earlier fw_proto_major/minor and returns ALP_OK. */
 	uint16_t     fw_version = 0u;
 	alp_status_t vs         = cc3501e_get_version(ctx, &fw_version);
 	/* #1937 (silicon, 1 of 5 cold boots): one missed GET_VERSION right after the

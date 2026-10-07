@@ -126,8 +126,11 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `ai-anomaly-detection-vibration`   | Predictive maintenance -- sliding-window vibration → 1D-CNN anomaly score via TFLM. **(AEN)** |
 | `aen/edgeai-vision-aen`            | On-device vision inference with Ethos-U on an AEN SoM. **(AEN)**              |
 | `v2n/v2n-drpai-inference`          | DRP-AI3 on-die NPU still-frame inference through `<alp/inference.h>` -- the exhibition booth demo. **(V2N, Yocto)** |
+| `v2n/v2n-gpu2d-compose`            | Fill / blit / SRC_OVER-blend ARGB8888 layers through `<alp/gpu2d.h>` -- Mali-G31 via EGL/GLES when the image has it, CPU fallback otherwise; reports which. **(V2N, Yocto)** |
+| `v2n/v2n-two-models`               | DRP-AI3 and DX-M1 running at the same time -- one model per NPU, one thread each, per-NPU latency and combined FPS. **(V2M, Yocto, not bench-verified)** |
 | `v2n/v2n-m1-deepx-inference`       | DEEPX DX-M1 NPU bring-up + a single inference through `<alp/inference.h>`. **(V2N-M1)** |
 | `v2n/v2n-m1-ros-perception`        | ROS 2 perception node -- detection on DEEPX, DRP-AI3 fallback on plain V2N. **(V2N / V2N-M1, Yocto)** |
+| `v2n/v2n-ros2-som-temperature`     | Minimal ROS 2 node: portable `alp_temperature_read_milli_c()` -> `sensor_msgs/Temperature`. `[UNTESTED]` **(V2N / V2N-M1, Yocto)** |
 | `cold-chain-monitor`               | Pharma/food cold-chain integrity monitor -- BME280 T/RH/P samples → anomaly classification; v0.9 paper-correct, HiL bench-gated. |
 | `motor-current-signature`          | DC motor/load current-signature health monitor -- INA236 current sensing → 1D-CNN health classifier; v0.9 paper-correct, HiL bench-gated. |
 | `multimodal-fusion-pdm`            | Multi-sensor motor-health monitor fusing vibration (ICM-42670) + current + acoustic (PDM mic); v0.9 paper-correct, HiL bench-gated. |
@@ -232,13 +235,11 @@ SoM EEPROM manifest).
 |---------------------------------|--------------------------------------------------------------------------|
 | `v2n/v2n-gd32-bridge-ping`      | PING + GET_VERSION round-trip on both SPI fast path + I2C management path.|
 | `v2n/v2n-board-id-readout`      | Read the SoM EEPROM manifest + assert the SKU matches the firmware build. |
-| `v2n/v2n-ethernet-dual`         | Bring up both RTL8211FDI PHYs (ET0 + ET1) -- probe, reset, autoneg, link, WoL. |
 | `v2n/v2n-eeprom-manifest-dump`  | Hexdump + decode the 128-byte EEPROM manifest at offset 0x0000.          |
 | `v2n/v2n-temp-sensor`           | Read the on-module TMP112 once per second; print degrees C.              |
+| `v2n/v2n-soc-temperature`       | Read the SoC die temperature from the Linux thermal zones once per second. |
 | `v2n/v2n-pwm-fan-control`       | Ramp a GD32-side PWM channel along a five-stop fan curve (25 kHz board). |
 | `v2n/v2n-secure-element-sign`   | OPTIGA Trust M probe, Coprocessor UID read and raw APDU session. |
-| `v2n/v2n-xspi-flash-readwrite`  | Erase + write + read-back one page on the on-module xSPI NOR.            |
-| `v2n/v2n-emmc-block-stat`       | Disk-access ioctls + first-block read on the on-module eMMC.             |
 | `v2n/v2n-gd32-swd-flash`        | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
 | `v2n/v2n-brd-i2c-bringup`       | Patch-day diagnostic for the V2N SoM's BRD_I2C management bus (Renesas RIIC8) -- distinguishes a bus-level electrical fault from per-device failures; prints a PASS/FAIL/SKIP table. |
 | `v2n/v2n-gd32-bridge-functional` | Single-pass functional validation of the GD32G553 supervisor-MCU bridge, followed by a forever PWM7 duty staircase as a live oscilloscope observable. **(V2N-M1)** |
@@ -252,9 +253,9 @@ SoM EEPROM manifest).
 These live under `examples/aen/` and target the E1M-AEN (Alif
 Ensemble) family on the E1M-EVK board (lead part: E8).
 
-`examples/aen/` has 84 tracked directories; the 10 below are the
+`examples/aen/` has 85 tracked directories; the 10 below are the
 customer-facing catalog (the ones carrying a `board.yaml`).  The
-remaining 74 are internal bring-up/regression apps (per-driver
+remaining 75 are internal bring-up/regression apps (per-driver
 regcheck, bench smoke tests, dual-core internal validation) --
 `board.yaml` presence is the reliable way to tell them apart, not
 their filename (some of those internal dirs don't follow a

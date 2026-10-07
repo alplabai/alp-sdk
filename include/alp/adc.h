@@ -199,6 +199,25 @@ alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg);
 alp_status_t alp_adc_read_raw(alp_adc_t *adc, int32_t *raw_out);
 
 /**
+ * @brief Back-to-back burst of @p n raw conversions on one channel.
+ *
+ * Same value domain as @ref alp_adc_read_raw, but backends that sit
+ * behind a command bridge (V2N's GD32 supervisor) fetch up to 8
+ * samples per bus round trip instead of one, which is what makes
+ * short bursts affordable.  Backends without a native burst fall
+ * back to @p n calls of @ref alp_adc_read_raw.  Samples are NOT
+ * averaged and NOT paced: use @ref alp_adc_stream_open for a
+ * rate-controlled continuous capture.
+ *
+ * @param[in]  adc      Handle from @ref alp_adc_open.
+ * @param[out] raw_out  Receives @p n raw codes (array of @p n entries).
+ * @param[in]  n        Number of samples, >= 1.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL (NULL, n == 0) /
+ *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ */
+alp_status_t alp_adc_read_raw_n(alp_adc_t *adc, int32_t *raw_out, size_t n);
+
+/**
  * @brief One-shot read converted to microvolts (int32, µV).
  *
  * Applies the configured reference voltage and gain to the raw code.
