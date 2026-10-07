@@ -29,18 +29,19 @@
 #include "../render/panel_rot.h"
 #include "display.h"
 
-#ifdef TR_PANEL_RVT121
-/* The RVT121 scans out a 1280 x 720 window of its 1280 x 800 panel
- * (panel_rvt121_window.overlay) while the game stays 720 x 1280 portrait; the
- * A32 writes the frame rotated (render/panel_rot.h). Same bytes as RK055's frame. */
+/* The scan-out layer-1 window, whatever the panel: the full panel on RK055, a
+ * 1280 x 720 window of the RVT121's 1280 x 800 (the shield-fit overlay,
+ * shield-fit/e1m_evk_rvt121hvdfwca0.overlay). It is always the portrait
+ * frame's byte count: a panel mounted turned scans the same bytes the A32
+ * writes rotated (render/panel_rot.h). */
 #define TR_L1_NODE DT_NODELABEL(cdc200)
-#define TR_FB_BYTES \
-	((size_t)(DT_PROP(TR_L1_NODE, win_x1_l1) - DT_PROP(TR_L1_NODE, win_x0_l1)) * \
-	 (DT_PROP(TR_L1_NODE, win_y1_l1) - DT_PROP(TR_L1_NODE, win_y0_l1)) * 2u)
-#else
-#define TR_FB_BYTES \
-	((size_t)DT_PROP(DT_NODELABEL(cdc200), width) * DT_PROP(DT_NODELABEL(cdc200), height) * 2u)
-#endif
+#define TR_L1_W \
+	(DT_PROP_OR(TR_L1_NODE, win_x1_l1, DT_PROP(TR_L1_NODE, width)) - \
+	 DT_PROP_OR(TR_L1_NODE, win_x0_l1, 0))
+#define TR_L1_H \
+	(DT_PROP_OR(TR_L1_NODE, win_y1_l1, DT_PROP(TR_L1_NODE, height)) - \
+	 DT_PROP_OR(TR_L1_NODE, win_y0_l1, 0))
+#define TR_FB_BYTES ((size_t)TR_L1_W * TR_L1_H * 2u)
 
 /* FB A is the SRAM0 partition base (plan section 4); FB B is SRAM1
  * 0x02600000 (tr_mbox.h), outside every DT partition -- cdc200_swap_fb()
@@ -85,6 +86,13 @@ int tr_display_open(void)
 	}
 	if (alp_display_get_caps(g_disp, &g_caps) != ALP_OK || g_caps.format != ALP_PIXFMT_RGB565) {
 		printk("RESULT FAIL: display caps unavailable or not RGB565\n");
+		alp_display_close(g_disp);
+		g_disp = NULL;
+		return -2;
+	}
+	if (!tr_rot_valid(g_caps.rotation)) {
+		printk("RESULT FAIL: display mount-rotation %u is not 0, 90 or 270\n",
+		       (unsigned)g_caps.rotation);
 		alp_display_close(g_disp);
 		g_disp = NULL;
 		return -2;
@@ -144,24 +152,21 @@ int tr_display_open(void)
 	return 0;
 }
 
-/* The game's own geometry: the panel's on RK055, always 720 x 1280 on the RVT121
- * (whose caps are the unrotated 1280 x 800). */
+/* The game's own geometry: always the portrait content (the panel's own
+ * geometry, and any mount-rotation, is the producer's to turn: panel_rot.h). */
 uint16_t tr_display_width(void)
 {
-#ifdef TR_PANEL_RVT121
 	return TR_ROT_PORTRAIT_W;
-#else
-	return g_caps.width;
-#endif
 }
 
 uint16_t tr_display_height(void)
 {
-#ifdef TR_PANEL_RVT121
 	return TR_ROT_PORTRAIT_H;
-#else
-	return g_caps.height;
-#endif
+}
+
+uint16_t tr_display_rotation(void)
+{
+	return g_caps.rotation;
 }
 
 static uint32_t live_fb(void)

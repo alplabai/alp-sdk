@@ -90,6 +90,12 @@ TR_HP_VISION=ON` against a real `hp_vision` build and the `TR_INPUT_NPU=ON` HE b
 | atoc | `0x8051BF90` | 409,712 | `26daa777886b2c13d9f35c7490f3ca75` |
 | movenet_model | `0x80100000` | 2,429,520 | `51f3fac2d27a8e2048bc77e0b8010815` |
 
+**Another display (the Riverdi RVT121, `-DSHIELD=e1m_evk_rvt121hvdfwca0`):** the renderer is one
+binary for every display (the HE sends the panel's rotation in every frame), so `a32_app`,
+`bl32` and `movenet_model` do not change between displays. Only the HE image differs, and with it
+the ATOC (`atoc`: its size and address come from `flowd/recipe.txt`). The HP image is the same
+`hp_vision`; it waits for the HE's I2C1 release (`alp,i2c-handover`), so start the HE first.
+
 **Regenerated fix round 12 (review: this table dated from fix round 4) against commit head at the
 time, `a32/release/build-release.sh` run with no read-back argument, printing `flowd/recipe.txt`
 directly -- `bl32`'s md5 is STILL UNCHANGED across every release so far (the board already holds

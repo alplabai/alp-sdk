@@ -18,7 +18,7 @@
  * entities (matches state.h's TR_MAX_ENTITIES, no data loss) and widened the
  * `in` block by one 64 B block instead: tr_frame_in_t is 152 B, the `in`
  * block is 0x080..0x140 (192 B, still 64 B aligned), and every block after
- * it shifts by 0x040. Real totals: sizeof(tr_frame_in_t) == 152 (160 since P6, 168 since P16, 172 since P15, see tr_frame_in_t),
+ * it shifts by 0x040. Real totals: sizeof(tr_frame_in_t) == 152 (160 since P6, 168 since P16, 172 since P15, 176 since the rotation byte, see tr_frame_in_t),
  * sizeof(tr_mbox_t) == 0x200, blocks at +0x040 +0x080 +0x140 +0x180 +0x1C0.
  * Flag for the maintainer if the plan doc's numbers were meant to imply a
  * smaller entity count instead.
@@ -35,9 +35,12 @@
 #include "../game/state.h" /* tr_game_t -- source struct for tr_frame_in_from_game(), never embedded on the wire */
 #include "../game/tilt.h" /* TR_TILT_CHARS */
 
-#define TR_MBOX_ADDR    0x02401000u
-#define TR_MBOX_MAGIC   0x54524D42u /* 'TRMB' */
-#define TR_MBOX_VERSION 1u
+#define TR_MBOX_ADDR  0x02401000u
+#define TR_MBOX_MAGIC 0x54524D42u /* 'TRMB' */
+/* 2: tr_frame_in_t grew a rotation byte (the `in` block 172 -> 176 B). The stub
+ * writes its own TR_MBOX_VERSION at init and the renderer refuses to run
+ * against a different one; the HE refuses a stub of another version too. */
+#define TR_MBOX_VERSION 2u
 #define TR_FB_A         0x02000000u /* SRAM0, DT sram0 */
 /* FB B: SRAM1 0x02600000..0x027C1FFF, below TF-A RW 0x027DE000 (the
  * CDC200 scans SRAM1 fine, measured). It used to be the shield's lcd_fb
@@ -239,8 +242,13 @@ typedef struct {
 	 * flag (an old HE) the renderer keeps its own crash_tick shake. */
 	uint8_t shake;
 	int16_t gate_y;
+	/* Version 2: clockwise degrees the renderer turns the portrait frame by
+	 * when it writes the framebuffer (the display's mount-rotation,
+	 * alp_display_caps_t.rotation): 0, 90 or 270. Anything else is a fault in
+	 * the renderer, never a silent fallback. */
+	uint8_t rotation;
 } tr_frame_in_t;
-_Static_assert(sizeof(tr_frame_in_t) == 172,
+_Static_assert(sizeof(tr_frame_in_t) == 176,
                "tr_frame_in_t layout drifted -- see file header note");
 _Static_assert(offsetof(tr_frame_in_t, character) == 160,
                "P16 fields follow hz (the old pad2 bytes)");
@@ -255,6 +263,7 @@ _Static_assert(offsetof(tr_frame_in_t, crash_tick) == 152,
                "crash fields must follow ents[] (old pad2 bytes)");
 _Static_assert(offsetof(tr_frame_in_t, pace_q8) == 158, "pace_q8 is the old pad3's first byte");
 _Static_assert(offsetof(tr_frame_in_t, hz) == 159, "hz is the old pad3's second byte");
+_Static_assert(offsetof(tr_frame_in_t, rotation) == 172, "rotation follows gate_y");
 
 /* A32 -> M55 per-frame stats payload (28 B): the fields after out_seq in
  * tr_mbox_t, bundled so publish/take can move them in one copy. Not a
@@ -275,8 +284,8 @@ typedef struct {
 	uint32_t      in_seq; /* incremented AFTER in_* + in_fb are written and barrier()'d */
 	uint32_t      in_fb;  /* TR_FB_A or TR_FB_B: draw here */
 	uint32_t      pad1[14];
-	tr_frame_in_t in;       /* +0x080, 172 B */
-	uint8_t       pad2[20]; /* pads the `in` block out to +0x140 (see file header note) */
+	tr_frame_in_t in;       /* +0x080, 176 B */
+	uint8_t       pad2[16]; /* pads the `in` block out to +0x140 (see file header note) */
 	/* +0x140 A32 -> M55 */
 	uint32_t out_seq; /* == in_seq of the frame now complete in out_fb */
 	uint32_t out_fb;

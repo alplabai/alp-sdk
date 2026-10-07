@@ -16,16 +16,19 @@
 #   with the watchdog relaunch, built against THIS renderer:
 #     python3 a32/stub/mkpayload.py info a32/renderer/renderer.bin --c-header H
 #     west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d DIR . -- \
-#       -DSHIELD=e1m_evk_rk055hdmipi4ma0 -DTR_M55_AUTOLAUNCH=ON -DTR_A32_LAUNCH_H=H \
-#       -DTR_PANEL_HZ=30 ...
+#       -DSHIELD=<the display: e1m_evk_rk055hdmipi4ma0 with
+#       -DEXTRA_DTC_OVERLAY_FILE=panel_30hz.overlay, or e1m_evk_rvt121hvdfwca0>
+#       -DTR_M55_AUTOLAUNCH=ON -DTR_A32_LAUNCH_H=H -DTR_INPUT_NPU=ON ...
+#   The renderer is the SAME binary for every display: the HE tells it the
+#   panel's mount-rotation in every frame.
 #   Refused unless zephyr.elf carries tr_a32_autolaunch_id (src/platform/
 #   a32.c) and it equals this renderer's {0x02500000, len, CRC} -- the
 #   values the stub's release mode LAUNCHes from MRAM, so the HE's
 #   relaunch after a fault re-checks the same bytes. <= 256 KiB (HE ITCM).
-#   Also refused unless CMakeCache.txt says TR_PANEL_HZ:STRING=30
-#   (panel_hz_check.sh -- CMakeLists.txt's own default is 40, the shield's
-#   native timing, not this release's intended 30; TR_ALLOW_PANEL_HZ_40=ON
-#   overrides for a genuine 40 Hz release).
+#   Also refused unless the display the HE was built for refreshes at 30 Hz
+#   (panel_hz_check.sh reads it from zephyr/zephyr.dts: the RK055 shield's
+#   stock timing is 40 Hz -- add panel_30hz.overlay; the RVT121 is 30 Hz;
+#   TR_ALLOW_PANEL_HZ_40=ON overrides for a genuine 40 Hz release).
 # MRAM_READBACK (optional): a raw read-back of LIVE MRAM from 0x80000000
 #   (J-Link savebin, >= 0x580000 bytes). With it, flowd/ gets whole 16 KiB
 #   sector blobs whose bytes outside the images come from the read-back

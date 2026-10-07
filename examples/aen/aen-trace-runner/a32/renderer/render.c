@@ -22,17 +22,15 @@
 
 #define BAND_PX (TR_R3D_W * TR_BAND_H)
 
-/* TR_PANEL_ROTATE (panel_rot.h): the bands are still drawn portrait, 720 px
- * wide, into the cores' cached scratch; only the copy out to the framebuffer
- * turns them onto the landscape panel (a 1280 x 720 window = the same
- * RENDER_FB_BYTES). The golden build's CRCs are of the portrait layout. */
-#if TR_PANEL_ROTATE && RENDER_DL_GOLDEN
-#error "RENDER_DL_GOLDEN checks portrait CRCs: build it without TR_PANEL_ROTATE"
-#endif
+/* The frame's rotation (panel_rot.h; in->rotation, from the display's
+ * mount-rotation): the bands are always drawn portrait, 720 px wide, into the
+ * cores' cached scratch, and only the copy out to the framebuffer turns them
+ * (a 1280 x 720 window for 90 / 270 = the same RENDER_FB_BYTES). Set once a
+ * frame by render_front_begin(), before any band is claimed. The golden
+ * build's CRCs are of the portrait layout, so it always draws rotation 0. */
+static int frame_rot;
 _Static_assert(TR_R3D_W == TR_ROT_PORTRAIT_W && TR_R3D_H == TR_ROT_PORTRAIT_H,
                "panel_rot.h: the portrait frame");
-_Static_assert((uint32_t)TR_ROT_L1_W * TR_ROT_L1_H * 2u == RENDER_FB_BYTES,
-               "panel_rot.h: the rotated window is the portrait frame's bytes");
 _Static_assert(TR_BAND_H % 8 == 0 && TR_BAND_H <= 32,
                "panel_rot.h's NEON blit takes up to four 8-row groups");
 
@@ -333,9 +331,7 @@ static inline void   dcache_inval_range(const void *addr, uint32_t bytes)
 typedef struct {
 	uint16_t *px;
 	int       x0, x1, y0, y1;
-#if TR_PANEL_ROTATE
-	int fb; /* nonzero: px is the (rotated) framebuffer itself, pixel (x, y) at tr_rot_idx() */
-#endif
+	int       rot; /* -1: px is a band's scratch; else px is the framebuffer, turned by rot */
 } vcv_t;
 
 static void cv_rect(const vcv_t *cv, int x, int y, int w, int h, uint16_t c)
@@ -343,16 +339,14 @@ static void cv_rect(const vcv_t *cv, int x, int y, int w, int h, uint16_t c)
 	int xa = x > cv->x0 ? x : cv->x0, xb = x + w < cv->x1 ? x + w : cv->x1;
 	int ya = y > cv->y0 ? y : cv->y0, yb = y + h < cv->y1 ? y + h : cv->y1;
 
-#if TR_PANEL_ROTATE
-	if (cv->fb) {
+	if (cv->rot >= 0) {
 		for (int yy = ya; yy < yb; yy++) {
 			for (int xx = xa; xx < xb; xx++) {
-				cv->px[tr_rot_idx(TR_PANEL_ROTATE, TR_ROT_L1_W, xx, yy)] = c;
+				cv->px[tr_rot_idx(cv->rot, TR_R3D_H, xx, yy)] = c;
 			}
 		}
 		return;
 	}
-#endif
 	for (int yy = ya; yy < yb; yy++) {
 		uint16_t *d = &cv->px[(uint32_t)(yy - cv->y0) * TR_R3D_W];
 
@@ -672,44 +666,49 @@ static void draw_strips(const vcv_t *cv)
 	video_text_c(cv, rcx, TR_VID_Y0 + 160, vid_hz, 5, vid_have_hz ? COLOR_KP : COLOR_LABEL);
 }
 
-#if TR_PANEL_ROTATE
-/* Band rows [y_lo, y_lo + rows) -> the rotated framebuffer (panel_rot.h).
- * Whole bands take the NEON transpose; a ragged one the scalar blit. */
-static void copy_rows_rot(uint16_t *fb, const uint16_t *cband, int y_lo, int rows)
+/* Band rows [y_lo, y_lo + rows) -> the framebuffer, write-only, 16 B at a
+ * time. One switch on the frame's rotation per band: 0 is the plain row copy,
+ * 90 / 270 the NEON transpose (whole bands) with the rotation as a literal so
+ * the mapping folds away; a ragged band (rows not a multiple of 8) takes the
+ * scalar blit. `rows` <= TR_BAND_H, so a ragged last video band never
+ * writes past TR_R3D_H. */
+static inline __attribute__((always_inline)) void
+copy_rows_turned(int rot, uint16_t *fb, const uint16_t *cband, int y_lo, int rows)
 {
 #if RENDER_A32 && (defined(__ARM_NEON) || defined(__ARM_NEON__))
-	if (rows % 8 == 0 && rows <= TR_BAND_H && y_lo % 8 == 0) {
-		tr_rot_blit_neon(
-		    TR_PANEL_ROTATE, fb, TR_ROT_L1_W, cband, TR_R3D_W, 0, y_lo, TR_R3D_W, rows);
+	if (rows % 8 == 0 && y_lo % 8 == 0) {
+		tr_rot_blit_neon(rot, fb, TR_R3D_H, cband, TR_R3D_W, 0, y_lo, TR_R3D_W, rows);
 		return;
 	}
 #endif
-	tr_rot_blit(TR_PANEL_ROTATE, fb, TR_ROT_L1_W, cband, TR_R3D_W, 0, y_lo, TR_R3D_W, rows);
+	tr_rot_blit(rot, fb, TR_R3D_H, cband, TR_R3D_W, 0, y_lo, TR_R3D_W, rows);
 }
-#endif
+
+static void copy_rows(uint16_t *fb, const uint16_t *cband, int y_lo, int rows)
+{
+	switch (frame_rot) {
+	case 90:
+		copy_rows_turned(90, fb, cband, y_lo, rows);
+		break;
+	case 270:
+		copy_rows_turned(270, fb, cband, y_lo, rows);
+		break;
+	default: {
+		uint16_t *d = &fb[(uint32_t)y_lo * TR_R3D_W];
+		uint32_t  n = (uint32_t)rows * TR_R3D_W;
+
+		for (uint32_t x = 0; x < n; x += 8) {
+			copy16(&d[x], &cband[x]);
+		}
+	}
+	}
+}
 
 static void fill_px(uint16_t *d, int n, uint16_t c)
 {
 	for (int i = 0; i < n; i++) {
 		d[i] = c;
 	}
-}
-
-/* Band rows -> FB, write-only, 16 B at a time -- copy_band()'s pattern,
- * bounded by `rows` (<= TR_BAND_H) so a ragged last video band can never
- * write past TR_R3D_H. */
-static void copy_video_rows(uint16_t *fb, const uint16_t *cband, int y_lo, int rows)
-{
-#if TR_PANEL_ROTATE
-	copy_rows_rot(fb, cband, y_lo, rows);
-#else
-	uint16_t *d = &fb[(uint32_t)y_lo * TR_R3D_W];
-	uint32_t  n = (uint32_t)rows * TR_R3D_W;
-
-	for (uint32_t x = 0; x < n; x += 8) {
-		copy16(&d[x], &cband[x]);
-	}
-#endif
 }
 
 /* Video band vb: video-area rows [vb * TR_BAND_H, +TR_BAND_H). The camera
@@ -723,19 +722,9 @@ void render_video_band(uint32_t core, int vb, uint16_t *fb)
 	int       rows  = ly0 + TR_BAND_H <= TR_VID_H ? TR_BAND_H : TR_VID_H - ly0;
 
 #if TR_CAM_PIP_ENABLE
-	const vcv_t cv = {
-		cband,
-		0,
-		TR_R3D_W,
-		TR_VID_Y0 + ly0,
-		TR_VID_Y0 + ly0 + rows
-#if TR_PANEL_ROTATE
-		,
-		0 /* scratch, not the framebuffer */
-#endif
-	};
-	int rot = vid_cv.rotate, ix0 = tr_cam_img_x0(rot), uw = TR_CAM_UP_W(rot);
-	int top = tr_cam_img_y0(rot), iy0 = 0, iy1 = 0; /* this band's image rows, area-local */
+	const vcv_t cv  = { cband, 0, TR_R3D_W, TR_VID_Y0 + ly0, TR_VID_Y0 + ly0 + rows, -1 };
+	int         rot = vid_cv.rotate, ix0 = tr_cam_img_x0(rot), uw = TR_CAM_UP_W(rot);
+	int         top = tr_cam_img_y0(rot), iy0 = 0, iy1 = 0; /* this band's image rows, area-local */
 
 	if (vid_have_cv) {
 		iy0 = ly0 > top ? ly0 : top;
@@ -784,7 +773,7 @@ void render_video_band(uint32_t core, int vb, uint16_t *fb)
 		}
 	}
 	draw_strips(&cv);
-	copy_video_rows(fb, cband, TR_VID_Y0 + ly0, rows);
+	copy_rows(fb, cband, TR_VID_Y0 + ly0, rows);
 #else
 	(void)cband;
 	(void)rows;
@@ -808,15 +797,9 @@ void render_video_overlay(uint16_t *fb)
 	if (vid_have_cv && tr_pslot_read(PIP_PSLOT_ADDR, 0u, &out, &seq, pip_barrier) &&
 	    out.hp_state == TR_HP_STATE_RUNNING) {
 		int rot = vid_cv.rotate, x0 = tr_cam_img_x0(rot), y0 = TR_VID_Y0 + tr_cam_img_y0(rot);
-#if TR_PANEL_ROTATE
-		const vcv_t cv = { fb, x0, x0 + TR_CAM_UP_W(rot), y0, y0 + TR_CAM_UP_H(rot), 1 };
-#else
-		const vcv_t cv = {
-			fb + (uint32_t)y0 * TR_R3D_W, x0, x0 + TR_CAM_UP_W(rot), y0, y0 + TR_CAM_UP_H(rot)
-		};
-#endif
-		int16_t px[TR_POSE_KP], py[TR_POSE_KP];
-		bool    ok[TR_POSE_KP];
+		const vcv_t cv = { fb, x0, x0 + TR_CAM_UP_W(rot), y0, y0 + TR_CAM_UP_H(rot), frame_rot };
+		int16_t     px[TR_POSE_KP], py[TR_POSE_KP];
+		bool        ok[TR_POSE_KP];
 
 		for (int k = 0; k < TR_POSE_KP; k++) {
 			ok[k] = tr_cam_pip_map_kp(&out.pose.kp[k], rot, &px[k], &py[k]);
@@ -838,20 +821,6 @@ void render_video_overlay(uint16_t *fb)
 	(void)fb;
 #endif
 	render_video_panel_ticks = ticks() - t0;
-}
-
-/* Band rows -> FB, write-only, 16 B at a time (whole rows, contiguous). */
-static void copy_band(uint16_t *fb, const uint16_t *cband, int y_lo)
-{
-#if TR_PANEL_ROTATE
-	copy_rows_rot(fb, cband, y_lo, TR_BAND_H);
-#else
-	uint16_t *d = &fb[(uint32_t)y_lo * TR_R3D_W];
-
-	for (uint32_t x = 0; x < BAND_PX; x += 8) {
-		copy16(&d[x], &cband[x]);
-	}
-#endif
 }
 
 uint32_t render_front(const tr_frame_in_t *in)
@@ -876,6 +845,7 @@ uint32_t render_front(const tr_frame_in_t *in)
 	hud_score  = in != NULL ? in->score : 0u;
 	hud_banner = in != NULL ? in->banner : 0u;
 	hud_flags  = in != NULL ? in->flags : 0u;
+	frame_rot  = in != NULL && !RENDER_DL_GOLDEN ? in->rotation : 0;
 	video_frame_state();
 	render_stats = (render_stats_t){ ticks() - t0, 0, DL->n, 0, tr_dl_dropped, 0 };
 	return DL->n;
@@ -887,6 +857,7 @@ void render_front_begin(const tr_frame_in_t *in)
 	hud_score  = in != NULL ? in->score : 0u;
 	hud_banner = in != NULL ? in->banner : 0u;
 	hud_flags  = in != NULL ? in->flags : 0u;
+	frame_rot  = in != NULL && !RENDER_DL_GOLDEN ? in->rotation : 0;
 #if RENDER_DL_GOLDEN
 	build_dl(in, DL, &frame_bg);
 #else
@@ -1006,7 +977,7 @@ void render_band(uint32_t core, int b, uint16_t *fb)
 	}
 	uint32_t tb = ticks();
 
-	copy_band(fb, CBAND(core), b * TR_BAND_H);
+	copy_rows(fb, CBAND(core), b * TR_BAND_H, TR_BAND_H);
 	st->raster += tb - ta;
 	st->copy += ticks() - tb;
 	st->bands++;

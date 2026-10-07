@@ -1,0 +1,21 @@
+/*
+ * i2c_handover_he.overlay -- TR_INPUT_NPU builds, the HE side of the I2C1
+ * handover (CMakeLists.txt). The HE's display shield may use I2C1 at boot (the
+ * RVT121's bridge); the HP owns the same controller for the camera
+ * afterwards. At the end of its boot the HE masks its I2C1 interrupt, stops
+ * its controller and writes the flag word; hp_vision (boards/*.overlay, role
+ * "acquire") waits for it before it touches the bus. See
+ * zephyr/soc-bridge/alif/i2c_handover.c and alp,i2c-handover.yaml in the SDK.
+ *
+ * flag-address: the reserved block next to TR_MEM_SRAM1_READY (tr_memmap.h
+ * TR_MEM_I2C1_HANDOVER), SRAM0, always on. Both overlays carry the same value.
+ */
+
+/ {
+	i2c1_handover: i2c1-handover {
+		compatible = "alp,i2c-handover";
+		role = "release";
+		bus = <&i2c1>;
+		flag-address = <0x0237FC94>;
+	};
+};

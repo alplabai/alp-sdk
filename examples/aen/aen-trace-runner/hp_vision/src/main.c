@@ -37,7 +37,6 @@
 #include <alp/peripheral.h>
 
 #include "../../src/ipc/tr_hp_dbg.h"
-#include "../../src/ipc/tr_i2c1_flag.h"
 #include "../../src/ipc/tr_cam_view.h"
 #include "../../src/ipc/tr_memmap.h"
 #include "../../src/ipc/tr_pslot.h"
@@ -71,10 +70,9 @@
  * itself needing the I2C1 controller already initialised) happens entirely
  * BEFORE main() ever runs. If I2C1 was left stuck from a prior boot, the
  * sensor's own init fails first and the camera never comes up, no matter
- * what main() does afterward. Fixed with SYS_INIT at PRE_KERNEL_1 priority
- * 0 -- the earliest init stage Zephyr runs, strictly before every driver's
- * own init (which starts no earlier than PRE_KERNEL_1 at a higher, later
- * priority number). This works with NO devicetree change (no
+ * what main() does afterward. Fixed with SYS_INIT at POST_KERNEL priority
+ * 1 -- ahead of the i2c_dw instance (POST_KERNEL priority 40) and the sensor
+ * driver after it, and behind the HE handover wait (priority 0, see below). This works with NO devicetree change (no
  * zephyr,deferred-init) because the unstick is raw MMIO on the pad control
  * registers directly, independent of whatever init order pinctrl or the
  * i2c1 controller driver use -- it does not need either to have run first.
@@ -87,50 +85,10 @@ static int tr_i2c1_unstick_init(void)
 	sys_write32(TR_I2C1_PAD_I2C1, TR_I2C1_PAD_P7_2);
 	return 0;
 }
-#ifdef TR_WAIT_I2C1_FREE
-/*
- * TR_PANEL=rvt121: the HE's display shield configures the SN65DSI83 bridge over
- * THIS bus at its boot, then hands it over (src/platform/i2c1_handoff.c writes
- * TR_I2C1_FREE_MAGIC). Until it has, nothing here may touch I2C1 -- not the pad
- * unstick above (its function-0 excursion would corrupt a bridge transfer),
- * not the i2c driver's init, not the sensor's chip-ID read: all of those run
- * after this POST_KERNEL priority-0 hook (the i2c driver is priority 40), so
- * waiting here is waiting before any of them. Past 20 s it reports and keeps
- * waiting rather than fight for the bus (a late HE still gets the camera up);
- * the HE clears the word on every boot, so a stale magic never ends the wait.
- * RK055 builds never define TR_WAIT_I2C1_FREE: the HE leaves I2C1 alone there
- * (i2c1_off.overlay) and the unstick stays at PRE_KERNEL_1 above.
- */
-static uint32_t tr_i2c1_rd(void *ctx)
-{
-	(void)ctx;
-	return sys_read32(TR_MEM_I2C1_FREE);
-}
-static int64_t tr_i2c1_now_ms(void *ctx)
-{
-	(void)ctx;
-	return k_uptime_get();
-}
-static void tr_i2c1_nap_ms(void *ctx, uint32_t ms)
-{
-	(void)ctx;
-	k_msleep(ms);
-}
-
-static int tr_i2c1_wait_then_unstick(void)
-{
-	printk("hp      : RVT121 -- waiting for the HE to release I2C1\n");
-	while (!tr_i2c1_wait_free(tr_i2c1_rd, tr_i2c1_now_ms, tr_i2c1_nap_ms, NULL, 5u, 20000u)) {
-		printk("hp      : I2C1 NOT released by the HE after 20 s -- not touching the bus, "
-		       "still waiting\n");
-	}
-	printk("hp      : I2C1 released by the HE\n");
-	return tr_i2c1_unstick_init();
-}
-SYS_INIT(tr_i2c1_wait_then_unstick, POST_KERNEL, 0);
-#else
-SYS_INIT(tr_i2c1_unstick_init, PRE_KERNEL_1, 0);
-#endif
+/* POST_KERNEL priority 1, after the alp,i2c-handover wait (priority 0, boards/*.overlay:
+ * the HE may be using this bus for a display bridge until it releases it) and
+ * still ahead of every driver (the i2c_dw instance is POST_KERNEL priority 40). */
+SYS_INIT(tr_i2c1_unstick_init, POST_KERNEL, 1);
 
 /* ---- software AE: apply tr_ae_step()'s result directly over I2C to the
  * sensor's own AE registers (chips/ov9281/zephyr/drivers/video/ov9281.c

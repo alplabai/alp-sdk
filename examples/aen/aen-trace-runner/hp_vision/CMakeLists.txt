@@ -34,18 +34,6 @@ target_sources(app PRIVATE
 	../src/ipc/tr_cam_view.c
 )
 target_include_directories(app PRIVATE ../src)
-# TR_PANEL=rvt121 (the HE build's own option, ../CMakeLists.txt): the HE
-# configures the panel's SN65DSI83 bridge over I2C1 first and hands the bus
-# over (src/ipc/tr_i2c1_flag.h); this image waits for that before it touches
-# I2C1. rk055 (default): no wait, the HE never uses I2C1.
-set(TR_PANEL rk055 CACHE STRING "Panel the HE drives: rk055 or rvt121 (rvt121: wait for the HE's I2C1 release)")
-set_property(CACHE TR_PANEL PROPERTY STRINGS rk055 rvt121)
-if(NOT TR_PANEL MATCHES "^(rk055|rvt121)$")
-	message(FATAL_ERROR "TR_PANEL must be rk055 or rvt121, got '${TR_PANEL}'")
-endif()
-if(TR_PANEL STREQUAL "rvt121")
-	target_compile_definitions(app PRIVATE TR_WAIT_I2C1_FREE=1)
-endif()
 target_compile_options(app PRIVATE -ffp-contract=off)
 # The camera's mounting rotation (../src/vision/cam_rot.h; empty = its
 # default): this image applies it (pre-process + keypoints) and publishes it

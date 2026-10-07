@@ -155,12 +155,28 @@ printf '#!/bin/sh\ntouch "%s/PACKAGED"\n' "$t" > "$t/st/app-gen-toc" && chmod +x
 : > "$t/st/build/images/bl32.bin"; : > "$t/st/build/images/m55_stub_hp.bin"
 : > "$t/st/build/config/app-device-config.json"
 head -c 4096 /dev/zero > "$t/he/zephyr/zephyr.bin"; : > "$t/he/zephyr/zephyr.elf"
-# fix round 15: build-release.sh now also refuses an HE whose CMakeCache
-# lacks TR_PANEL_HZ:STRING=30 (panel_hz_check.sh, tested on its own in
-# tests/host/test_panel_hz_check.sh) -- append it here so these two
-# end-to-end checks keep testing what THEY test (the HP interlocks), not
-# get short-circuited by an unrelated refusal earlier in the script.
-echo 'TR_PANEL_HZ:STRING=30' >> "$t/he/CMakeCache.txt"
+# build-release.sh also refuses an HE whose display does not refresh at 30 Hz
+# (panel_hz_check.sh, tested on its own in tests/host/test_panel_hz_check.sh)
+# -- give it a 30 Hz zephyr.dts so these two end-to-end checks keep testing
+# what THEY test (the HP interlocks), not get short-circuited by an unrelated
+# refusal earlier in the script.
+cat > "$t/he/zephyr/zephyr.dts" <<DTS
+/ {
+	soc {
+		cdc200: cdc200@49031000 {
+			width = < 0x2d0 >;
+			height = < 0x500 >;
+			hsync-len = < 0x6 >;
+			hfront-porch = < 0xc >;
+			hback-porch = < 0x18 >;
+			vsync-len = < 0x2 >;
+			vfront-porch = < 0x1c6 >;
+			vback-porch = < 0xe >;
+			clock-frequency = < 0x2625a00 >;
+		};
+	};
+};
+DTS
 mkdir -p "$t/bin" && printf '#!/bin/sh\ntouch "%s/MADE"\n' "$t" > "$t/bin/make" && chmod +x "$t/bin/make"
 
 out=$(PATH="$t/bin:$PATH" NM="$t/nm" TR_HP_VISION=ON TR_HP_VISION_BUILD="$t/he" TR_HP_VISION_MODEL="$t/model.bin" \

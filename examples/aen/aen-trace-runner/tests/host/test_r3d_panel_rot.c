@@ -1,5 +1,5 @@
 /* tests/host/test_r3d_panel_rot.c -- src/render/panel_rot.h: the portrait
- * game on the landscape RVT121 (TR_PANEL=rvt121). For rotate 90 and 270:
+ * game on a panel mounted turned (the RVT121, mount-rotation 90). For rotation 90 and 270:
  * the corners land where the direction says, the whole 720 x 1280 frame is a
  * bijection onto the 1280 x 720 layer-1 window (and the HUD's 720 x 352
  * onto its 352 x 720 layer-2 window), a blit equals the per-pixel mapping,
@@ -16,8 +16,8 @@
 
 #define W  TR_ROT_PORTRAIT_W
 #define H  TR_ROT_PORTRAIT_H
-#define LW TR_ROT_L1_W
-#define LH TR_ROT_L1_H
+#define LW TR_ROT_PORTRAIT_H /* the layer-1 window: 1280 x 720 */
+#define LH TR_ROT_PORTRAIT_W
 
 static uint16_t rot_px(int x, int y)
 {
@@ -96,7 +96,7 @@ static void check_rotation(int rot)
 	/* The HUD window sits on the side the portrait top (rows 0..351) lands:
 	 * the layer-1 X of those rows is exactly the window's columns. */
 	{
-		int x0 = TR_ROT_HUD_X0(rot), lo = LW, hi = -1;
+		int x0 = rot == 90 ? LW - TR_ROT_HUD_W : 0, lo = LW, hi = -1;
 
 		for (int y = 0; y < TR_ROT_HUD_W; y++) {
 			land(rot, LW, 0, y, &X, &Y);
@@ -171,10 +171,11 @@ int main(void)
 	/* Rotation off: the plain portrait index. */
 	assert(tr_rot_idx(0, 0, 5, 7) == 7u * W + 5u);
 
-	assert(TR_ROT_HUD_X0(90) == 928 && TR_ROT_HUD_X0(270) == 0);
+	assert(LW - TR_ROT_HUD_W == 928); /* the 90 HUD window starts at X 928 */
+	assert(tr_rot_valid(0) && tr_rot_valid(90) && tr_rot_valid(270));
+	assert(!tr_rot_valid(180) && !tr_rot_valid(45) && !tr_rot_valid(-90));
 	assert((uint32_t)LW * LH * 2u == 1843200u);          /* tr_mbox.h TR_FB_SIZE */
 	assert((uint32_t)TR_ROT_HUD_W * LH * 2u == 506880u); /* tr_mbox.h TR_HUD_FB_SIZE */
-	assert(TR_ROT_L1_Y0 * 2 + LH == 800);
 
 	check_rotation(90);
 	check_rotation(270);

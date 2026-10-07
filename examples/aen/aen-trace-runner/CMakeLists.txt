@@ -6,20 +6,6 @@ cmake_minimum_required(VERSION 3.20)
 # a 512 KiB video pool at the base of SRAM0 (camera.conf), which is exactly the
 # space the renderer's back buffer needs; without it the game double-buffers
 # in SRAM0 instead of reaching for SRAM1, which is unpowered at boot.
-# Which panel the game runs on. rk055 (default): the RK055HDMIPI4MA0 720x1280
-# portrait MIPI-DSI panel (HX8394). rvt121: the Riverdi RVT121HVDFWCA0-B 12.1"
-# 1280x800 landscape LVDS panel behind an SN65DSI83 bridge (shield
-# e1m_evk_rvt121hvdfwca0), mounted on its side: the game stays 720x1280
-# portrait and is rotated into a 1280x720 scan-out window (TR_PANEL_ROTATE,
-# src/render/panel_rot.h). It needs TR_RENDER=A32 and has no HE-local camera;
-# with TR_INPUT_NPU the HE hands I2C1 to the HP after the bridge is up
-# (README, "Riverdi RVT121").
-set(TR_PANEL rk055 CACHE STRING "Panel: rk055 or rvt121")
-set_property(CACHE TR_PANEL PROPERTY STRINGS rk055 rvt121)
-if(NOT TR_PANEL MATCHES "^(rk055|rvt121)$")
-	message(FATAL_ERROR "TR_PANEL must be rk055 or rvt121, got '${TR_PANEL}'")
-endif()
-
 option(TR_CAMERA "Stack the OV9281 camera shields and the video buffer pool" OFF)
 
 # NPU body control (docs/superpowers/specs/2026-09-24-npu-body-control-design.md):
@@ -33,17 +19,14 @@ option(TR_INPUT_NPU "Read body position from the HP's pose slot instead of a loc
 if(TR_INPUT_NPU AND TR_CAMERA)
 	message(FATAL_ERROR "TR_INPUT_NPU and TR_CAMERA are exclusive -- pick one body-detection source")
 endif()
-if(TR_PANEL STREQUAL "rvt121" AND TR_CAMERA)
-	message(FATAL_ERROR "TR_PANEL=rvt121 does not support TR_CAMERA: it needs TR_RENDER=M55, "
-			     "which has no rotation for this panel")
-endif()
-if(TR_INPUT_NPU AND NOT TR_PANEL STREQUAL "rvt121")
-	# The HP now owns I2C1 -- see i2c1_off.overlay's header for why the HE
-	# must stop touching the same controller (its own display shield
-	# enables it too, on the same pads). The RVT121 shield needs I2C1 on the
-	# HE once, for its bridge: that build keeps the bus enabled and hands it
-	# to the HP after the bridge is up (src/platform/i2c1_handoff.c).
-	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/i2c1_off.overlay)
+if(TR_INPUT_NPU)
+	# The HP owns I2C1 (the camera SCCB bus, 0x49011000) once the HE has
+	# finished with it: the HE's display shield may configure a bridge over the
+	# same controller at boot (the RVT121's SN65DSI83). The alp,i2c-handover
+	# node hands it over -- the HE releases it at the end of its boot, the HP
+	# (hp_vision) waits for that before it touches the bus -- instead of this
+	# image switching I2C1 off. Any shield, no app code.
+	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/i2c_handover_he.overlay)
 endif()
 
 # Who draws the frame. A32 (default): the Cortex-A32 renderer draws every
@@ -67,10 +50,6 @@ if(TR_INPUT_NPU AND TR_RENDER STREQUAL "M55")
 	message(FATAL_ERROR "TR_INPUT_NPU needs TR_RENDER=A32 -- TR_RENDER=M55 runs CONFIG_DCACHE=y "
 			     "(m55_render.conf) and the pose slot has no cache maintenance")
 endif()
-if(TR_PANEL STREQUAL "rvt121" AND NOT TR_RENDER STREQUAL "A32")
-	message(FATAL_ERROR "TR_PANEL=rvt121 needs TR_RENDER=A32: only the A32 renderer rotates "
-			     "the portrait frame onto the landscape panel")
-endif()
 if(TR_RENDER STREQUAL "A32" AND TR_CAMERA)
 	# The camera pool sits at the base of SRAM0 -- on top of TR_FB_A -- until
 	# plan task T-A8 moves it to SRAM1 0x02480000.
@@ -92,50 +71,22 @@ if(TR_M55_AUTOLAUNCH AND NOT EXISTS "${TR_A32_LAUNCH_H}")
 	message(FATAL_ERROR "TR_M55_AUTOLAUNCH=ON needs -DTR_A32_LAUNCH_H=<header with TR_A32_ENTRY/LEN/CRC>")
 endif()
 
-if(TR_PANEL STREQUAL "rvt121")
-	# The shield's SN65DSI83 driver brings the panel up itself: there is no
-	# lcd_panel node, so no deferred-init overlay and no HX8394 retry (panel.c).
-	list(APPEND SHIELD e1m_evk_rvt121hvdfwca0)
-	# Layer 1 shrinks to a 1280x720 window, 40 rows down (the portrait frame's bytes).
-	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/panel_rvt121_window.overlay)
-else()
-	list(APPEND SHIELD e1m_evk_rk055hdmipi4ma0)
-	# The panel inits from main() with retries (src/platform/panel.c), not at boot.
-	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/panel_deferred.overlay)
+# The display is a shield: -DSHIELD=<name> picks it, the RK055 panel by default.
+# Nothing else in this app names a panel -- its timings (refresh), geometry,
+# mount-rotation and backlight all come from the shield's devicetree, through
+# the SDK's display API. A shield whose panel does not scan the game's
+# 720 x 1280 portrait content as-is gets a fit overlay of the same name under
+# shield-fit/ (layer-1 window), applied automatically. A different refresh is an
+# extra overlay (panel_30hz.overlay for the RK055), passed with
+# -DEXTRA_DTC_OVERLAY_FILE=.
+if(NOT SHIELD)
+	set(SHIELD e1m_evk_rk055hdmipi4ma0)
 endif()
-
-# Which way the portrait frame is turned onto the RVT121: 90 clockwise (the
-# portrait top lands on the panel's right edge) or 270 anticlockwise. The panel
-# is mounted on its side; pick the one that reads upright. The A32 renderer
-# must be built with the same value (make -C a32/renderer TR_PANEL_ROTATE=...).
-set(TR_PANEL_ROTATE 90 CACHE STRING "RVT121 rotation of the portrait frame: 90 or 270")
-set_property(CACHE TR_PANEL_ROTATE PROPERTY STRINGS 90 270)
-if(TR_PANEL STREQUAL "rvt121" AND NOT TR_PANEL_ROTATE MATCHES "^(90|270)$")
-	message(FATAL_ERROR "TR_PANEL_ROTATE must be 90 or 270, got '${TR_PANEL_ROTATE}'")
-endif()
-
-# Panel refresh (P11a). 40: the shield's timing. 30: panel_30hz.overlay
-# stretches the vertical front porch (same pixel clock and DSI link) for
-# 33.3 ms of render time a frame, and the game's frame-counted constants
-# scale with it (src/game/panel_hz.h). A32 render only: the M55 renderer
-# runs its own TICK_MS loop.
-set(TR_PANEL_HZ 40 CACHE STRING "Panel refresh, Hz: 40 or 30")
-set_property(CACHE TR_PANEL_HZ PROPERTY STRINGS 40 30)
-if(NOT TR_PANEL_HZ MATCHES "^(40|30)$")
-	message(FATAL_ERROR "TR_PANEL_HZ must be 40 or 30, got '${TR_PANEL_HZ}'")
-endif()
-if(TR_PANEL STREQUAL "rvt121")
-	# The Riverdi shield natively runs ~30.06 Hz (36.363636 MHz, 1440x840
-	# totals); panel_30hz.overlay is RK055-specific and is never applied.
-	if(NOT TR_PANEL_HZ STREQUAL "30")
-		message(FATAL_ERROR "TR_PANEL=rvt121 runs ~30 Hz: pass -DTR_PANEL_HZ=30")
+foreach(shield IN LISTS SHIELD)
+	if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/shield-fit/${shield}.overlay)
+		list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/shield-fit/${shield}.overlay)
 	endif()
-elseif(TR_PANEL_HZ STREQUAL "30")
-	if(NOT TR_RENDER STREQUAL "A32")
-		message(FATAL_ERROR "TR_PANEL_HZ=30 needs TR_RENDER=A32")
-	endif()
-	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/panel_30hz.overlay)
-endif()
+endforeach()
 
 if(TR_CAMERA)
 	# Carrier CSI connector + OV9281 sensor -- the shield string
@@ -157,7 +108,6 @@ target_sources(app PRIVATE
 	src/game/state.c
 	src/game/step.c
 	src/platform/imu.c
-	src/platform/panel.c
 	src/platform/rail5v_power.c
 	src/vision/pose.c
 	src/vision/track.c
@@ -165,10 +115,6 @@ target_sources(app PRIVATE
 if(TR_INPUT_NPU)
 	target_sources(app PRIVATE src/ipc/tr_pslot.c)
 	target_compile_definitions(app PRIVATE TR_INPUT_NPU=1)
-	if(TR_PANEL STREQUAL "rvt121")
-		target_sources(app PRIVATE src/platform/i2c1_handoff.c)
-		target_compile_definitions(app PRIVATE TR_I2C1_HANDOFF=1)
-	endif()
 	# The camera's mounting rotation (src/vision/cam_rot.h; empty = its
 	# default). The HE only needs 0 vs 90/270 (the upright frame's
 	# dimensions): keep it the same as the HP build's.
@@ -222,10 +168,6 @@ else()
 	target_compile_definitions(app PRIVATE TR_RENDER_A32=0)
 endif()
 target_include_directories(app PRIVATE src)
-target_compile_definitions(app PRIVATE TR_PANEL_HZ=${TR_PANEL_HZ})
-if(TR_PANEL STREQUAL "rvt121")
-	target_compile_definitions(app PRIVATE TR_PANEL_RVT121=1 TR_PANEL_ROTATE=${TR_PANEL_ROTATE})
-endif()
 
 # No fused multiply-add: float code must compute the same bits as the host
 # tests (tests/host/runner.sh passes the same flag; see the plan's section 5).

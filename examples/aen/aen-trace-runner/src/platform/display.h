@@ -10,13 +10,18 @@
 int      tr_display_open(void);
 uint16_t tr_display_width(void);
 uint16_t tr_display_height(void);
+/* Clockwise degrees (0, 90, 270) the frame is turned onto the panel: the
+ * display's mount-rotation (alp_display_caps_t.rotation). The A32 renderer
+ * and the HUD apply it (render/panel_rot.h); the M55 2D renderer cannot, and
+ * display.c refuses a panel that needs it at build time. */
+uint16_t tr_display_rotation(void);
 
 #if TR_RENDER_A32
 /*
  * TR_RENDER=A32 (display_a32.c): the M55 writes no pixels. The A32 draws each
  * frame into tr_display_free_fb(); tr_display_flip_to() swaps the CDC200 to it
  * in vertical blanking and blocks until it has landed (~25.0 ms at 40.0 Hz,
- * ~33.3 ms at 30.0 Hz with -DTR_PANEL_HZ=30).
+ * ~33.3 ms at 30.0 Hz on a 30 Hz panel).
  * Returns 0 on a landed flip, -1 if `fb_addr` is not TR_FB_A/TR_FB_B, is
  * already live, or the swap never landed (the old frame stays up).
  */

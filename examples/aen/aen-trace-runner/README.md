@@ -49,17 +49,18 @@ itself, and tilting the board (IMU) steers. The steps below build the full exhib
    ```sh
    make -C a32/stub
    make -C a32/renderer
-   cp a32/renderer/renderer-launch.h build/tr_launch.h
+   python3 a32/stub/mkpayload.py info a32/renderer/renderer.bin --c-header build/tr_launch.h
    ```
 <!-- cross-platform-lint:resume -->
 
 2. Build the M55-HE game in A32 mode, with auto-launch, the 30 Hz panel timing and pose input
-   from the HP:
+   from the HP (`panel_30hz.overlay` stretches the RK055 shield to 30 Hz; the display itself is
+   `-DSHIELD=`, the RK055 by default):
 
    ```sh
    west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d build/he . -- \
      -DTR_M55_AUTOLAUNCH=ON -DTR_A32_LAUNCH_H=$PWD/build/tr_launch.h \
-     -DTR_PANEL_HZ=30 -DTR_INPUT_NPU=ON -DTR_CAM_ROTATE=90
+     -DEXTRA_DTC_OVERLAY_FILE=$PWD/panel_30hz.overlay -DTR_INPUT_NPU=ON -DTR_CAM_ROTATE=90
    ```
 
    `TR_CAM_ROTATE` is the camera's mounting rotation, clockwise, as seen on the panel: `0`, `90`
@@ -84,7 +85,7 @@ itself, and tilting the board (IMU) steers. The steps below build the full exhib
    ```
 
    `build-release.sh` refuses to package an HE image whose launch header doesn't match the
-   renderer it packages. It also refuses one that was not built with `TR_PANEL_HZ=30`, or an HP
+   renderer it packages. It also refuses one whose display does not refresh at 30 Hz (read from its `zephyr.dts`), or an HP
    build without an explicit camera rotation.
 
 ## Flash
@@ -100,71 +101,58 @@ rewrites whole 16 KiB sectors, and that read-back is the only way to restore the
 
 | CMake option | Default | Effect |
 | --- | --- | --- |
-| `TR_PANEL` | `rk055` | `rvt121` targets the Riverdi 12.1" LVDS panel, A32 render only (see below) |
+| `SHIELD` | `e1m_evk_rk055hdmipi4ma0` | The display. `e1m_evk_rvt121hvdfwca0` is the Riverdi 12.1" LVDS panel (see below). Nothing else in the build names a panel |
 | `TR_RENDER` | `A32` | `M55` renders on the HE instead (no A32 needed) |
 | `TR_INPUT_NPU` | `OFF` | Read the player's pose from the HP's pose slot |
 | `TR_CAMERA` | `OFF` | HE reads the camera itself (needs `TR_RENDER=M55`) |
-| `TR_PANEL_HZ` | `40` | `30` for the release panel timing (A32 render only; with `TR_PANEL=rvt121` it must be `30`) |
-| `TR_PANEL_ROTATE` | `90` | `TR_PANEL=rvt121` only: `90` or `270`, the direction the portrait frame is turned onto the panel |
 | `TR_M55_AUTOLAUNCH` | `OFF` | HE launches the A32 renderer at boot (release) |
 | `TR_TILT_TAKEOVER` | `OFF` | The IMU tilt takes over steering when no player is seen |
 
-## Riverdi RVT121 (12.1" LVDS)
+## Switching the display: Riverdi RVT121 (12.1" LVDS)
 
-`-DTR_PANEL=rvt121` runs the game on the Riverdi RVT121HVDFWCA0-B, 1280x800 landscape RGB565,
-through the SN65DSI83 DSI-to-LVDS bridge adapter (shield `e1m_evk_rvt121hvdfwca0`). The shield's
-bridge driver brings the panel up, so the HX8394 retry in `src/platform/panel.c` is a no-op, and
-none of `panel_deferred.overlay`, `panel_30hz.overlay` or `i2c1_off.overlay` is applied (the
-bridge and the touch controller live on I2C1). The panel runs at its native ~30.06 Hz
-(36.363636 MHz pixel clock, 1440x840 totals), hence `TR_PANEL_HZ=30`.
+The game does not know which panel it is on. A display is a shield (`-DSHIELD=`), and everything
+the game needs comes from that shield's devicetree through the SDK's display API:
 
-The game is the same A32-rendered 720x1280 portrait game as on the RK055, rotated when it is
-written to the scan-out buffer (`src/render/panel_rot.h`, the one definition of the mapping).
-The panel is mounted on its side, so:
+- the refresh (`pclk / (htotal * vtotal)` of the `cdc200` node, `src/game/panel_hz.h`): 40 Hz for
+  the RK055, 30 Hz for the RVT121, 30 Hz for the RK055 with `panel_30hz.overlay`;
+- the geometry and the panel's `mount-rotation` (`alp_display_caps_t.rotation`): the game stays
+  720x1280 portrait and turns the frame by that many degrees clockwise when it writes the scan-out
+  buffer (`src/render/panel_rot.h`, the one definition of the mapping). The RVT121 is mounted on
+  its side and declares 90;
+- the backlight (`alp,display-backlight` in the shield: the RVT121's 30% PWM; the RK055's HX8394
+  owns its own enable);
+- the panel bring-up (the SDK's `panel_init_retry.c` for the HX8394, the SN65DSI83 driver for the
+  RVT121), both before `main()`.
 
-- Layer 1 is a 1280x720 window centred on the 800 rows (`panel_rvt121_window.overlay`: rows
-  40..759, black bars above and below). 1280 x 720 x 2 B is the portrait frame's size exactly, so
-  no address in `src/ipc/tr_memmap.h` moves and the memory map is the RK055's.
-- The A32 renderer rotates each 32-row band as it copies it out to the framebuffer (NEON 8x8
-  transposes, whole 16-byte stores), the video half included.
-- The HUD (layer 2) becomes a 352x720 window at the panel edge the portrait top lands on, 40 rows
-  down, in the same buffer; `src/hud/hud.c` writes it rotated.
-- `TR_PANEL_ROTATE` is `90` (clockwise: the portrait top lands on the panel's right edge, the
-  default) or `270` (anticlockwise, the left edge). Pick the one that reads upright on the
-  mounted panel. The HE and the A32 renderer must be built with the same value.
-
-<!-- cross-platform-lint:ignore -->
 ```sh
-make -C a32/stub
-make -C a32/renderer TR_PANEL_ROTATE=90   # also writes renderer-launch.h, rotation included
-cp a32/renderer/renderer-launch.h build/tr_launch.h
-west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d build/he . -- \
-  -DTR_PANEL=rvt121 -DTR_PANEL_HZ=30 -DTR_PANEL_ROTATE=90 -DTR_INPUT_NPU=ON -DTR_CAM_ROTATE=90 \
-  -DTR_M55_AUTOLAUNCH=ON -DTR_A32_LAUNCH_H=$PWD/build/tr_launch.h
-west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp -d build/hp hp_vision -- \
-  -DTR_PANEL=rvt121 -DTR_CAM_ROTATE=90 -DTR_CAM_MIRROR=ON
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d build/he . -- -DSHIELD=e1m_evk_rvt121hvdfwca0
 ```
-<!-- cross-platform-lint:resume -->
 
-Wiring: bridge EN = `CK_INT` (P13_4), backlight = `CK_PWM0` (P10_7), and P9 powers +1V8.  The backlight is a 30% duty, 500 Hz UTIMER3 PWM set once at boot by `tr_panel_up()`.
+The only per-shield file in the game is `shield-fit/<shield>.overlay`, applied automatically when
+it exists: the RVT121's fits the portrait content to a 1280x720 layer-1 window centred on its 800
+rows (black bars above and below), which is the portrait frame's byte count exactly, so no address
+in `src/ipc/tr_memmap.h` moves. The A32 renderer rotates each 32-row band as it copies it out
+(NEON 8x8 transposes), the video half included; the HUD (layer 2) becomes a 352x720 window at the
+edge the portrait top lands on, in the same buffer. The renderer is ONE binary for every display:
+the HE puts the rotation in every frame (mailbox version 2), and the renderer faults on a version
+or rotation it cannot produce rather than draw something else.
 
-I2C1 is shared. The shield's SN65DSI83 bridge is configured over I2C1 by the HE at boot, and with
-`TR_INPUT_NPU` the HP owns the same controller for the camera. After the bridge is up
-(`tr_panel_up()`), `src/platform/i2c1_handoff.c` masks the HE's I2C1 interrupt, stops its
-controller and writes `TR_I2C1_FREE_MAGIC` to `TR_MEM_I2C1_FREE` (`0x0237FC94`, SRAM0, the
-reserved block next to `TR_MEM_SRAM1_READY`; `src/ipc/tr_i2c1_flag.h`). The HP image built with
-`-DTR_PANEL=rvt121` waits for that word before it unsticks the pads or initialises the bus and
-the camera, reports every 20 s on its console while it is missing, and never touches the bus
-until it arrives. The HE clears the word first thing at every boot, and the touch controller is
-disabled, so nothing on the HE uses I2C1 afterwards. Start the HE first, then the HP; the HP
-build for RK055 does not wait. An HE-only reset while the HP is streaming would reconfigure the
-bridge on a bus the HP is using, so reset both.
+I2C1 is shared. The RVT121's SN65DSI83 bridge is configured over I2C1 by the HE at boot, and with
+`TR_INPUT_NPU` the HP owns the same controller for the camera. Every `TR_INPUT_NPU` system carries
+an `alp,i2c-handover` node on each side (`i2c_handover_he.overlay`, `hp_vision/boards/*.overlay`;
+SDK glue in `zephyr/soc-bridge/alif/i2c_handover.c`): at the end of its boot the HE masks its I2C1
+interrupt, stops its controller and writes a flag word (`TR_MEM_I2C1_HANDOVER`, `0x0237FC94`,
+SRAM0); the HP waits for it before it unsticks the pads or initialises the bus and the camera,
+reports on its console every 20 s while it is missing, and clears it once it has it. Start the HE
+first, then the HP. An HP restarted alone after it took the bus waits for a release that is not
+coming: restart both, or write `0x31433249` to the flag word first. The touch controller is
+disabled in the fit overlay (the game does not use it). `TR_CAM_ROTATE` is the camera's mounting
+rotation and is independent of the panel's; the camera view and skeleton are drawn in the portrait
+video half and rotated with the rest of the frame.
 
-Limits: `TR_RENDER=A32` only (the M55 2D renderer has no rotation), and CMake refuses
-`TR_CAMERA`. `TR_CAM_ROTATE` is the camera's mounting rotation and is independent of
-`TR_PANEL_ROTATE`; the camera view and skeleton are drawn in the portrait video half and rotated
-with the rest of the frame. Touch is not used. The sound image is unaffected (it uses I2C bus 0
-and I2S3, not I2C1). Build-only: the full game on this panel is not yet verified on hardware.
+Limits: the 2D `TR_RENDER=M55` path cannot rotate and refuses a display with a `mount-rotation` at
+build time; `TR_CAMERA` is refused with `TR_RENDER=A32`. The sound image is unaffected (it uses I2C
+bus 0 and I2S3, not I2C1). Build-only for the RVT121 shield flow until it is run on the bench.
 
 ## Sound (reworked carriers only)
 
