@@ -87,7 +87,6 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/drivers/display/sn65dsi83.h>
-#include <zephyr/drivers/pwm.h>
 #include <zephyr/input/input.h>
 #include <zephyr/sys/printk.h>
 
@@ -97,10 +96,6 @@
 #define BRIDGE_NODE  DT_NODELABEL(bridge)
 #define EXP_NODE     DT_NODELABEL(lcd_exp)
 #define TOUCH_NODE   DT_NODELABEL(touch)
-
-/* Backlight PWM (UTIMER3 ch1 on P10_7), duty set once at boot. */
-#define BACKLIGHT_DUTY_PERCENT 30U
-static const struct pwm_dt_spec backlight = PWM_DT_SPEC_GET(DT_NODELABEL(backlight));
 
 /* Panel geometry (must match the shield's cdc200 node). */
 #define PANEL_W 1280
@@ -201,19 +196,8 @@ int main(void)
 	const struct device *dsi    = DEVICE_DT_GET(DSI_NODE);
 	const struct device *disp   = DEVICE_DT_GET(DISPLAY_NODE);
 
-	/*
-	 * Backlight at 30%: pwm_set_dt() with the shield's 500 Hz period (2 ms)
-	 * and pulse = period * 30 / 100.  Not part of the PASS gate -- a dark panel
-	 * with a healthy bridge is a backlight wiring fact, not a chain failure.
-	 */
-	if (pwm_is_ready_dt(&backlight)) {
-		int bl_rc = pwm_set_dt(
-		    &backlight, backlight.period, backlight.period * BACKLIGHT_DUTY_PERCENT / 100U);
-
-		printk("backlight: %u%% duty -> %d\n", BACKLIGHT_DUTY_PERCENT, bl_rc);
-	} else {
-		printk("backlight: PWM device not ready\n");
-	}
+	/* The backlight (30%) is the shield's alp,display-backlight node: the SDK set
+	 * it at boot, after the display chain, and only if the chain came up. */
 
 	/* Step 1: the panel-control expander (touch RESET lives behind it; the bridge
 	 * EN is a direct SoC GPIO, P13_4). */
