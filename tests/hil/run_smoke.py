@@ -471,11 +471,14 @@ def _run(cmd: list[str], stdin: str | None = None) -> tuple[int, str]:
     """Run a subprocess and capture combined stdout+stderr.  Returns
     (returncode, output).  Doesn't raise on non-zero exit -- the
     caller decides whether to fail the spec.  `stdin` is fed to the child."""
+    # Bytes mode: on Windows, text mode would write each stdin newline as
+    # CRLF, and the target's sh then chokes on the carriage return.
     proc = subprocess.run(
-        cmd, input=stdin, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        cmd, input=None if stdin is None else stdin.encode("utf-8"), capture_output=True,
         env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
     )
-    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+    out = (proc.stdout or b"") + (proc.stderr or b"")
+    return proc.returncode, out.decode("utf-8", errors="replace")
 
 
 def run_spec(spec: SmokeSpec, *, dry_run: bool = False) -> SmokeResult:

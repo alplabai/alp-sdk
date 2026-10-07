@@ -734,7 +734,7 @@ def test_ssh_command_is_sent_on_stdin_not_argv(tmp_path: Path, monkeypatch) -> N
     import subprocess
 
     d = _make_spec_dir(tmp_path)
-    cmd = 'printf "\$(printf %03o 50)"; echo HIL_OK'
+    cmd = r'printf "\$(printf %03o 50)"; echo HIL_OK'
     (d / "cmd.yaml").write_text(
         "schema_version: 1\nname: cmd\nflash_method: ssh-run\n"
         f"ssh_command: |-\n  {cmd}\nserial:\n  expect_contains: [HIL_OK]\n",
@@ -745,14 +745,17 @@ def test_ssh_command_is_sent_on_stdin_not_argv(tmp_path: Path, monkeypatch) -> N
 
     def fake_run(argv, **kw):
         seen.update(argv=argv, input=kw.get("input"))
-        return subprocess.CompletedProcess(argv, 0, "HIL_OK\n", "")
+        return subprocess.CompletedProcess(argv, 0, b"HIL_OK\n", b"")
 
     monkeypatch.setattr(run_smoke.subprocess, "run", fake_run)
     result = run_smoke.run_spec(spec)
     assert result.ok
     assert seen["argv"][-2:] == ["sh", "-s"]
     assert cmd not in " ".join(seen["argv"])
-    assert cmd in seen["input"]
+    # Bytes, so Windows text mode cannot turn newlines into CRLF.
+    assert isinstance(seen["input"], bytes)
+    assert cmd.encode() in seen["input"]
+    assert b"\r" not in seen["input"]
 
 
 def test_failed_spec_prints_board_output(capsys) -> None:
