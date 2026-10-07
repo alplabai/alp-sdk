@@ -212,6 +212,12 @@
           "default": "auto",
           "description": "Console backend the loader wires per slice.  `auto` (default) selects by the slice OS: a Zephyr slice gets the Alp UART console (`alp`/`uart` -- printf lands on the module console UART, e.g. E1M edge UART0), a Yocto slice gets the Linux console.  `ram` forces the Zephyr RAM console for serial-less bench boards (read `ram_console_buf` over SWD).  `none` emits no console Kconfig and inherits the board default.  The board layer owns the physical console UART (`zephyr,console` DT chosen); this knob only picks the backend."
         },
+        "link": {
+          "type": "string",
+          "enum": ["auto", "itcm"],
+          "default": "auto",
+          "description": "Link target of the built image (AEN Flow C).  `auto` (default) links the image where the board puts it -- E1M-AEN slices link into MRAM slot0 for the production flows.  `itcm` links the image into the M55-HE ITCM (base 0x0, global window 0x58000000) for a RAM-run (`tan flash --ram`, no MRAM write): the planner emits the ITCM retarget Kconfig fragment + devicetree overlay beside the slice's `alp.conf` and layers them into the build.  `itcm` is accepted ONLY when every buildable slice is a Zephyr M55-HE core of an Alif Ensemble (`alif-ensemble`) SoM -- an M55-HP, any other core, or a non-AEN SoM is refused by `tan build` -- and needs the RAM console (`console: auto` is promoted to `ram`; an explicit `uart`/`alp`/`linux`/`none` is refused).  Never use it for an image you intend to flash to MRAM: it links at 0x0 and is not bootable from MRAM."
+        },
         "sim_console": {
           "type": "boolean",
           "default": false,

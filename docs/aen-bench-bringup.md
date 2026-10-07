@@ -409,6 +409,29 @@ scripts/bench/aen/build.sh <app-dir> \
     -DEXTRA_DTC_OVERLAY_FILE="scripts/bench/aen/aen-flowc-itcm.overlay"
 ```
 
+**Building through `tan` (board.yaml knob).** A project built with `tan build`
+does not need those two files copied in: set
+
+```yaml
+diagnostics:
+  link: itcm        # auto (default) | itcm
+  console: ram      # optional here -- `auto` is promoted to `ram`; uart/alp/linux/none are refused
+```
+
+and the planner writes the retarget itself next to the slice's `alp.conf`
+(`alp-link-itcm.conf` + `alp-link-itcm.overlay`: the same `zephyr,flash = &itcm;`
+/ `/delete-property/ zephyr,code-partition;` overlay and the same
+`CONFIG_USE_DT_CODE_PARTITION=n` + `CONFIG_FLASH_LOAD_OFFSET=0x0` conf as above,
+plus `CONFIG_DCACHE=n` and the 16 KiB RAM console of `aen-bench-shared.conf`) and
+passes them via `-DEXTRA_CONF_FILE` / `-DEXTRA_DTC_OVERLAY_FILE`. Then
+`tan flash --ram --ram-console --core m55_he` loads the ELF into the HE ITCM
+global window `0x58000000` and reads `ram_console_buf`. The knob is HE-only:
+`tan build` refuses it (`build.link-itcm-unsupported`) for an M55-HP slice, any
+other core, a non-`alif-ensemble` SoM, or a `boot:`/sysbuild project, and refuses
+an explicit non-RAM console (`build.link-itcm-console-conflict`). It links at
+`0x0` -- never flash that image to MRAM. The planner lives in tan-cli
+(ADR-0026); alp-sdk's `alp_orchestrate` does not implement the knob.
+
 Both `aen-flowc-itcm.conf` lines are needed because they undo two different
 things. `USE_DT_CODE_PARTITION=n` alone undoes the board `_defconfig`'s
 *derived* offset, but it does **not** touch a hard-coded literal
