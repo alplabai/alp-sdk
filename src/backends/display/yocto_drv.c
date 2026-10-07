@@ -83,11 +83,11 @@
  * device tree decides which physical DU/DSI/LCDC controller backs
  * each /dev/dri/cardN.
  *
- * @par Status: REAL implementation.  BENCH-UNVERIFIED -- no
- *      /dev/dri/card* node exists in this build environment, so the
- *      open()/get_caps()/blit()/clear()/close() paths have not been
- *      exercised against real V2N DU/DSI/Mali-DRM hardware.  Do not
- *      read anything in this file as silicon-proven.
+ * @par Status: REAL implementation.  SDK -> KMS half bench-verified:
+ *      open()/get_caps()/blit()/close() returned OK on E1M-V2M103
+ *      2026W38-0001 and the CRTC scanned out the SDK buffer (#23).  No
+ *      panel was attached on that bench, so a rendered frame on glass is
+ *      not recorded (docs/display-support-matrix.md, row 8).
  */
 
 #if defined(__linux__)

@@ -125,9 +125,10 @@ without rewriting the layer above.
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
-  │ Vendor SDK    │ ─► │  Alif Ensemble (AEN) · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1      │
+  │ Vendor SDK    │ ─► │  Alif Ensemble (AEN) · Renesas RZ/V2N · NXP i.MX 93* · DEEPX DX-M1     │
   │               │    │  NPU runtimes dispatched into: Ethos-U/Vela · DRP-AI · DEEPX dx_rt     │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
+  * E1M-NX9101 (i.MX 93) is a target of the SDK, not a module Alp Lab currently produces.
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ HW + HAL      │ ─► │  E1M (35×35 mm) + E1M-X (45×65 mm) SoMs  ·  NPU silicon                │
@@ -178,7 +179,7 @@ examples: [`docs/portability.md`](docs/portability.md).
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M101` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55) · Zephyr (M33 system manager) |
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M102` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M103` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
-| **E1M-i.MX93** | E1M (35×35 mm) | TBD | NXP i.MX 93 (2× A55 + M33 + Ethos-U65) | ~0.5 TOPS | Yocto · Zephyr |
+| **E1M-i.MX93** | E1M (35×35 mm) | TBD | NXP i.MX 93 (2× A55 + M33 + Ethos-U65) | ~0.5 TOPS | Yocto · Zephyr — not currently produced |
 
 All modules share the **E1M open-standard form factor** — pinout + mechanical
 spec in [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec) (pinned
