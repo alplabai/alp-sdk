@@ -1,0 +1,19 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake video device used only by the camera_zephyr_video ztest (#2278 round
+# 2).  Implements ONLY .set_frmival, and it always fails with a non-ENOSYS
+# error (-EIO) -- exercises camera_apply_fps()'s (camera_frmival.h) two
+# non-ENOSYS branches directly: a backend-only default (requested_fps == 0)
+# tolerating ANY negative rc, and a CALLER-requested rate mapping a non-
+# ENOSYS error through the shared errno baseline instead of declining with
+# ALP_ERR_NOSUPPORT (that status is reserved for -ENOSYS/-ENOTSUP).
+
+description: |
+  Minimal fake video controller whose .set_frmival always returns -EIO,
+  backing the alp-sdk camera_zephyr_video unit test's direct
+  camera_apply_fps() coverage.
+
+compatible: "alp,test-video-frmival-err"
+
+include: base.yaml

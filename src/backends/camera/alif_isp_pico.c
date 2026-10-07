@@ -108,9 +108,9 @@
 LOG_MODULE_REGISTER(alp_camera_alif_isp_pico, CONFIG_LOG_DEFAULT_LEVEL);
 
 #include "alp_errno.h"
+#include "camera_frmival.h"
 #include "camera_ops.h"
 #include "alif_isp_pico.h"
-#include "camera_frmival.h"
 #include "alp_slot_claim.h"
 #include "yuv_to_rgb565.h"
 
@@ -434,86 +434,52 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	(void)video_set_ctrl(dev, &ae_ctrl);
 
 	/* Request the caller's fps on whichever real sensor is wired behind this
-	 * ISP -- OV5647, IMX296, IMX335, or a future sensor -- with no per-sensor
-	 * DT nodelabel list (issue #2338: this used to reach only
-	 * DEVICE_DT_GET(DT_NODELABEL(ov5647)), silently dropping the request for
-	 * every other sensor).  cfg->fps == 0 means "backend default" (see
-	 * <alp/camera.h>'s alp_camera_config_t::fps doc) -- NOT the same
-	 * convention width/height use just above (those are a "you must choose"
-	 * sentinel that alp_camera_open() rejects outright; an unset fps is not
-	 * an error, it just falls back to this backend's own default of 10 fps --
-	 * a *choice* that buys AE the most exposure headroom in a dim scene on a
-	 * sensor with a wide rate table like the OV5647 (ov5647_framerates[] in
-	 * ov5647.c: {10, 15, 30, 45, 60, 90, 120}), not a hardware floor any
-	 * sensor needs.  Each sensor's own set_frmival() picks the closest rate
-	 * it can actually reach (VTS-clamped for OV5647; IMX296's all-pixel-scan
-	 * mode has exactly one fixed 60.3 frame/s rate, imx296.c's
-	 * imx296_set_frmival() -- see below), so read the result back rather
-	 * than assume the request landed exactly.
+	 * ISP -- OV5647, IMX296, IMX335, or a future sensor -- through the ISP
+	 * device itself, with no per-sensor DT nodelabel list (issue #2338: this
+	 * used to reach only DEVICE_DT_GET(DT_NODELABEL(ov5647)), silently
+	 * dropping the request for every other sensor). cfg->fps == 0 means
+	 * "backend default" (see <alp/camera.h>'s alp_camera_config_t::fps doc)
+	 * -- NOT the same convention width/height use just above (those are a
+	 * "you must choose" sentinel that alp_camera_open() rejects outright;
+	 * an unset fps is not an error, it just falls back to this backend's
+	 * own default of 10 fps -- a *choice* that buys AE the most exposure
+	 * headroom in a dim scene on a sensor with a wide rate table like the
+	 * OV5647 (ov5647_framerates[] in ov5647.c: {10, 15, 30, 45, 60, 90,
+	 * 120}), not a hardware floor any sensor needs.
 	 *
-	 * A single video_set_frmival(dev, ...) on the ISP device itself now
-	 * reaches the real sensor generically: isp_pico.c gains its own
-	 * .get_frmival/.set_frmival (new, forwarding to `controller`) to match
+	 * A single video_set_frmival(dev, ...) on the ISP device itself reaches
+	 * the real sensor generically: isp_pico.c's own .get_frmival/.set_frmival
+	 * (forwarding to `controller`, isp_pico.c:2672-2699) match
 	 * video_alif.c's alif_cam_set_frmival() (forwards to its endpoint) and
 	 * video_csi_dw.c's csi2_dw_set_frmival() (forwards to
-	 * config->sensor[data->current_sensor]) -- those two already had a
-	 * .get_frmival forwarder each (isp_pico.c's isp_apply_ae() AE envelope
-	 * derivation used them directly, bypassing this backend's own vtable,
-	 * which is why isp_pico.c itself had none until now). Together the
-	 * three-hop isp -> cam -> csi -> sensor forward chain now exists on both
-	 * the get and set side. csi2_dw_set_frmival() targets the SAME
-	 * current_sensor its own .get_frmival reads, so a 2-sensor CSI node's AE
-	 * (which reads back through .get_frmival) sees the rate this sets. In
-	 * TPG mode (config->controller == NULL, no real sensor) isp_pico.c's
-	 * own .set_frmival returns -ENOSYS -- nothing to forward to -- which
-	 * this treats as "nothing to do", not an error.
+	 * config->sensor[data->current_sensor]) -- the three-hop
+	 * isp -> cam -> csi -> sensor forward chain exists on both the get and
+	 * set side, so camera_apply_fps() (#2278) below reaches whichever
+	 * sensor this shield actually wires up and reads the settled rate back
+	 * rather than assume the request landed exactly (VTS-clamped for
+	 * OV5647; IMX296's all-pixel-scan mode has exactly one fixed 60.3
+	 * frame/s rate, imx296.c's imx296_set_frmival(), which always overwrites
+	 * the request and returns success regardless of what was asked).
 	 *
-	 * The sensor driver owns the exposure ceiling: e.g. OV5647's
+	 * In TPG mode (config->controller == NULL, no real sensor) isp_pico.c's
+	 * own .set_frmival returns -ENOSYS -- camera_apply_fps()'s shared policy
+	 * treats that as "nothing to do" for a backend-only default (cfg->fps ==
+	 * 0, same tolerance this backend had before #2278/#2338) but as a loud
+	 * ALP_ERR_NOSUPPORT decline for an explicit CALLER request -- stricter
+	 * than this backend's pre-#2278 posture, which only ever logged
+	 * LOG_INF and never declined.
+	 *
+	 * The sensor driver owns the exposure ceiling regardless: e.g. OV5647's
 	 * ov5647_set_ctrl_exposure() (ov5647.c) clamps every VIDEO_CID_EXPOSURE
 	 * write to the active mode's VTS - 4 lines. */
-	uint8_t              requested_fps = (cfg->fps != 0u) ? cfg->fps : 10u;
-	struct video_frmival frmival       = { .numerator = 1, .denominator = requested_fps };
-	int                  rc            = video_set_frmival(dev, &frmival);
-
-	if (rc == -ENOSYS || rc == -ENOTSUP) {
-		/* Not a hard error: no sensor wired to set a rate on (TPG mode
-		 * above, or a future sensor that rejects set_frmival outright)
-		 * just keeps running at whatever rate it already has. */
-		LOG_INF("camera%u: no settable frame rate; fps request (%u) not applied",
-		        cfg->camera_id,
-		        requested_fps);
-	} else if (rc != 0) {
-		LOG_WRN(
-		    "camera%u: video_set_frmival(%u fps) failed: rc=%d", cfg->camera_id, requested_fps, rc);
-	} else {
-		struct video_frmival actual = { 0 };
-
-		if (video_get_frmival(dev, &actual) == 0 && actual.denominator > 0) {
-			/* Print the settled interval as num/den rather than a
-			 * truncating denominator/numerator division -- a
-			 * non-integer or sub-1-fps settled rate would otherwise
-			 * print a misleading rounded (or zero) fps. The request
-			 * was always {.numerator = 1, .denominator =
-			 * requested_fps}, so compare against that rather than
-			 * requested_fps alone. The caller reads the same settled
-			 * rate back through alp_camera_get_fps() (#2279). */
-			bool settled_as_requested =
-			    (actual.numerator == 1u) && (actual.denominator == requested_fps);
-
-			if (settled_as_requested) {
-				LOG_DBG("camera%u: requested %u fps, settled on %u/%u",
-				        cfg->camera_id,
-				        requested_fps,
-				        actual.denominator,
-				        actual.numerator);
-			} else {
-				LOG_INF("camera%u: requested %u fps, settled on %u/%u",
-				        cfg->camera_id,
-				        requested_fps,
-				        actual.denominator,
-				        actual.numerator);
-			}
-		}
+	alp_status_t fps_status = camera_apply_fps(dev, cfg->camera_id, cfg->fps, 10u, NULL);
+	if (fps_status != ALP_OK) {
+		/* The formats set above stay applied on the shared ISP device on
+		 * purpose, same as the min_vbuf_count / bytes_per_buf failure paths
+		 * below: nothing streams from them, and the next open() sets its
+		 * own format before it gets here. */
+		_free_state(st);
+		return fps_status;
 	}
 
 	uint8_t want = ARRAY_SIZE(st->vbufs);

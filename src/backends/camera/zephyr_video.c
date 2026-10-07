@@ -43,6 +43,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/video.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
 #include <alp/backend.h>
@@ -50,14 +51,12 @@
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
 
-#include "alp_errno.h"
-#include "camera_ops.h"
-#include "alp_slot_claim.h"
-
-#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(alp_camera_zephyr_video, CONFIG_LOG_DEFAULT_LEVEL);
 
+#include "alp_errno.h"
 #include "camera_frmival.h"
+#include "camera_ops.h"
+#include "alp_slot_claim.h"
 
 #ifndef CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT
 #define CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT 2
@@ -273,6 +272,21 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 		(void)video_get_format(dev, &st->fmt);
 	}
 
+	/* fps AFTER format, never before: ov5647_set_fmt() re-derives its
+	 * stored frame-interval request from the just-negotiated mode
+	 * (zephyr/drivers/video/ov5647.c), so a frmival set ahead of
+	 * set_format would be silently overwritten (#2278).  No backend
+	 * default here -- cfg->fps == 0 leaves this device at whatever
+	 * rate the sensor's default mode already runs. */
+	alp_status_t fps_status = camera_apply_fps(dev, cfg->camera_id, cfg->fps, 0u, NULL);
+	if (fps_status != ALP_OK) {
+		/* Nothing allocated yet (vbufs come after this) -- releasing
+		 * the state slot is the only cleanup an open failure this
+		 * early needs (#246). */
+		_free_state(st);
+		return fps_status;
+	}
+
 	/* Decide buffer count: clamp the configured pool to the
      * driver's min_vbuf_count when reported. */
 	uint8_t want = ARRAY_SIZE(st->vbufs);
@@ -339,7 +353,6 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 	}
 	st->vbuf_count = want;
 
-	alp_camera_apply_fps(dev, cfg->camera_id, cfg->fps);
 	state->fps_x1000 = alp_camera_read_fps_x1000(dev); /* #2279 */
 
 	state->be_data = st;
