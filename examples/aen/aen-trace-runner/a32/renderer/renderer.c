@@ -622,7 +622,7 @@ void renderer_main(volatile tr_mbox_t *m)
 			continue;
 		}
 		if (!tr_rot_valid(in.rotation)) {
-			abi_fault(m, 2u | (uint32_t)in.rotation << 8);
+			abi_fault(m, 2u | ((uint32_t)in.rotation & 0xFFu) << 8); /* low byte only: 270 -> 14 */
 		}
 		if (t_pub_valid) {
 			uint32_t gap = cntvct_lo() - t_pub;
