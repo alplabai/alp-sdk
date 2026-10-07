@@ -3,7 +3,7 @@
 Per SoM family and display path: what exists in the tree, what has a
 written bench record, and what is still open. It exists so issue
 [#23](https://github.com/alplabai/alp-sdk/issues/23) can be narrowed to
-the remaining real work. Snapshot of `dev` at `c49cd5dca` (2026-10-02).
+the remaining real work. Snapshot of `dev` at `2d2a85333` (2026-10-07), plus the Riverdi RVT121 shield and Trace Runner work of #2257.
 
 **How to read the hardware column.** A cell only says "verified" when a
 repo file, issue or PR records a bench run, and it cites that record. A
