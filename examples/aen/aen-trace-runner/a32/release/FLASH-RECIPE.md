@@ -106,11 +106,11 @@ header are the SAME files in both:
 
 | image | md5 |
 |---|---|
-| `renderer.bin` (460,460 B, `TR_A32_CRC 0xB8180736`) | `ec9b5f6de8becb37eb7d7fbb5dc019ff` |
+| `renderer.bin` (460,460 B, `TR_A32_CRC 0xD6605303`) | `47e15a9eecddba4fb21116b7c7b9f7be` |
 | `a32_stub.bin` | `c4cd1b52855bfbc329f0bf625df3f3f5` |
-| `tr_launch.h` | `fc61194c36f4cb418a48cbdaf08565c2` |
-| RVT121 `he_zephyr.bin` | `0961d32a14a638f938198ca57758a285` |
-| RK055 `he_zephyr.bin` | `8c844fa872664cfaa70c417c1e00c4ef` |
+| `tr_launch.h` | `282bf49ccf63ead0b651270f96e5b378` |
+| RVT121 `he_zephyr.bin` | `69c7e605e77357e8309199aa586d7a86` |
+| RK055 `he_zephyr.bin` | `8547ba008af1fa5b9b360b5b649716a5` |
 
 The packaged items' addresses and sizes (`a32_app`, `atoc`, `bl32`, `movenet_model`) come from the
 `flowd/recipe.txt` the packaging run prints; this file no longer carries a table of them, because
