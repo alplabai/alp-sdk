@@ -312,6 +312,13 @@
 		reset-gpios = <&lcd_exp 3 GPIO_ACTIVE_LOW>;
 		screen-width = <1280>;
 		screen-height = <800>;
+		/* Touch coordinates follow the panel's scan-out; with mount-rotation 90
+		 * an upright consumer sees x = Y and y = 1279 - X: X inverted over
+		 * screen-width, then swapped (the binding inverts before it swaps).
+		 * Panel coordinates: a consumer that shows a window of the panel
+		 * (the Trace Runner's 40-row-down layer) adds that offset itself. */
+		inverted-x;
+		swapped-x-y;
 		status = "okay";
 	};
 };
@@ -338,6 +345,10 @@
 	clock-frequency = <36363636>;
 	bg-color = <0x000000>;
 	memory-region = <&lcd_fb>;
+
+	/* Mounted on its side (bench-verified upright with 90): producers turn
+	 * their image 90 degrees clockwise (alp_display_caps_t.rotation). */
+	mount-rotation = <90>;
 
 	/* L1 only: a single full-screen RGB565 layer, same shape as
 	 * e1m_evk_rk055hdmipi4ma0's -- the DSI LINK format (RGB888,
