@@ -343,14 +343,20 @@ static bool t_pwm_set_get(soak_stat_t *st)
  * The GD32 is NOT reset between CM33 images, so a previous app may still
  * hold the TIMER7 claim (the functional app's scope loop leaves PWM7
  * running).  Stop PWM4..PWM7 first: PWM_SET with period 0 / duty 0
- * releases the claim.  Firmware that predates stop answers an error;
- * ignore it and let the row's own status check decide. */
+ * releases the claim.  Firmware before protocol minor 17 has no stop, so
+ * a channel a previous image left running cannot be released: there a
+ * BUSY answer is reported as a SKIP (see row_is_skipped), not a failure. */
+static bool pwm_single_pulse_skipped;
+
 static bool t_pwm_single_pulse(soak_stat_t *st)
 {
 	for (uint8_t ch = 4u; ch <= 7u; ch++) {
 		(void)gd32g553_pwm_stop(&ctx, ch);
 	}
 	const alp_status_t s = gd32g553_pwm_single_pulse(&ctx, 4u, 1000u);
+	pwm_single_pulse_skipped =
+	    s == ALP_ERR_BUSY && ctx.version.minor < GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR;
+	if (pwm_single_pulse_skipped) return true;
 	if (s != ALP_OK) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "status=%d", (int)s);
@@ -1079,6 +1085,7 @@ static bool row_is_skipped(bool (*fn)(soak_stat_t *))
 {
 	if (fn == t_adc_stream2) return (ctx.granted & GD32G553_LINK_FEAT_ADC_STREAM2) == 0u;
 	if (fn == t_batch) return (ctx.granted & GD32G553_LINK_FEAT_BATCH) == 0u;
+	if (fn == t_pwm_single_pulse) return pwm_single_pulse_skipped;
 	return false;
 }
 

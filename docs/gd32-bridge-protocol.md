@@ -824,7 +824,7 @@ second `BEGIN` whose channel shares the first stream's converter
 answers `STATUS_INVAL`), and `STREAM_END` restores the converter's
 single-shot state for subsequent `ADC_READ` calls.  While a stream
 runs, a single-shot `ADC_READ` on **either** channel of its
-converter answers `STATUS_IO` (fw `v0.2.8+`) -- retry after
+converter answers `STATUS_BUSY` (fw `v0.2.8+`) -- retry after
 `STREAM_END`.  `STREAM_END` itself answers `STATUS_IO` in the rare
 case the converter's restore re-calibration never completes (the
 stream still tears down; the converter is back but in an unproven
