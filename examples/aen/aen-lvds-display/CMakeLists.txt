@@ -18,7 +18,7 @@
 #
 # The whole chain comes from the e1m_evk_rvt121hvdfwca0 shield
 # (zephyr/boards/shields/): it turns on the SoC display nodes, adds the
-# bridge, the carrier's I2C GPIO expander (bridge EN) and the framebuffer
+# bridge, the carrier's I2C GPIO expander (touch RESET; bridge EN is SoC GPIO P13_4) and the framebuffer
 # memory region, and enables the drivers.  This example appends the shield
 # here so a plain `west build` needs no -DSHIELD.
 

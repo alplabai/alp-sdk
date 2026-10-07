@@ -4,7 +4,7 @@
 # Everything the Riverdi RVT121HVDFWCA0-B (via a TI SN65DSI83 DSI-to-LVDS
 # adapter) display chain needs on an E1M-AEN SoM, so an app only adds the
 # shield: the DSI host + D-PHY, the SN65DSI83 bridge driver, and the
-# carrier's I2C GPIO expander that carries the bridge's EN pin.  Unlike
+# carrier's I2C GPIO expander (touch RESET; the bridge EN is a direct SoC GPIO).  Unlike
 # e1m_evk_rk055hdmipi4ma0, DISPLAY_CDC200 is what actually renders here (the
 # bridge is init-only, no display API of its own) and there is no panel
 # driver or fixed regulator -- the bridge's EN sequencing IS the panel-power

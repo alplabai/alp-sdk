@@ -196,7 +196,8 @@ int main(void)
 	const struct device *dsi    = DEVICE_DT_GET(DSI_NODE);
 	const struct device *disp   = DEVICE_DT_GET(DISPLAY_NODE);
 
-	/* Step 1: the panel-control expander (the bridge's EN pin lives behind it). */
+	/* Step 1: the panel-control expander (touch RESET lives behind it; the bridge
+	 * EN is a direct SoC GPIO, P13_4). */
 	bool exp_ok = dev_ready("lcd-exp", exp);
 
 	/*

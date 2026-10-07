@@ -4,7 +4,7 @@
  *
  * aen-lvds-display overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
  *
- * The display chain, the SN65DSI83 bridge, the carrier expander and the
+ * The display chain, the SN65DSI83 bridge, the touch-reset expander and the
  * framebuffer region all come from the e1m_evk_rvt121hvdfwca0 shield
  * (CMakeLists.txt).  This overlay only retargets the image for the bench
  * RAM-run: ROM to ITCM (path-reference form &itcm; the phandle-array form

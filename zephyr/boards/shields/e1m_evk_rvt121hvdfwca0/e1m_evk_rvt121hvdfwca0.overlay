@@ -37,11 +37,13 @@
  * regulator cannot express (EN must not go high until the DSI clock lane is
  * already running HS -- see the driver's header comment).
  *
- * ADAPTER PCB ROLES: everything below marked UNVERIFIED assumes the adapter
- * reuses the e1m_evk_rk055hdmipi4ma0 shield's GPIO-expander role map (the
- * maintainer's stated assumption for this bring-up), because no adapter
- * schematic was available for this change.  Confirm against the real
- * adapter before trusting a dark panel vs. a wiring mismatch.
+ * WIRING (EVK-03, maintainer-confirmed): the bridge EN is on the mikroBUS
+ * INT pin (CK_INT = E1M_I2S1_SDI = pad AH6 = Alif P13_4, metadata/pinmux/
+ * aen.yaml:58) and the backlight enable is on the mikroBUS PWM pin (CK_PWM0 =
+ * E1M_PWM6 = pad A3 = Alif P10_7, aen.yaml:15) -- both plain SoC GPIOs.  (CK_CS
+ * = E1M_SPI1_CS0 is CC3501E-owned, aen.yaml:100, so it cannot carry EN.)  The
+ * ILI2511 touch RESET is still UNVERIFIED: it assumes the adapter reuses the
+ * e1m_evk_rk055hdmipi4ma0 shield's GPIO-expander role map (lcd_exp P3).
  *
  * ------------------------- Lane-rate / clock math -------------------------
  * 2 DSI data lanes, RGB888 (24 bpp), non-burst-sync-events, the Ensemble
@@ -168,13 +170,10 @@
  * The panel-control I2C GPIO expander on the E1M bus 0 (SoC I2C2).  reg
  * 0x73 is EVK_I2C_ADDR_TCAL9538_MAIN in metadata/boards/e1m-evk.yaml.
  *
- * UNVERIFIED -- role assumption: P0 is assumed to carry the same net
- * e1m_evk_rk055hdmipi4ma0 uses for panel power (J6 pin 32), repurposed here
- * as the SN65DSI83's EN pin (bridge@2c below) instead of a fixed-regulator
- * enable.  P3 is assumed to carry CTP_RST (EVK_IOEXP_CTP_RST = 3 in that
- * same metadata file, for the touch controller on the panel's own FFC) --
- * that one constant IS established EVK metadata, not adapter-specific, but
- * whether the adapter routes it through at all is still unverified.
+ * Kept ONLY for the touch controller's RESET (touch@41 below): P3 is assumed
+ * to carry CTP_RST (EVK_IOEXP_CTP_RST = 3 in that metadata file -- established
+ * EVK metadata, but whether the adapter routes it through is UNVERIFIED).  The
+ * bridge EN no longer uses this expander; it is a direct SoC GPIO (P13_4).
  *
  * nxp,pca9538 (not nxp,pcal9538): see e1m_evk_rk055hdmipi4ma0's overlay
  * comment -- same part, same reasoning (#1974).
@@ -192,33 +191,32 @@
 };
 
 /*
- * Backlight enable, P5_5 -- the same SoM backlight-driver enable pin
- * e1m_evk_rk055hdmipi4ma0 uses (metadata/e1m_modules/aen/on-module-links.yaml,
- * backlight.enable).  Static high there means full brightness because no
- * panel driver ever pulses it for dimming; here there is no panel driver at
- * all (the bridge is init-only), so a gpio-hog drives it directly instead of
- * a panel's bl-gpios. `bl-gpios` is ALSO set on &mipi_dsi purely so
- * zephyr/soc-bridge/alif/mipi_display_e8.c's pad-mux helper still muxes the
- * pad to its GPIO function (alt 0) with the input receiver on -- gpio_dw
- * applies no pad mux of its own, and without it a plain gpio-hog would
- * configure the port register while the physical pad stayed on whatever
- * alternate function reset left it at.
+ * Backlight enable, P10_7 = E1M_PWM6 = the mikroBUS PWM pin (CK_PWM0), wired to
+ * the panel backlight on EVK-03.  First bring-up: held HIGH as a plain GPIO
+ * (100% backlight) by a gpio-hog -- no PWM device.  A real PWM backlight
+ * (P10_7 = UT3_T1_C, PIN_P10_7__UT3_T1_C, via <alp/pwm.h>) comes later.
+ * The pad is muxed to GPIO in pinctrl_i2c1_dsi below, because
+ * snps,designware-gpio applies no pad mux of its own.
  *
- * NOTE (real hardware, not a firmware limitation): the Riverdi panel's own
- * PWM pin (its connector pin 18) is a TPS61500 backlight-driver dimming
- * input, 200 Hz-1 kHz -- unrelated to this SoM-side enable.  Static high on
- * THIS pin is 100% brightness at whatever the TPS61500 is programmed for;
- * it is not a substitute for real PWM dimming.
+ * NOTE (real hardware): the Riverdi panel's own PWM pin (its connector pin
+ * 18) is a TPS61500 dimming input, 200 Hz-1 kHz; static high is full
+ * brightness.
  */
-&gpio5 {
+&gpio10 {
 	status = "okay";
 
 	bl_en_hog: bl-en-hog {
 		gpio-hog;
-		gpios = <5 GPIO_ACTIVE_HIGH>;
+		gpios = <7 GPIO_ACTIVE_HIGH>;
 		output-high;
 		line-name = "lcd-bl-en";
 	};
+};
+
+/* Bridge EN: P13_4 (see bridge@2c).  Controller enabled here; no hog, the
+ * SN65DSI83 driver sequences it itself. */
+&gpio13 {
+	status = "okay";
 };
 
 /*
@@ -238,6 +236,17 @@
 			pinmux = <PIN_P3_7__I2C1_SCL_B>, <PIN_P7_2__I2C1_SDA_C>;
 			input-enable;
 			bias-pull-down;
+		};
+
+		/*
+		 * Bridge EN (P13_4, default alt is LPI2S_SDI_C) and backlight enable
+		 * (P10_7) as plain GPIOs.  Muxed here because snps,designware-gpio has
+		 * no pinctrl-0 (same trick as e1m_evk_rpi_csi's CAM_MUX_SEL).  No
+		 * LPI2S/I2S node is enabled by this shield, so nothing else claims
+		 * either pad.
+		 */
+		group1 {
+			pinmux = <PIN_P13_4__GPIO>, <PIN_P10_7__GPIO>;
 		};
 	};
 };
@@ -264,8 +273,8 @@
 		mipi-dsi = <&mipi_dsi>;
 		data-lanes = <2>;
 		pixel-format = <MIPI_DSI_PIXFMT_RGB888>;
-		/* UNVERIFIED: P0 on lcd_exp -- see that node's comment above. */
-		enable-gpios = <&lcd_exp 0 GPIO_ACTIVE_HIGH>;
+		/* P13_4 = CK_INT / E1M_I2S1_SDI, active high. */
+		enable-gpios = <&gpio13 4 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
 
@@ -350,9 +359,6 @@
 	 * margin over 438.18 Mbps, still under the 500 Mbps app-note cap.
 	 */
 	panel-max-lane-bandwidth = <440000000>;
-
-	/* bl-gpios: see the &gpio5 comment above. */
-	bl-gpios = <&gpio5 5 GPIO_ACTIVE_HIGH>;
 
 	status = "okay";
 
