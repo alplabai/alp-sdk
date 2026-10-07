@@ -224,6 +224,8 @@
 		compatible = "alp,display-backlight";
 		led = <&backlight>;
 		default-brightness = <30>;
+		/* Lit only if the display controller and the bridge came up. */
+		required-devices = <&cdc200 &bridge>;
 	};
 };
 

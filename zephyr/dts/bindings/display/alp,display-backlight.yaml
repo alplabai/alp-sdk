@@ -27,4 +27,14 @@ properties:
   default-brightness:
     type: int
     default: 100
-    description: Initial brightness, percent (0..100).
+    description: |
+      Initial brightness, percent, 0..100 (asserted at build time).
+
+  required-devices:
+    type: phandles
+    description: |
+      Devices that must be ready before the backlight is lit (the display
+      controller, a bridge): if any of them failed to initialise the backlight
+      stays off and the reason is logged, instead of lighting a dead panel.
+      The backlight is set at a later APPLICATION priority than the display
+      chain, so these have run by then.
