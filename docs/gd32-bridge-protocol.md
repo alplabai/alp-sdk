@@ -420,8 +420,8 @@ Both enables drive their module low-then-high: the host holds
 `GPIO_WRITE` low for >= 10 ms before the rising edge, matching the
 on-module Murata LBEE5HY2FY-922's REG_ON timing requirement.
 
-The Linux `gpio-gd32-bridge` driver additionally exports line 21 `se-rst` (line 20 is
-reserved for `can-stby`, bridge bit 20, #2341), which is not a `GPIO_WRITE` pad: setting it sends `CMD_SE_RESET`
+The Linux `gpio-gd32-bridge` driver additionally exports line 20 `can-stby` (bridge bit 20, GD32 `PB13`, the TCAN1044 STB shared by
+both transceivers; requestable as a `phy-can-transceiver` `standby-gpios`) and line 21 `se-rst`, which is not a `GPIO_WRITE` pad: setting it sends `CMD_SE_RESET`
 (`0x41`, payload one byte, 1 = assert = hold the OPTIGA Trust M in reset) and
 it is never replayed, so a bridge reset leaves the part released. Userspace
 pulses it through the gpiochip labelled `gd32-bridge-gpio` instead of opening
@@ -435,6 +435,43 @@ moves; bit 20 is `CAN_STBY`):
 |-----|---------|----------|---------------------|------------|
 | 21  | `IO15`  | `PB4`    | analog, no drive (PB4 parked explicitly) | `GD32G553_GPIO_LINE_E1M_IO15` |
 | 22  | `IO26`  | `PC2`    | analog, no drive    | `GD32G553_GPIO_LINE_E1M_IO26` |
+
+At protocol minor `>= 17` the pad map grows to 27 bits with the four camera LDO
+enables (SoM power-supply sheet, not E1M-X pads), bit `n` = Linux line `n + 1`
+(line 21 is `se-rst`):
+
+| Bit | Linux line / `gpio-line-names` | GD32 pad |
+|-----|--------------------------------|----------|
+| 23  | 24 `cam-en-ldo0`               | `PC3`    |
+| 24  | 25 `cam-en-ldo1`               | `PE8`    |
+| 25  | 26 `cam-en-ldo2`               | `PE7`    |
+| 26  | 27 `cam-en-ldo3`               | `PE10`   |
+
+A bridge older than 0.17 refuses these lines. Kernel consumers (`can-stby`,
+`cam-en-ldo*`) get `-EPROBE_DEFER` while the bridge is silent, so their probe is
+retried.
+
+Also at minor `>= 17` the Linux driver exposes, on the same gpio node:
+
+- an I2C adapter for E1M-X I2C3 (GD32 `PC8` SCL, `PC9` SDA) over `I2CM_CONFIG`
+  / `I2CM_XFER` / `I2CM_RESULT`, from the node's `i2c` child (label
+  `e1m_x_i2c3`, alias `i2c3`, `clock-frequency` 100000 or 400000, default
+  100 kHz).  I2C link only; the SoM has no pull-ups on I2C3, the carrier or
+  module must provide them (with no pull the pads float low and the firmware
+  reports TIMEOUT / BUS_STUCK).  A transfer made before the bridge answers waits up to
+  1 s for `GET_VERSION`.
+- a polled interrupt controller (`#interrupt-cells = <2>`): `GPIO_READ` every
+  10 ms while any line is unmasked, so an edge shorter than 10 ms is missed
+  and a level line re-fires every poll while asserted.
+- a PWM provider for E1M `PWM0`..`PWM7` over `PWM_SET` / `PWM_GET`
+  (`#pwm-cells = <2>`: channel, period in ns; normal polarity only).
+  Enabling a channel on a bridge below 0.17 returns `-EOPNOTSUPP`.  `PWM0..3`
+  share `TIMER0` and `PWM4..7` share `TIMER7`, so the enabled channels of a
+  group share one period: enabling a channel with a period different from an
+  enabled sibling returns `-EBUSY` (the sibling is never silently retuned);
+  disable the group's channels first to change it.  Disabling sends
+  `PWM_SET` period 0 / duty 0 (stop and release), which is why it needs 0.17:
+  older firmware underflows the shared timer reload on period 0.
 
 `PB4` resets as the JTAG `NJTRST` pin (alternate function, pull-up) on GD32
 parts, so firmware 0.3.1 parks it analog / no pull at boot; debug access on

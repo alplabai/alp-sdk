@@ -1,0 +1,280 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Per-PR `tan build` gate -- compiles one example per SoM family through the
+# customer path (`tan build --project <ex> --sdk-root "$PWD"`), so a break in
+# the build path a customer actually runs fails THIS PR instead of surfacing
+# post-merge in tan-cli's seam2 (dispatch-tan-parity.yml fires on `push`).
+#
+# What already runs tan, and why it is not enough:
+#
+#   * onramp-clean-container.yml -- docs-path filtered; its real-ELF job is
+#     additionally gated behind the `run-full-quickstart` label / a schedule.
+#   * dispatch-tan-parity.yml    -- post-merge push to dev/main only.
+#   * pr-alp-build.yml / pr-twister*.yml -- the DIRECT orchestrator / west /
+#     twister path; they never go through `tan`.
+#
+# Matrix (one Zephyr-buildable example per SoM family that has a Zephyr
+# target in this repo -- each leg was built through `tan build` before this
+# file landed):
+#
+#   AEN  E1M-AEN801 -> examples/peripheral-io/gpio-button-led
+#                      (m55_he + m55_hp Zephyr slices)
+#   V2N  E1M-V2N101 -> examples/multicore/rpmsg-v2n
+#                      (m33_sm Zephyr slice; the a55_cluster Yocto slice is
+#                       skipped by tan's missingTool=skip policy because the
+#                       runner has no bitbake -- the Yocto lane is pr-bitbake.yml)
+#
+# NX91 (E1M-NX9101) is deliberately absent: zephyr/boards/alp/ carries no
+# i.MX 93 board, so there is no Zephyr slice for `tan build` to compile on a
+# stock runner (its Linux slice is Yocto-only, covered by pr-bitbake.yml).
+# Add an NX91 leg in the same PR that adds an NX91 Zephyr board.
+#
+# Install/cache mechanics are reused, not invented: tan comes from a
+# tan-cli checkout + `pip install ./tan-cli/python` (onramp-clean-container.yml
+# `full-quickstart-build`), the Zephyr workspace from scripts/bootstrap.sh and
+# the toolchain from the metadata/toolchains.json pin with sha256 verification
+# (pr-getting-started-aen801.yml).
+#
+# `merge_group`: not a required context on dev today, so this is
+# purely additive -- the trigger exists so promoting it to required later does
+# not reopen #1415 (a required check whose workflow never reports on the
+# queue ref wedges the queue in AWAITING_CHECKS).
+
+name: pr-tan-build
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'firmware/**'
+      - 'blocks/**'
+      - 'vendors/**'
+      - 'tools/**'
+      - '.python-version'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'chips/**'
+      - 'metadata/**'
+      - 'scripts/**'
+      - 'examples/**'
+      - 'zephyr/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'west.yml'
+      - '.github/workflows/pr-tan-build.yml'
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The tan-cli release this gate installs. MUST move with the tan release:
+  # bump it in the PR that follows every new tan-cli tag, and let this job run
+  # on that bump PR before merging it. A ref, not `dev`, so an unreleased
+  # tan-cli regression cannot redden unrelated alp-sdk PRs; the customer path
+  # is the released tan. onramp-clean-container.yml deliberately tracks tan
+  # `dev` instead (it is the early-warning lane for the quickstart), so the two
+  # pins differ on purpose.
+  TAN_REF: v0.6.0
+
+jobs:
+  tan-build:
+    name: tan-build · ${{ matrix.family }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    strategy:
+      # Surface every broken family at once rather than masking later legs.
+      fail-fast: false
+      matrix:
+        include:
+          - family: AEN
+            sku: E1M-AEN801
+            example: examples/peripheral-io/gpio-button-led
+            # Slices that must report status "ok" in the envelope.
+            zephyr_cores: m55_he m55_hp
+          - family: V2N
+            sku: E1M-V2N101
+            example: examples/multicore/rpmsg-v2n
+            zephyr_cores: m33_sm
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          path: alp-sdk
+          fetch-depth: 1
+
+      - name: Checkout tan-cli (${{ env.TAN_REF }})
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          repository: alplabai/tan-cli
+          ref: ${{ env.TAN_REF }}
+          path: tan-cli
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
+        with:
+          python-version-file: alp-sdk/.python-version
+
+      - name: Install host build tools
+        # 20min: finite so a HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        run: |
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh update
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh install -y --no-install-recommends \
+              ninja-build gperf ccache dfu-util device-tree-compiler \
+              python3-dev python3-pip python3-setuptools python3-wheel \
+              libffi-dev libssl-dev xz-utils file make wget
+
+      - name: Install tan (pinned ${{ env.TAN_REF }})
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv tan-cli/.venv
+          tan-cli/.venv/bin/python -m pip install ./tan-cli/python
+          echo "${GITHUB_WORKSPACE}/tan-cli/.venv/bin" >> "${GITHUB_PATH}"
+          tan-cli/.venv/bin/tan --version
+
+      - name: Read Zephyr SDK toolchain pin (metadata/toolchains.json)
+        run: |
+          set -euo pipefail
+          python3 -c '
+          import json
+          d = json.load(open("alp-sdk/metadata/toolchains.json"))
+          sdk = d["zephyrSdk"]
+          art = next(a for a in sdk["artifacts"] if a["host"] == "linux-x86_64" and a["component"] == "minimal-sdk")
+          version = sdk["version"]
+          url = sdk["baseUrl"] + art["filename"]
+          sha256 = art["sha256"]
+          print(f"ZEPHYR_SDK_VERSION={version}")
+          print(f"ZEPHYR_SDK_URL={url}")
+          print(f"ZEPHYR_SDK_SHA256={sha256}")
+          ' >> "$GITHUB_ENV"
+
+      - name: Cache Zephyr workspace (modules + zephyr)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 5
+        with:
+          path: |
+            zephyr
+            modules
+          key: tan-build-zephyr-v4.4.1-${{ runner.os }}-${{ hashFiles('*/zephyr/patches.yml', '*/west.yml') }}
+
+      - name: Cache Zephyr SDK
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 15
+        with:
+          path: zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
+          key: tan-build-sdk-${{ env.ZEPHYR_SDK_VERSION }}-arm-zephyr-eabi-${{ runner.os }}
+
+      - name: Assemble the workspace (scripts/bootstrap.sh)
+        working-directory: alp-sdk
+        run: bash scripts/bootstrap.sh
+
+      - name: Install Zephyr SDK (arm-zephyr-eabi only)
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          ARCHIVE="zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz"
+          if [ ! -x "zephyr-sdk-${ZEPHYR_SDK_VERSION}/setup.sh" ]; then
+            wget --tries=3 --waitretry=5 -O "${ARCHIVE}" "${ZEPHYR_SDK_URL}"
+            ACTUAL_SHA256="$(sha256sum "${ARCHIVE}" | awk '{print $1}')"
+            if [ "${ACTUAL_SHA256}" != "${ZEPHYR_SDK_SHA256}" ]; then
+              echo "::error::sha256 mismatch for ${ARCHIVE}: expected ${ZEPHYR_SDK_SHA256}, got ${ACTUAL_SHA256}"
+              exit 1
+            fi
+            tar xf "${ARCHIVE}"
+          fi
+          zephyr-sdk-${ZEPHYR_SDK_VERSION}/setup.sh -t arm-zephyr-eabi -h -c
+
+      - name: tan build ${{ matrix.family }} (${{ matrix.sku }} · ${{ matrix.example }})
+        working-directory: alp-sdk
+        timeout-minutes: 20
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+          ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
+          ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+          EXAMPLE: ${{ matrix.example }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Each step is a fresh shell: the workspace venv (west + the
+          # planner's PyYAML/jsonschema) is not carried over. tan stays on
+          # PATH via GITHUB_PATH (its own venv) after the activate below.
+          source ../.venv/bin/activate
+          unset Python3_ROOT_DIR Python3_INCLUDE_DIR Python3_LIBRARY pythonLocation
+          # stdout is the JSON envelope; west/cmake chatter goes to stderr.
+          tan build --project "${EXAMPLE}" --sdk-root "${PWD}" --format json \
+              > "${RUNNER_TEMP}/tan-build-envelope.json"
+          rc=$?
+          echo "tan build exit code: ${rc}"
+          exit 0
+
+      - name: Upload tan build envelope
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        timeout-minutes: 5
+        with:
+          name: tan-build-envelope-${{ matrix.family }}
+          overwrite: true
+          path: ${{ runner.temp }}/tan-build-envelope.json
+          if-no-files-found: warn
+
+      # The envelope, not the exit code alone, is the verdict: a Yocto slice
+      # skipped for a missing bitbake is a warning (ok:true), but the Zephyr
+      # slices this leg exists for must each report status "ok" and leave an ELF.
+      - name: Assert envelope ok:true and every Zephyr slice built
+        working-directory: alp-sdk
+        timeout-minutes: 5
+        env:
+          EXAMPLE: ${{ matrix.example }}
+          ZEPHYR_CORES: ${{ matrix.zephyr_cores }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, sys
+          env = json.load(open(os.environ["RUNNER_TEMP"] + "/tan-build-envelope.json"))
+          errors = []
+          if not env.get("ok"):
+              errors.append(f"envelope ok:false (exitCode={env.get('exitCode')})")
+          slices = {s["coreId"]: s for s in env.get("data", {}).get("slices", [])}
+          for core in os.environ["ZEPHYR_CORES"].split():
+              st = slices.get(core, {}).get("status")
+              if st != "ok":
+                  errors.append(f"slice {core}: status={st!r} (want 'ok')")
+          for issue in env.get("issues", []):
+              if issue.get("severity") == "error":
+                  errors.append(f"issue {issue.get('code')}: {issue.get('message')}")
+          if errors:
+              for e in errors:
+                  print(f"::error::tan build {os.environ['EXAMPLE']}: {e}")
+              sys.exit(1)
+          print("tan build envelope ok:true; slices:",
+                {k: v.get("status") for k, v in slices.items()})
+          PY
+          missing=0
+          for core in ${ZEPHYR_CORES}; do
+            elf="${EXAMPLE}/build/${core}-zephyr/build/zephyr/zephyr.elf"
+            if [ ! -s "${elf}" ]; then
+              echo "::error::slice ${core} of ${EXAMPLE}: no non-empty ${elf} although the envelope reported it built"
+              missing=1
+            else
+              echo "Built: ${elf} ($(stat -c%s "${elf}") bytes)"
+            fi
+          done
+          exit "${missing}"
