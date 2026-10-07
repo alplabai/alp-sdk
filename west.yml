@@ -407,14 +407,15 @@ manifest:
         - extras-lwrb-nanopb
 
     # micro-ROS Zephyr module for the ADR 0018 Zephyr+ROS 2 flagship.
-    # Pinned to the Humble branch revision verified on 2026-07-05; the
+    # Pinned to the last Humble-branch commit that still clones Humble sources
+    # (8477de12; the branch tip cfbddc5e clones Jazzy, upstream PR #162); the
     # module's modules/libmicroros/Kconfig exposes the real master enable
     # symbol CONFIG_MICROROS.  Kept default-enabled so a board.yaml
     # `libraries: [micro-ros]` selection can build in the standard
     # alp-sdk workspace without an out-of-band EXTRA_ZEPHYR_MODULES path.
     - name: micro_ros_zephyr_module
       remote: micro-ROS
-      revision: cfbddc5e4334317a1036e883ce8f6af12b1da66a
+      revision: 8477de124763e4701f8029d01216d6f6b524dde9
       path: modules/lib/micro_ros_zephyr_module
 
     # ---------------------------------------------------------------

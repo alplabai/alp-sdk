@@ -219,6 +219,15 @@ _ZEPHYR_DRIVER_INCLUDE_ALLOWLIST: dict[str, dict[str, str]] = {
             "messaging; no portable <alp/*.h> IPC surface exists yet."
         ),
     },
+    "multicore/microros-ros2-v2n": {
+        "mbox": (
+            "m33_sm/src/rpmsg_link.c, the raw OpenAMP/MHU mailbox "
+            "transport under the micro-ROS XRCE-DDS custom transport; "
+            "<alp/rpc.h> is framed request/response RPC, not the raw "
+            "datagram endpoint XRCE needs, so no portable <alp/*.h> IPC "
+            "surface fits yet (same gap as multicore/rpmsg-v2n)."
+        ),
+    },
     "peripheral-io/alp-console": {
         "pwm": (
             "RGB status LED -- pre-existing gap predating #520 and out "
