@@ -391,7 +391,9 @@ part of the declarative output either.
 **Manifest contract (IDE / tooling).**  `system-manifest.yaml` is the
 single derived projection of `board.yaml` — one `slices[]` entry per
 per-core image (its `os`, `build_dir`, `output_artefact`,
-`board`/`machine`, and `flash_method`/`flash_args`), plus the `ipc:`
+`board`/`machine`, and `flash_method`/`flash_args`, plus the optional
+`flash_method_resolved` a flasher records when it dispatched to a different
+backend than the declared `flash_method`), plus the `ipc:`
 links, `helper_mcus:`, the resolved `storage:` partitions, and the
 `memory:` region table those last two refer INTO by name
 (`ipc[].carve_out_region` and `storage[].flash_device` each name a

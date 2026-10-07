@@ -55,7 +55,8 @@
           "log_path": { "type": "string" },
           "reason": { "type": "string", "description": "Why a slice was skipped/failed." },
           "flash_method": { "type": "string", "description": "Backend the flasher dispatches to (e.g. zephyr_west_flash, yocto_wic_to_sd_or_emmc)." },
-          "flash_args": { "type": "object", "description": "Method-specific flash arguments (shape varies by flash_method)." }
+          "flash_args": { "type": "object", "description": "Method-specific flash arguments (shape varies by flash_method)." },
+          "flash_method_resolved": { "type": "string", "description": "OPTIONAL, additive. The flash backend the flasher actually dispatched to, recorded by the flasher (tan) when it differs from the declared `flash_method` (e.g. declared `zephyr_west_flash`, resolved `alif_mram_jlink` because `flash_args.jlink_flash_device` is set). Same type as `flash_method` (an open string -- `flash_method` carries no enum). The emitter never writes it; absence means 'no override was recorded'. Readers that predate it ignore it." }
         }
       }
     },

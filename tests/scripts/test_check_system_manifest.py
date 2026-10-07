@@ -177,3 +177,44 @@ def test_the_join_is_skipped_when_the_memory_pane_is_absent(tmp_path):
     p.write_text(json.dumps(doc), encoding="utf-8")
     proc = _run("--manifest", str(p))
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+# ---------------------------------------------------------------------
+# slices[].flash_method_resolved (#2756): optional, additive, same type as
+# flash_method, no schema_version bump.
+# ---------------------------------------------------------------------
+
+
+def _slice(**extra):
+    row = {"core_id": "m55_hp", "os": "zephyr", "status": "ok",
+           "flash_method": "zephyr_west_flash", "flash_args": {}}
+    row.update(extra)
+    return row
+
+
+def _write(tmp_path, slice_row):
+    p = tmp_path / "m.yaml"
+    p.write_text(json.dumps(_manifest(slices=[slice_row])), encoding="utf-8")
+    return p
+
+
+def test_slice_without_flash_method_resolved_validates(tmp_path):
+    proc = _run("--manifest", str(_write(tmp_path, _slice())))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_slice_with_flash_method_resolved_validates(tmp_path):
+    p = _write(tmp_path, _slice(flash_method_resolved="alif_mram_jlink"))
+    proc = _run("--manifest", str(p))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_slice_flash_method_resolved_wrong_type_rejected(tmp_path):
+    for bad in (5, None, ["alif_mram_jlink"], {"m": "x"}):
+        proc = _run("--manifest", str(_write(tmp_path, _slice(flash_method_resolved=bad))))
+        assert proc.returncode != 0, bad
+
+
+def test_slice_other_unknown_key_still_rejected(tmp_path):
+    proc = _run("--manifest", str(_write(tmp_path, _slice(flash_method_bogus="x"))))
+    assert proc.returncode != 0
