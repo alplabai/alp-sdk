@@ -32,7 +32,7 @@ span by more than 2 %. A DWT stall alone still ends in `RESULT PASS` with a WARN
 ## Console protocol
 
 A strict subset of `aen-inference-energy`'s `ENERGY-*` protocol, so
-`tan model run --device --capture FILE` parses both apps with the same code:
+the tan on-device model-run capture parser (tan-cli#1287; the `--device` / `--capture` flags ship with that work) reads both apps with the same code:
 
 ```
 ENERGY-CFG {"mode":"latency-only","cycles_per_s":160000000,"npu_dispatched":true,"model":"<name>","model_bytes":N,"arena_used_bytes":N,"arena_bytes":N,"sram_peak_bytes":N,"windows":W,"inferences_per_window":N,"timestamp_source":"dwt-cyccnt"}
@@ -76,15 +76,15 @@ tan build --project examples/aen/aen-inference-latency \
   -D AEN_NPU_MODEL=<model_int8>.tflite
 ```
 
-Then RAM-run it (`tan flash --ram`, or the AEN `ram-run.sh` helper) and save the
-console to a file; `tan model run --device --capture FILE` turns it into the host-tier
+Then RAM-run it with the AEN `ram-run.sh` helper (tan's RAM-run flash mode, tan-cli#1313, is not released yet) and save the
+console to a file; the tan capture parser (tan-cli#1287) turns it into the host-tier
 envelope. Hold the labgrid reservation first, as for any bench work.
 
 `ram-run.sh` defaults (0x600 bytes, 1500 ms) capture only about one window of the
 roughly 3.5-4 KB this app prints. Call it as
 `ram-run.sh <build-dir> <sleep_ms >= expected run time> 0x2000`, and check the capture
 ends with a `RESULT PASS` line before trusting it (a truncated console reads as fewer
-windows). `tan flash --ram` reads the console symbol at its real size.
+windows). tan's RAM-run mode (tan-cli#1313) will read the console symbol at its real size.
 
 ## Build + run — Flow D (models too big for ITCM)
 
