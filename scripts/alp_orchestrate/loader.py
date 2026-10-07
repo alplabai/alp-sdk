@@ -1402,4 +1402,14 @@ def load_board_yaml(path: Path, *,
     # extra_libraries: entry the schema couldn't validate cleanly.
     _validate_consistency(out)
 
+    # `diagnostics.link: itcm` (tan-cli#1350) is implemented by tan's planner
+    # only (ADR-0026).  This planner would otherwise accept the schema-valid
+    # knob and silently emit an MRAM-linked image: refuse instead.
+    if str(out.diagnostics.get("link") or "auto").strip().lower() != "auto":
+        raise OrchestratorError(
+            "diagnostics.link: itcm is implemented by `tan build` only "
+            "(ADR-0026: tan owns the planner); alp_orchestrate would emit an "
+            "MRAM-linked image and silently ignore it.  Build with `tan build`, "
+            "or remove `diagnostics.link`.")
+
     return out
