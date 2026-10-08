@@ -145,7 +145,6 @@ static void log_first_frame(uint64_t waited_us)
 	       (unsigned)total);
 }
 
-#if TR_M55_AUTOLAUNCH
 /* The stub initialised the page this boot (or an earlier one): stub_state
  * and ctrl_cmd are real, not power-on garbage. */
 static bool stub_alive(void)
@@ -169,6 +168,7 @@ static bool stub_alive(void)
 	return true;
 }
 
+#if TR_M55_AUTOLAUNCH
 /* The mailbox's ctrl_entry/len/crc name the image this HE LAUNCHes (the
  * release stub self-LAUNCHes with its own header's values). */
 static bool stub_image_ours(void)
