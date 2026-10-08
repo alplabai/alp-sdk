@@ -366,6 +366,7 @@
 			alp,default-modes = "stop", "standby";
 			alp,stop-hold = "unproven";
 			alp,restore = "pin_release";
+			alp,dependents = "phy_refclk";
 		};
 
 		/*

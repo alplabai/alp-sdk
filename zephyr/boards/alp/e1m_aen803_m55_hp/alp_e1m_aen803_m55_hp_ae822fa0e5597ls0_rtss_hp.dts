@@ -371,6 +371,7 @@
 			alp,default-modes = "stop", "standby";
 			alp,stop-hold = "unproven";
 			alp,restore = "pin_release";
+			alp,dependents = "phy_refclk";
 		};
 
 		/*
@@ -383,7 +384,7 @@
 			alp,role = "ext_flash";
 			reset-gpios = <&lpgpio 7 GPIO_ACTIVE_LOW>; /* OSPI1_RESETn P15_7 */
 			alp,chip = "IS25WX256-JHLE";
-			alp,default-action = "deep_power_down_cmd";
+			alp,default-action = "hold_reset";
 			alp,default-modes = "stop", "standby";
 			alp,stop-hold = "unproven";
 			alp,restore = "driver_release";

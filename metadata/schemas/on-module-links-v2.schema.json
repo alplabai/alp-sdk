@@ -110,7 +110,7 @@
       "additionalProperties": false,
       "required": ["kind", "net", "driver_pin", "source"],
       "properties": {
-        "kind": { "enum": ["cam_ldo", "sd_enable"] },
+        "kind": { "enum": ["cam_ldo", "sd_enable", "phy_refclk"] },
         "net": { "type": "string", "minLength": 1 },
         "driver_pin": { "type": "string", "minLength": 1 },
         "source": { "$ref": "#/$defs/source" }

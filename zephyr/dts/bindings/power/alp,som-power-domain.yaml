@@ -84,6 +84,13 @@ properties:
   alp,default-action:
     type: string
     required: true
+    enum:
+      - hold_reset
+      - powerdown_pin
+      - deep_power_down_cmd
+      - shutdown_reg
+      - keep_alive
+      - enable_low
     description: |
       Action the SDK's AUTO policy takes (hold_reset, powerdown_pin,
       deep_power_down_cmd, shutdown_reg, keep_alive, enable_low).
@@ -121,4 +128,11 @@ properties:
 
   alp,dependents:
     type: string-array
-    description: Other loads the domain's chip drives (cam_ldo, sd_enable).
+    enum:
+      - cam_ldo
+      - sd_enable
+      - phy_refclk
+    description: |
+      Other loads the domain's control also affects: cam_ldo and sd_enable are
+      carrier loads the CC3501E drives; phy_refclk is the Y3 50 MHz PHY
+      reference oscillator whose TRI pin is the PHY power-down pad (P15_4).

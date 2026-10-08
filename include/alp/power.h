@@ -536,11 +536,13 @@ typedef enum {
 #define ALP_POWER_ACTION_SHUTDOWN_REG        0x00000008u /**< Shutdown bit in the chip. */
 #define ALP_POWER_ACTION_RAIL_OFF            0x00000010u /**< Gate the supply. */
 
-/** Carrier-side loads that quiescing a domain also affects, bits of
- *  @ref alp_power_domain_info_t::dependents. */
-#define ALP_POWER_DEP_NONE    0x00000000u
-#define ALP_POWER_DEP_CAM_LDO 0x00000001u /**< Camera LDO enables. */
-#define ALP_POWER_DEP_SD_EN   0x00000002u /**< SD-card supply enable. */
+/** Loads that quiescing a domain also affects, bits of
+ *  @ref alp_power_domain_info_t::dependents.  @c PHY_REFCLK is the PHY's 50 MHz
+ *  reference oscillator, whose tri-state pin is the PHY power-down pad. */
+#define ALP_POWER_DEP_NONE       0x00000000u
+#define ALP_POWER_DEP_CAM_LDO    0x00000001u /**< Camera LDO enables. */
+#define ALP_POWER_DEP_SD_EN      0x00000002u /**< SD-card supply enable. */
+#define ALP_POWER_DEP_PHY_REFCLK 0x00000004u /**< PHY 50 MHz reference oscillator. */
 
 /** Static description of one domain on the running SoM. */
 typedef struct {

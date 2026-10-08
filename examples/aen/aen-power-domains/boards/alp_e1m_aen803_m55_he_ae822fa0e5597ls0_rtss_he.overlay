@@ -1,0 +1,159 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-power-domains overlay for the E1M-AEN803 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Every domain the example round-trips needs its own bus up:
+ *   - CC3501E : SPI1 (inter-chip bridge) + the WIFI_EN / nRESET LPGPIO pads;
+ *   - PHY     : the GMAC (MDIO only) with its RMII pin group, GPIO11 (PHY reset);
+ *   - NOR     : OSPI0, chip select 1;
+ *   - TMP112  : BRD_I2C, already enabled by the board layer;
+ *   - backlight : GPIO5 (P5_5).
+ * The groups below are transcribed from the bench-proven siblings
+ * aen-ethernet-link, aen-ospi-regcheck and aen-evk-demo; read their overlays for
+ * the evidence behind each pad and value.
+ */
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		/* bus_id 1 in alp_spi_open() -> the CC3501E bridge controller. */
+		alp-spi1 = &cc3501e_spi;
+	};
+
+	/*
+	 * The two SoM-internal CC3501E control nets, in the order
+	 * cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices expect.  Exactly ONE
+	 * "alp,pin-array" node may exist in the tree.
+	 */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>, /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>; /* [1] E_WIFI.NRST (P15_1_FLEX) */
+	};
+};
+
+&clockctrl {
+	status = "okay";
+};
+
+&pinctrl {
+	/* RMII to the DP83825 + MDIO: alif-ethernet-phy.tsv. */
+	pinctrl_eth: pinctrl_eth {
+		group0 {
+			pinmux = <PIN_P11_0__ETH_REFCLK_B>, <PIN_P11_3__ETH_RXD0_B>,
+				 <PIN_P1_1__ETH_RXD1_C>, <PIN_P6_7__ETH_CRS_DV_A>,
+				 <PIN_P11_1__ETH_MDIO_B>;
+			input-enable;
+		};
+		group1 {
+			pinmux = <PIN_P10_4__ETH_TXD0_B>, <PIN_P10_5__ETH_TXD1_B>,
+				 <PIN_P1_5__ETH_TXEN_C>, <PIN_P11_2__ETH_MDC_B>;
+		};
+	};
+
+	/* SPI1 to the CC3501E; input-enable on MISO because the pad's input buffer is
+	 * a PADCTRL bit that only pinctrl sets. */
+	pinctrl_spi1: pinctrl_spi1 {
+		group0 {
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>,
+				 <PIN_P14_7__SPI1_SS0_C>;
+		};
+		group1 {
+			pinmux = <PIN_P14_4__SPI1_MISO_C>;
+			input-enable;
+		};
+	};
+
+	/* OSPI0 routing: alif-ospi.tsv (13 pads, all function 1). */
+	pinctrl_ospi0: pinctrl_ospi0 {
+		group0 {
+			pinmux = <PIN_P12_0__OSPI0_SCLK_C>,
+				 <PIN_P12_1__OSPI0_SCLKN_C>,
+				 <PIN_P12_2__OSPI0_RXDS_C>,
+				 <PIN_P12_3__OSPI0_SS0_C>,
+				 <PIN_P12_4__OSPI0_SS1_C>,
+				 <PIN_P2_0__OSPI0_D0_B>,
+				 <PIN_P2_1__OSPI0_D1_B>,
+				 <PIN_P6_2__OSPI0_D2_C>,
+				 <PIN_P6_3__OSPI0_D3_C>,
+				 <PIN_P6_4__OSPI0_D4_C>,
+				 <PIN_P6_5__OSPI0_D5_C>,
+				 <PIN_P6_6__OSPI0_D6_C>,
+				 <PIN_P0_7__OSPI0_D7_A>;
+			input-enable;
+			drive-strength = <12>;
+			slew-rate = "fast";
+		};
+	};
+};
+
+/* The pads the power layer drives: LPGPIO island (P15_n), GPIO11 (P11_6, PHY
+ * reset), GPIO5 (P5_5, backlight).  Muxing and output drivers are set in
+ * src/main.c; the layer only drives the levels. */
+&lpgpio {
+	status = "okay";
+};
+
+&gpio11 {
+	status = "okay";
+};
+
+&gpio5 {
+	status = "okay";
+};
+
+&ethernet {
+	pinctrl-0 = <&pinctrl_eth>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/*
+ * cs-pin / bus-speed override the dtsi defaults: SS1 is where the fitted
+ * IS25WX256-JHLE answers (SS0 is the HyperRAM footprint), at the 20 MHz the
+ * #915 bench capture used.
+ */
+&ospi0 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_ospi0>;
+	pinctrl-names = "default";
+	cs-pin = <1>;
+	bus-speed = <20000000>;
+};
+
+/*
+ * DWC_ssi SPI1 -- the on-SoM CC3501E inter-chip link.  The consuming app
+ * declares it (ensemble_e8_peripherals.dtsi only has the edge SPI0).
+ * clock-frequency is REQUIRED (200 MHz SSI functional clock); rx-delay is
+ * overwritten by the poke in src/cc3501e_bridge.c.  See aen-evk-demo's overlay
+ * for the full argument and the unconfirmed SPI1 interrupt number.
+ */
+&soc {
+	cc3501e_spi: spi@48104000 {
+		compatible = "alif,dwc-ssi-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x48104000 0x1000>;
+		interrupts = <138 3>;          /* BENCH-TBD: confirm SPI1 IRQ */
+		clocks = <&clockctrl ALIF_SPI_CLK>;
+		clock-frequency = <200000000>;
+		dwc-ssi;
+		fifo-depth = <16>;
+		rx-delay = <2>;
+		pinctrl-0 = <&pinctrl_spi1>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};

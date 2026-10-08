@@ -402,6 +402,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/flash.h>
+#include <zephyr/drivers/flash/flash_ospi_alif.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -892,6 +893,16 @@ static int ospi_alif_ensure_octal_ddr(const struct device *dev)
 	}
 	k_mutex_unlock(&data->lock);
 	return rc;
+}
+
+int flash_ospi_alif_reset_notify(const struct device *dev)
+{
+	struct ospi_alif_data *data = dev->data;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	data->octal_ddr_active = false;
+	k_mutex_unlock(&data->lock);
+	return 0;
 }
 
 static int ospi_alif_write(const struct device *dev, off_t offset, const void *buffer, size_t len)

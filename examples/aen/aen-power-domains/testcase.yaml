@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the aen-power-domains bench app on the E1M-AEN803
+# (Ensemble E8, M55-HE).  Compile-checks the SoM power-domain runtime
+# (src/backends/power/som_power*.c), the CC3501E / TMP112 / OSPI-flash hooks
+# and the app against the real board target.  The behaviour is a bench signal
+# (evk-02 RAM-run); native_sim cannot carry it -- the logic is covered by
+# tests/unit/power_som_domains.
+
+sample:
+  name: aen-power-domains
+  description: |
+    Bench RAM-run proof of the SoM power-domain runtime on the E1M-AEN803:
+    quiesce the Wi-Fi/BLE coprocessor, Ethernet PHY, NOR, temperature sensor,
+    RTC clock-out and backlight, hold 5 s, restore, and check the CC3501E
+    answers a PING with no WIFI_EN toggle, the PHY ID is back, the NOR JEDEC ID
+    reads and the TMP112 reads.
+
+tests:
+  alp_sdk.examples.aen.power_domains.aen:
+    platform_allow:
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - power
+    build_only: true   # the round trip is a bench flash, not a CI run.
