@@ -785,6 +785,7 @@ int main(void)
 	 * mode with no input source at all (whole-branch review F4 point 3). */
 	bool imu_ok = (tr_imu_open() == 0);
 	(void)tr_rail5v_open(); /* +5V power HUD line -- non-fatal, see rail5v_power.h */
+	tr_bus2_he_arm();       /* TR_HP_SOUND: only now may the HP be offered I2C2 */
 
 #if TR_INPUT_NPU
 	/* No local camera or detector to open/init: the HP owns both, and

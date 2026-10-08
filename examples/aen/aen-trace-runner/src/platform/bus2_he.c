@@ -26,7 +26,9 @@ BUILD_ASSERT(DT_NODE_HAS_STATUS(BUS2_I2C2, okay),
 BUILD_ASSERT(DT_PROP(BUS2_I2C2, clock_frequency) == 100000,
              "the HE's I2C2 is standard mode, as the HP's (src/ipc/tr_bus2.h)");
 /* The HP drives GPIO5 (SD_N P5_2, IRQZ P5_0) with read-modify-write of DR/DDR and its lpgpio /
- * GPIO5 driver init masks those ports' interrupts: this image must use neither. The RK055 shield
+ * GPIO5 driver init masks those ports' interrupts: this image must not instantiate the GPIO5
+ * driver. (It does touch GPIO5 DR/DDR bits 6/7 by raw MMIO for the SCL bus-clear, tr_i2c2_rearm.h,
+ * only while it owns the bus.) The RK055 shield
  * puts its backlight enable on GPIO5 (P5_5) and enables the port; the Riverdi RVT121 shield
  * (backlight PWM on P10_7) does not. */
 BUILD_ASSERT(!DT_NODE_HAS_STATUS(DT_NODELABEL(gpio5), okay),
@@ -41,7 +43,8 @@ BUILD_ASSERT(
     "TR_HP_SOUND: the HE must not build the RV3028 RTC driver (it arms the lpgpio port the "
     "HP drives for the CC3501E's WIFI_EN / nRESET)");
 
-static tr_bus2_he_t              g_he;
+static tr_bus2_he_t g_he;
+static bool         g_armed; /* tr_bus2_he_arm(): this core's own I2C2 users are open */
 static volatile tr_bus2_t *const g_b2 = (volatile tr_bus2_t *)TR_MEM_BUS2;
 
 static void b2_barrier(void)
@@ -133,11 +136,20 @@ static int bus2_he_boot(void)
 }
 SYS_INIT(bus2_he_boot, POST_KERNEL, 0);
 
+void tr_bus2_he_arm(void)
+{
+	g_armed = true;
+}
+
 void tr_bus2_he_frame(void)
 {
 	static bool dc_told;
 	uint8_t     before   = g_he.st;
 	uint32_t    reclaims = g_b2->he_reclaims;
+
+	if (!g_armed) {
+		return; /* the BMI323 / INA236 opens have not run yet: no offer before they did */
+	}
 
 	/* The lease record lives in SRAM0, uncached by the MPU region over its page (the board
 	 * overlay) and by CONFIG_DCACHE=n. A warm RAM-run can still inherit CCR.DC=1 from a previous

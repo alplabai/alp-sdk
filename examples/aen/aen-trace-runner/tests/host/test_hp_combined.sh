@@ -302,6 +302,19 @@ grep -q 'tr_bus2_he_owns()' src/platform/rail5v_power.c || FAILS "src/platform/r
 grep -q 'tr_bus2_he_owns()' src/platform/imu.c || FAILS "src/platform/imu.c: the IMU read does not check the lease"
 awk '/tr_bus2_he_frame\(\);/ { f = NR } /tr_rail5v_poll\(\);/ { if (f && NR == f + 1) ok = 1 } END { exit !ok }' src/main.c ||
 	FAILS "src/main.c: the HE's main loop does not tick the lease right before the +5V poll"
+# The HE offers I2C2 only AFTER its own I2C2 users (BMI323, INA236) are open: ui_present() ticks the lease
+# (so does the first flip, before the opens), therefore the tick is inert until tr_bus2_he_arm(), which
+# main() calls after tr_imu_open() and tr_rail5v_open().
+awk '/^int main\(void\)/ { m = 1 } m && /tr_imu_open\(\)/ { i = NR } m && /tr_rail5v_open\(\)/ { r = NR } m && /tr_bus2_he_arm\(\);/ { a = NR }
+	END { exit !(i && r && a && a > i && a > r) }' src/main.c ||
+	FAILS "src/main.c: tr_bus2_he_arm() is not called after tr_imu_open() and tr_rail5v_open()"
+[ "$(grep -c 'tr_bus2_he_arm();' src/main.c)" = 1 ] || FAILS "src/main.c: tr_bus2_he_arm() must be called exactly once"
+awk '/^void tr_bus2_he_frame\(void\)$/ { f = 1 } f && /if \(!g_armed\)/ { g = NR } f && /tr_bus2_he_tick\(/ { if (g && g < NR) ok = 1; f = 0 } END { exit !ok }' src/platform/bus2_he.c ||
+	FAILS "src/platform/bus2_he.c: tr_bus2_he_frame() can offer the bus before tr_bus2_he_arm()"
+[ "$(grep -c 'g_armed = true;' src/platform/bus2_he.c)" = 1 ] || FAILS "src/platform/bus2_he.c: g_armed is set somewhere other than tr_bus2_he_arm()"
+# the SCL bus-clear sets DR / DDR before the pads leave the I2C function (no driven glitch)
+awk '/^static inline bool tr_i2c2_bus_clear/ { f = 1 } f && /tr_gpio5_ddr\(0u, TR_I2C2_SCL \| TR_I2C2_SDA\);/ { d = NR } f && /pinctrl_configure_pins\(tr_i2c2_gpio_pads/ { if (d && d < NR) ok = 1; f = 0 } END { exit !ok }' src/platform/tr_i2c2_rearm.h ||
+	FAILS "src/platform/tr_i2c2_rearm.h: the bus-clear switches the pads to GPIO before clearing DDR bits 6/7"
 # the amp settle + ACK poll: the settle after SD_N is TR_SND_AMP_SETTLE_US, every amp is polled for its ACK
 # before tas2563_init, and an amp that never ACKs fails the bring-up
 grep -q '^	k_usleep(TR_SND_AMP_SETTLE_US);$' sound/src/main.c && ! grep -q 'k_usleep(TAS2563_RESET_SETTLE_US)' sound/src/main.c ||

@@ -168,6 +168,12 @@ Flash the HE and the HP from ONE build: the pairings that matter are in the tabl
 `new HP (TR_HP_SOUND) + HE without TR_HP_SOUND`: the HP prints `waiting for the HE's I2C2 + GPIO5
 offer` for ever, vision runs, no sound.
 
+**Do not halt the HP (debugger halt, breakpoint, J-Link `h`) during the amp bring-up.** While the HP holds the
+bus it beats `hp_beat`; a halted HP stops beating, and after 2 s the HE reclaims the lease (controller stopped, SCL
+bus-clear) under a core that is only paused, which then resumes into a bus it no longer owns (its next entry is
+refused and the bring-up aborts and starts over). Read the lease record (`0x0237FD40`) and the console without
+halting, or halt only when the HP waits for the offer or streams.
+
 Order is free (the lease does not need the HE first; the I2C1 handover still wants both reset
 together, as before). Nothing waits on the sound: the camera, the NPU and the pose slot run whether
 or not the amps come up.

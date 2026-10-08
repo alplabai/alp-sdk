@@ -116,11 +116,13 @@ static void (*s_idle)(void);
 		} \
 	} while (0)
 #define SND_RELEASE()   tr_snd_bus_release()
+#define SND_BEAT()      (((volatile tr_bus2_t *)TR_MEM_BUS2)->hp_beat++)
 #define SND_IDLE_SET(f) (s_idle = (f))
 static bool s_bridge_up; /* step 1 done: a retried bring-up keeps the bridge and its handles */
 #else
 #define SND_BUS()       (void)0
 #define SND_RELEASE()   (void)0
+#define SND_BEAT()      (void)0
 #define SND_IDLE_SET(f) (void)0
 #endif
 
@@ -333,7 +335,15 @@ static int bringup(bool with_mic)
 		/* Bench A/B: extra register writes from -DTR_SND_AMP_REGS_FILE
 		 * (sound/amp_regs_example.h), after the driver's own config. */
 		size_t bad = 0;
-		rc         = tas2563_load_tuning(&s.amps[i], k_amp_regs, ARRAY_SIZE(k_amp_regs), &bad);
+
+		rc = ALP_OK;
+		for (size_t k = 0; k < ARRAY_SIZE(k_amp_regs) && rc == ALP_OK; k++) {
+			size_t one_bad = 0;
+
+			SND_BEAT(); /* a long override list must not outlast the HE's 2 s heartbeat limit */
+			rc  = tas2563_load_tuning(&s.amps[i], &k_amp_regs[k], 1u, &one_bad);
+			bad = k + one_bad;
+		}
 		printk("[snd] 7b amp 0x%02x %u override writes -> %d (record %u)\n",
 		       amp_addrs[i],
 		       (unsigned)ARRAY_SIZE(k_amp_regs),

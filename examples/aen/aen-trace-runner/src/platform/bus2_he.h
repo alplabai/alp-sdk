@@ -15,11 +15,19 @@
  * back when the HP returns it (or restarted / gave up). */
 void tr_bus2_he_frame(void);
 
+/* Called once, after this core's own I2C2 users (the BMI323 and INA236 opens) are done: until then
+ * tr_bus2_he_frame() offers nothing, so the opens never race the HP for the controller. */
+void tr_bus2_he_arm(void);
+
 /* True while this core may use I2C2 (BMI323, the +5V INA236). False while the HP holds the bus:
  * every I2C2 user must skip its transfer, keep its last value and mark it stale. */
 bool tr_bus2_he_owns(void);
 #else
 static inline void tr_bus2_he_frame(void)
+{
+}
+
+static inline void tr_bus2_he_arm(void)
 {
 }
 

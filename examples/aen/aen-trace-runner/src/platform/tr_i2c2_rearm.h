@@ -93,11 +93,13 @@ static inline bool tr_i2c2_bus_clear(bool busy)
 {
 	bool ok;
 
-	(void)pinctrl_configure_pins(tr_i2c2_gpio_pads, ARRAY_SIZE(tr_i2c2_gpio_pads), 0U);
-	/* open-drain emulation: the output value stays 0, DDR bit set = driven low, clear = released */
+	/* open-drain emulation: the output value stays 0, DDR bit set = driven low, clear = released.
+	 * Both are set up BEFORE the pads leave the I2C function, so the switch to GPIO never drives
+	 * a line. */
 	sys_write32(sys_read32(TR_GPIO5_BASE + TR_GPIO_DR) & ~(TR_I2C2_SCL | TR_I2C2_SDA),
 	            TR_GPIO5_BASE + TR_GPIO_DR);
 	tr_gpio5_ddr(0u, TR_I2C2_SCL | TR_I2C2_SDA);
+	(void)pinctrl_configure_pins(tr_i2c2_gpio_pads, ARRAY_SIZE(tr_i2c2_gpio_pads), 0U);
 	k_busy_wait(10);
 	if (busy || !tr_i2c2_sda_high()) {
 		for (int i = 0; i < 9; i++) { /* 9 clocks at ~100 kHz */
