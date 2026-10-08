@@ -575,6 +575,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set(_alp_sdk_link_visibility PUBLIC)
     endif()
 
+    # A static libalp_sdk.a only yields the members something references, and
+    # nothing references a backend that sits in its own TU next to the class's
+    # catch-all stub: the dispatcher anchor pulls the stub, the linux driver
+    # (registered at priority 100) is dropped, and the app silently gets the
+    # stub.  Name each such backend's ALP_BACKEND_ANCHOR_FORCE symbol so every
+    # consumer's link pulls it.  Camera only today; the other classes' yocto_drv.c
+    # need the same line (tracked in the issue linked from #2616).
+    if(NOT ALP_SDK_BUILD_SHARED AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(alp_sdk INTERFACE
+            "LINKER:--undefined=_alp_backend_force_camera_yocto_drv")
+    endif()
+
     target_sources(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2c.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi.c

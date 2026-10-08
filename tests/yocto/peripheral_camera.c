@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/mman.h>
 
 #include "test_assert.h"
 
@@ -457,6 +458,67 @@ static void test_cr10_unpack(void)
 	ALP_ASSERT_TRUE(ok16);
 }
 
+/* The V4L2 mapping is uncached, so the mapped unpack must (a) match the plain
+ * unpack bit for bit and (b) read nothing but the ceil(w/6)*8 data bytes of each
+ * row.  The source sits against a PROT_NONE page with a stride wider than the
+ * data (the CRU pads rows to width*8): reading a padding byte of the last row
+ * would fault. */
+static void test_cr10_unpack_mapped_reads_only_row_data(void)
+{
+	enum { W = 13, H = 3, DATA = 24, STRIDE = 104 }; /* 13 px = 3 words, CRU pad to W*8 */
+	long     pg  = sysconf(_SC_PAGESIZE);
+	size_t   len = ((size_t)STRIDE * H + (size_t)pg - 1u) / (size_t)pg * (size_t)pg;
+	uint8_t *m =
+	    mmap(NULL, len + (size_t)pg, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	ALP_ASSERT_TRUE(m != MAP_FAILED);
+	ALP_ASSERT_EQ_INT(mprotect(m + len, (size_t)pg, PROT_NONE), 0);
+	/* last row's data ends exactly at the guard page */
+	uint8_t *src = m + len - ((size_t)STRIDE * (H - 1u) + DATA);
+
+	uint32_t val[W * H];
+	memset(src, 0, (size_t)STRIDE * (H - 1u) + DATA);
+	for (uint32_t y = 0; y < H; ++y) {
+		for (uint32_t x = 0; x < W; ++x) {
+			val[y * W + x] = (x * 59u + y * 211u + 7u) & 0x3FFu;
+			pack_px(src + (size_t)y * STRIDE, x, val[y * W + x]);
+		}
+	}
+
+	uint8_t scratch[DATA], want[W * H * 2], got[W * H * 2];
+	cam_cr10_unpack(src, STRIDE, W, H, want, 2, 0);
+	cam_cr10_unpack_mapped(src, STRIDE, W, H, got, 2, 0, scratch);
+	ALP_ASSERT_TRUE(memcmp(want, got, sizeof(want)) == 0);
+	ALP_ASSERT_EQ_INT(got[0] | (got[1] << 8), (int)val[0]);
+	munmap(m, len + (size_t)pg);
+}
+
+/* fps=0 on a later open must not inherit the rate an earlier caller set. */
+static void test_close_restores_vblank(void)
+{
+	reset();
+	g_sensor_codes[0] = MEDIA_BUS_FMT_Y10_1X10;
+	g_nsensor_codes   = 1;
+	g_cam_discover    = fake_discover;
+	g_pixel_rate      = 10000000;
+	g_vblank          = 777;
+
+	alp_camera_config_t        cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 30);
+	alp_camera_backend_state_t st;
+	memset(&st, 0, sizeof(st));
+	ALP_ASSERT_EQ_INT(y_open(&cfg, &st, NULL), ALP_OK);
+	ALP_ASSERT_TRUE(g_vblank != 777);
+	y_close(&st);
+	ALP_ASSERT_EQ_INT(g_vblank, 777);
+
+	/* fps 0 never touches VBLANK, so close has nothing to restore */
+	cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 0);
+	memset(&st, 0, sizeof(st));
+	g_vblank = 321;
+	ALP_ASSERT_EQ_INT(y_open(&cfg, &st, NULL), ALP_OK);
+	y_close(&st);
+	ALP_ASSERT_EQ_INT(g_vblank, 321);
+}
+
 static void test_capture_release_and_timeout(void)
 {
 	reset();
@@ -695,6 +757,8 @@ int main(void)
 	test_fps();
 	test_subdev_adjust_is_inval();
 	test_cr10_unpack();
+	test_cr10_unpack_mapped_reads_only_row_data();
+	test_close_restores_vblank();
 	test_capture_release_and_timeout();
 	test_capture_integrity();
 	test_start_failure_resets_queue();

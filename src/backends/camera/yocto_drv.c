@@ -39,7 +39,8 @@
  *      fps 0 keeps the driver default.  Otherwise V4L2_CID_VBLANK on the
  *      sensor is set from V4L2_CID_PIXEL_RATE and the current HBLANK,
  *      clamped to the control's [minimum, maximum] and rounded to its
- *      step.  The request is a request (camera.h): a rate the sensor
+ *      step; the sensor's own VBLANK is put back on close, so fps 0 never
+ *      inherits a previous caller's rate.  The request is a request (camera.h): a rate the sensor
  *      cannot reach is logged and settles on the nearest one, never an
  *      open failure.  alp_camera_get_fps() reports the settled rate x1000.
  *
@@ -134,6 +135,13 @@ typedef struct cam {
 	bool     held[CAM_NBUF]; /* app owns out[i] (unpack) / map[i] (direct) */
 	bool     streaming;
 	bool     got_frame;
+
+	/* cached bounce row for the uncached V4L2 mapping (see cam_cr10_unpack_mapped) */
+	uint8_t *scratch;
+
+	/* sensor VBLANK before our fps request, restored on close */
+	bool    vblank_saved;
+	int32_t vblank_orig;
 } cam_t;
 
 /* ------------------------------------------------------------------ */
@@ -188,13 +196,46 @@ static void cam_munmap(void *p, size_t len)
 /* CR10 unpack                                                         */
 /* ------------------------------------------------------------------ */
 
+/** Little-endian 64-bit load from a 8-byte-aligned address (rows are 8-aligned). */
+static inline uint64_t cam_ld64le(const uint8_t *p)
+{
+	uint64_t w;
+	memcpy(&w, p, sizeof(w));
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	w = __builtin_bswap64(w);
+#endif
+	return w;
+}
+
+/** Unpack one row of @p w pixels; @p row must be 8-byte aligned. */
+static void cam_cr10_unpack_row(const uint8_t *row,
+                                uint32_t       w,
+                                uint8_t       *dst,
+                                unsigned       out_bytes,
+                                unsigned       shift)
+{
+	for (uint32_t x = 0; x < w;) {
+		uint64_t word = cam_ld64le(row + (size_t)(x / 6u) * 8u);
+		/* one 64-bit word carries up to six pixels */
+		for (unsigned k = 0; k < 6u && x < w; ++k, ++x) {
+			uint32_t v = (uint32_t)((word >> (k * 10u)) & 0x3FFu) >> shift;
+			if (out_bytes == 1u) {
+				*dst++ = (uint8_t)v;
+			} else {
+				*dst++ = (uint8_t)(v & 0xFFu);
+				*dst++ = (uint8_t)(v >> 8);
+			}
+		}
+	}
+}
+
 /**
- * @brief Unpack an RZ CRU CR10 frame.
+ * @brief Unpack an RZ CRU CR10 frame from ordinary (cached) memory.
  *
  * Six 10-bit pixels live in the low 60 bits of each little-endian
- * 64-bit word; rows start every @p stride bytes.  The caller guarantees
- * `stride >= ceil(w / 6) * 8`.  Each sample is `(v >> shift)` written as
- * one byte (@p out_bytes == 1) or one little-endian uint16 (== 2).
+ * 64-bit word; rows start every @p stride bytes (8-aligned).  The caller
+ * guarantees `stride >= ceil(w / 6) * 8`.  Each sample is `(v >> shift)`
+ * written as one byte (@p out_bytes == 1) or one little-endian uint16 (== 2).
  */
 static void cam_cr10_unpack(const uint8_t *src,
                             uint32_t       stride,
@@ -205,24 +246,34 @@ static void cam_cr10_unpack(const uint8_t *src,
                             unsigned       shift)
 {
 	for (uint32_t y = 0; y < h; ++y) {
-		const uint8_t *row = src + (size_t)y * stride;
-		for (uint32_t x = 0; x < w;) {
-			const uint8_t *wp   = row + (size_t)(x / 6u) * 8u;
-			uint64_t       word = 0;
-			for (unsigned b = 0; b < 8u; ++b) {
-				word |= (uint64_t)wp[b] << (8u * b);
-			}
-			/* one 64-bit word carries up to six pixels */
-			for (unsigned k = 0; k < 6u && x < w; ++k, ++x) {
-				uint32_t v = (uint32_t)((word >> (k * 10u)) & 0x3FFu) >> shift;
-				if (out_bytes == 1u) {
-					*dst++ = (uint8_t)v;
-				} else {
-					*dst++ = (uint8_t)(v & 0xFFu);
-					*dst++ = (uint8_t)(v >> 8);
-				}
-			}
-		}
+		cam_cr10_unpack_row(
+		    src + (size_t)y * stride, w, dst + (size_t)y * w * out_bytes, out_bytes, shift);
+	}
+}
+
+/**
+ * @brief Unpack straight from the V4L2 mmap buffer.
+ *
+ * ponytail: that mapping is uncached on RZ/V2N (DMA-coherent), so every load
+ * is a ~100 ns bus read: byte loads took ~345 ms/frame at 1456x1088, 8-byte
+ * loads would still be ~40 ms.  glibc memcpy reads it with 16-32 byte loads,
+ * so each row's ceil(w/6)*8 data bytes (the stride padding is never touched)
+ * are bounced into the cached @p scratch row and unpacked from there.  Ceiling:
+ * one extra cached copy of ~2 MB per frame; fine until a sensor outgrows it.
+ */
+static void cam_cr10_unpack_mapped(const uint8_t *src,
+                                   uint32_t       stride,
+                                   uint32_t       w,
+                                   uint32_t       h,
+                                   uint8_t       *dst,
+                                   unsigned       out_bytes,
+                                   unsigned       shift,
+                                   uint8_t       *scratch)
+{
+	size_t row_bytes = (size_t)((w + 5u) / 6u) * 8u;
+	for (uint32_t y = 0; y < h; ++y) {
+		memcpy(scratch, src + (size_t)y * stride, row_bytes);
+		cam_cr10_unpack_row(scratch, w, dst + (size_t)y * w * out_bytes, out_bytes, shift);
 	}
 }
 
@@ -334,7 +385,7 @@ static uint32_t cam_read_fps_x1000(const cam_t *c)
 	return (uint32_t)((pr * 1000 + total / 2) / total);
 }
 
-static alp_status_t cam_set_fps(const cam_t *c, uint8_t fps)
+static alp_status_t cam_set_fps(cam_t *c, uint8_t fps)
 {
 	int     fd = c->hop[0].fd;
 	int64_t pr, hb;
@@ -363,6 +414,11 @@ static alp_status_t cam_set_fps(const cam_t *c, uint8_t fps)
 		fprintf(stderr,
 		        "alp_camera: %u fps is outside the sensor's range; using the nearest rate\n",
 		        (unsigned)fps);
+	}
+	int64_t orig;
+	if (!c->vblank_saved && cam_get_ctrl(fd, V4L2_CID_VBLANK, &orig)) {
+		c->vblank_orig  = (int32_t)orig;
+		c->vblank_saved = true;
 	}
 	if (!cam_set_ctrl(fd, V4L2_CID_VBLANK, (int32_t)vblank)) return ALP_ERR_IO;
 	return ALP_OK;
@@ -482,7 +538,9 @@ static void cam_free_buffers(cam_t *c)
 		free(c->out[i]);
 		c->out[i] = NULL;
 	}
-	c->nbuf = 0;
+	free(c->scratch);
+	c->scratch = NULL;
+	c->nbuf    = 0;
 }
 
 static alp_status_t cam_alloc_buffers(cam_t *c)
@@ -498,6 +556,10 @@ static alp_status_t cam_alloc_buffers(cam_t *c)
 	if (rb.count < 2u) return ALP_ERR_NOMEM;
 	if (rb.count > CAM_NBUF) rb.count = CAM_NBUF;
 
+	if (c->unpack) {
+		c->scratch = malloc((size_t)((c->width + 5u) / 6u) * 8u);
+		if (c->scratch == NULL) return ALP_ERR_NOMEM;
+	}
 	for (unsigned i = 0; i < rb.count; ++i) {
 		struct v4l2_buffer b;
 		memset(&b, 0, sizeof(b));
@@ -866,8 +928,14 @@ y_capture(alp_camera_backend_state_t *st, alp_camera_frame_t *out, uint32_t time
 	}
 
 	if (c->unpack) {
-		cam_cr10_unpack(
-		    c->map[b.index], c->stride, c->width, c->height, c->out[slot], c->out_bytes, c->shift);
+		cam_cr10_unpack_mapped(c->map[b.index],
+		                       c->stride,
+		                       c->width,
+		                       c->height,
+		                       c->out[slot],
+		                       c->out_bytes,
+		                       c->shift,
+		                       c->scratch);
 		/* The V4L2 buffer is free again as soon as it is unpacked. */
 		alp_status_t qrc = cam_qbuf(c, b.index);
 		if (qrc != ALP_OK) return qrc;
@@ -911,6 +979,9 @@ static void y_close(alp_camera_backend_state_t *st)
 	cam_t *c = st->be_data;
 	if (c == NULL) return;
 	if (c->streaming) (void)y_stop(st);
+	/* Put the sensor's own frame rate back: fps=0 on the next open means
+	 * "driver default", not "whatever the last user asked for". */
+	if (c->vblank_saved) (void)cam_set_ctrl(c->hop[0].fd, V4L2_CID_VBLANK, c->vblank_orig);
 	cam_free_buffers(c);
 	cam_close_hops(c);
 	free(c);
@@ -927,6 +998,7 @@ static const alp_camera_ops_t _ops = {
 	.close         = y_close,
 };
 
+ALP_BACKEND_ANCHOR_FORCE(camera, yocto_drv);
 ALP_BACKEND_REGISTER(camera,
                      yocto_drv,
                      {

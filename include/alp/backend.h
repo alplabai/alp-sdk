@@ -159,12 +159,21 @@ typedef struct alp_backend_class_range {
 	extern const int         _alp_backend_anchor_##class; \
 	static const void *const _alp_backend_anchor_ref_##class __attribute__((used)) = \
 	    (const void *)&_alp_backend_anchor_##class
+/* A second backend of a class that lives in its OWN TU (e.g. the Linux
+ * yocto_drv.c next to the catch-all stub): nothing in the always-pulled
+ * dispatcher can name it, so the plain-CMake build adds
+ * `-Wl,--undefined=_alp_backend_force_<class>_<name>` to libalp_sdk's
+ * interface link options (src/yocto/CMakeLists.txt) to pull its member. */
+#define ALP_BACKEND_ANCHOR_FORCE(class, name) \
+	const int _alp_backend_force_##class##_##name __attribute__((used, retain)) = 0
 #else
 /* Whole-archive (Zephyr) links never need the anchor: expand to a bare
  * declaration so the call sites still take a trailing semicolon while
  * emitting no code or symbols. */
 #define ALP_BACKEND_ANCHOR_DEFINE(class) extern const int _alp_backend_anchor_decl_##class
 #define ALP_BACKEND_ANCHOR(class)        extern const int _alp_backend_anchor_decl_##class
+#define ALP_BACKEND_ANCHOR_FORCE(class, name) \
+	extern const int _alp_backend_force_decl_##class##_##name
 #endif
 
 /**

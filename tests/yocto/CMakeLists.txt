@@ -1011,6 +1011,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_camera
              COMMAND alp_test_peripheral_camera)
 
+    # A static libalp_sdk.a must keep the Linux camera backend (it sits in its
+    # own TU; only the stub is reachable from the dispatcher).  Link a tiny
+    # binary against alp::sdk and look for the backend's registry entry.
+    find_program(ALP_NM nm)
+    if(ALP_NM AND NOT ALP_SDK_BUILD_SHARED)
+        add_executable(alp_test_static_link_camera
+            ${CMAKE_CURRENT_SOURCE_DIR}/static_link_camera_backend.c
+        )
+        target_link_libraries(alp_test_static_link_camera PRIVATE alp::sdk)
+        target_compile_features(alp_test_static_link_camera PRIVATE c_std_99)
+        add_test(NAME alp_test_static_link_camera
+                 COMMAND sh -c "${ALP_NM} $<TARGET_FILE:alp_test_static_link_camera> | grep -q _alp_be_camera_yocto_drv")
+    endif()
+
     # Edge-config rollback regression for issue #746 (Yocto GPIO chardev-v2
     # backend): alp_gpio_irq_enable() must restore plain-input if the IRQ
     # dispatcher fails to start (eventfd()/pthread_create() failure),
