@@ -9,7 +9,7 @@
  * through rv3028c7_route_clkout(); its endurance guard skips the EEPROM
  * commit once CLKOUT already reads low.  CONTROL_1.EERD (a RAM bit) is then set so
  * the chip's 24 h EEPROM -> mirror refresh cannot switch CLKOUT back on during
- * the sleep, and cleared again on restore.  Nothing else is restored: the alarm /
+ * the sleep, and put back to its pre-quiesce value on restore.  Nothing else is restored: the alarm /
  * countdown-timer interrupt state belongs to the wake path, not here.
  */
 
@@ -38,10 +38,24 @@ static alp_status_t eerd(rv3028c7_t *ctx, bool pause)
 	return alp_i2c_write(ctx->bus, RV3028C7_I2C_ADDR, buf, sizeof(buf));
 }
 
+static bool _eerd_prior; /* EERD as found before the quiesce */
+
+static alp_status_t eerd_read(rv3028c7_t *ctx, bool *set)
+{
+	uint8_t      reg = RV3028_REG_CONTROL_1;
+	uint8_t      v   = 0;
+	alp_status_t s   = alp_i2c_write_read(ctx->bus, RV3028C7_I2C_ADDR, &reg, 1, &v, 1);
+
+	*set = (s == ALP_OK) && (v & RV3028_CTRL1_EERD) != 0u;
+	return s;
+}
+
 static alp_status_t rtc_quiesce(void *ctx, bool rail_off)
 {
 	(void)rail_off;
-	/* route_clkout() leaves EERD as it found it, so pause the refresh AFTER it. */
+	/* Remember EERD first; route_clkout() leaves it as it found it, so pause the
+	 * refresh AFTER it. */
+	(void)eerd_read((rv3028c7_t *)ctx, &_eerd_prior);
 	alp_status_t s = rv3028c7_route_clkout((rv3028c7_t *)ctx, RV3028C7_CLKOUT_LOW);
 
 	return (s == ALP_OK) ? eerd((rv3028c7_t *)ctx, true) : s;
@@ -51,7 +65,7 @@ static alp_status_t rtc_restore(void *ctx, bool rail_off, bool early)
 {
 	(void)rail_off;
 	(void)early;
-	return eerd((rv3028c7_t *)ctx, false);
+	return eerd((rv3028c7_t *)ctx, _eerd_prior); /* back to what it was, not always clear */
 }
 
 static const alp_som_power_hooks_t _hooks = {

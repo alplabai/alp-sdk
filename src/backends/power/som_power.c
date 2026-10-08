@@ -289,7 +289,7 @@ static alp_status_t rv3028_eerd(const struct i2c_dt_spec *i2c, bool pause)
 /* CLKOUT low in the RAM mirror only: no EEPROM write cycle (100 cycles min at the
  * hot corner).  With EERD clear the chip reloads the mirror from EEPROM every 24 h,
  * which would switch CLKOUT back on mid-sleep, so EERD is set for the duration and
- * cleared again by rv3028_clkout_restore(). */
+ * put back by rv3028_clkout_restore(). */
 static alp_status_t rv3028_clkout_off(const struct i2c_dt_spec *i2c)
 {
 	if (i2c->bus == NULL || !device_is_ready(i2c->bus)) {
@@ -306,10 +306,24 @@ static alp_status_t rv3028_clkout_off(const struct i2c_dt_spec *i2c)
 	return rv3028_eerd(i2c, true);
 }
 
-/* Resume the EEPROM refresh.  CLKOUT itself stays low: nothing here needs it back. */
-static alp_status_t rv3028_clkout_restore(const struct i2c_dt_spec *i2c)
+/* Whether the EEPROM refresh was already paused; false when it cannot be read. */
+static bool rv3028_eerd_was_set(const struct i2c_dt_spec *i2c)
 {
-	return rv3028_eerd(i2c, false);
+	uint8_t v = 0;
+
+	if (i2c->bus == NULL || !device_is_ready(i2c->bus) ||
+	    i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_1, &v) != 0) {
+		return false;
+	}
+	return (v & RV3028_CTRL1_EERD) != 0u;
+}
+
+/* Put EERD back to what it was before the quiesce (@p prior), NOT unconditionally
+ * clear: a caller that had paused the refresh for its own EEPROM work keeps it
+ * paused.  CLKOUT itself stays low: nothing here needs it back. */
+static alp_status_t rv3028_clkout_restore(const struct i2c_dt_spec *i2c, bool prior)
+{
+	return rv3028_eerd(i2c, prior);
 }
 
 /* ---- Default (no driver) actions ------------------------------------------- */
@@ -321,6 +335,9 @@ static bool prior_active(alp_power_domain_t d)
 	    device_is_ready(p->enable.port)) {
 		int v = gpio_pin_get_dt(&p->enable);
 		return v != 0; /* a read error counts as "was on" */
+	}
+	if (d == ALP_POWER_DOMAIN_RTC) {
+		return rv3028_eerd_was_set(&p->i2c); /* the saved bit is "EERD was set" */
 	}
 	return true;
 }
@@ -364,7 +381,7 @@ alp_status_t alp_som_power_pin_quiesce(alp_power_domain_t d, bool rail_off)
 	}
 }
 
-alp_status_t alp_som_power_pin_restore(alp_power_domain_t d, bool rail_off, bool early)
+alp_status_t alp_som_power_pin_restore(alp_power_domain_t d, bool rail_off, bool early, bool prior)
 {
 	if ((unsigned)d >= (unsigned)ALP_POWER_DOMAIN_COUNT || !_reg[d].present) {
 		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
@@ -427,7 +444,7 @@ alp_status_t alp_som_power_pin_restore(alp_power_domain_t d, bool rail_off, bool
 	case SOMPD_A_SHUTDOWN_REG:
 		return tmp112_shutdown(&p->i2c, false);
 	case SOMPD_A_KEEP_ALIVE:
-		return (d == ALP_POWER_DOMAIN_RTC) ? rv3028_clkout_restore(&p->i2c) : ALP_OK;
+		return (d == ALP_POWER_DOMAIN_RTC) ? rv3028_clkout_restore(&p->i2c, prior) : ALP_OK;
 	case SOMPD_A_DEEP_POWER_DOWN_CMD:
 	default:
 		return ALP_ERR_NOSUPPORT;
@@ -452,7 +469,7 @@ static alp_status_t run_restore(alp_power_domain_t d, bool rail_off, bool early,
 	if (_reg[d].action == SOMPD_A_ENABLE_LOW && !prior) {
 		return ALP_OK; /* it was off before the quiesce: leave it off */
 	}
-	return alp_som_power_pin_restore(d, rail_off, early);
+	return alp_som_power_pin_restore(d, rail_off, early, prior);
 }
 
 alp_status_t alp_som_power_bind(alp_power_domain_t d, const alp_som_power_hooks_t *hooks, void *ctx)
@@ -578,7 +595,10 @@ alp_status_t alp_som_power_quiesce(alp_power_mode_t mode, uint32_t *rollback_fai
 		restore_domains(&rec, ~0u, false, &restored, &failed);
 		if (failed != 0u) {
 			rec.quiesced = failed;
-			rec.mode     = (uint32_t)mode;
+			/* RUN, not @p mode: the retry record must survive a warm reset
+			 * that STOP_MODE_STAT (0 on a warm reset) cannot vouch for;
+			 * leaving a rollback-failed domain held would be the worse outcome. */
+			rec.mode = (uint32_t)ALP_POWER_MODE_RUN;
 			alp_som_pd_store_save(&rec);
 		}
 		if (rollback_failed != NULL) {

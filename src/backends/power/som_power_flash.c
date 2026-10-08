@@ -46,7 +46,7 @@ static alp_status_t flash_quiesce(void *ctx, bool rail_off)
 	alp_status_t s = alp_som_power_pin_quiesce(ALP_POWER_DOMAIN_EXT_FLASH, rail_off);
 	if (s != ALP_OK) {
 		/* Reset was not (fully) asserted: give the driver back. */
-		(void)alp_som_power_pin_restore(ALP_POWER_DOMAIN_EXT_FLASH, rail_off, false);
+		(void)alp_som_power_pin_restore(ALP_POWER_DOMAIN_EXT_FLASH, rail_off, false, true);
 		(void)flash_ospi_alif_resume(dev);
 		_suspended = false;
 	}
@@ -55,7 +55,7 @@ static alp_status_t flash_quiesce(void *ctx, bool rail_off)
 
 static alp_status_t flash_restore(void *ctx, bool rail_off, bool early)
 {
-	alp_status_t s = alp_som_power_pin_restore(ALP_POWER_DOMAIN_EXT_FLASH, rail_off, early);
+	alp_status_t s = alp_som_power_pin_restore(ALP_POWER_DOMAIN_EXT_FLASH, rail_off, early, true);
 
 	if (_suspended) {
 		/* Unlock even when the pin restore failed: a stuck lock would hang every

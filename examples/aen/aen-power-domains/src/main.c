@@ -36,8 +36,9 @@
  *     relaunch the firmware.  The SDK restore releases nRESET only, so the
  *     bench check "PING after restore, no WIFI_EN toggle" is the point of the
  *     CC3501E step.  The bring-up at the start follows the same rule: when
- *     WIFI_EN already reads high the chip is powered and it resets through
- *     nRESET only; cc3501e_reset() runs only from a known-unpowered state.
+ *     WIFI_EN already reads high AND the chip answers a PING it resets through
+ *     nRESET only; cc3501e_reset() runs only from WIFI_EN low or, as a last
+ *     resort, from a chip that stays silent through an nRESET-only reset.
  *
  *   - The PHY's power state is tracked in SOFTWARE.  An unpowered DP83825 does
  *     not read back 0xFFFF over MDIO, it reads back stale data, so "the ID reads"

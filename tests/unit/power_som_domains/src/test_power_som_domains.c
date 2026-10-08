@@ -302,6 +302,14 @@ ZTEST(power_som_domains, test_rollback_failure_is_reported_and_retryable)
 	              "the rollback failure reaches the caller");
 	zassert_equal(alp_som_power_state(ALP_POWER_DOMAIN_EXT_FLASH), ALP_SOM_PD_RESTORE_FAILED);
 
+	/* The retry record is a RUN record whatever mode failed: after a warm reset
+	 * STOP_MODE_STAT reads 0 and would drop a STOP record, leaving the domain held. */
+	alp_som_pd_record_t rec;
+
+	zassert_true(alp_som_pd_store_load(&rec));
+	zassert_equal(rec.mode, (uint32_t)ALP_POWER_MODE_RUN);
+	zassert_equal(rec.quiesced, ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_EXT_FLASH));
+
 	/* It stays in the record, so a later restore retries just that domain. */
 	g_fail_restore_on = ALP_POWER_DOMAIN_COUNT;
 	g_log_n           = 0;
@@ -309,6 +317,30 @@ ZTEST(power_som_domains, test_rollback_failure_is_reported_and_retryable)
 	zassert_equal(g_log_n, 1u);
 	zassert_equal(g_log[0], ALP_POWER_DOMAIN_EXT_FLASH);
 	zassert_equal(alp_som_power_state(ALP_POWER_DOMAIN_EXT_FLASH), ALP_SOM_PD_ACTIVE);
+}
+
+ZTEST(power_som_domains, test_rollback_retry_record_survives_a_warm_reset)
+{
+	alp_power_boot_info_t info;
+	alp_som_pd_record_t   rec;
+	uint32_t              rb = 0u;
+
+	bind_all_logging();
+	g_fail_on         = ALP_POWER_DOMAIN_RTC;
+	g_fail_restore_on = ALP_POWER_DOMAIN_EXT_FLASH;
+	zassert_equal(alp_som_power_quiesce(ALP_POWER_MODE_STOP, &rb), ALP_ERR_IO);
+	zassert_not_equal(rb, 0u);
+	zassert_true(alp_som_pd_store_load(&rec));
+
+	/* A warm reset: RAM state gone, STOP_MODE_STAT = 0.  A STOP-mode record would
+	 * be dropped here and the NOR left in reset. */
+	alp_som_power_reset_for_test();
+	alp_som_pd_store_save(&rec);
+	g_stop_mode = 0u;
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_true(info.valid, "the retry record is a RUN record");
+	zassert_equal(info.restored_domains, ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_EXT_FLASH));
 }
 
 ZTEST(power_som_domains, test_keep_alive_policy_is_never_touched)
@@ -370,6 +402,22 @@ ZTEST(power_som_domains, test_default_actions_and_restore_levels)
 	zassert_equal(tmp_conf() & 0x0100u, 0u, "TMP112 SD cleared");
 	zassert_equal(rtc_regs()[RTC_CTRL1_REG] & RTC_EERD, 0u, "EERD cleared on wake");
 	zassert_equal(alp_som_power_state(ALP_POWER_DOMAIN_ETH_PHY), ALP_SOM_PD_ACTIVE);
+}
+
+ZTEST(power_som_domains, test_rtc_eerd_goes_back_to_its_pre_quiesce_value)
+{
+	/* Already paused by someone else (e.g. an EEPROM write in progress): stays so. */
+	rtc_regs()[RTC_CTRL1_REG] |= RTC_EERD;
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL));
+	zassert_true((rtc_regs()[RTC_CTRL1_REG] & RTC_EERD) != 0u);
+	zassert_ok(alp_som_power_restore(NULL));
+	zassert_true((rtc_regs()[RTC_CTRL1_REG] & RTC_EERD) != 0u, "not unconditionally cleared");
+
+	/* Not paused before: cleared again. */
+	rtc_regs()[RTC_CTRL1_REG] &= (uint8_t)~RTC_EERD;
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL));
+	zassert_ok(alp_som_power_restore(NULL));
+	zassert_equal(rtc_regs()[RTC_CTRL1_REG] & RTC_EERD, 0u);
 }
 
 ZTEST(power_som_domains, test_backlight_that_was_off_stays_off)
@@ -665,6 +713,12 @@ ZTEST(power_som_domains, test_rv3028_hook_routes_clkout_low_and_pauses_refresh)
 	zassert_ok(alp_som_power_restore(NULL));
 	zassert_equal(g_clkout_calls, 1u, "restore does not re-route CLKOUT");
 	zassert_equal(g_chip_regs[RTC_CTRL1_REG] & RTC_EERD, 0u, "EERD cleared on wake");
+
+	/* Paused before the quiesce: the hook restores THAT, not zero. */
+	g_chip_regs[RTC_CTRL1_REG] = RTC_EERD;
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL));
+	zassert_ok(alp_som_power_restore(NULL));
+	zassert_true((g_chip_regs[RTC_CTRL1_REG] & RTC_EERD) != 0u);
 }
 
 /* ---- CC3501E link handshake ------------------------------------------------------------ */

@@ -9,8 +9,8 @@ See [`docs/aen-power-domains.md`](../../../docs/aen-power-domains.md) for the mo
 
 ## What it does
 
-1. Brings the CC3501E bridge up (`nRESET` only when `WIFI_EN` already reads high;
-   `cc3501e_reset()`, which cycles `WIFI_EN`, only from a known-unpowered state) and
+1. Brings the CC3501E bridge up (`nRESET` only when `WIFI_EN` reads high and the chip answers a PING;
+   `cc3501e_reset()`, which cycles `WIFI_EN`, only from `WIFI_EN` low or a chip that stays silent; "warm" needs a PING, not just a high `WIFI_EN`) and
    records a baseline: CC3501E PING, DP83825 PHY ID over MDIO, NOR JEDEC ID,
    TMP112 temperature.
 2. Prints every domain through `alp_power_domain_info()` and checks that

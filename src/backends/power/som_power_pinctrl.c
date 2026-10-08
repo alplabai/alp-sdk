@@ -8,6 +8,11 @@
  * covers every pad the layer drives (P15_n on the LPGPIO island, P11_6, P5_5).
  * Writing a level to an unmuxed pad reports success and does nothing, so the
  * layer applies this state before its first drive and fails when it is absent.
+ *
+ * The group sets mux and pad configuration only (function select, input buffer,
+ * schmitt, drive strength) -- never a pad's DIRECTION or LEVEL, which live in the GPIO
+ * port.  Applying it therefore cannot change what a KEEP_ALIVE pad is doing, and it is
+ * safe to apply once for all pads whatever each domain's policy.
  */
 
 #include <zephyr/devicetree.h>

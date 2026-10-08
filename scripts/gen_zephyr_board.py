@@ -2306,7 +2306,9 @@ def _aen_som_power_dts(
     # `alp,som-power` node's own pinctrl-0 state.  Pad config is input-enable +
     # schmitt (0x23 with the default 4 mA drive on the LP pads: the value the
     # bench-proven CC3501E bring-up writes by hand) so the output driver is on
-    # and the pad can be read back.  Port 15 is the LPGPIO island.
+    # and the pad can be read back.  Port 15 is the LPGPIO island.  The group sets
+    # mux / pad configuration only, never direction or level (those are GPIO-port
+    # state), so applying it to a pad whose domain is KEEP_ALIVE changes nothing.
     pads: list[tuple[int, int]] = []
     for name, dom in domains.items():
         if _aen_power_domain_presence(dom, on_module) is None:

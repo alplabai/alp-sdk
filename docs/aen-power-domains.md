@@ -21,7 +21,7 @@ part has no node and the domain reads as absent.
 | `EXT_FLASH` | take the `flash_ospi_alif` lock and wait for WIP to clear, then hold `OSPI1_RESETn` (P15_7) low | release, then the driver drops its Octal DDR state and unlocks |
 | `EXT_RAM` | hold `OSPI0_RESETn` (P15_6) low | release |
 | `TEMP_SENSOR` | TMP112 `CONFIG.SD` | clear `SD` |
-| `RTC` | RV-3028 stays powered; CLKOUT low, `CONTROL_1.EERD` set so the 24 h EEPROM refresh cannot switch CLKOUT back on | EERD cleared (CLKOUT stays low) |
+| `RTC` | RV-3028 stays powered; CLKOUT low, `CONTROL_1.EERD` set so the 24 h EEPROM refresh cannot switch CLKOUT back on | EERD back to its pre-quiesce value (CLKOUT stays low) |
 | `BACKLIGHT` | `BACKLIGHT_EN` (P5_5) low (a main-domain pad, does not hold through STOP) | back to its previous level |
 
 `flash_ospi_alif` exposes no power-management or deep-power-down hook and no
@@ -61,7 +61,8 @@ carry answers `ALP_ERR_NOT_PRESENT_ON_THIS_SOC`.
   (`drivers/pinctrl/pinctrl_alif.c`, `soc/alif/ensemble/pinctrl_soc.h`) and is
   TBD against the HWRM.
 - A quiesce that fails rolls back the failing domain's own partial step and the
-  domains already held, and reports rollback failures to the caller.
+  domains already held, and reports rollback failures to the caller; the record
+  kept for the retry is a RUN-mode record, so a warm reset still restores it.
 - After the CC3501E restore the chip is as after a reset: Wi-Fi association,
   sockets and BLE state are gone and the application re-establishes them.
 - RUN-mode cycles: the PHY's 50 MHz reference oscillator stops with the PHY, so

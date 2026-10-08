@@ -65,7 +65,7 @@ typedef struct {
 	uint32_t mode;         /**< alp_power_mode_t the quiesce ran for. */
 	uint32_t quiesced;     /**< ALP_POWER_DOMAIN_BIT set quiesced. */
 	uint32_t rail_off;     /**< Subset of @c quiesced taken with RAIL_OFF. */
-	uint32_t prior_active; /**< Subset that was active before (backlight). */
+	uint32_t prior_active; /**< Per-domain saved bit: backlight was on / RTC EERD was set. */
 	uint32_t wake_source;  /**< ALP_POWER_WAKE_* that fired; U7 fills it. */
 	uint32_t slept_ms;     /**< Sleep duration; U7 fills it. */
 	uint32_t crc;          /**< CRC-32 (IEEE) over every field above. */
@@ -85,7 +85,10 @@ void alp_som_power_unbind(alp_power_domain_t domain);
 
 /** The default (no driver) pin action for @p domain, for hooks to compose with. */
 alp_status_t alp_som_power_pin_quiesce(alp_power_domain_t domain, bool rail_off);
-alp_status_t alp_som_power_pin_restore(alp_power_domain_t domain, bool rail_off, bool early);
+/** @p prior is the domain's saved pre-quiesce bit (backlight on / RTC EERD set);
+ *  hooks that compose with this pass true for domains that do not use it. */
+alp_status_t
+alp_som_power_pin_restore(alp_power_domain_t domain, bool rail_off, bool early, bool prior);
 
 /* ---- Quiesce / restore --------------------------------------------------- */
 
