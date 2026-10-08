@@ -4,7 +4,6 @@
 > module. [ADR 0028](../../adr/0028-tan-owns-the-model-engine.md) (Proposed)
 > moves the `alp model` engine to tan (`python/tan/model/`). Kept as design history.
 
-
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use `- [ ]` checkboxes.
 
 **Goal:** Let `alp model prep` accept a `.tflite` model (the SDK's native format) — convert it to ONNX via `tf2onnx`, then run the existing quantize + accuracy flow.

@@ -92,8 +92,8 @@ This pass adds **v0.11.0** through **v0.15.0** (five more tagged
 releases).  After this pass the ledger's newest per-release section is
 **v0.15.0** while `metadata/sdk_version.yaml` reports **0.17.0-rc1** and
 `CHANGELOG.md`'s `## [v0.17.0] - 2026-10-08 (release candidate: v0.17.0-rc1)`
-section is the next one out (already partially ledgered above, under
-"v0.17.0-rc1").
+section is the next one out (already partially ledgered below, under
+"## v0.17.0-rc1 (tagged 2026-10-08) — RPC link liveness (2026-09)").
 **v0.10.0 and v0.16.0 remain un-audited** -- down from the original
 seven-release gap to two -- tracked as remaining scope on issue #1893.
 
@@ -314,7 +314,7 @@ reconciled v0.1.0 I²C/SPI/UART/GPIO rows above for that distinction.
 | AEN801 peripheral matrix — SD card | DWC SDHC | 🟡 partial | 4-bit SD read proven 2026-09-15 at 25 MHz, after a U38 solder fix, on E1M-AEN803 serial 2026W36-0002 (U38/U39/U46 hand-reworked to 3257-type) with the unmerged enable path (#2122, clock gate) plus the unmerged `test/2051-sdhc-enable-on-reworked-mux` branch (ADMA address translation, system RAM in SRAM0); dev's SD path unverified until that lands. EN=IO20, CC3501E-side on both hw revisions; SEL=IO21, CC3501E-side on r1 only -- unrouted/hardware-strapped on r2 | same | v0.8 |
 | AEN Ethernet (dp83825 PHY + `eth_dwmac_alif_ensemble` MAC glue) | `zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c` + `metadata/chips/dp83825.yaml` | ✅ verified | DHCP lease acquired and confirmed server-side (dnsmasq lease + ARP REACHABLE); root cause of the earlier no-link was DMA-visible buffers placed in DTCM instead of SRAM0 | `docs/aen-bench-bringup.md` §1 Ethernet row, `examples/aen/aen-ethernet-link` RESULT PASS, real E8 silicon, 2026-06-24; managed-MDIO PHY address corrected `@1`→`@0` against a live MDIO scan (`CHANGELOG.md` [v0.16.0], #1244) | v0.8 |
 
-Note: the `test/u46-i2s-tas2563-on-reworked-mux` branch and the `examples/aen/aen-i2s-tas2563-probe` example cited in the rows above are not in this tree (`examples/aen/` has no such directory on `dev`); the evidence they produced is recorded here as history, and the branch is the only place the probe source lives.
+Note: the `test/u46-i2s-tas2563-on-reworked-mux` branch and the `examples/aen/aen-i2s-tas2563-probe` example cited in the rows above are not in this tree (`examples/aen/` has no such directory on `dev`); the evidence they produced is recorded here as history, and the probe source lives on two branches, `origin/test/u46-i2s-tas2563-on-reworked-mux` (`094570cc4`, cited by the PDM-mics row) and `origin/test/2179-isr-capture` (`e1ed4881a`, cited by the DesignWare I2S channel-enable row under `v0.17.0-rc1`, which also cites the `PROBE_RX_TEARDOWN` mode cherry-picked from it); neither is merged.
 
 ## v0.9.0 — portable-surface consistency batch (tagged 2026-07-06)
 

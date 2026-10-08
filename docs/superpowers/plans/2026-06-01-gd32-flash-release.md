@@ -4,7 +4,6 @@
 > it now lives in `alplabai/gd32-bridge-firmware` ([ADR 0031](../../adr/0031-bridge-firmware-lives-in-its-own-repositories.md)).
 > Paths under `firmware/gd32-bridge/` below are history.
 
-
 > **STATUS — LANDED.** `scripts/flash_backends/swd_probe.py` exists
 > (the `swd_v2n_host` rename this plan calls for); the GD32 bridge
 > firmware has shipped several further releases since (see

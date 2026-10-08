@@ -4,7 +4,6 @@
 > module. [ADR 0028](../../adr/0028-tan-owns-the-model-engine.md) (Proposed)
 > moves the `alp model` engine to tan (`python/tan/model/`). Kept as design history.
 
-
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use `- [ ]` checkboxes.
 
 **Goal:** `alp model run <model.onnx>` (a host reference run: functional + accuracy + host-latency) and `alp model ab <a> <b> --input` (side-by-side compare) — the measurement result schema + A/B engine + estimate-vs-measured calibration feedback, all on the host with no silicon.
