@@ -81,7 +81,7 @@
         "direction": { "enum": ["out", "in"] },
         "polarity": { "enum": ["active_high", "active_low"] },
         "polarity_basis": {
-          "enum": ["net_name", "datasheet", "assumed"],
+          "enum": ["bench_verified", "net_name", "datasheet", "assumed"],
           "description": "How the asserted level was decided; `assumed` is not yet confirmed and must be bench-verified before the runtime drives the pad."
         },
         "role": { "enum": ["reset", "rail_enable", "powerdown", "enable", "wake_in"] },

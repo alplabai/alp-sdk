@@ -332,8 +332,11 @@
 		 * E_WIFI_NRST / WIFI_EN pads: inter-chip.tsv rows E_WIFI_NRST (P15_1_FLEX)
 		 * and WIFI_EN (P15_5); roles per docs/cc3501e-bridge.md ("WIFI_EN gates
 		 * VPA", "E_WIFI.NRST: Alif resets the CC3501E"). Savings: bench 2026-10-08,
-		 * E1M-AEN803 on an E1M-EVK. Restore semantics: chips/cc3501e/cc3501e_core.c
-		 * cc3501e_reset() vs cc3501e_hard_reset().
+		 * E1M-AEN803 on an E1M-EVK (board-input PSU telemetry at 16.0 V, 1 mA
+		 * resolution, RAM-run). E_WIFI_NRST is active-low, bench-verified the same
+		 * run: held LOW the CC3501E PING returns -5, released it returns 0. Restore
+		 * semantics: chips/cc3501e/cc3501e_core.c cc3501e_reset() vs
+		 * cc3501e_hard_reset().
 		 */
 		som_pd_wifi_ble: wifi-ble {
 			compatible = "alp,som-power-domain";
@@ -352,10 +355,11 @@
 		/*
 		 * alif-ethernet-phy.tsv rows E_PHY_RESET (P11_6) and E_PHY_PWRDWN (P15_4);
 		 * docs/aen-bench-bringup.md ("PHY power E_PHY_PWRDWN = P15_4 lpgpio, PHY
-		 * reset E_PHY_RESET = P11_6 gpio11"). Polarity is `assumed` (neither the TSV
-		 * nor the bring-up note states the asserted level): confirm on the bench
-		 * before the runtime layer drives it. Savings: bench 2026-10-08, RAM-run,
-		 * all three methods.
+		 * reset E_PHY_RESET = P11_6 gpio11"). Polarity bench-verified 2026-10-08
+		 * (E1M-AEN803 on an E1M-EVK, RAM-run, MDIO): E_PHY_PWRDWN HIGH powers the
+		 * PHY (ID 2000a140 reads), LOW turns it off (ID gone, stale reads);
+		 * E_PHY_RESET held LOW reads every MDIO register as 0xffff, release brings
+		 * the ID back. Savings: bench 2026-10-08, RAM-run, all three methods.
 		 */
 		som_pd_eth_phy: eth-phy {
 			compatible = "alp,som-power-domain";

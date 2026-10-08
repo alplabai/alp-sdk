@@ -67,8 +67,11 @@ properties:
     type: boolean
     description: |
       The domain's chip is the primary RTC and the primary RTC wake source.
-      The internal LPRTC is secondary (Alif ER001/ER002, no LF crystal in the
-      SES): not trusted for time or accurate timed wake.
+      The internal LPRTC is secondary (Alif ER001/ER002): the SES boot leaves
+      the LF clock on LFRC (`[SES] No LF XTAL`).  LFXO works when selected
+      (about 32785 Hz measured) but selecting it via `se_service_set_run_cfg`
+      has side effects, so LPRTC stays secondary until the full-profile backend
+      (U5/U7).
 
   alp,device:
     type: phandle

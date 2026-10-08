@@ -165,6 +165,13 @@ def find_problems(root: Path) -> list[str]:
             if src.get("file") and not _tsv_has(root, src["file"], src.get("signal", "")):
                 problems.append(f"{where}.dependents: no row {src.get('signal')!r} "
                                 f"in {src['file']}")
+            elif src.get("file") == "inter-chip.tsv":
+                cell = next((r.get("cc3501e_pad") for r in read_tsv(root / TSV_DIR_REL / "inter-chip.tsv")
+                             if r.get("signal") == src.get("signal")), None)
+                if cell != dep.get("driver_pin"):
+                    problems.append(
+                        f"{where}.dependents: {src.get('signal')} driver_pin "
+                        f"{dep.get('driver_pin')!r} but inter-chip.tsv cc3501e_pad is {cell!r}")
 
         key = (dom.get("presence") or {}).get("on_module_key")
         if key and not any(_dig(p.get("on_module") or {}, key) is not None for p in presets):

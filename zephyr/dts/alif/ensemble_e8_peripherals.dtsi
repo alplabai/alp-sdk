@@ -2178,6 +2178,8 @@
 		 * bench SES is the LFRC (about 5 % error; "[SES] No LF XTAL").  Long
 		 * intervals use the on-module RV-3028 countdown timer on RTC_ALARM
 		 * (P15_0 / LPGPIO0), the primary RTC wake source.
+		 * Consumers must check DT_NODE_HAS_STATUS_OKAY(DT_CHOSEN(alp_power_wake_timer)).
+		 * Dual-core ownership of this shared timer is deferred.
 		 */
 		alp,power-wake-timer = &lptimer0;
 	};

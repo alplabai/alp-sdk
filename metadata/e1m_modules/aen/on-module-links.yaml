@@ -327,6 +327,7 @@ on_module_links:
 #                  Secure Enclave's wake boot is a bench question (#2784 U8) --
 #                  and "no" for main-domain pads, which are powered down in STOP.
 #                  `polarity_basis` says how the asserted level was decided:
+#                  `bench_verified` (measured on hardware, see evidence),
 #                  `net_name` (an n/N suffix in the netlist name), `datasheet`,
 #                  or `assumed` (NOT yet confirmed -- bench-verify before relying).
 #   actions{}      what the SDK may do; `default_action` is the AUTO choice for
@@ -348,7 +349,7 @@ power_domains:
         gpio_pin: 1
         direction: out
         polarity: active_low
-        polarity_basis: net_name
+        polarity_basis: bench_verified
         role: reset
         holds_through_stop: unproven
         source: { file: inter-chip.tsv, signal: E_WIFI_NRST }
@@ -371,7 +372,8 @@ power_domains:
         opt_in: false
         measured:
           - { saving: "≈2 mA", input_voltage: "16 V", bench: "E1M-AEN803 on E1M-EVK", date: "2026-10-08",
-              note: "CC3501E nRESET held low" }
+              method: ram-run,
+              note: "CC3501E nRESET held low; board-input PSU telemetry at 16.0 V, 1 mA resolution" }
       rail_off:
         control: WIFI_EN
         opt_in: true
@@ -403,7 +405,10 @@ power_domains:
       E_WIFI_NRST / WIFI_EN pads: inter-chip.tsv rows E_WIFI_NRST (P15_1_FLEX)
       and WIFI_EN (P15_5); roles per docs/cc3501e-bridge.md ("WIFI_EN gates
       VPA", "E_WIFI.NRST: Alif resets the CC3501E").  Savings: bench
-      2026-10-08, E1M-AEN803 on an E1M-EVK.  Restore semantics:
+      2026-10-08, E1M-AEN803 on an E1M-EVK (board-input PSU telemetry at 16.0 V,
+      1 mA resolution, RAM-run).  E_WIFI_NRST is active-low, bench-verified the
+      same run: held LOW the CC3501E PING returns -5, released it returns 0.
+      Restore semantics:
       chips/cc3501e/cc3501e_core.c cc3501e_reset() vs cc3501e_hard_reset().
 
   # DP83825 RMII Ethernet PHY.  The three methods below are ALTERNATIVES, not
@@ -420,7 +425,7 @@ power_domains:
         gpio_pin: 4
         direction: out
         polarity: active_low
-        polarity_basis: assumed
+        polarity_basis: bench_verified
         role: powerdown
         holds_through_stop: unproven
         source: { file: alif-ethernet-phy.tsv, signal: E_PHY_PWRDWN }
@@ -431,7 +436,7 @@ power_domains:
         gpio_pin: 6
         direction: out
         polarity: active_low
-        polarity_basis: assumed
+        polarity_basis: bench_verified
         role: reset
         holds_through_stop: "no"
         source: { file: alif-ethernet-phy.tsv, signal: E_PHY_RESET }
@@ -465,9 +470,11 @@ power_domains:
     evidence: >-
       alif-ethernet-phy.tsv rows E_PHY_RESET (P11_6) and E_PHY_PWRDWN (P15_4);
       docs/aen-bench-bringup.md ("PHY power E_PHY_PWRDWN = P15_4 lpgpio, PHY
-      reset E_PHY_RESET = P11_6 gpio11").  Polarity is `assumed` (neither the
-      TSV nor the bring-up note states the asserted level): confirm on the
-      bench before the runtime layer drives it.  Savings: bench 2026-10-08,
+      reset E_PHY_RESET = P11_6 gpio11").  Polarity bench-verified 2026-10-08
+      (E1M-AEN803 on an E1M-EVK, RAM-run, MDIO): E_PHY_PWRDWN HIGH powers the
+      PHY (ID 2000a140 reads), LOW turns it off (ID gone, stale reads);
+      E_PHY_RESET held LOW reads every MDIO register as 0xffff, release brings
+      the ID back.  Savings: bench 2026-10-08,
       RAM-run, all three methods.
 
   # External NOR flash: the U10 footprint, chip-select OSPI0_SS1, reset/INT on
@@ -592,10 +599,11 @@ power_domains:
     secondary_rtc: >-
       Internal LPRTC (rtc0) is SECONDARY and not trusted for time or timed
       wake: Alif ER001 (A0: a STOP wake resets the prescaler) and ER002 (A1:
-      falls back to LFRC), and the bench SES reports `[SES] No LF XTAL` on
-      every boot, so it runs on LFRC (about 5 % error).  See the CHANGELOG
-      alp-sdk#1814 section.  Usable as a wake source only if the LFXO is proven
-      running.
+      falls back to LFRC).  The SES boot leaves the LF clock on LFRC
+      (`[SES] No LF XTAL`, about 5 % error); LFXO works when selected (about
+      32785 Hz measured) but selecting it via `se_service_set_run_cfg` has side
+      effects, so LPRTC stays secondary until the full-profile backend (U5/U7).
+      See the CHANGELOG alp-sdk#1814 section.
     evidence: >-
       Part per on_module_links.brd_i2c.devices (U21); /INT -> P15_0 per
       on_module_links.rtc_alarm and the inter-chip.tsv RTC_ALARM row.  VBACKUP

@@ -96,3 +96,10 @@ def test_unresolved_action_control_fails(tmp_path):
     root = _tree(tmp_path, LINKS.replace("hold_reset: { control: E_WIFI_NRST }",
                                          "hold_reset: { control: NOPE }"))
     assert any("control 'NOPE'" in p for p in gate.find_problems(root))
+
+
+def test_dependent_driver_pin_must_match_tsv(tmp_path):
+    root = _tree(tmp_path, LINKS.replace("driver_pin: GPIO_0", "driver_pin: GPIO_7"))
+    problems = gate.find_problems(root)
+    assert any("driver_pin 'GPIO_7' but inter-chip.tsv cc3501e_pad is 'GPIO_0'" in p
+               for p in problems), problems

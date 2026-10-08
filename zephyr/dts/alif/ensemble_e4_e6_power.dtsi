@@ -124,6 +124,8 @@
 		 * The LPTIMER channel the SoM power layer will arm as a STOP wake source.
 		 * Short intervals only (LFRC accuracy, about 5 %); long intervals use the
 		 * on-module RV-3028 on RTC_ALARM (P15_0 / LPGPIO0).
+		 * Consumers must check DT_NODE_HAS_STATUS_OKAY(DT_CHOSEN(alp_power_wake_timer)):
+		 * the node is disabled here.  Dual-core ownership of the timer is deferred.
 		 */
 		alp,power-wake-timer = &lptimer0;
 	};

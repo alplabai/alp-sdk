@@ -1,7 +1,0 @@
-id: broken
-task: smoke
-description: x
-license: Apache-2.0
-source:
-  bundled: starters/does-not-exist.tflite
-validated_soms: []
