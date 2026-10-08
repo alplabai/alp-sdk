@@ -477,9 +477,11 @@ int main(void)
 		 * cap spreads that over two frames (case 8) */
 		assert(turns >= 2u && worst <= 720u * 160u + 720u * 52u);
 		printf("hud: high-score page turn repaints %u px\n", (unsigned)worst);
-		/* with the HE's cap (hud_l2.c HUD_PX_BUDGET 110,000) a turn is never
-		 * split: every frame's card middle is wholly one page or the other */
-		{
+		/* with the HE's cap (hud_l2.c HUD_PX_BUDGET 110,000) a turn is never split: every
+		 * frame's card middle -- the three middle tiles AND the tagline strip's end (T_STRIP) --
+		 * is wholly one page or the other. 100,000 is the margin case: the group (97.6 k px)
+		 * fits it and the strip behind it (3 k) would not, were it not part of the group. */
+		for (int bi = 0; bi < 2; bi++) {
 			static uint16_t lp[TR_HUD_W * TR_HUD_H], tp[TR_HUD_W * TR_HUD_H];
 			tr_hud_t        hb;
 			uint32_t        seen_t = 0;
@@ -488,7 +490,7 @@ int main(void)
 			tr_hud_paint_all(lp, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, off);
 			tr_hud_paint_all(tp, &v, P, 0u - TR_HUD_POPUP_FRAMES, P + off);
 			tr_hud_init(&hb);
-			hb.budget = 110000u;
+			hb.budget = bi ? 100000u : 110000u;
 			for (uint32_t f = 0; f < TR_HZ_FRAMES(3u * P); f++) {
 				px = tr_hud_update(&hb, fb, &v, &dirty);
 				if (f < 3u) {

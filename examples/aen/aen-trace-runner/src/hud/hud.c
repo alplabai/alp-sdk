@@ -971,9 +971,9 @@ static uint32_t tile_area(int t)
 	return (uint32_t)(tiles[t].x1 - tiles[t].x0) * (uint32_t)(tiles[t].y1 - tiles[t].y0);
 }
 
-#define MID_BITS (1u << T_MIDL | 1u << T_POP | 1u << T_MIDR)
-_Static_assert(T_POP == T_MIDL + 1 && T_MIDR == T_POP + 1,
-               "the card's middle tiles are consecutive");
+#define MID_BITS (1u << T_MIDL | 1u << T_POP | 1u << T_MIDR | 1u << T_STRIP)
+_Static_assert(T_POP == T_MIDL + 1 && T_MIDR == T_POP + 1 && T_STRIP == T_MIDR + 1,
+               "the card's middle tiles (and the tagline strip's end) are consecutive");
 
 uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32_t *dirty)
 {
@@ -1009,11 +1009,11 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32
 		 * is budgeted for all of them that changed, and the rest follow
 		 * it in the same frame -- never half a page on screen. (A lone
 		 * group can pass the cap: 720 x 160 = 115,200 px at most.) */
-		bool mid = t == T_MIDL || t == T_POP || t == T_MIDR;
+		bool mid = t == T_MIDL || t == T_POP || t == T_MIDR || t == T_STRIP;
 
 		if (mid && (d & MID_BITS) == 0u) {
 			area = 0u;
-			for (int m = T_MIDL; m <= T_MIDR; m++) {
+			for (int m = T_MIDL; m <= T_STRIP; m++) {
 				area += tile_key(m, v, f, h->popup_start, h->zone_start) != h->key[m] ? tile_area(m)
 				                                                                      : 0u;
 			}
