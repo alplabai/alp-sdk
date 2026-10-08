@@ -8,7 +8,9 @@ Outputs (committed, DO NOT EDIT BY HAND), in
 meta-alp-sdk/recipes-kernel/linux/linux-renesas/:
 
   e1m-x-evk-<connector>-<module_id>.dtsi   one per carrier camera connector x
-                                           camera module that fits it
+                                           camera module that fits it; sets
+                                           `aliases { alp-camera<N> = &<sensor>; }`
+                                           for connector CAM<N>
   camera-sensors.cfg                       CSI-2 receiver + capture-unit
                                            drivers and every camera module's
                                            sensor driver, built in
@@ -288,6 +290,12 @@ def render_fragment(ctx: Ctx, board_name: str, board: dict, conn: str, mod: dict
               f"{t}{t}regulator-max-microvolt = <{uv}>;",
               f"{t}{t}regulator-always-on;",
               f"{t}}};"]
+    # <alp/camera.h> camera_id N resolves through this alias to the sensor node
+    # (src/backends/camera/yocto_drv.c), then walks the media graph to /dev/video*.
+    idx = re.fullmatch(r"CAM(\d+)", conn)
+    if not idx:
+        raise GenError(f"{what}: connector {conn!r} is not CAM<N>; no alp-camera<N> alias index")
+    o += ["", f"{t}aliases {{", f"{t}{t}alp-camera{int(idx.group(1))} = &{pre}_sensor;", f"{t}}};"]
     o += ["};", ""]
     if hogs or reset:
         o += ["&gd32_gpio {"]

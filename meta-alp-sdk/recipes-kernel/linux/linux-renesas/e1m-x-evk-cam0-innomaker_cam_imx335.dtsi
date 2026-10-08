@@ -35,6 +35,10 @@
 		regulator-max-microvolt = <3300000>;
 		regulator-always-on;
 	};
+
+	aliases {
+		alp-camera0 = &cam0_sensor;
+	};
 };
 
 &gd32_gpio {

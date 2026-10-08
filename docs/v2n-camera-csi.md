@@ -36,6 +36,11 @@ SoM route records as `TBD` (CAM0 enable and reset) is listed in the
 fragment's header as not modelled. A module that routes more lanes than the
 connector carries gets no fragment.
 
+Each fragment also sets `aliases { alp-camera<N> = &cam<N>_sensor; }` for
+connector `CAM<N>` (CAM0 -> `alp-camera0 = &cam0_sensor;`): the `<alp/camera.h>`
+Linux backend resolves `camera_id` N through that alias to the sensor node and
+walks the media graph from there to `/dev/video*`.
+
 Bench status: the OV9281 path (`innomaker_cam_ov9281`) and the IMX296LQ
 path (`raspberry_pi_global_shutter_camera`: 1 lane, 54 MHz inck, RIIC2 at
 400 kHz, 60 fps `SBGGR10_1X10` 1456x1088, zero CSI/CRU errors over 300
@@ -133,7 +138,7 @@ Report the outcome on #1149 before treating any of this as verified.
 receiver and CRU, into the kernel (`=y`) on every V2N/V2M machine -- built
 in rather than as modules because the `alp-image-*` images install no
 `kernel-modules` package -- so a camera works once its devicetree node is in the dtb,
-without any `ALP_ENABLE_CAM0_*` switch. Every module with a generated CAM0
+without any per-sensor kernel switch. Every module with a generated CAM0
 fragment (above) selects its node with `ALP_CAMERA_CAM0`; any other sensor
 needs your own node on the CAM0 I2C bus and a `csi20` endpoint.
 

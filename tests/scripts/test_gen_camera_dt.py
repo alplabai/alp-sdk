@@ -87,6 +87,14 @@ def test_imx296_on_cam0_matches_the_bench_proven_dt(want):
     assert "CONFIG_VIDEO_IMX296=y" in want[CFG]
 
 
+def test_every_fragment_aliases_its_sensor_as_alp_camera_n(want):
+    """<alp/camera.h> camera_id N -> the `alp-camera<N>` alias -> the sensor node."""
+    frags = [k for k in want if k.endswith(".dtsi")]
+    assert frags
+    for k in frags:
+        assert "\taliases {\n\t\talp-camera0 = &cam0_sensor;\n\t};" in want[k], k
+
+
 def test_imx335_two_lane_fragment_is_generated(want):
     assert "data-lanes = <1 2>;" in want[IMX335]
     assert "CONFIG_VIDEO_IMX335=y" in want[CFG]
