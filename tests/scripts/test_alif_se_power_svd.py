@@ -63,7 +63,7 @@ def test_misc_ctrl_sel_32k_matches_svd():
 
 def test_cap_cont_max_is_the_field_maximum():
     _, width = _fields(_register("ANA", "VBAT_ANA_REG1"))["XTAL32K_CAP_CONT"]
-    m = re.search(r"^#define\s+XTAL32K_CAP_CONT_MAX\s+(\d+)u", BACKEND.read_text(), re.M)
+    m = re.search(r"^#define\s+XTAL32K_CAP_CONT_MAX\s+(\d+)u", BACKEND.read_text(encoding="utf-8"), re.M)
     assert m and int(m.group(1)) == (1 << width) - 1
 
 

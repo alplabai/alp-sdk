@@ -32,11 +32,7 @@ typedef enum {
 } lfclock_t;
 
 /* aipm.h: HF Clock Sources */
-typedef enum {
-	CLK_SRC_HFRC = 0,
-	CLK_SRC_HFXO,
-	CLK_SRC_PLL
-} hfclock_t;
+typedef enum { CLK_SRC_HFRC = 0, CLK_SRC_HFXO, CLK_SRC_PLL } hfclock_t;
 
 /* aipm.h: Scaled HFRC/HFXO clock frequencies -- ordinals matter. */
 typedef enum {
@@ -87,10 +83,7 @@ typedef enum {
 } dcdc_mode_t;
 
 /* aipm.h */
-typedef enum {
-	IOFLEX_LEVEL_3V3,
-	IOFLEX_LEVEL_1V8
-} ioflex_mode_t;
+typedef enum { IOFLEX_LEVEL_3V3, IOFLEX_LEVEL_1V8 } ioflex_mode_t;
 
 /* aipm.h: the OFF profile, every member in declaration order. */
 typedef struct {
