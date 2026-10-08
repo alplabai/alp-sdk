@@ -3381,6 +3381,10 @@
       "script": "scripts/check_build_receipt.py"
     },
     {
+      "purpose": "Gate: the committed V2N/V2M Linux camera files match the camera metadata (#2633).",
+      "script": "scripts/check_camera_parity.py"
+    },
+    {
       "purpose": "CI gate: every in-tree copy of `cc3501e_bridge.{c,h}` under `examples/**` is byte-identical to the canonical pair, except the copies this gate declares divergent by name.",
       "script": "scripts/check_cc3501e_bridge_copies.py"
     },
