@@ -246,28 +246,6 @@ static void cam_cr10_unpack_row(const uint8_t *row,
 }
 
 /**
- * @brief Unpack an RZ CRU CR10 frame from ordinary (cached) memory.
- *
- * Six 10-bit pixels live in the low 60 bits of each little-endian
- * 64-bit word; rows start every @p stride bytes (8-aligned).  The caller
- * guarantees `stride >= ceil(w / 6) * 8`.  Each sample is `(v >> shift)`
- * written as one byte (@p out_bytes == 1) or one little-endian uint16 (== 2).
- */
-static void cam_cr10_unpack(const uint8_t *src,
-                            uint32_t       stride,
-                            uint32_t       w,
-                            uint32_t       h,
-                            uint8_t       *dst,
-                            unsigned       out_bytes,
-                            unsigned       shift)
-{
-	for (uint32_t y = 0; y < h; ++y) {
-		cam_cr10_unpack_row(
-		    src + (size_t)y * stride, w, dst + (size_t)y * w * out_bytes, out_bytes, shift);
-	}
-}
-
-/**
  * @brief Unpack straight from the V4L2 mmap buffer.
  *
  * ponytail: that mapping is uncached on RZ/V2N (DMA-coherent), so every load

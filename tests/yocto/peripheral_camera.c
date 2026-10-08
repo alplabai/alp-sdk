@@ -32,6 +32,28 @@
 #define FD_CSI    11
 #define FD_VIDEO  12
 
+/**
+ * @brief Unpack an RZ CRU CR10 frame from ordinary (cached) memory (test reference for the mapped variant).
+ *
+ * Six 10-bit pixels live in the low 60 bits of each little-endian
+ * 64-bit word; rows start every @p stride bytes (8-aligned).  The caller
+ * guarantees `stride >= ceil(w / 6) * 8`.  Each sample is `(v >> shift)`
+ * written as one byte (@p out_bytes == 1) or one little-endian uint16 (== 2).
+ */
+static void cam_cr10_unpack(const uint8_t *src,
+                            uint32_t       stride,
+                            uint32_t       w,
+                            uint32_t       h,
+                            uint8_t       *dst,
+                            unsigned       out_bytes,
+                            unsigned       shift)
+{
+	for (uint32_t y = 0; y < h; ++y) {
+		cam_cr10_unpack_row(
+		    src + (size_t)y * stride, w, dst + (size_t)y * w * out_bytes, out_bytes, shift);
+	}
+}
+
 /* ---- scripted kernel -------------------------------------------- */
 
 static uint32_t g_sensor_codes[4]; /* media-bus codes the sensor offers */
