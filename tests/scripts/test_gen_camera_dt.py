@@ -344,3 +344,12 @@ def test_main_reports_a_generation_error(tree, capsys):
     finally:
         sys.argv = old
     assert "GenError" in capsys.readouterr().err
+
+
+def test_only_linux_connectors_get_fragments(tree, want):
+    """The E1M-EVK CAM0 is Zephyr-only (no `linux: true`): no fragment for it; dropping
+    the flag from the X-EVK CAM0 removes every fragment (the connector set is the flag)."""
+    assert not [k for k in want if "/e1m-evk-" in k]
+    _edit(tree, "metadata/boards/e1m-x-evk.yaml", lambda s: s.replace("    linux:         true", "    linux:         false", 1))
+    got = g.generate(tree)
+    assert [k for k in got if k.endswith(".dtsi")] == []

@@ -1,4 +1,4 @@
-# V2N / V2N-M1 MIPI CSI-2 camera path (Linux, opt-in, bench-unverified)
+# V2N / V2N-M1 MIPI CSI-2 camera path (Linux, opt-in)
 
 Issue #1149. The RZ/V2N has two MIPI CSI-2 receivers feeding the CRU
 (R01UH1071, "Camera Data Receiver Unit (CRU)" chapter). Until now no
@@ -13,6 +13,9 @@ path on the A55; the default dtb is unchanged.
 - Every other module: **BENCH-UNVERIFIED**.
 
 bitbake has not been run on the fragments.
+
+The `<alp/camera.h>` backend on top of it is bench-verified for RAW10 on
+E1M-V2M103 with an IMX296LQ (see "Using `<alp/camera.h>` on Linux").
 
 ## What is wired
 
@@ -68,11 +71,6 @@ yaml, which must be one of the chip's `drivers.linux.variants`) because the
 module carries the colour part and the explicit variant skips the
 auto-identify entirely. Every fragment of a module whose `linux_bench` is
 not `verified` carries a `BENCH-UNVERIFIED` header line.
-
-Each fragment also sets `aliases { alp-camera<N> = &cam<N>_sensor; }` for
-connector `CAM<N>` (CAM0 -> `alp-camera0 = &cam0_sensor;`): the
-`<alp/camera.h>` Linux backend resolves `camera_id` N through that alias to
-the sensor node and walks the media graph from there to `/dev/video*`.
 
 ## Enable
 
@@ -307,3 +305,68 @@ v4l2-ctl -d /dev/v4l-subdevN -c exposure=1000,analogue_gain=100
 Pass: 10 frames, no CSI errors in `dmesg`. If `i2cdetect` sees nothing,
 check the mux select (`gpioinfo | grep cam0-mux-sel` must read output,
 low) and the module's I2C address.
+
+## Using `<alp/camera.h>` on Linux
+
+The portable `alp_camera_open()` works on the A55 through the V4L2 /
+media-controller backend (`src/backends/camera/yocto_drv.c`). It is
+sensor-agnostic: nothing in it names a sensor, so any camera with a mainline
+V4L2 subdev driver and a media-graph path to a capture node works.
+**Bench-verified on E1M-V2M103** (`2026W38-0008`, IMX296LQ colour sensor on
+CAM0/J5): RAW10 frames match a `v4l2-ctl` capture, 30.00 fps is delivered at a
+30 fps request, and the sensor's VBLANK is restored on close. Still
+bench-unverified: `ALP_PIXFMT_RAW8` (the Bayer8 fourccs) and the direct 8-bit
+path (Y8, including the stride repack for a node that pads its rows).
+
+`camera_id` N is resolved through a device-tree alias. The generated CAM0
+fragments set `alp-camera0 = &cam0_sensor;` themselves; a hand-written
+carrier or sensor fragment **must** name the sensor node:
+
+```
+aliases {
+	alp-camera0 = &ov9281;   /* the sensor's i2c node label */
+};
+```
+
+Without that alias `alp_camera_open()` returns `ALP_ERR_NOT_READY` (as it
+does for an alias with no probed sensor). The backend then scans every
+`/dev/media*`, finds the `MEDIA_ENT_F_CAM_SENSOR` entity bound to that node,
+follows the enabled links to the capture node, and never changes a link.
+
+| Request | Result |
+|---|---|
+| `ALP_PIXFMT_GREY8` | Y8 sensor passes through; Y10 (`CR10`) is unpacked and `>>2` |
+| `ALP_PIXFMT_RAW8` | Bayer8 / Y8 passes through |
+| `ALP_PIXFMT_RAW10` | Bayer10 / Y10 (`CR10`) unpacked to one `uint16` per pixel |
+| colour (RGB/YUV) | `ALP_ERR_NOSUPPORT` (no ISP in the path) |
+| width x height | must be a size the sensor produces natively, else `ALP_ERR_INVAL` |
+| `fps` | a request: VBLANK is clamped to the sensor's range; read the settled rate with `alp_camera_get_fps()` |
+
+**Bayer colour sensors (IMX296LQ colour).** Without the ISP a colour Bayer
+sensor is served as `ALP_PIXFMT_RAW10` (one `uint16` per pixel, still the
+mosaic); `RGB565` and `GREY8` stay `ALP_ERR_NOSUPPORT` and `RAW8` needs an
+8-bit Bayer code the sensor does not offer. The backend does not demosaic.
+Bench facts this path is written against (E1M-V2M103, IMX296LQ colour on
+CAM0/J5, 2026-10-08, observed with the V4L2 tools; the backend itself has not
+yet run on the board): the chain is `imx296 9-001a`:0 ->
+`csi-16000400.csi20`:0/1 -> `cru-ip-16000000.vide0`:0/1 -> `CRU output`
+(`/dev/video0`) with every link immutable and enabled; the sensor emits
+`SBGGR10_1X10/1456x1088`; the capture fourcc is `CR10`, 11648 bytes per line,
+12673024 bytes per frame; `CR10` packs 6 pixels per little-endian 64-bit word,
+LSB first, with 4 padding bits; the stream runs at 60.04-60.10 fps.
+
+A frame the kernel marks corrupt (`V4L2_BUF_FLAG_ERROR`) or short is dropped
+and `alp_camera_capture()` returns `ALP_ERR_IO`. `configure_isp` is
+`ALP_ERR_NOSUPPORT`. RAW8 Bayer fourccs are unverified against the CRU format
+table. A capture node whose `bytesperline` exceeds the width on an 8-bit format
+is repacked row by row, so `alp_camera_capture()` always returns `width*height`
+bytes.
+
+**Known limits.** (1) A 60 fps request on the IMX296LQ settles near 40 fps
+(24.9 ms per frame); the sensor and CRU can do 60 fps, the backend's frame
+path cannot yet (#2792). (2) A plain non-CMake static link of `libalp_sdk.a`
+must add `-Wl,--undefined=_alp_backend_force_camera_yocto_drv`, otherwise only
+the stub is linked (#2790); CMake consumers of `alp::sdk` get that option
+automatically. (3) One thread per handle: do not run `capture()` and
+`release()` on the same handle concurrently.
+

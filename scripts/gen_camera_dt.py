@@ -24,7 +24,7 @@ Inputs (nothing is restated here; every value is read):
   metadata/chips/<chip>.yaml          linux: compatible, kconfig, link_freqs,
                                       supplies, clock_name, reset_property,
                                       endpoint_flags
-  metadata/boards/<board>.yaml        camera_connectors (csi, lanes, i2c,
+  metadata/boards/<board>.yaml        camera_connectors with `linux: true` (csi, lanes, i2c,
                                       select / enable / reset macros, supply,
                                       lane_polarity) and the e1m_routes the
                                       macros name (active_low)
@@ -414,6 +414,8 @@ def generate_with_notes(root: Path) -> tuple[dict[str, str], dict[str, str]]:
         for bp in sorted((root / "metadata/boards").glob("*.yaml")):
             board = _yaml(bp)
             for conn, c in (board.get("camera_connectors") or {}).items():
+                if not c.get("linux"):  # no Linux camera path on this connector (e.g. the E1M-EVK's Zephyr-only CAM0)
+                    continue
                 for mid, mod in ctx.modules.items():
                     try:
                         if mod["lanes"] > c["lanes"] or not ctx.serves_lanes(mod):

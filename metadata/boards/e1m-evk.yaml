@@ -73,6 +73,22 @@ populated:
   # SDK-level block helpers (GPIO button + LED on the EVK headers).
   button_led:               true
 
+# Camera connectors (project `cameras:` entries name one of these keys).
+# Every signal is a reference to a route below, never a restated pad.
+camera_connectors:
+  CAM0:
+    refdes:        J5            # 15-pin Raspberry-Pi MIPI CSI-2 connector
+    csi:           E1M_CSI0
+    lanes:         2             # the RPi 15-pin connector carries no more
+    i2c:           EVK_I2C_BUS_DSI_CSI
+    select:
+      - { gpio: EVK_PIN_CAM_MUX_SEL, value: 0 }   # PI3WVR626 SEL low = input A = J5
+    # J5 has no reset line and no XVCLK; its pin-11 module enable must NOT be
+    # asserted (docs/boards/e1m-evk.md), so `enable:`/`reset:` are left out.
+    # Zephyr carrier half: `e1m_evk_rpi_csi` ships the J5 DT labels and the
+    # mux hog, with a boards/<target>.overlay per SoM target (AEN M55-HE).
+    zephyr_shields: [e1m_evk_rpi_csi]
+
 # E1M-pad → board-feature routing.  Each entry binds an
 # E1M-standard pad or peripheral instance to a board-side
 # macro name.  The generator `scripts/gen_board_header.py`

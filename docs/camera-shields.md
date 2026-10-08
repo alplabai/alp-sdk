@@ -62,6 +62,15 @@ west build -b <board> -- -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_c
 
 (carrier connector shield first, camera shield second).
 
+You normally do not write that by hand: declare the module in `board.yaml`
+(`cameras: [{ connector: CAM0, module: innomaker_cam_ov9281 }]`) and the
+build plan emits the same `-DSHIELD=` for the core that owns the camera (`cameras[].core`, or the one core whose OS the connector supports) -- carrier shield
+from the board preset's `camera_connectors.CAM0.zephyr_shields`, camera shield
+from the module's `zephyr_shield:` -- or `ALP_CAMERA_CAM<n>` for a Linux core.
+See [board-config-schema.md](board-config-schema.md#cameras-and-camera_connectors-camera-modules)
+and `tests/fixtures/cameras-select/board.yaml`.  A hand-written
+`-DSHIELD` still works (and is what the twister scenarios use).
+
 ## Driver: OV5647 (`zephyr/drivers/video/ov5647.c`)
 
 ADR 0017 Tier-1 -- an **upstream-PENDING backport** of open upstream PR

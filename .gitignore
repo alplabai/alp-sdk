@@ -202,3 +202,6 @@ oe-workdir
 # scripts/gen_example_alp_conf.py (#866); regenerable, never committed.
 examples/**/generated/alp.conf
 examples/**/generated/*/alp.conf
+
+# Scratch dirs a test makes under the repo root (tempfile.mkdtemp(dir=_ROOT)).
+/tmp*/

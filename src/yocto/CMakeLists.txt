@@ -575,6 +575,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set(_alp_sdk_link_visibility PUBLIC)
     endif()
 
+    # A static libalp_sdk.a only yields the members something references, and
+    # nothing references a backend that sits in its own TU next to the class's
+    # catch-all stub: the dispatcher anchor pulls the stub, the linux driver
+    # (registered at priority 100) is dropped, and the app silently gets the
+    # stub.  Name each such backend's ALP_BACKEND_ANCHOR_FORCE symbol so every
+    # consumer's link pulls it.  Camera only today; the other classes' yocto_drv.c
+    # need the same line (#2790).
+    if(NOT ALP_SDK_BUILD_SHARED)
+        target_link_options(alp_sdk INTERFACE
+            "LINKER:--undefined=_alp_backend_force_camera_yocto_drv")
+    endif()
+
     target_sources(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2c.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi.c
@@ -592,6 +604,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # gated below behind pkg_check_modules(ALSA), mirroring audio_yocto.c.)
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/can/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/pwm/yocto_drv.c
+        # Camera: backends/camera/yocto_drv.c is the V4L2 + media-controller
+        # backend (sensor found via the alp-camera<N> DT alias, link chain
+        # walked to the capture node).  Self-gates on __linux__ and
+        # registers at priority 100 above the zephyr_stub wildcard.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/camera/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/adc/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/counter/yocto_drv.c
         # RTC + WDT are now REAL registry backends (#33), not stubs:
