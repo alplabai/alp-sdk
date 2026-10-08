@@ -55,6 +55,8 @@
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
+#include "alp_slot_claim.h"
 #include "ble_ops.h"
 
 #if defined(CONFIG_ALP_SDK_BLE)
@@ -79,6 +81,18 @@
 #endif
 #ifndef CONFIG_ALP_SDK_BLE_GATT_MAX_VALUE_LEN
 #define CONFIG_ALP_SDK_BLE_GATT_MAX_VALUE_LEN 64
+#endif
+
+/* Client-side GATT procedure pool sizing (issue #1620).  Zephyr has no
+ * cancel for an outstanding bt_gatt_read()/bt_gatt_write(), so a procedure
+ * the caller has already timed out on keeps its context -- and this slot --
+ * until the peer finally answers or the link drops.  The synchronous
+ * <alp/ble.h> surface can only have one procedure of each kind per
+ * connection in flight, so two slots per connection leaves room for one
+ * live procedure plus one still owed by a slow peer before z_gatt_read()/
+ * z_gatt_write() have to refuse with ALP_ERR_BUSY. */
+#ifndef CONFIG_ALP_SDK_BLE_MAX_GATT_PROCS
+#define CONFIG_ALP_SDK_BLE_MAX_GATT_PROCS (CONFIG_ALP_SDK_BLE_MAX_CONNS * 2)
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -112,9 +126,13 @@ static bool                _conn_be_in_use[CONFIG_ALP_SDK_BLE_MAX_CONNS];
 static struct ble_conn_be *_conn_be_alloc(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_conn_be_pool); ++i) {
-		if (!_conn_be_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_conn_be_in_use[i])) {
 			memset(&_conn_be_pool[i], 0, sizeof(_conn_be_pool[i]));
-			_conn_be_in_use[i] = true;
 			return &_conn_be_pool[i];
 		}
 	}
@@ -130,7 +148,7 @@ static void _conn_be_free(struct ble_conn_be *p)
 	}
 	for (size_t i = 0; i < ARRAY_SIZE(_conn_be_pool); ++i) {
 		if (&_conn_be_pool[i] == p) {
-			_conn_be_in_use[i] = false;
+			alp_slot_release(&_conn_be_in_use[i]);
 			return;
 		}
 	}
@@ -138,26 +156,11 @@ static void _conn_be_free(struct ble_conn_be *p)
 
 static alp_status_t errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	case -ENOMEM:
-		return ALP_ERR_NOMEM;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf_simple *buf)
@@ -249,13 +252,47 @@ static ssize_t ble_char_write(struct bt_conn            *conn,
 	return len;
 }
 
-/* Synchronous client-side read/write (conn ops, below) block on this
- * semaphore-backed context until the async bt_gatt_read()/bt_gatt_write()
- * completion callback fires -- the ctx must remain valid until then,
- * which the k_sem_take() call below guarantees for an on-stack instance. */
+/* Lifetime of a synchronous client-side GATT procedure (issue #1620).
+ *
+ * bt_gatt_read()/bt_gatt_write() are asynchronous and Zephyr exposes NO
+ * way to cancel one: once the host has been handed a bt_gatt_*_params it
+ * keeps that pointer until the completion callback fires -- when the peer
+ * answers, or when the link drops and the host completes the outstanding
+ * request.  The caller's `timeout_ms` bounds how long the CALLER waits; it
+ * bounds nothing about how long the host holds the pointer, and the peer
+ * decides which of the two is longer.  So the calling frame cannot own the
+ * context: an automatic one leaves the host pointing at a frame that has
+ * been returned, and the late callback then memcpy()s through ctx->out
+ * into whatever that thread has pushed since and k_sem_give()s a k_sem
+ * whose storage has been reused.
+ *
+ * The contexts therefore live in the static pools below.  A slot is
+ * claimed for the whole procedure and released by whichever side finishes
+ * it, elected by a single compare-exchange on ctx->state:
+ *
+ *   LIVE               the caller is parked in k_sem_take(); the slot,
+ *                      and the caller's out/out_len, are valid.
+ *   LIVE -> DONE       won by the callback.  The caller cannot have left
+ *                      yet -- its only two exits are taking ctx->done, or
+ *                      losing this same CAS and then waiting for it -- so
+ *                      writing through ctx->out and signalling ctx->done
+ *                      is safe.  The caller frees the slot.
+ *   LIVE -> ABANDONED  won by the caller on the timeout path.  It returns
+ *                      ALP_ERR_TIMEOUT and leaves the slot claimed; the
+ *                      late callback loses the CAS, touches nothing
+ *                      outside the slot, and frees it there.
+ *
+ * A procedure whose callback never fires keeps its slot for good, which is
+ * the honest accounting: the host still owns that memory and there is no
+ * API to take it back.  That costs a slot, never a corrupted stack. */
+#define BLE_PROC_LIVE      0u /* must be 0: the allocators publish by zeroing */
+#define BLE_PROC_DONE      1u
+#define BLE_PROC_ABANDONED 2u
+
 struct ble_read_ctx {
 	struct bt_gatt_read_params params; /* MUST be first: cb casts params -> ctx */
 	struct k_sem               done;
+	uint8_t                    state; /* BLE_PROC_*, stepped with alp_lifecycle_cas */
 	alp_status_t               result;
 	uint8_t                   *out;
 	size_t                     out_cap;
@@ -265,8 +302,64 @@ struct ble_read_ctx {
 struct ble_write_ctx {
 	struct bt_gatt_write_params params; /* MUST be first: cb casts params -> ctx */
 	struct k_sem                done;
+	uint8_t                     state; /* BLE_PROC_*, stepped with alp_lifecycle_cas */
 	alp_status_t                result;
 };
+
+static struct ble_read_ctx  _read_ctx_pool[CONFIG_ALP_SDK_BLE_MAX_GATT_PROCS];
+static bool                 _read_ctx_in_use[CONFIG_ALP_SDK_BLE_MAX_GATT_PROCS];
+static struct ble_write_ctx _write_ctx_pool[CONFIG_ALP_SDK_BLE_MAX_GATT_PROCS];
+static bool                 _write_ctx_in_use[CONFIG_ALP_SDK_BLE_MAX_GATT_PROCS];
+
+BUILD_ASSERT(BLE_PROC_LIVE == 0u, "the ctx allocators publish a slot as LIVE by zeroing it");
+
+static struct ble_read_ctx *_read_ctx_alloc(void)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(_read_ctx_pool); ++i) {
+		/* Same atomic claim as _conn_be_alloc() above (alp_slot_claim.h):
+		 * the BT RX thread releases abandoned slots concurrently with a
+		 * caller claiming one, so the claim must be a compare-exchange
+		 * rather than a check-then-set. */
+		if (alp_slot_try_claim(&_read_ctx_in_use[i])) {
+			memset(&_read_ctx_pool[i], 0, sizeof(_read_ctx_pool[i]));
+			return &_read_ctx_pool[i];
+		}
+	}
+	return NULL;
+}
+
+static void _read_ctx_free(struct ble_read_ctx *p)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(_read_ctx_pool); ++i) {
+		if (&_read_ctx_pool[i] == p) {
+			alp_slot_release(&_read_ctx_in_use[i]);
+			return;
+		}
+	}
+	/* Not pool storage: the CONFIG_ZTEST seam below drives ble_read_cb()
+	 * with a context it owns itself, so falling through is the answer. */
+}
+
+static struct ble_write_ctx *_write_ctx_alloc(void)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(_write_ctx_pool); ++i) {
+		if (alp_slot_try_claim(&_write_ctx_in_use[i])) {
+			memset(&_write_ctx_pool[i], 0, sizeof(_write_ctx_pool[i]));
+			return &_write_ctx_pool[i];
+		}
+	}
+	return NULL;
+}
+
+static void _write_ctx_free(struct ble_write_ctx *p)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(_write_ctx_pool); ++i) {
+		if (&_write_ctx_pool[i] == p) {
+			alp_slot_release(&_write_ctx_in_use[i]);
+			return;
+		}
+	}
+}
 
 static uint8_t ble_read_cb(struct bt_conn             *conn,
                            uint8_t                     err,
@@ -276,6 +369,19 @@ static uint8_t ble_read_cb(struct bt_conn             *conn,
 {
 	struct ble_read_ctx *ctx = (struct ble_read_ctx *)params;
 	(void)conn;
+	/* Claim the completion before touching anything outside the slot.
+	 * Losing this CAS means z_gatt_read() already gave up on this
+	 * procedure: its frame is gone, so ctx->out and ctx->out_len point at
+	 * memory that no longer exists and nobody is waiting on ctx->done.
+	 * The slot itself is still ours -- it was deliberately left claimed
+	 * for exactly this late arrival -- so hand it back and return.
+	 * Winning the CAS pins the caller in k_sem_take() (see the ownership
+	 * comment above ble_read_ctx), which is what keeps ctx->out,
+	 * ctx->out_len and ctx->done live for the rest of this function. */
+	if (!alp_lifecycle_cas(&ctx->state, BLE_PROC_LIVE, BLE_PROC_DONE)) {
+		_read_ctx_free(ctx);
+		return BT_GATT_ITER_STOP;
+	}
 	/* Zephyr's gatt_read_rsp() (subsys/bluetooth/host/gatt.c) delivers a
 	 * peer-rejected read as func(conn, err, params, NULL, 0) -- data is
 	 * NULL here too, so err must be checked before data to avoid mapping
@@ -321,6 +427,7 @@ alp_status_t alp_ble_test_read_cb(uint8_t err, const void *data, uint16_t length
 	uint8_t             out_buf[16];
 	struct ble_read_ctx ctx = {
 		.params  = { .func = ble_read_cb },
+		.state   = BLE_PROC_LIVE, /* the cb's CAS must find a live ctx here */
 		.out     = out_buf,
 		.out_cap = sizeof(out_buf),
 		.out_len = NULL,
@@ -335,15 +442,178 @@ alp_status_t alp_ble_test_read_cb(uint8_t err, const void *data, uint16_t length
 	}
 	return ctx.result;
 }
+
+/* Test-only seam (issue #1939): reproduces ble_read_cb()'s CAS-loss branch
+ * -- a late callback arriving after the caller has already abandoned the
+ * ctx must lose its own alp_lifecycle_cas() and touch nothing. The abandon
+ * itself is z_gatt_read()'s real "Deadline passed" branch (zephyr_drv.c
+ * :1047) firing on a genuine timeout; that stays BENCH-OWED (see
+ * docs/test-plan.md) because native_sim has no live peer to time out
+ * against. This drives the CAS-loss half only, by pre-abandoning a
+ * synthetic stack ctx directly via alp_lifecycle_cas() -- the same call
+ * z_gatt_read() makes. That pre-abandon always wins (single-threaded,
+ * freshly-LIVE ctx), so ble_read_cb()'s own CAS always loses. The dummy
+ * payload below is deliberately non-NULL: if the CAS guard itself ever
+ * regressed to a no-op, ble_read_cb() would fall through to the
+ * data-bearing branch and set ctx.result = ALP_OK, which is how this
+ * seam would notice -- a NULL/zero-length payload would land on the
+ * "procedure complete" branch instead and leave ctx.result unchanged,
+ * masking exactly that regression. The return value is this file's
+ * usual "cb never signalled ctx.done" sentinel (ALP_ERR_TIMEOUT, same
+ * convention as alp_ble_test_read_cb() above); a winning CAS always
+ * calls k_sem_give() before returning. */
+alp_status_t alp_ble_test_read_cb_loses_cas_after_abandon(void)
+{
+	static const uint8_t dummy[] = { 0xCC };
+	uint8_t              out_buf[16];
+	struct ble_read_ctx  ctx = {
+		.params  = { .func = ble_read_cb },
+		.state   = BLE_PROC_LIVE,
+		.out     = out_buf,
+		.out_cap = sizeof(out_buf),
+		.out_len = NULL,
+		.result  = ALP_ERR_TIMEOUT,
+	};
+	k_sem_init(&ctx.done, 0, 1);
+
+	(void)alp_lifecycle_cas(&ctx.state, BLE_PROC_LIVE, BLE_PROC_ABANDONED);
+
+	(void)ble_read_cb(NULL, 0, &ctx.params, dummy, sizeof(dummy));
+
+	if (k_sem_take(&ctx.done, K_NO_WAIT) != 0) {
+		return ALP_ERR_TIMEOUT;
+	}
+	return ctx.result;
+}
+
+/* Test-only seam (issue #1939): reproduces _read_ctx_pool running dry
+ * through the exact allocator z_gatt_read() calls. No bt_conn or radio
+ * involved: _read_ctx_alloc()/_read_ctx_free() are pure pool bookkeeping.
+ * Checking only "_read_ctx_alloc() == NULL" after the claiming loop is a
+ * tautology -- it re-reads the condition the loop already exited on, so a
+ * mutated allocator that always returns NULL (or a pool already exhausted
+ * on entry) would pass silently. Requiring n to equal the pool's real
+ * capacity closes both holes. Leaves the pool exactly as it found it --
+ * every slot this claims is freed before returning. */
+bool alp_ble_test_read_ctx_pool_exhausts(size_t *claimed_out)
+{
+	struct ble_read_ctx *held[ARRAY_SIZE(_read_ctx_pool)];
+	size_t               n;
+
+	for (n = 0; n < ARRAY_SIZE(held); ++n) {
+		held[n] = _read_ctx_alloc();
+		if (held[n] == NULL) break;
+	}
+	if (claimed_out != NULL) *claimed_out = n;
+
+	/* Only probe for a spare slot once every real slot is already held --
+	 * otherwise this second alloc would just claim one of the pool's own
+	 * slots and get counted as "exhausted" for the wrong reason. If the
+	 * pool is genuinely full but a bug lets this claim one anyway, it
+	 * must be freed here: nothing else in this function ever sees it, so
+	 * skipping the free would leak a slot out from under the pool. */
+	struct ble_read_ctx *extra     = (n == ARRAY_SIZE(_read_ctx_pool)) ? _read_ctx_alloc() : NULL;
+	bool                 exhausted = (n == ARRAY_SIZE(_read_ctx_pool)) && (extra == NULL);
+	if (extra != NULL) _read_ctx_free(extra);
+
+	for (size_t i = 0; i < n; ++i) {
+		_read_ctx_free(held[i]);
+	}
+	return exhausted;
+}
 #endif /* CONFIG_ZTEST */
 
 static void ble_write_cb(struct bt_conn *conn, uint8_t err, struct bt_gatt_write_params *params)
 {
 	struct ble_write_ctx *ctx = (struct ble_write_ctx *)params;
 	(void)conn;
+	/* Same handoff as ble_read_cb() above: losing the CAS means
+	 * z_gatt_write() timed out and left, so ctx->done has no waiter and
+	 * this slot is ours to release. */
+	if (!alp_lifecycle_cas(&ctx->state, BLE_PROC_LIVE, BLE_PROC_DONE)) {
+		_write_ctx_free(ctx);
+		return;
+	}
 	ctx->result = (err == 0) ? ALP_OK : ALP_ERR_IO;
 	k_sem_give(&ctx->done);
 }
+
+#if defined(CONFIG_ZTEST)
+/* Test-only seam (issue #1939): the write-ctx-pool counterpart of
+ * alp_ble_test_read_cb() above -- proves ble_write_cb()'s ordinary
+ * LIVE -> DONE win, both the err == 0 -> ALP_OK and err != 0 ->
+ * ALP_ERR_IO mappings. alp_ble_test_write_cb_loses_cas_after_abandon()
+ * below cannot cover this: it pre-abandons the ctx, so ble_write_cb()'s
+ * CAS always loses before err is ever read. */
+alp_status_t alp_ble_test_write_cb(uint8_t err)
+{
+	struct ble_write_ctx ctx = {
+		.params = { .func = ble_write_cb },
+		.state  = BLE_PROC_LIVE,
+		.result = ALP_ERR_TIMEOUT,
+	};
+	k_sem_init(&ctx.done, 0, 1);
+
+	ble_write_cb(NULL, err, &ctx.params);
+
+	if (k_sem_take(&ctx.done, K_NO_WAIT) != 0) {
+		return ALP_ERR_TIMEOUT;
+	}
+	return ctx.result;
+}
+
+/* Test-only seam (issue #1939): the write-ctx-pool counterpart of
+ * alp_ble_test_read_cb_loses_cas_after_abandon() above -- same CAS-loss
+ * race, against ble_write_ctx/ble_write_cb. The real abandon branch is
+ * z_gatt_write()'s "Timeout handoff" (zephyr_drv.c :1109), which stays
+ * BENCH-OWED for the same reason as the read side. err is not taken: the
+ * pre-abandon always wins, so ble_write_cb()'s own CAS always loses and
+ * returns before ever reading err. */
+alp_status_t alp_ble_test_write_cb_loses_cas_after_abandon(void)
+{
+	struct ble_write_ctx ctx = {
+		.params = { .func = ble_write_cb },
+		.state  = BLE_PROC_LIVE,
+		.result = ALP_ERR_TIMEOUT,
+	};
+	k_sem_init(&ctx.done, 0, 1);
+
+	(void)alp_lifecycle_cas(&ctx.state, BLE_PROC_LIVE, BLE_PROC_ABANDONED);
+
+	ble_write_cb(NULL, 0, &ctx.params);
+
+	if (k_sem_take(&ctx.done, K_NO_WAIT) != 0) {
+		return ALP_ERR_TIMEOUT;
+	}
+	return ctx.result;
+}
+
+/* Test-only seam (issue #1939): the write-ctx-pool counterpart of
+ * alp_ble_test_read_ctx_pool_exhausts() above -- same tautology fix,
+ * against _write_ctx_pool/_write_ctx_alloc(). */
+bool alp_ble_test_write_ctx_pool_exhausts(size_t *claimed_out)
+{
+	struct ble_write_ctx *held[ARRAY_SIZE(_write_ctx_pool)];
+	size_t                n;
+
+	for (n = 0; n < ARRAY_SIZE(held); ++n) {
+		held[n] = _write_ctx_alloc();
+		if (held[n] == NULL) break;
+	}
+	if (claimed_out != NULL) *claimed_out = n;
+
+	/* Same spare-slot guard as alp_ble_test_read_ctx_pool_exhausts() above
+	 * -- free a wrongly-granted extra rather than leak it. */
+	struct ble_write_ctx *extra = (n == ARRAY_SIZE(_write_ctx_pool)) ? _write_ctx_alloc() : NULL;
+	bool                  exhausted = (n == ARRAY_SIZE(_write_ctx_pool)) && (extra == NULL);
+	if (extra != NULL) _write_ctx_free(extra);
+
+	for (size_t i = 0; i < n; ++i) {
+		_write_ctx_free(held[i]);
+	}
+	return exhausted;
+}
+#endif /* CONFIG_ZTEST */
 #endif /* CONFIG_ALP_SDK_BLE */
 
 /* ================================================================== */
@@ -352,22 +622,20 @@ static void ble_write_cb(struct bt_conn *conn, uint8_t err, struct bt_gatt_write
 
 static alp_status_t z_open(alp_ble_radio_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 #if defined(CONFIG_ALP_SDK_BLE)
 	if (_radio_be.refcount == 0) {
 		int err = bt_enable(NULL);
 		if (err != 0 && err != -EALREADY) {
-			caps_out->flags = 0u;
 			return errno_to_alp(err);
 		}
 		bt_le_scan_cb_register(&_scan_cb);
 	}
 	_radio_be.refcount++;
-	st->be_data     = &_radio_be;
-	caps_out->flags = 0u;
+	st->be_data = &_radio_be;
 	return ALP_OK;
 #else
 	(void)st;
-	caps_out->flags = 0u;
 	return ALP_ERR_NOSUPPORT;
 #endif
 }
@@ -693,6 +961,15 @@ static alp_status_t z_disconnect(alp_ble_conn_state_t *conn_st)
 #if defined(CONFIG_ALP_SDK_BLE)
 	struct ble_conn_be *c = (struct ble_conn_be *)conn_st->be_data;
 	if (c == NULL) return ALP_ERR_NOT_READY;
+	/* A GATT procedure still in flight on this connection needs nothing
+	 * unwound here: its context is storage of its own (see the ownership
+	 * comment above ble_read_ctx, issue #1620), not part of this
+	 * connection slot, so recycling the slot cannot pull memory out from
+	 * under the host.  Dropping the link is the host's other route to
+	 * releasing the params, and it takes that route by running the
+	 * completion callback -- which frees the procedure's slot exactly as a
+	 * late peer response would.  If it never runs, the slot stays claimed:
+	 * reserved, never recycled underneath the host. */
 	int err = bt_conn_disconnect(c->bt, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
 	_conn_be_free(c);
 	conn_st->be_data = NULL;
@@ -722,25 +999,56 @@ static alp_status_t z_gatt_read(alp_ble_conn_state_t *conn_st,
 	struct ble_conn_be *c = (struct ble_conn_be *)conn_st->be_data;
 	if (c == NULL || c->bt == NULL) return ALP_ERR_NOT_READY;
 
-	struct ble_read_ctx ctx = {
+	/* Pool-owned, not automatic: the host keeps &ctx->params past our
+	 * timeout and there is nothing to cancel it with -- see the ownership
+	 * comment above ble_read_ctx (issue #1620). */
+	struct ble_read_ctx *ctx = _read_ctx_alloc();
+	if (ctx == NULL) return ALP_ERR_BUSY;
+
+	*ctx = (struct ble_read_ctx){
 		.params =
 		    {
 		        .func         = ble_read_cb,
 		        .handle_count = 1,
 		        .single       = { .handle = handle, .offset = 0 },
 		    },
+		.state   = BLE_PROC_LIVE,
 		.out     = out,
 		.out_cap = out_cap,
 		.out_len = out_len,
 		.result  = ALP_ERR_TIMEOUT,
 	};
-	k_sem_init(&ctx.done, 0, 1);
+	k_sem_init(&ctx->done, 0, 1);
 
-	int err = bt_gatt_read(c->bt, &ctx.params);
-	if (err != 0) return errno_to_alp(err);
+	int err = bt_gatt_read(c->bt, &ctx->params);
+	if (err != 0) {
+		/* The procedure never started, so no callback is coming and the
+		 * host holds no pointer into the slot: reclaim it here. */
+		_read_ctx_free(ctx);
+		return errno_to_alp(err);
+	}
 
-	if (k_sem_take(&ctx.done, K_MSEC(timeout_ms)) != 0) return ALP_ERR_TIMEOUT;
-	return ctx.result;
+	if (k_sem_take(&ctx->done, K_MSEC(timeout_ms)) == 0) {
+		/* Read the result BEFORE releasing the slot -- once released it
+		 * can be claimed and overwritten by another thread. */
+		alp_status_t rc = ctx->result;
+		_read_ctx_free(ctx);
+		return rc;
+	}
+
+	/* Deadline passed.  Abandon the procedure to its callback and leave
+	 * the slot claimed -- unless ble_read_cb() won the CAS in the gap
+	 * between the semaphore expiring and this line, in which case it is
+	 * running right now with our out/out_len and will signal ctx->done.
+	 * Waiting that out is what keeps this frame alive underneath it, and
+	 * the wait is bounded: the callback body blocks on nothing. */
+	if (alp_lifecycle_cas(&ctx->state, BLE_PROC_LIVE, BLE_PROC_ABANDONED)) {
+		return ALP_ERR_TIMEOUT;
+	}
+	(void)k_sem_take(&ctx->done, K_FOREVER);
+	alp_status_t rc = ctx->result;
+	_read_ctx_free(ctx);
+	return rc;
 #else
 	(void)conn_st;
 	(void)handle;
@@ -765,7 +1073,11 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
 	struct ble_conn_be *c = (struct ble_conn_be *)conn_st->be_data;
 	if (c == NULL || c->bt == NULL) return ALP_ERR_NOT_READY;
 
-	struct ble_write_ctx ctx = {
+	/* Pool-owned for the same reason as the read above (issue #1620). */
+	struct ble_write_ctx *ctx = _write_ctx_alloc();
+	if (ctx == NULL) return ALP_ERR_BUSY;
+
+	*ctx = (struct ble_write_ctx){
 		.params =
 		    {
 		        .func   = ble_write_cb,
@@ -774,15 +1086,31 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
 		        .data   = data,
 		        .length = (uint16_t)len,
 		    },
+		.state  = BLE_PROC_LIVE,
 		.result = ALP_ERR_TIMEOUT,
 	};
-	k_sem_init(&ctx.done, 0, 1);
+	k_sem_init(&ctx->done, 0, 1);
 
-	int err = bt_gatt_write(c->bt, &ctx.params);
-	if (err != 0) return errno_to_alp(err);
+	int err = bt_gatt_write(c->bt, &ctx->params);
+	if (err != 0) {
+		_write_ctx_free(ctx);
+		return errno_to_alp(err);
+	}
 
-	if (k_sem_take(&ctx.done, K_MSEC(timeout_ms)) != 0) return ALP_ERR_TIMEOUT;
-	return ctx.result;
+	if (k_sem_take(&ctx->done, K_MSEC(timeout_ms)) == 0) {
+		alp_status_t rc = ctx->result;
+		_write_ctx_free(ctx);
+		return rc;
+	}
+
+	/* Timeout handoff, identical to z_gatt_read()'s above. */
+	if (alp_lifecycle_cas(&ctx->state, BLE_PROC_LIVE, BLE_PROC_ABANDONED)) {
+		return ALP_ERR_TIMEOUT;
+	}
+	(void)k_sem_take(&ctx->done, K_FOREVER);
+	alp_status_t rc = ctx->result;
+	_write_ctx_free(ctx);
+	return rc;
 #else
 	(void)conn_st;
 	(void)handle;
@@ -792,6 +1120,86 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
 	return ALP_ERR_NOSUPPORT;
 #endif
 }
+
+#if defined(CONFIG_ALP_SDK_BLE) && defined(CONFIG_ZTEST)
+/* Test-only seam (issue #1939): drives z_gatt_read()'s real ALP_ERR_BUSY
+ * refusal (zephyr_drv.c :1008) through the production entry point itself,
+ * not a reimplementation. Exhausts _read_ctx_pool through the same
+ * allocator z_gatt_read() calls, then calls z_gatt_read() with a non-NULL
+ * `bt` sentinel: the pool-exhaustion check runs before bt_gatt_read() is
+ * ever reached, so the sentinel is never dereferenced and no radio is
+ * needed. Leaves the pool exactly as it found it. */
+alp_status_t alp_ble_test_gatt_read_busy(void)
+{
+	struct ble_read_ctx *held[ARRAY_SIZE(_read_ctx_pool)];
+	size_t               n;
+
+	for (n = 0; n < ARRAY_SIZE(held); ++n) {
+		held[n] = _read_ctx_alloc();
+		if (held[n] == NULL) break;
+	}
+
+	/* Guard against the exact tautology this seam exists to kill (issue
+	 * #1939 review): checking only z_gatt_read()'s return below, with no
+	 * check that the claiming loop above actually ran the pool dry, lets
+	 * a broken allocator (e.g. one that refuses every claim) answer
+	 * ALP_ERR_BUSY for the wrong reason and pass unnoticed. Bail with a
+	 * status distinct from ALP_ERR_BUSY so the caller's
+	 * zassert_equal(..., ALP_ERR_BUSY) catches the gap instead of it
+	 * passing silently. */
+	if (n != ARRAY_SIZE(_read_ctx_pool)) {
+		for (size_t i = 0; i < n; ++i) {
+			_read_ctx_free(held[i]);
+		}
+		return ALP_ERR_NOT_READY;
+	}
+
+	struct ble_conn_be   fake_conn = { .bt = (struct bt_conn *)1 };
+	alp_ble_conn_state_t conn_st   = { .be_data = &fake_conn };
+	uint8_t              out[1];
+	size_t               out_len = 0;
+
+	alp_status_t rc = z_gatt_read(&conn_st, 0, out, sizeof(out), &out_len, 0);
+
+	for (size_t i = 0; i < n; ++i) {
+		_read_ctx_free(held[i]);
+	}
+	return rc;
+}
+
+/* Test-only seam (issue #1939): the write counterpart of
+ * alp_ble_test_gatt_read_busy() above -- drives z_gatt_write()'s real
+ * ALP_ERR_BUSY refusal (zephyr_drv.c :1080) the same way. */
+alp_status_t alp_ble_test_gatt_write_busy(void)
+{
+	struct ble_write_ctx *held[ARRAY_SIZE(_write_ctx_pool)];
+	size_t                n;
+
+	for (n = 0; n < ARRAY_SIZE(held); ++n) {
+		held[n] = _write_ctx_alloc();
+		if (held[n] == NULL) break;
+	}
+
+	/* Same tautology guard as alp_ble_test_gatt_read_busy() above. */
+	if (n != ARRAY_SIZE(_write_ctx_pool)) {
+		for (size_t i = 0; i < n; ++i) {
+			_write_ctx_free(held[i]);
+		}
+		return ALP_ERR_NOT_READY;
+	}
+
+	struct ble_conn_be   fake_conn = { .bt = (struct bt_conn *)1 };
+	alp_ble_conn_state_t conn_st   = { .be_data = &fake_conn };
+	static const uint8_t data[1]   = { 0 };
+
+	alp_status_t rc = z_gatt_write(&conn_st, 0, data, sizeof(data), 0);
+
+	for (size_t i = 0; i < n; ++i) {
+		_write_ctx_free(held[i]);
+	}
+	return rc;
+}
+#endif /* CONFIG_ALP_SDK_BLE && CONFIG_ZTEST */
 
 /* ------------------------------------------------------------------ */
 /* Registration                                                        */

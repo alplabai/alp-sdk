@@ -130,7 +130,11 @@ new SoM's bench coverage means:
 
 Coverage for V2N / V2N-M1 / i.MX 93 follows the same bench-run
 contract above — their board dirs already exist under `tests/hil/`
-(`v2n101-x-evk`, `v2n102-x-evk`, `v2m101-x-evk`, `v2m102-x-evk`,
-`nx9101-evk`) — no separate runner-label scheme to design; the
+(`v2n101-x-evk`, `v2n102-x-evk`, `v2n103-x-evk`, `v2m101-x-evk`,
+`v2m102-x-evk`, `v2m103-x-evk`, `nx9101-evk`) — no separate runner-label scheme to design; the
 constraint (serial, reservation-gated, license-gated tooling) is the
 same for every board on this bench.
+
+The V2N101 ssh-run specs live only in `tests/hil/v2n101-x-evk/` and are
+unverified on a V2N unit; V2N102/V2N103 runs must target that directory
+explicitly, since nothing includes it automatically.

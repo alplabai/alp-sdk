@@ -1,0 +1,19 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * fillrate probe overlay for the E1M-AEN803 (Ensemble E8, M55-HP) RAM-run.
+ * Same retarget as examples/aen/aen-hp-core-smoke's overlay: ROM to ITCM
+ * (path-reference form &itcm; the SES HP ATOC loadAddress 0x50000000 puts it
+ * at the HP ITCM global base), no MCUboot code partition. The display chain
+ * comes from the e1m_evk_rk055hdmipi4ma0 shield the same way it does for the
+ * HE variant; the framebuffer is used by address (SRAM0), so it adds nothing
+ * to this RAM-run .bin either.
+ */
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

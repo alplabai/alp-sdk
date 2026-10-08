@@ -6,8 +6,13 @@
  *
  * write(data, len) -- appends bytes into the ring; bytes that overflow
  *   the capacity are silently truncated.
- * read(data, len, timeout_ms) -- drains up to len bytes; returns as
- *   many as are available (may be zero if the ring is empty).
+ * read(data, len, timeout_ms) -- drains up to len bytes already in
+ *   the ring.  This backend never blocks (nothing refills the ring
+ *   asynchronously), so it behaves as a single poll regardless of
+ *   @p timeout_ms: per the documented contract
+ *   (include/alp/peripheral.h alp_uart_read), zero bytes collected
+ *   means the call returns ALP_ERR_TIMEOUT, never ALP_OK with an
+ *   untouched buffer.
  *
  * Priority 0, silicon_ref="*": always loses to zephyr_drv
  * (priority 100) on real silicon; picked only when the test build
@@ -46,11 +51,11 @@ static size_t  _count = 0u; /* bytes currently buffered */
 static alp_status_t
 sw_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
-	st->dev         = NULL;
-	st->port_id     = 0u;
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->port_id = 0u;
+	st->be_data = NULL;
 	/* Reset the circular buffer state on each open */
 	_head  = 0u;
 	_tail  = 0u;
@@ -78,6 +83,7 @@ sw_read(alp_uart_backend_state_t *st, uint8_t *data, size_t len, uint32_t timeou
 	(void)st;
 	(void)timeout_ms;
 	size_t n = (_count < len) ? _count : len;
+	if (n == 0u) return ALP_ERR_TIMEOUT;
 	for (size_t i = 0; i < n; i++) {
 		data[i] = _buf[_head];
 		_head   = (_head + 1u) % SW_BUF_LEN;

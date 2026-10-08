@@ -116,7 +116,7 @@ To reproduce CI byte-for-byte, match the pin locally — `pyenv` and `uv` pick
 ### 1.2 Installing Tan from source
 
 As of `tan-cli` [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0)
-(current release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+(current release: [v0.6.0](https://github.com/alplabai/tan-cli/releases/tag/v0.6.0)),
 the published installer (`install.sh`/`install.ps1`) installs the real Python
 `tan` directly -- it no longer resolves the frozen Rust v0.4.1 release.
 alp-sdk `dev` tracks `tan-cli/dev` instead, to stay ahead of the last tagged
@@ -135,7 +135,6 @@ is not distributed on PyPI, and the bare name `tan` there belongs to an
 unrelated project (`200` for it: `tan` v23.7.0, "The compromising code
 formatter") -- `pip install tan` does not get you this tool. `alp-tan` is
 not registered there either (`404` for it, not a reservation placeholder).
-The old `crates/` tree remains the frozen v0.4.1 behaviour oracle.
 
 ---
 
@@ -199,10 +198,10 @@ them the Zephyr-on-M default:
   bridge recovery
   ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
 - Building the **CC3501E bridge firmware's silicon-free stub target**
-  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  ([`cc3501e-bridge-firmware:README.md`](https://github.com/alplabai/cc3501e-bridge-firmware#readme) "Build")
   -- the CC3501E's *production* image builds with TI's `ticlang`, not
   this toolchain
-  ([`firmware/cc3501e/toolchain/arm-none-eabi.cmake`](../firmware/cc3501e/toolchain/arm-none-eabi.cmake));
+  ([`cc3501e-bridge-firmware:toolchain/arm-none-eabi.cmake`](https://github.com/alplabai/cc3501e-bridge-firmware));
   only the stub / CI-compile-smoke target needs `arm-none-eabi-gcc`.
 - Hand-writing **bare-metal firmware for a real M-class core**
   (`ALP_OS=baremetal`, no Zephyr -- see [`docs/architecture.md`](architecture.md)
@@ -310,7 +309,7 @@ the Zephyr-on-M default:
   ([`docs/bring-up-v2n.md`](bring-up-v2n.md)) or bridge recovery
   ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
 - Building the **CC3501E bridge firmware's silicon-free stub target**
-  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  ([`cc3501e-bridge-firmware:README.md`](https://github.com/alplabai/cc3501e-bridge-firmware#readme) "Build")
   -- the CC3501E's *production* image builds with TI's `ticlang`, not
   this toolchain; only the stub / CI-compile-smoke target needs
   `arm-none-eabi-gcc`.
@@ -431,12 +430,12 @@ winget install -e --id oss-winget.gperf
 ```
 
 Neither `dtc` nor `gperf` is in `prerequisites.windows`, and
-`bootstrap.ps1` does not require them. The SDK-reference
-`python -m alp_cli doctor` checks are WARN-only: `edtlib` does the load-bearing devicetree
-parse in pure Python (a missing `dtc` never blocks a build), and plain
-kernel-mode apps build without `gperf`.  Install them if your build needs
-extra dts validation or kobject/userspace generation -- the Zephyr SDK's
-Windows bundle ships neither.
+`bootstrap.ps1` does not require them. `tan doctor`'s checks for both are
+WARN-only: `edtlib` does the load-bearing devicetree parse in pure Python (a
+missing `dtc` never blocks a build), and plain kernel-mode apps build without
+`gperf`.  Install them if your build needs extra dts validation or
+kobject/userspace generation -- the Zephyr SDK's Windows bundle ships
+neither.
 
 ### 4.2 Python deps
 
@@ -462,7 +461,7 @@ paths, none of them the Zephyr-on-M default:
   ([`docs/bring-up-v2n.md`](bring-up-v2n.md)) or bridge recovery
   ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
 - Building the **CC3501E bridge firmware's silicon-free stub target**
-  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  ([`cc3501e-bridge-firmware:README.md`](https://github.com/alplabai/cc3501e-bridge-firmware#readme) "Build")
   -- the CC3501E's *production* image builds with TI's `ticlang`, not
   this toolchain; only the stub / CI-compile-smoke target needs
   `arm-none-eabi-gcc`.
@@ -679,11 +678,25 @@ python3 scripts/check_cross_platform.py
 python scripts\check_cross_platform.py
 ```
 
-Expected: exits 0; may print warnings about Linux-only idioms in
-docs.  These warnings are informational today (the lint is soft);
-they document drift for future cleanup.  See
-[ADR 0012](adr/0012-cross-platform-developer-host.md) for why the
-lint is soft initially.
+Expected: exits 0, with `check_cross_platform: 0 finding(s)` plus
+four informational `allowlisted` lines for the docs that
+intentionally discuss per-OS paths (`INTENTIONALLY_DISCUSSES_OS_PATHS`).
+The #2195 `IMPLICIT-ENCODING` backlog (478 sites across 139 files
+when the rule landed) was fully drained file by file under #2197 —
+every Python text-IO call under `scripts/`, `tests/`, and `examples/`
+(`PY_SCAN_ROOTS`) now states its `encoding=` explicitly, so there is
+nothing left to grandfather.
+
+The lint itself is **not** soft: CI runs it as
+`--fail-on-warning` on every runner (since #1032 A5), and that flag
+fails on any finding, `IMPLICIT-ENCODING` included — there is no
+carve-out any more.  `python3 scripts/check_cross_platform.py
+--fail-on-warning` exits 0 on a clean tree exactly like the
+no-flag form above.  So a new Linux-only idiom, or a new implicit
+encoding under `scripts/`, `tests/`, or `examples/` (or anywhere
+else via an explicit `--path`), breaks the build.  See
+[ADR 0012](adr/0012-cross-platform-developer-host.md) for the
+cross-platform promise this lint enforces.
 
 ### 6.3 Native_sim example build
 
@@ -700,6 +713,8 @@ same way [`docs/testing.md`](testing.md)'s Zephyr suite does:
 # run this inside WSL2 — there is no native-Windows native_sim target):
 cd ../alp-workspace
 export ZEPHYR_BASE="$PWD/zephyr"
+# Examples load a pre-generated per-core Kconfig fragment (#866):
+python3 alp-sdk/scripts/gen_example_alp_conf.py
 python3 "$ZEPHYR_BASE/scripts/twister" \
     -T alp-sdk/examples/peripheral-io/gpio-button-led \
     -s alp_sdk.example.gpio_button_led.e1m_evk \
@@ -723,9 +738,19 @@ python3 -m pytest tests/scripts/ -q
 python -m pytest tests\scripts\ -q
 ```
 
-Expected: ~370+ passing tests; matches the Linux baseline.  Any
+Expected: ~4,400 passing tests; matches the Linux baseline.  Any
 divergence here is a cross-platform regression and should be
 filed as an issue.
+
+To run it the way CI does, in parallel (needs the `[dev]` extra, which
+includes `pytest-xdist`), use two passes. The first spreads the tests over
+every core. The second runs the few modules that write into the checkout
+(`tests/scripts/conftest.py` `_REPO_WRITER_MODULES`) on their own:
+
+```bash
+python3 -m pytest tests/scripts/ -q -n auto -m "not repo_writes"
+python3 -m pytest tests/scripts/ -q -m repo_writes
+```
 
 ---
 
@@ -840,24 +865,6 @@ prefer placeholders like `<your-serial-device>` and let the
 reader fill in their OS's convention.  The
 `scripts/check_cross_platform.py` lint catches hardcoded
 `/dev/...` paths in docs.
-
-### 7.8 Symlinks in git on Windows
-
-Git on Windows does not enable symlink support by default
-(requires Developer Mode or admin rights at clone time).  A few
-files in the SDK are symlinks for backward-compatibility
-filename aliases.  Either:
-
-```powershell
-# As admin, enable Developer Mode (Settings → System → For
-# developers), then:
-git config --global core.symlinks true
-git clone https://github.com/alplabai/alp-sdk
-```
-
-or accept that the symlinks land as plain text files containing
-the link target.  The SDK does not rely on these symlinks for
-build correctness; they're documentation aliases only.
 
 ---
 

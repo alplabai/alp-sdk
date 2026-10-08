@@ -39,12 +39,28 @@ struct spi_dw_dma_ch {
 /**
  * DMA transfer state structure
  */
+/* Cached shape of a previously-programmed DMA channel.  dma_config() on the
+ * PL330 builds a microcode program and is by far the dominant per-transfer cost
+ * on short transfers; dma_reload() only rewrites source/dest/size on the already
+ * built descriptor.  When nothing but the addresses and length change -- which is
+ * every steady-state bridge frame, since the buffers are fixed -- reload is
+ * enough and dma_config() can be skipped entirely. */
+struct spi_dw_dma_shape {
+	bool     valid;
+	uint32_t burst;
+	uint32_t dfs;
+	uint32_t dir;
+	uint32_t slot;
+	uint32_t src_adj, dst_adj;
+};
+
 struct spi_dw_dma_state {
 	size_t tx_idx, rx_idx;
 	size_t tx_off, rx_off;
 	size_t tx_count, rx_count;
 	bool is_fullduplex;
 	bool is_tx_req, is_rx_req;
+	struct spi_dw_dma_shape rx_shape, tx_shape;
 };
 #endif /* CONFIG_SPI_DW_ALIF_USE_DMA */
 
@@ -79,7 +95,10 @@ struct spi_dw_config {
 struct spi_dw_data {
 	DEVICE_MMIO_RAM;
 	struct spi_context ctx;
-	uint8_t dfs;	/* dfs in bytes: 1,2 or 4 */
+	uint8_t dfs;
+#ifdef CONFIG_SPI_DW_ALIF_PACK32
+	uint8_t pack;	/* bytes packed per FIFO slot this transfer: 0, 2 or 4 */
+#endif	/* dfs in bytes: 1,2 or 4 */
 	uint8_t fifo_diff;	/* cannot be bigger than FIFO depth */
 	uint8_t dwc_ssi;	/* enable it for dwc ssi operation on AHB*/
 	uint8_t _unused;
@@ -265,6 +284,11 @@ static int reg_test_bit(uint8_t bit, mm_reg_t addr, uint32_t off)
 #define DWC_SSI_SPI_CTRLR0_TMOD_RESET	(3 << DWC_SSI_SPI_CTRLR0_TMOD_SHIFT)
 
 #define DW_SPI_CTRLR0_DFS_16(__bpw)	((__bpw) - 1)
+/* DFS_32 occupies CTRLR0[20:16]; needed to CLEAR the field before setting it. */
+#define SPI_DW_CTRLR0_DFS_32_MASK	(0x1FU << 16)
+/* DFS_16 occupies CTRLR0[3:0]. */
+#define SPI_DW_CTRLR0_DFS_16_MASK	(0x0FU)
+
 #define DW_SPI_CTRLR0_DFS_32(__bpw)	(((__bpw) - 1) << 16)
 
 /* 0x38 represents the bits 8, 16 and 32. Knowing that 24 is bits 8 and 16

@@ -38,11 +38,18 @@ extern "C" {
  * docs/release-policy.md.  Rewritten by scripts/bump_version.py.
  */
 #define ALP_VERSION_MAJOR 0  /**< SDK major version (ABI-breaking changes). */
-#define ALP_VERSION_MINOR 16 /**< SDK minor version (additive ABI changes). */
+#define ALP_VERSION_MINOR 17 /**< SDK minor version (additive ABI changes). */
 #define ALP_VERSION_PATCH 0  /**< SDK patch version (fixes, no surface change). */
 
-/** SDK version as a string literal, e.g. "0.8.1". */
-#define ALP_VERSION_STRING "0.16.0"
+/**
+ * SDK version as a string literal, e.g. "0.8.1", or "0.9.0-rc1" for a
+ * release-candidate build (SemVer 2.0.0 pre-release syntax -- see
+ * metadata/sdk_version.yaml).  ALP_VERSION_MAJOR/MINOR/PATCH above always
+ * stay the plain core integers; this is the only macro (with
+ * `alp_version_string()` below, which returns it verbatim) that can tell an
+ * rc build apart from the GA version it targets (#1902).
+ */
+#define ALP_VERSION_STRING "0.17.0-rc1"
 
 /**
  * @brief Encode a MAJOR.MINOR.PATCH triple into one comparable integer.
@@ -129,6 +136,7 @@ extern "C" {
 #define ALP_ABI_STATUS_UPDATE_LOG ALP_ABI_EXPERIMENTAL /**< <alp/update_log.h>. */
 #define ALP_ABI_STATUS_BACKEND    ALP_ABI_EXPERIMENTAL /**< <alp/backend.h>. */
 #define ALP_ABI_STATUS_CAP        ALP_ABI_EXPERIMENTAL /**< <alp/cap.h> + <alp/cap_instance.h>. */
+#define ALP_ABI_STATUS_TEMPERATURE ALP_ABI_EXPERIMENTAL /**< <alp/temperature.h>. */
 
 /**
  * @brief Return the SDK release version as a string.

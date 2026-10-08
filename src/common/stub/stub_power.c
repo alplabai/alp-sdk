@@ -26,6 +26,12 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *p, uint32_t wake_bitma
 	(void)wake_bitmap;
 	return ALP_ERR_NOSUPPORT;
 }
+alp_status_t alp_power_configure_retention(alp_power_t *p, const alp_power_retain_t *retain)
+{
+	(void)p;
+	(void)retain;
+	return ALP_ERR_NOSUPPORT;
+}
 alp_status_t alp_power_request_sleep(alp_power_t           *p,
                                      alp_power_mode_t       mode,
                                      uint32_t               wake_after_ms,

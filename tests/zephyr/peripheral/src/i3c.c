@@ -25,7 +25,6 @@
 
 #include "alp/i3c.h" /* alp_i3c_open / alp_i3c_t / alp_i3c_config_t */
 #include "alp/peripheral.h"
-#include "alp/soc_caps.h" /* ALP_SOC_I3C_COUNT */
 
 ZTEST(alp_peripheral, test_i3c_null_cfg)
 {
@@ -35,20 +34,20 @@ ZTEST(alp_peripheral, test_i3c_null_cfg)
 
 ZTEST(alp_peripheral, test_i3c_out_of_range_bus)
 {
-	/* Bus id 9 is out of range for any E1M part (ALP_E1M_I3C_COUNT = 1). */
+	/* Bus id 9 is out of range for any E1M part (ALP_E1M_I3C_COUNT = 1).
+	 *
+	 * Admission is the backend registry, not the SoC cap table (issue
+	 * #1642's dispatch-level `ALP_SOC_I3C_COUNT > 0` gate is gone): a
+	 * backend registered on a SoC with ALP_SOC_I3C_COUNT == 0 can still
+	 * serve a bus, so alp_i3c_open() no longer rejects up front on the
+	 * cap table.  Which backend wins (zephyr_drv here, no
+	 * CONFIG_I3C_CONTROLLER in this suite) decides the code -- NOSUPPORT
+	 * if the backend declines outright, INVAL if it bounds-checks the
+	 * bus itself.  Either way the bus is out of range and open() returns
+	 * NULL. */
 	alp_i3c_t *b = alp_i3c_open(&(alp_i3c_config_t){ .bus_id = 9u });
 
 	zassert_is_null(b);
-#if !defined(CONFIG_ALP_SOC_NONE) && (ALP_SOC_I3C_COUNT > 0)
-	/* A SoC that declares a real, finite I3C bus count rejects an
-	 * out-of-range bus up front with INVAL (the i3c dispatch's
-	 * capability gate). */
-	zassert_equal(alp_last_error(), ALP_ERR_INVAL);
-#endif
-	/* Under CONFIG_ALP_SOC_NONE the count is the accept-any UINT16_MAX
-	 * sentinel (gate is a no-op), and a no-I3C SoC has count 0: either
-	 * way the out-of-range bus just surfaces NULL via the backend
-	 * (NOT_READY / NOSUPPORT), already asserted by zassert_is_null above. */
 }
 
 ZTEST(alp_peripheral, test_i3c_unresolved_bus_yields_not_ready)

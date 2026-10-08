@@ -9,7 +9,7 @@ adapter.
 > Peer docs: [`bring-up-v2n.md`](bring-up-v2n.md),
 > [`bring-up-v2n-m1.md`](bring-up-v2n-m1.md),
 > [`bring-up-imx93.md`](bring-up-imx93.md).  This guide covers the
-> AEN family specifically (AEN301..801, Alif Ensemble silicon).
+> AEN family specifically (AEN301..801 plus AEN803, Alif Ensemble silicon).
 
 ## 0. Pre-flight
 
@@ -41,13 +41,48 @@ Inventory check before powering anything:
   (Carrier parts ride **I2C2** (`ALP_E1M_I2C0`) / the EVK headers, not
   the SoM's BRD_I2C trio -- see the bus table in §5.1.)
 
-> **This batch: the SoM's OSPI memories are NOT populated.** The
-> OSPI0 octal bus (BOM-optional NOR flash on CS0 + HyperRAM on CS1,
-> both `assembled: optional` in the SKU preset) is un-stuffed on the
-> AEN801 modules on the bench, so boot **and** app storage run from
-> on-die **MRAM only** (5.5 MB on `AE822FA0E5597LS0`).  Don't expect
-> an external flash / XIP device on this hardware; MCUboot slots and
-> any storage partition must target MRAM, not OSPI.
+> **OSPI0 population is SKU-scoped, not a blanket "this batch" fact.**
+> On the **E1M-AEN801** SKU both OSPI0 devices are DNI
+> (`ospi_memories.ospi0.assembled: false` and `hyperram.assembled: false`
+> in [`E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml)), so
+> boot **and** app storage on an AEN801 module run from on-die **MRAM
+> only** (5.5 MB on `AE822FA0E5597LS0`). The **E1M-AEN803** SKU fits
+> **both** external memories -- the `IS25WX256-JHLE` NOR on CS1 and the
+> `S80KS5122GABHM02` HyperRAM on CS0, both `assembled: true` in
+> [`E1M-AEN803.yaml`](../metadata/e1m_modules/E1M-AEN803.yaml) -- and on
+> the **AEN803** bench module serial `2026W36-0002` the NOR answers a
+> JEDEC ID read on OSPI0 **CS1** with `9d 5b 19 10` (ISSI, IS25WX256) at
+> a 20 MHz test rate (`ser` is a **bitmask**: `0x00000002` selects CS1,
+> not the index `1`). The same read at the driver's 100 MHz DT-derived
+> default comes back `4e ad 8c 88` with `RISR=0x00000001` -- a sampling
+> error, not silence -- so headroom above 20 MHz is unmeasured
+> (alp-sdk#2041). This corrects an earlier version of this same
+> paragraph, which had the chip-select mapping backwards (NOR on CS0,
+> HyperRAM on CS1) -- a probe wired from that wording would aim a NOR
+> opcode at CS0 and could misread a live NOR as dead. That CS1 result
+> says nothing about the HyperRAM's own behaviour. The OSPI0 pinctrl
+> gap this paragraph used to name as the blocker is **closed**
+> (alp-sdk#2041, closed 2026-09-12):
+> `zephyr/drivers/flash/flash_ospi_alif.c` now applies
+> `pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT)` at the top
+> of `ospi_alif_init()`, before the clock-enable, and
+> `examples/aen/aen-ospi-regcheck`'s overlay now muxes the module's own
+> 13-pad OSPI0 route (ports 0/2/6/12, all function 1, per
+> [`alif-ospi.tsv`](../metadata/e1m_modules/aen/alif-ospi.tsv)) rather
+> than the Alif DevKit's -- and that example's PASS banner no longer
+> prints the stale "no part populated this batch" claim. The apply is
+> bench-verified on two E1M-AEN803 modules (serial 2026W36-0001, serial 2026W36-0002): it is
+> fail-closed and runs before the clock-enable, so the device reaching
+> READY proves it returned 0. The pad-mux registers were **not** read
+> back, though, so "pinctrl applied without error" is measured and "the
+> pads carry the intended function" is not. **Keep MCUboot slots and
+> any storage partition on MRAM regardless of SKU anyway** -- for a
+> reason that outlived the pinctrl one: `flash_ospi_alif.c` registers
+> a `flash_driver_api` (#915) with `read`/`read_jedec_id`/`sfdp_read`
+> and, since #915, `write`/`erase` over an Octal-DDR mode switch (2-byte
+> write granularity, 4 KiB erase alignment). The MRAM rule stands
+> because the driver exposes no `page_layout`, so a partition cannot be
+> laid over it yet.
 
 ## 1. First-power smoke test
 
@@ -84,9 +119,12 @@ PMIC's `EVENT_00` status register over BRD_I2C.
 
    The SW-DP IDR (the debug-port identification register — a property of
    the ADIv5 SW-DP, **not** a core ID) reads **`0x4C013477`** on the E8
-   (BENCH-VERIFIED). Note this is *not* the generic `0x6BA02477` this repo
-   reads for the GD32/Cortex-M33 — a wrong value means wrong target or
-   reversed SWD wiring.
+   (BENCH-VERIFIED). Note this is *not* `0x6BA02477`, the generic
+   Cortex-M33 r0p1 SW-DPv2 default this repo carries as
+   `GD32_SWD_GENERIC_CM33_R0P1_IDCODE` (never measured on a GD32; #1440,
+   #1369) and separately the bench-measured V2N CM33 DAP value on this
+   same rack — a wrong value on the E8 means wrong target or reversed
+   SWD wiring.
 
    > pyocd works too, but its `-t` target id depends on the installed
    > `alif_ensemble-cmsis-dfp` CMSIS-pack (do NOT assume an `alif_e8` id).
@@ -156,19 +194,36 @@ SoM preset at `metadata/e1m_modules/<SKU>.yaml` automatically).
 
 4. An Alp-Lab-provisioned module ships with a dev-signed **MCUboot**
    (the SES-launched ATOC) plus a **self-test** image in slot0, so it
-   boots that on power-up and the M55 core is already released — `west
-   flash`/SWD work directly.  (A *bare* module sourced outside Alp Lab,
-   or one whose ATOC was wiped, reports `No ATOC` and the core stays
-   gated until you provision MCUboot over the SE-UART — see
-   [`aen-provisioning.md`](aen-provisioning.md).)  To take it over with
-   your own image, build with sysbuild so MCUboot signs it into slot0:
+   boots that on power-up and the M55 core is already released — SWD
+   attach works directly. A plain **non-sysbuild** `west flash` also
+   REFUSES here (#2262: the resident factory MCUboot ATOC entry is
+   foreign to any build's own section) — that door is for bare/recovered
+   modules only. (A *bare* module sourced outside Alp Lab, or one whose
+   ATOC was wiped, reports `No ATOC` and the core stays gated until you
+   provision MCUboot over the SE-UART — see
+   [`aen-provisioning.md`](aen-provisioning.md).)
+
+   To take a **pre-provisioned** module over with your own image, use a
+   plain J-Link `loadbin` straight to slot0 instead (Option B,
+   `docs/aen-provisioning.md` §0.5) — the sysbuild + `west flash` recipe
+   below REFUSES on every module, bare or pre-provisioned, since
+   alp-sdk#2274, so it is shown here only as the build step that
+   produces the signed artefact Option B flashes:
 
    ```bash
+   # writes examples/peripheral-io/gpio-button-led/generated/alp.conf, which west reads below (#866)
+   python3 scripts/gen_example_alp_conf.py examples/peripheral-io/gpio-button-led
    west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
        examples/peripheral-io/gpio-button-led \
-       --sysbuild -- -DSB_CONF_FILE=$PWD/zephyr/sysbuild/aen/sysbuild.conf
-   west flash
+       --sysbuild -- -Dgpio-button-led_EXTRA_CONF_FILE=generated/alp.conf -DSB_CONF_FILE=$PWD/zephyr/sysbuild/aen/sysbuild.conf
+   west flash    # REFUSES (alp-sdk#2274) -- see docs/aen-provisioning.md §0.5.
    ```
+
+   On a bare/wiped/re-keyed module, provision MCUboot with SETOOLS first
+   (the provisioning section in `zephyr/sysbuild/aen/README.md`), then
+   flash the app the same Option B way. Option B writes the app only;
+   without a resident MCUboot the module will not boot (recoverable via
+   SETOOLS re-provisioning).
 
    One-liner alternative (manifest-driven -- `tan` builds every slice
    declared in the example's `board.yaml`, then flashes them in
@@ -187,49 +242,105 @@ SoM preset at `metadata/e1m_modules/<SKU>.yaml` automatically).
 Run these in order; each one exercises a different on-module
 or on-board subsystem.
 
-### 5.1 On-module I2C: EEPROM (I2C2) vs BRD_I2C (LPI2C0) housekeeping
+### 5.1 On-module I2C: EEPROM (I2C2) vs BRD_I2C (I2C0) housekeeping
 
 **Two separate buses -- don't assume a single shared bus.** The
 EEPROM manifest is bridge/DNP-selected onto its own **SoC I2C2**
 (`P5_6 SCL_C` / `P5_7 SDA_C`); the EVK carrier's sensor + IO-expander
 + INA236 parts share that same **I2C2** bus (`metadata/boards/e1m-evk.yaml`
-`buses:` `E1M_I2C0` -> `EVK_I2C_BUS_SENSORS`). Only the on-module
-housekeeping trio (OPTIGA / RTC / TMP112) is on the separate, shared,
-slave-only **BRD_I2C** (**LPI2C0**, `P7_4`/`P7_5`) -- the silicon can
-only be a slave on that bus, so an external master must never be
-clipped onto it, and the M55 reaches it only via SE services (see
-§5.2), not a direct `i2cdetect`. Scan **I2C2 only** from a built
-`i2c-scanner` example or via the console; the BRD_I2C trio isn't
-scannable from the host:
+`buses:` `E1M_I2C0` -> `EVK_I2C_BUS_SENSORS`). The on-module housekeeping
+trio (OPTIGA / RTC / TMP112) is on the separate, shared **BRD_I2C**
+(**SoC I2C0, function C**, `P7_0` SDA / `P7_1` SCL).
+
+> **Corrected 2026-08-30 (#1848).** This used to say BRD_I2C was
+> "**LPI2C0**, `P7_4`/`P7_5`" -- wrong on both halves. The netlist puts
+> `BRD_I2C_SCL` on ball B3 = **`P7_1`** and `BRD_I2C_SDA` on ball B8 =
+> **`P7_0`**; the datasheet's LPI2C0 pads are `P7_4`/`P7_5`, which carry
+> different nets on this module. `ADTS0013` v1.2 Table 3-16 gives
+> `P7_0`/`P7_1` the alternate function `I2C0_SDA_C`/`I2C0_SCL_C`, confirmed
+> a second time in the per-pin alternate-function grid -- **not**
+> undocumented, and **not** LPI2C0. I2C0 is master-or-slave capable (HWRM
+> section 15.4.1), unlike LPI2C0, so the M55 can master BRD_I2C directly;
+> "the M55 reaches it via SE services" was never true either -- the
+> pinned hal_alif SE services expose no I2C service at all.
+>
+> **Bench-settled 2026-09-05 on 2626-R2 silicon.** This paragraph used to
+> say the bus needed `R93`/`R94` stuffed before it could be mastered. It does
+> not: it works on the SoC pad's **internal pull-up alone**, with the RTC
+> ACKing at `0x52` (oscillator proven running) and the TMP112 fingerprinting
+> correctly, every non-response a clean `-EIO` NACK and zero `-ETIMEDOUT` /
+> `User Abort`. `R93`/`R94` stay DNP by design -- BRD_I2C is **isolated** from
+> the I2C2/EEPROM segment, and the EEPROM is not on it. See
+> [`docs/soms/aen.md`](soms/aen.md) "On-module housekeeping I2C (BRD_I2C)" for
+> the customer-facing writeup, its limitations (no `VBACKUP` supply, so no
+> timekeeping across a power cycle; `RTC_CLKOUT` carrier-only), and the
+> TMP112 design address: `0x40`, not the earlier-declared `0x48`, which was a
+> metadata error (alp-sdk#1978). #1814's blocker is cleared: `rv3028c7` is
+> reachable.
+>
+> Unrelated but corrected in the same pass: `LPI2C1` **is** master-capable
+> (HWRM: "Two Low-Power I2C modules (LPI2C0 slave-only and LPI2C1
+> master-only) in the RTSS-HE"), so the RTSS-HE is not slave-only on I2C
+> in general.
+
+`alp_i2c_open()` reaches BRD_I2C at portable bus **2**
+(`aen-secure-element-sign`'s own board overlay aliases `alp-i2c2 = &i2c0`
+-- bus 0 and 1 are already the E1M edge I2C buses, so BRD_I2C could not
+reuse either without silently repointing other examples at a bus carrying
+a secure element). **Do not blind-scan it**: OPTIGA Trust M lives on it at
+`0x30`, and a scan is a real bus transaction against a secure element, not
+a free operation -- probe known addresses only. Scan **I2C2** freely from
+a built `i2c-scanner` example or via the console.
+
+The BRD_I2C routing above is **R2-sourced** (E1M-AEN-2626-R2 netlist +
+`ADTS0013`) and is now **bench-verified on an R2 unit** (2026-09-05). It does
+**not** describe r1 modules: there the RTC and TMP112 sit on LPI2C0
+(`P7_4`/`P7_5`) with nothing on `P7_0`/`P7_1`, which is what an r1 probe of
+this bus actually measured.
 
 | Slave | 7-bit addr | What | Bus | Where |
 |-------|------------|------|-----|-------|
 | 24C128 | `0x50` | EEPROM (manifest) | I2C2 | SoM |
-| OPTIGA TM | `0x30` | Secure element | BRD_I2C (LPI2C0) | SoM — **DNI on this bench batch** |
-| RV-3028-C7 | `0x52` | RTC | BRD_I2C (LPI2C0) | SoM |
-| TMP112 | `0x48` | Thermometer | BRD_I2C (LPI2C0) | SoM |
-| TCAL9538 | `0x72` | GPIO expander (U35 main) | I2C2 | EVK carrier |
-| TCAL9538 | `0x71` | GPIO expander (U37, PCIe) | I2C2 | EVK carrier |
+| OPTIGA TM | `0x30` | Secure element | BRD_I2C (I2C0) | SoM — **DNI on this bench batch** |
+| RV-3028-C7 | `0x52` | RTC | BRD_I2C (I2C0) | SoM |
+| TMP112 | `0x40` | Thermometer -- design address for the fitted TMP112DIDPWR (X2SON-5, ADD0->GND per SBOS473L Table 7-4); the earlier-declared `0x48` was a metadata error, corrected under alp-sdk#1978 | BRD_I2C (I2C0) | SoM |
+| TCAL9538 | `0x73` | GPIO expander (U35 main) | I2C2 | EVK carrier |
+| TCAL9538 | `0x71` | GPIO expander (U37, PCIe -- NOT ASSEMBLED, alp-sdk#1974) | I2C2 | EVK carrier |
 | INA236 | `0x40`..`0x42`, `0x49`..`0x4B` | Power monitor (6x) | I2C2 | EVK carrier |
 | BMP581 | `0x47` | Barometer | I2C2 | EVK carrier |
+| 24C128 | `0x58` | SAME EEPROM as above, second device-select header (`1010` -> 0x50, `1011` -> 0x58, same A2/A1/A0 straps) -- not a second chip | I2C2 | SoM (alp-sdk#1976) |
 
+> **CORRECTED 2026-09-05 (alp-sdk#1974):** U35 main is `0x73` (A1=1, A0=1),
+> not `0x72` as this table said when first written -- the maintainer's EVK
+> I2C schedule gives `1110011 = 0x73`, and 2 of 2 boards answer there and
+> are silent at `0x72`.
+>
 > Two address caveats when reading a scan of I2C2:
 >
 > * **`0x48` on I2C2 is not the TMP112.** The TMP112 above is on BRD_I2C,
 >   which this scan cannot reach. On **PRE-RESPIN** carriers `0x48` on I2C2
 >   is U32 INA236B (+V_CAM0 rail), re-strapped to `0x4B` from the next batch
->   (`metadata/boards/e1m-evk.yaml:294-295`).
-> * **U35 answers at `0x20`, not `0x72`,** when it is assembled as the
+>   (`metadata/boards/e1m-evk.yaml:316-317`). On **POST-RESPIN** carriers,
+>   `0x48` is the TAS2563 GLOBAL/broadcast address — every fitted TAS2563
+>   answers there in addition to its own unit address (`0x4D`/`0x4E`), so an
+>   I2C census will always list `0x48` here; it is not an unidentified device
+>   (`metadata/boards/e1m-evk.yaml:303`, alp-sdk#1976).
+> * **U35 answers at `0x20`, not `0x73`,** when it is assembled as the
 >   TCA6408ARSVR alternative (R112 fitted, R145 DNP) — register-compatible,
->   so `chips/tcal9538` drives it unchanged (`metadata/boards/e1m-evk.yaml:276-277`).
+>   so `chips/tcal9538` drives it unchanged (`metadata/boards/e1m-evk.yaml:297-298`).
 
-> **This bench batch (2026-06-15):** the **OPTIGA Trust M (`0x30`) is not
-> populated**, and that is *expected*, not a fault. OPTIGA is in the
-> E1M-AEN801 SoM design (`on_module`); the absence is a current-batch
-> population fact (like the un-stuffed OSPI memories). Skip §5.2 on these
-> boards. Note the evidence is the population record, **not** an `i2cdetect`
-> miss — OPTIGA sits on BRD_I2C, which the host cannot scan, so a scan would
-> not have ACKed 0x30 on a fully-populated board either.
+> **The OPTIGA Trust M (`0x30`) is not populated**, and that is
+> *expected*, not a fault. OPTIGA is in the E1M-AEN801 SoM design
+> (`on_module`); the absence is a population fact that holds across
+> **both** AEN SKUs on the bench -- `optiga_trust_m` is `assembled:
+> false` in both `metadata/e1m_modules/E1M-AEN801.yaml:123` and
+> `metadata/e1m_modules/E1M-AEN803.yaml:129` (unlike OSPI0 in §0, this
+> population fact is not SKU-differentiated). Skip §5.2 on these boards.
+> Note the evidence is the population record, **not** a scan miss --
+> OPTIGA sits on BRD_I2C, a working bus as of the 2026-09-05 R2 run (§5.1)
+> that is deliberately not blind-scanned here regardless (a scan is a real transaction against a
+> secure element); the driver's targeted `optiga_trust_m_init` probe is the
+> evidence to trust instead.
 
 A missing slave that's *expected* is a real fault.  The on-module
 set is authoritative in
@@ -250,10 +361,13 @@ The AEN secure-element example
 ([`examples/aen/aen-secure-element-sign`](../examples/aen/aen-secure-element-sign))
 exercises the OPTIGA Trust M over the portable `<alp/*>` API on
 BRD_I2C.  (It is the AEN sibling of the V2N variant -- identical
-`src/`, AEN `board.yaml` with `m55_he` as the BRD_I2C owner.)
+`src/`; the AEN `board.yaml` targets `m55_he`, whose own overlay wires
+BRD_I2C to portable bus 2.)
 
 ```bash
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-secure-element-sign
+# writes examples/aen/aen-secure-element-sign/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/aen/aen-secure-element-sign
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-secure-element-sign -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 
@@ -261,8 +375,8 @@ Expect an I2C_STATE probe result on the console.  On an OPTIGA-populated
 SoM the current driver then reports `ALP_ERR_NOSUPPORT` for product-info
 and raw-APDU calls; a future Infineon host-library integration owns the
 read/sign path.  On the current bench batch the example reports
-`RESULT SKIP` if BRD_I2C/LPI2C0 is not ready yet, or if BRD_I2C opens
-but the OPTIGA is DNI and the probe returns `ALP_ERR_NOT_READY`.
+`RESULT SKIP` if BRD_I2C fails to open, or if BRD_I2C opens but the OPTIGA
+is DNI and the probe returns `ALP_ERR_NOT_READY`.
 
 ### 5.3 Ethernet PHY link
 
@@ -283,8 +397,40 @@ of cable insert.
 
 These are optional and SKU-/carrier-dependent.  The E1M-EVK
 carries a `CAM_MUX_PI3WVR626` MIPI CSI 2:1 mux (selected via
-`EVK_PIN_CAM_MUX_SEL`), but no camera-mux truth table is published
-yet -- treat the wiring as TBD until the carrier camera doc lands.
+`EVK_PIN_CAM_MUX_SEL`); its truth table and the Raspberry Pi
+connector (J5, input A) wiring are in
+[`boards/e1m-evk.md`](boards/e1m-evk.md), which also shows the
+`e1m_evk_rpi_csi` shield build for a Raspberry Pi camera module.
+
+
+**Bench-settled 2026-09-05** on an **R2** module (`E1M-AEN801` 2626-R2, Flow A,
+cold-cycle proven), `i2c0` at 100 kHz: **BRD_I2C works on the SoC's internal
+pull-up alone.**
+
+| Address | Part | Result |
+|---|---|---|
+| `0x52` | RV-3028-C7 | ACK; ID reg `0x28` = `0x44` (HID nibble `0x4` matches; VID nibble is production-line, not identity, per RV-3028-C7 Application Manual Rev. 1.4 §3.14); seconds `0x01` -> `0x02` (oscillator running) |
+| `0x40` | TMP112 | ACK; `CONFIG` `0x60a0` / `T_LOW` `0x4b00` / `T_HIGH` `0x5000` = datasheet defaults; 28.062 °C |
+| `0x30` | OPTIGA Trust M | no answer -- DNP on this batch, the expected negative control |
+
+Every non-response was a clean `rc=-5` (`-EIO`) NACK: **zero `-ETIMEDOUT`,
+zero `User Abort on i2c@49010000`**. That distinction is the diagnostic --
+a NACK means the pads reach the wire and nobody answered; a timeout plus
+`User Abort` means the pinctrl is wrong.
+
+> **The earlier 2026-08-31 verdict on this bus is withdrawn.** That run --
+> pads High-Z giving `rc=-116` (`-ETIMEDOUT`) + `User Abort`, an internal
+> pull-up clearing the abort but nothing ACKing (`rc=-5`) -- was measured on
+> the **r1** module (serial `2617-0001`), where the RTC and TMP112 are on
+> LPI2C0 (`P7_4`/`P7_5`) and **nothing is connected to `P7_0`/`P7_1`**. It
+> characterised two floating pins, so its conclusions ("no usable pull-up",
+> "the pads must be open-drain", "not usable as built, needs `R93`/`R94`
+> stuffed") do not carry to R2. The measurement was real; the inference was
+> about the wrong revision.
+
+Full customer-facing writeup, including the RTC alarm path
+(`/INT` -> `P15_0` -> LPGPIO bit 0 -> IRQ 171) and the limitations that bite:
+[`docs/soms/aen.md`](soms/aen.md) "On-module housekeeping I2C (BRD_I2C)".
 
 ## 6. Bench-day bring-up runbook (first physical SoM)
 
@@ -317,10 +463,14 @@ top of the per-subsystem checks.
 > toolchain + silicon before switching to the carrier board.  (Alif's
 > own `sdk-alif` / `zephyr_alif` fork -- board `alif_e8_dk` -- and the
 > CMSIS-Pack DFP (`alif_ensemble-cmsis-dfp`, device `AE822FA0E5597`)
-> are opt-in alternatives; Yocto/A32 is `meta-alif-ensemble` branch
-> **scarthgap**, `devkit-e8.conf` / `appkit-e8.conf`.  Note E7 is not in
-> upstream Zephyr v4.4 at all -- only e4/e6/e8/e1c -- another reason E8
-> leads.)
+> are opt-in alternatives; Yocto/A32 is intended to ride
+> `meta-alif-ensemble`, but that path does not build today -- there is
+> no `scarthgap` branch, no `devkit-e8.conf` on the one branch that
+> exists, and the layer is Yocto-series-incompatible with this repo's
+> Scarthgap baseline regardless (issues #1967 / #1968 / #1971 / #1982;
+> see `meta-alp-sdk/README.md`'s "Alif Ensemble E8" section and #264
+> for the rebuild).  Note E7 is not in upstream Zephyr v4.4 at all --
+> only e4/e6/e8/e1c -- another reason E8 leads.)
 >
 > Per-core builds use plain `west build -b <target> <app>`.
 > (`tan build --project <app>` is the multi-core planner/executor: it fans a
@@ -376,19 +526,23 @@ top of the per-subsystem checks.
    in §7 -- but a *non-ACKing* EEPROM is a wiring/pull-up fault.
 
 4. **CC3501E PING / GET_VERSION.**  Bring the on-module Wi-Fi/BLE
-   coprocessor to life over the inter-chip SPI1 bus.  Issue the
-   two META-group opcodes from the bridge host driver (see the
-   wire frame in `firmware/cc3501e/DESIGN.md`):
-   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`).
-   A standalone host-side helper for the M55 side is **TBD**
-   (only the device firmware ships today), so drive it from app
-   code via the bridge dispatch for now.
+   coprocessor to life over the inter-chip SPI1 bus.  The full
+   host-side driver ships in-tree: `cc3501e_init()` from
+   `<alp/chips/cc3501e.h>` (`chips/cc3501e/`) issues
+   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`)
+   over the bridge dispatch and refuses a protocol-major
+   mismatch; the runnable `cc3501e_bridge_bringup()` helper is
+   in `examples/aen/aen-cc3501e-bringup/`, and the
+   `alp companion` console verbs exercise the link
+   interactively.
 
    * `PING` must return `RESP_OK` with empty data -- the liveness
      signal.
    * `GET_VERSION` must return the firmware's wire-protocol
      version; cross-check it against
-     `firmware/cc3501e/prebuilt/CHANGELOG.md`.
+     `cc3501e-bridge-firmware:prebuilt/CHANGELOG.md`.
+     Modules ship factory-flashed with the latest CC3501E
+     firmware (v0.9.0 as of this writing).
 
    No `RESP_OK` usually means the CC3501E hasn't been flashed yet
    (`helper_firmware[].firmware_path` is still TBD in the SKU
@@ -401,7 +555,9 @@ top of the per-subsystem checks.
    carrier board for the carrier-accurate routing:
 
    ```bash
-   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
+   # writes examples/peripheral-io/gpio-button-led/generated/alp.conf, which west reads below (#866)
+   python3 scripts/gen_example_alp_conf.py examples/peripheral-io/gpio-button-led
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led -- -DEXTRA_CONF_FILE=generated/alp.conf
    west flash
    ```
 
@@ -436,7 +592,9 @@ top of the per-subsystem checks.
    `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`.
 
    ```bash
-   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer
+   # writes examples/multicore/mproc-mailbox/peer/generated/alp.conf, which west reads below (#866)
+   python3 scripts/gen_example_alp_conf.py examples/multicore/mproc-mailbox/peer
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer -- -DEXTRA_CONF_FILE=generated/alp.conf
    # peer image: -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/multicore/mproc-mailbox
    west flash
    ```
@@ -453,7 +611,9 @@ top of the per-subsystem checks.
    reports the detected variant:
 
    ```bash
-   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/edgeai-vision-aen
+   # writes examples/aen/edgeai-vision-aen/generated/alp.conf, which west reads below (#866)
+   python3 scripts/gen_example_alp_conf.py examples/aen/edgeai-vision-aen
+   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/edgeai-vision-aen -- -DEXTRA_CONF_FILE=generated/alp.conf
    west flash
    ```
 
@@ -509,8 +669,20 @@ Once §6's runbook passes:
    [`zephyr/sysbuild/aen/sysbuild.conf`](../zephyr/sysbuild/aen/sysbuild.conf).
    Dev key under [`keys/`](../keys/); production key never
    leaves OPTIGA Trust M secure NVM.
-3. Flash the signed image with `west flash`; the MCUboot
-   secondary slot stays empty until OTA lands.
+3. Flash the signed image with `west flash`; the AEN family's
+   MRAM map has no secondary/scratch slot at all (see
+   [ADR-0006](adr/0006-secure-boot-secure-ota.md)'s 2026-08-25
+   amendment), so there is nothing to revert to and OTA stays
+   deferred until a slot budget is found.
+
+   On the E1M-AEN boards, `west flash` on a sysbuild (MCUboot) build
+   refuses (alp-sdk#2274): the `alif_flash` runner cannot stage both
+   domains' ATOC entries in one burn. Use `docs/aen-provisioning.md`
+   §0.5 (Option B for a module whose MCUboot is already provisioned;
+   the SETOOLS MCUboot provisioning in `zephyr/sysbuild/aen/README.md`
+   otherwise). Option B writes the app only; without a resident
+   MCUboot the module will not boot (recoverable via SETOOLS
+   re-provisioning).
 
 ## 8. Troubleshooting
 
@@ -518,10 +690,10 @@ Once §6's runbook passes:
   image-rejected scenario.  Re-flash with the dev key or check
   the MCUboot trailer.
 * **`i2cdetect` returns no slaves at all** -- I2C2 pull-ups
-  missing or wrong voltage (I2C2 is the bus the scan in §5.1
-  reaches; the BRD_I2C trio is not host-scannable).  Standard
-  Alp boards pull to 1.8 V; some custom boards use 3.3 V
-  (re-strap the SoC side accordingly).
+  missing or wrong voltage (I2C2 is the bus the recommended scan in
+  §5.1 reaches; don't blind-scan BRD_I2C instead -- see §5.1's OPTIGA
+  caveat).  Standard Alp boards pull to 1.8 V; some custom boards use
+  3.3 V (re-strap the SoC side accordingly).
 * **PHY won't link** -- the DP83825 requires its 25 MHz REFCLK
   before the strap latches.  Check `OSC_25M` on the board
   with a scope; the PHY won't link if the clock is missing at

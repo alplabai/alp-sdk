@@ -38,7 +38,7 @@
 #     alp_project_emit package itself does still exist, so the citation read
 #     as live rather than obviously dead).  The mechanism today is the
 #     `integration.zephyr.kconfig` array below, transcribed verbatim by
-#     scripts/alp_orchestrate/libraries.py:197 (`zephyr_kconfig_lines`).
+#     scripts/alp_orchestrate/libraries.py:321 (`zephyr_kconfig_lines`).
 #
 # Licence CC0-1.0 -- public-domain-equivalent, added to this schema's
 # permissive `license` allowlist alongside BSL-1.0 (catch2) per the

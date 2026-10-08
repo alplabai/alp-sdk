@@ -1,0 +1,78 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Everything the RK055HDMIPI4MA0 display chain needs on an E1M-AEN SoM, so an
+# app only adds the shield: ALP_SDK itself, the display class, the DSI host +
+# D-PHY, the panel driver, and the carrier's I2C GPIO expander + fixed
+# regulator that power and reset the panel.
+#
+# The Alif CDC200 / DesignWare DSI / D-PHY drivers are alp-sdk ADR 0017 Tier-2
+# copies whose Kconfig symbols are defined under `if ALP_SDK`
+# (zephyr/Kconfig) -- without ALP_SDK on, those symbols do not exist at all
+# and the chain fails at LINK time (undefined __device_dts_ord_N for the
+# cdc200 / mipi_dsi nodes), not at configure time, which is what made this
+# easy to miss.  default y here (not select) so `-DSHIELD=e1m_evk_rk055hdmipi4ma0`
+# alone gets a working display with no extra app Kconfig.  Setting
+# CONFIG_ALP_SDK=n is not a supported way to run this shield: it reproduces
+# the same link failure, since nothing else provides these symbols.
+
+if SHIELD_E1M_EVK_RK055HDMIPI4MA0
+
+config ALP_SDK
+	default y
+
+config DISPLAY
+	default y
+
+config MIPI_DSI
+	default y
+
+config HX8394
+	default y
+
+config I2C
+	default y
+
+config GPIO
+	default y
+
+config GPIO_PCA_SERIES
+	default y
+
+# The overlay's lcd_exp hog drives the panel RESX low, and it only works in the
+# window between the two drivers that own that pin's timing:
+#
+#   GPIO_PCA_SERIES_INIT_PRIORITY (50, = I2C_INIT_PRIORITY)  the expander exists
+#   ---> GPIO_HOGS_INIT_PRIORITY (60)                        RESX driven low
+#   REGULATOR_FIXED_INIT_PRIORITY (75)                       panel supply on
+#   APPLICATION_INIT_PRIORITY (90)                           hx8394 reset pulse
+#
+# Upstream's default of 41 is below the expander, so gpio_hogs_init() would find
+# the port not ready, log an error and configure nothing.  aen-dsi-display
+# BUILD_ASSERTs the window, since a Kconfig default cannot.
+config GPIO_HOGS_INIT_PRIORITY
+	default 60
+
+config REGULATOR
+	default y
+
+config REGULATOR_FIXED
+	default y
+
+if ALP_SDK
+
+config MIPI_DPHY
+	default y
+
+config MIPI_DPHY_DW
+	default y
+
+config MIPI_DSI_DW
+	default y
+
+config DISPLAY_CDC200
+	default y
+
+endif # ALP_SDK
+
+endif # SHIELD_E1M_EVK_RK055HDMIPI4MA0

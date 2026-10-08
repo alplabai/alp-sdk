@@ -7,8 +7,10 @@
  * boot banner (src/zephyr/alp_banner.c): same SDK version + EEPROM
  * identity source, printed on demand.
  */
+#include <ctype.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
@@ -37,6 +39,37 @@ int alp_console_parse_ulong(const char *s, unsigned long *out)
 		return -EINVAL;
 	}
 	*out = v;
+	return 0;
+}
+
+/*
+ * Shared by every console group that takes an opaque byte blob on the command
+ * line (BLE GATT values, SPI1 passthrough TX).
+ */
+int alp_console_parse_hex(const char *s, uint8_t *out, size_t cap, size_t *out_len)
+{
+	if (s == NULL || out == NULL || out_len == NULL) {
+		return -EINVAL;
+	}
+
+	size_t n = strlen(s);
+
+	if (n == 0u || (n % 2u) != 0u || (n / 2u) > cap) {
+		return -EINVAL;
+	}
+	for (size_t i = 0; i < n; i += 2u) {
+		char oct[3] = { s[i], s[i + 1u], '\0' };
+
+		/* isxdigit BEFORE strtoul, not instead of it: strtoul happily accepts
+		 * "+1" and " 1" as a full 2-char window, so a typo would silently
+		 * decode to 0x01.  On a console verb that clocks bytes into a flash
+		 * part that is the wrong kind of forgiving. */
+		if (!isxdigit((unsigned char)oct[0]) || !isxdigit((unsigned char)oct[1])) {
+			return -EINVAL;
+		}
+		out[i / 2u] = (uint8_t)strtoul(oct, NULL, 16);
+	}
+	*out_len = n / 2u;
 	return 0;
 }
 

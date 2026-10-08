@@ -79,13 +79,13 @@ The server side (Hakan's repo) hands the device an artifact
 * `<alp/security.h>` -- runtime crypto surface that Mender uses
   for signature verification.
 
-## GD32 bridge firmware OTA (planned)
+## GD32 bridge firmware OTA
 
 ### Status
 
 **Path A implemented (gated, HIL-pending); Path B scaffolded.**
 The `0xF0..0xFF` opcode set is implemented in
-`firmware/gd32-bridge/src/ota.c` and specified in
+`gd32-bridge-firmware:src/ota.c` and specified in
 [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10;
 destructive flashing is armed only in `-DBRIDGE_OTA_PARTITIONED`
 builds (the default build answers `STATUS_NOSUPPORT`).  Host-driven
@@ -96,7 +96,7 @@ path (Path B).
 
 The authoritative wire contract is
 [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10
-(implemented in `firmware/gd32-bridge/src/ota.c`, mirrored host-side
+(implemented in `gd32-bridge-firmware:src/ota.c`, mirrored host-side
 in `<alp/chips/gd32g553.h>`).  As implemented, `OTA_BEGIN` carries
 `size:u32 expected_crc32:u32` (plus an optional additive version
 triple), session state is implicit rather than slot-addressed on
@@ -121,7 +121,7 @@ including `0xF6 OTA_ABORT`.
 0x08080000  └──────────────────────────────────────────────┘
 ```
 
-Exact `N` TBD pending bootloader implementation; ~32 KiB is a
+Exact `N` TBD; ~32 KiB is a
 reasonable starting estimate for a Cortex-M33 bootloader.
 
 ### Crypto
@@ -163,7 +163,8 @@ but that's a post-1.0 problem.
 
 ## See also
 
-* [`docs/ota.md`](ota.md) -- v0.3 OTA design (high-level).
+* [`docs/ota.md`](ota.md) -- high-level OTA design (trust model +
+  Yocto Mender flow).
 * [`docs/secure-boot.md`](secure-boot.md) -- trust model + signing.
 * [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 --
   GD32 bootloader-OTA opcode reservation.

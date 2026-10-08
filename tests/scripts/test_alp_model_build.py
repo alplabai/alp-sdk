@@ -71,8 +71,10 @@ def test_build_model_records_unavailable_tool_as_skip(tmp_path):
 
 
 def test_build_model_default_registry_reaches_executorch_adapter_for_pte_source(tmp_path):
-    # #1260 reachability: `alp model build` (scripts/alp_cli/model.py) calls
-    # build_model() with NO adapters= kwarg -- the default registry. Before this
+    # #1260 reachability: `tan model build` (python/tan/commands/model_cmd.py
+    # in tan-cli, which imports alp_model.build directly -- scripts/alp_cli/
+    # model.py retired, alp-sdk#1367/#1368) calls build_model() with NO
+    # adapters= kwarg -- the default registry. Before this
     # fix, ExecutorchAdapter existed but was never in _ADAPTERS, and even adding
     # it there naively would have collided with CpuAdapter on the "cpu" backend
     # key. Exercise the real default path, not an injected adapter list.
@@ -162,7 +164,7 @@ def test_build_model_passes_compile_opts_to_adapter(tmp_path):
         requires_compile_opts = True
         def is_available(self): return True
         def accepts(self, src_format): return src_format == "tflite"
-        def compile(self, source, *, accel_config, out_dir, opts=None):
+        def compile(self, source, *, accel_config, out_dir, opts=None, target=None):
             seen["opts"] = opts
             return Blob(format="drpai_dir", payload=b"RT", arena_bytes=0)
     src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")

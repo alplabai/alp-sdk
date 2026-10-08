@@ -1,0 +1,15 @@
+# a32/release/sound-carriers.txt -- units that may carry the P10 sound
+# firmware as HP_APP (build-release.sh TR_SND_HP=ON TR_SND_CARRIER_SERIAL=...).
+#
+# The sound image's i2s_dw driver muxes I2S3 onto P9_3/4/5 at kernel init,
+# before main() -- no runtime check can stop it. On a carrier whose U46 is the
+# stock 74LVC157 (no Hi-Z, outputs wired toward the SoC pads) that contends
+# the moment the HP boots, and the identity EEPROM (2626-r2 on both) cannot
+# tell a reworked carrier from a stock one. So this list, per bench unit, is
+# the only interlock. Keyed by the E1M-AEN803 unit serial on the bench place;
+# a SoM moved to another carrier invalidates its line -- edit it here, in a
+# reviewed commit, never on the command line.
+#
+# serial        verdict  why
+2026W36-0002    allow    U46 reworked to 74LV3257 on +3V3, TAS2563 amps + speakers heard (2026-09-15, 2026-09-23 loopback)
+2026W36-0009    deny     stock 74LVC157 U46, no speakers (maintainer 2026-09-23)

@@ -87,6 +87,39 @@ static void bridge_stream_free_slot(uint8_t slot)
 	bridge_streams_used &= (uint8_t)~(1u << slot);
 	k_mutex_unlock(&bridge_stream_lock);
 }
+
+/* Bounded retry for STREAM_END: a busy / timed-out supervisor acquire must
+ * not be read as "stream ended".  5 x (acquire timeout + 20 ms) keeps a
+ * close bounded (~0.6 s worst case at the default 100 ms acquire timeout). */
+#define BRIDGE_STREAM_END_TRIES      5
+#define BRIDGE_STREAM_END_BACKOFF_MS 20
+
+/* Stop the GD32 stream in @p slot, and free the slot ONLY once the GD32
+ * confirmed it is stopped (ALP_OK, or ALP_ERR_INVAL = it reports the
+ * stream not active, e.g. after a GD32 reset).  If STREAM_END cannot be
+ * delivered the GD32 stream is still running, and handing the slot back
+ * would let the next open's STREAM_BEGIN hit that live stream
+ * (STATUS_INVAL, forever).  So the slot stays reserved and the last
+ * error is returned; a later open then reports ALP_ERR_BUSY instead. */
+static alp_status_t bridge_stream_end_and_free(uint8_t slot)
+{
+	alp_status_t s = ALP_ERR_BUSY;
+
+	for (int i = 0; i < BRIDGE_STREAM_END_TRIES; i++) {
+		gd32g553_t *ctx = NULL;
+		s               = alp_z_v2n_supervisor_acquire(&ctx);
+		if (s == ALP_OK) {
+			s = gd32g553_adc_stream_end(ctx, slot);
+			alp_z_v2n_supervisor_release();
+			if (s == ALP_OK || s == ALP_ERR_INVAL) {
+				bridge_stream_free_slot(slot);
+				return ALP_OK;
+			}
+		}
+		k_msleep(BRIDGE_STREAM_END_BACKOFF_MS);
+	}
+	return s;
+}
 #endif /* ALP_ADC_HAS_BRIDGE_PATH */
 
 /* One-shot ADC (alp_adc_open / read_raw / read_uv / close) is served by the
@@ -109,6 +142,20 @@ static void bridge_stream_free_slot(uint8_t slot)
 /* NULL with last-error = ALP_ERR_NOSUPPORT.  A future polling-thread      */
 /* software fallback (timer + ring buffer) lives on the wave-2 roadmap.    */
 /* ====================================================================== */
+
+/* Test-only synchronisation hook (default no-op; a single NULL-check
+ * branch in production) -- mirrors src/backends/rpc/zephyr_drv.c's
+ * g_rpc_recv_test_sync_hook, but non-static: tests/zephyr/
+ * adc_stream_close_race links the real built alp_sdk library rather
+ * than #including this .c file directly, so the hook needs external
+ * linkage to be reachable from that test TU. Lets the test pause
+ * alp_adc_stream_read_mv() here -- right after alp_handle_op_enter()
+ * has counted the op in, before the mv/cap checks and any bridge
+ * round-trip -- so it can drive alp_adc_stream_close()'s drain
+ * against a counted op made through the REAL public entry point
+ * instead of a hand-rolled alp_handle_op_enter() call. Runs outside
+ * any lock, so it is safe for it to block. */
+void (*alp_adc_stream_read_test_sync_hook)(void) = NULL;
 
 alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 {
@@ -144,8 +191,25 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 		alp_z_set_last_error(s);
 		return NULL;
 	}
-	s = gd32g553_adc_stream_begin(
-	    ctx, (uint8_t)slot, (uint8_t)cfg->channel_id, cfg->sample_rate_hz);
+	/* v0.15 link with ADC_STREAM2 granted: BEGIN2 (lossless accounting,
+	 * the deepest ring the firmware grants at watermark 0).  This API is poll-driven, so no
+	 * watermark events are requested.  Otherwise the legacy BEGIN, which
+	 * the firmware keeps unchanged.  The choice is per stream and sticks
+	 * for its life: a BEGIN2 stream answers only READ2. */
+	const bool                  use_stream2 = (ctx->granted & GD32G553_LINK_FEAT_ADC_STREAM2) != 0u;
+	gd32g553_adc_stream2_info_t info        = { 0 };
+	if (use_stream2) {
+		s = gd32g553_adc_stream_begin2(
+		    ctx, (uint8_t)slot, (uint8_t)cfg->channel_id, cfg->sample_rate_hz, 0u, &info);
+		if (s == ALP_OK && info.full_scale == 0u) {
+			/* A reply with no scaling cannot be converted to millivolts. */
+			(void)gd32g553_adc_stream_end(ctx, (uint8_t)slot);
+			s = ALP_ERR_IO;
+		}
+	} else {
+		s = gd32g553_adc_stream_begin(
+		    ctx, (uint8_t)slot, (uint8_t)cfg->channel_id, cfg->sample_rate_hz);
+	}
 	alp_z_v2n_supervisor_release();
 
 	if (s != ALP_OK) {
@@ -156,12 +220,10 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 
 	struct alp_adc_stream *h = alp_z_adc_stream_pool_acquire();
 	if (h == NULL) {
-		/* Roll the bridge stream back so the slot is reusable. */
-		if (alp_z_v2n_supervisor_acquire(&ctx) == ALP_OK) {
-			(void)gd32g553_adc_stream_end(ctx, (uint8_t)slot);
-			alp_z_v2n_supervisor_release();
-		}
-		bridge_stream_free_slot((uint8_t)slot);
+		/* Roll the bridge stream back so the slot is reusable.  If the
+		 * STREAM_END is not confirmed the slot stays reserved (see
+		 * bridge_stream_end_and_free); the caller still gets NOMEM. */
+		(void)bridge_stream_end_and_free((uint8_t)slot);
 		alp_z_set_last_error(ALP_ERR_NOMEM);
 		return NULL;
 	}
@@ -171,6 +233,17 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 	h->channel        = (uint8_t)cfg->channel_id;
 	h->channel_id     = cfg->channel_id;
 	h->sample_rate_hz = cfg->sample_rate_hz;
+	h->stream2        = use_stream2;
+	h->full_scale     = info.full_scale;
+	h->vref_mv        = info.vref_mv;
+	/* Publish LAST, with release semantics: alp_handle_op_enter()'s
+	 * acquire-load of `lifecycle` is what a reader pairs with, so
+	 * anything that observes OPEN also observes stream_id/channel/rate
+	 * above.  The pool hands out a slot whose lifecycle is UNOPENED
+	 * (zeroed at acquire, and set back to UNOPENED by close before the
+	 * slot is released), so until this store lands a read on this
+	 * handle correctly reports ALP_ERR_NOT_READY. */
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 #else
 	alp_z_set_last_error(ALP_ERR_NOSUPPORT);
@@ -178,11 +251,14 @@ alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 #endif /* ALP_ADC_HAS_BRIDGE_PATH */
 }
 
-alp_status_t alp_adc_stream_read_mv(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got)
+/* Body of alp_adc_stream_read_mv(), split out so the op guard around it
+ * is a single enter/leave pair rather than one leave per early return --
+ * the shape that made the counted region easy to get wrong.  Runs only
+ * with the caller's alp_handle_op_enter() count held, which is what
+ * keeps `stream` alive across the supervisor acquire below. */
+static alp_status_t
+adc_stream_read_mv_body(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got)
 {
-	if (got == NULL) return ALP_ERR_INVAL;
-	*got = 0u;
-	if (stream == NULL || !stream->in_use) return ALP_ERR_NOT_READY;
 	if (mv == NULL) return ALP_ERR_INVAL;
 	if (cap == 0u) return ALP_OK;
 
@@ -190,37 +266,114 @@ alp_status_t alp_adc_stream_read_mv(alp_adc_stream_t *stream, uint16_t *mv, size
 	if (stream->via_bridge) {
 		/* Backend caps per-call at GD32G553_BRIDGE_ADC_STREAM_READ_MAX
          * (= 32); callers wanting more loop in their own thread. */
-		const uint8_t want     = (cap > (size_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX)
-		                             ? (uint8_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX
-		                             : (uint8_t)cap;
-		uint8_t       got_this = 0u;
+		uint8_t want     = (cap > (size_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX)
+		                       ? (uint8_t)GD32G553_BRIDGE_ADC_STREAM_READ_MAX
+		                       : (uint8_t)cap;
+		uint8_t got_this = 0u;
 
 		gd32g553_t  *ctx = NULL;
 		alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
 		if (s != ALP_OK) return s;
-		s = gd32g553_adc_stream_read(ctx, stream->stream_id, want, &got_this, mv);
+		if (!stream->stream2) {
+			s = gd32g553_adc_stream_read(ctx, stream->stream_id, want, &got_this, mv);
+			alp_z_v2n_supervisor_release();
+			if (s != ALP_OK) return s;
+			*got = got_this;
+			return ALP_OK;
+		}
+
+		/* v0.15 READ2: raw codes straight into the caller's buffer, then
+		 * scaled to millivolts in place.  The reply ceiling follows the
+		 * negotiated link (28 codes at 65 B, 121 with BIG_FRAME). */
+		const size_t read2_max = ((size_t)ctx->max_payload - GD32G553_READ2_HDR_BYTES) / 2u;
+		if (read2_max != 0u && want > read2_max) want = (uint8_t)read2_max;
+		uint32_t first_index = 0u;
+		uint32_t dropped     = 0u;
+		s                    = gd32g553_adc_stream_read2(
+		    ctx, stream->stream_id, want, &first_index, &dropped, &got_this, mv);
 		alp_z_v2n_supervisor_release();
 		if (s != ALP_OK) return s;
+		if (dropped == GD32G553_READ2_DROPPED_UNKNOWN) {
+			/* Discontinuity of unknown length (ROVF recovery, DSP gap): the
+			 * stream is intact but the sample sequence is not.  The ONLY
+			 * condition this API still reports as BUSY; a known drop count
+			 * (overrun) delivers the freshest samples with ALP_OK. */
+			return ALP_ERR_BUSY;
+		}
+		/* code -> mV: min(code, full_scale) * vref_mv / full_scale, integer
+		 * truncation -- bit-identical to the legacy STREAM_READ maths. */
+		for (uint8_t i = 0u; i < got_this; ++i) {
+			uint32_t code = mv[i];
+			if (code > stream->full_scale) code = stream->full_scale;
+			mv[i] = (uint16_t)((code * stream->vref_mv) / stream->full_scale);
+		}
 		*got = got_this;
 		return ALP_OK;
 	}
+#else
+	/* No bridge backend on this SoM: the wrapper already validated and
+	 * zeroed *got, so nothing here reads the handle. */
+	(void)stream;
+	(void)got;
 #endif
 	return ALP_ERR_NOSUPPORT;
+}
+
+alp_status_t alp_adc_stream_read_mv(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_t *got)
+{
+	if (got == NULL) return ALP_ERR_INVAL;
+	*got = 0u;
+	/* Count the op BEFORE reading any field of *stream.  The read blocks
+	 * inside alp_z_v2n_supervisor_acquire() and then issues a GD32G553
+	 * transaction keyed on stream->stream_id; an unguarded check would
+	 * let alp_adc_stream_close() free the slot and a third thread's
+	 * alp_adc_stream_open() re-own it during that window, so the bridge
+	 * read would be issued against the NEW owner's stream_id and land
+	 * that channel's samples in this caller's buffer with ALP_OK.  #1634 */
+	if (stream == NULL || !alp_handle_op_enter(&stream->lifecycle, &stream->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	/* Test-only pause point -- see alp_adc_stream_read_test_sync_hook's
+	 * comment above.  Sits after the op is counted in and before any
+	 * handle field is read, matching tests/zephyr/adc_stream_close_race's
+	 * expectation of pausing a real, counted read for its close-race. */
+	if (alp_adc_stream_read_test_sync_hook != NULL) {
+		alp_adc_stream_read_test_sync_hook();
+	}
+	const alp_status_t rc = adc_stream_read_mv_body(stream, mv, cap, got);
+	alp_handle_op_leave(&stream->active_ops);
+	return rc;
 }
 
 void alp_adc_stream_close(alp_adc_stream_t *stream)
 {
 	if (stream == NULL) return;
+	/* CAS OPEN -> CLOSING, then sleep-poll until every read that entered
+	 * before the CAS has left.  The drain must be the sleeping variant:
+	 * a read can sit in alp_z_v2n_supervisor_acquire() for up to
+	 * CONFIG_ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS, and a closer that
+	 * busy-spun there would never yield the core to a lower-priority
+	 * reader on Zephyr's preemptive scheduler (issue #1114).
+	 *
+	 * Also makes close idempotent: a second close loses the CAS and
+	 * no-ops, so bridge_stream_free_slot() below cannot release one
+	 * bridge stream slot twice and hand it to an unrelated opener. */
+	if (!alp_handle_begin_close_blocking(&stream->lifecycle, &stream->active_ops)) {
+		return;
+	}
 #if ALP_ADC_HAS_BRIDGE_PATH
 	if (stream->via_bridge) {
-		gd32g553_t *ctx = NULL;
-		if (alp_z_v2n_supervisor_acquire(&ctx) == ALP_OK) {
-			(void)gd32g553_adc_stream_end(ctx, stream->stream_id);
-			alp_z_v2n_supervisor_release();
-		}
-		bridge_stream_free_slot(stream->stream_id);
+		/* close() is void, so an unconfirmed STREAM_END cannot be
+		 * reported here: the slot just stays reserved (a later open
+		 * returns ALP_ERR_BUSY) rather than being recycled under a
+		 * still-running GD32 stream. */
+		(void)bridge_stream_end_and_free(stream->stream_id);
 	}
 #endif
+	/* UNOPENED before the slot goes back to the pool, so the next
+	 * claimer inherits a lifecycle that gates reads off until its own
+	 * open publishes OPEN. */
+	alp_lifecycle_set(&stream->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	alp_z_adc_stream_pool_release(stream);
 }
 
@@ -250,9 +403,22 @@ void alp_adc_stream_close(alp_adc_stream_t *stream)
 #define ALP_ADC_FILTER_POOL_SIZE 2u
 
 struct alp_adc_filter {
-	bool              in_use;
 	alp_adc_stream_t *stream;
 	alp_dsp_chain_t  *chain;
+	/* Same open/op/close guard as struct alp_adc_stream (issue #1634):
+	 * a filter read reaches the GD32G553 through alp_adc_stream_read_mv()
+	 * on `stream`, so it inherits that call's blocking window, and
+	 * alp_adc_filter_close() below closes `stream` and `chain` out from
+	 * under it.  Guarding the stream alone is not enough -- the filter
+	 * slot itself is pooled and recycled, and a reader that got past a
+	 * bare in_use check would go on to dereference filter->chain after
+	 * alp_adc_filter_pool_release() nulled it.
+	 *
+	 * lifecycle/active_ops before in_use: the layout convention shared
+	 * with every other guarded handle (see struct alp_counter). */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 static struct alp_adc_filter alp_adc_filter_pool[ALP_ADC_FILTER_POOL_SIZE];
@@ -339,15 +505,20 @@ alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg)
 	 * store here would race a concurrent reader of in_use). */
 	f->stream = stream;
 	f->chain  = chain;
+	/* Release-store LAST: a reader that observes OPEN also observes the
+	 * stream/chain pointers above.  Every failure path above releases
+	 * the slot with lifecycle still UNOPENED, so a half-built filter is
+	 * never readable. */
+	alp_lifecycle_set(&f->lifecycle, ALP_HANDLE_LC_OPEN);
 	return f;
 }
 
-alp_status_t
-alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
+/* Body of alp_adc_filter_read_mv() -- see adc_stream_read_mv_body()'s
+ * comment for why the guard wraps a helper instead of threading a leave
+ * through each early return.  Runs with the caller's op count held. */
+static alp_status_t
+adc_filter_read_mv_body(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
 {
-	if (got == NULL) return ALP_ERR_INVAL;
-	*got = 0u;
-	if (filter == NULL || !filter->in_use) return ALP_ERR_NOT_READY;
 	if (out_mv == NULL && cap > 0u) return ALP_ERR_INVAL;
 	if (cap == 0u) return ALP_OK;
 
@@ -374,15 +545,39 @@ alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, si
 	return ALP_OK;
 }
 
+alp_status_t
+alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, size_t *got)
+{
+	if (got == NULL) return ALP_ERR_INVAL;
+	*got = 0u;
+	/* Counted before the first field read, so filter->stream and
+	 * filter->chain cannot be torn down and the slot re-owned while the
+	 * body is blocked in the bridge read below.  #1634 */
+	if (filter == NULL || !alp_handle_op_enter(&filter->lifecycle, &filter->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	const alp_status_t rc = adc_filter_read_mv_body(filter, out_mv, cap, got);
+	alp_handle_op_leave(&filter->active_ops);
+	return rc;
+}
+
 void alp_adc_filter_close(alp_adc_filter_t *filter)
 {
 	if (filter == NULL) return;
+	/* Drain in-flight filter reads before closing the stream and chain
+	 * they are using -- a reader is parked inside alp_adc_stream_read_mv()
+	 * on filter->stream for most of its life.  Sleep-poll, not spin
+	 * (#1114), and idempotent on a second close (#1634). */
+	if (!alp_handle_begin_close_blocking(&filter->lifecycle, &filter->active_ops)) {
+		return;
+	}
 	if (filter->stream != NULL) {
 		alp_adc_stream_close(filter->stream);
 	}
 	if (filter->chain != NULL) {
 		alp_dsp_chain_close(filter->chain);
 	}
+	alp_lifecycle_set(&filter->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	alp_adc_filter_pool_release(filter);
 }
 
@@ -439,13 +634,25 @@ void alp_adc_filter_close(alp_adc_filter_t *filter)
 #define ALP_ADC_SPECTRUM_POOL_SIZE 2u
 
 struct alp_adc_spectrum {
-	bool                 in_use;
 	alp_adc_stream_t    *stream;
 	alp_dsp_chain_t     *chain;
 	uint16_t             fft_n_points;
 	alp_dsp_fft_output_t fft_output;
 	size_t               accumulated;
 	int16_t              samples[ALP_DSP_MAX_FFT_POINTS];
+	/* Same open/op/close guard as the filter above (issue #1634), and
+	 * this handle has more to lose: read_bins accumulates ACROSS calls
+	 * into `samples`/`accumulated`, and it loops on
+	 * alp_adc_stream_read_mv() until a full FFT block is in hand, so an
+	 * unguarded reader can be parked in that loop for many bridge
+	 * round-trips while a close recycles the slot and a new owner
+	 * rewrites fft_n_points -- which is the bound on the `samples`
+	 * writes in that loop.
+	 *
+	 * lifecycle/active_ops before in_use: shared layout convention. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 static struct alp_adc_spectrum alp_adc_spectrum_pool[ALP_ADC_SPECTRUM_POOL_SIZE];
@@ -524,15 +731,17 @@ alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg)
 	s->fft_n_points = last->u.fft.n_points;
 	s->fft_output   = last->u.fft.output_format;
 	s->accumulated  = 0u;
+	/* Release-store LAST, so a reader that observes OPEN also observes
+	 * fft_n_points -- the bound it indexes `samples` with. */
+	alp_lifecycle_set(&s->lifecycle, ALP_HANDLE_LC_OPEN);
 	return s;
 }
 
-alp_status_t
-alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, size_t *got)
+/* Body of alp_adc_spectrum_read_bins() -- guarded by its wrapper below;
+ * see adc_stream_read_mv_body() for why the split exists. */
+static alp_status_t
+adc_spectrum_read_bins_body(alp_adc_spectrum_t *spec, float *bins, size_t cap, size_t *got)
 {
-	if (got == NULL) return ALP_ERR_INVAL;
-	*got = 0u;
-	if (spec == NULL || !spec->in_use) return ALP_ERR_NOT_READY;
 	if (bins == NULL) return ALP_ERR_INVAL;
 
 	/* Required output element count per block.  Reject early if the
@@ -577,15 +786,40 @@ alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, si
 	return ALP_OK;
 }
 
+alp_status_t
+alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, size_t *got)
+{
+	if (got == NULL) return ALP_ERR_INVAL;
+	*got = 0u;
+	/* Counted before the first field read: the body's accumulate loop
+	 * blocks on the bridge repeatedly and writes spec->samples between
+	 * those blocks, so the slot must stay this caller's for the whole
+	 * call, not just for the entry check.  #1634 */
+	if (spec == NULL || !alp_handle_op_enter(&spec->lifecycle, &spec->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	const alp_status_t rc = adc_spectrum_read_bins_body(spec, bins, cap, got);
+	alp_handle_op_leave(&spec->active_ops);
+	return rc;
+}
+
 void alp_adc_spectrum_close(alp_adc_spectrum_t *spec)
 {
 	if (spec == NULL) return;
+	/* Drain in-flight read_bins calls before closing the stream and
+	 * chain they hold, and before alp_adc_spectrum_pool_release() resets
+	 * `accumulated`.  Sleep-poll, not spin (#1114); idempotent on a
+	 * second close (#1634). */
+	if (!alp_handle_begin_close_blocking(&spec->lifecycle, &spec->active_ops)) {
+		return;
+	}
 	if (spec->stream != NULL) {
 		alp_adc_stream_close(spec->stream);
 	}
 	if (spec->chain != NULL) {
 		alp_dsp_chain_close(spec->chain);
 	}
+	alp_lifecycle_set(&spec->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	alp_adc_spectrum_pool_release(spec);
 }
 

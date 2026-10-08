@@ -1,7 +1,9 @@
 # 0010. Heterogeneous OS orchestration: Zephyr + Yocto as peers, not alternatives
 
 Status: Accepted — superseded by ADR-0020 (build execution moved to
-`tan`; the `west alp-*` extensions are retired)
+`tan`; the `west alp-*` extensions are retired) and further amended by
+ADR-0022 (whose Renode-retirement amendment deleted
+`pr-renode-dual-os.yml` and the whole Renode dual-OS CI surface below)
 Date: 2026-05-15
 Deciders: alpCaner
 

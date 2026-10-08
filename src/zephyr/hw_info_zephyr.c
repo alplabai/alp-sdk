@@ -14,6 +14,7 @@
  * so native_sim tests can exercise it without a real EEPROM.
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
 #include <stdint.h>
@@ -142,6 +143,26 @@ alp_status_t alp_hw_info_classify_manifest(const alp_hw_info_eeprom_t *manifest,
 	return ALP_OK;
 }
 
+/* ----------------------------------------------------------------
+ * Secure Data Page mirror classification (pure; no I2C).  Public
+ * <alp/hw_info.h> entry point -- declared extern there (not
+ * `static inline`) and implemented here so it links out of
+ * libalp_sdk.a the same as every other portable_api function
+ * (scripts/check_plain_cmake_link_complete.py, issue #593); see
+ * alp_hw_info_classify_manifest() just above for the array-manifest
+ * equivalent this mirrors.
+ * ---------------------------------------------------------------- */
+bool alp_secure_page_mirror_classify(const uint8_t *page, alp_secure_page_mirror_t *out)
+{
+	alp_secure_page_mirror_t m;
+
+	memcpy(&m, page, sizeof(m));
+	if (m.magic != ALP_SECURE_PAGE_MAGIC) return false;
+	if (m.schema_version != ALP_SECURE_PAGE_SCHEMA_VERSION) return false;
+	*out = m;
+	return true;
+}
+
 alp_status_t alp_hw_info_read(alp_hw_info_t *out)
 {
 	if (out == NULL) return ALP_ERR_INVAL;
@@ -201,4 +222,22 @@ alp_status_t alp_hw_info_assert_matches_build(const alp_hw_info_t *info,
 	}
 	return ALP_OK;
 #endif
+}
+
+bool alp_hw_info_build_hw_rev_mismatch(const alp_hw_info_t *info, const char *built_hw_rev)
+{
+	if (info == NULL || built_hw_rev == NULL || built_hw_rev[0] == '\0') return false;
+	if (info->som_hw_rev[0] == '\0') return false; /* nothing read -- not a mismatch to report */
+	/* Bounded by the manifest field's own size (ALP_HW_INFO_HW_REV_LEN),
+     * same convention as copy_field()/alp_hw_info_assert_matches_build()
+     * above -- deliberately NOT a call through
+     * alp_hw_info_assert_matches_build() itself: that entry point's real
+     * compare body is compiled out (ALP_HW_INFO_EEPROM_ENABLED == 0) on
+     * any build with no EEPROM wired, so a native_sim test built without
+     * that Kconfig chain could never reach it.  (The one real caller, the
+     * boot banner, only gets here after alp_hw_info_read() == ALP_OK,
+     * which itself requires EEPROM_ENABLED == 1 -- so the two entry
+     * points behave identically in production; this one is just
+     * independently testable without a real EEPROM.) */
+	return strncmp(info->som_hw_rev, built_hw_rev, sizeof(info->som_hw_rev)) != 0;
 }

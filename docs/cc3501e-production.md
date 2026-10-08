@@ -11,10 +11,10 @@ bridge (`docs/cc3501e-bridge.md`).
 The production firmware is the **full** build — Wi-Fi + BLE + bridge + OTA:
 
 ```
-firmware/cc3501e/ti/build_ti.ps1 -Ble      # -Ble implies -WifiHostDriver
+cc3501e-bridge-firmware:ti/build_ti.ps1 -Ble      # -Ble implies -WifiHostDriver
 ```
 
-Output: `firmware/cc3501e/build/ti/cc3501e-bridge.{out,hex,bin}` (~1.0 MB text,
+Output: `cc3501e-bridge-firmware:build/ti/cc3501e-bridge.{out,hex,bin}` (~1.0 MB text,
 ~309 KB bss; fits the 512 KB DRAM). This is the same firmware as the bench bridge
 image plus the Wi-Fi host driver + NimBLE host (sized for a bridge peripheral).
 
@@ -22,14 +22,14 @@ image plus the Wi-Fi host driver + NimBLE host (sized for a bridge peripheral).
 
 **Production images are signed by the HSM**, which holds the production root key. The
 HSM is *not* on a dev/bench machine, so signing is the one step a developer cannot do
-locally. Bench/staging uses the **Alp VALIDATION** key (`deploy_validate.ps1`); those
+locally. Bench/staging uses the **Alp VALIDATION** key (`deploy_validate.sh`); those
 units are validation/staging only and are **NOT production-shippable** (rooted to the
 validation key, not the HSM).
 
 Reproducible production packaging (HSM operator):
 
 ```
-firmware/cc3501e/ti/package_cc3501e_prod.ps1 \
+cc3501e-bridge-firmware:ti/package_cc3501e_prod.ps1 \
     -PublicKey     <hsm_production_pub.pem> \
     -SigningModule <hsm_sign.py> \
     -ToolboxExe    <simplelink-wifi-toolbox.exe> \
@@ -53,8 +53,8 @@ runs. No PSU cold-cycle.
 Recipe (rooted to the **Alp VALIDATION** vendor key — staging only, see the warning
 below). Each step is one `simplelink-wifi-toolbox` (TI Wi-Fi toolbox) invocation:
 
-1. **Build** the full image: `firmware/cc3501e/ti/build_ti.ps1 -Ble`
-   → `firmware/cc3501e/build/ti/cc3501e-bridge.out`.
+1. **Build** the full image: `cc3501e-bridge-firmware:ti/build_ti.ps1 -Ble`
+   → `cc3501e-bridge-firmware:build/ti/cc3501e-bridge.out`.
 2. **FIB build** a vendor image at a **monotonically increasing** version — the
    anti-rollback fuses reject any version `<=` the one already programmed:
    `flash-images-builder build vendor_image --version <X.Y.Z.W>
@@ -70,9 +70,8 @@ below). Each step is one `simplelink-wifi-toolbox` (TI Wi-Fi toolbox) invocation
    Alif console — `alp companion ver`, `alp companion wifi scan`,
    `alp companion ble enable`, `alp companion ble scan`.
 
-The bench helper `fib_program_warm.ps1 -Version <X.Y.Z.W>` chains steps 2–4; bump the
-version on **every** flash. Keys live outside the repo (never committed); reference
-them by role, not path.
+Bump the image version on **every** flash; keys live outside the repo (never
+committed); reference them by role, not path.
 
 > Validation-key images are **staging only** — NOT production-shippable (rooted to the
 > VALIDATION key, not the HSM). Production uses `package_cc3501e_prod.ps1` + the HSM.
@@ -93,7 +92,7 @@ runs the same cold chain via BL2, cannot complete).
 
 OTA-over-the-bridge (host streams a signed vendor image → `psa_fwu` → MCUboot swap) is
 implemented and **silicon-validated end-to-end** (`chips/cc3501e/cc3501e_ota.c`,
-`firmware/cc3501e/hal/ti/cc3501e_hw_ti.c`). Each OTA payload is itself a signed vendor
+`cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti.c`). Each OTA payload is itself a signed vendor
 image (same FIB+sign recipe) whose version must **exceed** the running primary — monotonic
 anti-rollback: a downgrade is refused at `psa_fwu` install (`OTA_STATUS state=3` ERROR), a
 forward image is accepted (`state=2` STAGED). The swap is completed by the CC35's OWN
@@ -103,7 +102,7 @@ dropped ~2 s then returned) → the swapped image self-accepted and **persisted 
 cold POR** (no rollback). The `OTA_STATUS reserved[0]` byte surfaces the swap-reboot rc
 (0 = success, non-zero = refused).
 
-## Status / open items (2026-06-24)
+## Status / open items (2026-07-10)
 
 - ✅ Full firmware (Wi-Fi+BLE+bridge+OTA) builds + links (`-Ble`, 0 errors).
 - ✅ **Wi-Fi SCAN ON-AIR validated** (2026-06-22, warm-programmed v0.0.161.0): `wifi scan`
@@ -115,8 +114,9 @@ cold POR** (no rollback). The `OTA_STATUS reserved[0]` byte surfaces the swap-re
   ~15 s WPA3 association), and the L2 association completes with the bridge intact.
   The earlier "the ~15 s association **desyncs the CS-less r1 SPI bridge permanently**"
   limitation is **resolved**: the current rev runs a **hardware peripheral-driven SS0
-  chip-select** (Alif `P14_7` = `SPI1_SS0_C`; dwc-ssi drives SS0 per transfer) plus
-  per-phase READY gating, so a busy radio can no longer lose link framing — `ver`
+  chip-select** (Alif `P14_7` = `SPI1_SS0_C`; dwc-ssi drives SS0 per transfer) —
+  READY is an OPTIONAL additional gate, left unwired on the boards these numbers
+  were taken on — so a busy radio can no longer lose link framing — `ver`
   after a connect still returns, no power-cycle needed (`docs/cc3501e-bridge.md`
   "Bench-validated").  Connect was also found to have been dispatched **synchronously
   in the SPI ISR** (every other blocking radio op is worker-routed); that is fixed
@@ -133,7 +133,7 @@ cold POR** (no rollback). The `OTA_STATUS reserved[0]` byte surfaces the swap-re
   `psa_fwu_request_reboot()` swap (bridge drop+return) → the swapped image ran and
   **persisted across a true cold POR**. A first OTA after a failed one recovers cleanly
   (no bridge wedge, no CC35 reset — `ota_do_begin` stuck-slot recovery, #611). See
-  `firmware/cc3501e/BRINGUP_STATUS.md` §5.
+  `cc3501e-bridge-firmware:BRINGUP_STATUS.md` §5.
 - ✅ **Wi-Fi + BLE CONCURRENT — validated on silicon (2026-06-24, E1M-AEN801 EVK).**
   `wifi scan`, `ble enable` (NimBLE host up), and `wifi connect` (WPA3, async) all
   **succeed together**, and the HW-CS bridge survives the combined radio load (a `ver`

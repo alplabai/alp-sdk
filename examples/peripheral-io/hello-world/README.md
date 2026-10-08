@@ -31,13 +31,15 @@ Pin down which one BEFORE moving on to `gpio-button-led` or
 
 ```bash
 # Standalone, native_sim (host binary; no hardware needed):
+# writes examples/peripheral-io/hello-world/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/hello-world
 west build -b native_sim/native/64 examples/peripheral-io/hello-world \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 
 # On real silicon, point -b at the SoM's Zephyr board target.
 # Example for E1M-AEN801:
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/hello-world
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/hello-world -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

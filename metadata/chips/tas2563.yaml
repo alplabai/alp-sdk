@@ -2,13 +2,33 @@
 schema_version:   1
 chip_id:          tas2563
 driver_status:    partial
+notes: >
+  2026-09-27: the E1M-X-EVK V2N-family Linux ALSA path has a kernel
+  binding -- `ti,tas2563` codec nodes on one audio-graph-card2 `multi`
+  link in meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi
+  (issue #2331; bench-verified on E1M-V2M103). This is separate from --
+  and, on that
+  board/SoM combination, must not race -- the userspace driver
+  (`chips/tas2563/tas2563.c`) reachable over `alp_i2c_*` below, which
+  remains the sole ownership path on Zephyr/baremetal targets (e.g. AEN).
+  Ownership is non-fighting by construction, not by a PACKAGECONFIG
+  lock-out: `tas2563_init()` propagates its bus call's status verbatim,
+  so on Yocto, if the kernel already owns an address, `ioctl(I2C_SLAVE)`
+  fails EBUSY and `tas2563_init()` returns `ALP_ERR_BUSY` -- a clear,
+  distinct refusal, not a register race or a misleading
+  ALP_ERR_NOT_READY. See `include/alp/chips/tas2563.h`'s `@retval
+  ALP_ERR_BUSY` note on `tas2563_init()`.
 display_name:     "TI TAS2563 mono digital-input Class-D smart amp (I2C ctrl + I2S data, I/V sense)"
 vendor:           ti
 mpn_population:
   - "TAS2563RPP"
 
 datasheet:
-  primary:        "TI TAS2563 datasheet SLASEU1 (mono digital-input Class-D audio amplifier with speaker I/V sense)"
+  # SLASET3D (April 2019, revised January 2024) is the document the driver
+  # and its tests cite section/table/page numbers from.  The earlier
+  # "SLASEU1" recorded here predates a TI literature renumbering of the same
+  # device -- the `physical:` block below already noted the discrepancy.
+  primary:        "TI TAS2563 datasheet SLASET3D (6.1W boosted Class-D audio amplifier with integrated DSP and IV sense)"
 
 bus:              i2c
 i2c:
@@ -61,8 +81,8 @@ signals:
   - { name: GND,          type: ground }
 
 physical:
-  # pins per TI TAS2563 datasheet SLASET3D (Apr 2019, rev. Jan 2024; the manifest's
-  # SLASEU1 predates a TI literature renumbering of the same device), Section 4
+  # pins per TI TAS2563 datasheet SLASET3D (Apr 2019, rev. Jan 2024 -- now also
+  # the `datasheet.primary` above), Section 4
   # "Pin Configuration and Functions", Table 4-1 "Pin Functions", RPP (32-pin QFN)
   # column -- matches mpn_population TAS2563RPP.
   # GNDB/GNDD/GNDP (boost/digital/power-stage grounds) all tie to the PCB GND
@@ -114,3 +134,5 @@ families:
 verification:
   hil_silicon:    untested
   smoke_tests:    null_arg_guard
+tracking:
+  blocker: "ADR 0017 tier decision pending"

@@ -2,7 +2,8 @@
 schema_version:   1
 chip_id:          dp83825
 driver_status:    none              # no alp-sdk chip driver exists (ADR 0023
-                                     # layer 3 gap, #1241). The bench-verified
+                                     # layer 3 gap; this manifest itself
+                                     # landed via #1241). The bench-verified
                                      # PASS (examples/aen/aen-ethernet-link)
                                      # reaches the PHY via the upstream
                                      # eth_dwmac_alif_ensemble Tier-1.5 MAC
@@ -13,9 +14,10 @@ driver_status:    none              # no alp-sdk chip driver exists (ADR 0023
                                      # phy_ti_dp83825,
                                      # zephyr/kconfigs/vendor-alif-peripherals.kconfig:139-158)
                                      # has been exercised on real E8 silicon
-                                     # at the MDIO layer only (#1244: PHY-ID
-                                     # + register reads at address 0);
-                                     # link/traffic over it is still unproven.
+                                     # at the MDIO layer only, confirmed via
+                                     # #1244 (PHY-ID + register reads at
+                                     # address 0); link/traffic over it is
+                                     # still unproven.
 display_name:     "TI DP83825 10/100 Mbps RMII Ethernet PHY (exact order code TBD)"
 vendor:           ti
 mpn_population:
@@ -25,7 +27,7 @@ mpn_population:
                                      # netlist/BOM -- see #1241 "Blocked on".
                                      # Do not promote the "DP83825I" label the
                                      # devicetree used to carry (dropped from
-                                     # zephyr/dts/alif/ensemble_e8_peripherals.dtsi:353-375
+                                     # zephyr/dts/alif/ensemble_e8_peripherals.dtsi:538-560
                                      # with the #1244 address fix) into this
                                      # field as fact: the bench-read
                                      # id=2000a140 is die/OUI identity only.
@@ -48,7 +50,7 @@ phy_id_pattern:   0x2000a140         # PHYID1+PHYID2, bench-confirmed via
                                      # settle the order-code blocker above.
 
 notes: |
-  On-module TI RMII PHY (zephyr/dts/alif/ensemble_e8_peripherals.dtsi:282),
+  On-module TI RMII PHY (zephyr/dts/alif/ensemble_e8_peripherals.dtsi:467),
   listed as "TI DP83825 Ethernet PHY" in
   metadata/e1m_modules/aen/CHANGELOG.md:16 (family only, no order code).
   Real hardware, not theoretical:
@@ -98,3 +100,5 @@ kconfig:
                                      # Ethernet target exists in this tree.
   yocto:          n/a               # no A32/Linux Ethernet enablement exists
                                      # for AEN in this tree.
+tracking:
+  blocker: "no child issue filed; not scheduled, deferred until a product selects the part"

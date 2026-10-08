@@ -30,8 +30,11 @@ client opens its socket.
 
 ## Licensing / hygiene
 
-- **Never** commit private keys to git — `client.key` is in
-  `.gitignore` for this directory.
+- **Never** commit private keys to git — the `.gitignore` in this
+  directory ignores `*.key` and `*.priv` alongside the generated cert
+  material (`*.pem`, `*.crt`, `*.cer`, `*.der`, `*.csr`, `*.p12`,
+  `*.pfx`), so `client.key` stays untracked.  `README.md` and that
+  `.gitignore` are the only tracked files here.
 - Use a per-device certificate when shipping at any scale; reuse
   is a security smell.
 - Rotate the CA bundle when your broker rotates.  v0.3.x will ship

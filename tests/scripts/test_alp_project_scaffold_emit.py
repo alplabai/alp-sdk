@@ -13,6 +13,7 @@ directly.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -25,7 +26,8 @@ HELLO_WORLD = REPO / "examples" / "peripheral-io" / "hello-world"
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(ALP_PROJECT), *args],
-        capture_output=True, text=True, cwd=REPO, check=False,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO, check=False,
     )
 
 
@@ -48,8 +50,24 @@ def test_scaffold_emits_json_envelope_for_the_examples_own_sku():
     # rewrite), so they differ even for the canonical example's own SKU.
     for rel in ("board.yaml", "prj.conf", "src/main.c"):
         assert by_path[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
-    assert "--core m55_hp" in by_path["CMakeLists.txt"]
-    assert "ALP_SDK_ROOT is not set" in by_path["CMakeLists.txt"]
+    # The configure-time alp_project.py bridge is retired (#866): the
+    # scaffolded CMakeLists.txt carries no SDK-root plumbing at all.
+    assert "alp_project.py" not in by_path["CMakeLists.txt"]
+
+
+def test_iot_scaffold_emits_the_cc3501e_bridge_it_compiles():
+    """issue #2241: the iot template's CMakeLists.txt compiles
+    src/cc3501e_bridge.c, so the scaffold must carry it and its header --
+    before the fix the envelope had neither and the emitted project could
+    not link."""
+    proc = _run("--emit", "scaffold", "--template", "iot",
+                "--sku", "E1M-AEN801")
+    assert proc.returncode == 0, proc.stderr
+    by_path = {item["path"]: item["contents"] for item in json.loads(proc.stdout)}
+    assert "src/cc3501e_bridge.c" in by_path["CMakeLists.txt"]
+    example = REPO / "examples" / "connectivity" / "mqtt-telemetry"
+    for rel in ("src/cc3501e_bridge.c", "src/cc3501e_bridge.h"):
+        assert by_path.get(rel) == (example / rel).read_text(encoding="utf-8"), rel
 
 
 def test_scaffold_substitutes_sku_and_preset_for_a_different_sku():
@@ -66,7 +84,6 @@ def test_scaffold_substitutes_sku_and_preset_for_a_different_sku():
     # with rc=1, "unknown core id".
     assert "m33_sm:" in envelope["board.yaml"]
     assert "m55_hp" not in envelope["board.yaml"]
-    assert "--core m33_sm" in envelope["CMakeLists.txt"]
     # prj.conf / src/main.c carry no sku-specific content -- unmodified.
     for rel in ("prj.conf", "src/main.c"):
         assert envelope[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8")
@@ -80,7 +97,8 @@ def test_scaffold_substitutes_sku_and_preset_for_a_different_sku():
         check = subprocess.run(
             [sys.executable, str(ALP_PROJECT), "--input", str(board_yaml_path),
              "--emit", "zephyr-conf", "--core", "m33_sm"],
-            capture_output=True, text=True, cwd=REPO, check=False)
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO, check=False)
         assert check.returncode == 0, check.stderr
 
 
@@ -109,3 +127,83 @@ def test_scaffold_is_deterministic_across_two_invocations():
     b = _run("--emit", "scaffold", "--template", "minimal", "--sku", "E1M-V2N101")
     assert a.returncode == 0 and b.returncode == 0
     assert a.stdout == b.stdout
+
+
+# --------------------------------------------------------------------------
+# --cores (issue #1652): an explicit core -> app-dir mapping's SELECTOR
+# form -- a topology input alternative to --template, over the SAME
+# render_to_envelope() path. See scripts/alp_template.py's
+# find_template_by_cores() docstring for why this is a selector over
+# existing (already twister-gated) templates, not a generic renderer.
+# --------------------------------------------------------------------------
+
+def test_scaffold_via_cores_matches_scaffold_via_template():
+    """--cores must select the identical template --template would
+    name for it -- the fallback (--template) is unchanged, and the
+    two inputs can never disagree on a byte for the template they
+    both resolve to."""
+    via_template = _run("--emit", "scaffold", "--template", "multicore-mailbox",
+                         "--sku", "E1M-AEN801")
+    via_cores = _run("--emit", "scaffold",
+                      "--cores", "m55_hp:zephyr,m55_he:zephyr",
+                      "--sku", "E1M-AEN801")
+    assert via_template.returncode == 0, via_template.stderr
+    assert via_cores.returncode == 0, via_cores.stderr
+    assert via_template.stdout == via_cores.stdout
+
+
+def test_scaffold_via_cores_topology_order_does_not_matter():
+    a = _run("--emit", "scaffold", "--cores", "m55_hp:zephyr,m55_he:zephyr",
+              "--sku", "E1M-AEN801")
+    b = _run("--emit", "scaffold", "--cores", "m55_he:zephyr,m55_hp:zephyr",
+              "--sku", "E1M-AEN801")
+    assert a.returncode == 0 and b.returncode == 0
+    assert a.stdout == b.stdout
+
+
+def test_scaffold_via_cores_selects_multicore_rpmsg():
+    proc = _run("--emit", "scaffold",
+                "--cores", "a32_cluster:yocto,m55_hp:zephyr",
+                "--sku", "E1M-AEN801")
+    assert proc.returncode == 0, proc.stderr
+    envelope = json.loads(proc.stdout)
+    assert {item["path"] for item in envelope} == {
+        "board.yaml", "CMakeLists.txt", "README.md",
+        "linux/CMakeLists.txt", "linux/src/main.c",
+        "m55_hp/CMakeLists.txt", "m55_hp/prj.conf", "m55_hp/src/main.c",
+    }
+
+
+def test_scaffold_via_cores_rejects_unmatched_topology():
+    proc = _run("--emit", "scaffold",
+                "--cores", "m55_hp:zephyr,m55_he:yocto",
+                "--sku", "E1M-AEN801")
+    assert proc.returncode != 0
+    assert "m55_he" in proc.stderr
+
+
+def test_scaffold_via_cores_rejects_ambiguous_topology():
+    proc = _run("--emit", "scaffold", "--cores", "m55_hp:zephyr",
+                "--sku", "E1M-AEN801")
+    assert proc.returncode != 0
+    assert "--template" in proc.stderr
+
+
+def test_scaffold_via_cores_rejects_malformed_entry():
+    proc = _run("--emit", "scaffold", "--cores", "m55_hp",
+                "--sku", "E1M-AEN801")
+    assert proc.returncode != 0
+    assert "--cores" in proc.stderr
+
+
+def test_scaffold_rejects_both_template_and_cores():
+    proc = _run("--emit", "scaffold", "--template", "minimal",
+                "--cores", "m55_hp:zephyr", "--sku", "E1M-AEN801")
+    assert proc.returncode != 0
+    assert "--template" in proc.stderr and "--cores" in proc.stderr
+
+
+def test_scaffold_requires_template_or_cores():
+    proc = _run("--emit", "scaffold", "--sku", "E1M-AEN801")
+    assert proc.returncode != 0
+    assert "--template" in proc.stderr and "--cores" in proc.stderr

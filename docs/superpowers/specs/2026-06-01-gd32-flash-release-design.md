@@ -6,7 +6,7 @@
 GD32 bridge firmware has shipped multiple further protocol/OTA
 revisions since (see `CHANGELOG.md`, e.g. "gd32-bridge v0.2.9 /
 protocol v0.7").  Kept for the design rationale.
-**Scope:** `firmware/gd32-bridge/` build/release wrapper, `scripts/flash_backends/`
+**Scope:** `gd32-bridge-firmware:` build/release wrapper, `scripts/flash_backends/`
 + `scripts/openocd/`, and `docs/`. No change to the transport HAL *logic* —
 the `feat/gd32-transport-bringup` firmware is integrated as-is and treated as
 the release foundation.
@@ -19,10 +19,10 @@ The GD32G553 supervisor MCU on the E1M-X V2N / V2N-M1 SoMs ships (per the docs)
 - The real firmware that makes a flashed GD32 answer over the bus — the SPI1 +
   I2C0 **slave transport HAL** — lives **only on the unmerged branch
   `feat/gd32-transport-bringup`** (3 commits), not on `dev`. `dev`'s
-  `firmware/gd32-bridge/` is a scaffold whose HW-touching opcodes return
+  `gd32-bridge-firmware:` is a scaffold whose HW-touching opcodes return
   `NOTIMPL`.
 - There is **no single, public "flash a GD32 on your bench" SOP**. The steps are
-  scattered across `docs/gd32-bridge.md`, `firmware/gd32-bridge/README.md`, and
+  scattered across `docs/gd32-bridge.md`, `gd32-bridge-firmware:README.md`, and
   `docs/firmware-quickstart.md`, with the operational bench/HiL procedure held
   in `alplabai/alp-sdk-internal` (`HIL-PLAN.md`, `docs/internal-test-playbook.md`).
 - The GD32 flash backend `scripts/flash_backends/swd_v2n_host.py` references a
@@ -60,7 +60,7 @@ it but do not claim it done.
 - **Modifying transport HAL logic.** We ship the branch as the foundation; a
   deep line-by-line review of the transports is a separate concern.
 - **Committing a "shipping" prebuilt binary.** Because the firmware is unproven
-  on silicon, v0.1.0 is a *candidate*; no `firmware/gd32-bridge/prebuilt/` blob
+  on silicon, v0.1.0 is a *candidate*; no `gd32-bridge-firmware:prebuilt/` blob
   is enshrined this round (revisit post-silicon).
 - **Host-driven SWD reflash (`chips/gd32_swd/`, protocol §10 Path B):** not
   wired this HW rev; external SWD probe only.
@@ -90,7 +90,7 @@ it but do not claim it done.
 - Branch off current `dev`: **`feat/gd32-flash-release`**.
 - `git merge origin/feat/gd32-transport-bringup` (merge commit — preserves the
   3 commits' history). Before merging, print the conflict surface
-  (`git diff 0977435..dev -- firmware/gd32-bridge/ docs/gd32-bridge.md`) to
+  (`git diff 0977435..dev -- gd32-bridge-firmware: docs/gd32-bridge.md`) to
   confirm it is near-empty; resolve any trivial overlap (most likely the
   brand-casing sweep touching comments/README).
 - Tooling + docs (sections 3–4) commit onto the same branch.
@@ -102,16 +102,16 @@ it but do not claim it done.
 - Build **both backends** with the pinned toolchain file:
   ```
   cmake -B build/stub -S firmware/gd32-bridge \
-    -DCMAKE_TOOLCHAIN_FILE=$PWD/firmware/gd32-bridge/toolchain/arm-none-eabi.cmake \
+    -DCMAKE_TOOLCHAIN_FILE=$PWD/gd32-bridge-firmware:toolchain/arm-none-eabi.cmake \
     -DBRIDGE_HAL_BACKEND=stub  && cmake --build build/stub
   cmake -B build/gd32 -S firmware/gd32-bridge \
-    -DCMAKE_TOOLCHAIN_FILE=$PWD/firmware/gd32-bridge/toolchain/arm-none-eabi.cmake \
+    -DCMAKE_TOOLCHAIN_FILE=$PWD/gd32-bridge-firmware:toolchain/arm-none-eabi.cmake \
     -DBRIDGE_HAL_BACKEND=gd32  && cmake --build build/gd32
   ```
 - `gd32` build emits `build/gd32/gd32-bridge.elf/.hex/.bin`. Report
   `arm-none-eabi-size` (sanity vs 512 KB flash / 96 KB SRAM).
 - Record `sha256` + byte size of the `.bin`/`.hex` in the SOP (and/or
-  `firmware/gd32-bridge/CHANGELOG`-style note). **No committed prebuilt blob**;
+  `gd32-bridge-firmware:CHANGELOG`-style note). **No committed prebuilt blob**;
   rely on the CI artifact for distribution until silicon-validated.
 - **gcc-version risk:** CI uses gcc 10.3, local 13.3. There is no `-Werror`, so
   new `-Wshadow`/`-Wpedantic` diagnostics will not fail the build, but any new
@@ -167,7 +167,7 @@ it but do not claim it done.
 - **Mirror generic content** from `alp-sdk-internal` (`HIL-PLAN.md`,
   `docs/internal-test-playbook.md`); rig-specific bits stay internal.
 - Cross-link the new SOP from `docs/gd32-bridge.md` (Flashing section),
-  `firmware/gd32-bridge/README.md`, and `docs/firmware-quickstart.md`.
+  `gd32-bridge-firmware:README.md`, and `docs/firmware-quickstart.md`.
 
 ## Verification: provable here vs. bench boundary
 
@@ -175,7 +175,7 @@ it but do not claim it done.
 
 - Both backends build on gcc 13.3 with no errors; size report captured.
 - `gd32-bridge.hex/.bin` produced and `sha256`/size recorded.
-- `python3 firmware/gd32-bridge/tests/gen_protocol_vectors.py --check` passes
+- `python3 gd32-bridge-firmware:tests/gen_protocol_vectors.py --check` passes
   (protocol layer unchanged / consistent).
 - `python3 scripts/west_commands/alp_flash.py <app> --helper gd32_bridge
   --dry-run` prints the expected flash command against the extended backend
@@ -197,7 +197,7 @@ it but do not claim it done.
   has established GD32G553 flash support, so OpenOCD's uncertain GD32G5 support
   is demoted to the *alternative* path only. The flash command is
   **bench-validated** (no probe/tools on this workstation), not proven here.
-- **A3 — Merge is clean.** Assumed `dev` did not touch `firmware/gd32-bridge/`
+- **A3 — Merge is clean.** Assumed `dev` did not touch `gd32-bridge-firmware:`
   meaningfully since `0977435`; verified by the pre-merge conflict-surface diff.
 - **A4 — Firmware is paper-correct only.** v0.1.0 is a **candidate**; "verified
   working" requires the bench. The SOP states this plainly.
@@ -206,12 +206,12 @@ it but do not claim it done.
 
 | Path | Action |
 | --- | --- |
-| `firmware/gd32-bridge/**` | Integrated from `feat/gd32-transport-bringup` (merge, no logic edits) |
+| `gd32-bridge-firmware:**` | Integrated from `feat/gd32-transport-bringup` (merge, no logic edits) |
 | `scripts/flash_backends/swd_probe.py` | **Rename** `swd_v2n_host.py`→`swd_probe.py` (method key + class) **and extend** with a direct J-Link (`JLinkExe`) path |
 | SoM presets ×4 + preset schema + tests + `alp_flash` comment + `v0.6-tbd` | Update `flash_method` `swd_v2n_host`→`swd_probe`; also fix the `gd32_bridge` `firmware_path` (`gd32_bridge.bin`→`gd32-bridge.bin`) |
 | `scripts/openocd/` | **New** — alternative-probe (CMSIS-DAP / ST-Link / OpenOCD) configs |
 | `docs/gd32-flashing.md` | **New** — the public flashing SOP |
-| `docs/gd32-bridge.md`, `firmware/gd32-bridge/README.md`, `docs/firmware-quickstart.md` | Cross-link the SOP |
+| `docs/gd32-bridge.md`, `gd32-bridge-firmware:README.md`, `docs/firmware-quickstart.md` | Cross-link the SOP |
 | (build output) | `gd32-bridge.hex/.bin` checksummed; CI artifact relied on for distribution |
 
 ## Out of scope / deferred

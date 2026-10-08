@@ -4,8 +4,9 @@
  *
  * aen-ospi-regcheck -- compile + DT-bind + register-file proof of the Alif
  * Ensemble OSPI/HexSPI controller (Synopsys DesignWare OSPI, compatible
- * "snps,designware-ospi") on the E1M-AEN801 (Ensemble E8, M55-HE/M55-HP), via
- * the bench RAM-run + RAM-console flow.  Mirrors aen-isp-regcheck.
+ * "snps,designware-ospi") on the E1M-AEN801 and E1M-AEN803 (Ensemble E8,
+ * M55-HE), via the bench RAM-run + RAM-console flow.  Mirrors
+ * aen-isp-regcheck.
  *
  * WHAT THIS APP VALIDATES (and what it deliberately does NOT):
  *
@@ -37,40 +38,76 @@
  *        driver's file-header MEASURED block) -- a real bus read, not merely
  *        "the call returned".
  *
- * WHAT IS HW-BLOCKED ON THIS BATCH, AND WHY IT IS A SKIP NOT AN
- * ATTEMPT-AND-TOLERATE: XiP setup (alif_hal_ospi_xip_enable()) is not called
- * here at all.  OSPI_XIP_SER (offset 0x10C), the register that call touches,
- * DOES NOT EXIST on this die (SOC_FEAT_OSPI_HAS_XIP_SER=0, AE822-specific --
- * see flash_ospi_alif.c's file-header FOURTH section for the full citation
- * chain) -- calling it bus-faults every time, unconditionally, regardless of
- * whether any part is populated.  There is no rc to catch: hal_alif's
+ * WHY XiP IS SKIPPED, NOT ATTEMPTED: XiP setup (alif_hal_ospi_xip_enable())
+ * is not called here at all.  OSPI_XIP_SER (offset 0x10C), the register that
+ * call touches, DOES NOT EXIST on this die (SOC_FEAT_OSPI_HAS_XIP_SER=0,
+ * AE822-specific -- see flash_ospi_alif.c's file-header FOURTH section for
+ * the full citation chain) -- calling it bus-faults every time,
+ * unconditionally, on every AE822 board regardless of what any OSPI chip
+ * select carries.  There is no rc to catch: hal_alif's
  * alif_hal_ospi_xip_enable() (ospi_hal.c:397-416) returns OSPI_ERR_NONE
  * unconditionally after its register writes -- the ONLY failure mode is the
  * fault itself, so a prior version of this app that called it and "tolerated
  * a nonzero rc" was testing a premise that could never fail on its own terms
  * while the real failure (a crash before the RESULT line) went unreported.
  * This app instead states the SKIP explicitly: "no XiP slave in DT;
- * SOC_FEAT_OSPI_HAS_XIP_SER=0 on AE822".  A live XiP read stays additionally
- * unverifiable regardless (no octal-NOR/HyperBus part populated this
- * hardware batch) but is not the reason for the skip.
+ * SOC_FEAT_OSPI_HAS_XIP_SER=0 on AE822".  This one die-level reason is
+ * sufficient on its own and needs no premise about what's populated.
  *
- * This example has caught three real, distinct silicon/build bugs on a board
- * with nothing on the OSPI bus (the clock-gate fault, the MPU Device-mapping
- * regression, and the OSPI_XIP_SER fault above) -- it is a regression
- * sentinel, not a formality.  The clock-gate, MPU, and register-file checks
- * below MUST still surface as loud device_is_ready()/init/readback failures
- * if any of those three regress; only the XiP step is a deliberate,
- * explained skip.
+ * CORRECTED PREMISE (#2041): a prior version of this header also justified
+ * the skip with a second, board-population layer -- "the bench unit has NO
+ * OSPI memory fitted (maintainer, 2026-08-30)", against a design-intent
+ * Macronix MX25UM25645GXDI00 at SS1 per the module BOM.  That premise is now
+ * known WRONG.  OSPI0 SS1 (CS1) on E1M-AEN803, serial 2026W36-0002, answers
+ * a JEDEC ID read (opcode 0x9F, and again on the alternate ISSI opcode 0x9E)
+ * with `9d 5b 19 10` -- 0x9d = ISSI, 5b 19 = the IS25WX256 type/capacity
+ * pair -- i.e. a populated ISSI IS25WX256-JHLE, not a Macronix part, and not
+ * empty.  See metadata/e1m_modules/E1M-AEN801.yaml (NOR now mapped to SS1 to
+ * match) and metadata/e1m_modules/aen/alif-ospi.tsv, the shared AEN-family
+ * OSPI0 pinout both that measurement and this app's pinctrl group (see the
+ * board overlay) derive from.
+ *
+ * That measurement was NOT taken through this app.  In its DEFAULT mode
+ * everything below is a controller-register proof (DT bind, reg/aes-reg/irq
+ * match, CTRLR0 readback) with ZERO device-level transfers -- no opcode is
+ * shifted out to a chip select -- so a default-mode PASS is not evidence
+ * either way about whether a part answers on ITS specific board.  The
+ * opt-in #915 self-test further down is the device-level check: it erases,
+ * programs, reads back and restores one sector.
+ *
+ * BOTH SKUs, SAME APP (#2198): E1M-AEN803 fits the OSPI0 HyperRAM
+ * (S80KS5122GABHM02, SS0) and the xSPI NOR (IS25WX256-JHLE, SS1) that
+ * E1M-AEN801 leaves unpopulated.  On AEN803 those parts ARE on the bus and
+ * this app still leaves them untouched: it only binds the node, checks
+ * alif_hal_ospi_initialize()'s rc and reads CTRLR0 back against its reset
+ * value 0x00C00407 -- no device transfer, no reset pulse on P15_6/P15_7, no
+ * XIP, no write.  So its PASS/FAIL does not depend on what the chip selects
+ * carry, and the AEN803 board overlay is the AEN801 one with the SKU changed.
+ * It has already run on AEN803 silicon: #2041's 2026-09-13 bench check built
+ * this app for the AEN801 target and ran it on E1M-AEN803 serial
+ * 2026W36-0001 and E1M-AEN803 serial 2026W36-0002 -- rc=0, CTRLR0=0x00c00407, RESULT PASS on
+ * both (docs/verification-status.md, OSPI0 pinctrl row).
+ *
+ * This example has caught three real, distinct silicon/build bugs (the
+ * clock-gate fault, the MPU Device-mapping regression, and the OSPI_XIP_SER
+ * fault above) purely at the controller-register level -- it is a
+ * regression sentinel, not a formality.  The clock-gate, MPU, and
+ * register-file checks below MUST still surface as loud
+ * device_is_ready()/init/readback failures if any of those three regress;
+ * only the XiP step is a deliberate, explained skip.
  */
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <cmsis_core.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/flash.h>
 #include <zephyr/fatal.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/crc.h>
 #include <zephyr/sys/printk.h>
 
 #include <ospi_hal.h>
@@ -135,6 +172,155 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 #define OSPI_BOUND \
 	(DT_NODE_HAS_STATUS(OSPI_NODE, okay) && DT_NODE_HAS_COMPAT(OSPI_NODE, snps_designware_ospi))
 
+/*
+ * #915 program/erase self-test -- OFF by default. This performs a real
+ * destructive erase + program on ONE sector of whatever OSPI0 CS1 part is
+ * fitted, so it must never run by accident: flip
+ * AEN_OSPI_ENABLE_PROGRAM_ERASE_SELFTEST to 1 (a deliberate source edit, not
+ * a Kconfig a stale build cache could carry over) before flashing this app
+ * if you intend to run it. Always compiled and typechecked either way, so
+ * it cannot silently bit-rot while switched off.
+ *
+ * SECTOR CHOICE: 0x01FF0000, one 4 KiB sector near the top of the 32 MiB
+ * (256 Mbit) IS25WX256 array (FLASH_ISSI_SECTOR_SIZE, alif-dfp-ref
+ * components/Include/IS25WX256.h) -- picked to sit well clear of any low
+ * address a bootloader or XiP image might ever occupy, and named as a
+ * literal constant rather than derived from a part size this driver does
+ * not know at compile time (see flash_ospi_alif.c's read() ponytail note).
+ * The loop below touches ONLY this one address range: it reads it back
+ * before touching anything, restores exactly what it read, and never
+ * computes a second address anywhere.
+ */
+#define AEN_OSPI_ENABLE_PROGRAM_ERASE_SELFTEST 0
+#define AEN_OSPI_SELFTEST_OFFSET               0x01FF0000U
+#define AEN_OSPI_SELFTEST_SECTOR_SIZE          4096U
+
+static uint8_t aen_ospi_selftest_original[AEN_OSPI_SELFTEST_SECTOR_SIZE];
+static uint8_t aen_ospi_selftest_scratch[AEN_OSPI_SELFTEST_SECTOR_SIZE];
+
+/*
+ * Erase + program + restore ONE sector, proving flash_write()/flash_erase()
+ * against a known pattern and leaving the part exactly as found. Never
+ * touches any address outside [AEN_OSPI_SELFTEST_OFFSET,
+ * AEN_OSPI_SELFTEST_OFFSET + AEN_OSPI_SELFTEST_SECTOR_SIZE).
+ */
+static void aen_ospi_program_erase_selftest(const struct device *ospi_dev)
+{
+	uint32_t original_crc, blank_crc, pattern_crc, readback_crc, restored_crc;
+	int      rc;
+
+	printk("\n=== #915 program/erase self-test: sector 0x%08x ===\n", AEN_OSPI_SELFTEST_OFFSET);
+
+	/* 1. Save what's there now -- this is what gets restored at the end. */
+	rc = flash_read(ospi_dev,
+	                AEN_OSPI_SELFTEST_OFFSET,
+	                aen_ospi_selftest_original,
+	                sizeof(aen_ospi_selftest_original));
+	if (rc != 0) {
+		printk("RESULT FAIL: initial flash_read() rc=%d\n", rc);
+		return;
+	}
+	original_crc = crc32_ieee(aen_ospi_selftest_original, sizeof(aen_ospi_selftest_original));
+	printk("original: crc32=0x%08x\n", original_crc);
+
+	/* 2. Erase, then verify the sector actually reads back all-0xFF. */
+	rc = flash_erase(ospi_dev, AEN_OSPI_SELFTEST_OFFSET, AEN_OSPI_SELFTEST_SECTOR_SIZE);
+	if (rc != 0) {
+		printk("RESULT FAIL: flash_erase() rc=%d\n", rc);
+		return;
+	}
+	rc = flash_read(ospi_dev,
+	                AEN_OSPI_SELFTEST_OFFSET,
+	                aen_ospi_selftest_scratch,
+	                sizeof(aen_ospi_selftest_scratch));
+	if (rc != 0) {
+		printk("RESULT FAIL: post-erase flash_read() rc=%d\n", rc);
+		return;
+	}
+	blank_crc     = crc32_ieee(aen_ospi_selftest_scratch, sizeof(aen_ospi_selftest_scratch));
+	bool erase_ok = true;
+
+	for (size_t i = 0; i < sizeof(aen_ospi_selftest_scratch); i++) {
+		if (aen_ospi_selftest_scratch[i] != 0xFFU) {
+			erase_ok = false;
+			break;
+		}
+	}
+	printk("post-erase: crc32=0x%08x all_0xff=%d\n", blank_crc, (int)erase_ok);
+
+	/* 3. Program a known pattern, then read it back and compare. */
+	for (size_t i = 0; i < sizeof(aen_ospi_selftest_scratch); i++) {
+		aen_ospi_selftest_scratch[i] = (uint8_t)(i & 0xFFU);
+	}
+	pattern_crc = crc32_ieee(aen_ospi_selftest_scratch, sizeof(aen_ospi_selftest_scratch));
+	rc          = flash_write(ospi_dev,
+	                          AEN_OSPI_SELFTEST_OFFSET,
+	                          aen_ospi_selftest_scratch,
+	                          sizeof(aen_ospi_selftest_scratch));
+	if (rc != 0) {
+		printk("RESULT FAIL: flash_write() (pattern) rc=%d\n", rc);
+		return;
+	}
+	rc = flash_read(ospi_dev,
+	                AEN_OSPI_SELFTEST_OFFSET,
+	                aen_ospi_selftest_scratch,
+	                sizeof(aen_ospi_selftest_scratch));
+	if (rc != 0) {
+		printk("RESULT FAIL: post-program flash_read() rc=%d\n", rc);
+		return;
+	}
+	readback_crc    = crc32_ieee(aen_ospi_selftest_scratch, sizeof(aen_ospi_selftest_scratch));
+	bool program_ok = (readback_crc == pattern_crc);
+
+	printk("pattern: crc32=0x%08x readback_crc32=0x%08x match=%d\n",
+	       pattern_crc,
+	       readback_crc,
+	       (int)program_ok);
+
+	/* 4. Restore the original contents unconditionally (even on a program
+	 * mismatch above) -- this sector must not be left in the pattern
+	 * state, whatever else this test concludes. */
+	rc = flash_erase(ospi_dev, AEN_OSPI_SELFTEST_OFFSET, AEN_OSPI_SELFTEST_SECTOR_SIZE);
+	if (rc == 0) {
+		rc = flash_write(ospi_dev,
+		                 AEN_OSPI_SELFTEST_OFFSET,
+		                 aen_ospi_selftest_original,
+		                 sizeof(aen_ospi_selftest_original));
+	}
+	if (rc != 0) {
+		printk("RESULT FAIL: restore rc=%d -- sector 0x%08x may be left in the pattern "
+		       "state, NOT its original contents\n",
+		       rc,
+		       AEN_OSPI_SELFTEST_OFFSET);
+		return;
+	}
+	rc = flash_read(ospi_dev,
+	                AEN_OSPI_SELFTEST_OFFSET,
+	                aen_ospi_selftest_scratch,
+	                sizeof(aen_ospi_selftest_scratch));
+	if (rc != 0) {
+		printk("RESULT FAIL: post-restore flash_read() rc=%d\n", rc);
+		return;
+	}
+	restored_crc    = crc32_ieee(aen_ospi_selftest_scratch, sizeof(aen_ospi_selftest_scratch));
+	bool restore_ok = (restored_crc == original_crc);
+
+	printk("restored: crc32=0x%08x match=%d\n", restored_crc, (int)restore_ok);
+
+	if (erase_ok && program_ok && restore_ok) {
+		printk("RESULT PASS: #915 program/erase self-test -- sector 0x%08x erased "
+		       "(all 0xFF), programmed pattern verified byte-for-byte, original "
+		       "contents restored and CRC-verified\n",
+		       AEN_OSPI_SELFTEST_OFFSET);
+	} else {
+		printk("RESULT FAIL: #915 program/erase self-test (erase_ok=%d program_ok=%d "
+		       "restore_ok=%d)\n",
+		       (int)erase_ok,
+		       (int)program_ok,
+		       (int)restore_ok);
+	}
+}
+
 int main(void)
 {
 	printk("\n=== aen-ospi-regcheck ===\n");
@@ -194,10 +380,20 @@ int main(void)
 	 * POST_KERNEL init already took slot 0, so this call takes slot 1 --
 	 * both succeed against the fixed two-slot table.
 	 */
+	/*
+	 * core_clk: DT_PROP(OSPI_NODE, clock_frequency), NOT a `bus-speed`
+	 * fallback -- see flash_ospi_alif.c:30-80. A fallback here wrote
+	 * OSPI_BAUDR = core_clk / bus_speed = 1, and HWRM AHRM0012NDA v0.3
+	 * S16.1.5.3.5 defines OSPI_BAUDR[SCKDV] = 0 as "OSPI_SCLK is
+	 * disabled" -- a dead bus, not an overclock. The node always sets
+	 * `clock-frequency` now, so this app mirrors the driver's plain
+	 * DT_PROP() instead of quietly re-growing the same fallback one file
+	 * over from the fix.
+	 */
 	HAL_OSPI_Handle_T app_handle = -1;
 	struct ospi_init  app_cfg    = {
 		.bus_speed       = DT_PROP(OSPI_NODE, bus_speed),
-		.core_clk        = DT_PROP_OR(OSPI_NODE, clock_frequency, DT_PROP(OSPI_NODE, bus_speed)),
+		.core_clk        = DT_PROP(OSPI_NODE, clock_frequency),
 		.cs_pin          = DT_PROP(OSPI_NODE, cs_pin),
 		.rx_ds_delay     = DT_PROP(OSPI_NODE, rx_ds_delay),
 		.ddr_drive_edge  = DT_PROP(OSPI_NODE, ddr_drive_edge),
@@ -247,16 +443,17 @@ int main(void)
 	 * AND alif_hal_ospi_initialize() was called and returned OSPI_ERR_NONE
 	 * both from the driver's own init and directly from this app -- AND the
 	 * register file reads back its documented CTRLR0 reset value. XiP setup
-	 * is out of scope for this gate (see the module header SKIP note); a
-	 * live XiP read stays HW-blocked regardless (no octal-NOR/HyperBus part
-	 * populated this batch).
+	 * is out of scope for this gate (see the module header SKIP note --
+	 * OSPI_XIP_SER does not exist on AE822, independent of what any chip
+	 * select carries); this app makes no device-level transfer either way,
+	 * so its PASS says nothing about whether a NOR/HyperBus part answers.
 	 */
 	if (node_ok && hal_init_ok && ctrlr0_ok) {
 		printk("RESULT PASS: OSPI/HexSPI node BINDS -- ospi0@83000000 binds to "
 		       "snps,designware-ospi at the fork reg/aes-reg base with IRQ 96; "
 		       "alif_hal_ospi_initialize() is reachable and links; CTRLR0 reads "
-		       "its documented reset value; XiP SKIPPED (no XIP_SER on this die), "
-		       "live XiP HW-blocked (no part populated this batch)\n");
+		       "its documented reset value; XiP SKIPPED (no XIP_SER on this die); "
+		       "no device-level transfer attempted (controller-register proof only)\n");
 	} else {
 		printk("RESULT FAIL: OSPI/HexSPI node NOT staged "
 		       "(bound=%d base_ok=%d irq_ok=%d hal_init_ok=%d ctrlr0_ok=%d -- node "
@@ -268,6 +465,22 @@ int main(void)
 		       (int)(ospi_irq == OSPI_IRQ_EXPECTED),
 		       (int)hal_init_ok,
 		       (int)ctrlr0_ok);
+	}
+
+	/*
+	 * #915 program/erase self-test -- OFF unless AEN_OSPI_ENABLE_PROGRAM_
+	 * ERASE_SELFTEST is flipped to 1 above. Requires device_is_ready() to
+	 * have already succeeded (checked here, not just above) -- an erase/
+	 * program attempt against a not-ready device is exactly the kind of
+	 * silent-wrong-address risk this app's node-bind gate exists to catch.
+	 */
+	if (AEN_OSPI_ENABLE_PROGRAM_ERASE_SELFTEST) {
+		if (device_is_ready(ospi_dev)) {
+			aen_ospi_program_erase_selftest(ospi_dev);
+		} else {
+			printk("RESULT FAIL: #915 program/erase self-test SKIPPED -- ospi_dev "
+			       "not ready\n");
+		}
 	}
 
 	return 0;

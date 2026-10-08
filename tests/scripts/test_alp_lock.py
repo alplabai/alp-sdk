@@ -11,7 +11,7 @@ SCHEMA = REPO / "metadata/schemas/alp-lock-v1.schema.json"
 sys.path.insert(0, str(REPO / "scripts"))
 
 def test_schema_is_draft2020_closed():
-    s = json.loads(SCHEMA.read_text())
+    s = json.loads(SCHEMA.read_text(encoding="utf-8"))
     assert s["$schema"].endswith("2020-12/schema")
     assert s["additionalProperties"] is False
     assert s["properties"]["lockVersion"]["const"] == 1
@@ -23,10 +23,10 @@ def _fixture_ws(tmp_path):
     (tmp_path / "scripts" / "alp_cli").mkdir(parents=True)
     # alp_cli derives __version__ from metadata/sdk_version.yaml (the single
     # source alp_lock reads); the literal here mirrors real derivation only.
-    (tmp_path / "scripts" / "alp_cli" / "__init__.py").write_text('__version__ = "9.9.9"\n')
+    (tmp_path / "scripts" / "alp_cli" / "__init__.py").write_text('__version__ = "9.9.9"\n', encoding="utf-8")
     (tmp_path / "metadata").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "metadata" / "sdk_version.yaml").write_text("version: 9.9.9\nstatus: released\n")
-    (tmp_path / "scripts").joinpath("requirements.txt").write_text("cbor2\njsonschema==4.21.1\n")
+    (tmp_path / "metadata" / "sdk_version.yaml").write_text("version: 9.9.9\nstatus: released\n", encoding="utf-8")
+    (tmp_path / "scripts").joinpath("requirements.txt").write_text("cbor2\njsonschema==4.21.1\n", encoding="utf-8")
     (tmp_path / "west.yml").write_text(
         "manifest:\n"
         "  group-filter: [-optional]\n"
@@ -35,13 +35,13 @@ def _fixture_ws(tmp_path):
         "      revision: abc123\n"
         "      groups: [hal]\n"
         "    - name: cmsis\n"
-        "      revision: v5.9.0\n")
+        "      revision: v5.9.0\n", encoding="utf-8")
     libs = tmp_path / "metadata" / "libraries"; libs.mkdir(parents=True)
     (libs / "aws-iot.yaml").write_text(
         "schema_version: 1\nname: aws-iot\nversion: v3.1.5\nlicense: Apache-2.0\n"
-        "integration:\n  zephyr:\n    west:\n      revision: v3.1.5\n")
+        "integration:\n  zephyr:\n    west:\n      revision: v3.1.5\n", encoding="utf-8")
     sch = tmp_path / "metadata" / "schemas"; sch.mkdir(parents=True)
-    (sch / "a.schema.json").write_text('{"x":1}')
+    (sch / "a.schema.json").write_text('{"x":1}', encoding="utf-8")
     return tmp_path
 
 def test_build_lock_validates_and_is_deterministic(tmp_path):
@@ -49,7 +49,7 @@ def test_build_lock_validates_and_is_deterministic(tmp_path):
     ws = _fixture_ws(tmp_path)
     lock1 = alp_lock.build_lock(ws)
     lock2 = alp_lock.build_lock(ws)
-    jsonschema.validate(lock1, json.loads(SCHEMA.read_text()))
+    jsonschema.validate(lock1, json.loads(SCHEMA.read_text(encoding="utf-8")))
     assert lock1 == lock2
     assert lock1["sdk"] == {"version": "9.9.9"}   # no `revision` (#1615)
     # sorted by name
@@ -77,13 +77,13 @@ def test_collectors_route_leaves_through_guard(tmp_path):
     ws = _fixture_ws(tmp_path)
     # poison the library license with a local path
     (ws / "metadata" / "libraries" / "aws-iot.yaml").write_text(
-        "schema_version: 1\nname: aws-iot\nversion: v3.1.5\nlicense: /etc/secret\n")
+        "schema_version: 1\nname: aws-iot\nversion: v3.1.5\nlicense: /etc/secret\n", encoding="utf-8")
     with pytest.raises(alp_lock.LockError):
         alp_lock.build_lock(ws)
     # poison a west group
     ws2 = _fixture_ws(tmp_path / "b")
     (ws2 / "west.yml").write_text(
-        "manifest:\n  projects:\n    - name: p\n      revision: r\n      groups: [/abs]\n")
+        "manifest:\n  projects:\n    - name: p\n      revision: r\n      groups: [/abs]\n", encoding="utf-8")
     with pytest.raises(alp_lock.LockError):
         alp_lock.build_lock(ws2)
 
@@ -108,7 +108,7 @@ def test_verify_lock_detects_drift(tmp_path):
     assert alp_lock.verify_lock(locked, ws) == []
     # mutate a west revision on disk
     (ws / "west.yml").write_text(
-        (ws / "west.yml").read_text().replace("abc123", "9999999"))
+        (ws / "west.yml").read_text(encoding="utf-8").replace("abc123", "9999999"), encoding="utf-8")
     drifts = alp_lock.verify_lock(locked, ws)
     assert any(d.path == "west.projects[hal_alif].revision"
                and d.locked == "abc123" and d.actual == "9999999" for d in drifts)
@@ -127,7 +127,7 @@ def test_build_lock_omits_sdk_revision(tmp_path):
     ws = _fixture_ws(tmp_path)
     lock = alp_lock.build_lock(ws)
     assert "revision" not in lock["sdk"]
-    jsonschema.validate(lock, json.loads(SCHEMA.read_text()))
+    jsonschema.validate(lock, json.loads(SCHEMA.read_text(encoding="utf-8")))
     # The whole point: regenerating over an unchanged tree yields the identical
     # document, so nothing churns between commits.
     assert alp_lock.build_lock(ws) == lock
@@ -142,12 +142,12 @@ def test_verify_lock_accepts_a_pre_1615_lock_carrying_sdk_revision(tmp_path):
     locked = alp_lock.build_lock(ws)
     # Simulate the old generator: re-add the field the way it used to be written.
     locked["sdk"]["revision"] = "old_head"
-    jsonschema.validate(locked, json.loads(SCHEMA.read_text()))
+    jsonschema.validate(locked, json.loads(SCHEMA.read_text(encoding="utf-8")))
     assert alp_lock.verify_lock(locked, ws) == []
     # ...and a real input drifting is still reported, with the retired field
     # neither masking it nor appearing alongside it.
     (ws / "west.yml").write_text(
-        (ws / "west.yml").read_text().replace("abc123", "9999999"))
+        (ws / "west.yml").read_text(encoding="utf-8").replace("abc123", "9999999"), encoding="utf-8")
     drifts = alp_lock.verify_lock(locked, ws)
     assert [d.path for d in drifts] == ["west.projects[hal_alif].revision"]
 
@@ -155,27 +155,74 @@ def test_verify_lock_accepts_a_pre_1615_lock_carrying_sdk_revision(tmp_path):
 import subprocess as _sp
 
 def _run_cli(ws, *args):
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env["PYTHONPATH"] = os.pathsep.join([str(REPO / "scripts")])
     return _sp.run([sys.executable, str(REPO / "scripts/west_commands/alp_lock.py"),
                     "--workspace", str(ws), *args],
-                   capture_output=True, text=True, env=env)
+                   capture_output=True, text=True, encoding="utf-8", env=env)
 
-def test_cli_writes_then_check_passes(tmp_path):
+def test_cli_write_writes_a_schema_valid_lock_file(tmp_path):
+    """#1576 review: the name promises schema validity, so assert it.
+
+    Previously this checked only rc==0 and is_file(), which would still
+    pass if the writer emitted a structurally invalid lock -- exactly the
+    regression the plain write path can introduce now that `--check` no
+    longer diffs against a committed copy.
+    """
     ws = _fixture_ws(tmp_path)
     r = _run_cli(ws)
     assert r.returncode == 0, r.stderr
-    assert (ws / "alp.lock").is_file()
-    r2 = _run_cli(ws, "--check")
-    assert r2.returncode == 0, r2.stdout + r2.stderr
+    written = ws / "alp.lock"
+    assert written.is_file()
+    jsonschema.validate(json.loads(written.read_text(encoding="utf-8")), json.loads(SCHEMA.read_text(encoding="utf-8")))
 
-def test_cli_check_fails_on_drift(tmp_path):
+
+def test_cli_check_passes_with_no_lock_file_on_disk(tmp_path):
+    """#1576: `--check` no longer diffs against a committed alp.lock -- it
+    generates one in memory and schema-validates it, so it must pass on a
+    workspace that has never written one."""
     ws = _fixture_ws(tmp_path)
-    assert _run_cli(ws).returncode == 0
-    (ws / "west.yml").write_text((ws / "west.yml").read_text().replace("abc123", "9999999"))
+    assert not (ws / "alp.lock").exists()
+    r = _run_cli(ws, "--check")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not (ws / "alp.lock").exists()  # --check never writes
+
+
+def test_cli_check_fails_on_schema_invalid_lock(tmp_path, monkeypatch):
+    """`--check`'s jsonschema.ValidationError branch has no other coverage:
+    every other --check test exercises either the happy path or the
+    `_reject_local` LockError guard, never a lock that BUILDS successfully
+    but is schema-invalid (e.g. a generator regression that corrupts a
+    digest). Monkeypatch build_lock to return one, in-process (not via the
+    `_run_cli` subprocess -- there is no other way to hand the CLI a
+    malformed-but-buildable lock)."""
+    import importlib
+    import argparse
+    import alp_lock
+    cli = importlib.import_module("west_commands.alp_lock")
+    ws = _fixture_ws(tmp_path)
+    real_build_lock = alp_lock.build_lock  # cli.alp_lock IS this same module object
+
+    def _malformed(root, board=None):
+        lock = real_build_lock(root, board)
+        lock["digests"]["metadata"] = "not-a-sha256-digest"  # violates the schema pattern
+        return lock
+
+    monkeypatch.setattr(cli.alp_lock, "build_lock", _malformed)
+    args = argparse.Namespace(check=True, workspace=str(ws), board=None)
+    assert cli.run(args) == 1
+
+
+def test_cli_check_fails_on_local_path_leak(tmp_path):
+    """The generator's own guard (`_reject_local`) is what `--check` now
+    relies on to catch a broken/misconfigured input -- prove it still fires
+    through the CLI path, not just the library call."""
+    ws = _fixture_ws(tmp_path)
+    (ws / "metadata" / "libraries" / "aws-iot.yaml").write_text(
+        "schema_version: 1\nname: aws-iot\nversion: v3.1.5\nlicense: /etc/secret\n", encoding="utf-8")
     r = _run_cli(ws, "--check")
     assert r.returncode == 1
-    assert "west.projects[hal_alif].revision" in (r.stdout + r.stderr)
+    assert "refusing to lock a local" in (r.stdout + r.stderr)
 
 
 def test_dir_digest_orders_by_posix_parts(tmp_path):

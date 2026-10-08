@@ -13,7 +13,7 @@
 
 #define ALP_HW_BUILD_SOM_SKU         "E1M-V2N101"
 #define ALP_HW_BUILD_SOM_FAMILY      "v2n"
-#define ALP_HW_BUILD_SOM_HW_REV      "r1"
+#define ALP_HW_BUILD_SOM_HW_REV      "2625-r2"
 #define ALP_HW_BUILD_BOARD_NAME      "E1M-X-EVK"
 #define ALP_HW_BUILD_BOARD_HW_REV    "r1"
 #define ALP_HW_BUILD_OS              "zephyr"

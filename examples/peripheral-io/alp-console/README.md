@@ -24,6 +24,8 @@ binds the companion chip and spawns the RGB thread.
 | **Wi-Fi connect** | `alp companion wifi connect <ssid> [pass] [wpa3]` | CC3501E STA join |
 | **BLE enable** | `alp companion ble enable` | CC3501E NWP controller + NimBLE host |
 | **BLE scan** | `alp companion ble scan` | NimBLE `ble_gap_disc` |
+| **Soft-AP** | `alp companion wifi ap <ssid> [pass]` | CC3501E AP role + its DHCP server |
+| **Serve HTTP** | `alp companion sock serve <port> [seconds]` | CC3501E listening socket (wire protocol v9) |
 | RGB status LED | (automatic background thread) | Alif UTIMER PWM (`pwm-leds`) |
 
 ### Wi-Fi
@@ -67,8 +69,53 @@ uart:~$ alp companion ble scan
 
 > **Order matters on older bench firmware:** if a stale CC3501E image returns
 > `-4` after back-to-back heavy radio ops, cold-boot the companion and update the
-> bridge firmware. Current AEN hardware uses SS0 framing and READY gating, so the
-> host link should remain framed across Wi-Fi/BLE radio work.
+> bridge firmware. Current AEN hardware uses SS0 (hardware chip-select) framing,
+> so the host link should remain framed across Wi-Fi/BLE radio work regardless
+> of READY -- this app leaves `fw->ready_pin` NULL (see `src/cc3501e_bridge.c`),
+> so it relies on the fixed settle alone, not READY gating.
+
+### Serving over the soft-AP
+
+`sock serve` is the counterpart to `sock tcp-get`: instead of connecting out, it
+binds a listening socket and answers inbound HTTP — an embedded web console on a
+product with no Ethernet PHY. Start the AP first; `serve` prints the AP-side
+address a client should aim at.
+
+```
+uart:~$ alp companion wifi ap alp-serve alpserve123
+ap "alp-serve" up (wpa2)
+uart:~$ alp companion sock serve 80 60
+ap ip: 10.0.0.3
+listen handle 1 (epoch 0)
+listening on :80 for 60 s (the shell is blocked until then)
+[event] opcode 0x2c (len 12)
+accepted handle 2 (epoch 0)
+  request: GET /s1 HTTP/1.1
+  replied 154 bytes
+```
+
+The `opcode 0x2c` line is the inbound connection arriving as an async
+`EVT_SOCK_ACCEPTED` event — there is no accept opcode on the wire, because
+`accept()` blocks and this bridge is strict request/reply lockstep. The shell is
+blocked for the whole window (Zephyr's shell has no cancellation hook, so ctrl-c
+does not cut it short).
+
+> **Known limitation, not caused by the listening path:** socket operations in
+> AP mode are unreliable on current bridge firmware when they race radio
+> activity. Two shapes measured on an E1M-AEN801:
+>
+> - Back-to-back **client** ops: the first `sock tcp-get` succeeds and the next
+>   fails (`-1` / `-4`); a third can leave the link needing a cold boot.
+>   Reproduced identically on the pre-v9 firmware with **no listening socket in
+>   play**, so it is not from the serving path.
+> - `bind`/`listen` issued **while a client is still associating** timed out
+>   (`listen failed (-4)`) and wedged the link. Running the same command after
+>   the client had a lease worked 5/5.
+>
+> Both are tracked as cc3501e-bridge-firmware#106. Practical advice until it is
+> fixed: bring the AP up, let clients associate, *then* start serving — and do
+> not mix serving with `tcp-get` in one session. A wedged link needs a 20 s
+> power-off; a shorter cycle does not clear it.
 
 ### RGB status LED
 
@@ -87,7 +134,24 @@ nodes (native_sim, V2N) it compiles out and nothing is spawned.
 ## Build & flash (E1M-AEN801)
 
 ```sh
+# writes examples/peripheral-io/alp-console/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/alp-console
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+           -d build_console examples/peripheral-io/alp-console -- -DEXTRA_CONF_FILE=generated/alp.conf
+```
+
+This app also ships an E1M-AEN803 twin of the AEN801 overlay + `.conf` pair
+above
+(`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`,
+`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf`):
+`boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay` and
+`boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.conf` (identical
+DT/Kconfig content) -- it is the AEN bench farm's default target
+(`scripts/bench/aen/bench-env.sh`'s `AEN_BOARD`). After setting
+`som.sku: E1M-AEN803` in `board.yaml`:
+
+```sh
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
            -d build_console examples/peripheral-io/alp-console
 ```
 

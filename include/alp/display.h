@@ -72,6 +72,17 @@ typedef struct {
 	 * So @ref alp_display_open returns @c ALP_ERR_INVAL unless the caller
 	 * sets this explicitly.  Taking over a display is a deliberate act,
 	 * not something a default-constructed config should do.
+	 *
+	 * **Honoured by the Yocto/Linux backend only; ignored elsewhere.**
+	 * The hazard above is specific to KMS: a Zephyr backend drives a
+	 * dedicated panel it already owns, with no DRM master to take from
+	 * and no VT-switched session to displace, so there is nothing for
+	 * the flag to protect.  A default-constructed config therefore opens
+	 * normally on Zephyr and is refused on Linux -- deliberate, and
+	 * stated here because the paragraph above otherwise reads as an
+	 * unconditional promise the MCU backends do not keep (issue #1648
+	 * tier 2).  `alp_storage_config_t.allow_unsafe_write` documents its
+	 * own Yocto-only scope the same way.
 	 */
 	bool allow_modeset;
 } alp_display_config_t;
@@ -94,10 +105,31 @@ typedef struct {
 #define ALP_DISPLAY_CONFIG_DEFAULT(id) \
 	((alp_display_config_t){ .display_id = (id), .allow_modeset = false })
 
+/**
+ * @brief A display's static capabilities.  Layout is [ABI-EXPERIMENTAL]
+ *        (@ref alp_display_caps_t::rotation was added after the first
+ *        snapshot).
+ */
 typedef struct {
 	uint16_t     width;
 	uint16_t     height;
 	alp_pixfmt_t format;
+	/**
+	 * Clockwise degrees (0, 90, 180 or 270) the application must rotate an
+	 * upright image by before writing it to the scan-out buffer, because
+	 * the panel is mounted turned from the way its controller scans it
+	 * (devicetree @c mount-rotation on the display controller).  0 for a
+	 * panel mounted the way it scans.  @ref width / @ref height are the
+	 * controller's own, unrotated geometry.
+	 *
+	 * This is the producer's pre-rotation, NOT a Zephyr current_orientation:
+	 * the controller scans as it always did, and a UI stack that rotated its
+	 * touch input from this value as well would rotate twice.  A backend
+	 * without the concept (Linux/KMS) reports 0; the stub backend reports
+	 * nothing at all (its @ref alp_display_get_caps returns
+	 * ALP_ERR_NOT_IMPLEMENTED like every one of its operations).
+	 */
+	uint16_t rotation;
 } alp_display_caps_t;
 
 /**

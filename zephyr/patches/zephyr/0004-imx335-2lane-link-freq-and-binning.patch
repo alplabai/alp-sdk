@@ -1,0 +1,261 @@
+diff --git a/drivers/video/imx335.c b/drivers/video/imx335.c
+index cead6b7..1ffdc5f 100644
+--- a/drivers/video/imx335.c
++++ b/drivers/video/imx335.c
+@@ -29,6 +29,28 @@ LOG_MODULE_REGISTER(video_imx335, CONFIG_VIDEO_LOG_LEVEL);
+ 
+ #define IMX335_PIXEL_RATE	396000000
+ 
++/*
++ * Alp Lab AB (issue #2327): upstream registers VIDEO_CID_PIXEL_RATE only, and
++ * no VIDEO_CID_LINK_FREQ. video_get_csi_link_freq() (video_common.c) falls
++ * back to approximating the CSI-2 D-PHY link frequency from PIXEL_RATE
++ * whenever a sensor reports no VIDEO_CID_LINK_FREQ control -- for this
++ * sensor's 396 MHz PIXEL_RATE (a v4l2 pixel-array-clock convention value,
++ * unrelated to the per-lane D-PHY bit rate -- see <video-controls.h>'s own
++ * VIDEO_CID_PIXEL_RATE doc comment) that approximation lands the DW CSI-2
++ * host on 990 MHz (1980 Mbps/lane), not the sensor's real 594 MHz link clock
++ * (24 MHz INCK + imx335_mode_2l_10b's 2-lane 10-bit mode: 1188 Mbps/lane,
++ * link_freq = per-lane bit rate / 2 = 594 MHz) -- the same
++ * ERRSOTSYNCHS/PHY_FATAL storm signature OV5647 hit before its own fix
++ * (issue #2248). Register LINK_FREQ directly so video_get_csi_link_freq()
++ * never needs the PIXEL_RATE fallback for this sensor; PIXEL_RATE itself is
++ * untouched (out of scope -- LINK_FREQ alone is what the DW CSI-2 host
++ * reads). Bench-confirmed at 1188 Mbps/lane (E1M-AEN803 2026W36-0001,
++ * runs 319-330: 0 CSI CRC errors, 6/6 clean 1296x972 captures through the
++ * E1M SoM R2 pinout adapter, run 330) -- see imx335_mipi_timing_1188mbps
++ * below, which this link frequency must stay paired with.
++ */
++#define IMX335_LINK_FREQ_HZ	594000000
++
+ enum imx335_res {
+ 	IMX335_RES_2592x1944,
+ 	IMX335_RES_1296x972,
+@@ -53,6 +75,7 @@ struct imx335_ctrls {
+ 	struct video_ctrl gain;
+ 	struct video_ctrl exposure;
+ 	struct video_ctrl pixel_rate;
++	struct video_ctrl link_freq; /* Alp Lab AB (issue #2327) */
+ };
+ 
+ struct imx335_data {
+@@ -102,6 +125,43 @@ struct imx335_data {
+ #define IMX335_TCYCLE			IMX335_REG8(0x3300)
+ #define IMX335_ADBIT1			IMX335_REG16(0x341c)
+ #define IMX335_LANEMODE			IMX335_REG8(0x3a01)
++
++/*
++ * Alp Lab AB (issue #2327, bench runs 316-330, E1M-AEN803 2026W36-0001): the
++ * upstream driver never writes SYSMODE (0x319e) or the 0x3a18-0x3a28 MIPI
++ * output-timing block for ANY lane/rate combination -- both are left at
++ * their power-on-reset value (0x00 / all-zero). At this driver's 2-lane
++ * 10-bit configuration (1188 Mbps/lane, IMX335_LINK_FREQ_HZ above), that
++ * produces a payload-checksum/CRC error storm on the CSI-2 receiver (bench
++ * run 318). Writing the values the mainline Linux imx335 driver
++ * (raspberrypi/linux, branch rpi-6.12.y) programs for this exact lane count
++ * and bit rate (SYSMODE=1, the nine REG16 values below -- register values
++ * carried as hardware facts, no GPL code copied) eliminates it: 0 CSI CRC
++ * errors bench-confirmed at 1188 Mbps/lane (runs 319-330), including 6/6
++ * consecutive clean 1296x972 captures through the E1M SoM R2 pinout adapter
++ * (run 330) -- this VERIFIES 2-lane D-PHY lock at 1188 Mbps/lane on this
++ * unit/carrier. An 891 Mbps/lane alternative timing set also gave 0 CSI CRC
++ * errors on the link (run 320, a different IMX335_INCKSEL/INCK selection --
++ * that run still had the pre-binning-fix buffer overrun, so no clean frame
++ * resulted at 891 Mbps, only a clean link) but is not carried in the
++ * product -- this driver is hardcoded to imx335_mode_2l_10b's 2-lane/10-bit
++ * mode, which this repo's shield feeds at 24 MHz INCK -> the 1188 Mbps/lane
++ * path only; keep a single lane-rate's timing table rather than two unused
++ * branches.
++ */
++#define IMX335_SYSMODE			IMX335_REG8(0x319e)
++static const struct video_reg imx335_mipi_timing_1188mbps[] = {
++	{IMX335_SYSMODE, 0x01},
++	{IMX335_REG16(0x3a18), 0x008f},
++	{IMX335_REG16(0x3a1a), 0x004f},
++	{IMX335_REG16(0x3a1c), 0x0047},
++	{IMX335_REG16(0x3a1e), 0x0137},
++	{IMX335_REG16(0x3a20), 0x004f},
++	{IMX335_REG16(0x3a22), 0x0087},
++	{IMX335_REG16(0x3a24), 0x004f},
++	{IMX335_REG16(0x3a26), 0x007f},
++	{IMX335_REG16(0x3a28), 0x003f},
++};
+ static const struct video_reg imx335_init_params[] = {
+ 	{IMX335_STANDBY, 0x01},
+ 	{IMX335_XMSTA, 0x00},
+@@ -184,9 +244,30 @@ static const struct video_reg16 imx335_fixed_regs[] = {
+ 	{0x3a00, 0x01},
+ };
+ 
++/*
++ * Alp Lab AB (issue #2327, bench runs 316-330): upstream's imx335_bin_2x2
++ * leaves HNUM at imx335_init_params' full-resolution value (0x0a20 = 2592)
++ * and sets Y_OUT_SIZE to 0x03d8 (984) -- the sensor then transmits a
++ * 1308x984 frame into this driver's own 1296x972 buffer (IMX335_BIN_2X2_WIDTH/
++ * HEIGHT above), a 12-pixel-per-row overrun that corrupts whatever memory
++ * follows the buffer. Bench-derived model (run 322, HNUM swept until the
++ * transmitted width matched exactly): binned width = HNUM/2 + 12, so HNUM
++ * must be 0x0a08 (2568) for a 1296-pixel row, not the untouched 0x0a20. This
++ * driver has no comparable "HNUM = 2 * width - 24" formula anywhere else to
++ * derive this from -- it is carried as the bench-confirmed value for this
++ * ONE resolution, not a general formula. Y_OUT_SIZE corrected to the exact
++ * 972 lines (0x03cc, bench run 321) instead of upstream's 984 (0x03d8, a
++ * 12-line overrun matching the same pattern as the width). OPB_SIZE_V
++ * (0x304c) cleared to 0, the mainline Linux imx335 driver's own binned-mode
++ * value (raspberrypi/linux, branch rpi-6.12.y -- register value carried as
++ * a hardware fact, no GPL code copied) -- upstream Zephyr never touches it
++ * (POR default, unconfirmed non-zero).
++ */
+ static const struct video_reg imx335_bin_2x2[] = {
+ 	{IMX335_WINMODE, 0x01},
+-	{IMX335_Y_OUT_SIZE, 0x03D8},
++	{IMX335_HNUM, 0x0A08},
++	{IMX335_Y_OUT_SIZE, 0x03CC},
++	{IMX335_OPB_SIZE_V, 0x00},
+ 	{IMX335_AREA2_WIDTH_1, 0x0030},
+ 	{IMX335_AREA3_ST_ADR_1, 0x00A8},
+ 	{IMX335_AREA3_WIDTH_1, 0x0F60},
+@@ -225,10 +306,59 @@ static const struct video_reg imx335_bin_2x2[] = {
+ 
+ /* Note that this only contains registers that need to be reset when switching away from
+  * 2x2 binning mode
++ *
++ * Alp Lab AB (issue #2327): restores HNUM to imx335_init_params' full-resolution
++ * value (0x0a20 = 2592) now that imx335_bin_2x2 above changes it away from that
++ * default -- upstream never needed this entry because upstream's bin_2x2 never
++ * touched HNUM either.
++ *
++ * Alp Lab AB (issue #2334): Y_OUT_SIZE corrected from upstream's 0x07ac (1964)
++ * to 0x0798 (1944), matching IMX335_NATIVE_HEIGHT (imx335_fmts' own caps
++ * entry) -- a Y_OUT_SIZE/format-height MISMATCH (0x07ac feeds more lines
++ * than the 1944-line format advertises), the same class of defect as the
++ * binned-mode bug fixed above, for any caller of the full-resolution mode.
++ * Two independent references agree on 1944 for this exact register at full
++ * resolution: this driver's own imx335_init_params (Y_OUT_SIZE 0x0798, a
++ * power-on default this table never previously matched despite both
++ * targeting the same native size) and the mainline Linux imx335 driver's
++ * full-resolution mode table (raspberrypi/linux, branch rpi-6.12.y -- register
++ * value carried as a hardware fact, no GPL code copied). HNUM is left
++ * untouched at 0x0a20 (2592, restored above): unlike bin_2x2 -- which set an
++ * explicit HNUM value that this driver had no formula to derive and got
++ * bench-wrong by 24 columns (issue #2327's HNUM/2+12 model) -- this table's
++ * HNUM was already the exact value imx335_init_params and the Linux
++ * full-resolution table both use for the native width, so there is no
++ * corresponding width defect to fix here. WINMODE (0x00, "all-pixel" scan)
++ * also stays as upstream Zephyr wrote it, rather than adopting the Linux
++ * driver's WINMODE 0x04 ("window-crop") full-resolution path: the two
++ * drivers select the full sensor array through different window-mode
++ * encodings, but this driver's AREA2_WIDTH_1/AREA3_WIDTH_1 pair below (40 /
++ * 3928) already matches the Linux full-resolution table's values for the
++ * same geometry, so there is no register drift to reconcile by switching
++ * window-mode encodings.
++ *
++ * Bench runs 335-337 (E1M-AEN803 2026W36-0001): run 335 read WINMODE/
++ * HTRIMMING_START/HNUM/Y_OUT_SIZE back over I2C in all-pixel mode and
++ * confirmed this patch's writes landed as intended. Run 337 (the CPI's own
++ * CAM_VIDEO_FCFG ROW field bounding the capture to a few lines in hardware,
++ * so a full ~10 MB frame was never written) confirmed the WIDTH is exactly
++ * 2592 samples/line at full resolution, matching HNUM. The disputed LINE
++ * COUNT (1944 vs. upstream's 1964) was NOT measured: run 335 found the
++ * CPI's HSYNC/VSYNC "Detected" interrupts require the write-DMA armed, so
++ * counting them without writing frame data is not possible on this
++ * hardware, and a full-size frame does not fit the 4 MiB SRAM0 capture
++ * buffer. This does not undermine the fix -- CAM_VIDEO_FCFG's ROW field
++ * bounds the CPI's write to a fixed row count in hardware regardless of the
++ * sensor's own Y_OUT_SIZE (run 336), so this fix is a correction against
++ * the driver's own init table and the mainline Linux driver's
++ * full-resolution table, not a bench measurement of the disputed line
++ * count. See docs/camera-shields.md and changelog.d/2334.md for the full
++ * writeup.
+  */
+ static const struct video_reg imx335_bin_none[] = {
+ 	{IMX335_WINMODE, 0x00},
+-	{IMX335_Y_OUT_SIZE, 0x07AC},
++	{IMX335_HNUM, 0x0A20},
++	{IMX335_Y_OUT_SIZE, 0x0798},
+ 	{IMX335_AREA2_WIDTH_1, 0x0028},
+ 	{IMX335_AREA3_ST_ADR_1, 0x00B0},
+ 	{IMX335_AREA3_WIDTH_1, 0x0F58},
+@@ -341,6 +471,11 @@ static const struct video_format_cap imx335_fmts[] = {
+ 	{0}
+ };
+ 
++/* Alp Lab AB (issue #2327): single fixed link frequency, see IMX335_LINK_FREQ_HZ above. */
++static const int64_t imx335_link_frequencies[] = {
++	IMX335_LINK_FREQ_HZ,
++};
++
+ static const uint32_t imx335_framerates[] = {
+ 	[IMX335_25_FPS] = 25,
+ 	[IMX335_30_FPS] = 30,
+@@ -667,13 +802,31 @@ static int imx335_init_controls(const struct device *dev)
+ 		return ret;
+ 	}
+ 
+-	return video_init_ctrl(
++	ret = video_init_ctrl(
+ 		&ctrls->pixel_rate, dev, VIDEO_CID_PIXEL_RATE,
+ 		(struct video_ctrl_range){
+ 			.min64 = IMX335_PIXEL_RATE,
+ 			.max64 = IMX335_PIXEL_RATE,
+ 			.step64 = 1,
+ 			.def64 = IMX335_PIXEL_RATE});
++	if (ret < 0) {
++		return ret;
++	}
++
++	/*
++	 * Alp Lab AB (issue #2327): READ_ONLY int-menu, same shape as
++	 * sony,imx296.c's own link_freq control -- lets video_get_csi_link_freq()
++	 * (video_common.c) read the real D-PHY clock straight from this control
++	 * instead of falling back to approximating it from PIXEL_RATE.
++	 */
++	ret = video_init_int_menu_ctrl(&ctrls->link_freq, dev, VIDEO_CID_LINK_FREQ, 0,
++					imx335_link_frequencies, ARRAY_SIZE(imx335_link_frequencies));
++	if (ret < 0) {
++		return ret;
++	}
++	ctrls->link_freq.flags |= VIDEO_CTRL_FLAG_READ_ONLY;
++
++	return 0;
+ }
+ 
+ static int imx335_init(const struct device *dev)
+@@ -745,6 +898,37 @@ static int imx335_init(const struct device *dev)
+ 		return ret;
+ 	}
+ 
++	/*
++	 * Alp Lab AB (issue #2327): SYSMODE + MIPI output timing for this
++	 * driver's 2-lane/10-bit/1188 Mbps-per-lane mode -- see
++	 * imx335_mipi_timing_1188mbps's own comment above. Written after the
++	 * INCK table, in STANDBY, matching the mainline Linux imx335 driver's
++	 * own write order.
++	 */
++	ret = video_write_cci_multiregs(&cfg->i2c, imx335_mipi_timing_1188mbps,
++					ARRAY_SIZE(imx335_mipi_timing_1188mbps));
++	if (ret < 0) {
++		LOG_ERR("Unable to configure MIPI output timing");
++		return ret;
++	}
++
++	/*
++	 * Alp Lab AB (issue #2353): after a power-up the data lanes are not in
++	 * LP-11 until the sensor has streamed once, so the CSI-2 host's D-PHY
++	 * Stop-state check fails on the first boot after a power cycle. Stream
++	 * briefly and return to STANDBY so the lanes park in LP-11 before any
++	 * host configures its D-PHY.
++	 */
++	ret = video_write_cci_reg(&cfg->i2c, IMX335_STANDBY, IMX335_STANDBY_OPERATING);
++	if (ret < 0) {
++		return ret;
++	}
++	k_sleep(K_MSEC(20));
++	ret = video_write_cci_reg(&cfg->i2c, IMX335_STANDBY, IMX335_STANDBY_STANDBY);
++	if (ret < 0) {
++		return ret;
++	}
++
+ 	return imx335_init_controls(dev);
+ }
+ 

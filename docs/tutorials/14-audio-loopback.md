@@ -93,12 +93,19 @@ Q8 fraction of `0x100` = full-scale.  `0x9A` ≈ 154/256 ≈ 60 %.
 Real apps would also drive the codec's analog gain pin via
 `alp_gpio_*` for the full dynamic range.
 
+Software scaling only works on `ALP_AUDIO_FMT_S16_LE`.  A non-unity
+volume (anything but 255) on a handle opened `S24_LE` / `S32_LE`
+returns `ALP_ERR_NOSUPPORT` instead of silently playing at full
+scale -- open the handle `S16_LE` if you need `alp_audio_out_set_volume`.
+
 ## 4. Build + run
 
 ### native_sim
 
 ```bash
-west build -b native_sim/native/64 examples/audio/audio-loopback
+# writes examples/audio/audio-loopback/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/audio/audio-loopback
+west build -b native_sim/native/64 examples/audio/audio-loopback -- -DEXTRA_CONF_FILE=generated/alp.conf
 west build -t run
 ```
 

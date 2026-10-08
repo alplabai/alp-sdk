@@ -35,7 +35,8 @@ from . import sdk_compat
 from .models import (BoardProject, IpcEntry, OrchestratorError,
                      SdkRevisionNotBuildable, SdkRevisionUnknown,
                      SdkRevisionUnsupported, Slice, StorageEntry)
-from .partition import _known_flash_devices
+from .ownership import load_ownership_doc, resolve_ownership
+from .partition import _is_ospi_key_unassembled, _known_flash_devices
 from .paths import BOARD_SCHEMA, METADATA_ROOT, REPO
 from .topology import _default_os_from_core_type
 from .validate import (
@@ -60,7 +61,24 @@ def _silicon_to_soc_path(silicon: str, metadata_root: Path) -> Path:
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
-    if not path.is_file():
+    try:
+        path_is_file = path.is_file()
+    except (OSError, RuntimeError) as e:
+        # Same defect class as validate.py's `profile:` guard (#1961):
+        # a bad `--input` board.yaml path must not crash the loader
+        # with an unhandled exception.  `Path.is_file()`'s own
+        # `_ignore_error` list swallows ENOENT/ENOTDIR/EBADF/ELOOP on
+        # POSIX -- a symlink loop returns `False` there, no raise --
+        # but re-raises `PermissionError` on EACCES (an `OSError`
+        # subclass) rather than swallowing it, same as the `profile:`
+        # gap.  On Windows, a real WSL-made symlink loop driven through
+        # the real CLI with CPython 3.11.3 shows `.is_file()` raise a
+        # plain `OSError` (`WinError 1920`, "The file cannot be
+        # accessed by the system") instead -- confirmed, not a mock.
+        # `RuntimeError` is caught too for parity with `.resolve()`'s
+        # own ELOOP shape elsewhere in this module.
+        raise OrchestratorError(f"could not access {path}: {e}") from e
+    if not path_is_file:
         raise OrchestratorError(f"file not found: {path}")
     try:
         data = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
@@ -1041,6 +1059,23 @@ def _resolve_storage(
         for entry in storage_entries:
             if entry.flash_device is None:
                 continue   # resolver will block it with a clear reason
+            if _is_ospi_key_unassembled(som_preset, entry.flash_device):
+                # Same #2311 guard as the PSA ITS/PS backing-store check
+                # below: an `ospi_memories` key with `assembled: false`
+                # (e.g. E1M-AEN801's `ospi0`/`ospi1`) is a designed-in
+                # footprint, not a part this SKU actually carries -- refuse
+                # it as a `storage[].flash_device` with the specific reason
+                # rather than the generic "does not resolve" message.
+                where = f"SoM {sku}" if sku else "this SoM"
+                yaml_ref = (f"metadata/e1m_modules/{sku}.yaml" if sku
+                            else "its SoM preset YAML")
+                raise OrchestratorError(
+                    f"board.yaml `storage[{entry.name}].flash_device: "
+                    f"{entry.flash_device}` names on-module OSPI part "
+                    f"'{entry.flash_device}', which is not assembled on "
+                    f"{where} (assembled: false in {yaml_ref}); pick a "
+                    f"flash device backed by a part this SKU actually "
+                    f"carries")
             if entry.flash_device not in known_devices:
                 raise OrchestratorError(
                     f"board.yaml `storage[{entry.name}].flash_device: "
@@ -1102,7 +1137,27 @@ def _validate_cross_fields(
             ref = psa.get(field)
             if ref is None:
                 return
-            if str(ref) in valid_refs:
+            ref_str = str(ref)
+            if ref_str in ospi_keys and _is_ospi_key_unassembled(
+                    som_preset, ref_str):
+                # Same #2311 guard as `_known_flash_devices()` /
+                # `_resolve_flash_device()` in partition.py: an
+                # `ospi_memories` key with `assembled: false` (e.g.
+                # E1M-AEN801's `ospi0`/`ospi1`) is a designed-in footprint,
+                # not a part this SKU actually carries -- refuse it as a
+                # PSA ITS/PS backing store with the specific reason rather
+                # than the generic "does not resolve" message below.
+                sku = som_preset.get("sku")
+                where = f"SoM {sku}" if sku else "this SoM"
+                yaml_ref = (f"metadata/e1m_modules/{sku}.yaml" if sku
+                            else "its SoM preset YAML")
+                raise OrchestratorError(
+                    f"board.yaml `security.psa.{field}: {ref}` names "
+                    f"on-module OSPI part '{ref_str}', which is not "
+                    f"assembled on {where} (assembled: false in "
+                    f"{yaml_ref}); pick a storage partition or memory "
+                    f"region backed by a part this SKU actually carries")
+            if ref_str in valid_refs:
                 return
             raise OrchestratorError(
                 f"board.yaml `security.psa.{field}: {ref}` does not "
@@ -1120,6 +1175,24 @@ def _validate_cross_fields(
 
         att_root = psa.get("attestation_root")
         if att_root == "optiga_trust_m":
+            if _is_i2c_chip_unassembled(som_preset, "optiga_trust_m"):
+                # #2316, same class as #2311's OSPI guard: E1M-AEN801/803
+                # carry `capabilities.optiga_trust_m: true` and name the
+                # part under `on_module:`, but the part itself is DNP
+                # (`assembled: false` on its i2c_devices entry).  The
+                # population fact wins -- an attestation root on a part
+                # this SKU does not carry would build and then fail on
+                # silicon.
+                where = f"SoM {sku}" if sku else "this SoM"
+                yaml_ref = (f"metadata/e1m_modules/{sku}.yaml" if sku
+                            else "its SoM preset YAML")
+                raise OrchestratorError(
+                    f"board.yaml `security.psa.attestation_root: "
+                    f"optiga_trust_m` names on-module part "
+                    f"'optiga_trust_m', which is not assembled on "
+                    f"{where} (assembled: false in {yaml_ref}); pick "
+                    f"`tfm_internal` or `none`, or switch to a SKU that "
+                    f"carries OPTIGA Trust M")
             on_module = som_preset.get("on_module") or {}
             chip_set: set[str] = set()
             for key, val in on_module.items():
@@ -1143,6 +1216,22 @@ def _validate_cross_fields(
                     f"(AEN family).")
 
     return security_block
+
+
+def _is_i2c_chip_unassembled(som_preset: dict, chip: str) -> bool:
+    """True when the preset declares @p chip under `on_module.i2c_devices`
+    and every such entry is `assembled: false` (#2316).
+
+    A chip the preset never lists there is not "unassembled" -- the other
+    presence checks (on_module:/capabilities:) decide that case -- so this
+    only refuses what the preset explicitly marks DNP.
+    """
+    buses = ((som_preset.get("on_module") or {}).get("i2c_devices")) or {}
+    entries = [dev for bus in buses.values() if isinstance(bus, dict)
+               for dev in (bus.get("devices") or [])
+               if isinstance(dev, dict) and dev.get("chip") == chip]
+    return bool(entries) and all(dev.get("assembled") is False
+                                 for dev in entries)
 
 
 def _library_alias_table(metadata_root: Path) -> dict[str, str]:
@@ -1211,7 +1300,8 @@ def _normalize_libraries(project: dict[str, Any],
 
 
 def load_board_yaml(path: Path, *,
-                    metadata_root: Path = METADATA_ROOT) -> BoardProject:
+                    metadata_root: Path = METADATA_ROOT,
+                    sku: Optional[str] = None) -> BoardProject:
     """Load + validate a board.yaml.
 
     Raises OrchestratorError on any schema / preset / topology error.
@@ -1226,6 +1316,14 @@ def load_board_yaml(path: Path, *,
     unchanged.
     """
     project = _load_and_validate_yaml(path, metadata_root)
+    if sku:
+        # Per-target SKU (#2597): the SoM facts follow the board being
+        # built, not the single static `som.sku` an example declares.  Safe
+        # after schema validation: the override only changes the SKU string,
+        # and every SKU-derived value (_resolve_board's preset + SoC variant
+        # lookup, hw_rev checks, topology, storage) is computed below from
+        # it.  Callers pass a SKU taken from metadata/e1m_modules/.
+        project["som"]["sku"] = sku
 
     # Fold the unified top-level `libraries:` list into the per-core /
     # project-wide channels the downstream resolution expects, so topology +
@@ -1268,6 +1366,14 @@ def load_board_yaml(path: Path, *,
     security_block = _validate_cross_fields(
         project, som_preset, sku, storage_entries, metadata_root)
 
+    ownership = resolve_ownership(
+        load_ownership_doc(metadata_root, _sku_family_dir(sku)),
+        project.get("ownership"),
+        declared_core_types=(
+            {str(c.get("type") or "") for c in (soc_spec.get("cores") or [])
+             if c.get("id") in project["cores"]}
+            if project.get("cores") else None))
+
     out = BoardProject(
         sku=sku,
         hw_rev=hw_rev or som_preset.get("default_hw_rev"),
@@ -1286,6 +1392,7 @@ def load_board_yaml(path: Path, *,
         ota=dict(project.get("ota") or {}),
         storage=storage_entries,
         security=security_block,
+        ownership=ownership,
         raw=project,
         metadata_root=metadata_root,
     )
@@ -1294,5 +1401,15 @@ def load_board_yaml(path: Path, *,
     # inspect the fully-assembled project + every per-core
     # extra_libraries: entry the schema couldn't validate cleanly.
     _validate_consistency(out)
+
+    # `diagnostics.link: itcm` (tan-cli#1350) is implemented by tan's planner
+    # only (ADR-0026).  This planner would otherwise accept the schema-valid
+    # knob and silently emit an MRAM-linked image: refuse instead.
+    if str(out.diagnostics.get("link") or "auto").strip().lower() != "auto":
+        raise OrchestratorError(
+            "diagnostics.link: itcm is implemented by `tan build` only "
+            "(ADR-0026: tan owns the planner); alp_orchestrate would emit an "
+            "MRAM-linked image and silently ignore it.  Build with `tan build`, "
+            "or remove `diagnostics.link`.")
 
     return out

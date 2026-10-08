@@ -1,0 +1,147 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Nightly + on-demand build smoke for the `extras-cloud` Zephyr glue
+# (CONFIG_ALP_AWS_IOT / CONFIG_ALP_AZURE_IOT, tests/zephyr/cloud_sdks).
+#
+# pr-twister never fetches the `extras-cloud` west group, so the test's
+# CONFIG_CLOUD_SDKS_PRESENT filter skips it there.  This lane clones the two
+# pinned revisions (read from west.yml -- the single source of truth, nothing
+# is hardcoded here) and points ALP_AWS_IOT_SDK_DIR / ALP_AZURE_IOT_SDK_DIR at
+# them, then runs the test on native_sim/native/64.
+#
+# Deliberately schedule + workflow_dispatch only: NOT a PR trigger and NOT a
+# required context, so a dead upstream remote never blocks a merge.
+
+name: nightly-cloud-sdks
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cloud-sdks-twister:
+    name: cloud-sdks · native_sim/native/64
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ZEPHYR_TOOLCHAIN_VARIANT: host
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          path: alp-sdk
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
+        with:
+          python-version-file: alp-sdk/.python-version
+
+      - name: Install host build tools (dtc, ninja, gperf, libffi)
+        timeout-minutes: 20
+        run: |
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh update
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh install -y --no-install-recommends \
+              ninja-build gperf dfu-util device-tree-compiler \
+              python3-dev python3-pip python3-setuptools python3-wheel \
+              libffi-dev libssl-dev xz-utils file make gcc gcc-multilib \
+              g++-multilib libsdl2-dev libmagic1
+
+      - name: Install west
+        timeout-minutes: 20
+        run: pip3 install west pyyaml jsonschema
+
+      - name: west init zephyr workspace
+        timeout-minutes: 25
+        run: |
+          set -e
+          # Transport timeout for git-over-https; see pr-twister.yml's
+          # `west init zephyr workspace` step for the rationale (#1549).
+          git config --global http.lowSpeedLimit 1000
+          git config --global http.lowSpeedTime 30
+          mkdir -p zephyrproject
+          cd zephyrproject
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.1 .
+          for attempt in 1 2 3; do
+            west update --narrow -o=--depth=1 && break
+            rc=$?
+            if [ "$attempt" = 3 ]; then
+              echo "::error::west update failed after 3 attempts (exit $rc)"
+              exit "$rc"
+            fi
+            echo "west update failed (exit $rc); retry $attempt/3 in 15s" >&2
+            sleep 15
+          done
+          west zephyr-export
+
+      - name: pip install Zephyr requirements
+        timeout-minutes: 20
+        working-directory: ${{ github.workspace }}/zephyrproject
+        run: pip3 install -r zephyr/scripts/requirements.txt
+
+      - name: Fetch the pinned extras-cloud checkouts (revisions from west.yml)
+        timeout-minutes: 15
+        run: |
+          set -e
+          git config --global http.lowSpeedLimit 1000
+          git config --global http.lowSpeedTime 30
+          python3 - <<'PY' > cloud-pins.txt
+          import yaml
+
+          m = yaml.safe_load(open("alp-sdk/west.yml", encoding="utf-8"))["manifest"]
+          urls = {r["name"]: r["url-base"] for r in m["remotes"]}
+          rows = [
+              p for p in m["projects"] if "extras-cloud" in (p.get("groups") or [])
+          ]
+          assert len(rows) == 2, f"expected 2 extras-cloud projects, got {rows}"
+          for p in rows:
+              print(p["name"], f"{urls[p['remote']]}/{p['repo-path']}", p["revision"])
+          PY
+          cat cloud-pins.txt
+          mkdir -p cloud-sdks
+          while read -r name url rev; do
+            for attempt in 1 2 3; do
+              rm -rf "cloud-sdks/$name"
+              git clone --depth 1 --branch "$rev" --recurse-submodules \
+                --shallow-submodules "$url" "cloud-sdks/$name" && break
+              rc=$?
+              if [ "$attempt" = 3 ]; then
+                echo "::error::clone of $name@$rev failed after 3 attempts (exit $rc)"
+                exit "$rc"
+              fi
+              echo "clone failed (exit $rc); retry $attempt/3 in 15s" >&2
+              sleep 15
+            done
+          done < cloud-pins.txt
+
+      - name: twister · tests/zephyr/cloud_sdks on native_sim/native/64
+        working-directory: ${{ github.workspace }}/zephyrproject
+        timeout-minutes: 20
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
+          ALP_AWS_IOT_SDK_DIR: ${{ github.workspace }}/cloud-sdks/aws-iot-device-sdk-embedded-C
+          ALP_AZURE_IOT_SDK_DIR: ${{ github.workspace }}/cloud-sdks/azure-sdk-for-c
+        run: |
+          python3 zephyr/scripts/twister \
+            -T "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr/cloud_sdks" \
+            -p native_sim/native/64 \
+            --inline-logs \
+            --no-detailed-test-id
+          # The Kconfig filter skips (exit 0) when a checkout is missing;
+          # fail loudly so a silent skip can never pass this lane.
+          python3 - <<'PY'
+          import json, glob
+          r = json.load(open(glob.glob("twister-out/twister.json")[0]))
+          st = [t["status"] for s in r["testsuites"] for t in s["testcases"]]
+          assert "passed" in st, f"cloud_sdks test did not run: {st}"
+          PY

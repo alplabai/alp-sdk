@@ -38,6 +38,20 @@
  * offline-reproducible harness for the STOP-suppresses-completion bug. */
 extern alp_status_t alp_ble_test_read_cb(uint8_t err, const void *data, uint16_t length);
 
+/* White-box seams (src/backends/ble/zephyr_drv.c, CONFIG_ZTEST-only) for the
+ * GATT read/write context-pool branches issue #1939 found unexecuted: the
+ * alp_lifecycle_cas() loss and the ALP_ERR_BUSY refusal are driven for real
+ * below; the timeout-abandon branches themselves (zephyr_drv.c :1047,
+ * :1109) stay BENCH-OWED -- see that file and docs/test-plan.md for why a
+ * live peer cannot drive them under native_sim. */
+extern alp_status_t alp_ble_test_write_cb(uint8_t err);
+extern alp_status_t alp_ble_test_read_cb_loses_cas_after_abandon(void);
+extern alp_status_t alp_ble_test_write_cb_loses_cas_after_abandon(void);
+extern bool         alp_ble_test_read_ctx_pool_exhausts(size_t *claimed_out);
+extern bool         alp_ble_test_write_ctx_pool_exhausts(size_t *claimed_out);
+extern alp_status_t alp_ble_test_gatt_read_busy(void);
+extern alp_status_t alp_ble_test_gatt_write_busy(void);
+
 ZTEST_SUITE(alp_ble_gatt_server, NULL, NULL, NULL, NULL, NULL);
 
 static uint8_t find_attr_cb(const struct bt_gatt_attr *attr, uint16_t handle, void *user_data)
@@ -255,4 +269,99 @@ ZTEST(alp_ble_gatt_server, test_client_read_cb_att_error_maps_to_io)
 	zassert_equal(alp_ble_test_read_cb(BT_ATT_ERR_INVALID_HANDLE, NULL, 0),
 	              ALP_ERR_IO,
 	              "a peer-rejected read must surface as ALP_ERR_IO, not ALP_ERR_TIMEOUT");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_write_cb_success_signals_done)
+{
+	/* Write-ctx counterpart of test_client_read_cb_success_does_not_time_out
+	 * above: ble_write_cb()'s ordinary LIVE -> DONE win. */
+	zassert_equal(alp_ble_test_write_cb(0),
+	              ALP_OK,
+	              "a successful client GATT write must not surface as ALP_ERR_TIMEOUT");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_write_cb_att_error_maps_to_io)
+{
+	/* Write-ctx counterpart of test_client_read_cb_att_error_maps_to_io
+	 * above. */
+	zassert_equal(alp_ble_test_write_cb(BT_ATT_ERR_INVALID_HANDLE),
+	              ALP_ERR_IO,
+	              "a peer-rejected write must surface as ALP_ERR_IO, not ALP_ERR_TIMEOUT");
+}
+
+/* Context-pool regression tests -- issue #1939. changelog.d/1620.md shipped
+ * the pool design (_read_ctx_pool/_write_ctx_pool + alp_slot_try_claim() +
+ * alp_lifecycle_cas()) with three of its branches still unexecuted anywhere:
+ * the abandon path, the CAS loss, and the ALP_ERR_BUSY refusal. Each test
+ * below drives exactly one, through the CONFIG_ZTEST-only seams declared
+ * above -- none of them needs a live peer or a BLE controller. The abandon
+ * path itself (zephyr_drv.c :1047, :1109) is BENCH-OWED: see docs/test-plan.md;
+ * these seams reach only the CAS-loss half a late callback takes against an
+ * already-abandoned ctx. */
+
+ZTEST(alp_ble_gatt_server, test_client_read_cb_loses_cas_after_abandon)
+{
+	/* CAS loss: a callback arriving against a ctx that is no longer LIVE
+	 * must lose its own alp_lifecycle_cas(LIVE -> DONE) -- it must not
+	 * signal ctx.done or write ctx.result, which is exactly what this
+	 * seam's ALP_ERR_TIMEOUT sentinel proves (see its doc comment in
+	 * zephyr_drv.c). */
+	zassert_equal(alp_ble_test_read_cb_loses_cas_after_abandon(),
+	              ALP_ERR_TIMEOUT,
+	              "a callback against an already-abandoned ctx must lose its CAS and touch "
+	              "nothing");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_write_cb_loses_cas_after_abandon)
+{
+	/* Write-ctx-pool counterpart of the read test above. */
+	zassert_equal(alp_ble_test_write_cb_loses_cas_after_abandon(),
+	              ALP_ERR_TIMEOUT,
+	              "a write completion against an already-abandoned ctx must lose its CAS and "
+	              "touch nothing");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_read_ctx_pool_exhaustion_is_reachable)
+{
+	/* _read_ctx_alloc() must return NULL once every slot is held, and the
+	 * seam must have actually claimed every slot to get there -- not just
+	 * found an already-NULL allocator (the tautology issue #1939 review
+	 * found: mutating the allocator to always return NULL passed this
+	 * check with zero slots claimed). */
+	size_t claimed = 0;
+
+	zassert_true(alp_ble_test_read_ctx_pool_exhausts(&claimed),
+	             "the read-ctx pool must actually run out once every slot is held");
+	zassert_not_equal(claimed, 0, "the exhaustion check must have actually claimed slots");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_write_ctx_pool_exhaustion_is_reachable)
+{
+	/* Write-ctx-pool counterpart of the read exhaustion test above. */
+	size_t claimed = 0;
+
+	zassert_true(alp_ble_test_write_ctx_pool_exhausts(&claimed),
+	             "the write-ctx pool must actually run out once every slot is held");
+	zassert_not_equal(claimed, 0, "the exhaustion check must have actually claimed slots");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_gatt_read_refuses_busy_when_pool_exhausted)
+{
+	/* ALP_ERR_BUSY refusal, driven through z_gatt_read() itself
+	 * (zephyr_drv.c :1008) rather than asserted on the allocator alone.
+	 * The seam itself now requires its claiming loop to have actually
+	 * reached the pool's real capacity before calling z_gatt_read() --
+	 * otherwise it returns ALP_ERR_NOT_READY instead, which this
+	 * zassert_equal(..., ALP_ERR_BUSY) would then correctly catch. */
+	zassert_equal(alp_ble_test_gatt_read_busy(),
+	              ALP_ERR_BUSY,
+	              "z_gatt_read() must refuse with ALP_ERR_BUSY once the ctx pool is exhausted");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_gatt_write_refuses_busy_when_pool_exhausted)
+{
+	/* Write counterpart of the read test above (zephyr_drv.c :1080). */
+	zassert_equal(alp_ble_test_gatt_write_busy(),
+	              ALP_ERR_BUSY,
+	              "z_gatt_write() must refuse with ALP_ERR_BUSY once the ctx pool is exhausted");
 }

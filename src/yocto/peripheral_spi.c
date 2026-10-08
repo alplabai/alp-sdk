@@ -177,8 +177,11 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
 
 alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len)
 {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1834, same shape as
+	 * #1734's GPIO fix). */
 	if (bus == NULL || !bus->in_use) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	if (len == 0) {
 		return ALP_OK;
@@ -204,7 +207,14 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 
 alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 {
-	if (bus == NULL || !bus->in_use || (tx == NULL && len > 0)) {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1834).  A malformed
+	 * @p tx/@p len pairing is a separate condition -- ALP_ERR_INVAL,
+	 * checked only once the handle itself is known good. */
+	if (bus == NULL || !bus->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (tx == NULL && len > 0) {
 		return ALP_ERR_INVAL;
 	}
 	if (len == 0) {
@@ -222,7 +232,14 @@ alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 
 alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len)
 {
-	if (bus == NULL || !bus->in_use || (rx == NULL && len > 0)) {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1834).  A malformed
+	 * @p rx/@p len pairing is a separate condition -- ALP_ERR_INVAL,
+	 * checked only once the handle itself is known good. */
+	if (bus == NULL || !bus->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (rx == NULL && len > 0) {
 		return ALP_ERR_INVAL;
 	}
 	if (len == 0) {

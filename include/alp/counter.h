@@ -115,8 +115,9 @@ typedef void (*alp_counter_alarm_cb_t)(alp_counter_t *counter, uint32_t ticks, v
  *             @ref alp_counter_capabilities on that handle for the
  *             active backend's served count (`channel_count`) before
  *             attempting a higher id -- but see that function's note:
- *             only the GD32 bridge populates it today, so a zero means
- *             "not reported", not "serves none".
+ *             disambiguate a zero `channel_count` via
+ *             `ALP_INSTANCE_CAP_REPORTED` in the same descriptor's
+ *             `flags`, not by assuming "not reported".
  */
 alp_counter_t *alp_counter_open(const alp_counter_config_t *cfg);
 
@@ -125,7 +126,8 @@ alp_counter_t *alp_counter_open(const alp_counter_config_t *cfg);
  *
  * @param[in] counter  Handle from @ref alp_counter_open.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_counter_start(alp_counter_t *counter);
 
@@ -134,7 +136,7 @@ alp_status_t alp_counter_start(alp_counter_t *counter);
  *
  * @param[in] counter  Handle from @ref alp_counter_open.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_counter_stop(alp_counter_t *counter);
 
@@ -143,7 +145,8 @@ alp_status_t alp_counter_stop(alp_counter_t *counter);
  *
  * @param[in]  counter    Handle from @ref alp_counter_open.
  * @param[out] ticks_out  Receives the current value.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_counter_get_value(alp_counter_t *counter, uint32_t *ticks_out);
 
@@ -166,8 +169,11 @@ alp_status_t alp_counter_us_to_ticks(alp_counter_t *counter, uint32_t us, uint32
 /**
  * @brief Schedule a one-shot callback @p ticks_from_now ticks ahead.
  *
- * Replaces any previously-scheduled alarm.  At most one alarm per
- * handle.
+ * At most one alarm per handle.  Replacement of an already-armed
+ * alarm on the SAME handle is backend-dependent: some backends
+ * replace it silently, others return ALP_ERR_BUSY (see below) -- call
+ * @ref alp_counter_cancel_alarm first if the target backend is
+ * unknown.
  *
  * @param[in] counter         Handle from @ref alp_counter_open.
  * @param[in] ticks_from_now  Delay in counter ticks.
@@ -196,12 +202,18 @@ alp_status_t alp_counter_set_alarm(alp_counter_t         *counter,
  *
  * @param[in] counter  Handle from @ref alp_counter_open.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_counter_cancel_alarm(alp_counter_t *counter);
 
 /**
  * @brief Stop the counter and release the handle.  NULL is a no-op.
+ *
+ * Any alarm armed via @ref alp_counter_set_alarm is cancelled as part
+ * of teardown -- callers do not need to call @ref
+ * alp_counter_cancel_alarm before close.  This is a best-effort
+ * backend operation: it is not guaranteed atomic with a callback that
+ * is already in flight when close() is called.
  *
  * @param[in] counter  Handle from @ref alp_counter_open, or NULL.
  */
@@ -217,8 +229,16 @@ void alp_counter_close(alp_counter_t *counter);
  * It reads 0 on every other backend -- the generic Zephyr backend has
  * no single machine-readable source for its DT-resolved instance
  * count, the SW fallback accepts every id, and the Yocto Counter
- * sysfs ABI exposes no queryable device count -- so a 0 there means
- * "not reported by this backend", not "serves no counters".
+ * sysfs ABI exposes no queryable device count.
+ *
+ * The disambiguation is `ALP_INSTANCE_CAP_REPORTED` in the same
+ * descriptor's `flags` (<alp/cap_instance.h>): `channel_count == 0`
+ * alongside `REPORTED` means "serves none"; `REPORTED` clear means
+ * "not reported by this backend" -- check the flag, don't assume
+ * from `channel_count` alone.  No counter backend sets `REPORTED`
+ * yet (v0.7, Wave 1 of #1640 scoped it to ADC + GPU2D only), so on
+ * every counter backend today the two cases collapse to "not
+ * reported"; this note updates once a counter backend adopts it.
  *
  * On V2N/V2M this is discoverable only *after* `ALP_E1M_X_COUNTER0`
  * opens successfully: that open can itself fail (e.g.
@@ -283,7 +303,8 @@ alp_qenc_t *alp_qenc_open(const alp_qenc_config_t *cfg);
  *
  * @param[in]  enc      Handle from @ref alp_qenc_open.
  * @param[out] pos_out  Receives the signed accumulated count.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_qenc_get_position(alp_qenc_t *enc, int32_t *pos_out);
 
@@ -292,7 +313,8 @@ alp_status_t alp_qenc_get_position(alp_qenc_t *enc, int32_t *pos_out);
  *
  * @param[in] enc  Handle from @ref alp_qenc_open.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_qenc_reset_position(alp_qenc_t *enc);
 

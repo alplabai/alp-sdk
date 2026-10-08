@@ -415,9 +415,8 @@ ZTEST(alp_inference_registry, test_renesas_ext_zero_reserve_returns_oor)
 
 ZTEST(alp_inference_registry, test_deepx_ext_null_handle_returns_inval)
 {
-	uint32_t status = 0u;
-	zassert_equal(alp_deepx_inference_slot_pin(NULL, ALP_DEEPX_INFERENCE_SLOT_0), ALP_ERR_INVAL);
-	zassert_equal(alp_deepx_inference_dram_tile_reserve(NULL, 1024u), ALP_ERR_INVAL);
+	alp_deepx_device_status_t status;
+	zassert_equal(alp_deepx_inference_bind_cores(NULL, 0x1u), ALP_ERR_INVAL);
 	zassert_equal(alp_deepx_inference_get_status(NULL, &status), ALP_ERR_INVAL);
 }
 
@@ -437,15 +436,12 @@ ZTEST(alp_inference_registry, test_deepx_ext_non_deepx_returns_not_present)
 		.cached_caps = { 0 },
 		.in_use      = true,
 	};
-	uint32_t status = 0u;
-	zassert_equal(alp_deepx_inference_slot_pin(&fake, ALP_DEEPX_INFERENCE_SLOT_0),
-	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-	zassert_equal(alp_deepx_inference_dram_tile_reserve(&fake, 1024u),
-	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
+	alp_deepx_device_status_t status;
+	zassert_equal(alp_deepx_inference_bind_cores(&fake, 0x1u), ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 	zassert_equal(alp_deepx_inference_get_status(&fake, &status), ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 }
 
-ZTEST(alp_inference_registry, test_deepx_ext_oor_slot_returns_inval)
+ZTEST(alp_inference_registry, test_deepx_ext_bad_args_and_no_libdxrt_on_zephyr)
 {
 	const alp_backend_t fake_be = {
 		.silicon_ref = "deepx:dx:m1",
@@ -461,29 +457,11 @@ ZTEST(alp_inference_registry, test_deepx_ext_oor_slot_returns_inval)
 		.cached_caps = { 0 },
 		.in_use      = true,
 	};
-	/* Slot value past SLOT_COUNT. */
-	zassert_equal(alp_deepx_inference_slot_pin(&fake, (alp_deepx_inference_slot_t)99u),
-	              ALP_ERR_INVAL);
-}
-
-ZTEST(alp_inference_registry, test_deepx_ext_zero_tile_returns_oor)
-{
-	const alp_backend_t fake_be = {
-		.silicon_ref = "deepx:dx:m1",
-		.vendor      = "deepx",
-		.base_caps   = 0u,
-		.priority    = 0,
-		.ops         = NULL,
-		.probe       = NULL,
-	};
-	struct alp_inference fake = {
-		.state       = { 0 },
-		.backend     = &fake_be,
-		.cached_caps = { 0 },
-		.in_use      = true,
-	};
-	zassert_equal(alp_deepx_inference_dram_tile_reserve(&fake, 0u), ALP_ERR_OUT_OF_RANGE);
-	/* > V2N-M1 DDR carve-out (256 MB) -> OUT_OF_RANGE. */
-	zassert_equal(alp_deepx_inference_dram_tile_reserve(&fake, 512u * 1024u * 1024u),
-	              ALP_ERR_OUT_OF_RANGE);
+	/* A mask bit past NPU core 2 is unsupported. */
+	zassert_equal(alp_deepx_inference_bind_cores(&fake, 0x8u), ALP_ERR_NOSUPPORT);
+	zassert_equal(alp_deepx_inference_get_status(&fake, NULL), ALP_ERR_INVAL);
+	/* A DEEPX-vendor handle on an M-class core has no libdxrt behind it. */
+	alp_deepx_device_status_t status;
+	zassert_equal(alp_deepx_inference_bind_cores(&fake, 0x7u), ALP_ERR_NOSUPPORT);
+	zassert_equal(alp_deepx_inference_get_status(&fake, &status), ALP_ERR_NOSUPPORT);
 }

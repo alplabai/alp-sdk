@@ -125,6 +125,22 @@ static void test_standby_writes_mem(void)
 	ALP_ASSERT_TRUE(saw_call(ALP_YOCTO_POWER_STATE_PATH, "mem"));
 }
 
+/* #1813 review: STOP rounds DOWN to the same "mem" token as STANDBY
+ * (this generic sysfs ABI has nothing deeper) -- and realised_mode
+ * must report STANDBY, not STOP, so a caller is never told this
+ * backend reached a depth it never proved. */
+static void test_stop_writes_mem_and_reports_standby(void)
+{
+	reset_fixture();
+	alp_power_backend_state_t st   = { 0 };
+	alp_power_wake_info_t     info = { 0 };
+
+	alp_status_t rc = y_request_sleep(&st, ALP_POWER_MODE_STOP, 0u, &info);
+	ALP_ASSERT_EQ_INT(rc, ALP_OK);
+	ALP_ASSERT_TRUE(saw_call(ALP_YOCTO_POWER_STATE_PATH, "mem"));
+	ALP_ASSERT_EQ_INT((int)info.realised_mode, ALP_POWER_MODE_STANDBY);
+}
+
 /* wake_after_ms > 0 must clear the wakealarm ("0") THEN write the
  * absolute target epoch, ceiling-rounded to whole seconds, before the
  * /sys/power/state write. fake_time() pins "now" at 1000000000, so
@@ -188,6 +204,7 @@ int main(void)
 	test_sleep_mode_writes_freeze();
 	test_deep_sleep_writes_standby();
 	test_standby_writes_mem();
+	test_stop_writes_mem_and_reports_standby();
 	test_wake_after_ms_programs_wakealarm();
 	test_wake_after_ms_rounds_up();
 	test_state_write_failure_is_not_swallowed();

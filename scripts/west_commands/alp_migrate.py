@@ -50,7 +50,7 @@ def _all_board_yaml_files(root: Path) -> list[Path]:
         proc = subprocess.run(
             ["git", "-C", str(root), "ls-files", "--cached", "--others",
              "--exclude-standard", "--", "*board.yaml"],
-            check=True, capture_output=True, text=True,
+            check=True, capture_output=True, text=True, encoding="utf-8",
         )
     except (OSError, subprocess.CalledProcessError):
         found: list[Path] = []

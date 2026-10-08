@@ -23,8 +23,7 @@ ROS 2 perception node for **V2N + V2N-M1**.
 
 ```
               ┌──── /alp/imu        sensor_msgs/Imu         (50 Hz)
-              ├──── /alp/gnss       sensor_msgs/NavSatFix   ( 1 Hz)
-              ├──── /alp/battery    sensor_msgs/BatteryState( 1 Hz)
+              ├──── /alp/rail_3v3   sensor_msgs/BatteryState( 1 Hz)
               ├──── /alp/image      sensor_msgs/Image       (10 Hz)
    alp_       ├──── /alp/detections vision_msgs/Detection2DArray (10 Hz)
    perception │
@@ -55,7 +54,23 @@ colcon build --packages-select alp_perception
 ## Hardware needed
 
 - E1M-V2N101 or E1M-V2M101 SoM.
-- E1M-X-EVK board with the camera connector populated.
+- E1M-X-EVK board.  What the sensor topics read is what is fitted
+  to it (`metadata/boards/e1m-x-evk.yaml`):
+  - IMU: **ICM-42670** (U12, I2C `0x69`) on the sensor bus
+    (`XEVK_I2C_BUS_SENSORS`).  The EVK has no LSM6DSO.  The
+    alternate IMU, BMI323 (U13), is at `0x68`.
+  - Power: **INA236 U21** on the +3V3 rail (`0x40`, 20 mOhm shunt,
+    calibrated from `XEVK_INA236_SHUNT_3V3_OHMS`).  This is a supply
+    rail, not a battery.  On EVK V2 its bus-voltage register reads
+    about 0 V; the current reading is the one to trust.
+  - No GNSS receiver is fitted, so there is no `/alp/gnss` topic.
+    `E1M_X_UART0` is the EVK console (`XEVK_UART_PORT_DEBUG`), never
+    a GNSS port; add a GNSS on the Arduino-header UART
+    (`XEVK_UART_PORT_ARDUINO`) in your own code if you need one.
+  - Camera: the shipped image does not enable a camera and no sensor
+    is fitted.  The capture path is kept, but `/alp/image` needs a
+    camera module on a CSI connector plus enabling it (tracked in
+    #1149).
 - (Optional) external WiFi for remote ROS 2 graph access.
 
 ## Run
@@ -64,12 +79,15 @@ colcon build --packages-select alp_perception
 ros2 launch alp_perception perception.launch.py
 ros2 topic list           # confirm /alp/* topics
 ros2 topic echo /alp/imu  # 50 Hz Imu messages
+ros2 topic echo /alp/rail_3v3  # 1 Hz +3V3 rail voltage/current
 ```
 
 ## Yocto packaging
 
-A skeleton recipe lives under `recipes-ros/alp-perception_0.5.bb`
-in `meta-alp-sdk`.  The recipe DEPENDS on `alp-sdk`,
+The recipe is `alp-perception_0.6.bb` under
+`meta-alp-sdk/dynamic-layers/ros2-humble-layer/recipes-ros/` (parsed only
+when `meta-ros2-humble` is in `bblayers.conf`; see
+[`docs/bring-up-ros2.md`](../../../docs/bring-up-ros2.md)).  The recipe DEPENDS on `alp-sdk`,
 `ros-rclcpp`, `ros-vision-msgs`, `ros-sensor-msgs`, and (on
 V2N-M1) `dx-rt`.
 
@@ -77,7 +95,7 @@ V2N-M1) `dx-rt`.
 
 `[UNTESTED]` -- builds clean against the Yocto SDK; HiL
 bring-up gates on v0.8 V2M.  The `sensor_msgs` publishers
-exercise the alp-sdk chip drivers (LSM6DSO, NEO-M9N, INA236)
+exercise the alp-sdk chip drivers (ICM-42670, INA236)
 through their portable surfaces -- once V2N silicon is in the
 lab, switching the topics' tick rate up is a one-line change
 in `sensor_pubs.cpp`.

@@ -3,7 +3,7 @@
 #
 # Grounding (this checkout):
 #   * `integration.zephyr.kconfig` below, verbatim: `CONFIG_ALP_JSMN_SW=y`,
-#     transcribed by scripts/alp_orchestrate/libraries.py:197
+#     transcribed by scripts/alp_orchestrate/libraries.py:321
 #     (`zephyr_kconfig_lines`).  This bullet used to cite
 #     `_LIBRARY_KCONFIG["jsmn"]` in scripts/alp_project_emit/__init__.py;
 #     that per-library dict no longer exists anywhere under scripts/ (the
@@ -27,7 +27,7 @@
 #
 # `module: jsmn` matches the real (disabled-by-default) west project
 # name above; `kconfig:` is transcribed verbatim by
-# scripts/alp_orchestrate/libraries.py:197 (`zephyr_kconfig_lines`).
+# scripts/alp_orchestrate/libraries.py:321 (`zephyr_kconfig_lines`).
 #
 # No `requires:` -- pure portable C99, single self-contained header, no
 # capability/core-class/RAM floor of note.

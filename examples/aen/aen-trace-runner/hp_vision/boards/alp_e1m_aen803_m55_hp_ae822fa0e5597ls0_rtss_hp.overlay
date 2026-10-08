@@ -1,0 +1,104 @@
+/* SPDX-License-Identifier: Apache-2.0
+ *
+ * M55-HP vision app: link into the HP ITCM (the SE loads HP_APP to
+ * 0x50000000, same retarget as probe/npu's overlay), and bind the
+ * HP-paired Ethos-U55 (256 MAC) instead of the board default U85.
+ *
+ * The camera DT completion (csi_interface, csi_i2c, csi_capture_port,
+ * i2c1/gpio12/dphy enablement) is NOT here -- see
+ * boards/shields/tr_hp_csi_complete/boards/<this board>.overlay's header
+ * for why an app-level board overlay is too late in Zephyr's devicetree
+ * concatenation order to supply what a SHIELD overlay (innomaker_cam_ov9281)
+ * references. */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	/* Camera frame pool: design sec 2's own SRAM1 0x02480000..0x024FFFFF
+	 * reservation, NOT probe/camera/prj.conf's SRAM0 default -- that
+	 * default lands the pool at SRAM0's base (0x02000000), which is FB A
+	 * + the A32 renderer's triangle setup records when this app runs
+	 * alongside the game (../CMakeLists.txt's own TR_CAMERA+TR_RENDER=A32
+	 * guard exists for exactly this collision). SRAM1 needs the A32/stub
+	 * boot to have already powered it (AEN memory note: SRAM1 bus-faults
+	 * cold, before that sequencing) -- a real ordering dependency for the
+	 * bench-runner, not provable here. 512 KiB: 2 x 256,000 B GREY8
+	 * frames (CONFIG_VIDEO_BUFFER_POOL_NUM_MAX=2), same as design sec 2's
+	 * own "2 x 256,000 B in SRAM1 0x02480000". */
+	sram1_cam_pool: sram1_cam_pool@2480000 {
+		compatible = "zephyr,memory-region", "mmio-sram";
+		reg = <0x02480000 0x80000>;
+		zephyr,memory-region = "CAM_POOL";
+	};
+};
+
+&ethosu55 {
+	status = "okay";
+};
+
+&ethosu85 {
+	status = "disabled";
+};
+
+/* Peripheral-ownership audit (fix round 6, silicon root cause): the base
+ * board file (alp-sdk-lcd's alp_e1m_aen803_m55_hp_....dts) turns i2c0
+ * (0x49010000) and i2c2 (0x49012000) "okay" UNCONDITIONALLY -- neither is
+ * this app's camera bus (that is i2c1, enabled by the ordering-fix shield
+ * above) or otherwise touched by any hp_vision source file. i2c2 is the
+ * SAME physical SoC I2C2 the HE's imu.c (BMI323) and rail5v_power.c
+ * (INA236) share: with it left "okay" here, Zephyr's i2c_dw driver installs
+ * and enables its interrupt-driven ISR on the HP's NVIC too, and that ISR
+ * writes INTR_MASK=0 on the ONE shared 0x49012000 controller on every
+ * entry/exit -- silicon-proven (2026W36-0009, HE halted): INTR_MASK 0x810 cleared
+ * within 50 ms purely from the HP's own i2c_dw_isr traffic, with nothing on
+ * the HE running at all. That is the root cause of "5V 0 mW" AND "BMI323
+ * init failed" both: the HP was never meant to arbitrate this bus, it just
+ * silently could. Disabling the node here means Zephyr never builds or
+ * enables that ISR on this core at all, not merely "app code doesn't call
+ * it" -- see hp_vision_check.sh's build-time guard for the enforcement.
+ * i2c0: same audit, unused by any hp_vision source, disabled on the same
+ * "the HP owns only what it drives" principle (design sec 2's own listed
+ * HP memory/peripheral scope never named i2c0). See design doc sec 12 for
+ * the full ownership table (both cores). */
+&i2c0 {
+	status = "disabled";
+};
+
+&i2c2 {
+	status = "disabled";
+};
+
+/* fix round 12 (review + silicon finding): the base board file also turns
+ * &uart5 (0x4901D000) and &lpgpio (0x42002000) "okay" unconditionally.
+ * uart5 is the SAME UART the HE's own console and shell run on -- with it
+ * left enabled here (and CONFIG_SERIAL selected back on regardless of
+ * prj.conf, see that file's own comment), the HP's UART driver init reset
+ * the port and both cores fought over the one RX line. lpgpio is unused by
+ * any hp_vision source (its own init masks every one of its interrupt
+ * lines, silicon-provable the same way i2c2's ISR knocked out the HE's
+ * INTR_MASK, fix round 6) -- disabled on the same "the HP owns only what
+ * it drives" principle. See hp_vision_check.sh's build-time guard, now an
+ * allow-list of every /soc peripheral this app actually needs (i2c1, cam,
+ * csi, d-phy, gpio12, ethosu55), not just an i2c-specific one. */
+&uart5 {
+	status = "disabled";
+};
+
+&lpgpio {
+	status = "disabled";
+};
+
+/* The HE may use I2C1 at its boot (a display shield's bridge); this image owns
+ * the camera bus after that. Wait for the HE's release before anything touches
+ * the bus (POST_KERNEL priority 0, ahead of every driver and of the pad unstick
+ * in src/main.c). The HE side: ../../i2c_handover_he.overlay; the flag word is
+ * the same address. zephyr/soc-bridge/alif/i2c_handover.c (alp-sdk). */
+/ {
+	i2c1_handover: i2c1-handover {
+		compatible = "alp,i2c-handover";
+		role = "acquire";
+		flag-address = <0x0237FC94>;
+	};
+};

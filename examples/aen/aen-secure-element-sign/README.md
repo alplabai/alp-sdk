@@ -1,35 +1,49 @@
 # aen-secure-element-sign
 
-Probe the OPTIGA Trust M on the E1M-AEN's **BRD_I2C** and confirm the
-current probe-only driver contract.  The driver reads I2C_STATE to prove
-the part is reachable; product-info and raw-APDU helpers return
-`ALP_ERR_NOSUPPORT` until the Infineon host-library transport is
-integrated.
+Probe the OPTIGA Trust M on the E1M-AEN's **BRD_I2C** and read its
+Coprocessor UID.  The driver runs Infineon's host library
+(`vendors/optiga-trust-m`) through a PAL on the portable `<alp/*>` I2C
+and timing calls.  Nothing here writes to the chip.
 
 This is the **E1M-AEN (Alif Ensemble) sibling** of
 [`examples/v2n/v2n-secure-element-sign`](../../v2n/v2n-secure-element-sign).
 The `src/` is intentionally parallel -- everything goes through the SoM-portable
 `<alp/*>` API — so the only AEN-specific facts are:
 
-- **BRD_I2C is the Alif LPI2C0** (the LP-island I2C, `P7_4 SCL_A` /
-  `P7_5 SDA_A`), surfaced as portable bus 0, carrying the Trust M at
-  `0x30` alongside the RTC + TMP112. (The EEPROM is on a separate bus,
-  SoC I2C2 -- see `docs/bring-up-aen.md` §5.1.)
-- BRD_I2C lives in the low-power domain, so it is owned by the
-  **M55-HE** subsystem — hence `board.yaml`'s app core is `m55_he`
-  and the board target is `…/rtss_he`.
+- **BRD_I2C is SoC I2C0, function C** (`P7_1 I2C0_SCL_C` / `P7_0 I2C0_SDA_C`)
+  -- corrected in #1848; earlier docs believed it was the slave-only Alif
+  LPI2C0. This example's own board overlay wires it as portable bus 2
+  (`alp-i2c2` -- 0 and 1 are already the E1M edge I2C buses), carrying the
+  Trust M at `0x30` alongside the RTC + TMP112.
+  (A different, separate bus carries the EEPROM -- SoC I2C2, see
+  `docs/bring-up-aen.md` §5.1 -- an unrelated same-numbered controller;
+  don't confuse the `alp-i2c2` *alias index* with the *SoC I2C2* node.)
+- `board.yaml`'s app core is `m55_he` (board target `…/rtss_he`); only this
+  example's HE overlay enables SoC I2C0, so nothing on the HP core touches
+  the same controller.
 
 ```bash
+# writes examples/aen/aen-secure-element-sign/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/aen/aen-secure-element-sign
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-    examples/aen/aen-secure-element-sign
+    examples/aen/aen-secure-element-sign -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 
-> **Bench note:** running on hardware needs the AEN board's BRD_I2C
-> (LPI2C0) enabled + mapped to portable bus 0 (the alp-sdk Alif LPI2C
-> driver bring-up). Until that lands, the example builds (CI builds it
-> under `native_sim`) but `alp_i2c_open(bus_id=0)` will not find the
-> chip on a board that hasn't wired LPI2C0 yet.
+> **Bench note:** this example's own board overlay wires BRD_I2C (I2C0) to
+> portable bus 2 (#1848), so `alp_i2c_open(bus_id=2)` now reaches the
+> physical bus. That routing is **R2-sourced and not yet on-unit-verified**:
+> it comes from the E1M-AEN-2626-R2 netlist + `ADTS0013`; no R1 netlist is
+> available, and the only bench unit on hand is an r1 module -- probe
+> `P7_0`/`P7_1` before treating a probe result here as confirming the wiring
+> itself, not just the chip response.
+>
+> **The pull-up state is also unresolved, on purpose.** The overlay adds NO
+> internal bias: the R2 components CSV shows this net's pull-up jumpers
+> (R93/R94) DNP, so there is no external pull-up either, and the datasheet
+> (open-drain, needs a pull-up) and the HWRM (push-pull is the correct I2C
+> mode on these pins) disagree about what that means for this bus. Do not
+> add `bias-pull-down` -- see the overlay's pinctrl comment.
 >
 > **The current E1M-AEN801 bench batch does not populate the OPTIGA**
 > (DNI), so this example has nothing to talk to on those boards — it is
@@ -38,29 +52,29 @@ west flash
 
 ## What it shows
 
-1. Opening BRD_I2C at 400 kHz and initialising
+1. Opening BRD_I2C at 100 kHz and initialising
    [`optiga_trust_m_t`](../../../include/alp/chips/optiga_trust_m.h).
    `optiga_trust_m_init` performs an I2C_STATE register read only;
    failing this means the chip is not on the bus or is not strapped to
    address 0x30.
-2. `optiga_trust_m_read_product_info` returns `ALP_ERR_NOSUPPORT`
-   because GET_DATA_OBJECT needs the full APDU transport.
-3. `optiga_trust_m_send_apdu` validates a non-empty APDU buffer and
-   returns `ALP_ERR_NOSUPPORT` without fabricating a signature.
+2. `optiga_trust_m_read_product_info` opens the Trust M application
+   and reads the 27-byte Coprocessor UID (data object 0xE0C2).
 
 ## Expected output (OPTIGA-populated SoM)
 
+Not yet run on an OPTIGA-populated AEN; the same driver path is
+bench-verified on E1M-V2M103 (see the V2N variant):
+
 ```
 [se] I2C_STATE probe -> ALP_OK
-[se] read_product_info -> -5 (expected NOSUPPORT)
-[se] send_apdu -> -5 resp_len=0 (expected NOSUPPORT, zero bytes)
-[se] RESULT PASS: Trust M I2C_STATE probe works; product-info/raw-APDU are cleanly blocked with ALP_ERR_NOSUPPORT
+[se] UID: cim CD platform 16 model 33 fw 80101071 build 2564
+[se] RESULT PASS: Trust M probe and Coprocessor UID read work
 ```
 
 ## Expected output (current AEN bench gates)
 
 ```
-[se] RESULT SKIP: alp_i2c_open failed: -2 (BRD_I2C/LPI2C0 not ready on this bench)
+[se] RESULT SKIP: alp_i2c_open failed: -2 (BRD_I2C not ready on this bench)
 ```
 
 or, once BRD_I2C opens but the assembly is OPTIGA-DNI:
@@ -69,15 +83,12 @@ or, once BRD_I2C opens but the assembly is OPTIGA-DNI:
 [se] RESULT SKIP: optiga_trust_m_init -> -2 (Trust M not ACKing; current AEN bench assemblies may be OPTIGA-DNI)
 ```
 
-The eventual signing path belongs with the Infineon host-library/PSA
-integration, not a partial hand-rolled APDU transport in this example.
-
 ## See also
 
 * [`examples/v2n/v2n-secure-element-sign`](../../v2n/v2n-secure-element-sign)
-  -- the V2N variant with the same probe-only contract.
+  -- the V2N variant, which also runs a raw APDU session.
 * [`<alp/chips/optiga_trust_m.h>`](../../../include/alp/chips/optiga_trust_m.h)
-  -- driver header (I2C_STATE probe + NOSUPPORT APDU/product-info stubs).
+  -- driver header.
 * [`docs/bring-up-aen.md`](../../../docs/bring-up-aen.md) §5.2 -- where
   this example is the OPTIGA bench sanity check.
 * Infineon "Solution Reference Manual OPTIGA Trust M"

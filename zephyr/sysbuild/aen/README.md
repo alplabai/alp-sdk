@@ -107,10 +107,26 @@ cd "$SETOOLS_DIR"
 (MCUboot entry: `cpu_id M55_HE`, `loadAddress 0x58000000`,
 `flags ["load","boot"]`, `signed true`.  The SES banner then shows
 `| MCUBOOT- | M55-HE | ... | uLVB |` -- slot0 is no longer an SES boot
-entry; MCUboot owns it from here.)  Shipped modules then boot
-out-of-box, and customers load apps into slot0 via `west flash` **or**
-a plain J-Link with no SETOOLS/SE-UART of their own (see
-[`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md) §0.5).
+entry; MCUboot owns it from here.  **TBD, unverified:** this exact `Name`
+column literal has never been confirmed against a real `gettoc` capture
+off a pre-provisioned module -- every real capture in this repo's test
+suite is off an AEN EVK dev board instead. `scripts/west_commands/runners/
+alif_flash.py`'s `_FACTORY_MCUBOOT_ATOC_NAME` cites this sentence as its
+only source; capture the real string during a bench session and correct
+both if it differs.)  Shipped modules then boot
+out-of-box, and customers load apps into slot0 with a plain J-Link (no
+SETOOLS/SE-UART of their own -- see
+[`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md) §0.5,
+Option B). **Not `west flash`'s `alif_flash` runner**: on a pre-provisioned
+module it refuses regardless -- since alp-sdk#2274 it refuses ANY
+multi-domain sysbuild flash outright, before touching anything, because
+this sysbuild always produces two domains (`mcuboot` + app); even without
+that, since alp-sdk#2262 it separately reads the resident `MCUBOOT-` entry
+back before burning and refuses (foreign to whatever `ALP-HE`/`ALP-HP`
+section the customer's own build stages), because burning would otherwise
+silently delist this factory bootloader -- see `docs/aen-provisioning.md`
+§0.5's Option A warning before pointing a customer at `west flash` on a
+pre-provisioned module.
 
 ## Usage
 
@@ -122,25 +138,62 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     -- -DSB_CONF_FILE=/abs/path/to/alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
 
 # Produces:
-#   build/zephyr/zephyr.signed.bin     -- signed application image
-#   build/mcuboot/zephyr/zephyr.bin    -- MCUboot bootloader
-#
-# Flash both (once the module's MCUboot ATOC is provisioned and the SES
-# has released the core, so SWD/west flash is available):
-west flash --bin-file build/mcuboot/zephyr/zephyr.bin --domain mcuboot
-west flash --bin-file build/zephyr/zephyr.signed.bin
+#   build/<app>/zephyr/zephyr.signed.bin  -- signed application image
+#   build/mcuboot/zephyr/zephyr.bin       -- MCUboot bootloader
 ```
+
+> **`west flash` REFUSES on this sysbuild -- see alp-sdk#2274.**
+> `alif_flash` runs once per domain (Zephyr's own `flash.py`/
+> `run_common.py` resolve one runner invocation per `--domain`, or per
+> entry in `domains.yaml`'s flash order for a plain multi-domain `west
+> flash`). The `#2262` ATOC guard identifies a resident entry by NAME
+> ONLY, and both the MCUboot domain (ITCM `0x58000000`) and the HE app
+> domain map to the SAME ATOC section name `ALP-HE` (`_atoc_section_name`)
+> -- so a SECOND `alif_flash` invocation would see any `ALP-HE` entry a
+> previous run of the other domain wrote as already-allowed, not foreign,
+> and report `clear`, then burn a fresh single-entry ATOC, silently
+> replacing whatever that earlier run wrote. Rather than let that happen,
+> `do_run` now checks the build's own `domains.yaml` BEFORE any
+> staging/gettoc/burn side effect and refuses outright whenever it
+> declares more than one flashable domain -- including a single
+> `--domain <x>` invocation of such a build, since flashing only one
+> domain would still replace any `ALP-HE` entry a previous run of the
+> other domain wrote, the same way.
+
+Flash your app the supported way instead: a plain J-Link `loadbin` of your
+`imgtool`-signed image straight to slot0, no SETOOLS/ATOC/SE-UART at all
+(Option B, [`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md)
+§0.5 -- copied verbatim below; see that section for the two hazards
+(alp-sdk#2233) if you type this by hand rather than use its scripted
+path):
+
+```
+si SWD
+speed 4000
+device AE822FA0E5597LS0_M55_HE
+connect
+loadbin build/<app>/zephyr/zephyr.signed.bin 0x80010000
+verifybin build/<app>/zephyr/zephyr.signed.bin 0x80010000
+qc
+```
+
+Then power-cycle. `device AE822FA0E5597LS0_M55_HE` is **required** -- the
+bare `AE822FA0E5597LS0` hangs on the GUI device picker even with
+`-nogui 1`.
+
+> Option B writes the app only; without a resident MCUboot the module
+> will not boot (recoverable via SETOOLS re-provisioning -- the
+> `app-gen-toc`/`app-write-mram` steps above).
 
 ## Key management
 
 The reference config points at
-[`<repo>/keys/mcuboot_dev_ecdsa_p256.pem`](../../../keys/README.md)
--- a **development key**, not for production.  Generate it
-locally:
-
-```bash
-bash keys/generate_dev_key.sh
-```
+[`<repo>/keys/mcuboot_shared_dev_ecdsa_p256.pem`](../../../keys/README.md)
+-- the committed **shared development key** that the factory MCUboot on
+pre-provisioned modules trusts (#2421).  It is public, so it gives no
+security and is never for production.  Your own key comes from
+`bash keys/generate_dev_key.sh`, and only an MCUboot re-provisioned with
+it will accept images signed by it.
 
 For production, regenerate the key from a secure source and
 hand the public half over to the bootloader build via a

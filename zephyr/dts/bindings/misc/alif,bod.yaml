@@ -1,0 +1,69 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# vendor-ext, BENCH-UNVERIFIED.
+#
+# Binding for the Alif Ensemble Brown-Out Detect (BOD) block -- the
+# programmable-threshold VDD_MAIN supply monitor described in the AE822
+# Datasheet (Alif_E8_Datasheet_v1.2) section 3.7.4 Power Supply Supervisors
+# (NOT the HWRM -- the HWRM covers this at section 8.1.5 Power Supply
+# Supervisors instead; it has no section 3.7.4 at all):
+#
+#   "The BOD circuit monitors the VDD_MAIN power supply and generates
+#   interrupts when the voltage falls below a programmable threshold. The BOD
+#   interrupt can be used as a wake-up source from STANDBY and from STOP
+#   low-power modes."
+#
+# NO DRIVER EXISTS for this compatible -- there is no upstream Zephyr
+# brown-out class API and alp-sdk carries no vendored one yet.  This binding
+# exists so the node below VALIDATES (reg + interrupts only); it is
+# deliberately NOT wired to a driver.  BOD is distinct from BOR (which resets
+# the SoC outright) and from the external supervisor errata ER004 requires --
+# both are out of scope here (see alp-sdk issue #1817).
+#
+# reg is the shared BOR_BOD register block (HWRM Table 10-4 Low Power VBAT
+# Peripherals Memory Map + Table 19-32 BOR_BOD Modules: base 0x4200_4000,
+# 4KB) -- BOD and BOR share one 4KB window; this node claims the whole block
+# since no narrower BOD-only sub-range is documented.  interrupts (100,
+# M55HE_IRQS[100] BOD_IRQ) is HWRM Table 8-5 BOD Interrupt Requests.  BOD
+# also asserts a DMA request, BOD_DMA_REQ = DMA2_REQ[7] (HWRM Table 8-6 BOD
+# DMA Requests -- the Datasheet's Table 3-5 only says a DMA request exists,
+# not which number); that DMA wiring is alp-sdk issue #1815's territory, not
+# modelled on this node.
+#
+# Example (BOR_BOD at 0x42004000):
+#
+#   bod0: bod@42004000 {
+#       compatible = "alif,bod";
+#       reg = <0x42004000 0x1000>;
+#       interrupts = <100 3>;
+#       status = "disabled";
+#   };
+
+description: |
+  Alif Ensemble Brown-Out Detect (BOD) -- a programmable-threshold VDD_MAIN
+  supply monitor in the VBAT/AON always-on domain, sharing its 4KB register
+  window with BOR (Brown-Out Reset, not modelled here).  A STANDBY/STOP wake
+  source and a DMA-request source (Datasheet section 3.7.4 / Table 3-5;
+  the DMA request NUMBER, DMA2_REQ[7], is HWRM Table 8-6).
+
+  vendor-ext, BENCH-UNVERIFIED -- authored from the AE822 HWRM memory map and
+  interrupt tables; NO DRIVER binds this compatible yet (see the file header
+  above).  A disabled node only: it validates the devicetree without claiming
+  the peripheral is usable from application code.
+
+compatible: "alif,bod"
+
+include: [base.yaml]
+
+properties:
+  reg:
+    required: true
+    description: |
+      BOR_BOD shared register base address and size (0x1000, HWRM Table
+      10-4).  BOD is a sub-range of this block; BOR (outright reset) is not
+      modelled by this binding.
+
+  interrupts:
+    required: true
+    description: BOD_IRQ, M55HE_IRQS[100] (interrupt number 100, HWRM Table 8-5).

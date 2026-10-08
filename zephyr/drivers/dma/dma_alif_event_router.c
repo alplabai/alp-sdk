@@ -497,10 +497,27 @@ static int dma_alif_evtrtr_init(const struct device *dev)
 		sys_write32(0, EVTRTR_DMA_CTRL_REG(reg_base, i));
 	}
 
-	/* Clear all handshake enable registers (one per dma_group) */
-	for (i = 0; i < cfg->num_groups; i++) {
-		sys_write32(0, EVTRTR_DMA_ACK_TYPE_REG(reg_base, i));
-	}
+	/*
+	 * The DMA_ACK_TYPE registers are deliberately NOT touched here.
+	 *
+	 * They used to be zeroed in a loop over the groups, but their reset values
+	 * are not zero (HWRM 11.4.4.3.3-11.4.4.3.6): ACK_TYPE0 0xFFFFFF00,
+	 * ACK_TYPE1 0xFF3FF300, ACK_TYPE2 0xC3FF0000, ACK_TYPE3 0x0.  And the bit
+	 * is not a policy knob -- HWRM 11.4.4.3.1 EVTRTR0_DMA_CTRLn[16] ACK_TYPE
+	 * describes how the ATTACHED PERIPHERAL behaves: "0x0: Peripheral completes
+	 * the REQ-ACK handshake with DMA controller ... 0x1: Event Router completes
+	 * the REQ-ACK handshake with DMA controller.  Peripheral raises DMA request
+	 * without responding to ACK from DMA controller."
+	 *
+	 * ACK_TYPE2 = 0xC3FF0000 has all four SPIs' RX and TX (requests 16-23),
+	 * LPSPI (24-25) and PDM/LPPDM (30-31) on router-completed handshaking while
+	 * the UTIMER events (0-15) and the CAM/CDC sync events (26-29) are
+	 * pass-through.  That split is a property of the silicon.  Zeroing it made
+	 * every DMA request this driver is never asked to configure -- LPSPI, PDM,
+	 * I2S, ADC, CANFD -- take the wrong handshake type from the moment this
+	 * driver initialised (#1820).  The per-channel configure path restores the
+	 * bit for the channels it IS given, which is why SPI1 kept working.
+	 */
 
 	/* Initialize DMA Request Control register - enable all request types */
 	sys_write32(EVTRTR_DMA_REQ_CTRL_CB | EVTRTR_DMA_REQ_CTRL_CLB |

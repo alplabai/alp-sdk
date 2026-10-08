@@ -74,7 +74,7 @@ untrusted from the receiving side's perspective.
 | Asset | Trust requirement | Storage |
 |-------|-------------------|---------|
 | **Firmware image signing key (production)** | Confidential + integrity | OPTIGA Trust M secure NVM only |
-| **Firmware image signing key (development)** | Integrity (test-only) | `keys/mcuboot_dev_ecdsa_p256.pem` -- gitignored |
+| **Firmware image signing key (development)** | None -- public by design (#2421) | `keys/mcuboot_shared_dev_ecdsa_p256.pem` -- committed; trusted only by the factory development MCUboot on DM-lifecycle modules |
 | **OPTIGA Trust M device-unique key** | Confidential | OPTIGA's secure NVM (never leaves) |
 | **MQTT broker TLS client cert + private key** | Confidential + integrity | Application-owned; SDK exposes the pinning API |
 | **EEPROM manifest (SKU + serial + hw_rev)** | Integrity (authenticity) | 24C128 EEPROM (board-side); read-only at runtime |
@@ -118,8 +118,12 @@ In RF range; can advertise/scan but not pair without consent.
 **Mitigations:**
 
 - BLE adv parser fuzzed (above).
-- Pairing requires user-confirmed bonding; auto-pair disabled
-  by default in the SDK's BLE backend.
+- Pairing/bonding policy is application-owned: the SDK's BLE
+  surface registers no auth callbacks of its own, so a
+  product's pairing posture comes from the Zephyr host stack
+  configuration (or the CC3501E firmware) the application
+  ships. Applications that need user-confirmed bonding must
+  enable it in that stack layer — the SDK does not enforce it.
 
 ### 3.3 Local I²C / I²S / UART attacker
 
@@ -161,7 +165,7 @@ CPU, dump RAM, reflash.
 - Production-side: lock the SWD interface via the SoC's
   debug-disable fuse + the secure-boot lock register.  See
   the per-SoM bring-up docs (e.g.
-  [`bring-up-v2n.md`](bring-up-v2n.md) "Production lock-down").
+  [`bring-up-v2n.md`](bring-up-v2n.md)).
 - Pre-production / dev builds: SWD open.  Customers should
   blow the lock fuse for production runs.
 
@@ -183,8 +187,11 @@ keys, or insert a backdoored vendor library.
 - Release builds emit SLSA L3 provenance attestations per
   Pillar 8 of `docs/v1.0-readiness.md` (L2 landed in Â§C.18, upgraded
   to L3 in Â§C.27).
-- `keys/.gitignore` excludes every `*.pem` file; only the
-  generator script + README live in the keys dir.
+- `keys/.gitignore` excludes every `*.pem` file except
+  `*.pub.pem`; only the generator script, the README, and the
+  release-signing PUBLIC key
+  (`alp_release_signing_ecdsa_p256.pub.pem`) live in the keys
+  dir.
 - Production signing key never leaves the OPTIGA secure NVM;
   the SDK ships only the pub-key bytes compiled into MCUboot.
 
@@ -197,7 +204,8 @@ defend (e.g. `<alp/e1m_pinout.h>` is just constants) marked n/a.
 | Header | Primary threat | Mitigation |
 |--------|----------------|------------|
 | `<alp/peripheral.h>` (I²C/SPI/GPIO/UART) | Bus-side attacker on a shared bus | Backend validates handle on every call; NULL-cfg / OOB IDs rejected at `*_open` |
-| `<alp/peripheral.h>` target (slave) mode (`alp_i2c_target_*` / `alp_spi_target_*`, v0.9) | **Untrusted external controller** drives arbitrary bytes / clock edges into our ISR-context callbacks (a hostile master is the 3.3 local-bus attacker in reverse) | The SDK layer keeps no parse surface of its own: I²C callbacks are byte-granular with no SDK-side buffering, SPI hands the app a fixed-length caller-owned frame.  Address/config validated at `*_target_open`; drivers without target support fail open with `ALP_ERR_NOSUPPORT`.  The request/response protocol on top is **application-owned untrusted input** — apps must bound-check every frame field and should fuzz their decoder (the `i2c-slave` / `spi-slave` examples model the defensive shape: fixed frames, explicit unknown-command path) |
+| `<alp/peripheral.h>` monotonic clock (`alp_uptime_ms`, v0.17 new, issue #1953) | n/a — read-only getter, no arguments, no parse surface | — used only to bound a retry loop (e.g. `chips/cc3501e/cc3501e_core.c`'s `poll_by_repeat`) to a real deadline instead of the caller's declared budget silently overrunning |
+| `<alp/peripheral.h>` target (slave) mode (`alp_i2c_target_*` / `alp_spi_target_*`, v0.9) | **Untrusted external controller** drives arbitrary bytes / clock edges into our ISR-context callbacks (a hostile master is the 3.3 local-bus attacker in reverse) | The SDK layer keeps no parse surface of its own: I²C callbacks are byte-granular with no SDK-side buffering, SPI hands the app a fixed-length caller-owned frame.  Address/config validated at `*_target_open`; drivers without target support **fail** — `*_target_open` returns `ALP_ERR_NOSUPPORT` rather than permitting the call.  The request/response protocol on top is **application-owned untrusted input** — apps must bound-check every frame field and should fuzz their decoder (the `i2c-slave` / `spi-slave` examples model the defensive shape: fixed frames, explicit unknown-command path) |
 | `<alp/version.h>` | n/a — compile-time constants + a read-only string getter; nothing to defend | — |
 | `<alp/console.h>` | Companion-link peer (the bound CC3501E supervisor) | Thin binder -- stores one caller-owned `cc3501e_t*` via `alp_console_companion_set`; no parse surface of its own.  The real threats live in `<alp/chips/cc3501e.h>` (companion wire protocol) and the CLI verb, not here.  NULL unbinds safely. |
 | `<alp/i2c_regfile.h>` | **Untrusted external I²C controller** drives register-pointer + payload bytes into ISR-context callbacks | Inherits the `<alp/peripheral.h>` target-mode posture it wraps: the register pointer is taken **modulo the file length** (no OOB), auto-increment wraps within the caller-owned backing buffer, and there is no SDK-side heap or parse.  Register *semantics* layered on top stay application-owned untrusted input -- apps bound-check meaning; the helper bounds memory. |
@@ -207,17 +215,33 @@ defend (e.g. `<alp/e1m_pinout.h>` is just constants) marked n/a.
 | `<alp/security.h>` | All five | Wraps MbedTLS PSA Crypto + OPTIGA TM; secret material wiped via `OPENSSL_cleanse` on Yocto, `psa_destroy_key` on Zephyr |
 | `<alp/inference.h>` | Supply-chain (Vela model swap) | Model-bytes integrity is application-owned; SDK signs the firmware containing it via MCUboot |
 | `<alp/mproc.h>` (IPC framing) | Cross-core peer-compromise | Envelope decoder fuzzed under `tests/fuzz/mproc_frame_fuzz.c` |
+| `<alp/rpc.h>` (framed RPC over OpenAMP/RPMsg) | **Availability**: a compromised or crashed peer core going silent was indistinguishable from an idle one -- `alp_rpc_send()` kept returning `ALP_OK` into a dead vring forever (issue #1643), and the caller had no way to detect or react to the loss | Method-name framing is fixed-shape (≤32-byte NUL-terminated header, no SDK-side parse of the opaque application payload -- same posture as `<alp/mproc.h>`).  `alp_rpc_set_link_callback` / `alp_rpc_link_state` (v0.17) surface the transport's own bind/unbind/error signal as `ALP_RPC_LINK_DOWN`/`_UP`/`_LOST`; once `_LOST` is observed, `alp_rpc_send()` (and a NEW `alp_rpc_call()`, at entry) rejects with `ALP_ERR_NOT_READY` instead of silently accepting into the dead queue.  **Coverage differs by backend in this revision**: fully wired on the Linux/A-class chardev backend (`yocto_drv.c`); on Zephyr/M-class the pinned `ipc_service` RPMsg static-vrings backend reports `_UP` but never invokes the `unbound`/`error` callbacks this code wires, so `_LOST` is NOT observable there yet; V2N's own A55 selects the still-unwired `yocto_uio_drv.c` and is in the same UP-only position -- see `include/alp/rpc.h`'s `@par Link liveness` block.  Re-establishing the link (close + reopen) stays application-owned -- the SDK reports loss, it does not auto-reconnect |
 | `<alp/mproc.h>` `alp_mproc_boot_core` (v0.9) | **Privilege**: releasing a peer core with an attacker-controlled `entry_addr` is arbitrary code execution on that core | Boot-authority (SE / boot firmware) validates the request; `ALP_CORE_SELF` rejected at the API; the entry image is expected to be covered by the platform's secure-boot chain (MCUboot / SETOOLS ATOC) — the SDK call releases a core, it does not bypass image authentication.  Callers run in the firmware trust domain (no unprivileged-caller path exists on the supported RTOS targets) |
 | `<alp/hw_info.h>` | Local I²C 3.3 (manifest rewrite) | CRC32 verification on read; production WP strap on the EEPROM |
 | `<alp/hw_info.h>` SoC identity (`alp_soc_info_read` / `alp_soc_secure_fw_ping`, v0.9) | Spoofed / compromised secure-fw ("SE") responses over the service transport; DoS by an unresponsive controller | Bounded round-trips (`ALP_ERR_NOT_READY` instead of hangs); `out` zero-filled + build-time `soc_ref` stamped even on failure; transport faults surface `ALP_ERR_IO`.  Identity fields are **informational** — the SDK never gates an authorisation decision on them; anything security-critical stays with the secure-boot chain |
 | `<alp/dsp.h>` | Application-side input fuzz | DSP-chain descriptors validated at `_open`; no untrusted-network-driven path today |
 | `<alp/gpu2d.h>` | Application-side surface descriptor injection | Surface dimensions bound-checked at `_open` |
-| `<alp/power.h>` | DoS via aggressive sleep request | `_open`-time validation of wake-source bitmaps |
+| `<alp/power.h>` | DoS via aggressive sleep request (`alp_power_request_sleep` with no reachable wake source); a caller arms a wake source (or retention footprint) the backend cannot honour, sleeps, and the device never wakes -- a silent permanent hang, worse than the DoS alone | `alp_power_request_sleep()`'s dispatcher-level pre-checks (RUN-mode / invalid-enum rejection, `ALP_ERR_INVAL` when no wake source AND `wake_after_ms == 0`) run before any backend is reached.  As of v0.17 (#1812/#1813) `alp_power_configure_wake_source()` / `alp_power_configure_retention()` additionally return `ALP_ERR_NOSUPPORT` for any bit / level the active backend cannot arm -- discoverable in advance via `alp_power_wake_capabilities()` -- instead of the old "unsupported bits silently ignored" contract, enforced centrally in the dispatcher (`src/power_dispatch.c`) against every registered backend (`zephyr_stub`, `zephyr_pm_policy`, `yocto_drv`) |
 | `<alp/power.h>` operating-point profiles (`alp_power_profile_set`, v0.9) | A hostile or buggy caller browns out the core / stalls the SoC by writing a bad rail voltage or clock | Documented as a firmware-update-grade operation (header `@warning`); backend accepts only values the silicon realises **exactly** (`ALP_ERR_INVAL`, never rounds); read-modify-write touches only non-zero fields; `wake_events` writable only on the STANDBY profile; the controller firmware is the final validator |
-| `<alp/storage.h>` (inline-AES) | Local physical | Key material via OPTIGA path only; SDK never sees the AES key in clear |
+| `<alp/storage.h>` (inline-AES, `alp_storage_configure_inline_aes`) | Local physical | Portable surface; every backend today returns `ALP_ERR_NOSUPPORT` (unimplemented) -- no backend takes the caller's key yet.  Doc contract when one lands: key/IV read only for the duration of the call, caller may free/zeroise on return, HW key never traces back to RAM after the call |
+| `<alp/ext/alif/storage.h>` (Alif OSPI SecAES key provisioning, issue #224) | Local physical (JTAG/SWD) + local storage-bus attacker; **false-success risk**: an SE that never implements the write-key service must not report `ALP_OK` while the key was never loaded | Caller-supplied AES-128 key is marshalled into one on-stack SE request packet (`ospi_write_key_svc_t`) and sent to the Secure Enclave over the RTSS-HE↔SE MHUv2 mailbox (`se_service_send_request`) -- the SE, not the host, writes the key into the OSPI AES hardware slot.  That packet is the only place the SDK ever holds the key in clear; it is zeroised with a compiler barrier immediately after the call returns, on both the success and failure path, and never logged.  `se_service_send_request()` returns `rc==0` as soon as any response frame arrives, without itself checking either verdict field, so the caller reads back BOTH `header.hdr_error_code` (the transport-layer NACK an unimplemented service answers with) and `resp_error_code` (pre-seeded to a non-success sentinel before send, since a zeroed response field is bit-identical to the real success code) before ever reporting `ALP_OK`.  No OPTIGA involvement -- this is a separate key-loading path from the portable surface above.  Gated on `CONFIG_ALP_SDK_STORAGE_ALIF_SECAES`, **default OFF**: UNVERIFIED ON SILICON, no bench unit reachable at implementation time has an OSPI SecAES-relevant part populated (board rev r1; E1M-AEN801 populates neither external OSPI memory on any revision -- E1M-AEN803 is the SKU that fits OSPI0, measured in #2041 as an ISSI `IS25WX256-JHLE` on CS1, not the Macronix part this row previously named).  The call brackets the SE round-trip with the handle's open/close guard (issue #629) so a concurrent `alp_storage_close` cannot free/recycle the handle while the call is parked in the SE transport |
 | `<alp/camera.h>` | DMA-buffer overflow if frame_size mis-declared | Backend reconciles frame_size against silicon-reported width × height × bpp |
 | `<alp/audio.h>` | DMA-buffer overflow on misbehaving DMIC | Backend enforces `frames_per_block` × `channels` × `sizeof(int16_t)` against allocator |
+| `<alp/i2s.h>` | Misbehaving / hostile I2S peer clocking or streaming into a DMA buffer | Backend enforces the block size against the allocator (see the `<alp/audio.h>` row); the SDK keeps no parse surface of its own |
+| `<alp/can.h>` | **Bus-side attacker on the shared CAN bus** — hostile or malformed frames, DLC abuse, bus-off injection | Handle validated per call; bitrate and mode validated at `alp_can_open`; the controller's filter and error-confinement policy owns the rest.  RX hands the app a driver-decoded frame, so apps must still bound-check every payload field they interpret |
+| `<alp/counter.h>` | n/a — counts local edges; no peer-supplied parse surface | — |
+| `<alp/rtc.h>` | Local physical (tamper with the RTC over I²C) | Bus posture covered by the `<alp/peripheral.h>` rows; no parse surface of its own |
+| `<alp/wdt.h>` | **Availability**: a caller arms a watchdog the backend cannot honour, or feeds it too late, resetting the device | Timeout validated against the backend's range at `alp_wdt_open` (never rounded); feed and disarm validate the handle per call |
+| `<alp/board.h>` | n/a — facade include that selects the active board's generated routes header; declares no symbols of its own | — |
 | `<alp/update_log.h>` | Tamper of historical update records | Hash-chain + monotonic-counter (SW tier, tamper-evident); TF-M secure owner with PSA Protected Storage + protected high-watermark counter (HW_ENFORCED tier) |
+| `<alp/model.h>` (`.alpmodel` read-side parser) | **Untrusted model package** — header + CBOR manifest decoded from an in-memory buffer, the exact class §3's supply-chain row covers | Decode is bounded: fixed-shape header, CBOR manifest decoded with length checks against the package envelope, and **no malloc** -- the view is decoded once into a caller-provided `alp_model_t` (`include/alp/model.h:10`); model *bytes* are never executed by the SDK — they feed the inference backend, and firmware-image integrity (MCUboot signature) still covers what actually runs.  Model authenticity (who signed the `.alpmodel`) is application-owned today |
+| `<alp/jpeg.h>` (encode-only) | Mis-declared surface descriptor (dimensions / stride / format) driving an OOB write in the encoder | Backend reconciles the request against `pixfmt_mask` and buffer reachability (DMA-reachable check on the HW backend rejects ITCM/DTCM buffers); encode-only — no untrusted JPEG *decode* path exists in the SDK.  **Known limits, stated in the header's `@note`**: width/height are bounded (and the implicit stride transitively), but an explicit caller-supplied `y_stride`/`u_stride`/`v_stride` is only *floor*-checked against the row it describes, never capped, because the dispatcher is not handed the real buffer length (`src/jpeg_dispatch.c:108-115`); and on the HW backend an `ALP_ERR_TIMEOUT` can be returned while the engine is still DMA-ing into `out_buf` (#2268), so the caller must not free or reuse the surface on a timeout |
+| `<alp/i3c.h>` | Bus-side attacker on the shared I3C bus (dynamic-address assignment, IBI spam) | Same posture as the `<alp/peripheral.h>` bus rows: handle validated per call, config validated at `_open`; backends without I3C support **fail** — their `_open` returns `ALP_ERR_NOSUPPORT` rather than permitting the call |
+| `<alp/temperature.h>` | n/a — read-only millidegrees getter from the on-module sensor | — |
+| `<alp/usb.h>` | USB host/device peer (attacker-plugged peripheral / host) | Thin abstraction over the vendor xHCI / device stacks; enumeration policy and class-driver parsing stay in the (vendor) stack below the SDK — no SDK-side parse surface |
+| `<alp/display.h>` / `<alp/gui.h>` | Application-side surface/framebuffer descriptor injection | Panel geometry validated against the board's display config; LVGL re-export adds no parse surface of its own |
+| `<alp/ahrs.h>` / `<alp/pid.h>` / `<alp/tmu.h>` | Application-side numeric input (NaN/Inf propagation, out-of-range gains) | Pure computation on caller-owned state; TMU offload validates descriptor handles at `_open` and falls back to libm — no untrusted-network-driven path |
+| `<alp/cap.h>` / `<alp/cap_instance.h>` / `<alp/backend.h>` / `<alp/soc_caps.h>` / `<alp/e1m_x_pinout.h>` | n/a — capability flags, registration enums, generated constants; no parse surface | — |
 
 ## 5. Out-of-scope (explicit non-goals)
 

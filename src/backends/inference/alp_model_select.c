@@ -19,6 +19,46 @@ static alp_inference_backend_t _backend_enum(const char *s)
 	return ALP_INFERENCE_BACKEND_AUTO; /* sentinel: unknown */
 }
 
+size_t alp_auto_order_parse(const char *csv, alp_inference_backend_t *out, size_t max)
+{
+	size_t n = 0;
+
+	while (csv != NULL && *csv != '\0' && n < max) {
+		const char *end = strchr(csv, ',');
+		size_t      len = end ? (size_t)(end - csv) : strlen(csv);
+		char        key[ALP_MODEL_STR_MAX];
+
+		if (len > 0 && len < sizeof(key)) {
+			memcpy(key, csv, len);
+			key[len]                   = '\0';
+			alp_inference_backend_t be = _backend_enum(key);
+			if (be != ALP_INFERENCE_BACKEND_AUTO) {
+				out[n++] = be;
+				if (be == ALP_INFERENCE_BACKEND_CPU) {
+					break;
+				}
+			}
+		}
+		csv = end ? end + 1 : csv + len;
+	}
+	return n;
+}
+
+/* Tiebreak rank between two fitting NPU targets (lower wins): the SoM
+ * auto_order position; with no auto_order every backend ranks 0 (first fitting wins). */
+static size_t _rank(alp_inference_backend_t be, const alp_model_select_env_t *env)
+{
+	if (env->n_auto_order > 0u) {
+		for (size_t i = 0; i < env->n_auto_order; ++i) {
+			if (env->auto_order[i] == be) {
+				return i;
+			}
+		}
+		return env->n_auto_order;
+	}
+	return 0u;
+}
+
 /* Every format string the .alpmodel writer (scripts/alp_model/manifest.py)
  * can emit must have an explicit case here.  This used to default every
  * unrecognised string to ALP_INFERENCE_MODEL_TFLITE: a typo'd or newly added
@@ -79,7 +119,17 @@ static bool _silicon_available(const char *ref, const alp_model_select_env_t *e)
 	return false;
 }
 
-/* SRAM gate: 0 budget = unknown -> always fits. */
+/* SRAM gate: 0 budget = unknown -> always fits, permissively.  This stays a
+ * pass rather than a fail-closed reject (issue #1731): ALP_SOC_NPU_ARENA_SRAM_KIB
+ * is 0 on all nine real SoCs today because the figure is an integration
+ * decision (how much on-die SRAM this SKU's firmware reserves for the NPU
+ * tensor arena vs. everything else), not a datasheet constant any vendor
+ * publishes -- rejecting every selection on every real SoC until that
+ * per-SKU decision is made would break inference on hardware that works
+ * today, over a fact nobody can currently supply.  What changes is that the
+ * pass is no longer SILENT: alp_model_select() now flags every such
+ * unverified pass on its result (arena_fit_unverified) instead of returning
+ * ALP_OK indistinguishably from a budget that was actually checked. */
 static bool _fits(const alp_model_target_t *t, const alp_model_select_env_t *e)
 {
 	return e->arena_sram_kib == 0u || t->req_sram_kib <= e->arena_sram_kib;
@@ -137,11 +187,8 @@ alp_status_t alp_model_select(const alp_model_t            *m,
 			best = (int)i;
 			continue;
 		}
-		/* tiebreak: SoM preferred_backend wins */
-		alp_inference_backend_t cur = _backend_enum(m->targets[best].backend);
-
-		if (env->preferred_backend != ALP_INFERENCE_BACKEND_AUTO && be == env->preferred_backend &&
-		    cur != env->preferred_backend) {
+		/* tiebreak: SoM auto_order (else preferred_backend) wins */
+		if (_rank(be, env) < _rank(_backend_enum(m->targets[best].backend), env)) {
 			best = (int)i;
 		}
 	}
@@ -192,5 +239,9 @@ alp_status_t alp_model_select(const alp_model_t            *m,
 	out->target_index = (uint32_t)best;
 	out->backend      = _backend_enum(t->backend);
 	out->arena_bytes  = t->arena_bytes;
+	/* The winning target only ever passed the SRAM gate unconditionally
+	 * (not by comparison) when the device published no arena budget at
+	 * all -- see _fits() and the field's own doc comment. */
+	out->arena_fit_unverified = (env->arena_sram_kib == 0u);
 	return ALP_OK;
 }

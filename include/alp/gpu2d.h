@@ -22,9 +22,14 @@
  *   - AEN-family : D/AVE 2D hardware block (SDK backend; no vendor
  *                  SDK dependency in app code).  Bench-unverified
  *                  today -- see src/backends/gpu2d/alif_dave2d.c.
+ *   - RZ/V2N Linux: the Mali-G31 through the vendor EGL/GLES stack
+ *                  (src/backends/gpu2d/yocto_gles.c, opt-in
+ *                  ALP_SDK_USE_GPU2D_GLES, bench-unverified); falls
+ *                  back to the CPU path per op or when no GPU context
+ *                  exists.  See docs/v2n-mali-gpu.md.
  *   - all others : portable software fallback (CPU fill/blit/blend;
  *                  src/backends/gpu2d/sw_fallback.c).  This is what
- *                  V2N, i.MX 93 (whose 2D engine is PXP, not a
+ *                  V2N without the GPU stack, i.MX 93 (whose 2D engine is PXP, not a
  *                  GPU2D peer -- see ADR 0008), and ALP_OS=yocto
  *                  Linux builds use.  Plain-CMake bare-metal builds
  *                  still link the NOSUPPORT stub (no backend
@@ -70,16 +75,23 @@ extern "C" {
 /** Pixel format for 2D surfaces.  Backends honour the subset their
  *  HW supports; unsupported formats return ALP_ERR_NOSUPPORT.
  *  Field-level meanings:
- *   - ARGB8888: 32-bit, A:R:G:B = 8:8:8:8 (default for DAVE2D).
- *   - RGB565: 16-bit, R:G:B = 5:6:5.
  *   - A8: 8-bit alpha only (useful for masks).
+ *   - RGB565: 16-bit, R:G:B = 5:6:5.
  *   - RGB888: 24-bit packed; backend-defined byte order.
- *   - RGBA8888: 32-bit, R:G:B:A = 8:8:8:8 (alternate ordering). */
+ *   - ARGB8888: 32-bit, A:R:G:B = 8:8:8:8 (default for DAVE2D).
+ *   - RGBA8888: 32-bit, R:G:B:A = 8:8:8:8 (alternate ordering).
+ *
+ *  RGB565 / RGB888 / ARGB8888 are numbered to agree with @ref
+ *  alp_pixfmt_t's members of the same name (issue #1647) -- a caller
+ *  wiring a display's advertised @ref alp_pixfmt_t straight into a
+ *  GPU2D surface no longer gets a silently-relabelled format.  A8 and
+ *  RGBA8888 have no @ref alp_pixfmt_t counterpart, so they take the
+ *  remaining values; keep it that way if either enum grows. */
 typedef enum {
-	ALP_GPU2D_FMT_ARGB8888 = 0,
+	ALP_GPU2D_FMT_A8       = 0,
 	ALP_GPU2D_FMT_RGB565   = 1,
-	ALP_GPU2D_FMT_A8       = 2,
-	ALP_GPU2D_FMT_RGB888   = 3,
+	ALP_GPU2D_FMT_RGB888   = 2,
+	ALP_GPU2D_FMT_ARGB8888 = 3,
 	ALP_GPU2D_FMT_RGBA8888 = 4,
 } alp_gpu2d_format_t;
 
@@ -90,7 +102,15 @@ typedef enum {
  *     src-over: a transparent src leaves dst untouched, an opaque
  *     src replaces it).
  *   - ADDITIVE: dst = src + dst (clamped).
- *   - MULTIPLY: dst = src * dst. */
+ *   - MULTIPLY: dst = src * dst.
+ *
+ *   Blended channels may differ by 1 between backends: the software
+ *   fallback divides by 255 with rounding, the Alif D/AVE 2D engine
+ *   scales by 1/256 (bench: 0x80FF0000 over 0xFF0000FF gives red 0x80
+ *   in software, 0x7F on the engine), and the Linux EGL/GLES backend
+ *   blends in the GPU's own fixed-point precision (tolerance the same
+ *   1 per channel, not measured on silicon). REPLACE, fills and copies are
+ *   exact everywhere. */
 typedef enum {
 	ALP_GPU2D_BLEND_REPLACE  = 0,
 	ALP_GPU2D_BLEND_SRC_OVER = 1,
@@ -154,7 +174,8 @@ alp_gpu2d_t *alp_gpu2d_open(void);
  * @param[in] argb_color  Colour in ARGB8888 (backend converts).
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
- *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT.
+ *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_TIMEOUT (engine did not go idle; backend-dependent).
  */
 alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t               *handle,
                                  const alp_gpu2d_surface_t *dst,
@@ -185,7 +206,8 @@ alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t               *handle,
  * @param[in] w, h    Rect size (pixels).
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
- *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT.
+ *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_TIMEOUT (engine did not go idle; backend-dependent).
  */
 alp_status_t alp_gpu2d_blit(alp_gpu2d_t               *handle,
                             const alp_gpu2d_surface_t *src,
@@ -212,7 +234,8 @@ alp_status_t alp_gpu2d_blit(alp_gpu2d_t               *handle,
  * @param[in] mode    One of @ref alp_gpu2d_blend_mode_t.
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL /
- *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT.
+ *         ALP_ERR_OUT_OF_RANGE / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_TIMEOUT (engine did not go idle; backend-dependent).
  */
 alp_status_t alp_gpu2d_blend(alp_gpu2d_t               *handle,
                              const alp_gpu2d_surface_t *src,

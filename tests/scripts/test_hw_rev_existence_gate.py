@@ -26,6 +26,7 @@ Run locally:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -89,8 +90,8 @@ def test_status_reserved_and_no_status_key_both_pass():
     ("aen", "r2"),      # status: production
     ("aen", "r3"),      # status: reserved
     ("v2n", "r1"),      # status: production
-    ("v2n", "r2"),      # status: reserved (was status-less pre-#1025 status half)
-    ("v2n-m1", "r2"),   # status: reserved (was status-less pre-#1025 status half)
+    ("v2n", "r2"),      # status: production
+    ("v2n-m1", "r2"),   # status: production
     ("imx93", "r1"),    # status: tbd, and an in-tree example builds it
 ])
 def test_family_revision_known_passes_every_real_status_in_tree(family, rev):
@@ -163,8 +164,8 @@ def test_revision_buildable_is_false_for_a_malformed_present_entry():
     ("aen", "r1", True),         # status: production
     ("aen", "r3", False),        # status: reserved
     ("v2n", "r1", True),         # status: production
-    ("v2n", "r2", False),        # status: reserved
-    ("v2n-m1", "r2", False),     # status: reserved
+    ("v2n", "r2", True),         # status: production (board 2625-R2)
+    ("v2n-m1", "r2", True),      # status: production (board 2625-R2)
     ("imx93", "r1", False),      # status: tbd -- the KNOWN FALLOUT
 ])
 def test_family_revision_buildable_matches_every_real_status_in_tree(family, rev, expected):
@@ -397,7 +398,8 @@ def _run_validate_board_yaml(path: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(REPO / "scripts" / "validate_board_yaml.py"),
          "--input", str(path), "--no-color"],
-        cwd=REPO, capture_output=True, text=True, check=False,
+        cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
     )
 
 
@@ -462,9 +464,9 @@ def test_board_preset_status_enum_matches_hw_revisions_v1():
     import json
 
     family_schema = json.loads(
-        (METADATA_ROOT / "schemas/hw-revisions-v1.schema.json").read_text())
+        (METADATA_ROOT / "schemas/hw-revisions-v1.schema.json").read_text(encoding="utf-8"))
     preset_schema = json.loads(
-        (METADATA_ROOT / "schemas/board-preset.schema.json").read_text())
+        (METADATA_ROOT / "schemas/board-preset.schema.json").read_text(encoding="utf-8"))
 
     family_enum = family_schema["$defs"]["hw_rev_entry"]["properties"]["status"]["enum"]
     preset_enum = preset_schema["properties"]["hw_revisions"]["additionalProperties"][

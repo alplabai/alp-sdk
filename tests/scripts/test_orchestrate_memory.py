@@ -22,8 +22,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import (              # noqa: E402
-    REPO,
     V2N_HAPPY,
+    _scratch_metadata_root,
+    _synthetic_aen_unresolved_base_root,
     _synthetic_nx9101_root,
     _write_board,
 )
@@ -54,12 +55,12 @@ ipc:
 
 
 # AEN701 resolves its mailbox controller (alif_mhuv2), so it sails past
-# the controller-TBD guard -- but its memory map is derived from the SoC
-# variant JSON, which carries no per-region `base` yet. Before the
-# region.get("base") fix this crashed resolve_carve_outs with `KeyError:
-# 'base'`; it MUST instead land a clean blocked carve-out.  Regression
-# guard for that crash.  (E1M-AEN801 used to share this fixture -- #1069
-# gave it a real `memory_map:`, so it now RESOLVES instead; see
+# the controller-TBD guard -- but its own `memory_map:` (metadata/
+# e1m_modules/E1M-AEN701.yaml) still keeps `mram_main`'s `base: "TBD"`.
+# Before the region.get("base") fix this crashed resolve_carve_outs with
+# `KeyError: 'base'`; it MUST instead land a clean blocked carve-out.
+# Regression guard for that crash.  (E1M-AEN801 used to share this fixture
+# -- #1069 gave it a real `memory_map:`, so it now RESOLVES instead; see
 # test_resolve_carve_outs_aen801_resolves_after_1069_memory_map below.)
 AEN701_UNMAPPED = """
 som:
@@ -180,9 +181,22 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
 ) -> None:
     """AEN presets have a RESOLVED mailbox controller (alif_mhuv2), so
     they proceed past the controller-TBD guard into the region allocator.
-    A stock (no memory_map:) AEN preset is still base-unmapped, so
-    resolve_carve_outs MUST emit a blocked carve-out rather than crash
-    with `KeyError: 'base'`."""
+    E1M-AEN701's `memory_map:` authors seven flash-class regions
+    (including `mram_main`, resolved since #2053), so resolve_carve_outs
+    MUST emit a blocked carve-out rather than crash with `KeyError:
+    'base'`.
+
+    #1365 split B changed the reason text this asserts. Pre-split-B,
+    `mram_main` was the sole candidate (no `carveout:` key excluded it), so
+    the block came from the base-unmapped check ("... hasn't been HW-mapped
+    yet") in `_region_top_init()`. Split B derives eligibility against the
+    SoC's declared MRAM aperture first: all seven regions are excluded as
+    flash-class (contained in the aperture) -- `mram_main`'s extent now
+    equals the aperture exactly (the whole-device alias, #2053), so
+    `classify_region()` calls it `flash` outright rather than reaching the
+    `write_authority`-keyed `unresolved` tail its `base: "TBD"` used to
+    route it through. Every candidate is excluded before the
+    base-unmapped check ever runs, and the reason names that."""
     path = _write_board(tmp_path, body)
     project = load_board_yaml(path)
     resolved = resolve_carve_outs(project)        # must not raise
@@ -191,7 +205,68 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
     assert entry.status == "blocked"
     assert entry.reason is not None
     assert sku in entry.reason
-    assert "HW-mapped" in entry.reason
+    assert "ineligible for an IPC carve-out" in entry.reason
+    assert "mram_main" in entry.reason
+    assert (
+        "'mram_main' (region 'mram_main' [0x80000000, 0x80580000) is "
+        "flash-class" in entry.reason)
+
+
+# ---------------------------------------------------------------------
+# Wiring coverage (#2096): `_region_ipc_eligibility()`'s `cls ==
+# "unresolved"` tail above is reached through the FULL pipeline
+# (load_board_yaml -> resolve_carve_outs), not a direct call into the
+# private helper. `mram_main.base` resolves to a real address on every
+# shipped AEN preset (#2053, #2102), so no shipped preset authors an
+# unresolved `memory_map:` base any more, and the tests that cover this
+# leg elsewhere in this file are direct calls into the private helper --
+# they keep the leg itself green but prove nothing about the routing
+# that gets a row into it. This synthetic AEN-shaped preset
+# (`_synthetic_aen_unresolved_base_root`) keeps that routing covered
+# instead. A future change that filtered unresolved rows out earlier --
+# say in `_candidate_regions()`, before `_region_ipc_eligibility()` is
+# ever called -- would leave the direct-call leg pins green while this
+# test alone catches the dead wiring.
+# ---------------------------------------------------------------------
+
+SYNTHETIC_AEN_UNRESOLVED_BASE = """
+name: test-synthetic-aen-carveout
+som:
+  sku: E1M-AEN899
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: zephyr
+    app: ./m55_he
+
+ipc:
+  - kind: rpmsg
+    endpoints: [m55_hp, m55_he]
+    carve_out_kb: 64
+    name: alp_test_rpmsg
+"""
+
+
+def test_resolve_carve_outs_routes_an_unresolved_base_through_the_full_pipeline(
+        tmp_path: Path) -> None:
+    import alp_orchestrate
+
+    meta = _synthetic_aen_unresolved_base_root(tmp_path)
+    path = _write_board(tmp_path, SYNTHETIC_AEN_UNRESOLVED_BASE)
+    project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
+    resolved = resolve_carve_outs(project)         # must not raise
+
+    assert len(resolved) == 1
+    entry = resolved[0]
+    assert entry.status == "blocked"
+    assert entry.reason is not None
+    assert "E1M-AEN899" in entry.reason
+    assert "ineligible for an IPC carve-out" in entry.reason
+    assert "mram_main" in entry.reason
+    assert "write_authority is 'composite'" in entry.reason
 
 
 def test_resolve_carve_outs_aen801_stays_blocked_after_1069_memory_map(
@@ -205,8 +280,11 @@ def test_resolve_carve_outs_aen801_stays_blocked_after_1069_memory_map(
     shared-memory ring inside non-volatile flash just because the region
     has a real `base` (needed only for the board generator's DTS
     partition table, see metadata/e1m_modules/E1M-AEN801.yaml). The only
-    other both-core-accessible region, `mram_main`, deliberately keeps
-    `base: TBD`, so the entry blocks there instead."""
+    other both-core-accessible region, `mram_main`, is ALSO excluded --
+    its `base` resolved to `0x80000000` (#2053), so its extent equals the
+    aperture exactly (the whole-device alias) and it is `flash`-class
+    too, not the `write_authority`-keyed unresolved-base refusal it used
+    to hit while its `base` was still `"TBD"`."""
     path = _write_board(tmp_path, AEN801_MAPPED)
     project = load_board_yaml(path)
     resolved = resolve_carve_outs(project)
@@ -258,26 +336,8 @@ def test_resolve_carve_outs_blocks_on_no_reserved_channel(
     """
     import alp_orchestrate
 
-    # Compose the synthetic SoM preset on a scratch metadata root.
-    meta = tmp_path / "metadata"
-    e1m = meta / "e1m_modules"
-    socs = meta / "socs" / "renesas" / "rzv2n"
-    schemas = meta / "schemas"
-    for d in (e1m, socs, schemas):
-        d.mkdir(parents=True)
-
-    # Symlink / copy the v2 board-config schema + SoC + som-preset
-    # schemas from the real repo so the validator finds them.
-    import shutil
-    real_meta = REPO / "metadata"
-    shutil.copy(real_meta / "schemas" / "board.schema.json",
-                schemas / "board.schema.json")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
-    shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
-                schemas / "soc-spec-v1.schema.json")
-    shutil.copy(real_meta / "socs" / "renesas" / "rzv2n" / "n44.json",
-                socs / "n44.json")
+    meta, e1m = _scratch_metadata_root(
+        tmp_path, ("renesas", "rzv2n", "n44.json"))
 
     preset = e1m / "E1M-V2N101.yaml"
     preset.write_text(textwrap.dedent("""

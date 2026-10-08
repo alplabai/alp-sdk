@@ -60,6 +60,7 @@
 #include <alp/display.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
 #include "display_ops.h"
 
 #define ALP_DISPLAY_DEV_OR_NULL(idx) \
@@ -74,6 +75,20 @@ static const struct device *const _devs[] = {
 	ALP_DISPLAY_DEV_OR_NULL(3),
 };
 
+/** The panel's `mount-rotation` (tes,cdc-2.1.yaml), per alias: clockwise degrees a
+ *  producer pre-rotates its image. 0 where the node does not carry the property. */
+#define ALP_DISPLAY_ROT(idx) \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_display, idx)), okay), \
+	            (DT_PROP_OR(DT_ALIAS(_CONCAT(alp_display, idx)), mount_rotation, 0)), \
+	            (0))
+
+static const uint16_t _rots[] = {
+	ALP_DISPLAY_ROT(0),
+	ALP_DISPLAY_ROT(1),
+	ALP_DISPLAY_ROT(2),
+	ALP_DISPLAY_ROT(3),
+};
+
 /** Scratch buffer for the software clear fallback (drivers without a
  *  clear op).  Sized per-chunk, not per-frame: clear() walks the
  *  panel in scratch-sized display_write calls, so the static cost
@@ -86,24 +101,11 @@ static const uint8_t _zeros[CONFIG_ALP_SDK_DISPLAY_CLEAR_CHUNK_BYTES];
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 /** Map a single Zephyr display_pixel_format bit to alp_pixfmt_t.
@@ -146,6 +148,7 @@ static alp_status_t z_open(const alp_display_config_t  *cfg,
                            alp_display_backend_state_t *state,
                            alp_capabilities_t          *caps_out)
 {
+	(void)caps_out;
 	if (cfg->display_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
 	}
@@ -188,8 +191,7 @@ static alp_status_t z_open(const alp_display_config_t  *cfg,
 		return _errno_to_alp(err);
 	}
 
-	state->be_data  = (void *)dev;
-	caps_out->flags = 0u; /* no instance-level cap flags defined for display */
+	state->be_data = (void *)dev;
 	return ALP_OK;
 }
 
@@ -208,9 +210,15 @@ static alp_status_t z_get_caps(alp_display_backend_state_t *state, alp_display_c
 		 * third party re-formatted the panel behind our back. */
 		return ALP_ERR_NOSUPPORT;
 	}
-	out->width  = zcaps.x_resolution;
-	out->height = zcaps.y_resolution;
-	out->format = fmt;
+	out->width    = zcaps.x_resolution;
+	out->height   = zcaps.y_resolution;
+	out->format   = fmt;
+	out->rotation = 0;
+	for (size_t i = 0; i < ARRAY_SIZE(_devs); i++) {
+		if (_devs[i] == dev) {
+			out->rotation = _rots[i];
+		}
+	}
 	return ALP_OK;
 }
 

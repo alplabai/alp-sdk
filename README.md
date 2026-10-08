@@ -13,15 +13,6 @@ built on the **E1M open-standard form factor**. It gives you one C/C++ API
 vendor's SDK on top of ARM CMSIS. Change `som.sku:` in a project's
 `board.yaml`, rebuild, ship — within a SoM family, no source changes.
 
-> [!WARNING]
-> **Partially silicon-verified.** Every chip driver, peripheral wrapper, and
-> example builds clean and passes CI on `native_sim`. Two SoM families carry
-> real-silicon evidence today: **E1M-X V2N** (GD32-bridge stack, verified
-> v0.6) and **E1M-AEN801** (peripheral matrix + NPU inference + CC3501E
-> bridge, verified v0.8). The rest (i.MX 93, V2M/DEEPX, AEN301/401/501/601/701)
-> remain pre-silicon. Per-feature status: [`docs/test-plan.md`](docs/test-plan.md);
-> full caveats: [Status](README.md#status) below.
-
 Rendered docs: [**docs.alplab.ai/sdk/introduction**](https://docs.alplab.ai/sdk/introduction) ·
 community: [**community.alplab.ai**](https://community.alplab.ai/) ·
 issues: [**github.com/alplabai/alp-sdk/issues**](https://github.com/alplabai/alp-sdk/issues)
@@ -104,7 +95,7 @@ without rewriting the layer above.
   │               │    │                                                                        │
   │               │    │  Inference  ──  the .alpmodel runtime (where on-device AI runs)        │
   │               │    │  ─ alp_inference_open_alpmodel()  loads the fat .alpmodel              │
-  │               │    │  ─ selects the blob: silicon-ref + SRAM-fit + preferred_backend        │
+  │               │    │  ─ selects the blob: silicon-ref + SRAM-fit + SoM auto_order          │
   │               │    │  ─ dispatches →  Ethos-U · DRP-AI3 · DEEPX DX-M1 · CPU / TFLM          │
   │               │    │                                                                        │
   │               │    │  IoT / BLE               Security               Storage                │
@@ -121,7 +112,7 @@ without rewriting the layer above.
   │               │    │                                                                        │
   │               │    │  ── 80+ Tier-1 chip drivers + Tier-2 community repo:                   │
   │               │    │        lsm6dso, bmi323, bmp581, icm42670, ina236, tmp112,              │
-  │               │    │        tcal9538, rv3028c7, 24c128, cc3501e, ssd13xx, …                 │
+  │               │    │        tcal9538, rv3028c7, 24c128, cc3501e, ssd1306,                   │
   │               │    │  ── User libraries (board.yaml libraries:):                            │
   │               │    │        ETL · fmt · nlohmann_json · doctest · LVGL · MbedTLS ·          │
   │               │    │        CMSIS-DSP · LittleFS                                            │
@@ -134,9 +125,10 @@ without rewriting the layer above.
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
-  │ Vendor SDK    │ ─► │  Alif Ensemble (AEN) · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1      │
+  │ Vendor SDK    │ ─► │  Alif Ensemble (AEN) · Renesas RZ/V2N · NXP i.MX 93* · DEEPX DX-M1     │
   │               │    │  NPU runtimes dispatched into: Ethos-U/Vela · DRP-AI · DEEPX dx_rt     │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
+  * E1M-NX9101 (i.MX 93) is a target of the SDK, not a module Alp Lab currently produces.
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ HW + HAL      │ ─► │  E1M (35×35 mm) + E1M-X (45×65 mm) SoMs  ·  NPU silicon                │
@@ -164,12 +156,12 @@ See [ADR 0001](docs/adr/0001-wrapper-on-top-of-zephyr.md) and
 ## Portability
 
 Swap-and-run is measured **within** a SoM family, against the generated
-swap-test matrix: the 6 released E1M-AEN SKUs pass all three canonical
-examples (18 / 21 E1M cells — the remaining 3 are `E1M-NX9101`, a
+swap-test matrix: the 7 released E1M-AEN SKUs pass all three canonical
+examples (21 / 24 E1M cells — the remaining 3 are `E1M-NX9101`, a
 placeholder MPN whose only hw_rev is `status: tbd`, refused by the
-hw_rev-buildable gate and so not yet buildable at all), and the 4 E1M-X
-SKUs pass two of three (8 / 12 cells — `adc-voltmeter` fails on all
-four). Matrix at
+hw_rev-buildable gate and so not yet buildable at all), and the 6 E1M-X
+SKUs pass two of three (12 / 18 cells — `adc-voltmeter` fails on all
+six). Matrix at
 [`docs/portability-matrix.md`](docs/portability-matrix.md). Crossing
 between E1M and E1M-X is intentionally out of scope: they're separate
 product lines with separate pinout namespaces
@@ -180,14 +172,18 @@ examples: [`docs/portability.md`](docs/portability.md).
 
 | Family | Form factor | SKUs | Primary silicon | AI throughput | OS targets |
 |---|---|---|---|---|---|
-| **E1M-AEN** | E1M (35×35 mm) | `E1M-AEN301/401/501/601/701/801` | Alif Ensemble E3–E8 (Cortex-M55 + optional A32 + Ethos-U55, U85 on E4/E6/E8) | up to ~1024 GOPS | Zephyr · bare-metal |
-| **E1M-X V2N** | E1M-X (45×65 mm) | `E1M-V2N101/102` | Renesas RZ/V2N (4× A55 + M33 + DRP-AI3) | 4 TOPS | Yocto |
-| **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M101/102` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto |
-| **E1M-i.MX93** | E1M (35×35 mm) | TBD | NXP i.MX 93 (2× A55 + M33 + Ethos-U65) | ~0.5 TOPS | Yocto + Zephyr |
+| **E1M-AEN** | E1M (35×35 mm) | `E1M-AEN301/401/501/601/701/801` + `E1M-AEN803` | Alif Ensemble E3–E8 (Cortex-M55 + optional A32 + Ethos-U55, U85 on E4/E6/E8) | up to ~1024 GOPS | Zephyr · bare-metal |
+| **E1M-X V2N** | E1M-X (45×65 mm) | `E1M-V2N101` | Renesas RZ/V2N (4× A55 + M33 + DRP-AI3) | 4 TOPS | Yocto (A55) · Zephyr (M33 system manager) |
+| **E1M-X V2N** | E1M-X (45×65 mm) | `E1M-V2N102` | Renesas RZ/V2N (4× A55 + M33 + DRP-AI3) | 4 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
+| **E1M-X V2N** | E1M-X (45×65 mm) | `E1M-V2N103` | Renesas RZ/V2N (4× A55 + M33 + DRP-AI3) | 4 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
+| **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M101` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55) · Zephyr (M33 system manager) |
+| **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M102` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
+| **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M103` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
+| **E1M-i.MX93** | E1M (35×35 mm) | TBD | NXP i.MX 93 (2× A55 + M33 + Ethos-U65) | ~0.5 TOPS | Yocto · Zephyr — not currently produced |
 
 All modules share the **E1M open-standard form factor** — pinout + mechanical
 spec in [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec) (pinned
-v1.1). Evaluation kits: **E1M EVK** and **E1M-X EVK**, per-EVK detail in
+v1.0). Evaluation kits: **E1M EVK** and **E1M-X EVK**, per-EVK detail in
 [`docs/boards/`](docs/boards/).
 
 ## Firmware engineers, start here
@@ -218,14 +214,13 @@ upstream `bitbake` constraint. Per-OS quickstart + gotchas:
 
 ## Status
 
-**Current ramp — paper-correct, mostly pre-HIL; partial silicon-verified
-additions.** Code merged ≠ verified: every claim is tracked in
+**Verification status.** Code merged ≠ verified: every claim is tracked in
 [`docs/test-plan.md`](docs/test-plan.md), and a release doesn't tag until
 its gating rows flip to ✅. Treat register addresses, timing values, and
 per-SoM accelerator wiring as paper-correct only until their test-plan row
 flips. Silicon-verified today: the V2N GD32-bridge campaign (since v0.6)
-and AEN801 (15/17 peripheral apps) + CC3501E (Wi-Fi/BLE, GPIO proxy) since
-v0.8; breadth beyond these families remains pre-HIL. Per-driver status also
+AEN801 (15/17 peripheral apps) + CC3501E (Wi-Fi/BLE, GPIO proxy) since
+v0.8, and E1M-V2M103 (DEEPX DX-M1 inference, GD32 bridge, provisioning flow); breadth beyond these families remains pre-HIL. Per-driver status also
 lives in `metadata/chips/<name>.yaml`'s `verification:` block and as
 `@par Verification status: [UNTESTED]` Doxygen tags.
 

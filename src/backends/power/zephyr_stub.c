@@ -10,11 +10,17 @@
  *
  * Behaviour differs from the Camera / Display / GPU2D stubs:
  * stub_open returns ALP_OK so the dispatcher hands the caller a
- * real handle, and stub_configure_wake_source accepts the bitmap
- * silently.  request_sleep (and both power_profile ops further
- * below) is the actual "not supported" gate.  Customer wake-bitmap
- * setup code links + runs unchanged; only the actual sleep / profile
- * call sees the ALP_ERR_NOSUPPORT status.
+ * real handle, and reports *wake_caps_out = 0 (this backend can arm
+ * zero real wake sources).  The dispatcher (src/power_dispatch.c)
+ * enforces the reported-capability + error contract centrally against
+ * that value -- ANY non-empty bitmap is refused with ALP_ERR_NOSUPPORT
+ * at alp_power_configure_wake_source() time, before this backend's own
+ * op even runs, so setup code that ignores wake_caps finds out at
+ * configuration time rather than after a sleep that could never wake
+ * (#1812).  request_sleep is the final backstop for a caller that
+ * skips configure_wake_source entirely (e.g. a wake_after_ms-only
+ * request): it always returns ALP_ERR_NOSUPPORT too, since this
+ * backend can never actually sleep.
  *
  * Real backends already exist and out-rank this wildcard at higher
  * priority on the silicon_refs they claim: src/backends/power/
@@ -42,25 +48,33 @@
 
 #include "power_ops.h"
 
-static alp_status_t stub_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out)
+static alp_status_t
+stub_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out, uint32_t *wake_caps_out)
 {
 	(void)state;
-	(void)caps_out;
+	(void)caps_out; /* no alp_instance_cap_t bits apply to power */
 	/* Successful open is required so the dispatcher hands the caller
      * a handle; alp_power_open always returns a valid pointer.  The
      * real "this feature isn't implemented" surface is at
-     * request_sleep below. */
+     * configure_wake_source / request_sleep below.
+     *
+     * wake_caps_out = 0: this backend can arm zero real wake sources.
+     * The dispatcher enforces that centrally against every
+     * configure_wake_source() call (#1813). */
+	if (wake_caps_out != NULL) {
+		*wake_caps_out = 0u;
+	}
 	return ALP_OK;
 }
 
 static alp_status_t stub_configure_wake_source(alp_power_backend_state_t *state,
                                                uint32_t                   wake_bitmap)
 {
+	/* The dispatcher already rejected any bitmap outside wake_caps
+     * (0 for this backend, see stub_open) before this op runs -- only
+     * ALP_POWER_WAKE_NONE can reach here, which is trivially OK. */
 	(void)state;
 	(void)wake_bitmap;
-	/* Accept any bitmap silently; the stub's request_sleep will fail
-     * anyway, and the dispatcher's mirror keeps the bitmap visible
-     * for the INVAL guard in alp_power_request_sleep. */
 	return ALP_OK;
 }
 
@@ -70,21 +84,30 @@ static alp_status_t stub_request_sleep(alp_power_backend_state_t *state,
                                        alp_power_wake_info_t     *info)
 {
 	(void)state;
+	(void)mode;
 	(void)wake_after_ms;
+	/* realised_mode = RUN, never the requested mode: this call always
+     * fails, so nothing was realised (matches yocto_drv.c's y_request_sleep
+     * on its own failure path -- the three backends now agree, #1813
+     * review). */
 	if (info != NULL) {
-		info->realised_mode = mode;
+		info->realised_mode = ALP_POWER_MODE_RUN;
 		info->wake_source   = 0u;
 		info->slept_ms      = 0u;
 	}
 	/* No real PM backend on this build: report NOSUPPORT (matching the
-     * <alp/power.h> portable contract), not NOT_IMPLEMENTED.  open() +
-     * configure_wake_source still succeed so setup code links/runs. */
+     * <alp/power.h> portable contract), not NOT_IMPLEMENTED.  open()
+     * still succeeds so setup code links/runs; the dispatcher already
+     * rejects a non-empty wake bitmap before this point (see
+     * stub_open), so this is the backstop for a wake_after_ms-only
+     * (bitmap-free) request. */
 	return ALP_ERR_NOSUPPORT;
 }
 
 static const alp_power_ops_t _ops = {
 	.open                  = stub_open,
 	.configure_wake_source = stub_configure_wake_source,
+	.configure_retention   = NULL, /* dispatcher default: NONE ok, else NOSUPPORT */
 	.request_sleep         = stub_request_sleep,
 	.close                 = NULL,
 };

@@ -15,6 +15,11 @@ Workflow:
     #    folding explicitly here keeps the diff reviewable before the bump.
     python3 scripts/assemble_changelog.py
 
+    # 0.5. This tool itself refuses to bump while [Unreleased] carries a
+    #    drifted citation (alp-sdk#2350 round 2, verify_changelog_citations()
+    #    below) -- fix one by hand if it does:
+    python3 scripts/check_changelog_citations.py --fix
+
     # 1. Verify everything looks ready (no-op dry run)
     python3 scripts/bump_version.py --to 1.0.0 --dry-run
 
@@ -39,14 +44,30 @@ Bump rules (per docs/release-policy.md):
 The script doesn't enforce these -- the operator chooses the version
 and the ABI workflow gates whether it was correct.
 
+Pre-release cuts (issue #1902 -- a build made from an rc must identify
+itself as one, not as its eventual GA version):
+
+    python3 scripts/bump_version.py --to 1.0.0-rc1
+
+Ordinary SemVer 2.0.0 pre-release syntax, not a bespoke flag.  This writes
+the FULL "1.0.0-rc1" into metadata/sdk_version.yaml's `version:` and
+include/alp/version.h's ALP_VERSION_STRING (ALP_VERSION_MAJOR/MINOR/PATCH
+stay the plain core integers, 1/0/0).  pyproject.toml's `[project]` version
+and the alp_banner.c sample line stay pinned to the core "1.0.0" -- PEP 440
+doesn't accept a bare hyphenated suffix, and neither is the identification
+surface; the banner's *code* always prints the live ALP_VERSION_STRING at
+runtime regardless of what this static sample line says.  CHANGELOG.md is
+left untouched: an rc has no GA section of its own yet, and slicing one
+here would starve `.github/workflows/release.yml`'s documented pre-release
+fallback (it reads `## [Unreleased]` when the core `## [vX.Y.Z]` heading
+doesn't exist) of any content to publish.  The later GA bump
+(`--to 1.0.0`, no suffix) does the real CHANGELOG slice.
+
 What this touches:
 
     metadata/sdk_version.yaml       -- the declared version.
     CHANGELOG.md                    -- slice [Unreleased] into the new version section.
     docs/abi/v<MAJOR.MINOR>-snapshot.json  -- regenerated.
-    alp.lock                        -- sdk.version + metadata digest, regenerated
-                                       so the "alp.lock in sync" gate passes on the
-                                       release commit.
     include/alp/version.h           -- ALP_VERSION_MAJOR/MINOR/PATCH +
                                        ALP_VERSION_STRING macros;
                                        enforced by scripts/check_version_doc_sync.py.
@@ -56,6 +77,15 @@ What this touches:
                                        file's doc-comment (the code always
                                        prints the live ALP_VERSION_STRING);
                                        enforced by scripts/check_version_doc_sync.py.
+    tests/fixtures/emit-snapshots/  -- the `--emit` goldens (#1461):
+                                       build-plan's sdkVersion field reads
+                                       metadata/sdk_version.yaml directly, and
+                                       a released scaffold's README doc links
+                                       pin to v<version>, so both go stale on
+                                       every bump; regenerated the same way
+                                       `check_emit_snapshots.py --update`
+                                       already does by hand, enforced by
+                                       scripts/check_emit_snapshots.py.
 
 The README/docs current-state prose is de-versioned (single-source
 version derived from metadata/sdk_version.yaml), so bump touches no
@@ -89,7 +119,8 @@ PYPROJECT = REPO / "pyproject.toml"
 BANNER_C = REPO / "src" / "zephyr" / "alp_banner.c"
 ABI_DIR = REPO / "docs" / "abi"
 ABI_SNAPSHOT_TOOL = REPO / "scripts" / "abi_snapshot.py"
-ALP_LOCK_TOOL = REPO / "scripts" / "west_commands" / "alp_lock.py"
+EMIT_SNAPSHOT_TOOL = REPO / "scripts" / "check_emit_snapshots.py"
+CHANGELOG_CITATIONS_TOOL = REPO / "scripts" / "check_changelog_citations.py"
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([\w.]+))?$")
 
@@ -153,7 +184,23 @@ def slice_changelog(new_version: str, dry_run: bool) -> None:
     the new [vX] heading, so every fragment authored this cycle would
     silently ship with no changelog entry at all. Run
     `python3 scripts/assemble_changelog.py` first.
+
+    No-op (prints and returns) when `new_version` carries a SemVer
+    pre-release suffix (#1902): an rc has no GA CHANGELOG section of its
+    own yet, and `.github/workflows/release.yml`'s "Verify + slice
+    CHANGELOG" step only ever searches for the CORE version's heading,
+    falling back to `## [Unreleased]` for a pre-release tag. Slicing here
+    would create a `## [vX.Y.Z-rcN]` heading that step never looks for AND
+    leave `## [Unreleased]` freshly emptied -- the exact "empty body"
+    failure that step's own fallback exists to avoid. The GA bump
+    (`--to X.Y.Z`, no suffix) does the real slice.
     """
+    _major, _minor, _patch, pre = parse_version(new_version)
+    if pre:
+        print(f"  skipped {CHANGELOG.relative_to(REPO)}: {new_version} is a "
+              f"pre-release; '[Unreleased]' stays open until the GA bump")
+        return
+
     pending = _pending_changelog_fragments()
     if pending:
         names = ", ".join(p.name for p in pending)
@@ -186,6 +233,52 @@ def slice_changelog(new_version: str, dry_run: bool) -> None:
     print(f"  sliced {CHANGELOG.relative_to(REPO)}: [Unreleased] -> [v{new_version}] - {today}")
 
 
+def verify_changelog_citations() -> None:
+    """Refuse to bump while `[Unreleased]` carries a drifted citation (#2350).
+
+    `check_changelog_citations.py`'s plain run only advisory-notes a
+    pre-existing citation that relocated to a new, unique, long-enough line
+    -- never blocking, so an unrelated PR is never reddened by a line it
+    never touched. But `slice_changelog()` above FREEZES today's
+    `[Unreleased]` into a released `## [vX]` section, and a released section
+    is NEVER rewritten by `--fix` afterward (see that script's own CHANGELOG
+    comment) -- so a drift left unresolved at exactly this moment ships
+    wrong FOREVER. That is the #1387 failure mode again, arriving through
+    the release path instead of a rebase.
+
+    `--strict-lines` is the flag that turns that same drift into a hard
+    ERROR here, before the freeze. Deliberately NOT run with `--fix` baked
+    in: a version-bump command silently rewriting changelog fragments as a
+    side effect would be its own surprise, so this only CHECKS and names the
+    remedy -- the operator runs `--fix`, reviews the diff, and re-bumps.
+
+    Runs even under `--dry-run`: this is a readiness check, matching this
+    tool's own "step 1: verify everything looks ready" contract, not a
+    write of its own.
+
+    Uses `subprocess.check_call`, not `.run()` -- the same call shape every
+    other subprocess step in this file uses (`regenerate_abi_snapshot`,
+    `regenerate_emit_snapshots`), so it is mockable the same way in tests.
+    `cwd=REPO` is pinned because the checker finds the tree it grades with
+    `git rev-parse --show-toplevel` from its cwd: run from outside the
+    checkout, it would grade the wrong tree or exit "not inside a git
+    worktree" (alp-sdk#2350 round 3).
+    """
+    try:
+        subprocess.check_call(
+            [sys.executable, str(CHANGELOG_CITATIONS_TOOL), "--strict-lines"],
+            cwd=REPO)
+    except subprocess.CalledProcessError:
+        raise SystemExit(
+            "bump_version: changelog citations failed --strict-lines (see "
+            "above) -- a drifted citation would freeze into released "
+            "history here and never be rewritten again. Run `python3 "
+            "scripts/check_changelog_citations.py --fix`, review the "
+            "rewrite, commit it, and re-run this bump."
+        )
+    print("  changelog citations: OK (--strict-lines)")
+
+
 def _next_candidate(version: str) -> str:
     """Suggested next-version label for the new [Unreleased] section."""
     major, minor, patch, _pre = parse_version(version)
@@ -199,6 +292,12 @@ def update_version_h(new_version: str, dry_run: bool) -> None:
     clang-format aligns consecutive macro values), substituting only
     the numeric / string values.  Keep in lockstep with
     scripts/check_version_doc_sync.py's version.h parsers.
+
+    ALP_VERSION_MAJOR/MINOR/PATCH are always the plain core integers
+    (`_pre` discarded); ALP_VERSION_STRING gets `new_version` VERBATIM,
+    suffix included -- this is what makes a pre-release build report
+    itself as one (#1902), e.g. `--to 1.0.0-rc1` -> `ALP_VERSION_STRING
+    "1.0.0-rc1"` while MAJOR/MINOR/PATCH are still 1/0/0.
     """
     major, minor, patch, _pre = parse_version(new_version)
     text = version_h_text = VERSION_H.read_text(encoding="utf-8")
@@ -227,34 +326,51 @@ def update_banner_c(new_version: str, dry_run: bool) -> None:
     The banner *code* always prints the live ALP_VERSION_STRING at runtime;
     only this illustrative comment line can drift.  Keep in lockstep with
     scripts/check_version_doc_sync.py's check_banner_c().
+
+    Always the CORE MAJOR.MINOR.PATCH, even when `new_version` carries a
+    SemVer pre-release suffix (#1902): the sample line isn't the
+    self-identification surface (ALP_VERSION_STRING is, and the banner's
+    *code* prints that live), so it stays pinned to the target GA triple
+    the same way pyproject.toml does below.
     """
+    major, minor, patch, _pre = parse_version(new_version)
+    core = f"{major}.{minor}.{patch}"
     text = BANNER_C.read_text(encoding="utf-8")
-    new_text, n = re.subn(r"Alp SDK \d+\.\d+\.\d+", f"Alp SDK {new_version}", text, count=1)
+    new_text, n = re.subn(r"Alp SDK \d+\.\d+\.\d+", f"Alp SDK {core}", text, count=1)
     if n != 1:
         raise SystemExit(f"bump_version: no 'Alp SDK X.Y.Z' sample banner line in "
                          f"{BANNER_C.relative_to(REPO)}")
     if new_text == text:
-        print(f"  unchanged {BANNER_C.relative_to(REPO)} (already at {new_version})")
+        print(f"  unchanged {BANNER_C.relative_to(REPO)} (already at {core})")
         return
     if not dry_run:
         BANNER_C.write_text(new_text, encoding="utf-8", newline="")
-    print(f"  updated {BANNER_C.relative_to(REPO)}: sample banner -> \"Alp SDK {new_version}\"")
+    print(f"  updated {BANNER_C.relative_to(REPO)}: sample banner -> \"Alp SDK {core}\"")
 
 
 def update_pyproject(new_version: str, dry_run: bool) -> None:
-    """Rewrite the [project] version in pyproject.toml (alp-sdk-cli)."""
+    """Rewrite the [project] version in pyproject.toml (alp-sdk-cli).
+
+    Always the CORE MAJOR.MINOR.PATCH, even when `new_version` carries a
+    SemVer pre-release suffix (#1902): PEP 440 doesn't accept a bare
+    hyphenated suffix like "-rc1", and packaging metadata isn't where an rc
+    identifies itself -- include/alp/version.h's ALP_VERSION_STRING and
+    metadata/sdk_version.yaml's `version:` carry the full string instead.
+    """
+    major, minor, patch, _pre = parse_version(new_version)
+    core = f"{major}.{minor}.{patch}"
     text = PYPROJECT.read_text(encoding="utf-8")
-    new_text, n = re.subn(r'^version\s*=\s*"[^"]*"', f'version = "{new_version}"',
+    new_text, n = re.subn(r'^version\s*=\s*"[^"]*"', f'version = "{core}"',
                           text, count=1, flags=re.MULTILINE)
     if n != 1:
         raise SystemExit(f"bump_version: no 'version = \"...\"' line in "
                          f"{PYPROJECT.relative_to(REPO)}")
     if new_text == text:
-        print(f"  unchanged {PYPROJECT.relative_to(REPO)} (already at {new_version})")
+        print(f"  unchanged {PYPROJECT.relative_to(REPO)} (already at {core})")
         return
     if not dry_run:
         PYPROJECT.write_text(new_text, encoding="utf-8", newline="")
-    print(f"  updated {PYPROJECT.relative_to(REPO)}: -> version = \"{new_version}\"")
+    print(f"  updated {PYPROJECT.relative_to(REPO)}: -> version = \"{core}\"")
 
 
 def regenerate_abi_snapshot(new_version: str, dry_run: bool) -> None:
@@ -275,17 +391,23 @@ def regenerate_abi_snapshot(new_version: str, dry_run: bool) -> None:
     print(f"  regenerated {snapshot_path.relative_to(REPO)}")
 
 
-def regenerate_alp_lock(dry_run: bool) -> None:
-    """Rewrite alp.lock so its sdk.version (and the metadata digest) track the
-    bump.  Without this the "alp.lock in sync" gate fails on the release commit
-    (sdk.version stays at the old version while sdk_version.yaml moves).
+def regenerate_emit_snapshots(dry_run: bool) -> None:
+    """Rewrite the `--emit` goldens under tests/fixtures/emit-snapshots/ (#1461).
+
+    Two paths carry the version into these goldens: build-plan's
+    `sdkVersion` field (read straight from metadata/sdk_version.yaml by
+    scripts/alp_orchestrate/buildplan.py::_sdk_version()) and a released
+    scaffold's README doc links (pinned to v<version> by
+    scripts/alp_template.py::_docs_ref() once status: released). Without
+    this, every version bump reds check_emit_snapshots.py until a human
+    runs `--update` by hand.
     """
-    cmd = [sys.executable, str(ALP_LOCK_TOOL), "--workspace", str(REPO)]
+    cmd = [sys.executable, str(EMIT_SNAPSHOT_TOOL), "--update"]
     if dry_run:
         print(f"  would run: {' '.join(cmd)}")
         return
     subprocess.check_call(cmd)
-    print("  regenerated alp.lock (sdk.version + metadata digest)")
+    print("  regenerated tests/fixtures/emit-snapshots/ (--emit goldens)")
 
 
 def main() -> int:
@@ -294,18 +416,20 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="Show what would change without writing")
     args = ap.parse_args()
 
-    parse_version(args.to)  # validates SemVer shape
+    prerelease = parse_version(args.to)[3]  # validates SemVer shape
     current = read_current_version()
 
     print(f"bump_version: {current} -> {args.to}" + ("  [dry run]" if args.dry_run else ""))
     print()
+    if not prerelease:  # rc bumps freeze nothing into history (slice_changelog returns early)
+        verify_changelog_citations()
     update_sdk_version_yaml(args.to, args.dry_run)
     slice_changelog(args.to, args.dry_run)
     update_version_h(args.to, args.dry_run)
     update_pyproject(args.to, args.dry_run)
     update_banner_c(args.to, args.dry_run)
     regenerate_abi_snapshot(args.to, args.dry_run)
-    regenerate_alp_lock(args.dry_run)
+    regenerate_emit_snapshots(args.dry_run)
     print()
     print("Next steps:")
     print("  git diff --stat")

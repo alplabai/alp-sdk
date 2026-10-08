@@ -10,7 +10,7 @@
 Headline edge-AI demo: an E1M-AEN module captures camera
 frames, runs a person-detect model on the on-die Ethos-U NPU,
 and renders the preview + bounding boxes on a 240×240 LVGL
-display.
+region of the panel's 240×320 ST7789 display.
 
 ## What it shows end-to-end
 
@@ -24,12 +24,22 @@ OV5640 ──▶ <alp/camera.h> ──▶ <alp/inference.h> ──▶ post-proce
 - **OV5640** SCCB config side + MIPI / DVP capture (via the
   `<alp/camera.h>` SoC-receiver path).
 - **TFLM + Ethos-U** dispatch via the `<alp/inference.h>`
-  `ALP_INFERENCE_BACKEND_AUTO` path.  The §D.lib.loader resolves
-  the right NPU shim from the SKU's `capabilities:` block:
-  - AEN401 / AEN601 / AEN801 → `CONFIG_ALP_TFLM_ETHOS_U85=y` +
-    `_U55=y`
-  - NX9101 → `CONFIG_ALP_TFLM_ETHOS_U65=y`
-  - V2N → `CONFIG_ALP_TFLM_DRP_AI=y`
+  `ALP_INFERENCE_BACKEND_AUTO` path.  Two knob sets are emitted for this
+  example, from two different sources:
+  - the §D.lib.loader's `metadata/libraries/tflite-micro.yaml`
+    `hw_backends` block selects the TFLM shim --
+    `CONFIG_ALP_TFLM_ETHOS_U85=y` (with `_U55=y` linked alongside it on
+    U85 SKUs), or `CONFIG_ALP_TFLM_ETHOS_U65=y` on NX9101;
+  - the capability-derived block in `scripts/alp_orchestrate/kconfig.py`
+    emits the backend/variant selects resolved from the SKU's
+    `capabilities:` block:
+    - AEN401 / AEN601 / AEN801 / AEN803 →
+      `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y` +
+      `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y` +
+      `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y`
+    - NX9101 → `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y` +
+      `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y`
+  - V2N M33 → TFLM CPU kernels; DRP-AI3 remains on the A55/Yocto side
 - **LVGL** composes the preview, bounding-box overlay, and
   latency / FPS strip, bound to the panel via `<alp/display.h>` +
   `alp_gui_lvgl_attach()` (`<alp/gui.h>`) -- no direct
@@ -80,7 +90,9 @@ bytes.
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/camera-vision/ai-camera-viewer
+# writes examples/camera-vision/ai-camera-viewer/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/camera-vision/ai-camera-viewer
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/camera-vision/ai-camera-viewer -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

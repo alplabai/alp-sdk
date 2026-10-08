@@ -27,7 +27,7 @@ firmware as a first-class consumer.
 >   [README Quickstart](../README.md#quickstart) — if you just want
 >   a hello-world running in two minutes, start there. As of `tan-cli`
 >   [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0) (current
->   release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+>   release: [v0.6.0](https://github.com/alplabai/tan-cli/releases/tag/v0.6.0)),
 >   the published release installer (`curl -fsSL
 >   https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh`
 >   on Linux/macOS, `irm
@@ -91,7 +91,7 @@ tan build --project examples/peripheral-io/gpio-button-led --sdk-root "$PWD"
 # this cross-compiles for the example's real SoM (E1M-AEN801) -- it
 # needs the Zephyr SDK toolchain pinned in metadata/toolchains.json;
 # flash it and open a serial monitor to see output like:
-#   [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
+#   [gpio] init button=BOARD_PIN_ENCODER_SW, led=BOARD_PIN_LED_RED
 #   ...
 #   [gpio] done
 ```
@@ -226,9 +226,8 @@ tan doctor --format json      # machine-readable
 
 It is HW-free (no build and no flash), so it is safe to run anytime. An
 unhealthy environment exits 4. `--build` remains accepted for compatibility
-with v0.4 callers but no longer changes the checklist. On tan-cli `dev`
-(ahead of the tagged `v0.5.1` release the installer above ships -- lands in
-`v0.6.0-rc1`+), interactive `--fix` (it needs a TTY on both stdin and
+with v0.4 callers but no longer changes the checklist. As of tan v0.6.0,
+interactive `--fix` (it needs a TTY on both stdin and
 stderr) can run manifest remedies: a remedy that needs no elevation (macOS
 `brew`, Windows `winget`) runs for any caller; a `sudo`-prefixed remedy
 (Linux `apt`/`dnf`) is refused with the command printed to run by hand for
@@ -372,8 +371,8 @@ What this does:
 
 - `--project alp-sdk/examples/peripheral-io/gpio-button-led` — the
   application directory.  Each example under `examples/` ships a
-  `board.yaml` + an empty `prj.conf` + a CMakeLists.txt that invokes
-  the loader at configure time.  See
+  `board.yaml` + an empty `prj.conf` + a plain CMakeLists.txt; `tan`
+  runs the loader and hands the generated `alp.conf` to the build.  See
   [`docs/board-config-schema.md`](board-config-schema.md) for the
   schema.
 - The target comes entirely from that `board.yaml` — there is no
@@ -414,7 +413,7 @@ output like this (exact ordering/timing may vary):
 
 ```
 *** Booting Zephyr OS build v4.4.1 ***
-[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
+[gpio] init button=BOARD_PIN_ENCODER_SW, led=BOARD_PIN_LED_RED
 [gpio] led=0 status=0
 [gpio] led=1 status=0
 [gpio] led=0 status=0
@@ -488,14 +487,12 @@ right wiring per OS (Zephyr `CONFIG_LVGL=y` in `alp.conf`, Yocto
 `IMAGE_INSTALL` for the A-cores, …) and refuses a library the target
 can't run, naming the failing constraint.  Check what's selected and
 whether it's compatible — run this from *your project's* directory
-(the one containing the `board.yaml` above), not from the SDK
-checkout: the `libraries` line only appears when `doctor` is run
-where it can find that `board.yaml`, and `PYTHONPATH` has to reach
-the checkout's `scripts/` from wherever that project lives:
+(the one containing the `board.yaml` above): the `libraries` line only
+appears when `doctor` is run where it can find that `board.yaml`:
 
 ```bash
 cd <your-project-dir>   # contains the board.yaml you just edited
-PYTHONPATH=<path-to-alp-sdk>/scripts python3 -m alp_cli doctor   # a "libraries" line reports tier + licence + fit
+tan doctor               # a "libraries" line reports tier + licence + fit
 ```
 
 `doctor`'s library check only handles the bare-string `libraries: [name,
@@ -621,7 +618,7 @@ default `west update` skips it.
 |----------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | **Renesas (RZ/V)** | `hal_renesas` (in Zephyr's own west.yml)   | Nothing extra.  Our `name-allowlist` lets Zephyr import it; `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/` is what the V2N + V2N-M1 paths consume. |
 | **NXP (i.MX 9x)**  | `hal_nxp` (in Zephyr's own west.yml)       | Nothing extra.  `mcux/mcux-sdk-ng/devices/i.MX/i.MX93/` covers MIMX9301..9352 (E1M-NX9101 = MIMX9352).   |
-| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + upstream Zephyr `boards/alif/` | **Simpler than v3.7.**  HAL drivers come from `alifsemi/hal_alif v2.3.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  Upstream Zephyr v4.4 also ships the stock Alif Ensemble board files under `boards/alif/` (`ensemble_e8_dk`, `ensemble_e1c_dk`, `balletto_b1_dk`) -- those target Alif's own EVKs, not the E1M board.  The AEN-specific board files (`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`, `alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`) ship in-tree at [`zephyr/boards/alp/`](../zephyr/boards/alp/) -- no separate overlay or repo needed.  Two Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels.  See `docs/vendor-partnerships.md` §Alif for the migration history. |
+| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + upstream Zephyr `boards/alif/` | **Simpler than v3.7.**  HAL drivers come from `alifsemi/hal_alif v2.3.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  Upstream Zephyr v4.4 also ships the stock Alif Ensemble board files under `boards/alif/` (`ensemble_e8_dk`, `ensemble_e1c_dk`, `balletto_b1_dk`) -- those target Alif's own EVKs, not the E1M board.  The AEN-specific board files (`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`, `alp_e1m_aen803_m55_he`, `alp_e1m_aen803_m55_hp`, `alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`) ship in-tree at [`zephyr/boards/alp/`](../zephyr/boards/alp/) -- no separate overlay or repo needed.  Two Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels.  See `docs/vendor-partnerships.md` §Alif for the migration history. |
 | **DEEPX (DX-M1)**  | Out of Zephyr scope (Linux-side runtime).  | The on-device NPU runs from a Linux PCIe driver, not a Zephyr backend.  `chips/deepx_dxm1/` is the **host-side** Zephyr code that brings up the M1 from the Renesas A55 cluster; `dx_rt` itself rides on Linux/Yocto.  See `examples/v2n/v2n-m1-deepx-inference/` and the customer-side integration notes in `docs/vendor-partnerships.md` §DEEPX. |
 
 ### Bare-metal / non-Zephyr customers
@@ -652,10 +649,25 @@ fetched when a customer opts in to the `vendor-sdks` group.
 
 `west alp-lock` writes `alp.lock` — a deterministic, public-safe record of the
 workspace's SDK version, west project pins, curated library versions, Python
-requirements, and metadata digests. Commit it. `west alp-lock --check` (run in
-CI) fails with a field-level diagnostic when any locked input drifts, so an old
-release can be rebuilt against its exact declared inputs. It contains no local
-paths or credentials.
+requirements, and metadata digests. It contains no local paths or credentials.
+
+**It is generated on demand, not committed (#1576).** `digests.metadata` is a
+single hash over the whole `metadata/**` tree, so two PRs touching *different*
+metadata files rewrote that one digest line from different bases and
+conflicted on it by construction — the whole-tree hash carries no information
+about which file changed, only that something did, so it couldn't tell two
+non-conflicting edits apart. `build_lock` is a pure function of tracked files
+(`scripts/alp_lock/__init__.py`), so any consumer can regenerate the identical
+document from whichever commit they need it for. CI enforces that the
+generator itself keeps working — `west alp-lock --check` now builds a lock in
+memory and schema-validates it (nonzero on a broken generator or a
+local/abs-path leak) rather than diffing against a tracked copy, because
+there is no tracked copy to diff against.
+
+A tagged **release still ships one**: `.github/workflows/release.yml`
+generates `alp.lock` before packaging the source tarball and folds it into
+the archive, so a consumer with only the tarball — not a git checkout — still
+gets it without running the generator themselves.
 
 `sdk.version` and the west pins lock the SDK identity you build against. The
 lock no longer records an `sdk.revision` (#1615) — a git HEAD written into a
@@ -670,10 +682,10 @@ worth reaching for between release tags, where many commits share one
 `include/`. The lock does not yet pin resolved commit SHAs or toolchain
 container identities (tracked follow-ups).
 
-Because `alp.lock` hashes `metadata/**` and pins the west/library/Python inputs,
-**re-run `west alp-lock` and commit the updated `alp.lock` in the same PR**
-whenever you touch `west.yml`, `metadata/**`, `scripts/requirements.txt`, or
-`scripts/alp_cli/__init__.py` — otherwise the `alp.lock in sync` CI check reds.
+To inspect a lock locally — e.g. to see what a release tarball would carry —
+run `west alp-lock` (or `python3 scripts/west_commands/alp_lock.py
+--workspace .`); it writes `./alp.lock`, which `.gitignore` keeps out of any
+commit.
 
 ## 9. SoC capability validation
 
@@ -746,8 +758,8 @@ Key tasks (Command Palette → **Tasks: Run Task**):
   `cmake-args`, `yocto-conf`, `dts-overlay`, `hw-info-h`,
   `west-libraries`).
 - **Per-peripheral examples**: [`examples/`](../examples/README.md)
-  -- 11 minimal apps, one per `<alp/*.h>` class, each driven by a
-  matching `board.yaml`.
+  -- 50+ example apps covering the `<alp/*.h>` peripheral classes,
+  each driven by a matching `board.yaml`.
 - **End-to-end reference apps**:
   [`examples/aen/edgeai-vision-aen/`](../examples/aen/edgeai-vision-aen/)
   (camera → Ethos-U inference → display) and
@@ -773,4 +785,4 @@ Key tasks (Command Palette → **Tasks: Run Task**):
 - **Testing coverage map**: [`docs/testing.md`](testing.md)
 - **Verification ledger** (⏳/🟡/✅): [`docs/test-plan.md`](test-plan.md)
 - **Secure boot chain + key lifecycle**: [`docs/secure-boot.md`](secure-boot.md)
-- **OTA strategy** (Yocto Mender + AEN-Zephyr pending decision): [`docs/ota.md`](ota.md)
+- **OTA strategy** (Yocto Mender + Zephyr-side provider dispatch): [`docs/ota.md`](ota.md)

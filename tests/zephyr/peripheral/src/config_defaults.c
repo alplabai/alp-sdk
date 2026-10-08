@@ -56,6 +56,7 @@ ZTEST(alp_peripheral, test_uart_config_default)
 	zassert_equal(cfg.data_bits, 8u, NULL);
 	zassert_equal(cfg.stop_bits, 1u, NULL);
 	zassert_equal(cfg.parity, ALP_UART_PARITY_NONE, NULL);
+	zassert_equal(cfg.flow_control, ALP_UART_FLOW_NONE, "no flow control by default");
 }
 
 ZTEST(alp_peripheral, test_pwm_config_default)
@@ -79,6 +80,12 @@ ZTEST(alp_peripheral, test_wdt_config_default)
 	zassert_equal(cfg.wdt_id, 0u, NULL);
 	zassert_equal(cfg.timeout_ms, 1000u, "non-zero deadline (zero-init is invalid for wdt)");
 	zassert_equal(cfg.on_timeout, ALP_WDT_RESET_SOC, "safest action default");
+	/* #1637: on_expire/user are new fields the macro doesn't name --
+     * the compound literal's designated initializers zero them, which
+     * is correct because the default action is RESET_SOC, not
+     * INTERRUPT_ONLY, so no callback is required. */
+	zassert_is_null(cfg.on_expire, "unnamed fields zero-init");
+	zassert_is_null(cfg.user, "unnamed fields zero-init");
 }
 
 ZTEST(alp_peripheral, test_counter_config_default)
@@ -242,7 +249,6 @@ ZTEST(alp_peripheral, test_shmem_config_default)
 	zassert_str_equal(cfg.name, "alp_shmem0", NULL);
 	zassert_equal(
 	    cfg.size, 0u, "advisory -- backend derives extent from DT; set size to document intent");
-	zassert_false(cfg.cacheable, "required for the simple core A/B pattern");
 }
 
 ZTEST(alp_peripheral, test_mqtt_config_default)
@@ -278,7 +284,6 @@ ZTEST(alp_peripheral, test_rpc_config_default)
 	zassert_equal(cfg.src_ept, 0u, "0 = FNV-1a hash of name");
 	zassert_equal(cfg.dst_ept, 0u, "0 = src_ept + 1");
 	zassert_equal(cfg.mbox_ch, ALP_RPC_DEFAULT_MBOX_CH, NULL);
-	zassert_false(cfg.cacheable, "v0.6 default");
 }
 
 ZTEST(alp_peripheral, test_storage_config_default)

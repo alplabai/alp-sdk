@@ -7,7 +7,7 @@
  *
  * The portable surface mirrored:
  *   alp_camera_open      -> video_get_caps + format negotiation +
- *                           video_set_format + video_buffer_alloc x N +
+ *                           video_set_format + video_buffer_aligned_alloc x N +
  *                           video_enqueue x N (warm the queue ahead
  *                           of stream_start, see Zephyr docs on
  *                           min_vbuf_count).
@@ -16,7 +16,9 @@
  *   alp_camera_capture   -> video_dequeue (blocking with timeout)
  *   alp_camera_release   -> video_enqueue (return the buffer to the
  *                           driver's incoming queue for reuse)
- *   alp_camera_close     -> stop if running + video_buffer free path
+ *   alp_camera_close     -> video_stream_stop + drain-dequeue +
+ *                           video_buffer_release x N (the pool is
+ *                           whole again for the next open)
  *   configure_isp        -> NOSUPPORT (the portable video class has
  *                           no in-line ISP knobs; vendor backends
  *                           ride on top to add the configure_isp op).
@@ -48,8 +50,14 @@
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
 #include "camera_ops.h"
 #include "alp_slot_claim.h"
+
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(alp_camera_zephyr_video, CONFIG_LOG_DEFAULT_LEVEL);
+
+#include "camera_frmival.h"
 
 #ifndef CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT
 #define CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT 2
@@ -109,49 +117,96 @@ static void _free_state(alp_z_video_state_t *s)
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-		return ALP_ERR_TIMEOUT;
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
-/** Map the portable alp_pixfmt_t enum to a Zephyr video FourCC.
- *  Returns 0 if the format isn't expressible in the portable enum
- *  yet -- callers fall back to whatever the sensor's default
- *  pixelformat is (no set_format call). */
-static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
+/** Whether @p fmt participates in FourCC negotiation at all.  MONO_VLSB /
+ *  YUV420_PLANAR / NV12 have no Zephyr video FourCC this backend maps --
+ *  a request for one of those leaves the sensor's default format in
+ *  place (no set_format call), same as before raw formats existed. */
+static bool _pixfmt_is_negotiable(alp_pixfmt_t fmt)
 {
 	switch (fmt) {
 	case ALP_PIXFMT_RGB565:
-		return VIDEO_PIX_FMT_RGB565;
 	case ALP_PIXFMT_RGB888:
-		return VIDEO_PIX_FMT_RGB24;
 	case ALP_PIXFMT_ARGB8888:
-		return VIDEO_PIX_FMT_XRGB32;
+	case ALP_PIXFMT_GREY8:
+	case ALP_PIXFMT_RAW8:
+	case ALP_PIXFMT_RAW10:
+		return true;
 	default:
-		return 0u;
+		return false;
 	}
+}
+
+/** Whether a Zephyr video FourCC belongs to the class the portable
+ *  @p fmt requests.  RGB565 / RGB888 / ARGB8888 / GREY8 map 1:1 to a
+ *  single FourCC.  The two raw sensor formats accept ANY FourCC of
+ *  that bit depth: a Bayer sensor's driver names its own CFA order in
+ *  the FourCC (SBGGR8 vs SGRBG8 etc.), which the portable request
+ *  deliberately does not pin (see alp_pixfmt_t's Doxygen in
+ *  <alp/peripheral.h>) -- so whichever entry the device's own
+ *  video_get_caps() advertises first for that bit depth wins, and the
+ *  same open() call works unmodified across sensors with different
+ *  native CFA orders. */
+static bool _fourcc_in_class(alp_pixfmt_t fmt, uint32_t fourcc)
+{
+	switch (fmt) {
+	case ALP_PIXFMT_RGB565:
+		return fourcc == VIDEO_PIX_FMT_RGB565;
+	case ALP_PIXFMT_RGB888:
+		return fourcc == VIDEO_PIX_FMT_RGB24;
+	case ALP_PIXFMT_ARGB8888:
+		return fourcc == VIDEO_PIX_FMT_XRGB32;
+	case ALP_PIXFMT_GREY8:
+		return fourcc == VIDEO_PIX_FMT_GREY;
+	case ALP_PIXFMT_RAW8:
+		return fourcc == VIDEO_PIX_FMT_SBGGR8 || fourcc == VIDEO_PIX_FMT_SGBRG8 ||
+		       fourcc == VIDEO_PIX_FMT_SGRBG8 || fourcc == VIDEO_PIX_FMT_SRGGB8 ||
+		       fourcc == VIDEO_PIX_FMT_GREY;
+	case ALP_PIXFMT_RAW10:
+		return fourcc == VIDEO_PIX_FMT_SBGGR10P || fourcc == VIDEO_PIX_FMT_SGBRG10P ||
+		       fourcc == VIDEO_PIX_FMT_SGRBG10P || fourcc == VIDEO_PIX_FMT_SRGGB10P ||
+		       fourcc == VIDEO_PIX_FMT_Y10P;
+	default:
+		return false;
+	}
+}
+
+/* Release every video_buffer this handle acquired, getting the driver's
+ * queue out of the way first.  video_stream_stop() implies a CANCEL flush
+ * (video.h: `video_flush(dev, true)` moves everything the driver holds
+ * from its incoming queue to the outgoing one as VIDEO_BUF_ABORTED), so a
+ * stop + drain-dequeue detaches the buffers from the device before
+ * video_buffer_release() returns them to the shared pool.  Releasing a
+ * buffer the driver still queues would recycle a pool slot the device can
+ * later hand back -- a stale pointer on the next open (#246). */
+static void _release_vbufs(alp_z_video_state_t *st)
+{
+	struct video_buffer *vb = NULL;
+
+	(void)video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
+	while (video_dequeue(st->dev, &vb, K_NO_WAIT) == 0 && vb != NULL) {
+		vb = NULL;
+	}
+	for (size_t i = 0; i < ARRAY_SIZE(st->vbufs); ++i) {
+		if (st->vbufs[i] != NULL) {
+			(void)video_buffer_release(st->vbufs[i]);
+			st->vbufs[i] = NULL;
+		}
+	}
+	st->vbuf_count = 0;
 }
 
 static alp_status_t z_open(const alp_camera_config_t  *cfg,
                            alp_camera_backend_state_t *state,
                            alp_capabilities_t         *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
 	}
@@ -167,11 +222,16 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 	st->dev = dev;
 
 	/* Probe the sensor's caps so we know the buffer line-stride to
-     * use for video_buffer_alloc.  Treat -ENOSYS as success-with-
-     * minimal-info -- some bridges (e.g. CSI-2 SerDes pairs) leave
-     * get_caps unimplemented and only honour set_format. */
-	struct video_caps vcaps = { 0 };
-	int               err   = video_get_caps(dev, VIDEO_EP_OUT, &vcaps);
+	 * use for video_buffer_aligned_alloc.  Treat -ENOSYS as success-with-
+	 * minimal-info -- some bridges (e.g. CSI-2 SerDes pairs) leave
+	 * get_caps unimplemented and only honour set_format.
+	 *
+	 * The v4.4 video API names the endpoint with an `enum video_buf_type`
+	 * carried ON the caps / format / buffer structs rather than as a
+	 * separate argument.  A camera's capture side -- the frames the app
+	 * consumes -- is VIDEO_BUF_TYPE_OUTPUT. */
+	struct video_caps vcaps = { .type = VIDEO_BUF_TYPE_OUTPUT };
+	int               err   = video_get_caps(dev, &vcaps);
 	if (err != 0 && err != -ENOSYS) {
 		_free_state(st);
 		return _errno_to_alp(err);
@@ -181,18 +241,19 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
      * (pixelformat, width, height) bracket the requested config.
      * If no portable FourCC is requested or the list is empty the
      * sensor's default format stays in place. */
-	uint32_t want_fourcc    = _to_video_fourcc(cfg->format);
-	bool     fmt_negotiated = false;
-	if (want_fourcc != 0u && vcaps.format_caps != NULL) {
+	bool want_negotiation = _pixfmt_is_negotiable(cfg->format);
+	bool fmt_negotiated   = false;
+	if (want_negotiation && vcaps.format_caps != NULL) {
 		for (const struct video_format_cap *fc = vcaps.format_caps; fc->pixelformat != 0u; ++fc) {
-			if (fc->pixelformat != want_fourcc) continue;
+			if (!_fourcc_in_class(cfg->format, fc->pixelformat)) continue;
 			if (cfg->width < fc->width_min || cfg->width > fc->width_max) continue;
 			if (cfg->height < fc->height_min || cfg->height > fc->height_max) continue;
-			st->fmt.pixelformat = want_fourcc;
+			st->fmt.type        = VIDEO_BUF_TYPE_OUTPUT;
+			st->fmt.pixelformat = fc->pixelformat;
 			st->fmt.width       = cfg->width;
 			st->fmt.height      = cfg->height;
 			st->fmt.pitch       = 0u; /* driver fills in via set_format */
-			err                 = video_set_format(dev, VIDEO_EP_OUT, &st->fmt);
+			err                 = video_set_format(dev, &st->fmt);
 			if (err != 0) {
 				_free_state(st);
 				return _errno_to_alp(err);
@@ -206,8 +267,10 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 		}
 	} else {
 		/* Caller didn't supply a portable format -- read back the
-         * sensor's default so our buffer allocations match. */
-		(void)video_get_format(dev, VIDEO_EP_OUT, &st->fmt);
+		 * sensor's default so our buffer allocations match.  get_format
+		 * reads the endpoint named by fmt.type, so set it first. */
+		st->fmt.type = VIDEO_BUF_TYPE_OUTPUT;
+		(void)video_get_format(dev, &st->fmt);
 	}
 
 	/* Decide buffer count: clamp the configured pool to the
@@ -218,46 +281,70 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 		return ALP_ERR_OUT_OF_RANGE;
 	}
 
-	/* Compute buffer size: pitch * height when pitch is known,
-     * else fall back to width * height * 2 (RGB565 worst-case for
-     * the formats the portable enum carries -- BGGR8 sensors stay
-     * within this bound).  ARGB8888 paths get caught by the
-     * pitch-known branch since set_format fills pitch in. */
-	uint32_t bytes_per_buf = (st->fmt.pitch != 0u)
-	                             ? (st->fmt.pitch * st->fmt.height)
-	                             : ((uint32_t)st->fmt.width * st->fmt.height * 2u);
+	/* Per-buffer size: prefer the driver-negotiated pitch; when the driver
+	 * reports none, derive bytes-per-pixel from the negotiated fourcc via
+	 * Zephyr's own format table (video_bits_per_pixel: RGB565 = 16 bpp,
+	 * RGB24 = 24 bpp, XRGB32 = 32 bpp).  A flat 2 B/px guess here
+	 * under-allocates the RGB888 (3 B/px) and ARGB8888 (4 B/px) frames
+	 * _to_video_fourcc() can negotiate, while the capture engine DMAs the
+	 * full frame regardless (#245). */
+	uint32_t bytes_per_buf = (st->fmt.pitch != 0u) ? (st->fmt.pitch * st->fmt.height)
+	                                               : (((uint32_t)st->fmt.width * st->fmt.height *
+	                                                   video_bits_per_pixel(st->fmt.pixelformat)) /
+	                                                  BITS_PER_BYTE);
 	if (bytes_per_buf == 0u) {
-		/* No format negotiated at all -- avoid passing 0 to alloc. */
+		if (st->fmt.width != 0u && st->fmt.height != 0u) {
+			/* Real dimensions but a fourcc Zephyr's table can't size:
+			 * refuse rather than under-allocate and let the capture
+			 * DMA past the end of the pool block. */
+			_free_state(st);
+			return ALP_ERR_NOSUPPORT;
+		}
+		/* No format negotiated at all (driver without get_format):
+		 * keep open() alive with a minimal dummy allocation. */
 		bytes_per_buf = 64u;
 	}
 
+	/* Round the tail up to the pool's alignment too, so the last cache line
+	 * of this buffer isn't shared with the next heap chunk. */
+	bytes_per_buf = ROUND_UP(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN);
+
+	/* Allocate at CONFIG_VIDEO_BUFFER_POOL_ALIGN (64 by default), not through
+	 * video_buffer_alloc(): that one aligns to sizeof(void *) only, 4 on a
+	 * 32-bit core.  Capture engines DMA straight into the buffer and need
+	 * more -- the Alif CPI refuses anything not 8-byte aligned with -ENOBUFS
+	 * at enqueue (seen on silicon: a 0x0200005C buffer failed every open) --
+	 * and the per-buffer cache clean/invalidate must not share a cache line
+	 * with the heap's neighbouring allocation. */
 	for (uint8_t i = 0; i < want; ++i) {
-		st->vbufs[i] = video_buffer_alloc(bytes_per_buf);
+		st->vbufs[i] =
+		    video_buffer_aligned_alloc(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN, K_NO_WAIT);
 		if (st->vbufs[i] == NULL) {
-			/* Roll back partial allocation. */
-			for (uint8_t j = 0; j < i; ++j) {
-				/* video_buffer_alloc has no free in upstream Zephyr;
-                 * a v0.5 follow-up will revisit this when the upstream
-                 * lifecycle stabilises.  Today the slab is sized to
-                 * the pool count so leakage on the rollback path stays
-                 * bounded. */
-				st->vbufs[j] = NULL;
-			}
+			/* Pool exhausted: give back vbufs[0..i-1] (already
+			 * enqueued) before failing (#246). */
+			_release_vbufs(st);
 			_free_state(st);
 			return ALP_ERR_NOMEM;
 		}
-		err = video_enqueue(dev, VIDEO_EP_OUT, st->vbufs[i]);
+		st->vbufs[i]->type = VIDEO_BUF_TYPE_OUTPUT;
+		err                = video_enqueue(dev, st->vbufs[i]);
 		if (err != 0) {
+			/* Mid-loop enqueue failure: vbufs[0..i-1] sit in the
+			 * driver's queue and vbufs[i] is loose -- release them
+			 * all instead of leaking the pool (#246). */
+			_release_vbufs(st);
 			_free_state(st);
 			return _errno_to_alp(err);
 		}
 	}
 	st->vbuf_count = want;
 
+	alp_camera_apply_fps(dev, cfg->camera_id, cfg->fps);
+	state->fps_x1000 = alp_camera_read_fps_x1000(dev); /* #2279 */
+
 	state->be_data = st;
 	/* No special caps from the portable Zephyr video class -- ISP
      * gates stay off, vendor backends layer them on. */
-	caps_out->flags = 0u;
 	return ALP_OK;
 }
 
@@ -266,7 +353,7 @@ static alp_status_t z_start(alp_camera_backend_state_t *state)
 	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
 	if (st == NULL) return ALP_ERR_NOT_READY;
 	if (st->streaming) return ALP_OK; /* idempotent */
-	int err = video_stream_start(st->dev);
+	int err = video_stream_start(st->dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (err == 0) st->streaming = true;
 	return _errno_to_alp(err);
 }
@@ -276,8 +363,19 @@ static alp_status_t z_stop(alp_camera_backend_state_t *state)
 	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
 	if (st == NULL) return ALP_ERR_NOT_READY;
 	if (!st->streaming) return ALP_OK;
-	int err = video_stream_stop(st->dev);
-	if (err == 0) st->streaming = false;
+	int err = video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
+	if (err == 0) {
+		st->streaming = false;
+		/* The stop's cancel flush moves every queued buffer to the done
+		 * queue as VIDEO_BUF_ABORTED.  Queue them again so the next
+		 * z_start() has buffers to fill (#2351); frames the caller still
+		 * holds come back through z_release() as usual. */
+		struct video_buffer *vb = NULL;
+		while (video_dequeue(st->dev, &vb, K_NO_WAIT) == 0 && vb != NULL) {
+			(void)video_enqueue(st->dev, vb);
+			vb = NULL;
+		}
+	}
 	return _errno_to_alp(err);
 }
 
@@ -291,7 +389,7 @@ z_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t t
 	k_timeout_t t = (timeout_ms == UINT32_MAX) ? K_FOREVER : K_MSEC(timeout_ms);
 
 	struct video_buffer *vb  = NULL;
-	int                  err = video_dequeue(st->dev, VIDEO_EP_OUT, &vb, t);
+	int                  err = video_dequeue(st->dev, &vb, t);
 	if (err != 0) return _errno_to_alp(err);
 	if (vb == NULL) return ALP_ERR_IO;
 
@@ -313,7 +411,7 @@ static alp_status_t z_release(alp_camera_backend_state_t *state, alp_camera_fram
 	/* Find the vbuf whose buffer pointer matches and re-enqueue it. */
 	for (uint8_t i = 0; i < st->vbuf_count; ++i) {
 		if (st->vbufs[i] != NULL && st->vbufs[i]->buffer == frame->data) {
-			int err = video_enqueue(st->dev, VIDEO_EP_OUT, st->vbufs[i]);
+			int err = video_enqueue(st->dev, st->vbufs[i]);
 			return _errno_to_alp(err);
 		}
 	}
@@ -336,18 +434,11 @@ static void z_close(alp_camera_backend_state_t *state)
 {
 	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
 	if (st == NULL) return;
-	if (st->streaming) {
-		(void)video_stream_stop(st->dev);
-		st->streaming = false;
-	}
-	/* video_buffer_alloc has no upstream free counterpart yet --
-     * we drop our references and trust the slab to recycle once
-     * the handle slot is reused.  Pool is sized to the max handle
-     * count so the worst-case footprint is bounded. */
-	for (uint8_t i = 0; i < st->vbuf_count; ++i) {
-		st->vbufs[i] = NULL;
-	}
-	st->vbuf_count = 0;
+	st->streaming = false;
+	/* Stop + drain + release every buffer this handle allocated --
+	 * _release_vbufs stops the stream itself (harmless when already
+	 * stopped), so the pool is whole again for the next open (#246). */
+	_release_vbufs(st);
 	_free_state(st);
 	state->be_data = NULL;
 }

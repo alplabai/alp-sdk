@@ -32,9 +32,10 @@
  * drives).  SET is a read-modify-write over se_service_set_run_cfg /
  * se_service_set_off_cfg per the portable contract: only non-zero
  * caller fields are applied, frequencies must map onto a
- * clock_frequency_t ordinal EXACTLY (never rounded), and the 76.8 /
- * 38.4 MHz RC-vs-XO ambiguity resolves from the profile's current
- * run_clk_src.  Every call bounds its wait inside hal_alif's
+ * clock_frequency_t ordinal EXACTLY (never rounded), a rail_mv request
+ * is refused unless it is inside the documented DC-DC range, and the
+ * 76.8 / 38.4 MHz RC-vs-XO ambiguity resolves from the profile's
+ * current run_clk_src.  Every call bounds its wait inside hal_alif's
  * se_service.c, so nothing here hangs.
  */
 
@@ -271,6 +272,34 @@ static bool io_mv_to_ioflex(uint32_t io_mv, ioflex_mode_t *out)
 	return false;
 }
 
+/* Bound a caller-supplied core DC-DC rail request.
+ *
+ * rail_mv is the one profile field that physically moves the SoC core
+ * supply, and getting it wrong is not a recoverable software error: a
+ * voltage the rail cannot sustain browns out or hangs the core, and
+ * recovery is a PHYSICAL power cycle -- a J-Link reset does not bring a
+ * collapsed rail back.  So the bound lives here instead of being
+ * delegated to the SE mailbox: whether the SE firmware rejects an
+ * out-of-range dcdc_voltage cannot be established from this repository,
+ * and "the far side probably checks it" is not a safe basis for a field
+ * with that failure mode.
+ *
+ * 750-850 mV is the range documented for se_service_set_run_cfg() in
+ * docs/aen-se-services.md; the live E1M-AEN801 baseline reads 825 mV.
+ * The standby profile drives the same DC-DC (se_service_get_off_cfg
+ * reports the same 825 mV), so one bound covers both writers.
+ *
+ * A range and not an enumeration on purpose: no step granularity is
+ * documented for this field, and an invented step would reject settings
+ * the silicon can realise. */
+#define ALIF_SE_RAIL_MV_MIN 750u
+#define ALIF_SE_RAIL_MV_MAX 850u
+
+static bool rail_mv_supported(uint32_t rail_mv)
+{
+	return rail_mv >= ALIF_SE_RAIL_MV_MIN && rail_mv <= ALIF_SE_RAIL_MV_MAX;
+}
+
 static alp_status_t alif_profile_set(alp_power_profile_id_t which, const alp_power_profile_t *p)
 {
 	if (which == ALP_POWER_PROFILE_RUN) {
@@ -287,6 +316,9 @@ static alp_status_t alif_profile_set(alp_power_profile_id_t which, const alp_pow
 			return ALP_ERR_INVAL;
 		}
 		if (p->rail_mv != 0u) {
+			if (!rail_mv_supported(p->rail_mv)) {
+				return ALP_ERR_INVAL;
+			}
 			run.dcdc_voltage = p->rail_mv;
 		}
 		if (p->power_domains != 0u) {
@@ -315,6 +347,9 @@ static alp_status_t alif_profile_set(alp_power_profile_id_t which, const alp_pow
 		return se_rc_to_alp(rc);
 	}
 	if (p->rail_mv != 0u) {
+		if (!rail_mv_supported(p->rail_mv)) {
+			return ALP_ERR_INVAL;
+		}
 		off.dcdc_voltage = p->rail_mv;
 	}
 	if (p->power_domains != 0u) {

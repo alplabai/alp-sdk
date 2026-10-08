@@ -7,34 +7,37 @@
  * @file optiga_trust_m.h
  * @brief Infineon OPTIGA Trust M secure-element driver
  *
- * @par Driver scope: [PROBE-ONLY] -- driver compiles, validates its public
- *   arguments, and probes the chip by reading I2C_STATE.  Product-info
- *   and raw-APDU entry points intentionally return ALP_ERR_NOSUPPORT
- *   until the Infineon host-library transport is integrated.
+ * @par Driver scope: [PARTIAL] -- probe, Coprocessor UID and a raw APDU
+ *   session over Infineon's host library (vendors/optiga-trust-m).  Key,
+ *   crypto and NVM commands are reachable through the raw APDU session
+ *   only; typed wrappers and the PSA driver hook are not written yet.
  *        (SLS32AIA010MLUSON10XTMA2).
  *
  * Hardware security IC providing ECC-256/384/521, RSA-1k/2k,
  * AES-128/192/256, SHA-256, TRNG, and 10 KB user NVM with secure
- * key/object storage.  On the E1M-AEN module the chip sits on
- * Alif's LPI2C bus alongside the TMP112 + RV-3028-C7 RTC.
+ * key/object storage.
+ *
+ * Populated on E1M-X V2N / V2M at 0x30 on BRD_I2C, with the RZ/V2N as
+ * bus master (`metadata/e1m_modules/E1M-V2N101.yaml`) -- that is the
+ * target this driver is written for.  E1M-AEN801 carries the same
+ * footprint on its own BRD_I2C (SoC I2C0, Alif as bus master -- #1848,
+ * corrected from an earlier belief that this bus was the slave-only
+ * LPI2C0), but is not a usable target on the current bench batch: the
+ * part is DNI there (see `docs/bring-up-aen.md` section 5.1;
+ * `examples/aen/aen-secure-element-sign` exercises this driver on AEN).
  *
  * Default I2C address: **0x30** (7-bit, configurable via
  * provisioning).
  *
- * v0.3 driver scope.  This header surfaces the lifecycle bits a
- * developer needs to confirm the part is wired correctly.  `init()`
- * reads I2C_STATE only; it does not send OPEN_APPLICATION.  Product
- * info (`GET_DATA_OBJECT Coprocessor UID`) and raw APDU transport are
- * declared so callers can compile against the planned surface, but the
- * implementation returns ALP_ERR_NOSUPPORT after argument validation.
+ * The host library is the transport: this driver does not reimplement
+ * the IFX I2C data-link / transport stack.  It runs through a PAL on the
+ * portable alp surface (alp_i2c + alp_uptime_ms), so the same code runs
+ * on the A55 and an MCU core.  The library holds one IFX I2C instance, so
+ * an image drives one Trust M.  Shielded Connection (link encryption) is
+ * off until binding-secret provisioning is designed (#1164).
  *
- * The full APDU command set -- key generation, TLS handshake handler,
- * ECDSA, AES wrapping, SHA, secure NVM read/write -- lands only after
- * Infineon's **OPTIGA Trust M Host Library** is integrated as a Zephyr
- * module.  At that point the cleanest architectural fit is registering
- * OPTIGA's PSA driver with `<alp/security.h>`'s MbedTLS PSA wrapper, so
- * apps that call alp_aead_open / etc. pick up hardware acceleration
- * transparently.
+ * A PSA driver registered with `<alp/security.h>`'s MbedTLS wrapper is
+ * the intended route for apps to use the chip's crypto transparently.
  */
 
 #ifndef ALP_CHIPS_OPTIGA_TRUST_M_H
@@ -52,33 +55,82 @@ extern "C" {
 
 #define OPTIGA_TRUST_M_I2C_ADDR 0x30u
 
-/** Coprocessor product info as returned by GET_DATA_OBJECT 0xE0C2.
- *  Fields are little-endian on the wire; the parsed shape lives
- *  in this struct.  See SRM table 38. */
+/** Coprocessor UID as returned by GET_DATA_OBJECT 0xE0C2: 27 bytes, in
+ *  wire order.  Multi-byte fields are big-endian. */
 typedef struct {
-	uint8_t chip_type[6]; /**< Chip type number. */
-	uint8_t fw_id[2];     /**< Firmware identifier. */
-	uint8_t fw_build[2];  /**< Firmware build number. */
-	uint8_t reserved[10];
+	uint8_t cim_id;         /**< CIM identifier. */
+	uint8_t platform_id;    /**< Platform identifier. */
+	uint8_t model_id;       /**< Model identifier. */
+	uint8_t rom_mask_id[2]; /**< ROM mask identifier. */
+	uint8_t chip_type[6];   /**< Chip type. */
+	uint8_t batch_num[6];   /**< Production batch number. */
+	uint8_t x_coord[2];     /**< Die X coordinate on the wafer. */
+	uint8_t y_coord[2];     /**< Die Y coordinate on the wafer. */
+	uint8_t fw_id[4];       /**< Firmware identifier. */
+	uint8_t esw_build[2];   /**< Embedded-software build number. */
 } optiga_trust_m_product_info_t;
+
+/** Drives the part's RESET line: @p assert true pulls it low, false
+ *  releases it.  On V2N/V2M SE_RST hangs off the GD32 supervisor, which the
+ *  kernel bridge driver owns on Linux: drive the driver's "se-rst" GPIO
+ *  line (see examples/v2n/v2n-secure-element-sign/src/se_reset_gpio.h). */
+typedef alp_status_t (*optiga_trust_m_reset_fn_t)(void *user, bool assert);
 
 typedef struct {
 	bool       initialised;
 	alp_i2c_t *bus;
 	uint8_t    addr;
+	/* Host-library session state; private to the driver. */
+	void             *util;
+	void             *comms;
+	uint8_t           session;
+	uint8_t           op_pending; /* a timed-out library op is still in flight */
+	uint16_t          xfer_len;   /* in-flight op length; must outlive the call */
+	uint8_t           uid[27];    /* in-flight read buffer; must outlive the call */
+	volatile uint16_t op_status;
+	/* Reset hook from optiga_trust_m_init_with_reset(), or NULL. */
+	optiga_trust_m_reset_fn_t reset;
+	void                     *reset_user;
 } optiga_trust_m_t;
 
 /** @brief Probe the chip's I2C_STATE register.
  *
  *  Returns ALP_ERR_NOT_READY if the chip doesn't ACK on its I2C
  *  address (mis-strap / not populated).  Does not open a Trust M
- *  application session; APDU transport is not implemented yet. */
+ *  application session; the first product-info read or APDU does. */
 alp_status_t optiga_trust_m_init(optiga_trust_m_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);
 
-/** @brief Planned product-info read (GET_DATA_OBJECT 0xE0C2).
+/** @brief optiga_trust_m_init() with a hardware-reset fallback.
  *
- *  Current implementation validates @p ctx and @p out, then returns
- *  ALP_ERR_NOSUPPORT because product info needs the full APDU transport.
+ *  After more than about 10 s idle the part can stop answering I2C
+ *  entirely and only a hardware reset revives it (#2507).  If the probe
+ *  runs out of NACK-polling budget and @p reset is non-NULL, the driver
+ *  pulses RESET through it (low for the host library's RESET_LOW_TIME_MSEC,
+ *  then the library's STARTUP_TIME_MSEC start-up wait) and probes once
+ *  more.  ALP_ERR_NOT_READY therefore means the part stayed silent even
+ *  after a reset.  Reset-hook failures also surface as ALP_ERR_NOT_READY.
+ *  With @p reset NULL this is exactly optiga_trust_m_init().
+ *
+ *  The hook and @p reset_user are kept in @p ctx and must outlive it: a
+ *  later read_product_info() / send_apdu() that has to open a session and
+ *  finds the part idled out (#2517) pulses RESET through it once and
+ *  opens again.  A session that is already open is not retried. */
+alp_status_t optiga_trust_m_init_with_reset(optiga_trust_m_t         *ctx,
+                                            alp_i2c_t                *bus,
+                                            uint8_t                   addr_7bit,
+                                            optiga_trust_m_reset_fn_t reset,
+                                            void                     *reset_user);
+
+/** @brief Read the Coprocessor UID (GET_DATA_OBJECT 0xE0C2).
+ *
+ *  Opens the Trust M application on first use, closing a raw APDU
+ *  session if one is open.
+ *
+ *  @return ALP_OK, ALP_ERR_NOT_READY (not initialised), ALP_ERR_INVAL
+ *          (@p out NULL), ALP_ERR_TIMEOUT or ALP_ERR_IO (the chip or
+ *          link failed), ALP_ERR_NOMEM (host-library instance),
+ *          ALP_ERR_BUSY (a timed-out operation is still in flight; retry
+ *          later).
  */
 alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx,
                                               optiga_trust_m_product_info_t *out);
@@ -86,11 +138,11 @@ alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx
 /**
  * @brief Send a raw APDU command frame and read the response.
  *
- * Planned raw-APDU escape hatch for crypto operations the MbedTLS PSA
- * wrapper has not picked up yet.  Current implementation validates
- * pointers, lengths, and initialisation state, then returns
- * ALP_ERR_NOSUPPORT because the Trust M data-link/info-pack transport
- * is not implemented in-tree.
+ * Escape hatch for commands without a typed wrapper.  Runs on the host
+ * library's comms layer: the first call opens a fresh link (soft reset,
+ * application closed), so the caller sends OpenApplication itself and
+ * owns the APDU sequence from there.  The session stays open across calls
+ * until a product-info read or deinit() closes it.
  *
  * @param[in]  ctx         OPTIGA Trust M context (must be initialised first).
  * @param[in]  apdu        Bytes of the command APDU.
@@ -99,6 +151,12 @@ alp_status_t optiga_trust_m_read_product_info(optiga_trust_m_t              *ctx
  * @param[in]  resp_cap    Response buffer capacity.
  * @param[out] resp_len    Receives bytes copied into @p resp.
  * @param[in]  timeout_ms  Max wait for the chip to clock out the response.
+ *
+ * @return ALP_OK, ALP_ERR_NOT_READY (not initialised), ALP_ERR_INVAL
+ *         (bad pointer or length), ALP_ERR_TIMEOUT, ALP_ERR_IO,
+ *         ALP_ERR_NOMEM, ALP_ERR_BUSY (a timed-out operation is still in
+ *         flight; retry later).  After ALP_ERR_TIMEOUT @p resp must stay
+ *         valid until the next call, which drains the operation.
  */
 alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
                                       const uint8_t    *apdu,
@@ -108,7 +166,7 @@ alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
                                       size_t           *resp_len,
                                       uint32_t          timeout_ms);
 
-/** @brief Close the application context + release I2C resources. */
+/** @brief Close any open session and free the host-library instances. */
 void optiga_trust_m_deinit(optiga_trust_m_t *ctx);
 
 #ifdef __cplusplus

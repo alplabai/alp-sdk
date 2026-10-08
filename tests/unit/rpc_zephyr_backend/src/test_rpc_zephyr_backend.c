@@ -35,7 +35,7 @@
  * a minimal test-local double below tracks how many times, and with
  * which owner, it was actually invoked.
  *
- * Four scenarios:
+ * Five scenarios:
  *
  *   1. test_defect1_recv_vs_timed_out_call_race -- uses
  *      zephyr_drv.c's g_rpc_recv_test_sync_hook (a test-only seam
@@ -107,6 +107,26 @@
  *      for what was, and was not, possible to drive on native_sim for
  *      the narrower check-and-count instruction-level race, confirmed
  *      by hand.
+ *
+ *   5. test_1632_dispatch_vs_unsubscribe_snapshot_is_coherent -- #1632:
+ *      rpc_ept_recv()'s async dispatch races z_unsubscribe() mutating
+ *      the same subscribe-table entry, both previously lock-free.
+ *      Drives a genuinely concurrent unsubscribe against an in-flight
+ *      dispatch, timed via a new hook (g_rpc_dispatch_test_sync_hook)
+ *      fired from inside the fix's `be->lock` critical section right
+ *      after `sub` is found, mirroring scenario 1's technique. See
+ *      that scenario's own header comment for the full mutation-proof
+ *      argument.
+ *   6. test_bound_notifies_link_up / test_unbound_notifies_link_lost_*
+ *      / test_error_notifies_link_lost / test_*_after_closing_does_not_notify
+ *      (issue #1643) -- rpc_ept_bound() / rpc_ept_unbound() /
+ *      rpc_ept_error() drive the dispatcher's alp_rpc_notify_link() (a
+ *      new test-local double, mirroring alp_rpc_close_finalize()'s),
+ *      and ALL THREE (bound included -- a regression test, since
+ *      bound() originally ran unbracketed) bail without notifying once
+ *      `closing` is already set -- the same rpc_recv_enter() gate
+ *      `received` already used, reused via the new rpc_worker_leave()
+ *      epilogue helper rather than duplicated.
  */
 
 /* Faked purely at the preprocessor level -- no real Kconfig ALP_SDK_RPC
@@ -132,7 +152,15 @@
 #define CONFIG_OPENAMP                   1
 #define CONFIG_IPC_SERVICE_BACKEND_RPMSG 1
 
+/* z_call()'s timeout branch needs a request that "goes on the wire", and the
+ * zeroed endpoint these tests use has no transport: rename the one ipc_service
+ * call the driver makes to a test double that accepts the frame and never
+ * answers (#2586).  The renaming applies to the header's prototype too. */
+#define ipc_service_send test_ipc_service_send
+
 #include "../../../../src/backends/rpc/zephyr_drv.c"
+
+#undef ipc_service_send
 
 #include <string.h>
 
@@ -140,6 +168,16 @@
 #include <zephyr/ztest.h>
 
 ZTEST_SUITE(alp_rpc_zephyr_backend, NULL, NULL, NULL, NULL, NULL);
+
+static atomic_t g_sent_frames;
+
+int test_ipc_service_send(struct ipc_ept *ept, const void *data, size_t len)
+{
+	ARG_UNUSED(ept);
+	ARG_UNUSED(data);
+	atomic_inc(&g_sent_frames);
+	return (int)len;
+}
 
 /* ------------------------------------------------------------------ */
 /* Test double for the dispatcher's alp_rpc_close_finalize()           */
@@ -152,6 +190,21 @@ void alp_rpc_close_finalize(void *owner)
 {
 	g_finalize_owner = owner;
 	atomic_inc(&g_finalize_calls);
+}
+
+/* ------------------------------------------------------------------ */
+/* Test double for the dispatcher's alp_rpc_notify_link() (issue #1643) */
+/* ------------------------------------------------------------------ */
+
+static atomic_t             g_notify_calls;
+static void                *g_notify_owner;
+static alp_rpc_link_state_t g_notify_last_state;
+
+void alp_rpc_notify_link(void *owner, alp_rpc_link_state_t state)
+{
+	g_notify_owner      = owner;
+	g_notify_last_state = state;
+	atomic_inc(&g_notify_calls);
 }
 
 /* ------------------------------------------------------------------ */
@@ -706,4 +759,373 @@ ZTEST(alp_rpc_zephyr_backend, test_defect2_shutdown_waits_for_inflight_recv)
 	zassert_false(be.recv_active,
 	              "recv must have cleared recv_active before z_shutdown() returned DONE");
 	zassert_equal(atomic_get(&be.cb_active), 0);
+}
+
+/* ------------------------------------------------------------------ */
+/* 4. #1632: rpc_ept_recv() async dispatch vs z_unsubscribe() race.     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Before the fix, rpc_ept_recv()'s async dispatch block read
+ * `sub->cb`/`sub->user` with NO lock held while z_subscribe()/
+ * z_unsubscribe() mutated the exact same fields, also lock-free, from
+ * the application thread.  This drives a genuinely concurrent
+ * z_unsubscribe() against an in-flight rpc_ept_recv() dispatch, timed
+ * via g_rpc_dispatch_test_sync_hook (declared in zephyr_drv.c, called
+ * from inside the fixed code's `be->lock` critical section right
+ * after `sub` is found, before cb+user are copied into locals) --
+ * mirrors test_defect1_recv_vs_timed_out_call_race's technique
+ * exactly: the hook wakes a HIGHER-priority "unsubscriber" thread
+ * that immediately tries to take the same `be->lock` z_unsubscribe()
+ * needs.
+ *
+ * Fixed code: that lock is already held by rpc_ept_recv() at the
+ * moment the hook fires, so the unsubscriber cannot actually run
+ * until rpc_ept_recv() has finished copying `cb`+`user` into locals
+ * and released the lock -- the dispatch therefore always observes a
+ * coherent (cb, user) pair and the subscriber callback always fires
+ * exactly once, with the correct payload and user pointer, before the
+ * unsubscribe clears the table.
+ *
+ * Pre-fix (mutation-proof target): nothing guards the window between
+ * `sub_find()` returning and `sub->cb`/`sub->user` being read -- the
+ * woken higher-priority unsubscriber thread preempts immediately (no
+ * lock/IRQ state to defer it) and fully clears `sub->cb`/`sub->user`/
+ * `sub->method` before the dispatch resumes, so the dispatch observes
+ * `sub->cb == NULL` and silently drops the callback entirely --
+ * `g_1632_record_calls` stays 0.  See this file's own comment on the
+ * hook's call site in zephyr_drv.c for the exact insertion point a
+ * manual revert must match to reproduce this.
+ */
+
+static atomic_t     g_1632_record_calls;
+static void        *g_1632_record_user;
+static uint8_t      g_1632_record_payload[RACE_RESP_CAP];
+static size_t       g_1632_record_payload_len;
+static struct k_sem g_1632_unsub_woken;
+static atomic_t     g_1632_unsub_ran;
+static alp_status_t g_1632_unsub_status;
+
+static int g_1632_user_ctx; /* Address-only sentinel -- never dereferenced. */
+
+static void record_cb(const void *payload, size_t len, void *user)
+{
+	g_1632_record_user        = user;
+	g_1632_record_payload_len = len;
+	if (len <= sizeof(g_1632_record_payload)) {
+		memcpy(g_1632_record_payload, payload, len);
+	}
+	atomic_inc(&g_1632_record_calls);
+}
+
+/* g_rpc_dispatch_test_sync_hook (declared in zephyr_drv.c, inside
+ * rpc_ept_recv()'s async-dispatch critical section): wakes the
+ * unsubscriber thread.  Non-blocking, same contract as
+ * recv_write_race_hook() above. */
+static void wake_1632_unsub_hook(void)
+{
+	k_sem_give(&g_1632_unsub_woken);
+}
+
+static struct rpc_be           g_1632_be;
+static alp_rpc_backend_state_t g_1632_state;
+
+static void unsub_1632_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	k_sem_take(&g_1632_unsub_woken, K_FOREVER);
+	g_1632_unsub_status = z_unsubscribe(&g_1632_state, "probe");
+	atomic_set(&g_1632_unsub_ran, 1);
+}
+
+static void recv_1632_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	uint8_t payload[RACE_RESP_CAP];
+	memset(payload, RACE_PAYLOAD_BYTE, sizeof(payload));
+
+	uint8_t frame[64];
+	int     built = frame_build(frame, sizeof(frame), "probe", payload, sizeof(payload));
+	zassert_true(built > 0, "frame_build failed");
+
+	rpc_ept_recv(frame, (size_t)built, &g_1632_be);
+}
+
+ZTEST(alp_rpc_zephyr_backend, test_1632_dispatch_vs_unsubscribe_snapshot_is_coherent)
+{
+	static K_THREAD_STACK_DEFINE(recv_stack, RACE_STACK_SIZE);
+	static struct k_thread recv_thread_h;
+	static K_THREAD_STACK_DEFINE(unsub_stack, RACE_STACK_SIZE);
+	static struct k_thread unsub_thread_h;
+
+	init_test_channel(&g_1632_be, "sub1632");
+	g_1632_be.subs[0].method_hash = fnv1a_32("probe");
+	strncpy(g_1632_be.subs[0].method, "probe", sizeof(g_1632_be.subs[0].method) - 1);
+	g_1632_be.subs[0].cb   = record_cb;
+	g_1632_be.subs[0].user = &g_1632_user_ctx;
+
+	memset(&g_1632_state, 0, sizeof(g_1632_state));
+	g_1632_state.be_data = &g_1632_be;
+
+	k_sem_init(&g_1632_unsub_woken, 0, 1);
+	atomic_clear(&g_1632_record_calls);
+	atomic_clear(&g_1632_unsub_ran);
+	g_1632_record_user        = NULL;
+	g_1632_record_payload_len = 0;
+	g_1632_unsub_status       = (alp_status_t)-1;
+
+	g_rpc_dispatch_test_sync_hook = wake_1632_unsub_hook;
+
+	/* HIGHER priority than the recv below -- once woken (inside
+	 * rpc_ept_recv()'s critical section, pre-fix; only after it,
+	 * post-fix), it always gets the CPU before recv's own next
+	 * instruction -- mirrors test_defect1_recv_vs_timed_out_call_race. */
+	k_thread_create(&unsub_thread_h,
+	                unsub_stack,
+	                K_THREAD_STACK_SIZEOF(unsub_stack),
+	                unsub_1632_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(4),
+	                0,
+	                K_NO_WAIT);
+
+	k_tid_t recv_tid = k_thread_create(&recv_thread_h,
+	                                   recv_stack,
+	                                   K_THREAD_STACK_SIZEOF(recv_stack),
+	                                   recv_1632_entry,
+	                                   NULL,
+	                                   NULL,
+	                                   NULL,
+	                                   K_PRIO_PREEMPT(5),
+	                                   0,
+	                                   K_NO_WAIT);
+
+	zassert_equal(k_thread_join(recv_tid, K_MSEC(RACE_BOUND_MS)), 0, "recv thread never finished");
+	g_rpc_dispatch_test_sync_hook = NULL;
+
+	int waited_ms = 0;
+	while (!atomic_get(&g_1632_unsub_ran) && waited_ms < RACE_BOUND_MS) {
+		k_sleep(K_MSEC(1));
+		waited_ms += 1;
+	}
+	zassert_true(atomic_get(&g_1632_unsub_ran), "unsubscriber thread never ran");
+
+	uint8_t expect_payload[RACE_RESP_CAP];
+	memset(expect_payload, RACE_PAYLOAD_BYTE, sizeof(expect_payload));
+
+	/* The decisive assertions: the unsubscriber ran at the earliest
+	 * possible instant (right when dispatch found `sub`, before it
+	 * read cb/user), yet the lock means dispatch always observes a
+	 * coherent (cb, user) snapshot and the callback always fires --
+	 * never silently dropped, never called with a torn/mismatched
+	 * user pointer. */
+	zassert_equal(atomic_get(&g_1632_record_calls),
+	              1,
+	              "subscriber callback was not invoked exactly once -- the racing unsubscribe "
+	              "corrupted or dropped the dispatch");
+	zassert_equal(g_1632_record_user,
+	              &g_1632_user_ctx,
+	              "callback ran with the wrong user pointer -- torn cb/user snapshot");
+	zassert_equal(g_1632_record_payload_len, RACE_RESP_CAP);
+	zassert_mem_equal(g_1632_record_payload, expect_payload, RACE_RESP_CAP);
+
+	/* The unsubscribe itself must still have succeeded cleanly once
+	 * dispatch released the lock. */
+	zassert_equal(g_1632_unsub_status, ALP_OK);
+	zassert_equal(g_1632_be.subs[0].cb, NULL);
+	zassert_equal(g_1632_be.subs[0].user, NULL);
+}
+
+/* ---------------------------------------------------------------------
+ * 5. Link liveness (issue #1643): rpc_ept_bound() / rpc_ept_unbound() /
+ *    rpc_ept_error() drive the dispatcher's alp_rpc_notify_link() hook,
+ *    and the unbound/error paths respect the SAME `closing` gate
+ *    rpc_ept_recv() already does (rpc_recv_enter()/rpc_worker_leave()).
+ * ------------------------------------------------------------------- */
+
+ZTEST(alp_rpc_zephyr_backend, test_bound_notifies_link_up)
+{
+	struct rpc_be be;
+	init_test_channel(&be, "bound");
+	be.owner = &be;
+	atomic_clear(&g_notify_calls);
+	g_notify_owner = NULL;
+
+	rpc_ept_bound(&be);
+
+	zassert_true(be.ept_bound);
+	zassert_equal(atomic_get(&g_notify_calls), 1, "bound must notify link state exactly once");
+	zassert_equal(g_notify_owner, &be);
+	zassert_equal(g_notify_last_state, ALP_RPC_LINK_UP);
+}
+
+ZTEST(alp_rpc_zephyr_backend, test_unbound_notifies_link_lost_and_clears_ept_bound)
+{
+	struct rpc_be be;
+	init_test_channel(&be, "unbound");
+	be.owner     = &be;
+	be.ept_bound = true;
+	atomic_clear(&g_notify_calls);
+	g_notify_owner = NULL;
+	/* ztest does not run suites in declaration order (and does not
+     * reset file-scope test doubles between cases) -- reset this one
+     * too, not just g_notify_calls above, so this test's assertion on
+     * it doesn't depend on run order.  Regression: adding a case
+     * elsewhere in this file shifted the order enough that
+     * test_defect3_cross_channel_close_takes_external_path's own
+     * atomic_inc() (which deliberately leaves g_finalize_calls == 1 on
+     * exit -- see that test) started running BEFORE this one and made
+     * the un-reset zassert below fail spuriously. */
+	atomic_clear(&g_finalize_calls);
+	g_finalize_owner = NULL;
+
+	rpc_ept_unbound(&be);
+
+	zassert_false(be.ept_bound);
+	zassert_equal(atomic_get(&g_notify_calls), 1, "unbound must notify link state exactly once");
+	zassert_equal(g_notify_owner, &be);
+	zassert_equal(g_notify_last_state, ALP_RPC_LINK_LOST);
+	/* Not a self-close: close_from_worker was never set, so the
+     * dispatcher's close_finalize() double must not have fired. */
+	zassert_equal(atomic_get(&g_finalize_calls), 0);
+}
+
+ZTEST(alp_rpc_zephyr_backend, test_unbound_after_closing_does_not_notify)
+{
+	/* Mirrors z_shutdown() having already run on this channel (its
+     * external-close path sets `closing` under `lock` before this
+     * callback could observe it) -- rpc_recv_enter() must bail before
+     * ever touching `owner`, exactly like it already does for
+     * rpc_ept_recv(). */
+	struct rpc_be be;
+	init_test_channel(&be, "unbound_closing");
+	be.owner   = &be;
+	be.closing = true;
+	atomic_clear(&g_notify_calls);
+
+	rpc_ept_unbound(&be);
+
+	zassert_equal(atomic_get(&g_notify_calls), 0, "unbound after closing must not notify");
+}
+
+ZTEST(alp_rpc_zephyr_backend, test_error_notifies_link_lost)
+{
+	struct rpc_be be;
+	init_test_channel(&be, "error");
+	be.owner = &be;
+	atomic_clear(&g_notify_calls);
+	g_notify_owner = NULL;
+
+	rpc_ept_error("simulated transport fault", &be);
+
+	zassert_equal(atomic_get(&g_notify_calls), 1, "error must notify link state exactly once");
+	zassert_equal(g_notify_owner, &be);
+	zassert_equal(g_notify_last_state, ALP_RPC_LINK_LOST);
+}
+
+ZTEST(alp_rpc_zephyr_backend, test_bound_after_closing_does_not_notify)
+{
+	/* Regression: rpc_ept_bound() used to run unbracketed (no
+     * rpc_recv_enter()/rpc_worker_leave() gate), unlike unbound()/
+     * error() above -- see this file's own header comment for the
+     * self-close-misclassification + recycle-race it caused.  bound()
+     * must now respect the SAME `closing` gate. */
+	struct rpc_be be;
+	init_test_channel(&be, "bound_closing");
+	be.owner   = &be;
+	be.closing = true;
+	atomic_clear(&g_notify_calls);
+
+	rpc_ept_bound(&be);
+
+	zassert_equal(atomic_get(&g_notify_calls), 0, "bound after closing must not notify");
+}
+
+ZTEST(alp_rpc_zephyr_backend, test_error_after_closing_does_not_notify)
+{
+	struct rpc_be be;
+	init_test_channel(&be, "error_closing");
+	be.owner   = &be;
+	be.closing = true;
+	atomic_clear(&g_notify_calls);
+
+	rpc_ept_error("simulated transport fault", &be);
+
+	zassert_equal(atomic_get(&g_notify_calls), 0, "error after closing must not notify");
+}
+
+/* ------------------------------------------------------------------ */
+/* 6. #2586: a poisoned channel refuses calls until reopen.            */
+/* ------------------------------------------------------------------ */
+
+/* z_call() sets call_poisoned when a call times out with its request on the
+ * wire (its late reply would otherwise answer the next call).  The timeout
+ * branch itself needs a live ipc_service endpoint this test does not have;
+ * this pins the entry gate.  An oversized request makes the unpoisoned
+ * path fail in frame_build() (ALP_ERR_NOMEM, before any send), so a
+ * NOT_READY can only come from the gate. */
+static uint8_t g_2586_big_req[CONFIG_ALP_SDK_RPC_TX_FRAME_MAX];
+
+ZTEST(alp_rpc_zephyr_backend, test_2586_poisoned_channel_refuses_call)
+{
+	struct rpc_be           be;
+	alp_rpc_backend_state_t st = { 0 };
+
+	init_test_channel(&be, "poisoned");
+	st.be_data = &be;
+
+	be.call_poisoned = true;
+	zassert_equal(z_call(&st, "echo", g_2586_big_req, sizeof(g_2586_big_req), NULL, NULL, 10),
+	              ALP_ERR_NOT_READY);
+	zassert_false(be.call_pending);
+
+	be.call_poisoned = false;
+	zassert_equal(z_call(&st, "echo", g_2586_big_req, sizeof(g_2586_big_req), NULL, NULL, 10),
+	              ALP_ERR_NOMEM);
+	zassert_false(be.call_pending);
+}
+
+/* A call whose request is on the wire and gets no reply in time poisons the
+ * channel.  timeout_ms == 0 makes k_sem_take() return -EBUSY, which the old
+ * `== -EAGAIN` test missed (call slot left staged, channel not poisoned). */
+ZTEST(alp_rpc_zephyr_backend, test_2586_zero_timeout_call_poisons_channel)
+{
+	struct rpc_be           be;
+	alp_rpc_backend_state_t st = { 0 };
+
+	init_test_channel(&be, "zero_to");
+	st.be_data = &be;
+	atomic_clear(&g_sent_frames);
+
+	zassert_equal(z_call(&st, "echo", "A", 1, NULL, NULL, 0), ALP_ERR_TIMEOUT);
+	zassert_equal(atomic_get(&g_sent_frames), 1);
+	zassert_false(be.call_pending, "timeout must not leave the call slot staged");
+	zassert_true(be.call_poisoned);
+}
+
+ZTEST(alp_rpc_zephyr_backend, test_2586_timeout_poisons_then_refuses_without_sending)
+{
+	struct rpc_be           be;
+	alp_rpc_backend_state_t st = { 0 };
+
+	init_test_channel(&be, "to_poison");
+	st.be_data = &be;
+	atomic_clear(&g_sent_frames);
+
+	zassert_equal(z_call(&st, "echo", "A", 1, NULL, NULL, 10), ALP_ERR_TIMEOUT);
+	zassert_true(be.call_poisoned);
+	zassert_false(be.call_pending);
+
+	/* A late "A" reply would answer B (replies match by method name only);
+	 * B is refused before it is sent. */
+	zassert_equal(z_call(&st, "echo", "B", 1, NULL, NULL, 10), ALP_ERR_NOT_READY);
+	zassert_equal(atomic_get(&g_sent_frames), 1, "only A went out");
 }

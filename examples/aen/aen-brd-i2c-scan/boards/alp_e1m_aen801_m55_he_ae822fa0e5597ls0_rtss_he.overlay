@@ -1,0 +1,91 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On-silicon BRD_I2C (SoC I2C0, function C) housekeeping-bus probe overlay for
+ * the E1M-AEN801 (Alif Ensemble E8, M55-HE), bench RAM-run via J-Link.
+ *
+ * Pad identity -- E1M-AEN-2626-R2 netlist pinmap CSV:
+ *   "BRD_I2C_SDA",U6,B8,"P7_0/SCP0_A"
+ *   "BRD_I2C_SCL",U6,B3,"P7_1/SCP1_A"
+ * corroborated by the AE822 DFP pin table (pins.h,
+ * AE822FA0E5597LS0_M55_HE/RTE/BSP): P7_0 alt-fn [4] = I2C0_SDA_C, P7_1 alt-fn
+ * [4] = I2C0_SCL_C.  So BRD_I2C is SoC I2C0 (snps,designware-i2c, Tier-1
+ * upstream-native per ADR 0017 as amended 2026-08-30, #1848) -- NOT the
+ * slave-only LPI2C0 it was once believed to be.  See the i2c0 node's own
+ * comment in ensemble_e8_peripherals.dtsi for the full history.
+ *
+ * Devices on the bus -- E1M-AEN-2626-R2 netlist components CSV:
+ *   U21  RV-3028-C7 32.768KHZ 1PPM-TA-QA (Micro Crystal RTC)   DNP=0 fitted, @0x52
+ *   U20  TMP112DIDPWR (TI temp sensor), ADD0 tied to 0V        DNP=0 fitted, @0x48
+ *   IC1  SLS32AIA010MLUSON10XTMA2 (Infineon OPTIGA Trust M)    DNP=1 NOT fitted, @0x30
+ * R93/R94 (0-ohm jumpers that would bridge BRD_I2C into the I2C2/EEPROM
+ * segment) are also DNP, so this bus is isolated -- the EEPROM is NOT reachable
+ * here, and OPTIGA should NOT ack (it's a negative control, not a fault).
+ *
+ * PULL-UPS -- no pull-up resistor exists on BRD_I2C_SDA/SCL in the R2 netlist,
+ * and unlike the I2C2/EEPROM segment this bus never reaches the E1M edge
+ * connector, so no carrier-side pull-up can help.  Two pad settings cover that:
+ *
+ *   bias-pull-up          -> DSC=1.  soc/alif/ensemble/pinctrl_soc.h encodes
+ *                            bits 19:20 [DSC] as 0=high-Z, 1=pull-up,
+ *                            2=pull-down, 3=bus-keeper, so this really is a
+ *                            pull-up.  Do NOT copy the I2C2/EEPROM overlay's
+ *                            bias-pull-down here: DSC=2 is a pull-DOWN, and it
+ *                            is harmless there only because that bus has strong
+ *                            external pull-ups (carrier R137/R144) that
+ *                            overpower it.  On this net it would park both
+ *                            lines low and look like a permanently busy bus.
+ *   drive-open-drain NOT set -> bit 23 [DRV] stays 0 = PUSH-PULL, so the pad
+ *                            actively drives the high phase rather than relying
+ *                            on a pull-up at all.  This matches the HWRM Pn_i
+ *                            note that I2C on these ports works with the
+ *                            push-pull default (the datasheet's open-drain text
+ *                            disagrees; the HWRM reading is the one that makes
+ *                            a pull-up-less net workable, and this app is the
+ *                            experiment that decides it).
+ *
+ * A prior probe of this net (ensemble_e8_peripherals.dtsi i2c0 comment,
+ * "BENCH-SETTLED 2026-08-31") concluded the bus is unusable without external
+ * pull-ups.  That run was on an r1 module (serial 2617-0001), where the RTC and
+ * TMP112 sit on LPI2C0 (P7_4/P7_5) and are NOT connected to P7_0/P7_1 at all --
+ * so nothing could ACK there regardless of biasing, and its -ETIMEDOUT-vs-EIO
+ * comparison reflects floating pins, not a populated bus.  That conclusion does
+ * NOT carry to this R2 module, which routes BRD_I2C to I2C0 by design.  Treat
+ * the present app's result, on R2 hardware, as the authoritative one.
+ */
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+/*
+ * BRD_I2C ITSELF IS NO LONGER SET UP HERE.  &i2c0 (status okay, pinctrl-0,
+ * 100 kHz), the pinctrl_i2c0 pad group (both pads, input-enable on BOTH,
+ * bias-pull-up, input-schmitt-enable, no drive-open-drain), the
+ * RV-3028/TMP112 child nodes and the alp-i2c2 alias all moved DOWN a layer
+ * into the board, where a SoM-resident bus belongs:
+ *
+ *   zephyr/boards/alp/e1m_aen801_m55_he/alp_e1m_aen801_m55_he-pinctrl.dtsi
+ *   zephyr/boards/alp/e1m_aen801_m55_he/alp_e1m_aen801_m55_he_...rtss_he.dts
+ *
+ * both GENERATED from metadata/e1m_modules/aen/on-module-links.yaml -- edit
+ * the pad config or the bus speed THERE and regenerate, never here.  This
+ * overlay keeps only the ITCM retarget, which is a bench-flow concern and
+ * must never ship in a board file.
+ *
+ * The scan itself is unchanged: it still walks 0x08..0x77 and still treats a
+ * NACK at any address as data, so it remains the app that decides what is
+ * actually on this bus on a given module -- including the 0x40 anomaly, which
+ * the shipped devicetree deliberately does NOT encode.
+ */

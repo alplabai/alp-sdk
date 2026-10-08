@@ -2,7 +2,8 @@
 #
 # Getting-started onboarding fixture: assembles a workspace exactly as
 # docs/getting-started.md instructs a brand-new customer to, then runs
-# the doc's LITERAL section-7 AEN801 real-silicon build command.  This
+# the AEN801 real-silicon build docs/getting-started.md section 7 describes
+# (`tan build`), expressed as its `west build` equivalent.  This
 # is a hosted BUILD only (no bench, no flash) -- it exists so the
 # onboarding path is an executable fixture: if a future change breaks
 # `scripts/bootstrap.sh`, renames the AEN801 board target, or moves
@@ -16,9 +17,11 @@
 #      native_sim quickstart, but IS required for this doc's §7 command.
 #      Install recipe mirrors docs/local-ci.md Path B (Windows) §5,
 #      translated to the Linux SDK-ng release layout.
-#   3. The doc's literal §7 command:
+#   3. `scripts/gen_example_alp_conf.py` writes the example's per-core
+#      `generated/alp.conf` (what `tan build` carries as a plan
+#      configArtefact), then the `west build` equivalent of section 7:
 #        west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-#            alp-sdk/examples/peripheral-io/gpio-button-led
+#            alp-sdk/examples/peripheral-io/gpio-button-led \n#            -- -DEXTRA_CONF_FILE=<example>/generated/alp.conf
 #
 name: pr-getting-started-aen801
 
@@ -126,7 +129,15 @@ jobs:
           path: |
             zephyr
             modules
-          key: getting-started-aen801-zephyr-v4.4.1-${{ runner.os }}
+          # hashFiles(zephyr/patches.yml) is part of the key: without it, a
+          # PR that only changes patches.yml (e.g. the pixel-clock set_rate
+          # patch) hits this cache, restores a zephyr/ tree with the OLD
+          # patch(es) applied, and `west patch apply` then fails against an
+          # already-patched (but stale) checkout instead of picking up the
+          # new patch content.  The `*/` glob (it only matches the alp-sdk
+          # checkout) keeps the checkout dir name off this line, which
+          # check_toolchain_lock.py would otherwise read as an SDK cache key.
+          key: getting-started-aen801-zephyr-v4.4.1-${{ runner.os }}-${{ hashFiles('*/zephyr/patches.yml') }}
 
       - name: Cache Zephyr SDK
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
@@ -174,7 +185,7 @@ jobs:
       # AEN801_EXAMPLE_PATH comment above) -- run from the workspace
       # root, one level above alp-sdk/, exactly as docs/getting-started.md
       # writes it (`alp-sdk/examples/...`, not a bare `examples/...`).
-      - name: west build (docs/getting-started.md §7 AEN801 command)
+      - name: west build (docs/getting-started.md §7 AEN801 target, west equivalent)
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
           ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
@@ -184,10 +195,14 @@ jobs:
           source .venv/bin/activate
           # The runner's setup-python step exports Python3_ROOT_DIR, which
           # CMake's find_package(Python3) honours OVER the activated venv --
-          # so alp_project.py (invoked by CMakeLists) would run under the
-          # hosted-tool python and miss the venv's PyYAML.  A real customer's
+          # so CMake-invoked python would run under the hosted-tool
+          # python and miss the venv's PyYAML.  A real customer's
           # activated venv has no Python3_ROOT_DIR, so this is a CI artefact;
           # pin CMake to the venv interpreter to mirror the customer env.
           unset Python3_ROOT_DIR Python3_INCLUDE_DIR Python3_LIBRARY pythonLocation
+          # The example CMakeLists.txt no longer generates alp.conf at
+          # configure time (#866): pre-generate it, then hand it to Zephyr.
+          python alp-sdk/scripts/gen_example_alp_conf.py "${AEN801_EXAMPLE_PATH}"
           west build -b "${AEN801_BOARD_TARGET}" "${AEN801_EXAMPLE_PATH}" \
-              -- -DPython3_EXECUTABLE="$(command -v python)"
+              -- -DPython3_EXECUTABLE="$(command -v python)" \
+                 -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/${AEN801_EXAMPLE_PATH}/generated/alp.conf"

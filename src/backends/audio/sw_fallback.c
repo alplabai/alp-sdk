@@ -19,8 +19,13 @@
  *     anything meaningful".
  *   - out_write -> ALP_OK; null sink (discards), reports @p frames
  *     via *out_frames so caller-side accounting stays consistent.
- *   - out_set_volume -> ALP_OK (accepts any value; no underlying
- *     scale to apply).
+ *   - out_set_volume -> ALP_OK for @p vol == 255 (full scale is a
+ *     no-op on every backend); ALP_ERR_NOSUPPORT otherwise -- this
+ *     null sink never scales ANY format (issue #2002; #1648 tier 1
+ *     closed this exact accept-and-discard shape on the Yocto/Zephyr
+ *     siblings, which refuse only S24_LE/S32_LE because they CAN
+ *     scale S16_LE -- this backend can scale nothing, so it refuses
+ *     every format).
  *   - in_close / out_close -> no-op.
  *
  * Matches the design spec Section 5 sw_fallback contract.
@@ -75,9 +80,9 @@ static alp_status_t sw_in_open(const alp_audio_config_t     *cfg,
                                alp_audio_in_backend_state_t *state,
                                alp_capabilities_t           *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
-	state->be_data  = NULL;
-	caps_out->flags = 0u;
+	state->be_data = NULL;
 	return ALP_OK;
 }
 
@@ -120,9 +125,9 @@ static alp_status_t sw_out_open(const alp_audio_config_t      *cfg,
                                 alp_audio_out_backend_state_t *state,
                                 alp_capabilities_t            *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
-	state->be_data  = NULL;
-	caps_out->flags = 0u;
+	state->be_data = NULL;
 	return ALP_OK;
 }
 
@@ -156,7 +161,12 @@ static alp_status_t sw_out_write(alp_audio_out_backend_state_t *state,
 static alp_status_t sw_out_set_volume(alp_audio_out_backend_state_t *state, uint8_t vol)
 {
 	(void)state;
-	(void)vol;
+	/* out_write is a null sink -- no format can ever be
+     * software-scaled here (unlike yocto_drv.c / zephyr_drv.c, which
+     * scale S16_LE).  255 (full scale) is a no-op on every format
+     * and must still succeed; anything else can never be honoured,
+     * so claiming ALP_OK would repeat #1648 (issue #2002). */
+	if (vol != 255u) return ALP_ERR_NOSUPPORT;
 	return ALP_OK;
 }
 

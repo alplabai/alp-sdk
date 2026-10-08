@@ -27,6 +27,10 @@
 #include <zephyr/ztest.h>
 
 #include <alp/backend.h>
+
+/* for alp_display_slot_epoch() -- internal, same as this suite's other
+ * white-box reaches into the dispatcher. */
+#include "../../../../src/backends/display/display_ops.h"
 #include <alp/cap_instance.h>
 #include <alp/display.h>
 #include <alp/peripheral.h>
@@ -94,6 +98,44 @@ ZTEST(alp_display, test_open_and_close)
 	zassert_equal(alp_display_get_caps(d, &caps), ALP_ERR_NOT_READY);
 }
 
+/* Issue #1698: the handle pool is static, so alp_display_close() followed by
+ * alp_display_open() hands the SAME address back.  A holder that cached the
+ * pointer (LVGL's user-data in src/gui_lvgl.c) cannot tell "still my display"
+ * from "my slot, someone else's display" by pointer alone -- and because
+ * alp_display_blit() gates on the lifecycle byte, the reused slot reads OPEN
+ * and the blit SUCCEEDS against the wrong screen.  That is silent corruption,
+ * not a crash, which is why the epoch exists.  This asserts the invariant the
+ * gui_lvgl guard depends on: same address, different generation. */
+ZTEST(alp_display, test_slot_epoch_changes_across_reuse_1698)
+{
+	const alp_display_config_t cfg = { .display_id = 0 };
+
+	alp_display_t *first = alp_display_open(&cfg);
+	zassert_not_null(first, "open failed: last_error=%d", alp_last_error());
+	const uint32_t first_epoch = alp_display_slot_epoch(first);
+	alp_display_close(first);
+
+	alp_display_t *second = alp_display_open(&cfg);
+	zassert_not_null(second, "reopen failed: last_error=%d", alp_last_error());
+	const uint32_t second_epoch = alp_display_slot_epoch(second);
+
+	/* The address coming back identical is the whole hazard -- assert it
+	 * rather than assume it, so this test still means something if the
+	 * allocator ever stops reusing the slot. */
+	zassert_equal(first, second, "expected the pool to hand back the same slot");
+	zassert_not_equal(first_epoch,
+	                  second_epoch,
+	                  "epoch must change across reuse, else a stale holder "
+	                  "cannot detect the new owner");
+
+	alp_display_close(second);
+}
+
+ZTEST(alp_display, test_slot_epoch_of_null_is_zero_1698)
+{
+	zassert_equal(alp_display_slot_epoch(NULL), 0u);
+}
+
 ZTEST(alp_display, test_get_caps_matches_dt)
 {
 	const alp_display_config_t cfg = { .display_id = 0 };
@@ -109,6 +151,10 @@ ZTEST(alp_display, test_get_caps_matches_dt)
 	zassert_equal(caps.width, 320);
 	zassert_equal(caps.height, 240);
 	zassert_equal(caps.format, ALP_PIXFMT_ARGB8888);
+	/* The dummy panel declares no mount-rotation: scanned as mounted. (The
+	 * property lives on tes,cdc-2.1; the dummy-dc binding does not allow it, so
+	 * a non-zero value is covered by the Alif board builds, not here.) */
+	zassert_equal(caps.rotation, 0);
 
 	zassert_equal(alp_display_get_caps(d, NULL), ALP_ERR_INVAL);
 

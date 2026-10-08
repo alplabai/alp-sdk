@@ -67,7 +67,7 @@ arm_fir_f32(&fir, in, out, 256);
 Enable: `CONFIG_CMSIS_DSP=y` in board.yaml-generated alp.conf
 (triggered automatically when the SoM's `capabilities:` block
 declares a backend that needs CMSIS-DSP, or when you explicitly
-add `cmsis_dsp` to a core's `libraries:` list).
+add `cmsis-dsp` to the `libraries:` list).
 
 ### ETLCPP
 
@@ -112,7 +112,7 @@ if (!doc.is_discarded()) {
 }
 ```
 
-Enable: `libraries: [nlohmann_json]`.  Profile sets
+Enable: `libraries: [nlohmann-json]`.  Profile sets
 `JSON_NOEXCEPTION=1` so `parse(...)` returns a discarded sentinel
 on malformed input instead of throwing.
 
@@ -181,15 +181,20 @@ ship in production builds.
 
 If a library you want isn't in the Tier-1 list above, see the
 deferred / considered tiers below or open an issue.  Adding a
-library is a matter of writing a profile header at
-`metadata/library-profiles/<lib>/` + a `libraries:` enum entry
-in `metadata/schemas/board.schema.json` -- low friction
-once the case is made.
+library is a matter of writing a manifest at
+`metadata/libraries/<name>.yaml` (shape per ADR 0018 and
+`metadata/schemas/library-v1.schema.json`; `board.yaml`'s
+`libraries:` references manifests by name), plus, where the library
+needs one, a compile-time profile header under
+[`metadata/library-profiles/<lib>/`](../metadata/library-profiles/)
+(`etl_profile.h`, `fmt_config.h`, `lv_conf.h`, `mbedtls_config.h`,
+`json_config.h`, `doctest_config.h`) -- low friction once the case is
+made.
 
-## HW-backend profiles (per-library accelerator binding)
+## HW-backend bindings (per-library accelerator selection)
 
 Alongside the compile-time profile header (`etl_profile.h`,
-`fmt_config.h`, ...), 23 of the 35 library manifests under
+`fmt_config.h`, ...), 22 of the 35 library manifests under
 `metadata/libraries/*.yaml` also declare an
 `integration.zephyr.hw_backends:` block -- an inline table inside
 that library's own manifest, not a separate `hw-backends.yaml` file.
@@ -214,32 +219,31 @@ symbol.  This keeps generated `alp.conf` files from claiming
 hardware acceleration that would still run through the library's
 software path.
 
-**Coverage (v0.6).**  23 of the 35 manifests declare an
-`integration.zephyr.hw_backends:` block; the libraries below are
-grouped by accelerator class:
+**Coverage (v0.6).**  22 of the 35 manifests declare an
+`integration.zephyr.hw_backends:` block; the libraries with
+non-empty accelerator bindings below are grouped by accelerator
+class:
 
 | Class                   | Libraries                                                   |
 |-------------------------|-------------------------------------------------------------|
 | Crypto / TLS            | `mbedtls`, `bearssl`                                        |
-| ML inference            | `tflite_micro`, `onnxruntime`                               |
-| DSP / math              | `cmsis_dsp`                                                 |
+| ML inference            | `tflite-micro`                                              |
+| DSP / math              | `cmsis-dsp`                                                 |
 | Filesystem              | `littlefs`                                                  |
-| Graphics / vision       | `lvgl`, `u8g2`, `gfx_compat`, `arm-2d`, `cmsis-cv`          |
-| Dataflow / scheduling   | `cmsis-stream`                                              |
-| Sensor fusion / control | `madgwick_ahrs`, `pid`                                      |
+| Graphics / vision       | `lvgl`, `u8g2`, `gfx-compat`                                |
+| Sensor fusion / control | `madgwick-ahrs`, `pid`                                      |
 | Industrial bus          | `modbus`                                                    |
-| IoT / networking        | `coremqtt_sn`, `libcoap`, `libwebsockets`, `nanopb`, `jsmn` |
+| IoT / networking        | `coap`, `libwebsockets`                                     |
 | Audio codecs            | `minimp3`, `opus`                                           |
-| Header-only utility     | `etl`, `fmt`, `nlohmann_json`, `doctest`                    |
-| Test framework          | `catch2`                                                    |
 
 Seven libraries declare an empty `accelerators:` list -- the four
-header-only utility libraries (`etl`, `fmt`, `nlohmann_json`,
+header-only utility libraries (`etl`, `fmt`, `nlohmann-json`,
 `doctest`) plus `catch2` (test framework, host-side), `jsmn`
 (parser, pure-SW only), and `nanopb` (serialisation, pure-SW only)
 -- their value lives in the pure-SW path with no accelerator class
-to bind.  The other 18 libraries each carry at least one
-`requires_cap:`-gated backend entry.
+to bind.  The other 15 declare at least one accelerator binding; 11 of
+them gate it on `requires_cap:` (the remaining four — `coap`,
+`libwebsockets`, `modbus`, `pid` — carry an ungated `priority:` entry).
 
 Regression-tested by
 [`tests/scripts/test_project_backends.py`](../tests/scripts/test_project_backends.py)'s
@@ -280,15 +284,16 @@ it's parked.  v0.5 cycle revisits.
 
 ## Tier 4 — alternative inference backends (considered, deferred)
 
-Already wired: TFLM (Cortex-M, Zephyr), Ethos-U (AEN), DRP-AI (V2N, Zephyr
-dispatch stub), and DEEPX DX-M1 (V2N-M1, Yocto dispatch stub).  The
+Already wired: TFLM (Cortex-M, Zephyr), Ethos-U (AEN), DRP-AI
+(V2N, A55/Yocto only -- the former M-class dispatch stubs are
+removed), and DEEPX DX-M1 (V2N-M1, A55/Yocto).  The
 libraries below are smaller / different in scope:
 
 | Library     | Niche                                                                  | Why we haven't integrated                                          |
 |-------------|------------------------------------------------------------------------|--------------------------------------------------------------------|
 | [TinyMaix](https://github.com/sipeed/TinyMaix) | Sub-100 KB inference for tiny MCUs (Cortex-M0, AVR)             | Below our target tier — alp-sdk's smallest target is the AEN M55.   |
 | [nnom](https://github.com/majianjia/nnom) | Pure-C neural net on MCUs, Keras export                        | Overlap with TFLM; no clear win on AEN/N93.                          |
-| [libonnx](https://github.com/xboot/libonnx) | C99 ONNX inference for embedded                                | Superseded as the ONNX answer by the real `onnxruntime` Tier B manifest (own `meta-alp-sdk` recipe, upstream `microsoft/onnxruntime` v1.28.0) — the A55/Yocto CPU inference floor, default off (`ALP_SDK_USE_ORT_CPU`), not yet run on silicon.  libonnx's remaining niche is a sub-Yocto (M-class / bare-metal) pure-ONNX path, which nothing in-tree needs yet. |
+| [libonnx](https://github.com/xboot/libonnx) | C99 ONNX inference for embedded                                | Superseded as the ONNX answer by the real `onnxruntime` Tier B manifest (own `meta-alp-sdk` recipe, upstream `microsoft/onnxruntime` v1.28.0) — the A55/Yocto CPU inference floor, default off in CMake (`ALP_SDK_USE_ORT_CPU`) but on by default in the V2M101/V2M102/V2M103/V2N101/V2N102/V2N103 images via `ALP_ENABLE_ORT_CPU` (#1259; V2M with the DEEPX runtime builds against dx-rt's libonnxruntime instead of the layer's), not yet run on silicon.  libonnx's remaining niche is a sub-Yocto (M-class / bare-metal) pure-ONNX path, which nothing in-tree needs yet. |
 | [libonnx](https://github.com/xboot/libonnx) | C99 ONNX inference for embedded                                | ONNX path is reachable via TFLM (TFLite converter).  Revisit if model authors want pure ONNX. |
 | [ExecuTorch](https://github.com/pytorch/executorch) | PyTorch's own on-device runtime for exported `.pte` programs | Write-side only (#1260): `ALP_INFERENCE_MODEL_EXECUTORCH` decodes and `scripts/alp_model/adapters/executorch.py` packages a `.pte` into an `.alpmodel`, but no on-device ExecuTorch runtime backend exists yet — a package built this way has nothing to `alp_inference_invoke()` it. |
 
@@ -309,9 +314,17 @@ When a new library candidate shows up:
 
 1. **Scope test** — does it sit cleanly above the SDK's existing
    abstractions, or does it overlap them?  Overlap = no.
-2. **License test** — Apache-2.0, MIT, BSD, Zlib, ISC, Boost.
-   No GPL/LGPL in headers; LGPL is OK if linked dynamically on
-   Yocto-only targets.
+2. **License test** — the SPDX id must be on the permissive allowlist
+   in `metadata/libraries/README.md` ("Licence allowlist"), which
+   `metadata/schemas/library-v1.schema.json` enforces.  Anything
+   outside it (ISC, any GPL/LGPL, proprietary) needs a maintainer
+   legal review that extends the allowlist first.
+   LGPL is the one case with a narrower path: it is acceptable as a
+   dynamically linked binary package in a Yocto image, built by its
+   own recipe.  It is not acceptable where its source is compiled or
+   statically linked into firmware, or its headers are vendored.  A
+   `libraries:` manifest cannot express that path today, because the
+   schema rejects LGPL ids.
 3. **Maintenance test** — commit activity in the last 12 months,
    no single-bus-factor maintainers.
 4. **Footprint test** — sub-50 KB ROM / sub-4 KB RAM at typical

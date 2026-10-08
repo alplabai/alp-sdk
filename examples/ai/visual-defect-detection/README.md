@@ -55,5 +55,6 @@ the autoencoder training recipe. The most important calibration is the clean
 
 ```
 twister -p native_sim/native/64 -T tests/unit/defect_map
+python3 scripts/gen_example_alp_conf.py examples/ai/visual-defect-detection   # writes generated/alp.conf (#866)
 twister -p native_sim/native/64 -T examples/ai/visual-defect-detection
 ```

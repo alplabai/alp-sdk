@@ -15,6 +15,7 @@ toolchains (cmake, doxygen, ...) installed.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -42,7 +43,8 @@ pytestmark = pytest.mark.skipif(
 def test_test_all_would_run_every_declared_gate_script():
     declared = subprocess.run(
         [sys.executable, str(REPO / "scripts" / "quality_tasks.py"), "--gate-scripts"],
-        cwd=str(REPO), capture_output=True, text=True, check=True,
+        cwd=str(REPO), capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=True,
     ).stdout.splitlines()
     declared = {line.strip() for line in declared if line.strip()}
     assert declared, "quality_tasks.py --gate-scripts declared zero scripts"
@@ -56,7 +58,8 @@ def test_test_all_would_run_every_declared_gate_script():
     bash_path = shutil.which("bash")
     listed = subprocess.run(
         [bash_path, TEST_ALL.as_posix(), "--list-required-gate-scripts"],
-        cwd=str(REPO), capture_output=True, text=True, timeout=30,
+        cwd=str(REPO), capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=30,
     )
     assert listed.returncode == 0, listed.stdout + listed.stderr
     would_run = {line.strip() for line in listed.stdout.splitlines() if line.strip()}
@@ -68,6 +71,21 @@ def test_test_all_would_run_every_declared_gate_script():
         f"gate scripts; missing: {sorted(declared - would_run)}; "
         f"unexpected: {sorted(would_run - declared)}"
     )
+
+
+def test_deselected_gate_duplicates_keep_their_success_line_guard():
+    """check_emit_snapshots.py and check_zephyr_conf_parity.py have pytest
+    twins marked gate_duplicate (deselected from test-all.sh's pytest stage).
+    The twins also asserted the `byte-identical` success line; the
+    required-gate-scripts stage must keep asserting it, or a run that exits 0
+    without checking anything would pass. Pin the guard and that the string
+    is still what both scripts print."""
+    text = TEST_ALL.read_text(encoding="utf-8")
+    assert "check_emit_snapshots.py|check_zephyr_conf_parity.py)" in text
+    assert "grep -q 'byte-identical'" in text
+    for name in ("check_emit_snapshots.py", "check_zephyr_conf_parity.py"):
+        src = (REPO / "scripts" / name).read_text(encoding="utf-8")
+        assert "byte-identical." in src, f"{name} no longer prints its success line"
 
 
 if __name__ == "__main__":

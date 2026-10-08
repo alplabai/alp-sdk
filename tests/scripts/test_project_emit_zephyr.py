@@ -13,6 +13,7 @@ Or via CI as configured in .github/workflows/pr-metadata-validate.yml.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -82,9 +83,11 @@ class TestZephyrEmit(unittest.TestCase):
 
     def test_schema_peripherals_emit_storage_network_usb_kconfig(self) -> None:
         """Non-wrapper Zephyr subsystem tokens must not silently no-op."""
+        # Token-to-Kconfig mapping only: the inline V2N101 m33_sm boards are
+        # not a claim that the CM33 owns these peripherals.
         cases = {
             "emmc": {
-                "path": REPO / "examples" / "v2n" / "v2n-emmc-block-stat" / "board.yaml",
+                "periph": "emmc",
                 "core": "m33_sm",
                 "kconfig": [
                     "CONFIG_DISK_ACCESS=y",
@@ -93,7 +96,7 @@ class TestZephyrEmit(unittest.TestCase):
                 ],
             },
             "ethernet": {
-                "path": REPO / "examples" / "v2n" / "v2n-ethernet-dual" / "board.yaml",
+                "periph": "ethernet",
                 "core": "m33_sm",
                 "kconfig": [
                     "CONFIG_NETWORKING=y",
@@ -101,7 +104,7 @@ class TestZephyrEmit(unittest.TestCase):
                 ],
             },
             "flash": {
-                "path": REPO / "examples" / "v2n" / "v2n-xspi-flash-readwrite" / "board.yaml",
+                "periph": "flash",
                 "core": "m33_sm",
                 "kconfig": [
                     "CONFIG_FLASH=y",
@@ -119,7 +122,23 @@ class TestZephyrEmit(unittest.TestCase):
         }
         for periph, case in cases.items():
             with self.subTest(peripheral=periph):
-                rv = _run_loader(input_path=case["path"], core=case["core"])
+                if "periph" in case:
+                    with tempfile.TemporaryDirectory() as td:
+                        path = _write_board(Path(td), f"""
+                            som:
+                              sku: E1M-V2N101
+                            preset: e1m-x-evk
+                            cores:
+                              a55_cluster:
+                                os: "off"
+                              m33_sm:
+                                app: ./src
+                                peripherals:
+                                  - {case["periph"]}
+                        """)
+                        rv = _run_loader(input_path=path, core=case["core"])
+                else:
+                    rv = _run_loader(input_path=case["path"], core=case["core"])
                 self.assertEqual(rv.returncode, 0, msg=rv.stderr)
                 for kconfig in case["kconfig"]:
                     self.assertIn(kconfig, rv.stdout)
@@ -287,7 +306,8 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
                  "--input", str(path),
                  "--emit", "cmake-args",
                  "--core", core],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         return rv.returncode, rv.stdout, rv.stderr
 
@@ -309,7 +329,8 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
                  "--input", str(path),
                  "--emit", "zephyr-conf",
                  "--core", core],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         return rv.returncode, rv.stdout, rv.stderr
 
@@ -349,7 +370,8 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
                  "--input", str(path),
                  "--emit", "cmake-args",
                  "--core", "m55_hp"],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
         self.assertNotIn("ALP_BOARD_", rv.stdout,
@@ -407,7 +429,8 @@ class TestAlpBoardDefineEmit(unittest.TestCase):
                  "--input", str(path),
                  "--emit", "zephyr-conf",
                  "--core", "m55_hp"],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
         self.assertNotIn("ALP_BOARD_", rv.stdout,

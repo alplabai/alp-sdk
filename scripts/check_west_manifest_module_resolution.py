@@ -28,7 +28,7 @@ manifest text is the single source of truth for what's *reachable*; whether
 a customer's group-filter currently *enables* an optional/tier1/vendor-sdks
 group is a deliberate, documented, per-library opt-in this gate does not
 second-guess -- jsmn, Catch2, u8g2, BearSSL, etl, fmt, doctest,
-libwebsockets, libmodbus, coreMQTT-SN, madgwick_ahrs, minimp3, and opus all
+libwebsockets, libmodbus, madgwick_ahrs, minimp3, and opus all
 sit ONLY inside a disabled-by-default group today, entirely by design; see
 the `group-filter:` comment block in west.yml. A top-level project counts as
 reachable here regardless of its own `groups:` state -- the defect this

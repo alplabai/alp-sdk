@@ -44,10 +44,10 @@ Want green or blue?  Both EVK route tables declare the full RGB set
 [`alp_e1m_evk_routes.h`](../../../include/alp/boards/alp_e1m_evk_routes.h),
 `XEVK_PIN_LED_GREEN` / `XEVK_PIN_LED_BLUE` in
 [`alp_e1m_x_evk_routes.h`](../../../include/alp/boards/alp_e1m_x_evk_routes.h))
--- but only RED has a cross-EVK `BOARD_*` alias in `<alp/board.h>`
-today.  Open the `EVK_*` / `XEVK_*` macro directly, guarded by
-`ALP_BOARD_E1M_EVK` / `ALP_BOARD_E1M_X_EVK`, for the other two
-channels.
+-- and both alias all three channels, so `BOARD_PIN_LED_GREEN` and
+`BOARD_PIN_LED_BLUE` reach through `<alp/board.h>` exactly like
+`BOARD_PIN_LED_RED`.  Swap the macro in `src/main.c`; no
+`ALP_BOARD_E1M_EVK` / `ALP_BOARD_E1M_X_EVK` guard needed.
 
 ## What this shows
 
@@ -85,7 +85,23 @@ this exact gap (tracked as
 `tan doctor` to confirm what's missing before re-running.
 
 To target a different SoM / board, edit `board.yaml` -- nothing else
-needs to change.
+needs to change. For example, this app already ships an E1M-AEN803
+twin of its board-qualified overlay, with DT content identical to the
+AEN801 file beside it. After you set `som.sku: E1M-AEN803` in
+`board.yaml`, `tan build` applies
+[`boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`](boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay)
+(this app declares only `cores: m55_hp`). There is no M55-HE twin: the
+AEN bench farm's default target
+(`scripts/bench/aen/bench-env.sh`'s `AEN_BOARD`) is M55-HE, an
+undeclared core for this app. `scripts/bench/aen/build.sh`, run with
+that default `AEN_BOARD`, refuses with exit 2 (its board-qualified
+preflight, alp-sdk#2094/#2235) rather than silently applying the
+M55-HP-derived config to the wrong core. For the bench, build M55-HP
+instead (`AEN_BOARD=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`).
+The preflight guards only
+`build.sh` itself, though -- a raw `west build -b
+alp_e1m_aen803_m55_he/...` bypasses it, applies no overlay, and is
+unsupported.
 
 ### native_sim (host, no hardware)
 
@@ -95,8 +111,10 @@ rather than `tan`: `native_sim` is a Twister platform, not something
 so `tan build` always targets the real SKU and has no `-b` equivalent.
 
 ```bash
+# writes examples/peripheral-io/blink/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/blink
 west build -b native_sim/native/64 examples/peripheral-io/blink \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd) -DCONFIG_COMPILER_OPT='"-DALP_BOARD_E1M_EVK"'
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd) -DCONFIG_COMPILER_OPT='"-DALP_BOARD_E1M_EVK"'
 west build -t run
 ```
 

@@ -106,10 +106,35 @@ LOG_MODULE_REGISTER(CMP, CONFIG_COMPARATOR_LOG_LEVEL);
  * CMP_STATUS, bitRange [0:0]. */
 #define CMP_STATUS_VALUE BIT(0)
 
-/* Interrupt mask / clear.  alif-dfp drivers/include/cmp.h:29-30
- * (CMP_INT_MASK = 0x01, CMP_INTERRUPT_CLEAR = 0x01). */
-#define CMP_INT_MASK_BIT  0x01U
-#define CMP_INT_CLEAR_BIT 0x01U
+/*
+ * The HSCMP has TWO interrupt sources, one per edge direction, in BOTH
+ * CMP_INTERRUPT_STATUS (0x20, W1C) and CMP_INTERRUPT_MASK (0x24).
+ *
+ * HWRM 19.3.5.3.8: bit 1 FILTER_EVENT1 "Filter event has occurred for the
+ * programmed number of taps, with a transition on the input from HIGH to LOW.
+ * Write 1 to clear."; bit 0 FILTER_EVENT0, same for LOW to HIGH.
+ *
+ * HWRM 19.3.5.3.9, both bits, reset value 0x1: "0x0: Clear mask / 0x1: Set
+ * mask.  Note: By default, interrupt mask is set.  Mask must be cleared to
+ * allow interrupt to be driven out."  So the mask register is active-HIGH:
+ * 0x3 masks both, 0x0 enables both.  The old single-bit constant did the
+ * opposite of what its call sites claimed -- writing 0x01 SET the rising-edge
+ * mask while CLEARING the falling-edge one, arming the very interrupt the
+ * comment said it was disabling (#1821).
+ */
+#define CMP_INT_EVENT_RISING  BIT(0) /* FILTER_EVENT0: LOW  -> HIGH */
+#define CMP_INT_EVENT_FALLING BIT(1) /* FILTER_EVENT1: HIGH -> LOW  */
+#define CMP_INT_EVENT_BOTH    (CMP_INT_EVENT_RISING | CMP_INT_EVENT_FALLING)
+
+/* Filter tap count, HWRM 19.3.5.3.5 CMP_FILTER_CTRL "11-8 NUM_TAPS ... Number
+ * of filter taps, 2-8 taps." */
+#define CMP_FILTER_TAPS_MIN 2U
+#define CMP_FILTER_TAPS_MAX 8U
+/* Default when a node omits filter_taps.  The filter is NOT optional -- both
+ * interrupt sources are defined as filter events -- so the old "0 = off"
+ * default silently disabled every callback.  3 is the count HWRM 19.3.4.2
+ * step 4 uses in its own worked example (CMP_FILTER_CTRL = 0x0301). */
+#define CMP_FILTER_DEFAULT_TAPS 3U
 
 /* Filter control: alif-dfp drivers/include/cmp.h:21,145 -- bit 0 enables the
  * filter, the tap count goes in bits [..8]. */
@@ -142,7 +167,7 @@ struct cmp_alif_config {
 	uint32_t in_m_sel;    /* 0..3  (negative_input enum idx) */
 	uint32_t hyst;        /* 0..7  (hysteresis_level enum idx) */
 	uint32_t prescaler;   /* 0..0x3F */
-	uint32_t filter_taps; /* 2..8, 0 = filter off */
+	uint32_t filter_taps; /* 2..8, HWRM 19.3.5.3.5; validated in init */
 	bool     polarity_en;
 };
 
@@ -191,17 +216,20 @@ static int cmp_alif_set_trigger(const struct device *dev, enum comparator_trigge
 	 * here, and only for a non-NONE trigger. */
 	irq_disable(config->irqn);
 
-	/* Clear any latched event, then mask/unmask the single CMP interrupt at the
-	 * IP level.  The HSCMP raises one line on a configured edge; edge-direction
-	 * discrimination (RISING vs FALLING vs BOTH) is done in software in the ISR
-	 * by re-reading CMP_STATUS.  NONE leaves both the IP mask and the NVIC line
-	 * disabled. */
-	sys_write32(CMP_INT_CLEAR_BIT, base + CMP_INTERRUPT_STATUS);
+	/* Clear BOTH latched events, then mask or unmask BOTH at the IP level.
+	 * The IP raises one NVIC line but latches the two directions separately,
+	 * and the line is LEVEL-sensitive (HWRM Table 19-17), so an uncleared
+	 * FILTER_EVENT1 re-enters the ISR forever.  The ISR discriminates the
+	 * direction from which status bit is set; leaving one source armed but
+	 * unhandled is what locked the core (#1821).
+	 *
+	 * The mask register is active-HIGH (HWRM 19.3.5.3.9, reset 0x1 = masked),
+	 * so NONE writes 0x3 and an armed trigger writes 0x0. */
+	sys_write32(CMP_INT_EVENT_BOTH, base + CMP_INTERRUPT_STATUS);
 
 	if (trigger == COMPARATOR_TRIGGER_NONE) {
-		sys_write32(CMP_INT_MASK_BIT, base + CMP_INTERRUPT_MASK);
+		sys_write32(CMP_INT_EVENT_BOTH, base + CMP_INTERRUPT_MASK);
 	} else {
-		/* cmp.h: writing 0 to the mask register ENABLES the interrupt. */
 		sys_write32(0U, base + CMP_INTERRUPT_MASK);
 		irq_enable(config->irqn);
 	}
@@ -233,9 +261,13 @@ static int cmp_alif_trigger_is_pending(const struct device *dev)
 {
 	uintptr_t base = cmp_base(dev);
 
-	if (sys_read32(base + CMP_INTERRUPT_STATUS) & CMP_INT_CLEAR_BIT) {
-		/* Pending: clear and report it (class contract). */
-		sys_write32(CMP_INT_CLEAR_BIT, base + CMP_INTERRUPT_STATUS);
+	uint32_t status = sys_read32(base + CMP_INTERRUPT_STATUS) & CMP_INT_EVENT_BOTH;
+
+	if (status != 0U) {
+		/* Pending: clear exactly what was latched and report it (class
+		 * contract).  Testing bit 0 alone reported "not pending" for a pure
+		 * falling edge and left it latched (#1821). */
+		sys_write32(status, base + CMP_INTERRUPT_STATUS);
 		return 1;
 	}
 
@@ -254,30 +286,38 @@ static void cmp_alif_isr(const struct device *dev)
 	struct cmp_alif_data *data = dev->data;
 	uintptr_t             base = cmp_base(dev);
 
-	/* Acknowledge the latched event (cmp.h cmp_clear_interrupt()). */
-	sys_write32(CMP_INT_CLEAR_BIT, base + CMP_INTERRUPT_STATUS);
+	/* Read the latched sources, then W1C exactly those.  Clearing only bit 0
+	 * left FILTER_EVENT1 asserted on a level-sensitive line, which re-entered
+	 * this ISR forever after the first HIGH-to-LOW transition (#1821). */
+	uint32_t status = sys_read32(base + CMP_INTERRUPT_STATUS) & CMP_INT_EVENT_BOTH;
 
-	/* Software edge filter: the IP gives one event line; honour the
-	 * configured trigger by re-reading the synchronized output. */
-	if (data->callback != NULL && data->trigger != COMPARATOR_TRIGGER_NONE) {
-		int out = cmp_alif_get_output(dev);
+	sys_write32(status, base + CMP_INTERRUPT_STATUS);
 
-		switch (data->trigger) {
-		case COMPARATOR_TRIGGER_RISING_EDGE:
-			if (out == 1) {
-				data->callback(dev, data->user_data);
-			}
-			break;
-		case COMPARATOR_TRIGGER_FALLING_EDGE:
-			if (out == 0) {
-				data->callback(dev, data->user_data);
-			}
-			break;
-		case COMPARATOR_TRIGGER_BOTH_EDGES:
-		default:
+	/* The status bits ARE the edge direction (HWRM 19.3.5.3.8), so use them.
+	 * Re-reading CMP_STATUS instead raced a short pulse: by the time the ISR
+	 * ran, a live analog comparator could already have swung back, and a
+	 * RISING_EDGE subscriber silently lost the callback it was owed. */
+	if (data->callback == NULL || data->trigger == COMPARATOR_TRIGGER_NONE) {
+		return;
+	}
+
+	switch (data->trigger) {
+	case COMPARATOR_TRIGGER_RISING_EDGE:
+		if (status & CMP_INT_EVENT_RISING) {
 			data->callback(dev, data->user_data);
-			break;
 		}
+		break;
+	case COMPARATOR_TRIGGER_FALLING_EDGE:
+		if (status & CMP_INT_EVENT_FALLING) {
+			data->callback(dev, data->user_data);
+		}
+		break;
+	case COMPARATOR_TRIGGER_BOTH_EDGES:
+	default:
+		if (status != 0U) {
+			data->callback(dev, data->user_data);
+		}
+		break;
 	}
 }
 
@@ -297,6 +337,32 @@ static int cmp_alif_init(const struct device *dev)
 	DEVICE_MMIO_NAMED_MAP(dev, config_reg, K_MEM_CACHE_NONE);
 
 	base = cmp_base(dev);
+
+	/*
+	 * This driver implements the HSCMP register map only.  The LPCMP is a
+	 * different block: HWRM 19.4.5.1 puts it at 0x4200_3000 with a SINGLE
+	 * register, LPCOMP_CTRL at offset 0x0 (19.4.5.3.1: 31-24 COMP_LP0_CTRL,
+	 * 23-2 RESERVED, 1 LPCOMP_CLK_SEL, 0 LPCOMP_CLK32_EN).  Driving it through
+	 * the sequence below would ungate the wrong clock, land BIT(28) inside
+	 * COMP_LP0_IN_M_SEL[28:27], clear LPCOMP_CLK32_EN, and write five offsets
+	 * that do not exist there.  The binding still accepts the enum value, so
+	 * refuse it here rather than corrupt the block (#1821).
+	 */
+	if (config->drv_inst == CMP_DRV_INSTANCE_LP) {
+		LOG_ERR("CMP_INSTANCE_LP is not supported: the LPCMP is a different "
+		        "register block (HWRM 19.4.5), not the HSCMP map this driver "
+		        "implements");
+		return -ENOTSUP;
+	}
+
+	/* HWRM 19.3.5.3.5 CMP_FILTER_CTRL "11-8 NUM_TAPS ... 2-8 taps".  A value
+	 * outside that range programs an illegal tap count, and 16 or above spills
+	 * into 31-12 RESERVED.  Zero used to mean "skip the filter write", which
+	 * left the filter DISABLED and every interrupt source dead (see step 4). */
+	if (config->filter_taps < CMP_FILTER_TAPS_MIN || config->filter_taps > CMP_FILTER_TAPS_MAX) {
+		LOG_ERR("filter_taps %u out of range: HWRM 19.3.5.3.5 allows 2..8", config->filter_taps);
+		return -EINVAL;
+	}
 
 	/* Mux the comparator input pads if the node carries a pinctrl group
 	 * (the internal-reference smoke leaves it off). */
@@ -346,19 +412,32 @@ static int cmp_alif_init(const struct device *dev)
 	/* 3. Polarity (invert result) -- CMP_POLARITY_CTRL. */
 	sys_write32(config->polarity_en ? 1U : 0U, base + CMP_POLARITY_CTRL);
 
-	/* 4. Optional digital filter -- bit 0 enables, taps in bits [..8]
-	 *    (cmp.h cmp_set_filter_ctrl()). */
-	if (config->filter_taps != 0U) {
-		sys_write32(CMP_FILTER_CTRL_EN | (config->filter_taps << CMP_FILTER_TAPS_POS),
-		            base + CMP_FILTER_CTRL);
-		sys_write32(config->prescaler & 0x3FU, base + CMP_PRESCALER_CTRL);
-	}
+	/* 4. Digital filter -- bit 0 enables, taps in bits [11:8].  This is NOT
+	 *    optional: HWRM 19.3.4.2 step 3 (windowing) is explicitly skippable,
+	 *    "If windowing is not required, skip this step", and step 4 carries no
+	 *    such escape; 19.3.5.3.8 then defines BOTH interrupt sources as
+	 *    "Filter event has occurred for the programmed number of taps".  With
+	 *    the filter disabled, set_trigger() and set_trigger_callback() still
+	 *    returned 0 and no callback ever fired -- indistinguishable from a
+	 *    wiring fault on the bench.  The tap count is validated to 2..8 at the
+	 *    top of init, so the filter is always programmed here (#1821). */
+	sys_write32(CMP_FILTER_CTRL_EN | (config->filter_taps << CMP_FILTER_TAPS_POS),
+	            base + CMP_FILTER_CTRL);
+	sys_write32(config->prescaler & 0x3FU, base + CMP_PRESCALER_CTRL);
 
 	/* 5. Program input-select + hysteresis, then enable the comparator, in a
 	 *    single CMP_COMP_REG1 write (the enable bit lives in the same reg). */
-	reg1 = ((config->in_p_sel << CMP_REG1_IN_P_SEL_POS) & CMP_REG1_IN_P_SEL_MSK) |
-	       ((config->in_m_sel << CMP_REG1_IN_M_SEL_POS) & CMP_REG1_IN_M_SEL_MSK) |
-	       ((config->hyst << CMP_REG1_HYST_POS) & CMP_REG1_HYST_MSK) | CMP_REG1_HS_EN;
+	/* HWRM 19.3.5.3.1 carries the note "This register controls analog portion
+	 * of all CMP instances." (contrast 19.3.5.3.2 for CMP_COMP_REG2, "This
+	 * register is available in CMP0 register map only.").  A blind full-word
+	 * store therefore wipes the input-mux and hysteresis selection of any
+	 * earlier-initialised instance, so touch only this instance's fields
+	 * (#1821). */
+	reg1 = sys_read32(base + CMP_COMP_REG1);
+	reg1 &= ~(CMP_REG1_IN_P_SEL_MSK | CMP_REG1_IN_M_SEL_MSK | CMP_REG1_HYST_MSK);
+	reg1 |= ((config->in_p_sel << CMP_REG1_IN_P_SEL_POS) & CMP_REG1_IN_P_SEL_MSK) |
+	        ((config->in_m_sel << CMP_REG1_IN_M_SEL_POS) & CMP_REG1_IN_M_SEL_MSK) |
+	        ((config->hyst << CMP_REG1_HYST_POS) & CMP_REG1_HYST_MSK) | CMP_REG1_HS_EN;
 	sys_write32(reg1, base + CMP_COMP_REG1);
 
 	/* 6. Start with the IP interrupt MASKED and the latched event CLEARED.  The
@@ -367,8 +446,8 @@ static int cmp_alif_init(const struct device *dev)
 	 *    Only CONNECT the ISR here; the NVIC line is enabled later in
 	 *    set_trigger() -- enabling it now, while an unbiased input is toggling
 	 *    the event line, would self-retrigger an ISR storm that hangs boot. */
-	sys_write32(CMP_INT_MASK_BIT, base + CMP_INTERRUPT_MASK);
-	sys_write32(CMP_INT_CLEAR_BIT, base + CMP_INTERRUPT_STATUS);
+	sys_write32(CMP_INT_EVENT_BOTH, base + CMP_INTERRUPT_MASK);
+	sys_write32(CMP_INT_EVENT_BOTH, base + CMP_INTERRUPT_STATUS);
 
 	data->callback  = NULL;
 	data->user_data = NULL;
@@ -392,45 +471,45 @@ static int cmp_alif_init(const struct device *dev)
  *   hysteresis_level: "0mV".."42mV"     -> 0..7  (COMP_HS_HYST value, 6 mV/step)
  * so DT_INST_ENUM_IDX yields the register value directly.
  */
-#define CMP_ALIF_INIT(n)                                                                           \
-	IF_ENABLED(DT_INST_NODE_HAS_PROP(n, pinctrl_0), (PINCTRL_DT_INST_DEFINE(n)));                  \
-                                                                                                   \
-	static void cmp_alif_irq_config_##n(const struct device *dev)                                  \
-	{                                                                                              \
-		/* Connect the ISR but DO NOT irq_enable() here: the comparator is live      \
-		 * once enabled, so enabling the NVIC line at init -- before any trigger is   \
-		 * armed -- lets an already-asserted event self-retrigger into an ISR storm   \
-		 * (priority 0) that starves the boot thread, so the banner never prints.     \
-		 * The line is enabled in set_trigger() once a real trigger is armed.  */             \
-		IRQ_CONNECT(                                                                               \
-		    DT_INST_IRQN(n), DT_INST_IRQ(n, priority), cmp_alif_isr, DEVICE_DT_INST_GET(n), 0);    \
-	}                                                                                              \
-                                                                                                   \
-	static struct cmp_alif_data cmp_alif_data_##n;                                                 \
-                                                                                                   \
-	static const struct cmp_alif_config cmp_alif_config_##n = {                                    \
-		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(cmp_reg, DT_DRV_INST(n)),                               \
-		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(config_reg, DT_DRV_INST(n)),                            \
-		IF_ENABLED(DT_INST_NODE_HAS_PROP(n, pinctrl_0),                                            \
-		           (.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n), ))                                  \
-		    .irq_config_func = cmp_alif_irq_config_##n,                                            \
-		.irqn                = DT_INST_IRQN(n),                                                    \
-		.drv_inst            = DT_INST_ENUM_IDX(n, driver_instance),                               \
-		.in_p_sel            = DT_INST_ENUM_IDX(n, positive_input),                                \
-		.in_m_sel            = DT_INST_ENUM_IDX(n, negative_input),                                \
-		.hyst                = DT_INST_ENUM_IDX(n, hysteresis_level),                              \
-		.prescaler           = DT_INST_PROP_OR(n, prescaler, 0),                                   \
-		.filter_taps         = DT_INST_PROP_OR(n, filter_taps, 0),                                 \
-		.polarity_en         = DT_INST_PROP(n, polarity_en),                                       \
-	};                                                                                             \
-                                                                                                   \
-	DEVICE_DT_INST_DEFINE(n,                                                                       \
-	                      cmp_alif_init,                                                           \
-	                      NULL,                                                                    \
-	                      &cmp_alif_data_##n,                                                      \
-	                      &cmp_alif_config_##n,                                                    \
-	                      POST_KERNEL,                                                             \
-	                      CONFIG_COMPARATOR_INIT_PRIORITY,                                         \
+#define CMP_ALIF_INIT(n) \
+	IF_ENABLED(DT_INST_NODE_HAS_PROP(n, pinctrl_0), (PINCTRL_DT_INST_DEFINE(n))); \
+\
+	static void cmp_alif_irq_config_##n(const struct device *dev) \
+	{ \
+		/* Connect the ISR but DO NOT irq_enable() here: the comparator is live                 \
+		 * once enabled, so enabling the NVIC line at init -- before any trigger is             \
+		 * armed -- lets an already-asserted event self-retrigger into an ISR storm             \
+		 * (priority 0) that starves the boot thread, so the banner never prints.               \
+		 * The line is enabled in set_trigger() once a real trigger is armed.  */ \
+		IRQ_CONNECT( \
+		    DT_INST_IRQN(n), DT_INST_IRQ(n, priority), cmp_alif_isr, DEVICE_DT_INST_GET(n), 0); \
+	} \
+\
+	static struct cmp_alif_data cmp_alif_data_##n; \
+\
+	static const struct cmp_alif_config cmp_alif_config_##n = { \
+		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(cmp_reg, DT_DRV_INST(n)), \
+		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(config_reg, DT_DRV_INST(n)), \
+		IF_ENABLED(DT_INST_NODE_HAS_PROP(n, pinctrl_0), \
+		           (.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n), )) \
+		    .irq_config_func = cmp_alif_irq_config_##n, \
+		.irqn                = DT_INST_IRQN(n), \
+		.drv_inst            = DT_INST_ENUM_IDX(n, driver_instance), \
+		.in_p_sel            = DT_INST_ENUM_IDX(n, positive_input), \
+		.in_m_sel            = DT_INST_ENUM_IDX(n, negative_input), \
+		.hyst                = DT_INST_ENUM_IDX(n, hysteresis_level), \
+		.prescaler           = DT_INST_PROP_OR(n, prescaler, 0), \
+		.filter_taps         = DT_INST_PROP_OR(n, filter_taps, CMP_FILTER_DEFAULT_TAPS), \
+		.polarity_en         = DT_INST_PROP(n, polarity_en), \
+	}; \
+\
+	DEVICE_DT_INST_DEFINE(n, \
+	                      cmp_alif_init, \
+	                      NULL, \
+	                      &cmp_alif_data_##n, \
+	                      &cmp_alif_config_##n, \
+	                      POST_KERNEL, \
+	                      CONFIG_COMPARATOR_INIT_PRIORITY, \
 	                      &cmp_alif_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(CMP_ALIF_INIT)

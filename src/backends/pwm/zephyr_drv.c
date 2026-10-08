@@ -42,6 +42,7 @@
 #include <alp/pwm.h>
 #include <alp/soc_caps.h>
 
+#include "alp_errno.h"
 #include "pwm_ops.h"
 
 #if DT_NODE_HAS_STATUS(DT_PWMS_CTLR(DT_ALIAS(alp_pwm0)), okay)
@@ -92,24 +93,19 @@ static const struct pwm_dt_spec _specs[] = {
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * BEHAVIOUR CHANGE: this switch had no -EAGAIN and/or no -ETIMEDOUT
+	 * arm, so a driver-reported deadline surfaced as ALP_ERR_IO.  Callers
+	 * can now receive ALP_ERR_TIMEOUT here, and ALP_ERR_NOT_READY /
+	 * ALP_ERR_NOMEM / ALP_ERR_NOSUPPORT for the other arms the switch
+	 * lacked.  Every arm it DID carry agreed with the baseline. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static alp_status_t
 z_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg->channel_id >= ARRAY_SIZE(_specs)) return ALP_ERR_INVAL;
 	if (cfg->channel_id >= ALP_SOC_PWM_COUNT) return ALP_ERR_OUT_OF_RANGE;
 
@@ -131,9 +127,8 @@ z_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 	int err = pwm_set(spec->dev, h->channel, h->period_ns, 0u, h->flags);
 	if (err != 0) return _errno_to_alp(err);
 
-	st->dev         = (void *)spec->dev;
-	st->channel_id  = cfg->channel_id;
-	caps_out->flags = 0u;
+	st->dev        = (void *)spec->dev;
+	st->channel_id = cfg->channel_id;
 	return ALP_OK;
 }
 

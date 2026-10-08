@@ -5,7 +5,7 @@
 # Grounding (this checkout):
 #   * "CONFIG_ALP_GFX_COMPAT_SW=y" (real, always-on SW-blit fallback
 #     CONFIG_ line, copied verbatim into `integration.zephyr.kconfig`
-#     below, transcribed by scripts/alp_orchestrate/libraries.py:197
+#     below, transcribed by scripts/alp_orchestrate/libraries.py:321
 #     (`zephyr_kconfig_lines`)) -- the schema's kconfig items must match
 #     `^CONFIG_...=...$`, so the "gfx_compat: maintainer-shipped thin
 #     shim; no external dep" note lives here as prose instead of an

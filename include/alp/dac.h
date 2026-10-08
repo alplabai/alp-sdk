@@ -98,7 +98,7 @@ alp_dac_t *alp_dac_open(const alp_dac_config_t *cfg);
  *
  * @param[in] dac  Handle from @ref alp_dac_open.
  * @param[in] mv   Requested output in millivolts (@c uint16_t, mV).
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_dac_write_mv(alp_dac_t *dac, uint16_t mv);
 
@@ -111,7 +111,8 @@ alp_status_t alp_dac_write_mv(alp_dac_t *dac, uint16_t mv);
  *
  * @param[in]  dac     Handle from @ref alp_dac_open.
  * @param[out] mv_out  Receives the programmed output (@c uint16_t, mV).
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_dac_read_mv(alp_dac_t *dac, uint16_t *mv_out);
 

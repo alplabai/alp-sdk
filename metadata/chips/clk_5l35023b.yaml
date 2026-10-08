@@ -14,8 +14,8 @@ mpn_population:
 datasheet:
   primary:        "Renesas 5L35023 datasheet (public, Dec 2025 rev)"
   url:            "https://www.renesas.com/en/document/dst/5l35023-datasheet"
-  # 8-bit default write-address is 0xD0 (per the V2N strap I2C_addr[1:0] = 00),
-  # which is 7-bit 0x68 + R/W bit.
+  # 8-bit default write-address is 0xD2 (per the V2N strap I2C_addr[1:0] = 01,
+  # maintainer-confirmed 2026-09-24), which is 7-bit 0x69 + R/W bit.
 
 notes: |
   Same part is used on the Renesas RZ/V2N EVK.  The chip carries
@@ -28,7 +28,8 @@ notes: |
 
   I2C slave-address options: 0xD0 / 0xD2 / 0xD4 / 0xD6 (8-bit) =
   7-bit 0x68 / 0x69 / 0x6A / 0x6B per the `I2C_addr[1:0]` strap
-  in Byte 0x00 bits[6:5].  V2N straps `00` -> 7-bit 0x68.
+  in Byte 0x00 bits[6:5].  V2N straps `01` -> 7-bit 0x69
+  (maintainer-confirmed 2026-09-24).
 
   Typed helpers cover:
     * Byte 0x00 (General Control) -- cached at init; readback via
@@ -60,7 +61,7 @@ register_table:
   - { addr: 0x1E, name: "OE / DFC Control",     type: rw,
       summary: "SE1/3 enable, OE1/OE3 pin function" }
   - { addr: 0x1F, name: "Control",              type: rw,
-      summary: "SE2 freerun, VDD2 sel, PLL2 CH2 enable" }
+      summary: "SE2 freerun, VDD2 sel, PLL2 CH2 enable; SE2 (GD32 HXTAL/OSCIN) runs at 24.576 MHz only with 0xC7 (OTP 0x46 = 32.768 kHz)" }
   - { addr: 0x20, name: "Control",              type: rw,
       summary: "SE2 enable, OE2 pin function, DFC_EN, WD_EN" }
   - { addr: 0x21, name: "SE3 + DIFF1 Control",  type: rw }
@@ -73,13 +74,18 @@ register_table:
 bus:              i2c
 i2c:
   addresses:
-    - { addr_7bit: 0x68, scope: "BRD_I2C; V2N strap (8-bit 0xD0); other strap options 0x69/0x6A/0x6B." }
+    - { addr_7bit: 0x69, scope: "BRD_I2C; V2N strap I2C_addr[1:0]=01 (8-bit 0xD2), maintainer-confirmed 2026-09-24; other strap options 0x68/0x6A/0x6B." }
   max_clock_hz:   400000           # Fast-mode -- datasheet I2C bus AC chars table 13
 
 signals:
   # Logical V2N board-level roles (as consumed by the driver / board wiring).
   - { name: Audio_CLKB,    type: output, v2n_route: "P10 (E1M AR9 AUDIO_CLK)" }
   - { name: Audio_CLKB_OE, type: input,  v2n_route: "P67 (host-driven enable)" }
+  # SE2 -> GD32 OSCIN (net GD32_OSC, R278 22R, TP88). OTP reg 0x1F = 0x46 leaves SE2
+  # free-running at 32.768 kHz so the GD32 HXTAL never starts; U-Boot (patch 0012)
+  # writes reg 0x24 = 0x8F then reg 0x1F = 0xC7 -> SE2 = DIV4 = 24.576 MHz at 1.8 V.
+  # SE2 must not change once the GD32 has locked its PLL to it.
+  - { name: GD32_OSC,      type: output, v2n_route: "SE2 -> GD32 OSCIN (HXTAL), 24.576 MHz after the U-Boot fixup" }
   - { name: SDA,           type: bidir,  v2n_route: "P06 (BRD_I2C.SDA)" }
   - { name: SCL,           type: input,  v2n_route: "P07 (BRD_I2C.SCL)" }
 
@@ -159,3 +165,5 @@ families:
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
   smoke_tests:    null_arg_guard
+tracking:
+  blocker: "ADR 0017 tier decision pending"

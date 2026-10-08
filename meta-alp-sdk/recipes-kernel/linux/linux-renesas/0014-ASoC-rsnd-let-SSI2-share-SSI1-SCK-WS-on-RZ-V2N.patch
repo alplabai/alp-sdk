@@ -1,0 +1,115 @@
+From: Alp Lab AB <contact@alplab.ai>
+Subject: [PATCH] ASoC: rsnd: let SSI2 share SSI1's SCK/WS (RZ/V2N SSIU_SSI_MODE1)
+
+rsnd only knows SSI0 as the clock parent of SSI1/2/9. On the E1M-V2N
+module SSI0's SCK/WS are not routed; I2S0 SCK/WS come out of SSI1 and the
+data-out line is SSI2's SDATA. The RZ/V2N SSIU can slave SSI2 to SSI1's
+SCK/WS: SSIU_SSI_MODE1.ssi2_pin{2,1,0} = 110b (SSI1 master, SSI2 slave) or
+101b (both slaves), see RZ/V2N Group Hardware Manual Additional Document
+R01UH1072EJ0120, section 8.5.2.3.16.
+
+Add an SSI2-only DT boolean "alp,shared-pin-ssi1" (implies shared-pin):
+ssi.c then attaches SSI1 (not SSI0) as the SSIP parent, and ssiu.c sets
+SSI_MODE1 bit 8 (ssi2_pin2) alongside ssi2_pin[1:0]. Without the property
+behaviour is unchanged.
+---
+diff --git a/sound/soc/sh/rcar/rsnd.h b/sound/soc/sh/rcar/rsnd.h
+index 690f493..d95362e 100644
+--- a/sound/soc/sh/rcar/rsnd.h
++++ b/sound/soc/sh/rcar/rsnd.h
+@@ -785,6 +785,9 @@ int rsnd_ssi_is_dma_mode(struct rsnd_mod *mod);
+ #define rsnd_ssi_is_pin_sharing(io)	\
+ 	__rsnd_ssi_is_pin_sharing(rsnd_io_to_mod_ssi(io))
+ int __rsnd_ssi_is_pin_sharing(struct rsnd_mod *mod);
++#define rsnd_ssi_pin_parent_is_ssi1(io)	\
++	__rsnd_ssi_pin_parent_is_ssi1(rsnd_io_to_mod_ssi(io))
++int __rsnd_ssi_pin_parent_is_ssi1(struct rsnd_mod *mod);
+ 
+ #define rsnd_ssi_of_node(priv) rsnd_parse_of_node(priv, RSND_NODE_SSI)
+ void rsnd_parse_connect_ssi(struct rsnd_dai *rdai,
+diff --git a/sound/soc/sh/rcar/ssi.c b/sound/soc/sh/rcar/ssi.c
+index cb7fff4..3fe4e9b 100644
+--- a/sound/soc/sh/rcar/ssi.c
++++ b/sound/soc/sh/rcar/ssi.c
+@@ -100,6 +100,7 @@ struct rsnd_ssi {
+ #define RSND_SSI_CLK_PIN_SHARE		(1 << 0)
+ #define RSND_SSI_NO_BUSIF		(1 << 1) /* SSI+DMA without BUSIF */
+ #define RSND_SSI_PROBED			(1 << 2)
++#define RSND_SSI_PARENT_SSI1		(1 << 3) /* SSI2 shares SSI1's SCK/WS */
+ 
+ #define for_each_rsnd_ssi(pos, priv, i)					\
+ 	for (i = 0;							\
+@@ -771,8 +772,13 @@ static void rsnd_ssi_parent_attach(struct rsnd_mod *mod,
+ 		return;
+ 
+ 	switch (rsnd_mod_id(mod)) {
+-	case 1:
+ 	case 2:
++		if (rsnd_flags_has(rsnd_mod_to_ssi(mod), RSND_SSI_PARENT_SSI1)) {
++			rsnd_dai_connect(rsnd_ssi_mod_get(priv, 1), io, RSND_MOD_SSIP);
++			break;
++		}
++		fallthrough;
++	case 1:
+ 	case 9:
+ 		rsnd_dai_connect(rsnd_ssi_mod_get(priv, 0), io, RSND_MOD_SSIP);
+ 		break;
+@@ -1154,6 +1160,14 @@ int __rsnd_ssi_is_pin_sharing(struct rsnd_mod *mod)
+ 	return !!(rsnd_flags_has(rsnd_mod_to_ssi(mod), RSND_SSI_CLK_PIN_SHARE));
+ }
+ 
++int __rsnd_ssi_pin_parent_is_ssi1(struct rsnd_mod *mod)
++{
++	if (!mod)
++		return 0;
++
++	return !!rsnd_flags_has(rsnd_mod_to_ssi(mod), RSND_SSI_PARENT_SSI1);
++}
++
+ int rsnd_ssi_probe(struct rsnd_priv *priv)
+ {
+ 	struct device_node *node;
+@@ -1211,6 +1225,11 @@ int rsnd_ssi_probe(struct rsnd_priv *priv)
+ 		if (of_property_read_bool(np, "shared-pin"))
+ 			rsnd_flags_set(ssi, RSND_SSI_CLK_PIN_SHARE);
+ 
++		/* RZ/V2N: SSI2 slave of SSI1's SCK/WS (SSIU_SSI_MODE1.ssi2_pin = 110b) */
++		if (i == 2 && of_property_read_bool(np, "alp,shared-pin-ssi1"))
++			rsnd_flags_set(ssi, RSND_SSI_CLK_PIN_SHARE |
++					    RSND_SSI_PARENT_SSI1);
++
+ 		if (of_property_read_bool(np, "no-busif"))
+ 			rsnd_flags_set(ssi, RSND_SSI_NO_BUSIF);
+ 
+diff --git a/sound/soc/sh/rcar/ssiu.c b/sound/soc/sh/rcar/ssiu.c
+index 281bc20..00a94db 100644
+--- a/sound/soc/sh/rcar/ssiu.c
++++ b/sound/soc/sh/rcar/ssiu.c
+@@ -191,10 +191,16 @@ static int rsnd_ssiu_init(struct rsnd_mod *mod,
+ 	if (ssis & (1 << 1))
+ 		val1 |= is_clk_master ? 0x2 : 0x1;
+ 
+-	/* SSI2 is sharing pin with SSI0 */
+-	if (ssis & (1 << 2))
++	/*
++	 * SSI2 is sharing pin with SSI0, or with SSI1 (ssi2_pin2 = bit 8 set,
++	 * ssi2_pin[1:0] = 10b/01b: 110b master, 101b slave).
++	 */
++	if (ssis & (1 << 2)) {
+ 		val1 |= is_clk_master ?	0x2 << 2 :
+ 					0x1 << 2;
++		if (rsnd_ssi_pin_parent_is_ssi1(io))
++			val1 |= 1 << 8;
++	}
+ 	/* SSI4 is sharing pin with SSI3 */
+ 	if (ssis & (1 << 4))
+ 		val1 |= is_clk_master ? 0x2 << 16 :
+@@ -203,7 +209,7 @@ static int rsnd_ssiu_init(struct rsnd_mod *mod,
+ 	if (ssis & (1 << 9))
+ 		val2 |= is_clk_master ? 0x2 : 0x1;
+ 
+-	rsnd_mod_bset(mod, SSI_MODE1, 0x0013001f, val1);
++	rsnd_mod_bset(mod, SSI_MODE1, 0x0013011f, val1);
+ 	rsnd_mod_bset(mod, SSI_MODE2, 0x00000017, val2);
+ 
+ 	/*

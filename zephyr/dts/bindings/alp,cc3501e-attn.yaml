@@ -1,0 +1,39 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# alp,cc3501e-attn — the CC3501E slave->master attention line (issue #130).
+
+description: |
+  CC3501E attention/READY input (CC35 GPIO17 -> Alif P2_6 on E1M-AEN rev-1).
+
+  Points CONFIG_ALP_SDK_CC3501E_EVENT_IRQ at the pin whose edge schedules a
+  GET_PENDING_EVENTS drain, via the `cc3501e-attn` alias.
+
+  This is DELIBERATELY its own binding rather than a second "alp,pin-array"
+  node: that compatible is resolved as a single, indexed array by
+  src/zephyr/peripheral_gpio.c, and adding a second one broke pin resolution
+  outright (bridge bring-up failed with err=-1, bench-caught 2026-08-26).
+  It is equally deliberately NOT "gpio-leds"/"gpio-keys" -- those instantiate
+  drivers that would drive this pin, and it is an INPUT carrying the bridge's
+  READY flow control.  The binding exists only so the `gpios` property is
+  parsed as a phandle-array and GPIO_DT_SPEC_GET() resolves; no driver binds
+  to it.
+
+  The net is a rev-1 bodge, absent on the stock E1M-AEN EVK, which is why the
+  Kconfig that consumes it defaults to n.
+
+  Example:
+    cc3501e_attn: cc3501e-attn {
+        compatible = "alp,cc3501e-attn";
+        gpios = <&gpio2 6 GPIO_ACTIVE_HIGH>;
+    };
+
+compatible: "alp,cc3501e-attn"
+
+properties:
+  gpios:
+    type: phandle-array
+    required: true
+    description: |
+      The single attention input.  GPIO_DT_SPEC_GET(DT_ALIAS(cc3501e_attn),
+      gpios) reads index 0.

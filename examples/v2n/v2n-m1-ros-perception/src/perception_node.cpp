@@ -18,16 +18,15 @@
 //   │                                                          │
 //   │   ┌──────────┐ ┌──────────┐ ┌──────────────────┐         │
 //   │   │ sensors  │ │ camera   │ │ DEEPX / DRP-AI   │         │
-//   │   │ (LSM6DSO │ │ capture  │ │ object detector  │         │
-//   │   │  GNSS    │ │ pipeline │ │ (cnn yolov*-style)│         │
-//   │   │  INA236) │ │          │ │                  │         │
+//   │   │ (ICM42670│ │ capture  │ │ object detector  │         │
+//   │   │ +INA236  │ │ pipeline │ │ (cnn yolov*-style)│         │
+//   │   │ 3V3 rail)│ │          │ │                  │         │
 //   │   └─────┬────┘ └─────┬────┘ └────────┬─────────┘         │
 //   │         │            │               │                   │
 //   │         ▼            ▼               ▼                   │
 //   │   /alp/imu        /alp/image    /alp/detections           │
-//   │   /alp/gnss      (sensor_msgs)  (vision_msgs/             │
-//   │   /alp/battery                    Detection2DArray)       │
-//   │   (sensor_msgs)                                           │
+//   │   /alp/rail_3v3  (sensor_msgs)  (vision_msgs/             │
+//   │   (sensor_msgs)                   Detection2DArray)       │
 //   └─────────────────────────────────────────────────────────┘
 //
 //                              ▲
@@ -43,16 +42,16 @@
 // only difference is the backend the inference dispatcher resolves
 // to at startup:
 //
-//   - V2N101 / V2N102 ->
+//   - V2N101 / V2N102 / V2N103 ->
 //       alp_inference_open(backend=AUTO) -> ALP_INFERENCE_BACKEND_DRPAI
-//   - V2M101 / V2M102 (V2N + DEEPX) ->
+//   - V2M101 / V2M102 / V2M103 (V2N + DEEPX) ->
 //       alp_inference_open(backend=AUTO) -> ALP_INFERENCE_BACKEND_DEEPX_DXM1
 //
 // The SoM preset's `capabilities:` block drives which backends the
 // A55/Yocto build compiles in -- both engines are Linux-side only
 // (DRP-AI3 via the MERA runtime, DX-M1 via libdxrt over PCIe): the
 // orchestrator emits -DALP_SDK_USE_DRPAI_V2N=ON on every V2N-family
-// SKU and additionally -DALP_SDK_USE_DEEPX_DXM1=ON on V2M101/V2M102
+// SKU and additionally -DALP_SDK_USE_DEEPX_DXM1=ON on V2M101/V2M102/V2M103
 // (`deepx_dxm1: true`).  On V2N101 (no DEEPX silicon) the DEEPX
 // body isn't compiled in and dispatch resolves to DRP-AI.  The
 // M33/Zephyr slice carries neither engine -- see issues #58/#59.
@@ -98,7 +97,7 @@ class PerceptionNode : public rclcpp::Node
 		// on /alp/detections.
 		dispatcher_ = std::make_unique<DeepxDispatcher>(*this);
 
-		// Bring up the sensor publishers (IMU + GNSS + battery).
+		// Bring up the sensor publishers (IMU + 3V3 rail monitor).
 		// sensor_pubs.cpp owns the alp_i2c_t handles + the 50 Hz
 		// sample timer.
 		sensors_ = std::make_unique<SensorPublishers>(*this);

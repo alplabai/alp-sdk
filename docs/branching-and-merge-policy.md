@@ -171,8 +171,6 @@ workflows (on `dev` they catch problems before integration; on
 - `pr-metadata-validate` — schema validation on every
   `metadata/**` and `examples/**/board.yaml`.
 - `pr-generated-files` — `soc_caps.h` + ABI snapshot in sync.
-- `pr-gd32-bridge-build` — firmware tree builds under both
-  `BRIDGE_HAL_BACKEND=stub` and `=gd32`.
 - `pr-abi-snapshot` — **post-1.0 only**.  Flags removed /
   signature-changed `[ABI-STABLE]` symbols.
 
@@ -201,6 +199,23 @@ hard gate.
 - **Never**: plain fast-forward merge that erases the branch
   boundary on `dev` or `main` (creates topology
   noise + makes bisect harder).
+
+### Reviewing a PR whose head is a `dev` merge
+
+Merging `origin/dev` into a feature branch stays the convention here.
+One side effect to know: with a `Merge origin/dev into <branch>` commit at
+the branch head, GitHub's rendered PR diff ("Files changed", and
+`gh pr diff`) has been observed to disagree with the actual tree at the
+head -- a reviewer can be shown a hunk naming symbols or values that don't
+exist at `HEAD` (see #2349). Before acting on a reviewed hunk, confirm it
+against the head itself:
+
+```sh
+head=$(gh pr view <PR> --json headRefOid -q .headRefOid)
+git fetch origin "$head"
+git show "$head:<path>"                          # the file as it really is
+git diff "$(git merge-base origin/dev "$head")" "$head" -- <path>
+```
 
 ### Commit-message style (enforced informally; pre-commit hint)
 
@@ -296,7 +311,6 @@ held to the full `main` gate set below.
     - `pr-twister`
     - `pr-metadata-validate`
     - `pr-generated-files`
-    - `pr-gd32-bridge-build`
 
 **Merge gates:**
 

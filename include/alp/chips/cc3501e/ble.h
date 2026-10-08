@@ -14,7 +14,7 @@
  * documented field-by-field, not a directly-castable struct), but has NO
  * payload struct for CONNECT (0x36) or the other three GATT ops
  * (0x39..0x3B); those wire layouts are defined only by the firmware handlers
- * (firmware/cc3501e/src/protocol.c handle_ble_*) and are documented
+ * (cc3501e-bridge-firmware:src/protocol.c handle_ble_*) and are documented
  * per-function + in cc3501e.c.  GATT async notifications
  * (EVT_BLE_GATT_WRITE_REQ, 0x3F) need the async-event path (not wired on
  * this HW rev); these wrappers issue the outbound commands only.
@@ -38,13 +38,18 @@ extern "C" {
  * @brief Enable the CC3501E BLE controller + NimBLE host (BLE_ENABLE, 0x30).
  *
  * The firmware worker-routes BLE_ENABLE off the SPI ISR: it brings the Wi-Fi
- * stack up first (shared HIF), then runs nimble_host_start (~2 s).  Like
- * cc3501e_wifi_get_mac, the host re-issues until the radio op completes; the
- * bridge is briefly down during the op, so @p timeout_ms is floored internally
- * to cover the bring-up window.  No reply payload -- success is the OK status.
+ * stack up first (shared HIF), then runs nimble_host_start.  Like
+ * cc3501e_wifi_get_mac, the host re-issues until the radio op completes, since
+ * the bridge is briefly down during the op.  No reply payload -- success is the
+ * OK status.
+ *
+ * @p timeout_ms IS the budget.  It used to be floored internally to 90 s, which
+ * silently overrode every caller and is where alp-sdk#82's "failed after 90.5 s
+ * against a 30 s timeout" came from; bench-measured, a cold enable completes in
+ * well under a second.
  *
  * @param ctx         Initialised bridge handle.
- * @param timeout_ms  Caller budget (floored to the radio-down window).
+ * @param timeout_ms  Caller budget, honoured as given.
  * @return ALP_OK once the BLE host is up; ALP_ERR_NOT_READY if BLE is not built
  *         in the firmware; otherwise the mapped error.
  */
@@ -202,7 +207,7 @@ alp_status_t cc3501e_ble_disconnect(cc3501e_t *ctx, uint32_t timeout_ms);
  * @note Service registration must complete BEFORE advertising starts.  The
  *       firmware's @c cc3501e_nimble_gatt_register re-runs NimBLE's
  *       @c ble_gatts_start() (via @c ble_gatts_reset(), see
- *       firmware/cc3501e/hal/ti/cc3501e_nimble_host.c), and NimBLE's own
+ *       cc3501e-bridge-firmware:hal/ti/cc3501e_nimble_host.c), and NimBLE's own
  *       @c ble_gatts_mutable() constraint refuses that while advertising,
  *       scanning, or connected -- register the service, THEN call
  *       @ref cc3501e_ble_adv_start.

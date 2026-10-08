@@ -66,10 +66,13 @@ cores:
 ```
 
 `sleep_mode != disabled` emits `CONFIG_PM=y` + `CONFIG_PM_DEVICE=y`
-and lands the per-state hierarchy.  `wakeup_sources:` entries that
-name a subsystem (`uart`, `gpio`, ...) emit
-`CONFIG_PM_DEVICE_WAKE_<SUBSYS>=y`; `E1M_*` pad names emit a hint
-comment (per-silicon wake-pin Kconfig lands in v0.7).
+and lands the per-state hierarchy.  `wakeup_sources:` entries --
+subsystem names (`uart`, `gpio`, ...) and `E1M_*` pad names alike --
+emit a hint comment in the generated `alp.conf`: Zephyr marks wake
+capability via the DT `wakeup-source;` property + a runtime
+`pm_device_wakeup_enable()` call rather than a Kconfig symbol, so the
+customer wires them by hand (per-silicon DT-overlay plumbing
+pending).
 
 ### Per-module log levels (`diagnostics.modules:`)
 
@@ -103,6 +106,24 @@ choice symbol Zephyr has not declared still leaves the configure at exit 0.
 It only warns `The choice symbol … was selected (set =y), but no symbol ended
 up as the choice selection`, and the log level is quietly discarded.
 
+### Link target (`diagnostics.link:` -- AEN Flow C)
+
+```yaml
+diagnostics:
+  link: itcm                    # auto (default) | itcm
+```
+
+`itcm` makes `tan build` link the image into the Alif Ensemble M55-HE ITCM
+(base `0x0`, global window `0x58000000`) so `tan flash --ram` can RAM-run it
+with no MRAM write. The planner (tan-cli, ADR-0026) emits the ITCM retarget
+Kconfig fragment + devicetree overlay beside the slice's `alp.conf`; the
+content mirrors `scripts/bench/aen/aen-flowc-itcm.{conf,overlay}`. Proven on the
+E8 M55-HE (E1M-AEN801 / E1M-AEN803) and HE-only: a project with no M55-HE app
+(an M55-HP-only one included) or any other SKU is refused
+(`build.link-itcm-unsupported`), as is an explicit non-RAM
+`diagnostics.console:` (`build.link-itcm-console-conflict`). Details and the
+Flow C procedure: `docs/aen-bench-bringup.md`.
+
 ### Bootloader (`boot:` -- MCUboot)
 
 ```yaml
@@ -131,7 +152,7 @@ gets no `build/alp_sysbuild.conf` at all.
 supplies its default**, not one value for every SKU.  A target whose
 `memory_map:` declares a disjoint per-core `<role>_slot0` region
 (today every AEN SoM -- metadata/e1m_modules/E1M-AEN301.yaml ..
-E1M-AEN801.yaml, #1069 + #1445 --
+E1M-AEN801.yaml and E1M-AEN803.yaml, #1069 + #1445 --
 both M55 cores share the same physical App MRAM, so slot0 was split
 into disjoint per-core windows and the secondary/scratch slot dropped
 rather than forced to fit) has no slot1/scratch partition, so it
@@ -203,9 +224,12 @@ take the board.yaml values as written:
   so `https://hosted.mender.io` emits
   `CONFIG_HAWKBIT_SERVER="hosted.mender.io"` plus `CONFIG_HAWKBIT_PORT=443`
   and `CONFIG_NET_SOCKETS_SOCKOPT_TLS=y` + `CONFIG_HAWKBIT_USE_TLS=y`. A value
-  with no `://` is taken as an already-bare host, so a whole-value `${VAR}`
-  placeholder passes through untouched. A base path, URL userinfo or a
-  non-HTTP scheme is refused — the DDI client has no knob for any of them.
+  with no `://` is taken as an already-bare host. A base path, URL userinfo or
+  a non-HTTP scheme is refused — the DDI client has no knob for any of them.
+  A `${VAR}` placeholder is refused too (#2696): Zephyr does not expand
+  environment variables in a Kconfig fragment, so the firmware would use the
+  text `${VAR}` itself as its server name. Write the real host, or set
+  `CONFIG_HAWKBIT_SERVER` in the app's own `prj.conf`.
 - **`poll_interval_s` is converted to MINUTES.** `CONFIG_HAWKBIT_POLL_INTERVAL`
   is declared in minutes with `range 1 43200`, so `poll_interval_s: 1800`
   emits `CONFIG_HAWKBIT_POLL_INTERVAL=30`. A value that is not a whole number
@@ -271,12 +295,95 @@ name-sort position -- `pinned_low` above sorts after `app_data` and
 
 A `memory_map:` region marked `carveout: false` is excluded from
 resolution (#1484): that flag also means the region is a partition
-*inside* a flash-class node -- on E1M-AEN301..801 that's `mcuboot`,
+*inside* a flash-class node -- on E1M-AEN301..803 that's `mcuboot`,
 `he_slot0`, `hp_slot0`, `reserved`, `storage`, and `atoc`, all living
 inside the `mram_storage` flash node -- not a flash device with a
 Devicetree label of its own. Naming one as `flash_device:` refuses
 with a reason instead of silently decorating a DT label that doesn't
 exist on the board.
+
+Each of those six regions also carries a `write_authority:` value --
+WHO may write the region, and when, a different axis from `carveout:`
+(whether the allocator may land shared memory there). On E1M-AEN301..803,
+`mcuboot` is `vendor_image`, `he_slot0`/`hp_slot0` are `customer_image`,
+`reserved` is `none`, `storage` is `customer_runtime`, and `atoc` is
+`secure_enclave` (`mram_main` is `composite`, spanning all six); see
+`docs/porting-new-som.md`'s "Field rules" section for the full six-value
+enum and the absent-means-unresolved rule.
+
+As of #1365 split B, **`carveout:` is a LEGACY OVERRIDE that must AGREE
+with the derived class, not the only signal the allocator reads.**
+`scripts/alp_orchestrate/carveout.py` (`resolve_carve_outs()`) and
+`scripts/alp_orchestrate/partition.py` (the flash-device resolver) now
+derive a region's class against the SoC's declared on-die MRAM aperture
+(`scripts/alp_orchestrate/aperture.py`, the same math
+`scripts/check_atoc_reservation.py` validates every region against in
+CI): a region CONTAINED in the aperture is `flash` regardless of what
+`carveout:` says, and is refused as an IPC carve-out target
+unconditionally -- no `write_authority:` value makes a contained region
+eligible. A region OUTSIDE the aperture that the SoM preset authored
+itself needs `write_authority: customer_runtime` to land an IPC
+carve-out there. A region the loader DERIVED (SoC-level
+`memory_regions`, or the silicon-variant fallback, e.g. every V2N/V2M/NX9101
+row) needs no authority at all: it is RAM by construction. The legacy
+`carveout:` flag is honoured VERBATIM only where the derivation can't
+resolve an answer -- no aperture declared for this SoC (every non-Alif
+SoM), or the region's own `base:` is unresolved (a `"TBD"` placeholder;
+every AEN preset's `mram_main` used to be the standing example until
+#2053 resolved it, so this fallback has no shipped-preset producer today
+-- see `tests/scripts/test_orchestrate_carveout_aperture_ordering.py`'s
+`TestUnresolvedLegOrdering` for its direct-call coverage) -- which is
+also what keeps every non-Alif SoM's resolution byte-identical to before
+this change. In that fallback,
+`carveout:` decides BEFORE `write_authority:`: when a region's `base:`
+is unresolved and the preset authors both fields, `carveout:` wins (the
+conservative, pre-split-B signal), and `write_authority:` is consulted
+only when `carveout:` is absent. `carveout: false` is
+NOT deprecated or removed by this (doing so would break every existing
+`carveout: false` row and any customer copy of the schema); it becomes
+the fallback answer instead of the primary one, and a `carveout:` value
+that DISAGREES with a resolvable derived class -- `flash`, `ram`, or an
+`unclassified` row's `write_authority`-derived answer -- is a metadata
+bug, refused loudly and naming both facts, not a silently-honoured
+override.
+
+**#2088: `write_authority:` is also enforced, not just derived-from, at
+the `flash_device:` resolution step.** `_resolve_flash_device()`
+(`scripts/alp_orchestrate/partition.py`) refuses a `memory_map:` region
+whose authored `write_authority` is anything other than
+`customer_runtime` or `composite` -- `customer_image`/`vendor_image`/
+`secure_enclave`/`none` name a region something else owns writes to, and
+naming one directly as `flash_device:` is refused with the region, the
+value, and the remedy. An ABSENT `write_authority` on an authored region
+is refused too, but only where an on-die MRAM aperture resolves for the
+SoM (every Alif SoC/variant that declares `soc_flash_base:`) -- mirrors
+`carveout.py`'s own `_region_ipc_eligibility()` gate, which enforces the
+identical rule the same way; a no-op on every non-Alif SoM (V2N/V2M/
+NX9101), none of which author `write_authority` on a derived region in
+the first place. `composite` -- the tag a whole-device alias like
+`mram_main` carries, meaning "consult the contained rows instead" -- is
+not an unconditional pass either: every OTHER `memory_map:` row that
+resolves to an address CONTAINED in the alias's own window must declare
+its own `write_authority`, and together the contained rows must
+CONTIGUOUSLY tile the alias's capacity -- no gap, no overlap -- before
+the alias is accepted; summing sizes is not enough, since an overlap of
+N bytes plus a hole of N bytes sums correctly while the hole itself
+stays unprotected. A resolved row that can't be attributed (a gap none
+of the contained rows cover, or two rows overlapping) refuses the whole
+alias rather than let a `storage:` entry land unprotected in whatever
+band the metadata didn't account for (potentially the
+Secure-Enclave-owned `atoc` window). A row whose base or size DOESN'T
+resolve at all (`atoc`'s `base: "TBD"` before a SoM is HW-mapped is
+exactly this shape) is not immediately fatal on its own: only rows that
+DO resolve are walked for the contiguity check, and an unresolved row
+is named as a candidate ONLY when a gap remains for it to plausibly
+explain. A row whose resolved extent lies OUTSIDE the alias's window is
+not the alias's business and is ignored, so an unrelated device sharing
+the same `memory_map:` list does not block it -- but if that unrelated
+row also confuses `_reserved_spans()`'s own (separate, older) window
+derivation into degrading to zero reserved spans, the alias is refused
+on that basis too: contained rows that verify safe are worthless if
+placement can't actually reserve them.
 
 No AEN SKU has a working `storage[].flash_device:` target today. Neither
 candidate the resolver will accept resolves to a verified DT label:
@@ -288,7 +395,7 @@ candidate the resolver will accept resolves to a verified DT label:
   now refuses to emit `status: ok` for an entry on an unverified
   `memory_map:` device -- a `storage:` entry targeting `mram_main` blocks
   with a reason naming the unverified label, not just a fabricated
-  `dt_label`. (`mram_main` is ALSO 100% tiled on all six AEN presets --
+  `dt_label`. (`mram_main` is ALSO 100% tiled on all seven AEN presets --
   `mcuboot` + `he_slot0` + `hp_slot0` + `reserved` + `storage` + `atoc`,
   all `carveout: false`, summing to exactly its own 5632 KiB capacity --
   so on a real preset an entry there blocks on capacity first; the
@@ -300,8 +407,8 @@ candidate the resolver will accept resolves to a verified DT label:
 * an `on_module.ospi_memories:` entry (e.g. `ospi0`) -- despite the name
   matching a controller node 1:1 on paper, `ospi0` is the ONLY `ospi<n>`
   label anywhere under `zephyr/`
-  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:503`), only the two
-  E1M-AEN801 board `.dts` files include it, and there it is the OSPI
+  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:817`), only the four
+  E1M-AEN801 and E1M-AEN803 board `.dts` files include it, and there it is the OSPI
   CONTROLLER node (`status = "disabled"`, no flash-chip child) -- not an
   enabled flash device. E1M-AEN301/501/701 have no board tree at all;
   E1M-AEN401/601 have one with no `ospi0` node. #1556 does NOT gate this
@@ -351,10 +458,20 @@ security:
   psa:
     persistent_slots:  16
     its_storage:       mram_main          # SoM memory_map region OR storage[] name
-    ps_storage:        ospi0              # optional (PS)
+    ps_storage:        mram_main          # optional (PS)
     tfm:               true               # enable TF-M secure partition
     attestation_root:  optiga_trust_m     # optiga_trust_m | tfm_internal | none
 ```
+
+Any `storage[].flash_device`, `security.psa.its_storage`, or
+`security.psa.ps_storage` that names an `on_module.ospi_memories:` key
+must resolve to a part the chosen SKU actually carries: a key marked
+`assembled: false` in that SKU's `metadata/e1m_modules/<SKU>.yaml`
+(e.g. E1M-AEN801's `ospi0`/`ospi1`, which are a designed-in PCB
+footprint the module doesn't populate) is refused with the reason at
+load time, not silently accepted. Point these fields at a `storage[]`
+partition, a SoM `memory_map:` region (like `mram_main` above), or an
+OSPI key that SKU assembles.
 
 Project-wide. When `tfm: true` the planner emits a sysbuild
 child-image overlay at `build/sysbuild/tfm/tfm.conf` containing

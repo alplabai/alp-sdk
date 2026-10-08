@@ -45,7 +45,7 @@ RPMsg already provides framing + integrity, so the GD32 `SOF(0xA5)` + `CRC16`
 are dropped:
 
 - **Request payload:** `CMD:u8 | <GD32 request payload>` — the exact GD32 opcode
-  (`firmware/gd32-bridge/src/protocol.h`, e.g. `PWM_SET 0x20`, `ADC_READ 0x30`,
+  (`gd32-bridge-firmware:src/protocol.h`, e.g. `PWM_SET 0x20`, `ADC_READ 0x30`,
   `COUNTER_READ 0x70`, `QENC_READ 0x60`, `DAC_SET 0x50`) followed by its
   documented payload, little-endian.
 - **Reply payload:** `STATUS:u8 | <GD32 reply payload>` — the GD32 status code
@@ -135,6 +135,6 @@ inter-core link is not an SDK-scope attack surface).
 - Issue #33 (cross-core proxy section).
 - `src/backends/rpc/yocto_drv.c`, `include/alp/rpc.h` (transport).
 - `src/zephyr/v2n_supervisor.{c,h}`, `include/alp/chips/gd32g553.h` (M33→GD32).
-- `firmware/gd32-bridge/src/protocol.{h,c}`, `docs/gd32-bridge-protocol.md` (opcode set, v0.8.0).
+- `gd32-bridge-firmware:src/protocol.{h,c}`, `docs/gd32-bridge-protocol.md` (opcode set, v0.8.0).
 - `src/backends/{adc,counter,pwm,qenc,dac}/gd32_bridge.c` (the in-core reference the M33 relay reuses).
 - `src/backend.c:62-104`, `include/alp/soc_caps.h` `ALP_SOC_REF_STR` (silicon_ref tiebreak).

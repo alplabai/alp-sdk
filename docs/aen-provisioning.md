@@ -34,7 +34,12 @@ runs `app-gen-toc` locally, with no SE-UART involved in that step):
   This is also what plain `west flash` runs: the board's default flash
   runner is `alif_flash` (`scripts/west_commands/runners/alif_flash.py`),
   which drives `app-gen-toc` + `app-write-mram` over the **SE-UART** — `west
-  flash` does **not** go over SWD.
+  flash` does **not** go over SWD. Before burning, the runner reads the
+  resident ATOC back over the SE-UART and refuses the write if it would
+  silently delist a resident app entry belonging to a different flash (e.g.
+  the other M55 core, or an A32 Linux boot chain) or if that read could not
+  be verified — pass `--replace-atoc` once you've confirmed the loss is
+  intended (#2262).
 - **Flow D — J-Link DIRECT MRAM flash over SWD** (the bench's SWD
   alternative to Flow A; not what `west flash` uses by default). J-Link's
   built-in Alif MRAM loader activates when you select the **part-number
@@ -64,24 +69,65 @@ in lifecycle state **DM** (development — debug open, fully re-provisionable).
 So out of the box your module:
 
 - **boots on its own** (the self-test runs — proves the unit at our QA), and
-- the M55 core is **already released**, so both `west flash` and SWD attach
-  just work.
+- the M55 core is **already released**, so SWD attach just works. A plain
+  **non-sysbuild** `west flash` also refuses here (#2262: the resident
+  factory MCUboot ATOC entry is foreign to any build's own section) —
+  that door is for bare/recovered modules only.
 
 That means your day-1 path needs **no hand-run SETOOLS and no SE-UART
-wiring of your own** — two proven ways to get your app into MCUboot's
-slot0:
+wiring of your own**.
 
-**Option A — `west flash` (alif_flash runner).**  Builds + signs your
-app, then writes it into slot0 for you over the SE-UART via SETOOLS:
+**Which key signs your app.** The factory MCUboot trusts the SDK's shared
+development key, [`keys/mcuboot_shared_dev_ecdsa_p256.pem`](../keys/README.md),
+which is committed to this repository. The AEN sysbuild configuration
+(`zephyr/sysbuild/aen/sysbuild.conf`) already signs with it, so an image built
+from a fresh clone boots on an Alp Lab-provisioned module without any key
+setup. The key is public: it gives **no** security, which matches the DM
+lifecycle the module ships in. For a product, build MCUboot with your own key
+and re-provision it (the re-keying path below). If a module's MCUboot was built
+with a different key, it refuses your image with `E: Unable to find bootable
+image`; that failure is safe (the debug port stays alive, see below), and the
+fix is to re-provision MCUboot.
+
+**Option A — `west flash` (alif_flash runner) — REFUSED on every module,
+bare or pre-provisioned, since alp-sdk#2274; see the warning below.** The
+recipe below is what this door used to do (build + sign, then write into
+slot0 over the SE-UART via SETOOLS) before that refusal landed:
 
 ```bash
+# A board.yaml-driven app needs its alp.conf first: prefer `tan build`, or pass
+# -DEXTRA_CONF_FILE=<alp.conf> (docs/board-config-emit.md; #866).
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
     --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
-west flash    # alif_flash runner: signs + writes your MCUboot-signed image
-              # into slot0 via SETOOLS over the SE-UART (not SWD)
+west flash    # REFUSES (alp-sdk#2274) -- see the warning below. Historical
+              # intent: alif_flash runner signs + writes your MCUboot-signed
+              # image into slot0 via SETOOLS over the SE-UART (not SWD).
 ```
 
-**Option B — plain J-Link, no SETOOLS, no ATOC, no SE-UART.**  Proven
+> **On a pre-provisioned module, a `west flash` here would ALSO have
+> refused independently (#2262).** The `alif_flash` runner reads the
+> resident ATOC back before burning, finds the factory MCUboot entry
+> (entry name TBD/unverified, see `zephyr/sysbuild/aen/README.md`'s
+> provisioning section) foreign to the `ALP-HE`/`ALP-HP` section your own
+> build stages, and refuses rather than silently delisting it the way a
+> pre-#2262 `west flash` did — burning `DEVICE + ALP-HE` only replaces
+> the WHOLE ATOC, so the factory MCUboot bootloader would vanish with no
+> error and no SES warning, leaving the module unable to boot MCUboot at
+> all. `--replace-atoc` overrides the refusal, but it **deletes the
+> factory MCUboot ATOC entry** — it is NOT the remedy for a
+> pre-provisioned module. **Use Option B below instead**, which never
+> touches the ATOC.
+>
+> **On the E1M-AEN boards, `west flash` on a sysbuild (MCUboot) build
+> refuses on its own (alp-sdk#2274), on EVERY module**, independent of
+> the above: the `alif_flash` runner cannot stage both domains' ATOC
+> entries in one burn. Use Option B below (a module whose MCUboot is
+> already provisioned) or the SETOOLS MCUboot provisioning in
+> `zephyr/sysbuild/aen/README.md` (a bare/wiped/re-keyed module)
+> instead.
+
+**Option B — plain J-Link, no SETOOLS, no ATOC, no SE-UART (the
+day-1 path for a pre-provisioned module).**  Proven
 on the bench: an `imgtool`-signed image `loadbin`'d straight to slot0
 is verified by MCUboot and chainloaded, and survived three cold
 power-cycles (`80010000 = 96F3B83D 00000000 00000800 000041B8`,
@@ -103,6 +149,23 @@ qc
 Then power-cycle.  `device AE822FA0E5597LS0_M55_HE` is **required** --
 the bare `AE822FA0E5597LS0` hangs on the GUI device picker even with
 `-nogui 1`.
+
+> **alp-sdk#2233 — two hazards in the raw session above, if you type it by
+> hand.** SEGGER's built-in loader rewrites the WHOLE 16 KiB sector either
+> `loadbin` touches and never reads its prior contents first, so a blob that
+> does not start and end on a sector (`0x4000`) boundary silently turns the
+> REST of that sector to `0xFF` (harmless here only because this particular
+> image happened to fill its sector, which is NOT true in general — check
+> the size before assuming that). Separately, `verifybin` here only ever
+> compares against J-Link's own in-process flash cache, never a fresh chip
+> read — `Verify successful.` is not proof of what MRAM holds. The scripted
+> path (`scripts/bench/aen/flash-jlink-mramxip.sh` for this two-blob shape)
+> handles both: it reads the touched sectors first, overlays the blob on
+> them (`scripts/bench/aen/flowd_sector_pad.py`), `loadbin`s the padded
+> image instead, and proves the write with a FRESH read-only session rather
+> than `verifybin`. Prefer the script; if you must type this by hand, at
+> minimum confirm with a fresh-session `savebin` (a NEW JLinkExe process) or
+> a cold-cycle read, never `verifybin` alone.
 
 > **Proven safe at `0x80010000` (slot0) only.**  Writing the ATOC
 > region, or erasing MCUboot itself, was **not** tested by this bench
@@ -126,6 +189,55 @@ You only need to hand-run the SETOOLS steps below if you are:
 
 The rest of this document is that path.
 
+## 0.6 The ATOC-replace guard verdict contract
+
+Every `west flash` attempt through the `alif_flash` runner (#2262) leaves
+`<build_dir>/alif_flash/atoc-before.txt` (the raw `getbanner`/`gettoc`
+transcript) and `<build_dir>/alif_flash/atoc-guard.json` (a machine-readable
+verdict), written *before* any refusal is raised, so a caller such as
+tan-cli's `zephyr_west_flash` backend (tan-cli#1267) can tell this refusal
+apart from any other `west flash` failure without parsing stderr. The exact
+field set is **frozen as `alp-sdk.alif-flash-atoc-guard.v1`** — any future
+change bumps the schema string (`...v1` -> `...v2`), the same convention
+`metadata/schemas/*-v1.schema.json` already uses elsewhere in this repo.
+(Moved here from `docs/_aen-runbook-section.md`, second #2262 review round:
+that fragment was never actually folded into a published doc, so the table
+had no reachable home — this file, the one a reader chasing `west flash`'s
+ATOC guard is already reading, is that home now.)
+
+| Field | Type | Value |
+|---|---|---|
+| `schema` | string | the literal `alp-sdk.alif-flash-atoc-guard.v1` |
+| `status` | string | one of `clear`, `empty`, `refused-foreign`, `refused-unverified`, `replaced` |
+| `foreign` | array of strings | the resident entry names foreign to this run's own section; `[]` when none |
+| `transcript` | string | absolute path to the paired `atoc-before.txt`, always present (`.resolve()`d, second #2262 review round — previously only absolute when west's own `build_dir` happened to be) |
+| `allowed` | array of strings, sorted | the section name(s) this run is itself about to (re)write (today always exactly one) |
+| `query_status` | string | one of `unverified`, `empty`, `ok` — the raw pre-decision read outcome, BEFORE `--replace-atoc` is applied |
+
+`status == "replaced"` alone doesn't say what `--replace-atoc` overrode:
+`query_status == "unverified"` (with `foreign == []`) means it overrode an
+unverified read; any other `query_status` with a non-empty `foreign` means
+it overrode a genuinely foreign entry.
+
+**A refused run always leaves a verdict — with two honest exceptions.** The
+guard writes `atoc-guard.json` before every `raise`, specifically so a
+refusal is never silent to a machine reader. That guarantee assumes the
+build directory itself is writable: if it is not, writing the verdict fails
+the same way writing the transcript does, and `_run_atoc_guard` raises a
+`RuntimeError` naming the path instead of leaving any file at all (a burn is
+still never reached — this is a fail-closed abort, just one with no verdict
+JSON to inspect afterward, since there is nowhere to put it). Second
+exception: any **#2274 domains.yaml refusal** (see §0.5's Option A
+warning) fires before this guard ever runs — a multi-domain sysbuild, this
+build's own `build_dir` not listed in its `domains.yaml`, or a
+`domains.yaml` that is unreadable, malformed, empty, or names a duplicate
+domain, refuse the same way. Every one of these leaves *no* `atoc-guard.json`
+at all, and REMOVES any stale one a previous run left behind, so a caller
+never mistakes an old `clear`/`replaced` verdict for this attempt's own
+result. `atoc-before.txt` is NOT written or removed on a #2274 refusal
+either (the guard step that writes it is never reached), so an existing
+one is always from an earlier run, not this attempt's.
+
 ## 1. What you need
 
 * **Alif Security Toolkit (SETOOLS)** — Alif Developer download
@@ -139,6 +251,14 @@ The rest of this document is that path.
   and it confirms the core came alive after provisioning. Needs the J-Link
   V9.46+ DLL. *Optional* if you only
   use the SETOOLS/SE-UART path (Flow A).
+
+> **Check the module's SERAM version before you provision it.** The SE
+> firmware image (SERAM) and the services library this SDK links are
+> versioned together, and Alif documents an **API break between SERAM v106
+> and v109** on E8 parts. A module below v109 needs a System Package update
+> over this same SE-UART before its application can use the SE at all --
+> see [`aen-se-services.md`](aen-se-services.md) §0.1 for the pairing rule
+> and how to read the running version.
 
 ## 2. Wire the SE-UART — the part everyone gets wrong
 
@@ -204,6 +324,60 @@ It probes the SES and reports e.g. `Target part# AE822FA0E5597LS0 matches
 default E8`. If it can't reach the SES, fix §2 first (auto-detect needs the
 **send** direction working too, not just receive).
 
+**Which `app-device-config.json` this uses.** SETOOLS 1.110.00 ships no
+AE822-specific device config — the stock `build/config/app-device-config.json`
+declares `"device": "AE722F80F55D5AS"`, an **E7** part, not our
+`AE822FA0E5597LS0`. A maintainer relayed the following from Alif, second-hand:
+it was **not** posted to alp-sdk#1700 or alp-sdk#1701, and as of this writing
+(2026-09-02) it appears nowhere else in this repo either. Treat it as an
+uncorroborated vendor statement, not a settled repo fact, until it lands on
+the issue thread with a citable source:
+
+> The provided app-device-config.json works with either E7 or E8. The part
+> number field is just a text field for your own usage. The important thing
+> to note is the part number selected when you execute tools-config, as that
+> is what app-gen-toc and app-write-mram use.
+
+What follows separates what the bench already established independently
+from what rests on the relay alone:
+
+- **`device` is very likely cosmetic, not silicon-relevant** —
+  bench-established on its own: the SE reports the correct part identity from
+  OTP (`ALIF_PN = AE822FA0E5597LS0`) regardless of which part the config file
+  names. The relay agrees but isn't needed to support this bullet.
+- **The HFXO trim fields already matched our AE822** independently: the
+  reference board's own clock register readback (`XO_REG1` →
+  `xtal_cap:8 gm_pfet:16 gm_nfet:16`) agrees with the stock file's
+  `HFXO_CAP_CTRL`/`HFXO_PFET_GM_CTRL`/`HFXO_NFET_GM_CTRL`.
+- **The relay says what actually binds the ATOC to a part is the
+  `tools-config -a` step above, not this file** —
+  `app-gen-toc`/`app-write-mram` key off the part `tools-config` selected,
+  not the `device` string. This rests on the relayed statement alone; it is
+  not independently bench-verified here.
+
+Use the stock `app-device-config.json` unmodified for this boot/identity
+path, as the reference board does, and do not hand-edit its `device` field.
+**That does not generalize to every field or every flow.** This repo already
+ships a firewall-policy-sensitive path that treats the file's content beyond
+`device` as board-specific and non-interchangeable:
+`examples/connectivity/firmware-update-log`'s hardware-firewall proof
+(`scripts/bench/aen/flash-update-log-firewall-probe.sh`,
+`ALP_AEN_INCLUDE_DEVICE_CONFIG=yes` / `ALP_AEN_DEVICE_CONFIG_JSON`) warns
+that swapping in a generic device config there "can remove the very
+firewall rule you are trying to prove," and requires a board-specific config
+instead of the stock file. So: the `device` string is cosmetic for identity;
+the file's `firewall` block is not established as interchangeable, and the
+shipped firewall-proof flow already treats it as the opposite. Don't read
+"the part-number field doesn't matter" as "any stock device config is safe
+wherever firewall enforcement matters" — it isn't. `app-device-config.json`
+also remains a licensed SETOOLS deliverable carrying Alif-owned configuration
+beyond the `device` string, so alp-sdk does not ship or hand-produce a copy
+of it regardless.
+
+alp-sdk#1701 stays **open**: this section records the relayed guidance as
+current best-known practice, not a settled answer — close the loop by
+getting Alif's statement onto the issue thread.
+
 ## 4. Build the ATOC + write it
 
 Use the stock blink first to validate the path end-to-end before your own
@@ -261,10 +435,123 @@ core and full SWD debug is now available.
 | Scope shows `SEROM v1…` but the host reads **0 bytes** | No common **GND**, **3.3 V adapter** on a 1.8 V line, or you're on the **app UART** not the SEUART. |
 | `Target did not respond` (no scope signal either) | Wrong **baud** (57600 vs 55000), or the SES isn't in its ISP window — use **Hard-maintenance** (`maintenance` → Device Control → Hard maintenance mode) and power-cycle. |
 | Adapter loopback (TXD↔RXD jumper) echoes nothing | Dead/incompatible adapter — swap it (and ensure 1.8 V VCCIO). |
-| `app-write-mram` warns "device in SEROM Recovery mode" | No valid SES — recover the SES first (`maintenance` recovery), it's not a normal app-write. |
+| `app-write-mram` warns "device in SEROM Recovery mode" | No valid SES — recover the SES first, it's not a normal app-write. The ROM→MRAM Recovery procedure is in [`debugging-aen.md` §7.4](debugging-aen.md#74-the-se-is-in-recovery--serom-is-alive-seram-is-not). |
 | Image written but won't boot | ATOC built with the wrong **DEVICE** config for the part — re-run `tools-config` for the correct part and rebuild the ATOC (or write app-only, keeping the factory DEVICE config). |
 | J-Link `Could not find core in CoreSight setup` | Normal on a **fresh** board — the SES hasn't released the core. Provision an app first. On a board that *used* to boot, this is the same no-valid-ATOC state reached by an interrupted write — see [`debugging-aen.md` §7](debugging-aen.md#7-the-secure-enclave-boots-nothing-at-all--cores-parked-vtor-0). |
 | J-Link hangs on a firmware update on first connect (Flow D) | A version-mismatched probe forces a J-Link firmware update that **times out over a USB hub** — connect the probe to a **direct root USB port**. |
+
+## 7. Before the SoM ships — erase the customer storage window
+
+This section is for **whoever provisions a module**, not for a customer
+bringing one up. It is the last step of manufacturing, after §4/§5 have put a
+working image on the part.
+
+**Why.** alp-sdk#1334 measured, on real E8 silicon, roughly 110 KiB of a
+**stale previously-flashed Zephyr application image** sitting in the customer
+storage window. It is not live data — the region was erased and the board
+cold-cycled to `[SES] ATOC ok` / `RESULT PASS`, with the ATOC band verified
+byte-identical throughout — but shipping it means a customer who dumps the
+part sees another application's shell strings, and the customer's **first NVS
+write silently destroys bytes that look meaningful**. A SoM should leave
+provisioning with that window in its erased state (alp-sdk#1430).
+
+**The erased value on this MRAM is `0x00`, not `0xFF`.** That is measured, not
+assumed — from the running application's own flash parameters,
+`write_block_size=16 erase_value=0x00` (alp-sdk#1430). Anything that asks "is
+this window erased?" compares against `0x00`. Filling it with `0xFF` leaves it
+looking *programmed*, not erased.
+
+**The window.** Its authoritative definition is the `memory_map:` block in
+[`metadata/e1m_modules/E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml)
+— today the `storage` region at `0x80560000`, 96 KiB, ending at `0x80578000`.
+Do not copy that address into a runbook: read it from the preset each time.
+The size moved once already (128 KiB → 96 + 32 KiB) when the SE-owned `atoc`
+band was carved out of it.
+
+> **DATA LOSS, and a brick risk one byte away.** The erase is irreversible —
+> there is no backup of what is in the window. And the region immediately
+> above it, `atoc` at `0x80578000`, is **SE-owned**: SETOOLS top-anchors the
+> signed ATOC at the top of the App MRAM window and grows it *downward*, so it
+> is live data with no fixed address. An overshoot past `0x80578000` corrupts
+> the ATOC and the board comes back as **`No ATOC`**, needing a full
+> re-provision over the SE-UART (§4). Confirm you are on an `E1M-AEN801` (E8)
+> before writing zeros to any MRAM address — the bench has three J-Link probes
+> and two of them share OEM serial `603000869`.
+
+**How.** Use the helper, which derives the window from the preset, refuses to
+run unless it ends exactly where `atoc` begins, checks the SW-DP IDR is the
+AEN E8's `0x4C013477` before writing anything, resolves where the RESIDENT
+ATOC package actually starts (not just where its allocated region begins —
+alp-sdk#2233 measured a real board whose package started well inside the
+customer storage window; see `scripts/bench/aen/atoc_trailer.py`) and refuses
+outright if the erase would overlap it, and byte-verifies the result with a
+fresh-session read-back (not `verifybin`, which only reads J-Link's own
+cache — the other alp-sdk#2233 defect):
+
+```sh
+scripts/bench/aen/erase-storage.sh --dry-run              # prints the window + script, touches nothing
+scripts/bench/aen/erase-storage.sh                         # the real thing (destructive), default E1M-AEN801
+scripts/bench/aen/erase-storage.sh --sku E1M-AEN803         # another AEN SKU with the same storage/atoc layout
+```
+
+Note that a J-Link **`erase` does not clear MRAM** on this part, so the erase
+is a sector-padded `loadbin` of a zero-filled file through the part-number
+device profile (`AE822FA0E5597LS0_M55_HE`) — the same mechanism Flow D uses
+to write MRAM. The zero file is also what the fresh-session read-back proof
+compares against, so "erased" is a byte-compare rather than a claim. The
+script does **not** reset or boot the board; when it exits 0, cold
+power-cycle by hand and re-run the §2 listener. The ATOC band was not
+touched, so the banner must still show your image booting — **not**
+`No ATOC`. Every pre-write sector read is also kept under
+`$BENCH_ROOT/flowd-backup/<timestamp>-erase-storage/`, printed at run time —
+the only restore source on a board with no SE-UART.
+
+If you would rather stay on the SETOOLS/SE-UART path (Flow A) instead of SWD,
+the equivalent is `app-write-mram -c <your-serial-device> -e "<base> <size>"`;
+that costs you the probe-identity gate the helper performs, so check the part
+with `tools-config` (§3) first.
+
+**`[BENCH-VERIFIED 2026-08-30]`** — first real run of `erase-storage.sh` on a
+module (off-labgrid E1M-AEN801, `AE822FA0E5597LS0`, J-Link `000821005680`).
+Both things a first run owed are below. **This transcript predates the
+alp-sdk#2233 fix** (2026-09-19) and still shows the old `verifybin` line the
+script no longer gates on, and no ATOC-trailer check — kept verbatim as the
+historical record of that run, not as a description of the current gate.
+
+The erase itself, with the byte-compare that makes "erased" a measurement
+rather than a claim:
+
+```
+>>> customer storage window: 0x80560000 .. 0x80578000 (96 KiB, exclusive of atoc at 0x80578000)
+>>> DPIDR gate OK: probe confirmed AEN E8 (0x4C013477)
+J-Link: Flash download: Total: 0.527s (... Program & Verify: 0.464s ...)
+J-Link>verifybin ...\aen-storage-erased.bin 0x80560000
+Verify successful.
+erased: 0x80560000 .. 0x80578000 verified all-0x00
+```
+
+Then a 20 s cold power cycle, reading the SES boot header on the SE-UART. The
+ATOC band was not touched and still boots the application:
+
+```
+[SES] ATOC DEVICE ok
+[SES] STOC ok
+[SES] ATOC ok
+[SES] LCS=1
+|   ALP-HE | M55-HE | 0x80010000 | 0x8057EA50 | ---------- | 0x80010000 |   121588 |      1.0.0| u VB   |
+```
+
+`u VB` on the `ALP-HE` row is the point: **V**erified and **B**ooted after the
+erase, so wiping the customer window did not disturb the signed boot chain.
+
+> **One host caveat, fixed in the same change.** Before this run the script
+> could not erase anything on a Windows bench host: it handed the J-Link an
+> MSYS path (`/tmp/aen-storage-erased.bin`) that `JLink.exe` cannot open, and
+> the run ended in `Failed to open file.` / `ERROR: Could not open file.` The
+> verify gate behaved correctly — no `verify successful`, so it reported NOT
+> erased rather than claiming success — but the erase silently never happened.
+> `erase-storage.sh` now converts the path with `cygpath -w` where a converter
+> exists. Same trap as `ti/regen_flashset.sh` in the firmware repo.
 
 ## See also
 

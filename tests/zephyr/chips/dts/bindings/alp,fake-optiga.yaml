@@ -1,0 +1,13 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake OPTIGA Trust M emul target.  Lives in this test only.
+
+description: |
+  Fake Infineon OPTIGA Trust M i2c-emul target used by the alp-sdk chips
+  ztest.  Answers the I2C_STATE (0x82) probe with 4 bytes and can be armed
+  to NACK its next N accesses, the way the part does while it wakes.
+
+compatible: "alp,fake-optiga"
+
+include: i2c-device.yaml

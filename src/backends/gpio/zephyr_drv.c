@@ -25,8 +25,10 @@
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
+#include <alp/chips/gd32g553.h>
 #include <alp/soc_caps.h>
 
+#include "alp_errno.h"
 #include "alp_slot_claim.h"
 #include "gpio_ops.h"
 #include "gpio_resolve.h"
@@ -51,10 +53,38 @@
 static const struct gpio_dt_spec alp_pins[] = { LISTIFY(ALP_PIN_COUNT, ALP_PIN_ENTRY, ()) };
 #endif
 
+/* GD32 control pads (SWD + the bridge ATTN input) live in their OWN
+ * `alp,gd32-pads` node and are reached only through the reserved ids
+ * GD32G553_PAD_ID_* -- never as positional alp_pins indices (index 0 of that
+ * array is the GD32 SPI chip-select, so a shared index space would let a
+ * stray id drive it).  See zephyr/dts/bindings/alp,gd32-pads.yaml. */
+#define ALP_GD32_PADS_NODE DT_INST(0, alp_gd32_pads)
+
+#if DT_NODE_EXISTS(ALP_GD32_PADS_NODE)
+static const struct gpio_dt_spec gd32_pads[] = {
+	[GD32G553_PAD_ID_SWDIO - GD32G553_PAD_ID_SWDIO] =
+	    GPIO_DT_SPEC_GET(ALP_GD32_PADS_NODE, swdio_gpios),
+	[GD32G553_PAD_ID_SWCLK - GD32G553_PAD_ID_SWDIO] =
+	    GPIO_DT_SPEC_GET(ALP_GD32_PADS_NODE, swclk_gpios),
+	[GD32G553_PAD_ID_NRST - GD32G553_PAD_ID_SWDIO] =
+	    GPIO_DT_SPEC_GET(ALP_GD32_PADS_NODE, nrst_gpios),
+	[GD32G553_PAD_ID_ATTN - GD32G553_PAD_ID_SWDIO] =
+	    GPIO_DT_SPEC_GET(ALP_GD32_PADS_NODE, attn_gpios),
+};
+#endif
+
 /* Exported for other backends (e.g. spi/zephyr_drv.c) that need to
  * resolve a chip-select gpio_dt_spec from the same alp,pin-array node. */
 bool alp_z_gpio_resolve(uint32_t pin_id, struct gpio_dt_spec *out)
 {
+	if (pin_id >= GD32G553_PAD_ID_SWDIO && pin_id <= GD32G553_PAD_ID_ATTN) {
+#if DT_NODE_EXISTS(ALP_GD32_PADS_NODE)
+		*out = gd32_pads[pin_id - GD32G553_PAD_ID_SWDIO];
+		return true;
+#else
+		return false; /* this board publishes no GD32 pads */
+#endif
+	}
 #if ALP_PIN_AVAILABLE
 	if (pin_id >= ARRAY_SIZE(alp_pins)) return false;
 	*out = alp_pins[pin_id];
@@ -129,21 +159,13 @@ static gpio_flags_t _to_gpio_irq_flags(alp_gpio_edge_t edge)
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * BEHAVIOUR CHANGE: this switch had no -EAGAIN and/or no -ETIMEDOUT
+	 * arm, so a driver-reported deadline surfaced as ALP_ERR_IO.  Callers
+	 * can now receive ALP_ERR_TIMEOUT here, and ALP_ERR_NOT_READY /
+	 * ALP_ERR_NOMEM / ALP_ERR_NOSUPPORT for the other arms the switch
+	 * lacked.  Every arm it DID carry agreed with the baseline. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static void _isr_thunk(const struct device *port, struct gpio_callback *cb, gpio_port_pins_t pins)
@@ -157,23 +179,36 @@ static void _isr_thunk(const struct device *port, struct gpio_callback *cb, gpio
 	}
 }
 
-static alp_status_t
-z_open(uint32_t pin_id, alp_gpio_backend_state_t *st, alp_capabilities_t *caps_out)
+alp_status_t alp_z_gpio_open_owned(uint32_t                  pin_id,
+                                   alp_gpio_backend_state_t *st,
+                                   alp_capabilities_t       *caps_out,
+                                   alp_gpio_backend_state_t *owner_state)
 {
+	(void)caps_out;
 	struct gpio_dt_spec spec;
 	if (!alp_z_gpio_resolve(pin_id, &spec)) return ALP_ERR_INVAL;
 	if (!device_is_ready(spec.port)) return ALP_ERR_NOT_READY;
 
 	alp_z_gpio_side_t *s = _alloc_side();
 	if (s == NULL) return ALP_ERR_NOMEM;
-	s->spec  = spec;
-	s->owner = CONTAINER_OF(st, struct alp_gpio, state);
+	s->spec = spec;
+	/* Derived from the state the CALLER named as the owner's, never from `st`
+	 * -- `st` may be nested in a delegating backend's sidecar.  See
+	 * alp_z_gpio_open_owned()'s contract in gpio_ops.h and issue #1618. */
+	s->owner = (owner_state != NULL) ? CONTAINER_OF(owner_state, struct alp_gpio, state) : NULL;
 
-	st->dev         = (void *)spec.port;
-	st->pin_id      = pin_id;
-	st->be_data     = s;
-	caps_out->flags = 0u;
+	st->dev     = (void *)spec.port;
+	st->pin_id  = pin_id;
+	st->be_data = s;
 	return ALP_OK;
+}
+
+static alp_status_t
+z_open(uint32_t pin_id, alp_gpio_backend_state_t *st, alp_capabilities_t *caps_out)
+{
+	/* Direct (non-delegated) open: the dispatcher passed &handle->state, so
+	 * `st` is its own owner state. */
+	return alp_z_gpio_open_owned(pin_id, st, caps_out, st);
 }
 
 static alp_status_t
@@ -193,6 +228,24 @@ z_configure(alp_gpio_backend_state_t *st, alp_gpio_dir_t dir, alp_gpio_pull_t pu
 		err = gpio_pin_configure_dt(&s->spec, _to_gpio_flags(dir, ALP_GPIO_PULL_NONE));
 	}
 	return _errno_to_alp(err);
+}
+
+/* OUTPUT whose level is LOW from the first instant -- the pad must never drive a
+ * stale-high latch onto a shared net.  GPIO_OUTPUT_INIT_LOW alone is NOT enough on
+ * RZ/V2N: the FSP's r_ioport_port_mode_pin_config() writes PM (direction) BEFORE
+ * P (data), so the pad would drive the old latch for a few bus cycles.  So write
+ * the P latch FIRST while the pad is still an input: gpio_pin_set_raw(0) ->
+ * gpio_rz_port_clear_bits_raw (gpio_renesas_rz.c) -> R_IOPORT_PortWrite
+ * (r_ioport.c), which writes only the P register, whatever the direction.  Then
+ * switch the direction with GPIO_OUTPUT_INIT_LOW (physical low, redundant for the
+ * latch but correct on controllers that apply the level at the switch). */
+static alp_status_t z_configure_output_low(alp_gpio_backend_state_t *st)
+{
+	alp_z_gpio_side_t *s = (alp_z_gpio_side_t *)st->be_data;
+	if (s == NULL) return ALP_ERR_NOT_READY;
+	int err = gpio_pin_set_raw(s->spec.port, s->spec.pin, 0);
+	if (err != 0) return _errno_to_alp(err);
+	return _errno_to_alp(gpio_pin_configure_dt(&s->spec, GPIO_OUTPUT_INIT_LOW));
 }
 
 static alp_status_t z_write(alp_gpio_backend_state_t *st, bool level)
@@ -256,13 +309,14 @@ static void z_close(alp_gpio_backend_state_t *st)
 }
 
 static const alp_gpio_ops_t _ops = {
-	.open        = z_open,
-	.configure   = z_configure,
-	.write       = z_write,
-	.read        = z_read,
-	.enable_irq  = z_irq_enable,
-	.disable_irq = z_irq_disable,
-	.close       = z_close,
+	.open                 = z_open,
+	.configure            = z_configure,
+	.write                = z_write,
+	.read                 = z_read,
+	.enable_irq           = z_irq_enable,
+	.disable_irq          = z_irq_disable,
+	.close                = z_close,
+	.configure_output_low = z_configure_output_low,
 };
 
 /* Delegation hook for the CC3501E GPIO proxy backend

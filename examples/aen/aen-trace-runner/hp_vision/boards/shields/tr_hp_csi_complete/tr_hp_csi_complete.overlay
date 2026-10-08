@@ -1,0 +1,9 @@
+/* Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Required by Zephyr's shield mechanism (a <shield-name>.overlay at the
+ * shield root, alongside boards/) but deliberately empty: all of this
+ * shield's actual content is per-board
+ * (boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay), because
+ * it exists only to sit ahead of innomaker_cam_ov9281 in the devicetree
+ * concatenation order -- see that file's header. */

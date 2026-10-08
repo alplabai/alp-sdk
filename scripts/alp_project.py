@@ -132,11 +132,55 @@ def _write_or_print(out: str, target: Path | None) -> int:
     return 0
 
 
+def _parse_cores_arg(raw: str) -> dict[str, str]:
+    """`--cores` (issue #1652): `core_id:os[,core_id:os...]` -- the
+    topology an IDE wizard already knows (which cores it's targeting
+    and which OS each runs), NOT a directory. `--cores` is a SELECTOR
+    over the catalog's existing templates (see
+    `alp_template.find_template_by_cores`'s docstring for why this
+    stops short of an arbitrary core -> app-dir renderer): the
+    directory each core lands in is whatever the matched template
+    already uses, same as picking that template by `--template` would
+    give.
+    """
+    cores: dict[str, str] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if ":" not in entry:
+            raise ValueError(
+                f"--cores entry {entry!r} must be core_id:os (e.g. "
+                f"m55_hp:zephyr)")
+        core_id, _, os_name = entry.partition(":")
+        core_id, os_name = core_id.strip(), os_name.strip()
+        if not core_id or not os_name:
+            raise ValueError(
+                f"--cores entry {entry!r} must be core_id:os (e.g. "
+                f"m55_hp:zephyr)")
+        if core_id in cores:
+            raise ValueError(
+                f"--cores names {core_id!r} more than once")
+        cores[core_id] = os_name
+    if not cores:
+        raise ValueError("--cores must name at least one core_id:os pair")
+    return cores
+
+
 def _run_scaffold_emit(args: argparse.Namespace) -> int:
-    """`--emit scaffold --template <id> --sku <SKU>` (issue #864): print
-    the `[{path, contents}, ...]` envelope for a NEW project's
-    `files.user_owned` -- no board.yaml required (there is no project
-    yet), so this never touches `_validate_and_load`/`--input` at all.
+    """`--emit scaffold --template <id> --sku <SKU>` (issue #864), or
+    `--emit scaffold --cores <core_id:os,...> --sku <SKU>` (issue
+    #1652): print the `[{path, contents}, ...]` envelope for a NEW
+    project's `files.user_owned` -- no board.yaml required (there is
+    no project yet), so this never touches `_validate_and_load`/
+    `--input` at all.
+
+    `--cores` is an ALTERNATIVE way to pick the template -- a selector
+    by core/OS topology instead of by id (`alp_template.
+    find_template_by_cores`) -- resolved to the same `template_id`
+    `--template` would name, then handed to the exact same
+    `render_to_envelope()` call below. `--template` keeps working
+    unchanged; this is an additional input mode, not a replacement.
 
     Delegates to `alp_template.render_to_envelope()`, the same
     planning + read/substitute path `alp_template.py render` uses to
@@ -146,9 +190,13 @@ def _run_scaffold_emit(args: argparse.Namespace) -> int:
     integration conventions Python Tan's relocated scaffold renderer keeps in
     parity with this SDK reference.
     """
-    if not args.template:
-        print("alp_project: --emit scaffold requires --template <id>",
-              file=sys.stderr)
+    if args.template and args.cores:
+        print("alp_project: --emit scaffold takes --template OR --cores, "
+              "not both", file=sys.stderr)
+        return 1
+    if not args.template and not args.cores:
+        print("alp_project: --emit scaffold requires --template <id> or "
+              "--cores <core_id:os,...>", file=sys.stderr)
         return 1
     if not args.sku:
         print("alp_project: --emit scaffold requires --sku <SKU>",
@@ -156,9 +204,24 @@ def _run_scaffold_emit(args: argparse.Namespace) -> int:
         return 1
 
     import alp_template
+    template_id = args.template
+    if args.cores:
+        try:
+            cores = _parse_cores_arg(args.cores)
+        except ValueError as e:
+            print(f"alp_project: {e}", file=sys.stderr)
+            return 1
+        try:
+            record = alp_template.find_template_by_cores(
+                alp_template.load_catalog(), cores)
+        except alp_template.TemplateError as e:
+            print(f"alp_project: {e}", file=sys.stderr)
+            return 1
+        template_id = record["id"]
+
     try:
         envelope = alp_template.render_to_envelope(
-            args.template, args.sku, metadata_root=args.metadata_root)
+            template_id, args.sku, metadata_root=args.metadata_root)
     except alp_template.TemplateError as e:
         print(f"alp_project: {e}", file=sys.stderr)
         return 1
@@ -184,6 +247,7 @@ def _run_v2_emit(args: argparse.Namespace) -> int:
             emit_system_manifest,
             load_board_yaml,
         )
+        from alp_orchestrate.linux_ownership import emit_linux_ownership_dts
     except ImportError as e:
         print(f"alp_project: failed to import alp_orchestrate: {e}",
               file=sys.stderr)
@@ -200,6 +264,8 @@ def _run_v2_emit(args: argparse.Namespace) -> int:
             out = emit_dts_reservations(project)
         elif args.emit == "os-topology":
             out = emit_os_topology(project)
+        elif args.emit == "linux-ownership-dts":
+            out = emit_linux_ownership_dts(project)
         else:
             print(f"alp_project: unknown v2 emit '{args.emit}'",
                   file=sys.stderr)
@@ -225,9 +291,12 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             OrchestratorError,
             _slice_alp_conf,
             _slice_cmake_args,
+            _slice_dts_overlay,
             _slice_local_conf,
+            _v1_shaped_project,
             load_board_yaml,
         )
+        from alp_orchestrate.ownership import project_m33_overlay
     except ImportError as e:
         print(f"alp_project: failed to import alp_orchestrate: {e}",
               file=sys.stderr)
@@ -252,17 +321,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
     # hw-info-h, west-libraries).  The public board.yaml schema no
     # longer uses this wrapper, but it's a convenient internal
     # representation for the emitters' read paths.
-    project_v1_shaped: dict[str, Any] = {
-        "som": {
-            "sku":    project.sku,
-            "hw_rev": project.hw_rev,
-        },
-        "pins": list(project.raw.get("pins") or []),
-        "board": ({
-            "name":   project.board_name,
-            "hw_rev": project.board_hw_rev,
-        } if project.board_name else None),
-    }
+    project_v1_shaped: dict[str, Any] = _v1_shaped_project(project)
 
     # --- zephyr-board: writes a directory of files, not a single stream --
     if args.emit == "zephyr-board":
@@ -302,16 +361,14 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
         # fact.  v2 contributes only the peripherals list: union across
         # Zephyr/baremetal cores (or one core when --core is set).
         if args.core is not None:
-            slice_ = project.cores[args.core]
-            v2_peripherals = sorted(set(slice_.peripherals))
-            out = _emit_dts_overlay(
-                project_v1_shaped, project.som_preset,
-                project.board_preset,
-                v2_peripherals=v2_peripherals,
-                v2_core_id=args.core,
-                v2_core_os=slice_.os,
-                v2_core_ids=[args.core],
-            )
+            # Single source shared with the build plan's `alp.overlay`
+            # configArtefact (ADR-0026 §D), M33-ownership nodes included.
+            try:
+                out = _slice_dts_overlay(project, project.cores[args.core])
+            except OrchestratorError as e:
+                print(f"alp_project: {e}", file=sys.stderr)
+                return 1
+            return _write_or_print(out, args.output)
         else:
             union: set[str] = set()
             zephyr_core_ids: list[str] = []
@@ -325,6 +382,16 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
                 v2_peripherals=sorted(union),
                 v2_core_ids=zephyr_core_ids,
             )
+        # Per-product core ownership: enable the assignable nodes this
+        # project assigned to the M33 (the board tree carries them disabled).
+        try:
+            own_dts, _ = project_m33_overlay(project, args.core)
+        except OrchestratorError as e:
+            print(f"alp_project: {e}", file=sys.stderr)
+            return 1
+        if own_dts:
+            out += ("\n/* Assignable peripherals owned by the M33 "
+                    "(board.yaml `ownership:`). */\n" + "\n".join(own_dts) + "\n")
         return _write_or_print(out, args.output)
 
     if args.emit == "native-sim-overlay":
@@ -475,7 +542,7 @@ def main() -> int:
                                  "hw-info-h", "west-libraries",
                                  # v2 orchestration emits (Phase 2):
                                  "system-manifest", "dts-reservations",
-                                 "ipc-contract-h",
+                                 "ipc-contract-h", "linux-ownership-dts",
                                  # Per-core natural-vs-effective OS facts (issue #95).
                                  "os-topology",
                                  # Carrier routing / Studio handoff JSON.
@@ -493,7 +560,16 @@ def main() -> int:
                         help="Override the metadata search root.")
     parser.add_argument("--template", default=None,
                         help="metadata/templates/catalog-v1.json template "
-                             "id; required for --emit scaffold.")
+                             "id; required for --emit scaffold (unless "
+                             "--cores is given instead).")
+    parser.add_argument("--cores", default=None,
+                        help="core_id:os[,core_id:os...] topology (e.g. "
+                             "'m55_hp:zephyr,m55_he:zephyr'); an "
+                             "alternative to --template for --emit "
+                             "scaffold -- selects whichever catalog "
+                             "template's own cores: topology matches "
+                             "exactly (issue #1652). Mutually exclusive "
+                             "with --template.")
     parser.add_argument("--sku", default=None,
                         help="Target SoM SKU (e.g. E1M-V2N101); required "
                              "for --emit scaffold -- substitutes the "
@@ -524,7 +600,7 @@ def main() -> int:
     # Project-wide v2 emit modes (system-manifest, dts-reservations,
     # ipc-contract-h) route through alp_orchestrate/ directly.
     if args.emit in ("system-manifest", "dts-reservations",
-                     "ipc-contract-h", "os-topology"):
+                     "ipc-contract-h", "os-topology", "linux-ownership-dts"):
         return _run_v2_emit(args)
 
     project = _validate_and_load(args.input, args.metadata_root)

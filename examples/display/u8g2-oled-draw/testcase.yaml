@@ -9,6 +9,7 @@ sample:
 
 tests:
   alp_sdk.example.u8g2_oled_draw:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
       - native_sim
       - native_sim/native/64

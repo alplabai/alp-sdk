@@ -1,0 +1,26 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake I2S controller used only by the audio_out_start_defer ztest.
+# native_sim ships no built-in I2S emulation, so this test supplies its
+# own minimal `struct device` behind the standard Zephyr i2s_* driver
+# API -- enough for src/backends/audio/zephyr_drv.c (via
+# src/backends/i2s/zephyr_drv.c underneath it) to run for real instead
+# of falling back to sw_fallback.
+#
+# Same fake as tests/unit/i2s_start_defer's (duplicated, not shared --
+# these are two independent Zephyr test apps): that suite proves the
+# deferred-start mechanism itself against <alp/i2s.h> directly; this one
+# proves the <alp/audio.h> composition on top of it, specifically the
+# volume-scaled chunk loop (src/backends/audio/zephyr_drv.c) that the
+# silicon repro (set_volume(4) then start/write) actually exercised.
+
+description: |
+  Fake I2S controller for the alp-sdk audio_out_start_defer unit test.
+  Models the TX-direction empty-queue START refusal, the not-running
+  STOP/DRAIN refusal, and DROP's unconditional release that issue #2132
+  is about -- see ../src/fake_i2s.c.
+
+compatible: "alp,test-i2s"
+
+include: i2s-controller.yaml

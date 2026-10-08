@@ -2,9 +2,12 @@
 
 import base64
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "check_som_bundle.py"
@@ -17,7 +20,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 def _run(*args):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
 
 
@@ -56,7 +60,7 @@ def test_shipped_example_validates():
 
 def test_valid_bundle_passes(tmp_path):
     p = tmp_path / "bundle.json"
-    p.write_text(json.dumps(_valid_bundle()))
+    p.write_text(json.dumps(_valid_bundle()), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode == 0, proc.stdout
 
@@ -65,7 +69,7 @@ def test_complete_status_requires_system_image(tmp_path):
     b = _valid_bundle()
     b["components"] = [c for c in b["components"] if c["role"] != "system_image"]
     p = tmp_path / "bundle.json"
-    p.write_text(json.dumps(b))
+    p.write_text(json.dumps(b), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode != 0
     assert "FAIL" in proc.stdout
@@ -76,7 +80,7 @@ def test_bootloader_only_without_image_passes(tmp_path):
     b["status"] = "bootloader-only:image-pending-hw"
     b["components"] = [c for c in b["components"] if c["role"] != "system_image"]
     p = tmp_path / "bundle.json"
-    p.write_text(json.dumps(b))
+    p.write_text(json.dumps(b), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode == 0, proc.stdout
 
@@ -85,7 +89,7 @@ def test_missing_bl2_fails(tmp_path):
     b = _valid_bundle()
     b["components"] = [c for c in b["components"] if c["role"] != "bl2"]
     p = tmp_path / "bundle.json"
-    p.write_text(json.dumps(b))
+    p.write_text(json.dumps(b), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode != 0
 
@@ -94,9 +98,23 @@ def test_bad_sha256_fails(tmp_path):
     b = _valid_bundle()
     b["components"][0]["sha256"] = "NOTHEX"
     p = tmp_path / "bundle.json"
-    p.write_text(json.dumps(b))
+    p.write_text(json.dumps(b), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode != 0
+
+
+def test_release_version_accepts_rc_rejects_other_suffixes(tmp_path):
+    p = tmp_path / "bundle.json"
+    for good in ("som-0.2.2", "som-0.2.2-rc1", "som-1.0.0-rc12"):
+        b = _valid_bundle()
+        b["release_version"] = good
+        p.write_text(json.dumps(b), encoding="utf-8")
+        assert _run("--bundle", str(p)).returncode == 0, good
+    for bad in ("som-0.2.2-beta", "som-0.2.2-rc", "0.2.2-rc1"):
+        b = _valid_bundle()
+        b["release_version"] = bad
+        p.write_text(json.dumps(b), encoding="utf-8")
+        assert _run("--bundle", str(p)).returncode != 0, bad
 
 
 def test_bad_created_date_fails(tmp_path):
@@ -106,7 +124,7 @@ def test_bad_created_date_fails(tmp_path):
         b = _valid_bundle()
         b["created"] = bad
         p = tmp_path / "bundle.json"
-        p.write_text(json.dumps(b))
+        p.write_text(json.dumps(b), encoding="utf-8")
         proc = _run("--bundle", str(p))
         assert proc.returncode != 0, f"{bad!r} should be rejected\n{proc.stdout}"
 
@@ -131,7 +149,7 @@ def _write_pub(key, path):
 def test_signed_bundle_verifies(tmp_path):
     key = ec.generate_private_key(ec.SECP256R1())
     b = _sign_bundle(_valid_bundle(), key)
-    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b), encoding="utf-8")
     pub = tmp_path / "pub.pem"; _write_pub(key, pub)
     proc = _run("--bundle", str(p), "--pubkey", str(pub), "--require-signature")
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -142,7 +160,7 @@ def test_tampered_signed_bundle_fails(tmp_path):
     key = ec.generate_private_key(ec.SECP256R1())
     b = _sign_bundle(_valid_bundle(), key)
     b["hw_rev"] = "r2"  # mutate AFTER signing
-    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b), encoding="utf-8")
     pub = tmp_path / "pub.pem"; _write_pub(key, pub)
     proc = _run("--bundle", str(p), "--pubkey", str(pub))
     assert proc.returncode != 0
@@ -150,13 +168,13 @@ def test_tampered_signed_bundle_fails(tmp_path):
 
 
 def test_unsigned_with_require_fails(tmp_path):
-    p = tmp_path / "bundle.json"; p.write_text(json.dumps(_valid_bundle()))
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(_valid_bundle()), encoding="utf-8")
     proc = _run("--bundle", str(p), "--require-signature")
     assert proc.returncode != 0
 
 
 def test_unsigned_without_require_passes(tmp_path):
-    p = tmp_path / "bundle.json"; p.write_text(json.dumps(_valid_bundle()))
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(_valid_bundle()), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode == 0, proc.stdout
 
@@ -164,7 +182,7 @@ def test_unsigned_without_require_passes(tmp_path):
 def test_malformed_signature_object_rejected_by_schema(tmp_path):
     b = _valid_bundle()
     b["signature"] = {"algorithm": "ecdsa-p256-sha256"}  # missing required fields
-    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode != 0
 
@@ -173,10 +191,154 @@ def test_malformed_pubkey_is_clean_fail(tmp_path):
     # a garbage public key must produce a clean FAIL line, not a Python traceback
     key = ec.generate_private_key(ec.SECP256R1())
     b = _sign_bundle(_valid_bundle(), key)
-    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b), encoding="utf-8")
     bad_pub = tmp_path / "bad.pem"
-    bad_pub.write_text("-----BEGIN PUBLIC KEY-----\nnotbase64\n-----END PUBLIC KEY-----\n")
+    bad_pub.write_text("-----BEGIN PUBLIC KEY-----\nnotbase64\n-----END PUBLIC KEY-----\n", encoding="utf-8")
     proc = _run("--bundle", str(p), "--pubkey", str(bad_pub))
     assert proc.returncode != 0
     assert "cannot load public key" in proc.stdout
     assert "Traceback" not in proc.stderr
+
+
+# --- V2N provisioning extensions: bl2_mmc -> emmc:boot1, optional memory_tier ---
+
+def _v2n_bundle():
+    b = _valid_bundle()
+    b["components"].insert(1, {"role": "bl2_mmc", "file": "artifacts/bl2_mmc.bin",
+                               "sha256": "0" * 64, "size_bytes": 1,
+                               "flash_target": "emmc:boot1"})
+    b["memory_tier"] = {"dram_mbit": 32768}
+    return b
+
+
+def _check(tmp_path, doc):
+    p = tmp_path / "bundle.json"
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    return _run("--bundle", str(p))
+
+
+def test_v2n_bundle_with_bl2_mmc_and_memory_tier_passes(tmp_path):
+    proc = _check(tmp_path, _v2n_bundle())
+    assert proc.returncode == 0, proc.stdout
+
+
+def test_old_bundle_without_new_fields_still_passes(tmp_path):
+    b = _valid_bundle()
+    assert "memory_tier" not in b and all(c["role"] != "bl2_mmc" for c in b["components"])
+    assert _check(tmp_path, b).returncode == 0
+
+
+def test_bl2_mmc_must_target_emmc_boot1(tmp_path):
+    b = _v2n_bundle()
+    b["components"][1]["flash_target"] = "emmc"
+    assert _check(tmp_path, b).returncode != 0
+
+
+def test_emmc_boot1_reserved_for_bl2_mmc(tmp_path):
+    b = _v2n_bundle()
+    b["components"][2]["flash_target"] = "emmc:boot1"  # the fip
+    assert _check(tmp_path, b).returncode != 0
+
+
+def test_memory_tier_shape(tmp_path):
+    ok = _v2n_bundle()
+    ok["memory_tier"] = {"dram_mbit": 32768, "label": "D8S32"}
+    assert _check(tmp_path, ok).returncode == 0
+    for bad in ({}, {"dram_mbit": 0}, {"dram_mbit": "32768"}, {"dram_mbit": 32768, "extra": 1},
+                {"dram_mbit": 32768, "label": "D8 S32"}):
+        b = _v2n_bundle()
+        b["memory_tier"] = bad
+        assert _check(tmp_path, b).returncode != 0, bad
+
+
+def test_duplicate_role_fails(tmp_path):
+    b = _v2n_bundle()
+    b["components"].append(dict(b["components"][1]))
+    proc = _check(tmp_path, b)
+    assert proc.returncode != 0
+    assert "duplicate role" in proc.stdout
+
+
+def _bmap_bundle(tmp_path, image_size, bmap_text):
+    import gzip
+    d = tmp_path / "artifacts"
+    d.mkdir()
+    (d / "img.wic.gz").write_bytes(gzip.compress(b"\x01" * 8192))
+    (d / "img.wic.bmap").write_text(bmap_text, encoding="utf-8")
+    b = _valid_bundle()
+    b["components"].append({"role": "system_image_bmap", "file": "artifacts/img.wic.bmap",
+                            "sha256": "0" * 64, "size_bytes": 1, "flash_target": "emmc"})
+    p = tmp_path / "bundle.json"
+    p.write_text(json.dumps(b), encoding="utf-8")
+    return p
+
+
+class _Bmap:
+    """A signed bmap: BmapFileChecksum is the sha256 of the file with that checksum zeroed."""
+
+    @staticmethod
+    def format(n, h):
+        import hashlib
+        xml = (f'<bmap version="2.0"><ImageSize> {n} </ImageSize><BlockSize> 4096 </BlockSize>'
+               f'<MappedBlocksCount> 2 </MappedBlocksCount><ChecksumType> sha256 </ChecksumType>'
+               f'<BmapFileChecksum> {"0" * 64} </BmapFileChecksum>'
+               f'<BlockMap><Range chksum="{h}"> 0-1 </Range></BlockMap></bmap>')
+        return xml.replace("0" * 64, hashlib.sha256(xml.encode()).hexdigest(), 1)
+
+
+_BMAP = _Bmap
+
+
+def test_system_image_bmap_valid_and_size_checked(tmp_path):
+    ok = _run("--bundle", str(_bmap_bundle(tmp_path, 8192, _BMAP.format(n=8192, h="0" * 64))))
+    assert ok.returncode == 0, ok.stdout
+    (tmp_path / "x").mkdir()
+    bad = _run("--bundle", str(_bmap_bundle(tmp_path / "x", 4096, _BMAP.format(n=4096, h="0" * 64))))
+    assert bad.returncode == 1 and "ImageSize" in bad.stdout
+
+
+def test_system_image_bmap_garbage_rejected(tmp_path):
+    r = _run("--bundle", str(_bmap_bundle(tmp_path, 8192, "<bmap/>")))
+    assert r.returncode == 1 and "not a valid bmap" in r.stdout
+
+
+def _cm33_image(**kw):
+    img = bytearray(0x3000) + (kw.get("sp", 0x08100000)).to_bytes(4, "little") + \
+        (kw.get("reset", 0x08003101)).to_bytes(4, "little") + b"\0" * 64
+    img[kw.get("dirty", 0)] |= kw.get("mark", 0)
+    return bytes(img) + b"\0" * kw.get("extra", 0)
+
+
+def _cm33_bundle(tmp_path, image, target="xspi:mtd1"):
+    d = tmp_path / "artifacts"
+    d.mkdir()
+    (d / "cm33.bin").write_bytes(image)
+    b = _valid_bundle()
+    b["components"].append({"role": "cm33", "file": "artifacts/cm33.bin", "sha256": "0" * 64,
+                            "size_bytes": len(image), "flash_target": target})
+    p = tmp_path / "bundle.json"
+    p.write_text(json.dumps(b), encoding="utf-8")
+    return p
+
+
+def test_cm33_valid_image_accepted(tmp_path):
+    r = _run("--bundle", str(_cm33_bundle(tmp_path, _cm33_image(sp=0x08FFFFFF))))
+    assert r.returncode == 0, r.stdout
+
+
+def test_cm33_must_target_mtd1(tmp_path):
+    r = _run("--bundle", str(_cm33_bundle(tmp_path, _cm33_image(), "xspi:mtd0")))
+    assert r.returncode == 1 and "flash_target" in r.stdout
+
+
+@pytest.mark.parametrize("kw, msg", [
+    ({"dirty": 5, "mark": 1}, "first 0x3000 bytes must be zero"),
+    ({"sp": 0x20000000}, "initial SP 0x20000000 is not in SRAM0 (0x08xxxxxx)"),
+    ({"reset": 0x08003100}, "reset vector 0x08003100 must have the Thumb bit"),
+    ({"reset": 0x08002FFF}, "reset vector 0x08002fff must have the Thumb bit"),
+    ({"reset": 0x08033001}, "reset vector 0x08033001 must have the Thumb bit"),
+    ({"extra": 0x30000}, "exceeds the 0x30000"),
+])
+def test_cm33_sanity_rejections(tmp_path, kw, msg):
+    r = _run("--bundle", str(_cm33_bundle(tmp_path, _cm33_image(**kw))))
+    assert r.returncode == 1 and msg in r.stdout, r.stdout

@@ -143,7 +143,7 @@ alp_gpu2d_t *alp_gpu2d_open(void)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	alp_status_t       rc   = ops->open(&h->state, &caps);
 	if (rc != ALP_OK) {
 		_free(h);
@@ -176,7 +176,12 @@ alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t               *h,
 		alp_handle_op_leave(&h->active_ops);
 		return s;
 	}
-	alp_status_t rc = h->state.ops->fill_rect(&h->state, dst, x, y, w, height, argb_color);
+	alp_status_t rc;
+	if (h->state.ops->fill_rect == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->fill_rect(&h->state, dst, x, y, w, height, argb_color);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -204,7 +209,12 @@ alp_status_t alp_gpu2d_blit(alp_gpu2d_t               *h,
 		alp_handle_op_leave(&h->active_ops);
 		return s;
 	}
-	alp_status_t rc = h->state.ops->blit(&h->state, src, sx, sy, dst, dx, dy, w, height);
+	alp_status_t rc;
+	if (h->state.ops->blit == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->blit(&h->state, src, sx, sy, dst, dx, dy, w, height);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -237,7 +247,12 @@ alp_status_t alp_gpu2d_blend(alp_gpu2d_t               *h,
 		alp_handle_op_leave(&h->active_ops);
 		return s;
 	}
-	alp_status_t rc = h->state.ops->blend(&h->state, src, sx, sy, dst, dx, dy, w, height, mode);
+	alp_status_t rc;
+	if (h->state.ops->blend == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->blend(&h->state, src, sx, sy, dst, dx, dy, w, height, mode);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }

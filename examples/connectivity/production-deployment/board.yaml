@@ -122,9 +122,10 @@ chips:
 # `key_file:` is the SIGNING key (it becomes
 # `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE`, which imgtool signs with and
 # from which MCUboot extracts the public half), so it must be a
-# PRIVATE PEM -- never a `.pub.pem`.  This points at the local
-# development key, matching `zephyr/sysbuild/aen/sysbuild.conf`; it is
-# gitignored and generated once per clone by `keys/generate_dev_key.sh`.
+# PRIVATE PEM -- never a `.pub.pem`.  This points at the committed
+# shared development key, matching `zephyr/sysbuild/aen/sysbuild.conf`:
+# the factory MCUboot on pre-provisioned modules trusts it (#2421), and
+# it is public, so it gives no security.
 # Despite this example's name, a production image is re-signed in the
 # manufacturing CA's HSM and never uses a build-time key from the repo
 # (see keys/README.md).
@@ -132,14 +133,16 @@ boot:
   method: mcuboot
   signing:
     algorithm: ecdsa_p256
-    key_file:  keys/mcuboot_dev_ecdsa_p256.pem
+    key_file:  keys/mcuboot_shared_dev_ecdsa_p256.pem
 
 # ----------------------------------------------------------------
 # OTA (project-wide).
 # ----------------------------------------------------------------
 # Mender HTTPS-poll fabric with anti-downgrade floor + automatic
 # rollback on health-check failure.  The tenant token stays
-# outside the repo; it's injected by the device provisioning step.
+# outside the repo: the `${MENDER_TENANT_TOKEN}` placeholder is
+# skipped by the Yocto emit; set the real token in conf/local.conf
+# (meta-alp-sdk/README.md) or the device provisioning step.
 ota:
   provider:        mender
   artifact_name:   production-deployment
@@ -167,18 +170,25 @@ ota:
 # ----------------------------------------------------------------
 # TF-M-on-HE-core is the AEN production stance.  Persistent keys
 # live in Internal Trusted Storage backed by the secure half of
-# MRAM; Protected Storage (encrypted-at-rest) lives in the on-
-# module OSPI for app-managed credentials that don't need the
-# tamper-resistant tier.  Attestation root is the OPTIGA Trust M
-# (single trust root with boot + OTA -- see iot-fleet-ota for the
-# shared signing key story).
+# MRAM.  E1M-AEN801 populates NEITHER on-module OSPI part
+# (`ospi0`/`ospi1` are both `assembled: false`,
+# metadata/e1m_modules/E1M-AEN801.yaml) -- an app-tier Protected
+# Storage backing store would need a SKU that actually carries one
+# (e.g. E1M-AEN803), so this example keeps PS in the same on-die
+# MRAM as ITS rather than naming a part this SKU doesn't have (#2311).
+# Attestation root is TF-M's own secure storage: E1M-AEN801 names the
+# OPTIGA Trust M under `on_module:` but the part is DNP (`assembled:
+# false` on its i2c_devices entry), and the loader refuses an
+# `optiga_trust_m` root on a SKU that does not carry the part (#2316).
+# On a SKU with OPTIGA fitted (E1M-AEN501/601/701) switch this to
+# `optiga_trust_m` for a hardware trust root.
 security:
   psa:
     persistent_slots: 32
     its_storage:      mram_main     # AEN E8: 5.5 MiB MRAM (secure half)
-    ps_storage:       ospi0         # on-module OSPI for app-tier creds
+    ps_storage:       mram_main     # same on-die MRAM (no OSPI on this SKU)
     tfm:              true
-    attestation_root: optiga_trust_m
+    attestation_root: tfm_internal
 
 # ----------------------------------------------------------------
 # Storage partitions.

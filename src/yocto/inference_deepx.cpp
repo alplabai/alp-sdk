@@ -4,11 +4,11 @@
  *
  * [vendor-ext] DEEPX DX-M1 backend hook for <alp/inference.h>.
  *
- * BENCH-UNVERIFIED: compiles + header-checks against the real DEEPX
- * dx_rt headers, but has NOT been run on silicon.  Validation needs an
- * E1M-X V2N-M1 module with the DX-M1 enumerated on PCIe plus the
- * proprietary dx_rt runtime + kernel driver on the Yocto sysroot.
- * Same posture as the recent mbox_alif_mhuv2 / alif_dave2d work.
+ * Runs on silicon (#1262, 2026-09-28): an E1M-V2M103 with dx-rt 3.2.0
+ * and DX-M1 FW 2.4.0 opens and invokes a yolo11n `.dxnn` through this
+ * file under both DEEPX_DXM1 and AUTO, and close() against an in-flight
+ * invoke() drains cleanly.  Outputs match ONNX Runtime CPU on the same
+ * model (box correlation 0.9997, class-score correlation 0.9946).
  *
  * ----------------------------------------------------------------------
  * Real vendor API
@@ -28,16 +28,11 @@
  *   returns and yields the output `TensorPtrs`.
  *
  * Vendor-artifact handling (classifying-public-vs-internal)
- *   dx_rt is PROPRIETARY (DEEPX EULA, customer-only).  Its headers + the
- *   libdxrt.so live OUTSIDE this repo (the maintainer clone at
- *   ~/npu-sdks/dx_rt; the license-gated copy belongs in alp-sdk-internal
- *   under Git LFS).  The public repo carries only THIS body, which links
- *   against the SDK located via the Yocto sysroot at build time when
- *   ALP_SDK_USE_DEEPX_DXM1=ON (default OFF).  No DEEPX source is vendored.
- *
- *   Follow-up: drop the real dx_rt headers/libs into alp-sdk-internal
- *   (Git LFS) + wire the meta-deepx-m1 dx-rt recipe into the V2N-M1
- *   MACHINE so the cross-build finds libdxrt on the sysroot.
+ *   dx_rt is DEEPX's own runtime, published by DEEPX on GitHub for the
+ *   users of its NPU (every V2M SoM carries one).  It is not vendored
+ *   here: DEEPX's meta-deepx-m1 layer builds it into the Yocto sysroot,
+ *   and the V2M MACHINEs turn ALP_SDK_USE_DEEPX_DXM1=ON automatically
+ *   whenever that layer is present (#482; default OFF elsewhere).
  *
  * Blob format
  *   cfg.model_data is a `.dxnn` compiled model (magic "DXNN", 8 KiB
@@ -55,8 +50,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <atomic>
 #include <cstring>
+#include <mutex>
 #include <new>
+#include <shared_mutex>
 #include <vector>
 
 /* Pull the specific dx_rt headers this backend uses rather than the
@@ -68,12 +66,16 @@
 #include "dxrt/tensor.h"
 #include "dxrt/inference_option.h"
 #include "dxrt/inference_engine.h"
+#include "dxrt/device_info_status.h"
 
 extern "C" {
+#include "alp/ext/deepx/inference.h"
 #include "alp/inference.h"
 
 #include "inference_handle_internal.h"
 }
+
+#include "inference_tensor_shape.h"
 
 /* The dispatcher's `struct alp_inference` comes from the shared internal
  * header (issue #1257).  This file used to hand-mirror the layout and cast
@@ -90,6 +92,23 @@ namespace
  *  by the InferenceEngine and refreshed each Run(). */
 struct DeepxState {
 	dxrt::InferenceEngine *engine = nullptr;
+
+	/* Model bytes from open(): alp_deepx_inference_bind_cores() rebuilds
+	 * the engine from them (libdxrt fixes the core binding at engine
+	 * construction).  Borrowed, not copied -- the ext header documents
+	 * that model_data must still be valid for a rebind. */
+	const uint8_t *model      = nullptr;
+	size_t         model_size = 0u;
+
+	/* dxrt::InferenceOption::BOUND_OPTION this engine runs on, and whether
+	 * it holds a slot in the process-wide core-set table below. */
+	std::atomic<unsigned> bound{ 0u };
+	bool                  core_held = false;
+
+	/* Guards `engine`, `outputs` and `last_outputs` against a rebind:
+	 * get_output takes it shared; invoke (writes last_outputs) and
+	 * bind_cores take it exclusive. */
+	std::shared_mutex engine_mtx;
 
 	/* SDK-owned input staging buffers (one contiguous blob per input
      * tensor).  dx_rt's Run(inputPtr) takes a single pointer to the
@@ -108,9 +127,90 @@ struct DeepxState {
 	dxrt::TensorPtrs last_outputs;
 };
 
+/* ------------------------------------------------------------------ */
+/* Process-wide core-set admission.                                    */
+/*                                                                     */
+/* The DX-M1 kernel driver keeps one hardware request queue per        */
+/* DISTINCT core set and has DX_NORMAL_QUEUE_MAX = 3 of them.  Engines */
+/* on the same set share a queue (refcounted); a 4th distinct set is   */
+/* refused by the driver (-EBUSY), and dx_rt turns that into a         */
+/* DXRT_ASSERT -- it aborts the process (or kills dxrtd).  Count the   */
+/* sets this process holds and refuse the 4th ourselves with           */
+/* ALP_ERR_BUSY.  NPU_ALL (0) is a set like any other.  This only      */
+/* sees THIS process; across processes the limit is dxrtd's problem.   */
+/* ------------------------------------------------------------------ */
+
+constexpr unsigned kDeepxBoundCount  = 7u; /* BOUND_OPTION values 0..6 */
+constexpr unsigned kDeepxMaxCoreSets = 3u;
+
+/* alp_inference_config_t::accel_unit_mask (bit n = NPU core n) ->
+ * dxrt::InferenceOption::BOUND_OPTION.  This table is the ONLY place libdxrt's
+ * numbering appears; the public headers speak masks.  Index = mask.  Mask 0
+ * (backend default) and 0x7 both mean all three cores = BOUND_OPTION 0. */
+constexpr unsigned kMaskToBound[8] = {
+	0u, /* 0x0 default  -> all  */
+	1u, /* 0x1 core 0   -> NPU_0 */
+	2u, /* 0x2 core 1   -> NPU_1 */
+	4u, /* 0x3 cores 01 -> NPU_01 */
+	3u, /* 0x4 core 2   -> NPU_2 */
+	6u, /* 0x5 cores 02 -> NPU_02 */
+	5u, /* 0x6 cores 12 -> NPU_12 */
+	0u, /* 0x7 all      -> all  */
+};
+
+/** Translate @p mask to a BOUND_OPTION; ALP_ERR_NOSUPPORT for a bit past core 2. */
+alp_status_t mask_to_bound(uint32_t mask, unsigned &bound)
+{
+	if (mask >= (sizeof(kMaskToBound) / sizeof(kMaskToBound[0]))) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	bound = kMaskToBound[mask];
+	return ALP_OK;
+}
+
+std::mutex g_cores_mtx;
+unsigned   g_core_refs[kDeepxBoundCount];
+
+alp_status_t cores_acquire(unsigned bound)
+{
+	if (bound >= kDeepxBoundCount) {
+		return ALP_ERR_INVAL;
+	}
+	std::lock_guard<std::mutex> lk(g_cores_mtx);
+	if (g_core_refs[bound] == 0u) {
+		unsigned distinct = 0u;
+		for (unsigned i = 0; i < kDeepxBoundCount; ++i) {
+			distinct += (g_core_refs[i] != 0u) ? 1u : 0u;
+		}
+		if (distinct >= kDeepxMaxCoreSets) {
+			return ALP_ERR_BUSY;
+		}
+	}
+	++g_core_refs[bound];
+	return ALP_OK;
+}
+
+void cores_release(unsigned bound)
+{
+	std::lock_guard<std::mutex> lk(g_cores_mtx);
+	if (bound < kDeepxBoundCount && g_core_refs[bound] != 0u) {
+		--g_core_refs[bound];
+	}
+}
+
+/** Delete @p st with its engine and give back its core-set slot. */
+void destroy_state(DeepxState *st)
+{
+	delete st->engine;
+	if (st->core_held) {
+		cores_release(st->bound.load());
+	}
+	delete st;
+}
+
 /** Map a dx_rt DataType onto the alp_inference dtype enum.  dx_rt's enum
  *  (datatype.h) carries device-only structured types (BBOX/FACE/POSE)
- *  the portable surface has no slot for; those fall back to UINT8 so the
+ *  and unsigned 16/32-bit ints the portable surface has no slot for; those fall back to UINT8 so the
  *  raw bytes are still reachable via the tensor's data()/size. */
 alp_inference_dtype_t dxrt_dtype_to_alp(dxrt::DataType t)
 {
@@ -121,33 +221,69 @@ alp_inference_dtype_t dxrt_dtype_to_alp(dxrt::DataType t)
 		return ALP_INFERENCE_DTYPE_UINT8;
 	case dxrt::INT8:
 		return ALP_INFERENCE_DTYPE_INT8;
-	case dxrt::UINT16:
 	case dxrt::INT16:
 		return ALP_INFERENCE_DTYPE_INT16;
 	case dxrt::INT32:
-	case dxrt::UINT32:
 		return ALP_INFERENCE_DTYPE_INT32;
 	default:
-		/* INT64/UINT64/BBOX/FACE/POSE/NONE have no portable slot; expose
+		/* UINT16/UINT32/INT64/UINT64/BBOX/FACE/POSE/NONE have no portable
+         * slot (the public enum has no unsigned 16/32-bit dtype; issue
+         * #2456) -- reporting UINT16/UINT32 as signed INT16/INT32 would
+         * make values above the signed range read as negative.  Expose
          * the raw bytes as uint8 so the caller can still reach them. */
 		return ALP_INFERENCE_DTYPE_UINT8;
 	}
 }
 
-/** Fill an alp tensor descriptor from a dx_rt Tensor.  `data` points at
- *  the engine/SDK-owned buffer; the app must not free it. */
-void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t *out)
+/** True when every tensor in @p tensors has rank <= 4 -- the maximum
+ *  alp_inference_tensor_t's fixed shape[4] descriptor can hold without
+ *  truncating.  fill_tensor_descriptor() below used to silently truncate a
+ *  longer shape to the first 4 dims instead of saying so; the caller read
+ *  back a shape that no longer matched the model, with no signal anything
+ *  was wrong (issue #1729).  Called at open() time, before any tensor
+ *  descriptor is handed to a caller -- validates st->inputs/st->outputs,
+ *  the DECLARED metadata dx_rt reports before any Run().  It does NOT
+ *  cover the LIVE last_outputs a Run() actually hands back; get_output()
+ *  re-checks that path itself right before calling fill_tensor_descriptor()
+ *  on it. */
+bool all_tensor_ranks_fit(dxrt::Tensors &tensors)
 {
+	for (auto &t : tensors) {
+		if (t.shape().size() > 4) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/** Fill an alp tensor descriptor from a dx_rt Tensor.  `data` points at
+ *  the engine/SDK-owned buffer; the app must not free it.
+ *
+ *  For st->inputs/st->outputs, open() already refuses (ALP_ERR_NOSUPPORT)
+ *  any model carrying a declared tensor whose rank exceeds 4, via
+ *  all_tensor_ranks_fit() above; for a live st->last_outputs[i] tensor
+ *  (get_output() after invoke()), the caller re-checks the rank itself
+ *  immediately before this call, for the same reason. Neither of those
+ *  checks the per-axis EXTENT, though: shape[] is uint16_t, and a dim
+ *  above 65535 or a symbolic/dynamic negative dim would silently wrap
+ *  when cast, the same "plausible-looking wrong shape" issue #1729 is
+ *  about, one level down. fill_fixed_shape() below checks both rank and
+ *  every extent before writing anything to @p out.
+ *
+ *  @return false, leaving @p out untouched, when @p t's real rank exceeds
+ *          the fixed shape[4] descriptor, or any extent does not fit
+ *          uint16_t -- the caller must return ALP_ERR_NOSUPPORT instead of
+ *          a truncated or wrapped shape (issue #1729). */
+bool fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t *out)
+{
+	const std::vector<int64_t> &shape = t.shape();
+	if (!alp_inference_shape::fill_fixed_shape(shape.data(), shape.size(), out)) {
+		return false;
+	}
+
 	out->data       = data;
 	out->size_bytes = static_cast<size_t>(t.size_in_bytes());
 	out->dtype      = dxrt_dtype_to_alp(t.type());
-
-	const std::vector<int64_t> &shape = t.shape();
-	const size_t                n     = shape.size();
-	out->rank                         = static_cast<uint8_t>((n <= 4) ? n : 4);
-	for (uint8_t i = 0; i < out->rank; ++i) {
-		out->shape[i] = static_cast<uint16_t>(shape[i]);
-	}
 
 	/* dx_rt models carry per-task quant params internally and emit
      * already-dequantized FLOAT outputs for the common case; the public
@@ -156,6 +292,7 @@ void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t 
      * <alp/ext/deepx/inference.h> escape hatch. */
 	out->scale      = 1.0f;
 	out->zero_point = 0;
+	return true;
 }
 
 } /* namespace */
@@ -169,39 +306,87 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
 {
 	struct alp_inference *h = h_;
 
+	unsigned     bound = 0u;
+	alp_status_t mrc   = mask_to_bound(cfg->accel_unit_mask, bound);
+	if (mrc != ALP_OK) {
+		return mrc;
+	}
+
+	/* Reserve the core-set slot BEFORE building the engine: the engine is
+	 * constructed directly on `bound`, so no transient all-cores engine
+	 * ever occupies one of the driver's 3 queues. */
+	alp_status_t adm = cores_acquire(bound);
+	if (adm != ALP_OK) {
+		return adm;
+	}
+
 	auto *st = new (std::nothrow) DeepxState();
 	if (st == nullptr) {
+		cores_release(bound);
 		return ALP_ERR_NOMEM;
 	}
+	st->bound     = bound;
+	st->core_held = true;
 
 	/* dx_rt reports load/device errors by throwing; a failed PCIe
      * enumeration or a bad .dxnn header surfaces as an exception, which
      * we translate to ALP_ERR_IO so the portable surface stays
      * exception-free for C callers. */
 	try {
-		st->engine =
-		    new (std::nothrow) dxrt::InferenceEngine(static_cast<const uint8_t *>(cfg->model_data),
-		                                             cfg->model_size,
-		                                             dxrt::DefaultInferenceOption);
+		dxrt::InferenceOption opt = dxrt::DefaultInferenceOption;
+		opt.boundOption           = bound;
+		st->engine                = new (std::nothrow) dxrt::InferenceEngine(
+		    static_cast<const uint8_t *>(cfg->model_data), cfg->model_size, opt);
 		if (st->engine == nullptr) {
-			delete st;
+			destroy_state(st);
 			return ALP_ERR_NOMEM;
 		}
 
-		st->inputs  = st->engine->GetInputs();
-		st->outputs = st->engine->GetOutputs();
+		st->model      = static_cast<const uint8_t *>(cfg->model_data);
+		st->model_size = cfg->model_size;
+		st->inputs     = st->engine->GetInputs();
+		st->outputs    = st->engine->GetOutputs();
+
+		if (!all_tensor_ranks_fit(st->inputs) || !all_tensor_ranks_fit(st->outputs)) {
+			/* alp_inference_tensor_t's shape[] has exactly 4 slots; refuse
+			 * the model rather than let get_input()/get_output() hand back
+			 * a shape silently truncated to the first 4 dims (issue
+			 * #1729). NOSUPPORT, not IO: the model loaded fine, it is this
+			 * portable descriptor that has no slot for its rank. */
+			destroy_state(st);
+			return ALP_ERR_NOSUPPORT;
+		}
+
+		if (st->inputs.size() > 1) {
+			/* invoke() hands dx_rt's Run() a SINGLE pointer --
+			 * st->input_bufs[0].data() -- which dx_rt treats as the base
+			 * of one contiguous blob concatenating every input tensor
+			 * (see the DeepxState::input_bufs doc above). This backend
+			 * stages each input in its OWN separate std::vector
+			 * allocation instead, so for any model with more than one
+			 * input dx_rt would read past input_bufs[0]'s real size and
+			 * DMA whatever unrelated heap memory follows it over PCIe to
+			 * the DX-M1 (issue #1645). Refuse rather than mis-run until a
+			 * real concatenating staging buffer lands -- this path is
+			 * compiled in under ALP_SDK_USE_DEEPX_DXM1 (on deepx-dxm1
+			 * MACHINEs). The backend has run on DX-M1 silicon (#1262);
+			 * this multi-input path has not, so getting it wrong here
+			 * would be read as a hardware/model problem. */
+			destroy_state(st);
+			return ALP_ERR_NOSUPPORT;
+		}
 
 		/* Stage one SDK-owned buffer per input tensor.  The app writes
          * into these via get_input(); invoke() hands inputs[0].data() to
          * Run().  (dx_rt concatenates multi-input models; the common
-         * V2N-M1 vision model is single-input.) */
+         * V2N-M1 vision model is single-input -- multi-input is refused
+         * above until a real concatenating staging buffer lands.) */
 		st->input_bufs.resize(st->inputs.size());
 		for (size_t i = 0; i < st->inputs.size(); ++i) {
 			st->input_bufs[i].resize(static_cast<size_t>(st->inputs[i].size_in_bytes()));
 		}
 	} catch (...) {
-		delete st->engine;
-		delete st;
+		destroy_state(st);
 		return ALP_ERR_IO;
 	}
 
@@ -237,7 +422,9 @@ extern "C" alp_status_t alp_inference_deepx_get_input(struct alp_inference   *h_
 	}
 	/* Hand back the SDK-owned staging buffer, not the engine's internal
      * pointer -- the app fills this before invoke(). */
-	fill_tensor_descriptor(st->inputs[index], st->input_bufs[index].data(), out);
+	if (!fill_tensor_descriptor(st->inputs[index], st->input_bufs[index].data(), out)) {
+		return ALP_ERR_NOSUPPORT; /* real rank > 4 -- see #1729 */
+	}
 	return ALP_OK;
 }
 
@@ -250,20 +437,35 @@ extern "C" alp_status_t alp_inference_deepx_get_output(struct alp_inference   *h
 	if (st == nullptr) {
 		return ALP_ERR_NOT_READY;
 	}
+	std::shared_lock<std::shared_mutex> lk(st->engine_mtx);
 	if (index >= st->outputs.size()) {
 		return ALP_ERR_OUT_OF_RANGE;
 	}
 
 	/* After the first invoke(), last_outputs[index] points at the live
      * engine-owned result buffer; before any invoke the descriptor's
-     * data() is the engine's zero-initialised output area. */
+     * data() is the engine's zero-initialised output area.
+     *
+     * all_tensor_ranks_fit() at open() time only validated st->outputs --
+     * the declared metadata dx_rt reported before any Run().  It says
+     * nothing about what a live Run() actually hands back in
+     * last_outputs; fill_tensor_descriptor()'s PRECONDITION (rank <= 4)
+     * does not hold for that path on its own, so re-check the live
+     * tensor's rank here too before trusting it (issue #1729). */
 	void *data = nullptr;
+	bool  ok;
 	if (index < st->last_outputs.size() && st->last_outputs[index] != nullptr) {
+		if (st->last_outputs[index]->shape().size() > 4) {
+			return ALP_ERR_NOSUPPORT;
+		}
 		data = st->last_outputs[index]->data();
-		fill_tensor_descriptor(*st->last_outputs[index], data, out);
+		ok   = fill_tensor_descriptor(*st->last_outputs[index], data, out);
 	} else {
 		data = st->outputs[index].data();
-		fill_tensor_descriptor(st->outputs[index], data, out);
+		ok   = fill_tensor_descriptor(st->outputs[index], data, out);
+	}
+	if (!ok) {
+		return ALP_ERR_NOSUPPORT; /* real rank > 4 -- see #1729 */
 	}
 	return ALP_OK;
 }
@@ -272,7 +474,16 @@ extern "C" alp_status_t alp_inference_deepx_invoke(struct alp_inference *h_)
 {
 	auto *h  = h_;
 	auto *st = static_cast<DeepxState *>(h->be_state);
-	if (st == nullptr || st->engine == nullptr) {
+	if (st == nullptr) {
+		return ALP_ERR_NOT_READY;
+	}
+	/* Exclusive: this writes last_outputs, which get_output() reads under
+	 * the shared lock, and Run() consumes the shared input_bufs.  A shared
+	 * lock here let two invokes (or invoke vs get_output) race on the
+	 * shared_ptr vector.  Run() is synchronous on one engine, so
+	 * serialising invokes costs no real throughput. */
+	std::unique_lock<std::shared_mutex> lk(st->engine_mtx);
+	if (st->engine == nullptr) {
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -290,6 +501,81 @@ extern "C" alp_status_t alp_inference_deepx_invoke(struct alp_inference *h_)
 	return st->last_outputs.empty() ? ALP_ERR_IO : ALP_OK;
 }
 
+/* <alp/ext/deepx/inference.h> hooks, called by inference_yocto.c's
+ * alp_deepx_inference_* with the handle op-counted and the backend
+ * already checked. */
+
+extern "C" alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h_, uint32_t mask)
+{
+	auto *st = static_cast<DeepxState *>(h_->be_state);
+	if (st == nullptr || st->model == nullptr) {
+		return ALP_ERR_NOT_READY;
+	}
+	unsigned     bound = 0u;
+	alp_status_t mrc   = mask_to_bound(mask, bound);
+	if (mrc != ALP_OK) {
+		return mrc;
+	}
+	if (bound == st->bound.load()) {
+		return ALP_OK; /* already on this core set */
+	}
+
+	/* The new engine is built before the old one is deleted, so for that
+	 * window this handle holds BOTH core sets; admission therefore counts
+	 * the old one too and may answer ALP_ERR_BUSY.  Prefer
+	 * alp_inference_config_t::accel_unit_mask at open. */
+	alp_status_t adm = cores_acquire(bound);
+	if (adm != ALP_OK) {
+		return adm;
+	}
+	dxrt::InferenceOption opt = dxrt::DefaultInferenceOption;
+	opt.boundOption           = bound;
+
+	/* Build the new engine first: on failure the old one keeps serving. */
+	dxrt::InferenceEngine *fresh = nullptr;
+	try {
+		fresh = new (std::nothrow) dxrt::InferenceEngine(st->model, st->model_size, opt);
+	} catch (...) {
+		cores_release(bound);
+		return ALP_ERR_IO;
+	}
+	if (fresh == nullptr) {
+		cores_release(bound);
+		return ALP_ERR_NOMEM;
+	}
+
+	std::unique_lock<std::shared_mutex> lk(st->engine_mtx); /* waits out in-flight invokes */
+	delete st->engine;
+	cores_release(st->bound.exchange(bound)); /* under engine_mtx */
+	st->engine  = fresh;
+	st->outputs = fresh->GetOutputs();
+	st->last_outputs.clear(); /* pointed into the old engine */
+	return ALP_OK;
+}
+
+extern "C" alp_status_t alp_inference_deepx_get_status(struct alp_inference      *h_,
+                                                       alp_deepx_device_status_t *out)
+{
+	if (h_->be_state == nullptr) {
+		return ALP_ERR_NOT_READY;
+	}
+	try {
+		/* ponytail: device 0 -- a V2N-M1 carries exactly one DX-M1 and
+		 * InferenceEngine exposes no device id; map per handle if a
+		 * multi-DX-M1 carrier ever ships. */
+		dxrt::DeviceStatus ds = dxrt::DeviceStatus::GetCurrentStatus(0);
+		for (unsigned ch = 0; ch < ALP_DEEPX_NPU_CORE_COUNT; ++ch) {
+			out->temperature_c[ch]  = static_cast<int32_t>(ds.Temperature(static_cast<int>(ch)));
+			out->npu_clock_mhz[ch]  = ds.NpuClock(static_cast<int>(ch));
+			out->npu_voltage_mv[ch] = ds.Voltage(static_cast<int>(ch));
+		}
+		out->memory_bytes = static_cast<uint64_t>(ds.MemorySize());
+	} catch (...) {
+		return ALP_ERR_IO;
+	}
+	return ALP_OK;
+}
+
 extern "C" void alp_inference_deepx_close(struct alp_inference *h_)
 {
 	auto *h  = h_;
@@ -297,7 +583,6 @@ extern "C" void alp_inference_deepx_close(struct alp_inference *h_)
 	if (st == nullptr) {
 		return;
 	}
-	delete st->engine;
-	delete st;
+	destroy_state(st);
 	h->be_state = nullptr;
 }

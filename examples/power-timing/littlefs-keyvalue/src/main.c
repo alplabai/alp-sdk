@@ -20,7 +20,7 @@
  * Where this runs: native_sim only.  `board.yaml`'s `libraries:
  * [littlefs]` selects CONFIG_FILE_SYSTEM_LITTLEFS + CONFIG_FILE_SYSTEM
  * (emitted from littlefs.yaml's `integration.zephyr.kconfig` array by
- * scripts/alp_orchestrate/libraries.py:197 -- the `_LIBRARY_KCONFIG`
+ * scripts/alp_orchestrate/libraries.py:321 -- the `_LIBRARY_KCONFIG`
  * dict this used to cite no longer exists); this example's
  * own prj.conf adds CONFIG_FLASH + CONFIG_FLASH_MAP, the storage-medium
  * plumbing littlefs needs underneath (see prj.conf for why that split

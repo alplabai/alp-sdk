@@ -19,13 +19,15 @@ notes: |
   audio).  The chip driver in alp-sdk owns only the side-channel
   GPIO management lines documented below.
 
+firmware_banner_regex: 'Firmware: BCM55500'   # brcmfmac/cyw kernel-log line the provisioning functional test expects
+
 bus:              gpio              # plus SDIO / UART / I2S not handled here
 
 side_channel_lines:
   - { name: BT_REG_ON,    direction: output, role: "BT subsystem regulator enable",
-      v2n_route: "GD32 PE14 -- host reaches via gd32g553_gpio_write" }
+      v2n_route: "GD32 PE14, bridge GPIO expander line 18 (GD32G553_GPIO_LINE_BT_REG_ON) -- host reaches via gd32g553_gpio_write; requires bridge protocol minor >= 11 (GD32G553_REG_ON_MIN_PROTOCOL_MINOR)" }
   - { name: WL_REG_ON,    direction: output, role: "Wi-Fi subsystem regulator enable",
-      v2n_route: "GD32 PE15 -- host reaches via gd32g553_gpio_write" }
+      v2n_route: "GD32 PE15, bridge GPIO expander line 19 (GD32G553_GPIO_LINE_WL_REG_ON) -- host reaches via gd32g553_gpio_write; requires bridge protocol minor >= 11 (GD32G553_REG_ON_MIN_PROTOCOL_MINOR)" }
   - { name: BT_HOST_WAKE, direction: input,  role: "module wakes host on BT activity",
       v2n_route: "Renesas P05" }
   - { name: WL_HOST_WAKE, direction: input,  role: "module wakes host on Wi-Fi activity",
@@ -41,14 +43,20 @@ bulk_traffic_lines:
 kconfig:
   zephyr:         ALP_SDK_CHIP_MURATA_LBEE5HY2FY
   baremetal:      ALP_SDK_CHIP_MURATA_LBEE5HY2FY
-  yocto:          n/a              # Linux uses the upstream brcmfmac + BlueZ
+  yocto:          "meta-alp-sdk/recipes-kernel/cyw-fmac (out-of-tree brcmfmac backports, the in-tree driver has no CYW55513 ID) + wifi-bt.cfg's CONFIG_BT_HCIUART/CONFIG_BT_BCM (in-tree hci_uart/btbcm, BlueZ userspace)"
 
 families:
   - v2n
   - v2n-m1
 
 verification:
-  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  hil_silicon:    partial          # Bench, E1M-V2M103, 2026-09-26: Wi-Fi scan/
+                                   # WPA2-SAE association + DHCP + TCP throughput,
+                                   # hci0 UP+RUNNING via serdev shutdown-gpios,
+                                   # BT_REG_ON/WL_REG_ON driven via GD32 bridge
+                                   # lines 18/19. RF range/antenna performance on
+                                   # this specific unit is still under investigation
+                                   # (hardware, not this manifest's scope).
   smoke_tests:    null_arg_guard
 
 physical:
@@ -65,3 +73,5 @@ physical:
   operating_temp_deg_c: "-40..85"
   visibility:           public
   provenance:           web_provisional
+tracking:
+  blocker: "SDIO, BT-UART and I2S data paths stay in the Yocto/Linux stack; no open tracker"

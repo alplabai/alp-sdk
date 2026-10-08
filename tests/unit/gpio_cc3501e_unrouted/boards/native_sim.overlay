@@ -1,0 +1,55 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Host-emulated alp,pin-array for gpio_cc3501e_unrouted under native_sim, so
+ * the platform-delegate path (alp_z_gpio_open_owned) has a real DT node to
+ * resolve against.  That matters for the test's "before" premise (issue
+ * #1854's known-bad validation): without this node, delegating a pin_id on
+ * bare native_sim returns ALP_ERR_INVAL (no alp,pin-array at all), which
+ * would make a pre-fix build's alp_gpio_open(IO21) fail for the WRONG
+ * reason and mask whether the new unrouted check is what's firing.  With a
+ * real 22-entry array (covering ALP_E1M_GPIO_IO0..IO21), the pre-fix open
+ * genuinely succeeds (ALP_OK) and the post-fix open is refused with
+ * ALP_ERR_NOSUPPORT before delegation is even attempted.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	gpio_emul0: gpio_emul0 {
+		compatible = "zephyr,gpio-emul";
+		status = "okay";
+		gpio-controller;
+		rising-edge;
+		falling-edge;
+		#gpio-cells = <2>;
+		ngpios = <22>;
+	};
+
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&gpio_emul0 0 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 1 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 2 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 3 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 4 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 5 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 6 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 7 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 8 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 9 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 10 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 11 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 12 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 13 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 14 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 15 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 16 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 17 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 18 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 19 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 20 GPIO_ACTIVE_HIGH>,
+			<&gpio_emul0 21 GPIO_ACTIVE_HIGH>;
+	};
+};

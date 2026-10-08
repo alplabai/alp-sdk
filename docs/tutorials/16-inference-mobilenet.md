@@ -61,7 +61,7 @@ Backend selection:
 | `_AUTO` | Picks per SoM: Ethos-U on AEN/N93, DRP-AI on V2N, DEEPX on V2M, CPU fallback otherwise. |
 | `_ETHOS_U` | AEN (E3..E8 with Ethos-U55 + E4/E6/E8 with Ethos-U85) + N93 (Ethos-U65). |
 | `_DRPAI` | V2N + V2M (DRP-AI3). |
-| `_DEEPX_DXM1` | V2M101 / V2M102 (DEEPX DX-M1 on a PCIe-like link). |
+| `_DEEPX_DXM1` | V2M101 / V2M102 / V2M103 (DEEPX DX-M1 on a PCIe-like link). |
 | `_CPU` | TFLM reference / Helium / NEON kernels; always available. |
 
 The `ETHOS_U` token is a single customer-facing handle that
@@ -285,7 +285,9 @@ source, three SoMs.
 >     source: models/mobilenet.onnx
 >     compile:
 >       drpai:
->         spec: models/mobilenet.drpai.yaml   # DRP-AI TVM compile spec
+>         input_shape: [1, 3, 224, 224]         # NCHW
+>         input_name: input                     # ONNX input tensor name
+>         images: models/calib/                 # calibration images
 >       deepx_dxm1:
 >         config:      models/mobilenet.deepx.json   # dxcom per-model JSON
 >         calibration: models/calib/                 # PTQ calibration dataset
@@ -377,14 +379,24 @@ Per-backend latency baselines (native_sim CPU + AEN Ethos-U55):
 | MobileNet v2 96x96 quant | ~120 ms | ~1 ms |
 
 Real numbers per silicon land in
-`tests/bench/baselines/E1M-AEN801-zephyr.yaml` once HiL is
-provisioned.
+`tests/bench/baselines/` (only the `native-sim-cpu.yaml` row
+exists today; the E1M-AEN801-zephyr row arrives once HiL is
+provisioned).
 
 ## 8. Troubleshooting
 
 - **`alp_inference_open` returns NULL with NOSUPPORT** -- the
   selected backend isn't compiled in.  Check `board.yaml` and
   the generated `alp.conf`.
+- **`alp_inference_open` returns NULL with NOSUPPORT on the ONNX
+  Runtime (V2N/V2M CPU floor), DEEPX DX-M1, or TFLM backend
+  specifically** -- one of the model's tensors has rank > 4.
+  `alp_inference_tensor_t`'s `shape` field has exactly 4 slots; a model
+  that needs more dims is refused outright (on all three backends,
+  consistently) rather than opened with a shape silently truncated to
+  the first 4 (issue #1729).  There is no workaround at the SDK level
+  -- reshape/squeeze the model upstream (e.g. drop a size-1 axis) so
+  every tensor fits in 4 dims.
 - **Open succeeds but `_invoke` returns ALP_ERR_NOMEM** --
   arena too small for the model.  Bump `arena_bytes`; check
   Vela's output for the required value.

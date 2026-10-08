@@ -15,7 +15,7 @@ libraries:
 
 som:
   sku: E1M-AEN801           # E8 -- Ethos-U85 primary plus two Ethos-U55s;
-                             # the SoM `npu_population:` block drives
+                             # the SoC JSON `npus[]` (via the SoM's silicon) drives
                              # CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y +
                              # CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y
                              # automatically.

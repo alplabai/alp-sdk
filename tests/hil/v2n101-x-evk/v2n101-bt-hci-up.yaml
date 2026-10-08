@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2N101 Bluetooth: hci0 is registered and the controller powers up.
+# The image's bluetoothd does not auto-enable the adapter (it sits DOWN after
+# boot), so the spec brings it UP itself and restores the prior state.
+
+schema_version: 1
+name: v2n101-bt-hci-up
+description: |
+  hci0 present and reaches UP RUNNING when powered.
+
+flash_method: ssh-run
+ssh_command: |-
+  [ -e /sys/class/bluetooth/hci0 ] && echo HIL_BT_HCI_OK
+  if command -v hciconfig >/dev/null; then
+    was_up=0; hciconfig hci0 | grep -q 'UP RUNNING' && was_up=1
+    hciconfig hci0 up
+    for t in 1 2 3 4 5; do
+      hciconfig hci0 | grep -q 'UP RUNNING' && { echo HIL_BT_UP_OK; break; }
+      [ $t = 5 ] && echo HIL_BT_DOWN || sleep 1
+    done
+    [ $was_up = 1 ] || hciconfig hci0 down
+  fi
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_BT_HCI_OK"
+  expect_absent:
+    - "HIL_BT_DOWN"

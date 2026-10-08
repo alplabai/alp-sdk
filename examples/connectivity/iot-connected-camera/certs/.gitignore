@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Keep locally generated TLS material out of git.  README.md and this
+# file are the only tracked artefacts in this directory; ca.pem,
+# client.pem and client.key are produced on the developer's machine.
+
+# Private keys -- never commit.
+*.key
+*.priv
+
+# Certificates, CSRs and keystore bundles.
+*.pem
+*.crt
+*.cer
+*.der
+*.csr
+*.p12
+*.pfx
+
+# Tracked artefacts.
+!README.md
+!.gitignore

@@ -69,11 +69,17 @@ int main(void)
 {
 	printf("[manifest] v2n-eeprom-manifest-dump\n");
 
-	/* On V2N the on-module 24C128 EEPROM lives on ALP_E1M_I2C0 --
-     * BRD_I2C, the same SoC-mastered management bus shared with the
-     * PMICs, RTC, and the GD32 bridge (see v2n-brd-i2c-bringup for the
-     * full device table) -- at 7-bit address 0x50.  Customise the
-     * bus_id below for your board overlay. */
+	/* On V2N the on-module 24C128 EEPROM lives on ALP_E1M_I2C0
+     * (Renesas RIIC0) -- a SEPARATE bus from BRD_I2C (RIIC8), which
+     * carries the PMICs, RTC, and GD32 bridge instead (see
+     * v2n-brd-i2c-bringup for that bus's device table) -- at 7-bit
+     * address 0x50.  Customise the bus_id below for your board
+     * overlay.
+     *
+     * KNOWN GAP: the CM33 board currently defines no `alp-i2c0` alias
+     * / CONFIG_I2C for e1m_i2c0, so alp_i2c_open() below fails on
+     * silicon until that alias lands (tracked; see
+     * v2n-board-id-readout for the same gap). */
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
 	    .bus_id     = 0u,
 	    .bitrate_hz = 400000u,
@@ -111,7 +117,15 @@ int main(void)
 	/* Validate the manifest in the same order as
      * src/zephyr/hw_info_zephyr.c does at boot.  Each failure
      * mode prints a diagnostic the production line can act on. */
-	const alp_hw_info_eeprom_t *m = (const alp_hw_info_eeprom_t *)raw;
+	/* memcpy, not a cast -- raw is a uint8_t[] (alignment 1);
+     * alp_hw_info_eeprom_t needs alignment 4 for its uint32_t
+     * magic/schema_version/crc32 and uint16_t mfg_year. Reading through a
+     * cast pointer is the same misaligned-access bug already fixed on the
+     * Secure Data Page path (see alp_secure_page_mirror_classify()'s doc
+     * comment in include/alp/hw_info.h) and left unswept here. */
+	alp_hw_info_eeprom_t manifest;
+	memcpy(&manifest, raw, sizeof(manifest));
+	const alp_hw_info_eeprom_t *m = &manifest;
 
 	/* Magic byte: ASCII "ALPH" in little-endian.  An erased EEPROM
      * reads 0xFF or 0x00 across the board; either is unambiguously

@@ -22,6 +22,7 @@
 
 #include "alp/chips/cc3501e.h"
 #include "alp/protocol/cc3501e.h"
+#include "cc3501e_reply_model.h"
 
 /* ---- software model of the firmware event-ring slave ----------------------- */
 
@@ -32,7 +33,7 @@ enum slave_phase {
 	PH_REPLY_PL,    /* host reads the reply payload (status+data) */
 };
 
-/* A queued event in the model (mirrors firmware/cc3501e/src/event_ring.c). */
+/* A queued event in the model (mirrors cc3501e-bridge-firmware:src/event_ring.c). */
 struct model_evt {
 	uint8_t opcode;
 	uint8_t len;
@@ -71,32 +72,40 @@ static void model_queue_evt(uint8_t opcode, const uint8_t *payload, uint8_t len)
 	slave.evt_count++;
 }
 
-/* Drain the model ring into the reply DATA, packing WHOLE entries only (the
- * firmware never splits a payload across replies). */
+/* Drain the model ring into a scratch DATA buffer, packing WHOLE entries only
+ * (the firmware never splits a payload across replies), then stage it
+ * through the real MAJOR-4 shape (cc3501e_reply_model.h): padded to an
+ * ALP_CC3501E_REPLY_PAD multiple with a CRC trailer, exactly like the
+ * firmware's protocol_build_reply() -- including on an EMPTY ring (#1740:
+ * the padding is what turns a real 1-byte bare-OK reply into 7 zero DATA
+ * bytes on the wire, which is the shape the #1740 tests below pin). */
 static void slave_dispatch(void)
 {
 	if (slave.cmd == ALP_CC3501E_CMD_GET_PENDING_EVENTS) {
-		slave.reply_pl[0] = ALP_CC3501E_RESP_OK;
-		size_t off        = 1u;
+		/* static: ALP_CC3501E_MAX_PAYLOAD (4096 B) is too big to add to this
+		 * thread's stack on top of what it already carries. */
+		static uint8_t data[ALP_CC3501E_MAX_PAYLOAD];
+		size_t         off = 0u;
 		while (slave.evt_count > 0u) {
 			const struct model_evt *e    = &slave.evt[slave.evt_head];
 			const size_t            need = (size_t)ALP_CC3501E_EVENT_HDR_BYTES + e->len;
-			if (off + need > sizeof(slave.reply_pl)) {
+			if (off + need > sizeof(data)) {
 				break; /* would overflow the reply -- leave it queued */
 			}
-			slave.reply_pl[off]      = e->opcode;
-			slave.reply_pl[off + 1u] = e->len;
-			memcpy(&slave.reply_pl[off + ALP_CC3501E_EVENT_HDR_BYTES], e->payload, e->len);
+			data[off]      = e->opcode;
+			data[off + 1u] = e->len;
+			memcpy(&data[off + ALP_CC3501E_EVENT_HDR_BYTES], e->payload, e->len);
 			off += need;
 			slave.evt_head = (slave.evt_head + 1u) % 32u;
 			slave.evt_count--;
 		}
-		slave.reply_len = (uint16_t)off;
+		slave.reply_len = cc3501e_model_stage_reply(
+		    slave.reply_pl, slave.cmd, ALP_CC3501E_RESP_OK, data, (uint16_t)off);
 		return;
 	}
 	/* Any other opcode: a bare OK status (the tests only drive events). */
-	slave.reply_pl[0] = ALP_CC3501E_RESP_OK;
-	slave.reply_len   = 1u;
+	slave.reply_len =
+	    cc3501e_model_stage_reply(slave.reply_pl, slave.cmd, ALP_CC3501E_RESP_OK, NULL, 0u);
 }
 
 /* ---- test doubles for the alp_* seams the host driver links against -------- */
@@ -144,13 +153,31 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	return ALP_OK;
 }
 
+/* alp_delay_ms and alp_uptime_ms share one fake millisecond counter (same
+ * pattern as tests/zephyr/cc3501e_poll_deadline), so poll_by_repeat()'s
+ * deadline (issue #1953) resolves deterministically for any retry this
+ * suite drives, without any real sleeping. */
+static uint64_t g_fake_now_ms;
+
 void alp_delay_us(uint32_t us)
 {
 	(void)us;
 }
 void alp_delay_ms(uint32_t ms)
 {
-	(void)ms;
+	g_fake_now_ms += ms;
+}
+uint64_t alp_uptime_ms(void)
+{
+	return g_fake_now_ms;
+}
+
+/* #2052: the bridge's settles count from the last transfer's end via
+ * alp_uptime_us(); derived from this suite's millisecond clock so both
+ * readings stay on the same (virtual) timeline. */
+uint64_t alp_uptime_us(void)
+{
+	return alp_uptime_ms() * 1000u;
 }
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {
@@ -196,6 +223,23 @@ static void capture_cb(uint8_t opcode, const uint8_t *payload, size_t len, void 
 	}
 }
 
+/* Second, independent sink (issue #1723).  The defect this models is the SDK's
+ * own console companion registering on the same context as the application: the
+ * old single-slot API let the second registration silently displace the first,
+ * so one of the two consumers received nothing. */
+static size_t  cap2_count;
+static uint8_t cap2_last_opcode;
+static void   *cap2_user;
+
+static void capture_cb2(uint8_t opcode, const uint8_t *payload, size_t len, void *user)
+{
+	(void)payload;
+	(void)len;
+	cap2_user        = user;
+	cap2_last_opcode = opcode;
+	cap2_count++;
+}
+
 /* ---- fixture --------------------------------------------------------------- */
 
 static cc3501e_t  fw;
@@ -206,8 +250,11 @@ static void reset_before(void *fixture)
 	(void)fixture;
 	slave_reset();
 	memset(cap, 0, sizeof(cap));
-	cap_count = 0;
-	cap_user  = NULL;
+	cap_count        = 0;
+	cap_user         = NULL;
+	cap2_count       = 0;
+	cap2_last_opcode = 0;
+	cap2_user        = NULL;
 	zassert_equal(cc3501e_init(&fw, fake_bus), ALP_OK, "init binds the (fake) bus");
 }
 
@@ -227,7 +274,7 @@ ZTEST(cc3501e_host_events, test_poll_without_callback_is_noop)
 /* Empty ring -> OK, GET_PENDING_EVENTS emitted, zero callbacks. */
 ZTEST(cc3501e_host_events, test_poll_empty_queue)
 {
-	zassert_equal(cc3501e_set_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb");
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb");
 	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_GET_PENDING_EVENTS, "opcode 0x05 emitted");
 	zassert_equal(slave.req_len, 0u, "GET_PENDING_EVENTS carries no request payload");
@@ -238,7 +285,7 @@ ZTEST(cc3501e_host_events, test_poll_empty_queue)
 ZTEST(cc3501e_host_events, test_poll_wifi_connect_then_disconnect)
 {
 	int marker = 42;
-	zassert_equal(cc3501e_set_event_callback(&fw, capture_cb, &marker), ALP_OK, "set cb");
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, &marker), ALP_OK, "set cb");
 	model_queue_evt(ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
 	model_queue_evt(ALP_CC3501E_EVT_WIFI_DISCONNECTED, NULL, 0u);
 
@@ -254,7 +301,7 @@ ZTEST(cc3501e_host_events, test_poll_wifi_connect_then_disconnect)
 /* An event WITH a payload (e.g. a GPIO edge) round-trips the payload bytes. */
 ZTEST(cc3501e_host_events, test_poll_event_with_payload)
 {
-	zassert_equal(cc3501e_set_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb");
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb");
 	const uint8_t gpio_evt[8] = { 6u, 1u, 0u, 0u, 0x11, 0x22, 0x33, 0x44 };
 	model_queue_evt(ALP_CC3501E_EVT_GPIO_INTERRUPT, gpio_evt, sizeof(gpio_evt));
 
@@ -284,9 +331,40 @@ static void reentrant_cb(uint8_t opcode, const uint8_t *payload, size_t len, voi
 	reentrant_poll_rc = cc3501e_poll_events(&fw);
 }
 
+/* #1740: an EMPTY ring still returns a PADDED reply -- the firmware pads to an
+ * 8-byte multiple for DMA burst alignment and folds the pad into the declared
+ * payload length, so the host receives 7 zero bytes of DATA (measured on an
+ * AEN801: "[evtdbg] got=7 raw=00 00 00 00").  Walked naively those are three
+ * {opcode 0, len 0} entries -- ~5.8 phantom events/second on an idle bench,
+ * fanned out to every subscriber.  0x00 is not a defined ALP_CC3501E_EVT_*
+ * opcode, so it must terminate the walk. */
+ZTEST(cc3501e_host_events, test_padded_empty_reply_dispatches_nothing_1740)
+{
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb");
+
+	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll -> OK");
+	zassert_equal(slave.reply_len, 8u, "firmware padded the bare-OK reply to 8 B");
+	zassert_equal(cap_count, 0u, "padding must NOT be decoded as events");
+}
+
+/* #1740 companion: a REAL entry followed by padding still dispatches exactly
+ * once.  Padding is appended after the data, so the guard must stop at the pad
+ * without swallowing the entry that precedes it. */
+ZTEST(cc3501e_host_events, test_real_event_then_padding_dispatches_once_1740)
+{
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb");
+	model_queue_evt(ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
+
+	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll -> OK");
+	zassert_equal(slave.reply_len, 8u, "status + 1 entry (2 B) padded up to 8 B");
+	zassert_equal(cap_count, 1u, "exactly one real event, pad ignored");
+	zassert_equal(cap[0].opcode, ALP_CC3501E_EVT_WIFI_CONNECTED, "the real opcode");
+	zassert_equal(cap[0].len, 0u, "no payload");
+}
+
 ZTEST(cc3501e_host_events, test_poll_reentrant_from_callback_is_rejected_740)
 {
-	zassert_equal(cc3501e_set_event_callback(&fw, reentrant_cb, NULL), ALP_OK, "set cb");
+	zassert_equal(cc3501e_add_event_callback(&fw, reentrant_cb, NULL), ALP_OK, "set cb");
 	model_queue_evt(ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
 	model_queue_evt(ALP_CC3501E_EVT_WIFI_DISCONNECTED, NULL, 0u);
 	reentrant_poll_calls = 0;
@@ -302,7 +380,7 @@ ZTEST(cc3501e_host_events, test_poll_reentrant_from_callback_is_rejected_740)
 	/* Guard cleared after the outer call returns -- a later, non-reentrant
 	 * poll works normally again. */
 	zassert_false(fw.evt_busy, "evt_busy cleared once the outer poll returns");
-	zassert_equal(cc3501e_set_event_callback(&fw, capture_cb, NULL), ALP_OK, "restore plain cb");
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, NULL), ALP_OK, "restore plain cb");
 	cap_count = 0;
 	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll after reentrancy -> OK");
 	zassert_equal(cap_count, 0u, "ring was already drained");
@@ -319,7 +397,7 @@ ZTEST(cc3501e_host_events, test_poll_reentrant_from_callback_is_rejected_740)
  * unaffected -- same discriminating shape as test_wifi_scan_buf_is_per_context_740. */
 ZTEST(cc3501e_host_events, test_evt_buf_is_per_context_740)
 {
-	zassert_equal(cc3501e_set_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb ctx A");
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb ctx A");
 	const uint8_t gpio_evt[4] = { 0xDE, 0xAD, 0xBE, 0xEF };
 	model_queue_evt(ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
 	model_queue_evt(ALP_CC3501E_EVT_GPIO_INTERRUPT, gpio_evt, sizeof(gpio_evt));
@@ -353,7 +431,7 @@ ZTEST(cc3501e_host_events, test_evt_buf_is_per_context_740)
 	slave_reset();
 	memset(cap, 0, sizeof(cap));
 	cap_count = 0;
-	zassert_equal(cc3501e_set_event_callback(&ctx_b, capture_cb, NULL), ALP_OK, "set cb ctx B");
+	zassert_equal(cc3501e_add_event_callback(&ctx_b, capture_cb, NULL), ALP_OK, "set cb ctx B");
 	const uint8_t b_payload[2] = { 0x55, 0x66 };
 	model_queue_evt(ALP_CC3501E_EVT_WIFI_DISCONNECTED, b_payload, sizeof(b_payload));
 	zassert_equal(cc3501e_poll_events(&ctx_b), ALP_OK, "poll ctx B -> OK");
@@ -370,7 +448,7 @@ ZTEST(cc3501e_host_events, test_evt_buf_is_per_context_740)
 /* A second poll after a drain sees an empty ring (delivered exactly once). */
 ZTEST(cc3501e_host_events, test_events_delivered_exactly_once)
 {
-	zassert_equal(cc3501e_set_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb");
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb");
 	model_queue_evt(ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
 
 	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "first poll -> OK");
@@ -379,6 +457,103 @@ ZTEST(cc3501e_host_events, test_events_delivered_exactly_once)
 	cap_count = 0;
 	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "second poll -> OK");
 	zassert_equal(cap_count, 0u, "nothing left to deliver");
+}
+
+/* #1723: two subscribers on ONE context BOTH receive every event.
+ *
+ * This is the shape that actually shipped broken: the application registers in
+ * main(), then the console companion registers on the same ctx from its own
+ * init path.  Under the old single-slot API the second registration silently
+ * replaced the first, so the application's callback never ran again while
+ * cc3501e_poll_events() kept returning ALP_OK -- undetectable from the caller.
+ * On that code this test fails on the FIRST subscriber's count, which is
+ * exactly the symptom (bench-confirmed: ring drained, application saw none). */
+ZTEST(cc3501e_host_events, test_two_subscribers_both_receive_events_1723)
+{
+	int marker_a = 0;
+	int marker_b = 0;
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, &marker_a), ALP_OK, "sub A");
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb2, &marker_b), ALP_OK, "sub B");
+
+	model_queue_evt(ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
+	model_queue_evt(ALP_CC3501E_EVT_WIFI_DISCONNECTED, NULL, 0u);
+	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll -> OK");
+
+	zassert_equal(cap_count, 2u, "subscriber A got BOTH events (the #1723 regression)");
+	zassert_equal(cap2_count, 2u, "subscriber B got both events too");
+	zassert_equal(cap_user, &marker_a, "A keeps its own user pointer");
+	zassert_equal(cap2_user, &marker_b, "B keeps its own user pointer");
+	zassert_equal(cap2_last_opcode, ALP_CC3501E_EVT_WIFI_DISCONNECTED, "B saw the last event");
+}
+
+/* #1723: registering the SAME (cb, user) pair twice must not double-deliver. */
+ZTEST(cc3501e_host_events, test_duplicate_registration_is_idempotent_1723)
+{
+	int marker = 0;
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, &marker), ALP_OK, "first add");
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, &marker), ALP_OK, "duplicate add");
+
+	model_queue_evt(ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
+	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll -> OK");
+	zassert_equal(cap_count, 1u, "one event delivered ONCE, not twice");
+
+	/* Same callback with a DIFFERENT user is a distinct subscription. */
+	int other = 0;
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, &other), ALP_OK, "distinct user");
+	cap_count = 0;
+	model_queue_evt(ALP_CC3501E_EVT_WIFI_DISCONNECTED, NULL, 0u);
+	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll -> OK");
+	zassert_equal(cap_count, 2u, "both subscriptions fire");
+}
+
+/* #1723: unsubscribing stops delivery; removing an unknown pair is reported. */
+ZTEST(cc3501e_host_events, test_remove_event_callback_1723)
+{
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, NULL), ALP_OK, "sub A");
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb2, NULL), ALP_OK, "sub B");
+	zassert_equal(cc3501e_remove_event_callback(&fw, capture_cb, NULL), ALP_OK, "remove A");
+	zassert_equal(cc3501e_remove_event_callback(&fw, capture_cb, NULL),
+	              ALP_ERR_NOT_FOUND,
+	              "removing it again reports NOT_FOUND");
+
+	model_queue_evt(ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
+	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll -> OK");
+	zassert_equal(cap_count, 0u, "removed subscriber gets nothing");
+	zassert_equal(cap2_count, 1u, "the remaining subscriber still gets it");
+}
+
+/* #1723: the slot array is finite, and exhausting it REFUSES the new
+ * registration rather than displacing a subscriber that is already working --
+ * failing closed is what makes the limit debuggable instead of silent. */
+ZTEST(cc3501e_host_events, test_subscriber_slots_fail_closed_1723)
+{
+	static int markers[CC3501E_EVENT_SUBSCRIBERS];
+	for (size_t i = 0; i < CC3501E_EVENT_SUBSCRIBERS; i++) {
+		zassert_equal(
+		    cc3501e_add_event_callback(&fw, capture_cb, &markers[i]), ALP_OK, "slot fills");
+	}
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb2, NULL),
+	              ALP_ERR_NOMEM,
+	              "one past the last slot is refused");
+
+	model_queue_evt(ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
+	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll -> OK");
+	zassert_equal(cap_count,
+	              (size_t)CC3501E_EVENT_SUBSCRIBERS,
+	              "every ACCEPTED subscriber still receives the event");
+	zassert_equal(cap2_count, 0u, "the refused one receives nothing");
+
+	/* Freeing a slot makes room again. */
+	zassert_equal(cc3501e_remove_event_callback(&fw, capture_cb, &markers[0]), ALP_OK, "free");
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb2, NULL), ALP_OK, "now it fits");
+}
+
+/* #1723: a NULL callback is rejected outright -- unsubscribing goes through
+ * cc3501e_remove_event_callback, so NULL can never occupy a slot. */
+ZTEST(cc3501e_host_events, test_null_callback_rejected_1723)
+{
+	zassert_equal(cc3501e_add_event_callback(&fw, NULL, NULL), ALP_ERR_INVAL, "add NULL");
+	zassert_equal(cc3501e_remove_event_callback(&fw, NULL, NULL), ALP_ERR_INVAL, "remove NULL");
 }
 
 ZTEST_SUITE(cc3501e_host_events, NULL, NULL, reset_before, NULL, NULL);

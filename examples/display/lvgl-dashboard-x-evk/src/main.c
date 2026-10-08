@@ -45,10 +45,9 @@
  *   LVGL's evdev backend (lv_evdev_create) reads it without any
  *   board-specific glue.
  *
- *   NOTE: on current V2N hardware the GT911's I2C bus terminates at
- *   the GD32 IO-MCU (BRD_I2C), not directly at the RZ/V2N RIIC
- *   controller.  The GD32 I2C-proxy follow-up task will add a Linux
- *   master path.  Until then TOUCH_EVDEV may not exist -- the demo
+ *   NOTE: on X-EVK V2 the J6 panel I2C (GT911) is not wired to E1M-X
+ *   I2C3, the bus the GD32 I2C proxy exposes to Linux, so touch needs a
+ *   carrier fix or bench bodge.  Until then TOUCH_EVDEV may not exist -- the demo
  *   detects this at runtime with access(2) and degrades gracefully to
  *   display-only operation.
  *
@@ -100,8 +99,8 @@
  * if it does the panel is always card0 (enumerated first by rz-du). */
 #define DRM_CARD "/dev/dri/card0"
 
-/* GT911 touch node after the GD32 I2C-proxy lands.  On current silicon
- * this node is absent -- the access(2) guard below prevents a hard
+/* GT911 touch node.  On X-EVK V2 (J6 I2C not wired to I2C3) this node
+ * is absent -- the access(2) guard below prevents a hard
  * failure so the dashboard runs display-only in the meantime. */
 #define TOUCH_EVDEV "/dev/input/event0"
 
@@ -115,7 +114,7 @@
  *                       quantity (CPU load, battery, signal strength).
  *   3. Touch button  -- demonstrates interactive input; the GT911 sends
  *                       pointer events through the evdev indev registered
- *                       below once the I2C-proxy path is live.
+ *                       below when the touch bus is wired.
  *
  * This function is intentionally minimal -- it demonstrates the LVGL 9
  * object hierarchy (lv_screen_active → child widget) without adding
@@ -184,7 +183,7 @@ int main(void)
 	/* ── Touch input (optional) ── */
 
 	/* access(R_OK) probes the node without opening it -- avoids a hard
-	 * error on units where the GD32 I2C-proxy hasn't landed yet.  The
+	 * error on units where the GT911 bus is not wired to Linux.  The
 	 * demo is fully usable display-only; touch is additive. */
 	if (access(TOUCH_EVDEV, R_OK) == 0) {
 		/* lv_evdev_create() opens the evdev node, spawns an internal

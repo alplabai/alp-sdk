@@ -1,0 +1,230 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+# Capturing a tier-2 model-perf point
+
+How to add one bench-measured performance point to
+`metadata/model_perf/` once the two blockers listed below (see
+"Blockers -- read this before you spend bench time") clear. Written
+**before** any bench time is spent on tier 2
+(docs/superpowers/specs/2026-07-24-edge-ai-lifecycle-roadmap.md
+sub-project 1), so a first capture campaign follows a recipe instead
+of improvising one against the schema.
+
+`metadata/model_perf/` ships **empty** as of issue #1520: this doc
+describes the contract a real capture must satisfy, not a procedure
+that has been run yet. Do not write an estimated, extrapolated, or
+synthetic point into `metadata/model_perf/` to fill the gap — a perf
+point comes off real Alp Lab bench silicon or it does not exist. A
+worked example for tests lives under
+[`tests/fixtures/model_perf/`](../../tests/fixtures/model_perf/), never
+under the published tree (`scripts/validate_metadata.py` refuses any
+`_fixture`-named path there).
+
+## Blockers — read this before you spend bench time
+
+One open question gates the *data*, not the contract landed here.
+It is not solved by this doc; it's called out so a capture session
+doesn't discover it mid-bench. (A second former blocker, the lack of a
+latency accessor, used to be listed here; it closed when
+`alp_inference_last_invoke_latency_us()` landed in #1541 — see the
+Recipe's step 4 below for how a capture uses it. A third, the
+const-region question, is now settled — see below, not a blocker.)
+
+1. **The vela profile question.** `vela` picks its OWN built-in
+   default system/memory profile (`Ethos_U85_SYS_DRAM_Mid` /
+   `Dedicated_Sram_384KB`) whenever `--system-config` /
+   `--memory-mode` are omitted — a **DRAM-backed** profile, on Alp Lab
+   silicon that has **no DRAM**. Every `ethos_u` point's `vela:` block
+   is schema-required precisely so a capture can't silently inherit
+   that default unrecorded, but *which* profile a module should
+   actually compile under is not decided yet. Do not invent one;
+   capture whichever profile is in use once this is resolved, and
+   record it verbatim in `vela.system_config` / `vela.memory_mode`.
+
+   A vendor-tuned `System_Config` (e.g. Alif's `ensemble_vela.ini`,
+   named per SoC by `npu_toolchain.vela.vendor_config_filename`) is
+   proprietary and alp-sdk does not redistribute it. A capture run
+   on one points `scripts/alp_model/build.py`'s `.alpmodel` pipeline
+   at it via the `ALP_VELA_CONFIG` environment variable -- never a
+   `board.yaml` field, since where the file lives on a bench host is
+   not a fact about the silicon.
+
+   **`ALP_VELA_CONFIG` is inert today.** It only takes effect once a
+   SoC spec's `npu_toolchain.vela` names a `system_config` with
+   `system_config_requires_vendor_config: true`
+   (`metadata/schemas/soc-spec-v1.schema.json`) -- `scripts/alp_project_loader.py`'s
+   `_soc_targets()` is what routes a named `system_config` into the
+   vendor-gated field this env var feeds. No shipped `metadata/socs/**`
+   spec names a `system_config` at all yet, so setting this variable
+   changes nothing for any part in metadata/ today. AEN example builds
+   configure the same vendor `.ini` a different way, via the CMake
+   `AEN_NPU_VELA_CONFIG` variable
+   (`examples/aen/aen-npu-inference/README.md`), not this env var.
+
+**The const-region question (settled, tan-cli#1011).**
+`perf.req_sram_kib` is **arena-only, by design** — vela's
+`sram_memory_used` column, the same accounting as the `.alpmodel`
+manifest's `Target.requires.sram_kib` and the on-device selector's
+comparison in `src/backends/inference/alp_model_select.c`. The
+const/weight region (vela's `on_chip_flash_memory_used`) is **never**
+summed into it: it is carried in the model blob itself, and its size
+is the blob's own byte length (`blob_len`), provisioned by the
+integrator per `vela_memory_mode` placement — not a figure this
+pipeline re-derives. This is the same contract as tan-cli's `_footprint()`
+(tan-cli#1011, `python/tan/model/adapters/ethos_u.py`), not a line-for-line
+port, and the SRAM-port pinning in `src/backends/inference/ethos_u_aen.cpp`.
+
+## What a point is keyed on
+
+A perf point's identity is the full **measurement** — SoM SKU, hw_rev,
+compile target (backend + accel_config + core + the exact compiler
+build, `target.compiler_version`), the exact source-model bytes, and
+the vela profile when one applies — not the model alone and not the
+SoM alone. `compiler_version` is part of this identity because a
+compiler upgrade alone (e.g. vela 4.1.0 → 5.x) can move
+`arena_bytes`/`latency_ms` with every other field unchanged. Two
+captures that share a model but differ in any of those fields are two
+different measurements and get two different files; see
+`metadata/model_perf/README.md` and
+`metadata/schemas/model-perf-v1.schema.json` for the full contract.
+
+## Recipe
+
+1. **Resolve the target.** For the SKU under test, run
+   `alp model check <model> --sku <SKU>` (or read
+   `scripts/alp_project_loader.py`'s `resolve_targets()` directly) to
+   get the exact `(backend, accel_config, core)` triples that SKU
+   resolves. A perf point naming anything else fails
+   `scripts/validate_metadata.py`'s target cross-check.
+2. **Compile for that target, and record the exact compiler build into
+   `target.compiler_version`** — part of the measurement identity (see
+   above), so it must be the compiler that ACTUALLY produced this
+   point, not a version typed from memory.
+   - `ethos_u`: run `vela <model>.tflite --accelerator-config
+     <accel_config> --system-config <profile> --memory-mode <mode>
+     --output-dir <out>` — pass BOTH profile flags explicitly (see
+     blocker 1); never rely on vela's own default. Record `vela
+     --version` (or the installed `ethos-u-vela` package version) as
+     `vela X.Y.Z`, the same string `scripts/alp_model/adapters/ethos_u.py`'s
+     `_vela_version()` writes into the `.alpmodel` manifest.
+   - Other backends: use that backend's own compile step (`dxcom` /
+     the DRP-AI toolchain / `.alpmodel` build via
+     `scripts/alp_model/build.py`), and record ITS version, or
+     `passthrough` for a backend with no real compile step (`cpu`).
+3. **Read `arena_bytes` in raw bytes** from the compiler's own report
+   (vela's `<stem>_summary_*.csv` SRAM-used/arena column, or the
+   `.alpmodel` manifest `Target.arena` if building through
+   `alp_model.build`) — do not hand-estimate it. **Then compute
+   `req_sram_kib` yourself as `ceil(arena_bytes / 1024)`, rounding UP to
+   the next whole KiB.** `scripts/validate_metadata.py` requires
+   `req_sram_kib * 1024 >= arena_bytes` — the declared KiB budget must
+   actually COVER the byte figure — and a **floored** KiB value almost
+   never does: 393000 B floor-divides to 383 KiB, but `383 * 1024 =
+   392192 < 393000` is **REJECTED**; `ceil` gives 384 KiB, `384 * 1024 =
+   393216 >= 393000` is accepted. Do NOT copy a KiB figure verbatim from
+   somewhere else without checking its rounding direction first — vela's
+   own summary CSV and the `.alpmodel` manifest's
+   `Target.requires.sram_kib` both floor-divide
+   (`scripts/alp_model/adapters/ethos_u.py`'s `_parse_vela_summary()`
+   does `sram_bytes // 1024`), so pasting either straight into
+   `perf.req_sram_kib` reproduces this exact rejection on real data.
+4. **Flash the target and time it with `alp_inference_last_invoke_latency_us()`**
+   (declared in `include/alp/inference.h`) on the real SoM. For each
+   timed run, call `alp_inference_invoke()` and check ITS OWN return
+   first — proceed to read the accessor only when `alp_inference_invoke()`
+   itself returned `ALP_OK`. On `ALP_ERR_TIMEOUT` (NPU stuck) or
+   `ALP_ERR_IO` (NPU error) the invoke did NOT succeed, and the
+   accessor's stored value is UNCHANGED: `alp_inference_last_invoke_latency_us()`
+   still reports `ALP_OK`, but with the PREVIOUS successful invoke's
+   duration, not this run's (`include/alp/inference.h`'s doc on the
+   accessor: a failed invoke "does not update the stored value").
+   Recording that reading as this run's sample silently duplicates an
+   old value and drops exactly the invoke that blew its timing budget —
+   the one `p95` exists to catch — biasing `p95` low, and neither the
+   run-count floor nor the `p95 >= mean` check can see it. Discard a
+   failed invoke instead (it does not count toward the sample) and
+   re-run it rather than recording anything for it.
+
+   Once `alp_inference_invoke()` has returned `ALP_OK`, read
+   `alp_inference_last_invoke_latency_us(inf, &out_us)` immediately —
+   the accessor reports only the LAST successful invoke (no history, no
+   accumulated statistics), so read it once per invoke before calling
+   `alp_inference_invoke()` again. Run a handful of warm-up invokes
+   first and discard their readings, then take ≥ 30 back-to-back GOOD
+   (`ALP_OK` invoke, `ALP_OK` accessor read) timed invokes and compute
+   `mean` / `p50` / `p95` / `stdev` / `runs` from that sample.
+
+   `out_us` is a `uint64_t` in whole MICROSECONDS, rounded to nearest.
+   Convert to the schema's `latency_ms.*` fields (MILLISECONDS) with a
+   **floating-point** division by `1000.0`, and keep the fractional
+   result — do NOT integer-divide `out_us / 1000` in C, which truncates
+   to whole milliseconds. Worked example, matching step 3's standard of
+   care above: a 1500 us invoke is `1500 / 1000.0 = 1.5` ms, recorded as
+   `1.5`; the same value integer-divided is `1500 / 1000 = 1` (C's
+   `uint64_t` division truncates), a 33% under-report that still passes
+   every gate — `mean` / `p50` / `p95` are schema-typed `number` with
+   only a positivity floor and `stdev` a `number` with only a
+   non-negativity floor (`metadata/schemas/model-perf-v1.schema.json`'s
+   `latency_ms` block), so a whole-millisecond value validates cleanly,
+   and a tight distribution that quantizes to one repeated integer
+   collapses `stdev` to `0`, still schema-valid; only a sub-millisecond
+   invoke fails loudly (rounding to `0`, which the fields' positivity
+   floor rejects). Keep every `latency_ms.*` value as the true
+   fractional-millisecond quotient, never rounded to a whole
+   millisecond.
+
+   Check `alp_inference_last_invoke_latency_us()`'s own `alp_status_t`
+   return too: `ALP_ERR_NOT_READY` means the handle is closed or no
+   invoke has yet completed with `ALP_OK` (a warm-up/setup bug, not a
+   real measurement of 0); `ALP_ERR_NOSUPPORT` means the target is a
+   stub build with no inference backend compiled in at all;
+   `ALP_ERR_INVAL` means `out_us` itself was NULL (harmless in this
+   recipe, which always passes `&out_us`). None of the three is a value
+   to record. `ALP_OK` is NECESSARY but NOT SUFFICIENT for a
+   trustworthy reading: on a target compiled at 60 MHz or below under
+   stock Kconfig, or any target without
+   `CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER`, the underlying hardware cycle
+   counter wraps modulo 2^32 and the accessor has no way to detect that
+   wrap — it reports `ALP_OK` with a plausible-looking but too-small
+   duration, not an error (`include/alp/inference.h`'s doc on the
+   accessor). This recipe's own targets (`ethos_u` / `dxcom` / DRP-AI /
+   `cpu`, not specifically the AEN M55 at 400 MHz with the 64-bit
+   counter) should confirm which case applies before trusting a
+   suspiciously fast reading. `scripts/validate_metadata.py` refuses
+   fewer than 30 runs and refuses a `p95` below `mean`.
+
+   Do not copy the timing pattern in
+   `examples/camera-vision/ai-object-detection-realtime/src/main.c:227-232`
+   or `examples/camera-vision/ai-camera-viewer/src/inference_loop.c:112-122`
+   as a model for this step — both predate this accessor, hand-roll
+   `k_cycle_get_32()` / `k_cyc_to_us_floor32()` (the floor-truncation
+   bias #1541 removes), and both discard `alp_inference_invoke()`'s
+   status via `(void)alp_inference_invoke(inf)`, which is exactly the
+   discarded-status defect this step exists to avoid.
+5. **Fill `capture`**: `date` (ISO-8601, the day of the run),
+   `operator`, `bench_id` (the physical rig, identified by module SKU +
+   serial, e.g. `E1M-AEN801/2026W36-0003`),
+   and `notes` for anything a reader trusting the number should know
+   (thermal state, firmware build).
+6. **Compute the filename** by content-hashing the identity fields —
+   `scripts/validate_metadata.py`'s `_model_perf_identity_hash()` is
+   the single source of that recipe; do not hand-invent a filename.
+7. **Write the file** to `metadata/model_perf/<SKU>/<hash>.yaml` and
+   run `py -3 scripts/validate_metadata.py` — it must report `OK` for
+   the new file with no semantic-check failures before it's committed.
+
+## Reference
+
+- Schema: [`metadata/schemas/model-perf-v1.schema.json`](../../metadata/schemas/model-perf-v1.schema.json).
+- Semantic checks: `scripts/validate_metadata.py`'s
+  `_check_model_perf_semantics()` (SKU existence, target/core
+  resolution, hw_rev family membership, the vela-profile requirement,
+  the SRAM/latency sanity checks, the run-count floor, the `_fixture`
+  refusal) and `_collect_model_perf_files()` (the exact
+  `<SKU>/<hash>.yaml` two-level tree shape, enforced BEFORE any of the
+  above runs — a misplaced file fails loudly instead of never being
+  opened).
+- Test coverage for every rule above: `tests/scripts/test_model_perf_metadata.py`.
+- Consumer: `tan model check`'s tiered resolution
+  (precomputed → exact-if-toolchain → static) reads these points to
+  emit `basis: "bench"` — tracked in `alplabai/tan-cli`, out of scope
+  here.

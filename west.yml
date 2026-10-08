@@ -94,8 +94,6 @@ manifest:
       url-base: https://github.com/catchorg
     - name: stephane           # libmodbus
       url-base: https://github.com/stephane
-    - name: freertos-org       # coreMQTT-SN
-      url-base: https://github.com/FreeRTOS
     - name: xio-technologies   # Madgwick AHRS reference
       url-base: https://github.com/xioTechnologies
     - name: bearssl-upstream   # BearSSL upstream git server -- non-GitHub
@@ -105,6 +103,10 @@ manifest:
                               # earlier comment here claiming otherwise).
     - name: micro-ROS
       url-base: https://github.com/micro-ROS
+    - name: aws                # AWS IoT Device SDK for Embedded C (extras-cloud)
+      url-base: https://github.com/aws
+    - name: azure              # Azure SDK for Embedded C (extras-cloud)
+      url-base: https://github.com/Azure
     - name: arm-software    # CMSIS-Stream, CMSIS-CV, Arm-2D
       url-base: https://github.com/ARM-software
     # extras-cpp remotes (Task 0 3p-library-examples batch): three
@@ -137,7 +139,7 @@ manifest:
   #                    tree (u8g2, libcoap, libwebsockets,
   #                    jsmn, bearssl, minimp3, opus,
   #                    catch2, libmodbus, madgwick_ahrs,
-  #                    coremqtt_sn, cmsisstream (repo CMSIS-Stream),
+  #                    cmsisstream (repo CMSIS-Stream),
   #                    CMSIS-CV, Arm-2D).  Disabled by default so v0.5
   #                    workspaces stay light; customers flip via
   #                    `west update --group-filter +extras-tier1`
@@ -147,6 +149,18 @@ manifest:
   #                    bumps land alongside the library knob in that
   #                    library's `integration.zephyr.hw_backends:` block
   #                    in `metadata/libraries/<name>.yaml`.
+  # `extras-cloud`   - aws-iot-device-sdk-embedded-C (202412.00 LTS, MIT)
+  #                    + azure-sdk-for-c (1.5.0, MIT): source pins only,
+  #                    matching metadata/libraries/{aws-iot,azure-iot}.yaml
+  #                    (ADR 0018 Tier B; no upstream Zephyr module.yml, so
+  #                    the in-tree glue under vendors/{aws,azure}-iot/ builds
+  #                    them under CONFIG_ALP_AWS_IOT / CONFIG_ALP_AZURE_IOT;
+  #                    nightly-cloud-sdks.yml is the build lane).  Disabled by default
+  #                    so workspaces stay light; flip via
+  #                    `west update --group-filter +extras-cloud`.  The AWS
+  #                    repo vendors coreMQTT/coreHTTP/... as git submodules;
+  #                    its project sets `submodules: true` so west
+  #                    initialises them.
   # `vendor-sdks`    - public vendor SDK repos pinned to the
   #                    verified tags (Alif sdk-alif, Renesas
   #                    rzv-fsp, NXP mcuxsdk-manifests).  Carries
@@ -202,6 +216,7 @@ manifest:
     - -extras-lwrb-nanopb
     - -extras-tier1
     - -extras-cpp
+    - -extras-cloud
     - -vendor-sdks
     - +optional
 
@@ -253,6 +268,22 @@ manifest:
           # littlefs-keyvalue
           # actually builds; see the Task 0 completion report.
           - littlefs
+          # ELM FatFs (modules/fs/fatfs, group "fs" in Zephyr's own
+          # west.yml).  Backs CONFIG_FAT_FILESYSTEM_ELM, whose Kconfig
+          # `depends on ZEPHYR_FATFS_MODULE` -- set only by Zephyr's
+          # module-resolution pass once the module is actually present.
+          # Without this entry that dependency is unmet and BOTH
+          # CONFIG_FILE_SYSTEM=y and CONFIG_FAT_FILESYSTEM_ELM=y are
+          # dropped from the solve SILENTLY: no warning, no error, and an
+          # app links with no filesystem in the image at all (measured on
+          # examples/aen/aen-evk-demo before this entry landed -- the
+          # .config simply had neither symbol).  FAT is the format a
+          # removable SD card in someone's hand actually carries, so this
+          # is what phase 9 of aen-evk-demo mounts.  NOTE, same caveat as
+          # littlefs and hal_ethos_u below: a workspace set up before this
+          # entry landed needs a `west update` in its own topdir before
+          # aen-evk-demo builds.
+          - fatfs
           - cmsis
           # cmsis_6 provides cmsis_core.h for Cortex-M targets on Zephyr
           # v4.4 (the legacy `cmsis` module now serves Cortex-A/R only).
@@ -376,14 +407,15 @@ manifest:
         - extras-lwrb-nanopb
 
     # micro-ROS Zephyr module for the ADR 0018 Zephyr+ROS 2 flagship.
-    # Pinned to the Humble branch revision verified on 2026-07-05; the
+    # Pinned to the last Humble-branch commit that still clones Humble sources
+    # (8477de12; the branch tip cfbddc5e clones Jazzy, upstream PR #162); the
     # module's modules/libmicroros/Kconfig exposes the real master enable
     # symbol CONFIG_MICROROS.  Kept default-enabled so a board.yaml
     # `libraries: [micro-ros]` selection can build in the standard
     # alp-sdk workspace without an out-of-band EXTRA_ZEPHYR_MODULES path.
     - name: micro_ros_zephyr_module
       remote: micro-ROS
-      revision: cfbddc5e4334317a1036e883ce8f6af12b1da66a
+      revision: 8477de124763e4701f8029d01216d6f6b524dde9
       path: modules/lib/micro_ros_zephyr_module
 
     # ---------------------------------------------------------------
@@ -400,6 +432,25 @@ manifest:
     # ships its compile-time profile + HW-accelerator binding under
     # metadata/library-profiles/<name>/.
     # ---------------------------------------------------------------
+    - name: aws-iot-device-sdk-embedded-C
+      remote: aws
+      repo-path: aws-iot-device-sdk-embedded-C
+      revision: "202412.00"       # annotated tag object
+                                  # 6d82c0be02db96c3df6da9e1295bb9e33dc006da,
+                                  # peeled commit
+                                  # da99638ec373c791a45557b0cd91fc20968d492d.
+      path: modules/lib/aws-iot-device-sdk-embedded-C
+      submodules: true
+      groups:
+        - extras-cloud
+    - name: azure-sdk-for-c
+      remote: azure
+      repo-path: azure-sdk-for-c
+      revision: 1.5.0             # tag commit
+                                  # 6d6e634a3bb7f4d6bb5666ec8e1005ecd248e635.
+      path: modules/lib/azure-sdk-for-c
+      groups:
+        - extras-cloud
     - name: u8g2
       remote: olikraus
       repo-path: u8g2
@@ -460,13 +511,6 @@ manifest:
       repo-path: libmodbus
       revision: v3.1.10           # Aug 2023; v3.1.x stable.
       path: modules/lib/libmodbus
-      groups:
-        - extras-tier1
-    - name: coreMQTT-SN
-      remote: freertos-org
-      repo-path: coreMQTT-SN
-      revision: v1.0.1            # Aug 2024.
-      path: modules/lib/coremqtt_sn
       groups:
         - extras-tier1
     - name: madgwick_ahrs

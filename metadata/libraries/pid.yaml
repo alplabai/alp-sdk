@@ -4,7 +4,7 @@
 # Grounding (this checkout):
 #   * `integration.zephyr.kconfig` below, verbatim: `CONFIG_ALP_SDK_PID=y`,
 #     `CONFIG_ALP_PID_INT_MATH=y`, transcribed by
-#     scripts/alp_orchestrate/libraries.py:197 (`zephyr_kconfig_lines`).
+#     scripts/alp_orchestrate/libraries.py:321 (`zephyr_kconfig_lines`).
 #     This bullet used to cite `_LIBRARY_KCONFIG["pid"]` in
 #     scripts/alp_project_emit/__init__.py; that per-library dict no
 #     longer exists anywhere under scripts/ (the alp_project_emit package
@@ -40,7 +40,7 @@
 #
 # `module: null` -- in-tree alp-sdk source, no separate west module
 # (the SDK's own src/pid.c + include/alp/pid.h, not a fetched project).
-# `kconfig:` is transcribed verbatim by scripts/alp_orchestrate/libraries.py:197
+# `kconfig:` is transcribed verbatim by scripts/alp_orchestrate/libraries.py:321
 # (`zephyr_kconfig_lines`).
 #
 # No `requires:` -- pure C, portable across every core class; the

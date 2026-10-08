@@ -1,8 +1,8 @@
 # Firmware engineer quickstart
 
-This guide takes a firmware engineer from "I have an E1M-X module
-on the bench" to a working application built against the SDK.  It
-sits **alongside** the general [`docs/getting-started.md`](getting-started.md)
+This guide takes a firmware engineer from "I have an E1M or E1M-X
+module on the bench" to a working application built against the
+SDK.  It sits **alongside** the general [`docs/getting-started.md`](getting-started.md)
 walkthrough (which covers workspace setup + the gpio-button-led
 example end-to-end); this doc focuses on the choices and patterns
 that matter when you're targeting a specific SoM and writing
@@ -10,8 +10,8 @@ real firmware.
 
 ## Who this is for
 
-You're writing Zephyr or bare-metal C against an E1M-X System-on-
-Module (AEN, V2N, V2N-M1, or N93 family) and you want:
+You're writing Zephyr or bare-metal C against an E1M or E1M-X
+System-on-Module (AEN, V2N, V2N-M1, or N93 family) and you want:
 
 * A clear picture of what the SDK gives you per-SoM.
 * Idiomatic patterns for the on-module chips (PMICs, RTC, Wi-Fi/BT
@@ -31,9 +31,9 @@ own quickstart.
 
 | If your hardware is...                      | `som.sku` to declare | Board default     | One-pager                                         | Bring-up doc | Reference examples |
 |---------------------------------------------|----------------------|---------------------|---------------------------------------------------|--------------|---------------------|
-| E1M-AEN3..801 SoM on E1M EVK                | `E1M-AEN801` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 | [`docs/bring-up-aen.md`](bring-up-aen.md) | `examples/peripheral-io/gpio-button-led`, `i2c-scanner`, `rtc-clock`, `hello-world` |
-| E1M-X V2N101 / V2N102 SoM on E1M-X-EVK      | `E1M-V2N101`         | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 | [`docs/bring-up-v2n.md`](bring-up-v2n.md) | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual`, `dac-waveform` |
-| E1M-X V2N-M1 (V2M101 / V2M102) SoM          | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           | [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) | DEEPX bring-up delta on top of V2N |
+| E1M-AEN3..803 SoM on E1M EVK                | `E1M-AEN801` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 | [`docs/bring-up-aen.md`](bring-up-aen.md) | `examples/peripheral-io/gpio-button-led`, `i2c-scanner`, `rtc-clock`, `hello-world` |
+| E1M-X V2N101 / V2N102 / V2N103 SoM on E1M-X-EVK | `E1M-V2N101`     | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 | [`docs/bring-up-v2n.md`](bring-up-v2n.md) | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `dac-waveform` |
+| E1M-X V2N-M1 (V2M101 / V2M102 / V2M103) SoM | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           | [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) | DEEPX bring-up delta on top of V2N |
 | E1M-NX9101 (NXP i.MX 93)                    | `E1M-NX9101`         | `E1M-EVK`           | [`docs/soms/imx93.md`](soms/imx93.md)             | [`docs/getting-started.md`](getting-started.md) §4-5 | same cross-family examples as AEN |
 
 The per-SoM one-pager covers what's populated, which examples
@@ -54,7 +54,7 @@ modules.
 You'll also need `tan`, the standalone Python planner and build executor -- a
 separate public repo, not installed by `bootstrap.sh`. As of `tan-cli`
 [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0) (current
-release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+release: [v0.6.0](https://github.com/alplabai/tan-cli/releases/tag/v0.6.0)),
 the published installer (`install.sh`/`install.ps1`) installs the real Python
 `tan` directly -- it no longer resolves the frozen Rust v0.4.1 release. This
 guide instead installs from `tan-cli`'s `dev` branch in a Python 3.12+ venv,
@@ -73,8 +73,6 @@ is not distributed on PyPI, and the bare name `tan` there belongs to an
 unrelated project (`200` for it: `tan` v23.7.0, "The compromising code
 formatter") -- `pip install tan` does not get you this tool. `alp-tan` is
 not registered there either (`404` for it, not a reservation placeholder).
-The old `crates/` implementation remains the frozen v0.4.1 behaviour
-oracle.
 
 For the rest of this doc, all paths are relative to `alp-workspace/`.
 
@@ -254,14 +252,22 @@ Walk-through: [`docs/bring-up-v2n.md`](bring-up-v2n.md) §5.
 
 ### V2N-M1: bring DEEPX up before opening PCIe
 
-Three steps in the V2N-M1 bring-up that V2N base skips:
+Three steps in the V2N-M1 bring-up that V2N base skips. U-Boot
+(patches `0004` and `0001`) runs steps 1 and 3 -- the 0.75 V DEEPX rail
+on the secondary PMIC's CH2 and the `M1_RESET` release -- before any
+application starts; application firmware must not re-run them (that
+would pulse `M1_RESET` on a DX-M1 Linux has already enumerated). App
+firmware only reads state:
 
-1. `da9292_v2n_m1_enable_deepx_rail(&pmic, 50000)` -- the 0.75 V
-   DEEPX rail on the secondary PMIC's CH2.
-2. ACK-probe the three DEEPX TPS628640 instances at `0x44 / 0x48 /
-   0x4F` to confirm population.
-3. `deepx_dxm1_bring_up(&dxm1, DEEPX_DXM1_DEFAULT_BOOT_US)` -- the
-   PCIe muxes + M1_RESET sequencer.
+1. The DEEPX rail (`da9292_ch2_sequence()` is the OS-agnostic reference;
+   U-Boot carries its own port). Read it back with `da9292_get_status()`.
+2. ACK-probe the DEEPX TPS628640 instances at `0x44 / 0x48 / 0x4F`
+   to confirm population. `0x48` (`deepx_lpddr_0v85`) only ACKs once
+   P64 (`DEEPX_CORE_0P75_EN`) is high, and reads back `0x5A` = 0.85 V
+   there; the on-module TMP112 is at `0x40`, not `0x48`. See
+   [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) §1.
+3. The PCIe muxes + `M1_RESET` sequencer. `deepx_dxm1_bring_up()` is
+   only for platforms where a portable caller owns `M1_RESET`.
 
 Full sequence with code: [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md).
 

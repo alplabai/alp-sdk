@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -47,9 +48,20 @@ class Report:
         `all()` over an empty sequence is `True`, so before tan-cli#721 a
         profile that selected no check-script task at all returned 0 and
         printed `0/0 passed` + `complete.` -- indistinguishable by `$?` from a
-        verified clean run. `quick` selects exactly zero today (measured
-        against `metadata/quality-tasks-v1.json`: quick 0, pr 55, full 58,
-        release 55), so that was every `--profile quick` invocation.
+        verified clean run. `quick` selected exactly zero back then
+        (measured against `metadata/quality-tasks-v1.json` as of
+        cd71de060: quick 0, pr 55, full 58, release 55 -- as of 494671530:
+        quick 36, pr 60, full 63, release 60; these will drift further,
+        check the registry itself for the live count), so that was every
+        `--profile quick` invocation -- the gap `selected_nothing()`
+        closed. #1463 populated `quick` (see the registry's own root
+        `description` for the membership bar, and
+        check_quality_registry.py for the gate that now enforces `quick`
+        stays non-empty, a subset of `pr`, and free of module-level
+        `subprocess` imports), so this branch is now reachable only if a
+        future edit strips `quick` back to empty -- the check stays
+        because that regression is exactly the shape this method exists
+        to catch.
 
         `selected_nothing()` is kept separate from a gate failure because the
         two are different facts and get different exit codes -- see `main()`.
@@ -76,7 +88,8 @@ def run_profile(profile: str, root: Path = ROOT) -> Report:
     for t in sorted(_tasks_for(profile), key=lambda x: x["id"]):
         script = t["script"]
         r = subprocess.run([sys.executable, str(root / script)],
-                           capture_output=True, text=True, cwd=root)
+                           capture_output=True, text=True, encoding="utf-8", cwd=root,
+                           env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         rep.results.append(TaskResult(
             id=t["id"], script=script, gate=bool(t.get("gate")),
             passed=(r.returncode == 0), returncode=r.returncode,

@@ -16,9 +16,13 @@ every PR that touches metadata/.
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 import json
+import os
+import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import jsonschema
 
@@ -35,7 +39,13 @@ REPO = Path(__file__).resolve().parent.parent
 # check_system_manifest.py / check_emit_snapshots.py already use.
 sys.path.insert(0, str(REPO / "scripts"))
 
-from alp_project_loader import _sku_family, resolve_soc_path  # noqa: E402
+from alp_project_loader import (  # noqa: E402
+    _sku_family,
+    accel_config as _resolve_accel_config,
+    npu_backend,
+    resolve_soc_path,
+    resolve_targets,
+)
 from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
 from strict_loaders import strict_json_loads, strict_yaml_load  # noqa: E402
 
@@ -78,7 +88,7 @@ def _dict_entries(value) -> list[dict]:
 
 
 SCHEMA = REPO / "metadata" / "schemas" / "soc-spec-v1.schema.json"
-SOM_SCHEMA = REPO / "metadata" / "schemas" / "som-preset-v1.schema.json"
+SOM_SCHEMA = REPO / "metadata" / "schemas" / "som-preset-v2.schema.json"
 HWREV_SCHEMA = REPO / "metadata" / "schemas" / "hw-revisions-v1.schema.json"
 SILICON_KCONFIG_SCHEMA = REPO / "metadata" / "schemas" / "silicon-kconfig-v1.schema.json"
 SILICON_KCONFIG_REGISTRY = REPO / "metadata" / "registries" / "silicon-kconfig.json"
@@ -95,8 +105,52 @@ BOARD_PRESETS = REPO / "metadata" / "boards"
 LIBRARIES = REPO / "metadata" / "libraries"
 CHIP_SCHEMA = REPO / "metadata" / "schemas" / "chip-v1.schema.json"
 CHIPS = REPO / "metadata" / "chips"
+CAMERA_MODULE_SCHEMA = REPO / "metadata" / "schemas" / "camera-module-v1.schema.json"
+CAMERA_MODULES = REPO / "metadata" / "camera_modules"
+LINUX_KERNEL_DRIVERS_SCHEMA = REPO / "metadata" / "schemas" / "linux-kernel-drivers-v1.schema.json"
+LINUX_KERNEL_DRIVERS = REPO / "metadata" / "os" / "linux-kernel-drivers.yaml"
+# The V2N/V2M on-module GD32G553 supervisor pin-wiring source
+# scripts/gen_zephyr_board.py's `_v2n_pinctrl_dtsi()` / `_v2n_defconfig()`
+# read (#655).  There is NO auto-discovery in this script -- an
+# unregistered schema is silently unvalidated -- so this constant pair is
+# load-bearing, not decorative.
+SUPERVISOR_LINKS_SCHEMA = REPO / "metadata" / "schemas" / "supervisor-links-v1.schema.json"
+CORE_OWNERSHIP_SCHEMA = REPO / "metadata" / "schemas" / "core-ownership-v1.schema.json"
+CORE_OWNERSHIP_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "core-ownership.yaml"
+SUPERVISOR_LINKS_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "supervisor-links.yaml"
+# SoM-family on-module power trees (runtime PMIC guard policy), projected
+# into include/alp/chips/<family>_power_tree.h by scripts/gen_power_tree.py.
+# Discovered by glob -- every metadata/e1m_modules/<family>/power-tree.yaml
+# is schema-checked AND cross-checked (gen_power_tree.cross_check()).
+POWER_TREE_SCHEMA = REPO / "metadata" / "schemas" / "power-tree-v1.schema.json"
 BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
 BLOCKS = REPO / "metadata" / "blocks"
+NPU_OPS_SCHEMA = REPO / "metadata" / "schemas" / "npu-ops-v1.schema.json"
+NPU_OPS = REPO / "metadata" / "npu_ops"
+MODEL_PERF_SCHEMA = REPO / "metadata" / "schemas" / "model-perf-v1.schema.json"
+MODEL_PERF = REPO / "metadata" / "model_perf"
+# Model-zoo manifests (ADR-0028: alp-sdk owns the schema + the data, tan owns
+# the engine that reads it -- scripts/alp_model/zoo.py and its tests are
+# ported into tan-cli, not here, tan-cli#1286). One file per model under
+# metadata/model_zoo/ (top-level *.yaml only -- NOT the starters/ subdir,
+# which holds the bundled binaries the `bundled:` source field references).
+MODEL_ZOO_SCHEMA = REPO / "metadata" / "schemas" / "model-zoo-v1.schema.json"
+MODEL_ZOO = REPO / "metadata" / "model_zoo"
+MODEL_ZOO_STARTERS = MODEL_ZOO / "starters"
+# The one root-level non-.yaml file this tree tolerates (its own doc),
+# mirroring `_MODEL_PERF_ALLOWED_ROOT_FILES`'s same allowance.
+_MODEL_ZOO_ALLOWED_ROOT_FILES = {"README.md"}
+# Mechanical "genuinely tiny, no weight redistribution" guard:
+# a byte-size ceiling on every starters/* file, not a human's judgment call
+# on review. 64 KiB is generous headroom over the real example-tiny.tflite
+# smoke fixture (712 B) while still ruling out anything that could plausibly
+# be a real model's weights.
+_MODEL_ZOO_STARTER_MAX_BYTES = 64 * 1024
+# Mirrors model-zoo-v1.schema.json's `example_app` pattern exactly -- used
+# to guard the on-disk probe below so a schema-invalid value (caught by
+# the schema pass already) doesn't ALSO trigger a misleading disk-probe
+# message.
+_MODEL_ZOO_EXAMPLE_APP_RE = re.compile(r"^examples/[a-z0-9_-]+/[a-z0-9_-]+$(?!\n)")
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
 # .yaml whose `identifier:` is the fully-qualified <board>/<soc>/<cpucluster>
 # triple `west build -b` resolves).  Ground truth for the board-target check.
@@ -320,6 +374,79 @@ def _check_som_peripheral_instance_uniqueness(som_files) -> list:
     return failures
 
 
+def _check_som_i2c_address_collisions(som_files) -> list:
+    """Reject two on-module I2C devices sharing (bus, address_7bit).
+
+    `on_module.i2c_devices.<bus>.devices[]` records the schematic
+    strap-selected address per on-module device.  Two chips answering the
+    same address on the same bus is a real silicon defect, not an
+    editorial nit: #1163 (TMP112 vs the DEEPX LPDDR buck, both at 0x48)
+    and #1659 (an INA236 vs the TAS2563 broadcast address, also 0x48) are
+    real prior instances (#1845).  JSON Schema has no way to express
+    "unique across sibling array entries by a derived key", so enforce it
+    here.
+
+    An entry does NOT count as a fixed, collision-checkable address when:
+      * `address_7bit` is the literal `"TBD"` -- pending the HW-config
+        writeup, not yet a real value;
+      * `address_7bit` is the literal `"configurable"` -- picked by the
+        chip's own firmware (e.g. the GD32 supervisor MCU), not a
+        hardware-fixed strap two devices could physically contend over;
+      * `assembled: false` -- DNI, physically absent from the bus;
+      * `broadcast_address: true` -- a broadcast/global-call address
+        legitimately shared by design (e.g. TAS2563's 0x48, see
+        metadata/chips/tas2563.yaml). Do not reach for this opt-out to
+        silence a real strap conflict.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        buses = _as_dict(_as_dict(doc.get("on_module")).get("i2c_devices"))
+
+        msgs: list[str] = []
+        checked = 0
+        for bus_name, bus in sorted(buses.items()):
+            if not isinstance(bus, dict):
+                continue
+            seen: dict[int, list[dict]] = {}
+            for dev in _dict_entries(bus.get("devices")):
+                if dev.get("assembled") is False or dev.get("broadcast_address") is True:
+                    continue
+                addr = dev.get("address_7bit")
+                if not isinstance(addr, str) or not re.fullmatch(r"0x[0-9A-Fa-f]{1,2}", addr):
+                    continue  # "TBD" / "configurable" / malformed -- not a fixed address
+                checked += 1
+                seen.setdefault(int(addr, 16), []).append(dev)
+            for addr_int, devs in sorted(seen.items()):
+                if len(devs) < 2:
+                    continue
+                names = ", ".join(f"{d.get('chip')}/{d.get('role')}" for d in devs)
+                msgs.append(
+                    f"on_module.i2c_devices.{bus_name}: {names} all declare "
+                    f"address_7bit=0x{addr_int:02X} on the same bus -- two "
+                    f"devices cannot share a fixed I2C address (#1845); set "
+                    f"broadcast_address: true only if this is a real "
+                    f"broadcast/global-call address")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (i2c_devices: {checked} address(es) checked, "
+                  f"no collisions)")
+    return failures
+
+
 def _check_som_slot0_address_resolved(som_files) -> list:
     """Refuse a `memory_map:` region that names an MRAM slot0 path but
     carries no resolved address (tan-cli#353).
@@ -338,7 +465,7 @@ def _check_som_slot0_address_resolved(som_files) -> list:
     preset already gets feedback.
 
     JSON Schema can express that `base:` is `integer | "TBD"`
-    (`metadata/schemas/som-preset-v1.schema.json`'s `memory_region`) but
+    (`metadata/schemas/som-preset-v2.schema.json`'s `memory_region`) but
     not "declares itself a `*_slot0` region, so `base` may not be the
     `TBD` half of that union" -- that's a semantic rule over the region's
     OWN `name:`, not a shape constraint. Returns a failure list shaped
@@ -382,6 +509,279 @@ def _check_som_slot0_address_resolved(som_files) -> list:
         elif slot0_regions:
             print(f"OK   {rel}  (memory_map: {slot0_regions} slot0 "
                   f"region(s) all resolve a concrete base address)")
+    return failures
+
+
+#: `silicon:` refs on which `on_module.hyperram` + `on_module.ospi_memories`
+#: are MANDATORY, not merely bindable-if-present.  Matched on the ref rather
+#: than a SKU allow-list so a future E1M-AEN901 is covered the day it lands.
+#: The Alif Ensemble die's only external memory interface is the OSPI/HexSPI
+#: octal bus (`metadata/socs/alif/ensemble/e8.json` `external_memory_interfaces`
+#: lists HexSPI + SD/eMMC and no DRAM), so on this family those two blocks are
+#: not one possible source for `memory:` -- they are its whole source.
+_ALIF_ENSEMBLE_SILICON_PREFIX = "alif:ensemble:"
+
+
+def _population_state(entry: dict) -> str:
+    """Project an `assembled:` key onto `fitted` / `optional` / `absent`.
+
+    The schema's own default is authoritative: *"Population status: true
+    (default), false (DNI), or \"optional\" (assembled per BOM variant)"* --
+    an entry with no `assembled` key describes a part that IS fitted, so a
+    missing key must read `fitted`, never "unknown".
+    """
+    raw = entry.get("assembled", True)
+    if raw is False:
+        return "absent"
+    if raw == "optional":
+        return "optional"
+    return "fitted"
+
+
+def _memory_population_msgs(
+    figure_key: str,
+    figure,
+    parts: "list[tuple[str, dict]]",
+) -> "list[str]":
+    """Bind ONE `memory.<figure_key>` against the population of its parts.
+
+    `parts` is `[(dotted_path, entry)]` -- every `on_module` part whose
+    population decides this figure.  Returns the failure messages, empty
+    when the figure and the population agree.
+    """
+    if not parts:
+        return []
+
+    # `True`/`False` are `int` subclasses in Python; the schema forbids a
+    # boolean here, but never let one read as the integer 0/1.
+    is_int = isinstance(figure, int) and not isinstance(figure, bool)
+    fitted = [(n, e) for n, e in parts if _population_state(e) == "fitted"]
+    optional = [(n, e) for n, e in parts if _population_state(e) == "optional"]
+    populating = fitted + optional
+    names = ", ".join(n for n, _ in parts)
+
+    if not populating:
+        # Every declared part is `assembled: false` -- the population
+        # question is ANSWERED, and the answer is "none".  That is `0`.
+        # `TBD` would re-open a question the preset just closed, and any
+        # positive figure claims memory the module demonstrably has not
+        # got (which is exactly the 32 MiB #915 deleted).
+        if not (is_int and figure == 0):
+            return [
+                f"memory.{figure_key}={figure!r} but every part that could "
+                f"carry it is `assembled: false` ({names}) -- a resolved "
+                f"'populates none' is `0`, never TBD and never a capacity"
+            ]
+        return []
+
+    populating_names = ", ".join(n for n, _ in populating)
+    if is_int and figure == 0:
+        # `0` means "no such part on any current BOM variant"; at least one
+        # part says otherwise.  This is the mutation that used to be FULLY
+        # GREEN: `hyperram.assembled: true` next to `dram_mbit: 0`.
+        # Name each offender WITH its own state -- a mixed fitted/optional
+        # set must not be reported under one blanket `assembled:` value.
+        stated = ", ".join(
+            f"{n} (`assembled: {'optional' if _population_state(e) == 'optional' else 'true'}`)"
+            for n, e in populating)
+        return [
+            f"memory.{figure_key}=0 claims the module populates no such "
+            f"part, but {stated} is populated"
+        ]
+
+    if optional:
+        if not fitted:
+            # No always-fitted part at all -- the figure is entirely
+            # BOM-variant dependent, with no floor to bind it to.
+            return []
+        # An always-fitted part sets a FLOOR even with an optional
+        # sibling in the mix: whatever the optional variant adds, the
+        # figure can never read below what is soldered down for
+        # certain.  `TBD` stays a legitimate "not written down yet";
+        # a stated figure must be at least that floor.
+        caps = [e.get("capacity_mbit") for _, e in fitted]
+        if not all(isinstance(c, int) and not isinstance(c, bool)
+                   for c in caps):
+            # A fitted part whose own capacity is TBD leaves no floor
+            # to check the figure against either.
+            return []
+        floor = sum(int(c) for c in caps)
+        if isinstance(figure, str) and figure == "TBD":
+            return []
+        if not (is_int and figure >= floor):
+            return [
+                f"memory.{figure_key}={figure!r} is below the floor set "
+                f"by its always-fitted parts: {populating_names} "
+                f"{'sum to' if len(fitted) > 1 else 'declares'} "
+                f"capacity_mbit={floor}, and an optional sibling can "
+                f"only ADD to that, never subtract -- the figure must "
+                f"be `TBD` or >= {floor}"
+            ]
+        return []
+
+    caps = [e.get("capacity_mbit") for _, e in fitted]
+    if not all(isinstance(c, int) and not isinstance(c, bool) for c in caps):
+        # A fitted part whose own capacity is TBD leaves the module figure
+        # genuinely underivable -- nothing to cross-check against.
+        return []
+
+    expected = sum(int(c) for c in caps)
+    if figure != expected:
+        return [
+            f"memory.{figure_key}={figure!r} does not match the parts it is "
+            f"derived from: {populating_names} "
+            f"{'sum to' if len(fitted) > 1 else 'declares'} "
+            f"capacity_mbit={expected}"
+        ]
+    return []
+
+
+def _check_som_memory_population(som_files) -> list:
+    """Bind `memory:` to the `on_module` population facts it is DERIVED from.
+
+    Every AEN preset carries a comment stating the derivation
+    (`metadata/e1m_modules/E1M-AEN801.yaml`: *"dram_mbit  <- 0:
+    on_module.hyperram is `assembled: false`"*), and until this check
+    landed a comment was the whole of the enforcement.  Proven by
+    mutation: setting `hyperram.assembled: true` while leaving
+    `dram_mbit: 0` was FULLY GREEN -- `validate_metadata.py` rc=0 AND
+    `pytest tests/scripts/` rc=0 -- and `dram_mbit: 128` against an
+    unpopulated part left only one hardcoded string assertion red.  A
+    derivation nothing binds is not a derivation; it is a comment that
+    happens to be true today.
+
+    The rules, per figure:
+
+      - `memory.dram_mbit` is decided by `on_module.hyperram`;
+        `memory.flash_mbit` by every `on_module.ospi_memories[]` entry.
+        A preset that declares neither block (V2N/V2M's LPDDR4X + eMMC,
+        E1M-NX9101's open capacities) states no population fact here and
+        is skipped -- there is nothing to bind to, and inventing one
+        would be inventing a hardware value.  A skipped preset prints an
+        explicit `SKIP <rel> (nothing bound ...)` line, so "this file was
+        not cross-checked" is a thing you can READ in the gate's output
+        rather than an absence you have to notice.  The first version of
+        this check printed nothing at all for an unbound preset.
+      - EXCEPT on an Alif Ensemble part (`silicon: alif:ensemble:*`),
+        where both blocks are REQUIRED.  Skipping-when-absent is the
+        right default for a family whose external memory the SDK has no
+        model of, but on Ensemble the OSPI/HexSPI octal bus is the ONLY
+        external memory interface the die has -- `on_module.hyperram`
+        and `on_module.ospi_memories` are not one possible source for
+        `memory:`, they are its whole source.  Omitting them there does
+        not leave the question open, it DELETES the fact this check
+        binds to: measured, `_check_som_memory_population([synthetic])`
+        returned `[]` for an AEN preset carrying `dram_mbit: 256` with
+        no `on_module` memory blocks at all, i.e. a NEW AEN SKU could
+        restate the exact 32-MiB-of-HyperRAM claim #915 had just deleted
+        and ship it at rc=0.  Derived from the `silicon:` ref rather
+        than a SKU allow-list, so an E1M-AEN901 added tomorrow is
+        covered the day it lands.
+      - Every relevant part `assembled: false` => the figure MUST be `0`.
+        This is the `0`-vs-`TBD` distinction #915 established: `0` is a
+        RESOLVED fact ("populates none"), `TBD` is an open question
+        ("nobody has written the capacity down yet", E1M-NX9101's state).
+        A preset that has answered the question may not then spell the
+        answer `TBD`, and may not claim a capacity either.
+      - Any relevant part populated (`assembled: true`, or the key
+        absent -- the schema's own default) => the figure MUST NOT be
+        `0`, and when every fitted part declares an integer
+        `capacity_mbit` it must equal their sum.
+      - `assembled: "optional"` is BOM-variant dependent, so the exact
+        capacity is not fully decidable. But when an always-fitted part
+        sits alongside it, that fitted part still sets a FLOOR: the
+        figure must be `TBD` or >= the always-fitted parts' summed
+        `capacity_mbit` (an optional sibling can only ADD memory, never
+        subtract it). With no always-fitted part in the mix, or a
+        fitted part whose own `capacity_mbit` is `TBD`, there is no
+        floor to check and only the `0` contradiction above is
+        decidable.
+
+    JSON Schema cannot reach across `on_module` into `memory:` (nor sum
+    a sibling object's values), so this is the only layer that can hold
+    the derivation.  Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[str, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        memory = doc.get("memory")
+        if not isinstance(memory, dict):
+            memory = {}
+        on_module = doc.get("on_module")
+        if not isinstance(on_module, dict):
+            on_module = {}
+
+        msgs: list[str] = []
+        bound: list[str] = []
+
+        hyperram = on_module.get("hyperram")
+        ospi = on_module.get("ospi_memories")
+
+        # An Ensemble part's ONLY external memory sits on the OSPI/HexSPI
+        # octal bus, so declaring the blocks is not optional there: without
+        # them `memory:` is unbindable and can claim anything at rc=0.
+        silicon = doc.get("silicon")
+        if isinstance(silicon, str) and \
+                silicon.startswith(_ALIF_ENSEMBLE_SILICON_PREFIX):
+            for key, block, figure in (
+                    ("hyperram", hyperram, "dram_mbit"),
+                    ("ospi_memories", ospi, "flash_mbit")):
+                # An `ospi_memories` dict carrying only empty entries
+                # (`{ospi0: {}}`) is not a declared block either -- an empty
+                # per-entry dict has no `assembled`/`capacity_mbit` to bind
+                # against, so it would otherwise slip past both this check
+                # (the outer dict is non-empty) and _memory_population_msgs
+                # (no int capacity to compare, so it returns no failure).
+                block_is_effectively_empty = (
+                    not isinstance(block, dict) or not block or
+                    (key == "ospi_memories" and
+                     not any(isinstance(v, dict) and v
+                             for v in block.values())))
+                if block_is_effectively_empty:
+                    msgs.append(
+                        f"silicon={silicon!r} is an Alif Ensemble part, whose "
+                        f"only external memory sits on the OSPI/HexSPI octal "
+                        f"bus, so `memory.{figure}` is DERIVED from "
+                        f"`on_module.{key}` -- but that block is missing or "
+                        f"empty. Omitting it does not leave the question open, "
+                        f"it deletes the fact this check binds `memory.{figure}"
+                        f"` to. Declare the part with `assembled:` (see "
+                        f"metadata/e1m_modules/E1M-AEN801.yaml), `assembled: "
+                        f"false` if the SKU populates none")
+
+        if isinstance(hyperram, dict):
+            bound.append("dram_mbit <- on_module.hyperram")
+            msgs += _memory_population_msgs(
+                "dram_mbit", memory.get("dram_mbit"),
+                [("on_module.hyperram", hyperram)])
+
+        if isinstance(ospi, dict) and ospi:
+            entries = [(f"on_module.ospi_memories.{k}", v)
+                       for k, v in sorted(ospi.items())
+                       if isinstance(v, dict) and v]
+            if entries:
+                bound.append("flash_mbit <- on_module.ospi_memories")
+                msgs += _memory_population_msgs(
+                    "flash_mbit", memory.get("flash_mbit"), entries)
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        elif bound:
+            print(f"OK   {rel}  ({'; '.join(bound)})")
+        else:
+            # Printed, not omitted: an unbound preset that produced NO line
+            # was indistinguishable from one this loop never reached.
+            print(f"SKIP {rel}  (nothing bound -- declares neither "
+                  f"on_module.hyperram nor on_module.ospi_memories)")
     return failures
 
 
@@ -510,6 +910,187 @@ def _check_peripheral_kconfig() -> list:
     return failures
 
 
+def _check_board_camera_connectors(board_files) -> list:
+    """Every macro a `camera_connectors:` entry names (`i2c`, `enable`,
+    `reset`, `select[].gpio`) must be declared in the same preset's
+    `e1m_routes:`, and `lane_polarity` must hold `lanes + 1` flags.  The rules
+    live in `alp_cli.validator.camera_connector_problems`, shared with the
+    inline-project-board check.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    from alp_cli.validator import camera_connector_problems  # noqa: E402
+
+    failures: list[tuple[Path, list[str]]] = []
+    for path in board_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        msgs = camera_connector_problems(doc.get("camera_connectors"),
+                                         doc.get("e1m_routes"))
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+def _check_soc_linux_dt(soc_files, *, peripheral_map=None) -> list:
+    """Cross-check a SoC's `linux_dt` map (camera DT generators read it):
+
+      1. each instance's `label` must be a `label` in the same SoC's
+         `peripheral_instances` (the dtsi node the generator will reference);
+      2. each `pinmux` key is a peripheral-signal name that must exist in the
+         SoM peripheral map TSV (`renesas-peripheral-map.tsv`) -- the pin the
+         pinmux applies to is RESOLVED from that file, never restated here;
+    A capture-only entry (CSI receiver) has no `pinmux`, and capture units are
+    not modelled in `peripheral_instances`, so check 1 skips it.
+    """
+    tsv = peripheral_map or (REPO / "metadata" / "e1m_modules" / "v2n"
+                             / "renesas-peripheral-map.tsv")
+    signals: set[str] = set()
+    if tsv.is_file():
+        for line in tsv.read_text(encoding="utf-8").splitlines()[1:]:
+            cols = line.split("\t")
+            if cols and cols[0] and not cols[0].startswith("#"):
+                signals.add(cols[0])
+    failures: list[tuple[Path, list[str]]] = []
+    for path in soc_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        linux_dt = doc.get("linux_dt") if isinstance(doc, dict) else None
+        if not isinstance(linux_dt, dict):
+            continue
+        labels = {inst.get("label")
+                  for insts in (doc.get("peripheral_instances") or {}).values()
+                  if isinstance(insts, list)
+                  for inst in insts if isinstance(inst, dict)}
+        msgs: list[str] = []
+        for name, ent in linux_dt.items():
+            if not isinstance(ent, dict):
+                continue
+            label = ent.get("label")
+            if ent.get("pinmux") and label not in labels:
+                msgs.append(f"linux_dt.{name}.label: `{label}` is not a label in peripheral_instances")
+            for sig in (ent.get("pinmux") or {}):
+                if signals and sig not in signals:
+                    msgs.append(f"linux_dt.{name}.pinmux: signal `{sig}` is not in "
+                                f"{tsv.name}")
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+def _check_board_i2c_address_collisions(board_files) -> list:
+    """Reject two on-board I2C device instances sharing an address.
+
+    A board preset declares on-board I2C devices two ways, checked
+    separately here because each carries its own bus scope:
+
+      * `i2c_devices[]` -- ONE array per file; every entry sits on the
+        single implicit on-board I2C bus documented in-file (e.g.
+        e1m-evk.yaml: "all on ALP_E1M_I2C0, the sensor bus"). The schema
+        has no per-entry bus field because the board only has the one.
+      * `audio.codecs[]` -- each entry names its own `i2c_bus` explicitly
+        (a board can carry more than one audio-adjacent bus).
+
+    Two chips answering the same address on the same bus is a real
+    silicon defect, not an editorial nit: #1163 (TMP112 vs the DEEPX
+    LPDDR buck, both at 0x48) and #1659 (an INA236 vs the TAS2563
+    broadcast address, also 0x48) are real prior instances (#1845). JSON
+    Schema has no way to express "unique across sibling array entries by
+    a derived key", so enforce it here. An entry with
+    `broadcast_address: true` is skipped: a broadcast/global-call address
+    is legitimately shared by design (e.g. TAS2563's 0x48, see
+    metadata/chips/tas2563.yaml) -- do not reach for that opt-out to
+    silence a real strap conflict.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in board_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+        checked = 0
+
+        # i2c_devices[] -- one implicit on-board bus per file.
+        seen: dict[int, list[dict]] = {}
+        for dev in _dict_entries(doc.get("i2c_devices")):
+            if dev.get("broadcast_address") is True:
+                continue
+            addr = dev.get("address")
+            if not isinstance(addr, str) or not re.fullmatch(r"0x[0-9A-Fa-f]{2}", addr):
+                continue
+            checked += 1
+            seen.setdefault(int(addr, 16), []).append(dev)
+        for addr_int, devs in sorted(seen.items()):
+            if len(devs) < 2:
+                continue
+            names = ", ".join(f"{d.get('part')}/{d.get('designator')}" for d in devs)
+            msgs.append(
+                f"i2c_devices: {names} all declare address=0x{addr_int:02X} "
+                f"on the board's on-board I2C bus -- two devices cannot "
+                f"share a fixed I2C address (#1845); set "
+                f"broadcast_address: true only if this is a real "
+                f"broadcast/global-call address")
+
+        # audio.codecs[] -- each entry names its own bus.
+        seen_by_bus: dict[tuple[str, int], list[dict]] = {}
+        for dev in _dict_entries(_as_dict(doc.get("audio")).get("codecs")):
+            if dev.get("broadcast_address") is True:
+                continue
+            bus = dev.get("i2c_bus")
+            addr = dev.get("i2c_address")
+            if not isinstance(bus, str) or not isinstance(addr, str):
+                continue
+            if not re.fullmatch(r"0x[0-9A-Fa-f]{1,2}", addr):
+                continue
+            checked += 1
+            seen_by_bus.setdefault((bus, int(addr, 16)), []).append(dev)
+        for (bus, addr_int), devs in sorted(seen_by_bus.items()):
+            if len(devs) < 2:
+                continue
+            names = ", ".join(f"{d.get('chip')}/{d.get('designator')}" for d in devs)
+            msgs.append(
+                f"audio.codecs: {names} all declare i2c_address=0x{addr_int:02X} "
+                f"on {bus} -- two devices cannot share a fixed I2C address "
+                f"(#1845); set broadcast_address: true only if this is a "
+                f"real broadcast/global-call address")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (i2c address(es): {checked} checked, no collisions)")
+    return failures
+
+
 def _check_chip_semantics(chip_files) -> list:
     """Cross-check beyond pure schema validation: `chip_id:` matches filename.
 
@@ -545,6 +1126,42 @@ def _check_chip_semantics(chip_files) -> list:
     return failures
 
 
+def _check_camera_module_semantics(module_files, *, chips_dir=None) -> list:
+    """Cross-check beyond schema: `module_id` == filename stem and `chip`
+    names a real chip manifest.
+
+    The lane/address parity against the chip manifest is deliberately NOT
+    here, nor is the `zephyr_shield` directory check: both belong to the
+    camera parity gate that lands with the generators.  Returns a failure list shaped like `_check_files()`.
+    """
+    chips_dir = chips_dir or CHIPS
+    failures: list[tuple[Path, list[str]]] = []
+    for path in module_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        msgs: list[str] = []
+        mid = doc.get("module_id")
+        if isinstance(mid, str) and mid != path.stem:
+            msgs.append(f"module_id: `{mid}` must match the filename `{path.stem}`")
+        chip = doc.get("chip")
+        if isinstance(chip, str) and not (chips_dir / f"{chip}.yaml").is_file():
+            msgs.append(f"chip: `{chip}` has no metadata/chips/{chip}.yaml")
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def _check_soc_npu_pairing(soc_files) -> list:
     """Cross-ref the SoC `npus[].paired_core` field against `cores[]`.
 
@@ -561,8 +1178,52 @@ def _check_soc_npu_pairing(soc_files) -> list:
          the emit cannot tell the cores apart and a 256-MAC stream would error
          a 128-MAC NPU at invoke (issue #909).
 
-    A single-MAC variant, or an instance on a shared non-core subsystem (the
-    E8 U85 on the HG subsystem), legitimately omits `paired_core`.
+    A single-MAC variant, or an instance that is a shared, SoC-level NPU not
+    wired to one core, legitimately omits `paired_core`. The E8's Ethos-U85
+    (Alif block name NPU_HG) is that case: `NPU_HG_BASE 0x49042000` is
+    byte-identical in both M55 cores' generated CMSIS headers (rtss_hp/soc.h
+    and rtss_he/soc.h), unlike the two U55s, which alias the same local
+    address (0x400E1000) under per-core names (NPU_HP_BASE / NPU_HE_BASE)
+    with an interrupt in only their own core's NVIC. The A32 cluster can
+    reach the U85 too -- register-programmable, not merely interrupt-notified:
+    Alif E8 HWRM (AHRM0012NDA v0.3) Table 10-2 places 0x49042000 inside the
+    Shared Peripherals row (0x48000000, 32MB -- A32/M55-HP/M55-HE all Y),
+    unlike the M55-local-peripherals row directly above it (A32 N); Table 10-6
+    lists NPU-HG at that same 0x49042000 among the Shared Peripherals; and
+    Table 4-13 fans NPU_HG_IRQ to all three cores -- GIC400_IRQS[355] on the
+    A32, M55HP_IRQS[366] / M55HE_IRQS[366] on the M55s (366 is the M55 NVIC
+    number, not an A32 IRQ; the A32's own number, via GIC400, is 355).
+
+    The i.MX 93 Ethos-U65 (`nxp:imx9:imx93`) is the same kind of omission but
+    on WEAKER evidence, and the two must not be conflated. IMX93RM Rev. 7
+    (2026-02-10) §2.2 "System memory map used by all initiators" Table 4
+    lists a 4 KB "NPU Controller" region (4A90_0000 (NS) / 5A90_0000 (S)) in
+    the memory map used by ALL initiators, not one; Table 5, "System memory
+    map (Cortex-M33)", repeats the identical row in the Cortex-M33's OWN
+    memory map too -- so the block sits in both, not exclusively in either.
+    §17.2.8 "Interrupt signals" says only "See Arm's General Interrupt
+    Controller (GIC) documentation for NPU block interrupts" -- the GIC is
+    the Cortex-A55's controller, not the M33's NVIC. Chapter 17 never names a
+    host core, repeatedly using Arm's generic Ethos-U wording ("the external
+    host application processor", §17.2 and §17.2.9) instead of an i.MX
+    93-specific assignment. Unlike the E8 HWRM's Table 10-2, this is an
+    all-initiators memory map plus a GIC pointer, not a per-master access
+    table: it does not enumerate which masters may reach the NPU Controller
+    (TRDC governs actual masters, not this chapter), and it names no host
+    core at all. So imx93's single Ethos-U65 instance also omits
+    `paired_core`, but not for the E8's reason ("verified as shared") --
+    for the opposite one ("no pairing documented, period"). Do not add a
+    `paired_core` to the imx93 SoC spec on the strength of this manual; the
+    absence stays deliberate.
+
+    That silicon-documentation gap does not mean no core drives the NPU
+    today: NXP's own shipped Yocto/Linux driver stack
+    (`nxp-imx/ethos-u-driver-stack-imx`) runs the Ethos-U driver on the
+    Cortex-M33, with Linux on the Cortex-A55 dispatching to it over shared
+    memory and mailbox IRQs -- a separate, sourced, software-stack fact (see
+    `vendors/nxp-imx93/README.md`) that this omission does not contradict.
+    `paired_core` records documented silicon wiring, not which core a given
+    software stack happens to run on, so it still carries no value here.
     Returns a failure list shaped like `_check_files()`.
     """
     failures: list[tuple[Path, list[str]]] = []
@@ -632,6 +1293,151 @@ def _check_soc_npu_pairing(soc_files) -> list:
                         f"{ntype} appears with distinct MAC arrays {sorted(macs)} "
                         f"but instance(s) [{subs}] omit paired_core -- the build "
                         f"cannot size the accelerator per core (see #909)")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+# `[Memory_Mode.*]` sections shipped in Arm's own vela.ini (ethos-u-vela
+# 5.1.0) whose `arena_mem_area` is `Axi1` -- the non-SRAM memory that same
+# file documents as "assumed to be read-writeable", i.e. DRAM.  Vela's own
+# no-flags default (`Dedicated_Sram_384KB`) is in this set, which is exactly
+# why a DRAM-less part must never inherit it.
+_VELA_DRAM_BACKED_MEMORY_MODES = {
+    "Dedicated_Sram",
+    "Dedicated_Sram_256KB",
+    "Dedicated_Sram_384KB",
+    "Dedicated_Sram_512KB",
+}
+
+# `[System_Config.*]` sections shipped in that same Arm vela.ini.  Anything
+# else exists only in a vendor config; passing it without `--config` is a hard
+# vela rc=1, not a degradation.
+_VELA_BUILTIN_SYSTEM_CONFIGS = {
+    "Ethos_U55_Deep_Embedded",
+    "Ethos_U55_High_End_Embedded",
+    "Ethos_U65_Embedded",
+    "Ethos_U65_Mid_End",
+    "Ethos_U65_High_End",
+    "Ethos_U65_Client_Server",
+    "Ethos_U85_SYS_Flash_Low",
+    "Ethos_U85_SYS_Flash_High",
+    "Ethos_U85_SYS_DRAM_Low",
+    "Ethos_U85_SYS_DRAM_Mid",
+    "Ethos_U85_SYS_DRAM_High",
+}
+
+
+def _check_soc_vela_memory_profile(soc_files) -> list:
+    """Cross-check `npu_toolchain.vela` against the rest of the SAME SoC spec.
+
+    `--emit build-plan`'s consumer derives vela's `--memory-mode` from the SKU
+    rather than letting vela fall back to `Dedicated_Sram_384KB`, which places
+    the whole working set in DRAM and reports `sram_memory_used = 0.0`.  Zero
+    then satisfies alp-sdk's on-device fit gate against ANY arena
+    (src/backends/inference/alp_model_select.c), so a wrong profile is worse
+    than none.  JSON Schema cannot reach the sibling fields these invariants
+    need, so enforce them here:
+
+      1. every SoC declaring an `ethos-u*` NPU carries the block, and no SoC
+         without one does (vela compiles for nothing else);
+      2. a `Dedicated_Sram*` memory_mode puts the arena in read-writeable
+         non-SRAM, so the SoC must declare a DRAM-class
+         `external_memory_interfaces` entry -- the Alif Ensemble parts declare
+         only OctalSPI/HexSPI + SD/eMMC and must never claim one;
+      3. a scalar `system_config` describes ONE accelerator (on Alif, one core
+         subsystem), so it is legal only on a SoC carrying exactly one
+         distinct Ethos-U `(type, subtype)`;
+      4. a `system_config` outside Arm's built-in set must be flagged
+         `system_config_requires_vendor_config: true` AND name its file, else
+         a consumer would put an unresolvable section on the command line.
+
+    Reading the `source` citations back -- proving the cited lines still state
+    the declared `memory_mode` -- deliberately does NOT live here. Those
+    citations point into `examples/` and `vendors/`, which are not guaranteed
+    present in every context this script runs in (e.g. a metadata-only
+    scratch clone). Making the check tolerate their absence would turn it
+    into a silent skip; it lives in tests/scripts/test_vela_profile_metadata.py
+    instead, which always runs against the real checkout.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in soc_files:
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        rel = path.relative_to(REPO).as_posix()
+        # Every list read out of the parsed doc here (`npus`,
+        # `external_memory_interfaces`) is schema-typed as a list of objects,
+        # but the schema pass that would reject a malformed entry (e.g. a
+        # bare string or a list) runs separately and is not guaranteed to
+        # have run first -- filter to dicts rather than let a non-object
+        # raise `AttributeError: '<type>' object has no attribute 'get'`
+        # here and abort the whole gate mid-run, hiding the schema FAIL line
+        # that already explains the real problem.  Same reasoning as
+        # `npu_toolchain` below, and the same shape as the fix in
+        # `_check_soc_npu_pairing`.
+        npus = [n for n in (doc.get("npus") or []) if isinstance(n, dict)]
+        ethos = [n for n in npus if str(n.get("type", "")).startswith("ethos-u")]
+        npu_toolchain = doc.get("npu_toolchain")
+        npu_toolchain = npu_toolchain if isinstance(npu_toolchain, dict) else {}
+        vela = npu_toolchain.get("vela")
+        vela = vela if isinstance(vela, dict) else {}
+        msgs: list[str] = []
+
+        # (1) presence is decided by the accelerator the SoC actually carries.
+        if ethos and not vela:
+            msgs.append(
+                "declares an Ethos-U NPU but no npu_toolchain.vela -- a consumer "
+                "would inherit vela's DRAM-backed default profile")
+        if vela and not ethos:
+            msgs.append(
+                "declares npu_toolchain.vela but no ethos-u* NPU -- vela does not "
+                "compile for this accelerator")
+
+        if vela and ethos:
+            mode = vela.get("memory_mode")
+
+            # (2) a DRAM-backed placement needs a DRAM interface on this part.
+            kinds = [str(e.get("kind", ""))
+                     for e in (doc.get("external_memory_interfaces") or [])
+                     if isinstance(e, dict)]
+            has_dram = any("DDR" in k.upper() for k in kinds)
+            if mode in _VELA_DRAM_BACKED_MEMORY_MODES and not has_dram:
+                msgs.append(
+                    f"npu_toolchain.vela.memory_mode={mode!r} places the tensor arena "
+                    f"in read-writeable non-SRAM, but external_memory_interfaces "
+                    f"{kinds} declares no DRAM")
+
+            sysconf = vela.get("system_config")
+            if sysconf is not None:
+                # (3) one System_Config cannot describe several accelerators.
+                identities = {(n.get("type"), n.get("subtype")) for n in ethos}
+                if len(identities) != 1:
+                    msgs.append(
+                        f"npu_toolchain.vela.system_config={sysconf!r} is a single "
+                        f"section name but this SoC carries {len(identities)} distinct "
+                        f"Ethos-U accelerators "
+                        f"{sorted(str(i) for i in identities)} -- a System_Config "
+                        f"describes one accelerator (on Alif, one core subsystem)")
+                # (4) a vendor section is unusable without its file.
+                if sysconf not in _VELA_BUILTIN_SYSTEM_CONFIGS:
+                    if vela.get("system_config_requires_vendor_config") is not True:
+                        msgs.append(
+                            f"npu_toolchain.vela.system_config={sysconf!r} is not an Arm "
+                            f"built-in but system_config_requires_vendor_config is not "
+                            f"true -- a consumer would pass an unresolvable section and "
+                            f"vela would exit 1")
+                    if not vela.get("vendor_config_filename"):
+                        msgs.append(
+                            f"npu_toolchain.vela.system_config={sysconf!r} needs a vendor "
+                            f"config but vendor_config_filename is unset")
 
         if msgs:
             print(f"FAIL {rel}")
@@ -738,6 +1544,174 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
                         f"SW-DP IDR preflight needs both, and a half-armed "
                         f"pair is refused downstream rather than skipped "
                         f"(#1355)")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+#: Where ADR 0032 puts vendored register descriptions. A `debug.svd` value
+#: under this prefix ASSERTS the repository carries the file, so
+#: `_check_soc_debug_svd_shape` holds it to that; any other value is the
+#: customer-supplied `ALP_SVD_DIR` case, which no gate here can see.
+_VENDORED_SVD_ROOT = PurePosixPath("metadata/svd")
+
+
+def _check_soc_debug_svd_shape(soc_files) -> list:
+    """`variants[].debug.svd` maps a `cores[].id` to a BARE RELATIVE PATH,
+    and that path must exist only when it resolves inside the repo (#948).
+
+    **Keyed by core, like the sibling `jlink_device`.** An SVD is a register
+    map for one core's view of the SoC, not for the part: the Alif DFP ships
+    `<order_code>_CM55_HE_View.svd` and `<order_code>_CM55_HP_View.svd` as
+    separate files (cited at `metadata/socs/alif/ensemble/e3.json:225` and
+    `e5.json:173`), and `scripts/gen_rzv2n_cm33_svd.py` emits a CM33-only
+    view for a SoC that also has A55s. A single per-variant string could not
+    carry that, and the failure it invites -- attaching the HE register map
+    to an HP session -- is the one this key's own description calls worse
+    than shipping none, because a register map from the wrong core reads
+    plausibly. `expect_dpidr` and `jlink_flash_device` are per-variant and
+    each argues why in its description; this one cannot make that argument,
+    so it takes the shape the data has (#1890 review).
+
+    The value resolves in two places: the repository directory first, then
+    `ALP_SVD_DIR` -- the same shape `SETOOLS_DIR` already has for genuinely
+    licence-gated vendor tooling.  That split is why this gate cannot be a
+    single rule, and why getting it wrong in either direction is worse than
+    not having it:
+
+      * SHAPE is always checkable, and is what actually protects a
+        consumer.  An absolute path bakes one machine's layout into
+        published metadata; a `..` escapes whichever root resolved it, so a
+        value that looks repo-relative can reach outside the checkout; a
+        URL is not a path at all and a consumer would hand it to the
+        debugger verbatim.  All three are refused regardless of where the
+        file would come from.
+      * EXISTENCE is checkable ONLY for a path that resolves inside the
+        repo.  A value satisfied through `ALP_SVD_DIR` names a file on the
+        customer's machine, which this gate cannot see and must not call
+        missing -- that would fail a correctly-configured project on any
+        build host without the vendor SDK installed.
+
+    Shape is judged with `PureWindowsPath`, which treats BOTH `/` and `\\`
+    as separators. `PurePosixPath` does not: it reads `..\\outside\\x.svd` as
+    one filename, so every rule above was unenforced for a backslash
+    spelling while its POSIX twin was refused -- and `metadata\\svd\\...`
+    slipped the existence half too. The likeliest way to type that is on
+    this repo's own Windows maintainer host (#1890 review).
+
+    ADR 0032 records the mechanism for carrying vendor data under its own
+    terms, not an authorisation to carry any particular vendor's.  Alif's
+    were authorised on 2026-09-28 (#948): `alif/ensemble/e8.json` declares
+    the vendored E8 HE/HP views under `metadata/svd/alif/`, so the
+    existence check below applies to them.  The gate shipped ahead of that
+    data on purpose, so the first values to land were checked by an
+    already-reviewed rule instead of arriving with their own.
+
+    Returns a failure list shaped like `_check_files()`, and PRINTS each
+    message, as every sibling checker does -- a gate whose diagnostics only
+    reach a return value makes CI red with no file, no core and no reason.
+    """
+    failures: list[tuple[str, list[str]]] = []
+    for path in soc_files:
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue  # non-object top level; schema pass already flags it
+        variants = _dict_entries(doc.get("variants"))
+        if not variants:
+            continue
+        rel = path.relative_to(REPO).as_posix()
+        core_ids = {
+            c.get("id") for c in _dict_entries(doc.get("cores"))
+            if isinstance(c.get("id"), str)
+        }
+        msgs: list[str] = []
+
+        for i, v in enumerate(variants):
+            debug = v.get("debug")
+            if not isinstance(debug, dict) or "svd" not in debug:
+                continue  # absent is a published "unknown", not a defect
+            where = f"variants[{i}] ({v.get('order_code', '<no order_code>')})"
+            svd_map = debug.get("svd")
+            if not isinstance(svd_map, dict) or not svd_map:
+                msgs.append(
+                    f"{where}: `debug.svd` must be a non-empty object keyed "
+                    f"by `cores[].id` (like `debug.jlink_device`), not "
+                    f"{type(svd_map).__name__} -- an SVD is one core's "
+                    f"register view, not the part's")
+                continue
+
+            for core_id, svd in svd_map.items():
+                at = f"{where} core {core_id!r}"
+                if core_id not in core_ids:
+                    msgs.append(
+                        f"{at}: `debug.svd` key is not a cores[].id "
+                        f"(known: {sorted(x for x in core_ids if x)})")
+                    continue
+                if not isinstance(svd, str) or not svd:
+                    # The schema says this too; repeat it so the rest of this
+                    # loop cannot raise on a bad value when the schema pass
+                    # has not run first.
+                    msgs.append(f"{at}: `debug.svd` must be a non-empty string")
+                    continue
+                if "://" in svd:
+                    msgs.append(
+                        f"{at}: `debug.svd` is a URL ({svd!r}); it must be a "
+                        "bare relative path -- a consumer passes this straight "
+                        "to the debugger as `svdFile`, which cannot fetch one")
+                    continue
+                # PureWindowsPath, not PurePosixPath: it is the only one of
+                # the two that treats `\\` as a separator, so a backslash
+                # spelling is judged by the same rules as its POSIX twin.
+                win = PureWindowsPath(svd)
+                if win.drive or win.root or win.is_absolute():
+                    msgs.append(
+                        f"{at}: `debug.svd` is an absolute path ({svd!r}); it "
+                        "must be relative, or this published metadata carries "
+                        "one machine's layout")
+                    continue
+                if ".." in win.parts:
+                    msgs.append(
+                        f"{at}: `debug.svd` contains `..` ({svd!r}); a "
+                        "relative path that escapes its own root defeats the "
+                        "repo-then-ALP_SVD_DIR resolution order")
+                    continue
+                # Existence, but only for a value that CLAIMS to be in-repo.
+                #
+                # The two cases cannot be told apart from the string itself --
+                # a path that is simply absent looks identical to one meant
+                # for ALP_SVD_DIR -- so the discriminator is the declared
+                # convention, not the filesystem: ADR 0032 puts vendored
+                # register descriptions under `metadata/svd/<vendor>/`. A
+                # value under that prefix asserts the repo carries the file
+                # and must be held to it; anything else is the
+                # customer-supplied case this gate cannot see and must not
+                # fail.
+                #
+                # An earlier draft keyed this on "does the parent directory
+                # exist", which inverted the check: a value naming a subtree
+                # nobody had created yet -- exactly the first mistake a
+                # vendoring PR would make -- passed silently.
+                #
+                # Normalised to POSIX first, or `metadata\\svd\\alif\\x.svd`
+                # claims the prefix in prose and escapes the check.
+                posix = PurePosixPath(svd.replace("\\", "/"))
+                if posix.parts[:2] == _VENDORED_SVD_ROOT.parts:
+                    if not (REPO / posix).is_file():
+                        msgs.append(
+                            f"{at}: `debug.svd` claims the repository carries "
+                            f"the file ({svd!r}, under {_VENDORED_SVD_ROOT}/) "
+                            "but it is not present -- either add it in the "
+                            "segregated subtree ADR 0032 describes, with the "
+                            "vendor's unmodified licence file beside it, or "
+                            "move the value out of that prefix so it resolves "
+                            "through ALP_SVD_DIR")
 
         if msgs:
             print(f"FAIL {rel}")
@@ -968,6 +1942,221 @@ def _check_chip_physical(chip_files) -> list:
     return failures
 
 
+def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
+    """Cross-check metadata/e1m_modules/v2n/supervisor-links.yaml against
+    the pad-ownership ground truth in metadata/pinmux/v2n.yaml, and the
+    GD32 I2C address against metadata/chips/gd32g553.yaml (#655).
+
+    JSON Schema validates each link's shape but has no way to express a
+    cross-file reference: every (silicon_peripheral, silicon_pad) pair
+    this file claims for the GD32 supervisor bridge -- every pin row plus
+    the `gd32_spi.gpio_chip_select` entry -- must resolve to EXACTLY one
+    `owner: "renesas"` row in metadata/pinmux/v2n.yaml.  Zero matches or
+    more than one is a hard error naming the offending pair.  Where that
+    matched row itself carries a `core:` key, the value MUST match the
+    link's owning core -- "m33" for gd32_spi and console (both CM33-
+    side), "a55" for brd_i2c (RIIC8/BRD_I2C is Cortex-A55/Linux-
+    exclusive; the CM33 must never master it -- maintainer decision,
+    metadata/e1m_modules/v2n/core-ownership.yaml).  A matched row with
+    NO `core:` key is not an error: the console's UART0_TXD0/UART0_RXD0
+    rows legitimately carry no `core:` attribution in
+    metadata/pinmux/v2n.yaml (see
+    metadata/e1m_modules/v2n/core-ownership.yaml's own note on why
+    absence is never treated as "a55 by elimination"), so requiring a
+    `core:` value unconditionally would fail the console link.
+
+    Also cross-checks `brd_i2c.peer_address_7bit` against
+    metadata/chips/gd32g553.yaml `i2c.default_address_7bit` -- the value
+    is recorded in supervisor-links.yaml to be CROSS-CHECKED, not as an
+    independent authority.
+
+    Also cross-checks every pin row's `pfc_port`/`pfc_pin` against its own
+    `silicon_pad`: the two restate the same fact (`silicon_pad: "P76"`
+    implies `pfc_port: "PORT_07"`, `pfc_pin: 6`) and nothing else in this
+    file catches a typo'd pairing -- a mismatched `pfc_port`/`pfc_pin`
+    would emit a wrong `RZV_PINMUX(...)` to real silicon even though the
+    `silicon_pad` alone still resolves cleanly against
+    metadata/pinmux/v2n.yaml above. Only pads of the `P<digit><digit>`
+    shape are derivable this way; a pad that doesn't match is a hard
+    error too (naming the pad), never a silent skip, so a future non-`Pnn`
+    pad shape forces a deliberate decision here instead of quietly losing
+    the check.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    if not supervisor_links_files:
+        return failures
+    path = supervisor_links_files[0]
+    rel = path.relative_to(REPO).as_posix()
+    try:
+        doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+    except Exception:
+        return failures  # parse errors already reported by the schema pass
+    if not isinstance(doc, dict):
+        return failures
+    links = _as_dict(doc.get("supervisor_links"))
+    if not links:
+        return failures
+
+    msgs: list[str] = []
+
+    pinmux_path = REPO / "metadata" / "pinmux" / "v2n.yaml"
+    pads_by_pair: dict[tuple[str, str], list[dict]] = {}
+    if not pinmux_path.is_file():
+        msgs.append(
+            f"no {pinmux_path.relative_to(REPO).as_posix()} -- cannot "
+            f"cross-check pad ownership")
+    else:
+        try:
+            pm_doc = strict_yaml_load(
+                pinmux_path.read_text(encoding="utf-8"), source=pinmux_path)
+        except Exception as e:
+            msgs.append(
+                f"cannot cross-check against "
+                f"{pinmux_path.relative_to(REPO).as_posix()}: parse error ({e})")
+            pm_doc = None
+        if isinstance(pm_doc, dict):
+            for row in _dict_entries(pm_doc.get("pads")):
+                sp, pad = row.get("silicon_peripheral"), row.get("silicon_pad")
+                if isinstance(sp, str) and isinstance(pad, str):
+                    pads_by_pair.setdefault((sp, pad), []).append(row)
+
+    def _check_pair(sp: object, pad: object, where: str,
+                     expected_core: str = "m33") -> None:
+        if not isinstance(sp, str) or not isinstance(pad, str):
+            return  # already a schema-shape violation reported elsewhere
+        matches = [r for r in pads_by_pair.get((sp, pad), [])
+                   if r.get("owner") == "renesas"]
+        if len(matches) != 1:
+            msgs.append(
+                f"{where}: (silicon_peripheral={sp!r}, silicon_pad={pad!r}) "
+                f"matches {len(matches)} owner=\"renesas\" row(s) in "
+                f"metadata/pinmux/v2n.yaml (need exactly 1)")
+            return
+        core = matches[0].get("core")
+        if core is not None and core != expected_core:
+            msgs.append(
+                f"{where}: (silicon_peripheral={sp!r}, silicon_pad={pad!r}) "
+                f"resolves to a metadata/pinmux/v2n.yaml row with "
+                f"core={core!r}, expected \"{expected_core}\"")
+
+    _PAD_SHAPE = re.compile(r"^P([0-9])([0-9])$")
+
+    def _check_pad_derivation(pad: object, pfc_port: object, pfc_pin: object,
+                               where: str) -> None:
+        if not isinstance(pad, str):
+            return  # already a schema-shape violation reported elsewhere
+        m = _PAD_SHAPE.match(pad)
+        if not m:
+            msgs.append(
+                f"{where}: silicon_pad={pad!r} does not match the "
+                f"P<port-digit><pin-digit> shape this derivation check "
+                f"understands -- add explicit handling for this pad shape "
+                f"rather than silently skipping the pfc_port/pfc_pin check")
+            return
+        expected_port = f"PORT_0{m.group(1)}"
+        expected_pin = int(m.group(2))
+        if pfc_port != expected_port or pfc_pin != expected_pin:
+            msgs.append(
+                f"{where}: silicon_pad={pad!r} implies "
+                f"pfc_port={expected_port!r}, pfc_pin={expected_pin} but "
+                f"this row declares pfc_port={pfc_port!r}, "
+                f"pfc_pin={pfc_pin!r}")
+
+    for link_name, link in sorted(links.items()):
+        if not isinstance(link, dict):
+            continue
+        # brd_i2c is Cortex-A55/Linux-exclusive (maintainer decision,
+        # metadata/e1m_modules/v2n/core-ownership.yaml) -- every other
+        # link here (gd32_spi, console) is CM33-side, hence "m33".
+        # Left as a name check, not derived from metadata/pinmux/v2n.yaml's
+        # own `core:` field per pin: this check's whole POINT is to catch
+        # supervisor-links.yaml drifting out of sync with that file, so
+        # deriving "expected" from the same file being cross-checked would
+        # make it tautological.  The link-name set is closed (this file's
+        # schema only ever defines gd32_spi / brd_i2c / console), so the
+        # hardcode is stable, not a maintenance trap.
+        expected_core = "a55" if link_name == "brd_i2c" else "m33"
+        for pin in _dict_entries(link.get("pins")):
+            sp, pad = pin.get("silicon_peripheral"), pin.get("silicon_pad")
+            _check_pair(sp, pad, f"supervisor_links.{link_name}.pins", expected_core)
+            _check_pad_derivation(pad, pin.get("pfc_port"), pin.get("pfc_pin"),
+                                   f"supervisor_links.{link_name}.pins")
+        gcs = link.get("gpio_chip_select")
+        if isinstance(gcs, dict):
+            _check_pair(gcs.get("silicon_peripheral"), gcs.get("silicon_pad"),
+                        f"supervisor_links.{link_name}.gpio_chip_select", expected_core)
+        if link_name == "gd32_pads":
+            # No `pins:` rows: four plain GPIO pads (SWD + ATTN), each a
+            # (silicon_peripheral, silicon_pad) pair that must resolve.
+            for role, pad in sorted(link.items()):
+                if isinstance(pad, dict):
+                    _check_pair(pad.get("silicon_peripheral"), pad.get("silicon_pad"),
+                                f"supervisor_links.gd32_pads.{role}", expected_core)
+
+    brd_i2c = links.get("brd_i2c")
+    if isinstance(brd_i2c, dict) and "peer_address_7bit" in brd_i2c:
+        chip_path = REPO / "metadata" / "chips" / "gd32g553.yaml"
+        if not chip_path.is_file():
+            msgs.append(
+                f"no {chip_path.relative_to(REPO).as_posix()} -- cannot "
+                f"cross-check brd_i2c.peer_address_7bit")
+        else:
+            try:
+                chip_doc = strict_yaml_load(
+                    chip_path.read_text(encoding="utf-8"), source=chip_path)
+            except Exception as e:
+                msgs.append(
+                    f"cannot cross-check brd_i2c.peer_address_7bit against "
+                    f"{chip_path.relative_to(REPO).as_posix()}: parse error ({e})")
+                chip_doc = None
+            if isinstance(chip_doc, dict):
+                chip_addr = _as_dict(chip_doc.get("i2c")).get("default_address_7bit")
+                link_addr = brd_i2c.get("peer_address_7bit")
+                if chip_addr != link_addr:
+                    msgs.append(
+                        f"supervisor_links.brd_i2c.peer_address_7bit="
+                        f"{link_addr!r} does not match "
+                        f"{chip_path.relative_to(REPO).as_posix()} "
+                        f"i2c.default_address_7bit={chip_addr!r}")
+
+    if msgs:
+        print(f"FAIL {rel}")
+        for m in msgs:
+            print(f"  · {m}")
+        failures.append((rel, msgs))
+    else:
+        print(f"OK   {rel}  (supervisor_links cross-checked against "
+              f"metadata/pinmux/v2n.yaml + metadata/chips/gd32g553.yaml)")
+    return failures
+
+
+def _check_core_ownership(path: Path) -> list:
+    """core-ownership.yaml `assignable:` cross-checks the schema cannot
+    express: rows exist in metadata/pinmux/v2n.yaml, are not also FIXED
+    rows, default is a candidate, candidates are cores of the V2N SoC."""
+    from alp_orchestrate.ownership import validate_assignable
+    rel = path.relative_to(REPO).as_posix()
+    doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+    pm = strict_yaml_load((REPO / "metadata" / "pinmux" / "v2n.yaml").read_text(encoding="utf-8"),
+                          source=REPO / "metadata" / "pinmux" / "v2n.yaml")
+    pairs = {(r["silicon_peripheral"], r["silicon_pad"]) for r in _dict_entries(pm.get("pads"))
+             if r.get("owner") == "renesas"}
+    preset = strict_yaml_load((SOM_PRESETS / "E1M-V2N101.yaml").read_text(encoding="utf-8"),
+                              source=SOM_PRESETS / "E1M-V2N101.yaml")
+    soc = json.loads(resolve_soc_path(str(preset["silicon"]), SOM_PRESETS.parent).read_text(encoding="utf-8"))
+    types = {c.get("type") for c in _dict_entries(soc.get("cores"))}
+    msgs = validate_assignable(doc, pairs, types, soc.get("linux_dt") or {})
+    if msgs:
+        print(f"FAIL {rel}")
+        for m in msgs:
+            print(f"  · {m}")
+        return [(rel, msgs)]
+    print(f"OK   {rel}  (assignable cross-checked against metadata/pinmux/v2n.yaml + the V2N SoC cores)")
+    return []
+
+
 def _check_block_realizations(block_files, chip_files) -> list:
     """Semantic cross-checks for block `realizations[].parts[].chip`, `maps`, and `passives[].net`.
 
@@ -1032,6 +2221,140 @@ def _check_block_realizations(block_files, chip_files) -> list:
             print(f"FAIL {rel}")
             for m in msgs:
                 print(f"  · {m}")
+    return failures
+
+
+def _check_npu_ops_semantics(npu_ops_files) -> list:
+    """Cross-checks on `metadata/npu_ops/<backend_family>/*.json` beyond pure
+    schema validation (ADR-0028, reshaped from the flat one-file-per-backend
+    layout to one-file-per-SUPPORT-TABLE-IDENTITY).
+
+    The schema enforces per-file shape, but not facts that only exist
+    relative to the file's PATH (its parent directory + its own filename):
+
+      1. `applies_to.variant` + `applies_to.toolchain` +
+         `applies_to.toolchain_version` must reproduce the filename exactly
+         (`<variant>@<toolchain>-<toolchain_version>.json`).  Without this, a
+         file could claim one identity in its path and another inside its own
+         body, and a future consumer resolving a table by path alone would
+         silently load metadata that disagrees with what it asked for.
+      2. `op_namespace` must match the backend FAMILY's compiler ingest
+         format -- the `ethos_u/` directory is TFLite (Vela), the `drpai/`
+         directory is ONNX (DRP-AI Translator) -- mirroring each adapter's
+         `accepts(src_format)`.  Scoring a model's ops against a list in the
+         wrong vocabulary matches nothing and yields a categorically wrong
+         no-fit verdict.
+      3. `provenance.count_expected`, when present, must equal
+         `len(supported_ops)` -- it exists specifically so a transcription
+         that silently drops or duplicates an op (the exact defect this data
+         asset was reshaped to correct) is caught mechanically rather than
+         trusted on review alone.
+      4. Every entry in `supported_ops` must itself be spelled in the
+         vocabulary `op_namespace` declares -- TFLite builtins are
+         UPPER_SNAKE (`CONV_2D`), ONNX operators are CamelCase or a short
+         all-caps acronym and never contain an underscore (`Conv`, `LRN`).
+         Check (2) above only catches a table in the wrong FILE (`onnx`
+         table under `ethos_u/`); this catches a table with the wrong
+         `op_namespace` LABEL for its own contents (an `onnx` table whose
+         ops are actually spelled `CONV_2D`-style) -- the exact defect class
+         this data asset exists to correct, and the schema's own
+         `supported_ops[].pattern` admits both spellings so it can't tell
+         them apart on its own.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    # Backend-FAMILY (the directory under metadata/npu_ops/) -> the source
+    # format its compiler ingests.  A family with no entry here is unknown
+    # territory for this cross-check (nothing to compare against), not a
+    # failure -- new families are free to be added; this dict just doesn't
+    # yet know their ingest format.
+    _expected_namespace_by_family = {"ethos_u": "tflite", "drpai": "onnx"}
+    failures: list[tuple[Path, list[str]]] = []
+    for path in npu_ops_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+        family = path.parent.name
+        applies_to = doc.get("applies_to") if isinstance(doc.get("applies_to"), dict) else {}
+
+        variant = applies_to.get("variant")
+        toolchain = applies_to.get("toolchain")
+        toolchain_version = applies_to.get("toolchain_version")
+        if isinstance(variant, str) and isinstance(toolchain, str) and isinstance(toolchain_version, str):
+            expected_stem = f"{variant}@{toolchain}-{toolchain_version}"
+            if path.stem != expected_stem:
+                msgs.append(
+                    f"applies_to (variant={variant!r}, toolchain={toolchain!r}, "
+                    f"toolchain_version={toolchain_version!r}) implies filename "
+                    f"`{expected_stem}.json`, but this file is `{path.name}` -- "
+                    f"a consumer resolving this table by path would load metadata "
+                    f"that disagrees with what it asked for")
+
+        namespace = doc.get("op_namespace")
+        expected = _expected_namespace_by_family.get(family)
+        if expected is not None and namespace != expected:
+            msgs.append(
+                f"op_namespace: `{namespace}` but the `{family}/` directory's "
+                f"backend ingests `{expected}` -- see the matching adapter's "
+                f"accepts(src_format)")
+
+        # Spelling-vs-namespace (docstring item 4): TFLite builtins are
+        # UPPER_SNAKE; ONNX operators are CamelCase or a short all-caps
+        # acronym (`LRN`, `GRU`, `LSTM`) and never contain an underscore.
+        # `op == op.upper()` is NOT the discriminator here -- it would
+        # reject those legitimate all-caps ONNX acronyms as if they were
+        # TFLite spellings. An underscore is what TFLite-style multi-word
+        # names carry that ONNX names never do, so that is what a
+        # wrong-vocabulary onnx table (`CONV_2D` instead of `Conv`) trips.
+        ops = doc.get("supported_ops")
+        if isinstance(ops, list):
+            if namespace == "tflite":
+                bad_ops = [op for op in ops
+                          if not (isinstance(op, str) and op == op.upper())]
+            elif namespace == "onnx":
+                bad_ops = [op for op in ops if isinstance(op, str) and "_" in op]
+            else:
+                bad_ops = []
+            if bad_ops:
+                msgs.append(
+                    f"op_namespace: `{namespace}` but supported_ops contains "
+                    f"{len(bad_ops)} op(s) spelled in the wrong vocabulary: "
+                    f"{bad_ops} -- TFLite builtins are UPPER_SNAKE, ONNX "
+                    f"operators are CamelCase or a short all-caps acronym "
+                    f"with no underscore")
+
+        authority = doc.get("authority")
+        has_banner = isinstance(doc.get("_generated"), str)
+        if authority == "tool-generated" and not has_banner:
+            msgs.append(
+                "authority: tool-generated but no `_generated` DO-NOT-EDIT "
+                "banner -- a machine-reproducible table should self-identify "
+                "so a hand-edit is recognisable as wrong on sight")
+        if authority == "vendor-manual" and has_banner:
+            msgs.append(
+                "authority: vendor-manual but carries a `_generated` "
+                "DO-NOT-EDIT banner -- there is no script to regenerate a "
+                "hand-transcribed table from, so the banner is misleading")
+
+        provenance = doc.get("provenance") if isinstance(doc.get("provenance"), dict) else {}
+        count_expected = provenance.get("count_expected")
+        if isinstance(count_expected, int) and isinstance(ops, list) and len(ops) != count_expected:
+            msgs.append(
+                f"provenance.count_expected={count_expected} but supported_ops "
+                f"has {len(ops)} entries -- a dropped/duplicated op vs. the "
+                f"cited source, or a stale count_expected")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
     return failures
 
 
@@ -1422,6 +2745,708 @@ def _check_board_targets(som_files) -> list:
     return failures
 
 
+_MODEL_PERF_FIXTURE_MARKER = "_fixture"
+_MODEL_PERF_LATENCY_RUN_FLOOR = 30
+_MODEL_PERF_ALLOWED_ROOT_FILES = {"README.md"}
+
+
+def _collect_model_perf_files(root: Path) -> tuple[list[Path], list[tuple[str, list[str]]]]:
+    """Collect metadata/model_perf/<SKU>/<hash>.yaml -- and FAIL loudly on
+    anything that doesn't fit that exact two-level shape, instead of
+    silently skipping it (issue #1520 review, PR #1884).
+
+    The one-level `MODEL_PERF.glob("*/*.yaml")` this replaces never opens a
+    point placed one directory too deep (`<SKU>/_fixture/<hash>.yaml` --
+    the precise evasion the `_MODEL_PERF_FIXTURE_MARKER` refusal below
+    exists to catch), a `.yml` sibling, or a stray file dropped directly
+    under `root` -- none of those reach the schema or semantic pass, so
+    the gate prints a clean `0 failure(s)` for a file nobody looked at.
+
+    Walks the whole tree with `rglob("*")` and classifies every FILE it
+    finds (directories are structure, not data):
+      * `root/README.md` is the tree's own doc -- the one root-level file
+        allowed, silently skipped;
+      * `root/<dir>/<name>.yaml` (exactly two path segments below `root`,
+        `.yaml` -- not `.yml` -- suffix) is a real candidate, returned for
+        the schema + semantic passes to validate;
+      * anything else -- a stray root-level file, a nested-one-level-too-
+        deep file, a non-`.yaml` sibling -- is a structural violation and
+        comes back as a FAILURE, shaped like every other check's failure
+        list, not a silent skip.
+    """
+    candidates: list[Path] = []
+    failures: list[tuple[str, list[str]]] = []
+    if not root.is_dir():
+        return candidates, failures
+    for path in sorted(root.rglob("*")):
+        if path.is_dir():
+            continue
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        parts = path.relative_to(root).parts
+        if len(parts) == 1 and path.name in _MODEL_PERF_ALLOWED_ROOT_FILES:
+            continue  # the tree's own doc, not a data file
+        if len(parts) != 2:
+            failures.append((rel, [
+                f"sits {len(parts)} path segment(s) below metadata/model_perf/ "
+                f"-- a real point is exactly <SKU>/<hash>.yaml (2 segments); "
+                f"a file this shallow or this deep is never opened by the "
+                f"schema/semantic passes and validates nothing"]))
+            continue
+        if path.suffix != ".yaml":
+            failures.append((rel, [
+                f"extension `{path.suffix}` is not `.yaml` -- collection "
+                f"only looks for *.yaml, so this file is silently invisible "
+                f"to every check below"]))
+            continue
+        candidates.append(path)
+    return candidates, failures
+
+
+def _model_perf_identity_hash(doc) -> str:
+    """16-hex-char content hash of a model-perf point's MEASUREMENT identity
+    (issue #1520) -- the single source `docs/bench/model-perf-capture.md` and
+    `metadata/schemas/model-perf-v1.schema.json` both point back at.
+
+    Deliberately keyed on the full measurement context (SoM SKU + hw_rev +
+    compile target, including the exact compiler build + the exact
+    source-model bytes + the vela profile when one applies) rather than on
+    the model alone or the SoM alone: two points that share a model but
+    differ in backend/accel_config/core/compiler_version/vela profile are
+    different measurements and must not collide on one path.  Changing ANY
+    identity field must produce a different hash, so a stale filename can
+    never silently point at an edited body -- `_check_model_perf_semantics()`
+    below is what enforces that the on-disk filename actually matches this.
+
+    `target.compiler_version` (e.g. `vela 4.1.0`) is in this key because a
+    compiler upgrade alone -- no other identity field changing -- can move
+    `arena_bytes`/`latency_ms`: a point captured under vela 4.1.0 and the
+    same point re-captured under vela 5.x would otherwise hash identically
+    and the second capture would silently overwrite the first at the same
+    filename (issue #1520 review, PR #1884).  Two fields the same review
+    raised are DELIBERATELY left out of this key for now: vela's
+    `--optimise`/`--arena-cache-size` flags and the core/NPU clock. Neither
+    has a machine-source field anywhere in this repo today (unlike
+    compiler_version, which already lives on the `.alpmodel` manifest's
+    `Target.compiler_version` and `scripts/alp_model/adapters/ethos_u.py`'s
+    `_vela_version()`) -- adding them here would mean inventing new capture
+    plumbing this contract doesn't build, and an identity field nothing
+    writes is worse than no field: it can never be verified, only trusted.
+    Revisit once a capture path actually records them.
+    """
+    target = _as_dict(doc.get("target")) if isinstance(doc, dict) else {}
+    model = _as_dict(doc.get("model")) if isinstance(doc, dict) else {}
+    vela = doc.get("vela") if isinstance(doc, dict) else None
+    vela = vela if isinstance(vela, dict) else {}
+    parts = [
+        str(doc.get("sku", "")) if isinstance(doc, dict) else "",
+        str(doc.get("hw_rev", "")) if isinstance(doc, dict) else "",
+        str(target.get("backend", "")),
+        str(target.get("accel_config", "")),
+        str(target.get("core", "")),
+        str(target.get("compiler_version", "")),
+        str(model.get("src_sha", "")),
+        str(vela.get("system_config", "")),
+        str(vela.get("memory_mode", "")),
+    ]
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _model_perf_target_context(sku: str):
+    """(target_pairs, core_ids, paired_core_by_target) for a SKU, or None
+    when the SKU itself can't be resolved (the caller already reports that
+    separately as "SKU exists").
+
+    target_pairs -- the (backend, accel_config) pairs
+    `alp_project_loader.resolve_targets()` actually resolves for this SKU --
+    the SAME resolver `alp model check` uses, so a perf point can't name a
+    target the tiered resolution could never route a compile to.
+
+    core_ids -- the SoM preset's `topology:` role keys (e.g. `m55_hp`,
+    `a32_cluster`) -- the core-name vocabulary for this SKU.
+
+    paired_core_by_target -- for the subset of the HOST SoC's `npus[]`
+    entries that pin a `paired_core`, the one core id that (backend,
+    accel_config) target is allowed to name.  An NPU entry with no
+    `paired_core` (accessible from more than one core, or not yet known)
+    imposes no stricter constraint than "any topology core id" here --
+    `accel_config`'s one-line format mirrors
+    `alp_project_loader.py::_soc_targets()`, the only other place this
+    string is built, deliberately kept in sync by hand rather than by
+    extending that function's return shape for one caller.
+    """
+    preset_path = SOM_PRESETS / f"{sku}.yaml"
+    try:
+        specs = resolve_targets(sku, metadata_root=SOM_PRESETS.parent)
+        preset = strict_yaml_load(preset_path.read_text(encoding="utf-8"), source=preset_path)
+    except Exception:
+        return None
+    if not isinstance(preset, dict):
+        return None
+
+    target_pairs = {(s.backend, s.accel_config) for s in specs}
+    topology = preset.get("topology")
+    core_ids = set(topology.keys()) if isinstance(topology, dict) else set()
+
+    paired: dict[tuple[str, str], str] = {}
+    silicon = str(preset.get("silicon", ""))
+    soc_path = resolve_soc_path(silicon, SOM_PRESETS.parent)
+    if soc_path is not None and soc_path.is_file():
+        try:
+            soc = json.loads(soc_path.read_text(encoding="utf-8"))
+        except Exception:
+            soc = {}
+        for npu in _dict_entries(soc.get("npus") if isinstance(soc, dict) else None):
+            pc = npu.get("paired_core")
+            if not isinstance(pc, str) or not pc:
+                continue
+            backend = npu_backend(str(npu.get("type", "")), str(npu.get("subtype", "")))
+            if backend is None:
+                continue
+            accel = _resolve_accel_config(npu, backend)
+            paired[(backend, accel)] = pc
+
+    return target_pairs, core_ids, paired
+
+
+def _check_model_perf_semantics(model_perf_files) -> list:
+    """metadata/model_perf/<SKU>/<hash>.yaml semantic cross-checks a JSON
+    Schema shape pass can't express (issue #1520): the path reproduces the
+    body; the SKU exists; the (backend, accel_config) pair and the core are
+    ones the SKU actually resolves; hw_rev is in the family table; an
+    ethos_u point records its vela profile and a non-ethos_u point carries
+    none; req_sram_kib covers arena_bytes; p95 is not below the mean and
+    p50 is not above p95; the run-count floor; capture.date parses; the
+    published tree cannot absorb a `_fixture`.  Returns a failure list
+    shaped like `_check_files()`.
+    """
+    failures: list[tuple[str, list[str]]] = []  # (rel-path str, msgs), not Path -- see below
+    for path in model_perf_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        msgs: list[str] = []
+
+        # The published tree cannot absorb a `_fixture` -- checked on the
+        # PATH alone, before the body is even parsed: a test/dev fixture
+        # checked in here is wrong regardless of whether its body validates.
+        # Scoped to the two path components that are actually PART of the
+        # published-tree naming -- the SKU directory and the identity-hash
+        # filename -- rather than the full absolute path: an ancestor
+        # directory (a developer's checkout path, a CI workspace) can
+        # coincidentally contain this substring with nothing to do with the
+        # tree's own content, which a whole-path scan would misreport.
+        if (_MODEL_PERF_FIXTURE_MARKER in path.parent.name
+                or _MODEL_PERF_FIXTURE_MARKER in path.name):
+            msgs.append(
+                f"path contains `{_MODEL_PERF_FIXTURE_MARKER}` -- a fixture "
+                f"belongs under tests/fixtures/model_perf/, never in the "
+                f"published metadata/model_perf/ tree")
+
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            doc = None  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            if msgs:
+                print(f"FAIL {rel}")
+                for m in msgs:
+                    print(f"  · {m}")
+                failures.append((rel, msgs))
+            continue
+
+        sku = doc.get("sku")
+        hw_rev = doc.get("hw_rev")
+        target = _as_dict(doc.get("target"))
+        model = _as_dict(doc.get("model"))
+        vela = doc.get("vela")
+        perf = _as_dict(doc.get("perf"))
+        capture = _as_dict(doc.get("capture"))
+        backend = target.get("backend")
+        accel_config = target.get("accel_config", "")
+        core = target.get("core")
+
+        # The path reproduces the body: the containing directory IS the SKU,
+        # and the filename IS the measurement-identity hash of this body.
+        if isinstance(sku, str) and sku:
+            if path.parent.name != sku:
+                msgs.append(
+                    f"path directory `{path.parent.name}` != body `sku: "
+                    f"{sku}` -- the containing directory is the SKU, not an "
+                    f"independently-chosen label")
+            expected_stem = _model_perf_identity_hash(doc)
+            if path.stem != expected_stem:
+                msgs.append(
+                    f"filename `{path.stem}` doesn't reproduce this body's "
+                    f"measurement-identity hash (`{expected_stem}`) -- "
+                    f"sku/hw_rev/target/model.src_sha/vela changed without "
+                    f"renaming the file, or two different measurements "
+                    f"collided on one path")
+
+        # The SKU exists.
+        som_ctx = None
+        if not isinstance(sku, str) or not sku:
+            msgs.append("sku: missing/not a string")
+        elif not (SOM_PRESETS / f"{sku}.yaml").is_file():
+            msgs.append(f"sku `{sku}`: no metadata/e1m_modules/{sku}.yaml preset")
+        else:
+            som_ctx = _model_perf_target_context(sku)
+
+        # The (backend, accel_config) pair and the core are ones the SKU
+        # actually resolves.
+        if som_ctx is not None:
+            target_pairs, core_ids, paired = som_ctx
+            key = (backend, accel_config)
+            if key not in target_pairs:
+                msgs.append(
+                    f"target: (backend={backend!r}, accel_config="
+                    f"{accel_config!r}) is not a target `{sku}` actually "
+                    f"resolves (alp_project_loader.resolve_targets) -- valid: "
+                    f"{sorted(target_pairs)}")
+            if not isinstance(core, str) or not core:
+                msgs.append("target.core: missing/not a string")
+            elif core_ids and core not in core_ids:
+                msgs.append(
+                    f"target.core `{core}` is not a `topology:` role of "
+                    f"`{sku}` -- valid: {sorted(core_ids)}")
+            required_core = paired.get(key)
+            if required_core is not None and core != required_core:
+                msgs.append(
+                    f"target.core `{core}` != `{required_core}`, the core "
+                    f"this SoC JSON pins (backend={backend!r}, accel_config="
+                    f"{accel_config!r}) to via npus[].paired_core")
+
+        # hw_rev is in the family table.
+        if not isinstance(hw_rev, str) or not hw_rev:
+            msgs.append("hw_rev: missing/not a string")
+        elif isinstance(sku, str) and sku:
+            try:
+                family = _sku_family(sku)
+            except ValueError:
+                family = None
+            if family is not None:
+                hwrev_path = SOM_PRESETS / family / "hw-revisions.yaml"
+                if not hwrev_path.is_file():
+                    msgs.append(
+                        f"hw_rev `{hw_rev}`: no metadata/e1m_modules/"
+                        f"{family}/hw-revisions.yaml family table to check "
+                        f"against")
+                else:
+                    try:
+                        table = strict_yaml_load(
+                            hwrev_path.read_text(encoding="utf-8"), source=hwrev_path)
+                    except Exception:
+                        table = None
+                    revs = _as_dict(table.get("hw_revisions")) if isinstance(table, dict) else {}
+                    if hw_rev not in revs:
+                        msgs.append(
+                            f"hw_rev `{hw_rev}` is not a key in "
+                            f"metadata/e1m_modules/{family}/hw-revisions.yaml "
+                            f"hw_revisions: -- valid: {sorted(revs)}")
+
+        # An ethos_u point records its vela profile.
+        if backend == "ethos_u":
+            if not isinstance(vela, dict):
+                msgs.append(
+                    "target.backend is `ethos_u` but `vela:` is missing -- "
+                    "vela silently falls back to its OWN built-in default "
+                    "(Ethos_U85_SYS_DRAM_Mid / Dedicated_Sram_384KB, a "
+                    "DRAM-backed profile) when --system-config/--memory-mode "
+                    "aren't passed; record whichever profile this capture "
+                    "actually used")
+            else:
+                if not vela.get("system_config"):
+                    msgs.append("vela.system_config: missing/empty")
+                if not vela.get("memory_mode"):
+                    msgs.append("vela.memory_mode: missing/empty")
+        elif isinstance(vela, dict):
+            # A `vela:` block on a non-ethos_u point is meaningless (no vela
+            # compile happened) and hashes into the identity for nothing --
+            # a stray copy-paste from an ethos_u point silently produces a
+            # different hash for what is otherwise the same measurement
+            # (issue #1520 review, PR #1884).
+            msgs.append(
+                f"target.backend is `{backend}`, not `ethos_u`, but `vela:` "
+                f"is present -- vela only runs for an ethos_u target; drop "
+                f"this block (it plays no part in a {backend} compile)")
+
+        # req_sram_kib covers arena_bytes.
+        req_sram_kib = perf.get("req_sram_kib")
+        arena_bytes = perf.get("arena_bytes")
+        if isinstance(req_sram_kib, int) and isinstance(arena_bytes, int):
+            if req_sram_kib * 1024 < arena_bytes:
+                msgs.append(
+                    f"perf.req_sram_kib ({req_sram_kib} KiB = "
+                    f"{req_sram_kib * 1024} B) is smaller than "
+                    f"perf.arena_bytes ({arena_bytes} B) -- the declared "
+                    f"SRAM budget doesn't cover the compiler-reported arena "
+                    f"it's supposed to hold")
+
+        # p95 is not below the mean; p50 is not above p95; the run-count floor.
+        latency = perf.get("latency_ms")
+        if isinstance(latency, dict):
+            def _num(v):
+                return isinstance(v, (int, float)) and not isinstance(v, bool)
+            mean, p50, p95, runs = (latency.get("mean"), latency.get("p50"),
+                                     latency.get("p95"), latency.get("runs"))
+            if _num(mean) and _num(p95) and p95 < mean:
+                msgs.append(
+                    f"perf.latency_ms.p95 ({p95}) is below "
+                    f"perf.latency_ms.mean ({mean}) -- a p95 below the mean "
+                    f"of the same sample is not a valid percentile (mean/"
+                    f"p50/p95 swapped, or a stale value left over from a "
+                    f"re-run)")
+            if _num(p50) and _num(p95) and p95 < p50:
+                # p50 <= p95 always holds for any real sample (a percentile
+                # function is non-decreasing) -- unlike mean-vs-p50, which a
+                # right-skewed latency tail can legitimately invert, so that
+                # relationship is deliberately NOT enforced here (issue
+                # #1520 review, PR #1884).
+                msgs.append(
+                    f"perf.latency_ms.p50 ({p50}) is above "
+                    f"perf.latency_ms.p95 ({p95}) -- the 50th percentile of "
+                    f"a sample can never exceed its 95th percentile (mean/"
+                    f"p50/p95 swapped, or a stale value left over from a "
+                    f"re-run)")
+            if isinstance(runs, int) and not isinstance(runs, bool) and runs < _MODEL_PERF_LATENCY_RUN_FLOOR:
+                msgs.append(
+                    f"perf.latency_ms.runs ({runs}) is below the floor of "
+                    f"{_MODEL_PERF_LATENCY_RUN_FLOOR} -- a p95 over fewer "
+                    f"runs is noise, not a percentile")
+
+        # capture.date parses.
+        date = capture.get("date")
+        if not isinstance(date, str):
+            msgs.append("capture.date: missing/not a string")
+        else:
+            try:
+                datetime.date.fromisoformat(date)
+            except ValueError:
+                msgs.append(
+                    f"capture.date `{date}` does not parse as an ISO-8601 "
+                    f"date (YYYY-MM-DD)")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (sku={sku}, target={backend}/"
+                  f"{accel_config or 'cpu'}/{core})")
+    return failures
+
+
+def _collect_model_zoo_files(root: Path) -> tuple[list[Path], list[Path], list[tuple[str, list[str]]]]:
+    """Collect metadata/model_zoo/<id>.yaml entries + metadata/model_zoo/
+    starters/<file> data, and FAIL loudly on anything that doesn't fit
+    that exact two-tier shape, mirroring
+    `_collect_model_perf_files()`'s own structural-violation-as-failure
+    design rather than a bare glob that silently never opens a
+    misplaced file.
+
+      * `root/README.md` is the tree's own doc -- the one root-level
+        non-`.yaml` file allowed, silently skipped;
+      * `root/<id>.yaml` (exactly one path segment below `root`) is a
+        real entry candidate;
+      * `root/starters/<file>` (exactly two path segments, first segment
+        `starters`) is a real starter-data candidate;
+      * anything else -- a stray root-level non-`.yaml` file, a file
+        nested a level too deep under `starters/`, a second top-level
+        subdirectory -- is a structural violation and comes back as a
+        FAILURE, not a silent skip.
+
+    Returns (entries, starters, failures) -- entries/starters are sorted
+    `Path` lists, failures is shaped like `_check_files()`.
+    """
+    entries: list[Path] = []
+    starters: list[Path] = []
+    failures: list[tuple[str, list[str]]] = []
+    if not root.is_dir():
+        return entries, starters, failures
+    for path in sorted(root.rglob("*")):
+        if path.is_dir():
+            continue
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        parts = path.relative_to(root).parts
+        if len(parts) == 1:
+            if path.name in _MODEL_ZOO_ALLOWED_ROOT_FILES:
+                continue
+            if path.suffix == ".yaml":
+                entries.append(path)
+                continue
+            failures.append((rel, [
+                f"stray file directly under metadata/model_zoo/ -- a real "
+                f"entry is a top-level *.yaml; binary/data files belong "
+                f"under starters/, never loose at the root"]))
+            continue
+        if len(parts) == 2 and parts[0] == "starters":
+            starters.append(path)
+            continue
+        failures.append((rel, [
+            f"sits {len(parts)} path segment(s) below metadata/model_zoo/ "
+            f"in a shape collection doesn't recognise -- a real entry is "
+            f"exactly <id>.yaml (1 segment) and a real starter is exactly "
+            f"starters/<file> (2 segments); nothing else is opened by the "
+            f"schema/semantic passes below"]))
+    return entries, starters, failures
+
+
+def _bundled_case_exact(name: str, directory: Path) -> bool:
+    """True iff `name` is a byte-exact (case-sensitive) match for a real
+    entry in `directory`'s listing.
+
+    A case-insensitive host filesystem (macOS APFS default, Windows)
+    happily resolves a wrong-case `source.bundled` path to the real file
+    locally, while a case-sensitive CI runner (Linux ext4) 404s the exact
+    same string -- `Path.is_file()` alone cannot distinguish "matched
+    correctly" from "matched despite wrong case" on the former, so this
+    always re-checks against `os.listdir()`, which is never case-folding
+    regardless of the host filesystem's own behaviour.
+    """
+    try:
+        return name in os.listdir(directory)
+    except OSError:
+        return False
+
+
+def _check_model_zoo_semantics(model_zoo_files) -> list:
+    """`metadata/model_zoo/<id>.yaml` cross-checks a JSON Schema shape pass
+    can't express (ADR-0028, alp-sdk#2539):
+
+      1. `id:` matches the manifest filename (`<id>.yaml`), the same
+         join-key invariant `_check_library_semantics()` enforces for
+         libraries -- a `tan model zoo` lookup by id always resolves.
+      2. a `source.bundled` path resolves to a real file, and resolves
+         STRICTLY INSIDE `metadata/model_zoo/starters/` -- never outside it
+         (a `../` escape) and never to a missing file.  The schema can only
+         check that the field is a non-empty string shaped like
+         `starters/<file>`; it has no way to stat the filesystem or
+         resolve symlinks/`..`.  Without this, a typo'd or wandering
+         `bundled:` path validates clean and fails only later, opaquely,
+         whenever something actually tries to read the model.
+      3. every `validated_soms[]` entry names a SoM preset that actually
+         exists (`metadata/e1m_modules/<sku>.yaml`), mirroring
+         `_check_model_perf_semantics()`'s own SKU-existence check. The
+         schema's pattern only bounds the SKU to the real family/digit
+         vocabulary -- it cannot know which SKUs within that vocabulary
+         are actually shipped (e.g. `E1M-AEN899` is pattern-valid but no
+         such preset exists) -- so a well-formed but fictitious SKU would
+         otherwise validate clean and read as a real hardware claim.
+      4. `kind: fixture` implies `validated_soms == []` AND a `bundled`
+         source AND `task == "smoke"`; `kind: model` implies
+         `task != "smoke"` -- a fixture is a wiring/smoke entry by
+         definition and must never carry a hardware claim, an unreviewed
+         upstream link, or a real task. The schema's own `allOf` of two
+         `kind`-gated `if`/`then` pairs ALSO enforces this now (so a
+         violation is caught even by a bare jsonschema validate with no
+         Python involved) -- this repeats the check only to give a
+         friendlier, specific message ("kind: fixture but validated_soms
+         is non-empty", "kind: fixture but task is ...", "kind: model but
+         task is smoke") than jsonschema's own if/then error text.
+      5. a resolved `source.bundled` path is a byte-exact (case-sensitive)
+         match against the real starters/ directory listing -- see
+         `_bundled_case_exact()`'s own docstring for why `is_file()` alone
+         is not enough.
+      6. `example_app`, when present and schema-pattern-valid, names a
+         real directory under `examples/` that carries a `board.yaml`
+         (the board.yaml requirement is deliberate: only a tan-buildable
+         example is linkable today -- loosening it later is additive).
+         Only probed when `_MODEL_ZOO_EXAMPLE_APP_RE.fullmatch()` already
+         agrees with the schema's own pattern -- a schema-invalid value
+         is already reported by the schema pass and must not ALSO trigger
+         a misleading disk-probe message. Guarded by
+         `(REPO / "examples").is_dir()`: a metadata-only scratch checkout
+         (no `examples/` tree at all) skips this check rather than
+         failing every entry that names one.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[str, list[str]]] = []
+    for path in model_zoo_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+
+        entry_id = doc.get("id")
+        if isinstance(entry_id, str) and entry_id != path.stem:
+            msgs.append(
+                f"id: `{entry_id}` does not match filename `{path.name}` -- "
+                f"a `tan model zoo` lookup by id would not resolve this file")
+
+        source = doc.get("source") if isinstance(doc.get("source"), dict) else {}
+        bundled = source.get("bundled")
+        if isinstance(bundled, str) and bundled:
+            resolved = (MODEL_ZOO / bundled).resolve()
+            try:
+                resolved.relative_to(MODEL_ZOO_STARTERS.resolve())
+                inside_starters = True
+            except ValueError:
+                inside_starters = False
+            if not inside_starters:
+                msgs.append(
+                    f"source.bundled `{bundled}` resolves outside "
+                    f"metadata/model_zoo/starters/ -- a bundled path must "
+                    f"stay inside the starters/ directory it is meant to "
+                    f"ship from")
+            elif not resolved.is_file():
+                try:
+                    resolved_rel = resolved.relative_to(REPO).as_posix()
+                except ValueError:
+                    resolved_rel = resolved.as_posix()
+                msgs.append(
+                    f"source.bundled `{bundled}` does not resolve to a "
+                    f"real file at {resolved_rel}")
+            else:
+                written_name = bundled.rsplit("/", 1)[-1]
+                if not _bundled_case_exact(written_name, resolved.parent):
+                    msgs.append(
+                        f"source.bundled `{bundled}`'s filename "
+                        f"`{written_name}` is not a byte-exact "
+                        f"(case-sensitive) match in the real starters/ "
+                        f"directory listing -- a case-insensitive "
+                        f"filesystem (macOS APFS, Windows) can resolve "
+                        f"this locally while case-sensitive CI (Linux) "
+                        f"404s the identical path")
+
+        validated_soms = doc.get("validated_soms")
+        if isinstance(validated_soms, list):
+            for sku in validated_soms:
+                if isinstance(sku, str) and not (SOM_PRESETS / f"{sku}.yaml").is_file():
+                    msgs.append(
+                        f"validated_soms: `{sku}`: no metadata/e1m_modules/"
+                        f"{sku}.yaml preset -- this is not a real, shipped SKU")
+
+        kind = doc.get("kind")
+        task = doc.get("task")
+        if kind == "fixture":
+            if validated_soms:
+                msgs.append(
+                    f"kind: fixture but validated_soms is non-empty "
+                    f"({validated_soms!r}) -- a fixture is never a "
+                    f"bench-validated hardware claim")
+            if "bundled" not in source:
+                msgs.append(
+                    f"kind: fixture but source is not `bundled` -- a "
+                    f"fixture never links an external, unreviewed "
+                    f"upstream model")
+            if task is not None and task != "smoke":
+                msgs.append(
+                    f"kind: fixture but task is `{task}`, not `smoke` -- "
+                    f"a fixture is always the reserved wiring/smoke task")
+        elif kind == "model" and task == "smoke":
+            msgs.append(
+                f"kind: model but task is `smoke` -- `smoke` is reserved "
+                f"for kind: fixture wiring entries, never a real model's "
+                f"claimed task")
+
+        example_app = doc.get("example_app")
+        if (isinstance(example_app, str)
+                and _MODEL_ZOO_EXAMPLE_APP_RE.fullmatch(example_app)
+                and (REPO / "examples").is_dir()):
+            example_dir = REPO / example_app
+            if not example_dir.is_dir():
+                msgs.append(
+                    f"example_app `{example_app}` is not a real directory "
+                    f"under examples/")
+            elif not (example_dir / "board.yaml").is_file():
+                msgs.append(
+                    f"example_app `{example_app}` has no board.yaml -- a "
+                    f"directory existing under examples/ is not proof it "
+                    f"is a real example app")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+def _check_model_zoo_starters(model_zoo_files, starter_files) -> list:
+    """Cross-check the whole `metadata/model_zoo/starters/` tree against
+    every entry's `source.bundled` reference:
+
+      1. every file under `starters/` is referenced by at least one
+         entry's `source.bundled` -- an unreferenced ("orphan") starter is
+         untracked, unreviewable payload sitting in the published tree
+         with no entry accounting for its provenance.
+      2. every starter is small enough to mechanically back the
+         "genuinely tiny, no weight redistribution" contract (#2539) --
+         a hard byte-size ceiling (`_MODEL_ZOO_STARTER_MAX_BYTES`), not a
+         human's judgment call on review.
+
+    (The case-exact filename check lives in `_check_model_zoo_semantics`
+    instead, since it is meaningful per ENTRY-REFERENCE, not per starter
+    file on disk.)
+
+    Returns a failure list shaped like `_check_files()`, keyed per
+    starter file.
+    """
+    referenced: set[Path] = set()
+    for path in model_zoo_files:
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        source = doc.get("source") if isinstance(doc.get("source"), dict) else {}
+        bundled = source.get("bundled")
+        if isinstance(bundled, str) and bundled:
+            referenced.add((MODEL_ZOO / bundled).resolve())
+
+    failures: list[tuple[str, list[str]]] = []
+    for starter in starter_files:
+        try:
+            rel = starter.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = starter.as_posix()
+        msgs: list[str] = []
+
+        if starter.resolve() not in referenced:
+            msgs.append(
+                f"orphan starter: not referenced by any metadata/model_zoo/"
+                f"*.yaml entry's source.bundled -- untracked payload with "
+                f"no entry accounting for its provenance")
+
+        try:
+            size = starter.stat().st_size
+        except OSError as e:
+            msgs.append(
+                f"stat() failed ({e}) -- cannot confirm this file is "
+                f"under the {_MODEL_ZOO_STARTER_MAX_BYTES}-byte starter "
+                f"cap; treated as a failure, not silently skipped")
+            size = None
+        if size is not None and size > _MODEL_ZOO_STARTER_MAX_BYTES:
+            msgs.append(
+                f"{size} byte(s) exceeds the {_MODEL_ZOO_STARTER_MAX_BYTES}-"
+                f"byte starter cap -- #2539's mechanical guard for "
+                f"\"genuinely tiny, no weight redistribution\"")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def main() -> int:
     # SoC files (JSON) against soc-spec v1.
     soc_schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
@@ -1437,10 +3462,16 @@ def main() -> int:
     )
     # Semantic cross-ref the schema can't express: npus[].paired_core -> cores[].
     soc_failures += _check_soc_npu_pairing(soc_files)
+    soc_failures += _check_soc_linux_dt(soc_files)
+    # #1470: npu_toolchain.vela vs npus[] / external_memory_interfaces on the SAME spec.
+    soc_failures += _check_soc_vela_memory_profile(soc_files)
     # Semantic cross-ref the schema can't express: variants[].debug.jlink_device keys -> cores[].
     soc_failures += _check_soc_debug_probe_identity(soc_files)
     # #1295: every Alif Ensemble variant must declare debug.jlink_flash_device (string or null) -- never omit it.
     soc_failures += _check_soc_jlink_flash_device_declared(soc_files)
+    # #948: `debug.svd` is a bare relative path; it exists only when it
+    # resolves inside the repo (the ALP_SVD_DIR case is user-local).
+    soc_failures += _check_soc_debug_svd_shape(soc_files)
     # #1444: Alp Lab modules are BGA only -- no Alif Ensemble variant may declare a WLCSP package.
     soc_failures += _check_soc_no_wlcsp_variants(soc_files)
 
@@ -1492,6 +3523,10 @@ def main() -> int:
                 lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "name",
             )
+            # #1845: two chips declaring the same (bus, address) reaches
+            # silicon as two devices answering one address.
+            board_failures += _check_board_i2c_address_collisions(board_files)
+            board_failures += _check_board_camera_connectors(board_files)
 
     # Chip manifests (YAML) against chip-v1 schema.
     chip_failures: list = []
@@ -1510,6 +3545,118 @@ def main() -> int:
             chip_failures += _check_chip_semantics(chip_files)
             chip_failures += _check_chip_physical(chip_files)
 
+    # Camera modules (YAML) against camera-module-v1.
+    camera_module_failures: list = []
+    camera_module_files: list = []
+    if CAMERA_MODULE_SCHEMA.is_file():
+        camera_module_schema = json.loads(CAMERA_MODULE_SCHEMA.read_text(encoding="utf-8"))
+        camera_module_validator = jsonschema.Draft202012Validator(camera_module_schema)
+        camera_module_files = sorted(CAMERA_MODULES.glob("*.yaml"))
+        if camera_module_files:
+            print()
+            camera_module_failures = _check_files(
+                "YAML", camera_module_files, camera_module_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "module_id",
+            )
+            camera_module_failures += _check_camera_module_semantics(camera_module_files)
+
+    # Per-BSP-kernel Linux sensor-driver availability (linux-kernel-drivers-v1).
+    kernel_driver_failures: list = []
+    if LINUX_KERNEL_DRIVERS_SCHEMA.is_file() and LINUX_KERNEL_DRIVERS.is_file():
+        kd_validator = jsonschema.Draft202012Validator(
+            json.loads(LINUX_KERNEL_DRIVERS_SCHEMA.read_text(encoding="utf-8")))
+        print()
+        kernel_driver_failures = _check_files(
+            "YAML", [LINUX_KERNEL_DRIVERS], kd_validator,
+            lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+            "schema_version",
+        )
+
+    # V2N/V2M on-module GD32G553 supervisor pin-wiring source (#655)
+    # against supervisor-links-v1.
+    supervisor_links_failures: list = []
+    supervisor_links_files: list = []
+    if SUPERVISOR_LINKS_SCHEMA.is_file():
+        # SUPERVISOR_LINKS_DATA is an explicit single-file constant, not a
+        # glob -- a deleted/renamed data file used to silently no-op this
+        # whole registration (`0 supervisor-links file(s) checked, 0
+        # failure(s)`, exit 0). That is a hard error, not a skip: the
+        # V2N/V2M pinctrl.dtsi/_defconfig emitters have no other source.
+        if not SUPERVISOR_LINKS_DATA.is_file():
+            rel = SUPERVISOR_LINKS_DATA.relative_to(REPO).as_posix()
+            msg = ("missing -- the V2N/V2M on-module GD32G553 supervisor "
+                   "pin-wiring source (#655) must exist at this exact path")
+            print()
+            print(f"FAIL {rel}")
+            print(f"  · {msg}")
+            supervisor_links_failures.append((rel, [msg]))
+        else:
+            sl_schema = json.loads(SUPERVISOR_LINKS_SCHEMA.read_text(encoding="utf-8"))
+            sl_validator = jsonschema.Draft202012Validator(sl_schema)
+            supervisor_links_files = [SUPERVISOR_LINKS_DATA]
+            print()
+            supervisor_links_failures = _check_files(
+                "YAML", supervisor_links_files, sl_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "schemaVersion",
+            )
+            # Cross-ref against metadata/pinmux/v2n.yaml (pad ownership +
+            # core attribution) and metadata/chips/gd32g553.yaml (peer I2C
+            # address) -- neither is expressible in the schema alone.
+            supervisor_links_failures += _check_supervisor_links_cross_refs(supervisor_links_files)
+
+    # AMP core-ownership policy (fixed rows + assignable per-product choices).
+    core_ownership_failures: list = []
+    if CORE_OWNERSHIP_SCHEMA.is_file() and CORE_OWNERSHIP_DATA.is_file():
+        print()
+        co_validator = jsonschema.Draft202012Validator(
+            json.loads(CORE_OWNERSHIP_SCHEMA.read_text(encoding="utf-8")))
+        core_ownership_failures = _check_files(
+            "YAML", [CORE_OWNERSHIP_DATA], co_validator,
+            lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+            "schemaVersion",
+        )
+        if not core_ownership_failures:
+            core_ownership_failures = _check_core_ownership(CORE_OWNERSHIP_DATA)
+
+    # SoM-family power trees (YAML) against power-tree-v1, then the
+    # cross-file checks the schema can't express: every rail resolves to a
+    # chip rail/channel, addresses match the chip manifests AND every SoM
+    # preset of each populated family, every writable rail's window is the
+    # default +/-N % inward-rounded window and inside chip-absolute limits,
+    # write: deny registers are disjoint from rail-owned registers.
+    power_tree_failures: list = []
+    power_tree_files: list = []
+    if POWER_TREE_SCHEMA.is_file():
+        import gen_power_tree  # noqa: E402 -- scripts/ is on sys.path (above)
+        pt_validator = jsonschema.Draft202012Validator(
+            json.loads(POWER_TREE_SCHEMA.read_text(encoding="utf-8")))
+        power_tree_files = gen_power_tree.tree_paths()
+        if power_tree_files:
+            print()
+            power_tree_failures = _check_files(
+                "YAML", power_tree_files, pt_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "schemaVersion",
+            )
+            if not power_tree_failures:
+                pt_chips = gen_power_tree.load_chips(CHIPS)
+                pt_presets = {
+                    p.stem: strict_yaml_load(p.read_text(encoding="utf-8"), source=p)
+                    for p in som_files
+                }
+                for pt in power_tree_files:
+                    rel = pt.relative_to(REPO).as_posix()
+                    errs = gen_power_tree.cross_check(
+                        gen_power_tree.load_tree(pt), pt_chips, pt_presets,
+                        gen_power_tree.load_ownership(pt))
+                    if errs:
+                        print(f"FAIL {rel}")
+                        for e in errs:
+                            print(f"  · {e}")
+                        power_tree_failures.append((rel, errs))
+
     # Block manifests (YAML) against block-v1 schema.
     block_failures: list = []
     block_files: list = []
@@ -1525,6 +3672,90 @@ def main() -> int:
                 "block_id",
             )
             block_failures += _check_block_realizations(block_files, chip_files)
+
+    # Per-NPU op-support tables (the static-analyzer data asset, ADR-0028).
+    # One file per SUPPORT-TABLE IDENTITY under a per-backend-family
+    # subdirectory (metadata/npu_ops/<family>/<variant>@<toolchain>-
+    # <toolchain_version>.json) -- glob with `**` so this ALSO catches a file
+    # sitting directly under metadata/npu_ops/ (the retired flat layout).
+    # `*/*.json` looked recursive but isn't: it requires exactly one
+    # directory level, so a reintroduced flat file matches nothing and never
+    # reaches schema/semantic validation at all -- silently, not as a FAIL.
+    # A family directory can be legitimately absent (metadata/npu_ops/ has
+    # no deepx/ -- dxcom publishes no op-support table; see
+    # _check_npu_ops_semantics).
+    npu_ops_failures: list = []
+    npu_ops_files: list = []
+    if NPU_OPS_SCHEMA.is_file():
+        npu_ops_schema = json.loads(NPU_OPS_SCHEMA.read_text(encoding="utf-8"))
+        npu_ops_validator = jsonschema.Draft202012Validator(npu_ops_schema)
+        npu_ops_files = sorted(NPU_OPS.glob("**/*.json"))
+        if npu_ops_files:
+            print()
+            npu_ops_failures = _check_files(
+                "JSON", npu_ops_files, npu_ops_validator,
+                lambda p: strict_json_loads(p.read_text(encoding="utf-8"), source=p),
+                "op_namespace",
+            )
+            npu_ops_failures += _check_npu_ops_semantics(npu_ops_files)
+
+    # Tier-2 model-perf points (YAML) against model-perf v1 (#1520).
+    # metadata/model_perf/ ships EMPTY today -- a perf point comes off real
+    # silicon or it does not exist (docs/bench/model-perf-capture.md) -- so
+    # this section exists to gate the FIRST bench capture from day one,
+    # rather than being bolted on after the tree already has content in it.
+    model_perf_failures: list = []
+    model_perf_files: list = []
+    if MODEL_PERF_SCHEMA.is_file():
+        model_perf_schema = json.loads(MODEL_PERF_SCHEMA.read_text(encoding="utf-8"))
+        model_perf_validator = jsonschema.Draft202012Validator(model_perf_schema)
+        model_perf_files, model_perf_collector_failures = _collect_model_perf_files(MODEL_PERF)
+        if model_perf_files or model_perf_collector_failures:
+            print()
+        for rel, msgs in model_perf_collector_failures:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+        model_perf_failures += model_perf_collector_failures
+        if model_perf_files:
+            model_perf_failures += _check_files(
+                "YAML", model_perf_files, model_perf_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "sku",
+            )
+            model_perf_failures += _check_model_perf_semantics(model_perf_files)
+
+    # Model-zoo manifests (YAML) against model-zoo v1 (ADR-0028, #2539).
+    # One top-level *.yaml per model -- NOT the starters/ subdir, which
+    # holds the bundled binaries `source.bundled` references (a starter is
+    # data, not a manifest, and has no schema of its own).
+    # `_collect_model_zoo_files` (not a bare glob) so a stray/misplaced file
+    # is a FAILURE, not silently invisible to every check below.
+    model_zoo_failures: list = []
+    model_zoo_files: list = []
+    model_zoo_starter_files: list = []
+    if MODEL_ZOO_SCHEMA.is_file():
+        model_zoo_schema = json.loads(MODEL_ZOO_SCHEMA.read_text(encoding="utf-8"))
+        model_zoo_validator = jsonschema.Draft202012Validator(model_zoo_schema)
+        model_zoo_files, model_zoo_starter_files, model_zoo_collector_failures = (
+            _collect_model_zoo_files(MODEL_ZOO))
+        if model_zoo_files or model_zoo_starter_files or model_zoo_collector_failures:
+            print()
+        for rel, msgs in model_zoo_collector_failures:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+        model_zoo_failures = list(model_zoo_collector_failures)
+        if model_zoo_files:
+            model_zoo_failures += _check_files(
+                "YAML", model_zoo_files, model_zoo_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "id",
+            )
+            model_zoo_failures += _check_model_zoo_semantics(model_zoo_files)
+        if model_zoo_starter_files:
+            model_zoo_failures += _check_model_zoo_starters(
+                model_zoo_files, model_zoo_starter_files)
 
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []
@@ -1567,6 +3798,18 @@ def main() -> int:
         print()
         slot0_address_failures = _check_som_slot0_address_resolved(som_files)
 
+    # SoM `memory:` <-> `on_module` population cross-check.
+    memory_population_failures: list = []
+    if som_files:
+        print()
+        memory_population_failures = _check_som_memory_population(som_files)
+
+    # SoM `on_module.i2c_devices.<bus>.devices[]` (bus, address_7bit) uniqueness (#1845).
+    i2c_collision_failures: list = []
+    if som_files:
+        print()
+        i2c_collision_failures = _check_som_i2c_address_collisions(som_files)
+
     # Silicon -> Kconfig registry + socs/ correspondence.
     print()
     silicon_kconfig_failures = _check_silicon_kconfig()
@@ -1579,21 +3822,35 @@ def main() -> int:
     print()
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures) + len(chip_failures)
+                      + len(camera_module_failures) + len(kernel_driver_failures)
                       + len(block_failures)
+                      + len(npu_ops_failures)
+                      + len(model_perf_failures)
+                      + len(model_zoo_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(board_target_failures)
                       + len(restriction_failures)
                       + len(instance_uniqueness_failures)
                       + len(slot0_address_failures)
+                      + len(memory_population_failures)
+                      + len(i2c_collision_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)
-                      + len(tier_a_library_ci_failures))
+                      + len(tier_a_library_ci_failures)
+                      + len(supervisor_links_failures)
+                      + len(core_ownership_failures)
+                      + len(power_tree_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
-          f"{len(block_files)} block file(s) + "
+          f"{len(camera_module_files)} camera module(s) + "
+          f"{len(block_files)} block file(s) + {len(npu_ops_files)} npu-ops file(s) + "
+          f"{len(model_perf_files)} model-perf point(s) + "
+          f"{len(model_zoo_files)} model-zoo entry(ies) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
-          f"tier-a-library-ci registry "
+          f"tier-a-library-ci registry + "
+          f"{len(supervisor_links_files)} supervisor-links file(s) + "
+          f"{len(power_tree_files)} power-tree file(s) "
           f"checked, {total_failures} failure(s)")
     return 0 if total_failures == 0 else 1
 

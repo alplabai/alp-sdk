@@ -183,11 +183,29 @@ _CHIP_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]alp/chips/([A-Za-z0-9_]+)\
 _ZEPHYR_DRIVER_INCLUDE_RE = re.compile(
     r'^\s*#\s*include\s*[<"]zephyr/drivers/([A-Za-z0-9_./]+)\.h[>"]')
 
+# Headers under include/alp/chips/ that are NOT chip drivers, so they have
+# no metadata/chips/<name>.yaml and no board.yaml `chips:` entry.  Each is
+# a shared type or a generated per-family table the chip drivers consume.
+#
+# gen_power_tree.py names its output "<family_dir>_power_tree.h" for
+# WHATEVER family directory sits under metadata/e1m_modules/ (today just
+# "v2n" -> v2n_power_tree.h) -- match that whole family, not one hardcoded
+# family name, so a second family's power-tree.yaml doesn't need a matching
+# edit here to stay portability-clean.
+_NON_CHIP_HEADER_SUFFIXES: tuple[str, ...] = ("_power_tree",)
+_NON_CHIP_HEADERS: dict[str, str] = {
+    "pmic_rail_limit": "shared guard-entry type for the PMIC drivers",
+}
+
+
+def _is_non_chip_header(chip: str) -> bool:
+    return chip in _NON_CHIP_HEADERS or chip.endswith(_NON_CHIP_HEADER_SUFFIXES)
+
 # Pre-existing examples that #include <zephyr/drivers/...> directly with no
 # portable <alp/*.h> surface to route through today.  Keyed by the example's
 # path relative to examples/ (matches how check_example()/main() identify
 # examples), each mapping to a per-DRIVER reason (the driver stem
-# `_ZEPHYR_DRIVER_INCLUDE_RE` captures, e.g. "mdio", "pwm" -- not the whole
+# `_ZEPHYR_DRIVER_INCLUDE_RE` captures, e.g. "mbox", "pwm" -- not the whole
 # example).  This is issue #1129: an allowlist entry only excuses the
 # specific driver(s) it names, so an unrelated `#include
 # <zephyr/drivers/...>` landing in an already-allowlisted example still
@@ -201,32 +219,33 @@ _ZEPHYR_DRIVER_INCLUDE_ALLOWLIST: dict[str, dict[str, str]] = {
             "messaging; no portable <alp/*.h> IPC surface exists yet."
         ),
     },
+    "multicore/microros-ros2-v2n": {
+        "mbox": (
+            "m33_sm/src/rpmsg_link.c, the raw OpenAMP/MHU mailbox "
+            "transport under the micro-ROS XRCE-DDS custom transport; "
+            "<alp/rpc.h> is framed request/response RPC, not the raw "
+            "datagram endpoint XRCE needs, so no portable <alp/*.h> IPC "
+            "surface fits yet (same gap as multicore/rpmsg-v2n)."
+        ),
+    },
     "peripheral-io/alp-console": {
         "pwm": (
             "RGB status LED -- pre-existing gap predating #520 and out "
             "of its Display/LVGL scope; migrating the LED path to "
             "<alp/pwm.h> is tracked as separate follow-up work."
         ),
+    },
+    "connectivity/camera-mjpeg-stream": {
         "gpio": (
-            "src/cc3501e_bridge.c, the on-module Wi-Fi/BLE bridge's own "
-            "control-transport HAL -- pre-existing gap predating #520 "
-            "and out of its Display/LVGL scope."
+            "src/aen_eth_phy.c, INTERIM AEN-only PHY power/reset -- the "
+            "gpio11/lpgpio pins it drives are SoC-internal PHY control "
+            "lines (E_PHY_RESET/E_PHY_PWRDWN), not E1M portable pins; no "
+            "portable <alp/*.h> Ethernet-PHY surface exists yet -- drop "
+            "once board generation grows one."
         ),
         "pinctrl": (
-            "src/cc3501e_bridge.c, the on-module Wi-Fi/BLE bridge's own "
-            "control-transport HAL -- pre-existing gap predating #520 "
-            "and out of its Display/LVGL scope."
-        ),
-    },
-    "v2n/v2n-ethernet-dual": {
-        "mdio": (
-            "raw PHY register access for a link-diagnostics demo; no "
-            "portable <alp/*.h> MDIO surface exists."
-        ),
-    },
-    "v2n/v2n-xspi-flash-readwrite": {
-        "flash": (
-            "no portable <alp/flash.h> surface exists yet."
+            "src/aen_eth_phy.c, same INTERIM PHY bring-up -- pad-mux "
+            "selection for the same two SoC-internal PHY-control GPIOs."
         ),
     },
 }
@@ -345,7 +364,7 @@ def check_chip_includes_declared(example_dir: pathlib.Path,
             if not match:
                 continue
             chip = match.group(1)
-            if chip in declared or chip in seen:
+            if chip in declared or chip in seen or _is_non_chip_header(chip):
                 continue
             seen.add(chip)
             errors.append(

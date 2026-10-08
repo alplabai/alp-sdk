@@ -475,11 +475,11 @@ def extract_unverified_peripherals(soc: dict[str, Any]) -> list[str]:
     e.g. E5 inheriting from E7) is treated as ALL of its `peripherals` keys
     being unverified, so the header doesn't understate the gap -- UNLESS the
     file carries its own `peripherals_unverified` (even `[]`), which means
-    the file itself already grounds its populated keys individually (e.g.
-    i.MX93: `pending_reference_manual_ingestion` covers the still-zero rest
-    of the block, but `mipi_dsi`/`lcdif` are cited in `notes` and so are
-    correctly declared with `peripherals_unverified: []`).  An explicit
-    per-file list always wins over the wholesale fallback.
+    the file itself already sorts its populated keys individually (e.g.
+    i.MX93: `mipi_dsi`/`lcdif` are cited in `notes` and stay off the list,
+    while the #380 counts taken from the Zephyr device tree are on it, a
+    device tree being a lower bound and not the silicon total).  An
+    explicit per-file list always wins over the wholesale fallback.
     """
     if "peripherals_unverified" in soc:
         return sorted(str(k) for k in (soc.get("peripherals_unverified") or []))
@@ -493,6 +493,12 @@ def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
     for path in sorted(meta_dir.rglob("*.json")):
         soc = json.loads(path.read_text(encoding="utf-8"))
         ref = soc["ref"]
+        # 0 on every real SoC today, deliberately -- this is an
+        # integration/partition decision, not a datasheet constant any
+        # vendor publishes (issue #1731 investigation).  Do not "fix" this
+        # by filling in a plausible-looking number here; see
+        # metadata/schemas/soc-spec-v1.schema.json's field description and
+        # src/backends/inference/alp_model_select.c's _fits().
         arena_kib = int(soc.get("inference_arena_sram_kib", 0))
         socs.append((ref, kconfig_token(ref), extract_caps(soc), extract_bool_caps(soc),
                      arena_kib, extract_unverified_peripherals(soc)))
@@ -623,18 +629,18 @@ def main() -> int:
     out_text = emit()
     OUT.write_text(out_text, encoding="utf-8", newline="")
     _clang_format(OUT, exe)
-    print(f"wrote {OUT.relative_to(REPO)} ({len(OUT.read_text().splitlines())} lines)")
+    print(f"wrote {OUT.relative_to(REPO)} ({len(OUT.read_text(encoding='utf-8').splitlines())} lines)")
 
     cap_h_text = _emit_cap_h()
     CAP_H_OUT.write_text(cap_h_text, encoding="utf-8", newline="")
     _clang_format(CAP_H_OUT, exe)
-    print(f"wrote {CAP_H_OUT.relative_to(REPO)} ({len(CAP_H_OUT.read_text().splitlines())} lines)")
+    print(f"wrote {CAP_H_OUT.relative_to(REPO)} ({len(CAP_H_OUT.read_text(encoding='utf-8').splitlines())} lines)")
 
     CAP_C_OUT.parent.mkdir(parents=True, exist_ok=True)
     cap_c_text = _emit_cap_c()
     CAP_C_OUT.write_text(cap_c_text, encoding="utf-8", newline="")
     _clang_format(CAP_C_OUT, exe)
-    print(f"wrote {CAP_C_OUT.relative_to(REPO)} ({len(CAP_C_OUT.read_text().splitlines())} lines)")
+    print(f"wrote {CAP_C_OUT.relative_to(REPO)} ({len(CAP_C_OUT.read_text(encoding='utf-8').splitlines())} lines)")
 
     return 0
 

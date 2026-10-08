@@ -159,6 +159,18 @@ DUPLICATE_HEADING_PREFIX = "v0.4 prep"
 # the headline number.
 CI_ONLY_HEADING = "CI-only / tooling rows (no HIL gate)"
 
+# This section's own intro prose says every row in it is a
+# raw-Zephyr-driver / register-level regcheck (gpio_pin_set(),
+# i2c_transfer(), spi_transceive(), uart_poll_out(), pwm_set_cycles(),
+# ...) run directly against the Zephyr driver, never through the ALP
+# SDK's own portable alp_*_open() backends.  Pooling its 14 rows' worth
+# of ✅ into the headline Summary would claim portable-surface
+# verification the SDK has not done -- the same issue-#1200 defect
+# CI_ONLY_HEADING above already guards against -- so this heading is
+# tallied separately too, never folded into the headline number.
+RAW_DRIVER_HEADING = ("v0.8.0 — E1M-AEN801 (Alif Ensemble E8) first "
+                       "full bench bring-up")
+
 # Headings rendered by bespoke logic below, never via the generic per-section
 # copy loop: "Verification key" becomes "## Legend" (retitled, same content,
 # so the page doesn't use the word "verification" twice for one thing); "See
@@ -178,6 +190,9 @@ def render(text: str) -> str:
     ci_totals = {g: 0 for g in PICTO_GLYPHS}
     ci_totals["n/a"] = 0
     ci_rows = 0
+    rawdrv_totals = {g: 0 for g in PICTO_GLYPHS}
+    rawdrv_totals["n/a"] = 0
+    rawdrv_rows = 0
 
     body_chunks: list[str] = []
     for heading, body_lines in sections:
@@ -187,6 +202,9 @@ def render(text: str) -> str:
         if heading == CI_ONLY_HEADING:
             for t in tables:
                 ci_rows += count_glyphs(t, ci_totals)
+        elif heading == RAW_DRIVER_HEADING:
+            for t in tables:
+                rawdrv_rows += count_glyphs(t, rawdrv_totals)
         elif not heading.startswith(DUPLICATE_HEADING_PREFIX):
             if tables:
                 silicon_sections += 1
@@ -250,11 +268,15 @@ def render(text: str) -> str:
         f"{silicon_rows} silicon/HIL-gated ledger rows parsed across "
         f"{silicon_sections} sections.  A row can carry more than one glyph",
         "(e.g. half a feature done, half pending), so glyph counts can",
-        "exceed the row count.  This total EXCLUDES two kinds of row that",
+        "exceed the row count.  This total EXCLUDES three kinds of row that",
         f"would otherwise inflate it: the rows under \"{CI_ONLY_HEADING}\"",
         "below (its own `✅` means \"green CI workflow\", a different claim",
         "than the Legend's `✅` below -- so it gets its own table, tallied",
-        "separately), and the rows under a heading starting with "
+        f"separately); the rows under \"{RAW_DRIVER_HEADING}\"",
+        "(that section's own intro says every row is a raw-Zephyr-driver",
+        "regcheck that never touches the portable `alp_*_open()` surface --",
+        "same reasoning, own table, tallied separately); and the rows under",
+        "a heading starting with "
         "\"v0.4 prep\" (test-plan.md's own intro there says they are",
         "duplicated from the v0.4 section already counted above).",
         "",
@@ -278,6 +300,23 @@ def render(text: str) -> str:
     lines.append("|---|---|---|")
     for g in [*PICTO_GLYPHS, "n/a"]:
         lines.append(f"| `{g}` | {GLYPH_LABELS[g]} | {ci_totals[g]} |")
+    lines.append("")
+
+    lines.append(f"### \"{RAW_DRIVER_HEADING}\" -- counted separately")
+    lines.append("")
+    lines.append(
+        "Tracked here so the page is complete, but never pooled into the "
+        "Summary above -- see the note there.  Every row in this section "
+        "exercises a raw Zephyr driver directly (`gpio_pin_set()`, "
+        "`i2c_transfer()`, `spi_transceive()`, ...), never the ALP SDK's "
+        "own portable `alp_*_open()` backend, so a `✅` here is not yet a "
+        "portable-surface verification."
+    )
+    lines.append("")
+    lines.append("| Glyph | Meaning | Count |")
+    lines.append("|---|---|---|")
+    for g in [*PICTO_GLYPHS, "n/a"]:
+        lines.append(f"| `{g}` | {GLYPH_LABELS[g]} | {rawdrv_totals[g]} |")
     lines.append("")
 
     lines.append("## Legend")

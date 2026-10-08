@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2025 Alif Semiconductor
+ * Copyright (c) 2026 Alp Lab AB
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -53,11 +55,29 @@
 #define I2S_TXFFR_TXFFR_Pos 0U
 #define I2S_TXFFR_TXFFR_Msk (0x1UL << I2S_TXFFR_TXFFR_Pos)
 
-/* I2S RER.RXCHEN: Rx Channel Enable */
+/* I2S RER.RXCHEN: Rx Channel Enable
+ *
+ * alp-sdk issue #2205: on the Alif E8 this bit is RXCHENX, and it CANNOT be
+ * cleared. The E8 SVD (peripheral LPI2S, which i2s0..i2s3 derive from) gives
+ * I2S_RER0 a reset value of 0x00FFFF01 with RXCHENX [0:0] read-only, "always
+ * enabled" when the block is built with TDM support; bits 8-23 are the
+ * per-slot enables RXSLOT0..15_EN. Measured on E1M-AEN803 serial 2026W36-0002 i2s3
+ * (0x49017000) with the block idle (IER 0x00000F00, IRER/ITER/CER 0): RER
+ * still read 0x00FFFF01 right after i2s_rx_channel_disable(). The E7 SVD
+ * has RER0 reset 0x00000001 with the bit read-write and no slot fields.
+ * IRER.RXEN (or IER.IEN) is what actually stops the RX direction on both.
+ */
 #define I2S_RER_RXCHEN_Pos 0U
 #define I2S_RER_RXCHEN_Msk (0x1UL << I2S_RER_RXCHEN_Pos)
 
-/* I2S TER.TXCHEN: Tx Channel Enable */
+/* I2S TER.TXCHEN: Tx Channel Enable
+ *
+ * alp-sdk issue #2205: TXCHENX on the E8, the same as RER.RXCHEN above --
+ * I2S_TER0 resets to 0x00FFFF01, bit 0 is read-only, bits 8-23 are the
+ * per-slot enables TXSLOT0..15_EN. Measured on E1M-AEN803 serial 2026W36-0002 i2s3: TER
+ * still read 0x00FFFF01 right after i2s_tx_channel_disable(). ITER.TXEN (or
+ * IER.IEN) is what actually stops the TX direction.
+ */
 #define I2S_TER_TXCHEN_Pos 0U
 #define I2S_TER_TXCHEN_Msk (0x1UL << I2S_TER_TXCHEN_Pos)
 
@@ -85,6 +105,12 @@
 #define I2S_ISR_TXFO_Pos 5U
 #define I2S_ISR_TXFO_Msk (0x1UL << I2S_ISR_TXFO_Pos)
 
+/* I2S ISR.TXFU: Status of Tx FIFO Underrun Interrupt (alp-sdk issue #2205).
+ * E8 SVD only (I2S_ISR0 [6:6]); the E7 SVD defines no bit 6. ISR bits 2-3
+ * are undefined in both SVDs. */
+#define I2S_ISR_TXFU_Pos 6U
+#define I2S_ISR_TXFU_Msk (0x1UL << I2S_ISR_TXFU_Pos)
+
 /* I2S IMR.RXDAM: Mask Rx Data Available interrupt */
 #define I2S_IMR_RXDAM_Pos 0U
 #define I2S_IMR_RXDAM_Msk (0x1UL << I2S_IMR_RXDAM_Pos)
@@ -100,6 +126,19 @@
 /* I2S IMR.TXFOM: Mask Data Overrun Interrupt for Tx */
 #define I2S_IMR_TXFOM_Pos 5U
 #define I2S_IMR_TXFOM_Msk (0x1UL << I2S_IMR_TXFOM_Pos)
+
+/* I2S IMR.TXFUM: Mask Tx FIFO Underrun Interrupt (alp-sdk issue #2205).
+ * E8 SVD only (I2S_IMR0 [6:6], reset 0x00000073); the E7 SVD resets IMR0
+ * to 0x00000033 and defines no bit 6. */
+#define I2S_IMR_TXFUM_Pos 6U
+#define I2S_IMR_TXFUM_Msk (0x1UL << I2S_IMR_TXFUM_Pos)
+
+/* Every named IMR bit: RXDAM, RXFOM, TXFEM, TXFOM, TXFUM (0x73). Bits 2-3
+ * have no field in either the E7 or the E8 SVD, so no 1 is ever written
+ * there. This equals the E8's IMR reset value, i.e. "everything masked". */
+#define I2S_IMR_ALL_Msk \
+	(I2S_IMR_RXDAM_Msk | I2S_IMR_RXFOM_Msk | I2S_IMR_TXFEM_Msk | I2S_IMR_TXFOM_Msk | \
+	 I2S_IMR_TXFUM_Msk)
 
 /* I2S ROR.RXCHO: Clear Rx Data Overrun interrupt */
 #define I2S_ROR_RXCHO_Pos 0U
@@ -219,7 +258,9 @@ struct I2S_Type {
 	__IM uint32_t ISR;   /*!< Offset:0x38, I2S Interrupt Status */
 	__IOM uint32_t IMR;  /*!< Offset:0x3C, I2S Interrupt Mask */
 	__IM uint32_t ROR;   /*!< Offset:0x40, I2S Rx Overrun */
-	__IM uint32_t TOR;   /*!< Offset:0x44, I2S Tx Overrun */
+	/* Offset:0x44 -- TOR0 (TXCHO) on the E7 SVD. On the E8 SVD it is
+	 * I2S_TICR0 (TXCHOU), and one read clears BOTH TXFO and TXFU. */
+	__IM uint32_t TOR;   /*!< Offset:0x44, I2S Tx Overrun / TICR0 */
 	__IOM uint32_t RFCR; /*!< Offset:0x48, I2S Rx FIFO Configuration */
 	__IOM uint32_t TFCR; /*!< Offset:0x4C, I2S Tx FIFO Configuration */
 	__OM uint32_t RFF;   /*!< Offset:0x50, I2S Rx Channel FIFO Reset */
@@ -379,6 +420,25 @@ __STATIC_INLINE void i2s_clock_disable(const struct i2s_dw_cfg *i2s)
 }
 
 /**
+ * \brief             Query I2S Clock Enable state in Master Mode
+ * \param[in]   i2s   Pointer to I2S resources
+ * \return            true if CER.CLKEN is set
+ *
+ * alp-sdk issue #2149 (round 2): paired with struct stream's own one-shot
+ * clk_restart_skip_ok flag in tx_stream_start()'s restart-glitch guard --
+ * i2s_configure_clock() (CCR) below is documented "Should be called with
+ * Clock disabled", so a restart that finds the clock already running for a
+ * flag-confirmed reason (the underrun ISR path deliberately keeps
+ * CER.CLKEN set, and every path that could invalidate that clears the flag
+ * again) skips that write instead of reprogramming CCR live. This query
+ * alone is not sufficient -- see the flag's own comment for why.
+ */
+__STATIC_INLINE bool i2s_clock_is_enabled(const struct i2s_dw_cfg *i2s)
+{
+	return (i2s->paddr->CER & I2S_CER_CLKEN_Msk) != 0;
+}
+
+/**
  * \brief             Control I2S Configure WSS and SCLKG in Master Mode.
  *                    Should be called with Clock disabled.
  * \param[in]   i2s   Pointer to I2S resources
@@ -438,16 +498,24 @@ __STATIC_INLINE void i2s_write_right_tx(uint32_t data, const struct i2s_dw_cfg *
  * \fn                void i2s_rx_channel_enable(const struct i2s_dw_cfg *i2s)
  * \brief             Control I2S Receiver Channel Enable
  * \param[in]   i2s   Pointer to I2S resources
+ *
+ * alp-sdk issue #2205: read-modify-write. A plain write of 0x1 zeroed the
+ * E8's per-slot enables in bits 8-23 (measured: RER 0x00FFFF01 ->
+ * 0x00000001), harmless in standard I2S mode and wrong under TDM.
  */
 __STATIC_INLINE void i2s_rx_channel_enable(const struct i2s_dw_cfg *i2s)
 {
-	i2s->paddr->RER = _VAL2FLD(I2S_RER_RXCHEN, 1U);
+	i2s->paddr->RER |= I2S_RER_RXCHEN_Msk;
 }
 
 /**
  * \fn                void i2s_rx_channel_disable(const struct i2s_dw_cfg *i2s)
  * \brief             Control I2S Receiver Channel Disable
  * \param[in]   i2s   Pointer to I2S resources
+ *
+ * alp-sdk issue #2205: a no-op on the E8 (RXCHENX is read-only, see
+ * I2S_RER_RXCHEN_Msk); real on the E7. Callers must not rely on it to stop
+ * RX -- i2s_rx_block_disable() does that.
  */
 __STATIC_INLINE void i2s_rx_channel_disable(const struct i2s_dw_cfg *i2s)
 {
@@ -458,16 +526,23 @@ __STATIC_INLINE void i2s_rx_channel_disable(const struct i2s_dw_cfg *i2s)
  * \fn                void i2s_tx_channel_enable(const struct i2s_dw_cfg *i2s)
  * \brief             Control I2S Transmit Channel Enable
  * \param[in]   i2s   Pointer to I2S resources
+ *
+ * alp-sdk issue #2205: read-modify-write, for the same reason as
+ * i2s_rx_channel_enable() -- TER bits 8-23 are the E8's TX slot enables.
  */
 __STATIC_INLINE void i2s_tx_channel_enable(const struct i2s_dw_cfg *i2s)
 {
-	i2s->paddr->TER = _VAL2FLD(I2S_TER_TXCHEN, 1U);
+	i2s->paddr->TER |= I2S_TER_TXCHEN_Msk;
 }
 
 /**
  * \fn                void i2s_tx_channel_disable(const struct i2s_dw_cfg *i2s)
  * \brief             Control I2S Transmit Channel Disable
  * \param[in]   i2s   Pointer to I2S resources
+ *
+ * alp-sdk issue #2205: a no-op on the E8 (TXCHENX is read-only, see
+ * I2S_TER_TXCHEN_Msk); real on the E7. Callers must not rely on it to stop
+ * TX -- i2s_tx_block_disable() does that.
  */
 __STATIC_INLINE void i2s_tx_channel_disable(const struct i2s_dw_cfg *i2s)
 {
@@ -575,6 +650,8 @@ __STATIC_INLINE void i2s_clear_rx_overrun(const struct i2s_dw_cfg *i2s)
  * \fn                void i2s_clear_tx_overrun(const struct i2s_dw_cfg *i2s)
  * \brief             Clear Transmit FIFO Data Overrun Interrupt
  * \param[in]   i2s   Pointer to I2S resources
+ *
+ * On the E8 this read of offset 0x44 (I2S_TICR0) also clears TXFU.
  */
 __STATIC_INLINE void i2s_clear_tx_overrun(const struct i2s_dw_cfg *i2s)
 {

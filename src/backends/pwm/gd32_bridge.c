@@ -19,6 +19,7 @@
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
+#include <alp/e1m_x_pinout.h>
 #include <alp/peripheral.h>
 #include <alp/pwm.h>
 
@@ -26,6 +27,25 @@
 #include "alp_slot_claim.h"
 #include "v2n_supervisor.h"
 #include <alp/chips/gd32g553.h>
+
+/* CONTAINER_OF without <zephyr/sys/util.h>: nothing this TU includes
+ * pulls it in, and open() must reach the enclosing portable handle.
+ * offsetof comes from <stddef.h> above.  Guarded so a build that
+ * already has Zephyr's definition transitively keeps its own.
+ *
+ * The intermediate (void *) cast (rather than a direct char*->type*
+ * cast) is deliberate: `st` is always the `state` member embedded in a
+ * real `struct alp_pwm` (the dispatcher only ever hands the ops table
+ * &h->state), so the recovered pointer's alignment is correct by
+ * construction -- but a direct cast still trips -Wcast-align=strict
+ * because the compiler can't see that invariant.  Routing through
+ * void* (alignment-agnostic by definition) is the standard
+ * container_of idiom for this, matching how Zephyr's own
+ * <zephyr/sys/util.h> CONTAINER_OF avoids the same diagnostic
+ * (issue #634). */
+#ifndef CONTAINER_OF
+#define CONTAINER_OF(ptr, type, member) ((type *)(void *)((char *)(ptr) - offsetof(type, member)))
+#endif
 
 typedef struct gd32_pwm_state {
 	uint8_t  channel_id;
@@ -62,10 +82,26 @@ static void _free_state(gd32_pwm_state_t *s)
 static alp_status_t
 br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-	/* E1M spec reserves 8 PWM channels; all map to GD32 timers.
-     * Mirror the adc bridge + the peripheral suite contract: an
-     * out-of-range channel is INVAL (not OUT_OF_RANGE). */
-	if (cfg->channel_id >= 8u) {
+	(void)caps_out;
+	/* E1M spec reserves 8 PWM channels; ALL EIGHT map to a real GD32
+     * timer/channel on V2N (metadata/chips/gd32g553.yaml pwm_routing:
+     * PWM0..7 -> TIMER0/TIMER7, no gaps) -- unlike zephyr_drv.c /
+     * yocto_drv.c, this backend has no partial-population case to tell
+     * apart from a malformed index, so a single ALP_ERR_INVAL is the
+     * complete (not collapsed) answer here (#1635).  The two-tier
+     * contract still holds for THIS backend overall: the real hardware
+     * floor -- a period the GD32 timer can't represent at its 1 us
+     * prescaled tick (period_us == 0, i.e. under 1 us; under 2 us
+     * center-aligned -- firmware/gd32-bridge/hal/gd32/pwm.c:142,164) --
+     * surfaces as ALP_ERR_OUT_OF_RANGE from br_set_duty()/br_set_period()
+     * via the firmware's own STATUS_OUT_OF_RANGE (wire 0x08, see
+     * gd32g553.c:status_from_wire()), not from this channel_id check.
+     * The other end of the range (a period past the 16-bit ARR --
+     * > 65.536 ms edge-aligned, > 131.070 ms center-aligned, since
+     * the center-aligned path halves the commanded period before
+     * the same ARR clamp -- firmware/gd32-bridge/hal/gd32/pwm.c:157,165)
+     * is currently silently clamped instead of rejected -- #1730. */
+	if (cfg->channel_id >= ALP_E1M_X_PWM_COUNT) {
 		return ALP_ERR_INVAL;
 	}
 	/* Probe the supervisor up-front: with no SPI/I2C bus configured
@@ -81,14 +117,32 @@ br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabiliti
 	if (bs == NULL) {
 		return ALP_ERR_NOMEM;
 	}
+	/* Prime the PORTABLE handle too, not just our private state: the
+     * dispatcher bounds-checks pulse_ns against struct alp_pwm::period_ns
+     * (a different field from the gd32_pwm_state_t::period_ns assigned
+     * just below, which only this backend reads).  Left at its memset zero, every
+     * alp_pwm_set_duty() with a non-zero pulse fails ALP_ERR_INVAL in
+     * the dispatcher and never reaches the supervisor.  Same
+     * CONTAINER_OF write-back the zephyr / sw_fallback / yocto backends
+     * do.
+     *
+     * cfg->period_ns == 0 means "backend default".  There is no
+     * devicetree behind a GD32 timer channel to defer to, so take the
+     * 1 kHz the sw_fallback / yocto backends default to, and keep both
+     * copies of the period equal -- the dispatcher's bound and the
+     * period this backend puts on the wire must not disagree, and the
+     * bridge itself rejects duty_ns > period_ns. */
+	struct alp_pwm *h = CONTAINER_OF(st, struct alp_pwm, state);
+	h->channel        = cfg->channel_id;
+	h->period_ns      = (cfg->period_ns != 0u) ? cfg->period_ns : 1000000u; /* 1 kHz */
+
 	bs->channel_id = (uint8_t)cfg->channel_id;
-	bs->period_ns  = cfg->period_ns;
+	bs->period_ns  = h->period_ns;
 	bs->duty_ns    = 0u;
 
-	st->dev         = NULL; /* bridge sentinel */
-	st->channel_id  = cfg->channel_id;
-	st->be_data     = bs;
-	caps_out->flags = 0u; /* no HW dead-time/break advertised via bridge */
+	st->dev        = NULL; /* bridge sentinel */
+	st->channel_id = cfg->channel_id;
+	st->be_data    = bs;
 	return ALP_OK;
 }
 
@@ -192,6 +246,14 @@ static void br_capture_close(alp_pwm_backend_state_t *st)
 static void br_close(alp_pwm_backend_state_t *st)
 {
 	if (st->be_data != NULL) {
+		/* Release the timer claim so a sibling channel's single-pulse is not
+		 * left BUSY.  Firmware below protocol 0.17 gives NOSUPPORT and
+		 * nothing is sent; any other error is not actionable here. */
+		gd32g553_t *ctx = NULL;
+		if (alp_z_v2n_supervisor_acquire(&ctx) == ALP_OK) {
+			(void)gd32g553_pwm_stop(ctx, ((gd32_pwm_state_t *)st->be_data)->channel_id);
+			alp_z_v2n_supervisor_release();
+		}
 		_free_state((gd32_pwm_state_t *)st->be_data);
 		st->be_data = NULL;
 	}

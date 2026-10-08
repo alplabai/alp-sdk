@@ -12,18 +12,23 @@ Covers:
 - issue #515: `i2c_devices:` (on-board I2C addresses + INA236
   calibration) reproduces the previously hand-authored values
   exactly, and the generator-level fixture proves the mechanism.
+- issue #637: `mux_enums:` (mux-select / IO-expander-pin enums)
+  reproduces the previously hand-authored enum values exactly.
 """
 
 from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+import jsonschema
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "gen_board_header.py"
@@ -175,32 +180,69 @@ def test_real_evk_header_covers_known_macros(real_headers):
 def test_no_clash_with_existing_alp_e1m_evk_h(real_headers):
     """The generated routes header MUST NOT also re-define macros
     that live in the surviving hand-authored sections of
-    `alp_e1m_evk.h` (overlay-pad indices, mux enums).  On-board I2C
-    device addresses + INA236 calibration constants were lifted into
-    the `i2c_devices:` metadata block (issue #515) and are generated
-    now -- see `test_real_evk_header_covers_i2c_device_macros` below.
-    This guards against accidental over-lift of what's still
-    hand-authored in future slices."""
+    `alp_e1m_evk.h` (currently just `evk_cam_select_t` + prose).
+    On-board I2C device addresses + INA236 calibration constants
+    (#515), the overlay-pad indices (#1636), and the mux-select /
+    IO-expander-pin enums (#637) were all lifted into metadata and
+    are generated now -- see `test_real_evk_header_covers_i2c_device_macros`,
+    `test_real_evk_header_covers_overlay_pin_macros`, and
+    `test_real_evk_header_covers_mux_enums` below.  This guards
+    against accidental over-lift of what's still hand-authored in
+    future slices."""
     evk_out, _xevk_out = real_headers
     out = evk_out.read_text(encoding="utf-8")
     must_not_appear = [
-        # Overlay-pad indices (slice deferred)
-        "EVK_PIN_OVERLAY_BASE",
-        "EVK_PIN_IO_EXP_INT",
-        "EVK_PIN_IO_EXP_RST",
-        "EVK_PIN_AMP_FAULT",
-        "EVK_PIN_AMP_ENABLE",
-        "EVK_PIN_CTP_INT",
-        "EVK_PIN_MB_INT",
+        # evk_cam_select_t (MIPI CSI camera mux) -- out of #637's scope
+        "EVK_CAM_A",
+        "EVK_CAM_B",
+        "evk_cam_select_t",
         # ADC spellings not generated (the shipped ADC routes are
-        # EVK_ADC_ARDUINO_A1..A5 / EVK_ADC_MB_AN / EVK_ADC_VBAT_SENSE)
+        # EVK_ADC_ARDUINO_A0..A5 / EVK_ADC_DAC0_LOOPBACK /
+        # EVK_ADC_DAC1_LOOPBACK -- #1622 corrected the ADC0 entry from
+        # a nonexistent BOARD_ID divider to the real shared Arduino
+        # A0 / mikroBUS ANA input, and ADC6/ADC7 from a nonexistent
+        # mikroBUS AN pin / VBAT divider to the real DAC0/DAC1
+        # loopback senses)
         "EVK_ARD_A0",
         "EVK_MB_ANA",
     ]
     for macro in must_not_appear:
         assert macro not in out, (
             f"{macro} unexpectedly appears in generated header -- "
-            f"slice scope is gpio/buses/pwm/i2c_devices only"
+            f"slice scope is gpio/buses/pwm/i2c_devices/overlay_pins/mux_enums only"
+        )
+
+
+def test_real_evk_header_covers_overlay_pin_macros(real_headers):
+    """Issue #1636: the eleven `EVK_PIN_OVERLAY_BASE + N` overlay-pad
+    indices are ordinal positions in an `alp,pin-array` overlay list,
+    not independent hardware facts -- N must come from the metadata
+    list's order, computed by the generator, not hand-typed. Assert
+    every macro is present and its N matches its position (0-based)
+    in `metadata/boards/e1m-evk.yaml`'s `overlay_pins:` list, in the
+    same order the hand-authored header previously hard-coded."""
+    evk_out, _xevk_out = real_headers
+    out = evk_out.read_text(encoding="utf-8")
+    assert "#define EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT" in out
+    ordered_macros = [
+        "EVK_PIN_IO_EXP_INT",
+        "EVK_PIN_IO_EXP_RST",
+        "EVK_PIN_AMP_FAULT",
+        "EVK_PIN_AMP_ENABLE",
+        "EVK_PIN_MB_INT",
+        "EVK_PIN_CK_DIO4",
+        "EVK_PIN_CK_DIO3",
+        "EVK_PIN_CK_DIO2",
+        "EVK_PIN_CK_DIO1",
+        "EVK_PIN_CK_RST",
+        "EVK_PIN_CTP_INT",
+    ]
+    defined = dict(re.findall(r"#define\s+(\S+)\s+\(EVK_PIN_OVERLAY_BASE \+ (\d+)u\)", out))
+    for idx, macro in enumerate(ordered_macros):
+        assert macro in defined, f"{macro} missing from generated header"
+        assert defined[macro] == str(idx), (
+            f"{macro} = BASE + {defined[macro]}, expected BASE + {idx} -- "
+            f"index drifted from list order"
         )
 
 
@@ -216,9 +258,23 @@ def test_real_evk_header_covers_i2c_device_macros(real_headers):
         "EVK_I2C_ADDR_ICM42670": "0x69u",
         "EVK_I2C_ADDR_BMI323": "0x68u",
         "EVK_I2C_ADDR_BMP581": "0x47u",
-        "EVK_I2C_ADDR_TCAL9538_MAIN": "0x72u",
-        "EVK_I2C_ADDR_TCAL9538_PCIE": "0x71u",
-        "EVK_I2C_ADDR_TCA6408A_MAIN": "0x20u",
+        # U35 is strapped 1110011 = 0x73, not 0x72.  The hand-authored
+        # header carried 0x72; the EVK netlist and a full bench sweep of
+        # SoC I2C2 on the bench E1M-EVK units (serials 2026W36-0001 /
+        # 2026W36-0003; SKU disputed, see #2001) both answer at 0x73 and
+        # nothing answers at 0x72.  Corrected in metadata, so corrected here.
+        "EVK_I2C_ADDR_TCAL9538_MAIN": "0x73u",
+        # U37 is `assembled: false` in metadata/boards/e1m-evk.yaml (#1974);
+        # the generator (#1980) renames every macro an unfitted entry
+        # contributes with a `_NOT_ASSEMBLED` suffix, so the PLAIN name
+        # below must NOT be defined -- see
+        # test_real_evk_header_omits_plain_macro_for_unassembled_entry.
+        "EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED": "0x71u",
+        # U35's TCA6408ARSVR alt-population is ALSO `assembled: false`
+        # (#1974 follow-up): neither bench board answers at 0x20 and the
+        # maintainer's EVK I2C schedule places U35 at 0x73 instead, so
+        # this macro is renamed too -- same treatment, same test below.
+        "EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED": "0x20u",
         "EVK_I2C_ADDR_TAS2563_LOW": "0x4Du",
         "EVK_I2C_ADDR_TAS2563_HIGH": "0x4Eu",
         "EVK_I2C_ADDR_INA236_3V3": "0x40u",
@@ -255,6 +311,133 @@ def test_real_evk_header_covers_i2c_device_macros(real_headers):
         )
 
 
+def test_real_evk_header_omits_plain_macro_for_unassembled_entry(real_headers):
+    """Issue #1980: U37 (`EVK_I2C_ADDR_TCAL9538_PCIE`) and U35's
+    TCA6408ARSVR alt-population (`EVK_I2C_ADDR_TCA6408A_MAIN`) are both
+    `assembled: false` in `metadata/boards/e1m-evk.yaml` -- confirmed NOT
+    fitted on either 2026-09-05 bench board (alp-sdk#1974). Neither plain
+    macro name must appear in the generated header at all, so a reader
+    reaching for the obvious name gets a compile error rather than a
+    real-looking address for silicon that was never fitted. The renamed
+    `_NOT_ASSEMBLED`-suffixed macros (checked in
+    test_real_evk_header_covers_i2c_device_macros) still carry the
+    address + reason for anyone deliberately probing an earlier/other
+    revision's population."""
+    evk_out, _xevk_out = real_headers
+    out = evk_out.read_text(encoding="utf-8")
+    assert "#define EVK_I2C_ADDR_TCAL9538_PCIE " not in out, (
+        "the plain (unassembled) macro name must not be defined -- "
+        "see EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED instead"
+    )
+    assert "#define EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED 0x71u" in out
+    assert "#define EVK_I2C_ADDR_TCA6408A_MAIN " not in out, (
+        "the plain (unassembled) macro name must not be defined -- "
+        "see EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED instead"
+    )
+    assert "#define EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED 0x20u" in out
+    # #1980 follow-up (item 7): both entries' hand-written `doc:` text
+    # already SAYS "NOT ASSEMBLED" (mid-sentence, not just as a prefix)
+    # -- the generator must not additionally prepend its own generic
+    # "NOT ASSEMBLED on this board revision." on top, or the phrase
+    # appears twice in one comment.  Check per-macro line, not the whole
+    # file: a whole-file substring/count check can't tell "duplicated on
+    # this exact line" from "each phrase legitimately appears once, on
+    # two different lines".
+    for macro in (
+        "EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED",
+        "EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED",
+    ):
+        line = next(l for l in out.splitlines() if l.startswith(f"#define {macro} "))
+        assert line.count("NOT ASSEMBLED") == 1, (
+            f"{macro}'s doc comment says NOT ASSEMBLED "
+            f"{line.count('NOT ASSEMBLED')} times, expected 1 -- the generic "
+            f"prefix must be skipped when doc: already says it: {line!r}"
+        )
+
+
+def test_assembled_false_renames_every_macro_the_entry_contributes(gen_module):
+    """Generator unit test (#1980), mutation-proof shape: flip `assembled`
+    on one fixture entry (with BOTH an alias and a calibration block, so
+    every code path in `_emit_i2c_devices` is exercised) and assert the
+    generated header changes in exactly the way claimed, in both
+    directions."""
+    base_doc: dict[str, Any] = {
+        "name": "TEST-ASSEMBLED",
+        "e1m_routes": {},
+        "i2c_devices": [
+            {
+                "macro": "EVK_I2C_ADDR_BAR",
+                "address": "0x55",
+                "alias": "EVK_I2C_ADDR_BAR_LEGACY",
+                "doc": "Test rail monitor.",
+                "calibration": {
+                    "shunt_macro": "EVK_INA236_SHUNT_BAR_OHMS",
+                    "shunt_ohms": "0.010",
+                    "max_macro": "EVK_INA236_MAX_BAR_A",
+                    "max_current_a": "1.0",
+                },
+            },
+        ],
+    }
+
+    # Direction 1: no `assembled:` key -> default true -> plain names.
+    out_fitted = gen_module.emit_board("TEST-ASSEMBLED", base_doc)
+    assert out_fitted is not None
+    defined_fitted = dict(re.findall(r"#define\s+(\S+)\s+(\S+)", out_fitted))
+    assert defined_fitted["EVK_I2C_ADDR_BAR"] == "0x55u"
+    assert defined_fitted["EVK_I2C_ADDR_BAR_LEGACY"] == "EVK_I2C_ADDR_BAR"
+    assert defined_fitted["EVK_INA236_SHUNT_BAR_OHMS"] == "0.010f"
+    assert defined_fitted["EVK_INA236_MAX_BAR_A"] == "1.0f"
+    assert "_NOT_ASSEMBLED" not in out_fitted
+
+    # Direction 2: `assembled: false` -> every contributed macro renamed,
+    # the plain names vanish, and the reason lands in the doc comment.
+    unfitted_doc = json.loads(json.dumps(base_doc))  # cheap deep copy
+    unfitted_doc["i2c_devices"][0]["assembled"] = False
+    out_unfitted = gen_module.emit_board("TEST-ASSEMBLED", unfitted_doc)
+    assert out_unfitted is not None
+    defined_unfitted = dict(re.findall(r"#define\s+(\S+)\s+(\S+)", out_unfitted))
+    assert "EVK_I2C_ADDR_BAR" not in defined_unfitted
+    assert "EVK_I2C_ADDR_BAR_LEGACY" not in defined_unfitted
+    assert "EVK_INA236_SHUNT_BAR_OHMS" not in defined_unfitted
+    assert "EVK_INA236_MAX_BAR_A" not in defined_unfitted
+    assert defined_unfitted["EVK_I2C_ADDR_BAR_NOT_ASSEMBLED"] == "0x55u"
+    assert (
+        defined_unfitted["EVK_I2C_ADDR_BAR_LEGACY_NOT_ASSEMBLED"]
+        == "EVK_I2C_ADDR_BAR_NOT_ASSEMBLED"
+    )
+    assert defined_unfitted["EVK_INA236_SHUNT_BAR_OHMS_NOT_ASSEMBLED"] == "0.010f"
+    assert defined_unfitted["EVK_INA236_MAX_BAR_A_NOT_ASSEMBLED"] == "1.0f"
+    assert "NOT ASSEMBLED on this board revision. Test rail monitor." in out_unfitted
+
+
+def test_assembled_false_does_not_duplicate_an_already_present_prefix(gen_module):
+    """Generator unit test (#1980 item 7), mutation-proof shape: when a
+    `doc:` already opens with "NOT ASSEMBLED" (as a hand-written entry
+    describing its own unfitted status does), the generator must not
+    stack its own generic prefix on top -- exactly one occurrence, not
+    two back-to-back."""
+    doc: dict[str, Any] = {
+        "name": "TEST-PREFIX",
+        "e1m_routes": {},
+        "i2c_devices": [
+            {
+                "macro": "EVK_I2C_ADDR_BAZ",
+                "address": "0x66",
+                "doc": "NOT ASSEMBLED on this revision -- footprint reserved.",
+                "assembled": False,
+            },
+        ],
+    }
+    out = gen_module.emit_board("TEST-PREFIX", doc)
+    assert out is not None
+    assert "NOT ASSEMBLED on this board revision. NOT ASSEMBLED" not in out, (
+        "the generic prefix must be skipped when doc: already says "
+        "NOT ASSEMBLED"
+    )
+    assert "NOT ASSEMBLED on this revision -- footprint reserved." in out
+
+
 def test_i2c_devices_reproduce_metadata_values(gen_module):
     """Generator unit test (issue #515): feed a hand-built YAML dict
     with an `i2c_devices:` block (address + alias + calibration) and
@@ -286,6 +469,118 @@ def test_i2c_devices_reproduce_metadata_values(gen_module):
     assert defined["EVK_I2C_ADDR_FOO_LEGACY"] == "EVK_I2C_ADDR_FOO"
     assert defined["EVK_INA236_SHUNT_FOO_OHMS"] == "0.030f"
     assert defined["EVK_INA236_MAX_FOO_A"] == "2.5f"
+
+
+def test_real_evk_header_covers_mux_enums(real_headers):
+    """Issue #637: mux-select / IO-expander-pin enums are now
+    single-sourced from `metadata/boards/e1m-evk.yaml`'s
+    `mux_enums:` block and generated -- assert every typedef +
+    enumerator value hand-written firmware relies on is still
+    defined, with the metadata's current values preserved verbatim
+    (not just presence -- bind each enumerator to ITS OWN value so a
+    metadata transposition between two enumerators of the same enum
+    can't pass a membership-only check). `EVK_SDIO_M2E_KEY`/
+    `EVK_SDIO_SDCARD` no longer carry their pre-#2129 hand-authored
+    values: #2129 found the SDIO mux select polarity inverted against
+    the E1M-EVK-2626-R2 netlist and swapped the pair's 0/1 values to
+    match."""
+    evk_out, _xevk_out = real_headers
+    out = evk_out.read_text(encoding="utf-8")
+
+    for typedef_name in (
+        "evk_sdio_select_t",
+        "evk_i2s_select_t",
+        "evk_usb2_select_t",
+        "evk_pcie_select_t",
+        "evk_pcie_ioexp_pin_t",
+        "evk_ioexp_pin_t",
+    ):
+        assert f"}} {typedef_name};" in out, f"{typedef_name} missing from generated header"
+
+    enum_values = {
+        "EVK_SDIO_SDCARD": "0",
+        "EVK_SDIO_M2E_KEY": "1",
+        "EVK_I2S_AMP": "0",
+        "EVK_I2S_M2E_KEY": "1",
+        "EVK_USB2_CONNECTOR": "0",
+        "EVK_USB2_M2E_KEY": "1",
+        "EVK_PCIE_E_KEY": "0",
+        "EVK_PCIE_M_KEY": "1",
+        "EVK_PCIE_IOEXP_I2C_SEL": "0",
+        "EVK_PCIE_IOEXP_M2E_ALERT": "1",
+        "EVK_PCIE_IOEXP_E_PCIE0_RST": "2",
+        "EVK_PCIE_IOEXP_E_PCIE0_WAKE": "3",
+        "EVK_PCIE_IOEXP_E_PCIE0_CLKREQ": "4",
+        "EVK_PCIE_IOEXP_M_PCIE0_RST": "5",
+        "EVK_PCIE_IOEXP_M_PCIE0_WAKE": "6",
+        "EVK_PCIE_IOEXP_M_PCIE0_CLKREQ": "7",
+        "EVK_IOEXP_LCD_PWR_EN": "0",
+        "EVK_IOEXP_LCD_RST": "1",
+        "EVK_IOEXP_CAM_EN": "2",
+        "EVK_IOEXP_CTP_RST": "3",
+        "EVK_IOEXP_ICM42670_INT1": "4",
+        "EVK_IOEXP_ICM42670_INT2": "5",
+        "EVK_IOEXP_ICM42670_FSYNC": "6",
+        "EVK_IOEXP_BMP581_INT1": "7",
+    }
+    found = dict(re.findall(r"(EVK_[A-Z0-9_]+)\s*=\s*(\d+),", out))
+    for name, value in enum_values.items():
+        assert found.get(name) == value, (
+            f"{name} = {found.get(name)!r}, expected {value!r} -- enum value "
+            f"drifted from the hand-authored original"
+        )
+
+
+def test_mux_enums_reproduce_metadata_values(gen_module):
+    """Generator unit test (issue #637): feed a hand-built YAML dict
+    with a `mux_enums:` block and assert the emitted `typedef enum`
+    text carries exactly the metadata's names/values -- not just
+    presence.  Complements the real-YAML coverage check above with a
+    minimal, generator-only fixture."""
+    doc = {
+        "name": "TEST-MUX",
+        "e1m_routes": {},
+        "mux_enums": [
+            {
+                "name": "test_select_t",
+                "doc": "Test mux.",
+                "values": [
+                    {"name": "TEST_SEL_A", "value": 0, "doc": "A."},
+                    {"name": "TEST_SEL_B", "value": 1, "doc": "B."},
+                ],
+            },
+        ],
+    }
+    out = gen_module.emit_board("TEST-MUX", doc)
+    assert out is not None
+    assert "/** Test mux. */" in out
+    assert "typedef enum {" in out
+    assert "TEST_SEL_A = 0, /**< A. */" in out
+    assert "TEST_SEL_B = 1, /**< B. */" in out
+    assert "} test_select_t;" in out
+
+
+def test_mux_enums_reject_duplicate_enumerator_values(gen_module):
+    """A schema `mux_enum_entry` can't express cross-item uniqueness
+    within its own `values:` list -- two enumerators silently sharing
+    a numeric value would read as a typo in the generated header, not
+    a build error.  `_emit_mux_enums()` enforces it at generation
+    time instead (issue #637)."""
+    doc = {
+        "name": "TEST-MUX-DUP",
+        "e1m_routes": {},
+        "mux_enums": [
+            {
+                "name": "test_dup_select_t",
+                "values": [
+                    {"name": "TEST_DUP_A", "value": 0},
+                    {"name": "TEST_DUP_B", "value": 0},
+                ],
+            },
+        ],
+    }
+    with pytest.raises(ValueError, match="must be unique"):
+        gen_module.emit_board("TEST-MUX-DUP", doc)
 
 
 def test_emit_board_selects_e1m_x_pinout_for_x_routes(gen_module):
@@ -336,6 +631,39 @@ def test_real_xevk_header_uses_x_pinout_and_covers_macros(real_headers):
     assert "ALP_E1M_X_I2C0" in out and "ALP_E1M_X_GPIO_PWM5" in out
 
 
+def test_real_xevk_header_covers_i2c_device_macros(real_headers):
+    """Issue #1636: the X-EVK's five INA236 addresses + shunt/max-current
+    calibration must come from `metadata/boards/e1m-x-evk.yaml`'s
+    `i2c_devices:` block and be generated -- not hand-defined in
+    `include/alp/boards/alp_e1m_x_evk.h`, which is the E1M-EVK's #515
+    fix never having been applied to its sibling carrier. Values must
+    be preserved verbatim from the previously hand-authored header."""
+    _evk_out, xevk_out = real_headers
+    out = xevk_out.read_text(encoding="utf-8")
+    must_define = {
+        "XEVK_I2C_ADDR_INA236_3V3": "0x40u",
+        "XEVK_I2C_ADDR_INA236_1V8": "0x41u",
+        "XEVK_I2C_ADDR_INA236_VCAM3": "0x49u",
+        "XEVK_I2C_ADDR_INA228_5V": "0x42u",
+        "XEVK_INA228_SHUNT_5V_OHMS": "0.100f",
+        "XEVK_INA228_MAX_5V_A": "1.6384f",
+        "XEVK_INA228_ADCRANGE_5V": "0",
+        "XEVK_INA236_SHUNT_3V3_OHMS": "0.020f",
+        "XEVK_INA236_MAX_3V3_A": "4.0f",
+        "XEVK_INA236_SHUNT_1V8_OHMS": "0.020f",
+        "XEVK_INA236_MAX_1V8_A": "4.0f",
+        "XEVK_INA236_SHUNT_VCAM3_OHMS": "0.050f",
+        "XEVK_INA236_MAX_VCAM3_A": "1.6f",
+    }
+    defined = dict(re.findall(r"#define\s+(\S+)\s+(\S+)", out))
+    for macro, value in must_define.items():
+        assert macro in defined, f"{macro} missing from generated X-EVK header"
+        assert defined[macro] == value, (
+            f"{macro} = {defined[macro]!r}, expected {value!r} -- value drifted "
+            f"from the hand-authored original"
+        )
+
+
 def test_main_removes_orphaned_generated_header(gen_module, tmp_path, monkeypatch):
     """#1128(b): a renamed/deleted board YAML must take its generated
     header with it -- a stale `alp_<slug>_routes.h` left behind would
@@ -348,14 +676,15 @@ def test_main_removes_orphaned_generated_header(gen_module, tmp_path, monkeypatc
         "name: SOLO\n"
         "e1m_routes:\n"
         "  gpio:\n"
-        "    - {e1m: E1M_GPIO_IO0, macro: SOLO_PIN, doc: t}\n"
+        "    - {e1m: E1M_GPIO_IO0, macro: SOLO_PIN, doc: t}\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(gen_module, "BOARDS_DIR", boards_dir)
     monkeypatch.setattr(gen_module, "OUT_DIR", out_dir)
     monkeypatch.setattr(gen_module, "REPO", tmp_path)
 
     stale = out_dir / "alp_deleted_board_routes.h"
-    stale.write_text("/* stale: source YAML was renamed/deleted */\n")
+    stale.write_text("/* stale: source YAML was renamed/deleted */\n", encoding="utf-8")
 
     rc = gen_module.main()
     assert rc == 0
@@ -375,13 +704,15 @@ def test_main_rejects_slug_collision(gen_module, tmp_path, monkeypatch):
         "name: FOO-BAR\n"
         "e1m_routes:\n"
         "  gpio:\n"
-        "    - {e1m: E1M_GPIO_IO0, macro: A_PIN, doc: t}\n"
+        "    - {e1m: E1M_GPIO_IO0, macro: A_PIN, doc: t}\n",
+        encoding="utf-8",
     )
     (boards_dir / "b.yaml").write_text(
         "name: foo_bar\n"
         "e1m_routes:\n"
         "  gpio:\n"
-        "    - {e1m: E1M_GPIO_IO1, macro: B_PIN, doc: t}\n"
+        "    - {e1m: E1M_GPIO_IO1, macro: B_PIN, doc: t}\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(gen_module, "BOARDS_DIR", boards_dir)
     monkeypatch.setattr(gen_module, "OUT_DIR", out_dir)
@@ -407,13 +738,15 @@ def test_main_rejects_identical_board_names(gen_module, tmp_path, monkeypatch):
         "name: SAME-NAME\n"
         "e1m_routes:\n"
         "  gpio:\n"
-        "    - {e1m: E1M_GPIO_IO0, macro: A_PIN, doc: t}\n"
+        "    - {e1m: E1M_GPIO_IO0, macro: A_PIN, doc: t}\n",
+        encoding="utf-8",
     )
     (boards_dir / "b.yaml").write_text(
         "name: SAME-NAME\n"
         "e1m_routes:\n"
         "  gpio:\n"
-        "    - {e1m: E1M_GPIO_IO1, macro: B_PIN, doc: t}\n"
+        "    - {e1m: E1M_GPIO_IO1, macro: B_PIN, doc: t}\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(gen_module, "BOARDS_DIR", boards_dir)
     monkeypatch.setattr(gen_module, "OUT_DIR", out_dir)
@@ -421,3 +754,114 @@ def test_main_rejects_identical_board_names(gen_module, tmp_path, monkeypatch):
 
     rc = gen_module.main()
     assert rc == 1
+
+
+def test_schema_rejects_xevk_overlay_pin_macro():
+    """#1636 review: `_emit_overlay_pins()` hard-codes
+    `EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT` (the 35x35 pinout's
+    count) with no E1M-X branch, so an `XEVK_PIN_*` entry in some
+    future board's `overlay_pins:` would emit a base macro built
+    from the WRONG carrier's GPIO count into a header that only
+    includes the E1M-X pinout, where ALP_E1M_GPIO_COUNT does not
+    exist.  The schema must refuse `XEVK_PIN_*` until the generator
+    grows a matching branch."""
+    schema = json.loads(
+        (REPO / "metadata" / "schemas" / "board-preset.schema.json").read_text(encoding="utf-8")
+    )
+    validator = jsonschema.Draft202012Validator(schema)
+    doc = {
+        "name": "DEMO",
+        "overlay_pins": [{"macro": "XEVK_PIN_DEMO", "doc": "demo"}],
+    }
+    errors = list(validator.iter_errors(doc))
+    assert errors, "XEVK_PIN_* overlay_pins macro must fail schema validation"
+
+
+def _ina228_board(max_a: str, adc_range: str = "163mv", shunt: str = "0.100") -> dict[str, Any]:
+    return {
+        "name": "TEST-INA228",
+        "e1m_routes": {},
+        "i2c_devices": [
+            {
+                "macro": "EVK_I2C_ADDR_MON",
+                "part": "ina228",
+                "address": "0x42",
+                "calibration": {
+                    "shunt_macro": "EVK_INA228_SHUNT_MON_OHMS",
+                    "shunt_ohms": shunt,
+                    "max_macro": "EVK_INA228_MAX_MON_A",
+                    "max_current_a": max_a,
+                    "adc_range_macro": "EVK_INA228_ADCRANGE_MON",
+                    "adc_range": adc_range,
+                },
+            },
+        ],
+    }
+
+
+def test_ina228_scale_macro_follows_adc_range(gen_module):
+    """The INA228 `adc_range` is emitted as the CONFIG.ADCRANGE bit value
+    (0 = 163.84 mV, 1 = 40.96 mV) next to the shunt / max-current macros."""
+    wide = gen_module.emit_board("TEST-INA228", _ina228_board("1.6384", "163mv"))
+    narrow = gen_module.emit_board("TEST-INA228", _ina228_board("0.4096", "40mv"))
+    assert wide is not None and narrow is not None
+    assert dict(re.findall(r"#define\s+(\S+)\s+(\S+)", wide))["EVK_INA228_ADCRANGE_MON"] == "0"
+    assert dict(re.findall(r"#define\s+(\S+)\s+(\S+)", narrow))["EVK_INA228_ADCRANGE_MON"] == "1"
+
+
+def test_ina228_max_current_above_the_range_full_scale_is_rejected(gen_module):
+    """Full scale = range voltage / shunt: 1.6384 A (163mv) or 0.4096 A (40mv)
+    for 100 mOhm.  The boundary passes, anything above fails the generation."""
+    gen_module.emit_board("TEST-INA228", _ina228_board("1.6384", "163mv"))
+    gen_module.emit_board("TEST-INA228", _ina228_board("0.4096", "40mv"))
+    with pytest.raises(SystemExit, match="above the 163mv range's full scale"):
+        gen_module.emit_board("TEST-INA228", _ina228_board("1.6385", "163mv"))
+    with pytest.raises(SystemExit, match="above the 40mv range's full scale"):
+        gen_module.emit_board("TEST-INA228", _ina228_board("0.4097", "40mv"))
+    # The narrow range's limit tracks the shunt: 10 mOhm -> 4.096 A.
+    gen_module.emit_board("TEST-INA228", _ina228_board("4.096", "40mv", shunt="0.010"))
+    with pytest.raises(SystemExit):
+        gen_module.emit_board("TEST-INA228", _ina228_board("4.1", "40mv", shunt="0.010"))
+
+
+def test_schema_rejects_an_unknown_ina228_range_or_a_range_without_its_macro():
+    schema = json.loads(
+        (REPO / "metadata" / "schemas" / "board-preset.schema.json").read_text(encoding="utf-8")
+    )
+    validator = jsonschema.Draft202012Validator(schema)
+
+    def errors(board: dict[str, Any]) -> list[Any]:
+        """Schema errors located inside a `calibration:` block only."""
+        board = {**board, "e1m_routes": {}}
+        return [e for e in validator.iter_errors(board) if "calibration" in list(e.absolute_path)]
+
+    good = _ina228_board("1.6384", "163mv")
+    assert not errors(good)
+    bad_enum = _ina228_board("1.6384", "81mv")
+    assert errors(bad_enum), "an unknown adc_range must fail schema validation"
+    no_macro = _ina228_board("1.6384", "163mv")
+    del no_macro["i2c_devices"][0]["calibration"]["adc_range_macro"]
+    assert errors(no_macro), "adc_range without adc_range_macro must fail schema validation"
+
+
+def test_adc_range_is_rejected_on_a_part_other_than_ina228(gen_module):
+    """`adc_range` is INA228-only: the generator and the schema both refuse it
+    on an `ina236` entry (whose range enum and full scales differ)."""
+    board = _ina228_board("1.0", "163mv")
+    board["i2c_devices"][0]["part"] = "ina236"
+    with pytest.raises(SystemExit, match="INA228-only"):
+        gen_module.emit_board("TEST-INA228", board)
+
+    schema = json.loads(
+        (REPO / "metadata" / "schemas" / "board-preset.schema.json").read_text(encoding="utf-8")
+    )
+    validator = jsonschema.Draft202012Validator(schema)
+    doc = {**board, "e1m_routes": {}}
+    errs = [e for e in validator.iter_errors(doc) if "i2c_devices" in list(e.absolute_path)]
+    assert errs, "adc_range on an ina236 entry must fail schema validation"
+    # The same entry as an ina228 is accepted.
+    doc["i2c_devices"][0]["part"] = "ina228"
+    assert not [e for e in validator.iter_errors(doc) if "i2c_devices" in list(e.absolute_path)]
+    # An entry with no part at all, carrying adc_range, is rejected too.
+    del doc["i2c_devices"][0]["part"]
+    assert [e for e in validator.iter_errors(doc) if "i2c_devices" in list(e.absolute_path)]

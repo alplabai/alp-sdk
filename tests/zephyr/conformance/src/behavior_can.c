@@ -394,6 +394,42 @@ ZTEST(alp_testing_can_behavior, test_reset_all_frees_side_state)
 	alp_can_close(h2);
 }
 
+/* #1631: src/can_dispatch.c's mode guard ("fd = true on a handle not
+ * opened ALP_CAN_MODE_FD") lives in the dispatcher precisely so it
+ * covers every backend, not just zephyr_drv.c -- exercise it here
+ * against the priority-255 test double so that claim is actually
+ * tested off the Zephyr path. */
+ZTEST(alp_testing_can_behavior, test_fd_frame_rejected_on_classic_handle)
+{
+	const uint32_t bus_id = 10;
+
+	alp_can_t *h = open_bus(bus_id); /* ALP_CAN_CONFIG_DEFAULT -> classic mode */
+	zassert_not_null(h, "can test double must open ANY instance");
+	zassert_equal(alp_can_start(h), ALP_OK, "start() failed");
+
+	alp_can_frame_t frame = { 0 };
+	frame.id              = 0x123;
+	frame.fd              = true;
+	frame.payload_len     = ALP_CAN_MAX_PAYLOAD_BYTES_FD; /* 64 */
+	memset(frame.data, 0x5A, sizeof(frame.data));
+
+	alp_status_t rc = alp_can_send(h, &frame, 100);
+	zassert_equal(rc,
+	              ALP_ERR_NOSUPPORT,
+	              "fd-flagged send on a classic-mode handle returned %d, not "
+	              "ALP_ERR_NOSUPPORT -- the dispatcher mode guard did not fire for the "
+	              "test double",
+	              (int)rc);
+
+	/* A rejected send never reaches the TX ring. */
+	alp_can_frame_t out[1] = { 0 };
+	zassert_equal(alp_testing_can_tx_drain(bus_id, out, 1),
+	              0,
+	              "a mode-guard-rejected send must not be captured by tx_drain");
+
+	alp_can_close(h);
+}
+
 /* #610 review (test-completeness): reset_all() must free every
  * deferred RX frame that was scheduled but never fired (advance_ms()
  * never reached it) -- mirrors behavior_gpio.c's

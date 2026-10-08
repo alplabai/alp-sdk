@@ -1,0 +1,33 @@
+/*
+ * panel_30hz.overlay -- P11a: the RK055HDMIPI4MA0 at 30 Hz instead of 40 Hz,
+ * 33.3 ms of render time a frame instead of 25 ms. Opt-in: pass it after the
+ * e1m_evk_rk055hdmipi4ma0 shield with -DEXTRA_DTC_OVERLAY_FILE=; the game
+ * derives its refresh from the cdc200 timings, so its frame-counted constants
+ * follow (src/game/panel_hz.h).
+ *
+ * ONE property changes: the vertical front porch, 16 -> 454 lines. refresh =
+ * pclk / (htotal * vtotal):
+ *   shield: 40,000,000 / (762 * 1312) = 40.012 Hz
+ *   here:   40,000,000 / (762 * 1750) = 29.996 Hz   (vtotal 1312 + 438)
+ * htotal = 720 + 6 + 12 + 24 = 762; vtotal = 1280 + 2 + vfp + 14.
+ *
+ * Why the porch and not a slower pixel clock (400 MHz / 13 = 30.77 MHz):
+ * the pixel clock also sets the DSI host's lane rate (dsi_dw.c, non-burst:
+ * 40 MHz -> 483.6 Mbps/lane), the D-PHY PLL, the DSI byte-clock / pixel-clock
+ * scale behind every HSA/HBP/HLINE value, and the line rate (52.49 kHz). The
+ * HX8394 clocks its VGH/VGL charge pumps off HSYNC (display_hx8394.c SETPOWER
+ * CLK_OPT_VGH/VGL_HSYNC_RST) and its GIP / SETCYC timings in lines. Keeping
+ * the pixel clock keeps every one of those bit-identical to the bench-proven
+ * 40 Hz link; only the count of blanking lines per frame grows. No panel
+ * command changes (and never SETOTP BBh / SETID C3h).
+ *
+ * Limits: DSI_VID_VFP_LINES is 10 bits (454 <= 1023); the CDC200 porch
+ * fields are 16 bits; the CDC200 line IRQ that lands the flip stays at line
+ * vsync + vbp + height = 1296, now 454 lines before the frame ends instead
+ * of 16. tests/host/test_panel_hz.c parses this file and checks the
+ * arithmetic.
+ */
+
+&cdc200 {
+	vfront-porch = <454>;
+};

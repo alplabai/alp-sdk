@@ -97,7 +97,8 @@ alp_update_log_t *alp_update_log_open(void)
 		}
 		if (s == ALP_HANDLE_LC_UNOPENED) {
 			if (!alp_lifecycle_cas(&g_log.lifecycle, ALP_HANDLE_LC_UNOPENED, UL_LC_OPENING)) {
-				continue; /* lost the election; re-observe */
+				alp_slot_sleep_tick(); /* lost the election; re-observe (issue #1625) */
+				continue;
 			}
 			/* Elected initializer. */
 			alp_status_t rc = _elect_backend();
@@ -109,14 +110,18 @@ alp_update_log_t *alp_update_log_open(void)
 			alp_lifecycle_set(&g_log.lifecycle, ALP_HANDLE_LC_UNOPENED);
 			return NULL;
 		}
-		/* OPENING or CLOSING in flight: spin until it resolves, then loop. */
+		/* OPENING or CLOSING in flight: sleep a tick and re-observe (issue
+		 * #1625) -- a busy spin here never yields the core to a lower-
+		 * priority initializer/closer on Zephyr's preemptive scheduler,
+		 * per #1114's verdict (src/common/alp_slot_claim.h:152-163). */
+		alp_slot_sleep_tick();
 	}
 }
 
 alp_status_t alp_update_log_append(alp_update_log_t *log, const alp_update_log_entry_t *entry)
 {
 	if (log == NULL || entry == NULL) return ALP_ERR_INVAL;
-	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_NOT_READY;
 	alp_status_t rc =
 	    (log->ops->append == NULL) ? ALP_ERR_NOT_IMPLEMENTED : log->ops->append(entry);
 	alp_handle_op_leave(&log->active_ops);
@@ -141,7 +146,7 @@ alp_status_t alp_update_log_entry_from_boot_metadata(alp_update_log_entry_t *ent
 alp_status_t alp_update_log_append_boot(alp_update_log_t *log, uint64_t timestamp)
 {
 	if (log == NULL) return ALP_ERR_INVAL;
-	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_NOT_READY;
 
 	alp_status_t rc;
 	if (log->ops->append == NULL) {
@@ -162,7 +167,7 @@ alp_status_t alp_update_log_verify(alp_update_log_t         *log,
                                    uint64_t                 *bad_seq_out)
 {
 	if (log == NULL || verdict_out == NULL) return ALP_ERR_INVAL;
-	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_NOT_READY;
 	alp_status_t rc = (log->ops->verify == NULL) ? ALP_ERR_NOT_IMPLEMENTED
 	                                             : log->ops->verify(verdict_out, bad_seq_out);
 	alp_handle_op_leave(&log->active_ops);
@@ -172,7 +177,7 @@ alp_status_t alp_update_log_verify(alp_update_log_t         *log,
 alp_status_t alp_update_log_count(alp_update_log_t *log, uint64_t *count_out)
 {
 	if (log == NULL || count_out == NULL) return ALP_ERR_INVAL;
-	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_NOT_READY;
 	alp_status_t rc =
 	    (log->ops->count == NULL) ? ALP_ERR_NOT_IMPLEMENTED : log->ops->count(count_out);
 	alp_handle_op_leave(&log->active_ops);
@@ -183,7 +188,7 @@ alp_status_t
 alp_update_log_get(alp_update_log_t *log, uint64_t seq, alp_update_log_entry_t *entry_out)
 {
 	if (log == NULL || entry_out == NULL) return ALP_ERR_INVAL;
-	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_INVAL;
+	if (!alp_handle_op_enter(&log->lifecycle, &log->active_ops)) return ALP_ERR_NOT_READY;
 	alp_status_t rc =
 	    (log->ops->get == NULL) ? ALP_ERR_NOT_IMPLEMENTED : log->ops->get(seq, entry_out);
 	alp_handle_op_leave(&log->active_ops);

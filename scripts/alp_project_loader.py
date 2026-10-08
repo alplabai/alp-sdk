@@ -20,6 +20,7 @@ import functools
 import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -188,7 +189,8 @@ def _resolve_sku(sku: str, metadata_root: Path) -> dict[str, Any]:
     preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
     if not preset_path.is_file():
         sys.exit(
-            f"alp_project: no preset for SKU {sku} at {preset_path.relative_to(REPO)} "
+            f"alp_project: no preset for SKU {sku} at "
+            f"{preset_path.relative_to(REPO) if preset_path.is_relative_to(REPO) else preset_path} "
             f"(remaining SKUs land alongside the user-supplied HW config writeup)"
         )
     return _load_yaml(preset_path)
@@ -244,13 +246,6 @@ def split_silicon_ref(silicon: str | None) -> tuple[str, str, str] | None:
     want the slugs themselves, use this and root it their own way. Either
     way there is ONE place that knows a `silicon:` ref is three
     colon-separated parts.
-
-    Note the one remaining independent encoding of that fact:
-    `alp_cli/new_som.py::_SOC_REF_RE` (`^[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]+$`)
-    validates the arity up front for its own `--soc-ref` flag, and would
-    also need widening if the format ever grows a 4th part. It is a CLI
-    input validator rather than a resolution site, so it is deliberately
-    not folded in here -- but it is the other thing to change.
     """
     if not silicon:
         return None
@@ -283,13 +278,17 @@ def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     each behind a thin wrapper that preserves that site's original
     exception type or soft-fail shape.
 
-    Issue #1096 closed out the remaining hand-rolled copies. The two that
-    root at a metadata root now call this helper (`alp_model/targets.py`,
-    `alp_cli/new_som.py`'s preset-path site); the rest root elsewhere and
-    call `split_silicon_ref()` directly, including the three slug-extraction
-    sites in `alp_cli/new_som.py` that #1096 originally scoped out -- they
-    were the same three-part split, so leaving them would have left the
-    drift the issue exists to close.
+    Issue #1096 closed out the remaining hand-rolled copies. The one that
+    roots at a metadata root now calls this helper (`resolve_targets()`
+    below -- it lived in `alp_model/targets.py` at the time, moved into
+    this module by issue #1943; `alp_cli/new_som.py` held a second
+    preset-path site until that module retired, alp-sdk#1367/#1368); the
+    rest root elsewhere and call
+    `split_silicon_ref()` directly -- that set used to include three
+    slug-extraction sites in `alp_cli/new_som.py` that #1096 originally
+    scoped out because they were the same three-part split, so leaving them
+    would have left the drift the issue exists to close; those sites are
+    gone with the module now.
 
     There is no remaining `silicon.split(":")` outside this module; a
     regression test pins that.
@@ -522,7 +521,8 @@ def resolve_memory_map(
          SoC `cores[]` list.
 
     The returned dicts have the keys defined by the memory_region
-    schema: `name`, `size_kib`, `accessible_from`, `cacheable` (plus
+    schema: `name`, `size_kib`, `accessible_from`, `cacheable`,
+    `write_authority` (always set explicitly on derived rows) (plus
     optional `base` only when the SoM preset's override declares one
     -- silicon-default bases stay unset, so downstream emitters know
     to use the silicon's defaults).
@@ -554,7 +554,10 @@ def resolve_memory_map(
     # authoritative base addresses (e.g. RZ/V2N OCRAM at 0x00010000).
     soc_memory_regions = soc_spec.get("memory_regions")
     if soc_memory_regions:
-        return list(soc_memory_regions)
+        # Every SoC-level region is RAM (no SoC declares a flash window
+        # here), so each is runtime-writable by the application.
+        return [{**r, "write_authority": "customer_runtime"}
+                for r in soc_memory_regions]
 
     # MRAM as one region (size in KiB; mram_mb -> *1024).
     mram_mb = variant.get("mram_mb")
@@ -564,6 +567,11 @@ def resolve_memory_map(
             "size_kib": int(mram_mb * 1024),
             "accessible_from": list(soc_cores),
             "cacheable": True,
+            # The whole-device alias spans MCUboot/ATOC/slot0/storage
+            # rows of differing authority, so no single value is true;
+            # `composite` is the schema's explicit word for that
+            # (ADR-0034 clause 4: stated, never defaulted).
+            "write_authority": "composite",
         })
 
     # SRAM banks. Per-core TCM banks get `accessible_from: [<core>]`;
@@ -586,6 +594,8 @@ def resolve_memory_map(
             "size_kib": int(size_kib),
             "accessible_from": accessible,
             "cacheable": not is_tcm,
+            # SRAM/TCM is RAM: runtime-writable by the application.
+            "write_authority": "customer_runtime",
         })
 
     return regions
@@ -626,6 +636,14 @@ def resolve_capabilities(
     # SoM side wins on collision (bridge / add-on overrides silicon default).
     merged: dict[str, Any] = {**soc_caps, **som_caps}
 
+    # GPU: a per-die fact (variants[].optional_features.gpu_mali_g31, the one
+    # source) -- the SoC-level capabilities block cannot carry it because
+    # four of the eight RZ/V2N dies are fused without the Mali-G31.
+    variant = _resolve_silicon_variant(sku_preset, metadata_root)
+    mali = ((variant or {}).get("optional_features") or {}).get("gpu_mali_g31")
+    if mali is not None:
+        merged["gpu2d"] = bool(mali)
+
     # SKU-level restriction: capabilities the silicon offers but this SKU
     # leaves unpopulated (per-SKU granularity -- one family, many SKUs).
     # Preserve the value class so count-style caps (ethos_u55_count, ...)
@@ -654,3 +672,180 @@ def som_unpopulated_capabilities(sku_preset: dict[str, Any]) -> list[str]:
     if not isinstance(names, list):
         return []
     return [str(n) for n in names]
+
+
+# ---------------------------------------------------------------------
+# Model compile-target resolution
+# ---------------------------------------------------------------------
+#
+# Moved here from `scripts/alp_model/targets.py` (issue #1943): the
+# model-perf-v1 semantic cross-check in `scripts/validate_metadata.py` -- a
+# PR-blocking gate -- is a genuine consumer of `resolve_targets()` /
+# `npu_backend()` / `accel_config()`, and that gate must not import
+# `alp_model` -- a package that is due for deletion outright (ADR-0028
+# Task 6) -- or it breaks the moment that happens.
+
+
+@dataclass(frozen=True)
+class TargetSpec:
+    """One `.alpmodel` compile target: backend + owning silicon + vela accel-config.
+
+    The `vela_*` fields are the SoC spec's `npu_toolchain.vela` block
+    (metadata/schemas/soc-spec-v1.schema.json), resolved HERE from the open
+    SoC JSON and threaded to the ethos_u compiler adapter -- never re-read
+    from metadata/ inside the adapter, so a fact resolved once cannot
+    disagree with itself between the target and the artifact it produced
+    (mirrors tan-cli's `TargetSpec.vela_memory_mode`). All are "" / None
+    for a non-ethos_u target.
+
+    `vela_system_config` and `vela_vendor_system_config` are split by what is
+    SAFE TO PASS, per `system_config_requires_vendor_config`: the former is
+    an Arm built-in `System_Config` name that vela accepts on the command
+    line alone; the latter exists only inside a vendor `.ini` and is legal
+    only alongside a `--config` pointing at it (`ALP_VELA_CONFIG`). Exactly
+    one of the two is ever populated -- the adapter may put
+    `vela_system_config` on a command line unconditionally, and
+    `vela_vendor_system_config` only when a vendor config file is on hand,
+    because it is never handed a vendor-gated name in the field it passes
+    freely (mirrors tan-cli's `TargetSpec.vela_system_config` /
+    `vela_vendor_system_config` split, alp-sdk#2312)."""
+    backend: str            # cpu | ethos_u | drpai | deepx_dxm1
+    silicon_ref: str        # SoC ref e.g. "alif:ensemble:e7" | "deepx:dx:m1" | "*"
+    accel_config: str       # vela accel-config e.g. "ethos-u55-256"; "" when N/A
+    vela_memory_mode: str = ""              # vela --memory-mode, e.g. "Sram_Only"; "" when unknown
+    vela_system_config: str | None = None          # built-in, safe to pass alone; None when unnamed
+    vela_vendor_system_config: str | None = None   # vendor-gated; needs --config alongside it
+    vela_vendor_config_filename: str | None = None  # basename only, e.g. "ensemble_vela.ini"
+
+
+def npu_backend(npu_type: str, subtype: str) -> str | None:
+    """Map one `npus[]` entry's `type`/`subtype` to a compile backend, or
+    None when the entry names no known accelerator family."""
+    if npu_type.startswith("ethos-u"):
+        return "ethos_u"
+    if "drp" in npu_type or "drp" in subtype:   # renesas DRP-AI ("drp-ai" / "ai-mac+drp")
+        return "drpai"
+    if npu_type.startswith("dx") or "deepx" in npu_type:
+        return "deepx_dxm1"
+    return None
+
+
+def accel_config(npu: dict, backend: str) -> str:
+    """vela `--accelerator-config` string for one `npus[]` entry, e.g.
+    `ethos-u55-256`; `""` for a backend with no per-target accel-config.
+
+    The one machine source of this string -- `_soc_targets()` below and
+    `scripts/validate_metadata.py`'s model-perf paired-core cross-check
+    both call it, rather than each hand-building the same f-string, so
+    the two can't drift (issue #1520 review, PR #1884): a missing
+    `mac_per_cycle` on an `ethos_u` npus[] entry is a malformed SoC JSON
+    and raises `KeyError` here, with a message naming the npu type and the
+    missing key -- it must never be silently masked into a truncated
+    string like `ethos-u55-`.
+    """
+    if backend != "ethos_u":
+        return ""
+    try:
+        return f"{npu['type']}-{npu['mac_per_cycle']}"
+    except KeyError as exc:
+        raise KeyError(
+            f"ethos_u npu {npu.get('type', '<missing type>')!r} is missing "
+            f"required key {exc.args[0]!r} -- every ethos-u* npus[] entry "
+            f"must declare mac_per_cycle "
+            f"(metadata/schemas/soc-spec-v1.schema.json)"
+        ) from exc
+
+
+def _soc_targets(soc: dict, silicon_ref: str) -> list[TargetSpec]:
+    """One TargetSpec per mappable NPU in a SoC's npus[] (deduped by the caller)."""
+    vela = soc.get("npu_toolchain", {}).get("vela", {})
+    out: list[TargetSpec] = []
+    for npu in soc.get("npus", []):
+        npu_type = npu.get("type", "")
+        backend = npu_backend(npu_type, npu.get("subtype", ""))
+        if backend is None:
+            continue
+        accel = accel_config(npu, backend)
+        kwargs = {}
+        if backend == "ethos_u":
+            named_system_config = vela.get("system_config")
+            # Fail CLOSED, not open: an ABSENT/non-False
+            # `system_config_requires_vendor_config` withholds the name from
+            # the safe-to-pass field, exactly as an explicit `true` does --
+            # the schema requires this key whenever a `vela` block exists, so
+            # a spec that omits it is malformed, and the safe reading of a
+            # malformed spec is "assume vendor-gated", not "assume built-in
+            # and put an unresolvable name on vela's command line" (a hard
+            # rc=1, mirrors tan-cli's `_vela_profile`).
+            requires_vendor_config = vela.get("system_config_requires_vendor_config") is not False
+            kwargs = dict(
+                vela_memory_mode=vela.get("memory_mode", ""),
+                vela_system_config=None if requires_vendor_config else named_system_config,
+                vela_vendor_system_config=named_system_config if requires_vendor_config else None,
+                vela_vendor_config_filename=vela.get("vendor_config_filename"),
+            )
+        out.append(TargetSpec(backend=backend, silicon_ref=silicon_ref, accel_config=accel, **kwargs))
+    return out
+
+
+def _discrete_socs(sku: str, host_ref: str, metadata_root: Path) -> list[tuple[str, dict]]:
+    """SoCs (other than the host) whose variants[].alp_module_skus list this SKU --
+    i.e. on-module discrete accelerators wired to the host (DEEPX DX-M1 on V2M)."""
+    found: list[tuple[str, dict]] = []
+    for path in sorted((metadata_root / "socs").glob("**/*.json")):
+        soc = json.loads(path.read_text(encoding="utf-8"))
+        ref = soc.get("ref")
+        if not ref or ref == host_ref:
+            continue
+        skus = {s for v in soc.get("variants", []) for s in v.get("alp_module_skus", [])}
+        if sku in skus:
+            found.append((ref, soc))
+    return found
+
+
+def resolve_targets(sku: str, *, metadata_root: Path) -> list[TargetSpec]:
+    """Derive .alpmodel compile targets from a SoM SKU (silicon-determined).
+
+    Targets come from the host SoC's npus[] *and* from any on-module discrete
+    accelerator (e.g. the DEEPX DX-M1 on V2M SoMs). A discrete accelerator is
+    any *other* SoC JSON whose variants[].alp_module_skus lists this SKU --
+    so the SoC JSON's alp_module_skus stays the single source of truth (no
+    hardcoded backend->silicon map).
+    """
+    preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
+    if not preset_path.is_file():
+        raise FileNotFoundError(f"no SoM preset for SKU {sku} at {preset_path}")
+    preset = yaml.safe_load(preset_path.read_text(encoding="utf-8"))
+
+    silicon = preset["silicon"]                                 # host SoC, e.g. "alif:ensemble:e7"
+    # resolve_soc_path() returns None where the old inline 3-tuple unpack
+    # raised ValueError, so re-raise it here: callers distinguish a
+    # malformed ref (ValueError) from a well-formed ref naming a spec that
+    # isn't on disk (FileNotFoundError, below), and collapsing the two
+    # would be a behaviour change, not a refactor (#1096).
+    soc_path = resolve_soc_path(silicon, metadata_root)
+    if soc_path is None:
+        raise ValueError(
+            f"malformed silicon ref {silicon!r} in {preset_path}: expected "
+            f"exactly 3 colon-separated parts (<vendor>:<family>:<part>)"
+        )
+    if not soc_path.is_file():
+        raise FileNotFoundError(f"no SoC spec for {silicon} at {soc_path}")
+    host_soc = json.loads(soc_path.read_text(encoding="utf-8"))
+
+    specs: list[TargetSpec] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(spec: TargetSpec) -> None:
+        key = (spec.backend, spec.accel_config)
+        if key not in seen:
+            seen.add(key)
+            specs.append(spec)
+
+    for spec in _soc_targets(host_soc, silicon):                   # host SoC NPUs
+        _add(spec)
+    for ref, dsoc in _discrete_socs(sku, silicon, metadata_root):  # on-module discrete NPUs
+        for spec in _soc_targets(dsoc, ref):
+            _add(spec)
+    _add(TargetSpec(backend="cpu", silicon_ref="*", accel_config=""))  # CPU always present
+    return specs

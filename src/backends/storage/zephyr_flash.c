@@ -31,38 +31,25 @@
 #include <alp/soc_caps.h>
 #include <alp/storage.h>
 
+#include "alp_errno.h"
 #include "storage_ops.h"
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENODEV:
-	case -ENOENT:
-		return ALP_ERR_NOT_READY;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	case -ERANGE:
-		return ALP_ERR_OUT_OF_RANGE;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * BEHAVIOUR CHANGE: this switch had no -EAGAIN and/or no -ETIMEDOUT
+	 * arm, so a driver-reported deadline surfaced as ALP_ERR_IO.  Callers
+	 * can now receive ALP_ERR_TIMEOUT here, and ALP_ERR_NOT_READY /
+	 * ALP_ERR_NOMEM / ALP_ERR_NOSUPPORT for the other arms the switch
+	 * lacked.  Every arm it DID carry agreed with the baseline. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static alp_status_t z_open(const alp_storage_config_t  *cfg,
                            alp_storage_backend_state_t *st,
                            alp_capabilities_t          *caps_out)
 {
+	(void)caps_out;
 	/* SD/MMC isn't a flash_area abstraction.  alp_storage_open()
      * calls alp_backend_select() once (no retry loop -- that's
      * alp_backend_select_next(), used by security/update_log, not
@@ -74,8 +61,7 @@ static alp_status_t z_open(const alp_storage_config_t  *cfg,
 	if (err != 0 || fa == NULL) {
 		return _errno_to_alp(err);
 	}
-	st->dev         = (void *)fa;
-	caps_out->flags = 0u;
+	st->dev = (void *)fa;
 	return ALP_OK;
 }
 
@@ -83,16 +69,24 @@ static alp_status_t z_get_info(alp_storage_backend_state_t *st, alp_storage_info
 {
 	const struct flash_area *fa = (const struct flash_area *)st->dev;
 	if (fa == NULL) return ALP_ERR_NOT_READY;
-	/* Erase size from the underlying flash device.  Zephyr exposes
-     * the unit via flash_get_write_block_size / flash_params; for
-     * v0.6 we report fa_size as both total and erase granule when
-     * the device API is opaque.  Real-silicon backends override. */
+	/* include/alp/storage.h: "Both bounds MUST align to the device's
+     * erase_size".  flash_area_get_device(fa) below is a real device
+     * handle, not opaque -- flash_get_page_info_by_offs() reads the
+     * actual page/sector size straight from the flash driver.  1u is
+     * only a last-resort default if CONFIG_FLASH_PAGE_LAYOUT is off
+     * or the lookup fails. */
 	info->total_bytes        = fa->fa_size;
 	info->block_size         = 1u;
 	info->erase_size         = 1u;
 	const struct device *dev = flash_area_get_device(fa);
 	if (dev != NULL) {
 		info->block_size = flash_get_write_block_size(dev);
+#if defined(CONFIG_FLASH_PAGE_LAYOUT)
+		struct flash_pages_info page;
+		if (flash_get_page_info_by_offs(dev, fa->fa_off, &page) == 0) {
+			info->erase_size = page.size;
+		}
+#endif
 	}
 	return ALP_OK;
 }

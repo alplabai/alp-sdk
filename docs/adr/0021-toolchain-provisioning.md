@@ -6,6 +6,53 @@ correction, and the item-2 injection-set / dtc-gperf corrections.
 Date: 2026-07-25
 Deciders: alpCaner
 
+## Amendment (2026-08-26 — the dtc/gperf-consumer citation named a retired file)
+
+The dtc/gperf open-evidence Amendment below (2026-07-26) names its
+consumers as "`scripts/alp_cli/doctor.py`'s `_check_dtc` / `_check_gperf`
+hints and `metadata/bootstrap.json`'s `manualInstallHints.windows.note`."
+`scripts/alp_cli/doctor.py` is gone — alp-sdk#1367/#1368 deleted it along
+with the rest of the `alp_cli` command-line wrappers (ADR 0020's Amendment
+item 8). `metadata/bootstrap.json`'s `manualInstallHints.windows.note`
+still carries the corrected wording and is unaffected. The host-tool check
+itself is now `tan doctor`'s job — a generic host-tools presence check
+(`git`/`cmake`/`ninja`/`dtc`/`gperf`/`vendorToolchain`/...,
+`python/tan/commands/doctor_cmd.py` in `tan-cli`), not a `dtc`/`gperf`-named
+function; this ADR's earlier text should not be read as pinning specific
+function names in the live tool.
+
+## Amendment (2026-08-26 — both 2026-08-07 blockers cleared at tan-cli v0.6.0-rc1)
+
+Corrects the 2026-08-07 Amendment's "Net effect" paragraph: both halves of
+the blocker it named are now closed, so the Lane-1 P1 env-injection half is
+no longer resolver-blocked.
+
+- **The resolver landed.** `python/tan/commands/build/toolchain.py`'s
+  `resolve_toolchain_root()` is the Python port of
+  `crate::toolchain::resolve_toolchain_root` (tan-cli#547) and is wired at
+  `python/tan/commands/build_cmd.py:1497` as `toolchain_root=toolchain.root`.
+  No live call site in the shipped `python/tan/` package still passes
+  `toolchain_root=None`; the only two occurrences of that literal left in
+  `python/tan/` are prose in `build/toolchain.py`'s own module docstring
+  and `doctor_cmd.py` narrating the old, now-closed state. (`python/tests/`
+  carries the other 28 of the tree's 30 occurrences at `v0.6.0-rc1`,
+  several as live call sites, e.g. `test_build_token_substitution.py:38,60,80`
+  and `test_plan_tokens.py:53` — expected, since those tests exercise the
+  pre-resolver default explicitly; this claim is scoped to the shipped
+  package, not the test suite.)
+- **The `--materialise` demotion silence is also closed**, by tan-cli#565:
+  `_demoted_artefact_issues()` (`build_cmd.py:1406`) reports a demoted
+  artefact as an `Issue` in the envelope when `mode == _MODE_MATERIALISE`
+  (`build_cmd.py:1545-1549`), instead of the silent, policy-blind drop the
+  2026-08-07 Amendment's repro described.
+- **Shipped in tan-cli `v0.6.0-rc1`** (tagged 2026-08-14; `TAN_VERSION` at
+  `python/tan/version.py:49`), a real, existing tag.
+
+**Net effect on this ADR's Lane-1 P1 env-injection half.** No longer
+resolver-blocked or silence-blocked. Whether to move this ADR off
+`Proposed` is a decision on its remaining merits, not on either blocker
+named above.
+
 ## Amendment (2026-08-07 — a substitution-set token existing is not the same as it resolving; the Python executor line still hardcodes `toolchain_root=None`)
 
 Corrects the 2026-07-26 "drop `-DCMAKE_MAKE_PROGRAM`..." Amendment's read of
@@ -95,7 +142,7 @@ GD32-only scoping:
   the E1M-X V2N / V2N-M1 GD32 bridge firmware (`docs/gd32-bridge.md`,
   `docs/bring-up-v2n.md`, `docs/tutorials/07-recovering-a-bricked-bridge.md`);
   building the CC3501E bridge firmware's silicon-free stub target
-  (`firmware/cc3501e/README.md`, `firmware/cc3501e/toolchain/arm-none-eabi.cmake`
+  (`cc3501e-bridge-firmware:README.md`, `cc3501e-bridge-firmware:toolchain/arm-none-eabi.cmake`
   -- the CC3501E's *production* image builds with TI `ticlang`, not this
   toolchain); and hand-written bare-metal firmware targeting a real
   M-class core (`ALP_OS=baremetal`, no Zephyr).

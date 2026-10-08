@@ -85,15 +85,28 @@ int main(void)
      * can do (instance-level runtime gate -- pairs with the SoC-level
      * alp_has() / ALP_HAS() gate demonstrated at step 0).
      *
-     * For HW oversampling: this is reachable through the portable
-     * config field cfg->oversampling_ratio at open time -- no vendor
-     * ext needed.  Re-open with oversampling_ratio=8 to demonstrate. */
+     * Two-word design (<alp/cap_instance.h>): `flags` carries the
+     * universal ALP_INSTANCE_CAP_* bits, `class_flags` carries the
+     * ADC-owned ALP_ADC_CAP_* bits (<alp/adc.h>) -- oversampling is an
+     * ADC fact, not a universal one, so it lives in class_flags and is
+     * only meaningful once ALP_INSTANCE_CAP_REPORTED is set in flags
+     * (an unset REPORTED means the backend never spoke at all).
+     *
+     * No ADC backend in this tree advertises ALP_ADC_CAP_HW_OVERSAMPLE
+     * (#1648): the vendored Alif driver rejects every non-zero
+     * adc_sequence.oversampling outright, so alif_e7 / alif_e8 refuse any
+     * cfg.oversampling_ratio > 1 at alp_adc_open time with
+     * ALP_ERR_NOSUPPORT instead of advertising a capability they can't
+     * honour.  This branch is dead on every SoM this example targets --
+     * it stays only so the pattern is visible for a future backend that
+     * does support HW oversampling. */
 	const alp_capabilities_t *caps = alp_adc_capabilities(adc);
-	if (alp_capabilities_has(caps, ALP_INSTANCE_CAP_HW_OVERSAMPLE)) {
+	if (alp_capabilities_has(caps, ALP_INSTANCE_CAP_REPORTED) &&
+	    (caps->class_flags & ALP_ADC_CAP_HW_OVERSAMPLE) != 0u) {
 		printf("[adc] backend advertises HW oversampling -- "
 		       "set cfg.oversampling_ratio at open time to enable\n");
 	} else {
-		printf("[adc] no HW oversampling on this build\n");
+		printf("[adc] no HW oversampling reported on this build\n");
 	}
 
 	int32_t      uv = 0;

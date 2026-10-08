@@ -36,7 +36,7 @@ forever. Every stimulus is parked at 0 on the way out of its test.
 | Jumper | From (header.pin) | To (header.pin) | Signal path |
 | ------ | ----------------- | --------------- | ----------- |
 | **A** | **raw `DAC0` net** (E1M-X pin A19; see safety note 1) | `P7.1` (CK_ANA) | **Direct 1:1** analog loopback -> raw passthrough to E1M-X pin **A17 = ANA_S0 = bridge ADC channel 0** (GD32 `PD9`, ADC3_CH12). The carrier's buffered J15.2 `DAC0_OUT` path is NOT usable on this carrier rev (erratum, fixed next rev). |
-| **B** | `J26.14` (CK_PWM1) | `J18.7` (ENC1_X) | Bidirectional level translation on both sides (transparent to the signal). PWM bridge **ch1** (`PB1`, TIMER0_MCH2) -> encoder **index 1** X input (`PC6`, TIMER2 CH0). Y (`PC7`) floats with firmware pull-up = static **HIGH**. |
+| **B** | `J26.7` (CK_PWM1) | `J18.7` (ENC1_X) | Bidirectional level translation on both sides (transparent to the signal). PWM bridge **ch1** (`PB1`, TIMER0_MCH2) -> encoder **index 1** X input (`PC6`, TIMER2 CH0). Y (`PC7`) floats with firmware pull-up = static **HIGH**. |
 | **C** | `J26.10` (CK_PWM2) | `J26.8` (CK_PWM3) | Both pins ride the same bidirectional level translator -- no contention. PWM bridge **ch2** (`PB14`, TIMER0_MCH1) output -> PWM bridge **ch3** (`PC5`, TIMER0_MCH3) rebound as input capture. |
 
 ---
@@ -155,7 +155,9 @@ before trusting `[2]`/`[3]` and the raw forensics slots.
 
 ```sh
 # from the repo root, native_sim build-only (CI artifact; bench-only at runtime)
-west build -b native_sim/native/64 examples/v2n/v2n-gd32-bridge-loopback
+# writes examples/v2n/v2n-gd32-bridge-loopback/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/v2n/v2n-gd32-bridge-loopback
+west build -b native_sim/native/64 examples/v2n/v2n-gd32-bridge-loopback -- -DEXTRA_CONF_FILE=generated/alp.conf
 ```
 
 This example is **V2N-only and jumpered-bench-only**. It builds clean

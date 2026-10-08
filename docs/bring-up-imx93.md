@@ -175,9 +175,9 @@ Bring-up flow:
 
 The mproc IPC (mailbox / shmem / hwsem) between A55 + M33 uses
 the i.MX 93 MU (Messaging Unit).  See
-[`<alp/mproc.h>`](../include/alp/mproc.h) for the portable API
-and the Yocto-side backend `src/yocto/mproc_yocto.c` (lands in
-v0.4-final).
+[`<alp/mproc.h>`](../include/alp/mproc.h) for the portable API;
+the Yocto-side backend is still a NOSUPPORT stub
+(`src/common/stub/stub_mproc.c`).
 
 ## 6. Peripheral sanity checks
 

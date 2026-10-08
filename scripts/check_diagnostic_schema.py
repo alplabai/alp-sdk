@@ -20,11 +20,13 @@ surface. The document under test is unchanged: `--format json` prints
 exactly `machine_json_for_board_yaml(path)`.
 
 What the subprocess form additionally covered -- that the CLI prints ONLY
-the JSON document to stdout, with no human prose interleaved -- is NOT a
-property of this schema, and is locked by
+the JSON document to stdout, with no human prose interleaved -- was NOT a
+property of this schema, and was locked by
 tests/scripts/test_diagnostic_format.py::test_cli_format_json_emits_conformant_document_on_stdout
-(plus its sarif and default-format siblings), which live with the CLI and
-retire with it.
+(plus its sarif and default-format siblings) until `alp_cli/main.py` and
+`alp_cli/validate.py` themselves retired (alp-sdk#1368); `tan validate
+--format json|diagnostic-v1|sarif` is the live command now, with its own
+tan-cli test coverage of the same stdout-only property.
 
 Run locally:
 

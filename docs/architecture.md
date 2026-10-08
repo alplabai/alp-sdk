@@ -359,14 +359,21 @@ twister board `.yaml`, `_defconfig`, pinctrl `.dtsi`, `Kconfig.defconfig`,
 and the board `.dts` all derive from the SoM preset + SoC JSON
 (`tests/scripts/test_gen_zephyr_board.py` pins them byte-identical to the
 committed tree).  The Renesas RZ/V2N family (`v2n` / `v2n-m1`) generates
-only the family-agnostic files (`board.yml`, `Kconfig.alp_<board>`, the
-twister `.yaml`); its `.dts` / pinctrl `.dtsi` / `_defconfig` stay
-hand-authored because the on-module GD32G553 supervisor's Renesas-side pin
-assignments (SCI7 SPI, RIIC8/BRD_I2C, the disabled SCI0 console) aren't
-yet captured in `metadata/pinmux/*.yaml`.  `board.cmake` (flasher/debugger
-runner args) stays hand-authored for every family -- its prose is a
-documentation choice (which sibling board's file carries the full
-bring-up runbook), not a hardware fact derivable from metadata.
+the family-agnostic files (`board.yml`, `Kconfig.alp_<board>`, the
+twister `.yaml`) PLUS the pinctrl `.dtsi`, `_defconfig`, and the board
+`.dts` (issue #655), sourced from
+`metadata/e1m_modules/v2n/supervisor-links.yaml` -- a hand-authored,
+family-scoped source for the on-module GD32G553 supervisor's Renesas-side
+pin assignments (SCI7 SPI, RIIC8/BRD_I2C, the disabled SCI0 console),
+deliberately kept out of `metadata/pinmux/*.yaml` (itself generated
+DO-NOT-EDIT output, so it cannot also be a hand-authored generation
+source) -- plus, gated on the SoM preset's `topology.m33_sm.openamp_ipc`
+flag, the OpenAMP/MHU-B reserved-memory block and CAN-FD-unavailable
+analysis that only E1M-V2N101's committed board tree carries today.
+This family has no `Kconfig.defconfig` at all.  `board.cmake`
+(flasher/debugger runner args) stays hand-authored for every family --
+its prose is a documentation choice (which sibling board's file carries
+the full bring-up runbook), not a hardware fact derivable from metadata.
 
 **Not in the inventory above -- a standalone dev tool, not a build-time
 generator.** `scripts/gen_rzv2n_cm33_svd.py` (issue #1029 step 2) projects a
@@ -428,7 +435,7 @@ not others.
 | Library          | Header(s)            | Backed by                                                      | Status |
 |------------------|----------------------|----------------------------------------------------------------|--------|
 | Display          | `alp/display.h`      | Zephyr `display_*` driver class, including Zephyr MIPI DBI Type C SPI panels (`zephyr,mipi-dbi-spi` + ST7789V / ILI9341-class panel drivers). | Zephyr wrapper code-complete and native_sim-tested; DBI Type C path has build-only coverage, silicon bring-up pending |
-| Camera           | `alp/camera.h`       | Zephyr `video_*` API.  V2N MIPI CSI-2 wrapper in v0.2.          | v0.2 video stack (CPI / CSI-2 / D-PHY / ARX3A0) ported to Zephyr v4.4 + binds on E8; live capture bench-pending (sensor wiring); ISP-Pico ext + portable ISP config vendor-gated |
+| Camera           | `alp/camera.h`       | Zephyr `video_*` API.  V2N MIPI CSI-2 wrapper in v0.2.          | v0.2 video stack (CPI / CSI-2 / D-PHY / ARX3A0) ported to Zephyr v4.4 + binds on E8; ISP-Pico ext + portable ISP config vendor-gated. Four board-agnostic Raspberry-Pi-style CSI-2 camera-module sensor drivers (OV5647, OV9281, IMX296, IMX335) + matching Zephyr shields ship alongside — OV5647 and OV9281 bench-verified on an E1M-AEN803 on the E1M-EVK (OV9281 2026-09-21, OV5647 2026-09-22, issue #2248), both due for a re-bench after issue #2287 Stage B's shared CPI driver change; IMX296 Stage A + Stage B bench-verified (issue #2287); IMX335 raw-capture bench-verified (issue #2327, runs 316-330) — see [camera-shields.md](camera-shields.md) |
 | GUI/LVGL         | `alp/gui.h`          | Upstream LVGL with an Alp `lv_conf.h`.                         | Header re-export only — no custom widgets |
 | DSP              | `alp/dsp.h`          | Composable chain primitives — FIR/IIR/FFT/WINDOW via `alp_dsp_chain_t`; CMSIS-DSP SW fallback when `ALP_HAS_CMSIS_DSP` is set; GD32 FAC/CORDIC HW path on V2N via the bridge.  CMSIS-DSP low-level math (`arm_math.h`) consumed directly from app code — the SDK does not re-export it. | v0.5 surface (Wave-2 DSP); see ADR 0007. |
 | IoT              | `alp/iot.h`          | Wi-Fi station via the AEN CC3501E backend or Zephyr `net_*` on native-radio targets; MQTT via Zephyr `mqtt_client` or Linux net + libmosquitto. | v0.1 surface; AEN Wi-Fi station dispatches through the CC3501E bridge; Yocto MQTT cleartext + TLS (`mqtts://` via `mosquitto_tls_set`) code complete via libmosquitto (v0.4 prep, `pkg_check_modules`-gated), **broker roundtrip untested** -- see [test-plan.md](test-plan.md) |
@@ -436,7 +443,7 @@ not others.
 | BLE              | `alp/ble.h`          | AEN CC3501E backend or Zephyr `bt` host stack (peripheral + central + GATT). | v0.1 surface; impl v0.3 |
 | Security         | `alp/security.h`     | MbedTLS PSA Crypto API (Zephyr) + OpenSSL `EVP_*` (Yocto).      | v0.1 surface; Yocto OpenSSL backend (SHA-256/384/512, AES-128/256-GCM, ChaCha20-Poly1305, `alp_random_bytes`) code complete v0.4-prep with KATs green at `tests/yocto/security_openssl.c`; Zephyr MbedTLS impl v0.3 |
 | Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions, plus framed RPC over RPMsg / OpenAMP (`rpc.h`, opened with the generated `system_ipc.h`); placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` (replaced by nanopb-generated codec once `extras-lwrb-nanopb` lands -- interim/deferred as of v0.9, no committed version). | v0.1 surface; framing scaffolding shipping (interim); full impl v0.3+ |
-| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`tan model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3, DEEPX DX-M1, and the ONNX Runtime CPU floor are A55/Linux-side only (`src/yocto/inference_{drpai,deepx,ort}.cpp`, #58/#59).  ORT is default-off (`ALP_SDK_USE_ORT_CPU`), sits strictly last in `resolve_auto()` so an NPU-bearing SoM never silently falls back to it, and — unlike the other two — is reachable only via a hand-built `alp_inference_config_t` today: no `.alpmodel` → ORT route exists on Yocto.  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
+| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + SoM `auto_order` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`tan model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3, DEEPX DX-M1, and the ONNX Runtime CPU floor are A55/Linux-side only (`src/yocto/inference_{drpai,deepx,ort}.cpp`, #58/#59).  ORT is default-off in CMake (`ALP_SDK_USE_ORT_CPU`) but on by default in the V2M101/V2M102/V2M103/V2N101/V2N102/V2N103 images via `ALP_ENABLE_ORT_CPU` (#1259; V2M with the DEEPX runtime builds against dx-rt's libonnxruntime instead of the layer's), sits strictly last in `resolve_auto()` so an NPU-bearing SoM never silently falls back to it, and — unlike the other two — is reachable only via a hand-built `alp_inference_config_t` today: no `.alpmodel` → ORT route exists on Yocto.  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
 | Storage          | `alp/storage.h`      | Block + filesystem (LittleFS) on Zephyr; standard FS on Yocto.  | v0.5 surface |
 | 2D graphics      | `alp/gpu2d.h`        | Portable blit/fill shim (Alif Dave2D / GPU2D); SW fallback.     | v0.5 surface; see [ADR 0008](adr/0008-gpu2d-portable-shim.md) |
 
@@ -452,7 +459,7 @@ for Ethos-U (AEN, i.MX 93), the **DRP-AI translator** for Renesas
 RZ/V2N, **dxcom** for DEEPX DX-M1, plus a portable CPU/TFLM blob as
 the universal fallback.  At runtime, `alp_inference_open_alpmodel()`
 loads the package and its selection engine picks the matching blob
-(silicon-ref + SRAM-fit + `preferred_backend` tiebreak); see the
+(silicon-ref + SRAM-fit + SoM `inference.auto_order` tiebreak); see the
 *Inference* row above for the dispatcher detail.
 
 ### Peripherals: how a block resolves to a backend
@@ -791,7 +798,7 @@ for the full rationale and edge-case guidance.
 ## Sources of truth (do not duplicate)
 
 - HW pinout — [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec)
-  (v1.1).  See [`docs/e1m-pinout.md`](e1m-pinout.md) for how the
+  (v1.0).  See [`docs/e1m-pinout.md`](e1m-pinout.md) for how the
   spec, the per-SoM pad-routing YAMLs, and the SDK's opaque `bus_id` /
   `pin_id` integers all relate.
 - **Per-SoM E1M pad → silicon-pin routing** —
