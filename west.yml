@@ -20,9 +20,9 @@
 #     name-allowlist below lets them through the import filter).
 #     Zephyr v4.4 pins specific revisions; we follow what Zephyr ships.
 #     hal_renesas covers the RZ/V2N + RZ/V2L + RZ/V2H BSP under
-#     `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/`; hal_nxp covers
-#     i.MX 93 (MIMX9301..9352) and i.MX 95 under
-#     `mcux/mcux-sdk-ng/devices/i.MX/i.MX93/`.
+#     `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/`.  No alp-sdk SoM uses
+#     hal_nxp; it stays allowlisted only because Zephyr's base
+#     manifest pins it.
 #   - hal_alif: NOT in Zephyr's modules tree as of v3.7, but Alif
 #     publishes a fully Apache-2.0-licensed Zephyr module of their
 #     own at github.com/alifsemi/hal_alif (zephyr/module.yml shape,
@@ -247,7 +247,7 @@ manifest:
           # against the Alif-maintained release at
           # github.com/alifsemi/hal_alif (Apache-2.0).
           # hal_renesas covers RZ/V2N (V2N + V2N-M1 SoMs);
-          # hal_nxp covers i.MX 93 (E1M-NX9101).
+          # no alp-sdk SoM uses hal_nxp (pinned by Zephyr's base manifest).
           - hal_renesas
           - hal_nxp
           # Upstream littlefs C library (modules/fs/littlefs, group
