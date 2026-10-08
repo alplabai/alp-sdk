@@ -297,6 +297,8 @@ bytes.
 path cannot yet (#2792). (2) A plain non-CMake static link of `libalp_sdk.a`
 must add `-Wl,--undefined=_alp_backend_force_camera_yocto_drv`, otherwise only
 the stub is linked; CMake consumers of `alp::sdk` get that option, and the
-matching one for every other Linux backend, automatically (#2790). (3) One thread per handle: do not run `capture()` and
+matching one for every other Linux backend, automatically (#2790). A
+non-CMake link needs one `--undefined=_alp_backend_force_<class>_<name>` per
+backend; the list is in `docs/architecture/backend-registry.md`. (3) One thread per handle: do not run `capture()` and
 `release()` on the same handle concurrently.
 

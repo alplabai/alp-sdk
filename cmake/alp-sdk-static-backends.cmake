@@ -21,7 +21,7 @@
 #
 # Skipped:
 #   - sources that define ALP_BACKEND_ANCHOR_DEFINE: the dispatcher already
-#     pulls those catch-alls, and forcing them would drag unused classes in;
+#     pulls those catch-alls when the class is used;
 #   - registrations wrapped in another macro (indented, e.g. the cc3501e
 #     ble/wifi backends): their <name> is a macro parameter, not a symbol;
 #   - shared builds (every member is in the .so already) and non-ELF hosts
@@ -32,9 +32,15 @@
 # the ALP_SDK_NO_FORCED_BACKENDS target property; otherwise the forced archive
 # copy and its own copy would clash.
 #
+# Cost: every static consumer now links every forced backend, whether or not
+# it uses the class, and with them their runtime libraries (libasound,
+# libssl/libcrypto, libmosquitto, open-amp/libmetal) when the build found
+# them -- the same set a shared libalp_sdk.so already carries.
+#
 # The forced "<class>:<name>" pairs are recorded on the target's
-# ALP_SDK_FORCED_BACKENDS property; tests/yocto uses it to check, with nm,
-# that a static test binary really carries each backend.
+# ALP_SDK_FORCED_BACKENDS property: the list a non-CMake static link must pass
+# as --undefined= options itself.  tests/yocto checks the result against the
+# archive, not against this list (cmake/check-static-backends.cmake).
 
 function(alp_sdk_force_static_backends target)
     if(ALP_SDK_BUILD_SHARED OR APPLE OR WIN32)

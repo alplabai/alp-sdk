@@ -1018,8 +1018,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # A static libalp_sdk.a must keep every Linux backend that sits in its own
     # TU beside the class's catch-all stub (#2790): only the stub is reachable
     # from the dispatcher.  Link a tiny binary against alp::sdk, then require
-    # the registry entry of every backend alp_sdk_force_static_backends()
-    # forced (cmake/alp-sdk-static-backends.cmake).
+    # the registry entry of every non-anchor backend member of libalp_sdk.a.
+    # The expected list is read from the archive, not from the source scan
+    # that does the forcing, so a registration the scan misses still fails
+    # here (cmake/check-static-backends.cmake).
     get_target_property(_alp_forced_backends alp_sdk ALP_SDK_FORCED_BACKENDS)
     if(CMAKE_NM AND _alp_forced_backends)
         add_executable(alp_test_static_link_camera
@@ -1027,17 +1029,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
         target_link_libraries(alp_test_static_link_camera PRIVATE alp::sdk)
         target_compile_features(alp_test_static_link_camera PRIVATE c_std_99)
-        set(_alp_forced_syms "")
-        foreach(_alp_pair IN LISTS _alp_forced_backends)
-            string(REPLACE ":" "_" _alp_pair "${_alp_pair}")
-            list(APPEND _alp_forced_syms "_alp_be_${_alp_pair}")
-        endforeach()
-        list(JOIN _alp_forced_syms "|" _alp_forced_syms)
         add_test(NAME alp_test_static_link_backends
                  COMMAND ${CMAKE_COMMAND}
                          -DNM=${CMAKE_NM}
+                         -DLIB=$<TARGET_FILE:alp_sdk>
                          -DBIN=$<TARGET_FILE:alp_test_static_link_camera>
-                         -DSYMS=${_alp_forced_syms}
                          -P ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/check-static-backends.cmake)
         add_test(NAME alp_test_static_link_camera_selects_yocto
                  COMMAND alp_test_static_link_camera)
@@ -1301,6 +1297,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/mqtt/sw_fallback.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/mqtt/yocto_drv.c
         )
+        # Compiles its own backend copies: see alp_test_audio_alsa (#2790).
+        set_target_properties(alp_test_iot_mqtt PROPERTIES ALP_SDK_NO_FORCED_BACKENDS ON)
         target_link_libraries(alp_test_iot_mqtt PRIVATE alp::sdk)
         target_include_directories(alp_test_iot_mqtt PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
@@ -1351,6 +1349,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/i2s/sw_fallback.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/i2s/yocto_drv.c
         )
+        # Compiles its own backend copies: see alp_test_audio_alsa (#2790).
+        set_target_properties(alp_test_i2s_alsa PROPERTIES ALP_SDK_NO_FORCED_BACKENDS ON)
         target_link_libraries(alp_test_i2s_alsa PRIVATE alp::sdk)
         target_include_directories(alp_test_i2s_alsa PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
@@ -1378,6 +1378,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/security/sw_fallback.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/security/yocto_drv.c
         )
+        # Compiles its own backend copies: see alp_test_audio_alsa (#2790).
+        set_target_properties(alp_test_security_openssl PROPERTIES ALP_SDK_NO_FORCED_BACKENDS ON)
         target_link_libraries(alp_test_security_openssl PRIVATE alp::sdk)
         target_include_directories(alp_test_security_openssl PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
