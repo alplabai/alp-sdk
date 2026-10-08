@@ -19,3 +19,9 @@ The HUD stays 720 wide, centred on the Riverdi; its new rightmost tile shows the
 could not take while the HP holds I2C2. For that the INA236 `CONFIG` is now `0x485F` (AVG 128 of 204 us + 588 us,
 101 ms a result, was `0x4927`: 282 ms) and `RAIL5V_PERIOD_MS` 100. `panel_rot.h` takes the picture width:
 `tr_rot_idx`, `tr_rot_blit` and `tr_rot_blit_neon` gained a `pw` argument.
+
+Frame time, after the first bench run (peak 30.9 ms against the 31.2 ms real budget): the two cores claim the
+bands fullest-bin first, the video bands last (`render_claim_order()`); and the scene's second half is no longer
+copied onto the end of the first (`tr_dl_t` can read as two pieces, `tr_dl_tri()`), so setup and binning start
+sooner. Neither changes a pixel (the goldens are unchanged). The power poll keeps a true 10 Hz: its deadline advances
+a period from the last deadline instead of from the call, which the frame-rate quantised to 8.3 Hz.

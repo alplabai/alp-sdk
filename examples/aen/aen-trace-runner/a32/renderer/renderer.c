@@ -411,6 +411,9 @@ static uint32_t setup_lo, setup_hi; /* core 1's half, written before setup_go */
 static volatile uint32_t band_seq[TR_TOTAL_BANDS]
     __attribute__((aligned(64))); /* seq each band last landed for */
 static uint16_t *frame_fb;        /* written before frame_go */
+/* The band each claim index stands for this frame (render_claim_order()): written by core 0
+ * after the bins and before frame_go, which publishes it to core 1 with them. */
+static uint8_t band_order[TR_TOTAL_BANDS];
 
 /* Claim + render bands (3D, then video) until none are left; each band's
  * pixels are out (dsb) before band_seq says so. */
@@ -424,7 +427,7 @@ static void band_loop(uint32_t core, uint32_t seq, uint16_t *fb)
 		        &band_claim, &v, v + 1u, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
 			continue; /* v reloaded */
 
-		uint32_t b = v & 0xFFu;
+		uint32_t b = band_order[v & 0xFFu];
 
 		if (b < TR_BANDS)
 			render_band(core, (int)b, fb);
@@ -701,8 +704,9 @@ void renderer_main(volatile tr_mbox_t *m)
 			}
 			render_bin();
 			render_stats.bin = cntvct_lo() - tb;
-			frame_fb         = (uint16_t *)fb;
-			band_claim       = seq << 8; /* this frame's generation, band 0 */
+			render_claim_order(band_order);
+			frame_fb   = (uint16_t *)fb;
+			band_claim = seq << 8; /* this frame's generation, band 0 */
 			if (dual) {
 				dmb_ish(); /* bins, frame_fb, band_claim before frame_go */
 				frame_go = seq;

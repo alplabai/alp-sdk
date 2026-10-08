@@ -868,6 +868,7 @@ uint32_t render_front(const tr_frame_in_t *in)
 		scene_in = *in;
 	}
 #endif
+	DL->tail = NULL; /* one piece (the DL lives in uninitialised SRAM: set, never assumed) */
 	build_dl(in, DL, &frame_bg);
 	hud_score  = in != NULL ? in->score : 0u;
 	hud_banner = in != NULL ? in->banner : 0u;
@@ -885,6 +886,7 @@ void render_front_begin(const tr_frame_in_t *in)
 	hud_banner = in != NULL ? in->banner : 0u;
 	hud_flags  = in != NULL ? in->flags : 0u;
 	frame_set(in);
+	DL->tail = NULL; /* part 2 is attached by render_front_end() */
 #if RENDER_DL_GOLDEN
 	build_dl(in, DL, &frame_bg);
 #else
@@ -924,8 +926,16 @@ uint32_t render_front_end(int part2)
 	if (part2) {
 		uint32_t room = TR_DL_MAX_TRIS - DL->n, k = DL1->n < room ? DL1->n : room;
 
-		memcpy(&DL->tri[DL->n], DL1->tri, k * sizeof(DL->tri[0]));
-		DL->n = (uint16_t)(DL->n + k);
+		/* Part 2 is NOT copied onto the end of part 1 (up to ~114 KB of serial core-0 work
+		 * before the setup could start): the list reads as one, triangles [DL->n, DL->n + k)
+		 * being DL1's first k (r3d.h tr_dl_tri). Indices, and so setup records, bins and the
+		 * painter's order, are exactly the copied list's. DL1 is not touched again until the
+		 * next frame's scene_go, after the bands have been joined. */
+		if (k != 0u) {
+			DL->split = DL->n;
+			DL->tail  = DL1;
+			DL->n     = (uint16_t)(DL->n + k);
+		}
 		tr_dl_dropped += DL1->n - k;
 	}
 	tr_scene_bg(&scene_in, &scene_cam, &frame_bg);
@@ -953,6 +963,25 @@ void render_bin(void)
 	}
 	render_stats.dropped = overflow;
 	render_stats.max_bin = max_bin;
+}
+
+void render_claim_order(uint8_t order[TR_BANDS + TR_VIDEO_BANDS])
+{
+	int n = 0;
+
+	/* insertion sort by bin fullness, descending and stable (24 entries) */
+	for (int b = 0; b < TR_BANDS; b++) {
+		int i = n++;
+
+		while (i > 0 && counts[order[i - 1]] < counts[b]) {
+			order[i] = order[i - 1];
+			i--;
+		}
+		order[i] = (uint8_t)b;
+	}
+	for (int vb = 0; vb < TR_VIDEO_BANDS; vb++) {
+		order[n++] = (uint8_t)(TR_BANDS + vb);
+	}
 }
 
 void render_setup(const tr_frame_in_t *in)

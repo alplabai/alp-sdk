@@ -31,6 +31,7 @@
 #define TR_R3D_HEADER_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* Portrait framebuffer: spans run along the 800-px scanout rows (section 1
@@ -202,10 +203,21 @@ typedef struct {
 	tr_vattr_t a[3];  /* attributes of v[0..2] */
 } tr_tri_t;
 
-typedef struct {
+typedef struct tr_dl_s {
 	tr_tri_t tri[TR_DL_MAX_TRIS];
 	uint16_t n;
+	/* A display list in two pieces without copying one onto the other (the renderer's two cores
+	 * build one each): triangles [0, split) are tri[], [split, n) are tail->tri[0, n - split).
+	 * tail NULL (a freshly zeroed list, a one-core frame): all of it is tri[]. Readers go through
+	 * tr_dl_tri(); whoever appends to tri[] (the scene build) never sees the tail. */
+	uint16_t              split;
+	const struct tr_dl_s *tail;
 } tr_dl_t;
+
+static inline const tr_tri_t *tr_dl_tri(const tr_dl_t *dl, uint32_t i)
+{
+	return dl->tail != NULL && i >= dl->split ? &dl->tail->tri[i - dl->split] : &dl->tri[i];
+}
 
 /*
  * Per-triangle raster setup, built ONCE per triangle by tr_bin_build() (all

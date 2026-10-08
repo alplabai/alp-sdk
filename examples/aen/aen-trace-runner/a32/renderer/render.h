@@ -101,6 +101,14 @@ uint32_t render_front_end(int part2);
 void     render_setup_part(uint32_t lo, uint32_t hi);
 void     render_bin(void);
 
+/* The order the two cores claim this frame's bands in (after render_bin(), before the claim
+ * starts): order[i] is the band of claim i. The 3D bands first, the fullest bin first (the
+ * rasteriser's cost follows the triangles a band holds, so the long ones start early and the
+ * cheap ones fill in behind them), ties in band order; then the video bands (TR_BANDS + vb),
+ * which cost about the same each, in order. Bands are independent, so the order cannot change a
+ * pixel -- only how long one core waits on the other at the end of the frame. */
+void render_claim_order(uint8_t order[TR_BANDS + TR_VIDEO_BANDS]);
+
 /* Single core: render_setup + all bands in order on core 0. */
 void render_frame(const tr_frame_in_t *in, uint16_t *fb);
 
