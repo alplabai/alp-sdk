@@ -2231,7 +2231,7 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         lines.extend(iot_lines)
     # `cameras:` -> ALP_CAMERA_CAM<n>, the variable the kernel bbappend keys
     # the sensor devicetree include on (same resolver as Zephyr's -DSHIELD).
-    lines.extend(_cameras.yocto_camera_lines(project))
+    lines.extend(_cameras.yocto_camera_lines(project, slice_))
     # Curated third-party libraries (top-level `libraries:`, ADR 0018) with a
     # Yocto integration section -- BOTH the project-wide entries and the ones
     # scoped to this core.  Every recipe name comes from the library's own
@@ -2335,7 +2335,7 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
     if slice_.toolchain:
         lines.append(f"-DALP_TOOLCHAIN={slice_.toolchain}")
     # `cameras:` -> the same -DSHIELD the build command carries.
-    shield = _cameras.zephyr_shield_define(project, slice_)
+    shield = _cameras.shield_define_for_build(project, slice_)
     if shield:
         lines.append(f"-D{shield}")
     if capabilities.get("drp_ai"):

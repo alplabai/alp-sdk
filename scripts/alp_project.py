@@ -526,8 +526,14 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             parts.append(f"# --- core: {cid} ({slice_.os}) ---")
             parts.append(_slice_local_conf(project, slice_))
         elif args.emit == "cmake-args":
+            try:
+                body = _slice_cmake_args(project, slice_)
+            except OrchestratorError as e:
+                # e.g. a `cameras:` entry unbuildable for this core.
+                print(f"alp_project: {e}", file=sys.stderr)
+                return 1
             parts.append(f"# --- core: {cid} ({slice_.os}) ---")
-            parts.append(_slice_cmake_args(project, slice_))
+            parts.append(body)
         else:
             print(f"alp_project: unknown --emit {args.emit} for v2 board.yaml",
                   file=sys.stderr)

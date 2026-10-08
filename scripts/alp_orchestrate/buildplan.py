@@ -881,10 +881,16 @@ def emit_build_plan(
                 })
             try:
                 extras.append(_slice_cmake_args_artefact(project, slice_))
-            except CameraSelectError:
-                # Same error the command path above already reported as
-                # `camera-select-failed`; the listing is simply not emitted.
-                pass
+            except CameraSelectError as exc:
+                # The listing is not emitted; make sure the plan still says
+                # why (the command path usually already did).
+                if not any(w["code"] == "camera-select-failed"
+                           and w["coreId"] == slice_.core_id for w in warnings):
+                    warnings.append({
+                        "code":    "camera-select-failed",
+                        "coreId":  slice_.core_id,
+                        "message": str(exc),
+                    })
             try:
                 extras.append(_slice_hw_info_artefact(project, slice_))
             except HwInfoUnavailable as exc:

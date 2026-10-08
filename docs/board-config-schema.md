@@ -396,30 +396,42 @@ cameras:
 
 - **`cameras:` selects the camera in the build.**  One resolver
   (`scripts/alp_orchestrate/cameras.py`) turns each entry into the per-OS
-  build input, so the same line works on every SoM:
-  - **Zephyr** core running a customer app: one
-    `-DSHIELD="<carrier shields> <module shield>"` on the `west build`
-    command (and in `cmake-args.txt`).  Carrier shields come from the
-    connector's `zephyr_shields:` (ordered; e.g. `[e1m_evk_rpi_csi]` on the
-    E1M-EVK CAM0), the module shield from `zephyr_shield:` in its
-    `camera_modules/` YAML; duplicates collapse, carrier first.  A module
-    with no `zephyr_shield` (e.g. `raspberry_pi_camera_module_2`) is
-    rejected for a Zephyr core, and a carrier shield with no
-    `boards/<board>.overlay` for the slice's board target blocks the slice's
-    build command (`camera-select-failed` warning) instead of silently
-    building without the camera.
-  - **Yocto** core: `ALP_CAMERA_CAM<n> = "<module_id>"` in the slice's
-    `local.conf`, the variable the kernel bbappend keys the sensor
-    devicetree include (`<board>-cam<n>-<module_id>.dtsi`) on.
-  - Connector `CAMn` is camera index `n`: `alp-camera<n>` in Zephyr DT,
-    the `n` in `ALP_CAMERA_CAM<n>`.
+  build input, so the same line works on every SoM.  Each camera has exactly
+  ONE owner core and only that core's build is touched:
+  - **Owner:** `cameras[].core`, or, when omitted, the single candidate core
+    -- a Zephyr core running a customer app (not `alp-stock-shim`) or a Yocto
+    core.  No candidate, or several (e.g. a V2M with a CM33 app and an A55
+    image, or AEN M55-HE and M55-HP both running apps), is an ALP-B003 error
+    "ambiguous camera owner" until `core:` is set.  `core:` must name a
+    candidate.  The rule is `scripts/alp_orchestrate/camera_owner.py`, shared
+    by `tan validate` and the planner.
+  - **Zephyr** owner: one `-DSHIELD="<carrier shields> <module shield>"` on
+    the `west build` command (one argv element `SHIELD=a b`; a shell needs the
+    quotes) and in `cmake-args.txt`.  On a sysbuild (`boot:`/`security.psa:`)
+    it is `-D<image>_SHIELD=...` so MCUboot does not get the shields.  Carrier
+    shields come from the connector's `zephyr_shields:` (ordered; e.g.
+    `[e1m_evk_rpi_csi]` on the E1M-EVK CAM0), the module shield from
+    `zephyr_shield:` in its `camera_modules/` YAML; a carrier shield shared by
+    two connectors collapses, carrier first.  Rejected (ALP-B003, with
+    `camera-select-failed` as the planner's backstop): a module with no
+    `zephyr_shield` (e.g. `raspberry_pi_camera_module_2`), a connector with no
+    `zephyr_shields` (the X-EVK CAM0: no CM33 camera shield exists), a carrier
+    shield with no `boards/<board>.overlay` for the owner's board target, and
+    two cameras on one owner using the same module shield (a Zephyr shield is
+    a single instance).
+  - **Yocto** owner: `ALP_CAMERA_CAM<n> = "<module_id>"` in that slice's
+    `local.conf`.  This is the variable the kernel bbappend will key the
+    sensor devicetree include (`<board>-cam<n>-<module_id>.dtsi`) on once the
+    camera-DT generator (#2736) lands; that work consumes CAM0 only.
+  - Connector `CAMn` is camera index `n`: `alp-camera<n>` in Zephyr DT, the
+    `n` in `ALP_CAMERA_CAM<n>`.
   - `zephyr_shields` is optional and only for connectors a Zephyr shield
     exists for; each name must be a directory under
     `zephyr/boards/shields/`.
 
 `tan validate` rejects an unknown connector, an unknown module, a
-duplicated connector, a module without `zephyr_shield` when the project has a
-Zephyr core, and (inline boards) an unresolvable macro or a wrong
+duplicated connector, a missing, ambiguous or non-candidate camera owner core, the Zephyr
+owner problems above, and (inline boards) an unresolvable macro or a wrong
 `lane_polarity` length, all as [ALP-B003](diagnostics/ALP-B003.md).
 
 #### Pin direction (NOT in `board.yaml`)

@@ -1,17 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Resolve a project's `cameras: [{connector, module}]` into build inputs.
+"""Resolve a project's `cameras: [{connector, module, core?}]` into build inputs.
 
 One resolver for both OS lanes, so the same board.yaml line picks the camera
-on every SoM:
+on every SoM.  Ownership (which core gets the camera) is `camera_owner.py`,
+shared with the CLI validator; ONLY the owner core's build is touched:
 
-  * Zephyr slice -> ONE `-DSHIELD=<carrier shields> <module shield>` define
+  * Zephyr owner -> ONE `-DSHIELD=<carrier shields> <module shield>` define
     (carrier half from the board's `camera_connectors.<CAMn>.zephyr_shields`,
     camera half from `metadata/camera_modules/<module>.yaml: zephyr_shield`).
-  * Yocto slice  -> `ALP_CAMERA_CAM<n> = "<module_id>"` in local.conf, the
-    variable the kernel bbappend keys the sensor devicetree include on.
+    On a sysbuild it is `-D<image>_SHIELD=...` so MCUboot does not get it.
+    The space-joined value is ONE argv element (a shell would need it quoted:
+    `-DSHIELD="a b"`).
+  * Yocto owner  -> `ALP_CAMERA_CAM<n> = "<module_id>"` in local.conf.  Once
+    the camera-DT work (#2736) lands, the kernel bbappend keys the sensor DT
+    include on that variable; it consumes CAM0 only.
 
-Connector `CAMn` is camera index `n` (`alp-camera<n>` in Zephyr DT, the `n` in
-`ALP_CAMERA_CAM<n>`).
+Connector `CAMn` is camera index `n` (`alp-camera<n>` in Zephyr DT, the `n`
+in `ALP_CAMERA_CAM<n>`).
 """
 
 from __future__ import annotations
@@ -21,12 +26,9 @@ from typing import Optional
 
 import yaml
 
+from .camera_owner import CameraPlan, candidates, plan_cameras
 from .models import BoardProject, OrchestratorError, Slice
 from .paths import REPO
-
-# firmware/alp-stock-shim: the SDK's own M-core shim, never a camera owner.
-# (Same literal as orchestrator.STOCK_SHIM_APP; not imported -- cycle.)
-_STOCK_SHIM_APP = "alp-stock-shim"
 
 
 class CameraSelectError(OrchestratorError):
@@ -34,86 +36,92 @@ class CameraSelectError(OrchestratorError):
 
 
 def _connectors(project: BoardProject) -> dict:
-    src = project.board_preset if project.board_preset else project.raw
-    return (src or {}).get("camera_connectors") or {}
+    # A `preset:` board carries them; an inline board's live in board.yaml.
+    return ((project.board_preset or {}).get("camera_connectors")
+            or project.raw.get("camera_connectors") or {})
 
 
-def _module(project: BoardProject, module_id: str) -> dict:
+def _module(project: BoardProject, module_id: str) -> Optional[dict]:
     p = project.effective_metadata_root() / "camera_modules" / f"{module_id}.yaml"
     try:
         return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    except OSError as e:
-        raise CameraSelectError(f"cameras: unknown module '{module_id}' ({p})") from e
+    except OSError:
+        return None
 
 
-def _cameras(project: BoardProject) -> list[tuple[str, str]]:
-    """(connector, module_id) pairs in CAM-index order."""
-    pairs = [(c["connector"], c["module"])
-             for c in project.raw.get("cameras") or []]
-    return sorted(pairs, key=lambda p: int(p[0][3:]))
+def _cores(project: BoardProject) -> dict:
+    return {cid: {"os": s.os, "app": s.app, "board": s.board}
+            for cid, s in project.cores.items()}
 
 
-def _has_overlay(shield: str, board: str, repo: Path) -> bool:
-    """Zephyr applies `boards/<board>_<qualifiers>.overlay`, else `<board>.overlay`."""
-    name, *quals = board.split()[0].split("/")
-    d = repo / "zephyr" / "boards" / "shields" / shield / "boards"
-    return any((d / f"{n}.overlay").is_file()
-               for n in ("_".join([name, *quals]), name))
+def _plans(project: BoardProject, repo: Path = REPO) -> list[CameraPlan]:
+    cams = sorted(project.raw.get("cameras") or [],
+                  key=lambda c: int(c["connector"][3:]))
+    if not cams:
+        return []
+    modules = {c["module"]: _module(project, c["module"]) for c in cams}
+    plans = plan_cameras(cams, _connectors(project), _cores(project),
+                         {m: d for m, d in modules.items() if d is not None}, repo)
+    for p in plans:
+        if modules.get(p.module) is None:
+            p.errors.append(f"cameras: unknown module '{p.module}' "
+                            f"(no metadata/camera_modules/{p.module}.yaml)")
+    return plans
 
 
-def _owns_camera(s: Slice) -> bool:
-    """A Zephyr slice running a customer app (not the stock shim)."""
-    return (s.os == "zephyr" and bool(s.app) and bool(s.board)
-            and s.app != _STOCK_SHIM_APP)
+def check(project: BoardProject, slice_: Slice,
+          repo: Path = REPO) -> list[CameraPlan]:
+    """The cameras this slice owns.  Raises CameraSelectError when they are
+    unbuildable for it (the backstop for what `tan validate` reports as
+    ALP-B003).  An ownerless error (none / ambiguous) blocks every
+    candidate core."""
+    plans = _plans(project, repo)
+    mine = [p for p in plans if p.owner == slice_.core_id]
+    is_candidate = slice_.core_id in candidates(_cores(project))
+    errs = [e for p in plans
+            if p.owner == slice_.core_id or (p.owner is None and is_candidate)
+            for e in p.errors]
+    if errs:
+        raise CameraSelectError("; ".join(dict.fromkeys(errs)))
+    return mine
 
 
 def zephyr_shield_define(project: BoardProject, slice_: Slice,
+                         image: Optional[str] = None,
                          repo: Path = REPO) -> Optional[str]:
-    """`SHIELD=<...>` value for a Zephyr slice, or None when the project
-    declares no cameras (or the slice is not the camera-owning one).
-
-    Only Zephyr slices running a customer app qualify.  Each qualifying slice
-    with a board overlay for every carrier shield gets the define; if NONE
-    does, every qualifying slice raises -- never silently emitting nothing.
-    """
-    cams = _cameras(project)
-    if not cams or not _owns_camera(slice_):
+    """`SHIELD=<...>` (`<image>_SHIELD=<...>` on a sysbuild) for the Zephyr
+    slice that owns cameras, else None."""
+    mine = check(project, slice_, repo)
+    if not mine or slice_.os != "zephyr":
         return None
     connectors = _connectors(project)
     shields: list[str] = []
-    for connector, module_id in cams:
-        shield = _module(project, module_id).get("zephyr_shield")
-        if not shield:
-            raise CameraSelectError(
-                f"cameras: module '{module_id}' on {connector} has no "
-                f"`zephyr_shield:` in metadata/camera_modules/{module_id}.yaml "
-                f"-- it cannot be selected on a Zephyr core (Linux-only module)")
-        carrier = (connectors.get(connector) or {}).get("zephyr_shields") or []
-        if not carrier:
-            raise CameraSelectError(
-                f"cameras: connector {connector} declares no `zephyr_shields:` "
-                f"-- no Zephyr carrier shield exists for it")
-        shields += [*carrier, shield]
-    shields = list(dict.fromkeys(shields))  # carrier first, deduped, ordered
-
-    def covered(s: Slice) -> bool:
-        return bool(s.board) and all(
-            _has_overlay(sh, s.board, repo)
-            for conn, _m in cams
-            for sh in connectors[conn]["zephyr_shields"])
-
-    if not covered(slice_):
-        peers = [s for s in project.cores.values() if _owns_camera(s)]
-        if any(covered(s) for s in peers):
-            return None
-        raise CameraSelectError(
-            f"cameras: no Zephyr shield overlay for board target "
-            f"'{slice_.board}' (core '{slice_.core_id}'): the carrier shield(s) "
-            f"have no zephyr/boards/shields/<shield>/boards/<board>.overlay "
-            f"for it -- add one for that SoM target")
-    return "SHIELD=" + " ".join(shields)
+    for p in mine:
+        shields += connectors[p.connector]["zephyr_shields"]
+        shields.append(_module(project, p.module)["zephyr_shield"])
+    shields = list(dict.fromkeys(shields))  # a carrier shield is shared
+    return f"{image + '_' if image else ''}SHIELD=" + " ".join(shields)
 
 
-def yocto_camera_lines(project: BoardProject) -> list[str]:
-    """local.conf lines selecting each camera's sensor DT include."""
-    return [f'ALP_CAMERA_CAM{c[3:]} = "{m}"' for c, m in _cameras(project)]
+def shield_define_for_build(project: BoardProject, slice_: Slice,
+                            base_dir: Optional[Path] = None) -> Optional[str]:
+    """`zephyr_shield_define` with the sysbuild image prefix resolved the way
+    `_slice_command` names `<image>_EXTRA_CONF_FILE` (#866)."""
+    if not check(project, slice_) or slice_.os != "zephyr":
+        return None
+    from .orchestrator import _zephyr_app_dir
+    from .secure import emit_sysbuild_conf, emit_tfm_sysbuild_conf
+    image = None
+    if emit_sysbuild_conf(project) or emit_tfm_sysbuild_conf(project):
+        image = _zephyr_app_dir(
+            slice_.app, base_dir or project.source_dir or Path.cwd()).name
+    return zephyr_shield_define(project, slice_, image)
+
+
+def yocto_camera_lines(project: BoardProject, slice_: Slice) -> list[str]:
+    """local.conf lines for the cameras this Yocto slice owns.  Never raises:
+    `tan validate` and the command path report the problems."""
+    if slice_.os != "yocto":
+        return []
+    return [f'ALP_CAMERA_CAM{p.connector[3:]} = "{p.module}"'
+            for p in _plans(project) if p.owner == slice_.core_id]

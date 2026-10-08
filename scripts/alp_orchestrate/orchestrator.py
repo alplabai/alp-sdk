@@ -354,6 +354,9 @@ def _slice_command(
     matter where the emitting process happens to be invoked from
     (issue #596).
     """
+    # `cameras:` unbuildable for this core (none/ambiguous owner, missing
+    # shield or overlay): block the command, whatever the OS.
+    _cameras.check(project, slice_)
     if slice_.os == "zephyr":
         if not slice_.app or not slice_.board:
             return None
@@ -511,7 +514,8 @@ def _slice_command(
             f"-D{extra_var}={_tokenize(alp_conf, base_dir, REPO)}")
         # `cameras:` -> ONE -DSHIELD (carrier + module shields), shared with
         # the cmake-args listing via cameras.zephyr_shield_define.
-        shield = _cameras.zephyr_shield_define(project, slice_)
+        # Sysbuild: `-D<image>_SHIELD` so MCUboot does not get the shields.
+        shield = _cameras.shield_define_for_build(project, slice_, base_dir)
         if shield:
             defines.append(f"-D{shield}")
         cmd += ["--", *defines]

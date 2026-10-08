@@ -293,33 +293,33 @@ def _check_cameras(
             report("cameras",
                    f"cameras: unknown camera module '{module}' "
                    f"(no metadata/camera_modules/{module}.yaml)")
-        elif isinstance(module, str) and _uses_zephyr_core(data, som_doc):
-            mod = _load_metadata_yaml(camera_module_dir / f"{module}.yaml") or {}
-            if not mod.get("zephyr_shield"):
-                report("cameras",
-                       f"cameras: module '{module}' has no `zephyr_shield:` so it "
-                       f"cannot be selected on a Zephyr core; use a module with "
-                       f"one, or run the project on Linux only (`os: off` the "
-                       f"Zephyr cores)")
+    _check_camera_owners(data, cameras, connectors, som_doc, report,
+                         camera_module_dir=camera_module_dir)
 
 
-def _uses_zephyr_core(data: dict[str, Any], som_doc: Any) -> bool:
-    """True when a project core resolves to Zephyr: an explicit `os: zephyr`,
-    or a core with an `app:` whose SoM topology entry names a Zephyr `board:`
-    (and no other `os:`)."""
-    cores = data.get("cores")
-    topology = (som_doc or {}).get("topology") if isinstance(som_doc, dict) else None
-    if not isinstance(cores, dict):
-        return False
-    for cid, core in cores.items():
-        if not isinstance(core, dict):
-            continue
-        os_ = core.get("os")
-        if os_ == "zephyr":
-            return True
-        if os_ is None and core.get("app") and isinstance(topology, dict)                 and isinstance(topology.get(cid), dict) and topology[cid].get("board"):
-            return True
-    return False
+def _check_camera_owners(data, cameras, connectors, som_doc, report, *,
+                         camera_module_dir: Path) -> None:
+    """Ownership + static build checks via the shared leaf
+    `alp_orchestrate/camera_owner.py` (the same rule the planner applies):
+    an explicit/implied owner core, a module `zephyr_shield`, connector
+    `zephyr_shields`, and a shield overlay for the owner's board target.
+
+    Lazy import for the cycle reason `_known_chip_slugs` documents."""
+    if not isinstance(som_doc, dict):
+        return
+    try:
+        from alp_orchestrate.camera_owner import plan_cameras, resolve_cores
+    except ImportError:
+        return
+    modules = {}
+    for entry in cameras:
+        mod = entry.get("module") if isinstance(entry, dict) else None
+        if isinstance(mod, str) and (camera_module_dir / f"{mod}.yaml").is_file():
+            modules[mod] = _load_metadata_yaml(camera_module_dir / f"{mod}.yaml") or {}
+    cores = resolve_cores(data.get("cores"), som_doc.get("topology"))
+    for plan in plan_cameras(cameras, connectors, cores, modules, REPO):
+        for message in plan.errors:
+            report("cameras", message)
 
 
 def _known_chip_slugs(*, chip_dir: Path = CHIP_DIR) -> set[str]:
