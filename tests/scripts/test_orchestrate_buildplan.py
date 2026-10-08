@@ -388,9 +388,11 @@ def test_emit_build_plan_matches_materialiser(tmp_path: Path) -> None:
     SDK-side materialiser itself, so this checks the shared source
     functions directly instead of a real on-disk write)."""
     import json as _json
-    from alp_orchestrate import emit_build_plan
+    from alp_orchestrate import DtsOverlayUnavailable, emit_build_plan
     from alp_orchestrate.buildplan import (_shared_artefacts,
-                                           _slice_config_artefact)
+                                           _slice_cmake_args_artefact,
+                                           _slice_config_artefact,
+                                           _slice_dts_overlay_artefact)
 
     path = _write_board(tmp_path, V2N_HAPPY)
     build_root = tmp_path / "build"
@@ -411,6 +413,17 @@ def test_emit_build_plan_matches_materialiser(tmp_path: Path) -> None:
         if artefact is not None:
             name, contents = artefact
             want_confs[f"{s['buildDir']}/{name}"] = contents
+        try:
+            extra = _slice_dts_overlay_artefact(project, slice_)
+        except DtsOverlayUnavailable:
+            extra = None  # the plan carries a `dts-overlay-unavailable` warning
+        blocked_baremetal = (s["command"] is None
+                             and slice_.os == "baremetal")
+        if extra is not None and not blocked_baremetal:
+            want_confs[f"{s['buildDir']}/{extra[0]}"] = extra[1]
+        extra = _slice_cmake_args_artefact(project, slice_)
+        if extra is not None and not blocked_baremetal:
+            want_confs[f"{s['buildDir']}/{extra[0]}"] = extra[1]
         got_confs = {a["path"]: a["contents"] for a in s["configArtefacts"]}
         assert got_confs == want_confs
 

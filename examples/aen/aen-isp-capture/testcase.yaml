@@ -86,7 +86,7 @@ tests:
       - isp
       - video
       - camera
-    build_only: true   # issue #2327 Stage B: IMX335 2x2-binned frame, ISP-cropped to 1280x960 -- BUILD-ONLY, no bench run -- see changelog.d/2327.md.
+    build_only: true   # issue #2327 Stage B: IMX335 2x2-binned frame, ISP-cropped to 1280x960 -- AE-off variant, BUILD-ONLY (the AE-on scenario below is the bench-verified one) -- see changelog.d/2327.md.
 
   alp_sdk.examples.aen.isp_capture.imx335_ae:
     platform_allow:

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-07",
+  "generated": "2026-10-08",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -9895,13 +9895,14 @@
       },
       "typedefs": {
         "alp_display_caps_t": {
-          "definition": "typedef struct { uint16_t width; uint16_t height; alp_pixfmt_t format; } alp_display_caps_t;",
+          "definition": "typedef struct { uint16_t width; uint16_t height; alp_pixfmt_t format; uint16_t rotation; } alp_display_caps_t;",
           "fields": [
             "uint16_t width",
             "uint16_t height",
-            "alp_pixfmt_t format"
+            "alp_pixfmt_t format",
+            "uint16_t rotation"
           ],
-          "hash": "9ee6cffa0d364534",
+          "hash": "b6e680d6dafdbcfb",
           "kind": "struct"
         },
         "alp_display_config_t": {
@@ -15612,8 +15613,8 @@
           "value": "0"
         },
         "ALP_VERSION_STRING": {
-          "hash": "e049ddc52c8da9ae",
-          "value": "\"0.17.0\""
+          "hash": "b0e812a2a6fa1962",
+          "value": "\"0.17.0-rc1\""
         }
       },
       "typedefs": {},

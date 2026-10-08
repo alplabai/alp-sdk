@@ -416,7 +416,7 @@ bench-runner's to confirm on the next flash.
 Audited every layer on this path -- `tr_rail5v_open()`/`tr_rail5v_poll()`'s call sites in `main.c`
 (present, unconditional, not gated on `TR_INPUT_NPU`), the DT/pinctrl for `EVK_I2C_BUS_SENSORS`
 (`== ALP_E1M_I2C0 == SoC I2C2`, confirmed `status = "okay"` in the generated dts, on pads P5_6/P5_7
--- NOT the I2C1 pads `i2c1_off.overlay` disables), the SDK's I2C handle pool (a fixed 4-slot pool,
+-- NOT the I2C1 pads `i2c_handover_he.overlay` disables on the HE), the SDK's I2C handle pool (a fixed 4-slot pool,
 not DT-derived, two concurrent opens on one `bus_id` are explicitly supported by the backend), and
 the HUD's own read-through (`hud_l2.c` -> `hud.c`, unconditional, correct) -- **no logic bug found
 anywhere on this path**. The one live difference from the isolated test is TIMING: `tr_rail5v_open()`
@@ -545,7 +545,7 @@ overlay, not left to whatever the base board file happens to default to):
 
 | peripheral | M55-HP (`hp_vision`) | M55-HE (this game) | enforcement |
 |---|---|---|---|
-| I2C1 (`0x49011000`, camera SCCB) | **owns** (`csi_i2c`, ordering-fix shield) | disabled (`i2c1_off.overlay`, `TR_INPUT_NPU` builds) | `hp_vision_check.sh` i2c audit; existing overlay |
+| I2C1 (`0x49011000`, camera SCCB) | **owns** (`csi_i2c`, ordering-fix shield) | disabled on the HE (`i2c_handover_he.overlay`, `TR_INPUT_NPU` builds; a shield whose bridge needs the bus enables it and the HE releases it at boot end, `alp,i2c-handover`) | `hp_vision_check.sh` i2c audit; the HP waits for the release |
 | I2C2 (`0x49012000`, BMI323 + INA236) | **disabled** (fix round 6 -- was left `okay` by the base board file, the actual bug) | **owns** | `hp_vision_check.sh` i2c audit (new) |
 | I2C0 (`0x49010000`) | **disabled** (fix round 6 -- unused by any hp_vision source, same audit) | n/a (HE base board leaves it as the board default; unrelated to this round's finding) | `hp_vision_check.sh` i2c audit (new) |
 | CSI / CAM / D-PHY | **owns** (camera capture) | disabled by default (no camera shield attached) -- **except D-PHY**, which the display shield (`e1m_evk_rk055hdmipi4ma0`) also needs `okay` for its own DSI TX link; that is the HE's OWN dependency, not a camera leak, and stays on | build-time board default; confirmed via generated `zephyr.dts`, not asserted in code (no false leak to catch) |
@@ -565,7 +565,7 @@ exact bug this check's first draft had: a naive linear scan for the LAST `status
 node's braces matches the CHILD device's status, not the parent bus controller's -- the real i2c2 leak
 was invisible to that naive version. The shipped check tracks brace depth instead.
 
-**HE side:** already correct -- `i2c1_off.overlay` predates this round; CSI/CAM are off by board
+**HE side:** already correct -- `i2c_handover_he.overlay` keeps I2C1 off on the HE; CSI/CAM are off by board
 default (no camera shield); D-PHY's `okay` is the display's own DSI dependency, not a leak (see table).
 No HE-side code or overlay change was needed for this fix.
 

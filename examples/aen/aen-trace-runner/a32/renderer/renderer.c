@@ -87,6 +87,8 @@
 #include <stdint.h>
 
 #include "render.h"
+
+#include "../../src/render/panel_rot.h"
 #include "stub_abi.h"
 #include "tr_mbox.h"
 #include "tr_memmap.h"
@@ -535,6 +537,18 @@ static int join_core1(uint32_t seq)
 	return 1;
 }
 
+/* The mailbox ABI is wrong (a stub of another TR_MBOX_VERSION, or a frame whose
+ * rotation this renderer cannot produce): record what in pad3[7] -- 0xAB1D in
+ * the top half, 1 version / 2 rotation | rotation << 8 below -- and fault.
+ * The stub records the fault (UNDEF) and parks; there is no fallback drawing
+ * of a frame the HE did not ask for. */
+static void __attribute__((noreturn)) abi_fault(volatile tr_mbox_t *m, uint32_t what)
+{
+	m->pad3[7] = 0xAB1D0000u | what;
+	barrier();
+	__builtin_trap();
+}
+
 void renderer_main(volatile tr_mbox_t *m)
 {
 	uint32_t last = m->out_seq; /* a frame published before LAUNCH is still owed */
@@ -560,6 +574,9 @@ void renderer_main(volatile tr_mbox_t *m)
 	checks     = 0x80000000u | (tr_span_selfcheck() ? 1u : 0u) | (tr_raster_selfcheck() ? 2u : 0u) |
 	             (dual ? 4u : 0u);
 	m->pad3[1] = checks;
+	if (m->version != TR_MBOX_VERSION) {
+		abi_fault(m, 1u);
+	}
 	RENDER_STATS[1] = 0;
 	RENDER_STATS[2] = 0;
 	RENDER_STATS[3] = 0xFFFFFFFFu;
@@ -603,6 +620,9 @@ void renderer_main(volatile tr_mbox_t *m)
 		}
 		if (!tr_mbox_take_in(m, last, &in, &fb, &seq, barrier)) {
 			continue;
+		}
+		if (!tr_rot_valid(in.rotation)) {
+			abi_fault(m, 2u | ((uint32_t)in.rotation & 0xFFu) << 8); /* low byte only: 270 -> 14 */
 		}
 		if (t_pub_valid) {
 			uint32_t gap = cntvct_lo() - t_pub;

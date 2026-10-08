@@ -9895,13 +9895,14 @@
       },
       "typedefs": {
         "alp_display_caps_t": {
-          "definition": "typedef struct { uint16_t width; uint16_t height; alp_pixfmt_t format; } alp_display_caps_t;",
+          "definition": "typedef struct { uint16_t width; uint16_t height; alp_pixfmt_t format; uint16_t rotation; } alp_display_caps_t;",
           "fields": [
             "uint16_t width",
             "uint16_t height",
-            "alp_pixfmt_t format"
+            "alp_pixfmt_t format",
+            "uint16_t rotation"
           ],
-          "hash": "9ee6cffa0d364534",
+          "hash": "b6e680d6dafdbcfb",
           "kind": "struct"
         },
         "alp_display_config_t": {

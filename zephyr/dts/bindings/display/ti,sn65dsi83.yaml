@@ -1,0 +1,68 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# TI SN65DSI83 -- single-channel MIPI DSI receiver to single-link FlatLink(TM)
+# LVDS bridge (datasheet SLLSEC1, Texas Instruments).  Authored CLEAN-ROOM
+# against the public datasheet's Table 7-2 (initialization sequence) and
+# Tables 7-4..7-9 (CSR bit-field maps) -- no upstream Zephyr driver, no
+# hal_alif library, and no sdk-alif fork driver exists for this part, so this
+# is ADR-0017-ADJACENT (novel driver authored from spec, not consumed from
+# any vendor SDK).  Do NOT port logic from Linux's ti-sn65dsi83.c (GPL-2.0) --
+# see docs/adr/0017-alp-sdk-over-the-vendor-sdk.md and the
+# securing-the-alp-sdk-position skill's clean-room rule.
+#
+# The bridge is an INIT-ONLY device: it programs its own CSR bank over I2C
+# once and forwards whatever DSI video the host streams. It does not
+# implement a Zephyr display-class device of its own -- the CDC200 stays the
+# `zephyr,display` chosen node.  BENCH-UNVERIFIED: no adapter-PCB hardware was
+# on hand for this change; every register value should be reread on real
+# silicon per the driver's own comments before shipping.
+
+description: TI SN65DSI83 single-channel MIPI DSI to single-link FlatLink LVDS bridge
+
+compatible: "ti,sn65dsi83"
+
+include: [i2c-device.yaml]
+
+properties:
+  mipi-dsi:
+    type: phandle
+    required: true
+    description: |
+      Phandle to the snps,designware-dsi (or another Zephyr mipi_dsi-class)
+      host this bridge attaches to as the sole DSI peripheral.  The bridge
+      itself is not a node on that host's DSI bus (it is controlled over
+      I2C, not DCS), so it carries no DSI channel/reg of its own; the driver
+      always attaches on channel 0.
+
+  data-lanes:
+    type: int
+    required: true
+    enum:
+      - 1
+      - 2
+      - 3
+      - 4
+    description: |
+      Number of DSI data lanes the bridge's D-PHY receiver uses (datasheet
+      Table 7-6 CHA_DSI_LANES, CSR 0x10 bits[4:3]).
+
+  pixel-format:
+    type: int
+    required: true
+    description: |
+      DSI video pixel format fed to the bridge -- a MIPI_DSI_PIXFMT_* value
+      from <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>.  Only RGB666_PACKED
+      (18 bpp) and RGB888 (24 bpp) are wired in the driver: the two formats
+      the SN65DSI83 itself decodes (datasheet Section 3, Description).
+
+  enable-gpios:
+    type: phandle-array
+    required: true
+    description: |
+      The bridge's EN pin.  Per datasheet Table 7-2 (the initialization
+      sequence) and Section 7.3.3: EN must be held low for at least 10 ms
+      after reset, and the DSI clock lane must already be in the HS state
+      (data lanes at LP-11) BEFORE EN is asserted high -- the bridge answers
+      no I2C transaction at all until EN is high.  GPIO_ACTIVE_HIGH: driving
+      the line "active" raises EN.

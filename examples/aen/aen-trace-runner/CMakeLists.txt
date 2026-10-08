@@ -20,10 +20,13 @@ if(TR_INPUT_NPU AND TR_CAMERA)
 	message(FATAL_ERROR "TR_INPUT_NPU and TR_CAMERA are exclusive -- pick one body-detection source")
 endif()
 if(TR_INPUT_NPU)
-	# The HP now owns I2C1 -- see i2c1_off.overlay's header for why the HE
-	# must stop touching the same controller (its own display shield
-	# enables it too, on the same pads).
-	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/i2c1_off.overlay)
+	# The HP owns I2C1 (the camera SCCB bus, 0x49011000) once the HE has
+	# finished with it: the HE's display shield may configure a bridge over the
+	# same controller at boot (the RVT121's SN65DSI83). The alp,i2c-handover
+	# node hands it over -- the HE releases it at the end of its boot, the HP
+	# (hp_vision) waits for that before it touches the bus -- instead of this
+	# image switching I2C1 off. Any shield, no app code.
+	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/i2c_handover_he.overlay)
 endif()
 
 # Who draws the frame. A32 (default): the Cortex-A32 renderer draws every
@@ -68,26 +71,22 @@ if(TR_M55_AUTOLAUNCH AND NOT EXISTS "${TR_A32_LAUNCH_H}")
 	message(FATAL_ERROR "TR_M55_AUTOLAUNCH=ON needs -DTR_A32_LAUNCH_H=<header with TR_A32_ENTRY/LEN/CRC>")
 endif()
 
-list(APPEND SHIELD e1m_evk_rk055hdmipi4ma0)
-# The panel inits from main() with retries (src/platform/panel.c), not at boot.
-list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/panel_deferred.overlay)
-
-# Panel refresh (P11a). 40: the shield's timing. 30: panel_30hz.overlay
-# stretches the vertical front porch (same pixel clock and DSI link) for
-# 33.3 ms of render time a frame, and the game's frame-counted constants
-# scale with it (src/game/panel_hz.h). A32 render only: the M55 renderer
-# runs its own TICK_MS loop.
-set(TR_PANEL_HZ 40 CACHE STRING "Panel refresh, Hz: 40 or 30")
-set_property(CACHE TR_PANEL_HZ PROPERTY STRINGS 40 30)
-if(NOT TR_PANEL_HZ MATCHES "^(40|30)$")
-	message(FATAL_ERROR "TR_PANEL_HZ must be 40 or 30, got '${TR_PANEL_HZ}'")
+# The display is a shield: -DSHIELD=<name> picks it, the RK055 panel by default.
+# Nothing else in this app names a panel -- its timings (refresh), geometry,
+# mount-rotation and backlight all come from the shield's devicetree, through
+# the SDK's display API. A shield whose panel does not scan the game's
+# 720 x 1280 portrait content as-is gets a fit overlay of the same name under
+# shield-fit/ (layer-1 window), applied automatically. A different refresh is an
+# extra overlay (panel_30hz.overlay for the RK055), passed with
+# -DEXTRA_DTC_OVERLAY_FILE=.
+if(NOT SHIELD)
+	set(SHIELD e1m_evk_rk055hdmipi4ma0)
 endif()
-if(TR_PANEL_HZ STREQUAL "30")
-	if(NOT TR_RENDER STREQUAL "A32")
-		message(FATAL_ERROR "TR_PANEL_HZ=30 needs TR_RENDER=A32")
+foreach(shield IN LISTS SHIELD)
+	if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/shield-fit/${shield}.overlay)
+		list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/shield-fit/${shield}.overlay)
 	endif()
-	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/panel_30hz.overlay)
-endif()
+endforeach()
 
 if(TR_CAMERA)
 	# Carrier CSI connector + OV9281 sensor -- the shield string
@@ -109,7 +108,6 @@ target_sources(app PRIVATE
 	src/game/state.c
 	src/game/step.c
 	src/platform/imu.c
-	src/platform/panel.c
 	src/platform/rail5v_power.c
 	src/vision/pose.c
 	src/vision/track.c
@@ -170,7 +168,6 @@ else()
 	target_compile_definitions(app PRIVATE TR_RENDER_A32=0)
 endif()
 target_include_directories(app PRIVATE src)
-target_compile_definitions(app PRIVATE TR_PANEL_HZ=${TR_PANEL_HZ})
 
 # No fused multiply-add: float code must compute the same bits as the host
 # tests (tests/host/runner.sh passes the same flag; see the plan's section 5).

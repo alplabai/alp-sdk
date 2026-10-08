@@ -323,7 +323,7 @@ responder to 0 and back with `CAM_EN`.
   the same board); whether the IMX296 module self-enables without that
   rework is not established. IMX335 (issue #2327) has its raw capture
   bench-verified: 6/6 consecutive clean 1296x972 RAW10 frames (runs
-  316-330), 0 CSI/IPI errors -- see
+  316-330), 0 CSI/IPI errors on the kept frame (the discarded first frame of each start reports one `SEQ_FRAME_FATAL`, status `0x1`) -- see
   [`docs/camera-shields.md`](../camera-shields.md)'s IMX335 driver
   section. That bench also ran on the same E1M-AEN803 (serial
   2026W36-0001) on the same reworked E1M-EVK; whether the IMX335 module
@@ -370,11 +370,47 @@ responder to 0 and back with `CAM_EN`.
   from NXP's MIPI-DSI panel collection).  With an E1M-AEN SoM, add the
   `e1m_evk_rk055hdmipi4ma0` Zephyr shield (`zephyr/boards/shields/`)
   to drive it -- see `examples/aen/aen-dsi-display`, which renders at
-  40.0 Hz.  The panel intermittently fails to init on cold boot
-  (roughly 1 in 8-10 boots, #2199, no recovery once it happens).  The
+  40.0 Hz.  The panel's first init intermittently stalls on boot (#2199);
+  the shield defers it and the SDK retries it before `main()`
+  (`src/zephyr/panel_init_retry.c`: up to five retries that hold RESX low and
+  re-run the driver's own init, then a static-high backlight enable), so an
+  app needs no code of its own.  The
   capacitive-touch controller sits on `EVK_I2C_BUS_DSI_CSI`
   (`ALP_E1M_I2C1`) and is not driven yet.
   Display status per SoM and path: [display-support-matrix.md](../display-support-matrix.md).
+- **Display (alternative, LVDS panel via bridge adapter):** the same
+  40-pin DSI connector (J6) can instead drive a **Riverdi
+  RVT121HVDFWCA0-B** 12.1" 1280x800 native-LVDS panel through a
+  maintainer-built adapter PCB carrying a **TI SN65DSI83** MIPI DSI-to-
+  FlatLink(LVDS) bridge (I2C `0x2c` assumed -- ADDR-strap-selectable
+  between `0x2c`/`0x2d`, unconfirmed against the adapter).  With an
+  E1M-AEN SoM, add the `e1m_evk_rvt121hvdfwca0` Zephyr shield
+  (`zephyr/boards/shields/`) -- see `examples/aen/aen-lvds-display`,
+  which renders at ~30.06 Hz (2 DSI data lanes, **RGB888**,
+  non-burst-sync-events, 36.363636 MHz pixel clock -- deliberately under
+  the panel's own ~66.3 MHz native-60 Hz minimum for this bring-up; see
+  the shield overlay's header comment for the clock math and a fallback
+  ladder).  RGB888 + non-burst, not RGB666-packed + burst: the panel is
+  VESA-24, so an 18 bpp link would show every colour at roughly 1/4
+  intensity, and burst RGB888 at this pixel clock (581.8 Mbps/lane)
+  exceeds the Ensemble E8's two-lane 500 Mbps application-note ceiling.
+  Bench-verified end to end on 2026-10-07 through the Trace Runner on an
+  E1M-AEN803 + E1M-EVK (interim build): the bridge came up and the game
+  scanned out upright with the shield's `mount-rotation` of 90.  The touch
+  controller's reset role is still carried over from the RK055 shield's
+  role map and marked UNVERIFIED in the overlay (the game does not use
+  touch).  The panel's
+  own **ILI2511** capacitive-touch controller (I2C `0x41`, same
+  `EVK_I2C_BUS_DSI_CSI` bus as above) is bound by the shield
+  (`ilitek,ili251x` Zephyr input driver) and POLLED: the carrier's touch
+  INT lands on a CC3501E-owned pad.  HARDWARE CAVEAT: the panel's
+  backlight draws ~1 A from the E1M-EVK's own +5V rail (via J6 pins
+  39/40) as soon as the shield's `alp,display-backlight` node (30% PWM) runs at
+  boot.  That node runs after the display chain and only when the display
+  controller and the bridge are ready, so a bridge that failed to initialise
+  leaves the backlight off -- check the adapter PCB's and the
+  DSI FFC's current rating before powering it for any length of time on
+  the unverified adapter.
 - **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
   the PEC11R-4215K-S0024 quadrature signals.  The push-switch
   (SW) is on E1M `IO4` -- `EVK_PIN_ENCODER_SW`.
@@ -393,6 +429,14 @@ responder to 0 and back with `CAM_EN`.
    set on the header (`+VIO`).
 6. Add peripherals one at a time — Ethernet → microSD → display →
    camera → M.2 modules.
+
+## Troubleshooting: camera `ALP_ERR_NOSUPPORT`
+
+`alp_camera_open FAILED: ALP_ERR_NOSUPPORT` preceded by
+`Failed to set CSI pixel clock rate! ret - -134` means the Zephyr workspace
+lacks alp-sdk's `zephyr/patches.yml` patches. Run `bash scripts/bootstrap.sh`
+(or `west patch --dst-module zephyr apply`) and rebuild; full write-up in
+[`docs/camera-shields.md`](../camera-shields.md).
 
 ## Known design notes (to track)
 

@@ -210,8 +210,8 @@ struct cc3501e {
 	 *
 	 * Prefer @ref cc3501e_get_capabilities over reasoning from the minor: it
 	 * reports what the build IMPLEMENTS, not what its number implies. */
-	uint8_t     fw_proto_major;
-	uint8_t     fw_proto_minor;
+	uint8_t fw_proto_major;
+	uint8_t fw_proto_minor;
 	/* True when the firmware reported ALP_CC3501E_CAP_FAST_REPLY at the last
 	 * cc3501e_reset(); selects the shorter reply-header gate (#2052).  Sits
 	 * in the padding before @c bus, so the struct layout does not move. */
@@ -291,7 +291,7 @@ struct cc3501e {
 	 * (#2052). */
 	uint64_t last_xfer_end_us;
 	uint8_t  rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
-	uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
+	uint8_t  tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 	/* Per-context decode scratch for the scan/event helpers (issue #740).
 	 * Each of these used to be a function-local `static` buffer in
 	 * cc3501e_wifi.c / cc3501e_ble.c / cc3501e_events.c -- process-global

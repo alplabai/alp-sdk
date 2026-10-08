@@ -7,7 +7,152 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
-## [v0.17.0] - 2026-10-07
+## [v0.17.0] - 2026-10-08 (release candidate: v0.17.0-rc1)
+
+### Known issue — trace-runner A32 renderer faulted once on the bench (v0.17.0-rc1)
+
+In 1 of 3 cold boots on the bench, the trace-runner A32 renderer faulted once
+and the HE watchdog relaunched it. The cause is not captured. Body-control is
+not yet bench-tested on the Riverdi build.
+
+### Added — build-plan-v1 slices carry the rendered `alp.overlay` and `cmake-args.txt` (tan-cli#1216)
+
+A zephyr or baremetal slice's `configArtefacts` gains `alp.overlay`, its DTS
+overlay, byte-identical to `alp_project.py --emit dts-overlay --core <id>`
+(both call `_slice_dts_overlay`), and `cmake-args.txt`, its full `-D` listing,
+identical to `--emit cmake-args --core <id>` minus the `# --- core` marker line
+(`_slice_cmake_args`). Additive under `schemaVersion` 1, no bump; the primary
+artefact stays first. A board with no header under `include/alp/boards/` (or an unrecognised SKU)
+emits a `dts-overlay-unavailable` warning and no overlay artefact instead of
+failing the plan; every other overlay failure, such as an M33 ownership
+defect, still fails it. Per ADR-0026 §D, `tan` consumes these bytes rather than re-rendering
+them.
+
+### Added — `diagnostics.link: itcm` board.yaml knob for AEN Flow C builds (tan-cli#1350)
+
+`board.schema.json` gains `diagnostics.link` (`auto` | `itcm`, default `auto`).
+`itcm` asks the planner to link the Alif Ensemble M55-HE slice into the ITCM
+(base `0x0`; `0x58000000` is its global alias) for a RAM-run with
+`tan flash --ram`, instead of the MRAM slot0 link the production flows need.
+Until now the only way to get that image was to hand-copy
+`scripts/bench/aen/aen-flowc-itcm.{conf,overlay}` into the app.
+
+Per ADR-0026 the planner is tan's: `tan build` turns the knob into the ITCM
+retarget Kconfig fragment and devicetree overlay (the same content as the
+bench `aen-flowc-itcm.*` pair, plus `CONFIG_DCACHE=n` and the 16 KiB RAM
+console from `aen-bench-shared.conf`) and layers them after the slice's
+`alp.conf`. Proven on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and refused
+elsewhere: `tan build` rejects a project with no M55-HE app (an M55-HP-only
+project included), any other SKU or a sysbuild project
+(`build.link-itcm-unsupported`), and an explicit non-RAM console
+(`build.link-itcm-console-conflict`). The slice's manifest entry carries
+`flash_method: ram_run_only`, so plain `tan flash` cannot write the 0x0-linked
+image to MRAM. alp-sdk's own `alp_orchestrate` refuses the knob with a message
+naming `tan build` rather than silently emitting an MRAM-linked image. See
+`docs/aen-bench-bringup.md` (Flow C).
+
+### Added — Riverdi RVT121HVDFWCA0-B LVDS panel support on the E1M-EVK, via a TI SN65DSI83 DSI-to-LVDS bridge
+
+New out-of-tree Zephyr driver for the TI SN65DSI83 single-channel MIPI DSI
+receiver to single-link FlatLink(LVDS) bridge (`ti,sn65dsi83`,
+`zephyr/drivers/display/display_sn65dsi83.c`), authored clean-room against
+the public datasheet (SLLSEC1) — no upstream Zephyr driver, hal_alif
+library, or sdk-alif fork driver exists for this part class
+(ADR-0017-ADJACENT). The driver is init-only: it sequences the bridge's
+EN pin against the DesignWare MIPI-DSI host's clock-lane mode (the DSI
+clock lane must reach HS *before* EN is asserted high, per the
+datasheet's Table 7-2 init sequence — the bridge answers no I2C
+transaction at all before that), verifies the bridge's fixed ID bytes,
+and programs its CSR bank entirely from devicetree facts already
+describing the panel to CDC200/DSI (pixel clock, timings, lane count,
+lane bandwidth) rather than duplicating them as new properties. A new
+Kconfig option, `SN65DSI83_TEST_PATTERN`, forces the bridge's built-in
+LVDS test pattern for bench isolation of the PLL/LVDS link from the DSI
+video path.
+
+New shield `e1m_evk_rvt121hvdfwca0` (cloned in shape from
+`e1m_evk_rk055hdmipi4ma0`) wires the bridge on `E1M_I2C1`
+(`EVK_I2C_BUS_DSI_CSI`) behind a maintainer-built adapter PCB, at 2 DSI
+data lanes / RGB888 / non-burst-sync-events / ~30.06 Hz (36.363636 MHz
+pixel clock, deliberately under the panel's own ~66.3 MHz native-60 Hz
+minimum for this bring-up — see the shield overlay's header comment for
+the full clock-rate derivation and a fallback ladder to 40 MHz). RGB888
+is required, not a choice: the panel is VESA-24 (Figure 7-5 in the TI
+datasheet), and an 18 bpp link only gives the bridge 6 of each colour's
+8 bits to forward, so it would show every colour at roughly 1/4
+intensity. Non-burst is required alongside it — burst RGB888 at this
+pixel clock needs 581.8 Mbps/lane, over the Ensemble E8's two-lane
+500 Mbps application-note ceiling. Every GPIO-expander role the shield
+assumes (the bridge's EN pin, the
+touch controller's reset) is carried over from the RK055
+shield's role map with no adapter schematic to confirm it against, and
+is marked UNVERIFIED in the overlay accordingly. The panel's own
+ILI2511 capacitive-touch controller (I2C `0x41`, same bus) is bound
+through a new `ilitek,ili251x` Zephyr input driver
+(`zephyr/drivers/input/input_ili251x.c`, protocol facts authored from
+observed mainline Linux driver behaviour — no code or comments copied),
+polled because the carrier routes the touch INT line to a CC3501E-owned
+pad.
+
+New example `examples/aen/aen-lvds-display` renders colour bars through
+the chain and reads the bridge's own link-error register (CSR `0xE5`)
+after `display_blanking_off()`, as the equivalent of `aen-dsi-display`'s
+DCS-read proof for a bridge that has no DSI panel node to read from at
+all.
+
+A small shared-code extension: `zephyr/soc-bridge/alif/mipi_display_e8.c`'s
+backlight pad-mux helper previously only walked `panel@N` children of the
+`mipi_dsi` host node for a `bl-gpios` property; this shield has no such
+child (the bridge is not a DSI peripheral), so the helper now also checks
+the host node itself — a `bl-gpios` property added to the
+`snps,designware-dsi` binding for exactly this case, backward-compatible
+with the RK055 shield (which never sets it there).
+
+Entirely BENCH-UNVERIFIED: no adapter-PCB hardware was available for this
+change. `docs/boards/e1m-evk.md`'s display section documents the new
+shield, the assumed adapter roles, and the out-of-spec 30 Hz pixel clock.
+
+### Added — `alp,i2c-handover`: hand a shared Alif I2C controller from one M55 core to the other (#2257)
+
+The Ensemble has one I2C1 block that both M55 cores can address. A `release` node (the core that configures a peripheral over it at boot, such as a display bridge) masks its interrupt, stops its controller and publishes a per-boot nonce and a state word in always-on SRAM at the end of APPLICATION init; a controller that will not go idle is still released, as DIRTY, so the other core runs its bus recovery instead of waiting forever, and a bus that is disabled in that image is released at once. An `acquire` node (the core that owns the bus afterwards) waits for a release it has not taken yet at POST_KERNEL priority 0, ahead of every driver, reports on the console while it is missing without touching the bus, and consumes the release, so an already-taken release never satisfies a later wait (a release published but not yet taken survives a warm reset in the always-on SRAM; harmless when the release side keeps the bus disabled, a hazard with a bridge on the bus, hence reset both cores together). The glue is `zephyr/soc-bridge/alif/i2c_handover.c`, the protocol `i2c_handover.h`. An `acquire` image restarted alone waits for a release that will not come again, and a release-side reset while the acquire side runs reconfigures the bus under it: reset both, release side first.
+
+### Added — `alp,display-backlight`: a display's default brightness is set by the SDK at boot (#2257)
+
+A shield names its backlight LED (a `pwm-leds` or `gpio-leds` child) and a percentage in an `alp,display-backlight` node, and `src/zephyr/display_backlight.c` calls `led_set_brightness()` once at APPLICATION init, so an application that opens the display needs no backlight code. The RVT121 shield declares its 500 Hz UTIMER3 PWM at 30%. The RK055 shield has no node: its backlight enable is the HX8394 driver's own `bl-gpios`.
+
+### Added — a display declares how it is mounted: `mount-rotation` and `alp_display_caps_t.rotation` (#2257)
+
+`tes,cdc-2.1` has a `mount-rotation` property (0, 90, 180 or 270, default 0): the clockwise degrees a producer must turn its upright image before it writes the scan-out buffer. `alp_display_get_caps()` reports it as `alp_display_caps_t.rotation` (`[ABI-EXPERIMENTAL]`); the Linux backend and stubs report 0. It is the producer's pre-rotation, not Zephyr's `current_orientation`, which the CDC200 does not scan and which would make a UI stack rotate touch a second time. The RVT121 shield declares 90 (scanned out upright on an E1M-AEN803 + E1M-EVK, 2026-10-07) and its touch node inverts X and swaps X/Y to match. The SN65DSI83 driver's header now names the real EN GPIO (P13_4), asserts the `mipi-dsi` target is a `snps,designware-dsi` host, and states that display blanking is unsupported behind the bridge.
+
+### Added — aen-trace-runner runs on the Riverdi RVT121 12.1" LVDS panel by changing only the shield (#2257)
+
+`-DSHIELD=e1m_evk_rvt121hvdfwca0` builds the full game (HE, HP pose input with `TR_INPUT_NPU=ON`, A32 renderer) for the 1280x800 panel; the RK055 stays the default shield. The game no longer names a panel: the refresh is derived from the shield's `cdc200` timings (40 Hz RK055, 30 Hz RVT121, 30 Hz with `panel_30hz.overlay`), the panel's `mount-rotation` comes through `alp_display_caps_t.rotation`, and the backlight and panel bring-up belong to the SDK. The game stays 720x1280 portrait; the A32 renderer and the HUD turn the frame at scan-out into a 1280x720 window (`shield-fit/<shield>.overlay`), with the framebuffer addresses unchanged. One renderer binary serves every display: the HE sends the rotation (0, 90 or 270, a 16-bit field) in every frame (mailbox version 2) and the renderer faults on a mailbox version or a rotation it cannot produce, 180 included. `TR_PANEL`, `TR_PANEL_HZ` and `TR_PANEL_ROTATE` are removed as build options (`TR_PANEL_HZ` remains a macro, derived from the `cdc200` timings); the release interlock reads the refresh from the build's `zephyr.dts`. The SDK's `panel_init_retry.c` brings the RK055 panel up; with `TR_INPUT_NPU` the HE keeps I2C1 off unless the shield needs the bus (the RVT121's bridge) and releases it to the HP at the end of its boot (`alp,i2c-handover`). Rotation 90 scanned out upright on an E1M-AEN803 + E1M-EVK (2026-10-07, an interim build with the same renderer); the shield-driven SDK build itself has not yet been run on hardware.
+
+### Added — aen-inference-latency: latency-only on-device model benchmark (#2757)
+
+New `examples/aen/aen-inference-latency` for the E1M-AEN801/AEN803 (Ensemble E8,
+M55-HE). It runs a Vela-compiled int8 model in timed windows and prints cycles and
+milliseconds per inference plus the tensor-arena high-water mark, with no INA236
+rail monitor and no I2C, so it works on boards whose rail monitor is silent
+(#1975). It prints the `ENERGY-CFG` / `ENERGY-W` subset of `aen-inference-energy`'s
+console protocol, so tan's on-device capture parser (tan-cli#1287) reads it unchanged. The
+Flow C ITCM RAM-run image is about 83 KB of the 256 KiB ITCM; larger models use the
+Flow D overlay in `flowd/`, as for `aen-inference-energy`.
+
+### Fixed — an unpatched Zephyr workspace built silently, then `alp_camera_open` failed `ALP_ERR_NOSUPPORT` on AEN803 (#2766)
+
+A workspace without alp-sdk's `zephyr/patches.yml` patches linked fine and failed
+only at runtime (`Failed to set CSI pixel clock rate! ret - -134`). The Zephyr
+module now checks, at configure time, that the patches the enabled features
+depend on are present (CSI/CPI camera: `zephyr/0001`; `CONFIG_VIDEO_IMX335`:
+`zephyr/0004`; IMX335 ISP calibration: `hal_alif/0014`) and stops with a
+`CMake Error` naming the patch and the fix (`bash scripts/bootstrap.sh` or
+`west patch --dst-module <m> apply`). Opt out with `-DALP_SKIP_PATCH_CHECK=ON`.
+The CSI driver also logs the cause when the pixel-clock `set_rate` returns
+`-ENOTSUP`. `aen-camera-firstlight`, `docs/camera-shields.md` and
+`docs/boards/e1m-evk.md` gain a troubleshooting entry, and their "0 CSI/IPI
+errors" claim now says it holds for the kept frame only: the discarded first
+frame of each start reports one `SEQ_FRAME_FATAL` (status `0x1`).
 
 ### Added — a display support matrix, so #23 can be narrowed to the remaining hardware proof (#23)
 
@@ -611,7 +756,7 @@ by hand (the library manifest's `west:` block cannot carry it yet).
 
 ### Added — Zephyr build glue for the AWS IoT and Azure IoT embedded-C SDKs (#382)
 
-`CONFIG_ALP_AWS_IOT` (`zephyr/Kconfig.alp-libraries:457` ("config ALP_AWS_IOT")) builds coreMQTT and coreJSON from the west-pinned `aws-iot-device-sdk-embedded-C` (`202412.00`), and `CONFIG_ALP_AZURE_IOT` (`zephyr/Kconfig.alp-libraries:475` ("config ALP_AZURE_IOT")) builds az_core and the IoT Hub client from the pinned `azure-sdk-for-c` (`1.5.0`). The glue lives in-tree under `vendors/aws-iot/` and `vendors/azure-iot/`, added from `zephyr/CMakeLists.txt:1601` ("if(CONFIG_ALP_AWS_IOT)") so nothing compiles unless the symbol is set. Neither upstream ships a `zephyr/module.yml`, so the `extras-cloud` checkouts are found at `modules/lib/<project>` or via `ALP_AWS_IOT_SDK_DIR` / `ALP_AZURE_IOT_SDK_DIR`.
+`CONFIG_ALP_AWS_IOT` (`zephyr/Kconfig.alp-libraries:457` ("config ALP_AWS_IOT")) builds coreMQTT and coreJSON from the west-pinned `aws-iot-device-sdk-embedded-C` (`202412.00`), and `CONFIG_ALP_AZURE_IOT` (`zephyr/Kconfig.alp-libraries:475` ("config ALP_AZURE_IOT")) builds az_core and the IoT Hub client from the pinned `azure-sdk-for-c` (`1.5.0`). The glue lives in-tree under `vendors/aws-iot/` and `vendors/azure-iot/`, added from `zephyr/CMakeLists.txt:1630` ("if(CONFIG_ALP_AWS_IOT)") so nothing compiles unless the symbol is set. Neither upstream ships a `zephyr/module.yml`, so the `extras-cloud` checkouts are found at `modules/lib/<project>` or via `ALP_AWS_IOT_SDK_DIR` / `ALP_AZURE_IOT_SDK_DIR`.
 
 `metadata/libraries/aws-iot.yaml:63` ("CONFIG_ALP_AWS_IOT=y") and `metadata/libraries/azure-iot.yaml:54` ("CONFIG_ALP_AZURE_IOT=y") now carry the matching `kconfig:` entries, so `libraries: [aws-iot]` emits the symbol. `tests/zephyr/cloud_sdks/` links both on `native_sim/native/64`; `tests/zephyr/cloud_sdks/testcase.yaml:6` ("filter: CONFIG_CLOUD_SDKS_PRESENT") skips it unless both checkouts exist. The mbedtls TLS transport shim is not part of this change. `CONFIG_ALP_AWS_IOT_DEFAULT_CONFIG` (default `y`) controls whether coreMQTT uses its built-in defaults; set it to `n` to provide your own `core_mqtt_config.h`. The new `nightly-cloud-sdks.yml` workflow (nightly and manual, not a PR gate) fetches the pinned `extras-cloud` revisions and runs the test, which `pr-twister` skips.
 
@@ -18239,7 +18384,7 @@ itself halted moments before -- a narrower and better-grounded claim than
 this fix's first draft made by citing `flash-jlink.sh`'s `RSetType 2`/`r`/
 `g`/`exit` (`scripts/bench/aen/flash-jlink.sh:144-147`) as precedent: there
 the pin reset reboots the Secure Enclave and J-Link's own attach fails
-afterwards (`docs/aen-bench-bringup.md:511-513` ("Attach to CPU failed")), so
+afterwards (`docs/aen-bench-bringup.md:541-543` ("Attach to CPU failed")), so
 `g`/`exit` act on a core J-Link no longer controls -- that shows closing
 J-Link does not stop an SE-booted core, not that `exit` after resuming a
 core J-Link itself halted leaves it running. Whether `qc` behaves the same
@@ -19291,7 +19436,7 @@ backend exists", so it must not silently land on the software fallback's
 fake counter.
 
 Compiled only under `CONFIG_INPUT`
-(`zephyr/CMakeLists.txt:1101`
+(`zephyr/CMakeLists.txt:1130`
 ("zephyr_library_sources_ifdef(CONFIG_INPUT")), selected purely by the
 alias's devicetree `compatible` — no new Kconfig knob to choose between the
 two qenc backends.
@@ -22548,7 +22693,7 @@ non-prompt result symbol is y when the PSA core is compiled against
 randomness that is not cryptographically secure
 (`zephyr/Kconfig.alp-libraries:390` ("config ALP_SDK_MBEDTLS_WEAK_RNG")), and
 CMake turns that into a hard failure naming the board and the fix
-(`zephyr/CMakeLists.txt:1836` ("CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG AND NOT")).
+(`zephyr/CMakeLists.txt:1875` ("CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG AND NOT")).
 Kconfig cannot refuse a configuration, hence the CMake half.
 
 The check is `CSPRNG_ENABLED` — Zephyr's own "a true entropy driver is in this
@@ -24694,84 +24839,22 @@ the Alif fork included but never shipped). `display_cdc200.c` includes it
 instead of the driver's private `../mipi_dsi/dsi_dw.h`, whose
 `struct dsi_dw_config` layout depends on the including driver's `DT_DRV_COMPAT`.
 
-### Known issue — the RK055HDMIPI4MA0 panel intermittently fails to init, with no recovery (#2199)
+### Known behaviour — the RK055HDMIPI4MA0 panel's first init stalls on a variable fraction of boots; the shipped retry recovers it (#2199)
 
-On a variable fraction of cold boots of the `e1m_evk_rk055hdmipi4ma0` shield
-at the shipped 40 MHz / RGB888-link setting, `hx8394_init()` returns `-EIO`
-and the panel device never becomes ready. Zephyr has no re-init path for a display
-whose driver failed at `POST_KERNEL`, so an app sees a dead display with no
-way to recover short of a power cycle. `examples/aen/aen-dsi-display` now
-prints a one-line pointer to this issue when it detects the condition
-(`src/main.c`, the `if (!panel_ok)` block).
+On a variable fraction of boots of the `e1m_evk_rk055hdmipi4ma0` shield at the shipped 40 MHz / RGB888-link setting, the first `hx8394_init()` returns `-EIO` because one DCS write stalls in the DSI host's command FIFO. The SDK retries the init before `main()` (`src/zephyr/panel_init_retry.c`, up to five retries, recorded in `2199-panel-init-retry.md`), so an app gets a working panel with no code of its own; `examples/aen/aen-dsi-display` prints a one-line pointer to this issue if all attempts fail.
 
-The signature, in the diagnostic's shipped form --
-`zephyr/drivers/mipi_dsi/dsi_dw.c:1363` ("static void dsi_dw_log_fifo_stall(uintptr_t regs, uint32_t pkt_status, uint32_t header)")
--- grep a shipped build for `Failed to write command FIFO`:
+The signature, in the diagnostic's shipped form (`zephyr/drivers/mipi_dsi/dsi_dw.c`, `dsi_dw_log_fifo_stall()`) -- grep a build for `Failed to write command FIFO`:
 
 ```
 E: Failed to write command FIFO (header=0x%08x CMD_PKT_STATUS=0x%08x PHY_STATUS=0x%08x).
 E: PWR_UP=0x%08x CLKMGR_CFG=0x%08x MODE_CFG=0x%08x CMD_MODE_CFG=0x%08x LPCLK_CTRL=0x%08x
 ```
 
-The values below, measured on `E1M-AEN803 2026W36-0009`, predate the
-`header=` field -- they were captured with the earlier one-line message,
-which had no `header=`, `CLKMGR_CFG=` or `LPCLK_CTRL=`:
-`CMD_PKT_STATUS=0x00040015`, `PHY_STATUS=0x000015bd`, `PWR_UP=0x00000001`,
-`MODE_CFG=0x00000001`, `CMD_MODE_CFG=0x010f7f00`, the escape-clock divider
-right, all lanes in Stop -- and no interrupt latched: `CMD_PKT_STATUS` bit
-16, `GEN_BUFF_CMD_EMPTY`, is parked at 0, while bits 0, 2 and 18
-(`GEN_CMD_EMPTY`, `GEN_PLD_W_EMPTY`, `GEN_BUFF_PLD_EMPTY`) are already set
--- bit 4 (`GEN_PLD_R_EMPTY`) is set too but plays no part in the drain mask
--- so the payload path drained and only the command buffer itself never
-did. A rarer stall also hits the first DCS read issued after
-`display_write`.
+Measured on `E1M-AEN803 2026W36-0009`, with the earlier one-line message that had no `header=`, `CLKMGR_CFG=` or `LPCLK_CTRL=`: `CMD_PKT_STATUS=0x00040015`, `PHY_STATUS=0x000015bd`, `PWR_UP=0x00000001`, `MODE_CFG=0x00000001`, `CMD_MODE_CFG=0x010f7f00`, all lanes in Stop and no interrupt latched (`GEN_BUFF_CMD_EMPTY`, bit 16, parked at 0 while bits 0, 2 and 18 are set): the payload path drained and only the command buffer did not. A rarer stall also hits the first DCS read after `display_write`.
 
-Measured rates, all on the same module. The rate is NOT stable: it varies
-between sessions and drifts within one, so treat any single figure as a
-sample, not a specification.
+Rates without the retry, same module; the rate is not stable (it varies between sessions and drifts within one), so each figure is a sample: 6 of 15 cold boots reached READY, then 9 of 16 in a later session (RGB565 framebuffer 6/8, RGB888 3/8, failures clustered late in the session and hitting both builds). A 16-bit-link 57.142857 MHz config tried for 60 Hz is worse, 5/10 init stalls against 1/10 at 40 MHz in the same session, and adds read stalls; it is not shipped (the shield overlay's header comment has the reason).
 
-- 16 cold boots interleaved one-for-one between the shipped RGB565
-  framebuffer and an RGB888 one, both at 40 MHz: 9/16 reached READY (RGB565
-  6/8, RGB888 3/8). Failures clustered late in the session -- 0 failures in
-  the first four boots, 3 in the last four -- and hit both builds in the same
-  stretch, so they track the session, not the framebuffer format.
-- Earlier the same day, 15 cold boots of the shipped configuration: 6/15.
-- The day before, 10 cold boots of the equivalent RGB888 configuration in a
-  logging build: 9/10.
-
-A second, build-independent drift signal from the same session: the board's
-pre-load current at 16.0 V (measured before any of our code is loaded) fell
-from 0.107 A to 0.089 A over about 25 minutes and then held there. Cause
-unknown; recorded because it moves with the failure rate.
-
-A 16-bit-link 57.142857 MHz config tried for 60 Hz is clearly worse, measured
-interleaved against 40 MHz in one session, 10 boots each: 5/10 init stalls
-versus 1/10, plus read stalls after `display_write` that 40 MHz did not show
-at all, 4/10 versus 0/10. The shield overlay's header comment covers why that
-config is not shipped.
-
-Ruled out, none of it the cause:
-- the escape clock divider (12 MHz versus 15 MHz -- `MAX_ESC_CLK` change in
-  `changelog.d/2199-dsi-dw-read-timeout-and-vpg.md`);
-- a 300 ms panel-power settle inserted before the panel driver's reset pulse;
-- reordering `dsi_dw_transfer_locked()` to power the host up BEFORE
-  `dsi_dw_setup_lp_cmd()`/`dsi_dw_msg_config()`, paired with a bounded
-  stop-state settle poll in `dsi_dw_pwr_up_once()`. Both were tried and
-  measured across 20 cold boots (10 per pixel-clock config): the settle poll
-  read 0 us on 20/20 boots (dead code -- stop state was never the
-  bottleneck), and the stall rate was unchanged from the pre-reorder
-  baseline. The reorder was also reviewed and found harmful in principle --
-  `dsi_dw_attach_locked()` leaves `LPCLK_CTRL` with `PHY_TXREQUESTCLKHS` set,
-  so powering up before `dsi_dw_msg_config()` starts the HS clock and then
-  drops it, adding an LP->HS->LP excursion immediately before the first LP
-  command that Linux's `dw-mipi-dsi` does not have (it programs these
-  registers with the core in reset and waits for clock-lane stop before
-  power-up). Both changes were reverted.
-
-No retry or recovery is implemented. A future fix needs either a
-Zephyr-side re-init path for a `POST_KERNEL` device that failed, or an
-app-level retry loop around `hx8394_init()`'s effects (which Zephyr's driver
-model does not expose a way to re-invoke without a reboot).
+With the retry, on `2026W36-0002`: `RESULT PASS` 5 of 5 RAM-runs over a resident app that had already initialised the panel, the worst needing attempt 4 (attempts 1-3 returned `-5`). That is the residual: no failure in 5 runs; the rate is not characterised beyond that.
 
 ### Fixed — the RK055HDMIPI4MA0 panel was powered with its reset line floating (#2199)
 
@@ -26177,7 +26260,7 @@ point at. Every re-pointed citation here was re-verified against the current
 tree first.
 
 `docs/board-config-emit.md`'s cmake-args section-marker citation now reads
-`scripts/alp_project.py:523` ("{cid} ({slice_.os})");
+`scripts/alp_project.py:519` ("{cid} ({slice_.os})");
 `docs/board-config-schema.md` and
 `docs/adr/0034` re-point `_enforce_os_matches_core_class` at
 `scripts/alp_orchestrate/validate.py:296` ("def _enforce_os_matches_core_class(slice_: Slice, core_type: str) -> None:"),
@@ -26198,7 +26281,7 @@ newer opcodes; `docs/tutorials/07` re-points the `bench-env.sh` GD32_DPIDR
 hedge to `:391-396`; `docs/tutorials/13` re-points V2M101's `e1m_i2c0:` block
 to `:67-69`; `docs/tutorials/16` names the real `tests/bench/baselines/`
 contents; `docs/diagnostics/ALP-B099.md` re-points `supported_boards:` to
-`metadata/schemas/board.schema.json:521-523` ("^[a-z][a-z0-9-]*$"); `docs/aen-bench-bringup.md`'s lead notes the bench
+`metadata/schemas/board.schema.json:527-529` ("^[a-z][a-z0-9-]*$"); `docs/aen-bench-bringup.md`'s lead notes the bench
 farm moved to E1M-AEN803 (#2226); and `audio-wake-word`'s "TODO(v0.6)"
 milestone framing is re-phrased at ten minor versions past that marker.
 
@@ -30106,7 +30189,7 @@ never delivered another frame. Two faults stacked:
   fatal-IPI storm (status `0x2`) on re-enable and no frame arrived within
   2 s. The host now soft-resets the IPI at stream start, while it is still
   disabled and the sensor is in standby
-  (`zephyr/drivers/video/video_csi_dw.c:879` ("sys_write32(0, regs + CSI_IPI_SOFTRSTN);")).
+  (`zephyr/drivers/video/video_csi_dw.c:890` ("sys_write32(0, regs + CSI_IPI_SOFTRSTN);")).
 
 Verified on E1M-AEN803 serial 2026W36-0001 with an INNO-MAKER CAM-IMX335-5MP,
 1296x972 RAW10: 20 of 20 stop/start cycles each captured a full
@@ -30736,7 +30819,7 @@ shell's current directory had drifted by the time this stage ran, so doxygen
 resolved the relative markdown links in `docs/**/*.md` against the wrong base
 and reported `unable to resolve reference to
 '<home>/vendors/alif/README.md'` for the link at
-`docs/boards/e1m-evk.md:420` ("](../../vendors/alif/README.md)") —
+`docs/boards/e1m-evk.md:464` ("](../../vendors/alif/README.md)") —
 a false FAIL, since a fresh `--depth 1` clone of the identical commit built
 with 0 warnings.
 
@@ -32338,6 +32421,26 @@ bitbake). The job fails on `ok:false`, on any expected Zephyr slice not `ok`,
 or on a missing per-slice `zephyr.elf`, and uploads the envelope as an
 artifact. NX91 has no Zephyr board in this repo, so it has no leg.
 
+### Fixed — `aen-inference-energy` no longer stalls when a J-Link session closes
+
+The app timestamped every INA236 poll slot and window span with the DWT cycle
+counter, set up once at boot. A J-Link close (the end of `tan flash --ram` /
+ram-run) clears `DEMCR.TRCENA` about 10 ms after `go`, freezing `CYCCNT`, so the
+poll gate never fired again and every window timed out with no samples. It now
+uses `k_cycle_get_32()` throughout, as `aen-inference-latency` does since #2761,
+and reports `timestamp_source: "k-cycle-get-32"` in `ENERGY-CFG` (already handled
+by tan's capture parser). The `ENERGY-*` protocol and the INA236 path are
+unchanged. Closes #2764.
+
+### Fixed — system-manifest-v1 no longer requires flash fields on `os: off` slices
+
+`slices[].flash_method` / `flash_args` are now required only when `os != "off"`
+and the slice carries no `reason` (JSON-schema `if`/`then`). An `os: off` core
+(nothing built, nothing flashed) and an unflashable target with a `reason` no
+longer fail `scripts/check_system_manifest.py`. The reserved
+`flash_method: "none"` (an unknown target, emitted with `flash_args: {}` and a
+`reason`) is documented. Additive, no `schema_version` bump. Closes #2768.
+
 ### Added — optional `slices[].flash_method_resolved` in system-manifest-v1
 
 A flasher can now record, in `build/system-manifest.yaml`, the flash backend it
@@ -32377,11 +32480,12 @@ had none available -- see the `alp_uptime_ms()` entry (#1953).
 
 ### Changed — CC3501E wire protocol 7 to 8: request identity for every worker-routed opcode
 
-**HELD: needs `cc3501e-bridge-firmware` v0.6.0 (protocol 8) to be released and a
-bench run before this ships.** A protocol-8 host refuses a protocol-7 firmware
+**HELD: a protocol-8 host needs `cc3501e-bridge-firmware` v0.6.0 (protocol 8),
+which is not yet published.** A protocol-8 host refuses a protocol-7 firmware
 outright (`cc3501e_reset()` returns `ALP_ERR_VERSION` on a `GET_VERSION`
-mismatch), so merging this before that firmware release would break the
-companion link on every unit currently flashed with v0.5.1.
+mismatch), so a unit still flashed with v0.5.1 loses its companion link until
+re-flashed. Until v0.6.0 is published (it waits for the final v0.17.0), build
+`alplabai/cc3501e-bridge-firmware` from source at a protocol-8 revision.
 
 Protocol v7 gave `SOCK_SEND` a retry seq so a lost reply could not make the
 host's poll-by-repeat look like a new request and re-transmit the payload. That

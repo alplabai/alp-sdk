@@ -5,6 +5,12 @@
 # Plain-CMake (add_subdirectory) consumers don't reach this file —
 # they use the repo root CMakeLists.txt instead.
 
+# Patch guard (#2766): fail configure when a feature this build enables needs a
+# zephyr/patches.yml patch the workspace lacks (opt-out -DALP_SKIP_PATCH_CHECK=ON).
+# Before the CONFIG_ALP_SDK early-return: the vendored CSI driver below builds
+# without it.
+include(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/cmake/alp_patch_guard.cmake)
+
 # Alif Ensemble build-bridge -- applied BEFORE the CONFIG_ALP_SDK early-return
 # because it is needed for *any* Ensemble Zephyr build, not just alp-feature
 # builds.  Upstream Zephyr v4.4's (minimal) Alif SoC layer omits
@@ -115,6 +121,12 @@ endif()
 zephyr_sources_ifdef(CONFIG_ALIF_FLEX_IO_1V8
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/flex_io_1v8_e8.c)
 
+# Ensemble I2C controller handover between the M55 cores (alp,i2c-handover DT
+# node): pure SoC glue, needed by a build that has the node whether or not it
+# sets CONFIG_ALP_SDK, so applied before the early-return.
+zephyr_sources_ifdef(CONFIG_ALIF_I2C_HANDOVER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/i2c_handover.c)
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()
@@ -198,6 +210,11 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_BANNER
 # compiles to nothing unless a deferred-init `lcd_panel` HX8394 node exists.
 zephyr_library_sources_ifdef(CONFIG_DISPLAY
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/panel_init_retry.c)
+
+# Display backlight default brightness (alp,display-backlight DT node ->
+# led_set_brightness() at APPLICATION init): compiles to nothing without a node.
+zephyr_library_sources_ifdef(CONFIG_LED
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/display_backlight.c)
 
 # Alp SoM console (CONFIG_ALP_SDK_CONSOLE) -- the `alp` Zephyr-shell command
 # tree.  Each group is its own TU attaching to the `alp` root via the
@@ -798,6 +815,18 @@ if(CONFIG_MIPI_DSI_DW)
 endif()
 zephyr_library_sources_ifdef(CONFIG_MIPI_DSI_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mipi_dsi/dsi_dw.c)
+
+# TI SN65DSI83 single-channel MIPI DSI-to-FlatLink(LVDS) bridge (compatible
+# "ti,sn65dsi83") -- a maintainer-built adapter-PCB bridge chip that lets an
+# E1M-EVK DSI connector drive the Riverdi RVT121HVDFWCA0-B native-LVDS panel.
+# Authored clean-room against the TI datasheet (SLLSEC1); no upstream Zephyr
+# driver, no hal_alif library, and no sdk-alif fork driver exists for this
+# part class.  ADR-0017-ADJACENT.  BENCH-UNVERIFIED.
+if(CONFIG_SN65DSI83)
+    zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
+endif()
+zephyr_library_sources_ifdef(CONFIG_SN65DSI83
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/display_sn65dsi83.c)
 
 # ADR-0017-ADJACENT glue: the Alif E8 SoC-level setup the MIPI D-PHY and the
 # display chain need and no driver performs -- D-PHY clock sources + analog
@@ -1824,6 +1853,16 @@ zephyr_library_sources_ifdef(CONFIG_UHC_XHCI_ALIF
 if(CONFIG_UHC_XHCI_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/usb/uhc)
 endif()
+
+# Ilitek ILI251x capacitive touch controller (compatible "ilitek,ili251x"),
+# ILI2511 on the Riverdi RVT121HVDFWCA0-B panel -- ADR-0017-ADJACENT, no
+# upstream/fork/HAL driver to consume, clean-room from protocol facts, see
+# zephyr/drivers/input/input_ili251x.c for the full STATUS block. Board-unique
+# carrier driver, not part of the portable <alp/*> surface. The report parser
+# lives in a sibling header (input_ili251x_report.h) so it is host-testable
+# without a devicetree-instantiated device -- see tests/unit/input_ili251x_report.
+zephyr_library_sources_ifdef(CONFIG_INPUT_ILI251X
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/input/input_ili251x.c)
 
 # Weak-RNG refusal for mbedTLS' PSA crypto core (issues #2173, #2192).
 # CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG is y when this build compiles the PSA core
