@@ -61,6 +61,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "amp-window",
+      "description": "The CM33 OpenAMP window is declared once (SoC openamp_carveout); the generated board .dts, the Linux reserved-memory/UIO nodes and the RPC backend's alp_amp_window.h must agree, and the beacon magic lives only in include/alp/protocol/amp_beacon.h.",
+      "runner": "check-script",
+      "script": "scripts/check_amp_window.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "board-id-doc-parity",
       "description": "docs/board-id.md's alp_hw_info_eeprom_t typedef struct (field names, order, widths) must match include/alp/hw_info.h, macros resolved (#1231).",
       "runner": "check-script",
@@ -717,6 +731,20 @@
       "description": "CI gate: no hard-coded home-directory paths in executable / build files.",
       "runner": "check-script",
       "script": "scripts/check_local_paths.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "pad-voltage",
+      "description": "No board preset puts a 3.3 V signal on, or enables a bus on, an SoC pad that is not 3.3 V tolerant (SoC pad_tolerance) without a pad_levels signal_v / level_shifter declaration.",
+      "runner": "check-script",
+      "script": "scripts/check_pad_voltage.py",
       "gate": true,
       "profiles": [
         "pr",

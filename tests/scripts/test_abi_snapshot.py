@@ -900,6 +900,30 @@ def test_diff_still_reports_removed_when_not_allowlisted(tmp_path):
     assert msgs == ["REMOVED macro alp/board.h::FOO_MACRO"], msgs
 
 
+def test_diff_reports_deleted_header_as_allowed_only_when_every_symbol_is_allowlisted(tmp_path):
+    """A header deleted on purpose reads as one ALLOWED line per symbol when
+    every symbol has an allowlist entry; one unexplained symbol keeps the
+    single `REMOVED header` line."""
+    src = "#define A_MACRO 1\n#define B_MACRO 2\n"
+    prev = {"alp/gone.h": _extract_src(tmp_path, src, "prev.h")}
+    entry = _adc_allowlist_entry(header="alp/gone.h", replacement=None)
+
+    both = {
+        ("alp/gone.h", "macro", "A_MACRO"): dict(entry, symbol="A_MACRO"),
+        ("alp/gone.h", "macro", "B_MACRO"): dict(entry, symbol="B_MACRO"),
+    }
+    msgs = abi.diff({"headers": prev}, {"headers": {}}, removed_allowlist=both)
+    assert msgs == [
+        "ALLOWED macro alp/gone.h::A_MACRO (intentional removal, #1622 -> no replacement)",
+        "ALLOWED macro alp/gone.h::B_MACRO (intentional removal, #1622 -> no replacement)",
+    ], msgs
+
+    one = {("alp/gone.h", "macro", "A_MACRO"): dict(entry, symbol="A_MACRO")}
+    msgs = abi.diff({"headers": prev}, {"headers": {}}, removed_allowlist=one)
+    assert msgs == ["REMOVED header alp/gone.h"], msgs
+    assert abi.diff({"headers": prev}, {"headers": {}}) == ["REMOVED header alp/gone.h"]
+
+
 def test_load_removed_allowlist_missing_file_returns_empty(tmp_path):
     """No allowlist file yet is the normal pre-#1622 state, not an error."""
     assert abi.load_removed_allowlist(tmp_path / "does-not-exist.json") == {}

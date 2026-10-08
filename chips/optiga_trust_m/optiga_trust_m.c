@@ -174,7 +174,15 @@ static alp_status_t session_open(optiga_trust_m_t *ctx, uint8_t kind)
  * before OPEN_APPLICATION.  Register address and data go in two
  * transactions with a STOP between them, as upstream's physical layer
  * does: the part NACKs a repeated-start write-read (bench, E1M-V2M103
- * 2026W38-0001). */
+ * 2026-10-06: `w1 0x82 r4` combined NACKed 130/130, the same as two
+ * messages with a STOP ACKed 10/10), so alp_i2c_write_read() is never used.
+ *
+ * Wake/busy: the first access after an idle gap NACKs by design and the
+ * part sleeps again within ~20 ms of a NACKed access unless re-accessed at
+ * once, so a NACK on either half restarts the whole write+read pair after
+ * OPTIGA_PROBE_RETRY_MS.  The bound is OPTIGA_PROBE_TRIES (200) pairs at
+ * ~2 ms each (1 ms retry delay + 1 ms write-to-read guard), about 400 ms;
+ * only then does the caller see a failure (init maps it to NOT_READY). */
 static alp_status_t probe_i2c_state(optiga_trust_m_t *ctx)
 {
 	uint8_t      reg      = OPTIGA_REG_I2C_STATE;
@@ -264,10 +272,10 @@ alp_status_t optiga_trust_m_send_apdu(optiga_trust_m_t *ctx,
 	/* The library writes the received length when the op completes, which
 	 * after a timeout is a later call: keep it in ctx, not on the stack.
 	 * resp is the caller's and must stay valid until the next call. */
-	ctx->xfer_len = resp_cap > UINT16_MAX ? UINT16_MAX : (uint16_t)resp_cap;
-
 	alp_status_t s = session_open(ctx, SESSION_RAW);
 	if (s != ALP_OK) return s;
+	/* After session_open(): its drain of a timed-out op rewrites xfer_len. */
+	ctx->xfer_len  = resp_cap > UINT16_MAX ? UINT16_MAX : (uint16_t)resp_cap;
 	ctx->op_status = OPTIGA_LIB_BUSY;
 	if (optiga_comms_transceive(ctx->comms, apdu, (uint16_t)apdu_len, resp, &ctx->xfer_len) !=
 	    OPTIGA_LIB_SUCCESS) {

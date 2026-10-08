@@ -214,3 +214,22 @@ properties:
     type: int
     default: 0xff
     description: Layer 2 constant alpha (0..255).
+
+  mount-rotation:
+    type: int
+    default: 0
+    enum:
+      - 0
+      - 90
+      - 180
+      - 270
+    description: |
+      Clockwise degrees a producer must pre-rotate its (upright) image before
+      writing the scan-out buffer, because the panel is mounted turned from
+      the orientation the controller scans it in. 0 for a panel mounted the way
+      it scans. Reported through alp_display_caps_t.rotation.
+
+      This is NOT Zephyr's display current_orientation: the CDC200 only scans
+      DISPLAY_ORIENTATION_NORMAL, and an LVGL stack that sees a rotated
+      orientation would rotate touch input a second time. The producer
+      (a game, a compositor) does the rotation; the controller does not.

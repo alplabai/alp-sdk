@@ -40,7 +40,8 @@ bootloader `fdtfile` at it to use it; the stock dtb stays the fallback.
   `metadata/e1m_modules/v2n/core-ownership.yaml`, so
   `check_amp_pad_claims.py` cannot see a CM33 conflict on those pads.
   Add a BENCH-PENDING entry once the cam0 dtb is bench-verified.
-- CAM1: its control bus (E1M-X I2C3) terminates on the GD32 bridge.
+- CAM1: its control bus (E1M-X I2C3) terminates on the GD32 bridge; Linux
+  reaches it as adapter `i2c3` through the bridge's I2C proxy (protocol >= 0.17).
 - Connector-to-receiver and lane mapping (CAM0 -> receiver 0, 2 lanes
   is an assumption).
 - The Zephyr/CM33 side (`src/backends/camera/v2n_n44_isp.c`) is a
@@ -91,17 +92,18 @@ bus and a `csi20` endpoint.
 
 | Sensor | Kernel driver | Lanes | Modes / formats | Notes |
 |---|---|---|---|---|
-| OV9281 (mono) | `ov9282` (v6.6, patch 0020) | 2 | 1280x720, 1280x800, 640x400; `Y10_1X10` and `Y8_1X8` | Bench-proven at 1280x720 only |
+| OV9281 (mono) | `ov9282` (v6.6, patch 0030) | 2 | 1280x720, 1280x800, 640x400; `Y10_1X10` and `Y8_1X8` | Bench-proven at 1280x720 only |
 | OV5647 | `ov5647` (in 6.1) | 2 | `SBGGR10_1X10` modes of the 6.1 driver | Unverified |
 | IMX219 | `imx219` (in 6.1) | 2 | Bayer modes of the 6.1 driver | Unverified (#1149) |
-| IMX296 (mono / colour) | `imx296` (v6.6 backport, patch 0018) | 1 | 1456x1088; `Y10_1X10` mono, `SBGGR10_1X10` colour | No external trigger (XTRIG) in the driver: free-running only. No `sony,imx296.yaml` binding in 6.1, so `dtbs_check` does not validate the node |
-| IMX335 | `imx335` (6.1 + patch 0019) | 2 or 4 | 2 lanes: 1296x972 `SRGGB10_1X10`; 4 lanes: 2592x1940 `SRGGB12_1X12` and 1296x972 `SRGGB10_1X10` | With 2 lanes the 12-bit full frame does not fit the link at the default HMAX, so it is hidden |
+| IMX296 (mono / colour) | `imx296` (v6.6 backport, patch 0028) | 1 | 1456x1088; `Y10_1X10` mono, `SBGGR10_1X10` colour | IMX296LQ (colour) bench-verified on E1M-V2M103 CAM0/J5 (1 lane, 54 MHz inck, SBGGR10 1456x1088, 60 fps, zero CSI/CRU errors over 300 frames); colour / AWB is not tuned. No external trigger (XTRIG) in the driver: free-running only. No `sony,imx296.yaml binding in 6.1, so `dtbs_check` does not validate the node |
+| IMX335 | `imx335` (6.1 + patch 0029) | 2 or 4 | 2 lanes: 1296x972 `SRGGB10_1X10`; 4 lanes: 2592x1940 `SRGGB12_1X12` and 1296x972 `SRGGB10_1X10` | With 2 lanes the 12-bit full frame does not fit the link at the default HMAX, so it is hidden |
 
 Devicetree each driver needs (all on the sensor's I2C node and its `port`
 endpoint; lane polarity goes on the `csi20` endpoint, see patch 0017):
 
 - **IMX296**: `compatible = "sony,imx296"` (or `sony,imx296ll` / `sony,imx296lq`
-  to force mono / colour; plain `sony,imx296` auto-detects), `reg = <0x1a>`.
+  to force mono / colour; plain `sony,imx296` auto-detects, which needs the settle delay patch 0028
+  adds after leaving standby), `reg = <0x1a>`.
   `clocks` of 37.125, 54 or 74.25 MHz (`clock-names = "inck"`),
   `avdd-supply`, `dvdd-supply`, `ovdd-supply`, endpoint `data-lanes = <1>`.
   The driver does not parse the endpoint, so the lane count is only what
@@ -147,7 +149,7 @@ Carrier facts the fragment encodes:
   represented by a `fixed-clock`.
 
 `ov9282.c` facts (the v6.6 driver, backported by patch
-`0020-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch`): compatible
+`0030-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch`): compatible
 `ovti,ov9282` or `ovti,ov9281` (the fragment uses `ovti,ov9281`; the
 OV9281 shares chip ID `0x9281`); 2 lanes; link frequency `400000000` Hz
 only; three modes, **1280x720** (default), **1280x800** (full array) and

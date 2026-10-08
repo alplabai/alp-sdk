@@ -6,8 +6,24 @@ constraint. Examples in
 `diagnostics.log_level` (enum: `error`, `warn`, `info`, `debug`, `trace`),
 `boot.method` (enum: `mcuboot`, `none`), `ota.provider` (enum: `mender`,
 `hawkbit`, `mcumgr`, `none`), `som.sku` (pattern:
-`^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$`), and
+`^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3})$`), and
 `preset` (pattern: `^[a-z][a-z0-9-]*$`).
+
+The same code covers the camera declarations the schema cannot judge
+(`cameras:` and `camera_connectors:`, see
+[board-config-schema.md](../board-config-schema.md#cameras-and-camera_connectors-camera-modules)):
+
+- `cameras: connector 'CAM7' is not a camera connector of this board` -- the
+  connector is not a key of the resolved board's `camera_connectors:`.
+- `cameras: unknown camera module 'x'` -- no
+  `metadata/camera_modules/x.yaml`.
+- `cameras: connector 'CAM0' is listed more than once` -- one module per
+  connector.
+- `camera_connectors.CAM0.enable: 'X' is not a macro in e1m_routes.gpio` (also
+  `i2c`, `reset`, `select.gpio`) -- an inline board's connector names a macro
+  its own `e1m_routes:` does not declare.
+- `camera_connectors.CAM0.lane_polarity: 2 entries for 2 data lane(s); expected
+  3` -- one flag per clock + data lane.
 
 ## Cause
 

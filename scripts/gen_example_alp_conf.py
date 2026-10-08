@@ -84,6 +84,8 @@ def generate(app_dir: Path, board_yaml: Path, core_id: str) -> Path:
     out = app_dir / "generated" / "alp.conf"
     _write(out, text)
     for sku in _twin_skus(project.sku) if _has_hook(app_dir) else []:
+        # Drop a twin left by an earlier run: CMake prefers it whenever it exists.
+        (app_dir / "generated" / sku[4:].lower() / "alp.conf").unlink(missing_ok=True)
         try:
             twin = load_board_yaml(board_yaml, sku=sku)
             ttext = _slice_alp_conf(twin, twin.cores[core_id])
@@ -110,13 +112,7 @@ def main(argv: list[str]) -> int:
         except (OrchestratorError, OSError) as e:
             failures.append(f"{app_dir.relative_to(REPO).as_posix()}: {e}")
     for d in sorted(only - seen):
-        for rel, why in parity.EXCLUDED_WITH_REASON.items():
-            bdir = (REPO / rel).parent.resolve()
-            if d == bdir or bdir in d.parents:
-                print(f"SKIP {rel}: {why}")
-                break
-        else:
-            failures.append(f"{d}: matches no Zephyr example core")
+        failures.append(f"{d}: matches no Zephyr example core")
     for f in failures:
         print(f"gen_example_alp_conf: {f}", file=sys.stderr)
     print(f"gen_example_alp_conf: wrote {n} generated/alp.conf")

@@ -16,6 +16,7 @@ lazy-imported from the package (they stay inline until orchestrator.py).
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -25,9 +26,11 @@ from .headers import emit_dts_partitions, emit_dts_reservations, emit_ipc_contra
 from .kconfig import (
     _resolve_console,
     _slice_alp_conf,
+    _slice_cmake_args,
     _slice_local_conf,
 )
-from .models import BoardProject, Slice
+from .models import BoardProject, OrchestratorError, Slice
+from .ownership import project_m33_overlay
 from .paths import REPO
 from .secure import emit_sysbuild_conf, emit_tfm_sysbuild_conf
 
@@ -40,6 +43,89 @@ _EXECUTION_POLICY = {
     "missingTool":    "skip",
     "nullCommand":    "skip",
 }
+
+# The `${NAME}` tokens a plan consumer substitutes in a `planPathMode:
+# tokened` plan.  This emitter writes the first three; tan-cli also resolves
+# TOOLCHAIN_ROOT, so a board.yaml placeholder must not reuse that name either.
+PLAN_PATH_TOKENS = frozenset({"SDK_ROOT", "PROJECT_ROOT", "PYTHON", "TOOLCHAIN_ROOT"})
+
+# Any `${...}` in a plan field, and the names `deferredPlaceholders` may carry
+# (the schema's pattern; tan-cli matches the same).
+_PLAN_REF_RE = re.compile(r"\$\{([^}]*)\}")
+_DEFERRED_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]*")
+
+
+def _deferred_placeholders(
+    slices_out: list[dict[str, Any]],
+    shared: list[dict[str, str]],
+    board_yaml: Path,
+) -> list[str]:
+    """Names of the `${NAME}` placeholders this plan leaves unresolved on
+    purpose (issue #2696), sorted.
+
+    A deferred placeholder is a value the user wrote in board.yaml as
+    `${NAME}` and the planner copied verbatim into a slice config artefact,
+    for the build host or the device to fill
+    (`examples/connectivity/iot-fleet-ota`'s `ota.server.tenant`).  Who fills
+    it, and how, is outside the plan; the list only says the consumer must
+    leave it alone.  Listing
+    them lets a consumer tell them from a plan path token it must substitute,
+    instead of refusing the whole plan as an unresolved token.
+
+    Every other `${...}` is refused here, because a consumer cannot handle it
+    correctly:
+      * a plan path token in a config artefact -- a user value named like
+        `${SDK_ROOT}` would be silently replaced by a checkout path;
+      * a name not written as `${NAME}` in the project's board.yaml -- the
+        planner invented it, and tan would refuse it anyway;
+      * a name outside `[A-Z][A-Z0-9_]*`, the contract's name pattern;
+      * a placeholder in an artefact that is not a `.conf` file -- CMake
+        would expand it itself (the same rule tan-cli#1306 applies);
+      * any non-token `${...}` outside `configArtefacts` (command, env,
+        envAppendPath, appDir, postCommands, sharedArtefacts).
+    """
+    board_text = Path(board_yaml).read_text(encoding="utf-8")
+    deferred: set[str] = set()
+
+    def refuse(where: str, ref: str, why: str) -> None:
+        raise OrchestratorError(
+            f"build plan: `${{{ref}}}` in {where} {why} (issue #2696)")
+
+    for slice_ in slices_out:
+        core = slice_["coreId"]
+        for artefact in slice_["configArtefacts"]:
+            where = f"core '{core}' config artefact `{artefact['path']}`"
+            for ref in _PLAN_REF_RE.findall(artefact["contents"]):
+                if not artefact["path"].endswith(".conf"):
+                    refuse(where, ref, "is in a non-`.conf` artefact, which "
+                                       "its reader (e.g. CMake) would expand "
+                                       "itself -- a placeholder may only "
+                                       "reach a Kconfig fragment or local.conf")
+                if ref in PLAN_PATH_TOKENS:
+                    refuse(where, ref, "is a plan path token: a consumer would "
+                                       "replace it with a checkout path")
+                if not _DEFERRED_NAME_RE.fullmatch(ref):
+                    refuse(where, ref, "is not a valid placeholder name -- "
+                                       "use upper-case letters, digits and "
+                                       "`_`, starting with a letter")
+                if f"${{{ref}}}" not in board_text:
+                    refuse(where, ref, "does not come from board.yaml, so the "
+                                       "planner produced it -- an unresolved "
+                                       "token")
+                deferred.add(ref)
+        rest = {k: slice_[k] for k in ("command", "env", "envAppendPath",
+                                       "appDir", "postCommands")}
+        for ref in _PLAN_REF_RE.findall(json.dumps(rest)):
+            if ref not in PLAN_PATH_TOKENS:
+                refuse(f"core '{core}' command/env/appDir", ref,
+                       "is not a plan path token -- a placeholder may only "
+                       "appear in a config artefact")
+    for artefact in shared:
+        for ref in _PLAN_REF_RE.findall(artefact["contents"]):
+            refuse(f"shared artefact `{artefact['path']}`", ref,
+                   "cannot be resolved -- a placeholder may only appear in a "
+                   "slice config artefact")
+    return sorted(deferred)
 
 
 def _slice_build_dir(build_root: Path, slice_: Slice) -> Path:
@@ -70,8 +156,8 @@ def _slice_config_artefact(
     guards, loudly (alplabai/tan-cli#551). The `=`-bearing cache entries
     from the same source ride the configure command line directly and are
     NOT duplicated here. The full human-readable `-D` listing remains
-    available on request via `--emit cmake-args` (`_slice_cmake_args`,
-    unchanged) -- see docs/board-config-emit.md.
+    also published as the plan's `cmake-args.txt` artefact
+    (`_slice_cmake_args_artefact`) -- see docs/board-config-emit.md.
     """
     if slice_.os == "zephyr":
         return ("alp.conf", _slice_alp_conf(project, slice_))
@@ -89,6 +175,229 @@ def _slice_config_artefact(
             return None
         return (BAREMETAL_PROJECT_INCLUDE, contents)
     return None
+
+
+#: The os classes a slice's `alp.overlay` artefact is emitted for: the
+#: classes `alp_project.py --emit dts-overlay` unions over. A yocto slice has
+#: none. `cmake-args.txt` is emitted for the same two (`--emit cmake-args`).
+_DTS_OVERLAY_OS = ("zephyr", "baremetal")
+
+#: Filename of the rendered DTS overlay config artefact (under `buildDir`).
+DTS_OVERLAY_ARTEFACT = "alp.overlay"
+
+#: Filename of the rendered full `-D` listing config artefact.
+CMAKE_ARGS_ARTEFACT = "cmake-args.txt"
+
+#: Filename of the rendered build-identifier header config artefact
+#: (`--emit hw-info-h --core <id>`). Same name `<alp/hw_info.h>` documents.
+HW_INFO_ARTEFACT = "alp_hw_info_build.h"
+
+#: Filename of the rendered west manifest fragment config artefact
+#: (`--emit west-libraries --core <id>`).
+WEST_LIBS_ARTEFACT = "alp-west-libs.yml"
+
+
+class DtsOverlayUnavailable(OrchestratorError):
+    """The board has nothing to render a DTS overlay from: no header under
+    `include/alp/boards/`, or a SKU outside the production families. The one
+    failure `emit_build_plan` downgrades to a `dts-overlay-unavailable`
+    warning; every other `OrchestratorError` still fails the plan."""
+
+
+class HwInfoUnavailable(OrchestratorError):
+    """The slice's SKU is outside the production families, so there is no
+    family to put in `ALP_HW_BUILD_SOM_FAMILY`. Downgraded by
+    `emit_build_plan` to a `hw-info-unavailable` warning, like
+    `DtsOverlayUnavailable`; any other failure still fails the plan."""
+
+
+def _v1_shaped_project(project: BoardProject) -> dict[str, Any]:
+    """The legacy `board:`-wrapper dict the project-wide emitters read.
+
+    The public board.yaml schema no longer uses this wrapper, but the
+    in-file emitters (dts-overlay, hw-info-h, west-libraries) still consume
+    it. Shared by `alp_project.py` and `_slice_dts_overlay`.
+    """
+    return {
+        "som": {
+            "sku":    project.sku,
+            "hw_rev": project.hw_rev,
+        },
+        "pins": list(project.raw.get("pins") or []),
+        "board": ({
+            "name":   project.board_name,
+            "hw_rev": project.board_hw_rev,
+        } if project.board_name else None),
+    }
+
+
+def _slice_dts_overlay(project: BoardProject, slice_: Slice) -> str:
+    """The slice's DTS overlay text -- exactly what
+    `alp_project.py --emit dts-overlay --core <id>` prints.
+
+    Single source for that standalone emit and the build plan's
+    `alp.overlay` config artefact (ADR-0026 §D: `tan` consumes these bytes
+    instead of re-rendering them). The overlay is shaped by the board
+    header (bus aliases + `alp,pin-array`), a SoM-mounting fact; the slice
+    contributes its peripheral list and, per-product, the assignable nodes
+    board.yaml `ownership:` gave the M33.
+    """
+    # Same lazy sys.path dance `kconfig._slice_alp_conf` does: the
+    # `alp_project_emit` package lives beside this one under scripts/ and a
+    # top-level import would cycle.
+    import sys as _sys
+    _scripts = Path(__file__).resolve().parent.parent
+    if str(_scripts) not in _sys.path:
+        _sys.path.insert(0, str(_scripts))
+    from alp_project_emit.dts import _emit_dts_overlay  # type: ignore
+
+    from alp_project_loader import _sku_family  # type: ignore
+
+    # Only the two facts the emitter itself cannot render are "unavailable"
+    # (the plan degrades to a warning); everything else propagates.
+    try:
+        _sku_family(project.sku)
+    except ValueError as exc:
+        raise DtsOverlayUnavailable(str(exc)) from None
+    try:
+        out = _emit_dts_overlay(
+            _v1_shaped_project(project), project.som_preset,
+            project.board_preset,
+            v2_peripherals=sorted(set(slice_.peripherals)),
+            v2_core_id=slice_.core_id,
+            v2_core_os=slice_.os,
+            v2_core_ids=[slice_.core_id],
+        )
+    except SystemExit as exc:
+        # The emitter `sys.exit`s when the board names no header under
+        # include/alp/boards/. The standalone emit prints this and exits 1.
+        msg = str(exc.code)
+        raise DtsOverlayUnavailable(
+            msg.removeprefix("alp_project: ")) from None
+    # Outside the degrade path above: an M33 ownership defect must still
+    # fail the plan, not turn into a missing artefact.
+    own_dts, _ = project_m33_overlay(project, slice_.core_id)
+    if own_dts:
+        out += ("\n/* Assignable peripherals owned by the M33 "
+                "(board.yaml `ownership:`). */\n" + "\n".join(own_dts) + "\n")
+    return out
+
+
+def _slice_dts_overlay_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's rendered DTS overlay, or None for
+    an os that has none (see `_DTS_OVERLAY_OS`)."""
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    return (DTS_OVERLAY_ARTEFACT, _slice_dts_overlay(project, slice_))
+
+
+def _slice_cmake_args_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's full `-D` listing -- exactly what
+    `alp_project.py --emit cmake-args --core <id>` prints after its
+    `# --- core ---` marker -- or None for an os that has none.
+
+    A rendered REFERENCE listing for consumers (ADR-0026 §D). The
+    `=`-bearing cache entries already ride the baremetal configure line and
+    the bare guards arrive via `alp-baremetal.cmake`; this file is not read
+    by any build command and so does not resurrect the dead `cmake-args.txt`
+    #1278 removed -- it is the same text, now published in the plan so `tan`
+    stops re-rendering it.
+    """
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    return (CMAKE_ARGS_ARTEFACT, _slice_cmake_args(project, slice_))
+
+
+def _slice_hw_info_h(project: BoardProject, slice_: Slice) -> str:
+    """The slice's build-identifier header -- exactly what
+    `alp_project.py --emit hw-info-h --core <id>` prints.
+
+    `ALP_HW_BUILD_CORES` / `HAS_<id>` range over EVERY core of the project
+    (`v2_cores`), and `ALP_HW_BUILD_OS` / `PRIMARY_CORE` track the slice
+    (`v2_selected_core`). Single source for the standalone emit and the
+    build plan's `alp_hw_info_build.h` config artefact.
+    """
+    import sys as _sys
+    _scripts = Path(__file__).resolve().parent.parent
+    if str(_scripts) not in _sys.path:
+        _sys.path.insert(0, str(_scripts))
+    from alp_project_emit.hw_info import _emit_hw_info_h  # type: ignore
+
+    return _emit_hw_info_h(
+        _v1_shaped_project(project), project.som_preset,
+        project.board_preset,
+        v2_cores={cid: s.os for cid, s in project.cores.items()},
+        v2_selected_core=slice_.core_id,
+        # Same tree alp.conf's `CONFIG_ALP_SDK_SOM_HW_REV` reads, so the two
+        # composed hw_rev designators cannot disagree under --metadata-root.
+        metadata_root=project.effective_metadata_root(),
+    )
+
+
+def _slice_west_libraries(project: BoardProject, slice_: Slice) -> str:
+    """The slice's west manifest fragment -- exactly what
+    `alp_project.py --emit west-libraries --core <id>` prints.
+
+    Single source for that standalone emit and the build plan's
+    `alp-west-libs.yml` config artefact.
+    """
+    import sys as _sys
+    _scripts = Path(__file__).resolve().parent.parent
+    if str(_scripts) not in _sys.path:
+        _sys.path.insert(0, str(_scripts))
+    from alp_project_emit.west_libs import _emit_west_libraries  # type: ignore
+
+    return _emit_west_libraries(
+        _v1_shaped_project(project), project.som_preset,
+        project.board_preset,
+        v2_libraries=sorted(set(slice_.libraries)),
+        v2_project_libraries=sorted(project.libraries),
+        metadata_root=project.effective_metadata_root(),
+    )
+
+
+def _slice_hw_info_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's rendered `alp_hw_info_build.h`, or
+    None for an os that has none (see `_DTS_OVERLAY_OS`).
+
+    A REFERENCE artefact (ADR-0026 §D), like `cmake-args.txt`: no build
+    command, CMake file or Kconfig in this SDK reads it. The firmware's
+    own `ALP_HW_BUILD_*` values still come from the build, not this file.
+    """
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    # Only the SKU->family lookup is "unavailable" (same narrow pattern as
+    # `_slice_dts_overlay`); a damaged hw-revisions table etc. must still fail
+    # the plan, so the render itself runs outside any except.
+    from alp_project_loader import _sku_family  # type: ignore
+    try:
+        _sku_family(project.sku)
+    except ValueError as exc:
+        raise HwInfoUnavailable(str(exc)) from None
+    return (HW_INFO_ARTEFACT, _slice_hw_info_h(project, slice_))
+
+
+def _slice_west_libs_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's rendered west fragment, or None
+    for an os that has none. Emitted even when the slice selects no
+    libraries: the emitter renders a well-formed empty allowlist, and
+    byte-identity with `--emit west-libraries --core` is the contract.
+    Reference only, like `cmake-args.txt`."""
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    return (WEST_LIBS_ARTEFACT, _slice_west_libraries(project, slice_))
 
 
 def _shared_artefacts(
@@ -534,6 +843,47 @@ def emit_build_plan(
                 "path":     (build_dir / name).as_posix(),
                 "contents": contents,
             })
+        # Additive rendered-text artefacts (ADR-0026 §D, tan-cli#1216): the
+        # DTS overlay, the full `-D` listing, the build-identifier header and
+        # the west fragment, byte-identical to the standalone
+        # `--emit dts-overlay|cmake-args|hw-info-h|west-libraries --core`
+        # renders. Always AFTER the slice's primary config artefact, so a
+        # consumer that reads `configArtefacts[0]` is unaffected.
+        extras: list[Optional[tuple[str, str]]] = []
+        # Same dangling-path rule as `alp-baremetal.cmake` above: a baremetal
+        # slice whose command was blocked will never configure its build dir,
+        # so promise it nothing.
+        if not (cmd is None and slice_.os == "baremetal"):
+            try:
+                extras.append(_slice_dts_overlay_artefact(project, slice_))
+            except DtsOverlayUnavailable as exc:
+                # Additive artefact: a board with no header (or an
+                # unrecognised SKU) must not stop a plan that emitted fine
+                # before. The consumer sees the warning and falls back.
+                # Any other OrchestratorError still fails the plan.
+                warnings.append({
+                    "code":    "dts-overlay-unavailable",
+                    "coreId":  slice_.core_id,
+                    "message": (f"core '{slice_.core_id}': no `alp.overlay` "
+                                f"artefact -- {exc}"),
+                })
+            extras.append(_slice_cmake_args_artefact(project, slice_))
+            try:
+                extras.append(_slice_hw_info_artefact(project, slice_))
+            except HwInfoUnavailable as exc:
+                warnings.append({
+                    "code":    "hw-info-unavailable",
+                    "coreId":  slice_.core_id,
+                    "message": (f"core '{slice_.core_id}': no "
+                                f"`alp_hw_info_build.h` artefact -- {exc}"),
+                })
+            extras.append(_slice_west_libs_artefact(project, slice_))
+        for extra in extras:
+            if extra is not None:
+                config_artefacts.append({
+                    "path":     (build_dir / extra[0]).as_posix(),
+                    "contents": extra[1],
+                })
         # `appDir` retains the resolved source directory independent of
         # `command` -- tooling that wants the app source (e.g. to watch
         # it for incremental rebuilds) doesn't have to reverse-engineer
@@ -622,6 +972,10 @@ def emit_build_plan(
             },
         })
 
+    shared_out = [
+        {"path": p.as_posix(), "contents": c}
+        for p, c in _shared_artefacts(project, build_root)
+    ]
     plan: dict[str, Any] = {
         "schemaVersion":   1,
         # Additive to schemaVersion 1 (issue #865): every path in this plan
@@ -633,6 +987,12 @@ def emit_build_plan(
         # both this plan's own comparator and a plan consumer use to locate
         # PROJECT_ROOT in the first place.
         "planPathMode":    "tokened",
+        # Additive (issue #2696): the `${NAME}` values left unresolved on
+        # purpose, so a consumer never mistakes one for a plan path token
+        # above. Always present, `[]` when there are none, so a consumer can
+        # tell "none" from a pre-#2696 plan that does not carry the field.
+        "deferredPlaceholders": _deferred_placeholders(
+            slices_out, shared_out, board_yaml),
         "generatedBy":     "scripts/alp_orchestrate.py",
         # Additive provenance (ADR 0014's additive rule -- no schemaVersion
         # bump): traces a cached/materialised plan back to the planner that
@@ -645,10 +1005,7 @@ def emit_build_plan(
         "buildRoot":       build_root.as_posix(),
         "executionPolicy": _EXECUTION_POLICY,
         "slices":          slices_out,
-        "sharedArtefacts": [
-            {"path": p.as_posix(), "contents": c}
-            for p, c in _shared_artefacts(project, build_root)
-        ],
+        "sharedArtefacts": shared_out,
         "warnings":        warnings,
     }
     return json.dumps(plan, indent=2) + "\n"

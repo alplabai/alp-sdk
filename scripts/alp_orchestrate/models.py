@@ -391,6 +391,9 @@ class BoardProject:
     ota: dict[str, Any] = field(default_factory=dict)
     storage: list[StorageEntry] = field(default_factory=list)
     security: dict[str, Any] = field(default_factory=dict)
+    # Resolved per-product core ownership ({E1M instance: core}); empty when
+    # the SoM family declares no `assignable:` block (ownership.resolve_ownership).
+    ownership: dict[str, str] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
     # The metadata root `load_board_yaml(..., metadata_root=...)` resolved
     # this project against.  `None` means the default in-tree `metadata/`
@@ -399,6 +402,11 @@ class BoardProject:
     # validated against, instead of quietly falling back to the SDK's own
     # in-tree metadata (#1485).
     metadata_root: Optional[Path] = None
+    # Directory of the board.yaml this project was loaded from; anchors a
+    # slice's relative `app:` so the emitters can read the app's own
+    # `prj.conf` (e.g. to avoid shrinking an app-set RAM console size,
+    # tan-cli#1401).  `None` for a project built without a file.
+    source_dir: Optional[Path] = None
 
     def effective_metadata_root(self) -> Path:
         """The metadata root every resolver must use for this project --
@@ -484,4 +492,7 @@ class SystemManifest:
         # no per-row dataclass, matching the helper_mcus precedent.
         if self.memory_regions:
             out["memory"] = list(self.memory_regions)
+        # Additive, omitted when the SoM declares no assignable resources.
+        if self.project.ownership:
+            out["ownership"] = dict(self.project.ownership)
         return out

@@ -1,5 +1,7 @@
 # `alp model zoo` / `alp model add` — Model Zoo Machinery (Slice 2a) Implementation Plan
 
+> **Status (2026-10-08): Superseded** — `alp model zoo`/`add` and `scripts/alp_cli/model.py` were retired (#1727); only the `metadata/model_zoo/` data asset landed (#2542), the engine moves to tan per ADR 0028.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use `- [ ]` checkboxes.
 
 **Goal:** `alp model zoo [--sku]` (browse curated zoo entries + which run on your SoM) and `alp model add <id> [--board]` (fetch/cache the source model + append it to `board.yaml` `models:`), so a customer goes from "browse → one-click add → it's in my build" without hunting for weights or config.
@@ -44,6 +46,7 @@
 
 **Interfaces:**
 - Produces: `metadata/model_zoo/<id>.yaml` files `{id, task, description, source, license, validated_soms, io_spec?, perf_ref?, compile?, example_app?}` loaded in Task 2.
+  Superseded: model-zoo-v1 as pinned in alp-sdk#2539 drops `io_spec`/`perf_ref`, uses a `task` enum incl. `smoke`, and a closed permissive `license` enum.
 
 - [ ] **Step 1: Write the failing data-integrity test**
 

@@ -13,7 +13,7 @@ Correspondence rule (single-source-of-truth convention):
         modules -- e.g. cc3501e, issue #461 -- still counts as present)
 
 This is the root-cause gate for the gap-review finding "9 drivers lack a
-manifest and pca9451a is a manifest with no driver": new drift fails CI
+manifest and a manifest exists with no driver": new drift fails CI
 immediately. The allowlists are a RATCHET -- the gate also fails if an
 allowlisted entry is stale (a driver in KNOWN_DRIVER_NO_MANIFEST that now
 HAS a manifest, or vice-versa), so the backlog can only shrink, never grow
@@ -35,12 +35,6 @@ KNOWN_DRIVER_NO_MANIFEST: set[str] = set()
 
 # Manifests intentionally without a driver (planned-but-unimplemented parts).
 KNOWN_MANIFEST_NO_DRIVER = {
-    # N93 BOM candidates: catalogued so E1M-NX9xxx can pick one once the
-    # production module lands; Linux/NXP host stack owns the data path.
-    "murata_lbee0zz2kl",
-    "murata_lbee5pl2dl",
-    "murata_lbes0zz2ll",
-    "murata_lbes5pl2el",
     # AEN's on-module Ethernet PHY (#1241). ADR 0023 keeps Ethernet's PHY
     # read/write out of `<alp/*>` on AEN today -- the bench-proven path
     # (examples/aen/aen-ethernet-link) reaches the PHY via the upstream

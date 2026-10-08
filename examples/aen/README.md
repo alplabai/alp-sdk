@@ -55,6 +55,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-npu-inference`](aen-npu-inference/)          | **bench** -- first on-silicon NPU inference: a fused subgraph dispatched to the Ethos-U85 (256-MAC) via the Arm core driver. |
 | [`aen-npu-inference-alif`](aen-npu-inference-alif/)| **bench** -- matched-runtime Vela int8 inference end-to-end via the Arm `InferenceProcess` wrapper -> TFLM; hermetic fixture. |
 | [`aen-npu-inference-person-mram`](aen-npu-inference-person-mram/) | **bench** -- the real `person_detect` MobileNet (int8) end-to-end with the model resident in MRAM slot0 (production-scale). |
+| [`aen-inference-latency`](aen-inference-latency/)  | **bench** -- cycles and milliseconds per inference of any Vela-compiled int8 model plus the tensor-arena high-water mark. No INA236, no I2C; console-only, fits the Flow C ITCM RAM-run for small models, and prints the `ENERGY-CFG`/`ENERGY-W` subset the tan on-device model-run capture parser reads (tan-cli#1287). |
 | [`aen-inference-energy`](aen-inference-energy/)    | **bench** -- millijoules per inference, measured: picks the compute rail from the six EVK INA236 monitors, then integrates matched active/idle windows. A trivial model reports FAIL by design. |
 | [`aen-gpu2d-bench`](aen-gpu2d-bench/)              | **bench** -- GPU2D software-fallback validation on the M55-HE. |
 
@@ -124,7 +125,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 
 The top-level [`examples/README.md`](../README.md) lists every
 example.  This sub-index exists because AEN-specific examples
-need an AEN-family SoM (no fallback path on V2N / N93) -- having
+need an AEN-family SoM (no fallback path on V2N) -- having
 them in their own directory makes that constraint visible from
 the filesystem layout alone.  Cross-family examples (gpio,
 i2c, pwm, ...) stay at the top level of `examples/`.

@@ -115,8 +115,8 @@ def _slice_flash_recipe(
 
 
 # M-core "stock shim" app token (Zephyr side).  Accepted by the SoM-preset
-# schema and defaulted into M-core slots (AEN m55_hp/he, V2N m33_sm,
-# NX91 m33).  The token resolves to the SDK-owned app below rather than a
+# schema and defaulted into M-core slots (AEN m55_hp/he, V2N m33_sm).
+# The token resolves to the SDK-owned app below rather than a
 # project-local path.
 STOCK_SHIM_APP = "alp-stock-shim"
 STOCK_SHIM_DIR = REPO / "firmware" / "alp-stock-shim"

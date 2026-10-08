@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Stages the MERA2 / DRP-AI TVM runtime -- the RESIDUAL GAP named in
-# alp-sdk_0.6.bb's PACKAGECONFIG[drpai] comment (#1145).  `drpai` +
-# `lib-tvm` (meta-rz-drpai) cover <linux/drpai.h> and
-# libtvm_runtime.so; this recipe supplies the rest of what
+# alp-sdk_0.6.bb's PACKAGECONFIG[drpai] comment (#1145).  `drpai`
+# (meta-rz-drpai) covers <linux/drpai.h>; this recipe supplies the rest of what
 # src/yocto/CMakeLists.txt probes for -- the header tree, the eight
 # prebuilt RUHMI libraries (plus the runtime CLOSURE those need, not
 # just the three the link line names directly) -- AND, as of #1145's
@@ -276,19 +275,11 @@ python do_compile() {
         # mera2_runtime / mera2_plan_io / drp_tvm_rt: staged by do_install
         # into THIS package's own libdir, but not yet there at do_compile
         # time -- link straight against the checkout's copies, same as the
-        # header overlay above. tvm_runtime is deliberately NOT linked here:
-        # it comes from the separate, optional meta-rz-drpai `lib-tvm`
-        # recipe, and this recipe must not hard-DEPENDS on that layer (it
-        # is a soft LAYERRECOMMENDS on purpose -- AEN/NX91 have no DRP-AI
-        # silicon at all).  Any tvm::runtime::* reference this .cpp's
-        # ImplDrpTvm class leaves unresolved here is resolved later, at
-        # alp_sdk's OWN final link, which already links tvm_runtime
-        # directly (src/yocto/CMakeLists.txt's ALP_SDK_USE_DRPAI_V2N
-        # block) -- exactly the transitive-resolution shape --no-undefined
-        # (the durable fix, alp-sdk's own CMakeLists.txt) is designed to
-        # still permit: it only checks alp_sdk's OWN objects' undefined
-        # refs against ITS full link line, not what an intermediate .so
-        # left unresolved in ITS OWN build.
+        # header overlay above. tvm_runtime is deliberately NOT linked: RUHMI's
+        # own apps link only mera2_runtime, mera2_plan_io and drp_tvm_rt, and
+        # libdrp_tvm_rt.so already exports the tvm::runtime symbols the
+        # wrapper needs.  Linking meta-rz-drpai's older libtvm_runtime too
+        # would load two TVM runtimes in one process (audit NPU-02).
         "-lmera2_runtime", "-lmera2_plan_io", "-ldrp_tvm_rt",
         # fmt: with SPDLOG_FMT_EXTERNAL the wrapper calls fmt::v10::vformat*
         # directly (spdlog's header templates expand into this .so), and
@@ -496,7 +487,7 @@ EXCLUDE_FROM_WORLD = "1"
 # EXCLUDE_FROM_WORLD only keeps this out of `bitbake world`.  It does NOT
 # stop an image, or a PACKAGECONFIG DEPENDS, pulling it into a machine that
 # has no DRP-AI at all -- so scope it explicitly.  The payload staged here
-# is the RZ/V2N `obj/build_runtime/v2h` prebuilt set; on an AEN or NX9101
+# is the RZ/V2N `obj/build_runtime/v2h` prebuilt set; on an AEN
 # build it is not merely useless, it is wrong.
 COMPATIBLE_MACHINE = "^(e1m-v2n101-a55|e1m-v2n102-a55|e1m-v2n103-a55|e1m-v2m101-a55|e1m-v2m102-a55|e1m-v2m103-a55)$"
 
@@ -521,33 +512,27 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # incompatible ... when searching for -lmera2_runtime" is an
 # architecture mismatch, not a symbol error).
 #
-# THAT FINAL STEP HAS NOT BEEN TAKEN.  This recipe is correct on paper and
-# nothing more.
+# The final link and packaging have since been exercised: do_compile and
+# packaging ran in a drpai-enabled alp-image-edge bake (#2400, which found
+# and fixed the missing -lfmt link gap).  What has NOT been done is running
+# inference from a baked image on a board.
 #
 # An earlier revision of this comment claimed a `drpai`-ENABLED
 # alp-image-edge bake had completed (12118 tasks, DT_NEEDED resolved, 0
-# unresolved symbols, ten libraries in the rootfs).  That claim was removed
-# rather than softened, for two reasons:
-#
-#   1. docs/bring-up-drpai-v2n.md, in the same change, states that no
-#      bitbake run of this recipe -- with or without do_compile -- has
-#      happened at all, and that the 12118-task bake it refers to ran with
-#      `drpai` OFF.  Same task count, opposite verdict.  Both cannot be
-#      true.
-#   2. The bake it described could not have run: it names
-#      `PACKAGECONFIG:append:pn-alp-sdk = " drpai"`, and until #1145 no
-#      PACKAGECONFIG[drpai] existed in alp-sdk_0.6.bb.  OE errors out on an
-#      append naming an undefined flag.
+# unresolved symbols, ten libraries in the rootfs) before PACKAGECONFIG[drpai]
+# existed in alp-sdk_0.6.bb (until #1145); that claim was removed because OE
+# errors out on an append naming an undefined flag.  The bake status is now
+# the #2400 one below.
 #
 # So what is actually established, and nothing beyond it: a hand-run host
 # g++ command modelled on do_compile compiled apps/MeraDrpRuntimeWrapper.cpp
 # against the real RUHMI headers.  A separate hand-run host link probe then
 # stopped with "skipping incompatible ... when searching for
 # -lmera2_runtime" -- an architecture mismatch against the aarch64
-# obj/build_runtime/v2h libraries, not a symbol error.  No BitBake task ran.
-# Whether do_compile reaches a real aarch64 link, whether packaging passes
-# do_package_qa, and whether the symbols resolve against the real aarch64
-# payload are all UNTESTED.  docs/bring-up-drpai-v2n.md's status banner is
+# obj/build_runtime/v2h libraries, not a symbol error.  Since then do_compile
+# and packaging have run in a drpai-enabled alp-image-edge bake (#2400, which
+# found and fixed the missing -lfmt link gap).  Running inference from a baked
+# image on a board is UNTESTED.  docs/bring-up-drpai-v2n.md's status banner is
 # the authority for the current bake state.
 #
 # The kernel side is proven independently of this recipe: /dev/drpai0 probes

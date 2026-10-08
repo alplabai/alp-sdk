@@ -36,7 +36,7 @@ config ALP_SDK_GPU2D_SW_FALLBACK
 	  Always loses backend selection to a real silicon backend
 	  (the Alif D/AVE 2D backend at priority 100 on AEN parts), but
 	  is the backend that serves the API on every SoM without an
-	  on-die 2D engine (V2N, i.MX 93) and on native_sim.  Default y
+	  on-die 2D engine (V2N) and on native_sim.  Default y
 	  so alp_gpu2d_open() succeeds portably everywhere.
 
 config ALP_SDK_GPU2D_ALIF_DAVE2D

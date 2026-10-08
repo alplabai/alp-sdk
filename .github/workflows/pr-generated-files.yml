@@ -73,6 +73,8 @@ on:
       - 'scripts/gen_cc3501e_gpio_routes.py'
       - 'src/backends/gpio/cc3501e_rev_dependent_pins.c'
       - 'scripts/gen_power_tree.py'
+      - 'scripts/gen_linux_ownership_dt.py'
+      - 'meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi'
       # The portability matrix re-runs the som.sku swap-test through
       # scripts/alp_project.py + the alp_orchestrate/ package, so any
       # emit-pipeline change can move its generated block.
@@ -90,6 +92,8 @@ on:
       - 'scripts/gen_verification_status.py'
       - 'scripts/gen_chip_driver_classification.py'
       - 'docs/chip-driver-classification.md'
+      - 'scripts/gen_amp_window.py'
+      - 'src/backends/rpc/alp_amp_window.h'
       - '.github/workflows/pr-generated-files.yml'
   push:
     branches: [main, dev]
@@ -196,6 +200,12 @@ jobs:
       - name: Regenerate PMIC power-tree guard tables from metadata
         run: python3 scripts/gen_power_tree.py
 
+      # Linux ownership fragment: e1m-v2n-ownership.dtsi is projected from
+      # metadata/e1m_modules/v2n/core-ownership.yaml + the SoC linux_dt by
+      # scripts/gen_linux_ownership_dt.py (#2660).
+      - name: Regenerate the Linux core-ownership devicetree fragment from metadata
+        run: python3 scripts/gen_linux_ownership_dt.py
+
       - name: Regenerate pin-mux capability tables from the pinout TSVs
         run: python3 scripts/gen_pinmux_capability.py
 
@@ -248,6 +258,11 @@ jobs:
       # e1m_modules and boards (issue #500); regenerate and let the diff gate flag drift.
       - name: Regenerate chip-driver classification from metadata
         run: python3 scripts/gen_chip_driver_classification.py
+
+      # src/backends/rpc/alp_amp_window.h is projected from the SoC's
+      # `openamp_carveout` (metadata/socs/renesas/rzv2n/n44.json).
+      - name: Regenerate the RPC backend's OpenAMP window header
+        run: python3 scripts/gen_amp_window.py
 
       # Single source: metadata/sdk_version.yaml declares MAJOR.MINOR.PATCH
       # and the CURRENT snapshot is docs/abi/vMAJOR.MINOR-snapshot.json
@@ -329,7 +344,9 @@ jobs:
                      docs/chip-driver-classification.md \
                         examples/aen \
                         src/backends/gpio/cc3501e_rev_dependent_pins.c \
-                        include/alp/chips/*_power_tree.h
+                        src/backends/rpc/alp_amp_window.h \
+                        include/alp/chips/*_power_tree.h \
+                        meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi
           # No line-mask here: abi_snapshot.py's own write-skip guard
           # (above) is what keeps a no-op rerun from touching the
           # "generated" line at all, so this diff sees zero lines
@@ -352,13 +369,16 @@ jobs:
                      docs/chip-driver-classification.md \
                      examples/aen \
                      src/backends/gpio/cc3501e_rev_dependent_pins.c \
-                     include/alp/chips/*_power_tree.h; then
+                     src/backends/rpc/alp_amp_window.h \
+                     include/alp/chips/*_power_tree.h \
+                     meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/gen_status_strings.py"
             echo "::error::  python3 scripts/gen_board_header.py"
             echo "::error::  python3 scripts/gen_cc3501e_gpio_routes.py"
             echo "::error::  python3 scripts/gen_power_tree.py"
+            echo "::error::  python3 scripts/gen_linux_ownership_dt.py"
             echo "::error::  python3 scripts/gen_pinmux_capability.py"
             echo "::error::  python3 scripts/gen_support_matrix.py"
             echo "::error::  python3 scripts/gen_portability_matrix.py"
@@ -366,6 +386,7 @@ jobs:
             echo "::error::  python3 scripts/gen_error_catalog.py"
             echo "::error::  python3 scripts/gen_verification_status.py"
             echo "::error::  python3 scripts/gen_chip_driver_classification.py"
+            echo "::error::  python3 scripts/gen_amp_window.py"
             echo "::error::  python3 scripts/abi_snapshot.py --version $ABI_VERSION --output $ABI_SNAPSHOT"
             echo "::error::and commit the result."
             exit 1

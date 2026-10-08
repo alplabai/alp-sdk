@@ -35,6 +35,9 @@ into the topic-specific docs.
   auto-generated SoM × peripheral-class presence matrix, projected
   from the single-source SoC metadata (presence only; driver
   maturity lives in the OS support matrix).
+- [display-support-matrix.md](display-support-matrix.md) — per SoM
+  family and display path: what exists in code, what has a recorded
+  bench run, and what is still open (issue #23).
 - [ADR 0011 — intra-family portability](adr/0011-intra-family-portability.md)
   — architectural decision: portability is INTRA-family;
   cross-form-factor is intentionally a separate product-line choice.
@@ -97,12 +100,18 @@ into the topic-specific docs.
   symptom + recovery.
 - [bring-up-v2n.md](bring-up-v2n.md) — Renesas RZ/V2N.
 - [bring-up-v2n-m1.md](bring-up-v2n-m1.md) — V2N + DEEPX.
+- [bring-up-ros2.md](bring-up-ros2.md) — ROS 2 Humble on the V2N/V2M A55
+  (upstream meta-ros + Renesas rzv_ros, opt-in `ALP_ENABLE_ROS2`,
+  portable-API example node).  BENCH-UNVERIFIED.
+- [v2n-mali-gpu.md](v2n-mali-gpu.md) — the RZ/V2N Mali-G31: kernel +
+  vendor EGL/GLES stack, the `<alp/gpu2d.h>` GPU backend, image wiring,
+  licence placement, build steps. Bench-unverified.
+- [boot-log-v2n.md](boot-log-v2n.md) — what each V2N/V2M boot warning means.
 - [bring-up-drpai-v2n.md](bring-up-drpai-v2n.md) — the RZ/V2N on-die
   DRP-AI3 NPU: host toolchain, the DT override the driver needs,
   image wiring, model compile and microSD deploy. Kernel driver
   proven on silicon; userspace packaging is written but has never been
   baked, no model compiled and no inference run yet.
-- [bring-up-imx93.md](bring-up-imx93.md) — NXP i.MX 93.
 - [e1m-x-v2n-sdk-integration.md](e1m-x-v2n-sdk-integration.md) —
   landing the bench-validated V2N-M1 / E1M-X-EVK carrier bring-up
   into alp-sdk as the single source of truth.
@@ -140,6 +149,10 @@ into the topic-specific docs.
   Zephyr shell (safety tiers, command list, companion binding, banner).
 - [v2n-camera-csi.md](v2n-camera-csi.md) — opt-in Linux MIPI CSI-2
   camera path (IMX219 placeholder), bench-unverified.
+- [e1m-x-evk-usb-otg.md](e1m-x-evk-usb-otg.md) — E1M-X EVK USB 2.0 OTG: what works
+  (device mode), host/role limits, opt-in NCM+ACM gadget, HIL steps.
+- [v2n-bt-hfp-audio.md](v2n-bt-hfp-audio.md) — Bluetooth HFP/SCO audio
+  over the on-module PCM/I2S link: routing, open items, HIL steps.
 - [build-yocto-v2n.md](build-yocto-v2n.md) — building + deploying
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
 - [provisioning.md](provisioning.md) — provisioning a SoM from a
@@ -159,39 +172,55 @@ into the topic-specific docs.
 ## Models / edge-AI
 
 - `metadata/model_zoo/<id>.yaml` (schema:
-  `metadata/schemas/model-zoo-v1.schema.json`, `schema_version: 1`) — the
-  model-zoo data asset: alp-sdk owns the schema + the manifests (`tan model
-  zoo`'s hardware truth), tan owns the engine that reads them
-  ([adr/0028-tan-owns-the-model-engine.md](adr/0028-tan-owns-the-model-engine.md)).
-  Every entry declares `kind: model` (a real, published entry) or `kind:
-  fixture` (a wiring/smoke entry, never a hardware claim — enforced:
+  `metadata/schemas/model-zoo-v1.schema.json`, `schema_version: 1`;
+  directory doc: `metadata/model_zoo/README.md`)
+  — the model-zoo data asset: per ADR-0028
+  ([adr/0028-tan-owns-the-model-engine.md](adr/0028-tan-owns-the-model-engine.md),
+  `Status: Proposed` — a working plan, not a decided architecture),
+  alp-sdk owns the schema + the manifests (`tan model zoo`'s hardware
+  truth), and tan is planned to own the engine that reads them.
+  `task` is a closed kebab-case enum (`object-detection`,
+  `person-detection`, … plus `smoke`, reserved for fixtures); `license` is
+  a closed, permissive SPDX allowlist with no `LicenseRef-*` escape
+  (`Apache-2.0`/`MIT`/`BSD-2-Clause`/`BSD-3-Clause`/`CC0-1.0` — extending
+  it is a maintainer legal-review decision recorded in
+  metadata/model_zoo/README.md, same as metadata/libraries/README.md's own
+  process; AGPLv3 and non-commercial/vendor-customer-only terms are
+  rejected until explicitly admitted). Every entry declares `kind: model`
+  (a real, published entry, `task` never `smoke`) or `kind: fixture` (a
+  wiring/smoke entry, `task` always `smoke`, never a hardware claim —
+  enforced BOTH by the schema's own `allOf` of two `kind`-gated `if`/`then`
+  pairs AND, for a friendlier message, by `_check_model_zoo_semantics`:
   `validated_soms` must be empty and `source` must be `bundled`). Every
-  entry's `source` is EXCLUSIVELY an upstream `{url, sha256}` (`https://`
-  only, sha256 required) or a genuinely clean, tiny `{bundled}` starter
-  under `metadata/model_zoo/starters/` (at most 64 KiB; `starters/<file>`
-  only, no subdirectory) — no weight redistribution either way. The
-  `kind: fixture` restriction is enforced both by the schema's own
-  `if`/`then` and, for a friendlier message, by
-  `_check_model_zoo_semantics`. An optional `compile` block is
-  structurally identical to `board.schema.json`'s `models[].compile` (the
-  shape `tan model add` writes into a project's board.yaml; its own
-  `description` is reworded for the zoo's context), guarded by a drift
-  test (with descriptions stripped before comparing) rather than a
-  cross-file `$ref` (no schema in this tree resolves those).
-  `scripts/validate_metadata.py` gates the entry's shape, that every
-  `validated_soms[]` SKU names a real, shipped SoM preset, that every
-  `starters/` file is referenced by some entry and at most the size cap
-  (a `stat()` failure is reported, never silently skipped), and that a
-  `bundled` path is a byte-exact (case-sensitive) match on disk; it does
-  NOT gate that the SoM was actually bench-run — a populated
-  `validated_soms` is a claim the entry's author is responsible for, same
-  as `metadata/model_perf/`'s bench-capture points.
+  entry's `source` is
+  EXCLUSIVELY an upstream `{url, sha256}` (`https://` only, no userinfo,
+  sha256 required) or a genuinely clean, tiny `{bundled}` starter under
+  `metadata/model_zoo/starters/` (at most 64 KiB; `starters/<file>` only,
+  no subdirectory) — no weight redistribution either way. An optional
+  `example_app` (`examples/<category>/<name>`, same shape as
+  template-catalog-v1's `example`) must resolve to a real directory
+  carrying a `board.yaml`, checked whenever this checkout has an
+  `examples/` tree. An
+  optional `compile` block is structurally identical to
+  `board.schema.json`'s `models[].compile` (the shape `tan model add`
+  writes into a project's board.yaml; its own `description` is reworded
+  for the zoo's context), guarded by a drift test (with descriptions
+  stripped before comparing) rather than a cross-file `$ref` (no schema in
+  this tree resolves those). `scripts/validate_metadata.py` gates the
+  entry's shape, that every `validated_soms[]` SKU names a real, shipped
+  SoM preset, that every `starters/` file is referenced by some entry and
+  at most the size cap (a `stat()` failure is reported, never silently
+  skipped), and that a `bundled` path is a byte-exact (case-sensitive)
+  match on disk; it does NOT gate that the SoM was actually bench-run — a
+  populated `validated_soms` is a claim the entry's author is responsible
+  for, same as `metadata/model_perf/`'s bench-capture points.
 - [measuring-inference-energy.md](measuring-inference-energy.md) — the
   measured millijoules per inference on E1M-AEN801 silicon: the
   method (rail scan, conversion-ready sampling, idle-subtracted
   window integration), the whole-board PSU cross-check, a measured
   error budget, and the explicit list of what the figure is NOT
-  (not NPU energy, not silicon energy, not vendor-comparable).
+  (not NPU energy, not silicon energy, not vendor-comparable); also the
+  probe-based `scripts/alp_power.py` method (not yet validated on hardware).
 
 ## Security & release
 
@@ -257,7 +286,7 @@ into the topic-specific docs.
 
 - [v1.0-readiness.md](v1.0-readiness.md) — a 2026-05-14 execution-plan
   snapshot toward the v1.0.0 tag.  Not maintained current past the
-  session that wrote it (the SDK has since shipped through v0.16.0) —
+  session that wrote it (the SDK has since shipped through v0.17.0-rc1) —
   cross-check any status claim against `VERSIONS.md` and
   `CHANGELOG.md`, which are.
 - [v0.6-tbd-and-assumptions.md](v0.6-tbd-and-assumptions.md) —

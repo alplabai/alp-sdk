@@ -227,6 +227,9 @@ static void launch(void)
 		return;
 	}
 	clear_fault();
+	/* A fresh, non-zero launch token for the payload's core-1 gate: the self-launch never
+	 * visits the park loop that used to be the only thing bumping it. */
+	m->stub_heartbeat0 = stub_next_token(m->stub_heartbeat0);
 	cache_sync_all(); /* DCCISW all levels, ICIALLU, BPIALL, DSB, ISB */
 	m->pad4[TR_STUB_T_JUMP] = cntvct_lo();
 	m->stub_state           = STUB_STATE_RUNNING;
@@ -295,7 +298,7 @@ void stub_main(void)
 	 * from before this boot is dropped rather than obeyed. The previous
 	 * boot's fault record survives in pad4[0..3] (MBOX_OFF_LAST_FAULT_*) when
 	 * the magic says the page was ours; cold SRAM is garbage, so zero then. */
-	uint32_t warm = m->magic == TR_MBOX_MAGIC;
+	uint32_t warm = (uint32_t)tr_mbox_stub_page_init(m); /* cold or old-version: cleared */
 	m->pad4[0]    = warm ? m->fault_core : 0;
 	m->pad4[1]    = warm ? m->fault_code : 0;
 	m->pad4[2]    = warm ? m->lr : 0;

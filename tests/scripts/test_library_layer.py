@@ -88,6 +88,18 @@ def test_schema_rejects_bad_license() -> None:
     assert list(_validator().iter_errors(doc)), "GPL licence must be rejected"
 
 
+def test_license_enum_matches_readme_allowlist() -> None:
+    """metadata/libraries/README.md tells a maintainer to extend the schema
+    enum and its own allowlist block in the same change; this is what makes
+    that true rather than a convention."""
+    readme = (LIBRARIES_DIR / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## Licence allowlist", 1)[1]
+    block = section.split("```", 2)[1]
+    readme_ids = [i.strip() for i in block.replace("\n", " ").split(",")]
+    schema = json.loads(LIBRARY_SCHEMA.read_text(encoding="utf-8"))
+    assert readme_ids == schema["properties"]["license"]["enum"]
+
+
 def test_schema_requires_an_integration_section() -> None:
     doc = _valid_manifest()
     doc["integration"] = {}
@@ -344,10 +356,10 @@ def test_requires_min_ram_names_constraint(tmp_path: Path) -> None:
 
 def test_requires_capability_names_constraint(tmp_path: Path) -> None:
     project = load_board_yaml(_write_board(tmp_path, _V2N_NOLIB))
-    manifest = {"requires": {"capabilities": ["gpu2d"]}}  # V2N has no gpu2d cap
+    manifest = {"requires": {"capabilities": ["dave2d"]}}  # V2N has no dave2d cap
     with pytest.raises(OrchestratorError) as exc:
         liblayer._check_requires("needsgpu", manifest, project, liblayer.METADATA_ROOT)
-    assert "gpu2d" in str(exc.value)
+    assert "dave2d" in str(exc.value)
 
 
 def test_incompatible_selection_not_wireable(tmp_path: Path) -> None:
@@ -579,11 +591,38 @@ def test_ros2_edge_image_pulls_rclcpp_and_alp_perception() -> None:
     assert 'FEATURE_PACKAGES_alp-ros     = "packagegroup-alp-ros"' in common_inc
 
     packagegroup = (
-        meta / "recipes-core" / "packagegroups" / "packagegroup-alp-ros.bb"
+        meta / "dynamic-layers" / "ros2-humble-layer" / "recipes-core" / "packagegroups" / "packagegroup-alp-ros.bb"
     ).read_text(encoding="utf-8")
     rdepends = packagegroup.split('RDEPENDS:${PN} = "', 1)[1].split('"', 1)[0]
     assert "rclcpp" in rdepends
     assert "alp-perception" in rdepends
+    # The node recipe floats on branch=main (AUTOREV) and its example is not on
+    # main until dev is promoted: keep it out of the image closure until then.
+    assert "alp-ros2-temperature" not in rdepends
+
+
+def test_ros2_is_opt_in_by_layer_presence() -> None:
+    """ROS recipes parse only with upstream meta-ros2-humble present, and
+    ALP_ENABLE_ROS2 defaults from that, so ROS-free builds stay ROS-free."""
+    meta = REPO / "meta-alp-sdk"
+    layer_conf = (meta / "conf" / "layer.conf").read_text(encoding="utf-8")
+    assert "ros2-humble-layer:${LAYERDIR}/dynamic-layers/ros2-humble-layer/" in layer_conf
+    # No static BBFILES glob may reach the dynamic layer (it would parse without meta-ros).
+    for line in layer_conf.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        if "BBFILES" in line and "BBFILES_DYNAMIC" not in line:
+            assert "dynamic-layers/ros2-humble-layer" not in line
+    assert not any(
+        "dynamic-layers" in ln and "BBFILES +=" in ln and "ros2-humble-layer" in ln
+        for ln in layer_conf.splitlines()
+        if not ln.lstrip().startswith("#")
+    )
+
+    common_inc = (meta / "recipes-images" / "alp-image-common.inc").read_text(encoding="utf-8")
+    assert "ALP_ENABLE_ROS2 ?=" in common_inc
+    assert "'ros2-humble-layer' in" in common_inc
+    assert "${ALP_ROS2_FEATURE_OFF}" in common_inc.split("IMAGE_FEATURES:remove", 1)[1].splitlines()[0]
 
 
 # ---------------------------------------------------------------------

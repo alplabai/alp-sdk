@@ -54,7 +54,7 @@ Five reasons, in order of weight:
    re-building on Tuesday should get the same binary.  Tip Zephyr
    moves daily.
 2. **Vendor pack alignment.**  `hal_alif`, the Renesas RZ/V2N AI
-   SDK pack, the DEEPX DXNN host SDK, and the NXP i.MX 93 AI SDK
+   SDK pack, and the DEEPX DXNN host SDK
    all align release cadence to **a Zephyr LTS line**, not to
    Zephyr's monthly RCs.  Tracking tip breaks the pack we depend on.
 3. **CI cost.**  Every Zephyr bump invalidates the `actions/cache`
@@ -78,7 +78,7 @@ When a new Zephyr LTS lands and we want to adopt it:
 1. **Open a tracking issue** at `alplabai/alp-sdk` titled
    `Zephyr <new-LTS>: bump alp-sdk minor`.
 2. **Verify vendor packs.**  Confirm `hal_alif`, Renesas RZ/V2N AI
-   SDK, DEEPX DXNN, and NXP i.MX 93 AI SDK ship a revision that
+   SDK, and DEEPX DXNN ship a revision that
    targets the new Zephyr LTS.  If any is lagging, defer.
 3. **Branch + bump all the pins together** in a single PR:
    - Edit `metadata/bootstrap.json` &mdash; `zephyr.version` (the pin's

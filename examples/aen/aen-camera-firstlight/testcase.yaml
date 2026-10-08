@@ -10,7 +10,9 @@
 # streaming, and a captured+correlated frame, bench run 292; ISP-Pico/AE/
 # fast-trigger not yet bench-verified, see docs/camera-shields.md) and IMX335
 # (issue #2327 -- raw 1296x972 capture bench-verified, runs 316-330: 6/6
-# clean frames, 0 CSI/IPI errors; frame rate/fps, ISP/AE/colour and
+# clean frames, 0 CSI/IPI errors on the kept frame (the discarded first
+# frame shows one `E: Fatal Interrupt due to incorrect frame sequence for a
+# specific VC. status - 0x1` = SEQ_FRAME_FATAL, per stream start); frame rate/fps, ISP/AE/colour and
 # full-resolution mode are NOT bench-verified, see metadata/chips/imx335.yaml
 # and zephyr/boards/shields/innomaker_cam_imx335/doc/index.rst).
 #

@@ -19,6 +19,7 @@ i2c:
 
 mipi:
   lanes_supported: [1, 2, 4]
+  role:            csi2_tx
 
 resolutions:
   max:            [1920, 1200]
@@ -32,7 +33,6 @@ families:
   - aen
   - v2n
   - v2n-m1
-  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.

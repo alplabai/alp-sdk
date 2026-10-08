@@ -17,6 +17,7 @@ from __future__ import annotations
 import enum
 import gzip
 import hashlib
+import json
 import math
 import re
 import struct
@@ -24,6 +25,8 @@ import zlib
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+
+import yaml
 
 
 @dataclass
@@ -36,15 +39,33 @@ class GateResult:
 
 # --- artefacts: sha256 / size / role set / xSPI limits ------------------------
 
+# "cm33" becomes required once a bundle carries it (the maintainer decided every
+# E1M-V2M103 ships with a CM33 image; which image is still open).
 V2N_REQUIRED_ROLES = ("bl2", "bl2_mmc", "fip", "system_image")
 XSPI_LIMIT = 16 * 1024 * 1024  # an xSPI component must be strictly smaller
 # mtd1 + 0x1a0000 onward is the CM33 image; the FIP at mtd1 offset 0 must end
 # before it. linux_target re-checks with the real erase-size rounding.
-CM33_REGION_OFFSET = 0x1A0000
-# eMMC boot1 layout: bl2_mmc from sector 1, the FIP from sector 0x300.
-BL2_MMC_SECTOR = 0x1
-FIP_SECTOR = 0x300
+# BL2 copies the stored image raw to SRAM; the CM33 starts image_pad later, so the bundle's cm33
+# component is image_pad zero bytes + zephyr.bin (what rzv2n_mtd_flash writes). The numbers are
+# the SoC description's `cm33_boot` (metadata/socs/renesas/rzv2n/n44.json), not repeated here.
+_CM33_BOOT = json.loads((Path(__file__).resolve().parents[2] / "metadata" / "socs" / "renesas" / "rzv2n"
+                         / "n44.json").read_text(encoding="utf-8"))["cm33_boot"]
+CM33_REGION_OFFSET = _CM33_BOOT["xspi_offset"]
+CM33_SRAM_BASE = _CM33_BOOT["sram_base"]
+CM33_PAD = _CM33_BOOT["image_pad"]
+CM33_MAX = _CM33_BOOT["image_max"]        # BL2 silently truncates anything larger
+# eMMC boot-partition layout: the SoM preset's on_module.emmc_boot block (every
+# V2N/V2M SKU carries the same one; the V2N101 preset is read here).
+_EMMC_BOOT = yaml.safe_load(
+    (Path(__file__).resolve().parents[2] / "metadata/e1m_modules/E1M-V2N101.yaml").read_text(encoding="utf-8")
+)["on_module"]["emmc_boot"]
+BL2_MMC_SECTOR = _EMMC_BOOT["bl2_mmc_sector"]
+FIP_SECTOR = _EMMC_BOOT["fip_sector"]
 BL2_MMC_MAX = (FIP_SECTOR - BL2_MMC_SECTOR) * 512
+# The U-Boot environment (redundant pair) starts here in the boot partition
+# `uboot_env.part`. A boot write must end below it or it would erase the
+# saved environment.
+BOOT_ENV_OFFSET = min(_EMMC_BOOT["uboot_env"]["offset"], _EMMC_BOOT["uboot_env"]["offset_redund"])
 
 
 def _sha256(path: Path) -> str:
@@ -53,6 +74,25 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def cm33_problems(data: bytes) -> list[str]:
+    """The sanity checks of the rzv2n_mtd_flash west runner, on the stored (padded) image."""
+    if len(data) > CM33_MAX:
+        return [f"cm33: {len(data)} bytes exceeds the {CM33_MAX:#x} BL2 loads (it would be silently truncated)"]
+    if len(data) < CM33_PAD + 8:
+        return [f"cm33: {len(data)} bytes is too short for the {CM33_PAD:#x} zero pad plus a vector table"]
+    if any(data[:CM33_PAD]):
+        return [f"cm33: the first {CM33_PAD:#x} bytes must be zero (the CM33 starts at "
+                f"{CM33_SRAM_BASE + CM33_PAD:#x}); store zephyr.bin after the pad"]
+    sp, reset = int.from_bytes(data[CM33_PAD:CM33_PAD + 4], "little"), int.from_bytes(data[CM33_PAD + 4:CM33_PAD + 8], "little")
+    problems = []
+    if sp & 0xFF000000 != CM33_SRAM_BASE:       # the runner's test: SRAM0, 0x08xxxxxx
+        problems.append(f"cm33: initial SP {sp:#010x} is not in SRAM0 (0x08xxxxxx)")
+    lo, hi = CM33_SRAM_BASE + CM33_PAD, CM33_SRAM_BASE + CM33_PAD + CM33_MAX   # the runner's window
+    if not reset & 1 or not lo <= reset & ~1 < hi:
+        problems.append(f"cm33: reset vector {reset:#010x} must have the Thumb bit set and lie in {lo:#x}..{hi:#x}")
+    return problems
 
 
 def artefacts(bundle_dir: Path, bundle: dict) -> GateResult:
@@ -84,10 +124,14 @@ def artefacts(bundle_dir: Path, bundle: dict) -> GateResult:
             problems.append(f"{role}: sha256 {digest} != bundle.json {c.get('sha256')}")
         if str(c.get("flash_target", "")).startswith("xspi:") and size >= XSPI_LIMIT:
             problems.append(f"{role}: {size} bytes does not fit xSPI (< {XSPI_LIMIT})")
+        if role == "cm33":
+            if c.get("flash_target") != "xspi:mtd1":
+                problems.append(f"cm33: flash_target {c.get('flash_target')!r}, must be 'xspi:mtd1'")
+            problems += cm33_problems(path.read_bytes())
         if role == "fip" and size > CM33_REGION_OFFSET:
             problems.append(f"fip: {size} bytes would reach the CM33 region at mtd1+{CM33_REGION_OFFSET:#x}")
         if role == "bl2_mmc" and size > BL2_MMC_MAX:
-            problems.append(f"bl2_mmc: {size} bytes would overlap the FIP at boot1 sector {FIP_SECTOR:#x}")
+            problems.append(f"bl2_mmc: {size} bytes would overlap the FIP at boot partition 1 sector {FIP_SECTOR:#x}")
     if problems:
         return GateResult("artefacts", False, "; ".join(problems))
     return GateResult("artefacts", True, f"{len(comps)} component(s) match bundle.json")
@@ -184,21 +228,30 @@ def fip_rail(fip: bytes, family: str) -> GateResult:
     return GateResult("fip_rail", True, f"not required for family {family} (present={present})")
 
 
-_FDT_RE = re.compile(rb"boot/([A-Za-z0-9_.,+-]+\.dtb)")
+_FDT_RE = re.compile(rb"(?:boot/|alp_fdtfile )([A-Za-z0-9_.,+-]+\.dtb)")
 
 
 _BOOTCMD_RE = re.compile(rb"bootcmd=[^\x00]*")
 
 
 def fip_fdtfile(fip: bytes) -> str:
-    """The dtb basename U-Boot loads (compiled in by patch 0002 as boot/<name>).
+    """The build-time FALLBACK dtb basename (``CONFIG_ALP_E1M_FDTFILE``).
+
+    Since patch 0013 the dtb a unit boots is picked at boot from its EEPROM
+    manifest family (``boot/${fdtfile}``, which this regex ignores); only a
+    unit with no usable family also tries the other dtb in the family table
+    (``${fdtfile_alt}``), a known family fails closed. The fallback is the
+    default the bootcmd passes to ``alp_fdtfile <name>.dtb``. Using it for the
+    ``fdt`` gate and the ``dxm1`` swap is right when
+    the bundle's family equals the SoM's family, which per-SKU bundles
+    guarantee.
 
     Read from the default ``bootcmd`` when the FIP carries one: the vendor
     env scripts (``emmcload``/``sd2load``) also name the stock EVK dtb, but
     only ``bootcmd`` runs at autoboot. Without a ``bootcmd`` every
     ``boot/*.dtb`` in the FIP must agree."""
-    in_bootcmd = {m.decode("ascii") for cmd in _BOOTCMD_RE.findall(fip)
-                  for m in _FDT_RE.findall(cmd)}
+    in_bootcmd = {m[0].decode("ascii") for cmd in _BOOTCMD_RE.findall(fip)
+                  if (m := _FDT_RE.findall(cmd))}
     names = in_bootcmd or {m.decode("ascii") for m in _FDT_RE.findall(fip)}
     if len(names) != 1:
         where = "the FIP's bootcmd" if in_bootcmd else "the FIP"
@@ -368,15 +421,21 @@ def fdt(fip: bytes, wic_gz: Path) -> GateResult:
 
 # --- serial / mfg_date ----------------------------------------------------------
 
-_SERIAL_RE = re.compile(r"^(\d{4})W(\d{2})-(\d{4})$")
+# The index is 4 Crockford base32 characters (alp_eth_mac.CROCKFORD_ALPHABET,
+# no I/L/O/U): the printed labels run 0001..0009, 000A..000Z, ...
+_CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+_SERIAL_RE = re.compile(r"^(\d{4})W(\d{2})-([0-9A-HJKMNP-TV-Z]{4})$")
 
 
 def parse_serial(serial: str) -> tuple[int, int, int]:
-    """'YYYYWww-NNNN' -> (year, iso_week, seq). ValueError on a bad serial."""
+    """'YYYYWww-IIII' -> (year, iso_week, index). ValueError on a bad serial."""
     m = _SERIAL_RE.match(serial)
     if not m:
-        raise ValueError(f"serial {serial!r} is not YYYYWww-NNNN")
-    year, week, seq = (int(g) for g in m.groups())
+        raise ValueError(f"serial {serial!r} is not YYYYWww-IIII")
+    year, week = int(m.group(1)), int(m.group(2))
+    seq = 0
+    for c in m.group(3):
+        seq = seq * 32 + _CROCKFORD.index(c)
     if seq == 0:
         raise ValueError(f"serial {serial!r}: sequence starts at 0001")
     date.fromisocalendar(year, week, 1)  # ValueError for a week the year lacks

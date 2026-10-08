@@ -10,7 +10,7 @@ Mender contract documented below + the shared trust model in
 Two layers of OTA exist:
 
 1. **Main system OTA** -- Mender on the Renesas RZ/V2N (or Alif
-   E7 / NXP i.MX 93 on other E1M variants).  Updates the Linux
+   E7 on other E1M variants).  Updates the Linux
    kernel, root filesystem, and userspace.  This is the "big"
    OTA.
 2. **GD32 bridge firmware OTA** -- Path A (application bootloader

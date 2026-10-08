@@ -90,6 +90,9 @@ mk_build() { # dir board_line extra_i2c_status(okay|disabled) uart5_status lpgpi
 		# start refusing every board's own memory/clock/pin/NVIC/lptimer
 		# nodes now that they are actually looked at.
 		dts_plain_node memory 1a000000 NONE
+		# The core-local SE mailbox pair, okay on every image since #2192 (allow-listed).
+		dts_plain_node mhu 40040000 okay
+		dts_plain_node mhu 40050000 okay
 		dts_plain_node clock-controller 1a602000 NONE
 		dts_plain_node lptimer 42001000 NONE
 		[ -n "${7:-}" ] && dts_plain_node unowned "$7" NONE # bad: omitted status still defaults to okay
@@ -132,6 +135,10 @@ expect 1 "elf lacks tr_pslot_write" "$t/good" "$t/model.bin" "$t/nm-no-pslot"
 expect 1 "no model file" "$t/good" "$t/missing-model.bin" "$t/nm"
 expect 1 "wrong-size model" "$t/good" "$t/model-wrong.bin" "$t/nm"
 expect 0 "HP vision build + right-size model" "$t/good" "$t/model.bin" "$t/nm"
+# A Windows-built build dir: CRLF line ends in the cache, .config and zephyr.dts.
+cp -r "$t/good" "$t/good-crlf"
+for f in CMakeCache.txt zephyr/.config zephyr/zephyr.dts; do sed -i 's/$/\r/' "$t/good-crlf/$f"; done
+expect 0 "a CRLF (Windows-built) HP build dir" "$t/good-crlf" "$t/model.bin" "$t/nm"
 expect 1 "TR_CAM_ROTATE=180" "$t/bad-rot180" "$t/model.bin" "$t/nm"
 expect 1 "TR_CAM_ROTATE empty (the header default at build time)" "$t/bad-rot-empty" "$t/model.bin" "$t/nm"
 expect 0 "TR_CAM_ROTATE=270" "$t/rot270" "$t/model.bin" "$t/nm"
@@ -155,12 +162,28 @@ printf '#!/bin/sh\ntouch "%s/PACKAGED"\n' "$t" > "$t/st/app-gen-toc" && chmod +x
 : > "$t/st/build/images/bl32.bin"; : > "$t/st/build/images/m55_stub_hp.bin"
 : > "$t/st/build/config/app-device-config.json"
 head -c 4096 /dev/zero > "$t/he/zephyr/zephyr.bin"; : > "$t/he/zephyr/zephyr.elf"
-# fix round 15: build-release.sh now also refuses an HE whose CMakeCache
-# lacks TR_PANEL_HZ:STRING=30 (panel_hz_check.sh, tested on its own in
-# tests/host/test_panel_hz_check.sh) -- append it here so these two
-# end-to-end checks keep testing what THEY test (the HP interlocks), not
-# get short-circuited by an unrelated refusal earlier in the script.
-echo 'TR_PANEL_HZ:STRING=30' >> "$t/he/CMakeCache.txt"
+# build-release.sh also refuses an HE whose display does not refresh at 30 Hz
+# (panel_hz_check.sh, tested on its own in tests/host/test_panel_hz_check.sh)
+# -- give it a 30 Hz zephyr.dts so these two end-to-end checks keep testing
+# what THEY test (the HP interlocks), not get short-circuited by an unrelated
+# refusal earlier in the script.
+cat > "$t/he/zephyr/zephyr.dts" <<DTS
+/ {
+	soc {
+		cdc200: cdc200@49031000 {
+			width = < 0x2d0 >;
+			height = < 0x500 >;
+			hsync-len = < 0x6 >;
+			hfront-porch = < 0xc >;
+			hback-porch = < 0x18 >;
+			vsync-len = < 0x2 >;
+			vfront-porch = < 0x1c6 >;
+			vback-porch = < 0xe >;
+			clock-frequency = < 0x2625a00 >;
+		};
+	};
+};
+DTS
 mkdir -p "$t/bin" && printf '#!/bin/sh\ntouch "%s/MADE"\n' "$t" > "$t/bin/make" && chmod +x "$t/bin/make"
 
 out=$(PATH="$t/bin:$PATH" NM="$t/nm" TR_HP_VISION=ON TR_HP_VISION_BUILD="$t/he" TR_HP_VISION_MODEL="$t/model.bin" \

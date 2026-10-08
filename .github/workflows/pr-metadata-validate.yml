@@ -66,6 +66,16 @@ on:
       - 'scripts/check_i2c_address_uniqueness.py'
       - 'scripts/check_e1m_pinout.py'
       - 'scripts/check_amp_pad_claims.py'
+      - 'scripts/check_amp_window.py'
+      - 'scripts/gen_amp_window.py'
+      - 'src/backends/rpc/alp_amp_window.h'
+      - 'include/alp/protocol/amp_beacon.h'
+      - 'firmware/**'
+      - 'tests/yocto/**'
+      - 'tests/hil/**'
+      - 'src/backends/rpc/**'
+      - 'examples/multicore/**'
+      - 'scripts/check_pad_voltage.py'
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
@@ -159,6 +169,16 @@ on:
       - 'scripts/check_i2c_address_uniqueness.py'
       - 'scripts/check_e1m_pinout.py'
       - 'scripts/check_amp_pad_claims.py'
+      - 'scripts/check_amp_window.py'
+      - 'scripts/gen_amp_window.py'
+      - 'src/backends/rpc/alp_amp_window.h'
+      - 'include/alp/protocol/amp_beacon.h'
+      - 'firmware/**'
+      - 'tests/yocto/**'
+      - 'tests/hil/**'
+      - 'src/backends/rpc/**'
+      - 'examples/multicore/**'
+      - 'scripts/check_pad_voltage.py'
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
@@ -266,8 +286,22 @@ jobs:
       # field (#1157), and neither side could see the other -- which is
       # how the usb20 OVC gpio-hog silently clobbered the CM33's live
       # SCK7 mux on P9.6 (errata E3) until a bench session found it.
+      # Also runs the full pass (resolved board.yaml `ownership:` + the
+      # generated Linux fragment) for every V2N-family examples/**/board.yaml
+      # (#2660).
       - name: Check no Linux DT pad claim lands on a CM33-owned pad
         run: python3 scripts/check_amp_pad_claims.py
+
+      # The CM33 OpenAMP window is declared once (SoC `openamp_carveout`);
+      # the generated board .dts, the Linux reserved-memory/UIO nodes and the
+      # RPC backend header must agree (every sub-region), and the beacon magic
+      # and address must be defined only in include/alp/protocol/amp_beacon.h.
+      - name: Check the OpenAMP window agrees across metadata, DT and backend
+        run: python3 scripts/check_amp_window.py
+      # RZ/V2N P90-P92, P2x and PBx are not 3.3 V tolerant (SoC
+      # pad_tolerance); a board that routes 3.3 V there needs a level shifter.
+      - name: Check non-3.3 V-tolerant pads carry a level declaration
+        run: python3 scripts/check_pad_voltage.py
 
       # Cross-checks every non-TBD E1M pad/function claimed by a SoM
       # pin-mux table against the vendored e1m-spec standard snapshot
@@ -391,24 +425,10 @@ jobs:
           python3 scripts/validate_board_yaml.py \
               --input metadata/templates/board.yaml.example
 
-      # examples/multicore/rpmsg-imx93/board.yaml is EXCLUDED from both
-      # sweeps below (#1025): E1M-NX9101's only hw_rev (imx93 r1) is
-      # `status: tbd`, refused outright by the hw_rev-buildable gate
-      # (exit 5) -- not a validation defect, the gate correctly refusing
-      # an unbuildable SoM. The example's source + README stay (see the
-      # README's own #1025 note); only the requirement that it VALIDATE
-      # cleanly is lifted. The exclusion pattern lives in one place,
-      # scripts/board-yaml-sweep-exclude.sh (also sourced by
-      # scripts/test-all.sh -- alp-sdk#1109 was these two copies drifting
-      # apart), so both steps below source it rather than hardcoding it.
-      # Remove BOARD_YAML_SWEEP_EXCLUDE_PATTERN there once
-      # metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
-      # buildable status.
       - name: Validate every examples/*/board.yaml
         run: |
           set -e
-          . scripts/board-yaml-sweep-exclude.sh
-          for f in $(find examples -name board.yaml | grep -v "${BOARD_YAML_SWEEP_EXCLUDE_PATTERN}"); do
+          for f in $(find examples -name board.yaml); do
               echo "--- $f ---"
               python3 scripts/validate_board_yaml.py --input "$f"
           done
@@ -417,16 +437,14 @@ jobs:
       # examples/ + tests/ and runs scripts/validate_board_yaml.py
       # against metadata/schemas/board.schema.json.  Hard gate: any
       # board.yaml that doesn't validate fails the PR here (not at
-      # twister / bitbake time).  rpmsg-imx93 excluded -- see the
-      # #1025 comment above the previous step.
+      # twister / bitbake time).
       - name: schema sweep across examples/ + tests/
         run: |
           set -euo pipefail
-          . scripts/board-yaml-sweep-exclude.sh
           while IFS= read -r f; do
               echo "--- v2-check: $f ---"
               python3 scripts/validate_board_yaml.py --input "$f"
-          done < <(find examples tests -name board.yaml 2>/dev/null | grep -v "${BOARD_YAML_SWEEP_EXCLUDE_PATTERN}")
+          done < <(find examples tests -name board.yaml 2>/dev/null)
 
       # End-to-end: every E1M board route resolves to a function the SoM
       # capability table actually backs (or is a documented open pad).

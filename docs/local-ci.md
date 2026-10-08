@@ -114,7 +114,7 @@ build versus the `/mnt/c` path.
 ## Path B — Pure Windows
 
 This is the path for cross-compiled builds only (Alif Ensemble,
-Renesas V2N, NXP i.MX 93 targets via arm-zephyr-eabi).  Native_sim
+Renesas V2N targets via arm-zephyr-eabi).  Native_sim
 builds are not supported on Windows by upstream Zephyr.
 
 1. **Install Python 3.12+** from python.org (the Microsoft Store

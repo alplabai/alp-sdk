@@ -16,8 +16,14 @@
  * MeraDrpRuntimeWrapper.h (see that file's own comment) plus a fake
  * linux/drpai.h for the DRP-AI driver uapi struct/ioctl it also needs.
  *
- * Coverage differs from the ORT/DEEPX regression tests in one load-
- * bearing way: inference_drpai.cpp's open() resolves the DRP-AI
+ * Two kinds of test below.  The device-absent tests run against the
+ * default fake (no /dev/drpai0).  The multi-model tests (arena
+ * placement, serialised Run()) flip drpai_test::g_device_present so the
+ * fake linux/drpai.h answers the area ioctl and open() reaches the fake
+ * MeraDrpRuntimeWrapper; they need a `tar` that accepts an empty
+ * archive (open() extracts the blob with `tar -xf -`).
+ *
+ * Coverage of the device-absent path: inference_drpai.cpp's open() resolves the DRP-AI
  * reserved-memory arena via a REAL `::open("/dev/drpai0", O_RDWR)` +
  * `::ioctl(..., DRPAI_GET_DRPAI_AREA, ...)` (see its own
  * "_drpai_mem_start" doc comment) -- a genuine host syscall, not
@@ -39,13 +45,25 @@
  *   ctest --test-dir build -R alp_test_inference_drpai_regression
  */
 
+#include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 
 extern "C" {
 #include "alp/inference.h"
 }
 
+#include "drpai_arena.h"
+#include "drpai_test_seam.h"
 #include "inference_handle_internal.h"
 #include "test_assert.h"
 
@@ -124,6 +142,303 @@ void test_open_fails_cleanly_when_device_absent()
 	ALP_ASSERT_NULL(h.be_state);
 }
 
+/* Test 2b: DRP-AI3 is one unit -- accel_unit_mask 0 (default) and 0x1 pass the
+ * mask gate (and then hit the absent device -> IO); anything else is
+ * NOSUPPORT before the device is touched. */
+void test_open_accel_unit_mask_is_zero_or_one()
+{
+	struct alp_inference   h   = {};
+	alp_inference_config_t cfg = base_cfg();
+
+	for (uint32_t mask : { 0x2u, 0x3u, 0x80000000u }) {
+		cfg.accel_unit_mask = mask;
+		ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&h, &cfg), ALP_ERR_NOSUPPORT);
+		ALP_ASSERT_NULL(h.be_state);
+	}
+	for (uint32_t mask : { 0x0u, 0x1u }) {
+		cfg.accel_unit_mask = mask;
+		ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&h, &cfg), ALP_ERR_IO);
+	}
+}
+
+/* An empty tar archive (two zero blocks): what open() stages for the fake. */
+const std::vector<uint8_t> k_empty_tar(1024, 0);
+
+alp_inference_config_t tar_cfg()
+{
+	alp_inference_config_t cfg = base_cfg();
+	cfg.model_data             = k_empty_tar.data();
+	cfg.model_size             = k_empty_tar.size();
+	return cfg;
+}
+
+void fake_device(uint64_t model_bytes)
+{
+	drpai_test::g_device_present = true;
+	drpai_test::g_model_bytes    = model_bytes;
+	drpai_test::g_cpu_only       = false;
+	drpai_test::g_load_starts.clear();
+	drpai_test::g_max_in_flight  = 0;
+	drpai_test::g_in_flight      = 0;
+	drpai_test::g_runs           = 0;
+	drpai_test::g_run_block      = false;
+	drpai_test::g_overlap_events = 0;
+}
+
+constexpr uint64_t kMiB = 1ull << 20;
+
+/* Test 2b: open handles get DISJOINT, ordered, 16 MiB-aligned ranges, and a
+ * handle that does not fit is refused with ALP_ERR_NOMEM.  Before the arena
+ * allocator every handle loaded at the arena base and overwrote the previous
+ * one. */
+void test_handles_get_disjoint_arena_ranges()
+{
+	fake_device(64 * kMiB);
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a = {}, b = {};
+
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT((int)drpai_test::g_load_starts.size(), 2);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[0] == drpai_test::g_area_base);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[1] == drpai_test::g_area_base + 64 * kMiB);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[1] % (16 * kMiB) == 0);
+
+	/* 512 MiB - 32 MiB pre-processing reserve = 480 MiB usable; 2 x 64 MiB
+	 * used, so 5 more 64 MiB models fit and the 6th does not. */
+	struct alp_inference more[6] = {};
+	int                  opened  = 0;
+	alp_status_t         last    = ALP_OK;
+	for (auto &h : more) {
+		last = alp_inference_drpai_open(&h, &cfg);
+		if (last != ALP_OK) {
+			break;
+		}
+		++opened;
+	}
+	ALP_ASSERT_EQ_INT(opened, 5);
+	ALP_ASSERT_EQ_INT(last, ALP_ERR_NOMEM);
+	ALP_ASSERT_NULL(more[opened].be_state); /* failed open left no state */
+
+	for (int i = opened - 1; i >= 0; --i) {
+		alp_inference_drpai_close(&more[i]);
+	}
+	alp_inference_drpai_close(&b);
+	alp_inference_drpai_close(&a);
+	drpai_test::g_device_present = false;
+}
+
+/* Test 2c: a single model larger than the usable arena is refused. */
+void test_oversized_model_is_refused()
+{
+	fake_device(496 * kMiB); /* > 480 MiB usable */
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   h   = {};
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&h, &cfg), ALP_ERR_NOMEM);
+	ALP_ASSERT_NULL(h.be_state);
+	drpai_test::g_device_present = false;
+}
+
+/* Test 2e: ranges are reclaimed.  LIFO close then reopen reuses the space,
+ * and the "swap B while A stays open" cycle repeated far more often than the
+ * arena could hold never hits NOMEM. */
+void test_closed_ranges_are_reclaimed()
+{
+	fake_device(64 * kMiB);
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a = {}, b = {}, c = {};
+
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_OK);
+	alp_inference_drpai_close(&b); /* LIFO */
+	drpai_test::g_load_starts.clear();
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&c, &cfg), ALP_OK);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[0] == drpai_test::g_area_base + 64 * kMiB);
+	alp_inference_drpai_close(&c);
+
+	for (int i = 0; i < 40; ++i) { /* 40 x 64 MiB >> 480 MiB */
+		struct alp_inference x = {};
+		ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&x, &cfg), ALP_OK);
+		alp_inference_drpai_close(&x);
+	}
+	/* Closing the LOWER handle first leaves the upper range live: the cursor
+	 * stays above it, then falls back once it closes too. */
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_OK);
+	alp_inference_drpai_close(&a);
+	alp_inference_drpai_close(&b);
+	drpai_test::g_load_starts.clear();
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[0] == drpai_test::g_area_base);
+	alp_inference_drpai_close(&a);
+	drpai_test::g_device_present = false;
+}
+
+/* Test 2f: a CPU-only model (GetLastAddress() == 0) opens and uses no arena. */
+void test_cpu_only_model_uses_no_arena()
+{
+	fake_device(64 * kMiB);
+	drpai_test::g_cpu_only     = true;
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a = {}, b = {};
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	drpai_test::g_cpu_only = false;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_OK);
+	ALP_ASSERT_TRUE(drpai_test::g_load_starts[1] == drpai_test::g_area_base);
+	alp_inference_drpai_close(&b);
+	alp_inference_drpai_close(&a);
+	drpai_test::g_device_present = false;
+}
+
+/* Test 2g: a driver area that changes under live handles is refused. */
+void test_area_change_with_live_handle_is_refused()
+{
+	fake_device(64 * kMiB);
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a = {}, b = {};
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	const uint64_t old_base = drpai_test::g_area_base;
+	drpai_test::g_area_base = old_base + 0x10000000ull;
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_ERR_NOMEM);
+	drpai_test::g_area_base = old_base;
+	alp_inference_drpai_close(&a);
+	drpai_test::g_device_present = false;
+}
+
+/* Point the SDK's lock dir at a private temp dir (the real /run/alp is
+ * image-provided and root:drpai-owned).  Done once, from main(). */
+char g_tmp_lock_dir[] = "/tmp/alp-drpai-test-XXXXXX";
+
+/* The lock file the SDK uses.  Returns an fd on it (or -1). */
+int open_lock_file()
+{
+	const std::string path = std::string(alp_drpai::g_lock_dir) + "/drpai.lock";
+	return ::open(path.c_str(), O_RDWR | O_CLOEXEC);
+}
+
+/* True when some other open file description holds the lock (what a second
+ * process would see): a non-blocking flock() on our own fd fails EWOULDBLOCK. */
+bool lock_is_held_by_others()
+{
+	int fd = open_lock_file();
+	if (fd < 0) {
+		return false;
+	}
+	const bool held = ::flock(fd, LOCK_EX | LOCK_NB) != 0 && errno == EWOULDBLOCK;
+	::close(fd); /* also drops the lock if we got it */
+	return held;
+}
+
+/* Test 2i: one DRP-AI process per board.  The first handle takes a file
+ * lock that stays until the LAST handle in the process closes; handles in
+ * the same process share it; a lock held elsewhere (a second process -- a
+ * flock on another file description behaves the same as a fork()ed child)
+ * makes open() return ALP_ERR_BUSY and leaves nothing behind. */
+void test_one_drpai_process_per_board()
+{
+	fake_device(16 * kMiB);
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a = {}, b = {}, other = {};
+
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	ALP_ASSERT_TRUE(lock_is_held_by_others());
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&b, &cfg), ALP_OK); /* same process: fine */
+	alp_inference_drpai_close(&a);
+	ALP_ASSERT_TRUE(lock_is_held_by_others()); /* b still open */
+	alp_inference_drpai_close(&b);
+	ALP_ASSERT_TRUE(!lock_is_held_by_others()); /* last close released it */
+
+	/* "Another process" holds the board. */
+	int fd = open_lock_file();
+	ALP_ASSERT_TRUE(fd >= 0);
+	ALP_ASSERT_EQ_INT(::flock(fd, LOCK_EX | LOCK_NB), 0);
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&other, &cfg), ALP_ERR_BUSY);
+	ALP_ASSERT_NULL(other.be_state);
+	::close(fd);
+
+	/* The refused open took nothing: once the other holder is gone it works. */
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&other, &cfg), ALP_OK);
+	alp_inference_drpai_close(&other);
+	ALP_ASSERT_TRUE(!lock_is_held_by_others());
+	drpai_test::g_device_present = false;
+}
+
+/* Test 2d: invoke() from several threads on several handles never has two
+ * Run()s in flight at once (the fake sleeps inside Run() to widen the
+ * window; without the process-wide lock the high-water mark reaches >1). */
+void test_concurrent_invokes_are_serialised()
+{
+	fake_device(16 * kMiB);
+	alp_inference_config_t cfg  = tar_cfg();
+	struct alp_inference   h[3] = {};
+	for (auto &x : h) {
+		ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&x, &cfg), ALP_OK);
+	}
+
+	std::vector<std::thread> th;
+	for (auto &x : h) {
+		th.emplace_back([&x]() {
+			for (int i = 0; i < 10; ++i) {
+				(void)alp_inference_drpai_invoke(&x);
+			}
+		});
+	}
+	for (auto &t : th) {
+		t.join();
+	}
+	ALP_ASSERT_EQ_INT(drpai_test::g_runs.load(), 30);
+	ALP_ASSERT_EQ_INT(drpai_test::g_max_in_flight.load(), 1);
+
+	for (auto &x : h) {
+		alp_inference_drpai_close(&x);
+	}
+	drpai_test::g_device_present = false;
+}
+
+/* Test 2h: open() and close() of one handle wait for another handle's job:
+ * the model load and the runtime teardown touch the device, which runs one
+ * job at a time.  A job is held open on handle A; B is opened and C closed
+ * from other threads and neither may finish (nor touch the device) until
+ * A's Run() returns. */
+void test_open_and_close_wait_for_a_running_job()
+{
+	fake_device(64 * kMiB);
+	alp_inference_config_t cfg = tar_cfg();
+	struct alp_inference   a = {}, b = {}, c = {};
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&a, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&c, &cfg), ALP_OK);
+
+	drpai_test::g_run_block = true;
+	std::thread run_a([&a]() { (void)alp_inference_drpai_invoke(&a); });
+	while (drpai_test::g_in_flight.load() == 0) { /* A is inside Run() */
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+
+	std::atomic<int> opened{ 0 }, closed{ 0 };
+	alp_status_t     open_rc = ALP_ERR_IO;
+	std::thread      open_b([&]() {
+		open_rc = alp_inference_drpai_open(&b, &cfg);
+		opened  = 1;
+	});
+	std::thread      close_c([&]() {
+		alp_inference_drpai_close(&c);
+		closed = 1;
+	});
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	ALP_ASSERT_EQ_INT(opened.load(), 0); /* still waiting for A's job */
+	ALP_ASSERT_EQ_INT(closed.load(), 0);
+
+	drpai_test::g_run_block = false;
+	run_a.join();
+	open_b.join();
+	close_c.join();
+	ALP_ASSERT_EQ_INT(open_rc, ALP_OK);
+	ALP_ASSERT_EQ_INT(drpai_test::g_overlap_events.load(), 0);
+
+	alp_inference_drpai_close(&b);
+	alp_inference_drpai_close(&a);
+	drpai_test::g_device_present = false;
+}
+
 /* Test 3: num_inputs()/num_outputs() on a never-opened handle report 0,
  * not a crash on a NULL be_state. */
 void test_num_inputs_outputs_zero_when_not_open()
@@ -166,15 +481,50 @@ void test_close_on_null_state_is_noop()
 
 } /* namespace */
 
+/* Test 2j: an unopenable lock file fails the open (ALP_ERR_IO) instead of
+ * falling back to another path, where a second process could lock a
+ * different file and break the one-process-per-board rule. */
+void test_unopenable_lock_fails_open()
+{
+	fake_device(16 * kMiB);
+	alp_inference_config_t cfg   = tar_cfg();
+	struct alp_inference   inf   = {};
+	const char            *saved = alp_drpai::g_lock_dir;
+
+	alp_drpai::g_lock_dir = "/nonexistent-alp-lock-dir";
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&inf, &cfg), ALP_ERR_IO);
+	ALP_ASSERT_NULL(inf.be_state);
+	alp_drpai::g_lock_dir = saved;
+
+	ALP_ASSERT_EQ_INT(alp_inference_drpai_open(&inf, &cfg), ALP_OK); /* nothing leaked */
+	alp_inference_drpai_close(&inf);
+	drpai_test::g_device_present = false;
+}
+
 int main(void)
 {
+	ALP_ASSERT_TRUE(::mkdtemp(g_tmp_lock_dir) != nullptr);
+	alp_drpai::g_lock_dir = g_tmp_lock_dir;
 	test_open_rejects_null_model_data();
 	test_open_rejects_zero_model_size();
 	test_open_fails_cleanly_when_device_absent();
+	test_open_accel_unit_mask_is_zero_or_one();
+	test_handles_get_disjoint_arena_ranges();
+	test_oversized_model_is_refused();
+	test_closed_ranges_are_reclaimed();
+	test_cpu_only_model_uses_no_arena();
+	test_area_change_with_live_handle_is_refused();
+	test_concurrent_invokes_are_serialised();
+	test_open_and_close_wait_for_a_running_job();
+	test_one_drpai_process_per_board();
+	test_unopenable_lock_fails_open();
 	test_num_inputs_outputs_zero_when_not_open();
 	test_get_input_output_not_ready_when_not_open();
 	test_invoke_not_ready_when_not_open();
 	test_close_on_null_state_is_noop();
+
+	::unlink((std::string(g_tmp_lock_dir) + "/drpai.lock").c_str());
+	::rmdir(g_tmp_lock_dir);
 
 	ALP_TEST_SUMMARY();
 }
