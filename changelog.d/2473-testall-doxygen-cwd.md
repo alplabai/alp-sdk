@@ -6,7 +6,7 @@ shell's current directory had drifted by the time this stage ran, so doxygen
 resolved the relative markdown links in `docs/**/*.md` against the wrong base
 and reported `unable to resolve reference to
 '<home>/vendors/alif/README.md'` for the link at
-`docs/boards/e1m-evk.md:420` ("](../../vendors/alif/README.md)") —
+`docs/boards/e1m-evk.md:428` ("](../../vendors/alif/README.md)") —
 a false FAIL, since a fresh `--depth 1` clone of the identical commit built
 with 0 warnings.
 

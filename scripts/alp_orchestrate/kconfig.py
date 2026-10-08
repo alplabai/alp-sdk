@@ -35,6 +35,7 @@ gating (see #874).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -250,7 +251,41 @@ def _resolve_console(value: Optional[str], os_: str,
     return _CONSOLE_ALIASES.get(v, "none")
 
 
-def _emit_zephyr_console(console: str, sim_console: bool = False) -> list[str]:
+#: Floor for `CONFIG_RAM_CONSOLE_BUFFER_SIZE` when `diagnostics.console: ram`
+#: selects the RAM console.  An app that sets a larger size in its own
+#: `prj.conf` keeps it (see `_app_ram_console_size`).
+_RAM_CONSOLE_MIN_SIZE = 2048
+
+_RAM_CONSOLE_SIZE_RE = re.compile(
+    r"^\s*CONFIG_RAM_CONSOLE_BUFFER_SIZE\s*=\s*(0[xX][0-9a-fA-F]+|\d+)\s*(?:#.*)?$")
+
+
+def _app_ram_console_size(project: BoardProject, slice_: Slice) -> int:
+    """`CONFIG_RAM_CONSOLE_BUFFER_SIZE` the slice's own `prj.conf` sets, or 0.
+
+    The generated alp.conf is merged AFTER prj.conf, so a bare assignment
+    would clobber (and shrink) an app-set size -- the app's console then
+    wraps (tan-cli#1401).  Best effort: no source dir, no app, or an
+    unreadable prj.conf all read as "app sets nothing".
+    """
+    if project.source_dir is None or not slice_.app:
+        return 0
+    from .orchestrator import _zephyr_app_dir  # lazy: orchestrator imports us
+    try:
+        prj = _zephyr_app_dir(slice_.app, project.source_dir) / "prj.conf"
+        text = prj.read_text(encoding="utf-8")
+    except (OSError, OrchestratorError, UnicodeDecodeError):
+        return 0
+    size = 0
+    for line in text.splitlines():
+        m = _RAM_CONSOLE_SIZE_RE.match(line)
+        if m:
+            size = int(m.group(1), 0)  # last assignment wins, like Kconfig
+    return size
+
+
+def _emit_zephyr_console(console: str, sim_console: bool = False,
+                         ram_size: int = _RAM_CONSOLE_MIN_SIZE) -> list[str]:
     """Kconfig lines for a Zephyr slice's resolved console backend.
 
     ``sim_console`` distinguishes a RAM console selected explicitly via
@@ -292,7 +327,7 @@ def _emit_zephyr_console(console: str, sim_console: bool = False) -> list[str]:
             "# LOG is routed to printk so the RAM backend still captures it.",
             "CONFIG_CONSOLE=y",
             "CONFIG_RAM_CONSOLE=y",
-            "CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048",
+            f"CONFIG_RAM_CONSOLE_BUFFER_SIZE={ram_size}",
             "CONFIG_UART_CONSOLE=n",
             "",
         ]
@@ -528,7 +563,8 @@ def _emit_baseline(slice_: Slice, diagnostics: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _emit_console(diagnostics: dict[str, Any], slice_: Slice) -> list[str]:
+def _emit_console(diagnostics: dict[str, Any], slice_: Slice,
+                  project: Optional[BoardProject] = None) -> list[str]:
     """Console backend, auto-selected from the slice OS (overridable via
     board.yaml `diagnostics.console:`).  A Zephyr slice defaults to the
     Alp UART console so `west build && attach a terminal` just works;
@@ -552,7 +588,10 @@ def _emit_console(diagnostics: dict[str, Any], slice_: Slice) -> list[str]:
         and not slice_.hw_console and console == "none"
     if sim:
         console = "ram"
-    return _emit_zephyr_console(console, sim_console=sim)
+    ram_size = _RAM_CONSOLE_MIN_SIZE
+    if console == "ram" and project is not None:
+        ram_size = max(ram_size, _app_ram_console_size(project, slice_))
+    return _emit_zephyr_console(console, sim_console=sim, ram_size=ram_size)
 
 
 # Alif "high-perf"/"high-efficiency" M55 pair -> the "M55-HP"/"M55-HE"
@@ -2068,7 +2107,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
 
     lines: list[str] = []
     lines.extend(_emit_baseline(slice_, diagnostics))
-    lines.extend(_emit_console(diagnostics, slice_))
+    lines.extend(_emit_console(diagnostics, slice_, project))
     lines.extend(_emit_soc_summary(project, slice_))
     lines.extend(_emit_som_caps(project, silicon, kconfig))
 
