@@ -1,6 +1,6 @@
 # WS6-c Phase 2+3 library-resolution consolidation (#610 §6) — report
 
-> **Status (2026-10-08): Landed** — the blocker reported below was resolved and the consolidation shipped in #771 (WS6-c, one manifest-backed library model); `library-profiles/` and `_LIBRARY_KCONFIG` no longer exist on dev.
+> **Status (2026-10-08): Landed** — the blocker reported below was resolved and the consolidation shipped in #771 (WS6-c, one manifest-backed library model); `_LIBRARY_KCONFIG` (and `_LIBRARY_WEST_MODULES`) no longer exist in any code or script on dev (only in historical reports and the CHANGELOG), whereas `metadata/library-profiles/` still exists with 8 files (a README plus the cmsis_dsp, doctest, etl, fmt, lvgl, mbedtls and nlohmann_json profile files) and is still referenced by `scripts/alp_project_emit/west_libs.py` and `metadata/schemas/library-v1.schema.json`.
 
 **STATUS: PARTIAL — landed the safe 40/40 foundation; STOPPED at a hard blocker
 before repointing reader-1 / v2 migration / retirement. Emit-parity held at
