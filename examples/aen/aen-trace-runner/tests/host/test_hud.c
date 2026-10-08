@@ -260,6 +260,7 @@ int main(void)
 			         { "A32 DL", TR_MEM_A32_DL },
 			         { "A32 bins", TR_MEM_A32_BINS },
 			         { "A32 stacks", TR_MEM_A32_STACKS },
+			         { "camera pool", TR_MEM_CAM_POOL },
 			         { "A32 gate", TR_MEM_A32_GATE },
 			         { "FB B", TR_FB_B },
 			         { "HUD", TR_HUD_FB },

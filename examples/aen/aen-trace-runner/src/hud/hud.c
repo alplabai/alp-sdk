@@ -1253,6 +1253,7 @@ unsigned tr_mem_map(tr_mem_region_t out[TR_MEM_REGIONS], uint32_t renderer_end)
 		{ "A32 DL", TR_MEM_A32_DL, (uint32_t)sizeof(tr_dl_t) },
 		{ "renderer", STUB_PAYLOAD_BASE, rend },
 		{ "A32 bins", TR_MEM_A32_BINS, TR_BANDS * TR_BIN_MAX * 2u },
+		{ "camera pool", TR_MEM_CAM_POOL, TR_MEM_CAM_POOL_SIZE },
 		{ "A32 stacks", TR_MEM_A32_STACKS, TR_MEM_A32_STACKS_SIZE },
 		{ "A32 gate", TR_MEM_A32_GATE, 0x1000u },
 		{ "FB B", TR_FB_B, TR_FB_SLOT_SIZE },

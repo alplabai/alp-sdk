@@ -1,5 +1,7 @@
 /* tests/host/test_mbox.c */
 #include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "../../src/game/state.h"
 #include "../../src/game/zone.h"
@@ -116,6 +118,27 @@ int main(void)
 	assert(tr_fw_refuse(1, TR_R3D_W + 16u) && tr_fw_refuse(1, 65520u)); /* wider than the render */
 	assert(!tr_fw_refuse(0, 0u) && !tr_fw_refuse(0, TR_R3D_W + 1u)); /* a dropped frame: no ABI */
 	f.fw       = TR_R3D_W - 16u;
+	/* start.S keeps the stack tops as .equ literals (an assembler cannot see the C macros):
+	 * they must be STACKS + 64 KiB (core 0) and the gate page (core 1's top == STACKS + 128 KiB). */
+	{
+		FILE         *s = fopen("a32/renderer/start.S", "r");
+		char          line[256];
+		unsigned long top0 = 0, top1 = 0;
+
+		assert(s != NULL);
+		while (fgets(line, sizeof(line), s) != NULL) {
+			char *p;
+
+			if ((p = strstr(line, ".equ RENDER_STACK0_TOP,")) != NULL) {
+				top0 = strtoul(strchr(p, ',') + 1, NULL, 0);
+			} else if ((p = strstr(line, ".equ RENDER_STACK1_TOP,")) != NULL) {
+				top1 = strtoul(strchr(p, ',') + 1, NULL, 0);
+			}
+		}
+		fclose(s);
+		assert(top0 == TR_MEM_A32_STACKS + 0x10000u);
+		assert(top1 == TR_MEM_A32_GATE);
+	}
 	f.rotation = 270; /* does not fit a byte: the field is 16 bits */
 	tr_mbox_publish_in(&g_mbox, &f, TR_FB_A, noop_barrier);
 	{

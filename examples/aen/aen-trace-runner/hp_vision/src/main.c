@@ -544,7 +544,9 @@ int main(void)
 	/* Start mid-range; tr_ae_camera_opened() clamps it to the live ceiling. */
 	tr_ae_init(&g_ae, (uint16_t)(g_ae_exp_max / 2u), TR_AE_GAIN_IDX_0);
 
-	bool sram1_ok = tr_sram1_ready();
+	bool    sram1_ok        = tr_sram1_ready();
+	int64_t sram1_t0_ms     = k_uptime_get();
+	bool    sram1_fail_seen = false;
 
 	if (sram1_ok) {
 		g_dbg->sram1_ready_seen         = 1u;
@@ -626,6 +628,12 @@ int main(void)
 					g_dbg->sram1_ready_at_heartbeat = g_dbg->heartbeat;
 					printk("sram1   : ready word seen (after retry) -- CAM_POOL (SRAM1) safe to "
 					       "touch\n");
+				} else if (!sram1_fail_seen && k_uptime_get() - sram1_t0_ms > 10000) {
+					/* The transient case (the A32 stub still powering SRAM1) recovers in a
+					 * retry or two; ~10 s of 200 ms retries is a real fault, said once. */
+					sram1_fail_seen = true;
+					printk("RESULT FAIL: SRAM1 ready word still not seen after ~10 s -- CAM_POOL "
+					       "(SRAM1) NOT touched\n");
 				}
 			}
 			i2c1_ok = device_is_ready(g_sensor);

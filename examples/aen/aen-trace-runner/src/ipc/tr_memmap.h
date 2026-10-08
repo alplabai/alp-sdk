@@ -131,7 +131,7 @@
                                           * binding source, this is documentation only for cross-referencing */
 #define TR_MEM_CAM_POOL_SIZE 0x80000u /* 512 KiB, CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE */
 #define TR_MEM_MBOX_PAGE_END \
-	0x02403000u /* mailbox, prof + bench blocks, renderer L2 tables (0x023, 0x027, 0x021,
+	0x02403000u /* mailbox, prof + bench blocks, renderer L2 tables (0x023, 0x027, 0x025,
                                              * 0x024 -- fix round 10, camera pool cacheable) */
 #define TR_MEM_RENDER_TTB 0x02408000u /* renderer L1 table, 16 KiB */
 #define TR_MEM_A32_IMG_END \
