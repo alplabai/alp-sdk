@@ -7,7 +7,7 @@
  * J14) + U28 (0x4E, right, J21).
  *
  * Bring-up is the sequence that made the amps audible on the reworked EVK
- * (a bench E1M-AEN803, 2026-09-15, aen-i2s-tas2563-probe) in the
+ * (E1M-AEN803 serial 2026W36-0002, 2026-09-15, aen-i2s-tas2563-probe) in the
  * order alp-sdk's aen-evk-demo phase 11 settled on:
  *   1 CC3501E bridge up (the mux controls are CC3501E GPIOs)
  *   2 I2S0 mux S = 0 (amps) -- S is NEVER driven 1: on the reworked carrier

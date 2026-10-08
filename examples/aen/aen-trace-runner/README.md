@@ -9,7 +9,7 @@ bare-metal Cortex-A32 renders the 3D scene.
 
 **Bench status:** on 2026-09-29 the release was built from this directory (HE + HP vision + A32
 renderer), packaged with `a32/release/build-release.sh` and flashed with
-`a32/release/flash-release.sh` onto an E1M-AEN803 (the bench unit) on the E1M-EVK. After each of
+`a32/release/flash-release.sh` onto an E1M-AEN803 (2026W36-0009) on the E1M-EVK. After each of
 three cold power cycles it booted standalone into the game, running 30.0 fps (300 panel flips in
 10 s) with 0 dropped frames. The A32 image built here was byte-identical to the one already
 resident on that unit.

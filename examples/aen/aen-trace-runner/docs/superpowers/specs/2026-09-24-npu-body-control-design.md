@@ -1,7 +1,7 @@
 # NPU body control — design (phase 1: host + build, no camera)
 
 **Status:** host prototype and silicon probe built; nothing here has run on silicon.
-The camera is on `the bench E1M-AEN803 EVK`, the display on `the bench E1M-AEN803 EVK`, so phase 1 is proven
+The camera is on `the E1M-AEN803 2026W36-0001 EVK`, the display on `the E1M-AEN803 2026W36-0009 EVK`, so phase 1 is proven
 without a camera. Every latency figure marked *Vela* is Vela's estimate, not a measurement.
 `probe/npu` exists to replace those estimates with DWT numbers from the HP.
 

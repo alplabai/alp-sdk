@@ -77,13 +77,13 @@ Build of record (2026-09-24, host):
 
 The Vela'd model inside the payload is 2,429,520 B, crc32 `46f36a1a`.
 
-## Run: `the bench E1M-AEN803 EVK` (a bench E1M-AEN803), Flow D
+## Run: `the E1M-AEN803 2026W36-0009 EVK` (E1M-AEN803 2026W36-0009), Flow D
 
 Nothing on the board may be moved. The HP boots only through an ATOC; it cannot be loaded
 over the debugger. This flow replaces the release ATOC, which is why step 4 exists.
 
 ```sh
-export LG_PLACE=<your-labgrid-place> LG_COORDINATOR=<coordinator> ZEPHYR_SDK_INSTALL_DIR=$ZEPHYR_SDK_INSTALL_DIR/gnu
+export LG_PLACE=the E1M-AEN803 2026W36-0009 EVK LG_COORDINATOR=<coordinator> ZEPHYR_SDK_INSTALL_DIR=$ZEPHYR_SDK_INSTALL_DIR/gnu
 export SETOOLS_DIR=/tmp/tr-npu-probe/setools
 labgrid-client -p <place> acquire
 cd examples/aen/aen-trace-runner
@@ -100,7 +100,7 @@ probe/npu/flash-probe.sh restore /tmp/tr-npu-probe/mram-before.bin --atoc-unquer
 #    then a DPS cold cycle; the release game must come back by itself (HE "m55 boot", A32 RUNNING).
 ```
 
-`--atoc-unqueryable` applies because the bench unit has no SE-UART (its SE-UART path resolves to
+`--atoc-unqueryable` applies because 2026W36-0009 has no SE-UART (its SE-UART path resolves to
 "None"). It is alp-sdk's Flow D acknowledgement for that case (`bench_flowd_atoc_guard`).
 Use `--replace-atoc` instead on a place whose SE-UART is wired.
 

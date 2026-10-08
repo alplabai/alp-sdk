@@ -1,7 +1,7 @@
 /* probe/camera/src/main.c
  * SPDX-License-Identifier: Apache-2.0
  *
- * DIAGNOSTIC, NOT PRODUCT CODE. a bench E1M-AEN803 fails
+ * DIAGNOSTIC, NOT PRODUCT CODE. E1M-AEN803 2026W36-0009 fails
  * alp_camera_open() with ALP_ERR_IO, reproducibly. alp-sdk-lcd's
  * src/backends/camera/zephyr_video.c (z_open(), ~line 200) calls
  * video_get_caps() (~line 228), video_set_format() (~line 250) and
@@ -242,7 +242,7 @@ static int report(const char *step, int rc)
 
 int main(void)
 {
-	printk("\n=== camprobe: camera bring-up diagnostic, a bench E1M-AEN803 ===\n");
+	printk("\n=== camprobe: camera bring-up diagnostic, E1M-AEN803 2026W36-0009 ===\n");
 
 	/* --- Step 1: identify from devicetree, readiness ------------------- */
 	printk("[camprobe] sensor: %s @ 0x%02x on bus %s\n",

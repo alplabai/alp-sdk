@@ -13,7 +13,7 @@ table at every transition (it is the recovery map after a context reset).
    aen803 verified in CMakeCache); images/GIF for a critical look.
 3. **Review** — independent reviewer on `BASE..HEAD`. Findings -> fix round
    (same implementor) -> scoped re-review. Repeat until clean.
-4. **Bench** — RAM-run on a bench E1M-AEN803 (2026W36-0009): flip histogram,
+4. **Bench** — RAM-run on E1M-AEN803 2026W36-0009 (2026W36-0009): flip histogram,
    underruns, per-core frame ms, prof where cost changed. Numbers appended to
    docs/2026-09-22-measurements.md.
 5. **Maintainer look** — shown on the panel; feedback -> back to step 2.

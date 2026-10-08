@@ -19,7 +19,7 @@
  * SCANNING OUT.  With one buffer, tr_render_frame()'s erase pass is therefore
  * visible on the glass: for the width of that pass every moved sprite is gone,
  * and any scanout crossing it shows a frame with holes in it.  That is the
- * flicker the maintainer saw on a bench E1M-AEN803.
+ * flicker the maintainer saw on E1M-AEN803 2026W36-0009.
  *
  * The fork's CDC200 driver already has the missing piece as a device-specific
  * extension (cdc200_swap_fb / cdc200_get_framebuffer / restore_fb), so this
@@ -66,7 +66,7 @@ static const struct device *g_cdc;
  * Double buffering is OFF by default until SRAM1 is proven powered.
  *
  * "Wholly unused" above is true of the linker map and false of the silicon.
- * On a bench E1M-AEN803, measured cold with no image loaded, SRAM1 does
+ * On E1M-AEN803 2026W36-0009, measured cold with no image loaded, SRAM1 does
  * not answer at all: 0x023FFFF0 (the top of SRAM0) reads back, 0x02400000
  * returns "Failed to read memory" to the DEBUGGER as well as bus-faulting the
  * core -- so it is unpowered, not merely unmapped by the MPU. With this on,

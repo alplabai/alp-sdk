@@ -74,7 +74,7 @@ IMX296's 24.0 dB cap is). AWB/CCM stay on the stock ARX3A0 defaults, same as
 IMX296 — colour is NOT calibrated (bench run 332 reports a green cast with
 AWB off).
 
-**Bench run 332** (a bench E1M-AEN803, AE-on scenario): 60 frames, AE
+**Bench run 332** (E1M-AEN803 2026W36-0001, AE-on scenario): 60 frames, AE
 converged (`ae_stable=1` at frame 50, Y mean 152), ISP output YUV420
 1280x960 via the crop above, scene complete/straight/centred — the first
 silicon confirmation of `out_form_rect`'s `left`/`top` crop offsets working

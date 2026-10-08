@@ -49,7 +49,7 @@ scripts/bench/aen/openocd-ram-run.sh examples/aen/aen-trace-runner/build/fillrat
 (`hp` is the script's default core if omitted -- pass it explicitly anyway so the command matches the
 image being flashed.) Resolve the board's USB path fresh from `labgrid-client -p <place> show` per the
 script's own header; do not reuse a path from a doc or a previous run. Board under test:
-**a bench E1M-AEN803**. Read `ram_console_buf` over SWD after each run -- this board's console FTDI
+**E1M-AEN803 2026W36-0009**. Read `ram_console_buf` over SWD after each run -- this board's console FTDI
 passes zero bytes, so a UART capture will show nothing.
 
 ## Reading the output

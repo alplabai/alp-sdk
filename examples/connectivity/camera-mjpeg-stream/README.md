@@ -60,7 +60,7 @@ sensor mode also newly supports 30 fps (`OV5647_HTS_1280X960_BINNED`);
 this example still requests 15 fps by default, pending a bench pass to
 confirm SRAM0/JPEG/send-path headroom at 30 fps. Bench runs 242/243 below
 were measured under Stage A's crop mode; this driver-mode change (#2286)
-has since been re-benched on a bench E1M-AEN803, full-FOV 2x2-binned
+has since been re-benched on E1M-AEN803 2026W36-0001, full-FOV 2x2-binned
 1280x960 at 15 fps: delivered rate depends on JPEG size — 15.00 fps at
 ~35 KB frames in a daylight scene, 13.80 fps at ~39 KB (~0.54 MB/s) after
 the send-window fix below, and 7.50 fps at ~109-133 KB frames in earlier
@@ -101,7 +101,7 @@ line (fps, encoded/failed/retried counts, JPEG size min/avg/max, encode
 + send ms) to make the next bench run's numbers easy to read off the
 console.
 
-Bench run 243 (a bench E1M-AEN803, re-ran against these fixes): 0
+Bench run 243 (E1M-AEN803 2026W36-0001, re-ran against these fixes): 0
 CSI/IPI fatals, 0 JPEG buffer-full, board encodes ~15 fps capture/encode
 (encode ~2 ms), JPEG 131-135 KB at quality 60 against the 163,840 B cap —
 the encode-retry ladder never triggered (0 retries; every frame encoded
@@ -137,7 +137,7 @@ west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
 # flash + run per docs/aen-bench-bringup.md.
 ```
 
-Bench run 312 (a bench E1M-AEN803, night room) confirmed the pipeline
+Bench run 312 (E1M-AEN803 2026W36-0001, night room) confirmed the pipeline
 end to end — DHCP lease obtained, `/stream` and `/snapshot.jpg` both served
 a valid 1280x960 JPEG — but also found AE running gain to the GAIN
 register's full 48 dB ceiling in the dim scene blew the 160 KiB JPEG
@@ -233,7 +233,7 @@ west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
     "-DCONFIG_CAMERA_MJPEG_STREAM_FPS=30"
 ```
 
-**Bench run 333** (a bench E1M-AEN803): 1280x960, app stats `fps=30
+**Bench run 333** (E1M-AEN803 2026W36-0001): 1280x960, app stats `fps=30
 fail=0 retry=0`, one HTTP client measured 29.99 fps / 772.7 KB/s delivered
 over a 30 s window, ~26.3 KB JPEGs, a mild lavender/cyan colour cast (stock
 AWB, expected — no IMX335 colour calibration exists). Only error-class log
@@ -367,7 +367,7 @@ used a simpler scene with a smaller mean frame (14.7 KB) than those
 runs.
 
 **`CONFIG_ALP_SDK_FAST_MEMCPY` same-scene A/B** (E1M-AEN803, module
-the bench unit, **640×480 @ 30 fps**, camera-bound, against the
+2026W36-0001, **640×480 @ 30 fps**, camera-bound, against the
 buffer-sizing-only baseline): A1 (memcpy ON) 30.03 fps / 1,089,750 B/s,
 B1 (memcpy OFF) 30.03 fps / 1,092,219 B/s, A2 (memcpy ON) 30.03 fps /
 1,088,302 B/s, 0 drops in every leg -- **no measurable memcpy gain** in

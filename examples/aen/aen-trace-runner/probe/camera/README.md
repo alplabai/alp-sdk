@@ -1,6 +1,6 @@
 # camera probe
 
-DIAGNOSTIC, NOT PRODUCT CODE. Camera open fails `ALP_ERR_IO` on **a bench E1M-AEN803**,
+DIAGNOSTIC, NOT PRODUCT CODE. Camera open fails `ALP_ERR_IO` on **E1M-AEN803 2026W36-0009**,
 reproducibly. `<alp/camera.h>`'s Zephyr backend (`alp-sdk-lcd/src/backends/camera/zephyr_video.c`,
 `z_open()`) collapses every failure from `video_get_caps()`, `video_set_format()` and
 `video_enqueue()` into `ALP_ERR_IO` by design (`_errno_to_alp()` maps any errno it does not
@@ -47,7 +47,7 @@ scripts/bench/aen/openocd-ram-run.sh <build-dir> he
 
 Resolve the board's USB path fresh from `labgrid-client -p <place> show` per the script's own
 header; do not reuse a path from a doc or a previous run. Board under test: **E1M-AEN803
-the bench unit**. Read `ram_console_buf` over SWD after the run -- this board's console FTDI passes
+2026W36-0009**. Read `ram_console_buf` over SWD after the run -- this board's console FTDI passes
 zero bytes, so a UART capture will show nothing (`prj.conf` sets `CONFIG_RAM_CONSOLE=y` /
 `CONFIG_UART_CONSOLE=n` for exactly this reason).
 
@@ -56,7 +56,7 @@ zero bytes, so a UART capture will show nothing (`prj.conf` sets `CONFIG_RAM_CON
 Every line is prefixed `[camprobe]` except the final `RESULT:` line. In order:
 
 ```
-=== camprobe: camera bring-up diagnostic, a bench E1M-AEN803 ===
+=== camprobe: camera bring-up diagnostic, E1M-AEN803 2026W36-0009 ===
 sensor: ov9281@60 @ 0x60 on bus i2c@...
 device_is_ready(sensor) = 0/1
 device_is_ready(video)  = 0/1

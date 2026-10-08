@@ -102,7 +102,7 @@ comment) with the `qdec` child on it, wires `pinctrl_qec0`, and aliases
 
 ## Decode status (hardware path) — MEASURED, not a decoder
 
-**2026-09-13, attended, the bench E1M-AEN803: 120000 unaliased `CNTR`
+**2026-09-13, attended, E1M-AEN803 `2026W36-0002`: 120000 unaliased `CNTR`
 reads over 25 s of continuous hand motion.** Up `+2385`, down `-1731`, net
 `+654`, unwrapped range `-33..+710`, 293 of 734 non-zero steps `|step| >= 2`
 inside a single 0.21 ms sample window. For a genuine quadrature pair, this
@@ -202,7 +202,7 @@ status" above and "Software decoder" for the path that might.
 ## Status
 
 **Root cause identified AND measured resolved-differently than hoped
-(2026-09-13, same day, attended, the bench E1M-AEN803).** Three runs,
+(2026-09-13, same day, attended, E1M-AEN803 `2026W36-0002`).** Three runs,
 in order:
 
 1. **`RESULT SKIPPED`, pre-fix build.** All 200 samples read `0 deg`,

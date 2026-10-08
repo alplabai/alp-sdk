@@ -37,7 +37,7 @@
 #define TR_TILT_TAKEOVER 0
 #endif
 
-/* Steering sign for the board's mounting: on a bench E1M-AEN803 (on the EVK
+/* Steering sign for the board's mounting: on E1M-AEN803 2026W36-0009 (on the EVK
  * carrier) the BMI323 x axis reads POSITIVE for a tilt to the LEFT, so a
  * positive x_q8 must move the runner left (lane_delta -1). Only the lane
  * direction flips; the engage / level / dead-zone logic uses |x| and is

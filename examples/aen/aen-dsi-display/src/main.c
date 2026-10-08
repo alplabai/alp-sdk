@@ -37,7 +37,7 @@
  * changes -- so the lane rate is fixed at 40 x 24 / 2 = 480 Mbps/lane
  * (measured ~483.6 Mbps).  pixel-fmt-l1 = "rgb-565" here halves the
  * framebuffer and the per-row fill cost versus rgb-888; both were verified
- * on glass at 40 MHz on a bench E1M-AEN803: RGB888 at its earlier
+ * on glass at 40 MHz on E1M-AEN803 2026W36-0009: RGB888 at its earlier
  * framebuffer placement, 2026-09-21; RGB565 at the shipped placement
  * (`lcd_fb` at 0x02200000) on 2026-09-22, where the CDC L1 framebuffer
  * register (0x49031134) read back 0x02200000 on every one of 15 boots,

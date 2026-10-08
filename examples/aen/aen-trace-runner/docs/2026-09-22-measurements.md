@@ -1,6 +1,6 @@
 # Silicon measurements — 2026-09-22
 
-Unit: a bench E1M-AEN803. Core: M55-HE @ 160 MHz, dcache off, RAM-run (ITCM).
+Unit: E1M-AEN803 2026W36-0009. Core: M55-HE @ 160 MHz, dcache off, RAM-run (ITCM).
 Shield set for every game image below: `e1m_evk_rk055hdmipi4ma0` only (no camera).
 Panel: 720x1280 RGB565, 40.0 Hz refresh (25.0 ms frame).
 Read over the AHB-AP (mem_ap, no halt) from exported counters; 10 s windows timed on the host.
@@ -111,7 +111,7 @@ Frame rate went 17-21 -> 22-25 flips/s, not 2.5x: the loop is now paced by TICK_
 beating against the 25.0 ms panel frame, not by render. Render at ~9 ms leaves ~16 ms of a
 40 Hz frame for the perspective renderer on one core.
 
-## Cortex-A32 bare metal (BL33 under TF-A), a bench E1M-AEN803
+## Cortex-A32 bare metal (BL33 under TF-A), E1M-AEN803 2026W36-0009
 
 Probe: trace-runner feat/a32-probe a8e39aa, `a32/probe/a32_probe.bin` (2,488 B) in the A32_APP slot
 (MRAM 0x80020000) of the proven A32 ATOC; TF-A sp_min erets to it in NS SVC. Single core (A32_0),
