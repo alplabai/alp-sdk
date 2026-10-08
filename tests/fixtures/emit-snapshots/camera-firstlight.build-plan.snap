@@ -5,7 +5,7 @@
   "generatedBy": "scripts/alp_orchestrate.py",
   "sdkVersion": "0.17.0-rc1",
   "sdkCommit": "<SDK_COMMIT>",
-  "boardYaml": "examples/aen/aen-camera-firstlight/board.yaml",
+  "boardYaml": "tests/fixtures/cameras-select/board.yaml",
   "sku": "E1M-AEN803",
   "buildRoot": "build",
   "executionPolicy": {
@@ -18,7 +18,7 @@
       "coreId": "m55_he",
       "backend": "zephyr",
       "buildDir": "build/m55_he-zephyr",
-      "appDir": "${PROJECT_ROOT}/src",
+      "appDir": "${SDK_ROOT}/examples/aen/aen-camera-firstlight",
       "configArtefacts": [
         {
           "path": "build/m55_he-zephyr/alp.conf",
@@ -66,7 +66,7 @@
           "build",
           "-b",
           "alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he",
-          "${PROJECT_ROOT}",
+          "${SDK_ROOT}/examples/aen/aen-camera-firstlight",
           "--",
           "-DPython3_EXECUTABLE=${PYTHON}",
           "-DEXTRA_CONF_FILE=${PROJECT_ROOT}/build/m55_he-zephyr/alp.conf",

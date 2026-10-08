@@ -1,4 +1,5 @@
-# board.yaml -- aen-camera-firstlight: pick the camera module here.
+# board.yaml -- `cameras:` selects the camera module (emit-snapshot + build-proof
+# fixture; builds the examples/aen/aen-camera-firstlight app).
 #
 # `cameras:` is the one line that selects the camera.  The build resolver turns
 # it into `-DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"` for the Zephyr core
@@ -16,7 +17,7 @@ cores:
   a32_cluster:
     os: "off"
   m55_he:
-    app: ./src
+    app: ../../../examples/aen/aen-camera-firstlight
 
 cameras:
   - { connector: CAM0, module: innomaker_cam_ov9281 }

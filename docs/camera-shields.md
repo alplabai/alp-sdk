@@ -68,7 +68,7 @@ build plan emits the same `-DSHIELD=` for the Zephyr core -- carrier shield
 from the board preset's `camera_connectors.CAM0.zephyr_shields`, camera shield
 from the module's `zephyr_shield:` -- or `ALP_CAMERA_CAM0` for a Linux core.
 See [board-config-schema.md](board-config-schema.md#cameras-and-camera_connectors-camera-modules)
-and `examples/aen/aen-camera-firstlight/board.yaml`.  A hand-written
+and `tests/fixtures/cameras-select/board.yaml`.  A hand-written
 `-DSHIELD` still works (and is what the twister scenarios use).
 
 ## Driver: OV5647 (`zephyr/drivers/video/ov5647.c`)

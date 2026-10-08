@@ -13,7 +13,7 @@ drives the build. A Zephyr core running a customer app gets one
   command with a `camera-select-failed` plan warning.
 - `validate_metadata.py` now checks that every `zephyr_shield` /
   `zephyr_shields` entry is a directory under `zephyr/boards/shields/`.
-- New `examples/aen/aen-camera-firstlight/board.yaml` selects the OV9281 this way.
+- New fixture `tests/fixtures/cameras-select/board.yaml` pins the AEN OV9281 plan in the emit snapshots.
 
 tan-cli's planner mirror must resync `alp_orchestrate/orchestrator.py`,
 `buildplan.py`, `kconfig.py` and the new `cameras.py`.
