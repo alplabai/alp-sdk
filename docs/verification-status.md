@@ -158,9 +158,10 @@ against the v0.8.0 evidence (see those rows above).
 
 This pass adds **v0.11.0** through **v0.15.0** (five more tagged
 releases).  After this pass the ledger's newest per-release section is
-**v0.15.0** while `metadata/sdk_version.yaml` reports **0.16.0** and
-`CHANGELOG.md`'s `[Unreleased] - v0.17.0 candidate` section is the next
-one out (already partially ledgered above, under "v0.17.0 candidate").
+**v0.15.0** while `metadata/sdk_version.yaml` reports **0.17.0-rc1** and
+`CHANGELOG.md`'s `## [v0.17.0] - 2026-10-08 (release candidate: v0.17.0-rc1)`
+section is the next one out (already partially ledgered below, under
+"## v0.17.0-rc1 (tagged 2026-10-08) — RPC link liveness (2026-09)").
 **v0.10.0 and v0.16.0 remain un-audited** -- down from the original
 seven-release gap to two -- tracked as remaining scope on issue #1893.
 
@@ -349,7 +350,7 @@ yet against silicon:
 ## v0.8.0 — E1M-AEN801 (Alif Ensemble E8) first full bench bring-up
 
 First full bench bring-up of the `E1M-AEN801` (Alif Ensemble E8,
-Cortex-M55-HE) on real silicon (alplab-gw), flashed over the new Flow D
+Cortex-M55-HE) on real silicon (the lab bench gateway), flashed over the new Flow D
 (J-Link direct MRAM burn, part-number device profile
 `AE822FA0E5597LS0_M55_HE`).  Captured here as a structured ledger row
 per issue #1893, citing `docs/aen-bench-bringup.md` -- the authoritative
@@ -363,8 +364,8 @@ reconciled v0.1.0 I²C/SPI/UART/GPIO rows above for that distinction.
 
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
-| AEN801 peripheral matrix — GPIO | `examples/aen/aen-gpio-bench` (`gpio_dw`) | ✅ verified | Full P8_0 pad path proven at pad level, not just DDR/DR controller-register readback: an infinite-loop `blink` confirmed blinking by eye, with `EXT_PORTA` following `SWPORTA_DR` 12/12 while it ran | `docs/aen-bench-bringup.md` §1 GPIO row -- the original DDR/DR+`EXT_PORTA` PASS criterion could never independently fail (`EXT_PORTA` mirrors `SWPORTA_DR` for an output-direction pin, Synopsys DW_apb_gpio databook) and proved nothing beyond the controller-register path; a same-day `GPIO_CTRL_CKEN` theory for an earlier "dark pad" was refuted on the bench, and this pad-level optical re-proof superseded it, 2026-07-27, real E8 silicon, alplab-gw | v0.8 |
-| AEN801 peripheral matrix — UART | `examples/aen/aen-uart-ns16550-loopback` | ✅ verified | `uart3` (ns16550) TX/RX loopback byte-compares clean | `docs/aen-bench-bringup.md` §1 "What is validated on silicon" table, real E8 silicon, alplab-gw, 2026-06-24 | v0.8 |
+| AEN801 peripheral matrix — GPIO | `examples/aen/aen-gpio-bench` (`gpio_dw`) | ✅ verified | Full P8_0 pad path proven at pad level, not just DDR/DR controller-register readback: an infinite-loop `blink` confirmed blinking by eye, with `EXT_PORTA` following `SWPORTA_DR` 12/12 while it ran | `docs/aen-bench-bringup.md` §1 GPIO row -- the original DDR/DR+`EXT_PORTA` PASS criterion could never independently fail (`EXT_PORTA` mirrors `SWPORTA_DR` for an output-direction pin, Synopsys DW_apb_gpio databook) and proved nothing beyond the controller-register path; a same-day `GPIO_CTRL_CKEN` theory for an earlier "dark pad" was refuted on the bench, and this pad-level optical re-proof superseded it, 2026-07-27, real E8 silicon, the lab bench gateway | v0.8 |
+| AEN801 peripheral matrix — UART | `examples/aen/aen-uart-ns16550-loopback` | ✅ verified | `uart3` (ns16550) TX/RX loopback byte-compares clean | `docs/aen-bench-bringup.md` §1 "What is validated on silicon" table, real E8 silicon, the lab bench gateway, 2026-06-24 | v0.8 |
 | AEN801 peripheral matrix — PWM | `examples/aen/aen-pwm-utimer-pwmleds` (UTIMER3) | ✅ verified | `pwm_set_cycles` on UTIMER3/pwm3 register-readback verified | same | v0.8 |
 | AEN801 peripheral matrix — SPI | `examples/aen/aen-spi-regcheck` (DWC_ssi) | ✅ verified | `spi0` loopback via `spi_transceive()` completes clean | same | v0.8 |
 | AEN801 peripheral matrix — Counter | `examples/aen/aen-counter-utimer-regcheck` (utimer0) | ✅ verified | utimer0-backed counter exercised on real silicon | same | v0.8 |
@@ -380,6 +381,8 @@ reconciled v0.1.0 I²C/SPI/UART/GPIO rows above for that distinction.
 | AEN801 peripheral matrix — QEnc | quadrature counter | 🟡 partial | Driver reads clean but the count stays static -- **hardware-gated**: no physical encoder is attached to spin it, not a code/Flow-D bug | same | v0.8 |
 | AEN801 peripheral matrix — SD card | DWC SDHC | 🟡 partial | 4-bit SD read proven 2026-09-15 at 25 MHz, after a U38 solder fix, on E1M-AEN803 serial 2026W36-0002 (U38/U39/U46 hand-reworked to 3257-type) with the unmerged enable path (#2122, clock gate) plus the unmerged `test/2051-sdhc-enable-on-reworked-mux` branch (ADMA address translation, system RAM in SRAM0); dev's SD path unverified until that lands. EN=IO20, CC3501E-side on both hw revisions; SEL=IO21, CC3501E-side on r1 only -- unrouted/hardware-strapped on r2 | same | v0.8 |
 | AEN Ethernet (dp83825 PHY + `eth_dwmac_alif_ensemble` MAC glue) | `zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c` + `metadata/chips/dp83825.yaml` | ✅ verified | DHCP lease acquired and confirmed server-side (dnsmasq lease + ARP REACHABLE); root cause of the earlier no-link was DMA-visible buffers placed in DTCM instead of SRAM0 | `docs/aen-bench-bringup.md` §1 Ethernet row, `examples/aen/aen-ethernet-link` RESULT PASS, real E8 silicon, 2026-06-24; managed-MDIO PHY address corrected `@1`→`@0` against a live MDIO scan (`CHANGELOG.md` [v0.16.0], #1244) | v0.8 |
+
+Note: the `test/u46-i2s-tas2563-on-reworked-mux` branch and the `examples/aen/aen-i2s-tas2563-probe` example cited in the rows above are not in this tree (`examples/aen/` has no such directory on `dev`); the evidence they produced is recorded here as history, and the probe source lives on two branches, `origin/test/u46-i2s-tas2563-on-reworked-mux` (`094570cc4`, cited by the PDM-mics row) and `origin/test/2179-isr-capture` (`e1ed4881a`, cited by the DesignWare I2S channel-enable row under `v0.17.0-rc1`, which also cites the `PROBE_RX_TEARDOWN` mode cherry-picked from it); neither is merged.
 
 ## v0.9.0 — portable-surface consistency batch (tagged 2026-07-06)
 
@@ -466,7 +469,7 @@ link-clean but have not been run against real hardware:
 | Yocto `<alp/storage.h>` real backend (mmcblk / mtd) | `src/backends/storage/yocto_drv.c` | 🟡 code-complete, link-unverified | `alp_storage_get_info`/`read`/`write`/`erase` round-trip against a real `/dev/mmcblkN` or `/dev/mtdN` | No bench evidence in-tree -- `CHANGELOG.md` [v0.15.0]; `write`/`erase` additionally gated behind `allow_unsafe_write` (default false) | v0.15 |
 | Yocto `<alp/usb.h>` host backend | `src/backends/usb/yocto_drv.c` | 🟡 code-complete, link-unverified | `alp_usb_host_open` enumerates real root hubs under `/sys/bus/usb/devices` on a Yocto target | No bench evidence in-tree -- `CHANGELOG.md` [v0.15.0]; host enable/disable and the device/gadget role are honest `ALP_ERR_NOSUPPORT`, not faked | v0.15 |
 
-## v0.17.0 candidate — RPC link liveness (2026-09)
+## v0.17.0-rc1 (tagged 2026-10-08) — RPC link liveness (2026-09)
 
 `<alp/rpc.h>` link-liveness signal (issue #1643): a far core resetting or
 crashing used to be invisible to `alp_rpc_send()`.
