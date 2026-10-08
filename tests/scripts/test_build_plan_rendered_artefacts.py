@@ -147,3 +147,27 @@ def test_rendered_artefacts_follow_the_primary_in_fixed_order() -> None:
                 continue
             names = [a["path"].rsplit("/", 1)[-1] for a in sl["configArtefacts"]]
             assert names[-4:] == tail, (board, sl["coreId"], names)
+
+
+def test_unrecognised_sku_downgrades_hw_info_to_a_warning(monkeypatch) -> None:
+    """A SKU outside the production families has no family for the header:
+    the plan warns and omits `alp_hw_info_build.h`, west fragment unaffected."""
+    import alp_project_emit.hw_info as hw_info
+
+    def no_family(sku: str) -> str:
+        raise ValueError(f"unrecognised SoM SKU pattern: {sku}")
+
+    monkeypatch.setattr(hw_info, "_sku_family", no_family)
+    plan = _plan(REPO / "examples/multicore/rpmsg-aen/board.yaml")
+    jsonschema.Draft202012Validator(
+        json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))).validate(plan)
+    warned = {w["coreId"] for w in plan["warnings"]
+              if w["code"] == "hw-info-unavailable"}
+    carriers = {sl["coreId"] for sl in plan["slices"]
+                if sl["backend"] in ("zephyr", "baremetal")}
+    assert carriers and warned == carriers
+    for sl in plan["slices"]:
+        names = {a["path"].rsplit("/", 1)[-1] for a in sl["configArtefacts"]}
+        assert "alp_hw_info_build.h" not in names
+        if sl["backend"] in ("zephyr", "baremetal"):
+            assert "alp-west-libs.yml" in names

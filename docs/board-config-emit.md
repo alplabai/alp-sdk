@@ -94,8 +94,10 @@ byte-identical to the standalone render because both call one shared helper, so
 files: no build command, CMake file or Kconfig in this SDK reads them
 (`ALP_HW_BUILD_*` for the firmware still comes from the build itself).
 `alp.overlay` is absent, with a `dts-overlay-unavailable` warning, on a board
-with no header; the other three are always present, and a slice with no
-libraries gets a well-formed empty `alp-west-libs.yml`.
+with no header, and `alp_hw_info_build.h` is absent, with a `hw-info-unavailable`
+warning, for a SKU outside the production families; `cmake-args.txt` and
+`alp-west-libs.yml` are always present (a slice with no libraries gets a
+well-formed empty `alp-west-libs.yml`).
 
 ### Plain CMake (baremetal / yocto) -- generated `-D` args (reference / inspection)
 

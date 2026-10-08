@@ -204,6 +204,13 @@ class DtsOverlayUnavailable(OrchestratorError):
     warning; every other `OrchestratorError` still fails the plan."""
 
 
+class HwInfoUnavailable(OrchestratorError):
+    """The slice's SKU is outside the production families, so there is no
+    family to put in `ALP_HW_BUILD_SOM_FAMILY`. Downgraded by
+    `emit_build_plan` to a `hw-info-unavailable` warning, like
+    `DtsOverlayUnavailable`; any other failure still fails the plan."""
+
+
 def _v1_shaped_project(project: BoardProject) -> dict[str, Any]:
     """The legacy `board:`-wrapper dict the project-wide emitters read.
 
@@ -365,7 +372,12 @@ def _slice_hw_info_artefact(
     """
     if slice_.os not in _DTS_OVERLAY_OS:
         return None
-    return (HW_INFO_ARTEFACT, _slice_hw_info_h(project, slice_))
+    try:
+        return (HW_INFO_ARTEFACT, _slice_hw_info_h(project, slice_))
+    except ValueError as exc:
+        # `_sku_family` is the only ValueError source; the standalone emit
+        # still raises it (an unrecognised SKU is not a production board).
+        raise HwInfoUnavailable(str(exc)) from None
 
 
 def _slice_west_libs_artefact(
@@ -850,7 +862,15 @@ def emit_build_plan(
                                 f"artefact -- {exc}"),
                 })
             extras.append(_slice_cmake_args_artefact(project, slice_))
-            extras.append(_slice_hw_info_artefact(project, slice_))
+            try:
+                extras.append(_slice_hw_info_artefact(project, slice_))
+            except HwInfoUnavailable as exc:
+                warnings.append({
+                    "code":    "hw-info-unavailable",
+                    "coreId":  slice_.core_id,
+                    "message": (f"core '{slice_.core_id}': no "
+                                f"`alp_hw_info_build.h` artefact -- {exc}"),
+                })
             extras.append(_slice_west_libs_artefact(project, slice_))
         for extra in extras:
             if extra is not None:

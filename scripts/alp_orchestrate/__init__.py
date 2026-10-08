@@ -147,6 +147,7 @@ from .buildplan import (  # noqa: E402
     _slice_west_libs_artefact,  # noqa: F401  (re-export: tests)
     _v1_shaped_project,  # noqa: F401  (re-export: alp_project)
     DtsOverlayUnavailable,  # noqa: F401  (re-export: tests)
+    HwInfoUnavailable,  # noqa: F401  (re-export: tests)
     emit_build_plan,  # noqa: F401  (re-export: cli + tests)
 )
 
