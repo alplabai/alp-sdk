@@ -53,9 +53,9 @@ Three questions answered side-by-side:
 2. **How fast?**  The on-screen latency strip prints per-invoke
    microseconds.  Flip `som.sku` in `board.yaml` between E8, E6,
    and E4 AEN SKUs to compare the preferred NPU path.
-3. **Does it run portably?**  Re-target to a V2N SoM (TFLM CPU kernels on
-   the M33) by changing one line in `board.yaml`.  Same model file; the
-   loader emits the right Kconfig set and Vela's
+3. **Does it run portably?**  Re-target between AEN SKUs (E8 with
+   Ethos-U85 + U55, or a U55-only E3 / E5) by changing one line in
+   `board.yaml`.  The loader emits the matching Kconfig set and Vela's
    `--accelerator-config` adapts the binary.
 
 ## Hardware needed

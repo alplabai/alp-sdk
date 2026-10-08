@@ -104,7 +104,7 @@ are the *only* allowed source of divergence:
 | -------------------------------------------- | ------------------------------------------------------ |
 | `CONFIG_ALP_SOC_ALIF_ENSEMBLE_{E3..E8}=y`    | one variant per AEN SKU                                |
 | `CONFIG_ALP_SDK_CHIP_<NAME>=y`               | per on-module / on-board population                  |
-| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}=y` | per silicon NPU population (G-1 selector)   |
+| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U85}=y` | per silicon NPU population (G-1 selector)   |
 | `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_{NEON,HELIUM,REF}=y` | per CPU class on the slice (G-2 selector)   |
 
 The board-populated chips (`BMI323`, `LSM6DSO`, `TCAL9538`,

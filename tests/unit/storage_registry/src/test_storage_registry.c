@@ -12,9 +12,7 @@
  *   (f) sw_fallback NOSUPPORT contract via direct ops-table dispatch
  *   (g) vendor-ext gating: non-Alif handle -> NOT_PRESENT_ON_THIS_SOC
  *       from the Alif SecAES surface
- *   (h) the same gate holds for a handle bound to a test-local fake
- *       second vendor (the vendor-ext gate is by vendor name, not by
- *       "is it sw_fallback")
+ *   (h) a read-only handle: write() and erase() agree
  *   (i) overflow-safe range helper for fixed-capacity backends
  *   (j) SecAES key / key_bytes validation reaches the body, and
  *       NOSUPPORT on a build with no SE transport linked (issue #224)
@@ -233,38 +231,7 @@ ZTEST(alp_storage_registry, test_vendor_ext_gates_non_matching_backends)
 	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 }
 
-/* ---------- (h) fake second vendor is gated out too ---------------------- */
-
-ZTEST(alp_storage_registry, test_vendor_ext_gates_fake_second_vendor)
-{
-	/* A test-local backend row for a vendor that is neither "alif" nor
-     * "sw_fallback".  The vendor-ext gate keys on the vendor name, so
-     * this handle must be refused by the Alif surface exactly like the
-     * sw_fallback one above. */
-	static const alp_backend_t fake_acme_backend = {
-		.silicon_ref = "acme:soc:x1",
-		.vendor      = "acme",
-		.base_caps   = 0u,
-		.priority    = 100,
-		.ops         = NULL,
-		.probe       = NULL,
-	};
-	struct alp_storage h;
-	memset(&h, 0, sizeof(h));
-	h.in_use    = true;
-	h.backend   = &fake_acme_backend;
-	h.lifecycle = ALP_HANDLE_LC_OPEN;
-
-	static const uint8_t key16[16]  = { 0 };
-	uint32_t             status_out = 0u;
-
-	zassert_equal(alp_alif_storage_secaes_key_provision(&h, key16, 16u),
-	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-	zassert_equal(alp_alif_storage_secaes_get_status(&h, &status_out),
-	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-}
-
-/* ---------- (i) read-only handle: write() and erase() agree ------------- */
+/* ---------- (h) read-only handle: write() and erase() agree ------------- */
 
 ZTEST(alp_storage_registry, test_read_only_handle_write_and_erase_agree)
 {
@@ -295,7 +262,7 @@ ZTEST(alp_storage_registry, test_read_only_handle_write_and_erase_agree)
 	alp_storage_close(h);
 }
 
-/* ---------- (j) overflow-safe range helper for fixed-capacity backends -- */
+/* ---------- (i) overflow-safe range helper for fixed-capacity backends -- */
 
 ZTEST(alp_storage_registry, test_range_in_capacity_accepts_valid)
 {

@@ -864,24 +864,6 @@
       "issue": 2781,
       "reason": "E1M-NX9101 / NXP i.MX 93 was the only SoC with an LCDIF parallel-RGB display controller; the capability was removed with it.",
       "replacement": null
-    },
-    {
-      "header": "alp/cap.h",
-      "category": "macro",
-      "symbol": "ALP_CAP_ID_HW_LCDIF",
-      "release": "v0.17.0",
-      "issue": 2781,
-      "reason": "E1M-NX9101 / NXP i.MX 93 was the only SoC with an LCDIF parallel-RGB display controller; the capability was removed with it. (an enumerator of alp_cap_id_t; later enumerators shift down by one.)",
-      "replacement": null
-    },
-    {
-      "header": "alp/mproc.h",
-      "category": "macro",
-      "symbol": "ALP_CORE_M33",
-      "release": "v0.17.0",
-      "issue": 2781,
-      "reason": "ALP_CORE_M33 addressed the Cortex-M33 of E1M-NX9101 / NXP i.MX 93, which was removed from the SDK (the module was never produced). An enumerator of alp_core_id_t; the other enumerators keep their values. The V2N system-manager core is ALP_CORE_M33_SM.",
-      "replacement": null
     }
   ]
 }

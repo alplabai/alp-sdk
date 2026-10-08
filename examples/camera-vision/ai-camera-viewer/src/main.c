@@ -33,7 +33,7 @@
  *   1. "Can I run real inference on the AEN's on-die NPU?"  --
  *      yes, the dispatch path is alp_inference_open(..., backend
  *      = ALP_INFERENCE_BACKEND_ETHOS_U).  The §D.lib.loader picks
- *      the U85 vs U55 vs U65 driver shim from the SKU's
+ *      the U85 vs U55 driver shim from the SKU's
  *      `capabilities:` block, no app-source changes.
  *   2. "How fast?"  --  the per-frame latency strip prints the
  *      microseconds from `alp_inference_invoke()` entry to exit.

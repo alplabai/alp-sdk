@@ -570,7 +570,7 @@ For SoMs without an EVK board file yet, write your own:
 The SDK itself ships under Apache-2.0 (see `LICENSE`).  Once you
 target a specific silicon backend, you also pull source from the
 vendor's public SDK -- and each vendor's terms apply to that
-source.  All four vendor SDKs in the v1.0 matrix are **publicly
+source.  All three vendor SDKs in the v1.0 matrix are **publicly
 source-visible on GitHub** with steady release cadences, but the
 licence flavour differs.  Customer projects should be clear about
 which licence applies to which subtree before shipping.
@@ -579,7 +579,6 @@ which licence applies to which subtree before shipping.
 |--------------|------------------------------------------------------------------------------------------|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Alif**     | [`alifsemi/sdk-alif`](https://github.com/alifsemi/sdk-alif) + 58 sibling repos           | v2.3.0-rc1        | Two-bucket: forks of upstream OSS keep upstream licensing (`zephyr_alif` / `hal_alif` / `cmsis_alif` / `mcuboot_alif` / `matter_alif` Apache-2.0; `meta-alif*` Yocto layers MIT).  Differentiating drivers (`sdk-alif`, `alif_dave2d-driver`, ML eval kit, ISP helpers) ride a **vendor-specific "Alif Semiconductor Software License Agreement"** -- source-visible but with Alif's terms. |
 | **Renesas**  | [`renesas/rzv-fsp`](https://github.com/renesas/rzv-fsp)                                  | v3.1.0 (Mar 2025) | **BSD-3-Clause** for the MPU BSP / Board BSP / HAL / generic middleware (the parts the SDK consumes).  `rzv2n_evk` board support included.  A handful of pre-compiled middleware modules (e.g. `rm_zmod4xxx`) ship under Renesas's own software-licence agreement -- per-component table in the FSP repo's `LICENSE.md`.                                                                          |
-| **NXP**      | [`nxp-mcuxpresso/mcuxsdk-manifests`](https://github.com/nxp-mcuxpresso/mcuxsdk-manifests) | v26.03.00          | **NXP-specific licence**: `LA_OPT_Online Code Hosting NXP_Software_License v1.4` (May 2025).  Acceptance implied by clone / install / use.  Source-visible, not Apache / BSD.  Yocto-side via `meta-imx` is a separate release cycle.                                                                                                                                                                  |
 | **DEEPX**    | [`DEEPX-AI`](https://github.com/DEEPX-AI) (30+ repos)                                    | dx_rt 2026-05-11   | Two-bucket: firmware images (`dx_fw`) Apache-2.0; model zoo (`dx-modelzoo`) MIT.  Runtime (`dx_rt`), app templates (`dx_app`), Linux PCIe driver (`dx_rt_npu_linux_driver`), Windows runtime (`dx_rt_windows`) **source-visible but customer-only** -- restricted to "customers supplied with DEEPX NPU".  Yocto recipes (`meta-deepx-m1`) have no LICENSE file -- ask DEEPX before redistributing. |
 
 ### What this means for *your* project
@@ -589,7 +588,7 @@ which licence applies to which subtree before shipping.
 - **For shipping production firmware / Yocto images** that
   redistribute vendor source, check each component's licence
   text before stripping or relicensing.  The SDK's own
-  Apache-2.0 sits cleanly on top of all four; what you have to
+  Apache-2.0 sits cleanly on top of all three; what you have to
   manage is what *you* redistribute downstream.
 - **`chips/deepx_dxm1/`** is our own Apache-2.0 thin host
   driver; it does *not* redistribute DEEPX runtime code.  When
@@ -617,7 +616,6 @@ default `west update` skips it.
 | Vendor   | Zephyr v4.4 import path                            | What you need to do                                                                                     |
 |----------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | **Renesas (RZ/V)** | `hal_renesas` (in Zephyr's own west.yml)   | Nothing extra.  Our `name-allowlist` lets Zephyr import it; `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/` is what the V2N + V2N-M1 paths consume. |
-| **NXP (i.MX 9x)**  | `hal_nxp` (in Zephyr's own west.yml)       | Pinned by Zephyr's base manifest; no alp-sdk SoM uses it.                         |
 | **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + upstream Zephyr `boards/alif/` | **Simpler than v3.7.**  HAL drivers come from `alifsemi/hal_alif v2.3.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  Upstream Zephyr v4.4 also ships the stock Alif Ensemble board files under `boards/alif/` (`ensemble_e8_dk`, `ensemble_e1c_dk`, `balletto_b1_dk`) -- those target Alif's own EVKs, not the E1M board.  The AEN-specific board files (`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`, `alp_e1m_aen803_m55_he`, `alp_e1m_aen803_m55_hp`, `alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`) ship in-tree at [`zephyr/boards/alp/`](../zephyr/boards/alp/) -- no separate overlay or repo needed.  Two Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels.  See `docs/vendor-partnerships.md` §Alif for the migration history. |
 | **DEEPX (DX-M1)**  | Out of Zephyr scope (Linux-side runtime).  | The on-device NPU runs from a Linux PCIe driver, not a Zephyr backend.  `chips/deepx_dxm1/` is the **host-side** Zephyr code that brings up the M1 from the Renesas A55 cluster; `dx_rt` itself rides on Linux/Yocto.  See `examples/v2n/v2n-m1-deepx-inference/` and the customer-side integration notes in `docs/vendor-partnerships.md` §DEEPX. |
 
@@ -632,13 +630,13 @@ opt-in:
 ```bash
 west update --group-filter +vendor-sdks
 ls modules/                       # hal/alif/ (always)
-ls modules/vendors/                # rzv-fsp/ mcuxsdk-manifests/ (group-on)
+ls modules/vendors/                # rzv-fsp/ (group-on)
 ls modules/drivers/                # dave2d/ (group-on)
 ls modules/lib/                    # aipl/ (group-on)
 ```
 
-For Renesas + NXP the `vendor-sdks` pins (`rzv-fsp`,
-`mcuxsdk-manifests`) duplicate `hal_renesas` / `hal_nxp` --
+For Renesas the `vendor-sdks` pin (`rzv-fsp`)
+duplicates `hal_renesas` --
 intentional, so bare-metal customers don't have to dig through
 Zephyr's module organisation.  The Alif vendor-licensed pieces
 (`alif_dave2d-driver`, `alif_image-processing-lib`) are

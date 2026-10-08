@@ -32,7 +32,7 @@
 #   * licence Apache-2.0 (~/tflite-micro/LICENSE: Apache License 2.0 header).
 #
 # HW-backends: this manifest's own `integration.zephyr.hw_backends:`
-# block below carries per-accelerator priority binding (Ethos-U85/U65/
+# block below carries per-accelerator priority binding (Ethos-U85/
 # U55, Helium/NEON, DMA); folded in from the retired standalone
 # metadata/library-profiles/tflite_micro/hw-backends.yaml in WS6-c
 # Phase 3.

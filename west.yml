@@ -16,13 +16,11 @@
 #     release after re-verifying every wrapped peripheral on the
 #     target SoMs.  See docs/zephyr-version-policy.md for the full
 #     policy + LTS migration notes.
-#   - hal_renesas / hal_nxp: imported via Zephyr's own west.yml (the
-#     name-allowlist below lets them through the import filter).
+#   - hal_renesas: imported via Zephyr's own west.yml (the
+#     name-allowlist below lets it through the import filter).
 #     Zephyr v4.4 pins specific revisions; we follow what Zephyr ships.
 #     hal_renesas covers the RZ/V2N + RZ/V2L + RZ/V2H BSP under
-#     `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/`.  No alp-sdk SoM uses
-#     hal_nxp; it stays allowlisted only because Zephyr's base
-#     manifest pins it.
+#     `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/`.
 #   - hal_alif: NOT in Zephyr's modules tree as of v3.7, but Alif
 #     publishes a fully Apache-2.0-licensed Zephyr module of their
 #     own at github.com/alifsemi/hal_alif (zephyr/module.yml shape,
@@ -44,7 +42,7 @@
 #     (`sdk-alif` / `zephyr_alif`) is the OPT-IN path (vendor-sdks
 #     group) for customers who want Alif's whole Zephyr tree or its
 #     newest fork-only bits; alp-sdk deliberately does NOT base on it
-#     -- one upstream Zephyr base serves Alif + Renesas + NXP.  See
+#     -- one upstream Zephyr base serves Alif + Renesas.  See
 #     docs/getting-started.md §8 for the decision tree.
 #
 #     Two more Alif-specific pieces (alif_dave2d-driver,
@@ -55,7 +53,7 @@
 #     AEN customers.
 #
 # When upgrading the Zephyr pin: change `revision:` below, rerun
-# `west update`, verify the modules/hal/{renesas,nxp} revs that
+# `west update`, verify the modules/hal/renesas rev that
 # ship with the new Zephyr tag still satisfy the SoMs we target
 # (see docs/os-support-matrix.md), bump pr-twister.yml's `--mr` to
 # match, and add a CHANGELOG entry.
@@ -75,8 +73,6 @@ manifest:
       url-base: https://github.com/alifsemi
     - name: renesas
       url-base: https://github.com/renesas
-    - name: nxp-mcuxpresso
-      url-base: https://github.com/nxp-mcuxpresso
     # extras-tier1 community-library remotes (§D.lib batch).
     - name: olikraus           # u8g2
       url-base: https://github.com/olikraus
@@ -163,7 +159,7 @@ manifest:
   #                    initialises them.
   # `vendor-sdks`    - public vendor SDK repos pinned to the
   #                    verified tags (Alif sdk-alif, Renesas
-  #                    rzv-fsp, NXP mcuxsdk-manifests).  Carries
+  #                    rzv-fsp).  Carries
   #                    vendor-specific licensing -- see
   #                    docs/getting-started.md §8 and
   #                    docs/vendor-partnerships.md for the licence
@@ -226,8 +222,8 @@ manifest:
     # Ensemble SoC + boards ARE in the upstream Zephyr tree as of
     # v4.4, but the hal_alif module is not a Zephyr-managed project).
     # Default-enabled (no group) so AEN builds work out of the
-    # box -- matches how Zephyr's own west.yml ships hal_renesas /
-    # hal_nxp for the other vendor families.  Pinned to a verified
+    # box -- matches how Zephyr's own west.yml ships hal_renesas for
+    # the Renesas family.  Pinned to a verified
     # tagged release; bumps coordinate with the Zephyr-LTS cycle.
     - name: hal_alif
       remote: alifsemi
@@ -246,10 +242,8 @@ manifest:
           # we import it as a separate top-level project below
           # against the Alif-maintained release at
           # github.com/alifsemi/hal_alif (Apache-2.0).
-          # hal_renesas covers RZ/V2N (V2N + V2N-M1 SoMs);
-          # no alp-sdk SoM uses hal_nxp (pinned by Zephyr's base manifest).
+          # hal_renesas covers RZ/V2N (V2N + V2N-M1 SoMs).
           - hal_renesas
-          - hal_nxp
           # Upstream littlefs C library (modules/fs/littlefs, group
           # "fs" in Zephyr's own west.yml).  Backs
           # CONFIG_FILE_SYSTEM_LITTLEFS (config FILE_SYSTEM_LITTLEFS
@@ -652,13 +646,12 @@ manifest:
     #     or the Helium image-processing kernels on AEN silicon
     #     enable this group; default builds skip the download.
     #
-    #   * Bare-metal-mirror pins for Renesas + NXP
-    #     (renesas/rzv-fsp, nxp-mcuxpresso/mcuxsdk-manifests).
-    #     DUPLICATIVE with hal_renesas / hal_nxp which Zephyr
-    #     ships in its modules tree -- pinned here for customers
-    #     doing bare-metal builds outside Zephyr.  Also serves as
-    #     a customer-visible audit trail of the upstream version
-    #     we cross-verified hal_renesas / hal_nxp against.
+    #   * Bare-metal-mirror pin for Renesas (renesas/rzv-fsp).
+    #     DUPLICATIVE with hal_renesas which Zephyr ships in its
+    #     modules tree -- pinned here for customers doing
+    #     bare-metal builds outside Zephyr.  Also serves as a
+    #     customer-visible audit trail of the upstream version
+    #     we cross-verified hal_renesas against.
     #
     # Disabled by default via the `vendor-sdks` group; customer
     # builds enable by including the group in their workspace's
@@ -687,12 +680,6 @@ manifest:
       remote: renesas
       revision: v3.1.0
       path: modules/vendors/rzv-fsp
-      groups:
-        - vendor-sdks
-    - name: mcuxsdk-manifests
-      remote: nxp-mcuxpresso
-      revision: v26.03.00
-      path: modules/vendors/mcuxsdk-manifests
       groups:
         - vendor-sdks
 
