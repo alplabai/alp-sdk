@@ -143,6 +143,38 @@ expect 0 "a CRLF (Windows-built) HP build dir" "$t/good-crlf" "$t/model.bin" "$t
 expect 1 "TR_CAM_ROTATE=180" "$t/bad-rot180" "$t/model.bin" "$t/nm"
 expect 1 "TR_CAM_ROTATE empty (the header default at build time)" "$t/bad-rot-empty" "$t/model.bin" "$t/nm"
 expect 0 "TR_CAM_ROTATE=270" "$t/rot270" "$t/model.bin" "$t/nm"
+# The HE build dir (4th argument): the HE must be a TR_INPUT_NPU build for the same camera shape.
+he_dir() { # dir lines...
+	local d=$1
+	shift
+	mkdir -p "$d"
+	printf '%s
+' "$@" > "$d/CMakeCache.txt"
+}
+he_dir "$t/he-ok" "TR_INPUT_NPU:BOOL=ON" "TR_CAM_ROTATE:STRING=90" "TR_CAM_MIRROR:BOOL=ON"
+he_dir "$t/he-ok-270" "TR_INPUT_NPU:BOOL=ON" "TR_CAM_ROTATE:STRING=270"
+he_dir "$t/he-land" "TR_INPUT_NPU:BOOL=ON" "TR_CAM_ROTATE:STRING=0"
+he_dir "$t/he-nonpu" "TR_INPUT_NPU:BOOL=OFF" "TR_CAM_ROTATE:STRING=90"
+he_dir "$t/he-mirror-off" "TR_INPUT_NPU:BOOL=ON" "TR_CAM_ROTATE:STRING=90" "TR_CAM_MIRROR:BOOL=OFF"
+he_dir "$t/he-unset-rot" "TR_INPUT_NPU:BOOL=ON"
+expect_he() { # want(0|1) why hp_build he_dir
+	local want=$1 why=$2 out rc
+	out=$(hp_vision_check "$3" "$t/model.bin" "$t/nm" "$4" 2>&1)
+	rc=$?
+	if { [ "$want" = 0 ] && [ $rc -ne 0 ]; } || { [ "$want" = 1 ] && { [ $rc -eq 0 ] || ! grep -q REFUSED <<<"$out"; }; }; then
+		echo "FAIL hp_vision_check (HE given): $why (rc=$rc): $out"
+		fail=1
+	fi
+}
+expect_he 0 "HE for the same camera (90/90, mirror ON/ON)" "$t/good" "$t/he-ok"
+expect_he 0 "HE 270, HP 90: both portrait" "$t/good" "$t/he-ok-270"
+expect_he 0 "HE rotate unset (cam_rot.h portrait default), HP 90" "$t/good" "$t/he-unset-rot"
+expect_he 1 "HE landscape (0), HP portrait (90)" "$t/good" "$t/he-land"
+expect_he 1 "HE built without TR_INPUT_NPU" "$t/good" "$t/he-nonpu"
+expect_he 1 "HE mirror OFF, HP mirror ON" "$t/good" "$t/he-mirror-off"
+expect_he 1 "HE build dir without a CMakeCache.txt" "$t/good" "$t/no-such-he"
+# no HE dir given = no cross-check (the argument is optional; build-release.sh always passes it)
+expect 0 "no HE dir given: no cross-check" "$t/good" "$t/model.bin" "$t/nm"
 # The values it packages are printed.
 if ! hp_vision_check "$t/good" "$t/model.bin" "$t/nm" 2>&1 | grep -q 'TR_CAM_ROTATE=90 TR_CAM_MIRROR=ON'; then
 	echo "FAIL hp_vision_check: does not print TR_CAM_ROTATE=90 TR_CAM_MIRROR=ON"

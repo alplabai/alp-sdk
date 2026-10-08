@@ -10,6 +10,8 @@
  * for why an app-level board overlay is too late in Zephyr's devicetree
  * concatenation order to supply what a SHIELD overlay (innomaker_cam_ov9281)
  * references. */
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
+
 / {
 	chosen {
 		zephyr,flash = &itcm;
@@ -100,5 +102,26 @@
 		compatible = "alp,i2c-handover";
 		role = "acquire";
 		flag-address = <0x0237FC94>;
+	};
+};
+
+/*
+ * The shared page 0x0237F000..0x0237FFFF -- the event ring (sound), the I2C1 handover flag, the HP
+ * debug words, the camera view descriptor, the pose slot and the I2C2 + GPIO5 lease record
+ * (src/ipc/tr_memmap.h, src/ipc/tr_bus2.h) -- is written by the other M55 and the A32. The whole
+ * app relies on CONFIG_DCACHE=n for it, but CONFIG_DCACHE=n does not switch the cache off (Zephyr
+ * only disables it at boot when CONFIG_DCACHE=y), so a warm RAM-run after an image that left
+ * CCR.DC=1 would serve stale lines. This region makes the page Normal non-cacheable on this core
+ * whatever the cache state. The HE's board overlay carries the same node. It lies inside SRAM0
+ * (0x02000000, 4 MiB), which has NO MPU region of its own in this build (the board's fixed table,
+ * zephyr/soc-bridge/alif/mpu_regions_e8.c, covers MRAM, ITCM and DTCM only; SRAM0 is the default
+ * map), and ends below &sram1 (0x02400000): PMSAv8-M regions may not overlap, and none does.
+ */
+/ {
+	tr_shared_nc: sram@237f000 {
+		compatible = "zephyr,memory-region", "mmio-sram";
+		reg = <0x0237F000 0x1000>;
+		zephyr,memory-region = "TR_SHARED_NC"; /* required by the binding; nothing is linked there */
+		zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_RAM_NOCACHE)>;
 	};
 };

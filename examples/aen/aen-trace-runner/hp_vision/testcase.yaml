@@ -21,3 +21,13 @@ tests:
     extra_args:
       - "TR_CAM_ROTATE=90"
       - "TR_CAM_MIRROR=ON"
+  # The combined HP: camera + NPU + the TAS2563 game sound in ONE image (TR_HP_SOUND). Needs the
+  # clockctrl-patched ZEPHYR_BASE (hp_vision/CMakeLists.txt); a CI tree without it filters this
+  # scenario out instead of failing it.
+  alp_sdk.examples.aen.trace_runner.hp_vision_sound:
+    filter: CONFIG_TR_CLKCTL_PATCHED
+    extra_args:
+      - "TR_CAM_ROTATE=90"
+      - "TR_CAM_MIRROR=ON"
+      - "TR_SND_REWORKED_U46=ON"
+      - "TR_HP_SOUND=ON"

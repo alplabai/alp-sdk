@@ -8,7 +8,10 @@
 # deliberately not merged with it: sound and vision are different silicon
 # risks (I2S mux contention vs "does the HP app even link the pipeline").
 #
-# hp_vision_check HP_BUILD_DIR MODEL_FILE NM [MODE]
+# hp_vision_check HP_BUILD_DIR MODEL_FILE NM [HE_BUILD_DIR [MODE]]
+#   HE_BUILD_DIR  the HE build dir ("" = skip): adds the check that the HE was built for the same
+#                 camera as this HP image (the upright frame's shape and the mirror), see the end of
+#                 the camera block. build-release.sh always passes it.
 #   MODE vision   (default) a plain hp_vision (TR_HP_VISION=ON alone). An image that carries
 #                 the game sound (TR_HP_SOUND=ON: I2S3 + the TAS2563 amps) is REFUSED here --
 #                 it never skips the carrier interlock (snd_hp_check.sh, sound-carriers.txt).
@@ -19,6 +22,15 @@
 # Sets HP_VISION_SOUND=1 when the image carries the sound (the cache says TR_HP_SOUND is true,
 # or the ELF holds the sound's console text -- a cache edited after the build cannot hide it).
 
+# CMake booleans come back as ON/OFF, 1/0, TRUE/FALSE, YES/NO, Y/N in any case:
+# 1 for true, 0 for the rest (including empty).
+hv_bool() {
+	case "${1^^}" in
+	ON | 1 | TRUE | YES | Y) echo 1 ;;
+	*) echo 0 ;;
+	esac
+}
+
 hp_vision_refuse() {
 	{
 		echo "######################################################################"
@@ -28,7 +40,7 @@ hp_vision_refuse() {
 }
 
 hp_vision_check() {
-	local hd=$1 model=$2 nm=$3 mode=${4:-vision} snd_cache snd_elf=0
+	local hd=$1 model=$2 nm=$3 he=${4:-} mode=${5:-vision} snd_cache snd_elf=0
 	HP_VISION_SOUND=0
 	if [ ! -f "$hd/CMakeCache.txt" ]; then
 		hp_vision_refuse "$hd is not a Zephyr build dir (no CMakeCache.txt)"
@@ -52,6 +64,13 @@ hp_vision_check() {
 	combined)
 		if [ "$HP_VISION_SOUND" != 1 ]; then
 			hp_vision_refuse "TR_SND_HP=ON with TR_HP_VISION=ON needs the combined image: $hd has no game sound (build hp_vision with -DTR_SND_REWORKED_U46=ON -DTR_HP_SOUND=ON)"
+			return 1
+		fi
+		# A DEV bench control (sound/src/main.c TR_SND_UNDERRUN_TEST: holds the I2S3 IRQ off once to
+		# make the underrun counter count) is never shipped: cache OR the ELF's own console text.
+		if [ "$(hv_bool "$(tr -d '\r' < "$hd/CMakeCache.txt" | sed -n 's/^TR_SND_UNDERRUN_TEST:[A-Za-z]*=//p' | head -1)")" = 1 ] ||
+			{ [ -f "$hd/zephyr/zephyr.elf" ] && grep -aq 'underrun control: I2S3 IRQ held off' "$hd/zephyr/zephyr.elf"; }; then
+			hp_vision_refuse "$hd carries the DEV underrun positive control (TR_SND_UNDERRUN_TEST): it deliberately starves the I2S3 FIFO; rebuild without it"
 			return 1
 		fi
 		;;
@@ -80,6 +99,31 @@ hp_vision_check() {
 		return 1
 		;;
 	esac
+	# The HE reads the same camera two ways the HP cannot tell it: the upright frame's shape
+	# (0 = landscape, else portrait) and, once the HE build carries it, whether the view is
+	# mirrored. A pair that disagrees misreads every keypoint with nothing on the console to say so.
+	if [ -n "$he" ]; then
+		local hrot hmir hnpu
+		hnpu=$(sed -n 's/^TR_INPUT_NPU:[A-Z]*=//p' "$he/CMakeCache.txt" 2>/dev/null | tr -d '\r')
+		hrot=$(sed -n 's/^TR_CAM_ROTATE:[A-Z]*=//p' "$he/CMakeCache.txt" 2>/dev/null | tr -d '\r')
+		hmir=$(sed -n 's/^TR_CAM_MIRROR:[A-Z]*=//p' "$he/CMakeCache.txt" 2>/dev/null | tr -d '\r')
+		echo "build-release: HE camera: TR_CAM_ROTATE=${hrot:-<unset>} TR_CAM_MIRROR=${hmir:-<unset>}" >&2
+		if [ "$(hv_bool "$hnpu")" != 1 ]; then
+			hp_vision_refuse "$he is not a TR_INPUT_NPU=ON build (TR_INPUT_NPU='${hnpu:-<unset>}') -- the HE reads no pose from this HP image"
+			return 1
+		fi
+		if [ -n "$hmir" ] && [ "$(hv_bool "$hmir")" != "$(hv_bool "$mir")" ]; then
+			hp_vision_refuse "HE TR_CAM_MIRROR=$hmir but HP TR_CAM_MIRROR=${mir:-<unset>} -- the two builds must agree"
+			return 1
+		fi
+		local hland=0 rland=0
+		[ "${hrot:-90}" = 0 ] && hland=1
+		[ "$rot" = 0 ] && rland=1
+		if [ "$hland" != "$rland" ]; then
+			hp_vision_refuse "HE TR_CAM_ROTATE='${hrot:-<unset>}' but HP TR_CAM_ROTATE=$rot -- landscape (0) and portrait (90/270) frames differ in size, set it identically on both"
+			return 1
+		fi
+	fi
 	if [ ! -f "$hd/zephyr/zephyr.bin" ] || [ "$(stat -c %s "$hd/zephyr/zephyr.bin")" -gt 262144 ]; then
 		hp_vision_refuse "$hd/zephyr/zephyr.bin is missing or > 256 KiB HP ITCM"
 		return 1

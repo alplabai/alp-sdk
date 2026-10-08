@@ -53,6 +53,7 @@ if(TR_HP_SOUND)
 	# alp-sdk's clockctrl patch turns on; unpatched, the build is clean and nothing ever clocks out.
 	file(READ ${ZEPHYR_BASE}/drivers/clock_control/clock_control_alif.c _tr_clkctl)
 	string(FIND "${_tr_clkctl}" "ALIF_EXPMST0_CTRL_REG_OFF" _tr_patched)
+	# (hp_vision/Kconfig reads the same fact as CONFIG_TR_CLKCTL_PATCHED, for twister's filter.)
 	if(_tr_patched EQUAL -1)
 		message(FATAL_ERROR "${ZEPHYR_BASE}/drivers/clock_control/clock_control_alif.c lacks alp-sdk's "
 			"clockctrl patch (no 76.8 MHz audio clock for I2S3). TR_HP_SOUND=ON needs a patched tree "
@@ -68,6 +69,9 @@ if(TR_HP_SOUND)
 		../src/ipc/tr_bus2.c
 	)
 	target_include_directories(app PRIVATE ../sound/src)
+	# src/platform/tr_i2c2_rearm.h resets the i2c_dw driver's sync semaphore (struct
+	# i2c_dw_dev_config in drivers/i2c/i2c_dw.h, not a public header).
+	target_include_directories(app PRIVATE ${ZEPHYR_BASE}/drivers/i2c)
 	# The game's sound, as the standalone GAME image builds it by default (sound/CMakeLists.txt:
 	# V2 + V3 voicing, 16 kHz, round-4 amp config = no override writes): the synth defines are
 	# the same bits the host goldens pin.
@@ -78,6 +82,11 @@ if(TR_HP_SOUND)
 	if(TR_SND_VOLUME)
 		target_compile_definitions(app PRIVATE TR_SND_VOLUME=${TR_SND_VOLUME}u)
 	endif()
+	# DEV bench control (sound/src/main.c): once, after ~3 s of stream, hold the I2S3 IRQ off 2 ms so
+	# hp_i2s_fu MUST count -- the positive control for that counter. Never in a release:
+	# a32/release/hp_vision_check.sh and snd_hp_check.sh refuse an image that carries it.
+	option(TR_SND_UNDERRUN_TEST "DEV: I2S3 FIFO underrun positive control (hp_i2s_fu must count)" OFF)
+	target_compile_definitions(app PRIVATE TR_SND_UNDERRUN_TEST=$<BOOL:${TR_SND_UNDERRUN_TEST}>)
 	if(TR_SND_AMP_REGS_FILE AND NOT TR_SND_AMP_REGS_FILE STREQUAL "NONE")
 		target_compile_definitions(app PRIVATE TR_SND_AMP_REGS_FILE="${TR_SND_AMP_REGS_FILE}")
 	endif()

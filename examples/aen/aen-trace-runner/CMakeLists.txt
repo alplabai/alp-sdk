@@ -125,6 +125,9 @@ target_sources(app PRIVATE
 )
 if(TR_HP_SOUND)
 	target_sources(app PRIVATE src/platform/bus2_he.c src/ipc/tr_bus2.c)
+	# src/platform/tr_i2c2_rearm.h resets the i2c_dw driver's sync semaphore (struct
+	# i2c_dw_dev_config in drivers/i2c/i2c_dw.h, not a public header).
+	target_include_directories(app PRIVATE ${ZEPHYR_BASE}/drivers/i2c)
 	target_compile_definitions(app PRIVATE TR_HP_SOUND=1)
 endif()
 if(TR_INPUT_NPU)

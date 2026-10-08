@@ -43,3 +43,12 @@ tests:
       - "SHIELD=e1m_evk_rvt121hvdfwca0"
       - "TR_INPUT_NPU=ON"
       - "TR_CAM_ROTATE=90"
+  # The HE half of the combined HP image: leases I2C2 + GPIO5 to the HP's game sound
+  # (TR_HP_SOUND, src/platform/bus2_he.c). Needs a shield that leaves GPIO5 alone (the RVT121) and
+  # the NPU input (the HP is the vision HP); no clockctrl patch is involved on this core.
+  alp_sdk.examples.aen.trace_runner.rvt121_hp_sound:
+    extra_args:
+      - "SHIELD=e1m_evk_rvt121hvdfwca0"
+      - "TR_INPUT_NPU=ON"
+      - "TR_HP_SOUND=ON"
+      - "TR_CAM_ROTATE=90"

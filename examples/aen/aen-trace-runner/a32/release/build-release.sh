@@ -121,7 +121,7 @@ if [ "$vis" = ON ]; then
 			snd_hp_refuse "two separate HP images (TR_SND_HP_BUILD=$TR_SND_HP_BUILD, TR_HP_VISION_BUILD=$hv): only one can be HP_APP -- build hp_vision with -DTR_SND_REWORKED_U46=ON -DTR_HP_SOUND=ON and leave TR_SND_HP_BUILD unset"
 			exit 3
 		fi
-		hp_vision_check "$hv" "$hv_model" "$NM" combined || exit 3
+		hp_vision_check "$hv" "$hv_model" "$NM" "$hed" combined || exit 3
 		snd_hp_check "$hv" "${TR_SND_CARRIER_SERIAL:-}" "$here/sound-carriers.txt" "$NM" combined || exit 3
 		combined=1
 		# The HE must run its side of the I2C2 + GPIO5 lease, or the HP's amp bring-up waits for ever.
@@ -130,7 +130,7 @@ if [ "$vis" = ON ]; then
 			exit 3
 		fi
 	else
-		hp_vision_check "$hv" "$hv_model" "$NM" || exit 3
+		hp_vision_check "$hv" "$hv_model" "$NM" "$hed" || exit 3
 	fi
 elif [ "$snd" = ON ]; then
 	sd=$(realpath -m "${TR_SND_HP_BUILD:-/nonexistent-TR_SND_HP_BUILD-unset}")

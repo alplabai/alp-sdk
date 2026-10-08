@@ -21,9 +21,12 @@
  * I2C1 (camera) keeps using it.
  *
  * Every word has ONE writer, so no read-modify-write crosses cores:
- *   HE writes he_state / he_token / he_beat / he_regains
+ *   HE writes he_state / he_token / he_beat / he_regains / he_reclaims
  *   HP writes hp_state / hp_token / hp_beat / hp_aborts / hp_i2s_fu / hp_i2s_err / hp_acq
- * State words carry TR_BUS2_TAG (a cold SRAM0 reads as "none", never as a state).
+ * State words carry TR_BUS2_TAG (a cold SRAM0 reads as "none", never as a state) AND the low 12
+ * bits of the lease token (tr_bus2_word()): "which state, for which lease" is ONE load, so no
+ * second load needs ordering against the first (the Dekker edges below). The full token still
+ * travels in he_token / hp_token.
  *
  *   HE: OWNS --(HP wants it, alive)--> OFFERED(T) --(HP claims T)--> CLAIMED(T) --(HP returns T)--> OWNS
  *                                         '--(no claim for 1 s: withdraw)--> OWNS
@@ -40,9 +43,17 @@
  *     "he_state = OWNS, fence, THEN hp_state != BUS". One of the two always sees the other, so an
  *     HE restart (or withdrawal) in the middle of a bring-up aborts it BEFORE the next access,
  *     and the HE waits (bounded) for a bus step already running.
+ *   - The HP's I2C2 IRQ (NVIC line 134) is on ONLY between tr_bus2_hp_enter() and _leave() /
+ *     _return(): a lease held across a step that does not use the bus (the CC3501E reset, the I2S3
+ *     bring-up) has the line OFF, so an HE-only reset in that window cannot have its FIFO drained
+ *     and INTR_MASK zeroed by the HP's i2c_dw_isr. The HP also hands the lease back across those
+ *     stretches (sound/src/main.c leases only around the EEPROM read, steps 4-7 and step 11).
+ *   - Liveness: the HP bumps hp_beat on every enter / leave / poll, and at least every ~100 ms
+ *     while it holds the lease. A lease whose hp_beat has not moved for TR_BUS2_HP_DEAD_MS is dead:
+ *     the HE stops the controller, clears the bus (ops->reclaim) and takes the bus back by itself.
  *   - Fail safe: no HP, or no WANT: the HE keeps the bus. No HE (or a HE without this glue): the
- *     HP waits forever, vision unaffected, no sound. An HP that never returns: the HE never
- *     takes the bus by force (the HP may be mid-transfer); its HUD shows "5V -- mW".
+ *     HP waits forever, vision unaffected, no sound. An HP that is alive but never returns: the HE
+ *     does not take the bus (the HP may be mid-transfer, and it beats); its HUD shows "5V -- mW".
  *
  * Pure C: barriers, clock and the two hardware actions (stop / re-arm the HE's I2C2) are the
  * caller's, so the state machine is host-tested (tests/host/test_bus2.c) with both cores simulated.
@@ -61,8 +72,11 @@
 #include "tr_mbox.h"
 #include "tr_memmap.h"
 
-#define TR_BUS2_TAG      0x42320000u /* 'B2' */
-#define TR_BUS2_TAG_MASK 0xFFFF0000u
+#define TR_BUS2_TAG       0x42320000u /* 'B2' */
+#define TR_BUS2_TAG_MASK  0xFFFF0000u
+#define TR_BUS2_ST_MASK   0xFu /* state word: bits 3..0 state, 15..4 token & 0xFFF */
+#define TR_BUS2_TOK_SHIFT 4u
+#define TR_BUS2_TOK_MASK  0xFFFu
 
 /* he_state (HE-written) */
 #define TR_BUS2_HE_OWNS  0u
@@ -75,6 +89,7 @@
 #define TR_BUS2_HP_RETURN 4u /* gave the bus back (hp_token = the token returned) */
 
 #define TR_BUS2_OFFER_TIMEOUT_MS 1000u /* HE: withdraw an offer nobody claimed */
+#define TR_BUS2_HP_DEAD_MS       2000u /* HE: a lease whose hp_beat is silent this long is dead */
 #define TR_BUS2_HP_FRESH_MS      200u  /* HE: hp_beat must have moved this recently */
 #define TR_BUS2_HE_BOOT_WAIT_MS  500u  /* HE boot: wait for a running HP bus step, at most */
 #define TR_BUS2_HP_POLL_MS       20u   /* HP: hp_beat period while waiting */
@@ -83,15 +98,15 @@ typedef struct {
 	uint32_t he_state;
 	uint32_t he_token;
 	uint32_t he_beat;
-	uint32_t he_regains; /* leases given back or withdrawn */
+	uint32_t he_regains; /* leases given back, withdrawn or reclaimed */
 	uint32_t hp_state;
 	uint32_t hp_token;
 	uint32_t hp_beat;
-	uint32_t hp_aborts;  /* bring-up steps stopped by a claim */
-	uint32_t hp_i2s_fu;  /* I2S3 TX FIFO underruns seen while streaming */
-	uint32_t hp_i2s_err; /* I2S3 TX block found parked */
-	uint32_t hp_acq;     /* leases completed */
-	uint32_t reserved;
+	uint32_t hp_aborts;   /* bring-up steps stopped by a claim */
+	uint32_t hp_i2s_fu;   /* I2S3 TX FIFO underruns seen while streaming */
+	uint32_t hp_i2s_err;  /* I2S3 TX block found parked */
+	uint32_t hp_acq;      /* leases completed */
+	uint32_t he_reclaims; /* leases taken back from an HP that stopped beating */
 } tr_bus2_t;
 
 _Static_assert(sizeof(tr_bus2_t) == 48u, "tr_bus2_t is 12 words on the wire");
@@ -105,14 +120,24 @@ _Static_assert(TR_MEM_BUS2 >= TR_MEM_I2C1_HANDOVER + 12u && TR_MEM_BUS2 >= TR_ME
 _Static_assert(TR_MEM_BUS2 != TR_MEM_I2C1_HANDOVER,
                "I2C1 and I2C2/GPIO5 leases are different words");
 
+/* A state word: tag | token & 0xFFF | state. */
+static inline uint32_t tr_bus2_word(uint32_t state, uint32_t token)
+{
+	return TR_BUS2_TAG | ((token & TR_BUS2_TOK_MASK) << TR_BUS2_TOK_SHIFT) |
+	       (state & TR_BUS2_ST_MASK);
+}
+
 /* What the state machine asks of its core. now_ms / sleep_ms: any monotonic clock (the HE's boot
  * claim runs where the kernel clock is up, POST_KERNEL 0). give(): stop this core's I2C2 (IRQ off,
- * controller disabled) -- called BEFORE an offer is published. take(): re-arm it -- called after
- * the bus is back. HP ignores give / take / nonce. */
+ * controller disabled) -- called BEFORE an offer is published. take(): re-arm it (controller
+ * reset, pending IRQ cleared, bus recovered if stuck) -- called after the bus is back.
+ * reclaim(): the holder is dead -- stop the controller and clear the bus; take() follows. HP
+ * ignores give / take / reclaim / nonce. */
 typedef struct {
 	void (*barrier)(void);
 	void (*give)(void *ctx);
 	void (*take)(void *ctx);
+	void (*reclaim)(void *ctx);
 	int64_t (*now_ms)(void *ctx);
 	void (*sleep_ms)(void *ctx, uint32_t ms);
 	void *ctx;
@@ -128,10 +153,14 @@ typedef struct {
 	int64_t  hp_moved_ms; /* when hp_beat last changed */
 	bool     hp_moved;
 	int64_t  t_offer;
+	int64_t  t_hp_seen;  /* the lease's last sign of life: its claim, or hp_beat moving */
+	bool     boot_stale; /* he_boot: hp_state was BUS but nothing moved -- a dead HP's leftover */
 } tr_bus2_he_t;
 
 /* Boot (before any I2C2 driver init): void the offer, fence, THEN wait, bounded, while the HP is
- * in a bus step. Returns true when that wait timed out (the HE then proceeds regardless). */
+ * in a bus step. Returns true when a LIVE HP (hp_beat or hp_state moved during the wait) was still
+ * in the step at the timeout; the HE proceeds regardless. A BUS that never moves is a dead HP's
+ * leftover (SRAM0 survives warm resets): returns false with he->boot_stale set (a warning). */
 bool tr_bus2_he_boot(tr_bus2_he_t        *he,
                      volatile tr_bus2_t  *r,
                      const tr_bus2_ops_t *o,
@@ -167,11 +196,13 @@ void tr_bus2_hp_want(tr_bus2_hp_t *hp, volatile tr_bus2_t *r, void (*barrier)(vo
  * It does NOT start using the bus: tr_bus2_hp_enter() does. */
 bool tr_bus2_hp_poll(tr_bus2_hp_t *hp, volatile tr_bus2_t *r);
 
-/* Entering a step that uses I2C2 / GPIO5: hp_state = BUS, fence, THEN the offer must still stand.
- * false = the HE took the bus back: do not touch it, tr_bus2_hp_abort(). */
+/* Entering a step that uses I2C2 / GPIO5: hp_token, fence, hp_state = BUS, fence, THEN the offer
+ * must still stand (one load of he_state). Bumps hp_beat. The caller arms its I2C2 IRQ only after
+ * this returns true. false = the HE took the bus back: do not touch it, tr_bus2_hp_abort(). */
 bool tr_bus2_hp_enter(tr_bus2_hp_t *hp, volatile tr_bus2_t *r, void (*barrier)(void));
 
-/* Leaving a bus step for steps on SPI1 / LP-GPIO / I2S3 only (the lease stays). */
+/* Leaving a bus step for steps on SPI1 / LP-GPIO / I2S3 only (the lease stays). The caller disarms
+ * its I2C2 IRQ first. Bumps hp_beat. */
 void tr_bus2_hp_leave(tr_bus2_hp_t *hp, volatile tr_bus2_t *r, void (*barrier)(void));
 
 /* Bring-up done: this core's I2C2 IRQ is off, nothing more on the bus -- give it back. */

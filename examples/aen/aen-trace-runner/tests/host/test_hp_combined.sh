@@ -8,7 +8,8 @@
 #      2026W36-0002 allowed, + 2026W36-0009 refused, without REWORKED refused, a plain hp_vision
 #      passes WITHOUT the sound check, a sound image never passes without it, two separate HP
 #      images refused, the sound buffers outside the HP DTCM refused, an HE without the lease glue
-#      refused, ...;
+#      refused, the DEV underrun positive control refused (cache or ELF), an HE built for another
+#      camera than the HP refused, ...;
 #   C. source interlocks: I2S_SELECT is only ever written 0; the i2s3 overlay only in the
 #      TR_HP_SOUND branch; the lease is entered/left/returned in the right order;
 #   D. end to end: build-release.sh refuses combined + 2026W36-0009 before it builds anything.
@@ -95,6 +96,11 @@ mk "$t/comb-test" "$SOUND_ON" "-DTR_SND_TEST=1 -DTR_SND_EMBED=1" "$SND_ELF"
 mk "$t/comb-uart5" "$SOUND_ON" "$EMB" "$SND_ELF"
 sed -i 's|^\t};$|\t\tuart@4901d000 {\n\t\t\tstatus = "okay";\n\t\t};\n\t};|' "$t/comb-uart5/zephyr/zephyr.dts"
 for v in sram heap-over nostack; do mk "$t/comb-$v" "$SOUND_ON" "$EMB" "$SND_ELF"; done
+# the DEV underrun positive control, by its cache entry and by its console text in the ELF
+mk "$t/comb-underrun" "$SOUND_ON"'\nTR_SND_UNDERRUN_TEST:BOOL=ON' "$EMB" "$SND_ELF"
+mk "$t/comb-underrun-elf" "$SOUND_ON"'\nTR_SND_UNDERRUN_TEST:BOOL=OFF' "$EMB" "$SND_ELF"
+printf '[snd] underrun control: I2S3 IRQ held off 2000 us\0' >>"$t/comb-underrun-elf/zephyr/zephyr.elf"
+mk "$t/comb-underrun-off" "$SOUND_ON"'\nTR_SND_UNDERRUN_TEST:BOOL=OFF' "$EMB" "$SND_ELF"
 printf '%s\n' "00001234 00000040 T tr_pslot_write" "000031c0 00000200 T tr_audio_render" "00003200 00000040 T tr_bus2_he_frame" \
 	"02200000 00000200 b s_mono" "2002b4b4 00000400 b s_stereo" "200350a0 00010000 B kheap__system_heap" \
 	"2002e360 00002000 B _k_thread_stack_tr_snd_thread" >"$t/comb-sram/NM"
@@ -141,7 +147,15 @@ for d in he he-nobus2; do
 	head -c 4096 /dev/zero >"$t/$d/zephyr/zephyr.bin"
 	: >"$t/$d/zephyr/zephyr.elf"
 	cp "$t/he-dts" "$t/$d/zephyr/zephyr.dts"
+	# the camera the HE was built for: the release check compares it with the HP image's
+	printf '%s\n' "TR_INPUT_NPU:BOOL=ON" "TR_CAM_ROTATE:STRING=90" >"$t/$d/CMakeCache.txt"
 done
+mkdir -p "$t/he-land/zephyr" "$t/he-nonpu/zephyr"
+for d in he-land he-nonpu; do
+	cp "$t/he/zephyr/zephyr.bin" "$t/he/zephyr/zephyr.elf" "$t/he/zephyr/zephyr.dts" "$t/$d/zephyr/"
+done
+printf '%s\n' "TR_INPUT_NPU:BOOL=ON" "TR_CAM_ROTATE:STRING=0" >"$t/he-land/CMakeCache.txt" # landscape HE, portrait HP
+printf '%s\n' "TR_INPUT_NPU:BOOL=OFF" "TR_CAM_ROTATE:STRING=90" >"$t/he-nonpu/CMakeCache.txt"
 printf '%s\n' "00003200 00000040 T tr_a32_boot" >"$t/he-nobus2/NM" # an HE without tr_bus2_he_frame
 mkdir -p "$t/bin" && printf '#!/bin/sh\ntouch "%s/MADE"\n' "$t" >"$t/bin/make" && chmod +x "$t/bin/make"
 
@@ -184,6 +198,15 @@ S="TR_SND_HP=ON"
 	rel 3 "combined, not the embedded GAME build" $V $S TR_HP_VISION_BUILD="$t/comb-noembed" TR_SND_CARRIER_SERIAL=2026W36-0002
 	rel 3 "combined, a TEST build" $V $S TR_HP_VISION_BUILD="$t/comb-test" TR_SND_CARRIER_SERIAL=2026W36-0002
 	rel 3 "combined, uart5 left enabled (the audit stays on)" $V $S TR_HP_VISION_BUILD="$t/comb-uart5" TR_SND_CARRIER_SERIAL=2026W36-0002
+	rel 0 "combined with the DEV underrun control explicitly OFF" $V $S TR_HP_VISION_BUILD="$t/comb-underrun-off" TR_SND_CARRIER_SERIAL=2026W36-0002
+	rel 3 "combined with the DEV underrun positive control (cache)" $V $S TR_HP_VISION_BUILD="$t/comb-underrun" TR_SND_CARRIER_SERIAL=2026W36-0002
+	grep -q 'underrun positive control' <<<"$LAST_OUT" || FAILS "underrun control (cache): wrong refusal: $LAST_OUT"
+	rel 3 "combined with the DEV underrun control's text in the ELF" $V $S TR_HP_VISION_BUILD="$t/comb-underrun-elf" TR_SND_CARRIER_SERIAL=2026W36-0002
+	grep -q 'underrun positive control' <<<"$LAST_OUT" || FAILS "underrun control (ELF): wrong refusal: $LAST_OUT"
+	rel 3 "combined with an HE built for a landscape camera (HP is portrait)" $V $S TR_HP_VISION_BUILD="$t/comb" TR_SND_CARRIER_SERIAL=2026W36-0002 HE_DIR="$t/he-land"
+	grep -q 'landscape (0) and portrait' <<<"$LAST_OUT" || FAILS "HE rotation mismatch: wrong refusal: $LAST_OUT"
+	rel 3 "combined with an HE built without TR_INPUT_NPU" $V $S TR_HP_VISION_BUILD="$t/comb" TR_SND_CARRIER_SERIAL=2026W36-0002 HE_DIR="$t/he-nonpu"
+	grep -q 'TR_INPUT_NPU' <<<"$LAST_OUT" || FAILS "HE without TR_INPUT_NPU: wrong refusal: $LAST_OUT"
 	rel 3 "combined, the sound buffers in SRAM0" $V $S TR_HP_VISION_BUILD="$t/comb-sram" TR_SND_CARRIER_SERIAL=2026W36-0002
 	rel 3 "combined, the heap runs past the DTCM" $V $S TR_HP_VISION_BUILD="$t/comb-heap-over" TR_SND_CARRIER_SERIAL=2026W36-0002
 	rel 3 "combined, no sound thread stack in the ELF" $V $S TR_HP_VISION_BUILD="$t/comb-nostack" TR_SND_CARRIER_SERIAL=2026W36-0002
@@ -229,23 +252,49 @@ awk '/^\t\t\tfails\+\+;$/ { f = 1 } f && /^\t\t\tk_msleep\(BLOCK \* 1000u \/ RAT
 # steps leave the bus phase first
 n_bus=$(grep -cE '^[[:space:]]+SND_BUS\(\);' sound/src/main.c)
 [ "$n_bus" = 6 ] || FAILS "sound/src/main.c: $n_bus SND_BUS() entries, want 6 (step 4, 5, 5b, 6, 7, 11)"
-awk '/^\tSND_NOBUS\(\); \/\* steps 8-10/ { nb = NR } /s.spk = alp_audio_out_open\(/ { if (nb && NR == nb + 1) ok = 1 } END { exit !ok }' sound/src/main.c ||
-	FAILS "sound/src/main.c: the I2S3 steps do not leave the bus phase (SND_NOBUS before step 9)"
+awk '/^\tSND_RELEASE\(\); \/\* steps 8-10/ { nb = NR } /s.spk = alp_audio_out_open\(/ { if (nb && NR == nb + 1) ok = 1 } END { exit !ok }' sound/src/main.c ||
+	FAILS "sound/src/main.c: the I2S3 steps do not return the lease (SND_RELEASE before step 9)"
+# the lease is returned across step 1 too: the bridge releases it right after the EEPROM read, before the reset
+awk '/alp_gpio_cc3501e_attach\(fw\)/ { a = NR } /tr_snd_bus_release\(\);/ { if (a && NR - a <= 3) r = NR } /return cc3501e_reset\(fw\);/ { if (r && r < NR) ok = 1 } END { exit !ok }' sound/src/cc3501e_bridge.c ||
+	FAILS "sound/src/cc3501e_bridge.c: the lease is not returned between the EEPROM read and the CC3501E reset"
+# step 11: the lease is waited for with the bit clock fed, and returned at the end of the bring-up
+awk '/SND_IDLE_SET\(keepalive_block\);/ { k = NR } /rc = tas2563_resume\(/ { if (k && !r) r = NR } /^\tSND_RELEASE\(\);$/ { if (r && NR > r) ok = 1 } END { exit !ok }' sound/src/main.c ||
+	FAILS "sound/src/main.c: step 11 does not feed the clock while it waits for the lease, or does not return it"
 awk '/if \(!tr_snd_bus_enter\(\)\) \{/ { e = NR } /alp_gpio_cc3501e_attach\(fw\)/ { if (e && NR - e <= 4) ok = 1 } END { exit !ok }' sound/src/cc3501e_bridge.c ||
 	FAILS "sound/src/cc3501e_bridge.c: the proxy attach (identity-EEPROM read on I2C2) is not a bus step"
-awk '/^static void lease_acquire\(void\)$/ { f = 1 } f && /if \(tr_snd_bus_enter\(\)\) \{/ { e = 1 } f && /device_init\(i2c2\)/ { if (e) ok = 1; f = 0 } END { exit !ok }' sound/src/main.c ||
-	FAILS "sound/src/main.c: the HP's I2C2 device_init is not inside a bus step (Dekker entry)"
-awk '/^bool tr_bus2_hp_enter\(/ { f = 1 } f && /hp_set\(r, TR_BUS2_HP_BUS\);/ { w = NR } f && /barrier\(\);/ { if (w) b = NR } f && /r->he_state;/ { if (w && b && w < b && b < NR) ok = 1; f = 0 } END { exit !ok }' src/ipc/tr_bus2.c ||
+awk '/^static void lease_acquire\(void\)$/ { f = 1 } f && /tr_bus2_hp_enter\(&s_lease/ { e = NR } f && /tr_i2c2_quiesce\(i2c2/ { q = NR } f && /device_init\(i2c2\)/ { if (e && q && e < q && q < NR) ok = 1; f = 0 } END { exit !ok }' sound/src/main.c ||
+	FAILS "sound/src/main.c: the HP's I2C2 is not quiesced and device_init()ed inside an entered bus step (Dekker entry)"
+# this core's I2C2 IRQ: armed ONLY by an entry that passed (one irq_enable, in snd_irq_on; its callers)
+[ "$(grep -c 'irq_enable(TR_I2C2_IRQN)' sound/src/main.c)" = 1 ] ||
+	FAILS "sound/src/main.c: the I2C2 IRQ is armed somewhere other than snd_irq_on()"
+awk '/^bool tr_snd_bus_enter\(void\)$/ { f = 1 } f && /^}$/ { f = 0 } f && /snd_irq_on\(\);/ { n++ } f && /tr_bus2_hp_enter\(&s_lease/ { e = 1 } END { exit !(n == 2 && e) }' sound/src/main.c ||
+	FAILS "sound/src/main.c: tr_snd_bus_enter() does not arm the IRQ after the entry / the acquire"
+[ "$(grep -c 'snd_irq_on();' sound/src/main.c)" = 2 ] ||
+	FAILS "sound/src/main.c: snd_irq_on() is called outside tr_snd_bus_enter()"
+awk '/^void tr_snd_bus_leave\(void\)$/ { f = 1 } f && /snd_irq_off\(\);/ { i = NR } f && /tr_bus2_hp_leave\(/ { if (i && i < NR) ok = 1; f = 0 } END { exit !ok }' sound/src/main.c ||
+	FAILS "sound/src/main.c: tr_snd_bus_leave() does not turn the I2C2 IRQ off before HELD"
+# the HP quiesces the controller the same way the HE does (see tr_i2c2_quiesce below)
+grep -q 'SCB->CCR & SCB_CCR_DC_Msk' sound/src/main.c || FAILS "sound/src/main.c: the HP claims a lease with the D-cache on"
+grep -q 'SCB->CCR & SCB_CCR_DC_Msk' src/platform/bus2_he.c || FAILS "src/platform/bus2_he.c: the HE offers a lease with the D-cache on"
+awk '/^bool tr_bus2_hp_enter\(/ { f = 1 } f && /hp_set\(r, TR_BUS2_HP_BUS, hp->token\);/ { w = NR } f && /barrier\(\);/ { if (w) b = NR } f && /r->he_state;/ { if (w && b && w < b && b < NR) ok = 1; f = 0 } END { exit !ok }' src/ipc/tr_bus2.c ||
 	FAILS "src/ipc/tr_bus2.c: the HP entry is not write-state, fence, read-offer"
-awk '/^bool tr_bus2_he_boot\(/ { f = 1 } f && /r->he_state = TR_BUS2_TAG \| TR_BUS2_HE_OWNS;/ { w = NR } f && /o->barrier\(\);/ { if (w) b = NR } f && /hp_st\(r\) != TR_BUS2_HP_BUS/ { if (w && b && w < b && b < NR) ok = 1; f = 0 } END { exit !ok }' src/ipc/tr_bus2.c ||
+awk '/^bool tr_bus2_he_boot\(/ { f = 1 } f && /r->he_state = tr_bus2_word\(TR_BUS2_HE_OWNS, 0u\);/ { w = NR } f && /o->barrier\(\);/ { if (w) b = NR } f && /hp_st\(r\) != TR_BUS2_HP_BUS/ { if (w && b && w < b && b < NR) ok = 1; f = 0 } END { exit !ok }' src/ipc/tr_bus2.c ||
 	FAILS "src/ipc/tr_bus2.c: the HE boot is not void, fence, read-HP-phase"
 # the HE stops its I2C2 BEFORE it publishes the offer; the HP turns its line off BEFORE it returns it
-awk '/^void tr_bus2_he_tick\(/ { f = 1 } f && /o->give\(o->ctx\);/ { g = NR } f && /r->he_state = TR_BUS2_TAG \| TR_BUS2_HE_OFFER;/ { if (g && !p) { p = NR; ok = (g < p) } } END { exit !ok }' src/ipc/tr_bus2.c ||
+awk '/^void tr_bus2_he_tick\(/ { f = 1 } f && /o->give\(o->ctx\);/ { g = NR } f && /r->he_state = tr_bus2_word\(TR_BUS2_HE_OFFER, tok\);/ { if (g && !p) { p = NR; ok = (g < p) } } END { exit !ok }' src/ipc/tr_bus2.c ||
 	FAILS "src/ipc/tr_bus2.c: the HE publishes the offer before it stopped its I2C2"
-awk '/^static void lease_release\(void\)$/ { f = 1 } f && /irq_disable\(DT_IRQN\(SND_I2C2_NODE\)\);/ { i = NR } f && /tr_bus2_hp_return\(/ { if (i) ok = 1; f = 0 } END { exit !ok }' sound/src/main.c ||
+awk '/^void tr_snd_bus_release\(void\)$/ { f = 1 } f && /tr_snd_bus_leave\(\);/ { i = NR } f && /tr_bus2_hp_return\(/ { if (i) ok = 1; f = 0 } END { exit !ok }' sound/src/main.c ||
 	FAILS "sound/src/main.c: the HP returns the bus before it turned its I2C2 IRQ off"
-awk '/^static void b2_give\(void \*ctx\)$/ { f = 1 } f && /irq_disable\(/ { i = NR } f && /DW_IC_ENABLE\);/ { if (i && NR > i) ok = 1; f = 0 } END { exit !ok }' src/platform/bus2_he.c ||
+awk '/^static void b2_give\(void \*ctx\)$/ { f = 1 } f && /irq_disable\(/ { i = NR } f && /tr_i2c2_stop\(\);/ { if (i && NR > i) ok = 1; f = 0 } END { exit !ok }' src/platform/bus2_he.c ||
 	FAILS "src/platform/bus2_he.c: the HE does not mask its I2C2 line before it stops the controller"
+# re-arming a controller the other core used: IC_ENABLE = 0 + wait, INTR_MASK = 0, clear the pending
+# IRQ, reset the driver's semaphore, bus-recover -- in this order -- and only THEN configure + enable
+awk '/^static inline bool tr_i2c2_quiesce\(/ { f = 1 } f && /tr_i2c2_stop\(\);/ { a = NR } f && /TR_I2C2_IC_INTR_MASK\);/ { b = NR } f && /NVIC_ClearPendingIRQ/ { c = NR } f && /k_sem_reset/ { d = NR } f && /tr_i2c2_bus_clear/ { e = NR; f = 0 } END { exit !(a && b && c && d && e && a < b && b < c && c < d && d < e) }' src/platform/tr_i2c2_rearm.h ||
+	FAILS "src/platform/tr_i2c2_rearm.h: tr_i2c2_quiesce() is not stop, INTR_MASK=0, clear pending, sem reset, bus-recover"
+awk '/^static void b2_take\(void \*ctx\)$/ { f = 1 } f && /tr_i2c2_quiesce\(/ { q = NR } f && /i2c_configure\(/ { c = NR } f && /irq_enable\(/ { if (q && c && q < c && c < NR) ok = 1; f = 0 } END { exit !ok }' src/platform/bus2_he.c ||
+	FAILS "src/platform/bus2_he.c: the HE re-arms I2C2 without quiescing it first"
+awk '/^static void b2_reclaim\(void \*ctx\)$/ { f = 1 } f && /irq_disable\(/ { i = NR } f && /tr_i2c2_stop\(\);/ { s = NR } f && /tr_i2c2_bus_clear\(true\)/ { if (i && s && i < s && s < NR) ok = 1; f = 0 } END { exit !ok }' src/platform/bus2_he.c ||
+	FAILS "src/platform/bus2_he.c: the reclaim is not IRQ off, IC_ENABLE = 0, SCL bus-clear"
 grep -q '^SYS_INIT(snd_bus2_boot, PRE_KERNEL_1, 0);$' sound/src/main.c || FAILS "sound/src/main.c: the HP does not forget the lease record at PRE_KERNEL_1"
 grep -q '^SYS_INIT(bus2_he_boot, POST_KERNEL, 0);$' src/platform/bus2_he.c || FAILS "src/platform/bus2_he.c: the HE does not claim at POST_KERNEL 0 (before the i2c_dw instance)"
 # the HE's only I2C2 users skip their transfer while the HP holds the bus

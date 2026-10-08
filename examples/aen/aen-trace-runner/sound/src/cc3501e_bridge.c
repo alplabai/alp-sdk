@@ -12,12 +12,14 @@
 
 #if defined(TR_SND_EMBED) && TR_SND_EMBED
 /* Combined HP image (sound/src/main.c): the proxy attach below reads the identity EEPROM @0x50
- * on I2C2, which the HE may own -- enter it as a bus step (Dekker, src/ipc/tr_bus2.h) and leave
- * it before the long, bus-free CC3501E reset. A take-back seen there aborts the bring-up
- * (main.c reads its s_aborted); a retry reuses the control-pin and SPI handles opened here. */
+ * on I2C2, which the HE may own -- lease the bus for it (Dekker entry, src/ipc/tr_bus2.h) and
+ * GIVE IT BACK right after, before the long, bus-free CC3501E reset: this core's I2C2 IRQ is off
+ * and the HE owns the bus again for that whole stretch. A take-back seen at the entry aborts the
+ * bring-up (main.c reads its s_aborted); a retry reuses the control-pin and SPI handles opened
+ * here. */
 #include <stdbool.h>
 bool tr_snd_bus_enter(void);
-void tr_snd_bus_leave(void);
+void tr_snd_bus_release(void);
 #define BRIDGE_EMBED 1
 static alp_gpio_t *s_wifi_en, *s_nrst;
 static alp_spi_t  *s_spi;
@@ -144,7 +146,7 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 #endif
 	(void)alp_gpio_cc3501e_attach(fw); /* reads the identity EEPROM @0x50 on I2C2 */
 #if BRIDGE_EMBED
-	tr_snd_bus_leave();
+	tr_snd_bus_release();
 #endif
 #endif
 #ifdef CONFIG_ALP_SDK_WIFI_CC3501E

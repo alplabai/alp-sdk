@@ -67,6 +67,12 @@ snd_hp_check() {
 			snd_hp_refuse "$sd was not configured with TR_HP_SOUND=ON (no embedded game sound)"
 			return 1
 		fi
+		# The DEV underrun positive control (TR_SND_UNDERRUN_TEST) starves the I2S3 FIFO on purpose.
+		if tr -d '\r' < "$sd/CMakeCache.txt" | grep -qiE '^TR_SND_UNDERRUN_TEST:[A-Za-z]*=(ON|1|YES|TRUE|Y)$' ||
+			grep -aq 'underrun control: I2S3 IRQ held off' "$sd/zephyr/zephyr.elf" 2>/dev/null; then
+			snd_hp_refuse "$sd carries the DEV underrun positive control (TR_SND_UNDERRUN_TEST)"
+			return 1
+		fi
 		;;
 	*)
 		snd_hp_refuse "unknown mode '$mode'"

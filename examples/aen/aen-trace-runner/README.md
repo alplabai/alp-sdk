@@ -214,7 +214,10 @@ the other core releases, which is right for the camera bus (no camera without it
 where the vision must never wait for the sound handshake and the HE needs the bus back. Fail safe:
 no HP asking means the HE keeps the bus; no HE (or an HE built without `TR_HP_SOUND`) means the HP
 waits and the vision runs without sound; an HP that never returns the bus leaves the HUD at `--`,
-never a hang; an HE restart in the middle of the bring-up aborts it before the next access.
+never a hang (and an HP that dies holding the lease, no beat for 2 s, is reclaimed by the HE:
+controller stopped, SCL bus-clear); an HE restart in the middle of the bring-up aborts it before
+the next access. The HP leases the bus only around the stretches that use it and keeps its I2C2
+interrupt off in between, so an HE-only reset never meets an armed HP interrupt.
 
 ## Tests
 

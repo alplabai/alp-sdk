@@ -156,7 +156,10 @@ HP build, and refuses: a build without `-DTR_SND_REWORKED_U46=ON` or `-DTR_HP_SO
 `TR_HP_VISION=ON` alone, or the combined directory as `TR_SND_HP_BUILD` alone; the sound buffers,
 heap or thread stack outside the HP DTCM; an HP image over 256 KiB; and an HE image without
 `tr_bus2_he_frame` (an HE built without `-DTR_HP_SOUND=ON` never leases the bus: the HP would wait
-for ever). The RK055 shield cannot be the HE of a combined release: it uses GPIO5 for its backlight,
+for ever); an HE whose `TR_CAM_ROTATE` shape (landscape 0 / portrait 90|270) or `TR_CAM_MIRROR`
+differs from the HP's, or that was built without `TR_INPUT_NPU` (`hp_vision_check HP MODEL NM HE_DIR
+[MODE]`: the HE dir is argument 4); and an HP carrying the DEV underrun positive control
+(`-DTR_SND_UNDERRUN_TEST=ON`, by cache entry or by its console text in the ELF). The RK055 shield cannot be the HE of a combined release: it uses GPIO5 for its backlight,
 and the HE build refuses `-DTR_HP_SOUND=ON` with it.
 
 What flashes does not change: `bl32`, `a32_app`, `atoc` (which carries the HE and the HP image) and

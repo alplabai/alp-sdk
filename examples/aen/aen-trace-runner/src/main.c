@@ -236,6 +236,11 @@ static void ui_present(const tr_game_t *g, bool attract_active, bool paused)
 {
 	tr_frame_in_t in;
 
+	/* Every presenting loop (the crash sequence, the high-score entry, the fallback banner) keeps
+	 * the HP's I2C2 lease moving, not only main's frame loop: an HE that stopped ticking would
+	 * neither offer the bus nor take it back (platform/bus2_he.h). */
+	tr_bus2_he_frame();
+
 	tr_frame_in_from_game(&in, g, g_banner, attract_active, paused);
 	tr_frame_in_p16(&in, tr_tilt.character, &g_react, g_lobby.standing, g_lobby.idle_us);
 	in.track_h  = (int16_t)tr_display_height();
@@ -377,6 +382,7 @@ static void ui_present(const tr_game_t *g, bool attract_active, bool paused)
 	(void)g;
 	(void)attract_active;
 	(void)paused;
+	tr_bus2_he_frame(); /* as the A32 variant above */
 	tr_display_flip();
 }
 
