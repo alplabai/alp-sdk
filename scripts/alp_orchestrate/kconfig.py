@@ -253,7 +253,9 @@ def _resolve_console(value: Optional[str], os_: str,
 
 #: Floor for `CONFIG_RAM_CONSOLE_BUFFER_SIZE` when `diagnostics.console: ram`
 #: selects the RAM console.  An app that sets a larger size in its own
-#: `prj.conf` keeps it (see `_app_ram_console_size`).
+#: `prj.conf` keeps it (see `_app_ram_console_size`).  Only `prj.conf` is
+#: read: a size set in `boards/<board>.conf`, `prj_<board>.conf` or an app
+#: `EXTRA_CONF_FILE` is not seen and still loses to this floor.
 _RAM_CONSOLE_MIN_SIZE = 2048
 
 _RAM_CONSOLE_SIZE_RE = re.compile(
@@ -266,7 +268,9 @@ def _app_ram_console_size(project: BoardProject, slice_: Slice) -> int:
     The generated alp.conf is merged AFTER prj.conf, so a bare assignment
     would clobber (and shrink) an app-set size -- the app's console then
     wraps (tan-cli#1401).  Best effort: no source dir, no app, or an
-    unreadable prj.conf all read as "app sets nothing".
+    unreadable prj.conf all read as "app sets nothing".  Limit: only
+    `prj.conf` is read, so sizes set in `boards/<board>.conf`,
+    `prj_<board>.conf` or an app `EXTRA_CONF_FILE` still lose.
     """
     if project.source_dir is None or not slice_.app:
         return 0

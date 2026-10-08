@@ -437,6 +437,12 @@ slice's manifest entry carries `flash_method: ram_run_only`, so plain
 never flash that image to MRAM. The planner lives in tan-cli
 (ADR-0026); alp-sdk's `alp_orchestrate` does not implement the knob.
 
+With `diagnostics.console: ram` the generated `alp.conf` sets
+`CONFIG_RAM_CONSOLE_BUFFER_SIZE` to 2048, which is a floor: a larger value in
+the app's own `prj.conf` wins. Only `prj.conf` is read, so a size set in
+`boards/<board>.conf`, `prj_<board>.conf` or an app `EXTRA_CONF_FILE` still loses
+to the 2048 floor.
+
 Both `aen-flowc-itcm.conf` lines are needed because they undo two different
 things. `USE_DT_CODE_PARTITION=n` alone undoes the board `_defconfig`'s
 *derived* offset, but it does **not** touch a hard-coded literal
