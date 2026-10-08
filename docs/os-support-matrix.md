@@ -111,7 +111,7 @@ plan in `VERSIONS.md`.
     Known limits: a 60 fps request settles near 40 fps (#2792), and a plain
     non-CMake static link needs `-Wl,--undefined=_alp_backend_force_camera_yocto_drv`
     or it gets the stub, plus one such option per other Linux backend
-    (`docs/architecture/backend-registry.md`); CMake consumers get them all
+    (list: see `docs/architecture/backend-registry.md`); CMake consumers get them all
     automatically (#2790).  The sensor must be named by an `alp-camera<N>`
     devicetree alias (see `docs/v2n-camera-csi.md`).  The MIPI CSI-2 ISP-aware backend
     (`src/backends/camera/v2n_n44_isp.c`) is a separate **Zephyr** backend for
