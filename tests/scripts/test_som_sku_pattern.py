@@ -9,7 +9,7 @@ instead of silently reintroducing the drift fixed in #1089.
 triple, an unrelated shape -- and must NOT be pinned here.
 
 `metadata/schemas/som-release-bundle-v1.schema.json:sku` is a *third*, looser
-copy (`^E1M-(AEN|V2N|V2M|NX9)\\d{3}$`, no AEN tier-3-8 restriction). It is
+copy (`^E1M-(AEN|V2N|V2M)\\d{3}$`, no AEN tier-3-8 restriction). It is
 deliberately not pinned equal to the two above: it constrains a different
 artifact -- the SoM release-bundle manifest `scripts/provision_som.py` consumes
 (public, documented at `docs/provisioning.md`, gated by
@@ -44,7 +44,6 @@ def test_som_sku_pattern_matches_across_schemas():
     "E1M-AEN301", "E1M-AEN801",  # already-shipped, must keep matching
     "E1M-AEN302", "E1M-AEN709",  # newly allocated per-configuration tails (issue #1089)
     "E1M-V2N103", "E1M-V2M999",
-    "E1M-NX9101",
 ])
 def test_widened_pattern_admits_new_and_existing_skus(sku):
     assert re.match(_PRESET_SKU_PATTERN, sku)
@@ -54,6 +53,7 @@ def test_widened_pattern_admits_new_and_existing_skus(sku):
     "E1M-AEN201",   # tier digit 2 is out of the 3-8 silicon-tier range
     "E1M-AEN3012",  # too many digits in the config tail
     "E1M-XYZ301",   # not a recognised family
+    "E1M-NX9101",   # i.MX 93 is no longer a supported family
     "E1M-V2N1",     # tail too short
 ])
 def test_widened_pattern_still_rejects_invalid_skus(sku):

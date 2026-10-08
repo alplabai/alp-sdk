@@ -1814,7 +1814,7 @@
       "macros": {},
       "typedefs": {
         "alp_cap_id_t": {
-          "definition": "typedef enum { ALP_CAP_ID_HW_I2C, ALP_CAP_ID_HW_SPI, ALP_CAP_ID_HW_UART, ALP_CAP_ID_HW_I2S, ALP_CAP_ID_HW_PDM, ALP_CAP_ID_HW_ADC, ALP_CAP_ID_HW_DAC, ALP_CAP_ID_HW_CAN, ALP_CAP_ID_HW_CAN_FD, ALP_CAP_ID_HW_RTC, ALP_CAP_ID_HW_WDT, ALP_CAP_ID_HW_QENC, ALP_CAP_ID_HW_TIMER, ALP_CAP_ID_HW_PWM, ALP_CAP_ID_HW_ETHERNET, ALP_CAP_ID_HW_USB, ALP_CAP_ID_HW_MIPI_CSI, ALP_CAP_ID_HW_MIPI_DSI, ALP_CAP_ID_HW_LCDIF, ALP_CAP_ID_XSPI_DMA, ALP_CAP_ID_HEXSPI_DMA, ALP_CAP_ID_EMMC_DMA, ALP_CAP_ID_QUADSPI_DMA, ALP_CAP_ID_NPU_DRPAI, ALP_CAP_ID_HELIUM_MVE, ALP_CAP_ID_NEON, ALP_CAP_ID_GPU2D, ALP_CAP_ID_DAVE2D, ALP_CAP_ID_CRYPTOCELL, ALP_CAP_ID_INLINE_AES, ALP_CAP_ID_CAU, ALP_CAP_ID_DMA2D, ALP_CAP_ID_HW_I3C, ALP_CAP_ID_COUNT } alp_cap_id_t;",
+          "definition": "typedef enum { ALP_CAP_ID_HW_I2C, ALP_CAP_ID_HW_SPI, ALP_CAP_ID_HW_UART, ALP_CAP_ID_HW_I2S, ALP_CAP_ID_HW_PDM, ALP_CAP_ID_HW_ADC, ALP_CAP_ID_HW_DAC, ALP_CAP_ID_HW_CAN, ALP_CAP_ID_HW_CAN_FD, ALP_CAP_ID_HW_RTC, ALP_CAP_ID_HW_WDT, ALP_CAP_ID_HW_QENC, ALP_CAP_ID_HW_TIMER, ALP_CAP_ID_HW_PWM, ALP_CAP_ID_HW_ETHERNET, ALP_CAP_ID_HW_USB, ALP_CAP_ID_HW_MIPI_CSI, ALP_CAP_ID_HW_MIPI_DSI, ALP_CAP_ID_XSPI_DMA, ALP_CAP_ID_HEXSPI_DMA, ALP_CAP_ID_EMMC_DMA, ALP_CAP_ID_QUADSPI_DMA, ALP_CAP_ID_NPU_DRPAI, ALP_CAP_ID_HELIUM_MVE, ALP_CAP_ID_NEON, ALP_CAP_ID_GPU2D, ALP_CAP_ID_DAVE2D, ALP_CAP_ID_CRYPTOCELL, ALP_CAP_ID_INLINE_AES, ALP_CAP_ID_CAU, ALP_CAP_ID_DMA2D, ALP_CAP_ID_HW_I3C, ALP_CAP_ID_COUNT } alp_cap_id_t;",
           "enumerators": [
             "ALP_CAP_ID_HW_I2C",
             "ALP_CAP_ID_HW_SPI",
@@ -1834,7 +1834,6 @@
             "ALP_CAP_ID_HW_USB",
             "ALP_CAP_ID_HW_MIPI_CSI",
             "ALP_CAP_ID_HW_MIPI_DSI",
-            "ALP_CAP_ID_HW_LCDIF",
             "ALP_CAP_ID_XSPI_DMA",
             "ALP_CAP_ID_HEXSPI_DMA",
             "ALP_CAP_ID_EMMC_DMA",
@@ -1851,7 +1850,7 @@
             "ALP_CAP_ID_HW_I3C",
             "ALP_CAP_ID_COUNT"
           ],
-          "hash": "cacabf2cc15b87bb",
+          "hash": "0e0e4f9fcd6aed40",
           "kind": "enum"
         }
       },
@@ -7246,303 +7245,6 @@
       },
       "variables": {}
     },
-    "alp/chips/pca9451a.h": {
-      "functions": {
-        "pca9451a_deinit": {
-          "hash": "181412cdb2216aad",
-          "signature": "void pca9451a_deinit(pca9451a_t *ctx);"
-        },
-        "pca9451a_get_status": {
-          "hash": "fba5fc95a887c62a",
-          "signature": "alp_status_t pca9451a_get_status(pca9451a_t *ctx, pca9451a_status_t *out);"
-        },
-        "pca9451a_init": {
-          "hash": "d9f3ccd5e02c0781",
-          "signature": "alp_status_t pca9451a_init(pca9451a_t *ctx, alp_i2c_t *bus);"
-        },
-        "pca9451a_init_at": {
-          "hash": "cc6538bbbfacf4af",
-          "signature": "alp_status_t pca9451a_init_at(pca9451a_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);"
-        },
-        "pca9451a_rail_get_voltage_uv": {
-          "hash": "0032e72e903bc160",
-          "signature": "alp_status_t pca9451a_rail_get_voltage_uv(pca9451a_t *ctx, pca9451a_rail_t rail, int32_t *microvolts);"
-        },
-        "pca9451a_rail_is_enabled": {
-          "hash": "0e8282d30a7ea182",
-          "signature": "alp_status_t pca9451a_rail_is_enabled(pca9451a_t *ctx, pca9451a_rail_t rail, bool *enabled);"
-        },
-        "pca9451a_rail_set_enable": {
-          "hash": "d84e9ffbab1de331",
-          "signature": "alp_status_t pca9451a_rail_set_enable(pca9451a_t *ctx, pca9451a_rail_t rail, bool enable);"
-        },
-        "pca9451a_rail_set_voltage_uv": {
-          "hash": "21ba5bc329174af7",
-          "signature": "alp_status_t pca9451a_rail_set_voltage_uv(pca9451a_t *ctx, pca9451a_rail_t rail, int32_t microvolts);"
-        },
-        "pca9451a_read_reg": {
-          "hash": "dc64dd0863a11980",
-          "signature": "alp_status_t pca9451a_read_reg(pca9451a_t *ctx, uint8_t reg, uint8_t *out);"
-        },
-        "pca9451a_write_reg": {
-          "hash": "a70bf6cf38f3d9fe",
-          "signature": "alp_status_t pca9451a_write_reg(pca9451a_t *ctx, uint8_t reg, uint8_t val);"
-        }
-      },
-      "macros": {
-        "PCA9451A_I2C_ADDR": {
-          "hash": "efe6d4855f374819",
-          "value": "0x25u"
-        },
-        "PCA9451A_INT1_LOWVSYS": {
-          "hash": "72f598a6bee58215",
-          "value": "0x04u"
-        },
-        "PCA9451A_INT1_PWRON": {
-          "hash": "bd7da9ce9da1806c",
-          "value": "0x80u"
-        },
-        "PCA9451A_INT1_RSVD": {
-          "hash": "faeba1c4c1288269",
-          "value": "0x20u"
-        },
-        "PCA9451A_INT1_THERM_105": {
-          "hash": "f5d4e024583a142d",
-          "value": "0x02u"
-        },
-        "PCA9451A_INT1_THERM_125": {
-          "hash": "f2269ae67759f36d",
-          "value": "0x01u"
-        },
-        "PCA9451A_INT1_VR_FLT1": {
-          "hash": "d536b85c3ed5a61d",
-          "value": "0x10u"
-        },
-        "PCA9451A_INT1_VR_FLT2": {
-          "hash": "52aa54f2e5464c0e",
-          "value": "0x08u"
-        },
-        "PCA9451A_INT1_WDOGB": {
-          "hash": "ff694e6edd7c0670",
-          "value": "0x40u"
-        },
-        "PCA9451A_MAX_REGISTER": {
-          "hash": "420d2d21a3b514b3",
-          "value": "0x2Fu"
-        },
-        "PCA9451A_REG_BUCK123_DVS": {
-          "hash": "1055a15210a7192a",
-          "value": "0x0Cu"
-        },
-        "PCA9451A_REG_BUCK1CTRL": {
-          "hash": "fa71ae1ce495eb09",
-          "value": "0x10u"
-        },
-        "PCA9451A_REG_BUCK1OUT_DVS0": {
-          "hash": "fc92fdf3fbc32039",
-          "value": "0x11u"
-        },
-        "PCA9451A_REG_BUCK1OUT_DVS1": {
-          "hash": "b97c20b99073181b",
-          "value": "0x12u"
-        },
-        "PCA9451A_REG_BUCK2CTRL": {
-          "hash": "94adea5aa31ecbef",
-          "value": "0x13u"
-        },
-        "PCA9451A_REG_BUCK2OUT_DVS0": {
-          "hash": "a909c4b19890c612",
-          "value": "0x14u"
-        },
-        "PCA9451A_REG_BUCK2OUT_DVS1": {
-          "hash": "b58556dbdcc55822",
-          "value": "0x15u"
-        },
-        "PCA9451A_REG_BUCK3CTRL": {
-          "hash": "edf15a0e504a2bfe",
-          "value": "0x16u"
-        },
-        "PCA9451A_REG_BUCK3OUT_DVS0": {
-          "hash": "86240956b00fa6f0",
-          "value": "0x17u"
-        },
-        "PCA9451A_REG_BUCK3OUT_DVS1": {
-          "hash": "daa8b0e9a296448e",
-          "value": "0x18u"
-        },
-        "PCA9451A_REG_BUCK4CTRL": {
-          "hash": "b08177763542a936",
-          "value": "0x19u"
-        },
-        "PCA9451A_REG_BUCK4OUT": {
-          "hash": "5e64ff2480c4485c",
-          "value": "0x1Au"
-        },
-        "PCA9451A_REG_BUCK5CTRL": {
-          "hash": "dde86d854781ae80",
-          "value": "0x1Bu"
-        },
-        "PCA9451A_REG_BUCK5OUT": {
-          "hash": "29da6a39c0b72233",
-          "value": "0x1Cu"
-        },
-        "PCA9451A_REG_BUCK6CTRL": {
-          "hash": "4d09c97f9a1bfd72",
-          "value": "0x1Du"
-        },
-        "PCA9451A_REG_BUCK6OUT": {
-          "hash": "aaa167ee90b2bae0",
-          "value": "0x1Eu"
-        },
-        "PCA9451A_REG_CONFIG1": {
-          "hash": "968c8f039120570c",
-          "value": "0x09u"
-        },
-        "PCA9451A_REG_CONFIG2": {
-          "hash": "d93e6d5058d6562c",
-          "value": "0x0Au"
-        },
-        "PCA9451A_REG_DEV_ID": {
-          "hash": "1d6b288a0933d042",
-          "value": "0x00u"
-        },
-        "PCA9451A_REG_INT1": {
-          "hash": "1821da0478527190",
-          "value": "0x01u"
-        },
-        "PCA9451A_REG_INT1_MSK": {
-          "hash": "7dadba67c3895491",
-          "value": "0x02u"
-        },
-        "PCA9451A_REG_LDO1CTRL": {
-          "hash": "ce5976dc214279f1",
-          "value": "0x21u"
-        },
-        "PCA9451A_REG_LDO2CTRL": {
-          "hash": "642416ef92f82cfe",
-          "value": "0x22u"
-        },
-        "PCA9451A_REG_LDO3CTRL": {
-          "hash": "192f959db79a1b18",
-          "value": "0x23u"
-        },
-        "PCA9451A_REG_LDO4CTRL": {
-          "hash": "9a2a66f43553df1f",
-          "value": "0x24u"
-        },
-        "PCA9451A_REG_LDO5CTRL_L": {
-          "hash": "c332042ea598271f",
-          "value": "0x25u"
-        },
-        "PCA9451A_REG_LDO_AD_CTRL": {
-          "hash": "d9dcb98ba17f4335",
-          "value": "0x20u"
-        },
-        "PCA9451A_REG_LOADSW_CTRL": {
-          "hash": "6cedf112bc1a2f4e",
-          "value": "0x2Au"
-        },
-        "PCA9451A_REG_PWRCTRL": {
-          "hash": "60fdd3b3962f3a7b",
-          "value": "0x07u"
-        },
-        "PCA9451A_REG_PWRON_STAT": {
-          "hash": "0ab42f0a20603a75",
-          "value": "0x05u"
-        },
-        "PCA9451A_REG_RESET_CTRL": {
-          "hash": "434bf27010fda934",
-          "value": "0x08u"
-        },
-        "PCA9451A_REG_STATUS1": {
-          "hash": "6c2d2cc0ec64ac12",
-          "value": "0x03u"
-        },
-        "PCA9451A_REG_STATUS2": {
-          "hash": "4bb4465a9eaf4468",
-          "value": "0x04u"
-        },
-        "PCA9451A_REG_SWRST": {
-          "hash": "649962d6cf4f55e2",
-          "value": "0x06u"
-        },
-        "PCA9451A_REG_VRFLT1_MASK": {
-          "hash": "ae0a1b13b9934721",
-          "value": "0x2Du"
-        },
-        "PCA9451A_REG_VRFLT1_STS": {
-          "hash": "64c85988ee095ab0",
-          "value": "0x2Bu"
-        },
-        "PCA9451A_REG_VRFLT2_MASK": {
-          "hash": "2018718a592750ed",
-          "value": "0x2Eu"
-        },
-        "PCA9451A_REG_VRFLT2_STS": {
-          "hash": "5f9fc88ca3426f69",
-          "value": "0x2Cu"
-        }
-      },
-      "typedefs": {
-        "pca9451a_enmode_t": {
-          "definition": "typedef enum { PCA9451A_ENMODE_OFF = 0x00, PCA9451A_ENMODE_ONREQ = 0x01, PCA9451A_ENMODE_ONREQ_STBYREQ = 0x02, PCA9451A_ENMODE_ON = 0x03, } pca9451a_enmode_t;",
-          "enumerators": [
-            "PCA9451A_ENMODE_OFF = 0x00",
-            "PCA9451A_ENMODE_ONREQ = 0x01",
-            "PCA9451A_ENMODE_ONREQ_STBYREQ = 0x02",
-            "PCA9451A_ENMODE_ON = 0x03"
-          ],
-          "hash": "c282de79550f0804",
-          "kind": "enum"
-        },
-        "pca9451a_rail_t": {
-          "definition": "typedef enum { PCA9451A_RAIL_BUCK1 = 0, PCA9451A_RAIL_BUCK2, PCA9451A_RAIL_BUCK3, PCA9451A_RAIL_BUCK4, PCA9451A_RAIL_BUCK5, PCA9451A_RAIL_BUCK6, PCA9451A_RAIL_LDO1, PCA9451A_RAIL_LDO2, PCA9451A_RAIL_LDO3, PCA9451A_RAIL_LDO4, PCA9451A_RAIL_LDO5, PCA9451A_RAIL_COUNT } pca9451a_rail_t;",
-          "enumerators": [
-            "PCA9451A_RAIL_BUCK1 = 0",
-            "PCA9451A_RAIL_BUCK2",
-            "PCA9451A_RAIL_BUCK3",
-            "PCA9451A_RAIL_BUCK4",
-            "PCA9451A_RAIL_BUCK5",
-            "PCA9451A_RAIL_BUCK6",
-            "PCA9451A_RAIL_LDO1",
-            "PCA9451A_RAIL_LDO2",
-            "PCA9451A_RAIL_LDO3",
-            "PCA9451A_RAIL_LDO4",
-            "PCA9451A_RAIL_LDO5",
-            "PCA9451A_RAIL_COUNT"
-          ],
-          "hash": "56207fa7cc88ee7f",
-          "kind": "enum"
-        },
-        "pca9451a_status_t": {
-          "definition": "typedef struct { bool pwron; bool wdogb; bool vr_flt1; bool vr_flt2; bool low_vsys; bool therm_105; bool therm_125; uint8_t raw; } pca9451a_status_t;",
-          "fields": [
-            "bool pwron",
-            "bool wdogb",
-            "bool vr_flt1",
-            "bool vr_flt2",
-            "bool low_vsys",
-            "bool therm_105",
-            "bool therm_125",
-            "uint8_t raw"
-          ],
-          "hash": "f5b02e3fe77e5795",
-          "kind": "struct"
-        },
-        "pca9451a_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; uint8_t dev_id; } pca9451a_t;",
-          "fields": [
-            "bool initialised",
-            "alp_i2c_t *bus",
-            "uint8_t addr",
-            "uint8_t dev_id"
-          ],
-          "hash": "b8a90aaa1e545d53",
-          "kind": "struct"
-        }
-      },
-      "variables": {}
-    },
     "alp/chips/pi3dbs12212.h": {
       "functions": {
         "pi3dbs12212_deinit": {
@@ -11551,42 +11253,6 @@
       },
       "variables": {}
     },
-    "alp/ext/nxp/storage.h": {
-      "functions": {
-        "alp_nxp_storage_otfad_provision": {
-          "hash": "fba3b8139815badd",
-          "signature": "alp_status_t alp_nxp_storage_otfad_provision(alp_storage_t *s, uint8_t window_id, const uint8_t *key, const uint8_t *counter);"
-        },
-        "alp_nxp_storage_otfad_set_window": {
-          "hash": "bd5a1b3e18f2f5d3",
-          "signature": "alp_status_t alp_nxp_storage_otfad_set_window(alp_storage_t *s, uint8_t window_id, uint32_t start_addr, uint32_t end_addr);"
-        }
-      },
-      "macros": {
-        "ALP_EXT_NXP_STORAGE_AVAILABLE": {
-          "hash": "a814acd2b79543a7",
-          "value": "1"
-        },
-        "ALP_NXP_STORAGE_OTFAD_WINDOW_COUNT": {
-          "hash": "9189b764c02da9b5",
-          "value": "4u"
-        }
-      },
-      "typedefs": {
-        "alp_nxp_storage_otfad_slot_t": {
-          "definition": "typedef enum { ALP_NXP_STORAGE_OTFAD_SLOT_0 = 0, ALP_NXP_STORAGE_OTFAD_SLOT_1 = 1, ALP_NXP_STORAGE_OTFAD_SLOT_2 = 2, ALP_NXP_STORAGE_OTFAD_SLOT_3 = 3, } alp_nxp_storage_otfad_slot_t;",
-          "enumerators": [
-            "ALP_NXP_STORAGE_OTFAD_SLOT_0 = 0",
-            "ALP_NXP_STORAGE_OTFAD_SLOT_1 = 1",
-            "ALP_NXP_STORAGE_OTFAD_SLOT_2 = 2",
-            "ALP_NXP_STORAGE_OTFAD_SLOT_3 = 3"
-          ],
-          "hash": "c98f98b2f8d1b7d9",
-          "kind": "enum"
-        }
-      },
-      "variables": {}
-    },
     "alp/ext/renesas/camera.h": {
       "functions": {
         "alp_renesas_camera_isp_3a_window_set": {
@@ -12597,7 +12263,7 @@
       },
       "typedefs": {
         "alp_core_id_t": {
-          "definition": "typedef enum { ALP_CORE_SELF = 0, ALP_CORE_M55_HP = 1, ALP_CORE_M55_HE = 2, ALP_CORE_A32_0 = 3, ALP_CORE_A32_1 = 4, ALP_CORE_A32_CLUSTER = 5, ALP_CORE_M33_SM = 6, ALP_CORE_A55_CLUSTER = 7, ALP_CORE_M33 = 8 } alp_core_id_t;",
+          "definition": "typedef enum { ALP_CORE_SELF = 0, ALP_CORE_M55_HP = 1, ALP_CORE_M55_HE = 2, ALP_CORE_A32_0 = 3, ALP_CORE_A32_1 = 4, ALP_CORE_A32_CLUSTER = 5, ALP_CORE_M33_SM = 6, ALP_CORE_A55_CLUSTER = 7 } alp_core_id_t;",
           "enumerators": [
             "ALP_CORE_SELF = 0",
             "ALP_CORE_M55_HP = 1",
@@ -12606,10 +12272,9 @@
             "ALP_CORE_A32_1 = 4",
             "ALP_CORE_A32_CLUSTER = 5",
             "ALP_CORE_M33_SM = 6",
-            "ALP_CORE_A55_CLUSTER = 7",
-            "ALP_CORE_M33 = 8"
+            "ALP_CORE_A55_CLUSTER = 7"
           ],
-          "hash": "134b1f44f4947092",
+          "hash": "1424629e96916fb1",
           "kind": "enum"
         },
         "alp_hwsem_t": {
@@ -14840,10 +14505,6 @@
           "hash": "a157ade572b177ec",
           "value": "(ALP_SOC_I3C_COUNT > 0)"
         },
-        "ALP_CAP_HW_LCDIF": {
-          "hash": "e7982d60d184e2d8",
-          "value": "(ALP_SOC_LCDIF_COUNT > 0)"
-        },
         "ALP_CAP_HW_MIPI_CSI": {
           "hash": "d6b4fe2c839d101a",
           "value": "(ALP_SOC_MIPI_CSI_COUNT > 0)"
@@ -14990,10 +14651,6 @@
         },
         "ALP_SOC_INLINE_AES": {
           "hash": "58e7e017d23b14b0",
-          "value": "UINT16_MAX"
-        },
-        "ALP_SOC_LCDIF_COUNT": {
-          "hash": "1d58f7f427bfe001",
           "value": "UINT16_MAX"
         },
         "ALP_SOC_MIPI_CSI_COUNT": {

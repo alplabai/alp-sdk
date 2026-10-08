@@ -11,9 +11,10 @@
  *   (e) close releases handle; NULL inputs are idempotent
  *   (f) sw_fallback NOSUPPORT contract via direct ops-table dispatch
  *   (g) vendor-ext gating: non-Alif handle -> NOT_PRESENT_ON_THIS_SOC
- *       from the Alif SecAES surface; non-NXP handle from the NXP
- *       OTFAD surface
- *   (h) OTFAD window-bounds validation reaches the body
+ *       from the Alif SecAES surface
+ *   (h) the same gate holds for a handle bound to a test-local fake
+ *       second vendor (the vendor-ext gate is by vendor name, not by
+ *       "is it sw_fallback")
  *   (i) overflow-safe range helper for fixed-capacity backends
  *   (j) SecAES key / key_bytes validation reaches the body, and
  *       NOSUPPORT on a build with no SE transport linked (issue #224)
@@ -41,7 +42,6 @@
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
 #include <alp/ext/alif/storage.h>
-#include <alp/ext/nxp/storage.h>
 #include <alp/storage.h>
 
 #include "../../../../src/backends/storage/storage_ops.h"
@@ -207,14 +207,12 @@ ZTEST(alp_storage_registry, test_vendor_ext_gates_non_matching_backends)
 	static const uint8_t key16[16] = { 0 };
 	static const uint8_t iv16[16]  = { 0 };
 	zassert_equal(alp_alif_storage_secaes_key_provision(NULL, key16, 16u), ALP_ERR_INVAL);
-	zassert_equal(alp_nxp_storage_otfad_provision(NULL, 0u, key16, iv16), ALP_ERR_INVAL);
 
 	uint32_t status_out = 0u;
 	zassert_equal(alp_alif_storage_secaes_get_status(NULL, &status_out), ALP_ERR_INVAL);
-	zassert_equal(alp_nxp_storage_otfad_set_window(NULL, 0u, 0u, 1024u), ALP_ERR_INVAL);
 
-	/* Build a fake handle pinned to sw_fallback (vendor != "alif" /
-     * "nxp") -- both vendor ext surfaces must return
+	/* Build a fake handle pinned to sw_fallback (vendor != "alif") --
+     * the Alif vendor ext surface must return
      * NOT_PRESENT_ON_THIS_SOC. */
 	const alp_backend_t *be = alp_backend_select("storage", "alif:ensemble:e7");
 	zassert_not_null(be);
@@ -234,21 +232,19 @@ ZTEST(alp_storage_registry, test_vendor_ext_gates_non_matching_backends)
 	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 	zassert_equal(alp_alif_storage_secaes_get_status(&h, &status_out),
 	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-	zassert_equal(alp_nxp_storage_otfad_provision(&h, 0u, key16, iv16),
-	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
-	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 0u, 1024u),
-	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 }
 
-/* ---------- (h) OTFAD window-bounds validation reaches the body ---------- */
+/* ---------- (h) fake second vendor is gated out too ---------------------- */
 
-ZTEST(alp_storage_registry, test_otfad_window_alignment_validation)
+ZTEST(alp_storage_registry, test_vendor_ext_gates_fake_second_vendor)
 {
-	/* Synthesise a handle that LOOKS NXP (so the body's vendor-gate
-     * passes) and then exercises the alignment + ordering checks. */
-	static const alp_backend_t fake_nxp_backend = {
-		.silicon_ref = "nxp:imx9:imx93",
-		.vendor      = "nxp",
+	/* A test-local backend row for a vendor that is neither "alif" nor
+     * "sw_fallback".  The vendor-ext gate keys on the vendor name, so
+     * this handle must be refused by the Alif surface exactly like the
+     * sw_fallback one above. */
+	static const alp_backend_t fake_acme_backend = {
+		.silicon_ref = "acme:soc:x1",
+		.vendor      = "acme",
 		.base_caps   = 0u,
 		.priority    = 100,
 		.ops         = NULL,
@@ -256,19 +252,17 @@ ZTEST(alp_storage_registry, test_otfad_window_alignment_validation)
 	};
 	struct alp_storage h;
 	memset(&h, 0, sizeof(h));
-	h.in_use  = true;
-	h.backend = &fake_nxp_backend;
+	h.in_use    = true;
+	h.backend   = &fake_acme_backend;
+	h.lifecycle = ALP_HANDLE_LC_OPEN;
 
-	/* Window id out of range -> INVAL. */
-	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 99u, 0u, 1024u), ALP_ERR_INVAL);
-	/* end <= start -> INVAL. */
-	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 1024u, 1024u), ALP_ERR_INVAL);
-	/* Misaligned start -> INVAL. */
-	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 512u, 1024u), ALP_ERR_INVAL);
-	/* Misaligned end -> INVAL. */
-	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 0u, 1500u), ALP_ERR_INVAL);
-	/* Aligned + ordered -> NOSUPPORT (vendor pack not landed). */
-	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 0u, 1024u), ALP_ERR_NOSUPPORT);
+	static const uint8_t key16[16]  = { 0 };
+	uint32_t             status_out = 0u;
+
+	zassert_equal(alp_alif_storage_secaes_key_provision(&h, key16, 16u),
+	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
+	zassert_equal(alp_alif_storage_secaes_get_status(&h, &status_out),
+	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 }
 
 /* ---------- (i) read-only handle: write() and erase() agree ------------- */

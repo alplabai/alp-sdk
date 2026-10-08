@@ -298,10 +298,8 @@ target_sources(alp_sdk PRIVATE
     # dispatcher owns the public alp_gpu2d_* symbols (the split stub backend
     # is muted below via ALP_VENDOR_OVERRIDES_GPU2D); the portable
     # sw_fallback is a REAL pure-C fill/blit/blend (the same backend
-    # native_sim unit-tests + the E8 bench ran), so Linux apps --
-    # including the i.MX 93 A55 cluster, whose PXP/libg2d silicon
-    # backend is future work (see ADR 0008) -- get working 2D ops
-    # rather than NOSUPPORT.  A future Linux 2D-engine backend
+    # native_sim unit-tests + the E8 bench ran), so Linux apps get
+    # working 2D ops rather than NOSUPPORT.  A future Linux 2D-engine backend
     # registers at priority 100 above it, exactly like the
     # yocto_drv.c backends of the classes above.
     ${CMAKE_CURRENT_SOURCE_DIR}/../gpu2d_dispatch.c

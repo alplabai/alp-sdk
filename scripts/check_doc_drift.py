@@ -201,7 +201,7 @@ _ALLOWLIST: set[str] = {
     # `src/security/optiga_trust_m_bridge.c` the emitted comment cites
     # does not exist (only the probe-only `chips/optiga_trust_m/
     # optiga_trust_m.c` chip driver is real, see #1164). A real, separate
-    # gap from #1228's imx93 table -- allowlisted rather than silently
+    # gap from #1228 -- allowlisted rather than silently
     # re-widening the harvest, pending a maintainer decision to finish
     # the PSA<->OPTIGA wiring or mark it not-yet-implemented in the doc.
     "ALP_SDK_PSA_ATTESTATION_OPTIGA",
@@ -280,7 +280,7 @@ _SYMBOL_RE = re.compile(r"\b(?:CONFIG_)?(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b")
 # `src/**/*.c`+`.cpp` layer went blind to a renamed-away Kconfig symbol
 # as long as one stale reference to the old name remained in a source
 # file (mutation-proven: renaming `config
-# ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65` out of Kconfig left the gate
+# ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85` out of Kconfig left the gate
 # green because src/backends/inference/tflm.cpp's `#elif
 # defined(CONFIG_...)` still matched).  A real Kconfig `config ALP_SDK_FOO`
 # line has no `CONFIG_` glued in front, so it still matches this bare

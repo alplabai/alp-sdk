@@ -125,7 +125,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 
 The top-level [`examples/README.md`](../README.md) lists every
 example.  This sub-index exists because AEN-specific examples
-need an AEN-family SoM (no fallback path on V2N / N93) -- having
+need an AEN-family SoM (no fallback path on V2N) -- having
 them in their own directory makes that constraint visible from
 the filesystem layout alone.  Cross-family examples (gpio,
 i2c, pwm, ...) stay at the top level of `examples/`.

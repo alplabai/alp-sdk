@@ -16,7 +16,7 @@ Two independent halves, both pinned below:
   1. No Zephyr slice -> no sysbuild overlay.  sysbuild exists only inside
      a Zephyr build (`west build --sysbuild -- -DSB_CONF_FILE=...`).
   2. `boot.method:` defaults PER SoM FAMILY, the value board.schema.json
-     has always documented ("AEN/N93 -> mcuboot, V2N/V2N-M1 -> none on the
+     has always documented ("AEN -> mcuboot, V2N/V2N-M1 -> none on the
      Zephyr slice since U-Boot owns boot on Linux") and nothing implemented.
 
 Run locally:
@@ -87,7 +87,7 @@ AEN_METHOD_OMITTED = """
 # EXPLICIT `method: mcuboot` + rsa3072 on a family that permits rsa3072:
 # the #807 refusal is still correct here and must survive -- silently
 # shipping rsa2048's key length for an rsa3072-declared key is the bug
-# that raise exists to prevent.  It has to be a V2N/i.MX9 board: AEN is
+# that raise exists to prevent.  It has to be a V2N board: AEN is
 # the one family `validate._boot_signing_supported_for_family` rejects
 # rsa3072 for outright, so an AEN board never reaches this emitter.
 V2N_EXPLICIT_MCUBOOT_RSA3072 = """

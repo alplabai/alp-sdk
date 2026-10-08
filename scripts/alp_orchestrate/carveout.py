@@ -85,7 +85,7 @@ def _region_ipc_eligibility(
     Called only once `aperture` has already resolved non-`None` -- the
     caller (`_candidate_regions` below) special-cases `aperture is None`
     itself, honouring the legacy `carveout:` flag verbatim so this whole
-    function is a no-op on every non-Alif SoM (V2N/V2M/NX9101).
+    function is a no-op on every non-Alif SoM (V2N/V2M).
 
     Eligible iff the region's derived class (`aperture.classify_region`)
     is not `flash`, AND -- for a region the SoM preset authored itself --
@@ -334,7 +334,7 @@ def resolve_carve_outs(
                 f"metadata.  Fill `mailbox.controller:` in "
                 f"metadata/e1m_modules/{project.sku}.yaml with the "
                 f"vendor mailbox node name (e.g. `renesas_mhu`, "
-                f"`nxp_mu`, `alif_mhuv2`) or remove the rpmsg "
+                f"`alif_mhuv2`) or remove the rpmsg "
                 f"entries from board.yaml.")
         else:
             reserved_tags = {

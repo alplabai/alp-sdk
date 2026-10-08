@@ -20,7 +20,7 @@ The signing keys behind OTA are the **same keys** that gate
 secure boot:
 
 - AEN-Zephyr: MCUboot ECDSA-P256 (see [`docs/secure-boot.md`](secure-boot.md)).
-- Yocto (V2N / V2N-M1 / i.MX 93): per-rootfs ECDSA signature
+- Yocto (V2N / V2N-M1): per-rootfs ECDSA signature
   verified by U-Boot before MCUboot-style A/B swap.
 
 A signed artefact accepted as a boot image is therefore also

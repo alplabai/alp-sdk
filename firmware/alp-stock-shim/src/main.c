@@ -26,7 +26,7 @@
 #include <alp/protocol/amp_beacon.h>
 
 /* Only the V2N / V2M CM33 boards have the `rsctbl` window; every other core
- * (AEN M55, NX9101) gets the plain idle loop below. */
+ * (AEN M55) gets the plain idle loop below. */
 #if DT_NODE_EXISTS(DT_NODELABEL(rsctbl))
 /* The beacon is the top 16 bytes of the rsctbl page, the same layout the RPC
  * firmware (examples/multicore/rpmsg-v2n/m33_sm) and the A55 backend use:

@@ -27,7 +27,7 @@ only metadata/chips/<id>.yaml's driver_status was bound to anything (its
 Only `partial`/`complete` are treated as claiming a driver exists now;
 `none` makes no claim and `planned` is a roadmap intent, not a claim about
 today's tree (mirrors metadata/chips/*.yaml's own use of `planned` for
-chips with no Alp SDK driver at all, e.g. murata_lbee0zz2kl.yaml).
+chips with no Alp SDK driver at all).
 
 This gate is deliberately about the ABSENCE of a driver as much as its
 presence -- a preset that upgrades one of these fields without adding the

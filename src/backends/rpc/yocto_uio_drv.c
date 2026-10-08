@@ -14,7 +14,7 @@
  * ("renesas:rzv2n:n44", ALP_SOC_REF_STR on this SoC -- see
  * include/alp/soc_caps.h) so it outranks yocto_drv.c's
  * silicon_ref="*"/priority=100 registration on V2N builds only; every
- * other Linux target (i.MX93, DEEPX DX-M1, ...) keeps using the
+ * other Linux target (DEEPX DX-M1, ...) keeps using the
  * `/dev/rpmsg*` backend unchanged (mirrors the exact pattern
  * src/backends/camera/v2n_n44_isp.c already uses to override
  * src/backends/camera/zephyr_video.c on this one SoC -- see that

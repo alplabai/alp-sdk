@@ -46,7 +46,6 @@ from alp_project_loader import (  # noqa: E402
     resolve_soc_path,
     resolve_targets,
 )
-from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
 from strict_loaders import strict_json_loads, strict_yaml_load  # noqa: E402
 
 # Power/ground nets are allowed as pin signals without a signals[] entry.
@@ -655,7 +654,7 @@ def _check_som_memory_population(som_files) -> list:
       - `memory.dram_mbit` is decided by `on_module.hyperram`;
         `memory.flash_mbit` by every `on_module.ospi_memories[]` entry.
         A preset that declares neither block (V2N/V2M's LPDDR4X + eMMC,
-        E1M-NX9101's open capacities) states no population fact here and
+        an open-capacity preset) states no population fact here and
         is skipped -- there is nothing to bind to, and inventing one
         would be inventing a hardware value.  A skipped preset prints an
         explicit `SKIP <rel> (nothing bound ...)` line, so "this file was
@@ -680,7 +679,7 @@ def _check_som_memory_population(som_files) -> list:
       - Every relevant part `assembled: false` => the figure MUST be `0`.
         This is the `0`-vs-`TBD` distinction #915 established: `0` is a
         RESOLVED fact ("populates none"), `TBD` is an open question
-        ("nobody has written the capacity down yet", E1M-NX9101's state).
+        ("nobody has written the capacity down yet").
         A preset that has answered the question may not then spell the
         answer `TBD`, and may not claim a capacity either.
       - Any relevant part populated (`assembled: true`, or the key
@@ -1193,37 +1192,6 @@ def _check_soc_npu_pairing(soc_files) -> list:
     Table 4-13 fans NPU_HG_IRQ to all three cores -- GIC400_IRQS[355] on the
     A32, M55HP_IRQS[366] / M55HE_IRQS[366] on the M55s (366 is the M55 NVIC
     number, not an A32 IRQ; the A32's own number, via GIC400, is 355).
-
-    The i.MX 93 Ethos-U65 (`nxp:imx9:imx93`) is the same kind of omission but
-    on WEAKER evidence, and the two must not be conflated. IMX93RM Rev. 7
-    (2026-02-10) §2.2 "System memory map used by all initiators" Table 4
-    lists a 4 KB "NPU Controller" region (4A90_0000 (NS) / 5A90_0000 (S)) in
-    the memory map used by ALL initiators, not one; Table 5, "System memory
-    map (Cortex-M33)", repeats the identical row in the Cortex-M33's OWN
-    memory map too -- so the block sits in both, not exclusively in either.
-    §17.2.8 "Interrupt signals" says only "See Arm's General Interrupt
-    Controller (GIC) documentation for NPU block interrupts" -- the GIC is
-    the Cortex-A55's controller, not the M33's NVIC. Chapter 17 never names a
-    host core, repeatedly using Arm's generic Ethos-U wording ("the external
-    host application processor", §17.2 and §17.2.9) instead of an i.MX
-    93-specific assignment. Unlike the E8 HWRM's Table 10-2, this is an
-    all-initiators memory map plus a GIC pointer, not a per-master access
-    table: it does not enumerate which masters may reach the NPU Controller
-    (TRDC governs actual masters, not this chapter), and it names no host
-    core at all. So imx93's single Ethos-U65 instance also omits
-    `paired_core`, but not for the E8's reason ("verified as shared") --
-    for the opposite one ("no pairing documented, period"). Do not add a
-    `paired_core` to the imx93 SoC spec on the strength of this manual; the
-    absence stays deliberate.
-
-    That silicon-documentation gap does not mean no core drives the NPU
-    today: NXP's own shipped Yocto/Linux driver stack
-    (`nxp-imx/ethos-u-driver-stack-imx`) runs the Ethos-U driver on the
-    Cortex-M33, with Linux on the Cortex-A55 dispatching to it over shared
-    memory and mailbox IRQs -- a separate, sourced, software-stack fact (see
-    `vendors/nxp-imx93/README.md`) that this omission does not contradict.
-    `paired_core` records documented silicon wiring, not which core a given
-    software stack happens to run on, so it still carries no value here.
     Returns a failure list shaped like `_check_files()`.
     """
     failures: list[tuple[Path, list[str]]] = []
@@ -2517,7 +2485,6 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
             som_docs[doc["sku"]] = doc
 
     families_seen: set[str] = set()
-    family_to_som: dict[str, str] = {}
     for idx, cell in enumerate(_as_list(data.get("familyMatrix"))):
         if not isinstance(cell, dict):
             continue
@@ -2526,8 +2493,6 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
         core = cell.get("core")
         if isinstance(family, str):
             families_seen.add(family)
-            if isinstance(som, str):
-                family_to_som[family] = som
         if isinstance(som, (dict, list)):
             # A dict/list `som` is unhashable -- `som_docs.get(som)` below
             # would raise `TypeError: unhashable type`. Every other
@@ -2582,32 +2547,6 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     if missing_families:
         msgs.append("familyMatrix: missing supported SoM families: "
                     + ", ".join(sorted(missing_families)))
-
-    # `excludedFamilies` RATCHET (#1025 round-2 review): each entry claims
-    # its family's SoM has no buildable hw_rev at all -- assert that against
-    # live metadata the same way `excludedLibraries` above is asserted to
-    # still be Tier A, instead of trusting the prose forever.
-    for family, _reason in sorted(_as_dict(data.get("excludedFamilies")).items()):
-        som = family_to_som.get(family)
-        if som is None:
-            msgs.append(f"excludedFamilies[{family}]: no familyMatrix cell "
-                        f"for this family to check against")
-            continue
-        doc = som_docs.get(som)
-        hw_rev = doc.get("default_hw_rev") if doc else None
-        try:
-            family_dir = _sku_family(som) if doc else None
-        except ValueError:
-            family_dir = None
-        if not family_dir or not hw_rev:
-            msgs.append(f"excludedFamilies[{family}]: cannot resolve "
-                        f"family_dir/default_hw_rev for som `{som}`")
-            continue
-        stale = assert_exclusion_still_not_buildable(
-            REPO / "metadata", family_dir, hw_rev,
-            gate=f"tier-a-library-ci.json excludedFamilies[{family}]")
-        if stale:
-            msgs.append(stale)
 
     if msgs:
         print(f"FAIL {rel}")

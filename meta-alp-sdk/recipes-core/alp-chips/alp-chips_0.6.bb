@@ -36,7 +36,7 @@ EXTRA_OECMAKE = " \
     -DALP_BUILD_CHIPS_ONLY=ON \
 "
 
-# Per-machine chip subset.  V2N / V2N-M1 / N93 carriers all use
+# Per-machine chip subset.  V2N / V2N-M1 carriers all use
 # the same E1M / E1M-X EVK, so the chip set is largely identical;
 # only the peripheral routing underneath differs (handled by
 # alp-sdk's Linux backend).

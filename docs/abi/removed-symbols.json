@@ -243,6 +243,645 @@
       "issue": 2692,
       "reason": "The raw one-shot POWER_MODE_SET wrapper never recorded that a Deep-sleep request had latched, so the next command's SPI frame was lost in the CS wake; gd32g553_set_power_mode() validates the request, gates it on the bridge protocol minor, tracks the asleep state and runs the wake procedure before the next command.",
       "replacement": "gd32g553_set_power_mode"
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "function",
+      "symbol": "pca9451a_deinit",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "function",
+      "symbol": "pca9451a_get_status",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "function",
+      "symbol": "pca9451a_init",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "function",
+      "symbol": "pca9451a_init_at",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "function",
+      "symbol": "pca9451a_rail_get_voltage_uv",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "function",
+      "symbol": "pca9451a_rail_is_enabled",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "function",
+      "symbol": "pca9451a_rail_set_enable",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "function",
+      "symbol": "pca9451a_rail_set_voltage_uv",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "function",
+      "symbol": "pca9451a_read_reg",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "function",
+      "symbol": "pca9451a_write_reg",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "typedef",
+      "symbol": "pca9451a_enmode_t",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "typedef",
+      "symbol": "pca9451a_rail_t",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "typedef",
+      "symbol": "pca9451a_status_t",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "typedef",
+      "symbol": "pca9451a_t",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_I2C_ADDR",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_INT1_LOWVSYS",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_INT1_PWRON",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_INT1_RSVD",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_INT1_THERM_105",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_INT1_THERM_125",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_INT1_VR_FLT1",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_INT1_VR_FLT2",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_INT1_WDOGB",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_MAX_REGISTER",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK123_DVS",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK1CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK1OUT_DVS0",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK1OUT_DVS1",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK2CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK2OUT_DVS0",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK2OUT_DVS1",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK3CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK3OUT_DVS0",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK3OUT_DVS1",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK4CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK4OUT",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK5CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK5OUT",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK6CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_BUCK6OUT",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_CONFIG1",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_CONFIG2",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_DEV_ID",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_INT1",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_INT1_MSK",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_LDO1CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_LDO2CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_LDO3CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_LDO4CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_LDO5CTRL_L",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_LDO_AD_CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_LOADSW_CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_PWRCTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_PWRON_STAT",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_RESET_CTRL",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_STATUS1",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_STATUS2",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_SWRST",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_VRFLT1_MASK",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_VRFLT1_STS",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_VRFLT2_MASK",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/chips/pca9451a.h",
+      "category": "macro",
+      "symbol": "PCA9451A_REG_VRFLT2_STS",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the PCA9451A on-module PMIC driver went with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/ext/nxp/storage.h",
+      "category": "function",
+      "symbol": "alp_nxp_storage_otfad_provision",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the NXP FlexSPI OTFAD vendor extension went with it. No other NXP silicon is supported.",
+      "replacement": null
+    },
+    {
+      "header": "alp/ext/nxp/storage.h",
+      "category": "function",
+      "symbol": "alp_nxp_storage_otfad_set_window",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the NXP FlexSPI OTFAD vendor extension went with it. No other NXP silicon is supported.",
+      "replacement": null
+    },
+    {
+      "header": "alp/ext/nxp/storage.h",
+      "category": "typedef",
+      "symbol": "alp_nxp_storage_otfad_slot_t",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the NXP FlexSPI OTFAD vendor extension went with it. No other NXP silicon is supported.",
+      "replacement": null
+    },
+    {
+      "header": "alp/ext/nxp/storage.h",
+      "category": "macro",
+      "symbol": "ALP_EXT_NXP_STORAGE_AVAILABLE",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the NXP FlexSPI OTFAD vendor extension went with it. No other NXP silicon is supported.",
+      "replacement": null
+    },
+    {
+      "header": "alp/ext/nxp/storage.h",
+      "category": "macro",
+      "symbol": "ALP_NXP_STORAGE_OTFAD_WINDOW_COUNT",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 support was removed from the SDK (the module was never produced); the NXP FlexSPI OTFAD vendor extension went with it. No other NXP silicon is supported.",
+      "replacement": null
+    },
+    {
+      "header": "alp/soc_caps.h",
+      "category": "macro",
+      "symbol": "ALP_SOC_LCDIF_COUNT",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 was the only SoC with an LCDIF parallel-RGB display controller; the capability was removed with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/soc_caps.h",
+      "category": "macro",
+      "symbol": "ALP_CAP_HW_LCDIF",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 was the only SoC with an LCDIF parallel-RGB display controller; the capability was removed with it.",
+      "replacement": null
+    },
+    {
+      "header": "alp/cap.h",
+      "category": "macro",
+      "symbol": "ALP_CAP_ID_HW_LCDIF",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "E1M-NX9101 / NXP i.MX 93 was the only SoC with an LCDIF parallel-RGB display controller; the capability was removed with it. (an enumerator of alp_cap_id_t; later enumerators shift down by one.)",
+      "replacement": null
+    },
+    {
+      "header": "alp/mproc.h",
+      "category": "macro",
+      "symbol": "ALP_CORE_M33",
+      "release": "v0.17.0",
+      "issue": 0,
+      "reason": "ALP_CORE_M33 addressed the Cortex-M33 of E1M-NX9101 / NXP i.MX 93, which was removed from the SDK (the module was never produced). An enumerator of alp_core_id_t; the other enumerators keep their values. The V2N system-manager core is ALP_CORE_M33_SM.",
+      "replacement": null
     }
   ]
 }

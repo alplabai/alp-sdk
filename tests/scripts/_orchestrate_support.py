@@ -45,7 +45,7 @@ def _scratch_metadata_root(
     touches (#1485).
 
     `soc_rel` is `(vendor, family, filename)`, e.g.
-    `("nxp", "imx9", "imx93.json")` -- the real SoC-JSON this copies
+    `("alif", "ensemble", "e3.json")` -- the real SoC-JSON this copies
     into `metadata/socs/<vendor>/<family>/<filename>` in the scratch
     root, at the same relative path `resolve_soc_path()` expects.
 
@@ -65,7 +65,7 @@ def _scratch_metadata_root(
     own `<sku>.yaml` preset body into the second path.
 
     Extracted from three near-identical copies of this scaffolding
-    (#2096 review): `_synthetic_nx9101_root` and
+    (#2096 review): `_synthetic_tbd_mailbox_root` and
     `_synthetic_aen_unresolved_base_root` below, plus a third inline in
     `test_orchestrate_memory.py::test_resolve_carve_outs_blocks_on_no_reserved_channel`
     that predated #1485 and had silently drifted out of copying
@@ -99,44 +99,47 @@ def _scratch_metadata_root(
     return meta, e1m
 
 
-def _synthetic_nx9101_root(tmp_path: Path) -> Path:
+def _synthetic_tbd_mailbox_root(tmp_path: Path) -> Path:
     """Build a scratch metadata root (`_scratch_metadata_root`) carrying
-    a synthetic E1M-NX9101 preset, isolated from the repo's real
-    `metadata/e1m_modules/imx93/hw-revisions.yaml`. Returns the scratch
-    metadata root.
+    a synthetic E1M-AEN-shaped preset (`E1M-AEN898`) whose
+    `mailbox.controller` and `on_module.wifi_ble` are both `TBD`,
+    isolated from the repo's real `metadata/e1m_modules/` presets.
+    Returns the scratch metadata root.
 
-    Why: #1025's hw_rev-buildable gate refuses the REAL E1M-NX9101
-    outright (its only hw_rev, imx93 r1, is `status: tbd`) before
-    `load_board_yaml` ever reaches SoM-preset-specific logic
-    (mailbox-controller-TBD carve-out blocking, wifi_ble-TBD IoT
-    fallback, ...) that several tests need to exercise in isolation,
-    and there is no second, buildable NX9101 hw_rev to pick instead.
-    `family_revision_buildable` on a MISSING hw-revisions.yaml table
-    returns None (unknown), not False, so a scratch root with no
-    `e1m_modules/imx93/hw-revisions.yaml` at all makes the #1025 gate
-    a no-op here -- this is test isolation of the SoM-preset logic, not
-    a claim about the real E1M-NX9101's buildability (which stays
-    refused everywhere else in the suite)."""
-    meta, e1m = _scratch_metadata_root(tmp_path, ("nxp", "imx9", "imx93.json"))
+    Why: no shipped preset carries the mailbox-controller-TBD or
+    wifi_ble-TBD placeholders any more, but the SoM-preset-specific
+    logic that reads them (mailbox-controller-TBD carve-out blocking,
+    the generic-Zephyr IoT fallback for an unknown wireless provider)
+    still needs exercising in isolation. As with
+    `_synthetic_aen_unresolved_base_root`, no
+    `e1m_modules/aen/hw-revisions.yaml` table exists in this scratch
+    root, so `family_revision_buildable()` returns None (unknown, not
+    refused) and board.yaml can omit `som.hw_rev` entirely.
 
-    preset = e1m / "E1M-NX9101.yaml"
+    `sku: E1M-AEN898` deliberately isn't a real SKU number; the
+    `AEN[3-8][0-9]{2}` SKU pattern accepts it. Silicon is
+    `alif:ensemble:e3` (two Zephyr cores, `m55_hp` + `m55_he`)."""
+    meta, e1m = _scratch_metadata_root(
+        tmp_path, ("alif", "ensemble", "e3.json"))
+
+    preset = e1m / "E1M-AEN898.yaml"
     preset.write_text(textwrap.dedent("""
         schema_version: 1
-        sku: E1M-NX9101
-        family: nxp-imx9
-        silicon: nxp:imx9:imx93
+        sku: E1M-AEN898
+        family: alif-ensemble
+        silicon: alif:ensemble:e3
         on_module:
           wifi_ble: TBD
         topology:
-          a55_cluster:
-            os: yocto
-            app: alp-image-edge
-            machine: e1m-nx9101-a55
-            toolchain: poky-glibc
-          m33:
+          m55_hp:
             os: zephyr
             app: alp-stock-shim
-            board: alp_e1m_nx9101_m33
+            board: alp_e1m_aentest_m55_hp
+            toolchain: arm-zephyr-eabi
+          m55_he:
+            os: zephyr
+            app: alp-stock-shim
+            board: alp_e1m_aentest_m55_he
             toolchain: arm-zephyr-eabi
         mailbox:
           controller: TBD
@@ -166,12 +169,9 @@ def _synthetic_aen_unresolved_base_root(tmp_path: Path) -> Path:
     seven rows as they stood before #2053/#2102 (same SoC family, same
     shape) -- not a synthetic layout invented for this fixture.
 
-    Sibling of `_synthetic_nx9101_root` above, not folded into it: that
-    helper's docstring and its one preset body are already
-    NX9101-specific (the #1025 hw_rev-buildable-gate workaround, the
-    imx93 SoC copy); the two share only the scratch-root scaffolding,
-    factored out into `_scratch_metadata_root` above, not the preset
-    bodies themselves.
+    Sibling of `_synthetic_tbd_mailbox_root` above: the two share only the
+    scratch-root scaffolding, factored out into `_scratch_metadata_root`
+    above, not the preset bodies themselves.
 
     `sku: E1M-AEN899` deliberately isn't a real SKU number (E1M-AEN301..
     803 are all taken and more may ship later) -- the `AEN` prefix alone
@@ -180,7 +180,7 @@ def _synthetic_aen_unresolved_base_root(tmp_path: Path) -> Path:
     obviously synthetic; `metadata/schemas/board.schema.json`'s
     `som.sku` pattern additionally pins it to `AEN[3-8][0-9]{2}`, which
     `899` satisfies without colliding with a real SKU number. As with
-    `_synthetic_nx9101_root`, no `e1m_modules/aen/hw-revisions.yaml`
+    `_synthetic_tbd_mailbox_root`, no `e1m_modules/aen/hw-revisions.yaml`
     table exists in this scratch root, so `family_revision_buildable()`
     returns None (unknown, not refused) and board.yaml can omit
     `som.hw_rev` entirely.

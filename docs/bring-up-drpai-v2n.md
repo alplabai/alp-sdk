@@ -194,7 +194,7 @@ below hold:
   `alp-drpai-inference` (only when `RUHMI_DRPAI_TVM_DIR` is set too, so
   the demo never lands without its backend); never
   `alp-image-prod`, and never on a non-RZ/V2N machine such as
-  `e1m-nx9101-a55` or `e1m-aen801-a32` even with `ALP_ENABLE_DRPAI = "1"`
+  `e1m-aen801-a32` even with `ALP_ENABLE_DRPAI = "1"`
   set. It installs no userspace runtime package itself. The
   "opted in without `meta-rz-drpai`" `bb.fatal` guard lives only in
   `alp-image-edge.bb`; `alp-image-prod` has none, so a prod build with

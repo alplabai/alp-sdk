@@ -29,6 +29,6 @@ EXTRA_OECMAKE = "-DALP_OS=yocto"
 
 FILES:${PN} = "${bindir}/alp-edgeai"
 
-# AEN A32-class targets are deferred to v0.7; on V2N / V2M / NX9101
+# AEN A32-class targets are deferred to v0.7; on V2N / V2M
 # the example builds for the A55 cluster MACHINE and exercises the
 # Ethos-U / DRP-AI / DEEPX backend matching the SoM.

@@ -28,10 +28,10 @@ the old plan to this one:
 |---------|-------------|------------------|
 | v0.1.0  | in-progress | AEN bring-up (Zephyr peripherals + multi-proc BSP foundation) |
 | v0.2.0  | **surface complete; impl in progress** | 12 wrapped peripheral classes + capability validation + E1M portability bound + per-peripheral examples + v0.2/v0.3 stub headers + ADRs all shipped early.  Bare-metal AEN real, V2N intro, EdgeAI app real are the remaining v0.2 deliverables. |
-| v0.3.0  | **surface complete; impl in progress** | Real impl behind v0.2-declared surfaces (`<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`, `<alp/mproc.h>`).  IoT reference app, multi-proc completion, display polish, V2N+M1 intro.  **Plus: `board.yaml` project config + loader (`scripts/alp_project.py`), DEEPX DX-M1 + Ethos-U65/i.MX 93 inference-backend dispatchers, bench + fuzz scaffolding, Coverity workflow stub, Renesas V2N AI SDK platform 7.1 / BSP v6.30 wire-up in meta-alp.** |
+| v0.3.0  | **surface complete; impl in progress** | Real impl behind v0.2-declared surfaces (`<alp/audio.h>`, `<alp/ble.h>`, `<alp/security.h>`, `<alp/mproc.h>`).  IoT reference app, multi-proc completion, display polish, V2N+M1 intro.  **Plus: `board.yaml` project config + loader (`scripts/alp_project.py`), DEEPX DX-M1 + Ethos-U inference-backend dispatchers, bench + fuzz scaffolding, Coverity workflow stub, Renesas V2N AI SDK platform 7.1 / BSP v6.30 wire-up in meta-alp.** |
 | v0.4.0  | **in-progress (prep code merged, untested)** | Yocto first-class (V2N + V2N+M1 full); secure boot + secure OTA on AEN-Zephyr.  **Prep merged on main:** Yocto core-4 peripheral wrappers (I²C / SPI / UART / GPIO + IRQ dispatcher), MQTT via libmosquitto, per-class override gates, `lwrb` + `nanopb` pinned behind `extras-lwrb-nanopb` group (interim/deferred as of v0.9 -- no committed release flips it on).  Failure-path ctest green; **HW roundtrip still pending** — every row in [`docs/test-plan.md`](docs/test-plan.md)'s v0.4 section gates the tag. |
 | v0.5.0  | **wave-2 surface complete; HAL bodies pending** | Wave-2 GD32-bridge DSP + advanced-timer + power-saving + AEN-audit top-five gap surfaces.  **Shipped on main:** PROTOCOL_VERSION_MINOR 4 -> 5 + seven new reserved opcodes (`0x23..0x28` + `0x36`).  `<alp/dsp.h>` standalone DSP-chain API (FIR / IIR / WINDOW / FFT) with CMSIS-DSP + portable-C fallback.  `alp_adc_filter_t` + `alp_adc_spectrum_t` in `<alp/adc.h>` composing stream + chain.  Advanced timer extras in `<alp/pwm.h>` (`alp_pwm_capture_t` + `alp_pwm_single_pulse`).  `<alp/power.h>` system-power-mode surface.  `<alp/gpu2d.h>` 2D-accelerator surface (AEN audit headline gap).  `<alp/camera.h>::alp_camera_configure_isp` for Mali-C55 ISP toggles.  `<alp/storage.h>::alp_storage_configure_inline_aes` for AEN SecAES on OSPI / HexSPI.  `alp_delay_us` + `alp_delay_ms` portable primitives.  CC3501E §2A.2-plan items §5.1..§5.5 + §5.7 (protocol docs hygiene, named GPIO enums, IRQ event structs, diag info, reset-timing fix, power policy).  v2n_supervisor `alp_z_v2n_supervisor_invalidate()` post-wake re-init hook.  Six `gd32g553_*` host helpers mirroring the new opcodes.  Tests for every new surface.  **HAL bodies pending** in the GD32 firmware tree (`gd32-bridge-firmware:hal/`) -- every wave-2 reserved opcode returns STATUS_NOSUPPORT until the firmware ships them.  CAU (DES / TDES / AES) deferred to v0.6 with PSA driver registration. |
-| v0.6.0  | **released 2026-06-06; pre-HiL** | Heterogeneous-OS orchestration.  `board.yaml` v2 introduces the per-core `cores:` block + cross-core `ipc:` carve-outs (v1 top-level `os:` / `peripherals:` / `libraries:` / `iot:` / `inference:` removed).  `scripts/alp_orchestrate.py` fans out one build slice per non-`off` core; `<alp/rpc.h>` + the generated `<alp/system_ipc.h>` give apps a framed RPC surface over OpenAMP RPMsg.  Reference: rpmsg-aen / rpmsg-v2n / rpmsg-imx93 / heterogeneous-offload examples.  Silicon-determined fields (`inference.backend`) removed from customer scope -- per-handle runtime selection via `alp_inference_open(.backend=...)`.  `alp_core_id_t` generalized to cover every SoM topology core_id.  HiL spec scaffolding for all 11 boards lands.  **2026-05-18 additions:** intra-family portability proven (matrix at [`docs/portability-matrix.md`](docs/portability-matrix.md), cookbook at [`docs/portability.md`](docs/portability.md), ADR 0011); 5 Phase B gap fixes landed (V2M102 namespace + V2M IO27..35 + per-variant Ethos-U U55/U65/U85 + per-CPU-class TFLM NEON/HELIUM/REF + cores key diagnostic); cross-platform Win/Mac/Linux developer host first-class (ADR 0012, [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md), `check_cross_platform.py` lint, CI matrix scaffolding); 8 vendor-SDK-style peripheral tutorial examples (hello-world, uart-hello-world, i2c-master, i2c-slave, spi-master, spi-slave, dac-waveform, timer-periodic-interrupt).  **Late-v0.6 additions (see CHANGELOG [v0.6.0]):** the GD32 supervisor-bridge silicon campaign (firmware v0.2.3 → v0.2.9, wire protocol v0.7 with the negotiated STATUS_SEQ stale-reply kill, A/B OTA Path-A, the hal/gd32 per-peripheral TU split, real-SHA build ids), EEPROM-authoritative SoM hardware revision (`ALP_ERR_NOT_PROVISIONED`; SoM-side ADC cross-check retired), Linux rz-dmac evicted from the CM33-owned DMAC0, `.alpmodel` unified AI-model pipeline Stage-1 + real-dxcom Stage-2 compile.  **Validation status at tag time:** V2N silicon-validated end-to-end on the bench (GD32 link functional suite 26/26, 20-row HIL soak 253/253, Tier-B loopback 5/6, OTA A/B e2e, protocol v0.7 negotiation) -- see [`docs/verification-status.md`](docs/verification-status.md); AEN / i.MX 93 surfaces remain pre-HiL. |
+| v0.6.0  | **released 2026-06-06; pre-HiL** | Heterogeneous-OS orchestration.  `board.yaml` v2 introduces the per-core `cores:` block + cross-core `ipc:` carve-outs (v1 top-level `os:` / `peripherals:` / `libraries:` / `iot:` / `inference:` removed).  `scripts/alp_orchestrate.py` fans out one build slice per non-`off` core; `<alp/rpc.h>` + the generated `<alp/system_ipc.h>` give apps a framed RPC surface over OpenAMP RPMsg.  Reference: rpmsg-aen / rpmsg-v2n / heterogeneous-offload examples.  Silicon-determined fields (`inference.backend`) removed from customer scope -- per-handle runtime selection via `alp_inference_open(.backend=...)`.  `alp_core_id_t` generalized to cover every SoM topology core_id.  HiL spec scaffolding for all 11 boards lands.  **2026-05-18 additions:** intra-family portability proven (matrix at [`docs/portability-matrix.md`](docs/portability-matrix.md), cookbook at [`docs/portability.md`](docs/portability.md), ADR 0011); 5 Phase B gap fixes landed (V2M102 namespace + V2M IO27..35 + per-variant Ethos-U U55/U65/U85 + per-CPU-class TFLM NEON/HELIUM/REF + cores key diagnostic); cross-platform Win/Mac/Linux developer host first-class (ADR 0012, [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md), `check_cross_platform.py` lint, CI matrix scaffolding); 8 vendor-SDK-style peripheral tutorial examples (hello-world, uart-hello-world, i2c-master, i2c-slave, spi-master, spi-slave, dac-waveform, timer-periodic-interrupt).  **Late-v0.6 additions (see CHANGELOG [v0.6.0]):** the GD32 supervisor-bridge silicon campaign (firmware v0.2.3 → v0.2.9, wire protocol v0.7 with the negotiated STATUS_SEQ stale-reply kill, A/B OTA Path-A, the hal/gd32 per-peripheral TU split, real-SHA build ids), EEPROM-authoritative SoM hardware revision (`ALP_ERR_NOT_PROVISIONED`; SoM-side ADC cross-check retired), Linux rz-dmac evicted from the CM33-owned DMAC0, `.alpmodel` unified AI-model pipeline Stage-1 + real-dxcom Stage-2 compile.  **Validation status at tag time:** V2N silicon-validated end-to-end on the bench (GD32 link functional suite 26/26, 20-row HIL soak 253/253, Tier-B loopback 5/6, OTA A/B e2e, protocol v0.7 negotiation) -- see [`docs/verification-status.md`](docs/verification-status.md); AEN / i.MX 93 surfaces remain pre-HiL. |
 | v0.7.0  | **released 2026-06-12** | meta-alp-sdk productization: `alp-image-prod` + the ALP distro identity and hardening recipes (SSH, watchdog policy, network defaults), U-Boot production boot + reproducible firmware banners, CA55 1.8 GHz OPP opt-in, kernel FIT-signing scaffolding (default off), V2N reboot-hang + Mali clock fixes.  Orchestrator: per-core OS topology + `build/system-manifest.yaml` pinned as the IDE/tool contract (`system-manifest-v1` schema, additive-only).  See CHANGELOG [v0.7.0]. |
 | v0.8.0  | **released 2026-06-24** | First **AEN silicon-validation** release: full E1M-AEN801 (Alif Ensemble E8) bench campaign — Flow D J-Link MRAM flashing, 15/17 peripheral apps PASS on real silicon, real `person_detect` NPU inference from MRAM slot0, ADC/DAC VREF corrections, camera CPI bind — plus the cc3501e Wi-Fi/BLE bridge (hardware SS0, real scans, GPIO proxy, production warm-program flow).  Yocto classes migrated to the registry/dispatcher pattern with real `/dev` backends (issue #33); `<alp/dac.h>` split out of `adc.h`; clang-format pinned to v22.  See CHANGELOG [v0.8.0]. |
 | v0.8.1  | **released 2026-06-24** | Documentation-accuracy patch on v0.8.0: whole-repo current-state sweep ("Partially silicon-verified"; two families carry silicon evidence), `[BENCH-VERIFIED]` scoping on `cc3501e.h`/`gd32g553.h`, version-sync tooling tracks the reworded intro badge.  See CHANGELOG [v0.8.1]. |
@@ -85,7 +85,7 @@ versions cleanly.
 | Peripherals | full      | `alp_i2c_*`, `alp_spi_*`, `alp_gpio_*`, `alp_uart_*` (Zephyr backend, AEN) |
 | Chips       | full      | `lsm6dso_*`, `ssd1306_*`, `button_led_*` (no `alp_` prefix on chip drivers) |
 | Display     | minimal   | `alp_display_init/clear/print` routes through Zephyr `display_*`         |
-| Math / DSP  | purpose-built | ALP does not provide a general `arm_math.h` re-export; for ad-hoc math app code uses CMSIS-DSP directly. But ALP DOES ship purpose-built *portable* DSP surfaces that wrap it where cross-silicon portability (Alif M55 / Renesas A55+DRP-AI / NXP) matters: the `<alp/dsp.h>` chain (FIR/IIR/WINDOW/FFT, float or int16 I/O, one-sided or two-sided FFT), `alp_dsp_stats_f32` (mean/RMS/variance/min/max/abs-peak), and `alp_dsp_biquad_design` (RBJ cookbook LP/HP/BP/notch). All select CMSIS-DSP (`ALP_HAS_CMSIS_DSP`) on Cortex-M and a portable-C fallback elsewhere. |
+| Math / DSP  | purpose-built | ALP does not provide a general `arm_math.h` re-export; for ad-hoc math app code uses CMSIS-DSP directly. But ALP DOES ship purpose-built *portable* DSP surfaces that wrap it where cross-silicon portability (Alif M55 / Renesas A55+DRP-AI) matters: the `<alp/dsp.h>` chain (FIR/IIR/WINDOW/FFT, float or int16 I/O, one-sided or two-sided FFT), `alp_dsp_stats_f32` (mean/RMS/variance/min/max/abs-peak), and `alp_dsp_biquad_design` (RBJ cookbook LP/HP/BP/notch). All select CMSIS-DSP (`ALP_HAS_CMSIS_DSP`) on Cortex-M and a portable-C fallback elsewhere. |
 | Control     | portable  | `<alp/pid.h>` caller-owned PID (`alp_pid_init`/`alp_pid_step`/`alp_pid_reset`) with output clamp + anti-windup + derivative-on-measurement; pure C on all OS targets, opt-in via `libraries: [pid]`. |
 | Sensor fusion | portable | `<alp/ahrs.h>` caller-owned Madgwick IMU filter (`alp_ahrs_init`/`alp_ahrs_update_imu`/`alp_ahrs_euler`/`alp_ahrs_reset`) fusing gyro+accel into a drift-corrected quaternion; pure C on all OS targets, opt-in via `libraries: [madgwick_ahrs]`. |
 | Camera      | header    | `<alp/camera.h>` API frozen; impl returns `ALP_ERR_NOSUPPORT`            |
@@ -256,11 +256,6 @@ more sensors) and add a second SoM family.
   25 TOPS @ 1.0 GHz, FC-BGA 625-ball.
 - `alif:ensemble:e4/e5/e6` upgraded from preliminary to released
   (if Alif publishes datasheets in time).
-- `nxp:imx9:imx93` (`metadata/socs/nxp/imx9/imx93.json`) — first
-  v0.1 stub shipped early; per-variant peripheral counts and the
-  orderable SKU list fill in for v0.4 (Yocto first-class)
-  alongside the i.MX 93 BSP work.  Vendor wrapper directory
-  scaffolded at `vendors/nxp-imx93/`.
 
 ### Build matrix
 
@@ -345,7 +340,7 @@ roadmap's "IoT Application Example" deliverable.
 
 ## v0.4.0 — "Yocto first-class" (~6 weeks after v0.3)
 
-**Goal:** Linux variants (V2N family + i.MX 93 family) become
+**Goal:** Linux variants (V2N family) become
 first-class with full Yocto support and Linux-native versions of
 every library.
 
@@ -438,7 +433,7 @@ target verification still gated on an explicit Yocto bench run
 - **Mender OTA opt-in on meta-alp.**
   `meta-alp-sdk/conf/distro/include/mender.inc` configures
   Mender's `mender-full` class with A/B rootfs + storage layout +
-  server/tenant placeholders.  V2N / V2N-M1 / i.MX 93 machine
+  server/tenant placeholders.  V2N / V2N-M1 machine
   configs gain `require` opt-in hook blocks.  Mender server
   ownership: see project memory + `docs/ota.md` -- the server
   itself is a separate-repo product owned outside alp-sdk.
@@ -450,7 +445,7 @@ target verification still gated on an explicit Yocto bench run
 
 - **Yocto:** `meta-alp` recipes actually building (currently
   parse-clean shells); image templates for vision/audio/IoT
-  product classes; full V2N / V2N-M1 / i.MX 93 BSP fleshout.
+  product classes; full V2N / V2N-M1 BSP fleshout.
 - **IoT:** Wi-Fi station on Yocto (NetworkManager / wpa_supplicant
   glue); HTTP/HTTPS client; time-series buffering helpers.
 - **Camera:** `alp_camera_v4l2` wrapper, GStreamer pipeline helpers.
@@ -474,7 +469,6 @@ target verification still gated on an explicit Yocto bench run
   body is now real (`dxrt::InferenceEngine`, replacing the earlier
   `dxnn_*` plan); the remaining work is the cross-link against `dx_rt`
   on the RZ/V Yocto sysroot + an on-silicon run on the DX-M1 PCIe card.
-- **Ethos-U65 real attach on i.MX 93:** Vela toolchain integration.
 
 See [`docs/secure-boot.md`](docs/secure-boot.md) and
 [`docs/ota.md`](docs/ota.md) for the full secure boot / OTA
@@ -751,7 +745,6 @@ target — porting across all four SoMs is additive.
 (No version commitment — revisit when customer pull + ecosystem state make it worthwhile.)
 
 - Ubuntu backend (`cores.<id>.os: ubuntu`) — non-trivial lift (RZ/V2N mainline-kernel coverage is the long pole, plus apt packaging + image flow + per-distro PPA infra).
-- NXP NX9101 silicon enablement — pairs naturally with Ubuntu if/when both pick up (i.MX 93 has the better Ubuntu mainline-kernel story).
 - FreeRTOS / Azure RTOS / NuttX backends — H2-2026 has zero OS expansion; later cycles only if customer asks.
 - Apple HomeKit Accessory Protocol (HAP) — Matter supersedes for most consumer use cases; deferred unless a customer specifically asks.
 - Zigbee 3.0 stack — Matter/Thread coverage probably enough; revisit if industrial customer asks.

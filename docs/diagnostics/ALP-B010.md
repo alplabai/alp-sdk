@@ -35,8 +35,8 @@ Look for a `"severity": "warning"` entry with `"code": "ALP-B010"`; it
 names the core, the peripheral kind, and the resolved silicon reference:
 
 ```
-warning[ALP-B010]: core 'm33': peripheral kind 'dac' is not listed on
-  silicon 'nxp:imx9:imx93' (SoC JSON may be incomplete or the peripheral
+warning[ALP-B010]: core 'm55_hp': peripheral kind 'emmc' is not listed on
+  silicon 'alif:ensemble:e8' (SoC JSON may be incomplete or the peripheral
   is board-side)
 ```
 
@@ -44,7 +44,7 @@ Cross-check the named SoC file directly (read-only) to see what it
 currently claims:
 
 ```sh
-cat metadata/socs/<vendor>/<family>/<part>.json   # e.g. metadata/socs/nxp/imx9/imx93.json
+cat metadata/socs/<vendor>/<family>/<part>.json   # e.g. metadata/socs/alif/ensemble/e8.json
 ```
 
 ## Fix

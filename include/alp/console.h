@@ -10,7 +10,7 @@
  *
  * This root header is deliberately CHIP-NEUTRAL: it pulls in no
  * `<alp/chips/...>` surface so the public console API stays portable
- * across AEN, V2N/GD32, i.MX93, and future companions.  Companion
+ * across AEN, V2N/GD32, and future companions.  Companion
  * attach is companion-specific and lives behind an extension header:
  * to bind a CC3501E companion (Alif SoMs), include
  * <alp/ext/cc3501e/console.h>.  SoMs whose companion is a singleton

@@ -268,10 +268,10 @@ def _sku_family_slug(sku: str) -> str:
     """AEN/V2N/V2M -- see alp_project_loader._sku_family (kept independent
     here so this module has no import-cycle risk on alp_project_loader's
     fuller SKU-family table; the two must agree, pinned by the test)."""
-    m = re.match(r"^E1M-(AEN|V2N|V2M|NX9)", sku)
+    m = re.match(r"^E1M-(AEN|V2N|V2M)", sku)
     if not m:
         raise ZephyrBoardEmitError(f"unrecognised SoM SKU pattern: {sku!r}")
-    return {"AEN": "aen", "V2N": "v2n", "V2M": "v2n-m1", "NX9": "imx93"}[m.group(1)]
+    return {"AEN": "aen", "V2N": "v2n", "V2M": "v2n-m1"}[m.group(1)]
 
 
 # ---------------------------------------------------------------------

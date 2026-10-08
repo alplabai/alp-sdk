@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Development image for V2N / V2N-M1 / i.MX 93 edge AI bring-up.
+# Development image for V2N / V2N-M1 edge AI bring-up.
 # Built by:
 #   MACHINE = "e1m-v2m101-a55" bitbake alp-image-edge
 #
@@ -57,7 +57,7 @@ IMAGE_INSTALL += " alp-lvgl-dashboard"
 # also checks 'rzv2n-family' in MACHINEOVERRIDES, the same guard the
 # python() block below uses, so a stray ALP_ENABLE_DRPAI = "1" in a
 # shared local.conf cannot pull this RZ-only recipe into an
-# e1m-nx9101-a55 / e1m-aen801-a32 build (see that guard's comment for
+# e1m-aen801-a32 build (see that guard's comment for
 # why 'rzv2n-family' is confirmed present at this parse point).
 # ...and only when alp-sdk's drpai backend is actually built (RUHMI
 # configured, see alp-sdk_0.6.bb): the demo is pointless without it.
@@ -108,9 +108,9 @@ IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '
 # THIS recipe for every MACHINE BBFILES matches, not only the six RZ/V2N
 # ones -- so the check below must gate itself on MACHINE, or a stale
 # ALP_ENABLE_DRPAI = "1" left in a shared local.conf would bb.fatal() an
-# e1m-nx9101-a55 (i.MX 93) or e1m-aen801-a32 (Alif Ensemble) parse too,
-# even though neither machine conf defines ALP_ENABLE_DRPAI at all and
-# neither wants the RZ layer.
+# e1m-aen801-a32 (Alif Ensemble) parse too,
+# even though that machine conf defines no ALP_ENABLE_DRPAI at all and
+# does not want the RZ layer.
 #
 # kernel-module-mmngr's install site is alp-image-common.inc alone (see the NOTE
 # above), on every alp-image-* image; no RZ/V2N machine conf installs

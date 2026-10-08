@@ -257,8 +257,8 @@ python () {
 #
 # Chosen over promoting meta-rz-drpai to LAYERDEPENDS_alp-sdk: a hard dep
 # would make an RZ/V-only vendor layer mandatory for EVERY meta-alp-sdk
-# consumer, including the e1m-aen801-a32 / e1m-nx9101-a55 machines that have
-# no DRP-AI silicon at all and never build linux-renesas.  This keeps the
+# consumer, including the e1m-aen801-a32 machine that has
+# no DRP-AI silicon at all and never builds linux-renesas.  This keeps the
 # blast radius inside the one recipe that actually compiles the node.
 #
 # Guarded on the LAYER because the layer is what supplies both the label and

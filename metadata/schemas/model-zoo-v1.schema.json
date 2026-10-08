@@ -67,7 +67,7 @@
       "description": "Bench-validated SKUs this exact model has been run on. Empty means NO SoM has been bench-validated yet -- `tan model zoo --sku <SKU>` matches NO entry with an empty list here, never treat empty as \"unfiltered\"/\"works everywhere\". A populated list is a hardware claim the entry author is responsible for; scripts/validate_metadata.py only checks that each listed SKU names a real, shipped SoM preset, not that the bench run actually happened.",
       "items": {
         "type": "string",
-        "pattern": "^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$(?!\\n)"
+        "pattern": "^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3})$(?!\\n)"
       }
     },
     "compile": {

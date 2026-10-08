@@ -22,8 +22,8 @@ from .paths import REPO
 # zephyr/sysbuild/<slug>/sysbuild.conf directory uses.  Mirrors the
 # alif-ensemble / renesas-rzv2n family-token `startswith` match already
 # duplicated in kconfig.py / validate.py.  Only families that actually
-# ship a curated file are listed -- renesas-rzv2n / nxp-imx9 boot via
-# U-Boot/Yocto, not sysbuild, so they have none today; adding one is a
+# ship a curated file are listed -- renesas-rzv2n boots via
+# U-Boot/Yocto, not sysbuild, so it has none today; adding one is a
 # metadata-only change (drop the file under zephyr/sysbuild/<slug>/),
 # no code change needed here.
 _FAMILY_SYSBUILD_DIRS: dict[str, str] = {
@@ -32,7 +32,7 @@ _FAMILY_SYSBUILD_DIRS: dict[str, str] = {
 
 # The per-family `boot.method:` default `board.schema.json` documents but
 # nothing implemented (#562): "the SoM family supplies the default
-# (AEN/N93 -> mcuboot, V2N/V2N-M1 -> none on the Zephyr slice since
+# (AEN -> mcuboot, V2N/V2N-M1 -> none on the Zephyr slice since
 # U-Boot owns boot on Linux)".  `emit_sysbuild_conf` used to hard-default
 # every family to `mcuboot`, so a Renesas project that omitted `method:`
 # was pushed down the MCUboot path -- and, with `rsa3072` (a value
@@ -44,7 +44,6 @@ _FAMILY_SYSBUILD_DIRS: dict[str, str] = {
 # tree, so this emitter is the only site the default has to exist at.
 _FAMILY_BOOT_METHOD_DEFAULTS: dict[str, str] = {
     "alif-ensemble": "mcuboot",
-    "nxp-imx9":      "mcuboot",
     "renesas-rzv2n": "none",
 }
 
@@ -88,8 +87,8 @@ def _boot_target_is_single_slot(project: BoardProject) -> bool:
     `metadata/schemas/som-preset-v2.schema.json` documents
     `memory_map:` as an SDK build-policy override "ONLY for non-stock
     partitioning", not something only a disjoint-slot0 SoM sets --
-    `docs/v0.6-tbd-and-assumptions.md` lists filling the V2N, AEN E7
-    and iMX93 memory_maps as open items.  A `memory_map:` present for
+    `docs/v0.6-tbd-and-assumptions.md` lists filling the V2N and AEN E7
+    memory_maps as open items.  A `memory_map:` present for
     an unrelated reason (an rpmsg carve-out, say) that declares no
     `<role>_slot0` region makes `_aen_flash_partitions` fall through to
     the STOCK two-slot layout -- a REAL `image-1` + `image-scratch` --

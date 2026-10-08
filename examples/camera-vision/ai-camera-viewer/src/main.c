@@ -41,8 +41,8 @@
  *      in `board.yaml`.
  *   3. "Does it run portably?"  --  the app source uses zero
  *      vendor-specific symbols; the SoC-family routing is in the
- *      loader, not the source.  Re-targeting from AEN to NX9101
- *      (Ethos-U65) is a one-line board.yaml change.
+ *      loader, not the source.  Re-targeting between AEN SKUs
+ *      is a one-line board.yaml change.
  *
  *
  * ── What's still a placeholder ──────────────────────────────────

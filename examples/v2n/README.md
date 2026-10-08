@@ -36,7 +36,7 @@ captured in [`docs/bring-up-v2n-m1.md`](../../docs/bring-up-v2n-m1.md).
 The top-level [`examples/README.md`](../README.md) lists every
 example.  This sub-index exists because V2N-specific examples
 need V2N-family hardware (GD32 supervisor, OPTIGA, dual PHY,
-on-module RTC) that doesn't exist on AEN or N93.  Keeping them
+on-module RTC) that doesn't exist on AEN.  Keeping them
 under `examples/v2n/` makes that constraint visible from the
 filesystem layout alone.  Cross-family examples (gpio, i2c,
 pwm, audio, ...) stay at the top level of `examples/`.
