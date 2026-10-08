@@ -1204,6 +1204,30 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_PM_POLICY
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/zephyr_pm_policy.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_EXT_RENESAS
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/power.c)
+# SoM power-domain runtime (#2784): registry + quiesce/restore + the BKRAM
+# record store, and the thin adapters that route a domain through the driver
+# that owns it.  The adapters build only with the driver they wrap.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_SOM_POWER
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_record.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_pinctrl.c)
+if(CONFIG_ALP_SDK_SOM_POWER AND CONFIG_ALP_SDK_CHIP_CC3501E)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_cc3501e.c)
+endif()
+if(CONFIG_ALP_SDK_SOM_POWER AND CONFIG_ALP_SDK_CHIP_TMP112)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_tmp112.c)
+endif()
+if(CONFIG_ALP_SDK_SOM_POWER AND CONFIG_ALP_SDK_CHIP_RV3028C7)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_rv3028.c)
+endif()
+if(CONFIG_ALP_SDK_SOM_POWER AND CONFIG_OSPI_ALIF)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_flash.c)
+endif()
+
 # Operating-point-profile class ("power_profile", handle-less).  The
 # dispatcher body + the wildcard NOSUPPORT stub ride in
 # power_dispatch.c / power/zephyr_stub.c above (same ALP_SDK_POWER

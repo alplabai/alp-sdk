@@ -402,6 +402,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/flash.h>
+#include <zephyr/drivers/flash/flash_ospi_alif.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -892,6 +893,50 @@ static int ospi_alif_ensure_octal_ddr(const struct device *dev)
 	}
 	k_mutex_unlock(&data->lock);
 	return rc;
+}
+
+int flash_ospi_alif_suspend(const struct device *dev, uint32_t timeout_ms)
+{
+	struct ospi_alif_data *data = dev->data;
+	int                    rc;
+
+	/* The lock is what makes write()/erase()/read() mutually exclusive, so
+	 * owning it means no transfer is in flight and none can start. */
+	rc = k_mutex_lock(&data->lock, K_MSEC(timeout_ms));
+	if (rc != 0) {
+		return -EBUSY;
+	}
+	/* Every write()/erase() path polls the part ready (poll_ready_locked) BEFORE it
+	 * unlocks -- page by page, sector by sector -- so once the lock is ours no
+	 * operation of this driver is running in the part.  The one exception is a poll
+	 * that timed out (the error path unlocks with the part possibly still busy),
+	 * which the wait below also covers.  That is why waiting for WIP only when
+	 * octal_ddr_active is enough: a program or erase cannot exist before the first
+	 * write switched the part to Octal DDR.
+	 * A program or erase the caller already issued runs inside the part after
+	 * the call returns; resetting the part now would abort it half done.  Wait
+	 * for WIP to clear.  Only an Octal DDR part can have such an operation (the
+	 * switch happens on the first write/erase); in 1-1-1 there is nothing to
+	 * wait for and the Octal status read would not be understood. */
+	if (data->octal_ddr_active) {
+		rc = ospi_alif_poll_ready_locked(dev);
+		if (rc != 0) {
+			k_mutex_unlock(&data->lock);
+			return rc;
+		}
+	}
+	return 0; /* lock stays held until flash_ospi_alif_resume() */
+}
+
+int flash_ospi_alif_resume(const struct device *dev)
+{
+	struct ospi_alif_data *data = dev->data;
+
+	/* The part was reset while the lock was held: it is back in its power-on
+	 * 1-1-1 framing, so forget the Octal DDR switch. */
+	data->octal_ddr_active = false;
+	k_mutex_unlock(&data->lock);
+	return 0;
 }
 
 static int ospi_alif_write(const struct device *dev, off_t offset, const void *buffer, size_t len)

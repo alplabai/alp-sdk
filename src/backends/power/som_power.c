@@ -1,0 +1,865 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright 2026 Alp Lab AB
+ *
+ * SoM power-domain runtime (#2784, unit U5): registry, policy, quiesce /
+ * restore and the cold-boot restore.  See som_power.h for the model.
+ *
+ * Registry
+ * --------
+ * One const entry per domain, built at compile time from the generated
+ * `alp,som-power-domain` devicetree nodes.  A SKU that does not fit a part has
+ * no node, so its entry stays zero and the domain reads as not present.  The
+ * pins come from the node's reset / enable / powerdown GPIO specs, whose flag
+ * is the ASSERTED level: gpio_pin_set(spec, 1) means "drive the pad to the
+ * level that holds reset / powers down / enables", whatever that pad level is.
+ *
+ * Default actions (what AUTO does)
+ * --------------------------------
+ *   wifi_ble     hold E_WIFI_NRST (P15_1) low.  Restore releases nRESET -- the
+ *                cc3501e_hard_reset() semantics, rails stay up.  The
+ *                supply-cycling cc3501e_reset() is NEVER used: it drops WIFI_EN
+ *                for 50 ms, the path that may never relaunch on an activated
+ *                unit.  RAIL_OFF (opt-in, CONFIG_ALP_SDK_SOM_PD_WIFI_RAIL_OFF)
+ *                additionally gates WIFI_EN, after nRESET is already low.
+ *   eth_phy      E_PHY_PWRDWN (P15_4) low.  That net is also the TRI pin of the
+ *                Y3 50 MHz PHY reference oscillator, so the clock stops with the
+ *                PHY.  Restore: P15_4 high, then an E_PHY_RESET pulse.
+ *   ext_flash    OSPI1_RESETn (P15_7) held low.  flash_ospi_alif exposes no
+ *                power-management or deep-power-down hook, so reset-hold is the
+ *                action; after it the part is back in 1-1-1 SPI, which the
+ *                driver is told about (som_power_flash.c).
+ *   ext_ram      OSPI0_RESETn (P15_6) held low.  No HyperRAM driver exists in
+ *                the tree to issue the part's low-power command.
+ *   temp_sensor  TMP112 CONFIG.SD set over BRD_I2C.
+ *   rtc          RV-3028 stays powered (KEEP_ALIVE); only CLKOUT is switched
+ *                off, in the RAM mirror (no EEPROM write cycle).
+ *   backlight    P5_5 low.  Main-domain pad, does not hold through STOP.
+ *
+ * State is tracked in software: an unpowered PHY answers MDIO with stale data,
+ * not 0xFFFF, so the chip can never be asked whether it is quiesced.
+ */
+
+#include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/init.h>
+#include <zephyr/kernel.h>
+#include <zephyr/sys/sys_io.h>
+#include <zephyr/sys/util.h>
+
+#include <alp/peripheral.h>
+#include <alp/power.h>
+
+#include "power_ops.h"
+#include "som_power.h"
+
+#define DT_DRV_COMPAT alp_som_power_domain
+
+#ifndef CONFIG_ALP_SDK_SOM_PD_WIFI_SETTLE_MS
+#define CONFIG_ALP_SDK_SOM_PD_WIFI_SETTLE_MS 3500
+#endif
+
+/* Datasheet / bench timing.  Early (cold-boot) waits are busy-waits and kept
+ * short; the drivers that initialise later wait for their own chip. */
+#define SOMPD_NRST_MIN_HOLD_MS 50u  /* cc3501e_hard_reset(): 50 ms nRESET pulse */
+#define SOMPD_RAIL_UP_MS       20u  /* WIFI_EN high -> VPA settled              */
+#define SOMPD_PHY_PWRUP_MS     20u  /* P15_4 high -> oscillator + PHY powered   */
+#define SOMPD_PHY_RESET_MS     10u  /* E_PHY_RESET pulse width                  */
+#define SOMPD_PHY_SETTLE_MS    200u /* PHY ready for MDIO after reset (runtime) */
+#define SOMPD_PHY_SETTLE_EARLY 20u
+#define SOMPD_MEM_RESET_MS     10u /* NOR / HyperRAM recovery after RESETn high */
+
+/* ---- Registry ------------------------------------------------------------- */
+
+typedef enum {
+	SOMPD_A_HOLD_RESET = 0,
+	SOMPD_A_POWERDOWN_PIN,
+	SOMPD_A_DEEP_POWER_DOWN_CMD,
+	SOMPD_A_SHUTDOWN_REG,
+	SOMPD_A_KEEP_ALIVE,
+	SOMPD_A_ENABLE_LOW,
+} sompd_action_t;
+
+typedef struct {
+	bool                present;
+	bool                holds_through_stop;
+	bool                rail_off_opt_in;
+	uint8_t             action; /* sompd_action_t of AUTO */
+	uint8_t             modes;  /* BIT(alp_power_mode_t) the default action applies to */
+	uint8_t             dependents;
+	struct gpio_dt_spec reset;
+	struct gpio_dt_spec enable;
+	struct gpio_dt_spec powerdown;
+	struct i2c_dt_spec  i2c; /* alp,device when it sits on an I2C bus */
+} sompd_t;
+
+#define SOMPD_ROLE_wifi_ble    ALP_POWER_DOMAIN_WIFI_BLE
+#define SOMPD_ROLE_eth_phy     ALP_POWER_DOMAIN_ETH_PHY
+#define SOMPD_ROLE_ext_flash   ALP_POWER_DOMAIN_EXT_FLASH
+#define SOMPD_ROLE_ext_ram     ALP_POWER_DOMAIN_EXT_RAM
+#define SOMPD_ROLE_temp_sensor ALP_POWER_DOMAIN_TEMP_SENSOR
+#define SOMPD_ROLE_rtc         ALP_POWER_DOMAIN_RTC
+#define SOMPD_ROLE_backlight   ALP_POWER_DOMAIN_BACKLIGHT
+
+#define SOMPD_ACT_hold_reset          SOMPD_A_HOLD_RESET
+#define SOMPD_ACT_powerdown_pin       SOMPD_A_POWERDOWN_PIN
+#define SOMPD_ACT_deep_power_down_cmd SOMPD_A_DEEP_POWER_DOWN_CMD
+#define SOMPD_ACT_shutdown_reg        SOMPD_A_SHUTDOWN_REG
+#define SOMPD_ACT_keep_alive          SOMPD_A_KEEP_ALIVE
+#define SOMPD_ACT_enable_low          SOMPD_A_ENABLE_LOW
+
+#define SOMPD_MODE_stop       BIT(ALP_POWER_MODE_STOP)
+#define SOMPD_MODE_standby    BIT(ALP_POWER_MODE_STANDBY)
+#define SOMPD_MODE_sleep      BIT(ALP_POWER_MODE_SLEEP)
+#define SOMPD_MODE_deep_sleep BIT(ALP_POWER_MODE_DEEP_SLEEP)
+
+#define SOMPD_DEP_cam_ldo    ALP_POWER_DEP_CAM_LDO
+#define SOMPD_DEP_sd_enable  ALP_POWER_DEP_SD_EN
+#define SOMPD_DEP_phy_refclk ALP_POWER_DEP_PHY_REFCLK
+
+#define SOMPD_MODE_BIT(n, p, i) UTIL_CAT(SOMPD_MODE_, DT_STRING_TOKEN_BY_IDX(n, p, i))
+#define SOMPD_DEP_BIT(n, p, i)  UTIL_CAT(SOMPD_DEP_, DT_STRING_TOKEN_BY_IDX(n, p, i))
+
+/* DEVICE_DT_GET_OR_NULL: a pad whose GPIO controller is disabled in this build
+ * gets a NULL port (reads as "pin unusable") instead of a link error; the I2C
+ * bus is likewise NULL when CONFIG_I2C is off (no driver, no device object). */
+#define SOMPD_GPIO(n, prop) \
+	COND_CODE_1(DT_NODE_HAS_PROP(n, prop), \
+	            ({ \
+	                .port     = DEVICE_DT_GET_OR_NULL(DT_GPIO_CTLR_BY_IDX(n, prop, 0)), \
+	                .pin      = DT_GPIO_PIN_BY_IDX(n, prop, 0), \
+	                .dt_flags = DT_GPIO_FLAGS_BY_IDX(n, prop, 0), \
+	            }), \
+	            ({ 0 }))
+
+#define SOMPD_I2C(n) \
+	COND_CODE_1( \
+	    DT_NODE_HAS_PROP(n, alp_device), \
+	    ({ \
+	        .bus = COND_CODE_1( \
+	            CONFIG_I2C, (DEVICE_DT_GET_OR_NULL(DT_BUS(DT_PROP(n, alp_device)))), (NULL)), \
+	        .addr = DT_REG_ADDR(DT_PROP(n, alp_device)), \
+	    }), \
+	    ({ 0 }))
+
+#define SOMPD_ENTRY(n) \
+	[UTIL_CAT(SOMPD_ROLE_, DT_STRING_TOKEN(n, alp_role))] = { \
+		.present            = true, \
+		.holds_through_stop = DT_ENUM_HAS_VALUE(n, alp_stop_hold, yes), \
+		.rail_off_opt_in    = DT_PROP(n, alp_rail_off_opt_in), \
+		.action             = UTIL_CAT(SOMPD_ACT_, DT_STRING_TOKEN(n, alp_default_action)), \
+		.modes              = (DT_FOREACH_PROP_ELEM_SEP(n, alp_default_modes, SOMPD_MODE_BIT, (|))), \
+		.dependents = \
+		    COND_CODE_1(DT_NODE_HAS_PROP(n, alp_dependents), \
+		                ((DT_FOREACH_PROP_ELEM_SEP(n, alp_dependents, SOMPD_DEP_BIT, (|)))), \
+		                (0)), \
+		.reset     = SOMPD_GPIO(n, reset_gpios), \
+		.enable    = SOMPD_GPIO(n, enable_gpios), \
+		.powerdown = SOMPD_GPIO(n, powerdown_gpios), \
+		.i2c       = SOMPD_I2C(n), \
+	},
+
+static const sompd_t _reg[ALP_POWER_DOMAIN_COUNT] = { DT_FOREACH_STATUS_OKAY(alp_som_power_domain,
+	                                                                         SOMPD_ENTRY) };
+
+/* ---- Mutable state -------------------------------------------------------- */
+
+typedef struct {
+	bool     valid;
+	uint32_t mode;
+	uint32_t wake_source;
+	uint32_t slept_ms;
+	uint32_t quiesced;
+	uint32_t restored;
+	uint32_t failed;
+} boot_capture_t;
+
+static alp_power_domain_policy_t    _policy[ALP_POWER_DOMAIN_COUNT];
+static alp_som_pd_state_t           _state[ALP_POWER_DOMAIN_COUNT];
+static const alp_som_power_hooks_t *_hooks[ALP_POWER_DOMAIN_COUNT];
+static void                        *_hook_ctx[ALP_POWER_DOMAIN_COUNT];
+static int64_t                      _assert_ms[ALP_POWER_DOMAIN_COUNT];
+static boot_capture_t               _boot;
+
+K_MUTEX_DEFINE(_lock);
+
+/* Consumers first; restore walks this backwards.  The PHY is last in, first out. */
+static const alp_power_domain_t _order[ALP_POWER_DOMAIN_COUNT] = {
+	ALP_POWER_DOMAIN_WIFI_BLE,    ALP_POWER_DOMAIN_EXT_FLASH, ALP_POWER_DOMAIN_EXT_RAM,
+	ALP_POWER_DOMAIN_TEMP_SENSOR, ALP_POWER_DOMAIN_RTC,       ALP_POWER_DOMAIN_BACKLIGHT,
+	ALP_POWER_DOMAIN_ETH_PHY,
+};
+
+/* ---- Pin and I2C primitives ------------------------------------------------ */
+
+static void wait_ms(uint32_t ms, bool early)
+{
+	if (early) {
+		k_busy_wait(ms * 1000u);
+	} else {
+		k_msleep((int32_t)ms);
+	}
+}
+
+/* Drive @p s to its asserted (true) or released (false) level. */
+/* Weak so the host tests can stand in for a pad read-back. */
+__weak int alp_som_power_pad_read(const struct gpio_dt_spec *s)
+{
+	return gpio_pin_get_dt(s);
+}
+
+static bool _pads_applied;
+
+static alp_status_t pin_assert(const struct gpio_dt_spec *s, bool asserted)
+{
+	if (s->port == NULL || !device_is_ready(s->port)) {
+		return ALP_ERR_NOT_READY;
+	}
+	/* The pads are muxed and pad-configured by the node's pinctrl-0 state, applied
+	 * once before the first drive.  A missing or failing state refuses the drive:
+	 * levels written to an unmuxed pad would be reported as success and do nothing. */
+	if (!_pads_applied) {
+		alp_status_t pa = alp_som_power_pads_apply();
+		if (pa != ALP_OK) {
+			return pa;
+		}
+		_pads_applied = true;
+	}
+	int rc = gpio_pin_configure_dt(s, asserted ? GPIO_OUTPUT_ACTIVE : GPIO_OUTPUT_INACTIVE);
+	if (rc != 0) {
+		return ALP_ERR_IO;
+	}
+	/* Read the pad back: the pinctrl group enables the pad's input buffer, so the
+	 * port's external data register shows what the pad actually carries.  A
+	 * mismatch means the hold did not happen (pad not muxed, shorted, wrong
+	 * controller) and the caller must not enter the sleep believing it did.  A
+	 * negative read is "cannot verify", not a failure. */
+	int seen = alp_som_power_pad_read(s);
+	if (seen >= 0 && (seen != 0) != asserted) {
+		return ALP_ERR_IO;
+	}
+	return ALP_OK;
+}
+
+#define TMP112_REG_CONF 0x01u
+#define TMP112_CONF_SD  0x0100u
+
+static alp_status_t tmp112_shutdown(const struct i2c_dt_spec *i2c, bool shutdown)
+{
+	if (i2c->bus == NULL || !device_is_ready(i2c->bus)) {
+		return ALP_ERR_NOT_READY;
+	}
+	uint8_t reg = TMP112_REG_CONF;
+	uint8_t buf[3];
+	if (i2c_write_read_dt(i2c, &reg, 1, &buf[1], 2) != 0) {
+		return ALP_ERR_IO;
+	}
+	uint16_t conf = (uint16_t)(((uint16_t)buf[1] << 8) | buf[2]);
+	conf   = shutdown ? (uint16_t)(conf | TMP112_CONF_SD) : (uint16_t)(conf & ~TMP112_CONF_SD);
+	buf[0] = TMP112_REG_CONF;
+	buf[1] = (uint8_t)(conf >> 8);
+	buf[2] = (uint8_t)conf;
+	return (i2c_write_dt(i2c, buf, sizeof(buf)) == 0) ? ALP_OK : ALP_ERR_IO;
+}
+
+#define RV3028_REG_CONTROL_1  0x0Fu
+#define RV3028_CTRL1_EERD     0x08u /* RAM bit: pause the 24 h EEPROM -> mirror refresh */
+#define RV3028_REG_EE_CLKOUT  0x35u
+#define RV3028_CLKOUT_FD_MASK 0x07u
+#define RV3028_CLKOUT_FD_LOW  0x07u /* CLKOUT driven low (rv3028c7_route_clkout LOW) */
+
+static alp_status_t rv3028_eerd(const struct i2c_dt_spec *i2c, bool pause)
+{
+	if (i2c->bus == NULL || !device_is_ready(i2c->bus)) {
+		return ALP_ERR_NOT_READY;
+	}
+	return (i2c_reg_update_byte_dt(
+	            i2c, RV3028_REG_CONTROL_1, RV3028_CTRL1_EERD, pause ? RV3028_CTRL1_EERD : 0u) == 0)
+	           ? ALP_OK
+	           : ALP_ERR_IO;
+}
+
+/* CLKOUT low in the RAM mirror only: no EEPROM write cycle (100 cycles min at the
+ * hot corner).  With EERD clear the chip reloads the mirror from EEPROM every 24 h,
+ * which would switch CLKOUT back on mid-sleep, so EERD is set for the duration and
+ * put back by rv3028_clkout_restore(). */
+static alp_status_t rv3028_clkout_off(const struct i2c_dt_spec *i2c)
+{
+	if (i2c->bus == NULL || !device_is_ready(i2c->bus)) {
+		return ALP_ERR_NOT_READY;
+	}
+	uint8_t v;
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_EE_CLKOUT, &v) != 0) {
+		return ALP_ERR_IO;
+	}
+	v = (uint8_t)((v & ~RV3028_CLKOUT_FD_MASK) | RV3028_CLKOUT_FD_LOW);
+	if (i2c_reg_write_byte_dt(i2c, RV3028_REG_EE_CLKOUT, v) != 0) {
+		return ALP_ERR_IO;
+	}
+	return rv3028_eerd(i2c, true);
+}
+
+/* Whether the EEPROM refresh was already paused; false when it cannot be read. */
+static bool rv3028_eerd_was_set(const struct i2c_dt_spec *i2c)
+{
+	uint8_t v = 0;
+
+	if (i2c->bus == NULL || !device_is_ready(i2c->bus) ||
+	    i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_1, &v) != 0) {
+		return false;
+	}
+	return (v & RV3028_CTRL1_EERD) != 0u;
+}
+
+/* Put EERD back to what it was before the quiesce (@p prior), NOT unconditionally
+ * clear: a caller that had paused the refresh for its own EEPROM work keeps it
+ * paused.  CLKOUT itself stays low: nothing here needs it back. */
+static alp_status_t rv3028_clkout_restore(const struct i2c_dt_spec *i2c, bool prior)
+{
+	return rv3028_eerd(i2c, prior);
+}
+
+/* ---- Default (no driver) actions ------------------------------------------- */
+
+static bool prior_active(alp_power_domain_t d)
+{
+	const sompd_t *p = &_reg[d];
+	if (p->action == SOMPD_A_ENABLE_LOW && p->enable.port != NULL &&
+	    device_is_ready(p->enable.port)) {
+		int v = gpio_pin_get_dt(&p->enable);
+		return v != 0; /* a read error counts as "was on" */
+	}
+	if (d == ALP_POWER_DOMAIN_RTC) {
+		return rv3028_eerd_was_set(&p->i2c); /* the saved bit is "EERD was set" */
+	}
+	return true;
+}
+
+alp_status_t alp_som_power_pin_quiesce(alp_power_domain_t d, bool rail_off)
+{
+	if ((unsigned)d >= (unsigned)ALP_POWER_DOMAIN_COUNT || !_reg[d].present) {
+		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+	}
+	const sompd_t *p = &_reg[d];
+	alp_status_t   s = ALP_OK;
+
+	if (rail_off) {
+		/* nRESET low BEFORE the supply, so the chip is held in reset while the
+		 * rail collapses (same order as cc3501e_power_off()). */
+		s = pin_assert(&p->reset, true);
+		if (s == ALP_OK) {
+			s = pin_assert(&p->enable, false);
+		}
+		_assert_ms[d] = k_uptime_get();
+		return s;
+	}
+
+	switch ((sompd_action_t)p->action) {
+	case SOMPD_A_HOLD_RESET:
+		s             = pin_assert(&p->reset, true);
+		_assert_ms[d] = k_uptime_get();
+		return s;
+	case SOMPD_A_POWERDOWN_PIN:
+		return pin_assert(&p->powerdown, true);
+	case SOMPD_A_ENABLE_LOW:
+		return pin_assert(&p->enable, false);
+	case SOMPD_A_SHUTDOWN_REG:
+		return tmp112_shutdown(&p->i2c, true);
+	case SOMPD_A_KEEP_ALIVE:
+		/* Never powered down; only the RTC's CLKOUT goes quiet. */
+		return (d == ALP_POWER_DOMAIN_RTC) ? rv3028_clkout_off(&p->i2c) : ALP_OK;
+	case SOMPD_A_DEEP_POWER_DOWN_CMD:
+	default:
+		return ALP_ERR_NOSUPPORT;
+	}
+}
+
+alp_status_t alp_som_power_pin_restore(alp_power_domain_t d, bool rail_off, bool early, bool prior)
+{
+	if ((unsigned)d >= (unsigned)ALP_POWER_DOMAIN_COUNT || !_reg[d].present) {
+		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+	}
+	const sompd_t *p = &_reg[d];
+	alp_status_t   s;
+
+	if (rail_off) {
+		s = pin_assert(&p->enable, true);
+		if (s != ALP_OK) {
+			return s;
+		}
+		wait_ms(SOMPD_RAIL_UP_MS, early);
+	}
+
+	switch ((sompd_action_t)p->action) {
+	case SOMPD_A_HOLD_RESET:
+		/* cc3501e_hard_reset() semantics: nRESET low for >= 50 ms, release, rails
+		 * untouched.  The line has normally been low for far longer; top up only
+		 * when a RUN-mode cycle was shorter than the pulse. */
+		if (!early) {
+			int64_t held = k_uptime_get() - _assert_ms[d];
+			if (held < (int64_t)SOMPD_NRST_MIN_HOLD_MS) {
+				k_msleep((int32_t)(SOMPD_NRST_MIN_HOLD_MS - (uint32_t)held));
+			}
+		}
+		s = pin_assert(&p->reset, false);
+		if (s != ALP_OK) {
+			return s;
+		}
+		if (d == ALP_POWER_DOMAIN_WIFI_BLE) {
+			/* BLIND boot settle: the CC3501E must not be clocked until its SPI
+			 * slave is armed.  Seconds long, so the cold-boot path skips it and
+			 * lets the bring-up code wait; a runtime restore waits here. */
+			if (!early) {
+				k_msleep(CONFIG_ALP_SDK_SOM_PD_WIFI_SETTLE_MS);
+			}
+		} else {
+			wait_ms(SOMPD_MEM_RESET_MS, early);
+		}
+		return ALP_OK;
+	case SOMPD_A_POWERDOWN_PIN:
+		s = pin_assert(&p->powerdown, false);
+		if (s != ALP_OK) {
+			return s;
+		}
+		wait_ms(SOMPD_PHY_PWRUP_MS, early);
+		if (p->reset.port != NULL) {
+			/* A PHY that just regained power needs a reset pulse to come up in a
+			 * known state.  A reset pad that is not usable here is not fatal. */
+			if (pin_assert(&p->reset, true) == ALP_OK) {
+				wait_ms(SOMPD_PHY_RESET_MS, early);
+				(void)pin_assert(&p->reset, false);
+			}
+		}
+		wait_ms(early ? SOMPD_PHY_SETTLE_EARLY : SOMPD_PHY_SETTLE_MS, early);
+		return ALP_OK;
+	case SOMPD_A_ENABLE_LOW:
+		return pin_assert(&p->enable, true);
+	case SOMPD_A_SHUTDOWN_REG:
+		return tmp112_shutdown(&p->i2c, false);
+	case SOMPD_A_KEEP_ALIVE:
+		return (d == ALP_POWER_DOMAIN_RTC) ? rv3028_clkout_restore(&p->i2c, prior) : ALP_OK;
+	case SOMPD_A_DEEP_POWER_DOWN_CMD:
+	default:
+		return ALP_ERR_NOSUPPORT;
+	}
+}
+
+/* ---- Hook dispatch --------------------------------------------------------- */
+
+static alp_status_t run_quiesce(alp_power_domain_t d, bool rail_off)
+{
+	if (_hooks[d] != NULL && _hooks[d]->quiesce != NULL) {
+		return _hooks[d]->quiesce(_hook_ctx[d], rail_off);
+	}
+	return alp_som_power_pin_quiesce(d, rail_off);
+}
+
+static alp_status_t run_restore(alp_power_domain_t d, bool rail_off, bool early, bool prior)
+{
+	if (_hooks[d] != NULL && _hooks[d]->restore != NULL) {
+		return _hooks[d]->restore(_hook_ctx[d], rail_off, early);
+	}
+	if (_reg[d].action == SOMPD_A_ENABLE_LOW && !prior) {
+		return ALP_OK; /* it was off before the quiesce: leave it off */
+	}
+	return alp_som_power_pin_restore(d, rail_off, early, prior);
+}
+
+alp_status_t alp_som_power_bind(alp_power_domain_t d, const alp_som_power_hooks_t *hooks, void *ctx)
+{
+	if ((unsigned)d >= (unsigned)ALP_POWER_DOMAIN_COUNT || hooks == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	k_mutex_lock(&_lock, K_FOREVER);
+	alp_status_t s = ALP_OK;
+	if (_state[d] == ALP_SOM_PD_QUIESCED) {
+		s = ALP_ERR_BUSY;
+	} else {
+		_hooks[d]    = hooks;
+		_hook_ctx[d] = ctx;
+	}
+	k_mutex_unlock(&_lock);
+	return s;
+}
+
+void alp_som_power_unbind(alp_power_domain_t d)
+{
+	if ((unsigned)d >= (unsigned)ALP_POWER_DOMAIN_COUNT) {
+		return;
+	}
+	k_mutex_lock(&_lock, K_FOREVER);
+	_hooks[d]    = NULL;
+	_hook_ctx[d] = NULL;
+	k_mutex_unlock(&_lock);
+}
+
+/* ---- Quiesce / restore ----------------------------------------------------- */
+
+/* Domains whose action goes over BRD_I2C.  The cold-boot restore handles them in a
+ * second pass once the I2C controller has initialised. */
+#define SOMPD_I2C_DOMAINS \
+	(ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_TEMP_SENSOR) | \
+	 ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_RTC))
+
+/* Restore the domains of @p rec that are also in @p only, last-quiesced first.
+ * Never stops on a failure. */
+static void restore_domains(const alp_som_pd_record_t *rec,
+                            uint32_t                   only,
+                            bool                       early,
+                            uint32_t                  *restored,
+                            uint32_t                  *failed)
+{
+	*restored = 0u;
+	*failed   = 0u;
+	for (int i = (int)ALP_POWER_DOMAIN_COUNT - 1; i >= 0; --i) {
+		alp_power_domain_t d   = _order[i];
+		uint32_t           bit = ALP_POWER_DOMAIN_BIT(d);
+		if ((rec->quiesced & only & bit) == 0u) {
+			continue;
+		}
+		alp_status_t s =
+		    run_restore(d, (rec->rail_off & bit) != 0u, early, (rec->prior_active & bit) != 0u);
+		if (s == ALP_OK) {
+			_state[d] = ALP_SOM_PD_ACTIVE;
+			*restored |= bit;
+		} else {
+			_state[d] = ALP_SOM_PD_RESTORE_FAILED;
+			*failed |= bit;
+		}
+	}
+}
+
+alp_status_t alp_som_power_quiesce(alp_power_mode_t mode, uint32_t *rollback_failed)
+{
+	if (rollback_failed != NULL) {
+		*rollback_failed = 0u;
+	}
+	if (mode == ALP_POWER_MODE_SLEEP || mode == ALP_POWER_MODE_DEEP_SLEEP) {
+		return ALP_OK; /* v1: only STOP / STANDBY quiesce */
+	}
+	if (mode != ALP_POWER_MODE_RUN && mode != ALP_POWER_MODE_STOP &&
+	    mode != ALP_POWER_MODE_STANDBY) {
+		return ALP_ERR_INVAL;
+	}
+
+	k_mutex_lock(&_lock, K_FOREVER);
+	alp_som_pd_record_t rec = { 0 };
+	alp_status_t        s   = ALP_OK;
+
+	for (size_t i = 0; i < ALP_POWER_DOMAIN_COUNT && s == ALP_OK; ++i) {
+		alp_power_domain_t d   = _order[i];
+		const sompd_t     *p   = &_reg[d];
+		uint32_t           bit = ALP_POWER_DOMAIN_BIT(d);
+
+		if (!p->present || _policy[d] == ALP_POWER_DOMAIN_POLICY_KEEP_ALIVE) {
+			continue;
+		}
+		if (mode != ALP_POWER_MODE_RUN && (p->modes & BIT(mode)) == 0u) {
+			continue;
+		}
+		if (_state[d] == ALP_SOM_PD_QUIESCED) {
+			s = ALP_ERR_BUSY;
+			break;
+		}
+		bool rail  = (_policy[d] == ALP_POWER_DOMAIN_POLICY_RAIL_OFF);
+		bool prior = prior_active(d);
+		s          = run_quiesce(d, rail);
+		/* Record the domain even when its quiesce failed: a multi-step action
+		 * (rail-off drives nRESET, then the supply) may have completed its first
+		 * step, and the rollback below must undo that too.  Releasing a pad that
+		 * was never driven is harmless. */
+		_state[d] = ALP_SOM_PD_QUIESCED;
+		rec.quiesced |= bit;
+		if (rail) {
+			rec.rail_off |= bit;
+		}
+		if (prior) {
+			rec.prior_active |= bit;
+		}
+	}
+
+	if (s != ALP_OK) {
+		/* Put back everything touched, including the failing domain's own partial
+		 * step; the caller sees the error and must not enter the sleep.  A domain
+		 * whose rollback also fails stays RESTORE_FAILED, is reported through
+		 * @p rollback_failed, and is kept in the record so a later
+		 * alp_som_power_restore() can retry it. */
+		uint32_t restored, failed;
+		restore_domains(&rec, ~0u, false, &restored, &failed);
+		if (failed != 0u) {
+			rec.quiesced = failed;
+			/* RUN, not @p mode: the retry record must survive a warm reset
+			 * that STOP_MODE_STAT (0 on a warm reset) cannot vouch for;
+			 * leaving a rollback-failed domain held would be the worse outcome. */
+			rec.mode = (uint32_t)ALP_POWER_MODE_RUN;
+			alp_som_pd_store_save(&rec);
+		}
+		if (rollback_failed != NULL) {
+			*rollback_failed = failed;
+		}
+	} else if (rec.quiesced != 0u) {
+		rec.mode = (uint32_t)mode;
+		alp_som_pd_store_save(&rec);
+	}
+	k_mutex_unlock(&_lock);
+	return s;
+}
+
+alp_status_t alp_som_power_restore(uint32_t *failed_out)
+{
+	k_mutex_lock(&_lock, K_FOREVER);
+	alp_som_pd_record_t rec;
+	if (!alp_som_pd_store_load(&rec)) {
+		k_mutex_unlock(&_lock);
+		return ALP_ERR_NOT_READY;
+	}
+	uint32_t restored, failed;
+	restore_domains(&rec, ~0u, false, &restored, &failed);
+	alp_som_pd_store_clear();
+	k_mutex_unlock(&_lock);
+	if (failed_out != NULL) {
+		*failed_out = failed;
+	}
+	return (failed == 0u) ? ALP_OK : ALP_ERR_IO;
+}
+
+alp_status_t alp_som_power_cycle_run(uint32_t hold_ms, uint32_t *failed)
+{
+	if (failed != NULL) {
+		*failed = 0u;
+	}
+	alp_status_t s = alp_som_power_quiesce(ALP_POWER_MODE_RUN, failed);
+	if (s != ALP_OK || alp_som_power_quiesced() == 0u) {
+		return s;
+	}
+	k_msleep((int32_t)hold_ms);
+	return alp_som_power_restore(failed);
+}
+
+alp_som_pd_state_t alp_som_power_state(alp_power_domain_t d)
+{
+	return ((unsigned)d < (unsigned)ALP_POWER_DOMAIN_COUNT) ? _state[d] : ALP_SOM_PD_ACTIVE;
+}
+
+uint32_t alp_som_power_quiesced(void)
+{
+	uint32_t mask = 0u;
+	for (size_t d = 0; d < ALP_POWER_DOMAIN_COUNT; ++d) {
+		if (_state[d] == ALP_SOM_PD_QUIESCED) {
+			mask |= ALP_POWER_DOMAIN_BIT(d);
+		}
+	}
+	return mask;
+}
+
+alp_power_domain_policy_t alp_som_power_policy(alp_power_domain_t d)
+{
+	return ((unsigned)d < (unsigned)ALP_POWER_DOMAIN_COUNT) ? _policy[d]
+	                                                        : ALP_POWER_DOMAIN_POLICY_AUTO;
+}
+
+void alp_som_power_reset_for_test(void)
+{
+	k_mutex_lock(&_lock, K_FOREVER);
+	memset(_policy, 0, sizeof(_policy));
+	memset(_state, 0, sizeof(_state));
+	memset(_hooks, 0, sizeof(_hooks));
+	memset(_hook_ctx, 0, sizeof(_hook_ctx));
+	memset(&_boot, 0, sizeof(_boot));
+	_pads_applied = false;
+	alp_som_pd_store_clear();
+	k_mutex_unlock(&_lock);
+}
+
+/* ---- Cold-boot restore ------------------------------------------------------ */
+
+/* STOP_MODE_STAT (0x1A60F000 bit4) must agree that the last reset was a STOP
+ * wake.  Absent register (non-Alif build) -> no extra evidence to require. */
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(stop_mode))
+#define SOMPD_STOP_MODE_STAT_BIT BIT(4)
+/* Weak so the host tests can stand in for the register. */
+__weak uint32_t alp_som_power_stop_mode_read(void)
+{
+	return sys_read32(DT_REG_ADDR(DT_NODELABEL(stop_mode)));
+}
+static bool stop_mode_stat_agrees(void)
+{
+	return (alp_som_power_stop_mode_read() & SOMPD_STOP_MODE_STAT_BIT) != 0u;
+}
+#else
+static bool stop_mode_stat_agrees(void)
+{
+	return true;
+}
+#endif
+
+int alp_som_power_boot_restore(void)
+{
+	k_mutex_lock(&_lock, K_FOREVER);
+	memset(&_boot, 0, sizeof(_boot));
+
+	alp_som_pd_record_t rec;
+	if (!alp_som_pd_store_load(&rec)) {
+		/* Plain POR (or a record that fails magic / CRC): touch nothing. */
+		k_mutex_unlock(&_lock);
+		return 0;
+	}
+	/* A RUN-mode record is the bench / test cycle interrupted by a warm reset:
+	 * STOP_MODE_STAT cannot vouch for it, and leaving the domains held would be
+	 * the worse outcome. */
+	if (rec.mode != (uint32_t)ALP_POWER_MODE_RUN && !stop_mode_stat_agrees()) {
+		alp_som_pd_store_clear();
+		k_mutex_unlock(&_lock);
+		return 0;
+	}
+
+	/* The in-RAM state is fresh after a cold boot; the record is the truth. */
+	for (size_t d = 0; d < ALP_POWER_DOMAIN_COUNT; ++d) {
+		if ((rec.quiesced & ALP_POWER_DOMAIN_BIT(d)) != 0u) {
+			_state[d] = ALP_SOM_PD_QUIESCED;
+		}
+	}
+	/* Pass 1: everything that needs only a GPIO pad.  The I2C-backed domains wait
+	 * for pass 2 (alp_som_power_boot_restore_i2c) -- the controller is not up yet. */
+	uint32_t restored, failed;
+	restore_domains(&rec, ~SOMPD_I2C_DOMAINS, true, &restored, &failed);
+
+	_boot.valid       = true;
+	_boot.mode        = rec.mode;
+	_boot.wake_source = rec.wake_source;
+	_boot.slept_ms    = rec.slept_ms;
+	_boot.quiesced    = rec.quiesced;
+	_boot.restored    = restored;
+	_boot.failed      = failed;
+
+	alp_som_pd_store_clear();
+	k_mutex_unlock(&_lock);
+	return 0;
+}
+
+int alp_som_power_boot_restore_i2c(void)
+{
+	k_mutex_lock(&_lock, K_FOREVER);
+	if (_boot.valid) {
+		alp_som_pd_record_t rec = { .quiesced = _boot.quiesced & SOMPD_I2C_DOMAINS };
+		uint32_t            restored, failed;
+
+		restore_domains(&rec, SOMPD_I2C_DOMAINS, true, &restored, &failed);
+		_boot.restored |= restored;
+		_boot.failed |= failed;
+	}
+	k_mutex_unlock(&_lock);
+	return 0;
+}
+
+/* Pass 1 runs right after the GPIO controllers (PRE_KERNEL_1) and before the
+ * flash, Ethernet and sensor drivers.  Pass 2 needs the BRD_I2C controller, which
+ * i2c_dw brings up at POST_KERNEL CONFIG_I2C_INIT_PRIORITY, so it must run after
+ * that and still before the sensor and Ethernet drivers that use the bus and the
+ * PHY clock.  SYS_INIT needs a literal priority, hence the assertions. */
+#define SOMPD_I2C_RESTORE_PRIO 51
+#ifdef CONFIG_I2C_INIT_PRIORITY
+BUILD_ASSERT(SOMPD_I2C_RESTORE_PRIO > CONFIG_I2C_INIT_PRIORITY,
+             "som_power: the I2C-backed restore must run after the I2C controller initialises");
+#endif
+#ifdef CONFIG_ETH_INIT_PRIORITY
+BUILD_ASSERT(SOMPD_I2C_RESTORE_PRIO < CONFIG_ETH_INIT_PRIORITY,
+             "som_power: the I2C-backed restore must run before the Ethernet driver");
+#endif
+#ifdef CONFIG_SENSOR_INIT_PRIORITY
+BUILD_ASSERT(SOMPD_I2C_RESTORE_PRIO < CONFIG_SENSOR_INIT_PRIORITY,
+             "som_power: the I2C-backed restore must run before the sensor drivers");
+#endif
+#ifdef CONFIG_FLASH_INIT_PRIORITY
+BUILD_ASSERT(
+    CONFIG_FLASH_INIT_PRIORITY > 1,
+    "som_power: the pin restore (and the flash hook binding at 1) precede the flash driver");
+#endif
+
+SYS_INIT(alp_som_power_boot_restore, POST_KERNEL, 0);
+SYS_INIT(alp_som_power_boot_restore_i2c, POST_KERNEL, 51);
+
+/* ---- Power-class op wrappers ------------------------------------------------ */
+
+static bool rail_off_available(alp_power_domain_t d)
+{
+	const sompd_t *p = &_reg[d];
+	return IS_ENABLED(CONFIG_ALP_SDK_SOM_PD_WIFI_RAIL_OFF) && d == ALP_POWER_DOMAIN_WIFI_BLE &&
+	       p->rail_off_opt_in && p->enable.port != NULL;
+}
+
+alp_status_t alp_som_power_ops_policy_set(alp_power_backend_state_t *state,
+                                          alp_power_domain_t         domain,
+                                          alp_power_domain_policy_t  policy)
+{
+	(void)state;
+	if (!_reg[domain].present) {
+		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+	}
+	if (policy == ALP_POWER_DOMAIN_POLICY_RAIL_OFF && !rail_off_available(domain)) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	k_mutex_lock(&_lock, K_FOREVER);
+	alp_status_t s = ALP_OK;
+	if (_state[domain] == ALP_SOM_PD_QUIESCED) {
+		s = ALP_ERR_BUSY; /* the held domain was taken under the old policy */
+	} else {
+		_policy[domain] = policy;
+	}
+	k_mutex_unlock(&_lock);
+	return s;
+}
+
+static uint32_t action_bit(const sompd_t *p, sompd_action_t a)
+{
+	switch (a) {
+	case SOMPD_A_HOLD_RESET:
+		return (p->reset.port != NULL) ? ALP_POWER_ACTION_HOLD_RESET : 0u;
+	case SOMPD_A_POWERDOWN_PIN:
+		return (p->powerdown.port != NULL) ? ALP_POWER_ACTION_POWERDOWN_PIN : 0u;
+	case SOMPD_A_ENABLE_LOW: /* the enable pad driven to its quiesce level */
+		return (p->enable.port != NULL) ? ALP_POWER_ACTION_POWERDOWN_PIN : 0u;
+	case SOMPD_A_SHUTDOWN_REG:
+		return (p->i2c.bus != NULL) ? ALP_POWER_ACTION_SHUTDOWN_REG : 0u;
+	case SOMPD_A_DEEP_POWER_DOWN_CMD: /* no driver exposes it yet */
+	case SOMPD_A_KEEP_ALIVE:
+	default:
+		return 0u;
+	}
+}
+
+alp_status_t alp_som_power_ops_domain_info(alp_power_domain_t domain, alp_power_domain_info_t *out)
+{
+	const sompd_t *p = &_reg[domain];
+	if (!p->present) {
+		return ALP_OK; /* zero-filled: present = false */
+	}
+	out->present            = true;
+	out->holds_through_stop = p->holds_through_stop;
+	out->default_action     = action_bit(p, (sompd_action_t)p->action);
+	out->supported_actions  = out->default_action;
+	if (rail_off_available(domain)) {
+		out->supported_actions |= ALP_POWER_ACTION_RAIL_OFF;
+	}
+	out->dependents = p->dependents;
+	return ALP_OK;
+}
+
+alp_status_t alp_som_power_ops_boot_wake_info(alp_power_boot_info_t *out)
+{
+	out->valid                  = _boot.valid;
+	out->realised_mode          = (alp_power_mode_t)_boot.mode;
+	out->wake_source            = _boot.wake_source;
+	out->slept_ms               = _boot.slept_ms;
+	out->quiesced_domains       = _boot.quiesced;
+	out->restored_domains       = _boot.restored;
+	out->restore_failed_domains = _boot.failed;
+	return ALP_OK;
+}

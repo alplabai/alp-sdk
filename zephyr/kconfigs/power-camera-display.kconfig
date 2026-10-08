@@ -223,6 +223,51 @@ config ALP_SDK_POWER_PM_POLICY
 	  vanish); the zephyr_stub at priority 0 keeps alp_power_open
 	  succeeding so application setup code keeps linking unchanged.
 
+config ALP_SDK_SOM_POWER
+	bool "SoM power-domain runtime (quiesce / restore around STOP)"
+	depends on ALP_SDK_POWER && GPIO && PINCTRL
+	default y if DT_HAS_ALP_SOM_POWER_DOMAIN_ENABLED
+	select CRC
+	help
+	  Compile src/backends/power/som_power.c: the registry of on-module
+	  power domains (Wi-Fi/BLE coprocessor, Ethernet PHY, external flash
+	  and RAM, temperature sensor, RTC clock-out, backlight) built from the
+	  generated `alp,som-power-domain` devicetree nodes, the per-domain
+	  policy, the quiesce / restore pair the Alif STOP backend calls, and
+	  the early SYS_INIT that restores the domains after a STOP wake.
+
+	  Answers alp_power_domain_policy_set(), alp_power_domain_info() and
+	  alp_power_boot_wake_info() through the power-class vtable.  On a plain
+	  power-on reset the wake path finds no valid record and touches
+	  nothing.  Without this option those three calls return
+	  ALP_ERR_NOSUPPORT.  The node's pinctrl-0 state muxes every pad the
+	  layer drives, so it also needs CONFIG_GPIO and CONFIG_PINCTRL.
+
+config ALP_SDK_SOM_PD_WIFI_RAIL_OFF
+	bool "Allow gating the CC3501E supply (RAIL_OFF policy) around STOP"
+	depends on ALP_SDK_SOM_POWER
+	help
+	  Lets alp_power_domain_policy_set(ALP_POWER_DOMAIN_WIFI_BLE,
+	  ALP_POWER_DOMAIN_POLICY_RAIL_OFF) succeed: the quiesce then also pulls
+	  WIFI_EN low (after nRESET) and the restore raises it again.  Default
+	  off, and it should stay off on activated modules.
+
+	  HAZARD: on a unit with vendor_sbl_container_enable=1 a WIFI_EN cold
+	  cycle may never relaunch the CC3501E firmware.  The default Wi-Fi
+	  action (hold nRESET low, release it on wake) never touches the supply
+	  and has no such risk.  Without this option RAIL_OFF is refused with
+	  ALP_ERR_NOSUPPORT.
+
+config ALP_SDK_SOM_PD_WIFI_SETTLE_MS
+	int "CC3501E boot settle after nRESET release on a runtime restore (ms)"
+	depends on ALP_SDK_SOM_POWER
+	default 3500
+	help
+	  Blind wait, with no SPI clocking, after the default nRESET-release
+	  restore of the Wi-Fi/BLE domain.  3500 ms is cc3501e_hard_reset()'s
+	  boot settle (Puya double-boot plus crypto init).  The cold-boot wake
+	  path never waits; it leaves the settle to the bring-up code.
+
 config ALP_SDK_POWER_EXT_RENESAS
 	bool "Compile the Renesas V2N power vendor-extension body"
 	depends on ALP_SDK_POWER

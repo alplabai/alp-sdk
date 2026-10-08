@@ -464,6 +464,13 @@ power_domains:
         measured:
           - { saving: "≈10 mA", input_voltage: "16 V", bench: "E1M-AEN803 on E1M-EVK", date: "2026-10-08",
               method: ram-run }
+    dependents:
+      # Y3 (KC2016Z50.0000C15XXK, 50 MHz) is the PHY reference oscillator: OUT ->
+      # R40 -> E_PHY_REFCLK (SoC P11_0 and the DP83825 XI / 50MHzIn).  Its TRI pin
+      # is E_PHY_PWRDWN (P15_4), so driving P15_4 low also tri-states the clock
+      # (E1M-AEN-2626-R2 netlist, 2026-10-08).
+      - { kind: phy_refclk, net: E_PHY_REFCLK, driver_pin: "Y3 TRI (E_PHY_PWRDWN)",
+          source: { file: alif-ethernet-phy.tsv, signal: E_PHY_PWRDWN } }
     restore:
       method: pin_release
       note: Release E_PHY_PWRDWN, then let the PHY re-negotiate the link.
@@ -495,17 +502,19 @@ power_domains:
         holds_through_stop: unproven
         source: { file: alif-ospi.tsv, signal: OSPI1_RESETn }
     default_modes: [stop, standby]
-    default_action: deep_power_down_cmd
+    default_action: hold_reset
     actions:
-      deep_power_down_cmd:
-        opt_in: false
-        note: Deep power-down through the flash driver; the part's command set is per SKU.
       hold_reset:
         control: OSPI1_RESETn
         opt_in: false
+        note: >-
+          flash_ospi_alif (zephyr/drivers/flash/flash_ospi_alif.c) exposes no
+          power-management or deep-power-down hook, so reset-hold is the
+          action.  The reset returns the part to its power-on 1-1-1 framing and
+          the driver is held out of service across the reset (flash_ospi_alif_suspend / flash_ospi_alif_resume): it takes the driver lock and waits for WIP to clear before RESETn is asserted, so a write or erase is never cut off.
     restore:
       method: driver_release
-      note: Exit deep power-down / release reset through the owning flash driver.
+      note: Release OSPI1_RESETn, then the flash driver re-enters Octal DDR on its next write or erase.
     evidence: >-
       alif-ospi.tsv row OSPI1_RESETn (P15_7); net-to-part mapping per
       E1M-AEN-2626-R2 (U10 NOR) as recorded in CHANGELOG.md (the OSPI1_INTn/OSPI1_RESETn entry).
@@ -532,8 +541,8 @@ power_domains:
         control: OSPI0_RESETn
         opt_in: false
         note: >-
-          Used when the part has no low-power command; a part that has one
-          may prefer it (decided per SKU part, not yet).
+          No HyperRAM driver exists in the tree to issue the part's own
+          low-power command, so reset-hold is the action.
     restore:
       method: pin_release
       note: Release OSPI0_RESETn, then re-run the HyperRAM init.

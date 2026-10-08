@@ -1,0 +1,22 @@
+tests:
+  alp.unit.power_som_domains:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp
+      - unit
+      - power
+  alp.unit.power_som_domains.rail_off:
+    extra_args: ALP_TEST_RAIL_OFF=1
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp
+      - unit
+      - power

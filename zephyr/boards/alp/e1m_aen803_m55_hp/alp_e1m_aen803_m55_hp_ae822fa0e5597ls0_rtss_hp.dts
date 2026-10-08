@@ -321,12 +321,26 @@
  * the SoC pads that gate them, and the default quiesce action per domain.
  * Presence follows this SKU's `on_module` block; pads, polarity and actions
  * come from `power_domains:` in metadata/e1m_modules/aen/on-module-links.yaml.
- * Data only -- no driver reads this node yet.  `alp,stop-hold` is "unproven"
- * for every LPGPIO (P15_n) pad until the STOP bench shows the output holds.
+ * The SoM power layer (src/backends/power/som_power.c) reads this node and
+ * applies its pinctrl-0 state before it first drives a pad.  `alp,stop-hold` is
+ * "unproven" for every LPGPIO (P15_n) pad until the STOP bench shows the output
+ * holds.
  */
+&pinctrl {
+	pinctrl_som_power: pinctrl_som_power {
+		group0 {
+			pinmux = <PIN_P5_5__GPIO>, <PIN_P11_6__GPIO>, <PIN_P15_1__LPGPIO>, <PIN_P15_4__LPGPIO>, <PIN_P15_5__LPGPIO>, <PIN_P15_6__LPGPIO>, <PIN_P15_7__LPGPIO>;
+			input-enable;
+			input-schmitt-enable;
+		};
+	};
+};
+
 / {
 	som_power: som-power {
 		compatible = "alp,som-power";
+		pinctrl-0 = <&pinctrl_som_power>;
+		pinctrl-names = "default";
 
 		/*
 		 * E_WIFI_NRST / WIFI_EN pads: inter-chip.tsv rows E_WIFI_NRST (P15_1_FLEX)
@@ -371,6 +385,7 @@
 			alp,default-modes = "stop", "standby";
 			alp,stop-hold = "unproven";
 			alp,restore = "pin_release";
+			alp,dependents = "phy_refclk";
 		};
 
 		/*
@@ -383,7 +398,7 @@
 			alp,role = "ext_flash";
 			reset-gpios = <&lpgpio 7 GPIO_ACTIVE_LOW>; /* OSPI1_RESETn P15_7 */
 			alp,chip = "IS25WX256-JHLE";
-			alp,default-action = "deep_power_down_cmd";
+			alp,default-action = "hold_reset";
 			alp,default-modes = "stop", "standby";
 			alp,stop-hold = "unproven";
 			alp,restore = "driver_release";
