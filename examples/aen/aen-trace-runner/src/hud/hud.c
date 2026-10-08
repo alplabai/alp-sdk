@@ -1104,8 +1104,7 @@ unsigned tr_mem_map(tr_mem_region_t out[TR_MEM_REGIONS], uint32_t renderer_end)
 	                    : TR_MEM_A32_IMG_END - STUB_PAYLOAD_BASE;
 	const tr_mem_region_t map[] = {
 		/* SRAM0 */
-		{ "FB A", TR_FB_A, TR_FB_SIZE },
-		{ "A32 DL", TR_MEM_A32_DL, (uint32_t)sizeof(tr_dl_t) },
+		{ "FB A", TR_FB_A, TR_FB_SLOT_SIZE },
 		{ "A32 setup", TR_MEM_A32_SETUP, (uint32_t)sizeof(tr_tri_setup_t) * TR_DL_MAX_TRIS },
 		{ "A32 bands",
 		  TR_MEM_A32_BANDS,
@@ -1123,10 +1122,12 @@ unsigned tr_mem_map(tr_mem_region_t out[TR_MEM_REGIONS], uint32_t renderer_end)
 		{ "renderer L1", TR_MEM_RENDER_TTB, 0x4000u },
 		{ "stub", STUB_BASE, STUB_LIMIT - STUB_BASE },
 		{ "stub stacks", STUB_LIMIT, STUB_STACK1_TOP - STUB_LIMIT },
+		{ "A32 DL", TR_MEM_A32_DL, (uint32_t)sizeof(tr_dl_t) },
 		{ "renderer", STUB_PAYLOAD_BASE, rend },
 		{ "A32 bins", TR_MEM_A32_BINS, TR_BANDS * TR_BIN_MAX * 2u },
 		{ "A32 stacks", TR_MEM_A32_STACKS, TR_MEM_A32_STACKS_SIZE },
-		{ "FB B", TR_FB_B, TR_FB_SIZE },
+		{ "A32 gate", TR_MEM_A32_GATE, 0x1000u },
+		{ "FB B", TR_FB_B, TR_FB_SLOT_SIZE },
 		{ "TF-A RW", TR_MEM_TFA_RW, TR_MEM_TFA_RW_END - TR_MEM_TFA_RW },
 	};
 	_Static_assert(sizeof(map) / sizeof(map[0]) == TR_MEM_REGIONS, "TR_MEM_REGIONS");

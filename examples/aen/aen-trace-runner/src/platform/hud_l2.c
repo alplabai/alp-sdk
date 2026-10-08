@@ -85,7 +85,7 @@ BUILD_ASSERT(TR_HUD_FB_SIZE == TR_HUD_W * TR_HUD_H * 2u, "tr_mbox.h TR_HUD_FB_SI
 BUILD_ASSERT(TR_HUD_FB % 64u == 0u,
              "CDC200 fetch address alignment (bus width 8 B; 64 B for burst)");
 /* The layer never touches what the A32 renders into or TF-A's window. */
-BUILD_ASSERT(TR_HUD_FB >= TR_MHU0_WINDOW_HI && TR_HUD_FB >= TR_FB_A + TR_FB_SIZE,
+BUILD_ASSERT(TR_HUD_FB >= TR_MHU0_WINDOW_HI && TR_HUD_FB >= TR_FB_A + TR_FB_SLOT_SIZE,
              "HUD buffer placement");
 
 /* Repaint cap per presented frame (tr_hud_t.budget). Host-counted M55

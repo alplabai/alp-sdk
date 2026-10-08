@@ -96,7 +96,17 @@ int main(void)
 	/* --- publish/take `in`: happy path --- */
 	memset((void *)&g_mbox, 0, sizeof(g_mbox));
 	f.track_h = 1280;
-	assert(f.rotation == 0 && TR_MBOX_VERSION == 2u); /* a fresh snapshot: not turned */
+	assert(f.rotation == 0 && TR_MBOX_VERSION == 3u); /* a fresh snapshot: not turned */
+
+	/* --- stage 0 memory re-plan: the placement relations the A32 builds assert too --- */
+	assert(TR_FB_SLOT_SIZE == 800u * 1280u * 2u && TR_FB_SIZE <= TR_FB_SLOT_SIZE);
+	assert(TR_FB_B == 0x025EA000u && (TR_FB_B & 0xFFFu) == 0u); /* derived from TR_MEM_TFA_RW */
+	assert(TR_FB_B + TR_FB_SLOT_SIZE <= TR_MEM_TFA_RW);
+	assert(TR_FB_B + TR_FB_SLOT_SIZE + 0x1000u > TR_MEM_TFA_RW); /* the last slot that fits */
+	assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == TR_MEM_A32_GATE);
+	assert(TR_MEM_A32_GATE + 0x1000u <= TR_FB_B);
+	assert(TR_MEM_A32_DL == 0x02424000u && TR_MEM_A32_BINS == 0x02460000u);
+	assert(TR_FB_A + TR_FB_SLOT_SIZE <= TR_MEM_A32_SETUP);
 	f.rotation = 270; /* does not fit a byte: the field is 16 bits */
 	tr_mbox_publish_in(&g_mbox, &f, TR_FB_A, noop_barrier);
 	{

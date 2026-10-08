@@ -55,12 +55,12 @@ BUILD_ASSERT(TR_MOUNT_ROT == 0 ? (TR_L1_W == TR_ROT_PORTRAIT_W && TR_L1_H == TR_
              "the shield's shield-fit overlay");
 
 /* FB A is the SRAM0 partition base (plan section 4); FB B is SRAM1
- * 0x02600000 (tr_mbox.h), outside every DT partition -- cdc200_swap_fb()
+ * 0x025EA000 (tr_mbox.h), outside every DT partition -- cdc200_swap_fb()
  * checks only the size. */
 BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(sram0)) == TR_FB_A,
              "TR_FB_A must be the sram0 partition base");
 BUILD_ASSERT(TR_FB_BYTES <= DT_REG_SIZE(DT_NODELABEL(sram0)), "FB A must fit the sram0 partition");
-BUILD_ASSERT(TR_FB_A + TR_FB_BYTES <= TR_FB_B, "FB A must end before FB B");
+BUILD_ASSERT(TR_FB_A + TR_FB_SLOT_SIZE <= TR_FB_B, "FB A's slot must end before FB B");
 BUILD_ASSERT(TR_FB_BYTES == TR_FB_SIZE, "panel size != tr_mbox.h TR_FB_SIZE");
 
 /* Same bound as display.c: one refresh is 25.0 ms (33.3 at TR_PANEL_HZ 30), three or four means the ISR is silent. */
@@ -120,7 +120,7 @@ int tr_display_open(void)
 	cdc200_get_framebuffer(g_cdc, CDC_LAYER_1, &fb);
 	g_fb_size = fb.fb_size;
 	/* The CDC200 boots scanning the shield's lcd_fb (0x02200000), which is
-	 * not FB B any more (tr_mbox.h: SRAM1 0x02600000) and which the A32
+	 * not FB B any more (tr_mbox.h: SRAM1 0x025EA000) and which the A32
 	 * renderer uses as cached scratch: park on FB A so the live/free pair
 	 * is valid from here on. FB A shows whatever it holds until the A32's
 	 * first frame. */

@@ -59,6 +59,11 @@ int main(void)
 	m.version = TR_MBOX_VERSION - 1u; /* an older stub's page: other offsets */
 	assert(tr_mbox_stub_page_init(&m) == 0);
 	assert(m.in_seq == 0u && m.out_seq == 0u && m.in.rotation == 0u);
+	/* The previous release's page (v2: FB B at 0x02600000, DL/bins/stacks elsewhere). */
+	memset((void *)&m, 0xA7, sizeof(m));
+	m.magic   = TR_MBOX_MAGIC;
+	m.version = 2u;
+	assert(TR_MBOX_VERSION == 3u && tr_mbox_stub_page_init(&m) == 0 && m.in_seq == 0u);
 	memset((void *)&m, 0xA7, sizeof(m));
 	m.magic   = TR_MBOX_MAGIC;
 	m.version = TR_MBOX_VERSION;

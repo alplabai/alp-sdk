@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "../../src/render/panel_rot.h"
+#include "../../src/ipc/tr_mbox.h" /* TR_FB_SLOT_SIZE */
 
 #define W  TR_ROT_PORTRAIT_W
 #define H  TR_ROT_PORTRAIT_H
@@ -175,6 +176,7 @@ int main(void)
 	assert(tr_rot_valid(0) && tr_rot_valid(90) && tr_rot_valid(270));
 	assert(!tr_rot_valid(180) && !tr_rot_valid(45) && !tr_rot_valid(-90));
 	assert((uint32_t)LW * LH * 2u == 1843200u);          /* tr_mbox.h TR_FB_SIZE */
+	assert((uint32_t)LW * LH * 2u <= TR_FB_SLOT_SIZE);   /* and fits the placement slot */
 	assert((uint32_t)TR_ROT_HUD_W * LH * 2u == 506880u); /* tr_mbox.h TR_HUD_FB_SIZE */
 
 	check_rotation(90);

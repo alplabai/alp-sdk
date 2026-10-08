@@ -103,17 +103,18 @@ running and a player in front of the camera:
 
 ## This release reflashes the HE, the HP, the A32 app and the ATOC together
 
-Compared with the previous release this one changes the HE image (frames carry a rotation,
-mailbox version 2), the HP vision image (it waits for the HE's I2C1 release before it touches
-the bus), `a32_app` (the stub and renderer, now speaking mailbox version 2) and therefore the
+Compared with the previous release this one changes the HE image (mailbox version 3: the memory
+re-plan moved FB B to 0x025EA000 and the DL, bins, stacks and gate; frames carry a rotation since
+version 2), the HP vision image (it waits for the HE's I2C1 release before it touches
+the bus), `a32_app` (the stub and renderer, now speaking mailbox version 3) and therefore the
 ATOC that carries the HE. Flash all of them from ONE build. `bl32` and `movenet_model` are
 unchanged (the board already holds them; `flash-release.sh write` skips an identical sector).
 Do not mix images across releases:
 
 | Mixed set | What happens |
 |---|---|
-| new HE, old `a32_app` (stub v1) | the HE logs `stub speaks mailbox version 1, this HE 2 -- not driving it`; it never treats the stub as alive, so no frames are drawn |
-| old HE, new `a32_app` (stub v2, new renderer) | the old HE's 172-byte frames carry no rotation; the renderer reads garbage there and faults (`0xAB1D....` in the mailbox `pad3[7]`), or draws turned |
+| new HE, old `a32_app` (stub v2) | the HE logs `stub speaks mailbox version 2, this HE 3 -- not driving it`; it never treats the stub as alive, so no frames are drawn |
+| old HE, new `a32_app` (stub v3, new renderer) | the old HE refuses the stub: its mailbox version (2) is not the stub's 3, so no frames are drawn; an HE that ignored the check would scan FB B at 0x02600000 while the renderer draws at 0x025EA000 |
 | new HP, old HE | the HP waits for an I2C1 release that the old HE never publishes: `i2c-handover: waiting ...` on its console, no camera, no pose, the game runs on its fallback |
 | old HP, new HE | the old HP touches I2C1 at its boot without waiting; on the RVT121 that collides with the bridge configuration |
 | new ATOC, old `a32_app` (or the reverse) | the ATOC's HE and the MRAM renderer disagree on length and CRC: the stub refuses the LAUNCH (`BAD_CRC`) and the HE's watchdog relaunches the same bytes |

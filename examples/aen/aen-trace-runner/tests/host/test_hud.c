@@ -242,7 +242,7 @@ int main(void)
 				assert(m[i].base + m[i].size <= m[j].base || m[j].base + m[j].size <= m[i].base);
 			}
 		}
-		assert(TR_HUD_FB >= TR_FB_A + TR_FB_SIZE && TR_HUD_FB >= TR_MHU0_WINDOW_HI &&
+		assert(TR_HUD_FB >= TR_FB_A + TR_FB_SLOT_SIZE && TR_HUD_FB >= TR_MHU0_WINDOW_HI &&
 		       TR_HUD_FB + TR_HUD_FB_SIZE <= 0x023FE000u);
 		/* The renderer's buffers are counted where render.c puts them
 		 * (both use tr_memmap.h), and the P10 ring + the stub's park page
@@ -258,6 +258,8 @@ int main(void)
 			         { "A32 DL", TR_MEM_A32_DL },
 			         { "A32 bins", TR_MEM_A32_BINS },
 			         { "A32 stacks", TR_MEM_A32_STACKS },
+			         { "A32 gate", TR_MEM_A32_GATE },
+			         { "FB B", TR_FB_B },
 			         { "HUD", TR_HUD_FB },
 			         { "A32 zone tex", TR_MEM_A32_ZTEX },
 			         { "A32 zone idx", TR_MEM_A32_ZIDX } };

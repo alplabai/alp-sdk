@@ -41,7 +41,7 @@ _Static_assert(STUB_MHU0_WINDOW == TR_MHU0_WINDOW_LO &&
                "tr_mbox.h and stub_abi.h disagree on the MHU0 window");
 _Static_assert(TR_FB_CLEAR_OF_MHU0(TR_FB_A) && TR_FB_CLEAR_OF_MHU0(TR_FB_B),
                "a framebuffer overlaps the TF-A MHU0 window [0x02380000, 0x02381000)");
-_Static_assert(TR_FB_B + TR_FB_SIZE <= 0x027DE000u, "FB B runs into TF-A RW (0x027DE000)");
+_Static_assert(TR_FB_B + TR_FB_SLOT_SIZE <= TR_MEM_TFA_RW, "FB B's slot runs into TF-A RW");
 _Static_assert(RENDER_FB_BYTES == TR_FB_SIZE, "framebuffer size");
 /* The HE's HUD buffer (layer 2) sits above everything the renderer maps in SRAM0. */
 _Static_assert(TR_HUD_FB >= STUB_MHU0_WINDOW + STUB_MHU0_WINDOW_SIZE &&
@@ -68,12 +68,11 @@ _Static_assert(TR_MEM_NPU_ARENA + TR_MEM_NPU_ARENA_SIZE <= TR_MEM_ARING,
                "NPU arena runs into the MHU0 window / sound ring");
 #define ZBAND(c) ((uint16_t *)TR_MEM_A32_BANDS + (c) * 2u * BAND_PX)
 #define CBAND(c) (ZBAND(c) + BAND_PX)
-_Static_assert(TR_MEM_A32_DL >= TR_FB_A + TR_FB_SIZE &&
-                   TR_MEM_A32_DL + sizeof(tr_dl_t) <= TR_MEM_A32_SETUP,
-               "DL must sit between FB A and the setup records (SRAM0 MiB 1 tail)");
-_Static_assert(TR_MEM_A32_IMG_END <= TR_MEM_A32_BINS, "renderer image + .bss overrun the bins");
-_Static_assert(TR_MEM_A32_BINS + TR_BANDS * TR_BIN_MAX * 2u <= TR_MEM_A32_STACKS,
-               "bins overrun the stacks");
+_Static_assert(TR_MEM_A32_DL >= STUB_STACK1_TOP, "DL overlaps the stub stacks");
+_Static_assert(TR_MEM_A32_DL + sizeof(tr_dl_t) <= TR_MEM_A32_BINS, "DL overruns the bins");
+_Static_assert(TR_MEM_A32_BINS + TR_BANDS * TR_BIN_MAX * 2u <= TR_MEM_CAM_POOL,
+               "bins overrun the camera pool");
+_Static_assert(TR_MEM_A32_IMG_END <= TR_MEM_A32_STACKS, "renderer image + .bss overrun the stacks");
 _Static_assert(TR_MEM_A32_SETUP + sizeof(tr_tri_setup_t) * TR_DL_MAX_TRIS <= TR_MEM_A32_BANDS,
                "setup records overrun the bands");
 _Static_assert(TR_MEM_A32_BANDS + RENDER_CORES * 4u * BAND_PX <= TR_MEM_A32_ZTEX,
@@ -288,9 +287,9 @@ static void hud_band(uint16_t *cband, int y_lo)
 #define VID_STRIP_W     160                   /* portrait: each side strip, (720 - 400) / 2 */
 #define LAND_BAND_H     ((TR_VID_H - TR_CAM_SENSOR_H) / 2) /* landscape: each letterbox band, 120 */
 #define LAND_LAMP_SQ    56                                 /* landscape lamp square, px */
-#define LAMP_CELL_H     (TR_VID_H / 4)        /* four lamps stacked down the left strip */
-#define LAMP_SQ         96                    /* lamp square, px */
-#define LAMP_CAP_SCALE  4                     /* caption: 3x5 font at 4x -> 20 px tall */
+#define LAMP_CELL_H     (TR_VID_H / 4) /* four lamps stacked down the left strip */
+#define LAMP_SQ         96             /* lamp square, px */
+#define LAMP_CAP_SCALE  4              /* caption: 3x5 font at 4x -> 20 px tall */
 #define LAMP_HOLD_TICKS 10
 
 #if TR_CAM_PIP_ENABLE

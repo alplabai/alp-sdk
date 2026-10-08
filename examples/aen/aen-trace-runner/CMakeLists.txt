@@ -165,10 +165,10 @@ if(TR_RENDER STREQUAL "A32")
 		src/hud/hud.c
 	)
 	target_compile_definitions(app PRIVATE TR_RENDER_A32=1)
-	# FB B defaults to SRAM1 0x02600000 (src/ipc/tr_mbox.h). Override only to
+	# FB B defaults to SRAM1 0x025EA000 (src/ipc/tr_mbox.h). Override only to
 	# pair with the old stub-table test payloads (payload-echo/-colorbar):
 	# -DTR_FB_B_ADDR=0x02200000u (the shield's lcd_fb).
-	set(TR_FB_B_ADDR "" CACHE STRING "Override TR_FB_B (A32 render only; empty = 0x02600000)")
+	set(TR_FB_B_ADDR "" CACHE STRING "Override TR_FB_B (A32 render only; empty = 0x025EA000)")
 	if(TR_FB_B_ADDR)
 		target_compile_definitions(app PRIVATE TR_FB_B_ADDR=${TR_FB_B_ADDR})
 	endif()
