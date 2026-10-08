@@ -15,7 +15,7 @@
 #                       lane mux + NPU reset release (gpio-hogs).
 #   e1m-x-evk.dtsi      E1M-X-EVK carrier: eth/i2c/usb/console enables,
 #                       USB-OVC hog, DSI display, TAS2563 audio. (CAN is TODO;
-#                       cameras are opt-in, see camera-csi.cfg.)
+#                       cameras are opt-in via ALP_CAMERA_CAM0, see below.)
 #   e1m-v2n101-x-evk.dts / e1m-v2m101-x-evk.dts  product boards.
 #
 # These compose up from the upstream Renesas SoC dtsi (r9a09g056.dtsi,
@@ -178,7 +178,7 @@ python () {
 # one: 1280x800 and 640x400 modes next to the default 1280x720, Y8_1X8 next
 # to Y10_1X10, and the ovti,ov9281 compatible.  v6.6 only writes the gated
 # MIPI clock (0x4800 = 0x20) when the endpoint has clock-noncontinuous, which
-# the bench-proven 0016/0017 run used, so e1m-x-evk-cam0-ov9281.dtsi sets it.
+# the bench-proven 0016/0017 run used, so the generated e1m-x-evk-cam0-innomaker_cam_ov9281.dtsi sets it.
 #
 # 0012 (UIO default match, #2374): uio_pdrv_genirq binds no DT node until
 # of_id is set, and the stored U-Boot bootargs cannot be relied on to carry
@@ -397,10 +397,10 @@ do_configure:prepend() {
         fi
     fi
 
-    # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
+    # Opt-in CAM0 sources (#1149, #2633): the wrapper dts + fragment must sit next
     # to the board dts or the cam0 dtb has no rule to build.
-    if [ -n "${ALP_CAM0_SENSOR}" ]; then
-        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAM0_SENSOR}.dtsi" \
+    if [ -n "${ALP_CAMERA_CAM0}" ]; then
+        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAMERA_CAM0}.dtsi" \
             "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
         install -m 0644 \
             "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts" \
@@ -486,40 +486,40 @@ SRC_URI:append:e1m-v2n101 = " file://display.cfg"
 # second :e1m-v2m101 append would add the patch twice and do_patch fails.
 SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-reset-the-amplifier-at-probe.patch file://0014-ASoC-rsnd-let-SSI2-share-SSI1-SCK-WS-on-RZ-V2N.patch"
 
-# Sensor drivers (#2618): every camera driver the SDK supports is built in
-# (=y, the images install no kernel-modules) on every V2N/V2M machine, so any
-# camera works once its DT is selected, without ALP_ENABLE_CAM0_*.
-# Unconditional, unlike camera-csi.cfg below (opt-in receiver DT).  A follow-up PR generates
-# this file from metadata.
-SRC_URI:append = " file://camera-sensors.cfg"
-
 # USB device (gadget) mode on the E1M-X-EVK USB 2.0 port (docs/e1m-x-evk-usb-otg.md).
 # OPT-IN, BENCH-UNVERIFIED: usb-gadget.cfg builds the Renesas USBHS driver
 # in, which binds the otg &hsusb node, so it is merged ONLY when
 # ALP_ENABLE_USB_GADGET = "1" (machines with the `usbgadget` MACHINE_FEATURES flag, the same gate as the image install).
 SRC_URI:append = "${@' file://usb-gadget.cfg' if d.getVar('ALP_ENABLE_USB_GADGET') == '1' and bb.utils.contains('MACHINE_FEATURES', 'usbgadget', True, False, d) else ''}"
 
-# Camera (#1149): OPT-IN IMX219 on the E1M-X-EVK CAM0 connector ->
-# CSI-2 receiver -> CRU0.  BENCH-UNVERIFIED.  Off by default: the shipped
-# dtb does not change.  Set ALP_ENABLE_CAM0_IMX219 = "1" in local.conf to
-# ALSO build renesas/e1m-v2{n,m}101-x-evk-cam0.dtb and merge
-# camera-csi.cfg; the bootloader `fdtfile` must then name that dtb (the
-# default dtb stays in KERNEL_DEVICETREE as the fallback).  Placeholder
-# sensor + assumed CSI/CRU labels: see e1m-x-evk-cam0-imx219.dtsi and
-# docs/v2n-camera-csi.md.
-ALP_ENABLE_CAM0_IMX219 ??= "0"
-# Camera (#2612): OPT-IN OV9281 (mono, RPi-style module) on the same CAM0
-# connector (J5).  Mutually exclusive with the IMX219 switch.  Adds
-# camera-csi.cfg (CONFIG_VIDEO_OV9282) and the same cam0 dtb; see
-# e1m-x-evk-cam0-ov9281.dtsi and docs/v2n-camera-csi.md.
-ALP_ENABLE_CAM0_OV9281 ??= "0"
+# Cameras (#2633).  camera-sensors.cfg is GENERATED (scripts/gen_camera_dt.py)
+# from the camera metadata: the CSI-2 receiver + capture unit and every camera
+# module's sensor driver, built in (=y, the images install no kernel-modules)
+# on every V2N/V2M machine, so a camera works once its DT is selected.
+SRC_URI:append = " file://camera-sensors.cfg"
+
+# Selecting a camera is one variable.  ALP_CAMERA_CAM0 = "<module_id>" (a file
+# stem in metadata/camera_modules/) builds renesas/e1m-v2{n,m}101-x-evk-cam0.dtb
+# in addition to the default dtb (which stays in KERNEL_DEVICETREE as the
+# fallback) from the generated fragment e1m-x-evk-cam0-<module_id>.dtsi; the
+# bootloader `fdtfile` must then name that dtb.  Unset (the default): the
+# shipped dtb is unchanged.  Adding a camera is a metadata-only change:
+# regenerate with scripts/gen_camera_dt.py.  See docs/v2n-camera-csi.md.
+ALP_CAMERA_CAM0 ??= ""
+ALP_CAM_FRAGMENT_DIR := "${THISDIR}/${PN}"
 python () {
-    imx219 = d.getVar('ALP_ENABLE_CAM0_IMX219') == '1'
-    ov9281 = d.getVar('ALP_ENABLE_CAM0_OV9281') == '1'
-    if imx219 and ov9281:
-        bb.fatal("ALP_ENABLE_CAM0_IMX219 and ALP_ENABLE_CAM0_OV9281 are mutually exclusive: both are CAM0 sensors")
-    d.setVar('ALP_CAM0_SENSOR', 'imx219' if imx219 else 'ov9281' if ov9281 else '')
+    sel = d.getVar('ALP_CAMERA_CAM0')
+    if not sel:
+        return
+    import glob, os
+    pre, suf = 'e1m-x-evk-cam0-', '.dtsi'
+    have = sorted(os.path.basename(f)[len(pre):-len(suf)]
+                  for f in glob.glob(os.path.join(d.getVar('ALP_CAM_FRAGMENT_DIR'), pre + '*' + suf))
+                  if not f.endswith('-sensor' + suf))
+    if sel not in have:
+        bb.fatal("ALP_CAMERA_CAM0 = '%s' has no generated fragment; available module ids: %s"
+                 % (sel, ', '.join(have)))
 }
 ALP_CAM0_DTB = "${@'e1m-v2m101-x-evk-cam0' if 'v2m' in d.getVar('MACHINE') else 'e1m-v2n101-x-evk-cam0'}"
-KERNEL_DEVICETREE:append = "${@' renesas/' + d.getVar('ALP_CAM0_DTB') + '.dtb' if d.getVar('ALP_CAM0_SENSOR') else ''}"
-SRC_URI += "${@' file://camera-csi.cfg file://e1m-x-evk-cam0-' + d.getVar('ALP_CAM0_SENSOR') + '.dtsi file://e1m-v2n101-x-evk-cam0.dts file://e1m-v2m101-x-evk-cam0.dts' if d.getVar('ALP_CAM0_SENSOR') else ''}"
+KERNEL_DEVICETREE:append = "${@' renesas/' + d.getVar('ALP_CAM0_DTB') + '.dtb' if d.getVar('ALP_CAMERA_CAM0') else ''}"
+SRC_URI += "${@' file://e1m-x-evk-cam0-' + d.getVar('ALP_CAMERA_CAM0') + '.dtsi file://e1m-v2n101-x-evk-cam0.dts file://e1m-v2m101-x-evk-cam0.dts' if d.getVar('ALP_CAMERA_CAM0') else ''}"

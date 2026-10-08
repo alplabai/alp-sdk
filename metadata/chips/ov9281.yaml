@@ -48,7 +48,7 @@ drivers:
     link_freqs:                      # the driver accepts exactly one lane count + rate
       - { lanes: 2, link_freqs_hz: [400000000] }
     # Supplies/flags below are the v6.6-based driver delivered by alp kernel
-    # patch 0020 (metadata/os/linux-kernel-drivers.yaml); the native 6.1
+    # patch 0030 (metadata/os/linux-kernel-drivers.yaml); the native 6.1
     # driver requests no supplies, which is harmless to the extra DT entries.
     supplies:      [avdd, dovdd, dvdd]
     reset_property: reset-gpios

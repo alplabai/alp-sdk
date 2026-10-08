@@ -404,8 +404,8 @@ cameras:
     (not `alp-stock-shim`) qualifies when the connector has a non-empty
     `zephyr_shields:` AND the module has a `zephyr_shield:`; a Yocto core
     qualifies when the connector declares `linux: true` (set on the X-EVK
-    CAM0 only, tied to the Linux sensor DT the camera-DT generator, #2736,
-    produces; validated: only CAM0 of a `renesas-rzv2n*` board).  So the E1M-EVK CAM0 is
+    CAM0 only, tied to the Linux sensor DT that `scripts/gen_camera_dt.py`
+    (#2736) generates; validated: only CAM0 of a `renesas-rzv2n*` board).  So the E1M-EVK CAM0 is
     owned by the M55 app core and the X-EVK CAM0 by the A55, with no `core:`
     needed, whatever else the SoM runs.  No qualifying core is an ALP-B003
     error naming the OS the connector supports; several (e.g. AEN M55-HE and
@@ -429,9 +429,10 @@ cameras:
     two cameras on one owner using the same module shield (a Zephyr shield is
     a single instance).
   - **Yocto** owner: `ALP_CAMERA_CAM<n> = "<module_id>"` in that slice's
-    `local.conf`.  This is the variable the kernel bbappend will key the
-    sensor devicetree include (`<board>-cam<n>-<module_id>.dtsi`) on once the
-    camera-DT generator (#2736) lands; that work consumes CAM0 only.
+    `local.conf`.  The kernel bbappend keys the generated sensor
+    devicetree include (`<board>-cam<n>-<module_id>.dtsi`, written by
+    `scripts/gen_camera_dt.py`, #2736) on this variable; it reads
+    `ALP_CAMERA_CAM0` only.
   - Connector `CAMn` is camera index `n`: `alp-camera<n>` in Zephyr DT, the
     `n` in `ALP_CAMERA_CAM<n>`.
   - `zephyr_shields` is optional and only for connectors a Zephyr shield

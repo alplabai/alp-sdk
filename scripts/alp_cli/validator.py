@@ -204,8 +204,9 @@ def camera_connector_problems(connectors: Any, e1m_routes: Any, *,
       (`families`: the preset's `hosts_som_families`, or the project SoM's
       family for an inline board; None skips the family half) -- the only
       place a Linux camera path exists.
-      Later: switch to "the camera-DT generator (#2736) emits
-      # <board>-cam<n>-<module>.dtsi for this connector" once it lands.
+      Follow-up: tighten to "scripts/gen_camera_dt.py (#2736) emits a
+      <board>-cam<n>-<module>.dtsi for this connector"; that needs the board
+      name, which an inline project board does not have.
     """
     if not isinstance(connectors, dict):
         return []
