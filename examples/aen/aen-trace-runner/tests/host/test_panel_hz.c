@@ -1,7 +1,8 @@
-/* tests/host/test_panel_hz.c -- P11a, the 30 Hz panel option (src/game/panel_hz.h).
+/* tests/host/test_panel_hz.c -- the 30 Hz panel option (src/game/panel_hz.h).
  *
- * runner.sh builds this twice: default (TR_PANEL_HZ 40, the shield's timing)
- * and -DTR_PANEL_HZ=30 (CMake adds panel_30hz.overlay). Checks, per build:
+ * runner.sh builds this twice: default (TR_PANEL_HZ 40, the host default and
+ * the RK055 shield's timing) and -DTR_PANEL_HZ=30 (what the game derives for
+ * panel_30hz.overlay and the Riverdi shield). Checks, per build:
  *  1. the panel timing arithmetic -- refresh = pclk / (htotal * vtotal) --
  *     for the shield's timing and for panel_30hz.overlay as committed (the
  *     file is parsed, not copied), inside every limit the link has;
@@ -102,6 +103,35 @@ int main(void)
 		assert(vfp > VFP);
 		assert(pclk == -1 || pclk == (long)PCLK); /* the pixel clock stays the shield's */
 		assert(near(timing(PCLK, (int)vfp), 30.0, 0.05));
+	}
+	/* The refresh the game derives from a display's devicetree timings
+	 * (panel_hz.h TR_PANEL_HZ): the real shield overlays, parsed. */
+	{
+		const char *rk   = "../../../zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/"
+		                   "e1m_evk_rk055hdmipi4ma0.overlay";
+		const char *riv  = "../../../zephyr/boards/shields/e1m_evk_rvt121hvdfwca0/"
+		                   "e1m_evk_rvt121hvdfwca0.overlay";
+		long        rkh  = overlay_prop(rk, "hsync-len") + overlay_prop(rk, "hback-porch") +
+		                   overlay_prop(rk, "hfront-porch") + overlay_prop(rk, "width");
+		long        rkv  = overlay_prop(rk, "vsync-len") + overlay_prop(rk, "vback-porch") +
+		                   overlay_prop(rk, "vfront-porch") + overlay_prop(rk, "height");
+		long        rkp  = overlay_prop(rk, "clock-frequency");
+		long        v30  = overlay_prop("panel_30hz.overlay", "vfront-porch");
+		long        rivh = overlay_prop(riv, "hsync-len") + overlay_prop(riv, "hback-porch") +
+		                   overlay_prop(riv, "hfront-porch") + overlay_prop(riv, "width");
+		long        rivv = overlay_prop(riv, "vsync-len") + overlay_prop(riv, "vback-porch") +
+		                   overlay_prop(riv, "vfront-porch") + overlay_prop(riv, "height");
+		long        rivp = overlay_prop(riv, "clock-frequency");
+
+		assert(rkp == (long)PCLK && rkh == 762 && rkv == 1312);
+		assert(tr_refresh_hz((uint32_t)rkp, (uint32_t)rkh, (uint32_t)rkv) == 40u);
+		/* RK055 with panel_30hz.overlay: only the vertical front porch changes. */
+		assert(tr_refresh_hz((uint32_t)rkp,
+		                     (uint32_t)rkh,
+		                     (uint32_t)(rkv - overlay_prop(rk, "vfront-porch") + v30)) == 30u);
+		/* Riverdi RVT121: 36,363,636 Hz over 1440 x 840 = 30.06 Hz. */
+		assert(rivp == 36363636L && rivh == 1440 && rivv == 840);
+		assert(tr_refresh_hz((uint32_t)rivp, (uint32_t)rivh, (uint32_t)rivv) == 30u);
 	}
 	/* The build's nominal period is the real one (the flip histogram's bins). */
 	assert(near(TR_PANEL_PERIOD_US * 1e-6, frame_s, 1e-5));

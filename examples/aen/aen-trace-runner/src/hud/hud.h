@@ -78,6 +78,10 @@ typedef struct {
 	bool     drawn;             /* false: every tile repaints on the next update */
 	uint32_t budget; /* px repainted per update at most (0: no cap); see tr_hud_update() */
 	int      next;   /* the tile a capped update stopped at */
+	/* Clockwise degrees the buffer is turned (render/panel_rot.h): 0 the 720 x 352
+	 * portrait HUD, 90 / 270 the 352 x 720 layer of a panel mounted turned
+	 * (hud_l2.c sets it at open). tr_hud_paint_all() always paints rotation 0. */
+	int rot;
 } tr_hud_t;
 
 /* Blink and popup run on a 40 Hz frame clock (tr_hz_to40() of the update

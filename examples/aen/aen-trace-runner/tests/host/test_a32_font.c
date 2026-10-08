@@ -44,7 +44,9 @@ static uint16_t fb[720 * 1280] __attribute__((aligned(16)));
  * (5*scale * 5*scale). */
 static int render_glyph_bits(char c, int scale, bool *out)
 {
-	const vcv_t cv = { fb, 0, TR_R3D_W, 0, TR_R3D_H };
+	const vcv_t cv = {
+		fb, 0, TR_R3D_W, 0, TR_R3D_H, -1
+	}; /* -1: a scratch buffer, not the turned framebuffer */
 
 	memset(fb, 0, sizeof(fb));
 	video_glyph(&cv, 0, 0, c, scale, 0xFFFFu);

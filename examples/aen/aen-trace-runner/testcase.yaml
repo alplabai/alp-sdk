@@ -2,10 +2,11 @@
 #
 # Build-only regressions for the M55-HE half of the Trace Runner game.
 # Twister has no bench, so these prove the game compiles in each render /
-# input mode, not that it runs. The M55-HP image (hp_vision/, needs the
-# tflite-micro module), the A32 renderer (a32/, arm-none-eabi Makefiles) and
-# the sound image (sound/, reworked carriers only) are not twister targets;
-# see README.md for their builds and tests/host/runner.sh for their tests.
+# input mode, not that it runs. The M55-HP image (hp_vision/testcase.yaml,
+# needs the tflite-micro module) is its own twister target. The A32 renderer
+# (a32/, arm-none-eabi Makefiles) and the sound image (sound/, reworked
+# carriers only) are not; see README.md for their builds and
+# tests/host/runner.sh for their tests.
 
 sample:
   name: aen-trace-runner
@@ -24,12 +25,21 @@ common:
 tests:
   alp_sdk.examples.aen.trace_runner.a32_render:
     extra_args:
-      - "TR_PANEL_HZ=30"
+      - "EXTRA_DTC_OVERLAY_FILE=panel_30hz.overlay"
   alp_sdk.examples.aen.trace_runner.a32_render_npu_input:
     extra_args:
-      - "TR_PANEL_HZ=30"
+      - "EXTRA_DTC_OVERLAY_FILE=panel_30hz.overlay"
       - "TR_INPUT_NPU=ON"
       - "TR_CAM_ROTATE=90"
   alp_sdk.examples.aen.trace_runner.m55_render:
     extra_args:
       - "TR_RENDER=M55"
+  # The same game on the Riverdi RVT121 LVDS panel: only the shield changes.
+  alp_sdk.examples.aen.trace_runner.rvt121_a32_render:
+    extra_args:
+      - "SHIELD=e1m_evk_rvt121hvdfwca0"
+  alp_sdk.examples.aen.trace_runner.rvt121_a32_render_npu_input:
+    extra_args:
+      - "SHIELD=e1m_evk_rvt121hvdfwca0"
+      - "TR_INPUT_NPU=ON"
+      - "TR_CAM_ROTATE=90"

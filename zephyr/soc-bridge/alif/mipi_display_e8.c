@@ -175,6 +175,16 @@ static int alif_dsi_panel_bl_pad_to_gpio(void)
 {
 	int ret = 0;
 
+	/*
+	 * A shield whose panel/bridge is not itself a DSI peripheral (e.g. the
+	 * ti,sn65dsi83 DSI-to-LVDS bridge, controlled over I2C, not DCS) has no
+	 * panel@N child of this node to carry bl-gpios -- check the host node
+	 * itself too.  A no-op for a shield like e1m_evk_rk055hdmipi4ma0 that
+	 * never sets this property here (its hx8394 panel@0 child carries it
+	 * instead, and is still reached by the DT_FOREACH_CHILD below).
+	 */
+	ALIF_BL_PAD_TO_GPIO(DT_NODELABEL(mipi_dsi))
+
 	DT_FOREACH_CHILD_STATUS_OKAY(DT_NODELABEL(mipi_dsi), ALIF_BL_PAD_TO_GPIO)
 	return ret;
 }

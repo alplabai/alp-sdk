@@ -9,6 +9,7 @@
 #include "../ipc/tr_mbox.h"            /* TR_BANNER_*, framebuffers, HUD, mailbox */
 #include "../ipc/tr_memmap.h"          /* the A32 build's fixed regions, shared with the renderer */
 #include "../game/zone.h"              /* zone names */
+#include "../render/panel_rot.h"       /* tr_rot_blit: the rotated layer-2 buffer */
 #include "../render/r3d.h"             /* the renderer's DL / setup / band sizes */
 #include "hud_assets.h"
 
@@ -16,6 +17,8 @@ _Static_assert(TR_HUD_FB_SIZE == TR_HUD_W * TR_HUD_H * 2, "tr_mbox.h TR_HUD_FB_S
 /* The layer-2 window (panel rows 0..TR_HUD_H-1) stays over the game
  * viewport, never over the video area below it (half/half layout). */
 _Static_assert(TR_HUD_H <= TR_VIEW_H, "the HUD layer 2 window runs into the video area");
+_Static_assert(TR_HUD_W == TR_ROT_PORTRAIT_W && TR_HUD_H == TR_ROT_HUD_W,
+               "panel_rot.h: the rotated HUD layer is TR_HUD_H px wide");
 
 /* ---------------------------------------------------------------- colours
  * 0x0RGB, 4 bits a channel (ARGB4444 without its alpha). */
@@ -320,11 +323,20 @@ int tr_hud_fmt_u32(char *buf, uint32_t v)
 _Static_assert(LOGO_CARD_Y + LOGO_CARD_H <= CARD_Y, "the logo card stays in the score tiles");
 _Static_assert(INV_Y + INV_PANEL_H <= TR_HUD_H, "the invitation panels stay in the HUD window");
 
-#define TR_HUD_STR_(x) #x
-#define TR_HUD_STR(x)  TR_HUD_STR_(x)
-static const char *const tagline =
-    "E1M-AEN803 \x7f Alif Ensemble E8 \x7f 2x Cortex-A32 \x7f 3D at " TR_HUD_STR(
-        TR_PANEL_HZ) " fps";
+/* The tagline strip; the refresh is a number derived from the display's timings
+ * (panel_hz.h), so it is formatted, not pasted into the literal. */
+static const char *tagline(void)
+{
+	static char buf[80];
+
+	if (buf[0] == '\0') {
+		(void)snprintf(buf,
+		               sizeof(buf),
+		               "E1M-AEN803 \x7f Alif Ensemble E8 \x7f 2x Cortex-A32 \x7f 3D at %u fps",
+		               (unsigned)TR_PANEL_HZ);
+	}
+	return buf;
+}
 
 static bool popup_on(uint32_t frame, uint32_t start)
 {
@@ -528,7 +540,7 @@ paint_attract(const canvas_t *cv, const tr_hud_view_t *v, uint32_t frame, uint32
 		paint_table(cv, &v->hs);
 	} else {
 		panel(cv, 20, CARD_Y + 2, TR_HUD_W - 40, TAGLINE_H, C_PANEL, A_PANEL);
-		text_c(cv, TR_HUD_FONT_SMALL, TR_HUD_W / 2, CARD_Y + 5, tagline, C_DIM, 16u);
+		text_c(cv, TR_HUD_FONT_SMALL, TR_HUD_W / 2, CARD_Y + 5, tagline(), C_DIM, 16u);
 	}
 	/* The character (P16): its name, with the arrow hint where a tilt
 	 * left / right picks another (TR_HUD_INVITE_TILT); the invitation
@@ -776,6 +788,7 @@ tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, ui
 static uint16_t strip[TR_HUD_STRIP * TR_HUD_W];
 
 static uint32_t paint_tile(uint16_t            *fb,
+                           int                  rot,
                            int                  t,
                            const tr_hud_view_t *v,
                            uint32_t             frame,
@@ -791,8 +804,15 @@ static uint32_t paint_tile(uint16_t            *fb,
 
 		memset(strip, 0, (size_t)w * (size_t)h * sizeof(strip[0]));
 		paint(&cv, v, frame, popup_start, zone_start);
-		for (int r = 0; r < h; r++) {
-			memcpy(&fb[(y + r) * TR_HUD_W + tl->x0], &strip[r * w], (size_t)w * sizeof(strip[0]));
+		if (rot == 0) {
+			for (int r = 0; r < h; r++) {
+				memcpy(
+				    &fb[(y + r) * TR_HUD_W + tl->x0], &strip[r * w], (size_t)w * sizeof(strip[0]));
+			}
+		} else if (rot == 90) {
+			tr_rot_blit(90, fb, TR_ROT_HUD_W, strip, (uint32_t)w, tl->x0, y, w, h);
+		} else {
+			tr_rot_blit(270, fb, TR_ROT_HUD_W, strip, (uint32_t)w, tl->x0, y, w, h);
 		}
 	}
 	return (uint32_t)w * (uint32_t)(tl->y1 - tl->y0);
@@ -806,7 +826,7 @@ void tr_hud_paint_all(uint16_t            *fb,
 {
 	inv_init();
 	for (int t = 0; t < T_N; t++) {
-		paint_tile(fb, t, v, frame, popup_start, zone_start);
+		paint_tile(fb, 0, t, v, frame, popup_start, zone_start);
 	}
 }
 
@@ -876,7 +896,7 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32
 			break;
 		}
 		h->key[t] = k;
-		px += paint_tile(fb, t, v, f, h->popup_start, h->zone_start);
+		px += paint_tile(fb, h->rot, t, v, f, h->popup_start, h->zone_start);
 		d |= 1u << t;
 	}
 	if (dirty != NULL) {
