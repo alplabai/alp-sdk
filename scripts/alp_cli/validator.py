@@ -555,8 +555,7 @@ def _compat_pass(
             collector.add(
                 Diagnostic(
                     # warning, not error: SoC peripherals JSON ingestion is
-                    # incomplete for several parts (e.g. iMX93 with its
-                    # `_pending_reason` placeholder), and some peripheral
+                    # incomplete for some parts, and some peripheral
                     # categories surface board-side rather than directly on
                     # the SoC (emmc / flash / ethernet via I/O controllers).
                     # A false-positive ALP-B010 must not block the build —

@@ -35,8 +35,8 @@ hp_vision_check() {
 	# is refused too: it means "cam_rot.h's default when this was built",
 	# and that default has changed (270 -> 90, the bench-verified mount).
 	local rot mir
-	rot=$(sed -n 's/^TR_CAM_ROTATE:[A-Z]*=//p' "$hd/CMakeCache.txt")
-	mir=$(sed -n 's/^TR_CAM_MIRROR:[A-Z]*=//p' "$hd/CMakeCache.txt")
+	rot=$(sed -n 's/^TR_CAM_ROTATE:[A-Z]*=//p' "$hd/CMakeCache.txt" | tr -d '\r')
+	mir=$(sed -n 's/^TR_CAM_MIRROR:[A-Z]*=//p' "$hd/CMakeCache.txt" | tr -d '\r')
 	echo "build-release: hp_vision camera: TR_CAM_ROTATE=${rot:-<unset>} TR_CAM_MIRROR=${mir:-<unset>}" >&2
 	case "$rot" in
 	0 | 90 | 270) ;;
@@ -125,6 +125,13 @@ ALLOW = {
 	'2000000', '2400000', '80000000',                            # SRAM0, SRAM1, MRAM/flash
 	'e000e100', 'e000e010',                                      # ARM core: NVIC, SysTick
 	'42001000',                                                  # lptimer0 -- see the scan below's own check
+	# The Secure-Enclave service mailbox pair (seservice0r/s, arm,mhuv2): okay on
+	# EVERY Ensemble image since #2192 because it backs the SE TRNG entropy source
+	# that seeds the CSPRNG. The pair is core-local -- each M55 reaches the SE through
+	# its own alias of 0x40040000/0x40050000, bench-verified from both the HE and the
+	# HP (ensemble_e8_peripherals.dtsi) -- so, unlike i2c2 or uart5, it cannot contend
+	# with the HE. The SDK's own SoC-info / power-profile backends use it too.
+	'40040000', '40050000',
 }
 depth = 0
 soc_seen = False
@@ -182,7 +189,7 @@ print(' '.join(sorted(set(bad))))
 PY
 	)
 	if [ -n "$bad" ]; then
-		hp_vision_refuse "/soc peripheral(s) 0x$bad are status=okay in $dts but not in this app's own allow-list (i2c1, gpio12, cam, csi/d-phy, ethosu55) -- the HP owns only what it drives; a stray enabled peripheral can contend with the HE for a shared resource (silicon-proven twice: i2c2's ISR, fix round 6; uart5's console, fix round 12) -- disable it in hp_vision's board overlay"
+		hp_vision_refuse "/soc peripheral(s) 0x$bad are status=okay in $dts but not in this app's own allow-list (i2c1, gpio12, cam, csi/d-phy, ethosu55, the core-local SE mailbox pair) -- the HP owns only what it drives; a stray enabled peripheral can contend with the HE for a shared resource (silicon-proven twice: i2c2's ISR, fix round 6; uart5's console, fix round 12) -- disable it in hp_vision's board overlay"
 		return 1
 	fi
 	# fix round 13: lptimer0 (0x42001000, above) is allow-listed on a

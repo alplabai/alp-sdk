@@ -209,10 +209,24 @@ jobs:
       # 8 minutes rather than tightening to ~3, because the failure this
       # guards against is exactly a mirror going slow and 8min = 480s =
       # 5.6x the worst good run will not fire on a slow-but-fine one.
+      # #2429: cache the .debs below (not the package lists -- `update`
+      # still runs), keyed on this workflow file, which holds the package
+      # list. A miss is a normal fetch. Only dev push + nightly save, as for
+      # ccache: a merge-queue ref's cache is unreadable by later runs.
+      - name: Restore apt .deb cache
+        id: apt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 5
+        with:
+          path: ${{ runner.temp }}/apt-archives
+          key: apt-debs-${{ runner.os }}-twister-${{ hashFiles('alp-sdk/.github/workflows/pr-twister.yml') }}
+
       - name: Install host build tools (dtc, ninja, ccache, gperf, libffi)
         # 20min: generous for a slow package mirror, finite so a
         # HUNG fetch fails here and names this step (#1549).
         timeout-minutes: 20
+        env:
+          APT_ARCHIVE_DIR: ${{ runner.temp }}/apt-archives
         run: |
           "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh update
           "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh install -y --no-install-recommends \
@@ -220,6 +234,14 @@ jobs:
               python3-dev python3-pip python3-setuptools python3-wheel \
               libffi-dev libssl-dev xz-utils file make gcc gcc-multilib \
               g++-multilib libsdl2-dev libmagic1
+
+      - name: Save apt .deb cache (dev push + nightly only, on a miss)
+        if: steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'schedule')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 5
+        with:
+          path: ${{ runner.temp }}/apt-archives
+          key: apt-debs-${{ runner.os }}-twister-${{ hashFiles('alp-sdk/.github/workflows/pr-twister.yml') }}
 
       # #1319: same failure class as "Install host build tools" above
       # (PyPI/mirror stall).  Worst successful run 13s; 2min = 9.2x.

@@ -239,8 +239,17 @@
   ],
   "cm33_boot": {"sram_base": 134217728, "image_pad": 12288, "image_max": 196608, "xspi_offset": 1703936,
     "note": "BL2 copies the stored CM33 image raw from mtd1 + xspi_offset (0x1A0000) to SRAM sram_base (0x08000000) and silently truncates past image_max (0x30000); the CM33 starts at sram_base + image_pad (0x08003000), so the stored image is image_pad zero bytes + zephyr.bin."},
-  "openamp_carveout": {"a55_base": 1332740096, "size": 9437184, "rsctbl_size": 4096,
-    "note": "OpenAMP/MHU-B reservation in the CM33-NS DDR alias, A55 view 0x4F700000..0x4FFFFFFF (CM33-NS 0x9F700000, A55 = CM33-NS - 0x50000000); rsctbl is its first rsctbl_size (0x1000) bytes. The stock firmware beacon sits in the top 16 bytes of the rsctbl window. The generated board .dts quotes the same region."},
+  "openamp_carveout": {"a55_base": 1332740096, "cm33_ns_base": 2674917376, "size": 9437184,
+    "regions": {
+      "rsctbl":     {"offset": 0,       "size": 4096},
+      "mhu-shm":    {"offset": 4096,    "size": 4096},
+      "vring-ctl0": {"offset": 1048576, "size": 327680},
+      "vring-ctl1": {"offset": 1376256, "size": 327680},
+      "vring-shm0": {"offset": 2097152, "size": 3145728},
+      "vring-shm1": {"offset": 5242880, "size": 3145728}
+    },
+    "ram_console": {"offset": 65536, "size": 16384},
+    "note": "OpenAMP/MHU-B reservation: A55 view 0x4F700000..0x4FFFFFFF = CM33-NS 0x9F700000 (A55 = CM33-NS - 0x50000000). regions[] are offsets+sizes inside it: rsctbl 0x0/0x1000 (the AMP liveness beacon is the top 16 bytes of this rsctbl page, A55 0x4F700FF0), mhu-shm 0x1000/0x1000, vring-ctl0 0x100000/0x50000, vring-ctl1 0x150000/0x50000, vring-shm0 0x200000/0x300000, vring-shm1 0x500000/0x300000. ram_console (0x10000/0x4000, A55 0x4F710000 = CM33-NS 0x9F710000) is the CM33 RAM-console buffer the A55 reads post-mortem; it lies inside the window, clear of every region above, and has no UIO node. The generated CM33 board .dts, the RPC backend's generated alp_amp_window.h and the Linux reserved-memory/UIO nodes (checked by scripts/check_amp_window.py) all quote this block."},
   "memory_regions": [
     {
       "name":            "ddr_main",

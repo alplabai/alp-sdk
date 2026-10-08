@@ -48,11 +48,6 @@ def test_generated_conf_is_byte_identical_to_alp_project_emit(rel, core):
     assert out.read_bytes() == want.encode("utf-8")
 
 
-def test_unbuildable_example_is_skipped_not_failed(capsys):
-    assert GEN.main([str(_example("examples/multicore/rpmsg-imx93/m33"))]) == 0
-    assert "SKIP" in capsys.readouterr().out
-
-
 def _testcases():
     for app_dir, _board, _core in CASES:
         tc = app_dir / "testcase.yaml"

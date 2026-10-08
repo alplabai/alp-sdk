@@ -315,9 +315,8 @@ SRC_URI:append:e1m-v2n101 = " file://sd1-microsd.cfg"
 # CONFIG_OF_SYSTEM_SETUP; ft_board_setup() is already taken by rcar-common's
 # v2-common.c). recipes-core/alp-hostname turns it into the hostname.
 # Context: 0001's alp_som_is_v2n_m1() and the tail of 0007's
-# alp_clk5l_fixup(). 0008 is reserved for the SDHI1 microSD patch on the
-# provisioning branch; its hunks are disjoint from this one's, so keep its
-# SRC_URI line ahead of this one when both land.
+# alp_clk5l_fixup(). 0008 (the SDHI1 microSD patch) is applied before this
+# one; its hunks are disjoint from this one's.
 SRC_URI:append:rzv2n-family = " file://0009-rzv2n-dev-ALP-E1M-publish-sku-to-chosen.patch"
 
 # Derive ethaddr/eth1addr from the same validated manifest's serial --
@@ -344,6 +343,11 @@ SRC_URI:append:rzv2n-family = " file://0010-rzv2n-dev-ALP-E1M-serial-derived-eth
 # board_late_init() clears bit 7 (0x88 -> 0x08) on every boot, before the
 # kernel, so the gpio-gd32-bridge driver finds the GD32 at probe. Production
 # OTP already reads 0x08, so the step is a no-op there; see the patch header.
+# Applied on the whole rzv2n-family, NOT only the E1M machines: 0012 and 0016
+# use 0011's code as hunk context, so dropping it on a plain Renesas EVK
+# breaks do_patch there. The protection is at runtime instead: the patch
+# writes ACT88760 reg 0x10 only when it reads exactly 0x88 at RIIC8 0x25 and
+# otherwise just prints and leaves it, so a plain EVK is never written to.
 SRC_URI:append:rzv2n-family = " file://0011-rzv2n-dev-ALP-E1M-gd32-nrst-release.patch"
 
 # 0012 (reset cause + DX-M1 reset hold, alp-sdk#1153): board_late_init() first
@@ -419,6 +423,14 @@ SRC_URI:append:rzv2n-family = " file://0015-rzv2n-dev-ALP-E1M-sd-card-detect.pat
 # plain EVK would persist the whole vendor-location environment with no
 # allowlist, so the patch and the cfg must travel together.
 SRC_URI:append:rzv2n-family = "     file://0016-rzv2n-dev-ALP-E1M-persistent-environment.patch     file://uboot-env-emmc.cfg "
+
+# 0017 (GBETH PHY address fixup, alplabai/alp-sdk#2582): the RTL8211F PHY address is
+# strap-latched and differs per unit (errata E2). U-Boot reads PHYID1/PHYID2 for
+# MDIO addresses 1..31 on both GBETH buses by driving the DWC EQoS MDIO
+# registers directly (bounded wait, no network device probed, no clock/reset
+# code: TF-A BL2 already enables GBETH0/1) and rewrites the booted Linux DT's
+# phy reg when the PHY is not where the DT says.
+SRC_URI:append:rzv2n-family = " file://0017-rzv2n-dev-ALP-E1M-gbeth-phy-address-fixup.patch"
 
 # Fallback dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  The dtb basename is
 # now derived at boot (0014); CONFIG_ALP_E1M_FDTFILE (patch 0002) is only

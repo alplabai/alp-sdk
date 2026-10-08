@@ -239,7 +239,7 @@ def test_a_unit_that_is_already_off_needs_no_shutdown(tmp_path):
 
 
 def test_a_second_call_on_the_same_power_on_does_nothing(tmp_path):
-    """dsw1_xspi_remove_sd halts the unit; cold_boot_test's first cycle must not type into it."""
+    """a halt leaves the unit halted; cold_boot_test's first cycle must not type into it."""
     ctx, order = _setup(tmp_path, script=_poweroff_over_console())
     ctx.console_login_on_count = ctx.bench.power.on_count
     assert steps.clean_shutdown(ctx) == "clean"
@@ -326,23 +326,8 @@ def test_dsw1_emmc_insert_sd_halts_before_it_asks_the_operator_to_power_off(tmp_
     assert order.index("psu-off") > 3                                # the cold cycle comes after the prompt
 
 
-def test_dsw1_xspi_remove_sd_halts_before_it_asks_the_operator_to_pull_the_card(tmp_path):
-    ctx, order = _setup(tmp_path)
-    res = steps.OpDsw1XspiRemoveSd().run(ctx)
-    assert res.status == "done"
-    assert order[:3] == ["true", "ident", "poweroff"]
-    assert order[3] == ("confirm: The unit has been halted (poweroff, halt line seen). "
-                        "Power OFF, set DSW1 to xSPI boot, REMOVE the microSD. Leave it OFF until the tool asks.")
-    assert "psu-off" not in order                                    # the operator cuts power, not the tool
 
 
-def test_the_operator_is_warned_when_the_unit_could_not_be_halted(tmp_path):
-    ctx, order = _setup(tmp_path, halts=False)
-    steps.OpDsw1XspiRemoveSd().run(ctx)
-    assert "WARNING: the unit was NOT cleanly halted (fallback)" in order[-1]
-    ctx2, order2 = _setup(tmp_path / "b", ssh=False)
-    steps.OpDsw1XspiRemoveSd().run(ctx2)
-    assert "WARNING: the unit was NOT cleanly halted (blind)" in order2[-1]
 
 
 def test_the_xmodem_path_halts_before_its_cold_to_prompt(tmp_path, monkeypatch):
@@ -489,13 +474,6 @@ def test_a_second_call_after_a_clean_halt_is_still_not_needed(tmp_path):
 def test_a_silent_console_keeps_the_halt_across_the_operator_prompt(tmp_path):
     """The tool saw the halt line and a halted unit prints nothing: the prompt must not turn the
     next cut into "blind"."""
-    ctx, order = _setup(tmp_path)
-    steps.OpDsw1XspiRemoveSd().run(ctx)
-    assert ctx.halted_on_count == ctx.bench.power.on_count
-    assert "Leave it OFF until the tool asks." in order[-1]
-    n = len(order)
-    assert steps.clean_shutdown(ctx) == "not-needed"
-    assert order[n:] == []
     ctx2, order2 = _setup(tmp_path / "e")
     ctx2.bench.power.on_hook = lambda: ctx2.bench.console.feed("Hit any key to stop autoboot: 3\r\n")
     steps.OpDsw1EmmcInsertSd().run(ctx2)
@@ -503,12 +481,6 @@ def test_a_silent_console_keeps_the_halt_across_the_operator_prompt(tmp_path):
     assert ctx2.halted_on_count != ctx2.bench.power.on_count      # the power-on after the halt
 
 
-def test_console_output_after_the_halt_invalidates_it_at_the_operator_prompt(tmp_path):
-    """The operator powered the unit back on before Enter: boot text on the console."""
-    ctx, order = _setup(tmp_path)
-    ctx.bench.operator.confirm = lambda msg: ctx.bench.console.feed("U-Boot 2025.01 (powered on)\r\n")
-    steps.OpDsw1XspiRemoveSd().run(ctx)
-    assert ctx.halted_on_count is None
 
 
 def test_a_clean_halt_with_a_failing_first_sync_is_its_own_outcome_on_the_console_path(tmp_path):
@@ -530,8 +502,9 @@ def test_a_clean_halt_with_a_failing_first_sync_is_its_own_outcome_on_the_ssh_pa
 
 def test_the_prompt_says_when_the_halt_came_with_a_sync_error(tmp_path):
     ctx, order = _setup(tmp_path, first_rc=1)
-    steps.OpDsw1XspiRemoveSd().run(ctx)
-    assert "halted (poweroff, halt line seen), but the final sync reported an error (sync rc=1)" in order[-1]
+    ctx.bench.power.on_hook = lambda: ctx.bench.console.feed("Hit any key to stop autoboot: 3\r\n")
+    steps.OpDsw1EmmcInsertSd().run(ctx)
+    assert "halted (poweroff, halt line seen), but the final sync reported an error (sync rc=1)" in order[3]
 
 
 def test_a_sync_rc_split_across_reads_is_not_truncated(tmp_path):

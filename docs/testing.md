@@ -26,10 +26,10 @@ bash scripts/bootstrap.sh
 
 # Make Zephyr reachable for builds.  For native_sim/native/64 the
 # host gcc is used; the Zephyr SDK is only needed for cross-compiled
-# real-silicon scenarios (E1M-AEN / V2N-M33 / iMX93-M33 boards).
+# real-silicon scenarios (E1M-AEN / V2N-M33 boards).
 export ZEPHYR_BASE="$PWD/../zephyr"
 export ZEPHYR_TOOLCHAIN_VARIANT=host   # use `zephyr` only when ZEPHYR_SDK_INSTALL_DIR is set
-                                        # for the *.aen / *.v2n-m33 / *.imx93-m33 scenarios
+                                        # for the *.aen / *.v2n-m33 scenarios
 
 # Run every locally-runnable test (no HIL).
 bash scripts/test-all.sh
@@ -116,7 +116,7 @@ It does **not** prove:
 | `<alp/display.h>` / `<alp/gui.h>` / `<alp/camera.h>` / `<alp/storage.h>` | compile-only via `tests/smoke.c` + headers-include test                                              | (real impls pending)                  |
 | Chip drivers (`chips/*/`)         | `tests/zephyr/chips/` with fakes for `lsm6dso`, `bme280`, `ssd1306`                                                    | per-chip on AEN bench         |
 | `<alp/soc_caps.h>` generation     | `pr-generated-files.yml` (drift gate)                                                                                  | n/a (generator-deterministic)         |
-| ABI snapshot                      | `scripts/abi_snapshot.py` + `docs/abi/v0.16-snapshot.json` (drift gate)                                                | n/a                                   |
+| ABI snapshot                      | `scripts/abi_snapshot.py` + `docs/abi/v0.17-snapshot.json` (drift gate)                                                | n/a                                   |
 | `board.yaml` schema + loader      | `pr-metadata-validate.yml` smoke + `tests/scripts/test_project_*.py`                                                   | n/a                                   |
 
 ---

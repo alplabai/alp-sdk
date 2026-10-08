@@ -125,6 +125,19 @@
 
 /* fault_code values. fault_lr carries the banked LR for 1-4, and the
  * detail value noted for the software faults. */
+/* The payload's launch token (renderer core-1 gate): stub_heartbeat0, bumped by every
+ * launch, never 0. The renderer's RENDER_GATE is a fixed word at 0x025FE000, outside
+ * .bss (core 0's zeroing never touches it), so on a cold page it holds power-on
+ * garbage or an earlier launch's token; a token of 0 (the self-launch never ran the
+ * park loop that used to bump it) could meet a gate word that reads 0 and open core 1
+ * before core 0 has written the token. */
+#ifndef __ASSEMBLER__
+static inline unsigned stub_next_token(unsigned hb)
+{
+	return hb + 1u == 0u ? 1u : hb + 1u;
+}
+#endif
+
 #define STUB_FAULT_NONE          0u
 #define STUB_FAULT_UNDEF         1u  /* fault PC = lr - 4 */
 #define STUB_FAULT_PABORT        2u  /* fault PC = lr - 4; IFSR/IFAR */

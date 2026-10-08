@@ -62,7 +62,7 @@
           "ref": "XEVK_PIN_PCIE0_I2C_EN"
         }
       ],
-      "board_doc": "Drive high to enable the I2C mux to the PCIe slot."
+      "board_doc": "Drive LOW to enable the I2C switch to the PCIe/M.2 slots (TMUX121 EN is active-low, no pull on the net)."
     },
     {
       "net_id": "XEVK_PIN_I2S_MUX_EN",

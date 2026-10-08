@@ -18,7 +18,8 @@
  *
  *     rsctbl + 0x000 .. 0xEFF   resource table (unused by these apps)
  *     rsctbl + 0xF00 .. 0xF4F   THIS RECORD  (20 words, 80 bytes)
- *     rsctbl + 0xF50 .. 0xFEF   free
+ *     rsctbl + 0xF50 .. 0xF7F   FAULT BLOCK  (12 words, 48 bytes; see below)
+ *     rsctbl + 0xF80 .. 0xFEF   free
  *     rsctbl + 0xFF0 .. 0xFFF   liveness beacon (magic, kind, heartbeat)
  *
  * No new carve-out: the window is already reserved `no-map` for Linux and
@@ -39,6 +40,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <alp/protocol/amp_beacon.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -48,7 +51,7 @@ extern "C" {
 /** Record magic, ASCII "GD3R" read as a big-endian number. */
 #define ALP_GD32_RESULTS_MAGIC 0x47443352u
 /** Layout version; bumped when a word moves or changes meaning. */
-#define ALP_GD32_RESULTS_LAYOUT 1u
+#define ALP_GD32_RESULTS_LAYOUT 2u
 /** Record size in 32-bit words. */
 #define ALP_GD32_RESULTS_WORDS 20u
 
@@ -105,7 +108,9 @@ typedef struct {
 	uint32_t soak_errors;    /**< Soak: failed test executions (any status). */
 	uint32_t soak_timeouts;  /**< Soak: lost ATTN edges (fallbacks to the 0.14 drain rule). */
 	uint32_t soak_elapsed_s; /**< Soak: seconds since the first cycle began. */
-	uint32_t reserved;       /**< 0. */
+	uint32_t fail_mask;      /**< Bit i set = test row i (index into the app's test table) failed:
+	                              *   functional: that test failed; soak: that row failed at least once
+	                              *   since start.  Rows >= 32 are not reported. */
 } alp_gd32_results_t;
 
 #ifdef __cplusplus
@@ -116,10 +121,52 @@ _Static_assert(sizeof(alp_gd32_results_t) == ALP_GD32_RESULTS_WORDS * 4u,
                "alp_gd32_results_t must stay 20 words");
 #endif
 
+/** Byte offset of the fault block inside the `rsctbl` window. */
+#define ALP_GD32_FAULT_OFFSET 0xF50u
+/** Fault-block magic, ASCII "FLT1" read as a big-endian number. */
+#define ALP_GD32_FAULT_MAGIC 0x464C5431u
+/** Fault block size in 32-bit words. */
+#define ALP_GD32_FAULT_WORDS 12u
+
+/**
+ * @brief What the test apps' fatal-error handler leaves behind when the CM33 halts.
+ *
+ * The CM33 has no console, so a fatal error (stack overflow, bus fault, ...)
+ * used to look like a silent freeze: the heartbeat just stopped.  The apps
+ * override Zephyr's `k_sys_fatal_error_handler`, store this block, then spin
+ * with interrupts off.  A reader that finds @c magic set knows the CM33 died
+ * rather than hung.  @c magic is cleared by alp_gd32_results_init() and
+ * written last by alp_gd32_results_fault_publish().
+ *
+ * Registers the core did not provide (no exception frame) are 0.
+ */
+typedef struct {
+	uint32_t magic;       /**< @ref ALP_GD32_FAULT_MAGIC; valid only when it matches. */
+	uint32_t reason;      /**< Zephyr `K_ERR_*` fatal reason. */
+	uint32_t pc;          /**< Faulting program counter (stacked exception frame). */
+	uint32_t lr;          /**< Stacked link register. */
+	uint32_t xpsr;        /**< Stacked xPSR (low 9 bits: exception number). */
+	uint32_t cfsr;        /**< SCB CFSR (0xE000ED28). */
+	uint32_t hfsr;        /**< SCB HFSR (0xE000ED2C). */
+	uint32_t mmfar;       /**< SCB MMFAR (0xE000ED34); meaningful when CFSR.MMARVALID. */
+	uint32_t bfar;        /**< SCB BFAR (0xE000ED38); meaningful when CFSR.BFARVALID. */
+	uint32_t thread_hash; /**< FNV-1a 32-bit hash of the faulting thread name. */
+	uint32_t uptime_ms;   /**< Uptime at the fault, truncated to 32 bits. */
+	uint32_t sp;          /**< Address of the exception frame (close to the faulting SP). */
+} alp_gd32_fault_t;
+
+#ifdef __cplusplus
+static_assert(sizeof(alp_gd32_fault_t) == ALP_GD32_FAULT_WORDS * 4u,
+              "alp_gd32_fault_t must stay 12 words");
+#else
+_Static_assert(sizeof(alp_gd32_fault_t) == ALP_GD32_FAULT_WORDS * 4u,
+               "alp_gd32_fault_t must stay 12 words");
+#endif
+
 /** Byte offset of the liveness beacon inside the `rsctbl` window. */
 #define ALP_GD32_RESULTS_BEACON_OFFSET 0xFF0u
-/** Beacon magic the provisioning `cm33_running` check reads. */
-#define ALP_GD32_RESULTS_BEACON_MAGIC 0xA10D0683u
+/** Beacon magic the provisioning `cm33_running` check reads (the one in amp_beacon.h). */
+#define ALP_GD32_RESULTS_BEACON_MAGIC ALP_AMP_BEACON_MAGIC
 /**
  * Beacon image kind of these test images: kind 2, rev 0.  Deliberately NOT the
  * idle shim's 0x100: these images own the GD32 SPI link and drive PWM7, so
@@ -141,7 +188,9 @@ static inline void alp_gd32_results_init(void *window, uint32_t kind)
 {
 	volatile uint32_t *w = (volatile uint32_t *)((uintptr_t)window + ALP_GD32_RESULTS_OFFSET);
 
-	w[offsetof(alp_gd32_results_t, magic) / 4u] = 0u;
+	/* A fault block from the previous run must not be mistaken for this one's. */
+	((volatile uint32_t *)((uintptr_t)window + ALP_GD32_FAULT_OFFSET))[0] = 0u;
+	w[offsetof(alp_gd32_results_t, magic) / 4u]                           = 0u;
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 	for (unsigned i = 1u; i < ALP_GD32_RESULTS_WORDS; ++i) {
 		w[i] = 0u;
@@ -214,6 +263,27 @@ static inline void alp_gd32_results_beacon_tick(void *window)
 	    (volatile uint32_t *)((uintptr_t)window + ALP_GD32_RESULTS_BEACON_OFFSET);
 
 	b[2] = b[2] + 1u;
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+}
+
+/**
+ * @brief Store the fault block; safe from a fatal-error handler (no locks, no kernel calls).
+ *
+ * @p f->magic is ignored: it is written last, by this function.
+ *
+ * @param[in] window Same base passed to @ref alp_gd32_results_init.
+ * @param[in] f      The captured fault state.
+ */
+static inline void alp_gd32_results_fault_publish(void *window, const alp_gd32_fault_t *f)
+{
+	volatile uint32_t *w   = (volatile uint32_t *)((uintptr_t)window + ALP_GD32_FAULT_OFFSET);
+	const uint32_t    *src = (const uint32_t *)f;
+
+	for (unsigned i = 1u; i < ALP_GD32_FAULT_WORDS; ++i) {
+		w[i] = src[i];
+	}
+	__atomic_thread_fence(__ATOMIC_SEQ_CST);
+	w[0] = ALP_GD32_FAULT_MAGIC;
 	__atomic_thread_fence(__ATOMIC_SEQ_CST);
 }
 

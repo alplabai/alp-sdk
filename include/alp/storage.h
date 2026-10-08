@@ -333,8 +333,7 @@ typedef struct {
  * @brief Configure on-the-fly inline AES for an open storage device.
  *
  * Backends with an inline-AES capable controller (AEN-family
- * OSPI / HexSPI with the SecAES block; future i.MX 93 FlexSPI
- * with the OTFAD module) program the controller's key / IV
+ * OSPI / HexSPI with the SecAES block) program the controller's key / IV
  * registers and enable the inline path before this function
  * returns.  Subsequent @ref alp_storage_read / @ref alp_storage_write
  * calls transparently encrypt + decrypt; XIP code execution

@@ -106,6 +106,24 @@ choice symbol Zephyr has not declared still leaves the configure at exit 0.
 It only warns `The choice symbol … was selected (set =y), but no symbol ended
 up as the choice selection`, and the log level is quietly discarded.
 
+### Link target (`diagnostics.link:` -- AEN Flow C)
+
+```yaml
+diagnostics:
+  link: itcm                    # auto (default) | itcm
+```
+
+`itcm` makes `tan build` link the image into the Alif Ensemble M55-HE ITCM
+(base `0x0`, global window `0x58000000`) so `tan flash --ram` can RAM-run it
+with no MRAM write. The planner (tan-cli, ADR-0026) emits the ITCM retarget
+Kconfig fragment + devicetree overlay beside the slice's `alp.conf`; the
+content mirrors `scripts/bench/aen/aen-flowc-itcm.{conf,overlay}`. Proven on the
+E8 M55-HE (E1M-AEN801 / E1M-AEN803) and HE-only: a project with no M55-HE app
+(an M55-HP-only one included) or any other SKU is refused
+(`build.link-itcm-unsupported`), as is an explicit non-RAM
+`diagnostics.console:` (`build.link-itcm-console-conflict`). Details and the
+Flow C procedure: `docs/aen-bench-bringup.md`.
+
 ### Bootloader (`boot:` -- MCUboot)
 
 ```yaml
@@ -123,7 +141,7 @@ sysbuild.conf overlay with the corresponding `SB_CONFIG_*` lines
 for the underlying secure-boot contract.
 
 `method:` is optional and **the SoM family supplies its default** --
-AEN and N93 default to `mcuboot`, V2N and V2N-M1 to `none`, because on
+AEN defaults to `mcuboot`, V2N and V2N-M1 to `none`, because on
 the Renesas families U-Boot owns boot and the `boot:` block describes
 the U-Boot/FIT chain rather than sysbuild.  The sysbuild overlay is
 emitted only for a project that has at least one `os: zephyr` slice:
@@ -167,7 +185,7 @@ security than the schema claimed.  For an explicit `method: mcuboot`,
 `rsa3072` is rejected at emit time (sysbuild's RSA choice has no
 key-length knob); use `rsa2048` or `ecdsa_p256`/`ed25519`.  That
 refusal is scoped to the sysbuild path only -- `rsa2048`/`rsa3072`
-stay legal on V2N / i.MX 9, whose U-Boot/FIT signing never goes
+stay legal on V2N, whose U-Boot/FIT signing never goes
 through sysbuild.
 
 ### OTA (`ota:` -- Mender / MCUmgr)
@@ -206,9 +224,12 @@ take the board.yaml values as written:
   so `https://hosted.mender.io` emits
   `CONFIG_HAWKBIT_SERVER="hosted.mender.io"` plus `CONFIG_HAWKBIT_PORT=443`
   and `CONFIG_NET_SOCKETS_SOCKOPT_TLS=y` + `CONFIG_HAWKBIT_USE_TLS=y`. A value
-  with no `://` is taken as an already-bare host, so a whole-value `${VAR}`
-  placeholder passes through untouched. A base path, URL userinfo or a
-  non-HTTP scheme is refused — the DDI client has no knob for any of them.
+  with no `://` is taken as an already-bare host. A base path, URL userinfo or
+  a non-HTTP scheme is refused — the DDI client has no knob for any of them.
+  A `${VAR}` placeholder is refused too (#2696): Zephyr does not expand
+  environment variables in a Kconfig fragment, so the firmware would use the
+  text `${VAR}` itself as its server name. Write the real host, or set
+  `CONFIG_HAWKBIT_SERVER` in the app's own `prj.conf`.
 - **`poll_interval_s` is converted to MINUTES.** `CONFIG_HAWKBIT_POLL_INTERVAL`
   is declared in minutes with `range 1 43200`, so `poll_interval_s: 1800`
   emits `CONFIG_HAWKBIT_POLL_INTERVAL=30`. A value that is not a whole number
@@ -303,7 +324,7 @@ unconditionally -- no `write_authority:` value makes a contained region
 eligible. A region OUTSIDE the aperture that the SoM preset authored
 itself needs `write_authority: customer_runtime` to land an IPC
 carve-out there. A region the loader DERIVED (SoC-level
-`memory_regions`, or the silicon-variant fallback, e.g. every V2N/V2M/NX9101
+`memory_regions`, or the silicon-variant fallback, e.g. every V2N/V2M
 row) needs no authority at all: it is RAM by construction. The legacy
 `carveout:` flag is honoured VERBATIM only where the derivation can't
 resolve an answer -- no aperture declared for this SoC (every non-Alif
@@ -337,8 +358,7 @@ value, and the remedy. An ABSENT `write_authority` on an authored region
 is refused too, but only where an on-die MRAM aperture resolves for the
 SoM (every Alif SoC/variant that declares `soc_flash_base:`) -- mirrors
 `carveout.py`'s own `_region_ipc_eligibility()` gate, which enforces the
-identical rule the same way; a no-op on every non-Alif SoM (V2N/V2M/
-NX9101), none of which author `write_authority` on a derived region in
+identical rule the same way; a no-op on every non-Alif SoM (V2N/V2M), none of which author `write_authority` on a derived region in
 the first place. `composite` -- the tag a whole-device alias like
 `mram_main` carries, meaning "consult the contained rows instead" -- is
 not an unconditional pass either: every OTHER `memory_map:` row that

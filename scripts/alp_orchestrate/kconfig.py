@@ -35,6 +35,7 @@ gating (see #874).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -121,8 +122,6 @@ def _emit_extra_library_profile(
         soc_family_token = "alif_ensemble"
     elif family.startswith("renesas-rzv2n"):
         soc_family_token = "renesas_rzv2n"
-    elif family.startswith("nxp-imx9"):
-        soc_family_token = "nxp_imx9"
 
     # resolve_capabilities merges SoC-JSON defaults + SoM overrides.
     capabilities = resolve_capabilities(
@@ -250,7 +249,45 @@ def _resolve_console(value: Optional[str], os_: str,
     return _CONSOLE_ALIASES.get(v, "none")
 
 
-def _emit_zephyr_console(console: str, sim_console: bool = False) -> list[str]:
+#: Floor for `CONFIG_RAM_CONSOLE_BUFFER_SIZE` when `diagnostics.console: ram`
+#: selects the RAM console.  An app that sets a larger size in its own
+#: `prj.conf` keeps it (see `_app_ram_console_size`).  Only `prj.conf` is
+#: read: a size set in `boards/<board>.conf`, `prj_<board>.conf` or an app
+#: `EXTRA_CONF_FILE` is not seen and still loses to this floor.
+_RAM_CONSOLE_MIN_SIZE = 2048
+
+_RAM_CONSOLE_SIZE_RE = re.compile(
+    r"^\s*CONFIG_RAM_CONSOLE_BUFFER_SIZE\s*=\s*(0[xX][0-9a-fA-F]+|\d+)\s*(?:#.*)?$")
+
+
+def _app_ram_console_size(project: BoardProject, slice_: Slice) -> int:
+    """`CONFIG_RAM_CONSOLE_BUFFER_SIZE` the slice's own `prj.conf` sets, or 0.
+
+    The generated alp.conf is merged AFTER prj.conf, so a bare assignment
+    would clobber (and shrink) an app-set size -- the app's console then
+    wraps (tan-cli#1401).  Best effort: no source dir, no app, or an
+    unreadable prj.conf all read as "app sets nothing".  Limit: only
+    `prj.conf` is read, so sizes set in `boards/<board>.conf`,
+    `prj_<board>.conf` or an app `EXTRA_CONF_FILE` still lose.
+    """
+    if project.source_dir is None or not slice_.app:
+        return 0
+    from .orchestrator import _zephyr_app_dir  # lazy: orchestrator imports us
+    try:
+        prj = _zephyr_app_dir(slice_.app, project.source_dir) / "prj.conf"
+        text = prj.read_text(encoding="utf-8")
+    except (OSError, OrchestratorError, UnicodeDecodeError):
+        return 0
+    size = 0
+    for line in text.splitlines():
+        m = _RAM_CONSOLE_SIZE_RE.match(line)
+        if m:
+            size = int(m.group(1), 0)  # last assignment wins, like Kconfig
+    return size
+
+
+def _emit_zephyr_console(console: str, sim_console: bool = False,
+                         ram_size: int = _RAM_CONSOLE_MIN_SIZE) -> list[str]:
     """Kconfig lines for a Zephyr slice's resolved console backend.
 
     ``sim_console`` distinguishes a RAM console selected explicitly via
@@ -292,7 +329,7 @@ def _emit_zephyr_console(console: str, sim_console: bool = False) -> list[str]:
             "# LOG is routed to printk so the RAM backend still captures it.",
             "CONFIG_CONSOLE=y",
             "CONFIG_RAM_CONSOLE=y",
-            "CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048",
+            f"CONFIG_RAM_CONSOLE_BUFFER_SIZE={ram_size}",
             "CONFIG_UART_CONSOLE=n",
             "",
         ]
@@ -528,7 +565,8 @@ def _emit_baseline(slice_: Slice, diagnostics: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _emit_console(diagnostics: dict[str, Any], slice_: Slice) -> list[str]:
+def _emit_console(diagnostics: dict[str, Any], slice_: Slice,
+                  project: Optional[BoardProject] = None) -> list[str]:
     """Console backend, auto-selected from the slice OS (overridable via
     board.yaml `diagnostics.console:`).  A Zephyr slice defaults to the
     Alp UART console so `west build && attach a terminal` just works;
@@ -552,7 +590,10 @@ def _emit_console(diagnostics: dict[str, Any], slice_: Slice) -> list[str]:
         and not slice_.hw_console and console == "none"
     if sim:
         console = "ram"
-    return _emit_zephyr_console(console, sim_console=sim)
+    ram_size = _RAM_CONSOLE_MIN_SIZE
+    if console == "ram" and project is not None:
+        ram_size = max(ram_size, _app_ram_console_size(project, slice_))
+    return _emit_zephyr_console(console, sim_console=sim, ram_size=ram_size)
 
 
 # Alif "high-perf"/"high-efficiency" M55 pair -> the "M55-HP"/"M55-HE"
@@ -634,8 +675,8 @@ def _soc_display_name(soc_spec: dict[str, Any]) -> str:
     """Vendor + family + part for `CONFIG_ALP_SDK_SOC_NAME`, e.g. "Alif
     Ensemble E8".  `vendor` contributes only its first word (Alif
     Semiconductor -> Alif); `part` is dropped when it already restates
-    `family` verbatim as a prefix (NXP's family "i.MX 9" / part "i.MX 93"
-    would otherwise read "NXP i.MX 9 i.MX 93").
+    `family` verbatim as a prefix (e.g. family "Ensemble" / part "Ensemble E8"
+    would otherwise read "Alif Ensemble Ensemble E8").
     """
     vendor = str(soc_spec.get("vendor") or "").strip()
     family = str(soc_spec.get("family") or "").strip()
@@ -752,7 +793,7 @@ def _emit_som_caps(
     # Build-time hw_rev this project resolved -- lets the boot banner warn
     # when the LIVE EEPROM manifest disagrees (issue #1853).  Emitted
     # unconditionally (not scoped to the `hw_info_eeprom` block above): a
-    # SKU with no on_module.eeprom today (e.g. E1M-NX9101) still gets the
+    # SKU with no on_module.eeprom today still gets the
     # symbol, so it isn't silently dropped if that SKU gains an EEPROM
     # later, and it stays harmless meanwhile (alp_hw_info_read() never
     # returns ALP_OK without a bus, so the banner's compare never runs).
@@ -1229,13 +1270,12 @@ def _emit_inference(
     the ALP_SDK_* parent it `depends on` in
     zephyr/kconfigs/iot-audio-inference.kconfig (issue #874 item 3):
 
-      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}=y -- derived
-        from the silicon capability counts (ethos_u{55,65,85}_count, resolved
+      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U85}=y -- derived
+        from the silicon capability counts (ethos_u{55,85}_count, resolved
         from the SoC JSON npus[]), the single source for which NPUs the
         part carries.  U85 carries Arm's larger MAC array + TensorOptimized
-        kernels; U55 carries the smaller MAC + reference kernels; U65 is
-        i.MX 93-only.  U55/U85 depend on BACKEND_ETHOS_U_AEN; U65 depends
-        on BACKEND_ETHOS_U_N93.
+        kernels; U55 carries the smaller MAC + reference kernels.
+        U55/U85 depend on BACKEND_ETHOS_U_AEN.
 
       - CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_{NEON,HELIUM,REF}=y -- picked
         from the SoC JSON's `cores[<slice.core_id>].vector_extension`
@@ -1316,32 +1356,23 @@ def _emit_inference(
 
     # ---- G-1 -- per-variant Ethos-U selector ---------------------
     # Which Ethos-U variants this SoM carries -- derived from the
-    # silicon-determined capability counts (ethos_u{55,65,85}_count, resolved
+    # silicon-determined capability counts (ethos_u{55,85}_count, resolved
     # from the SoC JSON npus[] via resolve_capabilities).  This is the single
     # source: an on-die NPU cannot be depopulated at the SoM level, so the SoM
     # preset does NOT restate the variant list.
     ethos_variants: set[str] = set()
     if (capabilities.get("ethos_u55_count") or 0) > 0:
         ethos_variants.add("u55")
-    if (capabilities.get("ethos_u65_count") or 0) > 0:
-        ethos_variants.add("u65")
     if (capabilities.get("ethos_u85_count") or 0) > 0:
         ethos_variants.add("u85")
     ethos_present = bool(ethos_variants)
     if ethos_present:
         # Per-silicon Ethos-U backend (Slice 3 registry layout):
         # Alif Ensemble (AEN) -> _BACKEND_ETHOS_U_AEN
-        # NXP i.MX 93        -> _BACKEND_ETHOS_U_N93
-        # Parent-gating (#874 item 3): only emit the variant switches that
-        # `depend on` the parent backend we're actually emitting on this
-        # silicon -- U55/U85 depend on BACKEND_ETHOS_U_AEN, U65 depends on
-        # BACKEND_ETHOS_U_N93 (zephyr/kconfigs/iot-audio-inference.kconfig).
-        if silicon == "nxp:imx9:imx93":
-            inference_lines.append("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y")
-            allowed_variants = {"u65"}
-        else:
-            inference_lines.append("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y")
-            allowed_variants = {"u55", "u85"}
+        # Parent-gating (#874 item 3): the variant switches `depend on` the
+        # parent backend (zephyr/kconfigs/iot-audio-inference.kconfig).
+        inference_lines.append("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y")
+        allowed_variants = {"u55", "u85"}
         for v in sorted(ethos_variants & allowed_variants):
             inference_lines.append(f"CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{v.upper()}=y")
         # Real Arm Ethos-U driver config -- the silicon-proven pair (bench:
@@ -1357,15 +1388,13 @@ def _emit_inference(
         # hooks (NOT CONFIG_ARM_ETHOS_U -- hal_alif's stale callback path);
         # CONFIG_DCACHE=n is the CPU<->NPU SRAM coherence mechanism; the
         # ethos_u driver's mutex/semaphore need a kernel heap (k_malloc).
-        # Pick the most-capable variant this silicon carries (U85 > U65 > U55),
+        # Pick the most-capable variant this silicon carries (U85 > U55),
         # then read its MAC config from the SoC's npus[] `mac_per_cycle` -- NOT a
         # hardcode.  The derived symbol must be a real ETHOS_U_NPU_CONFIG choice
         # member (hal_ethos_u), else it would silently no-op -- so validate and
         # fail loudly on a metadata mismatch.
         if "u85" in ethos_variants:
             variant_num = "85"
-        elif "u65" in ethos_variants:
-            variant_num = "65"
         else:
             variant_num = "55"
         npu_type = f"ethos-u{variant_num}"
@@ -1406,7 +1435,6 @@ def _emit_inference(
         accel = f"ETHOS_U{variant_num}_{mac}"
         _valid_accel = {
             "ETHOS_U55_64", "ETHOS_U55_128", "ETHOS_U55_256",
-            "ETHOS_U65_128", "ETHOS_U65_256", "ETHOS_U65_512",
             "ETHOS_U85_128", "ETHOS_U85_256", "ETHOS_U85_512",
             "ETHOS_U85_1024", "ETHOS_U85_2048",
         }
@@ -1631,11 +1659,11 @@ def _split_server_url(url: str) -> tuple[str, Optional[int], Optional[str]]:
     a DNS lookup that can never resolve (alplabai/tan-cli#558).
 
     A value carrying no `://` is taken as an already-bare host and returned
-    verbatim -- that covers a plain hostname and a whole-value `${VAR}`
-    placeholder, which the build system substitutes later.  Host case is
-    preserved (DNS is case-insensitive, a `${VAR}` placeholder is not), so
-    this parses the authority by hand rather than through `urlsplit`, whose
-    `.hostname` lowercases.
+    verbatim.  A `${VAR}` placeholder passes through here too, but
+    `_slice_alp_conf` then refuses it: nothing substitutes a placeholder in a
+    Kconfig fragment (issue #2696, `_refuse_live_kconfig_placeholders`).  Host
+    case is preserved (DNS is case-insensitive), so this parses the authority
+    by hand rather than through `urlsplit`, whose `.hostname` lowercases.
 
     Raises OrchestratorError on anything that cannot be expressed as those
     three parts rather than emitting a value the client cannot use.
@@ -1767,8 +1795,10 @@ def _emit_ota(project: "BoardProject") -> list[str]:
     `_slice_local_conf`.  This handles the Zephyr side: per-slice
     Kconfig that compiles the matching client in.  Settings (server URL,
     poll interval, tenant token) thread through Kconfig string values
-    when declared in `ota:`; placeholders (${VAR}) pass through verbatim
-    so the build system substitutes at link time.
+    when declared in `ota:`.  A `${VAR}` placeholder may only land on a
+    commented line here (the Mender hints): Zephyr does not expand one in a
+    Kconfig fragment, so `_slice_alp_conf` refuses it on a live line
+    (issue #2696).
     """
     lines: list[str] = []
     ota = project.ota or {}
@@ -2066,7 +2096,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
 
     lines: list[str] = []
     lines.extend(_emit_baseline(slice_, diagnostics))
-    lines.extend(_emit_console(diagnostics, slice_))
+    lines.extend(_emit_console(diagnostics, slice_, project))
     lines.extend(_emit_soc_summary(project, slice_))
     lines.extend(_emit_som_caps(project, silicon, kconfig))
 
@@ -2124,7 +2154,41 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
                      "`ownership:`).")
         lines.extend(own_kconfig)
 
-    return "\n".join(lines) + "\n"
+    text = "\n".join(lines) + "\n"
+    _refuse_live_kconfig_placeholders(text, slice_.core_id)
+    return text
+
+
+def _refuse_live_kconfig_placeholders(text: str, core_id: str) -> None:
+    """Refuse a `${NAME}` placeholder on a live line of a Zephyr fragment.
+
+    A board.yaml value written as a placeholder (`ota.server.tenant:
+    "${MENDER_TENANT_TOKEN}"`) is meant for the build host or the device to
+    fill.  A Zephyr Kconfig fragment can never do that: the pinned v4.4.1
+    `scripts/kconfig/kconfiglib.py` `_load_config` only unescapes a `.conf`
+    string value -- the `expandvars` call in that file belongs to the Kconfig
+    *source* tokenizer, not the `.conf` loader -- and nothing in Zephyr's CMake
+    expands a fragment either.  So a live `CONFIG_HAWKBIT_SERVER="${HOST}"`
+    would build firmware that carries the literal text `${HOST}` as its
+    server name, silently.  A commented line (the Mender-MCU-client hint lines
+    in `_emit_ota`) is inert and allowed.
+    """
+    # Imported here, not at the top: a new top-of-file line would shift every
+    # line number that changelog fragments cite in this module.
+    import re
+
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        match = re.search(r"\$\{[^}]*\}", line)
+        if match:
+            raise OrchestratorError(
+                f"core '{core_id}': the Zephyr config would carry the "
+                f"placeholder `{match.group(0)}` literally (`{line.strip()}`) "
+                f"-- Zephyr does not expand environment variables in a "
+                f"Kconfig fragment, so the firmware would use the text "
+                f"`{match.group(0)}` itself.  Write the real value in "
+                f"board.yaml, or set it in the app's own prj.conf")
 
 
 def _inference_auto_order(som_preset: dict) -> list[str]:
@@ -2206,8 +2270,19 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
         srv = ota.get("server") or {}
         if srv.get("url"):
             lines.append(f'MENDER_SERVER_URL ?= "{srv["url"]}"')
-        if srv.get("tenant"):
-            lines.append(f'MENDER_TENANT_TOKEN ?= "{srv["tenant"]}"')
+        tenant = str(srv.get("tenant") or "")
+        if "${" in tenant:
+            # A ${NAME} placeholder is never expanded by BitBake from the
+            # host environment, so a self-referencing `?=` would bake the
+            # literal text (or fail to expand).  Leave the token to the
+            # documented local.conf override instead.
+            lines.append(
+                "# MENDER_TENANT_TOKEN: set it in conf/local.conf "
+                "(meta-alp-sdk/README.md, Mender step 3); the board.yaml "
+                "placeholder is not expanded by BitBake."
+            )
+        elif tenant:
+            lines.append(f'MENDER_TENANT_TOKEN ?= "{tenant}"')
         sto = ota.get("storage") or {}
         if sto.get("device"):
             lines.append(f'MENDER_STORAGE_DEVICE_BASE ?= "{sto["device"]}"')

@@ -80,7 +80,8 @@ clock survives the driver swap.
   `metadata/e1m_modules/v2n/core-ownership.yaml`, so
   `check_amp_pad_claims.py` cannot see a CM33 conflict on those pads.
   Add a BENCH-PENDING entry once the cam0 dtb is bench-verified.
-- CAM1: its control bus (E1M-X I2C3) terminates on the GD32 bridge.
+- CAM1: its control bus (E1M-X I2C3) terminates on the GD32 bridge; Linux
+  reaches it as adapter `i2c3` through the bridge's I2C proxy (protocol >= 0.17).
 - Connector-to-receiver and lane mapping (CAM0 -> receiver 0, 2 lanes
   is an assumption).
 - The Zephyr/CM33 side (`src/backends/camera/v2n_n44_isp.c`) is a

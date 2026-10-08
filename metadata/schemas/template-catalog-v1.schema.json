@@ -60,7 +60,7 @@
               "uniqueItems": true,
               "items": {
                 "type": "string",
-                "enum": ["alif-ensemble", "nxp-imx9", "renesas-rzv2n", "renesas-rzv2n-deepx"]
+                "enum": ["alif-ensemble", "renesas-rzv2n", "renesas-rzv2n-deepx"]
               },
               "description": "SoM silicon families the example builds on (derived from the SoM SKU(s) behind its `supported_boards`/`preset`, per metadata/e1m_modules/<sku>.yaml `family:`)."
             },

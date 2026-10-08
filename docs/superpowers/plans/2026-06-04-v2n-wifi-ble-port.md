@@ -1,12 +1,8 @@
 # V2N/V2M Wi-Fi + BLE Port Implementation Plan
 
-> **Active.** Implementation plan dated 2026-06-04; the work below is not
-> finished. Tracked by #479 (V2N/V2M Murata CYW55513 Wi-Fi/BLE Yocto
-> stack is missing). Only the side-channel GPIO driver
-> (`include/alp/chips/murata_lbee5hy2fy.h`, `[UNTESTED]`) exists today --
-> the SDIO/brcmfmac Wi-Fi stack, BT UART/BlueZ stack and Yocto DT/kernel
-> wiring below have not been built. Cross-check the current tree before
-> treating a step as done, but do not discard this as history.
+> **Landed / superseded.** #479 is closed by PR #2302 (V2N/V2M Murata
+> CYW55513 Wi-Fi/BT Yocto stack, `meta-alp-sdk`). This plan is kept as
+> implementation history; cross-check the current tree, not the steps below.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
@@ -166,7 +162,7 @@ power-cycle a wedged radio; expect the SDIO/UART device to vanish and
 re-enumerate.
 ```
 
-- [ ] **Step 6:** Build both backends exactly as the bench skill's recipe does (stub via host cc, gd32 via the arm toolchain — reuse the existing `firmware/gd32-bridge` build scripts/CMake used by the LCD/functional work). Expected: both compile clean; `_Static_assert` holds.
+- [ ] **Step 6:** Build both backends exactly as the bench skill's recipe does (stub via host cc, gd32 via the arm toolchain — reuse the GD32 bridge build scripts/CMake (now in `alplabai/gd32-bridge-firmware`, ADR 0031) used by the LCD/functional work). Expected: both compile clean; `_Static_assert` holds.
 - [ ] **Step 7:** Commit:
 
 ```bash

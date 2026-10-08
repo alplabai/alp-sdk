@@ -69,13 +69,12 @@ SDK-shipped SoM presets (look under
 | Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`, `AEN803`     |
 | Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`, `V2N103`                                            |
 | RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`, `V2M103`                                            |
-| NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
 Stock board presets (paste into `preset:`):
 
 | Preset       | Form factor | Hosts                                  |
 |--------------|-------------|----------------------------------------|
-| `e1m-evk`    | 35×35       | E1M-AEN family, future E1M-N93 family  |
+| `e1m-evk`    | 35×35       | E1M-AEN family                         |
 | `e1m-x-evk`  | 45×65       | E1M-X V2N family, V2N-M1 family        |
 
 `preset:` is the SDK-internal shortcut the demos use.  For a
@@ -209,7 +208,6 @@ Rule 2 family-specific allow-list (built from the SoM preset's
 |--------------------|------------------------------------------------------|
 | `alif-ensemble`    | `ecdsa_p256`, `ed25519`  (OPTIGA Trust M slot type)  |
 | `renesas-rzv2n`    | `ecdsa_p256`, `rsa2048`, `rsa3072`                   |
-| `nxp-imx9`         | `ecdsa_p256`, `rsa2048`, `rsa3072`                   |
 | *(unknown family)* | Schema enum unrestricted (no capability data yet)    |
 
 The warning rules (4 + 5) are informational: the build still

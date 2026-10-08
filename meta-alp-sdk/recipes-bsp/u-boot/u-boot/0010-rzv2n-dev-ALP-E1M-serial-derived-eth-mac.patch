@@ -89,7 +89,7 @@ index ff403567..669b86ee 100644
  		printf("ALP: failed to publish /chosen/alp,sku (%d)\n", ret);
  
 +	/* The unit serial from the same validated manifest; Linux's
-+	 * alp-hostname unit appends its index to the SKU hostname. */
++	 * alp-hostname unit appends the full serial to the SKU hostname. */
 +	if (alp_serial[0]) {
 +		ret = fdt_setprop_string(blob, node, "alp,serial", alp_serial);
 +		if (ret)

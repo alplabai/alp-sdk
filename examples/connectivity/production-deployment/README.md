@@ -70,7 +70,7 @@ ota:
 `rollback.min_version: 1` is the anti-downgrade floor -- once v1.0
 ships, the device refuses any OTA claiming version < 1, even if
 it's signed correctly. `${MENDER_TENANT_TOKEN}` never lives in
-the repo; it's injected at provisioning.
+the repo; Yocto builds set it in `conf/local.conf`, Zephyr injects it at provisioning.
 
 ### `security.psa:` -- TF-M with an internal attestation root
 
@@ -199,7 +199,7 @@ reboot.  Attestation heartbeats publish every 60 s regardless.
 
 Customer-side variants typically:
 
-- Fork this skeleton for V2N or i.MX 93 boards (`som.sku:` +
+- Fork this skeleton for V2N boards (`som.sku:` +
   `cores:` edits; the declarative blocks above stay portable).
 - Replace the Mender connection with a different OTA fabric
   (`ota.provider:` -- `mcumgr` support tracked in ADR 0009).

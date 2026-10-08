@@ -93,7 +93,6 @@ families:
   - aen
   - v2n
   - v2n-m1
-  - imx93
 
 verification:
   hil_silicon:    verified          # BENCH-VERIFIED 2026-09-21 on E1M-AEN803

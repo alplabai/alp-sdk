@@ -4,6 +4,7 @@
 #include "../../src/game/state.h"
 #include "../../src/game/zone.h"
 #include "../../src/ipc/tr_mbox.h"
+#include "../../src/render/panel_rot.h"
 
 /* Test barrier: on host there's no real memory-ordering hazard to model, but
  * the torn-read case needs a way to simulate "the writer started a new
@@ -95,6 +96,27 @@ int main(void)
 	/* --- publish/take `in`: happy path --- */
 	memset((void *)&g_mbox, 0, sizeof(g_mbox));
 	f.track_h = 1280;
+	assert(f.rotation == 0 && TR_MBOX_VERSION == 2u); /* a fresh snapshot: not turned */
+	f.rotation = 270; /* does not fit a byte: the field is 16 bits */
+	tr_mbox_publish_in(&g_mbox, &f, TR_FB_A, noop_barrier);
+	{
+		tr_frame_in_t r270;
+		uint32_t      rfb, rseq;
+
+		assert(tr_mbox_take_in(&g_mbox, 0u, &r270, &rfb, &rseq, noop_barrier));
+		assert(r270.rotation == 270 && tr_rot_valid(r270.rotation));
+	}
+	f.rotation = 180; /* carried as is; the renderer refuses it (tr_rot_valid) */
+	tr_mbox_publish_in(&g_mbox, &f, TR_FB_A, noop_barrier);
+	{
+		tr_frame_in_t r180;
+		uint32_t      rfb, rseq;
+
+		assert(tr_mbox_take_in(&g_mbox, 0u, &r180, &rfb, &rseq, noop_barrier));
+		assert(r180.rotation == 180 && !tr_rot_valid(r180.rotation));
+	}
+	memset((void *)&g_mbox, 0, sizeof(g_mbox));
+	f.rotation = 90;
 	tr_mbox_publish_in(&g_mbox, &f, TR_FB_A, noop_barrier);
 	assert(g_mbox.in_seq == 1u);
 	assert(g_mbox.in_fb == TR_FB_A);
@@ -105,6 +127,7 @@ int main(void)
 	assert(ok);
 	assert(seq == 1u && fb == TR_FB_A);
 	assert(got.tick == f.tick && got.score == f.score && got.track_h == 1280);
+	assert(got.rotation == 90); /* the rotation byte crosses the mailbox */
 	assert(memcmp(got.ents, f.ents, sizeof(got.ents)) == 0);
 
 	/* --- no-new-frame: same last_seq as what's already published --- */
@@ -264,7 +287,7 @@ int main(void)
 	}
 
 	/* Booth crash shake: TR_FLAG_SHAKE (bit 12; 8..11 are taken) + the
-	 * `shake` byte in what was zone_pad -- still 172 B. A crashed run's
+	 * `shake` byte in what was zone_pad -- the block is 176 B since the rotation field. A crashed run's
 	 * packet carries it from the fatal frame: full at the hit, decaying
 	 * in real time to 0 within TR_SHAKE_FRAMES40 40 Hz frames, at either
 	 * panel rate. A live run's packet: no flag, 0 -- what an old HE sent. */
@@ -272,7 +295,7 @@ int main(void)
 		tr_game_t cg;
 
 		assert(TR_FLAG_SHAKE == (1u << 12) && (TR_FLAG_SHAKE & 0xFFFu) == 0u);
-		assert(sizeof(tr_frame_in_t) == 172 && offsetof(tr_frame_in_t, shake) == 169);
+		assert(sizeof(tr_frame_in_t) == 176 && offsetof(tr_frame_in_t, shake) == 169);
 		tr_game_init(&cg, 3u);
 		tr_frame_in_from_game(&f, &cg, TR_BANNER_NONE, false, false);
 		assert(!(f.flags & TR_FLAG_SHAKE) && f.shake == 0u);

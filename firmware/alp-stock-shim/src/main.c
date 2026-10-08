@@ -8,10 +8,11 @@
  *
  * The CM33 has no console on these SoMs (sci0 must stay disabled: a floating
  * RXD faults the core before main), so the only way to tell from Linux that
- * this core is running is memory.  The shim writes a three-word beacon into
- * the top of the `rsctbl` window -- the same words, offsets and magic as the
- * rpmsg-v2n example, so the A55 side reads one format.  Linux sees them at
- * 0x4F700FF0 / 0x4F700FF4 / 0x4F700FF8.
+ * this core is running is memory.  The shim writes the liveness beacon into
+ * the last 16 bytes of the `rsctbl` page -- the layout shared with the rpmsg-v2n
+ * example and the A55 backend (<alp/protocol/amp_beacon.h>), so the A55 side
+ * reads one format.  Linux sees it at the rsctbl page's A55
+ * alias (see README.md; the page is the SoC metadata's `openamp_carveout`).
  *
  * Plain stores only.  No peripheral, no interrupt, no IPC (no MHU, no sci0,
  * no RIIC8, no port 9 / GD32 SPI, no DMAC).  The window is the board DTS's
@@ -22,27 +23,20 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/barrier.h>
 
+#include <alp/protocol/amp_beacon.h>
+
 /* Only the V2N / V2M CM33 boards have the `rsctbl` window; every other core
- * (AEN M55, NX9101) gets the plain idle loop below. */
+ * (AEN M55) gets the plain idle loop below. */
 #if DT_NODE_EXISTS(DT_NODELABEL(rsctbl))
-#define RSCTBL_ADDR DT_REG_ADDR(DT_NODELABEL(rsctbl))
-
-#define BEACON_MAGIC (0xA10D0683U) /* "Alp Lab, #683" */
-/* The word at +0xFF4 says which image is running: values below 0x100 are the RPC
- * firmware's beacon versions (1 today, 2 after #2586); 0x100 is this idle shim
- * (kind 1, revision 0, no RPC). An A55 RPC backend must not read 0x100 as an old
- * RPC firmware. */
-#define BEACON_VERSION (0x100U)
-
-/* Same layout as examples/multicore/rpmsg-v2n/m33_sm: top 16 bytes of the
- * 4 KiB resource-table page, clear of the table at the low end. */
-struct beacon {
-	uint32_t magic;
-	uint32_t version;
-	uint32_t heartbeat;
-};
-
-#define BEACON ((volatile struct beacon *)(RSCTBL_ADDR + 0xFF0))
+/* The beacon is the top 16 bytes of the rsctbl page, the same layout the RPC
+ * firmware (examples/multicore/rpmsg-v2n/m33_sm) and the A55 backend use:
+ * <alp/protocol/amp_beacon.h>.  The page address and size come from the board
+ * .dts, generated from the SoC metadata's `openamp_carveout`.  This image
+ * publishes the idle-shim version (no RPC); the attach epoch is zeroed once at boot
+ * (clearing a stale odd value from a previous image) and never written again. */
+#define RSCTBL_BASE DT_REG_ADDR(DT_NODELABEL(rsctbl))
+#define RSCTBL_SIZE DT_REG_SIZE(DT_NODELABEL(rsctbl))
+#define BEACON      ALP_AMP_BEACON_AT(RSCTBL_BASE, RSCTBL_SIZE)
 #endif /* DT_NODE_EXISTS(rsctbl) */
 
 int main(void)
@@ -53,10 +47,11 @@ int main(void)
 	/* The window keeps its contents across a CM33 reset: clear the counter
 	 * and publish the magic last, so a reader never pairs a fresh magic
 	 * with a stale count. */
-	BEACON->heartbeat = 0;
-	BEACON->version   = BEACON_VERSION;
+	BEACON->heartbeat    = 0;
+	BEACON->attach_epoch = 0;
+	BEACON->version      = ALP_AMP_BEACON_VERSION_IDLE_SHIM;
 	barrier_dsync_fence_full();
-	BEACON->magic = BEACON_MAGIC;
+	BEACON->magic = ALP_AMP_BEACON_MAGIC;
 	barrier_dsync_fence_full();
 
 	while (1) {

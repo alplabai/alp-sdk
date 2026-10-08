@@ -32,9 +32,12 @@
  * The gate: core 0 zeroes .bss at entry and core 1 runs concurrently (the
  * stub releases it just before core 0 jumps), so core 1 touches nothing of
  * ours until core 0 writes RENDER_GATE = the launch token. The token is
- * stub_heartbeat0, which the stub's park loop bumps before every LAUNCH and
- * which stays frozen while a payload runs: fresh per launch, same on both
- * cores, so a gate value left by an earlier launch never matches.
+ * stub_heartbeat0, which the stub's launch() bumps (to a non-zero value) before every
+ * jump -- the release self-LAUNCH included, which never visits the park loop -- and
+ * which stays frozen while a payload runs: fresh per launch, same on both cores, so
+ * a gate value left by an earlier launch never matches, and a zero token cannot
+ * meet a gate word that happens to read 0 (RENDER_GATE sits outside .bss, so power-on
+ * garbage or an earlier launch's token is all it holds until core 0 writes it).
  *
  * HALT (contract: core 1 returns first): core 1 sees ctrl_cmd == HALT while
  * idle and returns; core 0 sees it, waits (<= RENDER_HALT_WAIT) for
@@ -87,6 +90,8 @@
 #include <stdint.h>
 
 #include "render.h"
+
+#include "../../src/render/panel_rot.h"
 #include "stub_abi.h"
 #include "tr_mbox.h"
 #include "tr_memmap.h"
@@ -535,6 +540,18 @@ static int join_core1(uint32_t seq)
 	return 1;
 }
 
+/* The mailbox ABI is wrong (a stub of another TR_MBOX_VERSION, or a frame whose
+ * rotation this renderer cannot produce): record what in pad3[7] -- 0xAB1D in
+ * the top half, 1 version / 2 rotation | rotation << 8 below -- and fault.
+ * The stub records the fault (UNDEF) and parks; there is no fallback drawing
+ * of a frame the HE did not ask for. */
+static void __attribute__((noreturn)) abi_fault(volatile tr_mbox_t *m, uint32_t what)
+{
+	m->pad3[7] = 0xAB1D0000u | what;
+	barrier();
+	__builtin_trap();
+}
+
 void renderer_main(volatile tr_mbox_t *m)
 {
 	uint32_t last = m->out_seq; /* a frame published before LAUNCH is still owed */
@@ -560,6 +577,9 @@ void renderer_main(volatile tr_mbox_t *m)
 	checks     = 0x80000000u | (tr_span_selfcheck() ? 1u : 0u) | (tr_raster_selfcheck() ? 2u : 0u) |
 	             (dual ? 4u : 0u);
 	m->pad3[1] = checks;
+	if (m->version != TR_MBOX_VERSION) {
+		abi_fault(m, 1u);
+	}
 	RENDER_STATS[1] = 0;
 	RENDER_STATS[2] = 0;
 	RENDER_STATS[3] = 0xFFFFFFFFu;
@@ -604,6 +624,14 @@ void renderer_main(volatile tr_mbox_t *m)
 		if (!tr_mbox_take_in(m, last, &in, &fb, &seq, barrier)) {
 			continue;
 		}
+		/* Only a frame that WILL be drawn is held to the rotation ABI: a frame with no
+		 * valid framebuffer is dropped below (out_dropped++), whatever its other
+		 * fields hold. */
+		int drawn = fb == TR_FB_A || fb == TR_FB_B;
+
+		if (tr_rot_refuse(drawn, in.rotation)) {
+			abi_fault(m, 2u | ((uint32_t)in.rotation & 0xFFu) << 8); /* low byte only: 270 -> 14 */
+		}
 		if (t_pub_valid) {
 			uint32_t gap = cntvct_lo() - t_pub;
 
@@ -615,8 +643,7 @@ void renderer_main(volatile tr_mbox_t *m)
 		render_set_quality(
 		    (uint8_t)(RENDER_STATS[1] & (TR_LOD_NO_BACK_RANK | TR_LOD_NEAR | TR_LOD_STILL)));
 
-		uint32_t t     = 0;
-		int      drawn = fb == TR_FB_A || fb == TR_FB_B;
+		uint32_t t = 0;
 
 		o.ticks1 = 0;
 		if (drawn) {

@@ -55,14 +55,14 @@ RDEPENDS:${PN} = " \
 # that the layer-only gate below was not enough:
 #   1. The LAYER being present (BBFILE_COLLECTIONS) -- so recipe parsing
 #      survives a build that drops the RZ/V feature layers entirely (e.g.
-#      AEN and NX91, which never build linux-renesas at all). This alone
+#      AEN, which never builds linux-renesas at all). This alone
 #      was the whole gate through the first two review passes.
 #   2. MACHINE_FEATURES containing "v2n" (set on all six V2N/V2M machine
 #      confs, e.g. e1m-v2n101-a55.conf's `MACHINE_FEATURES += "alp-sdk e1m
 #      v2n"`) -- because a single bblayers.conf commonly serves MULTIPLE
 #      MACHINE builds, gate (1) alone is not sufficient: with meta-rz-codecs
 #      present (as conf/layer.conf's LAYERRECOMMENDS_alp-sdk recommends) and
-#      MACHINE=e1m-aen801-a32 or e1m-nx9101-a55, `drp-fw`'s own
+#      MACHINE=e1m-aen801-a32, `drp-fw`'s own
 #      `COMPATIBLE_MACHINE = "(rzv2h-family|rzv2n-family)"`
 #      (meta-rz-codecs/recipes-drp/drp-fw/drp-fw_1.0.0.bb:10) makes bitbake
 #      skip that recipe entirely -- and an allarch-turned-MACHINE_ARCH

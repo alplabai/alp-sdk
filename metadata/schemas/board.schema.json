@@ -87,8 +87,8 @@
       "properties": {
         "sku": {
           "type": "string",
-          "pattern": "^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$",
-          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  Shape: E1M-AEN<tier 3-8><2-digit config> (Alif Ensemble, e.g. E1M-AEN301/AEN302), E1M-V2N<3-digit config> (Renesas RZ/V2N), E1M-V2M<3-digit config> (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93; E1M-NX9101 is a placeholder preset until the production MPN lands).  The config tail is a per-configuration increment allocated by the PLM; not every value in range has a shipped preset."
+          "pattern": "^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3})$",
+          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  Shape: E1M-AEN<tier 3-8><2-digit config> (Alif Ensemble, e.g. E1M-AEN301/AEN302), E1M-V2N<3-digit config> (Renesas RZ/V2N), E1M-V2M<3-digit config> (V2N + DEEPX).  The config tail is a per-configuration increment allocated by the PLM; not every value in range has a shipped preset."
         },
         "hw_rev": {
           "type": "string",
@@ -212,6 +212,12 @@
           "default": "auto",
           "description": "Console backend the loader wires per slice.  `auto` (default) selects by the slice OS: a Zephyr slice gets the Alp UART console (`alp`/`uart` -- printf lands on the module console UART, e.g. E1M edge UART0), a Yocto slice gets the Linux console.  `ram` forces the Zephyr RAM console for serial-less bench boards (read `ram_console_buf` over SWD).  `none` emits no console Kconfig and inherits the board default.  The board layer owns the physical console UART (`zephyr,console` DT chosen); this knob only picks the backend."
         },
+        "link": {
+          "type": "string",
+          "enum": ["auto", "itcm"],
+          "default": "auto",
+          "description": "Link target of the built image (AEN Flow C).  `auto` (default) links the image where the board puts it -- E1M-AEN slices link into MRAM slot0 for the production flows.  `itcm` links the image into the M55-HE ITCM (base 0x0, global window 0x58000000) for a RAM-run (`tan flash --ram`, no MRAM write): the planner emits the ITCM retarget Kconfig fragment + devicetree overlay beside the slice's `alp.conf` and layers them into the build.  `itcm` is proven on the Alif Ensemble E8 M55-HE (E1M-AEN801 / E1M-AEN803) and is accepted ONLY there: `tan build` refuses it for a project with no `os: zephyr` app on `cores.m55_he` (an M55-HP-only project included), any other SKU, and a sysbuild (`boot:`) project; only the M55-HE slice is retargeted, and its manifest entry carries `flash_method: ram_run_only` so plain `tan flash` cannot write it to MRAM.  It needs the RAM console (`console: auto` is promoted to `ram`; an explicit `uart`/`alp`/`linux`/`none` is refused).  Never use it for an image you intend to flash to MRAM: it links at 0x0 and is not bootable from MRAM."
+        },
         "sim_console": {
           "type": "boolean",
           "default": false,
@@ -294,7 +300,7 @@
         "method": {
           "type": "string",
           "enum": ["mcuboot", "none"],
-          "description": "Bootloader strategy.  `mcuboot` pulls MCUboot into the Zephyr build via sysbuild; `none` disables the bootloader (firmware runs unverified -- dev / lab only).  Optional; the SoM family supplies the default (AEN/N93 -> mcuboot, V2N/V2N-M1 -> none on the Zephyr slice since U-Boot owns boot on Linux)."
+          "description": "Bootloader strategy.  `mcuboot` pulls MCUboot into the Zephyr build via sysbuild; `none` disables the bootloader (firmware runs unverified -- dev / lab only).  Optional; the SoM family supplies the default (AEN -> mcuboot, V2N/V2N-M1 -> none on the Zephyr slice since U-Boot owns boot on Linux)."
         },
         "signing": {
           "type": "object",

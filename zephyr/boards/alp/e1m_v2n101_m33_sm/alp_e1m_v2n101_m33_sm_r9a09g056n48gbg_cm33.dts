@@ -33,6 +33,7 @@
 
 	chosen {
 		zephyr,sram = &sram;
+		zephyr,ram-console = &ram_console;
 		/*
 		 * No CM33 serial console on this board.  The only console is the
 		 * A55's (Linux, on the shared debug UART); sci0 here is the EVK
@@ -40,8 +41,9 @@
 		 * Bringing it up enables RX on a floating RXD, whose receive-error
 		 * interrupt (sci0 eri = NVIC 114) escalates to a Zephyr fatal
 		 * (arch_system_halt) and hangs the CM33 before main() ever runs.
-		 * Leave the console unset (sci0 is disabled below).  Re-add these
-		 * and re-enable sci0 only when a Pmod USB-UART is attached.
+		 * Leave the UART console unset (sci0 is disabled below); only the
+		 * RAM console is chosen.  Re-add zephyr,console/zephyr,shell-uart and
+		 * re-enable sci0 only when a Pmod USB-UART is attached.
 		 */
 	};
 
@@ -53,6 +55,19 @@
 	sram: memory@8003000 {
 		compatible = "mmio-sram";
 		reg = <0x08003000 0xfbfff>;
+	};
+
+	/*
+	 * RAM console buffer (audit CM33-M2): 16 KiB at CM33-NS 0x9f710000 (A55
+	 * view 0x4f710000), from the SoC's openamp_carveout.ram_console: inside the
+	 * 9 MiB 0x9f700000 window Linux reserves no-map and clear of every
+	 * region listed there (rsctbl with the liveness beacon in its top 16
+	 * bytes, mhu-shm, the vring control and buffer areas).
+	 */
+	ram_console: memory@9f710000 {
+		compatible = "zephyr,memory-region";
+		zephyr,memory-region = "RAM_CONSOLE";
+		reg = <0x9f710000 0x4000>;
 	};
 
 	/*
@@ -134,8 +149,19 @@
 	status = "okay";
 };
 
+/*
+ * ATTN (P71) interrupt: the RZ GPIO driver routes a pin to a TINT slot through
+ * the port's `irqs`; without it alp_gpio_irq_enable() has no route and the
+ * supervisor stays on the staging-gap fallback.  The slot is a shared ICU
+ * resource, claimed here for the CM33 (supervisor-links.yaml gd32_pads.attn).
+ */
+&tint31 {
+	status = "okay";
+};
+
 &gpio7 {
 	status = "okay";
+	irqs = <&tint31 1>;
 };
 
 /*
@@ -329,6 +355,11 @@
 			zephyr,memory-region = "openamp_memory";
 			zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_IO)>;
 		};
+	};
+
+	/* CM33-NS view minus A55 view of the OpenAMP reservation (from metadata) */
+	zephyr,user {
+		alp,cm33-ns-to-a55-offset = <0x50000000>;
 	};
 
 	chosen {

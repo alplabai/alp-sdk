@@ -8,7 +8,10 @@
 # #2507).  Writing 0x82 only selects the register to read; nothing is
 # written to the device's data or NVM.  The part NACKs the FIRST
 # transaction(s) after idle while it wakes from sleep (seconds after a
-# long idle), so the probe retries for up to ~5 s.
+# long idle), so the probe retries (see below).
+# The part NACKs the first transaction after idle and stays awake only a few
+# ms (bench 2026-10-07: gaps of 10-50 ms never ACK, 1 or 5 ms ACK on attempt
+# 2-3), so attempts are ~1 ms apart, capped at 100 (#2753).
 # Presence + protocol liveness only; the APDU-level check is
 # ../v2m103-x-evk/v2n-secure-element-sign.yaml.
 
@@ -24,7 +27,7 @@ ssh_command: |-
       sleep 0.01
       s=$(i2ctransfer -f -y 8 r4@0x30 2>/dev/null) && { echo "HIL_OPTIGA_I2C_STATE $s"; echo HIL_OPTIGA_ACK; break; }
     fi
-    sleep 0.05
+    sleep 0.001
   done
 
 serial:

@@ -8,8 +8,8 @@ fan out into per-core slices with Tan's relocated in-process planner,
 and end up with a flashable bundle that covers Linux + Zephyr + the
 on-module GD32 helper MCU.
 
-The same pattern generalises to **E1M-AEN801** (A32 + M55-HP + M55-HE),
-**E1M-NX9101** (A55 + M33), and any future heterogeneous SoM.
+The same pattern generalises to **E1M-AEN801** (A32 + M55-HP + M55-HE)
+and any future heterogeneous SoM.
 
 > If you're targeting a single-OS SoM (e.g. AEN E3/E4 with M55 cores
 > only), follow [`docs/firmware-quickstart.md`](firmware-quickstart.md)
@@ -23,7 +23,6 @@ Which SoM families are heterogeneous in the first place:
 | E1M-AEN E3/E4 | — | M55-HP, M55-HE (both Zephyr) | No — RTOS-only silicon |
 | E1M-AEN E5..E8 | A32 cluster (Yocto) | M55-HP, M55-HE (Zephyr) | Yes |
 | E1M-X V2N / V2N-M1 | A55 cluster (Yocto) | M33-SM (Zephyr) | Yes |
-| E1M-N93 (iMX93) | A55 cluster (Yocto) | M33 (Zephyr) | Yes |
 
 A bare `som: { sku: <MPN> }` produces a working dual-image build for every
 heterogeneous SoM — the per-core OS defaults come from the SoM preset's
@@ -259,7 +258,8 @@ The same file declares the seven `generic-uio` nodes the `alp_rpc` UIO
 backend opens, named for their sysfs `name` (`4f700000.rsctbl`,
 `4f701000.mhu-shm`, `4f800000.vring-ctl0`, `4f850000.vring-ctl1`,
 `4f900000.vring-shm0`, `4fc00000.vring-shm1` and `10480000.mhu-uio`).
-Only `mhu-uio` carries an interrupt (`GIC_SPI 404`). `uio.cfg` enables
+Only `mhu-uio` carries an interrupt (`GIC_SPI 404` by default, `385` with
+`ALP_V2N_DOORBELL_SPI`, see `docs/rzv2n-m33-secure-boot.md`). `uio.cfg` enables
 `CONFIG_UIO` and `CONFIG_UIO_PDRV_GENIRQ`, and patch 0012 makes
 `generic-uio` the default `uio_pdrv_genirq` match, so
 `uio_pdrv_genirq.of_id=generic-uio` no longer has to be in the bootargs.
@@ -267,6 +267,29 @@ Bench-verified on E1M-V2M103 silicon (2026-09-30): all seven devices bind
 (`uio0` rsctbl `0x4f700000`/`0x1000` through `uio6` mhu-uio
 `0x10480000`/`0x1000`), `/proc/interrupts` shows `GICv3 436 Level mhu-uio`,
 and `0x4f700000-0x4fffffff` is listed `reserved` in `/proc/iomem`.
+
+The same window also holds the CM33 RAM console: 16 KiB (`0x4000`) at
+CM33-NS `0x9f710000` (A55 view `0x4f710000`), clear of the rsctbl page
+(`0x9f700000..0x9f700fff`, liveness beacon at `0x9f700ff0..0x9f700fff`),
+the mhu-shm page (`0x9f701000..0x9f701fff`) and the vrings (from
+`0x9f800000`). The V2N101 and V2M101 CM33 board trees chose it as
+`zephyr,ram-console` with `CONFIG_RAM_CONSOLE=y`, because the CM33 has no
+UART console. Its offset and size are the SoC
+`openamp_carveout.ram_console` (`metadata/socs/renesas/rzv2n/n44.json`); the
+board `.dts` node, `CONFIG_RAM_CONSOLE_BUFFER_SIZE` and the backend's
+`ALP_AMP_RAM_CONSOLE_*` are generated from it. Read it back from Linux after a CM33 boot:
+map `/dev/mem` and copy the buffer out in 32-bit words (a plain `dd`
+`read()` on this `no-map` window fails with `Bad address`):
+
+```sh
+python3 -c "import mmap,os;m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC),0x4000,mmap.MAP_SHARED,mmap.PROT_READ,offset=0x4f710000);print(b''.join(m[i:i+4] for i in range(0,0x4000,4)).rstrip(b'\xff\x00').decode(errors='replace'))"
+```
+
+The board defconfigs set `CONFIG_LOG_PRINTK=n` so printk reaches the
+buffer even when an app enables `CONFIG_LOG`.  Bench-verified on an
+E1M-V2M103: the Zephyr and Alp SDK boot banners read back. An app's own
+status lines must use `printk` (e.g. `examples/multicore/microros-ros2-v2n`);
+`LOG_INF` and friends have no backend on this console and are lost.
 
 For each `ipc:` entry, `tan build`
 emits a header both halves `#include`:
@@ -367,7 +390,9 @@ part of the declarative output either.
 **Manifest contract (IDE / tooling).**  `system-manifest.yaml` is the
 single derived projection of `board.yaml` — one `slices[]` entry per
 per-core image (its `os`, `build_dir`, `output_artefact`,
-`board`/`machine`, and `flash_method`/`flash_args`), plus the `ipc:`
+`board`/`machine`, and `flash_method`/`flash_args`, plus the optional
+`flash_method_resolved` a flasher records when it dispatched to a different
+backend than the declared `flash_method`), plus the `ipc:`
 links, `helper_mcus:`, the resolved `storage:` partitions, and the
 `memory:` region table those last two refer INTO by name
 (`ipc[].carve_out_region` and `storage[].flash_device` each name a
@@ -437,6 +462,21 @@ paired with an `appdir-unrooted` warning rather than silently
 mis-rooted.  Additive under `schemaVersion 1` — see the
 `planPathMode` field in
 [`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json).
+
+**Deferred placeholders (`deferredPlaceholders`, #2696).**  A board.yaml
+value written as `${NAME}` (e.g. `ota.server.tenant: "${MENDER_TENANT_TOKEN}"`)
+is copied verbatim into a slice config artefact for the build host or the
+device to fill (on Zephyr it only ever lands on a commented hint line).  The
+plan does not resolve it and does not promise that anything downstream will.  The plan's top-level `deferredPlaceholders`
+lists those names (always present, `[]` when there are none) so a consumer
+leaves them alone instead of refusing them as unresolved plan tokens.  The
+emitter refuses a plan where such a name collides with a plan token
+(`SDK_ROOT`, `PROJECT_ROOT`, `PYTHON`, `TOOLCHAIN_ROOT`), is not upper-case
+(`[A-Z][A-Z0-9_]*`), does not appear as `${NAME}` in the project's
+board.yaml, sits in a config artefact that is not a `.conf` file (CMake would
+expand it), or appears outside `configArtefacts`.  A placeholder on a *live*
+Zephyr Kconfig line is refused as well: Zephyr does not expand `${NAME}` in a
+fragment, so the firmware would carry the literal text.
 
 Its shape is pinned by
 [`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json);
@@ -693,8 +733,7 @@ as Device memory (`src/backends/rpc/yocto_uio_drv.c`) or kernel-managed
 through the standard rpmsg/virtio DMA-coherent path
 (`src/backends/rpc/yocto_drv.c`).  Practically the emission only changes
 behaviour on Cortex-M55 (AEN's `m55_hp`); Cortex-M33 does not select
-`CPU_HAS_DCACHE`, so it is a no-op on V2N's `m33_sm`, NX9101's `m33`,
-and i.MX 93's `m33`.
+`CPU_HAS_DCACHE`, so it is a no-op on V2N's `m33_sm`.
 
 `ipc[].kind: raw_shmem` — the low-level `<alp/mproc.h>` shmem+mailbox
 primitives `<alp/rpc.h>` sits on — has the identical gap (no

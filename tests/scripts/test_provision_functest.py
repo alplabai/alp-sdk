@@ -653,7 +653,7 @@ def test_the_beacon_address_and_phy_id_come_from_metadata(tmp_path):
     # the carve-out in the SoC description is the one the generated CM33 board .dts quotes (CM33-NS = A55 + 0x50000000)
     soc = json.loads((functest.REPO / "metadata/socs/renesas/rzv2n/n44.json").read_text(encoding="utf-8"))["openamp_carveout"]
     dts = (functest.REPO / "zephyr/boards/alp/e1m_v2n101_m33_sm/alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts").read_text(encoding="utf-8")
-    assert f"reg = <{soc['a55_base'] + 0x50000000:#x} {soc['rsctbl_size']:#x}>" in dts
+    assert f"reg = <{soc['a55_base'] + 0x50000000:#x} {soc['regions']['rsctbl']['size']:#x}>" in dts
     assert f"reg = <{soc['a55_base'] + 0x50000000:#x} {soc['size']:#x}>" in dts
 
 

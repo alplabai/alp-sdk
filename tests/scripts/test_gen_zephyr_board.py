@@ -201,6 +201,28 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
                 self.assertIn(f"{prop}-gpios = {spec};", node.group(1))
             self.assertIn("&gpio7 {", dts)
 
+    def test_v2n_attn_pad_is_routed_to_a_tint_slot(self) -> None:
+        # Without `irqs` on the port the RZ GPIO driver has no TINT route for P71
+        # and alp_gpio_irq_enable(ATTN) returns NOSUPPORT.
+        for sku in ("E1M-V2N101", "E1M-V2M101"):
+            files = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)
+            dts = next(c for r, c in files.items() if r.endswith(".dts"))
+            self.assertIn('&tint31 {\n\tstatus = "okay";\n};', dts, sku)
+            self.assertIn(
+                '&gpio7 {\n\tstatus = "okay";\n\tirqs = <&tint31 1>;\n};', dts, sku)
+
+    def test_attn_tint_slot_refused_when_pads_block_is_skipped(self) -> None:
+        # swdio on CS0's gpio node skips the whole pads block, which would drop
+        # the TINT route silently; the generator must refuse instead.
+        real = gzb._load_supervisor_links(METADATA_ROOT)
+        links = copy.deepcopy(real)
+        links["gd32_pads"]["swdio"]["gpio_node"] = (
+            links["gd32_spi"]["gpio_chip_select"]["gpio_node"])
+        self.assertIsNotNone(links["gd32_pads"]["attn"].get("tint_slot"))
+        with mock.patch.object(gzb, "_load_supervisor_links", return_value=links):
+            with self.assertRaisesRegex(SystemExit, "pads block is skipped"):
+                emit_zephyr_board("E1M-V2N101", "m33_sm", METADATA_ROOT)
+
     def test_v2m101_m33_sm_family_agnostic_files(self) -> None:
         self._parity("e1m_v2m101_m33_sm")
 
@@ -306,6 +328,56 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
         dts = files["alp_e1m_v2m101_m33_sm/alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33.dts"]
         self.assertIn("openamp_shm: memory@9f700000", dts)
         self.assertIn("mbox1: mhu@", dts)
+
+    def test_v2n_v2m_audit_cm33_outputs(self) -> None:
+        """Pin the CM33 audit outputs (CM33-01/14/M2) on both SKUs: sci0 RXD
+        pull-up, enabled-only `supported:`, and the RAM console (node is a
+        `zephyr,memory-region`, size matches CONFIG_RAM_CONSOLE_BUFFER_SIZE)."""
+        for sku, d in (("E1M-V2N101", "e1m_v2n101_m33_sm"),
+                       ("E1M-V2M101", "e1m_v2m101_m33_sm")):
+            files = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)
+            base = f"alp_{d}/alp_{d}"
+            dts = files[f"{base}_r9a09g056n48gbg_cm33.dts"]
+            cfg = files[f"{base}_r9a09g056n48gbg_cm33_defconfig"]
+            yml = files[f"{base}_r9a09g056n48gbg_cm33.yaml"]
+            pin = files[f"{base}-pinctrl.dtsi"]
+            self.assertIn("bias-pull-up;", pin)
+            self.assertRegex(yml, r"supported:\s*- gpio\s*- spi\s")
+            self.assertNotRegex(yml, r"-\s*(i2c|uart)\b")
+            self.assertNotRegex(cfg, r"(?m)^CONFIG_UART_INTERRUPT_DRIVEN=")
+            self.assertIn("CONFIG_RAM_CONSOLE=y", cfg)
+            self.assertIn("zephyr,ram-console = &ram_console;", dts)
+            m = re.search(r"ram_console: memory@9f710000 \{(.*?)\};", dts, re.S)
+            self.assertIsNotNone(m)
+            node = m.group(1)
+            self.assertIn('compatible = "zephyr,memory-region";', node)
+            self.assertIn('zephyr,memory-region = "RAM_CONSOLE";', node)
+            self.assertIn("reg = <0x9f710000 0x4000>;", node)
+            self.assertIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=16384", cfg)
+            self.assertRegex(cfg, r"(?m)^CONFIG_LOG_PRINTK=n$")
+
+    def test_v2n_ram_console_inside_openamp_window_and_clear_of_ipc(self) -> None:
+        """The RAM console must sit inside `openamp_shm` and overlap none of
+        the rsctbl / mhu1_shm / vring_* regions (parsed from the same dts,
+        so a moved IPC region fails here, not on silicon)."""
+        for sku, d in (("E1M-V2N101", "e1m_v2n101_m33_sm"),
+                       ("E1M-V2M101", "e1m_v2m101_m33_sm")):
+            dts = emit_zephyr_board(sku, "m33_sm", METADATA_ROOT)[
+                f"alp_{d}/alp_{d}_r9a09g056n48gbg_cm33.dts"]
+            regs = {
+                label: (int(base, 16), int(base, 16) + int(size, 16))
+                for label, base, size in re.findall(
+                    r"(\w+): memory@\w+ \{[^}]*?reg = <(0x[0-9a-f]+) (0x[0-9a-f]+)>;",
+                    dts)
+            }
+            lo, hi = regs.pop("ram_console")
+            win_lo, win_hi = regs.pop("openamp_shm")
+            self.assertTrue(win_lo <= lo and hi <= win_hi, sku)
+            ipc = {k: v for k, v in regs.items()
+                   if k in ("rsctbl", "mhu1_shm") or k.startswith("vring_")}
+            self.assertEqual(len(ipc), 6, f"{sku}: {sorted(ipc)}")
+            for label, (a, b) in ipc.items():
+                self.assertTrue(hi <= a or b <= lo, f"{sku}: ram_console overlaps {label}")
 
     def test_openamp_ipc_false_drops_the_block(self) -> None:
         """No committed board sets `openamp_ipc: false` any more, so the

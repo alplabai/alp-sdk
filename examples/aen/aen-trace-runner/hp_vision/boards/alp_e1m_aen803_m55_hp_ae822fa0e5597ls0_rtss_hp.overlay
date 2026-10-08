@@ -89,3 +89,16 @@
 &lpgpio {
 	status = "disabled";
 };
+
+/* The HE may use I2C1 at its boot (a display shield's bridge); this image owns
+ * the camera bus after that. Wait for the HE's release before anything touches
+ * the bus (POST_KERNEL priority 0, ahead of every driver and of the pad unstick
+ * in src/main.c). The HE side: ../../i2c_handover_he.overlay; the flag word is
+ * the same address. zephyr/soc-bridge/alif/i2c_handover.c (alp-sdk). */
+/ {
+	i2c1_handover: i2c1-handover {
+		compatible = "alp,i2c-handover";
+		role = "acquire";
+		flag-address = <0x0237FC94>;
+	};
+};

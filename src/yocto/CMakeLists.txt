@@ -64,6 +64,13 @@ get_filename_component(_alp_sdk_yocto_root "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 target_include_directories(alp_sdk PRIVATE ${_alp_sdk_yocto_root}/src)
 unset(_alp_sdk_yocto_root)
 
+option(ALP_SDK_V2N_DOORBELL_RSP_CH8
+    "RZ/V2N: acknowledge the CM33 -> CA55 OpenAMP doorbell on Renesas' rsp_ch8_ns line (GIC_SPI 385) instead of MHU-B SWINT unit 12 (GIC_SPI 404). Must match the CM33 firmware (CONFIG_ALP_V2N_DOORBELL_RSP_CH8) and the kernel devicetree (ALP_V2N_DOORBELL_SPI).  Bench-pending; default OFF (404)."
+    OFF)
+if(ALP_SDK_V2N_DOORBELL_RSP_CH8)
+    target_compile_definitions(alp_sdk PRIVATE ALP_V2N_DOORBELL_RSP_CH8=1)
+endif()
+
 set(ALP_SDK_INFERENCE_AUTO_ORDER "" CACHE STRING
     "Comma-separated accelerator preference for ALP_INFERENCE_BACKEND_AUTO, best first (e.g. deepx_dxm1,drpai,cpu).  Generated from the SoM preset's inference.auto_order into local.conf (--emit yocto-conf) and forwarded by the alp-sdk recipe's EXTRA_OECMAKE.   Consumed only by the .alpmodel selector tiebreak; empty: the first fitting target wins.")
 if(ALP_SDK_INFERENCE_AUTO_ORDER)
@@ -291,10 +298,8 @@ target_sources(alp_sdk PRIVATE
     # dispatcher owns the public alp_gpu2d_* symbols (the split stub backend
     # is muted below via ALP_VENDOR_OVERRIDES_GPU2D); the portable
     # sw_fallback is a REAL pure-C fill/blit/blend (the same backend
-    # native_sim unit-tests + the E8 bench ran), so Linux apps --
-    # including the i.MX 93 A55 cluster, whose PXP/libg2d silicon
-    # backend is future work (see ADR 0008) -- get working 2D ops
-    # rather than NOSUPPORT.  A future Linux 2D-engine backend
+    # native_sim unit-tests + the E8 bench ran), so Linux apps get
+    # working 2D ops rather than NOSUPPORT.  A future Linux 2D-engine backend
     # registers at priority 100 above it, exactly like the
     # yocto_drv.c backends of the classes above.
     ${CMAKE_CURRENT_SOURCE_DIR}/../gpu2d_dispatch.c

@@ -108,7 +108,7 @@ without rewriting the layer above.
   │               │    │                                                                        │
   │               │    │  Heterogeneous IPC:  <alp/rpc.h> · <alp/system_ipc.h> · <alp/mproc.h>  │
   │               │    │     framed RPMsg/OpenAMP · auto endpoint IDs · mailbox/shmem/hwsem     │
-  │               │    │  Vendor escape hatches:  <alp/ext/{alif, renesas, nxp, deepx}>         │
+  │               │    │  Vendor escape hatches:  <alp/ext/{alif, renesas, deepx}>              │
   │               │    │                                                                        │
   │               │    │  ── 80+ Tier-1 chip drivers + Tier-2 community repo:                   │
   │               │    │        lsm6dso, bmi323, bmp581, icm42670, ina236, tmp112,              │
@@ -125,7 +125,7 @@ without rewriting the layer above.
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
-  │ Vendor SDK    │ ─► │  Alif Ensemble (AEN) · Renesas RZ/V2N · NXP i.MX 93 · DEEPX DX-M1      │
+  │ Vendor SDK    │ ─► │  Alif Ensemble (AEN) · Renesas RZ/V2N · DEEPX DX-M1                    │
   │               │    │  NPU runtimes dispatched into: Ethos-U/Vela · DRP-AI · DEEPX dx_rt     │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
@@ -156,10 +156,7 @@ See [ADR 0001](docs/adr/0001-wrapper-on-top-of-zephyr.md) and
 
 Swap-and-run is measured **within** a SoM family, against the generated
 swap-test matrix: the 7 released E1M-AEN SKUs pass all three canonical
-examples (21 / 24 E1M cells — the remaining 3 are `E1M-NX9101`, a
-placeholder MPN whose only hw_rev is `status: tbd`, refused by the
-hw_rev-buildable gate and so not yet buildable at all), and the 6 E1M-X
-SKUs pass two of three (12 / 18 cells — `adc-voltmeter` fails on all
+examples (all 21 E1M cells), and the 6 E1M-X SKUs pass two of three (12 / 18 cells — `adc-voltmeter` fails on all
 six). Matrix at
 [`docs/portability-matrix.md`](docs/portability-matrix.md). Crossing
 between E1M and E1M-X is intentionally out of scope: they're separate
@@ -178,7 +175,6 @@ examples: [`docs/portability.md`](docs/portability.md).
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M101` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55) · Zephyr (M33 system manager) |
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M102` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M103` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
-| **E1M-i.MX93** | E1M (35×35 mm) | TBD | NXP i.MX 93 (2× A55 + M33 + Ethos-U65) | ~0.5 TOPS | Yocto · Zephyr |
 
 All modules share the **E1M open-standard form factor** — pinout + mechanical
 spec in [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec) (pinned
@@ -229,8 +225,8 @@ silicon-verified via self-hosted HiL · `<alp/mproc.h>` shmem/hwsem on
 Zephyr · `<alp/power.h>` fleshed out · concurrent multi-NPU dispatch on
 V2M101 · Mender OTA E2E on a V2N101 fleet · ABI snapshot frozen for v1.0 ·
 ≤30-day customer onboarding dry-run · v1.0.0 after first customer pilot.
-Deferred indefinitely past v1.0: the Ubuntu backend, NXP NX9101 silicon
-enablement, FreeRTOS/ThreadX/NuttX backends.
+Deferred indefinitely past v1.0: the Ubuntu backend and
+FreeRTOS/ThreadX/NuttX backends.
 
 - Doc navigation hub: [`docs/README.md`](docs/README.md)
 - Per-(library × OS × SoM) status: [`docs/os-support-matrix.md`](docs/os-support-matrix.md)

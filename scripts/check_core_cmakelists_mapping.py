@@ -43,30 +43,6 @@ from alp_orchestrate import (  # noqa: E402
 from alp_orchestrate.orchestrator import (  # noqa: E402
     STOCK_SHIM_APP, _zephyr_app_dir,
 )
-from alp_orchestrate.sdk_compat import (  # noqa: E402
-    assert_exclusion_still_not_buildable,
-)
-
-# board.yaml paths (repo-relative) that cannot load AT ALL right now, with
-# the reason -- mirrors check_zephyr_conf_parity.py's
-# `_EXCLUDED_WITH_REASON` (same #1025 root cause: a board.yaml that can't
-# even load has nothing for this gate to walk, which is a different, honest
-# failure this gate isn't the one to report). RATCHET: `find_problems` re-
-# asserts each entry's (family_dir, hw_rev) every run via
-# `assert_exclusion_still_not_buildable` and fails loudly the moment the
-# reason stops holding -- this dict alone is not self-enforcing.
-_EXCLUDED_WITH_REASON: dict[str, str] = {
-    "examples/multicore/rpmsg-imx93/board.yaml":
-        "E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd` -- refused "
-        "outright by the hw_rev-buildable gate (#1025). Remove this entry "
-        "once metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a "
-        "buildable status.",
-}
-# (family_dir, hw_rev) each excluded board.yaml's reason cites, for the
-# ratchet assertion above -- keyed the same as _EXCLUDED_WITH_REASON.
-_EXCLUDED_FAMILY_HWREV: dict[str, tuple[str, str]] = {
-    "examples/multicore/rpmsg-imx93/board.yaml": ("imx93", "r1"),
-}
 
 
 def _line_of(text: str, offset: int) -> int:
@@ -93,14 +69,6 @@ def find_problems(root: Path) -> list[str]:
 
     for board_yaml in sorted(root.glob("examples/**/board.yaml")):
         rel_board = board_yaml.relative_to(root).as_posix()
-        if rel_board in _EXCLUDED_WITH_REASON:
-            family_dir, hw_rev = _EXCLUDED_FAMILY_HWREV[rel_board]
-            stale = assert_exclusion_still_not_buildable(
-                root / "metadata", family_dir, hw_rev,
-                gate=f"check_core_cmakelists_mapping.py ({rel_board})")
-            if stale:
-                problems.append(stale)
-            continue
         try:
             project = load_board_yaml(board_yaml)
         except OrchestratorError as e:

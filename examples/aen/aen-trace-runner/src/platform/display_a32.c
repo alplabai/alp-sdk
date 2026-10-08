@@ -26,10 +26,33 @@
 #include <display_cdc200.h>
 
 #include "../ipc/tr_flip.h"
+#include "../render/panel_rot.h"
 #include "display.h"
 
-#define TR_FB_BYTES \
-	((size_t)DT_PROP(DT_NODELABEL(cdc200), width) * DT_PROP(DT_NODELABEL(cdc200), height) * 2u)
+/* The scan-out layer-1 window, whatever the panel: the full panel on RK055, a
+ * 1280 x 720 window of the RVT121's 1280 x 800 (the shield-fit overlay,
+ * shield-fit/e1m_evk_rvt121hvdfwca0.overlay). It is always the portrait
+ * frame's byte count: a panel mounted turned scans the same bytes the A32
+ * writes rotated (render/panel_rot.h). */
+#define TR_L1_NODE DT_NODELABEL(cdc200)
+#define TR_L1_W \
+	(DT_PROP_OR(TR_L1_NODE, win_x1_l1, DT_PROP(TR_L1_NODE, width)) - \
+	 DT_PROP_OR(TR_L1_NODE, win_x0_l1, 0))
+#define TR_L1_H \
+	(DT_PROP_OR(TR_L1_NODE, win_y1_l1, DT_PROP(TR_L1_NODE, height)) - \
+	 DT_PROP_OR(TR_L1_NODE, win_y0_l1, 0))
+#define TR_FB_BYTES ((size_t)TR_L1_W * TR_L1_H * 2u)
+
+/* The window is the 720 x 1280 portrait content as scanned (rotation 0) or turned
+ * (90 / 270: 1280 x 720): the right shape for the mount-rotation, not just the
+ * right byte count. */
+#define TR_MOUNT_ROT DT_PROP_OR(TR_L1_NODE, mount_rotation, 0)
+BUILD_ASSERT(TR_MOUNT_ROT == 0 || TR_MOUNT_ROT == 90 || TR_MOUNT_ROT == 270,
+             "mount-rotation must be 0, 90 or 270 (the renderer cannot produce 180)");
+BUILD_ASSERT(TR_MOUNT_ROT == 0 ? (TR_L1_W == TR_ROT_PORTRAIT_W && TR_L1_H == TR_ROT_PORTRAIT_H)
+                               : (TR_L1_W == TR_ROT_PORTRAIT_H && TR_L1_H == TR_ROT_PORTRAIT_W),
+             "layer-1 window is not 720x1280 (mount-rotation 0) / 1280x720 (90, 270): add or fix "
+             "the shield's shield-fit overlay");
 
 /* FB A is the SRAM0 partition base (plan section 4); FB B is SRAM1
  * 0x02600000 (tr_mbox.h), outside every DT partition -- cdc200_swap_fb()
@@ -74,6 +97,13 @@ int tr_display_open(void)
 	}
 	if (alp_display_get_caps(g_disp, &g_caps) != ALP_OK || g_caps.format != ALP_PIXFMT_RGB565) {
 		printk("RESULT FAIL: display caps unavailable or not RGB565\n");
+		alp_display_close(g_disp);
+		g_disp = NULL;
+		return -2;
+	}
+	if (!tr_rot_valid(g_caps.rotation)) {
+		printk("RESULT FAIL: display mount-rotation %u is not 0, 90 or 270\n",
+		       (unsigned)g_caps.rotation);
 		alp_display_close(g_disp);
 		g_disp = NULL;
 		return -2;
@@ -133,14 +163,21 @@ int tr_display_open(void)
 	return 0;
 }
 
+/* The game's own geometry: always the portrait content (the panel's own
+ * geometry, and any mount-rotation, is the producer's to turn: panel_rot.h). */
 uint16_t tr_display_width(void)
 {
-	return g_caps.width;
+	return TR_ROT_PORTRAIT_W;
 }
 
 uint16_t tr_display_height(void)
 {
-	return g_caps.height;
+	return TR_ROT_PORTRAIT_H;
+}
+
+uint16_t tr_display_rotation(void)
+{
+	return g_caps.rotation;
 }
 
 static uint32_t live_fb(void)

@@ -14,7 +14,6 @@
 #include "ipc/tr_aring.h" /* TR_AEV_* -- sound events (A32 build pushes them) */
 #include "ipc/tr_mbox.h"  /* TR_BANNER_* -- the banner ids both render modes share */
 #include "platform/display.h"
-#include "platform/panel_retry.h"
 #include "platform/imu.h"
 #include "platform/rail5v_power.h"
 #include "vision/camera_watchdog.h"
@@ -29,6 +28,11 @@
 #include "ipc/tr_memmap.h" /* TR_MEM_PSLOT */
 #include "ipc/tr_pslot.h"
 #include "vision/cam_rot.h"
+
+/* The HE's side of the I2C1 handover (i2c_handover_he.overlay) names the same
+ * flag word hp_vision waits on (tr_memmap.h). */
+BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), flag_address) == TR_MEM_I2C1_HANDOVER,
+             "i2c1_handover flag-address != tr_memmap.h TR_MEM_I2C1_HANDOVER");
 #else
 #include "platform/camera.h"
 #include "vision/detect.h"
@@ -48,7 +52,7 @@
  * ~30 Hz logic against the panel's measured 40.0 Hz refresh -- TR_RENDER=M55
  * only. TR_RENDER=A32 does not sleep it out: the flip's vblank wait paces the
  * loop, so the game runs at the flip rate (40.0 Hz when the A32 keeps up;
- * 30.0 Hz with TR_PANEL_HZ=30, game/panel_hz.h scaling the frame counts) and
+ * 30.0 Hz on a 30 Hz panel, game/panel_hz.h scaling the frame counts) and
  * every tick-counted constant below and in the game (TR_AIR_TICKS,
  * TR_SCROLL_PX, TR_CALIB_TIMEOUT_TICKS, ...) runs ~1.2x faster in wall time.
  * Retuning them is plan task T9, not done here; TICK_MS still scales the
@@ -233,9 +237,10 @@ static void ui_present(const tr_game_t *g, bool attract_active, bool paused)
 
 	tr_frame_in_from_game(&in, g, g_banner, attract_active, paused);
 	tr_frame_in_p16(&in, tr_tilt.character, &g_react, g_lobby.standing, g_lobby.idle_us);
-	in.track_h = (int16_t)tr_display_height();
-	in.phase   = (uint16_t)g_phase_q16;
-	in.pace_q8 = g_pace_q8;
+	in.track_h  = (int16_t)tr_display_height();
+	in.rotation = tr_display_rotation(); /* the A32 turns the frame by it */
+	in.phase    = (uint16_t)g_phase_q16;
+	in.pace_q8  = g_pace_q8;
 	if (in.phase != 0u) {
 		in.flags |= TR_FLAG_PHASE;
 	}
@@ -718,11 +723,9 @@ int main(void)
 	 * NOMEM failure as the intermittent panel defect (whole-branch fix
 	 * round B, B1).
 	 */
-	/* The panel first: its init re-attaches the DSI host, so it must finish
-	 * before tr_display_open() switches the link to video (panel.c). A
-	 * failure is reported (tr_panel_init_tries) but not fatal -- the game
-	 * runs on as it did before the retry existed. */
-	(void)tr_panel_up();
+	/* The panel is up before main(): the SDK brings the HX8394 up with retries
+	 * (src/zephyr/panel_init_retry.c) and the RVT121's bridge configures
+	 * itself, both at APPLICATION init. */
 
 	bool display_ok  = false;
 	int  open_result = -1;
