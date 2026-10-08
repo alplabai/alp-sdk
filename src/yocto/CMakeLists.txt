@@ -581,7 +581,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # (registered at priority 100) is dropped, and the app silently gets the
     # stub.  Name each such backend's ALP_BACKEND_ANCHOR_FORCE symbol so every
     # consumer's link pulls it.  Camera only today; the other classes' yocto_drv.c
-    # need the same line (tracked in the issue linked from #2616).
+    # need the same line (#2790).
     if(NOT ALP_SDK_BUILD_SHARED AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_link_options(alp_sdk INTERFACE
             "LINKER:--undefined=_alp_backend_force_camera_yocto_drv")
