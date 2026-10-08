@@ -328,6 +328,10 @@ alp_status_t rv3028c7_timer_start(rv3028c7_t *ctx, uint32_t seconds, uint32_t *a
  *        cleared.  The preset in Timer Value is left alone (writing 0
  *        to a running Timer Value is documented as harmful, p.65).
  *        Idempotent.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ALP_OK, ALP_ERR_NOT_READY (@p ctx not initialised), or
+ *         ALP_ERR_IO on a transport failure.
  */
 alp_status_t rv3028c7_timer_stop(rv3028c7_t *ctx);
 
@@ -340,6 +344,11 @@ alp_status_t rv3028c7_timer_stop(rv3028c7_t *ctx);
  * Reading 0Ch first latches 0Dh, so both bytes are read in one
  * transaction.  Units follow the active TD tick (4096 Hz, 64 Hz, 1 Hz
  * or 1/60 Hz), expressed in whole milliseconds.
+ *
+ * @param ctx  Initialised driver context.
+ * @param out  Output: countdown state.
+ * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (@p out NULL), or
+ *         ALP_ERR_IO.
  */
 alp_status_t rv3028c7_timer_read(rv3028c7_t *ctx, rv3028c7_timer_state_t *out);
 
@@ -348,6 +357,13 @@ alp_status_t rv3028c7_timer_read(rv3028c7_t *ctx, rv3028c7_timer_state_t *out);
  *        registers (AE bits from @p match, see @ref rv3028c7_set_alarm),
  *        then enable AIE.  Fields not selected in @p match do not
  *        participate in the comparison (AE_x = 1, pp.18-19).
+ *
+ * @param ctx    Initialised driver context.
+ * @param when   Alarm time (minute, hour, and day or weekday).
+ * @param match  Which fields participate and whether 09h is a date or a
+ *               weekday.
+ * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (a pointer NULL),
+ *         or ALP_ERR_IO.
  */
 alp_status_t rv3028c7_alarm_arm(rv3028c7_t                   *ctx,
                                 const rv3028c7_time_t        *when,
@@ -357,6 +373,9 @@ alp_status_t rv3028c7_alarm_arm(rv3028c7_t                   *ctx,
  * @brief Disarm the alarm: AIE = 0, AE_M/AE_H/AE_WD = 1 (all match
  *        fields disabled, the POR state, pp.18-19) and AF cleared.
  *        Other latched flags are left alone.  Idempotent.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ALP_OK, ALP_ERR_NOT_READY, or ALP_ERR_IO.
  */
 alp_status_t rv3028c7_alarm_clear(rv3028c7_t *ctx);
 
@@ -366,21 +385,34 @@ alp_status_t rv3028c7_alarm_clear(rv3028c7_t *ctx);
 #define RV3028C7_WAKE_UF 0x10u /**< Periodic update (Status bit 4). */
 
 /**
- * @brief Interrupt service for the wake path: read Status, report the
- *        TF / AF / UF flags that are latched, and clear exactly those.
+ * @brief Interrupt service for the wake path: read Status and Control 2,
+ *        report the enabled wake sources that are latched, and clear
+ *        every latched TF / AF / UF flag.
  *
- * Read-modify-write like @ref rv3028c7_dispatch_irq, Status is read
- * once, and the write-back carries a 1 in every flag bit that is NOT
- * being acknowledged (a 1 leaves a flag unchanged, a 0 clears it;
- * same convention as rv3028c7_alarm_check_and_clear()).  PORF, EVF,
- * BSF and CLKF are therefore preserved for the caller / the
- * dispatcher, and EEbusy (read-only) is never written.  No handlers
- * are invoked.
+ * Reported (@p flags) is only a source whose interrupt enable is on:
+ * TF needs TIE, AF needs AIE, UF needs UIE (Control 2, p.24).  UF in
+ * particular latches every second regardless of UIE (p.22, Sec. 4.9),
+ * so it is never a wake cause unless UIE is set.  A latched but
+ * unreported flag is still cleared.
+ *
+ * The acknowledge is a constant-mask STATUS write, not a
+ * read-modify-write: 0 for the flags being cleared and 1 for every
+ * other latchable flag.  The same convention as
+ * rv3028c7_alarm_check_and_clear().  PORF, EVF, BSF and CLKF are
+ * therefore preserved, and EEbusy (read-only) is never written.  No
+ * handlers are invoked.
+ *
+ * @note The "writing 1 to a flag leaves it unchanged" behaviour this
+ *       relies on is ASSUMED (the manual only states a flag is
+ *       retained until 0 is written, p.22); it is not bench-verified.
+ *       The strategy lives in one helper in rv3028c7.c
+ *       (RV3028_STATUS_WRITE1_IGNORED).
  *
  * @param ctx   Initialised driver context.
- * @param flags Output: OR of RV3028C7_WAKE_* seen at the read.  May
- *              be NULL.  0 means nothing was pending (no write is
- *              issued).
+ * @param flags Output: OR of RV3028C7_WAKE_* for enabled, latched
+ *              sources.  May be NULL.
+ * @return ALP_OK, ALP_ERR_NOT_READY, or ALP_ERR_IO.  No STATUS write is
+ *         issued when no TF/AF/UF flag is latched.
  */
 alp_status_t rv3028c7_wake_service(rv3028c7_t *ctx, uint8_t *flags);
 

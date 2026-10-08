@@ -75,15 +75,15 @@ static int wlog_find(uint8_t reg, int from)
 		if (fake_rv3028c7_wlog_reg(i) == reg) return (int)i;
 	}
 	return -1;
-	wake_end();
 }
 
 ZTEST(alp_chips, test_rv3028c7_timer_start_1hz_sequence)
 {
 	wake_begin();
-	/* Preserve unrelated bits: WADA + USEL in CONTROL_1, UIE in CONTROL_2. */
-	fake_rv3028c7_set_reg(R_CTRL1, 0x30u);
-	fake_rv3028c7_set_reg(R_CTRL2, 0x20u);
+	/* Preserve unrelated bits: WADA + USEL + EERD in CONTROL_1,
+	 * UIE + 12_24 in CONTROL_2. */
+	fake_rv3028c7_set_reg(R_CTRL1, 0x38u);
+	fake_rv3028c7_set_reg(R_CTRL2, 0x22u);
 	fake_rv3028c7_set_reg(R_STATUS, 0x01u | 0x08u); /* PORF + stale TF */
 
 	uint32_t actual = 0;
@@ -91,8 +91,8 @@ ZTEST(alp_chips, test_rv3028c7_timer_start_1hz_sequence)
 	zassert_equal(actual, 90u);
 
 	/* TD = 10 (1 Hz), TRPT = 0, TE = 1; WADA/USEL kept. */
-	zassert_equal(fake_rv3028c7_get_reg(R_CTRL1), 0x30u | 0x04u | 0x02u);
-	zassert_equal(fake_rv3028c7_get_reg(R_CTRL2), 0x20u | 0x10u); /* UIE kept, TIE set */
+	zassert_equal(fake_rv3028c7_get_reg(R_CTRL1), 0x3Eu);
+	zassert_equal(fake_rv3028c7_get_reg(R_CTRL2), 0x32u); /* UIE + 12_24 kept, TIE set */
 	zassert_equal(fake_rv3028c7_get_reg(R_TVAL0), 90u);
 	zassert_equal(fake_rv3028c7_get_reg(R_TVAL1), 0u);
 	/* TF cleared, PORF preserved. */
@@ -102,19 +102,19 @@ ZTEST(alp_chips, test_rv3028c7_timer_start_1hz_sequence)
 	 * write, value, TIE on, TE on last. */
 	zassert_equal(fake_rv3028c7_wlog_len(), 8u);
 	zassert_equal(fake_rv3028c7_wlog_reg(0), R_CTRL1);
-	zassert_equal(fake_rv3028c7_wlog_val(0) & 0x04u, 0u);
+	zassert_equal(fake_rv3028c7_wlog_val(0), 0x38u);
 	zassert_equal(fake_rv3028c7_wlog_reg(1), R_CTRL2);
 	zassert_equal(fake_rv3028c7_wlog_val(1) & 0x10u, 0u);
 	zassert_equal(fake_rv3028c7_wlog_reg(2), R_STATUS);
 	zassert_equal(fake_rv3028c7_wlog_val(2) & 0x08u, 0u);
 	zassert_equal(fake_rv3028c7_wlog_reg(3), R_CTRL1);
-	zassert_equal(fake_rv3028c7_wlog_val(3), 0x30u | 0x02u);
+	zassert_equal(fake_rv3028c7_wlog_val(3), 0x3Au); /* EERD kept, TE still 0 */
 	zassert_equal(fake_rv3028c7_wlog_reg(4), R_TVAL0);
 	zassert_equal(fake_rv3028c7_wlog_reg(5), R_TVAL1);
 	zassert_equal(fake_rv3028c7_wlog_reg(6), R_CTRL2);
 	zassert_equal(fake_rv3028c7_wlog_val(6) & 0x10u, 0x10u);
 	zassert_equal(fake_rv3028c7_wlog_reg(7), R_CTRL1);
-	zassert_equal(fake_rv3028c7_wlog_val(7), 0x30u | 0x04u | 0x02u);
+	zassert_equal(fake_rv3028c7_wlog_val(7), 0x3Eu);
 
 	assert_no_eeprom_access();
 	wake_end();
@@ -236,6 +236,11 @@ ZTEST(alp_chips, test_rv3028c7_alarm_arm_and_clear)
 	zassert_equal(fake_rv3028c7_get_reg(R_CTRL1) & 0x20u, 0x20u); /* WADA = date */
 	zassert_equal(fake_rv3028c7_get_reg(R_CTRL2) & 0x08u, 0x08u); /* AIE */
 	zassert_equal(fake_rv3028c7_get_reg(R_STATUS), 0x01u);        /* AF cleared, PORF kept */
+	/* Ordering: AIE off first, then AF cleared, before the compare
+	 * registers are touched. */
+	zassert_equal(fake_rv3028c7_wlog_reg(0), R_CTRL2);
+	zassert_equal(fake_rv3028c7_wlog_val(0) & 0x08u, 0u);
+	zassert_equal(fake_rv3028c7_wlog_reg(1), R_STATUS);
 	/* AIE is the last write: enabled only after the compare is loaded. */
 	zassert_equal(fake_rv3028c7_wlog_reg(fake_rv3028c7_wlog_len() - 1), R_CTRL2);
 	assert_no_eeprom_access();
@@ -265,6 +270,7 @@ ZTEST(alp_chips, test_rv3028c7_wake_service_clears_tf_af_uf_keeps_porf)
 {
 	wake_begin();
 	uint8_t flags = 0xFFu;
+	fake_rv3028c7_set_reg(R_CTRL2, 0x10u | 0x08u | 0x20u); /* TIE + AIE + UIE */
 
 	/* Nothing pending: reported 0, no write issued. */
 	zassert_equal(rv3028c7_wake_service(&g_ctx, &flags), ALP_OK);
@@ -285,6 +291,54 @@ ZTEST(alp_chips, test_rv3028c7_wake_service_clears_tf_af_uf_keeps_porf)
 	zassert_equal(rv3028c7_wake_service(&g_ctx, NULL), ALP_OK);
 	zassert_equal(fake_rv3028c7_get_reg(R_STATUS), 0x01u);
 	assert_no_eeprom_access();
+	wake_end();
+}
+
+ZTEST(alp_chips, test_rv3028c7_wake_service_reports_only_enabled_sources)
+{
+	wake_begin();
+	uint8_t flags = 0xFFu;
+
+	/* UF latches every second regardless of UIE: with UIE = 0 it is not
+	 * a wake cause, but it is still cleared. */
+	fake_rv3028c7_set_reg(R_CTRL2, 0x00u);
+	fake_rv3028c7_set_reg(R_STATUS, 0x10u | 0x01u);
+	zassert_equal(rv3028c7_wake_service(&g_ctx, &flags), ALP_OK);
+	zassert_equal(flags, 0u);
+	zassert_equal(fake_rv3028c7_get_reg(R_STATUS), 0x01u);
+
+	/* TF + AF + UF latched, only TIE enabled: just TF is reported. */
+	fake_rv3028c7_set_reg(R_CTRL2, 0x10u);
+	fake_rv3028c7_set_reg(R_STATUS, 0x08u | 0x04u | 0x10u);
+	zassert_equal(rv3028c7_wake_service(&g_ctx, &flags), ALP_OK);
+	zassert_equal(flags, RV3028C7_WAKE_TF);
+	zassert_equal(fake_rv3028c7_get_reg(R_STATUS), 0u);
+
+	/* UIE set: UF is reported. */
+	fake_rv3028c7_set_reg(R_CTRL2, 0x20u);
+	fake_rv3028c7_set_reg(R_STATUS, 0x10u);
+	zassert_equal(rv3028c7_wake_service(&g_ctx, &flags), ALP_OK);
+	zassert_equal(flags, RV3028C7_WAKE_UF);
+	wake_end();
+}
+
+/* What would break if writing 1 to a STATUS flag SET it instead of being
+ * ignored (the assumption behind the constant-mask acknowledge, see
+ * RV3028_STATUS_WRITE1_IGNORED in rv3028c7.c): the mask's 1s would
+ * latch every other flag.  This pins the failure mode so a bench result
+ * of "write 1 sets" is visible here; if the helper is switched to the
+ * read-back strategy, this test is the one to invert. */
+ZTEST(alp_chips, test_rv3028c7_wake_service_if_write1_sets_latches_spurious_flags)
+{
+	wake_begin();
+	fake_rv3028c7_set_write1_sets(true);
+	fake_rv3028c7_set_reg(R_CTRL2, 0x10u);
+	fake_rv3028c7_set_reg(R_STATUS, 0x08u);
+	uint8_t flags = 0;
+	zassert_equal(rv3028c7_wake_service(&g_ctx, &flags), ALP_OK);
+	zassert_equal(flags, RV3028C7_WAKE_TF);
+	/* TF is gone, but every other flag in the 0x77 mask is now set. */
+	zassert_equal(fake_rv3028c7_get_reg(R_STATUS), 0x77u);
 	wake_end();
 }
 

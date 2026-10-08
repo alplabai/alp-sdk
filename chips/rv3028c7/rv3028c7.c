@@ -728,14 +728,38 @@ static alp_status_t rv3028_update_reg(rv3028c7_t *ctx, uint8_t reg, uint8_t clea
 	return rv3028_write_reg(ctx, reg, (uint8_t)((v & ~clear) | set));
 }
 
-/* Acknowledge only the flags in `clear` (a Status flag mask).  STATUS
- * clears on a 0 write and a 1 leaves the flag unchanged (see
- * rv3028_status_ack()), so every other latchable flag, PORF included,
- * is written back as 1.  EEbusy (bit 7) is read-only and not written. */
+/* STATUS write-1 behaviour.  Every wake-path STATUS acknowledge goes
+ * through rv3028_status_clear() below, so the strategy is this one
+ * switch.
+ *
+ *   1 (current) Constant mask: write 0 to the flags being cleared and 1
+ *     to every other latchable flag.  Correct only if writing 1 over a
+ *     0 flag leaves it 0 (and a 1 over a 1 leaves it 1).  The manual
+ *     (p.22) only says a flag "is retained until a 0 is written", so
+ *     this is ASSUMED, not bench-verified -- see the matching note on
+ *     rv3028c7_wake_service() in the header.  It is the same
+ *     convention the pre-existing rv3028c7_alarm_check_and_clear() and
+ *     rv3028_status_ack() already rely on.
+ *   0 Read-back: re-read STATUS and write that value with the cleared
+ *     flags zeroed (the mainline-Linux rtc-rv3028 pattern).  Safe if a
+ *     write of 1 sets a flag, at the cost of one more read and a
+ *     window in which a flag latching in between is cleared unseen. */
+#define RV3028_STATUS_WRITE1_IGNORED 1
+
+/* Acknowledge only the flags in `clear` (a Status flag mask).  PORF and
+ * every other latchable flag not in `clear` is preserved.  EEbusy
+ * (bit 7) is read-only and not written. */
 static alp_status_t rv3028_status_clear(rv3028c7_t *ctx, uint8_t clear)
 {
-	return rv3028_write_reg(
-	    ctx, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~(clear & RV3028_STATUS_FLAGS)));
+	const uint8_t mask = (uint8_t)(clear & RV3028_STATUS_FLAGS);
+#if RV3028_STATUS_WRITE1_IGNORED
+	return rv3028_write_reg(ctx, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~mask));
+#else
+	uint8_t      cur = 0;
+	alp_status_t s   = rv3028_read(ctx, RV3028_REG_STATUS, &cur, 1);
+	if (s != ALP_OK) return s;
+	return rv3028_write_reg(ctx, RV3028_REG_STATUS, (uint8_t)(cur & RV3028_STATUS_FLAGS & ~mask));
+#endif
 }
 
 /* Tick length of a TD setting, scaled so n ticks -> milliseconds. */
@@ -880,11 +904,21 @@ alp_status_t rv3028c7_wake_service(rv3028c7_t *ctx, uint8_t *flags)
 	uint8_t      status = 0;
 	alp_status_t s      = rv3028_read(ctx, RV3028_REG_STATUS, &status, 1);
 	if (s != ALP_OK) return s;
+	uint8_t ctrl2 = 0;
+	s             = rv3028_read(ctx, RV3028_REG_CONTROL_2, &ctrl2, 1);
+	if (s != ALP_OK) return s;
 
-	const uint8_t wake = status & (RV3028_STATUS_TF | RV3028_STATUS_AF | RV3028_STATUS_UF);
-	if (flags != NULL) *flags = wake;
-	if (wake == 0) return ALP_OK;
-	return rv3028_status_clear(ctx, wake);
+	/* UF latches every second whether or not UIE is set (p.22, Sec.
+     * 4.9), and TF/AF latch independently of TIE/AIE, so only a source
+     * whose interrupt enable is on is reported as a wake cause.  All
+     * three latched flags are still cleared. */
+	const uint8_t latched = status & (RV3028_STATUS_TF | RV3028_STATUS_AF | RV3028_STATUS_UF);
+	const uint8_t enabled = (uint8_t)(((ctrl2 & RV3028_CTRL2_TIE) ? RV3028_STATUS_TF : 0) |
+	                                  ((ctrl2 & RV3028_CTRL2_AIE) ? RV3028_STATUS_AF : 0) |
+	                                  ((ctrl2 & RV3028_CTRL2_UIE) ? RV3028_STATUS_UF : 0));
+	if (flags != NULL) *flags = latched & enabled;
+	if (latched == 0) return ALP_OK;
+	return rv3028_status_clear(ctx, latched);
 }
 
 void rv3028c7_deinit(rv3028c7_t *ctx)
