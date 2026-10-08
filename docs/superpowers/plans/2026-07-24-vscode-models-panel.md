@@ -1,5 +1,7 @@
 # VS Code Models panel — Implementation Plan (Plan C, alp-sdk-vscode)
 
+> **Status (2026-10-08): Landed** — `src/models/panel.ts` and `src/models/service.ts` exist in alplabai/alp-sdk-vscode.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax. **Route implementation to a `general-purpose` or bounded `alp-implementor` agent WITH the `alp-sdk-vscode` skill (TypeScript); review with `alp-reviewer`.**
 
 **Goal:** Add a **Models** GUI surface to the extension that shells the envelope-emitting `tan model {list,info,doctor,build}` (Plans A+B) and renders it: per-model artifact status + backend-coverage, NPU-toolchain availability, a build action with progress, and a `.alpmodel` inspector. Model *editing* reuses the existing Configurator "AI models" card. Plus the LSP `models` field-docs thin-win.

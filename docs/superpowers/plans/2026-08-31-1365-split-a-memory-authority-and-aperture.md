@@ -1,7 +1,7 @@
 # #1365 split A — declare the MRAM aperture, author write authority, gate both
 
 Date: 2026-08-31
-Status: Draft — blocked on two decisions (see "Before this starts")
+Status (2026-10-08): Landed — split A shipped in #1960; splits B and C followed in #1983 and #2030; #1365 is closed.
 Issue: [#1365](https://github.com/alplabai/alp-sdk/issues/1365)
 Scope owner: alpCaner
 
