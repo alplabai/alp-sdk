@@ -87,8 +87,8 @@
       "properties": {
         "sku": {
           "type": "string",
-          "pattern": "^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$",
-          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  Shape: E1M-AEN<tier 3-8><2-digit config> (Alif Ensemble, e.g. E1M-AEN301/AEN302), E1M-V2N<3-digit config> (Renesas RZ/V2N), E1M-V2M<3-digit config> (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93; E1M-NX9101 is a placeholder preset until the production MPN lands).  The config tail is a per-configuration increment allocated by the PLM; not every value in range has a shipped preset."
+          "pattern": "^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3})$",
+          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  Shape: E1M-AEN<tier 3-8><2-digit config> (Alif Ensemble, e.g. E1M-AEN301/AEN302), E1M-V2N<3-digit config> (Renesas RZ/V2N), E1M-V2M<3-digit config> (V2N + DEEPX).  The config tail is a per-configuration increment allocated by the PLM; not every value in range has a shipped preset."
         },
         "hw_rev": {
           "type": "string",
@@ -300,7 +300,7 @@
         "method": {
           "type": "string",
           "enum": ["mcuboot", "none"],
-          "description": "Bootloader strategy.  `mcuboot` pulls MCUboot into the Zephyr build via sysbuild; `none` disables the bootloader (firmware runs unverified -- dev / lab only).  Optional; the SoM family supplies the default (AEN/N93 -> mcuboot, V2N/V2N-M1 -> none on the Zephyr slice since U-Boot owns boot on Linux)."
+          "description": "Bootloader strategy.  `mcuboot` pulls MCUboot into the Zephyr build via sysbuild; `none` disables the bootloader (firmware runs unverified -- dev / lab only).  Optional; the SoM family supplies the default (AEN -> mcuboot, V2N/V2N-M1 -> none on the Zephyr slice since U-Boot owns boot on Linux)."
         },
         "signing": {
           "type": "object",

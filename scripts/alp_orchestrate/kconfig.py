@@ -122,8 +122,6 @@ def _emit_extra_library_profile(
         soc_family_token = "alif_ensemble"
     elif family.startswith("renesas-rzv2n"):
         soc_family_token = "renesas_rzv2n"
-    elif family.startswith("nxp-imx9"):
-        soc_family_token = "nxp_imx9"
 
     # resolve_capabilities merges SoC-JSON defaults + SoM overrides.
     capabilities = resolve_capabilities(
@@ -677,8 +675,8 @@ def _soc_display_name(soc_spec: dict[str, Any]) -> str:
     """Vendor + family + part for `CONFIG_ALP_SDK_SOC_NAME`, e.g. "Alif
     Ensemble E8".  `vendor` contributes only its first word (Alif
     Semiconductor -> Alif); `part` is dropped when it already restates
-    `family` verbatim as a prefix (NXP's family "i.MX 9" / part "i.MX 93"
-    would otherwise read "NXP i.MX 9 i.MX 93").
+    `family` verbatim as a prefix (e.g. family "Ensemble" / part "Ensemble E8"
+    would otherwise read "Alif Ensemble Ensemble E8").
     """
     vendor = str(soc_spec.get("vendor") or "").strip()
     family = str(soc_spec.get("family") or "").strip()
@@ -795,7 +793,7 @@ def _emit_som_caps(
     # Build-time hw_rev this project resolved -- lets the boot banner warn
     # when the LIVE EEPROM manifest disagrees (issue #1853).  Emitted
     # unconditionally (not scoped to the `hw_info_eeprom` block above): a
-    # SKU with no on_module.eeprom today (e.g. E1M-NX9101) still gets the
+    # SKU with no on_module.eeprom today still gets the
     # symbol, so it isn't silently dropped if that SKU gains an EEPROM
     # later, and it stays harmless meanwhile (alp_hw_info_read() never
     # returns ALP_OK without a bus, so the banner's compare never runs).
@@ -1272,13 +1270,12 @@ def _emit_inference(
     the ALP_SDK_* parent it `depends on` in
     zephyr/kconfigs/iot-audio-inference.kconfig (issue #874 item 3):
 
-      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}=y -- derived
-        from the silicon capability counts (ethos_u{55,65,85}_count, resolved
+      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U85}=y -- derived
+        from the silicon capability counts (ethos_u{55,85}_count, resolved
         from the SoC JSON npus[]), the single source for which NPUs the
         part carries.  U85 carries Arm's larger MAC array + TensorOptimized
-        kernels; U55 carries the smaller MAC + reference kernels; U65 is
-        i.MX 93-only.  U55/U85 depend on BACKEND_ETHOS_U_AEN; U65 depends
-        on BACKEND_ETHOS_U_N93.
+        kernels; U55 carries the smaller MAC + reference kernels.
+        U55/U85 depend on BACKEND_ETHOS_U_AEN.
 
       - CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_{NEON,HELIUM,REF}=y -- picked
         from the SoC JSON's `cores[<slice.core_id>].vector_extension`
@@ -1359,32 +1356,23 @@ def _emit_inference(
 
     # ---- G-1 -- per-variant Ethos-U selector ---------------------
     # Which Ethos-U variants this SoM carries -- derived from the
-    # silicon-determined capability counts (ethos_u{55,65,85}_count, resolved
+    # silicon-determined capability counts (ethos_u{55,85}_count, resolved
     # from the SoC JSON npus[] via resolve_capabilities).  This is the single
     # source: an on-die NPU cannot be depopulated at the SoM level, so the SoM
     # preset does NOT restate the variant list.
     ethos_variants: set[str] = set()
     if (capabilities.get("ethos_u55_count") or 0) > 0:
         ethos_variants.add("u55")
-    if (capabilities.get("ethos_u65_count") or 0) > 0:
-        ethos_variants.add("u65")
     if (capabilities.get("ethos_u85_count") or 0) > 0:
         ethos_variants.add("u85")
     ethos_present = bool(ethos_variants)
     if ethos_present:
         # Per-silicon Ethos-U backend (Slice 3 registry layout):
         # Alif Ensemble (AEN) -> _BACKEND_ETHOS_U_AEN
-        # NXP i.MX 93        -> _BACKEND_ETHOS_U_N93
-        # Parent-gating (#874 item 3): only emit the variant switches that
-        # `depend on` the parent backend we're actually emitting on this
-        # silicon -- U55/U85 depend on BACKEND_ETHOS_U_AEN, U65 depends on
-        # BACKEND_ETHOS_U_N93 (zephyr/kconfigs/iot-audio-inference.kconfig).
-        if silicon == "nxp:imx9:imx93":
-            inference_lines.append("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y")
-            allowed_variants = {"u65"}
-        else:
-            inference_lines.append("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y")
-            allowed_variants = {"u55", "u85"}
+        # Parent-gating (#874 item 3): the variant switches `depend on` the
+        # parent backend (zephyr/kconfigs/iot-audio-inference.kconfig).
+        inference_lines.append("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y")
+        allowed_variants = {"u55", "u85"}
         for v in sorted(ethos_variants & allowed_variants):
             inference_lines.append(f"CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{v.upper()}=y")
         # Real Arm Ethos-U driver config -- the silicon-proven pair (bench:
@@ -1400,15 +1388,13 @@ def _emit_inference(
         # hooks (NOT CONFIG_ARM_ETHOS_U -- hal_alif's stale callback path);
         # CONFIG_DCACHE=n is the CPU<->NPU SRAM coherence mechanism; the
         # ethos_u driver's mutex/semaphore need a kernel heap (k_malloc).
-        # Pick the most-capable variant this silicon carries (U85 > U65 > U55),
+        # Pick the most-capable variant this silicon carries (U85 > U55),
         # then read its MAC config from the SoC's npus[] `mac_per_cycle` -- NOT a
         # hardcode.  The derived symbol must be a real ETHOS_U_NPU_CONFIG choice
         # member (hal_ethos_u), else it would silently no-op -- so validate and
         # fail loudly on a metadata mismatch.
         if "u85" in ethos_variants:
             variant_num = "85"
-        elif "u65" in ethos_variants:
-            variant_num = "65"
         else:
             variant_num = "55"
         npu_type = f"ethos-u{variant_num}"
@@ -1449,7 +1435,6 @@ def _emit_inference(
         accel = f"ETHOS_U{variant_num}_{mac}"
         _valid_accel = {
             "ETHOS_U55_64", "ETHOS_U55_128", "ETHOS_U55_256",
-            "ETHOS_U65_128", "ETHOS_U65_256", "ETHOS_U65_512",
             "ETHOS_U85_128", "ETHOS_U85_256", "ETHOS_U85_512",
             "ETHOS_U85_1024", "ETHOS_U85_2048",
         }

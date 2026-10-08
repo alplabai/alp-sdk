@@ -85,7 +85,7 @@ versions cleanly.
 | Peripherals | full      | `alp_i2c_*`, `alp_spi_*`, `alp_gpio_*`, `alp_uart_*` (Zephyr backend, AEN) |
 | Chips       | full      | `lsm6dso_*`, `ssd1306_*`, `button_led_*` (no `alp_` prefix on chip drivers) |
 | Display     | minimal   | `alp_display_init/clear/print` routes through Zephyr `display_*`         |
-| Math / DSP  | purpose-built | ALP does not provide a general `arm_math.h` re-export; for ad-hoc math app code uses CMSIS-DSP directly. But ALP DOES ship purpose-built *portable* DSP surfaces that wrap it where cross-silicon portability (Alif M55 / Renesas A55+DRP-AI / NXP) matters: the `<alp/dsp.h>` chain (FIR/IIR/WINDOW/FFT, float or int16 I/O, one-sided or two-sided FFT), `alp_dsp_stats_f32` (mean/RMS/variance/min/max/abs-peak), and `alp_dsp_biquad_design` (RBJ cookbook LP/HP/BP/notch). All select CMSIS-DSP (`ALP_HAS_CMSIS_DSP`) on Cortex-M and a portable-C fallback elsewhere. |
+| Math / DSP  | purpose-built | ALP does not provide a general `arm_math.h` re-export; for ad-hoc math app code uses CMSIS-DSP directly. But ALP DOES ship purpose-built *portable* DSP surfaces that wrap it where cross-silicon portability (Alif M55 / Renesas A55+DRP-AI) matters: the `<alp/dsp.h>` chain (FIR/IIR/WINDOW/FFT, float or int16 I/O, one-sided or two-sided FFT), `alp_dsp_stats_f32` (mean/RMS/variance/min/max/abs-peak), and `alp_dsp_biquad_design` (RBJ cookbook LP/HP/BP/notch). All select CMSIS-DSP (`ALP_HAS_CMSIS_DSP`) on Cortex-M and a portable-C fallback elsewhere. |
 | Control     | portable  | `<alp/pid.h>` caller-owned PID (`alp_pid_init`/`alp_pid_step`/`alp_pid_reset`) with output clamp + anti-windup + derivative-on-measurement; pure C on all OS targets, opt-in via `libraries: [pid]`. |
 | Sensor fusion | portable | `<alp/ahrs.h>` caller-owned Madgwick IMU filter (`alp_ahrs_init`/`alp_ahrs_update_imu`/`alp_ahrs_euler`/`alp_ahrs_reset`) fusing gyro+accel into a drift-corrected quaternion; pure C on all OS targets, opt-in via `libraries: [madgwick_ahrs]`. |
 | Camera      | header    | `<alp/camera.h>` API frozen; impl returns `ALP_ERR_NOSUPPORT`            |
@@ -256,11 +256,6 @@ more sensors) and add a second SoM family.
   25 TOPS @ 1.0 GHz, FC-BGA 625-ball.
 - `alif:ensemble:e4/e5/e6` upgraded from preliminary to released
   (if Alif publishes datasheets in time).
-- `nxp:imx9:imx93` (`metadata/socs/nxp/imx9/imx93.json`) — first
-  v0.1 stub shipped early; per-variant peripheral counts and the
-  orderable SKU list fill in for v0.4 (Yocto first-class)
-  alongside the i.MX 93 BSP work.  Vendor wrapper directory
-  scaffolded at `vendors/nxp-imx93/`.
 
 ### Build matrix
 
@@ -345,7 +340,7 @@ roadmap's "IoT Application Example" deliverable.
 
 ## v0.4.0 — "Yocto first-class" (~6 weeks after v0.3)
 
-**Goal:** Linux variants (V2N family + i.MX 93 family) become
+**Goal:** Linux variants (V2N family) become
 first-class with full Yocto support and Linux-native versions of
 every library.
 
@@ -438,7 +433,7 @@ target verification still gated on an explicit Yocto bench run
 - **Mender OTA opt-in on meta-alp.**
   `meta-alp-sdk/conf/distro/include/mender.inc` configures
   Mender's `mender-full` class with A/B rootfs + storage layout +
-  server/tenant placeholders.  V2N / V2N-M1 / i.MX 93 machine
+  server/tenant placeholders.  V2N / V2N-M1 machine
   configs gain `require` opt-in hook blocks.  Mender server
   ownership: see project memory + `docs/ota.md` -- the server
   itself is a separate-repo product owned outside alp-sdk.
@@ -450,7 +445,7 @@ target verification still gated on an explicit Yocto bench run
 
 - **Yocto:** `meta-alp` recipes actually building (currently
   parse-clean shells); image templates for vision/audio/IoT
-  product classes; full V2N / V2N-M1 / i.MX 93 BSP fleshout.
+  product classes; full V2N / V2N-M1 BSP fleshout.
 - **IoT:** Wi-Fi station on Yocto (NetworkManager / wpa_supplicant
   glue); HTTP/HTTPS client; time-series buffering helpers.
 - **Camera:** `alp_camera_v4l2` wrapper, GStreamer pipeline helpers.
@@ -474,7 +469,6 @@ target verification still gated on an explicit Yocto bench run
   body is now real (`dxrt::InferenceEngine`, replacing the earlier
   `dxnn_*` plan); the remaining work is the cross-link against `dx_rt`
   on the RZ/V Yocto sysroot + an on-silicon run on the DX-M1 PCIe card.
-- **Ethos-U65 real attach on i.MX 93:** Vela toolchain integration.
 
 See [`docs/secure-boot.md`](docs/secure-boot.md) and
 [`docs/ota.md`](docs/ota.md) for the full secure boot / OTA
@@ -559,7 +553,7 @@ cut criteria:
 Cherry-picked into v1.x point releases as items land.  Grouped by what
 they unlock; items are sized roughly small (≤2 engineer-weeks) /
 medium (2-8 weeks) / large (8+ weeks).  Sizing assumes one SoM
-target — porting across all four SoMs is additive.
+target — porting across all three SoM families is additive.
 
 **Connectivity & protocols** (boosts IoT + industrial verticals):
 
@@ -751,7 +745,6 @@ target — porting across all four SoMs is additive.
 (No version commitment — revisit when customer pull + ecosystem state make it worthwhile.)
 
 - Ubuntu backend (`cores.<id>.os: ubuntu`) — non-trivial lift (RZ/V2N mainline-kernel coverage is the long pole, plus apt packaging + image flow + per-distro PPA infra).
-- NXP NX9101 silicon enablement — pairs naturally with Ubuntu if/when both pick up (i.MX 93 has the better Ubuntu mainline-kernel story).
 - FreeRTOS / Azure RTOS / NuttX backends — H2-2026 has zero OS expansion; later cycles only if customer asks.
 - Apple HomeKit Accessory Protocol (HAP) — Matter supersedes for most consumer use cases; deferred unless a customer specifically asks.
 - Zigbee 3.0 stack — Matter/Thread coverage probably enough; revisit if industrial customer asks.

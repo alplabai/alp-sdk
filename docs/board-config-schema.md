@@ -244,7 +244,7 @@ which carries the per-variant MRAM / SRAM / package /
 
 The reverse path (`alp_module_skus` arrays inside each SoC JSON
 variant) stays in place as a fallback for legacy presets that
-omit the field, AND for the placeholder `E1M-NX9101` preset which
+omit the field, AND for any preset that
 carries `silicon_variant: TBD` per the no-inventing-values rule.
 Resolver: `_resolve_silicon_variant()` in
 [`scripts/alp_project.py`](../scripts/alp_project.py).
@@ -306,7 +306,7 @@ with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 #### Preset mode (SDK-internal shortcut)
 
 Most example projects under `examples/` target the EVK or X-EVK
-(104 do today — 76 on `e1m-evk`, 28 on `e1m-x-evk`), so they share a
+(103 do today — 75 on `e1m-evk`, 28 on `e1m-x-evk`), so they share a
 single board definition each via the `preset:` field:
 
 ```yaml
@@ -478,15 +478,13 @@ metadata/
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
 │   ├── E1M-V2M102.yaml      # V2N-M1 SKU
 │   ├── E1M-V2M103.yaml      # V2N-M1 SKU, 4 GB / 16 GB memory tier
-│   └── E1M-NX9101.yaml      # i.MX 93 placeholder MPN (production E1M-NX9xxx TBD)
 └── boards/
-    ├── e1m-evk.yaml            # 35x35 EVK (AEN / N93)
+    ├── e1m-evk.yaml            # 35x35 EVK (AEN)
     ├── e1m-x-evk.yaml          # 45x65 EVK (V2N / V2N-M1)
     └── custom-example.yaml     # template downstream consumers copy + edit
 ```
 
-v0.3 ships the schema + ten production SoM presets, the
-placeholder N93 bring-up preset (`E1M-NX9101`), the two stock
+The tree ships the schema + thirteen SoM presets, the two stock
 boards, and a copy-friendly custom-example template.  Two SKUs
 (`E1M-AEN801`, `E1M-V2N101`) are the primary worked presets; lower-priority
 or not-yet-final SKUs carry `partial_hw_config: true` so

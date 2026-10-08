@@ -10,7 +10,6 @@
  * Form-factor scope: the E1M EVK accepts 35x35 mm E1M-standard
  * SoMs ONLY.  Currently shipping families that fit:
  *   - E1M-AEN  (Alif Ensemble)
- *   - E1M-N93  (NXP i.MX 93)
  *
  * The 45x65 mm form factor (E1M-X) -- which carries the E1M-X-V2N
  * (Renesas RZ/V2N) family among others -- plugs into a different
@@ -23,7 +22,7 @@
  * encoder, IO-expander pins, sensor I2C addresses, header
  * pinouts, mux control lines) are wired to E1M-standard pad
  * indices in `<alp/e1m_pinout.h>` and are therefore valid for any
- * 35x35 E1M-standard SoM plugged into it -- AEN today, N93 next,
+ * 35x35 E1M-standard SoM plugged into it -- AEN today,
  * future variants without modification.
  *
  * The macros and enums in this header are SoM-agnostic.  Per-SoM
@@ -36,14 +35,9 @@
  *     through the CC3501E protocol (see <alp/protocol/cc3501e.h>).
  *     This is called out per-pad in the macro doc-comments below.
  *
- *   - On the E1M-N93 family (no on-module coprocessor), those
- *     same E1M IO pads route directly to the i.MX 93's GPIO
- *     peripheral and apps use alp_gpio_* without dispatching
- *     through any intermediary.  The "routes through CC3501E"
- *     notes in this header are AEN-specific -- the macros
- *     themselves still resolve to the same E1M pad index.
- *     Rebuild against the N93 module's <alp/e1m_pinout.h>
- *     integer definitions and the dispatch follows automatically.
+ *     The "routes through CC3501E" notes in this header are
+ *     AEN-specific -- the macros themselves still resolve to the
+ *     same E1M pad index.
  *
  * Layered atop the E1M-standard fixed pinout in
  * `<alp/e1m_pinout.h>`.  For the underlying integers -- bus /

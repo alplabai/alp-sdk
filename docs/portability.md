@@ -13,9 +13,7 @@ This cookbook ties three other docs together:
 
 - [`docs/portability-matrix.md`](portability-matrix.md) — the empirical
   guarantee.  Every cell is a SKU × example compile test;
-  21 / 24 cells green for E1M (NX9101's only hw_rev is `status: tbd` --
-  refused outright by the hw_rev-buildable gate, #1025 --
-  so all 3 of its cells currently fail), 12 / 18 for E1M-X (the
+  21 / 21 cells green for E1M, 12 / 18 for E1M-X (the
   `adc-voltmeter` example fails on all six E1M-X presets --
   V2N101, V2N102, V2N103, V2M101, V2M102, V2M103; the other two pinned
   examples, `pwm-led-fade` and `v2n-pwm-fan-control`, are green on all
@@ -48,8 +46,7 @@ The promise has a **scope**.  It is not "any SoM, any time".  It is:
 ### Scope — INTRA-family
 
 - **E1M family.**  `E1M-AEN301` ↔ `E1M-AEN401` ↔ `E1M-AEN501` ↔
-  `E1M-AEN601` ↔ `E1M-AEN701` ↔ `E1M-AEN801` ↔ `E1M-AEN803` ↔
-  `E1M-NX9101`.
+  `E1M-AEN601` ↔ `E1M-AEN701` ↔ `E1M-AEN801` ↔ `E1M-AEN803`.
   Same 35 × 35 mm form factor, same `<alp/e1m_pinout.h>` symbol
   namespace, same E1M-spec instance reservations
   (`ALP_E1M_I2C_COUNT == 2`, `ALP_E1M_PWM_COUNT == 8`, etc.).
@@ -333,9 +330,9 @@ pinout namespaces, one per form factor.
 | Concern | E1M family | E1M-X family |
 | --- | --- | --- |
 | Mechanical | 35 × 35 mm | 45 × 65 mm |
-| SoC class | Per-SKU: Cortex-M only (AEN301/401) to heterogeneous Cortex-A32 + Cortex-M55 (AEN501..AEN801) or Cortex-A55 + Cortex-M33 (NX9101) | Uniform heterogeneous Cortex-A55 + Cortex-M33 (Renesas RZ/V2N) |
+| SoC class | Per-SKU: Cortex-M only (AEN301/401) to heterogeneous Cortex-A32 + Cortex-M55 (AEN501..AEN801) | Uniform heterogeneous Cortex-A55 + Cortex-M33 (Renesas RZ/V2N) |
 | Power envelope | mW-class | W-class |
-| NPU options | Ethos-U55 / U65 / U85 | DRP-AI3 (V2N), DRP-AI3 + DEEPX DX-M1 (V2M) |
+| NPU options | Ethos-U55 / U85 | DRP-AI3 (V2N), DRP-AI3 + DEEPX DX-M1 (V2M) |
 | Board | `E1M-EVK` or compatible | `E1M-X-EVK` or compatible |
 | GPIO count | 26 (`ALP_E1M_GPIO_IO0..IO25`) | 36 (`ALP_E1M_X_GPIO_IO0..IO35`) |
 | Ethernet | 1 MAC (`ALP_E1M_ETH0`) | 2 MAC (`ALP_E1M_X_ETH0`, `ALP_E1M_X_ETH1`) |
@@ -431,7 +428,7 @@ Two introspection helpers ship today to help validate the chain:
 
 - `alp_inference_tflm_npu_variant_name()` — returns the
   highest-tier Ethos-U variant the build linked (e.g. `"u85"` on
-  AEN801, `"u55"` on AEN701, `"u65"` on NX9101).  Use this to
+  AEN801, `"u55"` on AEN701).  Use this to
   log a one-line "we are dispatching to NPU=u85" on boot and
   cross-check against the Vela target your model-compile pipeline
   produced.
@@ -858,15 +855,12 @@ Headline numbers, measured against the generated block in
 `docs/portability-matrix.md` (re-run `python3
 scripts/gen_portability_matrix.py` to reproduce):
 
-- **E1M family.**  21 / 24 (SKU × example) cells generate cleanly.
+- **E1M family.**  21 / 21 (SKU × example) cells generate cleanly.
   Across the 7 AEN SKUs (AEN301..801 + AEN803) the generated
   `alp.conf` differs only in the documented expected-diff line
   families (per-silicon identity, OPTIGA population, and
   AEN803's on-module OSPI memory sizes) — not a byte-identity
-  claim; see the matrix's diff catalogue.  The other
-  3 cells all belong to E1M-NX9101 — a placeholder MPN whose only
-  hw_rev (imx93 r1) is `status: tbd`, which the hw_rev-buildable
-  gate refuses outright, so none of its cells currently pass.
+  claim; see the matrix's diff catalogue.
 - **E1M-X family.**  12 / 18 cells generate cleanly.  V2M SKUs
   add three on-module chip-driver enables (DEEPX DX-M1, PCIe
   mux, DEEPX rail buck) but otherwise produce the same
@@ -884,10 +878,10 @@ fix detail.
 Two other resolved gaps (the per-variant NPU and CPU-class
 selectors):
 
-- **G-1** — Ethos-U variant (U55 / U65 / U85) is now visible to
+- **G-1** — Ethos-U variant (U55 / U85) is now visible to
   the build; resolved 2026-05-18.  AEN401 / AEN601 / AEN801
   now emit both `_U55=y` and `_U85=y`; AEN301 / AEN501 / AEN701
-  emit only `_U55=y`; NX9101 emits `_U65=y`.
+  emit only `_U55=y`.
 - **G-2** — TFLM CPU-class kernel selector (NEON / Helium /
   REF) is now per-slice; resolved 2026-05-18.  M55_HP slices
   emit `_HELIUM=y`, A55 slices emit `_NEON=y`, M33 slices
@@ -968,8 +962,7 @@ walk the registry in order, so no other code changes when a step is added.
 - Per-SoM bring-up notes —
   [`docs/bring-up-aen.md`](bring-up-aen.md),
   [`docs/bring-up-v2n.md`](bring-up-v2n.md),
-  [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md),
-  [`docs/bring-up-imx93.md`](bring-up-imx93.md) — covering
+  [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) — covering
   flashing, debugger setup, and gotchas per silicon family.
 
 If anything in this cookbook doesn't match what

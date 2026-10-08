@@ -136,7 +136,6 @@ mechanism in "What the markers mean" above).  Current classification:
 | `ext/alif/storage.h`                    | `[ABI-EXPERIMENTAL]` | See the table above for its rationale row.                          |
 | `ext/cc3501e/console.h`                 | `[ABI-EXPERIMENTAL]` | See the table above for its rationale row.                          |
 | `ext/deepx/inference.h`                 | `[ABI-EXPERIMENTAL]` | Vendor escape hatch.                                                |
-| `ext/nxp/storage.h`                     | `[ABI-EXPERIMENTAL]` | Vendor escape hatch.                                                |
 | `ext/renesas/{camera,inference,power}.h`| `[ABI-EXPERIMENTAL]` | Vendor escape hatches.                                              |
 
 Headers that declare **no ABI symbols of their own** carry no

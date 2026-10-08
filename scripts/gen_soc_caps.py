@@ -152,11 +152,6 @@ CAPS: list[tuple[str, callable]] = [
         lambda p: p.get("mipi_csi2", 0) or 0),
     ("MIPI_DSI_COUNT",
         lambda p: p.get("mipi_dsi", 0) or 0),
-    # LCDIF / parallel-RGB display controller, distinct from mipi_dsi (issue
-    # #379).  imx93 has 1x nxp,imx-lcdifv3; E8 models its parallel display path
-    # as `dpi_parallel` (a different interface), so this key stays LCDIF-specific.
-    ("LCDIF_COUNT",
-        lambda p: p.get("lcdif", 0) or 0),
 ]
 
 
@@ -202,7 +197,6 @@ CAP_ALIASES: list[tuple[str, str, str]] = [
     ("USB_COUNT", "HW_USB", "count"),
     ("MIPI_CSI_COUNT", "HW_MIPI_CSI", "count"),
     ("MIPI_DSI_COUNT", "HW_MIPI_DSI", "count"),
-    ("LCDIF_COUNT", "HW_LCDIF", "count"),
     ("XSPI_DMA", "XSPI_DMA", "bool"),
     ("HEXSPI_DMA", "HEXSPI_DMA", "bool"),
     ("EMMC_DMA", "EMMC_DMA", "bool"),
@@ -475,10 +469,7 @@ def extract_unverified_peripherals(soc: dict[str, Any]) -> list[str]:
     e.g. E5 inheriting from E7) is treated as ALL of its `peripherals` keys
     being unverified, so the header doesn't understate the gap -- UNLESS the
     file carries its own `peripherals_unverified` (even `[]`), which means
-    the file itself already sorts its populated keys individually (e.g.
-    i.MX93: `mipi_dsi`/`lcdif` are cited in `notes` and stay off the list,
-    while the #380 counts taken from the Zephyr device tree are on it, a
-    device tree being a lower bound and not the silicon total).  An
+    the file itself already sorts its populated keys individually.  An
     explicit per-file list always wins over the wholesale fallback.
     """
     if "peripherals_unverified" in soc:

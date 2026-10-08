@@ -66,7 +66,7 @@ def resolve_memory_regions(project: BoardProject) -> list[dict[str, Any]]:
     """Project the SoM's memory regions into the manifest's `memory[]` pane.
 
     Returns `[]` when the SoM resolves no regions at all (an unresolvable
-    `silicon_variant`, e.g. NX9101's `TBD`). The caller must then OMIT the
+    `silicon_variant`, e.g. `TBD`). The caller must then OMIT the
     key rather than emit `memory: []` -- the schema draws a load-bearing
     distinction between an absent pane ("this producer does not emit it
     yet") and an empty one, and collapsing the two would tell every

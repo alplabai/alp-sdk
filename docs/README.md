@@ -112,7 +112,6 @@ into the topic-specific docs.
   image wiring, model compile and microSD deploy. Kernel driver
   proven on silicon; userspace packaging is written but has never been
   baked, no model compiled and no inference run yet.
-- [bring-up-imx93.md](bring-up-imx93.md) — NXP i.MX 93.
 - [e1m-x-v2n-sdk-integration.md](e1m-x-v2n-sdk-integration.md) —
   landing the bench-validated V2N-M1 / E1M-X-EVK carrier bring-up
   into alp-sdk as the single source of truth.

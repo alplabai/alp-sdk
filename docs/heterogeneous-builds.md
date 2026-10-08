@@ -8,8 +8,8 @@ fan out into per-core slices with Tan's relocated in-process planner,
 and end up with a flashable bundle that covers Linux + Zephyr + the
 on-module GD32 helper MCU.
 
-The same pattern generalises to **E1M-AEN801** (A32 + M55-HP + M55-HE),
-**E1M-NX9101** (A55 + M33), and any future heterogeneous SoM.
+The same pattern generalises to **E1M-AEN801** (A32 + M55-HP + M55-HE)
+and any future heterogeneous SoM.
 
 > If you're targeting a single-OS SoM (e.g. AEN E3/E4 with M55 cores
 > only), follow [`docs/firmware-quickstart.md`](firmware-quickstart.md)
@@ -23,7 +23,6 @@ Which SoM families are heterogeneous in the first place:
 | E1M-AEN E3/E4 | — | M55-HP, M55-HE (both Zephyr) | No — RTOS-only silicon |
 | E1M-AEN E5..E8 | A32 cluster (Yocto) | M55-HP, M55-HE (Zephyr) | Yes |
 | E1M-X V2N / V2N-M1 | A55 cluster (Yocto) | M33-SM (Zephyr) | Yes |
-| E1M-N93 (iMX93) | A55 cluster (Yocto) | M33 (Zephyr) | Yes |
 
 A bare `som: { sku: <MPN> }` produces a working dual-image build for every
 heterogeneous SoM — the per-core OS defaults come from the SoM preset's
@@ -734,8 +733,7 @@ as Device memory (`src/backends/rpc/yocto_uio_drv.c`) or kernel-managed
 through the standard rpmsg/virtio DMA-coherent path
 (`src/backends/rpc/yocto_drv.c`).  Practically the emission only changes
 behaviour on Cortex-M55 (AEN's `m55_hp`); Cortex-M33 does not select
-`CPU_HAS_DCACHE`, so it is a no-op on V2N's `m33_sm`, NX9101's `m33`,
-and i.MX 93's `m33`.
+`CPU_HAS_DCACHE`, so it is a no-op on V2N's `m33_sm`.
 
 `ipc[].kind: raw_shmem` — the low-level `<alp/mproc.h>` shmem+mailbox
 primitives `<alp/rpc.h>` sits on — has the identical gap (no

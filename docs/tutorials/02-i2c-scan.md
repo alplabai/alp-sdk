@@ -151,7 +151,7 @@ is a real `alp_project.py --emit zephyr-conf` error, not a guess):
 ```yaml
 som:
   sku: E1M-V2N101       # was E1M-AEN801
-preset: e1m-x-evk        # was e1m-evk -- e1m-evk only hosts alif-ensemble/nxp-imx9 (ALP-B007)
+preset: e1m-x-evk        # was e1m-evk -- e1m-evk only hosts alif-ensemble (ALP-B007)
 pins:
   - { e1m: E1M_X_I2C0, macro: XEVK_I2C_BUS_SENSORS }   # was E1M_I2C0 / EVK_I2C_BUS_SENSORS -- e1m-x-evk's e1m_routes: has no E1M_I2C0 pad
 cores:

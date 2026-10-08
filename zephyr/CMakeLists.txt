@@ -18,7 +18,7 @@ include(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/cmake/alp_patch_guard.cmake)
 # drivers/dma_event_router/src/dma_event_router.c *unconditionally* for the
 # Ensemble family and that TU does `#include <soc_common.h>`.  Supply our
 # bridge copy ONLY for Ensemble builds, so it cannot shadow another vendor's
-# soc_common.h (e.g. NXP's on i.MX93).  See zephyr/soc-bridge/alif/soc_common.h.
+# soc_common.h.  See zephyr/soc-bridge/alif/soc_common.h.
 if(CONFIG_SOC_FAMILY_ENSEMBLE OR CONFIG_SOC_FAMILY_ENSEMBLE_RTSS)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif)
 endif()
@@ -243,17 +243,14 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION
 # The dispatcher compiles unconditionally so apps that depend on the
 # <alp/storage.h> ABI always link cleanly; each backend gates on its
 # own Kconfig so builds that don't enable a path don't pay its code
-# size.  Vendor-ext bodies under src/backends/ext/{alif,nxp}/storage.c
-# compile unconditionally -- the NXP OTFAD surface still only emits
-# NOSUPPORT + parameter validation (zero vendor dependencies), and the
-# Alif SecAES key-provision body (issue #224) internally #ifdefs its
-# one vendor include (<se_service.h>) behind
-# CONFIG_ALP_SDK_STORAGE_ALIF_SECAES, so both files still link on every
+# size.  The vendor-ext body src/backends/ext/alif/storage.c compiles
+# unconditionally -- the Alif SecAES key-provision body (issue #224)
+# internally #ifdefs its one vendor include (<se_service.h>) behind
+# CONFIG_ALP_SDK_STORAGE_ALIF_SECAES, so the file still links on every
 # board regardless of which vendor Kconfig is on.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/storage_dispatch.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/storage.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/nxp/storage.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/storage.c)
 
 if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_FLASH)
     zephyr_library_sources(
@@ -1021,11 +1018,6 @@ if(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/ethos_u_aen.cpp)
 endif()
 
-if(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
-    zephyr_library_sources(
-        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/inference/ethos_u_n93.cpp)
-endif()
-
 # No Zephyr-side DRP-AI / DEEPX DX-M1 backends -- deliberately.  Both
 # engines are driven from the A55/Linux side only (DRP-AI3 via the
 # MERA/TVM runtime, DX-M1 via libdxrt over the A55's PCIe); an M-class
@@ -1253,9 +1245,7 @@ zephyr_library_sources(
 # does real CPU fill/blit/blend) is gated on its own opt-in so it
 # always builds on native_sim.  The Alif D/AVE 2D real backend is
 # gated on the proprietary Dave2D pack being on the include path
-# (BENCH-UNVERIFIED, never built on native_sim).  No NXP/Vivante
-# backend exists: i.MX 93's 2D engine is PXP, not Vivante -- see
-# docs/adr/0008-gpu2d-portable-shim.md.
+# (BENCH-UNVERIFIED, never built on native_sim).
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpu2d_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPU2D_SW_FALLBACK
@@ -1369,8 +1359,6 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_ACT8760
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/act8760/act8760.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_DA9292
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/da9292/da9292.c)
-zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PCA9451A
-    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/pca9451a/pca9451a.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_TPS628640
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/tps628640/tps628640.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PI3DBS12212

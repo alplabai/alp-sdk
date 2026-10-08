@@ -29,8 +29,7 @@
  *                  exists.  See docs/v2n-mali-gpu.md.
  *   - all others : portable software fallback (CPU fill/blit/blend;
  *                  src/backends/gpu2d/sw_fallback.c).  This is what
- *                  V2N without the GPU stack, i.MX 93 (whose 2D engine is PXP, not a
- *                  GPU2D peer -- see ADR 0008), and ALP_OS=yocto
+ *                  V2N without the GPU stack and ALP_OS=yocto
  *                  Linux builds use.  Plain-CMake bare-metal builds
  *                  still link the NOSUPPORT stub (no backend
  *                  registry there yet).
