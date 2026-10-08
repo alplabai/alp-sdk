@@ -993,6 +993,41 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_pwm
              COMMAND alp_test_peripheral_pwm)
 
+    # Camera V4L2/media-controller backend: #includes the real
+    # src/backends/camera/yocto_drv.c and scripts every kernel call through
+    # its ioctl/poll/mmap seam.  Not linked against alp::sdk (same ODR
+    # rationale as alp_test_peripheral_pwm).
+    add_executable(alp_test_peripheral_camera
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_camera.c
+    )
+    target_include_directories(alp_test_peripheral_camera PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/camera
+    )
+    target_compile_features(alp_test_peripheral_camera PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_camera
+             COMMAND alp_test_peripheral_camera)
+
+    # A static libalp_sdk.a must keep the Linux camera backend (it sits in its
+    # own TU; only the stub is reachable from the dispatcher).  Link a tiny
+    # binary against alp::sdk and look for the backend's registry entry.
+    if(CMAKE_NM AND NOT ALP_SDK_BUILD_SHARED)
+        add_executable(alp_test_static_link_camera
+            ${CMAKE_CURRENT_SOURCE_DIR}/static_link_camera_backend.c
+        )
+        target_link_libraries(alp_test_static_link_camera PRIVATE alp::sdk)
+        target_compile_features(alp_test_static_link_camera PRIVATE c_std_99)
+        add_test(NAME alp_test_static_link_camera
+                 COMMAND sh -c "${CMAKE_NM} $<TARGET_FILE:alp_test_static_link_camera> | grep -q _alp_be_camera_yocto_drv")
+        add_test(NAME alp_test_static_link_camera_selects_yocto
+                 COMMAND alp_test_static_link_camera)
+    else()
+        message(STATUS "SKIP alp_test_static_link_camera: needs CMAKE_NM and a static alp_sdk")
+    endif()
+
     # Edge-config rollback regression for issue #746 (Yocto GPIO chardev-v2
     # backend): alp_gpio_irq_enable() must restore plain-input if the IRQ
     # dispatcher fails to start (eventfd()/pthread_create() failure),

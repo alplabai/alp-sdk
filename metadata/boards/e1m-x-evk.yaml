@@ -98,6 +98,7 @@ camera_connectors:
     csi:           E1M_X_CSI0
     lanes:         2
     i2c:           XEVK_I2C_BUS_DSI_CSI0
+    linux:         true       # Yocto camera path (sensor DT generated per module); no Zephyr shield exists
     select:
       - { gpio: XEVK_PIN_CAM0_MUX_SEL, value: 0 }   # low selects J5 on the CSI mux
     # CAM0_EN drives the gate of an N-FET that pulls J5 pin 11 (CAM_GPIO, the

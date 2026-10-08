@@ -35,6 +35,7 @@
 
 #include <alif/ensemble/ae612fa0e5597ls0.dtsi>
 #include <alif/ensemble/common/ensemble_rtss_hp.dtsi>
+#include <alif/ensemble_e4_e6_power.dtsi>
 #include "alp_e1m_aen601_m55_hp-pinctrl.dtsi"
 
 / {

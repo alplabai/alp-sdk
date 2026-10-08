@@ -724,6 +724,7 @@ def emit_build_plan(
     """
     # Orchestrator-side (stay inline until orchestrator.py); lazy to avoid
     # a buildplan<->package import cycle.
+    from .cameras import CameraSelectError
     from .orchestrator import (
         STOCK_IMAGE_APP,
         UnbuildableYoctoMachineError,
@@ -785,6 +786,17 @@ def emit_build_plan(
             cmd = None
             warnings.append({
                 "code":    "board-tree-missing",
+                "coreId":  slice_.core_id,
+                "message": str(e),
+            })
+        except CameraSelectError as e:
+            # A `cameras:` entry that cannot become a -DSHIELD for this
+            # slice (module without a zephyr_shield, or a carrier shield
+            # with no overlay for the board target): block, never emit a
+            # command that silently drops the camera.
+            cmd = None
+            warnings.append({
+                "code":    "camera-select-failed",
                 "coreId":  slice_.core_id,
                 "message": str(e),
             })
@@ -867,7 +879,18 @@ def emit_build_plan(
                     "message": (f"core '{slice_.core_id}': no `alp.overlay` "
                                 f"artefact -- {exc}"),
                 })
-            extras.append(_slice_cmake_args_artefact(project, slice_))
+            try:
+                extras.append(_slice_cmake_args_artefact(project, slice_))
+            except CameraSelectError as exc:
+                # The listing is not emitted; make sure the plan still says
+                # why (the command path usually already did).
+                if not any(w["code"] == "camera-select-failed"
+                           and w["coreId"] == slice_.core_id for w in warnings):
+                    warnings.append({
+                        "code":    "camera-select-failed",
+                        "coreId":  slice_.core_id,
+                        "message": str(exc),
+                    })
             try:
                 extras.append(_slice_hw_info_artefact(project, slice_))
             except HwInfoUnavailable as exc:

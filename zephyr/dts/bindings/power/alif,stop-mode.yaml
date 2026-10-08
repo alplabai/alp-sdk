@@ -1,0 +1,21 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Alif Ensemble STOP_MODE block (STOP_MODE_Type: VBAT_STOP_MODE_REG, the stop-mode control and status word).
+#
+# Plumbing for the SoM power layer (alp-sdk#2784): a bare register window the
+# power code addresses through the devicetree instead of a hard-coded literal.
+# No driver binds it, no clocks, no pinctrl.  Base and size are from the Alif
+# DFP Device/soc/<part>/include/rtss_he/soc.h and rtss_hp/soc.h (STOP_MODE_BASE 0x1A60F000,
+# 4-byte block).
+
+description: |
+  Alif Ensemble STOP_MODE block (STOP_MODE_Type: VBAT_STOP_MODE_REG, the stop-mode control and status word).  Always-on; a register window only.
+
+compatible: "alif,stop-mode"
+
+include: [base.yaml]
+
+properties:
+  reg:
+    required: true

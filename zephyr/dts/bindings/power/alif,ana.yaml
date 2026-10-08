@@ -1,0 +1,21 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Alif Ensemble ANA block (ANA_Type: MISC_CTRL, WKUP_CTRL, DCDC and VBAT analog registers).
+#
+# Plumbing for the SoM power layer (alp-sdk#2784): a bare register window the
+# power code addresses through the devicetree instead of a hard-coded literal.
+# No driver binds it, no clocks, no pinctrl.  Base and size are from the Alif
+# DFP Device/soc/<part>/include/rtss_he/soc.h and rtss_hp/soc.h (ANA_BASE 0x1A60A000,
+# 68-byte block).
+
+description: |
+  Alif Ensemble ANA block (ANA_Type: MISC_CTRL, WKUP_CTRL, DCDC and VBAT analog registers).  Always-on; a register window only.
+
+compatible: "alif,ana"
+
+include: [base.yaml]
+
+properties:
+  reg:
+    required: true

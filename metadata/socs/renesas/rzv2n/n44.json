@@ -283,7 +283,7 @@
 
   "linux_dt": {
     "RIIC2": {"label": "i2c2", "pinmux": {"RIIC2_SDA2": 1, "RIIC2_SCL2": 1}},
-    "CSI0":  {"label": "csi20", "capture": "cru0"},
+    "CSI0":  {"label": "csi20", "capture": "cru0", "kconfig": ["CONFIG_VIDEO_RZG2L_CSI2", "CONFIG_VIDEO_RZG2L_CRU"]},
     "UART0": {"label": "sci0", "pinmux": {"UART0_TXD0": 1, "UART0_RXD0": 1}, "cpg_clocks": ["rsci_0_pclk", "rsci_0_tclk", "rsci_0_ps_ps3_n", "rsci_0_ps_ps2_n", "rsci_0_ps_ps1_n"]},
     "UART1": {"label": "sci1", "cpg_clocks": ["rsci_1_pclk", "rsci_1_tclk", "rsci_1_ps_ps3_n", "rsci_1_ps_ps2_n", "rsci_1_ps_ps1_n"]},
     "SCI7":  {"label": "sci7", "cpg_clocks": ["rsci_7_pclk", "rsci_7_tclk", "rsci_7_ps_ps3_n", "rsci_7_ps_ps2_n", "rsci_7_ps_ps1_n"]},

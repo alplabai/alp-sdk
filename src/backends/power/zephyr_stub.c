@@ -47,6 +47,7 @@
 #include <alp/power.h>
 
 #include "power_ops.h"
+#include "som_power.h"
 
 static alp_status_t
 stub_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out, uint32_t *wake_caps_out)
@@ -110,6 +111,17 @@ static const alp_power_ops_t _ops = {
 	.configure_retention   = NULL, /* dispatcher default: NONE ok, else NOSUPPORT */
 	.request_sleep         = stub_request_sleep,
 	.close                 = NULL,
+	.mode_wake_caps        = NULL, /* #2784: every reported bit works in every mode */
+#ifdef CONFIG_ALP_SDK_SOM_POWER
+	/* #2784 U5: the SoM power-domain runtime (som_power.c). */
+	.domain_policy_set = alp_som_power_ops_policy_set,
+	.domain_info       = alp_som_power_ops_domain_info,
+	.boot_wake_info    = alp_som_power_ops_boot_wake_info,
+#else
+	.domain_policy_set = NULL, /* #2784: dispatcher answers NOSUPPORT */
+	.domain_info       = NULL,
+	.boot_wake_info    = NULL,
+#endif
 };
 
 ALP_BACKEND_ANCHOR_DEFINE(power);
