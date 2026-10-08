@@ -65,7 +65,7 @@ int main(void)
 	memset((void *)&m, 0xA7, sizeof(m));
 	m.magic   = TR_MBOX_MAGIC;
 	m.version = 2u;
-	assert(TR_MBOX_VERSION == 3u && tr_mbox_stub_page_init(&m) == 0 && m.in_seq == 0u);
+	assert(TR_MBOX_VERSION == 4u && tr_mbox_stub_page_init(&m) == 0 && m.in_seq == 0u);
 	memset((void *)&m, 0xA7, sizeof(m));
 	m.magic   = TR_MBOX_MAGIC;
 	m.version = TR_MBOX_VERSION;

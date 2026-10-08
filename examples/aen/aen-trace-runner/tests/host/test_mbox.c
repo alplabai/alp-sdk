@@ -98,7 +98,7 @@ int main(void)
 	/* --- publish/take `in`: happy path --- */
 	memset((void *)&g_mbox, 0, sizeof(g_mbox));
 	f.track_h = 1280;
-	assert(f.rotation == 0 && TR_MBOX_VERSION == 3u); /* a fresh snapshot: not turned */
+	assert(f.rotation == 0 && TR_MBOX_VERSION == 4u); /* a fresh snapshot: not turned */
 
 	/* --- stage 0 memory re-plan: the placement relations the A32 builds assert too --- */
 	assert(TR_FB_SLOT_SIZE == 800u * 1280u * 2u && TR_FB_SLOT_SIZE == TR_R3D_W * TR_R3D_H * 2u);
@@ -109,6 +109,16 @@ int main(void)
 	assert(TR_MEM_A32_GATE + 0x1000u <= TR_FB_B);
 	assert(TR_MEM_A32_DL == 0x02424000u && TR_MEM_A32_BINS == 0x02460000u);
 	assert(TR_FB_A + TR_FB_SLOT_SIZE <= TR_MEM_A32_SETUP);
+	/* The renderer's ABI refusal record decodes (pad3[7] code + pad3[6] value): fw 721 is not
+	 * hidden behind 721 / 16 = 45, the rotation and version codes are told apart, and a plain
+	 * stats word (a max out_ticks0) is not mistaken for a record. */
+	assert(tr_abi_fault_code(TR_ABI_FAULT_TAG | TR_ABI_FAULT_FW | (721u / 16u) << 8) ==
+	       TR_ABI_FAULT_FW);
+	assert(tr_abi_fault_arg(721u) == 721u && tr_abi_fault_arg(0x12345u) == 0x2345u);
+	assert(tr_abi_fault_code(TR_ABI_FAULT_TAG | TR_ABI_FAULT_ROTATION | 14u << 8) ==
+	       TR_ABI_FAULT_ROTATION);
+	assert(tr_abi_fault_code(TR_ABI_FAULT_TAG | TR_ABI_FAULT_VERSION) == TR_ABI_FAULT_VERSION);
+	assert(tr_abi_fault_code(3093609u) == 0u && tr_abi_fault_code(0u) == 0u);
 	/* tr_frame_in_t.fw: the panel width, in the old trailing pad (sizeof unchanged) and carried
 	 * across the mailbox; tr_fw_refuse() holds a drawn frame to a width the copy-out can write. */
 	assert(offsetof(tr_frame_in_t, fw) == 174 && sizeof(tr_frame_in_t) == 176);

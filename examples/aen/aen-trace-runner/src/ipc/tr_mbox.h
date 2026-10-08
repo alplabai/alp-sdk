@@ -42,9 +42,12 @@
  * writes its own TR_MBOX_VERSION at init and the renderer refuses to run
  * against a different one; the HE refuses a stub of another version too.
  * 3: memory re-plan (stage 0) -- FB B, the DL, the bins, the stacks and the gate moved, so a
- * matched stub/renderer/HE set is required; tr_frame_in_t.fw (the panel width) is part of it:
- * the renderer faults on a frame with fw 0 (a stage-0 HE), so a mixed set cannot run. */
-#define TR_MBOX_VERSION 3u
+ * matched stub/renderer/HE set is required.
+ * 4: tr_frame_in_t.fw (the panel width, stage 1): the renderer is 800 wide and crops. A stage-1 HE
+ * (fw set) and a stage-0 / 720-wide renderer both said 3, so they paired silently -- the HE's frames
+ * written 800 wide into a framebuffer the old renderer filled 720 wide. Now the stub and the HE each
+ * refuse the other's version at once, and a warm page of version 3 is cleared. */
+#define TR_MBOX_VERSION 4u
 #define TR_FB_A         0x02000000u /* SRAM0, DT sram0 */
 /* A framebuffer SLOT is 800 x 1280 x 2 B, the widest frame (r3d.h TR_R3D_W): a panel of fw
  * columns scans and is drawn the first fw * 1280 * 2 bytes of it (tr_frame_in_t.fw). */
@@ -254,7 +257,7 @@ typedef struct {
 	 * not fit a byte). Anything else (180 included) is a fault in
 	 * the renderer, never a silent fallback. */
 	uint16_t rotation;
-	/* Version 3: the panel's width in px (the DT window's short side, 16 px aligned, <= TR_R3D_W).
+	/* Version 4: the panel's width in px (the DT window's short side, 16 px aligned, <= TR_R3D_W).
 	 * The renderer draws TR_R3D_W wide and writes the framebuffer fw wide, cropping the centre
 	 * columns (panel_rot.h); 0 is an HE that never set it and the renderer refuses it
 	 * (tr_fw_refuse). Appended into what was the block's trailing pad: sizeof stays 176. */
@@ -278,6 +281,24 @@ _Static_assert(offsetof(tr_frame_in_t, hz) == 159, "hz is the old pad3's second 
 _Static_assert(offsetof(tr_frame_in_t, rotation) == 172, "rotation follows gate_y");
 _Static_assert(offsetof(tr_frame_in_t, fw) == 174,
                "fw is the block's last two bytes (the old trailing pad)");
+
+/* The renderer's ABI refusal record (a32/renderer/renderer.c abi_fault): pad3[7] = 0xAB1D in the
+ * top half and a code and detail below, pad3[6] = the offending value. Codes: 1 a stub of another
+ * TR_MBOX_VERSION (arg: that version), 2 a rotation the renderer cannot produce (arg: the rotation,
+ * degrees), 3 a panel width tr_fw_refuse() rejects (arg: fw, 16 bits). 0: no record. */
+#define TR_ABI_FAULT_TAG      0xAB1D0000u
+#define TR_ABI_FAULT_VERSION  1u
+#define TR_ABI_FAULT_ROTATION 2u
+#define TR_ABI_FAULT_FW       3u
+static inline uint32_t tr_abi_fault_code(uint32_t pad3_7)
+{
+	return (pad3_7 & 0xFFFF0000u) == TR_ABI_FAULT_TAG ? pad3_7 & 0xFFu : 0u;
+}
+
+static inline uint32_t tr_abi_fault_arg(uint32_t pad3_6)
+{
+	return pad3_6 & 0xFFFFu;
+}
 
 /* A32 -> M55 per-frame stats payload (28 B): the fields after out_seq in
  * tr_mbox_t, bundled so publish/take can move them in one copy. Not a

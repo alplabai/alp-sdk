@@ -554,12 +554,15 @@ static int join_core1(uint32_t seq)
 
 /* The mailbox ABI is wrong (a stub of another TR_MBOX_VERSION, or a frame whose
  * rotation or width this renderer cannot produce): record what in pad3[7] -- 0xAB1D in
- * the top half, 1 version / 2 rotation | rotation << 8 / 3 width | fw / 16 << 8 below -- and fault.
+ * the top half, 1 version / 2 rotation | rotation << 8 / 3 width | fw / 16 << 8 below -- and the
+ * offending value itself in pad3[6] (tr_mbox.h TR_ABI_FAULT_*: fw 721 does not hide behind
+ * 721 / 16 = 45), and fault.
  * The stub records the fault (UNDEF) and parks; there is no fallback drawing
  * of a frame the HE did not ask for. */
-static void __attribute__((noreturn)) abi_fault(volatile tr_mbox_t *m, uint32_t what)
+static void __attribute__((noreturn)) abi_fault(volatile tr_mbox_t *m, uint32_t what, uint32_t arg)
 {
-	m->pad3[7] = 0xAB1D0000u | what;
+	m->pad3[6] = arg & 0xFFFFu;
+	m->pad3[7] = TR_ABI_FAULT_TAG | what;
 	barrier();
 	__builtin_trap();
 }
@@ -590,7 +593,7 @@ void renderer_main(volatile tr_mbox_t *m)
 	             (dual ? 4u : 0u);
 	m->pad3[1] = checks;
 	if (m->version != TR_MBOX_VERSION) {
-		abi_fault(m, 1u);
+		abi_fault(m, TR_ABI_FAULT_VERSION, m->version);
 	}
 	RENDER_STATS[1] = 0;
 	RENDER_STATS[2] = 0;
@@ -642,10 +645,14 @@ void renderer_main(volatile tr_mbox_t *m)
 		int drawn = fb == TR_FB_A || fb == TR_FB_B;
 
 		if (tr_rot_refuse(drawn, in.rotation)) {
-			abi_fault(m, 2u | ((uint32_t)in.rotation & 0xFFu) << 8); /* low byte only: 270 -> 14 */
+			abi_fault(m,
+			          TR_ABI_FAULT_ROTATION | ((uint32_t)in.rotation & 0xFFu) << 8,
+			          in.rotation); /* the code's low byte only: 270 -> 14 */
 		}
 		if (tr_fw_refuse(drawn, in.fw)) {
-			abi_fault(m, 3u | ((uint32_t)in.fw / 16u) << 8); /* fw / 16: 800 -> 50, 0 -> 0 */
+			abi_fault(m,
+			          TR_ABI_FAULT_FW | ((uint32_t)in.fw / 16u) << 8,
+			          in.fw); /* fw / 16 in the code: 800 -> 50, 0 -> 0; pad3[6] has fw */
 		}
 		if (t_pub_valid) {
 			uint32_t gap = cntvct_lo() - t_pub;
