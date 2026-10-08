@@ -10,9 +10,8 @@
  * The E1M standard reserves five logical power modes -- RUN,
  * SLEEP, DEEP_SLEEP, STANDBY, and STOP -- mapped per SoC by the
  * backend.  STOP is the deepest rung (e.g. the Alif Ensemble E8's
- * STOP_0..STOP_5 ladder, Table 5-5: a ~900 nA floor at STOP_5 with
- * nothing retained, up through low-uA STOP_1..4 levels depending on
- * what is retained -- e.g. STOP_2 retains the 4 KB Utility SRAM at
+ * STOP_0..STOP_5 ladder, Table 5-5: low-uA levels depending on what
+ * is retained -- e.g. STOP_2 retains the 4 KB Utility SRAM at
  * ~1.1 uA); @ref alp_power_configure_retention says what to keep
  * before entering it.  Apps select a mode via
  * @ref alp_power_request_sleep after declaring which sources may
@@ -20,6 +19,19 @@
  * the function returns with the realised mode + the wake source
  * that actually fired so apps can branch (e.g. handle an RTC tick
  * vs a GPIO irq differently).
+ *
+ * @par STOP and STANDBY may not return
+ * SLEEP and DEEP_SLEEP resume the caller where it stopped.  On a
+ * backend whose STOP / STANDBY rung powers the core down (the Alif
+ * Ensemble family: wake is a COLD BOOT through the Secure Enclave
+ * Services), @ref alp_power_request_sleep does NOT return on wake --
+ * execution restarts from the reset vector and only retained RAM
+ * survives.  Portable code must therefore treat a STOP / STANDBY
+ * request as "may never return": keep state worth keeping in a
+ * retained region, and recover the wake cause after boot with
+ * @ref alp_power_boot_wake_info instead of from the (never-delivered)
+ * @ref alp_power_wake_info_t.  A backend that does return reports the
+ * realised mode in @ref alp_power_wake_info_t::realised_mode as usual.
  *
  * Backends:
  *   - Zephyr   : Zephyr's `pm_policy_*` API + per-SoC `pm_state`
@@ -66,12 +78,17 @@
  *      "unsupported bits are silently ignored" wake-source contract
  *      with a reported-capability + error contract (see
  *      @ref alp_power_configure_wake_source).
+ *      The SoM power-domain surface (@ref alp_power_domain_t,
+ *      @ref alp_power_domain_policy_set, @ref alp_power_domain_info,
+ *      @ref alp_power_boot_wake_info) is a contract only (#2784 U1):
+ *      every backend currently answers @ref ALP_ERR_NOSUPPORT.
  *      See docs/abi-markers.md for the convention.
  */
 
 #ifndef ALP_POWER_H
 #define ALP_POWER_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "alp/cap_instance.h"
@@ -115,13 +132,13 @@ typedef enum {
  *  bit 0, the same numeric value as @c ALP_POWER_WAKE_RTC below --
  *  so wake-arm capability gets its own uint32_t rather than aliasing
  *  that one.) */
-#define ALP_POWER_WAKE_NONE     0x00000000u
-#define ALP_POWER_WAKE_RTC      0x00000001u /**< RTC alarm / periodic tick. */
-#define ALP_POWER_WAKE_GPIO     0x00000002u /**< Configured GPIO IRQ line. */
-#define ALP_POWER_WAKE_UART_RX  0x00000004u /**< UART RX activity. */
-#define ALP_POWER_WAKE_TIMER    0x00000008u /**< Free-running timer match. */
-#define ALP_POWER_WAKE_USB      0x00000010u /**< USB SOF / VBUS event. */
-#define ALP_POWER_WAKE_ETH_LINK 0x00000020u /**< Ethernet link-up / WoL packet. */
+#define ALP_POWER_WAKE_NONE       0x00000000u
+#define ALP_POWER_WAKE_RTC        0x00000001u /**< RTC alarm / periodic tick. */
+#define ALP_POWER_WAKE_GPIO       0x00000002u /**< Configured GPIO IRQ line. */
+#define ALP_POWER_WAKE_UART_RX    0x00000004u /**< UART RX activity. */
+#define ALP_POWER_WAKE_TIMER      0x00000008u /**< Free-running timer match. */
+#define ALP_POWER_WAKE_USB        0x00000010u /**< USB SOF / VBUS event. */
+#define ALP_POWER_WAKE_ETH_LINK   0x00000020u /**< Ethernet link-up / WoL packet. */
 #define ALP_POWER_WAKE_COMPARATOR 0x00000040u /**< Analog comparator threshold (e.g. LPCMP). */
 #define ALP_POWER_WAKE_BROWNOUT   0x00000080u /**< Brown-out / under-voltage detect. */
 
@@ -180,22 +197,25 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_
  *  cheapest first.  Deliberately named regions rather than a raw
  *  vendor bitmask (#1813) -- e.g. the Alif E8's
  *  `SERVICES_power_mem_retention_config` bitmask maps @ref
- *  ALP_POWER_RETAIN_UTILITY onto its 4 KB Utility SRAM bit (STOP_2,
- *  1.1 uA typ. per Table 5-5 -- NOT the ladder's 900 nA floor, which
- *  is STOP_5 retaining nothing) and @ref ALP_POWER_RETAIN_TCM onto
- *  its TCM retention bits, rounded UP to the backend's own retention
- *  granularity and sized by @ref alp_power_retain_t::retain_kb. */
+ *  ALP_POWER_RETAIN_TCM onto its TCM retention bits, rounded UP to the
+ *  backend's own retention granularity and sized by @ref
+ *  alp_power_retain_t::retain_kb.
+ *
+ *  The E8's 4 KB Utility SRAM ("BKRAM") is ALWAYS retained and is
+ *  reserved for the SDK (wake record, domain-restore state): it is
+ *  not application RAM at any level.  The lowest floor an app can
+ *  select is therefore the Utility-SRAM-retained rung (STOP_2,
+ *  1.1 uA typ., Table 5-5), never the no-retention STOP_5/4/3 rungs. */
 typedef enum {
-	ALP_POWER_RETAIN_NONE    = 0, /**< No RAM retained beyond the mandatory boot state.
-	                                    (E8: STOP_5, ~900 nA typ., is this floor ONLY
-	                                    with no wake source armed; pair with a real wake
-	                                    source and the actual floor is STOP_4 (~1000 nA,
-	                                    LPRTC/LFXO) or STOP_3 (~1050 nA, LPTIMER/BOD/
-	                                    LPCMP/LPGPIO) per Table 5-5, 11-17% above the
-	                                    STOP_5 number -- size a battery off the mode the
-	                                    wake source you actually configured maps to.) */
+	ALP_POWER_RETAIN_NONE    = 0, /**< No application RAM retained.  Only the SDK-reserved
+	                                    boot state survives (E8: the 4 KB Utility SRAM,
+	                                    STOP_2, ~1.1 uA typ.); this is the lowest floor
+	                                    the API can select.  Size a battery off the mode
+	                                    your configured wake source maps to. */
 	ALP_POWER_RETAIN_UTILITY = 1, /**< Smallest SoC-guaranteed retained block (e.g. E8's
-	                                    4 KB Utility SRAM, STOP_2, ~1.1 uA typ.). */
+	                                    4 KB Utility SRAM, STOP_2, ~1.1 uA typ.).  On
+	                                    backends where that block is SDK-reserved this is
+	                                    equivalent to @ref ALP_POWER_RETAIN_NONE. */
 	ALP_POWER_RETAIN_TCM     = 2, /**< @ref alp_power_retain_t::retain_kb KiB of
 	                                    tightly-coupled memory; the backend rounds UP to
 	                                    its own retention granularity (never NOSUPPORT
@@ -216,7 +236,7 @@ typedef struct {
  *
  * Optional: a handle that never calls this defaults to whatever the
  * backend's minimum for the requested mode is (typically @ref
- * ALP_POWER_RETAIN_NONE or the SoC's mandatory floor).  Call before
+ * ALP_POWER_RETAIN_NONE, i.e. no application RAM).  Call before
  * @ref alp_power_request_sleep, same ordering as @ref
  * alp_power_configure_wake_source.
  *
@@ -249,6 +269,17 @@ alp_status_t alp_power_configure_retention(alp_power_t *handle, const alp_power_
  * mode), waits for one of the configured wake sources to fire,
  * then re-runs any required post-wake bring-up before returning.
  *
+ * @warning STOP and STANDBY may not return: on backends where those
+ *          rungs power the core down, wake is a cold boot and this
+ *          function never hands control back (see the file-level
+ *          note).  The wake cause is then read with
+ *          @ref alp_power_boot_wake_info.
+ *
+ * Before reaching the backend the dispatcher checks the configured
+ * wake bitmap against what the REQUESTED @p mode can arm (a source
+ * armable in SLEEP may not be armable in STOP) and returns
+ * @ref ALP_ERR_NOSUPPORT, with nothing changed, for a mismatch.
+ *
  * On the V2N family the call routes through the GD32G553
  * supervisor's `CMD_POWER_MODE_SET` opcode; the supervisor wakes
  * the Renesas SoC and the singleton re-runs its handshake so the
@@ -259,19 +290,26 @@ alp_status_t alp_power_configure_retention(alp_power_t *handle, const alp_power_
  *                             use @ref alp_power_close to release).
  * @param[in]  wake_after_ms   Max wall-clock wait, or 0 for "wake
  *                             only on a non-timer source".  When
- *                             non-zero the backend sets up an RTC
- *                             alarm even if @ref ALP_POWER_WAKE_RTC
- *                             wasn't in the configured bitmap
- *                             (timer is implicit when wake_after_ms
- *                             > 0).
+ *                             non-zero the backend arms a timed wake
+ *                             (RTC alarm or low-power timer, whichever
+ *                             the mode can use) even if
+ *                             @ref ALP_POWER_WAKE_RTC wasn't in the
+ *                             configured bitmap.  Where the timed
+ *                             wake is a 32-bit low-power timer
+ *                             (e.g. the Alif LPTIMER) the value is
+ *                             bounded by that counter at its tick
+ *                             rate; a backend rejects a longer
+ *                             request with @ref ALP_ERR_INVAL.
  * @param[out] info            Optional; receives the realised mode +
  *                             actual wake source + slept duration.
  *                             May be NULL if the caller doesn't
  *                             care.
  *
  * @return ALP_OK / ALP_ERR_INVAL (no wake configured + zero
- *         wake_after_ms; or @c mode == RUN) / ALP_ERR_NOT_READY /
- *         ALP_ERR_NOSUPPORT / ALP_ERR_IO (backend transport
+ *         wake_after_ms; or @c mode == RUN; or a timed wake beyond
+ *         the backend's counter) / ALP_ERR_NOT_READY /
+ *         ALP_ERR_NOSUPPORT (incl. a configured wake bitmap the
+ *         requested @p mode cannot arm) / ALP_ERR_IO (backend transport
  *         failure mid-cycle).
  */
 alp_status_t alp_power_request_sleep(alp_power_t           *handle,
@@ -438,6 +476,149 @@ alp_status_t alp_power_profile_get(alp_power_profile_id_t which, alp_power_profi
  */
 alp_status_t alp_power_profile_set(alp_power_profile_id_t     which,
                                    const alp_power_profile_t *profile);
+
+/* ------------------------------------------------------------------ */
+/* SoM power domains + boot wake record (#2784)                        */
+/*                                                                     */
+/* Before STOP / STANDBY the SDK can quiesce the on-module consumers   */
+/* that would otherwise burn power through the sleep (Wi-Fi/BLE        */
+/* coprocessor, Ethernet PHY, external flash / RAM, temperature        */
+/* sensor, RTC clock-out, backlight) and restore them on the cold-boot */
+/* wake.  Domains are named by portable ROLE, not by chip or pad, so   */
+/* the same code keeps working when the SoM is swapped within a        */
+/* family.  This header is the CONTRACT only: no backend implements it */
+/* yet and every call below answers ALP_ERR_NOSUPPORT.                 */
+/* ------------------------------------------------------------------ */
+
+/** On-module power domains the SDK can quiesce, by portable role. */
+typedef enum {
+	ALP_POWER_DOMAIN_WIFI_BLE    = 0, /**< Wi-Fi / BLE coprocessor. */
+	ALP_POWER_DOMAIN_ETH_PHY     = 1, /**< Ethernet PHY. */
+	ALP_POWER_DOMAIN_EXT_FLASH   = 2, /**< External (XIP / NOR) flash. */
+	ALP_POWER_DOMAIN_EXT_RAM     = 3, /**< External (Hyper / PSRAM) RAM. */
+	ALP_POWER_DOMAIN_TEMP_SENSOR = 4, /**< On-module temperature sensor. */
+	ALP_POWER_DOMAIN_RTC         = 5, /**< On-module RTC (clock-out only; the
+	                                       time base is kept alive). */
+	ALP_POWER_DOMAIN_BACKLIGHT   = 6, /**< On-module backlight driver. */
+	ALP_POWER_DOMAIN_COUNT       = 7, /**< Number of domains; not a valid domain. */
+} alp_power_domain_t;
+
+/** Bit for domain @p d in the @c quiesced_domains / @c restored_domains /
+ *  @c restore_failed_domains bitmaps of @ref alp_power_boot_info_t. */
+#define ALP_POWER_DOMAIN_BIT(d) (1u << (unsigned)(d))
+
+/** What the SDK does to a domain around STOP / STANDBY. */
+typedef enum {
+	ALP_POWER_DOMAIN_POLICY_AUTO       = 0, /**< Default: the SoM's safe default action for
+	                                             the mode (see @ref
+	                                             alp_power_domain_info_t::default_action). */
+	ALP_POWER_DOMAIN_POLICY_KEEP_ALIVE = 1, /**< Never touched. */
+	ALP_POWER_DOMAIN_POLICY_RAIL_OFF   = 2, /**< Explicit supply gate.  Opt-in: refused
+	                                             unless the SoM marks it available and its
+	                                             build-time gate is enabled. */
+} alp_power_domain_policy_t;
+
+/** Actions a domain can support, bits of
+ *  @ref alp_power_domain_info_t::supported_actions / @c default_action. */
+#define ALP_POWER_ACTION_NONE                0x00000000u
+#define ALP_POWER_ACTION_HOLD_RESET          0x00000001u /**< Hold the chip's reset line. */
+#define ALP_POWER_ACTION_POWERDOWN_PIN       0x00000002u /**< Drive its power-down pin. */
+#define ALP_POWER_ACTION_DEEP_POWER_DOWN_CMD 0x00000004u /**< Deep-power-down command. */
+#define ALP_POWER_ACTION_SHUTDOWN_REG        0x00000008u /**< Shutdown bit in the chip. */
+#define ALP_POWER_ACTION_RAIL_OFF            0x00000010u /**< Gate the supply. */
+
+/** Carrier-side loads that quiescing a domain also affects, bits of
+ *  @ref alp_power_domain_info_t::dependents. */
+#define ALP_POWER_DEP_NONE    0x00000000u
+#define ALP_POWER_DEP_CAM_LDO 0x00000001u /**< Camera LDO enables. */
+#define ALP_POWER_DEP_SD_EN   0x00000002u /**< SD-card supply enable. */
+
+/** Static description of one domain on the running SoM. */
+typedef struct {
+	bool     present;            /**< Populated on this SKU. */
+	bool     holds_through_stop; /**< The quiesce state survives STOP itself
+	                                  (false: re-applied at wake). */
+	uint32_t supported_actions;  /**< @c ALP_POWER_ACTION_* the domain supports. */
+	uint32_t default_action;     /**< The single @c ALP_POWER_ACTION_* bit AUTO applies. */
+	uint32_t dependents;         /**< @c ALP_POWER_DEP_* loads affected. */
+} alp_power_domain_info_t;
+
+/** Record of the last STOP / STANDBY cycle, read after the cold-boot wake. */
+typedef struct {
+	bool             valid;                  /**< A wake record from a completed cycle exists;
+	                                     false after a plain power-on reset (the other
+	                                     fields are then zero). */
+	alp_power_mode_t realised_mode;          /**< Mode actually entered. */
+	uint32_t         wake_source;            /**< @c ALP_POWER_WAKE_* bit that fired. */
+	uint32_t         slept_ms;               /**< Sleep duration (best effort). */
+	uint32_t         quiesced_domains;       /**< @ref ALP_POWER_DOMAIN_BIT set quiesced
+	                                              before sleep. */
+	uint32_t         restored_domains;       /**< Bitmap restored after wake. */
+	uint32_t         restore_failed_domains; /**< Bitmap whose restore failed
+	                                              (reported, never fatal). */
+} alp_power_boot_info_t;
+
+/**
+ * @brief Set the quiesce policy of one domain for the next STOP / STANDBY.
+ *
+ * Takes effect at the next @ref alp_power_request_sleep with mode STOP or
+ * STANDBY; SLEEP and DEEP_SLEEP never quiesce domains.  A policy that
+ * conflicts with the armed wake sources (e.g. RTC domain RAIL_OFF while
+ * @ref ALP_POWER_WAKE_RTC is armed) is rejected at the sleep request with
+ * @ref ALP_ERR_INVAL before any change is made.
+ *
+ * @param[in] handle  Handle from @ref alp_power_open.
+ * @param[in] domain  Domain to configure.
+ * @param[in] policy  Requested policy.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL (@p domain or @p policy out of range) /
+ *         ALP_ERR_NOT_READY (NULL or closed handle) /
+ *         ALP_ERR_NOT_PRESENT_ON_THIS_SOC (domain not populated on this SKU) /
+ *         ALP_ERR_NOSUPPORT (no backend implements domains, or RAIL_OFF is
+ *         unavailable for this domain or its build-time gate is off).
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.17 (#2784) -- contract only; every backend returns
+ *      @ref ALP_ERR_NOSUPPORT.
+ */
+alp_status_t alp_power_domain_policy_set(alp_power_t              *handle,
+                                         alp_power_domain_t        domain,
+                                         alp_power_domain_policy_t policy);
+
+/**
+ * @brief Describe one power domain on the running SoM.
+ *
+ * Handle-less and read-only.  @p out is zero-filled first, so on any
+ * non-OK return it reads as "not present".
+ *
+ * @param[in]  domain  Domain to describe.
+ * @param[out] out     Receives the description.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL (NULL @p out or @p domain out of range) /
+ *         ALP_ERR_NOSUPPORT (no backend implements domains).
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.17 (#2784) -- contract only.
+ */
+alp_status_t alp_power_domain_info(alp_power_domain_t domain, alp_power_domain_info_t *out);
+
+/**
+ * @brief Read the wake record of the previous STOP / STANDBY cycle.
+ *
+ * The recovery path for a sleep that did not return (see the file-level
+ * note): call it early in boot.  Handle-less and read-only.  @p out is
+ * zero-filled first.
+ *
+ * @param[out] out  Receives the record; @c valid is false after a plain
+ *                  power-on reset.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL (NULL @p out) /
+ *         ALP_ERR_NOSUPPORT (no backend keeps a wake record).
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.17 (#2784) -- contract only.
+ */
+alp_status_t alp_power_boot_wake_info(alp_power_boot_info_t *out);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -10,7 +10,7 @@
  * pm_policy_*, priority 100), and yocto_drv.c (real Linux
  * /sys/power/state + RTC wakealarm backend, priority 100, #613).
  * alif_se_profile.c implements the SEPARATE "power_profile" class
- * vtable below, not this one.  src/backends/ext/renesas/power.c is
+ * vtable below, not this one (it has no #2784 domain/boot-info ops).  src/backends/ext/renesas/power.c is
  * NEITHER: it implements no alp_power_ops_t at all -- it's a vendor-
  * ext bypass function (alp_renesas_power_supervisor_mode_set) that
  * reads an ALREADY-OPENED alp_power_t handle's backend/state fields
@@ -79,6 +79,25 @@ struct alp_power_ops {
 	                              uint32_t                   wake_after_ms,
 	                              alp_power_wake_info_t     *info);
 	void (*close)(alp_power_backend_state_t *state);
+
+	/* ---- #2784 contract ops: ALL OPTIONAL (NULL is valid). ---------- */
+
+	/** ALP_POWER_WAKE_* bits @p mode can arm.  NULL means "every bit
+	 *  reported by open() works in every mode".  The dispatcher
+	 *  rejects a configured wake bitmap outside this set with
+	 *  ALP_ERR_NOSUPPORT before request_sleep() runs. */
+	uint32_t (*mode_wake_caps)(const alp_power_backend_state_t *state, alp_power_mode_t mode);
+	/** Per-domain quiesce policy.  NULL -> dispatcher answers
+	 *  ALP_ERR_NOSUPPORT.  Domain + policy are range-checked already. */
+	alp_status_t (*domain_policy_set)(alp_power_backend_state_t *state,
+	                                  alp_power_domain_t         domain,
+	                                  alp_power_domain_policy_t  policy);
+	/** Handle-less domain description.  NULL -> ALP_ERR_NOSUPPORT.
+	 *  @p out is pre-zeroed; @p domain is range-checked. */
+	alp_status_t (*domain_info)(alp_power_domain_t domain, alp_power_domain_info_t *out);
+	/** Handle-less wake record.  NULL -> ALP_ERR_NOSUPPORT.  @p out is
+	 *  pre-zeroed. */
+	alp_status_t (*boot_wake_info)(alp_power_boot_info_t *out);
 };
 
 /** Vtable for the handle-less operating-point-profile surface
