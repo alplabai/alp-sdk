@@ -448,17 +448,22 @@ lacks alp-sdk's `zephyr/patches.yml` patches. Run `bash scripts/bootstrap.sh`
 
 ## What this means for the SDK
 
-- v0.1 ships an **EVK overlay** under `tests/zephyr/peripheral/boards/`
-  that wires the `alp-i2c0` alias, the `alp,pin-array` (rotary encoder,
-  RGB LED, IO_EXP.INT), and the `alp-uart0` alias to EVK pins via the
-  SoM's pinmux.  It targets `alp_e1m_aen801_m55_he` (AEN-family build);
-  future E1M-N93 builds add their own overlay once that SoM lands.
-- v0.1 does **not** ship full board-level sensor drivers.  The
-  ICM-42670-P / BMI323 / BMP581 / TCAL9538 drivers land as part of
-  the v0.2 "Chips" library expansion (`chips/icm42670/`, etc.) per
-  [`VERSIONS.md`](../../VERSIONS.md).
-- The EVK example app (`examples/evk-bringup/`) lands in v0.2.  v0.1
-  ships a stub README at that path so the doc tree is stable.
+- The **EVK overlay** lives under `tests/zephyr/peripheral/boards/`
+  (`alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`, plus the
+  `native_sim` overlays).  It wires the `alp-i2c0` alias, the
+  `alp,pin-array` (rotary encoder, RGB LED, IO_EXP.INT), and the
+  `alp-uart0` alias to EVK pins via the SoM's pinmux, and targets the
+  AEN-family build (`alp_e1m_aen801_m55_he`).
+- The board-level sensor drivers ship as natural-name chip drivers:
+  ICM-42670-P (`chips/icm42670/`), BMI323 (`chips/bmi323/`), BMP581
+  (`chips/bmp581/`) and TCAL9538 (`chips/tcal9538/`), each with a public
+  header under `include/alp/chips/`.
+- There is no `examples/evk-bringup/`.  The EVK is exercised by
+  [`examples/aen/aen-evk-demo/`](../../examples/aen/aen-evk-demo/README.md)
+  (phased full-board demo), with per-chip bring-up in
+  `examples/aen/aen-bmi323-regcheck/` and
+  `examples/aen/aen-sensor-int-probe/`, and the cross-board
+  `examples/bringup/board-selftest/`.
 
 ## See also
 
