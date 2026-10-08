@@ -48,4 +48,17 @@ static inline uint32_t tr_pwr_ring_read(const tr_pwr_ring_t *r, int16_t out[TR_P
 	return seq;
 }
 
+/* The time of the poll after the one now taken. The poll is called once a game frame (~33 ms), so
+ * "now + period" quantises every interval up to a whole number of frames (100 ms became 4 frames,
+ * 133 ms: the graph ran at 8.3 Hz on the bench). The deadline instead advances by exactly one
+ * period from the PREVIOUS deadline, so a late call costs only its own jitter and the rate stays
+ * period-true; a call more than a period behind (a stall) is resynchronised, never answered with
+ * a burst of catch-up samples. All in ms of k_uptime_get(). */
+static inline int64_t tr_pwr_next_deadline(int64_t prev_deadline, int64_t now, int64_t period)
+{
+	int64_t next = prev_deadline + period;
+
+	return next > now ? next : now + period;
+}
+
 #endif /* TR_PLATFORM_PWR_RING_H */

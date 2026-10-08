@@ -48,6 +48,36 @@ int main(void)
 	(void)tr_pwr_ring_read(&r, w);
 	assert(w[TR_PWR_N - 1] == INT16_MAX);
 
+	/* The poll's deadline: called once a game frame (33.3 ms), the sample rate must be the period's,
+	 * 10 Hz, not the whole frames above it (the old "now + period" gave 8.3 Hz on the bench). */
+	{
+		const int64_t period   = 100;
+		int64_t       next_new = period, next_old = period;
+		int           n_new = 0, n_old = 0;
+
+		for (int f = 1; (int64_t)f * 3327 / 100 <= 315000;
+		     f++) { /* 315 s of 30.06 Hz frames (33.27 ms), ms truncated */
+			int64_t now = (int64_t)f * 3327 / 100;
+
+			if (now >= next_new) {
+				next_new = tr_pwr_next_deadline(next_new, now, period);
+				n_new++;
+			}
+			if (now >= next_old) {
+				next_old = now + period; /* the previous behaviour, as the control */
+				n_old++;
+			}
+		}
+		assert(n_new >= 3149 && n_new <= 3151); /* 10.00 Hz */
+		assert(n_old <
+		       2700); /* the control: a sample every 4 frames (7.5 Hz here; 8.3 on the bench) */
+		/* a stall of 5 s: one sample, then back on the period -- no burst */
+		assert(tr_pwr_next_deadline(1000, 6000, period) == 6100);
+		assert(tr_pwr_next_deadline(1000, 1033, period) ==
+		       1100); /* on time: exactly one period on */
+		assert(tr_pwr_next_deadline(1000, 1100, period) == 1200); /* late to the ms */
+	}
+
 	printf("PASS: tests/host/test_pwr_ring.c\n");
 	return 0;
 }

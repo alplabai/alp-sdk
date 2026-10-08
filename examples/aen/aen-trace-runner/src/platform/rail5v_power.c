@@ -186,7 +186,8 @@ void tr_rail5v_poll(void)
 	if (now < g_next_ms) {
 		return;
 	}
-	g_next_ms = now + RAIL5V_PERIOD_MS;
+	g_next_ms = tr_pwr_next_deadline(
+	    g_next_ms, now, RAIL5V_PERIOD_MS); /* a true 10 Hz, not frame-quantised */
 
 	/* The HP holds I2C2 for its amp bring-up (bus2_he.h): no transfer at all -- never wait for
 	 * it, never touch the bus -- the last average stays (the HUD marks it "--" for as long as
