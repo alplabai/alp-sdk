@@ -1,5 +1,7 @@
 # WS6-c Phase 2+3 library-resolution consolidation (#610 §6) — report
 
+> **Status (2026-10-08): Landed** — the blocker reported below was resolved and the consolidation shipped in #771 (WS6-c, one manifest-backed library model); `library-profiles/` and `_LIBRARY_KCONFIG` no longer exist on dev.
+
 **STATUS: PARTIAL — landed the safe 40/40 foundation; STOPPED at a hard blocker
 before repointing reader-1 / v2 migration / retirement. Emit-parity held at
 OK 40/40 through every landed commit. Golden was NOT edited.**

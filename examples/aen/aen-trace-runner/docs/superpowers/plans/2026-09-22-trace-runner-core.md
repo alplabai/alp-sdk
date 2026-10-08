@@ -1,5 +1,7 @@
 # Trace Runner Core Implementation Plan (M0-M3)
 
+> **Status (2026-10-08): Landed** — shipped as `examples/aen/aen-trace-runner` (#2452, closes #2446); game core in `src/game/`, host tests in `tests/host/`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** An original endless runner on the E1M-AEN803's 720x1280 panel that a player controls by standing in front of the camera, with tilt as a second mode.
