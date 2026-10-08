@@ -35,6 +35,10 @@ class CameraPlan:
     module: str
     owner: Optional[str]
     errors: list[str] = field(default_factory=list)
+    #: With no owner: the cores whose build this camera's errors block -- the
+    #: ones that could own it (usable, or of an OS the connector supports),
+    #: never an unrelated core (e.g. the AEN A32 for a Zephyr-only connector).
+    blocks: list[str] = field(default_factory=list)
 
 
 def resolve_cores(project_cores: Any, topology: Any) -> dict[str, dict[str, Any]]:
@@ -140,6 +144,14 @@ def plan_cameras(cameras: Any, connectors: Any, cores: dict[str, dict[str, Any]]
                                   mod, modules.get(mod))
         plan = CameraPlan(conn, mod, owner, [err] if err else [])
         plans.append(plan)
+        if owner is None:
+            cands = candidates(cores)
+            usable = [c for c in cands
+                      if _usable(cores[c], connector, modules.get(mod))]
+            by_os = [c for c in cands
+                     if connector.get("linux" if cores[c]["os"] == "yocto"
+                                      else "zephyr_shields")]
+            plan.blocks = usable if len(usable) > 1 else (by_os or cands)
         if owner is not None and cores[owner]["os"] == "yocto"                 and not connector.get("linux"):
             plan.errors.append(
                 f"cameras: connector {conn} does not declare Linux support "

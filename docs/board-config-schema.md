@@ -404,7 +404,8 @@ cameras:
     (not `alp-stock-shim`) qualifies when the connector has a non-empty
     `zephyr_shields:` AND the module has a `zephyr_shield:`; a Yocto core
     qualifies when the connector declares `linux: true` (set on the X-EVK
-    CAM0 only, tied to the generated Linux sensor DT).  So the E1M-EVK CAM0 is
+    CAM0 only, tied to the Linux sensor DT the camera-DT generator, #2736,
+    produces; validated: only CAM0 of a `renesas-rzv2n*` board).  So the E1M-EVK CAM0 is
     owned by the M55 app core and the X-EVK CAM0 by the A55, with no `core:`
     needed, whatever else the SoM runs.  No qualifying core is an ALP-B003
     error naming the OS the connector supports; several (e.g. AEN M55-HE and

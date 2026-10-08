@@ -189,7 +189,8 @@ def _xref_pass(
 
 
 def camera_connector_problems(connectors: Any, e1m_routes: Any, *,
-                              shield_dir: Path = ZEPHYR_SHIELD_DIR) -> list[str]:
+                              shield_dir: Path = ZEPHYR_SHIELD_DIR,
+                              families: Any = None) -> list[str]:
     """Cross-checks of `camera_connectors:` that the schema cannot express,
     shared by this validator (inline project boards) and
     scripts/validate_metadata.py (board presets):
@@ -198,7 +199,13 @@ def camera_connector_problems(connectors: Any, e1m_routes: Any, *,
       must be declared in the same board's `e1m_routes:` (`buses` for `i2c`,
       `gpio` for the rest) -- connectors reference routes, never restate pads;
     * `lane_polarity` carries one flag per clock + data lane: `lanes + 1`;
-    * every `zephyr_shields` entry is a directory under zephyr/boards/shields/.
+    * every `zephyr_shields` entry is a directory under zephyr/boards/shields/;
+    * `linux: true` only on CAM0 of a board for a `renesas-rzv2n*` SoM family
+      (`families`: the preset's `hosts_som_families`, or the project SoM's
+      family for an inline board; None skips the family half) -- the only
+      place a Linux camera path exists.
+      Later: switch to "the camera-DT generator (#2736) emits
+      # <board>-cam<n>-<module>.dtsi for this connector" once it lands.
     """
     if not isinstance(connectors, dict):
         return []
@@ -222,6 +229,15 @@ def camera_connector_problems(connectors: Any, e1m_routes: Any, *,
             if macro is not None and macro not in known:
                 msgs.append(f"camera_connectors.{name}.{field}: `{macro}` is not a "
                             f"macro in e1m_routes.{section}")
+        if c.get("linux"):
+            if name != "CAM0":
+                msgs.append(f"camera_connectors.{name}.linux: only CAM0 has a Linux "
+                            f"camera path (the sensor DT is generated for CAM0)")
+            if families is not None and not any(
+                    str(f).startswith("renesas-rzv2n") for f in families):
+                msgs.append(f"camera_connectors.{name}.linux: no Linux camera path "
+                            f"for SoM family {', '.join(map(str, families)) or 'none'} "
+                            f"(only renesas-rzv2n*)")
         for sh in c.get("zephyr_shields") or []:
             if not (shield_dir / str(sh)).is_dir():
                 msgs.append(f"camera_connectors.{name}.zephyr_shields: `{sh}` is not "
@@ -266,7 +282,10 @@ def _check_cameras(
                        span=len(key), code="ALP-B003", message=message))
 
     if inline:
-        for message in camera_connector_problems(connectors, data.get("e1m_routes")):
+        fam = som_doc.get("family") if isinstance(som_doc, dict) else None
+        for message in camera_connector_problems(
+                connectors, data.get("e1m_routes"),
+                families=[fam] if fam else None):
             report("camera_connectors", message)
 
     cameras = data.get("cameras")

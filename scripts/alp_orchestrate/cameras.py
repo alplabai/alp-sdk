@@ -27,7 +27,7 @@ from typing import Optional
 
 import yaml
 
-from .camera_owner import CameraPlan, candidates, plan_cameras
+from .camera_owner import CameraPlan, plan_cameras
 from .models import BoardProject, OrchestratorError, Slice
 from .paths import REPO
 
@@ -78,13 +78,13 @@ def check(project: BoardProject, slice_: Slice,
           repo: Path = REPO) -> list[CameraPlan]:
     """The cameras this slice owns.  Raises CameraSelectError when they are
     unbuildable for it (the backstop for what `tan validate` reports as
-    ALP-B003).  An ownerless error (none / ambiguous) blocks every
-    candidate core."""
+    ALP-B003).  An ownerless error (none / ambiguous) blocks only the cores
+    that could have owned the camera (`CameraPlan.blocks`)."""
     plans = _plans(project, repo)
     mine = [p for p in plans if p.owner == slice_.core_id]
-    is_candidate = slice_.core_id in candidates(_cores(project))
     errs = [e for p in plans
-            if p.owner == slice_.core_id or (p.owner is None and is_candidate)
+            if p.owner == slice_.core_id
+            or (p.owner is None and slice_.core_id in p.blocks)
             for e in p.errors]
     if errs:
         raise CameraSelectError("; ".join(dict.fromkeys(errs)))

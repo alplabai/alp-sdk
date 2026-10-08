@@ -9,7 +9,8 @@ drives the build, for the one core that owns the camera (`cameras[].core`, or th
 - `camera_connectors.<CAMn>.zephyr_shields` (new, optional, ordered) names the
   carrier-side Zephyr shields; the E1M-EVK CAM0 declares `[e1m_evk_rpi_csi]`.
   `camera_connectors.<CAMn>.linux: true` (new, optional) marks a connector a Linux
-  core can drive; the X-EVK CAM0 sets it.
+  core can drive; the X-EVK CAM0 sets it, and it is only valid on CAM0 of a
+  `renesas-rzv2n*` board.
 - On a Zephyr owner, a module without `zephyr_shield`, a connector without
   `zephyr_shields`, or a carrier shield with no overlay for the board target is an
   ALP-B003 error; the planner backstops it with a `camera-select-failed` warning.

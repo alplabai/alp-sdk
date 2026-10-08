@@ -292,3 +292,14 @@ def test_validator_core_resolution_matches_loader(tmp_path: Path, sku: str) -> N
     assert (camera_owner.candidates(resolved)
             == camera_owner.candidates({c: {"os": s.os, "app": s.app}
                                         for c, s in project.cores.items()}))
+
+
+def test_ownerless_error_blocks_only_cores_that_could_own_it(tmp_path: Path) -> None:
+    # AEN default topology (A32 Yocto stays): a module with no zephyr_shield
+    # leaves no usable core.  The Zephyr-only connector blocks the M55 app
+    # core, not the unrelated A32 Linux core.
+    path = _write(tmp_path, AEN.replace(A32_OFF, ""),
+                  module="raspberry_pi_camera_module_2")
+    assert _blocked(_plan(path)) == {"m55_he"}
+    # Ambiguous HE+HP: both could own it, both blocked.
+    assert _blocked(_plan(_write(tmp_path, AEN_HE_HP))) == {"m55_he", "m55_hp"}

@@ -401,3 +401,35 @@ def test_connector_zephyr_shields_must_exist(tmp_path):
     conn = {"CAM0": {"zephyr_shields": ["no_such_shield", "e1m_evk_rpi_csi"]}}
     msgs = camera_connector_problems(conn, {})
     assert len(msgs) == 1 and "no_such_shield" in msgs[0]
+
+
+def test_linux_flag_only_on_cam0_of_rzv2n_boards(tmp_path):
+    p = tmp_path / "board.yaml"
+
+    def problems(doc):
+        p.write_text(yaml.safe_dump(doc), encoding="utf-8")
+        return validate_metadata._check_board_camera_connectors([p])
+
+    ok = _load(META / "boards" / "e1m-x-evk.yaml")
+    assert ok["camera_connectors"]["CAM0"]["linux"] is True
+    assert not problems(ok)
+
+    aen = _load(META / "boards" / "e1m-evk.yaml")
+    aen["camera_connectors"]["CAM0"]["linux"] = True
+    assert problems(aen)  # alif-ensemble: no Linux camera path
+
+    cam1 = _load(META / "boards" / "e1m-x-evk.yaml")
+    cam1["camera_connectors"]["CAM1"] = dict(cam1["camera_connectors"]["CAM0"])
+    assert problems(cam1)  # only CAM0
+
+
+def test_inline_linux_flag_follows_the_project_som_family(tmp_path):
+    for sku, bad in (("E1M-V2M103", False), ("E1M-AEN803", True)):
+        p = _inline_project(tmp_path, {"linux": True})
+        doc = _load(p)
+        doc["som"]["sku"] = sku
+        doc["cores"] = {}
+        p.write_text(yaml.safe_dump(doc), encoding="utf-8")
+        hit = [d for d in validate_board_yaml(p)
+               if d.code == "ALP-B003" and "linux" in d.message]
+        assert bool(hit) is bad, (sku, [d.message for d in hit])

@@ -933,7 +933,8 @@ def _check_board_camera_connectors(board_files) -> list:
         if not isinstance(doc, dict):
             continue
         msgs = camera_connector_problems(doc.get("camera_connectors"),
-                                         doc.get("e1m_routes"))
+                                         doc.get("e1m_routes"),
+                                         families=doc.get("hosts_som_families") or [])
         if msgs:
             print(f"FAIL {rel}")
             for m in msgs:
