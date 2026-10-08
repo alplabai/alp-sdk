@@ -109,9 +109,8 @@ alp-sdk/
 │   ├── library-profiles/<name>/     # per-library HW-accelerator binding tables
 │   ├── templates/board.yaml         # customer-facing board.yaml template
 │   └── protos/                      # protobuf schemas (mproc framing, …)
-├── firmware/                        # PREBUILT HELPER-MCU FIRMWARE BLOBS
-│   ├── gd32-bridge/                 # GD32G553 bridge firmware (V2N supervisor)
-│   └── cc3501e/                     # TI CC3501E Wi-Fi bridge firmware (AEN)
+├── firmware/                        # IN-TREE FIRMWARE IMAGES
+│   └── alp-stock-shim/              # minimal Zephyr M-core image (no peripheral/IRQ/IPC claims)
 ├── cmake/                           # find_package + Zephyr module helpers
 │   └── alp-sdk-config.cmake.in
 ├── scripts/                         # REFERENCE CODEGEN + ORCHESTRATION
