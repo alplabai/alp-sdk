@@ -176,8 +176,45 @@ and only a carrier whose U46 has been reworked may run it.** On a stock 2626-R2 
 a 74LVC157 with no high-impedance state, and it contends with the SoC the moment I2S3 is muxed
 onto P9_3/P9_4/P9_5. `a32/release/sound-carriers.txt` is the per-unit allow list the release
 script checks. Sound also needs a Zephyr tree that sets the 76.8 MHz audio clock; see
-`docs/2026-09-23-sound.md`. The exhibition release runs `hp_vision` on the HP instead, without
-sound.
+`docs/2026-09-23-sound.md`.
+
+### Camera, NPU and sound in one HP image (`TR_HP_SOUND`)
+
+The HP core has one image slot, so the exhibition release used to choose between `hp_vision`
+(camera + NPU pose, no sound) and `sound/` (sound, no pose). Build `hp_vision` with
+`-DTR_SND_REWORKED_U46=ON -DTR_HP_SOUND=ON` and it links the same game sound as a cooperative
+thread above the vision thread (`TR_SND_EMBED`: I2S3 interrupt priority 0, ahead of the camera,
+CSI and Ethos-U55, asserted at build time). The HE is built with the same `-DTR_HP_SOUND=ON`
+(it needs `-DTR_INPUT_NPU=ON` and the Riverdi shield `-DSHIELD=e1m_evk_rvt121hvdfwca0`; the
+RK055 shield puts its backlight on GPIO5, which the HP's amps need, and the build refuses it).
+
+```sh
+west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp hp_vision -- \
+  -DTR_CAM_ROTATE=90 -DTR_CAM_MIRROR=ON -DTR_SND_REWORKED_U46=ON -DTR_HP_SOUND=ON
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he . -- -DSHIELD=e1m_evk_rvt121hvdfwca0 \
+  -DTR_INPUT_NPU=ON -DTR_HP_SOUND=ON -DTR_M55_AUTOLAUNCH=ON -DTR_A32_LAUNCH_H=<tr_launch.h>
+```
+
+The release is `TR_HP_VISION=ON TR_SND_HP=ON TR_SND_CARRIER_SERIAL=<unit>
+a32/release/build-release.sh ...` and checks both `hp_vision_check.sh` and `snd_hp_check.sh` on that
+one image (`a32/release/FLASH-RECIPE.md`, "Combined HP image"). Without `TR_HP_SOUND` the image
+is the unchanged vision-only `hp_vision`.
+
+**I2C2 and GPIO5 are shared, so the two cores take turns.** The HE uses I2C2 for the +5V INA236
+(the HUD power line) and the BMI323; the HP's amp bring-up needs the same controller and GPIO5 (the
+amps' `SD_N` and `IRQZ`). Two drivers on one DesignWare controller corrupt each other (its IRQ
+reaches both cores), so the bus has one holder: after its display is up the HE *leases* I2C2 to the
+HP once the HP asks, the HP brings the amps up (SD_N reset, ACK poll, `tas2563_init`, I2S3 proof,
+`tas2563_resume`), turns its I2C2 interrupt off and *gives the bus back*. Streaming is I2S3 only. While the HP holds the
+bus the HUD shows `5V -- mW` instead of a stale number. The protocol is `src/ipc/tr_bus2.h` (host
+tested with both cores simulated: `tests/host/test_bus2.c`), its record sits at
+`TR_MEM_BUS2 = 0x0237FD40`, clear of the I2C1 handover flag at `0x0237FC94`. It is not
+`alp,i2c-handover`: that glue is one-way and makes the acquiring core wait at `POST_KERNEL` 0 until
+the other core releases, which is right for the camera bus (no camera without it) and wrong here,
+where the vision must never wait for the sound handshake and the HE needs the bus back. Fail safe:
+no HP asking means the HE keeps the bus; no HE (or an HE built without `TR_HP_SOUND`) means the HP
+waits and the vision runs without sound; an HP that never returns the bus leaves the HUD at `--`,
+never a hang; an HE restart in the middle of the bring-up aborts it before the next access.
 
 ## Tests
 

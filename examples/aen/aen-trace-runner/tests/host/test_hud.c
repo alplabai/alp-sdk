@@ -125,6 +125,20 @@ int main(void)
 		 * see platform/rail5v_power.c's header comment). A label reading
 		 * "SOM 1234 mW" here is exactly the claim the maintainer rejected. */
 		assert(strcmp(v.perf[5], "5V 1234 mW SoM+LCD") == 0);
+		/* The HP holds I2C2 for its amp bring-up (platform/bus2_he.h): the reading is stale and
+		 * the line says so ("--"), not a frozen number; 0 mW is a real reading, not "--". */
+		r.now_us += 500000u;
+		r.flips += 20u;
+		r.rail5v_mw = -1;
+		assert(tr_perf_sample(&p, &r, &mem, &v) && strcmp(v.perf[5], "5V -- mW SoM+LCD") == 0);
+		r.now_us += 500000u;
+		r.flips += 20u;
+		r.rail5v_mw = 0;
+		assert(tr_perf_sample(&p, &r, &mem, &v) && strcmp(v.perf[5], "5V 0 mW SoM+LCD") == 0);
+		r.now_us += 500000u;
+		r.flips += 20u;
+		r.rail5v_mw = 1234;
+		assert(tr_perf_sample(&p, &r, &mem, &v));
 		/* 39 flips in 1.000 s after a hold: 39.0, not a stale 40. */
 		r.now_us += 1000000u;
 		r.flips += 39u;

@@ -7,6 +7,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
+#include "bus2_he.h"
 #include "ina236_math.h"
 #include "rail5v_power.h"
 
@@ -166,7 +167,9 @@ int tr_rail5v_open(void)
 
 void tr_rail5v_poll(void)
 {
-	if (!g_ok) {
+	/* The HP holds I2C2 for its amp bring-up (bus2_he.h): no transfer, the last average stays
+	 * (the HUD marks it "--" for as long as the bus is away). */
+	if (!g_ok || !tr_bus2_he_owns()) {
 		return;
 	}
 	int64_t now = k_uptime_get();

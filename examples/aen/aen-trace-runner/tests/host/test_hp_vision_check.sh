@@ -4,8 +4,9 @@
 # a32/release/build-release.sh (hp_vision_check.sh): every refusal path
 # refuses, the one allowed configuration passes, and the full script refuses
 # BEFORE it builds or packages anything -- same shape as
-# test_snd_hp_check.sh, and the TR_SND_HP + TR_HP_VISION-together refusal
-# that lives in build-release.sh itself, not either check function.
+# test_snd_hp_check.sh, and the refusal of TR_SND_HP + TR_HP_VISION as two
+# separate HP images that lives in build-release.sh itself, not either check
+# function (the one-image combined mode is tested in test_hp_combined.sh).
 set -u
 cd "$(dirname "$0")/../.." || exit 1
 t=$(mktemp -d "${TMPDIR:-/tmp}/tr-hp-vision-check.XXXXXX")
@@ -155,8 +156,8 @@ expect 1 "peripheral with NO status property defaults to okay by devicetree spec
 expect 1 "peripheral with two stacked labels must still be scanned (fix round 13)" "$t/bad-multilabel" "$t/model.bin" "$t/nm"
 
 # End to end: build-release.sh must stop at the interlock (exit 3) before it
-# runs make or app-gen-toc, AND must refuse TR_SND_HP + TR_HP_VISION together
-# (exit 1, die()) before touching either interlock.
+# runs make or app-gen-toc, AND must refuse TR_SND_HP + TR_HP_VISION naming two
+# DIFFERENT images (exit 3) before touching either interlock.
 mkdir -p "$t/st/build/images" "$t/st/build/config" "$t/he/zephyr"
 printf '#!/bin/sh\ntouch "%s/PACKAGED"\n' "$t" > "$t/st/app-gen-toc" && chmod +x "$t/st/app-gen-toc"
 : > "$t/st/build/images/bl32.bin"; : > "$t/st/build/images/m55_stub_hp.bin"
@@ -199,7 +200,7 @@ out=$(PATH="$t/bin:$PATH" NM="$t/nm" TR_SND_HP=ON TR_SND_HP_BUILD="$t/he" TR_SND
 	bash a32/release/build-release.sh "$t/st" "$t/he" 2>&1)
 rc=$?
 if [ $rc -eq 0 ] || [ -e "$t/MADE" ] || [ -e "$t/PACKAGED" ]; then
-	echo "FAIL build-release.sh did not refuse TR_SND_HP=ON + TR_HP_VISION=ON together (rc=$rc): $out"
+	echo "FAIL build-release.sh did not refuse TR_SND_HP=ON + TR_HP_VISION=ON as two separate images (rc=$rc): $out"
 	fail=1
 fi
 

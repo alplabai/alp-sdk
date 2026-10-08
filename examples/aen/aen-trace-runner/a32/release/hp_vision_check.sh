@@ -6,10 +6,18 @@
 #
 # Same shape as snd_hp_check.sh (the OTHER thing that can occupy HP_APP) --
 # deliberately not merged with it: sound and vision are different silicon
-# risks (I2S mux contention vs "does the HP app even link the pipeline"),
-# and TR_SND_HP + TR_HP_VISION are refused together below (build-release.sh),
-# not inside this function, since that refusal needs both env vars in view
-# at once.
+# risks (I2S mux contention vs "does the HP app even link the pipeline").
+#
+# hp_vision_check HP_BUILD_DIR MODEL_FILE NM [MODE]
+#   MODE vision   (default) a plain hp_vision (TR_HP_VISION=ON alone). An image that carries
+#                 the game sound (TR_HP_SOUND=ON: I2S3 + the TAS2563 amps) is REFUSED here --
+#                 it never skips the carrier interlock (snd_hp_check.sh, sound-carriers.txt).
+#   MODE combined hp_vision built with -DTR_HP_SOUND=ON (TR_HP_VISION=ON TR_SND_HP=ON): the
+#                 same audit, plus the sound's own peripherals in the allow-list (i2c2 deferred,
+#                 gpio5, i2s3, SPI1, lpgpio). build-release.sh then runs snd_hp_check.sh
+#                 (combined) on the SAME image; it refuses two separate HP images.
+# Sets HP_VISION_SOUND=1 when the image carries the sound (the cache says TR_HP_SOUND is true,
+# or the ELF holds the sound's console text -- a cache edited after the build cannot hide it).
 
 hp_vision_refuse() {
 	{
@@ -20,11 +28,38 @@ hp_vision_refuse() {
 }
 
 hp_vision_check() {
-	local hd=$1 model=$2 nm=$3
+	local hd=$1 model=$2 nm=$3 mode=${4:-vision} snd_cache snd_elf=0
+	HP_VISION_SOUND=0
 	if [ ! -f "$hd/CMakeCache.txt" ]; then
 		hp_vision_refuse "$hd is not a Zephyr build dir (no CMakeCache.txt)"
 		return 1
 	fi
+	snd_cache=$(tr -d '\r' < "$hd/CMakeCache.txt" | sed -n 's/^TR_HP_SOUND:[A-Za-z]*=//p' | head -1)
+	if [ -f "$hd/zephyr/zephyr.elf" ] && grep -aq 'I2S_SELECT = 0 (amps)' "$hd/zephyr/zephyr.elf"; then
+		snd_elf=1
+	fi
+	case "$(printf '%s' "$snd_cache" | tr '[:upper:]' '[:lower:]')" in
+	1 | on | yes | true | y) HP_VISION_SOUND=1 ;;
+	*) HP_VISION_SOUND=$snd_elf ;;
+	esac
+	case "$mode" in
+	vision)
+		if [ "$HP_VISION_SOUND" = 1 ]; then
+			hp_vision_refuse "$hd carries the game sound (I2S3 + TAS2563, TR_HP_SOUND): package it only with TR_SND_HP=ON and TR_SND_CARRIER_SERIAL (snd_hp_check.sh), or rebuild without -DTR_HP_SOUND=ON"
+			return 1
+		fi
+		;;
+	combined)
+		if [ "$HP_VISION_SOUND" != 1 ]; then
+			hp_vision_refuse "TR_SND_HP=ON with TR_HP_VISION=ON needs the combined image: $hd has no game sound (build hp_vision with -DTR_SND_REWORKED_U46=ON -DTR_HP_SOUND=ON)"
+			return 1
+		fi
+		;;
+	*)
+		hp_vision_refuse "unknown mode '$mode'"
+		return 1
+		;;
+	esac
 	if ! grep -q '^BOARD:STRING=alp_e1m_aen803_m55_hp/' "$hd/CMakeCache.txt"; then
 		hp_vision_refuse "$hd is not an M55-HP build"
 		return 1
@@ -117,7 +152,7 @@ hp_vision_check() {
 		hp_vision_refuse "$hd/zephyr/zephyr.dts missing -- can't audit peripheral ownership"
 		return 1
 	fi
-	bad=$(python3 - "$dts" <<'PY'
+	bad=$(python3 - "$dts" "$mode" <<'PY'
 import re, sys
 ALLOW = {
 	'49011000', '4900c000', '49030000', '49033000', '400e1000',  # this app's own peripherals
@@ -133,6 +168,11 @@ ALLOW = {
 	# with the HE. The SDK's own SoC-info / power-profile backends use it too.
 	'40040000', '40050000',
 }
+if sys.argv[2] == 'combined':
+	# TR_HP_SOUND=ON: the sound's own peripherals (sound/sound.overlay, hp_vision/sound_hp.overlay).
+	# i2c2 is `zephyr,deferred-init` and its IRQ is only armed inside a lease from the HE
+	# (src/ipc/tr_bus2.h); gpio5 is the amps' SD_N / IRQZ, lpgpio the CC3501E's WIFI_EN / nRESET.
+	ALLOW |= {'49012000', '49005000', '49017000', '48104000', '42002000'}
 depth = 0
 soc_seen = False
 in_soc_depth = None  # the stack depth /soc's OWN frame sits at, while still open

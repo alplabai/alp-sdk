@@ -29,6 +29,17 @@ if(TR_INPUT_NPU)
 	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/i2c_handover_he.overlay)
 endif()
 
+# The HP's game sound (hp_vision/ built with -DTR_HP_SOUND=ON: camera + NPU + the TAS2563 amps in
+# ONE HP image, docs/2026-09-23-sound.md "Sound with the vision HP"): the HP's amp bring-up needs
+# I2C2 + GPIO5, which this core also uses (INA236 power line, BMI323). With TR_HP_SOUND=ON this
+# image offers I2C2 to the HP once its display is up and takes it back when the HP is done
+# (src/platform/bus2_he.c, src/ipc/tr_bus2.h); the HUD shows "5V -- mW" while it is away. Needs
+# TR_INPUT_NPU (the HP is the vision HP) and a shield that leaves GPIO5 alone (the RVT121).
+option(TR_HP_SOUND "Lease I2C2 to the HP's game sound for its amp bring-up (hp_vision TR_HP_SOUND=ON)" OFF)
+if(TR_HP_SOUND AND NOT TR_INPUT_NPU)
+	message(FATAL_ERROR "TR_HP_SOUND is the vision HP's sound: it needs -DTR_INPUT_NPU=ON")
+endif()
+
 # Who draws the frame. A32 (default): the Cortex-A32 renderer draws every
 # pixel; this M55 image runs the game, flips the CDC200 and drives the SRAM1
 # mailbox, and links no renderer (docs/superpowers/plans/2026-09-22-a32-renderer.md).
@@ -112,6 +123,10 @@ target_sources(app PRIVATE
 	src/vision/pose.c
 	src/vision/track.c
 )
+if(TR_HP_SOUND)
+	target_sources(app PRIVATE src/platform/bus2_he.c src/ipc/tr_bus2.c)
+	target_compile_definitions(app PRIVATE TR_HP_SOUND=1)
+endif()
 if(TR_INPUT_NPU)
 	target_sources(app PRIVATE src/ipc/tr_pslot.c)
 	target_compile_definitions(app PRIVATE TR_INPUT_NPU=1)

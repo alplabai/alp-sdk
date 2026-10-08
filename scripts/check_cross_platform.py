@@ -251,6 +251,7 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     "examples/aen/aen-trace-runner/a32/release/flash-release.sh",
     "examples/aen/aen-trace-runner/probe/npu/flash-probe.sh",
     "examples/aen/aen-trace-runner/tests/host/runner.sh",
+    "examples/aen/aen-trace-runner/tests/host/test_hp_combined.sh",
     "examples/aen/aen-trace-runner/tests/host/test_hp_vision_check.sh",
     "examples/aen/aen-trace-runner/tests/host/test_panel_hz_check.sh",
     "examples/aen/aen-trace-runner/tests/host/test_snd_hp_check.sh",

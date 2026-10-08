@@ -91,6 +91,13 @@ if bash tests/host/test_hp_vision_check.sh; then
 else
 	echo "FAIL: tests/host/test_hp_vision_check.sh"; rc=1
 fi
+# The combined HP image (camera + NPU + game sound in one HP_APP): its build gate, release
+# interlocks and the source-level wiring of the I2C2/GPIO5 lease (a32/release/*_check.sh).
+if bash tests/host/test_hp_combined.sh; then
+	echo "PASS: tests/host/test_hp_combined.sh"
+else
+	echo "FAIL: tests/host/test_hp_combined.sh"; rc=1
+fi
 # The TR_PANEL_HZ release interlock (a32/release/panel_hz_check.sh).
 if bash tests/host/test_panel_hz_check.sh; then
 	echo "PASS: tests/host/test_panel_hz_check.sh"

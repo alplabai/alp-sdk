@@ -69,6 +69,7 @@
 #include "../render/panel_rot.h"
 #include "display.h"
 #include "hud_l2.h"
+#include "bus2_he.h"
 #include "rail5v_power.h"
 
 #define CDC_REGS DT_REG_ADDR(DT_NODELABEL(cdc200))
@@ -241,8 +242,9 @@ static void perf(void)
 	/* The HP's own status word (P10's sound ring, SRAM0: powered from reset). */
 	raw.hp_magic = ((volatile tr_aring_t *)TR_ARING_ADDR)->magic;
 	raw.hp_state = ((volatile tr_aring_t *)TR_ARING_ADDR)->hp_state;
-	raw.rail5v_mw =
-	    tr_rail5v_avg_mw; /* platform/rail5v_power.c, polled off this frame's hot path */
+	/* platform/rail5v_power.c, polled off this frame's hot path. -1 = stale: the HP holds I2C2
+	 * (the HUD prints "--"). */
+	raw.rail5v_mw = tr_bus2_he_owns() ? tr_rail5v_avg_mw : -1;
 	/* fix round 5: hp_vision's own beacon (src/ipc/tr_hp_dbg.h), SRAM0, no
 	 * cache maintenance needed (this build runs CONFIG_DCACHE=n, same as
 	 * every other fixed-address cross-core read in this file). Zeroed/

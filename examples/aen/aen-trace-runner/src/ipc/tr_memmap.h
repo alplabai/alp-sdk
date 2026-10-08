@@ -118,6 +118,13 @@
                                        * 0x0237FD20 + sizeof(tr_cam_view_t) (28 B, v2's rotate) =
                                        * 0x0237FD3C, with 0x0237FD3C..0x0237FFFF (0x2C4 B) of headroom
                                        * still free in the sound ring's page after it. */
+#define TR_MEM_BUS2 \
+	0x0237FD40u /* HE <-> HP: the I2C2 + GPIO5 lease (src/ipc/tr_bus2.h tr_bus2_t, 48 B, TR_HP_SOUND
+                                       * builds only). 64-B aligned, right after TR_MEM_CAM_VIEW's end
+                                       * (0x0237FD3C), clear of TR_MEM_I2C1_HANDOVER (0x0237FC94..0x0237FC9F:
+                                       * a different bus, a different protocol) and of hp_dbg; ends at
+                                       * 0x0237FD70, still inside the shared NC page (0x0237F000..0x0237FFFF).
+                                       * tr_bus2.h asserts all of that. */
 /* SRAM1 */
 #define TR_MEM_CAM_POOL \
 	0x02480000u /* HP: OV9281 camera frame pool (design sec 2), 2 x 256,000 B GREY8;

@@ -1080,7 +1080,11 @@ bool tr_perf_sample(tr_perf_t           *p,
 	 * SoM+LCD  %d.%01d mJ/f" measures 264 px wide (tr_hud_text_w, tiny
 	 * font) against a 238 px budget (PERF_W - the panel's left inset) --
 	 * it does not fit. */
-	snprintf(v->perf[5], TR_PERF_COLS, "5V %d mW SoM+LCD", (int)raw->rail5v_mw);
+	if (raw->rail5v_mw < 0) { /* stale: the HP holds I2C2 (platform/bus2_he.h) */
+		snprintf(v->perf[5], TR_PERF_COLS, "5V -- mW SoM+LCD");
+	} else {
+		snprintf(v->perf[5], TR_PERF_COLS, "5V %d mW SoM+LCD", (int)raw->rail5v_mw);
+	}
 	/* fix round 7 item 5 had a 7th line here naming the camera PiP; fix
 	 * round 8 (maintainer ruling) moved the real label into the video
 	 * panel itself (a32/renderer/render.c draw_video_panel()), drawn once

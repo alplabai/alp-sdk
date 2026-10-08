@@ -168,7 +168,8 @@ typedef struct {
 	uint32_t hp_magic;    /* sound ring identity word (tr_aring.h TR_ARING_MAGIC) */
 	uint32_t hp_state;    /* sound ring hp_state */
 	int32_t
-	    rail5v_mw; /* platform/rail5v_power.h tr_rail5v_avg_mw: carrier +5V net (SoM+LCD+regs), EMA mW */
+	    rail5v_mw; /* platform/rail5v_power.h tr_rail5v_avg_mw: carrier +5V net (SoM+LCD+regs), EMA mW;
+	       * -1 = stale (the HP holds I2C2 for its amp bring-up): the HUD prints "--" */
 	/* fix round 5: hp_vision's OWN beacon (src/ipc/tr_hp_dbg.h), read
 	 * alongside the sound ring's -- only one of the two is ever meaningful
 	 * on a given HP_APP (see tr_hp_dbg_magic's use in tr_perf_sample()).

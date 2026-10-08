@@ -128,6 +128,66 @@ and `movenet_model` do not change between displays. Only the HE image differs, a
 ATOC. The HP image is the same `hp_vision`; it waits for the HE's I2C1 release
 (`alp,i2c-handover`), so start the HE first.
 
+## Combined HP image: camera + NPU + game sound (`TR_HP_SOUND`, reworked carriers only)
+
+The HP's one image slot can carry `hp_vision` and the game sound together (design and protocol:
+`docs/2026-09-23-sound.md`, "Sound with the vision HP"). **Reworked-U46 carriers only: unit
+`2026W36-0002` is allowed, `2026W36-0009` is denied** (`sound-carriers.txt`; `build-release.sh`
+refuses the denied unit before it builds anything). **Not run on the bench yet: this recipe only
+packages and checks; the bench run below is still to be done.**
+
+```sh
+# HP: hp_vision with the sound linked in (needs the clockctrl-patched ZEPHYR_BASE)
+west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp -d "$HP_BUILD" hp_vision -- \
+  -DTR_CAM_ROTATE=90 -DTR_CAM_MIRROR=ON -DTR_SND_REWORKED_U46=ON -DTR_HP_SOUND=ON
+# HE: the Riverdi build, with the HE's side of the I2C2 + GPIO5 lease
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d "$HE_BUILD" . -- \
+  -DSHIELD=e1m_evk_rvt121hvdfwca0 -DTR_M55_AUTOLAUNCH=ON -DTR_A32_LAUNCH_H="$LAUNCH_H" \
+  -DTR_INPUT_NPU=ON -DTR_HP_SOUND=ON -DTR_CAM_ROTATE=90
+ST=$(mktemp -d)/setools && cp -a "$SETOOLS_DIR" "$ST"
+TR_HP_VISION=ON TR_SND_HP=ON TR_SND_CARRIER_SERIAL=2026W36-0002 \
+  TR_HP_VISION_BUILD="$HP_BUILD" TR_HP_VISION_MODEL="$MODEL" \
+  bash a32/release/build-release.sh "$ST" "$HE_BUILD" "$RB_PRE"
+```
+
+`build-release.sh` runs `hp_vision_check.sh` (combined) AND `snd_hp_check.sh` (combined) on that one
+HP build, and refuses: a build without `-DTR_SND_REWORKED_U46=ON` or `-DTR_HP_SOUND=ON`; a
+`TR_SND_HP_BUILD` that is a different directory (two HP images); a sound-carrying `hp_vision` with
+`TR_HP_VISION=ON` alone, or the combined directory as `TR_SND_HP_BUILD` alone; the sound buffers,
+heap or thread stack outside the HP DTCM; an HP image over 256 KiB; and an HE image without
+`tr_bus2_he_frame` (an HE built without `-DTR_HP_SOUND=ON` never leases the bus: the HP would wait
+for ever). The RK055 shield cannot be the HE of a combined release: it uses GPIO5 for its backlight,
+and the HE build refuses `-DTR_HP_SOUND=ON` with it.
+
+What flashes does not change: `bl32`, `a32_app`, `atoc` (which carries the HE and the HP image) and
+`movenet_model` are the same four items, and `flash-release.sh write` / `restore` need no change.
+Flash the HE and the HP from ONE build: the pairings that matter are in the table above, plus
+`new HP (TR_HP_SOUND) + HE without TR_HP_SOUND`: the HP prints `waiting for the HE's I2C2 + GPIO5
+offer` for ever, vision runs, no sound.
+
+Order is free (the lease does not need the HE first; the I2C1 handover still wants both reset
+together, as before). Nothing waits on the sound: the camera, the NPU and the pose slot run whether
+or not the amps come up.
+
+**Bench checks to run (not done):**
+
+1. HP RAM console (`ram_console_buf`): `[snd] waiting for the HE's I2C2 + GPIO5 offer`, then
+   `HE offered I2C2 + GPIO5: I2C2 device_init -> 0`, steps `1` to `11` with `5b amp 0x4d ACK` and
+   `5b amp 0x4e ACK`, `I2C2 + GPIO5 given back to the HE`, `game sound running at 16000 Hz`. HE
+   console: `bus2    : I2C2 offered to the HP`, `leased by the HP`, `back on the HE`; the HUD
+   `5V -- mW` for the length of the bring-up (a couple of seconds), then a number, and it keeps
+   updating.
+2. The lease record over SWD at `0x0237FD40`: `+0x00` `he_state` `0x42320000`, `+0x10` `hp_state`
+   `0x42320004` (returned), `+0x0C` `he_regains` 1, `+0x28` `hp_acq` 1, `+0x1C` `hp_aborts` 0,
+   `+0x08` `he_beat` advancing every frame, `+0x20` `hp_i2s_fu` 0 and `+0x24` `hp_i2s_err` 0 while
+   streaming. `0x0237FC94` (the I2C1 handover) is untouched by it.
+3. Sound plays beside the camera: the pose slot's `hp_state` stays 0, the HP debug beacon's
+   heartbeat (`0x0237FCAC`) keeps its frame rate, `hp_i2s_fu` stays 0 for 60 s.
+4. Reset the HP alone: its `PRE_KERNEL_1` forgets the lease, the HE (idle, it owns the bus)
+   sees the new `WANT`, offers a new token, and the bring-up runs again. An HE-only reset still
+   reconfigures I2C1 under the running camera exactly as before (`alp,i2c-handover`): reset both.
+   (An HE reset inside the HP's bring-up is covered by the host tests, not by a bench step.)
+
 ## Preconditions
 
 Export ALL THREE before anything else in this recipe -- `bench_jlink_run` (`flash-release.sh`'s

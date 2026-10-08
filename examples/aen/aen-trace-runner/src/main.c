@@ -15,6 +15,7 @@
 #include "ipc/tr_mbox.h"  /* TR_BANNER_* -- the banner ids both render modes share */
 #include "platform/display.h"
 #include "platform/imu.h"
+#include "platform/bus2_he.h"
 #include "platform/rail5v_power.h"
 #include "vision/camera_watchdog.h"
 #include "vision/pose.h" /* the presence rule, both input paths */
@@ -864,7 +865,8 @@ int main(void)
 		int64_t  start  = k_uptime_get();
 		uint64_t t_tick = k_cycle_get_64();
 
-		tr_rail5v_poll(); /* internally paced to ~3 Hz -- see rail5v_power.c */
+		tr_bus2_he_frame(); /* TR_HP_SOUND: offer / take back I2C2 for the HP's amp bring-up */
+		tr_rail5v_poll();   /* internally paced to ~3 Hz -- see rail5v_power.c */
 
 		tr_intent_t in          = tr_intent_none();
 		bool        pace_step   = true; /* false on the frames between paced game steps */

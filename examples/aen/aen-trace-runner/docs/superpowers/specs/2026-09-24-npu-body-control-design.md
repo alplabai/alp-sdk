@@ -553,6 +553,8 @@ overlay, not left to whatever the base board file happens to default to):
 | Ethos-U55 | **owns** (256 MAC, HP-paired instance) | n/a (HE never opens `<alp/inference.h>`) | `hp_vision`'s own `&ethosu55 { status = "okay"; }` + `&ethosu85 { status = "disabled"; }` |
 | UART / SPI / GPIO0-11,13,14 | disabled by default on both cores (neither app's source touches them) | disabled by default | build-time board default; confirmed via generated `zephyr.dts` |
 
+**Update, `TR_HP_SOUND` builds (2026-10-08):** with the game sound linked into `hp_vision` the HP is no longer the "disabled" side of the I2C2 row. I2C2 (and GPIO5, I2S3, SPI1, LP-GPIO) are enabled in the HP image, I2C2 as `zephyr,deferred-init`, and the HE *leases* I2C2 + GPIO5 to the HP for the amp bring-up and takes them back (`src/ipc/tr_bus2.h`, `docs/2026-09-23-sound.md`). The table above is the plain image.
+
 **Fix:** `hp_vision/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay` now force-disables
 `&i2c0` and `&i2c2`. **Enforcement, not just a one-time overlay edit:** `a32/release/hp_vision_check.sh`
 (the same gate `build-release.sh` already refuses TR_HP_VISION=ON packaging without) now parses the
