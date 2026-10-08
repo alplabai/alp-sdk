@@ -61,3 +61,7 @@ frozen oracle or not. This is a corpus-membership change (delete the file),
 not a re-capture of its frozen field values -- re-add the file (re-captured
 against a live emit, not restored from git history, since the shape may have
 moved since 97ad481b) once imx93 r1 carries a buildable status.
+
+Note (alp-sdk#2781): the `multicore_rpmsg-imx93` fixture described above was
+removed together with E1M-NX9101 / the rpmsg-imx93 example; it is no longer
+in the corpus.

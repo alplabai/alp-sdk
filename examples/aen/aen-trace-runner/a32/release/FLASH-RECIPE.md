@@ -75,40 +75,58 @@ when it was built" (`270` before this round). An HP build dir from before the op
 reason: rebuild it. Check the printed line before flashing: `TR_CAM_ROTATE=90
 TR_CAM_MIRROR=ON` for 2026W36-0009.**
 
-## Final blob list (real model, this release)
+## This release reflashes the HE, the HP, the A32 app and the ATOC together
 
-`sha256 6099cdcdff295e25a59107a5318df92f79cfc58ea8c366f5a806f53cf753e898` (the design doc's cut
-model) Vela'd exactly as the design doc's table (`ethos-u55-256`, `RTSS_HP_SRAM_MRAM`,
-`Shared_Sram`, 400 MHz, `--optimise Size`; Vela's own log confirms 277.50 KiB SRAM, 119/0 NPU/CPU
-ops -- matches the design table verbatim), packaged with `a32/release/build-release.sh
-TR_HP_VISION=ON` against a real `hp_vision` build and the `TR_INPUT_NPU=ON` HE build:
+Compared with the previous release this one changes the HE image (frames carry a rotation,
+mailbox version 2), the HP vision image (it waits for the HE's I2C1 release before it touches
+the bus), `a32_app` (the stub and renderer, now speaking mailbox version 2) and therefore the
+ATOC that carries the HE. Flash all of them from ONE build. `bl32` and `movenet_model` are
+unchanged (the board already holds them; `flash-release.sh write` skips an identical sector).
+Do not mix images across releases:
 
-| item | address | size (B) | md5 |
-|---|---|---|---|
-| bl32 | `0x80002000` | 28,816 | `766122d9cebb80bde9a0e346b8a806a2` |
-| a32_app | `0x80020000` | 460,800 | `8f7027fd4dd278740fbfa536a5364143` |
-| atoc | `0x8051BF90` | 409,712 | `26daa777886b2c13d9f35c7490f3ca75` |
-| movenet_model | `0x80100000` | 2,429,520 | `51f3fac2d27a8e2048bc77e0b8010815` |
+| Mixed set | What happens |
+|---|---|
+| new HE, old `a32_app` (stub v1) | the HE logs `stub speaks mailbox version 1, this HE 2 -- not driving it`; it never treats the stub as alive, so no frames are drawn |
+| old HE, new `a32_app` (stub v2, new renderer) | the old HE's 172-byte frames carry no rotation; the renderer reads garbage there and faults (`0xAB1D....` in the mailbox `pad3[7]`), or draws turned |
+| new HP, old HE | the HP waits for an I2C1 release that the old HE never publishes: `i2c-handover: waiting ...` on its console, no camera, no pose, the game runs on its fallback |
+| old HP, new HE | the old HP touches I2C1 at its boot without waiting; on the RVT121 that collides with the bridge configuration |
+| new ATOC, old `a32_app` (or the reverse) | the ATOC's HE and the MRAM renderer disagree on length and CRC: the stub refuses the LAUNCH (`BAD_CRC`) and the HE's watchdog relaunches the same bytes |
 
-**Regenerated fix round 12 (review: this table dated from fix round 4) against commit head at the
-time, `a32/release/build-release.sh` run with no read-back argument, printing `flowd/recipe.txt`
-directly -- `bl32`'s md5 is STILL UNCHANGED across every release so far (the board already holds
-it, so `flash-release.sh write`'s skip-if-identical check is expected to skip it, not write it);
-`movenet_model`'s is unchanged too (same Vela'd cut model, unaffected by this round's fixes).
-`a32_app`/`atoc` DID change (round 12's own fixes -- the MMU NC-page split, the completed font,
-the AE register readback fields all changed what the renderer/stub image actually contains, and
-by extension the ATOC's own size and address) -- confirm the board's actual MRAM state with a
-fresh read-back before trusting any md5 here against live hardware; these are the freshly-built
-images' own, not a read-back-merged flash image's.**
+`flash-release.sh` writes the images `build-release.sh` packaged together, in one pass; the proof
+step reads the same set back. Build the whole release on ONE machine with ONE toolchain (see
+`README.md`): `build-release.sh` refuses an HE whose launch header came from a different
+`renderer.bin`.
 
-**These md5s are of the EXACT images (build-release.sh run without a read-back argument).** The
-sector-merged blobs `flash-release.sh write` actually flashes are different files (each padded
-out to whole 16 KiB sectors with the live read-back's own neighbouring bytes) and will have
-different md5s each run, by design -- `flash-release.sh`'s own fresh-session proof checks the
-padded images it built, not these four. `atoc`'s address is computed per-release by `app-gen-toc`
-from the package size -- do not reuse `0x8051BF00` for a future release without re-reading
-`flowd/recipe.txt`. `build-release.sh`'s own all-pairs sector-overlap assert (`0x4000`-aligned)
-proves these four never share a 16 KiB sector.
+Image md5s of the builds this recipe was last regenerated from (the exact images; the
+sector-merged blobs `flash-release.sh write` flashes are padded with the live read-back and have
+different md5s each run, by design; the `hp_vision` image's md5 is whatever the packaging run's
+`TR_HP_VISION_BUILD` produced and is printed with it). Riverdi RVT121 release, RK055 release (30 Hz via
+`panel_30hz.overlay`), both `TR_INPUT_NPU=ON`, `TR_CAM_ROTATE=90`; the renderer, stub and launch
+header are the SAME files in both:
+
+| image | md5 |
+|---|---|
+| `renderer.bin` (460,460 B, `TR_A32_CRC 0xD6605303`) | `47e15a9eecddba4fb21116b7c7b9f7be` |
+| `a32_stub.bin` | `c4cd1b52855bfbc329f0bf625df3f3f5` |
+| `tr_launch.h` | `282bf49ccf63ead0b651270f96e5b378` |
+| RVT121 `he_zephyr.bin` | `69c7e605e77357e8309199aa586d7a86` |
+| RK055 `he_zephyr.bin` | `8547ba008af1fa5b9b360b5b649716a5` |
+
+The packaged items' addresses and sizes (`a32_app`, `atoc`, `bl32`, `movenet_model`) come from the
+`flowd/recipe.txt` the packaging run prints; this file no longer carries a table of them, because
+`atoc`'s address and size follow the package and change with every HE and HP. The release is
+packaged with `a32/release/build-release.sh TR_HP_VISION=ON` against a real `hp_vision` build and
+the `TR_INPUT_NPU=ON` HE build, the Vela'd cut MoveNet model
+(`sha256 6099cdcdff295e25a59107a5318df92f79cfc58ea8c366f5a806f53cf753e898`, `ethos-u55-256`,
+`RTSS_HP_SRAM_MRAM`, `Shared_Sram`, 400 MHz, `--optimise Size`; Vela's log confirms 277.50 KiB
+SRAM, 119/0 NPU/CPU ops). `build-release.sh`'s own all-pairs sector-overlap assert
+(`0x4000`-aligned) proves the items never share a 16 KiB sector.
+
+**Another display (the Riverdi RVT121, `-DSHIELD=e1m_evk_rvt121hvdfwca0`):** the renderer is one
+binary for every display (the HE sends the panel's rotation in every frame), so `a32_app`, `bl32`
+and `movenet_model` do not change between displays. Only the HE image differs, and with it the
+ATOC. The HP image is the same `hp_vision`; it waits for the HE's I2C1 release
+(`alp,i2c-handover`), so start the HE first.
 
 ## Preconditions
 

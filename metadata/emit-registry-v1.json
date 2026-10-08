@@ -313,6 +313,28 @@
       }
     },
     {
+      "mode": "linux-ownership-dts",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_orchestrate/linux_ownership.py",
+        "function": "emit_linux_ownership_dts"
+      },
+      "scope": "system",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "ignored",
+        "build_root": false
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "dts",
+        "schema_id": null,
+        "path": "build/generated/linux-ownership.dtsi",
+        "consumer_hint": "Per-project A55 core-ownership fragment (inspection and check_amp_pad_claims --project; the linux-renesas bbappend renders the same fragment from the system-manifest ownership)"
+      }
+    },
+    {
       "mode": "os-topology",
       "owner": {
         "cli": "alp_project",

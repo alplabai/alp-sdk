@@ -5,7 +5,7 @@
  * Backends visible on this test build:
  *   sw_fallback     (priority 0,   "*" wildcard, vendor "sw_fallback")
  *
- * Real bodies (tflm, ethos_u_aen, ethos_u_n93) do NOT link into
+ * Real bodies (tflm, ethos_u_aen) do NOT link into
  * this native_sim test build -- they all depend on either TFLM
  * (not on native_sim) or vendor silicon-specific Kconfigs.  The
  * A55/Linux-only DRP-AI / DEEPX DX-M1 engines never register on
@@ -416,7 +416,7 @@ ZTEST(alp_inference_registry, test_renesas_ext_zero_reserve_returns_oor)
 ZTEST(alp_inference_registry, test_deepx_ext_null_handle_returns_inval)
 {
 	alp_deepx_device_status_t status;
-	zassert_equal(alp_deepx_inference_bind_cores(NULL, ALP_DEEPX_NPU_CORE_0), ALP_ERR_INVAL);
+	zassert_equal(alp_deepx_inference_bind_cores(NULL, 0x1u), ALP_ERR_INVAL);
 	zassert_equal(alp_deepx_inference_get_status(NULL, &status), ALP_ERR_INVAL);
 }
 
@@ -437,8 +437,7 @@ ZTEST(alp_inference_registry, test_deepx_ext_non_deepx_returns_not_present)
 		.in_use      = true,
 	};
 	alp_deepx_device_status_t status;
-	zassert_equal(alp_deepx_inference_bind_cores(&fake, ALP_DEEPX_NPU_CORE_0),
-	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
+	zassert_equal(alp_deepx_inference_bind_cores(&fake, 0x1u), ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 	zassert_equal(alp_deepx_inference_get_status(&fake, &status), ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
 }
 
@@ -458,12 +457,11 @@ ZTEST(alp_inference_registry, test_deepx_ext_bad_args_and_no_libdxrt_on_zephyr)
 		.cached_caps = { 0 },
 		.in_use      = true,
 	};
-	/* Core set past the last libdxrt BOUND_OPTION value. */
-	zassert_equal(alp_deepx_inference_bind_cores(&fake, (alp_deepx_npu_cores_t)7u), ALP_ERR_INVAL);
+	/* A mask bit past NPU core 2 is unsupported. */
+	zassert_equal(alp_deepx_inference_bind_cores(&fake, 0x8u), ALP_ERR_NOSUPPORT);
 	zassert_equal(alp_deepx_inference_get_status(&fake, NULL), ALP_ERR_INVAL);
 	/* A DEEPX-vendor handle on an M-class core has no libdxrt behind it. */
 	alp_deepx_device_status_t status;
-	zassert_equal(alp_deepx_inference_bind_cores(&fake, ALP_DEEPX_NPU_CORES_ALL),
-	              ALP_ERR_NOSUPPORT);
+	zassert_equal(alp_deepx_inference_bind_cores(&fake, 0x7u), ALP_ERR_NOSUPPORT);
 	zassert_equal(alp_deepx_inference_get_status(&fake, &status), ALP_ERR_NOSUPPORT);
 }

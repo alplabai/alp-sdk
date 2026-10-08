@@ -51,6 +51,18 @@ i2c:
 
 mipi:
   lanes_supported: [1, 2]
+  role:            csi2_tx
+
+drivers:
+  zephyr:
+    compatible:    "ovti,ov5647"
+  linux:
+    compatible:    "ovti,ov5647"
+    kconfig:       CONFIG_VIDEO_OV5647
+    # No link_freqs / supplies / clock_name: 6.1 ov5647.c checks no link
+    # frequency, requests no regulators and takes its clock unnamed.
+    reset_property: pwdn-gpios
+    xclk_supported_hz: [25000000]
 
 resolutions:
   max:            [2592, 1944]

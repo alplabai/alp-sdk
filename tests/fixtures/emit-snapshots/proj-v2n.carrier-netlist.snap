@@ -62,7 +62,7 @@
           "ref": "XEVK_PIN_PCIE0_I2C_EN"
         }
       ],
-      "board_doc": "Drive high to enable the I2C mux to the PCIe slot."
+      "board_doc": "Drive LOW to enable the I2C switch to the PCIe/M.2 slots (TMUX121 EN is active-low, no pull on the net)."
     },
     {
       "net_id": "XEVK_PIN_I2S_MUX_EN",
@@ -245,7 +245,7 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_LCD1_PWR_EN",
       "board_role": null,
-      "dispatch": "direct",
+      "dispatch": "gd32_bridge",
       "endpoints": [
         {
           "kind": "e1m",
@@ -254,9 +254,15 @@
         {
           "kind": "board-macro",
           "ref": "XEVK_PIN_LCD1_PWR_EN"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PB4"
         }
       ],
-      "board_doc": "DSI display panel 1 power enable."
+      "board_doc": "DSI display panel 1 power enable.",
+      "dispatch_pin": "PB4"
     },
     {
       "net_id": "XEVK_PIN_LCD2_RST",
@@ -328,7 +334,7 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_CAM0_EN",
       "board_role": null,
-      "dispatch": "direct",
+      "dispatch": "TBD",
       "endpoints": [
         {
           "kind": "e1m",
@@ -337,9 +343,14 @@
         {
           "kind": "board-macro",
           "ref": "XEVK_PIN_CAM0_EN"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "TBD"
         }
       ],
-      "board_doc": "Camera-0 power enable."
+      "board_doc": "CAM0 module enable, active-low via N-FET on CAM_GPIO.",
+      "active_low": true
     },
     {
       "net_id": "XEVK_PIN_CAM0_RST",
@@ -347,7 +358,7 @@
       "board_category": "gpio",
       "board_macro": "XEVK_PIN_CAM0_RST",
       "board_role": null,
-      "dispatch": "direct",
+      "dispatch": "TBD",
       "endpoints": [
         {
           "kind": "e1m",
@@ -356,6 +367,10 @@
         {
           "kind": "board-macro",
           "ref": "XEVK_PIN_CAM0_RST"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "TBD"
         }
       ],
       "board_doc": "Camera-0 reset (active-low).",
@@ -382,7 +397,7 @@
           "ref": "unrouted"
         }
       ],
-      "board_doc": "USB path-mux select.",
+      "board_doc": "USB path-mux select. Driven by the DX-M1 on V2M, undriven on V2N (driven_by in the SoM pad_routes); polarity/default pending carrier-netlist confirmation.",
       "som_doc": "Not a GD32 pad; nothing drives it on V2N (no DX-M1 fitted). Bridge bit 8 answers STATUS_IO (#2453)."
     },
     {
@@ -579,7 +594,8 @@
           "ref": "XEVK_I2C_BUS_DSI_CSI0"
         }
       ],
-      "board_doc": "Display/camera control I2C bank 0 (DSI panel + CSI camera-side config)."
+      "board_doc": "Display/camera control I2C bank 0 (DSI panel + CSI camera-side config).",
+      "dispatch_pin": "RIIC2"
     },
     {
       "net_id": "XEVK_I2C_BUS_DSI_CSI1",
@@ -1176,6 +1192,24 @@
       ]
     },
     {
+      "net_id": "E1M_X_CSI0",
+      "e1m": "E1M_X_CSI0",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "direct",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_CSI0"
+        }
+      ],
+      "dispatch_pin": "CSI0",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
       "net_id": "E1M_X_ENC1",
       "e1m": "E1M_X_ENC1",
       "board_category": null,
@@ -1332,6 +1366,29 @@
         }
       ],
       "dispatch_pin": "PC15",
+      "caveats": [
+        "som_only_no_carrier_role"
+      ]
+    },
+    {
+      "net_id": "E1M_X_GPIO_IO26",
+      "e1m": "E1M_X_GPIO_IO26",
+      "board_category": null,
+      "board_macro": null,
+      "board_role": null,
+      "dispatch": "gd32_bridge",
+      "endpoints": [
+        {
+          "kind": "e1m",
+          "ref": "E1M_X_GPIO_IO26"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "gd32_bridge",
+          "pin": "PC2"
+        }
+      ],
+      "dispatch_pin": "PC2",
       "caveats": [
         "som_only_no_carrier_role"
       ]
@@ -1619,6 +1676,46 @@
           {
             "role": "pullup",
             "value": "10k",
+            "net": "SDA",
+            "refdes_prefix": "R"
+          }
+        ]
+      },
+      {
+        "item_id": "ina228",
+        "kind": "chip",
+        "scope": "carrier",
+        "source": "metadata/chips/ina228.yaml",
+        "display_name": "TI INA228 85 V 20-bit power / energy / charge monitor",
+        "vendor": "ti",
+        "mpn_population": [
+          "INA228AIDGS"
+        ],
+        "bus": "i2c",
+        "quantity": null,
+        "physical": {
+          "refdes_prefix": "U",
+          "package": "VSSOP-10",
+          "footprint": "vssop_10_3x3mm",
+          "visibility": "public",
+          "provenance": "web_provisional"
+        },
+        "passives": [
+          {
+            "role": "decouple",
+            "value": "100nF",
+            "net": "VS",
+            "refdes_prefix": "C"
+          },
+          {
+            "role": "pullup",
+            "value": "4k7",
+            "net": "SCL",
+            "refdes_prefix": "R"
+          },
+          {
+            "role": "pullup",
+            "value": "4k7",
             "net": "SDA",
             "refdes_prefix": "R"
           }

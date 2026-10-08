@@ -90,12 +90,21 @@ def fake_git_repo(tmp_path):
         "/* stub */\n",
         encoding="utf-8"
     )
+    # gen_amp_window's output; same fail-closed `git add -N` contract.
+    (tmp_path / "src" / "backends" / "rpc").mkdir(parents=True)
+    (tmp_path / "src" / "backends" / "rpc" / "alp_amp_window.h").write_text(
+        "/* stub */\n", encoding="utf-8"
+    )
     (tmp_path / "metadata" / "pinmux").mkdir(parents=True)
     (tmp_path / "metadata" / "pinmux" / "existing.tsv").write_text("x\n", encoding="utf-8")
     (tmp_path / "metadata" / "catalog.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "metadata" / "error-catalog.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "metadata" / "socs" / "renesas" / "rzv2n").mkdir(parents=True)
     (tmp_path / "metadata" / "socs" / "renesas" / "rzv2n" / "n44.json").write_text("{}\n", encoding="utf-8")
+    # #2660: the Linux ownership fragment is in the same pathspec.
+    lx = tmp_path / "meta-alp-sdk" / "recipes-kernel" / "linux" / "linux-renesas"
+    lx.mkdir(parents=True)
+    (lx / "e1m-v2n-ownership.dtsi").write_text("/* stub */\n", encoding="utf-8")
     (tmp_path / "examples" / "aen").mkdir(parents=True)
     (tmp_path / "examples" / "aen" / "existing.c").write_text("/* stub */\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)

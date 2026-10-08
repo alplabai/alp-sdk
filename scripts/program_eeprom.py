@@ -137,7 +137,6 @@ def _resolve_family(sku: str, metadata_root: Path) -> str:
         "alif-ensemble": "aen",
         "renesas-rzv2n": "v2n",
         "renesas-rzv2n-deepx": "v2n-m1",
-        "nxp-imx9":  "imx93",
     }.get(family, family)
     if not family_dir:
         sys.exit(f"program_eeprom: {sku}'s preset has no `family:` field")

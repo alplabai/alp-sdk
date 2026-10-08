@@ -247,6 +247,7 @@ def _run_v2_emit(args: argparse.Namespace) -> int:
             emit_system_manifest,
             load_board_yaml,
         )
+        from alp_orchestrate.linux_ownership import emit_linux_ownership_dts
     except ImportError as e:
         print(f"alp_project: failed to import alp_orchestrate: {e}",
               file=sys.stderr)
@@ -263,6 +264,8 @@ def _run_v2_emit(args: argparse.Namespace) -> int:
             out = emit_dts_reservations(project)
         elif args.emit == "os-topology":
             out = emit_os_topology(project)
+        elif args.emit == "linux-ownership-dts":
+            out = emit_linux_ownership_dts(project)
         else:
             print(f"alp_project: unknown v2 emit '{args.emit}'",
                   file=sys.stderr)
@@ -288,9 +291,14 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             OrchestratorError,
             _slice_alp_conf,
             _slice_cmake_args,
+            _slice_dts_overlay,
+            _slice_hw_info_h,
             _slice_local_conf,
+            _slice_west_libraries,
+            _v1_shaped_project,
             load_board_yaml,
         )
+        from alp_orchestrate.ownership import project_m33_overlay
     except ImportError as e:
         print(f"alp_project: failed to import alp_orchestrate: {e}",
               file=sys.stderr)
@@ -315,17 +323,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
     # hw-info-h, west-libraries).  The public board.yaml schema no
     # longer uses this wrapper, but it's a convenient internal
     # representation for the emitters' read paths.
-    project_v1_shaped: dict[str, Any] = {
-        "som": {
-            "sku":    project.sku,
-            "hw_rev": project.hw_rev,
-        },
-        "pins": list(project.raw.get("pins") or []),
-        "board": ({
-            "name":   project.board_name,
-            "hw_rev": project.board_hw_rev,
-        } if project.board_name else None),
-    }
+    project_v1_shaped: dict[str, Any] = _v1_shaped_project(project)
 
     # --- zephyr-board: writes a directory of files, not a single stream --
     if args.emit == "zephyr-board":
@@ -365,16 +363,14 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
         # fact.  v2 contributes only the peripherals list: union across
         # Zephyr/baremetal cores (or one core when --core is set).
         if args.core is not None:
-            slice_ = project.cores[args.core]
-            v2_peripherals = sorted(set(slice_.peripherals))
-            out = _emit_dts_overlay(
-                project_v1_shaped, project.som_preset,
-                project.board_preset,
-                v2_peripherals=v2_peripherals,
-                v2_core_id=args.core,
-                v2_core_os=slice_.os,
-                v2_core_ids=[args.core],
-            )
+            # Single source shared with the build plan's `alp.overlay`
+            # configArtefact (ADR-0026 §D), M33-ownership nodes included.
+            try:
+                out = _slice_dts_overlay(project, project.cores[args.core])
+            except OrchestratorError as e:
+                print(f"alp_project: {e}", file=sys.stderr)
+                return 1
+            return _write_or_print(out, args.output)
         else:
             union: set[str] = set()
             zephyr_core_ids: list[str] = []
@@ -388,6 +384,16 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
                 v2_peripherals=sorted(union),
                 v2_core_ids=zephyr_core_ids,
             )
+        # Per-product core ownership: enable the assignable nodes this
+        # project assigned to the M33 (the board tree carries them disabled).
+        try:
+            own_dts, _ = project_m33_overlay(project, args.core)
+        except OrchestratorError as e:
+            print(f"alp_project: {e}", file=sys.stderr)
+            return 1
+        if own_dts:
+            out += ("\n/* Assignable peripherals owned by the M33 "
+                    "(board.yaml `ownership:`). */\n" + "\n".join(own_dts) + "\n")
         return _write_or_print(out, args.output)
 
     if args.emit == "native-sim-overlay":
@@ -400,19 +406,27 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
         # hw-info-h is a project-level emit even under v2 -- consumers
         # `#include` it from any slice.  --core picks which slice's OS
         # lands in ALP_HW_BUILD_OS; absent --core, primary-core rules apply.
+        if args.core is not None:
+            # Single source shared with the build plan's
+            # `alp_hw_info_build.h` configArtefact (ADR-0026 §D).
+            out = _slice_hw_info_h(project, project.cores[args.core])
+            return _write_or_print(out, args.output)
         v2_cores = {cid: s.os for cid, s in project.cores.items()}
         out = _emit_hw_info_h(
             project_v1_shaped, project.som_preset,
             project.board_preset,
             v2_cores=v2_cores,
-            v2_selected_core=args.core,
+            v2_selected_core=None,
+            metadata_root=project.effective_metadata_root(),
         )
         return _write_or_print(out, args.output)
 
     if args.emit == "west-libraries":
         if args.core is not None:
-            slice_ = project.cores[args.core]
-            v2_libraries = sorted(set(slice_.libraries))
+            # Single source shared with the build plan's
+            # `alp-west-libs.yml` configArtefact (ADR-0026 §D).
+            out = _slice_west_libraries(project, project.cores[args.core])
+            return _write_or_print(out, args.output)
         else:
             union_l: set[str] = set()
             for slice_ in project.cores.values():
@@ -538,7 +552,7 @@ def main() -> int:
                                  "hw-info-h", "west-libraries",
                                  # v2 orchestration emits (Phase 2):
                                  "system-manifest", "dts-reservations",
-                                 "ipc-contract-h",
+                                 "ipc-contract-h", "linux-ownership-dts",
                                  # Per-core natural-vs-effective OS facts (issue #95).
                                  "os-topology",
                                  # Carrier routing / Studio handoff JSON.
@@ -596,7 +610,7 @@ def main() -> int:
     # Project-wide v2 emit modes (system-manifest, dts-reservations,
     # ipc-contract-h) route through alp_orchestrate/ directly.
     if args.emit in ("system-manifest", "dts-reservations",
-                     "ipc-contract-h", "os-topology"):
+                     "ipc-contract-h", "os-topology", "linux-ownership-dts"):
         return _run_v2_emit(args)
 
     project = _validate_and_load(args.input, args.metadata_root)

@@ -34,6 +34,8 @@ Top-level fields:
 `e1m_routes:` (customer path).  Both omitted is also fine -- a
 headless / inference-only build with no board declaration.
 
+Board presets (`metadata/boards/*.yaml`, not a project `board.yaml`) may also declare `pad_levels:` -- `{e1m, signal_v, level_shifter?}` per E1M route, keyed on the route and never on an SoC pad, so the carrier stays SoM-agnostic.  `scripts/check_pad_voltage.py` resolves each `e1m_routes` route (any class) through the pinmux table and host SoC of every SoM family the preset hosts, and requires an entry when a route lands on a pad the SoC marks non-3.3 V tolerant (`pad_tolerance` in the SoC JSON; RZ/V2N: P90-P92, P2x, PBx, per the hardware manual's IO-block table, Note 1).  A `signal_v` above the SoC `max_signal_v` needs a `level_shifter`.  A project `board.yaml` carries no `pad_levels`.
+
 Per-core fields under `cores.<id>` (all optional, all inherit from
 the SoM preset's `topology.<id>` when omitted):
 
@@ -242,7 +244,7 @@ which carries the per-variant MRAM / SRAM / package /
 
 The reverse path (`alp_module_skus` arrays inside each SoC JSON
 variant) stays in place as a fallback for legacy presets that
-omit the field, AND for the placeholder `E1M-NX9101` preset which
+omit the field, AND for any preset that
 carries `silicon_variant: TBD` per the no-inventing-values rule.
 Resolver: `_resolve_silicon_variant()` in
 [`scripts/alp_project.py`](../scripts/alp_project.py).
@@ -304,7 +306,7 @@ with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 #### Preset mode (SDK-internal shortcut)
 
 Most example projects under `examples/` target the EVK or X-EVK
-(102 do today — 76 on `e1m-evk`, 26 on `e1m-x-evk`), so they share a
+(103 do today — 75 on `e1m-evk`, 28 on `e1m-x-evk`), so they share a
 single board definition each via the `preset:` field:
 
 ```yaml
@@ -359,6 +361,42 @@ is supplied it must match the board's macro for that pad
 (catches drift if the demo references `EVK_PIN_LED_RED` but the
 preset moved it).  Bare-string and object entries can mix in the
 same list.
+
+#### `cameras:` and `camera_connectors:` (camera modules)
+
+A camera is declared by naming the module in the connector it is plugged
+into; the sensor chip, I2C address, oscillator and lane count come from
+metadata, never from `board.yaml`:
+
+```yaml
+cameras:
+  - { connector: CAM0, module: innomaker_cam_ov9281 }
+```
+
+- `connector` must be a key of the resolved board's `camera_connectors:`
+  (CAM0, CAM1, ...); `module` must have a
+  `metadata/camera_modules/<module>.yaml` (schema
+  `camera-module-v1`).  Each connector appears at most once.
+- `camera_connectors:` is board data, next to `e1m_routes:` in a board
+  preset (`metadata/boards/<name>.yaml`) or inline at the top level of a
+  custom board's `board.yaml` (mutually exclusive with `preset:`, like
+  `populated:` and `e1m_routes:`).  Per connector: `refdes`, `csi` (E1M CSI
+  receiver), `lanes`, `i2c` (an `e1m_routes.buses` macro), and optionally
+  `select` (mux GPIO levels), `enable`, `reset` (`e1m_routes.gpio` macros),
+  `supply` (what feeds the module, e.g. `fixed-3v3`), `lane_polarity` and
+  `notes`.  Signals reference macros already declared in `e1m_routes:`;
+  pads are never restated.
+- The `active_low` flag of the route behind `enable` / `reset` is
+  **normative**: generators emit `GPIO_ACTIVE_LOW` from it.  An asserted
+  enable means "camera on", so on a carrier where the pad drives an N-FET
+  that pulls the module enable low (X-EVK CAM0), the route is
+  `active_low: true`.
+- `lane_polarity` holds one 0/1 inversion flag per lane, clock first:
+  `lanes + 1` entries.
+
+`tan validate` rejects an unknown connector, an unknown module, a
+duplicated connector, and (inline boards) an unresolvable macro or a wrong
+`lane_polarity` length, all as [ALP-B003](diagnostics/ALP-B003.md).
 
 #### Pin direction (NOT in `board.yaml`)
 
@@ -440,15 +478,13 @@ metadata/
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
 │   ├── E1M-V2M102.yaml      # V2N-M1 SKU
 │   ├── E1M-V2M103.yaml      # V2N-M1 SKU, 4 GB / 16 GB memory tier
-│   └── E1M-NX9101.yaml      # i.MX 93 placeholder MPN (production E1M-NX9xxx TBD)
 └── boards/
-    ├── e1m-evk.yaml            # 35x35 EVK (AEN / N93)
+    ├── e1m-evk.yaml            # 35x35 EVK (AEN)
     ├── e1m-x-evk.yaml          # 45x65 EVK (V2N / V2N-M1)
     └── custom-example.yaml     # template downstream consumers copy + edit
 ```
 
-v0.3 ships the schema + ten production SoM presets, the
-placeholder N93 bring-up preset (`E1M-NX9101`), the two stock
+The tree ships the schema + thirteen SoM presets, the two stock
 boards, and a copy-friendly custom-example template.  Two SKUs
 (`E1M-AEN801`, `E1M-V2N101`) are the primary worked presets; lower-priority
 or not-yet-final SKUs carry `partial_hw_config: true` so
@@ -684,7 +720,7 @@ hidden:
   (no invented Kconfig); emit renders the selection tag with no
   `CONFIG_` line until the module is added to `west.yml`.
 - **ROS 2 is Tier B (recipe-only)**: its wiring is grounded in
-  `meta-alp-sdk` (`rclcpp`; `meta-ros2-humble` as a `LAYERRECOMMENDS`),
+  `meta-alp-sdk` (`rclcpp`; collection `ros2-humble-layer` as a `LAYERRECOMMENDS`),
   but alp-sdk CI does not build it, and a build must add
   `meta-ros2-humble` to `bblayers.conf`.
 - The **cross-core RMW bridge** that carries ROS topics between the two

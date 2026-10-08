@@ -1,0 +1,40 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  A display's backlight at its default brightness, set once at boot.
+
+  The SDK sets the brightness (src/zephyr/display_backlight.c, APPLICATION
+  init, through led_set_brightness()), so an application that opens the
+  display needs no backlight code. The node names an LED -- a child of a
+  pwm-leds or gpio-leds node -- and the percentage it starts at.
+
+  Do NOT use this for a backlight enable that the panel driver already owns
+  (the HX8394's bl-gpios): that pin is a driver-sequenced enable, never a
+  dimming PWM.
+
+compatible: "alp,display-backlight"
+
+include: base.yaml
+
+properties:
+  led:
+    type: phandle
+    required: true
+    description: |
+      The backlight LED: a child node of a pwm-leds or gpio-leds node.
+
+  default-brightness:
+    type: int
+    default: 100
+    description: |
+      Initial brightness, percent, 0..100 (asserted at build time).
+
+  required-devices:
+    type: phandles
+    description: |
+      Devices that must be ready before the backlight is lit (the display
+      controller, a bridge): if any of them failed to initialise the backlight
+      stays off and the reason is logged, instead of lighting a dead panel.
+      The backlight is set at a later APPLICATION priority than the display
+      chain, so these have run by then.

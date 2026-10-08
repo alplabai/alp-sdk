@@ -1,5 +1,7 @@
 # CX Improvements Implementation Plan
 
+> **Note (2026-10-08):** the `alp` CLI (`init`/`run`/`validate`) this plan builds is retired; `tan` is the CLI (ADR 0020, #1727). Only the init/run/validate command wrappers moved to `tan`; the board.yaml validator (`validator.py`), `yaml_pos.py`, the diagnostics modules (`diagnostic.py`, `diagnostic_format.py`) and `_workspace.py` remain under `scripts/alp_cli/` as library code.
+
 > **Historical transcript.** Implementation plan dated 2026-05-20. The
 > SDK has since shipped through the v0.15.0 release candidate
 > (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing

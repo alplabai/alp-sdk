@@ -36,7 +36,7 @@ EXTRA_OECMAKE = " \
     -DALP_BUILD_CHIPS_ONLY=ON \
 "
 
-# Per-machine chip subset.  V2N / V2N-M1 / N93 carriers all use
+# Per-machine chip subset.  V2N / V2N-M1 carriers all use
 # the same E1M / E1M-X EVK, so the chip set is largely identical;
 # only the peripheral routing underneath differs (handled by
 # alp-sdk's Linux backend).
@@ -51,13 +51,14 @@ EXTRA_OECMAKE = " \
 # CMakeLists.txt's CHIP_LIST_EXCLUDED_WITH_REASON note); the V2N
 # BRD_I2C bring-up example links all five.
 PACKAGECONFIG ??= " \
-    tcal9538 ina236 tas2563 lsm6dso bmi323 bmp581 \
+    tcal9538 ina228 ina236 tas2563 lsm6dso bmi323 bmp581 \
     icm42670 ssd1306 ssd1331 tmp112 rv3028c7 \
     optiga_trust_m eeprom_24c128 ov5640 cam_mux_pi3wvr626 \
     ublox_neo_m9n act8760 da9292 clk_5l35023b tps628640 gd32g553 \
 "
 
 PACKAGECONFIG[tcal9538]            = "-DALP_SDK_CHIP_TCAL9538=ON,-DALP_SDK_CHIP_TCAL9538=OFF"
+PACKAGECONFIG[ina228]              = "-DALP_SDK_CHIP_INA228=ON,-DALP_SDK_CHIP_INA228=OFF"
 PACKAGECONFIG[ina236]              = "-DALP_SDK_CHIP_INA236=ON,-DALP_SDK_CHIP_INA236=OFF"
 PACKAGECONFIG[tas2563]             = "-DALP_SDK_CHIP_TAS2563=ON,-DALP_SDK_CHIP_TAS2563=OFF"
 PACKAGECONFIG[lsm6dso]             = "-DALP_SDK_CHIP_LSM6DSO=ON,-DALP_SDK_CHIP_LSM6DSO=OFF"

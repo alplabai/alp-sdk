@@ -11,18 +11,20 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import json
 import re
 import shlex
 import subprocess
-import sys
+import tempfile
 import time
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from provision import bmap, payload_store
 from provision.bench import BenchError, ExpectTimeout
-from provision.gates import CM33_REGION_OFFSET
+from provision.gates import BOOT_ENV_OFFSET, CM33_REGION_OFFSET
 
 if TYPE_CHECKING:
     from provision.bench import Console
@@ -33,11 +35,37 @@ EEPROM_SIZE = 0x4000           # N24S128: 16 KiB, 2-byte word address
 EEPROM_DEVICE_PAGE = 64        # hardware page; a page write must not cross it
 MANIFEST_LEN = 128
 
-# SoC SYS block. Offsets follow the RZ/V2H-family SYS layout (LSI_MODE / DEVID /
-# PRR at 0x300 / 0x304 / 0x308). UNVERIFIED for RZ/V2N against the hardware
-# manual -- every census value from here carries that marker.
-SYS_REGS = {"soc_sys_lsi_mode": 0x10430300, "soc_lsi_devid": 0x10430304, "soc_prr": 0x10430308}
-SYS_REGS_NOTE = "unverified addr"
+REPO = Path(__file__).resolve().parents[2]
+
+
+def sys_lsi_spec(silicon: str) -> dict:
+    """SYS_LSI register addresses and the MD_BOOT decode of a SoC, from its description
+    (``boot_strap`` of metadata/socs/<vendor>/<family>/<part>.json); ``silicon`` is the preset's
+    ``vendor:family:part``. The hardware-manual facts live there, not in this file."""
+    from alp_project_loader import resolve_soc_path   # scripts/ is on sys.path
+    path = resolve_soc_path(silicon, REPO / "metadata")
+    if path is None:
+        raise ValueError(f"{silicon!r}: not a vendor:family:part silicon ref")
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if "boot_strap" not in doc:
+        raise ValueError(f"{silicon}: no boot_strap block in the SoC description")
+    return doc["boot_strap"]
+
+
+def decode_lsi_mode(value: int, spec: dict) -> dict[str, str]:
+    """Ledger keys decoded from a SYS_LSI_MODE read: the latched debug-mode strap (MD_BOOT3,
+    1 = debug mode), MD_BOOT[2:0], the boot device MD_BOOT[1:0] selects and the boot CPU the BOOTSELCPU strap selects."""
+    m = spec["strap_word"]
+    md = (value >> m["boot_pins_shift"]) & ((1 << m["boot_pins_width"]) - 1)
+    dev = md & ((1 << m["boot_device_pins_width"]) - 1)
+    names = m["boot_device_names"]
+    cpus = m["boot_cpu_names"]
+    cpu = (value >> m["boot_cpu_bit"]) & 1
+    return {"soc_boot_debug_en": str((value >> m["debug_enable_bit"]) & 1),
+            "soc_md_boot": f"{md:#x}",
+            "soc_boot_device": names[dev] if dev < len(names) else "unknown",
+            "soc_boot_cpu": cpus[cpu] if cpu < len(cpus) else "unknown"}
+
 
 ACT88760_ADDR = 0x25
 ACT88760_GPIO_REG = 0x10
@@ -60,7 +88,6 @@ DA9292_REGS = {
 }
 TPS628640_ADDRS = (0x44, 0x48, 0x4D, 0x4F)
 TPS628640_VOUT1 = 0x01
-RV3028_ADDR = 0x52
 CLKGEN_5L35023B_ADDR = 0x69
 # Bench-proven (2026-09-24/25) factory OTP image, reg 0x00..0x24 (37 bytes),
 # read ONE BYTE AT A TIME (i2cget): a combined i2ctransfer read bit-slips on
@@ -69,17 +96,12 @@ CLKGEN_OTP_IMAGE = bytes.fromhex(
     "a0 00 bb 04 32 08 cc 21 19 4c f2 16 5f 22 f0 3e 00 80 00 00 00 00 00 00 "
     "0e 0c 19 12 3f f0 90 46 a0 80 b0 b0 9c")
 CLKGEN_REG_COUNT = len(CLKGEN_OTP_IMAGE)  # 0x25 (37): reg 0x00..0x24 inclusive
-# U-Boot's 5L35023B fixup (U-Boot patch 0007, #2293) rewrites these two OTP
-# registers every boot; a post-boot read must expect the fixed-up values, not
-# the factory ones.
-CLKGEN_FIXUP_REGS = {0x21: 0xC0, 0x24: 0x8E}
-# DX-M1 (V2M-only) vendor firmware + the vendor uart_boot (aarch64) tool
-# binary itself, all pinned by md5 -- see docs/provisioning-v2n.md.
-DXM1_FW_UART_BOOT_MD5 = "ae449610ca72f4ebd431e4e2f7ebe0ab"
-DXM1_FW_MD5 = "88641281169f35de5ed7e33c072c93a9"
-DXM1_FW_VERSION = "2.4.0"
-DXM1_UART_BOOT_TOOL_MD5 = "5971694fb5b616bffcadcc5e6d32c1db"
-
+# U-Boot's 5L35023B fixup (U-Boot patches 0007, #2293, and 0012) rewrites these
+# three OTP registers every boot; a post-boot read must expect the fixed-up
+# values, not the factory ones. 0x1F = 0xC7 routes SE2 (the GD32 HXTAL input) from
+# DIV4 = 24.576 MHz (OTP 0x46 leaves it free-running at 32.768 kHz); 0x24 = 0x8F
+# is the old 0x8E plus bit 0 DIV4_CH2_EN, which SE2 needs.
+CLKGEN_FIXUP_REGS = {0x1F: 0xC7, 0x21: 0xC0, 0x24: 0x8F}
 # preset i2c_devices bus name -> bench.yaml i2c_bus key
 PRESET_BUS_TO_BENCH = {"e1m_i2c0": "eeprom", "brd_i2c": "brd"}
 
@@ -109,10 +131,12 @@ class LinuxTarget:
     def _exec(self, argv: list[str], timeout: float, stdin_path: Path | None = None) -> CmdResult:
         try:
             if stdin_path is None:
-                p = self.runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+                p = self.runner(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=timeout)
             else:
                 with open(stdin_path, "rb") as f:
-                    p = self.runner(argv, stdin=f, capture_output=True, text=True, timeout=timeout)
+                    p = self.runner(argv, stdin=f, capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace", timeout=timeout)
         except subprocess.TimeoutExpired as e:
             raise BenchError(f"timed out after {timeout}s: {argv[-1]}") from e
         except OSError as e:
@@ -178,16 +202,32 @@ _CPR_REPLY = b"\x1b[24;80R"
 CONSOLE_SETTLE_S = 0.5
 
 
+RESYNC_TRIES = 3     # newlines sent to a silent console before the wait gives up
+
+
 def _expect_answering_cpr(console: Console, patterns: dict[str, str], timeout: float) -> str:
     """expect_any(), but a cursor-position query on the way is answered (an
-    unanswered resize leaves the shell busy and garbles the next commands)."""
-    deadline = time.monotonic() + timeout
+    unanswered resize leaves the shell busy and garbles the next commands).
+
+    A kernel printk can land right after the prompt on the same line
+    (`root@unit:~# [   13.5] Bluetooth: ...`), so the prompt never ends the text. The wait is
+    split in RESYNC_TRIES + 1 windows; a window with no match sends a newline, which makes
+    the shell print a fresh prompt at the start of a line. The patterns stay anchored
+    (a prompt must END the text), so a `# ` in the middle of a log line still never matches."""
     pats = {**patterns, "cpr": re.escape(_CPR_QUERY)}
-    while True:
-        key, _ = console.expect_any(pats, max(deadline - time.monotonic(), 0.1))
-        if key != "cpr":
-            return key
-        console.write(_CPR_REPLY)
+    window = timeout / (RESYNC_TRIES + 1)
+    for attempt in range(RESYNC_TRIES + 1):
+        deadline = time.monotonic() + window
+        try:
+            while True:
+                key, _ = console.expect_any(pats, max(deadline - time.monotonic(), 0.1))
+                if key != "cpr":
+                    return key
+                console.write(_CPR_REPLY)
+        except ExpectTimeout:
+            if attempt == RESYNC_TRIES:
+                raise
+            console.send_line("")
 
 
 def _settle(console: Console) -> None:
@@ -258,7 +298,7 @@ def console_login(console: Console, user: str = "root", timeout: float = 120.0) 
     _settle(console)
     # no more escape-sequence queries from the shell or its profile
     send_checked(console, "export TERM=dumb")
-    console.expect(_SHELL, 10.0)
+    _expect_answering_cpr(console, {"shell": _SHELL}, 10.0)
     wait_system_settled(console)
 
 
@@ -300,28 +340,31 @@ def mtd_erasesize(t: LinuxTarget, mtd: int) -> int:
     return int(t.run(f"cat /sys/class/mtd/mtd{mtd}/erasesize").stdout.strip())
 
 
-def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = None) -> str:
-    """Erase ceil(size/erasesize) blocks from 0, write, read back, md5-compare."""
+def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = None, store=None,
+                     offset: int = 0) -> str:
+    """Erase ceil(size/erasesize) blocks from `offset` (erase-aligned), write, read back, md5-compare."""
     data_len = local.stat().st_size
     if data_len == 0:
         raise ValueError(f"{local} is empty")
     es = mtd_erasesize(t, mtd)
+    if offset % es:
+        raise ValueError(f"{local.name}: offset {offset:#x} is not aligned to the {es:#x} erase size of mtd{mtd}")
     blocks = -(-data_len // es)
-    if limit is not None and blocks * es > limit:
+    if limit is not None and offset + blocks * es > limit:
         raise ValueError(f"{local.name}: erase of {blocks * es:#x} bytes on mtd{mtd} would reach {limit:#x}")
     part = int(t.run(f"cat /sys/class/mtd/mtd{mtd}/size").stdout.strip())
-    if blocks * es > part:
+    if offset + blocks * es > part:
         raise ValueError(f"{local.name} ({data_len} bytes) does not fit mtd{mtd} ({part:#x})")
     want = _host_md5(local)
     remote = f"/tmp/{local.name}"
-    t.put(local, remote)
+    payload_store.stage(t, store, local, remote)
     try:
         if t.md5(remote) != want:
             raise BenchError(f"{remote}: copy on the target does not match {local.name}")
         dev = f"/dev/mtd{mtd}"
-        t.run(f"flash_erase {dev} 0 {blocks}", timeout=600.0)
-        t.run(f"mtd_debug write {dev} 0 {data_len} {shlex.quote(remote)}", timeout=600.0)
-        got = t.md5(dev, 0, data_len)
+        t.run(f"flash_erase {dev} {offset} {blocks}", timeout=600.0)
+        t.run(f"mtd_debug write {dev} {offset} {data_len} {shlex.quote(remote)}", timeout=600.0)
+        got = t.md5(dev, offset, data_len)
     finally:
         t.run(f"rm -f {shlex.quote(remote)}", check=False)
     if got != want:
@@ -331,21 +374,30 @@ def mtd_write_verify(t: LinuxTarget, mtd: int, local: Path, limit: int | None = 
 
 # --- eMMC boot area + EXT_CSD ------------------------------------------------------
 
-def emmc_boot1_write_verify(t: LinuxTarget, emmc: str, local: Path, sector: int) -> str:
-    """dd into <emmc>boot1 at `sector` (512 B), force_ro cleared only for the write."""
+# Boot partition 1 = Linux `boot0`, the one EXT_CSD[179]=0x08 boots (and the one
+# Flash Writer `EM_W` area 1 writes). Linux `boot1` is boot partition 2, which is
+# never booted: every access to the boot loader goes through this constant.
+EMMC_BOOT_PART = "boot0"
+
+
+def emmc_boot_write_verify(t: LinuxTarget, emmc: str, local: Path, sector: int, store=None) -> str:
+    """dd into <emmc>boot0 (boot partition 1) at `sector` (512 B), force_ro cleared only for the write."""
     data_len = local.stat().st_size
     want = _host_md5(local)
     name = emmc.rsplit("/", 1)[-1]
-    force_ro = f"/sys/block/{name}boot1/force_ro"
-    dev = f"{emmc}boot1"
-    # boot1 is a few MiB: refuse before writing anything rather than leave a
+    force_ro = f"/sys/block/{name}{EMMC_BOOT_PART}/force_ro"
+    dev = f"{emmc}{EMMC_BOOT_PART}"
+    # the boot partition is a few MiB: refuse before writing anything rather than leave a
     # new BL2 next to a half-written FIP when the image runs off the end.
-    part = int(t.run(f"cat /sys/block/{name}boot1/size").stdout.strip()) * 512
+    part = int(t.run(f"cat /sys/block/{name}{EMMC_BOOT_PART}/size").stdout.strip()) * 512
     if sector * 512 + data_len > part:
         raise BenchError(f"{local.name} ({data_len} B) at sector {sector:#x} does not fit "
                          f"{dev} ({part} B)")
+    if sector * 512 + data_len > BOOT_ENV_OFFSET:
+        raise BenchError(f"{local.name} ({data_len} B) at sector {sector:#x} would reach the "
+                         f"U-Boot environment at {dev}+{BOOT_ENV_OFFSET:#x}")
     remote = f"/tmp/{local.name}"
-    t.put(local, remote)
+    payload_store.stage(t, store, local, remote)
     try:
         if t.md5(remote) != want:
             raise BenchError(f"{remote}: copy on the target does not match {local.name}")
@@ -386,7 +438,7 @@ def ext_csd(t: LinuxTarget, emmc: str) -> dict[int, int]:
 
 
 def set_boot_config(t: LinuxTarget, emmc: str) -> None:
-    """[177]=0x02 (x8, SDR backward-compatible, reset to x1), [179]=0x08 (boot1, no ACK)."""
+    """[177]=0x02 (x8, SDR backward-compatible, reset to x1), [179]=0x08 (boot partition 1, no ACK)."""
     t.run(f"mmc bootbus set single_backward x1 x8 {emmc}")
     t.run(f"mmc bootpart enable 1 0 {emmc}")
     regs = ext_csd(t, emmc)
@@ -396,7 +448,7 @@ def set_boot_config(t: LinuxTarget, emmc: str) -> None:
 
 # --- rootfs ----------------------------------------------------------------------------
 
-def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float = 3600.0) -> str:
+def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float = 3600.0, store=None) -> dict[str, str]:
     """Stream the gzipped wic over SSH into the eMMC user area, then md5 the written span."""
     h = hashlib.md5()
     n = 0
@@ -405,14 +457,80 @@ def rootfs_write_verify(t: LinuxTarget, emmc: str, wic_gz: Path, timeout: float 
             h.update(block)
             n += len(block)
     want = h.hexdigest()
-    t.run(f"gunzip -c | dd of={emmc} bs=4M && sync", timeout=timeout, stdin_path=wic_gz)
+    local = store.fetch(wic_gz) if store is not None else None      # hash-verified on the board
+    t.run(f"gunzip -c{' ' + shlex.quote(local) if local else ''} | dd of={emmc} bs=4M && sync",
+          timeout=timeout, stdin_path=None if local else wic_gz)
     # busybox images may lack blockdev: fall back to the BLKRRPART ioctl
     t.run(f"blockdev --rereadpt {emmc} 2>/dev/null || python3 -c "
           f"\"import fcntl, os; fcntl.ioctl(os.open('{emmc}', os.O_RDONLY), 0x125f)\"")
     got = t.md5(emmc, 0, n)
     if got != want:
         raise BenchError(f"{emmc} readback md5 {got} != uncompressed {wic_gz.name} md5 {want}")
-    return got
+    return {"rootfs_md5": got, "rootfs_bytes_written": str(n), "rootfs_image_bytes": str(n)}
+
+
+RANGES_PATH = "/tmp/alp-bmap-ranges"
+# before any read that must come from the media (the bmap readback, functional_test's eMMC read)
+DROP_CACHES = "sync; echo 3 > /proc/sys/vm/drop_caches"
+WRITER = Path(__file__).with_name("bmap_writer.py")
+WRITER_PATH = "/tmp/alp-bmap-writer.py"
+
+
+def have_python3(t: LinuxTarget) -> bool:
+    return t.run("command -v python3", check=False).rc == 0
+
+
+def put_ranges(t: LinuxTarget, bm: bmap.Bmap) -> None:
+    # A file, not argv: a wic has thousands of ranges.
+    with tempfile.TemporaryDirectory() as d:
+        f = Path(d) / "ranges"
+        f.write_text("".join(f"{s} {c}\n" for s, c, _ in bm.ranges), encoding="ascii", newline="\n")
+        t.put(f, RANGES_PATH)
+
+
+def md5_ranges(t: LinuxTarget, dev: str, bm: bmap.Bmap) -> str:
+    """md5 of the mapped ranges of dev, concatenated (the ranges file must be on the board)."""
+    # drop the page cache first: the readback must come from the media, not from what was written
+    t.run(DROP_CACHES, check=False)
+    out = t.run(f"{{ while read s c <&3; do dd if={dev} bs={bm.block_size} skip=$s count=$c "
+                f"2>/dev/null; done; }} 3<{RANGES_PATH} | md5sum", timeout=1800.0).stdout.split()
+    if not out or not re.fullmatch(r"[0-9a-f]{32}", out[0]):
+        raise BenchError(f"unparsable md5sum output for the mapped ranges of {dev}")
+    return out[0]
+
+
+_REREADPT = ("blockdev --rereadpt {emmc} 2>/dev/null || python3 -c "
+             "\"import fcntl, os; fcntl.ioctl(os.open('{emmc}', os.O_RDONLY), 0x125f)\"")
+
+
+def rootfs_write_verify_mapped(t: LinuxTarget, emmc: str, wic_gz: Path, bm: bmap.Bmap,
+                               timeout: float = 3600.0, store=None) -> dict[str, str]:
+    """Write only the bmap's mapped ranges (host-verified first), then md5 them back.
+
+    The board runs bmap_writer.py (python3). With the wic.gz in the SD store it reads the WHOLE
+    stream and skips the gaps between ranges; otherwise the host sends only the mapped bytes.
+    When ImageSize is not a multiple of BlockSize the last block is zero-padded on BOTH paths
+    (the host pads the stream it sends; the writer pads the short final block of the whole
+    image), which is what the whole-block readback md5 expects."""
+    local = store.fetch(wic_gz) if store is not None else None
+    with tempfile.TemporaryDirectory() as d:
+        staged = Path(d) / "mapped.gz"
+        want, nbytes = bmap.stage(wic_gz, bm, None if local else staged)   # refuses on a checksum mismatch
+        put_ranges(t, bm)
+        t.put(WRITER, WRITER_PATH)
+        w = f"python3 {WRITER_PATH} {emmc} {bm.block_size} {RANGES_PATH}"
+        try:
+            if local:
+                t.run(f"{w} {bm.image_size} < {shlex.quote(local)}", timeout=timeout)
+            else:
+                t.run(f"{w} 0", timeout=timeout, stdin_path=staged)
+            t.run(_REREADPT.format(emmc=emmc))
+            got = md5_ranges(t, emmc, bm)
+        finally:
+            t.run(f"rm -f {RANGES_PATH} {WRITER_PATH}", check=False)
+    if got != want:
+        raise BenchError(f"{emmc} mapped-range readback md5 {got} != host md5 {want}")
+    return {"rootfs_md5": got, "rootfs_bytes_written": str(nbytes), "rootfs_image_bytes": str(bm.image_size)}
 
 
 def rootfs_check(t: LinuxTarget, emmc: str, part: int, dtb: str) -> None:
@@ -420,7 +538,7 @@ def rootfs_check(t: LinuxTarget, emmc: str, part: int, dtb: str) -> None:
     dev = f"{emmc}p{part}"
     mnt = "/mnt/alp-provision-rootfs"
     t.run(f"fsck.ext4 -n {dev}", timeout=600.0)
-    t.run(f"mkdir -p {mnt} && mount -o ro {dev} {mnt}")
+    t.run(f"mkdir -p {mnt} && mount -o ro,noload {dev} {mnt}")
     try:
         r = t.run(f"test -f {mnt}/boot/{shlex.quote(dtb)}", check=False)
     finally:
@@ -438,8 +556,9 @@ def _parse_bytes(out: str, n: int) -> bytes:
     return bytes(int(x, 16) for x in toks)
 
 
-def _xfer(t: LinuxTarget, bus: int, addr: int, write: bytes, read_len: int, check: bool = True) -> bytes | None:
-    """ONE i2ctransfer invocation: optional write msg, optional repeated-start read."""
+def xfer_cmd(bus: int, addr: int, write: bytes, read_len: int, force: bool = False) -> str:
+    """The ONE i2ctransfer command line of a transfer: optional write msg, optional
+    repeated-start read. ``force`` adds -f (an address a kernel driver owns)."""
     if not write and not read_len:
         raise ValueError("empty i2c transfer")
     msgs = []
@@ -447,7 +566,12 @@ def _xfer(t: LinuxTarget, bus: int, addr: int, write: bytes, read_len: int, chec
         msgs.append(f"w{len(write)}@{addr:#04x} " + " ".join(f"{b:#04x}" for b in write))
     if read_len:
         msgs.append(f"r{read_len}" if write else f"r{read_len}@{addr:#04x}")
-    r = t.run(f"i2ctransfer -y {bus} " + " ".join(msgs), check=check)
+    return f"i2ctransfer {'-f ' if force else ''}-y {bus} " + " ".join(msgs)
+
+
+def _xfer(t: LinuxTarget, bus: int, addr: int, write: bytes, read_len: int, check: bool = True) -> bytes | None:
+    """ONE i2ctransfer invocation: optional write msg, optional repeated-start read."""
+    r = t.run(xfer_cmd(bus, addr, write, read_len), check=check)
     if r.rc != 0:
         return None
     return _parse_bytes(r.stdout, read_len) if read_len else b""
@@ -519,12 +643,25 @@ def secure_page_write_verify(t: LinuxTarget, bus: int, write_frame, read_frame,
     return got
 
 
+I2C_GET_TRIES = 3
+I2C_GET_GAP_S = 0.5     # bench 2026-10-02: `Error: Read failed` on reads that worked minutes later
+
+
 def i2c_get(t: LinuxTarget, bus: int, addr: int, reg: int) -> int:
+    """One register byte. A failed or unparsable read is retried (I2C_GET_TRIES attempts,
+    I2C_GET_GAP_S apart) before the last error is raised."""
     # -f: read even when a kernel driver owns the address (e.g. the RTC shows UU)
-    out = t.run(f"i2cget -y -f {bus} {addr:#04x} {reg:#04x}").stdout.strip()
-    if not re.fullmatch(r"0x[0-9a-fA-F]{2}", out):
-        raise BenchError(f"i2cget {bus} {addr:#04x} {reg:#04x}: unparsable {out!r}")
-    return int(out, 16)
+    for attempt in range(I2C_GET_TRIES):
+        try:
+            out = t.run(f"i2cget -y -f {bus} {addr:#04x} {reg:#04x}").stdout.strip()
+            if not re.fullmatch(r"0x[0-9a-fA-F]{2}", out):
+                raise BenchError(f"i2cget {bus} {addr:#04x} {reg:#04x}: unparsable {out!r}")
+            return int(out, 16)
+        except BenchError as e:
+            if attempt == I2C_GET_TRIES - 1:
+                raise BenchError(f"{e} (after {I2C_GET_TRIES} attempts)") from e
+        time.sleep(I2C_GET_GAP_S)
+    raise AssertionError("unreachable")
 
 
 def i2c_set(t: LinuxTarget, bus: int, addr: int, reg: int, value: int) -> None:
@@ -554,14 +691,72 @@ def gd32_bridge_version(t: LinuxTarget, bus: int, addr: int = 0x70) -> tuple[int
     Asking the bridge beats grepping dmesg: the driver logs the protocol only if the
     GD32 answers AT PROBE, which a GD32 still held in reset (ACT88760 GPIO4 not yet
     released) never does."""
-    crc = _crc16_ccitt_false(b"")
-    r = t.run(f"i2ctransfer -f -y {bus} w4@{addr:#04x} 0x00 0x01 {crc & 0xFF:#04x} {crc >> 8:#04x} r6")
-    rsp = _parse_bytes(r.stdout, 6)
+    return gd32_parse_version(t.run(gd32_version_cmd(bus, addr)).stdout)
+
+
+def gd32_version_cmd(bus: int, addr: int = 0x70) -> str:
+    """The GET_VERSION i2ctransfer line (frame: see gd32_bridge_version)."""
+    crc = _crc16_ccitt_false(b"\x01")
+    return xfer_cmd(bus, addr, bytes((0x00, 0x01, crc & 0xFF, crc >> 8)), 6, force=True)
+
+
+def gd32_parse_version(out: str) -> tuple[int, int, int]:
+    rsp = _parse_bytes(out, 6)
     if _crc16_ccitt_false(rsp[:4]) != rsp[4] | rsp[5] << 8:
         raise BenchError(f"GD32 GET_VERSION reply CRC mismatch: {rsp.hex(' ')}")
     if rsp[0] != 0:
         raise BenchError(f"GD32 GET_VERSION status {rsp[0]:#04x}")
     return rsp[1], rsp[2], rsp[3]
+
+
+GD32_CMD_BOOT_CONFIG = 0x42                 # include/alp/chips/gd32g553.h GD32G553_CMD_BOOT_CONFIG
+GD32_BOOT_CONFIG_SDMUX_EN_HIGH = 0x00000001  # GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH
+GD32_BOOT_CONFIG_POLLS = 100                # x GD32_BOOT_CONFIG_GAP_S: the async flash commit
+GD32_BOOT_CONFIG_GAP_S = 0.05
+
+
+def gd32_boot_config_cmd(bus: int, flags: int | None = None, addr: int = 0x70) -> str:
+    """BOOT_CONFIG over the bridge's I2C link (docs/gd32-bridge-protocol.md 3.19, 5): GET when
+    `flags` is None, else SET. Same frame as GET_VERSION: write [0x00 reg][0x42][op][flags
+    u32 LE][crc lo][crc hi], repeated-start read of 7 bytes [status][flags u32 LE][crc]."""
+    body = bytes((GD32_CMD_BOOT_CONFIG, 0 if flags is None else 1)) + (flags or 0).to_bytes(4, "little")
+    crc = _crc16_ccitt_false(body)
+    return xfer_cmd(bus, addr, b"\x00" + body + bytes((crc & 0xFF, crc >> 8)), 7, force=True)
+
+
+def gd32_parse_boot_config(out: str) -> int:
+    """The stored flag word of a BOOT_CONFIG reply (on a SET: the value before the commit)."""
+    rsp = _parse_bytes(out, 7)
+    if rsp[0] != 0:
+        hint = (" (NOSUPPORT: GD32 firmware predates the opcode, a build without the flash HAL, a "
+                "single-bank part, or the GD32 is running from slot B; if it is on slot B, OTA the "
+                "same image into slot A, then retry)") if rsp[0] == 0x06 else ""
+        raise BenchError(f"GD32 BOOT_CONFIG status {rsp[0]:#04x}{hint}")
+    if _crc16_ccitt_false(rsp[:5]) != rsp[5] | rsp[6] << 8:
+        raise BenchError(f"GD32 BOOT_CONFIG reply CRC mismatch: {rsp.hex(' ')}")
+    return int.from_bytes(rsp[1:5], "little")
+
+
+def gd32_boot_config(t: LinuxTarget, bus: int, flags: int | None = None, addr: int = 0x70) -> int:
+    return gd32_parse_boot_config(t.run(gd32_boot_config_cmd(bus, flags, addr)).stdout)
+
+
+def gd32_sd_out_flag_set(t: LinuxTarget, bus: int, addr: int = 0x70) -> int:
+    """Persist SDMUX_EN_HIGH (the GD32 drives IO29 high from every reset: SD out across cold
+    cycles) and wait until a GET returns it. Other stored bits are kept. A SET moves no pad."""
+    cur = gd32_boot_config(t, bus, None, addr)
+    want = cur | GD32_BOOT_CONFIG_SDMUX_EN_HIGH
+    if cur == want:
+        return cur
+    gd32_boot_config(t, bus, want, addr)
+    for _ in range(GD32_BOOT_CONFIG_POLLS):
+        time.sleep(GD32_BOOT_CONFIG_GAP_S)
+        try:
+            if gd32_boot_config(t, bus, None, addr) == want:
+                return want
+        except BenchError:
+            pass                              # the commit blacks the link out for ~40 ms
+    raise BenchError(f"GD32 BOOT_CONFIG never read back {want:#010x} after the SET")
 
 
 def i2c_scan(t: LinuxTarget, bus: int, span: tuple[int, int] | None = None,
@@ -659,16 +854,22 @@ def clkgen_diff(image: bytes) -> list[str]:
             for i in range(CLKGEN_REG_COUNT) if image[i] != want[i]]
 
 
-# --- DX-M1 NPU (V2M-only): SPI-NAND recovery boot over UART -------------------------------
-
-# PCI-to-PCI bridge class (root ports and any intermediate switch port share
-# it); anything else enumerated under /sys/bus/pci/devices is an endpoint.
-PCI_CLASS_BRIDGE_PREFIX = "0x0604"
+# --- DX-M1 NPU (V2M-only): sysfs GPIO + read-only status ---------------------------------
+# The flash orchestration is provision/dxm1.py; these are the primitives it and the
+# census share.
 
 # the DEEPX 0.75 V rail; never a UART-mux/reset line -- gpiolib reconfigures
 # a pin on read and would kill it. Enforced at the single sysfs choke point
 # (_sysfs_gpio_dir) as well as steps.py's own bench.yaml validation.
 DXM1_REFUSED_GPIO_LINES = {52: "P64", 53: "P65"}
+# The DX-M1 is the only endpoint behind the root port, at bus 01.
+DXM1_PCIE_DEVICE = "/sys/bus/pci/devices/0000:01:00.0/device"
+DXM1_PCIE_FW_RUNNING = "0x0000"   # the firmware booted from the SPI-NAND
+DXM1_PCIE_ROM_BOOT = "0x0001"     # the ROM's own PCIe-boot endpoint: no firmware on the NAND
+# pinned to the real `dxrt-cli -s` line " * FW version          : v2.4.0" (fixture
+# tests/scripts/fixtures/provision/dxrt-cli-s.txt); the "RT Driver version" and
+# "PCIe Driver version" lines beside it must never match
+_FW_LINE_RE = re.compile(r"(?m)^[ \t*]*FW version[ \t]*:[ \t]*v?(\d+\.\d+\.\d+[\w.+-]*)")
 
 
 def _sysfs_gpio_line_name(line: int) -> str:
@@ -741,84 +942,66 @@ def _sysfs_gpio_dir(t: LinuxTarget, label: str, line: int) -> str:
                      f"{numeric} nor {named} appeared")
 
 
-def dxm1_reset_pulse(t: LinuxTarget, label: str, reset_line: int) -> None:
-    """Pulse PA6 (active-low M1_RESET) low for 100 ms then drive it high
-    again, in one ssh round trip so the 100 ms hold is timed by the board's
-    own `sleep`, not host-to-board latency. `direction`'s "high"/"low"
-    values set direction and value atomically (no separate value write to
-    glitch on). Chained with `&&` so a failed `echo low` short-circuits
-    instead of silently proceeding straight to the final `echo high`. DX-M1
-    PORES_N has an internal pull-up, so the final driven-high level is an
-    active drive that happens to match the pin's idle (deasserted) state,
-    not a "release" of the line."""
+def dxm1_reset_pulse(t: LinuxTarget, label: str, reset_line: int, hold_s: float = 0.5) -> None:
+    """Pulse PA6 (active-low M1_RESET) low for `hold_s` seconds then drive it high
+    again, in one ssh round trip so the hold is timed by the board's own `sleep`,
+    not host-to-board latency. `direction`'s "high"/"low" values set direction and
+    value atomically (no separate value write to glitch on). Chained with `&&` so a
+    failed `echo low` short-circuits instead of silently proceeding straight to the
+    final `echo high`. DX-M1 PORES_N has an internal pull-up, so the final
+    driven-high level is an active drive that happens to match the pin's idle
+    (deasserted) state, not a "release" of the line."""
     d = _sysfs_gpio_dir(t, label, reset_line)
-    t.run(f"echo low > {d}/direction && sleep 0.1 && echo high > {d}/direction")
+    t.run(f"echo low > {d}/direction && sleep {hold_s:g} && echo high > {d}/direction")
 
 
-def dxm1_uart_boot(t: LinuxTarget, label: str, uart_line: int, reset_line: int,
-                   uart_device: str, tool: str, fw_uart_boot: str, fw: str) -> str:
-    """Mux V2N P75 to the DX-M1 UART0 (driven high via sysfs for the whole
-    transfer -- a sysfs value write holds on its own, no background process
-    needed), pulse the PA6 reset (low 100 ms, high), then run the vendor
-    `uart_boot` twice against the ROM's XMODEM fallback ('C' prompt on an
-    empty NAND): once for the bootloader stage, once for the application
-    firmware (`-d <uart_device>` on both -- the vendor tool needs the device
-    path for either transfer mode). Drives P75 low again before returning,
-    even on failure (the mux-high write is inside the `try` too, so a
-    resolve-then-mux failure still runs the release). If the release itself
-    fails: raise loudly when it's the only failure (silently leaving the
-    DX-M1 UART0 muxed in would strand the console), but never mask an
-    already-propagating exception from the transfer -- that one is the real
-    root cause, so the release failure is only logged. Never touches V2N
-    P64/P65 (the DEEPX 0.75 V rail): this mechanism is a UART mux line and a
-    reset line only, enforced in `_sysfs_gpio_dir`."""
-    mux_dir = _sysfs_gpio_dir(t, label, uart_line)
-    try:
-        t.run(f"echo high > {mux_dir}/direction")
-        dxm1_reset_pulse(t, label, reset_line)
-        out1 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
-                     f"-f {shlex.quote(fw_uart_boot)} -b 115200", timeout=120.0).stdout
-        out2 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
-                     f"-F {shlex.quote(fw)} -U -b 115200", timeout=300.0).stdout
-    finally:
-        r = t.run(f"echo low > {mux_dir}/direction", check=False)
-        if r.rc != 0:
-            msg = (f"could not release {mux_dir} (P75 UART mux) after the DX-M1 "
-                   f"transfer (rc={r.rc}): {r.stderr.strip()[-200:]}")
-            if sys.exc_info()[0] is None:
-                raise BenchError(msg)
-            print(f"WARNING: {msg} -- not raised, masking an in-flight exception",
-                  file=sys.stderr)
-    return out1 + out2
+def dxm1_drive_high(t: LinuxTarget, label: str, line: int) -> str:
+    """Export `line` and drive it high (a sysfs direction write holds on its own)."""
+    d = _sysfs_gpio_dir(t, label, line)
+    t.run(f"echo high > {d}/direction")
+    return d
 
 
-def dxm1_pcie_present(t: LinuxTarget, vendor_id: str | None = None) -> bool:
-    """A DEEPX PCIe *endpoint* is enumerated, not just a bridge: every boot
-    lists the SoC's own root port, and any intermediate switch port shares
-    its PCI class (0x0604xx, read from `/sys/bus/pci/devices/*/class`); at
-    least one entry whose class does NOT start with that prefix must be
-    present. When `vendor_id` is given (bench.yaml `dxm1.pcie_vendor_id`,
-    e.g. "0xXXXX" -- the real ID is TBD, DEEPX has not published the DX-M1's
-    PCI vendor/device ID in any vendor material seen so far), an endpoint
-    must also match it via `/sys/bus/pci/devices/*/vendor`; until a
-    bench.yaml supplies one, any non-bridge entry counts."""
-    out = t.run("ls /sys/bus/pci/devices", check=False).stdout.split()
-    endpoints = []
-    for d in out:
-        r = t.run(f"cat /sys/bus/pci/devices/{shlex.quote(d)}/class", check=False)
-        if r.rc == 0 and r.stdout.strip().lower().startswith(PCI_CLASS_BRIDGE_PREFIX):
-            continue
-        endpoints.append(d)
-    if not endpoints:
-        return False
-    if vendor_id is None:
-        return True
-    want = vendor_id.lower()
-    for d in endpoints:
-        r = t.run(f"cat /sys/bus/pci/devices/{shlex.quote(d)}/vendor", check=False)
-        if r.rc == 0 and r.stdout.strip().lower() == want:
-            return True
-    return False
+# EVK SDIO path mux (#2697). Bench, E1M-V2M103 2026W38-0008: gpiochip `gd32-bridge-gpio`
+# IO29 `SDIO_MUX_EN` (GD32 PD11) = line 12; the chip base is resolved by label at runtime
+# (it moves with the kernel: 394 on the older image, 392 on r3). Active-LOW (low = microSD
+# connected, high = disconnected). IO27 `SDIO_MUX_SEL` is never touched.
+GD32_GPIO_LABEL = "gd32-bridge-gpio"
+SDIO_MUX_EN_LINE = 12
+
+
+def sdio_mux_set(t: LinuxTarget, connected: bool) -> str:
+    """Drive IO29 `SDIO_MUX_EN` (write-only: a bridge GPIO READ reconfigures the pad as an
+    input with a pull-up and moved the mux on the bench, #2701, so this never reads the
+    value). Disconnecting is refused while `/` is on the SD (mmcblk1), which would pull the
+    root filesystem out. The pad stays push-pull until the GD32 resets, and the mux
+    survives a warm reboot but not a power cycle."""
+    if not connected and "mmcblk1" in root_device(t):
+        raise BenchError("refusing to disconnect the SD: Linux root is on it")
+    d = _sysfs_gpio_dir(t, GD32_GPIO_LABEL, SDIO_MUX_EN_LINE)
+    t.run(f"echo {'low' if connected else 'high'} > {d}/direction")
+    return d
+
+
+def dxm1_pcie_device(t: LinuxTarget) -> str | None:
+    """The DX-M1's PCI device id ("0x0000" firmware running, "0x0001" ROM PCIe boot),
+    None when no endpoint is enumerated at 0000:01:00.0. Read-only."""
+    r = t.run(f"cat {DXM1_PCIE_DEVICE}", check=False)
+    out = r.stdout.strip().lower()
+    return out if r.rc == 0 and re.fullmatch(r"0x[0-9a-f]{4}", out) else None
+
+
+def parse_dxm1_fw_version(text: str) -> str | None:
+    """The firmware version from the `FW version : vX.Y.Z` line of `dxrt-cli -s`, without
+    the leading "v"; None when that line is absent (driver / runtime versions never count)."""
+    m = _FW_LINE_RE.search(text)
+    return m[1] if m else None
+
+
+def dxm1_fw_version(t: LinuxTarget) -> str | None:
+    """`dxrt-cli -s` firmware version, None when the tool is absent or prints none."""
+    r = t.run("dxrt-cli -s", timeout=60.0, check=False)
+    return parse_dxm1_fw_version(r.stdout) if r.rc == 0 else None
 
 
 # --- census ----------------------------------------------------------------------------
@@ -867,13 +1050,47 @@ def _reg_dump(t: LinuxTarget, bus: int, addr: int, regs) -> str:
     return " ".join(f"{r:#04x}={i2c_get(t, bus, addr, r):#04x}" for r in regs)
 
 
+_DEVMEM_PY = ("import mmap,os,struct,sys;a=int(sys.argv[1],16);"
+              "m=mmap.mmap(os.open('/dev/mem',os.O_RDONLY|os.O_SYNC),4096,mmap.MAP_SHARED,mmap.PROT_READ,offset=a&~4095);"
+              "print(hex(struct.unpack_from('<I',m,a&4095)[0]))")
+# Shell prelude defining `r <addr>` (one 32-bit /dev/mem word, read-only): devmem when present, else
+# python3; with neither, the whole script prints ALPUNREAD (the functional test's "cannot judge").
+DEVMEM_READ_FN = ("if command -v devmem >/dev/null 2>&1; then r() { devmem $1 32 2>&1; }\n"
+                  f"elif py=$(command -v python3); then r() {{ \"$py\" -c {shlex.quote(_DEVMEM_PY)} $1 2>&1 | tail -n1; }}\n"
+                  'else echo "ALPUNREAD missing tool: devmem or python3"; exit 0; fi\n')
+
+
+def devmem_cmd(addr: int) -> str:
+    """Shell script printing the 32-bit word at physical ``addr`` as ``0x...``."""
+    return f"{DEVMEM_READ_FN}r {addr:#x}"
+
+
 def _devmem(t: LinuxTarget, addr: int) -> int:
-    page, off = addr & ~0xFFF, addr & 0xFFF
-    py = ("import mmap,os,struct;f=os.open('/dev/mem',os.O_RDONLY|os.O_SYNC);"
-          f"m=mmap.mmap(f,4096,mmap.MAP_SHARED,mmap.PROT_READ,offset={page});"
-          f"print(hex(struct.unpack_from('<I',m,{off})[0]))")
-    out = t.run(f"devmem {addr:#x} 32 2>/dev/null || python3 -c {shlex.quote(py)}").stdout.strip()
-    return int(out, 16)
+    return int(t.run(devmem_cmd(addr)).stdout.strip(), 16)
+
+
+# Raw MII registers 2/3 of each port, through SIOCGMIIPHY / SIOCGMIIREG (the image has python3 and no
+# mii-tool). One line per port: "<name> 0x<reg2><reg3>", or "<name> errno <n>" on stderr (a port that is
+# down may answer EINVAL).
+MII_ID_REMOTE = "/tmp/alp_mii_id.py"
+MII_ID_PY = """
+import fcntl, socket, struct, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+def io(n, c, p, r):
+    a = struct.pack('16sHHHH16x', n.encode(), p, r, 0, 0)
+    return struct.unpack('16sHHHH16x', fcntl.ioctl(s, c, a))
+for n in sys.argv[1:]:
+    try:
+        p = io(n, 0x8947, 0, 0)[1]
+        print(n, '0x%04x%04x' % (io(n, 0x8948, p, 2)[4], io(n, 0x8948, p, 3)[4]))
+    except OSError as e:
+        sys.stderr.write('%s errno %s\\n' % (n, e.errno))
+"""
+
+def unread(why) -> str:
+    """A census value for a read that failed. Whitespace is collapsed: a multi-line stderr must
+    not put a newline into a ledger value (merge_unit_yaml refuses one and the write is lost)."""
+    return "unread (" + " ".join(str(why).split()) + ")"
 
 
 NET_IF_RE = re.compile(r"(?:end|eth)\d+")   # the Renesas gbeth ports are end0/end1
@@ -891,12 +1108,16 @@ def net_carrier(t, name: str) -> bool:
 
 
 def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None = None,
-           emmc: str | None = None) -> tuple[dict[str, str], list[str]]:
+           emmc: str | None = None, dxm1_present: bool = True,
+           rtc_addr: int | None = None,
+           silicon: str | None = None) -> tuple[dict[str, str], list[str]]:
     """Read-only. Returns (auto ledger keys, notes on what could not be read).
 
+    `rtc_addr` = the RV-3028 address from the SoM preset (rtc.rv3028_addr); None skips the RTC read.
     `sizes` = artefact byte lengths keyed by bundle role ("bl2", "fip",
     "bl2_mmc", "cm33"); an md5 key is produced only when its size is known.
-    Never issues a write to the unit (the only 0x58 frames are the sealed reads).
+    Never writes to the unit's storage or devices (the only 0x58 frames are the sealed reads;
+    the PHY-ID helper is a throwaway file in /tmp).
     """
     from provision import gates   # lazy: gates is the single source of 0x58 frames
 
@@ -911,8 +1132,12 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             notes.append(f"{name}: {e}")
 
     def soc():
-        for key, addr in SYS_REGS.items():
-            facts[key] = f"{_devmem(t, addr):#x} ({SYS_REGS_NOTE} {addr:#x})"
+        if not silicon:
+            raise ValueError("no SoC reference (preset silicon:), SYS_LSI registers not read")
+        spec = sys_lsi_spec(silicon)
+        for key, addr in spec["registers"].items():
+            facts[key] = f"{_devmem(t, int(addr, 16)):#x}"
+        facts.update(decode_lsi_mode(int(facts["soc_sys_lsi_mode"], 16), spec))
 
     def cpu_mem():
         facts["cpu_khz"] = t.run("cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").stdout.strip()
@@ -935,9 +1160,9 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
         facts["emmc_ext_csd_177"] = f"{regs[177]:#04x}"
         facts["emmc_ext_csd_179"] = f"{regs[179]:#04x}"
         if "bl2_mmc" in sizes:
-            facts["emmc_boot1_bl2_md5"] = t.md5(f"{dev}boot1", 1 * 512, sizes["bl2_mmc"])
+            facts["emmc_boot1_bl2_md5"] = t.md5(f"{dev}{EMMC_BOOT_PART}", 1 * 512, sizes["bl2_mmc"])
         if "fip" in sizes:
-            facts["emmc_boot1_fip_md5"] = t.md5(f"{dev}boot1", 0x300 * 512, sizes["fip"])
+            facts["emmc_boot1_fip_md5"] = t.md5(f"{dev}{EMMC_BOOT_PART}", 0x300 * 512, sizes["fip"])
         ios = t.run(f'cat /sys/kernel/debug/$(basename $(dirname $(readlink -f /sys/block/{name}/device)))/ios',
                     check=False).stdout
         m = re.search(r"timing spec:\s*\d+ \(([^)]+)\)", ios)
@@ -964,6 +1189,18 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             if role in sizes:
                 facts[key] = t.md5(f"/dev/mtd{mtd}", off, sizes[role])
 
+    def dxm1():
+        if not dxm1_present:
+            return
+        dev = dxm1_pcie_device(t)
+        facts["dxm1_pcie_device"] = dev or "absent"
+        if dev == DXM1_PCIE_FW_RUNNING:
+            ver = dxm1_fw_version(t)
+            if ver:
+                facts["dxm1_fw_version"] = ver
+            else:
+                notes.append("dxm1_fw_version: dxrt-cli -s printed no firmware version")
+
     def identity():
         bus = i2c_bus["eeprom"]
         rd = lambda op: i2c_transfer(t, bus, gates.identity_frame(op))  # noqa: E731
@@ -985,21 +1222,36 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             if zlib.crc32(arr[:0x7C]) != int.from_bytes(arr[0x7C:0x80], "little"):
                 notes.append("manifest_crc32: stored CRC does not match bytes 0x00..0x7b")
 
+    def read_key(key, fn):
+        """One census key: a read that still fails after i2c_get's retries is recorded as
+        `unread (<error>)` and noted, so it can never pass as a value and never takes the
+        group's other keys down with it."""
+        try:
+            facts[key] = fn()
+        except (BenchError, ValueError) as e:
+            facts[key] = unread(e)
+            notes.append(f"{key}: {e}")
+
     def power():
         pmic = i2c_bus["pmic"]
-        facts["act88760_gpio_regs"] = _reg_dump(t, pmic, ACT88760_ADDR, (ACT88760_GPIO_REG,))
+        read_key("act88760_gpio_regs", lambda: _reg_dump(t, pmic, ACT88760_ADDR, (ACT88760_GPIO_REG,)))
         for key, regs in DA9292_REGS.items():
-            facts[key] = _reg_dump(t, pmic, DA9292_ADDR, regs)
+            read_key(key, lambda regs=regs: _reg_dump(t, pmic, DA9292_ADDR, regs))
         present = sorted(i2c_scan(t, pmic) & set(TPS628640_ADDRS))
         facts["tps_present"] = " ".join(f"{a:#04x}" for a in present) or "none"
         if present:
-            facts["tps_vout"] = " ".join(f"{a:#04x}={i2c_get(t, pmic, a, TPS628640_VOUT1):#04x}" for a in present)
+            read_key("tps_vout", lambda: " ".join(
+                f"{a:#04x}={i2c_get(t, pmic, a, TPS628640_VOUT1):#04x}" for a in present))
 
     def clocks_rtc():
         brd = i2c_bus["brd"]
-        facts["rtc_rv3028_reg_0x37"] = f"{i2c_get(t, brd, RV3028_ADDR, 0x37):#04x}"
-        facts["clkgen_5l35023b_regs"] = ("ack" if CLKGEN_5L35023B_ADDR in i2c_scan(t, brd) else "no ack") + \
-            f" at {CLKGEN_5L35023B_ADDR:#04x}"
+        if rtc_addr is not None:
+            read_key("rtc_rv3028_reg_0x37", lambda: f"{i2c_get(t, brd, rtc_addr, 0x37):#04x}")
+            if facts["rtc_rv3028_reg_0x37"].startswith("0x"):
+                from provision import rtc
+                facts.update(rtc.decode(int(facts["rtc_rv3028_reg_0x37"], 16)))
+        facts["clkgen_5l35023b_regs"] = ("ack" if CLKGEN_5L35023B_ADDR in i2c_scan(t, brd) else "no ack")
+        facts["clkgen_5l35023b_regs"] += f" at {CLKGEN_5L35023B_ADDR:#04x}"
 
     def network():
         names = net_ifaces(t)
@@ -1023,9 +1275,49 @@ def census(t: LinuxTarget, i2c_bus: dict[str, int], sizes: dict[str, int] | None
             anlpar = lp[1].strip() if lp else "unknown"
             facts[f"eth{i}_mac"] = mac
             facts[f"eth{i}_link"] = f"{state} ({n}) carrier={carrier} speed={speed} anlpar={anlpar}"
+        phy_ids(names[:2])
+        dma = t.run("dmesg | grep 'Failed to reset the dma'", check=False).stdout
+        ports = sorted(set(NET_IF_RE.findall(dma)))
+        facts["eth_dma_reset_failed"] = ",".join(ports) or ("unknown" if dma.strip() else "none")
+
+    def phy_ids(names):
+        """eth<i>_phy_id (sysfs: the DT-forced ethernet-phy-id), eth<i>_phy_id_raw (the silicon's
+        MII registers 2/3) and eth_phy_id_mismatch. Read-only."""
+        r = CmdResult(1, "", "")
+        if names:
+            with tempfile.TemporaryDirectory(prefix="miiid_") as td:
+                helper = Path(td) / "alp_mii_id.py"
+                helper.write_bytes(MII_ID_PY.encode("utf-8"))
+                try:
+                    t.put(helper, MII_ID_REMOTE)     # a file, not -c: the console path is one line
+                    r = t.run(f"python3 {MII_ID_REMOTE} {' '.join(names)}", check=False)
+                except BenchError as e:
+                    r = CmdResult(1, "", str(e))
+                finally:
+                    try:
+                        t.run(f"rm -f {MII_ID_REMOTE}", check=False)
+                    except BenchError:
+                        pass
+        out = r.stdout + "\n" + r.stderr                 # the console path merges stderr into stdout
+        raw = dict(re.findall(r"^(\w+) (0x[0-9a-f]{8})$", out, re.M))
+        errno = dict(re.findall(r"^(\w+) errno (\d+)$", out, re.M))
+        differ = partial = False
+        for i, n in enumerate(names):
+            sysfs = t.run(f"cat /sys/class/net/{n}/phydev/phy_id", check=False).stdout.strip()
+            ok = re.fullmatch(r"0x[0-9a-fA-F]{1,8}", sysfs) is not None
+            facts[f"eth{i}_phy_id"] = f"0x{int(sysfs, 16):08x}" if ok else unread("no phydev/phy_id")
+            why = f"{n} errno {errno[n]}" if n in errno else (r.stderr or r.stdout).strip()[-80:] or "no output"
+            facts[f"eth{i}_phy_id_raw"] = raw.get(n) or unread(why)
+            if n not in raw or not ok:
+                partial = True
+                notes.append(f"{n}: phy id not fully readable")
+            else:
+                differ |= int(raw[n], 16) != int(sysfs, 16)
+        if names:
+            facts["eth_phy_id_mismatch"] = "yes" if differ else "unread" if partial else "no"
 
     for name, fn in (("soc", soc), ("cpu_mem", cpu_mem), ("storage", storage), ("xspi", xspi),
-                     ("identity", identity), ("power", power), ("clocks_rtc", clocks_rtc),
+                     ("dxm1", dxm1), ("identity", identity), ("power", power), ("clocks_rtc", clocks_rtc),
                      ("network", network)):
         group(name, fn)
     return facts, notes

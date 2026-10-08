@@ -25,8 +25,9 @@ FILES:${PN}:remove = "${bindir}/*"
 # but ships only a SysV init script (its dxrt.service is commented out);
 # this image runs systemd, so install upstream's unit instead.  The
 # PREFERRED_VERSION pin in e1m-v2m-deepx.inc stays on 3.2.0 (firmware
-# lockstep).  Limit on dx-rt 3.2.0 even with dxrtd: processes sharing
-# one DX-M1 must use the same NPU core set (see <alp/ext/deepx/inference.h>).
+# lockstep).  Limit, even with dxrtd: at most 3 DISTINCT NPU core sets
+# live on one DX-M1 at a time (kernel driver DX_NORMAL_QUEUE_MAX = 3; a 4th
+# makes dx-rt abort / kill dxrtd).  See <alp/ext/deepx/inference.h>.
 EXTRA_OECMAKE:remove = "-DUSE_SERVICE=OFF"
 EXTRA_OECMAKE += "-DUSE_SERVICE=ON"
 
@@ -43,3 +44,41 @@ do_install:append() {
 }
 
 FILES:${PN}-cli += "${systemd_system_unitdir}/dxrt.service"
+
+# DX-M1 firmware on Alp Lab E1M-V2M modules is an Alp-specific no-PMIC build
+# (fw 2.4.0), written at the factory. Stock DEEPX firmware leaves the NPUs
+# dead (dxrt_polling_ack: timeout) and recovery needs the ROM-UART path, so
+# `dxrt-cli -u` (fwupdate), `-w` (fwupload) and `-C` (fwconfig_json) print a
+# warning to stderr before running. Nothing is refused and nothing else
+# changes: the command proceeds exactly as upstream, and the library entry
+# points (Configuration::SetFWConfigWithJson, the Python package) are not
+# touched, so profiling works as upstream.
+#
+# alp_fw_warning.cpp is Alp code, added to the library (lib/ is globbed).
+# The constructor of each of the three commands gets one inserted call; the
+# edit is a sed on the constructor names, not a patch, so no DEEPX source is
+# reproduced here. It fails the build when a constructor is not found, which
+# is what happens if a dx-rt pin bump renames them (this "%" append covers
+# every PV in the layer; only 3.2.0, SRCREV 6a0052e, was checked).
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
+SRC_URI += "file://alp_fw_warning.cpp"
+
+do_configure:prepend() {
+	install -m 0644 ${WORKDIR}/alp_fw_warning.cpp ${S}/lib/alp_fw_warning.cpp
+	# do_configure can re-run without a fresh unpack, when ${S}/lib/cli.cpp is
+	# already edited; the guard keeps the calls from being inserted twice.
+	if [ "$(grep -c "AlpWarnFwWrite(" ${S}/lib/cli.cpp)" != "3" ]; then
+		awk '
+			/^FWUpdateCommand::FWUpdateCommand\(/ { call = "0" }
+			/^FWUploadCommand::FWUploadCommand\(/ { call = "0" }
+			/^FWConfigCommandJson::FWConfigCommandJson\(/ { call = "1" }
+			{ print }
+			call != "" && $0 == "{" { print "    void AlpWarnFwWrite(int); AlpWarnFwWrite(" call ");"; call = "" }
+		' ${S}/lib/cli.cpp > ${S}/lib/cli.cpp.alp
+		n=$(grep -c "AlpWarnFwWrite(" ${S}/lib/cli.cpp.alp || true)
+		if [ "$n" != "3" ]; then
+			bbfatal "dx-rt: expected the three CLI command constructors in lib/cli.cpp (inserted $n of 3 calls); update this bbappend for the new dx-rt version"
+		fi
+		mv ${S}/lib/cli.cpp.alp ${S}/lib/cli.cpp
+	fi
+}

@@ -69,13 +69,12 @@ SDK-shipped SoM presets (look under
 | Alif Ensemble     | `E1M-AEN301`, `AEN401`, `AEN501`, `AEN601`, `AEN701`, `AEN801`, `AEN803`     |
 | Renesas RZ/V2N    | `E1M-V2N101`, `V2N102`, `V2N103`                                            |
 | RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`, `V2M103`                                            |
-| NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
 Stock board presets (paste into `preset:`):
 
 | Preset       | Form factor | Hosts                                  |
 |--------------|-------------|----------------------------------------|
-| `e1m-evk`    | 35×35       | E1M-AEN family, future E1M-N93 family  |
+| `e1m-evk`    | 35×35       | E1M-AEN family                         |
 | `e1m-x-evk`  | 45×65       | E1M-X V2N family, V2N-M1 family        |
 
 `preset:` is the SDK-internal shortcut the demos use.  For a
@@ -209,12 +208,22 @@ Rule 2 family-specific allow-list (built from the SoM preset's
 |--------------------|------------------------------------------------------|
 | `alif-ensemble`    | `ecdsa_p256`, `ed25519`  (OPTIGA Trust M slot type)  |
 | `renesas-rzv2n`    | `ecdsa_p256`, `rsa2048`, `rsa3072`                   |
-| `nxp-imx9`         | `ecdsa_p256`, `rsa2048`, `rsa3072`                   |
 | *(unknown family)* | Schema enum unrestricted (no capability data yet)    |
 
 The warning rules (4 + 5) are informational: the build still
 succeeds.  Tightening one of them to ERROR is a v0.7+ tightening
 decision once enough field data confirms the heuristic.
+
+## Camera declarations
+
+`cameras:` (project) and `camera_connectors:` (board) are cross-checked by
+`tan validate` after the schema pass: a `cameras:` entry must name a connector
+the resolved board exposes and a module that exists under
+`metadata/camera_modules/`, a connector may be used once, and an inline
+board's connector macros must resolve in its own `e1m_routes:` with a
+`lane_polarity` of `lanes + 1` entries.  Violations are
+[ALP-B003](diagnostics/ALP-B003.md) errors.  Field reference:
+[board-config-schema.md](board-config-schema.md#cameras-and-camera_connectors-camera-modules).
 
 ## Versioning
 

@@ -19,6 +19,18 @@
       "additionalProperties": false,
       "required": ["gd32_spi", "brd_i2c", "console"],
       "properties": {
+        "gd32_pads": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["swdio", "swclk", "nrst", "attn"],
+          "description": "GD32 control pads published as the dedicated alp,gd32-pads devicetree node (SWD + ATTN); plain GPIO, input out of reset.",
+          "properties": {
+            "swdio": { "$ref": "#/$defs/gpio_chip_select" },
+            "swclk": { "$ref": "#/$defs/gpio_chip_select" },
+            "nrst": { "$ref": "#/$defs/gpio_chip_select" },
+            "attn": { "$ref": "#/$defs/gpio_chip_select" }
+          }
+        },
         "gd32_spi": {
           "type": "object",
           "additionalProperties": false,
@@ -139,6 +151,12 @@
         "gpio_node": { "type": "string", "pattern": "^gpio[0-9]+$" },
         "gpio_pin": { "type": "integer", "minimum": 0 },
         "active_low": { "type": "boolean" },
+        "tint_slot": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31,
+          "description": "Optional: the RZ/V2N ICU TINT slot (tintN) that routes this pad as a CM33 GPIO interrupt.  Emitted as `&tintN { status = okay; }` + `irqs = <&tintN pin>` on the pad gpio node.  The slot is a shared ICU resource (TSSR/TITSR), so it is a CM33 claim Linux must not take."
+        },
         "evidence": {
           "type": "string",
           "minLength": 1,

@@ -1,0 +1,34 @@
+/*
+ * shield-fit/e1m_evk_rvt121hvdfwca0.overlay -- the Trace Runner's 720 x 1280
+ * portrait content on the Riverdi RVT121 shield (CMakeLists.txt applies a
+ * shield-fit overlay named after the shield automatically).
+ *
+ * Layer 1 is a 1280 x 720 window centred on the panel's 1280 x 800 (rows
+ * 40..759, black bars above and below), not the shield's full-screen layer.
+ * The shield declares mount-rotation = <90>, so the A32 renderer writes the
+ * portrait frame rotated into this window (src/render/panel_rot.h):
+ * 1280 * 720 * 2 B = 1,843,200 B is the portrait frame's size exactly, so
+ * every buffer address in src/ipc/tr_memmap.h stays where it is. The CDC200
+ * driver derives the layer's fb_size (and so what cdc200_swap_fb() accepts)
+ * from this window.
+ *
+ * The game does not use the ILI2511 touch controller (I2C1 0x41), and the HE
+ * hands I2C1 to the HP after the bridge is configured (alp,i2c-handover): no
+ * input driver may poll the bus afterwards.
+ */
+
+&cdc200 {
+	win-y0-l1 = <40>;
+	win-y1-l1 = <760>;
+};
+
+&touch {
+	status = "disabled";
+};
+
+/* The bridge is configured over I2C1 at boot: this shield needs the bus on the HE
+ * (i2c_handover_he.overlay switches it off for every shield), and the HE releases
+ * it to the HP once the bridge is up. */
+&i2c1 {
+	status = "okay";
+};

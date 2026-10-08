@@ -48,6 +48,10 @@
 #include "../../src/vision/movenet_mram.h"
 #include "../../src/vision/pose.h"
 
+/* The board overlay's side of the I2C1 handover names the same flag words the HE's does. */
+BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), flag_address) == TR_MEM_I2C1_HANDOVER,
+             "i2c1_handover flag-address != tr_memmap.h TR_MEM_I2C1_HANDOVER");
+
 /* ---- I2C1 SCCB unstick (task facts, silicon-proven on 2026W36-0009 today) --
  * I2C1 (0x49011000, the camera SCCB bus, shared with GT911 touch at 0x14)
  * latches stuck after boot: every transfer times out with rc -116. Cure:
@@ -70,10 +74,9 @@
  * itself needing the I2C1 controller already initialised) happens entirely
  * BEFORE main() ever runs. If I2C1 was left stuck from a prior boot, the
  * sensor's own init fails first and the camera never comes up, no matter
- * what main() does afterward. Fixed with SYS_INIT at PRE_KERNEL_1 priority
- * 0 -- the earliest init stage Zephyr runs, strictly before every driver's
- * own init (which starts no earlier than PRE_KERNEL_1 at a higher, later
- * priority number). This works with NO devicetree change (no
+ * what main() does afterward. Fixed with SYS_INIT at POST_KERNEL priority
+ * 1 -- ahead of the i2c_dw instance (POST_KERNEL priority 40) and the sensor
+ * driver after it, and behind the HE handover wait (priority 0, see below). This works with NO devicetree change (no
  * zephyr,deferred-init) because the unstick is raw MMIO on the pad control
  * registers directly, independent of whatever init order pinctrl or the
  * i2c1 controller driver use -- it does not need either to have run first.
@@ -86,7 +89,10 @@ static int tr_i2c1_unstick_init(void)
 	sys_write32(TR_I2C1_PAD_I2C1, TR_I2C1_PAD_P7_2);
 	return 0;
 }
-SYS_INIT(tr_i2c1_unstick_init, PRE_KERNEL_1, 0);
+/* POST_KERNEL priority 1, after the alp,i2c-handover wait (priority 0, boards/<board>.overlay:
+ * the HE may be using this bus for a display bridge until it releases it) and
+ * still ahead of every driver (the i2c_dw instance is POST_KERNEL priority 40). */
+SYS_INIT(tr_i2c1_unstick_init, POST_KERNEL, 1);
 
 /* ---- software AE: apply tr_ae_step()'s result directly over I2C to the
  * sensor's own AE registers (chips/ov9281/zephyr/drivers/video/ov9281.c

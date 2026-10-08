@@ -19,7 +19,7 @@
 > The scaffold is **mergeable as-is**: it passes the full
 > `pr-metadata-validate` command set (`validate_metadata.py` and
 > `check_inference_backend_parity.py`) the moment it is committed.
-> The `inference.preferred_backend: tbd` placeholder rides on the
+> The `inference.auto_order: [tbd]` placeholder rides on the
 > preset's `status.preliminary: true` marker -- the parity gate
 > accepts `tbd` *only* on preliminary presets, so the port cannot
 > graduate (clear `status.preliminary`) until the real silicon
@@ -233,7 +233,7 @@ artifact per silicon SKU.
 | `cores[].type`                  | Used by codegen + by `<alp/system_ipc.h>` ARM core checks.                                                                                              |
 | `capabilities`                  | Drives `include/alp/soc_caps.h` boolean macros (`ALP_SOC_HELIUM_MVE`, `ALP_SOC_NEON`, etc.) via `scripts/gen_soc_caps.py`.                              |
 | `peripherals`                   | Counts per peripheral kind; drives `ALP_SOC_*_COUNT` ceilings in the same generated header.  `{}` is legal but trips the `pending_*` warning.          |
-| `peripherals_unverified`        | Array of `peripherals` keys whose count has no datasheet/DFP/HWRM citation in this file (#936) — e.g. a value copied from a sibling part and never independently confirmed. `scripts/gen_soc_caps.py` prints an `UNVERIFIED` comment above the SoC's block in `soc_caps.h`; `validate_metadata.py` warns if a listed key doesn't exist in `peripherals`. Use this — listing every key, if that's every key — even when the WHOLE block is inherited wholesale from a sibling (e.g. E5 from E7): `pending_reference_manual_ingestion: true` means something narrower, "`peripherals: {}` / counts default to zero," which is false for a fully-populated-but-uncited block and produces a wrong `validate_metadata.py` WARN. `pending_reference_manual_ingestion` is for a file that genuinely has no populated counts yet (e.g. i.MX93, still mostly `{}` pending its RM pass); a file can combine both flags when most of the block is genuinely pending but a handful of keys are individually grounded — in that case `peripherals_unverified: []` on the grounded keys tells `gen_soc_caps.py` NOT to also mark them unverified via the wholesale fallback. |
+| `peripherals_unverified`        | Array of `peripherals` keys whose count has no datasheet/DFP/HWRM citation in this file (#936) — e.g. a value copied from a sibling part and never independently confirmed. `scripts/gen_soc_caps.py` prints an `UNVERIFIED` comment above the SoC's block in `soc_caps.h`; `validate_metadata.py` warns if a listed key doesn't exist in `peripherals`. Use this — listing every key, if that's every key — even when the WHOLE block is inherited wholesale from a sibling (e.g. E5 from E7): `pending_reference_manual_ingestion: true` means something narrower, "`peripherals: {}` / counts default to zero," which is false for a fully-populated-but-uncited block and produces a wrong `validate_metadata.py` WARN. `pending_reference_manual_ingestion` is for a file that genuinely has no populated counts yet (a part whose RM pass has not run); a file can combine both flags when the block is still pending but some keys are populated — its own `peripherals_unverified` list (even `[]`) then replaces the wholesale fallback, so `gen_soc_caps.py` marks exactly the keys it names. |
 | `peripheral_instances`          | OPTIONAL, keyed by a SUBSET of `peripherals`' keys (issue #1154). Per-instance register `base`/`size` (lowercase `0x`-prefixed hex strings, `^0x[0-9a-f]+$`) + `interrupts` (`irq`/`priority` decimal ints, `name` when the DTSI names it), one entry per physical instance. `peripherals` stays the count map every other consumer reads; this is additive, for a consumer that needs an actual address rather than just a ceiling. Only populated where a real vendor devicetree/SVD source gives a grounded 1:1 instance count — a key absent here means "not yet projected," not "doesn't exist," same as an absent `peripherals` key. RZ/V2N n44 is the only populated example today: `scripts/gen_soc_peripheral_instances.py` mechanically projects it from the vendored Zephyr `r9a09g056.dtsi`; never hand-edit, regenerate. |
 | `soc_flash_base`                | OPTIONAL base address of the on-die non-volatile aperture (`2147483648` = `0x80000000` on Alif Ensemble, matching upstream Zephyr's `mram: flash@80000000`). Declared once **per SoC, not per variant** — only the aperture's LENGTH varies by SKU, and that already comes from `variants[].mram_mb` (an E3-family SoC ships both 5.5 MB and 1.5 MB order codes off one base). A SKU's aperture is `[soc_flash_base, soc_flash_base + variants[].mram_mb * 1 MiB)`. Scoped to the on-die DEVICE WINDOW, never to a controller: a NOR and a HyperRAM behind the same OSPI controller, distinguished only by `chip_select:`, must not both fall inside it. **Omit** for a SoC whose flash never enters `memory_map:` (e.g. Renesas RZ/V2N, where every `memory_regions` entry is RAM) — an aperture there would gate nothing. If declared on an Alif SoC it must agree with `scripts/gen_zephyr_board.py`'s `_AEN_MRAM_BASE`; `scripts/validate_metadata.py` enforces the agreement. |
 | `variants[].order_code`         | Vendor order code; **must match** the SoM preset's `silicon_variant:` field for the loader to resolve memory layout from this entry's `sram_banks_kb`. |
@@ -308,7 +308,7 @@ on_module:
 # E8 (U85 + 2x U55) shape; tune to whatever the E9 silicon actually
 # carries once the datasheet lands.
 inference:
-  preferred_backend:    ethos_u
+  auto_order:           [ethos_u, cpu]   # best first; first entry = preferred backend
   # Primary variant only.  Which Ethos-U instances the part carries (and their
   # subtype / MAC / paired core) is silicon-determined -- the SDK derives it
   # from the SoC JSON npus[] / capabilities.ethos_uNN_count -- so the preset
@@ -401,7 +401,8 @@ status:
 | `silicon`              | Yes — must match an `e9.json`    | No                        | Loader fails fast if the triple-colon ref does not resolve to a SoC JSON.                                              |
 | `silicon_variant`      | Yes — must match a `variants[]`  | Yes (`"TBD"`)             | When `TBD`, the loader falls back to `alp_module_skus[]` reverse lookup.                                                |
 | `on_module:*`          | No — SoM extension                | Yes per field             | The set of keys is open; chip names match `chips/<part>/` driver dirs (driver-naming convention applies).               |
-| `inference`            | Mixed                             | Yes (omit when unsure)    | `preferred_backend` is silicon-determined; the customer cannot override it from `board.yaml` (per the v0.6 cleanup).    |
+| `inference`            | Mixed                             | Yes (omit when unsure)    | `auto_order` (its first entry, the preferred backend) is silicon-determined; the customer cannot override it from `board.yaml` (per the v0.6 cleanup).    |
+| `inference.auto_order` | SoM-determined                    | No (required on every preset) | Ordered accelerator preference for `ALP_INFERENCE_BACKEND_AUTO`, best first (e.g. `[deepx_dxm1, drpai, cpu]`); `cpu` (the floor) last.  Its first entry **is** the SoM's preferred backend; it is the single source (there is no `preferred_backend` field and no SDK built-in order).  Emitted into `local.conf` as `ALP_SDK_INFERENCE_AUTO_ORDER ?= "deepx_dxm1,drpai,cpu"` (`--emit yocto-conf`, Yocto slices) and forwarded to CMake by the alp-sdk recipe's `EXTRA_OECMAKE`; emitted as `CONFIG_ALP_SDK_INFERENCE_AUTO_ORDER` on Zephyr inference slices and mapped by `zephyr/CMakeLists.txt`.  Its only reader is the `.alpmodel` selector (`src/common/alp_model_loader.c` -> `alp_model_select`), as the tiebreak between fitting targets; Yocto `resolve_auto()` picks by model format and does not read it. |
 | `capabilities`         | SoM extension only                | Yes                       | Only list keys the SoM **adds** to silicon caps (e.g., on-module CAU on V2N, `optiga_trust_m` on AEN/V2N).               |
 | `silicon_capabilities` | Silicon-determined (restriction)  | Omit when unrestricted    | Optional `unpopulated:` list of SoC `capabilities:` keys this SKU does **not** populate; can only remove what the silicon offers (`validate_metadata.py` cross-check). |
 | `topology`             | Silicon-determined (core ids)     | No                        | Keys must match `soc.cores[].id`; `app:` / `board:` / `machine:` / `toolchain:` are SoM-extension.                       |
@@ -485,7 +486,7 @@ new YAML with:
 
 ```
 FAIL metadata/e1m_modules/E1M-AEN901.yaml
-  · sku: 'E1M-AEN901' does not match '^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$'
+  · sku: 'E1M-AEN901' does not match '^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3})$'
 ```
 
 Edit the pattern in **both** schema files to accept `AEN[3-9][0-9]{2}`:
@@ -493,7 +494,7 @@ Edit the pattern in **both** schema files to accept `AEN[3-9][0-9]{2}`:
 ```jsonc
 "sku": {
   "type": "string",
-  "pattern": "^E1M-(AEN[3-9][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$"
+  "pattern": "^E1M-(AEN[3-9][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3})$"
 }
 ```
 
@@ -534,7 +535,7 @@ is named `metadata/e1m_modules/aen/hw-revisions.yaml`; the SoM
 preset's `family: alif-ensemble` is the human-readable family
 slug, NOT the directory name — see `scripts/alp_project.py`
 `_sku_family()` for the SKU-prefix → directory map: `AEN` → `aen`,
-`V2N` → `v2n`, `V2M` → `v2n-m1`, `NX9` → `imx93`).
+`V2N` → `v2n`, `V2M` → `v2n-m1`).
 
 **Future revision rows.**  If the AEN9 generation introduces a true
 PCB respin (different stack-up, different connector position, …)

@@ -41,6 +41,7 @@ resolutions:
 
 mipi:
   lanes_supported: [1, 2]
+  role:            csi2_tx
 
 kconfig:
   zephyr:         ALP_SDK_CHIP_OV5645
@@ -50,7 +51,6 @@ families:
   - aen
   - v2n
   - v2n-m1
-  - imx93
 
 verification:
   hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.

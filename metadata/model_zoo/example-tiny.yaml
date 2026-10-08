@@ -13,7 +13,7 @@
 schema_version: 1
 kind: fixture
 id: example-tiny
-task: example
+task: smoke
 description: Tiny INT8 smoke model for wiring the zoo add/build flow end to end.
 license: Apache-2.0
 source:

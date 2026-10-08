@@ -30,7 +30,7 @@ snd_hp_check() {
 		snd_hp_refuse "unit $serial is '$verdict' in $list: $line"
 		return 1
 	fi
-	if [ ! -f "$sd/CMakeCache.txt" ] || ! grep -q '^TR_SND_REWORKED_U46:BOOL=ON$' "$sd/CMakeCache.txt"; then
+	if [ ! -f "$sd/CMakeCache.txt" ] || ! tr -d '\r' < "$sd/CMakeCache.txt" | grep -q '^TR_SND_REWORKED_U46:BOOL=ON$'; then
 		snd_hp_refuse "$sd was not configured with TR_SND_REWORKED_U46=ON"
 		return 1
 	fi

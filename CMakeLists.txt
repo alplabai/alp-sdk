@@ -85,11 +85,11 @@ endif()
 
 # SoM family selector -- picks which vendor wrapper layer the
 # bare-metal backend pulls in.  none = peripheral stubs only;
-# aen = vendors/alif/ wrappers (Alif Ensemble); v2n / imx93
-# slot in once their respective vendor packs land.
-set(ALP_SUPPORTED_SOM "none;aen;v2n;imx93" CACHE INTERNAL "")
+# aen = vendors/alif/ wrappers (Alif Ensemble); v2n slots in once
+# its vendor pack lands.
+set(ALP_SUPPORTED_SOM "none;aen;v2n" CACHE INTERNAL "")
 set(ALP_SOM "none" CACHE STRING
-    "Target SoM family for bare-metal: none, aen, v2n, imx93")
+    "Target SoM family for bare-metal: none, aen, v2n")
 set_property(CACHE ALP_SOM PROPERTY STRINGS ${ALP_SUPPORTED_SOM})
 if(NOT ALP_SOM IN_LIST ALP_SUPPORTED_SOM)
     message(FATAL_ERROR
@@ -184,10 +184,10 @@ set(ALP_SDK_CHIP_LIST
     clk_5l35023b da9292 deepx_dxm1 drv8825 drv8833 eeprom_24c128
     es8388 gc2145 gd32g553 gd32_swd gdew0154t8 hailo_8l hx711
     icm42670 ics_43434 il3820 ili9341 ili9488 imx219 imx477
-    ina236 inmp441 lis2dw12 lps22hb lsm6dso max31855 max31865
+    ina228 ina236 inmp441 lis2dw12 lps22hb lsm6dso max31855 max31865
     max98357a maxim_max9295_9296 ms5611 mt6701 murata_lbee5hy2fy
     optiga_trust_m ov2640 ov5640 ov5645 ov7670 ov9281
-    pca9451a pi3dbs12212 qmc5883l quectel_bg77 quectel_bg95 ra8875
+    pi3dbs12212 qmc5883l quectel_bg77 quectel_bg95 ra8875
     rtl8211fdi rv3028c7 semtech_sx1262 semtech_sx1276 sh1106
     ssd1306 ssd1331 st7789 tas2563 tcal9538 ti_ds90ub953_954
     tlv320aic3204 tmc2209 tmp112 tps628640 tsl2591 ublox_max_m10s

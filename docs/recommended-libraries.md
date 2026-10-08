@@ -272,7 +272,7 @@ it's parked.  v0.5 cycle revisits.
 
 | Library     | Status                                                                                       |
 |-------------|---------------------------------------------------------------------------------------------|
-| MCUboot     | Bootloader for Zephyr targets (AEN, N93-RTcore).  Locked in by [ADR 0006](adr/0006-secure-boot-secure-ota.md). |
+| MCUboot     | Bootloader for Zephyr targets (AEN).  Locked in by [ADR 0006](adr/0006-secure-boot-secure-ota.md). |
 | MbedTLS     | PSA Crypto backend for `<alp/security.h>`.                                                  |
 | TinyUSB     | Reference for `<alp/usb.h>` Zephyr backend.                                                  |
 | LVGL        | `<alp/gui.h>` opt-in re-export with Alp defaults via `lv_conf.h`.                            |
@@ -292,7 +292,7 @@ libraries below are smaller / different in scope:
 | Library     | Niche                                                                  | Why we haven't integrated                                          |
 |-------------|------------------------------------------------------------------------|--------------------------------------------------------------------|
 | [TinyMaix](https://github.com/sipeed/TinyMaix) | Sub-100 KB inference for tiny MCUs (Cortex-M0, AVR)             | Below our target tier — alp-sdk's smallest target is the AEN M55.   |
-| [nnom](https://github.com/majianjia/nnom) | Pure-C neural net on MCUs, Keras export                        | Overlap with TFLM; no clear win on AEN/N93.                          |
+| [nnom](https://github.com/majianjia/nnom) | Pure-C neural net on MCUs, Keras export                        | Overlap with TFLM; no clear win on AEN.                          |
 | [libonnx](https://github.com/xboot/libonnx) | C99 ONNX inference for embedded                                | Superseded as the ONNX answer by the real `onnxruntime` Tier B manifest (own `meta-alp-sdk` recipe, upstream `microsoft/onnxruntime` v1.28.0) — the A55/Yocto CPU inference floor, default off in CMake (`ALP_SDK_USE_ORT_CPU`) but on by default in the V2M101/V2M102/V2M103/V2N101/V2N102/V2N103 images via `ALP_ENABLE_ORT_CPU` (#1259; V2M with the DEEPX runtime builds against dx-rt's libonnxruntime instead of the layer's), not yet run on silicon.  libonnx's remaining niche is a sub-Yocto (M-class / bare-metal) pure-ONNX path, which nothing in-tree needs yet. |
 | [libonnx](https://github.com/xboot/libonnx) | C99 ONNX inference for embedded                                | ONNX path is reachable via TFLM (TFLite converter).  Revisit if model authors want pure ONNX. |
 | [ExecuTorch](https://github.com/pytorch/executorch) | PyTorch's own on-device runtime for exported `.pte` programs | Write-side only (#1260): `ALP_INFERENCE_MODEL_EXECUTORCH` decodes and `scripts/alp_model/adapters/executorch.py` packages a `.pte` into an `.alpmodel`, but no on-device ExecuTorch runtime backend exists yet — a package built this way has nothing to `alp_inference_invoke()` it. |
@@ -303,7 +303,7 @@ libraries below are smaller / different in scope:
 |--------------|---------------------------------------------------------------------------------------------|
 | FreeRTOS direct | Zephyr is our RTOS choice (see [ADR 0001](adr/0001-wrapper-on-top-of-zephyr.md)).  FreeRTOS-on-Yocto is a Yocto-side concern, not SDK-side. |
 | Mbed OS      | Superseded — Arm has wound down Mbed OS.                                                    |
-| TouchGFX     | Proprietary STM32 tool.  Not portable to AEN/V2N/N93.                                       |
+| TouchGFX     | Proprietary STM32 tool.  Not portable to AEN/V2N.                                           |
 | eGUI         | NXP-specific; LVGL covers the cross-vendor case.                                            |
 | EmbeddedProto | nanoPB is more widely adopted + actively maintained.                                       |
 | picoTCP      | Effectively unmaintained; Zephyr's net stack + Yocto's native stack cover both worlds.      |
@@ -314,9 +314,17 @@ When a new library candidate shows up:
 
 1. **Scope test** — does it sit cleanly above the SDK's existing
    abstractions, or does it overlap them?  Overlap = no.
-2. **License test** — Apache-2.0, MIT, BSD, Zlib, ISC, Boost.
-   No GPL/LGPL in headers; LGPL is OK if linked dynamically on
-   Yocto-only targets.
+2. **License test** — the SPDX id must be on the permissive allowlist
+   in `metadata/libraries/README.md` ("Licence allowlist"), which
+   `metadata/schemas/library-v1.schema.json` enforces.  Anything
+   outside it (ISC, any GPL/LGPL, proprietary) needs a maintainer
+   legal review that extends the allowlist first.
+   LGPL is the one case with a narrower path: it is acceptable as a
+   dynamically linked binary package in a Yocto image, built by its
+   own recipe.  It is not acceptable where its source is compiled or
+   statically linked into firmware, or its headers are vendored.  A
+   `libraries:` manifest cannot express that path today, because the
+   schema rejects LGPL ids.
 3. **Maintenance test** — commit activity in the last 12 months,
    no single-bus-factor maintainers.
 4. **Footprint test** — sub-50 KB ROM / sub-4 KB RAM at typical

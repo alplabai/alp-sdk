@@ -1,0 +1,34 @@
+/*
+ * GENERATED (scripts/gen_linux_ownership_dt.py, or `--emit linux-ownership-dts`
+ * for a project) from metadata/e1m_modules/v2n/core-ownership.yaml
+ * and the SoC JSON linux_dt block -- DO NOT EDIT BY HAND.
+ *
+ * Per-product core ownership on the A55 side: each assignable resource
+ * the SoM default gives to Linux is enabled here with pinctrl built from
+ * the metadata; resources owned by the Cortex-M33 or hardware-blocked
+ * are explicitly disabled.  Regenerate after editing either source.
+ */
+
+/* e1m_can0 (CANFD3, &canfd): owned by a55; left at the vendor status (no `linux_enable` in
+ * metadata/e1m_modules/v2n/core-ownership.yaml -- Linux enablement is not bench-evidenced). */
+
+/* e1m_can1 (CANFD2, &canfd): owned by a55; left at the vendor status (no `linux_enable` in
+ * metadata/e1m_modules/v2n/core-ownership.yaml -- Linux enablement is not bench-evidenced). */
+
+/* e1m_spi0 (RSPI0, &rspi0): left disabled -- hardware-blocked on every core:
+ * P90-P92 are not 3.3 V tolerant (R01UH1071EJ0120 4.2.3.1.1 Note 1) and the carrier parts on E1M SPI0 are not yet confirmed 1.8 V (audit IO-05 / IO-M2 / CM33-13) */
+
+/* e1m_uart0 (UART0, &sci0): owned by a55; left at the vendor status (no `linux_enable` in
+ * metadata/e1m_modules/v2n/core-ownership.yaml -- Linux enablement is not bench-evidenced). */
+
+/* e1m_uart1 (UART1, &sci1): owned by a55; left at the vendor status (no `linux_enable` in
+ * metadata/e1m_modules/v2n/core-ownership.yaml -- Linux enablement is not bench-evidenced). */
+
+/*
+ * Module clocks the Cortex-M33 uses (enabled supervisor links + CM33-owned
+ * assignable instances): the CPG driver keeps them, and their bus-stop gates,
+ * on through clk_disable_unused (0001-clk-renesas-rzv2h-cpg-cm33-owned-clocks).
+ */
+&cpg {
+	renesas,cm33-owned-clocks = "rsci_7_pclk", "rsci_7_tclk", "rsci_7_ps_ps3_n", "rsci_7_ps_ps2_n", "rsci_7_ps_ps1_n";
+};

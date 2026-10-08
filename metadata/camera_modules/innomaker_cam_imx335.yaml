@@ -1,0 +1,20 @@
+# Alp SDK camera module: INNO-MAKER CAM-IMX335-5MP (Sony IMX335).
+# Values from zephyr/boards/shields/innomaker_cam_imx335/innomaker_cam_imx335.overlay.
+schema_version: 1
+module_id:      innomaker_cam_imx335
+display_name:   "INNO-MAKER CAM-IMX335-5MP (Sony IMX335, 2-lane CSI-2)"
+chip:           imx335
+i2c_addr_7bit:  0x1A
+xclk_hz:        24000000
+lanes:          2
+zephyr_shield:  innomaker_cam_imx335
+# Host-node settings from the shield overlay (Camera-mode IPI with an explicit
+# 200 MHz pixel clock -- the derived 285 MHz exceeds the Alif pixclk ceiling --
+# and the symmetric ISP crop 1296x972 -> 1280x960).
+zephyr_host_overrides:
+  snps,designware-csi:
+    ipi-mode:       "Camera"
+    csi-pixclk-hz:  200000000
+  vsi,isp-pico:
+    crop-x0:        8
+    crop-y0:        6

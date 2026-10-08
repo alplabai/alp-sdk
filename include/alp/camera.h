@@ -21,9 +21,10 @@
  *     100): same sensor pipeline as zephyr_video, real once the
  *     V2N N44 SoC port wires its MIPI CSI-2 IP up to
  *     `drivers/video/` (not yet landed), plus the N44 on-die ISP's
- *     `configure_isp` (AE/AWB/AF + tuning offsets latch and return
- *     ALP_OK; the MMIO pokes land once the N44 ISP register map is
- *     public).
+ *     `configure_isp`, which validates and returns ALP_ERR_NOSUPPORT:
+ *     no ISP register is written (the CM33 FSP has no CRU/CSI-2/ISP
+ *     module and the A55 owns them; RZ/V2N Hardware User's Manual
+ *     R01UH1071EJ0120 section 9.8).
  *   - **alif_isp_pico** (silicon_ref `"alif:ensemble:e8"`, priority
  *     100): same real sensor pipeline, plus the E8 VeriSilicon
  *     ISP-Pico's `configure_isp` (same latch-and-ALP_OK posture).

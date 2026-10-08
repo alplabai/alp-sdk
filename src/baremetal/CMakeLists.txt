@@ -9,8 +9,7 @@
 #     Used as the link-complete fall-back so a bare-metal app builds
 #     even with ALP_SOM=none.
 #   - vendors/<som>/ pulls in vendor-specific real impls (Alif HAL
-#     for ALP_SOM=aen, Renesas FSP for v2n, NXP MCUXpresso for
-#     imx93) when ALP_HAS_<VENDOR>_HAL is also ON.
+#     for ALP_SOM=aen, Renesas FSP for v2n) when ALP_HAS_<VENDOR>_HAL is also ON.
 #
 # When a vendor wrapper provides an alp_* symbol the corresponding
 # stub in src/common/stub/ is excluded via the
@@ -112,6 +111,16 @@ target_sources(alp_sdk PRIVATE
     # The Yocto backend already compiles this file; baremetal didn't (#593).
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/alp_model_loader.c
 )
+
+# SoM inference.auto_order for the .alpmodel AUTO tiebreak -- same define name
+# as the Yocto and Zephyr builds (the loader body is NOSUPPORT here until the
+# baremetal build compiles the model reader, but the wiring stays uniform).
+set(ALP_SDK_INFERENCE_AUTO_ORDER "" CACHE STRING
+    "Comma-separated accelerator preference for ALP_INFERENCE_BACKEND_AUTO, best first (e.g. ethos_u,cpu), from the SoM preset's inference.auto_order.")
+if(ALP_SDK_INFERENCE_AUTO_ORDER)
+    target_compile_definitions(alp_sdk PRIVATE
+        ALP_SDK_INFERENCE_AUTO_ORDER="${ALP_SDK_INFERENCE_AUTO_ORDER}")
+endif()
 
 target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_CAMERA=1

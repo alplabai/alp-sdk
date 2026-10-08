@@ -1500,6 +1500,36 @@
         "summary": "> `[UNTESTED]` -- v0.6 paper-correct. Builds against the same V2N > memory_map as rpmsg-v2n (no TBD addresses). HiL bring-up gates > on v0.8."
       },
       {
+        "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./linux",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "./m33_sm",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": true,
+          "models": false,
+          "peripherals": true
+        },
+        "name": "microros-ros2-v2n",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
+        "path": "examples/multicore/microros-ros2-v2n",
+        "som": "E1M-V2N101",
+        "summary": "> **Status: M33 slice builds and boots; no ROS 2 round-trip yet.** The A55 > bridge compiles warning-free on a Linux host; the M33 firmware builds to > `zephyr.elf` for the V2M101 and V2N101 CM33 targets on Zephyr 4.4.1 / > zephyr-sdk 1.0.1 (picolibc) with two carried patches to > `micro_ros_zephyr_module` (`m33_sm/patches/`). On an E1M-V2M103 > (2026-10-07) the image booted on the CM33 and `main()` wrote the resource > table (rsctbl v1, 1 RPMSG vdev, vrings at `0x4f800000`), no SError. Not > proven: a ROS 2 topic round-trip with a micro-ROS agent. See > [What is untested](#what-is-untested)."
+      },
+      {
         "board": "e1m-evk",
         "coreCount": 3,
         "cores": [
@@ -1568,19 +1598,6 @@
         "path": "examples/multicore/rpmsg-aen",
         "som": "E1M-AEN801",
         "summary": "> `[UNTESTED]` -- v0.6 structural draft. Board.yaml + sources are > shape-correct, but the end-to-end RPMsg path still needs AEN801 > bench validation."
-      },
-      {
-        "board": "e1m-evk",
-        "declares": {
-          "chips": false,
-          "ipc": true,
-          "models": false,
-          "peripherals": true
-        },
-        "name": "rpmsg-imx93",
-        "path": "examples/multicore/rpmsg-imx93",
-        "som": "E1M-NX9101",
-        "summary": "> `[UNTESTED]` -- v0.6 structural draft, targeting **E1M-NX9101** > (NXP i.MX 93), which is **not yet buildable**. Its only hw_rev, > `metadata/e1m_modules/imx93/hw-revisions.yaml`'s `r1`, is > `status: tbd` -- the hw_rev-buildable gate > ([#1025](https://github.com/alplabai/alp-sdk/issues/1025)) refuses > it outright, before the orchestrator ever reaches carve-out > resolution against the iMX93 memory map, which > `metadata/e1m_modules/E1M-NX9101.yaml` cannot resolve either > (`silicon_variant: TBD`). Both are TBD by design > (project memory note: don't invent HW values) pending real NX9101 > silicon; this example is excluded from the build/emit-snapshot/ > build-plan/system-manifest/parity-oracle gates for the same reason > (see those gates' own `#1025` comments) but its source and this > README stay -- the declarative structural files are the contract > that lets the orchestrator land cleanly the moment a real hw_rev > status lands."
       },
       {
         "board": "e1m-x-evk",
@@ -2901,54 +2918,6 @@
           }
         ],
         "declares": {
-          "chips": false,
-          "ipc": false,
-          "models": false,
-          "peripherals": true
-        },
-        "name": "v2n-emmc-block-stat",
-        "osSet": [
-          "zephyr"
-        ],
-        "path": "examples/v2n/v2n-emmc-block-stat",
-        "som": "E1M-V2N101",
-        "summary": "Query the V2N module's on-module eMMC via Zephyr's disk-access (block-storage) subsystem. Reports sector count + sector size, reads the first 16 blocks (8 KiB) of the device, looks for the MBR signature, and asks the driver for any erase-block / wear-level data it caches."
-      },
-      {
-        "board": "e1m-x-evk",
-        "coreCount": 1,
-        "cores": [
-          {
-            "app": "./src",
-            "id": "m33_sm",
-            "os": "zephyr"
-          }
-        ],
-        "declares": {
-          "chips": true,
-          "ipc": false,
-          "models": false,
-          "peripherals": true
-        },
-        "name": "v2n-ethernet-dual",
-        "osSet": [
-          "zephyr"
-        ],
-        "path": "examples/v2n/v2n-ethernet-dual",
-        "som": "E1M-V2N101",
-        "summary": "Brings up both RTL8211FDI Ethernet PHYs on the V2N module (ET0 + ET1), exercises the management surface (MDIO probe, soft-reset, autoneg restart, link-status read), and configures Wake-on-LAN."
-      },
-      {
-        "board": "e1m-x-evk",
-        "coreCount": 1,
-        "cores": [
-          {
-            "app": "./src",
-            "id": "m33_sm",
-            "os": "zephyr"
-          }
-        ],
-        "declares": {
           "chips": true,
           "ipc": false,
           "models": false,
@@ -3056,7 +3025,31 @@
         ],
         "path": "examples/v2n/v2n-gd32-swd-flash",
         "som": "E1M-V2N101",
-        "summary": "Demonstrate the host-driven SWD bit-bang controller ([`chips/gd32_swd/`](../../../chips/gd32_swd/)) by attaching from the Renesas RZ/V2N to the on-module GD32G553 over three GPIOs (SWDIO + SWCLK + optional NRST), reading the SW-DP IDCODE, halting the Cortex-M33, erasing a flash sector, writing + verifying a scratch pattern, and resetting."
+        "summary": "Demonstrate the host-driven SWD bit-bang controller ([`chips/gd32_swd/`](../../../chips/gd32_swd/)) by attaching from the Renesas RZ/V2N to the on-module GD32G553 over three GPIOs (SWDIO + SWCLK + NRST), reading the SW-DP IDCODE, halting the Cortex-M33, erasing a flash sector, writing + verifying a scratch pattern, and resetting."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
+        "name": "v2n-gpu2d-compose",
+        "osSet": [
+          "yocto"
+        ],
+        "path": "examples/v2n/v2n-gpu2d-compose",
+        "som": "E1M-V2N101",
+        "summary": "Compose ARGB8888 layers through the portable `<alp/gpu2d.h>` surface and check the result -- on the RZ/V2N Mali-G31 when the image carries the Renesas graphics stack, on the CPU otherwise. The source does not change between the two."
       },
       {
         "board": "e1m-x-evk",
@@ -3170,7 +3163,7 @@
         ],
         "path": "examples/v2n/v2n-power-monitor",
         "som": "E1M-V2N101",
-        "summary": "Live per-rail power table from the **E1M-X EVK**'s on-board INA236 current/voltage monitors, read from a Linux/Yocto user-space app on the V2N Cortex-A55."
+        "summary": "Live per-rail power table from the **E1M-X EVK**'s on-board INA236 current/voltage monitors and its INA228 +5V input monitor, read from a Linux/Yocto user-space app on the V2N Cortex-A55."
       },
       {
         "board": "e1m-x-evk",
@@ -3195,6 +3188,36 @@
         "path": "examples/v2n/v2n-pwm-fan-control",
         "som": "E1M-V2N101",
         "summary": "Drive a fan from `ALP_E1M_PWM0` on V2N. Walks duty cycle through a five-stop curve at a fixed 25 kHz board (above audible) using the portable `<alp/pwm.h>` surface, so the wave shape is observable on a scope."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
+        "name": "v2n-ros2-som-temperature",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
+        "path": "examples/v2n/v2n-ros2-som-temperature",
+        "som": "E1M-V2N101",
+        "summary": "The smallest useful Alp SDK + ROS 2 node. It calls the **portable temperature API** from `<alp/temperature.h>` and republishes the values as `sensor_msgs/Temperature`: the SoC die temperature on `/alp/soc_temperature` (real on V2N/V2M Linux) and the on-module sensor on `/alp/som_temperature`."
       },
       {
         "board": "e1m-x-evk",
@@ -3242,6 +3265,36 @@
           }
         ],
         "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
+        "name": "v2n-soc-temperature",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
+        "path": "examples/v2n/v2n-soc-temperature",
+        "som": "E1M-V2N101",
+        "summary": "Prints the SoC die (junction) temperature once per second from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster, through the portable `alp_temperature_read_die_milli_c()`."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
           "chips": true,
           "ipc": false,
           "models": false,
@@ -3262,23 +3315,23 @@
         "cores": [
           {
             "app": "./src",
-            "id": "m33_sm",
-            "os": "zephyr"
+            "id": "a55_cluster",
+            "os": "yocto"
           }
         ],
         "declares": {
           "chips": false,
           "ipc": false,
           "models": false,
-          "peripherals": true
+          "peripherals": false
         },
-        "name": "v2n-xspi-flash-readwrite",
+        "name": "v2n-two-models",
         "osSet": [
-          "zephyr"
+          "yocto"
         ],
-        "path": "examples/v2n/v2n-xspi-flash-readwrite",
-        "som": "E1M-V2N101",
-        "summary": "Erase one sector on the V2N module's on-module xSPI NOR, write a known pattern, read it back, and report the comparison. Exercises Zephyr's standard `flash` driver class against the board-facing xSPI bus."
+        "path": "examples/v2n/v2n-two-models",
+        "som": "E1M-V2M103",
+        "summary": "Run two models at the same time on an E1M-V2M, one on the RZ/V2N's on-die **DRP-AI3** NPU and one on the **DEEPX DX-M1**, each in its own thread, through `<alp/inference.h>`. Prints per-NPU latency and combined FPS."
       }
     ]
   },
@@ -3290,6 +3343,10 @@
     {
       "purpose": "Cross-core pad-claim gate for the AMP RZ/V2N SoM (issue #1142).",
       "script": "scripts/check_amp_pad_claims.py"
+    },
+    {
+      "purpose": "Pin every copy of the CM33 OpenAMP shared window to its one declaration.",
+      "script": "scripts/check_amp_window.py"
     },
     {
       "purpose": "Reject a raw `apt-get update`/`apt-get install` in a workflow step.",
@@ -3484,6 +3541,10 @@
       "script": "scripts/check_no_committed_doxygen_output.py"
     },
     {
+      "purpose": "Pad-voltage gate: a carrier must not drive a 3.3 V level onto an SoM pad whose SoC pad is not 3.3 V tolerant without declaring a level shifter.",
+      "script": "scripts/check_pad_voltage.py"
+    },
+    {
       "purpose": "Validate that every silicon pad referenced in the SoM peripheral maps is claimed by **exactly one** peripheral.",
       "script": "scripts/check_pin_conflicts.py"
     },
@@ -3598,6 +3659,7 @@
         "alp_adc_filter_read_mv",
         "alp_adc_open",
         "alp_adc_read_raw",
+        "alp_adc_read_raw_n",
         "alp_adc_read_uv",
         "alp_adc_spectrum_close",
         "alp_adc_spectrum_open",
@@ -4046,6 +4108,7 @@
     },
     {
       "functions": [
+        "alp_temperature_read_die_milli_c",
         "alp_temperature_read_milli_c"
       ],
       "header": "include/alp/temperature.h"
@@ -4572,66 +4635,6 @@
         "m55_hp": {
           "app": "alp-stock-shim",
           "board": "alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp",
-          "os": "zephyr",
-          "toolchain": "arm-zephyr-eabi"
-        }
-      }
-    },
-    {
-      "boot": {
-        "allowed_swap_algorithms": [
-          "scratch",
-          "move",
-          "overwrite"
-        ],
-        "default_swap_algorithm": "scratch",
-        "single_slot": false
-      },
-      "capabilities": {
-        "emmc_dma": true,
-        "ethos_u65_count": 1,
-        "neon": true
-      },
-      "family": "nxp-imx9",
-      "silicon": "nxp:imx9:imx93",
-      "sku": "E1M-NX9101",
-      "soc_part": "i.MX 93",
-      "soc_peripherals": {
-        "adc": false,
-        "can": false,
-        "dac": false,
-        "ethernet": false,
-        "i2c": false,
-        "i2s": false,
-        "i3c": false,
-        "mipi_csi": false,
-        "mipi_dsi": true,
-        "npu": true,
-        "pcie": false,
-        "pdm": false,
-        "pwm": false,
-        "quadrature_encoder": false,
-        "rtc": false,
-        "sd1": false,
-        "sdio_emmc": false,
-        "spi": false,
-        "timer": false,
-        "uart": false,
-        "usb": false,
-        "watchdog": false,
-        "wifi_sdio": false,
-        "xspi_ospi": true
-      },
-      "topology": {
-        "a55_cluster": {
-          "app": "alp-image-edge",
-          "machine": "e1m-nx9101-a55",
-          "os": "yocto",
-          "toolchain": "poky-glibc"
-        },
-        "m33": {
-          "app": "alp-stock-shim",
-          "board": "alp_e1m_nx9101_m33",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }
