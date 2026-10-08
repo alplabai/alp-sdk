@@ -369,7 +369,7 @@ alp_status_t rv3028c7_alarm_clear(rv3028c7_t *ctx);
  * @brief Interrupt service for the wake path: read Status, report the
  *        TF / AF / UF flags that are latched, and clear exactly those.
  *
- * Read-modify-write like @ref rv3028c7_dispatch_irq: Status is read
+ * Read-modify-write like @ref rv3028c7_dispatch_irq, Status is read
  * once, and the write-back carries a 1 in every flag bit that is NOT
  * being acknowledged (a 1 leaves a flag unchanged, a 0 clears it;
  * same convention as rv3028c7_alarm_check_and_clear()).  PORF, EVF,
