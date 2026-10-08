@@ -41,6 +41,14 @@ static inline int tr_rot_valid(int rot)
 	return rot == 0 || rot == 90 || rot == 270;
 }
 
+/* The renderer refuses a frame over its rotation only if the frame will be drawn
+ * (it has a valid framebuffer): a frame it would drop anyway, such as power-on
+ * garbage on a cold mailbox, is no ABI violation. */
+static inline int tr_rot_refuse(int drawn, unsigned rotation)
+{
+	return drawn && !tr_rot_valid((int)rotation);
+}
+
 /* The HUD layer (layer 2): TR_HUD_H portrait rows (hud.h, 352) -> that many
  * landscape columns, at the layer-1 window's right edge for 90, left for 270. */
 #define TR_ROT_HUD_W 352

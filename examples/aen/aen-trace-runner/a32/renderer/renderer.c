@@ -32,9 +32,12 @@
  * The gate: core 0 zeroes .bss at entry and core 1 runs concurrently (the
  * stub releases it just before core 0 jumps), so core 1 touches nothing of
  * ours until core 0 writes RENDER_GATE = the launch token. The token is
- * stub_heartbeat0, which the stub's park loop bumps before every LAUNCH and
- * which stays frozen while a payload runs: fresh per launch, same on both
- * cores, so a gate value left by an earlier launch never matches.
+ * stub_heartbeat0, which the stub's launch() bumps (to a non-zero value) before every
+ * jump -- the release self-LAUNCH included, which never visits the park loop -- and
+ * which stays frozen while a payload runs: fresh per launch, same on both cores, so
+ * a gate value left by an earlier launch never matches, and a zero token cannot
+ * meet a gate word that happens to read 0 (RENDER_GATE sits outside .bss, so power-on
+ * garbage or an earlier launch's token is all it holds until core 0 writes it).
  *
  * HALT (contract: core 1 returns first): core 1 sees ctrl_cmd == HALT while
  * idle and returns; core 0 sees it, waits (<= RENDER_HALT_WAIT) for
@@ -621,7 +624,12 @@ void renderer_main(volatile tr_mbox_t *m)
 		if (!tr_mbox_take_in(m, last, &in, &fb, &seq, barrier)) {
 			continue;
 		}
-		if (!tr_rot_valid(in.rotation)) {
+		/* Only a frame that WILL be drawn is held to the rotation ABI: a frame with no
+		 * valid framebuffer is dropped below (out_dropped++), whatever its other
+		 * fields hold. */
+		int drawn = fb == TR_FB_A || fb == TR_FB_B;
+
+		if (tr_rot_refuse(drawn, in.rotation)) {
 			abi_fault(m, 2u | ((uint32_t)in.rotation & 0xFFu) << 8); /* low byte only: 270 -> 14 */
 		}
 		if (t_pub_valid) {
@@ -635,8 +643,7 @@ void renderer_main(volatile tr_mbox_t *m)
 		render_set_quality(
 		    (uint8_t)(RENDER_STATS[1] & (TR_LOD_NO_BACK_RANK | TR_LOD_NEAR | TR_LOD_STILL)));
 
-		uint32_t t     = 0;
-		int      drawn = fb == TR_FB_A || fb == TR_FB_B;
+		uint32_t t = 0;
 
 		o.ticks1 = 0;
 		if (drawn) {

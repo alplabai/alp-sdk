@@ -312,6 +312,35 @@ _Static_assert(offsetof(tr_mbox_t, ctrl_cmd) == 0x180,
 _Static_assert(offsetof(tr_mbox_t, fault_core) == 0x1C0,
                "fault record block moved -- see file header note");
 
+/* Stub, on a COLD page (the magic is not ours): SRAM1 holds power-on garbage, and a
+ * renderer launched before the HE's first frame would read it as a pending frame
+ * (in_seq != out_seq) with a random rotation. Zero the producer and consumer blocks
+ * -- [in_seq, ctrl_cmd): in_seq, in_fb, the `in` snapshot, out_seq, the out_* stats --
+ * so in_seq == out_seq == 0 and nothing is owed. Identity and the control / stub-state
+ * blocks are the caller's to set. */
+static inline void tr_mbox_cold_clear(volatile tr_mbox_t *m)
+{
+	volatile uint32_t *w = (volatile uint32_t *)&m->in_seq;
+	volatile uint32_t *e = (volatile uint32_t *)&m->ctrl_cmd;
+
+	while (w < e) {
+		*w++ = 0u;
+	}
+}
+
+/* Stub, first thing in stub_main(): is this page warm (ours, of THIS mailbox layout)?
+ * A cold page, or a warm page of another TR_MBOX_VERSION (an older stub's, whose blocks
+ * sit at other offsets), is garbage to this stub: it is cleared (tr_mbox_cold_clear).
+ * Returns 1 for a warm page, 0 for one it cleared. */
+static inline int tr_mbox_stub_page_init(volatile tr_mbox_t *m)
+{
+	if (m->magic == TR_MBOX_MAGIC && m->version == TR_MBOX_VERSION) {
+		return 1;
+	}
+	tr_mbox_cold_clear(m);
+	return 0;
+}
+
 /* Field-by-field snapshot of `g` into `out` (see the header comment on why
  * tr_game_t is never embedded). `banner`, `attract_active` and `paused` are
  * display/mode state tr_game_t doesn't carry, passed in by the caller.
