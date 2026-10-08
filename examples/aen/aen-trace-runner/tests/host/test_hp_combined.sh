@@ -148,7 +148,7 @@ for d in he he-nobus2; do
 	: >"$t/$d/zephyr/zephyr.elf"
 	cp "$t/he-dts" "$t/$d/zephyr/zephyr.dts"
 	# the camera the HE was built for: the release check compares it with the HP image's
-	printf '%s\n' "TR_INPUT_NPU:BOOL=ON" "TR_CAM_ROTATE:STRING=90" >"$t/$d/CMakeCache.txt"
+	printf '%s\n' "TR_INPUT_NPU:BOOL=ON" "TR_CAM_ROTATE:STRING=90" "TR_CAM_MIRROR:BOOL=ON" >"$t/$d/CMakeCache.txt"
 done
 mkdir -p "$t/he-land/zephyr" "$t/he-nonpu/zephyr"
 for d in he-land he-nonpu; do
