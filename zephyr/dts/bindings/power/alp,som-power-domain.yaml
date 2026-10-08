@@ -1,0 +1,124 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# alp,som-power-domain -- one quiesce-able on-module power domain
+# (Wi-Fi/BLE, Ethernet PHY, external flash, external RAM, temperature sensor,
+# RTC, backlight).  Generated from `power_domains:` in
+# metadata/e1m_modules/aen/on-module-links.yaml; every control pad is pinned to
+# the pad TSVs by scripts/check_som_power_domains.py.  Data only (alp-sdk#2784):
+# nothing in the SDK drives these pads yet.
+
+description: |
+  One SoM power domain.  The `*-gpios` properties name the SoC pads that gate
+  the domain; the polarity flag is the ASSERTED level (GPIO_ACTIVE_LOW on a
+  reset or power-down line means "drive low to assert").  Which property a pad
+  lands in follows its role: reset -> reset-gpios, rail_enable and enable ->
+  enable-gpios, powerdown -> powerdown-gpios, wake_in -> wake-gpios.
+
+  Example:
+
+    wifi-ble {
+        compatible = "alp,som-power-domain";
+        alp,role = "wifi_ble";
+        reset-gpios = <&lpgpio 1 GPIO_ACTIVE_LOW>;
+        enable-gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>;
+        alp,default-action = "hold_reset";
+        alp,default-modes = "stop", "standby";
+        alp,stop-hold = "unproven";
+        alp,restore = "nreset_release";
+        alp,rail-off-opt-in;
+    };
+
+compatible: "alp,som-power-domain"
+
+include: [base.yaml]
+
+properties:
+  alp,role:
+    type: string
+    required: true
+    enum:
+      - wifi_ble
+      - eth_phy
+      - ext_flash
+      - ext_ram
+      - temp_sensor
+      - rtc
+      - backlight
+    description: Portable role name of the domain (stable across a SoM swap in the family).
+
+  reset-gpios:
+    type: phandle-array
+    description: Reset line of the domain's chip.  Flag = asserted level.
+
+  enable-gpios:
+    type: phandle-array
+    description: Supply or function enable of the domain's chip.  Flag = asserted (enabled) level.
+
+  powerdown-gpios:
+    type: phandle-array
+    description: Power-down pin of the domain's chip.  Flag = asserted (powered-down) level.
+
+  wake-gpios:
+    type: phandle-array
+    description: Wake input driven by the domain's chip (the RV-3028 /INT on P15_0).  Flag = asserted level.
+
+  alp,primary-rtc:
+    type: boolean
+    description: |
+      The domain's chip is the primary RTC and the primary RTC wake source.
+      The internal LPRTC is secondary (Alif ER001/ER002): the SES boot leaves
+      the LF clock on LFRC (`[SES] No LF XTAL`).  LFXO works when selected
+      (about 32785 Hz measured) but selecting it via `se_service_set_run_cfg`
+      has side effects, so LPRTC stays secondary until the full-profile backend
+      (U5/U7).
+
+  alp,device:
+    type: phandle
+    description: Node of the driver that owns the chip, where the board carries one.
+
+  alp,chip:
+    type: string
+    description: Part name for this SKU, from its `on_module` block.
+
+  alp,default-action:
+    type: string
+    required: true
+    description: |
+      Action the SDK's AUTO policy takes (hold_reset, powerdown_pin,
+      deep_power_down_cmd, shutdown_reg, keep_alive, enable_low).
+
+  alp,default-modes:
+    type: string-array
+    required: true
+    description: Sleep modes the default action applies to.
+
+  alp,stop-hold:
+    type: string
+    required: true
+    enum: ["yes", "no", "unproven", "none"]
+    description: |
+      Whether the default action's pad keeps its level through STOP.
+      `unproven` for every LPGPIO (P15_n) pad until the STOP bench shows the
+      output holds; `no` for main-domain pads; `none` when the domain has no
+      control pad.
+
+  alp,restore:
+    type: string
+    required: true
+    enum: [nreset_release, pin_release, driver_release, register_write, none]
+    description: |
+      How the domain is brought back.  `nreset_release` means the nRESET-only
+      path (cc3501e_hard_reset), never a supply cycle.
+
+  alp,rail-off-opt-in:
+    type: boolean
+    description: The domain has a supply-gate action that is opt-in only (Kconfig-gated).
+
+  alp,bom-optional:
+    type: boolean
+    description: The SKU lists the chip as a BOM variant; it may be absent on a given unit.
+
+  alp,dependents:
+    type: string-array
+    description: Other loads the domain's chip drives (cam_ldo, sd_enable).

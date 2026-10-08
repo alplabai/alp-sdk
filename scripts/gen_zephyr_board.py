@@ -1825,6 +1825,7 @@ def _aen_dts(
     metadata_root: Path, links: dict[str, Any],
     ethos_u: tuple[str, str] | None = None,
     memory_map: "list[dict[str, Any]] | None" = None,
+    power_domains: "dict[str, Any] | None" = None,
 ) -> str:
     role = core_id.split("_")[-1]                     # "hp" / "he"
     role_u = role.upper()
@@ -2127,6 +2128,8 @@ def _aen_dts(
     ]
     lines += _aen_brd_i2c_dts(links, part)
     lines += _aen_e1m_i2c0_dts(links)
+    if power_domains:
+        lines += _aen_som_power_dts(sku_preset, power_domains, links)
 
     if ethos_u is not None:
         _accel, node = ethos_u
@@ -2149,6 +2152,174 @@ def _aen_dts(
             "",
         ]
     return "\n".join(lines)
+
+
+def _load_aen_power_domains(metadata_root: Path) -> dict[str, Any]:
+    """Load + shape-check `power_domains:` of
+    `metadata/e1m_modules/aen/on-module-links.yaml` (v2, alp-sdk#2784).
+
+    The JSON schema (`on-module-links-v2.schema.json`) pins the shape in
+    `validate_metadata.py`; this refuses only what the emitter itself cannot
+    work without, so a hand-made `--metadata-root` copy fails loudly instead
+    of emitting a board with no SoM power node.
+    """
+    path = metadata_root / "e1m_modules" / "aen" / "on-module-links.yaml"
+    doc = _load_yaml(path)
+    if doc.get("schemaVersion") != "on-module-links-v2":
+        raise ZephyrBoardEmitError(
+            f"{path} schemaVersion is {doc.get('schemaVersion')!r}, expected "
+            "'on-module-links-v2' (the `power_domains:` block, alp-sdk#2784)")
+    domains = doc.get("power_domains")
+    if not isinstance(domains, dict) or not domains:
+        raise ZephyrBoardEmitError(f"{path} has no power_domains: block")
+    return domains
+
+
+def _aen_power_domain_presence(
+        domain: dict[str, Any], on_module: dict[str, Any],
+) -> "tuple[str, str | None] | None":
+    """`(state, chip)` for a power domain on THIS SoM preset, or `None` when
+    the domain is absent.  `state` is `"populated"` or `"optional"`.
+
+    Presence is never assumed from the family: it is read from the SKU's own
+    `on_module` block (`presence.on_module_key`, a dotted path).  A string
+    value (`wifi_ble: cc3501e`) is present unless it is a TBD placeholder; a
+    block with the tri-state `assembled:` follows that field via
+    `_aen_ospi_device_state()` (false -> absent, "optional" -> BOM variant).
+    `presence.family_invariant` is for the one domain no SKU preset describes.
+    """
+    presence = domain["presence"]
+    if presence.get("family_invariant"):
+        return "populated", domain.get("chip")
+    node: Any = on_module
+    for part in presence["on_module_key"].split("."):
+        node = node.get(part) if isinstance(node, dict) else None
+    if node is None:
+        return None
+    if isinstance(node, dict):
+        state, chip = _aen_ospi_device_state(node)
+        if state == "not_populated":
+            return None
+        return state, chip or domain.get("chip")
+    if not node or is_tbd(node):
+        return None
+    return "populated", str(node)
+
+
+#: `alp,stop-hold` strength order: the weakest control decides.
+_AEN_STOP_HOLD_RANK = {"no": 0, "unproven": 1, "yes": 2}
+
+#: Control role -> the DT gpio property name `alp,som-power-domain` uses.
+_AEN_POWER_ROLE_PROP = {
+    "reset": "reset-gpios",
+    "rail_enable": "enable-gpios",
+    "powerdown": "powerdown-gpios",
+    "enable": "enable-gpios",
+    "wake_in": "wake-gpios",
+}
+
+
+def _aen_som_power_dts(
+        sku_preset: dict[str, Any], domains: dict[str, Any],
+        links: dict[str, Any],
+) -> list[str]:
+    """The `alp,som-power` node: one `alp,som-power-domain` child per domain
+    this SKU actually carries (alp-sdk#2784, metadata-only -- nothing in the
+    SDK drives these pads yet).
+
+    Pad, polarity and action facts come from `power_domains:` in
+    on-module-links.yaml; whether the domain exists on this SKU comes from the
+    SKU's own `on_module:` block (`_aen_power_domain_presence()`).
+    """
+    on_module = sku_preset.get("on_module") or {}
+    device_labels = {
+        d["node_label"]
+        for d in (links["brd_i2c"].get("devices") or []) if d.get("node_label")}
+    children: list[str] = []
+    for name, dom in domains.items():
+        found = _aen_power_domain_presence(dom, on_module)
+        if found is None:
+            continue
+        state, chip = found
+        label = dom.get("device_label")
+        if label and label not in device_labels:
+            raise ZephyrBoardEmitError(
+                f"power_domains.{name}.device_label {label!r} is not a "
+                "node_label under on_module_links.brd_i2c.devices")
+        action = dom["default_action"]
+        actions = dom["actions"]
+        if action not in actions:
+            raise ZephyrBoardEmitError(
+                f"power_domains.{name}.default_action {action!r} is not in "
+                "its actions:")
+        by_signal = {c["signal"]: c for c in dom["controls"]}
+        # The hold level that matters is the default action's own pad; a
+        # command-only action falls back to the domain's pads (weakest wins).
+        ctl = by_signal.get(actions[action].get("control", ""))
+        held = ([ctl] if ctl else
+                [c for c in dom["controls"] if c["direction"] == "out"])
+        stop_hold = (min((c["holds_through_stop"] for c in held),
+                         key=_AEN_STOP_HOLD_RANK.__getitem__)
+                     if held else "none")
+        node = name.replace("_", "-")
+        child = [""]
+        child += _c_comment(dom["evidence"], "\t\t")
+        child += [f"\t\tsom_pd_{name}: {node} {{",
+                  '\t\t\tcompatible = "alp,som-power-domain";',
+                  f'\t\t\talp,role = "{name}";']
+        seen_props: set[str] = set()
+        for c in dom["controls"]:
+            prop = _AEN_POWER_ROLE_PROP[c["role"]]
+            if prop in seen_props:
+                raise ZephyrBoardEmitError(
+                    f"power_domains.{name}: two controls map to {prop}")
+            seen_props.add(prop)
+            flag = ("GPIO_ACTIVE_LOW" if c["polarity"] == "active_low"
+                    else "GPIO_ACTIVE_HIGH")
+            child.append(
+                f"\t\t\t{prop} = <&{c['gpio_node']} {c['gpio_pin']} {flag}>;"
+                f" /* {c['signal']} {c['silicon_pad']} */")
+        if dom.get("secondary_rtc"):
+            child.append("\t\t\talp,primary-rtc;")
+        if label:
+            child.append(f"\t\t\talp,device = <&{label}>;")
+        if chip:
+            child.append(f'\t\t\talp,chip = "{chip}";')
+        child += [
+            f'\t\t\talp,default-action = "{action}";',
+            "\t\t\talp,default-modes = "
+            + ", ".join(f'"{m}"' for m in dom["default_modes"]) + ";",
+            f'\t\t\talp,stop-hold = "{stop_hold}";',
+            f'\t\t\talp,restore = "{dom["restore"]["method"]}";']
+        if actions.get("rail_off", {}).get("opt_in"):
+            child.append("\t\t\talp,rail-off-opt-in;")
+        if state == "optional":
+            child.append("\t\t\talp,bom-optional;")
+        deps = sorted({d["kind"] for d in dom.get("dependents") or []})
+        if deps:
+            child.append("\t\t\talp,dependents = "
+                         + ", ".join(f'"{d}"' for d in deps) + ";")
+        child.append("\t\t};")
+        children += child
+
+    lines = [
+        "/*",
+        " * SoM power domains (alp-sdk#2784): which on-module chips this SKU carries,",
+        " * the SoC pads that gate them, and the default quiesce action per domain.",
+        " * Presence follows this SKU's `on_module` block; pads, polarity and actions",
+        " * come from `power_domains:` in metadata/e1m_modules/aen/on-module-links.yaml.",
+        " * Data only -- no driver reads this node yet.  `alp,stop-hold` is \"unproven\"",
+        " * for every LPGPIO (P15_n) pad until the STOP bench shows the output holds.",
+        " */",
+        "/ {",
+        "\tsom_power: som-power {",
+        '\t\tcompatible = "alp,som-power";',
+        *children,
+        "\t};",
+        "};",
+        "",
+    ]
+    return lines
 
 
 # ---------------------------------------------------------------------
@@ -3147,7 +3318,8 @@ def emit_zephyr_board(
         files[aen_dts_relpath] = _aen_dts(
             sku, sku_preset, core_id, soc_spec, variant, dir_name, basename,
             rx_row, tx_row, metadata_root, on_module_links,
-            _aen_ethos_u(soc_spec), memory_map)
+            _aen_ethos_u(soc_spec), memory_map,
+            _load_aen_power_domains(metadata_root))
         banner_extra_source.update(dict.fromkeys(
             (aen_pinctrl_relpath, aen_dts_relpath),
             "metadata/e1m_modules/aen/on-module-links.yaml"))

@@ -114,6 +114,8 @@ LINUX_KERNEL_DRIVERS = REPO / "metadata" / "os" / "linux-kernel-drivers.yaml"
 # unregistered schema is silently unvalidated -- so this constant pair is
 # load-bearing, not decorative.
 SUPERVISOR_LINKS_SCHEMA = REPO / "metadata" / "schemas" / "supervisor-links-v1.schema.json"
+ON_MODULE_LINKS_SCHEMA = REPO / "metadata" / "schemas" / "on-module-links-v2.schema.json"
+ON_MODULE_LINKS_DATA = REPO / "metadata" / "e1m_modules" / "aen" / "on-module-links.yaml"
 CORE_OWNERSHIP_SCHEMA = REPO / "metadata" / "schemas" / "core-ownership-v1.schema.json"
 CORE_OWNERSHIP_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "core-ownership.yaml"
 SUPERVISOR_LINKS_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "supervisor-links.yaml"
@@ -3552,6 +3554,28 @@ def main() -> int:
             # address) -- neither is expressible in the schema alone.
             supervisor_links_failures += _check_supervisor_links_cross_refs(supervisor_links_files)
 
+    # AEN on-module pad wiring + SoM power domains (#2784) against
+    # on-module-links-v2.  Single explicit file, so a deleted data file is a
+    # hard error rather than a silent no-op (same reasoning as above).
+    on_module_links_failures: list = []
+    if ON_MODULE_LINKS_SCHEMA.is_file():
+        print()
+        if not ON_MODULE_LINKS_DATA.is_file():
+            rel = ON_MODULE_LINKS_DATA.relative_to(REPO).as_posix()
+            msg = ("missing -- the AEN on-module pad + power-domain source "
+                   "must exist at this exact path")
+            print(f"FAIL {rel}")
+            print(f"  · {msg}")
+            on_module_links_failures.append((rel, [msg]))
+        else:
+            oml_validator = jsonschema.Draft202012Validator(
+                json.loads(ON_MODULE_LINKS_SCHEMA.read_text(encoding="utf-8")))
+            on_module_links_failures = _check_files(
+                "YAML", [ON_MODULE_LINKS_DATA], oml_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "schemaVersion",
+            )
+
     # AMP core-ownership policy (fixed rows + assignable per-product choices).
     core_ownership_failures: list = []
     if CORE_OWNERSHIP_SCHEMA.is_file() and CORE_OWNERSHIP_DATA.is_file():
@@ -3784,6 +3808,7 @@ def main() -> int:
                       + len(peripheral_kconfig_failures)
                       + len(tier_a_library_ci_failures)
                       + len(supervisor_links_failures)
+                      + len(on_module_links_failures)
                       + len(core_ownership_failures)
                       + len(power_tree_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "

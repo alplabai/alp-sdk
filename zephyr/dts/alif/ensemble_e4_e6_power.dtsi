@@ -1,0 +1,132 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * alp-sdk power-plumbing overlay for the Alif Ensemble E4 (AE402FA0E5597) and
+ * E6 (AE612FA0E5597) M55-HP boards (alp-sdk#2784): the Secure-Enclave service
+ * channel (se_service + its MHUv2 pair), the always-on power-management
+ * register blocks (VBAT / ANA / STOP_MODE) and the slice of the low-power bank
+ * the SoM power layer needs (lpgpio, lprtc, lptimer0), mirroring the same nodes
+ * in ensemble_e8_peripherals.dtsi.
+ *
+ * BUILD-ONLY.  Every node that could pull driver code into an image
+ * (se_service, both MHUs, lpgpio, rtc0, lptimer0) is status = "disabled", so
+ * adding this file changes no E4/E6 image.  The E8 declares the SE channel
+ * "okay" because it backs the SE TRNG there (bench-proven on the AEN803);
+ * nothing of that has been run on an E4 or E6, so an app or a later change
+ * enables these explicitly.  vbat / ana / stop_mode are bare register windows
+ * with no driver, so they carry no status.
+ *
+ * Grounding.  E4: the Alif DFP for THIS part, Device/soc/AE402FA0E5597/
+ * include/rtss_hp/soc.h (the HP view these boards run): VBAT_BASE 0x1A609000,
+ * ANA_BASE 0x1A60A000, STOP_MODE_BASE 0x1A60F000, MHU_SECPU_M55HP_0_RX_BASE
+ * 0x40040000 (IRQn 37) and MHU_M55HP_SECPU_0_TX_BASE 0x40050000 (IRQn 38),
+ * LPRTC0_BASE 0x42000000 (IRQn 58), LPTIMER_BASE 0x42001000 (IRQn 60),
+ * LPGPIO_BASE 0x42002000 (IRQn 171..178); struct sizes VBAT_Type 0x14,
+ * ANA_Type 0x44, STOP_MODE_Type 0x4.  metadata/socs/alif/ensemble/e4.json
+ * records that E4's *_BASE set is a strict subset of AE822FA0E5597's (183 vs
+ * 199; the 16 missing symbols are all A32 cluster), so these are the E8's
+ * addresses.  E6: no AE612FA0E5597 directory exists in the Alif DFP
+ * (e6.json notes), so the E6 values are INFERRED from its two DFP-present
+ * generation-mates (E4 above, E8 in ensemble_e8_peripherals.dtsi), which agree
+ * on every address used here.  Confirm on the first E6 bench run.
+ *
+ * Included by the E1M-AEN401 / E1M-AEN601 M55-HP boards.  Both boards are
+ * hand-authored (their SoC JSON declares no zephyr_peripherals_dtsi, so the
+ * board generator does not emit them).
+ */
+
+&soc {
+	/* Same register blocks and rationale as ensemble_e8_peripherals.dtsi. */
+	vbat: vbat@1a609000 {
+		compatible = "alif,vbat";
+		reg = <0x1a609000 0x14>;
+	};
+
+	ana: ana@1a60a000 {
+		compatible = "alif,ana";
+		reg = <0x1a60a000 0x44>;
+	};
+
+	stop_mode: stop-mode@1a60f000 {
+		compatible = "alif,stop-mode";
+		reg = <0x1a60f000 0x4>;
+	};
+
+	/* LPGPIO port (P15_n pads), same node as the E8 overlay's lpgpio. */
+	lpgpio: gpio@42002000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x42002000 0x1000>;
+		ngpios = <8>;
+		interrupts = <171 3>, <172 3>, <173 3>, <174 3>,
+			     <175 3>, <176 3>, <177 3>, <178 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	/* LPRTC counter, same node as the E8 overlay's rtc0. */
+	rtc0: lprtc@42000000 {
+		compatible = "snps,dw-apb-rtc";
+		reg = <0x42000000 0x1000>;
+		interrupts = <58 3>;
+		clock-frequency = <32768>;
+		prescaler = <0>;
+		load-value = <0>;
+		status = "disabled";
+	};
+
+	/* LPTIMER channel 0, same node as the E8 overlay's lptimer0 (disabled here, see above). */
+	lptimer0: lptimer@42001000 {
+		compatible = "alif,lptimer";
+		reg = <0x42001000 0xc0>;
+		interrupts = <60 3>;
+		channel = <0>;
+		clock-source = <0>;       /* 0 = 32 kHz VBAT LF source */
+		clock-frequency = <32768>;
+		status = "disabled";
+	};
+
+	/*
+	 * SE <-> RTSS-HP mailbox pair (the RTSS-HP view of the same SE channel the
+	 * E8 overlay declares as seservice0r/s).  Bases, IRQs and the "rx"/"tx"
+	 * names are the DFP's MHU_SECPU_M55HP_0_RX (0x40040000, IRQn 37) and
+	 * MHU_M55HP_SECPU_0_TX (0x40050000, IRQn 38).
+	 */
+	seservice0r: mhu@40040000 {
+		compatible = "arm,mhuv2";
+		reg = <0x40040000 0x1000>;
+		interrupts = <37 3>;
+		interrupt-names = "rx";
+		status = "disabled";
+	};
+
+	seservice0s: mhu@40050000 {
+		compatible = "arm,mhuv2";
+		reg = <0x40050000 0x1000>;
+		interrupts = <38 3>;
+		interrupt-names = "tx";
+		status = "disabled";
+	};
+};
+
+&{/} {
+	/* Ties the MHU pair into the logical SE channel hal_alif's se_service.c expects. */
+	se_service: se_service {
+		compatible = "alif,secure-enclave-services";
+		mhuv2-send-node = <&seservice0s>;
+		mhuv2-recv-node = <&seservice0r>;
+		status = "disabled";
+	};
+
+	chosen {
+		/*
+		 * The LPTIMER channel the SoM power layer will arm as a STOP wake source.
+		 * Short intervals only (LFRC accuracy, about 5 %); long intervals use the
+		 * on-module RV-3028 on RTC_ALARM (P15_0 / LPGPIO0).
+		 * Consumers must check DT_NODE_HAS_STATUS_OKAY(DT_CHOSEN(alp_power_wake_timer)):
+		 * the node is disabled here.  Dual-core ownership of the timer is deferred.
+		 */
+		alp,power-wake-timer = &lptimer0;
+	};
+};
