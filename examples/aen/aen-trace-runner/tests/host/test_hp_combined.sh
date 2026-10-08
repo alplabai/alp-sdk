@@ -312,6 +312,10 @@ awk '/^int main\(void\)/ { m = 1 } m && /tr_imu_open\(\)/ { i = NR } m && /tr_ra
 awk '/^void tr_bus2_he_frame\(void\)$/ { f = 1 } f && /if \(!g_armed\)/ { g = NR } f && /tr_bus2_he_tick\(/ { if (g && g < NR) ok = 1; f = 0 } END { exit !ok }' src/platform/bus2_he.c ||
 	FAILS "src/platform/bus2_he.c: tr_bus2_he_frame() can offer the bus before tr_bus2_he_arm()"
 [ "$(grep -c 'g_armed = true;' src/platform/bus2_he.c)" = 1 ] || FAILS "src/platform/bus2_he.c: g_armed is set somewhere other than tr_bus2_he_arm()"
+# flash-release.sh write: a package that carries the game sound cold-boots -- no warm reset at the end
+grep -q -- '--no-reset) noreset=1' a32/release/flash-release.sh && grep -q 'FLASH_NO_RESET_DEFAULT=1' a32/release/flash-release.sh &&
+	grep -q "bootreset=''" a32/release/flash-release.sh || FAILS "a32/release/flash-release.sh: no --no-reset / sound-package default"
+bash -n a32/release/flash-release.sh || FAILS "a32/release/flash-release.sh: syntax"
 # the SCL bus-clear sets DR / DDR before the pads leave the I2C function (no driven glitch)
 awk '/^static inline bool tr_i2c2_bus_clear/ { f = 1 } f && /tr_gpio5_ddr\(0u, TR_I2C2_SCL \| TR_I2C2_SDA\);/ { d = NR } f && /pinctrl_configure_pins\(tr_i2c2_gpio_pads/ { if (d && d < NR) ok = 1; f = 0 } END { exit !ok }' src/platform/tr_i2c2_rearm.h ||
 	FAILS "src/platform/tr_i2c2_rearm.h: the bus-clear switches the pads to GPIO before clearing DDR bits 6/7"

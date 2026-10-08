@@ -189,7 +189,12 @@ differs from the HP's, or that was built without `TR_INPUT_NPU` (`hp_vision_chec
 and the HE build refuses `-DTR_HP_SOUND=ON` with it.
 
 What flashes does not change: `bl32`, `a32_app`, `atoc` (which carries the HE and the HP image) and
-`movenet_model` are the same four items, and `flash-release.sh write` / `restore` need no change.
+`movenet_model` are the same four items, and `flash-release.sh write` / `restore` flash them the same
+way, with one difference at the end of the session: **`write` does not issue the warm pin reset
+(`RSetType 2; r; g`) into a package whose HP image carries the game sound** (detected from the packaged
+HP image; force either way with `--no-reset` / `--reset`). A TR_HP_SOUND image must COLD-boot (both cores
+come up together, the lease record starts clean); after the write, power-cycle the board (step 6) and do
+not resume the old image.
 Flash the HE and the HP from ONE build: the pairings that matter are in the table above, plus
 `new HP (TR_HP_SOUND) + HE without TR_HP_SOUND`: the HP prints `waiting for the HE's I2C2 + GPIO5
 offer` for ever, vision runs, no sound.
@@ -204,6 +209,15 @@ Order is free (the lease does not need the HE first; the I2C1 handover still wan
 together, as before). Nothing waits on the sound: the camera, the NPU and the pose slot run whether
 or not the amps come up.
 
+**The console symbols move per build.** Read `ram_console_buf` from each build's own ELF
+(`arm-zephyr-eabi-nm zephyr.elf | grep ram_console_buf`), never from a remembered address: the 26b8855cd
+build had the HE's at `0x20006550` (global `0x58806550`) and the HP's at `0x2002CE92`.
+
+The HE console says what the lease did from the evidence: `I2C2 offered to the HP`, `I2C2 leased by the HP`,
+`I2C2 back on the HE`; when the whole lease passes between two HE frames the claim is never observed, and the
+line reads `I2C2 leased by the HP and returned within one frame: back on the HE`; an unclaimed offer reads
+`I2C2 offer withdrawn (not claimed): back on the HE`. Each line ends with `hp_acq=` and `he_regains=`.
+
 **Bench checks to run (not done):**
 
 1. HP RAM console (`ram_console_buf`): `[snd] waiting for the HE's I2C2 + GPIO5 offer`, then
@@ -213,7 +227,9 @@ or not the amps come up.
    `5V -- mW` for the length of the bring-up (a couple of seconds), then a number, and it keeps
    updating.
 2. The lease record over SWD at `0x0237FD40`: `+0x00` `he_state` `0x42320000`, `+0x10` `hp_state`
-   `0x42320004` (returned), `+0x0C` `he_regains` 1, `+0x28` `hp_acq` 1, `+0x1C` `hp_aborts` 0,
+   `0x42320004` (returned), `+0x0C` `he_regains` 1, `+0x28` `hp_acq` 1, `+0x1C` `hp_aborts` 0 (each core zeroes the
+   counters it owns at its own boot, `tr_bus2_he_boot` / `tr_bus2_hp_boot`: `he_regains`, `he_reclaims` by the
+   HE; `hp_aborts`, `hp_i2s_fu`, `hp_i2s_err`, `hp_acq` by the HP; a cold SRAM0 no longer shows power-up garbage),
    `+0x08` `he_beat` advancing every frame, `+0x20` `hp_i2s_fu` 0 and `+0x24` `hp_i2s_err` 0 while
    streaming. `0x0237FC94` (the I2C1 handover) is untouched by it.
 3. Sound plays beside the camera: the pose slot's `hp_state` stays 0, the HP debug beacon's
