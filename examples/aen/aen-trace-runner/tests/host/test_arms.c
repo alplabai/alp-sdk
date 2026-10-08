@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#include "../../src/vision/cam_rot.h" /* TR_CAM_MIRROR */
 #include "../../src/vision/pose.h"
 #include "../../src/vision/track.h"
 
