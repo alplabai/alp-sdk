@@ -2,7 +2,8 @@
  * src/platform/hud_l2.c -- the HUD on CDC200 layer 2 (P9, TR_RENDER=A32).
  *
  * The HE owns layer 2 outright: a 720 x 352 ARGB4444 window over the top of
- * the panel, scanned from its own buffer TR_HUD_FB (tr_mbox.h, SRAM0
+ * the picture (centred on it when the panel is wider than 720: the buffer
+ * cannot grow, SRAM0 has no room for an 800-wide one, tr_memmap.h), scanned from its own buffer TR_HUD_FB (tr_mbox.h, SRAM0
  * 0x02382000..0x023FDBFF), blended per pixel over layer 1 (the A32's 3D
  * frame). Zero A32 cost: the renderer skips its own sprite HUD on frames
  * flagged TR_FLAG_HUD_L2, which main.c sets only once tr_hud_l2_open() says
@@ -12,8 +13,10 @@
  * Rotated panel (alp_display_caps_t.rotation 90 or 270, the RVT121): the layer
  * is a 352 x 720 window, TR_HUD_H landscape columns wide at the layer-1
  * window's edge the portrait top lands on (render/panel_rot.h) -- right for 90,
- * left for 270 -- same bytes, same buffer, hud.c writes it rotated. The window
- * is computed here at open from the rotation and the layer-1 window.
+ * left for 270 -- and centred along that edge (the Riverdi's 800 rows hold the
+ * 720-px HUD with 40 above and below), same bytes, same buffer, hud.c writes it
+ * rotated. The window is computed here at open from the rotation and the
+ * layer-1 window.
  *
  * Register programming follows the Alif DFP driver's own sequence,
  * cdc_set_layer_cfg() in alif-dfp drivers/source/cdc.c (register map
@@ -141,7 +144,7 @@ bool tr_hud_l2_open(void)
 	uint32_t win_w = rot ? TR_ROT_HUD_W : TR_HUD_W, win_h = rot ? TR_HUD_W : TR_HUD_H;
 	uint32_t pitch = win_w * 2u;
 
-	if (!tr_rot_valid(rot) || win_w > L1_W || win_h > L1_H || (rot == 0 && win_w != L1_W)) {
+	if (!tr_rot_valid(rot) || win_w > L1_W || win_h > L1_H) {
 		printk("hud     : %ux%u layer 2 (rotation %d) does not fit the %ux%u scan-out window -- "
 		       "A32 keeps the HUD\n",
 		       (unsigned)win_w,
@@ -162,8 +165,11 @@ bool tr_hud_l2_open(void)
 	memset(&g_view, 0, sizeof(g_view));
 
 	wr(CDC_L2_REL_CTRL, CDC_LN_REL_CTRL_SH_MASK);
-	hs += L1_X0 + (rot == 90 ? L1_W - win_w : 0u);
-	vs += L1_Y0;
+	uint32_t dx, dy;
+
+	tr_hud_window_off(rot, L1_W, L1_H, win_w, win_h, &dx, &dy); /* flush + centred (panel_rot.h) */
+	hs += L1_X0 + dx;
+	vs += L1_Y0 + dy;
 	wr(CDC_L2_WIN_HPOS, (hs + win_w - 1u) << CDC_LN_WIN_HPOS_STOP_POS_SHIFT | hs);
 	wr(CDC_L2_WIN_VPOS, (vs + win_h - 1u) << CDC_LN_WIN_VPOS_STOP_POS_SHIFT | vs);
 	wr(CDC_L2_PIX_FORMAT, CDC_PIXEL_FORMAT_ARGB4444);

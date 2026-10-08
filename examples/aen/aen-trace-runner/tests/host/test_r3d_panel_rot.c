@@ -170,6 +170,40 @@ static void check_blit(int rot, int W)
 	}
 }
 
+/* The HUD's layer-2 window sits over the same pixels of the game its portrait position names:
+ * the HUD pixel (hx, hy) is the picture's (hx + (pw - 720) / 2, hy) -- the HUD is centred on the
+ * picture, which is the panel -- and tr_hud_window_off() puts the layer's cell for it exactly
+ * where the picture's rotated pixel lands on the screen. */
+static void check_hud_window(int rot, int pw, int l1_w, int l1_h)
+{
+	uint32_t dx, dy;
+	int      crop = (pw - HW) / 2;
+
+	tr_hud_window_off(rot,
+	                  (uint32_t)l1_w,
+	                  (uint32_t)l1_h,
+	                  rot ? TR_ROT_HUD_W : HW,
+	                  rot ? HW : TR_ROT_HUD_W,
+	                  &dx,
+	                  &dy);
+	for (int hy = 0; hy < TR_ROT_HUD_W; hy += 7) {
+		for (int hx = 0; hx < HW; hx += 11) {
+			int      X, Y;
+			uint32_t layer =
+			    rot ? tr_rot_idx(rot, TR_ROT_HUD_W, HW, hx, hy) : (uint32_t)hy * HW + (uint32_t)hx;
+			uint32_t lw = rot ? TR_ROT_HUD_W : HW;
+
+			if (rot) {
+				land(rot, LW, pw, hx + crop, hy, &X, &Y);
+			} else {
+				X = hx + crop; /* the picture is the panel: portrait column == screen column */
+				Y = hy;
+			}
+			assert((int)(dx + layer % lw) == X && (int)(dy + layer / lw) == Y);
+		}
+	}
+}
+
 int main(void)
 {
 	/* Rotation off: the plain portrait index. */
@@ -184,6 +218,24 @@ int main(void)
 	assert((uint32_t)LW * 720u * 2u <= TR_FB_SLOT_SIZE); /* a narrower one fits it */
 	assert((uint32_t)TR_ROT_HUD_W * HW * 2u == 506880u); /* tr_mbox.h TR_HUD_FB_SIZE */
 	assert(WMAX == 800);
+
+	/* The Riverdi (1280 x 800 turned) and the RK055 (720 x 1280), and an 800-wide panel upright. */
+	check_hud_window(90, 800, 1280, 800);
+	check_hud_window(270, 800, 1280, 800);
+	check_hud_window(90, 720, 1280, 720);
+	check_hud_window(270, 720, 1280, 720);
+	check_hud_window(0, 720, 720, 1280);
+	check_hud_window(0, 800, 800, 1280);
+	{
+		uint32_t dx, dy;
+
+		tr_hud_window_off(90, 1280, 800, 352, 720, &dx, &dy);
+		assert(dx == 928 && dy == 40); /* flush right, 40 rows above and below */
+		tr_hud_window_off(270, 1280, 800, 352, 720, &dx, &dy);
+		assert(dx == 0 && dy == 40);
+		tr_hud_window_off(0, 720, 1280, 720, 352, &dx, &dy);
+		assert(dx == 0 && dy == 0); /* the RK055: exactly as wide, nothing to centre */
+	}
 
 	for (int pw = 720; pw <= 800; pw += 80) {
 		check_rotation(90, pw);

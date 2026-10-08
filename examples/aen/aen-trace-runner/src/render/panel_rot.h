@@ -63,6 +63,22 @@ static inline int tr_fw_refuse(int drawn, unsigned fw)
  * landscape columns, at the layer-1 window's right edge for 90, left for 270. */
 #define TR_ROT_HUD_W 352
 
+/* Where the HUD's layer-2 window sits inside the layer-1 window (l1_w x l1_h, panel px; the
+ * HUD window is win_w x win_h, hud_l2.c): flush with the edge the portrait top lands on (right
+ * for 90, left for 270, the top for 0) and centred along it, so the 720-wide HUD sits over the
+ * middle 720 columns of a wider picture. Offsets from the layer-1 window's top-left. */
+static inline void tr_hud_window_off(int       rot,
+                                     uint32_t  l1_w,
+                                     uint32_t  l1_h,
+                                     uint32_t  win_w,
+                                     uint32_t  win_h,
+                                     uint32_t *dx,
+                                     uint32_t *dy)
+{
+	*dx = rot == 0 ? (l1_w - win_w) / 2u : rot == 90 ? l1_w - win_w : 0u;
+	*dy = rot != 0 ? (l1_h - win_h) / 2u : 0u;
+}
+
 /* Index (in px) of portrait pixel (x, y) of a pw-wide picture in a surface `wl`
  * px wide rotated by `rot` (0, 90, 270; 0 ignores wl and is the pw-wide portrait
  * buffer). */
