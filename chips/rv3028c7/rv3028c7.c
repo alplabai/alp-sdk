@@ -737,7 +737,8 @@ static alp_status_t rv3028_update_reg(rv3028c7_t *ctx, uint8_t reg, uint8_t clea
  *     flag has no effect.  Bench-verified on E1M-AEN803 (2026-10-08)
  *     for PORF/EVF/AF/TF/BSF/CLKF (manual p.22 only says a flag "is
  *     retained until a 0 is written").  A flag latching between the
- *     read and the write is not lost.  It is the same convention the pre-existing rv3028c7_alarm_check_and_clear() and
+ *     read and the write is not lost.  It is the same convention the
+ *     pre-existing rv3028c7_alarm_check_and_clear() and
  *     rv3028_status_ack() already rely on.
  *   0 Read-back: re-read STATUS and write that value with the cleared
  *     flags zeroed (the mainline-Linux rtc-rv3028 pattern).  Safe if a
