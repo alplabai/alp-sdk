@@ -117,7 +117,7 @@ int main(void)
 	assert(tr_fw_refuse(1, TR_R3D_W - 8u) && tr_fw_refuse(1, 8u)); /* not 16 aligned */
 	assert(tr_fw_refuse(1, TR_R3D_W + 16u) && tr_fw_refuse(1, 65520u)); /* wider than the render */
 	assert(!tr_fw_refuse(0, 0u) && !tr_fw_refuse(0, TR_R3D_W + 1u)); /* a dropped frame: no ABI */
-	f.fw       = TR_R3D_W - 16u;
+	f.fw = TR_R3D_W - 16u;
 	/* start.S keeps the stack tops as .equ literals (an assembler cannot see the C macros):
 	 * they must be STACKS + 64 KiB (core 0) and the gate page (core 1's top == STACKS + 128 KiB). */
 	{
