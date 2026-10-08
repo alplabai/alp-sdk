@@ -4,7 +4,7 @@
 # (Ensemble E8, M55-HE).  Compile-checks the SoM power-domain runtime
 # (src/backends/power/som_power*.c), the CC3501E / TMP112 / OSPI-flash hooks
 # and the app against the real board target.  The behaviour is a bench signal
-# (evk-02 RAM-run); native_sim cannot carry it -- the logic is covered by
+# (E1M-AEN803 on an E1M-EVK, RAM-run); native_sim cannot carry it -- the logic is covered by
 # tests/unit/power_som_domains.
 
 sample:
