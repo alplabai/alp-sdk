@@ -10,6 +10,10 @@ USB-UART adapter, and a 1 Gb Ethernet link partner.
 > [`bring-up-v2n-m1.md`](bring-up-v2n-m1.md).  This guide covers
 > the **N93 family** (currently only `E1M-NX9101`, MPN TBD pending
 > final hardware config).
+>
+> **Status:** `E1M-NX9101` is not currently produced, so there is no
+> shipping module to bring up; this guide describes the provisional
+> preset and Yocto machine only.
 
 > **Yocto-first family.**  Unlike the AEN family (Zephyr / bare-
 > metal), the N93 family targets **Yocto Linux** as its primary
