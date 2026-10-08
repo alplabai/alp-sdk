@@ -227,6 +227,9 @@ static void launch(void)
 		return;
 	}
 	clear_fault();
+	/* A fresh, non-zero launch token for the payload's core-1 gate: the self-launch never
+	 * visits the park loop that used to be the only thing bumping it. */
+	m->stub_heartbeat0 = stub_next_token(m->stub_heartbeat0);
 	cache_sync_all(); /* DCCISW all levels, ICIALLU, BPIALL, DSB, ISB */
 	m->pad4[TR_STUB_T_JUMP] = cntvct_lo();
 	m->stub_state           = STUB_STATE_RUNNING;
@@ -302,6 +305,9 @@ void stub_main(void)
 	m->pad4[3]    = warm ? m->dfar : 0;
 	for (uint32_t i = TR_STUB_T_COPY0; i <= TR_STUB_T_JUMP; i++)
 		m->pad4[i] = 0;
+	if (!warm) {
+		tr_mbox_cold_clear(m); /* power-on garbage is never a waiting frame */
+	}
 	m->stub_state       = STUB_STATE_PARKED;
 	m->stub_core1_state = STUB_CORE1_OFF;
 	m->stub_heartbeat0 = m->stub_heartbeat1 = 0;

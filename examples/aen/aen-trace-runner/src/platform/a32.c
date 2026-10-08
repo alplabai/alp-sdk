@@ -204,6 +204,20 @@ static void wd_poll(bool missed)
 	last_pending_s = pending_ms / 1000u;
 
 	if (cmd != TR_CTRL_NONE) {
+		if (cmd == TR_CTRL_LAUNCH &&
+		    (g_mbox->fault_code != 0u || (g_mbox->pad3[7] >> 16) == 0xAB1Du)) {
+			/* A LAUNCH clears the stub's fault record: leave it on the console first. */
+			printk("a32     : fault record before relaunch: core %u code %u lr 0x%08x dfsr "
+			       "0x%08x dfar 0x%08x ifsr 0x%08x ifar 0x%08x abi 0x%08x\n",
+			       g_mbox->fault_core,
+			       g_mbox->fault_code,
+			       g_mbox->lr,
+			       g_mbox->dfsr,
+			       g_mbox->dfar,
+			       g_mbox->ifsr,
+			       g_mbox->ifar,
+			       g_mbox->pad3[7]);
+		}
 		if (cmd == TR_CTRL_LAUNCH) {
 			g_mbox->ctrl_entry = tr_a32_autolaunch_id[0];
 			g_mbox->ctrl_len   = tr_a32_autolaunch_id[1];
