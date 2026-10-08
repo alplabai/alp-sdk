@@ -30,6 +30,8 @@ on:
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
       - 'scripts/check_yocto_machine_tree_parity.py'
+      - 'scripts/check_camera_parity.py'
+      - 'scripts/gen_camera_dt.py'
       - 'scripts/check_atoc_reservation.py'
       # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
       - 'scripts/aen_atoc.py'
@@ -135,6 +137,8 @@ on:
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
       - 'scripts/check_yocto_machine_tree_parity.py'
+      - 'scripts/check_camera_parity.py'
+      - 'scripts/gen_camera_dt.py'
       - 'scripts/check_atoc_reservation.py'
       # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
       - 'scripts/aen_atoc.py'
@@ -600,6 +604,9 @@ jobs:
 
       - name: "Gate — SoM preset machine: targets resolve to a real conf or a declared gap (#1982)"
         run: python3 scripts/check_yocto_machine_tree_parity.py
+
+      - name: "Gate — V2N/V2M Linux camera DT + kernel config match the camera metadata (#2633)"
+        run: python3 scripts/check_camera_parity.py
 
       - name: "Gate — AEN ATOC reservation, aperture tiling/class, and slot0 address (#1289, #1365)"
         run: python3 scripts/check_atoc_reservation.py

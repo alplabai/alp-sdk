@@ -241,7 +241,8 @@ def test_soc_linux_dt():
     soc = json.loads((META / "socs/renesas/rzv2n/n44.json").read_text(encoding="utf-8"))
     assert not _errors(_validator("soc-spec-v1.schema.json"), soc)
     assert soc["linux_dt"]["RIIC2"] == {"label": "i2c2", "pinmux": {"RIIC2_SDA2": 1, "RIIC2_SCL2": 1}}
-    assert soc["linux_dt"]["CSI0"] == {"label": "csi20", "capture": "cru0"}
+    assert soc["linux_dt"]["CSI0"] == {"label": "csi20", "capture": "cru0",
+                                         "kconfig": ["CONFIG_VIDEO_RZG2L_CSI2", "CONFIG_VIDEO_RZG2L_CRU"]}
 
 
 # --- project board.yaml `cameras:` ---------------------------------------

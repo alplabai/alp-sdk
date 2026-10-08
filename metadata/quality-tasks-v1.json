@@ -162,6 +162,20 @@
       "ci": null
     },
     {
+      "id": "camera-parity",
+      "description": "Keep the V2N/V2M Linux camera devicetree fragments and camera-sensors.cfg identical to what scripts/gen_camera_dt.py generates from the camera metadata.",
+      "runner": "check-script",
+      "script": "scripts/check_camera_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "cc3501e-bridge-copies",
       "description": "Every cc3501e_bridge.{c,h} copied into an example is byte-identical to examples/aen/aen-cc3501e-bringup/src, except the copies the gate declares divergent by name, so a silicon fix cannot land in one copy of this hardware-sequencing code and silently miss the other fifteen (#2163).",
       "runner": "check-script",
