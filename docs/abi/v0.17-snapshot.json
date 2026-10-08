@@ -7686,9 +7686,17 @@
     },
     "alp/chips/rv3028c7.h": {
       "functions": {
+        "rv3028c7_alarm_arm": {
+          "hash": "9a807caff56fa9ee",
+          "signature": "alp_status_t rv3028c7_alarm_arm(rv3028c7_t *ctx, const rv3028c7_time_t *when, const rv3028c7_alarm_match_t *match);"
+        },
         "rv3028c7_alarm_check_and_clear": {
           "hash": "361fc928ff455160",
           "signature": "alp_status_t rv3028c7_alarm_check_and_clear(rv3028c7_t *ctx, bool *fired);"
+        },
+        "rv3028c7_alarm_clear": {
+          "hash": "7d80e7c8ba1b417c",
+          "signature": "alp_status_t rv3028c7_alarm_clear(rv3028c7_t *ctx);"
         },
         "rv3028c7_alarm_int_enable": {
           "hash": "4717882bb05252b3",
@@ -7730,6 +7738,22 @@
           "hash": "fbe619f222d9b13d",
           "signature": "alp_status_t rv3028c7_set_time(rv3028c7_t *ctx, const rv3028c7_time_t *t);"
         },
+        "rv3028c7_timer_read": {
+          "hash": "ded6a39fcacc9c37",
+          "signature": "alp_status_t rv3028c7_timer_read(rv3028c7_t *ctx, rv3028c7_timer_state_t *out);"
+        },
+        "rv3028c7_timer_start": {
+          "hash": "1a539011d6017da4",
+          "signature": "alp_status_t rv3028c7_timer_start(rv3028c7_t *ctx, uint32_t seconds, uint32_t *actual_s);"
+        },
+        "rv3028c7_timer_stop": {
+          "hash": "77f1e266efbe062e",
+          "signature": "alp_status_t rv3028c7_timer_stop(rv3028c7_t *ctx);"
+        },
+        "rv3028c7_wake_service": {
+          "hash": "6368d7e7dca5276d",
+          "signature": "alp_status_t rv3028c7_wake_service(rv3028c7_t *ctx, uint8_t *flags);"
+        },
         "rv3028c7_was_cold_start": {
           "hash": "6b9757bb5af7441f",
           "signature": "alp_status_t rv3028c7_was_cold_start(rv3028c7_t *ctx, bool *out);"
@@ -7739,6 +7763,26 @@
         "RV3028C7_I2C_ADDR": {
           "hash": "280e3b868b2cb979",
           "value": "0x52u"
+        },
+        "RV3028C7_TIMER_MAX_SECONDS": {
+          "hash": "4d790d2b60f6b894",
+          "value": "(4095u * 60u)"
+        },
+        "RV3028C7_TIMER_MAX_SECONDS_1HZ": {
+          "hash": "90961e30349a9203",
+          "value": "4095u"
+        },
+        "RV3028C7_WAKE_AF": {
+          "hash": "b18ec2860f5c8e83",
+          "value": "0x04u"
+        },
+        "RV3028C7_WAKE_TF": {
+          "hash": "a078bc6de6f40481",
+          "value": "0x08u"
+        },
+        "RV3028C7_WAKE_UF": {
+          "hash": "0ec2fface6037d9e",
+          "value": "0x10u"
         }
       },
       "typedefs": {
@@ -7812,6 +7856,18 @@
             "uint16_t year"
           ],
           "hash": "23fd2d5668efbbc2",
+          "kind": "struct"
+        },
+        "rv3028c7_timer_state_t": {
+          "definition": "typedef struct { bool running; bool expired; uint32_t preset_ms; uint32_t remaining_ms; uint32_t elapsed_ms; } rv3028c7_timer_state_t;",
+          "fields": [
+            "bool running",
+            "bool expired",
+            "uint32_t preset_ms",
+            "uint32_t remaining_ms",
+            "uint32_t elapsed_ms"
+          ],
+          "hash": "ad4495169cbc5660",
           "kind": "struct"
         }
       },

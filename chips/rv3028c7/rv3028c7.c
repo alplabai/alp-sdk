@@ -131,6 +131,28 @@
  * read-modify-write to the EEPROM-backed config registers. */
 #define RV3028_CTRL1_EERD 0x08
 
+/* Countdown timer + wake registers (RV-3028-C7 Application Manual
+ * Rev. 1.4).  All are plain RAM registers -- none is part of the
+ * EEPROM mirror (0x30..0x37), so nothing below needs EERD or the
+ * EEADDR/EEDATA/EECMD handshake. */
+#define RV3028_REG_TIMER_VAL0  0x0Au /* Timer Value 0, preset bits 7:0 (Sec. 3.6, p.20)  */
+#define RV3028_REG_TIMER_VAL1  0x0Bu /* Timer Value 1, preset bits 11:8 (Sec. 3.6, p.20) */
+#define RV3028_REG_TIMER_STAT0 0x0Cu /* Timer Status 0, live count 7:0 (p.21)            */
+#define RV3028_REG_TIMER_STAT1 0x0Du /* Timer Status 1 shadow, 11:8 (p.21)               */
+
+/* CONTROL_1 (0Fh) timer fields (p.23).  TRPT=0 is single mode. */
+#define RV3028_CTRL1_TRPT    0x80u /* bit 7: 1 = repeat, 0 = single (default)         */
+#define RV3028_CTRL1_WADA    0x20u /* bit 5: 1 = alarm 09h is a date, 0 = a weekday   */
+#define RV3028_CTRL1_TE      0x04u /* bit 2: countdown enable; self-clears in single  */
+#define RV3028_CTRL1_TD_MASK 0x03u /* bits 1:0: Timer Clock Frequency select          */
+#define RV3028_TD_4096HZ     0x00u /* 244.14 us tick                                  */
+#define RV3028_TD_64HZ       0x01u /* 15.625 ms tick                                  */
+#define RV3028_TD_1HZ        0x02u /* 1 s tick                                        */
+#define RV3028_TD_1_60HZ     0x03u /* 60 s tick                                       */
+
+/* Timer Value is 12 bits; 0 means "do not start" (Sec. 4.8.3, p.65). */
+#define RV3028_TIMER_MAX 0x0FFFu
+
 /* Alarm enable bits live in the alarm registers themselves (top
  * bit "AE" of each MIN/HR/WD register; 0 = participates in match,
  * 1 = ignored). */
@@ -338,9 +360,9 @@ alp_status_t rv3028c7_set_alarm(rv3028c7_t                   *ctx,
 	alp_status_t s     = rv3028_read(ctx, RV3028_REG_CONTROL_1, &ctrl1, 1);
 	if (s != ALP_OK) return s;
 	if (match->use_weekday)
-		ctrl1 &= ~0x20;
+		ctrl1 &= (uint8_t)~RV3028_CTRL1_WADA;
 	else
-		ctrl1 |= 0x20;
+		ctrl1 |= RV3028_CTRL1_WADA;
 	s = rv3028_write_reg(ctx, RV3028_REG_CONTROL_1, ctrl1);
 	if (s != ALP_OK) return s;
 
@@ -690,6 +712,179 @@ alp_status_t rv3028c7_route_clkout(rv3028c7_t *ctx, rv3028c7_clkout_src_t src)
 		if (s == ALP_OK) s = r;
 	}
 	return s;
+}
+
+/* ---------------------------------------------------------------- */
+/* Wake-source services: countdown timer, alarm, flag service        */
+/* ---------------------------------------------------------------- */
+
+/* Read-modify-write one RAM register.  Never used on 0x25..0x27 or
+ * 0x30..0x37: the wake services touch only 0x07..0x10. */
+static alp_status_t rv3028_update_reg(rv3028c7_t *ctx, uint8_t reg, uint8_t clear, uint8_t set)
+{
+	uint8_t      v = 0;
+	alp_status_t s = rv3028_read(ctx, reg, &v, 1);
+	if (s != ALP_OK) return s;
+	return rv3028_write_reg(ctx, reg, (uint8_t)((v & ~clear) | set));
+}
+
+/* Acknowledge only the flags in `clear` (a Status flag mask).  STATUS
+ * clears on a 0 write and a 1 leaves the flag unchanged (see
+ * rv3028_status_ack()), so every other latchable flag, PORF included,
+ * is written back as 1.  EEbusy (bit 7) is read-only and not written. */
+static alp_status_t rv3028_status_clear(rv3028c7_t *ctx, uint8_t clear)
+{
+	return rv3028_write_reg(
+	    ctx, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~(clear & RV3028_STATUS_FLAGS)));
+}
+
+/* Tick length of a TD setting, scaled so n ticks -> milliseconds. */
+static uint32_t timer_ticks_to_ms(uint8_t td, uint32_t n)
+{
+	switch (td & RV3028_CTRL1_TD_MASK) {
+	case RV3028_TD_4096HZ:
+		return (uint32_t)(((uint64_t)n * 1000u) / 4096u);
+	case RV3028_TD_64HZ:
+		return (n * 125u) / 8u; /* 15.625 ms */
+	case RV3028_TD_1HZ:
+		return n * 1000u;
+	default:
+		return n * 60000u;
+	}
+}
+
+alp_status_t rv3028c7_timer_start(rv3028c7_t *ctx, uint32_t seconds, uint32_t *actual_s)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (seconds == 0 || seconds > RV3028C7_TIMER_MAX_SECONDS) return ALP_ERR_INVAL;
+
+	uint8_t  td;
+	uint32_t n;
+	if (seconds <= RV3028C7_TIMER_MAX_SECONDS_1HZ) {
+		td = RV3028_TD_1HZ;
+		n  = seconds;
+	} else {
+		td = RV3028_TD_1_60HZ;
+		n  = (seconds + 59u) / 60u; /* round up: never wake early */
+	}
+
+	/* Sec. 4.8.2 procedure (p.63), step 1: clear TE, TIE, TF in that
+     * order so no stray INT edge is produced while reconfiguring. */
+	uint8_t      ctrl1 = 0;
+	alp_status_t s     = rv3028_read(ctx, RV3028_REG_CONTROL_1, &ctrl1, 1);
+	if (s != ALP_OK) return s;
+	s = rv3028_write_reg(ctx, RV3028_REG_CONTROL_1, (uint8_t)(ctrl1 & ~RV3028_CTRL1_TE));
+	if (s != ALP_OK) return s;
+	s = rv3028_update_reg(ctx, RV3028_REG_CONTROL_2, RV3028_CTRL2_TIE, 0);
+	if (s != ALP_OK) return s;
+	s = rv3028_status_clear(ctx, RV3028_STATUS_TF);
+	if (s != ALP_OK) return s;
+
+	/* Steps 2-4: single mode (TRPT = 0), TD, then the 12-bit value,
+     * low byte first (0Ah, 0Bh are consecutive). */
+	ctrl1 = (uint8_t)((ctrl1 & ~(RV3028_CTRL1_TE | RV3028_CTRL1_TRPT | RV3028_CTRL1_TD_MASK)) | td);
+	s     = rv3028_write_reg(ctx, RV3028_REG_CONTROL_1, ctrl1);
+	if (s != ALP_OK) return s;
+	uint8_t val[2] = { (uint8_t)(n & 0xFFu), (uint8_t)((n >> 8) & 0x0Fu) };
+	s              = rv3028_write(ctx, RV3028_REG_TIMER_VAL0, val, sizeof(val));
+	if (s != ALP_OK) return s;
+
+	/* Step 5: INT on.  Step 8: TE 0 -> 1 starts the countdown. */
+	s = rv3028_update_reg(ctx, RV3028_REG_CONTROL_2, 0, RV3028_CTRL2_TIE);
+	if (s != ALP_OK) return s;
+	s = rv3028_write_reg(ctx, RV3028_REG_CONTROL_1, (uint8_t)(ctrl1 | RV3028_CTRL1_TE));
+	if (s != ALP_OK) return s;
+
+	if (actual_s != NULL) *actual_s = (td == RV3028_TD_1HZ) ? n : n * 60u;
+	return ALP_OK;
+}
+
+alp_status_t rv3028c7_timer_stop(rv3028c7_t *ctx)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+
+	/* TE, TIE, TF in that order (p.63).  Timer Value is not written:
+     * zeroing it under a running countdown makes the part emit 64 Hz
+     * (p.65). */
+	alp_status_t s = rv3028_update_reg(ctx, RV3028_REG_CONTROL_1, RV3028_CTRL1_TE, 0);
+	if (s != ALP_OK) return s;
+	s = rv3028_update_reg(ctx, RV3028_REG_CONTROL_2, RV3028_CTRL2_TIE, 0);
+	if (s != ALP_OK) return s;
+	return rv3028_status_clear(ctx, RV3028_STATUS_TF);
+}
+
+alp_status_t rv3028c7_timer_read(rv3028c7_t *ctx, rv3028c7_timer_state_t *out)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (out == NULL) return ALP_ERR_INVAL;
+
+	/* 0Ah..0Dh in one transaction: reading 0Ch latches the 0Dh
+     * shadow (p.21), so the 12-bit status is coherent. */
+	uint8_t      t[4] = { 0 };
+	alp_status_t s    = rv3028_read(ctx, RV3028_REG_TIMER_VAL0, t, sizeof(t));
+	if (s != ALP_OK) return s;
+	uint8_t status = 0;
+	s              = rv3028_read(ctx, RV3028_REG_STATUS, &status, 1);
+	if (s != ALP_OK) return s;
+	uint8_t ctrl1 = 0;
+	s             = rv3028_read(ctx, RV3028_REG_CONTROL_1, &ctrl1, 1);
+	if (s != ALP_OK) return s;
+
+	uint32_t preset = (uint32_t)t[0] | ((uint32_t)(t[1] & 0x0Fu) << 8);
+	uint32_t remain = (uint32_t)t[2] | ((uint32_t)(t[3] & 0x0Fu) << 8);
+	uint8_t  td     = ctrl1 & RV3028_CTRL1_TD_MASK;
+
+	out->running      = (ctrl1 & RV3028_CTRL1_TE) != 0;
+	out->expired      = (status & RV3028_STATUS_TF) != 0;
+	out->preset_ms    = timer_ticks_to_ms(td, preset);
+	out->remaining_ms = timer_ticks_to_ms(td, remain);
+	out->elapsed_ms   = out->preset_ms > out->remaining_ms ? out->preset_ms - out->remaining_ms : 0;
+	return ALP_OK;
+}
+
+alp_status_t rv3028c7_alarm_arm(rv3028c7_t                   *ctx,
+                                const rv3028c7_time_t        *when,
+                                const rv3028c7_alarm_match_t *match)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (when == NULL || match == NULL) return ALP_ERR_INVAL;
+
+	/* AIE off and AF clear before touching the compare registers, so
+     * a half-written alarm can never assert INT. */
+	alp_status_t s = rv3028_update_reg(ctx, RV3028_REG_CONTROL_2, RV3028_CTRL2_AIE, 0);
+	if (s != ALP_OK) return s;
+	s = rv3028_status_clear(ctx, RV3028_STATUS_AF);
+	if (s != ALP_OK) return s;
+	s = rv3028c7_set_alarm(ctx, when, match);
+	if (s != ALP_OK) return s;
+	return rv3028_update_reg(ctx, RV3028_REG_CONTROL_2, 0, RV3028_CTRL2_AIE);
+}
+
+alp_status_t rv3028c7_alarm_clear(rv3028c7_t *ctx)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+
+	alp_status_t s = rv3028_update_reg(ctx, RV3028_REG_CONTROL_2, RV3028_CTRL2_AIE, 0);
+	if (s != ALP_OK) return s;
+	/* All three AE bits = 1 (disabled) is the POR state (pp.18-19). */
+	const uint8_t off[3] = { RV3028_ALARM_AE, RV3028_ALARM_AE, RV3028_ALARM_AE };
+	s                    = rv3028_write(ctx, RV3028_REG_ALARM_MIN, off, sizeof(off));
+	if (s != ALP_OK) return s;
+	return rv3028_status_clear(ctx, RV3028_STATUS_AF);
+}
+
+alp_status_t rv3028c7_wake_service(rv3028c7_t *ctx, uint8_t *flags)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+
+	uint8_t      status = 0;
+	alp_status_t s      = rv3028_read(ctx, RV3028_REG_STATUS, &status, 1);
+	if (s != ALP_OK) return s;
+
+	const uint8_t wake = status & (RV3028_STATUS_TF | RV3028_STATUS_AF | RV3028_STATUS_UF);
+	if (flags != NULL) *flags = wake;
+	if (wake == 0) return ALP_OK;
+	return rv3028_status_clear(ctx, wake);
 }
 
 void rv3028c7_deinit(rv3028c7_t *ctx)

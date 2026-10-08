@@ -247,6 +247,145 @@ alp_status_t rv3028c7_route_clkout(rv3028c7_t *ctx, rv3028c7_clkout_src_t src);
  *         (clock-out sync). */
 alp_status_t rv3028c7_set_int_enable(rv3028c7_t *ctx, rv3028c7_src_t src, bool enable);
 
+/* ---------------------------------------------------------------- */
+/* Wake-source services: countdown timer, alarm, flag service        */
+/* ---------------------------------------------------------------- */
+
+/**
+ * @name Wake-source services (STOP / low-power wake on INT)
+ *
+ * These calls arm and service the two timed wake sources of the part
+ * (Periodic Countdown Timer and Alarm) on the `INT` pin.  Register and
+ * bit citations are to the RV-3028-C7 Application Manual Rev. 1.4
+ * (November 2021): Timer Value 0/1 (0Ah/0Bh) Sec. 3.6 p.20, Timer
+ * Status 0/1 (0Ch/0Dh) p.21, Status (0Eh) p.22, Control 1 (0Fh)
+ * TRPT/WADA/EERD/TE/TD p.23, Control 2 (10h) TIE/AIE p.24, Alarm
+ * registers 07h..09h Sec. 3.5 pp.18-19, countdown procedure Sec. 4.8.2
+ * p.63, first-period table Sec. 4.8.3 p.65.
+ *
+ * **No EEPROM access.**  Nothing in this group reads or writes the
+ * EEPROM or any register of the EEPROM RAM mirror (0x30..0x37,
+ * including EEPROM_BACKUP 0x37 and its backup-switchover mode BSM
+ * field), and none touches EEADDR/EEDATA/EECMD (0x25..0x27) or the
+ * EERD bit.  Every register they use (0x07..0x0F, 0x10) is a plain
+ * RAM register.  This is deliberate: an EEPROM write wears the part
+ * (nCYCLE endurance, p.98, as low as 100 cycles at the hot corner)
+ * and a changed backup-switchover mode changes how the part is
+ * powered, which a wake-timing path must never do as a side effect.
+ * This is also why the bench power application uses this driver and
+ * not Zephyr's `rtc_rv3028` driver, whose init writes the
+ * backup-switch mode.
+ * @{
+ */
+
+/** Longest one-shot countdown rounded to the part's coarsest tick:
+ *  4095 x 60 s (TD = 11, 1/60 Hz; Sec. 4.8.2 table p.63). */
+#define RV3028C7_TIMER_MAX_SECONDS (4095u * 60u)
+
+/** Longest countdown that keeps 1 s resolution (TD = 10, 1 Hz). */
+#define RV3028C7_TIMER_MAX_SECONDS_1HZ 4095u
+
+/** Countdown state, as returned by @ref rv3028c7_timer_read. */
+typedef struct {
+	bool     running;      /**< TE (Control 1 bit 2) is set: a countdown is in progress. */
+	bool     expired;      /**< TF (Status bit 3) is latched. */
+	uint32_t preset_ms;    /**< Timer Value (0Ah/0Bh) preset, in ms of the active TD tick. */
+	uint32_t remaining_ms; /**< Timer Status (0Ch/0Dh) current value, in ms. */
+	uint32_t elapsed_ms;   /**< preset_ms - remaining_ms (saturating at 0). */
+} rv3028c7_timer_state_t;
+
+/**
+ * @brief Start a one-shot countdown of @p seconds with INT enabled.
+ *
+ * Picks the Timer Clock Frequency (TD, Control 1 bits 1:0) from the
+ * range: 1 Hz (TD = 10) for 1..4095 s, 1/60 Hz (TD = 11) above that.
+ * Longer requests are rounded UP to a whole number of minutes so the
+ * wake is never early.  The request must be 1..@ref
+ * RV3028C7_TIMER_MAX_SECONDS.
+ *
+ * Follows the Sec. 4.8.2 procedure (p.63): TE, TIE and TF are cleared
+ * in that order first (no stray INT), then TRPT = 0 (single mode) and
+ * TD are written, then the 12-bit Timer Value, then TIE = 1, and
+ * finally TE 0 -> 1 starts the countdown.  WADA, USEL and EERD in
+ * Control 1 and the other Control 2 enables are preserved.  Other
+ * latched flags in Status (including PORF) are left set.
+ *
+ * Timing: the first period may run up to 15.625 ms long (Sec. 4.8.3
+ * p.65); after expiry TF latches, INT goes low (cleared after tRTN1 =
+ * 7.813 ms, or when TF is cleared) and TE self-clears (single mode).
+ *
+ * @param ctx      Initialised driver context.
+ * @param seconds  Requested delay, 1..RV3028C7_TIMER_MAX_SECONDS.
+ * @param actual_s Output: the delay actually programmed, in seconds.
+ *                 May be NULL.
+ * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (0 or too long),
+ *         or ALP_ERR_IO.
+ */
+alp_status_t rv3028c7_timer_start(rv3028c7_t *ctx, uint32_t seconds, uint32_t *actual_s);
+
+/**
+ * @brief Stop the countdown and silence it: TE = 0, TIE = 0, TF
+ *        cleared.  The preset in Timer Value is left alone (writing 0
+ *        to a running Timer Value is documented as harmful, p.65).
+ *        Idempotent.
+ */
+alp_status_t rv3028c7_timer_stop(rv3028c7_t *ctx);
+
+/**
+ * @brief Read the countdown state: running, expired, preset, remaining
+ *        and elapsed.
+ *
+ * Remaining time comes from Timer Status 0/1 (0Ch/0Dh), which hold
+ * the live count while TE = 1 and the last value after TE = 0 (p.21).
+ * Reading 0Ch first latches 0Dh, so both bytes are read in one
+ * transaction.  Units follow the active TD tick (4096 Hz, 64 Hz, 1 Hz
+ * or 1/60 Hz), expressed in whole milliseconds.
+ */
+alp_status_t rv3028c7_timer_read(rv3028c7_t *ctx, rv3028c7_timer_state_t *out);
+
+/**
+ * @brief Arm the alarm: disable AIE, clear AF, write the 07h..09h alarm
+ *        registers (AE bits from @p match, see @ref rv3028c7_set_alarm),
+ *        then enable AIE.  Fields not selected in @p match do not
+ *        participate in the comparison (AE_x = 1, pp.18-19).
+ */
+alp_status_t rv3028c7_alarm_arm(rv3028c7_t                   *ctx,
+                                const rv3028c7_time_t        *when,
+                                const rv3028c7_alarm_match_t *match);
+
+/**
+ * @brief Disarm the alarm: AIE = 0, AE_M/AE_H/AE_WD = 1 (all match
+ *        fields disabled, the POR state, pp.18-19) and AF cleared.
+ *        Other latched flags are left alone.  Idempotent.
+ */
+alp_status_t rv3028c7_alarm_clear(rv3028c7_t *ctx);
+
+/** Wake flags reported by @ref rv3028c7_wake_service (bit masks). */
+#define RV3028C7_WAKE_TF 0x08u /**< Countdown timer expired (Status bit 3). */
+#define RV3028C7_WAKE_AF 0x04u /**< Alarm matched (Status bit 2). */
+#define RV3028C7_WAKE_UF 0x10u /**< Periodic update (Status bit 4). */
+
+/**
+ * @brief Interrupt service for the wake path: read Status, report the
+ *        TF / AF / UF flags that are latched, and clear exactly those.
+ *
+ * Read-modify-write like @ref rv3028c7_dispatch_irq: Status is read
+ * once, and the write-back carries a 1 in every flag bit that is NOT
+ * being acknowledged (a 1 leaves a flag unchanged, a 0 clears it;
+ * same convention as rv3028c7_alarm_check_and_clear()).  PORF, EVF,
+ * BSF and CLKF are therefore preserved for the caller / the
+ * dispatcher, and EEbusy (read-only) is never written.  No handlers
+ * are invoked.
+ *
+ * @param ctx   Initialised driver context.
+ * @param flags Output: OR of RV3028C7_WAKE_* seen at the read.  May
+ *              be NULL.  0 means nothing was pending (no write is
+ *              issued).
+ */
+alp_status_t rv3028c7_wake_service(rv3028c7_t *ctx, uint8_t *flags);
+
+/** @} */
+
 /** @brief Release resources.  Idempotent. */
 void rv3028c7_deinit(rv3028c7_t *ctx);
 
