@@ -9,17 +9,23 @@ See [`docs/aen-power-domains.md`](../../../docs/aen-power-domains.md) for the mo
 
 ## What it does
 
-1. Brings the CC3501E bridge up (the one `WIFI_EN` toggle in the run) and
+1. Brings the CC3501E bridge up (`nRESET` only when `WIFI_EN` already reads high;
+   `cc3501e_reset()`, which cycles `WIFI_EN`, only from a known-unpowered state) and
    records a baseline: CC3501E PING, DP83825 PHY ID over MDIO, NOR JEDEC ID,
    TMP112 temperature.
 2. Prints every domain through `alp_power_domain_info()` and checks that
    `alp_power_domain_policy_set(WIFI_BLE, RAIL_OFF)` is **refused** (the Kconfig
    gate `CONFIG_ALP_SDK_SOM_PD_WIFI_RAIL_OFF` is off).
-3. Quiesces every domain, holds 5 s, and checks the held state: TMP112
+3. Takes the Ethernet interface down (the PHY reference clock stops with the PHY),
+   quiesces every domain, holds 5 s, and checks the held state: TMP112
    `CONFIG.SD` set, CC3501E PING down.
 4. Restores every domain (reverse order) and re-checks each chip: CC3501E PING
    with **no `WIFI_EN` toggle** (nRESET release only), PHY ID and link, NOR JEDEC
    ID, TMP112 temperature.
+
+At baseline, hold and after it also prints the LPGPIO `DR`/`DDR`/`EXT` bits of
+P15_1/4/5/6/7 and the RV-3028 time, `CONTROL_1` and `EEPROM_CLKOUT`, so the
+acceptance needs no external probe.
 
 ## Build and run
 

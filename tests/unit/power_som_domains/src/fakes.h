@@ -18,6 +18,8 @@ struct fake_cc {
 	bool         nrst_written;
 	bool         en_level;
 	bool         en_written;
+	unsigned int ping_calls;
+	bool         ping_always_fail;
 };
 
 extern struct fake_cc    g_cc;
@@ -33,6 +35,16 @@ extern uint8_t g_chip_regs[256];
 
 extern unsigned int g_clkout_calls;
 extern int          g_clkout_src;
+
+/* alp_som_power_pads_apply() stand-in: call count and the status it returns. */
+extern unsigned int g_pads_calls;
+extern alp_status_t g_pads_rc;
+
+/* Pad index (>= 0) that reads back the opposite of what was driven; -1 = none. */
+extern int g_pad_stuck_pin;
+
+/* STOP_MODE_STAT word the boot restore reads (bit 4 = STOP wake). */
+extern uint32_t g_stop_mode;
 
 void fakes_reset(void);
 

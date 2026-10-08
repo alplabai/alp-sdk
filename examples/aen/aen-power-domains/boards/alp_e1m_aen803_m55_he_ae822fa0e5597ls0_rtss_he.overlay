@@ -100,8 +100,8 @@
 };
 
 /* The pads the power layer drives: LPGPIO island (P15_n), GPIO11 (P11_6, PHY
- * reset), GPIO5 (P5_5, backlight).  Muxing and output drivers are set in
- * src/main.c; the layer only drives the levels. */
+ * reset), GPIO5 (P5_5, backlight).  Their mux and pad configuration come from
+ * the pinctrl-0 state of the generated alp,som-power node, not from this app. */
 &lpgpio {
 	status = "okay";
 };

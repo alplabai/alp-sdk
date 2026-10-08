@@ -225,7 +225,7 @@ config ALP_SDK_POWER_PM_POLICY
 
 config ALP_SDK_SOM_POWER
 	bool "SoM power-domain runtime (quiesce / restore around STOP)"
-	depends on ALP_SDK_POWER && GPIO
+	depends on ALP_SDK_POWER && GPIO && PINCTRL
 	default y if DT_HAS_ALP_SOM_POWER_DOMAIN_ENABLED
 	select CRC
 	help
@@ -240,7 +240,8 @@ config ALP_SDK_SOM_POWER
 	  alp_power_boot_wake_info() through the power-class vtable.  On a plain
 	  power-on reset the wake path finds no valid record and touches
 	  nothing.  Without this option those three calls return
-	  ALP_ERR_NOSUPPORT.
+	  ALP_ERR_NOSUPPORT.  The node's pinctrl-0 state muxes every pad the
+	  layer drives, so it also needs CONFIG_GPIO and CONFIG_PINCTRL.
 
 config ALP_SDK_SOM_PD_WIFI_RAIL_OFF
 	bool "Allow gating the CC3501E supply (RAIL_OFF policy) around STOP"

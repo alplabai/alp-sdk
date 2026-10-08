@@ -10,6 +10,12 @@
  * (a supply cold cycle), which on an activated unit
  * (vendor_sbl_container_enable=1) may never relaunch the firmware.
  *
+ * After the blind boot settle the link is verified with a PING handshake before
+ * the context is re-armed; if the chip does not answer the context stays down and
+ * the restore reports ALP_ERR_NOT_READY.  The chip comes back as after a reset:
+ * Wi-Fi association, sockets and BLE state are gone and the application must
+ * re-establish them.
+ *
  * RAIL_OFF (opt-in, gated in the registry on
  * CONFIG_ALP_SDK_SOM_PD_WIFI_RAIL_OFF): cc3501e_power_off().  Its way back is
  * WIFI_EN high and then the same nRESET-only hard reset.
@@ -24,6 +30,11 @@
 #include "som_power_chips.h"
 
 #define CC3501E_RAIL_UP_MS 20u
+#define CC3501E_PING_TRIES 25u /* poll-by-repeat budget, as the bring-up code uses */
+#ifndef ALP_SOM_CC3501E_PING_GAP_MS
+#define ALP_SOM_CC3501E_PING_GAP_MS 200u
+#endif
+#define CC3501E_PING_GAP_MS ALP_SOM_CC3501E_PING_GAP_MS
 
 static struct {
 	cc3501e_t *fw;
@@ -68,10 +79,19 @@ static alp_status_t cc_restore(void *ctx, bool rail_off, bool early)
 		alp_delay_ms(CC3501E_RAIL_UP_MS);
 	}
 	alp_status_t s = cc3501e_hard_reset(fw);
-	if (s == ALP_OK) {
-		fw->initialised = _cc.was_initialised;
+	if (s != ALP_OK || !_cc.was_initialised) {
+		return s; /* a context that was never up is left down */
 	}
-	return s;
+	/* The blind settle only waited; prove the slave answers before re-arming. */
+	fw->initialised = true;
+	for (unsigned int i = 0; i < CC3501E_PING_TRIES; i++) {
+		if (cc3501e_ping(fw) == ALP_OK) {
+			return ALP_OK;
+		}
+		alp_delay_ms(CC3501E_PING_GAP_MS);
+	}
+	fw->initialised = false;
+	return ALP_ERR_NOT_READY;
 }
 
 static const alp_som_power_hooks_t _hooks = {

@@ -2302,18 +2302,53 @@ def _aen_som_power_dts(
         child.append("\t\t};")
         children += child
 
+    # Every output control pad the layer drives, muxed and pad-configured by the
+    # `alp,som-power` node's own pinctrl-0 state.  Pad config is input-enable +
+    # schmitt (0x23 with the default 4 mA drive on the LP pads: the value the
+    # bench-proven CC3501E bring-up writes by hand) so the output driver is on
+    # and the pad can be read back.  Port 15 is the LPGPIO island.
+    pads: list[tuple[int, int]] = []
+    for name, dom in domains.items():
+        if _aen_power_domain_presence(dom, on_module) is None:
+            continue
+        for c in dom["controls"]:
+            m = re.fullmatch(r"P(\d+)_(\d)", c["silicon_pad"])
+            if c["direction"] != "out" or m is None:
+                continue
+            pad = (int(m.group(1)), int(m.group(2)))
+            if pad not in pads:
+                pads.append(pad)
+    pads.sort()
+    pinmux = ", ".join(
+        f"<PIN_P{port}_{pin}__{'LPGPIO' if port == 15 else 'GPIO'}>"
+        for port, pin in pads)
+
     lines = [
         "/*",
         " * SoM power domains (alp-sdk#2784): which on-module chips this SKU carries,",
         " * the SoC pads that gate them, and the default quiesce action per domain.",
         " * Presence follows this SKU's `on_module` block; pads, polarity and actions",
         " * come from `power_domains:` in metadata/e1m_modules/aen/on-module-links.yaml.",
-        " * Data only -- no driver reads this node yet.  `alp,stop-hold` is \"unproven\"",
-        " * for every LPGPIO (P15_n) pad until the STOP bench shows the output holds.",
+        " * The SoM power layer (src/backends/power/som_power.c) reads this node and",
+        " * applies its pinctrl-0 state before it first drives a pad.  `alp,stop-hold` is",
+        " * \"unproven\" for every LPGPIO (P15_n) pad until the STOP bench shows the output",
+        " * holds.",
         " */",
+        "&pinctrl {",
+        "\tpinctrl_som_power: pinctrl_som_power {",
+        "\t\tgroup0 {",
+        f"\t\t\tpinmux = {pinmux};",
+        "\t\t\tinput-enable;",
+        "\t\t\tinput-schmitt-enable;",
+        "\t\t};",
+        "\t};",
+        "};",
+        "",
         "/ {",
         "\tsom_power: som-power {",
         '\t\tcompatible = "alp,som-power";',
+        "\t\tpinctrl-0 = <&pinctrl_som_power>;",
+        '\t\tpinctrl-names = "default";',
         *children,
         "\t};",
         "};",

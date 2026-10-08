@@ -7,9 +7,11 @@
 # `alp,som-power-domain` child per domain the SKU actually carries.
 
 description: |
-  Parent of the per-domain `alp,som-power-domain` nodes.  Carries no
-  properties of its own.  Data only: no driver binds it yet.
+  Parent of the per-domain `alp,som-power-domain` nodes.  Its `pinctrl-0`
+  ("default") state muxes and pad-configures every pad the power layer drives
+  (the LPGPIO P15_n pads and the main-domain P11_6 / P5_5); the layer applies it
+  before its first drive and refuses to drive a pad without it.
 
 compatible: "alp,som-power"
 
-include: [base.yaml]
+include: [base.yaml, pinctrl-device.yaml]

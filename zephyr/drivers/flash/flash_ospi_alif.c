@@ -895,11 +895,38 @@ static int ospi_alif_ensure_octal_ddr(const struct device *dev)
 	return rc;
 }
 
-int flash_ospi_alif_reset_notify(const struct device *dev)
+int flash_ospi_alif_suspend(const struct device *dev, uint32_t timeout_ms)
+{
+	struct ospi_alif_data *data = dev->data;
+	int                    rc;
+
+	/* The lock is what makes write()/erase()/read() mutually exclusive, so
+	 * owning it means no transfer is in flight and none can start. */
+	rc = k_mutex_lock(&data->lock, K_MSEC(timeout_ms));
+	if (rc != 0) {
+		return -EBUSY;
+	}
+	/* A program or erase the caller already issued runs inside the part after
+	 * the call returns; resetting the part now would abort it half done.  Wait
+	 * for WIP to clear.  Only an Octal DDR part can have such an operation (the
+	 * switch happens on the first write/erase); in 1-1-1 there is nothing to
+	 * wait for and the Octal status read would not be understood. */
+	if (data->octal_ddr_active) {
+		rc = ospi_alif_poll_ready_locked(dev);
+		if (rc != 0) {
+			k_mutex_unlock(&data->lock);
+			return rc;
+		}
+	}
+	return 0; /* lock stays held until flash_ospi_alif_resume() */
+}
+
+int flash_ospi_alif_resume(const struct device *dev)
 {
 	struct ospi_alif_data *data = dev->data;
 
-	k_mutex_lock(&data->lock, K_FOREVER);
+	/* The part was reset while the lock was held: it is back in its power-on
+	 * 1-1-1 framing, so forget the Octal DDR switch. */
 	data->octal_ddr_active = false;
 	k_mutex_unlock(&data->lock);
 	return 0;

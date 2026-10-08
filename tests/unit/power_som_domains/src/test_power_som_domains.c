@@ -15,6 +15,7 @@
  *   - failure of one domain rolls back the others.
  */
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -25,6 +26,8 @@
 #include <zephyr/drivers/gpio/gpio_emul.h>
 #include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
+
+#include <zephyr/drivers/flash/flash_ospi_alif.h>
 
 #include <alp/chips/tmp112.h>
 #include <alp/power.h>
@@ -48,6 +51,8 @@
 #define BL_PIN    5
 
 #define RTC_CLKOUT_REG 0x35u
+#define RTC_CTRL1_REG  0x0Fu
+#define RTC_EERD       0x08u
 
 static void pin_high(const struct device *port, gpio_pin_t pin)
 {
@@ -179,7 +184,8 @@ ZTEST(power_som_domains, test_rail_off_is_gated_by_kconfig)
 static alp_power_domain_t g_log[16];
 static bool               g_log_restore[16];
 static size_t             g_log_n;
-static alp_power_domain_t g_fail_on = ALP_POWER_DOMAIN_COUNT;
+static alp_power_domain_t g_fail_on         = ALP_POWER_DOMAIN_COUNT;
+static alp_power_domain_t g_fail_restore_on = ALP_POWER_DOMAIN_COUNT;
 
 static alp_status_t log_quiesce(void *ctx, bool rail_off)
 {
@@ -194,17 +200,19 @@ static alp_status_t log_restore(void *ctx, bool rail_off, bool early)
 {
 	(void)rail_off;
 	(void)early;
-	g_log[g_log_n]           = (alp_power_domain_t)(uintptr_t)ctx;
+	alp_power_domain_t d     = (alp_power_domain_t)(uintptr_t)ctx;
+	g_log[g_log_n]           = d;
 	g_log_restore[g_log_n++] = true;
-	return ALP_OK;
+	return (d == g_fail_restore_on) ? ALP_ERR_IO : ALP_OK;
 }
 
 static const alp_som_power_hooks_t log_hooks = { .quiesce = log_quiesce, .restore = log_restore };
 
 static void bind_all_logging(void)
 {
-	g_log_n   = 0;
-	g_fail_on = ALP_POWER_DOMAIN_COUNT;
+	g_log_n           = 0;
+	g_fail_on         = ALP_POWER_DOMAIN_COUNT;
+	g_fail_restore_on = ALP_POWER_DOMAIN_COUNT;
 	for (int d = 0; d < (int)ALP_POWER_DOMAIN_COUNT; ++d) {
 		alp_power_domain_info_t i;
 		(void)alp_som_power_ops_domain_info((alp_power_domain_t)d, &i);
@@ -223,7 +231,7 @@ ZTEST(power_som_domains, test_quiesce_consumers_first_restore_in_reverse)
 	uint32_t failed = 99u;
 
 	bind_all_logging();
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
 	zassert_equal(g_log_n, ARRAY_SIZE(want));
 	for (size_t i = 0; i < ARRAY_SIZE(want); ++i) {
 		zassert_equal(g_log[i], want[i], "quiesce slot %zu", i);
@@ -253,14 +261,54 @@ ZTEST(power_som_domains, test_failed_quiesce_rolls_back)
 	bind_all_logging();
 	g_fail_on = ALP_POWER_DOMAIN_RTC; /* fourth in order */
 
-	zassert_equal(alp_som_power_quiesce(ALP_POWER_MODE_STOP), ALP_ERR_IO);
-	/* wifi, flash, temp quiesced, rtc failed -> the three come back, newest first. */
-	zassert_equal(g_log_n, 7u);
-	zassert_equal(g_log[4], ALP_POWER_DOMAIN_TEMP_SENSOR);
-	zassert_equal(g_log[5], ALP_POWER_DOMAIN_EXT_FLASH);
-	zassert_equal(g_log[6], ALP_POWER_DOMAIN_WIFI_BLE);
+	uint32_t rb = 99u;
+
+	zassert_equal(alp_som_power_quiesce(ALP_POWER_MODE_STOP, &rb), ALP_ERR_IO);
+	zassert_equal(rb, 0u, "every rollback step succeeded");
+	/* wifi, flash, temp quiesced, rtc failed -> rtc's own partial step AND the
+	 * three come back, newest first. */
+	zassert_equal(g_log_n, 8u);
+	zassert_equal(g_log[4], ALP_POWER_DOMAIN_RTC, "the failing domain is rolled back too");
+	zassert_true(g_log_restore[4]);
+	zassert_equal(g_log[5], ALP_POWER_DOMAIN_TEMP_SENSOR);
+	zassert_equal(g_log[6], ALP_POWER_DOMAIN_EXT_FLASH);
+	zassert_equal(g_log[7], ALP_POWER_DOMAIN_WIFI_BLE);
 	zassert_equal(alp_som_power_quiesced(), 0u);
 	zassert_equal(alp_som_power_restore(NULL), ALP_ERR_NOT_READY, "no record was written");
+}
+
+ZTEST(power_som_domains, test_failure_on_the_first_domain_rolls_back_only_itself)
+{
+	bind_all_logging();
+	g_fail_on = ALP_POWER_DOMAIN_WIFI_BLE;
+
+	zassert_equal(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL), ALP_ERR_IO);
+	zassert_equal(g_log_n, 2u);
+	zassert_equal(g_log[1], ALP_POWER_DOMAIN_WIFI_BLE);
+	zassert_true(g_log_restore[1]);
+}
+
+ZTEST(power_som_domains, test_rollback_failure_is_reported_and_retryable)
+{
+	uint32_t rb = 0u;
+
+	bind_all_logging();
+	g_fail_on         = ALP_POWER_DOMAIN_RTC;
+	g_fail_restore_on = ALP_POWER_DOMAIN_EXT_FLASH;
+
+	zassert_equal(alp_som_power_quiesce(ALP_POWER_MODE_STOP, &rb), ALP_ERR_IO);
+	zassert_equal(rb,
+	              ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_EXT_FLASH),
+	              "the rollback failure reaches the caller");
+	zassert_equal(alp_som_power_state(ALP_POWER_DOMAIN_EXT_FLASH), ALP_SOM_PD_RESTORE_FAILED);
+
+	/* It stays in the record, so a later restore retries just that domain. */
+	g_fail_restore_on = ALP_POWER_DOMAIN_COUNT;
+	g_log_n           = 0;
+	zassert_ok(alp_som_power_restore(NULL));
+	zassert_equal(g_log_n, 1u);
+	zassert_equal(g_log[0], ALP_POWER_DOMAIN_EXT_FLASH);
+	zassert_equal(alp_som_power_state(ALP_POWER_DOMAIN_EXT_FLASH), ALP_SOM_PD_ACTIVE);
 }
 
 ZTEST(power_som_domains, test_keep_alive_policy_is_never_touched)
@@ -268,7 +316,7 @@ ZTEST(power_som_domains, test_keep_alive_policy_is_never_touched)
 	bind_all_logging();
 	zassert_ok(alp_som_power_ops_policy_set(
 	    NULL, ALP_POWER_DOMAIN_BACKLIGHT, ALP_POWER_DOMAIN_POLICY_KEEP_ALIVE));
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
 	for (size_t i = 0; i < g_log_n; ++i) {
 		zassert_not_equal(g_log[i], ALP_POWER_DOMAIN_BACKLIGHT);
 	}
@@ -279,13 +327,13 @@ ZTEST(power_som_domains, test_keep_alive_policy_is_never_touched)
 ZTEST(power_som_domains, test_sleep_modes_do_not_quiesce)
 {
 	bind_all_logging();
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_SLEEP));
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_DEEP_SLEEP));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_SLEEP, NULL));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_DEEP_SLEEP, NULL));
 	zassert_equal(g_log_n, 0u);
 	zassert_equal(alp_som_power_quiesced(), 0u);
-	zassert_equal(alp_som_power_quiesce((alp_power_mode_t)99), ALP_ERR_INVAL);
+	zassert_equal(alp_som_power_quiesce((alp_power_mode_t)99, NULL), ALP_ERR_INVAL);
 
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STANDBY));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STANDBY, NULL));
 	zassert_equal(g_log_n, 6u, "STANDBY quiesces like STOP");
 	zassert_ok(alp_som_power_restore(NULL));
 }
@@ -294,7 +342,7 @@ ZTEST(power_som_domains, test_sleep_modes_do_not_quiesce)
 
 ZTEST(power_som_domains, test_default_actions_and_restore_levels)
 {
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL));
 
 	zassert_equal(level(LPGPIO, NRST_PIN), 0, "CC3501E nRESET held low");
 	zassert_equal(level(LPGPIO, WIFIEN), 1, "AUTO never touches WIFI_EN");
@@ -304,6 +352,9 @@ ZTEST(power_som_domains, test_default_actions_and_restore_levels)
 	zassert_true((tmp_conf() & 0x0100u) != 0u, "TMP112 CONF.SD set");
 	zassert_equal(tmp_conf() & ~0x0100u, 0x60A0u, "other CONF bits kept");
 	zassert_equal(rtc_regs()[RTC_CLKOUT_REG], 0x87u, "CLKOUT_FD = low, CLKOE untouched");
+	zassert_true((rtc_regs()[RTC_CTRL1_REG] & RTC_EERD) != 0u,
+	             "EERD set: the 24 h EEPROM refresh must not turn CLKOUT back on");
+	zassert_equal(g_pads_calls, 1u, "pads muxed once, before the first drive");
 	zassert_equal(alp_som_power_state(ALP_POWER_DOMAIN_ETH_PHY),
 	              ALP_SOM_PD_QUIESCED,
 	              "PHY state is tracked in software");
@@ -317,13 +368,14 @@ ZTEST(power_som_domains, test_default_actions_and_restore_levels)
 	zassert_equal(level(LPGPIO, FLASH_RST), 1);
 	zassert_equal(level(GPIO5, BL_PIN), 1);
 	zassert_equal(tmp_conf() & 0x0100u, 0u, "TMP112 SD cleared");
+	zassert_equal(rtc_regs()[RTC_CTRL1_REG] & RTC_EERD, 0u, "EERD cleared on wake");
 	zassert_equal(alp_som_power_state(ALP_POWER_DOMAIN_ETH_PHY), ALP_SOM_PD_ACTIVE);
 }
 
 ZTEST(power_som_domains, test_backlight_that_was_off_stays_off)
 {
 	zassert_ok(gpio_pin_configure(GPIO5, BL_PIN, GPIO_OUTPUT_LOW | GPIO_INPUT));
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL));
 	zassert_ok(alp_som_power_restore(NULL));
 	zassert_equal(level(GPIO5, BL_PIN), 0);
 }
@@ -344,7 +396,7 @@ ZTEST(power_som_domains, test_cc3501e_restore_is_hard_reset_never_reset)
 {
 	zassert_ok(alp_som_power_bind_cc3501e(&g_fw));
 
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
 	zassert_true(g_cc.nrst_written);
 	zassert_false(g_cc.nrst_level, "nRESET held low");
 	zassert_false(g_cc.en_written, "AUTO leaves WIFI_EN alone");
@@ -362,7 +414,7 @@ ZTEST(power_som_domains, test_cc3501e_uninitialised_context_stays_down)
 {
 	g_fw.initialised = false;
 	zassert_ok(alp_som_power_bind_cc3501e(&g_fw));
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
 	zassert_ok(alp_som_power_restore(NULL));
 	zassert_false(g_fw.initialised, "restore does not initialise what was never up");
 }
@@ -373,7 +425,7 @@ ZTEST(power_som_domains, test_cc3501e_rail_off_uses_power_off_then_hard_reset)
 	zassert_ok(alp_som_power_bind_cc3501e(&g_fw));
 	zassert_ok(alp_som_power_ops_policy_set(
 	    NULL, ALP_POWER_DOMAIN_WIFI_BLE, ALP_POWER_DOMAIN_POLICY_RAIL_OFF));
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
 	zassert_equal(g_cc.power_off_calls, 1u);
 
 	zassert_ok(alp_som_power_restore(NULL));
@@ -387,7 +439,7 @@ ZTEST(power_som_domains, test_rail_off_default_path_gates_wifi_en)
 {
 	zassert_ok(alp_som_power_ops_policy_set(
 	    NULL, ALP_POWER_DOMAIN_WIFI_BLE, ALP_POWER_DOMAIN_POLICY_RAIL_OFF));
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL));
 	zassert_equal(level(LPGPIO, NRST_PIN), 0, "nRESET low before the supply drops");
 	zassert_equal(level(LPGPIO, WIFIEN), 0);
 	zassert_ok(alp_som_power_restore(NULL));
@@ -462,7 +514,7 @@ ZTEST(power_som_domains, test_boot_with_valid_record_restores_and_reports)
 
 	/* Quiesce for STOP, then "lose" the in-RAM state exactly as the cold boot
 	 * does: the record is all that survives. */
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
 	uint32_t held = alp_som_power_quiesced();
 	zassert_not_equal(held, 0u);
 	zassert_equal(level(LPGPIO, NRST_PIN), 0);
@@ -472,19 +524,84 @@ ZTEST(power_som_domains, test_boot_with_valid_record_restores_and_reports)
 	alp_som_power_reset_for_test();
 	alp_som_pd_store_save(&rec);
 
+	/* Pass 1 (POST_KERNEL 0): pin domains only.  The I2C controller is not up
+	 * yet, so the TMP112 / RTC stay held until pass 2. */
 	zassert_equal(alp_som_power_boot_restore(), 0);
 	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
 	zassert_true(info.valid);
 	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
 	zassert_equal(info.quiesced_domains, held);
+	uint32_t i2c_bits = ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_TEMP_SENSOR) |
+	                    ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_RTC);
+	zassert_equal(info.restored_domains, held & ~i2c_bits);
+	zassert_not_equal(tmp_conf() & 0x0100u, 0u, "TMP112 not touched before the I2C pass");
+	zassert_equal(level(LPGPIO, NRST_PIN), 1);
+
+	/* Pass 2 (after the I2C controller): the rest. */
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
 	zassert_equal(info.restored_domains, held);
 	zassert_equal(info.restore_failed_domains, 0u);
 	assert_pins_untouched();
 	zassert_equal(rtc_regs()[RTC_CLKOUT_REG], 0x87u, "restore leaves the RTC CLKOUT off");
+	zassert_equal(rtc_regs()[RTC_CTRL1_REG] & RTC_EERD, 0u);
 
 	/* The record is consumed: a second boot pass is a plain POR. */
 	alp_som_pd_record_t gone;
 	zassert_false(alp_som_pd_store_load(&gone));
+}
+
+ZTEST(power_som_domains, test_i2c_pass_without_record_does_nothing)
+{
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	assert_pins_untouched();
+}
+
+/* STOP_MODE_STAT bit 4 must agree that this boot is a STOP wake. */
+ZTEST(power_som_domains, test_boot_stop_mode_stat_gate)
+{
+	alp_power_boot_info_t info;
+	alp_som_pd_record_t   rec;
+
+	/* STAT = 0: the record is discarded and nothing is touched -- the domains stay
+	 * as the (unrelated) reset left them. */
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
+	zassert_true(alp_som_pd_store_load(&rec));
+	alp_som_power_reset_for_test();
+	alp_som_pd_store_save(&rec);
+	g_stop_mode = 0u;
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_false(info.valid);
+	zassert_equal(level(LPGPIO, NRST_PIN), 0, "nothing was restored");
+	zassert_not_equal(tmp_conf() & 0x0100u, 0u);
+	zassert_false(alp_som_pd_store_load(&rec), "the record is dropped");
+
+	/* STAT = 1 (bit 4): restored. */
+	before(NULL);
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
+	zassert_true(alp_som_pd_store_load(&rec));
+	alp_som_power_reset_for_test();
+	alp_som_pd_store_save(&rec);
+	g_stop_mode = 0x10u;
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_true(info.valid);
+	zassert_equal(level(LPGPIO, NRST_PIN), 1);
+
+	/* A RUN-mode record (an interrupted bench cycle) does not need the bit. */
+	before(NULL);
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL));
+	zassert_true(alp_som_pd_store_load(&rec));
+	alp_som_power_reset_for_test();
+	alp_som_pd_store_save(&rec);
+	g_stop_mode = 0u;
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_true(info.valid);
+	zassert_equal(level(LPGPIO, NRST_PIN), 1);
 }
 
 ZTEST(power_som_domains, test_restore_without_record_touches_nothing)
@@ -510,7 +627,7 @@ ZTEST(power_som_domains, test_tmp112_chip_shutdown_and_bind)
 
 	/* Through the domain layer the chip driver owns the bit, not the DT I2C path. */
 	zassert_ok(alp_som_power_bind_tmp112(&ctx));
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL));
 	zassert_equal(((uint16_t)g_chip_regs[1] << 8) | g_chip_regs[2], 0x61A0u);
 	zassert_equal(tmp_conf(), 0x60A0u, "the DT I2C path was bypassed");
 	zassert_ok(alp_som_power_restore(NULL));
@@ -525,7 +642,7 @@ ZTEST(power_som_domains, test_bind_rejects_bad_arguments)
 	zassert_equal(alp_som_power_bind_tmp112(NULL), ALP_ERR_INVAL);
 	zassert_equal(alp_som_power_bind_rv3028(NULL), ALP_ERR_INVAL);
 
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL));
 	zassert_equal(alp_som_power_bind(ALP_POWER_DOMAIN_RTC, &log_hooks, NULL),
 	              ALP_ERR_BUSY,
 	              "no re-binding while a domain is held");
@@ -535,15 +652,146 @@ ZTEST(power_som_domains, test_bind_rejects_bad_arguments)
 	zassert_ok(alp_som_power_restore(NULL));
 }
 
-ZTEST(power_som_domains, test_rv3028_hook_routes_clkout_low_and_nothing_else)
+ZTEST(power_som_domains, test_rv3028_hook_routes_clkout_low_and_pauses_refresh)
 {
-	rv3028c7_t ctx = { 0 };
+	rv3028c7_t ctx = { .bus = (alp_i2c_t *)&g_chip_regs };
 
 	zassert_ok(alp_som_power_bind_rv3028(&ctx));
-	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL));
 	zassert_equal(g_clkout_calls, 1u);
 	zassert_equal(g_clkout_src, (int)RV3028C7_CLKOUT_LOW);
+	zassert_true((g_chip_regs[RTC_CTRL1_REG] & RTC_EERD) != 0u, "EERD set after the route");
 	zassert_equal(rtc_regs()[RTC_CLKOUT_REG], 0x80u, "the DT I2C path was bypassed");
 	zassert_ok(alp_som_power_restore(NULL));
-	zassert_equal(g_clkout_calls, 1u, "restore leaves the RTC alone");
+	zassert_equal(g_clkout_calls, 1u, "restore does not re-route CLKOUT");
+	zassert_equal(g_chip_regs[RTC_CTRL1_REG] & RTC_EERD, 0u, "EERD cleared on wake");
+}
+
+/* ---- CC3501E link handshake ------------------------------------------------------------ */
+
+ZTEST(power_som_domains, test_cc3501e_restore_pings_before_rearming)
+{
+	zassert_ok(alp_som_power_bind_cc3501e(&g_fw));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
+	zassert_ok(alp_som_power_restore(NULL));
+	zassert_true(g_cc.ping_calls >= 1u, "the blind hard reset is followed by a PING");
+	zassert_true(g_fw.initialised);
+}
+
+ZTEST(power_som_domains, test_cc3501e_that_never_answers_stays_down)
+{
+	uint32_t failed = 0u;
+
+	g_cc.ping_always_fail = true;
+	zassert_ok(alp_som_power_bind_cc3501e(&g_fw));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
+	zassert_equal(alp_som_power_restore(&failed), ALP_ERR_IO);
+	zassert_equal(failed, ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_WIFI_BLE));
+	zassert_false(g_fw.initialised, "no re-arm without a handshake");
+	zassert_equal(g_cc.reset_calls, 0u);
+}
+
+/* ---- Pad mux ------------------------------------------------------------------------------ */
+
+ZTEST(power_som_domains, test_pads_are_applied_before_the_first_drive_and_failure_refuses)
+{
+	g_pads_rc = ALP_ERR_NOT_READY;
+	zassert_equal(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL),
+	              ALP_ERR_NOT_READY,
+	              "an unmuxed pad is never reported as driven");
+	zassert_equal(level(LPGPIO, NRST_PIN), 1, "nothing was driven");
+	zassert_equal(level(LPGPIO, PHY_PWR), 1);
+	zassert_equal(alp_som_power_quiesced(), 0u);
+
+	g_pads_rc = ALP_OK; /* it retries until the state applies */
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL));
+	zassert_equal(level(LPGPIO, NRST_PIN), 0);
+	zassert_ok(alp_som_power_restore(NULL));
+}
+
+ZTEST(power_som_domains, test_a_hold_that_does_not_read_back_fails_the_quiesce)
+{
+	/* nRESET (pin 1) is the first pad driven: it reads high although driven low. */
+	g_pad_stuck_pin = NRST_PIN;
+	uint32_t rb     = 0u;
+
+	zassert_equal(alp_som_power_quiesce(ALP_POWER_MODE_RUN, &rb),
+	              ALP_ERR_IO,
+	              "the layer must not report a hold it cannot see");
+	zassert_equal(alp_som_power_quiesced(), 0u);
+	/* The stuck pad cannot confirm the release either, so the rollback is reported. */
+	zassert_equal(rb, ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_WIFI_BLE));
+	zassert_equal(level(LPGPIO, PHY_PWR), 1, "no later domain was touched");
+
+	g_pad_stuck_pin = -1; /* the pad recovers; the kept record retries the release */
+	zassert_ok(alp_som_power_restore(NULL));
+	zassert_equal(level(LPGPIO, NRST_PIN), 1);
+}
+
+/* ---- OSPI NOR: no reset on top of a transfer ----------------------------------------------------- */
+
+static struct {
+	unsigned int suspends;
+	unsigned int resumes;
+	int          suspend_rc;
+	int          level_at_suspend;
+	int          level_at_resume;
+	bool         locked;
+} g_nor;
+
+int flash_ospi_alif_suspend(const struct device *dev, uint32_t timeout_ms)
+{
+	(void)dev;
+	(void)timeout_ms;
+	g_nor.suspends++;
+	g_nor.level_at_suspend = level(LPGPIO, FLASH_RST);
+	if (g_nor.suspend_rc != 0) {
+		return g_nor.suspend_rc; /* a write holds the lock: not taken */
+	}
+	g_nor.locked = true;
+	return 0;
+}
+
+int flash_ospi_alif_resume(const struct device *dev)
+{
+	(void)dev;
+	g_nor.resumes++;
+	g_nor.level_at_resume = level(LPGPIO, FLASH_RST);
+	g_nor.locked          = false;
+	return 0;
+}
+
+ZTEST(power_som_domains, test_nor_is_locked_before_reset_and_unlocked_after_release)
+{
+	memset(&g_nor, 0, sizeof(g_nor));
+	zassert_ok(alp_som_power_bind_flash(DEVICE_DT_GET(EMUL_TMP)));
+
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL));
+	zassert_equal(g_nor.suspends, 1u);
+	zassert_equal(g_nor.level_at_suspend, 1, "RESETn still released when the lock is taken");
+	zassert_true(g_nor.locked, "no access can start while RESETn is held");
+	zassert_equal(level(LPGPIO, FLASH_RST), 0);
+
+	zassert_ok(alp_som_power_restore(NULL));
+	zassert_equal(g_nor.resumes, 1u);
+	zassert_equal(g_nor.level_at_resume, 1, "RESETn released before the driver unlocks");
+	zassert_false(g_nor.locked);
+}
+
+ZTEST(power_som_domains, test_nor_write_in_flight_blocks_the_quiesce)
+{
+	memset(&g_nor, 0, sizeof(g_nor));
+	g_nor.suspend_rc = -EBUSY; /* a write / erase holds the driver lock */
+	zassert_ok(alp_som_power_bind_flash(DEVICE_DT_GET(EMUL_TMP)));
+
+	zassert_equal(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL), ALP_ERR_BUSY);
+	zassert_equal(level(LPGPIO, FLASH_RST), 1, "the NOR was never reset under the write");
+	zassert_equal(g_nor.resumes, 0u, "nothing to give back: the lock was never taken");
+	zassert_equal(alp_som_power_quiesced(), 0u, "everything quiesced before it is rolled back");
+	zassert_equal(level(LPGPIO, NRST_PIN), 1);
+
+	/* A part that never reports ready is an I/O error, same outcome. */
+	g_nor.suspend_rc = -ETIMEDOUT;
+	zassert_equal(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL), ALP_ERR_IO);
+	zassert_equal(level(LPGPIO, FLASH_RST), 1);
 }

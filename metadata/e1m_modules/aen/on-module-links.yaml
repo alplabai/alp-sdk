@@ -511,7 +511,7 @@ power_domains:
           flash_ospi_alif (zephyr/drivers/flash/flash_ospi_alif.c) exposes no
           power-management or deep-power-down hook, so reset-hold is the
           action.  The reset returns the part to its power-on 1-1-1 framing and
-          the driver is told so (flash_ospi_alif_reset_notify).
+          the driver is held out of service across the reset (flash_ospi_alif_suspend / flash_ospi_alif_resume): it takes the driver lock and waits for WIP to clear before RESETn is asserted, so a write or erase is never cut off.
     restore:
       method: driver_release
       note: Release OSPI1_RESETn, then the flash driver re-enters Octal DDR on its next write or erase.

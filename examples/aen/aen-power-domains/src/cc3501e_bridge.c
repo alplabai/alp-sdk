@@ -3,6 +3,14 @@
  * Copyright 2026 Alp Lab AB
  *
  * E1M-AEN SoM CC3501E bridge bring-up helper -- see cc3501e_bridge.h.
+ *
+ * LOCAL CHANGE vs the sibling aen-cc3501e-* copies (aen-power-domains only): the
+ * final reset is warm-aware.  cc3501e_reset() drops WIFI_EN for 50 ms, a supply
+ * cold cycle; on a CC3501E that is already running (an activated unit with
+ * vendor_sbl_container_enable=1 may then never relaunch) that is exactly what the
+ * power-domain layer exists to avoid.  So when WIFI_EN already reads high the
+ * bring-up resets through nRESET only (cc3501e_hard_reset()), and uses
+ * cc3501e_reset() only from a known-unpowered state (WIFI_EN low).
  */
 
 #include "cc3501e_bridge.h"
@@ -62,7 +70,14 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
 	}
 	aen_lp_pads_enable_output();
+	/* Sample the supply gate BEFORE touching its direction: high means the chip is
+	 * already powered. */
+	bool wifi_was_high = false;
+	(void)alp_gpio_read(wifi_en, &wifi_was_high);
 	(void)alp_gpio_configure(wifi_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (wifi_was_high) {
+		(void)alp_gpio_write(wifi_en, true); /* keep the supply up across the direction change */
+	}
 	(void)alp_gpio_configure(nrst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 
 	/* 2. Inter-chip SPI (Alif = master).  CS is the dwc-ssi hardware SS0
@@ -126,5 +141,8 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 #ifdef CONFIG_ALP_SDK_BLE_CC3501E
 	(void)alp_ble_cc3501e_attach(fw);
 #endif
-	return cc3501e_reset(fw);
+	if (wifi_was_high) {
+		return cc3501e_hard_reset(fw); /* supply is up: nRESET only, no WIFI_EN toggle */
+	}
+	return cc3501e_reset(fw); /* known-unpowered: the full cold-boot sequence */
 }

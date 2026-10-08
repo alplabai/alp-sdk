@@ -1209,7 +1209,8 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_EXT_RENESAS
 # that owns it.  The adapters build only with the driver they wrap.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_SOM_POWER
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power.c
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_record.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_record.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_pinctrl.c)
 if(CONFIG_ALP_SDK_SOM_POWER AND CONFIG_ALP_SDK_CHIP_CC3501E)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_cc3501e.c)

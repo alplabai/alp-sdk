@@ -25,7 +25,8 @@
  *                                                is back in 1-1-1 SPI
  *   ext_ram       OSPI0_RESETn (P15_6) low       release
  *   temp_sensor   TMP112 CONFIG.SD = 1           CONFIG.SD = 0
- *   rtc           CLKOUT low (RV-3028 stays on)  nothing: it was never powered down
+ *   rtc           CLKOUT low, EEPROM refresh     EEPROM refresh resumes; the RV-3028 was
+ *                 paused (RV-3028 stays on)      never powered down
  *   backlight     BACKLIGHT_EN (P5_5) low        P5_5 back to its old level
  *
  * Two details worth knowing before reading the code:
@@ -34,14 +35,17 @@
  *     for 50 ms (a supply cold cycle), which on an activated module may never
  *     relaunch the firmware.  The SDK restore releases nRESET only, so the
  *     bench check "PING after restore, no WIFI_EN toggle" is the point of the
- *     CC3501E step.  (The one cc3501e_reset() in this app is the bring-up at
- *     the very start, before anything is quiesced.)
+ *     CC3501E step.  The bring-up at the start follows the same rule: when
+ *     WIFI_EN already reads high the chip is powered and it resets through
+ *     nRESET only; cc3501e_reset() runs only from a known-unpowered state.
  *
  *   - The PHY's power state is tracked in SOFTWARE.  An unpowered DP83825 does
  *     not read back 0xFFFF over MDIO, it reads back stale data, so "the ID reads"
  *     is only meaningful after the restore, never as proof of the held state.
  *     E_PHY_PWRDWN is also the tri-state pin of the Y3 50 MHz reference
- *     oscillator, so the PHY clock stops and restarts with it.
+ *     oscillator, so the PHY clock stops and restarts with it.  The Ethernet
+ *     interface is therefore taken down (net_if_down) before the quiesce and
+ *     brought back up after the restore.
  *
  *
  * ==== BENCH CONTRACT ================================================
@@ -65,8 +69,6 @@
 #include <zephyr/drivers/flash.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
-#include <zephyr/drivers/pinctrl.h>
-#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/net/net_if.h>
@@ -83,21 +85,6 @@
 /* ---- Pads ------------------------------------------------------------------ */
 
 /*
- * The power layer drives levels; it does not own pad muxing.  Select the GPIO
- * function (and with it the output driver) on the pads this app quiesces.  The
- * WIFI_EN / nRESET pads are handled by cc3501e_bridge_bringup().  P15_6 is the
- * HyperRAM reset and is muxed here too so the ext_ram domain works on any SKU
- * that fits the part (this module reports it absent if the SKU does not).
- */
-static const pinctrl_soc_pin_t domain_pads[] = {
-	PIN_P15_4__LPGPIO, /* E_PHY_PWRDWN */
-	PIN_P15_6__LPGPIO, /* OSPI0_RESETn (HyperRAM) */
-	PIN_P15_7__LPGPIO, /* OSPI1_RESETn (NOR) */
-	PIN_P11_6__GPIO,   /* E_PHY_RESET */
-	PIN_P5_5__GPIO,    /* BACKLIGHT_EN */
-};
-
-/*
  * Power the PHY BEFORE the Ethernet driver's reference-clock probe looks for the
  * external 50 MHz oscillator, which is downstream of E_PHY_PWRDWN.  Same
  * sequence and priority as aen-ethernet-link (bench-verified): POST_KERNEL 50
@@ -112,7 +99,13 @@ static int phy_power_init(void)
 	if (!device_is_ready(gpio11) || !device_is_ready(lpgpio)) {
 		return -ENODEV;
 	}
-	(void)pinctrl_configure_pins(domain_pads, ARRAY_SIZE(domain_pads), 0U);
+	/* Mux and pad-configure every pad the power layer drives (P15_n, P11_6, P5_5)
+	 * through the alp,som-power node's pinctrl-0 state -- the same state the layer
+	 * applies itself before its first drive.  WIFI_EN / nRESET are covered by it
+	 * too; cc3501e_bridge_bringup() still writes them by hand, harmlessly. */
+	if (alp_som_power_pads_apply() != ALP_OK) {
+		return -EIO;
+	}
 
 	(void)gpio_pin_configure(lpgpio, 4, GPIO_OUTPUT_ACTIVE); /* E_PHY_PWRDWN high = on */
 	(void)gpio_pin_set(lpgpio, 4, 1);
@@ -318,13 +311,65 @@ static void print_domains(const char *when)
 	}
 }
 
+/* ---- Register snapshot (so acceptance needs no external probe) -------------------------- */
+
+/* LPGPIO (DesignWare APB GPIO): SWPORTA_DR +0x00, SWPORTA_DDR +0x04, EXT_PORTA +0x50. */
+#define LPGPIO_BASE DT_REG_ADDR(DT_NODELABEL(lpgpio))
+
+static const struct i2c_dt_spec rv3028 = I2C_DT_SPEC_GET(DT_NODELABEL(rv3028));
+
+#define RV3028_REG_SECONDS 0x00U
+#define RV3028_REG_CTRL1   0x0FU
+#define RV3028_REG_CLKOUT  0x35U
+
+static void snapshot(const char *when)
+{
+	/* The pads the layer drives: P15_1 E_WIFI_NRST, P15_4 E_PHY_PWRDWN, P15_5
+	 * WIFI_EN, P15_6 OSPI0_RESETn, P15_7 OSPI1_RESETn.  DR = the level written,
+	 * DDR = 1 for an output, EXT = what the pad reads back (needs the pad's input
+	 * buffer, which the pinctrl group enables). */
+	uint32_t dr  = sys_read32(LPGPIO_BASE + 0x00U);
+	uint32_t ddr = sys_read32(LPGPIO_BASE + 0x04U);
+	uint32_t ext = sys_read32(LPGPIO_BASE + 0x50U);
+
+	printf("snapshot %s: LPGPIO", when);
+	static const int pads[] = { 1, 4, 5, 6, 7 };
+
+	for (size_t i = 0; i < ARRAY_SIZE(pads); i++) {
+		printf(" b%d(DR=%u DDR=%u EXT=%u)",
+		       pads[i],
+		       (unsigned)((dr >> pads[i]) & 1U),
+		       (unsigned)((ddr >> pads[i]) & 1U),
+		       (unsigned)((ext >> pads[i]) & 1U));
+	}
+	printf("\n");
+
+	uint8_t t[3]  = { 0 };
+	uint8_t ctrl1 = 0, clkout = 0;
+
+	if (device_is_ready(rv3028.bus) && i2c_burst_read_dt(&rv3028, RV3028_REG_SECONDS, t, 3) == 0 &&
+	    i2c_reg_read_byte_dt(&rv3028, RV3028_REG_CTRL1, &ctrl1) == 0 &&
+	    i2c_reg_read_byte_dt(&rv3028, RV3028_REG_CLKOUT, &clkout) == 0) {
+		printf("snapshot %s: RV-3028 time=%02x:%02x:%02x (BCD h:m:s) CTRL1=0x%02x "
+		       "EE_CLKOUT=0x%02x\n",
+		       when,
+		       t[2] & 0x3FU,
+		       t[1] & 0x7FU,
+		       t[0] & 0x7FU,
+		       ctrl1,
+		       clkout);
+	} else {
+		printf("snapshot %s: RV-3028 read failed\n", when);
+	}
+}
+
 #define HOLD_MS 5000
 
 int main(void)
 {
 	printf("aen-power-domains: SoM power-domain quiesce/restore round trip (E1M-AEN803)\n");
 
-	/* -- Bring-up (the only WIFI_EN toggle in this app) ----------------------------- */
+	/* -- Bring-up (nRESET only when the chip is already powered; see the helper) ----- */
 	alp_status_t br = cc3501e_bridge_bringup(&g_fw);
 
 	printf("cc3501e_bridge_bringup -> %d\n", (int)br);
@@ -363,6 +408,7 @@ int main(void)
 	alp_power_t *pw = alp_power_open();
 
 	print_domains("before");
+	snapshot("baseline");
 	/* RAIL_OFF is opt-in behind CONFIG_ALP_SDK_SOM_PD_WIFI_RAIL_OFF, which this
 	 * build leaves off: the request must be refused, and nothing changes. */
 	alp_status_t ro = (pw != NULL) ? alp_power_domain_policy_set(pw,
@@ -373,10 +419,17 @@ int main(void)
 	step("rail_off_refused", ro == ALP_ERR_NOSUPPORT);
 
 	/* -- Quiesce, hold ----------------------------------------------------------------- */
-	alp_status_t q = alp_som_power_quiesce(ALP_POWER_MODE_RUN);
+	/* Y3, the PHY's 50 MHz RMII reference oscillator, stops with the PHY: stop the
+	 * MAC first so it does not run without its clock, and bring it back after. */
+	if (iface != NULL) {
+		(void)net_if_down(iface);
+	}
+	uint32_t     rollback_failed = 0U;
+	alp_status_t q               = alp_som_power_quiesce(ALP_POWER_MODE_RUN, &rollback_failed);
 
 	step("quiesce", q == ALP_OK && alp_som_power_quiesced() != 0U);
 	print_domains("held");
+	snapshot("hold");
 
 	printf("holding %d ms (expect: PING down, TMP112 shutdown bit set, PHY clock stopped)\n",
 	       HOLD_MS);
@@ -394,7 +447,12 @@ int main(void)
 	alp_status_t r      = alp_som_power_restore(&failed);
 
 	step("restore", r == ALP_OK && failed == 0U);
+	if (iface != NULL) {
+		(void)net_if_up(iface);
+		k_msleep(500);
+	}
 	print_domains("after");
+	snapshot("after");
 	printf("restore: rc=%d failed_mask=0x%02x\n", (int)r, (unsigned)failed);
 
 	/* -- Does each chip answer again? ------------------------------------------------------ */

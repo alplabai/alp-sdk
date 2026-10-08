@@ -94,10 +94,20 @@ alp_status_t alp_som_power_pin_restore(alp_power_domain_t domain, bool rail_off,
  * first, and write the BKRAM record.  STOP and STANDBY quiesce; SLEEP and
  * DEEP_SLEEP return ALP_OK touching nothing (v1 scope).  RUN is accepted ONLY
  * for the bench / test cycle and quiesces every domain regardless of its
- * default modes.  On a domain failure everything already quiesced is restored
- * in reverse and the error is returned (nothing stays held).
+ * default modes.
+ *
+ * On a domain failure everything already quiesced, AND the failing domain's own
+ * partial step, is restored in reverse and the error is returned.  A domain whose
+ * rollback also fails reads ALP_SOM_PD_RESTORE_FAILED, is reported in
+ * @p rollback_failed (may be NULL), and stays in the record so a later
+ * alp_som_power_restore() can retry it.
+ *
+ * RUN-mode cycle caveat: the Ethernet PHY's 50 MHz RMII reference oscillator (Y3)
+ * stops with the PHY, so bring the interface down (net_if_down()) before a RUN
+ * cycle; the MAC would otherwise run without its reference clock.  The STOP path
+ * has no such issue because the MAC is off.
  */
-alp_status_t alp_som_power_quiesce(alp_power_mode_t mode);
+alp_status_t alp_som_power_quiesce(alp_power_mode_t mode, uint32_t *rollback_failed);
 
 /**
  * Restore every domain named by the BKRAM record, in reverse quiesce order,
@@ -131,6 +141,27 @@ alp_power_domain_policy_t alp_som_power_policy(alp_power_domain_t domain);
  */
 int alp_som_power_boot_restore(void);
 
+/**
+ * Second cold-boot pass: restore the I2C-backed domains (temperature sensor,
+ * RTC clock-out) recorded by alp_som_power_boot_restore().  Runs from its own
+ * SYS_INIT after the I2C controller has initialised and before the sensor and
+ * Ethernet drivers.  A no-op when pass 1 found no valid record.
+ */
+int alp_som_power_boot_restore_i2c(void);
+
+/**
+ * Mux and pad-configure every pad the layer drives (the node's pinctrl-0
+ * "default" state).  Applied automatically before the first pad drive; callable
+ * early by code that drives the same pads itself.  ALP_ERR_NOT_READY when the
+ * state is missing from the devicetree, ALP_ERR_IO when it fails to apply -- the
+ * layer then refuses to drive any pad.
+ */
+alp_status_t alp_som_power_pads_apply(void);
+
+/** STOP_MODE_STAT word (0x1A60F000), bit 4 = last reset was a STOP wake.  Weak so a
+ *  host test can replace it; only built where the devicetree has the stop_mode node. */
+uint32_t alp_som_power_stop_mode_read(void);
+
 /** Test-only: forget policies, bindings, states and the boot capture. */
 void alp_som_power_reset_for_test(void);
 
@@ -155,6 +186,19 @@ void alp_som_pd_store_clear(void);
 void alp_som_pd_store_poke(const alp_som_pd_record_t *rec);
 
 /* ---- Op wrappers the power-class vtables point at ------------------------ */
+
+struct gpio_dt_spec;
+
+/**
+ * Logical level (1 = asserted) a pad actually carries, read back through its GPIO
+ * port after the layer drives it; negative when it cannot be read.  Weak so a host
+ * test can replace it.  Needs the pad's input buffer, which the pinctrl-0 group
+ * enables (pad config REN, see zephyr/soc/alif/ensemble/pinctrl_soc.h and
+ * drivers/pinctrl/pinctrl_alif.c -- the LP-pad register layout is taken from that
+ * driver and is TBD against the HWRM).  Without the buffer the read is meaningless
+ * and the layer's holds are not self-verifiable.
+ */
+int alp_som_power_pad_read(const struct gpio_dt_spec *spec);
 
 struct alp_power_backend_state;
 alp_status_t alp_som_power_ops_policy_set(struct alp_power_backend_state *state,
