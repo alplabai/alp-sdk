@@ -24,8 +24,18 @@ def _fields(periph_name: str, register: str) -> dict[str, tuple[int, int]]:
                 continue
             out = {}
             for fld in reg.iter("field"):
-                m = re.fullmatch(r"\[(\d+):(\d+)\]", fld.findtext("bitRange"))
-                out[fld.findtext("name")] = (int(m.group(2)), int(m.group(1)) - int(m.group(2)) + 1)
+                name = fld.findtext("name")
+                rng = fld.findtext("bitRange")
+                if rng is not None:
+                    m = re.fullmatch(r"\[(\d+):(\d+)\]", rng)
+                    assert m, f"{name}: unparsed bitRange {rng!r}"
+                    out[name] = (int(m.group(2)), int(m.group(1)) - int(m.group(2)) + 1)
+                elif fld.findtext("bitOffset") is not None:
+                    out[name] = (int(fld.findtext("bitOffset")), int(fld.findtext("bitWidth") or 1))
+                else:
+                    lsb, msb = fld.findtext("lsb"), fld.findtext("msb")
+                    assert lsb is not None and msb is not None, f"{name}: no bit position"
+                    out[name] = (int(lsb), int(msb) - int(lsb) + 1)
             return out
     raise AssertionError(f"{periph_name}.{register} not found in {SVD.name}")
 
@@ -47,7 +57,7 @@ def test_ret_ctrl_bits_match_svd():
         if m:
             assert fields[m.group(1)] == (val, 1), name
             checked += 1
-    assert checked == 6
+    assert checked == 8
 
 
 def test_wkup_ctrl_bits_match_svd():

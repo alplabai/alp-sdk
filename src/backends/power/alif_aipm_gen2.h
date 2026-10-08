@@ -29,13 +29,20 @@
  *   for (MB_SRAM0_1_RET..MB_SRAM1_RET).  E4 is gen2 by inference only (no
  *   E4 SVD in the tree); the AEN401 bench run confirms it.
  *
- * The memory-block mask bits are an SE-service protocol, not register
- * bits.  A mask is tied to the SVD only where the SVD names the block:
- * the Utility SRAM (BACKUP4K) and the SRAM0/SRAM1 retention banks.
- * Every tie is a _Static_assert below; a wrong edit fails the build of
- * tests/unit/power_alif_aipm_gen2 on native_sim.  The SVD numbers
- * themselves are cross-checked against the SVD file by
- * tests/scripts/test_alif_aipm_gen2_svd.py.
+ * What is enforced, and where:
+ *   - Every ALP_AIPM_GEN2_* value is asserted EQUAL to its hal_alif gen2
+ *     twin (aipm.h compiled with CONFIG_ENSEMBLE_GEN2) by
+ *     tests/unit/power_alif_aipm_gen2/src/aipm_twin.c.  That is the
+ *     check that catches a permuted or moved bit.
+ *   - The ALP_AIPM_SVD_* constants are checked against the SVD file by
+ *     tests/scripts/test_alif_aipm_gen2_svd.py.  The memory-block mask
+ *     bits are an SE-service protocol, not register bits, so they are NOT
+ *     derived from the SVD constants.  The SVD only corroborates which
+ *     blocks exist (BKRAM, SRAM0 RET1..4, SRAM1 RET).
+ *   - The asserts at the bottom of this header pin a few load-bearing
+ *     values (BACKUP4K bit21 vs FWRAM bit20) and check the aggregates tile.
+ *   - UNVERIFIED until the bench: that SRAM4_1/4_2/5_1/5_2 (HE ITCM/DTCM
+ *     RET1/RET2) correspond to RET_CTRL.HETCM_RET1/RET2.
  *
  * Header-only, no includes beyond <stdint.h>, no runtime behaviour.
  */
@@ -49,6 +56,11 @@
 
 /* [SVD] RET_CTRL.BKRAM_RET_MASK, bits [0:0] "Utility SRAM" */
 #define ALP_AIPM_SVD_RET_CTRL_BKRAM_RET_MASK_BIT 0u
+/* [SVD] RET_CTRL.HETCM_RET1_MASK, bits [4:4] "M55-HE TCM RET1"; mapping of
+ * SRAM4_x/SRAM5_x onto HETCM_RET1/RET2 is unverified until the bench. */
+#define ALP_AIPM_SVD_RET_CTRL_HETCM_RET1_MASK_BIT 4u
+/* [SVD] RET_CTRL.HETCM_RET2_MASK, bits [6:6] "M55-HE TCM RET2" (same caveat) */
+#define ALP_AIPM_SVD_RET_CTRL_HETCM_RET2_MASK_BIT 6u
 /* [SVD] RET_CTRL.CVM_RET1_MASK, bits [8:8] "SRAM0 RET1" */
 #define ALP_AIPM_SVD_RET_CTRL_CVM_RET1_MASK_BIT 8u
 /* [SVD] RET_CTRL.CVM_RET2_MASK, bits [10:10] "SRAM0 RET2" */
@@ -162,7 +174,8 @@
 /* [AIPM] aipm.h:347-357 (#elif defined(CONFIG_ENSEMBLE_GEN2)).  The EWIC
  * register is not described by the E8 SVD, so these have no SVD tie; the
  * asserts below only check internal consistency.  The gen1 (#else) list
- * at aipm.h:359-367 carries the same bit positions, so the EWIC half of
+ * at aipm.h:359-367 carries the same bit positions for every bit gen1
+ * defines (gen1 has no EWIC_LPGPIO / EWIC_UNUSED_1), so the EWIC half of
  * the mismatch is benign today. */
 
 #define ALP_AIPM_GEN2_EWIC_RTC_SE          UINT32_C(0x1)          /* bit0 */
@@ -177,44 +190,18 @@
 
 /* ---- Static asserts -------------------------------------------------- */
 
-/* Memory blocks <-> VBAT.RET_CTRL.  Utility SRAM: BACKUP4K mask is bit21
- * (NOT bit20, which is FWRAM here), and RET_CTRL names it BKRAM. */
+/* Utility SRAM: BACKUP4K mask is bit21 (NOT bit20, which is FWRAM here). */
 _Static_assert(ALP_AIPM_GEN2_BACKUP4K_MASK == UINT32_C(0x00200000),
                "gen2 BACKUP4K_MASK must be bit21 (aipm.h:252)");
 _Static_assert(ALP_AIPM_GEN2_FWRAM_MASK == UINT32_C(0x00100000),
                "gen2 FWRAM_MASK must be bit20 (aipm.h:251)");
 _Static_assert(ALP_AIPM_GEN2_BACKUP4K_MASK != ALP_AIPM_GEN2_FWRAM_MASK,
                "BACKUP4K and FWRAM must not alias (the gen1 layout aliases them)");
-_Static_assert(ALP_AIPM_SVD_RET_CTRL_BKRAM_RET_MASK_BIT == 0u,
-               "SVD RET_CTRL.BKRAM_RET_MASK is bit0");
 
-/* SRAM0 RET1..RET4 and SRAM1 RET: the SE mask index runs RET1..RET4,
- * SRAM1_RET from bit22; RET_CTRL spaces its MASK/FORCE pairs by 2 bits
- * from bit8 (CVM_RET1_MASK) to bit16 (OCVM_RET_MASK).  Same ordering. */
+/* SRAM0 RET1..RET4 and SRAM1 RET run from bit22 in that order. */
 _Static_assert(ALP_AIPM_GEN2_SRAM0_1_RET_MASK == UINT32_C(1) << 22, "SRAM0_1_RET is bit22");
 _Static_assert(ALP_AIPM_GEN2_SRAM0_4_RET_MASK == UINT32_C(1) << 25, "SRAM0_4_RET is bit25");
 _Static_assert(ALP_AIPM_GEN2_SRAM1_RET_MASK == UINT32_C(1) << 26, "SRAM1_RET is bit26");
-_Static_assert(ALP_AIPM_SVD_RET_CTRL_CVM_RET1_MASK_BIT == 8u, "SVD CVM_RET1_MASK is bit8");
-_Static_assert(ALP_AIPM_SVD_RET_CTRL_CVM_RET2_MASK_BIT == 10u, "SVD CVM_RET2_MASK is bit10");
-_Static_assert(ALP_AIPM_SVD_RET_CTRL_CVM_RET3_MASK_BIT == 12u, "SVD CVM_RET3_MASK is bit12");
-_Static_assert(ALP_AIPM_SVD_RET_CTRL_CVM_RET4_MASK_BIT == 14u, "SVD CVM_RET4_MASK is bit14");
-_Static_assert(ALP_AIPM_SVD_RET_CTRL_OCVM_RET_MASK_BIT == 16u, "SVD OCVM_RET_MASK is bit16");
-_Static_assert(
-    ALP_AIPM_GEN2_MB_SRAM0_2_RET - ALP_AIPM_GEN2_MB_SRAM0_1_RET ==
-        (ALP_AIPM_SVD_RET_CTRL_CVM_RET2_MASK_BIT - ALP_AIPM_SVD_RET_CTRL_CVM_RET1_MASK_BIT) / 2u,
-    "SRAM0_2_RET index step must match RET_CTRL CVM_RET2/RET1 spacing");
-_Static_assert(
-    ALP_AIPM_GEN2_MB_SRAM0_3_RET - ALP_AIPM_GEN2_MB_SRAM0_1_RET ==
-        (ALP_AIPM_SVD_RET_CTRL_CVM_RET3_MASK_BIT - ALP_AIPM_SVD_RET_CTRL_CVM_RET1_MASK_BIT) / 2u,
-    "SRAM0_3_RET index step must match RET_CTRL CVM_RET3/RET1 spacing");
-_Static_assert(
-    ALP_AIPM_GEN2_MB_SRAM0_4_RET - ALP_AIPM_GEN2_MB_SRAM0_1_RET ==
-        (ALP_AIPM_SVD_RET_CTRL_CVM_RET4_MASK_BIT - ALP_AIPM_SVD_RET_CTRL_CVM_RET1_MASK_BIT) / 2u,
-    "SRAM0_4_RET index step must match RET_CTRL CVM_RET4/RET1 spacing");
-_Static_assert(
-    ALP_AIPM_GEN2_MB_SRAM1_RET - ALP_AIPM_GEN2_MB_SRAM0_1_RET ==
-        (ALP_AIPM_SVD_RET_CTRL_OCVM_RET_MASK_BIT - ALP_AIPM_SVD_RET_CTRL_CVM_RET1_MASK_BIT) / 2u,
-    "SRAM1_RET index step must match RET_CTRL OCVM/CVM_RET1 spacing");
 
 /* The mask list covers bits 0..26 with no gaps and no overlap. */
 _Static_assert((ALP_AIPM_GEN2_SRAM0_MASK | ALP_AIPM_GEN2_SRAM1_MASK | ALP_AIPM_GEN2_SRAM2_MASK |
@@ -230,24 +217,10 @@ _Static_assert((ALP_AIPM_GEN2_SRAM0_MASK | ALP_AIPM_GEN2_SRAM1_MASK | ALP_AIPM_G
                 ALP_AIPM_GEN2_SRAM1_RET_MASK) == UINT32_C(0x07FFFFFF),
                "gen2 memory_block masks must cover bits 0..26");
 
-/* Wake events <-> ANA.WKUP_CTRL. */
-_Static_assert(ALP_AIPM_GEN2_WE_LPRTC == UINT32_C(1) << ALP_AIPM_SVD_WKUP_CTRL_RTCA_BIT,
-               "WE_LPRTC must be WKUP_CTRL.RTCA (bit5)");
-_Static_assert(ALP_AIPM_GEN2_WE_LPCMP == UINT32_C(1) << ALP_AIPM_SVD_WKUP_CTRL_LPCMP_BIT,
-               "WE_LPCMP must be WKUP_CTRL.LPCMP (bit6)");
-_Static_assert(ALP_AIPM_GEN2_WE_BOD == UINT32_C(1) << ALP_AIPM_SVD_WKUP_CTRL_BROWN_OUT_BIT,
-               "WE_BOD must be WKUP_CTRL.BROWN_OUT (bit7)");
-_Static_assert(ALP_AIPM_GEN2_WE_LPTIMER ==
-                   (((UINT32_C(1) << ALP_AIPM_SVD_WKUP_CTRL_LPTIMER_WIDTH) - 1u)
-                    << ALP_AIPM_SVD_WKUP_CTRL_LPTIMER_LSB),
-               "WE_LPTIMER must be WKUP_CTRL.LPTIMER [11:8]");
+/* Wake-event groups tile their aggregate masks. */
 _Static_assert(ALP_AIPM_GEN2_WE_LPTIMER == (ALP_AIPM_GEN2_WE_LPTIMER0 | ALP_AIPM_GEN2_WE_LPTIMER1 |
                                             ALP_AIPM_GEN2_WE_LPTIMER2 | ALP_AIPM_GEN2_WE_LPTIMER3),
                "WE_LPTIMER0..3 must tile WE_LPTIMER");
-_Static_assert(ALP_AIPM_GEN2_WE_LPGPIO ==
-                   (((UINT32_C(1) << ALP_AIPM_SVD_WKUP_CTRL_LPGPIO_WIDTH) - 1u)
-                    << ALP_AIPM_SVD_WKUP_CTRL_LPGPIO_LSB),
-               "WE_LPGPIO must be WKUP_CTRL.LPGPIO [23:16]");
 _Static_assert(ALP_AIPM_GEN2_WE_LPGPIO ==
                    (ALP_AIPM_GEN2_WE_LPGPIO0 | ALP_AIPM_GEN2_WE_LPGPIO1 | ALP_AIPM_GEN2_WE_LPGPIO2 |
                     ALP_AIPM_GEN2_WE_LPGPIO3 | ALP_AIPM_GEN2_WE_LPGPIO4 | ALP_AIPM_GEN2_WE_LPGPIO5 |
