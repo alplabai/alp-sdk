@@ -514,6 +514,7 @@ static void test_close_restores_vblank(void)
 	cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 0);
 	memset(&st, 0, sizeof(st));
 	g_vblank = 321;
+	g_nmap   = 0; /* the fake mmap table holds one open's buffers */
 	ALP_ASSERT_EQ_INT(y_open(&cfg, &st, NULL), ALP_OK);
 	y_close(&st);
 	ALP_ASSERT_EQ_INT(g_vblank, 321);
