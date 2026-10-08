@@ -977,8 +977,8 @@ def _check_zephyr_python_min_version(manifest: dict) -> tuple[list[str], str | N
 # it duplicates: bootstrap.ps1's own $Prereqs already carries a Hint= string
 # for the same reason (printing "install this" before python/JSON is even
 # confirmed present), but every OTHER site that ever needs a copy of that
-# string -- a doc, `tan doctor` (which runs from INSIDE the workspace venv,
-# so it has no such circularity and could always have read the manifest) --
+# string -- a doc, a doctor-style host check (which runs after the prerequisites are
+# already installed, so it has no such circularity and can read the manifest) --
 # has no excuse to hardcode its own. `install.windows` is compared against
 # bootstrap.ps1's Hint= values below because bootstrap.ps1 is still the
 # AUTHORITY for that value (it's the one script that cannot read this file
