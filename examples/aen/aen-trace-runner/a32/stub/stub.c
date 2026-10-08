@@ -186,7 +186,7 @@ void stub_build_table(void)
 	for (uint32_t i = 0x020; i <= 0x023; i++) /* SRAM0: FB A/B, TF-A MHU0 window (never touched) */
 		t[i] = (i << 20) | SEC_NC;
 	t[0x024] = 0x02400000u | SEC_NC_X;   /* mailbox, tables, stub, stacks */
-	t[0x025] = 0x02500000u | SEC_WB_S_X; /* payload image + DL/bins/stacks */
+	t[0x025] = 0x02500000u | SEC_WB_S_X; /* payload image + stacks + gate, FB B's head */
 	t[0x026] = 0x02600000u | SEC_WB_S;
 	t[0x027] = SEC_FAULT;               /* TF-A RW 0x027DE000-0x027ED000 */
 	t[0x800] = 0x80000000u | SEC_WB_RO; /* MRAM: release payload source only */

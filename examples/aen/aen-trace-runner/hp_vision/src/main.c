@@ -551,8 +551,10 @@ int main(void)
 		g_dbg->sram1_ready_at_heartbeat = g_dbg->heartbeat;
 		printk("sram1   : ready word seen -- CAM_POOL (SRAM1) safe to touch\n");
 	} else {
-		printk("RESULT FAIL: SRAM1 ready word not seen yet -- CAM_POOL (SRAM1) NOT touched this "
-		       "pass\n");
+		/* Not a failure: the A32 stub may still be powering SRAM1 at HP boot; the retry below
+		 * prints "ready word seen (after retry)" when it lands. */
+		printk("WARN: SRAM1 ready word not seen yet -- CAM_POOL (SRAM1) NOT touched this "
+		       "pass, will retry\n");
 	}
 
 	/* Gates the pool's own first real use: tr_camera_open() is where the

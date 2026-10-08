@@ -222,7 +222,7 @@ typedef struct {
 	uint32_t    base, size;
 } tr_mem_region_t;
 
-#define TR_MEM_REGIONS    21
+#define TR_MEM_REGIONS    22
 #define TR_MEM_SRAM_BASE  0x02000000u
 #define TR_MEM_SRAM_TOTAL 0x00800000u /* SRAM0 4 MiB + SRAM1 4 MiB, contiguous */
 

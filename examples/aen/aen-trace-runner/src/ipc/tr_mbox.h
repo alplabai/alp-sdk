@@ -34,20 +34,26 @@
 #include "../game/zone.h"  /* tr_zone_t -- tr_frame_in_set_zone() */
 #include "../game/state.h" /* tr_game_t -- source struct for tr_frame_in_from_game(), never embedded on the wire */
 #include "../game/tilt.h" /* TR_TILT_CHARS */
+#include "tr_memmap.h"    /* TR_MEM_TFA_RW: FB B is placed against it */
 
 #define TR_MBOX_ADDR  0x02401000u
 #define TR_MBOX_MAGIC 0x54524D42u /* 'TRMB' */
 /* 2: tr_frame_in_t grew a rotation field (the `in` block 172 -> 176 B). The stub
  * writes its own TR_MBOX_VERSION at init and the renderer refuses to run
- * against a different one; the HE refuses a stub of another version too. */
-#define TR_MBOX_VERSION 2u
+ * against a different one; the HE refuses a stub of another version too.
+ * 3: memory re-plan (stage 0) -- same mailbox layout, but FB B, the DL, the bins,
+ * the stacks and the gate moved, so a matched stub/renderer/HE set is required. */
+#define TR_MBOX_VERSION 3u
 #define TR_FB_A         0x02000000u /* SRAM0, DT sram0 */
-/* FB B: SRAM1 0x02600000..0x027C1FFF, below TF-A RW 0x027DE000 (the
- * CDC200 scans SRAM1 fine, measured). It used to be the shield's lcd_fb
- * 0x02200000, which overlaps the TF-A MHU0 payload window. Override only to
+/* A framebuffer SLOT is 800 x 1280 x 2 B (the stage-1 panel width); TR_FB_SIZE is the bytes
+ * actually scanned and drawn (720 wide until stage 1). */
+#define TR_FB_SLOT_SIZE 2048000u
+/* FB B: the last slot below TF-A RW (TR_MEM_TFA_RW, bench-verified), 4 KiB aligned:
+ * 0x025EA000..0x027DDFFF (the CDC200 scans SRAM1 fine, measured). It used to be the
+ * shield's lcd_fb 0x02200000, which overlaps the TF-A MHU0 payload window. Override only to
  * pair with an old test payload: -DTR_FB_B_ADDR=0x02200000u. */
 #ifndef TR_FB_B_ADDR
-#define TR_FB_B_ADDR 0x02600000u
+#define TR_FB_B_ADDR ((TR_MEM_TFA_RW - TR_FB_SLOT_SIZE) & ~0xFFFu)
 #endif
 #define TR_FB_B    TR_FB_B_ADDR
 #define TR_FB_SIZE 1843200u /* 720 x 1280 RGB565 */
@@ -56,7 +62,7 @@
 #define TR_MHU0_WINDOW_LO 0x02380000u
 #define TR_MHU0_WINDOW_HI 0x02381000u
 #define TR_FB_CLEAR_OF_MHU0(fb) \
-	((fb) + TR_FB_SIZE <= TR_MHU0_WINDOW_LO || (fb) >= TR_MHU0_WINDOW_HI)
+	((fb) + TR_FB_SLOT_SIZE <= TR_MHU0_WINDOW_LO || (fb) >= TR_MHU0_WINDOW_HI)
 /* HUD buffer (P9): CDC200 layer 2, drawn by the HE only (src/hud/hud.h:
  * 720 x 352 ARGB4444). SRAM0 above the MHU0 window, below the stub's early
  * fault park page (a32/common/stub_abi.h STUB_EARLY_PARK 0x023FE000): no
