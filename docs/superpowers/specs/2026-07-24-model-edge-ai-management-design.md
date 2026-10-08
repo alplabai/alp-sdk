@@ -1,5 +1,7 @@
 # Model & Edge-AI Management in VS Code — cross-repo design
 
+> **Status (2026-10-08): Landed** — the `alp model` pipeline shipped in #907 (`scripts/alp_model/`); its pipeline-spine clause (§2 item 4) is superseded by ADR 0028 (Proposed), see `docs/adr/0028-tan-owns-the-model-engine.md`.
+
 - **Date:** 2026-07-24
 - **Status:** Design (brainstormed + approved section-by-section; pending written-spec review)
 - **Repos touched:** `alp-sdk` (pipeline + device runner), `tan-cli` (executor), `alp-sdk-vscode` (GUI)
