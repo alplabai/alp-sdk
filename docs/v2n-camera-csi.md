@@ -296,7 +296,7 @@ bytes.
 (24.9 ms per frame); the sensor and CRU can do 60 fps, the backend's frame
 path cannot yet (#2792). (2) A plain non-CMake static link of `libalp_sdk.a`
 must add `-Wl,--undefined=_alp_backend_force_camera_yocto_drv`, otherwise only
-the stub is linked (#2790); CMake consumers of `alp::sdk` get that option
-automatically. (3) One thread per handle: do not run `capture()` and
+the stub is linked; CMake consumers of `alp::sdk` get that option, and the
+matching one for every other Linux backend, automatically (#2790). (3) One thread per handle: do not run `capture()` and
 `release()` on the same handle concurrently.
 

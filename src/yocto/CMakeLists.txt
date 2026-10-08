@@ -575,17 +575,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set(_alp_sdk_link_visibility PUBLIC)
     endif()
 
-    # A static libalp_sdk.a only yields the members something references, and
-    # nothing references a backend that sits in its own TU next to the class's
-    # catch-all stub: the dispatcher anchor pulls the stub, the linux driver
-    # (registered at priority 100) is dropped, and the app silently gets the
-    # stub.  Name each such backend's ALP_BACKEND_ANCHOR_FORCE symbol so every
-    # consumer's link pulls it.  Camera only today; the other classes' yocto_drv.c
-    # need the same line (#2790).
-    if(NOT ALP_SDK_BUILD_SHARED)
-        target_link_options(alp_sdk INTERFACE
-            "LINKER:--undefined=_alp_backend_force_camera_yocto_drv")
-    endif()
+    # The backends/<class>/yocto_drv.c sources below each sit in their own TU
+    # beside the class's catch-all stub, so a static libalp_sdk.a would drop
+    # them.  The top-level alp_sdk_force_static_backends() call keeps them
+    # (cmake/alp-sdk-static-backends.cmake, #2790); nothing to add here.
 
     target_sources(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2c.c

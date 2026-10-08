@@ -707,10 +707,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # even on a host with no OpenAMP/libmetal installed (the registry
     # falls back to src/backends/rpc/sw_fallback.c here -- see the
     # test's own header comment for why that is sufficient: defect 2
-    # lives entirely above the ops vtable).
+    # lives entirely above the ops vtable).  ALP_SDK_NO_FORCED_BACKENDS
+    # keeps that sw_fallback selection: forced in (#2790), rpc/yocto_drv.c
+    # (priority 100) would win and answer open() with NOSUPPORT on a host
+    # without OpenAMP.
     add_executable(alp_test_rpc_dispatch_close_race
         ${CMAKE_CURRENT_SOURCE_DIR}/rpc_dispatch_close_race.c
     )
+    set_target_properties(alp_test_rpc_dispatch_close_race PROPERTIES ALP_SDK_NO_FORCED_BACKENDS ON)
     target_link_libraries(alp_test_rpc_dispatch_close_race PRIVATE alp::sdk Threads::Threads)
     target_include_directories(alp_test_rpc_dispatch_close_race PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -1011,21 +1015,34 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_camera
              COMMAND alp_test_peripheral_camera)
 
-    # A static libalp_sdk.a must keep the Linux camera backend (it sits in its
-    # own TU; only the stub is reachable from the dispatcher).  Link a tiny
-    # binary against alp::sdk and look for the backend's registry entry.
-    if(CMAKE_NM AND NOT ALP_SDK_BUILD_SHARED)
+    # A static libalp_sdk.a must keep every Linux backend that sits in its own
+    # TU beside the class's catch-all stub (#2790): only the stub is reachable
+    # from the dispatcher.  Link a tiny binary against alp::sdk, then require
+    # the registry entry of every backend alp_sdk_force_static_backends()
+    # forced (cmake/alp-sdk-static-backends.cmake).
+    get_target_property(_alp_forced_backends alp_sdk ALP_SDK_FORCED_BACKENDS)
+    if(CMAKE_NM AND _alp_forced_backends)
         add_executable(alp_test_static_link_camera
             ${CMAKE_CURRENT_SOURCE_DIR}/static_link_camera_backend.c
         )
         target_link_libraries(alp_test_static_link_camera PRIVATE alp::sdk)
         target_compile_features(alp_test_static_link_camera PRIVATE c_std_99)
-        add_test(NAME alp_test_static_link_camera
-                 COMMAND sh -c "${CMAKE_NM} $<TARGET_FILE:alp_test_static_link_camera> | grep -q _alp_be_camera_yocto_drv")
+        set(_alp_forced_syms "")
+        foreach(_alp_pair IN LISTS _alp_forced_backends)
+            string(REPLACE ":" "_" _alp_pair "${_alp_pair}")
+            list(APPEND _alp_forced_syms "_alp_be_${_alp_pair}")
+        endforeach()
+        list(JOIN _alp_forced_syms "|" _alp_forced_syms)
+        add_test(NAME alp_test_static_link_backends
+                 COMMAND ${CMAKE_COMMAND}
+                         -DNM=${CMAKE_NM}
+                         -DBIN=$<TARGET_FILE:alp_test_static_link_camera>
+                         -DSYMS=${_alp_forced_syms}
+                         -P ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/check-static-backends.cmake)
         add_test(NAME alp_test_static_link_camera_selects_yocto
                  COMMAND alp_test_static_link_camera)
     else()
-        message(STATUS "SKIP alp_test_static_link_camera: needs CMAKE_NM and a static alp_sdk")
+        message(STATUS "SKIP alp_test_static_link_backends: needs CMAKE_NM and a static ELF alp_sdk")
     endif()
 
     # Edge-config rollback regression for issue #746 (Yocto GPIO chardev-v2
@@ -1304,12 +1321,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # backends straight into the test so the section is always populated
         # and the ALSA backend (priority 100) wins selection, matching the
         # library build under ALSA.  (static registration vars => no ODR clash
-        # with the never-extracted archive copies.)
+        # with the never-extracted archive copies.)  ALP_SDK_NO_FORCED_BACKENDS
+        # keeps them never-extracted: without it alp::sdk's forced-backend
+        # link options (#2790) would pull the archive's yocto_drv.o in too and
+        # clash with this copy.
         add_executable(alp_test_audio_alsa
             ${CMAKE_CURRENT_SOURCE_DIR}/audio_alsa.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/audio/sw_fallback.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/audio/yocto_drv.c
         )
+        set_target_properties(alp_test_audio_alsa PROPERTIES ALP_SDK_NO_FORCED_BACKENDS ON)
         target_link_libraries(alp_test_audio_alsa PRIVATE alp::sdk)
         target_include_directories(alp_test_audio_alsa PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
@@ -1374,7 +1395,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # vendor backends -- so the dispatcher deterministically selects
     # sw_fallback regardless of which optional host libs (libmosquitto /
     # OpenSSL) are installed.  Runnable on every Linux CI host; no
-    # pkg-config gate.
+    # pkg-config gate.  ALP_SDK_NO_FORCED_BACKENDS stops alp::sdk's
+    # forced-backend link options (#2790) from pulling those yocto_drv
+    # backends back in from the static archive.
     add_executable(alp_test_registry_sw_fallback
         ${CMAKE_CURRENT_SOURCE_DIR}/registry_sw_fallback.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/mqtt/sw_fallback.c
@@ -1382,6 +1405,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/wifi/sw_fallback.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/ble/sw_fallback.c
     )
+    set_target_properties(alp_test_registry_sw_fallback PROPERTIES ALP_SDK_NO_FORCED_BACKENDS ON)
     target_link_libraries(alp_test_registry_sw_fallback PRIVATE alp::sdk)
     target_include_directories(alp_test_registry_sw_fallback PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common

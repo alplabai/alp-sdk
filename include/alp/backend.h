@@ -81,6 +81,10 @@ typedef struct alp_backend_class_range {
  * @param name   Backend identifier (e.g. alif_e7, sw_fallback).  Must be
  *               unique within a class; appears in the symbol name.
  * @param ...    Brace-enclosed initializer for alp_backend_t.
+ *
+ * On a plain-CMake static build the registration also exports the
+ * `_alp_backend_force_<class>_<name>` link symbol (see
+ * ALP_BACKEND_FORCE_DEFINE), so a static link can be told to keep it.
  */
 /* The `used` attribute keeps the symbol through compile-time stripping;
  * `retain` (GCC 11+) keeps it through linker `--gc-sections`.  Zephyr's
@@ -90,6 +94,7 @@ typedef struct alp_backend_class_range {
  * ld auto-emits __start_alp_backends_&lt;class&gt; and __stop_&lt;class&gt;
  * bound symbols.  `retain` keeps the entry through --gc-sections. */
 #define ALP_BACKEND_REGISTER(class, name, ...) \
+	ALP_BACKEND_FORCE_DEFINE(class, name); \
 	static const alp_backend_t _alp_be_##class##_##name __attribute__(( \
 	    used, retain, aligned(__alignof__(alp_backend_t)), section("alp_backends_" #class))) = \
 	    __VA_ARGS__
@@ -160,29 +165,42 @@ typedef struct alp_backend_class_range {
 	static const void *const _alp_backend_anchor_ref_##class __attribute__((used)) = \
 	    (const void *)&_alp_backend_anchor_##class
 /**
- * @brief Keep a class's second backend in a static link (internal,
+ * @brief Export a backend's static-link keep symbol (internal,
  *        [ABI-EXPERIMENTAL]).
  *
- * For a backend that lives in its OWN TU beside the class's catch-all stub
- * (e.g. the Linux yocto_drv.c): the dispatcher anchor can only name the
- * stub's TU, so a static libalp_sdk.a drops the other member.  Place this
- * once in the backend TU; it exports `_alp_backend_force_<class>_<name>`.
- * The plain-CMake build then adds
- * `-Wl,--undefined=_alp_backend_force_<class>_<name>` to libalp_sdk's
- * INTERFACE link options (src/yocto/CMakeLists.txt); a non-CMake static link
- * adds that option itself.  Expands to a bare declaration on Zephyr.
+ * ALP_BACKEND_REGISTER expands this for every backend, so callers never
+ * write it.  It exists for a backend that lives in its OWN TU beside the
+ * class's catch-all stub (e.g. the Linux yocto_drv.c): the dispatcher anchor
+ * can only name the stub's TU, so a static libalp_sdk.a would drop the other
+ * member and the app would silently get the stub (#2790).  The symbol is
+ * `_alp_backend_force_<class>_<name>`; the plain-CMake build adds
+ * `-Wl,--undefined=` for it to libalp_sdk's INTERFACE link options for every
+ * backend added through alp_sdk_add_linux_backend() (src/yocto/CMakeLists.txt).
+ * A non-CMake static link adds those options itself.
  *
  * @param class  Registry class (camera, ...).
  * @param name   Backend name, as given to ALP_BACKEND_REGISTER.
  */
-#define ALP_BACKEND_ANCHOR_FORCE(class, name) \
+#define ALP_BACKEND_FORCE_DEFINE(class, name) \
 	const int _alp_backend_force_##class##_##name __attribute__((used, retain)) = 0
+/**
+ * @brief Declare a backend's static-link keep symbol ([ABI-EXPERIMENTAL]).
+ *
+ * Redundant since #2790: ALP_BACKEND_REGISTER now defines the symbol itself.
+ * Kept as a plain declaration so existing call sites still compile.
+ *
+ * @param class  Registry class (camera, ...).
+ * @param name   Backend name, as given to ALP_BACKEND_REGISTER.
+ */
+#define ALP_BACKEND_ANCHOR_FORCE(class, name) extern const int _alp_backend_force_##class##_##name
 #else
 /* Whole-archive (Zephyr) links never need the anchor: expand to a bare
  * declaration so the call sites still take a trailing semicolon while
  * emitting no code or symbols. */
 #define ALP_BACKEND_ANCHOR_DEFINE(class) extern const int _alp_backend_anchor_decl_##class
 #define ALP_BACKEND_ANCHOR(class)        extern const int _alp_backend_anchor_decl_##class
+#define ALP_BACKEND_FORCE_DEFINE(class, name) \
+	extern const int _alp_backend_force_decl_##class##_##name
 #define ALP_BACKEND_ANCHOR_FORCE(class, name) \
 	extern const int _alp_backend_force_decl_##class##_##name
 #endif

@@ -357,9 +357,13 @@
           "hash": "45086ed1fea06dff",
           "value": "(class) extern const alp_backend_t __start_alp_backends_##class[]; extern const alp_backend_t __stop_alp_backends_##class[];"
         },
+        "ALP_BACKEND_FORCE_DEFINE": {
+          "hash": "f5940c24c24848e4",
+          "value": "(class, name) extern const int _alp_backend_force_decl_##class##_##name"
+        },
         "ALP_BACKEND_REGISTER": {
-          "hash": "dbfd3ceb63cfb63a",
-          "value": "(class, name, ...) static const alp_backend_t _alp_be_##class##_##name __attribute__(( used, retain, aligned(__alignof__(alp_backend_t)), section(\"alp_backends_\" #class))) = __VA_ARGS__"
+          "hash": "2387308212b5343f",
+          "value": "(class, name, ...) ALP_BACKEND_FORCE_DEFINE(class, name); static const alp_backend_t _alp_be_##class##_##name __attribute__(( used, retain, aligned(__alignof__(alp_backend_t)), section(\"alp_backends_\" #class))) = __VA_ARGS__"
         }
       },
       "typedefs": {
