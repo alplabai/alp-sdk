@@ -4,7 +4,7 @@ Before STOP / STANDBY the SDK can hold the on-module consumers that would
 otherwise burn power through the sleep, and put them back on the wake. This is
 the runtime behind `alp_power_domain_policy_set()`, `alp_power_domain_info()` and
 `alp_power_boot_wake_info()` in `<alp/power.h>` (issue #2784, unit U5). The STOP
-backend ([below](#the-stop--standby-backend)) calls it; in RUN mode the pair is
+backend (section "The STOP / STANDBY backend" below) calls it; in RUN mode the pair is
 exercised by `examples/aen/aen-power-domains` and `tests/unit/power_som_domains`.
 
 ## Domains and default (AUTO) actions
