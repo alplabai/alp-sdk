@@ -120,8 +120,6 @@ static const tr_bus2_ops_t g_ops = {
  * wait (bounded) while the HP is inside a step that uses the bus. */
 static int bus2_he_boot(void)
 {
-	g_b2->he_regains  = 0u;
-	g_b2->he_reclaims = 0u;
 	if (tr_bus2_he_boot(&g_he, g_b2, &g_ops, TR_BUS2_HE_BOOT_WAIT_MS)) {
 		printk("RESULT FAIL: the HP was still in an I2C2 bring-up step after %u ms -- the HE "
 		       "proceeds; that bring-up aborts at its next step\n",
@@ -146,6 +144,7 @@ void tr_bus2_he_frame(void)
 	static bool dc_told;
 	uint8_t     before   = g_he.st;
 	uint32_t    reclaims = g_b2->he_reclaims;
+	uint32_t    leased   = g_he.leased;
 
 	if (!g_armed) {
 		return; /* the BMI323 / INA236 opens have not run yet: no offer before they did */
@@ -167,11 +166,13 @@ void tr_bus2_he_frame(void)
 		printk("bus2    : lease reclaimed from a silent HP (he_reclaims=%u)\n",
 		       (unsigned)g_b2->he_reclaims);
 	}
-	if (g_he.st != before) {
-		printk("bus2    : I2C2 %s\n",
-		       g_he.st == TR_BUS2_ST_OFFERED   ? "offered to the HP"
-		       : g_he.st == TR_BUS2_ST_CLAIMED ? "leased by the HP"
-		                                       : "back on the HE");
+	const char *ev = tr_bus2_he_event(&g_he, before, leased);
+
+	if (ev != NULL) {
+		printk("bus2    : %s (hp_acq=%u he_regains=%u)\n",
+		       ev,
+		       (unsigned)g_b2->hp_acq,
+		       (unsigned)g_b2->he_regains);
 	}
 }
 

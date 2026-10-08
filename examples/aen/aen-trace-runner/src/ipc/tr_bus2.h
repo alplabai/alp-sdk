@@ -155,9 +155,13 @@ typedef struct {
 	int64_t  t_offer;
 	int64_t  t_hp_seen;  /* the lease's last sign of life: its claim, or hp_beat moving */
 	bool     boot_stale; /* he_boot: hp_state was BUS but nothing moved -- a dead HP's leftover */
+	uint32_t leased;     /* leases the HP actually held, counted from the evidence (a claim seen,
+	                      * or a RETURN of the offered token seen) even when the whole lease passed
+	                      * between two ticks and CLAIMED was never observed */
 } tr_bus2_he_t;
 
-/* Boot (before any I2C2 driver init): void the offer, fence, THEN wait, bounded, while the HP is
+/* Boot (before any I2C2 driver init): zero the counters this core owns (he_regains, he_reclaims:
+ * SRAM0 powers up with garbage and survives warm resets), void the offer, fence, THEN wait, bounded, while the HP is
  * in a bus step. Returns true when a LIVE HP (hp_beat or hp_state moved during the wait) was still
  * in the step at the timeout; the HE proceeds regardless. A BUS that never moves is a dead HP's
  * leftover (SRAM0 survives warm resets): returns false with he->boot_stale set (a warning). */
@@ -174,6 +178,12 @@ void tr_bus2_he_tick(tr_bus2_he_t        *he,
                      const tr_bus2_ops_t *o,
                      uint32_t             nonce);
 
+/* What one tick changed, for the console, from the evidence only: `before` = he->st and
+ * `leased_before` = he->leased taken before the tick. NULL when nothing changed. A lease that began
+ * and ended between two ticks (OFFERED -> OWNS with he->leased moved) is reported as a lease, never
+ * as a bare "back on the HE"; an OFFERED -> OWNS with no lease is a withdrawn offer. */
+const char *tr_bus2_he_event(const tr_bus2_he_t *he, uint8_t before, uint32_t leased_before);
+
 static inline bool tr_bus2_he_owns_bus(const tr_bus2_he_t *he)
 {
 	return he->st == TR_BUS2_ST_OWNS;
@@ -185,8 +195,9 @@ typedef struct {
 	uint32_t token;     /* the offer being leased */
 } tr_bus2_hp_t;
 
-/* PRE_KERNEL_1: forget whatever a previous session left (the HE, if it holds a lease for it,
- * sees NONE and takes its bus back). */
+/* PRE_KERNEL_1: zero the counters this core owns (hp_aborts, hp_i2s_fu, hp_i2s_err, hp_acq: SRAM0
+ * powers up with garbage) and forget whatever a previous session left (the HE, if it holds a lease
+ * for it, sees NONE and takes its bus back). Each core writes only its own words. */
 void tr_bus2_hp_boot(volatile tr_bus2_t *r, void (*barrier)(void));
 
 /* Begin waiting for the bus (also after an abort, and for a runtime amp write). */
