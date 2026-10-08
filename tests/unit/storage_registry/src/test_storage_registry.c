@@ -205,7 +205,6 @@ ZTEST(alp_storage_registry, test_vendor_ext_gates_non_matching_backends)
 {
 	/* NULL handle -> INVAL (parameter check fires first). */
 	static const uint8_t key16[16] = { 0 };
-	static const uint8_t iv16[16]  = { 0 };
 	zassert_equal(alp_alif_storage_secaes_key_provision(NULL, key16, 16u), ALP_ERR_INVAL);
 
 	uint32_t status_out = 0u;

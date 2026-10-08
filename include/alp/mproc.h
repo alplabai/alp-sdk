@@ -117,7 +117,7 @@ typedef enum {
 	ALP_CORE_M33_SM      = 6, /**< V2N Cortex-M33 system-manager
                                      (matches `m33_sm` in V2N101/V2M101
                                      topology). */
-	ALP_CORE_A55_CLUSTER = 7 /**< V2N Cortex-A55 cluster as a single
+	ALP_CORE_A55_CLUSTER = 7  /**< V2N Cortex-A55 cluster as a single
                                      endpoint (matches `a55_cluster`). */
 } alp_core_id_t;
 
