@@ -9,12 +9,13 @@
  *        TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor.
  *
  * The CC3501E ships its own Cortex-M MCU and runs ALP-authored
- * firmware that lives in this repo at `cc3501e-bridge-firmware:` (embedded,
- * like the gd32-bridge -- see ADR 0015).  The firmware exposes Wi-Fi +
- * BLE control to the Alif over the inter-chip link (SPI default, SDIO
+ * firmware that lives in its own repo, `alplabai/cc3501e-bridge-firmware`
+ * (like the gd32-bridge firmware -- see ADR 0031).  The firmware exposes
+ * Wi-Fi + BLE control to the Alif over the inter-chip link (SPI default, SDIO
  * optional) -- Alif is master, CC3501E is slave.  This header is the
  * single-source contract between the two sides: the firmware includes
- * it directly, so a change here moves both sides in one commit.
+ * it directly from an alp-sdk checkout, so a change here must land in both
+ * repos together; the firmware repo's CI fails when the two drift (ADR 0031).
  *
  * Why a custom protocol instead of standardised Wi-Fi-host
  * commands (e.g. ESP-AT)?  We need granular control over the BLE

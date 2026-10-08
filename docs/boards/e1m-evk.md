@@ -19,6 +19,7 @@ sensor I²C addresses, button/LED assignments, IO-expander, and the
 bring-up checklist most relevant to firmware writers.  The Zephyr
 board files for the AEN family SoMs on this EVK
 (`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`,
+`alp_e1m_aen803_m55_he`, `alp_e1m_aen803_m55_hp`,
 `alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`) ship in-tree at
 [`zephyr/boards/alp/`](../../zephyr/boards/alp/) (per
 [`docs/architecture.md`](../architecture.md); there is no separate
@@ -33,8 +34,8 @@ not share a board.
 
 | SoM family       | EVK support | Notes                                                                                  |
 |------------------|-------------|----------------------------------------------------------------------------------------|
-| E1M-AEN (Alif Ensemble) | **v0.1** target | Primary bring-up target. ETH0 only (AEN family routes a single MAC).             |
-| E1M-N93 (NXP i.MX 93)   | planned, no committed version | `VERSIONS.md` Tier 3 ("deferred indefinitely past v1.0") lists NXP NX9101 silicon enablement.  Provisional preset `E1M-NX9101`; production MPN pending the HW config writeup. |
+| E1M-AEN (Alif Ensemble) | primary supported target | Primary bring-up target. ETH0 only (AEN family routes a single MAC).             |
+| E1M-N93 (NXP i.MX 93)   | provisional preset; no committed version | `VERSIONS.md` Tier 3 ("deferred indefinitely past v1.0") lists NXP NX9101 silicon enablement.  Provisional preset `E1M-NX9101`; production MPN pending the HW config writeup. |
 
 E1M-X SoMs (`E1M-V2N101/102`, `E1M-V2M101/102`) target the separate
 [E1M-X Development Board](e1m-x-evk.md), not this one.
@@ -447,17 +448,22 @@ lacks alp-sdk's `zephyr/patches.yml` patches. Run `bash scripts/bootstrap.sh`
 
 ## What this means for the SDK
 
-- v0.1 ships an **EVK overlay** under `tests/zephyr/peripheral/boards/`
-  that wires the `alp-i2c0` alias, the `alp,pin-array` (rotary encoder,
-  RGB LED, IO_EXP.INT), and the `alp-uart0` alias to EVK pins via the
-  SoM's pinmux.  It targets `alp_e1m_aen801_m55_he` (AEN-family build);
-  future E1M-N93 builds add their own overlay once that SoM lands.
-- v0.1 does **not** ship full board-level sensor drivers.  The
-  ICM-42670-P / BMI323 / BMP581 / TCAL9538 drivers land as part of
-  the v0.2 "Chips" library expansion (`chips/icm42670/`, etc.) per
-  [`VERSIONS.md`](../../VERSIONS.md).
-- The EVK example app (`examples/evk-bringup/`) lands in v0.2.  v0.1
-  ships a stub README at that path so the doc tree is stable.
+- The **EVK overlay** lives under `tests/zephyr/peripheral/boards/`
+  (`alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`, plus the
+  `native_sim` overlays).  It wires the `alp-i2c0` alias, the
+  `alp,pin-array` (rotary encoder, RGB LED, IO_EXP.INT), and the
+  `alp-uart0` alias to EVK pins via the SoM's pinmux, and targets the
+  AEN-family build (`alp_e1m_aen801_m55_he`).
+- The board-level sensor drivers ship as natural-name chip drivers:
+  ICM-42670-P (`chips/icm42670/`), BMI323 (`chips/bmi323/`), BMP581
+  (`chips/bmp581/`) and TCAL9538 (`chips/tcal9538/`), each with a public
+  header under `include/alp/chips/`.
+- There is no `examples/evk-bringup/`.  The EVK is exercised by
+  [`examples/aen/aen-evk-demo/`](../../examples/aen/aen-evk-demo/README.md)
+  (phased full-board demo), with per-chip bring-up in
+  `examples/aen/aen-bmi323-regcheck/` and
+  `examples/aen/aen-sensor-int-probe/`, and the cross-board
+  `examples/bringup/board-selftest/`.
 
 ## See also
 
