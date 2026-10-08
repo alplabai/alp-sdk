@@ -4021,10 +4021,13 @@
     },
     {
       "functions": [
+        "alp_power_boot_wake_info",
         "alp_power_capabilities",
         "alp_power_close",
         "alp_power_configure_retention",
         "alp_power_configure_wake_source",
+        "alp_power_domain_info",
+        "alp_power_domain_policy_set",
         "alp_power_open",
         "alp_power_profile_get",
         "alp_power_profile_set",

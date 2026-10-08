@@ -110,6 +110,10 @@ static const alp_power_ops_t _ops = {
 	.configure_retention   = NULL, /* dispatcher default: NONE ok, else NOSUPPORT */
 	.request_sleep         = stub_request_sleep,
 	.close                 = NULL,
+	.mode_wake_caps        = NULL, /* #2784: every reported bit works in every mode */
+	.domain_policy_set     = NULL, /* #2784: dispatcher answers NOSUPPORT */
+	.domain_info           = NULL,
+	.boot_wake_info        = NULL,
 };
 
 ALP_BACKEND_ANCHOR_DEFINE(power);

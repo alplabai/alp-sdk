@@ -12784,6 +12784,10 @@
     },
     "alp/power.h": {
       "functions": {
+        "alp_power_boot_wake_info": {
+          "hash": "dd33f443300625ca",
+          "signature": "alp_status_t alp_power_boot_wake_info(alp_power_boot_info_t *out);"
+        },
         "alp_power_capabilities": {
           "hash": "b46993ac0455f417",
           "signature": "const alp_capabilities_t * alp_power_capabilities(const alp_power_t *handle);"
@@ -12799,6 +12803,14 @@
         "alp_power_configure_wake_source": {
           "hash": "d42b698bee57d079",
           "signature": "alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_bitmap);"
+        },
+        "alp_power_domain_info": {
+          "hash": "41e4292415e87c08",
+          "signature": "alp_status_t alp_power_domain_info(alp_power_domain_t domain, alp_power_domain_info_t *out);"
+        },
+        "alp_power_domain_policy_set": {
+          "hash": "e0d09d81e08ff050",
+          "signature": "alp_status_t alp_power_domain_policy_set(alp_power_t *handle, alp_power_domain_t domain, alp_power_domain_policy_t policy);"
         },
         "alp_power_open": {
           "hash": "884b334187b41b49",
@@ -12822,6 +12834,46 @@
         }
       },
       "macros": {
+        "ALP_POWER_ACTION_DEEP_POWER_DOWN_CMD": {
+          "hash": "0208735b79a9bb97",
+          "value": "0x00000004u"
+        },
+        "ALP_POWER_ACTION_HOLD_RESET": {
+          "hash": "9b95db74209ef997",
+          "value": "0x00000001u"
+        },
+        "ALP_POWER_ACTION_NONE": {
+          "hash": "adae03f4125500db",
+          "value": "0x00000000u"
+        },
+        "ALP_POWER_ACTION_POWERDOWN_PIN": {
+          "hash": "7efaefed5ccc63e5",
+          "value": "0x00000002u"
+        },
+        "ALP_POWER_ACTION_RAIL_OFF": {
+          "hash": "588cbf4b84f48411",
+          "value": "0x00000010u"
+        },
+        "ALP_POWER_ACTION_SHUTDOWN_REG": {
+          "hash": "a1974f8492aa2f8f",
+          "value": "0x00000008u"
+        },
+        "ALP_POWER_DEP_CAM_LDO": {
+          "hash": "81cbd108e8cb5b7f",
+          "value": "0x00000001u"
+        },
+        "ALP_POWER_DEP_NONE": {
+          "hash": "932ebdbf4c2b4efb",
+          "value": "0x00000000u"
+        },
+        "ALP_POWER_DEP_SD_EN": {
+          "hash": "124a23d0311dfdec",
+          "value": "0x00000002u"
+        },
+        "ALP_POWER_DOMAIN_BIT": {
+          "hash": "3b369e8c055d0b59",
+          "value": "(d) (1u << (unsigned)(d))"
+        },
         "ALP_POWER_WAKE_BROWNOUT": {
           "hash": "f600ca1a81faae9d",
           "value": "0x00000080u"
@@ -12860,6 +12912,57 @@
         }
       },
       "typedefs": {
+        "alp_power_boot_info_t": {
+          "definition": "typedef struct { bool valid; alp_power_mode_t realised_mode; uint32_t wake_source; uint32_t slept_ms; uint32_t quiesced_domains; uint32_t restored_domains; uint32_t restore_failed_domains; } alp_power_boot_info_t;",
+          "fields": [
+            "bool valid",
+            "alp_power_mode_t realised_mode",
+            "uint32_t wake_source",
+            "uint32_t slept_ms",
+            "uint32_t quiesced_domains",
+            "uint32_t restored_domains",
+            "uint32_t restore_failed_domains"
+          ],
+          "hash": "a923ce8f6e0cef33",
+          "kind": "struct"
+        },
+        "alp_power_domain_info_t": {
+          "definition": "typedef struct { bool present; bool holds_through_stop; uint32_t supported_actions; uint32_t default_action; uint32_t dependents; } alp_power_domain_info_t;",
+          "fields": [
+            "bool present",
+            "bool holds_through_stop",
+            "uint32_t supported_actions",
+            "uint32_t default_action",
+            "uint32_t dependents"
+          ],
+          "hash": "a606576a42b867d1",
+          "kind": "struct"
+        },
+        "alp_power_domain_policy_t": {
+          "definition": "typedef enum { ALP_POWER_DOMAIN_POLICY_AUTO = 0, ALP_POWER_DOMAIN_POLICY_KEEP_ALIVE = 1, ALP_POWER_DOMAIN_POLICY_RAIL_OFF = 2, } alp_power_domain_policy_t;",
+          "enumerators": [
+            "ALP_POWER_DOMAIN_POLICY_AUTO = 0",
+            "ALP_POWER_DOMAIN_POLICY_KEEP_ALIVE = 1",
+            "ALP_POWER_DOMAIN_POLICY_RAIL_OFF = 2"
+          ],
+          "hash": "8bd3daa1f2f8dcdc",
+          "kind": "enum"
+        },
+        "alp_power_domain_t": {
+          "definition": "typedef enum { ALP_POWER_DOMAIN_WIFI_BLE = 0, ALP_POWER_DOMAIN_ETH_PHY = 1, ALP_POWER_DOMAIN_EXT_FLASH = 2, ALP_POWER_DOMAIN_EXT_RAM = 3, ALP_POWER_DOMAIN_TEMP_SENSOR = 4, ALP_POWER_DOMAIN_RTC = 5, ALP_POWER_DOMAIN_BACKLIGHT = 6, ALP_POWER_DOMAIN_COUNT = 7, } alp_power_domain_t;",
+          "enumerators": [
+            "ALP_POWER_DOMAIN_WIFI_BLE = 0",
+            "ALP_POWER_DOMAIN_ETH_PHY = 1",
+            "ALP_POWER_DOMAIN_EXT_FLASH = 2",
+            "ALP_POWER_DOMAIN_EXT_RAM = 3",
+            "ALP_POWER_DOMAIN_TEMP_SENSOR = 4",
+            "ALP_POWER_DOMAIN_RTC = 5",
+            "ALP_POWER_DOMAIN_BACKLIGHT = 6",
+            "ALP_POWER_DOMAIN_COUNT = 7"
+          ],
+          "hash": "57b7863db996cc5b",
+          "kind": "enum"
+        },
         "alp_power_mode_t": {
           "definition": "typedef enum { ALP_POWER_MODE_RUN = 0, ALP_POWER_MODE_SLEEP = 1, ALP_POWER_MODE_DEEP_SLEEP = 2, ALP_POWER_MODE_STANDBY = 3, ALP_POWER_MODE_STOP = 4, } alp_power_mode_t;",
           "enumerators": [
