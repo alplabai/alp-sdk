@@ -67,11 +67,10 @@ belongs to the firmware repo.
 - A wire change is now two PRs in two repositories, and the firmware CI is what
   keeps them honest. `CONTRIBUTING.md` in each firmware repo says so explicitly,
   because "CI here is green" no longer means the contract is whole.
-- `firmware/cc3501e/` and `firmware/gd32-bridge/` still exist in alp-sdk at the
-  time of writing. The deletion is sequenced separately (#1370): west projects,
-  the fuzz harness's `ALP_GD32_BRIDGE_FIRMWARE_DIR`, metadata `helper_firmware`
-  pins, and ~16 doc links all have to move first. **This ADR records the
-  decision, not the completion.**
+- `firmware/cc3501e/` and `firmware/gd32-bridge/` were removed from alp-sdk
+  (#1370, #1805) after the west projects, the fuzz harness's
+  `ALP_GD32_BRIDGE_FIRMWARE_DIR`, metadata `helper_firmware` pins and the doc
+  links had moved to the firmware repositories.
 - The firmware build scripts no longer guess their dependency's location. Both
   take an explicit root (`-AlpSdkRoot` / `ALP_SDK_ROOT` / `-DALP_SDK_ROOT`) and
   refuse loudly when the header is absent — the relative `../..` guess was
