@@ -1,5 +1,10 @@
 ### Changed — the trace-runner fills the Riverdi natively at 800 wide, 3/5 game over 2/5 camera, with a power graph on the HUD
 
+Stage 0, the memory re-plan that makes room for it: a framebuffer slot is 800x1280x2 B = 2,048,000 B (`TR_FB_SLOT_SIZE`); FB B is
+derived as the last slot below TF-A RW, `0x025EA000` (bench-verified base `0x027DE000`); the display list and the bins move to
+SRAM1 (`0x02424000`, `0x02460000`), the band buffers to `0x0229A000`, the stacks to `0x025C0000` and the gate word to
+`0x025E0000`. The HUD memory map and `TR_MEM_REGIONS` follow.
+
 The picture is rendered 800 columns wide (`TR_R3D_W`, was 720) and written to the panel `fw` columns wide: the
 Riverdi RVT121 shows all 800 on its whole 1280x800 window (no bars), the RK055 its centre 720, cropped, never
 scaled. `fw` is a new `uint16_t` in the mailbox frame (`tr_frame_in_t`, offset 174, the old trailing pad, 176 B; the
