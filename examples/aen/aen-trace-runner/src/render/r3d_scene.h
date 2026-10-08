@@ -64,8 +64,8 @@
 /* Half/half layout: the focal length scales with the viewport height, so
  * the vertical framing (horizon, runner feet, road below them) keeps the
  * proportions every knob above was tuned at (600 px over the 853-row view
- * of fix round 9): at TR_VIEW_H 640 that is 450 px -- the same picture 3/4
- * the size, with a wider horizontal view. */
+ * of fix round 9): at TR_VIEW_H 768 that is 540 px -- the same vertical
+ * framing at 6/5 the size of the 640-row half layout, over 800 columns. */
 #define TR_CAM_F_PX     (600.0f * (float)TR_VIEW_H / (float)TR_VIEW_TUNED_H)
 #define TR_CAM_BANK_DEG 5.0f
 /* The skyline (far layer) stands this far ahead of the eye, riding with it;

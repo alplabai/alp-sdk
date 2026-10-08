@@ -1,206 +1,267 @@
-/* tests/host/test_r3d_cam_pip.c -- src/render/cam_pip.c: the GREY8->RGB565
- * row expansion, the half/half video area's rotation to upright (the scalar
- * reference against an independent rotate, the NEON 8x8 transpose kernel
- * bit-exact against it, the raw column strip a band reads) and the
- * keypoint-to-screen mapping (score gate, corners, the letterbox padding).
+/* tests/host/test_r3d_cam_pip.c -- src/render/cam_pip.c: the camera's cover
+ * resample (the 640x400 landscape frame scaled by 32/25 into the 800x512 video
+ * area, centre-cropped), the NEON kernel bit-exact against the scalar
+ * reference, the source rows a band reads, and the keypoint-to-screen
+ * mapping (score gate, the crop, the round trip with the sampling grid).
  * Named test_r3d_*.c so tests/host/runner.sh's "A32 qemu" stage cross-
  * compiles and qemu-runs this file too -- the only place the NEON kernel
- * runs off silicon. */
+ * runs off silicon (a plain x86 host never defines __ARM_NEON; without qemu
+ * the runner prints a SKIP for that stage, and the kernel is NOT checked). */
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "../../src/render/cam_pip.h"
 
+#define W  TR_CAM_SRC_W
+#define H  TR_CAM_SRC_H
+#define VW TR_VID_W
+#define VH TR_VID_H
+
+static uint8_t                          src[W * H];
+static uint16_t                         want[VH * VW];
+__attribute__((unused)) static uint16_t got[VH * VW + 64]; /* NEON stage only */
+
+static uint8_t grey_of(uint16_t px) /* the green channel (6 bits) back to 8, low bits dropped */
+{
+	return (uint8_t)(((px >> 5) & 63) << 2);
+}
+
+static uint16_t rgb565(uint8_t g)
+{
+	return (uint16_t)(((g >> 3) << 11) | ((g >> 2) << 5) | (g >> 3));
+}
+
+static void fill_hash(void)
+{
+	for (int i = 0; i < W * H; i++) {
+		src[i] = (uint8_t)(i * 2654435761u >> 24);
+	}
+}
+
+__attribute__((unused)) static void fill_checker(void) /* NEON stage only */
+{
+	for (int i = 0; i < W * H; i++) {
+		src[i] = (uint8_t)(((i % W) ^ (i / W)) & 1 ? 0xFF : 0x00);
+	}
+}
+
+static void fill_edge_v(void) /* a vertical edge: 0 left of column 320, 255 from it */
+{
+	for (int i = 0; i < W * H; i++) {
+		src[i] = i % W < W / 2 ? 0 : 255;
+	}
+}
+
+static void fill_edge_h(void) /* a horizontal edge: 0 above row 200, 255 from it */
+{
+	for (int i = 0; i < W * H; i++) {
+		src[i] = i / W < H / 2 ? 0 : 255;
+	}
+}
+
+/* The sampling grid written out independently of cam_pip.c: output (x, r) reads source position
+ * (50 x + 473, 50 r - 7) / 64. Bilinear in doubles, so the integer kernels are checked against the
+ * maths, not against themselves; clamped at the frame edge. */
+static double ref_sample(int x, int r)
+{
+	double fx = (50.0 * x + 473.0) / 64.0, fy = (50.0 * r - 7.0) / 64.0;
+	int    x0 = (int)(fx < 0 ? -1 : fx), y0 = (int)(fy < 0 ? -1 : fy);
+	double ax = fx - x0, ay = fy - y0;
+	int    xa = x0 < 0 ? 0 : x0, xb = x0 + 1 > W - 1 ? W - 1 : x0 + 1;
+	int    ya = y0 < 0 ? 0 : y0, yb = y0 + 1 > H - 1 ? H - 1 : y0 + 1;
+	double top = src[ya * W + xa] * (1 - ax) + src[ya * W + xb] * ax;
+	double bot = src[yb * W + xa] * (1 - ax) + src[yb * W + xb] * ax;
+
+	return top * (1 - ay) + bot * ay;
+}
+
 int main(void)
 {
-	/* 1. Grey->RGB565: a true grey pixel has r=g=b, so every truncated
-	 * channel is EXACTLY what the 5/6/5 packing computes from the same
-	 * source byte -- pin the packing for known values, including the
-	 * extremes and a value that exercises non-zero low bits. */
+	/* 1. The geometry the maintainer ruled, pinned as numbers (the header's static asserts say the
+	 * same in types): 800 x 512 area, scale 1.28 = 32/25 height-bound, 819.2 px wide so 19.2 px
+	 * (9.6 a side) are cropped, every one of the 400 source rows used. */
+	assert(VW == 800 && VH == 512 && TR_VID_Y0 == 768);
+	assert(TR_CAM_COVER_NUM == 32 && TR_CAM_COVER_DEN == 25);
+	assert(W * 32 / 25 == 819 && W * 32 >= VW * 25 && H * 32 == VH * 25);
+	assert(tr_cam_cover_sx64(0) == 473 && tr_cam_cover_sx64(1) == 523 &&
+	       tr_cam_cover_sx64(799) == 40423);
+	assert(tr_cam_cover_sy64(0) == -7 && tr_cam_cover_sy64(1) == 43 &&
+	       tr_cam_cover_sy64(511) == 25543);
+	/* 32 output columns are exactly 25 source columns (the NEON pattern) */
+	assert(tr_cam_cover_sx64(32) - tr_cam_cover_sx64(0) == 25 * 64);
+	/* the last right-hand tap of every column and row is inside the frame (columns), or clamped (rows) */
+	assert((tr_cam_cover_sx64(VW - 1) >> 6) + 1 <= W - 1);
+	assert((tr_cam_cover_sx64(0) >> 6) >= 0);
+
+	/* 2. The scalar kernel against the maths: a constant frame stays constant, the tolerance covers
+	 * the two 8-bit roundings and the 5/6-bit RGB565 truncation (the green channel keeps 6 bits). */
+	fill_hash();
+	tr_cam_cover_rows(src, 0, VH, want, VW);
 	{
-		uint8_t  src[4] = { 0x00, 0xFF, 0x80, 0x18 };
-		uint16_t dst[4];
+		int worst = 0;
 
-		tr_cam_pip_row_grey_to_rgb565(src, 4, dst, 4); /* 1:1, no decimation */
-		assert(dst[0] == 0x0000u);                     /* black */
-		assert(dst[1] == 0xFFFFu);                     /* white: 0x1F<<11 | 0x3F<<5 | 0x1F */
-		assert(dst[2] == ((0x80 >> 3) << 11 | (0x80 >> 2) << 5 | (0x80 >> 3))); /* mid grey */
-		assert(dst[3] == ((0x18 >> 3) << 11 | (0x18 >> 2) << 5 | (0x18 >> 3)));
-	}
+		for (int r = 0; r < VH; r += 3) {
+			for (int x = 0; x < VW; x += 3) {
+				double ref = ref_sample(x, r);
+				int    d   = abs((int)grey_of(want[r * VW + x]) - (int)ref);
 
-	/* 2. Decimation: nearest-sample, matches x*src_w/dst_w exactly (the
-	 * SAME formula tr_cam_pip_map_kp's inverse must agree with). */
-	{
-		uint8_t  src[8] = { 10, 20, 30, 40, 50, 60, 70, 80 };
-		uint16_t dst[4];
-
-		tr_cam_pip_row_grey_to_rgb565(src, 8, dst, 4); /* dst[x] <- src[x*8/4] = src[x*2] */
-		for (int x = 0; x < 4; x++) {
-			uint8_t  g    = src[x * 8 / 4];
-			uint16_t want = (uint16_t)(((g >> 3) << 11) | ((g >> 2) << 5) | (g >> 3));
-
-			assert(dst[x] == want);
-		}
-	}
-
-	/* 3. Upscaling (dst_w > src_w, e.g. a narrow crop stretched into the
-	 * PiP) never reads past src_w-1 -- sx clamps via integer floor, the
-	 * last dst column's sx is src_w-1 exactly when dst_w divides evenly. */
-	{
-		uint8_t  src[2] = { 1, 254 };
-		uint16_t dst[4];
-
-		tr_cam_pip_row_grey_to_rgb565(src, 2, dst, 4);
-		assert(dst[0] == dst[1]); /* both sample src[0] */
-		assert(dst[2] == dst[3]); /* both sample src[1] */
-	}
-
-	/* 4. Rotation geometry: tr_cam_rot_src() against the definition
-	 * (cam_rot.h), and tr_cam_rot_rows() against an independent rotate of a
-	 * whole synthetic frame. 270 turns the raw frame counter-clockwise: a
-	 * mark on the raw RIGHT edge (a player's head with the camera body
-	 * turned clockwise, cam_rot.h's derivation) lands on the upright TOP. */
-	static uint8_t  raw[TR_CAM_SRC_W * TR_CAM_SRC_H];
-	static uint16_t want[TR_CAM_SRC_W * TR_VID_W], got[TR_CAM_SRC_W * TR_VID_W];
-	const int       W = TR_CAM_SRC_W, H = TR_CAM_SRC_H;
-
-	for (int i = 0; i < W * H; i++) {
-		raw[i] = (uint8_t)(i * 2654435761u >> 24);
-	}
-	{
-		int sx, sy;
-
-		assert(TR_CAM_UP_W(90) == 400 && TR_CAM_UP_H(90) == 640 && TR_CAM_UP_W(0) == 640 &&
-		       TR_CAM_UP_H(0) == 400);
-		tr_cam_rot_src(90, W, H, 0, 0, &sx, &sy);
-		assert(sx == 0 && sy == H - 1); /* upright top-left <- raw bottom-left */
-		tr_cam_rot_src(90, W, H, H - 1, W - 1, &sx, &sy);
-		assert(sx == W - 1 && sy == 0); /* upright bottom-right <- raw top-right */
-		tr_cam_rot_src(270, W, H, 0, 0, &sx, &sy);
-		assert(sx == W - 1 && sy == 0); /* upright top-left <- raw top-right */
-		tr_cam_rot_src(270, W, H, H - 1, W - 1, &sx, &sy);
-		assert(sx == 0 && sy == H - 1); /* upright bottom-right <- raw bottom-left */
-		tr_cam_rot_src(0, W, H, 17, 33, &sx, &sy);
-		assert(sx == 17 && sy == 33);
-
-		static uint8_t mark[TR_CAM_SRC_W * TR_CAM_SRC_H];
-
-		mark[(H / 2) * W + (W - 1)] = 255; /* raw right edge, mid-height */
-		tr_cam_rot_rows(mark, W, H, 270, 0, 1, got, TR_VID_W);
-		assert(got[H / 2] == 0xFFFFu); /* upright row 0, x = raw row H/2 */
-	}
-	for (int rot = 90; rot <= 270; rot += 180) {
-		for (int uy = 0; uy < W; uy++) {
-			for (int ux = 0; ux < H; ux++) {
-				/* the definition, written out, not through tr_cam_rot_src() */
-				uint8_t g = rot == 90 ? raw[(H - 1 - ux) * W + uy] : raw[ux * W + (W - 1 - uy)];
-
-				want[uy * TR_VID_W + ux] =
-				    (uint16_t)(((g >> 3) << 11) | ((g >> 2) << 5) | (g >> 3));
+				worst = d > worst ? d : worst;
 			}
 		}
-		memset(got, 0, sizeof(got));
-		tr_cam_rot_rows(raw, W, H, rot, 0, W, got, TR_VID_W);
-		for (int uy = 0; uy < W; uy++) {
-			assert(memcmp(&got[uy * TR_VID_W], &want[uy * TR_VID_W], (size_t)H * 2u) == 0);
-		}
-		/* a band's raw column strip covers every byte its rows read */
-		for (int uy0 = 0; uy0 < W; uy0 += TR_BAND_H) {
-			int c0, c1, sx, sy;
+		assert(worst <= 4); /* 6-bit green truncation loses up to 3, rounding up to 1 */
+		printf("cover: scalar within %d grey levels of the real-valued bilinear sample\n", worst);
+	}
+	memset(src, 0x77, sizeof(src));
+	tr_cam_cover_rows(src, 0, VH, want, VW);
+	for (int i = 0; i < VH * VW; i++) {
+		assert(want[i] == rgb565(0x77));
+	}
 
-			tr_cam_rot_src_cols(rot, uy0, TR_BAND_H, &c0, &c1);
-			assert(c0 >= 0 && c1 <= W && c1 - c0 == TR_BAND_H);
-			for (int r = 0; r < TR_BAND_H; r++) {
-				for (int ux = 0; ux < H; ux++) {
-					tr_cam_rot_src(rot, W, H, ux, uy0 + r, &sx, &sy);
-					assert(sx >= c0 && sx < c1);
-				}
-			}
+	/* 3. Where the picture lands: a vertical edge at source column 320 crosses 127.5 at output
+	 * column 399.5 -- the area's exact centre, so the crop is symmetric -- and a horizontal edge at
+	 * source row 200 crosses at output row 255.5. A wrong offset (the 473 / -7) moves these. */
+	fill_edge_v();
+	tr_cam_cover_rows(src, 0, 1, want, VW);
+	assert(grey_of(want[398]) < 128 && grey_of(want[399]) < 128 && grey_of(want[400]) >= 128 &&
+	       grey_of(want[401]) >= 128);
+	assert(want[0] == rgb565(0) && want[VW - 1] == rgb565(255)); /* flat out to both edges */
+	for (int i = 0; i < 8; i++) { /* mirror-symmetric about the centre, to within a rounding */
+		int s = (grey_of(want[399 - i]) >> 2) + (grey_of(want[400 + i]) >> 2);
+
+		assert(s == 62 || s == 63);
+	}
+	fill_edge_h();
+	tr_cam_cover_rows(src, 0, VH, want, VW);
+	assert(grey_of(want[254 * VW + 10]) < 128 && grey_of(want[255 * VW + 10]) < 128 &&
+	       grey_of(want[256 * VW + 10]) >= 128 && grey_of(want[257 * VW + 10]) >= 128);
+	assert(want[0] == rgb565(0) && want[(VH - 1) * VW] == rgb565(255)); /* top and bottom rows */
+	printf("cover: edges land at the area's centre (399.5, 255.5), flat to the borders\n");
+
+	/* 4. The source rows a band of output rows reads: inside the frame, never more than the band's
+	 * 25.6 + 2 rows, and every row the brute-force taps touch (what the A32 invalidates). */
+	for (int r0 = 0; r0 + TR_BAND_H <= VH; r0 += TR_BAND_H) {
+		int j0, j1;
+
+		tr_cam_cover_src_rows(r0, TR_BAND_H, &j0, &j1);
+		assert(j0 >= 0 && j1 <= H - 1 && j1 - j0 + 1 <= 28);
+		for (int r = r0; r < r0 + TR_BAND_H; r++) {
+			int v = tr_cam_cover_sy64(r), a = v >> 6, b = a + 1;
+
+			a = a < 0 ? 0 : a;
+			b = b > H - 1 ? H - 1 : b;
+			assert(a >= j0 && b <= j1);
 		}
 	}
-	printf("rotate: 90/270 scalar == the definition, column strips cover every read\n");
+	{
+		int j0, j1;
+
+		tr_cam_cover_src_rows(0, VH, &j0, &j1);
+		assert(j0 == 0 && j1 == H - 1); /* the whole area reads the whole frame */
+	}
+	printf("cover: band source-row spans cover every tap\n");
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
-	/* 5. The NEON kernel: bit-exact with the scalar reference for both
-	 * rotations, every 32-row band (the renderer's call) and a whole frame
-	 * at once, a hash pattern plus a 0x00/0xFF checker (block-seam edges),
-	 * written at the video area's x offset with guard words either side
-	 * that must survive. */
-	for (int pat = 0; pat < 2; pat++) {
-		if (pat == 1) {
-			for (int i = 0; i < W * H; i++) {
-				raw[i] = (uint8_t)(((i % W) ^ (i / W)) & 1 ? 0xFF : 0x00);
-			}
-		}
-		for (int rot = 90; rot <= 270; rot += 180) {
-			int x0 = tr_cam_img_x0(rot);
+	/* 5. The NEON kernel: bit-exact with the scalar reference on a hash, a 0x00/0xFF checker (every
+	 * tap pair at full contrast) and both edges, for every 32-row band (the renderer's call), the
+	 * whole area at once and ragged windows, with guard words either side that must survive. */
+	for (int pat = 0; pat < 4; pat++) {
+		static const struct {
+			int r0, rows;
+		} win[] = { { 0, VH }, { 5, 37 }, { 1, 1 }, { 480, 32 }, { 511, 1 }, { 100, 300 } };
 
-			memset(want, 0xA5, sizeof(want));
+		pat == 0   ? fill_hash()
+		: pat == 1 ? fill_checker()
+		: pat == 2 ? fill_edge_v()
+		           : fill_edge_h();
+		memset(want, 0xA5, sizeof(want));
+		tr_cam_cover_rows(src, 0, VH, want, VW);
+		for (int r0 = 0; r0 < VH; r0 += TR_BAND_H) {
 			memset(got, 0xA5, sizeof(got));
-			tr_cam_rot_rows(raw, W, H, rot, 0, W, want + x0, TR_VID_W);
-			for (int uy0 = 0; uy0 < W; uy0 += TR_BAND_H) {
-				tr_cam_rot_rows_neon(raw, rot, uy0, TR_BAND_H, got + uy0 * TR_VID_W + x0, TR_VID_W);
-			}
-			assert(memcmp(want, got, sizeof(want)) == 0);
+			tr_cam_cover_rows_neon(src, r0, TR_BAND_H, got + 8, VW);
+			assert(memcmp(got + 8, want + (size_t)r0 * VW, (size_t)TR_BAND_H * VW * 2u) == 0);
+			assert(got[0] == 0xA5A5u && got[7] == 0xA5A5u);     /* before the first row */
+			assert(got[8 + (size_t)TR_BAND_H * VW] == 0xA5A5u); /* after the last */
+		}
+		for (unsigned k = 0; k < sizeof(win) / sizeof(win[0]); k++) {
 			memset(got, 0xA5, sizeof(got));
-			tr_cam_rot_rows_neon(raw, rot, 0, W, got + x0, TR_VID_W);
-			assert(memcmp(want, got, sizeof(want)) == 0);
+			tr_cam_cover_rows_neon(src, win[k].r0, win[k].rows, got + 8, VW);
+			assert(memcmp(got + 8, want + (size_t)win[k].r0 * VW, (size_t)win[k].rows * VW * 2u) ==
+			       0);
 		}
 	}
-	printf("NEON rotate: bit-exact with scalar, 90 + 270, banded + whole frame, guards intact\n");
+	printf(
+	    "cover NEON: bit-exact with scalar, bands + whole area + ragged windows, guards intact\n");
+#else
+	printf("!!!!! SKIP: cover NEON kernel not compiled (host build) -- bit-exactness NOT checked "
+	       "!!!!!\n");
 #endif
 
-	/* 6. Keypoints -> screen: native 1:1, so an upright keypoint is the
-	 * image pixel it names -- the corners of the portrait image land on the
-	 * corners of x 200..599 x rows 0..639 of the video area; the landscape
-	 * comparison path centres 640x400 at x 80, row 120. */
+	/* 6. Keypoints -> screen: the inverse of the grid, x = (64 kx - 473) / 50 and y = (64 ky + 7) / 50,
+	 * to the nearest output pixel. */
 	{
 		int16_t px = -1, py = -1;
 		tr_kp_t k;
 
-		assert(tr_cam_img_x0(90) == 200 && tr_cam_img_y0(90) == 0 && tr_cam_img_x0(270) == 200);
-		assert(tr_cam_img_x0(0) == 80 && tr_cam_img_y0(0) == 120);
-		k = (tr_kp_t){ 0, 0, 255 };
-		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 200 && py == 0);
-		k = (tr_kp_t){ 399, 639, 255 };
-		assert(tr_cam_pip_map_kp(&k, 270, &px, &py) && px == 599 && py == 639);
-		k = (tr_kp_t){ 399, 0, 255 };
-		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 599 && py == 0);
-		k = (tr_kp_t){ 0, 639, 255 };
-		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 200 && py == TR_VID_H - 1);
-		k = (tr_kp_t){ 639, 399, 255 };
-		assert(tr_cam_pip_map_kp(&k, 0, &px, &py) && px == 719 && py == 519);
-		/* Landscape (rotation 0), the arm controls' layout: 640x400 (16:10) at
-		 * native 1:1 -- never stretched -- centred in the 800x640 video area
-		 * with 80-px side margins and 120-row letterbox bands, and every
-		 * keypoint lands on the image pixel it names. */
-		_Static_assert(TR_CAM_UP_W(0) == 640 && TR_CAM_UP_H(0) == 400,
-		               "landscape is the raw frame");
-		_Static_assert(TR_VID_W >= TR_CAM_UP_W(0) && TR_VID_H >= TR_CAM_UP_H(0),
-		               "the landscape image fits the video area");
-		k = (tr_kp_t){ 0, 0, 255 };
-		assert(tr_cam_pip_map_kp(&k, 0, &px, &py) && px == 80 && py == 120);
-		k = (tr_kp_t){ 320, 200, 255 };
-		assert(tr_cam_pip_map_kp(&k, 0, &px, &py) && px == TR_VID_W / 2 && py == TR_VID_H / 2);
-		k = (tr_kp_t){ 640, 10, 255 };
-		assert(!tr_cam_pip_map_kp(&k, 0, &px, &py));
-		k = (tr_kp_t){ 10, 400, 255 };
-		assert(!tr_cam_pip_map_kp(&k, 0, &px, &py)); /* 400 is a PORTRAIT-only row */
-		/* outside the upright frame (the letterbox padding) or unsure: not drawn */
+		k = (tr_kp_t){ 7, 0, 255 }; /* the first column the 9.6 px crop leaves */
+		assert(tr_cam_pip_map_kp(&k, &px, &py) && px == 0 && py == 0);
+		k = (tr_kp_t){ 6, 0, 255 }; /* cropped away on the left */
+		assert(!tr_cam_pip_map_kp(&k, &px, &py));
+		k = (tr_kp_t){ 631, 399, 255 }; /* the last one on the right */
+		assert(tr_cam_pip_map_kp(&k, &px, &py) && px == 798 && py == VH - 1);
+		k = (tr_kp_t){ 632, 399, 255 }; /* cropped away on the right */
+		assert(!tr_cam_pip_map_kp(&k, &px, &py));
+		k = (tr_kp_t){ 320,
+			           200,
+			           255 }; /* the frame's centre: 639.5 / 2 -> the area's, within a pixel */
+		assert(tr_cam_pip_map_kp(&k, &px, &py) && px == 400 && py == 256);
+		assert(tr_cam_pip_map_kp(&(tr_kp_t){ 100, 50, 255 }, &px, &py) && px == 119 && py == 64);
+
+		/* round trip, every keypoint of the frame: the output pixel it maps to samples the source
+		 * within half an output step (25/64 source px) of it, in both axes -- and a kp maps
+		 * exactly when that pixel is inside the area. */
+		int mapped = 0;
+
+		for (int ky = 0; ky < H; ky++) {
+			for (int kx = 0; kx < W; kx++) {
+				k  = (tr_kp_t){ (int16_t)kx, (int16_t)ky, 255 };
+				px = py = -7;
+				if (tr_cam_pip_map_kp(&k, &px, &py)) {
+					assert(px >= 0 && px < VW && py >= 0 && py < VH);
+					assert(abs(tr_cam_cover_sx64(px) - 64 * kx) <= 25);
+					assert(abs(tr_cam_cover_sy64(py) - 64 * ky) <= 25);
+					mapped++;
+				} else {
+					assert(px == -7 && py == -7); /* untouched on a reject */
+					assert(kx < 7 || kx > 631);   /* only the crop rejects an in-frame keypoint */
+				}
+			}
+		}
+		assert(mapped == (631 - 7 + 1) * H);
+
+		/* and the forward direction: every output pixel's nearest source pixel maps back to within one */
+		for (int x = 0; x < VW; x += 5) {
+			int kx = (tr_cam_cover_sx64(x) + 32) >> 6;
+
+			k = (tr_kp_t){ (int16_t)kx, 100, 255 };
+			assert(tr_cam_pip_map_kp(&k, &px, &py) && abs(px - x) <= 1);
+		}
+		/* gate and bounds */
 		px = py = -7;
-		k       = (tr_kp_t){ -1, 10, 255 };
-		assert(!tr_cam_pip_map_kp(&k, 90, &px, &py));
-		k = (tr_kp_t){ 400, 10, 255 };
-		assert(!tr_cam_pip_map_kp(&k, 90, &px, &py));
-		k = (tr_kp_t){ 10, 640, 255 };
-		assert(!tr_cam_pip_map_kp(&k, 90, &px, &py));
-		k = (tr_kp_t){ 200, 300, TR_POSE_KP_MIN - 1 };
-		assert(!tr_cam_pip_map_kp(&k, 90, &px, &py));
-		assert(px == -7 && py == -7); /* untouched on a reject */
-		k.score = TR_POSE_KP_MIN;
-		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 400 && py == 300);
-		printf("map_kp: corners 1:1, padding and low score rejected\n");
+		k       = (tr_kp_t){ 300, 200, TR_POSE_KP_MIN - 1 };
+		assert(!tr_cam_pip_map_kp(&k, &px, &py) && px == -7 && py == -7);
+		k = (tr_kp_t){ -1, 10, 255 };
+		assert(!tr_cam_pip_map_kp(&k, &px, &py));
+		k = (tr_kp_t){ 640, 10, 255 };
+		assert(!tr_cam_pip_map_kp(&k, &px, &py));
+		k = (tr_kp_t){ 10, 400, 255 }; /* 400 is past the frame */
+		assert(!tr_cam_pip_map_kp(&k, &px, &py));
+		k = (tr_kp_t){ 10, -1, 255 };
+		assert(!tr_cam_pip_map_kp(&k, &px, &py));
+		k.x = 300, k.y = 200, k.score = TR_POSE_KP_MIN;
+		assert(tr_cam_pip_map_kp(&k, &px, &py) && px == 375 && py == 256);
+		printf("map_kp: inverse of the grid within half a step, crop and low score rejected\n");
 	}
 
 	/* 7. fix round 11: tr_cam_pip_format_hz() -- pin the maintainer-reported

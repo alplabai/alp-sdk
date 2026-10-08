@@ -44,19 +44,20 @@
 #define TR_R3D_H 1280
 _Static_assert(TR_R3D_W % 16 == 0, "the band copy-out moves 16 px at a time");
 
-/* Viewport split (maintainer layout ruling "Half / half", supersedes fix
- * round 8's 853/427): the physical panel stays 800x1280 (TR_R3D_W/H, the
- * CDC200 scanout, the framebuffer size, DMA), the 3D GAME fills the top
- * TR_VIEW_H rows, and rows [TR_VIEW_H, TR_R3D_H) are the video area
- * (a32/renderer/render.c render_video_band()/render_video_overlay(): the
- * camera rotated to portrait at native 1:1, its skeleton, the intent lamps
- * and the "CAMERA . NPU Hz" label). Everything that frames the GAME on
+/* Viewport split (maintainer ruling 2026-10-08, 3/5 game : 2/5 camera, one rule for every
+ * panel; supersedes "Half / half" and fix round 8's 853/427): the physical panel stays
+ * 800x1280 (TR_R3D_W/H, the CDC200 scanout, the framebuffer size, DMA), the 3D GAME fills the
+ * top TR_VIEW_H rows (768 = 3/5), and rows [TR_VIEW_H, TR_R3D_H) are the video area (512 =
+ * 2/5; a32/renderer/render.c render_video_band()/render_video_overlay(): the camera scaled up
+ * to cover it, its skeleton, the intent lamps and the "CAMERA . NPU Hz" label on a plate at
+ * its bottom edge). Everything that frames the GAME on
  * screen derives from this ONE constant: the projection centre (r3d_math.c
  * cy), the camera focal length (r3d_scene.h TR_CAM_F_PX), the horizon
  * clamp, the raster/band clip and the flash border. Gameplay (scroll speed,
  * ground_y, collision) stays in world units -- tr_runner_ground_y(TR_R3D_H)
  * -- and never reads TR_VIEW_H (fix round 9's lesson). */
-#define TR_VIEW_H 640 /* top half of 1280, TR_BAND_H-aligned: 20 full bands, no ragged last band */
+#define TR_VIEW_H 768 /* 3/5 of 1280, TR_BAND_H-aligned: 24 full bands, no ragged last band */
+_Static_assert(TR_VIEW_H * 5 == TR_R3D_H * 3 && TR_VIEW_H % 32 == 0, "3/5 game, whole bands");
 /* The viewport height the camera and the on-screen size targets (the
  * visibility lead, the framing bounds) were tuned at (fix round 9), and a
  * screen-px figure from that tuning rescaled to TR_VIEW_H. */

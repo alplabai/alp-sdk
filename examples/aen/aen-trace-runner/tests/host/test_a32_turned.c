@@ -51,21 +51,15 @@ int main(void)
 	}
 	host_hp_dbg_mem.magic       = TR_HP_DBG_MAGIC;
 	host_hp_dbg_mem.loop_hz_x10 = 251u;
-	tr_cam_view_write(&host_cam_view_mem,
-	                  TR_MEM_CAM_POOL,
-	                  42u,
-	                  TR_CAM_SRC_W,
-	                  TR_CAM_SRC_H,
-	                  270u,
-	                  1u,
-	                  pip_barrier);
+	tr_cam_view_write(
+	    &host_cam_view_mem, TR_MEM_CAM_POOL, 42u, TR_CAM_SRC_W, TR_CAM_SRC_H, 0u, 1u, pip_barrier);
 	{
 		tr_pose_t pose = { 0 };
 
-		pose.kp[TR_KP_NOSE] = (tr_kp_t){ 200, 300, 255 };
-		pose.kp[TR_KP_LSHO] = (tr_kp_t){ 120, 380, 255 };
-		pose.kp[TR_KP_RSHO] = (tr_kp_t){ 280, 380, 255 };
-		pose.kp[TR_KP_LELB] = (tr_kp_t){ 90, 470, 255 };
+		pose.kp[TR_KP_NOSE] = (tr_kp_t){ 320, 200, 255 };
+		pose.kp[TR_KP_LSHO] = (tr_kp_t){ 250, 250, 255 };
+		pose.kp[TR_KP_RSHO] = (tr_kp_t){ 390, 250, 255 };
+		pose.kp[TR_KP_LELB] = (tr_kp_t){ 200, 330, 255 };
 		tr_pslot_write(&host_pslot_mem, &pose, 0u, 0u, TR_HP_STATE_RUNNING, NULL, 1u, pip_barrier);
 	}
 
@@ -84,7 +78,7 @@ int main(void)
 		in[f].fw       = W;
 		draw(&in[f], fb0, 0x5A);
 		/* the skeleton overlay really drew (nose dot on its image pixel) */
-		assert(fb0[(TR_VID_Y0 + 300) * W + tr_cam_img_x0(270) + 200] == COLOR_KP);
+		assert(fb0[(TR_VID_Y0 + 256) * W + 400] == COLOR_KP);
 		for (unsigned r = 0; r < sizeof(rots) / sizeof(rots[0]); r++) {
 			in[f].rotation = (uint16_t)rots[r];
 			draw(&in[f], fbr, 0xA5);
@@ -119,7 +113,11 @@ int main(void)
 					int edge = (in[f].flags & TR_FLAG_CRASH) && y < TR_VIEW_H &&
 					           (x < 16 || x >= FW - 16 || y < 16 || y >= TR_VIEW_H - 16);
 
-					if (!edge) {
+					/* the plate (lamps, label) is laid out over the VISIBLE columns, so it
+					 * differs by design from the crop of the full-width one */
+					int plate = y >= TR_VID_Y0 + PLATE_Y;
+
+					if (!edge && !plate) {
 						assert(fbn[tr_rot_idx(rot, TR_R3D_H, FW, x, y)] == fb0[y * W + X0 + x]);
 					}
 				}

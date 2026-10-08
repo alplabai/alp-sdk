@@ -42,6 +42,12 @@
 	40 /* ... of the road against the haze: neon city's dark board under its dark purple glow is 52
 			  * at the far end (the board's own colour, not the fog: 0.2 of it was 8,800 deep) */
 
+/* ... of a pixel of the scenery off the first pixel of its span. 30 until the native-800 /
+ * 3-5-game framing: MEMORY CANYON's first far row under the skyline then has its left
+ * scenery at 28 -- fogged to the haze, still a visible step, and an EMPTY span (the defect
+ * this guards) reads 0. */
+#define SCENERY_CONTRAST 24
+
 /* Game steps per second at the play pace (state.h: 0.5x = 20). */
 #define STEPS_S (TR_GAME_PACE_Q8 * 40u / 256u)
 
@@ -133,7 +139,7 @@ int main(void)
 
 		/* The far road: every row from the skyline's foot down to
 		 * TR_APPEAR_PX under the horizon shows the board over the lanes
-		 * (x 300..420, a majority >= ROAD_CONTRAST off the fog colour) -- the
+		 * (x 340..460, the 120 px about the centre, a majority >= ROAD_CONTRAST off the fog colour) -- the
 		 * haze no longer eats it (nearer, the zones' own ground art sets
 		 * the contrast, not the fog). */
 		assert(tr_r3d_project(
@@ -146,7 +152,7 @@ int main(void)
 		for (int y = foot + 1; y <= hz + TR_APPEAR_PX; y++) {
 			int n = 0;
 
-			for (int x = 300; x <= 420; x++) {
+			for (int x = W / 2 - 60; x <= W / 2 + 60; x++) {
 				n += contrast(fb0[y * W + x], bg.ground) >= ROAD_CONTRAST;
 			}
 			if (n <= 60) {
@@ -214,7 +220,8 @@ int main(void)
 					x1s = sv.x >> TR_R3D_SUB;
 					for (int x = x0s < x1s ? x0s : x1s; x <= (x0s < x1s ? x1s : x0s); x++) {
 						n += x >= 0 && x < W &&
-						     contrast(fb0[y * W + x], fb0[y * W + (x0s < x1s ? x0s : x1s)]) >= 30;
+						     contrast(fb0[y * W + x], fb0[y * W + (x0s < x1s ? x0s : x1s)]) >=
+						         SCENERY_CONTRAST;
 					}
 					side += n > 0;
 				}
@@ -285,6 +292,51 @@ int main(void)
 			printf("%d s out %d x %d px at row %d\n", TR_LEAD_S, w, h, (int)(sv.y >> TR_R3D_SUB));
 			assert((w >= TR_REC_PX && h >= TR_REC_MIN) || (h >= TR_REC_PX && w >= TR_REC_MIN));
 			assert((sv.y >> TR_R3D_SUB) > foot); /* on the visible road */
+		}
+	}
+
+	/* 2b. Framing at the narrower panel: the render is 800 wide and the RK055 shows its centre
+	 * 720 columns [40, 760) (tr_frame_in_t.fw). With the runner in the middle lane, the centre of
+	 * either OUTER lane at the runner's own depth -- the nearest a part is drawn before it passes
+	 * the camera -- and a whole pickup standing there must lie inside them. (An obstacle's body is
+	 * lane-wide and so, at that depth, reaches past 40 / 760 on the narrower panel: it is on its way
+	 * out of the picture by then; the run is lost or won before. The spans are printed.) */
+	{
+		tr_frame_in_t none = tr_scene_golden_in(3000, 1);
+		tr_sv_t       sv;
+		float         vz;
+
+		tr_scene_init(&s);
+		tr_scene_step(&s, &none);
+		render(&s, &none, fb0);
+		for (unsigned j = 0; j < sizeof(k) / sizeof(k[0]); j++) {
+			for (uint8_t lane = 0; lane < TR_LANES; lane += 2) {
+				tr_frame_in_t in = none;
+				int           x0, y0, x1, y1;
+
+				in.ents[5] = (tr_pkt_ent_t){ k[j].kind, lane, k[j].low, 0, (int16_t)ry, 0 };
+				render(&s, &in, fb);
+				assert(part_box(&x0, &y0, &x1, &y1) > 0);
+				assert(tr_r3d_project(&cam,
+				                      (tr_v3_t){ (lane == 0 ? -1.0f : 1.0f) * (float)TR_PROJ_LANE_W,
+				                                 0.0f,
+				                                 tr_scene_ent_z(&in, 5) },
+				                      &sv,
+				                      &vz));
+				int cx = sv.x >> TR_R3D_SUB;
+
+				printf("  %-13s outer lane %d at the runner: lane centre column %d, part columns "
+				       "%d..%d\n",
+				       k[j].name,
+				       lane,
+				       cx,
+				       x0,
+				       x1);
+				assert(cx >= (W - 720) / 2 + 60 && cx < (W + 720) / 2 - 60); /* room for a body */
+				if (k[j].kind == 2) { /* a pickup is small: all of it inside the crop */
+					assert(x0 >= (W - 720) / 2 && x1 < (W + 720) / 2);
+				}
+			}
 		}
 	}
 

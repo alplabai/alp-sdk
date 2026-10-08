@@ -14,8 +14,8 @@
  * updated for the camera's own pitch retune (r3d_scene.h TR_CAM_PITCH_DEG,
  * 18 -> 23 deg) -- run test_r3d_scene.c and paste its own printed "golden
  * scene crc32". Half/half layout: updated for TR_VIEW_H 853 -> 640 (r3d.h;
- * the focal length and cy follow it), same procedure; and for TR_R3D_W 720 -> 800 (cx follows it). */
-#define TR_SCENE_GOLDEN_CRC 0xdc7fd52cu
+ * the focal length and cy follow it), same procedure; and for TR_R3D_W 720 -> 800 (cx follows it) and TR_VIEW_H 640 -> 768 (cy and f_px follow it). */
+#define TR_SCENE_GOLDEN_CRC 0x0af66d1au
 
 /* World zones (P15, test_r3d_zones.c): tr_scene_golden_in(1234, 1) in each
  * zone (TR_FLAG_ZONE, no gate), and in the die city with its gate at model
@@ -24,10 +24,10 @@
  * test_r3d_zones.c with -DTR_ZONES_PRINT_ONLY and paste its own printed
  * "zones: golden ..." lines. */
 /* Half/half layout (TR_VIEW_H 640): same procedure. Native 800 (TR_R3D_W 720 -> 800, the
- * projection centre follows it): same procedure again. */
+ * projection centre follows it) and the 3/5 game (TR_VIEW_H 640 -> 768): same procedure again. */
 #define TR_ZONE_GOLDEN_CRC \
-	{ TR_SCENE_GOLDEN_CRC, 0x27c4b3e6u, 0xf90fb371u, 0xc4fc4821u, 0xded09b0bu }
-#define TR_ZONE_BLEND_GOLDEN_CRC 0xbb5384dfu
+	{ TR_SCENE_GOLDEN_CRC, 0xb6f105c1u, 0x313afd53u, 0x925fb797u, 0xb65ff2a1u }
+#define TR_ZONE_BLEND_GOLDEN_CRC 0x5a084295u
 
 /* The skinned run cycle at 16 phases, every character (test_r3d_scene case 0), same rule. */
 #define TR_RIG_RUN_CRC 0x4f3cfa95u
