@@ -26,6 +26,7 @@
 #include <zephyr/sys/barrier.h>
 
 #include "ipc/tr_memmap.h" /* TR_MEM_PSLOT */
+#include "ipc/tr_cam_view.h"
 #include "ipc/tr_pslot.h"
 #include "vision/cam_rot.h"
 
@@ -119,6 +120,40 @@ static uint32_t g_pslot_stale = TR_NPU_STALE_TICKS + 1u; /* no pose read yet: st
 static void pslot_barrier(void)
 {
 	barrier_dsync_fence_full();
+}
+
+/* Whether the upright view the poses are in is mirrored like a selfie: what
+ * decides which arm is the player's left (vision/pose.c). The truth is the HP's
+ * own report in its camera descriptor (tr_cam_view_t.mirror, the sensor flip bit
+ * read back after every camera open) -- not this build's TR_CAM_MIRROR, which
+ * only says what the two images were BUILT to agree on. Until a valid
+ * descriptor has been read the build's value stands; the last valid read is
+ * kept across a torn one. A disagreement is printed once, loudly. */
+static volatile const tr_cam_view_t *const g_cam_view =
+    (volatile const tr_cam_view_t *)TR_MEM_CAM_VIEW;
+static bool g_mirrored = TR_CAM_MIRROR != 0;
+static bool g_mirror_warned;
+
+static bool hp_mirrored(void)
+{
+	tr_cam_view_t cv;
+
+	if (tr_cam_view_read(g_cam_view, &cv, pslot_barrier)) {
+		g_mirrored = cv.mirror != 0u;
+		if (!g_mirror_warned &&
+		    (g_mirrored != (TR_CAM_MIRROR != 0) || (cv.rotate == 0u) != (TR_CAM_ROTATE == 0))) {
+			g_mirror_warned = true;
+			printk(
+			    "!!!!! HE built for TR_CAM_MIRROR=%d TR_CAM_ROTATE=%d but the HP reports mirror=%u "
+			    "rotate=%u -- using the HP's mirror for the arm controls; rebuild the HE to "
+			    "match\n",
+			    TR_CAM_MIRROR,
+			    TR_CAM_ROTATE,
+			    (unsigned)cv.mirror,
+			    (unsigned)cv.rotate);
+		}
+	}
+	return g_mirrored;
 }
 
 /* Last successfully accepted publish -- capture_box() below must NEVER read
@@ -479,7 +514,7 @@ static tr_box_t capture_box(void)
 
 	/* Tagged with its seq: until the HP publishes again, every tick re-reads
 	 * this same pose, and the tracker must count it once (track.h). */
-	tr_box_t b = tr_pose_box(&g_pslot_last.pose);
+	tr_box_t b = tr_pose_box_mirrored(&g_pslot_last.pose, hp_mirrored());
 
 	b.seq = g_pslot_seq;
 	return b;
@@ -652,6 +687,9 @@ static void enter_high_score(tr_game_t *g, tr_mode_t mode, tr_track_t *track, bo
 
 	if (rank < 0) {
 		return;
+	}
+	if (track != NULL) {
+		tr_track_resync(track); /* an arm still up from the run must not step the initials */
 	}
 	tr_ini_start(&e, ui_default_name(), rank);
 	if (src == TR_HS_IN_VISION && track == NULL) {

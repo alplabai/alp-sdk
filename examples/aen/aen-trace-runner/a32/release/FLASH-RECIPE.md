@@ -83,6 +83,24 @@ all) is refused for the same reason: rebuild it. Check the printed lines before 
 `TR_CAM_ROTATE=0 TR_CAM_MIRROR=ON` (HP and HE) for EVK-03, `TR_CAM_ROTATE=90 TR_CAM_MIRROR=ON` for
 2026W36-0009.
 
+**Bench acceptance: the arm lanes (do this before calling an EVK-03 release good).** With the game
+running and a player in front of the camera:
+
+1. Raise your physical LEFT arm. The figure's raised arm must appear on the screen's LEFT, and the
+   runner must move ONE lane left (the "LEFT ARM" lamp lights). Lower it and raise the RIGHT arm: the
+   figure's arm on the screen's RIGHT, one lane right ("RIGHT ARM" lamp).
+2. Raise both arms together: the runner jumps ("BOTH ARMS" lamp) and does not change lane.
+3. If the picture is not mirrored (your left arm shows on the screen's RIGHT), the sensor flip did
+   not take: look for `camera  : mirror 1 -> ... -- MIRROR NOT APPLIED` on the HP console.
+4. If the picture IS mirrored correctly but the runner moves the OPPOSITE way, or if the picture
+   looks mirrored the wrong way round, the rot-0 flip bit (0x3821 bit 2) mirrors the other way to
+   the one assumed. The Linux `ov9282` driver has had its hflip inverted against the silicon, and
+   nothing here had put a rot-0 picture on glass before this release. Rebuild ONLY the HP image with
+   `-DTR_OV9281_HMIRROR_ACTIVE_LOW=ON` (`src/vision/cam_rot.h`): it writes the bit the other way
+   round and still reports the truth in the camera descriptor. The HE does not need rebuilding:
+   it takes "is the view mirrored" from that descriptor (`tr_cam_view_t.mirror`), not from its own
+   `TR_CAM_MIRROR`, and prints `!!!!! HE built for TR_CAM_MIRROR=...` once if the two differ.
+
 ## This release reflashes the HE, the HP, the A32 app and the ATOC together
 
 Compared with the previous release this one changes the HE image (frames carry a rotation,

@@ -106,4 +106,34 @@ static inline uint16_t tr_cam_mirror_reg(int rot)
 	return rot != 0 ? TR_OV9281_REG_TIMING_FORMAT1 : TR_OV9281_REG_TIMING_FORMAT2;
 }
 
+/* BENCH TRAP: the sense of the HMIRROR bit (0x3821 bit 2, the rot-0 mirror).
+ * The Linux ov9282 driver has had its hflip control inverted against the
+ * silicon, and nothing in this repo has yet put a rot-0 picture on a glass to
+ * see which way the bit really mirrors (the 90/270 VFLIP was). Set this to 1
+ * (the HP's TR_OV9281_HMIRROR_ACTIVE_LOW CMake option) if, on the bench, the
+ * physical LEFT arm raised makes the figure's arm go up on the screen's RIGHT
+ * (README "Controls", FLASH-RECIPE "Bench acceptance"): the HP then writes
+ * the bit the other way round and still reports the TRUTH -- whether the view
+ * is mirrored -- in tr_cam_view_t.mirror, which is what the HE reads, so only
+ * the HP image changes. Applies to the rot-0 register only. */
+#ifndef TR_OV9281_HMIRROR_ACTIVE_LOW
+#define TR_OV9281_HMIRROR_ACTIVE_LOW 0
+#endif
+
+/* The flip-bit value that makes the upright view mirrored (want != 0) or not. */
+static inline uint8_t tr_cam_mirror_bit(int rot, int want)
+{
+	int inverted = rot == 0 && TR_OV9281_HMIRROR_ACTIVE_LOW;
+
+	return ((want != 0) != inverted) ? TR_OV9281_FLIP_BIT : 0u;
+}
+
+/* Whether the view is mirrored, from the register value read back. */
+static inline int tr_cam_mirrored_from_reg(int rot, uint8_t reg_value)
+{
+	int inverted = rot == 0 && TR_OV9281_HMIRROR_ACTIVE_LOW;
+
+	return ((reg_value & TR_OV9281_FLIP_BIT) != 0u) != inverted;
+}
+
 #endif /* TR_CAM_ROT_H */

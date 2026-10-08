@@ -70,6 +70,8 @@ mk_build() { # dir board_line extra_i2c_status(okay|disabled) uart5_status lpgpi
 	# ROT (env): the TR_CAM_ROTATE cache value, 90 when unset; ROT= writes it empty.
 	# MIR (env): the TR_CAM_MIRROR cache value, ON when unset; MIR= leaves the entry out.
 	printf '%s\nTR_CAM_ROTATE:STRING=%s\n' "$2" "${ROT-90}" > "$1/CMakeCache.txt"
+	# NPU (env): the TR_INPUT_NPU cache value, ON when unset (an HE build's entry; HP builds ignore it).
+	[ -z "${NPU-ON}" ] || printf 'TR_INPUT_NPU:BOOL=%s\n' "${NPU-ON}" >> "$1/CMakeCache.txt"
 	[ -z "${MIR-ON}" ] || printf 'TR_CAM_MIRROR:BOOL=%s\n' "${MIR-ON}" >> "$1/CMakeCache.txt"
 	head -c 4096 /dev/zero > "$1/zephyr/zephyr.bin"
 	: > "$1/zephyr/zephyr.elf"
@@ -124,6 +126,12 @@ ROT=0 mk_build "$t/he-rot0" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0
 ROT=270 mk_build "$t/he-rot270" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
 MIR=OFF mk_build "$t/he-mir-off" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
 MIR= mk_build "$t/he-no-mir" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
+NPU=OFF mk_build "$t/he-no-npu" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
+NPU= mk_build "$t/he-no-npu-entry" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
+MIR=1 mk_build "$t/he-mir-1" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
+MIR=true mk_build "$t/he-mir-true" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
+MIR=0 mk_build "$t/he-mir-0" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
+MIR=yes mk_build "$t/hp-mir-yes" 'BOARD:STRING=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp' disabled disabled disabled
 
 # A model file of exactly the right size, and a wrong-size one.
 head -c 2429520 /dev/zero > "$t/model.bin"
@@ -167,6 +175,12 @@ expect_he 0 "HE 270 with HP 90: both portrait, the HE only needs the shape" "$t/
 expect_he 1 "HE portrait with HP landscape" "$t/rot0" "$t/he"
 expect_he 1 "HE landscape with HP portrait" "$t/good" "$t/he-rot0"
 expect_he 1 "HE mirror OFF with HP mirror ON (the arms would swap)" "$t/good" "$t/he-mir-off"
+expect_he 0 "HE mirror 1 vs HP ON: the same boolean" "$t/good" "$t/he-mir-1"
+expect_he 0 "HE mirror true vs HP ON" "$t/good" "$t/he-mir-true"
+expect_he 0 "HE mirror ON vs HP yes" "$t/hp-mir-yes" "$t/he"
+expect_he 1 "HE mirror 0 vs HP ON" "$t/good" "$t/he-mir-0"
+expect_he 1 "an HE build with TR_INPUT_NPU=OFF" "$t/good" "$t/he-no-npu"
+expect_he 1 "an HE build with no TR_INPUT_NPU entry" "$t/good" "$t/he-no-npu-entry"
 expect_he 1 "an HE build with no TR_CAM_MIRROR entry (from before the arm controls)" "$t/good" "$t/he-no-mir"
 # The values it packages are printed.
 if ! hp_vision_check "$t/good" "$t/model.bin" "$t/nm" 2>&1 | grep -q 'TR_CAM_ROTATE=90 TR_CAM_MIRROR=ON'; then

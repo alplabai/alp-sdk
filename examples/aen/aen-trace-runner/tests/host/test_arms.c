@@ -34,6 +34,9 @@ static int rise_pct(arm_t a)
 /* The player facing the camera as it is DRAWN under TR_CAM_MIRROR, with MoveNet's labels
  * (the keypoints at larger x are "left"). `left` / `right` are the player's
  * own arms. */
+static int g_left_wri,
+    g_right_wri; /* the keypoints of the player's own wrists, last player_pct() */
+
 static tr_pose_t player_pct(int left_pct, int right_pct)
 {
 	enum { CX = UW / 2, CY = 220 };
@@ -52,6 +55,8 @@ static tr_pose_t player_pct(int left_pct, int right_pct)
 
 	p.kp[a]     = (tr_kp_t){ (int16_t)(CX + ls * SW / 2), CY, HI };
 	p.kp[b]     = (tr_kp_t){ (int16_t)(CX - ls * SW / 2), CY, HI };
+	g_left_wri  = a + 4;
+	g_right_wri = b + 4;
 	p.kp[a + 4] = (tr_kp_t){ (int16_t)(CX + ls * SW), (int16_t)(CY - left_pct * SW / 100), HI };
 	p.kp[b + 4] = (tr_kp_t){ (int16_t)(CX - ls * SW), (int16_t)(CY - right_pct * SW / 100), HI };
 	p.kp[TR_KP_LHIP] = (tr_kp_t){ (int16_t)(CX + SW / 3), CY + 150, HI };
@@ -150,13 +155,23 @@ int main(void)
 	s = feed(player(UP, UP), HOLD); /* lowered, so it counts again */
 	assert(s.jumps == 1 && s.lane == 0);
 
-	/* An arm already up when the other goes up much later (past the window) is a lane step, not a
-	 * jump: two separate gestures. */
+	/* A staggered both-arms raise, the second arm later than the window while the first is
+	 * still up: the first arm has stepped its lane, the second makes it the jump. */
+	for (int first_left = 0; first_left < 2; first_left++) {
+		start();
+		feed(player(DOWN, DOWN), 5);
+		s = feed(first_left ? player(UP, DOWN) : player(DOWN, UP), 3 * TR_ARM_SETTLE_POSES);
+		assert(s.lane == (first_left ? -1 : +1) && s.jumps == 0);
+		s = feed(player(UP, UP), HOLD);
+		assert(s.lane == 0 && s.jumps == 1);
+	}
+	/* ...but the second arm after the first came DOWN is its own lane step. */
 	start();
 	feed(player(DOWN, DOWN), 5);
 	s = feed(player(UP, DOWN), HOLD);
 	assert(s.lane == -1);
-	s = feed(player(UP, UP), HOLD);
+	feed(player(DOWN, DOWN), 3);
+	s = feed(player(DOWN, UP), HOLD);
 	assert(s.lane == +1 && s.jumps == 0);
 
 	/* 4. Hysteresis: an arm hovering between the lowered and the raised line
@@ -284,6 +299,50 @@ int main(void)
 		assert(a.arm_raise[TR_ARM_LEFT] < 0 && b.arm_raise[TR_ARM_LEFT] >= TR_ARM_UP_PCT);
 		assert(b.arm_raise[TR_ARM_RIGHT] >= TR_ARM_UP_PCT);
 	}
+
+	/* 11. The arm clock is TIME. A wrist that leaves the top of the frame (unjudged)
+	 * or is parked in the hysteresis band after its rise never confirms the
+	 * gesture; the other arm seconds later is a lane step, not a jump. */
+	for (int how = 0; how < 2; how++) {
+		start();
+		feed(player(DOWN, DOWN), 5);
+		feed(player(UP, DOWN), 1); /* the left wrist crosses the line... */
+		if (how == 0) {
+			tr_pose_t gone = player(UP, DOWN);
+
+			gone.kp[g_left_wri].score = 0; /* ...and goes out of frame */
+			feed(gone, 2 * TR_ARM_SETTLE_POSES);
+		} else {
+			feed(player_pct(35, -80), 2 * TR_ARM_SETTLE_POSES); /* ...and parks in the band */
+		}
+		s = feed(player(DOWN, UP), HOLD);
+		assert(s.lane == +1 && s.jumps == 0);
+	}
+	/* The first judged pose primes PER ARM: an all-unknown pose primes nothing, so an arm
+	 * that is already up when it is first seen is spent, not a step. */
+	start();
+	{
+		tr_pose_t blind = player(DOWN, DOWN);
+
+		blind.kp[g_left_wri].score  = 0;
+		blind.kp[g_right_wri].score = 0;
+		feed(blind, 1);
+	}
+	s = feed(player(UP, DOWN), HOLD);
+	assert(s.lane == 0 && s.jumps == 0);
+	/* ...and one arm judged first does not prime the other. */
+	start();
+	{
+		tr_pose_t half = player(DOWN, UP);
+
+		half.kp[g_left_wri].score = 0;
+		feed(half, 3);
+	}
+	s = feed(player(UP, UP), HOLD); /* the left is first judged only now, already up: spent */
+	assert(s.lane == 0 && s.jumps == 0);
+	feed(player(DOWN, DOWN), 3);
+	s = feed(player(UP, UP), HOLD); /* both lowered, then both raised: a jump */
+	assert(s.lane == 0 && s.jumps == 1);
 
 	/* 10. Left is the player's left, in this build's picture of them. */
 	{

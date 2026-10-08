@@ -152,6 +152,21 @@ int main(void)
 		                      : TR_OV9281_REG_TIMING_FORMAT1));
 	}
 
+	/* 1b. The flip-bit helpers: the bit written for "mirrored" reads back as mirrored, and
+	 * "not mirrored" as not, at every rotation, whichever sense the rot-0 bit has. */
+	for (int rot = 0; rot <= 270; rot += 90) {
+		if (rot == 180) {
+			continue;
+		}
+		for (int want = 0; want < 2; want++) {
+			uint8_t reg = (uint8_t)(0x60u | tr_cam_mirror_bit(rot, want));
+
+			assert(tr_cam_mirrored_from_reg(rot, reg) == want);
+			assert((reg & 0x60u) == 0x60u); /* the neighbouring bits are untouched */
+		}
+	}
+	assert(TR_OV9281_HMIRROR_ACTIVE_LOW || tr_cam_mirror_bit(0, 1) == TR_OV9281_FLIP_BIT);
+
 	/* 2. A marked corner, the bench's TR_CAM_ROTATE=90: the scene's raw
 	 * top-left pixel shows at the upright TOP-RIGHT unmirrored (the image
 	 * turned clockwise), and a selfie puts it at the TOP-LEFT. */
@@ -186,6 +201,24 @@ int main(void)
 		tr_track_calibrate(&t, tr_pose_box(&down));
 		assert(t.calibrated);
 		(void)hold(&t, rot, flip, false, false, 3); /* primed, both arms down */
+
+		/* MoveNet's own L/R labels play no part: a pose with every pair swapped (as if
+		 * the model had labelled the mirrored body the other way round) measures the
+		 * same arms. */
+		{
+			tr_pose_t p = as_delivered(player(TR_CAM_UP_W(rot), uh, true, false), rot, flip);
+			tr_pose_t q = p;
+
+			for (int k = TR_KP_LEYE; k < TR_POSE_KP; k += 2) {
+				q.kp[k]     = p.kp[k + 1];
+				q.kp[k + 1] = p.kp[k];
+			}
+			tr_box_t a = tr_pose_box(&p), b = tr_pose_box(&q);
+
+			assert(a.arm_raise[TR_ARM_LEFT] == b.arm_raise[TR_ARM_LEFT] &&
+			       a.arm_raise[TR_ARM_RIGHT] == b.arm_raise[TR_ARM_RIGHT]);
+			assert(a.arm_raise[TR_ARM_LEFT] >= TR_ARM_UP_PCT && a.arm_raise[TR_ARM_RIGHT] < 0);
+		}
 
 		tr_intent_t in = hold(&t, rot, flip, true, false, 10);
 

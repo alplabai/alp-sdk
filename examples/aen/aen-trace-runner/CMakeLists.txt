@@ -1,24 +1,21 @@
 cmake_minimum_required(VERSION 3.20)
 
-# The camera is opt-in: -DTR_CAMERA=ON. Default OFF because the board the game
-# runs on, the E1M-AEN803 2026W36-0009 EVK, has the display panel and
-# no camera on J5 -- the only camera rig is on 2026W36-0001. A camera build also costs
-# a 512 KiB video pool at the base of SRAM0 (camera.conf), which is exactly the
-# space the renderer's back buffer needs; without it the game double-buffers
-# in SRAM0 instead of reaching for SRAM1, which is unpowered at boot.
-option(TR_CAMERA "Stack the OV9281 camera shields and the video buffer pool" OFF)
+# The camera is the M55-HP's (hp_vision, TR_INPUT_NPU=ON). The old
+# camera-on-the-HE path (TR_CAMERA) had no keypoints, so none of the arm
+# controls (lane, jump), left the game unwinnable, and cost a 512 KiB video
+# pool at the base of SRAM0, on top of the renderer's back buffer: refused.
+option(TR_CAMERA "Removed: use TR_INPUT_NPU=ON (the HP owns the camera)" OFF)
+if(TR_CAMERA)
+	message(FATAL_ERROR "TR_CAMERA is removed: the HE-side camera and classical detector have no "
+			     "keypoints, so no lane or jump control. Use -DTR_INPUT_NPU=ON with the "
+			     "hp_vision image (README 'Controls').")
+endif()
 
 # NPU body control (docs/superpowers/specs/2026-09-24-npu-body-control-design.md):
 # the HE reads the HP's pose slot (src/ipc/tr_pslot.h) instead of running a
 # local camera + classical detector -- the M55-HP now owns the camera, the
-# Ethos-U NPU and (separately, TR_SND_HP) sound. Exclusive with TR_CAMERA:
-# that option is the OTHER, camera-on-THIS-core path (the TR_RENDER=M55
-# booth fallback / 2026W36-0001 rig), and the two body-detection sources are never
-# both wanted in one image.
+# Ethos-U NPU and (separately, TR_SND_HP) sound.
 option(TR_INPUT_NPU "Read body position from the HP's pose slot instead of a local camera" OFF)
-if(TR_INPUT_NPU AND TR_CAMERA)
-	message(FATAL_ERROR "TR_INPUT_NPU and TR_CAMERA are exclusive -- pick one body-detection source")
-endif()
 if(TR_INPUT_NPU)
 	# The HP owns I2C1 (the camera SCCB bus, 0x49011000) once the HE has
 	# finished with it: the HE's display shield may configure a bridge over the
@@ -49,11 +46,6 @@ if(TR_INPUT_NPU AND TR_RENDER STREQUAL "M55")
 	# combination rather than add cache maintenance nothing has exercised.
 	message(FATAL_ERROR "TR_INPUT_NPU needs TR_RENDER=A32 -- TR_RENDER=M55 runs CONFIG_DCACHE=y "
 			     "(m55_render.conf) and the pose slot has no cache maintenance")
-endif()
-if(TR_RENDER STREQUAL "A32" AND TR_CAMERA)
-	# The camera pool sits at the base of SRAM0 -- on top of TR_FB_A -- until
-	# plan task T-A8 moves it to SRAM1 0x02480000.
-	message(FATAL_ERROR "TR_CAMERA needs TR_RENDER=M55 until the video pool moves to SRAM1 (plan T-A8)")
 endif()
 if(TR_RENDER STREQUAL "M55")
 	# prj.conf pins CONFIG_DCACHE=n for the A32 link (the M55 must see the
@@ -88,12 +80,6 @@ foreach(shield IN LISTS SHIELD)
 	endif()
 endforeach()
 
-if(TR_CAMERA)
-	# Carrier CSI connector + OV9281 sensor -- the shield string
-	# examples/aen/aen-camera-firstlight (PR #2247) verified on the bench.
-	list(APPEND SHIELD e1m_evk_rpi_csi innomaker_cam_ov9281)
-	list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/camera.conf)
-endif()
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(trace_runner LANGUAGES C)
 
@@ -114,7 +100,7 @@ target_sources(app PRIVATE
 	src/vision/track.c
 )
 if(TR_INPUT_NPU)
-	target_sources(app PRIVATE src/ipc/tr_pslot.c)
+	target_sources(app PRIVATE src/ipc/tr_pslot.c src/ipc/tr_cam_view.c)
 	target_compile_definitions(app PRIVATE TR_INPUT_NPU=1)
 	# The camera's mounting rotation (src/vision/cam_rot.h; empty = its
 	# default). The HE only needs 0 vs 90/270 (the upright frame's

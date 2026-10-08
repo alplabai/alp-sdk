@@ -558,7 +558,7 @@ static void video_text_c(const vcv_t *cv, int cx, int y0, const char *s, int sca
  * before any band is claimed -- the frame_go barrier publishes it to core 1). */
 static tr_cam_view_t vid_cv;      /* the camera view, range-checked; .rotate also sets the layout */
 static bool          vid_have_cv; /* vid_cv is safe to read pixels through */
-static bool          vid_lamp[4]; /* LEFT, RIGHT, JUMP, DUCK */
+static bool          vid_lamp[4]; /* LEFT ARM, RIGHT ARM, BOTH ARMS (the jump), DUCK */
 static bool          vid_have_hz; /* hp_vision's loop rate is live */
 static char          vid_hz[12];  /* "NN.NHz" or "--" */
 static char          vid_dims[12]; /* the upright image's size, "400x640" */
@@ -676,6 +676,19 @@ static void draw_strips_portrait(const vcv_t *cv)
 	video_text_c(cv, rcx, TR_VID_Y0 + 128, "NPU", 4, COLOR_LABEL);
 	video_text_c(cv, rcx, TR_VID_Y0 + 160, vid_hz, 5, vid_have_hz ? COLOR_KP : COLOR_LABEL);
 }
+
+/* The landscape layout's arithmetic, checked where it is used: the picture is
+ * centred, the two letterbox bands are equal and hold the lamps (square, gap,
+ * caption) and the label (two lines), and each lamp cell holds the widest
+ * caption ("RIGHT ARM" / "BOTH ARMS": 8 glyphs of 4 px at scale 4 and an M of
+ * 6 px, 152 px). */
+_Static_assert(2 * LAND_BAND_H + TR_CAM_SENSOR_H == TR_VID_H, "the landscape bands are equal");
+_Static_assert(TR_CAM_UP_W(0) <= TR_VID_W && TR_CAM_UP_H(0) == TR_CAM_SENSOR_H,
+               "the landscape picture fits the video area");
+_Static_assert(8 + LAND_LAMP_SQ + 10 + 5 * LAMP_CAP_SCALE <= LAND_BAND_H,
+               "the lamps and captions fit the top band");
+_Static_assert(12 + 32 + 5 * 5 <= LAND_BAND_H, "the camera / NPU label fits the bottom band");
+_Static_assert(TR_VID_W / 4 >= 152, "a lamp cell holds the widest caption");
 
 /* Landscape: the four lamps side by side in the top letterbox band (a
  * LAND_LAMP_SQ square over its caption, one TR_VID_W / 4 cell each), the

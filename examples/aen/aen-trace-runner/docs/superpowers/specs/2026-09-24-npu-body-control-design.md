@@ -165,6 +165,11 @@ integration task after the probe passes.
 
 ## 3. Motion logic (HE, pure C, host-tested)
 
+> **Superseded by #2788** (the arm-raise controls): lane and jump are no longer read from the
+> torso, so the lane-band, jump and `TR_CAM_MIRROR_X` items below no longer exist; lane and jump
+> are arm raises (`src/vision/arms.h`) and only the duck is read from the torso. The rest of this
+> section is the design history it was built from.
+
 `src/vision/pose.c` turns a pose into a torso box; `track.c` reads intent from it. Revised
 2026-09-25 after the 2026W36-0009 finding "it always sees me jumping": with the legs out of frame the
 first box (head top to ankle, else frame bottom) read a player walking toward the camera as a

@@ -242,13 +242,13 @@ static void tr_cam_mirror_apply(void)
 	int      rc  = ov9281_read_reg8(reg, &v);
 
 	if (rc >= 0) {
-		v  = TR_CAM_MIRROR ? (uint8_t)(v | TR_OV9281_FLIP_BIT) : (uint8_t)(v & ~TR_OV9281_FLIP_BIT);
+		v  = (uint8_t)((v & ~TR_OV9281_FLIP_BIT) | tr_cam_mirror_bit(TR_CAM_ROTATE, TR_CAM_MIRROR));
 		rc = ov9281_write_reg8(reg, v);
 	}
 	if (rc >= 0) {
 		rc = ov9281_read_reg8(reg, &v);
 	}
-	g_cam_mirrored = (uint16_t)(rc >= 0 && (v & TR_OV9281_FLIP_BIT) != 0u);
+	g_cam_mirrored = (uint16_t)(rc >= 0 && tr_cam_mirrored_from_reg(TR_CAM_ROTATE, v));
 	printk("camera  : mirror %d -> 0x%04x = 0x%02x (rc %d)%s\n",
 	       TR_CAM_MIRROR,
 	       reg,

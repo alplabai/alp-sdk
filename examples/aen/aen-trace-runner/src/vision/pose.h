@@ -81,6 +81,12 @@ typedef struct {
  */
 tr_box_t tr_pose_box(const tr_pose_t *p);
 
+/* tr_pose_box() for a camera whose view is (or is not) mirrored like a
+ * selfie, as the HP reports it (tr_cam_view_t.mirror, the sensor flip bit
+ * read back): decides which arm of the pose is the player's left. The plain
+ * form assumes this build's TR_CAM_MIRROR. */
+tr_box_t tr_pose_box_mirrored(const tr_pose_t *p, bool mirrored);
+
 /*
  * "A player is here" -- the one presence rule the booth flow (main.c:
  * attract, the join lobby, a run's end, the initials) decides on. A single

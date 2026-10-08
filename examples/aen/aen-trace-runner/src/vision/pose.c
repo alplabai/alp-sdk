@@ -53,11 +53,12 @@ static int16_t arm_raise(const tr_pose_t *p, int sho, int wri, int sw)
  * view: with TR_CAM_MIRROR the player looks at a selfie, so the arm on the
  * screen's left is their LEFT arm; without it the camera sees them face to
  * face, so the arm on the screen's left is their RIGHT. So the shoulders'
- * x order says which pair is on the screen's left, and TR_CAM_MIRROR says
- * whose arm that is. The same rule holds at every TR_CAM_ROTATE: the pose is
+ * x order says which pair is on the screen's left, and the mirror (the
+ * HP's published truth on the HE, TR_CAM_MIRROR otherwise) says whose arm
+ * that is. The same rule holds at every TR_CAM_ROTATE: the pose is
  * already in the UPRIGHT frame (cam_rot.h), where the mirror is a
  * left/right one at 0, 90 and 270 alike. */
-static void pose_arms(const tr_pose_t *p, int16_t raise[2])
+static void pose_arms(const tr_pose_t *p, bool mirrored, int16_t raise[2])
 {
 	raise[TR_ARM_LEFT] = raise[TR_ARM_RIGHT] = TR_ARM_UNKNOWN;
 	if (p->kp[TR_KP_LSHO].score < TR_ARM_KP_MIN || p->kp[TR_KP_RSHO].score < TR_ARM_KP_MIN) {
@@ -70,8 +71,10 @@ static void pose_arms(const tr_pose_t *p, int16_t raise[2])
 	}
 	/* true: the label-LEFT pair is the one on the screen's left. */
 	bool l_on_screen_left = p->kp[TR_KP_LSHO].x < p->kp[TR_KP_RSHO].x;
-	/* The player's left arm is the screen-left pair when mirrored. */
-	bool l_is_player_left = l_on_screen_left == (TR_CAM_MIRROR != 0);
+	/* The player's left arm is the screen-left pair when mirrored. A camera mounted
+	 * upside down (TR_CAM_FLIP_Y: a 180 degree turn) reverses x as well as y, so it
+	 * swaps the sides once more. */
+	bool l_is_player_left = (l_on_screen_left == mirrored) != (TR_CAM_FLIP_Y != 0);
 
 	raise[l_is_player_left ? TR_ARM_LEFT : TR_ARM_RIGHT] = arm_raise(p, TR_KP_LSHO, TR_KP_LWRI, sw);
 	raise[l_is_player_left ? TR_ARM_RIGHT : TR_ARM_LEFT] = arm_raise(p, TR_KP_RSHO, TR_KP_RWRI, sw);
@@ -79,13 +82,18 @@ static void pose_arms(const tr_pose_t *p, int16_t raise[2])
 
 tr_box_t tr_pose_box(const tr_pose_t *p)
 {
+	return tr_pose_box_mirrored(p, TR_CAM_MIRROR != 0);
+}
+
+tr_box_t tr_pose_box_mirrored(const tr_pose_t *p, bool mirrored)
+{
 	tr_box_t b  = { .valid = false };
 	int      sx = 0, sy = 0, hx = 0, hy = 0;
 	unsigned conf = 0u;
 	int      ns   = mid(p, TR_KP_LSHO, &sx, &sy, &conf);
 	int      nh   = mid(p, TR_KP_LHIP, &hx, &hy, &conf);
 
-	pose_arms(p, b.arm_raise);
+	pose_arms(p, mirrored, b.arm_raise);
 	if (ns == 0) {
 		return b;
 	}

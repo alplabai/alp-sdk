@@ -21,6 +21,15 @@ hp_vision_refuse() {
 	} >&2
 }
 
+# CMake booleans come back as ON/OFF, 1/0, TRUE/FALSE, YES/NO, Y/N in any case:
+# 1 for true, 0 for the rest (including empty).
+hv_bool() {
+	case "${1^^}" in
+	ON | 1 | TRUE | YES | Y) echo 1 ;;
+	*) echo 0 ;;
+	esac
+}
+
 hp_vision_check() {
 	local hd=$1 model=$2 nm=$3 he=${4:-}
 	if [ ! -f "$hd/CMakeCache.txt" ]; then
@@ -53,15 +62,20 @@ hp_vision_check() {
 	# (src/vision/pose.c). A pair that disagrees steers the wrong way round or
 	# misreads every keypoint, with nothing on the console to say so: refuse.
 	if [ -n "$he" ]; then
-		local hrot hmir
+		local hrot hmir hnpu
+		hnpu=$(sed -n 's/^TR_INPUT_NPU:[A-Z]*=//p' "$he/CMakeCache.txt" 2>/dev/null | tr -d '\r')
 		hrot=$(sed -n 's/^TR_CAM_ROTATE:[A-Z]*=//p' "$he/CMakeCache.txt" 2>/dev/null | tr -d '\r')
 		hmir=$(sed -n 's/^TR_CAM_MIRROR:[A-Z]*=//p' "$he/CMakeCache.txt" 2>/dev/null | tr -d '\r')
 		echo "build-release: HE camera: TR_CAM_ROTATE=${hrot:-<unset>} TR_CAM_MIRROR=${hmir:-<unset>}" >&2
+		if [ "$(hv_bool "$hnpu")" != 1 ]; then
+			hp_vision_refuse "$he is not a TR_INPUT_NPU=ON build (TR_INPUT_NPU='${hnpu:-<unset>}') -- the HE reads no pose from this HP image"
+			return 1
+		fi
 		if [ -z "$hmir" ]; then
 			hp_vision_refuse "$he/CMakeCache.txt has no TR_CAM_MIRROR -- an HE build from before the arm controls; rebuild it with -DTR_CAM_MIRROR=${mir:-ON} to match the HP"
 			return 1
 		fi
-		if [ "${hmir^^}" != "${mir^^}" ]; then
+		if [ "$(hv_bool "$hmir")" != "$(hv_bool "$mir")" ]; then
 			hp_vision_refuse "HE TR_CAM_MIRROR=$hmir but HP TR_CAM_MIRROR=${mir:-<unset>} -- the two builds must agree (the arm controls read which arm is the player's left from it)"
 			return 1
 		fi

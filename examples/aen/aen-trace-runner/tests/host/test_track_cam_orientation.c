@@ -43,10 +43,11 @@ int main(void)
 
 		tr_box_t b = tr_pose_box(&p);
 
-		/* Default TR_CAM_MIRROR=1: the label-LEFT pair sits at larger x, so it is the
-		 * player's RIGHT arm (pose.c); its wrist is below the shoulder in the
+		/* Default TR_CAM_MIRROR=1: the label-LEFT pair sits at larger x, which in an
+		 * upright selfie is the player's RIGHT arm -- but a 180 degree mount reverses
+		 * x too (pose.c), so it is their LEFT; its wrist is below the shoulder in the
 		 * flipped image, i.e. raised by one shoulder width. */
-		assert(b.arm_raise[TR_ARM_RIGHT] == 100 && b.arm_raise[TR_ARM_LEFT] == -100);
+		assert(b.arm_raise[TR_ARM_LEFT] == 100 && b.arm_raise[TR_ARM_RIGHT] == -100);
 	}
 
 	/* TR_CAM_FLIP_Y, duck: the centre UP the raw frame. */

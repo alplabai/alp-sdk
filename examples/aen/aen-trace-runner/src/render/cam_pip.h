@@ -5,10 +5,10 @@
  * With the sensor on its side the upright image is 400x640 portrait at
  * x 160..559, leaving a 160-px strip each side (intent lamps left, the
  * "CAMERA / NPU Hz" label right -- a32/renderer/render.c). Upright
- * (rotation 0, the arm controls' release) it is 640x400 LANDSCAPE at
- * x 40..679, rows 120..519 of the area: 1:1 (fit width less a 40-px margin,
- * never stretched), letterboxed 120 rows above (the lamps) and below (the
- * label). Host-tested
+ * (rotation 0, the arm controls' release) it is 640x400 LANDSCAPE,
+ * centred by tr_cam_img_x0(0) / tr_cam_img_y0(0): 1:1, never stretched, a
+ * (TR_VID_W - 640) / 2 margin each side, letterboxed (TR_VID_H - 400) / 2 rows
+ * above (the lamps) and below (the label). Host-tested
  * (tests/host/test_r3d_cam_pip.c, the NEON kernel under qemu-arm too). No
  * Zephyr; a32/renderer/render.c calls these same functions.
  */

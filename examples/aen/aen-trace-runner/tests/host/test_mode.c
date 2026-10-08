@@ -101,12 +101,12 @@ int main(void)
 		c.paused = true; /* as if a prior pause was already in effect */
 
 		(void)tr_track_update(&t, box(270, 100, 100, 300, 90)); /* valid: reacquired */
-		assert(t.arms.primed);
+		assert(tr_arms_primed(&t.arms));
 		bool run = tr_ctl_step(&c, &t, tr_track_player_lost(&t));
 
 		assert(!c.paused);
 		assert(!run); /* this tick is spent resyncing, not stepping -- see case 2 */
-		assert(!t.arms.primed);
+		assert(!tr_arms_primed(&t.arms));
 	}
 
 	/*
@@ -172,10 +172,10 @@ int main(void)
 		c.paused = true;
 
 		(void)tr_track_update(&t, arm_box(80, 0));
-		assert(t.arms.primed);
+		assert(tr_arms_primed(&t.arms));
 
 		tr_ctl_reset(&c, &t);
-		assert(!t.arms.primed);
+		assert(!tr_arms_primed(&t.arms));
 		assert(!c.paused);
 		for (int k = 0; k < 3 * TR_ARM_SETTLE_POSES; k++) {
 			tr_intent_t in = tr_track_update(&t, arm_box(80, 0));

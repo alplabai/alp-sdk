@@ -62,20 +62,20 @@ int main(void)
 		tr_attract_init(&a);
 		tr_track_init(&t, 400);
 		(void)tr_arms_step(&t.arms, down); /* primed: a pose has been seen */
-		assert(t.arms.primed);
+		assert(tr_arms_primed(&t.arms));
 
 		for (uint32_t k = 0; k < TR_ATTRACT_ENTER_TICKS; k++) {
 			(void)tr_attract_step(&a, &t, false);
 		}
 		assert(a.active);
-		assert(t.arms.primed); /* entry path never touches the tracker */
+		assert(tr_arms_primed(&t.arms)); /* entry path never touches the tracker */
 
 		for (uint32_t k = 0; k < TR_ATTRACT_JOIN_TICKS - 1; k++) {
 			(void)tr_attract_step(&a, &t, /*player_present=*/true);
-			assert(t.arms.primed); /* the lobby leaves the tracker alone */
+			assert(tr_arms_primed(&t.arms)); /* the lobby leaves the tracker alone */
 		}
 		assert(tr_attract_step(&a, &t, true) == TR_ATTRACT_LEFT);
-		assert(!t.arms.primed); /* resynced */
+		assert(!tr_arms_primed(&t.arms)); /* resynced */
 	}
 
 	/* 4. The synthetic input actually plays: over a run of many ticks the

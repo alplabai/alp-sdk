@@ -34,9 +34,13 @@ PLAYER's own, as they see themselves on the screen (a selfie view).
   hysteresis. A wrist or shoulder the model is not sure of (below `TR_ARM_KP_MIN`, 77 of 255) is
   ignored, and so is a player turned side-on (shoulders closer than `TR_ARM_MIN_SHOULDER_PX`).
 - **A both-arms raise never steps a lane.** A lane step waits `TR_ARM_SETTLE_POSES` (4 poses,
-  about 100 ms) for the other arm; if it comes up inside that window the gesture is a jump and
-  both arms are spent. The price is that a lane step lands about 100 ms after the arm crosses
-  the line.
+  about 100 ms, counted on every pose) for the other arm; if it comes up inside that window the
+  gesture is a jump and both arms are spent. The price is that a lane step lands about 100 ms
+  after the arm crosses the line. A wrist that leaves the frame or sinks back into the hysteresis
+  band during the window never confirms its rise. If the second arm comes up later, while the
+  first is still up from its own lane step, that is a jump too.
+- **A jump is not lost.** Asked during a duck or the last steps of a jump, it is held
+  `TR_JUMP_BUFFER_TICKS` (4) game steps and taken as soon as the runner is free.
 - Where you stand is not a control: stepping sideways does nothing. An arm already up when you
   join, or when play resumes after a pause, has to be lowered before it counts.
 - **Left and right follow the camera.** The pose model labels a limb by the anatomy it sees, so
@@ -45,7 +49,12 @@ PLAYER's own, as they see themselves on the screen (a selfie view).
   view, their right if the camera is not mirrored). The pose is already in the upright frame, so
   the rule is the same at every `TR_CAM_ROTATE`. `tests/host/test_cam_mirror.c` checks it through
   the sensor flip and the rotation for `0`, `90` and `270`, and `tests/host/test_arms.c` with the
-  mirror on and off.
+  mirror on and off. On the HE the mirror is not taken from its own `TR_CAM_MIRROR` but from the
+  HP's camera descriptor (`tr_cam_view_t.mirror`, the sensor flip bit read back), so what the sensor
+  really does decides; the build's value is only the fallback before the HP has published and the
+  `!!!!!` warning printed once if the two disagree. The rotation-0 flip bit has not been seen on
+  glass yet: `a32/release/FLASH-RECIPE.md` has the bench acceptance step and the
+  `TR_OV9281_HMIRROR_ACTIVE_LOW` HP option if it turns out reversed.
 - The lamps beside the camera picture say it on screen: **LEFT ARM**, **RIGHT ARM**,
   **BOTH ARMS** and **DUCK** light as the game acts on them.
 - Tilting the board (IMU) is still the camera-less way to play; see `TR_TILT_TAKEOVER`.
@@ -86,7 +95,7 @@ itself, and tilting the board (IMU) steers. The steps below build the full exhib
 <!-- cross-platform-lint:ignore -->
    ```sh
    make -C a32/stub
-   make -C a32/renderer
+   make -C a32/renderer TR_CAM_ROTATE=0
    python3 a32/stub/mkpayload.py info a32/renderer/renderer.bin --c-header build/tr_launch.h
    ```
 <!-- cross-platform-lint:resume -->
@@ -156,7 +165,6 @@ rewrites whole 16 KiB sectors, and that read-back is the only way to restore the
 | `TR_INPUT_NPU` | `OFF` | Read the player's pose from the HP's pose slot |
 | `TR_CAM_ROTATE` | `90` | With `TR_INPUT_NPU`: the camera's mounting rotation, `0` (landscape, the EVK bench release), `90` or `270` (portrait). Same value on the HP build |
 | `TR_CAM_MIRROR` | `ON` | With `TR_INPUT_NPU`: the HP mirrors the view like a selfie; decides which arm is the player's left. Same value on the HP build |
-| `TR_CAMERA` | `OFF` | HE reads the camera itself (needs `TR_RENDER=M55`) |
 | `TR_M55_AUTOLAUNCH` | `OFF` | HE launches the A32 renderer at boot (release) |
 | `TR_TILT_TAKEOVER` | `OFF` | The IMU tilt takes over steering when no player is seen |
 
@@ -211,7 +219,7 @@ the camera's mounting rotation and is independent of the panel's; the camera vie
 drawn in the portrait video half and rotated with the rest of the frame.
 
 Limits: the 2D `TR_RENDER=M55` path cannot rotate and refuses a display with a `mount-rotation` at
-build time; `TR_CAMERA` is refused with `TR_RENDER=A32`. The sound image is unaffected (it uses I2C
+build time. `TR_CAMERA` (a camera on the HE) is removed and refused at configure time: it had no keypoints, so no lane or jump. The sound image is unaffected (it uses I2C
 bus 0 and I2S3, not I2C1). Build-only for the RVT121 shield flow until it is run on the bench.
 
 ## Sound (reworked carriers only)

@@ -51,6 +51,16 @@
  * hand are rarely closer than a pose or two apart, so this is what keeps a
  * jump from first stepping a lane. Cost: a lane step lands
  * (TR_ARM_SETTLE_POSES - 1) poses (~100 ms) after the wrist crosses the line.
+ * The window is TIME: the age counts every new pose since the rise, whether or
+ * not the wrist is judged or in the hysteresis band meanwhile. When it runs
+ * out, a wrist that is still clearly up steps its lane; one that left the
+ * frame (UNKNOWN) or fell back into the band never confirmed the gesture, so
+ * the rise is dropped and a later rise starts afresh.
+ *
+ * A second arm that rises while the first is SPENT and still up (a staggered
+ * both-arms raise, later than the window) is a jump too: the first arm's lane
+ * step has already happened, the second turns it into the jump the player
+ * meant.
  * ponytail: tuning knob, retune on glass. */
 #define TR_ARM_SETTLE_POSES 4
 
@@ -63,9 +73,9 @@ enum {
 };
 
 typedef struct {
-	bool    primed;   /* a first pose has been seen since the last reset */
-	uint8_t state[2]; /* per arm: DOWN, RISING (counting), SPENT (up, already used) */
-	uint8_t age[2];   /* poses a RISING arm has been up */
+	bool    primed[2]; /* this arm has been judged since the last reset */
+	uint8_t state[2];  /* per arm: DOWN, RISING (counting), SPENT (up, already used) */
+	uint8_t age[2];    /* new poses since a RISING arm crossed the line (counted on every pose) */
 } tr_arms_t;
 
 typedef struct {
@@ -73,9 +83,15 @@ typedef struct {
 	bool   jump;       /* ONE tick only */
 } tr_arm_event_t;
 
-/* Forget everything: the next pose only records where the arms are. An arm
- * that is already up then is spent -- it does not fire until it has been
- * lowered and raised again. Call it wherever the player may have changed
+/* Both arms have been judged since the last reset (tests, bench prints). */
+static inline bool tr_arms_primed(const tr_arms_t *a)
+{
+	return a->primed[0] && a->primed[1];
+}
+
+/* Forget everything: the first pose that JUDGES an arm (not TR_ARM_UNKNOWN)
+ * only records where it is, per arm. An arm that is already up then is spent
+ * -- it does not fire until it has been lowered and raised again. Call it wherever the player may have changed
  * (a run starts, pause ends, the player is re-acquired). */
 void tr_arms_reset(tr_arms_t *a);
 
