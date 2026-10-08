@@ -9,7 +9,7 @@
 > resolution against the iMX93 memory map, which
 > `metadata/e1m_modules/E1M-NX9101.yaml` cannot resolve either
 > (`silicon_variant: TBD`).  Both are TBD by design
-> (project memory note: don't invent HW values) pending real NX9101
+> (HW values are not invented) pending real NX9101
 > silicon; this example is excluded from the build/emit-snapshot/
 > build-plan/system-manifest/parity-oracle gates for the same reason
 > (see those gates' own `#1025` comments) but its source and this
