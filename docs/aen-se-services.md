@@ -237,6 +237,16 @@ documented here so the path is review-ready, not so it is run casually.
 Sets the run power/clock profile (DCDC voltage 750–850 mV, clock sources, CPU
 frequency, power domains, memory retention, IO-flex 3V3).
 
+> **Gen1/gen2 mask hazard.** hal_alif's `aipm.h` selects its `memory_block_t`
+> and `*_MASK` layout with `CONFIG_ENSEMBLE_GEN2`, which no alp-sdk build
+> defines, so the `memory_blocks` masks it exposes are the gen1 layout even on
+> E8 (a gen2 part). Gen1 `BACKUP4K_MASK` is bit20, which is gen2 `FWRAM_MASK`;
+> gen2 `BACKUP4K_MASK` is bit21. Do not build `memory_blocks` from the hal_alif
+> `*_MASK` macros; use `ALP_AIPM_GEN2_*` from
+> `src/backends/power/alif_aipm_gen2.h`. Defining `CONFIG_ENSEMBLE_GEN2`
+> globally is a separate OSPI-affecting change tracked in
+> [#2785](https://github.com/alplabai/alp-sdk/issues/2785).
+
 ```c
 run_profile_t p;
 se_service_get_run_cfg(&p);     /* read the live baseline first */
