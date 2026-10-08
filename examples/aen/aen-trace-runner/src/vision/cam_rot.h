@@ -1,13 +1,20 @@
-/* src/vision/cam_rot.h -- the OV9281's mounting rotation (maintainer ruling,
- * "Half / half" layout): the sensor is mounted on its side, still streams
- * 640x400 GREY8, and everything downstream of the capture works on the
- * UPRIGHT image -- 400x640 portrait when rotated.
+/* src/vision/cam_rot.h -- the OV9281's mounting rotation. The sensor always
+ * streams 640x400 GREY8, and everything downstream of the capture works on
+ * the UPRIGHT image: 640x400 landscape when the camera sits upright, 400x640
+ * portrait when it is mounted on its side and the software turns it.
  *
  * TR_CAM_ROTATE: the degrees the SOFTWARE turns the raw sensor image
- * CLOCKWISE (as it would be displayed, unrotated) to make it upright -- 90,
- * 270, or 0 (no rotation: the old landscape path, kept for comparison).
+ * CLOCKWISE (as it would be displayed, unrotated) to make it upright -- 0,
+ * 90 or 270. All three are first-class:
+ *   0       the camera is mounted upright (the E1M-EVK's RPi CSI connector,
+ *           EVK-03): 640x400 LANDSCAPE, 16:10, shown at native 1:1 and
+ *           letterboxed in the portrait game's camera half. This is the
+ *           release for the arm-raise controls: arms reach sideways, and the
+ *           wider field of view keeps both in frame;
+ *   90, 270 the camera is mounted on its side (other rigs): 400x640 portrait.
+ * Whichever it is, set it the same on the HE and the HP build.
  *
- * Default 90, BENCH-VERIFIED (2026W36-0009, 2026-09-25): with the camera body
+ * Default 90 (the first reference rig), BENCH-VERIFIED (2026W36-0009, 2026-09-25): with the camera body
  * turned 90 deg clockwise as seen from its LENS side, 270 showed the player
  * upside down and 90 upright -- the maintainer confirmed it by eye. So a
  * standing player's head lands at the LEFT edge of the raw frame (the
@@ -66,10 +73,12 @@ static inline void tr_cam_rot_src(int rot, int src_w, int src_h, int ux, int uy,
 	}
 }
 
-/* TR_CAM_MIRROR (default 1, hp_vision's CMake option): the upright view is
- * mirrored left/right like a selfie -- the player raises their right hand,
- * the figure's hand on the RIGHT of the screen goes up; they step to their
- * own left, the figure moves screen-left. The SENSOR does it (one register
+/* TR_CAM_MIRROR (default 1, a CMake option of both the hp_vision and the HE
+ * image, which must agree): the upright view is mirrored left/right like a
+ * selfie -- the player raises their right arm, the figure's arm on the RIGHT
+ * of the screen goes up. The arm controls depend on it: with the mirror the
+ * arm on the screen's left is the player's LEFT arm, without it their RIGHT
+ * (src/vision/pose.c). The SENSOR does it (one register
  * bit, free), so the NPU input, the keypoints and the A32 video all see the
  * same mirrored raw frame and stay consistent with no pixel-path change.
  *
@@ -95,6 +104,36 @@ static inline void tr_cam_rot_src(int rot, int src_w, int src_h, int ux, int uy,
 static inline uint16_t tr_cam_mirror_reg(int rot)
 {
 	return rot != 0 ? TR_OV9281_REG_TIMING_FORMAT1 : TR_OV9281_REG_TIMING_FORMAT2;
+}
+
+/* BENCH TRAP: the sense of the HMIRROR bit (0x3821 bit 2, the rot-0 mirror).
+ * The Linux ov9282 driver has had its hflip control inverted against the
+ * silicon, and nothing in this repo has yet put a rot-0 picture on a glass to
+ * see which way the bit really mirrors (the 90/270 VFLIP was). Set this to 1
+ * (the HP's TR_OV9281_HMIRROR_ACTIVE_LOW CMake option) if, on the bench, the
+ * physical LEFT arm raised makes the figure's arm go up on the screen's RIGHT
+ * (README "Controls", FLASH-RECIPE "Bench acceptance"): the HP then writes
+ * the bit the other way round and still reports the TRUTH -- whether the view
+ * is mirrored -- in tr_cam_view_t.mirror, which is what the HE reads, so only
+ * the HP image changes. Applies to the rot-0 register only. */
+#ifndef TR_OV9281_HMIRROR_ACTIVE_LOW
+#define TR_OV9281_HMIRROR_ACTIVE_LOW 0
+#endif
+
+/* The flip-bit value that makes the upright view mirrored (want != 0) or not. */
+static inline uint8_t tr_cam_mirror_bit(int rot, int want)
+{
+	int inverted = rot == 0 && TR_OV9281_HMIRROR_ACTIVE_LOW;
+
+	return ((want != 0) != inverted) ? TR_OV9281_FLIP_BIT : 0u;
+}
+
+/* Whether the view is mirrored, from the register value read back. */
+static inline int tr_cam_mirrored_from_reg(int rot, uint8_t reg_value)
+{
+	int inverted = rot == 0 && TR_OV9281_HMIRROR_ACTIVE_LOW;
+
+	return ((reg_value & TR_OV9281_FLIP_BIT) != 0u) != inverted;
 }
 
 #endif /* TR_CAM_ROT_H */

@@ -8,8 +8,10 @@
  *   - every video-area row is written (no stale framebuffer shows through);
  *   - the camera turned upright at native 1:1, centred at x 160..559 (270
  *     and 90), or 640x400 at x 40, row 120 (0);
- *   - the lamps (JUMP lit from air_ticks, LEFT unlit), the live Hz label,
- *     a skeleton keypoint on its image pixel;
+ *   - the lamps (BOTH ARMS lit from air_ticks, LEFT ARM unlit) down the left
+ *     strip of the portrait layout and along the top letterbox of the
+ *     landscape one, the live Hz label, a skeleton keypoint on its image
+ *     pixel;
  *   - bands in any order, on either core's scratch, give the same frame. */
 #define _GNU_SOURCE
 #include <assert.h>
@@ -149,13 +151,31 @@ int main(void)
 	    &host_cam_view_mem, TR_MEM_CAM_POOL, 43u, TR_CAM_SRC_W, TR_CAM_SRC_H, 0u, 0u, pip_barrier);
 	frame(&in, fb);
 	for (int y = 0; y < TR_CAM_SRC_H; y++) {
-		for (int x = 160; x < 560; x++) { /* clear of the strips' own lamps/label */
+		for (int x = 40; x < 40 + TR_CAM_SRC_W;
+		     x++) { /* the whole picture: lamps/label are letterboxed */
 			uint8_t g = pool[y * TR_CAM_SRC_W + x - 40];
 
 			assert(at(fb, x, 120 + y) == (uint16_t)(((g >> 3) << 11) | ((g >> 2) << 5) | (g >> 3)));
 		}
 	}
 	assert(at(fb, 300, 60) == COLOR_PANEL_BG && at(fb, 300, 600) == COLOR_PANEL_BG);
+	assert(at(fb, 39, 120 + 200) == COLOR_PANEL_BG && at(fb, 680, 120 + 200) == COLOR_PANEL_BG);
+	/* the lamps along the top letterbox, one 180-px cell each: LEFT ARM unlit,
+	 * BOTH ARMS lit (air_ticks), DUCK unlit */
+	assert(at(fb, 90, 8 + LAND_LAMP_SQ / 2) == COLOR_LAMP_OFF);
+	assert(at(fb, 450, 8 + LAND_LAMP_SQ / 2) == COLOR_LAMP_ON);
+	assert(at(fb, 630, 8 + LAND_LAMP_SQ / 2) == COLOR_LAMP_OFF);
+	/* the live Hz line, in green, in the bottom letterbox's right half */
+	{
+		int green = 0;
+
+		for (int vy = TR_VID_H - LAND_BAND_H; vy < TR_VID_H; vy++) {
+			for (int x = 360; x < 720; x++) {
+				green += at(fb, x, vy) == COLOR_KP;
+			}
+		}
+		assert(green > 100);
+	}
 
 	/* 6. a view the renderer must not trust: wrong size -> background, no read */
 	tr_cam_view_write(

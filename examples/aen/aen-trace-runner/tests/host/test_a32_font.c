@@ -85,11 +85,11 @@ int main(void)
 		/* Every string the video area actually draws (render.c
 		 * draw_strips(): "CAMERA", the upright size "400x640" / "640x400",
 		 * "NPU", tr_cam_pip_format_hz()'s "NN.NHz" or "--", and the four
-		 * lamp captions), concatenated -- not a hand-picked char list that
+		 * lamp captions, lamp_cap[]), concatenated -- not a hand-picked char list that
 		 * could itself miss one. */
 		static const char chars[] = "CAMERA 640x400 400x640 NPU -- "
 		                            "0123456789.Hz"
-		                            "LEFTRIGHTJUMPDUCK";
+		                            "LEFT ARM RIGHT ARM BOTH ARMS DUCK";
 
 		for (size_t i = 0; i < sizeof(chars) - 1; i++) {
 			char c = chars[i];

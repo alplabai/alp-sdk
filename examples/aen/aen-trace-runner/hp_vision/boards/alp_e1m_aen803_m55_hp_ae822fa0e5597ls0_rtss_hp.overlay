@@ -22,8 +22,8 @@
 	 * reservation, NOT probe/camera/prj.conf's SRAM0 default -- that
 	 * default lands the pool at SRAM0's base (0x02000000), which is FB A
 	 * + the A32 renderer's triangle setup records when this app runs
-	 * alongside the game (../CMakeLists.txt's own TR_CAMERA+TR_RENDER=A32
-	 * guard exists for exactly this collision). SRAM1 needs the A32/stub
+	 * alongside the game (a pool there is why the HE's old TR_CAMERA option
+	 * is refused). SRAM1 needs the A32/stub
 	 * boot to have already powered it (AEN memory note: SRAM1 bus-faults
 	 * cold, before that sequencing) -- a real ordering dependency for the
 	 * bench-runner, not provable here. 512 KiB: 2 x 256,000 B GREY8

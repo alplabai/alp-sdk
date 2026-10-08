@@ -24,7 +24,15 @@ else
 NAME     = renderer
 VDEFS    = -DRENDER_DL_GOLDEN=0
 endif
-O        = build-$(V)
+# TR_CAM_ROTATE (0, 90 or 270; empty = src/vision/cam_rot.h's default): the layout
+# of the camera area before the HP has published a view (render.c video_frame_state()).
+# Once it publishes, the HP's own rotation wins, so this only decides what the first
+# frames show; build it as the HE and HP are built (build-release.sh passes the HE's).
+TR_CAM_ROTATE ?=
+ifneq ($(TR_CAM_ROTATE),)
+ROT_DEFS = -DTR_CAM_ROTATE=$(TR_CAM_ROTATE)
+endif
+O        = build-$(V)$(if $(TR_CAM_ROTATE),-r$(TR_CAM_ROTATE))
 # -ffp-contract=off on every renderer build (plan sec 5): no FMA drift vs host goldens.
 # ROPT: the image's optimisation; RASTER_OPT: r3d_raster.c's (the span / row /
 # setup kernels), -O3 -funroll-loops as measured on silicon (a32/payload-isa,
@@ -38,7 +46,7 @@ ROPT       ?= -O2
 RASTER_OPT ?= -O3 -funroll-loops
 CFLAGS  = -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
           $(ROPT) -ffreestanding -std=c11 -Wall -Wextra -Wdouble-promotion -Werror \
-          -ffp-contract=off -ffunction-sections -fdata-sections -DRENDER_A32=1 $(VDEFS) $(RENDER_DEFS) \
+          -ffp-contract=off -ffunction-sections -fdata-sections -DRENDER_A32=1 $(VDEFS) $(ROT_DEFS) $(RENDER_DEFS) \
           -I../common -I../../src/ipc -I../../src/render
 # --gc-sections: the golden build links the scene objects but never calls
 # them -- their zone textures (P15) must not count against its budget.
@@ -49,7 +57,7 @@ HDRS    = $(wildcard ../common/*.h ../../src/ipc/*.h ../../src/render/*.h ../../
           ../../tests/host/tr_golden_dl.h
 vpath %.c . ../../src/render ../../src/ipc ../common
 
-.PHONY: all golden prof clean
+.PHONY: all golden prof clean $(NAME).bin
 all: $(NAME).bin
 	$(SIZE) -A $(O)/$(NAME).elf | grep -E '^\.(image|data|bss) '
 	python3 ../stub/mkpayload.py info $(NAME).bin \
@@ -72,4 +80,4 @@ $(O)/%.o: %.c $(HDRS) | $(O)
 $(O):
 	mkdir -p $@
 clean:
-	rm -rf build-scene build-golden build-prof renderer.bin renderer-golden.bin renderer-prof.bin *.jlink
+	rm -rf build-scene* build-golden* build-prof* renderer.bin renderer-golden.bin renderer-prof.bin *.jlink

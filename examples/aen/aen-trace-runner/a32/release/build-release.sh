@@ -140,7 +140,10 @@ fi
 # 1. stub + renderer (scene build) -> one A32_APP image, stub release mode:
 #    the stub copies the payload MRAM -> 0x02500000 and self-LAUNCHes.
 make -s -C "$repo/a32/stub" >/dev/null
-make -s -C "$repo/a32/renderer" >/dev/null
+# The renderer's boot layout follows the HE's camera rotation (same as the HP's, hp_vision_check.sh).
+hrot=$(sed -n 's/^TR_CAM_ROTATE:[A-Z]*=//p' "$hed/CMakeCache.txt" 2>/dev/null | tr -d '\r')
+case "${hrot:-90}" in 0 | 90 | 270) ;; *) die "HE TR_CAM_ROTATE='$hrot' must be 0, 90 or 270" ;; esac
+make -s -C "$repo/a32/renderer" TR_CAM_ROTATE="${hrot:-90}" >/dev/null
 rend="$repo/a32/renderer/renderer.bin"
 python3 "$repo/a32/stub/mkpayload.py" release "$repo/a32/stub/a32_stub.bin" "$rend" \
 	-o "$st/build/images/trace_runner_a32.bin"

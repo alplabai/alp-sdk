@@ -31,3 +31,16 @@ tests:
       - "TR_CAM_MIRROR=ON"
       - "TR_SND_REWORKED_U46=ON"
       - "TR_HP_SOUND=ON"
+  # The EVK bench release: the camera upright, landscape (../README.md "Controls").
+  alp_sdk.examples.aen.trace_runner.hp_vision_landscape:
+    extra_args:
+      - "TR_CAM_ROTATE=0"
+      - "TR_CAM_MIRROR=ON"
+  # The EVK bench release: landscape camera AND the game sound in one image.
+  alp_sdk.examples.aen.trace_runner.hp_vision_landscape_sound:
+    filter: CONFIG_TR_CLKCTL_PATCHED
+    extra_args:
+      - "TR_CAM_ROTATE=0"
+      - "TR_CAM_MIRROR=ON"
+      - "TR_SND_REWORKED_U46=ON"
+      - "TR_HP_SOUND=ON"

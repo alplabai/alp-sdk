@@ -257,13 +257,17 @@ static void hud_band(uint16_t *cband, int y_lo)
 /* Video area (maintainer ruling "Half / half", supersedes fix rounds 8-10's
  * landscape fill): rows [TR_VID_Y0, TR_R3D_H) (cam_pip.h) of the SAME
  * 720x1280 framebuffer, dark background, no border. The camera at native
- * 1:1, turned upright (src/vision/cam_rot.h) -- 400x640 portrait at x
- * 160..559 with the sensor on its side -- with its skeleton on top; the
- * left 160-px strip holds the LEFT/RIGHT/JUMP/DUCK lamps stacked, the right
- * one the "CAMERA / NPU Hz" label. The rotation is whatever the HP applied
- * and published (tr_cam_view_t.rotate), so image and keypoints always
- * agree. Rotation 0 (the old landscape path, kept for comparison) centres
- * 640x400 at x 40..679 and the strips' lamps/label overlap its sides.
+ * 1:1, turned upright (src/vision/cam_rot.h), with its skeleton on top. The
+ * rotation is whatever the HP applied and published (tr_cam_view_t.rotate),
+ * so image and keypoints always agree, and it picks the layout:
+ *   - 90 / 270, the sensor on its side: 400x640 portrait at x 160..559; the
+ *     left 160-px strip holds the LEFT ARM / RIGHT ARM / BOTH ARMS / DUCK
+ *     lamps stacked, the right one the "CAMERA / NPU Hz" label;
+ *   - 0, the camera upright and LANDSCAPE (the arm controls want the wider
+ *     field of view -- arms reach sideways): 640x400 at x 40..679, rows
+ *     120..519, letterboxed 120 rows above and below (not stretched). The
+ *     lamps run along the top letterbox and the label along the bottom one,
+ *     so nothing is drawn over the picture.
  *
  * Split like the 3D bands (fix round 10's lesson, 35.9 ms when it was one
  * uncached pass): render_video_band() is claimable band work, either core,
@@ -281,7 +285,9 @@ static void hud_band(uint16_t *cband, int y_lo)
 #define COLOR_LAMP_ON   RGB565(255, 210, 40)  /* intent lamp, lit */
 #define COLOR_LAMP_OFF  RGB565(52, 54, 62)    /* intent lamp, unlit: visible on the dark strip */
 #define COLOR_LABEL     RGB565(235, 245, 235) /* label/caption text */
-#define VID_STRIP_W     160                   /* each side strip: (720 - 400) / 2 */
+#define VID_STRIP_W     160                   /* portrait: each side strip, (720 - 400) / 2 */
+#define LAND_BAND_H     ((TR_VID_H - TR_CAM_SENSOR_H) / 2) /* landscape: each letterbox band, 120 */
+#define LAND_LAMP_SQ    56                                 /* landscape lamp square, px */
 #define LAMP_CELL_H     (TR_VID_H / 4)        /* four lamps stacked down the left strip */
 #define LAMP_SQ         96                    /* lamp square, px */
 #define LAMP_CAP_SCALE  4                     /* caption: 3x5 font at 4x -> 20 px tall */
@@ -488,6 +494,9 @@ static const glyph3x5_t font3x5[] = {
 	{ 'J', { "..#", "..#", "..#", "#.#", "###" } },
 	{ 'D', { "##.", "#.#", "#.#", "#.#", "##." } },
 	{ 'K', { "#.#", "#.#", "##.", "#.#", "#.#" } },
+	{ 'B', { "##.", "#.#", "##.", "#.#", "##." } },
+	{ 'O', { "###", "#.#", "#.#", "#.#", "###" } }, /* the same bitmap as '0': context tells */
+	{ 'S', { "###", "#..", "###", "..#", "###" } }, /* the same bitmap as '5' */
 };
 
 static const glyph3x5_t *video_glyph_find(char c)
@@ -549,7 +558,7 @@ static void video_text_c(const vcv_t *cv, int cx, int y0, const char *s, int sca
  * before any band is claimed -- the frame_go barrier publishes it to core 1). */
 static tr_cam_view_t vid_cv;      /* the camera view, range-checked; .rotate also sets the layout */
 static bool          vid_have_cv; /* vid_cv is safe to read pixels through */
-static bool          vid_lamp[4]; /* LEFT, RIGHT, JUMP, DUCK */
+static bool          vid_lamp[4]; /* LEFT ARM, RIGHT ARM, BOTH ARMS (the jump), DUCK */
 static bool          vid_have_hz; /* hp_vision's loop rate is live */
 static char          vid_hz[12];  /* "NN.NHz" or "--" */
 static char          vid_dims[12]; /* the upright image's size, "400x640" */
@@ -636,13 +645,15 @@ static void video_frame_state(void)
 #endif
 }
 
-/* The side strips, clipped to the canvas (one band's rows): four lamps
- * stacked down the left strip (a LAMP_SQ square over its caption, one
- * LAMP_CELL_H cell each), the label down the right. */
-static void draw_strips(const vcv_t *cv)
+/* The lamp captions: what the player DOES to make it light (the lane lamps
+ * follow the lane step, the jump lamp the jump -- game/step.c). */
+static const char *const lamp_cap[4] = { "LEFT ARM", "RIGHT ARM", "BOTH ARMS", "DUCK" };
+
+/* Portrait: four lamps stacked down the left strip (a LAMP_SQ square over
+ * its caption, one LAMP_CELL_H cell each), the label down the right. */
+static void draw_strips_portrait(const vcv_t *cv)
 {
-	static const char *const cap[4] = { "LEFT", "RIGHT", "JUMP", "DUCK" };
-	const int                lcx = VID_STRIP_W / 2, rcx = TR_VID_W - VID_STRIP_W / 2;
+	const int lcx = VID_STRIP_W / 2, rcx = TR_VID_W - VID_STRIP_W / 2;
 
 	for (int i = 0; i < 4; i++) {
 		int y = TR_VID_Y0 + i * LAMP_CELL_H + 16;
@@ -656,7 +667,7 @@ static void draw_strips(const vcv_t *cv)
 		video_text_c(cv,
 		             lcx,
 		             y + LAMP_SQ + 12,
-		             cap[i],
+		             lamp_cap[i],
 		             LAMP_CAP_SCALE,
 		             vid_lamp[i] ? COLOR_LAMP_ON : COLOR_LABEL);
 	}
@@ -664,6 +675,61 @@ static void draw_strips(const vcv_t *cv)
 	video_text_c(cv, rcx, TR_VID_Y0 + 64, vid_dims, 3, COLOR_LABEL);
 	video_text_c(cv, rcx, TR_VID_Y0 + 128, "NPU", 4, COLOR_LABEL);
 	video_text_c(cv, rcx, TR_VID_Y0 + 160, vid_hz, 5, vid_have_hz ? COLOR_KP : COLOR_LABEL);
+}
+
+/* The landscape layout's arithmetic, checked where it is used: the picture is
+ * centred, the two letterbox bands are equal and hold the lamps (square, gap,
+ * caption) and the label (two lines), and each lamp cell holds the widest
+ * caption ("RIGHT ARM" / "BOTH ARMS": 8 glyphs of 4 px at scale 4 and an M of
+ * 6 px, 152 px). */
+_Static_assert(2 * LAND_BAND_H + TR_CAM_SENSOR_H == TR_VID_H, "the landscape bands are equal");
+_Static_assert(TR_CAM_UP_W(0) <= TR_VID_W && TR_CAM_UP_H(0) == TR_CAM_SENSOR_H,
+               "the landscape picture fits the video area");
+_Static_assert(8 + LAND_LAMP_SQ + 10 + 5 * LAMP_CAP_SCALE <= LAND_BAND_H,
+               "the lamps and captions fit the top band");
+_Static_assert(12 + 32 + 5 * 5 <= LAND_BAND_H, "the camera / NPU label fits the bottom band");
+_Static_assert(TR_VID_W / 4 >= 152, "a lamp cell holds the widest caption");
+
+/* Landscape: the four lamps side by side in the top letterbox band (a
+ * LAND_LAMP_SQ square over its caption, one TR_VID_W / 4 cell each), the
+ * "CAMERA / NPU Hz" label in the bottom band, camera on the left half and
+ * NPU on the right. */
+static void draw_strips_landscape(const vcv_t *cv)
+{
+	const int cell = TR_VID_W / 4, ly = TR_VID_Y0 + 8;
+	const int by = TR_VID_Y0 + TR_VID_H - LAND_BAND_H + 12;
+
+	for (int i = 0; i < 4; i++) {
+		int cx = i * cell + cell / 2;
+
+		cv_rect(cv,
+		        cx - LAND_LAMP_SQ / 2,
+		        ly,
+		        LAND_LAMP_SQ,
+		        LAND_LAMP_SQ,
+		        vid_lamp[i] ? COLOR_LAMP_ON : COLOR_LAMP_OFF);
+		video_text_c(cv,
+		             cx,
+		             ly + LAND_LAMP_SQ + 10,
+		             lamp_cap[i],
+		             LAMP_CAP_SCALE,
+		             vid_lamp[i] ? COLOR_LAMP_ON : COLOR_LABEL);
+	}
+	video_text_c(cv, TR_VID_W / 4, by, "CAMERA", 4, COLOR_LABEL);
+	video_text_c(cv, TR_VID_W / 4, by + 32, vid_dims, 3, COLOR_LABEL);
+	video_text_c(cv, TR_VID_W * 3 / 4, by, "NPU", 4, COLOR_LABEL);
+	video_text_c(cv, TR_VID_W * 3 / 4, by + 32, vid_hz, 5, vid_have_hz ? COLOR_KP : COLOR_LABEL);
+}
+
+/* The lamps and label around the picture, clipped to the canvas (one band's
+ * rows), in the layout the camera view's rotation picks. */
+static void draw_strips(const vcv_t *cv)
+{
+	if (vid_cv.rotate == 0u) {
+		draw_strips_landscape(cv);
+	} else {
+		draw_strips_portrait(cv);
+	}
 }
 
 /* Band rows [y_lo, y_lo + rows) -> the framebuffer, write-only, 16 B at a
@@ -746,7 +812,7 @@ void render_video_band(uint32_t core, int vb, uint16_t *fb)
 		int            uy0 = iy0 - top, n = iy1 - iy0;
 
 		if (rot == 0) {
-			/* Landscape comparison path: raw rows 1:1, scalar. */
+			/* Landscape: raw rows 1:1, scalar. */
 			dcache_inval_range(buf + (uint32_t)uy0 * TR_CAM_SRC_W, (uint32_t)n * TR_CAM_SRC_W);
 			for (int r = 0; r < n; r++) {
 				tr_cam_pip_row_grey_to_rgb565(buf + (uint32_t)(uy0 + r) * TR_CAM_SRC_W,

@@ -3,6 +3,8 @@
 # tests/host/test_hp_vision_check.sh). hp_vision_check HP_BUILD_DIR
 # MODEL_FILE NM: 0 when the hp_vision image + Vela'd model may be packaged as
 # HP_APP + the MRAM model blob, else prints a loud refusal and returns 1.
+# An optional 4th argument, the HE build dir, adds the check that the HE was
+# built for the same camera as this HP image (see the end of the camera block).
 #
 # Same shape as snd_hp_check.sh (the OTHER thing that can occupy HP_APP) --
 # deliberately not merged with it: sound and vision are different silicon
@@ -95,13 +97,15 @@ hp_vision_check() {
 	case "$rot" in
 	0 | 90 | 270) ;;
 	*)
-		hp_vision_refuse "TR_CAM_ROTATE='$rot' in $hd/CMakeCache.txt -- must be set explicitly to 0, 90 or 270 (90: the 2026W36-0009 bench mount, see FLASH-RECIPE.md)"
+		hp_vision_refuse "TR_CAM_ROTATE='$rot' in $hd/CMakeCache.txt -- must be set explicitly to 0, 90 or 270 (0: the EVK-03 landscape release, 90: the 2026W36-0009 sideways mount, see FLASH-RECIPE.md)"
 		return 1
 		;;
 	esac
-	# The HE reads the same camera two ways the HP cannot tell it: the upright frame's shape
-	# (0 = landscape, else portrait) and, once the HE build carries it, whether the view is
-	# mirrored. A pair that disagrees misreads every keypoint with nothing on the console to say so.
+	# The HE reads the same camera two ways the HP cannot tell it: the upright
+	# frame's shape (0 = landscape, else portrait) and whether the view is
+	# mirrored, which decides which arm on the screen is the player's LEFT
+	# (src/vision/pose.c). A pair that disagrees steers the wrong way round or
+	# misreads every keypoint, with nothing on the console to say so: refuse.
 	if [ -n "$he" ]; then
 		local hrot hmir hnpu
 		hnpu=$(sed -n 's/^TR_INPUT_NPU:[A-Z]*=//p' "$he/CMakeCache.txt" 2>/dev/null | tr -d '\r')
@@ -112,8 +116,12 @@ hp_vision_check() {
 			hp_vision_refuse "$he is not a TR_INPUT_NPU=ON build (TR_INPUT_NPU='${hnpu:-<unset>}') -- the HE reads no pose from this HP image"
 			return 1
 		fi
-		if [ -n "$hmir" ] && [ "$(hv_bool "$hmir")" != "$(hv_bool "$mir")" ]; then
-			hp_vision_refuse "HE TR_CAM_MIRROR=$hmir but HP TR_CAM_MIRROR=${mir:-<unset>} -- the two builds must agree"
+		if [ -z "$hmir" ]; then
+			hp_vision_refuse "$he/CMakeCache.txt has no TR_CAM_MIRROR -- an HE build from before the arm controls; rebuild it with -DTR_CAM_MIRROR=${mir:-ON} to match the HP"
+			return 1
+		fi
+		if [ "$(hv_bool "$hmir")" != "$(hv_bool "$mir")" ]; then
+			hp_vision_refuse "HE TR_CAM_MIRROR=$hmir but HP TR_CAM_MIRROR=${mir:-<unset>} -- the two builds must agree (the arm controls read which arm is the player's left from it)"
 			return 1
 		fi
 		local hland=0 rland=0

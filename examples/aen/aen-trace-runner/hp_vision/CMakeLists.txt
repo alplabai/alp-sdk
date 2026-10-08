@@ -123,3 +123,10 @@ if(TR_CAM_MIRROR)
 else()
 	target_compile_definitions(app PRIVATE TR_CAM_MIRROR=0)
 endif()
+# Bench knob (../src/vision/cam_rot.h TR_OV9281_HMIRROR_ACTIVE_LOW): write the
+# rot-0 mirror bit the other way round, if the bench shows it mirrors the
+# opposite way to the one assumed. The HE follows through tr_cam_view_t.mirror.
+option(TR_OV9281_HMIRROR_ACTIVE_LOW "The rot-0 HMIRROR bit mirrors when CLEAR (bench-verified only)" OFF)
+if(TR_OV9281_HMIRROR_ACTIVE_LOW)
+	target_compile_definitions(app PRIVATE TR_OV9281_HMIRROR_ACTIVE_LOW=1)
+endif()

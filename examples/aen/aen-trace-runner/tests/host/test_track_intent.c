@@ -1,5 +1,7 @@
-/* tests/host/test_track_intent.c -- body intent from the torso, in the
- * silicon geometry: UPRIGHT 400x640 (portrait) frame, legs out of frame.
+/* tests/host/test_track_intent.c -- the duck from the torso (and that nothing
+ * else the body does is a jump or a lane), in the silicon geometry: UPRIGHT
+ * 400x640 (portrait) frame, legs out of frame. The arm controls are in
+ * test_arms.c.
  *
  * Every scenario opens the way main.c does: tr_track_calibrate() with a box
  * from the 2 s title screen that is NOT the player standing ready (a passer-by,
@@ -71,8 +73,8 @@ static void boot(tr_track_t *t)
 {
 	tr_pose_t passer = person(200, 600, 55);
 
-	tr_track_init(t, FW, FH);
-	tr_track_calibrate(t, tr_pose_box(&passer), FW);
+	tr_track_init(t, FH);
+	tr_track_calibrate(t, tr_pose_box(&passer));
 	assert(t->calibrated);
 }
 
@@ -115,7 +117,7 @@ static void silicon_replay(void)
 
 			jumps += i.jump;
 			ducks += i.duck;
-			assert(i.lane_delta == 0); /* torso x ~215: the centre lane (133..266) */
+			assert(i.lane_delta == 0); /* arms down the whole clip */
 		}
 	}
 	printf("silicon stand: %d jump, %d duck\n", jumps, ducks);
@@ -131,13 +133,11 @@ static void standing_still(void)
 	stand(&t, 200, 560, 90, 150);
 }
 
-/* 3. A real jump: torso up 0.4 s for 300 ms (9 frames), scale constant. JUMP
- * within 2 frames, held at least TR_TRACK_HOLD_MIN, released after landing,
- * and the landing is no duck. */
-static void real_jump(void)
+/* 3. The torso rising is no jump any more (a jump is both arms up, arms.h):
+ * lifting it 0.4 s for 300 ms at constant scale asks for nothing. */
+static void body_rise_is_not_a_jump(void)
 {
 	tr_track_t t;
-	int        first = -1, last = -1;
 
 	boot(&t);
 	stand(&t, 200, 560, 90, 40);
@@ -145,24 +145,8 @@ static void real_jump(void)
 		int         cy = n < 9 ? 560 - 36 : 560;
 		tr_intent_t i  = feed(&t, jitter(person(200, cy, 90), 3));
 
-		assert(!i.duck && i.lane_delta == 0);
-		if (i.jump) {
-			first = first < 0 ? n : first;
-			last  = n;
-		}
+		assert(!i.jump && !i.duck && i.lane_delta == 0);
 	}
-	printf("real jump: frames %d..%d\n", first, last);
-	assert(first >= 0 && first <= 1);              /* within 2 frames of the rise */
-	assert(last - first + 1 >= TR_TRACK_HOLD_MIN); /* the lamp is visible */
-	assert(last < 9 + TR_TRACK_HOLD_MIN);          /* released once back down */
-	stand(&t, 200, 560, 90, 30);
-
-	/* Held up (a step onto something, a tiptoe): capped, then neutral. */
-	int held = 0;
-	for (int n = 0; n < 90; n++) {
-		held += feed(&t, jitter(person(200, 520, 90), 3)).jump;
-	}
-	assert(held > 0 && held <= TR_TRACK_JUMP_MAX);
 }
 
 /* 4. A duck: the torso drops 0.45 s (the hips leave the frame: the
@@ -188,29 +172,24 @@ static void duck(void)
 	stand(&t, 200, 560, 90, 30);
 }
 
-/* 5. A lateral step: the player's left is screen left (the mirror is in the
- * pixels). One lane per crossing, nothing else. */
-static void lateral(void)
+/* 5. Stepping sideways asks for nothing: where the player STANDS is no lane
+ * (the arms are, test_arms.c). Left, right, and well past either edge. */
+static void sideways_step_is_nothing(void)
 {
 	tr_track_t t;
-	int        sum = 0;
 
 	boot(&t);
 	stand(&t, 200, 560, 90, 30);
 	for (int n = 0; n < 30; n++) {
 		tr_intent_t i = feed(&t, jitter(person(60, 560, 90), 3));
 
-		assert(!i.jump && !i.duck);
-		sum += i.lane_delta;
+		assert(!i.jump && !i.duck && i.lane_delta == 0);
 	}
-	assert(sum == -1);
 	for (int n = 0; n < 30; n++) {
 		tr_intent_t i = feed(&t, jitter(person(340, 560, 90), 3));
 
-		assert(!i.jump && !i.duck);
-		sum += i.lane_delta;
+		assert(!i.jump && !i.duck && i.lane_delta == 0);
 	}
-	assert(sum == +1);
 }
 
 /* 6. Walking toward the camera: scale x2 in 1 s, the torso centre rising
@@ -233,7 +212,7 @@ static void approach(void)
 }
 
 /* 7. A second person swaps in -- after a gap, and straight in with no gap --
- * taller and closer. Re-baseline, nothing false; a jump still works after. */
+ * taller and closer. Re-baseline, nothing false. */
 static void swap(void)
 {
 	tr_track_t t;
@@ -245,12 +224,6 @@ static void swap(void)
 	}
 	stand(&t, 200, 500, 120, 60);
 	stand(&t, 200, 580, 80, 60); /* and straight back, no gap */
-
-	bool jumped = false;
-	for (int n = 0; n < 9; n++) {
-		jumped |= feed(&t, jitter(person(200, 580 - 32, 80), 3)).jump;
-	}
-	assert(jumped);
 }
 
 /* 8. A 12 % step BACK (the 2026W36-0009 probe: 298 of 300 standing frames read
@@ -311,7 +284,7 @@ static void long_duck(void)
 /* 10. main.c hands the tracker the LAST accepted pose on every HE tick,
  * repeated until the HP publishes a new seq. One outlier pose (a torso
  * yanked up 0.45 s -- a misfire, a hand across the shoulders) re-read on
- * two ticks is still one pose: no debounce, no jump. */
+ * two ticks is still one pose: no debounce, no duck. */
 static void repeated_seq(void)
 {
 	tr_track_t t;
@@ -340,7 +313,7 @@ static void repeated_seq(void)
 }
 
 /* 11. A torso 3 px long (the hips mis-found a few px under the shoulders):
- * below TR_TRACK_MIN_SCALE, whichever branch measured it -- lane only. */
+ * below TR_TRACK_MIN_SCALE, whichever branch measured it -- no duck. */
 static void tiny_scale(void)
 {
 	tr_track_t t;
@@ -361,9 +334,17 @@ static void tiny_scale(void)
 
 int main(int argc, char **argv)
 {
-	static void (*const scenario[])(void) = { silicon_replay, standing_still, real_jump, duck,
-		                                      lateral,        approach,       swap,      retreat,
-		                                      long_duck,      repeated_seq,   tiny_scale };
+	static void (*const scenario[])(void) = { silicon_replay,
+		                                      standing_still,
+		                                      body_rise_is_not_a_jump,
+		                                      duck,
+		                                      sideways_step_is_nothing,
+		                                      approach,
+		                                      swap,
+		                                      retreat,
+		                                      long_duck,
+		                                      repeated_seq,
+		                                      tiny_scale };
 	int only = argc > 1 ? atoi(argv[1]) : -1; /* one scenario, by index */
 
 	srand(11);

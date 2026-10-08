@@ -154,8 +154,8 @@ mkdir -p "$t/he-land/zephyr" "$t/he-nonpu/zephyr"
 for d in he-land he-nonpu; do
 	cp "$t/he/zephyr/zephyr.bin" "$t/he/zephyr/zephyr.elf" "$t/he/zephyr/zephyr.dts" "$t/$d/zephyr/"
 done
-printf '%s\n' "TR_INPUT_NPU:BOOL=ON" "TR_CAM_ROTATE:STRING=0" >"$t/he-land/CMakeCache.txt" # landscape HE, portrait HP
-printf '%s\n' "TR_INPUT_NPU:BOOL=OFF" "TR_CAM_ROTATE:STRING=90" >"$t/he-nonpu/CMakeCache.txt"
+printf '%s\n' "TR_INPUT_NPU:BOOL=ON" "TR_CAM_ROTATE:STRING=0" "TR_CAM_MIRROR:BOOL=ON" >"$t/he-land/CMakeCache.txt" # landscape HE, portrait HP
+printf '%s\n' "TR_INPUT_NPU:BOOL=OFF" "TR_CAM_ROTATE:STRING=90" "TR_CAM_MIRROR:BOOL=ON" >"$t/he-nonpu/CMakeCache.txt"
 printf '%s\n' "00003200 00000040 T tr_a32_boot" >"$t/he-nobus2/NM" # an HE without tr_bus2_he_frame
 mkdir -p "$t/bin" && printf '#!/bin/sh\ntouch "%s/MADE"\n' "$t" >"$t/bin/make" && chmod +x "$t/bin/make"
 

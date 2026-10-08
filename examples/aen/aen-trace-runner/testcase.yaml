@@ -31,6 +31,13 @@ tests:
       - "EXTRA_DTC_OVERLAY_FILE=panel_30hz.overlay"
       - "TR_INPUT_NPU=ON"
       - "TR_CAM_ROTATE=90"
+  # The EVK bench release: the camera upright and shown landscape (README "Controls").
+  alp_sdk.examples.aen.trace_runner.a32_render_npu_input_landscape:
+    extra_args:
+      - "EXTRA_DTC_OVERLAY_FILE=panel_30hz.overlay"
+      - "TR_INPUT_NPU=ON"
+      - "TR_CAM_ROTATE=0"
+      - "TR_CAM_MIRROR=ON"
   alp_sdk.examples.aen.trace_runner.m55_render:
     extra_args:
       - "TR_RENDER=M55"
