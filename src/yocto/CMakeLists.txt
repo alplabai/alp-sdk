@@ -582,7 +582,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # stub.  Name each such backend's ALP_BACKEND_ANCHOR_FORCE symbol so every
     # consumer's link pulls it.  Camera only today; the other classes' yocto_drv.c
     # need the same line (#2790).
-    if(NOT ALP_SDK_BUILD_SHARED AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(NOT ALP_SDK_BUILD_SHARED)
         target_link_options(alp_sdk INTERFACE
             "LINKER:--undefined=_alp_backend_force_camera_yocto_drv")
     endif()

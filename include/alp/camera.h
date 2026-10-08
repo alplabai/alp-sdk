@@ -47,8 +47,10 @@
  *     capture-node chain is discovered from the media graph, so any
  *     sensor with a mainline V4L2 subdev driver works with no
  *     per-sensor code.  Supports ALP_PIXFMT_GREY8 / RAW8 / RAW10 only
- *     (colour formats are ALP_ERR_NOSUPPORT).  Bench-unverified on
- *     this header's own CI; see docs/v2n-camera-csi.md.
+ *     (colour formats are ALP_ERR_NOSUPPORT).  RAW10 bench-verified
+ *     on E1M-V2M103 with an IMX296LQ (30.00 fps at a 30 fps request); RAW8
+ *     and the direct Y8 path are not.  Known limits and the static-link
+ *     caveat: docs/v2n-camera-csi.md.
  *   - **zephyr_stub** (silicon_ref `"*"`, priority 0): tracked
  *     fallback for silicon none of the above cover -- every op
  *     returns ALP_ERR_NOT_IMPLEMENTED (issue #223).

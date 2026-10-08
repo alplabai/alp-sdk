@@ -1,12 +1,14 @@
-# V2N / V2N-M1 MIPI CSI-2 camera path (Linux, opt-in, bench-unverified)
+# V2N / V2N-M1 MIPI CSI-2 camera path (Linux, opt-in)
 
 Issue #1149. The RZ/V2N has two MIPI CSI-2 receivers feeding the CRU
 (R01UH1071, "Camera Data Receiver Unit (CRU)" chapter). Until now no
 carrier DT node wired one to a sensor. This adds an **opt-in** Linux
 path on the A55; the default dtb is unchanged.
 
-**Status: BENCH-UNVERIFIED.** No sensor was on the bench and the DT has
-not been through dtc. Nothing here is proof the pipeline streams.
+**Status.** The generated-DT path below was written without a sensor on the
+bench and has not been through dtc; treat it as bench-unverified. The
+`<alp/camera.h>` backend on top of it is bench-verified for RAW10 on
+E1M-V2M103 with an IMX296LQ (see "Using `<alp/camera.h>` on Linux").
 
 ## What is wired
 
@@ -181,8 +183,11 @@ The portable `alp_camera_open()` works on the A55 through the V4L2 /
 media-controller backend (`src/backends/camera/yocto_drv.c`). It is
 sensor-agnostic: nothing in it names a sensor, so any camera with a mainline
 V4L2 subdev driver and a media-graph path to a capture node works.
-**Bench-unverified as a backend** (unit-tested against an ioctl hook; the
-OV9281 Y10 -> `CR10` path above is the hardware-proven pipeline it targets).
+**Bench-verified on E1M-V2M103** (`2026W38-0008`, IMX296LQ colour sensor on
+CAM0/J5): RAW10 frames match a `v4l2-ctl` capture, 30.00 fps is delivered at a
+30 fps request, and the sensor's VBLANK is restored on close. Still
+bench-unverified: `ALP_PIXFMT_RAW8` (the Bayer8 fourccs) and the direct 8-bit
+path (Y8, including the stride repack for a node that pads its rows).
 
 `camera_id` N is resolved through a device-tree alias. The carrier or sensor
 fragment **must** name the sensor node:
@@ -223,4 +228,15 @@ LSB first, with 4 padding bits; the stream runs at 60.04-60.10 fps.
 A frame the kernel marks corrupt (`V4L2_BUF_FLAG_ERROR`) or short is dropped
 and `alp_camera_capture()` returns `ALP_ERR_IO`. `configure_isp` is
 `ALP_ERR_NOSUPPORT`. RAW8 Bayer fourccs are unverified against the CRU format
-table.
+table. A capture node whose `bytesperline` exceeds the width on an 8-bit format
+is repacked row by row, so `alp_camera_capture()` always returns `width*height`
+bytes.
+
+**Known limits.** (1) A 60 fps request on the IMX296LQ settles near 40 fps
+(24.9 ms per frame); the sensor and CRU can do 60 fps, the backend's frame
+path cannot yet (#2792). (2) A plain non-CMake static link of `libalp_sdk.a`
+must add `-Wl,--undefined=_alp_backend_force_camera_yocto_drv`, otherwise only
+the stub is linked (#2790); CMake consumers of `alp::sdk` get that option
+automatically. (3) One thread per handle: do not run `capture()` and
+`release()` on the same handle concurrently.
+

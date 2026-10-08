@@ -2,16 +2,23 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Link-only probe: references the camera dispatcher from a STATIC libalp_sdk.a
- * so the ctest rule next to it can look for the Linux
- * V4L2 backend's registry entry in the final binary.  It never runs a camera.
+ * Static-link probe for the Linux camera backend.  Two ctest rules use it:
+ * `nm` must list the backend's registry entry in this binary (the archive
+ * member was linked), and running it must show the dispatcher selected that
+ * backend: an alias that does not exist is ALP_ERR_NOT_READY from yocto_drv,
+ * while the zephyr_stub would answer ALP_ERR_NOT_IMPLEMENTED.  No camera
+ * hardware is touched.
  */
 
 #include <alp/camera.h>
+#include <alp/peripheral.h>
 
 int main(void)
 {
-	alp_camera_config_t cfg = { 0 };
-	/* width/height 0 is rejected before any device is touched. */
-	return alp_camera_open(&cfg) == NULL ? 0 : 1;
+	alp_camera_config_t cfg = ALP_CAMERA_CONFIG_DEFAULT(987654u);
+	cfg.width               = 320u;
+	cfg.height              = 240u;
+	cfg.format              = ALP_PIXFMT_GREY8;
+	if (alp_camera_open(&cfg) != NULL) return 2;
+	return alp_last_error() == ALP_ERR_NOT_READY ? 0 : 1;
 }

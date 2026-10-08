@@ -21,6 +21,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "test_assert.h"
 
@@ -54,6 +56,8 @@ static uint32_t g_dq_flags;        /* flags on the dequeued buffer */
 static uint32_t g_dq_bytesused;    /* bytesused on the dequeued buffer (0 = unreported) */
 static int      g_qbuf_fail_after; /* QBUF fails once this many succeeded (-1 = never) */
 static bool     g_streamon_fail;
+static bool     g_qbuf_fail_once; /* the next QBUF fails, then they work again */
+static bool     g_reqbufs_fail;
 static int      g_hop_fd[3];
 
 static int fake_ioctl(int fd, unsigned long req, void *arg)
@@ -129,7 +133,11 @@ static int fake_ioctl(int fd, unsigned long req, void *arg)
 	}
 	case VIDIOC_REQBUFS: {
 		struct v4l2_requestbuffers *r = arg;
-		r->count                      = CAM_NBUF;
+		if (g_reqbufs_fail) {
+			errno = ENOMEM;
+			return -1;
+		}
+		r->count = CAM_NBUF;
 		return 0;
 	}
 	case VIDIOC_QUERYBUF: {
@@ -139,6 +147,11 @@ static int fake_ioctl(int fd, unsigned long req, void *arg)
 		return 0;
 	}
 	case VIDIOC_QBUF:
+		if (g_qbuf_fail_once) {
+			g_qbuf_fail_once = false;
+			errno            = EINVAL;
+			return -1;
+		}
 		if (g_qbuf_fail_after >= 0 && g_qbuf >= g_qbuf_fail_after) {
 			errno = EINVAL;
 			return -1;
@@ -194,9 +207,12 @@ static void fake_munmap(void *p, size_t len)
 
 static void reset(void)
 {
-	g_nsensor_codes = 0;
-	g_sfmt_calls    = 0;
-	g_video_fourcc  = 0;
+	g_nsensor_codes  = 0;
+	g_qbuf_fail_once = false;
+	g_reqbufs_fail   = false;
+	g_cam_try_media  = NULL;
+	g_sfmt_calls     = 0;
+	g_video_fourcc   = 0;
 	g_qbuf = g_streamon = g_streamoff = 0;
 	g_pixel_rate                      = 100000000;
 	g_hblank                          = 400;
@@ -484,10 +500,16 @@ static void test_cr10_unpack_mapped_reads_only_row_data(void)
 		}
 	}
 
-	uint8_t scratch[DATA], want[W * H * 2], got[W * H * 2];
+	uint8_t scratch[DATA + 8], want[W * H * 2], got[W * H * 2];
+	memset(scratch, 0xA5, sizeof(scratch));
 	cam_cr10_unpack(src, STRIDE, W, H, want, 2, 0);
 	cam_cr10_unpack_mapped(src, STRIDE, W, H, got, 2, 0, scratch);
 	ALP_ASSERT_TRUE(memcmp(want, got, sizeof(want)) == 0);
+	/* the bounce row is exactly DATA bytes: the canary behind it is untouched */
+	bool canary = true;
+	for (unsigned i = DATA; i < sizeof(scratch); ++i)
+		canary = canary && scratch[i] == 0xA5;
+	ALP_ASSERT_TRUE(canary);
 	ALP_ASSERT_EQ_INT(got[0] | (got[1] << 8), (int)val[0]);
 	munmap(m, len + (size_t)pg);
 }
@@ -518,6 +540,159 @@ static void test_close_restores_vblank(void)
 	ALP_ASSERT_EQ_INT(y_open(&cfg, &st, NULL), ALP_OK);
 	y_close(&st);
 	ALP_ASSERT_EQ_INT(g_vblank, 321);
+}
+
+/* 8-bit node that pads its rows (bytesperline 96 > width 12): the frame is
+ * repacked to width*height, never handed out stride-padded. */
+static void test_8bit_padded_stride_is_repacked(void)
+{
+	reset();
+	g_sensor_codes[0] = MEDIA_BUS_FMT_Y8_1X8;
+	g_nsensor_codes   = 1;
+	cam_t c;
+	make_chain(&c);
+	alp_camera_config_t cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 0);
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_OK);
+	ALP_ASSERT_TRUE(!c.unpack && c.copy && c.stride == 96u);
+	ALP_ASSERT_EQ_INT(cam_alloc_buffers(&c), ALP_OK);
+	alp_camera_backend_state_t st;
+	memset(&st, 0, sizeof(st));
+	st.be_data = &c;
+	ALP_ASSERT_EQ_INT(y_start(&st), ALP_OK);
+
+	for (unsigned y = 0; y < 4u; ++y)
+		for (unsigned x = 0; x < 96u; ++x)
+			((uint8_t *)c.map[1])[y * 96u + x] = (uint8_t)(x < 12u ? 16u * y + x : 0xEEu);
+	g_poll_ret     = 1;
+	g_dq_index     = 1;
+	g_dq_flags     = 0;
+	g_dq_bytesused = 96u * 4u;
+	alp_camera_frame_t fr;
+	ALP_ASSERT_EQ_INT(y_capture(&st, &fr, 10), ALP_OK);
+	ALP_ASSERT_EQ_INT(fr.size, 12 * 4);
+	bool ok = true;
+	for (unsigned i = 0; i < 48u; ++i)
+		ok = ok && ((const uint8_t *)fr.data)[i] == (uint8_t)(16u * (i / 12u) + i % 12u);
+	ALP_ASSERT_TRUE(ok);
+	ALP_ASSERT_EQ_INT(y_release(&st, &fr), ALP_OK);
+	c.streaming = false;
+	cam_free_buffers(&c);
+}
+
+/* A failed requeue is retried once; two failures mark the handle dead so
+ * capture() errors out cleanly instead of starving. */
+static void test_requeue_failure(void)
+{
+	reset();
+	g_sensor_codes[0] = MEDIA_BUS_FMT_Y10_1X10;
+	g_nsensor_codes   = 1;
+	cam_t c;
+	make_chain(&c);
+	alp_camera_config_t cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 0);
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(cam_alloc_buffers(&c), ALP_OK);
+	alp_camera_backend_state_t st;
+	memset(&st, 0, sizeof(st));
+	st.be_data = &c;
+	ALP_ASSERT_EQ_INT(y_start(&st), ALP_OK);
+	g_poll_ret     = 1;
+	g_dq_index     = 1;
+	g_dq_flags     = 0;
+	g_dq_bytesused = 96u * 4u;
+	alp_camera_frame_t fr;
+
+	/* one failure: the retry succeeds, the frame is delivered */
+	g_qbuf_fail_once = true;
+	ALP_ASSERT_EQ_INT(y_capture(&st, &fr, 10), ALP_OK);
+	ALP_ASSERT_TRUE(!c.dead);
+	ALP_ASSERT_EQ_INT(y_release(&st, &fr), ALP_OK);
+
+	/* both attempts fail: IO, handle dead, nothing held, later captures IO */
+	g_qbuf_fail_after = g_qbuf;
+	ALP_ASSERT_EQ_INT(y_capture(&st, &fr, 10), ALP_ERR_IO);
+	ALP_ASSERT_TRUE(c.dead);
+	ALP_ASSERT_TRUE(!c.held[0] && !c.held[1]);
+	g_qbuf_fail_after = -1;
+	ALP_ASSERT_EQ_INT(y_capture(&st, &fr, 10), ALP_ERR_IO);
+
+	c.streaming = false;
+	cam_free_buffers(&c);
+}
+
+/* open() failing after the fps request still puts the sensor's VBLANK back. */
+static void test_open_failure_after_fps_restores_vblank(void)
+{
+	reset();
+	g_sensor_codes[0] = MEDIA_BUS_FMT_Y10_1X10;
+	g_nsensor_codes   = 1;
+	g_cam_discover    = fake_discover;
+	g_pixel_rate      = 10000000;
+	g_vblank          = 555;
+	g_reqbufs_fail    = true;
+
+	alp_camera_config_t        cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 30);
+	alp_camera_backend_state_t st;
+	memset(&st, 0, sizeof(st));
+	ALP_ASSERT_EQ_INT(y_open(&cfg, &st, NULL), ALP_ERR_NOMEM);
+	ALP_ASSERT_TRUE(st.be_data == NULL);
+	ALP_ASSERT_EQ_INT(g_vblank, 555);
+	g_reqbufs_fail = false;
+}
+
+static int g_try_calls[CAM_MAX_MEDIA];
+static int g_try_ok_at = -1;
+
+static alp_status_t fake_try_media(int m, const char *want, cam_t *c)
+{
+	(void)want;
+	(void)c;
+	++g_try_calls[m];
+	return m == g_try_ok_at ? ALP_OK : ALP_ERR_NOT_READY;
+}
+
+/* A /dev/media* that fails must not stop the scan of the later ones. */
+static void test_scan_continues_past_failed_media(void)
+{
+	reset();
+	cam_t c;
+	make_chain(&c);
+	g_cam_try_media = fake_try_media;
+
+	memset(g_try_calls, 0, sizeof(g_try_calls));
+	g_try_ok_at = 2;
+	ALP_ASSERT_EQ_INT(cam_scan_media("/x", &c), ALP_OK);
+	ALP_ASSERT_TRUE(g_try_calls[0] == 1 && g_try_calls[1] == 1 && g_try_calls[2] == 1);
+	ALP_ASSERT_EQ_INT(g_try_calls[3], 0); /* stops at the first success */
+
+	memset(g_try_calls, 0, sizeof(g_try_calls));
+	g_try_ok_at = -1;
+	ALP_ASSERT_EQ_INT(cam_scan_media("/x", &c), ALP_ERR_NOT_READY);
+	for (int m = 0; m < CAM_MAX_MEDIA; ++m)
+		ALP_ASSERT_EQ_INT(g_try_calls[m], 1);
+	g_cam_try_media = NULL;
+}
+
+/* cam_path_is: a sysfs-style link resolves to the wanted DT node, nothing else. */
+static void test_path_is(void)
+{
+	char dir[] = "/tmp/alp_cam_pathXXXXXX";
+	ALP_ASSERT_TRUE(mkdtemp(dir) != NULL);
+	char node[PATH_MAX], other[PATH_MAX], link[PATH_MAX], want[PATH_MAX];
+	(void)snprintf(node, sizeof(node), "%s/camera@1a", dir);
+	(void)snprintf(other, sizeof(other), "%s/camera@1b", dir);
+	(void)snprintf(link, sizeof(link), "%s/of_node", dir);
+	ALP_ASSERT_EQ_INT(mkdir(node, 0700), 0);
+	ALP_ASSERT_EQ_INT(mkdir(other, 0700), 0);
+	ALP_ASSERT_EQ_INT(symlink("camera@1a", link), 0);
+	ALP_ASSERT_TRUE(realpath(node, want) != NULL);
+	ALP_ASSERT_TRUE(cam_path_is(link, want));
+	ALP_ASSERT_TRUE(realpath(other, want) != NULL);
+	ALP_ASSERT_TRUE(!cam_path_is(link, want));
+	ALP_ASSERT_TRUE(!cam_path_is("/nonexistent/of_node", want));
+	unlink(link);
+	rmdir(node);
+	rmdir(other);
+	rmdir(dir);
 }
 
 static void test_capture_release_and_timeout(void)
@@ -760,6 +935,11 @@ int main(void)
 	test_cr10_unpack();
 	test_cr10_unpack_mapped_reads_only_row_data();
 	test_close_restores_vblank();
+	test_open_failure_after_fps_restores_vblank();
+	test_8bit_padded_stride_is_repacked();
+	test_requeue_failure();
+	test_scan_continues_past_failed_media();
+	test_path_is();
 	test_capture_release_and_timeout();
 	test_capture_integrity();
 	test_start_failure_resets_queue();
