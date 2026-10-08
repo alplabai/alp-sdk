@@ -23,7 +23,7 @@
  * build records per-frame front-end stats instead (pad3 below).
  *
  * Core 1 (renderer_core1): waits for the gate, switches to the renderer
- * table (0x022/0x026/0x027 differ from the stub's), then loops: wait scene_go
+ * table (0x022/0x024/0x025/0x026/0x027 differ from the stub's), then loops: wait scene_go
  * (WFE, event stream on per the stub), build scene part 2, scene_done = seq;
  * sev; wait setup_go, set up its half, dmb ish,
  * setup_done = seq; sev; wait frame_go == seq, claim + render bands with its
@@ -153,7 +153,8 @@ _Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == TR_MEM_A32_GATE,
 /* 0x024 likewise, fourth table (fix round 10, silicon finding: the camera
  * pool at TR_MEM_CAM_POOL, 0x02480000, is HP-DMA'd GREY8 the video panel
  * reads every frame -- mapped Normal NC like the rest of the old 0x024
- * SECTION, every read was an individual uncached bus transaction, the
+ * SECTION (the stub table still maps it as one NC_X section; the DL at
+ * TR_MEM_A32_DL and the bins are WB here too), every read was an individual uncached bus transaction, the
  * dominant term in the panel's measured ~117 ns/px, ~50x the ~2 ns/px a
  * cached read + NEON copy-out costs). Mailbox/stub/tables (below
  * TR_MEM_CAM_POOL, same NC-exec permission the section had) stay NC: cross-
@@ -248,7 +249,8 @@ void renderer_main(volatile tr_mbox_t *m);
 void renderer_core1(volatile tr_mbox_t *m);
 
 /* Everything not listed faults. Both cores run on this table (core 1
- * switches after the gate): 0x022 and 0x026 differ from the stub table.
+ * switches after the gate): 0x022, 0x024 (DL, bins, camera pool WB), 0x025 (4 KiB
+ * pages, FB B's head NC) and 0x026 differ from the stub table.
  *   0x020-0x021 FB A slot      Normal NC, XN sections (the FB is only written);
  *               the slot ends 0x021F4000, the rest of 0x021 is free
  *   0x022       setup + bands + zone textures + zone indices  Normal WB-WA S=1, XN (A32-only, cached RMW)
