@@ -66,11 +66,9 @@ static inline uint16x8_t grey8_to_rgb565(uint8x8_t g)
 
 /* The 32-column pattern's taps and weights, from the same grid the scalar reference walks: the
  * compiler folds them to constants. COVER_LIST(F) applies F to 0..31. */
-#define COVER_LIST(F) \
-	F(0) \
-	F(1) \
-	F(2) F(3) F(4) F(5) F(6) F(7) F(8) F(9) F(10) F(11) F(12) F(13) F(14) F(15) F(16) F(17) F(18) \
-	    F(19) F(20) F(21) F(22) F(23) F(24) F(25) F(26) F(27) F(28) F(29) F(30) F(31)
+/* clang-format off */
+#define COVER_LIST(F) 	F(0) F(1) F(2) F(3) F(4) F(5) F(6) F(7) F(8) F(9) F(10) F(11) F(12) F(13) F(14) F(15) 	F(16) F(17) F(18) F(19) F(20) F(21) F(22) F(23) F(24) F(25) F(26) F(27) F(28) F(29) F(30) F(31)
+/* clang-format on */
 #define COVER_TAP_L(x) (uint8_t)(TR_CAM_COVER_SX64(x) >> 6),
 #define COVER_TAP_R(x) (uint8_t)((TR_CAM_COVER_SX64(x) >> 6) + 1),
 #define COVER_W_R(x)   (uint8_t)(TR_CAM_COVER_SX64(x) & 63),

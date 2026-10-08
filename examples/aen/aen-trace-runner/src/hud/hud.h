@@ -46,6 +46,16 @@
                          * duplicated up here too. */
 #define TR_PERF_COLS 40
 
+/* ---------------------------------------------------------------- power
+ * The +5V net's power graph (the HUD's T_PWR tile, "+5V net (SoM+LCD)"): the last TR_PWR_N
+ * samples of platform/rail5v_power.c, oldest first, ~10 Hz so about 10 s, in mW. A sample the
+ * poll could not take (the HP holds I2C2, a read missed, the rail below 4.5 V) is TR_PWR_GAP and
+ * draws as a hole, never as a zero. pwr_seq counts every sample pushed: the repaint key. */
+#define TR_PWR_N           96
+#define TR_PWR_GAP         (-1)
+#define TR_PWR_MIN_SPAN_MW 500 /* the graph's full scale is never less */
+#define TR_PWR_STEP_MW     250 /* ... and grows in these steps */
+
 typedef struct {
 	uint8_t  mode;   /* TR_HUD_* */
 	uint8_t  banner; /* TR_BANNER_* (tr_mbox.h), TR_HUD_BANNER only */
@@ -60,13 +70,23 @@ typedef struct {
 	uint32_t zone_seq; /* ... and its entry count: a change shows its name */
 	uint32_t score, metres, best;
 	char     perf[TR_PERF_LINES][TR_PERF_COLS]; /* NUL-terminated, "" = blank line */
+	int16_t  pwr[TR_PWR_N];                     /* the power graph, oldest first (see TR_PWR_N) */
+	uint32_t pwr_seq;                           /* samples pushed so far: the tile's repaint key */
 	/* Booth (tr_hud_view_booth()): */
 	uint8_t popup_hs;  /* the popup is the new-high-score celebration (score.h), not a pickup's */
 	tr_hiscore_t  hs;  /* the table: a page of the attract card */
 	tr_initials_t ini; /* TR_HUD_INITIALS: the entry as it stands */
 } tr_hud_view_t;
 
-#define TR_HUD_TILES 7
+/* The window's readouts: *now the newest sample (-1: it is a gap), *avg the mean and *peak the
+ * largest of the real ones (-1 with none); returns how many are real. */
+int tr_hud_pwr_stats(const int16_t pwr[TR_PWR_N], int32_t *now, int32_t *avg, int32_t *peak);
+
+/* The graph's full scale in mW: the peak rounded UP to TR_PWR_STEP_MW, at least TR_PWR_MIN_SPAN_MW
+ * (the bottom is always 0). */
+int32_t tr_hud_pwr_range(const int16_t pwr[TR_PWR_N]);
+
+#define TR_HUD_TILES 9
 
 typedef struct {
 	uint32_t key[TR_HUD_TILES]; /* what each tile last showed */

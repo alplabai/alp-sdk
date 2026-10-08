@@ -284,6 +284,8 @@ static void perf(void)
 	mem.img = mem.itcm;
 #endif
 	tr_perf_sample(&g_perf, &raw, &mem, &g_view);
+	/* The power graph's window (platform/rail5v_power.c): every present, it is 192 bytes. */
+	g_view.pwr_seq = tr_rail5v_ring_read(g_view.pwr);
 }
 
 void tr_hud_l2_present(const tr_score_t    *s,

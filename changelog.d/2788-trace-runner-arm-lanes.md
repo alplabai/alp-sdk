@@ -20,8 +20,7 @@ build) until the HP publishes, printing a warning once if they differ. The new H
 (`FLASH-RECIPE.md` has the acceptance step).
 
 The rotation `TR_CAM_ROTATE=0` is the EVK bench release: the OV9281 is mounted upright and shown as a
-640x400 landscape picture at native 1:1, letterboxed in the portrait camera half with the lamps above it
-and the label below. `90` and `270` (a camera on its side) keep their portrait layout. The lamps read
+640x400 landscape picture, scaled up to fill the camera area (see the fill-800 fragment). The lamps read
 LEFT ARM, RIGHT ARM, BOTH ARMS and DUCK. `build-release.sh` now also refuses an HE and HP build that
 disagree on `TR_CAM_MIRROR` or on whether the rotation is `0`, or an HE that is not `TR_INPUT_NPU=ON`,
 and builds the A32 renderer with the HE's `TR_CAM_ROTATE` (`make -C a32/renderer TR_CAM_ROTATE=`) so the

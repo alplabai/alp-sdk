@@ -4,6 +4,8 @@
 
 #include <stdint.h>
 
+#include "../hud/hud.h" /* TR_PWR_N */
+
 /* The carrier's downstream +5V net, opened on the shared sensor I2C bus
  * (EVK_I2C_BUS_SENSORS -- the same bus platform/imu.c's BMI323 already
  * uses; a second alp_i2c_open() on one bus_id is supported -- see
@@ -13,7 +15,7 @@
  * this rail does and does not cover. */
 int tr_rail5v_open(void);
 
-/* Call every tick; internally paced to ~3 Hz (TR_RAIL5V_PERIOD_MS in the
+/* Call every tick; internally paced to ~10 Hz (RAIL5V_PERIOD_MS in the
  * .c), so this is cheap to call from the hot path -- most calls are a single
  * timestamp compare and return. Off ticks: no I2C traffic, so it never
  * contends with platform/imu.c's BMI323 polling on the shared bus. */
@@ -29,5 +31,9 @@ extern volatile int32_t tr_rail5v_avg_mw;
  * write + readback verified TR_INA236_CONFIG (ina236_math.h). Healthy:
  * 0x80004927 (reserved bits 14:13 read 10b). */
 extern volatile uint32_t tr_rail5v_config_rb;
+
+/* The graph's samples (hud.h TR_PWR_N, oldest first, TR_PWR_GAP where none could be taken) into
+ * out; returns the number of samples pushed so far. Same thread as tr_rail5v_poll(). */
+uint32_t tr_rail5v_ring_read(int16_t out[TR_PWR_N]);
 
 #endif /* TR_PLATFORM_RAIL5V_POWER_H */

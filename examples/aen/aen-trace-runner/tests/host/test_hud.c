@@ -17,7 +17,9 @@
 
 static uint16_t fb[TR_HUD_W * TR_HUD_H], ref[TR_HUD_W * TR_HUD_H];
 
-#define MIDDLE (1u << 3 | 1u << 4 | 1u << 5) /* hud.c T_MIDL, T_POP, T_MIDR */
+#define MIDDLE    (1u << 3 | 1u << 4 | 1u << 5 | 1u << 6) /* hud.c T_MIDL, T_POP, T_MIDR, T_STRIP */
+#define T_PWR_BIT (1u << 7)                               /* hud.c T_PWR: the power graph */
+#define T_INV_BIT (1u << 8)                               /* hud.c T_INV */
 
 static uint64_t now_ns(void)
 {
@@ -378,7 +380,7 @@ int main(void)
 			if (age < TR_HUD_ZONE_FRAMES) {
 				assert(rows);
 				seen++;
-				assert(f == 0u || (dirty & ~(1u << 6)) == 0u); /* T_INV only */
+				assert(f == 0u || (dirty & ~T_INV_BIT) == 0u); /* T_INV only */
 				repaints += (dirty >> 6) & 1u;
 			} else {
 				assert(!rows);
@@ -573,6 +575,121 @@ int main(void)
 		}
 	}
 
+	/* 6b. The power graph (the +5V net, T_PWR): readouts, scale, gaps, the tile, the layout. */
+	{
+		int16_t w[TR_PWR_N];
+		int32_t now, avg, peak;
+
+		/* the maths, by hand: a gap is not a zero */
+		for (int i = 0; i < TR_PWR_N; i++) {
+			w[i] = TR_PWR_GAP;
+		}
+		assert(tr_hud_pwr_stats(w, &now, &avg, &peak) == 0 && now == -1 && avg == -1 && peak == -1);
+		assert(tr_hud_pwr_range(w) == TR_PWR_MIN_SPAN_MW);
+		w[TR_PWR_N - 1] = 2000;
+		w[TR_PWR_N - 2] = 2210;
+		w[TR_PWR_N - 4] = 0; /* a real zero counts: avg of 2000, 2210, 0 */
+		assert(tr_hud_pwr_stats(w, &now, &avg, &peak) == 3 && now == 2000 && peak == 2210 &&
+		       avg == 1403);
+		w[TR_PWR_N - 1] = TR_PWR_GAP; /* the newest is a gap: "now --", the rest stands */
+		assert(tr_hud_pwr_stats(w, &now, &avg, &peak) == 2 && now == -1 && avg == 1105 &&
+		       peak == 2210);
+		/* the scale: the peak rounded UP to 250, at least 500 */
+		assert(tr_hud_pwr_range(w) == 2250);
+		w[TR_PWR_N - 2] = 2250;
+		assert(tr_hud_pwr_range(w) == 2250); /* exactly on a step: not the next one */
+		w[TR_PWR_N - 2] = 2251;
+		assert(tr_hud_pwr_range(w) == 2500);
+		w[TR_PWR_N - 2] = 100;
+		assert(tr_hud_pwr_range(w) == 500);
+
+		/* the readouts fit the panel's 100 px at the worst int16 width, and so do the titles */
+		assert(tr_hud_text_w(TR_HUD_FONT_TINY, "+5V net") <=
+		       92); /* PWR_W 100 less a 4 px inset each side */
+		assert(tr_hud_text_w(TR_HUD_FONT_TINY, "(SoM+LCD)") <=
+		       92); /* PWR_W 100 less a 4 px inset each side */
+		assert(tr_hud_text_w(TR_HUD_FONT_TINY, "now 32767") <=
+		       92); /* PWR_W 100 less a 4 px inset each side */
+		assert(tr_hud_text_w(TR_HUD_FONT_TINY, "avg 32767") <=
+		       92); /* PWR_W 100 less a 4 px inset each side */
+		assert(tr_hud_text_w(TR_HUD_FONT_TINY, "pk 32767") <=
+		       92); /* PWR_W 100 less a 4 px inset each side */
+
+		/* a sample sequence with gaps (the HP holding I2C2 for a stretch): the tile alone moves,
+		 * and every update equals a scratch paint */
+		tr_hud_t      hp;
+		tr_hud_view_t pv;
+		uint32_t      d2;
+
+		tr_hud_init(&hp);
+		view_play(&pv, 0u, 0u);
+		memset(fb, 0xA5, sizeof(fb));
+		(void)tr_hud_update(&hp, fb, &pv, &d2);
+		same_as_scratch(&hp, &pv);
+		for (uint32_t n = 0; n < 250u; n++) {
+			int16_t sample = (n / 30u) % 3u == 1u ? (int16_t)TR_PWR_GAP
+			                                      : (int16_t)(1800 + (int)(n * 37u % 900u));
+
+			/* oldest first: shift the window and append, as the platform ring reads out */
+			memmove(pv.pwr, pv.pwr + 1, (TR_PWR_N - 1) * sizeof(pv.pwr[0]));
+			pv.pwr[TR_PWR_N - 1] = sample;
+			pv.pwr_seq++;
+			px = tr_hud_update(&hp, fb, &pv, &d2);
+			assert(d2 == T_PWR_BIT && px > 0u && px <= 110u * 132u);
+			same_as_scratch(&hp, &pv);
+		}
+		/* unchanged: nothing repaints */
+		assert(tr_hud_update(&hp, fb, &pv, &d2) == 0u && d2 == 0u);
+		/* a sample window with a gap in it paints a hole, not a bar: the gap's column keeps the
+		 * panel's own pixels (as with no samples at all), its neighbours carry the bar */
+		{
+			static uint16_t bare[TR_HUD_W * TR_HUD_H];
+			tr_hud_view_t   g = pv;
+			const int       y = 202 + 24; /* mid-graph */
+
+			g.pwr_seq = 0u; /* nothing sampled: the empty panel */
+			tr_hud_paint_all(bare, &g, 0u, 0u, 0u);
+			for (int i = 0; i < TR_PWR_N; i++) {
+				g.pwr[i] = 1000;
+			}
+			g.pwr[40] = TR_PWR_GAP;
+			g.pwr_seq = 99u;
+			tr_hud_paint_all(ref, &g, 0u, 0u, 0u);
+			assert(ref[y * TR_HUD_W + 614 + 40] == bare[y * TR_HUD_W + 614 + 40]);
+			assert(ref[y * TR_HUD_W + 614 + 39] != bare[y * TR_HUD_W + 614 + 39]);
+			assert(ref[y * TR_HUD_W + 614 + 41] != bare[y * TR_HUD_W + 614 + 41]);
+			/* and a real zero is a bar of one pixel, not a hole */
+			g.pwr[40] = 0;
+			tr_hud_paint_all(ref, &g, 0u, 0u, 0u);
+			assert(ref[(202 + 47) * TR_HUD_W + 614 + 40] != bare[(202 + 47) * TR_HUD_W + 614 + 40]);
+		}
+
+		/* the layout: the cards end where the power column begins, in EVERY screen -- the
+		 * margins around the panel (x 610..612 and 712..720, rows 168..170 and 298..300) stay
+		 * transparent, and the quiet screens leave the panel's own rows to it */
+		for (uint8_t mode = TR_HUD_PLAY; mode <= TR_HUD_INITIALS; mode++) {
+			tr_hud_view_t m;
+
+			view_play(&m, 1234u, 56u);
+			m.mode     = mode;
+			m.banner   = TR_BANNER_STAND;
+			m.best     = 99999u;
+			m.new_best = 1;
+			m.hs.n     = 5;
+			for (int i = 0; i < m.hs.n; i++) {
+				m.hs.e[i].score = 4000u - 100u * (uint32_t)i;
+				memcpy(m.hs.e[i].name, "ABC", 4);
+			}
+			tr_hud_paint_all(ref, &m, 250u, 0u, 0u); /* a table page for the attract card */
+			assert(alpha_px(ref, 610, 140, 612, 300) == 0u);
+			assert(alpha_px(ref, 712, 140, TR_HUD_W, 300) == 0u);
+			assert(alpha_px(ref, 612, 168, 712, 170) == 0u);
+			assert(alpha_px(ref, 612, 298, 712, 300) == 0u);
+			assert(alpha_px(ref, 612, 170, 712, 298) > 8000u); /* the panel itself is there */
+		}
+		printf("hud power: readouts, scale, gaps, tile, layout ok\n");
+	}
+
 	/* 7. Screen changes + a scripted mix: always equal to scratch. */
 	static const uint8_t banners[] = {
 		TR_BANNER_NONE,  TR_BANNER_ATTRACT,   TR_BANNER_GAME_OVER,
@@ -609,7 +726,8 @@ int main(void)
 			 * the half layout's road and runner stay clear (polish round:
 			 * the old card covered rows 140..348 edge to edge). */
 			assert(v.mode == TR_HUD_ATTRACT && alpha_px(fb, 16, 74, 388, 138) > 20000u);
-			assert(alpha_px(fb, 20, 172, 700, 298) == 0u);
+			assert(alpha_px(fb, 20, 172, 610, 298) ==
+			       0u); /* left of the power panel (x 612..712) */
 		}
 	}
 	uint64_t dt = now_ns() - t0;

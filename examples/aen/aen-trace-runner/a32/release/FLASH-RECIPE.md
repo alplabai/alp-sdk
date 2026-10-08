@@ -67,8 +67,9 @@ camera on first silicon boot.
 **Camera orientation: the EVK-03 bench release is LANDSCAPE, `-DTR_CAM_ROTATE=0 -DTR_CAM_MIRROR=ON`
 on BOTH the HE and the HP build.** The arm-raise controls (README "Controls") want the wider field
 of view -- arms reach sideways -- so the OV9281 on the E1M-EVK's RPi CSI connector is mounted
-upright and shown as a 640x400 picture, letterboxed in the portrait game's camera half (the lamps
-above it, the "CAMERA / NPU Hz" label below). Mirror ON makes the player see a mirror image of
+upright and shown as a 640x400 picture scaled up x1.28 to cover the camera area (the bottom 2/5 of
+the screen, about 10 px cropped a side), with the lamps and the "CAMERA / NPU Hz" label on a plate
+along its bottom edge. Mirror ON makes the player see a mirror image of
 themselves, which is also what tells the HE which arm is their left (`src/vision/pose.c`). A rig
 with the camera mounted on its SIDE uses `90` (the 2026W36-0009 mount; `270` showed the player upside
 down, the maintainer confirmed `90` by eye -- `src/vision/cam_rot.h` defaults to it) with

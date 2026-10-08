@@ -111,6 +111,13 @@ if bash tests/host/test_hp_combined.sh; then
 else
 	echo "FAIL: tests/host/test_hp_combined.sh"; rc=1
 fi
+# The power graph's source interlock: the I2C2 lease check before any transfer, a gap for every slot the poll
+# cannot sample, never blocking (platform/rail5v_power.c is a Zephyr file with no host build).
+if bash tests/host/test_rail5v_gap.sh; then
+	echo "PASS: tests/host/test_rail5v_gap.sh"
+else
+	echo "FAIL: tests/host/test_rail5v_gap.sh"; rc=1
+fi
 # The TR_PANEL_HZ release interlock (a32/release/panel_hz_check.sh).
 if bash tests/host/test_panel_hz_check.sh; then
 	echo "PASS: tests/host/test_panel_hz_check.sh"

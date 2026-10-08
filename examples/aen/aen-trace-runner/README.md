@@ -55,8 +55,9 @@ PLAYER's own, as they see themselves on the screen (a selfie view).
   `!!!!!` warning printed once if the two disagree. The rotation-0 flip bit has not been seen on
   glass yet: `a32/release/FLASH-RECIPE.md` has the bench acceptance step and the
   `TR_OV9281_HMIRROR_ACTIVE_LOW` HP option if it turns out reversed.
-- The lamps beside the camera picture say it on screen: **LEFT ARM**, **RIGHT ARM**,
-  **BOTH ARMS** and **DUCK** light as the game acts on them.
+- The lamps on the plate along the bottom edge of the camera picture say it on screen: **LEFT ARM**,
+  **RIGHT ARM**, **BOTH ARMS** and **DUCK** light as the game acts on them. The picture itself is
+  clear of overlays at the top, where the arms go up.
 - Tilting the board (IMU) is still the camera-less way to play; see `TR_TILT_TAKEOVER`.
 
 The thresholds are named constants in `src/vision/arms.h` (arms) and `src/vision/track.h` (duck).
@@ -113,8 +114,10 @@ itself, and tilting the board (IMU) steers. The steps below build the full exhib
    `TR_CAM_ROTATE` is the camera's mounting rotation, clockwise, as seen on the panel: `0`, `90`
    or `270`. `0` is the camera mounted upright and shown LANDSCAPE: that is the E1M-EVK bench
    release (EVK-03, the OV9281 on the RPi CSI connector), and what the arm controls want, since
-   arms reach sideways. `90` (and `270`) are for a camera mounted on its side and shown portrait;
-   `90` matches the first reference unit. `TR_CAM_MIRROR` (default `ON`) says the HP mirrors the
+   arms reach sideways. Only `0` is drawn on the panel (scaled up to fill the camera area); a camera
+   the HP turns (`90` / `270`, a camera mounted on its side) still drives the game, but the video
+   area says `ROT nn` instead of showing it sideways. `90` is the default and matches the first
+   reference unit. `TR_CAM_MIRROR` (default `ON`) says the HP mirrors the
    view like a selfie; the arm controls read which arm is the player's left from it, so set it
    exactly as the HP build. `build-release.sh` refuses an HE and HP pair that disagree on
    `TR_CAM_MIRROR`, or on whether `TR_CAM_ROTATE` is `0`.
@@ -176,9 +179,12 @@ the game needs comes from that shield's devicetree through the SDK's display API
 - the refresh (`pclk / (htotal * vtotal)` of the `cdc200` node, `src/game/panel_hz.h`): 40 Hz for
   the RK055, 30 Hz for the RVT121, 30 Hz for the RK055 with `panel_30hz.overlay`;
 - the geometry and the panel's `mount-rotation` (`alp_display_caps_t.rotation`): the game stays
-  720x1280 portrait and turns the frame by that many degrees clockwise when it writes the scan-out
+  portrait and turns the frame by that many degrees clockwise when it writes the scan-out
   buffer (`src/render/panel_rot.h`, the one definition of the mapping). The RVT121 is mounted on
-  its side and declares 90;
+  its side and declares 90. The picture is rendered natively 800 columns wide (`TR_R3D_W`), 768
+  rows of game over 512 of camera, and the frame is written `fw` columns wide: the panel's width,
+  taken from its window (`tr_frame_in_t.fw`, mailbox version 3). The RVT121 shows all 800; the
+  RK055 (720) shows the centre 720, cropped, never scaled;
 - the backlight (`alp,display-backlight` in the shield: the RVT121's 30% PWM; the RK055's HX8394
   owns its own enable);
 - the panel bring-up (the SDK's `panel_init_retry.c` for the HX8394, the SN65DSI83 driver for the
@@ -189,15 +195,13 @@ west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d build/he . -- -D
 ```
 
 The only per-shield file in the game is `shield-fit/<shield>.overlay`, applied automatically when
-it exists: the RVT121's fits the portrait content to a 1280x720 layer-1 window centred on its 800
-rows (black bars above and below), which is the portrait frame's byte count exactly, so no address
-in `src/ipc/tr_memmap.h` moves. It stays a per-shield overlay rather than a runtime window because
-the CDC200 driver derives the layer's `fb_size` from the devicetree window and `cdc200_swap_fb()`
-rejects any other size, so a window chosen at run time would need a driver change that lets the
-swap size follow the registers. The A32 renderer rotates each 32-row band as it copies it out
+it exists: the RVT121's only disables the touch controller and enables I2C1 (the layer-1 window is
+the shield's whole 1280x800, which is 2,048,000 B, exactly one framebuffer slot, so no address in
+`src/ipc/tr_memmap.h` moves). The HE takes `fw` from the CDC200 driver's `fb_size` and checks it
+against the devicetree window, because `cdc200_swap_fb()` rejects any other size. The A32 renderer rotates each 32-row band as it copies it out
 (NEON 8x8 transposes), the video half included; the HUD (layer 2) is placed at open from the
-rotation and the layer-1 window, 352x720 at the edge the portrait top lands on, in the same
-buffer. The renderer is ONE binary for every display: the HE puts the rotation (0, 90 or 270; a
+rotation and the layer-1 window, 352x720 at the edge the portrait top lands on and centred along
+it (`tr_hud_window_off()`), in the same buffer. It stays 720 wide on every panel. The renderer is ONE binary for every display: the HE puts the rotation (0, 90 or 270; a
 16-bit field) in every frame (mailbox version 2), and the renderer faults on a version or rotation
 it cannot produce rather than draw something else.
 
@@ -216,7 +220,7 @@ first, then the HP. An HP restarted alone after it took the bus waits for a rele
 coming, and an HE-only reset while the HP is running reconfigures the bus under it: restart both.
 The touch controller is disabled in the fit overlay (the game does not use it). `TR_CAM_ROTATE` is
 the camera's mounting rotation and is independent of the panel's; the camera view and skeleton are
-drawn in the portrait video half and rotated with the rest of the frame.
+drawn in the video area (the bottom 2/5) and rotated with the rest of the frame.
 
 Limits: the 2D `TR_RENDER=M55` path cannot rotate and refuses a display with a `mount-rotation` at
 build time. `TR_CAMERA` (a camera on the HE) is removed and refused at configure time: it had no keypoints, so no lane or jump. The sound image is unaffected (it uses I2C
