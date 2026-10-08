@@ -210,7 +210,7 @@ void cc_feat_extract(const struct cc_window_state *st,
  * Feature packing -- lay the metrics out in a fixed order for the AI model.
  *
  * The order here must match the column order used when the classifier was
- * trained (see tools/training/feature_extractor.py).  If a feature is added
+ * trained (the training script is not shipped with this example).  If a feature is added
  * or removed, CC_FEATURE_DIM must be updated AND the model must be retrained.
  *
  * The function intentionally takes a raw float pointer + capacity so that the

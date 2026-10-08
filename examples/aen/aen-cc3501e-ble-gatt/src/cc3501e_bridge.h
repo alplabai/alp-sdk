@@ -123,7 +123,7 @@
  * (200 MHz) cycles -- 5 ns per step.
  *
  * 4 is silicon-measured at the 25 MHz working point (40 ns bit period) on
- * E1M-AEN803 serial 2026W36-0002.  N was swept 0..10 with 0x481040F0 read back
+ * a bench E1M-AEN803.  N was swept 0..10 with 0x481040F0 read back
  * each time to confirm the value took, using aen-evk-demo phase 8 as the
  * workload:
  *

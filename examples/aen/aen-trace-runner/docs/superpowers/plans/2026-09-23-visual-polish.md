@@ -1,6 +1,6 @@
 # Trace Runner visual polish + crash feel — plan (2026-09-23)
 
-Maintainer feedback on 2026W36-0009 (E1M-AEN803 2026W36-0009), 2026-09-23: "no flicker, it looks
+Maintainer feedback on 2026W36-0009 (a bench E1M-AEN803), 2026-09-23: "no flicker, it looks
 perfect but there can be some improvements for the whole 3D graphics". Asked for, verbatim:
 depth fog + sky gradient, more detail (tris/textures), blob shadows + speed lines, lighting
 upgrade; "also character can be better, we should have more complex traces. and when crashing
@@ -200,7 +200,7 @@ distance repaint 0.53 M (every 4th frame), popup frame 0.46 M, a screen change 2
 ### P10 — game sound on the M55-HP (maintainer 2026-09-23)
 
 Maintainer chose: M55-HP = game sound now, camera + Ethos-U55 body control later (needs camera
-and display on one board). Sound bench: the E1M-AEN803 2026W36-0002 EVK ONLY ("you can use EVK 03 for sound only
+and display on one board). Sound bench: the bench E1M-AEN803 EVK ONLY ("you can use EVK 03 for sound only
 on the bench now"; reworked I2S mux, TAS2563 amps 0x4d/0x4e). Evidence by PDM-mic loopback, not
 by ear. Engine: portable C synth (host-tested, deterministic): music loop (synthwave bass/arp/
 drums, procedural or tracker-style pattern data), SFX: footsteps tick, pickup chime, combo

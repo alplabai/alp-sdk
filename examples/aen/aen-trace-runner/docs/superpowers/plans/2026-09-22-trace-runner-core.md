@@ -22,7 +22,7 @@
 - **Licence:** Apache-2.0. Consume alp-sdk through `<alp/*>` only; an SDK gap is logged against the SDK, never worked around here.
 - **Hardware truths that shape the code:** panel init fails roughly 1 cold boot in 8-10 with no re-init path; touch is unusable (GT911 config block reads blank); HyperRAM is unusable (CK/CK# crossed at U9). Free memory: SRAM0 4 MB (1.84 MB is the framebuffer), SRAM1 4 MB, MRAM 5.5 MB, OSPI NOR 32 MB.
 - **Load flow:** M0-M1 fit the 256 KB ITCM RAM-run. From M2 the model pushes the image past that, so M2 onward use the MRAM slot0 flash flow.
-- **Commit messages:** no AI attribution, no lab-farm place names; refer to boards as SKU + serial (`E1M-AEN803 2026W36-0009`).
+- **Commit messages:** no AI attribution, no lab-farm place names; refer to boards as SKU + serial (`a bench E1M-AEN803`).
 
 ---
 
@@ -874,7 +874,7 @@ git commit -m "feat(render): draw the track with an erase-all, move-all, draw-al
 
 - [ ] **Step 1: Run it on the board**
 
-Hand the ELF to a bench run on `E1M-AEN803 2026W36-0009`, via the Flow C ITCM RAM-run, with a **cold power cycle before every boot**. The RAM console is read over SWD: resolve `ram_console_buf` and its position symbol with `arm-zephyr-eabi-nm` from this build's own `zephyr.elf`, because they move between builds.
+Hand the ELF to a bench run on `a bench E1M-AEN803`, via the Flow C ITCM RAM-run, with a **cold power cycle before every boot**. The RAM console is read over SWD: resolve `ram_console_buf` and its position symbol with `arm-zephyr-eabi-nm` from this build's own `zephyr.elf`, because they move between builds.
 
 - [ ] **Step 2: Record what was observed**
 
@@ -886,7 +886,7 @@ Expect roughly 1 boot in 8-10 to print the known panel-init failure line instead
 
 ```bash
 git add docs/bench
-git commit -m "docs(bench): record the M0 run on E1M-AEN803 2026W36-0009"
+git commit -m "docs(bench): record the M0 run on a bench E1M-AEN803"
 ```
 
 ---
@@ -1505,7 +1505,7 @@ Draw a clear "step back into view" banner while paused, so a player who wandered
 
 - [ ] **Step 4: Build both targets, then bench-run**
 
-Bench-run on `E1M-AEN803 2026W36-0009`, cold cycle first. The evidence for this milestone is a video or frame sequence showing a person stepping left and right, jumping and crouching, with the runner following. Record it in `docs/bench/`.
+Bench-run on `a bench E1M-AEN803`, cold cycle first. The evidence for this milestone is a video or frame sequence showing a person stepping left and right, jumping and crouching, with the runner following. Record it in `docs/bench/`.
 
 - [ ] **Step 5: Commit**
 

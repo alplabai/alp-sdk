@@ -6,7 +6,7 @@ E1M-AEN803 (Alif Ensemble E8, M55-HE), bench RAM-run via J-Link.
 
 ## The problem it settles
 
-On E1M-AEN803 serial 2026W36-0002, `examples/peripheral-io/i2c-device-hub`
+On a bench E1M-AEN803, `examples/peripheral-io/i2c-device-hub`
 reports:
 
 ```
@@ -102,7 +102,7 @@ sensor. `RESULT FAIL` means a read-back itself failed at the bus level
 
 BMI323 (U13) sits on the carrier bus -- SoC I2C0, portable alias `alp-i2c0`
 (`ALP_E1M_I2C0` / `EVK_I2C_BUS_SENSORS`) -- at 7-bit address 0x68
-(`EVK_I2C_ADDR_BMI323`), confirmed on E1M-AEN803 serial 2026W36-0002 with no
+(`EVK_I2C_ADDR_BMI323`), confirmed on a bench E1M-AEN803 with no
 0x69 collision on this respin batch. The board layer already enables this
 bus; this app's overlay carries only the bench ITCM retarget.
 

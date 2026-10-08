@@ -101,5 +101,5 @@ RESULT PASS: 8/8 TMP112 samples read at 0x40, all within the plausible indoor ba
 
 > **NOT YET BENCH-RUN.** The temperature read itself has been proven on
 > 2626-R2 silicon by `aen-brd-i2c-scan` (raw register read at `0x40`, 27.687 °C
-> on 2026-09-07, serial `2026W36-0002`); this app's upstream-driver path is
+> on 2026-09-07, the bench unit); this app's upstream-driver path is
 > build-verified only until it gets a bench slot.

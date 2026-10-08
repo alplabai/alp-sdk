@@ -80,7 +80,7 @@ either build form, so no `-DSHIELD=...` flag is needed.
 > `e1m_evk_rk055hdmipi4ma0` shield), and the twister coverage this
 > example gets is `build_only`. This app's M55-HP display chain is
 > compile-checked only -- the shield's own glass evidence (#2204,
-> E1M-AEN803 2026W36-0009) was an M55-HE run -- and the
+> a bench E1M-AEN803) was an M55-HE run -- and the
 > `boards/*.overlay` CC3501E bridge wiring these AEN targets need is an
 > HP twin of the bench-proven M55-HE wiring, itself unbenched.
 

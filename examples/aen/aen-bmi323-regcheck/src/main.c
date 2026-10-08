@@ -106,7 +106,7 @@
  * BMI323 (U13) sits on the CARRIER bus -- SoC I2C0 pad group, portable
  * alias alp-i2c0 (ALP_E1M_I2C0 / EVK_I2C_BUS_SENSORS, portable bus index 0)
  * -- at 7-bit address 0x68 (EVK_I2C_ADDR_BMI323 == BMI323_I2C_ADDR_LOW;
- * confirmed on E1M-AEN803 serial 2026W36-0002, no 0x69 collision on this
+ * confirmed on a bench E1M-AEN803, no 0x69 collision on this
  * respin batch, per <alp/boards/alp_e1m_evk_routes.h>). The board layer
  * already enables this bus (metadata/e1m_modules/aen/on-module-links.yaml
  * `e1m_i2c0` entry) -- this app's own overlay carries only the bench ITCM

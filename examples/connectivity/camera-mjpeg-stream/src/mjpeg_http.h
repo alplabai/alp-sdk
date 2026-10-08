@@ -29,11 +29,11 @@
  *  roughly with it, and 160 KiB keeps 2x this buffer inside the SRAM0
  *  budget boards/overlay-1280x960.conf works out alongside the
  *  (also larger) raw ISP buffer pool -- see that file for the full
- *  SRAM0 accounting. Bench run 243 (E1M-AEN803 2026W36-0001) measured
+ *  SRAM0 accounting. Bench run 243 (a bench E1M-AEN803) measured
  *  131-135 KB JPEGs at quality 60 -- comfortably under this cap, 0
  *  buffer-full.
  *
- *  Bench run 312 (E1M-AEN803 2026W36-0001, IMX296, night room, #2287)
+ *  Bench run 312 (a bench E1M-AEN803, IMX296, night room, #2287)
  *  DID overflow this cap repeatedly, once AE ran gain to its full 48 dB
  *  ceiling in a dim scene -- 160 KiB is still the right budget (SRAM0 is
  *  already at 98.5% for this resolution, see overlay-1280x960.conf; a

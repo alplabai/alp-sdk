@@ -106,7 +106,7 @@ static const struct sweep_step SWEEP[] = {
 /*
  * SRAM1 is OFF by default: it is power-gated and unpowered at boot.
  *
- * On E1M-AEN803 2026W36-0009, measured cold with no image loaded, SRAM1 does
+ * On a bench E1M-AEN803, measured cold with no image loaded, SRAM1 does
  * not answer -- 0x023FFFF0 (the top of SRAM0) reads back, 0x02400000 returns
  * "Failed to read memory" to the debugger as well as bus-faulting the core.
  * This probe's first bench run bus-faulted at exactly the SRAM0-to-SRAM1

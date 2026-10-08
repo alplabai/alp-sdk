@@ -48,7 +48,7 @@ same-family part swap alone removes the contention hazard below,
 regardless of which rail powers it -- this app never drives EN or SEL
 itself, and tests only the SoC's own `i2s3` controller, not the amps).
 Amp audibility is a separate, stricter condition this app does not
-check: on E1M-AEN803 serial 2026W36-0002 (2026-09-15), a fitted 3257-type part's VCC
+check: on a bench E1M-AEN803 (2026-09-15), a fitted 3257-type part's VCC
 was moved to `+3V3` between a silent run and an audible run -- not
 established as the only difference between the two (a switch rated
 for 1.8 V VCC is the untested alternative), and even then disabling
@@ -93,7 +93,7 @@ on SoCs whose clockctrl lacks `.set_rate` (e.g. `native_sim`).
 >    at any VCC (undervoltage is not the problem for that part — its VCC
 >    range is 1.2-3.6 V). U46 must be REPLACED with a 3257-type bus switch
 >    AND that switch's VCC must be on `+3V3` — on E1M-AEN803 serial
->    2026W36-0002 (2026-09-15), a fitted 3257-type part's VCC was moved from `+VIO`
+>    the bench unit (2026-09-15), a fitted 3257-type part's VCC was moved from `+VIO`
 >    (1.8 V, silent) to `+3V3` (audible) — not established as the only
 >    difference between the two runs. `S` = IO13 →
 >    **CC3501E GPIO_13**, both hw revisions; `/E` is REVISION-DEPENDENT —

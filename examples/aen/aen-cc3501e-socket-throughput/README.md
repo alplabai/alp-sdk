@@ -174,7 +174,7 @@ another order of magnitude.
 **The 1024-byte trap is gone on a matched host/firmware pair.** An earlier
 bench (host and CC3501E firmware on mismatched protocol revisions) failed
 1024 B and 4092 B with `rc=-5` and a link that never recovered, so the sweep
-used to stop at 512 B. Re-measured 2026-09-28 on E1M-AEN803 2026W36-0009
+used to stop at 512 B. Re-measured 2026-09-28 on a bench E1M-AEN803
 against the bridge firmware's main branch (`GET_VERSION` v1024), 2 of 2
 runs plus a final run of the committed seven-size sweep, each size over the
 full 1 MiB window:

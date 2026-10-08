@@ -1,6 +1,6 @@
 # A32 bare-metal memory probe
 
-First numbers from the Cortex-A32 pair (E1M-AEN803 2026W36-0009) for scalar,
+First numbers from the Cortex-A32 pair (a bench E1M-AEN803) for scalar,
 NEON and D-cache-clean throughput, PMU clock speed, dual-core coherency, and
 CDC200 NS-access reachability -- feeding the T-A0 open questions in
 `docs/superpowers/plans/2026-09-22-a32-renderer.md`. No OS, no libc: this is
