@@ -19,6 +19,7 @@ sensor I²C addresses, button/LED assignments, IO-expander, and the
 bring-up checklist most relevant to firmware writers.  The Zephyr
 board files for the AEN family SoMs on this EVK
 (`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`,
+`alp_e1m_aen803_m55_he`, `alp_e1m_aen803_m55_hp`,
 `alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`) ship in-tree at
 [`zephyr/boards/alp/`](../../zephyr/boards/alp/) (per
 [`docs/architecture.md`](../architecture.md); there is no separate
@@ -33,8 +34,8 @@ not share a board.
 
 | SoM family       | EVK support | Notes                                                                                  |
 |------------------|-------------|----------------------------------------------------------------------------------------|
-| E1M-AEN (Alif Ensemble) | **v0.1** target | Primary bring-up target. ETH0 only (AEN family routes a single MAC).             |
-| E1M-N93 (NXP i.MX 93)   | not currently produced; no committed version | `VERSIONS.md` Tier 3 ("deferred indefinitely past v1.0") lists NXP NX9101 silicon enablement.  Provisional preset `E1M-NX9101`; production MPN pending the HW config writeup. |
+| E1M-AEN (Alif Ensemble) | primary supported target | Primary bring-up target. ETH0 only (AEN family routes a single MAC).             |
+| E1M-N93 (NXP i.MX 93)   | provisional preset; no committed version | `VERSIONS.md` Tier 3 ("deferred indefinitely past v1.0") lists NXP NX9101 silicon enablement.  Provisional preset `E1M-NX9101`; production MPN pending the HW config writeup. |
 
 E1M-X SoMs (`E1M-V2N101/102`, `E1M-V2M101/102`) target the separate
 [E1M-X Development Board](e1m-x-evk.md), not this one.

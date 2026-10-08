@@ -11,9 +11,8 @@ USB-UART adapter, and a 1 Gb Ethernet link partner.
 > the **N93 family** (currently only `E1M-NX9101`, MPN TBD pending
 > final hardware config).
 >
-> **Status:** `E1M-NX9101` is not currently produced, so there is no
-> shipping module to bring up; this guide describes the provisional
-> preset and Yocto machine only.
+> **Status:** `E1M-NX9101` is a provisional preset (MPN TBD); this
+> guide describes the preset and Yocto machine, not a shipped module.
 
 > **Yocto-first family.**  Unlike the AEN family (Zephyr / bare-
 > metal), the N93 family targets **Yocto Linux** as its primary
@@ -29,9 +28,9 @@ Inventory check before powering anything:
   - **NXP i.MX 93** SoC (2x Cortex-A55 @ 1.7 GHz + Cortex-M33
     @ 250 MHz + Ethos-U65 NPU).  Specific variant per the SKU's
     [`metadata/e1m_modules/E1M-NX9101.yaml`](../metadata/e1m_modules/E1M-NX9101.yaml).
-  - **PCA9450** primary PMIC.
-  - **PCAL9538** GPIO expander on BRD_I2C.
-  - **24C128** EEPROM at `0x50` with the Alp manifest.
+  - **PCA9451A** primary PMIC (`pmic_main` in the preset).
+  - GPIO expander on BRD_I2C and an identity EEPROM -- part and
+    address TBD / unverified: neither is declared in the preset.
   - **Ethernet PHY** (single MAC routed; ETH1 lives on E1M-X
     form factor only) -- exact part TBD, per BOM
     (`metadata/e1m_modules/E1M-NX9101.yaml`'s `ethernet_phy: TBD
@@ -54,10 +53,8 @@ Inventory check before powering anything:
 5. Probe V_CORE (A55 core rail, ~0.85 V at low load).  Within
    spec: 0.85 V ±3 %.
 
-If V_CORE is missing the PCA9450 didn't release the core rail.
-Check the PMIC's `INT_STATUS` register over BRD_I2C; the
-[`docs/troubleshooting.md`](troubleshooting.md) entry for
-"V_CORE absent on N93" covers the typical causes.
+If V_CORE is missing the PCA9451A didn't release the core rail.
+Check the PMIC's `INT_STATUS` register over BRD_I2C.
 
 ## 2. Console + first boot
 
