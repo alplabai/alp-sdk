@@ -116,8 +116,11 @@ int main(void)
 					/* the plate (lamps, label) is laid out over the VISIBLE columns, so it
 					 * differs by design from the crop of the full-width one */
 					int plate = y >= TR_VID_Y0 + PLATE_Y;
+					/* ... and the A32 sprite score is drawn at the PANEL's left edge, not the
+					 * render's: checked on its own below */
+					int score = render_hud && !(in[f].flags & TR_FLAG_HUD_L2) && y < 64 && x < 160;
 
-					if (!edge && !plate) {
+					if (!edge && !plate && !score) {
 						assert(fbn[tr_rot_idx(rot, TR_R3D_H, FW, x, y)] == fb0[y * W + X0 + x]);
 					}
 				}
@@ -128,6 +131,33 @@ int main(void)
 
 				assert(l == r &&
 				       l != fb0[(TR_VIEW_H / 2) * W + X0]); /* the border at the crop edge */
+			}
+			if (render_hud && !(in[f].flags & TR_FLAG_HUD_L2)) {
+				/* the score digits start HUD_X0 in from the PANEL's left edge: the pixels the sprite
+				 * HUD adds (a frame with it, less one without) are, on the crop, where the full-width
+				 * frame has them HUD_X0 in from the render's edge -- and there are some */
+				static uint16_t wide_off[W * H], narrow_off[W * H];
+				int             shown = 0;
+
+				render_hud     = 0;
+				in[f].fw       = W;
+				in[f].rotation = 0;
+				draw(&in[f], wide_off, 0x5A);
+				in[f].fw       = FW;
+				in[f].rotation = (uint16_t)rot;
+				draw(&in[f], narrow_off, 0xA5);
+				render_hud = 1;
+				for (int y = 0; y < 64; y++) {
+					for (int x = 0; x < 160; x++) {
+						int digit_w = fb0[y * W + x] != wide_off[y * W + x];
+						int digit_n = fbn[tr_rot_idx(rot, TR_R3D_H, FW, x, y)] !=
+						              narrow_off[tr_rot_idx(rot, TR_R3D_H, FW, x, y)];
+
+						assert(digit_w == digit_n);
+						shown += digit_n;
+					}
+				}
+				assert(shown > 20); /* the digits really are on the crop, not under it */
 			}
 			for (size_t i = (size_t)FW * H; i < (size_t)W * H; i++) {
 				assert(fbn[i] == 0xA5A5u);

@@ -28,6 +28,11 @@
 #define W TR_R3D_W
 #define H TR_R3D_H
 
+#ifndef TR_REACT_MS
+/* ms before impact (about 1.5 frames) that a whole part must still lie inside the panel: the nearest
+   it is judged at */
+#define TR_REACT_MS 50
+#endif
 #define TR_LEAD_S 8 /* seconds of warning the player gets: recognisable by then */
 /* Screen-size targets tuned at TR_VIEW_TUNED_H and rescaled to the game
  * viewport (r3d.h TR_VIEW_PX): the whole picture scales with TR_VIEW_H. */
@@ -338,6 +343,59 @@ int main(void)
 				}
 			}
 		}
+	}
+
+	/* 2c. Framing on BOTH panels (the focal length follows the panel: r3d_scene.h tr_scene_f_px):
+	 * a whole obstacle in an OUTER lane, at the depth a player still has TR_REACT_MS to react at,
+	 * lies inside the columns the panel shows -- all 800 on the Riverdi, the centre 720 on the
+	 * RK055 (which used to lose ~40 px of it at the edges). Lane spacing and collision are world
+	 * units and not touched. */
+	assert(tr_scene_f_px(800u) == TR_CAM_F_PX &&
+	       tr_scene_f_px(0u) == TR_CAM_F_PX); /* the Riverdi: untouched */
+	assert(tr_scene_f_px(720u) > 486.0f && tr_scene_f_px(720u) < 487.0f); /* (720 / 2) / 0.74 */
+	assert(tr_scene_f_px(816u) == TR_CAM_F_PX); /* a width the renderer refuses: the whole render */
+	for (int pass = 0; pass < 2; pass++) {
+		const unsigned fw   = pass ? 800u : 720u;
+		const int      x0c  = (W - (int)fw) / 2;
+		tr_frame_in_t  none = tr_scene_golden_in(3000, 1);
+		int            lo = W, hi = -1;
+
+		none.fw = (uint16_t)fw;
+		tr_scene_init(&s);
+		tr_scene_step(&s, &none);
+		render(&s, &none, fb0);
+		for (unsigned j = 0; j < 2; j++) { /* the low and the high obstacle: lane-wide bodies */
+			for (uint8_t lane = 0; lane < TR_LANES; lane += 2) {
+				tr_frame_in_t in = none;
+				int           x0, y0, x1, y1;
+
+				in.ents[5] = (tr_pkt_ent_t){
+					k[j].kind,
+					lane,
+					k[j].low,
+					0,
+					(int16_t)(ry - TR_REACT_MS * (int)STEPS_S * TR_SCROLL_PX / 1000),
+					0
+				};
+				render(&s, &in, fb);
+				assert(part_box(&x0, &y0, &x1, &y1) > 0);
+				/* the OUTER edge of the outer lane's body (the inner one is the runner's side) */
+				if (lane == 0) {
+					lo = x0 < lo ? x0 : lo;
+				} else {
+					hi = x1 > hi ? x1 : hi;
+				}
+			}
+		}
+		printf("fw %u: outer-lane obstacles %d ms before the runner span columns %d..%d (panel "
+		       "shows %d..%d)\n",
+		       fw,
+		       TR_REACT_MS,
+		       lo,
+		       hi,
+		       x0c,
+		       x0c + (int)fw - 1);
+		assert(lo >= x0c && hi < x0c + (int)fw);
 	}
 
 	/* 3. A run's worth of parts: one spawned every TR_SPAWN_TICKS steps

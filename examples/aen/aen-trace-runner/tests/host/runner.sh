@@ -24,6 +24,11 @@ for t in tests/host/test_*.c; do
 	if [ "$(basename "$t")" = "test_tilt_takeover.c" ]; then
 		extra_cflags="-DTR_TILT_TAKEOVER=1"
 	fi
+	# test_a32_turned.c compares a 720-wide panel's frame with the centre crop of the 800-wide one,
+	# which only holds with the focal length pinned (r3d_scene.h tr_scene_f_px: it follows fw).
+	if [ "$(basename "$t")" = "test_a32_turned.c" ]; then
+		extra_cflags="-DTR_SCENE_F_PX_FIXED=1"
+	fi
 	# test_r3d_zones.c reads the raster's TR_PROF_* counters for its per-zone
 	# cost estimate (the A32 qemu stage below builds it without: goldens only).
 	if [ "$(basename "$t")" = "test_r3d_zones.c" ]; then

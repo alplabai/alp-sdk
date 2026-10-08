@@ -3202,7 +3202,7 @@ void tr_scene_build_part(const tr_scene_t    *s,
 	             0.0f,
 	             TR_CAM_PITCH_DEG * DEG + s->lift * 0.0004f,
 	             s->cam_roll,
-	             TR_CAM_F_PX + kick);
+	             tr_scene_f_px(in->fw) + kick);
 	{
 		float dx, dy;
 

@@ -68,6 +68,30 @@
  * framing at 6/5 the size of the 640-row half layout, over 800 columns. */
 #define TR_CAM_F_PX     (600.0f * (float)TR_VIEW_H / (float)TR_VIEW_TUNED_H)
 #define TR_CAM_BANK_DEG 5.0f
+
+/* The focal length for a panel `fw` columns wide (tr_frame_in_t.fw; 0 or anything the renderer
+ * would refuse: the whole render). TR_CAM_F_PX grew with the viewport HEIGHT (450 -> 540) while
+ * the render grew 720 -> 800 wide, so on a narrower panel's centre crop the outer lanes lost
+ * ~40 px of obstacle at the edges. The picture is made no wider than the panel can show: an
+ * outer lane's obstacle reaches TR_CAM_OUTER_HALF (0.74) of the picture's half-width per unit of
+ * f, so f is at most (fw / 2) / 0.74 -- 540.5 at 800 (the full F_PX applies: unchanged) and 486.5
+ * at 720. Lane spacing, collision and everything in world units are untouched. */
+#define TR_CAM_OUTER_HALF 0.74f
+/* TR_SCENE_F_PX_FIXED (a host-test build flag, tests/host/runner.sh test_a32_turned.c): pin the
+ * focal length to TR_CAM_F_PX for every width, so a narrow panel's frame is the exact pixel crop
+ * of the full-width one and the copy-out's crop can be proven bit for bit. Never in a release. */
+static inline float tr_scene_f_px(unsigned fw)
+{
+#ifdef TR_SCENE_F_PX_FIXED
+	(void)fw;
+	return TR_CAM_F_PX;
+#else
+	float w = fw >= 16u && fw <= (unsigned)TR_R3D_W ? (float)fw : (float)TR_R3D_W;
+	float f = (w * 0.5f) / TR_CAM_OUTER_HALF;
+
+	return f < TR_CAM_F_PX ? f : TR_CAM_F_PX;
+#endif
+}
 /* The skyline (far layer) stands this far ahead of the eye, riding with it;
  * the board runs out to its foot (r3d_scene.c GROUND_END). */
 #define TR_SCENE_SKY_DZ 24000.0f

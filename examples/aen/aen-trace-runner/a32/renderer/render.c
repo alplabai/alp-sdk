@@ -243,7 +243,8 @@ static void hud_band(uint16_t *cband, int y_lo)
 	}
 
 	uint8_t d[TR_SCORE_MAX_DIGITS];
-	int     n = tr_score_to_digits(hud_score, d), x = HUD_X0;
+	/* the score sits at the PANEL's left edge: on a narrower panel's crop that is frame_x0c in */
+	int n = tr_score_to_digits(hud_score, d), x = frame_x0c + HUD_X0;
 
 	for (int i = 0; i < n; i++) {
 		tr_sprite_blit(cband,
@@ -669,6 +670,10 @@ static const char *const lamp_cap[4] = { "LEFT ARM", "RIGHT ARM", "BOTH ARMS", "
  * left three quarters and the label (CAMERA and its size, NPU and its rate) in the last quarter. */
 static void draw_plate(const vcv_t *cv)
 {
+	if (cv->y1 <= TR_VID_Y0 + PLATE_Y) {
+		return; /* a band wholly above the plate: nothing of it is in these rows */
+	}
+
 	const int top = TR_VID_Y0 + PLATE_Y, x0 = frame_x0c, fw = (int)frame_fw;
 	const int lamps_w = fw * 3 / 4, cell = lamps_w / 4, lcx = x0 + lamps_w + (fw - lamps_w) / 2;
 
