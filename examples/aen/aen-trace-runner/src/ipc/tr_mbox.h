@@ -328,6 +328,19 @@ static inline void tr_mbox_cold_clear(volatile tr_mbox_t *m)
 	}
 }
 
+/* Stub, first thing in stub_main(): is this page warm (ours, of THIS mailbox layout)?
+ * A cold page, or a warm page of another TR_MBOX_VERSION (an older stub's, whose blocks
+ * sit at other offsets), is garbage to this stub: it is cleared (tr_mbox_cold_clear).
+ * Returns 1 for a warm page, 0 for one it cleared. */
+static inline int tr_mbox_stub_page_init(volatile tr_mbox_t *m)
+{
+	if (m->magic == TR_MBOX_MAGIC && m->version == TR_MBOX_VERSION) {
+		return 1;
+	}
+	tr_mbox_cold_clear(m);
+	return 0;
+}
+
 /* Field-by-field snapshot of `g` into `out` (see the header comment on why
  * tr_game_t is never embedded). `banner`, `attract_active` and `paused` are
  * display/mode state tr_game_t doesn't carry, passed in by the caller.

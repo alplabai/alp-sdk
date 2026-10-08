@@ -217,6 +217,7 @@ static void wd_poll(bool missed)
 			       g_mbox->ifsr,
 			       g_mbox->ifar,
 			       g_mbox->pad3[7]);
+			g_mbox->pad3[7] = 0u; /* said once: a stale record is not repeated */
 		}
 		if (cmd == TR_CTRL_LAUNCH) {
 			g_mbox->ctrl_entry = tr_a32_autolaunch_id[0];
@@ -480,7 +481,9 @@ void tr_a32_flush(void)
 
 void tr_a32_present(const tr_frame_in_t *in)
 {
-	if (!g_link_ok) {
+	/* The stub must have initialised the page: publishing into a cold page it has not
+	 * cleared yet (the "starting anyway" boot path) would be overwritten by that clear. */
+	if (!g_link_ok || !stub_alive()) {
 		return;
 	}
 	tr_a32_flush();

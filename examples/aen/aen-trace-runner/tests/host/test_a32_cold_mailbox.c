@@ -7,6 +7,8 @@
  *   1. a page full of garbage: tr_mbox_cold_clear() leaves in_seq == out_seq == 0,
  *      the renderer's first poll (`last = out_seq`) finds nothing to take, and
  *      identity / control words outside [in_seq, ctrl_cmd) are untouched;
+ *   1b. the stub's warm/cold decision: cold or old-version pages are cleared, a warm page of
+ *      this version is kept;
  *   2. a real frame published after the clear is taken, rotation intact;
  *   3. tr_rot_refuse(): a bad rotation is refused only on a drawn frame;
  *   4. stub_next_token(): never 0, wraps to 1, differs from its input. */
@@ -47,6 +49,24 @@ int main(void)
 		assert(!tr_mbox_take_in(&m, last, &in, &fb, &seq, barrier)); /* nothing waiting */
 	}
 
+	/* 1b. The stub's decision at its call site (tr_mbox_stub_page_init): cold garbage and a
+	 * warm page of ANOTHER mailbox version are cleared; a warm page of this version is
+	 * kept, frame owed and all. Mutating the guard (magic only, or inverted) fails here. */
+	memset((void *)&m, 0xA7, sizeof(m));
+	assert(tr_mbox_stub_page_init(&m) == 0 && m.in_seq == 0u && m.out_seq == 0u);
+	memset((void *)&m, 0xA7, sizeof(m));
+	m.magic   = TR_MBOX_MAGIC;
+	m.version = TR_MBOX_VERSION - 1u; /* an older stub's page: other offsets */
+	assert(tr_mbox_stub_page_init(&m) == 0);
+	assert(m.in_seq == 0u && m.out_seq == 0u && m.in.rotation == 0u);
+	memset((void *)&m, 0xA7, sizeof(m));
+	m.magic   = TR_MBOX_MAGIC;
+	m.version = TR_MBOX_VERSION;
+	m.in_seq  = 7u;
+	m.out_seq = 6u;
+	assert(tr_mbox_stub_page_init(&m) == 1 && m.in_seq == 7u && m.out_seq == 6u); /* kept */
+
+	tr_mbox_cold_clear(&m); /* back to a clean page for the frame below */
 	/* 2. The HE's first real frame after the clear is taken, rotation intact. */
 	{
 		tr_frame_in_t f, in;

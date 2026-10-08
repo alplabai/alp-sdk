@@ -298,16 +298,13 @@ void stub_main(void)
 	 * from before this boot is dropped rather than obeyed. The previous
 	 * boot's fault record survives in pad4[0..3] (MBOX_OFF_LAST_FAULT_*) when
 	 * the magic says the page was ours; cold SRAM is garbage, so zero then. */
-	uint32_t warm = m->magic == TR_MBOX_MAGIC;
+	uint32_t warm = (uint32_t)tr_mbox_stub_page_init(m); /* cold or old-version: cleared */
 	m->pad4[0]    = warm ? m->fault_core : 0;
 	m->pad4[1]    = warm ? m->fault_code : 0;
 	m->pad4[2]    = warm ? m->lr : 0;
 	m->pad4[3]    = warm ? m->dfar : 0;
 	for (uint32_t i = TR_STUB_T_COPY0; i <= TR_STUB_T_JUMP; i++)
 		m->pad4[i] = 0;
-	if (!warm) {
-		tr_mbox_cold_clear(m); /* power-on garbage is never a waiting frame */
-	}
 	m->stub_state       = STUB_STATE_PARKED;
 	m->stub_core1_state = STUB_CORE1_OFF;
 	m->stub_heartbeat0 = m->stub_heartbeat1 = 0;

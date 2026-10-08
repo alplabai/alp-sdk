@@ -36,7 +36,8 @@
  * jump -- the release self-LAUNCH included, which never visits the park loop -- and
  * which stays frozen while a payload runs: fresh per launch, same on both cores, so
  * a gate value left by an earlier launch never matches, and a zero token cannot
- * match a not-yet-cleared (zero) gate word.
+ * meet a gate word that happens to read 0 (RENDER_GATE sits outside .bss, so power-on
+ * garbage or an earlier launch's token is all it holds until core 0 writes it).
  *
  * HALT (contract: core 1 returns first): core 1 sees ctrl_cmd == HALT while
  * idle and returns; core 0 sees it, waits (<= RENDER_HALT_WAIT) for
