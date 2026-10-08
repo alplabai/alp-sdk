@@ -379,3 +379,57 @@ def test_linux_driver_facts_consistent_with_modules():
             assert m["xclk_hz"] in lin["xclk_supported_hz"], p.stem
         if "link_freqs" in lin:
             assert m["lanes"] in {e["lanes"] for e in lin["link_freqs"]}, p.stem
+
+
+def test_cameras_module_without_zephyr_shield_rejected_on_zephyr_core(tmp_path):
+    p = tmp_path / "board.yaml"
+    p.write_text(yaml.safe_dump({
+        "som": {"sku": "E1M-AEN803"}, "preset": "e1m-evk",
+        "cores": {"a32_cluster": {"os": "off"}, "m55_he": {"app": "./src"}},
+        "cameras": [{"connector": "CAM0", "module": "raspberry_pi_camera_module_2"}]}),
+        encoding="utf-8")
+    c = validate_board_yaml(p)
+    assert any("zephyr_shield" in d.message and d.code == "ALP-B003" for d in c)
+    # same module on a Linux-only core is fine
+    assert not [d for d in validate_board_yaml(_project(
+        tmp_path, [{"connector": "CAM0", "module": "raspberry_pi_camera_module_2"}]))
+        if "camera" in d.message]
+
+
+def test_connector_zephyr_shields_must_exist(tmp_path):
+    from alp_cli.validator import camera_connector_problems
+    conn = {"CAM0": {"zephyr_shields": ["no_such_shield", "e1m_evk_rpi_csi"]}}
+    msgs = camera_connector_problems(conn, {})
+    assert len(msgs) == 1 and "no_such_shield" in msgs[0]
+
+
+def test_linux_flag_only_on_cam0_of_rzv2n_boards(tmp_path):
+    p = tmp_path / "board.yaml"
+
+    def problems(doc):
+        p.write_text(yaml.safe_dump(doc), encoding="utf-8")
+        return validate_metadata._check_board_camera_connectors([p])
+
+    ok = _load(META / "boards" / "e1m-x-evk.yaml")
+    assert ok["camera_connectors"]["CAM0"]["linux"] is True
+    assert not problems(ok)
+
+    aen = _load(META / "boards" / "e1m-evk.yaml")
+    aen["camera_connectors"]["CAM0"]["linux"] = True
+    assert problems(aen)  # alif-ensemble: no Linux camera path
+
+    cam1 = _load(META / "boards" / "e1m-x-evk.yaml")
+    cam1["camera_connectors"]["CAM1"] = dict(cam1["camera_connectors"]["CAM0"])
+    assert problems(cam1)  # only CAM0
+
+
+def test_inline_linux_flag_follows_the_project_som_family(tmp_path):
+    for sku, bad in (("E1M-V2M103", False), ("E1M-AEN803", True)):
+        p = _inline_project(tmp_path, {"linux": True})
+        doc = _load(p)
+        doc["som"]["sku"] = sku
+        doc["cores"] = {}
+        p.write_text(yaml.safe_dump(doc), encoding="utf-8")
+        hit = [d for d in validate_board_yaml(p)
+               if d.code == "ALP-B003" and "linux" in d.message]
+        assert bool(hit) is bad, (sku, [d.message for d in hit])

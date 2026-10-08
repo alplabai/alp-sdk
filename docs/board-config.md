@@ -221,7 +221,9 @@ decision once enough field data confirms the heuristic.
 the resolved board exposes and a module that exists under
 `metadata/camera_modules/`, a connector may be used once, and an inline
 board's connector macros must resolve in its own `e1m_routes:` with a
-`lane_polarity` of `lanes + 1` entries.  Violations are
+`lane_polarity` of `lanes + 1` entries; the camera's owner core (`cameras[].core`, or the one core whose OS the connector supports)
+must exist and, if Zephyr, have a module `zephyr_shield:`, a connector
+`zephyr_shields:` and a shield overlay for its board.  Violations are
 [ALP-B003](diagnostics/ALP-B003.md) errors.  Field reference:
 [board-config-schema.md](board-config-schema.md#cameras-and-camera_connectors-camera-modules).
 

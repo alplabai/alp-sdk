@@ -276,6 +276,19 @@
           },
           "description": "Per-lane P/N inversion flags, clock lane first then data lanes (1 = inverted), as Linux `lane-polarities`."
         },
+        "linux": {
+          "type": "boolean",
+          "description": "True when a Linux (Yocto) core can drive a camera on this connector: once the camera-DT generator (#2736) lands, its sensor devicetree is generated for it.  Allowed only on CAM0 of a renesas-rzv2n* board.  A Yocto core is a camera-owner candidate only on a connector with `linux: true`; a Zephyr core only on one with `zephyr_shields`.  Omit/false = no Linux camera path."
+        },
+        "zephyr_shields": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "description": "Zephyr shield names (zephyr/boards/shields/<name>/), in `-DSHIELD` order, that supply this connector's carrier half -- the DT labels the camera-module shield consumes (e.g. `e1m_evk_rpi_csi`).  The build resolver puts them BEFORE the camera module's own `zephyr_shield` in one `-DSHIELD=`.  Each shield must ship a boards/<board>.overlay for every Zephyr board target that builds a camera on this connector.  Omit when no Zephyr shield exists for the connector (no Zephyr core can then own its camera)."
+        },
         "notes": {
           "type": "string"
         }

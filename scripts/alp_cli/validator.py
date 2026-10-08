@@ -37,6 +37,7 @@ PRESET_DIR = METADATA / "boards"
 SOC_DIR = METADATA / "socs"
 CHIP_DIR = METADATA / "chips"
 CAMERA_MODULE_DIR = METADATA / "camera_modules"
+ZEPHYR_SHIELD_DIR = REPO / "zephyr" / "boards" / "shields"
 
 
 def load_board_schema(schema_path: Path | None = None) -> dict[str, Any]:
@@ -180,13 +181,16 @@ def _xref_pass(
     # missing (ALP-B006 already reported) there is nothing to check against.
     if not isinstance(preset, str):
         _check_cameras(data, path, collector, data.get("camera_connectors"),
-                       camera_module_dir=camera_module_dir, inline=True)
+                       camera_module_dir=camera_module_dir, inline=True,
+                       som_doc=som_doc)
     elif board_doc is not None:
         _check_cameras(data, path, collector, board_doc.get("camera_connectors"),
-                       camera_module_dir=camera_module_dir)
+                       camera_module_dir=camera_module_dir, som_doc=som_doc)
 
 
-def camera_connector_problems(connectors: Any, e1m_routes: Any) -> list[str]:
+def camera_connector_problems(connectors: Any, e1m_routes: Any, *,
+                              shield_dir: Path = ZEPHYR_SHIELD_DIR,
+                              families: Any = None) -> list[str]:
     """Cross-checks of `camera_connectors:` that the schema cannot express,
     shared by this validator (inline project boards) and
     scripts/validate_metadata.py (board presets):
@@ -194,7 +198,14 @@ def camera_connector_problems(connectors: Any, e1m_routes: Any) -> list[str]:
     * every macro a connector names (`i2c`, `enable`, `reset`, `select[].gpio`)
       must be declared in the same board's `e1m_routes:` (`buses` for `i2c`,
       `gpio` for the rest) -- connectors reference routes, never restate pads;
-    * `lane_polarity` carries one flag per clock + data lane: `lanes + 1`.
+    * `lane_polarity` carries one flag per clock + data lane: `lanes + 1`;
+    * every `zephyr_shields` entry is a directory under zephyr/boards/shields/;
+    * `linux: true` only on CAM0 of a board for a `renesas-rzv2n*` SoM family
+      (`families`: the preset's `hosts_som_families`, or the project SoM's
+      family for an inline board; None skips the family half) -- the only
+      place a Linux camera path exists.
+      Later: switch to "the camera-DT generator (#2736) emits
+      # <board>-cam<n>-<module>.dtsi for this connector" once it lands.
     """
     if not isinstance(connectors, dict):
         return []
@@ -218,6 +229,19 @@ def camera_connector_problems(connectors: Any, e1m_routes: Any) -> list[str]:
             if macro is not None and macro not in known:
                 msgs.append(f"camera_connectors.{name}.{field}: `{macro}` is not a "
                             f"macro in e1m_routes.{section}")
+        if c.get("linux"):
+            if name != "CAM0":
+                msgs.append(f"camera_connectors.{name}.linux: only CAM0 has a Linux "
+                            f"camera path (the sensor DT is generated for CAM0)")
+            if families is not None and not any(
+                    str(f).startswith("renesas-rzv2n") for f in families):
+                msgs.append(f"camera_connectors.{name}.linux: no Linux camera path "
+                            f"for SoM family {', '.join(map(str, families)) or 'none'} "
+                            f"(only renesas-rzv2n*)")
+        for sh in c.get("zephyr_shields") or []:
+            if not (shield_dir / str(sh)).is_dir():
+                msgs.append(f"camera_connectors.{name}.zephyr_shields: `{sh}` is not "
+                            f"a shield under zephyr/boards/shields/")
         pol, lanes = c.get("lane_polarity"), c.get("lanes")
         if isinstance(pol, list) and isinstance(lanes, int) and len(pol) != lanes + 1:
             msgs.append(f"camera_connectors.{name}.lane_polarity: {len(pol)} entries "
@@ -234,6 +258,7 @@ def _check_cameras(
     *,
     camera_module_dir: Path = CAMERA_MODULE_DIR,
     inline: bool = False,
+    som_doc: Any = None,
 ) -> None:
     """ALP-B003 for camera declarations the schema cannot judge:
 
@@ -241,6 +266,8 @@ def _check_cameras(
       expose, a module with no `metadata/camera_modules/<module>.yaml`, or a
       connector listed twice (both valid identifiers to the schema, so a typo
       would only surface when a generator looks the name up);
+    * a module with no `zephyr_shield:` while a Zephyr core is in use (it
+      could never be selected: the Zephyr build takes `-DSHIELD` from it);
     * for an INLINE board, a `camera_connectors:` block whose macros do not
       resolve in the project's own `e1m_routes:` or whose `lane_polarity` has
       the wrong length (presets get the same check from validate_metadata.py).
@@ -255,7 +282,10 @@ def _check_cameras(
                        span=len(key), code="ALP-B003", message=message))
 
     if inline:
-        for message in camera_connector_problems(connectors, data.get("e1m_routes")):
+        fam = som_doc.get("family") if isinstance(som_doc, dict) else None
+        for message in camera_connector_problems(
+                connectors, data.get("e1m_routes"),
+                families=[fam] if fam else None):
             report("camera_connectors", message)
 
     cameras = data.get("cameras")
@@ -282,6 +312,33 @@ def _check_cameras(
             report("cameras",
                    f"cameras: unknown camera module '{module}' "
                    f"(no metadata/camera_modules/{module}.yaml)")
+    _check_camera_owners(data, cameras, connectors, som_doc, report,
+                         camera_module_dir=camera_module_dir)
+
+
+def _check_camera_owners(data, cameras, connectors, som_doc, report, *,
+                         camera_module_dir: Path) -> None:
+    """Ownership + static build checks via the shared leaf
+    `alp_orchestrate/camera_owner.py` (the same rule the planner applies):
+    an explicit/implied owner core, a module `zephyr_shield`, connector
+    `zephyr_shields`, and a shield overlay for the owner's board target.
+
+    Lazy import for the cycle reason `_known_chip_slugs` documents."""
+    if not isinstance(som_doc, dict):
+        return
+    try:
+        from alp_orchestrate.camera_owner import plan_cameras, resolve_cores
+    except ImportError:
+        return
+    modules = {}
+    for entry in cameras:
+        mod = entry.get("module") if isinstance(entry, dict) else None
+        if isinstance(mod, str) and (camera_module_dir / f"{mod}.yaml").is_file():
+            modules[mod] = _load_metadata_yaml(camera_module_dir / f"{mod}.yaml") or {}
+    cores = resolve_cores(data.get("cores"), som_doc.get("topology"))
+    for plan in plan_cameras(cameras, connectors, cores, modules, REPO):
+        for message in plan.errors:
+            report("cameras", message)
 
 
 def _known_chip_slugs(*, chip_dir: Path = CHIP_DIR) -> set[str]:
