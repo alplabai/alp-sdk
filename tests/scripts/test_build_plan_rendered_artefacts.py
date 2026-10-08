@@ -152,12 +152,12 @@ def test_rendered_artefacts_follow_the_primary_in_fixed_order() -> None:
 def test_unrecognised_sku_downgrades_hw_info_to_a_warning(monkeypatch) -> None:
     """A SKU outside the production families has no family for the header:
     the plan warns and omits `alp_hw_info_build.h`, west fragment unaffected."""
-    import alp_project_emit.hw_info as hw_info
+    import alp_project_loader
 
     def no_family(sku: str) -> str:
         raise ValueError(f"unrecognised SoM SKU pattern: {sku}")
 
-    monkeypatch.setattr(hw_info, "_sku_family", no_family)
+    monkeypatch.setattr(alp_project_loader, "_sku_family", no_family)
     plan = _plan(REPO / "examples/multicore/rpmsg-aen/board.yaml")
     jsonschema.Draft202012Validator(
         json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))).validate(plan)
@@ -171,3 +171,19 @@ def test_unrecognised_sku_downgrades_hw_info_to_a_warning(monkeypatch) -> None:
         assert "alp_hw_info_build.h" not in names
         if sl["backend"] in ("zephyr", "baremetal"):
             assert "alp-west-libs.yml" in names
+
+
+def test_a_non_sku_value_error_in_hw_info_still_fails_the_plan(monkeypatch) -> None:
+    """Only the SKU->family lookup is downgraded. A ValueError from anywhere
+    else in the render (a damaged hw-revisions table, a UnicodeDecodeError)
+    must fail the plan, not silently drop the artefact."""
+    import alp_project_emit.hw_info as hw_info
+
+    def damaged(*args, **kwargs):
+        raise ValueError("hw-revisions.yaml is damaged")
+
+    # Patched at the emitter, not `load_family_table`: alp.conf reads the same
+    # table and would fail the plan first, hiding whether hw-info downgrades it.
+    monkeypatch.setattr(hw_info, "_emit_hw_info_h", damaged)
+    with pytest.raises(ValueError, match="hw-revisions.yaml is damaged"):
+        _plan(REPO / "examples/multicore/rpmsg-aen/board.yaml")

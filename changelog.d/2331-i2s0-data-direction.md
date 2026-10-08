@@ -1,5 +1,0 @@
-### Fixed
-
-- **E1M-V2N/V2M SoM pad crosswalk filled from the SoM netlist (#2331).** `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv` now carries the E1M edge ball and function for the 40 RZ/V2N pads the SoM routes straight to the connector (I2C0/1/2, SPI0/1/2, I3C, PDM, UART0, SD card detect/reset, AUDIO_CLK, I2S0, I2S1). `metadata/pinmux/v2n.yaml` shows them instead of `TBD`. `gen_pinmux_capability.py` reads the two optional columns.
-- **I2S0/SPI direction corrections.** `check_e1m_route_capability.py` hand-mapped SSI1 SDATA to `I2S0_SDO`, SSI2 SDATA to `I2S0_SDI` and RSPI0 to `SPI1_*`. The netlist says the opposite for I2S (P46 -> AQ4 `I2S0_SDI`, P47 -> AR4 `I2S0_SDO`) and `SPI0_*` for RSPI0. Both tables are deleted; the rows now carry the netlist functions.
-- **Audio DT flagged.** The E1M-X EVK card plays on SSI1, whose data pin reaches the TAS2563 SDOUT pins rather than SDIN. The `e1m-x-evk.dtsi` comment now says so and warns against playback until the SSI2 data-line fix lands.

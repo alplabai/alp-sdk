@@ -334,6 +334,9 @@ def _slice_hw_info_h(project: BoardProject, slice_: Slice) -> str:
         project.board_preset,
         v2_cores={cid: s.os for cid, s in project.cores.items()},
         v2_selected_core=slice_.core_id,
+        # Same tree alp.conf's `CONFIG_ALP_SDK_SOM_HW_REV` reads, so the two
+        # composed hw_rev designators cannot disagree under --metadata-root.
+        metadata_root=project.effective_metadata_root(),
     )
 
 
@@ -372,12 +375,15 @@ def _slice_hw_info_artefact(
     """
     if slice_.os not in _DTS_OVERLAY_OS:
         return None
+    # Only the SKU->family lookup is "unavailable" (same narrow pattern as
+    # `_slice_dts_overlay`); a damaged hw-revisions table etc. must still fail
+    # the plan, so the render itself runs outside any except.
+    from alp_project_loader import _sku_family  # type: ignore
     try:
-        return (HW_INFO_ARTEFACT, _slice_hw_info_h(project, slice_))
+        _sku_family(project.sku)
     except ValueError as exc:
-        # `_sku_family` is the only ValueError source; the standalone emit
-        # still raises it (an unrecognised SKU is not a production board).
         raise HwInfoUnavailable(str(exc)) from None
+    return (HW_INFO_ARTEFACT, _slice_hw_info_h(project, slice_))
 
 
 def _slice_west_libs_artefact(

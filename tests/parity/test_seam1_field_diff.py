@@ -389,13 +389,21 @@ def test_cmake_args_only_no_header_case_passes():
     assert not _fails(oracle, _with_extras(oracle, *_FULL_TAIL[1:]))
 
 
+def test_downgraded_tails_pass():
+    oracle = _load("multicore_rpmsg-aen")
+    assert not _fails(oracle, _with_extras(
+        oracle, "alp.overlay", "cmake-args.txt", "alp-west-libs.yml"))
+    assert not _fails(oracle, _with_extras(oracle, "cmake-args.txt", "alp-west-libs.yml"))
+
+
 def test_partial_tails_that_never_occur_fail():
     oracle = _load("multicore_rpmsg-aen")
     for tail in (_FULL_TAIL[:1], _FULL_TAIL[:2], _FULL_TAIL[:3],
                  ("cmake-args.txt",), ("alp.overlay",),
                  ("alp.overlay", "cmake-args.txt"),
-                 _FULL_TAIL[1:3], _FULL_TAIL[2:], _FULL_TAIL[:2] + _FULL_TAIL[3:],
-                 ("alp.overlay", "alp_hw_info_build.h", "alp-west-libs.yml")):
+                 _FULL_TAIL[1:3], _FULL_TAIL[2:], ("alp.overlay", "alp_hw_info_build.h", "alp-west-libs.yml"),
+                 ("alp.overlay", "alp-west-libs.yml"),
+                 ("alp_hw_info_build.h", "alp-west-libs.yml")):
         assert _fails(oracle, _with_extras(oracle, *tail)), tail
 
 
@@ -423,7 +431,7 @@ def test_reordered_extras_fail():
 
 def test_extras_inserted_before_the_oracles_entries_fail():
     oracle = _load("multicore_rpmsg-aen")
-    mutated = _with_extras(oracle, "alp.overlay")
+    mutated = _with_extras(oracle, *_FULL_TAIL)
     sl = mutated["slices"][_first_commanded_slice(mutated)]
     sl["configArtefacts"].reverse()
     assert _fails(oracle, mutated)

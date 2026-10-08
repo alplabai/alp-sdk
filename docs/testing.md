@@ -116,7 +116,7 @@ It does **not** prove:
 | `<alp/display.h>` / `<alp/gui.h>` / `<alp/camera.h>` / `<alp/storage.h>` | compile-only via `tests/smoke.c` + headers-include test                                              | (real impls pending)                  |
 | Chip drivers (`chips/*/`)         | `tests/zephyr/chips/` with fakes for `lsm6dso`, `bme280`, `ssd1306`                                                    | per-chip on AEN bench         |
 | `<alp/soc_caps.h>` generation     | `pr-generated-files.yml` (drift gate)                                                                                  | n/a (generator-deterministic)         |
-| ABI snapshot                      | `scripts/abi_snapshot.py` + `docs/abi/v0.16-snapshot.json` (drift gate)                                                | n/a                                   |
+| ABI snapshot                      | `scripts/abi_snapshot.py` + `docs/abi/v0.17-snapshot.json` (drift gate)                                                | n/a                                   |
 | `board.yaml` schema + loader      | `pr-metadata-validate.yml` smoke + `tests/scripts/test_project_*.py`                                                   | n/a                                   |
 
 ---

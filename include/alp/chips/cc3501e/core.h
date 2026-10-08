@@ -291,7 +291,7 @@ struct cc3501e {
 	 * (#2052). */
 	uint64_t last_xfer_end_us;
 	uint8_t  rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
-	uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
+	uint8_t  tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 	/* Per-context decode scratch for the scan/event helpers (issue #740).
 	 * Each of these used to be a function-local `static` buffer in
 	 * cc3501e_wifi.c / cc3501e_ble.c / cc3501e_events.c -- process-global
