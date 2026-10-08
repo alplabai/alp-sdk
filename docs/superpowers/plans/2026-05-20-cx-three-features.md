@@ -1,5 +1,7 @@
 # CX Improvements Implementation Plan
 
+> **Note (2026-10-08):** the `alp` CLI (`init`/`run`/`validate`) this plan builds is retired; `tan` is the CLI (ADR 0020, #1727). Only the diagnostics and YAML-loader modules remain under `scripts/alp_cli/`.
+
 > **Historical transcript.** Implementation plan dated 2026-05-20. The
 > SDK has since shipped through the v0.15.0 release candidate
 > (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
