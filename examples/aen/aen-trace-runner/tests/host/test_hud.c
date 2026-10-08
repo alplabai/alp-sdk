@@ -588,7 +588,10 @@ int main(void)
 			w[i] = TR_PWR_GAP;
 		}
 		assert(tr_hud_pwr_stats(w, &now, &avg, &peak) == 0 && now == -1 && avg == -1 && peak == -1);
-		assert(tr_hud_pwr_range(w) == TR_PWR_MIN_SPAN_MW);
+		int32_t lo, span;
+
+		tr_hud_pwr_scale(w, &lo, &span);
+		assert(lo == 0 && span == TR_PWR_MIN_SPAN_MW); /* no data: the minimum span */
 		w[TR_PWR_N - 1] = 2000;
 		w[TR_PWR_N - 2] = 2210;
 		w[TR_PWR_N - 4] = 0; /* a real zero counts: avg of 2000, 2210, 0 */
@@ -597,14 +600,34 @@ int main(void)
 		w[TR_PWR_N - 1] = TR_PWR_GAP; /* the newest is a gap: "now --", the rest stands */
 		assert(tr_hud_pwr_stats(w, &now, &avg, &peak) == 2 && now == -1 && avg == 1105 &&
 		       peak == 2210);
-		/* the scale: the peak rounded UP to 250, at least 500 */
-		assert(tr_hud_pwr_range(w) == 2250);
-		w[TR_PWR_N - 2] = 2250;
-		assert(tr_hud_pwr_range(w) == 2250); /* exactly on a step: not the next one */
-		w[TR_PWR_N - 2] = 2251;
-		assert(tr_hud_pwr_range(w) == 2500);
-		w[TR_PWR_N - 2] = 100;
-		assert(tr_hud_pwr_range(w) == 500);
+		/* the scale is tight on the data: 0..2210 -> span 2762.5 up to 2800, centred 1105 - 1400 < 0 -> 0 */
+		tr_hud_pwr_scale(w, &lo, &span);
+		assert(lo == 0 && span == 2800 && span >= 2210 - 0);
+		/* the real case: 4.85 W with ~50 mW swings fills the box, it does not sit in a 5000 mW one */
+		for (int i = 0; i < TR_PWR_N; i++) {
+			w[i] = (int16_t)(4825 + (i % 2) * 50);
+		}
+		tr_hud_pwr_scale(w, &lo, &span);
+		assert(span == 100 &&
+		       lo == 4800); /* range 50 x 1.25 = 62.5 -> the 100 minimum; centre 4850 */
+		for (int i = 0; i < TR_PWR_N; i++) {
+			assert(w[i] >= lo && w[i] <= lo + span); /* every sample inside */
+			w[i] = TR_PWR_GAP;
+		}
+		w[3] = 4000;
+		w[4] = 4400; /* range 400 x 1.25 = 500; centre 4200 - 250 = 3950 */
+		tr_hud_pwr_scale(w, &lo, &span);
+		assert(span == 500 && lo == 3950 && lo % TR_PWR_STEP_MW == 0 && span % TR_PWR_STEP_MW == 0);
+		assert(4000 >= lo && 4400 <= lo + span);
+		w[4] = 4390; /* flooring the bottom must never push the top out: the peak stays inside */
+		tr_hud_pwr_scale(w, &lo, &span);
+		assert(4390 <= lo + span && 4000 >= lo && lo % TR_PWR_STEP_MW == 0);
+		for (int i = 0; i < TR_PWR_N; i++) {
+			w[i] = TR_PWR_GAP;
+		}
+		w[TR_PWR_N - 1] = 40; /* near zero: the bottom is clamped at 0 */
+		tr_hud_pwr_scale(w, &lo, &span);
+		assert(lo == 0 && span == 100 && 40 <= span);
 
 		/* the readouts fit the panel's 100 px at the worst int16 width, and so do the titles */
 		assert(tr_hud_text_w(TR_HUD_FONT_TINY, "+5V net") <=
@@ -665,6 +688,68 @@ int main(void)
 			g.pwr[40] = 0;
 			tr_hud_paint_all(ref, &g, 0u, 0u, 0u);
 			assert(ref[(202 + 47) * TR_HUD_W + 614 + 40] != bare[(202 + 47) * TR_HUD_W + 614 + 40]);
+		}
+
+		/* The graph is a LINE, tightly scaled: the rail really sits at ~4.85 W with ~50 mW swings, so a
+		 * filled area on a 500 mW minimum span was a flat solid block. A flat series draws a thin line,
+		 * not a block (few pixels per column), and a +-25 mW wobble reaches many distinct rows. */
+		{
+			static uint16_t bare[TR_HUD_W * TR_HUD_H];
+			tr_hud_view_t   g = pv;
+			enum {
+				GX = 614,
+				GY = 202,
+				GH = 48
+			}; /* the graph box: hud.c PWR_GX / PWR_GY / PWR_GH */
+			int worst_col = 0, rows = 0;
+			int row_hit[GH] = { 0 };
+
+			g.pwr_seq = 0u;
+			tr_hud_paint_all(bare, &g, 0u, 0u, 0u);
+
+			/* a flat 4850 mW */
+			for (int i = 0; i < TR_PWR_N; i++) {
+				g.pwr[i] = 4850;
+			}
+			g.pwr_seq = 500u;
+			tr_hud_paint_all(ref, &g, 0u, 0u, 0u);
+			for (int x = GX; x < GX + TR_PWR_N; x++) {
+				int n = 0;
+
+				for (int y = GY; y < GY + GH; y++) {
+					n += ref[y * TR_HUD_W + x] != bare[y * TR_HUD_W + x];
+				}
+				worst_col = n > worst_col ? n : worst_col;
+				assert(n >= 1); /* and it is there in every column */
+			}
+			assert(worst_col <= 3); /* a line, not a filled block */
+
+			/* a +-25 mW wobble around 4850 mW, 12 samples a period */
+			static const int16_t wob[12] = { 0, 12, 22, 25, 22, 12, 0, -12, -22, -25, -22, -12 };
+
+			for (int i = 0; i < TR_PWR_N; i++) {
+				g.pwr[i] = (int16_t)(4850 + wob[i % 12]);
+			}
+			g.pwr_seq = 501u;
+			tr_hud_paint_all(ref, &g, 0u, 0u, 0u);
+			worst_col = 0;
+			for (int x = GX; x < GX + TR_PWR_N; x++) {
+				int n = 0;
+
+				for (int y = GY; y < GY + GH; y++) {
+					if (ref[y * TR_HUD_W + x] != bare[y * TR_HUD_W + x]) {
+						n++;
+						row_hit[y - GY] = 1;
+					}
+				}
+				worst_col = n > worst_col ? n : worst_col;
+			}
+			for (int r = 0; r < GH; r++) {
+				rows += row_hit[r];
+			}
+			assert(rows >= 20); /* the swing is visible: it spans many rows of the box */
+			assert(worst_col <=
+			       12); /* ... as a connected line (one step between neighbours), not a fill */
 		}
 
 		/* the layout: the cards end where the power column begins, in EVERY screen -- the

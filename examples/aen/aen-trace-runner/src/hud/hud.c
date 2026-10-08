@@ -445,8 +445,8 @@ static void paint_perf(const canvas_t *cv, const tr_hud_view_t *v)
 
 /* ------------------------------------------------------------- power
  * The +5V net's graph (maintainer 2026-10-08, "it should be on the HUD"): about 10 s of
- * rail5v_power.c's ~10 Hz samples as a 96 x 48 area graph, 1-px columns, a gap left as a hole,
- * the scale rounded up to 250 mW (at least 500, bottom 0), with the newest, the mean and the peak
+ * rail5v_power.c's ~10 Hz samples as a 96 x 48 LINE graph (1 px a column, joined, a gap breaks it)
+ * on a tight scale centred on the data (tr_hud_pwr_scale), with the newest, the mean and the peak
  * in mW below. The rail is the carrier's whole +5V net, LCD and backlight included: the titles
  * say so. Drawn on every screen, in the column right of the cards (they end at x 610). */
 #define PWR_X   612
@@ -483,14 +483,34 @@ int tr_hud_pwr_stats(const int16_t pwr[TR_PWR_N], int32_t *now, int32_t *avg, in
 	return n;
 }
 
-int32_t tr_hud_pwr_range(const int16_t pwr[TR_PWR_N])
+void tr_hud_pwr_scale(const int16_t pwr[TR_PWR_N], int32_t *lo, int32_t *span)
 {
-	int32_t now, avg, peak;
+	int32_t mn = INT32_MAX, mx = -1;
 
-	(void)tr_hud_pwr_stats(pwr, &now, &avg, &peak);
-	int32_t r = peak < 0 ? 0 : (peak + TR_PWR_STEP_MW - 1) / TR_PWR_STEP_MW * TR_PWR_STEP_MW;
+	for (int i = 0; i < TR_PWR_N; i++) {
+		if (pwr[i] >= 0) {
+			mn = pwr[i] < mn ? pwr[i] : mn;
+			mx = pwr[i] > mx ? pwr[i] : mx;
+		}
+	}
+	if (mx < 0) {
+		*lo   = 0;
+		*span = TR_PWR_MIN_SPAN_MW;
+		return;
+	}
+	int32_t sp = (mx - mn) * 5 / 4;
 
-	return r < TR_PWR_MIN_SPAN_MW ? TR_PWR_MIN_SPAN_MW : r;
+	sp = sp < TR_PWR_MIN_SPAN_MW ? TR_PWR_MIN_SPAN_MW : sp;
+	sp = (sp + TR_PWR_STEP_MW - 1) / TR_PWR_STEP_MW * TR_PWR_STEP_MW;
+
+	int32_t l = (mn + mx) / 2 - sp / 2;
+
+	l = l < 0 ? 0 : l / TR_PWR_STEP_MW * TR_PWR_STEP_MW;
+	while (l + sp < mx) {
+		sp += TR_PWR_STEP_MW;
+	}
+	*lo   = l;
+	*span = sp;
 }
 
 /* A value for a readout line: "now 2210", or "now --". */
@@ -525,7 +545,7 @@ static void paint_power(const canvas_t *cv, const tr_hud_view_t *v)
 {
 	int16_t        none[TR_PWR_N];
 	const int16_t *w = v->pwr;
-	int32_t        now, avg, peak, hi;
+	int32_t        now, avg, peak, lo, span;
 	char           b[24];
 
 	if (v->pwr_seq == 0u) { /* nothing sampled yet: an empty graph, not a flat zero line */
@@ -535,20 +555,30 @@ static void paint_power(const canvas_t *cv, const tr_hud_view_t *v)
 		w = none;
 	}
 	(void)tr_hud_pwr_stats(w, &now, &avg, &peak);
-	hi = tr_hud_pwr_range(w);
+	tr_hud_pwr_scale(w, &lo, &span);
 	panel(cv, PWR_X, PWR_Y, PWR_W, PWR_H, C_PANEL, A_PANEL);
 	text(cv, TR_HUD_FONT_TINY, PWR_X + 4, PWR_Y, "+5V net", C_GREEN, 16u);
 	text(cv, TR_HUD_FONT_TINY, PWR_X + 4, PWR_Y + PWR_LH, "(SoM+LCD)", C_DIM, 16u);
-	rect(cv, PWR_GX, PWR_GY + PWR_GH, TR_PWR_N, 1, C_DIM, 10u); /* the 0 mW line */
-	rect(cv, PWR_GX, PWR_GY, 1, PWR_GH, C_DIM, 6u);             /* and the scale's edge */
+	/* faint frame: the scale's bottom, middle and top, and a tick each at the left */
+	for (int k = 0; k < 3; k++) {
+		rect(cv, PWR_GX, PWR_GY + k * (PWR_GH - 1) / 2, TR_PWR_N, 1, C_DIM, 3u);
+		rect(cv, PWR_GX - 2, PWR_GY + k * (PWR_GH - 1) / 2, 2, 1, C_DIM, 8u);
+	}
+	/* the line: one pixel a column, each column joined to the last one's by a vertical run, a gap
+	 * (no sample) breaks it */
+	int prev = -1;
+
 	for (int i = 0; i < TR_PWR_N; i++) {
 		if (w[i] < 0) {
-			continue; /* a gap: nothing sampled */
+			prev = -1; /* a gap: nothing sampled */
+			continue;
 		}
-		int h = (int)((int32_t)w[i] * PWR_GH / hi);
+		int32_t up = ((int32_t)w[i] - lo) * (PWR_GH - 1) / span;
+		int     y  = PWR_GY + (PWR_GH - 1) - (up < 0 ? 0 : up > PWR_GH - 1 ? PWR_GH - 1 : up);
+		int     y0 = prev < 0 || y < prev ? y : prev, y1 = prev < 0 || y > prev ? y : prev;
 
-		h = h < 1 ? 1 : h > PWR_GH ? PWR_GH : h;
-		rect(cv, PWR_GX + i, PWR_GY + PWR_GH - h, 1, h, C_GREEN, 11u);
+		rect(cv, PWR_GX + i, y0, 1, y1 - y0 + 1, C_GREEN, 16u);
+		prev = y;
 	}
 	pwr_line(b, "now", now);
 	text(cv, TR_HUD_FONT_TINY, PWR_X + 4, PWR_GY + PWR_GH + 2, b, C_WHITE, 16u);
@@ -863,7 +893,12 @@ tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, ui
 		return fnv(k,
 		           v->mode == TR_HUD_ATTRACT ? v->best : 0u); /* attract's BEST panel may be wide */
 	case T_PWR: /* the same on every screen: its samples and scale (the mode is in k) */
-		return fnv(fnv(k, v->pwr_seq), (uint32_t)tr_hud_pwr_range(v->pwr));
+	{
+		int32_t lo, span;
+
+		tr_hud_pwr_scale(v->pwr, &lo, &span);
+		return fnv(fnv(fnv(k, v->pwr_seq), (uint32_t)lo), (uint32_t)span);
+	}
 	case T_MIDL:
 	case T_POP:
 	case T_MIDR:

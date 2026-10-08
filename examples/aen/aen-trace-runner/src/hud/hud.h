@@ -47,14 +47,14 @@
 #define TR_PERF_COLS 40
 
 /* ---------------------------------------------------------------- power
- * The +5V net's power graph (the HUD's T_PWR tile, "+5V net (SoM+LCD)"): the last TR_PWR_N
+ * The +5V net's power graph (the HUD's T_PWR tile, "+5V net (SoM+LCD)", a line graph): the last TR_PWR_N
  * samples of platform/rail5v_power.c, oldest first, ~10 Hz so about 10 s, in mW. A sample the
  * poll could not take (the HP holds I2C2, a read missed, the rail below 4.5 V) is TR_PWR_GAP and
  * draws as a hole, never as a zero. pwr_seq counts every sample pushed: the repaint key. */
 #define TR_PWR_N           96
 #define TR_PWR_GAP         (-1)
-#define TR_PWR_MIN_SPAN_MW 500 /* the graph's full scale is never less */
-#define TR_PWR_STEP_MW     250 /* ... and grows in these steps */
+#define TR_PWR_MIN_SPAN_MW 100 /* the graph's full scale is never less ... */
+#define TR_PWR_STEP_MW     50  /* ... and its ends sit on multiples of this */
 
 typedef struct {
 	uint8_t  mode;   /* TR_HUD_* */
@@ -82,9 +82,12 @@ typedef struct {
  * largest of the real ones (-1 with none); returns how many are real. */
 int tr_hud_pwr_stats(const int16_t pwr[TR_PWR_N], int32_t *now, int32_t *avg, int32_t *peak);
 
-/* The graph's full scale in mW: the peak rounded UP to TR_PWR_STEP_MW, at least TR_PWR_MIN_SPAN_MW
- * (the bottom is always 0). */
-int32_t tr_hud_pwr_range(const int16_t pwr[TR_PWR_N]);
+/* The graph's vertical scale, mW: *lo at the bottom, *span from it to the top. Tight on the data -- the
+ * rail sits at ~4.85 W and swings ~50 mW, which a scale from 0 hides: span = the data's range x 1.25,
+ * at least TR_PWR_MIN_SPAN_MW, rounded UP to TR_PWR_STEP_MW, centred on the data, *lo a multiple of
+ * TR_PWR_STEP_MW (never below 0) and raised span so the peak is always inside. No data: 0 and the
+ * minimum span. */
+void tr_hud_pwr_scale(const int16_t pwr[TR_PWR_N], int32_t *lo, int32_t *span);
 
 #define TR_HUD_TILES 9
 
