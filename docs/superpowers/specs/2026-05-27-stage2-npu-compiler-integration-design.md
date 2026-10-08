@@ -11,7 +11,9 @@
   RZ/V2N on-die DRP-AI3 NPU backend, opt-in (#1145)") but is explicitly
   **BENCH-UNVERIFIED** there -- a drpai-enabled `alp-image-edge` bake has since completed (#2400),
   but the real-model silicon proof is #1268 (closed: YOLOX-S detections on
-  E1M-V2M103 silicon); #1145 is closed (2026-09-28).
+  E1M-V2M103 silicon); #1145 is closed (2026-09-28). Running inference from a
+  baked image on a board is still unverified: the #1268 run used a
+  hand-patched DTB and an SDK cross-built in /tmp, not a baked image.
 - **Scope:** Turn the two NOT_IMPLEMENTED NPU paths (`drpai`, `deepx_dxm1`) into real **host compilers** (the `scripts/alp_model/adapters/` side) and real **A55/Linux runtimes** (the `src/yocto/` side), against the actual vendor toolchains. The `.alpmodel` contract (Stages 1a–1c) is **frozen** and already reserves both backends — Stage 2 slots in with **no format change**.
 - **Builds on:** [[project_unified_model_pipeline]] (Stage 2), [[reference_deepx_toolchain]], the 1c selection engine/loader, the backend registry, and `src/yocto/inference_yocto.c` (the Linux dispatch that already routes `ALP_INFERENCE_BACKEND_DEEPX_DXM1`).
 

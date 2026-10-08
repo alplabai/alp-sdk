@@ -1,6 +1,6 @@
 # V2N/V2M Wi-Fi + BLE port — Murata LBEE5HY2FY-922 (design)
 
-> **Status (2026-10-08): Landed** — the Yocto stack (SDIO/Wi-Fi, BT UART, DT/kernel wiring) shipped in PR #2302 (closes #479); V2N/V2M silicon validation is still pending.
+> **Status (2026-10-08): Landed** — the Yocto stack (SDIO/Wi-Fi, BT UART, DT/kernel wiring) shipped in PR #2302 (closes #479). Silicon validation is partial (`metadata/chips/murata_lbee5hy2fy.yaml` records `hil_silicon: partial`): a 2026-09-26 bench run on E1M-V2M103 showed Wi-Fi scan, WPA2-SAE association, DHCP, TCP throughput and hci0 UP+RUNNING. Only RF range and antenna performance remain open.
 
 Date: 2026-06-04
 Status: approved (Approach A)
