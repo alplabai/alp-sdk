@@ -29,11 +29,13 @@
 #include "../render/panel_rot.h"
 #include "display.h"
 
-/* The scan-out layer-1 window, whatever the panel: the full panel on RK055, a
- * 1280 x 720 window of the RVT121's 1280 x 800 (the shield-fit overlay,
- * shield-fit/e1m_evk_rvt121hvdfwca0.overlay). It is always the portrait
- * frame's byte count: a panel mounted turned scans the same bytes the A32
- * writes rotated (render/panel_rot.h). */
+/* The scan-out layer-1 window, whatever the panel: the full panel on RK055
+ * (720 x 1280), the RVT121's whole 1280 x 800 (the shield-fit overlay,
+ * shield-fit/e1m_evk_rvt121hvdfwca0.overlay). Its byte count is the frame the
+ * A32 writes: fw x 1280 x 2, where fw is the panel's width in portrait terms
+ * (the window's short side); a panel mounted turned scans the same bytes the
+ * A32 writes rotated (render/panel_rot.h). The renderer draws TR_R3D_W (800)
+ * columns and crops the centre fw of them. */
 #define TR_L1_NODE DT_NODELABEL(cdc200)
 #define TR_L1_W \
 	(DT_PROP_OR(TR_L1_NODE, win_x1_l1, DT_PROP(TR_L1_NODE, width)) - \
@@ -43,25 +45,29 @@
 	 DT_PROP_OR(TR_L1_NODE, win_y0_l1, 0))
 #define TR_FB_BYTES ((size_t)TR_L1_W * TR_L1_H * 2u)
 
-/* The window is the 720 x 1280 portrait content as scanned (rotation 0) or turned
- * (90 / 270: 1280 x 720): the right shape for the mount-rotation, not just the
- * right byte count. */
+/* The window is the fw x 1280 portrait content as scanned (rotation 0) or turned
+ * (90 / 270: 1280 x fw): the right shape for the mount-rotation, not just the
+ * right byte count. fw is what the renderer's tr_fw_refuse() accepts: a
+ * multiple of 16, at most TR_R3D_W. */
 #define TR_MOUNT_ROT DT_PROP_OR(TR_L1_NODE, mount_rotation, 0)
+#define TR_FB_FW     (TR_MOUNT_ROT == 0 ? TR_L1_W : TR_L1_H)
 BUILD_ASSERT(TR_MOUNT_ROT == 0 || TR_MOUNT_ROT == 90 || TR_MOUNT_ROT == 270,
              "mount-rotation must be 0, 90 or 270 (the renderer cannot produce 180)");
-BUILD_ASSERT(TR_MOUNT_ROT == 0 ? (TR_L1_W == TR_ROT_PORTRAIT_W && TR_L1_H == TR_ROT_PORTRAIT_H)
-                               : (TR_L1_W == TR_ROT_PORTRAIT_H && TR_L1_H == TR_ROT_PORTRAIT_W),
-             "layer-1 window is not 720x1280 (mount-rotation 0) / 1280x720 (90, 270): add or fix "
-             "the shield's shield-fit overlay");
+BUILD_ASSERT(TR_MOUNT_ROT == 0 ? TR_L1_H == TR_ROT_PORTRAIT_H : TR_L1_W == TR_ROT_PORTRAIT_H,
+             "layer-1 window is not fw x 1280 (mount-rotation 0) / 1280 x fw (90, 270): add or "
+             "fix the shield's shield-fit overlay");
+BUILD_ASSERT(TR_FB_FW % 16 == 0 && TR_FB_FW >= 16 && TR_FB_FW <= TR_R3D_W,
+             "the panel width must be a multiple of 16 and at most the render's TR_R3D_W "
+             "(panel_rot.h tr_fw_refuse: the renderer would fault on every frame)");
 
 /* FB A is the SRAM0 partition base (plan section 4); FB B is SRAM1
  * 0x025EA000 (tr_mbox.h), outside every DT partition -- cdc200_swap_fb()
  * checks only the size. */
 BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(sram0)) == TR_FB_A,
              "TR_FB_A must be the sram0 partition base");
+BUILD_ASSERT(TR_FB_BYTES <= TR_FB_SLOT_SIZE, "the panel's frame must fit a framebuffer slot");
 BUILD_ASSERT(TR_FB_BYTES <= DT_REG_SIZE(DT_NODELABEL(sram0)), "FB A must fit the sram0 partition");
 BUILD_ASSERT(TR_FB_A + TR_FB_SLOT_SIZE <= TR_FB_B, "FB A's slot must end before FB B");
-BUILD_ASSERT(TR_FB_BYTES == TR_FB_SIZE, "panel size != tr_mbox.h TR_FB_SIZE");
 
 /* Same bound as display.c: one refresh is 25.0 ms (33.3 at TR_PANEL_HZ 30), three or four means the ISR is silent. */
 #define TR_FLIP_TIMEOUT_MS 100
@@ -70,6 +76,7 @@ static alp_display_t       *g_disp;
 static alp_display_caps_t   g_caps;
 static const struct device *g_cdc;
 static size_t               g_fb_size;
+static uint16_t             g_fw;
 static tr_flip_pace_t       g_pace;
 static bool                 g_land_err_printed;
 
@@ -119,6 +126,19 @@ int tr_display_open(void)
 	}
 	cdc200_get_framebuffer(g_cdc, CDC_LAYER_1, &fb);
 	g_fb_size = fb.fb_size;
+	/* fw from the driver's own byte count, cross-checked against the devicetree window
+	 * the BUILD_ASSERTs above vetted: the two must agree or the renderer's frame is
+	 * written at a pitch the CDC200 does not scan. */
+	g_fw = (uint16_t)(fb.fb_size / ((size_t)TR_ROT_PORTRAIT_H * 2u));
+	if (g_fw != TR_FB_FW) {
+		printk("RESULT FAIL: CDC200 layer 1 is %u B = %u columns, the devicetree window says %u\n",
+		       (unsigned)fb.fb_size,
+		       (unsigned)g_fw,
+		       (unsigned)TR_FB_FW);
+		alp_display_close(g_disp);
+		g_disp = NULL;
+		return -2;
+	}
 	/* The CDC200 boots scanning the shield's lcd_fb (0x02200000), which is
 	 * not FB B any more (tr_mbox.h: SRAM1 0x025EA000) and which the A32
 	 * renderer uses as cached scratch: park on FB A so the live/free pair
@@ -163,11 +183,12 @@ int tr_display_open(void)
 	return 0;
 }
 
-/* The game's own geometry: always the portrait content (the panel's own
- * geometry, and any mount-rotation, is the producer's to turn: panel_rot.h). */
+/* The game's own geometry: the portrait content (the panel's own geometry, and
+ * any mount-rotation, is the producer's to turn: panel_rot.h). The width is the
+ * panel's fw: the renderer crops its TR_R3D_W render to it (tr_frame_in_t.fw). */
 uint16_t tr_display_width(void)
 {
-	return TR_ROT_PORTRAIT_W;
+	return g_fw;
 }
 
 uint16_t tr_display_height(void)

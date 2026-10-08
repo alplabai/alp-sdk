@@ -6,8 +6,8 @@
  * unmodified):
  *   - rows [0, TR_VIEW_H) are never touched by the video pass;
  *   - every video-area row is written (no stale framebuffer shows through);
- *   - the camera turned upright at native 1:1, centred at x 160..559 (270
- *     and 90), or 640x400 at x 40, row 120 (0);
+ *   - the camera turned upright at native 1:1, centred at x 200..599 (270
+ *     and 90), or 640x400 at x 80, row 120 (0);
  *   - the lamps (BOTH ARMS lit from air_ticks, LEFT ARM unlit) down the left
  *     strip of the portrait layout and along the top letterbox of the
  *     landscape one, the live Hz label, a skeleton keypoint on its image
@@ -61,6 +61,7 @@ int main(void)
 	in.flags     = TR_FLAG_ALIVE | TR_FLAG_HUD_L2;
 	in.lane      = 1;
 	in.air_ticks = 5u; /* JUMP lit */
+	in.fw        = TR_R3D_W;
 
 	/* 1. nothing published: the area is background + strips, the game rows untouched */
 	frame(&in, fb);
@@ -72,7 +73,7 @@ int main(void)
 	for (int vy = 0; vy < TR_VID_H; vy++) {
 		for (int x = 0; x < TR_R3D_W; x++) {
 			assert(at(fb, x, vy) != 0xDEADu);
-			if (x >= 160 && x < 560) {
+			if (x >= tr_cam_img_x0(90) && x < tr_cam_img_x0(90) + 400) {
 				assert(at(fb, x, vy) == COLOR_PANEL_BG);
 			}
 		}
@@ -93,11 +94,12 @@ int main(void)
 		frame(&in, fb);
 		tr_cam_rot_rows(pool, TR_CAM_SRC_W, TR_CAM_SRC_H, rot, 0, TR_CAM_SRC_W, ref, TR_VID_W);
 		for (int vy = 0; vy < TR_VID_H; vy++) {
-			assert(memcmp(&fb[(TR_VID_Y0 + vy) * TR_R3D_W + 160], &ref[vy * TR_VID_W], 400u * 2u) ==
-			       0);
+			assert(memcmp(&fb[(TR_VID_Y0 + vy) * TR_R3D_W + tr_cam_img_x0(rot)],
+			              &ref[vy * TR_VID_W],
+			              400u * 2u) == 0);
 		}
 		assert(at(fb, 2, 2) == COLOR_PANEL_BG &&
-		       at(fb, 717, 637) == COLOR_PANEL_BG); /* no border */
+		       at(fb, TR_R3D_W - 3, TR_VID_H - 3) == COLOR_PANEL_BG); /* no border */
 		/* lamps: cells of TR_VID_H/4, the square 16 px down, centred in the left strip */
 		assert(at(fb, 80, 0 * LAMP_CELL_H + 16 + LAMP_SQ / 2) == COLOR_LAMP_OFF); /* LEFT */
 		assert(at(fb, 80, 2 * LAMP_CELL_H + 16 + LAMP_SQ / 2) == COLOR_LAMP_ON);  /* JUMP */
@@ -106,7 +108,7 @@ int main(void)
 		int green = 0;
 
 		for (int vy = 160; vy < 160 + 5 * 5; vy++) {
-			for (int x = 560; x < 720; x++) {
+			for (int x = TR_R3D_W - VID_STRIP_W; x < TR_R3D_W; x++) {
 				green += at(fb, x, vy) == COLOR_KP;
 			}
 		}
@@ -120,8 +122,9 @@ int main(void)
 		pose.kp[TR_KP_NOSE] = (tr_kp_t){ 200, 300, 255 };
 		tr_pslot_write(&host_pslot_mem, &pose, 0u, 0u, TR_HP_STATE_RUNNING, NULL, 1u, pip_barrier);
 		frame(&in, fb);
-		assert(at(fb, 160 + 200, 300) == COLOR_KP && at(fb, 160 + 201, 301) == COLOR_KP);
-		assert(at(fb, 160 + 203, 300) != COLOR_KP); /* a 3x3 dot, not a smear */
+		assert(at(fb, tr_cam_img_x0(270) + 200, 300) == COLOR_KP &&
+		       at(fb, tr_cam_img_x0(270) + 201, 301) == COLOR_KP);
+		assert(at(fb, tr_cam_img_x0(270) + 203, 300) != COLOR_KP); /* a 3x3 dot, not a smear */
 	}
 
 	/* 4. bands in reverse order, alternating cores: the same frame */
@@ -138,7 +141,7 @@ int main(void)
 		assert(memcmp(fb, fb2, sizeof(fb)) == 0);
 	}
 
-	/* 5. rotation 0, the landscape comparison path: 640x400 at x 40, row 120 */
+	/* 5. rotation 0, the landscape comparison path: 640x400 at x 80, row 120 */
 	tr_pslot_write(&host_pslot_mem,
 	               &(tr_pose_t){ 0 },
 	               0u,
@@ -151,26 +154,27 @@ int main(void)
 	    &host_cam_view_mem, TR_MEM_CAM_POOL, 43u, TR_CAM_SRC_W, TR_CAM_SRC_H, 0u, 0u, pip_barrier);
 	frame(&in, fb);
 	for (int y = 0; y < TR_CAM_SRC_H; y++) {
-		for (int x = 40; x < 40 + TR_CAM_SRC_W;
+		for (int x = tr_cam_img_x0(0); x < tr_cam_img_x0(0) + TR_CAM_SRC_W;
 		     x++) { /* the whole picture: lamps/label are letterboxed */
-			uint8_t g = pool[y * TR_CAM_SRC_W + x - 40];
+			uint8_t g = pool[y * TR_CAM_SRC_W + x - tr_cam_img_x0(0)];
 
 			assert(at(fb, x, 120 + y) == (uint16_t)(((g >> 3) << 11) | ((g >> 2) << 5) | (g >> 3)));
 		}
 	}
-	assert(at(fb, 300, 60) == COLOR_PANEL_BG && at(fb, 300, 600) == COLOR_PANEL_BG);
-	assert(at(fb, 39, 120 + 200) == COLOR_PANEL_BG && at(fb, 680, 120 + 200) == COLOR_PANEL_BG);
-	/* the lamps along the top letterbox, one 180-px cell each: LEFT ARM unlit,
+	assert(at(fb, 200, 60) == COLOR_PANEL_BG && at(fb, 200, 600) == COLOR_PANEL_BG);
+	assert(at(fb, tr_cam_img_x0(0) - 1, 120 + 200) == COLOR_PANEL_BG &&
+	       at(fb, tr_cam_img_x0(0) + TR_CAM_SRC_W, 120 + 200) == COLOR_PANEL_BG);
+	/* the lamps along the top letterbox, one 200-px cell each: LEFT ARM unlit,
 	 * BOTH ARMS lit (air_ticks), DUCK unlit */
-	assert(at(fb, 90, 8 + LAND_LAMP_SQ / 2) == COLOR_LAMP_OFF);
-	assert(at(fb, 450, 8 + LAND_LAMP_SQ / 2) == COLOR_LAMP_ON);
-	assert(at(fb, 630, 8 + LAND_LAMP_SQ / 2) == COLOR_LAMP_OFF);
+	assert(at(fb, 100, 8 + LAND_LAMP_SQ / 2) == COLOR_LAMP_OFF);
+	assert(at(fb, 500, 8 + LAND_LAMP_SQ / 2) == COLOR_LAMP_ON);
+	assert(at(fb, 700, 8 + LAND_LAMP_SQ / 2) == COLOR_LAMP_OFF);
 	/* the live Hz line, in green, in the bottom letterbox's right half */
 	{
 		int green = 0;
 
 		for (int vy = TR_VID_H - LAND_BAND_H; vy < TR_VID_H; vy++) {
-			for (int x = 360; x < 720; x++) {
+			for (int x = TR_R3D_W / 2; x < TR_R3D_W; x++) {
 				green += at(fb, x, vy) == COLOR_KP;
 			}
 		}
@@ -181,9 +185,9 @@ int main(void)
 	tr_cam_view_write(
 	    &host_cam_view_mem, TR_MEM_CAM_POOL, 44u, TR_CAM_SRC_W, 200u, 270u, 0u, pip_barrier);
 	frame(&in, fb);
-	assert(at(fb, 360, 320) == COLOR_PANEL_BG);
+	assert(at(fb, TR_R3D_W / 2, TR_VID_H / 2) == COLOR_PANEL_BG);
 
-	printf("a32 video: upright 1:1 at x 160 (90/270) and landscape at x 40 (0), strips, lamps, Hz, "
+	printf("a32 video: upright 1:1 at x 200 (90/270) and landscape at x 80 (0), strips, lamps, Hz, "
 	       "skeleton, "
 	       "band order free\n");
 	return 0;

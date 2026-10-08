@@ -2888,18 +2888,23 @@ static void screen_rect(tr_dl_t *dl, int x0, int y0, int x1, int y1, uint16_t c)
 
 /* The crash's flash (red, blue-white for a live wire): a screen border
  * that thins out as it fades (a flat fill costs only its own pixels; no
- * blend pass). */
-static void flash_border(tr_dl_t *dl, float ct, uint16_t c)
+ * blend pass). It frames the PANEL, not the render: a narrower panel shows
+ * only the centre fw of the TR_R3D_W columns (tr_frame_in_t.fw), so the side
+ * edges are the crop's, [x0c, x0c + fw); fw 0 (a host caller that never set
+ * it) is the whole render. */
+static void flash_border(tr_dl_t *dl, float ct, uint16_t c, unsigned fw)
 {
 	int th = (int)((float)FLASH_PX * flash_amount(ct));
+	int w  = fw >= 16u && fw <= (unsigned)TR_R3D_W ? (int)fw : TR_R3D_W;
+	int x0 = (TR_R3D_W - w) / 2, x1 = x0 + w;
 
 	if (th <= 0) {
 		return;
 	}
-	screen_rect(dl, 0, 0, TR_R3D_W, th, c);
-	screen_rect(dl, 0, TR_VIEW_H - th, TR_R3D_W, TR_VIEW_H, c);
-	screen_rect(dl, 0, th, th, TR_VIEW_H - th, c);
-	screen_rect(dl, TR_R3D_W - th, th, TR_R3D_W, TR_VIEW_H - th, c);
+	screen_rect(dl, x0, 0, x1, th, c);
+	screen_rect(dl, x0, TR_VIEW_H - th, x1, TR_VIEW_H, c);
+	screen_rect(dl, x0, th, x0 + th, TR_VIEW_H - th, c);
+	screen_rect(dl, x1 - th, th, x1, TR_VIEW_H - th, c);
 }
 
 /* World units hold_front() pulled the drawn runner's pos.z back by this
@@ -3435,7 +3440,7 @@ void tr_scene_build_part(const tr_scene_t    *s,
 		}
 	}
 	if (crash) {
-		flash_border(dl, ct, flash_rgb(in));
+		flash_border(dl, ct, flash_rgb(in), in->fw);
 	}
 }
 

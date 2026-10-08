@@ -22,7 +22,9 @@
 #define RENDER_DL_GOLDEN 0
 #endif
 
-#define RENDER_FB_BYTES (720u * 1280u * 2u)
+/* One framebuffer slot: the widest frame, TR_R3D_W x TR_R3D_H RGB565 (a narrower panel's
+ * frame, fw wide, uses the first fw * 1280 * 2 bytes of it). */
+#define RENDER_FB_BYTES TR_FB_SLOT_SIZE
 
 /* Two cores render bands; the band buffers (z + colour) are per core. */
 #define RENDER_CORES 2
@@ -67,7 +69,8 @@ extern int render_hud;
 /* One frame = render_setup(in) once (core 0), then render_band(core, b, fb)
  * for every b in 0..TR_BANDS-1, in any order, from either core -- each band
  * is independent (own rows of `fb`, the core's own z/colour band). `fb` is
- * 720x1280 RGB565, stride 720, 16-byte aligned. render_setup() advances the
+ * in->fw x 1280 RGB565 (stride fw: the centre fw columns of the TR_R3D_W render, rotation
+ * 0), 16-byte aligned. render_setup() advances the
  * scene state by one frame (scene build) and keeps in->score/banner for the
  * HUD; `in` is unused by the golden build. */
 void render_setup(const tr_frame_in_t *in);

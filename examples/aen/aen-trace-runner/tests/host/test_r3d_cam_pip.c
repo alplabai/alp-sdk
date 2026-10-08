@@ -153,34 +153,34 @@ int main(void)
 
 	/* 6. Keypoints -> screen: native 1:1, so an upright keypoint is the
 	 * image pixel it names -- the corners of the portrait image land on the
-	 * corners of x 160..559 x rows 0..639 of the video area; the landscape
-	 * comparison path centres 640x400 at x 40, row 120. */
+	 * corners of x 200..599 x rows 0..639 of the video area; the landscape
+	 * comparison path centres 640x400 at x 80, row 120. */
 	{
 		int16_t px = -1, py = -1;
 		tr_kp_t k;
 
-		assert(tr_cam_img_x0(90) == 160 && tr_cam_img_y0(90) == 0 && tr_cam_img_x0(270) == 160);
-		assert(tr_cam_img_x0(0) == 40 && tr_cam_img_y0(0) == 120);
+		assert(tr_cam_img_x0(90) == 200 && tr_cam_img_y0(90) == 0 && tr_cam_img_x0(270) == 200);
+		assert(tr_cam_img_x0(0) == 80 && tr_cam_img_y0(0) == 120);
 		k = (tr_kp_t){ 0, 0, 255 };
-		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 160 && py == 0);
+		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 200 && py == 0);
 		k = (tr_kp_t){ 399, 639, 255 };
-		assert(tr_cam_pip_map_kp(&k, 270, &px, &py) && px == 559 && py == 639);
+		assert(tr_cam_pip_map_kp(&k, 270, &px, &py) && px == 599 && py == 639);
 		k = (tr_kp_t){ 399, 0, 255 };
-		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 559 && py == 0);
+		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 599 && py == 0);
 		k = (tr_kp_t){ 0, 639, 255 };
-		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 160 && py == TR_VID_H - 1);
+		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 200 && py == TR_VID_H - 1);
 		k = (tr_kp_t){ 639, 399, 255 };
-		assert(tr_cam_pip_map_kp(&k, 0, &px, &py) && px == 679 && py == 519);
+		assert(tr_cam_pip_map_kp(&k, 0, &px, &py) && px == 719 && py == 519);
 		/* Landscape (rotation 0), the arm controls' layout: 640x400 (16:10) at
-		 * native 1:1 -- never stretched -- centred in the 720x640 video area
-		 * with 40-px side margins and 120-row letterbox bands, and every
+		 * native 1:1 -- never stretched -- centred in the 800x640 video area
+		 * with 80-px side margins and 120-row letterbox bands, and every
 		 * keypoint lands on the image pixel it names. */
 		_Static_assert(TR_CAM_UP_W(0) == 640 && TR_CAM_UP_H(0) == 400,
 		               "landscape is the raw frame");
 		_Static_assert(TR_VID_W >= TR_CAM_UP_W(0) && TR_VID_H >= TR_CAM_UP_H(0),
 		               "the landscape image fits the video area");
 		k = (tr_kp_t){ 0, 0, 255 };
-		assert(tr_cam_pip_map_kp(&k, 0, &px, &py) && px == 40 && py == 120);
+		assert(tr_cam_pip_map_kp(&k, 0, &px, &py) && px == 80 && py == 120);
 		k = (tr_kp_t){ 320, 200, 255 };
 		assert(tr_cam_pip_map_kp(&k, 0, &px, &py) && px == TR_VID_W / 2 && py == TR_VID_H / 2);
 		k = (tr_kp_t){ 640, 10, 255 };
@@ -199,7 +199,7 @@ int main(void)
 		assert(!tr_cam_pip_map_kp(&k, 90, &px, &py));
 		assert(px == -7 && py == -7); /* untouched on a reject */
 		k.score = TR_POSE_KP_MIN;
-		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 360 && py == 300);
+		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 400 && py == 300);
 		printf("map_kp: corners 1:1, padding and low score rejected\n");
 	}
 

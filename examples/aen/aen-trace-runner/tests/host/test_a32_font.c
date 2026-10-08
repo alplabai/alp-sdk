@@ -30,7 +30,7 @@
 #include "../../a32/common/crc32.c"
 #include "../../a32/renderer/render.c"
 
-static uint16_t fb[720 * 1280] __attribute__((aligned(16)));
+static uint16_t fb[TR_R3D_W * TR_R3D_H] __attribute__((aligned(16)));
 
 #define GLYPH_MAX_PX \
 	(5 * 4 * 5 * 4) /* generous: >= 5*scale rows x 5*scale cols (M) for any scale used here */
@@ -45,7 +45,7 @@ static uint16_t fb[720 * 1280] __attribute__((aligned(16)));
 static int render_glyph_bits(char c, int scale, bool *out)
 {
 	const vcv_t cv = {
-		fb, 0, TR_R3D_W, 0, TR_R3D_H, -1
+		fb, 0, TR_R3D_W, 0, TR_R3D_H, -1, 0, TR_R3D_W
 	}; /* -1: a scratch buffer, not the turned framebuffer */
 
 	memset(fb, 0, sizeof(fb));

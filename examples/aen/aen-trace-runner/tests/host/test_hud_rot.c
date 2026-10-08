@@ -26,7 +26,8 @@ static void check(int rot, const tr_hud_view_t *v)
 	(void)tr_hud_update(&h, turned, v, NULL);
 	for (int y = 0; y < TR_HUD_H; y++) {
 		for (int x = 0; x < TR_HUD_W; x++) {
-			assert(turned[tr_rot_idx(rot, TR_ROT_HUD_W, x, y)] == portrait[y * TR_HUD_W + x]);
+			assert(turned[tr_rot_idx(rot, TR_ROT_HUD_W, TR_HUD_W, x, y)] ==
+			       portrait[y * TR_HUD_W + x]);
 		}
 	}
 }

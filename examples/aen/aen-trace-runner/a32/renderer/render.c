@@ -23,14 +23,19 @@
 #define BAND_PX (TR_R3D_W * TR_BAND_H)
 
 /* The frame's rotation (panel_rot.h; in->rotation, from the display's
- * mount-rotation): the bands are always drawn portrait, 720 px wide, into the
- * cores' cached scratch, and only the copy out to the framebuffer turns them
- * (a 1280 x 720 window for 90 / 270 = the same RENDER_FB_BYTES). Set once a
- * frame by render_front_begin(), before any band is claimed. The golden
- * build's CRCs are of the portrait layout, so it always draws rotation 0. */
-static int frame_rot;
-_Static_assert(TR_R3D_W == TR_ROT_PORTRAIT_W && TR_R3D_H == TR_ROT_PORTRAIT_H,
-               "panel_rot.h: the portrait frame");
+ * mount-rotation) and width (in->fw, from the display's window): the bands are
+ * always drawn portrait, TR_R3D_W px wide, into the cores' cached scratch, and
+ * only the copy out to the framebuffer turns them and crops them to the centre
+ * frame_fw columns [frame_x0c, frame_x0c + frame_fw) (a 1280 x fw window for
+ * 90 / 270 = the same bytes: fw * 1280 * 2, inside RENDER_FB_BYTES). Set once
+ * a frame by render_front_begin(), before any band is claimed. The golden
+ * build's CRCs are of the whole portrait layout, so it always draws rotation 0
+ * at the full TR_R3D_W. */
+static int      frame_rot;
+static uint32_t frame_fw  = TR_R3D_W;
+static int      frame_x0c = 0;
+_Static_assert(TR_R3D_H == TR_ROT_PORTRAIT_H, "panel_rot.h: the portrait frame");
+_Static_assert(RENDER_FB_BYTES == TR_R3D_W * TR_R3D_H * 2u, "a slot holds the widest frame");
 _Static_assert(TR_BAND_H % 8 == 0 && TR_BAND_H <= 32,
                "panel_rot.h's NEON blit takes up to four 8-row groups");
 
@@ -42,7 +47,7 @@ _Static_assert(STUB_MHU0_WINDOW == TR_MHU0_WINDOW_LO &&
 _Static_assert(TR_FB_CLEAR_OF_MHU0(TR_FB_A) && TR_FB_CLEAR_OF_MHU0(TR_FB_B),
                "a framebuffer overlaps the TF-A MHU0 window [0x02380000, 0x02381000)");
 _Static_assert(TR_FB_B + TR_FB_SLOT_SIZE <= TR_MEM_TFA_RW, "FB B's slot runs into TF-A RW");
-_Static_assert(RENDER_FB_BYTES == TR_FB_SIZE, "framebuffer size");
+_Static_assert(RENDER_FB_BYTES == TR_FB_SLOT_SIZE, "framebuffer slot size");
 /* The HE's HUD buffer (layer 2) sits above everything the renderer maps in SRAM0. */
 _Static_assert(TR_HUD_FB >= STUB_MHU0_WINDOW + STUB_MHU0_WINDOW_SIZE &&
                    TR_HUD_FB + TR_HUD_FB_SIZE <= STUB_EARLY_PARK,
@@ -332,11 +337,15 @@ static inline void   dcache_inval_range(const void *addr, uint32_t bytes)
 
 /* A drawing target: screen pixel (x, y) lives at px[(y - y0) * TR_R3D_W + x],
  * and only [x0, x1) x [y0, y1) is drawn -- a band's cached scratch (y0 its
- * first screen row) or the framebuffer itself. */
+ * first screen row) or the framebuffer itself. A framebuffer is fw wide and
+ * holds the render's columns [xoff, xoff + fw): its column is x - xoff, and
+ * the caller keeps [x0, x1) inside them. */
 typedef struct {
 	uint16_t *px;
 	int       x0, x1, y0, y1;
 	int       rot; /* -1: px is a band's scratch; else px is the framebuffer, turned by rot */
+	int       xoff;
+	uint32_t  fw;
 } vcv_t;
 
 static void cv_rect(const vcv_t *cv, int x, int y, int w, int h, uint16_t c)
@@ -347,7 +356,7 @@ static void cv_rect(const vcv_t *cv, int x, int y, int w, int h, uint16_t c)
 	if (cv->rot >= 0) {
 		for (int yy = ya; yy < yb; yy++) {
 			for (int xx = xa; xx < xb; xx++) {
-				cv->px[tr_rot_idx(cv->rot, TR_R3D_H, xx, yy)] = c;
+				cv->px[tr_rot_idx(cv->rot, TR_R3D_H, cv->fw, xx - cv->xoff, yy)] = c;
 			}
 		}
 		return;
@@ -740,13 +749,15 @@ static void draw_strips(const vcv_t *cv)
 static inline __attribute__((always_inline)) void
 copy_rows_turned(int rot, uint16_t *fb, const uint16_t *cband, int y_lo, int rows)
 {
+	const uint16_t *src = cband + frame_x0c; /* the centre fw columns, at the surface's column 0 */
+
 #if RENDER_A32 && (defined(__ARM_NEON) || defined(__ARM_NEON__))
 	if (rows % 8 == 0 && y_lo % 8 == 0) {
-		tr_rot_blit_neon(rot, fb, TR_R3D_H, cband, TR_R3D_W, 0, y_lo, TR_R3D_W, rows);
+		tr_rot_blit_neon(rot, fb, TR_R3D_H, frame_fw, src, TR_R3D_W, 0, y_lo, (int)frame_fw, rows);
 		return;
 	}
 #endif
-	tr_rot_blit(rot, fb, TR_R3D_H, cband, TR_R3D_W, 0, y_lo, TR_R3D_W, rows);
+	tr_rot_blit(rot, fb, TR_R3D_H, frame_fw, src, TR_R3D_W, 0, y_lo, (int)frame_fw, rows);
 }
 
 static void copy_rows(uint16_t *fb, const uint16_t *cband, int y_lo, int rows)
@@ -759,14 +770,31 @@ static void copy_rows(uint16_t *fb, const uint16_t *cband, int y_lo, int rows)
 		copy_rows_turned(270, fb, cband, y_lo, rows);
 		break;
 	default: {
-		uint16_t *d = &fb[(uint32_t)y_lo * TR_R3D_W];
-		uint32_t  n = (uint32_t)rows * TR_R3D_W;
+		/* Row by row: the framebuffer's pitch is fw, the band's TR_R3D_W, and the
+		 * crop starts frame_x0c (a multiple of 8 px: 16 B aligned) into each band row. */
+		uint16_t       *d = &fb[(uint32_t)y_lo * frame_fw];
+		const uint16_t *s = cband + frame_x0c;
 
-		for (uint32_t x = 0; x < n; x += 8) {
-			copy16(&d[x], &cband[x]);
+		for (int r = 0; r < rows; r++, d += frame_fw, s += TR_R3D_W) {
+			for (uint32_t x = 0; x < frame_fw; x += 8) {
+				copy16(&d[x], &s[x]);
+			}
 		}
 	}
 	}
+}
+
+/* This frame's rotation and width from `in` (see frame_rot). A width that
+ * tr_fw_refuse() would have faulted on never gets here from the renderer; for
+ * any other caller it falls back to the whole render rather than write a
+ * framebuffer slot out of its bounds. */
+static void frame_set(const tr_frame_in_t *in)
+{
+	int use = in != NULL && !RENDER_DL_GOLDEN;
+
+	frame_rot = use ? in->rotation : 0;
+	frame_fw  = use && !tr_fw_refuse(1, in->fw) ? in->fw : TR_R3D_W;
+	frame_x0c = (int)(TR_R3D_W - frame_fw) / 2;
 }
 
 static void fill_px(uint16_t *d, int n, uint16_t c)
@@ -787,9 +815,11 @@ void render_video_band(uint32_t core, int vb, uint16_t *fb)
 	int       rows  = ly0 + TR_BAND_H <= TR_VID_H ? TR_BAND_H : TR_VID_H - ly0;
 
 #if TR_CAM_PIP_ENABLE
-	const vcv_t cv  = { cband, 0, TR_R3D_W, TR_VID_Y0 + ly0, TR_VID_Y0 + ly0 + rows, -1 };
-	int         rot = vid_cv.rotate, ix0 = tr_cam_img_x0(rot), uw = TR_CAM_UP_W(rot);
-	int         top = tr_cam_img_y0(rot), iy0 = 0, iy1 = 0; /* this band's image rows, area-local */
+	const vcv_t cv = {
+		cband, 0, TR_R3D_W, TR_VID_Y0 + ly0, TR_VID_Y0 + ly0 + rows, -1, 0, TR_R3D_W
+	};
+	int rot = vid_cv.rotate, ix0 = tr_cam_img_x0(rot), uw = TR_CAM_UP_W(rot);
+	int top = tr_cam_img_y0(rot), iy0 = 0, iy1 = 0; /* this band's image rows, area-local */
 
 	if (vid_have_cv) {
 		iy0 = ly0 > top ? ly0 : top;
@@ -862,7 +892,9 @@ void render_video_overlay(uint16_t *fb)
 	if (vid_have_cv && tr_pslot_read(PIP_PSLOT_ADDR, 0u, &out, &seq, pip_barrier) &&
 	    out.hp_state == TR_HP_STATE_RUNNING) {
 		int rot = vid_cv.rotate, x0 = tr_cam_img_x0(rot), y0 = TR_VID_Y0 + tr_cam_img_y0(rot);
-		const vcv_t cv = { fb, x0, x0 + TR_CAM_UP_W(rot), y0, y0 + TR_CAM_UP_H(rot), frame_rot };
+		int xa = x0 > frame_x0c ? x0 : frame_x0c, xe = x0 + TR_CAM_UP_W(rot);
+		int xb         = xe < frame_x0c + (int)frame_fw ? xe : frame_x0c + (int)frame_fw;
+		const vcv_t cv = { fb, xa, xb, y0, y0 + TR_CAM_UP_H(rot), frame_rot, frame_x0c, frame_fw };
 		int16_t     px[TR_POSE_KP], py[TR_POSE_KP];
 		bool        ok[TR_POSE_KP];
 
@@ -910,7 +942,7 @@ uint32_t render_front(const tr_frame_in_t *in)
 	hud_score  = in != NULL ? in->score : 0u;
 	hud_banner = in != NULL ? in->banner : 0u;
 	hud_flags  = in != NULL ? in->flags : 0u;
-	frame_rot  = in != NULL && !RENDER_DL_GOLDEN ? in->rotation : 0;
+	frame_set(in);
 	video_frame_state();
 	render_stats = (render_stats_t){ ticks() - t0, 0, DL->n, 0, tr_dl_dropped, 0 };
 	return DL->n;
@@ -922,7 +954,7 @@ void render_front_begin(const tr_frame_in_t *in)
 	hud_score  = in != NULL ? in->score : 0u;
 	hud_banner = in != NULL ? in->banner : 0u;
 	hud_flags  = in != NULL ? in->flags : 0u;
-	frame_rot  = in != NULL && !RENDER_DL_GOLDEN ? in->rotation : 0;
+	frame_set(in);
 #if RENDER_DL_GOLDEN
 	build_dl(in, DL, &frame_bg);
 #else

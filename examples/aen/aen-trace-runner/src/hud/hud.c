@@ -17,7 +17,7 @@ _Static_assert(TR_HUD_FB_SIZE == TR_HUD_W * TR_HUD_H * 2, "tr_mbox.h TR_HUD_FB_S
 /* The layer-2 window (panel rows 0..TR_HUD_H-1) stays over the game
  * viewport, never over the video area below it (half/half layout). */
 _Static_assert(TR_HUD_H <= TR_VIEW_H, "the HUD layer 2 window runs into the video area");
-_Static_assert(TR_HUD_W == TR_ROT_PORTRAIT_W && TR_HUD_H == TR_ROT_HUD_W,
+_Static_assert(TR_HUD_W == 720 && TR_HUD_H == TR_ROT_HUD_W,
                "panel_rot.h: the rotated HUD layer is TR_HUD_H px wide");
 
 /* ---------------------------------------------------------------- colours
@@ -810,9 +810,9 @@ static uint32_t paint_tile(uint16_t            *fb,
 				    &fb[(y + r) * TR_HUD_W + tl->x0], &strip[r * w], (size_t)w * sizeof(strip[0]));
 			}
 		} else if (rot == 90) {
-			tr_rot_blit(90, fb, TR_ROT_HUD_W, strip, (uint32_t)w, tl->x0, y, w, h);
+			tr_rot_blit(90, fb, TR_ROT_HUD_W, TR_HUD_W, strip, (uint32_t)w, tl->x0, y, w, h);
 		} else {
-			tr_rot_blit(270, fb, TR_ROT_HUD_W, strip, (uint32_t)w, tl->x0, y, w, h);
+			tr_rot_blit(270, fb, TR_ROT_HUD_W, TR_HUD_W, strip, (uint32_t)w, tl->x0, y, w, h);
 		}
 	}
 	return (uint32_t)w * (uint32_t)(tl->y1 - tl->y0);

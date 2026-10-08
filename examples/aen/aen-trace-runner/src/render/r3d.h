@@ -33,14 +33,19 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Portrait framebuffer: spans run along the 720-px scanout rows (section 1
+/* Portrait framebuffer: spans run along the 800-px scanout rows (section 1
  * of the plan -- a landscape presentation rotates the physical mount, never
- * the raster). */
-#define TR_R3D_W 720
+ * the raster). 800 is the widest panel (the Riverdi RVT121, 800 x 1280 scanned
+ * turned); a narrower panel (the RK055, 720) gets the centre fw columns of the
+ * same render (tr_frame_in_t.fw, panel_rot.h) -- the picture is drawn natively
+ * at 800 and cropped, never stretched. A multiple of 16: the band copy and the
+ * NEON kernels move whole 16-byte stores. */
+#define TR_R3D_W 800
 #define TR_R3D_H 1280
+_Static_assert(TR_R3D_W % 16 == 0, "the band copy-out moves 16 px at a time");
 
 /* Viewport split (maintainer layout ruling "Half / half", supersedes fix
- * round 8's 853/427): the physical panel stays 720x1280 (TR_R3D_W/H, the
+ * round 8's 853/427): the physical panel stays 800x1280 (TR_R3D_W/H, the
  * CDC200 scanout, the framebuffer size, DMA), the 3D GAME fills the top
  * TR_VIEW_H rows, and rows [TR_VIEW_H, TR_R3D_H) are the video area
  * (a32/renderer/render.c render_video_band()/render_video_overlay(): the
@@ -103,7 +108,7 @@
 #define TR_DL_MAX_VERTS 3072
 
 /* Band raster (a32-renderer plan section 7): 40 bands of 32 rows, each band
- * owns a 720 x 32 uint16 z band. A band's bin holds <= TR_BIN_MAX DL
+ * owns a TR_R3D_W x 32 uint16 z band. A band's bin holds <= TR_BIN_MAX DL
  * indices; a triangle that does not fit is counted in *overflow, not drawn
  * in that band. 1024 -> 1536 with the far road and scenery out to the
  * skyline: the horizon's band holds everything past ~7,000 deep (worst in

@@ -46,8 +46,8 @@
  * the renderer faults on a frame with fw 0 (a stage-0 HE), so a mixed set cannot run. */
 #define TR_MBOX_VERSION 3u
 #define TR_FB_A         0x02000000u /* SRAM0, DT sram0 */
-/* A framebuffer SLOT is 800 x 1280 x 2 B (the stage-1 panel width); TR_FB_SIZE is the bytes
- * actually scanned and drawn (720 wide until stage 1). */
+/* A framebuffer SLOT is 800 x 1280 x 2 B, the widest frame (r3d.h TR_R3D_W): a panel of fw
+ * columns scans and is drawn the first fw * 1280 * 2 bytes of it (tr_frame_in_t.fw). */
 #define TR_FB_SLOT_SIZE 2048000u
 /* FB B: the last slot below TF-A RW (TR_MEM_TFA_RW, bench-verified), 4 KiB aligned:
  * 0x025EA000..0x027DDFFF (the CDC200 scans SRAM1 fine, measured). It used to be the
@@ -56,8 +56,7 @@
 #ifndef TR_FB_B_ADDR
 #define TR_FB_B_ADDR ((TR_MEM_TFA_RW - TR_FB_SLOT_SIZE) & ~0xFFFu)
 #endif
-#define TR_FB_B    TR_FB_B_ADDR
-#define TR_FB_SIZE 1843200u /* 720 x 1280 RGB565 */
+#define TR_FB_B TR_FB_B_ADDR
 /* TF-A MHU0 payload window (== a32/common/stub_abi.h STUB_MHU0_WINDOW):
  * no A32 code ever writes it, so no framebuffer may contain it. */
 #define TR_MHU0_WINDOW_LO 0x02380000u

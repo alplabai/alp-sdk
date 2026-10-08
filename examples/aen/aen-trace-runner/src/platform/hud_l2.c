@@ -138,7 +138,7 @@ bool tr_hud_l2_open(void)
 	uint32_t ahbp = (bp >> 16) & 0xFFFFu, avbp = bp & 0xFFFFu;
 	uint32_t hs = ahbp + 1u, vs = avbp + 1u;
 	/* The window and pitch of the layer: 720 x 352, or turned 352 x 720. */
-	uint32_t win_w = rot ? TR_ROT_HUD_W : TR_HUD_W, win_h = rot ? TR_ROT_PORTRAIT_W : TR_HUD_H;
+	uint32_t win_w = rot ? TR_ROT_HUD_W : TR_HUD_W, win_h = rot ? TR_HUD_W : TR_HUD_H;
 	uint32_t pitch = win_w * 2u;
 
 	if (!tr_rot_valid(rot) || win_w > L1_W || win_h > L1_H || (rot == 0 && win_w != L1_W)) {

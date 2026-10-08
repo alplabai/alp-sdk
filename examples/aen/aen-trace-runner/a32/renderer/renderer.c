@@ -325,8 +325,7 @@ _Static_assert(TR_MEM_PSLOT >= TR_MEM_ARING && TR_MEM_HP_DBG >= TR_MEM_ARING &&
                    TR_MEM_CAM_VIEW >= TR_MEM_ARING &&
                    TR_MEM_CAM_VIEW + sizeof(tr_cam_view_t) <= TR_MHU0_WINDOW_LO,
                "tr_pslot_t/hp_dbg_t/tr_cam_view_t must all sit inside the one NC page above");
-_Static_assert(TR_FB_A == 0x02000000u && TR_FB_A + TR_FB_SIZE <= 0x02200000u,
-               "FB A must be SRAM0 MiB 0-1");
+_Static_assert(TR_FB_A == 0x02000000u, "FB A must start SRAM0 MiB 0");
 _Static_assert(TR_FB_A + TR_FB_SLOT_SIZE <= 0x02200000u, "FB A's slot must end in SRAM0 MiB 1");
 _Static_assert((TR_MEM_A32_DL & 0xFFFu) == 0 && TR_MEM_A32_DL >= STUB_STACK1_TOP &&
                    TR_MEM_A32_DL < TR_MEM_CAM_POOL,

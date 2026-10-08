@@ -2,7 +2,9 @@
  * turned (a32/renderer/render.c, frame_rot from tr_frame_in_t.rotation): a
  * frame rendered with rotation 90 / 270 is, pixel for pixel, the rotation 0
  * frame (the portrait golden path every RK055 CRC in test_a32_scene.c /
- * test_a32_render.c pins) put through the mapping of render/panel_rot.h.
+ * test_a32_render.c pins) put through the mapping of render/panel_rot.h. The same holds for a
+ * narrower panel (in.fw 720, the RK055): its frame is the CENTRE 720 columns of the full
+ * 800-column render, cropped, never rescaled -- at rotation 0 and turned.
  * Whole frames, 3D bands, HUD and the video half included -- with a running HP
  * slot (camera view, pose) seeded, so the camera image and the skeleton overlay
  * (cv_rect writing the turned framebuffer directly) are part of the comparison. */
@@ -21,6 +23,7 @@
 
 static uint16_t fb0[W * H] __attribute__((aligned(16)));
 static uint16_t fbr[W * H] __attribute__((aligned(16)));
+static uint16_t fbn[W * H] __attribute__((aligned(16))); /* the narrower panel's frame */
 
 static void draw(const tr_frame_in_t *in, uint16_t *fb, uint8_t poison)
 {
@@ -78,18 +81,60 @@ int main(void)
 	for (int f = 0; f < 3; f++) {
 		render_hud     = f != 0; /* HUD on the sprite path for frames 1, 2 */
 		in[f].rotation = 0;
+		in[f].fw       = W;
 		draw(&in[f], fb0, 0x5A);
 		/* the skeleton overlay really drew (nose dot on its image pixel) */
-		assert(fb0[(TR_VID_Y0 + 300) * W + 160 + 200] == COLOR_KP);
+		assert(fb0[(TR_VID_Y0 + 300) * W + tr_cam_img_x0(270) + 200] == COLOR_KP);
 		for (unsigned r = 0; r < sizeof(rots) / sizeof(rots[0]); r++) {
 			in[f].rotation = (uint16_t)rots[r];
 			draw(&in[f], fbr, 0xA5);
 			for (int y = 0; y < H; y++) {
 				for (int x = 0; x < W; x++) {
-					assert(fbr[tr_rot_idx(rots[r], TR_R3D_H, x, y)] == fb0[y * W + x]);
+					assert(fbr[tr_rot_idx(rots[r], TR_R3D_H, W, x, y)] == fb0[y * W + x]);
 				}
 			}
 			printf("a32 turned frame %d rotation %d: matches the portrait frame\n", f, rots[r]);
+		}
+		/* The intent lamps hold a lane step lit for LAMP_HOLD_TICKS draws (render.c
+		 * video_frame_state) and count DRAWS, so frames drawn in between would differ from the
+		 * reference by a lamp going dark: drain them, then redraw the reference. */
+		in[f].rotation = 0;
+		in[f].fw       = W;
+		for (int i = 0; i <= LAMP_HOLD_TICKS; i++) {
+			draw(&in[f], fb0, 0x5A);
+		}
+		/* The 720-wide panel: the centre columns [40, 760) of the 800-wide frame, pitch 720,
+		 * and turned the same way. Poisoned beyond the bytes it owns: nothing may touch them. */
+		for (int rot = 0; rot <= 270; rot = rot == 0 ? 90 : rot + 180) {
+			enum { FW = 720, X0 = (W - FW) / 2 };
+
+			in[f].rotation = (uint16_t)rot;
+			in[f].fw       = FW;
+			draw(&in[f], fbn, 0xA5);
+			/* The crash flash's border frames the PANEL (r3d_scene.c flash_border): at the crop's
+			 * edge, not the render's, so a flash frame differs from the crop of the full-width
+			 * one exactly in the game view's outer 16 px (and the border really is there). */
+			for (int y = 0; y < H; y++) {
+				for (int x = 0; x < FW; x++) {
+					int edge = (in[f].flags & TR_FLAG_CRASH) && y < TR_VIEW_H &&
+					           (x < 16 || x >= FW - 16 || y < 16 || y >= TR_VIEW_H - 16);
+
+					if (!edge) {
+						assert(fbn[tr_rot_idx(rot, TR_R3D_H, FW, x, y)] == fb0[y * W + X0 + x]);
+					}
+				}
+			}
+			if (in[f].flags & TR_FLAG_CRASH) {
+				uint16_t l = fbn[tr_rot_idx(rot, TR_R3D_H, FW, 0, TR_VIEW_H / 2)];
+				uint16_t r = fbn[tr_rot_idx(rot, TR_R3D_H, FW, FW - 1, TR_VIEW_H / 2)];
+
+				assert(l == r &&
+				       l != fb0[(TR_VIEW_H / 2) * W + X0]); /* the border at the crop edge */
+			}
+			for (size_t i = (size_t)FW * H; i < (size_t)W * H; i++) {
+				assert(fbn[i] == 0xA5A5u);
+			}
+			printf("a32 turned frame %d fw %d rotation %d: the centre crop\n", f, FW, rot);
 		}
 	}
 	puts("a32 turned ok");

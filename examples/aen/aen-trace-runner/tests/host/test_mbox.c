@@ -99,7 +99,7 @@ int main(void)
 	assert(f.rotation == 0 && TR_MBOX_VERSION == 3u); /* a fresh snapshot: not turned */
 
 	/* --- stage 0 memory re-plan: the placement relations the A32 builds assert too --- */
-	assert(TR_FB_SLOT_SIZE == 800u * 1280u * 2u && TR_FB_SIZE <= TR_FB_SLOT_SIZE);
+	assert(TR_FB_SLOT_SIZE == 800u * 1280u * 2u && TR_FB_SLOT_SIZE == TR_R3D_W * TR_R3D_H * 2u);
 	assert(TR_FB_B == 0x025EA000u && (TR_FB_B & 0xFFFu) == 0u); /* derived from TR_MEM_TFA_RW */
 	assert(TR_FB_B + TR_FB_SLOT_SIZE <= TR_MEM_TFA_RW);
 	assert(TR_FB_B + TR_FB_SLOT_SIZE + 0x1000u > TR_MEM_TFA_RW); /* the last slot that fits */

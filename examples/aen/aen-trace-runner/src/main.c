@@ -279,7 +279,7 @@ static void ui_present(const tr_game_t *g, bool attract_active, bool paused)
 	tr_frame_in_p16(&in, tr_tilt.character, &g_react, g_lobby.standing, g_lobby.idle_us);
 	in.track_h  = (int16_t)tr_display_height();
 	in.rotation = tr_display_rotation(); /* the A32 turns the frame by it */
-	in.fw       = TR_R3D_W;              /* the panel's width: the render is cropped to it */
+	in.fw       = tr_display_width();    /* the panel's width: the render is cropped to it */
 	in.phase    = (uint16_t)g_phase_q16;
 	in.pace_q8  = g_pace_q8;
 	if (in.phase != 0u) {
