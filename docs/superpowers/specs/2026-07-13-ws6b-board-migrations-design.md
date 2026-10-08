@@ -1,5 +1,7 @@
 # WS6-b — `alp-migrate` board.yaml migration engine (epic #610, Workstream 6)
 
+> **Status (2026-10-08): Landed** — `west alp-migrate` engine and `check_board_schema_version.py` shipped in #761.
+
 **Status:** design approved 2026-07-13; **revised 2026-07-13 → lazy versioning
 (see note).**
 
