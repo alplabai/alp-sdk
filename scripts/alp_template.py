@@ -500,9 +500,9 @@ def render(
 def default_sku(record: dict[str, Any], *, base_dir: Path | None = None) -> str:
     """The catalog record's canonical example's OWN `som.sku:` -- what
     `render_to_envelope()` (and now `render(..., sku=...)`) treats as a
-    byte-identical passthrough. `alp generate` (issue #864 Fable-review
+    byte-identical passthrough. `tan generate` (issue #864 Fable-review
     MINOR G) has no `--sku` flag of its own; it always scaffold-adapts
-    for the template's own sku, so its output matches `alp emit
+    for the template's own sku, so its output matches `alp_project.py --emit
     scaffold --sku <that sku>` exactly rather than the two commands
     silently disagreeing on content."""
     base = base_dir or REPO
@@ -1272,7 +1272,7 @@ def _tag_resolves(base_dir: Path, tag: str) -> bool:
     """Whether `tag` exists in `base_dir`'s git checkout.
 
     Local-only: `git rev-parse` against the checkout's own refs, never a
-    network call -- scaffolding must work offline, and an `alp init` that
+    network call -- scaffolding must work offline, and a `tan init` that
     stalled on `git ls-remote` would be a worse defect than the dead link
     this guards. A checkout that fetched from origin has origin's tags, so
     "resolves here" is the closest offline proxy for "resolves on GitHub"

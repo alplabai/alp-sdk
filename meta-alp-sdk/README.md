@@ -326,8 +326,8 @@ The NX9101 path tracks NXP's
 base BSP plus
 [`meta-freescale`](https://git.yoctoproject.org/meta-freescale) for
 the broader i.MX userspace stack.  The `e1m-nx9101-a55.conf`
-MACHINE ships today; board DTB + full image-bake gate on v0.7
-HW-in-loop.
+MACHINE ships, but the board DTB and a full image bake are not
+validated: the E1M-NX9101 module is not currently produced.
 
 ```bash
 MACHINE = "e1m-nx9101-a55"

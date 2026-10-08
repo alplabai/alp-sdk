@@ -312,7 +312,7 @@ extern "C" {
  * input pull-up + write 0 to assert / write 1 / Hi-Z to release)
  * + ALP_CC3501E_CMD_GPIO_WRITE.  The CC3501E firmware needs the
  * open-drain mode wired into its GPIO_CONFIGURE handler -- a v0.4
- * item for the embedded cc3501e-bridge-firmware: tree (GPIO proxy group).
+ * item for the cc3501e-bridge-firmware repo (GPIO proxy group).
  *
  * EVK_PIN_W_DISABLE1 (= ALP_E1M_GPIO_IO17) and EVK_PIN_W_DISABLE2
  * (= ALP_E1M_GPIO_IO16) are defined in the generated routes header. */

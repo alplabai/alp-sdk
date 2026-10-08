@@ -22,7 +22,7 @@ silently to the AUTO/TFLITE sentinel on-device (NOT an error), so the
 mis-selection would never surface at runtime; here it fails CI immediately.
 
 One sanctioned exception: the `tbd` backend placeholder emitted by
-`alp new-som` is accepted, but ONLY while the preset declares
+`tan new-som` is accepted, but ONLY while the preset declares
 `status.preliminary: true` (the scaffold-first porting flow -- see
 docs/porting-new-som.md).  Clearing the preliminary flag without
 replacing `tbd` with the real silicon backend fails here.
@@ -122,7 +122,7 @@ def main() -> int:
         for field, kind, value in names:
             checked += 1
             if kind == "backend" and value == "tbd":
-                # `alp new-som` scaffold placeholder: legal ONLY while the
+                # `tan new-som` scaffold placeholder: legal ONLY while the
                 # preset itself is flagged status.preliminary: true, so a
                 # scaffold commits green but cannot graduate with `tbd`.
                 if preliminary:
@@ -130,7 +130,7 @@ def main() -> int:
                           f"status.preliminary: true)")
                     continue
                 errors.append(
-                    f"{rel}: {field} = 'tbd' is the `alp new-som` scaffold "
+                    f"{rel}: {field} = 'tbd' is the `tan new-som` scaffold "
                     f"placeholder, legal only while the preset declares "
                     f"status.preliminary: true; replace it with the real "
                     f"silicon backend (one of {sorted(canonical[kind])}) "

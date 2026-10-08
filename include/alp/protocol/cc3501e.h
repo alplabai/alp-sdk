@@ -9,8 +9,8 @@
  *        TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor.
  *
  * The CC3501E ships its own Cortex-M MCU and runs ALP-authored
- * firmware that lives in this repo at `cc3501e-bridge-firmware:` (embedded,
- * like the gd32-bridge -- see ADR 0015).  The firmware exposes Wi-Fi +
+ * firmware that lives in its own repo, `alplabai/cc3501e-bridge-firmware`
+ * (like the gd32-bridge firmware -- see ADR 0015).  The firmware exposes Wi-Fi +
  * BLE control to the Alif over the inter-chip link (SPI default, SDIO
  * optional) -- Alif is master, CC3501E is slave.  This header is the
  * single-source contract between the two sides: the firmware includes

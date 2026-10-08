@@ -63,7 +63,7 @@ def main() -> int:
     args = ap.parse_args()
 
     # Click used to do this for us (`click.Path(exists=True, dir_okay=False)`
-    # on `alp validate PATH`), and a bad --fixture came back as a clean gate
+    # on `tan validate PATH`), and a bad --fixture came back as a clean gate
     # error rather than a traceback. The in-process form has no argv layer, so
     # the gate owns the check.
     if not args.fixture.is_file():
@@ -77,7 +77,7 @@ def main() -> int:
         doc = machine_json_for_board_yaml(args.fixture)
     except Exception as exc:  # noqa: BLE001 -- deliberately broad, framed below
         # Same posture as the --fixture-is-a-file guard above: the old
-        # subprocess form (`alp validate`) framed a crash out of the
+        # subprocess form (`tan validate`) framed a crash out of the
         # validator as a clean CLI error; the in-process form has no argv/
         # command layer to do that for free, so the gate frames it itself
         # instead of letting a bare traceback (e.g. UnicodeDecodeError on a

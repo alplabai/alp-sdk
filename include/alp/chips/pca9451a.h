@@ -11,12 +11,12 @@
  *   raw register R/W + INT1 latched-interrupt decode + per-rail
  *   enable/disable + per-rail voltage set/get (microvolts) on all 6
  *   bucks and 5 LDOs, landed via #474.  NOT yet exercised on real
- *   E1M-NX9101 silicon -- that board doesn't exist on the bench yet --
+ *   E1M-NX9101 silicon -- that module is not currently produced --
  *   so treat every number and sequencing decision here as paper-correct
  *   only, validated by the host-side `tests/zephyr/chips` unit suite
  *   against NULL-arg / uninitialised-context / table-bounds
  *   properties, not against a real transceiver.  HiL bring-up happens
- *   once the NX9101 module is on the bench.
+ *   if the NX9101 module is ever built.
  *
  * @par Register-map provenance
  * The PCA9451A shares its register map with the wider NXP PCA9450
