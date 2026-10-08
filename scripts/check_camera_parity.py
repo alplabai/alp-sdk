@@ -26,10 +26,10 @@ import gen_camera_dt as g  # noqa: E402
 
 def find_problems(root: Path) -> list[str]:
     try:
-        want = g.generate(root)
-    except (g.GenError, KeyError, OSError) as e:
+        want, notes = g.generate_with_notes(root)
+    except (g.GenError, OSError) as e:
         return [f"gen_camera_dt cannot generate: {type(e).__name__}: {e}"]
-    return g.stale_files(root, want)
+    return g.stale_files(root, want, notes)
 
 
 def main() -> int:

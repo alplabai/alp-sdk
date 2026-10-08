@@ -9,6 +9,7 @@ chip:           imx296
 # standby on V2M103 (kernel patch 0028 adds a settle delay; the LQ node was the
 # bench-proven configuration).
 linux_compatible: "sony,imx296lq"
+linux_bench:    verified   # generated fragment booted + captured on V2M103 2026-10-08 (60.38 fps)
 i2c_addr_7bit:  0x1A
 xclk_hz:        54000000
 lanes:          1

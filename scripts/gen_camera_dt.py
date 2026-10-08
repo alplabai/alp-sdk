@@ -57,6 +57,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -80,13 +81,23 @@ class GenError(Exception):
     pass
 
 
+def _load(path: Path, parse):
+    """Parse a metadata file; any failure names the file (GenError, never a bare traceback)."""
+    try:
+        doc = parse(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, yaml.YAMLError) as e:
+        raise GenError(f"{path.as_posix()}: {type(e).__name__}: {e}") from e
+    if not isinstance(doc, dict):
+        raise GenError(f"{path.as_posix()}: expected a mapping at the top level, found {type(doc).__name__}")
+    return doc
+
+
 def _yaml(path: Path) -> dict:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    return _load(path, yaml.safe_load)
 
 
 def _json(path: Path) -> dict:
-    import json
-    return json.loads(path.read_text(encoding="utf-8"))
+    return _load(path, json.loads)
 
 
 def _pad_routes(root: Path) -> dict[str, dict]:
@@ -142,31 +153,52 @@ class Ctx:
         self.kdrivers = {d["compatible"]: d for d in next(iter(kernels.values()))["drivers"]}
         self.chips: dict[str, dict] = {}
         self.modules = {p.stem: _yaml(p) for p in sorted((root / "metadata/camera_modules").glob("*.yaml"))}
-        for m in self.modules.values():
+        for stem, m in self.modules.items():
+            if not isinstance(m.get("chip"), str):
+                raise GenError(f"metadata/camera_modules/{stem}.yaml: no `chip`")
             self.chips[m["chip"]] = _yaml(root / "metadata/chips" / f"{m['chip']}.yaml")
+        # {module_id: why it got no Linux fragment}; printed by main() and quoted by stale_files().
+        self.notes: dict[str, str] = {}
+
+    def has_linux(self, mod: dict) -> bool:
+        """A chip without drivers.linux (e.g. an AEN-only sensor) is simply not a Linux camera."""
+        return bool((self.chips[mod["chip"]].get("drivers") or {}).get("linux"))
 
     def linux(self, mod: dict) -> dict:
-        lx = (self.chips[mod["chip"]].get("drivers") or {}).get("linux")
-        if not lx:
-            raise GenError(f"module {mod['module_id']}: chip {mod['chip']} has no drivers.linux block")
-        return lx
+        return self.chips[mod["chip"]]["drivers"]["linux"]
 
     def _patched(self, drv: dict) -> bool:
         pats = drv.get("patches") or []
         return bool(pats) and all((self.root / OUT_DIR / f).is_file() for f in pats)
 
+    def _missing_patches(self, drv: dict) -> list[str]:
+        return [f for f in drv.get("patches") or [] if not (self.root / OUT_DIR / f).is_file()]
+
     def driver_available(self, mod: dict) -> bool:
         """The sensor driver is in the kernel: native, or every named patch exists."""
+        if not self.has_linux(mod):
+            return False
         drv = self.kdrivers.get(self.linux(mod)["compatible"])
         return bool(drv) and (drv["native"] or self._patched(drv))
 
     def serves_lanes(self, mod: dict) -> bool:
-        """Some available driver variant accepts this module's lane count."""
+        """Some available driver variant accepts this module's lane count; else say why not."""
+        mid = mod["module_id"]
+        if not self.has_linux(mod):
+            self.notes[mid] = f"chip {mod['chip']} has no drivers.linux block"
+            return False
         drv = self.kdrivers.get(self.linux(mod)["compatible"])
-        if not drv or not self.driver_available(mod):
+        if not drv:
+            self.notes[mid] = f"{self.linux(mod)['compatible']} is not in {KERNEL_DRIVERS.name}"
+            return False
+        if not self.driver_available(mod):
+            self.notes[mid] = "patch " + ", ".join(self._missing_patches(drv)) + " absent"
             return False
         lanes = drv.get("native_lanes")
-        return not drv["native"] or lanes is None or mod["lanes"] in lanes or self._patched(drv)
+        ok = not drv["native"] or lanes is None or mod["lanes"] in lanes or self._patched(drv)
+        if not ok:
+            self.notes[mid] = f"{mod['lanes']} lane(s) not served by {drv['compatible']} (native lanes {lanes})"
+        return ok
 
     def soc_route(self, e1m: str, what: str) -> dict:
         r = self.routes.get(e1m)
@@ -202,6 +234,10 @@ def render_fragment(ctx: Ctx, board_name: str, board: dict, conn: str, mod: dict
     lx, chip = ctx.linux(mod), mod["chip"]
     pre, n = conn.lower(), mod["lanes"]
     what = f"{board_name} {conn} + {mod['module_id']}"
+    compat = mod.get("linux_compatible", lx["compatible"])
+    if compat != lx["compatible"] and compat not in (lx.get("variants") or []):
+        raise GenError(f"{what}: linux_compatible {compat!r} is neither {chip}'s drivers.linux.compatible "
+                       f"{lx['compatible']!r} nor one of its drivers.linux.variants {lx.get('variants') or []}")
     if mod["xclk_hz"] not in lx.get("xclk_supported_hz", [mod["xclk_hz"]]):
         raise GenError(f"{what}: xclk_hz {mod['xclk_hz']} is not in {chip} linux xclk_supported_hz")
     freqs = None
@@ -266,6 +302,8 @@ def render_fragment(ctx: Ctx, board_name: str, board: dict, conn: str, mod: dict
          f" * Link frequency, lanes, supplies and clock follow the {lx['compatible']} driver",
          f" * facts in metadata/chips/{chip}.yaml (drivers.linux).",
          ]
+    if mod.get("linux_bench", "unverified") != "verified":
+        o += [" *", " * BENCH-UNVERIFIED: this fragment has not been booted with this module."]
     if hogs and any(h[2] for h in hogs):
         o += [" *", " * GD32 bridge lines (line number = index in &gd32_gpio gpio-line-names):"]
         o += [h[2] for h in hogs if h[2]]
@@ -318,7 +356,7 @@ def render_fragment(ctx: Ctx, board_name: str, board: dict, conn: str, mod: dict
           f"{t}clock-frequency = <{I2C_HZ}>;",
           f'{t}status = "okay";', "",
           f"{t}{pre}_sensor: camera@{mod['i2c_addr_7bit']:x} {{",
-          f'{t}{t}compatible = "{mod.get("linux_compatible", lx["compatible"])}";',
+          f'{t}{t}compatible = "{compat}";',
           f"{t}{t}reg = <0x{mod['i2c_addr_7bit']:x}>;",
           f"{t}{t}clocks = <&{pre}_xclk>;"]
     if lx.get("clock_name"):
@@ -366,22 +404,36 @@ def render_cfg(ctx: Ctx) -> str:
             + "".join(f"{k}=y\n" for k in [*rx, *sensors]))
 
 
+def generate_with_notes(root: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """({path relative to root: content} for every generated file,
+        {module_id: why it got no fragment}).  Only GenError escapes."""
+    ctx = Ctx(root)
+    out: dict[str, str] = {}
+    try:
+        out[(OUT_DIR / "camera-sensors.cfg").as_posix()] = render_cfg(ctx)
+        for bp in sorted((root / "metadata/boards").glob("*.yaml")):
+            board = _yaml(bp)
+            for conn, c in (board.get("camera_connectors") or {}).items():
+                for mid, mod in ctx.modules.items():
+                    try:
+                        if mod["lanes"] > c["lanes"] or not ctx.serves_lanes(mod):
+                            continue
+                        name = f"{bp.stem}-{conn.lower()}-{mid}.dtsi"
+                        out[(OUT_DIR / name).as_posix()] = render_fragment(ctx, bp.stem, board, conn, mod)
+                    except (KeyError, TypeError) as e:
+                        raise GenError(f"{bp.name} {conn} + metadata/camera_modules/{mid}.yaml: "
+                                       f"missing or malformed field {e}") from e
+    except (KeyError, TypeError) as e:
+        raise GenError(f"missing or malformed field {e}") from e
+    return out, ctx.notes
+
+
 def generate(root: Path) -> dict[str, str]:
     """{path relative to root: content} for every generated file."""
-    ctx = Ctx(root)
-    out = {(OUT_DIR / "camera-sensors.cfg").as_posix(): render_cfg(ctx)}
-    for bp in sorted((root / "metadata/boards").glob("*.yaml")):
-        board = _yaml(bp)
-        for conn, c in (board.get("camera_connectors") or {}).items():
-            for mid, mod in ctx.modules.items():
-                if mod["lanes"] > c["lanes"] or not ctx.serves_lanes(mod):
-                    continue
-                name = f"{bp.stem}-{conn.lower()}-{mid}.dtsi"
-                out[(OUT_DIR / name).as_posix()] = render_fragment(ctx, bp.stem, board, conn, mod)
-    return out
+    return generate_with_notes(root)[0]
 
 
-def stale_files(root: Path, want: dict[str, str]) -> list[str]:
+def stale_files(root: Path, want: dict[str, str], notes: dict[str, str] | None = None) -> list[str]:
     """Committed generated files that differ from, are missing in, or are not
     in `want` (an orphan fragment of a removed module)."""
     msgs = []
@@ -392,7 +444,9 @@ def stale_files(root: Path, want: dict[str, str]) -> list[str]:
     for p in sorted((root / OUT_DIR).glob("e1m-*-cam*-*.dtsi")):
         rel = (OUT_DIR / p.name).as_posix()
         if rel not in want:
-            msgs.append(f"{rel} is generated for no (connector, module) pair; delete it")
+            why = next((f" (module {m} skipped: {r})" for m, r in (notes or {}).items()
+                        if p.name.endswith(f"-{m}.dtsi")), "")
+            msgs.append(f"{rel} is generated for no (connector, module) pair{why}; delete it")
     return msgs
 
 
@@ -402,11 +456,13 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="exit 1 if a committed output is stale")
     args = ap.parse_args()
     try:
-        want = generate(args.root)
-    except (GenError, KeyError, OSError) as e:
+        want, notes = generate_with_notes(args.root)
+    except (GenError, OSError) as e:
         print(f"gen_camera_dt: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
-    bad = stale_files(args.root, want)
+    for m, r in notes.items():
+        print(f"gen_camera_dt: skipped {m}: {r}", file=sys.stderr)
+    bad = stale_files(args.root, want, notes)
     if args.check:
         for m in bad:
             print(f"gen_camera_dt: {m} -- run python3 scripts/gen_camera_dt.py", file=sys.stderr)

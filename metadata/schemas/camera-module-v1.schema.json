@@ -14,12 +14,9 @@
     "i2c_addr_7bit": { "type": "integer", "minimum": 0, "maximum": 127 },
     "xclk_hz": { "type": "integer", "minimum": 1, "description": "Frequency of the module's own oscillator / sensor input clock." },
     "lanes": { "type": "integer", "minimum": 1, "maximum": 4, "description": "CSI-2 data lanes the module routes to its connector." },
-    "linux_compatible": {
-   "type": "string",
-   "pattern": "^[a-z0-9]+,[a-z0-9._-]+$",
-   "description": "Linux sensor `compatible` for this module when it must differ from its chip's drivers.linux.compatible, e.g. the colour/mono variant the module carries (`sony,imx296lq`), which skips the driver's SENSOR_INFO auto-detect.  The chip's drivers.linux.compatible is still the key into metadata/os/linux-kernel-drivers.yaml."
-  },
-  "zephyr_shield": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Name of the zephyr/boards/shields/<name> shield for this module, when one exists." },
+    "linux_compatible": { "type": "string", "pattern": "^[a-z0-9]+,[a-z0-9._-]+$", "description": "Linux sensor `compatible` for this module when it must differ from its chip's drivers.linux.compatible: one of the chip's drivers.linux.variants, e.g. the colour part (`sony,imx296lq`), which skips the driver's SENSOR_INFO auto-detect.  The chip's drivers.linux.compatible is still the key into metadata/os/linux-kernel-drivers.yaml." },
+    "linux_bench": { "enum": ["verified", "unverified"], "description": "Whether the generated Linux CAM0 devicetree fragment for this module has been bench-proven on silicon.  Default unverified; an unverified fragment carries a BENCH-UNVERIFIED header line." },
+    "zephyr_shield": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$", "description": "Name of the zephyr/boards/shields/<name> shield for this module, when one exists." },
     "zephyr_host_overrides": {
       "type": "object",
       "description": "Properties a Zephyr shield generator must set on the SHARED capture-host nodes (not on the sensor node) for this module to stream, keyed by the host node's devicetree `compatible` (e.g. `snps,designware-csi` for `&csi`, `vsi,isp-pico` for `&isp`).  Values are DT scalars: integer, string or boolean (true = bare property).  Captures the per-module bench-proven CSI-2 host timing / ISP crop that is not derivable from the chip or the lane count.",

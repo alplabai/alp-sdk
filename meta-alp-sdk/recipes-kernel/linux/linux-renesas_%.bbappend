@@ -178,7 +178,7 @@ python () {
 # one: 1280x800 and 640x400 modes next to the default 1280x720, Y8_1X8 next
 # to Y10_1X10, and the ovti,ov9281 compatible.  v6.6 only writes the gated
 # MIPI clock (0x4800 = 0x20) when the endpoint has clock-noncontinuous, which
-# the bench-proven 0016/0017 run used, so e1m-x-evk-cam0-ov9281.dtsi sets it.
+# the bench-proven 0016/0017 run used, so the generated e1m-x-evk-cam0-innomaker_cam_ov9281.dtsi sets it.
 #
 # 0012 (UIO default match, #2374): uio_pdrv_genirq binds no DT node until
 # of_id is set, and the stored U-Boot bootargs cannot be relied on to carry

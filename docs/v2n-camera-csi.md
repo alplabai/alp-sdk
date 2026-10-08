@@ -5,9 +5,14 @@ Issue #1149. The RZ/V2N has two MIPI CSI-2 receivers feeding the CRU
 carrier DT node wired one to a sensor. This adds an **opt-in** Linux
 path on the A55; the default dtb is unchanged.
 
-**Status:** the OV9281 path is bench-proven on E1M-V2M103; every other
-module is **BENCH-UNVERIFIED**. The generated fragments compile with dtc
-against both cam0 wrapper dts; bitbake has not been run on them.
+**Status** (E1M-V2M103 `2026W38-0008` on the E1M-X EVK):
+
+- IMX296LQ (generated fragment): bench-proven 2026-10-08 on V2M103.
+- OV9281: the hand-written DT was bench-proven 2026-10-02; the generated
+  OV9281 fragment is pending re-bench.
+- Every other module: **BENCH-UNVERIFIED**.
+
+bitbake has not been run on the fragments.
 
 ## What is wired
 
@@ -41,17 +46,33 @@ connector `CAM<N>` (CAM0 -> `alp-camera0 = &cam0_sensor;`): the `<alp/camera.h>`
 Linux backend resolves `camera_id` N through that alias to the sensor node and
 walks the media graph from there to `/dev/video*`.
 
-Bench status: the OV9281 path (`innomaker_cam_ov9281`) and the IMX296LQ
-path (`raspberry_pi_global_shutter_camera`: 1 lane, 54 MHz inck, RIIC2 at
-400 kHz, 60 fps `SBGGR10_1X10` 1456x1088, zero CSI/CRU errors over 300
-frames; colour / AWB not tuned) are bench-proven on E1M-V2M103; every other
-module is **BENCH-UNVERIFIED**. The IMX296 fragment names `sony,imx296lq`
-(`linux_compatible` in the module yaml) rather than the auto-detecting
-`sony,imx296`: the module carries the colour part, and the explicit variant
-skips the `SENSOR_INFO` read that returns `0x0000` right after standby
-(patch 0028 adds the settle delay, but only the `lq` node was bench-run). Each generated
-fragment compiles with dtc against both cam0 wrapper dts; bitbake has not
-been run on them.
+Bench status: see **Status** at the top. The IMX296LQ path
+(`raspberry_pi_global_shutter_camera`: 1 lane, 54 MHz inck, RIIC2 at
+400 kHz, `SBGGR10_1X10` 1456x1088 at 60.04-60.38 fps, zero CSI/CRU errors
+over 300 frames; colour / AWB not tuned) was proven in two steps on
+2026-10-08:
+
+- Patch 0028 with plain `compatible = "sony,imx296"` (auto-identify) passed
+  6/6 boots (`found IMX296LQ`, 60.38 fps). Without the 2-5 ms settle delay
+  the `SENSOR_INFO` read right after standby returns `0x0000` and probe
+  fails with `invalid device model 0x0000`.
+- The generated cam0 DTB (built with the kernel make rule) booted: dtc is
+  clean at the default warning level (`W=1`: 37 pre-existing SoC warnings
+  only), the `alp-camera0` alias resolves to the sensor subdev's `of_node`,
+  probe succeeds, it captures at 60.38 fps and `<alp/camera.h>` returns
+  `ALP_OK`. Its camera nodes are identical to the hand-made bench DT apart
+  from the pinctrl group name.
+
+The IMX296 fragment names `sony,imx296lq` (`linux_compatible` in the module
+yaml, which must be one of the chip's `drivers.linux.variants`) because the
+module carries the colour part and the explicit variant skips the
+auto-identify entirely. Every fragment of a module whose `linux_bench` is
+not `verified` carries a `BENCH-UNVERIFIED` header line.
+
+Each fragment also sets `aliases { alp-camera<N> = &cam<N>_sensor; }` for
+connector `CAM<N>` (CAM0 -> `alp-camera0 = &cam0_sensor;`): the
+`<alp/camera.h>` Linux backend resolves `camera_id` N through that alias to
+the sensor node and walks the media graph from there to `/dev/video*`.
 
 ## Enable
 
@@ -69,13 +90,18 @@ the shipped dtb unchanged.
 A module only gets a fragment (and its sensor driver a line in
 `camera-sensors.cfg`) when the BSP kernel can serve it, per
 `metadata/os/linux-kernel-drivers.yaml`: the driver is native, or the alp
-patch that adds it (or its lane count) exists in `linux-renesas/`. Today
-`raspberry_pi_camera_module_2` (IMX219), `raspberry_pi_camera_module_1`
-(OV5647) and `innomaker_cam_ov9281` (OV9281) qualify. The IMX296
-(`raspberry_pi_global_shutter_camera`, patch `0028`) and the 2-lane
-`innomaker_cam_imx335` (the native driver is 4-lane only; patch `0029`) get
-their fragments, and IMX296 its config line, the moment those patch files
-land and `gen_camera_dt.py` is re-run.
+patch that adds it (or its lane count) exists in `linux-renesas/`. A module
+whose chip has no `drivers.linux` block is skipped silently; one skipped for
+a missing patch is reported by `gen_camera_dt.py`. All five modules qualify
+today:
+
+| `ALP_CAMERA_CAM0` | Sensor | Lanes | Bench |
+|---|---|---|---|
+| `raspberry_pi_global_shutter_camera` | IMX296LQ (patch `0028`) | 1 | bench-proven 2026-10-08 |
+| `innomaker_cam_ov9281` | OV9281 (`ovti,ov9282`, patch `0030`) | 2 | hand-written DT bench-proven 2026-10-02; generated fragment pending re-bench |
+| `raspberry_pi_camera_module_2` | IMX219 | 2 | BENCH-UNVERIFIED |
+| `raspberry_pi_camera_module_1` | OV5647 | 2 | BENCH-UNVERIFIED |
+| `innomaker_cam_imx335` | IMX335 2-lane (patch `0029`) | 2 | BENCH-UNVERIFIED |
 
 `clock-noncontinuous` (the OV9281 endpoint): the native 6.1 `ov9282.c`
 ignores it and always writes the gated MIPI clock (`0x4800 = 0x20`); the
@@ -144,11 +170,11 @@ needs your own node on the CAM0 I2C bus and a `csi20` endpoint.
 
 | Sensor | Kernel driver | Lanes | Modes / formats | Notes |
 |---|---|---|---|---|
-| OV9281 (mono) | `ov9282` (v6.6, patch 0030) | 2 | 1280x720, 1280x800, 640x400; `Y10_1X10` and `Y8_1X8` | Bench-proven at 1280x720 only |
-| OV5647 | `ov5647` (in 6.1) | 2 | `SBGGR10_1X10` modes of the 6.1 driver | Unverified |
-| IMX219 | `imx219` (in 6.1) | 2 | Bayer modes of the 6.1 driver | Unverified (#1149) |
-| IMX296 (mono / colour) | `imx296` (v6.6 backport, patch 0028) | 1 | 1456x1088; `Y10_1X10` mono, `SBGGR10_1X10` colour | IMX296LQ (colour) bench-verified on E1M-V2M103 CAM0/J5 (1 lane, 54 MHz inck, SBGGR10 1456x1088, 60 fps, zero CSI/CRU errors over 300 frames); colour / AWB is not tuned. No external trigger (XTRIG) in the driver: free-running only. No `sony,imx296.yaml binding in 6.1, so `dtbs_check` does not validate the node |
-| IMX335 | `imx335` (6.1 + patch 0029) | 2 or 4 | 2 lanes: 1296x972 `SRGGB10_1X10`; 4 lanes: 2592x1940 `SRGGB12_1X12` and 1296x972 `SRGGB10_1X10` | With 2 lanes the 12-bit full frame does not fit the link at the default HMAX, so it is hidden |
+| OV9281 (mono) | `ov9282` (v6.6, patch 0030) | 2 | 1280x720, 1280x800, 640x400; `Y10_1X10` and `Y8_1X8` | Hand-written DT bench-proven at 1280x720 (2026-10-02); generated fragment pending re-bench |
+| OV5647 | `ov5647` (in 6.1) | 2 | `SBGGR10_1X10` modes of the 6.1 driver | BENCH-UNVERIFIED |
+| IMX219 | `imx219` (in 6.1) | 2 | Bayer modes of the 6.1 driver | BENCH-UNVERIFIED (#1149) |
+| IMX296 (mono / colour) | `imx296` (v6.6 backport, patch 0028) | 1 | 1456x1088; `Y10_1X10` mono, `SBGGR10_1X10` colour | IMX296LQ (colour) bench-proven 2026-10-08 on E1M-V2M103 CAM0/J5 (generated fragment; 60.38 fps, zero CSI/CRU errors); colour / AWB is not tuned. No external trigger (XTRIG) in the driver: free-running only. No `sony,imx296.yaml` binding in 6.1, so `dtbs_check` does not validate the node |
+| IMX335 | `imx335` (6.1 + patch 0029) | 2 or 4 | 2 lanes: 1296x972 `SRGGB10_1X10`; 4 lanes: 2592x1940 `SRGGB12_1X12` and 1296x972 `SRGGB10_1X10` | BENCH-UNVERIFIED. With 2 lanes the 12-bit full frame does not fit the link at the default HMAX, so it is hidden |
 
 Devicetree each driver needs (all on the sensor's I2C node and its `port`
 endpoint; lane polarity goes on the `csi20` endpoint, see patch 0017):
@@ -196,15 +222,16 @@ Carrier facts the fragment encodes:
 
 `ov9282.c` facts (the v6.6 driver, backported by patch
 `0030-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch`): compatible
-`ovti,ov9282` or `ovti,ov9281` (the fragment uses `ovti,ov9281`; the
+`ovti,ov9282` or `ovti,ov9281` (the driver accepts both; the generated
+fragment uses `ovti,ov9282`, the chip's `drivers.linux.compatible`; the
 OV9281 shares chip ID `0x9281`); 2 lanes; link frequency `400000000` Hz
 only; three modes, **1280x720** (default), **1280x800** (full array) and
 **640x400** (2x2 binned), each as `Y10_1X10` or `Y8_1X8`. The v6.6 driver
 only writes the gated MIPI clock (`0x4800 = 0x20`) when the endpoint has
 `clock-noncontinuous`; the bench-proven 0016/0017 run used the gated clock,
 so the fragment sets it on `cam0_sensor_out`. It also requests
-`avdd`/`dovdd`/`dvdd` supplies; none is described (J5 3V3 is always on), so
-three "using dummy regulator" lines in `dmesg` are expected.
+`avdd`/`dovdd`/`dvdd` supplies; the fragment binds all three to the
+always-on 3.3 V `cam0_supply` regulator.
 Streaming needs kernel patch
 `0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch` (applied
 unconditionally by `linux-renesas_%.bbappend`): without it the RZ/G2L CSI-2

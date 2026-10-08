@@ -3,8 +3,10 @@
  * e1m-v2m101-x-evk plus an opt-in CAM0 camera path (#1149, #2612, #2633).  Built
  * only when ALP_CAMERA_CAM0 = "<module_id>" is set; the bbappend stages the
  * generated fragment e1m-x-evk-cam0-<module_id>.dtsi (scripts/gen_camera_dt.py)
- * under the module-neutral name e1m-x-evk-cam0-sensor.dtsi.  OV9281 path: bench-proven on E1M-V2M103 +
- * X-EVK (2026-10-02).  Every other module: BENCH-UNVERIFIED.
+ * under the module-neutral name e1m-x-evk-cam0-sensor.dtsi.  Bench status on
+ * E1M-V2M103 + X-EVK: IMX296LQ (generated fragment) bench-proven 2026-10-08;
+ * hand-written OV9281 DT bench-proven 2026-10-02, generated OV9281 fragment
+ * pending re-bench; everything else BENCH-UNVERIFIED.
  */
 #include "e1m-v2m101-x-evk.dts"
 #include "e1m-x-evk-cam0-sensor.dtsi"

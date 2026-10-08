@@ -13,6 +13,8 @@
  * Link frequency, lanes, supplies and clock follow the sony,imx335 driver
  * facts in metadata/chips/imx335.yaml (drivers.linux).
  *
+ * BENCH-UNVERIFIED: this fragment has not been booted with this module.
+ *
  * GD32 bridge lines (line number = index in &gd32_gpio gpio-line-names):
  * XEVK_PIN_CAM0_MUX_SEL = E1M IO16 = GD32 PC0, bridge line 7
  *
