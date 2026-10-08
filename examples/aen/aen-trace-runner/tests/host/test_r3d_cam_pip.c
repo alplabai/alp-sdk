@@ -171,6 +171,22 @@ int main(void)
 		assert(tr_cam_pip_map_kp(&k, 90, &px, &py) && px == 160 && py == TR_VID_H - 1);
 		k = (tr_kp_t){ 639, 399, 255 };
 		assert(tr_cam_pip_map_kp(&k, 0, &px, &py) && px == 679 && py == 519);
+		/* Landscape (rotation 0), the arm controls' layout: 640x400 (16:10) at
+		 * native 1:1 -- never stretched -- centred in the 720x640 video area
+		 * with 40-px side margins and 120-row letterbox bands, and every
+		 * keypoint lands on the image pixel it names. */
+		_Static_assert(TR_CAM_UP_W(0) == 640 && TR_CAM_UP_H(0) == 400,
+		               "landscape is the raw frame");
+		_Static_assert(TR_VID_W >= TR_CAM_UP_W(0) && TR_VID_H >= TR_CAM_UP_H(0),
+		               "the landscape image fits the video area");
+		k = (tr_kp_t){ 0, 0, 255 };
+		assert(tr_cam_pip_map_kp(&k, 0, &px, &py) && px == 40 && py == 120);
+		k = (tr_kp_t){ 320, 200, 255 };
+		assert(tr_cam_pip_map_kp(&k, 0, &px, &py) && px == TR_VID_W / 2 && py == TR_VID_H / 2);
+		k = (tr_kp_t){ 640, 10, 255 };
+		assert(!tr_cam_pip_map_kp(&k, 0, &px, &py));
+		k = (tr_kp_t){ 10, 400, 255 };
+		assert(!tr_cam_pip_map_kp(&k, 0, &px, &py)); /* 400 is a PORTRAIT-only row */
 		/* outside the upright frame (the letterbox padding) or unsure: not drawn */
 		px = py = -7;
 		k       = (tr_kp_t){ -1, 10, 255 };

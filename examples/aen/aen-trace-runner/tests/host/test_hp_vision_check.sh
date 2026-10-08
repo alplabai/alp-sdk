@@ -68,7 +68,9 @@ DTS
 mk_build() { # dir board_line extra_i2c_status(okay|disabled) uart5_status lpgpio_status counter(yes|) omitted_status_bad_addr multilabel_bad_addr
 	mkdir -p "$1/zephyr"
 	# ROT (env): the TR_CAM_ROTATE cache value, 90 when unset; ROT= writes it empty.
-	printf '%s\nTR_CAM_ROTATE:STRING=%s\nTR_CAM_MIRROR:BOOL=ON\n' "$2" "${ROT-90}" > "$1/CMakeCache.txt"
+	# MIR (env): the TR_CAM_MIRROR cache value, ON when unset; MIR= leaves the entry out.
+	printf '%s\nTR_CAM_ROTATE:STRING=%s\n' "$2" "${ROT-90}" > "$1/CMakeCache.txt"
+	[ -z "${MIR-ON}" ] || printf 'TR_CAM_MIRROR:BOOL=%s\n' "${MIR-ON}" >> "$1/CMakeCache.txt"
 	head -c 4096 /dev/zero > "$1/zephyr/zephyr.bin"
 	: > "$1/zephyr/zephyr.elf"
 	if [ "${6:-}" = yes ]; then
@@ -115,6 +117,13 @@ mk_build "$t/he" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
 ROT=180 mk_build "$t/bad-rot180" 'BOARD:STRING=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp' disabled disabled disabled
 ROT= mk_build "$t/bad-rot-empty" 'BOARD:STRING=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp' disabled disabled disabled
 ROT=270 mk_build "$t/rot270" 'BOARD:STRING=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp' disabled disabled disabled
+# The EVK-03 release: the camera upright, landscape.
+ROT=0 mk_build "$t/rot0" 'BOARD:STRING=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp' disabled disabled disabled
+# HE builds (the 4th argument): the camera must be the one the HP image uses.
+ROT=0 mk_build "$t/he-rot0" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
+ROT=270 mk_build "$t/he-rot270" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
+MIR=OFF mk_build "$t/he-mir-off" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
+MIR= mk_build "$t/he-no-mir" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
 
 # A model file of exactly the right size, and a wrong-size one.
 head -c 2429520 /dev/zero > "$t/model.bin"
@@ -142,6 +151,23 @@ expect 0 "a CRLF (Windows-built) HP build dir" "$t/good-crlf" "$t/model.bin" "$t
 expect 1 "TR_CAM_ROTATE=180" "$t/bad-rot180" "$t/model.bin" "$t/nm"
 expect 1 "TR_CAM_ROTATE empty (the header default at build time)" "$t/bad-rot-empty" "$t/model.bin" "$t/nm"
 expect 0 "TR_CAM_ROTATE=270" "$t/rot270" "$t/model.bin" "$t/nm"
+expect 0 "TR_CAM_ROTATE=0 (landscape, the EVK-03 release)" "$t/rot0" "$t/model.bin" "$t/nm"
+expect_he() { # want(0|1) why hp_build he_build
+	local want=$1 why=$2 out rc
+	out=$(hp_vision_check "$3" "$t/model.bin" "$t/nm" "$4" 2>&1)
+	rc=$?
+	if { [ "$want" = 0 ] && [ $rc -ne 0 ]; } || { [ "$want" = 1 ] && { [ $rc -eq 0 ] || ! grep -q REFUSED <<<"$out"; }; }; then
+		echo "FAIL hp_vision_check (HE given): $why (rc=$rc): $out"
+		fail=1
+	fi
+}
+expect_he 0 "HE and HP both 90, mirror ON" "$t/good" "$t/he"
+expect_he 0 "HE and HP both landscape (0)" "$t/rot0" "$t/he-rot0"
+expect_he 0 "HE 270 with HP 90: both portrait, the HE only needs the shape" "$t/good" "$t/he-rot270"
+expect_he 1 "HE portrait with HP landscape" "$t/rot0" "$t/he"
+expect_he 1 "HE landscape with HP portrait" "$t/good" "$t/he-rot0"
+expect_he 1 "HE mirror OFF with HP mirror ON (the arms would swap)" "$t/good" "$t/he-mir-off"
+expect_he 1 "an HE build with no TR_CAM_MIRROR entry (from before the arm controls)" "$t/good" "$t/he-no-mir"
 # The values it packages are printed.
 if ! hp_vision_check "$t/good" "$t/model.bin" "$t/nm" 2>&1 | grep -q 'TR_CAM_ROTATE=90 TR_CAM_MIRROR=ON'; then
 	echo "FAIL hp_vision_check: does not print TR_CAM_ROTATE=90 TR_CAM_MIRROR=ON"

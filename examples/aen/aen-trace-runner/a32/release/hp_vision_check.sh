@@ -3,6 +3,8 @@
 # tests/host/test_hp_vision_check.sh). hp_vision_check HP_BUILD_DIR
 # MODEL_FILE NM: 0 when the hp_vision image + Vela'd model may be packaged as
 # HP_APP + the MRAM model blob, else prints a loud refusal and returns 1.
+# An optional 4th argument, the HE build dir, adds the check that the HE was
+# built for the same camera as this HP image (see the end of the camera block).
 #
 # Same shape as snd_hp_check.sh (the OTHER thing that can occupy HP_APP) --
 # deliberately not merged with it: sound and vision are different silicon
@@ -20,7 +22,7 @@ hp_vision_refuse() {
 }
 
 hp_vision_check() {
-	local hd=$1 model=$2 nm=$3
+	local hd=$1 model=$2 nm=$3 he=${4:-}
 	if [ ! -f "$hd/CMakeCache.txt" ]; then
 		hp_vision_refuse "$hd is not a Zephyr build dir (no CMakeCache.txt)"
 		return 1
@@ -41,10 +43,36 @@ hp_vision_check() {
 	case "$rot" in
 	0 | 90 | 270) ;;
 	*)
-		hp_vision_refuse "TR_CAM_ROTATE='$rot' in $hd/CMakeCache.txt -- must be set explicitly to 0, 90 or 270 (90: the 2026W36-0009 bench mount, see FLASH-RECIPE.md)"
+		hp_vision_refuse "TR_CAM_ROTATE='$rot' in $hd/CMakeCache.txt -- must be set explicitly to 0, 90 or 270 (0: the EVK-03 landscape release, 90: the 2026W36-0009 sideways mount, see FLASH-RECIPE.md)"
 		return 1
 		;;
 	esac
+	# The HE reads the same camera two ways the HP cannot tell it: the upright
+	# frame's shape (0 = landscape, else portrait) and whether the view is
+	# mirrored, which decides which arm on the screen is the player's LEFT
+	# (src/vision/pose.c). A pair that disagrees steers the wrong way round or
+	# misreads every keypoint, with nothing on the console to say so: refuse.
+	if [ -n "$he" ]; then
+		local hrot hmir
+		hrot=$(sed -n 's/^TR_CAM_ROTATE:[A-Z]*=//p' "$he/CMakeCache.txt" 2>/dev/null | tr -d '\r')
+		hmir=$(sed -n 's/^TR_CAM_MIRROR:[A-Z]*=//p' "$he/CMakeCache.txt" 2>/dev/null | tr -d '\r')
+		echo "build-release: HE camera: TR_CAM_ROTATE=${hrot:-<unset>} TR_CAM_MIRROR=${hmir:-<unset>}" >&2
+		if [ -z "$hmir" ]; then
+			hp_vision_refuse "$he/CMakeCache.txt has no TR_CAM_MIRROR -- an HE build from before the arm controls; rebuild it with -DTR_CAM_MIRROR=${mir:-ON} to match the HP"
+			return 1
+		fi
+		if [ "${hmir^^}" != "${mir^^}" ]; then
+			hp_vision_refuse "HE TR_CAM_MIRROR=$hmir but HP TR_CAM_MIRROR=${mir:-<unset>} -- the two builds must agree (the arm controls read which arm is the player's left from it)"
+			return 1
+		fi
+		local hland=0 rland=0
+		[ "${hrot:-90}" = 0 ] && hland=1
+		[ "$rot" = 0 ] && rland=1
+		if [ "$hland" != "$rland" ]; then
+			hp_vision_refuse "HE TR_CAM_ROTATE='${hrot:-<unset>}' but HP TR_CAM_ROTATE=$rot -- landscape (0) and portrait (90/270) frames differ in size, set it identically on both"
+			return 1
+		fi
+	fi
 	if [ ! -f "$hd/zephyr/zephyr.bin" ] || [ "$(stat -c %s "$hd/zephyr/zephyr.bin")" -gt 262144 ]; then
 		hp_vision_refuse "$hd/zephyr/zephyr.bin is missing or > 256 KiB HP ITCM"
 		return 1

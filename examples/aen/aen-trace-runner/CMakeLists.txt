@@ -109,6 +109,7 @@ target_sources(app PRIVATE
 	src/game/step.c
 	src/platform/imu.c
 	src/platform/rail5v_power.c
+	src/vision/arms.c
 	src/vision/pose.c
 	src/vision/track.c
 )
@@ -124,6 +125,17 @@ if(TR_INPUT_NPU)
 			message(FATAL_ERROR "TR_CAM_ROTATE must be 0, 90 or 270, got '${TR_CAM_ROTATE}'")
 		endif()
 		target_compile_definitions(app PRIVATE TR_CAM_ROTATE=${TR_CAM_ROTATE})
+	endif()
+	# Whether the HP mirrors the upright view like a selfie (cam_rot.h
+	# TR_CAM_MIRROR; the HP's own option of the same name). The arm controls
+	# need it: with the mirror the arm on the screen's left is the player's
+	# LEFT arm, without it their RIGHT (src/vision/pose.c). Set it exactly as
+	# the HP build -- build-release.sh refuses a pair that disagrees.
+	option(TR_CAM_MIRROR "The HP mirrors the upright camera view like a selfie (match the hp_vision build)" ON)
+	if(TR_CAM_MIRROR)
+		target_compile_definitions(app PRIVATE TR_CAM_MIRROR=1)
+	else()
+		target_compile_definitions(app PRIVATE TR_CAM_MIRROR=0)
 	endif()
 else()
 	target_sources(app PRIVATE src/platform/camera.c src/vision/detect.c)

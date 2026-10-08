@@ -1,13 +1,20 @@
-/* src/vision/cam_rot.h -- the OV9281's mounting rotation (maintainer ruling,
- * "Half / half" layout): the sensor is mounted on its side, still streams
- * 640x400 GREY8, and everything downstream of the capture works on the
- * UPRIGHT image -- 400x640 portrait when rotated.
+/* src/vision/cam_rot.h -- the OV9281's mounting rotation. The sensor always
+ * streams 640x400 GREY8, and everything downstream of the capture works on
+ * the UPRIGHT image: 640x400 landscape when the camera sits upright, 400x640
+ * portrait when it is mounted on its side and the software turns it.
  *
  * TR_CAM_ROTATE: the degrees the SOFTWARE turns the raw sensor image
- * CLOCKWISE (as it would be displayed, unrotated) to make it upright -- 90,
- * 270, or 0 (no rotation: the old landscape path, kept for comparison).
+ * CLOCKWISE (as it would be displayed, unrotated) to make it upright -- 0,
+ * 90 or 270. All three are first-class:
+ *   0       the camera is mounted upright (the E1M-EVK's RPi CSI connector,
+ *           EVK-03): 640x400 LANDSCAPE, 16:10, shown at native 1:1 and
+ *           letterboxed in the portrait game's camera half. This is the
+ *           release for the arm-raise controls: arms reach sideways, and the
+ *           wider field of view keeps both in frame;
+ *   90, 270 the camera is mounted on its side (other rigs): 400x640 portrait.
+ * Whichever it is, set it the same on the HE and the HP build.
  *
- * Default 90, BENCH-VERIFIED (2026W36-0009, 2026-09-25): with the camera body
+ * Default 90 (the first reference rig), BENCH-VERIFIED (2026W36-0009, 2026-09-25): with the camera body
  * turned 90 deg clockwise as seen from its LENS side, 270 showed the player
  * upside down and 90 upright -- the maintainer confirmed it by eye. So a
  * standing player's head lands at the LEFT edge of the raw frame (the
@@ -66,10 +73,12 @@ static inline void tr_cam_rot_src(int rot, int src_w, int src_h, int ux, int uy,
 	}
 }
 
-/* TR_CAM_MIRROR (default 1, hp_vision's CMake option): the upright view is
- * mirrored left/right like a selfie -- the player raises their right hand,
- * the figure's hand on the RIGHT of the screen goes up; they step to their
- * own left, the figure moves screen-left. The SENSOR does it (one register
+/* TR_CAM_MIRROR (default 1, a CMake option of both the hp_vision and the HE
+ * image, which must agree): the upright view is mirrored left/right like a
+ * selfie -- the player raises their right arm, the figure's arm on the RIGHT
+ * of the screen goes up. The arm controls depend on it: with the mirror the
+ * arm on the screen's left is the player's LEFT arm, without it their RIGHT
+ * (src/vision/pose.c). The SENSOR does it (one register
  * bit, free), so the NPU input, the keypoints and the A32 video all see the
  * same mirrored raw frame and stay consistent with no pixel-path change.
  *

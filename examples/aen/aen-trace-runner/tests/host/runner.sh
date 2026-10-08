@@ -12,12 +12,12 @@ CHECKS="-DTR_RASTER_CHECKS"
 for t in tests/host/test_*.c; do
 	out="$RUN_TMP/tr-$(basename "$t" .c)"
 	extra_cflags=""
-	# test_track_cam_orientation.c needs TR_CAM_MIRROR_X/TR_CAM_FLIP_Y compiled
-	# in as 1 (track.h #ifndef-guards both) to exercise the `1` state of the
-	# camera-orientation constants against the real track.c -- see that file's
-	# header comment (whole-branch fix round B, B2).
+	# test_track_cam_orientation.c needs TR_CAM_FLIP_Y compiled in as 1
+	# (track.h #ifndef-guards it) to exercise the `1` state of the
+	# camera-orientation constant against the real track.c / pose.c -- see
+	# that file's header comment.
 	if [ "$(basename "$t")" = "test_track_cam_orientation.c" ]; then
-		extra_cflags="-DTR_CAM_MIRROR_X=1 -DTR_CAM_FLIP_Y=1"
+		extra_cflags="-DTR_CAM_FLIP_Y=1"
 	fi
 	# test_tilt_takeover.c re-runs test_tilt.c with the bench/dev takeover
 	# compiled in (tilt.h's TR_TILT_TAKEOVER, default OFF).
@@ -40,7 +40,20 @@ for t in tests/host/test_*.c; do
 	fi
 	if "$out"; then echo "PASS: $t"; else echo "FAIL: $t"; rc=1; fi
 done
-# The 30 Hz panel build (P11a, -DTR_PANEL_HZ=30): the frame-counted game
+# The arm controls with the sensor NOT mirrored (cam_rot.h TR_CAM_MIRROR=0: a
+# camera that sees the player face to face): the same physical player's LEFT
+# arm must still be the left lane, at every rotation (the default build above
+# is the release's selfie mirror).
+for t in test_arms test_cam_mirror; do
+	out="$RUN_TMP/tr-$t-nomirror"
+	if cc -std=c11 -Wall -Wextra -Werror -ffp-contract=off -g -DTR_CAM_MIRROR=0 -o "$out" "tests/host/$t.c" \
+		$(ls src/game/*.c src/vision/*.c src/ipc/*.c 2>/dev/null | grep -v main.c) -lm && "$out" >/dev/null; then
+		echo "PASS: tests/host/$t.c -DTR_CAM_MIRROR=0"
+	else
+		echo "FAIL: tests/host/$t.c -DTR_CAM_MIRROR=0"; rc=1
+	fi
+done
+# The 30 Hz panel build (P11a,-DTR_PANEL_HZ=30): the frame-counted game
 # logic re-run with its constants scaled -- test_panel_hz.c checks the real
 # times, the others that the logic holds at the 30 Hz counts.
 for t in test_panel_hz test_step test_pace test_tilt test_tilt_takeover test_attract test_mbox test_hud test_score test_react \
@@ -187,7 +200,7 @@ else
 fi
 
 if [ -n "$M55_GCC" ]; then
-	for f in $R3D_SRC $AUDIO_SRC src/game/sfx.c src/vision/movenet.c src/vision/pose.c \
+	for f in $R3D_SRC $AUDIO_SRC src/game/sfx.c src/vision/movenet.c src/vision/pose.c src/vision/arms.c \
 		src/vision/camera_ae.c src/vision/kp_smooth.c src/ipc/tr_pslot.c src/ipc/tr_cam_view.c; do
 		if "$M55_GCC" $WARN -mcpu=cortex-m55 -mthumb -mfloat-abi=hard -c -o /dev/null "$f"; then
 			echo "PASS (M55 compile): $f"

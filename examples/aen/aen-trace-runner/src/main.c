@@ -132,11 +132,10 @@ static void pslot_barrier(void)
 static tr_pslot_t g_pslot_last;
 
 /* No local camera object on this core to ask (platform/camera.h is not
- * linked into a TR_INPUT_NPU build) -- track.c's calibration and lane-band
- * geometry still need the frame's dimensions: the HP's fixed OV9281 mode
- * turned UPRIGHT (src/vision/cam_rot.h -- 400x640 with the sensor on its
- * side), the frame the pose keypoints come in, so lanes (torso x) and
- * jump/duck (head/shoulder y) read upright coordinates. Kept as same-named
+ * linked into a TR_INPUT_NPU build) -- track.c's duck (and its TR_CAM_FLIP_Y
+ * mirror) still needs the frame's height: the HP's fixed OV9281 mode turned
+ * UPRIGHT (src/vision/cam_rot.h -- 400x640 with the sensor on its side,
+ * 640x400 when it is not), the frame the pose keypoints come in. Kept as same-named
  * functions rather than replacing every call site below, so the
  * mode-selection/calibration code reads identically on both paths. */
 static inline int16_t tr_camera_width(void)
@@ -843,7 +842,7 @@ int main(void)
 		 * "STEP INTO VIEW", the tracker calibrating on them) -- never on a
 		 * box seen at boot (silicon, 4612458: an empty room's flicker
 		 * calibrated the old title screen and started a phantom run). */
-		tr_track_init(&track, tr_camera_width(), tr_camera_height());
+		tr_track_init(&track, tr_camera_height());
 		tr_attract_enter(&attract);
 		printk("step into view...\n");
 	}
@@ -876,7 +875,7 @@ int main(void)
 			in          = tr_track_update(&track, b);
 			player_lost = tr_track_player_lost(&track);
 			if (attract.active && g_present) {
-				tr_track_calibrate(&track, b, tr_camera_width()); /* the join lobby: on them */
+				tr_track_calibrate(&track, b); /* the join lobby: on them */
 			}
 		} else {
 			int16_t tx, ty;
@@ -891,7 +890,7 @@ int main(void)
 				 * ends the lobby at once, a walk-away opens it (P16). */
 				run_start(&g);
 				tr_zone_reset(&g_zone);
-				tr_ctl_reset(&ctl, track_ptr, g.lane);
+				tr_ctl_reset(&ctl, track_ptr);
 				ui_reset();
 				held = tr_intent_none(); /* nothing from before the takeover / walk-away */
 			}
@@ -911,14 +910,14 @@ int main(void)
 			 * the sole authority on the tracker and the run this tick, so
 			 * routing through both would double up its leaving-attract
 			 * resync with tr_ctl_step()'s own leaving-pause one. */
-			if (tr_attract_step(&attract, &track, g_present, g.lane) == TR_ATTRACT_LEFT) {
+			if (tr_attract_step(&attract, &track, g_present) == TR_ATTRACT_LEFT) {
 				/* A real player just took the idle board back over --
 				 * abandon whatever the synthetic run was doing and start
 				 * fresh for them, exactly like any other run-reset (see
 				 * mode.h's tr_ctl_reset() doc). */
 				run_start(&g);
 				tr_zone_reset(&g_zone);
-				tr_ctl_reset(&ctl, track_ptr, g.lane);
+				tr_ctl_reset(&ctl, track_ptr);
 				ui_reset();
 				was_paused = false;
 				run_step   = false; /* this tick is spent on the transition, not a step */
@@ -931,15 +930,15 @@ int main(void)
 				run_step = true;
 			}
 		} else {
-			run_step = tr_ctl_step(&ctl, track_ptr, player_lost, g.lane);
+			run_step = tr_ctl_step(&ctl, track_ptr, player_lost);
 			if (mode == TR_MODE_VISION &&
-			    tr_attract_step(&attract, &track, g_present, g.lane) == TR_ATTRACT_ENTERED) {
+			    tr_attract_step(&attract, &track, g_present) == TR_ATTRACT_ENTERED) {
 				/* Nobody for TR_ATTRACT_ENTER_TICKS: the run ENDS here --
 				 * attract plays demo runs, never the walked-off player's
 				 * (the best still counts). */
 				tr_score_run_end(&g_score, true);
 				run_start(&g);
-				tr_ctl_reset(&ctl, track_ptr, g.lane);
+				tr_ctl_reset(&ctl, track_ptr);
 				ui_reset();
 				run_step = false;
 				held     = tr_intent_none();
@@ -1118,7 +1117,7 @@ int main(void)
 					(void)tr_attract_run_over(&attract, g_present);
 				}
 			}
-			tr_ctl_reset(&ctl, track_ptr, g.lane); /* run-reset resync: see mode.h */
+			tr_ctl_reset(&ctl, track_ptr); /* run-reset resync: see mode.h */
 			ui_reset();
 			was_paused = false;
 			held       = tr_intent_none(); /* nothing carried into the next run */

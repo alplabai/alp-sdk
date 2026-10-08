@@ -21,3 +21,8 @@ tests:
     extra_args:
       - "TR_CAM_ROTATE=90"
       - "TR_CAM_MIRROR=ON"
+  # The EVK bench release: the camera upright, landscape (../README.md "Controls").
+  alp_sdk.examples.aen.trace_runner.hp_vision_landscape:
+    extra_args:
+      - "TR_CAM_ROTATE=0"
+      - "TR_CAM_MIRROR=ON"

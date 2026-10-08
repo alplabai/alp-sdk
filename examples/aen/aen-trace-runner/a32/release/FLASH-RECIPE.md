@@ -64,16 +64,24 @@ Confirm against a fresh read-back before trusting these against live hardware --
 round 13's own image was flash-ready by every local gate and still froze the
 camera on first silicon boot.
 
-**Camera orientation (npu-body review round): `TR_CAM_ROTATE` now defaults to `90`
-(`src/vision/cam_rot.h`), the bench-verified 2026W36-0009 mount -- `270` showed the player upside
-down, the maintainer confirmed `90` by eye. Build the HP image with it spelled out anyway:
-`-DTR_CAM_ROTATE=90 -DTR_CAM_MIRROR=ON`. `build-release.sh` (`hp_vision_check.sh`) prints
-`TR_CAM_ROTATE=... TR_CAM_MIRROR=...` from the HP build's `CMakeCache.txt` and REFUSES any
-rotation but `0`/`90`/`270` -- including an EMPTY one, which only means "cam_rot.h's default
-when it was built" (`270` before this round). An HP build dir from before the option existed
-(e.g. `/tmp/tr-hp-vision-build10`, no `TR_CAM_ROTATE` entry at all) is refused for the same
-reason: rebuild it. Check the printed line before flashing: `TR_CAM_ROTATE=90
-TR_CAM_MIRROR=ON` for 2026W36-0009.**
+**Camera orientation: the EVK-03 bench release is LANDSCAPE, `-DTR_CAM_ROTATE=0 -DTR_CAM_MIRROR=ON`
+on BOTH the HE and the HP build.** The arm-raise controls (README "Controls") want the wider field
+of view -- arms reach sideways -- so the OV9281 on the E1M-EVK's RPi CSI connector is mounted
+upright and shown as a 640x400 picture, letterboxed in the portrait game's camera half (the lamps
+above it, the "CAMERA / NPU Hz" label below). Mirror ON makes the player see a mirror image of
+themselves, which is also what tells the HE which arm is their left (`src/vision/pose.c`). A rig
+with the camera mounted on its SIDE uses `90` (the 2026W36-0009 mount; `270` showed the player upside
+down, the maintainer confirmed `90` by eye -- `src/vision/cam_rot.h` defaults to it) with
+`-DTR_CAM_MIRROR=ON`. Spell the rotation out in every build: `build-release.sh`
+(`hp_vision_check.sh`) prints `TR_CAM_ROTATE=... TR_CAM_MIRROR=...` for the HP build and for the HE
+from their `CMakeCache.txt`, REFUSES any HP rotation but `0`/`90`/`270` -- including an EMPTY one,
+which only means "cam_rot.h's default when it was built" -- and REFUSES an HE/HP pair that disagrees
+on `TR_CAM_MIRROR` or on whether the rotation is `0` (landscape and portrait frames differ in size;
+an HE built before `TR_CAM_MIRROR` existed has no entry and is refused too: rebuild it). An HP build
+dir from before the option existed (e.g. `/tmp/tr-hp-vision-build10`, no `TR_CAM_ROTATE` entry at
+all) is refused for the same reason: rebuild it. Check the printed lines before flashing:
+`TR_CAM_ROTATE=0 TR_CAM_MIRROR=ON` (HP and HE) for EVK-03, `TR_CAM_ROTATE=90 TR_CAM_MIRROR=ON` for
+2026W36-0009.
 
 ## This release reflashes the HE, the HP, the A32 app and the ATOC together
 
@@ -203,7 +211,7 @@ ONLY rollback basis.
 **The first flash uses the FROZEN, already-reviewed artifacts below -- do not rebuild into, modify
 or delete them** (but see "Camera orientation" above: `hp_vision_check.sh` now refuses an HP build
 without an explicit `TR_CAM_ROTATE`, so a pre-rotation HP dir like `build10` needs replacing by a
-build with `-DTR_CAM_ROTATE=90 -DTR_CAM_MIRROR=ON`):
+build with `-DTR_CAM_ROTATE=0 -DTR_CAM_MIRROR=ON` (EVK-03; `90` for a camera on its side)):
 
 ```sh
 TR_HP_VISION_BUILD=/tmp/tr-hp-vision-build10

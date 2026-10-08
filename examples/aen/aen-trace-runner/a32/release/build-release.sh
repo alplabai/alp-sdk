@@ -106,7 +106,7 @@ if [ "${TR_HP_VISION:-OFF}" = ON ]; then
 	source "$here/hp_vision_check.sh"
 	hv=$(realpath -m "${TR_HP_VISION_BUILD:-/nonexistent-TR_HP_VISION_BUILD-unset}")
 	hv_model=$(realpath -m "${TR_HP_VISION_MODEL:-/nonexistent-TR_HP_VISION_MODEL-unset}")
-	hp_vision_check "$hv" "$hv_model" "$NM" || exit 3
+	hp_vision_check "$hv" "$hv_model" "$NM" "$hed" || exit 3
 elif [ -n "${TR_HP_VISION:-}" ] && [ "$TR_HP_VISION" != OFF ]; then
 	die "TR_HP_VISION must be ON or OFF, got '$TR_HP_VISION'"
 fi
