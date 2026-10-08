@@ -188,6 +188,14 @@ DTS_OVERLAY_ARTEFACT = "alp.overlay"
 #: Filename of the rendered full `-D` listing config artefact.
 CMAKE_ARGS_ARTEFACT = "cmake-args.txt"
 
+#: Filename of the rendered build-identifier header config artefact
+#: (`--emit hw-info-h --core <id>`). Same name `<alp/hw_info.h>` documents.
+HW_INFO_ARTEFACT = "alp_hw_info_build.h"
+
+#: Filename of the rendered west manifest fragment config artefact
+#: (`--emit west-libraries --core <id>`).
+WEST_LIBS_ARTEFACT = "alp-west-libs.yml"
+
 
 class DtsOverlayUnavailable(OrchestratorError):
     """The board has nothing to render a DTS overlay from: no header under
@@ -297,6 +305,81 @@ def _slice_cmake_args_artefact(
     if slice_.os not in _DTS_OVERLAY_OS:
         return None
     return (CMAKE_ARGS_ARTEFACT, _slice_cmake_args(project, slice_))
+
+
+def _slice_hw_info_h(project: BoardProject, slice_: Slice) -> str:
+    """The slice's build-identifier header -- exactly what
+    `alp_project.py --emit hw-info-h --core <id>` prints.
+
+    `ALP_HW_BUILD_CORES` / `HAS_<id>` range over EVERY core of the project
+    (`v2_cores`), and `ALP_HW_BUILD_OS` / `PRIMARY_CORE` track the slice
+    (`v2_selected_core`). Single source for the standalone emit and the
+    build plan's `alp_hw_info_build.h` config artefact.
+    """
+    import sys as _sys
+    _scripts = Path(__file__).resolve().parent.parent
+    if str(_scripts) not in _sys.path:
+        _sys.path.insert(0, str(_scripts))
+    from alp_project_emit.hw_info import _emit_hw_info_h  # type: ignore
+
+    return _emit_hw_info_h(
+        _v1_shaped_project(project), project.som_preset,
+        project.board_preset,
+        v2_cores={cid: s.os for cid, s in project.cores.items()},
+        v2_selected_core=slice_.core_id,
+    )
+
+
+def _slice_west_libraries(project: BoardProject, slice_: Slice) -> str:
+    """The slice's west manifest fragment -- exactly what
+    `alp_project.py --emit west-libraries --core <id>` prints.
+
+    Single source for that standalone emit and the build plan's
+    `alp-west-libs.yml` config artefact.
+    """
+    import sys as _sys
+    _scripts = Path(__file__).resolve().parent.parent
+    if str(_scripts) not in _sys.path:
+        _sys.path.insert(0, str(_scripts))
+    from alp_project_emit.west_libs import _emit_west_libraries  # type: ignore
+
+    return _emit_west_libraries(
+        _v1_shaped_project(project), project.som_preset,
+        project.board_preset,
+        v2_libraries=sorted(set(slice_.libraries)),
+        v2_project_libraries=sorted(project.libraries),
+        metadata_root=project.effective_metadata_root(),
+    )
+
+
+def _slice_hw_info_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's rendered `alp_hw_info_build.h`, or
+    None for an os that has none (see `_DTS_OVERLAY_OS`).
+
+    A REFERENCE artefact (ADR-0026 §D), like `cmake-args.txt`: no build
+    command, CMake file or Kconfig in this SDK reads it. The firmware's
+    own `ALP_HW_BUILD_*` values still come from the build, not this file.
+    """
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    return (HW_INFO_ARTEFACT, _slice_hw_info_h(project, slice_))
+
+
+def _slice_west_libs_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's rendered west fragment, or None
+    for an os that has none. Emitted even when the slice selects no
+    libraries: the emitter renders a well-formed empty allowlist, and
+    byte-identity with `--emit west-libraries --core` is the contract.
+    Reference only, like `cmake-args.txt`."""
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    return (WEST_LIBS_ARTEFACT, _slice_west_libraries(project, slice_))
 
 
 def _shared_artefacts(
@@ -743,8 +826,9 @@ def emit_build_plan(
                 "contents": contents,
             })
         # Additive rendered-text artefacts (ADR-0026 §D, tan-cli#1216): the
-        # DTS overlay and the full `-D` listing, byte-identical to the
-        # standalone `--emit dts-overlay --core` / `--emit cmake-args`
+        # DTS overlay, the full `-D` listing, the build-identifier header and
+        # the west fragment, byte-identical to the standalone
+        # `--emit dts-overlay|cmake-args|hw-info-h|west-libraries --core`
         # renders. Always AFTER the slice's primary config artefact, so a
         # consumer that reads `configArtefacts[0]` is unaffected.
         extras: list[Optional[tuple[str, str]]] = []
@@ -766,6 +850,8 @@ def emit_build_plan(
                                 f"artefact -- {exc}"),
                 })
             extras.append(_slice_cmake_args_artefact(project, slice_))
+            extras.append(_slice_hw_info_artefact(project, slice_))
+            extras.append(_slice_west_libs_artefact(project, slice_))
         for extra in extras:
             if extra is not None:
                 config_artefacts.append({

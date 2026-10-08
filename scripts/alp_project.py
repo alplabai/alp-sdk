@@ -292,7 +292,9 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             _slice_alp_conf,
             _slice_cmake_args,
             _slice_dts_overlay,
+            _slice_hw_info_h,
             _slice_local_conf,
+            _slice_west_libraries,
             _v1_shaped_project,
             load_board_yaml,
         )
@@ -404,19 +406,26 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
         # hw-info-h is a project-level emit even under v2 -- consumers
         # `#include` it from any slice.  --core picks which slice's OS
         # lands in ALP_HW_BUILD_OS; absent --core, primary-core rules apply.
+        if args.core is not None:
+            # Single source shared with the build plan's
+            # `alp_hw_info_build.h` configArtefact (ADR-0026 §D).
+            out = _slice_hw_info_h(project, project.cores[args.core])
+            return _write_or_print(out, args.output)
         v2_cores = {cid: s.os for cid, s in project.cores.items()}
         out = _emit_hw_info_h(
             project_v1_shaped, project.som_preset,
             project.board_preset,
             v2_cores=v2_cores,
-            v2_selected_core=args.core,
+            v2_selected_core=None,
         )
         return _write_or_print(out, args.output)
 
     if args.emit == "west-libraries":
         if args.core is not None:
-            slice_ = project.cores[args.core]
-            v2_libraries = sorted(set(slice_.libraries))
+            # Single source shared with the build plan's
+            # `alp-west-libs.yml` configArtefact (ADR-0026 §D).
+            out = _slice_west_libraries(project, project.cores[args.core])
+            return _write_or_print(out, args.output)
         else:
             union_l: set[str] = set()
             for slice_ in project.cores.values():

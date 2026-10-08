@@ -1,0 +1,5 @@
+### Added — build-plan-v1 slices carry the rendered `alp_hw_info_build.h` and `alp-west-libs.yml` (tan-cli#1216, #2777)
+
+A zephyr or baremetal slice's `configArtefacts` gains, after `cmake-args.txt`, `alp_hw_info_build.h`, byte-identical to `alp_project.py --emit hw-info-h --core <id>` (`_slice_hw_info_h`), and `alp-west-libs.yml`, byte-identical to `--emit west-libraries --core <id>` (`_slice_west_libraries`); the standalone emits and the plan call the same helpers. Order is `alp.overlay`, `cmake-args.txt`, `alp_hw_info_build.h`, `alp-west-libs.yml`. Additive under `schemaVersion` 1, no bump. A slice with no libraries still carries a well-formed empty `alp-west-libs.yml`. Both are reference files: nothing in the CMake or Zephyr build reads them.
+
+The seam-1 comparator (`tests/parity/seam1_field_diff.py`) allows exactly that ordered tail (without `alp.overlay` on a no-header board) and nothing else, and the emit snapshots are regenerated, so `parity-seam1` stays green. Per ADR-0026 §D.

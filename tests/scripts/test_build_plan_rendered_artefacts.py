@@ -27,6 +27,8 @@ from alp_orchestrate import emit_build_plan, load_board_yaml  # noqa: E402
 MODES = {
     "dts-overlay": ("alp.overlay", ("zephyr", "baremetal")),
     "cmake-args": ("cmake-args.txt", ("zephyr", "baremetal")),
+    "hw-info-h": ("alp_hw_info_build.h", ("zephyr", "baremetal")),
+    "west-libraries": ("alp-west-libs.yml", ("zephyr", "baremetal")),
 }
 
 BOARDS = [
@@ -131,3 +133,17 @@ def test_any_other_overlay_failure_still_fails_the_plan(monkeypatch):
     monkeypatch.setattr(bp, "project_m33_overlay", broken)
     with pytest.raises(OrchestratorError, match="M33 ownership defect"):
         _plan(REPO / "examples/multicore/rpmsg-aen/board.yaml")
+
+
+# --- artefact order (alp-sdk #2777) ------------------------------------------
+
+
+def test_rendered_artefacts_follow_the_primary_in_fixed_order() -> None:
+    """The seam-1 comparator allows exactly this ordered tail."""
+    tail = ["alp.overlay", "cmake-args.txt", "alp_hw_info_build.h", "alp-west-libs.yml"]
+    for board in BOARDS:
+        for sl in _plan(REPO / board)["slices"]:
+            if sl["backend"] not in ("zephyr", "baremetal"):
+                continue
+            names = [a["path"].rsplit("/", 1)[-1] for a in sl["configArtefacts"]]
+            assert names[-4:] == tail, (board, sl["coreId"], names)

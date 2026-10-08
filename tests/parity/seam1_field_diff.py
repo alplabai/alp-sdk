@@ -401,11 +401,14 @@ def normalize_plan(plan: dict) -> dict:
 
 
 #: Basename sequences a slice's ``configArtefacts`` may GAIN, after the oracle's
-#: own entries (alp-sdk #2771). Exact and ordered.
+#: own entries (alp-sdk #2771, #2777). Exact and ordered: the full tail is
+#: ``alp.overlay, cmake-args.txt, alp_hw_info_build.h, alp-west-libs.yml``; a
+#: board with no header under include/alp/boards/ drops ``alp.overlay``. The
+#: other three are emitted unconditionally for a zephyr/baremetal slice (an
+#: empty library set still renders a well-formed ``alp-west-libs.yml``).
 _RENDERED_TAILS = (
-    ("alp.overlay", "cmake-args.txt"),
-    ("cmake-args.txt",),
-    ("alp.overlay",),
+    ("alp.overlay", "cmake-args.txt", "alp_hw_info_build.h", "alp-west-libs.yml"),
+    ("cmake-args.txt", "alp_hw_info_build.h", "alp-west-libs.yml"),
 )
 
 #: Synthetic path suffix `_walk_diff` yields for an allowed rendered tail.
