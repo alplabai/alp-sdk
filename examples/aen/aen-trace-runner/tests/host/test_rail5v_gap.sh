@@ -22,7 +22,7 @@ xfer=$(grep -n 'config_check()\|reg_read16(\|config_write()' <<<"$body" | head -
 { [ -n "$lease" ] && [ -n "$xfer" ] && [ "$lease" -lt "$xfer" ]; } || FAILS "the lease check (line ${lease:-none}) must precede the first bus transfer (line ${xfer:-none})"
 
 # 2. every return after the period gate leaves a gap (or follows a pushed sample)
-after=$(awk '/g_next_ms = now/{p=1;next} p{print}' <<<"$body")
+after=$(awk '/g_next_ms = tr_pwr_next_deadline/{p=1;next} p{print}' <<<"$body")
 prev=""
 n=0
 while IFS= read -r line; do
@@ -38,6 +38,12 @@ done <<<"$after"
 # 3. never blocks
 grep -qE 'k_sleep|k_msleep|k_usleep|k_busy_wait|K_FOREVER|k_sem_take|k_mutex_lock' <<<"$body" &&
 	FAILS "tr_rail5v_poll must not block"
+
+# 3b. the period is kept as a deadline from the last deadline (a true 10 Hz), not from the call
+tr -d ' 	
+' <<<"$body" | grep -q 'g_next_ms=tr_pwr_next_deadline(g_next_ms,now,RAIL5V_PERIOD_MS)' || FAILS "the poll deadline must advance from the previous deadline"
+tr -d ' 	
+' <<<"$body" | grep -q 'g_next_ms=now+RAIL5V_PERIOD_MS' && FAILS "the frame-quantising now + period deadline is back"
 
 # 4. the sample goes into the graph raw
 tr -d ' 	
