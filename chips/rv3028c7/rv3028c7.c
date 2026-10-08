@@ -732,13 +732,12 @@ static alp_status_t rv3028_update_reg(rv3028c7_t *ctx, uint8_t reg, uint8_t clea
  * through rv3028_status_clear() below, so the strategy is this one
  * switch.
  *
- *   1 (current) Constant mask: write 0 to the flags being cleared and 1
- *     to every other latchable flag.  Correct only if writing 1 over a
- *     0 flag leaves it 0 (and a 1 over a 1 leaves it 1).  The manual
- *     (p.22) only says a flag "is retained until a 0 is written", so
- *     this is ASSUMED, not bench-verified -- see the matching note on
- *     rv3028c7_wake_service() in the header.  It is the same
- *     convention the pre-existing rv3028c7_alarm_check_and_clear() and
+ *   1 (current, kept) Constant mask: write 0 to the flags being cleared and 1
+ *     to every other latchable flag.  Correct only if writing 1 to a
+ *     flag has no effect.  Bench-verified on E1M-AEN803 (2026-10-08)
+ *     for PORF/EVF/AF/TF/BSF/CLKF (manual p.22 only says a flag "is
+ *     retained until a 0 is written").  A flag latching between the
+ *     read and the write is not lost.  It is the same convention the pre-existing rv3028c7_alarm_check_and_clear() and
  *     rv3028_status_ack() already rely on.
  *   0 Read-back: re-read STATUS and write that value with the cleared
  *     flags zeroed (the mainline-Linux rtc-rv3028 pattern).  Safe if a

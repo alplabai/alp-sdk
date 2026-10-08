@@ -402,11 +402,13 @@ alp_status_t rv3028c7_alarm_clear(rv3028c7_t *ctx);
  * therefore preserved, and EEbusy (read-only) is never written.  No
  * handlers are invoked.
  *
- * @note The "writing 1 to a flag leaves it unchanged" behaviour this
- *       relies on is ASSUMED (the manual only states a flag is
- *       retained until 0 is written, p.22); it is not bench-verified.
- *       The strategy lives in one helper in rv3028c7.c
- *       (RV3028_STATUS_WRITE1_IGNORED).
+ * @note Writing 1 to a STATUS flag has no effect and only writing 0
+ *       clears it -- bench-verified on E1M-AEN803 (2026-10-08) for
+ *       PORF/EVF/AF/TF/BSF/CLKF; App Manual p.22 states only
+ *       "retained until a 0 is written".  The constant mask is kept
+ *       over a read-back write because a flag that latches between
+ *       the read and the write is not lost.  The strategy lives in one
+ *       helper in rv3028c7.c (RV3028_STATUS_WRITE1_IGNORED).
  *
  * @param ctx   Initialised driver context.
  * @param flags Output: OR of RV3028C7_WAKE_* for enabled, latched

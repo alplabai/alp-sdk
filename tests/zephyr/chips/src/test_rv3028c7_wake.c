@@ -323,7 +323,7 @@ ZTEST(alp_chips, test_rv3028c7_wake_service_reports_only_enabled_sources)
 }
 
 /* What would break if writing 1 to a STATUS flag SET it instead of being
- * ignored (the assumption behind the constant-mask acknowledge, see
+ * ignored (bench-verified NOT to happen on the part; the basis of the constant-mask acknowledge, see
  * RV3028_STATUS_WRITE1_IGNORED in rv3028c7.c): the mask's 1s would
  * latch every other flag.  This pins the failure mode so a bench result
  * of "write 1 sets" is visible here; if the helper is switched to the
