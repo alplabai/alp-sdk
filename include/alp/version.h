@@ -38,7 +38,7 @@ extern "C" {
  * docs/release-policy.md.  Rewritten by scripts/bump_version.py.
  */
 #define ALP_VERSION_MAJOR 0  /**< SDK major version (ABI-breaking changes). */
-#define ALP_VERSION_MINOR 16 /**< SDK minor version (additive ABI changes). */
+#define ALP_VERSION_MINOR 17 /**< SDK minor version (additive ABI changes). */
 #define ALP_VERSION_PATCH 0  /**< SDK patch version (fixes, no surface change). */
 
 /**
@@ -49,7 +49,7 @@ extern "C" {
  * `alp_version_string()` below, which returns it verbatim) that can tell an
  * rc build apart from the GA version it targets (#1902).
  */
-#define ALP_VERSION_STRING "0.16.0"
+#define ALP_VERSION_STRING "0.17.0-rc1"
 
 /**
  * @brief Encode a MAJOR.MINOR.PATCH triple into one comparable integer.

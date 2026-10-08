@@ -1,3 +1,0 @@
-### Fixed
-
-- V2N/V2M docs: reconciled `docs/build-yocto-v2n.md`, `docs/soms/v2n.md`, `docs/soms/v2n-m1.md`, `docs/gd32-bridge.md` and `docs/heterogeneous-builds.md` against facts established 2026-09-29 on E1M-V2M103 2026W38-0001 -- U-Boot prefers a present microSD rootfs regardless of the DSW1 boot-mode switch (DSW1 only selects the BL2/FIP source); the ACT88760 early-OTP `GD32_NRST` workaround (U-Boot patch 0011); the GD32 bridge's IRC8M clock-override requirement and the `gen_ota_metadata.py` 8 KiB padding covering `REC1`; the A55-side OpenAMP no-map reservation (#2374); the RV-3028 time-backup dependency on carrier pad `P10` and the NTP resync path; and the BRD_I2C addresses (`0x70`, `0x52`) held by kernel drivers, which need `i2c -f` from userspace (#2415).
