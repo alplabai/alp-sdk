@@ -72,6 +72,22 @@
 	status = "disabled";
 };
 
+/* The SoC power-control register blocks the SoM power layer (alp-sdk#2784) describes in
+ * ensemble_e8_peripherals.dtsi (VBAT 0x1A609000, ANA 0x1A60A000, STOP_MODE 0x1A60F000) are inert
+ * register windows with no driver, always on: this app never drives them, and an enabled one is
+ * a stray HP peripheral to hp_vision_check.sh (the HP owns only what it drives). */
+&vbat {
+	status = "disabled";
+};
+
+&ana {
+	status = "disabled";
+};
+
+&stop_mode {
+	status = "disabled";
+};
+
 /* fix round 12 (review + silicon finding): the base board file also turns
  * &uart5 (0x4901D000) and &lpgpio (0x42002000) "okay" unconditionally.
  * uart5 is the SAME UART the HE's own console and shell run on -- with it
