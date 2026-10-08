@@ -7,7 +7,7 @@
  * CLOCKWISE (as it would be displayed, unrotated) to make it upright -- 0,
  * 90 or 270. All three are first-class:
  *   0       the camera is mounted upright (the E1M-EVK's RPi CSI connector,
- *           EVK-03): 640x400 LANDSCAPE, 16:10, shown at native 1:1 and
+ *           E1M-EVK): 640x400 LANDSCAPE, 16:10, shown at native 1:1 and
  *           letterboxed in the portrait game's camera half. This is the
  *           release for the arm-raise controls: arms reach sideways, and the
  *           wider field of view keeps both in frame;

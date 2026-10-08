@@ -120,7 +120,7 @@ mk_build "$t/he" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
 ROT=180 mk_build "$t/bad-rot180" 'BOARD:STRING=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp' disabled disabled disabled
 ROT= mk_build "$t/bad-rot-empty" 'BOARD:STRING=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp' disabled disabled disabled
 ROT=270 mk_build "$t/rot270" 'BOARD:STRING=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp' disabled disabled disabled
-# The EVK-03 release: the camera upright, landscape.
+# The E1M-EVK release: the camera upright, landscape.
 ROT=0 mk_build "$t/rot0" 'BOARD:STRING=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp' disabled disabled disabled
 # HE builds (the 4th argument): the camera must be the one the HP image uses.
 ROT=0 mk_build "$t/he-rot0" 'BOARD:STRING=alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'
@@ -160,7 +160,7 @@ expect 0 "a CRLF (Windows-built) HP build dir" "$t/good-crlf" "$t/model.bin" "$t
 expect 1 "TR_CAM_ROTATE=180" "$t/bad-rot180" "$t/model.bin" "$t/nm"
 expect 1 "TR_CAM_ROTATE empty (the header default at build time)" "$t/bad-rot-empty" "$t/model.bin" "$t/nm"
 expect 0 "TR_CAM_ROTATE=270" "$t/rot270" "$t/model.bin" "$t/nm"
-expect 0 "TR_CAM_ROTATE=0 (landscape, the EVK-03 release)" "$t/rot0" "$t/model.bin" "$t/nm"
+expect 0 "TR_CAM_ROTATE=0 (landscape, the E1M-EVK release)" "$t/rot0" "$t/model.bin" "$t/nm"
 expect_he() { # want(0|1) why hp_build he_build
 	local want=$1 why=$2 out rc
 	out=$(hp_vision_check "$3" "$t/model.bin" "$t/nm" "$4" 2>&1)

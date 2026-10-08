@@ -143,7 +143,7 @@
 #define TR_MEM_A32_STACKS_SIZE 0x20000u
 /* Renderer core-1 gate word (renderer.c RENDER_GATE): the page above the stacks, outside .bss. */
 #define TR_MEM_A32_GATE 0x025E0000u
-/* TF-A RW, never mapped by the A32. Bench-verified on EVK-03 (2026W36-0002): 0x027DE000 is the
+/* TF-A RW, never mapped by the A32. Bench-verified on E1M-EVK (2026W36-0002): 0x027DE000 is the
  * lowest TF-A-owned address (bl32 map RAM ORIGIN 0x027de000, literal pool 027de000 027ed000;
  * 0x027C2000..0x027DDFFF untouched through boot + 90 s), so FB B may end exactly here. */
 #define TR_MEM_TFA_RW     0x027DE000u

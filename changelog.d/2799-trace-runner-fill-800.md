@@ -1,7 +1,7 @@
 ### Changed — the trace-runner fills the Riverdi natively at 800 wide, 3/5 game over 2/5 camera, with a power graph on the HUD
 
 Stage 0, the memory re-plan that makes room for it: a framebuffer slot is 800x1280x2 B = 2,048,000 B (`TR_FB_SLOT_SIZE`); FB B is
-derived as the last slot below TF-A RW, `0x025EA000` (bench-verified base `0x027DE000`); the display list and the bins move to
+derived as the last slot below TF-A RW, `0x025EA000` (TF-A RW starts at `0x027DE000`); the display list and the bins move to
 SRAM1 (`0x02424000`, `0x02460000`), the band buffers to `0x0229A000`, the stacks to `0x025C0000` and the gate word to
 `0x025E0000`. The HUD memory map and `TR_MEM_REGIONS` follow.
 

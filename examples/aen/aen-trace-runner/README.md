@@ -113,7 +113,7 @@ itself, and tilting the board (IMU) steers. The steps below build the full exhib
 
    `TR_CAM_ROTATE` is the camera's mounting rotation, clockwise, as seen on the panel: `0`, `90`
    or `270`. `0` is the camera mounted upright and shown LANDSCAPE: that is the E1M-EVK bench
-   release (EVK-03, the OV9281 on the RPi CSI connector), and what the arm controls want, since
+   release (E1M-EVK, the OV9281 on the RPi CSI connector), and what the arm controls want, since
    arms reach sideways. Only `0` is drawn on the panel (scaled up to fill the camera area); a camera
    the HP turns (`90` / `270`, a camera mounted on its side) still drives the game, but the video
    area says `ROT nn` instead of showing it sideways. `90` is the default and matches the first

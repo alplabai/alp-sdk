@@ -97,7 +97,7 @@ hp_vision_check() {
 	case "$rot" in
 	0 | 90 | 270) ;;
 	*)
-		hp_vision_refuse "TR_CAM_ROTATE='$rot' in $hd/CMakeCache.txt -- must be set explicitly to 0, 90 or 270 (0: the EVK-03 landscape release, 90: the 2026W36-0009 sideways mount, see FLASH-RECIPE.md)"
+		hp_vision_refuse "TR_CAM_ROTATE='$rot' in $hd/CMakeCache.txt -- must be set explicitly to 0, 90 or 270 (0: the E1M-EVK landscape release, 90: the 2026W36-0009 sideways mount, see FLASH-RECIPE.md)"
 		return 1
 		;;
 	esac

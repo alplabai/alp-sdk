@@ -64,7 +64,7 @@ Confirm against a fresh read-back before trusting these against live hardware --
 round 13's own image was flash-ready by every local gate and still froze the
 camera on first silicon boot.
 
-**Camera orientation: the EVK-03 bench release is LANDSCAPE, `-DTR_CAM_ROTATE=0 -DTR_CAM_MIRROR=ON`
+**Camera orientation: the E1M-EVK bench release is LANDSCAPE, `-DTR_CAM_ROTATE=0 -DTR_CAM_MIRROR=ON`
 on BOTH the HE and the HP build.** The arm-raise controls (README "Controls") want the wider field
 of view -- arms reach sideways -- so the OV9281 on the E1M-EVK's RPi CSI connector is mounted
 upright and shown as a 640x400 picture scaled up x1.28 to cover the camera area (the bottom 2/5 of
@@ -84,10 +84,10 @@ on `TR_CAM_MIRROR` or on whether the rotation is `0` (landscape and portrait fra
 an HE built before `TR_CAM_MIRROR` existed has no entry and is refused too: rebuild it). An HP build
 dir from before the option existed (e.g. `/tmp/tr-hp-vision-build10`, no `TR_CAM_ROTATE` entry at
 all) is refused for the same reason: rebuild it. Check the printed lines before flashing:
-`TR_CAM_ROTATE=0 TR_CAM_MIRROR=ON` (HP and HE) for EVK-03, `TR_CAM_ROTATE=90 TR_CAM_MIRROR=ON` for
+`TR_CAM_ROTATE=0 TR_CAM_MIRROR=ON` (HP and HE) for E1M-EVK, `TR_CAM_ROTATE=90 TR_CAM_MIRROR=ON` for
 2026W36-0009.
 
-**Bench acceptance: the arm lanes (do this before calling an EVK-03 release good).** With the game
+**Bench acceptance: the arm lanes (do this before calling an E1M-EVK release good).** With the game
 running and a player in front of the camera:
 
 1. Raise your physical LEFT arm. The figure's raised arm must appear on the screen's LEFT, and the
@@ -324,7 +324,7 @@ ONLY rollback basis.
 **The first flash uses the FROZEN, already-reviewed artifacts below -- do not rebuild into, modify
 or delete them** (but see "Camera orientation" above: `hp_vision_check.sh` now refuses an HP build
 without an explicit `TR_CAM_ROTATE`, so a pre-rotation HP dir like `build10` needs replacing by a
-build with `-DTR_CAM_ROTATE=0 -DTR_CAM_MIRROR=ON` (EVK-03; `90` for a camera on its side)):
+build with `-DTR_CAM_ROTATE=0 -DTR_CAM_MIRROR=ON` (E1M-EVK; `90` for a camera on its side)):
 
 ```sh
 TR_HP_VISION_BUILD=/tmp/tr-hp-vision-build10
