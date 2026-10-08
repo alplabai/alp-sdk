@@ -29,7 +29,7 @@ extern volatile int32_t tr_rail5v_avg_mw;
  * CONFIG register value read, [23:16] times it was found reverted and
  * rewritten since boot (saturating), [31] set once the open-time
  * write + readback verified TR_INA236_CONFIG (ina236_math.h). Healthy:
- * 0x80004927 (reserved bits 14:13 read 10b). */
+ * 0x8000485F (reserved bits 14:13 read 10b). */
 extern volatile uint32_t tr_rail5v_config_rb;
 
 /* The graph's samples (hud.h TR_PWR_N, oldest first, TR_PWR_GAP where none could be taken) into

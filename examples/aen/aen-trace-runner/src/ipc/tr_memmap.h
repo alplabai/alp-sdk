@@ -30,18 +30,15 @@
                                        * spare, ruled that way on real silicon (see TR_MEM_NPU_ARENA_SIZE)
                                        * after Vela's own 277.5 KiB figure proved short by 424 B once
                                        * TFLM's persistent allocations were counted too. */
-#define TR_MEM_NPU_ARENA_SIZE \
-	286720u /* 0x46000, 280 KiB. Vela's --optimise Size figure (277.5 KiB,
-                                       * 284,160 B) undercounted TFLM's own persistent allocations on
-                                       * top of it -- real silicon (HP ram console): "Failed to resize
-                                       * buffer. Requested: 284288, available 283864, missing: 424."
-                                       * (alp_inference_open ALP_ERR_IO). 286,720 B leaves ~2.4 KiB
-                                       * headroom over the 284,288 B TFLM actually asked for -- ponytail:
-                                       * untested against a second real allocation; if this ever fails
-                                       * again, the ram console's "missing: N" line names the exact B to
-                                       * add here. */
-#define TR_MEM_ARING      0x0237F000u /* P10 HE -> HP sound ring, layout in tr_aring.h */
-#define TR_MEM_ARING_SIZE 0x1C0u      /* == sizeof(tr_aring_t), asserted there */
+/* 0x46000, 280 KiB. Vela's --optimise Size figure (277.5 KiB, 284,160 B) undercounted TFLM's own
+ * persistent allocations on top of it -- real silicon (HP ram console): "Failed to resize buffer.
+ * Requested: 284288, available 283864, missing: 424." (alp_inference_open ALP_ERR_IO). 286,720 B
+ * leaves ~2.4 KiB headroom over the 284,288 B TFLM actually asked for -- ponytail: untested
+ * against a second real allocation; if this ever fails again, the ram console's "missing: N" line
+ * names the exact B to add here. */
+#define TR_MEM_NPU_ARENA_SIZE 286720u
+#define TR_MEM_ARING          0x0237F000u /* P10 HE -> HP sound ring, layout in tr_aring.h */
+#define TR_MEM_ARING_SIZE     0x1C0u      /* == sizeof(tr_aring_t), asserted there */
 #define TR_MEM_PSLOT \
 	0x0237F200u /* HP -> HE pose slot, layout + protocol in tr_pslot.h (design:
                                        * docs/superpowers/specs/2026-09-24-npu-body-control-design.md

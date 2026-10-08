@@ -73,7 +73,10 @@ along its bottom edge. Mirror ON makes the player see a mirror image of
 themselves, which is also what tells the HE which arm is their left (`src/vision/pose.c`). A rig
 with the camera mounted on its SIDE uses `90` (the 2026W36-0009 mount; `270` showed the player upside
 down, the maintainer confirmed `90` by eye -- `src/vision/cam_rot.h` defaults to it) with
-`-DTR_CAM_MIRROR=ON`. Spell the rotation out in every build: `build-release.sh`
+`-DTR_CAM_MIRROR=ON`. **Since Stage 1 the A32 renderer draws only rotation 0.** A rot-90 / 270 build
+(the side-mounted 2026W36-0009 rig) still plays -- the HP decodes and the game reads the pose -- but
+the video area shows `ROT 90` in its label instead of the camera picture, and draws no skeleton.
+Spell the rotation out in every build: `build-release.sh`
 (`hp_vision_check.sh`) prints `TR_CAM_ROTATE=... TR_CAM_MIRROR=...` for the HP build and for the HE
 from their `CMakeCache.txt`, REFUSES any HP rotation but `0`/`90`/`270` -- including an EMPTY one,
 which only means "cam_rot.h's default when it was built" -- and REFUSES an HE/HP pair that disagrees
@@ -104,18 +107,18 @@ running and a player in front of the camera:
 
 ## This release reflashes the HE, the HP, the A32 app and the ATOC together
 
-Compared with the previous release this one changes the HE image (mailbox version 3: the memory
-re-plan moved FB B to 0x025EA000 and the DL, bins, stacks and gate; frames carry a rotation since
-version 2), the HP vision image (it waits for the HE's I2C1 release before it touches
-the bus), `a32_app` (the stub and renderer, now speaking mailbox version 3) and therefore the
+Compared with the previous release this one changes the HE image (mailbox version 4: Stage 1's
+panel width `fw` in every frame, on top of version 3's memory re-plan, which moved FB B to
+0x025EA000 and the DL, bins, stacks and gate; frames carry a rotation since version 2), the HP vision image (it waits for the HE's I2C1 release before it touches
+the bus), `a32_app` (the stub and renderer, now speaking mailbox version 4) and therefore the
 ATOC that carries the HE. Flash all of them from ONE build. `bl32` and `movenet_model` are
 unchanged (the board already holds them; `flash-release.sh write` skips an identical sector).
 Do not mix images across releases:
 
 | Mixed set | What happens |
 |---|---|
-| new HE, old `a32_app` (stub v2) | the HE logs `stub speaks mailbox version 2, this HE 3 -- not driving it`; it never treats the stub as alive, so no frames are drawn |
-| old HE, new `a32_app` (stub v3, new renderer) | the old HE refuses the stub: its mailbox version (2) is not the stub's 3, so no frames are drawn; an HE that ignored the check would scan FB B at 0x02600000 while the renderer draws at 0x025EA000 |
+| new HE, old `a32_app` (stub v2 or v3) | the HE logs `stub speaks mailbox version 3, this HE 4 -- not driving it`; it never treats the stub as alive, so no frames are drawn (a Stage 0 renderer is v3: it cannot crop to `fw`, an 800-wide HE frame would be written 720 wide into a framebuffer scanned 800 wide) |
+| old HE (v2 or v3), new `a32_app` (stub v4, new renderer) | the old HE refuses the stub: its mailbox version is not the stub's 4, so no frames are drawn; an HE that ignored the check would scan FB B at 0x02600000 while the renderer draws at 0x025EA000, or never set `fw` (the renderer would fault: `renderer refused fw=0`) |
 | new HP, old HE | the HP waits for an I2C1 release that the old HE never publishes: `i2c-handover: waiting ...` on its console, no camera, no pose, the game runs on its fallback |
 | old HP, new HE | the old HP touches I2C1 at its boot without waiting; on the RVT121 that collides with the bridge configuration |
 | new ATOC, old `a32_app` (or the reverse) | the ATOC's HE and the MRAM renderer disagree on length and CRC: the stub refuses the LAUNCH (`BAD_CRC`) and the HE's watchdog relaunches the same bytes |
@@ -124,6 +127,11 @@ Do not mix images across releases:
 step reads the same set back. Build the whole release on ONE machine with ONE toolchain (see
 `README.md`): `build-release.sh` refuses an HE whose launch header came from a different
 `renderer.bin`.
+
+**The table below is PRE-STAGE-1 and historical** (mailbox version 2, 720 wide, `TR_CAM_ROTATE=90`):
+none of it matches a current release. A current release's image md5s are the ones its packaging run
+prints (`flowd/recipe.txt`, and the `images.md5` the release script writes next to it); compare
+those, never this table.
 
 Image md5s of the builds this recipe was last regenerated from (the exact images; the
 sector-merged blobs `flash-release.sh write` flashes are padded with the live read-back and have

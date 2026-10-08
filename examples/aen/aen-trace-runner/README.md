@@ -183,7 +183,7 @@ the game needs comes from that shield's devicetree through the SDK's display API
   buffer (`src/render/panel_rot.h`, the one definition of the mapping). The RVT121 is mounted on
   its side and declares 90. The picture is rendered natively 800 columns wide (`TR_R3D_W`), 768
   rows of game over 512 of camera, and the frame is written `fw` columns wide: the panel's width,
-  taken from its window (`tr_frame_in_t.fw`, mailbox version 3). The RVT121 shows all 800; the
+  taken from its window (`tr_frame_in_t.fw`, mailbox version 4). The RVT121 shows all 800; the
   RK055 (720) shows the centre 720, cropped, never scaled;
 - the backlight (`alp,display-backlight` in the shield: the RVT121's 30% PWM; the RK055's HX8394
   owns its own enable);

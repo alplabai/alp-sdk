@@ -2,8 +2,8 @@
 
 The picture is rendered 800 columns wide (`TR_R3D_W`, was 720) and written to the panel `fw` columns wide: the
 Riverdi RVT121 shows all 800 on its whole 1280x800 window (no bars), the RK055 its centre 720, cropped, never
-scaled. `fw` is a new `uint16_t` in the mailbox frame (`tr_frame_in_t`, offset 174, the old trailing pad; still
-mailbox version 3 and 176 B): the HE sets it from the CDC200 layer-1 size, and the renderer faults (pad3[7]
+scaled. `fw` is a new `uint16_t` in the mailbox frame (`tr_frame_in_t`, offset 174, the old trailing pad, 176 B; the
+mailbox version is 4 so a Stage 0 / 720-wide renderer and a Stage 1 HE can never pair silently): the HE sets it from the CDC200 layer-1 size, and the renderer faults (pad3[7]
 `0xAB1D0003 | fw/16 << 8`) on a frame whose `fw` is not a multiple of 16 in 16..800, so a Stage 0 HE (`fw` 0) and
 the new renderer cannot run together. The screen is split 3/5 game (`TR_VIEW_H` 768, 24 bands) and 2/5 camera (512
 rows, 16 bands) for every panel.
@@ -25,3 +25,7 @@ bands fullest-bin first, the video bands last (`render_claim_order()`); and the 
 copied onto the end of the first (`tr_dl_t` can read as two pieces, `tr_dl_tri()`), so setup and binning start
 sooner. Neither changes a pixel (the goldens are unchanged). The power poll keeps a true 10 Hz: its deadline advances
 a period from the last deadline instead of from the call, which the frame-rate quantised to 8.3 Hz.
+
+The camera's focal length follows the panel (`tr_scene_f_px(fw)`, at most `(fw / 2) / 0.74`): 540 at 800 as before, 486.5 on
+the RK055's 720 crop, where the taller viewport's larger focal length would have cut ~40 px off outer-lane obstacles.
+The A32 sprite score is drawn at the panel's left edge on the crop. A rot-90/270 camera is not drawn (`ROT nn`).

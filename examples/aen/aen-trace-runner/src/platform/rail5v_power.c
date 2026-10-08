@@ -66,10 +66,10 @@ volatile uint32_t tr_rail5v_config_rb;
  * phase fixed per boot. Not ADCRANGE (0 on every boot: a 4x error would be
  * 4x, not ~2.3x) and not CALIBRATION (never used); not the other I2C2
  * user either (the IMU is on this core, the Zephyr controller serialises
- * the transfers; the HP's i2c2 is disabled, fix round 6). Fix: AVG 128 --
- * each result the mean over 282 ms, i.e. over ~8 frames -- written and
- * read back at open, re-checked every poll. The graph (10 Hz) then moved it to
- * ~101 ms per result: AVG 128 of VBUSCT 204 us + VSHCT 588 us (ina236_math.h). */
+ * the transfers; the HP's i2c2 is disabled, fix round 6). Fix: AVG 128, written
+ * and read back at open, re-checked every poll -- first with 1.1 ms conversions
+ * (each result the mean over 282 ms, ~8 frames), now (the 10 Hz power graph) with
+ * VBUSCT 204 us + VSHCT 588 us: ~101 ms a result (ina236_math.h). */
 static uint16_t g_cfg_rb;
 static uint8_t  g_cfg_rewrites;
 static bool     g_cfg_verified;

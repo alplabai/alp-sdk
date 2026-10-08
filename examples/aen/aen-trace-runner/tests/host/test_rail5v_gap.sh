@@ -28,7 +28,7 @@ n=0
 while IFS= read -r line; do
 	if [[ $line =~ ^[[:space:]]*return\; ]]; then
 		n=$((n + 1))
-		[[ $prev == *"tr_pwr_ring_push(&g_ring, TR_PWR_GAP);"* || $prev == *"g_have_sample"* ]] ||
+		[[ $prev == *"tr_pwr_ring_push(&g_ring, TR_PWR_GAP);"* || $prev == *"g_have_sample    = true;"* ]] ||
 			FAILS "a return without a gap pushed before it: after '${prev}'"
 	fi
 	[ -n "${line//[[:space:]]/}" ] && prev=$line
@@ -47,6 +47,7 @@ tr -d '
 
 # 4. the sample goes into the graph raw
 tr -d ' 	
+
 ' <<<"$body" | grep -q 'tr_pwr_ring_push(&g_ring,sample_mw)' || FAILS "the raw sample must be pushed into the ring"
 
 if [ $fail -eq 0 ]; then echo "PASS: test_rail5v_gap.sh"; else exit 1; fi
