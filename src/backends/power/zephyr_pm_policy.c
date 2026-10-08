@@ -384,7 +384,8 @@ static void z_close(alp_power_backend_state_t *state)
 	state->be_data = NULL;
 }
 
-static const alp_power_ops_t _ops = {
+/* Not static: the Alif STOP backend (alif_se_power.c) forwards SLEEP / DEEP_SLEEP here. */
+const alp_power_ops_t alp_power_pm_policy_ops = {
 	.open                  = z_open,
 	.configure_wake_source = z_configure_wake_source,
 	.request_sleep         = z_request_sleep,
@@ -409,6 +410,6 @@ ALP_BACKEND_REGISTER(power,
                          .vendor      = "zephyr",
                          .base_caps   = 0u,
                          .priority    = 100,
-                         .ops         = &_ops,
+                         .ops         = &alp_power_pm_policy_ops,
                          .probe       = NULL,
                      });

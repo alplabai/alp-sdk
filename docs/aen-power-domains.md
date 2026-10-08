@@ -4,8 +4,8 @@ Before STOP / STANDBY the SDK can hold the on-module consumers that would
 otherwise burn power through the sleep, and put them back on the wake. This is
 the runtime behind `alp_power_domain_policy_set()`, `alp_power_domain_info()` and
 `alp_power_boot_wake_info()` in `<alp/power.h>` (issue #2784, unit U5). The STOP
-backend (U7) calls it; until then the pair is exercised in RUN mode by
-`examples/aen/aen-power-domains` and `tests/unit/power_som_domains`.
+backend ([below](#the-stop--standby-backend)) calls it; in RUN mode the pair is
+exercised by `examples/aen/aen-power-domains` and `tests/unit/power_som_domains`.
 
 ## Domains and default (AUTO) actions
 
@@ -68,5 +68,63 @@ carry answers `ALP_ERR_NOT_PRESENT_ON_THIS_SOC`.
 - RUN-mode cycles: the PHY's 50 MHz reference oscillator stops with the PHY, so
   `net_if_down()` the Ethernet interface before the cycle.
 
-The record is held behind a store abstraction backed by a `__noinit` RAM
-placeholder. It does not survive STOP; BKRAM placement is a U7 item.
+The record lives in the 4 KB Utility SRAM ("BKRAM", base `0x4902C000`), which is
+retained across STOP and reserved for the SDK: the E8 devicetree carries a `bkram`
+node with `zephyr,memory-region = "ALP_BKRAM"`, so the linker emits a NOLOAD section
+at that address that nothing zeroes at boot. Builds without that node (native_sim,
+E4/E6) keep it in a `__noinit` cell, which does not survive STOP. The base address
+comes from the Alif DFP `Backup_SRAM` memory entry (`start="0x4902C000"
+size="0x1000"`) of the E1C, E3, E5 and E7 SVDs; the E8 SVD omits its `<memory>`
+list, but its peripheral map leaves exactly that slot free and carries the block's
+`BKRAM_CKEN` / `BKRAM_RET_MASK` fields. It is bench-unverified on the E8 (the BKRAM
+pattern test in U8).
+
+## The STOP / STANDBY backend
+
+`src/backends/power/alif_se_power.c` implements `alp_power_request_sleep(STOP |
+STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803). It is registered for
+`alif:ensemble:e8` behind `CONFIG_ALP_SDK_POWER_ALIF_SE` (default **n**,
+experimental, **untested on silicon**). The M55-HE subsystem is powered off and the
+wake is a cold boot through the Secure Enclave, so the call does not return: read
+the cause with `alp_power_boot_wake_info()`. `SLEEP` / `DEEP_SLEEP` are forwarded to
+the pm_policy backend when it is built.
+
+**Wake sources** (only what is real is advertised):
+
+| Bit | Armed by | Notes |
+|---|---|---|
+| `ALP_POWER_WAKE_RTC` | on-module RV-3028, `INT` -> P15_0 -> `WE_LPGPIO0` | primary RTC (the internal LPRTC is not trusted: ER001 / ER002, LFRC-only boot). With `wake_after_ms == 0` the caller's own alarm / countdown must already be armed, or the request is `ALP_ERR_INVAL`. |
+| `ALP_POWER_WAKE_TIMER` | LPTIMER (`alp,power-wake-timer`, `WE_LPTIMER0`) for `wake_after_ms < 1000` | runs from the AON low-frequency clock: LFRC is ~4.5 % fast, so a short wake comes early by about that much. |
+| (timed wake >= 1 s) | RV-3028 countdown (`rv3028c7_timer_start`) | whole seconds, rounded up; reports `ALP_POWER_WAKE_RTC`. Needs the chip context bound (`alp_som_power_bind_rv3028`). |
+
+**The OFF profile is complete and explicit.** `se_service_set_run_cfg()` /
+`set_off_cfg()` are not side-effect-free (bench: a one-field read-modify-write
+dropped `memory_blocks` bit 20, cleared the retention LDO enables in
+`VBAT_ANA_REG1` and the CVM masks in `RET_CTRL`), so every `off_profile_t` member is
+assigned by name: `power_domains` (STOP: VBAT AON; STANDBY: SSE700 AON),
+`dcdc_mode` OFF, `aon_clk_src` (LFXO only when `ANA.MISC_CTRL.SEL_32K` and
+`XTAL32K_EN` already confirm it, else LFRC; with LFXO the 32 kHz crystal trim
+`XTAL32K_CAP_CONT` is set to its maximum, 63), `memory_blocks` (BKRAM = gen2 bit 21,
+plus the HE TCM banks the retention asks for), `vdd_ioflex_3V3` 1.8 V,
+`wakeup_events` and `ewic_cfg` from the gen2 masks in `alif_aipm_gen2.h`, and
+`vtor_address` / `vtor_address_ns` preserved from the live profile so the wake still
+goes through SES -> ATOC. After the SE call the profile is read back, the retention
+bits it needs in `RET_CTRL` / `VBAT_ANA_REG1` are re-asserted, and the request is
+abandoned if any of it did not stick.
+
+**Refusals**, all before any state is changed: `ALP_ERR_BUSY` when a debugger is
+attached (`DHCSR.C_DEBUGEN`; bench override
+`CONFIG_ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER`) or an armed source is already pending;
+`ALP_ERR_NOSUPPORT` with the D-cache on (the clean loop hangs on this silicon);
+`ALP_ERR_NOT_READY` when the core's low-power-state requests are not all OFF.
+
+**Wake decode.** The record in BKRAM carries what was armed; on the cold boot the
+LPTIMER status is read before its driver initialises, and the RV-3028 flags and
+calendar in the I2C restore pass. `slept_ms` is the RV-3028 calendar delta (1 s
+resolution).
+
+**Not verified on silicon:** that the SE accepts the profile, that the EWIC entry
+removes power (`RTSS_HE_CTRL.COLD_WAKEUP` is cleared and `WIC` set by
+read-modify-write), that BKRAM retains with bit 21, the HE TCM bank sizes and
+ITCM / DTCM split, STANDBY, and that the LPGPIO holds survive the SE's wake boot.
+`examples/aen/aen-power-stop` is the bench for the first three.

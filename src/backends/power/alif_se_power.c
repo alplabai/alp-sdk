@@ -1,0 +1,840 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright 2026 Alp Lab AB
+ *
+ * Alif Secure Enclave STOP / STANDBY power backend for the Ensemble E8 M55-HE
+ * (#2784, unit U7).  alp_power_request_sleep(STOP | STANDBY) on E1M-AEN801 /
+ * E1M-AEN803.
+ *
+ * STATUS: UNTESTED ON SILICON.  CONFIG_ALP_SDK_POWER_ALIF_SE is off by default.
+ * Every item marked [BENCH] below is a hypothesis the first bench run must settle.
+ *
+ * What a STOP is on this part
+ * ---------------------------
+ * The M55-HE subsystem is powered OFF.  The Secure Enclave (SE) owns the power
+ * tree: before the core sleeps, an OFF profile (off_profile_t) is handed to the SE
+ * over its mailbox, then the core enters the EWIC subsystem-off sleep.  When a
+ * wake event fires the SE powers the subsystem back up and boots it through the
+ * normal SES -> ATOC path -- a COLD BOOT, so alp_power_request_sleep() does not
+ * return.  The 4 KB Utility SRAM (BKRAM) is retained and carries the SDK's wake
+ * record (som_power_record.c); the wake decode below turns that record plus the
+ * wake hardware's latched status into alp_power_boot_wake_info().
+ *
+ * The OFF profile is built COMPLETELY and EXPLICITLY
+ * --------------------------------------------------
+ * se_service_set_run_cfg() / set_off_cfg() are not side-effect-free (bench,
+ * E1M-AEN803, 2026-10-08): a read-modify-write of one field dropped memory_blocks
+ * bit 20, cleared the VBAT retention-LDO enables in VBAT_ANA_REG1 and the CVM
+ * retention masks in RET_CTRL, and those persist across a SYSRESETREQ.  So this
+ * backend never read-modify-writes a profile.  build_off_profile() assigns each of
+ * the 14 off_profile_t members by name (a test pre-fills the struct with a poison
+ * pattern and proves none survives).  Only the three members the SE itself owns
+ * are taken from the live profile: dcdc_voltage (range-checked), vtor_address and
+ * vtor_address_ns (preserved so the wake still goes through the SES -> ATOC path).
+ * After the SE has written the profile the backend reads it back, re-asserts the
+ * retention LDO / RET_CTRL bits it needs and refuses to sleep if any of it did not
+ * stick.
+ *
+ * Wake sources (advertised only when real)
+ * ----------------------------------------
+ *   ALP_POWER_WAKE_RTC    the on-module RV-3028 on /INT -> P15_0 -> LPGPIO0
+ *                         (WE_LPGPIO0).  Primary RTC: ER001 / ER002 and the
+ *                         LFRC-only boot make the internal LPRTC unfit for timed
+ *                         wake.  A countdown is started through the chip driver
+ *                         (rv3028c7_timer_start); with wake_after_ms == 0 the
+ *                         caller's own alarm / countdown must already be armed.
+ *   ALP_POWER_WAKE_TIMER  the LPTIMER (the `alp,power-wake-timer` chosen node,
+ *                         WE_LPTIMER0) for wake_after_ms < 1000.  Its 32 kHz source
+ *                         is the AON low-frequency clock: LFRC runs ~4.5 % fast
+ *                         (34251.7 Hz measured vs the 32768 Hz the devicetree
+ *                         states), so a short wake comes early by about that much.
+ *                         wake_after_ms >= 1000 uses the RV-3028 countdown instead
+ *                         (whole seconds, rounded up; > 4095 s in whole minutes).
+ *   Nothing else is advertised.  GPIO, UART RX, comparator, brown-out and USB wake
+ *   are real hardware features of the part but are not wired by this backend.
+ *
+ * Refusals (nothing has been changed when they are returned)
+ * ----------------------------------------------------------
+ *   ALP_ERR_BUSY       a debugger is attached (DHCSR.C_DEBUGEN; bench override
+ *                      CONFIG_ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER), or an armed
+ *                      wake source is already pending (the sleep would end at once).
+ *   ALP_ERR_NOSUPPORT  the D-cache is enabled, or a wake bit / duration this
+ *                      backend cannot arm.
+ *   ALP_ERR_INVAL      bad mode, bad retention, a timed wake out of range, a
+ *                      policy that conflicts with an armed source.
+ *
+ * Sequence of a STOP / STANDBY request
+ * ------------------------------------
+ *   1 validate wake bits, retention, duration       (no side effect)
+ *   2 refuse: debugger, D-cache, LPSTATE, pending   (no side effect)
+ *   3 read the live OFF profile, build the new one  (no side effect)
+ *   4 quiesce the SoM power domains, write the BKRAM record
+ *   5 arm the wake sources (RV countdown / LPTIMER / INT pad)
+ *   6 se_service_set_off_cfg, read back, re-assert RET_CTRL / ANA_REG1, verify
+ *   7 EWIC entry; does not return on success
+ * A failure after 3 disarms the sources, restores the domains in reverse and
+ * returns the error.
+ */
+
+#include <errno.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+#include <zephyr/kernel.h>
+
+#include <alp/backend.h>
+#include <alp/chips/rv3028c7.h>
+#include <alp/peripheral.h>
+#include <alp/power.h>
+
+#if defined(CONFIG_ALP_SDK_POWER_ALIF_SE)
+
+/* hal_alif SE service client (Apache-2.0): off_profile_t / run_profile_t and the
+ * aiPM enums.  The memory-block and wake-event masks are NOT taken from its
+ * headers (gen1 layout, see alif_aipm_gen2.h); only power-domain masks, clock
+ * enums and the profile structs are. */
+#include <se_service.h>
+
+#include "alif_aipm_gen2.h"
+#include "alif_se_power_hw.h"
+#include "power_ops.h"
+#include "som_power.h"
+
+/* ---- Register facts (E8 SVD) ----------------------------------------------- */
+
+/* ANA.VBAT_ANA_REG1 fields (SVD VBAT_ANA_REG1 @ ANA + 0x38).  Checked against the
+ * SVD by tests/scripts/test_alif_se_power_svd.py. */
+#define ALP_ALIF_SE_SVD_ANA_REG1_RET_LDO_VBAT_EN_BIT    8u  /* LDO-0: Utility SRAM retention */
+#define ALP_ALIF_SE_SVD_ANA_REG1_RET_LDO_VDDMAIN_EN_BIT 10u /* LDO-2: SRAM0/1, SE SRAM, HE TCM */
+#define ALP_ALIF_SE_SVD_ANA_REG1_XTAL32K_EN_BIT         12u
+#define ALP_ALIF_SE_SVD_ANA_REG1_XTAL32K_CAP_CONT_LSB   19u
+#define ALP_ALIF_SE_SVD_ANA_REG1_XTAL32K_CAP_CONT_WIDTH 6u
+/* ANA.MISC_CTRL.SEL_32K: 0 = LFRC, 1 = LFXO. */
+#define ALP_ALIF_SE_SVD_ANA_MISC_SEL_32K_BIT 0u
+
+#define ANA_REG1_RET_LDO_VBAT_EN    (UINT32_C(1) << ALP_ALIF_SE_SVD_ANA_REG1_RET_LDO_VBAT_EN_BIT)
+#define ANA_REG1_RET_LDO_VDDMAIN_EN (UINT32_C(1) << ALP_ALIF_SE_SVD_ANA_REG1_RET_LDO_VDDMAIN_EN_BIT)
+#define ANA_REG1_XTAL32K_EN         (UINT32_C(1) << ALP_ALIF_SE_SVD_ANA_REG1_XTAL32K_EN_BIT)
+#define ANA_REG1_CAP_CONT_MASK \
+	(((UINT32_C(1) << ALP_ALIF_SE_SVD_ANA_REG1_XTAL32K_CAP_CONT_WIDTH) - 1u) \
+	 << ALP_ALIF_SE_SVD_ANA_REG1_XTAL32K_CAP_CONT_LSB)
+#define ANA_MISC_SEL_32K (UINT32_C(1) << ALP_ALIF_SE_SVD_ANA_MISC_SEL_32K_BIT)
+
+/* Y1 (ECS-.327-12.5, CL 12.5 pF) has no external load caps, so the SoC trim is its
+ * only load: code 63 (maximum) measured +61 ppm against the RV-3028, the SE's
+ * default code 8 measured +451 ppm (bench, E1M-AEN803, 2026-10-08). */
+#define XTAL32K_CAP_CONT_MAX 63u
+
+/* RET_CTRL masks this backend needs (SVD VBAT.RET_CTRL, via alif_aipm_gen2.h). */
+#define RET_CTRL_BKRAM  (UINT32_C(1) << ALP_AIPM_SVD_RET_CTRL_BKRAM_RET_MASK_BIT)
+#define RET_CTRL_HETCM1 (UINT32_C(1) << ALP_AIPM_SVD_RET_CTRL_HETCM_RET1_MASK_BIT)
+#define RET_CTRL_HETCM2 (UINT32_C(1) << ALP_AIPM_SVD_RET_CTRL_HETCM_RET2_MASK_BIT)
+
+/* ---- Constants -------------------------------------------------------------- */
+
+/* The LPTIMER carries wake_after_ms below this; at or above it the RV-3028 does. */
+#define ALIF_SE_LPTIMER_MAX_MS 1000u
+
+/* DC-DC window the SE accepts (alif_se_profile.c, docs/aen-se-services.md). */
+#define ALIF_SE_DCDC_MV_MIN 750u
+#define ALIF_SE_DCDC_MV_MAX 850u
+
+/* M55-HE TCM: ITCM 256 KiB + DTCM 256 KiB, two retention banks each.  [BENCH] The
+ * 128 KiB bank size and the SRAM4_x = ITCM / SRAM5_x = DTCM split are the
+ * unverified part of the gen2 header (alif_aipm_gen2.h); DTCM banks are claimed
+ * first because data is what an application keeps. */
+#define ALIF_SE_TCM_BANK_KB  128u
+#define ALIF_SE_TCM_BANKS    4u
+#define ALIF_SE_TCM_TOTAL_KB (ALIF_SE_TCM_BANK_KB * ALIF_SE_TCM_BANKS)
+
+static const uint32_t _tcm_bank_mask[ALIF_SE_TCM_BANKS] = {
+	ALP_AIPM_GEN2_SRAM5_1_MASK,
+	ALP_AIPM_GEN2_SRAM5_2_MASK,
+	ALP_AIPM_GEN2_SRAM4_1_MASK,
+	ALP_AIPM_GEN2_SRAM4_2_MASK,
+};
+
+/* ---- Small helpers ---------------------------------------------------------- */
+
+static alp_status_t se_rc_to_alp(int rc)
+{
+	switch (rc) {
+	case 0:
+		return ALP_OK;
+	case -EINVAL:
+		return ALP_ERR_INVAL;
+	case -EAGAIN:
+	case -EBUSY:
+		return ALP_ERR_NOT_READY;
+	default:
+		return ALP_ERR_IO;
+	}
+}
+
+static bool rtc_int_usable(void)
+{
+	return alif_se_hw_rtc_int_present();
+}
+
+/* The wake bits STOP / STANDBY can arm right now. */
+static uint32_t stop_wake_caps(void)
+{
+	uint32_t caps = 0u;
+
+	if (rtc_int_usable()) {
+		caps |= ALP_POWER_WAKE_RTC;
+	}
+	if (alif_se_hw_wake_timer_present() ||
+	    (rtc_int_usable() && alp_som_power_rtc_countdown_ready())) {
+		caps |= ALP_POWER_WAKE_TIMER;
+	}
+	return caps;
+}
+
+static bool is_deep_mode(alp_power_mode_t mode)
+{
+	return mode == ALP_POWER_MODE_STOP || mode == ALP_POWER_MODE_STANDBY;
+}
+
+/* ---- Retention -------------------------------------------------------------- */
+
+/* memory_blocks for @p r: the Utility SRAM (BKRAM, always, gen2 bit 21) plus the
+ * TCM banks the request needs, rounded UP to whole banks. */
+static uint32_t retained_blocks(const alp_power_retain_t *r)
+{
+	uint32_t blocks = ALP_AIPM_GEN2_BACKUP4K_MASK;
+	uint32_t banks  = 0u;
+
+	if (r->level == ALP_POWER_RETAIN_FULL) {
+		banks = ALIF_SE_TCM_BANKS;
+	} else if (r->level == ALP_POWER_RETAIN_TCM) {
+		banks = (r->retain_kb + ALIF_SE_TCM_BANK_KB - 1u) / ALIF_SE_TCM_BANK_KB;
+	}
+	for (uint32_t i = 0; i < banks && i < ALIF_SE_TCM_BANKS; ++i) {
+		blocks |= _tcm_bank_mask[i];
+	}
+	return blocks;
+}
+
+static bool retention_valid(const alp_power_retain_t *r, alp_status_t *why)
+{
+	switch (r->level) {
+	case ALP_POWER_RETAIN_NONE:
+	case ALP_POWER_RETAIN_UTILITY: /* equivalent to NONE: BKRAM is always kept */
+	case ALP_POWER_RETAIN_FULL:
+		return true;
+	case ALP_POWER_RETAIN_TCM:
+		if (r->retain_kb == 0u) {
+			*why = ALP_ERR_INVAL;
+			return false;
+		}
+		if (r->retain_kb > ALIF_SE_TCM_TOTAL_KB) {
+			*why = ALP_ERR_NOSUPPORT;
+			return false;
+		}
+		return true;
+	default:
+		*why = ALP_ERR_INVAL;
+		return false;
+	}
+}
+
+static bool tcm_requested(uint32_t memory_blocks)
+{
+	for (uint32_t i = 0; i < ALIF_SE_TCM_BANKS; ++i) {
+		if ((memory_blocks & _tcm_bank_mask[i]) != 0u) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/* ---- The sleep plan ---------------------------------------------------------- */
+
+typedef struct {
+	alp_power_mode_t mode;
+	uint32_t         wake;          /* ALP_POWER_WAKE_* the cycle arms */
+	uint32_t         hw;            /* ALP_SOM_ARM_* wake paths */
+	uint32_t         lptimer_ticks; /* LPTIMER_ARM: down-count */
+	uint32_t         rtc_seconds;   /* RTC_TIMER: requested countdown */
+	uint32_t         armed_ms;      /* nominal timed-wake length */
+	bool             lfxo;          /* AON clock source for the OFF profile */
+	uint32_t         memory_blocks;
+} sleep_plan_t;
+
+/* Decide what arms the wake, with no side effect.  Errors are final. */
+static alp_status_t
+plan_wake(const alp_power_backend_state_t *state, uint32_t wake_after_ms, sleep_plan_t *plan)
+{
+	const uint32_t bitmap = state->wake_bitmap;
+
+	if ((bitmap & ~stop_wake_caps()) != 0u) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	if (bitmap == 0u && wake_after_ms == 0u) {
+		return ALP_ERR_INVAL; /* nothing would ever wake the SoC */
+	}
+	if ((bitmap & ALP_POWER_WAKE_TIMER) != 0u && wake_after_ms == 0u) {
+		return ALP_ERR_INVAL; /* a timer wake with no length */
+	}
+
+	if (wake_after_ms != 0u) {
+		if (wake_after_ms < ALIF_SE_LPTIMER_MAX_MS) {
+			uint32_t hz = alif_se_hw_wake_timer_hz();
+
+			if (!alif_se_hw_wake_timer_present() || hz == 0u) {
+				return ALP_ERR_NOSUPPORT;
+			}
+			uint64_t ticks = ((uint64_t)wake_after_ms * hz) / 1000u;
+
+			plan->lptimer_ticks = (ticks == 0u) ? 1u : (uint32_t)ticks;
+			plan->hw |= ALP_SOM_ARM_LPTIMER;
+			plan->wake |= ALP_POWER_WAKE_TIMER;
+			plan->armed_ms = wake_after_ms;
+		} else {
+			if (!rtc_int_usable() || !alp_som_power_rtc_countdown_ready()) {
+				return ALP_ERR_NOSUPPORT;
+			}
+			uint32_t seconds = (wake_after_ms + 999u) / 1000u;
+
+			if (seconds > RV3028C7_TIMER_MAX_SECONDS) {
+				return ALP_ERR_INVAL;
+			}
+			plan->rtc_seconds = seconds;
+			plan->hw |= ALP_SOM_ARM_RTC_TIMER;
+			plan->wake |= ALP_POWER_WAKE_RTC;
+			plan->armed_ms = seconds * 1000u;
+		}
+	}
+
+	if ((bitmap & ALP_POWER_WAKE_RTC) != 0u) {
+		if ((plan->hw & ALP_SOM_ARM_RTC_TIMER) == 0u) {
+			/* The caller's own RV-3028 alarm / countdown: it must really be armed, or
+			 * the SoC sleeps with nothing to wake it. */
+			bool armed = false;
+
+			if (!rtc_int_usable() || alp_som_power_rtc_int_armed(&armed) != ALP_OK || !armed) {
+				return ALP_ERR_INVAL;
+			}
+			plan->hw |= ALP_SOM_ARM_RTC_INT;
+		}
+		plan->wake |= ALP_POWER_WAKE_RTC;
+	}
+
+	/* A policy that takes the RTC away conflicts with an RTC wake. */
+	if ((plan->wake & ALP_POWER_WAKE_RTC) != 0u &&
+	    alp_som_power_policy(ALP_POWER_DOMAIN_RTC) == ALP_POWER_DOMAIN_POLICY_RAIL_OFF) {
+		return ALP_ERR_INVAL;
+	}
+	return ALP_OK;
+}
+
+/* Every armed path must be idle before arming: a latched status would end the sleep
+ * at once, and clearing it here would swallow an event the application wants. */
+static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
+{
+	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
+		return ALP_ERR_BUSY;
+	}
+	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
+	    alif_se_hw_rtc_int_asserted() > 0) {
+		return ALP_ERR_BUSY;
+	}
+	return ALP_OK;
+}
+
+static alp_status_t refuse_if_unfit(void)
+{
+#ifndef CONFIG_ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER
+	if (alif_se_hw_debugger_attached()) {
+		return ALP_ERR_BUSY;
+	}
+#endif
+	if (alif_se_hw_dcache_active()) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	if (!alif_se_hw_lpstate_off()) {
+		return ALP_ERR_NOT_READY; /* a core power-state request keeps the subsystem up */
+	}
+	return ALP_OK;
+}
+
+/* ---- The OFF profile ---------------------------------------------------------- */
+
+/* off_profile_t must end at vtor_address_ns, or a member added by a hal_alif bump
+ * would go unassigned below. */
+_Static_assert(offsetof(off_profile_t, vtor_address_ns) + sizeof(uint32_t) == sizeof(off_profile_t),
+               "off_profile_t changed: assign the new member in build_off_profile()");
+
+/* LFXO is selected only when the live clock tree already runs on it (SEL_32K and
+ * XTAL32K_EN), i.e. when it is confirmed to oscillate; the SES boot leaves LFRC. */
+static bool lfxo_confirmed(void)
+{
+	return (alif_se_hw_reg_read(ALIF_SE_REG_ANA_MISC) & ANA_MISC_SEL_32K) != 0u &&
+	       (alif_se_hw_reg_read(ALIF_SE_REG_ANA_REG1) & ANA_REG1_XTAL32K_EN) != 0u;
+}
+
+static uint32_t wake_events_for(const sleep_plan_t *plan)
+{
+	uint32_t we = 0u;
+
+	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u) {
+		we |= ALP_AIPM_GEN2_WE_LPTIMER0; /* lptimer0 is the `alp,power-wake-timer` */
+	}
+	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
+		we |= ALP_AIPM_GEN2_WE_LPGPIO0; /* RV-3028 /INT = P15_0 = LPGPIO bit 0 */
+	}
+	return we;
+}
+
+static uint32_t ewic_for(const sleep_plan_t *plan)
+{
+	uint32_t ewic = 0u;
+
+	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u) {
+		ewic |= ALP_AIPM_GEN2_EWIC_VBAT_TIMER;
+	}
+	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
+		ewic |= ALP_AIPM_GEN2_EWIC_VBAT_GPIO;
+	}
+	return ewic;
+}
+
+/**
+ * Build the complete OFF profile for @p plan.  Every member of @p out is assigned
+ * here by name; @p out is not read first.  @p live is the SE's current OFF profile,
+ * consulted for exactly three things: dcdc_voltage (range-checked, not trusted),
+ * vtor_address and vtor_address_ns (preserved, so the wake still goes through the
+ * SES -> ATOC path).
+ */
+static alp_status_t
+build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_plan_t *plan)
+{
+	if (live->dcdc_voltage < ALIF_SE_DCDC_MV_MIN || live->dcdc_voltage > ALIF_SE_DCDC_MV_MAX) {
+		return ALP_ERR_IO; /* a garbled read, not a profile to carry over */
+	}
+
+	const bool stop = (plan->mode == ALP_POWER_MODE_STOP);
+
+	/* STOP keeps only the VBAT always-on domain powered; STANDBY keeps the SE's own
+	 * always-on domain as well (the vendor OFF_STATE_STOP / OFF_STATE_STANDBY
+	 * profiles, sdk-alif subsys/bluetooth/common/power_mgr.c).  [BENCH] */
+	out->power_domains = stop ? PD_VBAT_AON_MASK : PD_SSE700_AON_MASK;
+	out->dcdc_voltage  = live->dcdc_voltage;
+	out->dcdc_mode     = DCDC_MODE_OFF;
+	out->aon_clk_src   = plan->lfxo ? CLK_SRC_LFXO : CLK_SRC_LFRC;
+	out->stby_clk_src  = CLK_SRC_HFRC;
+	out->stby_clk_freq = stop ? SCALED_FREQ_RC_STDBY_0_075_MHZ : SCALED_FREQ_RC_STDBY_76_8_MHZ;
+	out->memory_blocks = plan->memory_blocks;
+	/* The cold-boot RUN profile carries no IP clock gating and no PHY power gating
+	 * (E1M-AEN803, 2026-10-08); nothing here changes that. */
+	out->ip_clock_gating = 0u;
+	out->phy_pwr_gating  = 0u;
+	out->vdd_ioflex_3V3  = IOFLEX_LEVEL_1V8; /* this SoM's I/O flex rail is 1.8 V */
+	out->wakeup_events   = wake_events_for(plan);
+	out->ewic_cfg        = ewic_for(plan);
+	out->vtor_address    = live->vtor_address;
+	out->vtor_address_ns = live->vtor_address_ns;
+	return ALP_OK;
+}
+
+/* Fields this backend owns must read back as written.  The SE can drop bits
+ * silently (it refused to restore memory_blocks bit 20 on the bench). */
+static bool off_profile_stuck(const off_profile_t *want, const off_profile_t *got)
+{
+	return got->power_domains == want->power_domains && got->dcdc_mode == want->dcdc_mode &&
+	       got->aon_clk_src == want->aon_clk_src && got->memory_blocks == want->memory_blocks &&
+	       got->wakeup_events == want->wakeup_events && got->ewic_cfg == want->ewic_cfg &&
+	       got->vtor_address == want->vtor_address && got->vtor_address_ns == want->vtor_address_ns;
+}
+
+/* After the SE call: re-assert what its write cleared and check it took.  Only bits
+ * this cycle needs are OR-ed in; nothing is cleared. */
+static alp_status_t reassert_retention(const sleep_plan_t *plan)
+{
+	uint32_t ret_need = RET_CTRL_BKRAM;
+	uint32_t ana_need = ANA_REG1_RET_LDO_VBAT_EN;
+
+	if (tcm_requested(plan->memory_blocks)) {
+		ret_need |= RET_CTRL_HETCM1 | RET_CTRL_HETCM2;
+		ana_need |= ANA_REG1_RET_LDO_VDDMAIN_EN;
+	}
+	if (plan->lfxo) {
+		ana_need |= ANA_REG1_XTAL32K_EN;
+	}
+
+	uint32_t ret = alif_se_hw_reg_read(ALIF_SE_REG_RET_CTRL);
+
+	if ((ret & ret_need) != ret_need) {
+		alif_se_hw_reg_write(ALIF_SE_REG_RET_CTRL, ret | ret_need);
+	}
+
+	uint32_t ana  = alif_se_hw_reg_read(ALIF_SE_REG_ANA_REG1);
+	uint32_t want = ana | ana_need;
+
+	if (plan->lfxo) {
+		want = (want & ~ANA_REG1_CAP_CONT_MASK) |
+		       (XTAL32K_CAP_CONT_MAX << ALP_ALIF_SE_SVD_ANA_REG1_XTAL32K_CAP_CONT_LSB);
+	}
+	if (want != ana) {
+		alif_se_hw_reg_write(ALIF_SE_REG_ANA_REG1, want);
+	}
+
+	if ((alif_se_hw_reg_read(ALIF_SE_REG_RET_CTRL) & ret_need) != ret_need ||
+	    (alif_se_hw_reg_read(ALIF_SE_REG_ANA_REG1) & want) != want ||
+	    (plan->lfxo &&
+	     (alif_se_hw_reg_read(ALIF_SE_REG_ANA_REG1) & ANA_REG1_CAP_CONT_MASK) !=
+	         (XTAL32K_CAP_CONT_MAX << ALP_ALIF_SE_SVD_ANA_REG1_XTAL32K_CAP_CONT_LSB))) {
+		return ALP_ERR_IO; /* retention not guaranteed: do not sleep */
+	}
+	return ALP_OK;
+}
+
+/* ---- Arming ------------------------------------------------------------------- */
+
+typedef struct {
+	bool lptimer;
+	bool rtc_timer;
+	bool int_pad;
+} armed_t;
+
+static void disarm(const armed_t *a)
+{
+	if (a->int_pad) {
+		alif_se_hw_rtc_int_disarm();
+	}
+	if (a->rtc_timer) {
+		(void)alp_som_power_rtc_countdown_cancel();
+	}
+	if (a->lptimer) {
+		alif_se_hw_wake_timer_disarm();
+	}
+}
+
+static alp_status_t arm(const sleep_plan_t *plan, armed_t *a)
+{
+	alp_status_t s;
+
+	*a = (armed_t){ 0 };
+	if ((plan->hw & ALP_SOM_ARM_RTC_TIMER) != 0u) {
+		uint32_t actual = 0u;
+
+		s = alp_som_power_rtc_countdown_start(plan->rtc_seconds, &actual);
+		if (s != ALP_OK) {
+			return s;
+		}
+		a->rtc_timer = true;
+	}
+	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u) {
+		s = alif_se_hw_wake_timer_arm(plan->lptimer_ticks);
+		if (s != ALP_OK) {
+			return s; /* the caller unwinds what is recorded in @p a */
+		}
+		a->lptimer = true;
+	}
+	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
+		s = alif_se_hw_rtc_int_arm();
+		if (s != ALP_OK) {
+			return s; /* the caller unwinds what is recorded in @p a */
+		}
+		a->int_pad = true;
+	}
+	return ALP_OK;
+}
+
+/* ---- The cycle record --------------------------------------------------------- */
+
+/* Quiesce writes the record only when it quiesced something; the wake decode needs
+ * one every cycle, so complete (or create) it here. */
+static void save_cycle_record(const sleep_plan_t *plan)
+{
+	alp_som_pd_record_t rec = { 0 };
+	uint32_t            now = 0u;
+
+	(void)alp_som_pd_store_load(&rec);
+	rec.mode        = (uint32_t)plan->mode;
+	rec.wake_source = 0u;
+	rec.slept_ms    = 0u;
+	rec.armed       = plan->wake;
+	rec.armed_hw    = plan->hw;
+	rec.armed_ms    = plan->armed_ms;
+	rec.entry_rtc_s = (alp_som_power_rtc_seconds(&now) == ALP_OK) ? now : 0u;
+	alp_som_pd_store_save(&rec);
+}
+
+/* ---- request_sleep ------------------------------------------------------------- */
+
+static void
+fill_info(alp_power_wake_info_t *info, alp_power_mode_t mode, uint32_t wake, uint32_t ms)
+{
+	if (info != NULL) {
+		info->realised_mode = mode;
+		info->wake_source   = wake;
+		info->slept_ms      = ms;
+	}
+}
+
+/* Which armed source ended an aborted sleep (the sleep did not power the core down). */
+static uint32_t fired_sources(const sleep_plan_t *plan)
+{
+	uint32_t fired = 0u;
+	uint8_t  flags = 0u;
+
+	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
+		fired |= ALP_POWER_WAKE_TIMER;
+	}
+	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
+	    alp_som_power_rtc_wake_service(&flags) == ALP_OK &&
+	    (flags & (RV3028C7_WAKE_TF | RV3028C7_WAKE_AF)) != 0u) {
+		fired |= ALP_POWER_WAKE_RTC;
+	}
+	return fired;
+}
+
+static alp_status_t deep_sleep(alp_power_backend_state_t *state,
+                               alp_power_mode_t           mode,
+                               uint32_t                   wake_after_ms,
+                               alp_power_wake_info_t     *info)
+{
+	sleep_plan_t  plan  = { .mode = mode };
+	armed_t       armed = { 0 };
+	off_profile_t live;
+	off_profile_t off;
+	off_profile_t readback;
+	alp_status_t  why = ALP_ERR_INVAL;
+	alp_status_t  s;
+	unsigned int  key;
+	uint32_t      fired;
+
+	fill_info(info, ALP_POWER_MODE_RUN, 0u, 0u);
+
+	/* 1. Validate everything first. */
+	if (!retention_valid(&state->retain, &why)) {
+		return why;
+	}
+	plan.memory_blocks = retained_blocks(&state->retain);
+	s                  = plan_wake(state, wake_after_ms, &plan);
+	if (s != ALP_OK) {
+		return s;
+	}
+
+	/* 2. Refuse what cannot work, before touching anything. */
+	s = refuse_if_unfit();
+	if (s != ALP_OK) {
+		return s;
+	}
+	s = refuse_if_pending(&plan);
+	if (s != ALP_OK) {
+		return s;
+	}
+
+	/* 3. Build the profile from what the SE reports now. */
+	s = se_rc_to_alp(se_service_get_off_cfg(&live));
+	if (s != ALP_OK) {
+		return s;
+	}
+	plan.lfxo = lfxo_confirmed();
+	s         = build_off_profile(&off, &live, &plan);
+	if (s != ALP_OK) {
+		return s;
+	}
+
+	/* 4. Quiesce the SoM domains; on failure it has already put them back. */
+	s = alp_som_power_quiesce(mode, NULL);
+	if (s != ALP_OK) {
+		return s;
+	}
+
+	/* 5. Arm the wake sources and record the cycle. */
+	s = arm(&plan, &armed);
+	if (s != ALP_OK) {
+		goto unwind;
+	}
+	save_cycle_record(&plan);
+
+	/* 6. Hand the profile to the SE, read it back, re-assert what its write cleared. */
+	s = se_rc_to_alp(se_service_set_off_cfg(&off));
+	if (s != ALP_OK) {
+		goto unwind;
+	}
+	s = se_rc_to_alp(se_service_get_off_cfg(&readback));
+	if (s != ALP_OK) {
+		goto unwind;
+	}
+	if (!off_profile_stuck(&off, &readback)) {
+		s = ALP_ERR_IO;
+		goto unwind;
+	}
+	s = reassert_retention(&plan);
+	if (s != ALP_OK) {
+		goto unwind;
+	}
+
+	/* 7. Enter.  Does not return when the subsystem powers down. */
+	key = irq_lock();
+	alif_se_hw_enter_ewic();
+	irq_unlock(key);
+
+	/* Back here means a wake source fired before power was removed.  Report it as
+	 * an ordinary early wake: nothing was lost, the domains are put back below. */
+	fired = fired_sources(&plan);
+	disarm(&armed);
+	(void)alp_som_power_restore(NULL);
+	alp_som_pd_store_clear();
+	fill_info(info, ALP_POWER_MODE_RUN, fired, 0u);
+	return ALP_OK;
+
+unwind:
+	disarm(&armed);
+	(void)alp_som_power_restore(NULL);
+	alp_som_pd_store_clear();
+	return s;
+}
+
+/* ---- Ops ------------------------------------------------------------------------ */
+
+/* SLEEP and DEEP_SLEEP are the pm_policy backend's business: this backend takes the
+ * "power" class on the E8 (an exact silicon match beats the wildcard), so it
+ * forwards them rather than leaving the E8 without them. */
+#if defined(CONFIG_ALP_SDK_POWER_PM_POLICY)
+#define PM_AVAILABLE 1
+#else
+#define PM_AVAILABLE 0
+#endif
+
+static alp_status_t
+se_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out, uint32_t *wake_caps_out)
+{
+	uint32_t pm_caps = 0u;
+
+#if PM_AVAILABLE
+	alp_status_t s = alp_power_pm_policy_ops.open(state, caps_out, &pm_caps);
+
+	if (s != ALP_OK) {
+		return s;
+	}
+#else
+	(void)state;
+	(void)caps_out;
+#endif
+	if (wake_caps_out != NULL) {
+		*wake_caps_out = pm_caps | stop_wake_caps();
+	}
+	return ALP_OK;
+}
+
+static alp_status_t se_configure_wake_source(alp_power_backend_state_t *state, uint32_t wake_bitmap)
+{
+	(void)state;
+	(void)wake_bitmap;
+	return ALP_OK; /* armed at request time, from the mirrored bitmap */
+}
+
+static alp_status_t se_configure_retention(alp_power_backend_state_t *state,
+                                           const alp_power_retain_t  *retain)
+{
+	alp_status_t why = ALP_ERR_INVAL;
+
+	(void)state;
+	return retention_valid(retain, &why) ? ALP_OK : why;
+}
+
+static alp_status_t se_request_sleep(alp_power_backend_state_t *state,
+                                     alp_power_mode_t           mode,
+                                     uint32_t                   wake_after_ms,
+                                     alp_power_wake_info_t     *info)
+{
+	if (is_deep_mode(mode)) {
+		return deep_sleep(state, mode, wake_after_ms, info);
+	}
+	if (mode == ALP_POWER_MODE_SLEEP || mode == ALP_POWER_MODE_DEEP_SLEEP) {
+#if PM_AVAILABLE
+		return alp_power_pm_policy_ops.request_sleep(state, mode, wake_after_ms, info);
+#else
+		return ALP_ERR_NOSUPPORT;
+#endif
+	}
+	return ALP_ERR_INVAL;
+}
+
+static void se_close(alp_power_backend_state_t *state)
+{
+#if PM_AVAILABLE
+	alp_power_pm_policy_ops.close(state);
+#else
+	(void)state;
+#endif
+}
+
+static uint32_t se_mode_wake_caps(const alp_power_backend_state_t *state, alp_power_mode_t mode)
+{
+	(void)state;
+	if (is_deep_mode(mode)) {
+		return stop_wake_caps();
+	}
+#if PM_AVAILABLE
+	if (mode == ALP_POWER_MODE_SLEEP || mode == ALP_POWER_MODE_DEEP_SLEEP) {
+		return ALP_POWER_WAKE_TIMER; /* what the pm_policy backend arms */
+	}
+#endif
+	return 0u;
+}
+
+static const alp_power_ops_t _ops = {
+	.open                  = se_open,
+	.configure_wake_source = se_configure_wake_source,
+	.configure_retention   = se_configure_retention,
+	.request_sleep         = se_request_sleep,
+	.close                 = se_close,
+	.mode_wake_caps        = se_mode_wake_caps,
+	.domain_policy_set     = alp_som_power_ops_policy_set,
+	.domain_info           = alp_som_power_ops_domain_info,
+	.boot_wake_info        = alp_som_power_ops_boot_wake_info,
+};
+
+ALP_BACKEND_REGISTER(power,
+                     alif_se_stop,
+                     {
+                         .silicon_ref = "alif:ensemble:e8",
+                         .vendor      = "alif",
+                         .base_caps   = 0u,
+                         .priority    = 100,
+                         .ops         = &_ops,
+                         .probe       = NULL,
+                     });
+
+/* ---- Cold-boot wake decode ------------------------------------------------------ */
+
+/* Part 1, before the timer driver initialises (it clears the status): the LPTIMER. */
+void alp_som_power_wake_decode_early(alp_som_pd_record_t *rec)
+{
+	if ((rec->armed_hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
+		rec->wake_source |= ALP_POWER_WAKE_TIMER;
+	}
+}
+
+/* Part 2, once BRD_I2C is up: the RV-3028 flags and the slept time. */
+void alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
+{
+	uint8_t  flags = 0u;
+	uint32_t now   = 0u;
+
+	if ((rec->armed_hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
+	    alp_som_power_rtc_wake_service(&flags) == ALP_OK &&
+	    (flags & (RV3028C7_WAKE_TF | RV3028C7_WAKE_AF)) != 0u) {
+		rec->wake_source |= ALP_POWER_WAKE_RTC;
+	}
+
+	/* The RV-3028 is the time base (+-1 ppm): a calendar delta, 1 s resolution.  Only
+	 * with no RV-3028 reading does a timer wake fall back to its nominal length. */
+	if (rec->entry_rtc_s != 0u && alp_som_power_rtc_seconds(&now) == ALP_OK &&
+	    now >= rec->entry_rtc_s) {
+		rec->slept_ms = (now - rec->entry_rtc_s) * 1000u;
+	} else if ((rec->wake_source & ALP_POWER_WAKE_TIMER) != 0u) {
+		rec->slept_ms = rec->armed_ms;
+	}
+}
+
+#endif /* CONFIG_ALP_SDK_POWER_ALIF_SE */

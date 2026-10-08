@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+common:
+  platform_allow:
+    - native_sim
+    - native_sim/native/64
+  integration_platforms:
+    - native_sim/native/64
+  tags:
+    - alp
+    - unit
+    - power
+tests:
+  # Profile construction, refusals, unwind, wake decode (#2784 U7).
+  alp.unit.power_alif_se: {}
+  # The bench override: a debugger no longer blocks the sleep.
+  alp.unit.power_alif_se.allow_debugger:
+    extra_args: ALP_TEST_ALLOW_DEBUGGER=1

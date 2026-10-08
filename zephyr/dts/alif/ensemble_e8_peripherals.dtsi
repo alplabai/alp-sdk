@@ -282,6 +282,28 @@
 		reg = <0x1a60f000 0x4>;
 	};
 
+	/*
+	 * BKRAM -- the 4 KB Utility SRAM, always retained across STOP and reserved
+	 * for the SDK (the SoM power layer's wake record, #2784).  The
+	 * `zephyr,memory-region` property makes the Zephyr linker emit a NOLOAD
+	 * output section named ALP_BKRAM at this address, so nothing zeroes or loads
+	 * it at boot.
+	 *
+	 * Base and size: Alif DFP Debug/SVD/<part>_CM55_HE_View.svd, <memory
+	 * name="Backup_SRAM" start="0x4902C000" size="0x00001000" access="rw"/>.
+	 * The DFP carries that entry for the E1C, E3, E5 and E7 SVDs; the E8
+	 * (AE822FA0E5597) SVD omits its <memory> list altogether, but its
+	 * peripheral map leaves exactly this slot free between ADC_VREF
+	 * (0x4902B000) and PDM (0x4902D000), and it carries the block's
+	 * CLKCTL_PER_SLV.BKRAM_CKEN (reset value 1) and VBAT.RET_CTRL.BKRAM_RET_*
+	 * fields.  BENCH-UNVERIFIED on the E8 until the BKRAM pattern test (U8).
+	 */
+	bkram: memory@4902c000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x4902c000 0x1000>;
+		zephyr,memory-region = "ALP_BKRAM";
+	};
+
 	lpgpio: gpio@42002000 {
 		compatible = "snps,designware-gpio";
 		reg = <0x42002000 0x1000>;

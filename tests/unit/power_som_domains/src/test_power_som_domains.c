@@ -849,3 +849,276 @@ ZTEST(power_som_domains, test_nor_write_in_flight_blocks_the_quiesce)
 	zassert_equal(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL), ALP_ERR_IO);
 	zassert_equal(level(LPGPIO, FLASH_RST), 1);
 }
+
+/* ---- #2784 U7: RV-3028 wake services, wake decode hooks, STANDBY records ------- */
+
+#define RTC_STATUS_REG   0x0Eu
+#define RTC_CONTROL2_REG 0x10u
+#define RTC_SF_TF        0x08u
+#define RTC_SF_AF        0x04u
+#define RTC_SF_UF        0x10u
+#define RTC_SF_PORF      0x01u
+#define RTC_C2_TIE       0x10u
+#define RTC_C2_AIE       0x08u
+
+ZTEST(power_som_domains, test_rtc_wake_service_reports_enabled_flags_and_clears)
+{
+	uint8_t flags = 0xFFu;
+
+	/* Countdown expired with TIE on: reported; every latched flag is acknowledged
+	 * with the constant mask (0 for TF, 1 for every other latchable flag). */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_TF | RTC_SF_PORF;
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_TIE;
+	zassert_ok(alp_som_power_rtc_wake_service(&flags));
+	zassert_equal(flags, RTC_SF_TF);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~RTC_SF_TF);
+
+	/* A latched flag with its interrupt enable off is no wake cause -- but it is
+	 * still cleared, or it would sit there forever. */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_AF | RTC_SF_UF;
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_TIE;
+	zassert_ok(alp_som_power_rtc_wake_service(&flags));
+	zassert_equal(flags, 0u);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~(RTC_SF_AF | RTC_SF_UF));
+
+	/* Alarm. */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_AF;
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_AIE;
+	zassert_ok(alp_som_power_rtc_wake_service(&flags));
+	zassert_equal(flags, RTC_SF_AF);
+
+	/* Nothing latched: no STATUS write at all. */
+	rtc_regs()[RTC_STATUS_REG] = RTC_SF_PORF;
+	zassert_ok(alp_som_power_rtc_wake_service(&flags));
+	zassert_equal(flags, 0u);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_PORF, "PORF untouched");
+
+	zassert_equal(alp_som_power_rtc_wake_service(NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(power_som_domains, test_rtc_int_armed_reads_control2)
+{
+	bool armed = true;
+
+	rtc_regs()[RTC_CONTROL2_REG] = 0u;
+	zassert_ok(alp_som_power_rtc_int_armed(&armed));
+	zassert_false(armed);
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_AIE;
+	zassert_ok(alp_som_power_rtc_int_armed(&armed));
+	zassert_true(armed);
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_TIE;
+	zassert_ok(alp_som_power_rtc_int_armed(&armed));
+	zassert_true(armed);
+	rtc_regs()[RTC_CONTROL2_REG] = 0x20u; /* UIE alone is not a wake source */
+	zassert_ok(alp_som_power_rtc_int_armed(&armed));
+	zassert_false(armed);
+	zassert_equal(alp_som_power_rtc_int_armed(NULL), ALP_ERR_INVAL);
+}
+
+static void set_rtc_time(uint8_t sec, uint8_t min, uint8_t hr, uint8_t day, uint8_t mon, uint8_t yr)
+{
+	rtc_regs()[0] = sec;
+	rtc_regs()[1] = min;
+	rtc_regs()[2] = hr;
+	rtc_regs()[4] = day;
+	rtc_regs()[5] = mon;
+	rtc_regs()[6] = yr;
+}
+
+ZTEST(power_som_domains, test_rtc_seconds_since_2000)
+{
+	uint32_t s = 1u;
+
+	set_rtc_time(0x00, 0x00, 0x00, 0x01, 0x01, 0x00); /* 2000-01-01 00:00:00 */
+	zassert_ok(alp_som_power_rtc_seconds(&s));
+	zassert_equal(s, 0u);
+
+	set_rtc_time(0x10, 0x00, 0x00, 0x01, 0x01, 0x00);
+	zassert_ok(alp_som_power_rtc_seconds(&s));
+	zassert_equal(s, 10u);
+
+	set_rtc_time(0x59, 0x59, 0x23, 0x31, 0x12, 0x00); /* 2000-12-31, leap year: day 365 */
+	zassert_ok(alp_som_power_rtc_seconds(&s));
+	zassert_equal(s, 365u * 86400u + 23u * 3600u + 59u * 60u + 59u);
+
+	set_rtc_time(0x00, 0x00, 0x00, 0x01, 0x03, 0x24); /* 2024-03-01: 8826 days */
+	zassert_ok(alp_som_power_rtc_seconds(&s));
+	zassert_equal(s, 8826u * 86400u);
+
+	set_rtc_time(0x00, 0x00, 0x00, 0x01, 0x03, 0x23); /* 2023-03-01: 8826 - 366 days */
+	zassert_ok(alp_som_power_rtc_seconds(&s));
+	zassert_equal(s, (8826u - 366u) * 86400u);
+
+	/* A one-second step is exactly one second (the slept-time arithmetic). */
+	uint32_t a, b;
+
+	set_rtc_time(0x59, 0x59, 0x23, 0x28, 0x02, 0x24);
+	zassert_ok(alp_som_power_rtc_seconds(&a));
+	set_rtc_time(0x00, 0x00, 0x00, 0x29, 0x02, 0x24); /* 2024-02-29 exists */
+	zassert_ok(alp_som_power_rtc_seconds(&b));
+	zassert_equal(b - a, 1u);
+}
+
+ZTEST(power_som_domains, test_rtc_seconds_rejects_garbage)
+{
+	uint32_t s = 5u;
+
+	set_rtc_time(0x7A, 0x00, 0x00, 0x01, 0x01, 0x00); /* not BCD */
+	zassert_equal(alp_som_power_rtc_seconds(&s), ALP_ERR_IO);
+	set_rtc_time(0x00, 0x00, 0x00, 0x00, 0x01, 0x00); /* day 0 */
+	zassert_equal(alp_som_power_rtc_seconds(&s), ALP_ERR_IO);
+	set_rtc_time(0x00, 0x00, 0x00, 0x01, 0x13, 0x00); /* month 13 */
+	zassert_equal(alp_som_power_rtc_seconds(&s), ALP_ERR_IO);
+	set_rtc_time(0x60, 0x00, 0x00, 0x01, 0x01, 0x00); /* second 60 */
+	zassert_equal(alp_som_power_rtc_seconds(&s), ALP_ERR_IO);
+	zassert_equal(alp_som_power_rtc_seconds(NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(power_som_domains, test_wake_gpio_is_the_rtc_int_pad)
+{
+	const struct gpio_dt_spec *g = alp_som_power_wake_gpio(ALP_POWER_DOMAIN_RTC);
+
+	zassert_not_null(g);
+	zassert_equal(g->pin, 0);
+	zassert_equal(g->port, LPGPIO);
+	zassert_equal(g->dt_flags & GPIO_ACTIVE_LOW, GPIO_ACTIVE_LOW, "/INT is active low");
+	zassert_is_null(alp_som_power_wake_gpio(ALP_POWER_DOMAIN_WIFI_BLE), "no wake input");
+	zassert_is_null(alp_som_power_wake_gpio(ALP_POWER_DOMAIN_COUNT));
+}
+
+/* The strong definitions below replace the weak no-ops in som_power.c for this
+ * image: the default (no backend) behaviour is "the record's fields pass through
+ * untouched", which test_weak_decode_defaults_pass_the_record_through proves by
+ * leaving the hooks disarmed. */
+static struct {
+	bool                armed;
+	unsigned            early_calls, i2c_calls;
+	unsigned            early_order, i2c_order, seq;
+	alp_som_pd_record_t early_seen;
+} g_dec;
+
+void alp_som_power_wake_decode_early(alp_som_pd_record_t *rec)
+{
+	if (!g_dec.armed) {
+		return;
+	}
+	g_dec.early_calls++;
+	g_dec.early_order = ++g_dec.seq;
+	g_dec.early_seen  = *rec;
+	rec->wake_source |= ALP_POWER_WAKE_TIMER;
+}
+
+void alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
+{
+	if (!g_dec.armed) {
+		return;
+	}
+	g_dec.i2c_calls++;
+	g_dec.i2c_order = ++g_dec.seq;
+	rec->wake_source |= ALP_POWER_WAKE_RTC;
+	rec->slept_ms = 4242u;
+}
+
+static void poke_cycle_record(alp_power_mode_t mode)
+{
+	alp_som_pd_record_t r = {
+		.mode        = (uint32_t)mode,
+		.quiesced    = ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_WIFI_BLE),
+		.armed       = ALP_POWER_WAKE_TIMER,
+		.armed_hw    = ALP_SOM_ARM_LPTIMER,
+		.armed_ms    = 500u,
+		.entry_rtc_s = 1234u,
+	};
+
+	alp_som_pd_store_save(&r);
+}
+
+ZTEST(power_som_domains, test_weak_decode_defaults_pass_the_record_through)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec)); /* hooks disarmed: they return at once */
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_true(info.valid);
+	zassert_equal(info.wake_source, 0u, "nothing decoded: nothing claimed");
+	zassert_equal(info.slept_ms, 0u);
+}
+
+ZTEST(power_som_domains, test_boot_runs_the_decode_hooks_early_then_i2c)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(g_dec.early_calls, 1u);
+	zassert_equal(g_dec.i2c_calls, 0u, "the I2C half waits for the controller");
+	/* the hook sees the whole cycle record, armed fields included */
+	zassert_equal(g_dec.early_seen.armed_hw, ALP_SOM_ARM_LPTIMER);
+	zassert_equal(g_dec.early_seen.armed_ms, 500u);
+	zassert_equal(g_dec.early_seen.entry_rtc_s, 1234u);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_TIMER, "part 1 is already visible");
+
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_equal(g_dec.i2c_calls, 1u);
+	zassert_true(g_dec.early_order < g_dec.i2c_order);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_RTC);
+	zassert_equal(info.slept_ms, 4242u);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+
+	g_dec.armed = false;
+}
+
+ZTEST(power_som_domains, test_decode_hooks_are_not_run_without_a_valid_record)
+{
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	alp_som_pd_store_clear();
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_equal(g_dec.early_calls, 0u, "a plain POR decodes nothing");
+	zassert_equal(g_dec.i2c_calls, 0u);
+
+	/* STOP record, STOP_MODE_STAT = 0: dropped before any decode. */
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0u;
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(g_dec.early_calls, 0u);
+	g_dec.armed = false;
+}
+
+ZTEST(power_som_domains, test_standby_record_is_restored_without_stop_mode_stat)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STANDBY, NULL));
+	zassert_equal(level(LPGPIO, NRST_PIN), 0);
+	alp_som_pd_record_t rec;
+	zassert_true(alp_som_pd_store_load(&rec));
+	alp_som_power_reset_for_test();
+	alp_som_pd_store_save(&rec);
+	g_stop_mode = 0u; /* the register names STOP only */
+
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STANDBY);
+	zassert_equal(level(LPGPIO, NRST_PIN), 1, "the held domain was put back, not stranded");
+}
+
+ZTEST(power_som_domains, test_record_layout_is_stable)
+{
+	zassert_equal(sizeof(alp_som_pd_record_t), 48u);
+	zassert_equal(offsetof(alp_som_pd_record_t, crc), 44u);
+}

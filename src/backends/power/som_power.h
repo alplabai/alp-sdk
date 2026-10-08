@@ -59,6 +59,13 @@ typedef struct {
 	alp_status_t (*restore)(void *ctx, bool rail_off, bool early);
 } alp_som_power_hooks_t;
 
+/** Hardware wake paths a STOP / STANDBY cycle armed, bits of
+ *  alp_som_pd_record_t::armed_hw.  The STOP backend (alif_se_power.c) writes
+ *  them, the cold-boot wake decode reads them. */
+#define ALP_SOM_ARM_LPTIMER   0x00000001u /**< LPTIMER underflow (short timed wake). */
+#define ALP_SOM_ARM_RTC_TIMER 0x00000002u /**< RV-3028 countdown the SDK started. */
+#define ALP_SOM_ARM_RTC_INT   0x00000004u /**< RV-3028 /INT -> P15_0 armed by the caller. */
+
 /** On-disk shape of the BKRAM wake record.  Fixed-width, no padding. */
 typedef struct {
 	uint32_t magic;        /**< ALP_SOM_PD_RECORD_MAGIC. */
@@ -66,8 +73,12 @@ typedef struct {
 	uint32_t quiesced;     /**< ALP_POWER_DOMAIN_BIT set quiesced. */
 	uint32_t rail_off;     /**< Subset of @c quiesced taken with RAIL_OFF. */
 	uint32_t prior_active; /**< Per-domain saved bit: backlight was on / RTC EERD was set. */
-	uint32_t wake_source;  /**< ALP_POWER_WAKE_* that fired; U7 fills it. */
-	uint32_t slept_ms;     /**< Sleep duration; U7 fills it. */
+	uint32_t wake_source;  /**< ALP_POWER_WAKE_* that fired; the wake decode fills it. */
+	uint32_t slept_ms;     /**< Sleep duration; the wake decode fills it. */
+	uint32_t armed;        /**< ALP_POWER_WAKE_* the STOP backend armed (0 before U7 arms). */
+	uint32_t armed_hw;     /**< ALP_SOM_ARM_* wake paths armed. */
+	uint32_t armed_ms;     /**< Timed-wake length actually programmed, ms (0 = none). */
+	uint32_t entry_rtc_s;  /**< RV-3028 seconds since 2000-01-01 at entry; 0 = unreadable. */
 	uint32_t crc;          /**< CRC-32 (IEEE) over every field above. */
 } alp_som_pd_record_t;
 
@@ -82,6 +93,9 @@ alp_som_power_bind(alp_power_domain_t domain, const alp_som_power_hooks_t *hooks
 
 /** Drop a binding (the default pin action applies again). */
 void alp_som_power_unbind(alp_power_domain_t domain);
+
+/** The context bound to @p domain by alp_som_power_bind(), or NULL. */
+void *alp_som_power_bound_ctx(alp_power_domain_t domain);
 
 /** The default (no driver) pin action for @p domain, for hooks to compose with. */
 alp_status_t alp_som_power_pin_quiesce(alp_power_domain_t domain, bool rail_off);
@@ -168,7 +182,7 @@ uint32_t alp_som_power_stop_mode_read(void);
 /** Test-only: forget policies, bindings, states and the boot capture. */
 void alp_som_power_reset_for_test(void);
 
-/* ---- BKRAM record store (backing is a placeholder until U7) -------------- */
+/* ---- BKRAM record store ---------------------------------------------------- */
 
 /** CRC-32 over the record's covered fields. */
 uint32_t alp_som_pd_record_crc(const alp_som_pd_record_t *rec);
@@ -187,6 +201,62 @@ void alp_som_pd_store_clear(void);
 
 /** Test-only: store @p rec verbatim, bypassing the seal. */
 void alp_som_pd_store_poke(const alp_som_pd_record_t *rec);
+
+/** Bench-only retention counter sharing the BKRAM region
+ *  (CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH).  BKRAM is SDK-reserved; this
+ *  exists so a bench image can prove it survived STOP, and is absent from a
+ *  product build. */
+typedef struct {
+	uint32_t magic;
+	uint32_t count;
+	uint32_t crc;
+} alp_som_pd_bench_t;
+
+uint32_t alp_som_pd_bench_count(void);
+void     alp_som_pd_bench_set(uint32_t count);
+
+/* ---- Wake services for the STOP backend ----------------------------------- */
+
+struct gpio_dt_spec;
+
+/** The `wake-gpios` input of @p domain (the RV-3028 /INT pad P15_0 for the RTC
+ *  domain), or NULL when the domain is absent or has none. */
+const struct gpio_dt_spec *alp_som_power_wake_gpio(alp_power_domain_t domain);
+
+/** True when the RV-3028 has its alarm or countdown interrupt enabled
+ *  (CONTROL_2 AIE | TIE).  ALP_ERR_NOT_READY with no RTC domain / I2C bus. */
+alp_status_t alp_som_power_rtc_int_armed(bool *armed);
+
+/** RV-3028 interrupt service by devicetree I2C: reports the enabled, latched
+ *  countdown / alarm flags (RV3028C7_WAKE_TF / _AF layout: 0x08 / 0x04) and
+ *  clears every latched TF / AF / UF.  Needs no chip context, so it runs on the
+ *  cold-boot wake path. */
+alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags);
+
+/** RV-3028 calendar as seconds since 2000-01-01 00:00:00. */
+alp_status_t alp_som_power_rtc_seconds(uint32_t *seconds);
+
+/** True once an RV-3028 chip context is bound (alp_som_power_bind_rv3028), the
+ *  precondition for the countdown calls below. */
+bool alp_som_power_rtc_countdown_ready(void);
+
+/** Start a one-shot countdown of @p seconds with INT enabled, through
+ *  rv3028c7_timer_start().  @p actual_s (optional) receives the length the part
+ *  was programmed with (long requests round up to whole minutes).
+ *  ALP_ERR_NOT_READY when no chip context is bound. */
+alp_status_t alp_som_power_rtc_countdown_start(uint32_t seconds, uint32_t *actual_s);
+
+/** Stop the countdown and silence it, through rv3028c7_timer_stop(). */
+alp_status_t alp_som_power_rtc_countdown_cancel(void);
+
+/** Wake decode, part 1: runs from the early cold-boot SYS_INIT on the cycle's
+ *  record (a working copy), before any timer driver initialises, with no I2C.
+ *  Fills rec->wake_source / rec->slept_ms where it can.  Weak: the STOP backend
+ *  overrides it; the default leaves the record untouched. */
+void alp_som_power_wake_decode_early(alp_som_pd_record_t *rec);
+
+/** Wake decode, part 2: the I2C pass (RV-3028 flags, slept time).  Weak, as above. */
+void alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec);
 
 /* ---- Op wrappers the power-class vtables point at ------------------------ */
 

@@ -268,6 +268,46 @@ config ALP_SDK_SOM_PD_WIFI_SETTLE_MS
 	  boot settle (Puya double-boot plus crypto init).  The cold-boot wake
 	  path never waits; it leaves the settle to the bring-up code.
 
+config ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	bool "Bench-only retention counter in the BKRAM region"
+	depends on ALP_SDK_SOM_POWER
+	help
+	  Adds a small counter cell next to the wake record in the 4 KB Utility
+	  SRAM, so a bench image can prove BKRAM survives STOP without owning any
+	  of it.  BKRAM is reserved for the SDK; this exists for the bench example
+	  only and must stay off in a product build.
+
+config ALP_SDK_POWER_ALIF_SE
+	bool "Alif SE STOP / STANDBY power backend (E8 M55-HE, EXPERIMENTAL)"
+	depends on ALP_SDK_POWER && ALP_SDK_SOM_POWER
+	depends on HAS_ALIF_SE_SERVICES && SOC_AE822FA0E5597LS0_RTSS_HE
+	default n
+	help
+	  Compile src/backends/power/alif_se_power.c: alp_power_request_sleep()
+	  for STOP and STANDBY on the Alif Ensemble E8 M55-HE.  It builds a
+	  complete OFF profile for the Secure Enclave, quiesces the on-module
+	  domains, arms the wake source (the on-module RV-3028 on INT -> P15_0,
+	  or the LPTIMER for short intervals) and enters the EWIC subsystem-off
+	  sleep.  The wake is a COLD BOOT through the Secure Enclave; the call
+	  does not return, and the cause is read with alp_power_boot_wake_info().
+
+	  UNTESTED ON SILICON.  Off by default.  An image that gets the entry
+	  sequence wrong can stop at the Secure Enclave until the module is
+	  power-cycled; keep a way to restore the MRAM image before trying it.
+
+	  SLEEP and DEEP_SLEEP are forwarded to the pm_policy backend when that is
+	  built.  Needs CONFIG_DCACHE=n (the cache-clean loop hangs on this
+	  silicon); with the D-cache on, STOP is refused with ALP_ERR_NOSUPPORT.
+
+config ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER
+	bool "Allow STOP / STANDBY with a debugger attached (bench only)"
+	depends on ALP_SDK_POWER_ALIF_SE
+	help
+	  By default STOP / STANDBY is refused with ALP_ERR_BUSY while
+	  DHCSR.C_DEBUGEN is set: a connected debug port keeps PDDEBUG powered, so
+	  the subsystem never powers down and the sleep proves nothing (or hangs
+	  the probe).  Enable this for a bench run that sleeps under J-Link.
+
 config ALP_SDK_POWER_EXT_RENESAS
 	bool "Compile the Renesas V2N power vendor-extension body"
 	depends on ALP_SDK_POWER
