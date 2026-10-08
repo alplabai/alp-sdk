@@ -218,7 +218,7 @@ typedef enum {
 	ALP_POWER_RETAIN_UTILITY = 1, /**< Smallest SoC-guaranteed retained block (e.g. E8's
 	                                    4 KB Utility SRAM, STOP_2, ~1.1 uA typ.).  The
 	                                    Alif STOP backend (#2784) treats this as
-	                                    equivalent to @ref ALP_POWER_RETAIN_NONE: it
+	                                    equivalent to @ref ALP_POWER_RETAIN_NONE -- it
 	                                    returns ALP_OK and retains nothing extra.  Today's
 	                                    backends still return ALP_ERR_NOSUPPORT. */
 	ALP_POWER_RETAIN_TCM     = 2, /**< @ref alp_power_retain_t::retain_kb KiB of
