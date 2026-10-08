@@ -37,6 +37,7 @@ PRESET_DIR = METADATA / "boards"
 SOC_DIR = METADATA / "socs"
 CHIP_DIR = METADATA / "chips"
 CAMERA_MODULE_DIR = METADATA / "camera_modules"
+ZEPHYR_SHIELD_DIR = REPO / "zephyr" / "boards" / "shields"
 
 
 def load_board_schema(schema_path: Path | None = None) -> dict[str, Any]:
@@ -180,13 +181,15 @@ def _xref_pass(
     # missing (ALP-B006 already reported) there is nothing to check against.
     if not isinstance(preset, str):
         _check_cameras(data, path, collector, data.get("camera_connectors"),
-                       camera_module_dir=camera_module_dir, inline=True)
+                       camera_module_dir=camera_module_dir, inline=True,
+                       som_doc=som_doc)
     elif board_doc is not None:
         _check_cameras(data, path, collector, board_doc.get("camera_connectors"),
-                       camera_module_dir=camera_module_dir)
+                       camera_module_dir=camera_module_dir, som_doc=som_doc)
 
 
-def camera_connector_problems(connectors: Any, e1m_routes: Any) -> list[str]:
+def camera_connector_problems(connectors: Any, e1m_routes: Any, *,
+                              shield_dir: Path = ZEPHYR_SHIELD_DIR) -> list[str]:
     """Cross-checks of `camera_connectors:` that the schema cannot express,
     shared by this validator (inline project boards) and
     scripts/validate_metadata.py (board presets):
@@ -194,7 +197,8 @@ def camera_connector_problems(connectors: Any, e1m_routes: Any) -> list[str]:
     * every macro a connector names (`i2c`, `enable`, `reset`, `select[].gpio`)
       must be declared in the same board's `e1m_routes:` (`buses` for `i2c`,
       `gpio` for the rest) -- connectors reference routes, never restate pads;
-    * `lane_polarity` carries one flag per clock + data lane: `lanes + 1`.
+    * `lane_polarity` carries one flag per clock + data lane: `lanes + 1`;
+    * every `zephyr_shields` entry is a directory under zephyr/boards/shields/.
     """
     if not isinstance(connectors, dict):
         return []
@@ -218,6 +222,10 @@ def camera_connector_problems(connectors: Any, e1m_routes: Any) -> list[str]:
             if macro is not None and macro not in known:
                 msgs.append(f"camera_connectors.{name}.{field}: `{macro}` is not a "
                             f"macro in e1m_routes.{section}")
+        for sh in c.get("zephyr_shields") or []:
+            if not (shield_dir / str(sh)).is_dir():
+                msgs.append(f"camera_connectors.{name}.zephyr_shields: `{sh}` is not "
+                            f"a shield under zephyr/boards/shields/")
         pol, lanes = c.get("lane_polarity"), c.get("lanes")
         if isinstance(pol, list) and isinstance(lanes, int) and len(pol) != lanes + 1:
             msgs.append(f"camera_connectors.{name}.lane_polarity: {len(pol)} entries "
@@ -234,6 +242,7 @@ def _check_cameras(
     *,
     camera_module_dir: Path = CAMERA_MODULE_DIR,
     inline: bool = False,
+    som_doc: Any = None,
 ) -> None:
     """ALP-B003 for camera declarations the schema cannot judge:
 
@@ -241,6 +250,8 @@ def _check_cameras(
       expose, a module with no `metadata/camera_modules/<module>.yaml`, or a
       connector listed twice (both valid identifiers to the schema, so a typo
       would only surface when a generator looks the name up);
+    * a module with no `zephyr_shield:` while a Zephyr core is in use (it
+      could never be selected: the Zephyr build takes `-DSHIELD` from it);
     * for an INLINE board, a `camera_connectors:` block whose macros do not
       resolve in the project's own `e1m_routes:` or whose `lane_polarity` has
       the wrong length (presets get the same check from validate_metadata.py).
@@ -282,6 +293,33 @@ def _check_cameras(
             report("cameras",
                    f"cameras: unknown camera module '{module}' "
                    f"(no metadata/camera_modules/{module}.yaml)")
+        elif isinstance(module, str) and _uses_zephyr_core(data, som_doc):
+            mod = _load_metadata_yaml(camera_module_dir / f"{module}.yaml") or {}
+            if not mod.get("zephyr_shield"):
+                report("cameras",
+                       f"cameras: module '{module}' has no `zephyr_shield:` so it "
+                       f"cannot be selected on a Zephyr core; use a module with "
+                       f"one, or run the project on Linux only (`os: off` the "
+                       f"Zephyr cores)")
+
+
+def _uses_zephyr_core(data: dict[str, Any], som_doc: Any) -> bool:
+    """True when a project core resolves to Zephyr: an explicit `os: zephyr`,
+    or a core with an `app:` whose SoM topology entry names a Zephyr `board:`
+    (and no other `os:`)."""
+    cores = data.get("cores")
+    topology = (som_doc or {}).get("topology") if isinstance(som_doc, dict) else None
+    if not isinstance(cores, dict):
+        return False
+    for cid, core in cores.items():
+        if not isinstance(core, dict):
+            continue
+        os_ = core.get("os")
+        if os_ == "zephyr":
+            return True
+        if os_ is None and core.get("app") and isinstance(topology, dict)                 and isinstance(topology.get(cid), dict) and topology[cid].get("board"):
+            return True
+    return False
 
 
 def _known_chip_slugs(*, chip_dir: Path = CHIP_DIR) -> set[str]:

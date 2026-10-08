@@ -394,8 +394,32 @@ cameras:
 - `lane_polarity` holds one 0/1 inversion flag per lane, clock first:
   `lanes + 1` entries.
 
+- **`cameras:` selects the camera in the build.**  One resolver
+  (`scripts/alp_orchestrate/cameras.py`) turns each entry into the per-OS
+  build input, so the same line works on every SoM:
+  - **Zephyr** core running a customer app: one
+    `-DSHIELD="<carrier shields> <module shield>"` on the `west build`
+    command (and in `cmake-args.txt`).  Carrier shields come from the
+    connector's `zephyr_shields:` (ordered; e.g. `[e1m_evk_rpi_csi]` on the
+    E1M-EVK CAM0), the module shield from `zephyr_shield:` in its
+    `camera_modules/` YAML; duplicates collapse, carrier first.  A module
+    with no `zephyr_shield` (e.g. `raspberry_pi_camera_module_2`) is
+    rejected for a Zephyr core, and a carrier shield with no
+    `boards/<board>.overlay` for the slice's board target blocks the slice's
+    build command (`camera-select-failed` warning) instead of silently
+    building without the camera.
+  - **Yocto** core: `ALP_CAMERA_CAM<n> = "<module_id>"` in the slice's
+    `local.conf`, the variable the kernel bbappend keys the sensor
+    devicetree include (`<board>-cam<n>-<module_id>.dtsi`) on.
+  - Connector `CAMn` is camera index `n`: `alp-camera<n>` in Zephyr DT,
+    the `n` in `ALP_CAMERA_CAM<n>`.
+  - `zephyr_shields` is optional and only for connectors a Zephyr shield
+    exists for; each name must be a directory under
+    `zephyr/boards/shields/`.
+
 `tan validate` rejects an unknown connector, an unknown module, a
-duplicated connector, and (inline boards) an unresolvable macro or a wrong
+duplicated connector, a module without `zephyr_shield` when the project has a
+Zephyr core, and (inline boards) an unresolvable macro or a wrong
 `lane_polarity` length, all as [ALP-B003](diagnostics/ALP-B003.md).
 
 #### Pin direction (NOT in `board.yaml`)

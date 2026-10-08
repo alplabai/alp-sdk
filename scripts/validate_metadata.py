@@ -1129,9 +1129,10 @@ def _check_camera_module_semantics(module_files, *, chips_dir=None) -> list:
     """Cross-check beyond schema: `module_id` == filename stem and `chip`
     names a real chip manifest.
 
-    The lane/address parity against the chip manifest is deliberately NOT
-    here, nor is the `zephyr_shield` directory check: both belong to the
-    camera parity gate that lands with the generators.  Returns a failure list shaped like `_check_files()`.
+    Also `zephyr_shield` (when set) must be a directory under
+    zephyr/boards/shields/.  The lane/address parity against the chip manifest
+    is deliberately NOT here: it belongs to the camera parity gate that lands
+    with the generators.  Returns a failure list shaped like `_check_files()`.
     """
     chips_dir = chips_dir or CHIPS
     failures: list[tuple[Path, list[str]]] = []
@@ -1153,6 +1154,11 @@ def _check_camera_module_semantics(module_files, *, chips_dir=None) -> list:
         chip = doc.get("chip")
         if isinstance(chip, str) and not (chips_dir / f"{chip}.yaml").is_file():
             msgs.append(f"chip: `{chip}` has no metadata/chips/{chip}.yaml")
+        shield = doc.get("zephyr_shield")
+        if isinstance(shield, str) and not (
+                REPO / "zephyr" / "boards" / "shields" / shield).is_dir():
+            msgs.append(f"zephyr_shield: `{shield}` is not a shield under "
+                        f"zephyr/boards/shields/")
         if msgs:
             print(f"FAIL {rel}")
             for m in msgs:

@@ -276,6 +276,15 @@
           },
           "description": "Per-lane P/N inversion flags, clock lane first then data lanes (1 = inverted), as Linux `lane-polarities`."
         },
+        "zephyr_shields": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "description": "Zephyr shield names (zephyr/boards/shields/<name>/), in `-DSHIELD` order, that supply this connector's carrier half -- the DT labels the camera-module shield consumes (e.g. `e1m_evk_rpi_csi`).  The build resolver puts them BEFORE the camera module's own `zephyr_shield` in one `-DSHIELD=`.  Each shield must ship a boards/<board>.overlay for every Zephyr board target that builds a camera on this connector.  Omit when no Zephyr shield exists for the connector (the connector is then Linux-only)."
+        },
         "notes": {
           "type": "string"
         }

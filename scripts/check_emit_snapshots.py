@@ -104,6 +104,9 @@ CASES = [
     # staying in the build-plan's rendered alp.conf for THIS declaration
     # form specifically.
     ("coap-client-get.build-plan",  ORCH, "examples/connectivity/coap-client-get/board.yaml",   "build-plan"),
+    # `cameras:` -> -DSHIELD (Zephyr) / cmake-args.txt; pins the resolver
+    # output in the plan's command and its rendered cmake-args artefact.
+    ("camera-firstlight.build-plan", ORCH, "examples/aen/aen-camera-firstlight/board.yaml",   "build-plan"),
 ]
 for _bid, _board in _PROJ_BOARDS:
     for _mode in _PROJ_MODES:

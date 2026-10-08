@@ -379,3 +379,25 @@ def test_linux_driver_facts_consistent_with_modules():
             assert m["xclk_hz"] in lin["xclk_supported_hz"], p.stem
         if "link_freqs" in lin:
             assert m["lanes"] in {e["lanes"] for e in lin["link_freqs"]}, p.stem
+
+
+def test_cameras_module_without_zephyr_shield_rejected_on_zephyr_core(tmp_path):
+    p = tmp_path / "board.yaml"
+    p.write_text(yaml.safe_dump({
+        "som": {"sku": "E1M-AEN803"}, "preset": "e1m-evk",
+        "cores": {"m55_he": {"app": "./src"}},
+        "cameras": [{"connector": "CAM0", "module": "raspberry_pi_camera_module_2"}]}),
+        encoding="utf-8")
+    c = validate_board_yaml(p)
+    assert any("zephyr_shield" in d.message and d.code == "ALP-B003" for d in c)
+    # same module on a Linux-only core is fine
+    assert not [d for d in validate_board_yaml(_project(
+        tmp_path, [{"connector": "CAM0", "module": "raspberry_pi_camera_module_2"}]))
+        if "camera" in d.message]
+
+
+def test_connector_zephyr_shields_must_exist(tmp_path):
+    from alp_cli.validator import camera_connector_problems
+    conn = {"CAM0": {"zephyr_shields": ["no_such_shield", "e1m_evk_rpi_csi"]}}
+    msgs = camera_connector_problems(conn, {})
+    assert len(msgs) == 1 and "no_such_shield" in msgs[0]

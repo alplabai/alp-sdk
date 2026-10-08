@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 import yaml
 
+from . import cameras as _cameras
 from .models import BoardProject, OrchestratorError, Slice
 from .paths import REPO
 from .secure import (emit_sysbuild_conf, emit_tfm_sysbuild_conf,
@@ -508,6 +509,11 @@ def _slice_command(
             extra_var = f"{image}_EXTRA_CONF_FILE"
         defines.append(
             f"-D{extra_var}={_tokenize(alp_conf, base_dir, REPO)}")
+        # `cameras:` -> ONE -DSHIELD (carrier + module shields), shared with
+        # the cmake-args listing via cameras.zephyr_shield_define.
+        shield = _cameras.zephyr_shield_define(project, slice_)
+        if shield:
+            defines.append(f"-D{shield}")
         cmd += ["--", *defines]
         return cmd
     if slice_.os == "yocto":
