@@ -1,5 +1,7 @@
 # `tan model` envelope-wrapping — Implementation Plan (Plan B, tan-cli)
 
+> **Status (2026-10-08): Superseded** — tan is now a Python program; `tan model` lives in `python/tan/model/` and `python/tan/envelope.py` (ADR 0028), not the planned `crates/tan-cli/src/commands/model.rs`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax. **Route implementation to the `tan-implementor` agent (Rust); review with `alp-reviewer`.**
 
 **Goal:** Upgrade `tan model {build,list,info,doctor}` from a raw inherited-stdio passthrough into a real envelope-wrapping command: in `--format json` mode, capture the SDK's `python -m alp_cli model <sub> --format json` payload (Plan A) and wrap it in tan's `{command, ok, exitCode, project, data, issues}` envelope. Text mode and the interactive/long-running subs keep streaming unchanged.
