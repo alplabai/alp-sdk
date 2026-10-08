@@ -323,6 +323,41 @@ static void test_negotiation_other_pixfmts(void)
 	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_ERR_NOSUPPORT);
 }
 
+/* Bench 2026-10-08 (IMX296LQ colour on CAM0): the sensor offers only
+ * SBGGR10_1X10, the CRU capture is CR10.  RAW10 is served, every colour or
+ * 8-bit request is NOSUPPORT, and a hand-packed CR10 word (6 px, LSB first,
+ * 4 padding bits, little-endian) unpacks to the pixels it holds. */
+static void test_bayer_colour_sensor_raw10_only(void)
+{
+	reset();
+	g_sensor_codes[0] = MEDIA_BUS_FMT_SBGGR10_1X10;
+	g_nsensor_codes   = 1;
+	cam_t c;
+	make_chain(&c);
+
+	alp_camera_config_t cfg = cfg_of(ALP_PIXFMT_RAW10, 12, 4, 0);
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_OK);
+	ALP_ASSERT_EQ_INT(c.fourcc, CAM_FOURCC_CR10);
+	ALP_ASSERT_EQ_INT(c.out_bytes, 2);
+
+	cfg = cfg_of(ALP_PIXFMT_RGB565, 12, 4, 0);
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_ERR_NOSUPPORT);
+	cfg = cfg_of(ALP_PIXFMT_GREY8, 12, 4, 0);
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_ERR_NOSUPPORT);
+	cfg = cfg_of(ALP_PIXFMT_RAW8, 12, 4, 0);
+	ALP_ASSERT_EQ_INT(cam_configure(&c, &cfg), ALP_ERR_NOSUPPORT);
+
+	/* pixels 1, 2, 3, 1023, 512, 5; the CRU pads each row to width*8 bytes */
+	const uint8_t  src[16] = { 0x01, 0x08, 0x30, 0xC0, 0xFF, 0x00, 0x16, 0x00 };
+	uint8_t        out[12] = { 0 };
+	const uint16_t want[6] = { 1, 2, 3, 1023, 512, 5 };
+	cam_cr10_unpack(src, 16, 6, 1, out, 2, 0);
+	bool ok = true;
+	for (unsigned i = 0; i < 6u; ++i)
+		ok = ok && (uint16_t)(out[2 * i] | (out[2 * i + 1] << 8)) == want[i];
+	ALP_ASSERT_TRUE(ok);
+}
+
 static void test_fps(void)
 {
 	reset();
@@ -656,6 +691,7 @@ int main(void)
 	test_missing_alias_is_not_ready();
 	test_negotiation_y10_grey8();
 	test_negotiation_other_pixfmts();
+	test_bayer_colour_sensor_raw10_only();
 	test_fps();
 	test_subdev_adjust_is_inval();
 	test_cr10_unpack();
