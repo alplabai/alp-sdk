@@ -799,6 +799,91 @@ static void test_claim_is_a_sign_of_life(void)
 	assert(reclaims == 1u);
 }
 
+/* ---- the counters power up as garbage (SRAM0) and are zeroed by their owner at boot ---- */
+static void test_counters_zeroed_at_boot(void)
+{
+	memset((void *)&rec, 0xDF, sizeof(rec)); /* hp_i2s_fu = 0xDFDFDFDF, ... */
+	memset(&he, 0, sizeof(he));
+	he_irq = 1;
+	hp_irq = 0;
+	clk    = 1000;
+	assert(!tr_bus2_he_boot(&he, &rec, &ops, TR_BUS2_HE_BOOT_WAIT_MS));
+	assert(rec.he_regains == 0u && rec.he_reclaims == 0u); /* the HE's own words ... */
+	assert(rec.hp_acq == 0xDFDFDFDFu && rec.hp_aborts == 0xDFDFDFDFu &&
+	       rec.hp_i2s_fu == 0xDFDFDFDFu); /* ... and ONLY its own */
+	rec.he_regains  = 7u;
+	rec.he_reclaims = 9u;
+	tr_bus2_hp_boot(&rec, b_barrier);
+	assert(rec.hp_acq == 0u && rec.hp_aborts == 0u && rec.hp_i2s_fu == 0u && rec.hp_i2s_err == 0u);
+	assert(rec.he_regains == 7u && rec.he_reclaims == 9u); /* the HP never writes the HE's words */
+	/* after a full cold start the bench reads: hp_acq 1, hp_i2s_fu 0, he_regains 1 */
+	memset((void *)&rec, 0xDF, sizeof(rec));
+	cold_start();
+	hp_full_lease();
+	assert(rec.hp_acq == 1u && rec.hp_i2s_fu == 0u && rec.hp_i2s_err == 0u && rec.hp_aborts == 0u &&
+	       rec.he_regains == 1u && rec.he_reclaims == 0u);
+}
+
+/* ---- the console line comes from the evidence, never a misleading "back on the HE" ---- */
+static const char *tick_event(void)
+{
+	uint8_t  before = he.st;
+	uint32_t leased = he.leased;
+
+	he_tick();
+	return tr_bus2_he_event(&he, before, leased);
+}
+
+static void test_event_log(void)
+{
+	cold_start();
+	assert(tick_event() == NULL); /* nothing happened */
+	/* the usual lease: offered, leased (claim seen), back */
+	rec.hp_state = TR_BUS2_TAG | TR_BUS2_HP_WANT;
+	rec.hp_beat++;
+	const char *e = tick_event();
+
+	assert(e && strstr(e, "offered"));
+	tr_bus2_hp_want(&hp, &rec, b_barrier);
+	hp.token = rec.he_token;
+	assert(hp_step_enter());
+	e = tick_event();
+	assert(e && strstr(e, "leased by the HP") && !strstr(e, "returned") && he.leased == 1u);
+	hp_disarm();
+	tr_bus2_hp_return(&hp, &rec, b_barrier);
+	e = tick_event();
+	assert(e && strstr(e, "back on the HE") && !strstr(e, "leased") && he.leased == 1u);
+
+	/* the whole lease between two ticks: claim never observed, but it IS reported as a lease */
+	cold_start();
+	assert(hp_get_offer(50) > 0);
+	assert(hp_step_enter());
+	hp_disarm();
+	tr_bus2_hp_return(&hp, &rec, b_barrier);
+	e = tick_event();
+	assert(e && strstr(e, "leased by the HP and returned") && he.leased == 1u);
+
+	/* an offer nobody claimed is a withdrawal, not a lease */
+	cold_start();
+	rec.hp_state = TR_BUS2_TAG | TR_BUS2_HP_WANT;
+	rec.hp_beat++;
+	assert(tick_event() != NULL);
+	clk += TR_BUS2_OFFER_TIMEOUT_MS + 10;
+	e = tick_event();
+	assert(e && strstr(e, "withdrawn") && !strstr(e, "leased") && he.leased == 0u);
+
+	/* a reclaimed lease: the claim was seen (counted), the end is "back on the HE" */
+	cold_start();
+	assert(hp_get_offer(50) > 0);
+	assert(hp_step_enter());
+	e = tick_event();
+	assert(e && strstr(e, "leased by the HP") && he.leased == 1u);
+	hp_disarm();
+	clk += TR_BUS2_HP_DEAD_MS + 100;
+	e = tick_event();
+	assert(e && strstr(e, "back on the HE") && he.leased == 1u && rec.he_reclaims == 1u);
+}
+
 int main(void)
 {
 	test_two_way();
@@ -826,6 +911,8 @@ int main(void)
 	test_dekker_order();
 	test_unclaimed_offer_is_withdrawn();
 	test_claim_races_the_withdrawal();
+	test_counters_zeroed_at_boot();
+	test_event_log();
 	printf("test_bus2: ok\n");
 	return 0;
 }

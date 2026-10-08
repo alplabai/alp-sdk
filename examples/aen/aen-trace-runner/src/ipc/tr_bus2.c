@@ -1,4 +1,6 @@
 /* src/ipc/tr_bus2.c -- see tr_bus2.h. Pure C, host + HE + HP. */
+#include <stddef.h>
+
 #include "tr_bus2.h"
 
 /* A state word's state, or 0 (none) for a word without the tag (cold SRAM0). */
@@ -47,6 +49,9 @@ bool tr_bus2_he_boot(tr_bus2_he_t        *he,
 	he->hp_moved     = false;
 	he->t_hp_seen    = 0;
 	he->boot_stale   = false;
+	he->leased       = 0u;
+	r->he_regains    = 0u;
+	r->he_reclaims   = 0u;
 	/* Dekker with tr_bus2_hp_enter(): void first, fence, THEN look at the HP's phase. */
 	r->he_state = tr_bus2_word(TR_BUS2_HE_OWNS, 0u);
 	r->he_token = 0u;
@@ -82,6 +87,7 @@ static void he_regain(tr_bus2_he_t *he, volatile tr_bus2_t *r, const tr_bus2_ops
 
 static void he_claimed(tr_bus2_he_t *he, int64_t now)
 {
+	he->leased++;
 	he->st        = TR_BUS2_ST_CLAIMED;
 	he->t_hp_seen = now; /* the claim is itself a sign of life */
 }
@@ -128,7 +134,8 @@ void tr_bus2_he_tick(tr_bus2_he_t        *he,
 		if (hp_holds(r, he->token)) {
 			he_claimed(he, now);
 		} else if (hp_returned(r, he->token)) {
-			he_regain(he, r, o); /* claimed and finished between two ticks */
+			he->leased++; /* the lease passed between two ticks: counted from the RETURN */
+			he_regain(he, r, o);
 		} else if (now - he->t_offer >= (int64_t)TR_BUS2_OFFER_TIMEOUT_MS) {
 			/* Withdraw: void, fence, THEN look (Dekker with the HP's entry). An HP that
 			 * slipped in meanwhile holds a lease the HE must honour: put the offer back. */
@@ -164,6 +171,26 @@ void tr_bus2_he_tick(tr_bus2_he_t        *he,
 	}
 }
 
+const char *tr_bus2_he_event(const tr_bus2_he_t *he, uint8_t before, uint32_t leased_before)
+{
+	if (he->st == before) {
+		return NULL;
+	}
+	switch (he->st) {
+	case TR_BUS2_ST_OFFERED:
+		return "I2C2 offered to the HP";
+	case TR_BUS2_ST_CLAIMED:
+		return "I2C2 leased by the HP";
+	default:
+		if (before == TR_BUS2_ST_OFFERED) {
+			return he->leased != leased_before
+			           ? "I2C2 leased by the HP and returned within one frame: back on the HE"
+			           : "I2C2 offer withdrawn (not claimed): back on the HE";
+		}
+		return "I2C2 back on the HE";
+	}
+}
+
 /* ---- HP ------------------------------------------------------------------------------------ */
 
 static void hp_set(volatile tr_bus2_t *r, uint32_t st, uint32_t token)
@@ -173,7 +200,11 @@ static void hp_set(volatile tr_bus2_t *r, uint32_t st, uint32_t token)
 
 void tr_bus2_hp_boot(volatile tr_bus2_t *r, void (*barrier)(void))
 {
-	r->hp_token = 0u;
+	r->hp_aborts  = 0u;
+	r->hp_i2s_fu  = 0u;
+	r->hp_i2s_err = 0u;
+	r->hp_acq     = 0u;
+	r->hp_token   = 0u;
 	hp_set(r, TR_BUS2_HP_NONE, 0u);
 	barrier();
 }
