@@ -1,5 +1,10 @@
 # `alp model prep` — License-Free Quantize + Accuracy Report (Slice 3a) Implementation Plan
 
+> **STATUS — NOT LANDED HERE; SUPERSEDED.** `scripts/alp_model/` has no `prep.py`
+> module. [ADR 0028](../../adr/0028-tan-owns-the-model-engine.md) (Proposed)
+> moves the `alp model` engine to tan (`python/tan/model/`). Kept as design history.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use `- [ ]` checkboxes.
 
 **Goal:** `alp model prep <raw.onnx> --calibration <dir>` — quantize a model to INT8 and produce an **fp32-vs-int8 accuracy-delta report**, entirely on free `onnxruntime`/`onnx` (no vendor toolchain). Turns "quantization is a dark art" into a guided, measured flow.
