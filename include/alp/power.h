@@ -201,21 +201,26 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_
  *  backend's own retention granularity and sized by @ref
  *  alp_power_retain_t::retain_kb.
  *
- *  The E8's 4 KB Utility SRAM ("BKRAM") is ALWAYS retained and is
- *  reserved for the SDK (wake record, domain-restore state): it is
- *  not application RAM at any level.  The lowest floor an app can
- *  select is therefore the Utility-SRAM-retained rung (STOP_2,
- *  1.1 uA typ., Table 5-5), never the no-retention STOP_5/4/3 rungs. */
+ *  Once the Alif STOP backend lands (#2784), the E8's 4 KB Utility SRAM
+ *  ("BKRAM") is ALWAYS retained and reserved for the SDK (wake record,
+ *  domain-restore state): it is not application RAM at any level.  The
+ *  lowest floor an app can select is then the Utility-SRAM-retained
+ *  rung (STOP_2, 1.1 uA typ., Table 5-5), never the no-retention
+ *  STOP_5/4/3 rungs.  Today's backends have no STOP retention and
+ *  answer NOSUPPORT for everything but NONE. */
 typedef enum {
-	ALP_POWER_RETAIN_NONE    = 0, /**< No application RAM retained.  Only the SDK-reserved
-	                                    boot state survives (E8: the 4 KB Utility SRAM,
-	                                    STOP_2, ~1.1 uA typ.); this is the lowest floor
-	                                    the API can select.  Size a battery off the mode
-	                                    your configured wake source maps to. */
+	ALP_POWER_RETAIN_NONE    = 0, /**< No application RAM retained.  Once the Alif STOP
+	                                    backend lands (#2784) only the SDK-reserved boot
+	                                    state survives (E8: the 4 KB Utility SRAM, STOP_2,
+	                                    ~1.1 uA typ.) and that is the lowest floor the API
+	                                    can select.  Size a battery off the mode your
+	                                    configured wake source maps to. */
 	ALP_POWER_RETAIN_UTILITY = 1, /**< Smallest SoC-guaranteed retained block (e.g. E8's
-	                                    4 KB Utility SRAM, STOP_2, ~1.1 uA typ.).  On
-	                                    backends where that block is SDK-reserved this is
-	                                    equivalent to @ref ALP_POWER_RETAIN_NONE. */
+	                                    4 KB Utility SRAM, STOP_2, ~1.1 uA typ.).  The
+	                                    Alif STOP backend (#2784) treats this as
+	                                    equivalent to @ref ALP_POWER_RETAIN_NONE: it
+	                                    returns ALP_OK and retains nothing extra.  Today's
+	                                    backends still return ALP_ERR_NOSUPPORT. */
 	ALP_POWER_RETAIN_TCM     = 2, /**< @ref alp_power_retain_t::retain_kb KiB of
 	                                    tightly-coupled memory; the backend rounds UP to
 	                                    its own retention granularity (never NOSUPPORT
@@ -307,9 +312,13 @@ alp_status_t alp_power_configure_retention(alp_power_t *handle, const alp_power_
  *
  * @return ALP_OK / ALP_ERR_INVAL (no wake configured + zero
  *         wake_after_ms; or @c mode == RUN; or a timed wake beyond
- *         the backend's counter) / ALP_ERR_NOT_READY /
+ *         the backend's counter; or a domain policy that conflicts
+ *         with an armed wake source) / ALP_ERR_NOT_READY /
  *         ALP_ERR_NOSUPPORT (incl. a configured wake bitmap the
- *         requested @p mode cannot arm) / ALP_ERR_IO (backend transport
+ *         requested @p mode cannot arm, and @c wake_after_ms > 0 on
+ *         a backend that reports per-mode wake capabilities when the
+ *         mode can arm neither @ref ALP_POWER_WAKE_TIMER nor
+ *         @ref ALP_POWER_WAKE_RTC) / ALP_ERR_IO (backend transport
  *         failure mid-cycle).
  */
 alp_status_t alp_power_request_sleep(alp_power_t           *handle,
@@ -546,8 +555,8 @@ typedef struct {
 /** Record of the last STOP / STANDBY cycle, read after the cold-boot wake. */
 typedef struct {
 	bool             valid;                  /**< A wake record from a completed cycle exists;
-	                                     false after a plain power-on reset (the other
-	                                     fields are then zero). */
+	                                              false after a plain power-on reset (the
+	                                              other fields are then zero). */
 	alp_power_mode_t realised_mode;          /**< Mode actually entered. */
 	uint32_t         wake_source;            /**< @c ALP_POWER_WAKE_* bit that fired. */
 	uint32_t         slept_ms;               /**< Sleep duration (best effort). */

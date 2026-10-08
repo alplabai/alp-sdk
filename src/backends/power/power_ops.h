@@ -10,8 +10,8 @@
  * pm_policy_*, priority 100), and yocto_drv.c (real Linux
  * /sys/power/state + RTC wakealarm backend, priority 100, #613).
  * alif_se_profile.c implements the SEPARATE "power_profile" class
- * vtable below, not this one (it has no #2784 domain/boot-info ops).  src/backends/ext/renesas/power.c is
- * NEITHER: it implements no alp_power_ops_t at all -- it's a vendor-
+ * vtable below, not this one (it has no #2784 domain/boot-info ops).
+ * src/backends/ext/renesas/power.c is NEITHER: it implements no alp_power_ops_t at all -- it's a vendor-
  * ext bypass function (alp_renesas_power_supervisor_mode_set) that
  * reads an ALREADY-OPENED alp_power_t handle's backend/state fields
  * directly (see the struct alp_power layout below), so no vendor

@@ -213,7 +213,12 @@ alp_status_t alp_power_request_sleep(alp_power_t           *h,
 	if (h->state.ops->mode_wake_caps != NULL) {
 		mode_caps = h->state.ops->mode_wake_caps(&h->state, mode);
 	}
-	if ((h->state.wake_bitmap & ~mode_caps) != 0u) {
+	/* A timed wake needs a timer-class source in the mode; a backend that
+	 * reports per-mode caps and has neither TIMER nor RTC there cannot
+	 * honour wake_after_ms. */
+	bool timed_unarmable = h->state.ops->mode_wake_caps != NULL && wake_after_ms != 0u &&
+	                       (mode_caps & (ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_RTC)) == 0u;
+	if ((h->state.wake_bitmap & ~mode_caps) != 0u || timed_unarmable) {
 		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_NOSUPPORT;
 	}

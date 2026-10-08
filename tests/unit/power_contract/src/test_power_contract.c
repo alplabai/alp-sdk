@@ -61,6 +61,9 @@ static alp_status_t t_request_sleep(alp_power_backend_state_t *state,
 static uint32_t t_mode_wake_caps(const alp_power_backend_state_t *state, alp_power_mode_t mode)
 {
 	(void)state;
+	if (mode == ALP_POWER_MODE_STANDBY) {
+		return 0u; /* arms nothing: not even a timed wake */
+	}
 	return (mode == ALP_POWER_MODE_STOP) ? ALP_POWER_WAKE_RTC : ALL_WAKE;
 }
 
@@ -119,6 +122,7 @@ static void before(void *fixture)
 	(void)fixture;
 	g_sleep_calls          = 0u;
 	g_policy_calls         = 0u;
+	_ops.mode_wake_caps    = t_mode_wake_caps;
 	_ops.domain_policy_set = NULL;
 	_ops.domain_info       = NULL;
 	_ops.boot_wake_info    = NULL;
@@ -176,6 +180,53 @@ ZTEST(alp_power_contract, test_mode_check_skipped_for_timer_only_request)
 	zassert_not_null(h);
 	zassert_equal(alp_power_request_sleep(h, ALP_POWER_MODE_STOP, 10u, NULL), ALP_OK);
 	alp_power_close(h);
+}
+
+ZTEST(alp_power_contract, test_timed_wake_nosupport_when_mode_arms_no_timer)
+{
+	alp_power_t *h = alp_power_open();
+	zassert_not_null(h);
+	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_NONE), ALP_OK);
+	zassert_equal(alp_power_request_sleep(h, ALP_POWER_MODE_STANDBY, 10u, NULL), ALP_ERR_NOSUPPORT);
+	zassert_equal(g_sleep_calls, 0u);
+	/* wake_after_ms == 0 with a source the mode cannot arm is the other path. */
+	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC), ALP_OK);
+	zassert_equal(alp_power_request_sleep(h, ALP_POWER_MODE_STANDBY, 0u, NULL), ALP_ERR_NOSUPPORT);
+	alp_power_close(h);
+}
+
+ZTEST(alp_power_contract, test_timed_wake_unchecked_without_mode_op)
+{
+	_ops.mode_wake_caps = NULL;
+	alp_power_t *h      = alp_power_open();
+	zassert_not_null(h);
+	zassert_equal(alp_power_request_sleep(h, ALP_POWER_MODE_STANDBY, 10u, NULL), ALP_OK);
+	alp_power_close(h);
+}
+
+ZTEST(alp_power_contract, test_domain_policy_set_closed_handle_not_ready)
+{
+	_ops.domain_policy_set = t_domain_policy_set;
+	alp_power_t *h         = alp_power_open();
+	zassert_not_null(h);
+	alp_power_close(h);
+	zassert_equal(
+	    alp_power_domain_policy_set(h, ALP_POWER_DOMAIN_RTC, ALP_POWER_DOMAIN_POLICY_AUTO),
+	    ALP_ERR_NOT_READY);
+	zassert_equal(g_policy_calls, 0u);
+}
+
+ZTEST(alp_power_contract, test_domain_info_range_reject_zeroes_out)
+{
+	alp_power_domain_info_t info;
+	memset(&info, 0xA5, sizeof(info));
+	zassert_equal(alp_power_domain_info((alp_power_domain_t)-1, &info), ALP_ERR_INVAL);
+	zassert_false(info.present);
+	zassert_equal(info.supported_actions, 0u);
+	zassert_equal(info.dependents, 0u);
+	memset(&info, 0xA5, sizeof(info));
+	zassert_equal(alp_power_domain_info(ALP_POWER_DOMAIN_COUNT, &info), ALP_ERR_INVAL);
+	zassert_equal(info.default_action, 0u);
 }
 
 ZTEST(alp_power_contract, test_no_mode_op_falls_back_to_overall_caps)
