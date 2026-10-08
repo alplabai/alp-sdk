@@ -27,6 +27,8 @@ from alp_orchestrate import emit_build_plan, load_board_yaml  # noqa: E402
 MODES = {
     "dts-overlay": ("alp.overlay", ("zephyr", "baremetal")),
     "cmake-args": ("cmake-args.txt", ("zephyr", "baremetal")),
+    "hw-info-h": ("alp_hw_info_build.h", ("zephyr", "baremetal")),
+    "west-libraries": ("alp-west-libs.yml", ("zephyr", "baremetal")),
 }
 
 BOARDS = [
@@ -130,4 +132,58 @@ def test_any_other_overlay_failure_still_fails_the_plan(monkeypatch):
 
     monkeypatch.setattr(bp, "project_m33_overlay", broken)
     with pytest.raises(OrchestratorError, match="M33 ownership defect"):
+        _plan(REPO / "examples/multicore/rpmsg-aen/board.yaml")
+
+
+# --- artefact order (alp-sdk #2777) ------------------------------------------
+
+
+def test_rendered_artefacts_follow_the_primary_in_fixed_order() -> None:
+    """The seam-1 comparator allows exactly this ordered tail."""
+    tail = ["alp.overlay", "cmake-args.txt", "alp_hw_info_build.h", "alp-west-libs.yml"]
+    for board in BOARDS:
+        for sl in _plan(REPO / board)["slices"]:
+            if sl["backend"] not in ("zephyr", "baremetal"):
+                continue
+            names = [a["path"].rsplit("/", 1)[-1] for a in sl["configArtefacts"]]
+            assert names[-4:] == tail, (board, sl["coreId"], names)
+
+
+def test_unrecognised_sku_downgrades_hw_info_to_a_warning(monkeypatch) -> None:
+    """A SKU outside the production families has no family for the header:
+    the plan warns and omits `alp_hw_info_build.h`, west fragment unaffected."""
+    import alp_project_loader
+
+    def no_family(sku: str) -> str:
+        raise ValueError(f"unrecognised SoM SKU pattern: {sku}")
+
+    monkeypatch.setattr(alp_project_loader, "_sku_family", no_family)
+    plan = _plan(REPO / "examples/multicore/rpmsg-aen/board.yaml")
+    jsonschema.Draft202012Validator(
+        json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))).validate(plan)
+    warned = {w["coreId"] for w in plan["warnings"]
+              if w["code"] == "hw-info-unavailable"}
+    carriers = {sl["coreId"] for sl in plan["slices"]
+                if sl["backend"] in ("zephyr", "baremetal")}
+    assert carriers and warned == carriers
+    for sl in plan["slices"]:
+        names = {a["path"].rsplit("/", 1)[-1] for a in sl["configArtefacts"]}
+        assert "alp_hw_info_build.h" not in names
+        if sl["backend"] in ("zephyr", "baremetal"):
+            assert "alp-west-libs.yml" in names
+
+
+def test_a_non_sku_value_error_in_hw_info_still_fails_the_plan(monkeypatch) -> None:
+    """Only the SKU->family lookup is downgraded. A ValueError from anywhere
+    else in the render (a damaged hw-revisions table, a UnicodeDecodeError)
+    must fail the plan, not silently drop the artefact."""
+    import alp_project_emit.hw_info as hw_info
+
+    def damaged(*args, **kwargs):
+        raise ValueError("hw-revisions.yaml is damaged")
+
+    # Patched at the emitter, not `load_family_table`: alp.conf reads the same
+    # table and would fail the plan first, hiding whether hw-info downgrades it.
+    monkeypatch.setattr(hw_info, "_emit_hw_info_h", damaged)
+    with pytest.raises(ValueError, match="hw-revisions.yaml is damaged"):
         _plan(REPO / "examples/multicore/rpmsg-aen/board.yaml")

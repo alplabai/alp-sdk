@@ -361,7 +361,9 @@ def test_sysbuild_slice_wrong_image_extra_conf_file_still_fails():
     assert _fails(oracle, mutated)
 
 
-# --- the rendered reference artefacts (alp-sdk #2771) ---
+# --- the rendered reference artefacts (alp-sdk #2771, #2777) ---
+
+_FULL_TAIL = ("alp.overlay", "cmake-args.txt", "alp_hw_info_build.h", "alp-west-libs.yml")
 
 
 def _with_extras(plan: dict, *names: str) -> dict:
@@ -377,25 +379,44 @@ def test_rendered_artefacts_after_the_oracles_entries_pass():
     oracle = _load("multicore_rpmsg-aen")
     allowed, failing = s.diff_plans(
         s.normalize_plan(oracle),
-        s.normalize_plan(_with_extras(oracle, "alp.overlay", "cmake-args.txt")))
+        s.normalize_plan(_with_extras(oracle, *_FULL_TAIL)))
     assert not failing
     assert any(p.endswith("[+rendered]") for p, _, _ in allowed)
 
 
 def test_cmake_args_only_no_header_case_passes():
     oracle = _load("multicore_rpmsg-aen")
-    assert not _fails(oracle, _with_extras(oracle, "cmake-args.txt"))
+    assert not _fails(oracle, _with_extras(oracle, *_FULL_TAIL[1:]))
+
+
+def test_downgraded_tails_pass():
+    oracle = _load("multicore_rpmsg-aen")
+    assert not _fails(oracle, _with_extras(
+        oracle, "alp.overlay", "cmake-args.txt", "alp-west-libs.yml"))
+    assert not _fails(oracle, _with_extras(oracle, "cmake-args.txt", "alp-west-libs.yml"))
+
+
+def test_partial_tails_that_never_occur_fail():
+    oracle = _load("multicore_rpmsg-aen")
+    for tail in (_FULL_TAIL[:1], _FULL_TAIL[:2], _FULL_TAIL[:3],
+                 ("cmake-args.txt",), ("alp.overlay",),
+                 ("alp.overlay", "cmake-args.txt"),
+                 _FULL_TAIL[1:3], _FULL_TAIL[2:], ("alp.overlay", "alp_hw_info_build.h", "alp-west-libs.yml"),
+                 ("alp.overlay", "alp-west-libs.yml"),
+                 ("alp_hw_info_build.h", "alp-west-libs.yml")):
+        assert _fails(oracle, _with_extras(oracle, *tail)), tail
 
 
 def test_an_unknown_extra_artefact_fails():
     oracle = _load("multicore_rpmsg-aen")
+    assert _fails(oracle, _with_extras(oracle, *_FULL_TAIL, "surprise.txt"))
     assert _fails(oracle, _with_extras(oracle, "alp.overlay", "surprise.txt"))
     assert _fails(oracle, _with_extras(oracle, "alp-link-itcm.conf"))
 
 
 def test_a_modified_primary_artefact_fails_even_with_the_extras():
     oracle = _load("multicore_rpmsg-aen")
-    mutated = _with_extras(oracle, "alp.overlay", "cmake-args.txt")
+    mutated = _with_extras(oracle, *_FULL_TAIL)
     sl = mutated["slices"][_first_commanded_slice(mutated)]
     sl["configArtefacts"][0]["path"] += ".moved"
     assert _fails(oracle, mutated)
@@ -404,11 +425,13 @@ def test_a_modified_primary_artefact_fails_even_with_the_extras():
 def test_reordered_extras_fail():
     oracle = _load("multicore_rpmsg-aen")
     assert _fails(oracle, _with_extras(oracle, "cmake-args.txt", "alp.overlay"))
+    assert _fails(oracle, _with_extras(
+        oracle, "alp.overlay", "cmake-args.txt", "alp-west-libs.yml", "alp_hw_info_build.h"))
 
 
 def test_extras_inserted_before_the_oracles_entries_fail():
     oracle = _load("multicore_rpmsg-aen")
-    mutated = _with_extras(oracle, "alp.overlay")
+    mutated = _with_extras(oracle, *_FULL_TAIL)
     sl = mutated["slices"][_first_commanded_slice(mutated)]
     sl["configArtefacts"].reverse()
     assert _fails(oracle, mutated)
