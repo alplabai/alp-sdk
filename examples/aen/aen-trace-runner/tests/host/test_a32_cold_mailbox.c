@@ -36,8 +36,10 @@ int main(void)
 	m.in_seq      = 0xA7A7A7A7u;
 	m.out_seq     = 0x13572468u;
 	m.in.rotation = 0xA7A7u;
+	m.in.fw       = 0xA7A7u;
 	tr_mbox_cold_clear(&m);
-	assert(m.in_seq == 0u && m.out_seq == 0u && m.in_fb == 0u && m.in.rotation == 0u);
+	assert(m.in_seq == 0u && m.out_seq == 0u && m.in_fb == 0u && m.in.rotation == 0u &&
+	       m.in.fw == 0u);
 	assert(m.out_dropped == 0u && m.out_frames == 0u && m.pad3[7] == 0u);
 	assert(m.magic == 0x12345678u && m.version == 0x9ABCDEF0u && m.ctrl_entry == 0x02500000u);
 	assert(m.ctrl_cmd == 0xA7A7A7A7u && m.stub_state == 0xA7A7A7A7u); /* not ours to clear here */

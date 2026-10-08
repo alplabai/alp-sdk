@@ -107,6 +107,15 @@ int main(void)
 	assert(TR_MEM_A32_GATE + 0x1000u <= TR_FB_B);
 	assert(TR_MEM_A32_DL == 0x02424000u && TR_MEM_A32_BINS == 0x02460000u);
 	assert(TR_FB_A + TR_FB_SLOT_SIZE <= TR_MEM_A32_SETUP);
+	/* tr_frame_in_t.fw: the panel width, in the old trailing pad (sizeof unchanged) and carried
+	 * across the mailbox; tr_fw_refuse() holds a drawn frame to a width the copy-out can write. */
+	assert(offsetof(tr_frame_in_t, fw) == 174 && sizeof(tr_frame_in_t) == 176);
+	assert(!tr_fw_refuse(1, TR_R3D_W) && !tr_fw_refuse(1, TR_R3D_W - 16u) && !tr_fw_refuse(1, 16u));
+	assert(tr_fw_refuse(1, 0u));                                   /* an HE that never set it */
+	assert(tr_fw_refuse(1, TR_R3D_W - 8u) && tr_fw_refuse(1, 8u)); /* not 16 aligned */
+	assert(tr_fw_refuse(1, TR_R3D_W + 16u) && tr_fw_refuse(1, 65520u)); /* wider than the render */
+	assert(!tr_fw_refuse(0, 0u) && !tr_fw_refuse(0, TR_R3D_W + 1u)); /* a dropped frame: no ABI */
+	f.fw       = TR_R3D_W - 16u;
 	f.rotation = 270; /* does not fit a byte: the field is 16 bits */
 	tr_mbox_publish_in(&g_mbox, &f, TR_FB_A, noop_barrier);
 	{
@@ -114,7 +123,7 @@ int main(void)
 		uint32_t      rfb, rseq;
 
 		assert(tr_mbox_take_in(&g_mbox, 0u, &r270, &rfb, &rseq, noop_barrier));
-		assert(r270.rotation == 270 && tr_rot_valid(r270.rotation));
+		assert(r270.rotation == 270 && tr_rot_valid(r270.rotation) && r270.fw == TR_R3D_W - 16u);
 	}
 	f.rotation = 180; /* carried as is; the renderer refuses it (tr_rot_valid) */
 	tr_mbox_publish_in(&g_mbox, &f, TR_FB_A, noop_barrier);

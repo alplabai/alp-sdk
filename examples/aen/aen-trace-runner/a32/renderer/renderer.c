@@ -549,8 +549,8 @@ static int join_core1(uint32_t seq)
 }
 
 /* The mailbox ABI is wrong (a stub of another TR_MBOX_VERSION, or a frame whose
- * rotation this renderer cannot produce): record what in pad3[7] -- 0xAB1D in
- * the top half, 1 version / 2 rotation | rotation << 8 below -- and fault.
+ * rotation or width this renderer cannot produce): record what in pad3[7] -- 0xAB1D in
+ * the top half, 1 version / 2 rotation | rotation << 8 / 3 width | fw / 16 << 8 below -- and fault.
  * The stub records the fault (UNDEF) and parks; there is no fallback drawing
  * of a frame the HE did not ask for. */
 static void __attribute__((noreturn)) abi_fault(volatile tr_mbox_t *m, uint32_t what)
@@ -639,6 +639,9 @@ void renderer_main(volatile tr_mbox_t *m)
 
 		if (tr_rot_refuse(drawn, in.rotation)) {
 			abi_fault(m, 2u | ((uint32_t)in.rotation & 0xFFu) << 8); /* low byte only: 270 -> 14 */
+		}
+		if (tr_fw_refuse(drawn, in.fw)) {
+			abi_fault(m, 3u | ((uint32_t)in.fw / 16u) << 8); /* fw / 16: 800 -> 50, 0 -> 0 */
 		}
 		if (t_pub_valid) {
 			uint32_t gap = cntvct_lo() - t_pub;

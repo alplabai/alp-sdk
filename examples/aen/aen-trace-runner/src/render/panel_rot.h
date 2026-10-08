@@ -32,6 +32,8 @@
 
 #include <stdint.h>
 
+#include "r3d.h" /* TR_R3D_W: the widest frame the renderer draws */
+
 #define TR_ROT_PORTRAIT_W 720  /* the game's width (== TR_R3D_W) */
 #define TR_ROT_PORTRAIT_H 1280 /* the game's height (== TR_R3D_H) */
 
@@ -47,6 +49,15 @@ static inline int tr_rot_valid(int rot)
 static inline int tr_rot_refuse(int drawn, unsigned rotation)
 {
 	return drawn && !tr_rot_valid((int)rotation);
+}
+
+/* The renderer refuses a frame whose panel width is not one it can write: the framebuffer is
+ * fw px wide (the centre of the TR_R3D_W render), the band copy moves 16 px at a time, and a
+ * panel wider than the render has nothing to fill it with. fw 0 (an HE that never set it) is
+ * refused too. Like the rotation, only a frame that will be drawn is held to it. */
+static inline int tr_fw_refuse(int drawn, unsigned fw)
+{
+	return drawn && !(fw % 16u == 0u && fw >= 16u && fw <= (unsigned)TR_R3D_W);
 }
 
 /* The HUD layer (layer 2): TR_HUD_H portrait rows (hud.h, 352) -> that many

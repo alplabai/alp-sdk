@@ -41,8 +41,9 @@
 /* 2: tr_frame_in_t grew a rotation field (the `in` block 172 -> 176 B). The stub
  * writes its own TR_MBOX_VERSION at init and the renderer refuses to run
  * against a different one; the HE refuses a stub of another version too.
- * 3: memory re-plan (stage 0) -- same mailbox layout, but FB B, the DL, the bins,
- * the stacks and the gate moved, so a matched stub/renderer/HE set is required. */
+ * 3: memory re-plan (stage 0) -- FB B, the DL, the bins, the stacks and the gate moved, so a
+ * matched stub/renderer/HE set is required; tr_frame_in_t.fw (the panel width) is part of it:
+ * the renderer faults on a frame with fw 0 (a stage-0 HE), so a mixed set cannot run. */
 #define TR_MBOX_VERSION 3u
 #define TR_FB_A         0x02000000u /* SRAM0, DT sram0 */
 /* A framebuffer SLOT is 800 x 1280 x 2 B (the stage-1 panel width); TR_FB_SIZE is the bytes
@@ -254,6 +255,11 @@ typedef struct {
 	 * not fit a byte). Anything else (180 included) is a fault in
 	 * the renderer, never a silent fallback. */
 	uint16_t rotation;
+	/* Version 3: the panel's width in px (the DT window's short side, 16 px aligned, <= TR_R3D_W).
+	 * The renderer draws TR_R3D_W wide and writes the framebuffer fw wide, cropping the centre
+	 * columns (panel_rot.h); 0 is an HE that never set it and the renderer refuses it
+	 * (tr_fw_refuse). Appended into what was the block's trailing pad: sizeof stays 176. */
+	uint16_t fw;
 } tr_frame_in_t;
 _Static_assert(sizeof(tr_frame_in_t) == 176,
                "tr_frame_in_t layout drifted -- see file header note");
@@ -271,6 +277,8 @@ _Static_assert(offsetof(tr_frame_in_t, crash_tick) == 152,
 _Static_assert(offsetof(tr_frame_in_t, pace_q8) == 158, "pace_q8 is the old pad3's first byte");
 _Static_assert(offsetof(tr_frame_in_t, hz) == 159, "hz is the old pad3's second byte");
 _Static_assert(offsetof(tr_frame_in_t, rotation) == 172, "rotation follows gate_y");
+_Static_assert(offsetof(tr_frame_in_t, fw) == 174,
+               "fw is the block's last two bytes (the old trailing pad)");
 
 /* A32 -> M55 per-frame stats payload (28 B): the fields after out_seq in
  * tr_mbox_t, bundled so publish/take can move them in one copy. Not a
