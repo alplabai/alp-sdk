@@ -36,8 +36,15 @@ SoM route records as `TBD` (CAM0 enable and reset) is listed in the
 fragment's header as not modelled. A module that routes more lanes than the
 connector carries gets no fragment.
 
-Bench status: the OV9281 path (`innomaker_cam_ov9281`) is bench-proven on
-E1M-V2M103; every other module is **BENCH-UNVERIFIED**. Each generated
+Bench status: the OV9281 path (`innomaker_cam_ov9281`) and the IMX296LQ
+path (`raspberry_pi_global_shutter_camera`: 1 lane, 54 MHz inck, RIIC2 at
+400 kHz, 60 fps `SBGGR10_1X10` 1456x1088, zero CSI/CRU errors over 300
+frames; colour / AWB not tuned) are bench-proven on E1M-V2M103; every other
+module is **BENCH-UNVERIFIED**. The IMX296 fragment names `sony,imx296lq`
+(`linux_compatible` in the module yaml) rather than the auto-detecting
+`sony,imx296`: the module carries the colour part, and the explicit variant
+skips the `SENSOR_INFO` read that returns `0x0000` right after standby
+(patch 0028 adds the settle delay, but only the `lq` node was bench-run). Each generated
 fragment compiles with dtc against both cam0 wrapper dts; bitbake has not
 been run on them.
 
@@ -60,14 +67,14 @@ A module only gets a fragment (and its sensor driver a line in
 patch that adds it (or its lane count) exists in `linux-renesas/`. Today
 `raspberry_pi_camera_module_2` (IMX219), `raspberry_pi_camera_module_1`
 (OV5647) and `innomaker_cam_ov9281` (OV9281) qualify. The IMX296
-(`raspberry_pi_global_shutter_camera`, patch `0018`) and the 2-lane
-`innomaker_cam_imx335` (the native driver is 4-lane only; patch `0019`) get
+(`raspberry_pi_global_shutter_camera`, patch `0028`) and the 2-lane
+`innomaker_cam_imx335` (the native driver is 4-lane only; patch `0029`) get
 their fragments, and IMX296 its config line, the moment those patch files
 land and `gen_camera_dt.py` is re-run.
 
 `clock-noncontinuous` (the OV9281 endpoint): the native 6.1 `ov9282.c`
 ignores it and always writes the gated MIPI clock (`0x4800 = 0x20`); the
-v6.6 backport of patch `0020` writes it only when the endpoint sets the
+v6.6 backport of patch `0030` writes it only when the endpoint sets the
 property. The chip's `endpoint_flags` carries it so the bench-proven gated
 clock survives the driver swap.
 
@@ -120,6 +127,45 @@ clock survives the driver swap.
 
 Report the outcome on #1149 before treating any of this as verified.
 
+## Sensor drivers available (#2618)
+
+`camera-sensors.cfg` builds these drivers, plus the RZ/G2L-family CSI-2
+receiver and CRU, into the kernel (`=y`) on every V2N/V2M machine -- built
+in rather than as modules because the `alp-image-*` images install no
+`kernel-modules` package -- so a camera works once its devicetree node is in the dtb,
+without any `ALP_ENABLE_CAM0_*` switch. Every module with a generated CAM0
+fragment (above) selects its node with `ALP_CAMERA_CAM0`; any other sensor
+needs your own node on the CAM0 I2C bus and a `csi20` endpoint.
+
+| Sensor | Kernel driver | Lanes | Modes / formats | Notes |
+|---|---|---|---|---|
+| OV9281 (mono) | `ov9282` (v6.6, patch 0030) | 2 | 1280x720, 1280x800, 640x400; `Y10_1X10` and `Y8_1X8` | Bench-proven at 1280x720 only |
+| OV5647 | `ov5647` (in 6.1) | 2 | `SBGGR10_1X10` modes of the 6.1 driver | Unverified |
+| IMX219 | `imx219` (in 6.1) | 2 | Bayer modes of the 6.1 driver | Unverified (#1149) |
+| IMX296 (mono / colour) | `imx296` (v6.6 backport, patch 0028) | 1 | 1456x1088; `Y10_1X10` mono, `SBGGR10_1X10` colour | IMX296LQ (colour) bench-verified on E1M-V2M103 CAM0/J5 (1 lane, 54 MHz inck, SBGGR10 1456x1088, 60 fps, zero CSI/CRU errors over 300 frames); colour / AWB is not tuned. No external trigger (XTRIG) in the driver: free-running only. No `sony,imx296.yaml binding in 6.1, so `dtbs_check` does not validate the node |
+| IMX335 | `imx335` (6.1 + patch 0029) | 2 or 4 | 2 lanes: 1296x972 `SRGGB10_1X10`; 4 lanes: 2592x1940 `SRGGB12_1X12` and 1296x972 `SRGGB10_1X10` | With 2 lanes the 12-bit full frame does not fit the link at the default HMAX, so it is hidden |
+
+Devicetree each driver needs (all on the sensor's I2C node and its `port`
+endpoint; lane polarity goes on the `csi20` endpoint, see patch 0017):
+
+- **IMX296**: `compatible = "sony,imx296"` (or `sony,imx296ll` / `sony,imx296lq`
+  to force mono / colour; plain `sony,imx296` auto-detects, which needs the settle delay patch 0028
+  adds after leaving standby), `reg = <0x1a>`.
+  `clocks` of 37.125, 54 or 74.25 MHz (`clock-names = "inck"`),
+  `avdd-supply`, `dvdd-supply`, `ovdd-supply`, endpoint `data-lanes = <1>`.
+  The driver does not parse the endpoint, so the lane count is only what
+  the receiver endpoint says.
+- **IMX335**: `compatible = "sony,imx335"`, `reg = <0x1a>`. A 24 MHz
+  `clocks` entry (any other rate is rejected), `avdd-supply`, `ovdd-supply`,
+  `dvdd-supply`, optional `reset-gpios`. Endpoint
+  `data-lanes = <1 2>` (2 lanes) or `<1 2 3 4>` and
+  `link-frequencies = /bits/ 64 <594000000>;` for both. The CRU captures
+  the 10-bit binned mode as `CR10` with bytesperline `1296 * 8`. The
+  2-lane 12-bit full frame is intentionally not offered.
+- **OV9281 / OV9282**: endpoint `link-frequencies = /bits/ 64 <400000000>;`,
+  `data-lanes = <1 2>`, and `clock-noncontinuous;` for the gated MIPI clock
+  (without it the driver uses a continuous clock and different timing).
+
 ## OV9281 on CAM0 (J5), opt-in (#2612)
 
 A monochrome OmniVision OV9281 (RPi-style 15-pin module) on the E1M-X-EVK
@@ -143,9 +189,17 @@ Carrier facts the fragment encodes:
 - Power: J5 3V3 is always on. Clock: the module's own 24 MHz oscillator,
   represented by a `fixed-clock`.
 
-6.1.141-cip43 `ov9282.c` facts: compatible is `ovti,ov9282` only (the
+`ov9282.c` facts (the v6.6 driver, backported by patch
+`0030-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch`): compatible
+`ovti,ov9282` or `ovti,ov9281` (the fragment uses `ovti,ov9281`; the
 OV9281 shares chip ID `0x9281`); 2 lanes; link frequency `400000000` Hz
-only; one mode, **1280x720 `Y10_1X10`** (no native 1280x800 mode).
+only; three modes, **1280x720** (default), **1280x800** (full array) and
+**640x400** (2x2 binned), each as `Y10_1X10` or `Y8_1X8`. The v6.6 driver
+only writes the gated MIPI clock (`0x4800 = 0x20`) when the endpoint has
+`clock-noncontinuous`; the bench-proven 0016/0017 run used the gated clock,
+so the fragment sets it on `cam0_sensor_out`. It also requests
+`avdd`/`dovdd`/`dvdd` supplies; none is described (J5 3V3 is always on), so
+three "using dummy regulator" lines in `dmesg` are expected.
 Streaming needs kernel patch
 `0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch` (applied
 unconditionally by `linux-renesas_%.bbappend`): without it the RZ/G2L CSI-2
@@ -196,6 +250,19 @@ writes the 64-bit packed data into each line). Observed line layout: 1280 px
 = 214 packed 64-bit words (1712 B) plus 2 trailing words, well inside the
 10240 B bytesperline. An 8-bit greyscale sensor
 (`Y8_1X8`) uses `pixelformat=GREY` instead.
+
+The other modes use the same recipe with the size changed, for example
+the full array:
+
+```
+media-ctl -d /dev/media0 -V "'ov9282 <bus>-0060':0 [fmt:Y10_1X10/1280x800]"
+media-ctl -d /dev/media0 -V "'<csi2 entity>':0 [fmt:Y10_1X10/1280x800]"
+media-ctl -d /dev/media0 -V "'cru-ip-16000000.video':0 [fmt:Y10_1X10/1280x800]"
+v4l2-ctl -d /dev/video0 --set-fmt-video=width=1280,height=800,pixelformat=CR10
+```
+
+(`640x400` likewise; `CR10` bytesperline is always `width * 8`.) The
+non-720p modes and `Y8_1X8` are unverified on the bench.
 
 The default image is dark (the `ov9282` driver defaults to exposure 642,
 analogue gain 16). Raise them on the **sensor** subdev (find it with

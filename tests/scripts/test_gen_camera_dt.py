@@ -64,30 +64,50 @@ def test_imx219_on_cam0(want):
 
 GS = f"{OUT}/e1m-x-evk-cam0-raspberry_pi_global_shutter_camera.dtsi"
 IMX335 = f"{OUT}/e1m-x-evk-cam0-innomaker_cam_imx335.dtsi"
-P0018 = "0018-media-i2c-add-imx296-backport.patch"
-P0019 = "0019-media-i2c-imx335-2-lane-10-bit-binned-mode.patch"
+P0028 = "0028-media-i2c-add-imx296-backport.patch"
+P0029 = "0029-media-i2c-imx335-2-lane-10-bit-binned-mode.patch"
 
 
-def test_unserved_modules_have_no_fragment_and_no_kconfig(want):
-    """IMX296 is not in the 6.1 kernel (patch 0018 pending) and the native
-    IMX335 is 4-lane only (patch 0019 pending): no fragment, no config line."""
+def test_imx296_on_cam0_matches_the_bench_proven_dt(want):
+    """IMX296LQ on E1M-V2M103 CAM0/J5, bench 2026-10-08 (60 fps, SBGGR10 1456x1088):
+    1 lane, 54 MHz inck, RIIC2 400 kHz at 0x1a, lane-polarities <1 1>, the IO16 mux
+    hog low, an always-on 3.3 V rail, no reset / enable GPIOs.  The explicit
+    `sony,imx296lq` skips the SENSOR_INFO auto-identify."""
+    t = want[GS]
+    assert 'compatible = "sony,imx296lq";' in t and "reg = <0x1a>;" in t
+    assert 'clock-names = "inck";' in t and "clock-frequency = <54000000>;" in t
+    assert "clock-frequency = <400000>;" in t
+    assert "data-lanes = <1>;" in t and "data-lanes = <1 2>" not in t
+    assert "lane-polarities = <1 1>;" in t
+    assert "gpios = <7 GPIO_ACTIVE_HIGH>;\n\t\toutput-low;" in t
+    assert 'regulator-name = "cam0-3v3";' in t and "regulator-always-on;" in t
+    for s in ("avdd", "dvdd", "ovdd"):
+        assert f"{s}-supply = <&cam0_supply>;" in t
+    assert "reset-gpios" not in t and "link-frequencies" not in t
+    assert "CONFIG_VIDEO_IMX296=y" in want[CFG]
+
+
+def test_imx335_two_lane_fragment_is_generated(want):
+    assert "data-lanes = <1 2>;" in want[IMX335]
+    assert "CONFIG_VIDEO_IMX335=y" in want[CFG]
+
+
+def test_missing_patches_drop_fragment_and_kconfig(tree):
+    """IMX296 is not in the 6.1 kernel and the native IMX335 is 4-lane only: without
+    their alp patches there is no fragment (and no IMX296 config line)."""
+    (tree / OUT / P0028).unlink()
+    (tree / OUT / P0029).unlink()
+    want = g.generate(tree)
     assert GS not in want and IMX335 not in want
-    cfg = want[CFG]
-    assert "IMX296" not in cfg
-    assert "CONFIG_VIDEO_IMX335=y" in cfg  # native driver, so built in
+    assert "IMX296" not in want[CFG]
+    assert "CONFIG_VIDEO_IMX335=y" in want[CFG]  # native driver, so still built in
     assert OV9281 in want and IMX219 in want
 
 
-def test_patch_presence_enables_driver_and_lane_count(tree):
-    assert GS not in g.generate(tree) and IMX335 not in g.generate(tree)
-    (tree / OUT / P0018).write_text("p", encoding="utf-8")
-    (tree / OUT / P0019).write_text("p", encoding="utf-8")
-    want = g.generate(tree)
-    assert "CONFIG_VIDEO_IMX296=y" in want[CFG]
-    t = want[GS]
-    assert "data-lanes = <1>;" in t and "lane-polarities = <1 1>;" in t
-    assert 'clock-names = "inck";' in t and "link-frequencies" not in t
-    assert "data-lanes = <1 2>;" in want[IMX335]
+def test_module_linux_compatible_defaults_to_the_chips(tree):
+    p = tree / "metadata/camera_modules/raspberry_pi_global_shutter_camera.yaml"
+    p.write_text(p.read_text(encoding="utf-8").replace('linux_compatible: "sony,imx296lq"\n', ""), encoding="utf-8")
+    assert 'compatible = "sony,imx296";' in g.generate(tree)[GS]
 
 
 def test_kernel_config_lists_receiver_and_available_sensors(want):

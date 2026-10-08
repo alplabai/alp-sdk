@@ -310,7 +310,7 @@ def render_fragment(ctx: Ctx, board_name: str, board: dict, conn: str, mod: dict
           f"{t}clock-frequency = <{I2C_HZ}>;",
           f'{t}status = "okay";', "",
           f"{t}{pre}_sensor: camera@{mod['i2c_addr_7bit']:x} {{",
-          f'{t}{t}compatible = "{lx["compatible"]}";',
+          f'{t}{t}compatible = "{mod.get("linux_compatible", lx["compatible"])}";',
           f"{t}{t}reg = <0x{mod['i2c_addr_7bit']:x}>;",
           f"{t}{t}clocks = <&{pre}_xclk>;"]
     if lx.get("clock_name"):

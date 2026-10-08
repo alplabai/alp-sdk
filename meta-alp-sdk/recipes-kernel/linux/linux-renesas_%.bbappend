@@ -86,6 +86,9 @@ SRC_URI:append = " \
     file://0025-gpio-gd32-bridge-add-cam-en-ldo-lines-and-make-can-stby-requestable.patch \
     file://0026-gpio-gd32-bridge-i2c3-proxy-adapter-and-polled-irqchip.patch \
     file://0027-pwm-gd32-bridge-provider-over-cmd-pwm-set-get.patch \
+    file://0028-media-i2c-add-imx296-backport.patch \
+    file://0029-media-i2c-imx335-2-lane-10-bit-binned-mode.patch \
+    file://0030-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch \
     file://uio.cfg \
     file://e1m-v2n-doorbell.dtsi \
     file://panic.cfg \
@@ -158,6 +161,24 @@ python () {
 # 0x30.  The patch programs it from lane-polarities (all data lanes or none);
 # the cam0 dtsi fragments set <1 1 1> on the csi20 endpoint.  Applied
 # unconditionally: with no lane-polarities the register is still written 0.
+#
+# 0028 (IMX296 driver, #2618): the 6.1 tree has no Sony IMX296 driver.  The
+# patch backports v6.6 imx296.c (1-lane 1456x1088, colour SBGGR10 / mono Y10;
+# .probe_new for the 6.1 i2c_driver API) with a 6.1-style Kconfig entry that
+# selects REGMAP_I2C.  A new driver: nothing else changes, so unconditional.
+#
+# 0029 (IMX335 2-lane, #2618): the 6.1 imx335 accepts four data lanes and one
+# 2592x1940 SRGGB12 mode.  The patch reads 2 or 4 lanes from the endpoint,
+# programs LANEMODE, adds a 1296x972 SRGGB10 2x2 binned mode and derives the
+# pixel rate from lanes and bit depth; on 2 lanes only the binned mode is
+# offered (the 12-bit full frame cannot fit the link at the default HMAX).
+# 4-lane behaviour is unchanged.
+#
+# 0030 (OV9282 v6.6 modes, #2618): replaces the 6.1 ov9282.c with the v6.6
+# one: 1280x800 and 640x400 modes next to the default 1280x720, Y8_1X8 next
+# to Y10_1X10, and the ovti,ov9281 compatible.  v6.6 only writes the gated
+# MIPI clock (0x4800 = 0x20) when the endpoint has clock-noncontinuous, which
+# the bench-proven 0016/0017 run used, so e1m-x-evk-cam0-ov9281.dtsi sets it.
 #
 # 0012 (UIO default match, #2374): uio_pdrv_genirq binds no DT node until
 # of_id is set, and the stored U-Boot bootargs cannot be relied on to carry
