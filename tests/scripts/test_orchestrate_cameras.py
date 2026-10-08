@@ -48,6 +48,13 @@ V2M = """
     cameras:
 """ + CAM
 
+NL = chr(10)
+A32_OFF = "      a32_cluster:" + NL + '        os: "off"' + NL
+A55_IMAGE = "      a55_cluster:" + NL + "        image: alp-image-edge" + NL
+A55_OFF = "      a55_cluster:" + NL + '        os: "off"' + NL
+HE_APP = "      m55_he:" + NL + "        app: ./src" + NL
+HE_OFF = "      m55_he:" + NL + '        os: "off"' + NL
+
 SHIELD = "e1m_evk_rpi_csi innomaker_cam_ov9281"
 OV9281 = "innomaker_cam_ov9281"
 
@@ -138,15 +145,40 @@ def test_v2m_linux_camera_with_cm33_app_builds_both(tmp_path: Path) -> None:
     assert cm33 and not any("SHIELD" in a for a in cm33)
 
 
-def test_v2m_cm33_app_and_linux_without_core_is_ambiguous(tmp_path: Path) -> None:
+def test_v2m_cm33_app_and_linux_camera_without_core_a55_owns_it(
+        tmp_path: Path) -> None:
+    # X-EVK CAM0 has `linux: true` and no zephyr_shields: only the A55 can own it.
     path = _write(tmp_path, V2M, module="raspberry_pi_global_shutter_camera")
-    assert any("ambiguous camera owner" in m and "cameras[].core" in m
-               for m in _b003(path))
     plan = _plan(path)
-    assert _blocked(plan) == {"a55_cluster", "m33_sm"}
-    # no Yocto slice got the variable either
+    assert not _b003(path) and not plan["warnings"]
     conf = _artefact(_slice(plan, "a55_cluster"), "local.conf")["contents"]
-    assert "ALP_CAMERA_CAM" not in conf
+    assert 'ALP_CAMERA_CAM0 = "raspberry_pi_global_shutter_camera"' in conf
+    assert _args(plan, "m33_sm") and not any("SHIELD" in a for a in _args(plan, "m33_sm"))
+
+
+def test_aen_default_topology_a32_yocto_does_not_make_it_ambiguous(
+        tmp_path: Path) -> None:
+    # The E1M-EVK connector is Zephyr-only: the A32 Yocto core is not a candidate.
+    path = _write(tmp_path, AEN.replace(A32_OFF, ""))
+    plan = _plan(path)
+    assert not _b003(path)
+    assert f"-DSHIELD={SHIELD}" in _args(plan, "m55_he")
+
+
+def test_zero_candidates_message_names_the_supported_os(tmp_path: Path) -> None:
+    # V2M, CM33 app only (A55 parked): the connector supports Linux, not Zephyr.
+    body = V2M.replace(A55_IMAGE, A55_OFF)
+    path = _write(tmp_path, body, module="raspberry_pi_global_shutter_camera")
+    assert any("supports Linux (Yocto) only" in m for m in _b003(path))
+    # AEN, connector Zephyr-only, Zephyr core parked.
+    body = AEN.replace(HE_APP, HE_OFF)
+    assert any("supports Zephyr only" in m for m in _b003(_write(tmp_path, body)))
+
+
+def test_explicit_yocto_core_needs_connector_linux_flag(tmp_path: Path) -> None:
+    path = _write(tmp_path, AEN.replace(A32_OFF, ""), core="a32_cluster")
+    assert any("does not declare Linux support" in m for m in _b003(path))
+    assert "a32_cluster" in _blocked(_plan(path))
 
 
 def test_v2m_single_linux_owner_has_yocto_line(tmp_path: Path) -> None:

@@ -383,8 +383,9 @@ cameras:
   `populated:` and `e1m_routes:`).  Per connector: `refdes`, `csi` (E1M CSI
   receiver), `lanes`, `i2c` (an `e1m_routes.buses` macro), and optionally
   `select` (mux GPIO levels), `enable`, `reset` (`e1m_routes.gpio` macros),
-  `supply` (what feeds the module, e.g. `fixed-3v3`), `lane_polarity` and
-  `notes`.  Signals reference macros already declared in `e1m_routes:`;
+  `supply` (what feeds the module, e.g. `fixed-3v3`), `lane_polarity`,
+  `zephyr_shields` (Zephyr carrier shields) and `linux` (true if a Linux core can
+  drive it) and `notes`.  Signals reference macros already declared in `e1m_routes:`;
   pads are never restated.
 - The `active_low` flag of the route behind `enable` / `reset` is
   **normative**: generators emit `GPIO_ACTIVE_LOW` from it.  An asserted
@@ -398,13 +399,20 @@ cameras:
   (`scripts/alp_orchestrate/cameras.py`) turns each entry into the per-OS
   build input, so the same line works on every SoM.  Each camera has exactly
   ONE owner core and only that core's build is touched:
-  - **Owner:** `cameras[].core`, or, when omitted, the single candidate core
-    -- a Zephyr core running a customer app (not `alp-stock-shim`) or a Yocto
-    core.  No candidate, or several (e.g. a V2M with a CM33 app and an A55
-    image, or AEN M55-HE and M55-HP both running apps), is an ALP-B003 error
-    "ambiguous camera owner" until `core:` is set.  `core:` must name a
-    candidate.  The rule is `scripts/alp_orchestrate/camera_owner.py`, shared
-    by `tan validate` and the planner.
+  - **Owner:** `cameras[].core`, or, when omitted, the single core whose OS
+    the camera's CONNECTOR supports.  A Zephyr core running a customer app
+    (not `alp-stock-shim`) qualifies when the connector has a non-empty
+    `zephyr_shields:` AND the module has a `zephyr_shield:`; a Yocto core
+    qualifies when the connector declares `linux: true` (set on the X-EVK
+    CAM0 only, tied to the generated Linux sensor DT).  So the E1M-EVK CAM0 is
+    owned by the M55 app core and the X-EVK CAM0 by the A55, with no `core:`
+    needed, whatever else the SoM runs.  No qualifying core is an ALP-B003
+    error naming the OS the connector supports; several (e.g. AEN M55-HE and
+    M55-HP both running apps) is "ambiguous camera owner" until `core:` is
+    set.  An explicit `core:` must be a Zephyr customer-app or Yocto core, and
+    then gets the per-OS checks below.  The rule is
+    `scripts/alp_orchestrate/camera_owner.py`, shared by `tan validate` and the
+    planner.
   - **Zephyr** owner: one `-DSHIELD="<carrier shields> <module shield>"` on
     the `west build` command (one argv element `SHIELD=a b`; a shell needs the
     quotes) and in `cmake-args.txt`.  On a sysbuild (`boot:`/`security.psa:`)

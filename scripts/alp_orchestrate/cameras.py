@@ -3,7 +3,8 @@
 
 One resolver for both OS lanes, so the same board.yaml line picks the camera
 on every SoM.  Ownership (which core gets the camera) is `camera_owner.py`,
-shared with the CLI validator; ONLY the owner core's build is touched:
+shared with the CLI validator; ONLY the owner core's build is touched (the owner is the core whose OS the
+connector supports, see there):
 
   * Zephyr owner -> ONE `-DSHIELD=<carrier shields> <module shield>` define
     (carrier half from the board's `camera_connectors.<CAMn>.zephyr_shields`,
@@ -62,10 +63,14 @@ def _plans(project: BoardProject, repo: Path = REPO) -> list[CameraPlan]:
     modules = {c["module"]: _module(project, c["module"]) for c in cams}
     plans = plan_cameras(cams, _connectors(project), _cores(project),
                          {m: d for m, d in modules.items() if d is not None}, repo)
+    connectors = _connectors(project)
     for p in plans:
         if modules.get(p.module) is None:
             p.errors.append(f"cameras: unknown module '{p.module}' "
                             f"(no metadata/camera_modules/{p.module}.yaml)")
+        if p.connector not in connectors:
+            p.errors.append(f"cameras: connector '{p.connector}' is not a camera "
+                            f"connector of this board")
     return plans
 
 
