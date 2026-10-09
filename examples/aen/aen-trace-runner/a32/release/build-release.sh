@@ -32,8 +32,8 @@
 #   With TR_HP_SOUND (the combined image below) the HE must also be built with
 #   -DTR_HP_SOUND=ON (src/platform/bus2_he.c): without it the HP's sound never
 #   gets the bus. Refused unless zephyr.elf carries tr_bus2_he_frame.
-# Partner logo (optional): the HE built with -DTR_PARTNER_LOGO=<header from tools/genlogo.py> draws it
-#   on every HUD screen (src/hud/hud.c). Without the option nothing is drawn. This script only checks
+# Partner logo (optional): the HE built with -DTR_PARTNER_LOGO=<header from tools/genlogo.py> puts it
+#   beside the ALP LAB mark in the attract header (src/hud/hud.c). Without the option the banner is unchanged. This script only checks
 #   that the elf and the build's CMakeCache agree (a configured logo is linked in, none otherwise)
 #   and says so; the header is the partner's artwork and lives outside this repo.
 # MRAM_READBACK (optional): a raw read-back of LIVE MRAM from 0x80000000

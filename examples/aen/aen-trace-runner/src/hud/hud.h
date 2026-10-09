@@ -143,14 +143,17 @@ void tr_hud_view_booth(tr_hud_view_t *v, const tr_hiscore_t *hs, const tr_initia
 void tr_hud_view_zone(tr_hud_view_t *v, uint8_t zone, uint32_t seq);
 
 #ifdef TR_PARTNER_LOGO_HEADER
-/* The optional partner logo (CMake -DTR_PARTNER_LOGO=<header>, tools/genlogo.py), drawn on every
- * screen on a card-style plate: the plate's rect in HUD pixels (rotation 0), the logo centred in it
- * with TR_HUD_PARTNER_PAD around. There are two sizes: the full one, and the compact one the
- * crash / banner / initials / high-score screens get (tr_hud_partner_logo_compact()), whose text
- * runs nearer the left edge. Only declared when the logo is built in. */
-#define TR_HUD_PARTNER_PAD 6
-bool tr_hud_partner_logo_rect(bool compact, int *x, int *y, int *w, int *h);
-bool tr_hud_partner_logo_compact(const tr_hud_view_t *v, uint32_t frame);
+/* The optional co-brand header (CMake -DTR_PARTNER_LOGO=<header>, tools/genlogo.py): the attract
+ * header card holds the ALP LAB mark, a divider and the partner's logo. Where each sits, in HUD
+ * pixels (rotation 0). Only declared when the logo is built in. */
+typedef struct {
+	int card_x, card_y, card_w, card_h;
+	int alp_x, alp_y, alp_w, alp_h;
+	int div_x, div_y, div_h; /* the divider is 1 px wide */
+	int logo_x, logo_y, logo_w, logo_h;
+} tr_hud_partner_layout_t;
+
+void tr_hud_partner_layout(tr_hud_partner_layout_t *l);
 #endif
 
 void tr_hud_init(tr_hud_t *h);

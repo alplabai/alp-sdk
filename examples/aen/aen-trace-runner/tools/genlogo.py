@@ -1,28 +1,25 @@
 #!/usr/bin/env python3
 """tools/genlogo.py -- a partner logo (PNG or SVG) -> an ARGB4444 C header for the HUD.
 
-The HUD (src/hud/hud.c) draws an OPTIONAL partner logo, always on, from a
-generated header named by the build (CMake -DTR_PARTNER_LOGO=<header>). With
+The HUD (src/hud/hud.c) draws an OPTIONAL partner logo beside the ALP LAB mark in its
+attract header card, from a generated header named by the build (CMake -DTR_PARTNER_LOGO=<header>). With
 no header nothing is drawn and the image is byte-identical. This tool makes
 that header; the logo artwork and its header are the partner's trademark and
 are NOT committed here -- keep them in a private repo and pass the path.
 
-    python3 tools/genlogo.py LOGO.{png,svg} OUT.h [--box 210x77] [--small-box 118x43] [--source URL]
+    python3 tools/genlogo.py LOGO.{png,svg} OUT.h [--box 124x45] [--source URL]
 
-Two sizes are made: the full one (--box) for the HUD screens with room (play, attract),
-and a compact one (--small-box) for the screens whose text reaches the left edge (the
-crash, banner, initials and high-score screens). Each is scaled to fit its box (keeping the
-aspect ratio, never upscaled past the box), composited in premultiplied alpha (no dark fringes) and quantised to
-ARGB4444, straight alpha: A[15:12] R[11:8] G[7:4] B[3:0] -- the HUD buffer's own
-format (hud.h). The pixels are stored as 8-bit indices into a palette of the
-logo's distinct ARGB4444 values (index 0 = clear), half the flash of raw pixels --
-the HE image has only 256 KiB of ITCM. OUT.h defines, per size, TR_PARTNER_LOGO_W / _H,
-tr_partner_logo_pal[] and tr_partner_logo[] (the compact size: TR_PARTNER_LOGO_S_*,
-tr_partner_logo_s*) and TR_PARTNER_LOGO_PX(i) (pixel i's value); a logo with more than
-256 distinct values needs a smaller box.
+The logo is scaled to fit --box (keeping its aspect ratio, never upscaled past the box),
+composited in premultiplied alpha (no dark fringes) and quantised to ARGB4444, straight
+alpha: A[15:12] R[11:8] G[7:4] B[3:0] -- the HUD buffer's own format (hud.h). The pixels
+are stored as 8-bit indices into a palette of the logo's distinct ARGB4444 values (index
+0 = clear), half the flash of raw pixels -- the HE image has only 256 KiB of ITCM. OUT.h
+defines TR_PARTNER_LOGO_W / _H / _NPAL, tr_partner_logo_pal[], tr_partner_logo[] and
+TR_PARTNER_LOGO_PX(i) (pixel i's value); a logo with more than 256 distinct values needs a
+smaller --box.
 
-The default box is the largest logo the HUD's plate takes (hud.c PARTNER_BOX_W/H);
-hud.c refuses a bigger header at compile time.
+The default box is the largest logo the HUD's co-brand header takes (hud.c CB_BOX_W/H, the
+height of the ALP LAB mark beside it); hud.c refuses a bigger header at compile time.
 
 Needs Pillow + numpy; SVG input also needs `pip install resvg_py`.
 """
@@ -108,8 +105,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("logo")
     ap.add_argument("out")
-    ap.add_argument("--box", default="210x77", help="max WxH in px, the full size (default 210x77)")
-    ap.add_argument("--small-box", default="118x43", help="max WxH in px, the compact size (default 118x43)")
+    ap.add_argument("--box", default="124x45", help="max WxH in px (default 124x45)")
     ap.add_argument("--source", default="", help="where the artwork came from (recorded in the header)")
     a = ap.parse_args()
     o = [
@@ -119,12 +115,11 @@ def main():
     if a.source:
         o.append(" * Source: %s" % a.source)
     o.append(" * ARGB4444 straight alpha. Partner artwork: keep out of public repos. */")
-    full, w, h, n = variant(a.logo, a.box, "", "tr_partner_logo")
-    small, sw, sh, _ = variant(a.logo, a.small_box, "_S", "tr_partner_logo_s")
-    o += full + small
+    body, w, h, _ = variant(a.logo, a.box, "", "tr_partner_logo")
+    o += body
     with open(a.out, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(o) + "\n")
-    print("genlogo: %s -> %s (full %dx%d, compact %dx%d)" % (a.logo, a.out, w, h, sw, sh))
+    print("genlogo: %s -> %s (%dx%d)" % (a.logo, a.out, w, h))
 
 
 if __name__ == "__main__":

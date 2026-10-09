@@ -170,7 +170,7 @@ rewrites whole 16 KiB sectors, and that read-back is the only way to restore the
 | `TR_CAM_MIRROR` | `ON` | With `TR_INPUT_NPU`: the HP mirrors the view like a selfie; decides which arm is the player's left. Same value on the HP build |
 | `TR_M55_AUTOLAUNCH` | `OFF` | HE launches the A32 renderer at boot (release) |
 | `TR_TILT_TAKEOVER` | `OFF` | The IMU tilt takes over steering when no player is seen |
-| `TR_PARTNER_LOGO` | empty | Path of a header from `tools/genlogo.py`: that partner logo is drawn on every HUD screen, on a card-style plate down the left edge (level with the power tile; a compact one on the crash, banner, initials and high-score screens). Empty draws nothing and leaves the image unchanged. The artwork is the partner's trademark and is not in this repo |
+| `TR_PARTNER_LOGO` | empty | Path of a header from `tools/genlogo.py`: the attract header card then holds the ALP LAB mark, a divider and that partner logo. Empty draws the ALP LAB banner alone and leaves the image unchanged. The artwork is the partner's trademark and is not in this repo |
 
 ## Switching the display: Riverdi RVT121 (12.1" LVDS)
 

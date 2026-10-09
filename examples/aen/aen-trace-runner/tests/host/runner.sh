@@ -74,16 +74,18 @@ for t in test_panel_hz test_step test_pace test_tilt test_tilt_takeover test_att
 		echo "FAIL: tests/host/$t.c -DTR_PANEL_HZ=30"; rc=1
 	fi
 done
-# The optional partner logo (hud.c TR_PARTNER_LOGO_HEADER, tools/genlogo.py): test_hud.c's logo section
-# and the rotated-HUD test against a SYNTHETIC logo at the largest sizes the HUD accepts (210 x 77 and 118 x 43; an
+# The optional partner logo (hud.c TR_PARTNER_LOGO_HEADER, tools/genlogo.py): test_hud.c's co-brand header
+# section and the rotated-HUD test against a SYNTHETIC logo at the largest size the header accepts (124 x 45; an
 # opaque frame, half-alpha stripes, clear gaps -- every alpha class). No real partner artwork is in
 # this repo; the default build above runs the same tests with no logo (nothing drawn).
 logo_h="$RUN_TMP/synthetic_partner_logo.h"
-awk 'function size(pre, name, w, h,    x, y, v) {
-	print "#define TR_PARTNER_LOGO" pre "_W " w
-	print "#define TR_PARTNER_LOGO" pre "_H " h
-	print "static const uint16_t " name "_pal[4] = { 0x0000, 0xFFFF, 0x8F63, 0x3ABC };"
-	print "static const uint8_t " name "[TR_PARTNER_LOGO" pre "_W * TR_PARTNER_LOGO" pre "_H] = {"
+awk 'BEGIN {
+	w = 124; h = 45
+	print "#define TR_PARTNER_LOGO_W " w
+	print "#define TR_PARTNER_LOGO_H " h
+	print "#define TR_PARTNER_LOGO_NPAL 4"
+	print "static const uint16_t tr_partner_logo_pal[4] = { 0x0000, 0xFFFF, 0x8F63, 0x3ABC };"
+	print "static const uint8_t tr_partner_logo[TR_PARTNER_LOGO_W * TR_PARTNER_LOGO_H] = {"
 	for (y = 0; y < h; y++) {
 		for (x = 0; x < w; x++) {
 			if (x == 0 || y == 0 || x == w - 1 || y == h - 1) v = 1
@@ -95,11 +97,7 @@ awk 'function size(pre, name, w, h,    x, y, v) {
 		print ""
 	}
 	print "};"
-	print "#define TR_PARTNER_LOGO" pre "_PX(i) (" name "_pal[" name "[i]])"
-}
-BEGIN {
-	size("", "tr_partner_logo", 210, 77)
-	size("_S", "tr_partner_logo_s", 118, 43)
+	print "#define TR_PARTNER_LOGO_PX(i) (tr_partner_logo_pal[tr_partner_logo[i]])"
 }' >"$logo_h"
 for t in test_hud test_hud_rot; do
 	out="$RUN_TMP/tr-$t-logo"
