@@ -2,7 +2,9 @@
 
 First-light bench proof for Raspberry-Pi-style MIPI CSI-2 camera modules on
 the E1M-EVK's J5 connector, on an E1M-AEN801/AEN803 SoM (Alif Ensemble E8,
-M55-HE). Exercises the portable `<alp/camera.h>` API only — open, start,
+M55-HE or M55-HP) or an E1M-AEN401 SoM (Alif Ensemble E4, M55-HP only;
+compile-only, not bench-verified). IMX335 capture on the E1M-AEN803 M55-HP
+is bench-verified (2026-10-09). Exercises the portable `<alp/camera.h>` API only — open, start,
 capture-with-timeout, release, stop, close — the same four calls whichever
 sensor shield is stacked underneath. **OV9281 and OV5647 are fully
 bench-verified**: OV9281 (2026-09-21, an E1M-AEN803 on the E1M-EVK: real
@@ -39,6 +41,10 @@ ZEPHYR_BASE=<zephyr> west build \
   -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-camera-firstlight -- \
   "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>" \
   -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"   # OV5647, RAW10 640x480
+
+# M55-HP instead of M55-HE (E8), or the E4 (compile-only):
+#   -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
+#   -b alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp
 
 # ... or:
   -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"            # OV9281, GREY8 640x400

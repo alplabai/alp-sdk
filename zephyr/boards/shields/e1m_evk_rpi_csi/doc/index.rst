@@ -20,8 +20,8 @@ their own oscillator). Its control I2C is E1M ``I2C1``, shared with the DSI
 connector's touch controller.
 
 The labels map onto SoC nodes and pins, so each supported SoM target has its
-own overlay under ``boards/``. The E1M-AEN HE targets share
-``boards/e1m_aen.dtsi``: the CSI-2 host on the E8's dedicated receive D-PHY,
+own overlay under ``boards/``. The E1M-AEN targets (HE and HP on the
+E8, HP on the E4) share ``boards/e1m_aen.dtsi``: the CSI-2 host on the E8's dedicated receive D-PHY,
 SoC ``I2C1`` for the sensor bus, and the CPI as the capture device.
 
 Requirements
@@ -31,6 +31,11 @@ An E1M-EVK carrying a SoM target this shield has a ``boards/`` overlay for:
 
 - ``alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he``
 - ``alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he``
+- ``alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp``
+- ``alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`` (bench-verified
+  2026-10-09, IMX335 capture)
+- ``alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp`` (compile-only; not
+  bench-verified)
 
 Keep the carrier's ``CAM_EN`` expander output at 0 (its reset default):
 driving it to 1 pulls J5 pin 11 low and powers the module down.
