@@ -10,8 +10,8 @@
 #   1. `nm -A` the archive and collect, per member, its registry entries
 #      (`_alp_be_<class>_<name>`) and whether it defines a dispatcher anchor
 #      (`_alp_backend_anchor_<class>`).
-#   2. Members that define an anchor are the catch-alls the dispatcher pulls
-#      only when the class is used; drop them.
+#   2. Registry entries of a class the same member anchors are the catch-alls
+#      the dispatcher pulls only when the class is used; drop them.
 #   3. Every registry entry left must be present in the linked binary.
 #      A missing one means a static link dropped that backend and an app
 #      would silently get the stub.
@@ -39,7 +39,7 @@ endfunction()
 # GNU nm -A on an archive prints "<archive>:<member>:<addr> <type> <symbol>".
 _alp_nm(_lib_out -A "${LIB}")
 string(REPLACE "\n" ";" _lines "${_lib_out}")
-set(_anchored_members "")
+set(_anchored_classes "")
 set(_entries "")
 foreach(_line IN LISTS _lines)
     if(_line MATCHES "^.*:([^:]+):[0-9a-fA-F ]* ([A-Za-z]) (_alp_[A-Za-z0-9_]+)$")
@@ -50,7 +50,8 @@ foreach(_line IN LISTS _lines)
             continue()
         endif()
         if(_sym MATCHES "^_alp_backend_anchor_" AND NOT _sym MATCHES "^_alp_backend_anchor_(ref|decl)_")
-            list(APPEND _anchored_members "${_member}")
+            string(REPLACE "_alp_backend_anchor_" "" _aclass "${_sym}")
+            list(APPEND _anchored_classes "${_member}|${_aclass}")
         elseif(_sym MATCHES "^_alp_be_")
             list(APPEND _entries "${_member}|${_sym}")
         endif()
@@ -62,7 +63,18 @@ foreach(_entry IN LISTS _entries)
     string(REPLACE "|" ";" _parts "${_entry}")
     list(GET _parts 0 _member)
     list(GET _parts 1 _sym)
-    if(NOT _member IN_LIST _anchored_members)
+    # Anchored per member AND class: a member that anchors class A but also
+    # registers class B still has B's backends expected.
+    set(_is_anchored FALSE)
+    foreach(_ac IN LISTS _anchored_classes)
+        string(REPLACE "|" ";" _acp "${_ac}")
+        list(GET _acp 0 _am)
+        list(GET _acp 1 _acl)
+        if(_am STREQUAL _member AND _sym MATCHES "^_alp_be_${_acl}_")
+            set(_is_anchored TRUE)
+        endif()
+    endforeach()
+    if(NOT _is_anchored)
         list(APPEND _expected "${_sym}")
     endif()
 endforeach()

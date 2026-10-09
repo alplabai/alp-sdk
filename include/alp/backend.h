@@ -184,7 +184,8 @@ typedef struct alp_backend_class_range {
  * @param name   Backend name, as given to ALP_BACKEND_REGISTER.
  */
 #define ALP_BACKEND_FORCE_DEFINE(class, name) \
-	const int _alp_backend_force_##class##_##name \
+	extern const int _alp_backend_force_##class##_##name; \
+	const int        _alp_backend_force_##class##_##name \
 	    __attribute__((used, retain, visibility("hidden"))) = 0
 #else
 /* Whole-archive (Zephyr) links never need the anchor: expand to a bare

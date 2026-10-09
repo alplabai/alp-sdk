@@ -707,14 +707,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # even on a host with no OpenAMP/libmetal installed (the registry
     # falls back to src/backends/rpc/sw_fallback.c here -- see the
     # test's own header comment for why that is sufficient: defect 2
-    # lives entirely above the ops vtable).  ALP_SDK_NO_FORCED_BACKENDS
-    # keeps that sw_fallback selection: forced in (#2790), rpc/yocto_drv.c
-    # (priority 100) would win and answer open() with NOSUPPORT on a host
-    # without OpenAMP.
+    # lives entirely above the ops vtable).  The CMake
+    # build omits rpc/yocto_drv.c without OpenAMP, so sw_fallback is
+    # selected there.
     add_executable(alp_test_rpc_dispatch_close_race
         ${CMAKE_CURRENT_SOURCE_DIR}/rpc_dispatch_close_race.c
     )
-    set_target_properties(alp_test_rpc_dispatch_close_race PROPERTIES ALP_SDK_NO_FORCED_BACKENDS ON)
     target_link_libraries(alp_test_rpc_dispatch_close_race PRIVATE alp::sdk Threads::Threads)
     target_include_directories(alp_test_rpc_dispatch_close_race PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}

@@ -369,7 +369,8 @@ must add `-Wl,--undefined=_alp_backend_force_camera_yocto_drv`, otherwise only
 the stub is linked; CMake consumers of `alp::sdk` get that option, and the
 matching one for every other Linux backend, automatically (#2790). A
 non-CMake link needs one `--undefined=_alp_backend_force_<class>_<name>` per
-backend; `docs/architecture/backend-registry.md` says where the list comes from.
+backend; the list is the `alp_sdk` target's `ALP_SDK_FORCED_BACKENDS` property, or
+`nm -A libalp_sdk.a | grep ' _alp_backend_force_'`.
 (3) One thread per handle: do not run `capture()` and
 `release()` on the same handle concurrently.
 

@@ -20,8 +20,9 @@
 # list from the sources means a new backend needs no CMake line of its own.
 #
 # Skipped:
-#   - sources that define ALP_BACKEND_ANCHOR_DEFINE: the dispatcher already
-#     pulls those catch-alls when the class is used;
+#   - registrations of a class whose ALP_BACKEND_ANCHOR_DEFINE is in the same
+#     source: the dispatcher already pulls those catch-alls when the class is
+#     used;
 #   - registrations wrapped in another macro (indented, e.g. the cc3501e
 #     ble/wifi backends): their <name> is a macro parameter, not a symbol;
 #   - shared builds (every member is in the .so already) and non-ELF hosts
@@ -50,13 +51,19 @@ function(alp_sdk_force_static_backends target)
     get_target_property(_srcs ${target} SOURCES)
     set(_forced "")
     foreach(_src IN LISTS _srcs)
-        if(NOT _src MATCHES "\\.c$" OR NOT EXISTS "${_src}")
+        if(NOT _src MATCHES "\\.(c|cc|cpp)$" OR NOT EXISTS "${_src}")
             continue()
         endif()
         file(READ "${_src}" _text)
-        if(_text MATCHES "\nALP_BACKEND_ANCHOR_DEFINE\\(")
-            continue()
-        endif()
+        # Classes this TU anchors; only their registrations are skipped, so
+        # a TU that also registers a non-anchored class still gets forced.
+        set(_anchored "")
+        string(REGEX MATCHALL "\nALP_BACKEND_ANCHOR_DEFINE\\([ \t\r\n]*[a-z0-9_]+"
+            _anchor_calls "\n${_text}")
+        foreach(_anchor IN LISTS _anchor_calls)
+            string(REGEX REPLACE "^.*\\([ \t\r\n]*([a-z0-9_]+)$" "\\1" _aclass "${_anchor}")
+            list(APPEND _anchored "${_aclass}")
+        endforeach()
         # Prepend a newline so a call on the file's first line still
         # counts as column 0.
         string(REGEX MATCHALL
@@ -66,6 +73,10 @@ function(alp_sdk_force_static_backends target)
             string(REGEX REPLACE
                 "^\nALP_BACKEND_REGISTER\\([ \t\r\n]*([a-z0-9_]+)[ \t\r\n]*,[ \t\r\n]*([A-Za-z0-9_]+)$"
                 "\\1:\\2" _pair "${_call}")
+            string(REGEX REPLACE ":.*$" "" _pclass "${_pair}")
+            if(_pclass IN_LIST _anchored)
+                continue()
+            endif()
             list(APPEND _forced "${_pair}")
         endforeach()
     endforeach()
