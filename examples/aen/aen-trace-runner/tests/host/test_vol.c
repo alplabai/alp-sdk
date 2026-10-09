@@ -114,6 +114,21 @@ static void test_ramp(void)
 		assert(b[i] == 30000);
 	}
 
+	/* a block length that does not divide the ramp evenly still lands exactly on the target */
+	{
+		int16_t c[240];
+
+		for (unsigned i = 0; i < 240u; i++) {
+			c[i] = 32767;
+		}
+		tr_vol_ramp_init(&r, 0u);
+		tr_vol_apply(&r, c, 240u, 100u);
+		assert(c[239] == 32767 && r.gain == TR_VOL_UNITY);
+		for (unsigned i = 1; i < 240u; i++) {
+			assert(c[i] >= c[i - 1]);
+		}
+	}
+
 	/* a target change with no samples is harmless (n == 0 never divides) */
 	tr_vol_apply(&r, b, 0u, 10u);
 }

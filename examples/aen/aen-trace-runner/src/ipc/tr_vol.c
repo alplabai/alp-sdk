@@ -32,11 +32,18 @@ void tr_vol_apply(tr_vol_ramp_t *r, int16_t *buf, unsigned n, uint32_t pct)
 	const int64_t g0 = r->gain, g1 = tr_vol_gain(pct);
 
 	r->gain = (uint32_t)g1;
-	if (g0 == TR_VOL_UNITY && g1 == TR_VOL_UNITY) {
+	if (n == 0u || (g0 == TR_VOL_UNITY && g1 == TR_VOL_UNITY)) {
 		return;
 	}
+	/* One division per block, not per sample (the HP has no 64-bit divide): the gain walks from
+	 * g0 to g1 in Q32 steps; the truncated step falls short of g1 by under one Q16 LSB, which
+	 * the S16 rounding below absorbs. */
+	const int64_t step = ((g1 - g0) * 65536) / (int64_t)n;
+	int64_t       acc  = g0 * 65536;
+
 	for (unsigned i = 0; i < n; i++) {
-		int64_t g = g0 + (g1 - g0) * (int64_t)(i + 1u) / (int64_t)n;
+		acc += step;
+		int64_t g = acc >> 16;
 
 		buf[i] = (int16_t)(((int64_t)buf[i] * g + (TR_VOL_UNITY / 2u)) >> 16);
 	}
