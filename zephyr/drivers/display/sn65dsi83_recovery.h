@@ -170,8 +170,8 @@ struct sn65dsi83_stats {
 	uint32_t err_polls;      /* consecutive polls with CSR 0xE5 non-zero */
 	int64_t  last_reinit_ms;
 	bool     have_last;
-	bool     last_failed;  /* the last replay failed */
-	uint32_t fast_retries; /* fast retries spent in this failure episode */
+	bool     last_failed;    /* the last replay failed */
+	uint32_t fast_retries;   /* fast retries spent in this failure episode */
 	bool     after_recovery; /* the next poll is the first after a successful re-init */
 };
 

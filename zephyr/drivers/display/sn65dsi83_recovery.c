@@ -232,11 +232,10 @@ int sn65dsi83_health_poll(const struct i2c_dt_spec   *i2c,
 			st->errors_cleared++;
 		}
 	} else if (rep->health == SN65_HEALTH_REINIT) {
-		if (!sn65dsi83_reinit_allowed(
-		        st->have_last,
-		        st->last_reinit_ms,
-		        now_ms,
-		        sn65dsi83_reinit_gap_ms(st->last_failed, st->fast_retries))) {
+		if (!sn65dsi83_reinit_allowed(st->have_last,
+		                              st->last_reinit_ms,
+		                              now_ms,
+		                              sn65dsi83_reinit_gap_ms(st->last_failed, st->fast_retries))) {
 			rep->suppressed = true;
 			return 0;
 		}
