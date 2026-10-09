@@ -51,6 +51,8 @@
 /* The board overlay's side of the I2C1 handover names the same flag words the HE's does. */
 BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), flag_address) == TR_MEM_I2C1_HANDOVER,
              "i2c1_handover flag-address != tr_memmap.h TR_MEM_I2C1_HANDOVER");
+BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), alive_address) == TR_MEM_I2C1_ALIVE,
+             "i2c1_handover alive-address != tr_memmap.h TR_MEM_I2C1_ALIVE");
 BUILD_ASSERT(DT_PROP(DT_NODELABEL(sn65dsi83_agent), recipe_address) == TR_MEM_SN65_RECIPE,
              "sn65dsi83_agent recipe-address != tr_memmap.h TR_MEM_SN65_RECIPE");
 

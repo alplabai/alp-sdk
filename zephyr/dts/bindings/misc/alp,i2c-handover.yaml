@@ -63,13 +63,17 @@ properties:
   alive-address:
     type: int
     description: |
-      `release` only. Address of a 32-bit liveness word the acquiring core keeps
-      advancing while it runs (a heartbeat counter), in the same always-on SRAM.
-      Setting it turns on warm-boot detection: a release-side reset while the
-      acquiring core is running and owns the bus is recognised (record "taken" and
-      the word moving, alp_i2c_handover_is_warm()) and then touches NOTHING of the
-      controller -- no driver init, no NVIC line, no state clear, no release. Needs
-      `zephyr,deferred-init` on the bus node (asserted at build time): the glue then
-      initialises the controller itself, on a cold boot only. The word may advance
-      as slowly as the acquiring core's main loop, up to 300 ms is waited for it.
+      Address of a 32-bit liveness word in the same always-on SRAM, set on BOTH
+      sides to the same value.
+      `acquire`: the word is advanced every 10 ms by a timer that is started right
+      AFTER the bus is taken (not by the main loop: a pass can take seconds, and
+      the word must not move while this core is still waiting for the release).
+      `release`: turns on warm-boot detection. A release-side reset while the
+      acquiring core is running and owns the bus is recognised (record "taken"
+      -- snapshotted at PRE_KERNEL_1, where a release nobody took is also
+      cleared -- and the word moving within 100 ms, alp_i2c_handover_is_warm())
+      and then touches NOTHING of the controller: no driver init, no NVIC line, no
+      state clear, no release. Needs `zephyr,deferred-init` on the bus node
+      (asserted at build time): the glue then initialises the controller itself,
+      on a cold boot only.
       Unset: every boot is treated as cold (reset both cores together).

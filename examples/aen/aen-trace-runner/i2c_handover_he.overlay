@@ -9,7 +9,7 @@
  *
  * flag-address: the reserved block next to TR_MEM_SRAM1_READY (tr_memmap.h
  * TR_MEM_I2C1_HANDOVER, three words), SRAM0, always on. Both overlays carry the
- * same value. alive-address is the HP's heartbeat word (TR_MEM_HP_DBG + 12, asserted in
+ * same value. alive-address is the HP's liveness word (TR_MEM_I2C1_ALIVE, asserted in
  * src/main.c): with it an HE-only reset leaves I2C1, the bridge's EN pin and the HP's camera
  * alone (the HP's sn65dsi83 agent repairs the bridge if the DSI restart cost it its lock).
  */
@@ -32,8 +32,9 @@
 		role = "release";
 		bus = <&i2c1>;
 		flag-address = <0x0237FC94>;
-		/* hp_dbg_t.heartbeat (tr_hp_dbg.h): the HP bumps it every main-loop pass while it runs;
-		 * with the record "taken" it tells a warm HE-only reset from a cold power-up. */
-		alive-address = <0x0237FCAC>;
+		/* The HP's liveness word (tr_memmap.h TR_MEM_I2C1_ALIVE): a 10 ms timer the HP starts right
+		 * after it took the bus. With the record "taken" and this word moving, an HE reset is a warm
+		 * one and leaves I2C1 alone. */
+		alive-address = <0x0237FD80>;
 	};
 };

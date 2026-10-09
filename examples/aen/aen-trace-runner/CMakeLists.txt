@@ -120,6 +120,19 @@ option(TR_HE_FAULT_LOG "Keep the HE's last fatal error and console tail across a
 if(TR_HE_FAULT_LOG)
 	target_sources(app PRIVATE src/platform/he_fault.c src/ipc/tr_he_fault.c)
 endif()
+# After a fatal error the HE asks the Secure Enclave to reset the whole SoC (bounded, direct MHUv2 send,
+# src/platform/he_fault.c) instead of halting; the third quick fatal error in a row still halts
+# (src/ipc/tr_reset_guard.h). OFF: a fatal error halts the HE, as Zephyr's default does. Needs TR_HE_FAULT_LOG.
+option(TR_HE_FAULT_SOC_RESET "HE fatal error -> SE whole-SoC reset (loop-guarded) instead of a halt" ON)
+if(TR_HE_FAULT_LOG)
+	target_compile_definitions(app PRIVATE TR_HE_FAULT_SOC_RESET=$<BOOL:${TR_HE_FAULT_SOC_RESET}>)
+endif()
+# BENCH ONLY: the HE panics on demand once the bench writes tr_fault_inject_t over SWD to
+# TR_MEM_FAULT_INJECT (src/ipc/tr_fault_inject.h). Inert until the magic is written. Default ON for the
+# exhibition build so the SoC-reset loop guard can be tested on the real unit; turn OFF for a
+# customer-facing build.
+option(TR_BENCH_FAULT_INJECT "BENCH ONLY: SWD-armed fatal-error injector (inert until armed)" ON)
+target_compile_definitions(app PRIVATE TR_BENCH_FAULT_INJECT=$<BOOL:${TR_BENCH_FAULT_INJECT}>)
 if(TR_HP_SOUND)
 	target_sources(app PRIVATE src/platform/bus2_he.c src/ipc/tr_bus2.c)
 	# src/platform/tr_i2c2_rearm.h resets the i2c_dw driver's sync semaphore (struct

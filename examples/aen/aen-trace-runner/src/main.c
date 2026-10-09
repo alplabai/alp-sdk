@@ -13,6 +13,10 @@
 #include "game/zone.h"
 #include "ipc/tr_aring.h" /* TR_AEV_* -- sound events (A32 build pushes them) */
 #include "ipc/tr_mbox.h"  /* TR_BANNER_* -- the banner ids both render modes share */
+#if TR_BENCH_FAULT_INJECT
+#include "ipc/tr_fault_inject.h"
+#include "ipc/tr_memmap.h"
+#endif
 #include "platform/display.h"
 #include "platform/imu.h"
 #include "platform/bus2_he.h"
@@ -28,7 +32,6 @@
 
 #include "ipc/tr_memmap.h" /* TR_MEM_PSLOT */
 #include "ipc/tr_cam_view.h"
-#include "ipc/tr_hp_dbg.h" /* hp_dbg_t.heartbeat: the handover's alive-address */
 #include "ipc/tr_pslot.h"
 #include "vision/cam_rot.h"
 
@@ -36,10 +39,9 @@
  * flag word hp_vision waits on (tr_memmap.h). */
 BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), flag_address) == TR_MEM_I2C1_HANDOVER,
              "i2c1_handover flag-address != tr_memmap.h TR_MEM_I2C1_HANDOVER");
-/* ... and the HP's heartbeat word it uses to tell a warm HE-only reset from a cold power-up. */
-BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), alive_address) ==
-                 TR_MEM_HP_DBG + offsetof(hp_dbg_t, heartbeat),
-             "i2c1_handover alive-address != the HP's hp_dbg_t heartbeat");
+/* ... and the HP's liveness word it uses to tell a warm HE-only reset from a cold power-up. */
+BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), alive_address) == TR_MEM_I2C1_ALIVE,
+             "i2c1_handover alive-address != tr_memmap.h TR_MEM_I2C1_ALIVE");
 #if DT_HAS_COMPAT_STATUS_OKAY(ti_sn65dsi83)
 /* The bridge's recovery recipe (shield-fit-npu/): the HP's agent reads the same address. */
 BUILD_ASSERT(DT_PROP(DT_COMPAT_GET_ANY_STATUS_OKAY(ti_sn65dsi83), recovery_recipe_address) ==
@@ -923,6 +925,13 @@ int main(void)
 
 		tr_bus2_he_frame(); /* TR_HP_SOUND: offer / take back I2C2 for the HP's amp bring-up */
 		tr_rail5v_poll();   /* internally paced to 10 Hz -- see rail5v_power.c */
+#if TR_BENCH_FAULT_INJECT
+		/* Bench only: a fatal error on demand (tr_fault_inject.h), to test the SoC reset + guard. */
+		if (tr_fault_inject_due((const tr_fault_inject_t *)(uintptr_t)TR_MEM_FAULT_INJECT,
+		                        k_uptime_get_32())) {
+			k_panic();
+		}
+#endif
 
 		tr_intent_t in          = tr_intent_none();
 		bool        pace_step   = true; /* false on the frames between paced game steps */

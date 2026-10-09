@@ -35,7 +35,10 @@
  * consumed -- and the acquiring core's liveness word (the node's alive-address, e.g.
  * a heartbeat counter) advances. Both are needed: cold SRAM can look "taken" (all
  * zero apart from the nonce test, or any pattern with nonce == consumed), and only a
- * running acquiring core moves a counter. A releasing core that detects this must not
+ * running acquiring core moves a counter. The acquiring core drives that word from a
+ * timer it starts right after it took the bus (not from its main loop, whose passes can take
+ * seconds), so it moves only while that core is up AND holds the bus. A releasing core that
+ * detects this must not
  * touch the controller at all (no driver init, no reset, no NVIC line, no release):
  * alp_i2c_handover_warm_boot() reports it to the drivers that would have.
  *
@@ -106,6 +109,54 @@ alp_i2c_handover_is_warm(const alp_i2c_handover_t *w, uint32_t alive_a, uint32_t
 /* True when this releasing core booted warm (see above); valid from the glue's boot-time sample
  * on. Always false where the node has no alive-address. */
 bool alp_i2c_handover_warm_boot(void);
+
+/* Releasing core, FIRST thing at boot (before any acquiring core can reach its wait): remember
+ * whether the record reads "taken" and, if it does not, clear `state`. A release published by
+ * an earlier boot that was never taken (this core died before the other took it, the whole SoC
+ * was reset) must not be taken now: the acquiring core would own the bus before this core's
+ * drivers are done with it, and this core would later see a "taken" record and a moving
+ * liveness word and call itself warm. Returns the "taken" verdict. */
+static inline bool alp_i2c_handover_boot_snapshot(alp_i2c_handover_t *w)
+{
+	bool taken = alp_i2c_handover_taken(w);
+
+	if (!taken) {
+		w->state = 0u;
+		ALP_I2C_HANDOVER_BARRIER();
+	}
+	return taken;
+}
+
+/* Liveness sampling: step and window. The acquiring core's timer period is
+ * ALP_I2C_HANDOVER_ALIVE_PERIOD_MS, so the word moves at least ALP_I2C_HANDOVER_ALIVE_WINDOW_US /
+ * period times in the window (i2c_handover.c asserts at least 2). */
+#define ALP_I2C_HANDOVER_ALIVE_STEP_US   2000u
+#define ALP_I2C_HANDOVER_ALIVE_WINDOW_US 100000u
+#define ALP_I2C_HANDOVER_ALIVE_PERIOD_MS 10u
+
+/* Releasing core, boot: is this a warm boot? `taken` is alp_i2c_handover_boot_snapshot()'s
+ * verdict, `alive` the other core's liveness word (NULL: none, always cold). The word is sampled
+ * every `step_us` for up to `window_us`, `delay_us` being the caller's wait; no wait at all when
+ * the record is not "taken". */
+static inline bool alp_i2c_handover_sample_warm(const alp_i2c_handover_t *w,
+                                                bool                      taken,
+                                                const volatile uint32_t  *alive,
+                                                void (*delay_us)(uint32_t),
+                                                uint32_t step_us,
+                                                uint32_t window_us)
+{
+	uint32_t a, b;
+
+	if (alive == NULL || !taken) {
+		return false;
+	}
+	a = b = *alive;
+	for (uint32_t t = 0; t < window_us && b == a; t += step_us) {
+		delay_us(step_us);
+		b = *alive;
+	}
+	return alp_i2c_handover_is_warm(w, a, b);
+}
 
 /* Acquiring core, polled: NOT_YET, or TAKEN / DIRTIED once it holds the bus (the
  * release is consumed). */

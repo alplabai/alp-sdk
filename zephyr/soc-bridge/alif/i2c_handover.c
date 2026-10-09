@@ -18,9 +18,10 @@
  * pad-level bus recovery on one core in the middle of the other's transaction
  * corrupts it. So the handover is explicit:
  *
- *   release: first thing at boot (POST_KERNEL 49, just ahead of the I2C drivers): decide
- *            whether this is a WARM boot (see below) and, if not, clear the state word.
- *            Then, at the end of APPLICATION init, mask this core's NVIC line for the controller, clear IC_ENABLE
+ *   release: first thing at boot (PRE_KERNEL_1 0): snapshot the record and clear a
+ *            release nobody took (alp_i2c_handover_boot_snapshot()); then, ahead of the I2C
+ *            drivers (POST_KERNEL 49), decide whether this is a WARM boot (see below). At the
+ *            end of APPLICATION init, mask this core's NVIC line for the controller, clear IC_ENABLE
  *            (0x6C), poll IC_ENABLE_STATUS (0x9C) until idle, then publish. Runs
  *            at the end of APPLICATION init, after the drivers that used the
  *            bus (the SN65DSI83 display bridge initialises at
@@ -32,7 +33,10 @@
  *   acquire: POST_KERNEL priority 0 -- before any driver (the i2c_dw instance is
  *            priority 40) -- waits for the release, reports on the console every
  *            20 s while it is missing, never touches the bus meanwhile, and
- *            consumes the release once it has it.
+ *            consumes the release once it has it. With an alive-address it then starts a
+ *            10 ms timer that advances that word (the release side's warm-boot detection
+ *            reads it): started only AFTER the bus is taken, from a timer so a slow main
+ *            loop cannot starve it.
  *
  * WARM BOOT (release side, optional alive-address): this core alone was reset while the
  * acquiring core runs and owns the bus. The record reads "taken" and the acquiring core's
@@ -72,12 +76,11 @@
 #define I2C_HANDOVER_RELEASE_PRIO 99 /* last of APPLICATION: after every bus user's init */
 #define I2C_HANDOVER_WAIT_STEP_MS 5
 #define I2C_HANDOVER_REPORT_MS    20000
-#define I2C_HANDOVER_ALIVE_STEP_US 2000 /* liveness sampling step */
-/* The acquiring core's liveness word moves once per main-loop pass, as slowly as every 200 ms
- * (the Trace Runner's HP camera-less loop, hp_vision/src/main.c): wait up to this long for it. Only
- * paid when the record already reads "taken", so a cold power-up with clean SRAM pays nothing. */
-#define I2C_HANDOVER_ALIVE_WINDOW_US 300000
+BUILD_ASSERT(ALP_I2C_HANDOVER_ALIVE_PERIOD_MS * 1000u * 2u < ALP_I2C_HANDOVER_ALIVE_WINDOW_US,
+             "the liveness timer must tick at least twice inside the sampling window");
 
+/* Release side: the record read "taken" at PRE_KERNEL_1 (before anything could change it). */
+static bool i2c_handover_taken_at_boot;
 static bool i2c_handover_warm;
 
 bool alp_i2c_handover_warm_boot(void)
@@ -98,22 +101,9 @@ static bool __maybe_unused i2c_handover_stop(uintptr_t base, unsigned int irq)
 	return !(sys_read32(base + DW_IC_ENABLE_STATUS) & DW_IC_EN_BIT);
 }
 
-/* Release side, boot: warm (see the file comment) or cold. `alive` is the other core's liveness
- * word, NULL when the node has none (always cold). */
-static bool __maybe_unused i2c_handover_sample_warm(alp_i2c_handover_t      *w,
-                                                    const volatile uint32_t *alive)
+static void i2c_handover_delay_us(uint32_t us)
 {
-	uint32_t a, b;
-
-	if (alive == NULL || !alp_i2c_handover_taken(w)) {
-		return false;
-	}
-	a = b = *alive;
-	for (int t = 0; t < I2C_HANDOVER_ALIVE_WINDOW_US && b == a; t += I2C_HANDOVER_ALIVE_STEP_US) {
-		k_busy_wait(I2C_HANDOVER_ALIVE_STEP_US);
-		b = *alive;
-	}
-	return alp_i2c_handover_is_warm(w, a, b);
+	k_busy_wait(us);
 }
 
 static void __maybe_unused i2c_handover_release(alp_i2c_handover_t *w, bool idle)
@@ -146,10 +136,10 @@ static void __maybe_unused i2c_handover_acquire(alp_i2c_handover_t *w)
 	           : "i2c-handover: bus acquired DIRTY -- recover it before use\n");
 }
 
+#define HANDOVER_ALIVE_WORD(inst) ((volatile uint32_t *)(uintptr_t)DT_INST_PROP(inst, alive_address))
+
 #define HANDOVER_ALIVE(inst) \
-	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, alive_address), \
-	            ((const volatile uint32_t *)(uintptr_t)DT_INST_PROP(inst, alive_address)), \
-	            (NULL))
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, alive_address), (HANDOVER_ALIVE_WORD(inst)), (NULL))
 
 /* The bus node is initialised by hand on a cold boot, never on a warm one. */
 #define HANDOVER_BUS_DEFERRED(inst) DT_PROP_OR(DT_INST_PHANDLE(inst, bus), zephyr_deferred_init, 0)
@@ -181,9 +171,20 @@ static void __maybe_unused i2c_handover_acquire(alp_i2c_handover_t *w)
 	                          "the boot-time sample must run before the I2C drivers' init " \
 	                          "priority");), \
 	            ()) \
+	static int i2c_handover_snapshot_##inst(void) \
+	{ \
+		i2c_handover_taken_at_boot = alp_i2c_handover_boot_snapshot(HANDOVER_WORDS(inst)); \
+		return 0; \
+	} \
+	SYS_INIT(i2c_handover_snapshot_##inst, PRE_KERNEL_1, 0); \
 	static int i2c_handover_boot_##inst(void) \
 	{ \
-		i2c_handover_warm = i2c_handover_sample_warm(HANDOVER_WORDS(inst), HANDOVER_ALIVE(inst)); \
+		i2c_handover_warm = alp_i2c_handover_sample_warm(HANDOVER_WORDS(inst), \
+		                                                 i2c_handover_taken_at_boot, \
+		                                                 HANDOVER_ALIVE(inst), \
+		                                                 i2c_handover_delay_us, \
+		                                                 ALP_I2C_HANDOVER_ALIVE_STEP_US, \
+		                                                 ALP_I2C_HANDOVER_ALIVE_WINDOW_US); \
 		if (i2c_handover_warm) { \
 			printk("i2c-handover: warm boot, the other core owns the bus -- not touching " \
 			       "it\n"); \
@@ -211,9 +212,24 @@ static void __maybe_unused i2c_handover_acquire(alp_i2c_handover_t *w)
 	SYS_INIT(i2c_handover_release_##inst, APPLICATION, I2C_HANDOVER_RELEASE_PRIO);
 
 #define HANDOVER_ACQUIRE(inst) \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, alive_address), \
+	            (static void i2c_handover_alive_tick_##inst(struct k_timer *t) \
+	             { \
+		             ARG_UNUSED(t); \
+		             (*HANDOVER_ALIVE_WORD(inst))++; \
+	             } K_TIMER_DEFINE(i2c_handover_alive_timer_##inst, \
+	                              i2c_handover_alive_tick_##inst, \
+	                              NULL);), \
+	            ()) \
 	static int i2c_handover_acquire_##inst(void) \
 	{ \
 		i2c_handover_acquire(HANDOVER_WORDS(inst)); \
+		/* Liveness starts only now, with the bus in hand. */ \
+		COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, alive_address), \
+		            (k_timer_start(&i2c_handover_alive_timer_##inst, \
+		                           K_MSEC(ALP_I2C_HANDOVER_ALIVE_PERIOD_MS), \
+		                           K_MSEC(ALP_I2C_HANDOVER_ALIVE_PERIOD_MS));), \
+		            ()) \
 		return 0; \
 	} \
 	SYS_INIT(i2c_handover_acquire_##inst, POST_KERNEL, 0);

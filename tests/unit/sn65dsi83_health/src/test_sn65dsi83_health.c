@@ -389,7 +389,7 @@ ZTEST(sn65dsi83_poll, test_newer_recipe_refreshes_the_latch)
 	zassert_equal(latch.n, ARRAY_SIZE(other), "untouched");
 }
 
-/* ---- the bus owner rides out an I2C transient and only then recovers the controller --------- */
+/* ---- the bus owner rides out an I2C transient ------------------------------------------------ */
 
 /* A failing poll (the display core's restart, a camera transfer in flight) changes nothing; the
  * bridge is judged again the moment the bus answers. */
@@ -410,22 +410,36 @@ ZTEST(sn65dsi83_poll, test_transient_io_error_then_replay)
 	zassert_equal(st.recoveries, 1U, "the replay happens as soon as the bus is back");
 }
 
-/* The streak is the wedge detector: SN65_IO_FAIL_POLLS in a row, then again every as many. */
-ZTEST(sn65dsi83_poll, test_persistent_io_error_asks_for_bus_recovery)
+/* The streak reports once per episode (SN65_IO_FAIL_POLLS failures in a row) and re-arms after a
+ * success; nothing is written to the bus while it fails. */
+ZTEST(sn65dsi83_poll, test_persistent_io_error_reports_once_per_episode)
 {
 	uint32_t streak  = 0U;
-	unsigned recover = 0U;
+	unsigned reports = 0U;
 
 	fake.fail_reads = true;
 	for (int i = 1; i <= 3 * SN65_IO_FAIL_POLLS; i++) {
 		if (sn65dsi83_io_fail_step(&streak, poll(1000 * i))) {
-			recover++;
-			zassert_equal(i % SN65_IO_FAIL_POLLS, 0, "only on the Nth failure in a row");
+			reports++;
+			zassert_equal(i, SN65_IO_FAIL_POLLS, "on the Nth failure in a row, once");
 		}
 	}
-	zassert_equal(recover, 3U);
+	zassert_equal(reports, 1U);
+	zassert_equal(fake.nwrites, 0, "the bus is only retried, never written while it fails");
 
-	/* One good poll in the middle restarts the count. */
+	/* A good poll ends the episode: a later wedge is reported again. */
+	fake.fail_reads = false;
+	zassert_false(sn65dsi83_io_fail_step(&streak, poll(100000)));
+	zassert_equal(streak, 0U);
+	fake.fail_reads = true;
+	for (int i = 1; i <= 2 * SN65_IO_FAIL_POLLS; i++) {
+		if (sn65dsi83_io_fail_step(&streak, poll(200000 + 1000 * i))) {
+			reports++;
+		}
+	}
+	zassert_equal(reports, 2U);
+
+	/* A bus that fails twice, answers, fails twice: never reaches the threshold. */
 	streak          = 0U;
 	fake.fail_reads = true;
 	zassert_false(sn65dsi83_io_fail_step(&streak, poll(0)));

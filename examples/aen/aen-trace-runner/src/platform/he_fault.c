@@ -4,14 +4,25 @@
  *    text from before a reboot survives (ram_console_buf lives in .bss, which the startup code
  *    zeroes, and ram_console restarts at offset 0).
  *  - k_sys_fatal_error_handler() records reason / PC / LR / CFSR / HFSR / MMFAR / BFAR first, then
- *    (last resort, CONFIG_HAS_ALIF_SE_SERVICES) asks the Secure Enclave to reset the whole SoC
- *    through hal_alif's se_service_boot_reset_soc() (se_services/zephyr/include/se_service.h, the
- *    SE's boot-reset service), unless tr_reset_guard.h says the fault repeats on every boot: the
- *    third quick one in a row halts. A fault that does not reach the reset halts exactly as
- *    Zephyr's default does (CONFIG_REBOOT is off: this core never restarts itself, so a restart
- *    WITHOUT a record came from outside it). The call runs in the fault's context, where
- *    se_service.c uses its polling MHU path (k_can_yield() is false); if the SE does not answer
- *    the reset, the core halts.
+ *    (last resort, TR_HE_FAULT_SOC_RESET) asks the Secure Enclave to reset the whole SoC, unless
+ *    tr_reset_guard.h says the fault repeats on every boot (the third quick one in a row halts). A
+ *    fault that does not reach the reset halts exactly as Zephyr's default does (CONFIG_REBOOT is
+ *    off: this core never restarts itself, so a restart WITHOUT a record came from outside it).
+ *
+ *    The reset request is sent DIRECTLY, bounded, not through se_service_boot_reset_soc(): that
+ *    wrapper takes a mutex with a 15 s timeout (se_service.c: MUTEX_TIMEOUT) and retries a silent SE
+ *    MAX_TRIES (100) times at SERVICE_TIMEOUT (10 s), all from exception context, where a held mutex
+ *    would pend from handler mode and a silent SE would hold the core for ~33 minutes. This does what
+ *    its polling branch does (se_service.c send_msg_to_se(), the !k_can_yield() path): one
+ *    ipm_poll_out(send_dev, CH_ID = 0, &global_address, size, timeout) on the SE service's MHUv2 send
+ *    node (DT: se_service's mhuv2_send_node), the request being a service_header_t with
+ *    hdr_service_id = SERVICE_BOOT_RESET_SOC (se_service_boot_reset_soc(), se_service.c) in SRAM0
+ *    (TR_MEM_SE_MSG; SRAM0 is its own global address, so no local_to_global()). ipm_poll_out() is the
+ *    MHUv2 driver's loop-bounded poll (zephyr/drivers/ipm/ipm_arm_mhuv2.c mhuv2_poll_out(), the
+ *    ipm_poll_* API from zephyr/patches/zephyr/0002): no tick, no IRQ, usable with interrupts locked.
+ *    The request is not answered when it works (the SoC resets); then k_busy_wait() bounds the wait
+ *    to SE_RESET_WAIT_US and the core halts if the SoC is still running. Assumes the SE was
+ *    synchronised earlier (this image calls the SE service during init); not bench-verified.
  *  - At the next boot the record and the old console tail are printed, then the record is re-armed.
  *    (No Alif reset-status register is read: it is not documented in hal_alif, and an unverified
  *    peripheral read at boot is not worth a possible bus fault.)
@@ -22,6 +33,7 @@
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk-hooks.h>
+#include <zephyr/sys/barrier.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/sys_io.h>
 
@@ -29,8 +41,16 @@
 #include "../ipc/tr_memmap.h"
 #include "../ipc/tr_reset_guard.h"
 
-#ifdef CONFIG_HAS_ALIF_SE_SERVICES
-#include <se_service.h>
+/* The SoC reset needs the SE client's MHUv2 send node; without it (or with the option off) a
+ * fatal error halts, as Zephyr's default does. */
+#if defined(TR_HE_FAULT_SOC_RESET) && TR_HE_FAULT_SOC_RESET && defined(CONFIG_HAS_ALIF_SE_SERVICES) && \
+	DT_NODE_EXISTS(DT_NODELABEL(se_service))
+#define HE_SOC_RESET 1
+#include <zephyr/drivers/ipm.h>
+#include <services_lib_ids.h>
+#include <services_lib_protocol.h>
+#else
+#define HE_SOC_RESET 0
 #endif
 
 _Static_assert(TR_MEM_HE_FAULT_SIZE == sizeof(tr_he_fault_t),
@@ -46,6 +66,39 @@ _Static_assert(TR_MEM_HE_RESET_GUARD_SIZE == sizeof(tr_reset_guard_t),
 
 #define REC   ((tr_he_fault_t *)(uintptr_t)TR_MEM_HE_FAULT)
 #define GUARD ((tr_reset_guard_t *)(uintptr_t)TR_MEM_HE_RESET_GUARD)
+
+#if HE_SOC_RESET
+#define SE_RESET_CH_ID   0U /* se_service.c CH_ID */
+#define SE_RESET_POLL_MS 100U
+#define SE_RESET_WAIT_US 100000U /* then give up: 2 x the bounds, <= 200 ms in all */
+
+_Static_assert(TR_MEM_SE_MSG_SIZE == sizeof(service_header_t), "TR_MEM_SE_MSG_SIZE != service_header_t");
+
+/* One bounded reset request. Returns only if the SoC was not reset. */
+static void he_soc_reset_request(void)
+{
+	const struct device *send_dev =
+	    DEVICE_DT_GET_OR_NULL(DT_PHANDLE(DT_NODELABEL(se_service), mhuv2_send_node));
+	volatile service_header_t *msg = (volatile service_header_t *)(uintptr_t)TR_MEM_SE_MSG;
+	uint32_t                   global_address = (uint32_t)TR_MEM_SE_MSG;
+
+	if (send_dev == NULL || !device_is_ready(send_dev)) {
+		return;
+	}
+	msg->hdr_service_id = SERVICE_BOOT_RESET_SOC;
+	msg->hdr_flags      = 0;
+	msg->hdr_error_code = 0;
+	msg->hdr_padding    = 0;
+	barrier_dsync_fence_full();
+	if (ipm_poll_out(send_dev,
+	                 SE_RESET_CH_ID,
+	                 &global_address,
+	                 (int)sizeof(*msg),
+	                 K_MSEC(SE_RESET_POLL_MS)) == 0) {
+		k_busy_wait(SE_RESET_WAIT_US); /* the SE resets the SoC; nothing to wait for otherwise */
+	}
+}
+#endif
 
 static printk_hook_fn_t prev_hook;
 
@@ -66,11 +119,11 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 	                   sys_read32(SCB_MMFAR),
 	                   sys_read32(SCB_BFAR),
 	                   k_uptime_get_32());
-#ifdef CONFIG_HAS_ALIF_SE_SERVICES
+#if HE_SOC_RESET
 	if (tr_reset_guard_allow(GUARD, k_uptime_get_32())) {
 		printk("he-fault: fatal error %u, asking the SE to reset the SoC\n", reason);
-		(void)se_service_boot_reset_soc(); /* does not return when the SE resets the SoC */
-		printk("he-fault: the SE did not reset the SoC, halting\n");
+		he_soc_reset_request();
+		printk("he-fault: the SoC was not reset, halting\n");
 	} else {
 		printk("he-fault: fatal errors keep coming right after each boot, halting\n");
 	}
@@ -79,24 +132,11 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 	k_fatal_halt(reason);
 }
 
-#ifdef CONFIG_HAS_ALIF_SE_SERVICES
-/* Up for the guard's window: the boot is healthy, the streak of quick fatal errors is over. */
-static void he_fault_healthy(struct k_timer *t)
-{
-	ARG_UNUSED(t);
-	tr_reset_guard_healthy(GUARD);
-}
-K_TIMER_DEFINE(he_fault_healthy_timer, he_fault_healthy, NULL);
-#endif
-
 static int he_fault_init(void)
 {
 	static tr_he_fault_snap_t snap; /* the previous boot's record, before the ring is re-armed */
 
 	(void)tr_he_fault_take(REC, &snap);
-#ifdef CONFIG_HAS_ALIF_SE_SERVICES
-	k_timer_start(&he_fault_healthy_timer, K_MSEC(TR_RESET_GUARD_WINDOW_MS), K_NO_WAIT);
-#endif
 	prev_hook = __printk_get_hook();
 	__printk_hook_install(tee_hook);
 

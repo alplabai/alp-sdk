@@ -131,22 +131,22 @@ static inline struct sn65dsi83_boot_plan sn65dsi83_boot_plan_for(bool warm, bool
 	};
 }
 
-/* The bus owner's I2C access failed (not a bridge verdict) on this many polls in a row: the
- * controller itself is suspect, not the bridge. */
+/* The bus owner's I2C access failed (not a bridge verdict) on this many polls in a row: worth one
+ * report.  Nothing else is done about it: the next interval retries, and the I2C driver already
+ * aborts a timed-out transfer by itself. */
 #define SN65_IO_FAIL_POLLS 3U
 
-/* Count one poll's I2C result in *streak.  True when the streak just reached the threshold and the
- * bus should be recovered now (the streak restarts, so a bus that stays dead is retried every
- * SN65_IO_FAIL_POLLS polls, never wedged on and never hammered each poll). */
+/* Count one poll's I2C result in *streak.  True exactly once per episode: when the streak reaches
+ * SN65_IO_FAIL_POLLS.  A successful poll ends the episode (the next one reports again). */
 static inline bool sn65dsi83_io_fail_step(uint32_t *streak, int io_result)
 {
 	if (io_result == 0) {
 		*streak = 0U;
 		return false;
 	}
-	if (++*streak >= SN65_IO_FAIL_POLLS) {
-		*streak = 0U;
-		return true;
+	if (*streak < SN65_IO_FAIL_POLLS) {
+		(*streak)++;
+		return *streak == SN65_IO_FAIL_POLLS;
 	}
 	return false;
 }

@@ -13,6 +13,30 @@
 
 static alp_i2c_handover_t w;
 
+/* A fake clock and liveness word: the heartbeat moves every `hb_every_us` of delay (0: never). */
+static uint32_t           alive, now_us, hb_every_us, last_tick_us, delayed_us;
+
+static void fake_delay(uint32_t us)
+{
+	now_us += us;
+	delayed_us += us;
+	if (hb_every_us != 0u && now_us - last_tick_us >= hb_every_us) {
+		alive++;
+		last_tick_us = now_us;
+	}
+}
+
+static bool sample(bool taken)
+{
+	now_us = last_tick_us = delayed_us = 0u;
+	return alp_i2c_handover_sample_warm(&w,
+	                                    taken,
+	                                    &alive,
+	                                    fake_delay,
+	                                    ALP_I2C_HANDOVER_ALIVE_STEP_US,
+	                                    ALP_I2C_HANDOVER_ALIVE_WINDOW_US);
+}
+
 static void cold(uint32_t s, uint32_t n, uint32_t c)
 {
 	w.state    = s;
@@ -117,6 +141,54 @@ int main(void)
 	cold(0, 0xDEADBEEFu, 0xDEADBEEFu);
 	assert(alp_i2c_handover_taken(&w));
 	assert(!alp_i2c_handover_is_warm(&w, 0xDEADBEEFu, 0xDEADBEEFu));
+
+	/* STALE CLEAN: the releasing core died before the acquiring core took a release, then the whole
+	 * SoC was reset. At PRE_KERNEL_1 the snapshot clears the untaken release, so the acquiring core
+	 * (POST_KERNEL 0) cannot take it, and this core cannot mistake the later take for a warm record. */
+	cold(ALP_I2C_HANDOVER_CLEAN, 0x8888u, 0x7777u);
+	assert(!alp_i2c_handover_boot_snapshot(&w));
+	assert(w.state == 0u);
+	assert(alp_i2c_handover_try_acquire(&w) == ALP_I2C_HANDOVER_NOT_YET);
+	cold(ALP_I2C_HANDOVER_DIRTY, 0x8888u, 0x7777u);
+	assert(!alp_i2c_handover_boot_snapshot(&w) && w.state == 0u);
+	/* ... the same acquire taking it afterwards would have made THIS record look taken: */
+	cold(ALP_I2C_HANDOVER_CLEAN, 0x8888u, 0x7777u);
+	assert(alp_i2c_handover_try_acquire(&w) == ALP_I2C_HANDOVER_TAKEN);
+	assert(alp_i2c_handover_taken(&w)); /* what the snapshot prevents the HE from ever acting on */
+	/* A record that is taken is left exactly as it is. */
+	cold(0, 0x9999u, 0x9999u);
+	assert(alp_i2c_handover_boot_snapshot(&w) && w.state == 0u && w.nonce == 0x9999u);
+
+	/* sample_warm against a fake clock and liveness word. */
+	cold(0, 0x9999u, 0x9999u);
+	alive       = 1000u;
+	hb_every_us = 10000u; /* the HP's 10 ms timer */
+	assert(sample(true));
+	assert(delayed_us <= 6u * ALP_I2C_HANDOVER_ALIVE_STEP_US); /* returns at the first tick */
+	hb_every_us = 0u; /* a stopped / not yet acquired HP */
+	assert(!sample(true));
+	assert(delayed_us >= ALP_I2C_HANDOVER_ALIVE_WINDOW_US); /* waited the whole window */
+	/* Cold boot with a MOVING heartbeat but the record not taken: cold, and no wait at all. */
+	hb_every_us = 10000u;
+	assert(!sample(false) && delayed_us == 0u);
+	cold(ALP_I2C_HANDOVER_CLEAN, 5u, 6u);
+	assert(!sample(alp_i2c_handover_taken(&w)) && delayed_us == 0u);
+	/* No liveness word on the node: never warm. */
+	cold(0, 0x9999u, 0x9999u);
+	assert(!alp_i2c_handover_sample_warm(
+	    &w, true, NULL, fake_delay, ALP_I2C_HANDOVER_ALIVE_STEP_US, ALP_I2C_HANDOVER_ALIVE_WINDOW_US));
+	/* The HP's timer must tick at least twice in the window (i2c_handover.c asserts the same). */
+	assert(ALP_I2C_HANDOVER_ALIVE_PERIOD_MS * 1000u * 2u < ALP_I2C_HANDOVER_ALIVE_WINDOW_US);
+	/* Fill patterns with state == 0 look taken (nonce == consumed == fill) but need a moving word: */
+	{
+		static const uint32_t z[] = { 0x00000001u, 0x80000000u, 0x0000FFFFu, 0xA5A5A5A5u };
+
+		for (unsigned i = 0; i < sizeof(z) / sizeof(z[0]); i++) {
+			cold(0, z[i], z[i]);
+			hb_every_us = 0u;
+			assert(alp_i2c_handover_taken(&w) && !sample(true));
+		}
+	}
 
 	puts("i2c handover protocol ok");
 	return 0;

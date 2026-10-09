@@ -29,11 +29,11 @@
  * (CONFIG_SN65DSI83_RECOVERY, sn65dsi83_recovery.h) -- which is why
  * `DEVICE_DT_INST_DEFINE()` below passes no display_driver_api.
  *
- * INIT ORDER (why this runs at CONFIG_APPLICATION_INIT_PRIORITY, matching
+ * INIT ORDER (why this runs at POST_KERNEL, CONFIG_APPLICATION_INIT_PRIORITY, matching
  * upstream Zephyr's himax,hx8394 panel driver): by the time this device
  * initializes, the I2C bus, the EN pin's GPIO controller (a plain SoC GPIO on
  * this shield: P13_4, the mikroBUS INT pin, gpio13) and the DesignWare
- * MIPI-DSI host all need to be ready.  APPLICATION (90, kernel/Kconfig.device) is
+ * MIPI-DSI host all need to be ready.  CONFIG_APPLICATION_INIT_PRIORITY (90, kernel/Kconfig.device) is
  * after the GPIO and I2C controllers (I2C bus priority, KERNEL_INIT_PRIORITY_DEVICE = 50,
  * drivers/i2c/Kconfig), the fixed regulators (REGULATOR_FIXED_INIT_PRIORITY
  * = 75, drivers/regulator/Kconfig.fixed) and the DSI host + CDC200
@@ -722,9 +722,12 @@ DT_INST_FOREACH_STATUS_OKAY(SN65DSI83_INIT)
  * A bridge on a deferred-init bus must itself be deferred (Zephyr's build-time init-priority check:
  * "non-deferred device depends on deferred device"), and the bus is deferred so that a warm boot of
  * this core can leave a controller the other core is using untouched (alp,i2c-handover alive-address).
- * The driver then starts itself at the priority it would have been initialised at anyway: the bus is
- * up by then on a cold boot (the handover glue initialises it ahead of this), and a warm boot's
- * sn65dsi83_init() never opens it.  The priority has to be a literal (SYS_INIT pastes it).
+ * The driver then starts itself from a SYS_INIT at APPLICATION level, priority 90 (a deferred device
+ * is not part of the POST_KERNEL 90 slot the non-deferred one takes; APPLICATION comes after every
+ * POST_KERNEL driver, so the DSI host, the CDC200 and the GPIO controller are up, and before the
+ * handover release at APPLICATION 99).  The bus is up by then on a cold boot (the handover glue
+ * initialises it at POST_KERNEL 49), and a warm boot's sn65dsi83_init() never opens it.  The
+ * priority has to be a literal (SYS_INIT pastes it).
  */
 #define SN65_START_PRIO 90
 BUILD_ASSERT(CONFIG_APPLICATION_INIT_PRIORITY == SN65_START_PRIO,

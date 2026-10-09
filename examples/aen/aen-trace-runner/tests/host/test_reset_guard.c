@@ -31,14 +31,34 @@ int main(void)
 	assert(!tr_reset_guard_allow(&g, 4000u)); /* 3rd: halt */
 	assert(!tr_reset_guard_allow(&g, 4000u)); /* never resets again while it keeps happening */
 
-	/* A boot that stayed up the window ends the streak (the glue's healthy mark)... */
-	tr_reset_guard_healthy(&g);
-	assert(g.count == 0u);
-	assert(tr_reset_guard_allow(&g, 4000u));
-	assert(tr_reset_guard_allow(&g, 4000u));
-	/* ... and so does a fatal error that comes after the window even if the mark never ran. */
+	/* A fatal error that comes after the window ends the streak, even a halted one. */
 	assert(tr_reset_guard_allow(&g, TR_RESET_GUARD_WINDOW_MS) && g.count == 1u);
 	assert(tr_reset_guard_allow(&g, TR_RESET_GUARD_WINDOW_MS - 1u) && g.count == 2u);
+	assert(!tr_reset_guard_allow(&g, 1u) && g.count == 3u);
+
+	/* Realistic cold patterns. A count without our magic is not a streak (the magic check): */
+	g.magic = 0u;
+	g.count = 2u;
+	assert(tr_reset_guard_allow(&g, 5000u) && g.count == 1u && g.magic == TR_RESET_GUARD_MAGIC);
+	g.magic = 0u;
+	g.count = 3u;
+	assert(tr_reset_guard_allow(&g, 5000u) && g.count == 1u);
+	/* power-up SRAM that is all-ones / 0xA5 / a stray magic-like value with a wild count: */
+	g.magic = 0xFFFFFFFFu;
+	g.count = 0xFFFFFFFFu;
+	assert(tr_reset_guard_allow(&g, 5000u) && g.count == 1u);
+	g.magic = TR_RESET_GUARD_MAGIC ^ 1u;
+	g.count = 2u;
+	assert(tr_reset_guard_allow(&g, 5000u) && g.count == 1u);
+	/* our magic with a streak of 2 and a quick fault: the third halts; a streak of 3 stays halted */
+	g.magic = TR_RESET_GUARD_MAGIC;
+	g.count = 2u;
+	assert(!tr_reset_guard_allow(&g, 100u) && g.count == 3u);
+	g.count = TR_RESET_GUARD_MAX;
+	assert(!tr_reset_guard_allow(&g, 100u) && g.count == TR_RESET_GUARD_MAX);
+	/* one count past the limit is garbage, not a halted streak */
+	g.count = TR_RESET_GUARD_MAX + 1u;
+	assert(tr_reset_guard_allow(&g, 100u) && g.count == 1u);
 
 	puts("test_reset_guard: OK");
 	return 0;

@@ -6,9 +6,12 @@
  * always-on SRAM: the third fatal error in a row that comes before TR_RESET_GUARD_WINDOW_MS of
  * uptime halts instead (what Zephyr does without CONFIG_REBOOT), and the core stays inspectable.
  *
- * A boot that stays up for the window is healthy: the glue zeroes the count then
- * (tr_reset_guard_healthy()), and a fatal error after that many ms of uptime starts a new streak
- * at 1 whatever the record says. Cold SRAM (magic not ours) starts at 0.
+ * A fatal error after that many ms of uptime starts a new streak at 1 whatever the record says
+ * (no timer is needed to end a streak). The flip side: a fault that comes more than the window
+ * into EVERY boot is indistinguishable from a rare one and resets the SoC every ~30 s for good.
+ * Cold SRAM (magic not ours, or a count above the limit) starts at 0. The count survives the SE's
+ * SoC reset only if SRAM0 does; if it does not, the guard never trips (bench-verify, the
+ * TR_BENCH_FAULT_INJECT word exists for that).
  *
  * Pure C so tests/host/test_reset_guard.c drives it. */
 #ifndef TR_RESET_GUARD_H
@@ -43,13 +46,6 @@ static inline bool tr_reset_guard_allow(tr_reset_guard_t *g, uint32_t uptime_ms)
 	g->count = n;
 	g->magic = TR_RESET_GUARD_MAGIC;
 	return n < TR_RESET_GUARD_MAX;
-}
-
-/* The boot has been up for the window: the streak is over. */
-static inline void tr_reset_guard_healthy(tr_reset_guard_t *g)
-{
-	g->count = 0u;
-	g->magic = TR_RESET_GUARD_MAGIC;
 }
 
 #endif /* TR_RESET_GUARD_H */

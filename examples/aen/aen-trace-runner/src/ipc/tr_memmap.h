@@ -154,12 +154,28 @@ _Static_assert(TR_MEM_HE_FAULT + TR_MEM_HE_FAULT_SIZE <= 0x02380000u,
 #define TR_MEM_HE_RESET_GUARD \
 	0x0237FFF0u /* HE -> HE (next boot): the loop guard of the last-resort SoC reset (src/ipc/
                                        * tr_reset_guard.h tr_reset_guard_t, 8 B). Right after TR_MEM_HE_FAULT's end
-                                       * (0x0237FFEC), ends at the page end. */
+                                       * (0x0237FFEC), ends at 0x0237FFF8. */
 #define TR_MEM_HE_RESET_GUARD_SIZE 8u /* sizeof(tr_reset_guard_t), asserted in tr_reset_guard.h */
 _Static_assert(TR_MEM_HE_RESET_GUARD >= TR_MEM_HE_FAULT + TR_MEM_HE_FAULT_SIZE,
                "the reset guard is clear of the HE fault record");
 _Static_assert(TR_MEM_HE_RESET_GUARD + TR_MEM_HE_RESET_GUARD_SIZE <= 0x02380000u,
                "the reset guard sits inside the shared NC page, below the MHU0 window");
+#define TR_MEM_I2C1_ALIVE \
+	0x0237FD80u /* HP -> HE: the I2C1 handover's liveness word (alive-address of both alp,i2c-handover nodes): the HP
+ * advances it from a 10 ms timer started right after it took I2C1; the HE reads it at boot to tell a warm
+ * HE-only reset from a cold power-up. 4 B, clear of the I2C2 lease record (ends 0x0237FD70). */
+#define TR_MEM_FAULT_INJECT \
+	0x0237FD88u /* bench -> HE: tr_fault_inject_t (src/ipc/tr_fault_inject.h, 8 B, TR_BENCH_FAULT_INJECT builds): write
+ * magic + delay over SWD and the HE panics once its uptime passes the delay, on every boot until cleared. */
+#define TR_MEM_FAULT_INJECT_SIZE 8u
+#define TR_MEM_SE_MSG \
+	0x0237FD90u /* HE: the SE service request of the fatal-error SoC reset (service_header_t, 8 B), in SRAM0 so the SE reads
+ * it by its global address with no local-to-global translation (src/platform/he_fault.c). */
+#define TR_MEM_SE_MSG_SIZE 8u
+_Static_assert(TR_MEM_I2C1_ALIVE >= TR_MEM_BUS2 + 48u && TR_MEM_I2C1_ALIVE + 4u <= TR_MEM_FAULT_INJECT &&
+                   TR_MEM_FAULT_INJECT + TR_MEM_FAULT_INJECT_SIZE <= TR_MEM_SE_MSG &&
+                   TR_MEM_SE_MSG + TR_MEM_SE_MSG_SIZE <= TR_MEM_SN65_RECIPE,
+               "the liveness word, the fault injector and the SE message sit between the lease record and the recipe");
 /* SRAM1 */
 #define TR_MEM_CAM_POOL \
 	0x02480000u /* HP: OV9281 camera frame pool (design sec 2), 2 x 256,000 B GREY8;
