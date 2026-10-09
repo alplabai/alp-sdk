@@ -706,6 +706,11 @@ static void save_cycle_record(const sleep_plan_t *plan)
 	rec.slept_ms    = 0u;
 	rec.armed       = plan->wake;
 	rec.armed_hw    = plan->hw;
+	/* Probed NOW, before the sleep: only if the NSRST syndrome bit does clear can a set bit
+	 * at the next boot be read as a pin reset (see ALP_SOM_REC_NSRST_TRUSTED). */
+	if (alp_som_power_reset_syndrome_trusted()) {
+		rec.armed_hw |= ALP_SOM_REC_NSRST_TRUSTED;
+	}
 	rec.timed_bit   = plan->timed_bit;
 	rec.armed_ms    = plan->armed_ms;
 	rec.entry_rtc_s = (alp_som_power_rtc_seconds(&now) == ALP_OK) ? now : 0u;

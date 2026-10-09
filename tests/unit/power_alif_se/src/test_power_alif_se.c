@@ -194,14 +194,6 @@ uint32_t alif_se_hw_wake_timer_hz(void)
 	return g_timer_hz;
 }
 
-alp_status_t alif_se_hw_wake_timer_arm(uint32_t ticks)
-{
-	/* The backend no longer arms the timer itself: it is armed inside the entry. */
-	(void)ticks;
-	ev(EV_ARM_LPTIMER);
-	return ALP_ERR_NOSUPPORT;
-}
-
 void alif_se_hw_wake_timer_disarm(void)
 {
 	ev(EV_DISARM_LPTIMER);
@@ -346,6 +338,12 @@ alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags)
 }
 
 static bool g_porf;
+static bool g_nsrst_trusted = true;
+
+bool alp_som_power_reset_syndrome_trusted(void)
+{
+	return g_nsrst_trusted;
+}
 static bool g_flags_pending;
 
 alp_status_t alp_som_power_rtc_flags_pending(bool *pending)
@@ -467,6 +465,7 @@ static void reset_fakes(void)
 	memset(&g_set, 0, sizeof(g_set));
 	memset(&g_rec_at_set, 0, sizeof(g_rec_at_set));
 	g_porf                 = false;
+	g_nsrst_trusted        = true;
 	g_transports_dcdc_mode = false;
 	g_flip_word            = -1;
 	g_lptimer_fired_at_arm = false;
@@ -706,7 +705,7 @@ ZTEST(power_alif_se, test_short_timed_wake_uses_lptimer)
 	zassert_equal(g_armed_ticks, 18023u, "500 ms, rounded UP at 36045 Hz (LFRC +10 %)");
 	zassert_equal(ev_count(EV_ARM_LPTIMER), 1u);
 	zassert_equal(ev_count(EV_ARM_RTC_TIMER), 0u);
-	zassert_equal(g_rec_at_set.armed_hw, ALP_SOM_ARM_LPTIMER);
+	zassert_equal(g_rec_at_set.armed_hw & ~ALP_SOM_REC_NSRST_TRUSTED, ALP_SOM_ARM_LPTIMER);
 	zassert_equal(g_set.wakeup_events, ALP_AIPM_GEN2_WE_LPTIMER0);
 }
 
@@ -724,7 +723,7 @@ ZTEST(power_alif_se, test_timed_wake_boundary_999_and_1000)
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 1000u, &info), ALP_OK);
 	zassert_equal(ev_count(EV_ARM_LPTIMER), 0u, "1000 ms: RV-3028 countdown");
 	zassert_equal(g_countdown_req, 1u);
-	zassert_equal(g_rec_at_set.armed_hw, ALP_SOM_ARM_RTC_TIMER);
+	zassert_equal(g_rec_at_set.armed_hw & ~ALP_SOM_REC_NSRST_TRUSTED, ALP_SOM_ARM_RTC_TIMER);
 	zassert_equal(g_set.wakeup_events, ALP_AIPM_GEN2_WE_LPGPIO0);
 	zassert_equal(g_rec_at_set.armed,
 	              ALP_POWER_WAKE_TIMER,
@@ -786,7 +785,7 @@ ZTEST(power_alif_se, test_rtc_wake_needs_the_callers_alarm_to_be_armed)
 	g_state.wake_bitmap = ALP_POWER_WAKE_RTC;
 	g_rtc_int_armed     = true;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_OK);
-	zassert_equal(g_rec_at_set.armed_hw, ALP_SOM_ARM_RTC_INT);
+	zassert_equal(g_rec_at_set.armed_hw & ~ALP_SOM_REC_NSRST_TRUSTED, ALP_SOM_ARM_RTC_INT);
 	zassert_equal(ev_count(EV_ARM_RTC_TIMER), 0u, "the SDK starts no countdown of its own");
 	zassert_equal(ev_count(EV_ARM_INT_PAD), 1u);
 }
@@ -960,7 +959,7 @@ ZTEST(power_alif_se, test_record_carries_the_cycle)
 	zassert_equal(g_rec_at_set.mode, (uint32_t)ALP_POWER_MODE_STANDBY);
 	zassert_equal(g_rec_at_set.armed, ALP_POWER_WAKE_TIMER);
 	zassert_equal(g_rec_at_set.timed_bit, ALP_POWER_WAKE_TIMER);
-	zassert_equal(g_rec_at_set.armed_hw, ALP_SOM_ARM_RTC_TIMER);
+	zassert_equal(g_rec_at_set.armed_hw & ~ALP_SOM_REC_NSRST_TRUSTED, ALP_SOM_ARM_RTC_TIMER);
 	zassert_equal(g_rec_at_set.armed_ms, 2000u);
 	zassert_equal(g_rec_at_set.entry_rtc_s, 777u);
 	zassert_equal(g_rec_at_set.wake_source, 0u);
@@ -971,7 +970,7 @@ ZTEST(power_alif_se, test_record_carries_the_cycle)
 	g_rtc_seconds_ok = false;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
 	zassert_equal(g_rec_at_set.entry_rtc_s, 0u);
-	zassert_equal(g_rec_at_set.armed_hw, ALP_SOM_ARM_LPTIMER);
+	zassert_equal(g_rec_at_set.armed_hw & ~ALP_SOM_REC_NSRST_TRUSTED, ALP_SOM_ARM_LPTIMER);
 }
 
 ZTEST(power_alif_se, test_quiesce_failure_arms_nothing)
@@ -1527,9 +1526,13 @@ ZTEST(power_alif_se, test_undo_succeeds_with_the_dcdc_mode_sentinel)
 
 ZTEST(power_alif_se, test_lptimer_that_already_fired_is_refused_never_slept_on)
 {
+	alp_power_wake_info_t info = { .wake_source = 0xFFu };
+
 	g_lptimer_fired_at_arm = true;
 	g_state.wake_bitmap    = ALP_POWER_WAKE_TIMER;
-	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_BUSY);
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, &info), ALP_ERR_BUSY);
+	zassert_equal(info.wake_source, 0u, "a refused sleep reports no wake source");
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
 	zassert_equal(ev_count(EV_ENTER), 0u, "no WFI with the wake already spent");
 	zassert_equal(ev_count(EV_RESTORE), 1u);
 	zassert_equal(ev_count(EV_SET_OFF_CFG), 2u);
@@ -1554,4 +1557,19 @@ ZTEST(power_alif_se, test_bench_variants_default_to_the_documented_profile)
 	zassert_ok(build_off_profile(&out, &g_live, &plan));
 	zassert_equal(out.memory_blocks, ALP_AIPM_GEN2_BACKUP4K_MASK, "no MRAM / SERAM by default");
 	zassert_equal(out.vtor_address, g_live.vtor_address, "the live vtor is preserved by default");
+}
+
+ZTEST(power_alif_se, test_the_record_says_whether_nsrst_can_be_trusted)
+{
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+	zassert_true((g_rec_at_set.armed_hw & ALP_SOM_REC_NSRST_TRUSTED) != 0u);
+
+	/* A syndrome bit that does not clear: the next boot must not read it as a pin reset. */
+	reset_fakes();
+	g_nsrst_trusted     = false;
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+	zassert_equal(g_rec_at_set.armed_hw & ALP_SOM_REC_NSRST_TRUSTED, 0u);
+	zassert_equal(g_rec_at_set.armed_hw & ALP_SOM_ARM_LPTIMER, ALP_SOM_ARM_LPTIMER);
 }

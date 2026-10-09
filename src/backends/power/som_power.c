@@ -725,6 +725,11 @@ __weak uint32_t alp_som_power_reset_syndrome_take(void)
 	return 0u;
 }
 
+__weak bool alp_som_power_reset_syndrome_trusted(void)
+{
+	return false;
+}
+
 /* RESETSYNDROME bit 0: the NSRST pin was asserted (E8 SVD AON.RTSS_HE_RESET). */
 #define SOMPD_RESET_NSRST BIT(0)
 
@@ -987,7 +992,9 @@ int alp_som_power_boot_restore(void)
 	 * STOP_MODE_STAT set and a valid record, and used to be reported as a wake with no
 	 * cause.  It is not one: the sleep was cut short from outside.  The domains still
 	 * have to be put back, so the restore below is unchanged; only the report differs. */
-	_boot_external = (alp_som_power_reset_syndrome_take() & SOMPD_RESET_NSRST) != 0u;
+	const bool nsrst = (alp_som_power_reset_syndrome_take() & SOMPD_RESET_NSRST) != 0u;
+
+	_boot_external = false;
 
 	alp_som_pd_record_t rec;
 	if (!alp_som_pd_store_load(&rec)) {
@@ -1029,6 +1036,12 @@ int alp_som_power_boot_restore(void)
 	 * for pass 2 (alp_som_power_boot_restore_i2c) -- the controller is not up yet. */
 	uint32_t restored, failed;
 	restore_domains(&rec, ~SOMPD_I2C_DOMAINS, true, &restored, &failed);
+
+	/* A set NSRST bit marks a pin reset ONLY if it was probed before the sleep and does
+	 * clear (ALP_SOM_REC_NSRST_TRUSTED in the record): the SVD calls the field write-only
+	 * with reset value 1, and a stale bit must never turn a genuine wake into an aborted
+	 * sleep. */
+	_boot_external = nsrst && (rec.armed_hw & ALP_SOM_REC_NSRST_TRUSTED) != 0u;
 
 	/* Wake cause, part 1: what needs no I2C (LPTIMER status).  This must run before
 	 * the timer driver initialises and clears the status; the RTC half follows in

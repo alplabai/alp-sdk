@@ -1038,6 +1038,18 @@ static void poke_cycle_record(alp_power_mode_t mode)
 	alp_som_pd_store_save(&r);
 }
 
+/* The same record, but the way the STOP backend writes it when the NSRST syndrome bit was
+ * probed before the sleep and does clear. */
+static void poke_trusted_record(alp_power_mode_t mode)
+{
+	alp_som_pd_record_t r;
+
+	poke_cycle_record(mode);
+	zassert_true(alp_som_pd_store_load(&r));
+	r.armed_hw |= ALP_SOM_REC_NSRST_TRUSTED;
+	alp_som_pd_store_save(&r);
+}
+
 ZTEST(power_som_domains, test_weak_decode_defaults_pass_the_record_through)
 {
 	alp_power_boot_info_t info;
@@ -1252,6 +1264,7 @@ ZTEST(power_som_domains, test_pin_reset_after_stop_is_an_aborted_sleep_not_a_wak
 	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
 	alp_som_pd_record_t rec;
 	zassert_true(alp_som_pd_store_load(&rec));
+	rec.armed_hw |= ALP_SOM_REC_NSRST_TRUSTED; /* probed before the sleep: the bit does clear */
 	alp_som_power_reset_for_test();
 	alp_som_pd_store_save(&rec);
 	g_stop_mode = 0x10u;
@@ -1269,7 +1282,25 @@ ZTEST(power_som_domains, test_pin_reset_after_stop_is_an_aborted_sleep_not_a_wak
 	g_dec.armed = false;
 }
 
-ZTEST(power_som_domains, test_pin_reset_with_no_record_is_also_not_a_wake)
+ZTEST(power_som_domains, test_a_stale_nsrst_bit_never_turns_a_wake_into_an_aborted_sleep)
+{
+	alp_power_boot_info_t info;
+
+	/* The syndrome bit could not be shown to clear before the sleep (no TRUSTED flag, e.g.
+	 * a write-only field that reads 1 forever): a set bit at the next boot is not a pin reset. */
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	g_syndrome  = 1u;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP, "still a wake");
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_RTC);
+	g_dec.armed = false;
+}
+
+ZTEST(power_som_domains, test_pin_reset_with_no_record_is_not_classified_the_bit_is_unproven)
 {
 	alp_power_boot_info_t info;
 
@@ -1280,7 +1311,9 @@ ZTEST(power_som_domains, test_pin_reset_with_no_record_is_also_not_a_wake)
 	g_syndrome  = 1u;
 	wake_boot(&info);
 	zassert_true(info.valid);
-	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+	/* With no record there is no proof the bit clears, so it is not read as a pin reset. */
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+	zassert_equal(info.wake_source, 0u);
 	zassert_equal(level(LPGPIO, NRST_PIN), 1, "still released");
 }
 
@@ -1289,7 +1322,7 @@ ZTEST(power_som_domains, test_only_the_pin_bit_marks_an_external_reset)
 	alp_power_boot_info_t info;
 
 	memset(&g_dec, 0, sizeof(g_dec));
-	poke_cycle_record(ALP_POWER_MODE_STOP);
+	poke_trusted_record(ALP_POWER_MODE_STOP);
 	g_stop_mode = 0x10u;
 	g_syndrome  = 4u; /* reset request to the power domain: not proven to be a pin reset */
 	wake_boot(&info);
