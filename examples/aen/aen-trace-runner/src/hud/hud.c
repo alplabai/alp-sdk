@@ -12,6 +12,9 @@
 #include "../render/panel_rot.h"       /* tr_rot_blit: the rotated layer-2 buffer */
 #include "../render/r3d.h"             /* the renderer's DL / setup / band sizes */
 #include "hud_assets.h"
+#ifdef TR_PARTNER_LOGO_HEADER
+#include TR_PARTNER_LOGO_HEADER /* tr_partner_logo[], _W, _H (tools/genlogo.py) */
+#endif
 
 _Static_assert(TR_HUD_FB_SIZE == TR_HUD_W * TR_HUD_H * 2, "tr_mbox.h TR_HUD_FB_SIZE");
 /* The layer-2 window (panel rows 0..TR_HUD_H-1) stays over the game
@@ -323,6 +326,57 @@ int tr_hud_fmt_u32(char *buf, uint32_t v)
 #define STRIP_END   (CARD_Y + 2 + TAGLINE_H) /* the tagline strip's last row + 1: 168 */
 _Static_assert(LOGO_CARD_Y + LOGO_CARD_H <= CARD_Y, "the logo card stays in the score tiles");
 _Static_assert(INV_Y + INV_PANEL_H <= TR_HUD_H, "the invitation panels stay in the HUD window");
+
+#ifdef TR_PARTNER_LOGO_HEADER
+/* The optional partner logo (build: -DTR_PARTNER_LOGO=<header from tools/genlogo.py>; without it none
+ * of this is compiled). Always on, every screen: bottom-left of the free left strip, just above the
+ * INV_Y row. x < 110 is clear on every screen (the crash / initials card starts at x 110, the attract
+ * name panel at x 80 but only from INV_Y down) and nothing between the tagline strip and INV_Y
+ * reaches it -- test_hud.c proves it against every screen. It sits in T_MIDL; no tile key
+ * mentions it, so it is composed into the tile only when that tile repaints for its own reasons. */
+#define PARTNER_X     2
+#define PARTNER_BOX_W 106 /* the strip left of the card, less the margin */
+#define PARTNER_BOX_H 48
+#define PARTNER_Y     (INV_Y - 4 - TR_PARTNER_LOGO_H)
+_Static_assert(
+    TR_PARTNER_LOGO_W <= PARTNER_BOX_W && TR_PARTNER_LOGO_H <= PARTNER_BOX_H,
+    "the partner logo is larger than the HUD's free left strip (tools/genlogo.py --box)");
+_Static_assert(PARTNER_Y >= STRIP_END + 4, "the partner logo stays under the tagline strip");
+
+bool tr_hud_partner_logo_rect(int *x, int *y, int *w, int *h)
+{
+	*x = PARTNER_X;
+	*y = PARTNER_Y;
+	*w = TR_PARTNER_LOGO_W;
+	*h = TR_PARTNER_LOGO_H;
+	return true;
+}
+
+static void paint_partner_logo(const canvas_t *cv)
+{
+	int y0 = PARTNER_Y > cv->y ? PARTNER_Y : cv->y;
+	int y1 = PARTNER_Y + TR_PARTNER_LOGO_H < cv->y + cv->h ? PARTNER_Y + TR_PARTNER_LOGO_H
+	                                                       : cv->y + cv->h;
+	int x0 = PARTNER_X > cv->x ? PARTNER_X : cv->x;
+	int x1 = PARTNER_X + TR_PARTNER_LOGO_W < cv->x + cv->w ? PARTNER_X + TR_PARTNER_LOGO_W
+	                                                       : cv->x + cv->w;
+
+	for (int y = y0; y < y1; y++) {
+		const uint16_t *s = &tr_partner_logo[(y - PARTNER_Y) * TR_PARTNER_LOGO_W - PARTNER_X];
+		uint16_t       *d = cv->px + (y - cv->y) * cv->w - cv->x;
+
+		for (int x = x0; x < x1; x++) {
+			uint32_t a = s[x] >> 12;
+
+			if (a == 15u) {
+				d[x] = s[x];
+			} else if (a != 0u) {
+				blend(&d[x], s[x] & 0xFFFu, a);
+			}
+		}
+	}
+}
+#endif
 
 /* The tagline strip; the refresh is a number derived from the display's timings
  * (panel_hz.h), so it is formatted, not pasted into the literal. */
@@ -800,6 +854,9 @@ static void paint(const canvas_t      *cv,
                   uint32_t             popup_start,
                   uint32_t             zone_start)
 {
+#ifdef TR_PARTNER_LOGO_HEADER
+	paint_partner_logo(cv);
+#endif
 	paint_perf(cv, v);
 	paint_power(cv, v);
 	switch (v->mode) {

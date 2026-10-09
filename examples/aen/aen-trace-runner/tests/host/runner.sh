@@ -74,6 +74,38 @@ for t in test_panel_hz test_step test_pace test_tilt test_tilt_takeover test_att
 		echo "FAIL: tests/host/$t.c -DTR_PANEL_HZ=30"; rc=1
 	fi
 done
+# The optional partner logo (hud.c TR_PARTNER_LOGO_HEADER, tools/genlogo.py): test_hud.c's logo section
+# and the rotated-HUD test against a SYNTHETIC logo at the largest size the HUD accepts (106 x 48; an
+# opaque frame, half-alpha stripes, clear gaps -- every alpha class). No real partner artwork is in
+# this repo; the default build above runs the same tests with no logo (nothing drawn).
+logo_h="$RUN_TMP/synthetic_partner_logo.h"
+awk 'BEGIN {
+	w = 106; h = 48
+	print "#define TR_PARTNER_LOGO_W " w
+	print "#define TR_PARTNER_LOGO_H " h
+	print "static const uint16_t tr_partner_logo[TR_PARTNER_LOGO_W * TR_PARTNER_LOGO_H] = {"
+	for (y = 0; y < h; y++) {
+		for (x = 0; x < w; x++) {
+			if (x == 0 || y == 0 || x == w - 1 || y == h - 1) v = 65535
+			else if ((x + y) % 8 < 3) v = 36707
+			else if ((x + y) % 8 == 3) v = 14014
+			else v = 0
+			printf "0x%04X,", v
+		}
+		printf "\n"
+	}
+	print "};"
+}' >"$logo_h"
+for t in test_hud test_hud_rot; do
+	out="$RUN_TMP/tr-$t-logo"
+	if cc -std=c11 -Wall -Wextra -Werror -ffp-contract=off -g -DTR_PARTNER_LOGO_HEADER="\"$logo_h\"" -o "$out" "tests/host/$t.c" \
+		$(ls src/game/*.c src/vision/*.c src/hud/*.c src/render/sprite.c src/render/proj.c src/ipc/*.c 2>/dev/null |
+			grep -v main.c) -lm && "$out" >/dev/null; then
+		echo "PASS: tests/host/$t.c -DTR_PARTNER_LOGO_HEADER"
+	else
+		echo "FAIL: tests/host/$t.c -DTR_PARTNER_LOGO_HEADER"; rc=1
+	fi
+done
 # The synth's other builds (bench A/B): V1 (must keep golden 0xDBF70C58), V2
 # and V3 at 48 kHz, each with its own golden in test_audio.c.
 for f in "-DTR_AUDIO_V2=0" "-DTR_AUDIO_V3=0" "-DTR_AUDIO_RATE=48000u"; do
