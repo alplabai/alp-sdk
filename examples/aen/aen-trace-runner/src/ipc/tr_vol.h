@@ -38,8 +38,8 @@
 #define TR_VOL_TAG      0x564F0000u /* 'VO' */
 #define TR_VOL_TAG_MASK 0xFFFF0000u
 #define TR_VOL_MAX      100u /* percent of TR_SND_VOLUME */
-#define TR_VOL_DEFAULT  30u /* an unset or garbage word, and the HE's level at boot: never a 100 % burst */
-#define TR_VOL_STEP     5u   /* percent per encoder detent */
+#define TR_VOL_DEFAULT  30u /* unset / garbage word and the HE's boot level (no 100 % burst) */
+#define TR_VOL_STEP     5u  /* percent per encoder detent */
 
 typedef struct {
 	uint32_t vol;
@@ -89,8 +89,8 @@ void tr_vol_apply(tr_vol_ramp_t *r, int16_t *buf, unsigned n, uint32_t pct);
 /* ---- HE: the owner ---------------------------------------------------------------------- */
 typedef struct {
 	uint32_t pct;        /* the level published: 0 while muted */
-	uint32_t unmute_pct; /* the last non-zero level: what the switch restores and a turn steps from */
-	bool     muted;      /* the switch muted it: the level to resume is unmute_pct */
+	uint32_t unmute_pct; /* last non-zero level: the switch restores it, a turn steps from it */
+	bool     muted;      /* the switch muted it: resume from unmute_pct */
 	uint32_t last_req;   /* the req word as last seen: only a CHANGE is a request */
 } tr_vol_he_t;
 

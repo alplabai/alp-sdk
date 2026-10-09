@@ -85,8 +85,8 @@ bool tr_vol_he_step(tr_vol_he_t *he, volatile tr_vol_t *r, int32_t detents, bool
 	bool changed = false;
 
 	if (detents != 0) {
-		int32_t lim = (int32_t)(TR_VOL_MAX / TR_VOL_STEP);
-		int32_t d   = detents > lim ? lim : (detents < -lim ? -lim : detents);
+		int32_t lim  = (int32_t)(TR_VOL_MAX / TR_VOL_STEP);
+		int32_t d    = detents > lim ? lim : (detents < -lim ? -lim : detents);
 		int32_t base = (int32_t)(he->muted ? he->unmute_pct : he->pct);
 		int32_t p    = base + d * (int32_t)TR_VOL_STEP;
 
