@@ -241,7 +241,8 @@ static void rs_wait(uint32_t i, uint32_t w)
 #define RENDER_PROF_ADDR   ((volatile uint32_t *)0x02401800u)
 #define RENDER_PROF_MARKER 0x5E4D5052u
 #define RENDER_PROF_WINDOW 64u /* frames: 64 x ~27 ms x 800 MHz < 2^32 cycles */
-_Static_assert(0x1800u + 8u + 2u * TR_PROF_N * 12u <= 0x1900u, "the prof block ends below the stats block");
+_Static_assert(0x1800u + 8u + 2u * TR_PROF_N * 12u <= 0x1900u,
+               "the prof block ends below the stats block");
 static tr_prof_t prof[2][TR_PROF_N] __attribute__((aligned(64)));
 
 tr_prof_t *tr_prof_core(void)

@@ -247,9 +247,9 @@ tr_tex_fog_t    tr_r3d_tex_fog[TR_TEX_MAX];
 uint8_t         tr_r3d_fog_lut[TR_FOG_LUT_N];
 
 #ifdef TR_RASTER_PROF
-#define PROF_T0()            uint32_t prof_t0 = tr_prof_now()
-#define PROF_ADD(k, px, cnt) prof_add((k), prof_t0, (px), (cnt))
-#define PROF_T1()            uint32_t prof_t1 = tr_prof_now()
+#define PROF_T0()             uint32_t prof_t0 = tr_prof_now()
+#define PROF_ADD(k, px, cnt)  prof_add((k), prof_t0, (px), (cnt))
+#define PROF_T1()             uint32_t prof_t1 = tr_prof_now()
 #define PROF_ADD1(k, px, cnt) prof_add((k), prof_t1, (px), (cnt))
 static inline void prof_add(int k, uint32_t t0, uint32_t px, uint32_t cnt)
 {
@@ -260,9 +260,9 @@ static inline void prof_add(int k, uint32_t t0, uint32_t px, uint32_t cnt)
 	p->n += cnt;
 }
 #else
-#define PROF_T0()            ((void)0)
-#define PROF_ADD(k, px, cnt) ((void)0)
-#define PROF_T1()            ((void)0)
+#define PROF_T0()             ((void)0)
+#define PROF_ADD(k, px, cnt)  ((void)0)
+#define PROF_T1()             ((void)0)
 #define PROF_ADD1(k, px, cnt) ((void)0)
 #endif
 
