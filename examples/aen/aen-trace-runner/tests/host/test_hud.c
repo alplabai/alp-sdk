@@ -881,6 +881,8 @@ int main(void)
 		assert(lx == 16 && ly == 170 && ly >= 168 && ly + lh <= 300 && lx + lw <= 220);
 		assert(220 * (300 - 140) <= 110000); /* hud_l2.c HUD_PX_BUDGET: the tile fits a frame */
 
+		memset(
+		    &vl, 0, sizeof(vl)); /* no stale fields: a clean view, whatever the build adds to it */
 		tr_hs_init(&hs);
 		(void)tr_hs_insert(&hs, 9999999u, "ZZZ");
 		(void)tr_hs_insert(&hs, 1234u, "AAA");
