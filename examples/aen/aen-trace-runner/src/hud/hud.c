@@ -329,40 +329,47 @@ _Static_assert(INV_Y + INV_PANEL_H <= TR_HUD_H, "the invitation panels stay in t
 
 #ifdef TR_PARTNER_LOGO_HEADER
 /* The optional partner logo (build: -DTR_PARTNER_LOGO=<header from tools/genlogo.py>; without it none
- * of this is compiled). Always on, every screen: bottom-left of the free left strip, just above the
- * INV_Y row. x < 110 is clear on every screen (the crash / initials card starts at x 110, the attract
- * name panel at x 80 but only from INV_Y down) and nothing between the tagline strip and INV_Y
- * reaches it -- test_hud.c proves it against every screen. It sits in T_MIDL; no tile key
- * mentions it, so it is composed into the tile only when that tile repaints for its own reasons. */
-#define PARTNER_X     2
-#define PARTNER_BOX_W 106 /* the strip left of the card, less the margin */
-#define PARTNER_BOX_H 48
-#define PARTNER_Y     (INV_Y - 4 - TR_PARTNER_LOGO_H)
-_Static_assert(
-    TR_PARTNER_LOGO_W <= PARTNER_BOX_W && TR_PARTNER_LOGO_H <= PARTNER_BOX_H,
-    "the partner logo is larger than the HUD's free left strip (tools/genlogo.py --box)");
-_Static_assert(PARTNER_Y >= STRIP_END + 4, "the partner logo stays under the tagline strip");
+ * of this is compiled). Always on, every screen, on a plate in the HUD's own card style (panel(),
+ * C_PANEL / A_PANEL) down the left edge: top-aligned with the power tile (PWR_Y, which it mirrors on
+ * the right) and left-aligned with the BEST / logo cards (SCORE_X), the logo centred in it. The plate
+ * ends above INV_Y, clear of the name / invitation panels. It is drawn last, so on the crash,
+ * initials and high-score screens, whose cards start at x 110, it overlaps their left edge rather than
+ * being cut. It sits in T_MIDL; no tile key mentions it, so it is composed into that tile only when it
+ * repaints for its own reasons. Plate and logo are the same pixels on every screen (test_hud.c). */
+#define PARTNER_PAD   TR_HUD_PARTNER_PAD
+#define PARTNER_BOX_W 140 /* the largest logo: tools/genlogo.py's default --box */
+#define PARTNER_BOX_H 51
+#define PARTNER_X     SCORE_X
+#define PARTNER_Y 170 /* == PWR_Y, the power tile's top (checked below, once PWR_Y is defined) */
+#define PARTNER_W (TR_PARTNER_LOGO_W + 2 * PARTNER_PAD)
+#define PARTNER_H (TR_PARTNER_LOGO_H + 2 * PARTNER_PAD)
+_Static_assert(TR_PARTNER_LOGO_W <= PARTNER_BOX_W && TR_PARTNER_LOGO_H <= PARTNER_BOX_H,
+               "the partner logo is larger than its plate allows (tools/genlogo.py --box)");
+_Static_assert(PARTNER_Y >= STRIP_END && PARTNER_Y + PARTNER_H <= INV_Y,
+               "the partner plate stays between the tagline strip and the name / invitation row");
+_Static_assert(PARTNER_X + PARTNER_W <= 220 && PARTNER_Y >= CARD_Y,
+               "the partner plate stays inside the T_MIDL tile");
 
 bool tr_hud_partner_logo_rect(int *x, int *y, int *w, int *h)
 {
 	*x = PARTNER_X;
 	*y = PARTNER_Y;
-	*w = TR_PARTNER_LOGO_W;
-	*h = TR_PARTNER_LOGO_H;
+	*w = PARTNER_W;
+	*h = PARTNER_H;
 	return true;
 }
 
 static void paint_partner_logo(const canvas_t *cv)
 {
-	int y0 = PARTNER_Y > cv->y ? PARTNER_Y : cv->y;
-	int y1 = PARTNER_Y + TR_PARTNER_LOGO_H < cv->y + cv->h ? PARTNER_Y + TR_PARTNER_LOGO_H
-	                                                       : cv->y + cv->h;
-	int x0 = PARTNER_X > cv->x ? PARTNER_X : cv->x;
-	int x1 = PARTNER_X + TR_PARTNER_LOGO_W < cv->x + cv->w ? PARTNER_X + TR_PARTNER_LOGO_W
-	                                                       : cv->x + cv->w;
+	int lx = PARTNER_X + PARTNER_PAD, ly = PARTNER_Y + PARTNER_PAD;
+	int y0 = ly > cv->y ? ly : cv->y;
+	int y1 = ly + TR_PARTNER_LOGO_H < cv->y + cv->h ? ly + TR_PARTNER_LOGO_H : cv->y + cv->h;
+	int x0 = lx > cv->x ? lx : cv->x;
+	int x1 = lx + TR_PARTNER_LOGO_W < cv->x + cv->w ? lx + TR_PARTNER_LOGO_W : cv->x + cv->w;
 
+	panel(cv, PARTNER_X, PARTNER_Y, PARTNER_W, PARTNER_H, C_PANEL, A_PANEL);
 	for (int y = y0; y < y1; y++) {
-		const uint16_t *s = &tr_partner_logo[(y - PARTNER_Y) * TR_PARTNER_LOGO_W - PARTNER_X];
+		const uint16_t *s = &tr_partner_logo[(y - ly) * TR_PARTNER_LOGO_W - lx];
 		uint16_t       *d = cv->px + (y - cv->y) * cv->w - cv->x;
 
 		for (int x = x0; x < x1; x++) {
@@ -515,6 +522,9 @@ static void paint_perf(const canvas_t *cv, const tr_hud_view_t *v)
 _Static_assert(PWR_GX + TR_PWR_N <= PWR_X + PWR_W, "the graph fits the power panel");
 _Static_assert(PWR_GY + PWR_GH + 2 + 2 * PWR_LH + PWR_INK <= PWR_Y + PWR_H,
                "the readouts' ink (descenders too) fits the power panel");
+#ifdef TR_PARTNER_LOGO_HEADER
+_Static_assert(PARTNER_Y == PWR_Y, "the partner plate is top-aligned with the power tile");
+#endif
 _Static_assert(PWR_Y >= STRIP_END && PWR_Y + PWR_H <= INV_Y,
                "the power panel sits between the tagline strip and the invitation row");
 
@@ -854,9 +864,6 @@ static void paint(const canvas_t      *cv,
                   uint32_t             popup_start,
                   uint32_t             zone_start)
 {
-#ifdef TR_PARTNER_LOGO_HEADER
-	paint_partner_logo(cv);
-#endif
 	paint_perf(cv, v);
 	paint_power(cv, v);
 	switch (v->mode) {
@@ -891,6 +898,9 @@ static void paint(const canvas_t      *cv,
 		}
 		break;
 	}
+#ifdef TR_PARTNER_LOGO_HEADER
+	paint_partner_logo(cv); /* last: the plate stays whole over any card that reaches it */
+#endif
 }
 
 /* ---------------------------------------------------------------- tiles

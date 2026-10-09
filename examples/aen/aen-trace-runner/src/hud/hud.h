@@ -144,7 +144,9 @@ void tr_hud_view_zone(tr_hud_view_t *v, uint8_t zone, uint32_t seq);
 
 #ifdef TR_PARTNER_LOGO_HEADER
 /* The optional partner logo (CMake -DTR_PARTNER_LOGO=<header>, tools/genlogo.py), drawn on every
- * screen: its rect in HUD pixels (rotation 0). Only declared when the logo is built in. */
+ * screen on a card-style plate: the plate's rect in HUD pixels (rotation 0), the logo centred in it
+ * with TR_HUD_PARTNER_PAD around. Only declared when the logo is built in. */
+#define TR_HUD_PARTNER_PAD 6
 bool tr_hud_partner_logo_rect(int *x, int *y, int *w, int *h);
 #endif
 

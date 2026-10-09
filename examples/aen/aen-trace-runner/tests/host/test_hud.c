@@ -818,7 +818,7 @@ int main(void)
 			 * the old card covered rows 140..348 edge to edge). */
 			assert(v.mode == TR_HUD_ATTRACT && alpha_px(fb, 16, 74, 388, 138) > 20000u);
 #ifdef TR_PARTNER_LOGO_HEADER
-			assert(alpha_px(fb, 110, 172, 610, 298) == 0u); /* the logo owns the strip x < 110 */
+			assert(alpha_px(fb, 170, 172, 610, 298) == 0u); /* the partner plate owns x < 170 */
 #else
 			assert(alpha_px(fb, 20, 172, 610, 298) ==
 			       0u); /* left of the power panel (x 612..712) */
@@ -852,9 +852,10 @@ int main(void)
 
 #ifdef TR_PARTNER_LOGO_HEADER
 	/* 9. The optional partner logo (TR_PARTNER_LOGO_HEADER; runner.sh builds this test against a
-	 * SYNTHETIC header): in bounds, in one tile, clear of everything any screen paints, on every
-	 * screen, and free per frame. */
+	 * SYNTHETIC header): its card-style plate down the left edge, in bounds, in one tile, clear of
+	 * the name / invitation row, the same pixels on every screen, and free per frame. */
 	{
+		static uint16_t      refp[TR_HUD_W * TR_HUD_H];
 		int                  lx, ly, lw, lh, screens = 0;
 		tr_hud_t             hl;
 		tr_hud_view_t        vl;
@@ -869,12 +870,15 @@ int main(void)
 			                            TR_BANNER_NONE };
 
 		assert(tr_hud_partner_logo_rect(&lx, &ly, &lw, &lh));
-		assert(lw == TR_PARTNER_LOGO_W && lh == TR_PARTNER_LOGO_H);
-		assert(lw > 0 && lh > 0 && lw <= 160 && lh <= 48); /* "small": inside 160 x 48 */
+		assert(lw == TR_PARTNER_LOGO_W + 2 * TR_HUD_PARTNER_PAD &&
+		       lh == TR_PARTNER_LOGO_H + 2 * TR_HUD_PARTNER_PAD);
+		assert(TR_PARTNER_LOGO_W <= 140 && TR_PARTNER_LOGO_H <= 51); /* the plate's largest logo */
 		assert(lx >= 0 && ly >= 0 && lx + lw <= TR_HUD_W && ly + lh <= TR_HUD_H);
-		/* inside the card's left middle tile (hud.c T_MIDL: 0..220 x 140..300): only a repaint of
-		 * that tile ever touches the logo, and the tile's cost is what it was */
-		assert(lx + lw <= 220 && ly >= 140 && ly + lh <= 300);
+		/* mirrors the power tile (hud.c PWR_Y 170) down the left edge, level with the BEST / logo
+		 * cards (SCORE_X 16), under the tagline strip (to 168) and above the name / invitation
+		 * row (INV_Y 300), inside the card's left middle tile (hud.c T_MIDL: 0..220 x 140..300):
+		 * only a repaint of that tile ever touches it, and the tile's cost is what it was */
+		assert(lx == 16 && ly == 170 && ly >= 168 && ly + lh <= 300 && lx + lw <= 220);
 		assert(220 * (300 - 140) <= 110000); /* hud_l2.c HUD_PX_BUDGET: the tile fits a frame */
 
 		tr_hs_init(&hs);
@@ -883,6 +887,21 @@ int main(void)
 		memset(&ini, 0, sizeof(ini));
 		strcpy(ini.name, "WWW");
 		tr_score_init(&ls);
+		tr_hud_view_set(&vl, &ls, TR_BANNER_NONE, false, TR_HUD_INVITE_NONE);
+		tr_hud_paint_all(refp, &vl, 10u, 0u - 100u, 0u - 200u);
+		/* the reference plate: the HUD's card pixel in the padding, the logo's own pixels where it
+		 * is opaque, and the card showing through where it is clear */
+		assert(refp[(ly + 2) * TR_HUD_W + lx + lw / 2] == (uint16_t)(10u << 12 | 0x013u));
+		for (int y = 0; y < TR_PARTNER_LOGO_H; y++) {
+			for (int x = 0; x < TR_PARTNER_LOGO_W; x++) {
+				uint16_t g = tr_partner_logo[y * TR_PARTNER_LOGO_W + x];
+				uint16_t o =
+				    refp[(ly + TR_HUD_PARTNER_PAD + y) * TR_HUD_W + lx + TR_HUD_PARTNER_PAD + x];
+
+				assert(g >> 12 != 15u || o == g);
+				assert(g >> 12 != 0u || o == (uint16_t)(10u << 12 | 0x013u));
+			}
+		}
 		ls.score      = 9999999u;
 		ls.metres     = 999999u;
 		ls.best       = 9999999u;
@@ -891,8 +910,8 @@ int main(void)
 		ls.popup_mult = 5u;
 		ls.new_best   = 1u;
 		/* Every screen x invitation x character x popup/zone x table page, widest numbers and
-		 * perf lines: the rect must hold EXACTLY the logo's pixels -- anything else painting there
-		 * blends over it (or into its clear pixels) and shows. */
+		 * perf lines: the plate is the same pixels on all of them (it is drawn last, so the
+		 * crash / initials / table cards, which start at x 110, never cut it). */
 		for (int mode = 0; mode < 5; mode++) {
 			for (int inv = 0; inv < 3; inv++) {
 				for (int ch = 0; ch < 4; ch++) {
@@ -914,7 +933,7 @@ int main(void)
 							    fb, &vl, fr, pop ? fr - 5u : 0u - 100u, pop ? fr - 20u : 0u - 200u);
 							for (int y = 0; y < lh; y++) {
 								assert(memcmp(&fb[(ly + y) * TR_HUD_W + lx],
-								              &tr_partner_logo[y * lw],
+								              &refp[(ly + y) * TR_HUD_W + lx],
 								              (size_t)lw * 2u) == 0);
 							}
 							screens++;
@@ -923,7 +942,7 @@ int main(void)
 				}
 			}
 		}
-		/* Always on, incrementally: attract -> play -> crash, the logo stays and the update still
+		/* Always on, incrementally: attract -> play -> crash, the plate stays and the update still
 		 * equals a scratch paint. */
 		tr_hud_init(&hl);
 		for (uint32_t f = 0; f < 400u; f++) {
@@ -940,12 +959,12 @@ int main(void)
 			same_as_scratch(&hl, &vl);
 			for (int y = 0; y < lh; y++) {
 				assert(memcmp(&fb[(ly + y) * TR_HUD_W + lx],
-				              &tr_partner_logo[y * lw],
+				              &refp[(ly + y) * TR_HUD_W + lx],
 				              (size_t)lw * 2u) == 0);
 			}
 		}
 		/* No per-frame cost: a static view repaints nothing, and a change elsewhere (the perf
-		 * panel, hud.c T_PERF) repaints that tile alone -- the logo's tile is not in its key. */
+		 * panel, hud.c T_PERF) repaints that tile alone -- the plate's tile is not in its key. */
 		tr_hud_init(&hl);
 		tr_score_init(&ls);
 		tr_hud_view_set(&vl, &ls, TR_BANNER_NONE, false, TR_HUD_INVITE_NONE);
@@ -953,7 +972,7 @@ int main(void)
 		assert(tr_hud_update(&hl, fb, &vl, NULL) == 0u);
 		snprintf(vl.perf[0], TR_PERF_COLS, "FPS 40.0");
 		assert(tr_hud_update(&hl, fb, &vl, &d2) > 0u && d2 == (1u << 2));
-		printf("hud: partner logo %d x %d at (%d, %d), clear on %d screens\n",
+		printf("hud: partner plate %d x %d at (%d, %d), same on %d screens\n",
 		       lw,
 		       lh,
 		       lx,

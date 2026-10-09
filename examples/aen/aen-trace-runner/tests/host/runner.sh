@@ -75,12 +75,12 @@ for t in test_panel_hz test_step test_pace test_tilt test_tilt_takeover test_att
 	fi
 done
 # The optional partner logo (hud.c TR_PARTNER_LOGO_HEADER, tools/genlogo.py): test_hud.c's logo section
-# and the rotated-HUD test against a SYNTHETIC logo at the largest size the HUD accepts (106 x 48; an
+# and the rotated-HUD test against a SYNTHETIC logo at the largest size the HUD accepts (140 x 51; an
 # opaque frame, half-alpha stripes, clear gaps -- every alpha class). No real partner artwork is in
 # this repo; the default build above runs the same tests with no logo (nothing drawn).
 logo_h="$RUN_TMP/synthetic_partner_logo.h"
 awk 'BEGIN {
-	w = 106; h = 48
+	w = 140; h = 51
 	print "#define TR_PARTNER_LOGO_W " w
 	print "#define TR_PARTNER_LOGO_H " h
 	print "static const uint16_t tr_partner_logo[TR_PARTNER_LOGO_W * TR_PARTNER_LOGO_H] = {"

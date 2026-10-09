@@ -7,15 +7,15 @@ no header nothing is drawn and the image is byte-identical. This tool makes
 that header; the logo artwork and its header are the partner's trademark and
 are NOT committed here -- keep them in a private repo and pass the path.
 
-    python3 tools/genlogo.py LOGO.{png,svg} OUT.h [--box 106x48] [--source URL]
+    python3 tools/genlogo.py LOGO.{png,svg} OUT.h [--box 140x51] [--source URL]
 
 The logo is scaled to fit --box (keeping its aspect ratio, never upscaled past
 the box), composited in premultiplied alpha (no dark fringes) and quantised to
 ARGB4444, straight alpha: A[15:12] R[11:8] G[7:4] B[3:0] -- the HUD buffer's own
 format (hud.h). OUT.h defines TR_PARTNER_LOGO_W / _H and tr_partner_logo[].
 
-The default box fits the HUD's free left strip (hud.c PARTNER_BOX_W/H); hud.c
-refuses a header bigger than that at compile time.
+The default box is the largest logo the HUD's plate takes (hud.c PARTNER_BOX_W/H);
+hud.c refuses a bigger header at compile time.
 
 Needs Pillow + numpy; SVG input also needs `pip install resvg_py`.
 """
@@ -72,7 +72,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("logo")
     ap.add_argument("out")
-    ap.add_argument("--box", default="106x48", help="max WxH in px (default 106x48)")
+    ap.add_argument("--box", default="140x51", help="max WxH in px (default 140x51)")
     ap.add_argument("--source", default="", help="where the artwork came from (recorded in the header)")
     a = ap.parse_args()
     tw, th = (int(v) for v in a.box.lower().split("x"))
