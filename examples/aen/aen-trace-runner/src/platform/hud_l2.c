@@ -306,6 +306,7 @@ void tr_hud_l2_present(const tr_score_t    *s,
 	tr_hud_view_set(&g_view, s, banner, attract, invite);
 	tr_hud_view_zone(&g_view, z->zone, z->seq);
 	tr_hud_view_vol(&g_view, tr_volume_he_pct(), tr_volume_he_seq());
+	tr_hud_view_vol_kind(&g_view, tr_volume_he_kind());
 	tr_hud_view_booth(&g_view, hs, ini);
 	g_view.character = character;
 	perf();

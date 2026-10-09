@@ -390,18 +390,25 @@ static uint32_t zone_alpha(uint32_t age)
 	return fade_alpha(age, TR_HUD_ZONE_FRAMES);
 }
 
-/* The volume popup, over the bottom row: the row's own content is cleared, then "VOL n%" (or
+void tr_hud_vol_text(char *b, size_t n, uint8_t kind, uint8_t pct)
+{
+	if (kind == TR_HUD_KNOB_BRIGHTNESS) {
+		(void)snprintf(b, n, "BRIGHTNESS %u%%", (unsigned)pct);
+	} else if (pct == 0u) {
+		(void)snprintf(b, n, "MUTE");
+	} else {
+		(void)snprintf(b, n, "VOLUME %u%%", (unsigned)pct);
+	}
+}
+
+/* The volume popup, over the bottom row: the row's own content is cleared, then "VOLUME n%" (or
  * "MUTE") on a panel centred on the HUD, fading like a zone name. */
 static void paint_vol(const canvas_t *cv, const tr_hud_view_t *v, uint32_t age)
 {
 	uint32_t s = fade_alpha(age, TR_HUD_VOL_FRAMES);
-	char     b[16];
+	char     b[24];
 
-	if (v->vol_pct == 0u) {
-		memcpy(b, "MUTE", 5);
-	} else {
-		(void)snprintf(b, sizeof(b), "VOL %u%%", (unsigned)v->vol_pct);
-	}
+	tr_hud_vol_text(b, sizeof(b), v->vol_kind, v->vol_pct);
 	int w = tr_hud_text_w(TR_HUD_FONT_MED, b);
 
 	clear(cv, 0, INV_Y, TR_HUD_W, TR_HUD_H - INV_Y);
@@ -412,7 +419,13 @@ static void paint_vol(const canvas_t *cv, const tr_hud_view_t *v, uint32_t age)
 	      INV_PANEL_H,
 	      C_PANEL,
 	      (A_PANEL * s + 8u) / 16u);
-	text_c(cv, TR_HUD_FONT_MED, TR_HUD_W / 2, INV_Y + 2, b, v->vol_pct == 0u ? C_RED : C_WHITE, s);
+	text_c(cv,
+	       TR_HUD_FONT_MED,
+	       TR_HUD_W / 2,
+	       INV_Y + 2,
+	       b,
+	       v->vol_kind == TR_HUD_KNOB_VOLUME && v->vol_pct == 0u ? C_RED : C_WHITE,
+	       s);
 }
 
 /* A zone's name, entering (P15): in its zone's colour, centred on x; a
@@ -975,11 +988,11 @@ static uint32_t tile_key(int                  t,
 			        blink_on(frame));
 		}
 		return k;
-	default: /* T_INV */
+	default:                            /* T_INV */
 		if (vol_on(frame, vol_start)) { /* the volume popup covers the row, whatever the screen */
 			return fnv(
 			    fnv(fnv(fnv(k, 9u), fade_alpha(frame - vol_start, TR_HUD_VOL_FRAMES)), v->vol_pct),
-			    v->vol_seq);
+			    v->vol_seq * 2u + v->vol_kind);
 		}
 		if (v->mode == TR_HUD_PLAY && zone_on(frame, zone_start)) {
 			return fnv(fnv(fnv(k, 3u), zone_alpha(frame - zone_start)), v->zone);
@@ -1185,6 +1198,11 @@ void tr_hud_view_vol(tr_hud_view_t *v, uint8_t pct, uint32_t seq)
 {
 	v->vol_pct = pct;
 	v->vol_seq = seq;
+}
+
+void tr_hud_view_vol_kind(tr_hud_view_t *v, uint8_t kind)
+{
+	v->vol_kind = kind;
 }
 
 void tr_hud_view_zone(tr_hud_view_t *v, uint8_t zone, uint32_t seq)

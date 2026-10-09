@@ -16,6 +16,7 @@
 #define TR_HUD_HUD_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "../game/hiscore.h"
@@ -69,7 +70,9 @@ typedef struct {
 	uint8_t  zone;     /* the world zone (src/game/zone.h) ... */
 	uint32_t zone_seq; /* ... and its entry count: a change shows its name */
 	uint8_t  vol_pct;  /* the game sound's volume, percent (0 = mute) ... */
-	uint32_t vol_seq;  /* ... and its change count: a change shows "VOL n%" for TR_HUD_VOL_FRAMES */
+	uint32_t
+	    vol_seq; /* ... and its change count: a change shows "VOLUME n%" for TR_HUD_VOL_FRAMES */
+	uint8_t  vol_kind; /* TR_HUD_KNOB_*: what the encoder is set to, so what the popup names */
 	uint32_t score, metres, best;
 	char     perf[TR_PERF_LINES][TR_PERF_COLS]; /* NUL-terminated, "" = blank line */
 	int16_t  pwr[TR_PWR_N];                     /* the power graph, oldest first (see TR_PWR_N) */
@@ -117,7 +120,7 @@ typedef struct {
 #define TR_HUD_ZONE_FRAMES \
 	110u /* 2.75 s: a zone's name on entry (P15), in the row under the play field's centre */
 #define TR_HUD_VOL_FRAMES \
-	60u /* 1.5 s: "VOL n%" over the bottom row (every screen) when the volume changes */
+	60u /* 1.5 s: "VOLUME n%" over the bottom row (every screen) when the volume changes */
 #define TR_HUD_BLINK_FRAMES 40u /* invitation period, 1 s, on for the first 28 */
 #define TR_HUD_PAGE_FRAMES \
 	240u /* 6 s: the attract card turns between the logo and the high scores */
@@ -149,9 +152,18 @@ void tr_hud_view_booth(tr_hud_view_t *v, const tr_hiscore_t *hs, const tr_initia
 void tr_hud_view_zone(tr_hud_view_t *v, uint8_t zone, uint32_t seq);
 
 /* view <- the game sound's volume (percent) and its change count (tr_vol_t.seq): the bottom row
- * shows "VOL n%" (or "MUTE" at 0) for TR_HUD_VOL_FRAMES whenever seq changes, over whatever the
+ * shows "VOLUME n%" (or "MUTE" at 0) for TR_HUD_VOL_FRAMES whenever seq changes, over whatever the
  * screen has there. A seq that never moves shows nothing. */
 void tr_hud_view_vol(tr_hud_view_t *v, uint8_t pct, uint32_t seq);
+
+/* The popup's subject: TR_HUD_KNOB_VOLUME ("VOLUME n%" / "MUTE") or TR_HUD_KNOB_BRIGHTNESS
+ * ("BRIGHTNESS n%"); then `pct` of tr_hud_view_vol() is that quantity. Default (0): volume. */
+#define TR_HUD_KNOB_VOLUME     0u
+#define TR_HUD_KNOB_BRIGHTNESS 1u
+void tr_hud_view_vol_kind(tr_hud_view_t *v, uint8_t kind);
+
+/* The popup's text (the longest, "BRIGHTNESS 100%", is 15 chars + NUL). */
+void tr_hud_vol_text(char *b, size_t n, uint8_t kind, uint8_t pct);
 
 void tr_hud_init(tr_hud_t *h);
 

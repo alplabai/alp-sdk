@@ -856,7 +856,7 @@ int main(void)
 		assert(memcmp(fb, ref, sizeof(fb)) == 0);
 	}
 
-	/* 9. The volume popup ("VOL n%" / "MUTE"): a change of vol_seq shows it over the bottom row for
+	/* 9. The volume popup ("VOLUME n%" / "MUTE"): a change of vol_seq shows it over the bottom row for
 	 * exactly TR_HUD_VOL_FRAMES of the 40 Hz clock, counted from the update that saw the change, on
 	 * any screen; incremental == from scratch every frame, and the row goes back to what the screen
 	 * has once it ends. The window is checked against the clock here, not against the HUD's own
@@ -904,6 +904,22 @@ int main(void)
 		}
 		assert(pops >= 30u);
 		assert(alpha_px(fb, 0, 300, TR_HUD_W, TR_HUD_H) == before); /* the row is back */
+	}
+
+	/* 10. The knob popup names its subject: the same level as BRIGHTNESS paints differently from
+	 * VOLUME, and flipping the subject alone (same seq-less view) repaints the row. */
+	{
+		tr_hud_t        hk;
+		tr_hud_view_t   kv;
+		static uint16_t va[TR_HUD_W * TR_HUD_H], vb[TR_HUD_W * TR_HUD_H];
+
+		tr_hud_init(&hk);
+		view_play(&kv, 1234u, 56u);
+		tr_hud_view_vol(&kv, 60u, 1u);
+		tr_hud_paint_all(va, &kv, 8u, 0u - TR_HUD_POPUP_FRAMES, 0u - TR_HUD_ZONE_FRAMES, 0u);
+		tr_hud_view_vol_kind(&kv, TR_HUD_KNOB_BRIGHTNESS);
+		tr_hud_paint_all(vb, &kv, 8u, 0u - TR_HUD_POPUP_FRAMES, 0u - TR_HUD_ZONE_FRAMES, 0u);
+		assert(memcmp(va, vb, sizeof(va)) != 0);
 	}
 
 	printf("hud: %u px repainted over %u frames, host %.2f ns/px (%.1f ms total)\n",

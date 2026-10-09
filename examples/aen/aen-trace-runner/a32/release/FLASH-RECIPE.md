@@ -250,10 +250,20 @@ line reads `I2C2 leased by the HP and returned within one frame: back on the HE`
    (An HE reset inside the HP's bring-up is covered by the host tests, not by a bench step.)
 5. Volume (record `TR_MEM_VOL` = `0x0237FD80`, `src/ipc/tr_vol.h`): HE console `[vol] 30% at 0x0237fd80: pads 0,
    encoder ok, switch ok, bench request word +4` (`encoder none` / `switch none` if that control failed to open); over SWD `+0x00` `vol` = `0x564F001E` (30 %), `+0x08` `rejects` 0, `+0x0C` `seq` 0. Turn the
-   encoder: 5 % a detent, `[vol] 35% (seq 1)` (clockwise, from the 30 % boot level), the HUD shows `VOL 35%` for 1.5 s over its bottom row, `vol`
-   follows, and the sound gets louder inside one 16 ms block with no click. Press the switch: `MUTE`, the
-   amps keep running (`hp_i2s_fu` stays 0, SD_N is never touched), press again: the level it muted; turning while muted unmutes and steps from that saved level. The first bench run found the phase order reversed (clockwise lowered it) and the
+   encoder: 5 % a detent, `[vol] 35% (seq 1)` (clockwise, from the 30 % boot level), the HUD shows `VOLUME 35%` for 1.5 s over its bottom row, `vol`
+   follows, and the sound gets louder inside one 16 ms block with no click. HOLD the switch for 1 s (a long press; it fires while held): `MUTE`, the
+   amps keep running (`hp_i2s_fu` stays 0, SD_N is never touched), hold again: the level it muted; turning while muted unmutes and steps from that saved level. A SHORT press (under 1 s) is not a mute any more: it switches the knob to BRIGHTNESS (HUD `BRIGHTNESS 30%`, console `[bl] backlight 35% -> 0` on the first detent), and a short press while muted only switches the mode (a long press unmutes). BRIGHTNESS is 10..100 % in 5 % steps (never dark) and returns to VOLUME after 5 s with no turn or press. The first bench run found the phase order reversed (clockwise lowered it) and the
    overlay now lists ENC0_Y / P3_1 first; the rotary decode over GPIO3 (#2037 / #2095) and the switch (GPIO4 P4_3) are bench-exercised on that run only, not yet on the final order. If the encoder is dead, the request word below still works.
+
+**Changing the backlight without reflashing (record `TR_MEM_BL` = `0x0237FDC0`, `src/ipc/tr_knob.h`).** Console
+`[vol] ... backlight 30% at 0x0237fdc0`. Words: `+0x00` `bl` (`0x424C001E` at the 30 % boot level), `+0x04` `req`,
+`+0x08` `rejects`, `+0x0C` `seq`. Write the REQUEST word, never `bl`: 10..100 % only (`0x424C000A` .. `0x424C0064`);
+anything else (below 10 %, a wrong tag) is counted in `rejects` and ignored, so the panel cannot be turned dark.
+
+```
+J-Link> w4 0x0237FDC4, 0x424C003C     // 60 %      (0x424C0000 | percent)
+J-Link> mem32 0x0237FDC0, 4           // bl, req, rejects, seq
+```
 
 **Changing the volume without reflashing (any SWD probe, HE or HP running, nothing halted).** The sound's
 volume is 0..100 % of the build's `TR_SND_VOLUME` ceiling (128, the level heard as safe on the 2026W36-0002

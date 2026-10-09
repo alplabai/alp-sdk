@@ -260,7 +260,7 @@ fi
 
 if [ -n "$M55_GCC" ]; then
 	for f in $R3D_SRC $AUDIO_SRC src/game/sfx.c src/vision/movenet.c src/vision/pose.c src/vision/arms.c \
-		src/vision/camera_ae.c src/vision/kp_smooth.c src/ipc/tr_pslot.c src/ipc/tr_cam_view.c src/ipc/tr_vol.c; do
+		src/vision/camera_ae.c src/vision/kp_smooth.c src/ipc/tr_pslot.c src/ipc/tr_cam_view.c src/ipc/tr_vol.c src/ipc/tr_knob.c; do
 		if "$M55_GCC" $WARN -mcpu=cortex-m55 -mthumb -mfloat-abi=hard -c -o /dev/null "$f"; then
 			echo "PASS (M55 compile): $f"
 		else
