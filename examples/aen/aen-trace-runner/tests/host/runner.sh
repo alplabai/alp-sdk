@@ -181,6 +181,25 @@ else
 	skip "A32 NEON stage (set TR_A32_GCC / TR_QEMU_ARM)"
 fi
 
+# render.c at the renderer image's HOT_OPT (a32/renderer/Makefile, -O3) on Cortex-A32 under qemu-arm:
+# the test_a32_*.c suites include it (RENDER_A32=0: the scalar paths, no CP15), so the goldens hold
+# for what the image's -O3 objects compute.
+if [ -n "$A32_GCC" ] && [ -n "$QEMU_ARM" ]; then
+	for t in tests/host/test_a32_*.c; do
+		out="$RUN_TMP/tr-a32o3-$(basename "$t" .c).elf"
+		extra_cflags=""
+		[ "$(basename "$t")" = "test_a32_turned.c" ] && extra_cflags="-DTR_SCENE_F_PX_FIXED=1"
+		if ! "$A32_GCC" $WARN -O3 $extra_cflags -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
+			--specs=rdimon.specs -o "$out" "$t" \
+			$(ls src/game/*.c src/vision/*.c src/hud/*.c src/render/sprite.c src/render/proj.c \
+				src/render/r3d_math.c src/render/r3d_scene.c src/render/r3d_rig.c src/render/cam_pip.c \
+				src/ipc/*.c src/audio/*.c 2>/dev/null | grep -v main.c) "$RUN_TMP/r3d_raster.o" -lm; then
+			echo "BUILD FAIL (A32 -O3): $t"; rc=1; continue
+		fi
+		if "$QEMU_ARM" -cpu max "$out" >/dev/null; then echo "PASS (A32 qemu -O3): $t"; else echo "FAIL (A32 qemu -O3): $t"; rc=1; fi
+	done
+fi
+
 # A32 renderer image (a32/renderer), scene and golden builds: must build warning-free and fit its
 # 512 KiB budget (renderer.ld asserts it); the host half of it is
 # test_a32_render.c above.

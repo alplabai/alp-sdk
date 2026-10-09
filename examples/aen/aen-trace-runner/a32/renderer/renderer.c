@@ -124,9 +124,17 @@ _Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == TR_MEM_A32_GATE,
 #define RENDER_JOIN_TIMEOUT 600000u /* 6 ms of CNTVCT */
 /* After publishing, core 0 polls in_seq flat out this long (the M55's
  * out -> in turnaround, flip + vblank wait included, measured <= 2.05 ms),
- * then drops to WFE with the event stream: a held or dead M55 does not get
- * a core spinning on uncached SRAM1 (which the CDC200 is scanning) forever. */
-#define RENDER_SPIN_TICKS 300000u /* 3 ms */
+ * then PACED -- one in_seq read per RENDER_PACE_TICKS, the wait between
+ * reads on the CNTVCT register, not the bus -- up to RENDER_PACED_TICKS after
+ * the publish (one 30 Hz vsync period and a bit: the turnaround is the
+ * frame's flip + vblank wait, so the M55's next frame normally lands inside
+ * it, which a WFE with a wake of up to ~0.66 ms would otherwise delay).
+ * Then WFE with the event stream: a held or dead M55 does not get a core
+ * spinning on uncached SRAM1 (which the CDC200 is scanning) forever. */
+#define RENDER_SPIN_TICKS  300000u  /* 3 ms flat out */
+#define RENDER_PACED_TICKS 3500000u /* 35 ms */
+#define RENDER_PACE_TICKS  1000u    /* 10 us between reads */
+#define RENDER_PACED_SLICE 20000u   /* 200 us per pass, then the heartbeat/HALT/take run */
 /* Both halves of the setup take about as long; core 1 is idle and waiting. */
 #define RENDER_SETUP_TIMEOUT 500000u   /* 5 ms */
 #define RENDER_HALT_WAIT     50000000u /* 500 ms, inside the stub's 1 s core-1 wait */
@@ -672,10 +680,22 @@ void renderer_main(volatile tr_mbox_t *m)
 		/* Within RENDER_SPIN_TICKS of a publish: spin (the event stream
 		 * would add up to ~0.66 ms before every frame -- the M55 cannot SEV
 		 * us); the heartbeat, HALT and the full take run every ~2000 polls
-		 * of in_seq. Later (held or dead M55): WFE, event-stream paced. */
-		if (t_pub_valid && cntvct_lo() - t_pub < RENDER_SPIN_TICKS) {
+		 * of in_seq. Then paced polls up to RENDER_PACED_TICKS, then (held or
+		 * dead M55): WFE, event-stream paced. */
+		uint32_t age = t_pub_valid ? cntvct_lo() - t_pub : 0xFFFFFFFFu;
+
+		if (age < RENDER_SPIN_TICKS) {
 			for (uint32_t i = 0; i < 2000u && m->in_seq == last; i++) {
 				__asm__ volatile("" ::: "memory");
+			}
+		} else if (age < RENDER_PACED_TICKS) {
+			uint32_t t1 = cntvct_lo();
+
+			while (m->in_seq == last && cntvct_lo() - t1 < RENDER_PACED_SLICE) {
+				uint32_t t2 = cntvct_lo();
+
+				while (cntvct_lo() - t2 < RENDER_PACE_TICKS) {
+				}
 			}
 		} else if (m->in_seq == last) {
 			wfe();

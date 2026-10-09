@@ -151,8 +151,11 @@ static tr_cam_t      scene_cam; /* part 1's camera (== part 2's), for the backgr
 #endif
 static uint32_t front_t0;
 
+static void dcache_line_init(void); /* the camera picture-in-picture's D-cache line size */
+
 void render_init(void)
 {
+	dcache_line_init();
 #if RENDER_DL_GOLDEN
 	tr_golden_tex_init(tex0);
 	tr_r3d_tex[0] = tex0;
@@ -307,15 +310,29 @@ _Static_assert(58 + 5 * 3 <= PLATE_H, "the label's four lines fit the plate");
 #define HP_DBG_ADDR    ((const volatile hp_dbg_t *)TR_MEM_HP_DBG)
 /* DCIMVAC: Data Cache line Invalidate by VA to PoC (ARMv7-A, Cortex-A32) --
  * the camera writes CAM_POOL by DMA, so a cached A32 read of it needs this
- * before every access or it can read stale, pre-DMA bytes. 32 B lines;
- * walked from a line-aligned start so all of [addr, addr+bytes) is covered.
+ * before every access or it can read stale, pre-DMA bytes. Stepped by the
+ * smallest D-cache line, CTR.DminLine (log2 of words; the Cortex-A32's L1D
+ * is 64 B), read once in render_init(); 32 B until then (a smaller step
+ * only costs time). Walked from a line-aligned start so all of
+ * [addr, addr+bytes) is covered.
  * Always safe here: the A32 never writes CAM_POOL, so no line is ever dirty. */
+static uint32_t dcache_line; /* bytes; 0 until render_init() */
+
+static void dcache_line_init(void)
+{
+	uint32_t ctr;
+
+	__asm__ volatile("mrc p15, 0, %0, c0, c0, 1" : "=r"(ctr));
+	dcache_line = 4u << ((ctr >> 16) & 0xFu);
+}
+
 static inline void dcache_inval_range(const void *addr, uint32_t bytes)
 {
-	uintptr_t a   = (uintptr_t)addr & ~(uintptr_t)31u;
-	uintptr_t end = (uintptr_t)addr + bytes;
+	uintptr_t line = dcache_line ? dcache_line : 32u;
+	uintptr_t a    = (uintptr_t)addr & ~(line - 1u);
+	uintptr_t end  = (uintptr_t)addr + bytes;
 
-	for (; a < end; a += 32u) {
+	for (; a < end; a += line) {
 		__asm__ volatile("mcr p15, 0, %0, c7, c6, 1" ::"r"(a) : "memory");
 	}
 }
@@ -335,7 +352,14 @@ static inline void   dcache_inval_range(const void *addr, uint32_t bytes)
 	(void)addr;
 	(void)bytes;
 }
+static void dcache_line_init(void)
+{
+}
 #endif
+#else
+static void dcache_line_init(void)
+{
+}
 #endif /* TR_CAM_PIP_ENABLE */
 
 /* A drawing target: screen pixel (x, y) lives at px[(y - y0) * TR_R3D_W + x],

@@ -44,6 +44,10 @@ O        = build-$(V)$(if $(TR_CAM_ROTATE),-r$(TR_CAM_ROTATE))
 # 2026-09-23-a32-isa-opportunities.md.
 ROPT       ?= -O2
 RASTER_OPT ?= -O3 -funroll-loops
+# render.o (the band copy-out, video panel, overlay) and cam_pip.o (the camera picture resample)
+# at plain -O3: bit-identical (tests/host/runner.sh builds test_a32_*.c at this -O3 under
+# qemu-arm and holds it to the goldens). Watch __bss_end against the 0x025C0000 cap.
+HOT_OPT    ?= -O3
 CFLAGS  = -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
           $(ROPT) -ffreestanding -std=c11 -Wall -Wextra -Wdouble-promotion -Werror \
           -ffp-contract=off -ffunction-sections -fdata-sections -DRENDER_A32=1 $(VDEFS) $(ROT_DEFS) $(RENDER_DEFS) \
@@ -75,6 +79,10 @@ $(O)/start.o: start.S ../common/stub_abi.h | $(O)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(O)/r3d_raster.o: r3d_raster.c $(HDRS) | $(O)
 	$(CC) $(CFLAGS) $(RASTER_OPT) -c $< -o $@
+$(O)/render.o: render.c $(HDRS) | $(O)
+	$(CC) $(CFLAGS) $(HOT_OPT) -c $< -o $@
+$(O)/cam_pip.o: cam_pip.c $(HDRS) | $(O)
+	$(CC) $(CFLAGS) $(HOT_OPT) -c $< -o $@
 $(O)/%.o: %.c $(HDRS) | $(O)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(O):
