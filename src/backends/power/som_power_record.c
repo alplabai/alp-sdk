@@ -65,6 +65,7 @@ typedef struct {
 	alp_som_pd_record_t record;
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	alp_som_pd_bench_t bench;
+	alp_som_pd_diag_t  diag[2]; /* PRE (before the WFI), BOOT (earliest init of the next boot) */
 #endif
 } sompd_bkram_t;
 
@@ -164,5 +165,32 @@ void alp_som_pd_bench_set(uint32_t count)
 
 	b.crc     = crc32_ieee((const uint8_t *)&b, 8u);
 	_bk.bench = b;
+}
+
+#define SOMPD_DIAG_MAGIC 0x44494147u /* "DIAG" */
+
+void alp_som_pd_diag_save(unsigned slot, const uint32_t *words, unsigned n)
+{
+	alp_som_pd_diag_t d = { .magic = SOMPD_DIAG_MAGIC };
+
+	if (slot >= 2u) {
+		return;
+	}
+	bkram_clock_assert();
+	d.seq = (_bk.diag[slot].magic == SOMPD_DIAG_MAGIC) ? _bk.diag[slot].seq + 1u : 1u;
+	for (unsigned i = 0; i < n && i < ALP_SOM_PD_DIAG_WORDS; ++i) {
+		d.w[i] = words[i];
+	}
+	_bk.diag[slot] = d;
+}
+
+bool alp_som_pd_diag_load(unsigned slot, alp_som_pd_diag_t *out)
+{
+	if (slot >= 2u) {
+		return false;
+	}
+	bkram_clock_assert();
+	*out = _bk.diag[slot];
+	return out->magic == SOMPD_DIAG_MAGIC;
 }
 #endif

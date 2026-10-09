@@ -308,6 +308,39 @@ config ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER
 	  the subsystem never powers down and the sleep proves nothing (or hangs
 	  the probe).  Enable this for a bench run that sleeps under J-Link.
 
+config ALP_SDK_POWER_ALIF_SE_BENCH_LPTIMER_MAX_MS
+	int "Bench only: longest wake_after_ms served by the LPTIMER (ms)"
+	depends on ALP_SDK_POWER_ALIF_SE
+	range 1000 60000
+	default 1000
+	help
+	  Longer intervals use the RV-3028 countdown.  Bench variant (iii) raises this so a
+	  5000 ms wake can be served by the LPTIMER and the interval compared.
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_FORCE_LFXO
+	bool "Bench only: select LFXO as the OFF profile's AON clock even when not confirmed"
+	depends on ALP_SDK_POWER_ALIF_SE
+	help
+	  Variant (iv) of the STOP bench: aon_clk_src = LFXO (with XTAL32K_CAP_CONT 63), the
+	  vendor sample's choice, instead of the LFRC the SES boot leaves selected.  Changes
+	  one thing against the default.  Never for a product build.
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_VTOR_SELF
+	bool "Bench only: OFF profile vtor_address = this image's VTOR (vendor sample)"
+	depends on ALP_SDK_POWER_ALIF_SE
+	help
+	  The default preserves the live profile's vtor_address so the wake goes through
+	  SES -> ATOC.  The vendor system_off sample writes SCB->VTOR instead (the MRAM
+	  vector table, resumed directly).  Bench variant (v); never for a product build.
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_MRAM_SERAM
+	bool "Bench only: OFF profile memory_blocks also includes MRAM and SERAM"
+	depends on ALP_SDK_POWER_ALIF_SE
+	help
+	  The default keeps BKRAM (plus any TCM bank asked for).  The vendor system_off
+	  sample's MRAM-boot profile is MRAM_MASK | SERAM_MASK.  Bench variant (vi); never
+	  for a product build.
+
 config ALP_SDK_POWER_EXT_RENESAS
 	bool "Compile the Renesas V2N power vendor-extension body"
 	depends on ALP_SDK_POWER

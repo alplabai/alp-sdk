@@ -190,6 +190,7 @@ static void                        *_hook_ctx[ALP_POWER_DOMAIN_COUNT];
 static int64_t                      _assert_ms[ALP_POWER_DOMAIN_COUNT];
 static boot_capture_t               _boot;
 static alp_som_pd_record_t          _boot_rec; /* the cycle's record, kept for the wake decode */
+static bool                         _boot_external; /* this boot followed a pin / external reset */
 
 K_MUTEX_DEFINE(_lock);
 
@@ -717,6 +718,16 @@ void alp_som_power_unbind(alp_power_domain_t d)
 	k_mutex_unlock(&_lock);
 }
 
+/* M55-HE reset syndrome, read and acknowledged (strong definition: alif_se_power_hw.c).
+ * Without it every boot looks like a Secure-Enclave-initiated one. */
+__weak uint32_t alp_som_power_reset_syndrome_take(void)
+{
+	return 0u;
+}
+
+/* RESETSYNDROME bit 0: the NSRST pin was asserted (E8 SVD AON.RTSS_HE_RESET). */
+#define SOMPD_RESET_NSRST BIT(0)
+
 /* ---- Wake decode hooks ------------------------------------------------------ */
 
 /* The STOP backend (alif_se_power.c) overrides these.  Without it the record's
@@ -911,7 +922,8 @@ void alp_som_power_reset_for_test(void)
 	memset(_hook_ctx, 0, sizeof(_hook_ctx));
 	memset(&_boot, 0, sizeof(_boot));
 	memset(&_boot_rec, 0, sizeof(_boot_rec));
-	_pads_applied = false;
+	_boot_external = false;
+	_pads_applied  = false;
 	alp_som_pd_store_clear();
 	k_mutex_unlock(&_lock);
 }
@@ -971,6 +983,11 @@ int alp_som_power_boot_restore(void)
 {
 	k_mutex_lock(&_lock, K_FOREVER);
 	memset(&_boot, 0, sizeof(_boot));
+	/* A pin reset (a debugger nRESET, a reset button) during or after a sleep also finds
+	 * STOP_MODE_STAT set and a valid record, and used to be reported as a wake with no
+	 * cause.  It is not one: the sleep was cut short from outside.  The domains still
+	 * have to be put back, so the restore below is unchanged; only the report differs. */
+	_boot_external = (alp_som_power_reset_syndrome_take() & SOMPD_RESET_NSRST) != 0u;
 
 	alp_som_pd_record_t rec;
 	if (!alp_som_pd_store_load(&rec)) {
@@ -982,7 +999,7 @@ int alp_som_power_boot_restore(void)
 			memset(&_boot_rec, 0, sizeof(_boot_rec));
 			_boot_rec.mode = (uint32_t)ALP_POWER_MODE_STOP;
 			_boot.valid    = true;
-			_boot.mode     = (uint32_t)ALP_POWER_MODE_STOP;
+			_boot.mode     = (uint32_t)(_boot_external ? ALP_POWER_MODE_RUN : ALP_POWER_MODE_STOP);
 			_boot.quiesced = named;
 			_boot.restored = restored;
 			_boot.failed   = failed;
@@ -1023,9 +1040,16 @@ int alp_som_power_boot_restore(void)
 	_boot.mode        = _boot_rec.mode;
 	_boot.wake_source = _boot_rec.wake_source;
 	_boot.slept_ms    = _boot_rec.slept_ms;
-	_boot.quiesced    = rec.quiesced;
-	_boot.restored    = restored;
-	_boot.failed      = failed;
+	if (_boot_external && rec.mode != (uint32_t)ALP_POWER_MODE_RUN) {
+		/* Aborted sleep / external reset, not a wake: the realised mode is RUN and
+		 * there is no wake cause or sleep time. */
+		_boot.mode        = (uint32_t)ALP_POWER_MODE_RUN;
+		_boot.wake_source = 0u;
+		_boot.slept_ms    = 0u;
+	}
+	_boot.quiesced = rec.quiesced;
+	_boot.restored = restored;
+	_boot.failed   = failed;
 
 	alp_som_pd_store_clear();
 	k_mutex_unlock(&_lock);
@@ -1045,8 +1069,10 @@ int alp_som_power_boot_restore_i2c(void)
 
 		/* Wake cause, part 2: the RV-3028 flags and the slept time. */
 		if (alp_som_power_wake_decode_i2c(&_boot_rec)) {
-			_boot.wake_source = _boot_rec.wake_source;
-			_boot.slept_ms    = _boot_rec.slept_ms;
+			if (!_boot_external || _boot_rec.mode == (uint32_t)ALP_POWER_MODE_RUN) {
+				_boot.wake_source = _boot_rec.wake_source;
+				_boot.slept_ms    = _boot_rec.slept_ms;
+			} /* else: an external reset has no wake cause (decode only acknowledged flags) */
 		} else {
 			memset(&_boot, 0, sizeof(_boot)); /* untrusted record: report a plain boot */
 		}

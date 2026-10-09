@@ -71,6 +71,10 @@ alp_status_t alif_se_hw_rtc_int_arm(void);
 /** Switch the pad interrupt and the combined line off.  Idempotent. */
 void alif_se_hw_rtc_int_disarm(void);
 
+/** This image's vector table base (SCB->VTOR), for the vendor-style OFF profile bench
+ *  variant. */
+uint32_t alif_se_hw_vtor_read(void);
+
 /* ---- Entry ------------------------------------------------------------------ */
 
 /**
@@ -78,7 +82,10 @@ void alif_se_hw_rtc_int_disarm(void);
  * DFP does), the wake pad armed (@p rtc_int: falling-edge interrupt on the
  * RV-3028 /INT pad plus the LPGPIO combined line toward the EWIC), read-modify-write
  * of RTSS_HE_CTRL (WIC on, EWIC selected, COLD_WAKEUP cleared so the power domain
- * may drop), SLEEPDEEP, WFI.  On success the core loses power and the wake is a
+ * may drop), SLEEPDEEP, WFI.  When @p lptimer_ticks is non-zero the wake timer is armed
+ * LAST, inside the interrupt-off section, and verified live (enabled, unmasked, not
+ * already fired): ALP_ERR_BUSY = it had already fired, ALP_ERR_IO = not counting or
+ * masked; either way nothing is entered.  On success the core loses power and the wake is a
  * cold boot, so this does not return.  It returns only when the sleep was aborted (a
  * wake source fired before power was removed): the wake pad is disarmed again, and
  * RTSS_HE_CTRL and the core state are put back exactly as found, all before
@@ -86,6 +93,9 @@ void alif_se_hw_rtc_int_disarm(void);
  * entering, and so does a pad that already reads asserted once the edge is armed
  * (ALP_ERR_BUSY: the RV-3028 fired before the interrupt existed).
  */
-alp_status_t alif_se_hw_enter_ewic(bool rtc_int);
+alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks);
+
+/** Why the last alif_se_hw_enter_ewic() refused (a static string), for the diagnostic. */
+const char *alif_se_hw_enter_reason(void);
 
 #endif /* ALP_BACKENDS_POWER_ALIF_SE_POWER_HW_H */

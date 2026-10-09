@@ -108,6 +108,11 @@ void alif_se_hw_reg_write(alif_se_reg_t reg, uint32_t value)
 
 /* ---- Core state ----------------------------------------------------------- */
 
+uint32_t alif_se_hw_vtor_read(void)
+{
+	return SCB->VTOR;
+}
+
 bool alif_se_hw_debugger_attached(void)
 {
 	return (sys_read32(HW_DHCSR) & HW_DHCSR_C_DEBUGEN) != 0u;
@@ -198,6 +203,51 @@ bool alif_se_hw_wake_timer_pending(void)
 {
 	return (sys_read32(HW_LPTIMER_INTSTATUS) & BIT(HW_LPTIMER_CHANNEL)) != 0u;
 }
+
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+static uint32_t _arm_cyc; /* DWT CYCCNT when the wake timer was armed */
+#endif
+
+/* LPTIMER registers for the diagnostics and the pre-WFI verification: channel block
+ * base + channel * 0x14 + {LOADCOUNT 0x00, CURRENTVAL 0x04, CONTROLREG 0x08}; block-wide
+ * RAWINTSTATUS at +0xA8, INTSTATUS at +0xA0 (Alif DFP soc.h LPTIMER_Type, the same
+ * offsets counter_alif_lptimer.h transcribes). */
+#define HW_LPT_CH      (DT_REG_ADDR(HW_WAKE_TIMER_NODE) + HW_LPTIMER_CHANNEL * 0x14u)
+#define HW_LPT_LOAD    (HW_LPT_CH + 0x00u)
+#define HW_LPT_CUR     (HW_LPT_CH + 0x04u)
+#define HW_LPT_CTRL    (HW_LPT_CH + 0x08u)
+#define HW_LPT_RAWINT  (DT_REG_ADDR(HW_WAKE_TIMER_NODE) + 0xA8u)
+#define HW_LPT_CTRL_EN BIT(0)
+#define HW_LPT_CTRL_IM BIT(2) /* interrupt MASK: 1 = masked */
+
+/* Arm the wake timer and prove it is live, with interrupts off, immediately before the
+ * WFI: a timer that already fired (the SE calls took longer than the interval) or that
+ * is not counting / has its interrupt masked would let the SoC sleep with no wake source
+ * (bench U8c: the 500 ms wake never fired).  BUSY = already fired, IO = not live. */
+static alp_status_t wake_timer_arm_locked(uint32_t ticks)
+{
+	alp_status_t s = alif_se_hw_wake_timer_arm(ticks);
+
+	if (s != ALP_OK) {
+		return s;
+	}
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	DCB->DEMCR |= DCB_DEMCR_TRCENA_Msk;
+	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+	_arm_cyc = DWT->CYCCNT;
+#endif
+	if ((sys_read32(HW_LPTIMER_INTSTATUS) & BIT(HW_LPTIMER_CHANNEL)) != 0u ||
+	    (sys_read32(HW_LPT_RAWINT) & BIT(HW_LPTIMER_CHANNEL)) != 0u) {
+		return ALP_ERR_BUSY;
+	}
+	uint32_t ctrl = sys_read32(HW_LPT_CTRL);
+
+	if ((ctrl & HW_LPT_CTRL_EN) == 0u || (ctrl & HW_LPT_CTRL_IM) != 0u ||
+	    sys_read32(HW_LPT_CUR) == 0u) {
+		return ALP_ERR_IO;
+	}
+	return ALP_OK;
+}
 #else
 bool alif_se_hw_wake_timer_present(void)
 {
@@ -223,6 +273,100 @@ bool alif_se_hw_wake_timer_pending(void)
 {
 	return false;
 }
+
+static alp_status_t wake_timer_arm_locked(uint32_t ticks)
+{
+	(void)ticks;
+	return ALP_ERR_NOSUPPORT;
+}
+#endif
+
+/* ---- Bench diagnostics (CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH) --------------
+ *
+ * Two raw register snapshots in BKRAM, which survives the STOP they document:
+ *   PRE  taken with interrupts off immediately before the WFI;
+ *   BOOT taken by the earliest init hook (PRE_KERNEL_1, priority 0) of the next boot,
+ *        before the SoM restore (POST_KERNEL 0), the I2C pass and any driver init.
+ * main() prints both.  Word index -> register:
+ *    0 LPTIMER CONTROLREG   1 LPTIMER RAWINTSTATUS  2 LPTIMER INTSTATUS
+ *    3 LPTIMER LOADCOUNT    4 LPTIMER CURRENTVAL    5 ANA WKUP_CTRL  (0x1A60A008)
+ *    6 VBAT TIMER_CLKSEL    7 ANA MISC_CTRL         8 LPRTC +0x00
+ *    9 LPRTC CCVR (+0x04)  10 VBAT RTC_CLK_EN as found (set here when clear)
+ *   11 NVIC ISER1 (IRQ 60 = bit 28)    12 NVIC ISPR1
+ *   13 DWT CYCCNT delta, LPTIMER arm -> snapshot (PRE only; 0 in BOOT)
+ *   14 VBAT RET_CTRL        15 ANA VBAT_ANA_REG1   16 STOP_MODE (0x1A60F000)
+ *   17 AON RTSS_HE_CTRL     18 PWRMODCTL CPDLPSTATE  19 AON RTSS_HE_RESET (0x1A604014)
+ *   20 CGU OSC_CTRL (0x1A602000)  21 PLL_LOCK_CTRL (+4)  22 PLL_CLK_SEL (+8)
+ *   23 ESCLK_SEL (+0x10)   24 CLK_ENA (+0x14)     25 CLKCTL_SYS ACLK_CTRL (0x1A010820)
+ *   26 AON SYSTOP_CLK_DIV (0x1A604020)   27 CLKCTL_PER_SLV UART_CTRL (0x4902F008)
+ *   28..35 NVIC ISPR0..7   36 NVIC ISER0   37 SysTick CTRL   38 SCB VTOR   39 reserved
+ */
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+static void diag_capture(uint32_t w[ALP_SOM_PD_DIAG_WORDS], bool with_lptimer)
+{
+	for (unsigned i = 0; i < ALP_SOM_PD_DIAG_WORDS; ++i) {
+		w[i] = 0u;
+	}
+#if DT_HAS_CHOSEN(alp_power_wake_timer) && DT_NODE_HAS_STATUS_OKAY(DT_CHOSEN(alp_power_wake_timer))
+	w[0] = sys_read32(HW_LPT_CTRL);
+	w[1] = sys_read32(HW_LPT_RAWINT);
+	w[2] = sys_read32(HW_LPTIMER_INTSTATUS);
+	w[3] = sys_read32(HW_LPT_LOAD);
+	w[4] = sys_read32(HW_LPT_CUR);
+	if (with_lptimer) {
+		w[13] = DWT->CYCCNT - _arm_cyc;
+	}
+#endif
+	w[5] = sys_read32(HW_ANA_BASE + 0x08u);
+	w[6] = sys_read32(HW_VBAT_BASE + 0x04u);
+	w[7] = sys_read32(HW_ANA_MISC);
+	/* The LPRTC counter needs RTC_CLK_EN; enable it when clear, and record how it was. */
+	w[10] = sys_read32(HW_VBAT_BASE + 0x10u);
+	if ((w[10] & 1u) == 0u) {
+		sys_write32(w[10] | 1u, HW_VBAT_BASE + 0x10u);
+	}
+	w[8]  = sys_read32(0x42000000u);
+	w[9]  = sys_read32(0x42000004u);
+	w[11] = NVIC->ISER[1];
+	w[12] = NVIC->ISPR[1];
+	w[14] = sys_read32(HW_RET_CTRL);
+	w[15] = sys_read32(HW_ANA_REG1);
+	w[16] = sys_read32(0x1A60F000u);
+	w[17] = sys_read32(HW_RTSS_HE_CTRL);
+	w[18] = PWRMODCTL->CPDLPSTATE;
+	w[19] = sys_read32(0x1A604014u);
+	w[20] = sys_read32(0x1A602000u);
+	w[21] = sys_read32(0x1A602004u);
+	w[22] = sys_read32(0x1A602008u);
+	w[23] = sys_read32(0x1A602010u);
+	w[24] = sys_read32(0x1A602014u);
+	w[25] = sys_read32(0x1A010820u);
+	w[26] = sys_read32(0x1A604020u);
+	w[27] = sys_read32(0x4902F008u);
+	for (unsigned i = 0; i < 8u; ++i) {
+		w[28 + i] = NVIC->ISPR[i];
+	}
+	w[36] = NVIC->ISER[0];
+	w[37] = SysTick->CTRL;
+	w[38] = SCB->VTOR;
+}
+
+static void diag_capture_to_slot(unsigned slot, bool with_lptimer)
+{
+	uint32_t w[ALP_SOM_PD_DIAG_WORDS];
+
+	diag_capture(w, with_lptimer);
+	alp_som_pd_diag_save(slot, w, ALP_SOM_PD_DIAG_WORDS);
+}
+
+/* Earliest possible: before the SoM restore (POST_KERNEL 0), before the counter driver
+ * initialises (which clears the LPTIMER state) and before any console output. */
+static int diag_boot_snapshot(void)
+{
+	diag_capture_to_slot(ALP_SOM_PD_DIAG_BOOT, false);
+	return 0;
+}
+SYS_INIT(diag_boot_snapshot, PRE_KERNEL_1, 0);
 #endif
 
 /* ---- RV-3028 /INT wake input ---------------------------------------------- */
@@ -367,7 +511,14 @@ static inline void hw_restore_fp(const hw_fp_state_t *st)
 }
 #endif
 
-alp_status_t alif_se_hw_enter_ewic(bool rtc_int)
+static const char *_enter_reason = "none";
+
+const char *alif_se_hw_enter_reason(void)
+{
+	return _enter_reason;
+}
+
+alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 {
 	uint32_t     orig_ctrl    = sys_read32(HW_RTSS_HE_CTRL);
 	uint32_t     orig_cppwr   = ICB->CPPWR;
@@ -397,15 +548,31 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int)
 	__disable_irq();
 	__set_BASEPRI(0);
 
+	_enter_reason = "int_pad";
 	if (rtc_int) {
 		armed = rtc_int_open_locked();
 	}
+	_enter_reason = (armed == ALP_ERR_BUSY) ? "rtc_int_already_asserted" : "int_pad";
+	/* The LPTIMER is armed LAST, here, so no SE call, readback or printk can outlast it. */
+	if (armed == ALP_OK && lptimer_ticks != 0u) {
+		armed         = wake_timer_arm_locked(lptimer_ticks);
+		_enter_reason = (armed == ALP_ERR_BUSY) ? "lptimer_already_fired"
+		                : (armed == ALP_ERR_IO) ? "lptimer_not_live_or_masked"
+		                                        : "lptimer_arm";
+	}
 	if (armed != ALP_OK) {
+		if (lptimer_ticks != 0u) {
+			alif_se_hw_wake_timer_disarm();
+		}
 		alif_se_hw_rtc_int_disarm();
 		__set_BASEPRI(orig_basepri);
 		__set_PRIMASK(orig_primask);
 		return armed;
 	}
+
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	diag_capture_to_slot(ALP_SOM_PD_DIAG_PRE, true);
+#endif
 
 	/* PDEPU may go off only if the FP / MVE state is declared expendable. */
 	ICB->CPPWR = orig_cppwr | ICB_CPPWR_SU11_Msk | ICB_CPPWR_SU10_Msk;
@@ -456,4 +623,19 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int)
 	__set_BASEPRI(orig_basepri);
 	__set_PRIMASK(orig_primask);
 	return ALP_OK;
+}
+
+/* AON.RTSS_HE_RESET (0x1A604014), M55-HE reset status: RESETSYNDROME [5:0], set by hardware
+ * and cleared by software with a 1 (E8 SVD, oneToClear).  Values the SVD names: 0 = POR or
+ * Secure-Enclave-initiated reset, 1 = the NSRST pin was asserted, 4 = a reset request to
+ * the power domain.  Read and acknowledge here, so the next boot reads its own cause
+ * rather than a stale bit; the earliest bench snapshot (word 19) has the raw value first. */
+uint32_t alp_som_power_reset_syndrome_take(void)
+{
+	uint32_t v = sys_read32(0x1A604014u) & 0x3Fu;
+
+	if (v != 0u) {
+		sys_write32(v, 0x1A604014u);
+	}
+	return v;
 }

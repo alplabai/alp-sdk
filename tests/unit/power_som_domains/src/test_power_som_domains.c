@@ -1206,3 +1206,105 @@ ZTEST(power_som_domains, test_plain_por_without_a_record_still_touches_nothing)
 	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
 	zassert_false(info.valid);
 }
+
+/* ---- A pin reset is not a wake -------------------------------------------------- */
+
+static uint32_t g_syndrome; /* what AON.RTSS_HE_RESET reads this boot */
+
+uint32_t alp_som_power_reset_syndrome_take(void)
+{
+	uint32_t v = g_syndrome;
+
+	g_syndrome = 0u; /* acknowledged: read-to-clear */
+	return v;
+}
+
+static void wake_boot(alp_power_boot_info_t *info)
+{
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(info));
+}
+
+ZTEST(power_som_domains, test_se_initiated_reset_after_stop_is_a_wake)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	g_syndrome  = 0u; /* POR / Secure-Enclave-initiated */
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_RTC);
+	g_dec.armed = false;
+}
+
+ZTEST(power_som_domains, test_pin_reset_after_stop_is_an_aborted_sleep_not_a_wake)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	hold_everything();
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
+	alp_som_pd_record_t rec;
+	zassert_true(alp_som_pd_store_load(&rec));
+	alp_som_power_reset_for_test();
+	alp_som_pd_store_save(&rec);
+	g_stop_mode = 0x10u;
+	g_syndrome  = 1u; /* NSRST asserted: a debugger nRESET */
+	wake_boot(&info);
+
+	zassert_true(info.valid, "the cycle is reported");
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN, "the sleep was not realised");
+	zassert_equal(info.wake_source, 0u, "no wake cause, even if the decode found a flag");
+	zassert_equal(info.slept_ms, 0u);
+	zassert_not_equal(info.quiesced_domains, 0u);
+	zassert_equal(info.quiesced_domains, info.restored_domains, "the domains are still put back");
+	zassert_equal(level(LPGPIO, NRST_PIN), 1);
+	zassert_equal(g_syndrome, 0u, "the syndrome was acknowledged");
+	g_dec.armed = false;
+}
+
+ZTEST(power_som_domains, test_pin_reset_with_no_record_is_also_not_a_wake)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	alp_som_pd_store_clear();
+	hold_everything();
+	g_stop_mode = 0x10u;
+	g_syndrome  = 1u;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+	zassert_equal(level(LPGPIO, NRST_PIN), 1, "still released");
+}
+
+ZTEST(power_som_domains, test_only_the_pin_bit_marks_an_external_reset)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	g_syndrome  = 4u; /* reset request to the power domain: not proven to be a pin reset */
+	wake_boot(&info);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+}
+
+ZTEST(power_som_domains, test_run_cycle_record_ignores_the_syndrome)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	poke_cycle_record(ALP_POWER_MODE_RUN);
+	g_stop_mode = 0u;
+	g_syndrome  = 1u;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+}

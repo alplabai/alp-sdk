@@ -50,6 +50,42 @@ counter lives in SRAM that a reset keeps and a power cycle loses.
 A refused sleep prints `alif_se_power: refuse step=<n> reason=<...> rc=<raw>` (and
 `som_power: ...` for a pad or domain) before the `request FAIL` line.
 
+## Bench variants (#2784 addendum 6)
+
+One variable each, selected with a config fragment on top of `prj.conf`
+(`-DEXTRA_CONF_FILE=variants/<name>.conf`). All of them print the same evidence.
+
+| Variant | Fragment | Changes | Read |
+|---|---|---|---|
+| (i) default, instrumented | `i-default.conf` | nothing | the baseline: `diag pre` / `diag boot` / `se run` / `se off` |
+| (ii) RV-3028 first | `ii-rtc-first.conf` | cycle order: countdown, LPTIMER, alarm | if the countdown cycle wakes and the LPTIMER one does not, the INT path is sound and the LPTIMER path is the suspect |
+| (iii) LPTIMER 5 s | `iii-lptimer-5s.conf` | LPTIMER interval 5000 ms (backend bench option raises the LPTIMER ceiling) | whether a longer interval changes the outcome (a race with the SE calls, or the clock) |
+| (iv) LFXO | `iv-lfxo.conf` | OFF profile `aon_clk_src` = LFXO (cap 63) | the vendor sample's choice; compare the wake and `se off aon_clk` |
+| (v) VTOR self | `v-vtor-self.conf` | OFF profile `vtor_address` = this image's VTOR | the vendor sample's resume vector; the default keeps the live value |
+| (vi) MRAM+SERAM | `vi-mram-seram.conf` | OFF profile `memory_blocks` also MRAM \| SERAM | the vendor sample's MRAM-boot profile |
+
+Variants (v) and (vi) are the two differences from the vendor `system_off` sample not
+covered by (i)-(iv); see `docs/aen-power-domains.md`.
+
+## What to read after a wake
+
+Each boot prints, in order: `stop_mode_reg=...`, `diag pre` (the registers immediately
+before the WFI of the previous sleep, from BKRAM), `diag boot` (the registers at
+`PRE_KERNEL_1` of THIS boot, before any restore or driver), `se run` and `se off` (the SE's
+profiles as they stand). The word index of the diag blocks is listed in
+`src/backends/power/alif_se_power_hw.c`. The questions they answer:
+
+- **Did the LPTIMER count and fire before the WFI?** `pre` words 0 (CONTROLREG: bit 0 enable,
+  bit 2 interrupt mask), 1/2 (RAWINT/INTSTATUS), 3 (LOADCOUNT), 4 (CURRENTVAL), 13 (CYCCNT
+  between arm and snapshot) and 11/12 (NVIC ISER1/ISPR1, IRQ 60 = bit 28).
+- **Was the wake source reaching the SE?** `pre` word 5 (`WKUP_CTRL`: LPTIMER bits [11:8]).
+- **What did the clock tree look like after the wake?** `boot` words 20-27 (CGU `OSC_CTRL`,
+  `PLL_LOCK_CTRL`, `PLL_CLK_SEL`, `ESCLK_SEL`, `CLK_ENA`, `ACLK_CTRL`, `SYSTOP_CLK_DIV`,
+  `UART_CTRL`) against the cold-boot values, and `se run` against the cold-boot profile.
+- **Was it a wake or a reset?** `boot` word 19 (`RTSS_HE_RESET`: 0 SE-initiated, 1 NSRST
+  pin, 4 power-domain request) and `boot` word 16 (`STOP_MODE_STAT`, bit 4). A pin reset
+  is reported as an aborted sleep (`valid=1 mode=0 wake_source=0x0`), not a wake.
+
 ## Bench contract
 
 ```

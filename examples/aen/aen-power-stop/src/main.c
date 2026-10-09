@@ -72,10 +72,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/sys_io.h>
+#include <zephyr/sys/util.h>
+
+#include <se_service.h> /* get_run_cfg / get_off_cfg, read-only, for the dump below */
 
 #include <alp/chips/rv3028c7.h>
 #include <alp/peripheral.h>
@@ -98,10 +102,28 @@ typedef struct {
 	bool        arm_alarm;     /* arm the RV-3028 alarm for the next minute first */
 } cycle_t;
 
+/* The three cycles.  The bench variants (variants/<name>.conf, one variable each) reorder or
+ * retime them: CONFIG_AEN_STOP_FIRST_RTC runs the RV-3028 countdown first,
+ * CONFIG_AEN_STOP_LPTIMER_MS sets the LPTIMER interval. */
+#define LPT_CYCLE \
+	{ "LPTIMER " STRINGIFY(CONFIG_AEN_STOP_LPTIMER_MS) " ms", \
+	  ALP_POWER_WAKE_TIMER, \
+	  CONFIG_AEN_STOP_LPTIMER_MS, \
+	  ALP_POWER_WAKE_TIMER, \
+	  false }
+#define RTC_CYCLE { "RV-3028 countdown 3 s", ALP_POWER_WAKE_RTC, 3000u, ALP_POWER_WAKE_RTC, false }
+#define ALARM_CYCLE { "RV-3028 alarm", ALP_POWER_WAKE_RTC, 0u, ALP_POWER_WAKE_RTC, true }
+
 static const cycle_t cycles[N_CYCLES] = {
-	{ "LPTIMER 500 ms", ALP_POWER_WAKE_TIMER, 500u, ALP_POWER_WAKE_TIMER, false },
-	{ "RV-3028 countdown 3 s", ALP_POWER_WAKE_RTC, 3000u, ALP_POWER_WAKE_RTC, false },
-	{ "RV-3028 alarm", ALP_POWER_WAKE_RTC, 0u, ALP_POWER_WAKE_RTC, true },
+#ifdef CONFIG_AEN_STOP_FIRST_RTC
+	RTC_CYCLE,
+	LPT_CYCLE,
+	ALARM_CYCLE,
+#else
+	LPT_CYCLE,
+	RTC_CYCLE,
+	ALARM_CYCLE,
+#endif
 };
 
 /* Must outlive main(): the SDK keeps this pointer for the RTC power-domain hook and
@@ -147,6 +169,79 @@ static void print_stop_mode(void)
 	       (unsigned)((v >> 4) & 1u),
 	       (unsigned)((v >> 8) & 1u),
 	       (unsigned)(v & 1u));
+}
+
+/* The two BKRAM register snapshots (alif_se_power_hw.c lists what each word is):
+ *   PRE  = written with interrupts off immediately before the WFI of the last sleep;
+ *   BOOT = written by the earliest init hook of THIS boot (PRE_KERNEL_1), before the SoM
+ *          restore, any driver init and the console.
+ * Raw words, no interpretation: the bench reads them against the register list. */
+static void print_diag(const char *name, unsigned slot)
+{
+	alp_som_pd_diag_t d;
+
+	if (!alp_som_pd_diag_load(slot, &d)) {
+		printk("POWER_STOP: diag %s empty\n", name);
+		return;
+	}
+	printk("POWER_STOP: diag %s seq=%u\n", name, (unsigned)d.seq);
+	for (unsigned i = 0; i < ALP_SOM_PD_DIAG_WORDS; i += 4u) {
+		printk("POWER_STOP: diag %s w[%02u..%02u]=%08x %08x %08x %08x\n",
+		       name,
+		       i,
+		       i + 3u,
+		       (unsigned)d.w[i],
+		       (unsigned)d.w[i + 1u],
+		       (unsigned)d.w[i + 2u],
+		       (unsigned)d.w[i + 3u]);
+	}
+}
+
+/* Every field of the SE's RUN and OFF profiles as it stands now (read-only getters), so
+ * the clock tree the SE left after the wake can be compared with the cold-boot profile
+ * (power_domains 0x16d, dcdc 825 PWM, LFRC, PLL, 160 MHz, memory_blocks 0x108000). */
+static void print_se_profiles(void)
+{
+	run_profile_t run;
+	off_profile_t off;
+
+	memset(&run, 0, sizeof(run));
+	memset(&off, 0, sizeof(off));
+	int rrc = se_service_get_run_cfg(&run);
+	int orc = se_service_get_off_cfg(&off);
+
+	printk("POWER_STOP: se run rc=%d power_domains=0x%x dcdc_mv=%u dcdc_mode=%d aon_clk=%d "
+	       "run_clk=%d cpu_clk=%d scaled=%d mem=0x%x ipclk=0x%x phy=0x%x ioflex=%d\n",
+	       rrc,
+	       (unsigned)run.power_domains,
+	       (unsigned)run.dcdc_voltage,
+	       (int)run.dcdc_mode,
+	       (int)run.aon_clk_src,
+	       (int)run.run_clk_src,
+	       (int)run.cpu_clk_freq,
+	       (int)run.scaled_clk_freq,
+	       (unsigned)run.memory_blocks,
+	       (unsigned)run.ip_clock_gating,
+	       (unsigned)run.phy_pwr_gating,
+	       (int)run.vdd_ioflex_3V3);
+	/* dcdc_mode is not carried by hal_alif's OFF getter: it reads 0 here, not the SE's. */
+	printk("POWER_STOP: se off rc=%d power_domains=0x%x dcdc_mv=%u aon_clk=%d stby_clk=%d "
+	       "stby_freq=%d mem=0x%x ipclk=0x%x phy=0x%x ioflex=%d wake=0x%x ewic=0x%x "
+	       "vtor=0x%x vtor_ns=0x%x\n",
+	       orc,
+	       (unsigned)off.power_domains,
+	       (unsigned)off.dcdc_voltage,
+	       (int)off.aon_clk_src,
+	       (int)off.stby_clk_src,
+	       (int)off.stby_clk_freq,
+	       (unsigned)off.memory_blocks,
+	       (unsigned)off.ip_clock_gating,
+	       (unsigned)off.phy_pwr_gating,
+	       (int)off.vdd_ioflex_3V3,
+	       (unsigned)off.wakeup_events,
+	       (unsigned)off.ewic_cfg,
+	       (unsigned)off.vtor_address,
+	       (unsigned)off.vtor_address_ns);
 }
 
 /* Judge the cycle that ended with this boot.  @p done is how many STOPs were
@@ -287,6 +382,9 @@ int main(void)
 	printk("POWER_STOP: boot valid=%d counter=%u\n", (int)bi.valid, done);
 	print_regs();
 	print_stop_mode(); /* baseline on the first boot, the wake witness after one */
+	print_diag("pre", ALP_SOM_PD_DIAG_PRE);
+	print_diag("boot", ALP_SOM_PD_DIAG_BOOT);
+	print_se_profiles();
 
 	if (done > N_CYCLES) {
 		done = 0u; /* stale or corrupt: start over */

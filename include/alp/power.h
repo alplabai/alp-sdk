@@ -639,6 +639,10 @@ alp_status_t alp_power_domain_info(alp_power_domain_t domain, alp_power_domain_i
  * @return ALP_OK / ALP_ERR_INVAL (NULL @p out) /
  *         ALP_ERR_NOSUPPORT (no backend keeps a wake record).
  *
+ * A cycle that an external reset (a debugger nRESET, a reset button) interrupted is
+ * reported with @c valid true, @c realised_mode @ref ALP_POWER_MODE_RUN and
+ * @c wake_source 0: the sleep was aborted, it did not wake.
+ *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      New in v0.17 (#2784).  The AEN801 / AEN803 build answers it; the record
  *      is written by the Alif STOP backend (U7, CONFIG_ALP_SDK_POWER_ALIF_SE),

@@ -153,6 +153,40 @@ STANDBY record is discarded when the RV-3028 reports its power-on-reset flag.
 The BKRAM placement exists only in a build with `CONFIG_ALP_SDK_POWER_ALIF_SE`;
 every other build keeps the record in RAM.
 
+### Comparison with the vendor reference (bench U8c)
+
+The vendor `system_off` sample (sdk-alif `samples/drivers/pm/system_off`, whose MRAM-boot
+SOFT_OFF is the same `PD_VBAT_AON` profile as our STOP) and the Bluetooth `power_mgr.c`
+set the OFF profile as follows. Differences against `build_off_profile()`:
+
+| Member | This backend (STOP) | Vendor `system_off` (MRAM boot) | Vendor BLE `power_mgr` (STOP) |
+|---|---|---|---|
+| `power_domains` | `PD_VBAT_AON` | `PD_VBAT_AON` | `PD_VBAT_AON` |
+| `dcdc_voltage` / `dcdc_mode` | live (825) / OFF | 825 / OFF | 775 / OFF |
+| `aon_clk_src` | **LFRC** unless confirmed | **LFXO** | **LFXO** |
+| `stby_clk_src` | HFRC | HFRC | HFRC |
+| `stby_clk_freq` | `RC_STDBY_0_075` | **`RC_STDBY_76_8`** | `RC_STDBY_0_075` |
+| `memory_blocks` | **BKRAM only** (bit 21, plus TCM on request) | **`MRAM_MASK` \| `SERAM_MASK`** | MRAM \| SERAM \| retention blocks |
+| `ip_clock_gating` / `phy_pwr_gating` | 0 / 0 | 0 / 0 | 0 / 0 |
+| `vdd_ioflex_3V3` | 1.8 V | 1.8 V | 1.8 V |
+| `wakeup_events` / `ewic_cfg` | `WE_LPTIMER0` / `EWIC_VBAT_TIMER` (RTC: `WE_LPGPIO0` / `EWIC_VBAT_GPIO`) | `WE_LPTIMER0` / `EWIC_VBAT_TIMER` (or `WE_LPRTC` / `EWIC_RTC_A`) | same families |
+| `vtor_address` | **live value preserved** (so the wake goes through SES -> ATOC) | **`SCB->VTOR`** (this image's own vector table) | `SCB->VTOR` |
+| `vtor_address_ns` | live | not set (uninitialised) | `SCB->VTOR` |
+
+Process differences: the vendor sample **re-applies a full explicit RUN profile at
+`PRE_KERNEL_1` priority 46 on every boot** (power domains `PD_SYST | PD_SSE700_AON`, DC-DC 825
+mV PWM, `aon_clk_src` LFXO, `run_clk_src` PLL, 160 MHz, I/O flex 1.8 V, `memory_blocks`
+`MRAM_MASK`), because after a SOFT_OFF wake the SoC comes up on whatever the SE left; this
+backend does not (TODO addendum 6; bench U8c saw UART5 at ~1/5 baud and a slow tick, i.e. no
+PLL). The vendor writes the OFF profile from a PM notifier and never reads it back or touches
+`RET_CTRL` / `VBAT_ANA_REG1`. The EWIC entry (`pm_core_enter_deep_sleep_request_subsys_off`) is
+the same sequence as ours, with `RTSS_HE_CTRL` written whole. The vendor wake timer is the same
+LPTIMER0 (`timer0`, `snps,dw-timers`, IRQ 60) through the Zephyr counter API.
+
+The three differences with the best chance of explaining a missing wake are `memory_blocks`
+without MRAM, `vtor_address` (a preserved value that may be 0 resumes at an empty ITCM), and
+`aon_clk_src`; they are bench variants (vi), (v) and (iv) of `aen-power-stop`.
+
 **Wake decode.** The record in BKRAM carries what was armed; on the cold boot the
 LPTIMER status is read before its driver initialises, and the RV-3028 flags and
 calendar in the I2C restore pass. `slept_ms` is the RV-3028 calendar delta (1 s

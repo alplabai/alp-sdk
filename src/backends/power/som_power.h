@@ -217,6 +217,26 @@ typedef struct {
 uint32_t alp_som_pd_bench_count(void);
 void     alp_som_pd_bench_set(uint32_t count);
 
+/** Bench-only register snapshots kept in BKRAM so they survive the very STOP they
+ *  document (same option as the counter).  Slot PRE is written just before the WFI,
+ *  slot BOOT by the earliest init hook of the next boot; main() prints both.  A
+ *  slot is a magic, a sequence number and ALP_SOM_PD_DIAG_WORDS raw register words;
+ *  the meaning of each word is the index list in alif_se_power_hw.c. */
+#define ALP_SOM_PD_DIAG_WORDS 40u
+#define ALP_SOM_PD_DIAG_PRE   0u
+#define ALP_SOM_PD_DIAG_BOOT  1u
+
+typedef struct {
+	uint32_t magic;
+	uint32_t seq;
+	uint32_t w[ALP_SOM_PD_DIAG_WORDS];
+} alp_som_pd_diag_t;
+
+/** Store @p words (@p n <= ALP_SOM_PD_DIAG_WORDS, the rest zero) into @p slot. */
+void alp_som_pd_diag_save(unsigned slot, const uint32_t *words, unsigned n);
+/** Copy @p slot out; true when it carries the magic. */
+bool alp_som_pd_diag_load(unsigned slot, alp_som_pd_diag_t *out);
+
 /* ---- Wake services for the STOP backend ----------------------------------- */
 
 struct gpio_dt_spec;
@@ -234,6 +254,11 @@ alp_status_t alp_som_power_rtc_int_armed(bool *armed);
  *  clears every latched TF / AF / UF.  Needs no chip context, so it runs on the
  *  cold-boot wake path. */
 alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags);
+
+/** M55-HE reset syndrome (AON.RTSS_HE_RESET.RESETSYNDROME), read and acknowledged:
+ *  0 = POR or Secure-Enclave-initiated, 1 = the NSRST pin was asserted, 4 = reset
+ *  request to the power domain.  Weak: 0 where there is no such register. */
+uint32_t alp_som_power_reset_syndrome_take(void);
 
 /** True when an enabled RV-3028 countdown / alarm flag (TF / AF) is already latched.
  *  Read only: nothing is cleared, so the wake decode still sees it. */

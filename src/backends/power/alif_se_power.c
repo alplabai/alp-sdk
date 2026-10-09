@@ -161,7 +161,11 @@
 #define ALIF_SE_LFXO_HZ_MAX 32775u
 
 /* The LPTIMER carries wake_after_ms below this; at or above it the RV-3028 does. */
+#ifdef CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_LPTIMER_MAX_MS
+#define ALIF_SE_LPTIMER_MAX_MS ((uint32_t)CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_LPTIMER_MAX_MS)
+#else
 #define ALIF_SE_LPTIMER_MAX_MS 1000u
+#endif
 
 /* DC-DC window the SE accepts (alif_se_profile.c, docs/aen-se-services.md). */
 #define ALIF_SE_DCDC_MV_MIN 750u
@@ -485,6 +489,11 @@ build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_pla
 	out->stby_clk_src  = CLK_SRC_HFRC;
 	out->stby_clk_freq = stop ? SCALED_FREQ_RC_STDBY_0_075_MHZ : SCALED_FREQ_RC_STDBY_76_8_MHZ;
 	out->memory_blocks = plan->memory_blocks;
+	if (IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_MRAM_SERAM)) {
+		/* Bench variant (vi): the vendor sample's MRAM-boot profile (sdk-alif
+		 * samples/drivers/pm/system_off) keeps MRAM and the SE RAM powered. */
+		out->memory_blocks |= ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK;
+	}
 	/* The cold-boot RUN profile carries no IP clock gating and no PHY power gating
 	 * (E1M-AEN803, 2026-10-08); nothing here changes that. */
 	out->ip_clock_gating = 0u;
@@ -494,6 +503,12 @@ build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_pla
 	out->ewic_cfg        = ewic_for(plan);
 	out->vtor_address    = live->vtor_address;
 	out->vtor_address_ns = live->vtor_address_ns;
+	if (IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_VTOR_SELF)) {
+		/* Bench variant (v): resume at this image's own vector table, as the vendor
+		 * sample does (offp.vtor_address = SCB->VTOR), instead of through SES -> ATOC. */
+		out->vtor_address    = alif_se_hw_vtor_read();
+		out->vtor_address_ns = out->vtor_address;
+	}
 	return ALP_OK;
 }
 
@@ -661,10 +676,9 @@ static alp_status_t arm(const sleep_plan_t *plan, armed_t *a)
 		a->rtc_timer = true;
 	}
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u) {
-		s = alif_se_hw_wake_timer_arm(plan->lptimer_ticks);
-		if (s != ALP_OK) {
-			return s; /* the caller unwinds what is recorded in @p a */
-		}
+		/* NOT armed here: the LPTIMER is armed last, inside the interrupt-off entry,
+		 * so no SE call, readback or console output can outlast the interval (bench
+		 * U8c).  Recorded now so every unwind cancels it. */
 		a->lptimer = true;
 	}
 	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
@@ -778,8 +792,10 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 		return refuse(1, "retention_invalid", (int)state->retain.level, why);
 	}
 	plan.memory_blocks = retained_blocks(&state->retain);
-	plan.lfxo          = lfxo_confirmed(); /* fixes the LPTIMER rate used below */
-	s                  = plan_wake(state, wake_after_ms, &plan);
+	plan.lfxo =
+	    lfxo_confirmed() ||
+	    IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_FORCE_LFXO); /* fixes the LPTIMER rate */
+	s = plan_wake(state, wake_after_ms, &plan);
 	if (s != ALP_OK) {
 		return refuse(1, "wake_plan", (int)wake_after_ms, s);
 	}
@@ -868,9 +884,11 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 
 	/* 7. Enter.  Interrupts are off and the wake pad is armed inside; this does not
 	 * return when the subsystem powers down. */
-	s = alif_se_hw_enter_ewic((plan.hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u);
+	s = alif_se_hw_enter_ewic((plan.hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u,
+	                          ((plan.hw & ALP_SOM_ARM_LPTIMER) != 0u) ? plan.lptimer_ticks : 0u);
 	if (s != ALP_OK) {
-		(void)refuse(7, "ewic_entry", (int)s, s);
+		/* INT already asserted / LPTIMER already fired (BUSY), LPTIMER not live (IO), ... */
+		(void)refuse(7, alif_se_hw_enter_reason(), (int)s, s);
 		goto unwind;
 	}
 
@@ -1012,6 +1030,17 @@ ALP_BACKEND_REGISTER(power,
                      });
 
 /* ---- Cold-boot wake decode ------------------------------------------------------ */
+
+/*
+ * TODO(#2784 addendum 6): the wake is a cold boot into whatever clock tree the SE left,
+ * and bench U8c saw UART5 at ~1/5 of its baud and a slow tick afterwards, so the PLL was
+ * not running.  Once the instrumented data (BKRAM slots PRE / BOOT, printed by
+ * aen-power-stop) confirms it, re-apply the full explicit RUN profile at PRE_KERNEL_1
+ * before any peripheral init, then call uart_configure().  Reference: the vendor sample
+ * sdk-alif samples/drivers/pm/system_off does exactly that
+ * (SYS_INIT(app_set_run_params, PRE_KERNEL_1, 46) with PLL / 160 MHz / LFXO / MRAM).
+ * NOT implemented yet on purpose: instrument first.
+ */
 
 /* Part 1, before the timer driver initialises (it clears the status): the LPTIMER. */
 void alp_som_power_wake_decode_early(alp_som_pd_record_t *rec)

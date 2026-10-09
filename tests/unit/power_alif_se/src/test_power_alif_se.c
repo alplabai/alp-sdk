@@ -196,12 +196,10 @@ uint32_t alif_se_hw_wake_timer_hz(void)
 
 alp_status_t alif_se_hw_wake_timer_arm(uint32_t ticks)
 {
-	if (g_arm_timer_rc != 0) {
-		return (alp_status_t)g_arm_timer_rc;
-	}
+	/* The backend no longer arms the timer itself: it is armed inside the entry. */
+	(void)ticks;
 	ev(EV_ARM_LPTIMER);
-	g_armed_ticks = ticks;
-	return ALP_OK;
+	return ALP_ERR_NOSUPPORT;
 }
 
 void alif_se_hw_wake_timer_disarm(void)
@@ -238,8 +236,33 @@ void alif_se_hw_rtc_int_disarm(void)
 	ev(EV_DISARM_INT_PAD);
 }
 
-alp_status_t alif_se_hw_enter_ewic(bool rtc_int)
+static bool     g_lptimer_fired_at_arm;
+static unsigned g_enter_lptimer_ticks;
+
+const char *alif_se_hw_enter_reason(void)
 {
+	return "fake";
+}
+
+uint32_t alif_se_hw_vtor_read(void)
+{
+	return 0x80010400u;
+}
+
+alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
+{
+	if (lptimer_ticks != 0u) {
+		/* The real entry arms the timer last and proves it live, under the lock. */
+		if (g_arm_timer_rc != 0) {
+			return (alp_status_t)g_arm_timer_rc;
+		}
+		ev(EV_ARM_LPTIMER);
+		g_armed_ticks = lptimer_ticks;
+		if (g_lptimer_fired_at_arm) {
+			return ALP_ERR_BUSY;
+		}
+	}
+	g_enter_lptimer_ticks = lptimer_ticks;
 	ev(EV_ENTER);
 	g_enter_count++;
 	g_enter_rtc_int = rtc_int;
@@ -446,6 +469,8 @@ static void reset_fakes(void)
 	g_porf                 = false;
 	g_transports_dcdc_mode = false;
 	g_flip_word            = -1;
+	g_lptimer_fired_at_arm = false;
+	g_enter_lptimer_ticks  = 0;
 	g_flags_pending        = false;
 
 	g_countdown_ready = true;
@@ -908,10 +933,13 @@ ZTEST(power_alif_se, test_happy_path_order)
 	zassert_equal(ev_count(EV_QUIESCE), 1u);
 	zassert_equal(g_quiesce_mode, ALP_POWER_MODE_STOP);
 	zassert_equal(ev_count(EV_ENTER), 1u);
-	zassert_true(ev_pos(EV_QUIESCE) < ev_pos(EV_ARM_LPTIMER), "quiesce, then arm");
-	zassert_true(ev_pos(EV_ARM_LPTIMER) < ev_pos(EV_SAVE_RECORD));
+	zassert_true(ev_pos(EV_QUIESCE) < ev_pos(EV_SAVE_RECORD), "quiesce, then record");
 	zassert_true(ev_pos(EV_SAVE_RECORD) < ev_pos(EV_SET_OFF_CFG), "record before the SE call");
-	zassert_true(ev_pos(EV_SET_OFF_CFG) < ev_pos(EV_ENTER));
+	/* The LPTIMER is armed LAST: after the SE write and readback, inside the entry. */
+	zassert_true(ev_pos(EV_SET_OFF_CFG) < ev_pos(EV_ARM_LPTIMER), "timer armed after the SE calls");
+	zassert_true(ev_pos(EV_GET_OFF_CFG) < ev_pos(EV_ARM_LPTIMER));
+	zassert_true(ev_pos(EV_ARM_LPTIMER) < ev_pos(EV_ENTER), "and immediately before the WFI");
+	zassert_equal(g_enter_lptimer_ticks, g_armed_ticks);
 
 	/* The fake enter returned: an aborted sleep, reported as an early RUN return. */
 	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
@@ -987,10 +1015,12 @@ ZTEST(power_alif_se, test_se_dropping_a_requested_bit_unwinds)
 
 ZTEST(power_alif_se, test_arm_failure_unwinds_in_reverse)
 {
+	/* The timer is armed inside the entry, after the SE write: a failure there undoes it. */
 	g_arm_timer_rc = ALP_ERR_IO;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_IO);
-	assert_unwound();
-	zassert_equal(ev_count(EV_SET_OFF_CFG), 0u);
+	zassert_equal(ev_count(EV_ENTER), 0u);
+	zassert_equal(ev_count(EV_RESTORE), 1u);
+	zassert_equal(ev_count(EV_SET_OFF_CFG), 2u, "profile written, then written back");
 
 	reset_fakes();
 	g_arm_int_rc        = ALP_ERR_IO;
@@ -1240,9 +1270,11 @@ ZTEST(power_alif_se, test_a_refusal_before_the_se_call_never_writes_the_se)
 	g_dcache = true;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOSUPPORT);
 	zassert_equal(ev_count(EV_SET_OFF_CFG), 0u);
-	g_arm_timer_rc = ALP_ERR_IO;
-	g_dcache       = false;
-	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_IO);
+	g_dcache            = false;
+	g_arm_int_rc        = ALP_ERR_IO; /* the RV-3028 countdown path: INT pad refused */
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	g_countdown_rc      = ALP_ERR_IO; /* the countdown itself cannot start (step 5) */
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_IO);
 	zassert_equal(ev_count(EV_SET_OFF_CFG), 0u, "a failure before step 6 has nothing to undo");
 }
 
@@ -1489,4 +1521,37 @@ ZTEST(power_alif_se, test_undo_succeeds_with_the_dcdc_mode_sentinel)
 	g_readback.ewic_cfg ^= 1u;
 	g_readback_overridden = true;
 	zassert_equal(undo_se(&u), ALP_ERR_IO);
+}
+
+/* ---- LPTIMER armed last, and proven live (bench U8c) ------------------------------ */
+
+ZTEST(power_alif_se, test_lptimer_that_already_fired_is_refused_never_slept_on)
+{
+	g_lptimer_fired_at_arm = true;
+	g_state.wake_bitmap    = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_BUSY);
+	zassert_equal(ev_count(EV_ENTER), 0u, "no WFI with the wake already spent");
+	zassert_equal(ev_count(EV_RESTORE), 1u);
+	zassert_equal(ev_count(EV_SET_OFF_CFG), 2u);
+	zassert_equal(ev_count(EV_DISARM_LPTIMER), 1u);
+}
+
+ZTEST(power_alif_se, test_the_entry_gets_no_ticks_for_an_rtc_only_wake)
+{
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_OK);
+	zassert_equal(g_enter_lptimer_ticks, 0u, "the RV-3028 countdown needs no LPTIMER");
+	zassert_equal(ev_count(EV_ARM_LPTIMER), 0u);
+}
+
+ZTEST(power_alif_se, test_bench_variants_default_to_the_documented_profile)
+{
+	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,
+		                   .hw            = ALP_SOM_ARM_LPTIMER,
+		                   .memory_blocks = ALP_AIPM_GEN2_BACKUP4K_MASK };
+	off_profile_t out;
+
+	zassert_ok(build_off_profile(&out, &g_live, &plan));
+	zassert_equal(out.memory_blocks, ALP_AIPM_GEN2_BACKUP4K_MASK, "no MRAM / SERAM by default");
+	zassert_equal(out.vtor_address, g_live.vtor_address, "the live vtor is preserved by default");
 }
