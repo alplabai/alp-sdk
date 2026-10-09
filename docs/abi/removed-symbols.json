@@ -864,6 +864,15 @@
       "issue": 2781,
       "reason": "E1M-NX9101 / NXP i.MX 93 was the only SoC with an LCDIF parallel-RGB display controller; the capability was removed with it.",
       "replacement": null
+    },
+    {
+      "header": "alp/backend.h",
+      "category": "macro",
+      "symbol": "ALP_BACKEND_ANCHOR_FORCE",
+      "release": "v0.17.0",
+      "issue": 2790,
+      "reason": "ALP_BACKEND_REGISTER now defines the static-link keep symbol for every backend through ALP_BACKEND_FORCE_DEFINE, so the hand-placed per-backend macro has no job left; its only call site (camera yocto_drv.c) was removed.",
+      "replacement": "ALP_BACKEND_FORCE_DEFINE"
     }
   ]
 }
