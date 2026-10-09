@@ -231,9 +231,11 @@ static alp_status_t wake_timer_arm_locked(uint32_t ticks)
 	if (s != ALP_OK) {
 		return s;
 	}
-#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	/* A cycle counter bounds the liveness poll below (and times the arm -> WFI gap in the
+	 * bench diagnostics).  The caller restores DEMCR / DWT_CTRL on a refusal. */
 	DCB->DEMCR |= DCB_DEMCR_TRCENA_Msk;
 	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	_arm_cyc = DWT->CYCCNT;
 #endif
 	if ((sys_read32(HW_LPTIMER_INTSTATUS) & BIT(HW_LPTIMER_CHANNEL)) != 0u ||
@@ -242,9 +244,23 @@ static alp_status_t wake_timer_arm_locked(uint32_t ticks)
 	}
 	uint32_t ctrl = sys_read32(HW_LPT_CTRL);
 
-	if ((ctrl & HW_LPT_CTRL_EN) == 0u || (ctrl & HW_LPT_CTRL_IM) != 0u ||
-	    sys_read32(HW_LPT_CUR) == 0u) {
+	if ((ctrl & HW_LPT_CTRL_EN) == 0u || (ctrl & HW_LPT_CTRL_IM) != 0u) {
 		return ALP_ERR_IO;
+	}
+	/* CURRENTVAL reads 0 until the 32 kHz domain has seen its first edge after ENABLE
+	 * (about 30 us), so a read a few cycles after the arm proves nothing.  Poll for it
+	 * to leave 0, bounded to ~4 LF ticks (122 us); only a timeout means "not counting". */
+	const uint32_t bound = (sys_clock_hw_cycles_per_sec() / 1000000u) * 122u;
+	const uint32_t t0    = DWT->CYCCNT;
+
+	while (sys_read32(HW_LPT_CUR) == 0u) {
+		if ((DWT->CYCCNT - t0) > bound) {
+			return ALP_ERR_IO;
+		}
+	}
+	/* A very short interval could have fired while polling. */
+	if ((sys_read32(HW_LPTIMER_INTSTATUS) & BIT(HW_LPTIMER_CHANNEL)) != 0u) {
+		return ALP_ERR_BUSY;
 	}
 	return ALP_OK;
 }
@@ -290,8 +306,8 @@ static alp_status_t wake_timer_arm_locked(uint32_t ticks)
  * main() prints both.  Word index -> register:
  *    0 LPTIMER CONTROLREG   1 LPTIMER RAWINTSTATUS  2 LPTIMER INTSTATUS
  *    3 LPTIMER LOADCOUNT    4 LPTIMER CURRENTVAL    5 ANA WKUP_CTRL  (0x1A60A008)
- *    6 VBAT TIMER_CLKSEL    7 ANA MISC_CTRL         8 LPRTC +0x00
- *    9 LPRTC CCVR (+0x04)  10 VBAT RTC_CLK_EN as found (set here when clear)
+ *    6 VBAT TIMER_CLKSEL    7 ANA MISC_CTRL         8 LPRTC CCVR (+0x00)
+ *    9 LPRTC CMR (+0x04)   10 VBAT RTC_CLK_EN as found (set here when clear)
  *   11 NVIC ISER1 (IRQ 60 = bit 28)    12 NVIC ISPR1
  *   13 DWT CYCCNT delta, LPTIMER arm -> snapshot (PRE only; 0 in BOOT)
  *   14 VBAT RET_CTRL        15 ANA VBAT_ANA_REG1   16 STOP_MODE (0x1A60F000)
@@ -299,7 +315,11 @@ static alp_status_t wake_timer_arm_locked(uint32_t ticks)
  *   20 CGU OSC_CTRL (0x1A602000)  21 PLL_LOCK_CTRL (+4)  22 PLL_CLK_SEL (+8)
  *   23 ESCLK_SEL (+0x10)   24 CLK_ENA (+0x14)     25 CLKCTL_SYS ACLK_CTRL (0x1A010820)
  *   26 AON SYSTOP_CLK_DIV (0x1A604020)   27 CLKCTL_PER_SLV UART_CTRL (0x4902F008)
- *   28..35 NVIC ISPR0..7   36 NVIC ISER0   37 SysTick CTRL   38 SCB VTOR   39 reserved
+ *   28..35 NVIC ISPR0..7   36 NVIC ISER0   37 SysTick CTRL   38 SCB VTOR
+ *   39 RTSS_HE_RESET re-read after the W1C acknowledge, bit 31 = "bit 0 was set and
+ *      cleared" (BOOT only; written by alp_som_power_reset_syndrome_take)
+ * PRE words 17 and 37 are patched after the pre-WFI writes; word 25 and 27 are read
+ * separately (riskier blocks) so a fault there cannot lose the rest of the slot.
  */
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 static void diag_capture(uint32_t w[ALP_SOM_PD_DIAG_WORDS], bool with_lptimer)
@@ -340,9 +360,7 @@ static void diag_capture(uint32_t w[ALP_SOM_PD_DIAG_WORDS], bool with_lptimer)
 	w[22] = sys_read32(0x1A602008u);
 	w[23] = sys_read32(0x1A602010u);
 	w[24] = sys_read32(0x1A602014u);
-	w[25] = sys_read32(0x1A010820u);
 	w[26] = sys_read32(0x1A604020u);
-	w[27] = sys_read32(0x4902F008u);
 	for (unsigned i = 0; i < 8u; ++i) {
 		w[28 + i] = NVIC->ISPR[i];
 	}
@@ -355,8 +373,13 @@ static void diag_capture_to_slot(unsigned slot, bool with_lptimer)
 {
 	uint32_t w[ALP_SOM_PD_DIAG_WORDS];
 
+	/* AON / LPTIMER / VBAT / CGU / NVIC words first, saved at once ... */
 	diag_capture(w, with_lptimer);
 	alp_som_pd_diag_save(slot, w, ALP_SOM_PD_DIAG_WORDS);
+	/* ... then the two reads in other clock domains, each saved on its own: a bus fault
+	 * on either leaves everything above intact in BKRAM. */
+	alp_som_pd_diag_patch(slot, 25u, sys_read32(0x1A010820u)); /* CLKCTL_SYS ACLK_CTRL */
+	alp_som_pd_diag_patch(slot, 27u, sys_read32(0x4902F008u)); /* PER_SLV UART_CTRL */
 }
 
 /* Earliest possible: before the SoM restore (POST_KERNEL 0), before the counter driver
@@ -525,6 +548,7 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 	uint32_t     orig_ccr     = SCB->CCR;
 	uint32_t     orig_mscr    = MEMSYSCTL->MSCR;
 	uint32_t     orig_demcr   = DCB->DEMCR;
+	uint32_t     orig_dwt     = DWT->CTRL;
 	uint32_t     orig_systick = SysTick->CTRL;
 	uint32_t     orig_primask = __get_PRIMASK();
 	uint32_t     orig_basepri = __get_BASEPRI();
@@ -560,19 +584,21 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 		                : (armed == ALP_ERR_IO) ? "lptimer_not_live_or_masked"
 		                                        : "lptimer_arm";
 	}
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	/* Before any refusal return, so a refused sleep still leaves its data. */
+	diag_capture_to_slot(ALP_SOM_PD_DIAG_PRE, true);
+#endif
 	if (armed != ALP_OK) {
 		if (lptimer_ticks != 0u) {
 			alif_se_hw_wake_timer_disarm();
 		}
 		alif_se_hw_rtc_int_disarm();
+		DWT->CTRL  = orig_dwt; /* the arm turned the cycle counter on */
+		DCB->DEMCR = orig_demcr;
 		__set_BASEPRI(orig_basepri);
 		__set_PRIMASK(orig_primask);
 		return armed;
 	}
-
-#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
-	diag_capture_to_slot(ALP_SOM_PD_DIAG_PRE, true);
-#endif
 
 	/* PDEPU may go off only if the FP / MVE state is declared expendable. */
 	ICB->CPPWR = orig_cppwr | ICB_CPPWR_SU11_Msk | ICB_CPPWR_SU10_Msk;
@@ -599,6 +625,13 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 	__DSB();
 	__ISB();
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	/* Words 17 (RTSS_HE_CTRL) and 37 (SysTick CTRL) were captured before the writes
+	 * above; patch in what the hardware holds going into the WFI. */
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_PRE, 17u, sys_read32(HW_RTSS_HE_CTRL));
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_PRE, 37u, SysTick->CTRL);
+#endif
+
 	/* Does not return when the power is removed: the wake is a cold boot. */
 	__WFI();
 
@@ -610,6 +643,7 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 
 	MEMSYSCTL->MSCR |= orig_mscr & (MEMSYSCTL_MSCR_ICACTIVE_Msk | MEMSYSCTL_MSCR_DCACTIVE_Msk);
 	SCB->CCR      = orig_ccr;
+	DWT->CTRL     = orig_dwt;
 	DCB->DEMCR    = orig_demcr;
 	ICB->CPPWR    = orig_cppwr;
 	SysTick->CTRL = orig_systick;
@@ -637,5 +671,29 @@ uint32_t alp_som_power_reset_syndrome_take(void)
 	if (v != 0u) {
 		sys_write32(v, 0x1A604014u);
 	}
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	/* The SVD marks the field write-only with reset value 1: record what a re-read
+	 * shows, and whether bit 0 actually cleared. */
+	uint32_t v2 = sys_read32(0x1A604014u) & 0x3Fu;
+
+	alp_som_pd_diag_patch(
+	    ALP_SOM_PD_DIAG_BOOT, 39u, v2 | (((v & 1u) != 0u && (v2 & 1u) == 0u) ? BIT(31) : 0u));
+#endif
 	return v;
+}
+
+/* Can bit 0 (NSRST) of the syndrome be trusted as a pin-reset marker?  Not if it is
+ * stuck: set, and still set after a W1C acknowledge (a write-only field with reset
+ * value 1 would look like that).  Probed BEFORE the sleep and carried in the record, so
+ * a stale bit can never turn a genuine SE wake into an "aborted sleep".  A bit that
+ * reads 0 is trusted (it can only be set by a reset from now on). */
+bool alp_som_power_reset_syndrome_trusted(void)
+{
+	uint32_t v = sys_read32(0x1A604014u) & 0x3Fu;
+
+	if ((v & 1u) == 0u) {
+		return true;
+	}
+	sys_write32(v, 0x1A604014u);
+	return (sys_read32(0x1A604014u) & 1u) == 0u;
 }

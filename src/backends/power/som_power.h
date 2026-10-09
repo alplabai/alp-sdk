@@ -65,6 +65,9 @@ typedef struct {
 #define ALP_SOM_ARM_LPTIMER   0x00000001u /**< LPTIMER underflow (short timed wake). */
 #define ALP_SOM_ARM_RTC_TIMER 0x00000002u /**< RV-3028 countdown the SDK started. */
 #define ALP_SOM_ARM_RTC_INT   0x00000004u /**< RV-3028 /INT -> P15_0 armed by the caller. */
+/** Record flag (not a wake path): the reset syndrome's NSRST bit was probed before the
+ *  sleep and does clear, so a set bit at the next boot really is a pin reset. */
+#define ALP_SOM_REC_NSRST_TRUSTED 0x00000100u
 
 /** On-disk shape of the BKRAM wake record.  Fixed-width, no padding. */
 typedef struct {
@@ -228,12 +231,17 @@ void     alp_som_pd_bench_set(uint32_t count);
 
 typedef struct {
 	uint32_t magic;
-	uint32_t seq;
+	uint32_t seq;   /**< boot number: BOOT = previous BOOT + 1; PRE = the boot that wrote it */
+	uint32_t cycle; /**< the bench counter (cycle number) when the slot was written */
 	uint32_t w[ALP_SOM_PD_DIAG_WORDS];
 } alp_som_pd_diag_t;
 
 /** Store @p words (@p n <= ALP_SOM_PD_DIAG_WORDS, the rest zero) into @p slot. */
 void alp_som_pd_diag_save(unsigned slot, const uint32_t *words, unsigned n);
+/** Overwrite word @p idx of an existing @p slot (no sequence change). */
+void alp_som_pd_diag_patch(unsigned slot, unsigned idx, uint32_t value);
+/** Invalidate @p slot (main does this to PRE once it has printed it). */
+void alp_som_pd_diag_invalidate(unsigned slot);
 /** Copy @p slot out; true when it carries the magic. */
 bool alp_som_pd_diag_load(unsigned slot, alp_som_pd_diag_t *out);
 
@@ -259,6 +267,11 @@ alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags);
  *  0 = POR or Secure-Enclave-initiated, 1 = the NSRST pin was asserted, 4 = reset
  *  request to the power domain.  Weak: 0 where there is no such register. */
 uint32_t alp_som_power_reset_syndrome_take(void);
+
+/** True when the syndrome's NSRST bit can be trusted as a pin-reset marker (it reads 0,
+ *  or clears when acknowledged).  Probed before the sleep.  Weak: false where there is no
+ *  such register, so nothing is ever classified as a pin reset there. */
+bool alp_som_power_reset_syndrome_trusted(void);
 
 /** True when an enabled RV-3028 countdown / alarm flag (TF / AF) is already latched.
  *  Read only: nothing is cleared, so the wake decode still sees it. */

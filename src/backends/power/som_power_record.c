@@ -169,6 +169,26 @@ void alp_som_pd_bench_set(uint32_t count)
 
 #define SOMPD_DIAG_MAGIC 0x44494147u /* "DIAG" */
 
+static uint32_t _diag_boot_seq;
+
+void alp_som_pd_diag_patch(unsigned slot, unsigned idx, uint32_t value)
+{
+	if (slot >= 2u || idx >= ALP_SOM_PD_DIAG_WORDS) {
+		return;
+	}
+	bkram_clock_assert();
+	_bk.diag[slot].w[idx] = value;
+}
+
+void alp_som_pd_diag_invalidate(unsigned slot)
+{
+	if (slot >= 2u) {
+		return;
+	}
+	bkram_clock_assert();
+	_bk.diag[slot].magic = 0u;
+}
+
 void alp_som_pd_diag_save(unsigned slot, const uint32_t *words, unsigned n)
 {
 	alp_som_pd_diag_t d = { .magic = SOMPD_DIAG_MAGIC };
@@ -177,7 +197,14 @@ void alp_som_pd_diag_save(unsigned slot, const uint32_t *words, unsigned n)
 		return;
 	}
 	bkram_clock_assert();
-	d.seq = (_bk.diag[slot].magic == SOMPD_DIAG_MAGIC) ? _bk.diag[slot].seq + 1u : 1u;
+	/* BOOT is written first thing each boot and numbers it (previous BOOT + 1); PRE, written
+	 * later in the same boot, carries that boot's number, so after the next boot the two
+	 * slots show which boot wrote what.  `cycle` is the bench counter at the time. */
+	if (slot == ALP_SOM_PD_DIAG_BOOT) {
+		_diag_boot_seq = (_bk.diag[slot].magic == SOMPD_DIAG_MAGIC) ? _bk.diag[slot].seq + 1u : 1u;
+	}
+	d.seq   = _diag_boot_seq;
+	d.cycle = alp_som_pd_bench_count();
 	for (unsigned i = 0; i < n && i < ALP_SOM_PD_DIAG_WORDS; ++i) {
 		d.w[i] = words[i];
 	}
