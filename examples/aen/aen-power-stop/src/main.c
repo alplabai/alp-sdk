@@ -133,6 +133,22 @@ static void print_regs(void)
 	       sys_read32(0x1A604010u)); /* AON.RTSS_HE_CTRL: bit0 COLD_WAKEUP, [9:8] WIC */
 }
 
+/* VBAT_STOP_MODE_REG (0x1A60F000), decoded: the hardware's own witness, independent of
+ * the SDK's record.  STOP_MODE_STAT (bit 4) says the last reset was a STOP wake;
+ * DC_DC_STAT (bit 8) the DC-DC state the SE left (SVD: 1 = off, 0 = on); STOP_MODE_CTRL
+ * (bit 0).  Printed on every boot, so the first line (before cycle 1) is the baseline
+ * and the ones after a wake are the evidence. */
+static void print_stop_mode(void)
+{
+	uint32_t v = sys_read32(DT_REG_ADDR(DT_NODELABEL(stop_mode)));
+
+	printk("POWER_STOP: stop_mode_reg=0x%08x STOP_MODE_STAT=%u DC_DC_STAT=%u STOP_MODE_CTRL=%u\n",
+	       v,
+	       (unsigned)((v >> 4) & 1u),
+	       (unsigned)((v >> 8) & 1u),
+	       (unsigned)(v & 1u));
+}
+
 /* Judge the cycle that ended with this boot.  @p done is how many STOPs were
  * started before it (the bench counter), so the cycle is cycles[done - 1]. */
 static void judge(unsigned done, const alp_power_boot_info_t *bi)
@@ -270,6 +286,7 @@ int main(void)
 
 	printk("POWER_STOP: boot valid=%d counter=%u\n", (int)bi.valid, done);
 	print_regs();
+	print_stop_mode(); /* baseline on the first boot, the wake witness after one */
 
 	if (done > N_CYCLES) {
 		done = 0u; /* stale or corrupt: start over */

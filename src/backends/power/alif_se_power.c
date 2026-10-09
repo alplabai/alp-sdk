@@ -501,6 +501,9 @@ build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_pla
  * (it refused to restore memory_blocks bit 20 on the bench), and a wrong dcdc_voltage
  * or vdd_ioflex_3V3 is a hardware hazard, not a power-saving miss: any difference
  * abandons the sleep. */
+/* Probe value for the OFF profile's dcdc_mode (see off_profile_matches()). */
+#define OFF_DCDC_MODE_SENTINEL ((dcdc_mode_t)0xA5A5A5A5u)
+
 /* Name every member that differs, expected vs got, so the first bench run can tell an
  * SE that rewrites only what it owns (stby_clk_src / stby_clk_freq are "selected
  * automatically") from one that drops a retention or wake bit.  Failure path only. */
@@ -518,7 +521,9 @@ static void off_profile_log_diff(const off_profile_t *want, const off_profile_t 
 {
 	OFF_DIFF(power_domains);
 	OFF_DIFF(dcdc_voltage);
-	OFF_DIFF(dcdc_mode);
+	if (got->dcdc_mode != OFF_DCDC_MODE_SENTINEL) {
+		OFF_DIFF(dcdc_mode);
+	}
 	OFF_DIFF(aon_clk_src);
 	OFF_DIFF(stby_clk_src);
 	OFF_DIFF(stby_clk_freq);
@@ -532,12 +537,45 @@ static void off_profile_log_diff(const off_profile_t *want, const off_profile_t 
 	OFF_DIFF(vtor_address_ns);
 }
 
+/* hal_alif's OFF-profile client does not carry dcdc_mode (v2.3.0 se_service.c:
+ * se_service_set_off_cfg() zeroes the packet, so the SE receives 0 = DCDC_MODE_OFF;
+ * se_service_get_off_cfg() never fills it, unlike the RUN pair), so a read-back
+ * leaves the member untouched.  It is probed with a sentinel: still the sentinel
+ * after the call means "not transported", and the member is skipped.  A value that
+ * changed (a future hal_alif) is compared strictly.  Nothing special-cases a value. */
+
+/* Read the SE's OFF profile into @p out, which is fully initialised first: the
+ * members the client does not fill must not be stack garbage. */
+static int off_cfg_read(off_profile_t *out)
+{
+	memset(out, 0, sizeof(*out));
+	out->dcdc_mode = OFF_DCDC_MODE_SENTINEL;
+	return se_service_get_off_cfg(out);
+}
+
+static bool dcdc_mode_transported(const off_profile_t *got)
+{
+	static bool logged;
+
+	if (got->dcdc_mode == OFF_DCDC_MODE_SENTINEL) {
+		if (!logged) {
+			logged = true;
+			printk("alif_se_power: OFF dcdc_mode not transported by the hal_alif client; the "
+			       "SE receives 0 (DCDC_MODE_OFF)\n");
+		}
+		return false;
+	}
+	return true;
+}
+
 static bool off_profile_matches(const off_profile_t *want, const off_profile_t *got)
 {
+	if (dcdc_mode_transported(got) && got->dcdc_mode != want->dcdc_mode) {
+		return false;
+	}
 	return got->power_domains == want->power_domains && got->dcdc_voltage == want->dcdc_voltage &&
-	       got->dcdc_mode == want->dcdc_mode && got->aon_clk_src == want->aon_clk_src &&
-	       got->stby_clk_src == want->stby_clk_src && got->stby_clk_freq == want->stby_clk_freq &&
-	       got->memory_blocks == want->memory_blocks &&
+	       got->aon_clk_src == want->aon_clk_src && got->stby_clk_src == want->stby_clk_src &&
+	       got->stby_clk_freq == want->stby_clk_freq && got->memory_blocks == want->memory_blocks &&
 	       got->ip_clock_gating == want->ip_clock_gating &&
 	       got->phy_pwr_gating == want->phy_pwr_gating &&
 	       got->vdd_ioflex_3V3 == want->vdd_ioflex_3V3 &&
@@ -710,7 +748,7 @@ static alp_status_t undo_se(const undo_t *u)
 	if (alif_se_hw_reg_read(ALIF_SE_REG_ANA_REG1) != u->ana_reg1) {
 		alif_se_hw_reg_write(ALIF_SE_REG_ANA_REG1, u->ana_reg1);
 	}
-	if (s != ALP_OK || se_service_get_off_cfg(&chk) != 0 || !off_profile_matches(&u->live, &chk) ||
+	if (s != ALP_OK || off_cfg_read(&chk) != 0 || !off_profile_matches(&u->live, &chk) ||
 	    alif_se_hw_reg_read(ALIF_SE_REG_RET_CTRL) != u->ret_ctrl ||
 	    alif_se_hw_reg_read(ALIF_SE_REG_ANA_REG1) != u->ana_reg1) {
 		return ALP_ERR_IO; /* could not be put back: the caller reports it */
@@ -757,11 +795,14 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	}
 
 	/* 3. Build the profile from what the SE reports now.  Read-only so far. */
-	int rc = se_service_get_off_cfg(&undo.live);
+	int rc = off_cfg_read(&undo.live);
 
 	s = se_rc_to_alp(rc);
 	if (s != ALP_OK) {
 		return refuse(3, "se_get_off_cfg", rc, s);
+	}
+	if (undo.live.dcdc_mode == OFF_DCDC_MODE_SENTINEL) {
+		undo.live.dcdc_mode = DCDC_MODE_OFF; /* what the client sends to the SE: 0 */
 	}
 	s = build_off_profile(&off, &undo.live, &plan);
 	if (s != ALP_OK) {
@@ -794,7 +835,7 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 		(void)refuse(6, "se_set_off_cfg", rc, s);
 		goto unwind;
 	}
-	rc = se_service_get_off_cfg(&readback);
+	rc = off_cfg_read(&readback);
 	s  = se_rc_to_alp(rc);
 	if (s != ALP_OK) {
 		(void)refuse(6, "se_get_off_cfg_readback", rc, s);

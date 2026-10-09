@@ -94,17 +94,31 @@ static off_profile_t       g_stored;     /* what the fake SE holds */
 static alp_som_pd_record_t g_rec_at_set; /* the record as it stood at the SE call */
 static uint32_t            g_se_drops_memory_bits;
 
+static bool     g_transports_dcdc_mode;
+static int      g_flip_word = -1;
+static unsigned g_set_calls;
+
 int se_service_get_off_cfg(off_profile_t *wp)
 {
 	ev(EV_GET_OFF_CFG);
 	if (g_get_rc != 0) {
 		return g_get_rc;
 	}
+	/* Like the real client: dcdc_mode is neither sent by set_off_cfg nor filled in
+	 * here, so the caller's value survives the call (unless a future hal_alif
+	 * transports it, modelled by g_transports_dcdc_mode). */
+	dcdc_mode_t keep = wp->dcdc_mode;
+
 	*wp = g_readback_overridden ? g_readback : g_stored;
+	if (!g_transports_dcdc_mode) {
+		wp->dcdc_mode = keep;
+	}
+	if (g_flip_word >= 0 && g_set_calls > 0u && g_flip_word != 2) {
+		((uint32_t *)wp)[g_flip_word] ^= 1u; /* the SE hands one bit back wrong */
+	}
 	return 0;
 }
 
-static unsigned      g_set_calls;
 static off_profile_t g_undo_set; /* the last profile written (the undo) */
 
 int se_service_set_off_cfg(off_profile_t *wp)
@@ -429,8 +443,10 @@ static void reset_fakes(void)
 	g_set_calls = 0;
 	memset(&g_set, 0, sizeof(g_set));
 	memset(&g_rec_at_set, 0, sizeof(g_rec_at_set));
-	g_porf          = false;
-	g_flags_pending = false;
+	g_porf                 = false;
+	g_transports_dcdc_mode = false;
+	g_flip_word            = -1;
+	g_flags_pending        = false;
 
 	g_countdown_ready = true;
 	g_rtc_int_armed   = false;
@@ -1390,4 +1406,87 @@ ZTEST(power_alif_se, test_entry_refusing_an_already_asserted_int_unwinds)
 	zassert_false(g_rec_valid);
 	zassert_equal(ev_count(EV_DISARM_INT_PAD), 1u);
 	zassert_equal(ev_count(EV_CANCEL_RTC_TIMER), 1u);
+}
+
+/* ---- hal_alif does not transport dcdc_mode for the OFF profile -------------------- */
+
+ZTEST(power_alif_se, test_dcdc_mode_sentinel_survives_the_readback)
+{
+	off_profile_t got;
+	off_profile_t want = g_live;
+
+	/* Poison the stack words first: the helper must initialise everything itself. */
+	memset(&got, 0xCC, sizeof(got));
+	zassert_equal(off_cfg_read(&got), 0);
+	zassert_equal(got.dcdc_mode, OFF_DCDC_MODE_SENTINEL, "the client did not fill it");
+	zassert_equal(got.power_domains, g_stored.power_domains);
+	zassert_equal(got.vtor_address_ns, g_stored.vtor_address_ns);
+
+	want.dcdc_mode = DCDC_MODE_OFF;
+	zassert_true(off_profile_matches(&want, &got), "a non-transported member is skipped");
+}
+
+ZTEST(power_alif_se, test_the_sleep_proceeds_with_dcdc_mode_not_transported)
+{
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+	zassert_equal(g_set.dcdc_mode, DCDC_MODE_OFF, "OFF is still what is handed to the client");
+	zassert_equal(ev_count(EV_ENTER), 1u);
+}
+
+ZTEST(power_alif_se, test_a_transported_dcdc_mode_is_compared_strictly)
+{
+	/* A future hal_alif that carries the member: equal passes. */
+	g_transports_dcdc_mode = true;
+	g_state.wake_bitmap    = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+
+	/* ...and a different value refuses, including 0x7f, the stack garbage the bench saw:
+	 * no value is excused. */
+	reset_fakes();
+	g_transports_dcdc_mode = true;
+	g_readback             = g_stored;
+	g_readback.dcdc_mode   = (dcdc_mode_t)0x7fu;
+	g_readback_overridden  = true;
+	g_state.wake_bitmap    = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_IO);
+	zassert_equal(ev_count(EV_ENTER), 0u);
+}
+
+ZTEST(power_alif_se, test_each_strict_member_refuses_at_step_6)
+{
+	/* 13 members stay strict; word 2 is dcdc_mode, which is probed, not compared. */
+	for (int i = 0; i < (int)(sizeof(off_profile_t) / sizeof(uint32_t)); ++i) {
+		if (i == 2) {
+			continue;
+		}
+		reset_fakes();
+		g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+		g_flip_word         = i;
+		zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL),
+		              ALP_ERR_IO,
+		              "member word %d was not compared",
+		              i);
+		zassert_equal(ev_count(EV_ENTER), 0u, "word %d", i);
+	}
+}
+
+ZTEST(power_alif_se, test_undo_succeeds_with_the_dcdc_mode_sentinel)
+{
+	undo_t u;
+
+	memset(&u, 0, sizeof(u));
+	u.live           = g_live;
+	u.live.dcdc_mode = DCDC_MODE_OFF;
+	u.ret_ctrl       = g_regs[ALIF_SE_REG_RET_CTRL];
+	u.ana_reg1       = g_regs[ALIF_SE_REG_ANA_REG1];
+	g_stored         = g_live;
+	zassert_equal(undo_se(&u), ALP_OK);
+	zassert_equal(ev_count(EV_SET_OFF_CFG), 1u);
+
+	/* A real mismatch in a strict member still fails the undo. */
+	g_readback = g_stored;
+	g_readback.ewic_cfg ^= 1u;
+	g_readback_overridden = true;
+	zassert_equal(undo_se(&u), ALP_ERR_IO);
 }

@@ -85,7 +85,13 @@ typedef enum {
 /* aipm.h */
 typedef enum { IOFLEX_LEVEL_3V3, IOFLEX_LEVEL_1V8 } ioflex_mode_t;
 
-/* aipm.h: the OFF profile, every member in declaration order. */
+/* aipm.h: the OFF profile, every member in declaration order.
+ *
+ * NOTE (hal_alif v2.3.0 se_services/zephyr/src/se_service.c): the real client does
+ * NOT transport dcdc_mode for the OFF profile -- se_service_set_off_cfg() zeroes the
+ * request packet (the SE receives 0 = DCDC_MODE_OFF) and se_service_get_off_cfg()
+ * never fills the member in, unlike the RUN pair.  The fake in the test source
+ * mirrors that. */
 typedef struct {
 	uint32_t          power_domains;
 	uint32_t          dcdc_voltage;
