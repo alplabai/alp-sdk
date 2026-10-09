@@ -179,13 +179,14 @@ _Static_assert(TR_MEM_VOL == TR_MEM_VOL_RESERVED, "TR_MEM_VOL moved: update TR_M
 	0x0237FDA0u /* HE: the SE service request of the fatal-error SoC reset (service_header_t, 8 B), in SRAM0 so the SE reads
  * it by its global address with no local-to-global translation (src/platform/he_fault.c). */
 #define TR_MEM_SE_MSG_SIZE 8u
-_Static_assert(TR_MEM_VOL_RESERVED >= TR_MEM_BUS2 + 48u &&
-                   TR_MEM_I2C1_ALIVE >= TR_MEM_VOL_RESERVED + TR_MEM_VOL_RESERVED_SIZE &&
-                   TR_MEM_I2C1_ALIVE + 4u <= TR_MEM_FAULT_INJECT &&
-                   TR_MEM_FAULT_INJECT + TR_MEM_FAULT_INJECT_SIZE <= TR_MEM_SE_MSG &&
-                   TR_MEM_SE_MSG + TR_MEM_SE_MSG_SIZE <= TR_MEM_SN65_RECIPE,
-               "the liveness word, the fault injector and the SE message sit between the volume record "
-               "and the recipe");
+_Static_assert(
+    TR_MEM_VOL_RESERVED >= TR_MEM_BUS2 + 48u &&
+        TR_MEM_I2C1_ALIVE >= TR_MEM_VOL_RESERVED + TR_MEM_VOL_RESERVED_SIZE &&
+        TR_MEM_I2C1_ALIVE + 4u <= TR_MEM_FAULT_INJECT &&
+        TR_MEM_FAULT_INJECT + TR_MEM_FAULT_INJECT_SIZE <= TR_MEM_SE_MSG &&
+        TR_MEM_SE_MSG + TR_MEM_SE_MSG_SIZE <= TR_MEM_SN65_RECIPE,
+    "the liveness word, the fault injector and the SE message sit between the volume record "
+    "and the recipe");
 /* SRAM1 */
 #define TR_MEM_CAM_POOL \
 	0x02480000u /* HP: OV9281 camera frame pool (design sec 2), 2 x 256,000 B GREY8;
