@@ -108,6 +108,13 @@
 	status = "disabled";
 };
 
+/* The SoC's backup RAM (0x4902C000, the HE power backend's wake record) is a memory-region node that
+ * the base file leaves "okay": this image drives none of it, and hp_vision_check.sh refuses any
+ * /soc node that is okay but not in the allow-list. */
+&bkram {
+	status = "disabled";
+};
+
 /* The HE may use I2C1 at its boot (a display shield's bridge); this image owns
  * the camera bus after that. Wait for the HE's release before anything touches
  * the bus (POST_KERNEL priority 0, ahead of every driver and of the pad unstick
