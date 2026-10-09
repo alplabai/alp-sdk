@@ -61,6 +61,11 @@ void tr_volume_he_init(void)
 	tr_vol_he_boot(&s_he, s_rec);
 	tr_knob_boot(&s_knob, s_bl, BL_BOOT_PCT, HAVE_BL);
 	s_vol_seq = s_rec->seq;
+#if HAVE_BL
+	if (s_knob.bl_pct != BL_BOOT_PCT) { /* the SDK's default is past the ceiling: pull it down */
+		(void)led_set_brightness(BL_LED_DEV, BL_LED_IDX, (uint8_t)s_knob.bl_pct);
+	}
+#endif
 
 	int rc = pinctrl_apply_state(PINCTRL_DT_DEV_CONFIG_GET(ENC_NODE), PINCTRL_STATE_DEFAULT);
 

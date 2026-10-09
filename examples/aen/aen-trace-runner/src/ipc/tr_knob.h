@@ -9,15 +9,15 @@
  * TR_KNOB_IDLE_MS with no turn and no press. The raw switch must hold a new state
  * TR_KNOB_DEBOUNCE_MS before it counts, so a contact bounce is neither a press nor a short one.
  *
- * THE BACKLIGHT. TR_BL_MIN..TR_BL_MAX percent in TR_BL_STEP steps; the floor is hard, so neither
- * the knob nor the bench word can turn the panel dark. The HE owns the PWM (UTIMER3 on P10_7,
+ * THE BACKLIGHT. TR_BL_MIN..TR_BL_MAX percent in TR_BL_STEP steps; the floor AND the ceiling are hard, so
+ * neither the knob nor the bench word can turn the panel dark or past 80 %. The HE owns the PWM (UTIMER3 on P10_7,
  * through the LED API), so nothing crosses a core but the bench record TR_MEM_BL:
  *   bl       HE      the level now:  TR_BL_TAG | percent
  *   req      bench   "please set":   TR_BL_TAG | percent, TR_BL_MIN..TR_BL_MAX (0 = no request)
  *   rejects  HE      requests refused (bad tag, or a percent outside the range)
  *   seq      HE      level changes adopted
  * The boot level is the one the SDK already set (alp,display-backlight default-brightness), so
- * booting never flickers the panel.
+ * booting never flickers the panel; a default above the ceiling is clamped to it.
  *
  * Pure C, no Zephyr: tests/host/test_knob.c runs what the HE runs.
  */
@@ -32,8 +32,8 @@
 
 #define TR_BL_TAG  0x424C0000u /* 'BL' */
 #define TR_BL_MIN  10u         /* percent: never dark */
-#define TR_BL_MAX  100u
-#define TR_BL_STEP 5u /* percent per encoder detent */
+#define TR_BL_MAX  80u         /* percent: the panel's ceiling, a hard one like the floor */
+#define TR_BL_STEP 5u          /* percent per encoder detent */
 
 #define TR_KNOB_DEBOUNCE_MS 30u
 #define TR_KNOB_LONG_MS     1000u

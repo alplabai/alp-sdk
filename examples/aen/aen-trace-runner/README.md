@@ -293,11 +293,11 @@ SRAM0 reads as the 30 % default) and sets it from:
   A short press while muted only switches the mode: just a long press unmutes (a turn in VOLUME mode unmutes too).
   BRIGHTNESS goes back to VOLUME after 5 s with no turn or press.
 - **The panel backlight** (Riverdi RVT121, PWM on P10_7, the SDK's `alp,display-backlight` LED): in BRIGHTNESS mode
-  5 % per detent, 10..100 % (a hard floor of 10 %: the screen can never go dark). It boots at the level the SDK
+  5 % per detent, 10..80 % (a hard floor of 10 %, so the screen can never go dark, and a hard ceiling of 80 %). It boots at the level the SDK
   already set (30 %), so booting does not flicker. The RK055 shield has no PWM backlight, so there a short press does nothing.
 - **A request word over SWD** (`0x0237FD84`, `0x564F0000 | percent`), for the bench: no reflash, see
   `a32/release/FLASH-RECIPE.md` ("Changing the volume without reflashing"). The HE validates it. The backlight
-  has its own (`TR_MEM_BL` `0x0237FDC0`, request word `0x0237FDC4`, `0x424C0000 | percent`, 10..100 only).
+  has its own (`TR_MEM_BL` `0x0237FDC0`, request word `0x0237FDC4`, `0x424C0000 | percent`, 10..80 only).
 
 The HUD shows `VOLUME 40%` (or `MUTE`, or `BRIGHTNESS 60%`) over its bottom row for 1.5 s whenever the level or the mode changes. The encoder
 pads are GPIO3 / GPIO4 (P3_0, P3_1, P4_3): not the GPIO5 port or the lpgpio island the HP's amps use. The

@@ -61,7 +61,9 @@ static void test_boot(void)
 	tr_knob_boot(&k, &rec, 3u, true); /* below the floor: raised, never dark */
 	assert(k.bl_pct == TR_BL_MIN);
 	tr_knob_boot(&k, &rec, 250u, true);
-	assert(k.bl_pct == TR_BL_MAX);
+	assert(k.bl_pct == TR_BL_MAX && TR_BL_MAX == 80u && rec.bl == tr_bl_word(80u));
+	tr_knob_boot(&k, &rec, 90u, true); /* a boot default past the ceiling */
+	assert(k.bl_pct == 80u && tr_bl_word(100u) == tr_bl_word(80u));
 	assert(TR_MEM_BL == 0x0237FDC0u && TR_BL_TAG == 0x424C0000u);
 }
 
@@ -128,7 +130,8 @@ static void test_brightness(void)
 	assert(frame(-1000000, false).bl_changed && k.bl_pct == TR_BL_MIN);
 	assert(!frame(-1, false).bl_changed && k.bl_pct == TR_BL_MIN && rec.bl == tr_bl_word(10u));
 	assert(frame(2147483647, false).bl_changed && k.bl_pct == TR_BL_MAX);
-	assert(!frame(1, false).bl_changed && k.bl_pct == TR_BL_MAX);
+	assert(k.bl_pct == 80u && rec.bl == tr_bl_word(80u));
+	assert(!frame(1, false).bl_changed && k.bl_pct == 80u);
 	assert(frame((-2147483647 - 1), false).bl_changed && k.bl_pct == TR_BL_MIN);
 	assert(frame(1, false).bl_changed && k.bl_pct == 15u);
 	/* the volume did not move */
@@ -210,14 +213,23 @@ static void test_request(void)
 	assert(!frame(0, false).bl_changed && rec.rejects == 2u);
 	rec.req = TR_BL_TAG | 101u;
 	assert(!frame(0, false).bl_changed && rec.rejects == 3u);
-	rec.req = 0x564F0028u; /* the volume tag */
+	rec.req = TR_BL_TAG | 85u; /* over the 80 % ceiling */
 	assert(!frame(0, false).bl_changed && rec.rejects == 4u && k.bl_pct == 60u);
+	rec.req = TR_BL_TAG | 100u;
+	assert(!frame(0, false).bl_changed && rec.rejects == 5u && k.bl_pct == 60u);
+	rec.req = tr_bl_word(80u); /* the ceiling itself is fine */
+	assert(frame(0, false).bl_changed && k.bl_pct == 80u);
+	rec.req = tr_bl_word(60u);
+	assert(frame(0, false).bl_changed && k.bl_pct == 60u);
+	rec.req = 0x564F0028u; /* the volume tag */
+	assert(!frame(0, false).bl_changed && rec.rejects == 6u && k.bl_pct == 60u);
 	rec.req = 0u; /* re-arm */
 	(void)frame(0, false);
 	rec.req = tr_bl_word(60u);
-	assert(!frame(0, false).bl_changed && rec.rejects == 4u); /* same level: no change, no reject */
+	assert(!frame(0, false).bl_changed && rec.rejects == 6u); /* same level: no change, no reject */
 	assert(tr_bl_valid(tr_bl_word(10u), &(uint32_t){ 0 }) &&
-	       tr_bl_valid(tr_bl_word(100u), &(uint32_t){ 0 }));
+	       tr_bl_valid(tr_bl_word(80u), &(uint32_t){ 0 }));
+	assert(!tr_bl_valid(TR_BL_TAG | 85u, &(uint32_t){ 0 }));
 }
 
 static void test_no_backlight(void)
@@ -242,8 +254,8 @@ static void test_popup_text(void)
 	assert(strcmp(b, "MUTE") == 0);
 	tr_hud_vol_text(b, sizeof(b), TR_HUD_KNOB_BRIGHTNESS, 60u);
 	assert(strcmp(b, "BRIGHTNESS 60%") == 0);
-	tr_hud_vol_text(b, sizeof(b), TR_HUD_KNOB_BRIGHTNESS, 100u);
-	assert(strcmp(b, "BRIGHTNESS 100%") == 0 && strlen(b) < sizeof(b));
+	tr_hud_vol_text(b, sizeof(b), TR_HUD_KNOB_BRIGHTNESS, 80u);
+	assert(strcmp(b, "BRIGHTNESS 80%") == 0 && strlen(b) < sizeof(b));
 	tr_hud_vol_text(b, sizeof(b), TR_HUD_KNOB_BRIGHTNESS, 10u);
 	assert(strcmp(b, "BRIGHTNESS 10%") == 0);
 	/* the longest popup fits the HUD row */
