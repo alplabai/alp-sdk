@@ -162,7 +162,7 @@ void tr_hud_view_vol(tr_hud_view_t *v, uint8_t pct, uint32_t seq);
 #define TR_HUD_KNOB_BRIGHTNESS 1u
 void tr_hud_view_vol_kind(tr_hud_view_t *v, uint8_t kind);
 
-/* The popup's text (the longest, "BRIGHTNESS 100%", is 15 chars + NUL). */
+/* The popup's text (the longest, "BRIGHTNESS 80%", is 14 chars + NUL). */
 void tr_hud_vol_text(char *b, size_t n, uint8_t kind, uint8_t pct);
 
 void tr_hud_init(tr_hud_t *h);

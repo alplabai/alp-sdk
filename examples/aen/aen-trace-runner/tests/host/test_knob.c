@@ -1,5 +1,5 @@
 /* tests/host/test_knob.c -- src/ipc/tr_knob.c: the encoder switch's short / long press (with
- * debounce), the BRIGHTNESS mode and its 5 s revert, the 10..100 % clamps, a long press that
+ * debounce), the BRIGHTNESS mode and its 5 s revert, the 10..80 % clamps, a long press that
  * mutes and restores through tr_vol_he_step, a short press while muted, the bench's request word
  * and the HUD popup's text. */
 #include <assert.h>
@@ -259,7 +259,7 @@ static void test_popup_text(void)
 	tr_hud_vol_text(b, sizeof(b), TR_HUD_KNOB_BRIGHTNESS, 10u);
 	assert(strcmp(b, "BRIGHTNESS 10%") == 0);
 	/* the longest popup fits the HUD row */
-	assert(tr_hud_text_w(TR_HUD_FONT_MED, "BRIGHTNESS 100%") + 24 < TR_HUD_W);
+	assert(tr_hud_text_w(TR_HUD_FONT_MED, "BRIGHTNESS 80%") + 24 < TR_HUD_W);
 }
 
 int main(void)
