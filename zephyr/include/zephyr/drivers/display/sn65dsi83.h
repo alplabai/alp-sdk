@@ -14,6 +14,8 @@
 #ifndef ZEPHYR_INCLUDE_DRIVERS_DISPLAY_SN65DSI83_H_
 #define ZEPHYR_INCLUDE_DRIVERS_DISPLAY_SN65DSI83_H_
 
+#include <stdint.h>
+
 #include <zephyr/device.h>
 
 #ifdef __cplusplus
@@ -48,6 +50,21 @@ extern "C" {
  * @retval <0      The I2C transaction itself failed (bus/NAK).
  */
 int sn65dsi83_read_errors(const struct device *dev, uint8_t *e5);
+
+/**
+ * @brief Number of times the bridge lost its configuration and was re-initialised.
+ *
+ * With CONFIG_DISPLAY_SN65DSI83_RECOVERY the bridge is health-checked once per
+ * CONFIG_DISPLAY_SN65DSI83_RECOVERY_INTERVAL_MS (CSR 0x0D PLL_EN, 0x0A PLL_EN_STAT and
+ * HS_CLK_SRC, 0xE5); a bridge that reset itself to its defaults (ESD, supply glitch) gets
+ * the init sequence replayed.  Where the I2C controller belongs to another core after
+ * init (recovery-recipe-address in the devicetree node), that core does the check and
+ * this reads its counter from shared SRAM.
+ *
+ * @param dev The ti,sn65dsi83 device.
+ * @return Successful re-inits since boot; 0 if @p dev is NULL.
+ */
+uint32_t sn65dsi83_recovery_count(const struct device *dev);
 
 #ifdef __cplusplus
 }

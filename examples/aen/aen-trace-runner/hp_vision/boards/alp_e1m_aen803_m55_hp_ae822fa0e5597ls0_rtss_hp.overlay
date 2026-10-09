@@ -121,6 +121,19 @@
 	};
 };
 
+/* A display bridge the HE configured over this bus (the RVT121's SN65DSI83) can reset itself
+ * to its defaults afterwards; the HE may not touch the bus any more, so this core, which owns
+ * it, health-checks the bridge and replays the HE's published CSR table
+ * (zephyr/drivers/display/sn65dsi83_recovery_agent.c). Idle when the HE published no recipe
+ * (any other shield). recipe-address = the RVT121 fit overlay's recovery-recipe-address. */
+&i2c1 {
+	sn65dsi83_agent: sn65dsi83-agent@2c {
+		compatible = "alp,sn65dsi83-recovery";
+		reg = <0x2c>;
+		recipe-address = <0x0237FE00>;
+	};
+};
+
 /*
  * The shared page 0x0237F000..0x0237FFFF -- the event ring (sound), the I2C1 handover flag, the HP
  * debug words, the camera view descriptor, the pose slot and the I2C2 + GPIO5 lease record

@@ -1,0 +1,142 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * ADR-0017-ADJACENT (see display_sn65dsi83.c).  Private to the SN65DSI83 driver
+ * and its recovery agent: the register facts both share, the pure health
+ * decision, and the replay entry points.
+ *
+ * WHY THIS EXISTS: the bridge can reset itself to its power-on defaults (an ESD
+ * or supply glitch) while EN stays high and the DSI clock keeps running.  Bench
+ * (E1M-AEN803, RVT121): CSR 0x0D 0x00 (PLL_EN), 0x0A 0x0A (PLL_EN_STAT and
+ * HS_CLK_SRC clear), 0xE5 0x3D -- the panel black, the SoC side healthy.  Init
+ * runs once at boot, so nothing set the bridge up again.
+ *
+ * WHO RUNS THE CHECK: whichever core owns the I2C controller at run time, and
+ * never two.  Alone on the bus (the aen-lvds-display example) the driver's own
+ * delayable work item does.  Where the display core hands the controller to
+ * another core after init (the Trace Runner: the HE configures the bridge, then
+ * alp,i2c-handover gives I2C1 to the HP for the camera), the driver publishes
+ * its CSR table in a shared-SRAM recipe (recovery-recipe-address) and the core
+ * that owns the bus replays it (sn65dsi83_recovery_agent.c).  The display core
+ * must not touch the bus after the handover.
+ */
+#ifndef ZEPHYR_DRIVERS_DISPLAY_SN65DSI83_RECOVERY_H_
+#define ZEPHYR_DRIVERS_DISPLAY_SN65DSI83_RECOVERY_H_
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/sys/util.h>
+
+/* CSR addresses shared by the driver and the replay (datasheet Tables 7-4..7-9). */
+#define SN65_REG_ID_BASE    0x00U /* 9-byte burst: CSR 0x00..0x08. */
+#define SN65_REG_ID_LEN     9U
+#define SN65_REG_SOFT_RESET 0x09U
+#define SN65_REG_CLK_SRC    0x0AU /* LVDS_CLK_RANGE[3:1], HS_CLK_SRC[0]; PLL_EN_STAT[7] (R/O). */
+#define SN65_REG_PLL_EN     0x0DU
+#define SN65_REG_IRQ_EN     0xE0U
+#define SN65_REG_ERR_STAT   0xE5U
+
+/* CSR 0x0A.7: PLL_EN_STAT (not itself named "PLL locked" -- Table 7-2's own
+ * init sequence wants >= 10 ms after PLL_EN regardless, see sn65dsi83_pll_start()). */
+#define SN65_CLK_SRC_PLL_EN_STAT BIT(7)
+/* CSR 0x0A.0: HS_CLK_SRC -- the driver always writes 1; a power-on reset reads 0. */
+#define SN65_CLK_SRC_HS_CLK_SRC BIT(0)
+
+/* CSR 0x0D / 0x09. */
+#define SN65_PLL_EN_BIT     BIT(0)
+#define SN65_SOFT_RESET_BIT BIT(0)
+
+/* One CSR write of the init table. */
+struct sn65dsi83_csr {
+	uint8_t reg;
+	uint8_t val;
+};
+
+enum sn65dsi83_health {
+	SN65_HEALTH_OK,           /* PLL enabled, locked, config kept, no latched error. */
+	SN65_HEALTH_CLEAR_ERRORS, /* PLL fine, CSR 0xE5 latched something: clear and count only. */
+	SN65_HEALTH_REINIT,       /* PLL off / not locked / config lost: replay the init sequence. */
+};
+
+/*
+ * The whole recovery decision, from the three registers read: CSR 0x0D, 0x0A, 0xE5.
+ * Error bits alone never re-init (a transient sync error clears itself); a PLL that is
+ * off or not locked, or an HS_CLK_SRC that reads back clear (the table was lost), does.
+ */
+static inline enum sn65dsi83_health
+sn65dsi83_health_decide(uint8_t pll_en, uint8_t clk_src, uint8_t err_stat)
+{
+	if (!(pll_en & SN65_PLL_EN_BIT) || !(clk_src & SN65_CLK_SRC_PLL_EN_STAT) ||
+	    !(clk_src & SN65_CLK_SRC_HS_CLK_SRC)) {
+		return SN65_HEALTH_REINIT;
+	}
+	return err_stat != 0U ? SN65_HEALTH_CLEAR_ERRORS : SN65_HEALTH_OK;
+}
+
+/* A bridge that will not stay up is re-initialised at most this often. */
+#define SN65_REINIT_MIN_GAP_MS 5000
+
+static inline bool sn65dsi83_reinit_allowed(bool have_last, int64_t last_ms, int64_t now_ms)
+{
+	return !have_last || (now_ms - last_ms) >= SN65_REINIT_MIN_GAP_MS;
+}
+
+struct sn65dsi83_stats {
+	uint32_t recoveries;     /* successful re-inits */
+	uint32_t failures;       /* re-inits that failed (ID mismatch, I2C error, PLL never locked) */
+	uint32_t errors_cleared; /* CSR 0xE5 cleared with the PLL fine */
+	int64_t  last_reinit_ms;
+	bool     have_last;
+};
+
+struct sn65dsi83_report {
+	enum sn65dsi83_health health;
+	bool                  suppressed; /* wanted a re-init, rate limit said not yet */
+	int                   err;        /* re-init result (0 when none was attempted) */
+	uint8_t               pll_en;
+	uint8_t               clk_src;
+	uint8_t               err_stat;
+};
+
+/* Shared-SRAM recipe: the display core publishes its CSR table, the bus owner replays it. */
+#define SN65_RECIPE_MAGIC 0x33385341u /* 'AS83' */
+#define SN65_RECIPE_MAX   32U
+
+struct sn65dsi83_recipe {
+	volatile uint32_t magic; /* written LAST by the publisher; cleared first on every boot */
+	/* Bus owner's counters (struct sn65dsi83_stats), readable by the display core. */
+	volatile uint32_t    recoveries;
+	volatile uint32_t    failures;
+	volatile uint32_t    errors_cleared;
+	uint8_t              n;
+	uint8_t              pad[3];
+	struct sn65dsi83_csr csr[SN65_RECIPE_MAX];
+};
+
+/* Identity check (CSR 0x00..0x08): 0 on a match, -ENODEV on a mismatch, <0 on an I2C error. */
+int sn65dsi83_check_id(const struct i2c_dt_spec *i2c);
+
+/* Datasheet init seq 5: write the CSR table. */
+int sn65dsi83_csr_write(const struct i2c_dt_spec *i2c, const struct sn65dsi83_csr *csr, size_t n);
+
+/* Datasheet init seq 6-10: PLL_EN, wait for PLL_EN_STAT, SOFT_RESET, clear CSR 0xE5. */
+int sn65dsi83_pll_start(const struct i2c_dt_spec *i2c);
+
+/*
+ * One health pass over the bus: read CSR 0x0D/0x0A/0xE5, decide, act.  The full init
+ * (ID check + sn65dsi83_csr_write() + sn65dsi83_pll_start()) is replayed from `csr`,
+ * the same table the driver's init wrote.  Returns the I2C error if the three reads
+ * failed (bridge absent or powered down: nothing to repair from here), else 0 -- the
+ * outcome is in `rep` and `st`.  The caller logs; this file is silent.
+ */
+int sn65dsi83_health_poll(const struct i2c_dt_spec   *i2c,
+                          const struct sn65dsi83_csr *csr,
+                          size_t                      n,
+                          struct sn65dsi83_stats     *st,
+                          struct sn65dsi83_report    *rep);
+
+#endif /* ZEPHYR_DRIVERS_DISPLAY_SN65DSI83_RECOVERY_H_ */

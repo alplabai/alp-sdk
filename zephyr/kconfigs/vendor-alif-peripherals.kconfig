@@ -991,6 +991,36 @@ config SN65DSI83_TEST_PATTERN
 	  not the bridge-to-panel link.  No DSI data is received while the pattern
 	  generator runs (datasheet Section 7.4.5).
 
+config DISPLAY_SN65DSI83_RECOVERY
+	bool "SN65DSI83: re-initialise the bridge if it resets itself"
+	depends on SN65DSI83
+	default y
+	help
+	  The bridge can reset itself to its power-on defaults (ESD, supply
+	  glitch) with EN high and the DSI clock still running: the panel goes
+	  black and nothing sets the bridge up again.  Health-check it every
+	  DISPLAY_SN65DSI83_RECOVERY_INTERVAL_MS (CSR 0x0D PLL_EN, 0x0A PLL_EN_STAT
+	  and HS_CLK_SRC, 0xE5) and replay the init sequence when the PLL is off,
+	  not locked or the configuration is gone.  Latched error flags with the PLL
+	  fine are cleared and counted only.  Re-inits are rate-limited, counted
+	  (sn65dsi83_recovery_count()) and logged at WRN with the register values.
+
+config DISPLAY_SN65DSI83_RECOVERY_INTERVAL_MS
+	int "SN65DSI83 health-check interval (ms)"
+	default 1000
+	range 100 60000
+
+config DISPLAY_SN65DSI83_RECOVERY_AGENT
+	bool "SN65DSI83 recovery on the core that owns the I2C bus"
+	default y
+	depends on DT_HAS_ALP_SN65DSI83_RECOVERY_ENABLED
+	select I2C
+	help
+	  Health-checks and re-initialises a bridge that ANOTHER core configured
+	  (the Trace Runner: the HE initialises it, I2C1 then belongs to the HP's
+	  camera), by replaying the CSR table the display core published in shared
+	  SRAM.  See the alp,sn65dsi83-recovery binding.
+
 config VIDEO_MIPI_CSI2_DW
 	bool "DesignWare MIPI CSI-2 host bridge for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
 	default y
