@@ -38,6 +38,16 @@
 	status = "okay";
 };
 
+/* The controllers of the real IO0 (P9.1) and IO2 (P12.5) pads that alp_pins below must name; enabling a
+ * controller changes no pad. */
+&gpio9 {
+	status = "okay";
+};
+
+&gpio12 {
+	status = "okay";
+};
+
 / {
 	aliases {
 		alp-qenc0 = &tr_enc;
@@ -63,13 +73,13 @@
 
 	/* alp_gpio_open(pin_id) indexes this array by E1M pad number, so index 4 (IO4, the switch) needs
 	 * entries 0..3 before it. Those are the real pads of metadata/e1m_modules/aen/from-alif.tsv
-	 * (IO0 P9.1, IO2 P12.5, IO3 P3.2), never a stand-in; IO1 has no SoC pad, so it points at the
-	 * disabled GPIO14 controller and an open of it fails (NOT_READY) rather than driving anything.
+	 * (IO0 P9.1, IO2 P12.5, IO3 P3.2), never a stand-in; IO1 has no SoC pad, so it names pin 31 of
+	 * an 8-pin controller: gpio_dw refuses that pin (-EINVAL) instead of driving some other pad.
 	 * Nothing in this image opens IO0..IO3. */
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
 		gpios = <&gpio9 1 GPIO_ACTIVE_HIGH>,  /* [0] IO0: P9.1 */
-			<&gpio14 0 GPIO_ACTIVE_HIGH>, /* [1] IO1: no SoC pad, GPIO14 is disabled */
+			<&gpio3 31 GPIO_ACTIVE_HIGH>, /* [1] IO1: no SoC pad, pin 31 does not exist */
 			<&gpio12 5 GPIO_ACTIVE_HIGH>, /* [2] IO2: P12.5 (the HP's CSI mux select) */
 			<&gpio3 2 GPIO_ACTIVE_HIGH>,  /* [3] IO3: P3.2 */
 			<&gpio4 3 GPIO_ACTIVE_LOW>;   /* [4] IO4: P4.3, the encoder switch (external pull-up) */
