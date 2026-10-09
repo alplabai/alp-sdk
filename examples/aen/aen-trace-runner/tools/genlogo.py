@@ -94,7 +94,7 @@ def main():
     for i in range(0, len(flat), 12):
         o.append("\t" + ", ".join("0x%04X" % v for v in flat[i : i + 12]) + ",")
     o.append("};")
-    with open(a.out, "w", newline="\n") as f:
+    with open(a.out, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(o) + "\n")
     print("genlogo: %s -> %s (%dx%d, %d px opaque-ish)" % (a.logo, a.out, w, h, int((px >> 12 != 0).sum())))
 
