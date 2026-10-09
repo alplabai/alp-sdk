@@ -3,13 +3,13 @@
  * src/platform/volume_he.c): the EVK's rotary encoder and its push switch, mapped for the
  * portable API.
  *
- *   ENC0_X (phase A) -> P3_0 = GPIO3 pin 0     ENC0_Y (phase B) -> P3_1 = GPIO3 pin 1
+ *   ENC0_X -> P3_0 = GPIO3 pin 0     ENC0_Y -> P3_1 = GPIO3 pin 1
  *   encoder push switch = E1M_GPIO_IO4 -> P4_3 = GPIO4 pin 3, active low, external 10k pull-up
  *   + 0.1 uF debounce (metadata/boards/e1m-evk.yaml, metadata/e1m_modules/aen/from-alif.tsv).
  * GPIO3 / GPIO4: not the GPIO5 port or the lpgpio island the HP's amps and CC3501E lines use.
- * The phase order is the e1m-evk.yaml / aen-qenc-readout one; which way is "clockwise" is
- * UNVERIFIED on the bench -- if a clockwise turn LOWERS the volume, swap the two `gpios` entries
- * of tr_enc.
+ * Phase order: BENCH-CONFIRMED reversed with ENC0_X as phase A (a clockwise turn lowered the
+ * volume), so tr_enc lists ENC0_Y (P3_1) first and ENC0_X (P3_0) second. That is also the order
+ * aen-evk-demo's netlist note gives. tests/host/test_hp_combined.sh pins it.
  *
  * REN. A pad's input buffer is on only once pinctrl sets `input-enable`, and neither gpio_dw nor
  * gpio-qdec applies a pinctrl state (alp-sdk#2808 is the SDK gap). Until that is fixed in the
@@ -53,7 +53,7 @@
 	 * interrupt (see examples/aen/aen-qenc-readout/boards/*.overlay). */
 	tr_enc: tr-enc {
 		compatible = "gpio-qdec";
-		gpios = <&gpio3 0 GPIO_ACTIVE_HIGH>, <&gpio3 1 GPIO_ACTIVE_HIGH>;
+		gpios = <&gpio3 1 GPIO_ACTIVE_HIGH>, <&gpio3 0 GPIO_ACTIVE_HIGH>;
 		steps-per-period = <4>;
 		zephyr,axis = <INPUT_REL_WHEEL>;
 		sample-time-us = <500>;

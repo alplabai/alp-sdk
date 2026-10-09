@@ -141,15 +141,44 @@ static void fresh(tr_vol_he_t *he)
 	tr_vol_he_boot(he, &rec);
 }
 
+/* A boot at the default, then moved to 100 % so the step arithmetic below starts from full. */
+static void fresh100(tr_vol_he_t *he)
+{
+	fresh(he);
+	he->pct        = 100u;
+	he->unmute_pct = 100u;
+	rec.vol        = tr_vol_word(100u);
+}
+
+static void test_boot(void)
+{
+	tr_vol_he_t he;
+
+	/* the HE boots at the default (30 %), never at 100 %: published before anything else runs */
+	assert(TR_VOL_DEFAULT == 30u);
+	fresh(&he);
+	assert(he.pct == 30u && rec.vol == tr_vol_word(30u) && rec.seq == 0u && rec.rejects == 0u);
+	assert(!tr_vol_he_step(&he, &rec, 0, false)); /* the 0xA5A5A5A5 req left over: not a request */
+	assert(he.pct == 30u && rec.rejects == 0u);
+	/* the HP reads a cold or garbage word as that same level, so the stream starts at 30 % too */
+	assert(tr_vol_read(0xA5A5A5A5u) == 30u && tr_vol_read(0u) == 30u);
+	tr_vol_ramp_t r;
+	int16_t       b[256];
+
+	tr_vol_ramp_init(&r, tr_vol_read(0xA5A5A5A5u));
+	for (unsigned i = 0; i < 256u; i++) {
+		b[i] = 30000;
+	}
+	tr_vol_apply(&r, b, 256u, tr_vol_read(0xA5A5A5A5u));
+	assert(b[0] == 9000 && b[255] == 9000); /* 30 %, steady, from the first block */
+}
+
 static void test_he(void)
 {
 	tr_vol_he_t he;
 
-	fresh(&he);
-	assert(he.pct == TR_VOL_DEFAULT && rec.vol == tr_vol_word(100u));
-	assert(rec.seq == 0u && rec.rejects == 0u);
-	assert(!tr_vol_he_step(&he, &rec, 0, false)); /* the 0xA5A5A5A5 req left over: not a request */
-	assert(he.pct == 100u && rec.rejects == 0u);
+	fresh100(&he);
+	assert(he.pct == 100u && rec.vol == tr_vol_word(100u));
 
 	/* encoder: 5 % a detent, clamped both ends, any burst size */
 	assert(tr_vol_he_step(&he, &rec, -1, false) && he.pct == 95u && rec.vol == tr_vol_word(95u));
@@ -168,7 +197,7 @@ static void test_he(void)
 	assert(tr_vol_he_step(&he, &rec, 0x20000000, false) && he.pct == 100u);
 
 	/* switch: mute and back to the last non-zero level */
-	fresh(&he);
+	fresh100(&he);
 	assert(tr_vol_he_step(&he, &rec, -12, false) && he.pct == 40u);
 	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 0u && rec.vol == tr_vol_word(0u));
 	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 40u);
@@ -182,17 +211,53 @@ static void test_he(void)
 	assert(he.pct == 5u);
 	assert(tr_vol_he_step(&he, &rec, -1, false) && he.pct == 0u);
 	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 5u);
-	/* an unmute from a fresh boot that was muted by request goes to the default or last level */
+	/* an unmute from a fresh boot goes back to the boot level */
 	fresh(&he);
 	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 0u);
-	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 100u);
+	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 30u);
+}
+
+static void test_mute(void)
+{
+	tr_vol_he_t he;
+
+	fresh100(&he);
+	assert(tr_vol_he_step(&he, &rec, -12, false) && he.pct == 40u);
+	/* mute, then turn up: unmutes and steps from the SAVED level, not from 0 */
+	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 0u && rec.vol == tr_vol_word(0u));
+	assert(tr_vol_he_step(&he, &rec, 1, false) && he.pct == 45u && rec.vol == tr_vol_word(45u));
+	/* mute, then turn down: from the saved level too */
+	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 0u);
+	assert(tr_vol_he_step(&he, &rec, -2, false) && he.pct == 35u);
+	/* a press after a turn mutes again and the next press restores that level */
+	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 0u);
+	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 35u);
+	/* the saved level survives a muted second press only once: unmuted, a press mutes again */
+	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 0u);
+	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 35u);
+	/* muted at the top, one detent up restores full */
+	assert(tr_vol_he_step(&he, &rec, 13, false) && he.pct == 100u);
+	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 0u);
+	assert(tr_vol_he_step(&he, &rec, 1, false) && he.pct == 100u);
+	/* muted at the lowest audible step, one detent down lands on 0 unmuted: the press resumes it */
+	assert(tr_vol_he_step(&he, &rec, -19, false) && he.pct == 5u);
+	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 0u);
+	assert(!tr_vol_he_step(&he, &rec, -1, false) && he.pct == 0u); /* 5 - 5 = 0: still silent */
+	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 5u);
+	/* a request while muted replaces the saved level; a muting request keeps it */
+	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == 0u);
+	rec.req = tr_vol_word(70u);
+	assert(tr_vol_he_step(&he, &rec, 0, false) && he.pct == 70u);
+	rec.req = tr_vol_word(0u);
+	assert(tr_vol_he_step(&he, &rec, 0, false) && he.pct == 0u);
+	assert(tr_vol_he_step(&he, &rec, 1, false) && he.pct == 75u);
 }
 
 static void test_request(void)
 {
 	tr_vol_he_t he;
 
-	fresh(&he);
+	fresh100(&he);
 	uint32_t seq = rec.seq;
 
 	/* a valid request is adopted once */
@@ -231,7 +296,7 @@ static void test_request(void)
 	memset((void *)&rec, 0, sizeof(rec));
 	rec.req = tr_vol_word(10u);
 	tr_vol_he_boot(&he, &rec);
-	assert(!tr_vol_he_step(&he, &rec, 0, false) && he.pct == 100u);
+	assert(!tr_vol_he_step(&he, &rec, 0, false) && he.pct == TR_VOL_DEFAULT);
 	/* ... but a new one is */
 	rec.req = tr_vol_word(20u);
 	assert(tr_vol_he_step(&he, &rec, 0, false) && he.pct == 20u);
@@ -241,7 +306,7 @@ static void test_single_writer(void)
 {
 	tr_vol_he_t he;
 
-	fresh(&he);
+	fresh100(&he);
 	assert(tr_vol_he_step(&he, &rec, -10, false) && he.pct == 50u);
 	/* someone writes vol over SWD (the wrong word): the HE puts its own level back */
 	rec.vol = tr_vol_word(90u);
@@ -259,7 +324,9 @@ int main(void)
 	test_word();
 	test_gain();
 	test_ramp();
+	test_boot();
 	test_he();
+	test_mute();
 	test_request();
 	test_single_writer();
 	puts("test_vol: ok");

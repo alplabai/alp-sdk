@@ -16,7 +16,9 @@
  *   rejects  HE   requests it refused (bad tag or percent above 100)
  *   seq      HE   changes adopted, for the HUD's "VOL" popup
  * A cold SRAM0 holds garbage: a vol word without the tag (or with a percent above 100) is read
- * as TR_VOL_DEFAULT, never as a level. The HE rewrites vol at boot and again whenever it does
+ * as TR_VOL_DEFAULT (30 %), never as a level; the HE boots at the same level, so the sound never
+ * plays at 100 % before the first request or turn. Warm resets keep a valid word (the HP may play
+ * the last level until the HE publishes again). The HE rewrites vol at boot and again whenever it does
  * not hold the HE's own level, so writing vol over SWD does nothing -- write req.
  *
  * SOURCES the HE adopts, in one place (tr_vol_he_step): the EVK rotary encoder (TR_VOL_STEP per
@@ -36,7 +38,7 @@
 #define TR_VOL_TAG      0x564F0000u /* 'VO' */
 #define TR_VOL_TAG_MASK 0xFFFF0000u
 #define TR_VOL_MAX      100u /* percent of TR_SND_VOLUME */
-#define TR_VOL_DEFAULT  100u /* an unset or garbage word */
+#define TR_VOL_DEFAULT  30u /* an unset or garbage word, and the HE's level at boot: never a 100 % burst */
 #define TR_VOL_STEP     5u   /* percent per encoder detent */
 
 typedef struct {
@@ -86,8 +88,9 @@ void tr_vol_apply(tr_vol_ramp_t *r, int16_t *buf, unsigned n, uint32_t pct);
 
 /* ---- HE: the owner ---------------------------------------------------------------------- */
 typedef struct {
-	uint32_t pct;
-	uint32_t unmute_pct; /* what the switch restores: the last non-zero level */
+	uint32_t pct;        /* the level published: 0 while muted */
+	uint32_t unmute_pct; /* the last non-zero level: what the switch restores and a turn steps from */
+	bool     muted;      /* the switch muted it: the level to resume is unmute_pct */
 	uint32_t last_req;   /* the req word as last seen: only a CHANGE is a request */
 } tr_vol_he_t;
 
@@ -95,8 +98,9 @@ typedef struct {
  * garbage and survives warm resets). A req left over from before is remembered, not obeyed. */
 void tr_vol_he_boot(tr_vol_he_t *he, volatile tr_vol_t *r);
 
-/* One HE frame. `detents`: encoder detents since the last call (clockwise positive); `press`:
- * the switch went down. Order: encoder, switch, then the bench's req. Re-asserts the vol word if
+/* One HE frame. `detents`: encoder detents since the last call (clockwise positive = louder);
+ * `press`: the switch went down (mutes; pressed again restores the level it muted). A turn while
+ * muted unmutes and steps from that saved level. Order: encoder, switch, then the bench's req. Re-asserts the vol word if
  * anything else changed it. Returns true when the level changed. */
 bool tr_vol_he_step(tr_vol_he_t *he, volatile tr_vol_t *r, int32_t detents, bool press);
 

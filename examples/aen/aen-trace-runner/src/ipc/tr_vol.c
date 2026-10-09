@@ -62,6 +62,7 @@ static bool set(tr_vol_he_t *he, volatile tr_vol_t *r, uint32_t pct)
 	he->pct = pct;
 	if (pct != 0u) {
 		he->unmute_pct = pct;
+		he->muted      = false;
 	}
 	publish(he, r);
 	r->seq = r->seq + 1u;
@@ -72,6 +73,7 @@ void tr_vol_he_boot(tr_vol_he_t *he, volatile tr_vol_t *r)
 {
 	he->pct        = TR_VOL_DEFAULT;
 	he->unmute_pct = TR_VOL_DEFAULT;
+	he->muted      = false;
 	he->last_req   = r->req;
 	r->rejects     = 0u;
 	r->seq         = 0u;
@@ -85,12 +87,15 @@ bool tr_vol_he_step(tr_vol_he_t *he, volatile tr_vol_t *r, int32_t detents, bool
 	if (detents != 0) {
 		int32_t lim = (int32_t)(TR_VOL_MAX / TR_VOL_STEP);
 		int32_t d   = detents > lim ? lim : (detents < -lim ? -lim : detents);
-		int32_t p   = (int32_t)he->pct + d * (int32_t)TR_VOL_STEP;
+		int32_t base = (int32_t)(he->muted ? he->unmute_pct : he->pct);
+		int32_t p    = base + d * (int32_t)TR_VOL_STEP;
 
+		he->muted = false; /* a turn while muted unmutes, stepping from the saved level */
 		changed |=
 		    set(he, r, (uint32_t)(p < 0 ? 0 : (p > (int32_t)TR_VOL_MAX ? (int32_t)TR_VOL_MAX : p)));
 	}
 	if (press) {
+		he->muted = he->pct != 0u; /* unmute_pct already holds the level being muted */
 		changed |= set(he, r, he->pct != 0u ? 0u : he->unmute_pct);
 	}
 	uint32_t q = r->req;
@@ -102,6 +107,7 @@ bool tr_vol_he_step(tr_vol_he_t *he, volatile tr_vol_t *r, int32_t detents, bool
 		if (q == 0u) {
 			/* "no request": the word cleared (a cold SRAM0 or a bench that wrote 0 to re-arm) */
 		} else if (tr_vol_valid(q, &pct)) {
+			he->muted = pct == 0u && he->pct != 0u; /* a muting request keeps the level to resume */
 			changed |= set(he, r, pct);
 		} else {
 			r->rejects = r->rejects + 1u;

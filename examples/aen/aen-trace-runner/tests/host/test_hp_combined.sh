@@ -355,6 +355,9 @@ awk '/tr_audio_render\(s_mono, BLOCK\);/ { r = NR } /tr_vol_apply\(&ramp, s_mono
 if grep -vE '^[[:space:]]*(/?\*|//)' src/platform/volume_he.c | grep -qiE 'i2c|gpio5|SD_N|tr_bus2'; then
 	FAILS "src/platform/volume_he.c touches I2C2 / GPIO5 / the lease"
 fi
+# the encoder phase order the bench confirmed (clockwise = louder): ENC0_Y / P3_1 first, ENC0_X / P3_0 second
+grep -Eq 'gpios = <&gpio3 1 GPIO_ACTIVE_HIGH>, <&gpio3 0 GPIO_ACTIVE_HIGH>;' volume_he.overlay ||
+	FAILS "volume_he.overlay: tr_enc phase order is not <&gpio3 1>, <&gpio3 0> (the bench-confirmed clockwise = louder)"
 a_vol=$(sed -n '/^#define TR_MEM_VOL /{n;s/^[[:space:]]*\(0x[0-9A-Fa-f]*\)u.*/\1/p}' src/ipc/tr_memmap.h | head -1)
 { [ -n "$a_vol" ] && [ "$a_vol" != "$a_b2" ] && [ "$a_vol" != "$a_i2c1" ]; } || FAILS "TR_MEM_VOL ($a_vol) collides with the lease record or the I2C1 handover"
 
