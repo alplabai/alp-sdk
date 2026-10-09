@@ -38,8 +38,8 @@
 #define TR_VOL_TAG      0x564F0000u /* 'VO' */
 #define TR_VOL_TAG_MASK 0xFFFF0000u
 #define TR_VOL_MAX      100u /* percent of TR_SND_VOLUME */
-#define TR_VOL_DEFAULT  30u /* unset / garbage word and the HE's boot level (no 100 % burst) */
-#define TR_VOL_STEP     5u  /* percent per encoder detent */
+#define TR_VOL_DEFAULT  30u  /* unset / garbage word and the HE's boot level (no 100 % burst) */
+#define TR_VOL_STEP     5u   /* percent per encoder detent */
 
 typedef struct {
 	uint32_t vol;
