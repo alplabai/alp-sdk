@@ -426,7 +426,8 @@ plan_wake(const alp_power_backend_state_t *state, uint32_t wake_after_ms, sleep_
 }
 
 /* One-shot evidence when the RV-3028 holds /INT low or a wake is already latched (bench U8d:
- * the RV-3028 cycles always refused; also dumped at the step-7 refusal): what the RV-3028 itself says -- STATUS 0Eh (EVF is bit 1), CONTROL_1 0Fh,
+ * the RV-3028 cycles always refused; also dumped at the step-7 refusal): what the RV-3028
+ * itself says -- STATUS 0Eh (EVF is bit 1), CONTROL_1 0Fh,
  * CONTROL_2 10h (EIE is bit 2), Event Control 13h, and the EEPROM mirrors 35h CLKOUT, 37h
  * BACKUP -- and what the LPGPIO block sees on its pins.  Reads only: nothing here writes the
  * part or its EEPROM.

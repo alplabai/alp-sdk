@@ -354,7 +354,7 @@ bool alp_som_power_reset_syndrome_trusted(void)
 {
 	return g_nsrst_trusted;
 }
-static bool g_flags_pending;
+static bool    g_flags_pending;
 static bool    g_fire_on_arm;
 static uint8_t g_rtc_regs[6];
 
