@@ -102,6 +102,55 @@ static inline bool sn65dsi83_reinit_allowed(bool have_last, int64_t last_ms, int
 	return !have_last || (now_ms - last_ms) >= SN65_REINIT_MIN_GAP_MS;
 }
 
+/*
+ * What the display core's boot init may touch.  A cold boot runs the whole datasheet sequence.  A
+ * WARM boot of the display core alone (the bus owner keeps running, alp,i2c-handover with an
+ * alive-address) must leave the shared I2C controller and the bridge's EN pin alone: EN low would
+ * reset a bridge the bus owner is watching, and any bus access would collide with the owner's
+ * transfers.  It still re-initialises the DSI host and republishes the recipe (compile-time
+ * constant, so the owner's latch stays valid); the owner replays the CSRs if the host's clock-lane
+ * restart cost the bridge its PLL lock.  Only a core that hands its bus away (has a recipe) can
+ * boot warm.
+ */
+struct sn65dsi83_boot_plan {
+	bool toggle_en;      /* EN low for >= 10 ms, then high (datasheet init seq 3-4) */
+	bool touch_bus;      /* ID check, CSR writes, PLL start over I2C */
+	bool clear_recipe;   /* zero the recipe magic and the owner's counters before re-publishing */
+	bool publish_recipe; /* (re)publish the CSR table for the bus owner */
+};
+
+static inline struct sn65dsi83_boot_plan sn65dsi83_boot_plan_for(bool warm, bool have_recipe)
+{
+	bool w = warm && have_recipe;
+
+	return (struct sn65dsi83_boot_plan){
+		.toggle_en      = !w,
+		.touch_bus      = !w,
+		.clear_recipe   = !w && have_recipe,
+		.publish_recipe = have_recipe,
+	};
+}
+
+/* The bus owner's I2C access failed (not a bridge verdict) on this many polls in a row: the
+ * controller itself is suspect, not the bridge. */
+#define SN65_IO_FAIL_POLLS 3U
+
+/* Count one poll's I2C result in *streak.  True when the streak just reached the threshold and the
+ * bus should be recovered now (the streak restarts, so a bus that stays dead is retried every
+ * SN65_IO_FAIL_POLLS polls, never wedged on and never hammered each poll). */
+static inline bool sn65dsi83_io_fail_step(uint32_t *streak, int io_result)
+{
+	if (io_result == 0) {
+		*streak = 0U;
+		return false;
+	}
+	if (++*streak >= SN65_IO_FAIL_POLLS) {
+		*streak = 0U;
+		return true;
+	}
+	return false;
+}
+
 struct sn65dsi83_stats {
 	uint32_t recoveries;     /* successful re-inits */
 	uint32_t failures;       /* re-inits that failed (ID mismatch, I2C error, PLL never locked) */
@@ -126,7 +175,7 @@ struct sn65dsi83_report {
 #define SN65_RECIPE_MAX   32U
 
 struct sn65dsi83_recipe {
-	volatile uint32_t magic; /* written LAST by the publisher; cleared first on every boot */
+	volatile uint32_t magic; /* written LAST by the publisher; cleared first on every COLD boot */
 	/* Bus owner's counters (struct sn65dsi83_stats), readable by the display core. */
 	volatile uint32_t    recoveries;
 	volatile uint32_t    failures;

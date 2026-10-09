@@ -388,3 +388,86 @@ ZTEST(sn65dsi83_poll, test_newer_recipe_refreshes_the_latch)
 	zassert_false(sn65dsi83_recipe_latch(&recipe, &latch));
 	zassert_equal(latch.n, ARRAY_SIZE(other), "untouched");
 }
+
+/* ---- the bus owner rides out an I2C transient and only then recovers the controller --------- */
+
+/* A failing poll (the display core's restart, a camera transfer in flight) changes nothing; the
+ * bridge is judged again the moment the bus answers. */
+ZTEST(sn65dsi83_poll, test_transient_io_error_then_replay)
+{
+	uint32_t streak = 0U;
+
+	black();
+	fake.fail_reads = true;
+	zassert_false(sn65dsi83_io_fail_step(&streak, poll(1000)), "one failure is a retry");
+	zassert_false(sn65dsi83_io_fail_step(&streak, poll(2000)));
+	zassert_equal(fake.nwrites, 0, "no write while the bus does not answer");
+
+	fake.fail_reads = false;
+	zassert_false(sn65dsi83_io_fail_step(&streak, poll(3000)));
+	zassert_equal(streak, 0U, "an answered poll ends the streak");
+	zassert_equal(rep.health, SN65_HEALTH_REINIT);
+	zassert_equal(st.recoveries, 1U, "the replay happens as soon as the bus is back");
+}
+
+/* The streak is the wedge detector: SN65_IO_FAIL_POLLS in a row, then again every as many. */
+ZTEST(sn65dsi83_poll, test_persistent_io_error_asks_for_bus_recovery)
+{
+	uint32_t streak  = 0U;
+	unsigned recover = 0U;
+
+	fake.fail_reads = true;
+	for (int i = 1; i <= 3 * SN65_IO_FAIL_POLLS; i++) {
+		if (sn65dsi83_io_fail_step(&streak, poll(1000 * i))) {
+			recover++;
+			zassert_equal(i % SN65_IO_FAIL_POLLS, 0, "only on the Nth failure in a row");
+		}
+	}
+	zassert_equal(recover, 3U);
+
+	/* One good poll in the middle restarts the count. */
+	streak          = 0U;
+	fake.fail_reads = true;
+	zassert_false(sn65dsi83_io_fail_step(&streak, poll(0)));
+	zassert_false(sn65dsi83_io_fail_step(&streak, poll(1000)));
+	fake.fail_reads = false;
+	zassert_false(sn65dsi83_io_fail_step(&streak, poll(2000)));
+	fake.fail_reads = true;
+	zassert_false(sn65dsi83_io_fail_step(&streak, poll(3000)));
+	zassert_false(sn65dsi83_io_fail_step(&streak, poll(4000)));
+}
+
+/* ---- what a display core may touch at boot ---------------------------------------------------- */
+
+ZTEST_SUITE(sn65dsi83_boot, NULL, NULL, NULL, NULL, NULL);
+
+/* Cold: the whole sequence, and the owner's record starts clean. */
+ZTEST(sn65dsi83_boot, test_cold_runs_everything)
+{
+	struct sn65dsi83_boot_plan p = sn65dsi83_boot_plan_for(false, true);
+
+	zassert_true(p.toggle_en && p.touch_bus && p.clear_recipe && p.publish_recipe);
+}
+
+/* Warm (the bus owner runs): EN stays up, the bus is not touched, the recipe and counters are
+ * kept, the recipe is published again. */
+ZTEST(sn65dsi83_boot, test_warm_leaves_bus_and_en_alone)
+{
+	struct sn65dsi83_boot_plan p = sn65dsi83_boot_plan_for(true, true);
+
+	zassert_false(p.toggle_en, "EN must not go low: the bridge is being watched");
+	zassert_false(p.touch_bus, "no ID check, no CSR write, no controller access");
+	zassert_false(p.clear_recipe, "the owner's latch and counters stay valid");
+	zassert_true(p.publish_recipe);
+}
+
+/* A core that keeps its own bus (no recipe) has no owner to leave it to: warm makes no difference. */
+ZTEST(sn65dsi83_boot, test_no_recipe_is_always_a_full_init)
+{
+	struct sn65dsi83_boot_plan w = sn65dsi83_boot_plan_for(true, false);
+	struct sn65dsi83_boot_plan c = sn65dsi83_boot_plan_for(false, false);
+
+	zassert_true(w.toggle_en && w.touch_bus);
+	zassert_false(w.clear_recipe || w.publish_recipe);
+	zassert_equal(memcmp(&w, &c, sizeof(w)), 0);
+}

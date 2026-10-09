@@ -82,6 +82,42 @@ int main(void)
 	cold(ALP_I2C_HANDOVER_CLEAN & ~1u, 1u, 2u);
 	assert(alp_i2c_handover_try_acquire(&w) == ALP_I2C_HANDOVER_NOT_YET);
 
+	/* WARM boot of the releasing core alone: the record reads "taken" (published, then consumed by
+	 * the acquiring core) and the acquiring core's liveness word moves. */
+	alp_i2c_handover_reset(&w);
+	alp_i2c_handover_publish(&w, 0x7777u, 0);
+	assert(alp_i2c_handover_try_acquire(&w) == ALP_I2C_HANDOVER_TAKEN);
+	assert(alp_i2c_handover_taken(&w));
+	assert(alp_i2c_handover_is_warm(&w, 100u, 101u));
+	assert(alp_i2c_handover_is_warm(&w, 0xFFFFFFFFu, 0u)); /* a wrapping counter still moved */
+	assert(!alp_i2c_handover_is_warm(&w, 100u, 100u));     /* a stopped acquiring core: cold path */
+
+	/* Cold SRAM must never read as warm, whatever it holds. Zero fill: nonce 0 is not a release. */
+	cold(0, 0, 0);
+	assert(!alp_i2c_handover_taken(&w) && !alp_i2c_handover_is_warm(&w, 1u, 2u));
+	/* Any word-fill pattern: either state != 0, or (state 0 patterns) nonce == consumed == fill. */
+	static const uint32_t fills[] = { 0xFFFFFFFFu, 0xA5A5A5A5u, 0x5A5A5A5Au, 0xDEADBEEFu,
+		                          0xCCCCCCCCu, 0x55555555u, 0xAAAAAAAAu, 0x12345678u };
+
+	for (unsigned i = 0; i < sizeof(fills) / sizeof(fills[0]); i++) {
+		cold(fills[i], fills[i], fills[i]);
+		assert(!alp_i2c_handover_taken(&w));
+		assert(!alp_i2c_handover_is_warm(&w, 1u, 2u));
+	}
+	/* A release not yet taken is not a taken one (the HP has not run): nonce differs. */
+	cold(0, 0x1234u, 0x1111u);
+	assert(!alp_i2c_handover_taken(&w));
+	/* A pending CLEAN / DIRTY release is never "taken" even with equal nonce words. */
+	cold(ALP_I2C_HANDOVER_CLEAN, 5u, 5u);
+	assert(!alp_i2c_handover_taken(&w));
+	cold(ALP_I2C_HANDOVER_DIRTY, 5u, 5u);
+	assert(!alp_i2c_handover_taken(&w));
+	/* Garbage that happens to look taken (state 0, nonce == consumed != 0) still needs a moving
+	 * liveness word: static SRAM never provides one. */
+	cold(0, 0xDEADBEEFu, 0xDEADBEEFu);
+	assert(alp_i2c_handover_taken(&w));
+	assert(!alp_i2c_handover_is_warm(&w, 0xDEADBEEFu, 0xDEADBEEFu));
+
 	puts("i2c handover protocol ok");
 	return 0;
 }

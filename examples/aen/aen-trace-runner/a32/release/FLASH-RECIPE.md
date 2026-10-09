@@ -245,8 +245,14 @@ line reads `I2C2 leased by the HP and returned within one frame: back on the HE`
 3. Sound plays beside the camera: the pose slot's `hp_state` stays 0, the HP debug beacon's
    heartbeat (`0x0237FCAC`) keeps its frame rate, `hp_i2s_fu` stays 0 for 60 s.
 4. Reset the HP alone: its `PRE_KERNEL_1` forgets the lease, the HE (idle, it owns the bus)
-   sees the new `WANT`, offers a new token, and the bring-up runs again. An HE-only reset still
-   reconfigures I2C1 under the running camera exactly as before (`alp,i2c-handover`): reset both.
+   sees the new `WANT`, offers a new token, and the bring-up runs again.
+   Reset the HE alone (SYSRESETREQ on the HE AP, HP and A32 running): the HE sees the handover record
+   taken and the HP heartbeat (`0x0237FCAC`) moving, prints `i2c-handover: warm boot ... not touching it`,
+   and leaves I2C1 (no driver init, no NVIC line), the bridge's EN pin, the recipe (`0x0237FE00`) magic and the
+   counters alone; it re-initialises the DSI host and the CDC200 only. The HP's `sn65dsi83` agent
+   replays the CSRs if the DSI restart cost the bridge its PLL lock (`sn65dsi83: lost config, re-init` on
+   the HP console within ~2 polls of `CONFIG_SN65DSI83_RECOVERY_INTERVAL_MS`), the camera keeps streaming.
+   (Not bench-verified at the time of writing.)
    (An HE reset inside the HP's bring-up is covered by the host tests, not by a bench step.)
 
 ## Preconditions

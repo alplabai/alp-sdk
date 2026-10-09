@@ -13,9 +13,10 @@
  * driver, no cross-core race.
  *
  * Silent until a recipe has been published once (magic set): an image whose display is not behind
- * a bridge never publishes one.  The first valid recipe is latched in this core's RAM: the display
- * core clears the magic on every warm reboot and may fail to publish again, and that must not turn
- * the watch off.  Writes only after the bridge's ID registers read back
+ * a bridge never publishes one.  The first valid recipe is latched in this core's RAM, so a display
+ * core that clears the magic (a cold boot) or never publishes again cannot turn the watch off.  A
+ * warm reboot of the display core alone leaves the bus, the bridge's EN pin, the magic and the
+ * counters alone (its host restart may cost the bridge its PLL lock: the next poll replays).  Writes only after the bridge's ID registers read back
  * (sn65dsi83_health_poll()), so a stale recipe from a previous boot with another panel
  * cannot write a CSR bank into anything else on the bus.  The report is printk: the
  * images this runs in turn the logging subsystem off.
@@ -25,6 +26,7 @@
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/i2c.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/barrier.h>
 #include <zephyr/sys/printk.h>
@@ -43,6 +45,8 @@ struct sn65dsi83_agent_data {
 	struct k_work_delayable health_work;
 	struct sn65dsi83_stats  stats;
 	struct sn65dsi83_latch  latch;
+	uint32_t                io_fails;       /* consecutive polls whose I2C access failed */
+	bool                    wedge_reported; /* the bus-recovery notice is printed once */
 };
 
 /* Its own low-priority queue: a replay sleeps ~40 ms and must not hold up the system work queue
@@ -50,6 +54,28 @@ struct sn65dsi83_agent_data {
 #define SN65_AGENT_STACK_SIZE 2048
 K_THREAD_STACK_DEFINE(sn65dsi83_agent_stack, SN65_AGENT_STACK_SIZE);
 static struct k_work_q sn65dsi83_agent_q;
+
+/*
+ * The controller keeps failing: take the bus lock through the driver's own recovery entry point and
+ * re-apply the controller configuration.  What the pinned Zephyr (v4.4.1, drivers/i2c/i2c_dw.c)
+ * provides: i2c_recover_bus() -> i2c_dw_recovery_bus(), which runs a board-registered recovery
+ * callback if there is one (none on this board: it then only clears the driver's stuck-line state
+ * under the bus lock), and i2c_configure() -> i2c_dw_runtime_configure(), which recomputes the
+ * timing counts and clears pending controller interrupts.  The transfer path itself already aborts
+ * a timed-out transfer (IC_ENABLE.ABORT) and the next transfer re-enables the controller, so a
+ * controller that merely stalled recovers there; neither call resets the block.  Reported once.
+ */
+static void sn65dsi83_agent_recover_bus(const struct device *bus, int err, bool *reported)
+{
+	if (!*reported) {
+		*reported = true;
+		printk("sn65dsi83: I2C failing (%d) on %u polls in a row -- recovering the bus\n",
+		       err,
+		       SN65_IO_FAIL_POLLS);
+	}
+	(void)i2c_recover_bus(bus);
+	(void)i2c_configure(bus, I2C_MODE_CONTROLLER | I2C_SPEED_SET(I2C_SPEED_STANDARD));
+}
 
 static void sn65dsi83_agent_work(struct k_work *work)
 {
@@ -65,10 +91,16 @@ static void sn65dsi83_agent_work(struct k_work *work)
 	(void)sn65dsi83_recipe_latch(r, &data->latch);
 
 	if (data->latch.n > 0U) {
-		if (sn65dsi83_health_poll(
-		        &config->i2c, data->latch.csr, data->latch.n, &data->stats, &rep, k_uptime_get()) ==
-		    0) {
+		/* An I2C error or timeout is a transient (the display core restarting its DSI host, a
+		 * camera transfer in flight): retry at the next interval, never block on it. */
+		int io = sn65dsi83_health_poll(
+		    &config->i2c, data->latch.csr, data->latch.n, &data->stats, &rep, k_uptime_get());
+
+		if (io == 0) {
 			sn65dsi83_report_print(&rep, &data->stats);
+		}
+		if (sn65dsi83_io_fail_step(&data->io_fails, io)) {
+			sn65dsi83_agent_recover_bus(config->i2c.bus, io, &data->wedge_reported);
 		}
 		/* The display core reads these through sn65dsi83_recovery_count(). */
 		r->recoveries     = data->stats.recoveries;

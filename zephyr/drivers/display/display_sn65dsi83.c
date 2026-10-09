@@ -98,6 +98,14 @@
  * dsi_dw_attach() only ever ORs the host's flags onto whatever the
  * peripheral already set -- it never clears one.
  *
+ * WARM BOOT (this core alone reset while the core that owns the bus runs; needs the
+ * alp,i2c-handover alive-address, see sn65dsi83_boot_plan_for()): the sequence above is NOT
+ * run.  EN stays high (low would reset a bridge the owner is watching), the I2C controller
+ * is neither initialised nor used (the owner may be mid-transfer), the recipe magic and the
+ * owner's counters are kept and the recipe is re-published unchanged.  Steps 2-3 still run:
+ * the DSI host and the CDC200 need them.  Restarting the host's clock lane can cost the
+ * bridge its PLL lock; the bus owner's recovery agent notices and replays the CSR table.
+ *
  * BLANKING IS NOT SUPPORTED: an app must not call display_blanking_on() on
  * the CDC200 behind this bridge (the first blanking_off(), which starts
  * video, is the supported use).
@@ -129,9 +137,17 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/barrier.h>
+#include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
 
 #include "sn65dsi83_recovery.h"
+
+#ifdef CONFIG_ALIF_I2C_HANDOVER
+#include "../../soc-bridge/alif/i2c_handover.h"
+#define SN65_BOOT_IS_WARM() alp_i2c_handover_warm_boot()
+#else
+#define SN65_BOOT_IS_WARM() false
+#endif
 
 LOG_MODULE_REGISTER(sn65dsi83, CONFIG_DISPLAY_LOG_LEVEL);
 
@@ -490,7 +506,8 @@ static void sn65dsi83_health_work(struct k_work *work)
 }
 
 /* Called as soon as the bridge has answered its ID check, BEFORE the CSR bank is written: a
- * boot init that then fails half-way is recoverable by the same replay. */
+ * boot init that then fails half-way is recoverable by the same replay.  A warm boot calls it
+ * without the check: the recipe is a compile-time constant, publishing it again changes nothing. */
 static void sn65dsi83_arm_recovery(const struct device *dev)
 {
 	const struct sn65dsi83_config *config = dev->config;
@@ -525,9 +542,13 @@ static int sn65dsi83_init(const struct device *dev)
 {
 	const struct sn65dsi83_config *config = dev->config;
 	struct mipi_dsi_device         mdev   = { 0 };
-	int                            ret;
+	const struct sn65dsi83_boot_plan plan =
+	    sn65dsi83_boot_plan_for(SN65_BOOT_IS_WARM(), config->recipe != NULL);
+	int ret;
 
-	if (!device_is_ready(config->i2c.bus)) {
+	/* A warm boot never looks at the bus: it is not initialised on this core and belongs to
+	 * the core that took it (alp,i2c-handover). */
+	if (plan.touch_bus && !device_is_ready(config->i2c.bus)) {
 		LOG_ERR("I2C bus not ready");
 		return -ENODEV;
 	}
@@ -540,7 +561,7 @@ static int sn65dsi83_init(const struct device *dev)
 		return -ENODEV;
 	}
 
-	if (config->recipe != NULL) {
+	if (plan.clear_recipe) {
 		/* A recipe and counters left in SRAM by a previous boot are not ours. */
 		config->recipe->magic          = 0U;
 		config->recipe->recoveries     = 0U;
@@ -549,13 +570,23 @@ static int sn65dsi83_init(const struct device *dev)
 		barrier_dmem_fence_full();
 	}
 
-	/* Step 1: EN low for >= 10 ms (datasheet init seq 3). */
-	ret = gpio_pin_configure_dt(&config->enable_gpio, GPIO_OUTPUT_INACTIVE);
-	if (ret != 0) {
-		LOG_ERR("EN GPIO configure failed (%d)", ret);
-		return ret;
+	if (plan.toggle_en) {
+		/* Step 1: EN low for >= 10 ms (datasheet init seq 3). */
+		ret = gpio_pin_configure_dt(&config->enable_gpio, GPIO_OUTPUT_INACTIVE);
+		if (ret != 0) {
+			LOG_ERR("EN GPIO configure failed (%d)", ret);
+			return ret;
+		}
+		k_msleep(10);
+	} else {
+		/* Warm boot: EN stays high (the bridge keeps its configuration); the pin is only
+		 * claimed as an output at its current level. */
+		ret = gpio_pin_configure_dt(&config->enable_gpio, GPIO_OUTPUT_ACTIVE);
+		if (ret != 0) {
+			LOG_ERR("EN GPIO configure failed (%d)", ret);
+			return ret;
+		}
 	}
-	k_msleep(10);
 
 	/* Step 2: attach to the DSI host (configures it, leaves the clock lane LP). */
 	mdev.data_lanes = SN65_DATA_LANES;
@@ -591,6 +622,14 @@ static int sn65dsi83_init(const struct device *dev)
 	if (ret != 0) {
 		LOG_ERR("dsi_dw_set_mode(VIDEO) failed (%d)", ret);
 		return ret;
+	}
+
+	if (!plan.touch_bus) {
+		/* Warm boot: the bus owner replays the CSRs if the host restart cost the bridge its
+		 * PLL lock; this core only keeps the owner's recipe valid. */
+		sn65dsi83_arm_recovery(dev);
+		printk("sn65dsi83: warm boot, bridge and I2C bus left to the bus owner\n");
+		return 0;
 	}
 
 	/* Step 4: EN high, wait 10 ms (datasheet init seq 4). */

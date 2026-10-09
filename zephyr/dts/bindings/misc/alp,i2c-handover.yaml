@@ -30,7 +30,9 @@ description: |
   harmless where the release side keeps the bus disabled, a hazard with a bridge
   on the bus. An image restarted alone after it took the bus waits for a release
   that is not coming, and a release-side reset while the acquire side is running
-  reconfigures the bus under it: reset BOTH cores together, release side first.
+  reconfigures the bus under it: reset BOTH cores together, release side first --
+  unless the release node has an alive-address, which makes a release-side-only
+  reset safe (the release side then leaves the controller alone).
 
 compatible: "alp,i2c-handover"
 
@@ -57,3 +59,17 @@ properties:
     description: |
       Address of the three 32-bit flag words (state, nonce, consumed: 12 bytes),
       in SRAM both cores see and that survives a warm reset.
+
+  alive-address:
+    type: int
+    description: |
+      `release` only. Address of a 32-bit liveness word the acquiring core keeps
+      advancing while it runs (a heartbeat counter), in the same always-on SRAM.
+      Setting it turns on warm-boot detection: a release-side reset while the
+      acquiring core is running and owns the bus is recognised (record "taken" and
+      the word moving, alp_i2c_handover_is_warm()) and then touches NOTHING of the
+      controller -- no driver init, no NVIC line, no state clear, no release. Needs
+      `zephyr,deferred-init` on the bus node (asserted at build time): the glue then
+      initialises the controller itself, on a cold boot only. The word may advance
+      as slowly as the acquiring core's main loop, up to 300 ms is waited for it.
+      Unset: every boot is treated as cold (reset both cores together).

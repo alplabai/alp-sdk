@@ -18,7 +18,9 @@
  * pad-level bus recovery on one core in the middle of the other's transaction
  * corrupts it. So the handover is explicit:
  *
- *   release: mask this core's NVIC line for the controller, clear IC_ENABLE
+ *   release: first thing at boot (POST_KERNEL 49, just ahead of the I2C drivers): decide
+ *            whether this is a WARM boot (see below) and, if not, clear the state word.
+ *            Then, at the end of APPLICATION init, mask this core's NVIC line for the controller, clear IC_ENABLE
  *            (0x6C), poll IC_ENABLE_STATUS (0x9C) until idle, then publish. Runs
  *            at the end of APPLICATION init, after the drivers that used the
  *            bus (the SN65DSI83 display bridge initialises at
@@ -26,11 +28,21 @@
  *            idle is still released, as DIRTY, with a warning: the other core
  *            then runs its own bus recovery instead of waiting forever. A bus
  *            node that is DISABLED in this image has nothing to stop and is
- *            released at once. The word is also cleared first thing at boot.
+ *            released at once.
  *   acquire: POST_KERNEL priority 0 -- before any driver (the i2c_dw instance is
  *            priority 40) -- waits for the release, reports on the console every
  *            20 s while it is missing, never touches the bus meanwhile, and
  *            consumes the release once it has it.
+ *
+ * WARM BOOT (release side, optional alive-address): this core alone was reset while the
+ * acquiring core runs and owns the bus. The record reads "taken" and the acquiring core's
+ * liveness word moves (alp_i2c_handover_is_warm()), so the bus is NOT ours: the controller
+ * is never initialised (the bus node carries zephyr,deferred-init; a cold boot
+ * device_init()s it from here, a warm one never does), its NVIC line stays masked, the
+ * state word is left alone and nothing is released. Initialising it would reset the
+ * controller under the other core's transfer and leave it wedged (bench, HE-only reset
+ * under a running camera). A drivers that would have used the bus asks
+ * alp_i2c_handover_warm_boot().
  *
  * An acquire image restarted alone, after it took the release, waits for one
  * that will not come again: restart both, or write the clean magic to state with
@@ -56,9 +68,22 @@
 #define DW_IC_ENABLE_STATUS 0x9Cu
 #define DW_IC_EN_BIT        BIT(0)
 
+#define I2C_HANDOVER_BOOT_PRIO    49 /* ahead of CONFIG_I2C_INIT_PRIORITY (50) */
 #define I2C_HANDOVER_RELEASE_PRIO 99 /* last of APPLICATION: after every bus user's init */
 #define I2C_HANDOVER_WAIT_STEP_MS 5
 #define I2C_HANDOVER_REPORT_MS    20000
+#define I2C_HANDOVER_ALIVE_STEP_US 2000 /* liveness sampling step */
+/* The acquiring core's liveness word moves once per main-loop pass, as slowly as every 200 ms
+ * (the Trace Runner's HP camera-less loop, hp_vision/src/main.c): wait up to this long for it. Only
+ * paid when the record already reads "taken", so a cold power-up with clean SRAM pays nothing. */
+#define I2C_HANDOVER_ALIVE_WINDOW_US 300000
+
+static bool i2c_handover_warm;
+
+bool alp_i2c_handover_warm_boot(void)
+{
+	return i2c_handover_warm;
+}
 
 #define HANDOVER_WORDS(inst) ((alp_i2c_handover_t *)(uintptr_t)DT_INST_PROP(inst, flag_address))
 
@@ -71,6 +96,23 @@ static bool __maybe_unused i2c_handover_stop(uintptr_t base, unsigned int irq)
 		k_busy_wait(100);
 	}
 	return !(sys_read32(base + DW_IC_ENABLE_STATUS) & DW_IC_EN_BIT);
+}
+
+/* Release side, boot: warm (see the file comment) or cold. `alive` is the other core's liveness
+ * word, NULL when the node has none (always cold). */
+static bool __maybe_unused i2c_handover_sample_warm(alp_i2c_handover_t *w, const volatile uint32_t *alive)
+{
+	uint32_t a, b;
+
+	if (alive == NULL || !alp_i2c_handover_taken(w)) {
+		return false;
+	}
+	a = b = *alive;
+	for (int t = 0; t < I2C_HANDOVER_ALIVE_WINDOW_US && b == a; t += I2C_HANDOVER_ALIVE_STEP_US) {
+		k_busy_wait(I2C_HANDOVER_ALIVE_STEP_US);
+		b = *alive;
+	}
+	return alp_i2c_handover_is_warm(w, a, b);
 }
 
 static void __maybe_unused i2c_handover_release(alp_i2c_handover_t *w, bool idle)
@@ -103,22 +145,61 @@ static void __maybe_unused i2c_handover_acquire(alp_i2c_handover_t *w)
 	           : "i2c-handover: bus acquired DIRTY -- recover it before use\n");
 }
 
+#define HANDOVER_ALIVE(inst) \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, alive_address), \
+	            ((const volatile uint32_t *)(uintptr_t)DT_INST_PROP(inst, alive_address)), \
+	            (NULL))
+
+/* The bus node is initialised by hand on a cold boot, never on a warm one. */
+#define HANDOVER_BUS_DEFERRED(inst) DT_PROP_OR(DT_INST_PHANDLE(inst, bus), zephyr_deferred_init, 0)
+
+/* Cold boot: bring the deferred bus up by hand (a bus that is not deferred was already
+ * initialised by its own driver, nothing to do here). */
+#define HANDOVER_COLD_BUS_INIT(inst) \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_INST_PHANDLE(inst, bus), okay), \
+	            (if (HANDOVER_BUS_DEFERRED(inst)) { \
+		             int r = device_init(DEVICE_DT_GET(DT_INST_PHANDLE(inst, bus))); \
+\
+		             if (r != 0) { \
+			             printk("i2c-handover: bus init failed (%d)\n", r); \
+		             } \
+	             }), \
+	            ())
+
 #define HANDOVER_RELEASE(inst) \
 	BUILD_ASSERT(DT_INST_NODE_HAS_PROP(inst, bus), "role release needs a bus phandle"); \
 	BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_INST_PHANDLE(inst, bus), snps_designware_i2c), \
 	             "bus must be a snps,designware-i2c controller"); \
 	BUILD_ASSERT(CONFIG_APPLICATION_INIT_PRIORITY < I2C_HANDOVER_RELEASE_PRIO, \
 	             "the release must run after the application-priority drivers that use the bus"); \
-	static int i2c_handover_clear_##inst(void) \
+	BUILD_ASSERT(!DT_INST_NODE_HAS_PROP(inst, alive_address) || HANDOVER_BUS_DEFERRED(inst), \
+	             "alive-address (warm-boot detection) needs the bus node to carry " \
+	             "zephyr,deferred-init, or a warm boot would initialise the shared controller"); \
+	COND_CODE_1(HANDOVER_BUS_DEFERRED(inst), \
+	            (BUILD_ASSERT(CONFIG_I2C_INIT_PRIORITY >= I2C_HANDOVER_BOOT_PRIO, \
+	                          "the boot-time sample must run before the I2C drivers' init " \
+	                          "priority");), \
+	            ()) \
+	static int i2c_handover_boot_##inst(void) \
 	{ \
+		i2c_handover_warm = i2c_handover_sample_warm(HANDOVER_WORDS(inst), HANDOVER_ALIVE(inst)); \
+		if (i2c_handover_warm) { \
+			printk("i2c-handover: warm boot, the other core owns the bus -- not touching " \
+			       "it\n"); \
+			return 0; \
+		} \
 		alp_i2c_handover_reset(HANDOVER_WORDS(inst)); \
+		HANDOVER_COLD_BUS_INIT(inst) \
 		return 0; \
 	} \
-	SYS_INIT(i2c_handover_clear_##inst, PRE_KERNEL_1, 0); \
+	SYS_INIT(i2c_handover_boot_##inst, POST_KERNEL, I2C_HANDOVER_BOOT_PRIO); \
 	static int i2c_handover_release_##inst(void) \
 	{ \
 		bool idle = true; \
 \
+		if (i2c_handover_warm) { \
+			return 0; \
+		} \
 		COND_CODE_1(DT_NODE_HAS_STATUS(DT_INST_PHANDLE(inst, bus), okay), \
 		            (idle = i2c_handover_stop(DT_REG_ADDR(DT_INST_PHANDLE(inst, bus)), \
 		                                      DT_IRQN(DT_INST_PHANDLE(inst, bus)));), \

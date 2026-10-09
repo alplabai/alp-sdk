@@ -28,6 +28,7 @@
 
 #include "ipc/tr_memmap.h" /* TR_MEM_PSLOT */
 #include "ipc/tr_cam_view.h"
+#include "ipc/tr_hp_dbg.h" /* hp_dbg_t.heartbeat: the handover's alive-address */
 #include "ipc/tr_pslot.h"
 #include "vision/cam_rot.h"
 
@@ -35,6 +36,10 @@
  * flag word hp_vision waits on (tr_memmap.h). */
 BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), flag_address) == TR_MEM_I2C1_HANDOVER,
              "i2c1_handover flag-address != tr_memmap.h TR_MEM_I2C1_HANDOVER");
+/* ... and the HP's heartbeat word it uses to tell a warm HE-only reset from a cold power-up. */
+BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), alive_address) ==
+                 TR_MEM_HP_DBG + offsetof(hp_dbg_t, heartbeat),
+             "i2c1_handover alive-address != the HP's hp_dbg_t heartbeat");
 #if DT_HAS_COMPAT_STATUS_OKAY(ti_sn65dsi83)
 /* The bridge's recovery recipe (shield-fit-npu/): the HP's agent reads the same address. */
 BUILD_ASSERT(DT_PROP(DT_COMPAT_GET_ANY_STATUS_OKAY(ti_sn65dsi83), recovery_recipe_address) ==

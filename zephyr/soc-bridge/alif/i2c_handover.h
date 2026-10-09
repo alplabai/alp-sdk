@@ -30,14 +30,24 @@
  * harmless; with a bridge on the bus it needs the two cores to be reset
  * separately, which the rule below forbids.
  *
- * Reset both cores together, and start the releasing core first. An acquiring
- * core that is already past its wait is not told when the releasing core resets
- * and configures the bus again; a restarted acquiring core waits for a release
- * that will not come again.
+ * WARM BOOT of the releasing core alone (the acquiring core keeps running and owns
+ * the bus): the record then reads "taken" -- state 0, nonce nonzero, nonce equal to
+ * consumed -- and the acquiring core's liveness word (the node's alive-address, e.g.
+ * a heartbeat counter) advances. Both are needed: cold SRAM can look "taken" (all
+ * zero apart from the nonce test, or any pattern with nonce == consumed), and only a
+ * running acquiring core moves a counter. A releasing core that detects this must not
+ * touch the controller at all (no driver init, no reset, no NVIC line, no release):
+ * alp_i2c_handover_warm_boot() reports it to the drivers that would have.
+ *
+ * Reset both cores together, and start the releasing core first, whenever the
+ * releasing core has no alive-address. An acquiring core that is already past its
+ * wait is not told when such a releasing core resets and configures the bus again;
+ * a restarted acquiring core waits for a release that will not come again.
  */
 #ifndef ALP_I2C_HANDOVER_H
 #define ALP_I2C_HANDOVER_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #define ALP_I2C_HANDOVER_CLEAN 0x31433249u /* 'I2C1' */
@@ -76,6 +86,27 @@ static inline void alp_i2c_handover_publish(alp_i2c_handover_t *w, uint32_t nonc
 	w->state = dirty ? ALP_I2C_HANDOVER_DIRTY : ALP_I2C_HANDOVER_CLEAN;
 	ALP_I2C_HANDOVER_BARRIER();
 }
+
+/* Releasing core, boot: the acquiring core took the last release (nothing pending, a nonce
+ * that was published and then consumed). Cold SRAM passes this by accident only when
+ * nonce == consumed and nonzero, and never with a state word other than 0. */
+static inline bool alp_i2c_handover_taken(const alp_i2c_handover_t *w)
+{
+	return w->state == 0u && w->nonce != 0u && w->nonce == w->consumed;
+}
+
+/* Releasing core, boot: the acquiring core is running AND had taken the bus. `alive_a`/`alive_b`
+ * are two samples of its liveness word, taken far enough apart for it to have moved. */
+static inline bool alp_i2c_handover_is_warm(const alp_i2c_handover_t *w,
+                                            uint32_t                  alive_a,
+                                            uint32_t                  alive_b)
+{
+	return alp_i2c_handover_taken(w) && alive_a != alive_b;
+}
+
+/* True when this releasing core booted warm (see above); valid from the glue's boot-time sample
+ * on. Always false where the node has no alive-address. */
+bool alp_i2c_handover_warm_boot(void);
 
 /* Acquiring core, polled: NOT_YET, or TAKEN / DIRTIED once it holds the bus (the
  * release is consumed). */

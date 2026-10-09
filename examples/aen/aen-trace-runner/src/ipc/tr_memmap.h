@@ -151,6 +151,15 @@ _Static_assert(TR_MEM_HE_FAULT >= TR_MEM_SN65_RECIPE + TR_MEM_SN65_RECIPE_SIZE,
                "the HE fault record is clear of the bridge recipe");
 _Static_assert(TR_MEM_HE_FAULT + TR_MEM_HE_FAULT_SIZE <= 0x02380000u,
                "the HE fault record sits inside the shared NC page, below the MHU0 window");
+#define TR_MEM_HE_RESET_GUARD \
+	0x0237FFF0u /* HE -> HE (next boot): the loop guard of the last-resort SoC reset (src/ipc/
+                                       * tr_reset_guard.h tr_reset_guard_t, 8 B). Right after TR_MEM_HE_FAULT's end
+                                       * (0x0237FFEC), ends at the page end. */
+#define TR_MEM_HE_RESET_GUARD_SIZE 8u /* sizeof(tr_reset_guard_t), asserted in tr_reset_guard.h */
+_Static_assert(TR_MEM_HE_RESET_GUARD >= TR_MEM_HE_FAULT + TR_MEM_HE_FAULT_SIZE,
+               "the reset guard is clear of the HE fault record");
+_Static_assert(TR_MEM_HE_RESET_GUARD + TR_MEM_HE_RESET_GUARD_SIZE <= 0x02380000u,
+               "the reset guard sits inside the shared NC page, below the MHU0 window");
 /* SRAM1 */
 #define TR_MEM_CAM_POOL \
 	0x02480000u /* HP: OV9281 camera frame pool (design sec 2), 2 x 256,000 B GREY8;
