@@ -18,4 +18,13 @@ config AEN_STOP_LPTIMER_MS
 	help
 	  Variant (iii) sets 5000 (with ALP_SDK_POWER_ALIF_SE_BENCH_LPTIMER_MAX_MS above it).
 
+config AEN_STOP_RTC_MS
+	int "RV-3028 countdown cycle length (ms)"
+	default 3000
+	help
+	  Must stay at or above the backend's LPTIMER ceiling (1000 ms, or the bench option
+	  ALP_SDK_POWER_ALIF_SE_BENCH_LPTIMER_MAX_MS) so the countdown is served by the
+	  RV-3028 and not the LPTIMER.  Variant (iii) raises the ceiling and moves this to
+	  11000 so that variant still changes ONE thing: the LPTIMER interval.
+
 source "Kconfig.zephyr"

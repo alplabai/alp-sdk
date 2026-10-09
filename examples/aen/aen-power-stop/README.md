@@ -50,6 +50,11 @@ counter lives in SRAM that a reset keeps and a power cycle loses.
 A refused sleep prints `alif_se_power: refuse step=<n> reason=<...> rc=<raw>` (and
 `som_power: ...` for a pad or domain) before the `request FAIL` line.
 
+> **No J-Link connect-under-reset and no `tan flash --readback` during the sleep window.**
+> Either one asserts NSRST, which resets the module mid-sleep and looks like a failed wake
+> (it is reported as an aborted sleep, not a wake, but the cycle is lost). Attach only
+> before the first cycle or after the last one.
+
 ## Bench variants (#2784 addendum 6)
 
 One variable each, selected with a config fragment on top of `prj.conf`
@@ -59,7 +64,7 @@ One variable each, selected with a config fragment on top of `prj.conf`
 |---|---|---|---|
 | (i) default, instrumented | `i-default.conf` | nothing | the baseline: `diag pre` / `diag boot` / `se run` / `se off` |
 | (ii) RV-3028 first | `ii-rtc-first.conf` | cycle order: countdown, LPTIMER, alarm | if the countdown cycle wakes and the LPTIMER one does not, the INT path is sound and the LPTIMER path is the suspect |
-| (iii) LPTIMER 5 s | `iii-lptimer-5s.conf` | LPTIMER interval 5000 ms (backend bench option raises the LPTIMER ceiling) | whether a longer interval changes the outcome (a race with the SE calls, or the clock) |
+| (iii) LPTIMER 5 s | `iii-lptimer-5s.conf` | LPTIMER interval 5000 ms (the backend bench option raises the LPTIMER ceiling to 10 s; the RV-3028 countdown cycle moves to 11 s so it stays on the RV-3028) | whether a longer interval changes the outcome (a race with the SE calls, or the clock) |
 | (iv) LFXO | `iv-lfxo.conf` | OFF profile `aon_clk_src` = LFXO (cap 63) | the vendor sample's choice; compare the wake and `se off aon_clk` |
 | (v) VTOR self | `v-vtor-self.conf` | OFF profile `vtor_address` = this image's VTOR | the vendor sample's resume vector; the default keeps the live value |
 | (vi) MRAM+SERAM | `vi-mram-seram.conf` | OFF profile `memory_blocks` also MRAM \| SERAM | the vendor sample's MRAM-boot profile |

@@ -79,7 +79,9 @@
 #include <zephyr/sys/sys_io.h>
 #include <zephyr/sys/util.h>
 
-#include <se_service.h> /* get_run_cfg / get_off_cfg, read-only, for the dump below */
+/* Deliberate for a bench app: the SE profile dump below calls hal_alif's read-only
+ * se_service_get_run_cfg() / get_off_cfg() directly.  Application code uses <alp/power.h>. */
+#include <se_service.h>
 
 #include <alp/chips/rv3028c7.h>
 #include <alp/peripheral.h>
@@ -111,7 +113,15 @@ typedef struct {
 	  CONFIG_AEN_STOP_LPTIMER_MS, \
 	  ALP_POWER_WAKE_TIMER, \
 	  false }
-#define RTC_CYCLE { "RV-3028 countdown 3 s", ALP_POWER_WAKE_RTC, 3000u, ALP_POWER_WAKE_RTC, false }
+#define RTC_CYCLE \
+	{ "RV-3028 countdown " STRINGIFY(CONFIG_AEN_STOP_RTC_MS) " ms", \
+	  ALP_POWER_WAKE_RTC, \
+	  CONFIG_AEN_STOP_RTC_MS, \
+	  ALP_POWER_WAKE_RTC, \
+	  false }
+
+/* The countdown is the RV-3028's only if the backend does not route it to the LPTIMER. */
+BUILD_ASSERT(CONFIG_AEN_STOP_RTC_MS >= 1000, "the countdown cycle must be at least 1 s")
 #define ALARM_CYCLE { "RV-3028 alarm", ALP_POWER_WAKE_RTC, 0u, ALP_POWER_WAKE_RTC, true }
 
 static const cycle_t cycles[N_CYCLES] = {
@@ -184,7 +194,7 @@ static void print_diag(const char *name, unsigned slot)
 		printk("POWER_STOP: diag %s empty\n", name);
 		return;
 	}
-	printk("POWER_STOP: diag %s seq=%u\n", name, (unsigned)d.seq);
+	printk("POWER_STOP: diag %s seq=%u cycle=%u\n", name, (unsigned)d.seq, (unsigned)d.cycle);
 	for (unsigned i = 0; i < ALP_SOM_PD_DIAG_WORDS; i += 4u) {
 		printk("POWER_STOP: diag %s w[%02u..%02u]=%08x %08x %08x %08x\n",
 		       name,
@@ -383,6 +393,7 @@ int main(void)
 	print_regs();
 	print_stop_mode(); /* baseline on the first boot, the wake witness after one */
 	print_diag("pre", ALP_SOM_PD_DIAG_PRE);
+	alp_som_pd_diag_invalidate(ALP_SOM_PD_DIAG_PRE); /* printed once; never read as stale later */
 	print_diag("boot", ALP_SOM_PD_DIAG_BOOT);
 	print_se_profiles();
 
