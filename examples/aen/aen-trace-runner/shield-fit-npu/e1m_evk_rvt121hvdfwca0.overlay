@@ -11,4 +11,7 @@
  */
 &bridge {
 	recovery-recipe-address = <0x0237FE00>;
+	/* Its bus (&i2c1) is deferred-init (i2c_handover_he.overlay): Zephyr refuses a non-deferred
+	 * device on a deferred bus. The driver starts itself at its usual priority. */
+	zephyr,deferred-init;
 };

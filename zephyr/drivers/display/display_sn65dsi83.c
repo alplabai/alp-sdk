@@ -132,6 +132,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/mipi_dsi.h>
+#include <zephyr/init.h>
 #include <zephyr/drivers/mipi_dsi/dsi_dw.h>
 #include <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>
 #include <zephyr/kernel.h>
@@ -716,3 +717,24 @@ DT_INST_FOREACH_STATUS_OKAY(SN65DSI83_ASSERT_HOST)
 	                      NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(SN65DSI83_INIT)
+
+/*
+ * A bridge on a deferred-init bus must itself be deferred (Zephyr's build-time init-priority check:
+ * "non-deferred device depends on deferred device"), and the bus is deferred so that a warm boot of
+ * this core can leave a controller the other core is using untouched (alp,i2c-handover alive-address).
+ * The driver then starts itself at the priority it would have been initialised at anyway: the bus is
+ * up by then on a cold boot (the handover glue initialises it ahead of this), and a warm boot's
+ * sn65dsi83_init() never opens it.  The priority has to be a literal (SYS_INIT pastes it).
+ */
+#define SN65_START_PRIO 90
+BUILD_ASSERT(CONFIG_APPLICATION_INIT_PRIORITY == SN65_START_PRIO,
+             "display_sn65dsi83.c: SN65_START_PRIO must equal CONFIG_APPLICATION_INIT_PRIORITY");
+
+#define SN65DSI83_DEFERRED_START(inst) \
+	COND_CODE_1(DT_INST_PROP_OR(inst, zephyr_deferred_init, 0), \
+	            (static int sn65dsi83_start_##inst(void) \
+	             { \
+		             return device_init(DEVICE_DT_INST_GET(inst)); \
+	             } SYS_INIT(sn65dsi83_start_##inst, APPLICATION, SN65_START_PRIO);), \
+	            ())
+DT_INST_FOREACH_STATUS_OKAY(SN65DSI83_DEFERRED_START)
