@@ -608,6 +608,9 @@ void tr_raster_band(uint16_t             *fb,
  *   BIN               tr_bin_only(): cycles, -, tris
  *   NOZ_TEX           TR_TRI_NOZ textured spans: cycles, px, spans
  *   NOZ_FILL          TR_TRI_NOZ flat + Gouraud spans: cycles, px, spans
+ *   BAND              the whole tr_raster_band(): cycles (z clear, background,
+ *                     every triangle, the copy-out), px, bands -- what is
+ *                     left after BG + TRI (+ the copy) is not otherwise timed
  */
 enum {
 	TR_PROF_FLAT,
@@ -619,6 +622,7 @@ enum {
 	TR_PROF_BIN,
 	TR_PROF_NOZ_TEX,
 	TR_PROF_NOZ_FILL,
+	TR_PROF_BAND,
 	TR_PROF_N
 };
 typedef struct {
