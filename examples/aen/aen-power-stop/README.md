@@ -39,11 +39,16 @@ ZEPHYR_BASE=<zephyr-base> west build \
   "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
 ```
 
-Flash it to MRAM (Flow D, slot0 `he_slot0` at `0x80010000`). **Detach the J-Link, THEN
-issue the flash-loader nRESET**: while the probe is attached `DHCSR.C_DEBUGEN` stays
-set and the backend refuses to sleep with `ALP_ERR_BUSY`. Read the console on the E1M
-edge UART0 at 115200 8N1. Start from a **cold power cycle**: the counter lives in SRAM
-that a reset keeps and a power cycle loses.
+Flash it to MRAM (Flow D, slot0 `he_slot0` at `0x80010000`). **The J-Link leaves
+`DHCSR.C_DEBUGEN` set after it detaches, and firmware cannot clear it**: the backend
+then refuses to sleep with `ALP_ERR_BUSY`. Clear it from the debugger BEFORE releasing
+the core (`w4 0xE000EDF0 0xA05F0000`), then detach the J-Link, then issue the
+flash-loader nRESET; or power-cycle the module with the probe detached. Read the
+console on the E1M edge UART0 at 115200 8N1. Start from a **cold power cycle**: the
+counter lives in SRAM that a reset keeps and a power cycle loses.
+
+A refused sleep prints `alif_se_power: refuse step=<n> reason=<...> rc=<raw>` (and
+`som_power: ...` for a pad or domain) before the `request FAIL` line.
 
 ## Bench contract
 

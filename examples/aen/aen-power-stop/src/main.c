@@ -44,7 +44,8 @@
  *
  * Each cycle starts with 10 s awake, so a probe or a console can attach before the
  * module goes down.  A probe that is still attached makes the backend refuse the
- * sleep with ALP_ERR_BUSY (the subsystem would not power down): detach it first.
+ * sleep with ALP_ERR_BUSY (the subsystem would not power down), and the probe leaves
+ * DHCSR.C_DEBUGEN set after it detaches: clear it from the debugger first (README).
  *
  *
  * ==== BENCH CONTRACT ================================================

@@ -40,6 +40,8 @@ bool alif_se_hw_dcache_active(void);
 /** PWRMODCTL.CPDLPSTATE core / EPU / RAMS low-power-state requests are all OFF,
  *  the precondition the vendor subsystem-off sequence assumes. */
 bool alif_se_hw_lpstate_off(void);
+/** Raw PWRMODCTL.CPDLPSTATE, for the refusal diagnostic. */
+uint32_t alif_se_hw_lpstate_read(void);
 
 /* ---- LPTIMER wake timer (the `alp,power-wake-timer` chosen node) ------------ */
 

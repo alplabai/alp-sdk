@@ -223,6 +223,11 @@ static bool _pads_applied;
 static alp_status_t pin_assert(const struct gpio_dt_spec *s, bool asserted)
 {
 	if (s->port == NULL || !device_is_ready(s->port)) {
+		/* A pad whose GPIO controller is disabled in the devicetree: the board or the
+		 * app overlay must enable it (&gpio5 / &gpio11 for the backlight and PHY reset). */
+		printk("som_power: pad P?_%u unusable: GPIO controller %s\n",
+		       (unsigned)s->pin,
+		       (s->port == NULL) ? "disabled in the devicetree" : "not ready");
 		return ALP_ERR_NOT_READY;
 	}
 	/* The pads are muxed and pad-configured by the node's pinctrl-0 state, applied
@@ -758,6 +763,7 @@ static void restore_domains(const alp_som_pd_record_t *rec,
 			_state[d] = ALP_SOM_PD_ACTIVE;
 			*restored |= bit;
 		} else {
+			printk("som_power: restore of domain %d failed, status %d\n", (int)d, (int)s);
 			_state[d] = ALP_SOM_PD_RESTORE_FAILED;
 			*failed |= bit;
 		}
@@ -799,6 +805,9 @@ alp_status_t alp_som_power_quiesce(alp_power_mode_t mode, uint32_t *rollback_fai
 		bool rail  = (_policy[d] == ALP_POWER_DOMAIN_POLICY_RAIL_OFF);
 		bool prior = prior_active(d);
 		s          = run_quiesce(d, rail);
+		if (s != ALP_OK) {
+			printk("som_power: quiesce of domain %d failed, status %d\n", (int)d, (int)s);
+		}
 		/* Record the domain even when its quiesce failed: a multi-step action
 		 * (rail-off drives nRESET, then the supply) may have completed its first
 		 * step, and the rollback below must undo that too.  Releasing a pad that

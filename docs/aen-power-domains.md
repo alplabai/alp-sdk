@@ -128,6 +128,12 @@ abandoned if any of it did not stick. All 14 members are compared on the readbac
 (a failure, or a sleep that did not power down) writes the live profile and both
 snapshots back and verifies them.
 
+**Every pad the layer drives needs its GPIO controller enabled in the devicetree**
+(`&gpio5` for the backlight enable, `&gpio11` for the PHY reset, `&lpgpio` for the
+P15_n pads); a disabled controller makes that domain's quiesce fail with
+`ALP_ERR_NOT_READY` and the sleep is refused (bench U8). Every refusal prints
+`alif_se_power: refuse step=<n> reason=<...> rc=<raw>` on the console.
+
 **Refusals**, all before any state is changed: `ALP_ERR_BUSY` when a debugger is
 attached (`DHCSR.C_DEBUGEN`; bench override
 `CONFIG_ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER`) or an armed source is already pending;

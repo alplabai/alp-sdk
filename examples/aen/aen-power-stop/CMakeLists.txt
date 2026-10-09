@@ -6,8 +6,10 @@
 # (a RAM-run image would not come back).
 #
 # Plain prj.conf app (no alp_project.py board.yaml flow); Zephyr applies
-# boards/<fully-qualified-board>.overlay by itself, and there is none here -- the
-# board layer already carries BRD_I2C, the LPGPIO bank and the LPTIMER.  Build with
+# boards/<fully-qualified-board>.overlay by itself; the overlay only enables the GPIO
+# controllers of the pads the power layer drives (GPIO5, GPIO11, LPGPIO) -- BRD_I2C and
+# the LPTIMER come from the board layer, and it has no ITCM retarget (MRAM image).
+# Build with
 #   ZEPHYR_BASE=<zephyr-base> west build \
 #     -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he <this-dir> -- \
 #     "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"

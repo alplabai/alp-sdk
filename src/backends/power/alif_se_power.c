@@ -199,6 +199,15 @@ static alp_status_t se_rc_to_alp(int rc)
 	}
 }
 
+/* Every refusal says which check, at which step, with what raw value: a STOP that
+ * does not start must never be silent (bench U8: ALP_ERR_NOT_READY with no clue). */
+static alp_status_t refuse(int step, const char *reason, int raw, alp_status_t rc)
+{
+	printk(
+	    "alif_se_power: refuse step=%d reason=%s rc=%d (status %d)\n", step, reason, raw, (int)rc);
+	return rc;
+}
+
 static bool rtc_int_usable(void)
 {
 	return alif_se_hw_rtc_int_present();
@@ -373,11 +382,11 @@ plan_wake(const alp_power_backend_state_t *state, uint32_t wake_after_ms, sleep_
 static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
 {
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
-		return ALP_ERR_BUSY;
+		return refuse(2, "lptimer_pending", 1, ALP_ERR_BUSY);
 	}
 	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
 	    alif_se_hw_rtc_int_asserted() > 0) {
-		return ALP_ERR_BUSY;
+		return refuse(2, "rtc_int_asserted", 1, ALP_ERR_BUSY);
 	}
 	return ALP_OK;
 }
@@ -386,14 +395,15 @@ static alp_status_t refuse_if_unfit(void)
 {
 #ifndef CONFIG_ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER
 	if (alif_se_hw_debugger_attached()) {
-		return ALP_ERR_BUSY;
+		return refuse(2, "debugger_attached", 1, ALP_ERR_BUSY);
 	}
 #endif
 	if (alif_se_hw_dcache_active()) {
-		return ALP_ERR_NOSUPPORT;
+		return refuse(2, "dcache_on", 1, ALP_ERR_NOSUPPORT);
 	}
 	if (!alif_se_hw_lpstate_off()) {
-		return ALP_ERR_NOT_READY; /* a core power-state request keeps the subsystem up */
+		/* a core power-state request keeps the subsystem up; raw = PWRMODCTL.CPDLPSTATE */
+		return refuse(2, "lpstate_not_off", (int)alif_se_hw_lpstate_read(), ALP_ERR_NOT_READY);
 	}
 	return ALP_OK;
 }
@@ -727,13 +737,13 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 
 	/* 1. Validate everything first. */
 	if (!retention_valid(&state->retain, &why)) {
-		return why;
+		return refuse(1, "retention_invalid", (int)state->retain.level, why);
 	}
 	plan.memory_blocks = retained_blocks(&state->retain);
 	plan.lfxo          = lfxo_confirmed(); /* fixes the LPTIMER rate used below */
 	s                  = plan_wake(state, wake_after_ms, &plan);
 	if (s != ALP_OK) {
-		return s;
+		return refuse(1, "wake_plan", (int)wake_after_ms, s);
 	}
 
 	/* 2. Refuse what cannot work, before touching anything. */
@@ -747,24 +757,27 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	}
 
 	/* 3. Build the profile from what the SE reports now.  Read-only so far. */
-	s = se_rc_to_alp(se_service_get_off_cfg(&undo.live));
+	int rc = se_service_get_off_cfg(&undo.live);
+
+	s = se_rc_to_alp(rc);
 	if (s != ALP_OK) {
-		return s;
+		return refuse(3, "se_get_off_cfg", rc, s);
 	}
 	s = build_off_profile(&off, &undo.live, &plan);
 	if (s != ALP_OK) {
-		return s;
+		return refuse(3, "live_dcdc_out_of_range", (int)undo.live.dcdc_voltage, s);
 	}
 
 	/* 4. Quiesce the SoM domains; on failure it has already put them back. */
 	s = alp_som_power_quiesce(mode, NULL);
 	if (s != ALP_OK) {
-		return s;
+		return refuse(4, "quiesce", (int)s, s);
 	}
 
 	/* 5. Arm the wake sources and record the cycle. */
 	s = arm(&plan, &armed);
 	if (s != ALP_OK) {
+		(void)refuse(5, "arm_wake_source", (int)s, s);
 		goto unwind;
 	}
 	save_cycle_record(&plan);
@@ -775,21 +788,27 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	undo.ret_ctrl = alif_se_hw_reg_read(ALIF_SE_REG_RET_CTRL);
 	undo.ana_reg1 = alif_se_hw_reg_read(ALIF_SE_REG_ANA_REG1);
 	se_touched    = true;
-	s             = se_rc_to_alp(se_service_set_off_cfg(&off));
+	rc            = se_service_set_off_cfg(&off);
+	s             = se_rc_to_alp(rc);
 	if (s != ALP_OK) {
+		(void)refuse(6, "se_set_off_cfg", rc, s);
 		goto unwind;
 	}
-	s = se_rc_to_alp(se_service_get_off_cfg(&readback));
+	rc = se_service_get_off_cfg(&readback);
+	s  = se_rc_to_alp(rc);
 	if (s != ALP_OK) {
+		(void)refuse(6, "se_get_off_cfg_readback", rc, s);
 		goto unwind;
 	}
 	if (!off_profile_matches(&off, &readback)) {
 		off_profile_log_diff(&off, &readback);
+		(void)refuse(6, "off_profile_mismatch", 0, ALP_ERR_IO);
 		s = ALP_ERR_IO;
 		goto unwind;
 	}
 	s = reassert_retention(&plan);
 	if (s != ALP_OK) {
+		(void)refuse(6, "retention_not_stuck", (int)alif_se_hw_reg_read(ALIF_SE_REG_RET_CTRL), s);
 		goto unwind;
 	}
 
@@ -801,7 +820,7 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 		bool spent = false;
 
 		if (alp_som_power_rtc_flags_pending(&spent) == ALP_OK && spent) {
-			s = ALP_ERR_BUSY;
+			s = refuse(7, "rtc_wake_already_latched", 1, ALP_ERR_BUSY);
 			goto unwind;
 		}
 	}
@@ -810,6 +829,7 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	 * return when the subsystem powers down. */
 	s = alif_se_hw_enter_ewic((plan.hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u);
 	if (s != ALP_OK) {
+		(void)refuse(7, "ewic_entry", (int)s, s);
 		goto unwind;
 	}
 
@@ -826,7 +846,7 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	}
 	/* A fired source is an ordinary early wake (OK).  No source fired: the core stayed
 	 * up for a reason this backend cannot name, which is a failed sleep, not a wake. */
-	return (fired != 0u) ? ALP_OK : ALP_ERR_IO;
+	return (fired != 0u) ? ALP_OK : refuse(7, "stayed_up_no_source", 0, ALP_ERR_IO);
 
 unwind:
 	disarm(&armed);

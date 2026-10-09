@@ -118,6 +118,11 @@ bool alif_se_hw_dcache_active(void)
 	return (SCB->CCR & SCB_CCR_DC_Msk) != 0u;
 }
 
+uint32_t alif_se_hw_lpstate_read(void)
+{
+	return PWRMODCTL->CPDLPSTATE;
+}
+
 bool alif_se_hw_lpstate_off(void)
 {
 	return (PWRMODCTL->CPDLPSTATE & PM_CPDLPSTATE_ALL_OFF) == PM_CPDLPSTATE_ALL_OFF;

@@ -160,6 +160,11 @@ bool alif_se_hw_dcache_active(void)
 	return g_dcache;
 }
 
+uint32_t alif_se_hw_lpstate_read(void)
+{
+	return g_lpstate_off ? 0x333u : 0x300u;
+}
+
 bool alif_se_hw_lpstate_off(void)
 {
 	return g_lpstate_off;
