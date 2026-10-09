@@ -9,7 +9,7 @@ CFLAGS  = -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
           -DTR_FB_B_ADDR=0x02200000u
 # ^ Pinned to the ORIGINAL FB B (lcd_fb, MHU0 window skipped): this payload
 # runs on the stub table (0x026 WB, 0x027 unmapped), so it cannot draw the
-# current FB B at 0x02600000. Pair it with an HE built -DTR_FB_B_ADDR=0x02200000u.
+# current FB B at 0x025EA000. Pair it with an HE built -DTR_FB_B_ADDR=0x02200000u.
 LDFLAGS = -T ../common/payload.ld -nostdlib -nostartfiles -Wl,-Map=colorbar.map -Wl,--no-warn-rwx-segments
 
 .PHONY: all clean

@@ -16,6 +16,7 @@
 #include "../ipc/tr_flip.h"
 #include "../ipc/tr_memmap.h" /* TR_MEM_SRAM1_READY -- HP camera-pool gate, see tr_a32_boot() */
 #include "../ipc/tr_wd.h"
+#include "../render/r3d.h" /* TR_R3D_W: the widest panel the renderer takes */
 #include "a32.h"
 #include "display.h"
 
@@ -217,6 +218,20 @@ static void wd_poll(bool missed)
 			       g_mbox->ifsr,
 			       g_mbox->ifar,
 			       g_mbox->pad3[7]);
+			if (tr_abi_fault_code(g_mbox->pad3[7]) == TR_ABI_FAULT_FW) {
+				printk("a32     : renderer refused fw=%u (a panel width must be a multiple of 16, "
+				       "16..%u)\n",
+				       (unsigned)tr_abi_fault_arg(g_mbox->pad3[6]),
+				       (unsigned)TR_R3D_W);
+			} else if (tr_abi_fault_code(g_mbox->pad3[7]) == TR_ABI_FAULT_ROTATION) {
+				printk("a32     : renderer refused rotation=%u (0, 90 or 270)\n",
+				       (unsigned)tr_abi_fault_arg(g_mbox->pad3[6]));
+			} else if (tr_abi_fault_code(g_mbox->pad3[7]) == TR_ABI_FAULT_VERSION) {
+				printk("a32     : renderer faulted on mailbox version %u (this HE %u)\n",
+				       (unsigned)tr_abi_fault_arg(g_mbox->pad3[6]),
+				       (unsigned)TR_MBOX_VERSION);
+			}
+			g_mbox->pad3[6] = 0u;
 			g_mbox->pad3[7] = 0u; /* said once: a stale record is not repeated */
 		}
 		if (cmd == TR_CTRL_LAUNCH) {

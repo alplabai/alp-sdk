@@ -23,7 +23,7 @@
  * build records per-frame front-end stats instead (pad3 below).
  *
  * Core 1 (renderer_core1): waits for the gate, switches to the renderer
- * table (0x022/0x026/0x027 differ from the stub's), then loops: wait scene_go
+ * table (0x022/0x024/0x025/0x026/0x027 differ from the stub's), then loops: wait scene_go
  * (WFE, event stream on per the stub), build scene part 2, scene_done = seq;
  * sev; wait setup_go, set up its half, dmb ish,
  * setup_done = seq; sev; wait frame_go == seq, claim + render bands with its
@@ -108,11 +108,11 @@
 #define RENDER_MARKER 0x5E4D0003u
 #endif
 #define RENDER_TTB ((volatile uint32_t *)TR_MEM_RENDER_TTB)
-/* SRAM1 MiB 1 spare tail above the core-1 stack (tr_memmap.h: stacks end at
- * 0x025FE000, FB B starts at 0x02600000), WB S=1 in both tables; outside .bss
+/* The page right above the core-1 stack (tr_memmap.h: stacks end at
+ * 0x025E0000, FB B starts at 0x025EA000), WB S=1 in both tables; outside .bss
  * so core 0's zeroing never races core 1's wait. */
-#define RENDER_GATE ((volatile uint32_t *)0x025FE000u)
-_Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == 0x025FE000u,
+#define RENDER_GATE ((volatile uint32_t *)TR_MEM_A32_GATE)
+_Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == TR_MEM_A32_GATE,
                "the gate sits on the core-1 stack top (start.S)");
 #ifndef RENDER_SINGLE_CORE
 #define RENDER_SINGLE_CORE 0
@@ -142,17 +142,19 @@ _Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == 0x025FE000u,
 #define L1_PAGE       0x00000001u /* page-table pointer, domain 0 */
 #define PTE_NC        0x00000073u /* small page, TEX=001 C=B=0 (Normal NC), AP=11, XN */
 #define PTE_NC_X      0x00000072u /* same, XN cleared (bit0): exec, like SEC_NC_X's section */
+#define PTE_WB_S_X    0x0000047Eu /* PTE_WB_S with XN cleared: exec, like SEC_WB_S_X's section */
 #define PTE_WB_S      0x0000047Fu /* small page, TEX=001 C=B=1 (WB-WA), AP=11, S=1, XN */
 /* 0x023 likewise, second table right after: WB pages below the MHU0 window
  * only (scene part 2's DL), the window and everything above fault. */
 #define RENDER_L2_023 ((volatile uint32_t *)0x02402400u)
-/* 0x021 likewise, third table: FB A's second MiB as NC pages (the same
- * Normal NC XN it had as a section), then the DL (TR_MEM_A32_DL) WB-WA S=1. */
-#define RENDER_L2_021 ((volatile uint32_t *)0x02402800u)
+/* 0x025 likewise, third table: the image, stacks, gate and spare as WB-WA S=1 exec pages,
+ * then FB B's head (TR_FB_B..0x025FFFFF) Normal NC XN (FB B shares the MiB with the image). */
+#define RENDER_L2_025 ((volatile uint32_t *)0x02402800u)
 /* 0x024 likewise, fourth table (fix round 10, silicon finding: the camera
  * pool at TR_MEM_CAM_POOL, 0x02480000, is HP-DMA'd GREY8 the video panel
  * reads every frame -- mapped Normal NC like the rest of the old 0x024
- * SECTION, every read was an individual uncached bus transaction, the
+ * SECTION (the stub table still maps it as one NC_X section; the DL at
+ * TR_MEM_A32_DL and the bins are WB here too), every read was an individual uncached bus transaction, the
  * dominant term in the panel's measured ~117 ns/px, ~50x the ~2 ns/px a
  * cached read + NEON copy-out costs). Mailbox/stub/tables (below
  * TR_MEM_CAM_POOL, same NC-exec permission the section had) stay NC: cross-
@@ -247,20 +249,21 @@ void renderer_main(volatile tr_mbox_t *m);
 void renderer_core1(volatile tr_mbox_t *m);
 
 /* Everything not listed faults. Both cores run on this table (core 1
- * switches after the gate): 0x022 and 0x026 differ from the stub table.
- *   0x020-0x021 FB A           Normal NC, XN (the FB is only written); 0x021
- *               through 4 KiB pages: FB A's tail NC, then the frame's DL
- *               0x021C2000..0x021FFFFF Normal WB-WA S=1, XN
+ * switches after the gate): 0x022, 0x024 (DL, bins, camera pool WB), 0x025 (4 KiB
+ * pages, FB B's head NC) and 0x026 differ from the stub table.
+ *   0x020-0x021 FB A slot      Normal NC, XN sections (the FB is only written);
+ *               the slot ends 0x021F4000, the rest of 0x021 is free
  *   0x022       setup + bands + zone textures + zone indices  Normal WB-WA S=1, XN (A32-only, cached RMW)
  *   0x023       scene part-2 DL 0x02300000..0x0237FFFF as WB-WA S=1 4 KiB
  *               pages; 0x02380000.. (the TF-A MHU0 window) faults
  *   0x024       mailbox, stub, tables -- NC, VA == PA, exec (contract), through
- *               4 KiB pages below TR_MEM_CAM_POOL; TR_MEM_CAM_POOL..+SIZE
- *               (0x02480000..0x024FFFFF, the MiB's own upper half) Normal
- *               WB-WA S=1, XN (fix round 10: camera pool cacheable)
- *   0x025       image + .bss (to 0x025C0000), bins, stacks -- WB-WA S=1, exec
- *   0x026       FB B (first MiB)  Normal NC, XN
- *   0x027       FB B tail 0x02700000..0x027C1FFF as NC 4 KiB pages; the rest
+ *               4 KiB pages below TR_MEM_A32_DL (0x02424000); from there the DL,
+ *               bins and the camera pool (TR_MEM_CAM_POOL..+SIZE, fix round 10)
+ *               Normal WB-WA S=1, XN
+ *   0x025       4 KiB pages: image + .bss (to 0x025C0000), stacks, gate, spare --
+ *               WB-WA S=1, exec; from TR_FB_B (0x025EA000) FB B's head, Normal NC, XN
+ *   0x026       FB B (middle MiB)  Normal NC, XN
+ *   0x027       FB B tail 0x02700000..0x027DDFFF as NC 4 KiB pages; the rest
  *               of the MiB (TF-A RW 0x027DE000..) faults */
 void render_build_table(void)
 {
@@ -269,25 +272,25 @@ void render_build_table(void)
 	for (uint32_t i = 0; i < 4096u; i++)
 		t[i] = 0;
 	t[0x020] = 0x02000000u | SEC_NC;
-	for (uint32_t p = 0; p < 256u; p++) {
-		uint32_t va = 0x02100000u + (p << 12);
-
-		RENDER_L2_021[p] = va | (va < TR_MEM_A32_DL ? PTE_NC : PTE_WB_S);
-	}
-	t[0x021] = 0x02402800u | L1_PAGE;
+	t[0x021] = 0x02100000u | SEC_NC;
 	t[0x022] = 0x02200000u | SEC_WB_S;
 	for (uint32_t p = 0; p < 256u; p++) {
 		uint32_t va = 0x02400000u + (p << 12);
 
-		RENDER_L2_024[p] = va | (va < TR_MEM_CAM_POOL ? PTE_NC_X : PTE_WB_S);
+		RENDER_L2_024[p] = va | (va < TR_MEM_A32_DL ? PTE_NC_X : PTE_WB_S);
 	}
 	t[0x024] = 0x02402C00u | L1_PAGE;
-	t[0x025] = 0x02500000u | SEC_WB_S_X;
+	for (uint32_t p = 0; p < 256u; p++) {
+		uint32_t va = 0x02500000u + (p << 12);
+
+		RENDER_L2_025[p] = va < TR_FB_B ? (va | PTE_WB_S_X) : (va | PTE_NC);
+	}
+	t[0x025] = 0x02402800u | L1_PAGE;
 	t[0x026] = 0x02600000u | SEC_NC;
 	for (uint32_t p = 0; p < 256u; p++) {
 		uint32_t va = 0x02700000u + (p << 12);
 
-		RENDER_L2_027[p] = va < TR_FB_B + TR_FB_SIZE ? (va | PTE_NC) : 0u;
+		RENDER_L2_027[p] = va < TR_FB_B + TR_FB_SLOT_SIZE ? (va | PTE_NC) : 0u;
 	}
 	t[0x027] = 0x02402000u | L1_PAGE;
 	for (uint32_t p = 0; p < 256u; p++) {
@@ -324,13 +327,19 @@ _Static_assert(TR_MEM_PSLOT >= TR_MEM_ARING && TR_MEM_HP_DBG >= TR_MEM_ARING &&
                    TR_MEM_CAM_VIEW >= TR_MEM_ARING &&
                    TR_MEM_CAM_VIEW + sizeof(tr_cam_view_t) <= TR_MHU0_WINDOW_LO,
                "tr_pslot_t/hp_dbg_t/tr_cam_view_t must all sit inside the one NC page above");
-_Static_assert(TR_FB_A == 0x02000000u && TR_FB_A + TR_FB_SIZE <= 0x02200000u,
-               "FB A must be SRAM0 MiB 0-1");
-_Static_assert(TR_MEM_A32_DL == TR_FB_A + TR_FB_SIZE && (TR_MEM_A32_DL & 0xFFFu) == 0 &&
-                   TR_MEM_A32_DL >= 0x02100000u,
-               "the DL pages start on the 4 KiB page right after FB A, in MiB 0x021");
-_Static_assert(TR_FB_B == 0x02600000u && TR_FB_B + TR_FB_SIZE <= 0x027DE000u,
-               "FB B must be 0x02600000, below TF-A RW");
+_Static_assert(TR_FB_A == 0x02000000u, "FB A must start SRAM0 MiB 0");
+_Static_assert(TR_FB_A + TR_FB_SLOT_SIZE <= 0x02200000u, "FB A's slot must end in SRAM0 MiB 1");
+_Static_assert((TR_MEM_A32_DL & 0xFFFu) == 0 && TR_MEM_A32_DL >= STUB_STACK1_TOP &&
+                   TR_MEM_A32_DL < TR_MEM_CAM_POOL,
+               "the DL starts on a page after the stub stacks, in the 0x024 MiB's WB-page span");
+_Static_assert(TR_MEM_A32_GATE + 0x1000u <= TR_FB_B && (TR_FB_B & 0xFFFu) == 0u,
+               "FB B must be page aligned and start above the gate page");
+_Static_assert(TR_FB_B == 0x025EA000u && TR_FB_B + TR_FB_SLOT_SIZE <= TR_MEM_TFA_RW,
+               "FB B must be 0x025EA000 and its slot must end at or below TF-A RW");
+_Static_assert(TR_FB_B > TR_MEM_A32_IMG_END && TR_FB_B < 0x02600000u,
+               "FB B's head must be in the 0x025 MiB (the L2_025 split), above the image cap");
+_Static_assert(TR_FB_B + TR_FB_SLOT_SIZE > 0x02700000u && TR_FB_B + TR_FB_SLOT_SIZE <= 0x027E0000u,
+               "FB B's slot must reach into 0x027 (the L2_027 map) and end inside it");
 
 /* Core 1's switch to the renderer table: the start.S sequence core 0 ran. */
 static void core1_use_render_table(void)
@@ -402,6 +411,9 @@ static uint32_t setup_lo, setup_hi; /* core 1's half, written before setup_go */
 static volatile uint32_t band_seq[TR_TOTAL_BANDS]
     __attribute__((aligned(64))); /* seq each band last landed for */
 static uint16_t *frame_fb;        /* written before frame_go */
+/* The band each claim index stands for this frame (render_claim_order()): written by core 0
+ * after the bins and before frame_go, which publishes it to core 1 with them. */
+static uint8_t band_order[TR_TOTAL_BANDS];
 
 /* Claim + render bands (3D, then video) until none are left; each band's
  * pixels are out (dsb) before band_seq says so. */
@@ -415,7 +427,7 @@ static void band_loop(uint32_t core, uint32_t seq, uint16_t *fb)
 		        &band_claim, &v, v + 1u, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
 			continue; /* v reloaded */
 
-		uint32_t b = v & 0xFFu;
+		uint32_t b = band_order[v & 0xFFu];
 
 		if (b < TR_BANDS)
 			render_band(core, (int)b, fb);
@@ -541,13 +553,16 @@ static int join_core1(uint32_t seq)
 }
 
 /* The mailbox ABI is wrong (a stub of another TR_MBOX_VERSION, or a frame whose
- * rotation this renderer cannot produce): record what in pad3[7] -- 0xAB1D in
- * the top half, 1 version / 2 rotation | rotation << 8 below -- and fault.
+ * rotation or width this renderer cannot produce): record what in pad3[7] -- 0xAB1D in
+ * the top half, 1 version / 2 rotation | rotation << 8 / 3 width | fw / 16 << 8 below -- and the
+ * offending value itself in pad3[6] (tr_mbox.h TR_ABI_FAULT_*: fw 721 does not hide behind
+ * 721 / 16 = 45), and fault.
  * The stub records the fault (UNDEF) and parks; there is no fallback drawing
  * of a frame the HE did not ask for. */
-static void __attribute__((noreturn)) abi_fault(volatile tr_mbox_t *m, uint32_t what)
+static void __attribute__((noreturn)) abi_fault(volatile tr_mbox_t *m, uint32_t what, uint32_t arg)
 {
-	m->pad3[7] = 0xAB1D0000u | what;
+	m->pad3[6] = arg & 0xFFFFu;
+	m->pad3[7] = TR_ABI_FAULT_TAG | what;
 	barrier();
 	__builtin_trap();
 }
@@ -578,7 +593,7 @@ void renderer_main(volatile tr_mbox_t *m)
 	             (dual ? 4u : 0u);
 	m->pad3[1] = checks;
 	if (m->version != TR_MBOX_VERSION) {
-		abi_fault(m, 1u);
+		abi_fault(m, TR_ABI_FAULT_VERSION, m->version);
 	}
 	RENDER_STATS[1] = 0;
 	RENDER_STATS[2] = 0;
@@ -630,7 +645,14 @@ void renderer_main(volatile tr_mbox_t *m)
 		int drawn = fb == TR_FB_A || fb == TR_FB_B;
 
 		if (tr_rot_refuse(drawn, in.rotation)) {
-			abi_fault(m, 2u | ((uint32_t)in.rotation & 0xFFu) << 8); /* low byte only: 270 -> 14 */
+			abi_fault(m,
+			          TR_ABI_FAULT_ROTATION | ((uint32_t)in.rotation & 0xFFu) << 8,
+			          in.rotation); /* the code's low byte only: 270 -> 14 */
+		}
+		if (tr_fw_refuse(drawn, in.fw)) {
+			abi_fault(m,
+			          TR_ABI_FAULT_FW | ((uint32_t)in.fw / 16u) << 8,
+			          in.fw); /* fw / 16 in the code: 800 -> 50, 0 -> 0; pad3[6] has fw */
 		}
 		if (t_pub_valid) {
 			uint32_t gap = cntvct_lo() - t_pub;
@@ -689,8 +711,9 @@ void renderer_main(volatile tr_mbox_t *m)
 			}
 			render_bin();
 			render_stats.bin = cntvct_lo() - tb;
-			frame_fb         = (uint16_t *)fb;
-			band_claim       = seq << 8; /* this frame's generation, band 0 */
+			render_claim_order(band_order);
+			frame_fb   = (uint16_t *)fb;
+			band_claim = seq << 8; /* this frame's generation, band 0 */
 			if (dual) {
 				dmb_ish(); /* bins, frame_fb, band_claim before frame_go */
 				frame_go = seq;

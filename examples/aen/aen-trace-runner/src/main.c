@@ -15,6 +15,7 @@
 #include "ipc/tr_mbox.h"  /* TR_BANNER_* -- the banner ids both render modes share */
 #include "platform/display.h"
 #include "platform/imu.h"
+#include "platform/bus2_he.h"
 #include "platform/rail5v_power.h"
 #include "vision/camera_watchdog.h"
 #include "vision/pose.h" /* the presence rule, both input paths */
@@ -26,6 +27,7 @@
 #include <zephyr/sys/barrier.h>
 
 #include "ipc/tr_memmap.h" /* TR_MEM_PSLOT */
+#include "ipc/tr_cam_view.h"
 #include "ipc/tr_pslot.h"
 #include "vision/cam_rot.h"
 
@@ -121,6 +123,40 @@ static void pslot_barrier(void)
 	barrier_dsync_fence_full();
 }
 
+/* Whether the upright view the poses are in is mirrored like a selfie: what
+ * decides which arm is the player's left (vision/pose.c). The truth is the HP's
+ * own report in its camera descriptor (tr_cam_view_t.mirror, the sensor flip bit
+ * read back after every camera open) -- not this build's TR_CAM_MIRROR, which
+ * only says what the two images were BUILT to agree on. Until a valid
+ * descriptor has been read the build's value stands; the last valid read is
+ * kept across a torn one. A disagreement is printed once, loudly. */
+static volatile const tr_cam_view_t *const g_cam_view =
+    (volatile const tr_cam_view_t *)TR_MEM_CAM_VIEW;
+static bool g_mirrored = TR_CAM_MIRROR != 0;
+static bool g_mirror_warned;
+
+static bool hp_mirrored(void)
+{
+	tr_cam_view_t cv;
+
+	if (tr_cam_view_read(g_cam_view, &cv, pslot_barrier)) {
+		g_mirrored = cv.mirror != 0u;
+		if (!g_mirror_warned &&
+		    (g_mirrored != (TR_CAM_MIRROR != 0) || (cv.rotate == 0u) != (TR_CAM_ROTATE == 0))) {
+			g_mirror_warned = true;
+			printk(
+			    "!!!!! HE built for TR_CAM_MIRROR=%d TR_CAM_ROTATE=%d but the HP reports mirror=%u "
+			    "rotate=%u -- using the HP's mirror for the arm controls; rebuild the HE to "
+			    "match\n",
+			    TR_CAM_MIRROR,
+			    TR_CAM_ROTATE,
+			    (unsigned)cv.mirror,
+			    (unsigned)cv.rotate);
+		}
+	}
+	return g_mirrored;
+}
+
 /* Last successfully accepted publish -- capture_box() below must NEVER read
  * its own stack-local tr_pslot_read() `out` on a failed read (about every
  * other tick: the HE ticks at TICK_MS while the HP publishes on its own,
@@ -132,11 +168,10 @@ static void pslot_barrier(void)
 static tr_pslot_t g_pslot_last;
 
 /* No local camera object on this core to ask (platform/camera.h is not
- * linked into a TR_INPUT_NPU build) -- track.c's calibration and lane-band
- * geometry still need the frame's dimensions: the HP's fixed OV9281 mode
- * turned UPRIGHT (src/vision/cam_rot.h -- 400x640 with the sensor on its
- * side), the frame the pose keypoints come in, so lanes (torso x) and
- * jump/duck (head/shoulder y) read upright coordinates. Kept as same-named
+ * linked into a TR_INPUT_NPU build) -- track.c's duck (and its TR_CAM_FLIP_Y
+ * mirror) still needs the frame's height: the HP's fixed OV9281 mode turned
+ * UPRIGHT (src/vision/cam_rot.h -- 400x640 with the sensor on its side,
+ * 640x400 when it is not), the frame the pose keypoints come in. Kept as same-named
  * functions rather than replacing every call site below, so the
  * mode-selection/calibration code reads identically on both paths. */
 static inline int16_t tr_camera_width(void)
@@ -235,10 +270,16 @@ static void ui_present(const tr_game_t *g, bool attract_active, bool paused)
 {
 	tr_frame_in_t in;
 
+	/* Every presenting loop (the crash sequence, the high-score entry, the fallback banner) keeps
+	 * the HP's I2C2 lease moving, not only main's frame loop: an HE that stopped ticking would
+	 * neither offer the bus nor take it back (platform/bus2_he.h). */
+	tr_bus2_he_frame();
+
 	tr_frame_in_from_game(&in, g, g_banner, attract_active, paused);
 	tr_frame_in_p16(&in, tr_tilt.character, &g_react, g_lobby.standing, g_lobby.idle_us);
 	in.track_h  = (int16_t)tr_display_height();
 	in.rotation = tr_display_rotation(); /* the A32 turns the frame by it */
+	in.fw       = tr_display_width();    /* the panel's width: the render is cropped to it */
 	in.phase    = (uint16_t)g_phase_q16;
 	in.pace_q8  = g_pace_q8;
 	if (in.phase != 0u) {
@@ -376,6 +417,7 @@ static void ui_present(const tr_game_t *g, bool attract_active, bool paused)
 	(void)g;
 	(void)attract_active;
 	(void)paused;
+	tr_bus2_he_frame(); /* as the A32 variant above */
 	tr_display_flip();
 }
 
@@ -480,7 +522,7 @@ static tr_box_t capture_box(void)
 
 	/* Tagged with its seq: until the HP publishes again, every tick re-reads
 	 * this same pose, and the tracker must count it once (track.h). */
-	tr_box_t b = tr_pose_box(&g_pslot_last.pose);
+	tr_box_t b = tr_pose_box_mirrored(&g_pslot_last.pose, hp_mirrored());
 
 	b.seq = g_pslot_seq;
 	return b;
@@ -654,6 +696,9 @@ static void enter_high_score(tr_game_t *g, tr_mode_t mode, tr_track_t *track, bo
 	if (rank < 0) {
 		return;
 	}
+	if (track != NULL) {
+		tr_track_resync(track); /* an arm still up from the run must not step the initials */
+	}
 	tr_ini_start(&e, ui_default_name(), rank);
 	if (src == TR_HS_IN_VISION && track == NULL) {
 		src = TR_HS_IN_NONE; /* the camera has been given up on */
@@ -778,6 +823,7 @@ int main(void)
 	 * mode with no input source at all (whole-branch review F4 point 3). */
 	bool imu_ok = (tr_imu_open() == 0);
 	(void)tr_rail5v_open(); /* +5V power HUD line -- non-fatal, see rail5v_power.h */
+	tr_bus2_he_arm();       /* TR_HP_SOUND: only now may the HP be offered I2C2 */
 
 #if TR_INPUT_NPU
 	/* No local camera or detector to open/init: the HP owns both, and
@@ -843,7 +889,7 @@ int main(void)
 		 * "STEP INTO VIEW", the tracker calibrating on them) -- never on a
 		 * box seen at boot (silicon, 4612458: an empty room's flicker
 		 * calibrated the old title screen and started a phantom run). */
-		tr_track_init(&track, tr_camera_width(), tr_camera_height());
+		tr_track_init(&track, tr_camera_height());
 		tr_attract_enter(&attract);
 		printk("step into view...\n");
 	}
@@ -864,7 +910,8 @@ int main(void)
 		int64_t  start  = k_uptime_get();
 		uint64_t t_tick = k_cycle_get_64();
 
-		tr_rail5v_poll(); /* internally paced to ~3 Hz -- see rail5v_power.c */
+		tr_bus2_he_frame(); /* TR_HP_SOUND: offer / take back I2C2 for the HP's amp bring-up */
+		tr_rail5v_poll();   /* internally paced to 10 Hz -- see rail5v_power.c */
 
 		tr_intent_t in          = tr_intent_none();
 		bool        pace_step   = true; /* false on the frames between paced game steps */
@@ -876,7 +923,7 @@ int main(void)
 			in          = tr_track_update(&track, b);
 			player_lost = tr_track_player_lost(&track);
 			if (attract.active && g_present) {
-				tr_track_calibrate(&track, b, tr_camera_width()); /* the join lobby: on them */
+				tr_track_calibrate(&track, b); /* the join lobby: on them */
 			}
 		} else {
 			int16_t tx, ty;
@@ -891,7 +938,7 @@ int main(void)
 				 * ends the lobby at once, a walk-away opens it (P16). */
 				run_start(&g);
 				tr_zone_reset(&g_zone);
-				tr_ctl_reset(&ctl, track_ptr, g.lane);
+				tr_ctl_reset(&ctl, track_ptr);
 				ui_reset();
 				held = tr_intent_none(); /* nothing from before the takeover / walk-away */
 			}
@@ -911,14 +958,14 @@ int main(void)
 			 * the sole authority on the tracker and the run this tick, so
 			 * routing through both would double up its leaving-attract
 			 * resync with tr_ctl_step()'s own leaving-pause one. */
-			if (tr_attract_step(&attract, &track, g_present, g.lane) == TR_ATTRACT_LEFT) {
+			if (tr_attract_step(&attract, &track, g_present) == TR_ATTRACT_LEFT) {
 				/* A real player just took the idle board back over --
 				 * abandon whatever the synthetic run was doing and start
 				 * fresh for them, exactly like any other run-reset (see
 				 * mode.h's tr_ctl_reset() doc). */
 				run_start(&g);
 				tr_zone_reset(&g_zone);
-				tr_ctl_reset(&ctl, track_ptr, g.lane);
+				tr_ctl_reset(&ctl, track_ptr);
 				ui_reset();
 				was_paused = false;
 				run_step   = false; /* this tick is spent on the transition, not a step */
@@ -931,15 +978,15 @@ int main(void)
 				run_step = true;
 			}
 		} else {
-			run_step = tr_ctl_step(&ctl, track_ptr, player_lost, g.lane);
+			run_step = tr_ctl_step(&ctl, track_ptr, player_lost);
 			if (mode == TR_MODE_VISION &&
-			    tr_attract_step(&attract, &track, g_present, g.lane) == TR_ATTRACT_ENTERED) {
+			    tr_attract_step(&attract, &track, g_present) == TR_ATTRACT_ENTERED) {
 				/* Nobody for TR_ATTRACT_ENTER_TICKS: the run ENDS here --
 				 * attract plays demo runs, never the walked-off player's
 				 * (the best still counts). */
 				tr_score_run_end(&g_score, true);
 				run_start(&g);
-				tr_ctl_reset(&ctl, track_ptr, g.lane);
+				tr_ctl_reset(&ctl, track_ptr);
 				ui_reset();
 				run_step = false;
 				held     = tr_intent_none();
@@ -1118,7 +1165,7 @@ int main(void)
 					(void)tr_attract_run_over(&attract, g_present);
 				}
 			}
-			tr_ctl_reset(&ctl, track_ptr, g.lane); /* run-reset resync: see mode.h */
+			tr_ctl_reset(&ctl, track_ptr); /* run-reset resync: see mode.h */
 			ui_reset();
 			was_paused = false;
 			held       = tr_intent_none(); /* nothing carried into the next run */

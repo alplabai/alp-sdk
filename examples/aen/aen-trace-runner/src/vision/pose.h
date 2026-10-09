@@ -72,10 +72,20 @@ typedef struct {
  *   h       : hip-mid y - shoulder-mid y, the torso length; 0 when no hip is
  *             confident (a player close enough that the frame cuts them).
  *   confidence: mean score of the keypoints used.
- * Head, wrists, knees and ankles are never read: a head turn, raised arms or
- * legs out of frame change nothing. Invalid without a confident shoulder.
+ * Head, wrists, knees and ankles are never read for the box: a head turn,
+ * raised arms or legs out of frame change nothing about the torso. The wrists
+ * are read for arm_raise[] only (arms.h): each wrist's height over its own
+ * shoulder, % of the shoulder width, [TR_ARM_LEFT] the PLAYER's left arm (the
+ * mirror question is answered in pose.c). Invalid without a confident
+ * shoulder.
  */
 tr_box_t tr_pose_box(const tr_pose_t *p);
+
+/* tr_pose_box() for a camera whose view is (or is not) mirrored like a
+ * selfie, as the HP reports it (tr_cam_view_t.mirror, the sensor flip bit
+ * read back): decides which arm of the pose is the player's left. The plain
+ * form assumes this build's TR_CAM_MIRROR. */
+tr_box_t tr_pose_box_mirrored(const tr_pose_t *p, bool mirrored);
 
 /*
  * "A player is here" -- the one presence rule the booth flow (main.c:

@@ -27,9 +27,9 @@ pickups. All artwork is original and generated from simple geometry and small sp
 authored for this project. No third-party game content, no reference to any existing
 title, character or franchise.
 
-**The camera is the controller.** The player stands in front of the board and moves their
-body: step left or right to change lane, jump to jump, crouch to duck. This is the primary
-input, not a bonus mechanic. It also settles an ergonomic problem — someone standing in
+**The camera is the controller.** The player stands in front of the board and uses their
+arms: raise the left arm to change lane to the left, the right arm for the right, both arms
+together to jump, and crouch to duck. This is the primary input, not a bonus mechanic. It also settles an ergonomic problem — someone standing in
 front of the camera cannot reach the board to tilt it, so tilt cannot be the main control.
 
 | Input | Role | Availability |
@@ -110,17 +110,17 @@ small record means the worst case is a late gesture, not a dropped frame.
 
 ### 5.4 Vision pipeline — the primary controller
 
-Body tracking, not gesture classification. Where the player *is* is easier to detect
-reliably than which of five poses they are striking, and it maps directly onto the game's
-three controls.
+Body tracking, not a posture classifier. Two cheap reads of one pose map directly onto the
+game's controls: how high each wrist is over its own shoulder (lane and jump), and where the
+torso sits against the player's own baseline (duck).
 
 - Camera frame -> downscale to the model's input -> `alp_inference_invoke()` -> a person
   bounding box -> a control record in the mailbox.
-- **Lane** comes from the box's horizontal centre, split into three bands with hysteresis
-  at the boundaries so a player standing on a line does not flicker between lanes.
-- **Jump** is a sharp rise in the box's top edge; **duck** is a sharp drop in its height.
-  Both are measured against a short rolling baseline of that player's own stance, so tall
-  and short players behave the same.
+- **Lane** is an arm raise: the wrist clearly above the same-side shoulder (a fraction of
+  the shoulder width, so distance does not matter), edge-triggered, with a lower threshold
+  to re-arm. **Jump** is both arms raised together. See `src/vision/arms.h`.
+- **Duck** is a sharp drop of the torso centre, measured against a short rolling baseline of
+  that player's own stance, so tall and short players behave the same.
 - The model is the existing person detector that already runs from MRAM; a dedicated
   classifier is not needed for the first cut.
 - Every record carries a confidence and a timestamp. If confidence stays low, or no person
@@ -130,7 +130,7 @@ Calibration: the title screen doubles as calibration. The player is asked to ste
 view and keep moving -- standing still would bake them into the detector's background
 model and produce zero foreground for as long as they held it, so the prompt asks for the
 opposite of what defeats calibration. The first box that clears confidence sets the stance
-baseline and the lane band edges to that player's distance from the board.
+baseline to that player's distance from the board.
 
 ### 5.5 Memory plan
 

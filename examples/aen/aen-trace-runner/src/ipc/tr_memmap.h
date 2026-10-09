@@ -10,10 +10,9 @@
 #define TR_MEMMAP_H
 
 /* SRAM0 */
-#define TR_MEM_A32_DL \
-	0x021C2000u /* the frame's DL (render.c DL): FB A's MiB-1 tail to 0x021FFFFF, WB 4 KiB pages */
 #define TR_MEM_A32_SETUP 0x02200000u /* triangle setup records (render.c SETUP) */
-#define TR_MEM_A32_BANDS 0x022A8000u /* per core a z + a colour band (render.c ZBAND) */
+#define TR_MEM_A32_BANDS \
+	0x0229A000u /* per core a z + a colour band (render.c ZBAND), setup ends 0x022996EB */
 #define TR_MEM_A32_ZTEX \
 	0x022D8000u /* P15: the camera-side zone's ground textures, RGB565 (r3d_scene.c) */
 #define TR_MEM_A32_ZTEX_SIZE 0x10000u /* 2 x 128 x 128 x 2 B */
@@ -31,18 +30,15 @@
                                        * spare, ruled that way on real silicon (see TR_MEM_NPU_ARENA_SIZE)
                                        * after Vela's own 277.5 KiB figure proved short by 424 B once
                                        * TFLM's persistent allocations were counted too. */
-#define TR_MEM_NPU_ARENA_SIZE \
-	286720u                           /* 0x46000, 280 KiB. Vela's --optimise Size figure (277.5 KiB,
-                                       * 284,160 B) undercounted TFLM's own persistent allocations on
-                                       * top of it -- real silicon (HP ram console): "Failed to resize
-                                       * buffer. Requested: 284288, available 283864, missing: 424."
-                                       * (alp_inference_open ALP_ERR_IO). 286,720 B leaves ~2.4 KiB
-                                       * headroom over the 284,288 B TFLM actually asked for -- ponytail:
-                                       * untested against a second real allocation; if this ever fails
-                                       * again, the ram console's "missing: N" line names the exact B to
-                                       * add here. */
-#define TR_MEM_ARING      0x0237F000u /* P10 HE -> HP sound ring, layout in tr_aring.h */
-#define TR_MEM_ARING_SIZE 0x1C0u      /* == sizeof(tr_aring_t), asserted there */
+/* 0x46000, 280 KiB. Vela's --optimise Size figure (277.5 KiB, 284,160 B) undercounted TFLM's own
+ * persistent allocations on top of it -- real silicon (HP ram console): "Failed to resize buffer.
+ * Requested: 284288, available 283864, missing: 424." (alp_inference_open ALP_ERR_IO). 286,720 B
+ * leaves ~2.4 KiB headroom over the 284,288 B TFLM actually asked for -- ponytail: untested
+ * against a second real allocation; if this ever fails again, the ram console's "missing: N" line
+ * names the exact B to add here. */
+#define TR_MEM_NPU_ARENA_SIZE 286720u
+#define TR_MEM_ARING          0x0237F000u /* P10 HE -> HP sound ring, layout in tr_aring.h */
+#define TR_MEM_ARING_SIZE     0x1C0u      /* == sizeof(tr_aring_t), asserted there */
 #define TR_MEM_PSLOT \
 	0x0237F200u /* HP -> HE pose slot, layout + protocol in tr_pslot.h (design:
                                        * docs/superpowers/specs/2026-09-24-npu-body-control-design.md
@@ -118,6 +114,13 @@
                                        * 0x0237FD20 + sizeof(tr_cam_view_t) (28 B, v2's rotate) =
                                        * 0x0237FD3C, with 0x0237FD3C..0x0237FFFF (0x2C4 B) of headroom
                                        * still free in the sound ring's page after it. */
+#define TR_MEM_BUS2 \
+	0x0237FD40u /* HE <-> HP: the I2C2 + GPIO5 lease (src/ipc/tr_bus2.h tr_bus2_t, 48 B, TR_HP_SOUND
+                                       * builds only). 64-B aligned, right after TR_MEM_CAM_VIEW's end
+                                       * (0x0237FD3C), clear of TR_MEM_I2C1_HANDOVER (0x0237FC94..0x0237FC9F:
+                                       * a different bus, a different protocol) and of hp_dbg; ends at
+                                       * 0x0237FD70, still inside the shared NC page (0x0237F000..0x0237FFFF).
+                                       * tr_bus2.h asserts all of that. */
 /* SRAM1 */
 #define TR_MEM_CAM_POOL \
 	0x02480000u /* HP: OV9281 camera frame pool (design sec 2), 2 x 256,000 B GREY8;
@@ -125,16 +128,25 @@
                                           * binding source, this is documentation only for cross-referencing */
 #define TR_MEM_CAM_POOL_SIZE 0x80000u /* 512 KiB, CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE */
 #define TR_MEM_MBOX_PAGE_END \
-	0x02403000u /* mailbox, prof + bench blocks, renderer L2 tables (0x023, 0x027, 0x021,
+	0x02403000u /* mailbox, prof + bench blocks, renderer L2 tables (0x023, 0x027, 0x025,
                                              * 0x024 -- fix round 10, camera pool cacheable) */
 #define TR_MEM_RENDER_TTB 0x02408000u /* renderer L1 table, 16 KiB */
 #define TR_MEM_A32_IMG_END \
 	0x025C0000u /* renderer image + .bss end (renderer.ld); the image alone <= 512 KiB (STUB_PAYLOAD_LIMIT) */
-#define TR_MEM_A32_BINS 0x025C0000u /* band bins (render.c BINS) */
-#define TR_MEM_A32_STACKS \
-	0x025DE000u /* renderer stacks, 64 KiB per core (start.S), below FB B 0x02600000 */
+/* The frame's DL (render.c DL), after the stub stacks (STUB_STACK1_TOP); Normal WB-WA S=1 XN in the
+ * renderer table (the rest of 0x024xxxxx below it is NC exec, the stub contract). */
+#define TR_MEM_A32_DL 0x02424000u
+/* Band bins (render.c BINS). 0x02460000, not right after the DL (0x0245CFD8): 12 KiB of DL headroom. */
+#define TR_MEM_A32_BINS 0x02460000u
+/* Renderer stacks, 64 KiB per core (start.S), directly above the image cap. */
+#define TR_MEM_A32_STACKS      0x025C0000u
 #define TR_MEM_A32_STACKS_SIZE 0x20000u
-#define TR_MEM_TFA_RW          0x027DE000u /* TF-A RW, never mapped by the A32 */
-#define TR_MEM_TFA_RW_END      0x027ED000u
+/* Renderer core-1 gate word (renderer.c RENDER_GATE): the page above the stacks, outside .bss. */
+#define TR_MEM_A32_GATE 0x025E0000u
+/* TF-A RW, never mapped by the A32. Bench-verified on E1M-EVK (2026W36-0002): 0x027DE000 is the
+ * lowest TF-A-owned address (bl32 map RAM ORIGIN 0x027de000, literal pool 027de000 027ed000;
+ * 0x027C2000..0x027DDFFF untouched through boot + 90 s), so FB B may end exactly here. */
+#define TR_MEM_TFA_RW     0x027DE000u
+#define TR_MEM_TFA_RW_END 0x027ED000u
 
 #endif /* TR_MEMMAP_H */

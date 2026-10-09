@@ -27,7 +27,7 @@ typedef enum {
  * override with -DTR_FALLBACK_MODE=TR_MODE_TILT for a bench build.
  *
  * Guarded with #ifndef, not a plain #define -- the same build-time-choice
- * pattern vision/track.h's TR_CAM_MIRROR_X/TR_CAM_FLIP_Y already use for a
+ * pattern vision/track.h's TR_CAM_FLIP_Y already uses for a
  * constant nothing in this file can safely default without knowing the
  * venue.
  */
@@ -55,9 +55,8 @@ void tr_ctl_init(tr_ctl_t *c, tr_mode_t mode);
  * itself, which is what makes it testable without a camera.
  *
  * `track` is the live tracker (NULL is fine in tilt mode and the standalone
- * TR_MODE_ATTRACT fallback, neither of which ever touches it); `game_lane`
- * is the game's current lane (0..TR_LANES-1), needed only to resync the
- * tracker on the leaving-pause discontinuity.
+ * TR_MODE_ATTRACT fallback, neither of which ever touches it); it is
+ * resynced on the leaving-pause discontinuity.
  *
  * Returns true when the caller should apply this tick's already-computed
  * intent via tr_game_step(); false means the tick is dropped (still paused,
@@ -67,15 +66,15 @@ void tr_ctl_init(tr_ctl_t *c, tr_mode_t mode);
  * hook without also changing what "apply" means -- that is a signature
  * change to make when such a policy actually exists, not before.
  */
-bool tr_ctl_step(tr_ctl_t *c, tr_track_t *track, bool player_lost, uint8_t game_lane);
+bool tr_ctl_step(tr_ctl_t *c, tr_track_t *track, bool player_lost);
 
 /*
  * Call once, right after a run reset (game over -> new run), before the
  * new run's first tick. Clears any leftover pause and, in vision mode,
- * resyncs the tracker to the reset lane -- the other discontinuity
+ * resyncs the tracker -- the other discontinuity
  * tr_track_resync()'s contract requires (see track.h), alongside the
  * leaving-pause one in tr_ctl_step().
  */
-void tr_ctl_reset(tr_ctl_t *c, tr_track_t *track, uint8_t reset_lane);
+void tr_ctl_reset(tr_ctl_t *c, tr_track_t *track);
 
 #endif /* TR_MODE_H */
