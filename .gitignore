@@ -105,6 +105,9 @@ Makefile
 # Checked-in Zephyr board flash/debug runner files (board.cmake) -- these
 # are source, not generated, and `west flash` needs them tracked.
 !zephyr/boards/**/board.cmake
+# The Trace Runner combined-HP gate (hp_vision/CMakeLists.txt includes it; test_hp_combined.sh runs
+# it with cmake -P): source, tracked.
+!examples/aen/aen-trace-runner/hp_vision/sound_gate.cmake
 
 # Doxygen's OUTPUT_DIRECTORY (docs/doxygen/Doxyfile:23) -- a local `doxygen`
 # run writes ~1900 generated HTML files here. Build artifact, regenerable

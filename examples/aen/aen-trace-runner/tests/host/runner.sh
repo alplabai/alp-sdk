@@ -12,17 +12,22 @@ CHECKS="-DTR_RASTER_CHECKS"
 for t in tests/host/test_*.c; do
 	out="$RUN_TMP/tr-$(basename "$t" .c)"
 	extra_cflags=""
-	# test_track_cam_orientation.c needs TR_CAM_MIRROR_X/TR_CAM_FLIP_Y compiled
-	# in as 1 (track.h #ifndef-guards both) to exercise the `1` state of the
-	# camera-orientation constants against the real track.c -- see that file's
-	# header comment (whole-branch fix round B, B2).
+	# test_track_cam_orientation.c needs TR_CAM_FLIP_Y compiled in as 1
+	# (track.h #ifndef-guards it) to exercise the `1` state of the
+	# camera-orientation constant against the real track.c / pose.c -- see
+	# that file's header comment.
 	if [ "$(basename "$t")" = "test_track_cam_orientation.c" ]; then
-		extra_cflags="-DTR_CAM_MIRROR_X=1 -DTR_CAM_FLIP_Y=1"
+		extra_cflags="-DTR_CAM_FLIP_Y=1"
 	fi
 	# test_tilt_takeover.c re-runs test_tilt.c with the bench/dev takeover
 	# compiled in (tilt.h's TR_TILT_TAKEOVER, default OFF).
 	if [ "$(basename "$t")" = "test_tilt_takeover.c" ]; then
 		extra_cflags="-DTR_TILT_TAKEOVER=1"
+	fi
+	# test_a32_turned.c compares a 720-wide panel's frame with the centre crop of the 800-wide one,
+	# which only holds with the focal length pinned (r3d_scene.h tr_scene_f_px: it follows fw).
+	if [ "$(basename "$t")" = "test_a32_turned.c" ]; then
+		extra_cflags="-DTR_SCENE_F_PX_FIXED=1"
 	fi
 	# test_r3d_zones.c reads the raster's TR_PROF_* counters for its per-zone
 	# cost estimate (the A32 qemu stage below builds it without: goldens only).
@@ -40,7 +45,20 @@ for t in tests/host/test_*.c; do
 	fi
 	if "$out"; then echo "PASS: $t"; else echo "FAIL: $t"; rc=1; fi
 done
-# The 30 Hz panel build (P11a, -DTR_PANEL_HZ=30): the frame-counted game
+# The arm controls with the sensor NOT mirrored (cam_rot.h TR_CAM_MIRROR=0: a
+# camera that sees the player face to face): the same physical player's LEFT
+# arm must still be the left lane, at every rotation (the default build above
+# is the release's selfie mirror).
+for t in test_arms test_cam_mirror; do
+	out="$RUN_TMP/tr-$t-nomirror"
+	if cc -std=c11 -Wall -Wextra -Werror -ffp-contract=off -g -DTR_CAM_MIRROR=0 -o "$out" "tests/host/$t.c" \
+		$(ls src/game/*.c src/vision/*.c src/ipc/*.c 2>/dev/null | grep -v main.c) -lm && "$out" >/dev/null; then
+		echo "PASS: tests/host/$t.c -DTR_CAM_MIRROR=0"
+	else
+		echo "FAIL: tests/host/$t.c -DTR_CAM_MIRROR=0"; rc=1
+	fi
+done
+# The 30 Hz panel build (P11a,-DTR_PANEL_HZ=30): the frame-counted game
 # logic re-run with its constants scaled -- test_panel_hz.c checks the real
 # times, the others that the logic holds at the 30 Hz counts.
 for t in test_panel_hz test_step test_pace test_tilt test_tilt_takeover test_attract test_mbox test_hud test_score test_react \
@@ -90,6 +108,20 @@ if bash tests/host/test_hp_vision_check.sh; then
 	echo "PASS: tests/host/test_hp_vision_check.sh"
 else
 	echo "FAIL: tests/host/test_hp_vision_check.sh"; rc=1
+fi
+# The combined HP image (camera + NPU + game sound in one HP_APP): its build gate, release
+# interlocks and the source-level wiring of the I2C2/GPIO5 lease (a32/release/*_check.sh).
+if bash tests/host/test_hp_combined.sh; then
+	echo "PASS: tests/host/test_hp_combined.sh"
+else
+	echo "FAIL: tests/host/test_hp_combined.sh"; rc=1
+fi
+# The power graph's source interlock: the I2C2 lease check before any transfer, a gap for every slot the poll
+# cannot sample, never blocking (platform/rail5v_power.c is a Zephyr file with no host build).
+if bash tests/host/test_rail5v_gap.sh; then
+	echo "PASS: tests/host/test_rail5v_gap.sh"
+else
+	echo "FAIL: tests/host/test_rail5v_gap.sh"; rc=1
 fi
 # The TR_PANEL_HZ release interlock (a32/release/panel_hz_check.sh).
 if bash tests/host/test_panel_hz_check.sh; then
@@ -187,7 +219,7 @@ else
 fi
 
 if [ -n "$M55_GCC" ]; then
-	for f in $R3D_SRC $AUDIO_SRC src/game/sfx.c src/vision/movenet.c src/vision/pose.c \
+	for f in $R3D_SRC $AUDIO_SRC src/game/sfx.c src/vision/movenet.c src/vision/pose.c src/vision/arms.c \
 		src/vision/camera_ae.c src/vision/kp_smooth.c src/ipc/tr_pslot.c src/ipc/tr_cam_view.c; do
 		if "$M55_GCC" $WARN -mcpu=cortex-m55 -mthumb -mfloat-abi=hard -c -o /dev/null "$f"; then
 			echo "PASS (M55 compile): $f"

@@ -14,10 +14,18 @@
 #
 #   flash-release.sh readback OUT.bin                     # step 1
 #   flash-release.sh check-a32                            # step 3
-#   flash-release.sh write SETOOLS_COPY READBACK.bin [--replace-atoc|--atoc-unqueryable]
+#   flash-release.sh write SETOOLS_COPY READBACK.bin [--replace-atoc|--atoc-unqueryable] [--no-reset|--reset]
 #                                                          # steps 4-5 (halt once, noreset
 #                                                          # loadbins, skip bl32 if unchanged,
-#                                                          # fresh-session proof)
+#                                                          # fresh-session proof). The session
+#                                                          # ends with a warm pin reset into the
+#                                                          # new image UNLESS the package carries
+#                                                          # the game sound (TR_HP_SOUND): that
+#                                                          # image must COLD-boot, so there the
+#                                                          # default is --no-reset (the core stays
+#                                                          # as the write left it: power-cycle
+#                                                          # the board). --no-reset / --reset
+#                                                          # force either way.
 #   flash-release.sh restore READBACK.bin [--replace-atoc|--atoc-unqueryable]
 #                                                          # recovery: put every touched
 #                                                          # sector back from a read-back
@@ -54,13 +62,15 @@ jlink_read() { # <commands...> -- one read-only session, generic device
 }
 
 do_write() { # <tag> <flags...> <file:addr>...
-	local tag="$1" replace=0 unq=0
+	local tag="$1" replace=0 unq=0 noreset="${FLASH_NO_RESET_DEFAULT:-0}"
 	shift
 	local -a blobs=()
 	for a in "$@"; do
 		case "$a" in
 		--replace-atoc) replace=1 ;;
 		--atoc-unqueryable) unq=1 ;;
+		--no-reset) noreset=1 ;;
+		--reset) noreset=0 ;;
 		*) blobs+=("$a") ;;
 		esac
 	done
@@ -97,7 +107,12 @@ do_write() { # <tag> <flags...> <file:addr>...
 	# reprogram even if J-Link's own CRC check thinks the sector already
 	# matches -- do not trust that optimisation on a first-time write to a
 	# part profile this release has not flashed before.
-	printf 'si SWD\nspeed %s\ndevice %s\nconnect\nexec SetSkipProgOnCRCMatch = 0\nh\n%s\n%s\nRSetType 2\nr\ng\nexit\n' \
+	# The boot reset is skipped with --no-reset (the default for a package that carries the game
+	# sound): a TR_HP_SOUND image needs a COLD boot (both cores up together, the HE's lease
+	# handshake from a clean record), which a warm pin reset into it does not give.
+	local bootreset='RSetType 2\nr\ng\n'
+	[ "$noreset" -eq 0 ] || bootreset=''
+	printf 'si SWD\nspeed %s\ndevice %s\nconnect\nexec SetSkipProgOnCRCMatch = 0\nh\n%s\n%s\n'"$bootreset"'exit\n' \
 		"$JLINK_SPEED" "$JLINK_DEVICE_FLASH" "$prewrite" "$loadbin" >"$T/write.jlink"
 	if [ -n "${FLOWD_DRY_RUN:-}" ]; then
 		echo "--- DRY RUN: nothing written; manifest $FLOWD_MANIFEST; write session: ---"
@@ -153,7 +168,11 @@ do_write() { # <tag> <flags...> <file:addr>...
 	[ "$race" -eq 0 ] || { echo "!! RACE -- restore from $scratch/sectors + $scratch/prewrite"; exit 11; }
 	[ "$proof" -eq 0 ] || { echo "!! READ-BACK PROOF FAILED -- do not treat the board as flashed, do not resume (g)"; exit 3; }
 	echo "verify: read-back proof OK (fresh-session, NOT a cold-cycle persistence proof -- FLASH-RECIPE.md steps 6-7)"
-	echo "the write session's own trailing RSetType 2/r/g already resumed the target -- FLASH-RECIPE.md step 6 (cold cycle) is the persistence proof, not this run"
+	if [ "$noreset" -eq 0 ]; then
+		echo "the write session's own trailing RSetType 2/r/g already resumed the target -- FLASH-RECIPE.md step 6 (cold cycle) is the persistence proof, not this run"
+	else
+		echo "NO boot reset was issued (--no-reset): the target is still halted/running its OLD image. POWER-CYCLE the board (cold boot) -- FLASH-RECIPE.md step 6"
+	fi
 }
 
 cmd="${1:-}"
@@ -214,6 +233,11 @@ write)
 		blobs+=("$f:$addr")
 	done
 	[ "${#blobs[@]}" -gt 0 ] || die "nothing to write (everything matched the read-back?)"
+	# A package that carries the game sound cold-boots: no warm reset at the end of the session.
+	if grep -aq 'I2S_SELECT = 0 (amps)' "$st/build/images/trace_runner_hp_vision.bin" 2>/dev/null; then
+		export FLASH_NO_RESET_DEFAULT=1
+		echo "flash-release: the HP image carries the game sound -> --no-reset (cold-boot it; pass --reset to override)" >&2
+	fi
 	do_write tr-release "$@" "${blobs[@]}"
 	;;
 restore)

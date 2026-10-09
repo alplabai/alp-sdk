@@ -3,6 +3,8 @@
 
 #include <stdlib.h>
 
+#include "cam_rot.h" /* TR_CAM_MIRROR */
+
 static bool ok(const tr_pose_t *p, int k)
 {
 	return p->kp[k].score >= TR_POSE_KP_MIN;
@@ -28,7 +30,62 @@ static int mid(const tr_pose_t *p, int a, int *x, int *y, unsigned *conf)
 	return k;
 }
 
+/* Raise level of one arm: how far the wrist is above its OWN shoulder, in %
+ * of the shoulder width `sw` (px). Image y grows downward, so "above" is
+ * shoulder y minus wrist y; TR_CAM_FLIP_Y (track.h) turns the image over. */
+static int16_t arm_raise(const tr_pose_t *p, int sho, int wri, int sw)
+{
+	if (p->kp[sho].score < TR_ARM_KP_MIN || p->kp[wri].score < TR_ARM_KP_MIN) {
+		return TR_ARM_UNKNOWN;
+	}
+	int up = TR_CAM_FLIP_Y ? p->kp[wri].y - p->kp[sho].y : p->kp[sho].y - p->kp[wri].y;
+	int v  = up * 100 / sw;
+
+	return (int16_t)(v > 1000 ? 1000 : v < -1000 ? -1000 : v);
+}
+
+/* Fill b->arm_raise[] (track.h): [TR_ARM_LEFT] is the PLAYER's left arm.
+ *
+ * Which keypoint pair is that? Not decided by the COCO label. MoveNet labels a
+ * limb by the anatomy it SEES: on any frontal figure its "left" keypoints are
+ * the ones at larger image x, mirrored frame or not (a mirrored frontal
+ * person is indistinguishable from an ordinary one). What is fixed is the
+ * view: with TR_CAM_MIRROR the player looks at a selfie, so the arm on the
+ * screen's left is their LEFT arm; without it the camera sees them face to
+ * face, so the arm on the screen's left is their RIGHT. So the shoulders'
+ * x order says which pair is on the screen's left, and the mirror (the
+ * HP's published truth on the HE, TR_CAM_MIRROR otherwise) says whose arm
+ * that is. The same rule holds at every TR_CAM_ROTATE: the pose is
+ * already in the UPRIGHT frame (cam_rot.h), where the mirror is a
+ * left/right one at 0, 90 and 270 alike. */
+static void pose_arms(const tr_pose_t *p, bool mirrored, int16_t raise[2])
+{
+	raise[TR_ARM_LEFT] = raise[TR_ARM_RIGHT] = TR_ARM_UNKNOWN;
+	if (p->kp[TR_KP_LSHO].score < TR_ARM_KP_MIN || p->kp[TR_KP_RSHO].score < TR_ARM_KP_MIN) {
+		return;
+	}
+	int sw = abs(p->kp[TR_KP_LSHO].x - p->kp[TR_KP_RSHO].x);
+
+	if (sw < TR_ARM_MIN_SHOULDER_PX) {
+		return; /* side-on: no left or right to tell */
+	}
+	/* true: the label-LEFT pair is the one on the screen's left. */
+	bool l_on_screen_left = p->kp[TR_KP_LSHO].x < p->kp[TR_KP_RSHO].x;
+	/* The player's left arm is the screen-left pair when mirrored. A camera mounted
+	 * upside down (TR_CAM_FLIP_Y: a 180 degree turn) reverses x as well as y, so it
+	 * swaps the sides once more. */
+	bool l_is_player_left = (l_on_screen_left == mirrored) != (TR_CAM_FLIP_Y != 0);
+
+	raise[l_is_player_left ? TR_ARM_LEFT : TR_ARM_RIGHT] = arm_raise(p, TR_KP_LSHO, TR_KP_LWRI, sw);
+	raise[l_is_player_left ? TR_ARM_RIGHT : TR_ARM_LEFT] = arm_raise(p, TR_KP_RSHO, TR_KP_RWRI, sw);
+}
+
 tr_box_t tr_pose_box(const tr_pose_t *p)
+{
+	return tr_pose_box_mirrored(p, TR_CAM_MIRROR != 0);
+}
+
+tr_box_t tr_pose_box_mirrored(const tr_pose_t *p, bool mirrored)
 {
 	tr_box_t b  = { .valid = false };
 	int      sx = 0, sy = 0, hx = 0, hy = 0;
@@ -36,6 +93,7 @@ tr_box_t tr_pose_box(const tr_pose_t *p)
 	int      ns   = mid(p, TR_KP_LSHO, &sx, &sy, &conf);
 	int      nh   = mid(p, TR_KP_LHIP, &hx, &hy, &conf);
 
+	pose_arms(p, mirrored, b.arm_raise);
 	if (ns == 0) {
 		return b;
 	}

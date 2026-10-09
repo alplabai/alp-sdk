@@ -194,7 +194,7 @@ static void gen_golden_header(const char *path, uint32_t crc, uint32_t fe_crc)
 	    "tests/host/test_r3d_band.c\n"
 	    " * (TR_GEN_DL=<path>), DO NOT EDIT. The golden scene's display list, sky and\n"
 	    " * texture; rasterised (tr_bin_build + %d x tr_raster_band, bg TR_GOLDEN_BG) it gives\n"
-	    " * TR_GOLDEN_RASTER_CRC (CRC-32, IEEE, over the 720x1280 RGB565 frame,\n"
+	    " * TR_GOLDEN_RASTER_CRC (CRC-32, IEEE, over the 800x1280 RGB565 frame,\n"
 	    " * little-endian). The raster has no float, so this holds bit-exact on the A32\n"
 	    " * (a32-renderer plan, CP-A6). */\n"
 	    "#ifndef TR_GOLDEN_DL_H\n#define TR_GOLDEN_DL_H\n\n#include \"../../src/render/r3d.h\"\n\n",
@@ -622,7 +622,7 @@ int main(void)
 				/* fix round 8: the camera's own cy is TR_VIEW_H/2 now (r3d_math.c
 				 * tr_cam_build), not TR_R3D_H/2 -- this hand-derived ray must
 				 * agree with it. */
-				float dx = ((float)x + 0.5f - 360.0f) / 600.0f,
+				float dx = ((float)x + 0.5f - (float)TR_R3D_W / 2.0f) / 600.0f,
 				      dy = -((float)y + 0.5f - (float)TR_VIEW_H / 2.0f) / 600.0f;
 				float t  = -100.0f / (sr * dx + cr * dy);
 				float wx = t * (cr * dx - sr * dy), wz = t;
@@ -717,13 +717,14 @@ int main(void)
 	{
 		uint32_t overflow = 0;
 
-		dl.n = 0;
-		dl.tri[0] =
-		    (tr_tri_t){ { { 800 << 4, 0 }, { 900 << 4, 1280 << 4 }, { 760 << 4, 1280 << 4 } },
-			            0x5555,
-			            0,
-			            0,
-			            { { 0 } } };
+		dl.n      = 0;
+		dl.tri[0] = (tr_tri_t){ { { (TR_R3D_W + 80) << 4, 0 },
+			                      { (TR_R3D_W + 180) << 4, 1280 << 4 },
+			                      { (TR_R3D_W + 40) << 4, 1280 << 4 } },
+			                    0x5555,
+			                    0,
+			                    0,
+			                    { { 0 } } };
 		dl.tri[1] =
 		    (tr_tri_t){ { { 10 << 4, 0 }, { -400 * 16, 1280 << 4 }, { -500 * 16, 1280 << 4 } },
 			            0x5555,

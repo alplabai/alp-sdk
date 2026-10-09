@@ -1,5 +1,7 @@
 /* tests/host/test_mbox.c */
 #include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "../../src/game/state.h"
 #include "../../src/game/zone.h"
@@ -96,7 +98,57 @@ int main(void)
 	/* --- publish/take `in`: happy path --- */
 	memset((void *)&g_mbox, 0, sizeof(g_mbox));
 	f.track_h = 1280;
-	assert(f.rotation == 0 && TR_MBOX_VERSION == 2u); /* a fresh snapshot: not turned */
+	assert(f.rotation == 0 && TR_MBOX_VERSION == 4u); /* a fresh snapshot: not turned */
+
+	/* --- stage 0 memory re-plan: the placement relations the A32 builds assert too --- */
+	assert(TR_FB_SLOT_SIZE == 800u * 1280u * 2u && TR_FB_SLOT_SIZE == TR_R3D_W * TR_R3D_H * 2u);
+	assert(TR_FB_B == 0x025EA000u && (TR_FB_B & 0xFFFu) == 0u); /* derived from TR_MEM_TFA_RW */
+	assert(TR_FB_B + TR_FB_SLOT_SIZE <= TR_MEM_TFA_RW);
+	assert(TR_FB_B + TR_FB_SLOT_SIZE + 0x1000u > TR_MEM_TFA_RW); /* the last slot that fits */
+	assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == TR_MEM_A32_GATE);
+	assert(TR_MEM_A32_GATE + 0x1000u <= TR_FB_B);
+	assert(TR_MEM_A32_DL == 0x02424000u && TR_MEM_A32_BINS == 0x02460000u);
+	assert(TR_FB_A + TR_FB_SLOT_SIZE <= TR_MEM_A32_SETUP);
+	/* The renderer's ABI refusal record decodes (pad3[7] code + pad3[6] value): fw 721 is not
+	 * hidden behind 721 / 16 = 45, the rotation and version codes are told apart, and a plain
+	 * stats word (a max out_ticks0) is not mistaken for a record. */
+	assert(tr_abi_fault_code(TR_ABI_FAULT_TAG | TR_ABI_FAULT_FW | (721u / 16u) << 8) ==
+	       TR_ABI_FAULT_FW);
+	assert(tr_abi_fault_arg(721u) == 721u && tr_abi_fault_arg(0x12345u) == 0x2345u);
+	assert(tr_abi_fault_code(TR_ABI_FAULT_TAG | TR_ABI_FAULT_ROTATION | 14u << 8) ==
+	       TR_ABI_FAULT_ROTATION);
+	assert(tr_abi_fault_code(TR_ABI_FAULT_TAG | TR_ABI_FAULT_VERSION) == TR_ABI_FAULT_VERSION);
+	assert(tr_abi_fault_code(3093609u) == 0u && tr_abi_fault_code(0u) == 0u);
+	/* tr_frame_in_t.fw: the panel width, in the old trailing pad (sizeof unchanged) and carried
+	 * across the mailbox; tr_fw_refuse() holds a drawn frame to a width the copy-out can write. */
+	assert(offsetof(tr_frame_in_t, fw) == 174 && sizeof(tr_frame_in_t) == 176);
+	assert(!tr_fw_refuse(1, TR_R3D_W) && !tr_fw_refuse(1, TR_R3D_W - 16u) && !tr_fw_refuse(1, 16u));
+	assert(tr_fw_refuse(1, 0u));                                   /* an HE that never set it */
+	assert(tr_fw_refuse(1, TR_R3D_W - 8u) && tr_fw_refuse(1, 8u)); /* not 16 aligned */
+	assert(tr_fw_refuse(1, TR_R3D_W + 16u) && tr_fw_refuse(1, 65520u)); /* wider than the render */
+	assert(!tr_fw_refuse(0, 0u) && !tr_fw_refuse(0, TR_R3D_W + 1u)); /* a dropped frame: no ABI */
+	f.fw = TR_R3D_W - 16u;
+	/* start.S keeps the stack tops as .equ literals (an assembler cannot see the C macros):
+	 * they must be STACKS + 64 KiB (core 0) and the gate page (core 1's top == STACKS + 128 KiB). */
+	{
+		FILE         *s = fopen("a32/renderer/start.S", "r");
+		char          line[256];
+		unsigned long top0 = 0, top1 = 0;
+
+		assert(s != NULL);
+		while (fgets(line, sizeof(line), s) != NULL) {
+			char *p;
+
+			if ((p = strstr(line, ".equ RENDER_STACK0_TOP,")) != NULL) {
+				top0 = strtoul(strchr(p, ',') + 1, NULL, 0);
+			} else if ((p = strstr(line, ".equ RENDER_STACK1_TOP,")) != NULL) {
+				top1 = strtoul(strchr(p, ',') + 1, NULL, 0);
+			}
+		}
+		fclose(s);
+		assert(top0 == TR_MEM_A32_STACKS + 0x10000u);
+		assert(top1 == TR_MEM_A32_GATE);
+	}
 	f.rotation = 270; /* does not fit a byte: the field is 16 bits */
 	tr_mbox_publish_in(&g_mbox, &f, TR_FB_A, noop_barrier);
 	{
@@ -104,7 +156,7 @@ int main(void)
 		uint32_t      rfb, rseq;
 
 		assert(tr_mbox_take_in(&g_mbox, 0u, &r270, &rfb, &rseq, noop_barrier));
-		assert(r270.rotation == 270 && tr_rot_valid(r270.rotation));
+		assert(r270.rotation == 270 && tr_rot_valid(r270.rotation) && r270.fw == TR_R3D_W - 16u);
 	}
 	f.rotation = 180; /* carried as is; the renderer refuses it (tr_rot_valid) */
 	tr_mbox_publish_in(&g_mbox, &f, TR_FB_A, noop_barrier);
