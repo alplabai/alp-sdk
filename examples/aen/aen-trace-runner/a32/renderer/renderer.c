@@ -76,13 +76,15 @@
  * drops.
  *
  * Profile build (`make prof`, TR_RASTER_PROF): PMCCNTR (A32 core cycles)
- * counters per core from src/render/r3d.h's TR_PROF_* hooks, accumulated
- * since LAUNCH, snapshotted by core 0 after every frame's join into the
- * NC block RENDER_PROF_ADDR (the unused tail of the mailbox page; debug-AP
- * readable, decode.py --prof):
- *   +0x00 RENDER_PROF_MARKER 0x5E4D5052, +0x04 frames rendered,
+ * counters per core from src/render/r3d.h's TR_PROF_* hooks, accumulated over
+ * a window of RENDER_PROF_WINDOW frames (the 32-bit cycle sums wrap in ~5 s at
+ * 800 MHz, so a since-LAUNCH total is garbage after the first seconds), then
+ * snapshotted by core 0 into the NC block RENDER_PROF_ADDR (the unused tail
+ * of the mailbox page; debug-AP readable, decode.py --prof) and cleared. The
+ * block therefore holds the last COMPLETE window, none before the first:
+ *   +0x00 RENDER_PROF_MARKER 0x5E4D5052, +0x04 frames in that window,
  *   +0x08 core 0 then core 1: TR_PROF_N x {cycles, px, calls}
- *   (FLAT, GOURAUD, TEX, TRI, BG, SETUP, BIN, NOZ_TEX, NOZ_FILL -- see r3d.h).
+ *   (FLAT, GOURAUD, TEX, TRI, BG, SETUP, BIN, NOZ_TEX, NOZ_FILL, BAND -- see r3d.h).
  * The hooks cost a few cycles per span; compare stage times against the
  * plain build, not this one.
  */
@@ -238,6 +240,8 @@ static void rs_wait(uint32_t i, uint32_t w)
 #ifdef TR_RASTER_PROF
 #define RENDER_PROF_ADDR   ((volatile uint32_t *)0x02401800u)
 #define RENDER_PROF_MARKER 0x5E4D5052u
+#define RENDER_PROF_WINDOW 64u /* frames: 64 x ~27 ms x 800 MHz < 2^32 cycles */
+_Static_assert(0x1800u + 8u + 2u * TR_PROF_N * 12u <= 0x1900u, "the prof block ends below the stats block");
 static tr_prof_t prof[2][TR_PROF_N] __attribute__((aligned(64)));
 
 tr_prof_t *tr_prof_core(void)
@@ -268,12 +272,16 @@ static void prof_publish(void)
 {
 	static uint32_t    frames;
 	volatile uint32_t *d = RENDER_PROF_ADDR;
-	const uint32_t    *p = (const uint32_t *)prof;
+	uint32_t          *p = (uint32_t *)prof;
 
+	if (++frames < RENDER_PROF_WINDOW) return;
 	d[0] = RENDER_PROF_MARKER;
-	d[1] = ++frames;
-	for (uint32_t i = 0; i < sizeof(prof) / 4u; i++)
+	d[1] = frames;
+	for (uint32_t i = 0; i < sizeof(prof) / 4u; i++) {
 		d[2 + i] = p[i];
+		p[i]     = 0; /* core 1 is parked in its wait after the join */
+	}
+	frames = 0;
 }
 #else
 static void prof_enable(void)

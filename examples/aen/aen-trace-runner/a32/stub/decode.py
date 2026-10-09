@@ -4,7 +4,7 @@
   decode.py DUMP        DUMP = raw 0x200-byte savebin of 0x02401000, or the
                         text of J-Link `mem32 0x02401000, 128`
                         ("02401000 = 54524D42 00000001 ...").
-  decode.py --prof DUMP renderer-prof block: `mem32 0x02401800, 56` (or a raw
+  decode.py --prof DUMP renderer-prof block: `mem32 0x02401800, 62` (or a raw
                         224-byte savebin) -> per-core cycles by span kind.
   decode.py --stats DUMP renderer bench block: `mem32 0x02401900, 40` -> LOD
                         quality word + out->in gap (M55 turnaround) stats +
@@ -171,12 +171,13 @@ def report(r):
 
 
 PROF_ADDR, PROF_MARKER = 0x02401800, 0x5E4D5052  # a32/renderer/renderer.c `make prof`
-PROF_KINDS = ["flat", "gouraud", "tex", "tri", "bg", "setup", "bin", "noz_tex", "noz_fill"]  # r3d.h TR_PROF_*
+PROF_KINDS = ["flat", "gouraud", "tex", "tri", "bg", "setup", "bin", "noz_tex", "noz_fill", "band"]  # r3d.h TR_PROF_*
 PROF_SIZE = 8 + 2 * len(PROF_KINDS) * 12
 A32_HZ = 800e6  # measured (docs/2026-09-22-measurements.md)
 # Cycles one PROF_T0 + PROF_ADD pair costs (a32/payload-isa PROF_HOOK, 2026W36-0009
 # 2026-09-23: 32.2 at -O2): every span pays it inside the tri window.
 PROF_HOOK_CYC = 32
+PROF_WINDOW = 64  # frames per snapshot (renderer.c RENDER_PROF_WINDOW): the 32-bit sums wrap in ~5 s
 PROF_SPANS = ("flat", "gouraud", "tex", "noz_tex", "noz_fill")
 
 
@@ -195,7 +196,8 @@ def prof_report(blob):
                 ("%s %8d  %.1f cyc/%s" % (unit, px // f, cyc / px, unit)) if px else "",
                 "  %.0f cyc/call" % (cyc / n) if n else ""))
     out.append("  (tri = whole per-(triangle, band) raster incl. its spans; overhead = tri - flat - gouraud - tex"
-               " - noz_tex - noz_fill)")
+               " - noz_tex - noz_fill; band = the whole tr_raster_band(); the block is the last complete"
+               " %d-frame window, per frame = / frames)" % PROF_WINDOW)
     for core in range(2):
         e = {name: w[2 + (core * len(PROF_KINDS) + k) * 3:5 + (core * len(PROF_KINDS) + k) * 3]
              for k, name in enumerate(PROF_KINDS)}
@@ -205,6 +207,14 @@ def prof_report(blob):
         out.append("  core%d overhead %.1f cyc/row raw, %.1f with the prof hook's ~%d cyc/span removed (%.3f ms)" % (
             core, ovh / rows, (ovh - PROF_HOOK_CYC * spans) / rows, PROF_HOOK_CYC,
             (ovh - PROF_HOOK_CYC * spans) / f / A32_HZ * 1e3))
+    for core in range(2):
+        e = {name: w[2 + (core * len(PROF_KINDS) + k) * 3:5 + (core * len(PROF_KINDS) + k) * 3]
+             for k, name in enumerate(PROF_KINDS)}
+        band, rest = e["band"][0], e["band"][0] - e["bg"][0] - e["tri"][0]
+        out.append("  core%d band total %.3f ms/frame = bg %.3f + tri %.3f + other (copy-out, bin walk) %.3f ms"
+                   "  (%d bands/frame)" % (core, band / f / A32_HZ * 1e3, e["bg"][0] / f / A32_HZ * 1e3,
+                                          e["tri"][0] / f / A32_HZ * 1e3, rest / f / A32_HZ * 1e3,
+                                          e["band"][2] // f))
     return "\n".join(out)
 
 
@@ -298,6 +308,8 @@ def selftest():
     pr = prof_report(parse(pb, PROF_ADDR, PROF_SIZE))
     assert "10 frames" in pr and "core1 bin" in pr and "1.000 ms" in pr and "100.0 cyc/px" in pr
     # tri 8e6 - 5 span kinds x 8e6 = -32e6 over 80000 rows; hook 32 x 500 spans
+    # synthetic: band = bg = tri, so "other" is negative here
+    assert "core0 band total 1.000 ms/frame = bg 1.000 + tri 1.000 + other (copy-out, bin walk) -1.000 ms  (10 bands/frame)" in pr
     assert "core0 overhead -400.0 cyc/row raw, -400.2 with the prof hook's ~32 cyc/span removed" in pr
     sr = stats_report(struct.pack("<6I", STATS_MARKER, 7, 250000, 200000, 400000, 50))
     assert "quality=0x7" in sr and "bit2 still board" in sr and "last 2.500 ms, min 2.000, max 4.000 over 50 frames" in sr

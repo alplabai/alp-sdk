@@ -249,6 +249,8 @@ uint8_t         tr_r3d_fog_lut[TR_FOG_LUT_N];
 #ifdef TR_RASTER_PROF
 #define PROF_T0()            uint32_t prof_t0 = tr_prof_now()
 #define PROF_ADD(k, px, cnt) prof_add((k), prof_t0, (px), (cnt))
+#define PROF_T1()            uint32_t prof_t1 = tr_prof_now()
+#define PROF_ADD1(k, px, cnt) prof_add((k), prof_t1, (px), (cnt))
 static inline void prof_add(int k, uint32_t t0, uint32_t px, uint32_t cnt)
 {
 	tr_prof_t *p = &tr_prof_core()[k];
@@ -260,6 +262,8 @@ static inline void prof_add(int k, uint32_t t0, uint32_t px, uint32_t cnt)
 #else
 #define PROF_T0()            ((void)0)
 #define PROF_ADD(k, px, cnt) ((void)0)
+#define PROF_T1()            ((void)0)
+#define PROF_ADD1(k, px, cnt) ((void)0)
 #endif
 
 /*
@@ -1931,6 +1935,7 @@ void tr_raster_band(uint16_t             *fb,
                     const uint16_t       *bin,
                     uint32_t              nbin)
 {
+	PROF_T1();
 	PROF_T0();
 	static const uint16_t zero[4];
 
@@ -1944,6 +1949,7 @@ void tr_raster_band(uint16_t             *fb,
 	if (fb != NULL) {
 		band_copy(fb, stride_px, cband, y_lo, y_hi);
 	}
+	PROF_ADD1(TR_PROF_BAND, (uint32_t)(y_hi - y_lo) * TR_R3D_W, 1);
 }
 
 void tr_tri_setup_range(const tr_dl_t *dl, tr_tri_setup_t *setup, uint32_t lo, uint32_t hi)
