@@ -13,7 +13,7 @@
 static uint16_t portrait[TR_HUD_W * TR_HUD_H];
 static uint16_t turned[TR_ROT_HUD_W * TR_HUD_W];
 
-static void check(int rot, const tr_hud_view_t *v)
+static void check(int rot, tr_hud_view_t *v)
 {
 	tr_hud_t h;
 
