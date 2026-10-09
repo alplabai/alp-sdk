@@ -246,3 +246,17 @@ ZTEST(rv3028c7_dispatch_ack, test_init_clears_a_stale_evf_and_never_enables_eie)
 	zassert_equal(fake_regs[REG_STATUS], STATUS_BSF, "regs=0x%02x", fake_regs[REG_STATUS]);
 	zassert_equal(fake_regs[0x10] & 0x04u, 0u, "EIE must not be enabled by init");
 }
+
+ZTEST(rv3028c7_dispatch_ack, test_init_leaves_evf_alone_when_eie_is_on)
+{
+	/* EIE already on: EVF is a live event (maybe the wake cause), not stale. */
+	fake_reset();
+	fake_regs[REG_STATUS] = 0x02u /* EVF */;
+	fake_regs[0x10]       = 0x04u /* EIE */;
+
+	rv3028c7_t ctx = open_rtc();
+	(void)ctx;
+
+	zassert_equal(
+	    fake_regs[REG_STATUS] & 0x02u, 0x02u, "EVF kept, regs=0x%02x", fake_regs[REG_STATUS]);
+}

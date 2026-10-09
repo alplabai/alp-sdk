@@ -302,7 +302,7 @@ config ALP_SDK_POWER_ALIF_SE
 config ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS
 	bool "Re-apply the RUN profile at boot when the clock tree is not the running one"
 	depends on ALP_SDK_POWER_ALIF_SE
-	default y
+	default y if ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	help
 	  A wake from STOP is a cold boot into whatever clock tree the Secure Enclave left,
 	  and after a reset taken inside the STOP that was all-RC (UART at ~1/5 baud, a slow
@@ -310,7 +310,11 @@ config ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS
 	  every peripheral) the backend checks the hardware state -- PLL not locked, or the PLL
 	  clock select not the running tree -- and, only then, calls se_service_set_run_cfg()
 	  with a complete explicit RUN profile (the vendor system_off sample does the same).
-	  Product behaviour, not bench-only: a product waking from STOP needs its clocks back.
+	  Product behaviour in intent (a product waking from STOP needs its clocks back), but
+	  UNPROVEN: the profile is measured on the E1M-AEN803 only, so it defaults on only in a
+	  bench image (the bench scratch option) until bench-proven.
+	  TODO(#2784): evaluate hal_alif's CONFIG_ALIF_SE_DTS_RUN_PROFILE (the aipm-run
+	  devicetree node) instead of this hand-rolled profile.
 
 config ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER
 	bool "Allow STOP / STANDBY with a debugger attached (bench only)"

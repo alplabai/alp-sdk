@@ -1416,8 +1416,8 @@ ZTEST(power_som_domains, test_another_images_bench_cell_starts_a_fresh_run)
 	hold_everything();
 	g_stop_mode = 0x10u;
 	wake_boot(&info);
-	zassert_false(info.valid, "the flash's reset is not a STOP wake");
-	zassert_equal(level(LPGPIO, NRST_PIN), 0, "no blind restore on a foreign status");
+	zassert_false(info.valid, "the flash's reset is not reported as a STOP wake");
+	zassert_equal(level(LPGPIO, NRST_PIN), 1, "but what the old run left held is released");
 	zassert_false(alp_som_pd_bkram_foreign(), "adopted");
 	zassert_equal(alp_som_pd_bench_count(), 0u);
 	g_image = 0xA1111111u;
@@ -1438,9 +1438,9 @@ ZTEST(power_som_domains, test_a_record_from_another_image_is_dropped)
 	hold_everything();
 	g_stop_mode = 0x10u;
 	wake_boot(&info);
-	zassert_false(info.valid);
+	zassert_false(info.valid, "not reported as a wake");
 	zassert_false(alp_som_pd_store_load(&rec), "the record is gone");
-	zassert_equal(level(LPGPIO, NRST_PIN), 0);
+	zassert_equal(level(LPGPIO, NRST_PIN), 1, "the domains the record names are restored anyway");
 	g_image = 0xA1111111u;
 }
 

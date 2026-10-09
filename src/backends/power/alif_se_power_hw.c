@@ -252,8 +252,8 @@ static alp_status_t wake_timer_arm_locked(uint32_t ticks)
 	 * 32 kHz domain has seen its first edge after ENABLE (~30 us).  So both are "not
 	 * loaded".  Poll until CURRENTVAL is a real count (<= LOADCOUNT), then require a
 	 * second read strictly smaller than the first: only a counting timer does that.  The
-	 * whole poll is bounded to ~4 LF ticks (122 us); only a timeout means "not counting". */
-	const uint32_t bound = (sys_clock_hw_cycles_per_sec() / 1000000u) * 122u;
+	 * whole poll is bounded to ~10 LF ticks (~300 us); only a timeout means "not counting". */
+	const uint32_t bound = (sys_clock_hw_cycles_per_sec() / 1000000u) * 305u;
 	const uint32_t t0    = DWT->CYCCNT;
 	const uint32_t load  = sys_read32(HW_LPT_LOAD);
 	uint32_t       first = 0u;
@@ -363,16 +363,19 @@ static void diag_capture(uint32_t w[ALP_SOM_PD_DIAG_WORDS], bool with_lptimer)
 		w[13] = DWT->CYCCNT - _arm_cyc;
 	}
 #endif
-	w[5] = sys_read32(HW_ANA_BASE + 0x08u);
-	w[6] = sys_read32(HW_VBAT_BASE + 0x04u);
-	w[7] = sys_read32(HW_ANA_MISC);
-	/* The LPRTC counter needs RTC_CLK_EN; enable it when clear, and record how it was. */
+	w[5]  = sys_read32(HW_ANA_BASE + 0x08u);
+	w[6]  = sys_read32(HW_VBAT_BASE + 0x04u);
+	w[7]  = sys_read32(HW_ANA_MISC);
 	w[10] = sys_read32(HW_VBAT_BASE + 0x10u);
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	/* Bench only: the LPRTC counter needs RTC_CLK_EN; enable it when clear (w[10] is how it
+	 * was).  A product build leaves the VBAT register alone and does not read the counter. */
 	if ((w[10] & 1u) == 0u) {
 		sys_write32(w[10] | 1u, HW_VBAT_BASE + 0x10u);
 	}
-	w[8]  = sys_read32(0x42000000u);
-	w[9]  = sys_read32(0x42000004u);
+	w[8] = sys_read32(0x42000000u);
+	w[9] = sys_read32(0x42000004u);
+#endif
 	w[11] = NVIC->ISER[1];
 	w[12] = NVIC->ISPR[1];
 	w[14] = sys_read32(HW_RET_CTRL);
@@ -734,12 +737,16 @@ bool alp_som_power_reset_syndrome_trusted(void)
  * callers use it only as a coarse, conservative elapsed-time bound. */
 uint32_t alif_se_hw_lprtc_ccvr(void)
 {
+#ifndef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	return 0u; /* product: the RV-3028 is the elapsed-time witness; RTC_CLK_EN stays untouched */
+#else
 	uint32_t en = sys_read32(HW_VBAT_BASE + 0x10u);
 
 	if ((en & 1u) == 0u) {
 		sys_write32(en | 1u, HW_VBAT_BASE + 0x10u);
 	}
 	return sys_read32(0x42000000u);
+#endif
 }
 
 /* CGU registers (base 0x1A602000, Alif DFP soc.h CGU_BASE): OSC_CTRL +0x00, PLL_LOCK_CTRL
@@ -763,7 +770,8 @@ uint32_t alif_se_hw_cgu_read(unsigned which)
  * mode"), bit 4 STOP_MODE_STAT (sticky until acknowledged).  HAZARD: a write with bit 0 set
  * enters stop mode, so this is a plain write of exactly the STAT bit and never a
  * read-modify-write (a read-modify-write would write back bit 0 if it reads 1). */
-#define HW_STOP_MODE_REG      DT_REG_ADDR(DT_NODELABEL(stop_mode))
+#define HW_STOP_MODE_REG DT_REG_ADDR(DT_NODELABEL(stop_mode))
+BUILD_ASSERT(HW_STOP_MODE_REG == 0x1A60F000u, "VBAT_STOP_MODE_REG moved");
 #define HW_STOP_MODE_CTRL     BIT(0)
 #define HW_STOP_MODE_STAT     BIT(4)
 #define HW_STOP_MODE_STAT_W1C 0x00000010u
@@ -800,4 +808,18 @@ uint32_t alif_se_hw_lpgpio_ext_porta(void)
 uint32_t alif_se_hw_lpperi_cken(void)
 {
 	return sys_read32(0x1A60401Cu);
+}
+
+/* PRE_KERNEL_1 runs before the system clock driver (PRE_KERNEL_2) starts SysTick, so
+ * k_busy_wait() -- which waits on the cycle counter the kernel derives from it -- must not
+ * be used there.  DWT CYCCNT only needs TRCENA + CYCCNTENA. */
+uint32_t alif_se_hw_cycles(void)
+{
+	if ((DCB->DEMCR & DCB_DEMCR_TRCENA_Msk) == 0u) {
+		DCB->DEMCR |= DCB_DEMCR_TRCENA_Msk;
+	}
+	if ((DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) == 0u) {
+		DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+	}
+	return DWT->CYCCNT;
 }

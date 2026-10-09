@@ -96,6 +96,10 @@ typedef struct {
  *         clears it, Application Manual Rev. 1.4 p.22), and force
  *         24-hour mode.
  *
+ *  A stale External Event flag (EVF) is cleared too, but only while the
+ *  External-event interrupt enable (EIE) is off; with EIE on, EVF is a live
+ *  event (possibly the cause of the wake being decoded) and is left set.
+ *
  *  Call @ref rv3028c7_was_cold_start afterwards to learn whether
  *  PORF was set going in, i.e. whether the time this RTC is holding
  *  should be treated as trustworthy. */

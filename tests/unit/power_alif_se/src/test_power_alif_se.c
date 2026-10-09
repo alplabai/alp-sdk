@@ -376,6 +376,37 @@ static unsigned      g_run_set_calls;
 static run_profile_t g_run_set;
 static bool          g_run_set_locks_pll = true;
 
+/* Bench build (the test's CMakeLists defines the option): the diag patch is real code in the
+ * header contract, so fake it and keep what the clock restore wrote to BOOT word 40. */
+static uint32_t g_boot_w[ALP_SOM_PD_DIAG_WORDS];
+static uint32_t g_w40_at_se_call;
+
+void alp_som_pd_diag_patch(unsigned slot, unsigned idx, uint32_t value)
+{
+	if (slot == ALP_SOM_PD_DIAG_BOOT && idx < ALP_SOM_PD_DIAG_WORDS) {
+		g_boot_w[idx] = value;
+	}
+}
+
+void alp_som_pd_diag_invalidate(unsigned slot)
+{
+	(void)slot;
+}
+
+/* The cycle counter the PLL wait is bounded by.  Every read jumps g_cycle_step cycles, so a
+ * wait bounded by CYCLES ends after a handful of reads; one bounded only by an iteration
+ * count (or by a k_busy_wait that works on the host) would read it millions of times. */
+static uint32_t g_cycles;
+static uint32_t g_cycle_step;
+static unsigned g_cycle_reads;
+
+uint32_t alif_se_hw_cycles(void)
+{
+	g_cycle_reads++;
+	g_cycles += g_cycle_step;
+	return g_cycles;
+}
+
 uint32_t alif_se_hw_cgu_read(unsigned which)
 {
 	return g_cgu[which];
@@ -412,6 +443,7 @@ int se_service_set_run_cfg(run_profile_t *pp)
 {
 	g_run_set = *pp;
 	g_run_set_calls++;
+	g_w40_at_se_call = g_boot_w[40];
 	if (g_run_set_rc == 0 && g_run_set_locks_pll) {
 		g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 1u;
 		g_cgu[ALIF_SE_CGU_PLL_CLK_SEL]   = 0x00110111u;
@@ -473,6 +505,11 @@ static alp_power_backend_state_t g_state;
 
 static void reset_fakes(void)
 {
+	memset(g_boot_w, 0, sizeof(g_boot_w));
+	g_w40_at_se_call = 0xFFFFFFFFu;
+	g_cycles         = 0u;
+	g_cycle_step     = 1000000u;
+	g_cycle_reads    = 0u;
 	memset(g_ev, 0, sizeof(g_ev));
 	g_ev_n = 0;
 
@@ -1787,6 +1824,33 @@ ZTEST(power_alif_se, test_a_failed_restore_is_logged_not_fatal)
 	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
 	g_run_set_locks_pll              = false;
 	zassert_equal(clock_restore(), 0);
+}
+
+ZTEST(power_alif_se, test_a_pll_that_never_locks_ends_the_wait_by_cycles_not_by_k_busy_wait)
+{
+	/* PRE_KERNEL_1: no SysTick, so k_busy_wait would spin forever on the target.  The host's
+	 * works, so this test cannot lean on it: the fake cycle counter advances 1M cycles per
+	 * read and the wait must give up after ~ALIF_SE_PLL_WAIT_CYCLES / 1M reads. */
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
+	g_run_set_locks_pll              = false;
+	g_cycle_step                     = 1000000u;
+
+	zassert_equal(clock_restore(), 0, "returns");
+	zassert_true(g_cycle_reads >= ALIF_SE_PLL_WAIT_CYCLES / g_cycle_step,
+	             "waited the full bound (%u reads)",
+	             g_cycle_reads);
+	zassert_true(g_cycle_reads <= ALIF_SE_PLL_WAIT_CYCLES / g_cycle_step + 4u,
+	             "and stopped on the cycle bound (%u reads)",
+	             g_cycle_reads);
+	zassert_equal(g_boot_w[40], 2u, "reported as failed");
+}
+
+ZTEST(power_alif_se, test_the_in_progress_marker_is_written_before_the_se_call)
+{
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
+	zassert_equal(clock_restore(), 0);
+	zassert_equal(g_w40_at_se_call, 3u, "w40 = 3 when set_run_cfg ran");
+	zassert_equal(g_boot_w[40], 1u, "and 1 once the PLL locked");
 }
 
 ZTEST(power_alif_se, test_the_run_profile_matches_the_cold_boot_profile)

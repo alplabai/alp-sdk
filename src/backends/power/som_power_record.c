@@ -123,8 +123,9 @@ bool alp_som_pd_store_load(alp_som_pd_record_t *out)
 }
 
 /* CRC-32 of the ROM region (vector table, code, rodata): changes with any rebuild or
- * variant.  Computed once per boot.  Only the BKRAM build has a ROM image worth checking. */
-#if SOMPD_IN_BKRAM
+ * variant.  Computed once per boot.  Bench builds only: it costs 15-30 ms, which a product
+ * boot must not pay; there the identity is the constant 0 (every image's data is "ours"). */
+#if SOMPD_IN_BKRAM && defined(CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH)
 #include <zephyr/linker/linker-defs.h>
 
 __weak uint32_t alp_som_pd_image_id(void)
@@ -170,7 +171,7 @@ void alp_som_pd_store_poke(const alp_som_pd_record_t *rec)
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 /* Bench-only retention proof: a counter with its own magic + CRC, so a power cycle
  * (random SRAM) reads as 0 rather than garbage. */
-#define SOMPD_BENCH_MAGIC 0x42454e43u /* "BENC" */
+#define SOMPD_BENCH_MAGIC 0x42454e32u /* "BEN2" */
 
 uint32_t alp_som_pd_bench_count(void)
 {

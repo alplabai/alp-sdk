@@ -78,6 +78,11 @@ void alif_se_hw_rtc_int_disarm(void);
 #define ALIF_SE_CGU_ACLK_CTRL     3u
 uint32_t alif_se_hw_cgu_read(unsigned which);
 
+/** Free-running cycle counter (DWT CYCCNT, enabled and left as found by the caller's
+ *  convenience: TRCENA / CYCCNTENA are turned on if off).  For bounding waits when SysTick
+ *  is not running yet (PRE_KERNEL_1), where k_busy_wait() would spin forever. */
+uint32_t alif_se_hw_cycles(void);
+
 /** LPGPIO EXT_PORTA (the pins as the on-chip GPIO block sees them). */
 uint32_t alif_se_hw_lpgpio_ext_porta(void);
 

@@ -192,6 +192,7 @@ static boot_capture_t               _boot;
 static alp_som_pd_record_t          _boot_rec; /* the cycle's record, kept for the wake decode */
 static bool                         _boot_external; /* this boot followed a pin / external reset */
 static bool _ignore_stat; /* BKRAM held another image's data: STOP_MODE_STAT means nothing here */
+static bool _boot_suppressed; /* ... and nothing about this boot is reported as a wake */
 
 K_MUTEX_DEFINE(_lock);
 
@@ -947,8 +948,10 @@ void alp_som_power_reset_for_test(void)
 	memset(_hook_ctx, 0, sizeof(_hook_ctx));
 	memset(&_boot, 0, sizeof(_boot));
 	memset(&_boot_rec, 0, sizeof(_boot_rec));
-	_boot_external = false;
-	_pads_applied  = false;
+	_boot_external   = false;
+	_boot_suppressed = false;
+	_ignore_stat     = false;
+	_pads_applied    = false;
 	alp_som_pd_store_clear();
 	k_mutex_unlock(&_lock);
 }
@@ -1014,16 +1017,23 @@ int alp_som_power_boot_restore(void)
 	 * have to be put back, so the restore below is unchanged; only the report differs. */
 	const bool nsrst = (alp_som_power_reset_syndrome_take() & SOMPD_RESET_NSRST) != 0u;
 
-	_boot_external = false;
-	_ignore_stat   = false;
+	_boot_external   = false;
+	_ignore_stat     = false;
+	_boot_suppressed = false;
 
 	/* Another image's data in BKRAM (a clean flash on top of a run that slept, bench U8d):
 	 * the counter and the diag belong to someone else, and a sticky STOP_MODE_STAT set by
-	 * that run is not this image's wake.  Start fresh and ignore the status this boot. */
+	 * that run is not this image's wake.  Start fresh, ignore the status and report nothing
+	 * this boot -- but STILL put back whatever that run left held (from its record, or
+	 * blind): a domain left in reset is the worse outcome. */
+	bool foreign_cell = false;
+	bool foreign_rec  = false;
+
 	if (alp_som_pd_bkram_foreign()) {
-		alp_som_pd_store_clear();
 		alp_som_pd_bkram_adopt();
-		_ignore_stat = true;
+		_ignore_stat     = true;
+		_boot_suppressed = true;
+		foreign_cell     = true;
 	}
 
 	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 51u, alp_som_pd_image_id());
@@ -1032,13 +1042,13 @@ int alp_som_power_boot_restore(void)
 	bool                have = alp_som_pd_store_load(&rec);
 
 	if (have && rec.image_id != alp_som_pd_image_id()) {
-		alp_som_pd_store_clear();
 		alp_som_pd_bkram_adopt();
-		_ignore_stat = true;
-		have         = false;
+		_ignore_stat     = true;
+		_boot_suppressed = true;
+		foreign_rec      = true; /* restored from its record below, but not reported */
 	}
 	if (!have) {
-		if (stop_mode_stat_set()) {
+		if (stop_mode_stat_set() || foreign_cell) {
 			/* A STOP wake with no usable record: never leave NOR, PHY or the CC3501E held. */
 			uint32_t restored, failed, named;
 
@@ -1060,7 +1070,7 @@ int alp_som_power_boot_restore(void)
 	 * bench / test cycle interrupted by a warm reset, and a STANDBY record's status
 	 * bit is not established (the register names STOP only): for both, leaving the
 	 * domains held would be the worse outcome, so they are restored. */
-	if (rec.mode == (uint32_t)ALP_POWER_MODE_STOP && !stop_mode_stat_agrees()) {
+	if (!foreign_rec && rec.mode == (uint32_t)ALP_POWER_MODE_STOP && !stop_mode_stat_agrees()) {
 		alp_som_pd_store_clear();
 		k_mutex_unlock(&_lock);
 		return 0;
@@ -1239,6 +1249,9 @@ alp_status_t alp_som_power_ops_domain_info(alp_power_domain_t domain, alp_power_
 
 alp_status_t alp_som_power_ops_boot_wake_info(alp_power_boot_info_t *out)
 {
+	if (_boot_suppressed) {
+		return ALP_OK; /* another image's leftovers were cleaned up; nothing to report */
+	}
 	out->valid                  = _boot.valid;
 	out->realised_mode          = (alp_power_mode_t)_boot.mode;
 	out->wake_source            = _boot.wake_source;

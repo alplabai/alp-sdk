@@ -395,6 +395,16 @@ int main(void)
 	print_diag("pre", ALP_SOM_PD_DIAG_PRE);
 	alp_som_pd_diag_invalidate(ALP_SOM_PD_DIAG_PRE); /* printed once; never read as stale later */
 	print_diag("boot", ALP_SOM_PD_DIAG_BOOT);
+	{
+		/* BOOT word 16 is VBAT_STOP_MODE_REG as the SDK found it, BEFORE the wake path
+		 * acknowledged STOP_MODE_STAT -- the raw witness; print_stop_mode() above reads it
+		 * after that acknowledge. */
+		alp_som_pd_diag_t b;
+
+		if (alp_som_pd_diag_load(ALP_SOM_PD_DIAG_BOOT, &b)) {
+			printk("POWER_STOP: BOOT w16 (raw pre-clear STOP_MODE)=0x%08x\n", (unsigned)b.w[16]);
+		}
+	}
 	print_se_profiles();
 
 	if (done > N_CYCLES) {

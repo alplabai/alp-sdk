@@ -89,7 +89,8 @@ typedef struct {
 	uint32_t crc;         /**< CRC-32 (IEEE) over every field above. */
 } alp_som_pd_record_t;
 
-#define ALP_SOM_PD_RECORD_MAGIC 0x41504d44u /* "APMD" */
+#define ALP_SOM_PD_RECORD_MAGIC \
+	0x41504d45u /* "APME": layout changed, an older record reads as foreign */
 
 /* ---- Hook binding -------------------------------------------------------- */
 

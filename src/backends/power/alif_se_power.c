@@ -1209,6 +1209,7 @@ bool alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
  * programmed against the nominal clock and is right again once the clock is.
  */
 #define ALIF_SE_PLL_CLK_SEL_RUN 0x00110111u
+#define ALIF_SE_PLL_WAIT_CYCLES 8000000u
 #define ALIF_SE_CGU_PLL_LOCK    BIT(0)
 
 _Static_assert(offsetof(run_profile_t, vdd_ioflex_3V3) + sizeof(uint32_t) == sizeof(run_profile_t),
@@ -1250,12 +1251,23 @@ static int clock_restore(void)
 	int           rc;
 
 	build_run_profile(&run);
+	/* 3 = "in progress", written BEFORE the SE call: if anything below hangs, the slot says
+	 * so instead of reading 0 ("healthy"). */
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 40u, 3u);
 	rc = se_service_set_run_cfg(&run);
 	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 41u, (uint32_t)rc);
 
-	/* The PLL needs time to lock after the SE retunes it. */
-	for (unsigned i = 0; i < 500u && !clocks_healthy(); ++i) {
-		k_busy_wait(100);
+	/* The PLL needs time to lock after the SE retunes it.  NOT k_busy_wait(): this runs at
+	 * PRE_KERNEL_1, before SysTick exists, and that call would spin forever (reviewer, bench
+	 * U8d follow-up).  Bounded by the cycle counter -- 8M cycles is >= 50 ms even on the
+	 * 76.8 MHz RC (104 ms) and 50 ms at 160 MHz -- and, in case the counter is not running, by
+	 * an iteration cap too. */
+	const uint32_t t0 = alif_se_hw_cycles();
+
+	for (unsigned i = 0; i < 4000000u && !clocks_healthy(); ++i) {
+		if ((alif_se_hw_cycles() - t0) > ALIF_SE_PLL_WAIT_CYCLES) {
+			break;
+		}
 	}
 	alp_som_pd_diag_patch(
 	    ALP_SOM_PD_DIAG_BOOT, 42u, alif_se_hw_cgu_read(ALIF_SE_CGU_PLL_LOCK_CTRL));
