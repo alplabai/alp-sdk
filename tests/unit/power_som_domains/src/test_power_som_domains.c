@@ -353,6 +353,33 @@ ZTEST(power_som_domains, test_rollback_failure_is_reported_and_retryable)
 	zassert_equal(alp_som_power_state(ALP_POWER_DOMAIN_EXT_FLASH), ALP_SOM_PD_ACTIVE);
 }
 
+ZTEST(power_som_domains, test_a_failed_runtime_restore_keeps_the_failed_domain_for_a_retry)
+{
+	uint32_t failed = 0u;
+
+	bind_all_logging();
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
+	g_fail_restore_on = ALP_POWER_DOMAIN_EXT_FLASH;
+
+	zassert_equal(alp_som_power_restore(&failed), ALP_ERR_IO);
+	zassert_equal(failed, ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_EXT_FLASH));
+
+	/* Not cleared: the failed domain is a RUN record, in BKRAM and in RAM. */
+	alp_som_pd_record_t rec;
+
+	zassert_true(alp_som_pd_store_load(&rec));
+	zassert_equal(rec.mode, (uint32_t)ALP_POWER_MODE_RUN);
+	zassert_equal(rec.quiesced, ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_EXT_FLASH));
+
+	/* Even with the BKRAM record gone, the RAM copy lets a retry find it. */
+	alp_som_pd_store_clear();
+	g_fail_restore_on = ALP_POWER_DOMAIN_COUNT;
+	g_log_n           = 0;
+	zassert_ok(alp_som_power_restore(NULL));
+	zassert_equal(g_log_n, 1u);
+	zassert_equal(g_log[0], ALP_POWER_DOMAIN_EXT_FLASH);
+}
+
 ZTEST(power_som_domains, test_rollback_retry_record_survives_a_warm_reset)
 {
 	alp_power_boot_info_t info;

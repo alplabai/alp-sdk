@@ -940,6 +940,19 @@ alp_status_t alp_som_power_restore(uint32_t *failed_out)
 	uint32_t restored, failed;
 	restore_domains(&rec, ~0u, false, &restored, &failed);
 	alp_som_pd_store_clear();
+	if (failed != 0u) {
+		/* As the quiesce rollback does: a domain that could not be put back stays in the
+		 * record (RUN mode, so the next boot's restore does not need STOP_MODE_STAT to
+		 * vouch for it), in BKRAM and in RAM, so a retry still has the data. */
+		alp_som_pd_record_t retry = { .mode         = (uint32_t)ALP_POWER_MODE_RUN,
+			                          .quiesced     = failed,
+			                          .rail_off     = rec.rail_off & failed,
+			                          .prior_active = rec.prior_active & failed };
+
+		alp_som_pd_store_save(&retry);
+		_ram_rec       = retry;
+		_ram_rec_valid = true;
+	}
 	k_mutex_unlock(&_lock);
 	if (failed_out != NULL) {
 		*failed_out = failed;

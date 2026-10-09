@@ -383,15 +383,13 @@ static void diag_capture(uint32_t w[ALP_SOM_PD_DIAG_WORDS], bool with_lptimer)
 	w[6]  = sys_read32(HW_VBAT_BASE + 0x04u);
 	w[7]  = sys_read32(HW_ANA_MISC);
 	w[10] = sys_read32(HW_VBAT_BASE + 0x10u);
-#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	/* Bench only: the LPRTC counter needs RTC_CLK_EN; enable it when clear (w[10] is how it
 	 * was).  A product build leaves the VBAT register alone and does not read the counter. */
 	if ((w[10] & 1u) == 0u) {
 		sys_write32(w[10] | 1u, HW_VBAT_BASE + 0x10u);
 	}
-	w[8] = sys_read32(0x42000000u);
-	w[9] = sys_read32(0x42000004u);
-#endif
+	w[8]  = sys_read32(0x42000000u);
+	w[9]  = sys_read32(0x42000004u);
 	w[11] = NVIC->ISER[1];
 	w[12] = NVIC->ISPR[1];
 	w[14] = sys_read32(HW_RET_CTRL);

@@ -102,10 +102,13 @@ restore a wake comes up at 23040 baud with a half-rate tick. Supply current at t
 board's 16 V input (a DPS reading of the whole EVK, **not** a SoC measurement): about
 0.043 A in STOP against 0.058 A awake. **`memory_blocks` MRAM | SERAM | BKRAM is required:**
 with MRAM | SERAM left out the board still returned on time, but the SE rebooted through the
-cold path (BOOT diag w19 = 1, `RET_CTRL` 0x0002aaf0, the OFF profile reads back cleared). That
-return is classified as a non-STOP wake (pin-reset-like: `STOP_MODE_STAT` does not agree with
-the record), which is the correct behaviour, and a build can not select it outside the bench
-scratch option; the backend also refuses to send an OFF profile without MRAM | SERAM.
+cold path (BOOT diag w19 = 1, `RET_CTRL` 0x0002aaf0, the OFF profile reads back cleared). The
+boot took the trusted-NSRST external-reset path: the reset syndrome showed NSRST (bit 0, probed
+before the sleep and recorded as trustworthy) and `STOP_MODE_STAT` agreed with the record, so the
+return is reported as an aborted sleep (`valid`, `realised_mode` RUN, no wake source) with the
+domains still restored. That is the correct classification, and a build can not select the
+memory-less profile outside the bench scratch option; the backend also checks the profile it
+built and refuses to send one without MRAM | SERAM.
 `vtor_address` = `SCB->VTOR` is optional (3 of 3 without it) and stays the default, as in the
 vendor sample.
 
@@ -193,24 +196,28 @@ Process differences: the vendor sample **re-applies a full explicit RUN profile 
 `PRE_KERNEL_1` priority 46 on every boot** (power domains `PD_SYST | PD_SSE700_AON`, DC-DC 825
 mV PWM, `aon_clk_src` LFXO, `run_clk_src` PLL, 160 MHz, I/O flex 1.8 V, `memory_blocks`
 `MRAM_MASK`), because after a SOFT_OFF wake the SoC comes up on whatever the SE left; this
-backend does not (TODO addendum 6; bench U8c saw UART5 at ~1/5 baud and a slow tick, i.e. no
-PLL). The vendor writes the OFF profile from a PM notifier and never reads it back or touches
+backend does the same at the same slot (`clock_restore`, `ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS`),
+but only when the hardware says the clock tree is not the running one (PLL not locked, or the
+three `PLL_CLK_SEL` bits for this core wrong); bench U8c saw UART5 at ~1/5 baud and a slow tick
+without it. The vendor writes the OFF profile from a PM notifier and never reads it back or touches
 `RET_CTRL` / `VBAT_ANA_REG1`. The EWIC entry (`pm_core_enter_deep_sleep_request_subsys_off`) is
 the same sequence as ours, with `RTSS_HE_CTRL` written whole. The vendor wake timer is the same
 LPTIMER0 (`timer0`, `snps,dw-timers`, IRQ 60) through the Zephyr counter API.
 
-Bench U8g settled it: the two OFF fields that made the difference were `memory_blocks`
-(MRAM \| SERAM) and `vtor_address` (`SCB->VTOR`; a preserved value that may be 0 resumes at an
-empty ITCM), and both are now the backend default. `aon_clk_src` and `stby_clk_freq` remain
-bench knobs. The boot-time clock restore now exists (`ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS`).
+Bench U8g / U8h settled the OFF fields: `memory_blocks` MRAM \| SERAM \| BKRAM is required (without
+it the SE reboots instead of resuming), `vtor_address` = `SCB->VTOR` is optional (3 of 3 cycles
+without it) and stays the default as in the vendor sample. `aon_clk_src` (LFXO) and
+`stby_clk_freq` (76.8 MHz) remain bench-only knobs; STOP works without them.
 
 **Wake decode.** The record in BKRAM carries what was armed; on the cold boot the
 LPTIMER status is read before its driver initialises, and the RV-3028 flags and
 calendar in the I2C restore pass. `slept_ms` is the RV-3028 calendar delta (1 s
 resolution).
 
-**Not verified on silicon:** that the SE accepts the profile, that the EWIC entry
-removes power (`RTSS_HE_CTRL.COLD_WAKEUP` is cleared and `WIC` set by
-read-modify-write), that BKRAM retains with bit 21, the HE TCM bank sizes and
-ITCM / DTCM split, STANDBY, and that the LPGPIO holds survive the SE's wake boot.
-`examples/aen/aen-power-stop` is the bench for the first three.
+**Verified on silicon (bench U8h, E1M-AEN803):** the SE accepts the profile, the EWIC entry
+removes power and the wake is a cold boot, BKRAM (bit 21) retains the record across STOP, and
+the LPTIMER (500 ms, 5 s) and the RV-3028 countdown (3 s, 11 s) and alarm wake the SoC.
+**Not verified:** STANDBY, the HE TCM bank sizes and ITCM / DTCM split, retention of
+application RAM, that the LPGPIO holds survive the SE's wake boot on every board population,
+the E1M-AEN801, and the E4. `examples/aen/aen-power-stop` is the bench (the
+`product-noscratch` variant is the shipping configuration without the bench cell).

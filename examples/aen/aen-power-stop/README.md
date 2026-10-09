@@ -72,6 +72,7 @@ One variable each, selected with a config fragment on top of `prj.conf`
 | (P-novtor) | `p-novtor.conf` | (P) with the live vtor_address | ablation of the resume vector |
 | (P-nomem) | `p-nomem.conf` | (P) without MRAM \| SERAM in memory_blocks | ablation of the memory blocks |
 | (P-500) | `p-500.conf` | (P) with LPTIMER 500 ms | the short interval |
+| (product-noscratch) | `product-noscratch.conf` | the shipping configuration: no bench scratch option (no BKRAM bench cell, diag, image CRC, LPRTC witness or `RTC_CLK_EN` write), default 1 s LPTIMER ceiling, restore on; the cycle number is kept in the RV-3028 User RAM 1 | cycles LPTIMER 500 ms, countdown 3 s, alarm; prints `wake_source`, `slept_ms`, `clocks uart_baud=... tick_ms_per_2_rtc_s=...` and the verdicts (`tick_rate` instead of `bkram_counter`) |
 | (A-norestore) | `vii-a-norestore.conf` | (P) with `RESTORE_CLOCKS=n` | no boot-time `set_run_cfg`; the UART comes up at 1/5 baud |
 | (R-vendor) | `ix-repro-vendor.conf` | forces the boot-time restore on a cold boot (fixed profile), then BKRAM self-test, then cycle 1 in the same boot | `bkram live=1 selftest=1` and BOOT w40 = 1, w52 = 1 |
 | (R-legacy) | `x-repro-legacy.conf` | the same with the c6de654ff restore profile (0x16d, no BACKUP4K, no re-assert) | reproduces the U8e loss: `bkram live=0`, BOOT w52 = 2, the sleep refused `bkram_unusable` |

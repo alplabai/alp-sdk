@@ -293,12 +293,19 @@ alp_status_t alp_som_power_quiesce(alp_power_mode_t mode, uint32_t *rollback_fai
 	return (alp_status_t)g_quiesce_rc;
 }
 
+static uint32_t g_restore_failed; /* domains the fake restore cannot put back */
+
 alp_status_t alp_som_power_restore(uint32_t *failed)
 {
 	ev(EV_RESTORE);
 	if (failed != NULL) {
-		*failed = 0;
+		*failed = g_restore_failed;
 	}
+	/* Like the real one: a failed domain stays in the record, a clean restore drops it. */
+	if (g_restore_failed != 0u) {
+		return ALP_ERR_IO;
+	}
+	alp_som_pd_store_clear();
 	return ALP_OK;
 }
 
@@ -379,6 +386,7 @@ static bool          g_run_set_locks_pll = true;
 
 /* Bench build (the test's CMakeLists defines the option): the diag patch is real code in the
  * header contract, so fake it and keep what the clock restore wrote to BOOT word 40. */
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 static uint32_t g_boot_w[ALP_SOM_PD_DIAG_WORDS];
 static uint32_t g_w40_at_se_call;
 
@@ -393,6 +401,7 @@ void alp_som_pd_diag_invalidate(unsigned slot)
 {
 	(void)slot;
 }
+#endif
 
 /* BKRAM seam (som_power_record.c in the product): the shadow lifecycle and the self-test. */
 static unsigned g_shadow_end_calls;
@@ -481,7 +490,9 @@ int se_service_set_run_cfg(run_profile_t *pp)
 {
 	g_run_set = *pp;
 	g_run_set_calls++;
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	g_w40_at_se_call = g_boot_w[40];
+#endif
 	if (g_run_set_rc == 0 && g_run_set_locks_pll) {
 		g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 1u;
 		g_cgu[ALIF_SE_CGU_PLL_CLK_SEL]   = 0x00110111u;
@@ -543,16 +554,19 @@ static alp_power_backend_state_t g_state;
 
 static void reset_fakes(void)
 {
-	g_bkram_ok          = true;
-	g_shadowed          = false;
-	g_shadow_end_calls  = 0u;
-	g_selftest_calls    = 0u;
+	g_bkram_ok         = true;
+	g_restore_failed   = 0u;
+	g_shadowed         = false;
+	g_shadow_end_calls = 0u;
+	g_selftest_calls   = 0u;
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	alp_som_bench_knobs = (alp_som_bench_knobs_t){ 0 };
 	memset(g_boot_w, 0, sizeof(g_boot_w));
 	g_w40_at_se_call = 0xFFFFFFFFu;
-	g_cycles         = 0u;
-	g_cycle_step     = 1000000u;
-	g_cycle_reads    = 0u;
+#endif
+	g_cycles      = 0u;
+	g_cycle_step  = 1000000u;
+	g_cycle_reads = 0u;
 	memset(g_ev, 0, sizeof(g_ev));
 	g_ev_n = 0;
 
@@ -643,6 +657,7 @@ static void before(void *f)
 	reset_fakes();
 }
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 static alp_som_bench_knobs_t g_initial_knobs;
 
 static void *suite_setup(void)
@@ -650,8 +665,13 @@ static void *suite_setup(void)
 	g_initial_knobs = alp_som_bench_knobs; /* what the build defaults to, before any test */
 	return NULL;
 }
+#endif
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST_SUITE(power_alif_se, NULL, suite_setup, before, NULL, NULL);
+#else
+ZTEST_SUITE(power_alif_se, NULL, NULL, before, NULL, NULL);
+#endif
 
 static void assert_no_side_effect(void)
 {
@@ -715,6 +735,7 @@ ZTEST(power_alif_se, test_off_profile_standby_differs_only_where_documented)
 	zassert_equal(out.stby_clk_freq, SCALED_FREQ_RC_STDBY_76_8_MHZ);
 }
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_off_profile_vtor_preserved_from_live)
 {
 	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,
@@ -735,7 +756,9 @@ ZTEST(power_alif_se, test_off_profile_vtor_preserved_from_live)
 	zassert_equal(out.vtor_address, 0x80012000u);
 	zassert_equal(out.vtor_address_ns, 0x80012100u);
 }
+#endif
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_off_profile_masks_come_from_the_gen2_header)
 {
 	sleep_plan_t  plan = { .mode = ALP_POWER_MODE_STOP };
@@ -766,6 +789,7 @@ ZTEST(power_alif_se, test_off_profile_masks_come_from_the_gen2_header)
 	zassert_equal(out.wakeup_events, ALP_AIPM_GEN2_WE_LPTIMER0 | ALP_AIPM_GEN2_WE_LPGPIO0);
 	zassert_equal(out.ewic_cfg, ALP_AIPM_GEN2_EWIC_VBAT_TIMER | ALP_AIPM_GEN2_EWIC_VBAT_GPIO);
 }
+#endif
 
 ZTEST(power_alif_se, test_off_profile_lfxo_only_when_selected)
 {
@@ -1219,6 +1243,7 @@ ZTEST(power_alif_se, test_untouched_registers_are_not_written)
 	zassert_equal(ev_count(EV_REG_WRITE), 0u, "already right: no write");
 }
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_tcm_retention_needs_ldo2_and_tcm_masks)
 {
 	g_state.retain = (alp_power_retain_t){ .level = ALP_POWER_RETAIN_TCM, .retain_kb = 64u };
@@ -1230,6 +1255,7 @@ ZTEST(power_alif_se, test_tcm_retention_needs_ldo2_and_tcm_masks)
 	zassert_true((g_regs_at_enter[ALIF_SE_REG_RET_CTRL] & (RET_CTRL_HETCM1 | RET_CTRL_HETCM2)) ==
 	             (RET_CTRL_HETCM1 | RET_CTRL_HETCM2));
 }
+#endif
 
 ZTEST(power_alif_se, test_retention_that_does_not_stick_refuses_to_sleep)
 {
@@ -1705,6 +1731,7 @@ ZTEST(power_alif_se, test_the_entry_gets_no_ticks_for_an_rtc_only_wake)
 	zassert_equal(ev_count(EV_ARM_LPTIMER), 0u);
 }
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_bench_variants_default_to_the_documented_profile)
 {
 	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,
@@ -1716,6 +1743,7 @@ ZTEST(power_alif_se, test_bench_variants_default_to_the_documented_profile)
 	zassert_equal(out.memory_blocks, ALP_AIPM_GEN2_BACKUP4K_MASK, "no MRAM / SERAM by default");
 	zassert_equal(out.vtor_address, g_live.vtor_address, "the live vtor is preserved by default");
 }
+#endif
 
 ZTEST(power_alif_se, test_the_record_says_whether_nsrst_can_be_trusted)
 {
@@ -1883,6 +1911,7 @@ ZTEST(power_alif_se, test_a_failed_restore_is_logged_not_fatal)
 	zassert_equal(clock_restore(), 0);
 }
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_a_pll_that_never_locks_ends_the_wait_by_cycles_not_by_k_busy_wait)
 {
 	/* PRE_KERNEL_1: no SysTick, so k_busy_wait would spin forever on the target.  The host's
@@ -1901,7 +1930,9 @@ ZTEST(power_alif_se, test_a_pll_that_never_locks_ends_the_wait_by_cycles_not_by_
 	             g_cycle_reads);
 	zassert_equal(g_boot_w[40], 2u, "reported as failed");
 }
+#endif
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_the_in_progress_marker_is_written_before_the_se_call)
 {
 	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
@@ -1909,6 +1940,7 @@ ZTEST(power_alif_se, test_the_in_progress_marker_is_written_before_the_se_call)
 	zassert_equal(g_w40_at_se_call, 3u, "w40 = 3 when set_run_cfg ran");
 	zassert_equal(g_boot_w[40], 1u, "and 1 once the PLL locked");
 }
+#endif
 
 ZTEST(power_alif_se, test_the_run_profile_matches_the_cold_boot_profile)
 {
@@ -1938,6 +1970,7 @@ ZTEST(power_alif_se, test_int_asserted_refusal_dumps_the_rtc_registers_once)
 
 /* ---- BKRAM-safe restore (bench U8e) ---------------------------------------------------- */
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_the_restore_reasserts_the_bkram_retention_enables_then_unshadows)
 {
 	g_shadowed                       = true; /* shadow_begin ran at priority 0 */
@@ -1953,7 +1986,9 @@ ZTEST(power_alif_se, test_the_restore_reasserts_the_bkram_retention_enables_then
 	zassert_equal(g_boot_w[52], 1u);
 	zassert_equal(g_boot_w[40], 1u);
 }
+#endif
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_a_dead_bkram_stays_shadowed_and_the_sleep_is_refused)
 {
 	g_shadowed                       = true;
@@ -1968,6 +2003,7 @@ ZTEST(power_alif_se, test_a_dead_bkram_stays_shadowed_and_the_sleep_is_refused)
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOT_READY);
 	assert_no_side_effect();
 }
+#endif
 
 ZTEST(power_alif_se, test_the_sleep_tests_bkram_before_touching_anything)
 {
@@ -1978,6 +2014,7 @@ ZTEST(power_alif_se, test_the_sleep_tests_bkram_before_touching_anything)
 	assert_no_side_effect();
 }
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_the_runtime_knobs_select_each_vendor_difference_in_the_off_profile)
 {
 	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,
@@ -2012,6 +2049,7 @@ ZTEST(power_alif_se, test_the_runtime_knobs_select_each_vendor_difference_in_the
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
 	zassert_equal(g_set.aon_clk_src, CLK_SRC_LFXO, "the LFXO knob reaches the plan");
 }
+#endif
 
 /* ---- U8g: the /INT check, the product OFF profile, the restore health check ------------ */
 
@@ -2068,6 +2106,7 @@ ZTEST(power_alif_se, test_a_low_pad_with_an_unreadable_rtc_still_refuses)
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
 }
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_the_product_default_is_the_vendor_off_profile)
 {
 	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,
@@ -2085,7 +2124,9 @@ ZTEST(power_alif_se, test_the_product_default_is_the_vendor_off_profile)
 	zassert_equal(out.memory_blocks,
 	              ALP_AIPM_GEN2_BACKUP4K_MASK | ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK);
 }
+#endif
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_the_u8g_clock_tree_is_healthy)
 {
 	/* PLL locked and PLL_CLK_SEL 0x00100111 (ES0 [16] clear): the HE core's clock is right. */
@@ -2101,7 +2142,9 @@ ZTEST(power_alif_se, test_the_u8g_clock_tree_is_healthy)
 	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL] = 0x00100110u; /* SYSREF [0] clear */
 	zassert_false(clocks_healthy());
 }
+#endif
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_w40_reflects_real_health_after_a_restore)
 {
 	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
@@ -2114,3 +2157,80 @@ ZTEST(power_alif_se, test_w40_reflects_real_health_after_a_restore)
 	zassert_equal(clock_restore(), 0);
 	zassert_equal(g_boot_w[40], 1u, "locked and selected");
 }
+#endif
+
+/* ---- A failed domain restore is not hidden (final gate review) -------------------------- */
+
+ZTEST(power_alif_se, test_a_failed_restore_after_an_aborted_sleep_is_reported_and_kept)
+{
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	g_restore_failed    = 0x4u; /* one domain would not come back */
+	alp_power_wake_info_t info;
+
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, &info), ALP_ERR_IO);
+	zassert_equal(ev_count(EV_RESTORE), 1u);
+}
+
+ZTEST(power_alif_se, test_a_failed_restore_on_the_unwind_path_keeps_the_record)
+{
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	g_set_rc            = -5;
+	g_restore_failed    = 0x4u;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_IO);
+	zassert_equal(ev_count(EV_ENTER), 0u);
+	zassert_true(g_rec_valid, "the record is not cleared behind a failed restore");
+}
+
+ZTEST(power_alif_se, test_the_built_profile_is_checked_for_mram_and_seram)
+{
+	off_profile_t p;
+
+	poison(&p);
+	p.memory_blocks = ALP_AIPM_GEN2_BACKUP4K_MASK;
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	alp_som_bench_knobs.mram_seram = true; /* the product value */
+#endif
+	zassert_false(off_memory_ok(&p), "BKRAM alone is not enough");
+	p.memory_blocks |= ALP_AIPM_GEN2_MRAM_MASK;
+	zassert_false(off_memory_ok(&p), "MRAM without SERAM");
+	p.memory_blocks |= ALP_AIPM_GEN2_SERAM_MASK;
+	zassert_true(off_memory_ok(&p));
+
+	/* And the profile build_off_profile() makes always passes. */
+	sleep_plan_t plan = { .mode = ALP_POWER_MODE_STOP, .hw = ALP_SOM_ARM_LPTIMER };
+
+	zassert_ok(build_off_profile(&p, &g_live, &plan));
+	zassert_true(off_memory_ok(&p));
+}
+
+#ifndef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+/* The product configuration (no bench scratch option): the OFF fields are fixed, the diag
+ * patches are no-ops, and nothing bench-only is reachable. */
+ZTEST(power_alif_se, test_product_build_off_profile_is_the_vendor_one_and_not_switchable)
+{
+	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,
+		                   .hw            = ALP_SOM_ARM_LPTIMER,
+		                   .memory_blocks = ALP_AIPM_GEN2_BACKUP4K_MASK };
+	off_profile_t out;
+
+	poison(&out);
+	zassert_ok(build_off_profile(&out, &g_live, &plan));
+	zassert_true(OFF_VTOR_SELF);
+	zassert_true(OFF_MRAM_SERAM);
+	zassert_equal(out.vtor_address, 0x80010400u);
+	zassert_equal(out.memory_blocks,
+	              ALP_AIPM_GEN2_BACKUP4K_MASK | ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK);
+	zassert_equal(out.stby_clk_freq, SCALED_FREQ_RC_STDBY_0_075_MHZ, "no 76.8 MHz knob");
+	zassert_false(BENCH_KNOB(lfxo));
+}
+
+ZTEST(power_alif_se, test_product_build_runs_the_whole_sleep_and_the_restore)
+{
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
+	zassert_equal(clock_restore(), 0);
+	zassert_equal(g_run_set_calls, 1u);
+}
+#endif

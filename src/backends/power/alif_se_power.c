@@ -6,8 +6,10 @@
  * (#2784, unit U7).  alp_power_request_sleep(STOP | STANDBY) on E1M-AEN801 /
  * E1M-AEN803.
  *
- * STATUS: UNTESTED ON SILICON.  CONFIG_ALP_SDK_POWER_ALIF_SE is off by default.
- * Every item marked [BENCH] below is a hypothesis the first bench run must settle.
+ * STATUS: STOP is bench-proven on the E1M-AEN803 (U8h: LPTIMER 500 ms / 5 s, RV-3028
+ * countdown and alarm all woke, BKRAM survived, clocks restored).  STANDBY and the HE TCM
+ * bank sizes are not.  CONFIG_ALP_SDK_POWER_ALIF_SE is off by default.  Items marked
+ * [BENCH] below are still open hypotheses.
  *
  * What a STOP is on this part
  * ---------------------------
@@ -29,9 +31,10 @@
  * backend never read-modify-writes a profile.  build_off_profile() assigns each of
  * the 14 off_profile_t members by name (a test pre-fills the struct with a poison
  * pattern and proves none survives).  Only the three members the SE itself owns
- * are taken from the live profile: dcdc_voltage (range-checked), vtor_address and
- * vtor_address_ns (the fallback; the default replaces both with SCB->VTOR, the vendor
- * resume vector, which the bench showed is needed for the wake -- U8g).
+ * are taken from the live profile: dcdc_voltage (range-checked) and, only as a bench
+ * ablation, vtor_address / vtor_address_ns.  The default replaces both with SCB->VTOR (the
+ * vendor resume vector; optional on the bench, U8h) and always keeps MRAM | SERAM in
+ * memory_blocks, which IS required: without them the SE reboots instead of resuming.
  * After the SE has written the profile the backend reads back ALL 14 members,
  * re-asserts the retention LDO / RET_CTRL bits it needs and refuses to sleep if any
  * of it did not stick.  Before that call it snapshots RET_CTRL and VBAT_ANA_REG1 and
@@ -59,7 +62,8 @@
  *   Nothing else is advertised.  GPIO, UART RX, comparator, brown-out and USB wake
  *   are real hardware features of the part but are not wired by this backend.
  *
- * Refusals (steps 1-3 below change nothing)
+ * Refusals (steps 1-3 below change no SE or domain state; the pre-sleep check clears a
+ * stale RV-3028 UF flag and the BKRAM self-test writes and restores spare SRAM words)
  * ----------------------------------------
  *   ALP_ERR_BUSY       a debugger is attached (DHCSR.C_DEBUGEN; bench override
  *                      CONFIG_ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER), or an armed
@@ -128,8 +132,10 @@ alp_som_bench_knobs_t alp_som_bench_knobs = {
 #else
 #define BENCH_KNOB(name) false
 #endif
-/* The two OFF-profile fields that make the wake work (bench U8g: with both, STOP woke 2 of 2;
- * with neither, no wake) are the product default; only a bench build can turn them off. */
+/* The OFF-profile fields of the vendor sample are the product default.  Bench U8h: MRAM |
+ * SERAM in memory_blocks is REQUIRED (without it the SE reboots through the cold path);
+ * vtor = SCB->VTOR is optional but kept, as the vendor does.  Only a bench build can turn
+ * either off, for ablation. */
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 #define OFF_VTOR_SELF  (alp_som_bench_knobs.vtor_self)
 #define OFF_MRAM_SERAM (alp_som_bench_knobs.mram_seram)
@@ -648,12 +654,23 @@ build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_pla
 	out->vtor_address_ns = live->vtor_address_ns;
 	if (OFF_VTOR_SELF) {
 		/* Resume at this image's own vector table, as the vendor sample does
-		 * (offp.vtor_address = SCB->VTOR), instead of through SES -> ATOC (bench U8g:
-		 * the wake needs it). */
+		 * (offp.vtor_address = SCB->VTOR).  Optional on the bench (U8h), kept as the
+		 * vendor default. */
 		out->vtor_address    = alif_se_hw_vtor_read();
 		out->vtor_address_ns = out->vtor_address;
 	}
 	return ALP_OK;
+}
+
+/* MRAM | SERAM retention is what makes the wake a STOP resume at all (bench U8h: without it
+ * the SE rebooted through the cold path with an empty OFF profile, which reads as a pin-reset
+ * like non-STOP wake).  A product build must never send a profile without it; only the bench
+ * ablation knob lifts the requirement. */
+static bool off_memory_ok(const off_profile_t *p)
+{
+	const uint32_t need = ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK;
+
+	return !OFF_MRAM_SERAM || (p->memory_blocks & need) == need;
 }
 
 /* Every member must read back as written.  The SE can drop or rewrite bits silently
@@ -920,6 +937,22 @@ static alp_status_t undo_se(const undo_t *u)
 	return ALP_OK;
 }
 
+/* Put the SoM domains back after a sleep that did not happen.  A domain that cannot be
+ * restored stays in the record (alp_som_power_restore() keeps it, so a retry still has the
+ * data) and the request reports ALP_ERR_IO; only a clean restore drops the cycle record. */
+static alp_status_t rollback_domains(void)
+{
+	uint32_t     failed = 0u;
+	alp_status_t r      = alp_som_power_restore(&failed);
+
+	if (r == ALP_ERR_IO || failed != 0u) {
+		(void)refuse(8, "restore_failed", (int)failed, ALP_ERR_IO);
+		return ALP_ERR_IO;
+	}
+	alp_som_pd_store_clear(); /* NOT_READY: nothing was quiesced; drop the cycle record */
+	return ALP_OK;
+}
+
 static alp_status_t deep_sleep(alp_power_backend_state_t *state,
                                alp_power_mode_t           mode,
                                uint32_t                   wake_after_ms,
@@ -932,6 +965,7 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	off_profile_t readback;
 	alp_status_t  why = ALP_ERR_INVAL;
 	alp_status_t  s;
+	alp_status_t  rs;
 	bool          se_touched = false;
 	uint32_t      fired;
 
@@ -981,12 +1015,9 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 		return refuse(3, "live_dcdc_out_of_range", (int)undo.live.dcdc_voltage, s);
 	}
 
-	/* MRAM | SERAM retention is what makes the wake a STOP resume at all (bench U8h: without
-	 * it the SE rebooted through the cold path with an empty OFF profile, which reads as a
-	 * pin-reset-like non-STOP wake).  A product build must never send a profile without it. */
-	if (OFF_MRAM_SERAM &&
-	    (off.memory_blocks & (ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK)) !=
-	        (ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK)) {
+	/* Checked against the profile actually built, not the intent: a regression in
+	 * build_off_profile() must not reach the SE. */
+	if (!off_memory_ok(&off)) {
 		return refuse(3, "off_profile_lacks_mram_seram", (int)off.memory_blocks, ALP_ERR_IO);
 	}
 
@@ -1061,12 +1092,15 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	 * nothing did.  Either way the SE profile and the domains are put back. */
 	fired = fired_sources(&plan);
 	disarm(&armed);
-	(void)alp_som_power_restore(NULL);
-	alp_som_pd_store_clear();
+	rs = rollback_domains();
+
 	s = undo_se(&undo);
 	fill_info(info, ALP_POWER_MODE_RUN, fired, 0u);
 	if (s != ALP_OK) {
 		return s;
+	}
+	if (rs != ALP_OK) {
+		return rs;
 	}
 	/* A fired source is an ordinary early wake (OK).  No source fired: the core stayed
 	 * up for a reason this backend cannot name, which is a failed sleep, not a wake. */
@@ -1074,12 +1108,12 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 
 unwind:
 	disarm(&armed);
-	(void)alp_som_power_restore(NULL);
-	alp_som_pd_store_clear();
+	rs = rollback_domains();
+
 	if (se_touched && undo_se(&undo) != ALP_OK) {
 		return ALP_ERR_IO;
 	}
-	return s;
+	return (rs != ALP_OK && s == ALP_OK) ? rs : s;
 }
 
 /* ---- Ops ------------------------------------------------------------------------ */
@@ -1197,14 +1231,9 @@ ALP_BACKEND_REGISTER(power,
 /* ---- Cold-boot wake decode ------------------------------------------------------ */
 
 /*
- * TODO(#2784 addendum 6): the wake is a cold boot into whatever clock tree the SE left,
- * and bench U8c saw UART5 at ~1/5 of its baud and a slow tick afterwards, so the PLL was
- * not running.  Once the instrumented data (BKRAM slots PRE / BOOT, printed by
- * aen-power-stop) confirms it, re-apply the full explicit RUN profile at PRE_KERNEL_1
- * before any peripheral init, then call uart_configure().  Reference: the vendor sample
- * sdk-alif samples/drivers/pm/system_off does exactly that
- * (SYS_INIT(app_set_run_params, PRE_KERNEL_1, 46) with PLL / 160 MHz / LFXO / MRAM).
- * NOT implemented yet on purpose: instrument first.
+ * The wake is a cold boot into whatever clock tree the SE left (bench U8c: UART5 at ~1/5 of
+ * its baud and a slow tick, i.e. no PLL).  clock_restore() at the end of this file re-applies
+ * the RUN profile at PRE_KERNEL_1 before any peripheral init, as the vendor sample does.
  */
 
 /* Part 1, before the timer driver initialises (it clears the status): the LPTIMER. */

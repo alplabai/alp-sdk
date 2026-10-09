@@ -28,6 +28,14 @@
  * and starts the next one.
  *
  *
+ * ==== PRODUCT CONFIGURATION (variants/product-noscratch.conf) ========
+ *
+ * Without CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH there is no bench cell and no diag: the
+ * cycle number is kept in the RV-3028's User RAM 1, every verdict comes from
+ * alp_power_boot_wake_info(), and each boot prints the UART's configured baud, the CGU PLL
+ * registers and a tick-rate check against two RV-3028 seconds (verdict "tick_rate").
+ *
+ *
  * ==== THE THREE CYCLES ==============================================
  *
  *   cycle  wake source armed                    expected wake_source
@@ -75,6 +83,7 @@
 #include <string.h>
 
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/sys_io.h>
 #include <zephyr/sys/util.h>
@@ -141,6 +150,44 @@ static const cycle_t cycles[N_CYCLES] = {
 static rv3028c7_t g_rtc;
 
 static unsigned g_pass, g_fail;
+
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+/* Bench build: the cycle number lives in the bench cell in BKRAM. */
+static unsigned cycle_get(void)
+{
+	return alp_som_pd_bench_count();
+}
+
+static void cycle_set(unsigned n)
+{
+	alp_som_pd_bench_set(n);
+}
+#else
+/* Product build (no bench cell, no diag): the cycle number lives in the RV-3028's User RAM 1
+ * (register 1Fh, kept on the backup supply), tagged 0xC0 | n so a stale or never-written value
+ * reads as 0.  The SDK's own wake record is what proves each wake. */
+#define RTC_USER_RAM1 0x1Fu
+#define CYCLE_TAG     0xC0u
+
+static unsigned cycle_get(void)
+{
+	uint8_t reg = RTC_USER_RAM1;
+	uint8_t v   = 0u;
+
+	if (alp_i2c_write_read(g_rtc.bus, RV3028C7_I2C_ADDR, &reg, 1, &v, 1) != ALP_OK ||
+	    (v & 0xF0u) != CYCLE_TAG) {
+		return 0u;
+	}
+	return v & 0x0Fu;
+}
+
+static void cycle_set(unsigned n)
+{
+	uint8_t buf[2] = { RTC_USER_RAM1, (uint8_t)(CYCLE_TAG | (n & 0x0Fu)) };
+
+	(void)alp_i2c_write(g_rtc.bus, RV3028C7_I2C_ADDR, buf, sizeof(buf));
+}
+#endif
 
 static void verdict(unsigned cycle, const char *check, bool pass)
 {
@@ -209,6 +256,7 @@ static void print_stop_mode(void)
 	       (unsigned)(v & 1u));
 }
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 /* The two BKRAM register snapshots (alif_se_power_hw.c lists what each word is):
  *   PRE  = written with interrupts off immediately before the WFI of the last sleep;
  *   BOOT = written by the earliest init hook of THIS boot (PRE_KERNEL_1), before the SoM
@@ -234,6 +282,7 @@ static void print_diag(const char *name, unsigned slot)
 		       (unsigned)d.w[i + 3u]);
 	}
 }
+#endif
 
 /* Every field of the SE's RUN and OFF profiles as it stands now (read-only getters), so
  * the clock tree the SE left after the wake can be compared with the cold-boot profile
@@ -309,7 +358,11 @@ static void judge(unsigned done, const alp_power_boot_info_t *bi)
 	            bi->restore_failed_domains == 0u);
 	/* Reaching this line with the counter at @p done is the retention proof: it was
 	 * written before the sleep and nothing else writes it. */
-	verdict(done, "bkram_counter", alp_som_pd_bench_count() == done);
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	verdict(done, "bkram_counter", cycle_get() == done);
+#else
+	verdict(done, "cycle_counter", cycle_get() == done);
+#endif
 }
 
 /* Arm the RV-3028 alarm for the next minute change and leave INT -> P15_0 enabled.
@@ -377,7 +430,7 @@ static void start_cycle(unsigned n)
 
 	/* The counter is written BEFORE the sleep: this boot cannot know whether the
 	 * next one happens. */
-	alp_som_pd_bench_set(n);
+	cycle_set(n);
 	printk("POWER_STOP: cycle%u enter STOP (%s)\n", n, c->what);
 	k_msleep(100); /* let the UART FIFO drain before the clocks go away */
 
@@ -392,9 +445,49 @@ static void start_cycle(unsigned n)
 	       (int)wi.realised_mode,
 	       (unsigned)wi.wake_source);
 	g_fail++;
-	alp_som_pd_bench_set(n - 1u); /* the cycle did not run: do not count it */
+	cycle_set(n - 1u); /* the cycle did not run: do not count it */
 	alp_power_close(p);
 }
+
+#ifndef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+/* Product build: is the post-wake clock tree the running one?  The UART's configured rate is
+ * printed (the line is only readable on the host if the real rate matches), the CGU PLL
+ * registers, and the kernel tick is measured against two RV-3028 seconds (a tick running on
+ * the SE-left RC clocks reads about twice as long). */
+static void check_clocks(unsigned cycle)
+{
+	const struct device *con = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+	struct uart_config   cfg = { 0 };
+	uint32_t             s0 = 0u, s = 0u;
+	int64_t              t0, t1;
+	bool                 ok = false;
+	int                  ms = -1;
+
+	(void)uart_config_get(con, &cfg);
+	printk("POWER_STOP: clocks uart_baud=%u pll_lock=0x%08x pll_clk_sel=0x%08x\n",
+	       (unsigned)cfg.baudrate,
+	       (unsigned)sys_read32(0x1A602004u),
+	       (unsigned)sys_read32(0x1A602008u));
+
+	if (alp_som_power_rtc_seconds(&s0) == ALP_OK) {
+		for (int i = 0; i < 300 && alp_som_power_rtc_seconds(&s) == ALP_OK && s == s0; ++i) {
+			k_msleep(10);
+		}
+		s0 = s;
+		t0 = k_uptime_get();
+		for (int i = 0; i < 700 && alp_som_power_rtc_seconds(&s) == ALP_OK && s < s0 + 2u; ++i) {
+			k_msleep(10);
+		}
+		t1 = k_uptime_get();
+		if (s == s0 + 2u) {
+			ms = (int)(t1 - t0);
+			ok = ms >= 1800 && ms <= 2200;
+		}
+	}
+	printk("POWER_STOP: clocks tick_ms_per_2_rtc_s=%d\n", ms);
+	verdict(cycle, "tick_rate", ok);
+}
+#endif
 
 int main(void)
 {
@@ -415,7 +508,7 @@ int main(void)
 	alp_power_boot_info_t bi = { 0 };
 
 	(void)alp_power_boot_wake_info(&bi);
-	unsigned done = alp_som_pd_bench_count();
+	unsigned done = cycle_get();
 
 	printk("POWER_STOP: boot valid=%d counter=%u\n", (int)bi.valid, done);
 	print_ses_version();
@@ -429,6 +522,7 @@ int main(void)
 	print_knobs();
 #endif
 	print_stop_mode(); /* baseline on the first boot, the wake witness after one */
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	print_diag("pre", ALP_SOM_PD_DIAG_PRE);
 	alp_som_pd_diag_invalidate(ALP_SOM_PD_DIAG_PRE); /* printed once; never read as stale later */
 	print_diag("boot", ALP_SOM_PD_DIAG_BOOT);
@@ -442,18 +536,21 @@ int main(void)
 			printk("POWER_STOP: BOOT w16 (raw pre-clear STOP_MODE)=0x%08x\n", (unsigned)b.w[16]);
 		}
 	}
+#else
+	check_clocks(done);
+#endif
 	print_se_profiles();
 
 	if (done > N_CYCLES) {
 		done = 0u; /* stale or corrupt: start over */
-		alp_som_pd_bench_set(0u);
+		cycle_set(0u);
 	}
 	if (done != 0u && !bi.valid) {
 		/* A counter with no wake record behind it: a reset kept the SRAM, or the
 		 * record did not survive.  Either way this is not a clean wake. */
 		verdict(done, "record_valid", false);
 		done = 0u;
-		alp_som_pd_bench_set(0u);
+		cycle_set(0u);
 	} else if (done != 0u) {
 		judge(done, &bi);
 	}

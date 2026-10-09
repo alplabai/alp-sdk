@@ -25,6 +25,8 @@ if(ALP_TEST_ALLOW_DEBUGGER)
 endif()
 
 # The bench scratch build: the clock restore writes its progress to the BOOT diag slot.
-target_compile_definitions(app PRIVATE CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH=1)
+if(NOT ALP_TEST_PRODUCT)
+    target_compile_definitions(app PRIVATE CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH=1)
+endif()
 
 target_sources(app PRIVATE src/test_power_alif_se.c)
