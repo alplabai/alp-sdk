@@ -138,6 +138,14 @@
 #define TR_MEM_BL_GAP_LO          TR_MEM_SN65_RESERVED_A_HI
 #define TR_MEM_BL_GAP_HI          TR_MEM_SN65_RESERVED_B_LO
 #define TR_MEM_BL 0x0237FDC0u /* HE: the backlight level + the bench's request word */
+/* Once fix/sn65dsi83-auto-recovery has landed, its real symbols must still match the ranges reserved
+ * above (until then this #ifdef compiles to nothing). */
+#ifdef TR_MEM_I2C1_ALIVE
+_Static_assert(TR_MEM_I2C1_ALIVE == TR_MEM_SN65_RESERVED_A_LO &&
+                   TR_MEM_SE_MSG + TR_MEM_SE_MSG_SIZE <= TR_MEM_SN65_RESERVED_A_HI &&
+                   TR_MEM_SN65_RECIPE == TR_MEM_SN65_RESERVED_B_LO,
+               "the SN65DSI83 recovery words moved: update TR_MEM_SN65_RESERVED_*");
+#endif
 /* SRAM1 */
 #define TR_MEM_CAM_POOL \
 	0x02480000u /* HP: OV9281 camera frame pool (design sec 2), 2 x 256,000 B GREY8;
