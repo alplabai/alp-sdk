@@ -72,12 +72,16 @@ The record lives in the 4 KB Utility SRAM ("BKRAM", base `0x4902C000`), which is
 retained across STOP and reserved for the SDK: the E8 devicetree carries a `bkram`
 node with `zephyr,memory-region = "ALP_BKRAM"`, so the linker emits a NOLOAD section
 at that address that nothing zeroes at boot. Builds without that node (native_sim,
-E4/E6) keep it in a `__noinit` cell, which does not survive STOP. The base address
-comes from the Alif DFP `Backup_SRAM` memory entry (`start="0x4902C000"
-size="0x1000"`) of the E1C, E3, E5 and E7 SVDs; the E8 SVD omits its `<memory>`
-list, but its peripheral map leaves exactly that slot free and carries the block's
-`BKRAM_CKEN` / `BKRAM_RET_MASK` fields. It is bench-unverified on the E8 (the BKRAM
-pattern test in U8).
+E4/E6) keep it in a `__noinit` cell, which does not survive STOP. The base address is
+bench-verified on the E8 (E1M-AEN803 on an E1M-EVK, RAM-run, 2026-10-09): 4 KiB
+read/write at `0x4902C000..0x4902CFFF`, no alias at +0x800, PDM at `0x4902D000`
+unaffected, contents survive `AIRCR.SYSRESETREQ` and are lost on a cold power cycle.
+It also matches the `Backup_SRAM` memory entry of the E1C, E3, E5 and E7 DFP SVDs
+(the E8 SVD omits its `<memory>` list). The clock gate is `BKRAM_CKEN`
+(`CLKCTL_PER_SLV` `0x4902F000` bit 4, set at cold boot; asserted before every
+access) and retention is `VBAT.RET_CTRL` (`0x1A60900C`) bit 0 `BKRAM_RET_MASK`,
+bit 1 `BKRAM_RET_FORCE`. Survival across STOP itself is the U8 bench test; E4 is
+unverified.
 
 ## The STOP / STANDBY backend
 

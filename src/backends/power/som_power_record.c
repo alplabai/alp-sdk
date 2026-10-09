@@ -16,11 +16,13 @@
  * "ALP_BKRAM"`, reg 0x4902C000 size 0x1000), which makes the Zephyr linker
  * emit a NOLOAD output section of that name at that address -- nothing zeroes
  * or loads it at boot, so the contents of the previous cycle are still there on
- * the cold-boot wake.  The base address comes from the Alif DFP SVDs
- * (`<memory name="Backup_SRAM" start="0x4902C000" size="0x00001000"/>`; the
- * peripheral map of the E8 leaves exactly that 4 KB slot free between ADC_VREF
- * 0x4902B000 and PDM 0x4902D000, and its CLKCTL_PER_SLV.BKRAM_CKEN and
- * VBAT.RET_CTRL.BKRAM_RET_MASK fields address this block).  Only a build with the
+ * the cold-boot wake.  The base address is bench-verified on the E8
+ * (E1M-AEN803, 2026-10-09: 4 KiB read/write at 0x4902C000, survives SYSRESETREQ,
+ * lost on a cold power cycle) and matches the Alif DFP SVDs of the E1C / E3 / E5 /
+ * E7 (`<memory name="Backup_SRAM" start="0x4902C000" size="0x00001000"/>`; the E8
+ * SVD omits its <memory> list).  The clock gate is BKRAM_CKEN (CLKCTL_PER_SLV
+ * 0x4902F000 bit 4, set at cold boot), which this file asserts before every access;
+ * retention is VBAT.RET_CTRL bit 0 (BKRAM_RET_MASK), checked by the STOP backend.  Only a build with the
  * STOP backend (CONFIG_ALP_SDK_POWER_ALIF_SE) places the record there, so BKRAM is
  * untouched unless the backend that needs it is enabled.  Every other build, and
  * targets without the node (native_sim, E4/E6), keep the record in a plain
@@ -72,6 +74,30 @@ BUILD_ASSERT(sizeof(sompd_bkram_t) <= DT_REG_SIZE(DT_NODELABEL(bkram)),
 static sompd_bkram_t _bk SOMPD_BKRAM_SECTION;
 #define _store (_bk.record)
 
+#if SOMPD_IN_BKRAM
+#include <zephyr/sys/sys_io.h>
+
+/* BKRAM_CKEN: CLKCTL_PER_SLV (Alif DFP soc.h CLKCTL_PER_SLV_BASE 0x4902F000) bit 4,
+ * reset value 0x10 and read back as 1 at cold boot on the E8 (bench, 2026-10-09).
+ * Asserted before every access rather than assumed: an access to a gated block would
+ * fault or read garbage. */
+#define SOMPD_BKRAM_CKEN_REG 0x4902F000u
+#define SOMPD_BKRAM_CKEN_BIT BIT(4)
+
+static void bkram_clock_assert(void)
+{
+	uint32_t v = sys_read32(SOMPD_BKRAM_CKEN_REG);
+
+	if ((v & SOMPD_BKRAM_CKEN_BIT) == 0u) {
+		sys_write32(v | SOMPD_BKRAM_CKEN_BIT, SOMPD_BKRAM_CKEN_REG);
+	}
+}
+#else
+static inline void bkram_clock_assert(void)
+{
+}
+#endif
+
 uint32_t alp_som_pd_record_crc(const alp_som_pd_record_t *rec)
 {
 	return crc32_ieee((const uint8_t *)rec, offsetof(alp_som_pd_record_t, crc));
@@ -84,12 +110,14 @@ bool alp_som_pd_record_valid(const alp_som_pd_record_t *rec)
 
 bool alp_som_pd_store_load(alp_som_pd_record_t *out)
 {
+	bkram_clock_assert();
 	memcpy(out, &_store, sizeof(*out));
 	return alp_som_pd_record_valid(out);
 }
 
 void alp_som_pd_store_save(alp_som_pd_record_t *rec)
 {
+	bkram_clock_assert();
 	rec->magic = ALP_SOM_PD_RECORD_MAGIC;
 	rec->crc   = alp_som_pd_record_crc(rec);
 	memcpy(&_store, rec, sizeof(_store));
@@ -97,11 +125,13 @@ void alp_som_pd_store_save(alp_som_pd_record_t *rec)
 
 void alp_som_pd_store_clear(void)
 {
+	bkram_clock_assert();
 	memset(&_store, 0, sizeof(_store));
 }
 
 void alp_som_pd_store_poke(const alp_som_pd_record_t *rec)
 {
+	bkram_clock_assert();
 	memcpy(&_store, rec, sizeof(_store));
 }
 
@@ -112,6 +142,7 @@ void alp_som_pd_store_poke(const alp_som_pd_record_t *rec)
 
 uint32_t alp_som_pd_bench_count(void)
 {
+	bkram_clock_assert();
 	alp_som_pd_bench_t b = _bk.bench;
 
 	if (b.magic != SOMPD_BENCH_MAGIC || b.crc != crc32_ieee((const uint8_t *)&b, 8u)) {
@@ -122,6 +153,7 @@ uint32_t alp_som_pd_bench_count(void)
 
 void alp_som_pd_bench_set(uint32_t count)
 {
+	bkram_clock_assert();
 	alp_som_pd_bench_t b = { .magic = SOMPD_BENCH_MAGIC, .count = count };
 
 	b.crc     = crc32_ieee((const uint8_t *)&b, 8u);
