@@ -14,7 +14,7 @@ sample:
     then STOP with a timed wake three times (LPTIMER, RV-3028 countdown,
     RV-3028 alarm on INT -> P15_0), checking after each cold-boot wake the wake
     source, the BKRAM counter and that every quiesced domain was restored; then
-    stay awake.  UNTESTED ON SILICON.
+    stay awake.  STOP bench-proven (U8h).
 
 tests:
   alp_sdk.examples.aen.power_stop.aen:

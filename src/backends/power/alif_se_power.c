@@ -137,6 +137,11 @@ alp_som_bench_knobs_t alp_som_bench_knobs = {
 #define OFF_VTOR_SELF  true
 #define OFF_MRAM_SERAM true
 #endif
+#if defined(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_NO_MRAM_SERAM) && \
+    !defined(CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH)
+#error \
+    "BENCH_NO_MRAM_SERAM is a bench-only ablation: a product OFF profile always keeps MRAM | SERAM"
+#endif
 
 /* ---- Register facts (E8 SVD) ----------------------------------------------- */
 
@@ -974,6 +979,15 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	s = build_off_profile(&off, &undo.live, &plan);
 	if (s != ALP_OK) {
 		return refuse(3, "live_dcdc_out_of_range", (int)undo.live.dcdc_voltage, s);
+	}
+
+	/* MRAM | SERAM retention is what makes the wake a STOP resume at all (bench U8h: without
+	 * it the SE rebooted through the cold path with an empty OFF profile, which reads as a
+	 * pin-reset-like non-STOP wake).  A product build must never send a profile without it. */
+	if (OFF_MRAM_SERAM &&
+	    (off.memory_blocks & (ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK)) !=
+	        (ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK)) {
+		return refuse(3, "off_profile_lacks_mram_seram", (int)off.memory_blocks, ALP_ERR_IO);
 	}
 
 	/* 4. Quiesce the SoM domains; on failure it has already put them back. */

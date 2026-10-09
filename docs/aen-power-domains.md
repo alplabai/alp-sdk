@@ -88,10 +88,26 @@ unverified.
 `src/backends/power/alif_se_power.c` implements `alp_power_request_sleep(STOP |
 STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803). It is registered for
 `alif:ensemble:e8` behind `CONFIG_ALP_SDK_POWER_ALIF_SE` (default **n**,
-experimental, **untested on silicon**). The M55-HE subsystem is powered off and the
+experimental; STOP is bench-proven on the E1M-AEN803, STANDBY is not). The M55-HE subsystem is powered off and the
 wake is a cold boot through the Secure Enclave, so the call does not return: read
 the cause with `alp_power_boot_wake_info()`. `SLEEP` / `DEEP_SLEEP` are forwarded to
 the pm_policy backend when it is built.
+
+**Measured behaviour (STOP, bench U8h, E1M-AEN803 on an E1M-EVK, head 680aaebd3).** Three
+STOP cycles in one image all woke, every verdict passed: the LPTIMER at 5 s (`slept_ms` 6000)
+and 500 ms (`slept_ms` 1000), the RV-3028 countdown at 11 s and the RV-3028 alarm. Intervals
+from 500 ms to 11 s were exercised. Every wake boot came up at 115200 baud with the boot-time
+clock restore having run (`RESTORE_CLOCKS`, BOOT diag w40 = 1) and BKRAM live. Without that
+restore a wake comes up at 23040 baud with a half-rate tick. Supply current at the EVK
+board's 16 V input (a DPS reading of the whole EVK, **not** a SoC measurement): about
+0.043 A in STOP against 0.058 A awake. **`memory_blocks` MRAM | SERAM | BKRAM is required:**
+with MRAM | SERAM left out the board still returned on time, but the SE rebooted through the
+cold path (BOOT diag w19 = 1, `RET_CTRL` 0x0002aaf0, the OFF profile reads back cleared). That
+return is classified as a non-STOP wake (pin-reset-like: `STOP_MODE_STAT` does not agree with
+the record), which is the correct behaviour, and a build can not select it outside the bench
+scratch option; the backend also refuses to send an OFF profile without MRAM | SERAM.
+`vtor_address` = `SCB->VTOR` is optional (3 of 3 without it) and stays the default, as in the
+vendor sample.
 
 **Wake sources** (only what is real is advertised):
 

@@ -291,7 +291,8 @@ config ALP_SDK_POWER_ALIF_SE
 	  sleep.  The wake is a COLD BOOT through the Secure Enclave; the call
 	  does not return, and the cause is read with alp_power_boot_wake_info().
 
-	  UNTESTED ON SILICON.  Off by default.  An image that gets the entry
+	  STOP is bench-proven on the E1M-AEN803 (U8h: LPTIMER, RV-3028 countdown
+	  and alarm wakes); STANDBY is not.  Off by default.  An image that gets the entry
 	  sequence wrong can stop at the Secure Enclave until the module is
 	  power-cycled; keep a way to restore the MRAM image before trying it.
 
@@ -302,22 +303,22 @@ config ALP_SDK_POWER_ALIF_SE
 config ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS
 	bool "Re-apply the RUN profile at boot when the clock tree is not the running one"
 	depends on ALP_SDK_POWER_ALIF_SE
-	default y if ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	default y
 	help
-	  A wake from STOP is a cold boot into whatever clock tree the Secure Enclave left,
-	  and after a reset taken inside the STOP that was all-RC (UART at ~1/5 baud, a slow
-	  tick; bench U8c / U8d).  At PRE_KERNEL_1 (priority 46, after the SE service, before
-	  every peripheral) the backend checks the hardware state -- PLL not locked, or the PLL
-	  clock select not the running tree -- and, only then, calls se_service_set_run_cfg()
-	  with a complete explicit RUN profile (the vendor system_off sample does the same).
-	  Product behaviour in intent (a product waking from STOP needs its clocks back), but
-	  UNPROVEN: the profile is measured on the E1M-AEN803 only, so it defaults on only in a
-	  bench image (the bench scratch option) until bench-proven.
-	  Bench U8e (c6de654ff): the first version of this restore (cold-boot power domains
-	  0x16d, no BACKUP4K) took the Utility SRAM away and the sleep had no record.  The
-	  profile now uses the vendor domains and BACKUP4K, re-asserts the retention enables,
-	  keeps the SDK's BKRAM data in a RAM shadow until the block is proved writable, and
-	  the sleep refuses (bkram_unusable) if it is not.  Still unproven on silicon.
+	  A wake from STOP is a cold boot into whatever clock tree the Secure Enclave left:
+	  all-RC, i.e. UART5 at ~1/5 of its baud (23040 instead of 115200) and the kernel tick
+	  at half rate (bench U8c / U8d / U8g).  At PRE_KERNEL_1 (priority 46, after the SE
+	  service, before every peripheral) the backend checks the hardware state -- PLL not
+	  locked, or the PLL clock select not the running tree -- and, only then, calls
+	  se_service_set_run_cfg() with a complete explicit RUN profile (the vendor system_off
+	  sample does the same).  The profile uses the vendor power domains, names the Utility
+	  SRAM (gen2 BACKUP4K) in memory_blocks and re-asserts the BKRAM retention enables; the
+	  SDK's BKRAM data sits in a RAM shadow until the block passes a write/readback, and a
+	  sleep refuses (bkram_unusable) if it does not (bench U8e).
+	  Bench evidence (U8h, E1M-AEN803 on an E1M-EVK, three STOP cycles): on every wake boot
+	  the restore ran, BOOT diag w40 = 1 (locked and selected), the UART came up at 115200
+	  and BKRAM was live.  Measured on the AEN803 only; another SoM or silicon revision
+	  needs its own bench pass.
 	  TODO(#2784): evaluate hal_alif's CONFIG_ALIF_SE_DTS_RUN_PROFILE (the aipm-run
 	  devicetree node) instead of this hand-rolled profile.
 
@@ -352,8 +353,8 @@ config ALP_SDK_POWER_ALIF_SE_BENCH_NO_VTOR_SELF
 	depends on ALP_SDK_POWER_ALIF_SE && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	help
 	  The product default writes vtor_address = SCB->VTOR (the vendor system_off sample's
-	  resume vector); with the MRAM | SERAM memory blocks it is what made STOP wake on the
-	  bench (U8g, 2 of 2; neither: no wake).  This turns that one field off to ablate it.
+	  resume vector).  Bench U8h: STOP wakes 3 of 3 without it, so it is optional; it stays the
+	  default because the vendor sample does it.  This turns that one field off to ablate it.
 	  Default of the runtime knob alp_som_bench_knobs.vtor_self.  Never for a product build.
 
 config ALP_SDK_POWER_ALIF_SE_BENCH_NO_MRAM_SERAM
@@ -361,8 +362,10 @@ config ALP_SDK_POWER_ALIF_SE_BENCH_NO_MRAM_SERAM
 	depends on ALP_SDK_POWER_ALIF_SE && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	help
 	  The product default keeps MRAM | SERAM | BKRAM (plus any TCM bank) powered in STOP, the
-	  vendor MRAM-boot profile.  This turns MRAM | SERAM off to ablate that one field.
-	  Never for a product build.
+	  vendor MRAM-boot profile.  Bench U8h: with MRAM | SERAM off the SE reboots through the
+	  cold path instead of resuming (empty OFF profile on read-back, RET_CTRL 0x0002aaf0), so
+	  they are REQUIRED; this exists only to reproduce that.  A product build can not select it
+	  (and the backend refuses to send a profile without them).
 
 config ALP_SDK_POWER_ALIF_SE_BENCH_STBY_76_8
 	bool "Bench only: OFF profile stby_clk_freq = 76.8 MHz for STOP too"

@@ -1,7 +1,7 @@
 # aen-power-stop
 
 Bench proof of the Alif SE STOP backend ([#2784](https://github.com/alplabai/alp-sdk/issues/2784),
-unit U7) on the **E1M-AEN803** (Alif Ensemble E8, M55-HE). **Untested on silicon.**
+unit U7) on the **E1M-AEN803** (Alif Ensemble E8, M55-HE). STOP **passed on silicon** (U8h, 3 of 3 cycles); STANDBY is untested.
 Built as an **MRAM image**: STOP wakes through a cold boot (SES -> ATOC -> this
 image), so a RAM-run image would not come back.
 

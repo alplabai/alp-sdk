@@ -5,7 +5,7 @@
  * aen-power-stop -- bench proof of the Alif SE STOP backend (#2784, unit U7) on
  * the E1M-AEN803 (Alif Ensemble E8, M55-HE), built as an MRAM image.
  *
- * UNTESTED ON SILICON.  Back up the MRAM image before flashing this (Flow D
+ * STOP passed on silicon (U8h); STANDBY is untested.  Back up the MRAM image before flashing this (Flow D
  * backup / restore): if the entry sequence is wrong the module can sit with the
  * Secure Enclave until it is power-cycled.
  *
@@ -398,7 +398,7 @@ static void start_cycle(unsigned n)
 
 int main(void)
 {
-	printk("\n=== aen-power-stop: Alif SE STOP backend bench (UNTESTED ON SILICON) ===\n");
+	printk("\n=== aen-power-stop: Alif SE STOP backend bench (STOP bench-proven) ===\n");
 
 	(void)alp_init();
 

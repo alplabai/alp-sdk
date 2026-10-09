@@ -85,8 +85,8 @@
  *      default on there when CONFIG_GPIO and CONFIG_PINCTRL are on).  Every
  *      other backend, and an AEN build without that option, answers
  *      @ref ALP_ERR_NOSUPPORT.  The Alif E8 M55-HE STOP / STANDBY backend
- *      (#2784 U7, CONFIG_ALP_SDK_POWER_ALIF_SE, default off, untested on
- *      silicon) calls the quiesce around the sleep.
+ *      (#2784 U7, CONFIG_ALP_SDK_POWER_ALIF_SE, default off; STOP bench-proven
+ *      on the E1M-AEN803, STANDBY not) calls the quiesce around the sleep.
  *      See docs/abi-markers.md for the convention.
  */
 
