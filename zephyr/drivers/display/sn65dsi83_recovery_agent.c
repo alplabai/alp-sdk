@@ -12,8 +12,10 @@
  * else shares the controller) transfers by that driver's bus lock -- one core, one
  * driver, no cross-core race.
  *
- * Silent until the recipe's magic is set: an image whose display is not behind a bridge
- * never publishes one.  Writes only after the bridge's ID registers read back
+ * Silent until a recipe has been published once (magic set): an image whose display is not behind
+ * a bridge never publishes one.  The first valid recipe is latched in this core's RAM: the display
+ * core clears the magic on every warm reboot and may fail to publish again, and that must not turn
+ * the watch off.  Writes only after the bridge's ID registers read back
  * (sn65dsi83_health_poll()), so a stale recipe from a previous boot with another panel
  * cannot write a CSR bank into anything else on the bus.  The report is printk: the
  * images this runs in turn the logging subsystem off.
@@ -40,6 +42,7 @@ struct sn65dsi83_agent_config {
 struct sn65dsi83_agent_data {
 	struct k_work_delayable health_work;
 	struct sn65dsi83_stats  stats;
+	struct sn65dsi83_latch  latch;
 };
 
 /* Its own low-priority queue: a replay sleeps ~40 ms and must not hold up the system work queue
@@ -55,30 +58,16 @@ static void sn65dsi83_agent_work(struct k_work *work)
 	    CONTAINER_OF(dwork, struct sn65dsi83_agent_data, health_work);
 	const struct sn65dsi83_agent_config *config = DEVICE_DT_INST_GET(0)->config;
 	struct sn65dsi83_recipe             *r      = config->recipe;
-	struct sn65dsi83_csr                 csr[SN65_RECIPE_MAX];
 	struct sn65dsi83_report              rep;
-	uint8_t                              n = 0U;
 
-	if (r->magic == SN65_RECIPE_MAGIC) {
-		barrier_dmem_fence_full();
-		n = r->n;
-		if (n > 0U && n <= SN65_RECIPE_MAX) {
-			for (uint8_t i = 0; i < n; i++) {
-				csr[i] = r->csr[i];
-			}
-		} else {
-			n = 0U;
-		}
-		barrier_dmem_fence_full();
-		/* The display core clears the magic before it rewrites the recipe: a copy that
-		 * overlapped a rewrite is dropped. */
-		if (r->magic != SN65_RECIPE_MAGIC) {
-			n = 0U;
-		}
-	}
+	/* A valid recipe is latched (and a newer one replaces it); the display core clears the magic
+	 * when it re-initialises, which is not a reason to forget the table or to go idle. */
+	(void)sn65dsi83_recipe_latch(r, &data->latch);
 
-	if (n > 0U) {
-		if (sn65dsi83_health_poll(&config->i2c, csr, n, &data->stats, &rep, k_uptime_get()) == 0) {
+	if (data->latch.n > 0U) {
+		if (sn65dsi83_health_poll(
+		        &config->i2c, data->latch.csr, data->latch.n, &data->stats, &rep, k_uptime_get()) ==
+		    0) {
 			sn65dsi83_report_print(&rep, &data->stats);
 		}
 		/* The display core reads these through sn65dsi83_recovery_count(). */

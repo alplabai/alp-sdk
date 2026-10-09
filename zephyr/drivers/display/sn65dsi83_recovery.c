@@ -13,6 +13,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/barrier.h>
 #include <zephyr/sys/printk.h>
 
 #include "sn65dsi83_recovery.h"
@@ -152,6 +153,34 @@ int sn65dsi83_pll_start(const struct i2c_dt_spec *i2c)
 	}
 
 	return 0;
+}
+
+bool sn65dsi83_recipe_latch(const struct sn65dsi83_recipe *r, struct sn65dsi83_latch *l)
+{
+	struct sn65dsi83_csr tmp[SN65_RECIPE_MAX];
+	uint8_t              n;
+
+	if (r->magic != SN65_RECIPE_MAGIC) {
+		return false;
+	}
+	barrier_dmem_fence_full();
+	n = r->n;
+	if (n == 0U || n > SN65_RECIPE_MAX) {
+		return false;
+	}
+	for (uint8_t i = 0; i < n; i++) {
+		tmp[i] = r->csr[i];
+	}
+	barrier_dmem_fence_full();
+	/* The display core clears the magic before it rewrites the recipe. */
+	if (r->magic != SN65_RECIPE_MAGIC) {
+		return false;
+	}
+	for (uint8_t i = 0; i < n; i++) {
+		l->csr[i] = tmp[i];
+	}
+	l->n = n;
+	return true;
 }
 
 /* HS_CLK_SRC as the table writes it (CSR 0x0A bit 0); the datasheet default is 0. */

@@ -114,6 +114,12 @@ target_sources(app PRIVATE
 	src/vision/pose.c
 	src/vision/track.c
 )
+# Why did the HE restart? A fatal error record + the console tail of the previous boot, kept in the
+# shared SRAM0 page and printed at the next boot (src/ipc/tr_he_fault.h, src/platform/he_fault.c).
+option(TR_HE_FAULT_LOG "Keep the HE's last fatal error and console tail across a restart, print them at boot" ON)
+if(TR_HE_FAULT_LOG)
+	target_sources(app PRIVATE src/platform/he_fault.c src/ipc/tr_he_fault.c)
+endif()
 if(TR_HP_SOUND)
 	target_sources(app PRIVATE src/platform/bus2_he.c src/ipc/tr_bus2.c)
 	# src/platform/tr_i2c2_rearm.h resets the i2c_dw driver's sync semaphore (struct

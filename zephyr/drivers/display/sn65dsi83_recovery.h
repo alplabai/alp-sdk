@@ -141,6 +141,21 @@ struct sn65dsi83_recipe {
 BUILD_ASSERT(sizeof(struct sn65dsi83_recipe) == SN65_RECIPE_SIZE,
              "struct sn65dsi83_recipe changed size: update TR_MEM_SN65_RECIPE's reserved size");
 
+/*
+ * The bus owner's own copy of the recipe.  The display core clears the recipe magic every time it
+ * re-initialises (a warm reboot of that core), and its re-init can then lose a race for the bus
+ * it has already handed away and never publish again: so the first valid recipe is LATCHED, a
+ * later magic of 0 means "no newer recipe", and the latched table stays in use.
+ */
+struct sn65dsi83_latch {
+	uint8_t              n; /* 0: nothing latched yet */
+	struct sn65dsi83_csr csr[SN65_RECIPE_MAX];
+};
+
+/* Copy a valid recipe into *l (re-reading the magic after the copy: a copy that overlapped a
+ * rewrite is dropped).  Returns true if *l was refreshed; with no valid magic *l is untouched. */
+bool sn65dsi83_recipe_latch(const struct sn65dsi83_recipe *r, struct sn65dsi83_latch *l);
+
 /* Identity check (CSR 0x00..0x08): 0 on a match, -ENODEV on a mismatch, <0 on an I2C error. */
 int sn65dsi83_check_id(const struct i2c_dt_spec *i2c);
 

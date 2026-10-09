@@ -140,6 +140,17 @@ _Static_assert(TR_MEM_SN65_RECIPE >= TR_MEM_CAM_VIEW + 0x20u &&
 _Static_assert(TR_MEM_SN65_RECIPE >= 0x0237F000u &&
                    TR_MEM_SN65_RECIPE + TR_MEM_SN65_RECIPE_SIZE <= 0x02380000u,
                "the recipe sits inside the shared NC page 0x0237F000..0x0237FFFF");
+#define TR_MEM_HE_FAULT \
+	0x0237FE60u /* HE -> HE (next boot): the last fatal error + the console tail (src/ipc/tr_he_fault.h
+                                       * tr_he_fault_t, 0x18C B, src/platform/he_fault.c). 32-B aligned, right after
+                                       * TR_MEM_SN65_RECIPE's end (0x0237FE54); ends at 0x0237FFEC, inside the shared NC
+                                       * page, which survives a warm reset. */
+#define TR_MEM_HE_FAULT_SIZE 0x18Cu /* sizeof(tr_he_fault_t), asserted in tr_he_fault.h */
+_Static_assert(TR_MEM_HE_FAULT % 32u == 0u, "the HE fault record is 32-B aligned");
+_Static_assert(TR_MEM_HE_FAULT >= TR_MEM_SN65_RECIPE + TR_MEM_SN65_RECIPE_SIZE,
+               "the HE fault record is clear of the bridge recipe");
+_Static_assert(TR_MEM_HE_FAULT + TR_MEM_HE_FAULT_SIZE <= 0x02380000u,
+               "the HE fault record sits inside the shared NC page, below the MHU0 window");
 /* SRAM1 */
 #define TR_MEM_CAM_POOL \
 	0x02480000u /* HP: OV9281 camera frame pool (design sec 2), 2 x 256,000 B GREY8;

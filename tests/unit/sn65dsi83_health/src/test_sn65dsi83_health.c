@@ -326,3 +326,65 @@ ZTEST(sn65dsi83_poll, test_errors_right_after_a_recovery_escalate)
 	zassert_equal(rep.health, SN65_HEALTH_REINIT);
 	zassert_equal(st.recoveries, 2U);
 }
+
+/* ---- the bus owner's latched recipe ------------------------------------------------------- */
+
+static struct sn65dsi83_recipe recipe;
+static struct sn65dsi83_latch  latch;
+
+static void publish(const struct sn65dsi83_csr *t, uint8_t n)
+{
+	memset(&recipe, 0, sizeof(recipe));
+	memcpy((void *)recipe.csr, t, n * sizeof(*t));
+	recipe.n     = n;
+	recipe.magic = SN65_RECIPE_MAGIC;
+}
+
+ZTEST(sn65dsi83_poll, test_no_recipe_latches_nothing)
+{
+	memset(&recipe, 0, sizeof(recipe));
+	memset(&latch, 0, sizeof(latch));
+	zassert_false(sn65dsi83_recipe_latch(&recipe, &latch));
+	zassert_equal(latch.n, 0U);
+}
+
+/* A warm reboot of the display core clears the magic and may never publish again (its re-init can
+ * lose the race for the bus it handed away): the bus owner keeps its copy and still recovers. */
+ZTEST(sn65dsi83_poll, test_latched_recipe_survives_a_cleared_magic)
+{
+	memset(&latch, 0, sizeof(latch));
+	publish(table, ARRAY_SIZE(table));
+	zassert_true(sn65dsi83_recipe_latch(&recipe, &latch));
+	zassert_equal(latch.n, ARRAY_SIZE(table));
+
+	recipe.magic = 0U; /* the display core restarted */
+	zassert_false(sn65dsi83_recipe_latch(&recipe, &latch), "nothing newer");
+	zassert_equal(latch.n, ARRAY_SIZE(table), "the latched table stays in use");
+
+	black();
+	zassert_equal(sn65dsi83_health_poll(&bus, latch.csr, latch.n, &st, &rep, 1000), 0);
+	zassert_equal(rep.health, SN65_HEALTH_REINIT);
+	zassert_equal(st.recoveries, 1U, "a lost config is still replayed");
+	zassert_equal(fake.regs[0x0D], 0x01);
+	zassert_equal(fake.regs[0x18], 0x78, "from the latched table");
+}
+
+/* A later valid recipe replaces the latched one; a half-written one is ignored. */
+ZTEST(sn65dsi83_poll, test_newer_recipe_refreshes_the_latch)
+{
+	static const struct sn65dsi83_csr other[] = { { 0x0A, 0x01 }, { 0x18, 0x7A } };
+
+	memset(&latch, 0, sizeof(latch));
+	publish(table, ARRAY_SIZE(table));
+	zassert_true(sn65dsi83_recipe_latch(&recipe, &latch));
+
+	publish(other, ARRAY_SIZE(other));
+	zassert_true(sn65dsi83_recipe_latch(&recipe, &latch));
+	zassert_equal(latch.n, ARRAY_SIZE(other));
+	zassert_equal(latch.csr[1].val, 0x7A);
+
+	publish(table, ARRAY_SIZE(table));
+	recipe.n = SN65_RECIPE_MAX + 1U; /* garbage length */
+	zassert_false(sn65dsi83_recipe_latch(&recipe, &latch));
+	zassert_equal(latch.n, ARRAY_SIZE(other), "untouched");
+}
