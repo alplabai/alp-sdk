@@ -135,6 +135,8 @@ bool alif_se_hw_lpstate_off(void)
 
 /* ---- LPTIMER wake timer --------------------------------------------------- */
 
+static bool _wfi_lptimer_fired;
+
 #if DT_HAS_CHOSEN(alp_power_wake_timer) && DT_NODE_HAS_STATUS_OKAY(DT_CHOSEN(alp_power_wake_timer))
 #define HW_WAKE_TIMER_NODE DT_CHOSEN(alp_power_wake_timer)
 
@@ -199,9 +201,18 @@ void alif_se_hw_wake_timer_disarm(void)
 	}
 }
 
+/* What the LPTIMER and the NVIC showed at the first instruction after the WFI, before the
+ * wake pad was disarmed or PRIMASK restored (bench U8e: a read taken later, after the
+ * disarm and the cache and clock restores, can miss a source that did end the WFI). */
+static bool wfi_timer_seen(void)
+{
+	return (NVIC->ISPR[1] & BIT(28)) != 0u ||
+	       (sys_read32(HW_LPTIMER_INTSTATUS) & BIT(HW_LPTIMER_CHANNEL)) != 0u;
+}
+
 bool alif_se_hw_wake_timer_pending(void)
 {
-	return (sys_read32(HW_LPTIMER_INTSTATUS) & BIT(HW_LPTIMER_CHANNEL)) != 0u;
+	return _wfi_lptimer_fired || (sys_read32(HW_LPTIMER_INTSTATUS) & BIT(HW_LPTIMER_CHANNEL)) != 0u;
 }
 
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
@@ -299,6 +310,11 @@ alp_status_t alif_se_hw_wake_timer_arm(uint32_t ticks)
 
 void alif_se_hw_wake_timer_disarm(void)
 {
+}
+
+static bool wfi_timer_seen(void)
+{
+	return false;
 }
 
 bool alif_se_hw_wake_timer_pending(void)
@@ -604,7 +620,8 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 	__disable_irq();
 	__set_BASEPRI(0);
 
-	_enter_reason = "int_pad";
+	_wfi_lptimer_fired = false;
+	_enter_reason      = "int_pad";
 	if (rtc_int) {
 		armed = rtc_int_open_locked();
 	}
@@ -666,6 +683,10 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 
 	/* Does not return when the power is removed: the wake is a cold boot. */
 	__WFI();
+
+	/* First thing after the WFI, interrupts still off: which source ended it.  IRQ 60 (the
+	 * LPTIMER, bit 28 of ISPR1) pending, or the channel's own INTSTATUS bit. */
+	_wfi_lptimer_fired = wfi_timer_seen();
 
 	/* A wake source fired before power was removed.  Put everything back, the wake
 	 * pad first, while interrupts are still off. */

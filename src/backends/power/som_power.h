@@ -59,6 +59,18 @@ typedef struct {
 	alp_status_t (*restore)(void *ctx, bool rail_off, bool early);
 } alp_som_power_hooks_t;
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+/** Bench-only OFF-profile knobs of the STOP backend (defaults from Kconfig; the bench app may
+ *  change them in RAM before a sleep, so one image can try each vendor difference). */
+typedef struct {
+	bool vtor_self;  /**< OFF vtor_address = SCB->VTOR (resume at this image, no SES->ATOC). */
+	bool mram_seram; /**< OFF memory_blocks |= MRAM | SERAM. */
+	bool lfxo;       /**< OFF aon_clk_src = LFXO. */
+	bool stby_76_8;  /**< OFF stby_clk_freq = 76.8 MHz. */
+} alp_som_bench_knobs_t;
+extern alp_som_bench_knobs_t alp_som_bench_knobs;
+#endif
+
 /** Hardware wake paths a STOP / STANDBY cycle armed, bits of
  *  alp_som_pd_record_t::armed_hw.  The STOP backend (alif_se_power.c) writes
  *  them, the cold-boot wake decode reads them. */
@@ -194,6 +206,17 @@ void alp_som_power_reset_for_test(void);
 
 /** CRC-32 over the record's covered fields. */
 uint32_t alp_som_pd_record_crc(const alp_som_pd_record_t *rec);
+
+/** BKRAM shadow (the boot-time clock restore can disturb the block): copy the SDK data
+ *  out to RAM and serve every accessor from there until alp_som_pd_shadow_end(). */
+void alp_som_pd_shadow_begin(void);
+/** Prove the block writable (alp_som_pd_bkram_selftest) and copy the shadow back.  False
+ *  when the block fails: the shadow stays authoritative and the block is dead for sleep. */
+bool alp_som_pd_shadow_end(void);
+/** Non-destructive write/readback test of the block (words past the SDK layout). */
+bool alp_som_pd_bkram_selftest(void);
+/** True unless the data is still served from the RAM shadow (BKRAM judged unusable). */
+bool alp_som_pd_bkram_live(void);
 
 /** True when @p rec has the right magic and CRC. */
 bool alp_som_pd_record_valid(const alp_som_pd_record_t *rec);

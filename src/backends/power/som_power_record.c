@@ -80,7 +80,20 @@ BUILD_ASSERT(sizeof(alp_som_pd_record_t) == 60, "wake record must be 60 bytes");
 BUILD_ASSERT(offsetof(alp_som_pd_record_t, crc) == 56, "wake record CRC must sit at offset 56");
 
 static sompd_bkram_t _bk SOMPD_BKRAM_SECTION;
-#define _store (_bk.record)
+
+/* The SDK's view of the BKRAM contents.  Normally the region itself.  While the boot-time
+ * clock restore runs it is a plain RAM shadow (alp_som_pd_shadow_begin / _end): the SE's
+ * set_run_cfg can switch the Utility SRAM's retention LDO or its clock off and leave the
+ * block returning a constant and ignoring writes (bench U8e), taking the record, the bench
+ * cell and the diag with it.  The data is copied out first, the block is proved writable
+ * after the restore, and only then is it copied back. */
+#if SOMPD_IN_BKRAM
+static sompd_bkram_t  _shadow;
+static sompd_bkram_t *_pk = &_bk;
+#else
+#define _pk (&_bk)
+#endif
+#define _store (_pk->record)
 
 #if SOMPD_IN_BKRAM
 
@@ -93,6 +106,9 @@ static sompd_bkram_t _bk SOMPD_BKRAM_SECTION;
 
 static void bkram_clock_assert(void)
 {
+	if (_pk != &_bk) {
+		return; /* shadowed: the data is in RAM, the block is not touched */
+	}
 	uint32_t v = sys_read32(SOMPD_BKRAM_CKEN_REG);
 
 	if ((v & SOMPD_BKRAM_CKEN_BIT) == 0u) {
@@ -104,6 +120,101 @@ static inline void bkram_clock_assert(void)
 {
 }
 #endif
+
+/* Non-destructive write/readback of the words past the SDK layout (offset 0xF00, 64 words):
+ * every word is saved, all are written with an index-mixed pattern and then all are read back
+ * (so a block that returns a constant, or a bus that echoes the last write, fails), then the
+ * saved values go back.  Two patterns, complementary bits. */
+#define SOMPD_SELFTEST_OFF   0xF00u
+#define SOMPD_SELFTEST_WORDS 64u
+
+bool alp_som_pd_bkram_selftest(void)
+{
+#if SOMPD_IN_BKRAM
+	BUILD_ASSERT(sizeof(sompd_bkram_t) <= SOMPD_SELFTEST_OFF,
+	             "the BKRAM self-test words must lie past the SDK layout");
+	BUILD_ASSERT(SOMPD_SELFTEST_OFF + SOMPD_SELFTEST_WORDS * 4u <= DT_REG_SIZE(DT_NODELABEL(bkram)),
+	             "the BKRAM self-test words must fit the region");
+	static const uint32_t pat[2] = { 0xA5A5A5A5u, 0x5A5A5A5Au };
+	volatile uint32_t    *t =
+	    (volatile uint32_t *)(DT_REG_ADDR(DT_NODELABEL(bkram)) + SOMPD_SELFTEST_OFF);
+	uint32_t     keep[SOMPD_SELFTEST_WORDS];
+	bool         ok  = true;
+	unsigned int key = irq_lock();
+
+	/* Unconditionally: the block itself is under test, never the shadow. */
+	uint32_t en = sys_read32(SOMPD_BKRAM_CKEN_REG);
+
+	if ((en & SOMPD_BKRAM_CKEN_BIT) == 0u) {
+		sys_write32(en | SOMPD_BKRAM_CKEN_BIT, SOMPD_BKRAM_CKEN_REG);
+	}
+	for (unsigned i = 0; i < SOMPD_SELFTEST_WORDS; ++i) {
+		keep[i] = t[i];
+	}
+	for (unsigned p = 0; p < 2u && ok; ++p) {
+		for (unsigned i = 0; i < SOMPD_SELFTEST_WORDS; ++i) {
+			t[i] = pat[p] ^ (i * 0x9E3779B9u);
+		}
+		for (unsigned i = 0; i < SOMPD_SELFTEST_WORDS; ++i) {
+			if (t[i] != (pat[p] ^ (i * 0x9E3779B9u))) {
+				ok = false;
+				break;
+			}
+		}
+	}
+	for (unsigned i = 0; i < SOMPD_SELFTEST_WORDS; ++i) {
+		t[i] = keep[i];
+	}
+	irq_unlock(key);
+	return ok;
+#else
+	return true;
+#endif
+}
+
+void alp_som_pd_shadow_begin(void)
+{
+#if SOMPD_IN_BKRAM
+	if (_pk == &_bk) {
+		bkram_clock_assert();
+		memcpy(&_shadow, &_bk, sizeof(_shadow));
+		_pk = &_shadow;
+	}
+#endif
+}
+
+bool alp_som_pd_shadow_end(void)
+{
+#if SOMPD_IN_BKRAM
+	if (_pk == &_bk) {
+		return true;
+	}
+	if (!alp_som_pd_bkram_selftest()) {
+		return false; /* BKRAM is dead: stay on the shadow, the sleep path refuses */
+	}
+	/* _pk is still the shadow, so assert the block's clock by hand. */
+	uint32_t v = sys_read32(SOMPD_BKRAM_CKEN_REG);
+
+	if ((v & SOMPD_BKRAM_CKEN_BIT) == 0u) {
+		sys_write32(v | SOMPD_BKRAM_CKEN_BIT, SOMPD_BKRAM_CKEN_REG);
+	}
+	memcpy(&_bk, &_shadow, sizeof(_bk));
+	if (memcmp(&_bk, &_shadow, sizeof(_bk)) != 0) {
+		return false;
+	}
+	_pk = &_bk;
+#endif
+	return true;
+}
+
+bool alp_som_pd_bkram_live(void)
+{
+#if SOMPD_IN_BKRAM
+	return _pk == &_bk;
+#else
+	return true;
+#endif
+}
 
 uint32_t alp_som_pd_record_crc(const alp_som_pd_record_t *rec)
 {
@@ -176,7 +287,7 @@ void alp_som_pd_store_poke(const alp_som_pd_record_t *rec)
 uint32_t alp_som_pd_bench_count(void)
 {
 	bkram_clock_assert();
-	alp_som_pd_bench_t b = _bk.bench;
+	alp_som_pd_bench_t b = _pk->bench;
 
 	/* Another image's counter reads 0: a clean flash starts fresh. */
 	if (b.magic != SOMPD_BENCH_MAGIC || b.crc != crc32_ieee((const uint8_t *)&b, 12u) ||
@@ -189,7 +300,7 @@ uint32_t alp_som_pd_bench_count(void)
 bool alp_som_pd_bkram_foreign(void)
 {
 	bkram_clock_assert();
-	alp_som_pd_bench_t b = _bk.bench;
+	alp_som_pd_bench_t b = _pk->bench;
 
 	if (b.magic != SOMPD_BENCH_MAGIC) {
 		return false; /* no counter at all: nothing says another image ran */
@@ -210,8 +321,8 @@ void alp_som_pd_bench_set(uint32_t count)
 		                     .count = count,
 		                     .image = alp_som_pd_image_id() };
 
-	b.crc     = crc32_ieee((const uint8_t *)&b, 12u);
-	_bk.bench = b;
+	b.crc      = crc32_ieee((const uint8_t *)&b, 12u);
+	_pk->bench = b;
 }
 
 #define SOMPD_DIAG_MAGIC 0x44494147u /* "DIAG" */
@@ -224,7 +335,7 @@ void alp_som_pd_diag_patch(unsigned slot, unsigned idx, uint32_t value)
 		return;
 	}
 	bkram_clock_assert();
-	_bk.diag[slot].w[idx] = value;
+	_pk->diag[slot].w[idx] = value;
 }
 
 void alp_som_pd_diag_invalidate(unsigned slot)
@@ -233,7 +344,7 @@ void alp_som_pd_diag_invalidate(unsigned slot)
 		return;
 	}
 	bkram_clock_assert();
-	_bk.diag[slot].magic = 0u;
+	_pk->diag[slot].magic = 0u;
 }
 
 void alp_som_pd_diag_save(unsigned slot, const uint32_t *words, unsigned n)
@@ -248,14 +359,15 @@ void alp_som_pd_diag_save(unsigned slot, const uint32_t *words, unsigned n)
 	 * later in the same boot, carries that boot's number, so after the next boot the two
 	 * slots show which boot wrote what.  `cycle` is the bench counter at the time. */
 	if (slot == ALP_SOM_PD_DIAG_BOOT) {
-		_diag_boot_seq = (_bk.diag[slot].magic == SOMPD_DIAG_MAGIC) ? _bk.diag[slot].seq + 1u : 1u;
+		_diag_boot_seq =
+		    (_pk->diag[slot].magic == SOMPD_DIAG_MAGIC) ? _pk->diag[slot].seq + 1u : 1u;
 	}
 	d.seq   = _diag_boot_seq;
 	d.cycle = alp_som_pd_bench_count();
 	for (unsigned i = 0; i < n && i < ALP_SOM_PD_DIAG_WORDS; ++i) {
 		d.w[i] = words[i];
 	}
-	_bk.diag[slot] = d;
+	_pk->diag[slot] = d;
 }
 
 bool alp_som_pd_diag_load(unsigned slot, alp_som_pd_diag_t *out)
@@ -264,7 +376,7 @@ bool alp_som_pd_diag_load(unsigned slot, alp_som_pd_diag_t *out)
 		return false;
 	}
 	bkram_clock_assert();
-	*out = _bk.diag[slot];
+	*out = _pk->diag[slot];
 	return out->magic == SOMPD_DIAG_MAGIC;
 }
 #endif

@@ -75,6 +75,7 @@
 #include <string.h>
 
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/sys_io.h>
 #include <zephyr/sys/util.h>
@@ -151,6 +152,63 @@ static void verdict(unsigned cycle, const char *check, bool pass)
 		g_fail++;
 	}
 }
+
+/* The Secure Enclave firmware identity (bench U8e: which SES the wake path was measured on). */
+static void print_ses_version(void)
+{
+	uint8_t  rev[80] = { 0 }; /* VERSION_RESPONSE_LENGTH */
+	uint32_t toc     = 0u;
+	int      rrc     = se_service_get_se_revision(rev);
+	int      trc     = se_service_get_toc_version(&toc);
+
+	rev[sizeof(rev) - 1u] = '\0';
+	printk("POWER_STOP: ses revision rc=%d \"%s\" toc_version rc=%d 0x%08x\n",
+	       rrc,
+	       rrc == 0 ? (const char *)rev : "",
+	       trc,
+	       (unsigned)toc);
+}
+
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+static void print_knobs(void)
+{
+	printk("POWER_STOP: knobs vtor_self=%d mram_seram=%d lfxo=%d stby_76_8=%d\n",
+	       (int)alp_som_bench_knobs.vtor_self,
+	       (int)alp_som_bench_knobs.mram_seram,
+	       (int)alp_som_bench_knobs.lfxo,
+	       (int)alp_som_bench_knobs.stby_76_8);
+}
+
+/* Runtime OFF-profile knobs without a reflash: during the awake window the console UART is
+ * polled and 'v' / 'm' / 'l' / 's' toggle vtor_self / mram_seram / lfxo / stby_76_8
+ * (Kconfig supplies the starting values).  The knobs live in plain RAM: a wake is a cold
+ * boot and falls back to the Kconfig defaults. */
+static void poll_knobs(void)
+{
+	const struct device *con = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+	unsigned char        c;
+
+	while (device_is_ready(con) && uart_poll_in(con, &c) == 0) {
+		switch (c) {
+		case 'v':
+			alp_som_bench_knobs.vtor_self = !alp_som_bench_knobs.vtor_self;
+			break;
+		case 'm':
+			alp_som_bench_knobs.mram_seram = !alp_som_bench_knobs.mram_seram;
+			break;
+		case 'l':
+			alp_som_bench_knobs.lfxo = !alp_som_bench_knobs.lfxo;
+			break;
+		case 's':
+			alp_som_bench_knobs.stby_76_8 = !alp_som_bench_knobs.stby_76_8;
+			break;
+		default:
+			continue;
+		}
+		print_knobs();
+	}
+}
+#endif
 
 /* Raw always-on registers, as evidence for the bench record.  The first boot after
  * the SE cold start is the baseline; the ones after a wake show what the SE left. */
@@ -315,6 +373,9 @@ static void start_cycle(unsigned n)
 	printk("POWER_STOP: awake %u ms before cycle%u (%s)\n", (unsigned)AWAKE_MS, n, c->what);
 	for (unsigned s = 0; s < AWAKE_MS / 1000u; ++s) {
 		k_sleep(K_SECONDS(1));
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+		poll_knobs();
+#endif
 		printk("POWER_STOP: awake %u/%u\n", s + 1u, (unsigned)(AWAKE_MS / 1000u));
 	}
 
@@ -390,7 +451,16 @@ int main(void)
 	unsigned done = alp_som_pd_bench_count();
 
 	printk("POWER_STOP: boot valid=%d counter=%u\n", (int)bi.valid, done);
+	print_ses_version();
 	print_regs();
+	/* BKRAM after the boot-time clock restore: served from the RAM shadow (live=0) means the
+	 * block failed its write/readback and a sleep will be refused (bkram_unusable). */
+	printk("POWER_STOP: bkram live=%d selftest=%d\n",
+	       (int)alp_som_pd_bkram_live(),
+	       (int)alp_som_pd_bkram_selftest());
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	print_knobs();
+#endif
 	print_stop_mode(); /* baseline on the first boot, the wake witness after one */
 	print_diag("pre", ALP_SOM_PD_DIAG_PRE);
 	alp_som_pd_diag_invalidate(ALP_SOM_PD_DIAG_PRE); /* printed once; never read as stale later */

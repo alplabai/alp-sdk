@@ -192,6 +192,12 @@ static boot_capture_t               _boot;
 static alp_som_pd_record_t          _boot_rec; /* the cycle's record, kept for the wake decode */
 static bool                         _boot_external; /* this boot followed a pin / external reset */
 static bool _ignore_stat; /* BKRAM held another image's data: STOP_MODE_STAT means nothing here */
+/* The record of the quiesce in progress, kept in plain RAM as well: a same-boot rollback
+ * (a sleep that did not power down, a refusal after the quiesce) must not depend on BKRAM,
+ * whose contents (or whose very retention) the sleep sequence may have disturbed.  The
+ * cold-boot wake still reads the BKRAM record; this copy dies with the boot. */
+static alp_som_pd_record_t _ram_rec;
+static bool                _ram_rec_valid;
 static bool _boot_suppressed; /* ... and nothing about this boot is reported as a wake */
 
 K_MUTEX_DEFINE(_lock);
@@ -874,6 +880,8 @@ alp_status_t alp_som_power_quiesce(alp_power_mode_t mode, uint32_t *rollback_fai
 			 * leaving a rollback-failed domain held would be the worse outcome. */
 			rec.mode = (uint32_t)ALP_POWER_MODE_RUN;
 			alp_som_pd_store_save(&rec);
+			_ram_rec       = rec;
+			_ram_rec_valid = true;
 		}
 		if (rollback_failed != NULL) {
 			*rollback_failed = failed;
@@ -881,6 +889,8 @@ alp_status_t alp_som_power_quiesce(alp_power_mode_t mode, uint32_t *rollback_fai
 	} else if (rec.quiesced != 0u) {
 		rec.mode = (uint32_t)mode;
 		alp_som_pd_store_save(&rec);
+		_ram_rec       = rec;
+		_ram_rec_valid = true;
 	}
 	k_mutex_unlock(&_lock);
 	return s;
@@ -891,9 +901,15 @@ alp_status_t alp_som_power_restore(uint32_t *failed_out)
 	k_mutex_lock(&_lock, K_FOREVER);
 	alp_som_pd_record_t rec;
 	if (!alp_som_pd_store_load(&rec)) {
-		k_mutex_unlock(&_lock);
-		return ALP_ERR_NOT_READY;
+		/* BKRAM did not give the record back (dead, or not retained after the SE call):
+		 * the in-RAM copy of the same quiesce is the truth for a same-boot rollback. */
+		if (!_ram_rec_valid) {
+			k_mutex_unlock(&_lock);
+			return ALP_ERR_NOT_READY;
+		}
+		rec = _ram_rec;
 	}
+	_ram_rec_valid = false;
 	uint32_t restored, failed;
 	restore_domains(&rec, ~0u, false, &restored, &failed);
 	alp_som_pd_store_clear();
@@ -952,6 +968,7 @@ void alp_som_power_reset_for_test(void)
 	_boot_suppressed = false;
 	_ignore_stat     = false;
 	_pads_applied    = false;
+	_ram_rec_valid   = false;
 	alp_som_pd_store_clear();
 	k_mutex_unlock(&_lock);
 }

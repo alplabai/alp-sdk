@@ -393,6 +393,37 @@ void alp_som_pd_diag_invalidate(unsigned slot)
 	(void)slot;
 }
 
+/* BKRAM seam (som_power_record.c in the product): the shadow lifecycle and the self-test. */
+static unsigned g_shadow_end_calls;
+static bool     g_bkram_ok;
+static bool     g_shadowed;
+static unsigned g_selftest_calls;
+
+void alp_som_pd_shadow_begin(void)
+{
+	g_shadowed = true;
+}
+
+bool alp_som_pd_shadow_end(void)
+{
+	g_shadow_end_calls++;
+	if (g_bkram_ok) {
+		g_shadowed = false;
+	}
+	return g_bkram_ok;
+}
+
+bool alp_som_pd_bkram_selftest(void)
+{
+	g_selftest_calls++;
+	return g_bkram_ok;
+}
+
+bool alp_som_pd_bkram_live(void)
+{
+	return !g_shadowed;
+}
+
 /* The cycle counter the PLL wait is bounded by.  Every read jumps g_cycle_step cycles, so a
  * wait bounded by CYCLES ends after a handful of reads; one bounded only by an iteration
  * count (or by a k_busy_wait that works on the host) would read it millions of times. */
@@ -505,6 +536,11 @@ static alp_power_backend_state_t g_state;
 
 static void reset_fakes(void)
 {
+	g_bkram_ok          = true;
+	g_shadowed          = false;
+	g_shadow_end_calls  = 0u;
+	g_selftest_calls    = 0u;
+	alp_som_bench_knobs = (alp_som_bench_knobs_t){ 0 };
 	memset(g_boot_w, 0, sizeof(g_boot_w));
 	g_w40_at_se_call = 0xFFFFFFFFu;
 	g_cycles         = 0u;
@@ -1785,14 +1821,16 @@ ZTEST(power_alif_se, test_an_all_rc_clock_tree_triggers_the_restore_with_a_compl
 
 	zassert_equal(clock_restore(), 0);
 	zassert_equal(g_run_set_calls, 1u);
-	zassert_equal(g_run_set.power_domains, 0x16du);
+	zassert_equal(g_run_set.power_domains, PD_SYST_MASK | PD_SSE700_AON_MASK, "the vendor set");
 	zassert_equal(g_run_set.dcdc_voltage, 825u);
 	zassert_equal(g_run_set.dcdc_mode, DCDC_MODE_PWM);
 	zassert_equal(g_run_set.aon_clk_src, CLK_SRC_LFRC);
 	zassert_equal(g_run_set.run_clk_src, CLK_SRC_PLL);
 	zassert_equal(g_run_set.cpu_clk_freq, CLOCK_FREQUENCY_160MHZ);
 	zassert_equal((int)g_run_set.scaled_clk_freq, 16);
-	zassert_equal(g_run_set.memory_blocks, 0x00108000u);
+	zassert_equal(g_run_set.memory_blocks,
+	              ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_FWRAM_MASK | ALP_AIPM_GEN2_BACKUP4K_MASK,
+	              "BACKUP4K (gen2 bit 21) is named, or the SE takes the Utility SRAM away");
 	zassert_equal(g_run_set.ip_clock_gating, 0u);
 	zassert_equal(g_run_set.phy_pwr_gating, 0u);
 	zassert_equal(g_run_set.vdd_ioflex_3V3, IOFLEX_LEVEL_1V8);
@@ -1876,4 +1914,81 @@ ZTEST(power_alif_se, test_int_asserted_refusal_dumps_the_rtc_registers_once)
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
 	assert_no_side_effect();
+}
+
+/* ---- BKRAM-safe restore (bench U8e) ---------------------------------------------------- */
+
+ZTEST(power_alif_se, test_the_restore_reasserts_the_bkram_retention_enables_then_unshadows)
+{
+	g_shadowed                       = true; /* shadow_begin ran at priority 0 */
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
+	g_regs[ALIF_SE_REG_ANA_REG1] &= ~ANA_REG1_RET_LDO_VBAT_EN; /* what the U8e SE call left */
+	g_regs[ALIF_SE_REG_RET_CTRL] &= ~RET_CTRL_BKRAM;
+
+	zassert_equal(clock_restore(), 0);
+	zassert_not_equal(g_regs[ALIF_SE_REG_ANA_REG1] & ANA_REG1_RET_LDO_VBAT_EN, 0u);
+	zassert_not_equal(g_regs[ALIF_SE_REG_RET_CTRL] & RET_CTRL_BKRAM, 0u);
+	zassert_equal(g_shadow_end_calls, 1u);
+	zassert_false(g_shadowed, "data written back only after the block was proved");
+	zassert_equal(g_boot_w[52], 1u);
+	zassert_equal(g_boot_w[40], 1u);
+}
+
+ZTEST(power_alif_se, test_a_dead_bkram_stays_shadowed_and_the_sleep_is_refused)
+{
+	g_shadowed                       = true;
+	g_bkram_ok                       = false;
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
+	zassert_equal(clock_restore(), 0, "boot continues");
+	zassert_true(g_shadowed, "the shadow stays authoritative");
+	zassert_equal(g_boot_w[52], 2u);
+	zassert_equal(g_boot_w[40], 2u, "reported as failed");
+
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOT_READY);
+	assert_no_side_effect();
+}
+
+ZTEST(power_alif_se, test_the_sleep_tests_bkram_before_touching_anything)
+{
+	g_bkram_ok          = false; /* live (not shadowed) but failing the write/readback */
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOT_READY);
+	zassert_true(g_selftest_calls >= 1u);
+	assert_no_side_effect();
+}
+
+ZTEST(power_alif_se, test_the_runtime_knobs_select_each_vendor_difference_in_the_off_profile)
+{
+	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,
+		                   .hw            = ALP_SOM_ARM_LPTIMER,
+		                   .memory_blocks = ALP_AIPM_GEN2_BACKUP4K_MASK };
+	off_profile_t out;
+
+	poison(&out);
+	zassert_ok(build_off_profile(&out, &g_live, &plan));
+	zassert_equal(out.vtor_address, g_live.vtor_address, "knobs off: the live vtor is kept");
+	zassert_equal(out.memory_blocks, ALP_AIPM_GEN2_BACKUP4K_MASK);
+	zassert_equal(out.stby_clk_freq, SCALED_FREQ_RC_STDBY_0_075_MHZ);
+
+	alp_som_bench_knobs.vtor_self = true;
+	poison(&out);
+	zassert_ok(build_off_profile(&out, &g_live, &plan));
+	zassert_equal(out.vtor_address, 0x80010400u, "SCB->VTOR");
+
+	alp_som_bench_knobs.mram_seram = true;
+	poison(&out);
+	zassert_ok(build_off_profile(&out, &g_live, &plan));
+	zassert_equal(out.memory_blocks,
+	              ALP_AIPM_GEN2_BACKUP4K_MASK | ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK);
+
+	alp_som_bench_knobs.stby_76_8 = true;
+	poison(&out);
+	zassert_ok(build_off_profile(&out, &g_live, &plan));
+	zassert_equal(out.stby_clk_freq, SCALED_FREQ_RC_STDBY_76_8_MHZ);
+
+	alp_som_bench_knobs.lfxo = true;
+	g_state.wake_bitmap      = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+	zassert_equal(g_set.aon_clk_src, CLK_SRC_LFXO, "the LFXO knob reaches the plan");
 }

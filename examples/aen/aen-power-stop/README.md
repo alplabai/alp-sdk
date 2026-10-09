@@ -71,6 +71,19 @@ One variable each, selected with a config fragment on top of `prj.conf`
 | (iv) LFXO | `iv-lfxo.conf` | OFF profile `aon_clk_src` = LFXO (cap 63) | the vendor sample's choice; compare the wake and `se off aon_clk` |
 | (v) VTOR self | `v-vtor-self.conf` | OFF profile `vtor_address` = this image's VTOR | the vendor sample's resume vector; the default keeps the live value |
 | (vi) MRAM+SERAM | `vi-mram-seram.conf` | OFF profile `memory_blocks` also MRAM \| SERAM | the vendor sample's MRAM-boot profile |
+| (A-norestore) | `vii-a-norestore.conf` | (A) with `RESTORE_CLOCKS=n` | the control for U8e: no boot-time `set_run_cfg` |
+| (V) vendor OFF | `viii-vendor-off.conf` | (A) with vtor = own VTOR and memory MRAM \| SERAM \| BKRAM, `RESTORE_CLOCKS=n` | the vendor OFF profile; ablate at run time with the console keys below |
+| (R-vendor) | `ix-repro-vendor.conf` | forces the boot-time restore on a cold boot (fixed profile), then BKRAM self-test, then cycle 1 in the same boot | `bkram live=1 selftest=1` and BOOT w40 = 1, w52 = 1 |
+| (R-legacy) | `x-repro-legacy.conf` | the same with the c6de654ff restore profile (0x16d, no BACKUP4K, no re-assert) | reproduces the U8e loss: `bkram live=0`, BOOT w52 = 2, the sleep refused `bkram_unusable` |
+
+Run-time knobs (bench build): during the 10 s awake window send `v` (OFF `vtor_address` =
+`SCB->VTOR`), `m` (`memory_blocks` |= MRAM \| SERAM), `l` (`aon_clk_src` LFXO) or `s`
+(`stby_clk_freq` 76.8 MHz) on the console; each toggles one knob and prints
+`POWER_STOP: knobs ...`. They live in RAM, so each wake starts from the Kconfig defaults. Every
+boot also prints `POWER_STOP: ses revision ...` (SE firmware revision and TOC version) and
+`POWER_STOP: bkram live=<0|1> selftest=<0|1>`; the BOOT diag words 52-55 hold the restore's
+BKRAM self-test result (1 ok, 2 failed), RET_CTRL and VBAT_ANA_REG1 before the re-assert, and
+VBAT_ANA_REG1 after it.
 
 Variants (v) and (vi) are the two differences from the vendor `system_off` sample not
 covered by (i)-(iv); see `docs/aen-power-domains.md`.

@@ -313,6 +313,11 @@ config ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS
 	  Product behaviour in intent (a product waking from STOP needs its clocks back), but
 	  UNPROVEN: the profile is measured on the E1M-AEN803 only, so it defaults on only in a
 	  bench image (the bench scratch option) until bench-proven.
+	  Bench U8e (c6de654ff): the first version of this restore (cold-boot power domains
+	  0x16d, no BACKUP4K) took the Utility SRAM away and the sleep had no record.  The
+	  profile now uses the vendor domains and BACKUP4K, re-asserts the retention enables,
+	  keeps the SDK's BKRAM data in a RAM shadow until the block is proved writable, and
+	  the sleep refuses (bkram_unusable) if it is not.  Still unproven on silicon.
 	  TODO(#2784): evaluate hal_alif's CONFIG_ALIF_SE_DTS_RUN_PROFILE (the aipm-run
 	  devicetree node) instead of this hand-rolled profile.
 
@@ -357,6 +362,30 @@ config ALP_SDK_POWER_ALIF_SE_BENCH_MRAM_SERAM
 	  The default keeps BKRAM (plus any TCM bank asked for).  The vendor system_off
 	  sample's MRAM-boot profile is MRAM_MASK | SERAM_MASK.  Bench variant (vi); never
 	  for a product build.
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_STBY_76_8
+	bool "Bench only: OFF profile stby_clk_freq = 76.8 MHz for STOP too"
+	depends on ALP_SDK_POWER_ALIF_SE && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	help
+	  STOP normally carries SCALED_FREQ_RC_STDBY_0_075_MHZ; the vendor system_off sample
+	  uses 76.8 MHz.  Default of a runtime knob (alp_som_bench_knobs.stby_76_8).  Never for
+	  a product build.
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_FORCE_RESTORE
+	bool "Bench only: run the boot-time clock restore even when the clocks are healthy"
+	depends on ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	help
+	  Reproduces the restore's own side effects on a cold boot that never slept (bench
+	  U8e: set_run_cfg disturbed the Utility SRAM).  Never for a product build.
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_RESTORE_LEGACY
+	bool "Bench only: restore with the old RUN profile (0x16d, no BACKUP4K, no re-assert)"
+	depends on ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	help
+	  The profile of c6de654ff, kept to reproduce the BKRAM loss of bench U8e.  The
+	  default restore uses the vendor power domains (PD_SYST | PD_SSE700_AON), names the
+	  Utility SRAM (gen2 BACKUP4K) in memory_blocks and re-asserts RET_CTRL bit 0 and
+	  VBAT_ANA_REG1 bit 8 afterwards.  Never for a product build.
 
 config ALP_SDK_POWER_EXT_RENESAS
 	bool "Compile the Renesas V2N power vendor-extension body"

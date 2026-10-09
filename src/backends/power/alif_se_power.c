@@ -114,6 +114,20 @@
 #include "power_ops.h"
 #include "som_power.h"
 
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+/* Bench-only OFF-profile knobs (declared in som_power.h): Kconfig supplies the defaults, the
+ * bench app may flip them in RAM before a sleep. */
+alp_som_bench_knobs_t alp_som_bench_knobs = {
+	.vtor_self  = IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_VTOR_SELF),
+	.mram_seram = IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_MRAM_SERAM),
+	.lfxo       = IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_FORCE_LFXO),
+	.stby_76_8  = IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_STBY_76_8),
+};
+#define BENCH_KNOB(name) (alp_som_bench_knobs.name)
+#else
+#define BENCH_KNOB(name) false
+#endif
+
 /* ---- Register facts (E8 SVD) ----------------------------------------------- */
 
 /* ANA.VBAT_ANA_REG1 fields (SVD VBAT_ANA_REG1 @ ANA + 0x38).  Checked against the
@@ -560,9 +574,10 @@ build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_pla
 	out->dcdc_mode     = DCDC_MODE_OFF;
 	out->aon_clk_src   = plan->lfxo ? CLK_SRC_LFXO : CLK_SRC_LFRC;
 	out->stby_clk_src  = CLK_SRC_HFRC;
-	out->stby_clk_freq = stop ? SCALED_FREQ_RC_STDBY_0_075_MHZ : SCALED_FREQ_RC_STDBY_76_8_MHZ;
+	out->stby_clk_freq = (stop && !BENCH_KNOB(stby_76_8)) ? SCALED_FREQ_RC_STDBY_0_075_MHZ
+	                                                      : SCALED_FREQ_RC_STDBY_76_8_MHZ;
 	out->memory_blocks = plan->memory_blocks;
-	if (IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_MRAM_SERAM)) {
+	if (BENCH_KNOB(mram_seram)) {
 		/* Bench variant (vi): the vendor sample's MRAM-boot profile (sdk-alif
 		 * samples/drivers/pm/system_off) keeps MRAM and the SE RAM powered. */
 		out->memory_blocks |= ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK;
@@ -576,7 +591,7 @@ build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_pla
 	out->ewic_cfg        = ewic_for(plan);
 	out->vtor_address    = live->vtor_address;
 	out->vtor_address_ns = live->vtor_address_ns;
-	if (IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_VTOR_SELF)) {
+	if (BENCH_KNOB(vtor_self)) {
 		/* Bench variant (v): resume at this image's own vector table, as the vendor
 		 * sample does (offp.vtor_address = SCB->VTOR), instead of through SES -> ATOC. */
 		out->vtor_address    = alif_se_hw_vtor_read();
@@ -871,10 +886,8 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 		return refuse(1, "retention_invalid", (int)state->retain.level, why);
 	}
 	plan.memory_blocks = retained_blocks(&state->retain);
-	plan.lfxo =
-	    lfxo_confirmed() ||
-	    IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_FORCE_LFXO); /* fixes the LPTIMER rate */
-	s = plan_wake(state, wake_after_ms, &plan);
+	plan.lfxo          = lfxo_confirmed() || BENCH_KNOB(lfxo); /* fixes the LPTIMER rate */
+	s                  = plan_wake(state, wake_after_ms, &plan);
 	if (s != ALP_OK) {
 		return refuse(1, "wake_plan", (int)wake_after_ms, s);
 	}
@@ -887,6 +900,14 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	s = refuse_if_pending(&plan);
 	if (s != ALP_OK) {
 		return s;
+	}
+
+	/* Sleep without BKRAM is a sleep that cannot come back to its record: refuse before any
+	 * state is touched (bench U8e: the boot-time restore had killed the Utility SRAM and
+	 * the board idled with the NOR, PHY and CC3501E held).  The block is tested, not
+	 * assumed, and a run that still serves BKRAM from the RAM shadow is already known bad. */
+	if (!alp_som_pd_bkram_live() || !alp_som_pd_bkram_selftest()) {
+		return refuse(2, "bkram_unusable", 0, ALP_ERR_NOT_READY);
 	}
 
 	/* 3. Build the profile from what the SE reports now.  Read-only so far. */
@@ -1217,15 +1238,25 @@ _Static_assert(offsetof(run_profile_t, vdd_ioflex_3V3) + sizeof(uint32_t) == siz
 
 static void build_run_profile(run_profile_t *r)
 {
-	r->power_domains   = PD_VBAT_AON_MASK | PD_SSE700_AON_MASK | PD_RTSS_HE_MASK | PD_SESS_MASK |
-	                     PD_SYST_MASK | PD_DBSS_MASK; /* 0x16d */
+	/* The vendor profile asks only for PD_SYST | PD_SSE700_AON (sdk-alif-ref
+	 * samples/drivers/pm/system_off/src/main.c:129) and the Utility SRAM must be named in
+	 * memory_blocks: the cold-boot profile's 0x16d (RTSS_HE and DBSS included) probably pinned
+	 * the HE up, and a RUN mask without BACKUP4K (gen2 bit 21) let the SE take BKRAM away
+	 * (bench U8e).  BENCH_RESTORE_LEGACY keeps the old profile to reproduce that. */
+	r->power_domains = PD_SYST_MASK | PD_SSE700_AON_MASK;
+	r->memory_blocks =
+	    ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_FWRAM_MASK | ALP_AIPM_GEN2_BACKUP4K_MASK;
+#ifdef CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_RESTORE_LEGACY
+	r->power_domains = PD_VBAT_AON_MASK | PD_SSE700_AON_MASK | PD_RTSS_HE_MASK | PD_SESS_MASK |
+	                   PD_SYST_MASK | PD_DBSS_MASK;                        /* 0x16d */
+	r->memory_blocks = ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_FWRAM_MASK; /* 0x00108000 */
+#endif
 	r->dcdc_voltage    = 825u;
 	r->dcdc_mode       = DCDC_MODE_PWM;
 	r->aon_clk_src     = CLK_SRC_LFRC;
 	r->run_clk_src     = CLK_SRC_PLL;
 	r->cpu_clk_freq    = CLOCK_FREQUENCY_160MHZ;
 	r->scaled_clk_freq = SCALED_FREQ_XO_LOW_DIV_38_4_MHZ;
-	r->memory_blocks   = ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_FWRAM_MASK; /* 0x00108000 */
 	r->ip_clock_gating = 0u;
 	r->phy_pwr_gating  = 0u;
 	r->vdd_ioflex_3V3  = IOFLEX_LEVEL_1V8;
@@ -1240,9 +1271,42 @@ static bool clocks_healthy(void)
 
 #if defined(CONFIG_ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS)
 /* Diag words 40..46 (see alif_se_power_hw.c); no output here: the console is not up yet. */
+
+/* The BKRAM-safe tail of the restore: put the two retention enables back (read-modify-write
+ * of those bits only), then prove the block writable and copy the shadow back.  False when
+ * the block failed: it stays shadowed and a later sleep is refused. */
+static bool bkram_recover(bool reassert)
+{
+	uint32_t ret = alif_se_hw_reg_read(ALIF_SE_REG_RET_CTRL);
+	uint32_t ana = alif_se_hw_reg_read(ALIF_SE_REG_ANA_REG1);
+
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 53u, ret);
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 54u, ana);
+	if (reassert) {
+		if ((ret & RET_CTRL_BKRAM) == 0u) {
+			alif_se_hw_reg_write(ALIF_SE_REG_RET_CTRL, ret | RET_CTRL_BKRAM);
+		}
+		if ((ana & ANA_REG1_RET_LDO_VBAT_EN) == 0u) {
+			alif_se_hw_reg_write(ALIF_SE_REG_ANA_REG1, ana | ANA_REG1_RET_LDO_VBAT_EN);
+		}
+	}
+	bool ok = alp_som_pd_shadow_end();
+
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 52u, ok ? 1u : 2u);
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 55u, alif_se_hw_reg_read(ALIF_SE_REG_ANA_REG1));
+	return ok;
+}
+
 static int clock_restore(void)
 {
-	if (clocks_healthy()) {
+#ifdef CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_FORCE_RESTORE
+	const bool healthy = false; /* bench repro: restore on a cold boot that never slept */
+#else
+	const bool healthy = clocks_healthy();
+#endif
+
+	if (healthy) {
+		(void)bkram_recover(false);
 		alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 40u, 0u);
 		return 0;
 	}
@@ -1275,6 +1339,14 @@ static int clock_restore(void)
 	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 44u, alif_se_hw_cgu_read(ALIF_SE_CGU_OSC_CTRL));
 	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 45u, alif_se_hw_cgu_read(ALIF_SE_CGU_ACLK_CTRL));
 
+	/* BKRAM: re-assert its retention enables and prove the block before anything is written
+	 * back from the shadow (the legacy bench profile skips the re-assert to reproduce U8e). */
+	bool bk_ok = bkram_recover(rc == 0
+#ifdef CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_RESTORE_LEGACY
+	                           && false
+#endif
+	);
+
 	/* The SE may keep memory_blocks at 0x8000 (it refused bit 20 before): logged, not fatal. */
 	run_profile_t after;
 
@@ -1282,7 +1354,8 @@ static int clock_restore(void)
 	if (se_service_get_run_cfg(&after) == 0) {
 		alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 46u, after.memory_blocks);
 	}
-	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 40u, (rc == 0 && clocks_healthy()) ? 1u : 2u);
+	alp_som_pd_diag_patch(
+	    ALP_SOM_PD_DIAG_BOOT, 40u, (rc == 0 && clocks_healthy() && bk_ok) ? 1u : 2u);
 	return 0;
 }
 
@@ -1292,6 +1365,15 @@ BUILD_ASSERT(CONFIG_SE_SERVICE_INIT_PRIORITY < 46,
              "the clock restore must run after the SE service is initialised");
 #endif
 SYS_INIT(clock_restore, PRE_KERNEL_1, 46);
+
+/* Priority 0: before anything else touches the SDK's BKRAM data (the diag snapshot at 0 may
+ * run on either side: both write to the same view, before or after this copy). */
+static int bkram_shadow_begin(void)
+{
+	alp_som_pd_shadow_begin();
+	return 0;
+}
+SYS_INIT(bkram_shadow_begin, PRE_KERNEL_1, 0);
 #endif
 #endif /* CONFIG_ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS */
 

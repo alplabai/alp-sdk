@@ -233,6 +233,29 @@ static void bind_all_logging(void)
 	}
 }
 
+ZTEST(power_som_domains, test_same_boot_rollback_does_not_need_the_bkram_record)
+{
+	uint32_t failed = 99u;
+
+	bind_all_logging();
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
+	zassert_not_equal(alp_som_power_quiesced(), 0u);
+
+	/* The SE call (or anything else) took BKRAM away: the record no longer loads. */
+	alp_som_pd_store_clear();
+	alp_som_pd_record_t rec;
+
+	zassert_false(alp_som_pd_store_load(&rec));
+
+	zassert_ok(alp_som_power_restore(&failed), "unwound from the in-RAM state");
+	zassert_equal(failed, 0u);
+	zassert_equal(alp_som_power_quiesced(), 0u, "every domain is active again");
+	zassert_equal(g_log_n, 12u, "6 quiesced, 6 restored");
+
+	/* Nothing quiesced and nothing recorded: still NOT_READY, not a blind restore. */
+	zassert_equal(alp_som_power_restore(NULL), ALP_ERR_NOT_READY);
+}
+
 ZTEST(power_som_domains, test_quiesce_consumers_first_restore_in_reverse)
 {
 	static const alp_power_domain_t want[] = {
