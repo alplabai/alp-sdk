@@ -399,8 +399,15 @@ plan_wake(const alp_power_backend_state_t *state, uint32_t wake_after_ms, sleep_
  * Lead: the part's EVI pin (U21.8) is the SoM net MODULE_STBY, pulled up to +1V8 by R43 and
  * on the EVK wired to header P14.1 (P14.2 = GND).  With EIE enabled and MODULE_STBY low, EVF
  * latches and /INT stays asserted.  So EVF and EIE are decoded by name. */
-#define RV3028_STATUS_EVF 0x02u
-#define RV3028_CTRL2_EIE  0x04u
+#define RV3028_STATUS_PORF 0x01u
+#define RV3028_STATUS_EVF  0x02u
+#define RV3028_STATUS_UF   0x10u
+#define RV3028_STATUS_BSF  0x20u
+#define RV3028_STATUS_CLKF 0x40u
+#define RV3028_CTRL2_EIE   0x04u
+#define RV3028_CTRL2_UIE   0x20u
+#define RV3028_CTRL2_CLKIE 0x40u
+#define RV3028_EE37_BSIE   0x40u /* EEPROM_BACKUP (37h) bit 6 */
 
 static void rtc_refusal_dump_once(void)
 {
@@ -412,22 +419,40 @@ static void rtc_refusal_dump_once(void)
 	}
 	done = true;
 	if (alp_som_power_rtc_regs(r) == ALP_OK) {
+		const uint8_t st = r[0], c2 = r[2], e37 = r[5];
+
 		printk(
 		    "alif_se_power: RV-3028 STATUS=0x%02x CTRL1=0x%02x CTRL2=0x%02x EVENT_CTRL(13h)=0x%02x "
-		    "EE35=0x%02x EE37=0x%02x; EVF=%u EIE=%u; LPGPIO EXT_PORTA=0x%08x\n",
-		    r[0],
+		    "EE35=0x%02x EE37=0x%02x\n",
+		    st,
 		    r[1],
-		    r[2],
+		    c2,
 		    r[3],
 		    r[4],
-		    r[5],
-		    (unsigned)((r[0] & RV3028_STATUS_EVF) != 0u),
-		    (unsigned)((r[2] & RV3028_CTRL2_EIE) != 0u),
-		    (unsigned)alif_se_hw_lpgpio_ext_porta());
+		    e37);
+		/* Every flag the part could be holding /INT with, paired with its enable.  A flag
+		 * that is set AND enabled asserts /INT; one the SDK never clears would hold it. */
+		printk("alif_se_power: RV-3028 EVF=%u/EIE=%u UF=%u/UIE=%u CLKF=%u/CLKIE=%u BSF=%u/BSIE=%u "
+		       "PORF=%u (PORIE: EE35=0x%02x)\n",
+		       (unsigned)((st & RV3028_STATUS_EVF) != 0u),
+		       (unsigned)((c2 & RV3028_CTRL2_EIE) != 0u),
+		       (unsigned)((st & RV3028_STATUS_UF) != 0u),
+		       (unsigned)((c2 & RV3028_CTRL2_UIE) != 0u),
+		       (unsigned)((st & RV3028_STATUS_CLKF) != 0u),
+		       (unsigned)((c2 & RV3028_CTRL2_CLKIE) != 0u),
+		       (unsigned)((st & RV3028_STATUS_BSF) != 0u),
+		       (unsigned)((e37 & RV3028_EE37_BSIE) != 0u),
+		       (unsigned)((st & RV3028_STATUS_PORF) != 0u),
+		       r[4]);
 	} else {
-		printk("alif_se_power: RV-3028 registers unreadable; LPGPIO EXT_PORTA=0x%08x\n",
-		       (unsigned)alif_se_hw_lpgpio_ext_porta());
+		printk("alif_se_power: RV-3028 registers unreadable\n");
 	}
+	/* The pad side: what the on-chip GPIO block reads on P15_0, and whether the LP peripheral
+	 * clocks (the LPGPIO among them) are enabled -- a gated block reads as an asserted
+	 * active-low pad. */
+	printk("alif_se_power: LPGPIO EXT_PORTA=0x%08x LPPERI_CKEN=0x%08x\n",
+	       (unsigned)alif_se_hw_lpgpio_ext_porta(),
+	       (unsigned)alif_se_hw_lpperi_cken());
 }
 
 static alp_status_t refuse_if_pending(const sleep_plan_t *plan)

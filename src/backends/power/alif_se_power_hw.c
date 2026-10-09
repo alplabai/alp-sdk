@@ -796,3 +796,8 @@ uint32_t alif_se_hw_lpgpio_ext_porta(void)
 {
 	return sys_read32(0x42002050u);
 }
+
+uint32_t alif_se_hw_lpperi_cken(void)
+{
+	return sys_read32(0x1A60401Cu);
+}

@@ -386,6 +386,11 @@ uint32_t alif_se_hw_lprtc_ccvr(void)
 	return g_ccvr_now;
 }
 
+uint32_t alif_se_hw_lpperi_cken(void)
+{
+	return 0x00030F01u;
+}
+
 uint32_t alif_se_hw_lpgpio_ext_porta(void)
 {
 	return 0x1u;

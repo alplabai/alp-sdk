@@ -81,6 +81,10 @@ uint32_t alif_se_hw_cgu_read(unsigned which);
 /** LPGPIO EXT_PORTA (the pins as the on-chip GPIO block sees them). */
 uint32_t alif_se_hw_lpgpio_ext_porta(void);
 
+/** AON RTSS_HE_LPPERI_CKEN (0x1A60401C): the LP peripheral clock enables (the LPGPIO clock
+ *  gate reads as an asserted active-low pad when off). */
+uint32_t alif_se_hw_lpperi_cken(void);
+
 /** LPRTC CCVR (the counter, units unproven: ~2 Hz on LFRC). */
 uint32_t alif_se_hw_lprtc_ccvr(void);
 
