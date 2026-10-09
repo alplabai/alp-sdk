@@ -11,10 +11,12 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 The RV-3028 is backup-powered, so a countdown or alarm that fired with nobody
 handling it kept its enable (TIE/AIE) and flag (TF/AF) across nRESET and power
-cycles and held `/INT` low. Before starting its own countdown the backend now
-stops TE, TIE and AIE and clears TF, AF and (with UIE off) UF by writing 0;
-EVF, PORF, BSF and CLKF are left alone. A wake pending from the current arm
-still refuses the sleep, and that refusal now dumps the RTC registers.
+cycles. Before starting its own countdown the backend now stops a stale TE/TIE
+and clears TF (and UF with UIE off) by writing 0, so a stale TIE+TF no longer
+holds `/INT` low at the pre-arm check; unless `WAKE_RTC` was requested it also
+clears a stale AIE/AF. EVF, PORF, BSF and CLKF are left alone. A wake pending
+from the current arm still refuses the sleep, and that refusal now dumps the
+RTC registers.
 
 ## [v0.17.0] - 2026-10-08 (release candidate: v0.17.0-rc1)
 
