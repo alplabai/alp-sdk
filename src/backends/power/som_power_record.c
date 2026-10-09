@@ -43,7 +43,9 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/linker/devicetree_regions.h>
 #include <zephyr/linker/sections.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/crc.h>
+#include <zephyr/sys/sys_io.h>
 #include <zephyr/toolchain.h>
 
 #include "som_power.h"
@@ -75,7 +77,6 @@ static sompd_bkram_t _bk SOMPD_BKRAM_SECTION;
 #define _store (_bk.record)
 
 #if SOMPD_IN_BKRAM
-#include <zephyr/sys/sys_io.h>
 
 /* BKRAM_CKEN: CLKCTL_PER_SLV (Alif DFP soc.h CLKCTL_PER_SLV_BASE 0x4902F000) bit 4,
  * reset value 0x10 and read back as 1 at cold boot on the E8 (bench, 2026-10-09).
