@@ -191,6 +191,7 @@ static int64_t                      _assert_ms[ALP_POWER_DOMAIN_COUNT];
 static boot_capture_t               _boot;
 static alp_som_pd_record_t          _boot_rec; /* the cycle's record, kept for the wake decode */
 static bool                         _boot_external; /* this boot followed a pin / external reset */
+static bool _ignore_stat; /* BKRAM held another image's data: STOP_MODE_STAT means nothing here */
 
 K_MUTEX_DEFINE(_lock);
 
@@ -400,6 +401,25 @@ alp_status_t alp_som_power_rtc_porf(bool *porf)
 		return ALP_ERR_IO;
 	}
 	*porf = (st & RV3028_STATUS_PORF) != 0u;
+	return ALP_OK;
+}
+
+alp_status_t alp_som_power_rtc_regs(uint8_t regs[6])
+{
+	static const uint8_t      addr[6] = { 0x0Eu, 0x0Fu, 0x10u, 0x13u, 0x35u, 0x37u };
+	const struct i2c_dt_spec *i2c     = rtc_i2c();
+
+	if (regs == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	for (unsigned i = 0; i < 6u; ++i) {
+		if (i2c_reg_read_byte_dt(i2c, addr[i], &regs[i]) != 0) {
+			return ALP_ERR_IO;
+		}
+	}
 	return ALP_OK;
 }
 
@@ -947,7 +967,7 @@ __weak uint32_t alp_som_power_stop_mode_read(void)
 /* The register is present and says "this boot is a STOP wake". */
 static bool stop_mode_stat_set(void)
 {
-	return (alp_som_power_stop_mode_read() & SOMPD_STOP_MODE_STAT_BIT) != 0u;
+	return !_ignore_stat && (alp_som_power_stop_mode_read() & SOMPD_STOP_MODE_STAT_BIT) != 0u;
 }
 static bool stop_mode_stat_agrees(void)
 {
@@ -995,9 +1015,29 @@ int alp_som_power_boot_restore(void)
 	const bool nsrst = (alp_som_power_reset_syndrome_take() & SOMPD_RESET_NSRST) != 0u;
 
 	_boot_external = false;
+	_ignore_stat   = false;
+
+	/* Another image's data in BKRAM (a clean flash on top of a run that slept, bench U8d):
+	 * the counter and the diag belong to someone else, and a sticky STOP_MODE_STAT set by
+	 * that run is not this image's wake.  Start fresh and ignore the status this boot. */
+	if (alp_som_pd_bkram_foreign()) {
+		alp_som_pd_store_clear();
+		alp_som_pd_bkram_adopt();
+		_ignore_stat = true;
+	}
+
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 51u, alp_som_pd_image_id());
 
 	alp_som_pd_record_t rec;
-	if (!alp_som_pd_store_load(&rec)) {
+	bool                have = alp_som_pd_store_load(&rec);
+
+	if (have && rec.image_id != alp_som_pd_image_id()) {
+		alp_som_pd_store_clear();
+		alp_som_pd_bkram_adopt();
+		_ignore_stat = true;
+		have         = false;
+	}
+	if (!have) {
 		if (stop_mode_stat_set()) {
 			/* A STOP wake with no usable record: never leave NOR, PHY or the CC3501E held. */
 			uint32_t restored, failed, named;
@@ -1069,6 +1109,14 @@ int alp_som_power_boot_restore(void)
 	return 0;
 }
 
+/* STOP_MODE_STAT is sticky: left set, a later reset of any kind (a flash, a debugger
+ * nRESET) reads as a STOP wake.  Acknowledged once the boot decode is done.  Weak: true
+ * where there is no such register. */
+__weak bool alp_som_power_stop_mode_stat_clear(void)
+{
+	return true;
+}
+
 int alp_som_power_boot_restore_i2c(void)
 {
 	k_mutex_lock(&_lock, K_FOREVER);
@@ -1090,6 +1138,8 @@ int alp_som_power_boot_restore_i2c(void)
 			memset(&_boot, 0, sizeof(_boot)); /* untrusted record: report a plain boot */
 		}
 	}
+	/* The decode is done (pass 1 read the status, pass 2 the RTC): acknowledge the status. */
+	(void)alp_som_power_stop_mode_stat_clear();
 	k_mutex_unlock(&_lock);
 	return 0;
 }

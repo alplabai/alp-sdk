@@ -21,9 +21,17 @@
 /* aipm.h: Power Domains */
 #define PD0_MASK (1 << 0)
 #define PD2_MASK (1 << 2)
+#define PD3_MASK (1 << 3)
+#define PD5_MASK (1 << 5)
+#define PD6_MASK (1 << 6)
+#define PD8_MASK (1 << 8)
 
 #define PD_VBAT_AON_MASK   PD0_MASK /* bit0 */
 #define PD_SSE700_AON_MASK PD2_MASK /* bit2 */
+#define PD_RTSS_HE_MASK    PD3_MASK /* bit3 */
+#define PD_SESS_MASK       PD5_MASK /* bit5 */
+#define PD_SYST_MASK       PD6_MASK /* bit6 */
+#define PD_DBSS_MASK       PD8_MASK /* bit8 */
 
 /* aipm.h: LF Clock Sources */
 typedef enum {
@@ -109,6 +117,32 @@ typedef struct {
 	uint32_t          vtor_address_ns;
 } off_profile_t;
 
+/* aipm.h: Clocks frequencies (RUN profile) */
+typedef enum {
+	CLOCK_FREQUENCY_800MHZ,
+	CLOCK_FREQUENCY_400MHZ,
+	CLOCK_FREQUENCY_300MHZ,
+	CLOCK_FREQUENCY_200MHZ,
+	CLOCK_FREQUENCY_160MHZ,
+} clock_frequency_t;
+
+/* aipm.h: the RUN profile, every member in declaration order. */
+typedef struct {
+	uint32_t          power_domains;
+	uint32_t          dcdc_voltage;
+	dcdc_mode_t       dcdc_mode;
+	lfclock_t         aon_clk_src;
+	hfclock_t         run_clk_src;
+	clock_frequency_t cpu_clk_freq;
+	scaled_clk_freq_t scaled_clk_freq;
+	uint32_t          memory_blocks;
+	uint32_t          ip_clock_gating;
+	uint32_t          phy_pwr_gating;
+	ioflex_mode_t     vdd_ioflex_3V3;
+} run_profile_t;
+
+int se_service_get_run_cfg(run_profile_t *pp);
+int se_service_set_run_cfg(run_profile_t *pp);
 int se_service_get_off_cfg(off_profile_t *wp);
 int se_service_set_off_cfg(off_profile_t *wp);
 

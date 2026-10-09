@@ -160,6 +160,13 @@
 #define ALIF_SE_LFRC_HZ_MAX 36045u
 #define ALIF_SE_LFXO_HZ_MAX 32775u
 
+/* Attribution gate (bench U8d): a wake claimed by the LPTIMER is rejected when more than
+ * armed_ms + this has demonstrably passed since entry.  The SES boot after a wake takes a
+ * few seconds; 8 s is generous without letting a 76 s sleep through. */
+#define ALIF_SE_WAKE_LATENCY_MS 8000u
+/* LPRTC CCVR ticks per second x 1000, at the fastest: LFRC 36045 Hz / 2^14 = 2.2 Hz. */
+#define ALIF_SE_LPRTC_MAX_MHZ 2200u
+
 /* The LPTIMER carries wake_after_ms below this; at or above it the RV-3028 does. */
 #ifdef CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_LPTIMER_MAX_MS
 #define ALIF_SE_LPTIMER_MAX_MS ((uint32_t)CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_LPTIMER_MAX_MS)
@@ -383,6 +390,46 @@ plan_wake(const alp_power_backend_state_t *state, uint32_t wake_after_ms, sleep_
 
 /* Every armed path must be idle before arming: a latched status would end the sleep
  * at once, and clearing it here would swallow an event the application wants. */
+/* One-shot evidence when /INT reads asserted before a sleep (bench U8d: the RV-3028 cycles
+ * always refused): what the RV-3028 itself says -- STATUS 0Eh (EVF is bit 1), CONTROL_1 0Fh,
+ * CONTROL_2 10h (EIE is bit 2), Event Control 13h, and the EEPROM mirrors 35h CLKOUT, 37h
+ * BACKUP -- and what the LPGPIO block sees on its pins.  Reads only: nothing here writes the
+ * part or its EEPROM.
+ *
+ * Lead: the part's EVI pin (U21.8) is the SoM net MODULE_STBY, pulled up to +1V8 by R43 and
+ * on the EVK wired to header P14.1 (P14.2 = GND).  With EIE enabled and MODULE_STBY low, EVF
+ * latches and /INT stays asserted.  So EVF and EIE are decoded by name. */
+#define RV3028_STATUS_EVF 0x02u
+#define RV3028_CTRL2_EIE  0x04u
+
+static void rtc_refusal_dump_once(void)
+{
+	static bool done;
+	uint8_t     r[6] = { 0 };
+
+	if (done) {
+		return;
+	}
+	done = true;
+	if (alp_som_power_rtc_regs(r) == ALP_OK) {
+		printk(
+		    "alif_se_power: RV-3028 STATUS=0x%02x CTRL1=0x%02x CTRL2=0x%02x EVENT_CTRL(13h)=0x%02x "
+		    "EE35=0x%02x EE37=0x%02x; EVF=%u EIE=%u; LPGPIO EXT_PORTA=0x%08x\n",
+		    r[0],
+		    r[1],
+		    r[2],
+		    r[3],
+		    r[4],
+		    r[5],
+		    (unsigned)((r[0] & RV3028_STATUS_EVF) != 0u),
+		    (unsigned)((r[2] & RV3028_CTRL2_EIE) != 0u),
+		    (unsigned)alif_se_hw_lpgpio_ext_porta());
+	} else {
+		printk("alif_se_power: RV-3028 registers unreadable; LPGPIO EXT_PORTA=0x%08x\n",
+		       (unsigned)alif_se_hw_lpgpio_ext_porta());
+	}
+}
+
 static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
 {
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
@@ -390,6 +437,7 @@ static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
 	}
 	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
 	    alif_se_hw_rtc_int_asserted() > 0) {
+		rtc_refusal_dump_once();
 		return refuse(2, "rtc_int_asserted", 1, ALP_ERR_BUSY);
 	}
 	return ALP_OK;
@@ -714,6 +762,7 @@ static void save_cycle_record(const sleep_plan_t *plan)
 	rec.timed_bit   = plan->timed_bit;
 	rec.armed_ms    = plan->armed_ms;
 	rec.entry_rtc_s = (alp_som_power_rtc_seconds(&now) == ALP_OK) ? now : 0u;
+	rec.entry_ccvr  = alif_se_hw_lprtc_ccvr();
 	alp_som_pd_store_save(&rec);
 }
 
@@ -1083,13 +1132,130 @@ bool alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
 
 	/* The RV-3028 is the time base (+-1 ppm): a calendar delta, 1 s resolution.  Only
 	 * with no RV-3028 reading does a timer wake fall back to its nominal length. */
+	uint32_t elapsed_lb_ms = 0u; /* a LOWER bound on the time since entry */
+
 	if (rec->entry_rtc_s != 0u && alp_som_power_rtc_seconds(&now) == ALP_OK &&
 	    now >= rec->entry_rtc_s) {
 		rec->slept_ms = (now - rec->entry_rtc_s) * 1000u;
+		/* 1 s resolution at each end: at least (delta - 1) s really passed. */
+		elapsed_lb_ms = (now > rec->entry_rtc_s) ? (now - rec->entry_rtc_s - 1u) * 1000u : 0u;
 	} else if ((rec->wake_source & rec->timed_bit) != 0u && rec->timed_bit != 0u) {
 		rec->slept_ms = rec->armed_ms;
 	}
+	/* The LPRTC counter as a second witness.  Its unit is not proven (155 ticks over a 76 s
+	 * sleep on the bench: ~2 Hz, LFRC / 2^14), so only a conservative bound is taken from
+	 * it: the fastest it can tick is 36045 / 16384 = 2.2 Hz. */
+	if (rec->entry_ccvr != 0u) {
+		uint32_t delta = alif_se_hw_lprtc_ccvr() - rec->entry_ccvr;
+		uint32_t lb_ms = (uint32_t)(((uint64_t)delta * 1000000u) / ALIF_SE_LPRTC_MAX_MHZ);
+
+		if (delta < 0x80000000u && lb_ms > elapsed_lb_ms) {
+			elapsed_lb_ms = lb_ms;
+		}
+	}
+
+	/* The periodic LPTIMER stays pending after ANY reset (a flash, a debugger nRESET): a
+	 * latched LPTIMER status alone does not prove it woke the SoC.  If far more time passed
+	 * than the interval plus a boot, the timer cannot have been the wake (bench U8d: a
+	 * cycle PASSED falsely after a 76 s "500 ms" sleep). */
+	if ((rec->armed_hw & ALP_SOM_ARM_LPTIMER) != 0u && rec->timed_bit != 0u &&
+	    (rec->wake_source & rec->timed_bit) != 0u &&
+	    (rec->armed_hw & ALP_SOM_ARM_RTC_TIMER) == 0u &&
+	    elapsed_lb_ms > rec->armed_ms + ALIF_SE_WAKE_LATENCY_MS) {
+		rec->wake_source &= ~rec->timed_bit;
+	}
 	return true;
 }
+
+/* ---- Clock restore after a wake ------------------------------------------------------
+ *
+ * Bench U8c / U8d: after a reset taken INSIDE the STOP the SoC came up with every clock on
+ * its RC oscillator (OSC_CTRL = 0, PLL_LOCK_CTRL = 0, PLL_CLK_SEL = 0, ACLK_CTRL 0x101): UART5
+ * ran at ~1/5 of its baud and the tick at half rate.  The vendor sample sdk-alif
+ * samples/drivers/pm/system_off re-applies a complete RUN profile at PRE_KERNEL_1 (priority
+ * 46, after the SE service at 45, before the UART and every other driver) for exactly this
+ * reason: after a SOFT_OFF wake "SYSTOP is OFF, must restore BEFORE peripherals access
+ * registers".  Same here, and keyed on the HARDWARE state, not on STOP_MODE_STAT: the PLL is
+ * not locked, or the PLL clock select is not the running tree (0x00110111 on this part).
+ *
+ * The profile is built field by field (the cold-boot RUN profile of the E1M-AEN803, bench
+ * 2026-10-09), because se_service_set_run_cfg() is not side-effect-free and a partial profile
+ * is how the retention bits were lost before.  The UART is not reconfigured: its divisor is
+ * programmed against the nominal clock and is right again once the clock is.
+ */
+#define ALIF_SE_PLL_CLK_SEL_RUN 0x00110111u
+#define ALIF_SE_CGU_PLL_LOCK    BIT(0)
+
+_Static_assert(offsetof(run_profile_t, vdd_ioflex_3V3) + sizeof(uint32_t) == sizeof(run_profile_t),
+               "run_profile_t changed: assign the new member in build_run_profile()");
+
+static void build_run_profile(run_profile_t *r)
+{
+	r->power_domains   = PD_VBAT_AON_MASK | PD_SSE700_AON_MASK | PD_RTSS_HE_MASK | PD_SESS_MASK |
+	                     PD_SYST_MASK | PD_DBSS_MASK; /* 0x16d */
+	r->dcdc_voltage    = 825u;
+	r->dcdc_mode       = DCDC_MODE_PWM;
+	r->aon_clk_src     = CLK_SRC_LFRC;
+	r->run_clk_src     = CLK_SRC_PLL;
+	r->cpu_clk_freq    = CLOCK_FREQUENCY_160MHZ;
+	r->scaled_clk_freq = SCALED_FREQ_XO_LOW_DIV_38_4_MHZ;
+	r->memory_blocks   = ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_FWRAM_MASK; /* 0x00108000 */
+	r->ip_clock_gating = 0u;
+	r->phy_pwr_gating  = 0u;
+	r->vdd_ioflex_3V3  = IOFLEX_LEVEL_1V8;
+}
+
+/* True when the clock tree is the running one. */
+static bool clocks_healthy(void)
+{
+	return (alif_se_hw_cgu_read(ALIF_SE_CGU_PLL_LOCK_CTRL) & ALIF_SE_CGU_PLL_LOCK) != 0u &&
+	       alif_se_hw_cgu_read(ALIF_SE_CGU_PLL_CLK_SEL) == ALIF_SE_PLL_CLK_SEL_RUN;
+}
+
+#if defined(CONFIG_ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS)
+/* Diag words 40..46 (see alif_se_power_hw.c); no output here: the console is not up yet. */
+static int clock_restore(void)
+{
+	if (clocks_healthy()) {
+		alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 40u, 0u);
+		return 0;
+	}
+
+	run_profile_t run;
+	int           rc;
+
+	build_run_profile(&run);
+	rc = se_service_set_run_cfg(&run);
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 41u, (uint32_t)rc);
+
+	/* The PLL needs time to lock after the SE retunes it. */
+	for (unsigned i = 0; i < 500u && !clocks_healthy(); ++i) {
+		k_busy_wait(100);
+	}
+	alp_som_pd_diag_patch(
+	    ALP_SOM_PD_DIAG_BOOT, 42u, alif_se_hw_cgu_read(ALIF_SE_CGU_PLL_LOCK_CTRL));
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 43u, alif_se_hw_cgu_read(ALIF_SE_CGU_PLL_CLK_SEL));
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 44u, alif_se_hw_cgu_read(ALIF_SE_CGU_OSC_CTRL));
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 45u, alif_se_hw_cgu_read(ALIF_SE_CGU_ACLK_CTRL));
+
+	/* The SE may keep memory_blocks at 0x8000 (it refused bit 20 before): logged, not fatal. */
+	run_profile_t after;
+
+	memset(&after, 0, sizeof(after));
+	if (se_service_get_run_cfg(&after) == 0) {
+		alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 46u, after.memory_blocks);
+	}
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 40u, (rc == 0 && clocks_healthy()) ? 1u : 2u);
+	return 0;
+}
+
+#ifndef ALP_TEST_NO_SYSINIT
+#ifdef CONFIG_SE_SERVICE_INIT_PRIORITY
+BUILD_ASSERT(CONFIG_SE_SERVICE_INIT_PRIORITY < 46,
+             "the clock restore must run after the SE service is initialised");
+#endif
+SYS_INIT(clock_restore, PRE_KERNEL_1, 46);
+#endif
+#endif /* CONFIG_ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS */
 
 #endif /* CONFIG_ALP_SDK_POWER_ALIF_SE */

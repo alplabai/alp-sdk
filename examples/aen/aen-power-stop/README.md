@@ -65,6 +65,9 @@ One variable each, selected with a config fragment on top of `prj.conf`
 | (i) default, instrumented | `i-default.conf` | nothing | the baseline: `diag pre` / `diag boot` / `se run` / `se off` |
 | (ii) RV-3028 first | `ii-rtc-first.conf` | cycle order: countdown, LPTIMER, alarm | if the countdown cycle wakes and the LPTIMER one does not, the INT path is sound and the LPTIMER path is the suspect |
 | (iii) LPTIMER 5 s | `iii-lptimer-5s.conf` | LPTIMER interval 5000 ms (the backend bench option raises the LPTIMER ceiling to 10 s; the RV-3028 countdown cycle moves to 11 s so it stays on the RV-3028) | whether a longer interval changes the outcome (a race with the SE calls, or the clock) |
+| (A) = (iii) | `iii-lptimer-5s.conf` | the 5 s LPTIMER cycle with the live vtor (the U8d plan's "A") | |
+| (A-vtor) | `a-vtor-lptimer-5s.conf` | (A) plus `vtor_address` = own VTOR | whether the vendor resume vector changes the outcome |
+| (B) = (i) | `i-default.conf` | LPTIMER 500 ms | the baseline |
 | (iv) LFXO | `iv-lfxo.conf` | OFF profile `aon_clk_src` = LFXO (cap 63) | the vendor sample's choice; compare the wake and `se off aon_clk` |
 | (v) VTOR self | `v-vtor-self.conf` | OFF profile `vtor_address` = this image's VTOR | the vendor sample's resume vector; the default keeps the live value |
 | (vi) MRAM+SERAM | `vi-mram-seram.conf` | OFF profile `memory_blocks` also MRAM \| SERAM | the vendor sample's MRAM-boot profile |
@@ -105,3 +108,21 @@ VBAT_ANA_REG1, MISC_CTRL, STOP_MODE, RTSS_HE_CTRL), `alarm`.
 Acceptance (design U8): the counter reads 1, 2, 3 across the wakes; `STOP_MODE_STAT`
 (bit 4 of `STOP_MODE`) is set at each wake; `wake_source` matches the armed source;
 `quiesced` equals `restored`; no power cycle in between.
+
+## Hygiene added after bench U8d
+
+- **Image identity.** The record and the counter carry a CRC-32 of the running image's ROM
+  region. A clean flash of another image finds a foreign counter or record: it starts fresh
+  (counter 0, record cleared, PRE diag invalidated) and ignores `STOP_MODE_STAT` for that boot,
+  so a reset taken after a previous run's sleep is never read as this image's wake.
+- **`STOP_MODE_STAT` is acknowledged** (a write of exactly `0x00000010`, never bit 0 -- bit 0
+  is `STOP_MODE_CTRL` and enters stop mode) once the boot decode is done. Diag word 50 holds the
+  read-back.
+- **Clock restore.** If the PLL is not locked or the PLL clock select is not the running tree,
+  the backend re-applies the full RUN profile at `PRE_KERNEL_1` (priority 46). Diag words 40-46
+  hold what happened (40: 0 healthy, 1 restored, 2 failed; 41: the SE return code; 42-45: PLL
+  lock, PLL clock select, OSC and ACLK after; 46: the RUN `memory_blocks` the SE reports).
+- **Wake attribution is time-gated.** An LPTIMER wake is rejected when the RV-3028 (or LPRTC)
+  shows far more time than the armed interval plus a boot passed: the periodic LPTIMER stays
+  pending after any reset.
+

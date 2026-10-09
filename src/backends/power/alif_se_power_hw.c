@@ -247,13 +247,29 @@ static alp_status_t wake_timer_arm_locked(uint32_t ticks)
 	if ((ctrl & HW_LPT_CTRL_EN) == 0u || (ctrl & HW_LPT_CTRL_IM) != 0u) {
 		return ALP_ERR_IO;
 	}
-	/* CURRENTVAL reads 0 until the 32 kHz domain has seen its first edge after ENABLE
-	 * (about 30 us), so a read a few cycles after the arm proves nothing.  Poll for it
-	 * to leave 0, bounded to ~4 LF ticks (122 us); only a timeout means "not counting". */
+	/* "Loaded" is not "non-zero": on this silicon CURRENTVAL reads 0xFFFFFFFF while the
+	 * timer is not loaded (cold boot, a timer never started; bench U8d) and 0 before the
+	 * 32 kHz domain has seen its first edge after ENABLE (~30 us).  So both are "not
+	 * loaded".  Poll until CURRENTVAL is a real count (<= LOADCOUNT), then require a
+	 * second read strictly smaller than the first: only a counting timer does that.  The
+	 * whole poll is bounded to ~4 LF ticks (122 us); only a timeout means "not counting". */
 	const uint32_t bound = (sys_clock_hw_cycles_per_sec() / 1000000u) * 122u;
 	const uint32_t t0    = DWT->CYCCNT;
+	const uint32_t load  = sys_read32(HW_LPT_LOAD);
+	uint32_t       first = 0u;
+	bool           have  = false;
 
-	while (sys_read32(HW_LPT_CUR) == 0u) {
+	for (;;) {
+		uint32_t cur = sys_read32(HW_LPT_CUR);
+
+		if (cur != 0u && cur != 0xFFFFFFFFu && cur <= load) {
+			if (!have) {
+				first = cur;
+				have  = true;
+			} else if (cur < first) {
+				break; /* counting down */
+			}
+		}
 		if ((DWT->CYCCNT - t0) > bound) {
 			return ALP_ERR_IO;
 		}
@@ -317,7 +333,17 @@ static alp_status_t wake_timer_arm_locked(uint32_t ticks)
  *   26 AON SYSTOP_CLK_DIV (0x1A604020)   27 CLKCTL_PER_SLV UART_CTRL (0x4902F008)
  *   28..35 NVIC ISPR0..7   36 NVIC ISER0   37 SysTick CTRL   38 SCB VTOR
  *   39 RTSS_HE_RESET re-read after the W1C acknowledge, bit 31 = "bit 0 was set and
- *      cleared" (BOOT only; written by alp_som_power_reset_syndrome_take)
+ *      cleared" -- tracks bit 0 ONLY; bit 4 (0x10, probably "HE domain powered from off")
+ *      and the rest are in the raw word 19 (BOOT only; written by
+ *      alp_som_power_reset_syndrome_take)
+ *   40 clock restore: 1 = triggered, 0 = hardware state was healthy, 2 = failed
+ *   41 clock restore: se_service_set_run_cfg return code (0 if not triggered)
+ *   42 PLL_LOCK_CTRL after the restore   43 PLL_CLK_SEL after   44 OSC_CTRL after
+ *   45 ACLK_CTRL after                   46 RUN memory_blocks the SE reports after
+ *   47 CLKCTL_SYS ACLK_DIV0 (0x1A010824) 48 LPGPIO EXT_PORTA (0x42002050)
+ *   49 AON RTSS_HE_LPPERI_CKEN (0x1A60401C)
+ *   50 STOP_MODE read back after the STAT clear (bit 4 must be 0)
+ *   51 image identity (CRC32 of .text)   52..55 reserved
  * PRE words 17 and 37 are patched after the pre-WFI writes; word 25 and 27 are read
  * separately (riskier blocks) so a fault there cannot lose the rest of the slot.
  */
@@ -367,6 +393,8 @@ static void diag_capture(uint32_t w[ALP_SOM_PD_DIAG_WORDS], bool with_lptimer)
 	w[36] = NVIC->ISER[0];
 	w[37] = SysTick->CTRL;
 	w[38] = SCB->VTOR;
+	w[48] = sys_read32(0x42002050u); /* LPGPIO EXT_PORTA: DW GPIO base + 0x50 */
+	w[49] = sys_read32(0x1A60401Cu); /* AON RTSS_HE_LPPERI_CKEN */
 }
 
 static void diag_capture_to_slot(unsigned slot, bool with_lptimer)
@@ -380,6 +408,7 @@ static void diag_capture_to_slot(unsigned slot, bool with_lptimer)
 	 * on either leaves everything above intact in BKRAM. */
 	alp_som_pd_diag_patch(slot, 25u, sys_read32(0x1A010820u)); /* CLKCTL_SYS ACLK_CTRL */
 	alp_som_pd_diag_patch(slot, 27u, sys_read32(0x4902F008u)); /* PER_SLV UART_CTRL */
+	alp_som_pd_diag_patch(slot, 47u, sys_read32(0x1A010824u)); /* CLKCTL_SYS ACLK_DIV0 */
 }
 
 /* Earliest possible: before the SoM restore (POST_KERNEL 0), before the counter driver
@@ -696,4 +725,74 @@ bool alp_som_power_reset_syndrome_trusted(void)
 	}
 	sys_write32(v, 0x1A604014u);
 	return (sys_read32(0x1A604014u) & 1u) == 0u;
+}
+
+/* ---- LPRTC, CGU and STOP_MODE_STAT -------------------------------------------- */
+
+/* LPRTC CCVR (+0x00, the counter).  Needs VBAT.RTC_CLK_EN; enabled when clear.  The unit
+ * is NOT seconds: the bench counted 155 ticks over a 76 s sleep (~2 Hz, LFRC / 2^14), so
+ * callers use it only as a coarse, conservative elapsed-time bound. */
+uint32_t alif_se_hw_lprtc_ccvr(void)
+{
+	uint32_t en = sys_read32(HW_VBAT_BASE + 0x10u);
+
+	if ((en & 1u) == 0u) {
+		sys_write32(en | 1u, HW_VBAT_BASE + 0x10u);
+	}
+	return sys_read32(0x42000000u);
+}
+
+/* CGU registers (base 0x1A602000, Alif DFP soc.h CGU_BASE): OSC_CTRL +0x00, PLL_LOCK_CTRL
+ * +0x04, PLL_CLK_SEL +0x08.  CLKCTL_SYS ACLK_CTRL 0x1A010820. */
+uint32_t alif_se_hw_cgu_read(unsigned which)
+{
+	switch (which) {
+	case ALIF_SE_CGU_OSC_CTRL:
+		return sys_read32(0x1A602000u);
+	case ALIF_SE_CGU_PLL_LOCK_CTRL:
+		return sys_read32(0x1A602004u);
+	case ALIF_SE_CGU_PLL_CLK_SEL:
+		return sys_read32(0x1A602008u);
+	case ALIF_SE_CGU_ACLK_CTRL:
+	default:
+		return sys_read32(0x1A010820u);
+	}
+}
+
+/* VBAT_STOP_MODE_REG (0x1A60F000): bit 0 STOP_MODE_CTRL ("SW sets this bit to enter stop
+ * mode"), bit 4 STOP_MODE_STAT (sticky until acknowledged).  HAZARD: a write with bit 0 set
+ * enters stop mode, so this is a plain write of exactly the STAT bit and never a
+ * read-modify-write (a read-modify-write would write back bit 0 if it reads 1). */
+#define HW_STOP_MODE_REG      DT_REG_ADDR(DT_NODELABEL(stop_mode))
+#define HW_STOP_MODE_CTRL     BIT(0)
+#define HW_STOP_MODE_STAT     BIT(4)
+#define HW_STOP_MODE_STAT_W1C 0x00000010u
+BUILD_ASSERT((HW_STOP_MODE_STAT_W1C & HW_STOP_MODE_CTRL) == 0u,
+             "the STOP_MODE_STAT acknowledge must never set STOP_MODE_CTRL (bit 0)");
+BUILD_ASSERT(HW_STOP_MODE_STAT_W1C == HW_STOP_MODE_STAT, "acknowledge exactly the STAT bit");
+
+bool alp_som_power_stop_mode_stat_clear(void)
+{
+	static bool logged;
+
+	sys_write32(HW_STOP_MODE_STAT_W1C, HW_STOP_MODE_REG);
+
+	uint32_t rb = sys_read32(HW_STOP_MODE_REG);
+
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 50u, rb);
+	if ((rb & HW_STOP_MODE_STAT) != 0u) {
+		if (!logged) {
+			logged = true;
+			printk("alif_se_power: STOP_MODE_STAT did not clear (reads 0x%08x); relying on the "
+			       "image identity instead\n",
+			       (unsigned)rb);
+		}
+		return false;
+	}
+	return true;
+}
+
+uint32_t alif_se_hw_lpgpio_ext_porta(void)
+{
+	return sys_read32(0x42002050u);
 }

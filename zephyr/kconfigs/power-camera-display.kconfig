@@ -299,6 +299,19 @@ config ALP_SDK_POWER_ALIF_SE
 	  built.  Needs CONFIG_DCACHE=n (the cache-clean loop hangs on this
 	  silicon); with the D-cache on, STOP is refused with ALP_ERR_NOSUPPORT.
 
+config ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS
+	bool "Re-apply the RUN profile at boot when the clock tree is not the running one"
+	depends on ALP_SDK_POWER_ALIF_SE
+	default y
+	help
+	  A wake from STOP is a cold boot into whatever clock tree the Secure Enclave left,
+	  and after a reset taken inside the STOP that was all-RC (UART at ~1/5 baud, a slow
+	  tick; bench U8c / U8d).  At PRE_KERNEL_1 (priority 46, after the SE service, before
+	  every peripheral) the backend checks the hardware state -- PLL not locked, or the PLL
+	  clock select not the running tree -- and, only then, calls se_service_set_run_cfg()
+	  with a complete explicit RUN profile (the vendor system_off sample does the same).
+	  Product behaviour, not bench-only: a product waking from STOP needs its clocks back.
+
 config ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER
 	bool "Allow STOP / STANDBY with a debugger attached (bench only)"
 	depends on ALP_SDK_POWER_ALIF_SE

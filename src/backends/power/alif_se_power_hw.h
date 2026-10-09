@@ -71,6 +71,19 @@ alp_status_t alif_se_hw_rtc_int_arm(void);
 /** Switch the pad interrupt and the combined line off.  Idempotent. */
 void alif_se_hw_rtc_int_disarm(void);
 
+/** CGU / CLKCTL_SYS registers for the clock-restore trigger and its log. */
+#define ALIF_SE_CGU_OSC_CTRL      0u
+#define ALIF_SE_CGU_PLL_LOCK_CTRL 1u
+#define ALIF_SE_CGU_PLL_CLK_SEL   2u
+#define ALIF_SE_CGU_ACLK_CTRL     3u
+uint32_t alif_se_hw_cgu_read(unsigned which);
+
+/** LPGPIO EXT_PORTA (the pins as the on-chip GPIO block sees them). */
+uint32_t alif_se_hw_lpgpio_ext_porta(void);
+
+/** LPRTC CCVR (the counter, units unproven: ~2 Hz on LFRC). */
+uint32_t alif_se_hw_lprtc_ccvr(void);
+
 /** This image's vector table base (SCB->VTOR), for the vendor-style OFF profile bench
  *  variant. */
 uint32_t alif_se_hw_vtor_read(void);

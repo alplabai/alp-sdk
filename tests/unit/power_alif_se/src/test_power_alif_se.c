@@ -22,7 +22,9 @@
  *              retains.  That is the bench (U8).
  */
 
-#define CONFIG_ALP_SDK_POWER_ALIF_SE 1
+#define CONFIG_ALP_SDK_POWER_ALIF_SE                1
+#define CONFIG_ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS 1
+#define ALP_TEST_NO_SYSINIT                         1 /* the test calls clock_restore() itself */
 
 #include "../../../../src/backends/power/alif_se_power.c"
 
@@ -364,6 +366,55 @@ alp_status_t alp_som_power_rtc_seconds(uint32_t *seconds)
 	return g_rtc_seconds_ok ? ALP_OK : ALP_ERR_IO;
 }
 
+static uint32_t      g_cgu[4]; /* OSC_CTRL, PLL_LOCK_CTRL, PLL_CLK_SEL, ACLK_CTRL */
+static uint32_t      g_ccvr;
+static uint32_t      g_ccvr_now;
+static uint8_t       g_rtc_regs[6];
+static bool          g_rtc_regs_ok = true;
+static int           g_run_set_rc;
+static unsigned      g_run_set_calls;
+static run_profile_t g_run_set;
+static bool          g_run_set_locks_pll = true;
+
+uint32_t alif_se_hw_cgu_read(unsigned which)
+{
+	return g_cgu[which];
+}
+
+uint32_t alif_se_hw_lprtc_ccvr(void)
+{
+	return g_ccvr_now;
+}
+
+uint32_t alif_se_hw_lpgpio_ext_porta(void)
+{
+	return 0x1u;
+}
+
+alp_status_t alp_som_power_rtc_regs(uint8_t regs[6])
+{
+	memcpy(regs, g_rtc_regs, 6);
+	return g_rtc_regs_ok ? ALP_OK : ALP_ERR_IO;
+}
+
+int se_service_get_run_cfg(run_profile_t *pp)
+{
+	*pp = g_run_set;
+	return 0;
+}
+
+int se_service_set_run_cfg(run_profile_t *pp)
+{
+	g_run_set = *pp;
+	g_run_set_calls++;
+	if (g_run_set_rc == 0 && g_run_set_locks_pll) {
+		g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 1u;
+		g_cgu[ALIF_SE_CGU_PLL_CLK_SEL]   = 0x00110111u;
+		g_cgu[ALIF_SE_CGU_OSC_CTRL]      = 0x00110011u;
+	}
+	return g_run_set_rc;
+}
+
 bool alp_som_power_rtc_countdown_ready(void)
 {
 	return g_countdown_ready;
@@ -464,7 +515,17 @@ static void reset_fakes(void)
 	g_set_calls = 0;
 	memset(&g_set, 0, sizeof(g_set));
 	memset(&g_rec_at_set, 0, sizeof(g_rec_at_set));
-	g_porf                 = false;
+	g_porf                           = false;
+	g_cgu[ALIF_SE_CGU_OSC_CTRL]      = 0x00110011u;
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 1u;
+	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL]   = 0x00110111u;
+	g_cgu[ALIF_SE_CGU_ACLK_CTRL]     = 0x202u;
+	g_ccvr = g_ccvr_now = 1000u;
+	g_rtc_regs_ok       = true;
+	g_run_set_rc        = 0;
+	g_run_set_calls     = 0;
+	g_run_set_locks_pll = true;
+	memset(&g_run_set, 0, sizeof(g_run_set));
 	g_nsrst_trusted        = true;
 	g_transports_dcdc_mode = false;
 	g_flip_word            = -1;
@@ -1572,4 +1633,178 @@ ZTEST(power_alif_se, test_the_record_says_whether_nsrst_can_be_trusted)
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
 	zassert_equal(g_rec_at_set.armed_hw & ALP_SOM_REC_NSRST_TRUSTED, 0u);
 	zassert_equal(g_rec_at_set.armed_hw & ALP_SOM_ARM_LPTIMER, ALP_SOM_ARM_LPTIMER);
+}
+
+/* ---- Elapsed-time gate on wake attribution (bench U8d) ------------------------------- */
+
+static alp_som_pd_record_t lptimer_record(uint32_t armed_ms)
+{
+	return (alp_som_pd_record_t){ .armed_hw    = ALP_SOM_ARM_LPTIMER,
+		                          .timed_bit   = ALP_POWER_WAKE_TIMER,
+		                          .armed_ms    = armed_ms,
+		                          .wake_source = ALP_POWER_WAKE_TIMER, /* from decode_early */
+		                          .entry_rtc_s = 1000u,
+		                          .entry_ccvr  = 5000u };
+}
+
+ZTEST(power_alif_se, test_a_genuine_lptimer_wake_is_kept)
+{
+	alp_som_pd_record_t rec = lptimer_record(500u);
+
+	g_rtc_seconds = 1004u; /* 4 s: 0.5 s sleep + a ~3 s SES boot */
+	g_ccvr_now    = 5000u + 8u;
+	zassert_true(alp_som_power_wake_decode_i2c(&rec));
+	zassert_equal(rec.wake_source, ALP_POWER_WAKE_TIMER);
+}
+
+ZTEST(power_alif_se, test_a_stale_lptimer_after_a_long_gap_is_not_a_wake)
+{
+	alp_som_pd_record_t rec = lptimer_record(500u);
+
+	/* 76 s passed (the bench's falsely passing cycle): the periodic LPTIMER stays pending
+	 * after any reset, so its latched status proves nothing. */
+	g_rtc_seconds = 1076u;
+	g_ccvr_now    = 5000u + 155u;
+	zassert_true(alp_som_power_wake_decode_i2c(&rec));
+	zassert_equal(rec.wake_source, 0u, "rejected");
+	zassert_equal(rec.slept_ms, 76000u, "the elapsed time is still reported");
+}
+
+ZTEST(power_alif_se, test_each_witness_alone_can_reject)
+{
+	alp_som_pd_record_t rec = lptimer_record(500u);
+
+	g_rtc_seconds_ok = false; /* no RV-3028: the LPRTC counter alone */
+	g_ccvr_now       = 5000u + 155u;
+	zassert_true(alp_som_power_wake_decode_i2c(&rec));
+	zassert_equal(rec.wake_source, 0u);
+
+	rec              = lptimer_record(500u);
+	g_ccvr_now       = 5000u; /* no counter movement */
+	g_rtc_seconds_ok = true;
+	g_rtc_seconds    = 1090u; /* the RV-3028 alone */
+	zassert_true(alp_som_power_wake_decode_i2c(&rec));
+	zassert_equal(rec.wake_source, 0u);
+}
+
+ZTEST(power_alif_se, test_a_long_armed_interval_allows_a_long_gap)
+{
+	alp_som_pd_record_t rec = lptimer_record(5000u);
+
+	g_rtc_seconds = 1009u; /* 5 s + 3 s boot + slack */
+	g_ccvr_now    = 5000u + 20u;
+	zassert_true(alp_som_power_wake_decode_i2c(&rec));
+	zassert_equal(rec.wake_source, ALP_POWER_WAKE_TIMER);
+
+	rec           = lptimer_record(5000u);
+	g_rtc_seconds = 1040u;
+	g_ccvr_now    = 5000u + 20u;
+	zassert_true(alp_som_power_wake_decode_i2c(&rec));
+	zassert_equal(rec.wake_source, 0u, "40 s is not a 5 s wake");
+}
+
+ZTEST(power_alif_se, test_the_rtc_countdown_is_not_gated_by_the_lptimer_rule)
+{
+	alp_som_pd_record_t rec = { .armed_hw    = ALP_SOM_ARM_RTC_TIMER,
+		                        .timed_bit   = ALP_POWER_WAKE_TIMER,
+		                        .armed_ms    = 3000u,
+		                        .entry_rtc_s = 1000u };
+
+	g_rtc_seconds = 1060u;
+	g_rtc_flags   = RV3028C7_WAKE_TF;
+	zassert_true(alp_som_power_wake_decode_i2c(&rec));
+	zassert_equal(rec.wake_source, ALP_POWER_WAKE_TIMER, "the RV-3028 flag is its own proof");
+}
+
+ZTEST(power_alif_se, test_the_record_carries_the_entry_ccvr)
+{
+	g_ccvr_now          = 0xABCD0u;
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+	zassert_equal(g_rec_at_set.entry_ccvr, 0xABCD0u);
+}
+
+/* ---- Clock restore (bench U8c / U8d) ------------------------------------------------- */
+
+ZTEST(power_alif_se, test_healthy_clocks_are_left_alone)
+{
+	zassert_equal(clock_restore(), 0);
+	zassert_equal(g_run_set_calls, 0u, "no set_run_cfg when the PLL is locked and selected");
+}
+
+ZTEST(power_alif_se, test_an_all_rc_clock_tree_triggers_the_restore_with_a_complete_profile)
+{
+	/* After a reset inside the STOP: OSC_CTRL 0, PLL_LOCK_CTRL 0, PLL_CLK_SEL 0, ACLK 0x101. */
+	g_cgu[ALIF_SE_CGU_OSC_CTRL]      = 0u;
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
+	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL]   = 0u;
+	g_cgu[ALIF_SE_CGU_ACLK_CTRL]     = 0x101u;
+	zassert_false(clocks_healthy());
+
+	zassert_equal(clock_restore(), 0);
+	zassert_equal(g_run_set_calls, 1u);
+	zassert_equal(g_run_set.power_domains, 0x16du);
+	zassert_equal(g_run_set.dcdc_voltage, 825u);
+	zassert_equal(g_run_set.dcdc_mode, DCDC_MODE_PWM);
+	zassert_equal(g_run_set.aon_clk_src, CLK_SRC_LFRC);
+	zassert_equal(g_run_set.run_clk_src, CLK_SRC_PLL);
+	zassert_equal(g_run_set.cpu_clk_freq, CLOCK_FREQUENCY_160MHZ);
+	zassert_equal((int)g_run_set.scaled_clk_freq, 16);
+	zassert_equal(g_run_set.memory_blocks, 0x00108000u);
+	zassert_equal(g_run_set.ip_clock_gating, 0u);
+	zassert_equal(g_run_set.phy_pwr_gating, 0u);
+	zassert_equal(g_run_set.vdd_ioflex_3V3, IOFLEX_LEVEL_1V8);
+	zassert_true(clocks_healthy(), "the PLL locked afterwards");
+}
+
+ZTEST(power_alif_se, test_each_unhealthy_condition_alone_triggers)
+{
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u; /* only the lock is gone */
+	zassert_equal(clock_restore(), 0);
+	zassert_equal(g_run_set_calls, 1u);
+
+	reset_fakes();
+	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL] = 0x00110110u; /* only the select differs */
+	zassert_equal(clock_restore(), 0);
+	zassert_equal(g_run_set_calls, 1u);
+}
+
+ZTEST(power_alif_se, test_a_failed_restore_is_logged_not_fatal)
+{
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
+	g_run_set_rc                     = -5;
+	zassert_equal(clock_restore(), 0, "boot continues");
+	zassert_equal(g_run_set_calls, 1u);
+	zassert_false(clocks_healthy());
+
+	/* The SE accepted it but the PLL never locked: also not fatal. */
+	reset_fakes();
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
+	g_run_set_locks_pll              = false;
+	zassert_equal(clock_restore(), 0);
+}
+
+ZTEST(power_alif_se, test_the_run_profile_matches_the_cold_boot_profile)
+{
+	run_profile_t r;
+
+	memset(&r, 0xA5, sizeof(r));
+	build_run_profile(&r);
+	const uint32_t *w = (const uint32_t *)&r;
+
+	for (size_t i = 0; i < sizeof(r) / sizeof(uint32_t); ++i) {
+		zassert_not_equal(w[i], POISON32, "run_profile_t word %u never assigned", (unsigned)i);
+	}
+}
+
+/* ---- RV-3028 evidence at an /INT refusal ---------------------------------------------- */
+
+ZTEST(power_alif_se, test_int_asserted_refusal_dumps_the_rtc_registers_once)
+{
+	g_int_level         = 1;
+	g_rtc_regs[0]       = 0x08u;
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
+	assert_no_side_effect();
 }

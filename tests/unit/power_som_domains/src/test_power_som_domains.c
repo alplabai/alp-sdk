@@ -36,6 +36,15 @@
 #include "som_power.h"
 #include "som_power_chips.h"
 
+static uint32_t g_image = 0xA1111111u; /* the "running image" */
+static unsigned g_stat_clears;
+static unsigned g_stat_clear_order, g_i2c_decode_order_seen;
+
+uint32_t alp_som_pd_image_id(void)
+{
+	return g_image;
+}
+
 #define LPGPIO DEVICE_DT_GET(DT_NODELABEL(lpgpio))
 #define GPIO11 DEVICE_DT_GET(DT_NODELABEL(gpio11))
 #define GPIO5  DEVICE_DT_GET(DT_NODELABEL(gpio5))
@@ -82,6 +91,8 @@ static uint16_t tmp_conf(void)
 static void before(void *unused)
 {
 	(void)unused;
+	g_image = 0xA1111111u;
+	alp_som_pd_bench_set(0u); /* the cell belongs to this image: a previous test must not leak */
 	alp_som_power_reset_for_test();
 	fakes_reset();
 
@@ -1137,8 +1148,8 @@ ZTEST(power_som_domains, test_standby_record_is_restored_without_stop_mode_stat)
 
 ZTEST(power_som_domains, test_record_layout_is_stable)
 {
-	zassert_equal(sizeof(alp_som_pd_record_t), 52u);
-	zassert_equal(offsetof(alp_som_pd_record_t, crc), 48u);
+	zassert_equal(sizeof(alp_som_pd_record_t), 60u);
+	zassert_equal(offsetof(alp_som_pd_record_t, crc), 56u);
 }
 
 ZTEST(power_som_domains, test_discarded_decode_reports_a_plain_boot)
@@ -1340,4 +1351,110 @@ ZTEST(power_som_domains, test_run_cycle_record_ignores_the_syndrome)
 	wake_boot(&info);
 	zassert_true(info.valid);
 	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+}
+
+/* ---- Image identity and the sticky STOP_MODE_STAT (bench U8d) -------------------------- */
+
+bool alp_som_power_stop_mode_stat_clear(void)
+{
+	g_stat_clears++;
+	g_stat_clear_order = ++g_dec.seq;
+	g_stop_mode &= ~0x10u; /* W1C of bit 4 only */
+	return true;
+}
+
+ZTEST(power_som_domains, test_stop_mode_stat_is_acknowledged_after_the_decode)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed   = true;
+	g_stat_clears = 0u;
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	wake_boot(&info);
+	zassert_equal(g_stat_clears, 1u);
+	zassert_true(g_stat_clear_order > g_dec.i2c_order, "after both decode parts");
+	zassert_equal(g_stop_mode & 0x10u, 0u, "the sticky status is gone");
+	zassert_equal(g_stop_mode & 0x1u, 0u, "and STOP_MODE_CTRL (bit 0) was never touched");
+	g_dec.armed = false;
+	(void)g_i2c_decode_order_seen;
+}
+
+ZTEST(power_som_domains, test_a_second_reset_after_a_wake_is_not_a_wake)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	hold_everything();
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	wake_boot(&info);
+	zassert_true(info.valid);
+
+	/* A flash / debugger reset after that: the status was acknowledged, there is no record. */
+	hold_everything();
+	wake_boot(&info);
+	zassert_false(info.valid, "not a STOP wake");
+	zassert_equal(level(LPGPIO, NRST_PIN), 0, "and nothing was blindly released");
+}
+
+ZTEST(power_som_domains, test_another_images_bench_cell_starts_a_fresh_run)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_image = 0xA1111111u;
+	alp_som_pd_store_clear();
+	alp_som_pd_bench_set(3u);
+	zassert_equal(alp_som_pd_bench_count(), 3u);
+
+	/* A clean flash of a different image on top, with the old run's STOP_MODE_STAT still set. */
+	g_image = 0xB2222222u;
+	zassert_equal(alp_som_pd_bench_count(), 0u, "another image's counter reads 0");
+	zassert_true(alp_som_pd_bkram_foreign());
+	hold_everything();
+	g_stop_mode = 0x10u;
+	wake_boot(&info);
+	zassert_false(info.valid, "the flash's reset is not a STOP wake");
+	zassert_equal(level(LPGPIO, NRST_PIN), 0, "no blind restore on a foreign status");
+	zassert_false(alp_som_pd_bkram_foreign(), "adopted");
+	zassert_equal(alp_som_pd_bench_count(), 0u);
+	g_image = 0xA1111111u;
+}
+
+ZTEST(power_som_domains, test_a_record_from_another_image_is_dropped)
+{
+	alp_power_boot_info_t info;
+	alp_som_pd_record_t   rec;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_image = 0xA1111111u;
+	poke_cycle_record(ALP_POWER_MODE_STOP); /* stamped with image A */
+	zassert_true(alp_som_pd_store_load(&rec));
+	zassert_equal(rec.image_id, 0xA1111111u);
+
+	g_image = 0xB2222222u;
+	hold_everything();
+	g_stop_mode = 0x10u;
+	wake_boot(&info);
+	zassert_false(info.valid);
+	zassert_false(alp_som_pd_store_load(&rec), "the record is gone");
+	zassert_equal(level(LPGPIO, NRST_PIN), 0);
+	g_image = 0xA1111111u;
+}
+
+ZTEST(power_som_domains, test_the_same_image_still_wakes_normally)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_image = 0xA1111111u;
+	alp_som_pd_bench_set(1u);
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+	zassert_equal(alp_som_pd_bench_count(), 1u, "the counter survives a wake of the same image");
 }

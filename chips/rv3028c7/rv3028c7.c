@@ -260,11 +260,17 @@ alp_status_t rv3028c7_init(rv3028c7_t *ctx, alp_i2c_t *bus)
      * flag exists on the RV-3028-C7); stash it in ctx before
      * clearing so rv3028c7_was_cold_start() can report it. */
 	ctx->cold_start = (status & RV3028_STATUS_PORF) != 0;
-	if (ctx->cold_start) {
-		/* Clear PORF only: BSF/EVF/... latched before init stay set
-         * for the first rv3028c7_dispatch_irq(). */
-		s = rv3028_write_reg(
-		    ctx, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_PORF));
+	/* Clear PORF (when set) and EVF (when set), nothing else: BSF/... latched before init stay
+     * set for the first rv3028c7_dispatch_irq().  EVF is cleared by writing 0 to it (a 1 is
+     * ignored, bench-verified, see rv3028c7_wake_service): a stale External Event flag is
+     * the EVI pin (MODULE_STBY on the E1M-AEN SoM) having been low at some point, and with
+     * EIE enabled it would hold /INT asserted and block every timed wake.  This driver never
+     * enables EIE unless asked (rv3028c7_set_int_enable(EXT_EVENT)). */
+	uint8_t clear = 0;
+	if (ctx->cold_start) clear |= RV3028_STATUS_PORF;
+	if (status & RV3028_STATUS_EVF) clear |= RV3028_STATUS_EVF;
+	if (clear != 0) {
+		s = rv3028_write_reg(ctx, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~clear));
 		if (s != ALP_OK) return s;
 	}
 

@@ -84,6 +84,8 @@ typedef struct {
 	    timed_bit; /**< ALP_POWER_WAKE_* a timed wake reports (the source the caller asked for). */
 	uint32_t armed_ms;    /**< Timed-wake length actually programmed, ms (0 = none). */
 	uint32_t entry_rtc_s; /**< RV-3028 seconds since 2000-01-01 at entry; 0 = unreadable. */
+	uint32_t entry_ccvr;  /**< LPRTC CCVR at entry (coarse, units unproven); 0 = unread. */
+	uint32_t image_id;    /**< alp_som_pd_image_id() of the image that wrote the record. */
 	uint32_t crc;         /**< CRC-32 (IEEE) over every field above. */
 } alp_som_pd_record_t;
 
@@ -214,8 +216,22 @@ void alp_som_pd_store_poke(const alp_som_pd_record_t *rec);
 typedef struct {
 	uint32_t magic;
 	uint32_t count;
+	uint32_t image; /**< alp_som_pd_image_id() of the image that wrote the counter */
 	uint32_t crc;
 } alp_som_pd_bench_t;
+
+/** Identity of the running image (CRC-32 of its ROM region).  Weak: 0 where there is no
+ *  such region, so identity checks pass trivially.  Stamped into the record and the bench
+ *  cell; a different value found in BKRAM means the contents belong to ANOTHER image (a
+ *  fresh flash), and must not be read as this one's sleep. */
+uint32_t alp_som_pd_image_id(void);
+
+/** True when the bench cell carries a counter written by another image (or by an older
+ *  layout).  Bench scratch option only; false otherwise. */
+bool alp_som_pd_bkram_foreign(void);
+
+/** Forget a foreign bench cell and diag: counter 0 under this image, PRE invalidated. */
+void alp_som_pd_bkram_adopt(void);
 
 uint32_t alp_som_pd_bench_count(void);
 void     alp_som_pd_bench_set(uint32_t count);
@@ -225,7 +241,7 @@ void     alp_som_pd_bench_set(uint32_t count);
  *  slot BOOT by the earliest init hook of the next boot; main() prints both.  A
  *  slot is a magic, a sequence number and ALP_SOM_PD_DIAG_WORDS raw register words;
  *  the meaning of each word is the index list in alif_se_power_hw.c. */
-#define ALP_SOM_PD_DIAG_WORDS 40u
+#define ALP_SOM_PD_DIAG_WORDS 56u
 #define ALP_SOM_PD_DIAG_PRE   0u
 #define ALP_SOM_PD_DIAG_BOOT  1u
 
@@ -238,10 +254,23 @@ typedef struct {
 
 /** Store @p words (@p n <= ALP_SOM_PD_DIAG_WORDS, the rest zero) into @p slot. */
 void alp_som_pd_diag_save(unsigned slot, const uint32_t *words, unsigned n);
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 /** Overwrite word @p idx of an existing @p slot (no sequence change). */
 void alp_som_pd_diag_patch(unsigned slot, unsigned idx, uint32_t value);
 /** Invalidate @p slot (main does this to PRE once it has printed it). */
 void alp_som_pd_diag_invalidate(unsigned slot);
+#else
+static inline void alp_som_pd_diag_patch(unsigned slot, unsigned idx, uint32_t value)
+{
+	(void)slot;
+	(void)idx;
+	(void)value;
+}
+static inline void alp_som_pd_diag_invalidate(unsigned slot)
+{
+	(void)slot;
+}
+#endif
 /** Copy @p slot out; true when it carries the magic. */
 bool alp_som_pd_diag_load(unsigned slot, alp_som_pd_diag_t *out);
 
@@ -268,6 +297,12 @@ alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags);
  *  request to the power domain.  Weak: 0 where there is no such register. */
 uint32_t alp_som_power_reset_syndrome_take(void);
 
+/** Acknowledge STOP_MODE_STAT (VBAT_STOP_MODE_REG bit 4), once the boot decode is done, so a
+ *  later reset is not read as a STOP wake.  Writes exactly the STAT bit, never bit 0
+ *  (STOP_MODE_CTRL enters stop mode).  Returns false when it did not clear.  Weak: true
+ *  where there is no such register. */
+bool alp_som_power_stop_mode_stat_clear(void);
+
 /** True when the syndrome's NSRST bit can be trusted as a pin-reset marker (it reads 0,
  *  or clears when acknowledged).  Probed before the sleep.  Weak: false where there is no
  *  such register, so nothing is ever classified as a pin reset there. */
@@ -276,6 +311,11 @@ bool alp_som_power_reset_syndrome_trusted(void);
 /** True when an enabled RV-3028 countdown / alarm flag (TF / AF) is already latched.
  *  Read only: nothing is cleared, so the wake decode still sees it. */
 alp_status_t alp_som_power_rtc_flags_pending(bool *pending);
+
+/** Read-only dump of RV-3028 STATUS 0Eh, CONTROL_1 0Fh, CONTROL_2 10h, Event Control 13h and
+ *  the EEPROM mirrors 35h (CLKOUT) and 37h (BACKUP) into @p regs[6], in that order.  Nothing
+ *  is written, EEPROM included. */
+alp_status_t alp_som_power_rtc_regs(uint8_t regs[6]);
 
 /** RV-3028 calendar as seconds since 2000-01-01 00:00:00. */
 alp_status_t alp_som_power_rtc_seconds(uint32_t *seconds);

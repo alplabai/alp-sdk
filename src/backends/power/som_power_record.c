@@ -76,8 +76,8 @@ BUILD_ASSERT(sizeof(sompd_bkram_t) <= DT_REG_SIZE(DT_NODELABEL(bkram)),
 
 /* The record layout is the contract between the sleep that writes it and the next
  * boot that reads it (and the CRC covers everything before `crc`). */
-BUILD_ASSERT(sizeof(alp_som_pd_record_t) == 52, "wake record must be 52 bytes");
-BUILD_ASSERT(offsetof(alp_som_pd_record_t, crc) == 48, "wake record CRC must sit at offset 48");
+BUILD_ASSERT(sizeof(alp_som_pd_record_t) == 60, "wake record must be 60 bytes");
+BUILD_ASSERT(offsetof(alp_som_pd_record_t, crc) == 56, "wake record CRC must sit at offset 56");
 
 static sompd_bkram_t _bk SOMPD_BKRAM_SECTION;
 #define _store (_bk.record)
@@ -122,11 +122,36 @@ bool alp_som_pd_store_load(alp_som_pd_record_t *out)
 	return alp_som_pd_record_valid(out);
 }
 
+/* CRC-32 of the ROM region (vector table, code, rodata): changes with any rebuild or
+ * variant.  Computed once per boot.  Only the BKRAM build has a ROM image worth checking. */
+#if SOMPD_IN_BKRAM
+#include <zephyr/linker/linker-defs.h>
+
+__weak uint32_t alp_som_pd_image_id(void)
+{
+	static uint32_t id;
+	static bool     have;
+
+	if (!have) {
+		id   = crc32_ieee((const uint8_t *)__rom_region_start,
+		                  (size_t)(__rom_region_end - __rom_region_start));
+		have = true;
+	}
+	return id;
+}
+#else
+__weak uint32_t alp_som_pd_image_id(void)
+{
+	return 0u;
+}
+#endif
+
 void alp_som_pd_store_save(alp_som_pd_record_t *rec)
 {
 	bkram_clock_assert();
-	rec->magic = ALP_SOM_PD_RECORD_MAGIC;
-	rec->crc   = alp_som_pd_record_crc(rec);
+	rec->image_id = alp_som_pd_image_id();
+	rec->magic    = ALP_SOM_PD_RECORD_MAGIC;
+	rec->crc      = alp_som_pd_record_crc(rec);
 	memcpy(&_store, rec, sizeof(_store));
 }
 
@@ -152,18 +177,39 @@ uint32_t alp_som_pd_bench_count(void)
 	bkram_clock_assert();
 	alp_som_pd_bench_t b = _bk.bench;
 
-	if (b.magic != SOMPD_BENCH_MAGIC || b.crc != crc32_ieee((const uint8_t *)&b, 8u)) {
+	/* Another image's counter reads 0: a clean flash starts fresh. */
+	if (b.magic != SOMPD_BENCH_MAGIC || b.crc != crc32_ieee((const uint8_t *)&b, 12u) ||
+	    b.image != alp_som_pd_image_id()) {
 		return 0u;
 	}
 	return b.count;
 }
 
+bool alp_som_pd_bkram_foreign(void)
+{
+	bkram_clock_assert();
+	alp_som_pd_bench_t b = _bk.bench;
+
+	if (b.magic != SOMPD_BENCH_MAGIC) {
+		return false; /* no counter at all: nothing says another image ran */
+	}
+	return b.crc != crc32_ieee((const uint8_t *)&b, 12u) || b.image != alp_som_pd_image_id();
+}
+
+void alp_som_pd_bkram_adopt(void)
+{
+	alp_som_pd_bench_set(0u);
+	alp_som_pd_diag_invalidate(ALP_SOM_PD_DIAG_PRE);
+}
+
 void alp_som_pd_bench_set(uint32_t count)
 {
 	bkram_clock_assert();
-	alp_som_pd_bench_t b = { .magic = SOMPD_BENCH_MAGIC, .count = count };
+	alp_som_pd_bench_t b = { .magic = SOMPD_BENCH_MAGIC,
+		                     .count = count,
+		                     .image = alp_som_pd_image_id() };
 
-	b.crc     = crc32_ieee((const uint8_t *)&b, 8u);
+	b.crc     = crc32_ieee((const uint8_t *)&b, 12u);
 	_bk.bench = b;
 }
 
@@ -219,5 +265,16 @@ bool alp_som_pd_diag_load(unsigned slot, alp_som_pd_diag_t *out)
 	bkram_clock_assert();
 	*out = _bk.diag[slot];
 	return out->magic == SOMPD_DIAG_MAGIC;
+}
+#endif
+
+#ifndef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+bool alp_som_pd_bkram_foreign(void)
+{
+	return false;
+}
+
+void alp_som_pd_bkram_adopt(void)
+{
 }
 #endif
