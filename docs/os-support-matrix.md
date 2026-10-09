@@ -110,7 +110,10 @@ plan in `VERSIONS.md`.
     request, data matches `v4l2-ctl`); RAW8 and the direct Y8 path are not.
     Known limits: a 60 fps request settles near 40 fps (#2792), and a plain
     non-CMake static link needs `-Wl,--undefined=_alp_backend_force_camera_yocto_drv`
-    or it gets the stub (#2790).  The sensor must be named by an `alp-camera<N>`
+    or it gets the stub, plus one such option per other Linux backend
+    (the list is the `alp_sdk` target's `ALP_SDK_FORCED_BACKENDS` property, or
+    `nm -A libalp_sdk.a | grep ' _alp_backend_force_'`); CMake consumers get them all
+    automatically (#2790).  The sensor must be named by an `alp-camera0`, `alp-camera1`, …
     devicetree alias (see `docs/v2n-camera-csi.md`).  The MIPI CSI-2 ISP-aware backend
     (`src/backends/camera/v2n_n44_isp.c`) is a separate **Zephyr** backend for
     the V2N `m33_sm` core (`zephyr/CMakeLists.txt:812`, opt-in via

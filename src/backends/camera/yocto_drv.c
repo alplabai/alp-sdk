@@ -1037,7 +1037,6 @@ static const alp_camera_ops_t _ops = {
 	.close         = y_close,
 };
 
-ALP_BACKEND_ANCHOR_FORCE(camera, yocto_drv);
 ALP_BACKEND_REGISTER(camera,
                      yocto_drv,
                      {
