@@ -47,14 +47,13 @@ static uint32_t scr_hash(const uint16_t *fb, bool skip_header)
 /* Paints screen `which` (a fixed view: the same numbers, text and frame every time) into fb. */
 static void scr_paint(int which, uint16_t *fb)
 {
-	static const uint8_t ban[SCR_N] = { TR_BANNER_NONE,      TR_BANNER_ATTRACT,
-		                                TR_BANNER_ATTRACT,   TR_BANNER_GAME_OVER,
-		                                TR_BANNER_STEP_BACK, TR_BANNER_NONE };
-	tr_hiscore_t  hs;
-	tr_initials_t ini;
-	tr_score_t    s;
-	tr_hud_view_t v;
-	uint32_t      fr = which == SCR_TABLE ? TR_HUD_PAGE_FRAMES : 10u;
+	static const uint8_t ban[SCR_N] = { TR_BANNER_NONE,      TR_BANNER_ATTRACT,   TR_BANNER_ATTRACT,
+		                                TR_BANNER_GAME_OVER, TR_BANNER_STEP_BACK, TR_BANNER_NONE };
+	tr_hiscore_t         hs;
+	tr_initials_t        ini;
+	tr_score_t           s;
+	tr_hud_view_t        v;
+	uint32_t             fr = which == SCR_TABLE ? TR_HUD_PAGE_FRAMES : 10u;
 
 	tr_hs_init(&hs);
 	(void)tr_hs_insert(&hs, 12345u, "ABC");
@@ -67,11 +66,8 @@ static void scr_paint(int which, uint16_t *fb)
 	s.metres = 321u;
 	s.best   = 9000u;
 	memset(&v, 0, sizeof(v));
-	tr_hud_view_set(&v,
-	                &s,
-	                ban[which],
-	                which == SCR_ATTRACT || which == SCR_TABLE,
-	                TR_HUD_INVITE_STEP_IN);
+	tr_hud_view_set(
+	    &v, &s, ban[which], which == SCR_ATTRACT || which == SCR_TABLE, TR_HUD_INVITE_STEP_IN);
 	if (which == SCR_INITIALS) {
 		v.mode = TR_HUD_INITIALS;
 	}
