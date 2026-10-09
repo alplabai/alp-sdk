@@ -917,13 +917,12 @@ static uint32_t fnv(uint32_t h, uint32_t v)
 	return h;
 }
 
-static uint32_t
-tile_key(int                  t,
-         const tr_hud_view_t *v,
-         uint32_t             frame,
-         uint32_t             popup_start,
-         uint32_t             zone_start,
-         uint32_t             vol_start)
+static uint32_t tile_key(int                  t,
+                         const tr_hud_view_t *v,
+                         uint32_t             frame,
+                         uint32_t             popup_start,
+                         uint32_t             zone_start,
+                         uint32_t             vol_start)
 {
 	uint32_t k = fnv(2166136261u, v->mode);
 
@@ -1113,8 +1112,9 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32
 		if (mid && (d & MID_BITS) == 0u) {
 			area = 0u;
 			for (int m = T_MIDL; m <= T_STRIP; m++) {
-				area += tile_key(m, v, f, h->popup_start, h->zone_start, h->vol_start) != h->key[m] ? tile_area(m)
-				                                                                      : 0u;
+				area += tile_key(m, v, f, h->popup_start, h->zone_start, h->vol_start) != h->key[m]
+				            ? tile_area(m)
+				            : 0u;
 			}
 		}
 		if (h->budget != 0u && px != 0u && !(mid && (d & MID_BITS) != 0u) &&

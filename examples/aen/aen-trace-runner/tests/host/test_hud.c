@@ -49,7 +49,8 @@ static void same_as_scratch(const tr_hud_t *h, const tr_hud_view_t *v)
 	                 v,
 	                 tr_hz_to40(h->frame - 1u),
 	                 h->popup_start,
-	                 h->zone_start, h->vol_start); /* the HUD's 40 Hz clock */
+	                 h->zone_start,
+	                 h->vol_start); /* the HUD's 40 Hz clock */
 	assert(memcmp(fb, ref, sizeof(fb)) == 0);
 }
 
@@ -373,7 +374,8 @@ int main(void)
 			uint32_t fr = tr_hz_to40(h.frame - 1u), age = fr - h.zone_start;
 			int      rows;
 
-			tr_hud_paint_all(none, &v, fr, h.popup_start, h.zone_start - TR_HUD_ZONE_FRAMES, h.vol_start);
+			tr_hud_paint_all(
+			    none, &v, fr, h.popup_start, h.zone_start - TR_HUD_ZONE_FRAMES, h.vol_start);
 			rows = memcmp(&fb[300 * TR_HUD_W],
 			              &none[300 * TR_HUD_W],
 			              (TR_HUD_H - 300) * TR_HUD_W * 2) != 0;
@@ -566,7 +568,12 @@ int main(void)
 			ts.combo      = hsp ? 0u : 5u;
 			tr_hud_view_set(&v, &ts, TR_BANNER_NONE, false, TR_HUD_INVITE_TILT);
 			tr_hud_paint_all(a, &v, 0u, 0u, 0u - TR_HUD_ZONE_FRAMES, 0u - TR_HUD_VOL_FRAMES);
-			tr_hud_paint_all(b, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, 0u - TR_HUD_ZONE_FRAMES, 0u - TR_HUD_VOL_FRAMES);
+			tr_hud_paint_all(b,
+			                 &v,
+			                 0u,
+			                 0u - TR_HUD_POPUP_FRAMES,
+			                 0u - TR_HUD_ZONE_FRAMES,
+			                 0u - TR_HUD_VOL_FRAMES);
 			for (int y = 0; y < TR_HUD_H; y++) {
 				for (int x = 0; x < TR_HUD_W; x++) {
 					bool in_pop = y >= 140 && y < 300 && x >= 220 && x < 500;
@@ -768,7 +775,12 @@ int main(void)
 				m.hs.e[i].score = 4000u - 100u * (uint32_t)i;
 				memcpy(m.hs.e[i].name, "ABC", 4);
 			}
-			tr_hud_paint_all(ref, &m, 250u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES); /* a table page for the attract card */
+			tr_hud_paint_all(ref,
+			                 &m,
+			                 250u,
+			                 0u,
+			                 0u,
+			                 0u - TR_HUD_VOL_FRAMES); /* a table page for the attract card */
 			assert(alpha_px(ref, 610, 140, 612, 300) == 0u);
 			assert(alpha_px(ref, 712, 140, TR_HUD_W, 300) == 0u);
 			assert(alpha_px(ref, 612, 168, 712, 170) == 0u);
@@ -839,7 +851,8 @@ int main(void)
 		} while (p1 != 0u && frames < 10u);
 		assert(frames >= 3u &&
 		       frames <= 5u); /* 253,440 px at <= 100,000 a frame, then one quiet frame */
-		tr_hud_paint_all(ref, &v, tr_hz_to40(hc.frame - 1u), hc.popup_start, hc.zone_start, hc.vol_start);
+		tr_hud_paint_all(
+		    ref, &v, tr_hz_to40(hc.frame - 1u), hc.popup_start, hc.zone_start, hc.vol_start);
 		assert(memcmp(fb, ref, sizeof(fb)) == 0);
 	}
 
