@@ -302,6 +302,9 @@
 		compatible = "zephyr,memory-region";
 		reg = <0x4902c000 0x1000>;
 		zephyr,memory-region = "ALP_BKRAM";
+		/* Normal, non-cacheable RAM: a record write must reach the SRAM itself,
+		 * never sit in a data cache across the STOP entry. */
+		zephyr,memory-attr = <DT_MEM_ARM_MPU_RAM_NOCACHE>;
 	};
 
 	lpgpio: gpio@42002000 {

@@ -63,22 +63,26 @@ bool alif_se_hw_rtc_int_present(void);
 /** Logical level of /INT: 1 = asserted (a wake is already pending), 0 = idle,
  *  negative = cannot be read. */
 int alif_se_hw_rtc_int_asserted(void);
-/** Configure the pad as a level-triggered interrupt input and open the LPGPIO
- *  combined interrupt toward the EWIC. */
+/** Make the pad a plain input and check it is usable.  The interrupt itself is
+ *  switched on only inside alif_se_hw_enter_ewic(), under the interrupt lock. */
 alp_status_t alif_se_hw_rtc_int_arm(void);
-/** Undo alif_se_hw_rtc_int_arm().  Idempotent. */
+/** Switch the pad interrupt and the combined line off.  Idempotent. */
 void alif_se_hw_rtc_int_disarm(void);
 
 /* ---- Entry ------------------------------------------------------------------ */
 
 /**
- * Enter the EWIC subsystem-off sleep: read-modify-write RTSS_HE_CTRL (WIC on,
- * EWIC selected, COLD_WAKEUP cleared so the power domain may drop), SLEEPDEEP,
- * WFI.  Called with interrupts locked.  On success the core loses power and the
- * wake is a cold boot, so this does not return; it returns only when the sleep
- * was aborted (a wake source fired before power was removed), with the register
- * and core state put back.
+ * Enter the EWIC subsystem-off sleep: interrupts off (PRIMASK, BASEPRI 0, as the
+ * DFP does), the wake pad armed (@p rtc_int: falling-edge interrupt on the
+ * RV-3028 /INT pad plus the LPGPIO combined line toward the EWIC), read-modify-write
+ * of RTSS_HE_CTRL (WIC on, EWIC selected, COLD_WAKEUP cleared so the power domain
+ * may drop), SLEEPDEEP, WFI.  On success the core loses power and the wake is a
+ * cold boot, so this does not return.  It returns only when the sleep was aborted (a
+ * wake source fired before power was removed): the wake pad is disarmed again, and
+ * RTSS_HE_CTRL and the core state are put back exactly as found, all before
+ * interrupts are re-enabled.  A failure to arm the pad returns its error without
+ * entering.
  */
-void alif_se_hw_enter_ewic(void);
+alp_status_t alif_se_hw_enter_ewic(bool rtc_int);
 
 #endif /* ALP_BACKENDS_POWER_ALIF_SE_POWER_HW_H */

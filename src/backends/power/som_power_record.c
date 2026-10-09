@@ -20,8 +20,10 @@
  * (`<memory name="Backup_SRAM" start="0x4902C000" size="0x00001000"/>`; the
  * peripheral map of the E8 leaves exactly that 4 KB slot free between ADC_VREF
  * 0x4902B000 and PDM 0x4902D000, and its CLKCTL_PER_SLV.BKRAM_CKEN and
- * VBAT.RET_CTRL.BKRAM_RET_MASK fields address this block).  Builds without the
- * node (native_sim, targets without a Utility SRAM) keep the record in a plain
+ * VBAT.RET_CTRL.BKRAM_RET_MASK fields address this block).  Only a build with the
+ * STOP backend (CONFIG_ALP_SDK_POWER_ALIF_SE) places the record there, so BKRAM is
+ * untouched unless the backend that needs it is enabled.  Every other build, and
+ * targets without the node (native_sim, E4/E6), keep the record in a plain
  * `__noinit` cell: that survives a warm reset but not a STOP, so a STOP cycle
  * there never finds a valid record and the wake path touches nothing, which is
  * the safe direction.
@@ -44,7 +46,7 @@
 
 #include "som_power.h"
 
-#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(bkram))
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(bkram)) && defined(CONFIG_ALP_SDK_POWER_ALIF_SE)
 #define SOMPD_BKRAM_SECTION Z_GENERIC_SECTION(LINKER_DT_NODE_REGION_NAME_TOKEN(DT_NODELABEL(bkram)))
 #define SOMPD_IN_BKRAM      1
 #else

@@ -341,6 +341,7 @@ static alp_status_t rv3028_clkout_restore(const struct i2c_dt_spec *i2c, bool pr
 #define RV3028_REG_SECONDS   0x00u
 #define RV3028_REG_STATUS    0x0Eu
 #define RV3028_REG_CONTROL_2 0x10u
+#define RV3028_STATUS_PORF   0x01u
 #define RV3028_STATUS_AF     0x04u
 #define RV3028_STATUS_TF     0x08u
 #define RV3028_STATUS_UF     0x10u
@@ -377,6 +378,25 @@ alp_status_t alp_som_power_rtc_int_armed(bool *armed)
 	return ALP_OK;
 }
 
+alp_status_t alp_som_power_rtc_porf(bool *porf)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   st  = 0;
+
+	if (porf == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	*porf = false;
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_STATUS, &st) != 0) {
+		return ALP_ERR_IO;
+	}
+	*porf = (st & RV3028_STATUS_PORF) != 0u;
+	return ALP_OK;
+}
+
 alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags)
 {
 	const struct i2c_dt_spec *i2c = rtc_i2c();
@@ -403,8 +423,11 @@ alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags)
 		return ALP_OK; /* nothing latched: no STATUS write */
 	}
 	/* Acknowledge with a constant mask: 0 for the flags being cleared, 1 for every
-	 * other latchable flag (a 1 is ignored by the part), so PORF / EVF / BSF / CLKF
-	 * survive and a flag latching between the read and the write is not lost. */
+	 * other latchable flag, so PORF / EVF / BSF / CLKF survive and a flag latching
+	 * between the read and the write is not lost.  This relies on the part ignoring a
+	 * 1 written to a flag that reads 0 (only a 0 clears): bench-verified 2026-10-08
+	 * on E1M-AEN803 and documented at rv3028c7_wake_service() in
+	 * include/alp/chips/rv3028c7.h (#2794). */
 	if (i2c_reg_write_byte_dt(i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~hit)) != 0) {
 		return ALP_ERR_IO;
 	}
@@ -678,9 +701,10 @@ __weak void alp_som_power_wake_decode_early(alp_som_pd_record_t *rec)
 	(void)rec;
 }
 
-__weak void alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
+__weak bool alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
 {
 	(void)rec;
+	return true;
 }
 
 /* ---- Quiesce / restore ----------------------------------------------------- */
@@ -873,16 +897,45 @@ __weak uint32_t alp_som_power_stop_mode_read(void)
 {
 	return sys_read32(DT_REG_ADDR(DT_NODELABEL(stop_mode)));
 }
-static bool stop_mode_stat_agrees(void)
+/* The register is present and says "this boot is a STOP wake". */
+static bool stop_mode_stat_set(void)
 {
 	return (alp_som_power_stop_mode_read() & SOMPD_STOP_MODE_STAT_BIT) != 0u;
 }
+static bool stop_mode_stat_agrees(void)
+{
+	return stop_mode_stat_set();
+}
 #else
+static bool stop_mode_stat_set(void)
+{
+	return false; /* no register: a record-less boot is a plain POR */
+}
 static bool stop_mode_stat_agrees(void)
 {
 	return true;
 }
 #endif
+
+/* A STOP wake whose record is missing or fails its CRC (the SRAM did not hold, the
+ * record was never written, a corrupted write): the domains it would have named are
+ * unknown, so nothing may be left held.  Release every present control pad to its
+ * inactive level, as if the whole set had been quiesced with AUTO (no rail-off, no
+ * saved "was on" bit, so the backlight stays off).  Reported as a STOP cycle with
+ * no wake cause. */
+static void blind_restore(uint32_t *restored, uint32_t *failed, uint32_t *named)
+{
+	alp_som_pd_record_t rec = { .mode = (uint32_t)ALP_POWER_MODE_STOP };
+
+	for (size_t d = 0; d < ALP_POWER_DOMAIN_COUNT; ++d) {
+		if (_reg[d].present) {
+			rec.quiesced |= ALP_POWER_DOMAIN_BIT(d);
+			_state[d] = ALP_SOM_PD_QUIESCED;
+		}
+	}
+	restore_domains(&rec, ~SOMPD_I2C_DOMAINS, true, restored, failed);
+	*named = rec.quiesced;
+}
 
 int alp_som_power_boot_restore(void)
 {
@@ -891,7 +944,21 @@ int alp_som_power_boot_restore(void)
 
 	alp_som_pd_record_t rec;
 	if (!alp_som_pd_store_load(&rec)) {
-		/* Plain POR (or a record that fails magic / CRC): touch nothing. */
+		if (stop_mode_stat_set()) {
+			/* A STOP wake with no usable record: never leave NOR, PHY or the CC3501E held. */
+			uint32_t restored, failed, named;
+
+			blind_restore(&restored, &failed, &named);
+			memset(&_boot_rec, 0, sizeof(_boot_rec));
+			_boot_rec.mode = (uint32_t)ALP_POWER_MODE_STOP;
+			_boot.valid    = true;
+			_boot.mode     = (uint32_t)ALP_POWER_MODE_STOP;
+			_boot.quiesced = named;
+			_boot.restored = restored;
+			_boot.failed   = failed;
+		}
+		/* Otherwise a plain POR: touch nothing. */
+		alp_som_pd_store_clear();
 		k_mutex_unlock(&_lock);
 		return 0;
 	}
@@ -947,9 +1014,12 @@ int alp_som_power_boot_restore_i2c(void)
 		_boot.failed |= failed;
 
 		/* Wake cause, part 2: the RV-3028 flags and the slept time. */
-		alp_som_power_wake_decode_i2c(&_boot_rec);
-		_boot.wake_source = _boot_rec.wake_source;
-		_boot.slept_ms    = _boot_rec.slept_ms;
+		if (alp_som_power_wake_decode_i2c(&_boot_rec)) {
+			_boot.wake_source = _boot_rec.wake_source;
+			_boot.slept_ms    = _boot_rec.slept_ms;
+		} else {
+			memset(&_boot, 0, sizeof(_boot)); /* untrusted record: report a plain boot */
+		}
 	}
 	k_mutex_unlock(&_lock);
 	return 0;

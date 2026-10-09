@@ -104,14 +104,20 @@ int se_service_get_off_cfg(off_profile_t *wp)
 	return 0;
 }
 
+static unsigned      g_set_calls;
+static off_profile_t g_undo_set; /* the last profile written (the undo) */
+
 int se_service_set_off_cfg(off_profile_t *wp)
 {
 	ev(EV_SET_OFF_CFG);
-	g_rec_at_set = g_rec;
+	if (g_set_calls++ == 0u) {
+		g_rec_at_set = g_rec;
+		g_set        = *wp; /* the profile of the cycle, not the undo */
+	}
+	g_undo_set = *wp;
 	if (g_set_rc != 0) {
 		return g_set_rc;
 	}
-	g_set    = *wp;
 	g_stored = *wp;
 	g_stored.memory_blocks &= ~g_se_drops_memory_bits;
 	return 0;
@@ -127,6 +133,11 @@ static int      g_int_level;
 static uint32_t g_armed_ticks;
 static int      g_arm_timer_rc, g_arm_int_rc;
 static unsigned g_enter_count;
+static uint8_t  g_rtc_flags; /* tentative: defined with the other som_power fakes below */
+static bool     g_enter_rtc_int;
+static bool     g_enter_fires; /* the fake sleep ends at once with the armed source fired */
+static int      g_enter_rc;
+static uint32_t g_regs_at_enter[3];
 
 uint32_t alif_se_hw_reg_read(alif_se_reg_t reg)
 {
@@ -208,10 +219,24 @@ void alif_se_hw_rtc_int_disarm(void)
 	ev(EV_DISARM_INT_PAD);
 }
 
-void alif_se_hw_enter_ewic(void)
+alp_status_t alif_se_hw_enter_ewic(bool rtc_int)
 {
 	ev(EV_ENTER);
 	g_enter_count++;
+	g_enter_rtc_int = rtc_int;
+	memcpy(g_regs_at_enter, g_regs, sizeof(g_regs));
+	if (g_enter_rc != 0) {
+		return (alp_status_t)g_enter_rc;
+	}
+	if (g_enter_fires) {
+		if ((g_rec_at_set.armed_hw & ALP_SOM_ARM_LPTIMER) != 0u) {
+			g_timer_pending = true;
+		}
+		if ((g_rec_at_set.armed_hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
+			g_rtc_flags = RV3028C7_WAKE_TF;
+		}
+	}
+	return ALP_OK;
 }
 
 /* som_power API the backend calls */
@@ -275,6 +300,14 @@ alp_status_t alp_som_power_rtc_int_armed(bool *armed)
 alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags)
 {
 	*flags = g_rtc_flags;
+	return ALP_OK;
+}
+
+static bool g_porf;
+
+alp_status_t alp_som_power_rtc_porf(bool *porf)
+{
+	*porf = g_porf;
 	return ALP_OK;
 }
 
@@ -377,6 +410,14 @@ static void reset_fakes(void)
 	g_armed_ticks   = 0;
 	g_arm_timer_rc = g_arm_int_rc = 0;
 	g_enter_count                 = 0;
+	g_enter_rtc_int               = false;
+	g_enter_fires                 = true;
+	g_enter_rc                    = 0;
+	memset(g_regs_at_enter, 0, sizeof(g_regs_at_enter));
+	g_set_calls = 0;
+	memset(&g_set, 0, sizeof(g_set));
+	memset(&g_rec_at_set, 0, sizeof(g_rec_at_set));
+	g_porf = false;
 
 	g_countdown_ready = true;
 	g_rtc_int_armed   = false;
@@ -461,7 +502,7 @@ ZTEST(power_alif_se, test_off_profile_standby_differs_only_where_documented)
 	poison(&out);
 	zassert_equal(build_off_profile(&out, &g_live, &plan), ALP_OK);
 	assert_all_assigned(&out);
-	zassert_equal(out.power_domains, PD_SSE700_AON_MASK);
+	zassert_equal(out.power_domains, PD_VBAT_AON_MASK | PD_SSE700_AON_MASK);
 	zassert_equal(out.stby_clk_freq, SCALED_FREQ_RC_STDBY_76_8_MHZ);
 }
 
@@ -608,7 +649,7 @@ ZTEST(power_alif_se, test_short_timed_wake_uses_lptimer)
 
 	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, &info), ALP_OK);
-	zassert_equal(g_armed_ticks, 16384u, "500 ms at 32768 Hz");
+	zassert_equal(g_armed_ticks, 18023u, "500 ms, rounded UP at 36045 Hz (LFRC +10 %)");
 	zassert_equal(ev_count(EV_ARM_LPTIMER), 1u);
 	zassert_equal(ev_count(EV_ARM_RTC_TIMER), 0u);
 	zassert_equal(g_rec_at_set.armed_hw, ALP_SOM_ARM_LPTIMER);
@@ -621,7 +662,7 @@ ZTEST(power_alif_se, test_timed_wake_boundary_999_and_1000)
 
 	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 999u, &info), ALP_OK);
-	zassert_equal(g_armed_ticks, 32735u, "999 ms: LPTIMER");
+	zassert_equal(g_armed_ticks, 36009u, "999 ms: LPTIMER, rounded up");
 	zassert_equal(ev_count(EV_ARM_RTC_TIMER), 0u);
 
 	reset_fakes();
@@ -631,7 +672,9 @@ ZTEST(power_alif_se, test_timed_wake_boundary_999_and_1000)
 	zassert_equal(g_countdown_req, 1u);
 	zassert_equal(g_rec_at_set.armed_hw, ALP_SOM_ARM_RTC_TIMER);
 	zassert_equal(g_set.wakeup_events, ALP_AIPM_GEN2_WE_LPGPIO0);
-	zassert_equal(g_rec_at_set.armed, ALP_POWER_WAKE_RTC, "the RV-3028 is the RTC wake");
+	zassert_equal(g_rec_at_set.armed,
+	              ALP_POWER_WAKE_TIMER,
+	              "a TIMER request served by the RV-3028 countdown still reports TIMER");
 
 	reset_fakes();
 	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
@@ -853,12 +896,13 @@ ZTEST(power_alif_se, test_record_carries_the_cycle)
 	g_rtc_seconds       = 777u;
 	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STANDBY, 1500u, NULL), ALP_OK);
-	zassert_equal(g_set.power_domains, PD_SSE700_AON_MASK);
+	zassert_equal(g_set.power_domains, PD_VBAT_AON_MASK | PD_SSE700_AON_MASK);
 	zassert_equal(g_quiesce_mode, ALP_POWER_MODE_STANDBY);
 
 	/* The record as the SE call saw it: this is what the cold-boot wake decodes. */
 	zassert_equal(g_rec_at_set.mode, (uint32_t)ALP_POWER_MODE_STANDBY);
-	zassert_equal(g_rec_at_set.armed, ALP_POWER_WAKE_RTC);
+	zassert_equal(g_rec_at_set.armed, ALP_POWER_WAKE_TIMER);
+	zassert_equal(g_rec_at_set.timed_bit, ALP_POWER_WAKE_TIMER);
 	zassert_equal(g_rec_at_set.armed_hw, ALP_SOM_ARM_RTC_TIMER);
 	zassert_equal(g_rec_at_set.armed_ms, 2000u);
 	zassert_equal(g_rec_at_set.entry_rtc_s, 777u);
@@ -947,10 +991,10 @@ ZTEST(power_alif_se, test_se_side_effect_is_reasserted)
 	g_regs[ALIF_SE_REG_ANA_REG1] = 0x06441f40u & ~ANA_REG1_RET_LDO_VBAT_EN;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
 	zassert_true(ev_count(EV_REG_WRITE) >= 2u);
-	zassert_true((g_regs[ALIF_SE_REG_RET_CTRL] & RET_CTRL_BKRAM) != 0u);
-	zassert_true((g_regs[ALIF_SE_REG_ANA_REG1] & ANA_REG1_RET_LDO_VBAT_EN) != 0u);
+	zassert_true((g_regs_at_enter[ALIF_SE_REG_RET_CTRL] & RET_CTRL_BKRAM) != 0u);
+	zassert_true((g_regs_at_enter[ALIF_SE_REG_ANA_REG1] & ANA_REG1_RET_LDO_VBAT_EN) != 0u);
 	/* nothing the SE left set is cleared */
-	zassert_equal(g_regs[ALIF_SE_REG_RET_CTRL] & 0x0002AAF0u, 0x0002AAF0u);
+	zassert_equal(g_regs_at_enter[ALIF_SE_REG_RET_CTRL] & 0x0002AAF0u, 0x0002AAF0u);
 }
 
 ZTEST(power_alif_se, test_untouched_registers_are_not_written)
@@ -966,8 +1010,8 @@ ZTEST(power_alif_se, test_tcm_retention_needs_ldo2_and_tcm_masks)
 	g_regs[ALIF_SE_REG_ANA_REG1] = ANA_REG1_RET_LDO_VBAT_EN;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
 	zassert_equal(g_set.memory_blocks, ALP_AIPM_GEN2_BACKUP4K_MASK | ALP_AIPM_GEN2_SRAM5_1_MASK);
-	zassert_true((g_regs[ALIF_SE_REG_ANA_REG1] & ANA_REG1_RET_LDO_VDDMAIN_EN) != 0u);
-	zassert_true((g_regs[ALIF_SE_REG_RET_CTRL] & (RET_CTRL_HETCM1 | RET_CTRL_HETCM2)) ==
+	zassert_true((g_regs_at_enter[ALIF_SE_REG_ANA_REG1] & ANA_REG1_RET_LDO_VDDMAIN_EN) != 0u);
+	zassert_true((g_regs_at_enter[ALIF_SE_REG_RET_CTRL] & (RET_CTRL_HETCM1 | RET_CTRL_HETCM2)) ==
 	             (RET_CTRL_HETCM1 | RET_CTRL_HETCM2));
 }
 
@@ -986,10 +1030,10 @@ ZTEST(power_alif_se, test_lfxo_trim_is_set_to_63_when_selected)
 	                               (8u << ALP_ALIF_SE_SVD_ANA_REG1_XTAL32K_CAP_CONT_LSB);
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
 	zassert_equal(g_set.aon_clk_src, CLK_SRC_LFXO);
-	zassert_equal((g_regs[ALIF_SE_REG_ANA_REG1] & ANA_REG1_CAP_CONT_MASK) >>
+	zassert_equal((g_regs_at_enter[ALIF_SE_REG_ANA_REG1] & ANA_REG1_CAP_CONT_MASK) >>
 	                  ALP_ALIF_SE_SVD_ANA_REG1_XTAL32K_CAP_CONT_LSB,
 	              63u);
-	zassert_true((g_regs[ALIF_SE_REG_ANA_REG1] & ANA_REG1_XTAL32K_EN) != 0u);
+	zassert_true((g_regs_at_enter[ALIF_SE_REG_ANA_REG1] & ANA_REG1_XTAL32K_EN) != 0u);
 }
 
 ZTEST(power_alif_se, test_lfrc_leaves_the_trim_alone)
@@ -1006,7 +1050,9 @@ ZTEST(power_alif_se, test_lfrc_leaves_the_trim_alone)
 
 ZTEST(power_alif_se, test_decode_early_lptimer)
 {
-	alp_som_pd_record_t rec = { .armed_hw = ALP_SOM_ARM_LPTIMER, .armed_ms = 500u };
+	alp_som_pd_record_t rec = { .armed_hw  = ALP_SOM_ARM_LPTIMER,
+		                        .armed_ms  = 500u,
+		                        .timed_bit = ALP_POWER_WAKE_TIMER };
 
 	g_timer_pending = false;
 	alp_som_power_wake_decode_early(&rec);
@@ -1026,6 +1072,7 @@ ZTEST(power_alif_se, test_decode_i2c_rtc_flags_and_slept_time)
 {
 	alp_som_pd_record_t rec = { .armed_hw    = ALP_SOM_ARM_RTC_TIMER,
 		                        .armed_ms    = 2000u,
+		                        .timed_bit   = ALP_POWER_WAKE_RTC,
 		                        .entry_rtc_s = 1000u };
 
 	g_rtc_seconds = 1003u;
@@ -1044,7 +1091,9 @@ ZTEST(power_alif_se, test_decode_i2c_rtc_flags_and_slept_time)
 
 ZTEST(power_alif_se, test_decode_i2c_no_flags_means_unknown_cause)
 {
-	alp_som_pd_record_t rec = { .armed_hw = ALP_SOM_ARM_RTC_TIMER, .entry_rtc_s = 10u };
+	alp_som_pd_record_t rec = { .armed_hw    = ALP_SOM_ARM_RTC_TIMER,
+		                        .timed_bit   = ALP_POWER_WAKE_RTC,
+		                        .entry_rtc_s = 10u };
 
 	g_rtc_seconds = 12u;
 	g_rtc_flags   = 0u;
@@ -1058,6 +1107,7 @@ ZTEST(power_alif_se, test_decode_i2c_lptimer_wake_falls_back_to_nominal_length)
 	alp_som_pd_record_t rec = { .armed_hw    = ALP_SOM_ARM_LPTIMER,
 		                        .armed_ms    = 500u,
 		                        .wake_source = ALP_POWER_WAKE_TIMER,
+		                        .timed_bit   = ALP_POWER_WAKE_TIMER,
 		                        .entry_rtc_s = 0u };
 
 	g_rtc_seconds_ok = false;
@@ -1081,6 +1131,7 @@ ZTEST(power_alif_se, test_decode_i2c_clock_going_backwards_is_not_a_duration)
 	alp_som_pd_record_t rec = { .armed_hw    = ALP_SOM_ARM_LPTIMER,
 		                        .armed_ms    = 500u,
 		                        .wake_source = ALP_POWER_WAKE_TIMER,
+		                        .timed_bit   = ALP_POWER_WAKE_TIMER,
 		                        .entry_rtc_s = 500u };
 
 	g_rtc_seconds = 100u; /* the RV-3028 was set back mid-sleep */
@@ -1092,16 +1143,207 @@ ZTEST(power_alif_se, test_aborted_sleep_reports_the_source_that_fired)
 {
 	alp_power_wake_info_t info;
 
-	g_timer_pending     = false;
+	/* LPTIMER fired: reported as the requested TIMER, an ordinary early wake. */
 	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
-	/* the fake enter returns; make the LPTIMER read latched only after arming */
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, &info), ALP_OK);
-	zassert_equal(info.wake_source, 0u);
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_TIMER);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN, "it never reached STOP");
 
+	/* A TIMER request served by the RV-3028 countdown still says TIMER. */
 	reset_fakes();
-	g_rtc_flags         = RV3028C7_WAKE_TF;
 	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, &info), ALP_OK);
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_TIMER);
+
+	/* An RTC request served by the countdown says RTC. */
+	reset_fakes();
+	g_state.wake_bitmap = ALP_POWER_WAKE_RTC;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, &info), ALP_OK);
 	zassert_equal(info.wake_source, ALP_POWER_WAKE_RTC);
-	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN, "it never reached STOP");
+}
+
+ZTEST(power_alif_se, test_stayed_up_with_no_source_is_a_failure_with_everything_put_back)
+{
+	alp_power_wake_info_t info;
+
+	g_enter_fires       = false;
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, &info), ALP_ERR_IO);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+	zassert_equal(info.wake_source, 0u);
+	zassert_equal(ev_count(EV_RESTORE), 1u);
+	zassert_equal(ev_count(EV_SET_OFF_CFG), 2u, "profile written, then the live one written back");
+	zassert_equal(g_undo_set.memory_blocks, g_live.memory_blocks);
+}
+
+/* ---- Review fixes: undo, full readback, never-early timers, PORF, entry arg ------ */
+
+ZTEST(power_alif_se, test_failure_after_the_se_call_writes_everything_back)
+{
+	/* RET_CTRL lacks BKRAM (so the backend writes it), VBAT_ANA_REG1 cannot take the
+	 * LDO-0 enable (so the verification fails afterwards). */
+	g_regs[ALIF_SE_REG_RET_CTRL]           = 0x0002AAF0u;
+	g_regs[ALIF_SE_REG_ANA_REG1]           = 0x06441f40u & ~ANA_REG1_RET_LDO_VBAT_EN;
+	g_reg_stuck_mask[ALIF_SE_REG_ANA_REG1] = ANA_REG1_RET_LDO_VBAT_EN;
+	uint32_t ret0                          = g_regs[ALIF_SE_REG_RET_CTRL];
+	uint32_t ana0                          = g_regs[ALIF_SE_REG_ANA_REG1];
+
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_IO);
+	assert_unwound();
+	zassert_equal(g_regs[ALIF_SE_REG_RET_CTRL], ret0, "RET_CTRL snapshot written back");
+	zassert_equal(g_regs[ALIF_SE_REG_ANA_REG1], ana0, "VBAT_ANA_REG1 snapshot written back");
+	zassert_equal(ev_count(EV_SET_OFF_CFG), 2u, "profile, then the live profile again");
+	zassert_equal(g_undo_set.memory_blocks, g_live.memory_blocks);
+	zassert_equal(g_undo_set.vtor_address, g_live.vtor_address);
+	zassert_equal(g_stored.dcdc_voltage, g_live.dcdc_voltage);
+}
+
+ZTEST(power_alif_se, test_a_failed_undo_is_reported_as_io)
+{
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	g_set_rc            = -5; /* the SE refuses both the profile and the write-back */
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_IO);
+	zassert_equal(ev_count(EV_ENTER), 0u);
+}
+
+ZTEST(power_alif_se, test_a_refusal_before_the_se_call_never_writes_the_se)
+{
+	g_dcache = true;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOSUPPORT);
+	zassert_equal(ev_count(EV_SET_OFF_CFG), 0u);
+	g_arm_timer_rc = ALP_ERR_IO;
+	g_dcache       = false;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_IO);
+	zassert_equal(ev_count(EV_SET_OFF_CFG), 0u, "a failure before step 6 has nothing to undo");
+}
+
+ZTEST(power_alif_se, test_every_off_profile_member_is_compared)
+{
+	off_profile_t want = g_live;
+
+	zassert_true(off_profile_matches(&want, &want));
+	for (size_t i = 0; i < sizeof(want) / sizeof(uint32_t); ++i) {
+		off_profile_t got = want;
+
+		((uint32_t *)&got)[i] ^= 1u;
+		zassert_false(off_profile_matches(&want, &got), "member %u is not compared", (unsigned)i);
+	}
+}
+
+ZTEST(power_alif_se, test_se_rewriting_the_io_rail_or_dcdc_abandons_the_sleep)
+{
+	/* The SE hands back a profile whose I/O flex rail or DC-DC voltage differs from
+	 * what was written: a hardware hazard, never a sleep. */
+	g_readback_overridden = true;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL),
+	              ALP_ERR_IO,
+	              "read back differs from what the fake SE was given");
+
+	reset_fakes();
+	g_stored.vdd_ioflex_3V3   = IOFLEX_LEVEL_3V3;
+	g_live                    = g_stored;
+	g_readback                = g_stored;
+	g_readback.vdd_ioflex_3V3 = IOFLEX_LEVEL_3V3;
+	g_readback.dcdc_voltage   = 850u;
+	g_readback_overridden     = true;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_IO);
+	zassert_equal(ev_count(EV_ENTER), 0u);
+}
+
+ZTEST(power_alif_se, test_lptimer_ticks_are_never_early)
+{
+	/* ceil(ms * fastest_rate / 1000) at every length, both clocks. */
+	for (uint32_t ms = 1u; ms < ALIF_SE_LPTIMER_MAX_MS; ++ms) {
+		reset_fakes();
+		g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+		zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, ms, NULL), ALP_OK);
+		zassert_true((uint64_t)g_armed_ticks * 1000u >= (uint64_t)ms * ALIF_SE_LFRC_HZ_MAX,
+		             "LFRC %u ms is early",
+		             (unsigned)ms);
+		zassert_true((uint64_t)(g_armed_ticks - 1u) * 1000u < (uint64_t)ms * ALIF_SE_LFRC_HZ_MAX,
+		             "LFRC %u ms is more than one tick late",
+		             (unsigned)ms);
+	}
+	for (uint32_t ms = 1u; ms < ALIF_SE_LPTIMER_MAX_MS; ms += 7u) {
+		reset_fakes();
+		g_regs[ALIF_SE_REG_ANA_MISC] = ANA_MISC_SEL_32K;
+		g_regs[ALIF_SE_REG_ANA_REG1] |= ANA_REG1_XTAL32K_EN;
+		g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+		zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, ms, NULL), ALP_OK);
+		zassert_true((uint64_t)g_armed_ticks * 1000u >= (uint64_t)ms * ALIF_SE_LFXO_HZ_MAX,
+		             "LFXO %u ms is early",
+		             (unsigned)ms);
+	}
+}
+
+ZTEST(power_alif_se, test_lptimer_tick_boundaries)
+{
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 1u, NULL), ALP_OK);
+	zassert_equal(g_armed_ticks, 37u, "1 ms: ceil(36.045)");
+
+	reset_fakes();
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 999u, NULL), ALP_OK);
+	zassert_equal(g_armed_ticks, 36009u);
+
+	reset_fakes();
+	g_regs[ALIF_SE_REG_ANA_MISC] = ANA_MISC_SEL_32K;
+	g_regs[ALIF_SE_REG_ANA_REG1] |= ANA_REG1_XTAL32K_EN;
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+	zassert_equal(g_armed_ticks, 16388u, "LFXO 500 ms: ceil(16387.5)");
+}
+
+ZTEST(power_alif_se, test_rtc_countdown_seconds_never_early)
+{
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	for (uint32_t ms = 1000u; ms <= 4200u; ms += 199u) {
+		reset_fakes();
+		g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+		zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, ms, NULL), ALP_OK);
+		zassert_true(g_countdown_req * 1000u >= ms, "%u ms countdown is early", (unsigned)ms);
+		zassert_true(g_countdown_req * 1000u < ms + 1000u);
+	}
+}
+
+ZTEST(power_alif_se, test_entry_gets_the_pad_flag_only_for_rtc_wakes)
+{
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+	zassert_false(g_enter_rtc_int, "LPTIMER wake: the INT pad stays off");
+	zassert_equal(ev_count(EV_ARM_INT_PAD), 0u);
+
+	reset_fakes();
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_OK);
+	zassert_true(g_enter_rtc_int);
+}
+
+ZTEST(power_alif_se, test_entry_failure_unwinds)
+{
+	g_enter_rc          = ALP_ERR_IO;
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_IO);
+	zassert_equal(ev_count(EV_RESTORE), 1u);
+	zassert_equal(ev_count(EV_SET_OFF_CFG), 2u);
+	zassert_equal(ev_count(EV_CANCEL_RTC_TIMER), 1u);
+}
+
+ZTEST(power_alif_se, test_stale_standby_record_is_discarded_after_rtc_power_loss)
+{
+	alp_som_pd_record_t rec = { .mode      = (uint32_t)ALP_POWER_MODE_STANDBY,
+		                        .armed_hw  = ALP_SOM_ARM_LPTIMER,
+		                        .timed_bit = ALP_POWER_WAKE_TIMER };
+
+	g_porf = true;
+	zassert_false(alp_som_power_wake_decode_i2c(&rec), "RV-3028 lost power: not this cycle");
+
+	g_porf = false;
+	zassert_true(alp_som_power_wake_decode_i2c(&rec));
+
+	/* STOP records are vouched for by STOP_MODE_STAT; PORF does not discard them. */
+	rec.mode = (uint32_t)ALP_POWER_MODE_STOP;
+	g_porf   = true;
+	zassert_true(alp_som_power_wake_decode_i2c(&rec));
 }

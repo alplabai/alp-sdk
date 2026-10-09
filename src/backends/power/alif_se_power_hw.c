@@ -243,6 +243,9 @@ int alif_se_hw_rtc_int_asserted(void)
 	return (spec != NULL) ? gpio_pin_get_dt(spec) : -ENODEV;
 }
 
+/* Nothing interrupt-related is switched on here: an enabled interrupt line outside
+ * the interrupt lock would be live while the SE is still being programmed.  The pad
+ * becomes a wake source in alif_se_hw_enter_ewic(), under the lock. */
 alp_status_t alif_se_hw_rtc_int_arm(void)
 {
 	const struct gpio_dt_spec *spec = rtc_wake_gpio();
@@ -250,13 +253,41 @@ alp_status_t alif_se_hw_rtc_int_arm(void)
 	if (spec == NULL) {
 		return ALP_ERR_NOT_READY;
 	}
-	if (gpio_pin_configure_dt(spec, GPIO_INPUT) != 0 ||
-	    gpio_pin_interrupt_configure_dt(spec, GPIO_INT_LEVEL_ACTIVE) != 0) {
+	return (gpio_pin_configure_dt(spec, GPIO_INPUT) == 0) ? ALP_OK : ALP_ERR_IO;
+}
+
+/* The combined LPGPIO line has no driver in this tree (gpio_dw connects only the
+ * eight individual lines, 171..178), so an enabled line 57 would reach
+ * z_irq_spurious(), which is fatal.  This acknowledge-only handler gives it a
+ * target; it masks the line again so a still-asserted source cannot storm. */
+static void comb_isr(const void *arg)
+{
+	(void)arg;
+	irq_disable(HW_LPGPIO_COMB_IRQ);
+}
+
+/* Interrupt lock held (PRIMASK set) by the caller. */
+static alp_status_t rtc_int_open_locked(void)
+{
+	const struct gpio_dt_spec *spec = rtc_wake_gpio();
+
+	if (spec == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	/* Falling EDGE, not level: the RV-3028 drives /INT low when the flag latches and
+	 * the edge is captured by the GPIO block until acknowledged, so a short /INT
+	 * pulse (tRTN1 = 7.8 ms, pulse mode) still latches the wake.  The SDK never
+	 * enables pulse mode (no EEPROM / TI_TP write): /INT stays low until the flag is
+	 * cleared by the wake decode. */
+	if (gpio_pin_interrupt_configure_dt(spec, GPIO_INT_EDGE_FALLING) != 0) {
 		return ALP_ERR_IO;
 	}
 	/* Same preparation as the vendor's pm_prepare_lpgpio_nvic_mask(): the combined
-	 * interrupt is the one that reaches the EWIC, so open it for the sleep and put
-	 * it back in alif_se_hw_rtc_int_disarm(). */
+	 * interrupt is the one that reaches the EWIC.  Line 57 is
+	 * "57 LPGPIO combined interrupt request" for the E8 M55-HE (Alif DFP
+	 * Device/soc/AE822FA0E5597/include/rtss_he/soc.h:155, LPGPIO_COMB_IRQ_IRQn;
+	 * the same constant as zephyr_alif soc/alif/common/rtss/power.c). */
+	IRQ_CONNECT(HW_LPGPIO_COMB_IRQ, 3, comb_isr, NULL, 0);
 	if (!irq_is_enabled(HW_LPGPIO_COMB_IRQ)) {
 		NVIC_ClearPendingIRQ(HW_LPGPIO_COMB_IRQ);
 		irq_enable(HW_LPGPIO_COMB_IRQ);
@@ -265,6 +296,7 @@ alp_status_t alif_se_hw_rtc_int_arm(void)
 	return ALP_OK;
 }
 
+/* Interrupt lock held when called from the entry path; idempotent. */
 void alif_se_hw_rtc_int_disarm(void)
 {
 	const struct gpio_dt_spec *spec = rtc_wake_gpio();
@@ -274,6 +306,7 @@ void alif_se_hw_rtc_int_disarm(void)
 	}
 	if (_comb_irq_opened_by_us) {
 		irq_disable(HW_LPGPIO_COMB_IRQ);
+		NVIC_ClearPendingIRQ(HW_LPGPIO_COMB_IRQ);
 		_comb_irq_opened_by_us = false;
 	}
 }
@@ -315,14 +348,17 @@ static inline void hw_restore_fp(const hw_fp_state_t *st)
 }
 #endif
 
-void alif_se_hw_enter_ewic(void)
+alp_status_t alif_se_hw_enter_ewic(bool rtc_int)
 {
-	uint32_t orig_ctrl    = sys_read32(HW_RTSS_HE_CTRL);
-	uint32_t orig_cppwr   = ICB->CPPWR;
-	uint32_t orig_ccr     = SCB->CCR;
-	uint32_t orig_mscr    = MEMSYSCTL->MSCR;
-	uint32_t orig_demcr   = DCB->DEMCR;
-	uint32_t orig_systick = SysTick->CTRL;
+	uint32_t     orig_ctrl    = sys_read32(HW_RTSS_HE_CTRL);
+	uint32_t     orig_cppwr   = ICB->CPPWR;
+	uint32_t     orig_ccr     = SCB->CCR;
+	uint32_t     orig_mscr    = MEMSYSCTL->MSCR;
+	uint32_t     orig_demcr   = DCB->DEMCR;
+	uint32_t     orig_systick = SysTick->CTRL;
+	uint32_t     orig_primask = __get_PRIMASK();
+	uint32_t     orig_basepri = __get_BASEPRI();
+	alp_status_t armed        = ALP_OK;
 #ifdef HW_SAVE_FP
 	hw_fp_state_t fp;
 	bool          fp_saved = false;
@@ -334,14 +370,32 @@ void alif_se_hw_enter_ewic(void)
 	}
 #endif
 
+	/* Interrupts off for the whole sequence, the way the DFP does it
+	 * (__disable_irq(), BASEPRI 0): a pending enabled interrupt still ends the WFI,
+	 * it is just not taken here.  The wake pad is armed INSIDE this section and
+	 * disarmed again before it ends, so no interrupt line is ever live while the
+	 * caller is unlocked. */
+	__disable_irq();
+	__set_BASEPRI(0);
+
+	if (rtc_int) {
+		armed = rtc_int_open_locked();
+	}
+	if (armed != ALP_OK) {
+		alif_se_hw_rtc_int_disarm();
+		__set_BASEPRI(orig_basepri);
+		__set_PRIMASK(orig_primask);
+		return armed;
+	}
+
 	/* PDEPU may go off only if the FP / MVE state is declared expendable. */
 	ICB->CPPWR = orig_cppwr | ICB_CPPWR_SU11_Msk | ICB_CPPWR_SU10_Msk;
 
 	/* The caller refused a live D-cache; clearing IC / DC lets PDRAMS go off. */
 	SCB->CCR        = orig_ccr & ~(SCB_CCR_IC_Msk | SCB_CCR_DC_Msk);
 	MEMSYSCTL->MSCR = (orig_mscr & ~(MEMSYSCTL_MSCR_ICACTIVE_Msk | MEMSYSCTL_MSCR_DCACTIVE_Msk));
-	/* The kernel tick would become pending under the interrupt lock and end the WFI
-	 * at once (SysTick wakes WFI even with PRIMASK set).  Stop it for the sleep. */
+	/* The kernel tick would become pending and end the WFI at once (SysTick wakes WFI
+	 * even with PRIMASK set).  Stop it for the sleep. */
 	SysTick->CTRL = orig_systick & ~(SysTick_CTRL_ENABLE_Msk | SysTick_CTRL_TICKINT_Msk);
 	SCB->ICSR     = SCB_ICSR_PENDSTCLR_Msk;
 	/* Disable the PMU / DWT trace enable so PDDEBUG can go off. */
@@ -362,9 +416,11 @@ void alif_se_hw_enter_ewic(void)
 	/* Does not return when the power is removed: the wake is a cold boot. */
 	__WFI();
 
-	/* A wake source fired before power was removed.  Put everything back. */
+	/* A wake source fired before power was removed.  Put everything back, the wake
+	 * pad first, while interrupts are still off. */
 	SCB->SCR &= ~SCB_SCR_SLEEPDEEP_Msk;
-	sys_write32(orig_ctrl & ~HE_CTRL_WIC_MASK, HW_RTSS_HE_CTRL);
+	sys_write32(orig_ctrl, HW_RTSS_HE_CTRL); /* the WIC bits and COLD_WAKEUP as found */
+	alif_se_hw_rtc_int_disarm();
 
 	MEMSYSCTL->MSCR |= orig_mscr & (MEMSYSCTL_MSCR_ICACTIVE_Msk | MEMSYSCTL_MSCR_DCACTIVE_Msk);
 	SCB->CCR      = orig_ccr;
@@ -378,4 +434,7 @@ void alif_se_hw_enter_ewic(void)
 		hw_restore_fp(&fp);
 	}
 #endif
+	__set_BASEPRI(orig_basepri);
+	__set_PRIMASK(orig_primask);
+	return ALP_OK;
 }

@@ -77,9 +77,11 @@ typedef struct {
 	uint32_t slept_ms;     /**< Sleep duration; the wake decode fills it. */
 	uint32_t armed;        /**< ALP_POWER_WAKE_* the STOP backend armed (0 before U7 arms). */
 	uint32_t armed_hw;     /**< ALP_SOM_ARM_* wake paths armed. */
-	uint32_t armed_ms;     /**< Timed-wake length actually programmed, ms (0 = none). */
-	uint32_t entry_rtc_s;  /**< RV-3028 seconds since 2000-01-01 at entry; 0 = unreadable. */
-	uint32_t crc;          /**< CRC-32 (IEEE) over every field above. */
+	uint32_t
+	    timed_bit; /**< ALP_POWER_WAKE_* a timed wake reports (the source the caller asked for). */
+	uint32_t armed_ms;    /**< Timed-wake length actually programmed, ms (0 = none). */
+	uint32_t entry_rtc_s; /**< RV-3028 seconds since 2000-01-01 at entry; 0 = unreadable. */
+	uint32_t crc;         /**< CRC-32 (IEEE) over every field above. */
 } alp_som_pd_record_t;
 
 #define ALP_SOM_PD_RECORD_MAGIC 0x41504d44u /* "APMD" */
@@ -255,8 +257,16 @@ alp_status_t alp_som_power_rtc_countdown_cancel(void);
  *  overrides it; the default leaves the record untouched. */
 void alp_som_power_wake_decode_early(alp_som_pd_record_t *rec);
 
-/** Wake decode, part 2: the I2C pass (RV-3028 flags, slept time).  Weak, as above. */
-void alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec);
+/** Wake decode, part 2: the I2C pass (RV-3028 flags, slept time).  Weak, as above.
+ *  Returns false to DISCARD the cycle's wake information (the record cannot be
+ *  trusted, e.g. a STANDBY record found after the RTC lost power); the domains were
+ *  already restored and are not affected. */
+bool alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec);
+
+/** True when the RV-3028 reports its power-on-reset flag (STATUS bit 0, read only,
+ *  not cleared here): the RTC lost power, so the module was power-cycled.
+ *  ALP_ERR_NOT_READY with no RTC domain / I2C bus. */
+alp_status_t alp_som_power_rtc_porf(bool *porf);
 
 /* ---- Op wrappers the power-class vtables point at ------------------------ */
 

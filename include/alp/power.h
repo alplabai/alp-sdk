@@ -298,8 +298,13 @@ alp_status_t alp_power_configure_retention(alp_power_t *handle, const alp_power_
  * @param[in]  handle          Handle from @ref alp_power_open.
  * @param[in]  mode            Requested mode (RUN is invalid here;
  *                             use @ref alp_power_close to release).
- * @param[in]  wake_after_ms   Max wall-clock wait, or 0 for "wake
- *                             only on a non-timer source".  When
+ * @param[in]  wake_after_ms   Minimum wall-clock sleep, or 0 for "wake
+ *                             only on a non-timer source".  The timed wake
+ *                             is never EARLY: a backend whose timer is
+ *                             coarse or inaccurate rounds the length UP
+ *                             (the Alif STOP backend counts against the
+ *                             fastest its low-frequency clock can run), so
+ *                             the actual sleep can be longer.  When
  *                             non-zero the backend arms a timed wake
  *                             (RTC alarm or low-power timer, whichever
  *                             the mode can use) even if

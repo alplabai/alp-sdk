@@ -94,15 +94,24 @@ the pm_policy backend when it is built.
 | Bit | Armed by | Notes |
 |---|---|---|
 | `ALP_POWER_WAKE_RTC` | on-module RV-3028, `INT` -> P15_0 -> `WE_LPGPIO0` | primary RTC (the internal LPRTC is not trusted: ER001 / ER002, LFRC-only boot). With `wake_after_ms == 0` the caller's own alarm / countdown must already be armed, or the request is `ALP_ERR_INVAL`. |
-| `ALP_POWER_WAKE_TIMER` | LPTIMER (`alp,power-wake-timer`, `WE_LPTIMER0`) for `wake_after_ms < 1000` | runs from the AON low-frequency clock: LFRC is ~4.5 % fast, so a short wake comes early by about that much. |
-| (timed wake >= 1 s) | RV-3028 countdown (`rv3028c7_timer_start`) | whole seconds, rounded up; reports `ALP_POWER_WAKE_RTC`. Needs the chip context bound (`alp_som_power_bind_rv3028`). |
+| `ALP_POWER_WAKE_TIMER` | LPTIMER (`alp,power-wake-timer`, `WE_LPTIMER0`) for `wake_after_ms < 1000` | runs from the AON low-frequency clock. `wake_after_ms` is a **minimum**: the tick count is rounded up against the fastest the clock can run (LFRC 36045 Hz = +10 %, the top of its trim range; measured 34251.7 Hz; LFXO 32775 Hz), so on LFRC a short wake can be up to ~10 % late but is never early. |
+| (timed wake >= 1 s) | RV-3028 countdown (`rv3028c7_timer_start`) | whole seconds, rounded up. Needs the chip context bound (`alp_som_power_bind_rv3028`). |
+
+A timed wake reports the source the caller asked for, whichever hardware serves it:
+`ALP_POWER_WAKE_TIMER` (also when only `wake_after_ms` was given), or
+`ALP_POWER_WAKE_RTC` when only `ALP_POWER_WAKE_RTC` was configured. The RV-3028
+`INT` pad is armed as a falling-edge interrupt, inside the interrupt-off entry
+section, so the edge is latched even by a short pulse (the part's pulse mode,
+tRTN1 = 7.8 ms, is never enabled by the SDK: `INT` stays low until the wake decode
+clears the flag). The LPGPIO combined line (IRQ 57) is the one that reaches the
+EWIC; its handler only masks the line again.
 
 **The OFF profile is complete and explicit.** `se_service_set_run_cfg()` /
 `set_off_cfg()` are not side-effect-free (bench: a one-field read-modify-write
 dropped `memory_blocks` bit 20, cleared the retention LDO enables in
 `VBAT_ANA_REG1` and the CVM masks in `RET_CTRL`), so every `off_profile_t` member is
-assigned by name: `power_domains` (STOP: VBAT AON; STANDBY: SSE700 AON),
-`dcdc_mode` OFF, `aon_clk_src` (LFXO only when `ANA.MISC_CTRL.SEL_32K` and
+assigned by name: `power_domains` (STOP: VBAT AON; STANDBY: VBAT AON + SSE700 AON),
+`dcdc_mode` OFF (STANDBY adds PD2 to PD0), `aon_clk_src` (LFXO only when `ANA.MISC_CTRL.SEL_32K` and
 `XTAL32K_EN` already confirm it, else LFRC; with LFXO the 32 kHz crystal trim
 `XTAL32K_CAP_CONT` is set to its maximum, 63), `memory_blocks` (BKRAM = gen2 bit 21,
 plus the HE TCM banks the retention asks for), `vdd_ioflex_3V3` 1.8 V,
@@ -110,13 +119,29 @@ plus the HE TCM banks the retention asks for), `vdd_ioflex_3V3` 1.8 V,
 `vtor_address` / `vtor_address_ns` preserved from the live profile so the wake still
 goes through SES -> ATOC. After the SE call the profile is read back, the retention
 bits it needs in `RET_CTRL` / `VBAT_ANA_REG1` are re-asserted, and the request is
-abandoned if any of it did not stick.
+abandoned if any of it did not stick. All 14 members are compared on the readback.
+`RET_CTRL` and `VBAT_ANA_REG1` are snapshotted before the SE call; every later exit
+(a failure, or a sleep that did not power down) writes the live profile and both
+snapshots back and verifies them.
 
 **Refusals**, all before any state is changed: `ALP_ERR_BUSY` when a debugger is
 attached (`DHCSR.C_DEBUGEN`; bench override
 `CONFIG_ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER`) or an armed source is already pending;
 `ALP_ERR_NOSUPPORT` with the D-cache on (the clean loop hangs on this silicon);
 `ALP_ERR_NOT_READY` when the core's low-power-state requests are not all OFF.
+
+**Entry.** Interrupts are off for the sequence (`PRIMASK`, `BASEPRI` 0, as the DFP
+does) and the wake pad is armed and disarmed inside it. A sleep that returns with a
+fired source is reported as an early wake; one that returns with none is
+`ALP_ERR_IO`, with the SE profile and the domains put back.
+
+**A STOP wake with no usable record** (the SRAM did not keep it, or the CRC fails)
+is not left with held domains: if `STOP_MODE_STAT` says STOP, every present pad is
+released to its inactive level (a blind early restore; no rail-off, backlight stays
+off) and `alp_power_boot_wake_info()` reports a STOP cycle with no wake cause. A
+STANDBY record is discarded when the RV-3028 reports its power-on-reset flag.
+The BKRAM placement exists only in a build with `CONFIG_ALP_SDK_POWER_ALIF_SE`;
+every other build keeps the record in RAM.
 
 **Wake decode.** The record in BKRAM carries what was armed; on the cold boot the
 LPTIMER status is read before its driver initialises, and the RV-3028 flags and
