@@ -38,16 +38,6 @@
 	status = "okay";
 };
 
-/* The controllers of the real IO0 (P9.1) and IO2 (P12.5) pads that alp_pins below must name; enabling a
- * controller changes no pad. */
-&gpio9 {
-	status = "okay";
-};
-
-&gpio12 {
-	status = "okay";
-};
-
 / {
 	aliases {
 		alp-qenc0 = &tr_enc;
@@ -71,17 +61,20 @@
 		idle-timeout-ms = <200>;
 	};
 
-	/* alp_gpio_open(pin_id) indexes this array by E1M pad number, so index 4 (IO4, the switch) needs
-	 * entries 0..3 before it. Those are the real pads of metadata/e1m_modules/aen/from-alif.tsv
-	 * (IO0 P9.1, IO2 P12.5, IO3 P3.2), never a stand-in; IO1 has no SoC pad, so it names pin 31 of
-	 * an 8-pin controller: gpio_dw refuses that pin (-EINVAL) instead of driving some other pad.
-	 * Nothing in this image opens IO0..IO3. */
+	/* alp_gpio_open(pin_id) indexes this array by E1M pad number, so index 4 (IO4, the switch)
+	 * needs entries 0..3 before it. The HE uses only IO4. IO0..IO3 name pin 31 of the 8-pin GPIO4
+	 * controller: gpio_dw refuses it (-EINVAL) instead of driving a pad. They deliberately do NOT
+	 * name the real IO0 (P9.1), IO2 (P12.5) or IO3 (P3.2) pads: P12_5 is CAM_MUX_SEL, hogged
+	 * output-low by hp_vision, and a gpio_dw controller the HP owns (GPIO12) must not be
+	 * instantiated on this core (cross-core INTEN / INTMASK / DDR writes and stray ISRs, the
+	 * I2C2 / GPIO5 hazard class). GPIO3 (encoder) and GPIO4 (switch) are not touched by any
+	 * hp_vision / sound overlay. */
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
-		gpios = <&gpio9 1 GPIO_ACTIVE_HIGH>,  /* [0] IO0: P9.1 */
-			<&gpio3 31 GPIO_ACTIVE_HIGH>, /* [1] IO1: no SoC pad, pin 31 does not exist */
-			<&gpio12 5 GPIO_ACTIVE_HIGH>, /* [2] IO2: P12.5 (the HP's CSI mux select) */
-			<&gpio3 2 GPIO_ACTIVE_HIGH>,  /* [3] IO3: P3.2 */
+		gpios = <&gpio4 31 GPIO_ACTIVE_HIGH>, /* [0] IO0: not used here */
+			<&gpio4 31 GPIO_ACTIVE_HIGH>, /* [1] IO1: not used here */
+			<&gpio4 31 GPIO_ACTIVE_HIGH>, /* [2] IO2: not used here */
+			<&gpio4 31 GPIO_ACTIVE_HIGH>, /* [3] IO3: not used here */
 			<&gpio4 3 GPIO_ACTIVE_LOW>;   /* [4] IO4: P4.3, the encoder switch (external pull-up) */
 	};
 };
