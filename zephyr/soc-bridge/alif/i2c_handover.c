@@ -68,7 +68,7 @@
 #define DW_IC_ENABLE_STATUS 0x9Cu
 #define DW_IC_EN_BIT        BIT(0)
 
-#define I2C_HANDOVER_BOOT_PRIO    49 /* ahead of CONFIG_I2C_INIT_PRIORITY (50) */
+#define I2C_HANDOVER_BOOT_PRIO     49 /* ahead of CONFIG_I2C_INIT_PRIORITY (50) */
 #define I2C_HANDOVER_RELEASE_PRIO 99 /* last of APPLICATION: after every bus user's init */
 #define I2C_HANDOVER_WAIT_STEP_MS 5
 #define I2C_HANDOVER_REPORT_MS    20000
@@ -100,7 +100,8 @@ static bool __maybe_unused i2c_handover_stop(uintptr_t base, unsigned int irq)
 
 /* Release side, boot: warm (see the file comment) or cold. `alive` is the other core's liveness
  * word, NULL when the node has none (always cold). */
-static bool __maybe_unused i2c_handover_sample_warm(alp_i2c_handover_t *w, const volatile uint32_t *alive)
+static bool __maybe_unused i2c_handover_sample_warm(alp_i2c_handover_t      *w,
+                                                    const volatile uint32_t *alive)
 {
 	uint32_t a, b;
 
@@ -158,12 +159,12 @@ static void __maybe_unused i2c_handover_acquire(alp_i2c_handover_t *w)
 #define HANDOVER_COLD_BUS_INIT(inst) \
 	COND_CODE_1(DT_NODE_HAS_STATUS(DT_INST_PHANDLE(inst, bus), okay), \
 	            (if (HANDOVER_BUS_DEFERRED(inst)) { \
-		             int r = device_init(DEVICE_DT_GET(DT_INST_PHANDLE(inst, bus))); \
+		            int r = device_init(DEVICE_DT_GET(DT_INST_PHANDLE(inst, bus))); \
 \
-		             if (r != 0) { \
-			             printk("i2c-handover: bus init failed (%d)\n", r); \
-		             } \
-	             }), \
+		            if (r != 0) { \
+			            printk("i2c-handover: bus init failed (%d)\n", r); \
+		            } \
+	            }), \
 	            ())
 
 #define HANDOVER_RELEASE(inst) \

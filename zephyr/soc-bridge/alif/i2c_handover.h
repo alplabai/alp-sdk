@@ -97,9 +97,8 @@ static inline bool alp_i2c_handover_taken(const alp_i2c_handover_t *w)
 
 /* Releasing core, boot: the acquiring core is running AND had taken the bus. `alive_a`/`alive_b`
  * are two samples of its liveness word, taken far enough apart for it to have moved. */
-static inline bool alp_i2c_handover_is_warm(const alp_i2c_handover_t *w,
-                                            uint32_t                  alive_a,
-                                            uint32_t                  alive_b)
+static inline bool
+alp_i2c_handover_is_warm(const alp_i2c_handover_t *w, uint32_t alive_a, uint32_t alive_b)
 {
 	return alp_i2c_handover_taken(w) && alive_a != alive_b;
 }

@@ -33,8 +33,9 @@ _Static_assert(sizeof(tr_reset_guard_t) == TR_RESET_GUARD_SIZE, "tr_reset_guard_
 static inline bool tr_reset_guard_allow(tr_reset_guard_t *g, uint32_t uptime_ms)
 {
 	/* A count above the limit is garbage (the record stops at the limit), not a streak. */
-	uint32_t prev = (g->magic == TR_RESET_GUARD_MAGIC && g->count <= TR_RESET_GUARD_MAX) ? g->count : 0u;
-	uint32_t n    = (uptime_ms < TR_RESET_GUARD_WINDOW_MS ? prev : 0u) + 1u;
+	uint32_t prev =
+	    (g->magic == TR_RESET_GUARD_MAGIC && g->count <= TR_RESET_GUARD_MAX) ? g->count : 0u;
+	uint32_t n = (uptime_ms < TR_RESET_GUARD_WINDOW_MS ? prev : 0u) + 1u;
 
 	if (n > TR_RESET_GUARD_MAX) {
 		n = TR_RESET_GUARD_MAX;

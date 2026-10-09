@@ -97,7 +97,7 @@ int main(void)
 	assert(!alp_i2c_handover_taken(&w) && !alp_i2c_handover_is_warm(&w, 1u, 2u));
 	/* Any word-fill pattern: either state != 0, or (state 0 patterns) nonce == consumed == fill. */
 	static const uint32_t fills[] = { 0xFFFFFFFFu, 0xA5A5A5A5u, 0x5A5A5A5Au, 0xDEADBEEFu,
-		                          0xCCCCCCCCu, 0x55555555u, 0xAAAAAAAAu, 0x12345678u };
+		                              0xCCCCCCCCu, 0x55555555u, 0xAAAAAAAAu, 0x12345678u };
 
 	for (unsigned i = 0; i < sizeof(fills) / sizeof(fills[0]); i++) {
 		cold(fills[i], fills[i], fills[i]);
