@@ -8,6 +8,10 @@ is now the package `scripts/alp_orchestrate/` (`orchestrator.py`, `buildplan.py`
 `carveout.py`, ...) -- still live, and per ADR 0020 (v0.12.0) it now emits
 `--emit build-plan` / `--emit system-manifest` for the standalone `tan` CLI to
 execute, rather than driving `west` directly.
+**Retired since:** the Renode pieces of this design (`west alp-renode`,
+`pr-renode-dual-os.yml`, the Renode dual-OS smoke test) no longer exist --
+see [ADR 0022](../../adr/0022-python-executor-renode-retirement.md),
+Amendment 2. The text below is the original design and is kept as written.
 **Owner:** alpCaner
 **Replaced:** `board.yaml` v1 single-OS model
 **Landed in:** v0.6.0 (2026-06-06)
