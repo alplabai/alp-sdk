@@ -21,14 +21,15 @@
  * that owns the bus replays it (sn65dsi83_recovery_agent.c).  The display core
  * must not touch the bus after the handover.
  */
-#ifndef ZEPHYR_DRIVERS_DISPLAY_SN65DSI83_RECOVERY_H_
-#define ZEPHYR_DRIVERS_DISPLAY_SN65DSI83_RECOVERY_H_
+#ifndef ZEPHYR_DRIVERS_SN65DSI83_RECOVERY_H_
+#define ZEPHYR_DRIVERS_SN65DSI83_RECOVERY_H_
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/toolchain.h>
 #include <zephyr/sys/util.h>
 
 /* CSR addresses shared by the driver and the replay (datasheet Tables 7-4..7-9). */
@@ -59,22 +60,38 @@ struct sn65dsi83_csr {
 enum sn65dsi83_health {
 	SN65_HEALTH_OK,           /* PLL enabled, locked, config kept, no latched error. */
 	SN65_HEALTH_CLEAR_ERRORS, /* PLL fine, CSR 0xE5 latched something: clear and count only. */
-	SN65_HEALTH_REINIT,       /* PLL off / not locked / config lost: replay the init sequence. */
+	SN65_HEALTH_REINIT,       /* PLL off / not locked / config lost / errors persist: replay. */
 };
+
+/* Latched errors on this many consecutive polls (PLL fine) are not transient: re-init. */
+#define SN65_ERR_POLLS_REINIT 3U
 
 /*
  * The whole recovery decision, from the three registers read: CSR 0x0D, 0x0A, 0xE5.
- * Error bits alone never re-init (a transient sync error clears itself); a PLL that is
- * off or not locked, or an HS_CLK_SRC that reads back clear (the table was lost), does.
+ *
+ * hs_clk_src: the HS_CLK_SRC bit (0x0A bit 0) the driver's own table writes -- a bridge
+ * that reads back anything else lost the table.  err_polls: consecutive polls (this one
+ * included) with CSR 0xE5 non-zero.  after_recovery: this is the first poll after a
+ * re-init.  A single transient sync error with the PLL fine is cleared and counted; the
+ * same errors on SN65_ERR_POLLS_REINIT polls in a row, or on the first poll after a
+ * re-init, mean the link does not hold and the sequence is replayed.
  */
-static inline enum sn65dsi83_health
-sn65dsi83_health_decide(uint8_t pll_en, uint8_t clk_src, uint8_t err_stat)
+static inline enum sn65dsi83_health sn65dsi83_health_decide(uint8_t  pll_en,
+                                                            uint8_t  clk_src,
+                                                            uint8_t  err_stat,
+                                                            uint8_t  hs_clk_src,
+                                                            uint32_t err_polls,
+                                                            bool     after_recovery)
 {
 	if (!(pll_en & SN65_PLL_EN_BIT) || !(clk_src & SN65_CLK_SRC_PLL_EN_STAT) ||
-	    !(clk_src & SN65_CLK_SRC_HS_CLK_SRC)) {
+	    (clk_src & SN65_CLK_SRC_HS_CLK_SRC) != (hs_clk_src & SN65_CLK_SRC_HS_CLK_SRC)) {
 		return SN65_HEALTH_REINIT;
 	}
-	return err_stat != 0U ? SN65_HEALTH_CLEAR_ERRORS : SN65_HEALTH_OK;
+	if (err_stat == 0U) {
+		return SN65_HEALTH_OK;
+	}
+	return (after_recovery || err_polls >= SN65_ERR_POLLS_REINIT) ? SN65_HEALTH_REINIT
+	                                                              : SN65_HEALTH_CLEAR_ERRORS;
 }
 
 /* A bridge that will not stay up is re-initialised at most this often. */
@@ -89,8 +106,10 @@ struct sn65dsi83_stats {
 	uint32_t recoveries;     /* successful re-inits */
 	uint32_t failures;       /* re-inits that failed (ID mismatch, I2C error, PLL never locked) */
 	uint32_t errors_cleared; /* CSR 0xE5 cleared with the PLL fine */
+	uint32_t err_polls;      /* consecutive polls with CSR 0xE5 non-zero */
 	int64_t  last_reinit_ms;
 	bool     have_last;
+	bool     after_recovery; /* the next poll is the first after a successful re-init */
 };
 
 struct sn65dsi83_report {
@@ -117,6 +136,11 @@ struct sn65dsi83_recipe {
 	struct sn65dsi83_csr csr[SN65_RECIPE_MAX];
 };
 
+/* The Trace Runner's tr_memmap.h places this struct in a fixed page: keep the size pinned. */
+#define SN65_RECIPE_SIZE 0x54U
+BUILD_ASSERT(sizeof(struct sn65dsi83_recipe) == SN65_RECIPE_SIZE,
+             "struct sn65dsi83_recipe changed size: update TR_MEM_SN65_RECIPE's reserved size");
+
 /* Identity check (CSR 0x00..0x08): 0 on a match, -ENODEV on a mismatch, <0 on an I2C error. */
 int sn65dsi83_check_id(const struct i2c_dt_spec *i2c);
 
@@ -128,15 +152,21 @@ int sn65dsi83_pll_start(const struct i2c_dt_spec *i2c);
 
 /*
  * One health pass over the bus: read CSR 0x0D/0x0A/0xE5, decide, act.  The full init
- * (ID check + sn65dsi83_csr_write() + sn65dsi83_pll_start()) is replayed from `csr`,
- * the same table the driver's init wrote.  Returns the I2C error if the three reads
- * failed (bridge absent or powered down: nothing to repair from here), else 0 -- the
- * outcome is in `rep` and `st`.  The caller logs; this file is silent.
+ * (PLL off, ID check, sn65dsi83_csr_write(), sn65dsi83_pll_start()) is replayed from `csr`,
+ * the same table the driver's init wrote; a failure part-way writes CSR 0x0D = 0 (best
+ * effort) so the next pass sees a bridge that needs a replay.  `now_ms` is the caller's
+ * uptime (injected so the rate limit is testable).  Returns the I2C error if the three
+ * reads failed (bridge absent or powered down: nothing to repair from here), else 0 --
+ * the outcome is in `rep` and `st`.  This file is silent; sn65dsi83_report_print() reports.
  */
 int sn65dsi83_health_poll(const struct i2c_dt_spec   *i2c,
                           const struct sn65dsi83_csr *csr,
                           size_t                      n,
                           struct sn65dsi83_stats     *st,
-                          struct sn65dsi83_report    *rep);
+                          struct sn65dsi83_report    *rep,
+                          int64_t                     now_ms);
 
-#endif /* ZEPHYR_DRIVERS_DISPLAY_SN65DSI83_RECOVERY_H_ */
+/* One printk line for a pass that did something (nothing while healthy). */
+void sn65dsi83_report_print(const struct sn65dsi83_report *rep, const struct sn65dsi83_stats *st);
+
+#endif /* ZEPHYR_DRIVERS_SN65DSI83_RECOVERY_H_ */

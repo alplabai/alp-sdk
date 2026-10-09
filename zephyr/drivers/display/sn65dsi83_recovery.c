@@ -13,10 +13,18 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/printk.h>
 
 #include "sn65dsi83_recovery.h"
 
-LOG_MODULE_REGISTER(sn65dsi83_rec, LOG_LEVEL_INF);
+/* The bridge driver's level where the display subsystem is built (the Kconfig symbol only
+ * exists there); the recovery agent's image may not have it. */
+#ifdef CONFIG_DISPLAY_LOG_LEVEL
+#define SN65_REC_LOG_LEVEL CONFIG_DISPLAY_LOG_LEVEL
+#else
+#define SN65_REC_LOG_LEVEL LOG_LEVEL_INF
+#endif
+LOG_MODULE_REGISTER(sn65dsi83_rec, SN65_REC_LOG_LEVEL);
 
 /*
  * Datasheet Table 7-4: "Addresses 0x08 - 0x00 = {0x01, 0x20, 0x20, 0x20,
@@ -146,11 +154,23 @@ int sn65dsi83_pll_start(const struct i2c_dt_spec *i2c)
 	return 0;
 }
 
+/* HS_CLK_SRC as the table writes it (CSR 0x0A bit 0); the datasheet default is 0. */
+static uint8_t sn65dsi83_table_hs_clk_src(const struct sn65dsi83_csr *csr, size_t n)
+{
+	for (size_t i = 0; i < n; i++) {
+		if (csr[i].reg == SN65_REG_CLK_SRC) {
+			return csr[i].val & SN65_CLK_SRC_HS_CLK_SRC;
+		}
+	}
+	return 0U;
+}
+
 int sn65dsi83_health_poll(const struct i2c_dt_spec   *i2c,
                           const struct sn65dsi83_csr *csr,
                           size_t                      n,
                           struct sn65dsi83_stats     *st,
-                          struct sn65dsi83_report    *rep)
+                          struct sn65dsi83_report    *rep,
+                          int64_t                     now_ms)
 {
 	int ret;
 
@@ -167,7 +187,14 @@ int sn65dsi83_health_poll(const struct i2c_dt_spec   *i2c,
 		return ret;
 	}
 
-	rep->health = sn65dsi83_health_decide(rep->pll_en, rep->clk_src, rep->err_stat);
+	st->err_polls      = rep->err_stat != 0U ? st->err_polls + 1U : 0U;
+	rep->health        = sn65dsi83_health_decide(rep->pll_en,
+	                                             rep->clk_src,
+	                                             rep->err_stat,
+	                                             sn65dsi83_table_hs_clk_src(csr, n),
+	                                             st->err_polls,
+	                                             st->after_recovery);
+	st->after_recovery = false;
 
 	if (rep->health == SN65_HEALTH_CLEAR_ERRORS) {
 		/* Latched flags are write-1-to-clear: write back what was read. */
@@ -176,18 +203,21 @@ int sn65dsi83_health_poll(const struct i2c_dt_spec   *i2c,
 			st->errors_cleared++;
 		}
 	} else if (rep->health == SN65_HEALTH_REINIT) {
-		int64_t now = k_uptime_get();
-
-		if (!sn65dsi83_reinit_allowed(st->have_last, st->last_reinit_ms, now)) {
+		if (!sn65dsi83_reinit_allowed(st->have_last, st->last_reinit_ms, now_ms)) {
 			rep->suppressed = true;
 			return 0;
 		}
 		st->have_last      = true;
-		st->last_reinit_ms = now;
+		st->last_reinit_ms = now_ms;
+		st->err_polls      = 0U;
 
-		/* The init again, from the table the boot-time init wrote.  The ID check
-		 * first: never write a CSR bank into something that is not the bridge. */
-		rep->err = sn65dsi83_check_id(i2c);
+		/* The init again, from the table the boot-time init wrote, from the state the
+		 * boot started in (PLL off).  The ID check first: never write a CSR bank into
+		 * something that is not the bridge. */
+		rep->err = i2c_reg_write_byte_dt(i2c, SN65_REG_PLL_EN, 0x00U);
+		if (rep->err == 0) {
+			rep->err = sn65dsi83_check_id(i2c);
+		}
 		if (rep->err == 0) {
 			rep->err = sn65dsi83_csr_write(i2c, csr, n);
 		}
@@ -196,10 +226,35 @@ int sn65dsi83_health_poll(const struct i2c_dt_spec   *i2c,
 		}
 		if (rep->err == 0) {
 			st->recoveries++;
+			st->after_recovery = true;
 		} else {
 			st->failures++;
+			/* Leave the bridge in the state the next pass recognises as lost, whatever
+			 * half-configured state the failed replay left it in. */
+			(void)i2c_reg_write_byte_dt(i2c, SN65_REG_PLL_EN, 0x00U);
 		}
 	}
 
 	return 0;
+}
+
+void sn65dsi83_report_print(const struct sn65dsi83_report *rep, const struct sn65dsi83_stats *st)
+{
+	if (rep->health == SN65_HEALTH_OK) {
+		return;
+	}
+	printk("sn65dsi83: %s (0x0D=0x%02x 0x0A=0x%02x 0xE5=0x%02x) err=%d recoveries=%u failures=%u "
+	       "cleared=%u
+	       ",
+	           rep->suppressed
+	           ? "down, re-init rate-limited"
+	       : rep->health == SN65_HEALTH_CLEAR_ERRORS ? "link errors cleared"
+	                                                 : "lost config, re-init",
+	       rep->pll_en,
+	       rep->clk_src,
+	       rep->err_stat,
+	       rep->err,
+	       st->recoveries,
+	       st->failures,
+	       st->errors_cleared);
 }

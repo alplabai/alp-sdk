@@ -36,6 +36,11 @@ extern "C" {
  * call is for.  Read it, do not assume a clean init means a clean link
  * forever.
  *
+ * With CONFIG_SN65DSI83_RECOVERY the driver's own health check also reads and
+ * clears this register (write-1-to-clear) once per interval, so a flag latched
+ * a moment ago may already be gone: this is a snapshot that races that check.
+ * sn65dsi83_recovery_count() is the reliable record.
+ *
  * @param dev The ti,sn65dsi83 device.
  * @param e5  Out: CSR 0xE5 as read (bit meaning: see the datasheet; the
  *            driver does not decode individual bits -- it has no error-
@@ -54,8 +59,8 @@ int sn65dsi83_read_errors(const struct device *dev, uint8_t *e5);
 /**
  * @brief Number of times the bridge lost its configuration and was re-initialised.
  *
- * With CONFIG_DISPLAY_SN65DSI83_RECOVERY the bridge is health-checked once per
- * CONFIG_DISPLAY_SN65DSI83_RECOVERY_INTERVAL_MS (CSR 0x0D PLL_EN, 0x0A PLL_EN_STAT and
+ * With CONFIG_SN65DSI83_RECOVERY the bridge is health-checked once per
+ * CONFIG_SN65DSI83_RECOVERY_INTERVAL_MS (CSR 0x0D PLL_EN, 0x0A PLL_EN_STAT and
  * HS_CLK_SRC, 0xE5); a bridge that reset itself to its defaults (ESD, supply glitch) gets
  * the init sequence replayed.  Where the I2C controller belongs to another core after
  * init (recovery-recipe-address in the devicetree node), that core does the check and

@@ -26,12 +26,3 @@
 &i2c1 {
 	status = "okay";
 };
-
-/* The HE gives I2C1 to the HP after the bridge is up, so it may not poll the bridge itself:
- * the driver publishes its CSR table here and the HP re-initialises a bridge that reset
- * itself (hp_vision's sn65dsi83_agent, the same address). 0x54 bytes in the shared NC page
- * 0x0237F000..0x0237FFFF, clear of the handover flag (0x0237FC94), hp_dbg, the camera view,
- * the I2C2 lease (0x0237FD40..0x0237FD70) and the volume word (0x0237FD80..0x0237FD90). */
-&bridge {
-	recovery-recipe-address = <0x0237FE00>;
-};

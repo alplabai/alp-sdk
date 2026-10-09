@@ -78,4 +78,4 @@ properties:
       table here and the core that owns the bus replays it when the bridge has
       reset itself to its defaults (an alp,sn65dsi83-recovery node on that core).
       Unset: this core keeps the bus and the driver polls the bridge on its own
-      (CONFIG_DISPLAY_SN65DSI83_RECOVERY).
+      (CONFIG_SN65DSI83_RECOVERY).

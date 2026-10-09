@@ -26,7 +26,7 @@
  * node and owns the framebuffer, layers and blanking.  This device exists
  * only to get itself into that transparent state at init -- and again, through
  * the same init sequence, if the bridge later resets itself to its defaults
- * (CONFIG_DISPLAY_SN65DSI83_RECOVERY, sn65dsi83_recovery.h) -- which is why
+ * (CONFIG_SN65DSI83_RECOVERY, sn65dsi83_recovery.h) -- which is why
  * `DEVICE_DT_INST_DEFINE()` below passes no display_driver_api.
  *
  * INIT ORDER (why this runs at CONFIG_APPLICATION_INIT_PRIORITY, matching
@@ -149,6 +149,22 @@ LOG_MODULE_REGISTER(sn65dsi83, CONFIG_DISPLAY_LOG_LEVEL);
  */
 BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(ti_sn65dsi83) <= 1,
              "display_sn65dsi83.c assumes a single ti,sn65dsi83 instance");
+
+/*
+ * A core that releases this bridge's I2C bus (alp,i2c-handover) may not touch the bridge
+ * afterwards, so its recovery has to run on the core that gets the bus: the recipe address
+ * says where this driver publishes the table that core replays.  A handover without it
+ * would leave the bridge unwatched.
+ */
+#define SN65_HANDOVER_NEEDS_RECIPE(node) \
+	BUILD_ASSERT(!(DT_ENUM_HAS_VALUE(node, role, release) && \
+	               COND_CODE_1(DT_NODE_HAS_PROP(node, bus), \
+	                           (DT_SAME_NODE(DT_PROP(node, bus), DT_INST_BUS(0))), \
+	                           (0))) || \
+	                 DT_INST_NODE_HAS_PROP(0, recovery_recipe_address), \
+	             "ti,sn65dsi83: an alp,i2c-handover release node hands this bridge's I2C bus to " \
+	             "another core, so recovery-recipe-address is required");
+DT_FOREACH_STATUS_OKAY(alp_i2c_handover, SN65_HANDOVER_NEEDS_RECIPE)
 
 /* CSR addresses (datasheet Tables 7-4..7-9). */
 #define SN65_REG_CLK_DIV 0x0BU /* DSI_CLK_DIVIDER[7:3], REFCLK_MULTIPLIER[1:0]. */
@@ -450,40 +466,10 @@ static const struct sn65dsi83_csr sn65dsi83_csr[] = {
 BUILD_ASSERT(ARRAY_SIZE(sn65dsi83_csr) <= SN65_RECIPE_MAX,
              "sn65dsi83: the CSR table no longer fits the shared recovery recipe");
 
-/* WRN with the register values on every action; silent while healthy. */
-static void sn65dsi83_log_report(const struct sn65dsi83_report *rep,
-                                 const struct sn65dsi83_stats  *st)
-{
-	if (rep->health == SN65_HEALTH_OK) {
-		return;
-	}
-	if (rep->suppressed) {
-		LOG_WRN("bridge still down, re-init rate-limited (0x0D=0x%02x 0x0A=0x%02x 0xE5=0x%02x)",
-		        rep->pll_en,
-		        rep->clk_src,
-		        rep->err_stat);
-	} else if (rep->health == SN65_HEALTH_CLEAR_ERRORS) {
-		LOG_WRN("link error flags cleared, PLL fine (0x0D=0x%02x 0x0A=0x%02x 0xE5=0x%02x) "
-		        "cleared=%u",
-		        rep->pll_en,
-		        rep->clk_src,
-		        rep->err_stat,
-		        st->errors_cleared);
-	} else {
-		LOG_WRN("bridge lost its config (0x0D=0x%02x 0x0A=0x%02x 0xE5=0x%02x): re-init %s (%d) "
-		        "recoveries=%u failures=%u",
-		        rep->pll_en,
-		        rep->clk_src,
-		        rep->err_stat,
-		        rep->err == 0 ? "ok" : "FAILED",
-		        rep->err,
-		        st->recoveries,
-		        st->failures);
-	}
-}
-
+#ifdef CONFIG_SN65DSI83_RECOVERY
 /* The bridge's health pass on the core that owns its I2C bus; serialised with every other
- * user of the bus by the I2C driver (one core, one driver instance). */
+ * user of the bus by the I2C driver (one core, one driver instance).  Reported with printk:
+ * the apps this runs in keep CONFIG_LOG off, so a LOG_WRN here would never be seen. */
 static void sn65dsi83_health_work(struct k_work *work)
 {
 	struct k_work_delayable       *dwork  = k_work_delayable_from_work(work);
@@ -491,13 +477,49 @@ static void sn65dsi83_health_work(struct k_work *work)
 	const struct sn65dsi83_config *config = DEVICE_DT_INST_GET(0)->config;
 	struct sn65dsi83_report        rep;
 
-	if (sn65dsi83_health_poll(
-	        &config->i2c, sn65dsi83_csr, ARRAY_SIZE(sn65dsi83_csr), &data->stats, &rep) == 0) {
-		sn65dsi83_log_report(&rep, &data->stats);
+	if (sn65dsi83_health_poll(&config->i2c,
+	                          sn65dsi83_csr,
+	                          ARRAY_SIZE(sn65dsi83_csr),
+	                          &data->stats,
+	                          &rep,
+	                          k_uptime_get()) == 0) {
+		sn65dsi83_report_print(&rep, &data->stats);
 	}
 
-	k_work_reschedule(dwork, K_MSEC(CONFIG_DISPLAY_SN65DSI83_RECOVERY_INTERVAL_MS));
+	k_work_reschedule(dwork, K_MSEC(CONFIG_SN65DSI83_RECOVERY_INTERVAL_MS));
 }
+
+/* Called as soon as the bridge has answered its ID check, BEFORE the CSR bank is written: a
+ * boot init that then fails half-way is recoverable by the same replay. */
+static void sn65dsi83_arm_recovery(const struct device *dev)
+{
+	const struct sn65dsi83_config *config = dev->config;
+
+	if (config->recipe != NULL) {
+		/* The bus goes to another core after this init (alp,i2c-handover): hand it
+		 * the table; it polls, this core never touches the bridge again. */
+		struct sn65dsi83_recipe *r = config->recipe;
+
+		for (size_t i = 0; i < ARRAY_SIZE(sn65dsi83_csr); i++) {
+			r->csr[i] = sn65dsi83_csr[i];
+		}
+		r->n = ARRAY_SIZE(sn65dsi83_csr);
+		barrier_dmem_fence_full();
+		r->magic = SN65_RECIPE_MAGIC;
+		barrier_dmem_fence_full();
+	} else {
+		struct sn65dsi83_data *data = dev->data;
+
+		k_work_init_delayable(&data->health_work, sn65dsi83_health_work);
+		k_work_schedule(&data->health_work, K_MSEC(CONFIG_SN65DSI83_RECOVERY_INTERVAL_MS));
+	}
+}
+#else
+static inline void sn65dsi83_arm_recovery(const struct device *dev)
+{
+	ARG_UNUSED(dev);
+}
+#endif /* CONFIG_SN65DSI83_RECOVERY */
 
 static int sn65dsi83_init(const struct device *dev)
 {
@@ -519,7 +541,11 @@ static int sn65dsi83_init(const struct device *dev)
 	}
 
 	if (config->recipe != NULL) {
-		config->recipe->magic = 0U; /* a recipe left in SRAM by a previous boot is not ours */
+		/* A recipe and counters left in SRAM by a previous boot are not ours. */
+		config->recipe->magic          = 0U;
+		config->recipe->recoveries     = 0U;
+		config->recipe->failures       = 0U;
+		config->recipe->errors_cleared = 0U;
 		barrier_dmem_fence_full();
 	}
 
@@ -582,6 +608,9 @@ static int sn65dsi83_init(const struct device *dev)
 		return ret;
 	}
 
+	/* From here a failure is recoverable by replaying the init: arm that first. */
+	sn65dsi83_arm_recovery(dev);
+
 	/* Step 6: program the CSR bank (datasheet init seq 5). */
 	ret = sn65dsi83_csr_write(&config->i2c, sn65dsi83_csr, ARRAY_SIZE(sn65dsi83_csr));
 	if (ret != 0) {
@@ -589,35 +618,7 @@ static int sn65dsi83_init(const struct device *dev)
 	}
 
 	/* Step 7: PLL_EN, poll lock, SOFT_RESET, clear errors (init seq 6-10). */
-	ret = sn65dsi83_pll_start(&config->i2c);
-	if (ret != 0) {
-		return ret;
-	}
-
-	if (!IS_ENABLED(CONFIG_DISPLAY_SN65DSI83_RECOVERY)) {
-		return 0;
-	}
-
-	if (config->recipe != NULL) {
-		/* The bus goes to another core after this init (alp,i2c-handover): hand it
-		 * the table; it polls, this core never touches the bridge again. */
-		struct sn65dsi83_recipe *r = config->recipe;
-
-		for (size_t i = 0; i < ARRAY_SIZE(sn65dsi83_csr); i++) {
-			r->csr[i] = sn65dsi83_csr[i];
-		}
-		r->n = ARRAY_SIZE(sn65dsi83_csr);
-		barrier_dmem_fence_full();
-		r->magic = SN65_RECIPE_MAGIC;
-		barrier_dmem_fence_full();
-	} else {
-		struct sn65dsi83_data *data = dev->data;
-
-		k_work_init_delayable(&data->health_work, sn65dsi83_health_work);
-		k_work_schedule(&data->health_work, K_MSEC(CONFIG_DISPLAY_SN65DSI83_RECOVERY_INTERVAL_MS));
-	}
-
-	return 0;
+	return sn65dsi83_pll_start(&config->i2c);
 }
 
 int sn65dsi83_read_errors(const struct device *dev, uint8_t *e5)

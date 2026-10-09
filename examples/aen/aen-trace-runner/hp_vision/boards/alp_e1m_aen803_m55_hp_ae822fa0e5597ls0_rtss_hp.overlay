@@ -125,7 +125,7 @@
  * to its defaults afterwards; the HE may not touch the bus any more, so this core, which owns
  * it, health-checks the bridge and replays the HE's published CSR table
  * (zephyr/drivers/display/sn65dsi83_recovery_agent.c). Idle when the HE published no recipe
- * (any other shield). recipe-address = the RVT121 fit overlay's recovery-recipe-address. */
+ * (any other shield). recipe-address = shield-fit-npu/e1m_evk_rvt121hvdfwca0.overlay's recovery-recipe-address, tr_memmap.h TR_MEM_SN65_RECIPE. */
 &i2c1 {
 	sn65dsi83_agent: sn65dsi83-agent@2c {
 		compatible = "alp,sn65dsi83-recovery";

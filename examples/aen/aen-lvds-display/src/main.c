@@ -62,6 +62,14 @@
  * clock lane and the CDC begins scanning out, which init cannot see because
  * it runs before either of those things happens.
  *
+ * SELF-RECOVERY (CONFIG_SN65DSI83_RECOVERY, default y): the driver also
+ * health-checks the bridge once a second and clears the latched error flags
+ * itself (and replays its init if the bridge reset to its defaults).  The
+ * 0xE5 read below therefore RACES that check: a flag the driver already
+ * cleared reads 0 here.  Treat it as a snapshot; the reliable record is
+ * sn65dsi83_recovery_count(), printed next, and the driver's own "sn65dsi83:"
+ * printk lines (printk, not LOG: this app keeps CONFIG_LOG off).
+ *
  * PANEL POWER / EN SEQUENCING: unlike aen-dsi-display's HX8394 panel driver
  * (reset pulse, then DCS init), this bridge's own driver owns the entire
  * power-up: EN low, attach + clock-lane HS, EN high, ID check, CSR program,
@@ -295,6 +303,11 @@ int main(void)
 		       (rc == 0 && err_status != 0U) ? " -- NONZERO, see the datasheet's "
 		                                       "IRQ/error table for the bit meaning"
 		                                     : "");
+	}
+
+	if (bridge_ok) {
+		printk("sn65dsi83 recoveries since boot: %u
+", sn65dsi83_recovery_count(bridge));
 	}
 
 	/* Touch is reported, not gated: a dead touch controller must not hide a

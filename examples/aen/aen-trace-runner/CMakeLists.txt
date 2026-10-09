@@ -89,6 +89,10 @@ foreach(shield IN LISTS SHIELD)
 	if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/shield-fit/${shield}.overlay)
 		list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/shield-fit/${shield}.overlay)
 	endif()
+	# The shield's bridge recovery recipe, only where the HE hands I2C1 to the HP (TR_INPUT_NPU).
+	if(TR_INPUT_NPU AND EXISTS ${CMAKE_CURRENT_LIST_DIR}/shield-fit-npu/${shield}.overlay)
+		list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/shield-fit-npu/${shield}.overlay)
+	endif()
 endforeach()
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})

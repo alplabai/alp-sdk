@@ -15,7 +15,7 @@
  * Silent until the recipe's magic is set: an image whose display is not behind a bridge
  * never publishes one.  Writes only after the bridge's ID registers read back
  * (sn65dsi83_health_poll()), so a stale recipe from a previous boot with another panel
- * cannot write a CSR bank into anything else on the bus.  The console is printk: the
+ * cannot write a CSR bank into anything else on the bus.  The report is printk: the
  * images this runs in turn the logging subsystem off.
  */
 
@@ -42,6 +42,12 @@ struct sn65dsi83_agent_data {
 	struct sn65dsi83_stats  stats;
 };
 
+/* Its own low-priority queue: a replay sleeps ~40 ms and must not hold up the system work queue
+ * (or anything above the camera and the game) for that long. */
+#define SN65_AGENT_STACK_SIZE 2048
+K_THREAD_STACK_DEFINE(sn65dsi83_agent_stack, SN65_AGENT_STACK_SIZE);
+static struct k_work_q sn65dsi83_agent_q;
+
 static void sn65dsi83_agent_work(struct k_work *work)
 {
 	struct k_work_delayable     *dwork = k_work_delayable_from_work(work);
@@ -51,7 +57,7 @@ static void sn65dsi83_agent_work(struct k_work *work)
 	struct sn65dsi83_recipe             *r      = config->recipe;
 	struct sn65dsi83_csr                 csr[SN65_RECIPE_MAX];
 	struct sn65dsi83_report              rep;
-	uint8_t                              n;
+	uint8_t                              n = 0U;
 
 	if (r->magic == SN65_RECIPE_MAGIC) {
 		barrier_dmem_fence_full();
@@ -60,39 +66,47 @@ static void sn65dsi83_agent_work(struct k_work *work)
 			for (uint8_t i = 0; i < n; i++) {
 				csr[i] = r->csr[i];
 			}
-			if (sn65dsi83_health_poll(&config->i2c, csr, n, &data->stats, &rep) == 0 &&
-			    rep.health != SN65_HEALTH_OK) {
-				printk("sn65dsi83: %s (0x0D=0x%02x 0x0A=0x%02x 0xE5=0x%02x) err=%d "
-				       "recoveries=%u failures=%u cleared=%u\n",
-				       rep.suppressed                           ? "down, re-init rate-limited"
-				       : rep.health == SN65_HEALTH_CLEAR_ERRORS ? "link errors cleared"
-				                                                : "lost config, re-init",
-				       rep.pll_en,
-				       rep.clk_src,
-				       rep.err_stat,
-				       rep.err,
-				       data->stats.recoveries,
-				       data->stats.failures,
-				       data->stats.errors_cleared);
-			}
-			/* The display core reads these through sn65dsi83_recovery_count(). */
-			r->recoveries     = data->stats.recoveries;
-			r->failures       = data->stats.failures;
-			r->errors_cleared = data->stats.errors_cleared;
+		} else {
+			n = 0U;
+		}
+		barrier_dmem_fence_full();
+		/* The display core clears the magic before it rewrites the recipe: a copy that
+		 * overlapped a rewrite is dropped. */
+		if (r->magic != SN65_RECIPE_MAGIC) {
+			n = 0U;
 		}
 	}
 
-	k_work_reschedule(dwork, K_MSEC(CONFIG_DISPLAY_SN65DSI83_RECOVERY_INTERVAL_MS));
+	if (n > 0U) {
+		if (sn65dsi83_health_poll(&config->i2c, csr, n, &data->stats, &rep, k_uptime_get()) == 0) {
+			sn65dsi83_report_print(&rep, &data->stats);
+		}
+		/* The display core reads these through sn65dsi83_recovery_count(). */
+		r->recoveries     = data->stats.recoveries;
+		r->failures       = data->stats.failures;
+		r->errors_cleared = data->stats.errors_cleared;
+	}
+
+	k_work_reschedule_for_queue(
+	    &sn65dsi83_agent_q, dwork, K_MSEC(CONFIG_SN65DSI83_RECOVERY_INTERVAL_MS));
 }
 
 static int sn65dsi83_agent_init(const struct device *dev)
 {
 	struct sn65dsi83_agent_data *data = dev->data;
 
+	k_work_queue_init(&sn65dsi83_agent_q);
+	k_work_queue_start(&sn65dsi83_agent_q,
+	                   sn65dsi83_agent_stack,
+	                   K_THREAD_STACK_SIZEOF(sn65dsi83_agent_stack),
+	                   K_LOWEST_APPLICATION_THREAD_PRIO,
+	                   NULL);
+	k_thread_name_set(&sn65dsi83_agent_q.thread, "sn65dsi83");
+
 	/* Late enough that the display core published its recipe before it released the bus
 	 * (the bus is ours only after that), and the camera has had its first transfers. */
 	k_work_init_delayable(&data->health_work, sn65dsi83_agent_work);
-	k_work_schedule(&data->health_work, K_SECONDS(5));
+	k_work_schedule_for_queue(&sn65dsi83_agent_q, &data->health_work, K_SECONDS(5));
 	return 0;
 }
 

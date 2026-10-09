@@ -121,6 +121,25 @@
                                        * a different bus, a different protocol) and of hp_dbg; ends at
                                        * 0x0237FD70, still inside the shared NC page (0x0237F000..0x0237FFFF).
                                        * tr_bus2.h asserts all of that. */
+#define TR_MEM_SN65_RECIPE \
+	0x0237FE00u /* HE -> HP: the SN65DSI83 bridge's CSR table (struct sn65dsi83_recipe, zephyr/drivers/
+                                       * display/sn65dsi83_recovery.h, 0x54 B, the RVT121 + TR_INPUT_NPU builds). The HE's
+                                       * bridge driver publishes it before it hands I2C1 over; the HP's
+                                       * alp,sn65dsi83-recovery node replays it if the bridge resets itself. Both overlays
+                                       * (shield-fit-npu/e1m_evk_rvt121hvdfwca0.overlay, hp_vision's board overlay) carry this
+                                       * as recovery-recipe-address / recipe-address, asserted against it in src/main.c and
+                                       * hp_vision/src/main.c. 32-B aligned, past the lease record (0x0237FD70). */
+#define TR_MEM_SN65_RECIPE_SIZE \
+	0x54u /* sizeof(struct sn65dsi83_recipe), asserted in the SDK header */
+_Static_assert(TR_MEM_SN65_RECIPE % 32u == 0u, "the recipe is 32-B aligned");
+_Static_assert(TR_MEM_SN65_RECIPE >= TR_MEM_BUS2 + 48u,
+               "the recipe is clear of the I2C2 lease record");
+_Static_assert(TR_MEM_SN65_RECIPE >= TR_MEM_CAM_VIEW + 0x20u &&
+                   TR_MEM_SN65_RECIPE >= TR_MEM_HP_DBG + 0x68u,
+               "the recipe is clear of the camera view and hp_dbg");
+_Static_assert(TR_MEM_SN65_RECIPE >= 0x0237F000u &&
+                   TR_MEM_SN65_RECIPE + TR_MEM_SN65_RECIPE_SIZE <= 0x02380000u,
+               "the recipe sits inside the shared NC page 0x0237F000..0x0237FFFF");
 /* SRAM1 */
 #define TR_MEM_CAM_POOL \
 	0x02480000u /* HP: OV9281 camera frame pool (design sec 2), 2 x 256,000 B GREY8;
