@@ -332,53 +332,83 @@ _Static_assert(INV_Y + INV_PANEL_H <= TR_HUD_H, "the invitation panels stay in t
  * of this is compiled). Always on, every screen, on a plate in the HUD's own card style (panel(),
  * C_PANEL / A_PANEL) down the left edge: top-aligned with the power tile (PWR_Y, which it mirrors on
  * the right) and left-aligned with the BEST / logo cards (SCORE_X), the logo centred in it. The plate
- * ends above INV_Y, clear of the name / invitation panels. It is drawn last, so on the crash,
- * initials and high-score screens, whose cards start at x 110, it overlaps their left edge rather than
- * being cut. It sits in T_MIDL; no tile key mentions it, so it is composed into that tile only when it
- * repaints for its own reasons. Plate and logo are the same pixels on every screen (test_hud.c). */
-#define PARTNER_PAD   TR_HUD_PARTNER_PAD
-#define PARTNER_BOX_W 140 /* the largest logo: tools/genlogo.py's default --box */
-#define PARTNER_BOX_H 51
-#define PARTNER_X     SCORE_X
-#define PARTNER_Y 170 /* == PWR_Y, the power tile's top (checked below, once PWR_Y is defined) */
-#define PARTNER_W (TR_PARTNER_LOGO_W + 2 * PARTNER_PAD)
-#define PARTNER_H (TR_PARTNER_LOGO_H + 2 * PARTNER_PAD)
+ * ends above INV_Y, clear of the name / invitation panels.
+ *
+ * Two sizes. The full one (play, attract: nothing of theirs reaches x 280) runs to x 238. The crash,
+ * banner, initials and attract high-score screens put text further left (the banner's "STEP BACK
+ * INTO VIEW" starts at x 150, the others at x 187 ..), so they get the compact one, which ends at
+ * x 146; the plate is drawn last, so it overlaps those cards' backing, never their text (test_hud.c
+ * checks the text, screen by screen). The plate spans T_MIDL and T_POP; no tile key mentions it --
+ * the keys already change with the mode and the table page, which is all the size depends on -- so
+ * it is composed into them only when they repaint for their own reasons. */
+#define PARTNER_PAD TR_HUD_PARTNER_PAD
+#define PARTNER_X   SCORE_X
+#define PARTNER_Y   170 /* == PWR_Y, the power tile's top (checked below, once PWR_Y is defined) */
+#define PARTNER_BOX_W       210 /* the largest full logo: tools/genlogo.py's default --box */
+#define PARTNER_BOX_H       77
+#define PARTNER_SMALL_BOX_W 118 /* ... and compact: --small-box */
+#define PARTNER_SMALL_BOX_H 43
+#define PARTNER_TEXT_X      150 /* the leftmost text of any compact screen (the banner's) */
 _Static_assert(TR_PARTNER_LOGO_W <= PARTNER_BOX_W && TR_PARTNER_LOGO_H <= PARTNER_BOX_H,
                "the partner logo is larger than its plate allows (tools/genlogo.py --box)");
-_Static_assert(PARTNER_Y >= STRIP_END && PARTNER_Y + PARTNER_H <= INV_Y,
+_Static_assert(TR_PARTNER_LOGO_S_W <= PARTNER_SMALL_BOX_W &&
+                   TR_PARTNER_LOGO_S_H <= PARTNER_SMALL_BOX_H,
+               "the compact partner logo is larger than its plate allows (--small-box)");
+_Static_assert(PARTNER_X + TR_PARTNER_LOGO_S_W + 2 * PARTNER_PAD + 4 <= PARTNER_TEXT_X,
+               "the compact partner plate reaches the banner's text");
+_Static_assert(PARTNER_Y >= STRIP_END && PARTNER_Y + TR_PARTNER_LOGO_H + 2 * PARTNER_PAD <= INV_Y,
                "the partner plate stays between the tagline strip and the name / invitation row");
-_Static_assert(PARTNER_X + PARTNER_W <= 220 && PARTNER_Y >= CARD_Y,
-               "the partner plate stays inside the T_MIDL tile");
+_Static_assert(PARTNER_X + TR_PARTNER_LOGO_W + 2 * PARTNER_PAD <= 500 && PARTNER_Y >= CARD_Y,
+               "the partner plate stays inside the card's left tiles (T_MIDL, T_POP)");
 
-bool tr_hud_partner_logo_rect(int *x, int *y, int *w, int *h)
+static bool table_page(const tr_hud_view_t *v, uint32_t frame); /* below */
+
+/* The compact plate: the screens with text near the left edge. Depends on the mode and the table page
+ * only, both of which the middle tiles' keys already carry. */
+static bool partner_compact(const tr_hud_view_t *v, uint32_t frame)
+{
+	return v->mode == TR_HUD_CRASH || v->mode == TR_HUD_BANNER || v->mode == TR_HUD_INITIALS ||
+	       (v->mode == TR_HUD_ATTRACT && table_page(v, frame));
+}
+
+bool tr_hud_partner_logo_rect(bool compact, int *x, int *y, int *w, int *h)
 {
 	*x = PARTNER_X;
 	*y = PARTNER_Y;
-	*w = PARTNER_W;
-	*h = PARTNER_H;
+	*w = (compact ? TR_PARTNER_LOGO_S_W : TR_PARTNER_LOGO_W) + 2 * PARTNER_PAD;
+	*h = (compact ? TR_PARTNER_LOGO_S_H : TR_PARTNER_LOGO_H) + 2 * PARTNER_PAD;
 	return true;
 }
 
-static void paint_partner_logo(const canvas_t *cv)
+bool tr_hud_partner_logo_compact(const tr_hud_view_t *v, uint32_t frame)
 {
-	int lx = PARTNER_X + PARTNER_PAD, ly = PARTNER_Y + PARTNER_PAD;
-	int y0 = ly > cv->y ? ly : cv->y;
-	int y1 = ly + TR_PARTNER_LOGO_H < cv->y + cv->h ? ly + TR_PARTNER_LOGO_H : cv->y + cv->h;
-	int x0 = lx > cv->x ? lx : cv->x;
-	int x1 = lx + TR_PARTNER_LOGO_W < cv->x + cv->w ? lx + TR_PARTNER_LOGO_W : cv->x + cv->w;
+	return partner_compact(v, frame);
+}
 
-	panel(cv, PARTNER_X, PARTNER_Y, PARTNER_W, PARTNER_H, C_PANEL, A_PANEL);
+static void paint_partner_logo(const canvas_t *cv, bool compact)
+{
+	const uint8_t  *idx = compact ? tr_partner_logo_s : tr_partner_logo;
+	const uint16_t *pal = compact ? tr_partner_logo_s_pal : tr_partner_logo_pal;
+	int             lw  = compact ? TR_PARTNER_LOGO_S_W : TR_PARTNER_LOGO_W;
+	int             lh  = compact ? TR_PARTNER_LOGO_S_H : TR_PARTNER_LOGO_H;
+	int             lx = PARTNER_X + PARTNER_PAD, ly = PARTNER_Y + PARTNER_PAD;
+	int             y0 = ly > cv->y ? ly : cv->y;
+	int             y1 = ly + lh < cv->y + cv->h ? ly + lh : cv->y + cv->h;
+	int             x0 = lx > cv->x ? lx : cv->x;
+	int             x1 = lx + lw < cv->x + cv->w ? lx + lw : cv->x + cv->w;
+
+	panel(cv, PARTNER_X, PARTNER_Y, lw + 2 * PARTNER_PAD, lh + 2 * PARTNER_PAD, C_PANEL, A_PANEL);
 	for (int y = y0; y < y1; y++) {
-		const uint16_t *s = &tr_partner_logo[(y - ly) * TR_PARTNER_LOGO_W - lx];
-		uint16_t       *d = cv->px + (y - cv->y) * cv->w - cv->x;
+		const uint8_t *s = &idx[(y - ly) * lw - lx];
+		uint16_t      *d = cv->px + (y - cv->y) * cv->w - cv->x;
 
 		for (int x = x0; x < x1; x++) {
-			uint32_t a = s[x] >> 12;
+			uint32_t c = pal[s[x]], a = c >> 12;
 
 			if (a == 15u) {
-				d[x] = s[x];
+				d[x] = (uint16_t)c;
 			} else if (a != 0u) {
-				blend(&d[x], s[x] & 0xFFFu, a);
+				blend(&d[x], c & 0xFFFu, a);
 			}
 		}
 	}
@@ -899,7 +929,7 @@ static void paint(const canvas_t      *cv,
 		break;
 	}
 #ifdef TR_PARTNER_LOGO_HEADER
-	paint_partner_logo(cv); /* last: the plate stays whole over any card that reaches it */
+	paint_partner_logo(cv, partner_compact(v, frame)); /* last: whole, over any card's backing */
 #endif
 }
 

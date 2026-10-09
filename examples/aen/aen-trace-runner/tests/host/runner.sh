@@ -75,26 +75,31 @@ for t in test_panel_hz test_step test_pace test_tilt test_tilt_takeover test_att
 	fi
 done
 # The optional partner logo (hud.c TR_PARTNER_LOGO_HEADER, tools/genlogo.py): test_hud.c's logo section
-# and the rotated-HUD test against a SYNTHETIC logo at the largest size the HUD accepts (140 x 51; an
+# and the rotated-HUD test against a SYNTHETIC logo at the largest sizes the HUD accepts (210 x 77 and 118 x 43; an
 # opaque frame, half-alpha stripes, clear gaps -- every alpha class). No real partner artwork is in
 # this repo; the default build above runs the same tests with no logo (nothing drawn).
 logo_h="$RUN_TMP/synthetic_partner_logo.h"
-awk 'BEGIN {
-	w = 140; h = 51
-	print "#define TR_PARTNER_LOGO_W " w
-	print "#define TR_PARTNER_LOGO_H " h
-	print "static const uint16_t tr_partner_logo[TR_PARTNER_LOGO_W * TR_PARTNER_LOGO_H] = {"
+awk 'function size(pre, name, w, h,    x, y, v) {
+	print "#define TR_PARTNER_LOGO" pre "_W " w
+	print "#define TR_PARTNER_LOGO" pre "_H " h
+	print "static const uint16_t " name "_pal[4] = { 0x0000, 0xFFFF, 0x8F63, 0x3ABC };"
+	print "static const uint8_t " name "[TR_PARTNER_LOGO" pre "_W * TR_PARTNER_LOGO" pre "_H] = {"
 	for (y = 0; y < h; y++) {
 		for (x = 0; x < w; x++) {
-			if (x == 0 || y == 0 || x == w - 1 || y == h - 1) v = 65535
-			else if ((x + y) % 8 < 3) v = 36707
-			else if ((x + y) % 8 == 3) v = 14014
+			if (x == 0 || y == 0 || x == w - 1 || y == h - 1) v = 1
+			else if ((x + y) % 8 < 3) v = 2
+			else if ((x + y) % 8 == 3) v = 3
 			else v = 0
-			printf "0x%04X,", v
+			printf "%d,", v
 		}
-		printf "\n"
+		print ""
 	}
 	print "};"
+	print "#define TR_PARTNER_LOGO" pre "_PX(i) (" name "_pal[" name "[i]])"
+}
+BEGIN {
+	size("", "tr_partner_logo", 210, 77)
+	size("_S", "tr_partner_logo_s", 118, 43)
 }' >"$logo_h"
 for t in test_hud test_hud_rot; do
 	out="$RUN_TMP/tr-$t-logo"

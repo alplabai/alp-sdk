@@ -23,6 +23,13 @@ static uint16_t fb[TR_HUD_W * TR_HUD_H], ref[TR_HUD_W * TR_HUD_H];
 #define MIDDLE    (1u << 3 | 1u << 4 | 1u << 5 | 1u << 6) /* hud.c T_MIDL, T_POP, T_MIDR, T_STRIP */
 #define T_PWR_BIT (1u << 7)                               /* hud.c T_PWR: the power graph */
 #define T_INV_BIT (1u << 8)                               /* hud.c T_INV */
+#ifdef TR_PARTNER_LOGO_HEADER
+/* The partner plate owns the road's left edge (x 16 .. 238, y 170 .. 259): the see-through checks
+ * below start right of it. */
+#define CLEAR_X(x) ((x) < 240 ? 240 : (x))
+#else
+#define CLEAR_X(x) (x)
+#endif
 
 static uint64_t now_ns(void)
 {
@@ -311,7 +318,7 @@ int main(void)
 	assert(tr_hud_update(&h, fb, &v, &dirty) == 0u && dirty == 0u);
 	/* Play: the score block is drawn, the centre stays see-through. */
 	assert(alpha_px(fb, 0, 0, 360, 150) > 2000u);
-	assert(alpha_px(fb, 200, 180, 520, 340) == 0u);
+	assert(alpha_px(fb, CLEAR_X(200), 180, 520, 340) == 0u);
 
 	view_play(&v, 555u, 0u); /* under BEST (777): only the score tile moves */
 	px = tr_hud_update(&h, fb, &v, &dirty);
@@ -353,7 +360,7 @@ int main(void)
 		}
 		prev = age;
 	}
-	assert(alpha_px(fb, 200, 180, 520, 298) == 0u);
+	assert(alpha_px(fb, CLEAR_X(200), 180, 520, 298) == 0u);
 
 	/* 6b. A zone entry (P15): its name shows in the row under the centre for
 	 * TR_HUD_ZONE_FRAMES of the 40 Hz clock, only that row's tile repaints,
@@ -817,12 +824,8 @@ int main(void)
 			 * the half layout's road and runner stay clear (polish round:
 			 * the old card covered rows 140..348 edge to edge). */
 			assert(v.mode == TR_HUD_ATTRACT && alpha_px(fb, 16, 74, 388, 138) > 20000u);
-#ifdef TR_PARTNER_LOGO_HEADER
-			assert(alpha_px(fb, 170, 172, 610, 298) == 0u); /* the partner plate owns x < 170 */
-#else
-			assert(alpha_px(fb, 20, 172, 610, 298) ==
+			assert(alpha_px(fb, CLEAR_X(20), 172, 610, 298) ==
 			       0u); /* left of the power panel (x 612..712) */
-#endif
 		}
 	}
 	uint64_t dt = now_ns() - t0;
@@ -850,13 +853,89 @@ int main(void)
 		assert(memcmp(fb, ref, sizeof(fb)) == 0);
 	}
 
-#ifdef TR_PARTNER_LOGO_HEADER
-	/* 9. The optional partner logo (TR_PARTNER_LOGO_HEADER; runner.sh builds this test against a
-	 * SYNTHETIC header): its card-style plate down the left edge, in bounds, in one tile, clear of
-	 * the name / invitation row, the same pixels on every screen, and free per frame. */
+#ifndef TR_PARTNER_LOGO_HEADER
+	/* 9. The partner logo's room (hud.c PARTNER_*, measured WITHOUT the logo built in): on every
+	 * screen the HUD paints nothing opaque (alpha 15: text, bars) in the logo plate's rows
+	 * (y 170 .. 259) left of x 242 on the screens that get the full plate (play, attract), nor left of
+	 * x 150 on the ones that get the compact plate (crash, banner, initials, the high-score page: text
+	 * nearer the edge). Card backing (alpha < 15) may sit under the plate. A screen that moves its text
+	 * left breaks this, and the logo build with it. */
 	{
-		static uint16_t      refp[TR_HUD_W * TR_HUD_H];
-		int                  lx, ly, lw, lh, screens = 0;
+		tr_hiscore_t  hs;
+		tr_initials_t ini;
+		tr_score_t    ps;
+		int           min_full = 999, min_compact = 999;
+
+		tr_hs_init(&hs);
+		for (int i = 0; i < 5; i++) {
+			(void)tr_hs_insert(&hs, 9999999u - (uint32_t)i * 1000u, "WWW");
+		}
+		memset(&ini, 0, sizeof(ini));
+		strcpy(ini.name, "WWW");
+		tr_score_init(&ps);
+		ps.score      = 9999999u;
+		ps.metres     = 999999u;
+		ps.best       = 9999999u;
+		ps.combo      = 9u;
+		ps.popup_pts  = 500u;
+		ps.popup_mult = 5u;
+		ps.new_best   = 1u;
+		for (int mode = 0; mode < 7; mode++) {
+			for (int inv = 0; inv < 3; inv++) {
+				for (int ch = 0; ch < 4; ch++) {
+					for (int page = 0; page < 2; page++) {
+						static const uint8_t ban[7] = { TR_BANNER_NONE,      TR_BANNER_ATTRACT,
+							                            TR_BANNER_GAME_OVER, TR_BANNER_STEP_BACK,
+							                            TR_BANNER_STAND,     TR_BANNER_CHECK_CAMERA,
+							                            TR_BANNER_NONE };
+						tr_hud_view_t        pv;
+						uint32_t             fr = page ? TR_HUD_PAGE_FRAMES : 10u;
+						bool                 compact;
+
+						tr_hud_view_set(&pv, &ps, ban[mode], mode == 1, (uint8_t)inv);
+						tr_hud_view_booth(&pv, &hs, NULL);
+						if (mode == 6) { /* the initials entry rides on a play view */
+							tr_hud_view_set(&pv, &ps, TR_BANNER_NONE, false, TR_HUD_INVITE_NONE);
+							pv.mode = TR_HUD_INITIALS;
+							tr_hud_view_booth(&pv, &hs, &ini);
+						}
+						pv.character = (uint8_t)ch;
+						tr_hud_view_zone(&pv, 3u, 1u);
+						for (int l = 0; l < TR_PERF_LINES; l++) {
+							memset(pv.perf[l], 'W', 30);
+						}
+						tr_hud_paint_all(fb, &pv, fr, fr - 5u, fr - 20u);
+						compact = pv.mode == TR_HUD_CRASH || pv.mode == TR_HUD_BANNER ||
+						          pv.mode == TR_HUD_INITIALS || (pv.mode == TR_HUD_ATTRACT && page);
+						for (int y = 170; y < 260; y++) {
+							for (int x = 118; x < TR_HUD_W; x++) {
+								if ((fb[y * TR_HUD_W + x] >> 12) == 15u) {
+									int *m = compact ? &min_compact : &min_full;
+
+									*m = x < *m ? x : *m;
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		/* hud.c: full plate ends x 238 (+ 4 clear), compact x 146 (+ 4) */
+		assert(min_full >= 242 && min_compact >= 150);
+		printf("hud: partner room: opaque content from x %d (play, attract), x %d (the rest)\n",
+		       min_full,
+		       min_compact);
+	}
+#endif
+#ifdef TR_PARTNER_LOGO_HEADER
+	/* 10. The optional partner logo (TR_PARTNER_LOGO_HEADER; runner.sh builds this test against a
+	 * SYNTHETIC header): its card-style plate down the left edge, in two sizes, in bounds, in the
+	 * card's left tiles, clear of the name / invitation row, the same pixels whenever the same size
+	 * shows, free per frame. Section 9 (default build) proves the text stays clear of both sizes. */
+	{
+		static uint16_t      refp[2][TR_HUD_W * TR_HUD_H];
+		int                  px_[2], py_[2], pw_[2], ph_[2], screens = 0;
 		tr_hud_t             hl;
 		tr_hud_view_t        vl;
 		tr_score_t           ls;
@@ -869,39 +948,61 @@ int main(void)
 			                            TR_BANNER_STEP_BACK,
 			                            TR_BANNER_NONE };
 
-		assert(tr_hud_partner_logo_rect(&lx, &ly, &lw, &lh));
-		assert(lw == TR_PARTNER_LOGO_W + 2 * TR_HUD_PARTNER_PAD &&
-		       lh == TR_PARTNER_LOGO_H + 2 * TR_HUD_PARTNER_PAD);
-		assert(TR_PARTNER_LOGO_W <= 140 && TR_PARTNER_LOGO_H <= 51); /* the plate's largest logo */
-		assert(lx >= 0 && ly >= 0 && lx + lw <= TR_HUD_W && ly + lh <= TR_HUD_H);
-		/* mirrors the power tile (hud.c PWR_Y 170) down the left edge, level with the BEST / logo
-		 * cards (SCORE_X 16), under the tagline strip (to 168) and above the name / invitation
-		 * row (INV_Y 300), inside the card's left middle tile (hud.c T_MIDL: 0..220 x 140..300):
-		 * only a repaint of that tile ever touches it, and the tile's cost is what it was */
-		assert(lx == 16 && ly == 170 && ly >= 168 && ly + lh <= 300 && lx + lw <= 220);
-		assert(220 * (300 - 140) <= 110000); /* hud_l2.c HUD_PX_BUDGET: the tile fits a frame */
+		for (int c = 0; c < 2; c++) {
+			assert(tr_hud_partner_logo_rect(c != 0, &px_[c], &py_[c], &pw_[c], &ph_[c]));
+			assert(px_[c] >= 0 && py_[c] >= 0 && px_[c] + pw_[c] <= TR_HUD_W &&
+			       py_[c] + ph_[c] <= TR_HUD_H);
+			/* mirrors the power tile (hud.c PWR_Y 170) down the left edge, level with the BEST /
+			 * logo cards (SCORE_X 16), under the tagline strip (to 168) and above the name /
+			 * invitation row (INV_Y 300), inside the card's left middle tiles (hud.c T_MIDL 0..220
+			 * and T_POP 220..500, rows 140..300): only a repaint of those ever touches it */
+			assert(px_[c] == 16 && py_[c] == 170 && py_[c] >= 168 && py_[c] + ph_[c] <= 300 &&
+			       px_[c] + pw_[c] <= 500);
+		}
+		assert(pw_[0] == TR_PARTNER_LOGO_W + 2 * TR_HUD_PARTNER_PAD &&
+		       ph_[0] == TR_PARTNER_LOGO_H + 2 * TR_HUD_PARTNER_PAD);
+		assert(pw_[1] == TR_PARTNER_LOGO_S_W + 2 * TR_HUD_PARTNER_PAD &&
+		       ph_[1] == TR_PARTNER_LOGO_S_H + 2 * TR_HUD_PARTNER_PAD);
+		assert(TR_PARTNER_LOGO_W <= 210 &&
+		       TR_PARTNER_LOGO_H <= 77); /* the largest logos hud.c takes */
+		assert(TR_PARTNER_LOGO_S_W <= 118 && TR_PARTNER_LOGO_S_H <= 43);
+		assert(px_[0] + pw_[0] <= 238 && px_[1] + pw_[1] <= 146); /* section 9's clearances */
+		assert(px_[0] + pw_[0] > 220); /* the full plate spans T_MIDL + T_POP */
+		assert((220 + 280) * (300 - 140) <=
+		       110000); /* hud_l2.c HUD_PX_BUDGET: both tiles together fit a frame */
 
-		memset(
-		    &vl, 0, sizeof(vl)); /* no stale fields: a clean view, whatever the build adds to it */
 		tr_hs_init(&hs);
 		(void)tr_hs_insert(&hs, 9999999u, "ZZZ");
 		(void)tr_hs_insert(&hs, 1234u, "AAA");
 		memset(&ini, 0, sizeof(ini));
 		strcpy(ini.name, "WWW");
+		memset(&vl, 0, sizeof(vl));
 		tr_score_init(&ls);
+		/* the references: the full plate on a play screen, the compact one on a crash screen */
 		tr_hud_view_set(&vl, &ls, TR_BANNER_NONE, false, TR_HUD_INVITE_NONE);
-		tr_hud_paint_all(refp, &vl, 10u, 0u - 100u, 0u - 200u);
-		/* the reference plate: the HUD's card pixel in the padding, the logo's own pixels where it
-		 * is opaque, and the card showing through where it is clear */
-		assert(refp[(ly + 2) * TR_HUD_W + lx + lw / 2] == (uint16_t)(10u << 12 | 0x013u));
-		for (int y = 0; y < TR_PARTNER_LOGO_H; y++) {
-			for (int x = 0; x < TR_PARTNER_LOGO_W; x++) {
-				uint16_t g = tr_partner_logo[y * TR_PARTNER_LOGO_W + x];
-				uint16_t o =
-				    refp[(ly + TR_HUD_PARTNER_PAD + y) * TR_HUD_W + lx + TR_HUD_PARTNER_PAD + x];
+		assert(!tr_hud_partner_logo_compact(&vl, 10u));
+		tr_hud_paint_all(refp[0], &vl, 10u, 0u - 100u, 0u - 200u);
+		tr_hud_view_set(&vl, &ls, TR_BANNER_GAME_OVER, false, TR_HUD_INVITE_NONE);
+		assert(tr_hud_partner_logo_compact(&vl, 10u));
+		tr_hud_paint_all(refp[1], &vl, 10u, 0u - 100u, 0u - 200u);
+		for (int c = 0; c < 2; c++) {
+			int lw = c ? TR_PARTNER_LOGO_S_W : TR_PARTNER_LOGO_W,
+			    lh = c ? TR_PARTNER_LOGO_S_H : TR_PARTNER_LOGO_H;
 
-				assert(g >> 12 != 15u || o == g);
-				assert(g >> 12 != 0u || o == (uint16_t)(10u << 12 | 0x013u));
+			/* the HUD's card pixel in the padding, the logo's own pixels where it is opaque, the
+			 * card showing through where it is clear */
+			assert(refp[c][(py_[c] + 2) * TR_HUD_W + px_[c] + pw_[c] / 2] ==
+			       (uint16_t)(10u << 12 | 0x013u));
+			for (int y = 0; y < lh; y++) {
+				for (int x = 0; x < lw; x++) {
+					uint16_t g =
+					    c ? TR_PARTNER_LOGO_S_PX(y * lw + x) : TR_PARTNER_LOGO_PX(y * lw + x);
+					uint16_t o = refp[c][(py_[c] + TR_HUD_PARTNER_PAD + y) * TR_HUD_W + px_[c] +
+					                     TR_HUD_PARTNER_PAD + x];
+
+					assert(g >> 12 != 15u || o == g);
+					assert(g >> 12 != 0u || o == (uint16_t)(10u << 12 | 0x013u));
+				}
 			}
 		}
 		ls.score      = 9999999u;
@@ -912,14 +1013,16 @@ int main(void)
 		ls.popup_mult = 5u;
 		ls.new_best   = 1u;
 		/* Every screen x invitation x character x popup/zone x table page, widest numbers and
-		 * perf lines: the plate is the same pixels on all of them (it is drawn last, so the
-		 * crash / initials / table cards, which start at x 110, never cut it). */
+		 * perf lines: the plate is the same pixels whenever the same size shows (it is drawn
+		 * last, so a card never cuts it), and the size is the compact one on exactly the crash,
+		 * banner, initials and high-score screens. */
 		for (int mode = 0; mode < 5; mode++) {
 			for (int inv = 0; inv < 3; inv++) {
 				for (int ch = 0; ch < 4; ch++) {
 					for (int pop = 0; pop < 2; pop++) {
 						for (int page = 0; page < 2; page++) {
 							uint32_t fr = page ? TR_HUD_PAGE_FRAMES : 10u;
+							bool     cp;
 
 							tr_hud_view_set(&vl, &ls, ban[mode], mode == 1, (uint8_t)inv);
 							if (mode == 4) {
@@ -931,12 +1034,15 @@ int main(void)
 							for (int l = 0; l < TR_PERF_LINES; l++) {
 								memset(vl.perf[l], 'W', 30);
 							}
+							cp = tr_hud_partner_logo_compact(&vl, fr);
+							assert(cp == (mode == 2 || mode == 3 || mode == 4 ||
+							              (mode == 1 && page && vl.hs.n != 0u)));
 							tr_hud_paint_all(
 							    fb, &vl, fr, pop ? fr - 5u : 0u - 100u, pop ? fr - 20u : 0u - 200u);
-							for (int y = 0; y < lh; y++) {
-								assert(memcmp(&fb[(ly + y) * TR_HUD_W + lx],
-								              &refp[(ly + y) * TR_HUD_W + lx],
-								              (size_t)lw * 2u) == 0);
+							for (int y = 0; y < ph_[cp]; y++) {
+								assert(memcmp(&fb[(py_[cp] + y) * TR_HUD_W + px_[cp]],
+								              &refp[cp][(py_[cp] + y) * TR_HUD_W + px_[cp]],
+								              (size_t)pw_[cp] * 2u) == 0);
 							}
 							screens++;
 						}
@@ -944,10 +1050,12 @@ int main(void)
 				}
 			}
 		}
-		/* Always on, incrementally: attract -> play -> crash, the plate stays and the update still
-		 * equals a scratch paint. */
+		/* Always on, incrementally: attract -> play -> crash, the plate (and its size) follow the
+		 * screen and the update still equals a scratch paint. */
 		tr_hud_init(&hl);
 		for (uint32_t f = 0; f < 400u; f++) {
+			bool cp;
+
 			ls.popup_pts = 0u;
 			tr_hud_view_set(&vl,
 			                &ls,
@@ -959,26 +1067,50 @@ int main(void)
 			tr_hud_view_booth(&vl, &hs, NULL);
 			(void)tr_hud_update(&hl, fb, &vl, &d2);
 			same_as_scratch(&hl, &vl);
-			for (int y = 0; y < lh; y++) {
-				assert(memcmp(&fb[(ly + y) * TR_HUD_W + lx],
-				              &refp[(ly + y) * TR_HUD_W + lx],
-				              (size_t)lw * 2u) == 0);
+			cp = tr_hud_partner_logo_compact(&vl, tr_hz_to40(hl.frame - 1u));
+			for (int y = 0; y < ph_[cp]; y++) {
+				assert(memcmp(&fb[(py_[cp] + y) * TR_HUD_W + px_[cp]],
+				              &refp[cp][(py_[cp] + y) * TR_HUD_W + px_[cp]],
+				              (size_t)pw_[cp] * 2u) == 0);
+			}
+		}
+		/* A play popup repaints T_POP every frame (x 220 .. 500: the full plate's right edge is in
+		 * it): the plate stays whole, and that tile alone repaints. */
+		tr_hud_init(&hl);
+		tr_score_init(&ls);
+		for (uint32_t f = 0; f < 40u; f++) {
+			memset(&vl, 0, sizeof(vl));
+			ls.popup_seq = f < 4u ? 0u : 1u;
+			ls.popup_pts = 50u;
+			tr_hud_view_set(&vl, &ls, TR_BANNER_NONE, false, TR_HUD_INVITE_NONE);
+			(void)tr_hud_update(&hl, fb, &vl, &d2);
+			same_as_scratch(&hl, &vl);
+			if (f > 8u && f < 4u + TR_HUD_POPUP_FRAMES - 1u) {
+				assert(d2 == (1u << 4)); /* hud.c T_POP only */
+			}
+			for (int y = 0; y < ph_[0]; y++) {
+				assert(memcmp(&fb[(py_[0] + y) * TR_HUD_W + px_[0]],
+				              &refp[0][(py_[0] + y) * TR_HUD_W + px_[0]],
+				              (size_t)pw_[0] * 2u) == 0);
 			}
 		}
 		/* No per-frame cost: a static view repaints nothing, and a change elsewhere (the perf
-		 * panel, hud.c T_PERF) repaints that tile alone -- the plate's tile is not in its key. */
+		 * panel, hud.c T_PERF) repaints that tile alone -- the plate's tiles are not in its key. */
 		tr_hud_init(&hl);
+		memset(&vl, 0, sizeof(vl));
 		tr_score_init(&ls);
 		tr_hud_view_set(&vl, &ls, TR_BANNER_NONE, false, TR_HUD_INVITE_NONE);
 		(void)tr_hud_update(&hl, fb, &vl, NULL);
 		assert(tr_hud_update(&hl, fb, &vl, NULL) == 0u);
 		snprintf(vl.perf[0], TR_PERF_COLS, "FPS 40.0");
 		assert(tr_hud_update(&hl, fb, &vl, &d2) > 0u && d2 == (1u << 2));
-		printf("hud: partner plate %d x %d at (%d, %d), same on %d screens\n",
-		       lw,
-		       lh,
-		       lx,
-		       ly,
+		printf("hud: partner plates %d x %d / %d x %d at (%d, %d), checked on %d screens\n",
+		       pw_[0],
+		       ph_[0],
+		       pw_[1],
+		       ph_[1],
+		       px_[0],
+		       py_[0],
 		       screens);
 	}
 #endif
