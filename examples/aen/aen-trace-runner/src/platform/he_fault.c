@@ -86,5 +86,7 @@ static int he_fault_init(void)
 	return 0;
 }
 
-/* Right after ram_console's own hook is in (CONFIG_CONSOLE_INIT_PRIORITY). */
-SYS_INIT(he_fault_init, PRE_KERNEL_1, CONFIG_CONSOLE_INIT_PRIORITY + 1);
+/* Right after ram_console's own hook is in (CONFIG_CONSOLE_INIT_PRIORITY, 40). The priority has to
+ * be a literal: SYS_INIT pastes it into a section name. */
+BUILD_ASSERT(CONFIG_CONSOLE_INIT_PRIORITY < 41, "he_fault_init must run after the console hook");
+SYS_INIT(he_fault_init, PRE_KERNEL_1, 41);
