@@ -218,6 +218,15 @@ static void test_request(void)
 	assert(!tr_vol_he_step(&he, &rec, 0, false) && rec.rejects == 3u && he.pct == 0u);
 	assert(rec.vol == tr_vol_word(0u));
 
+	/* 0 is "no request": not a refusal, no change; and it re-arms a value already sent */
+	rec.req = tr_vol_word(60u);
+	assert(tr_vol_he_step(&he, &rec, 0, false) && he.pct == 60u);
+	rec.req = 0u;
+	assert(!tr_vol_he_step(&he, &rec, 0, false) && he.pct == 60u && rec.rejects == 3u);
+	assert(tr_vol_he_step(&he, &rec, -4, false) && he.pct == 40u);
+	rec.req = tr_vol_word(60u); /* the same word as before the 0: taken again */
+	assert(tr_vol_he_step(&he, &rec, 0, false) && he.pct == 60u && rec.rejects == 3u);
+
 	/* a stale valid req from before the boot is not obeyed ... */
 	memset((void *)&rec, 0, sizeof(rec));
 	rec.req = tr_vol_word(10u);

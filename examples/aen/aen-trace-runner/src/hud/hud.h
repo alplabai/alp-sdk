@@ -70,7 +70,6 @@ typedef struct {
 	uint32_t zone_seq; /* ... and its entry count: a change shows its name */
 	uint8_t  vol_pct;  /* the game sound's volume, percent (0 = mute) ... */
 	uint32_t vol_seq;  /* ... and its change count: a change shows "VOL n%" for TR_HUD_VOL_FRAMES */
-	uint16_t vol_age1; /* tr_hud_update()'s: frames since that change + 1, 0 = no popup running */
 	uint32_t score, metres, best;
 	char     perf[TR_PERF_LINES][TR_PERF_COLS]; /* NUL-terminated, "" = blank line */
 	int16_t  pwr[TR_PWR_N];                     /* the power graph, oldest first (see TR_PWR_N) */
@@ -162,16 +161,17 @@ void tr_hud_init(tr_hud_t *h);
  * a frame stops before the tile that would pass it (the first dirty tile
  * always paints) and the next frame resumes there: a screen change spreads
  * over a few frames instead of stalling one. */
-uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, tr_hud_view_t *v, uint32_t *dirty);
+uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32_t *dirty);
 
 /* The whole HUD painted from scratch for `v` at hud frame `frame`, the
- * popups started at popup_start / zone_start (the reference tr_hud_update()
- * must match). */
+ * popups started at popup_start / zone_start / vol_start (the reference
+ * tr_hud_update() must match). */
 void tr_hud_paint_all(uint16_t            *fb,
                       const tr_hud_view_t *v,
                       uint32_t             frame,
                       uint32_t             popup_start,
-                      uint32_t             zone_start);
+                      uint32_t             zone_start,
+                      uint32_t             vol_start);
 
 /* The character's name as the HUD shows it (out of range: Probe's). */
 const char *tr_hud_char_name(uint8_t character);

@@ -2,16 +2,17 @@
  * file only reads the two EVK controls through the portable API and hands the result over.
  *
  * THE CONTROLS. The E1M EVK's rotary encoder (PEC11R-4215K-S0024, 24 PPR) is ALP_E1M_ENC0
- * (EVK_ENC_ROTARY): A / B on P3_1 / P3_0, read by <alp/counter.h> alp_qenc_*, whose gpio-qdec
+ * (EVK_ENC_ROTARY): A / B on P3_0 / P3_1 (e1m-evk.yaml), read by <alp/counter.h> alp_qenc_*, whose gpio-qdec
  * backend decodes the two phases in software (a detent = one count, steps-per-period 4). Its push
  * switch is E1M_GPIO_IO4 (EVK_PIN_ENCODER_SW, P4_3, active low, RC-debounced on the board) read
  * with <alp/peripheral.h> alp_gpio_*. All three pads are SoC GPIO3 / GPIO4: not GPIO5 (the HP's
  * SD_N / IRQZ) and not the lpgpio island (the HP's CC3501E lines). volume_he.overlay maps them.
  *
- * THE ONE NON-PORTABLE LINE. A pad's input buffer (REN) is on only once pinctrl sets it, and
+ * THE ONE NON-PORTABLE LINE (alp-sdk#2808). A pad's input buffer (REN) is on only once pinctrl sets it, and
  * neither gpio_dw nor gpio-qdec applies a pinctrl state, so without it both inputs read idle
  * forever (the trap the aen-evk-demo overlay documents). The SDK has no portable pad-config API:
- * pinctrl_apply_state() on the overlay's pinctrl group is the Zephyr call, nothing vendor-specific.
+ * pinctrl_apply_state() on the overlay's /zephyr,user group is the Zephyr call (the pattern of
+ * aen-camera-firstlight/trigger_gpio.overlay), nothing vendor-specific; it goes when #2808 lands.
  */
 #include "volume_he.h"
 
@@ -26,7 +27,7 @@
 
 #include "../ipc/tr_vol.h"
 
-#define ENC_NODE DT_NODELABEL(tr_pads)
+#define ENC_NODE DT_PATH(zephyr_user) /* carries pinctrl-0 only, volume_he.overlay */
 PINCTRL_DT_DEFINE(ENC_NODE);
 
 static volatile tr_vol_t *const s_rec = (volatile tr_vol_t *)TR_MEM_VOL;
@@ -51,7 +52,12 @@ void tr_volume_he_init(void)
 		(void)alp_qenc_get_position(s_enc, &s_pos);
 	}
 	if (s_sw != NULL) {
-		(void)alp_gpio_configure(s_sw, ALP_GPIO_INPUT, ALP_GPIO_PULL_UP);
+		/* The board has the external 10k pull-up; gpio_dw has no pull of its own and rejects the
+		 * flag (-ENOTSUP), so ask for none. A failed configure is no switch, not a half-open one. */
+		if (alp_gpio_configure(s_sw, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE) != ALP_OK) {
+			alp_gpio_close(s_sw);
+			s_sw = NULL;
+		}
 	}
 	printk("[vol] %u%% at 0x%08x: pads %d, encoder %s, switch %s, bench request word +4\n",
 	       (unsigned)s_he.pct,

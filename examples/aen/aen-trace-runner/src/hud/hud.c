@@ -380,6 +380,11 @@ static uint32_t fade_alpha(uint32_t age, uint32_t total)
 	return age < 8u ? 2u * age + 2u : age + 16u > total ? total - age : 16u;
 }
 
+static bool vol_on(uint32_t frame, uint32_t start)
+{
+	return frame - start < TR_HUD_VOL_FRAMES;
+}
+
 static uint32_t zone_alpha(uint32_t age)
 {
 	return fade_alpha(age, TR_HUD_ZONE_FRAMES);
@@ -387,9 +392,9 @@ static uint32_t zone_alpha(uint32_t age)
 
 /* The volume popup, over the bottom row: the row's own content is cleared, then "VOL n%" (or
  * "MUTE") on a panel centred on the HUD, fading like a zone name. */
-static void paint_vol(const canvas_t *cv, const tr_hud_view_t *v)
+static void paint_vol(const canvas_t *cv, const tr_hud_view_t *v, uint32_t age)
 {
-	uint32_t s = fade_alpha(v->vol_age1 - 1u, TR_HUD_VOL_FRAMES);
+	uint32_t s = fade_alpha(age, TR_HUD_VOL_FRAMES);
 	char     b[16];
 
 	if (v->vol_pct == 0u) {
@@ -836,7 +841,8 @@ static void paint(const canvas_t      *cv,
                   const tr_hud_view_t *v,
                   uint32_t             frame,
                   uint32_t             popup_start,
-                  uint32_t             zone_start)
+                  uint32_t             zone_start,
+                  uint32_t             vol_start)
 {
 	paint_perf(cv, v);
 	paint_power(cv, v);
@@ -872,8 +878,8 @@ static void paint(const canvas_t      *cv,
 		}
 		break;
 	}
-	if (v->vol_age1 != 0u) {
-		paint_vol(cv, v);
+	if (vol_on(frame, vol_start)) {
+		paint_vol(cv, v, frame - vol_start);
 	}
 }
 
@@ -912,7 +918,12 @@ static uint32_t fnv(uint32_t h, uint32_t v)
 }
 
 static uint32_t
-tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, uint32_t zone_start)
+tile_key(int                  t,
+         const tr_hud_view_t *v,
+         uint32_t             frame,
+         uint32_t             popup_start,
+         uint32_t             zone_start,
+         uint32_t             vol_start)
 {
 	uint32_t k = fnv(2166136261u, v->mode);
 
@@ -966,9 +977,9 @@ tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, ui
 		}
 		return k;
 	default: /* T_INV */
-		if (v->vol_age1 != 0u) { /* the volume popup covers the row, whatever the screen */
+		if (vol_on(frame, vol_start)) { /* the volume popup covers the row, whatever the screen */
 			return fnv(
-			    fnv(fnv(fnv(k, 9u), fade_alpha(v->vol_age1 - 1u, TR_HUD_VOL_FRAMES)), v->vol_pct),
+			    fnv(fnv(fnv(k, 9u), fade_alpha(frame - vol_start, TR_HUD_VOL_FRAMES)), v->vol_pct),
 			    v->vol_seq);
 		}
 		if (v->mode == TR_HUD_PLAY && zone_on(frame, zone_start)) {
@@ -1002,7 +1013,8 @@ static uint32_t paint_tile(uint16_t            *fb,
                            const tr_hud_view_t *v,
                            uint32_t             frame,
                            uint32_t             popup_start,
-                           uint32_t             zone_start)
+                           uint32_t             zone_start,
+                           uint32_t             vol_start)
 {
 	const tile_t *tl = &tiles[t];
 	int           w  = tl->x1 - tl->x0;
@@ -1012,7 +1024,7 @@ static uint32_t paint_tile(uint16_t            *fb,
 		canvas_t cv = { strip, tl->x0, y, w, h };
 
 		memset(strip, 0, (size_t)w * (size_t)h * sizeof(strip[0]));
-		paint(&cv, v, frame, popup_start, zone_start);
+		paint(&cv, v, frame, popup_start, zone_start, vol_start);
 		if (rot == 0) {
 			for (int r = 0; r < h; r++) {
 				memcpy(
@@ -1031,11 +1043,12 @@ void tr_hud_paint_all(uint16_t            *fb,
                       const tr_hud_view_t *v,
                       uint32_t             frame,
                       uint32_t             popup_start,
-                      uint32_t             zone_start)
+                      uint32_t             zone_start,
+                      uint32_t             vol_start)
 {
 	inv_init();
 	for (int t = 0; t < T_N; t++) {
-		paint_tile(fb, 0, t, v, frame, popup_start, zone_start);
+		paint_tile(fb, 0, t, v, frame, popup_start, zone_start, vol_start);
 	}
 }
 
@@ -1057,7 +1070,7 @@ static uint32_t tile_area(int t)
 _Static_assert(T_POP == T_MIDL + 1 && T_MIDR == T_POP + 1 && T_STRIP == T_MIDR + 1,
                "the card's middle tiles (and the tagline strip's end) are consecutive");
 
-uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, tr_hud_view_t *v, uint32_t *dirty)
+uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32_t *dirty)
 {
 	uint32_t f = tr_hz_to40(h->frame++), px = 0, d = 0; /* 40 Hz frames (hud.h) */
 	int      t0 = h->next;
@@ -1074,18 +1087,17 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, tr_hud_view_t *v, uint32_t *di
 		h->vol_seq   = v->vol_seq;
 		h->vol_start = f;
 	}
-	v->vol_age1 = f - h->vol_start < TR_HUD_VOL_FRAMES ? (uint16_t)(f - h->vol_start + 1u) : 0u;
 	if (!h->drawn) {
 		/* nothing on screen is ours yet: every tile mismatches once */
 		for (int t = 0; t < T_N; t++) {
-			h->key[t] = ~tile_key(t, v, f, h->popup_start, h->zone_start);
+			h->key[t] = ~tile_key(t, v, f, h->popup_start, h->zone_start, h->vol_start);
 		}
 		h->drawn = true;
 	}
 	/* From where the last capped frame stopped, so no tile starves. */
 	for (int i = 0; i < T_N; i++) {
 		int      t = (t0 + i) % T_N;
-		uint32_t k = tile_key(t, v, f, h->popup_start, h->zone_start);
+		uint32_t k = tile_key(t, v, f, h->popup_start, h->zone_start, h->vol_start);
 
 		if (k == h->key[t]) {
 			continue;
@@ -1101,7 +1113,7 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, tr_hud_view_t *v, uint32_t *di
 		if (mid && (d & MID_BITS) == 0u) {
 			area = 0u;
 			for (int m = T_MIDL; m <= T_STRIP; m++) {
-				area += tile_key(m, v, f, h->popup_start, h->zone_start) != h->key[m] ? tile_area(m)
+				area += tile_key(m, v, f, h->popup_start, h->zone_start, h->vol_start) != h->key[m] ? tile_area(m)
 				                                                                      : 0u;
 			}
 		}
@@ -1111,7 +1123,7 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, tr_hud_view_t *v, uint32_t *di
 			break;
 		}
 		h->key[t] = k;
-		px += paint_tile(fb, h->rot, t, v, f, h->popup_start, h->zone_start);
+		px += paint_tile(fb, h->rot, t, v, f, h->popup_start, h->zone_start, h->vol_start);
 		d |= 1u << t;
 	}
 	if (dirty != NULL) {

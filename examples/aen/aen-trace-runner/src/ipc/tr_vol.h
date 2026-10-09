@@ -11,7 +11,8 @@
  * WHERE. TR_MEM_VOL (tr_memmap.h) 0x0237FD80, 16 B, in the shared NC page. Every word has ONE
  * writer:
  *   vol      HE   what the HP applies:  TR_VOL_TAG | percent
- *   req      the bench, over SWD: "please set":  TR_VOL_TAG | percent  (the HE validates it)
+ *   req      the bench, over SWD: "please set":  TR_VOL_TAG | percent  (the HE validates it);
+ *            0 = no request (writing it re-arms the same value, it is not a refusal)
  *   rejects  HE   requests it refused (bad tag or percent above 100)
  *   seq      HE   changes adopted, for the HUD's "VOL" popup
  * A cold SRAM0 holds garbage: a vol word without the tag (or with a percent above 100) is read

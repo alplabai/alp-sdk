@@ -77,10 +77,12 @@
 #include "cc3501e_bridge.h"
 #include "snd_verdict.h"
 #include "ipc/tr_aring.h"
-#include "ipc/tr_vol.h"
 
 #ifndef TR_SND_EMBED
 #define TR_SND_EMBED 0
+#endif
+#if TR_SND_EMBED
+#include "ipc/tr_vol.h" /* the HE owns a volume word only in the combined HP image */
 #endif
 #if TR_SND_EMBED
 #if TR_SND_TEST
@@ -935,13 +937,17 @@ static int run_game(void)
 	/* Fixed seed: the HP's output for a given event sequence is the host
 	 * render's, bit for bit (tools/audio_preview.c, same synth build). */
 	tr_audio_init(TR_SND_GAME_SEED);
+#if TR_SND_EMBED
 	/* The volume word (src/ipc/tr_vol.h): the HE owns it, this core scales every block by it.
 	 * A software gain, so a change never touches I2C2 (leased) or SD_N; 0 is silence with the amps
-	 * running. Starts at the level already published: no ramp up from unity on the first block. */
+	 * running. Starts at the level already published: no ramp up from unity on the first block.
+	 * Only the combined HP image has an HE that publishes it; the standalone sound image plays at
+	 * unity (TR_SND_VOLUME). */
 	static tr_vol_ramp_t           ramp;
 	volatile const tr_vol_t *const vol = (volatile const tr_vol_t *)TR_MEM_VOL;
 
 	tr_vol_ramp_init(&ramp, tr_vol_read(vol->vol));
+#endif
 	printk("[snd] game sound running at %u Hz: ring at 0x%08x\n", RATE, TR_ARING_ADDR);
 	uint32_t fails = 0; /* consecutive failed block writes */
 #if TR_SND_EMBED
@@ -957,7 +963,9 @@ static int run_game(void)
 			s_ring->hp_events = s_ring->hp_events + 1u;
 		}
 		tr_audio_render(s_mono, BLOCK);
+#if TR_SND_EMBED
 		tr_vol_apply(&ramp, s_mono, BLOCK, tr_vol_read(vol->vol));
+#endif
 #if TR_SND_EMBED
 #if TR_SND_UNDERRUN_TEST
 		/* DEV positive control (TR_SND_UNDERRUN_TEST, refused by a32/release/hp_vision_check.sh and

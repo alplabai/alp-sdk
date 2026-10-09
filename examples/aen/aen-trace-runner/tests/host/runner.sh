@@ -150,7 +150,7 @@ skip() {
 	if [ "${TR_REQUIRE_CROSS:-0}" = 1 ]; then rc=1; fi
 }
 R3D_SRC="src/render/sprite.c src/render/proj.c src/render/r3d_math.c src/render/r3d_raster.c src/render/r3d_scene.c src/render/r3d_rig.c src/render/cam_pip.c"
-AUDIO_SRC="src/audio/tr_audio.c src/ipc/tr_aring.c src/ipc/tr_vol.c"
+AUDIO_SRC="src/audio/tr_audio.c src/ipc/tr_aring.c"
 WARN="-std=c11 -Wall -Wextra -Wdouble-promotion -Werror -ffp-contract=off -O2"
 # r3d_raster.c at the renderer's RASTER_OPT (a32/renderer/Makefile), the rest
 # at -O2 like the image: the A32 r3d tests prove the goldens as shipped.
@@ -220,7 +220,7 @@ fi
 
 if [ -n "$M55_GCC" ]; then
 	for f in $R3D_SRC $AUDIO_SRC src/game/sfx.c src/vision/movenet.c src/vision/pose.c src/vision/arms.c \
-		src/vision/camera_ae.c src/vision/kp_smooth.c src/ipc/tr_pslot.c src/ipc/tr_cam_view.c; do
+		src/vision/camera_ae.c src/vision/kp_smooth.c src/ipc/tr_pslot.c src/ipc/tr_cam_view.c src/ipc/tr_vol.c; do
 		if "$M55_GCC" $WARN -mcpu=cortex-m55 -mthumb -mfloat-abi=hard -c -o /dev/null "$f"; then
 			echo "PASS (M55 compile): $f"
 		else

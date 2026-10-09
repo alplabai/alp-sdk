@@ -99,7 +99,9 @@ bool tr_vol_he_step(tr_vol_he_t *he, volatile tr_vol_t *r, int32_t detents, bool
 		uint32_t pct;
 
 		he->last_req = q;
-		if (tr_vol_valid(q, &pct)) {
+		if (q == 0u) {
+			/* "no request": the word cleared (a cold SRAM0 or a bench that wrote 0 to re-arm) */
+		} else if (tr_vol_valid(q, &pct)) {
 			changed |= set(he, r, pct);
 		} else {
 			r->rejects = r->rejects + 1u;

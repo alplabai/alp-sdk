@@ -1,7 +1,7 @@
 /* tests/host/test_hud_rot.c -- the HUD buffer turned for a panel mounted
  * turned (hud.h tr_hud_t.rot, render/panel_rot.h): the 352 x 720 layer written
  * by tr_hud_update() at rotation 90 / 270 holds exactly the 720 x 352 portrait
- * HUD tr_hud_paint_all() paints, pixel for pixel, for the attract card, the
+ * HUD tr_hud_paint_all(, 0u - TR_HUD_VOL_FRAMES) paints, pixel for pixel, for the attract card, the
  * play screen with a popup and the game-over card. */
 #include <assert.h>
 #include <stdio.h>
@@ -13,7 +13,7 @@
 static uint16_t portrait[TR_HUD_W * TR_HUD_H];
 static uint16_t turned[TR_ROT_HUD_W * TR_HUD_W];
 
-static void check(int rot, tr_hud_view_t *v)
+static void check(int rot, const tr_hud_view_t *v)
 {
 	tr_hud_t h;
 
@@ -21,7 +21,7 @@ static void check(int rot, tr_hud_view_t *v)
 	h.rot = rot;
 	/* The first update is hud frame 0 and repaints every tile: the reference
 	 * is the whole HUD painted at frame 0. */
-	tr_hud_paint_all(portrait, v, 0u, h.popup_start, h.zone_start);
+	tr_hud_paint_all(portrait, v, 0u, h.popup_start, h.zone_start, h.vol_start);
 	memset(turned, 0, sizeof(turned));
 	(void)tr_hud_update(&h, turned, v, NULL);
 	for (int y = 0; y < TR_HUD_H; y++) {
