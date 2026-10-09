@@ -152,12 +152,16 @@ skip() {
 R3D_SRC="src/render/sprite.c src/render/proj.c src/render/r3d_math.c src/render/r3d_raster.c src/render/r3d_scene.c src/render/r3d_rig.c src/render/cam_pip.c"
 AUDIO_SRC="src/audio/tr_audio.c src/ipc/tr_aring.c"
 WARN="-std=c11 -Wall -Wextra -Wdouble-promotion -Werror -ffp-contract=off -O2"
-# r3d_raster.c at the renderer's RASTER_OPT (a32/renderer/Makefile), the rest
-# at -O2 like the image: the A32 r3d tests prove the goldens as shipped.
+# r3d_raster.c at the renderer's RASTER_OPT and cam_pip.c at its HOT_OPT (a32/renderer/Makefile), the
+# rest at -O2 like the image: the A32 r3d tests prove the goldens and the NEON kernels as shipped.
 A32_RASTER_OPT="-O3 -funroll-loops"
+A32_HOT_OPT="-O3"
 
 if [ -n "$A32_GCC" ] && [ -n "$QEMU_ARM" ]; then
 	A32_R3D="${R3D_SRC/src\/render\/r3d_raster.c/} $RUN_TMP/r3d_raster.o"
+	A32_R3D="${A32_R3D/src\/render\/cam_pip.c/} $RUN_TMP/cam_pip.o"
+	"$A32_GCC" $WARN $A32_HOT_OPT -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
+		-c -o "$RUN_TMP/cam_pip.o" src/render/cam_pip.c || { echo "BUILD FAIL (A32): cam_pip.c"; rc=1; }
 	"$A32_GCC" $WARN $A32_RASTER_OPT $CHECKS -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
 		-c -o "$RUN_TMP/r3d_raster.o" src/render/r3d_raster.c || { echo "BUILD FAIL (A32): r3d_raster.c"; rc=1; }
 	for t in tests/host/test_r3d_*.c tests/host/test_audio.c; do
@@ -168,6 +172,15 @@ if [ -n "$A32_GCC" ] && [ -n "$QEMU_ARM" ]; then
 		fi
 		if "$QEMU_ARM" -cpu max "$out" >/dev/null; then echo "PASS (A32 qemu): $t"; else echo "FAIL (A32 qemu): $t"; rc=1; fi
 	done
+	# The rot-90/270 NEON copy-out header (tr_rot_blit_neon) at the image's -O3 too.
+	out="$RUN_TMP/tr-a32-panel_rot-O3.elf"
+	if "$A32_GCC" $WARN $A32_HOT_OPT -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
+		--specs=rdimon.specs -o "$out" tests/host/test_r3d_panel_rot.c $A32_R3D -lm &&
+		"$QEMU_ARM" -cpu max "$out" >/dev/null; then
+		echo "PASS (A32 qemu -O3): tests/host/test_r3d_panel_rot.c"
+	else
+		echo "FAIL (A32 qemu -O3): tests/host/test_r3d_panel_rot.c"; rc=1
+	fi
 	for f in "-DTR_AUDIO_V2=0" "-DTR_AUDIO_V3=0" "-DTR_AUDIO_RATE=48000u"; do
 		out="$RUN_TMP/tr-a32-test_audio$(echo "$f" | tr -dc 'A-Za-z0-9_').elf"
 		if "$A32_GCC" $WARN -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard --specs=rdimon.specs \
@@ -183,8 +196,9 @@ fi
 
 # render.c at the renderer image's HOT_OPT (a32/renderer/Makefile, -O3) on Cortex-A32 under qemu-arm:
 # the test_a32_*.c suites include it (RENDER_A32=0: the scalar paths, no CP15), so the goldens hold
-# for what the image's -O3 objects compute. Only the test's own TU (render.c) is -O3; the game /
-# vision / hud / ipc sources it links are built at -O2 like the other A32 stages.
+# for what the image's -O3 objects compute; test_a32_copyout_neon.c includes it as RENDER_A32=1 and runs
+# the NEON rot-90/270 copy-out (tr_rot_blit_neon inlined into copy_rows_turned) against the mapping.
+# Only the test's own TU (render.c) is -O3; the game / vision / hud / ipc sources it links are built at -O2 like the other A32 stages.
 if [ -n "$A32_GCC" ] && [ -n "$QEMU_ARM" ]; then
 	A32_DEPS=""
 	for f in $(ls src/game/*.c src/vision/*.c src/hud/*.c src/render/sprite.c src/render/proj.c \
@@ -197,7 +211,7 @@ if [ -n "$A32_GCC" ] && [ -n "$QEMU_ARM" ]; then
 	done
 	# (test_a32_turned.c / test_a32_video.c mmap a host scratch: host cc only)
 	for t in tests/host/test_a32_cold_mailbox.c tests/host/test_a32_font.c tests/host/test_a32_render.c \
-		tests/host/test_a32_scene.c; do
+		tests/host/test_a32_scene.c tests/host/test_a32_copyout_neon.c; do
 		out="$RUN_TMP/tr-a32o3-$(basename "$t" .c).elf"
 		if ! "$A32_GCC" $WARN -O3 -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
 			--specs=rdimon.specs -o "$out" "$t" $A32_DEPS "$RUN_TMP/r3d_raster.o" -lm; then

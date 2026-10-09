@@ -73,7 +73,7 @@ static void ref_input_rot(const uint8_t *grey, int16_t src_w, int16_t src_h, int
 	}
 }
 
-static uint8_t raw_mem[640 * 400 + 64] __attribute__((aligned(64)));
+static uint8_t raw_mem[644 * 400 + 64] __attribute__((aligned(64)));
 static int8_t  want_mem[IN_BYTES + 64] __attribute__((aligned(64)));
 static int8_t  got_mem[IN_BYTES + 64] __attribute__((aligned(64)));
 
@@ -108,10 +108,13 @@ static void run(int w, int h, int rot, int ro, int io, int mode)
 
 int main(void)
 {
+	/* 644 x 400 is word-aligned but wider than the line buffers: the src_w <= TR_CAM_SENSOR_W guard. */
 	static const struct {
 		int w, h;
-	} sz[] = { { 640, 400 }, { 400, 640 }, { 320, 200 }, { 192, 192 },
-		       { 600, 400 }, { 640, 360 }, { 100, 640 } };
+	} sz[] = {
+		{ 640, 400 }, { 400, 640 }, { 320, 200 }, { 192, 192 },
+		{ 600, 400 }, { 640, 360 }, { 100, 640 }, { 644, 400 },
+	};
 
 	for (unsigned s = 0; s < sizeof(sz) / sizeof(sz[0]); s++) {
 		for (int rot = 0; rot <= 270; rot += 90) {
@@ -126,7 +129,7 @@ int main(void)
 	run(640, 400, 0, 0, 1, 0);
 	run(637, 400, 0, 0, 0, 0);
 	run(639, 399, 0, 2, 3, 0);
-	run(641, 400, 0, 0, 0, 0); /* wider than the line buffers */
+	run(641, 400, 0, 0, 0, 0); /* wider, and off the word grid */
 	run(640, 400, 90, 1, 2, 0);
 
 	/* Bite: the harness sees a single flipped output bit. */

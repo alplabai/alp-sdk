@@ -38,7 +38,8 @@ O        = build-$(V)$(if $(TR_CAM_ROTATE),-r$(TR_CAM_ROTATE))
 # setup kernels), -O3 -funroll-loops as measured on silicon (a32/payload-isa,
 # 2026-09-23: row loop 137.6 -> 107.2 cyc/row, setup 1661 -> 1414 cyc/tri,
 # Gouraud 9 px span 270 -> 255 cyc vs -O2). Not the whole image: at -O3
-# -funroll-loops everywhere __bss_end lands 1.9 KB under the DL (0x02580000).
+# -funroll-loops everywhere the image grows further. The cap on __bss_end is 0x025C0000
+# (renderer.ld asserts it); with HOT_OPT below, Arm GNU 13.2.rel1 lands at 0x02583108.
 # tests/host/runner.sh builds the A32 qemu r3d tests' r3d_raster.c at the same
 # RASTER_OPT. A/B: make ROPT=... RASTER_OPT=...; docs/superpowers/specs/
 # 2026-09-23-a32-isa-opportunities.md.

@@ -5,7 +5,7 @@
                         text of J-Link `mem32 0x02401000, 128`
                         ("02401000 = 54524D42 00000001 ...").
   decode.py --prof DUMP renderer-prof block: `mem32 0x02401800, 62` (or a raw
-                        224-byte savebin) -> per-core cycles by span kind.
+                        248-byte savebin) -> per-core cycles by span kind.
   decode.py --stats DUMP renderer bench block: `mem32 0x02401900, 40` -> LOD
                         quality word + out->in gap (M55 turnaround) stats +
                         LAUNCH timing (entry -> init done -> first frame).
@@ -350,7 +350,16 @@ def main(argv):
         print(stats_report(blob))
         return 0
     if len(argv) == 2 and argv[0] == "--prof":
-        print(prof_report(parse(open(argv[1], "rb").read(), PROF_ADDR, PROF_SIZE)))
+        data = open(argv[1], "rb").read()
+        try:
+            print(prof_report(parse(data, PROF_ADDR, PROF_SIZE)))
+        except ValueError as e:
+            try:
+                parse(data, PROF_ADDR, 8 + 2 * 9 * 12)
+                print("prof dump is the old 9-kind format (224 B / 56 words): re-capture `mem32 0x02401800, 62` "
+                      "from a current `make prof` image")
+            except ValueError:
+                print("prof dump too short (need 62 words from 0x02401800): %s" % e)
         return 0
     if len(argv) != 1:
         print(__doc__)

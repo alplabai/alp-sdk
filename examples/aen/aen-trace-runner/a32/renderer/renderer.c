@@ -81,7 +81,8 @@
  * 800 MHz, so a since-LAUNCH total is garbage after the first seconds), then
  * snapshotted by core 0 into the NC block RENDER_PROF_ADDR (the unused tail
  * of the mailbox page; debug-AP readable, decode.py --prof) and cleared. The
- * block therefore holds the last COMPLETE window, none before the first:
+ * block therefore holds the last COMPLETE window, none before the first (the
+ * marker is cleared at LAUNCH; a window with a core-1 join timeout is dropped):
  *   +0x00 RENDER_PROF_MARKER 0x5E4D5052, +0x04 frames in that window,
  *   +0x08 core 0 then core 1: TR_PROF_N x {cycles, px, calls}
  *   (FLAT, GOURAUD, TEX, TRI, BG, SETUP, BIN, NOZ_TEX, NOZ_FILL, BAND -- see r3d.h).
@@ -221,6 +222,8 @@ _Static_assert(0x02402C00u + 0x400u <= TR_MEM_MBOX_PAGE_END,
 #define RS_W_C1_SETUP       3u
 #define RS_W_C1_FRAME       4u
 #define RS_LAST_WORD        39u
+_Static_assert(RENDER_STATS_ADDR + (RS_LAST_WORD + 1u) * 4u <= 0x02401A00u,
+               "stats words 17..39 end below the accel probe block (0x02401A00)");
 _Static_assert(RENDER_STATS_ADDR + 12u * 4u == TR_RENDER_T_ADDR,
                "tr_mbox.h TR_RENDER_T_ADDR: words 12..14");
 _Static_assert(RENDER_STATS_ADDR + 6u * 4u == TR_RENDER_IMG_END_ADDR,
@@ -264,17 +267,28 @@ uint32_t tr_prof_now(void)
 /* PMCR.E (enable) | PMCR.C (reset the cycle counter); PMCNTENSET.C. */
 static void prof_enable(void)
 {
+	RENDER_PROF_ADDR[0] = 0; /* a stale window of an earlier LAUNCH is not this one's */
 	__asm__ volatile("mcr p15, 0, %0, c9, c12, 0\n\t"
 	                 "mcr p15, 0, %1, c9, c12, 1\n\tisb" ::"r"(5u),
 	                 "r"(0x80000000u));
 }
 
-static void prof_publish(void)
+/* `timeouts`: renderer_main's core-1 timeout count. A window in which a join timed out mixes a late
+ * core 1 into the sums, so it is dropped (counters cleared, nothing published), not shown. */
+static void prof_publish(uint32_t timeouts)
 {
-	static uint32_t    frames;
+	static uint32_t    frames, timeouts0;
 	volatile uint32_t *d = RENDER_PROF_ADDR;
 	uint32_t          *p = (uint32_t *)prof;
 
+	if (timeouts != timeouts0) {
+		timeouts0 = timeouts;
+		frames    = 0;
+		for (uint32_t i = 0; i < sizeof(prof) / 4u; i++) {
+			p[i] = 0;
+		}
+		return;
+	}
 	if (++frames < RENDER_PROF_WINDOW) return;
 	d[0] = RENDER_PROF_MARKER;
 	d[1] = frames;
@@ -288,8 +302,9 @@ static void prof_publish(void)
 static void prof_enable(void)
 {
 }
-static void prof_publish(void)
+static void prof_publish(uint32_t timeouts)
 {
+	(void)timeouts;
 }
 #endif
 
@@ -864,7 +879,7 @@ void renderer_main(volatile tr_mbox_t *m)
 		} else {
 			o.dropped++;
 		}
-		if (drawn) prof_publish();
+		if (drawn) prof_publish(timeouts);
 		o.fb     = fb;
 		o.ticks0 = t;
 		o.frames++;

@@ -767,6 +767,14 @@ int main(void)
 			continue;
 		}
 
+		/* tr_movenet_decode() copies the centre and heat maps out of the arena (movenet.c): a
+		 * model with smaller output tensors would be read past its end. */
+		if (o[0].size_bytes < TR_MN_CELLS || o[1].size_bytes < TR_MN_CELLS * TR_POSE_KP) {
+			g_dbg->status = ALP_ERR_INVAL;
+			tr_camera_release();
+			continue;
+		}
+
 		tr_movenet_out_t mo = { o[0].data, o[1].data, o[2].data, o[3].data };
 		tr_pose_t        pose;
 
