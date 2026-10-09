@@ -69,9 +69,17 @@ ZTEST(sn65dsi83_decide, test_persistent_errors_reinit)
 
 ZTEST(sn65dsi83_decide, test_reinit_rate_limit)
 {
-	zassert_true(sn65dsi83_reinit_allowed(false, 0, 0), "the first re-init is never limited");
-	zassert_false(sn65dsi83_reinit_allowed(true, 1000, 1000 + SN65_REINIT_MIN_GAP_MS - 1));
-	zassert_true(sn65dsi83_reinit_allowed(true, 1000, 1000 + SN65_REINIT_MIN_GAP_MS));
+	int64_t gap = sn65dsi83_reinit_gap_ms(false, 0);
+
+	zassert_equal(gap, SN65_REINIT_MIN_GAP_MS);
+	zassert_true(sn65dsi83_reinit_allowed(false, 0, 0, gap), "the first re-init is never limited");
+	zassert_false(sn65dsi83_reinit_allowed(true, 1000, 1000 + SN65_REINIT_MIN_GAP_MS - 1, gap));
+	zassert_true(sn65dsi83_reinit_allowed(true, 1000, 1000 + SN65_REINIT_MIN_GAP_MS, gap));
+	/* after a failed replay: no wait, up to SN65_FAST_RETRIES times, then the window again */
+	zassert_equal(sn65dsi83_reinit_gap_ms(true, 0), 0);
+	zassert_equal(sn65dsi83_reinit_gap_ms(true, SN65_FAST_RETRIES - 1U), 0);
+	zassert_equal(sn65dsi83_reinit_gap_ms(true, SN65_FAST_RETRIES), SN65_REINIT_MIN_GAP_MS);
+	zassert_equal(sn65dsi83_reinit_gap_ms(false, 0), SN65_REINIT_MIN_GAP_MS, "a success keeps it");
 }
 
 /* ---- health_poll against a fake bridge -------------------------------------------------- */
@@ -254,9 +262,48 @@ ZTEST(sn65dsi83_poll, test_mid_replay_failure_writes_pll_off)
 	zassert_equal(fake.wlog[fake.nwrites - 1].val, 0x00, "PLL_EN cleared after the failure");
 	zassert_equal(fake.regs[0x0D], 0x00);
 
-	/* The next window retries and succeeds. */
+	/* The next poll (1 s later, inside the window) retries and succeeds. */
 	fake.fail_write_reg = -1;
-	zassert_equal(poll(1000 + SN65_REINIT_MIN_GAP_MS), 0);
+	zassert_equal(poll(2000), 0);
+	zassert_false(rep.suppressed);
+	zassert_equal(st.recoveries, 1U);
+}
+
+/* The bench case: the replay fails while the HS clock is down (PLL never locks), the next polls
+ * retry; 3 fast retries per episode, then the 5 s window; a success restores the window. */
+ZTEST(sn65dsi83_poll, test_failed_replay_retries_next_poll_three_times)
+{
+	black();
+	fake.fail_write_reg = 0x18; /* every replay fails */
+	zassert_equal(poll(1000), 0);
+	zassert_equal(st.failures, 1U);
+
+	for (int i = 1; i <= SN65_FAST_RETRIES; i++) { /* three more attempts, one per poll */
+		black();
+		zassert_equal(poll(1000 + 1000 * i), 0);
+		zassert_false(rep.suppressed, "fast retry %d", i);
+		zassert_equal(st.failures, 1U + i);
+	}
+
+	black();
+	zassert_equal(poll(1000 + 1000 * (SN65_FAST_RETRIES + 1)), 0);
+	zassert_true(rep.suppressed, "fast retries used up: the window holds again");
+	zassert_equal(st.failures, 1U + SN65_FAST_RETRIES);
+
+	zassert_equal(poll(1000 + 1000 * SN65_FAST_RETRIES + SN65_REINIT_MIN_GAP_MS), 0);
+	zassert_false(rep.suppressed, "after the window it tries again");
+	zassert_equal(st.failures, 2U + SN65_FAST_RETRIES);
+
+	/* it recovers: success ends the episode and the window applies to the next loss */
+	fake.fail_write_reg = -1;
+	black();
+	int64_t t = 100000;
+
+	zassert_equal(poll(t + SN65_REINIT_MIN_GAP_MS), 0);
+	zassert_equal(st.recoveries, 1U);
+	black();
+	zassert_equal(poll(t + SN65_REINIT_MIN_GAP_MS + 1000), 0);
+	zassert_true(rep.suppressed, "a success keeps the 5 s limit");
 	zassert_equal(st.recoveries, 1U);
 }
 

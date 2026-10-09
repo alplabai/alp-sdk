@@ -94,12 +94,24 @@ static inline enum sn65dsi83_health sn65dsi83_health_decide(uint8_t  pll_en,
 	                                                              : SN65_HEALTH_CLEAR_ERRORS;
 }
 
-/* A bridge that will not stay up is re-initialised at most this often. */
+/* A bridge that will not stay up is re-initialised at most this often... */
 #define SN65_REINIT_MIN_GAP_MS 5000
 
-static inline bool sn65dsi83_reinit_allowed(bool have_last, int64_t last_ms, int64_t now_ms)
+/* ... except right after a FAILED replay: the usual cause is the display core restarting its DSI
+ * host (the HS clock is down, so the PLL cannot lock), which passes within seconds, so the next poll
+ * retries instead of leaving the panel black for the whole window.  At most this many such fast
+ * retries per episode (a success ends it); then the window applies again. */
+#define SN65_FAST_RETRIES 3U
+
+static inline int64_t sn65dsi83_reinit_gap_ms(bool last_failed, uint32_t fast_retries)
 {
-	return !have_last || (now_ms - last_ms) >= SN65_REINIT_MIN_GAP_MS;
+	return (last_failed && fast_retries < SN65_FAST_RETRIES) ? 0 : SN65_REINIT_MIN_GAP_MS;
+}
+
+static inline bool
+sn65dsi83_reinit_allowed(bool have_last, int64_t last_ms, int64_t now_ms, int64_t gap_ms)
+{
+	return !have_last || (now_ms - last_ms) >= gap_ms;
 }
 
 /*
@@ -158,6 +170,8 @@ struct sn65dsi83_stats {
 	uint32_t err_polls;      /* consecutive polls with CSR 0xE5 non-zero */
 	int64_t  last_reinit_ms;
 	bool     have_last;
+	bool     last_failed;  /* the last replay failed */
+	uint32_t fast_retries; /* fast retries spent in this failure episode */
 	bool     after_recovery; /* the next poll is the first after a successful re-init */
 };
 

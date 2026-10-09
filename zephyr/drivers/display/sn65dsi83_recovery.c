@@ -232,9 +232,16 @@ int sn65dsi83_health_poll(const struct i2c_dt_spec   *i2c,
 			st->errors_cleared++;
 		}
 	} else if (rep->health == SN65_HEALTH_REINIT) {
-		if (!sn65dsi83_reinit_allowed(st->have_last, st->last_reinit_ms, now_ms)) {
+		if (!sn65dsi83_reinit_allowed(
+		        st->have_last,
+		        st->last_reinit_ms,
+		        now_ms,
+		        sn65dsi83_reinit_gap_ms(st->last_failed, st->fast_retries))) {
 			rep->suppressed = true;
 			return 0;
+		}
+		if (st->last_failed && st->fast_retries < SN65_FAST_RETRIES) {
+			st->fast_retries++; /* this attempt is a fast retry */
 		}
 		st->have_last      = true;
 		st->last_reinit_ms = now_ms;
@@ -256,8 +263,11 @@ int sn65dsi83_health_poll(const struct i2c_dt_spec   *i2c,
 		if (rep->err == 0) {
 			st->recoveries++;
 			st->after_recovery = true;
+			st->last_failed    = false;
+			st->fast_retries   = 0U;
 		} else {
 			st->failures++;
+			st->last_failed = true;
 			/* Leave the bridge in the state the next pass recognises as lost, whatever
 			 * half-configured state the failed replay left it in. */
 			(void)i2c_reg_write_byte_dt(i2c, SN65_REG_PLL_EN, 0x00U);
