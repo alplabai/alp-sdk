@@ -2,9 +2,9 @@
  * file only reads the two EVK controls through the portable API and hands the result over.
  *
  * THE CONTROLS. The E1M EVK's rotary encoder (PEC11R-4215K-S0024, 24 PPR) is ALP_E1M_ENC0
- * (BOARD_ENC_ROTARY): A / B on P3_1 / P3_0, read by <alp/counter.h> alp_qenc_*, whose gpio-qdec
+ * (EVK_ENC_ROTARY): A / B on P3_1 / P3_0, read by <alp/counter.h> alp_qenc_*, whose gpio-qdec
  * backend decodes the two phases in software (a detent = one count, steps-per-period 4). Its push
- * switch is E1M_GPIO_IO4 (BOARD_PIN_ENCODER_SW, P4_3, active low, RC-debounced on the board) read
+ * switch is E1M_GPIO_IO4 (EVK_PIN_ENCODER_SW, P4_3, active low, RC-debounced on the board) read
  * with <alp/peripheral.h> alp_gpio_*. All three pads are SoC GPIO3 / GPIO4: not GPIO5 (the HP's
  * SD_N / IRQZ) and not the lpgpio island (the HP's CC3501E lines). volume_he.overlay maps them.
  *
@@ -17,7 +17,7 @@
 
 #if TR_HP_SOUND
 
-#include <alp/board.h>
+#include <alp/boards/alp_e1m_evk.h>
 #include <alp/counter.h>
 #include <alp/peripheral.h>
 #include <zephyr/devicetree.h>
@@ -43,10 +43,10 @@ void tr_volume_he_init(void)
 
 	int rc = pinctrl_apply_state(PINCTRL_DT_DEV_CONFIG_GET(ENC_NODE), PINCTRL_STATE_DEFAULT);
 
-	const alp_qenc_config_t cfg = ALP_QENC_CONFIG_DEFAULT(BOARD_ENC_ROTARY);
+	const alp_qenc_config_t cfg = ALP_QENC_CONFIG_DEFAULT(EVK_ENC_ROTARY);
 
 	s_enc = alp_qenc_open(&cfg);
-	s_sw  = alp_gpio_open(BOARD_PIN_ENCODER_SW);
+	s_sw  = alp_gpio_open(EVK_PIN_ENCODER_SW);
 	if (s_enc != NULL) {
 		(void)alp_qenc_get_position(s_enc, &s_pos);
 	}

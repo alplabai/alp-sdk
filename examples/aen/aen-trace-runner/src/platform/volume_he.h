@@ -11,8 +11,8 @@
 #endif
 
 #if TR_HP_SOUND
-/* Once, at boot: publish the default level, open the EVK's rotary encoder (BOARD_ENC_ROTARY, its
- * detents set the level) and push switch (BOARD_PIN_ENCODER_SW, mute / unmute). Either one failing
+/* Once, at boot: publish the default level, open the EVK's rotary encoder (EVK_ENC_ROTARY, its
+ * detents set the level) and push switch (EVK_PIN_ENCODER_SW, mute / unmute). Either one failing
  * to open leaves the other and the bench's request word working. */
 void tr_volume_he_init(void);
 

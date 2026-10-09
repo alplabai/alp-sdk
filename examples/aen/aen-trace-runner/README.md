@@ -286,9 +286,9 @@ across the block, no click, no I2C: I2C2 is leased) and 0 is silence with the am
 never toggled). The HE owns one word (`TR_MEM_VOL`, `0x0237FD80`, `src/ipc/tr_vol.h`, tagged `'VO'`: a cold
 SRAM0 reads as 100 %) and sets it from:
 
-- **The EVK's rotary encoder** (`BOARD_ENC_ROTARY`, read with `alp_qenc_*`): 5 % per detent, clockwise
+- **The EVK's rotary encoder** (`EVK_ENC_ROTARY`, read with `alp_qenc_*`): 5 % per detent, clockwise
   louder, clamped 0..100.
-- **Its push switch** (`BOARD_PIN_ENCODER_SW`, `alp_gpio_*`): mute, press again for the last level.
+- **Its push switch** (`EVK_PIN_ENCODER_SW`, `alp_gpio_*`): mute, press again for the last level.
 - **A request word over SWD** (`0x0237FD84`, `0x564F0000 | percent`), for the bench: no reflash, see
   `a32/release/FLASH-RECIPE.md` ("Changing the volume without reflashing"). The HE validates it.
 
