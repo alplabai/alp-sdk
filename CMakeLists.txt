@@ -126,6 +126,7 @@ option(ALP_SDK_BUILD_SHARED "Build libalp_sdk.so + install lib/headers (Linux/Yo
 # 100% first-party, no vendor sources ever land in it); alp_sdk instead
 # calls the per-source helper further down, once its SOURCES are complete.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/alp-sdk-warnings.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/alp-sdk-static-backends.cmake)
 
 # ---------------------------------------------------------------------
 # Public header library
@@ -326,6 +327,9 @@ if(NOT DEFINED ZEPHYR_BASE)
     # Must run AFTER add_subdirectory(src/${ALP_OS}) so alp_sdk's SOURCES
     # property already includes every backend/vendor file.
     alp_sdk_apply_strict_warnings(alp_sdk "${CMAKE_CURRENT_SOURCE_DIR}/src/")
+    # Same ordering constraint: keep every second backend (yocto_drv.c, ...)
+    # in a static link -- see cmake/alp-sdk-static-backends.cmake (#2790).
+    alp_sdk_force_static_backends(alp_sdk)
 endif()
 
 # ---------------------------------------------------------------------
