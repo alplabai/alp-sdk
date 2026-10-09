@@ -121,7 +121,7 @@ typedef struct {
 	  false }
 
 /* The countdown is the RV-3028's only if the backend does not route it to the LPTIMER. */
-BUILD_ASSERT(CONFIG_AEN_STOP_RTC_MS >= 1000, "the countdown cycle must be at least 1 s")
+BUILD_ASSERT(CONFIG_AEN_STOP_RTC_MS >= 1000, "the countdown cycle must be at least 1 s");
 #define ALARM_CYCLE { "RV-3028 alarm", ALP_POWER_WAKE_RTC, 0u, ALP_POWER_WAKE_RTC, true }
 
 static const cycle_t cycles[N_CYCLES] = {
