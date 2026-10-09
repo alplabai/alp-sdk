@@ -531,8 +531,13 @@ static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
 		return refuse(2, "lptimer_pending", 1, ALP_ERR_BUSY);
 	}
-	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
-		(void)alp_som_power_rtc_clear_stale_uf(); /* harmless noise, kept out of the dumps */
+	if ((plan->hw & ALP_SOM_ARM_RTC_TIMER) != 0u) {
+		/* This backend owns the countdown it is about to start.  Whatever an earlier cycle
+		 * left (a countdown or alarm that fired unhandled, an enable still on) is stale and
+		 * would otherwise hold /INT low across any power cycle of the backup-powered part. */
+		(void)alp_som_power_rtc_clear_stale_wake();
+	} else if ((plan->hw & ALP_SOM_ARM_RTC_INT) != 0u) {
+		(void)alp_som_power_rtc_clear_stale_uf(); /* the caller's own alarm: UF noise only */
 	}
 	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
 	    rtc_int_asserted_now()) {
@@ -1073,6 +1078,7 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 		bool spent = false;
 
 		if (alp_som_power_rtc_flags_pending(&spent) == ALP_OK && spent) {
+			rtc_refusal_dump_once();
 			s = refuse(7, "rtc_wake_already_latched", 1, ALP_ERR_BUSY);
 			goto unwind;
 		}

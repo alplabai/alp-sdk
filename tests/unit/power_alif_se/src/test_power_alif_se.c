@@ -379,6 +379,7 @@ static uint32_t      g_ccvr_now;
 static uint8_t       g_rtc_regs[6];
 static bool          g_rtc_regs_ok = true;
 static unsigned      g_uf_clears;
+static unsigned      g_stale_clears;
 static int           g_run_set_rc;
 static unsigned      g_run_set_calls;
 static run_profile_t g_run_set;
@@ -471,6 +472,18 @@ uint32_t alif_se_hw_lpgpio_ext_porta(void)
 alp_status_t alp_som_power_rtc_clear_stale_uf(void)
 {
 	g_uf_clears++;
+	return ALP_OK;
+}
+
+/* Like the real one: stops the countdown / alarm enables, then drops TF / AF / UF; EVF etc stay. */
+alp_status_t alp_som_power_rtc_clear_stale_wake(void)
+{
+	g_stale_clears++;
+	g_rtc_regs[0] &= (uint8_t)~(0x08u | 0x04u | (((g_rtc_regs[2] & 0x20u) == 0u) ? 0x10u : 0u));
+	g_rtc_regs[2] &= (uint8_t)~(0x10u | 0x08u); /* TIE, AIE */
+	if ((g_rtc_regs[0] & 0x02u) == 0u) {
+		g_int_level = 0; /* nothing left to hold /INT low */
+	}
 	return ALP_OK;
 }
 
@@ -623,6 +636,7 @@ static void reset_fakes(void)
 	g_rtc_regs_ok       = true;
 	memset(g_rtc_regs, 0, sizeof(g_rtc_regs));
 	g_uf_clears         = 0u;
+	g_stale_clears      = 0u;
 	g_run_set_rc        = 0;
 	g_run_set_calls     = 0;
 	g_run_set_locks_pll = true;
@@ -1077,10 +1091,11 @@ ZTEST(power_alif_se, test_armed_source_already_pending_is_refused_with_busy)
 	/* RV-3028 /INT already low, with an enabled countdown flag behind it. */
 	reset_fakes();
 	g_int_level         = 1;
+	g_rtc_int_armed     = true;  /* the caller's own countdown, not this backend's */
 	g_rtc_regs[0]       = 0x08u; /* TF */
 	g_rtc_regs[2]       = 0x10u; /* TIE */
-	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
-	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
+	g_state.wake_bitmap = ALP_POWER_WAKE_RTC;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_BUSY);
 	assert_no_side_effect();
 
 	/* An unreadable /INT does not count as pending. */
@@ -1960,11 +1975,13 @@ ZTEST(power_alif_se, test_the_run_profile_matches_the_cold_boot_profile)
 ZTEST(power_alif_se, test_int_asserted_refusal_dumps_the_rtc_registers_once)
 {
 	g_int_level         = 1;
+	g_rtc_int_armed     = true;
 	g_rtc_regs[0]       = 0x08u; /* TF */
 	g_rtc_regs[2]       = 0x10u; /* TIE */
-	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
-	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
-	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
+	g_state.wake_bitmap = ALP_POWER_WAKE_RTC;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_BUSY);
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_BUSY);
+	zassert_equal(g_stale_clears, 0u, "the caller's own alarm is never stopped");
 	assert_no_side_effect();
 }
 
@@ -2053,6 +2070,44 @@ ZTEST(power_alif_se, test_the_runtime_knobs_select_each_vendor_difference_in_the
 
 /* ---- U8g: the /INT check, the product OFF profile, the restore health check ------------ */
 
+ZTEST(power_alif_se,
+      test_a_wake_latched_by_an_earlier_unhandled_cycle_does_not_block_the_next_sleep)
+{
+	/* #2784: a countdown fired with nobody handling it (TF + TIE) and an alarm enable is still
+	 * on (AF + AIE); /INT is low and the part keeps all of it across a power cycle.  The next
+	 * countdown sleep clears it and proceeds, EVF (bit 1) is left alone. */
+	g_int_level         = 1;
+	g_rtc_regs[0]       = 0x08u | 0x04u | 0x02u; /* TF AF EVF */
+	g_rtc_regs[2]       = 0x10u | 0x08u;         /* TIE AIE */
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_OK);
+	zassert_equal(g_stale_clears, 1u);
+	zassert_equal(g_rtc_regs[0] & 0x1Eu, 0x02u, "only EVF survives");
+	zassert_equal(ev_count(EV_ARM_RTC_TIMER), 1u);
+}
+
+ZTEST(power_alif_se, test_a_wake_pending_from_the_current_arm_still_refuses)
+{
+	/* Stale state is cleaned BEFORE arming; a countdown that fires after the arm is not stale. */
+	g_int_level         = 1;
+	g_rtc_regs[0]       = 0x08u;
+	g_rtc_regs[2]       = 0x10u;
+	g_flags_pending     = true; /* what the step-7 read reports after the arm */
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
+	zassert_equal(g_stale_clears, 1u);
+	assert_unwound();
+}
+
+ZTEST(power_alif_se, test_a_lptimer_only_sleep_leaves_the_rtc_alone)
+{
+	g_rtc_regs[0]       = 0x08u;
+	g_rtc_regs[2]       = 0x10u;
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+	zassert_equal(g_stale_clears, 0u);
+}
+
 ZTEST(power_alif_se, test_the_u8g_dump_is_not_a_refusal)
 {
 	/* The refusal dump of bench U8g: STATUS=0x10 (UF) CTRL1=0 CTRL2=0 EVENT_CTRL=0 EE35=0xc7
@@ -2065,7 +2120,7 @@ ZTEST(power_alif_se, test_the_u8g_dump_is_not_a_refusal)
 
 	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_OK);
-	zassert_true(g_uf_clears >= 1u, "the stale UF is cleared while preparing");
+	zassert_true(g_stale_clears >= 1u, "the stale UF is cleared while preparing");
 }
 
 ZTEST(power_alif_se, test_every_enabled_flag_still_counts_and_a_disabled_one_never_does)
@@ -2087,11 +2142,12 @@ ZTEST(power_alif_se, test_every_enabled_flag_still_counts_and_a_disabled_one_nev
 	for (size_t i = 0; i < ARRAY_SIZE(cases); ++i) {
 		reset_fakes();
 		g_int_level         = 1;
+		g_rtc_int_armed     = true; /* the caller's own alarm: nothing here is stale to us */
 		g_rtc_regs[0]       = cases[i].st;
 		g_rtc_regs[2]       = cases[i].c2;
 		g_rtc_regs[5]       = cases[i].e37;
-		g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
-		zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL),
+		g_state.wake_bitmap = ALP_POWER_WAKE_RTC;
+		zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL),
 		              cases[i].refuse ? ALP_ERR_BUSY : ALP_OK,
 		              "case %u",
 		              (unsigned)i);
@@ -2101,9 +2157,10 @@ ZTEST(power_alif_se, test_every_enabled_flag_still_counts_and_a_disabled_one_nev
 ZTEST(power_alif_se, test_a_low_pad_with_an_unreadable_rtc_still_refuses)
 {
 	g_int_level         = 1;
+	g_rtc_int_armed     = true;
 	g_rtc_regs_ok       = false;
-	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
-	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
+	g_state.wake_bitmap = ALP_POWER_WAKE_RTC;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_BUSY);
 }
 
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
