@@ -14,7 +14,7 @@
 static alp_i2c_handover_t w;
 
 /* A fake clock and liveness word: the heartbeat moves every `hb_every_us` of delay (0: never). */
-static uint32_t           alive, now_us, hb_every_us, last_tick_us, delayed_us;
+static uint32_t alive, now_us, hb_every_us, last_tick_us, delayed_us;
 
 static void fake_delay(uint32_t us)
 {
@@ -165,7 +165,7 @@ int main(void)
 	hb_every_us = 10000u; /* the HP's 10 ms timer */
 	assert(sample(true));
 	assert(delayed_us <= 6u * ALP_I2C_HANDOVER_ALIVE_STEP_US); /* returns at the first tick */
-	hb_every_us = 0u; /* a stopped / not yet acquired HP */
+	hb_every_us = 0u;                                          /* a stopped / not yet acquired HP */
 	assert(!sample(true));
 	assert(delayed_us >= ALP_I2C_HANDOVER_ALIVE_WINDOW_US); /* waited the whole window */
 	/* Cold boot with a MOVING heartbeat but the record not taken: cold, and no wait at all. */
@@ -175,8 +175,12 @@ int main(void)
 	assert(!sample(alp_i2c_handover_taken(&w)) && delayed_us == 0u);
 	/* No liveness word on the node: never warm. */
 	cold(0, 0x9999u, 0x9999u);
-	assert(!alp_i2c_handover_sample_warm(
-	    &w, true, NULL, fake_delay, ALP_I2C_HANDOVER_ALIVE_STEP_US, ALP_I2C_HANDOVER_ALIVE_WINDOW_US));
+	assert(!alp_i2c_handover_sample_warm(&w,
+	                                     true,
+	                                     NULL,
+	                                     fake_delay,
+	                                     ALP_I2C_HANDOVER_ALIVE_STEP_US,
+	                                     ALP_I2C_HANDOVER_ALIVE_WINDOW_US));
 	/* The HP's timer must tick at least twice in the window (i2c_handover.c asserts the same). */
 	assert(ALP_I2C_HANDOVER_ALIVE_PERIOD_MS * 1000u * 2u < ALP_I2C_HANDOVER_ALIVE_WINDOW_US);
 	/* Fill patterns with state == 0 look taken (nonce == consumed == fill) but need a moving word: */

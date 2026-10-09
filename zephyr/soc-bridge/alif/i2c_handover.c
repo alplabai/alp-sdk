@@ -136,7 +136,8 @@ static void __maybe_unused i2c_handover_acquire(alp_i2c_handover_t *w)
 	           : "i2c-handover: bus acquired DIRTY -- recover it before use\n");
 }
 
-#define HANDOVER_ALIVE_WORD(inst) ((volatile uint32_t *)(uintptr_t)DT_INST_PROP(inst, alive_address))
+#define HANDOVER_ALIVE_WORD(inst) \
+	((volatile uint32_t *)(uintptr_t)DT_INST_PROP(inst, alive_address))
 
 #define HANDOVER_ALIVE(inst) \
 	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, alive_address), (HANDOVER_ALIVE_WORD(inst)), (NULL))
@@ -212,15 +213,13 @@ static void __maybe_unused i2c_handover_acquire(alp_i2c_handover_t *w)
 	SYS_INIT(i2c_handover_release_##inst, APPLICATION, I2C_HANDOVER_RELEASE_PRIO);
 
 #define HANDOVER_ACQUIRE(inst) \
-	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, alive_address), \
-	            (static void i2c_handover_alive_tick_##inst(struct k_timer *t) \
-	             { \
-		             ARG_UNUSED(t); \
-		             (*HANDOVER_ALIVE_WORD(inst))++; \
-	             } K_TIMER_DEFINE(i2c_handover_alive_timer_##inst, \
-	                              i2c_handover_alive_tick_##inst, \
-	                              NULL);), \
-	            ()) \
+	COND_CODE_1( \
+	    DT_INST_NODE_HAS_PROP(inst, alive_address), \
+	    (static void i2c_handover_alive_tick_##inst(struct k_timer *t) { \
+		    ARG_UNUSED(t); \
+		    (*HANDOVER_ALIVE_WORD(inst))++; \
+	    } K_TIMER_DEFINE(i2c_handover_alive_timer_##inst, i2c_handover_alive_tick_##inst, NULL);), \
+	    ()) \
 	static int i2c_handover_acquire_##inst(void) \
 	{ \
 		i2c_handover_acquire(HANDOVER_WORDS(inst)); \

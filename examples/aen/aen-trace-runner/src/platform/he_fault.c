@@ -43,8 +43,8 @@
 
 /* The SoC reset needs the SE client's MHUv2 send node; without it (or with the option off) a
  * fatal error halts, as Zephyr's default does. */
-#if defined(TR_HE_FAULT_SOC_RESET) && TR_HE_FAULT_SOC_RESET && defined(CONFIG_HAS_ALIF_SE_SERVICES) && \
-	DT_NODE_EXISTS(DT_NODELABEL(se_service))
+#if defined(TR_HE_FAULT_SOC_RESET) && TR_HE_FAULT_SOC_RESET && \
+    defined(CONFIG_HAS_ALIF_SE_SERVICES) && DT_NODE_EXISTS(DT_NODELABEL(se_service))
 #define HE_SOC_RESET 1
 #include <zephyr/drivers/ipm.h>
 #include <services_lib_ids.h>
@@ -72,7 +72,8 @@ _Static_assert(TR_MEM_HE_RESET_GUARD_SIZE == sizeof(tr_reset_guard_t),
 #define SE_RESET_POLL_MS 100U
 #define SE_RESET_WAIT_US 100000U /* then give up: 2 x the bounds, <= 200 ms in all */
 
-_Static_assert(TR_MEM_SE_MSG_SIZE == sizeof(service_header_t), "TR_MEM_SE_MSG_SIZE != service_header_t");
+_Static_assert(TR_MEM_SE_MSG_SIZE == sizeof(service_header_t),
+               "TR_MEM_SE_MSG_SIZE != service_header_t");
 
 /* One bounded reset request. Returns only if the SoC was not reset. */
 static void he_soc_reset_request(void)
