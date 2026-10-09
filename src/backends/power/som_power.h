@@ -339,6 +339,12 @@ alp_status_t alp_som_power_rtc_flags_pending(bool *pending);
 /** Clear a stale UF (time-update flag) when UIE is off; nothing else is touched. */
 alp_status_t alp_som_power_rtc_clear_stale_uf(void);
 
+/** Stop a countdown an earlier cycle left running or latched: clears TE and TIE and writes 0 to
+ *  TF (and UF when UIE is off).  Unless @p keep_alarm, the alarm enable AIE is cleared and AF
+ *  written 0 too; with it a caller-armed alarm is left untouched.  PORF / EVF / BSF / CLKF
+ *  are never touched.  Called only before this backend arms its own countdown. */
+alp_status_t alp_som_power_rtc_clear_stale_wake(bool keep_alarm);
+
 /** Read-only dump of RV-3028 STATUS 0Eh, CONTROL_1 0Fh, CONTROL_2 10h, Event Control 13h and
  *  the EEPROM mirrors 35h (CLKOUT) and 37h (BACKUP) into @p regs[6], in that order.  Nothing
  *  is written, EEPROM included. */

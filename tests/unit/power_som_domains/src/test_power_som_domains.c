@@ -1508,3 +1508,67 @@ ZTEST(power_som_domains, test_the_same_image_still_wakes_normally)
 	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
 	zassert_equal(alp_som_pd_bench_count(), 1u, "the counter survives a wake of the same image");
 }
+
+/* ---- alp_som_power_rtc_clear_stale_wake(): the real function against the register file ---- */
+
+#define RTC_STATUS_REG 0x0Eu
+#define RTC_CTRL2_REG  0x10u
+#define ST_PORF        0x01u
+#define ST_EVF         0x02u
+#define ST_AF          0x04u
+#define ST_TF          0x08u
+#define ST_UF          0x10u
+#define ST_BSF         0x20u
+#define ST_CLKF        0x40u
+#define C1_TE          0x04u
+#define C2_EIE         0x04u
+#define C2_AIE         0x08u
+#define C2_TIE         0x10u
+#define C2_UIE         0x20u
+
+static void stale_setup(uint8_t c1, uint8_t c2, uint8_t st)
+{
+	rtc_regs()[RTC_CTRL1_REG]  = c1;
+	rtc_regs()[RTC_CTRL2_REG]  = c2;
+	rtc_regs()[RTC_STATUS_REG] = st;
+}
+
+ZTEST(power_som_domains, test_clear_stale_wake_stops_the_countdown_and_the_alarm)
+{
+	stale_setup(C1_TE | RTC_EERD, C2_TIE | C2_AIE | C2_EIE, ST_TF | ST_AF | ST_EVF | ST_PORF);
+	zassert_ok(alp_som_power_rtc_clear_stale_wake(false));
+	zassert_equal(rtc_regs()[RTC_CTRL1_REG], RTC_EERD, "TE cleared, the rest of CONTROL_1 kept");
+	zassert_equal(rtc_regs()[RTC_CTRL2_REG], C2_EIE, "TIE and AIE cleared, EIE kept");
+	/* 0x7F & ~(TF | AF): a 1 is written to every other flag, so EVF and PORF survive. */
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~(ST_TF | ST_AF));
+}
+
+ZTEST(power_som_domains, test_clear_stale_wake_keep_alarm_leaves_the_alarm)
+{
+	stale_setup(C1_TE, C2_TIE | C2_AIE, ST_TF | ST_AF);
+	zassert_ok(alp_som_power_rtc_clear_stale_wake(true));
+	zassert_equal(rtc_regs()[RTC_CTRL1_REG], 0u);
+	zassert_equal(rtc_regs()[RTC_CTRL2_REG], C2_AIE, "only TIE cleared");
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~ST_TF, "AF is still latched");
+}
+
+ZTEST(power_som_domains, test_clear_stale_wake_clears_uf_only_with_uie_off)
+{
+	stale_setup(0u, 0u, ST_UF | ST_BSF | ST_CLKF);
+	zassert_ok(alp_som_power_rtc_clear_stale_wake(false));
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~ST_UF, "UF cleared with UIE off");
+
+	stale_setup(0u, C2_UIE, ST_UF);
+	zassert_ok(alp_som_power_rtc_clear_stale_wake(false));
+	zassert_equal(rtc_regs()[RTC_CTRL2_REG], C2_UIE, "UIE is not ours to clear");
+	zassert_equal(
+	    rtc_regs()[RTC_STATUS_REG], ST_UF, "UF is somebody's event with UIE on: no write");
+}
+
+ZTEST(power_som_domains, test_clear_stale_wake_writes_nothing_when_nothing_is_stale)
+{
+	stale_setup(0u, C2_EIE, ST_EVF | ST_PORF);
+	zassert_ok(alp_som_power_rtc_clear_stale_wake(false));
+	zassert_equal(rtc_regs()[RTC_CTRL2_REG], C2_EIE);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], ST_EVF | ST_PORF, "no STATUS write at all");
+}
