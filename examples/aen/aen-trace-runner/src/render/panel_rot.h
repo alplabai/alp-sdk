@@ -152,9 +152,13 @@ static inline void tr_rot_transpose8(const uint16x8_t in[8], uint16x8_t out[8])
  * 0, h % 8 == 0, h <= 32, x0 and y0 % 8 == 0 and 16-byte aligned dst / src /
  * pitch (the band copy: fw x 32 at a 32-row boundary); anything else goes
  * through tr_rot_blit(). Per 8 columns it transposes the band's 8-row
- * groups, then writes each column's whole h-px run in one go.
- * ponytail: a column run is h * 2 = 64 B; the cores' write buffers merge it, not
- * measured on silicon -- a wider run needs a taller band. */
+ * groups, then writes each column's whole h-px run in one go, in ASCENDING
+ * address order (a 32-row band: four back-to-back 16 B stores = one 64 B
+ * aligned run for the Normal-NC framebuffer's write buffer to merge; the old
+ * rot-90 form stored the groups in descending order). Same bytes either way:
+ * tests/host/test_r3d_panel_rot.c and the qemu NEON stage hold it to the
+ * scalar tr_rot_blit(); a32/payload-isa (stage_rot) times old vs ascending
+ * vs VST1 {d0-d3} x2 vs VSTM. */
 static inline __attribute__((always_inline)) void tr_rot_blit_neon(int             rot,
                                                                    uint16_t       *dst,
                                                                    uint32_t        wl,
@@ -182,14 +186,17 @@ static inline __attribute__((always_inline)) void tr_rot_blit_neon(int          
 		for (int k = 0; k < 8; k++) {
 			if (rot == 90) {
 				/* y runs the other way: reverse each 8-group and the group order. */
-				uint16_t *d = dst + tr_rot_idx(rot, wl, pw, x0 + x + k, y0 + h - 1);
+				uint16_t  *d = dst + tr_rot_idx(rot, wl, pw, x0 + x + k, y0 + h - 1);
+				uint16x8_t v[4];
 
 				for (int g = 0; g < groups; g++) {
-					uint16x8_t v = out[g][k];
+					uint16x8_t t = out[g][k];
 
-					vst1q_u16(
-					    d + (groups - 1 - g) * 8,
-					    vcombine_u16(vrev64_u16(vget_high_u16(v)), vrev64_u16(vget_low_u16(v))));
+					v[groups - 1 - g] =
+					    vcombine_u16(vrev64_u16(vget_high_u16(t)), vrev64_u16(vget_low_u16(t)));
+				}
+				for (int g = 0; g < groups; g++) {
+					vst1q_u16(d + g * 8, v[g]);
 				}
 			} else {
 				uint16_t *d = dst + tr_rot_idx(rot, wl, pw, x0 + x + k, y0);
