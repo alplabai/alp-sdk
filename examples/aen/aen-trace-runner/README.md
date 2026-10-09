@@ -277,6 +277,26 @@ controller stopped, SCL bus-clear); an HE restart in the middle of the bring-up 
 the next access. The HP leases the bus only around the stretches that use it and keeps its I2C2
 interrupt off in between, so an HE-only reset never meets an armed HP interrupt.
 
+### Volume (`TR_HP_SOUND`)
+
+The sound has a volume, 0 to 100 % of the build's `TR_SND_VOLUME` ceiling (128, the level heard as safe
+on the reworked EVK's speakers; 100 % is that level and the default, so it can only be turned down). The
+HP applies it as a software gain on every 16 ms block of mixed samples (`tr_vol_apply`, a linear ramp
+across the block, no click, no I2C: I2C2 is leased) and 0 is silence with the amps still running (SD_N is
+never toggled). The HE owns one word (`TR_MEM_VOL`, `0x0237FD80`, `src/ipc/tr_vol.h`, tagged `'VO'`: a cold
+SRAM0 reads as 100 %) and sets it from:
+
+- **The EVK's rotary encoder** (`BOARD_ENC_ROTARY`, read with `alp_qenc_*`): 5 % per detent, clockwise
+  louder, clamped 0..100.
+- **Its push switch** (`BOARD_PIN_ENCODER_SW`, `alp_gpio_*`): mute, press again for the last level.
+- **A request word over SWD** (`0x0237FD84`, `0x564F0000 | percent`), for the bench: no reflash, see
+  `a32/release/FLASH-RECIPE.md` ("Changing the volume without reflashing"). The HE validates it.
+
+The HUD shows `VOL 40%` (or `MUTE`) over its bottom row for 1.5 s whenever the level changes. The encoder
+pads are GPIO3 / GPIO4 (P3_0, P3_1, P4_3): not the GPIO5 port or the lpgpio island the HP's amps use. The
+controls are not bench-verified on this image (the decode path is #2037 / #2095); `tests/host/test_vol.c`
+covers the word, the gain and the HE's rules, `tests/host/test_hud.c` the popup.
+
 ## Tests
 
 ```sh

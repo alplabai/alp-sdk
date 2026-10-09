@@ -121,6 +121,11 @@
                                        * a different bus, a different protocol) and of hp_dbg; ends at
                                        * 0x0237FD70, still inside the shared NC page (0x0237F000..0x0237FFFF).
                                        * tr_bus2.h asserts all of that. */
+#define TR_MEM_VOL \
+	0x0237FD80u /* HE -> HP: the game sound's volume word + the bench's request word (src/ipc/
+                                       * tr_vol.h tr_vol_t, 16 B, TR_HP_SOUND builds). 16-B aligned, right after
+                                       * TR_MEM_BUS2's end (0x0237FD70) and a 16-B gap; ends at 0x0237FD90, still
+                                       * inside the shared NC page. tr_vol.h asserts all of that. */
 /* SRAM1 */
 #define TR_MEM_CAM_POOL \
 	0x02480000u /* HP: OV9281 camera frame pool (design sec 2), 2 x 256,000 B GREY8;

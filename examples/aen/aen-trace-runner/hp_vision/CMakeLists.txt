@@ -67,6 +67,7 @@ if(TR_HP_SOUND)
 		../src/audio/tr_amp_ready.c
 		../src/ipc/tr_aring.c
 		../src/ipc/tr_bus2.c
+		../src/ipc/tr_vol.c
 	)
 	target_include_directories(app PRIVATE ../sound/src)
 	# src/platform/tr_i2c2_rearm.h resets the i2c_dw driver's sync semaphore (struct

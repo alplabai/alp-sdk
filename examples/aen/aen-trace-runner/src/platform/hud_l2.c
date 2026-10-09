@@ -74,6 +74,7 @@
 #include "hud_l2.h"
 #include "bus2_he.h"
 #include "rail5v_power.h"
+#include "volume_he.h"
 
 #define CDC_REGS DT_REG_ADDR(DT_NODELABEL(cdc200))
 BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(cdc200)) == 0x49031000u, "CDC200 base (soc.h CDC_BASE)");
@@ -304,6 +305,7 @@ void tr_hud_l2_present(const tr_score_t    *s,
 
 	tr_hud_view_set(&g_view, s, banner, attract, invite);
 	tr_hud_view_zone(&g_view, z->zone, z->seq);
+	tr_hud_view_vol(&g_view, tr_volume_he_pct(), tr_volume_he_seq());
 	tr_hud_view_booth(&g_view, hs, ini);
 	g_view.character = character;
 	perf();

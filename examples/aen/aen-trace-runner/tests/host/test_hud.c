@@ -843,6 +843,46 @@ int main(void)
 		assert(memcmp(fb, ref, sizeof(fb)) == 0);
 	}
 
+	/* 9. The volume popup ("VOL n%" / "MUTE"): a change of vol_seq shows it over the bottom row for
+	 * TR_HUD_VOL_FRAMES of the 40 Hz clock, on any screen, incremental == from scratch every frame,
+	 * and the row goes back to what the screen has once it ends. */
+	for (int attract = 0; attract < 2; attract++) {
+		tr_hud_t      hv;
+		tr_hud_view_t vv;
+		unsigned      shown = 0, i;
+
+		tr_hud_init(&hv);
+		view_play(&vv, 1234u, 56u);
+		if (attract) {
+			tr_hud_view_set(&vv, &s, TR_BANNER_ATTRACT, true, TR_HUD_INVITE_NONE);
+		}
+		tr_hud_view_vol(&vv, 100u, 0u); /* the HE's boot value: no change seen, no popup */
+		for (i = 0; i < 4u; i++) {
+			tr_hud_update(&hv, fb, &vv, &dirty);
+			assert(vv.vol_age1 == 0u);
+		}
+		uint32_t before = alpha_px(fb, 0, 300, TR_HUD_W, TR_HUD_H);
+		tr_hud_view_vol(&vv, 40u, 1u);
+		for (i = 0; i < 120u; i++) {
+			uint32_t vpx = tr_hud_update(&hv, fb, &vv, &dirty);
+
+			same_as_scratch(&hv, &vv);
+			/* the HUD budget: only the bottom-row tile (720 x 52) ever repaints for it */
+			assert(vpx <= (uint32_t)TR_HUD_W * (TR_HUD_H - 300) && (dirty & ~(1u << 8)) == 0u);
+			if (vv.vol_age1 != 0u) {
+				shown++;
+				if (i == 8u) { /* fully faded in: a panel and text over the row's middle */
+					assert(alpha_px(fb, 240, 300, 480, TR_HUD_H) > 1500u);
+				}
+				if (i == 30u) { /* a second change restarts the popup, with its new text */
+					tr_hud_view_vol(&vv, 0u, 2u);
+				}
+			}
+		}
+		assert(vv.vol_age1 == 0u && shown >= 40u + 30u && shown <= 60u + 30u + 1u);
+		assert(alpha_px(fb, 0, 300, TR_HUD_W, TR_HUD_H) == before); /* the row is back */
+	}
+
 	printf("hud: %u px repainted over %u frames, host %.2f ns/px (%.1f ms total)\n",
 	       (unsigned)n,
 	       TR_HUD_POPUP_FRAMES + 403u,

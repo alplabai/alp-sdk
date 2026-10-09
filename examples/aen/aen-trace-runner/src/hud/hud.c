@@ -260,6 +260,16 @@ static void panel(const canvas_t *cv, int x, int y, int w, int h, uint32_t c, ui
 	}
 }
 
+static void clear(const canvas_t *cv, int x, int y, int w, int h)
+{
+	int y0 = y > cv->y ? y : cv->y, y1 = y + h < cv->y + cv->h ? y + h : cv->y + cv->h;
+	int x0 = x > cv->x ? x : cv->x, x1 = x + w < cv->x + cv->w ? x + w : cv->x + cv->w;
+
+	for (int yy = y0; yy < y1; yy++) {
+		memset(cv->px + (yy - cv->y) * cv->w - cv->x + x0, 0, (size_t)(x1 - x0) * sizeof(uint16_t));
+	}
+}
+
 static void rect(const canvas_t *cv, int x, int y, int w, int h, uint32_t c, uint32_t a)
 {
 	int y0 = y > cv->y ? y : cv->y, y1 = y + h < cv->y + cv->h ? y + h : cv->y + cv->h;
@@ -365,11 +375,33 @@ static bool zone_on(uint32_t frame, uint32_t start)
 /* A zone name's alpha (0..16) `age` frames into its popup: in over 8
  * frames, out over the last 16. The T_INV key holds this, not the age, so
  * the row repaints only while the name fades (~24 of its 110 frames). */
+static uint32_t fade_alpha(uint32_t age, uint32_t total)
+{
+	return age < 8u ? 2u * age + 2u : age + 16u > total ? total - age : 16u;
+}
+
 static uint32_t zone_alpha(uint32_t age)
 {
-	return age < 8u                         ? 2u * age + 2u
-	       : age + 16u > TR_HUD_ZONE_FRAMES ? TR_HUD_ZONE_FRAMES - age
-	                                        : 16u;
+	return fade_alpha(age, TR_HUD_ZONE_FRAMES);
+}
+
+/* The volume popup, over the bottom row: the row's own content is cleared, then "VOL n%" (or
+ * "MUTE") on a panel centred on the HUD, fading like a zone name. */
+static void paint_vol(const canvas_t *cv, const tr_hud_view_t *v)
+{
+	uint32_t s = fade_alpha(v->vol_age1 - 1u, TR_HUD_VOL_FRAMES);
+	char     b[16];
+
+	if (v->vol_pct == 0u) {
+		memcpy(b, "MUTE", 5);
+	} else {
+		(void)snprintf(b, sizeof(b), "VOL %u%%", (unsigned)v->vol_pct);
+	}
+	int w = tr_hud_text_w(TR_HUD_FONT_MED, b);
+
+	clear(cv, 0, INV_Y, TR_HUD_W, TR_HUD_H - INV_Y);
+	panel(cv, TR_HUD_W / 2 - w / 2 - 12, INV_Y, w + 24, INV_PANEL_H, C_PANEL, (A_PANEL * s + 8u) / 16u);
+	text_c(cv, TR_HUD_FONT_MED, TR_HUD_W / 2, INV_Y + 2, b, v->vol_pct == 0u ? C_RED : C_WHITE, s);
 }
 
 /* A zone's name, entering (P15): in its zone's colour, centred on x; a
@@ -834,6 +866,9 @@ static void paint(const canvas_t      *cv,
 		}
 		break;
 	}
+	if (v->vol_age1 != 0u) {
+		paint_vol(cv, v);
+	}
 }
 
 /* ---------------------------------------------------------------- tiles
@@ -925,6 +960,11 @@ tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, ui
 		}
 		return k;
 	default: /* T_INV */
+		if (v->vol_age1 != 0u) { /* the volume popup covers the row, whatever the screen */
+			return fnv(fnv(fnv(fnv(k, 9u), fade_alpha(v->vol_age1 - 1u, TR_HUD_VOL_FRAMES)),
+			               v->vol_pct),
+			           v->vol_seq);
+		}
 		if (v->mode == TR_HUD_PLAY && zone_on(frame, zone_start)) {
 			return fnv(fnv(fnv(k, 3u), zone_alpha(frame - zone_start)), v->zone);
 		}
@@ -999,6 +1039,7 @@ void tr_hud_init(tr_hud_t *h)
 	memset(h, 0, sizeof(*h));
 	h->popup_start = 0u - TR_HUD_POPUP_FRAMES; /* no popup running */
 	h->zone_start  = 0u - TR_HUD_ZONE_FRAMES;
+	h->vol_start   = 0u - TR_HUD_VOL_FRAMES;
 }
 
 static uint32_t tile_area(int t)
@@ -1010,7 +1051,7 @@ static uint32_t tile_area(int t)
 _Static_assert(T_POP == T_MIDL + 1 && T_MIDR == T_POP + 1 && T_STRIP == T_MIDR + 1,
                "the card's middle tiles (and the tagline strip's end) are consecutive");
 
-uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32_t *dirty)
+uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, tr_hud_view_t *v, uint32_t *dirty)
 {
 	uint32_t f = tr_hz_to40(h->frame++), px = 0, d = 0; /* 40 Hz frames (hud.h) */
 	int      t0 = h->next;
@@ -1023,6 +1064,11 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32
 		h->zone_seq   = v->zone_seq;
 		h->zone_start = f;
 	}
+	if (v->vol_seq != h->vol_seq) {
+		h->vol_seq   = v->vol_seq;
+		h->vol_start = f;
+	}
+	v->vol_age1 = f - h->vol_start < TR_HUD_VOL_FRAMES ? (uint16_t)(f - h->vol_start + 1u) : 0u;
 	if (!h->drawn) {
 		/* nothing on screen is ours yet: every tile mismatches once */
 		for (int t = 0; t < T_N; t++) {
@@ -1115,6 +1161,12 @@ void tr_hud_view_booth(tr_hud_view_t *v, const tr_hiscore_t *hs, const tr_initia
 		v->ini  = *ini;
 		v->mode = TR_HUD_INITIALS;
 	}
+}
+
+void tr_hud_view_vol(tr_hud_view_t *v, uint8_t pct, uint32_t seq)
+{
+	v->vol_pct = pct;
+	v->vol_seq = seq;
 }
 
 void tr_hud_view_zone(tr_hud_view_t *v, uint8_t zone, uint32_t seq)

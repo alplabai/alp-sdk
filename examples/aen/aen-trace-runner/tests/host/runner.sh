@@ -150,7 +150,7 @@ skip() {
 	if [ "${TR_REQUIRE_CROSS:-0}" = 1 ]; then rc=1; fi
 }
 R3D_SRC="src/render/sprite.c src/render/proj.c src/render/r3d_math.c src/render/r3d_raster.c src/render/r3d_scene.c src/render/r3d_rig.c src/render/cam_pip.c"
-AUDIO_SRC="src/audio/tr_audio.c src/ipc/tr_aring.c"
+AUDIO_SRC="src/audio/tr_audio.c src/ipc/tr_aring.c src/ipc/tr_vol.c"
 WARN="-std=c11 -Wall -Wextra -Wdouble-promotion -Werror -ffp-contract=off -O2"
 # r3d_raster.c at the renderer's RASTER_OPT (a32/renderer/Makefile), the rest
 # at -O2 like the image: the A32 r3d tests prove the goldens as shipped.

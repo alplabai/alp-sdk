@@ -68,6 +68,9 @@ typedef struct {
 	uint32_t popup_seq;
 	uint8_t  zone;     /* the world zone (src/game/zone.h) ... */
 	uint32_t zone_seq; /* ... and its entry count: a change shows its name */
+	uint8_t  vol_pct;  /* the game sound's volume, percent (0 = mute) ... */
+	uint32_t vol_seq;  /* ... and its change count: a change shows "VOL n%" for TR_HUD_VOL_FRAMES */
+	uint16_t vol_age1; /* tr_hud_update()'s: frames since that change + 1, 0 = no popup running */
 	uint32_t score, metres, best;
 	char     perf[TR_PERF_LINES][TR_PERF_COLS]; /* NUL-terminated, "" = blank line */
 	int16_t  pwr[TR_PWR_N];                     /* the power graph, oldest first (see TR_PWR_N) */
@@ -98,6 +101,8 @@ typedef struct {
 	uint32_t popup_start;       /* 40 Hz frame (below) the current popup started */
 	uint32_t zone_seq;          /* last zone_seq seen */
 	uint32_t zone_start;        /* 40 Hz frame the zone name popup started */
+	uint32_t vol_seq;           /* last vol_seq seen */
+	uint32_t vol_start;         /* 40 Hz frame the volume popup started */
 	bool     drawn;             /* false: every tile repaints on the next update */
 	uint32_t budget; /* px repainted per update at most (0: no cap); see tr_hud_update() */
 	int      next;   /* the tile a capped update stopped at */
@@ -112,6 +117,7 @@ typedef struct {
 #define TR_HUD_POPUP_FRAMES 32u /* 0.8 s */
 #define TR_HUD_ZONE_FRAMES \
 	110u /* 2.75 s: a zone's name on entry (P15), in the row under the play field's centre */
+#define TR_HUD_VOL_FRAMES 	60u /* 1.5 s: "VOL n%" over the bottom row (every screen) when the volume changes */
 #define TR_HUD_BLINK_FRAMES 40u /* invitation period, 1 s, on for the first 28 */
 #define TR_HUD_PAGE_FRAMES \
 	240u /* 6 s: the attract card turns between the logo and the high scores */
@@ -142,6 +148,11 @@ void tr_hud_view_booth(tr_hud_view_t *v, const tr_hiscore_t *hs, const tr_initia
  * of the invitation. After tr_hud_view_set(). */
 void tr_hud_view_zone(tr_hud_view_t *v, uint8_t zone, uint32_t seq);
 
+/* view <- the game sound's volume (percent) and its change count (tr_vol_t.seq): the bottom row
+ * shows "VOL n%" (or "MUTE" at 0) for TR_HUD_VOL_FRAMES whenever seq changes, over whatever the
+ * screen has there. A seq that never moves shows nothing. */
+void tr_hud_view_vol(tr_hud_view_t *v, uint8_t pct, uint32_t seq);
+
 void tr_hud_init(tr_hud_t *h);
 
 /* One presented frame: repaint the tiles that changed into fb (TR_HUD_W x
@@ -150,7 +161,7 @@ void tr_hud_init(tr_hud_t *h);
  * a frame stops before the tile that would pass it (the first dirty tile
  * always paints) and the next frame resumes there: a screen change spreads
  * over a few frames instead of stalling one. */
-uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32_t *dirty);
+uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, tr_hud_view_t *v, uint32_t *dirty);
 
 /* The whole HUD painted from scratch for `v` at hud frame `frame`, the
  * popups started at popup_start / zone_start (the reference tr_hud_update()

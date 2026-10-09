@@ -60,6 +60,7 @@ target_sources(app PRIVATE
 	../src/audio/tr_audio.c
 	../src/audio/tr_amp_ready.c
 	../src/ipc/tr_aring.c
+	../src/ipc/tr_vol.c
 )
 target_include_directories(app PRIVATE ../src)
 # Synth build (bench A/B): TR_SND_V2=OFF renders the first synth version;

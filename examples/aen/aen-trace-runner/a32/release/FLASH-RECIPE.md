@@ -248,6 +248,39 @@ line reads `I2C2 leased by the HP and returned within one frame: back on the HE`
    sees the new `WANT`, offers a new token, and the bring-up runs again. An HE-only reset still
    reconfigures I2C1 under the running camera exactly as before (`alp,i2c-handover`): reset both.
    (An HE reset inside the HP's bring-up is covered by the host tests, not by a bench step.)
+5. Volume (record `TR_MEM_VOL` = `0x0237FD80`, `src/ipc/tr_vol.h`): HE console `[vol] 100% at 0x0237fd80: pads 0,
+   encoder ok, switch ok`; over SWD `+0x00` `vol` = `0x564F0064`, `+0x08` `rejects` 0, `+0x0C` `seq` 0. Turn the
+   encoder: 5 % a detent, `[vol] 95% (seq 1)`, the HUD shows `VOL 95%` for 1.5 s over its bottom row, `vol`
+   follows, and the sound gets quieter inside one 16 ms block with no click. Press the switch: `MUTE`, the
+   amps keep running (`hp_i2s_fu` stays 0, SD_N is never touched), press again: the last level. If a clockwise
+   turn lowers the volume, swap the two `gpios` of `tr_enc` in `volume_he.overlay`. **Not bench-verified**:
+   the rotary decode (gpio-qdec over GPIO3 P3_0/P3_1, #2037 / #2095) and the switch (GPIO4 P4_3) have never
+   run in this image; if the encoder is dead, the request word below still works.
+
+**Changing the volume without reflashing (any SWD probe, HE or HP running, nothing halted).** The sound's
+volume is 0..100 % of the build's `TR_SND_VOLUME` ceiling (128, the level heard as safe on the 2026W36-0002
+speakers; 100 % is that level, the word can only turn it down). Write the REQUEST word, never `vol`:
+the HE is `vol`'s only writer and puts its own level back on the next frame.
+
+```
+J-Link> w4 0x0237FD84, 0x564F001E     // 30 %      (0x564F0000 | percent)
+J-Link> mem32 0x0237FD80, 4           // vol, req, rejects, seq
+```
+
+| Level | `req` |
+| --- | --- |
+| mute (amps keep running) | `0x564F0000` |
+| 25 % | `0x564F0019` |
+| 50 % | `0x564F0032` |
+| 75 % | `0x564F004B` |
+| 100 % (default) | `0x564F0064` |
+
+The HE adopts a request when the word CHANGES: writing the value it already holds again does nothing, and
+writing `0` first is the way to resend after a local change. Anything without the `0x564F` tag, or with a
+percent above 100, is refused: `rejects` (`+0x08`) counts it and the level stays. A `req` left over from
+before an HE boot is ignored (the HE records it at boot), so write after the HE console says `[vol]`.
+A cold SRAM0 reads as the default, 100 %: a garbage `vol` word is never a level. Because the
+change goes through the HE, it shows on the HUD and bumps `seq` (`+0x0C`).
 
 ## Preconditions
 
