@@ -1,0 +1,25 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# alp,pad-config -- a pinctrl state with no driver of its own.
+
+description: |
+  Holds a pinctrl state (`pinctrl-0` / `pinctrl-names`) for pads that a portable-API
+  consumer reads through a driver which never applies pinctrl itself.
+
+  On the Alif Ensemble a pad's input buffer (REN) is on only once pinctrl sets it, and
+  neither gpio_dw nor Zephyr's gpio-qdec applies a state, so an input read through them is
+  idle for ever. No driver binds to this node: the app applies the state with
+  pinctrl_apply_state(PINCTRL_DT_DEV_CONFIG_GET(node), PINCTRL_STATE_DEFAULT), because the
+  SDK has no portable pad-config API.
+
+  Example (examples/aen/aen-trace-runner/volume_he.overlay):
+    tr_pads: tr-pads {
+        compatible = "alp,pad-config";
+        pinctrl-0 = <&pinctrl_tr_enc>;
+        pinctrl-names = "default";
+    };
+
+compatible: "alp,pad-config"
+
+include: [base.yaml, pinctrl-device.yaml]

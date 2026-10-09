@@ -26,7 +26,7 @@
 
 #include "../ipc/tr_vol.h"
 
-#define ENC_NODE DT_NODELABEL(tr_enc)
+#define ENC_NODE DT_NODELABEL(tr_pads)
 PINCTRL_DT_DEFINE(ENC_NODE);
 
 static volatile tr_vol_t *const s_rec = (volatile tr_vol_t *)TR_MEM_VOL;

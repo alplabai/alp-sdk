@@ -10,8 +10,8 @@
  * the volume on the bench, swap the two `gpios` entries of tr_enc.
  *
  * The pads need their input buffer on (pinctrl `input-enable`, the REN trap): src/platform/
- * volume_he.c applies pinctrl_tr_enc through tr_enc's pinctrl-0, since neither gpio_dw nor
- * gpio-qdec applies a pinctrl state itself.
+ * volume_he.c applies pinctrl_tr_enc through tr_pads' pinctrl-0 (binding alp,pad-config), since
+ * neither gpio_dw nor gpio-qdec applies a pinctrl state itself.
  */
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
@@ -39,14 +39,19 @@
 		alp-qenc0 = &tr_enc;
 	};
 
+	/* No driver: src/platform/volume_he.c applies the state (pinctrl_apply_state). */
+	tr_pads: tr-pads {
+		compatible = "alp,pad-config";
+		pinctrl-0 = <&pinctrl_tr_enc>;
+		pinctrl-names = "default";
+	};
+
 	/* Software quadrature decode (the SoC's UTIMER QEC block is an edge counter, not a decoder,
 	 * #2037): one count per detent. idle-poll-time-us is required, gpio_dw has no both-edge
 	 * interrupt (see examples/aen/aen-qenc-readout/boards/*.overlay). */
 	tr_enc: tr-enc {
 		compatible = "gpio-qdec";
 		gpios = <&gpio3 1 GPIO_ACTIVE_HIGH>, <&gpio3 0 GPIO_ACTIVE_HIGH>;
-		pinctrl-0 = <&pinctrl_tr_enc>;
-		pinctrl-names = "default";
 		steps-per-period = <4>;
 		zephyr,axis = <INPUT_REL_WHEEL>;
 		sample-time-us = <500>;
