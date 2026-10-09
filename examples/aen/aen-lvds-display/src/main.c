@@ -306,8 +306,7 @@ int main(void)
 	}
 
 	if (bridge_ok) {
-		printk("sn65dsi83 recoveries since boot: %u
-", sn65dsi83_recovery_count(bridge));
+		printk("sn65dsi83 recoveries since boot: %u\n", sn65dsi83_recovery_count(bridge));
 	}
 
 	/* Touch is reported, not gated: a dead touch controller must not hide a
