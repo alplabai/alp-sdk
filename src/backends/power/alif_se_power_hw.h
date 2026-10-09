@@ -81,7 +81,8 @@ void alif_se_hw_rtc_int_disarm(void);
  * wake source fired before power was removed): the wake pad is disarmed again, and
  * RTSS_HE_CTRL and the core state are put back exactly as found, all before
  * interrupts are re-enabled.  A failure to arm the pad returns its error without
- * entering.
+ * entering, and so does a pad that already reads asserted once the edge is armed
+ * (ALP_ERR_BUSY: the RV-3028 fired before the interrupt existed).
  */
 alp_status_t alif_se_hw_enter_ewic(bool rtc_int);
 

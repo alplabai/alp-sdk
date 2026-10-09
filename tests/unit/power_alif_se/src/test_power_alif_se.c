@@ -304,6 +304,13 @@ alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags)
 }
 
 static bool g_porf;
+static bool g_flags_pending;
+
+alp_status_t alp_som_power_rtc_flags_pending(bool *pending)
+{
+	*pending = g_flags_pending;
+	return ALP_OK;
+}
 
 alp_status_t alp_som_power_rtc_porf(bool *porf)
 {
@@ -417,7 +424,8 @@ static void reset_fakes(void)
 	g_set_calls = 0;
 	memset(&g_set, 0, sizeof(g_set));
 	memset(&g_rec_at_set, 0, sizeof(g_rec_at_set));
-	g_porf = false;
+	g_porf          = false;
+	g_flags_pending = false;
 
 	g_countdown_ready = true;
 	g_rtc_int_armed   = false;
@@ -1346,4 +1354,35 @@ ZTEST(power_alif_se, test_stale_standby_record_is_discarded_after_rtc_power_loss
 	rec.mode = (uint32_t)ALP_POWER_MODE_STOP;
 	g_porf   = true;
 	zassert_true(alp_som_power_wake_decode_i2c(&rec));
+}
+
+ZTEST(power_alif_se, test_rtc_wake_already_spent_before_entry_is_refused)
+{
+	/* The countdown started at step 5 fired before the edge interrupt existed: the
+	 * flag is latched.  Sleeping on it would never wake. */
+	g_flags_pending     = true;
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
+	assert_unwound();
+	zassert_equal(ev_count(EV_CANCEL_RTC_TIMER), 1u);
+	zassert_equal(ev_count(EV_SET_OFF_CFG), 2u, "the profile was written, so it is written back");
+
+	/* An LPTIMER-only wake never looks at the RV-3028 flags. */
+	reset_fakes();
+	g_flags_pending     = true;
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+}
+
+ZTEST(power_alif_se, test_entry_refusing_an_already_asserted_int_unwinds)
+{
+	/* The entry re-reads /INT with the edge armed (hw seam) and answers BUSY. */
+	g_enter_rc          = ALP_ERR_BUSY;
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
+	zassert_equal(ev_count(EV_ENTER), 1u, "the entry itself refused");
+	zassert_equal(ev_count(EV_RESTORE), 1u);
+	zassert_false(g_rec_valid);
+	zassert_equal(ev_count(EV_DISARM_INT_PAD), 1u);
+	zassert_equal(ev_count(EV_CANCEL_RTC_TIMER), 1u);
 }

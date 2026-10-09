@@ -397,6 +397,27 @@ alp_status_t alp_som_power_rtc_porf(bool *porf)
 	return ALP_OK;
 }
 
+alp_status_t alp_som_power_rtc_flags_pending(bool *pending)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   st = 0, c2 = 0;
+
+	if (pending == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	*pending = false;
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_STATUS, &st) != 0 ||
+	    i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
+		return ALP_ERR_IO;
+	}
+	*pending = ((st & RV3028_STATUS_TF) && (c2 & RV3028_CTRL2_TIE)) ||
+	           ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE));
+	return ALP_OK;
+}
+
 alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags)
 {
 	const struct i2c_dt_spec *i2c = rtc_i2c();

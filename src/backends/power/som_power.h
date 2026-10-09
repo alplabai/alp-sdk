@@ -235,6 +235,10 @@ alp_status_t alp_som_power_rtc_int_armed(bool *armed);
  *  cold-boot wake path. */
 alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags);
 
+/** True when an enabled RV-3028 countdown / alarm flag (TF / AF) is already latched.
+ *  Read only: nothing is cleared, so the wake decode still sees it. */
+alp_status_t alp_som_power_rtc_flags_pending(bool *pending);
+
 /** RV-3028 calendar as seconds since 2000-01-01 00:00:00. */
 alp_status_t alp_som_power_rtc_seconds(uint32_t *seconds);
 

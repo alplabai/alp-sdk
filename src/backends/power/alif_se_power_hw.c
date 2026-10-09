@@ -293,6 +293,20 @@ static alp_status_t rtc_int_open_locked(void)
 		irq_enable(HW_LPGPIO_COMB_IRQ);
 		_comb_irq_opened_by_us = true;
 	}
+
+	/* The RV-3028 countdown / alarm was started BEFORE this edge interrupt existed,
+	 * and an edge that happened in between is gone.  /INT is held low until the flag
+	 * is cleared, so re-read the pad now, with the edge already armed and interrupts
+	 * off: an asserted /INT is a wake that already happened, and sleeping on it would
+	 * never wake.  An unreadable pad is refused too. */
+	int level = gpio_pin_get_dt(spec);
+
+	if (level > 0) {
+		return ALP_ERR_BUSY;
+	}
+	if (level < 0) {
+		return ALP_ERR_IO;
+	}
 	return ALP_OK;
 }
 

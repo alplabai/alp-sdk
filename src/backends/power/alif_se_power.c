@@ -94,6 +94,7 @@
 #include <string.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/sys/printk.h>
 
 #include <alp/backend.h>
 #include <alp/chips/rv3028c7.h>
@@ -152,8 +153,10 @@
  *         (+4.53 %, bench, E1M-AEN803, 2026-10-08), inside that bound.
  *   LFXO  32775 Hz = 32768 + 200 ppm; Y1 measured +61 ppm (RV-3028 reference) /
  *         +141 ppm (HE reference) at XTAL32K_CAP_CONT = 63.
- * Cost: on LFRC a short wake can be up to ~10 % late, which is the price of never
- * being early on a clock this poor; use the RV-3028 for an accurate wake. */
+ * Cost: counting at 36045 Hz, a clock at the BOTTOM of the trim range (-5 %, about
+ * 31130 Hz) sleeps up to ~16 % longer than asked; the 34251.7 Hz this module
+ * measured gives ~5 %.  That is the price of never being early on a clock this
+ * poor; use the RV-3028 for an accurate wake. */
 #define ALIF_SE_LFRC_HZ_MAX 36045u
 #define ALIF_SE_LFXO_HZ_MAX 32775u
 
@@ -488,6 +491,37 @@ build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_pla
  * (it refused to restore memory_blocks bit 20 on the bench), and a wrong dcdc_voltage
  * or vdd_ioflex_3V3 is a hardware hazard, not a power-saving miss: any difference
  * abandons the sleep. */
+/* Name every member that differs, expected vs got, so the first bench run can tell an
+ * SE that rewrites only what it owns (stby_clk_src / stby_clk_freq are "selected
+ * automatically") from one that drops a retention or wake bit.  Failure path only. */
+#define OFF_DIFF(field) \
+	do { \
+		if ((uint32_t)want->field != (uint32_t)got->field) { \
+			printk("alif_se_power: OFF profile %s: wrote 0x%08x, SE reports 0x%08x\n", \
+			       #field, \
+			       (unsigned)want->field, \
+			       (unsigned)got->field); \
+		} \
+	} while (0)
+
+static void off_profile_log_diff(const off_profile_t *want, const off_profile_t *got)
+{
+	OFF_DIFF(power_domains);
+	OFF_DIFF(dcdc_voltage);
+	OFF_DIFF(dcdc_mode);
+	OFF_DIFF(aon_clk_src);
+	OFF_DIFF(stby_clk_src);
+	OFF_DIFF(stby_clk_freq);
+	OFF_DIFF(memory_blocks);
+	OFF_DIFF(ip_clock_gating);
+	OFF_DIFF(phy_pwr_gating);
+	OFF_DIFF(vdd_ioflex_3V3);
+	OFF_DIFF(wakeup_events);
+	OFF_DIFF(ewic_cfg);
+	OFF_DIFF(vtor_address);
+	OFF_DIFF(vtor_address_ns);
+}
+
 static bool off_profile_matches(const off_profile_t *want, const off_profile_t *got)
 {
 	return got->power_domains == want->power_domains && got->dcdc_voltage == want->dcdc_voltage &&
@@ -750,12 +784,26 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 		goto unwind;
 	}
 	if (!off_profile_matches(&off, &readback)) {
+		off_profile_log_diff(&off, &readback);
 		s = ALP_ERR_IO;
 		goto unwind;
 	}
 	s = reassert_retention(&plan);
 	if (s != ALP_OK) {
 		goto unwind;
+	}
+
+	/* The countdown / alarm started above may already have fired.  A latched, enabled
+	 * flag means the wake is spent (and with pulse mode the pad may even have gone
+	 * high again), so do not sleep on it.  The entry re-reads the pad too, with the
+	 * edge interrupt armed. */
+	if ((plan.hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
+		bool spent = false;
+
+		if (alp_som_power_rtc_flags_pending(&spent) == ALP_OK && spent) {
+			s = ALP_ERR_BUSY;
+			goto unwind;
+		}
 	}
 
 	/* 7. Enter.  Interrupts are off and the wake pad is armed inside; this does not

@@ -98,7 +98,7 @@ the pm_policy backend when it is built.
 | Bit | Armed by | Notes |
 |---|---|---|
 | `ALP_POWER_WAKE_RTC` | on-module RV-3028, `INT` -> P15_0 -> `WE_LPGPIO0` | primary RTC (the internal LPRTC is not trusted: ER001 / ER002, LFRC-only boot). With `wake_after_ms == 0` the caller's own alarm / countdown must already be armed, or the request is `ALP_ERR_INVAL`. |
-| `ALP_POWER_WAKE_TIMER` | LPTIMER (`alp,power-wake-timer`, `WE_LPTIMER0`) for `wake_after_ms < 1000` | runs from the AON low-frequency clock. `wake_after_ms` is a **minimum**: the tick count is rounded up against the fastest the clock can run (LFRC 36045 Hz = +10 %, the top of its trim range; measured 34251.7 Hz; LFXO 32775 Hz), so on LFRC a short wake can be up to ~10 % late but is never early. |
+| `ALP_POWER_WAKE_TIMER` | LPTIMER (`alp,power-wake-timer`, `WE_LPTIMER0`) for `wake_after_ms < 1000` | runs from the AON low-frequency clock. `wake_after_ms` is a **minimum**: the tick count is rounded up against the fastest the clock can run (LFRC 36045 Hz = +10 %, the top of its trim range; measured 34251.7 Hz; LFXO 32775 Hz), so on LFRC a short wake is never early but can be late: ~5 % at the 34251.7 Hz this module measured, up to ~16 % if the clock sits at the bottom of the trim range (-5 %, ~31130 Hz). |
 | (timed wake >= 1 s) | RV-3028 countdown (`rv3028c7_timer_start`) | whole seconds, rounded up. Needs the chip context bound (`alp_som_power_bind_rv3028`). |
 
 A timed wake reports the source the caller asked for, whichever hardware serves it:

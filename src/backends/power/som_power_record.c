@@ -73,6 +73,11 @@ BUILD_ASSERT(sizeof(sompd_bkram_t) <= DT_REG_SIZE(DT_NODELABEL(bkram)),
              "som_power: the BKRAM layout must fit the Utility SRAM");
 #endif
 
+/* The record layout is the contract between the sleep that writes it and the next
+ * boot that reads it (and the CRC covers everything before `crc`). */
+BUILD_ASSERT(sizeof(alp_som_pd_record_t) == 52, "wake record must be 52 bytes");
+BUILD_ASSERT(offsetof(alp_som_pd_record_t, crc) == 48, "wake record CRC must sit at offset 48");
+
 static sompd_bkram_t _bk SOMPD_BKRAM_SECTION;
 #define _store (_bk.record)
 
