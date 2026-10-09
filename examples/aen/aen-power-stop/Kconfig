@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Bench variants of aen-power-stop (#2784 addendum 6): one variable each, chosen with a
+# config fragment (variants/<name>.conf) on top of prj.conf.
+
+mainmenu "aen-power-stop"
+
+config AEN_STOP_FIRST_RTC
+	bool "Variant (ii): run the RV-3028 countdown cycle first"
+	help
+	  Cycle order becomes RV-3028 countdown, LPTIMER, RV-3028 alarm.  If the first cycle
+	  wakes and the LPTIMER one does not, the RV-3028 INT path is sound and the
+	  LPTIMER path is the suspect (and the reverse).
+
+config AEN_STOP_LPTIMER_MS
+	int "LPTIMER cycle interval (ms)"
+	default 500
+	help
+	  Variant (iii) sets 5000 (with ALP_SDK_POWER_ALIF_SE_BENCH_LPTIMER_MAX_MS above it).
+
+config AEN_STOP_RTC_MS
+	int "RV-3028 countdown cycle length (ms)"
+	default 3000
+	help
+	  Must stay at or above the backend's LPTIMER ceiling (1000 ms, or the bench option
+	  ALP_SDK_POWER_ALIF_SE_BENCH_LPTIMER_MAX_MS) so the countdown is served by the
+	  RV-3028 and not the LPTIMER.  Variant (iii) raises the ceiling and moves this to
+	  11000 so that variant still changes ONE thing: the LPTIMER interval.
+
+source "Kconfig.zephyr"

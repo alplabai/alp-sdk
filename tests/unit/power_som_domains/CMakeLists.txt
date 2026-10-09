@@ -23,6 +23,7 @@ target_include_directories(app PRIVATE ${ALP_SDK_ROOT}/include ${ALP_SDK_ROOT}/z
 
 # Shortened so the runtime restore does not sit through the real 3.5 s settle.
 target_compile_definitions(app PRIVATE
+    CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH=1
     CONFIG_ALP_SDK_SOM_PD_WIFI_SETTLE_MS=10
     ALP_SOM_CC3501E_PING_GAP_MS=1)
 if(ALP_TEST_RAIL_OFF)

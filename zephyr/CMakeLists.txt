@@ -1237,6 +1237,13 @@ if(CONFIG_ALP_SDK_SOM_POWER AND CONFIG_OSPI_ALIF)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_flash.c)
 endif()
 
+# Alif Secure Enclave STOP / STANDBY backend for the E8 M55-HE (#2784, U7),
+# registered for alif:ensemble:e8 in the "power" class.  EXPERIMENTAL, off by
+# default; alif_se_power_hw.c is the only file that touches registers.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_ALIF_SE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/alif_se_power.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/alif_se_power_hw.c)
+
 # Operating-point-profile class ("power_profile", handle-less).  The
 # dispatcher body + the wildcard NOSUPPORT stub ride in
 # power_dispatch.c / power/zephyr_stub.c above (same ALP_SDK_POWER

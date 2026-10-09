@@ -100,6 +100,13 @@ struct alp_power_ops {
 	alp_status_t (*boot_wake_info)(alp_power_boot_info_t *out);
 };
 
+#if defined(CONFIG_ALP_SDK_POWER_PM_POLICY)
+/** The pm_policy backend's vtable (zephyr_pm_policy.c), exported so a silicon
+ *  backend that takes over the "power" class for STOP / STANDBY (alif_se_power.c)
+ *  can forward the modes it does not implement. */
+extern const alp_power_ops_t alp_power_pm_policy_ops;
+#endif
+
 /** Vtable for the handle-less operating-point-profile surface
  *  (alp_power_profile_get / alp_power_profile_set).
  *

@@ -36,6 +36,15 @@
 #include "som_power.h"
 #include "som_power_chips.h"
 
+static uint32_t g_image = 0xA1111111u; /* the "running image" */
+static unsigned g_stat_clears;
+static unsigned g_stat_clear_order, g_i2c_decode_order_seen;
+
+uint32_t alp_som_pd_image_id(void)
+{
+	return g_image;
+}
+
 #define LPGPIO DEVICE_DT_GET(DT_NODELABEL(lpgpio))
 #define GPIO11 DEVICE_DT_GET(DT_NODELABEL(gpio11))
 #define GPIO5  DEVICE_DT_GET(DT_NODELABEL(gpio5))
@@ -82,6 +91,8 @@ static uint16_t tmp_conf(void)
 static void before(void *unused)
 {
 	(void)unused;
+	g_image = 0xA1111111u;
+	alp_som_pd_bench_set(0u); /* the cell belongs to this image: a previous test must not leak */
 	alp_som_power_reset_for_test();
 	fakes_reset();
 
@@ -222,6 +233,29 @@ static void bind_all_logging(void)
 	}
 }
 
+ZTEST(power_som_domains, test_same_boot_rollback_does_not_need_the_bkram_record)
+{
+	uint32_t failed = 99u;
+
+	bind_all_logging();
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
+	zassert_not_equal(alp_som_power_quiesced(), 0u);
+
+	/* The SE call (or anything else) took BKRAM away: the record no longer loads. */
+	alp_som_pd_store_clear();
+	alp_som_pd_record_t rec;
+
+	zassert_false(alp_som_pd_store_load(&rec));
+
+	zassert_ok(alp_som_power_restore(&failed), "unwound from the in-RAM state");
+	zassert_equal(failed, 0u);
+	zassert_equal(alp_som_power_quiesced(), 0u, "every domain is active again");
+	zassert_equal(g_log_n, 12u, "6 quiesced, 6 restored");
+
+	/* Nothing quiesced and nothing recorded: still NOT_READY, not a blind restore. */
+	zassert_equal(alp_som_power_restore(NULL), ALP_ERR_NOT_READY);
+}
+
 ZTEST(power_som_domains, test_quiesce_consumers_first_restore_in_reverse)
 {
 	static const alp_power_domain_t want[] = {
@@ -317,6 +351,33 @@ ZTEST(power_som_domains, test_rollback_failure_is_reported_and_retryable)
 	zassert_equal(g_log_n, 1u);
 	zassert_equal(g_log[0], ALP_POWER_DOMAIN_EXT_FLASH);
 	zassert_equal(alp_som_power_state(ALP_POWER_DOMAIN_EXT_FLASH), ALP_SOM_PD_ACTIVE);
+}
+
+ZTEST(power_som_domains, test_a_failed_runtime_restore_keeps_the_failed_domain_for_a_retry)
+{
+	uint32_t failed = 0u;
+
+	bind_all_logging();
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
+	g_fail_restore_on = ALP_POWER_DOMAIN_EXT_FLASH;
+
+	zassert_equal(alp_som_power_restore(&failed), ALP_ERR_IO);
+	zassert_equal(failed, ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_EXT_FLASH));
+
+	/* Not cleared: the failed domain is a RUN record, in BKRAM and in RAM. */
+	alp_som_pd_record_t rec;
+
+	zassert_true(alp_som_pd_store_load(&rec));
+	zassert_equal(rec.mode, (uint32_t)ALP_POWER_MODE_RUN);
+	zassert_equal(rec.quiesced, ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_EXT_FLASH));
+
+	/* Even with the BKRAM record gone, the RAM copy lets a retry find it. */
+	alp_som_pd_store_clear();
+	g_fail_restore_on = ALP_POWER_DOMAIN_COUNT;
+	g_log_n           = 0;
+	zassert_ok(alp_som_power_restore(NULL));
+	zassert_equal(g_log_n, 1u);
+	zassert_equal(g_log[0], ALP_POWER_DOMAIN_EXT_FLASH);
 }
 
 ZTEST(power_som_domains, test_rollback_retry_record_survives_a_warm_reset)
@@ -525,6 +586,7 @@ ZTEST(power_som_domains, test_record_crc_detects_corruption)
 
 ZTEST(power_som_domains, test_boot_with_invalid_record_touches_nothing)
 {
+	g_stop_mode = 0u; /* a plain POR: STOP_MODE_STAT clear */
 	alp_power_boot_info_t info;
 
 	/* 1. Empty store: a plain POR. */
@@ -848,4 +910,601 @@ ZTEST(power_som_domains, test_nor_write_in_flight_blocks_the_quiesce)
 	g_nor.suspend_rc = -ETIMEDOUT;
 	zassert_equal(alp_som_power_quiesce(ALP_POWER_MODE_RUN, NULL), ALP_ERR_IO);
 	zassert_equal(level(LPGPIO, FLASH_RST), 1);
+}
+
+/* ---- #2784 U7: RV-3028 wake services, wake decode hooks, STANDBY records ------- */
+
+#define RTC_STATUS_REG   0x0Eu
+#define RTC_CONTROL2_REG 0x10u
+#define RTC_SF_TF        0x08u
+#define RTC_SF_AF        0x04u
+#define RTC_SF_UF        0x10u
+#define RTC_SF_PORF      0x01u
+#define RTC_C2_TIE       0x10u
+#define RTC_C2_AIE       0x08u
+
+ZTEST(power_som_domains, test_rtc_wake_service_reports_enabled_flags_and_clears)
+{
+	uint8_t flags = 0xFFu;
+
+	/* Countdown expired with TIE on: reported; every latched flag is acknowledged
+	 * with the constant mask (0 for TF, 1 for every other latchable flag). */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_TF | RTC_SF_PORF;
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_TIE;
+	zassert_ok(alp_som_power_rtc_wake_service(&flags));
+	zassert_equal(flags, RTC_SF_TF);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~RTC_SF_TF);
+
+	/* A latched flag with its interrupt enable off is no wake cause -- but it is
+	 * still cleared, or it would sit there forever. */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_AF | RTC_SF_UF;
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_TIE;
+	zassert_ok(alp_som_power_rtc_wake_service(&flags));
+	zassert_equal(flags, 0u);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~(RTC_SF_AF | RTC_SF_UF));
+
+	/* Alarm. */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_AF;
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_AIE;
+	zassert_ok(alp_som_power_rtc_wake_service(&flags));
+	zassert_equal(flags, RTC_SF_AF);
+
+	/* Nothing latched: no STATUS write at all. */
+	rtc_regs()[RTC_STATUS_REG] = RTC_SF_PORF;
+	zassert_ok(alp_som_power_rtc_wake_service(&flags));
+	zassert_equal(flags, 0u);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_PORF, "PORF untouched");
+
+	zassert_equal(alp_som_power_rtc_wake_service(NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(power_som_domains, test_rtc_int_armed_reads_control2)
+{
+	bool armed = true;
+
+	rtc_regs()[RTC_CONTROL2_REG] = 0u;
+	zassert_ok(alp_som_power_rtc_int_armed(&armed));
+	zassert_false(armed);
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_AIE;
+	zassert_ok(alp_som_power_rtc_int_armed(&armed));
+	zassert_true(armed);
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_TIE;
+	zassert_ok(alp_som_power_rtc_int_armed(&armed));
+	zassert_true(armed);
+	rtc_regs()[RTC_CONTROL2_REG] = 0x20u; /* UIE alone is not a wake source */
+	zassert_ok(alp_som_power_rtc_int_armed(&armed));
+	zassert_false(armed);
+	zassert_equal(alp_som_power_rtc_int_armed(NULL), ALP_ERR_INVAL);
+}
+
+static void set_rtc_time(uint8_t sec, uint8_t min, uint8_t hr, uint8_t day, uint8_t mon, uint8_t yr)
+{
+	rtc_regs()[0] = sec;
+	rtc_regs()[1] = min;
+	rtc_regs()[2] = hr;
+	rtc_regs()[4] = day;
+	rtc_regs()[5] = mon;
+	rtc_regs()[6] = yr;
+}
+
+ZTEST(power_som_domains, test_rtc_seconds_since_2000)
+{
+	uint32_t s = 1u;
+
+	set_rtc_time(0x00, 0x00, 0x00, 0x01, 0x01, 0x00); /* 2000-01-01 00:00:00 */
+	zassert_ok(alp_som_power_rtc_seconds(&s));
+	zassert_equal(s, 0u);
+
+	set_rtc_time(0x10, 0x00, 0x00, 0x01, 0x01, 0x00);
+	zassert_ok(alp_som_power_rtc_seconds(&s));
+	zassert_equal(s, 10u);
+
+	set_rtc_time(0x59, 0x59, 0x23, 0x31, 0x12, 0x00); /* 2000-12-31, leap year: day 365 */
+	zassert_ok(alp_som_power_rtc_seconds(&s));
+	zassert_equal(s, 365u * 86400u + 23u * 3600u + 59u * 60u + 59u);
+
+	set_rtc_time(0x00, 0x00, 0x00, 0x01, 0x03, 0x24); /* 2024-03-01: 8826 days */
+	zassert_ok(alp_som_power_rtc_seconds(&s));
+	zassert_equal(s, 8826u * 86400u);
+
+	set_rtc_time(0x00, 0x00, 0x00, 0x01, 0x03, 0x23); /* 2023-03-01: 8826 - 366 days */
+	zassert_ok(alp_som_power_rtc_seconds(&s));
+	zassert_equal(s, (8826u - 366u) * 86400u);
+
+	/* A one-second step is exactly one second (the slept-time arithmetic). */
+	uint32_t a, b;
+
+	set_rtc_time(0x59, 0x59, 0x23, 0x28, 0x02, 0x24);
+	zassert_ok(alp_som_power_rtc_seconds(&a));
+	set_rtc_time(0x00, 0x00, 0x00, 0x29, 0x02, 0x24); /* 2024-02-29 exists */
+	zassert_ok(alp_som_power_rtc_seconds(&b));
+	zassert_equal(b - a, 1u);
+}
+
+ZTEST(power_som_domains, test_rtc_seconds_rejects_garbage)
+{
+	uint32_t s = 5u;
+
+	set_rtc_time(0x7A, 0x00, 0x00, 0x01, 0x01, 0x00); /* not BCD */
+	zassert_equal(alp_som_power_rtc_seconds(&s), ALP_ERR_IO);
+	set_rtc_time(0x00, 0x00, 0x00, 0x00, 0x01, 0x00); /* day 0 */
+	zassert_equal(alp_som_power_rtc_seconds(&s), ALP_ERR_IO);
+	set_rtc_time(0x00, 0x00, 0x00, 0x01, 0x13, 0x00); /* month 13 */
+	zassert_equal(alp_som_power_rtc_seconds(&s), ALP_ERR_IO);
+	set_rtc_time(0x60, 0x00, 0x00, 0x01, 0x01, 0x00); /* second 60 */
+	zassert_equal(alp_som_power_rtc_seconds(&s), ALP_ERR_IO);
+	zassert_equal(alp_som_power_rtc_seconds(NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(power_som_domains, test_wake_gpio_is_the_rtc_int_pad)
+{
+	const struct gpio_dt_spec *g = alp_som_power_wake_gpio(ALP_POWER_DOMAIN_RTC);
+
+	zassert_not_null(g);
+	zassert_equal(g->pin, 0);
+	zassert_equal(g->port, LPGPIO);
+	zassert_equal(g->dt_flags & GPIO_ACTIVE_LOW, GPIO_ACTIVE_LOW, "/INT is active low");
+	zassert_is_null(alp_som_power_wake_gpio(ALP_POWER_DOMAIN_WIFI_BLE), "no wake input");
+	zassert_is_null(alp_som_power_wake_gpio(ALP_POWER_DOMAIN_COUNT));
+}
+
+/* The strong definitions below replace the weak no-ops in som_power.c for this
+ * image: the default (no backend) behaviour is "the record's fields pass through
+ * untouched", which test_weak_decode_defaults_pass_the_record_through proves by
+ * leaving the hooks disarmed. */
+static struct {
+	bool                armed, discard;
+	unsigned            early_calls, i2c_calls;
+	unsigned            early_order, i2c_order, seq;
+	alp_som_pd_record_t early_seen;
+} g_dec;
+
+void alp_som_power_wake_decode_early(alp_som_pd_record_t *rec)
+{
+	if (!g_dec.armed) {
+		return;
+	}
+	g_dec.early_calls++;
+	g_dec.early_order = ++g_dec.seq;
+	g_dec.early_seen  = *rec;
+	rec->wake_source |= ALP_POWER_WAKE_TIMER;
+}
+
+bool alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
+{
+	if (!g_dec.armed) {
+		return true;
+	}
+	g_dec.i2c_calls++;
+	g_dec.i2c_order = ++g_dec.seq;
+	if (g_dec.discard) {
+		return false;
+	}
+	rec->wake_source |= ALP_POWER_WAKE_RTC;
+	rec->slept_ms = 4242u;
+	return true;
+}
+
+static void poke_cycle_record(alp_power_mode_t mode)
+{
+	alp_som_pd_record_t r = {
+		.mode        = (uint32_t)mode,
+		.quiesced    = ALP_POWER_DOMAIN_BIT(ALP_POWER_DOMAIN_WIFI_BLE),
+		.armed       = ALP_POWER_WAKE_TIMER,
+		.armed_hw    = ALP_SOM_ARM_LPTIMER,
+		.armed_ms    = 500u,
+		.entry_rtc_s = 1234u,
+	};
+
+	alp_som_pd_store_save(&r);
+}
+
+/* The same record, but the way the STOP backend writes it when the NSRST syndrome bit was
+ * probed before the sleep and does clear. */
+static void poke_trusted_record(alp_power_mode_t mode)
+{
+	alp_som_pd_record_t r;
+
+	poke_cycle_record(mode);
+	zassert_true(alp_som_pd_store_load(&r));
+	r.armed_hw |= ALP_SOM_REC_NSRST_TRUSTED;
+	alp_som_pd_store_save(&r);
+}
+
+ZTEST(power_som_domains, test_weak_decode_defaults_pass_the_record_through)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec)); /* hooks disarmed: they return at once */
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_true(info.valid);
+	zassert_equal(info.wake_source, 0u, "nothing decoded: nothing claimed");
+	zassert_equal(info.slept_ms, 0u);
+}
+
+ZTEST(power_som_domains, test_boot_runs_the_decode_hooks_early_then_i2c)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(g_dec.early_calls, 1u);
+	zassert_equal(g_dec.i2c_calls, 0u, "the I2C half waits for the controller");
+	/* the hook sees the whole cycle record, armed fields included */
+	zassert_equal(g_dec.early_seen.armed_hw, ALP_SOM_ARM_LPTIMER);
+	zassert_equal(g_dec.early_seen.armed_ms, 500u);
+	zassert_equal(g_dec.early_seen.entry_rtc_s, 1234u);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_TIMER, "part 1 is already visible");
+
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_equal(g_dec.i2c_calls, 1u);
+	zassert_true(g_dec.early_order < g_dec.i2c_order);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_RTC);
+	zassert_equal(info.slept_ms, 4242u);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+
+	g_dec.armed = false;
+}
+
+ZTEST(power_som_domains, test_decode_hooks_are_not_run_without_a_valid_record)
+{
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	g_stop_mode = 0u;
+	alp_som_pd_store_clear();
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_equal(g_dec.early_calls, 0u, "a plain POR decodes nothing");
+	zassert_equal(g_dec.i2c_calls, 0u);
+
+	/* STOP record, STOP_MODE_STAT = 0: dropped before any decode. */
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0u;
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(g_dec.early_calls, 0u);
+	g_dec.armed = false;
+}
+
+ZTEST(power_som_domains, test_standby_record_is_restored_without_stop_mode_stat)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STANDBY, NULL));
+	zassert_equal(level(LPGPIO, NRST_PIN), 0);
+	alp_som_pd_record_t rec;
+	zassert_true(alp_som_pd_store_load(&rec));
+	alp_som_power_reset_for_test();
+	alp_som_pd_store_save(&rec);
+	g_stop_mode = 0u; /* the register names STOP only */
+
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STANDBY);
+	zassert_equal(level(LPGPIO, NRST_PIN), 1, "the held domain was put back, not stranded");
+}
+
+ZTEST(power_som_domains, test_record_layout_is_stable)
+{
+	zassert_equal(sizeof(alp_som_pd_record_t), 60u);
+	zassert_equal(offsetof(alp_som_pd_record_t, crc), 56u);
+}
+
+ZTEST(power_som_domains, test_discarded_decode_reports_a_plain_boot)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed   = true;
+	g_dec.discard = true;
+	poke_cycle_record(ALP_POWER_MODE_STANDBY);
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_false(info.valid, "an untrusted STANDBY record is not reported");
+	zassert_equal(info.wake_source, 0u);
+	g_dec.armed = false;
+}
+
+/* ---- A STOP wake with no usable record ------------------------------------------- */
+
+static void hold_everything(void)
+{
+	zassert_ok(gpio_pin_configure(LPGPIO, NRST_PIN, GPIO_OUTPUT_LOW));
+	zassert_ok(gpio_pin_configure(LPGPIO, PHY_PWR, GPIO_OUTPUT_LOW));
+	zassert_ok(gpio_pin_configure(LPGPIO, FLASH_RST, GPIO_OUTPUT_LOW));
+}
+
+ZTEST(power_som_domains, test_stop_wake_without_a_record_releases_every_pad)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	alp_som_pd_store_clear();
+	hold_everything();
+	g_stop_mode = 0x10u; /* STOP wake, but the SRAM did not keep the record */
+
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_equal(level(LPGPIO, NRST_PIN), 1, "CC3501E nRESET released");
+	zassert_equal(level(LPGPIO, PHY_PWR), 1, "PHY powered");
+	zassert_equal(level(LPGPIO, FLASH_RST), 1, "NOR out of reset");
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_true(info.valid, "reported, not silent");
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+	zassert_equal(info.wake_source, 0u, "the cause is unknown");
+	zassert_not_equal(info.quiesced_domains, 0u);
+	zassert_equal(info.restore_failed_domains, 0u);
+	zassert_equal(info.quiesced_domains, info.restored_domains);
+}
+
+ZTEST(power_som_domains, test_corrupt_record_on_a_stop_wake_is_a_blind_restore)
+{
+	alp_power_boot_info_t info;
+	alp_som_pd_record_t   r = { .magic = ALP_SOM_PD_RECORD_MAGIC, .mode = 4u, .crc = 1u };
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	hold_everything();
+	alp_som_pd_store_poke(&r); /* right magic, wrong CRC */
+	g_stop_mode = 0x10u;
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(level(LPGPIO, NRST_PIN), 1);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_true(info.valid);
+}
+
+ZTEST(power_som_domains, test_plain_por_without_a_record_still_touches_nothing)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	alp_som_pd_store_clear();
+	hold_everything();
+	g_stop_mode = 0u; /* not a STOP wake */
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_equal(level(LPGPIO, NRST_PIN), 0, "left exactly as the reset left it");
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_false(info.valid);
+}
+
+/* ---- A pin reset is not a wake -------------------------------------------------- */
+
+static uint32_t g_syndrome; /* what AON.RTSS_HE_RESET reads this boot */
+
+uint32_t alp_som_power_reset_syndrome_take(void)
+{
+	uint32_t v = g_syndrome;
+
+	g_syndrome = 0u; /* acknowledged: read-to-clear */
+	return v;
+}
+
+static void wake_boot(alp_power_boot_info_t *info)
+{
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_restore_i2c(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(info));
+}
+
+ZTEST(power_som_domains, test_se_initiated_reset_after_stop_is_a_wake)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	g_syndrome  = 0u; /* POR / Secure-Enclave-initiated */
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_RTC);
+	g_dec.armed = false;
+}
+
+ZTEST(power_som_domains, test_pin_reset_after_stop_is_an_aborted_sleep_not_a_wake)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	hold_everything();
+	zassert_ok(alp_som_power_quiesce(ALP_POWER_MODE_STOP, NULL));
+	alp_som_pd_record_t rec;
+	zassert_true(alp_som_pd_store_load(&rec));
+	rec.armed_hw |= ALP_SOM_REC_NSRST_TRUSTED; /* probed before the sleep: the bit does clear */
+	alp_som_power_reset_for_test();
+	alp_som_pd_store_save(&rec);
+	g_stop_mode = 0x10u;
+	g_syndrome  = 1u; /* NSRST asserted: a debugger nRESET */
+	wake_boot(&info);
+
+	zassert_true(info.valid, "the cycle is reported");
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN, "the sleep was not realised");
+	zassert_equal(info.wake_source, 0u, "no wake cause, even if the decode found a flag");
+	zassert_equal(info.slept_ms, 0u);
+	zassert_not_equal(info.quiesced_domains, 0u);
+	zassert_equal(info.quiesced_domains, info.restored_domains, "the domains are still put back");
+	zassert_equal(level(LPGPIO, NRST_PIN), 1);
+	zassert_equal(g_syndrome, 0u, "the syndrome was acknowledged");
+	g_dec.armed = false;
+}
+
+ZTEST(power_som_domains, test_a_stale_nsrst_bit_never_turns_a_wake_into_an_aborted_sleep)
+{
+	alp_power_boot_info_t info;
+
+	/* The syndrome bit could not be shown to clear before the sleep (no TRUSTED flag, e.g.
+	 * a write-only field that reads 1 forever): a set bit at the next boot is not a pin reset. */
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	g_syndrome  = 1u;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP, "still a wake");
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_RTC);
+	g_dec.armed = false;
+}
+
+ZTEST(power_som_domains, test_pin_reset_with_no_record_is_not_classified_the_bit_is_unproven)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	alp_som_pd_store_clear();
+	hold_everything();
+	g_stop_mode = 0x10u;
+	g_syndrome  = 1u;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	/* With no record there is no proof the bit clears, so it is not read as a pin reset. */
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+	zassert_equal(info.wake_source, 0u);
+	zassert_equal(level(LPGPIO, NRST_PIN), 1, "still released");
+}
+
+ZTEST(power_som_domains, test_only_the_pin_bit_marks_an_external_reset)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	poke_trusted_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	g_syndrome  = 4u; /* reset request to the power domain: not proven to be a pin reset */
+	wake_boot(&info);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+}
+
+ZTEST(power_som_domains, test_run_cycle_record_ignores_the_syndrome)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	poke_cycle_record(ALP_POWER_MODE_RUN);
+	g_stop_mode = 0u;
+	g_syndrome  = 1u;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+}
+
+/* ---- Image identity and the sticky STOP_MODE_STAT (bench U8d) -------------------------- */
+
+bool alp_som_power_stop_mode_stat_clear(void)
+{
+	g_stat_clears++;
+	g_stat_clear_order = ++g_dec.seq;
+	g_stop_mode &= ~0x10u; /* W1C of bit 4 only */
+	return true;
+}
+
+ZTEST(power_som_domains, test_stop_mode_stat_is_acknowledged_after_the_decode)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed   = true;
+	g_stat_clears = 0u;
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	wake_boot(&info);
+	zassert_equal(g_stat_clears, 1u);
+	zassert_true(g_stat_clear_order > g_dec.i2c_order, "after both decode parts");
+	zassert_equal(g_stop_mode & 0x10u, 0u, "the sticky status is gone");
+	zassert_equal(g_stop_mode & 0x1u, 0u, "and STOP_MODE_CTRL (bit 0) was never touched");
+	g_dec.armed = false;
+	(void)g_i2c_decode_order_seen;
+}
+
+ZTEST(power_som_domains, test_a_second_reset_after_a_wake_is_not_a_wake)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	hold_everything();
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	wake_boot(&info);
+	zassert_true(info.valid);
+
+	/* A flash / debugger reset after that: the status was acknowledged, there is no record. */
+	hold_everything();
+	wake_boot(&info);
+	zassert_false(info.valid, "not a STOP wake");
+	zassert_equal(level(LPGPIO, NRST_PIN), 0, "and nothing was blindly released");
+}
+
+ZTEST(power_som_domains, test_another_images_bench_cell_starts_a_fresh_run)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_image = 0xA1111111u;
+	alp_som_pd_store_clear();
+	alp_som_pd_bench_set(3u);
+	zassert_equal(alp_som_pd_bench_count(), 3u);
+
+	/* A clean flash of a different image on top, with the old run's STOP_MODE_STAT still set. */
+	g_image = 0xB2222222u;
+	zassert_equal(alp_som_pd_bench_count(), 0u, "another image's counter reads 0");
+	zassert_true(alp_som_pd_bkram_foreign());
+	hold_everything();
+	g_stop_mode = 0x10u;
+	wake_boot(&info);
+	zassert_false(info.valid, "the flash's reset is not reported as a STOP wake");
+	zassert_equal(level(LPGPIO, NRST_PIN), 1, "but what the old run left held is released");
+	zassert_false(alp_som_pd_bkram_foreign(), "adopted");
+	zassert_equal(alp_som_pd_bench_count(), 0u);
+	g_image = 0xA1111111u;
+}
+
+ZTEST(power_som_domains, test_a_record_from_another_image_is_dropped)
+{
+	alp_power_boot_info_t info;
+	alp_som_pd_record_t   rec;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_image = 0xA1111111u;
+	poke_cycle_record(ALP_POWER_MODE_STOP); /* stamped with image A */
+	zassert_true(alp_som_pd_store_load(&rec));
+	zassert_equal(rec.image_id, 0xA1111111u);
+
+	g_image = 0xB2222222u;
+	hold_everything();
+	g_stop_mode = 0x10u;
+	wake_boot(&info);
+	zassert_false(info.valid, "not reported as a wake");
+	zassert_false(alp_som_pd_store_load(&rec), "the record is gone");
+	zassert_equal(level(LPGPIO, NRST_PIN), 1, "the domains the record names are restored anyway");
+	g_image = 0xA1111111u;
+}
+
+ZTEST(power_som_domains, test_the_same_image_still_wakes_normally)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_image = 0xA1111111u;
+	alp_som_pd_bench_set(1u);
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+	zassert_equal(alp_som_pd_bench_count(), 1u, "the counter survives a wake of the same image");
 }

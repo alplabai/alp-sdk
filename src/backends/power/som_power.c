@@ -97,7 +97,8 @@ typedef struct {
 	struct gpio_dt_spec reset;
 	struct gpio_dt_spec enable;
 	struct gpio_dt_spec powerdown;
-	struct i2c_dt_spec  i2c; /* alp,device when it sits on an I2C bus */
+	struct gpio_dt_spec wake; /* wake-gpios: an INPUT that wakes the SoC (RV-3028 /INT) */
+	struct i2c_dt_spec  i2c;  /* alp,device when it sits on an I2C bus */
 } sompd_t;
 
 #define SOMPD_ROLE_wifi_ble    ALP_POWER_DOMAIN_WIFI_BLE
@@ -163,6 +164,7 @@ typedef struct {
 		.reset     = SOMPD_GPIO(n, reset_gpios), \
 		.enable    = SOMPD_GPIO(n, enable_gpios), \
 		.powerdown = SOMPD_GPIO(n, powerdown_gpios), \
+		.wake      = SOMPD_GPIO(n, wake_gpios), \
 		.i2c       = SOMPD_I2C(n), \
 	},
 
@@ -187,6 +189,16 @@ static const alp_som_power_hooks_t *_hooks[ALP_POWER_DOMAIN_COUNT];
 static void                        *_hook_ctx[ALP_POWER_DOMAIN_COUNT];
 static int64_t                      _assert_ms[ALP_POWER_DOMAIN_COUNT];
 static boot_capture_t               _boot;
+static alp_som_pd_record_t          _boot_rec; /* the cycle's record, kept for the wake decode */
+static bool                         _boot_external; /* this boot followed a pin / external reset */
+static bool _ignore_stat; /* BKRAM held another image's data: STOP_MODE_STAT means nothing here */
+/* The record of the quiesce in progress, kept in plain RAM as well: a same-boot rollback
+ * (a sleep that did not power down, a refusal after the quiesce) must not depend on BKRAM,
+ * whose contents (or whose very retention) the sleep sequence may have disturbed.  The
+ * cold-boot wake still reads the BKRAM record; this copy dies with the boot. */
+static alp_som_pd_record_t _ram_rec;
+static bool                _ram_rec_valid;
+static bool _boot_suppressed; /* ... and nothing about this boot is reported as a wake */
 
 K_MUTEX_DEFINE(_lock);
 
@@ -220,6 +232,11 @@ static bool _pads_applied;
 static alp_status_t pin_assert(const struct gpio_dt_spec *s, bool asserted)
 {
 	if (s->port == NULL || !device_is_ready(s->port)) {
+		/* A pad whose GPIO controller is disabled in the devicetree: the board or the
+		 * app overlay must enable it (&gpio5 / &gpio11 for the backlight and PHY reset). */
+		printk("som_power: pad P?_%u unusable: GPIO controller %s\n",
+		       (unsigned)s->pin,
+		       (s->port == NULL) ? "disabled in the devicetree" : "not ready");
 		return ALP_ERR_NOT_READY;
 	}
 	/* The pads are muxed and pad-configured by the node's pinctrl-0 state, applied
@@ -324,6 +341,255 @@ static bool rv3028_eerd_was_set(const struct i2c_dt_spec *i2c)
 static alp_status_t rv3028_clkout_restore(const struct i2c_dt_spec *i2c, bool prior)
 {
 	return rv3028_eerd(i2c, prior);
+}
+
+/* ---- RV-3028 wake services (raw DT-I2C, no chip context needed) -------------
+ *
+ * The cold-boot wake decode runs before any application has bound a chip
+ * context, so it reads the RV-3028 through the devicetree I2C address, like the
+ * other default actions.  Register and flag layout: RV-3028-C7 Application
+ * Manual Rev. 1.4 (STATUS 0Eh p.22, CONTROL_2 10h p.24, time 00h..06h p.17).
+ * Arming the countdown goes through the chip driver instead (rtc hook,
+ * som_power_rv3028.c): that procedure (App Manual Sec. 4.8.2) is not duplicated. */
+
+#define RV3028_REG_SECONDS   0x00u
+#define RV3028_REG_STATUS    0x0Eu
+#define RV3028_REG_CONTROL_2 0x10u
+#define RV3028_STATUS_PORF   0x01u
+#define RV3028_STATUS_AF     0x04u
+#define RV3028_STATUS_TF     0x08u
+#define RV3028_STATUS_UF     0x10u
+#define RV3028_STATUS_FLAGS  0x7Fu /* every latchable flag; EEbusy (bit7) is read-only */
+#define RV3028_CTRL2_UIE     0x20u
+#define RV3028_CTRL2_AIE     0x08u
+#define RV3028_CTRL2_TIE     0x10u
+
+static const struct i2c_dt_spec *rtc_i2c(void)
+{
+	const struct i2c_dt_spec *i2c = &_reg[ALP_POWER_DOMAIN_RTC].i2c;
+
+	if (!_reg[ALP_POWER_DOMAIN_RTC].present || i2c->bus == NULL || !device_is_ready(i2c->bus)) {
+		return NULL;
+	}
+	return i2c;
+}
+
+alp_status_t alp_som_power_rtc_int_armed(bool *armed)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   c2  = 0;
+
+	if (armed == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	*armed = false;
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
+		return ALP_ERR_IO;
+	}
+	*armed = (c2 & (RV3028_CTRL2_AIE | RV3028_CTRL2_TIE)) != 0u;
+	return ALP_OK;
+}
+
+alp_status_t alp_som_power_rtc_porf(bool *porf)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   st  = 0;
+
+	if (porf == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	*porf = false;
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_STATUS, &st) != 0) {
+		return ALP_ERR_IO;
+	}
+	*porf = (st & RV3028_STATUS_PORF) != 0u;
+	return ALP_OK;
+}
+
+alp_status_t alp_som_power_rtc_regs(uint8_t regs[6])
+{
+	static const uint8_t      addr[6] = { 0x0Eu, 0x0Fu, 0x10u, 0x13u, 0x35u, 0x37u };
+	const struct i2c_dt_spec *i2c     = rtc_i2c();
+
+	if (regs == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	for (unsigned i = 0; i < 6u; ++i) {
+		if (i2c_reg_read_byte_dt(i2c, addr[i], &regs[i]) != 0) {
+			return ALP_ERR_IO;
+		}
+	}
+	return ALP_OK;
+}
+
+/* UF (the time-update flag) latches every second boundary of a running clock when nothing
+ * clears it; with UIE off it does not drive /INT, but it is noise in every dump (bench U8g:
+ * STATUS=0x10 at each refusal).  Clear it, and only it: a flag is cleared by writing 0, a 1 is
+ * ignored, so every other bit is written as 1 and an event latching between the read and the
+ * write survives.  Left alone when UIE is on (then it is somebody's event). */
+alp_status_t alp_som_power_rtc_clear_stale_uf(void)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   st = 0, c2 = 0;
+
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_STATUS, &st) != 0 ||
+	    i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
+		return ALP_ERR_IO;
+	}
+	if ((st & RV3028_STATUS_UF) == 0u || (c2 & RV3028_CTRL2_UIE) != 0u) {
+		return ALP_OK;
+	}
+	return (i2c_reg_write_byte_dt(
+	            i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_UF)) == 0)
+	           ? ALP_OK
+	           : ALP_ERR_IO;
+}
+
+alp_status_t alp_som_power_rtc_flags_pending(bool *pending)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   st = 0, c2 = 0;
+
+	if (pending == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	*pending = false;
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_STATUS, &st) != 0 ||
+	    i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
+		return ALP_ERR_IO;
+	}
+	*pending = ((st & RV3028_STATUS_TF) && (c2 & RV3028_CTRL2_TIE)) ||
+	           ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE));
+	return ALP_OK;
+}
+
+alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   st = 0, c2 = 0, hit;
+
+	if (flags == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	*flags = 0u;
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_STATUS, &st) != 0 ||
+	    i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
+		return ALP_ERR_IO;
+	}
+	/* A flag is a wake cause only with its interrupt enable on; UF latches every
+	 * second regardless of UIE, so it is never one here. */
+	*flags =
+	    (uint8_t)(((st & RV3028_STATUS_TF) && (c2 & RV3028_CTRL2_TIE) ? RV3028_STATUS_TF : 0u) |
+	              ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE) ? RV3028_STATUS_AF : 0u));
+	hit = (uint8_t)(st & (RV3028_STATUS_TF | RV3028_STATUS_AF | RV3028_STATUS_UF));
+	if (hit == 0u) {
+		return ALP_OK; /* nothing latched: no STATUS write */
+	}
+	/* Acknowledge with a constant mask: 0 for the flags being cleared, 1 for every
+	 * other latchable flag, so PORF / EVF / BSF / CLKF survive and a flag latching
+	 * between the read and the write is not lost.  This relies on the part ignoring a
+	 * 1 written to a flag that reads 0 (only a 0 clears): bench-verified 2026-10-08
+	 * on E1M-AEN803 and documented at rv3028c7_wake_service() in
+	 * include/alp/chips/rv3028c7.h (#2794). */
+	if (i2c_reg_write_byte_dt(i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~hit)) != 0) {
+		return ALP_ERR_IO;
+	}
+	return ALP_OK;
+}
+
+static uint8_t rv_bcd(uint8_t v, bool *ok)
+{
+	if ((v & 0x0Fu) > 9u || (v >> 4) > 9u) {
+		*ok = false;
+	}
+	return (uint8_t)(((v >> 4) * 10u) + (v & 0x0Fu));
+}
+
+/* Seconds since 2000-01-01 00:00:00 from the RV-3028 calendar (24 h mode, years
+ * 2000..2099, so the only leap rule is year % 4). */
+alp_status_t alp_som_power_rtc_seconds(uint32_t *seconds)
+{
+	static const uint16_t     cum[12] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
+	const struct i2c_dt_spec *i2c     = rtc_i2c();
+	uint8_t                   r[7];
+	uint8_t                   reg = RV3028_REG_SECONDS;
+	bool                      ok  = true;
+
+	if (seconds == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	*seconds = 0u;
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_write_read_dt(i2c, &reg, 1, r, sizeof(r)) != 0) {
+		return ALP_ERR_IO;
+	}
+	uint8_t sec = rv_bcd(r[0] & 0x7Fu, &ok);
+	uint8_t min = rv_bcd(r[1] & 0x7Fu, &ok);
+	uint8_t hr  = rv_bcd(r[2] & 0x3Fu, &ok);
+	uint8_t day = rv_bcd(r[4] & 0x3Fu, &ok);
+	uint8_t mon = rv_bcd(r[5] & 0x1Fu, &ok);
+	uint8_t yr  = rv_bcd(r[6], &ok);
+
+	if (!ok || sec > 59u || min > 59u || hr > 23u || day < 1u || day > 31u || mon < 1u ||
+	    mon > 12u) {
+		return ALP_ERR_IO;
+	}
+	uint32_t days = (uint32_t)yr * 365u + ((uint32_t)yr + 3u) / 4u + cum[mon - 1u] + (day - 1u);
+
+	if (mon > 2u && (yr % 4u) == 0u) {
+		days += 1u;
+	}
+	*seconds = days * 86400u + (uint32_t)hr * 3600u + (uint32_t)min * 60u + sec;
+	return ALP_OK;
+}
+
+/* Countdown arming goes through the RV-3028 chip driver (som_power_rv3028.c,
+ * built with CONFIG_ALP_SDK_CHIP_RV3028C7).  Without the driver these are the
+ * truth: no countdown can be armed. */
+__weak bool alp_som_power_rtc_countdown_ready(void)
+{
+	return false;
+}
+
+__weak alp_status_t alp_som_power_rtc_countdown_start(uint32_t seconds, uint32_t *actual_s)
+{
+	(void)seconds;
+	(void)actual_s;
+	return ALP_ERR_NOSUPPORT;
+}
+
+__weak alp_status_t alp_som_power_rtc_countdown_cancel(void)
+{
+	return ALP_ERR_NOSUPPORT;
+}
+
+const struct gpio_dt_spec *alp_som_power_wake_gpio(alp_power_domain_t d)
+{
+	if ((unsigned)d >= (unsigned)ALP_POWER_DOMAIN_COUNT || !_reg[d].present ||
+	    _reg[d].wake.port == NULL) {
+		return NULL;
+	}
+	return &_reg[d].wake;
 }
 
 /* ---- Default (no driver) actions ------------------------------------------- */
@@ -489,6 +755,12 @@ alp_status_t alp_som_power_bind(alp_power_domain_t d, const alp_som_power_hooks_
 	return s;
 }
 
+void *alp_som_power_bound_ctx(alp_power_domain_t d)
+{
+	return ((unsigned)d < (unsigned)ALP_POWER_DOMAIN_COUNT && _hooks[d] != NULL) ? _hook_ctx[d]
+	                                                                             : NULL;
+}
+
 void alp_som_power_unbind(alp_power_domain_t d)
 {
 	if ((unsigned)d >= (unsigned)ALP_POWER_DOMAIN_COUNT) {
@@ -498,6 +770,37 @@ void alp_som_power_unbind(alp_power_domain_t d)
 	_hooks[d]    = NULL;
 	_hook_ctx[d] = NULL;
 	k_mutex_unlock(&_lock);
+}
+
+/* M55-HE reset syndrome, read and acknowledged (strong definition: alif_se_power_hw.c).
+ * Without it every boot looks like a Secure-Enclave-initiated one. */
+__weak uint32_t alp_som_power_reset_syndrome_take(void)
+{
+	return 0u;
+}
+
+__weak bool alp_som_power_reset_syndrome_trusted(void)
+{
+	return false;
+}
+
+/* RESETSYNDROME bit 0: the NSRST pin was asserted (E8 SVD AON.RTSS_HE_RESET). */
+#define SOMPD_RESET_NSRST BIT(0)
+
+/* ---- Wake decode hooks ------------------------------------------------------ */
+
+/* The STOP backend (alif_se_power.c) overrides these.  Without it the record's
+ * wake_source / slept_ms stay as stored (zero), which is the truth: nothing else
+ * knows why the SoC woke. */
+__weak void alp_som_power_wake_decode_early(alp_som_pd_record_t *rec)
+{
+	(void)rec;
+}
+
+__weak bool alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
+{
+	(void)rec;
+	return true;
 }
 
 /* ---- Quiesce / restore ----------------------------------------------------- */
@@ -530,6 +833,7 @@ static void restore_domains(const alp_som_pd_record_t *rec,
 			_state[d] = ALP_SOM_PD_ACTIVE;
 			*restored |= bit;
 		} else {
+			printk("som_power: restore of domain %d failed, status %d\n", (int)d, (int)s);
 			_state[d] = ALP_SOM_PD_RESTORE_FAILED;
 			*failed |= bit;
 		}
@@ -571,6 +875,9 @@ alp_status_t alp_som_power_quiesce(alp_power_mode_t mode, uint32_t *rollback_fai
 		bool rail  = (_policy[d] == ALP_POWER_DOMAIN_POLICY_RAIL_OFF);
 		bool prior = prior_active(d);
 		s          = run_quiesce(d, rail);
+		if (s != ALP_OK) {
+			printk("som_power: quiesce of domain %d failed, status %d\n", (int)d, (int)s);
+		}
 		/* Record the domain even when its quiesce failed: a multi-step action
 		 * (rail-off drives nRESET, then the supply) may have completed its first
 		 * step, and the rollback below must undo that too.  Releasing a pad that
@@ -600,6 +907,8 @@ alp_status_t alp_som_power_quiesce(alp_power_mode_t mode, uint32_t *rollback_fai
 			 * leaving a rollback-failed domain held would be the worse outcome. */
 			rec.mode = (uint32_t)ALP_POWER_MODE_RUN;
 			alp_som_pd_store_save(&rec);
+			_ram_rec       = rec;
+			_ram_rec_valid = true;
 		}
 		if (rollback_failed != NULL) {
 			*rollback_failed = failed;
@@ -607,6 +916,8 @@ alp_status_t alp_som_power_quiesce(alp_power_mode_t mode, uint32_t *rollback_fai
 	} else if (rec.quiesced != 0u) {
 		rec.mode = (uint32_t)mode;
 		alp_som_pd_store_save(&rec);
+		_ram_rec       = rec;
+		_ram_rec_valid = true;
 	}
 	k_mutex_unlock(&_lock);
 	return s;
@@ -617,12 +928,31 @@ alp_status_t alp_som_power_restore(uint32_t *failed_out)
 	k_mutex_lock(&_lock, K_FOREVER);
 	alp_som_pd_record_t rec;
 	if (!alp_som_pd_store_load(&rec)) {
-		k_mutex_unlock(&_lock);
-		return ALP_ERR_NOT_READY;
+		/* BKRAM did not give the record back (dead, or not retained after the SE call):
+		 * the in-RAM copy of the same quiesce is the truth for a same-boot rollback. */
+		if (!_ram_rec_valid) {
+			k_mutex_unlock(&_lock);
+			return ALP_ERR_NOT_READY;
+		}
+		rec = _ram_rec;
 	}
+	_ram_rec_valid = false;
 	uint32_t restored, failed;
 	restore_domains(&rec, ~0u, false, &restored, &failed);
 	alp_som_pd_store_clear();
+	if (failed != 0u) {
+		/* As the quiesce rollback does: a domain that could not be put back stays in the
+		 * record (RUN mode, so the next boot's restore does not need STOP_MODE_STAT to
+		 * vouch for it), in BKRAM and in RAM, so a retry still has the data. */
+		alp_som_pd_record_t retry = { .mode         = (uint32_t)ALP_POWER_MODE_RUN,
+			                          .quiesced     = failed,
+			                          .rail_off     = rec.rail_off & failed,
+			                          .prior_active = rec.prior_active & failed };
+
+		alp_som_pd_store_save(&retry);
+		_ram_rec       = retry;
+		_ram_rec_valid = true;
+	}
 	k_mutex_unlock(&_lock);
 	if (failed_out != NULL) {
 		*failed_out = failed;
@@ -673,7 +1003,12 @@ void alp_som_power_reset_for_test(void)
 	memset(_hooks, 0, sizeof(_hooks));
 	memset(_hook_ctx, 0, sizeof(_hook_ctx));
 	memset(&_boot, 0, sizeof(_boot));
-	_pads_applied = false;
+	memset(&_boot_rec, 0, sizeof(_boot_rec));
+	_boot_external   = false;
+	_boot_suppressed = false;
+	_ignore_stat     = false;
+	_pads_applied    = false;
+	_ram_rec_valid   = false;
 	alp_som_pd_store_clear();
 	k_mutex_unlock(&_lock);
 }
@@ -689,32 +1024,110 @@ __weak uint32_t alp_som_power_stop_mode_read(void)
 {
 	return sys_read32(DT_REG_ADDR(DT_NODELABEL(stop_mode)));
 }
+/* The register is present and says "this boot is a STOP wake". */
+static bool stop_mode_stat_set(void)
+{
+	return !_ignore_stat && (alp_som_power_stop_mode_read() & SOMPD_STOP_MODE_STAT_BIT) != 0u;
+}
 static bool stop_mode_stat_agrees(void)
 {
-	return (alp_som_power_stop_mode_read() & SOMPD_STOP_MODE_STAT_BIT) != 0u;
+	return stop_mode_stat_set();
 }
 #else
+static bool stop_mode_stat_set(void)
+{
+	return false; /* no register: a record-less boot is a plain POR */
+}
 static bool stop_mode_stat_agrees(void)
 {
 	return true;
 }
 #endif
 
+/* A STOP wake whose record is missing or fails its CRC (the SRAM did not hold, the
+ * record was never written, a corrupted write): the domains it would have named are
+ * unknown, so nothing may be left held.  Release every present control pad to its
+ * inactive level, as if the whole set had been quiesced with AUTO (no rail-off, no
+ * saved "was on" bit, so the backlight stays off).  Reported as a STOP cycle with
+ * no wake cause. */
+static void blind_restore(uint32_t *restored, uint32_t *failed, uint32_t *named)
+{
+	alp_som_pd_record_t rec = { .mode = (uint32_t)ALP_POWER_MODE_STOP };
+
+	for (size_t d = 0; d < ALP_POWER_DOMAIN_COUNT; ++d) {
+		if (_reg[d].present) {
+			rec.quiesced |= ALP_POWER_DOMAIN_BIT(d);
+			_state[d] = ALP_SOM_PD_QUIESCED;
+		}
+	}
+	restore_domains(&rec, ~SOMPD_I2C_DOMAINS, true, restored, failed);
+	*named = rec.quiesced;
+}
+
 int alp_som_power_boot_restore(void)
 {
 	k_mutex_lock(&_lock, K_FOREVER);
 	memset(&_boot, 0, sizeof(_boot));
+	/* A pin reset (a debugger nRESET, a reset button) during or after a sleep also finds
+	 * STOP_MODE_STAT set and a valid record, and used to be reported as a wake with no
+	 * cause.  It is not one: the sleep was cut short from outside.  The domains still
+	 * have to be put back, so the restore below is unchanged; only the report differs. */
+	const bool nsrst = (alp_som_power_reset_syndrome_take() & SOMPD_RESET_NSRST) != 0u;
+
+	_boot_external   = false;
+	_ignore_stat     = false;
+	_boot_suppressed = false;
+
+	/* Another image's data in BKRAM (a clean flash on top of a run that slept, bench U8d):
+	 * the counter and the diag belong to someone else, and a sticky STOP_MODE_STAT set by
+	 * that run is not this image's wake.  Start fresh, ignore the status and report nothing
+	 * this boot -- but STILL put back whatever that run left held (from its record, or
+	 * blind): a domain left in reset is the worse outcome. */
+	bool foreign_cell = false;
+	bool foreign_rec  = false;
+
+	if (alp_som_pd_bkram_foreign()) {
+		alp_som_pd_bkram_adopt();
+		_ignore_stat     = true;
+		_boot_suppressed = true;
+		foreign_cell     = true;
+	}
+
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_BOOT, 51u, alp_som_pd_image_id());
 
 	alp_som_pd_record_t rec;
-	if (!alp_som_pd_store_load(&rec)) {
-		/* Plain POR (or a record that fails magic / CRC): touch nothing. */
+	bool                have = alp_som_pd_store_load(&rec);
+
+	if (have && rec.image_id != alp_som_pd_image_id()) {
+		alp_som_pd_bkram_adopt();
+		_ignore_stat     = true;
+		_boot_suppressed = true;
+		foreign_rec      = true; /* restored from its record below, but not reported */
+	}
+	if (!have) {
+		if (stop_mode_stat_set() || foreign_cell) {
+			/* A STOP wake with no usable record: never leave NOR, PHY or the CC3501E held. */
+			uint32_t restored, failed, named;
+
+			blind_restore(&restored, &failed, &named);
+			memset(&_boot_rec, 0, sizeof(_boot_rec));
+			_boot_rec.mode = (uint32_t)ALP_POWER_MODE_STOP;
+			_boot.valid    = true;
+			_boot.mode     = (uint32_t)(_boot_external ? ALP_POWER_MODE_RUN : ALP_POWER_MODE_STOP);
+			_boot.quiesced = named;
+			_boot.restored = restored;
+			_boot.failed   = failed;
+		}
+		/* Otherwise a plain POR: touch nothing. */
+		alp_som_pd_store_clear();
 		k_mutex_unlock(&_lock);
 		return 0;
 	}
-	/* A RUN-mode record is the bench / test cycle interrupted by a warm reset:
-	 * STOP_MODE_STAT cannot vouch for it, and leaving the domains held would be
-	 * the worse outcome. */
-	if (rec.mode != (uint32_t)ALP_POWER_MODE_RUN && !stop_mode_stat_agrees()) {
+	/* Only a STOP record is vouched for by STOP_MODE_STAT.  A RUN-mode record is the
+	 * bench / test cycle interrupted by a warm reset, and a STANDBY record's status
+	 * bit is not established (the register names STOP only): for both, leaving the
+	 * domains held would be the worse outcome, so they are restored. */
+	if (!foreign_rec && rec.mode == (uint32_t)ALP_POWER_MODE_STOP && !stop_mode_stat_agrees()) {
 		alp_som_pd_store_clear();
 		k_mutex_unlock(&_lock);
 		return 0;
@@ -731,17 +1144,44 @@ int alp_som_power_boot_restore(void)
 	uint32_t restored, failed;
 	restore_domains(&rec, ~SOMPD_I2C_DOMAINS, true, &restored, &failed);
 
+	/* A set NSRST bit marks a pin reset ONLY if it was probed before the sleep and does
+	 * clear (ALP_SOM_REC_NSRST_TRUSTED in the record): the SVD calls the field write-only
+	 * with reset value 1, and a stale bit must never turn a genuine wake into an aborted
+	 * sleep. */
+	_boot_external = nsrst && (rec.armed_hw & ALP_SOM_REC_NSRST_TRUSTED) != 0u;
+
+	/* Wake cause, part 1: what needs no I2C (LPTIMER status).  This must run before
+	 * the timer driver initialises and clears the status; the RTC half follows in
+	 * the I2C pass. */
+	_boot_rec = rec;
+	alp_som_power_wake_decode_early(&_boot_rec);
+
 	_boot.valid       = true;
-	_boot.mode        = rec.mode;
-	_boot.wake_source = rec.wake_source;
-	_boot.slept_ms    = rec.slept_ms;
-	_boot.quiesced    = rec.quiesced;
-	_boot.restored    = restored;
-	_boot.failed      = failed;
+	_boot.mode        = _boot_rec.mode;
+	_boot.wake_source = _boot_rec.wake_source;
+	_boot.slept_ms    = _boot_rec.slept_ms;
+	if (_boot_external && rec.mode != (uint32_t)ALP_POWER_MODE_RUN) {
+		/* Aborted sleep / external reset, not a wake: the realised mode is RUN and
+		 * there is no wake cause or sleep time. */
+		_boot.mode        = (uint32_t)ALP_POWER_MODE_RUN;
+		_boot.wake_source = 0u;
+		_boot.slept_ms    = 0u;
+	}
+	_boot.quiesced = rec.quiesced;
+	_boot.restored = restored;
+	_boot.failed   = failed;
 
 	alp_som_pd_store_clear();
 	k_mutex_unlock(&_lock);
 	return 0;
+}
+
+/* STOP_MODE_STAT is sticky: left set, a later reset of any kind (a flash, a debugger
+ * nRESET) reads as a STOP wake.  Acknowledged once the boot decode is done.  Weak: true
+ * where there is no such register. */
+__weak bool alp_som_power_stop_mode_stat_clear(void)
+{
+	return true;
 }
 
 int alp_som_power_boot_restore_i2c(void)
@@ -754,7 +1194,19 @@ int alp_som_power_boot_restore_i2c(void)
 		restore_domains(&rec, SOMPD_I2C_DOMAINS, true, &restored, &failed);
 		_boot.restored |= restored;
 		_boot.failed |= failed;
+
+		/* Wake cause, part 2: the RV-3028 flags and the slept time. */
+		if (alp_som_power_wake_decode_i2c(&_boot_rec)) {
+			if (!_boot_external || _boot_rec.mode == (uint32_t)ALP_POWER_MODE_RUN) {
+				_boot.wake_source = _boot_rec.wake_source;
+				_boot.slept_ms    = _boot_rec.slept_ms;
+			} /* else: an external reset has no wake cause (decode only acknowledged flags) */
+		} else {
+			memset(&_boot, 0, sizeof(_boot)); /* untrusted record: report a plain boot */
+		}
 	}
+	/* The decode is done (pass 1 read the status, pass 2 the RTC): acknowledge the status. */
+	(void)alp_som_power_stop_mode_stat_clear();
 	k_mutex_unlock(&_lock);
 	return 0;
 }
@@ -854,6 +1306,9 @@ alp_status_t alp_som_power_ops_domain_info(alp_power_domain_t domain, alp_power_
 
 alp_status_t alp_som_power_ops_boot_wake_info(alp_power_boot_info_t *out)
 {
+	if (_boot_suppressed) {
+		return ALP_OK; /* another image's leftovers were cleaned up; nothing to report */
+	}
 	out->valid                  = _boot.valid;
 	out->realised_mode          = (alp_power_mode_t)_boot.mode;
 	out->wake_source            = _boot.wake_source;
