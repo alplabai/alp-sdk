@@ -91,7 +91,9 @@
  * LAUNCH. Published here (not render_core_stats, which stays in D-cache and
  * reads 0 to a raw external SRAM read unless explicitly cleaned) because
  * this block is the one already proven bench-readable without a prof build
- * (decode.py's own use of words 12..14). */
+ * (decode.py's own use of words 12..14). Words 17..39 (peak-frame breakdown,
+ * per-FB frame time, core join waits): the map is in renderer.c's RENDER_STATS
+ * comment and decode.py --stats. */
 #define TR_RENDER_T_ADDR                  0x02401930u
 #define TR_RENDER_STATS_ADDR              0x02401900u
 #define TR_RENDER_STATS_MARKER            0x5E4D5354u

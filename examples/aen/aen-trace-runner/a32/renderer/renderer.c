@@ -185,15 +185,47 @@ _Static_assert(0x02402C00u + 0x400u <= TR_MEM_MBOX_PAGE_END,
  *   +0x1C..+0x2C: words 7..11 are feat/edge-aa's / feat/dma-copyout's
  *   +0x30 CNTVCT at renderer_main entry, +0x34 after the self-checks +
  *         render_init, +0x38 when the first out_seq went out (0 before):
- *         LAUNCH -> first frame, which the HE logs (TR_RENDER_T_ADDR) */
+ *         LAUNCH -> first frame, which the HE logs (TR_RENDER_T_ADDR)
+ *   +0x3C, +0x40 words 15, 16: the bottom video panel's us, this frame / max
+ *   Perf-pass words (17..39, all zeroed at LAUNCH; decode.py --stats):
+ *   +0x44..+0x58 words 17..22: the PEAK frame's breakdown, latched with
+ *         pad3[7] whenever a frame sets a new max: pad3[2], pad3[3], pad3[4],
+ *         pad3[5], pad3[6] (CNTVCT ticks / scene packing as above), then
+ *         word 15's video-panel us
+ *   +0x60..+0x74 words 24..26 FB A (TR_FB_A, SRAM0), 27..29 FB B (TR_FB_B,
+ *         SRAM1): frames drawn into it, sum of their frame times (us, wraps
+ *         after ~71 min), max frame time (us); word 23 is reserved
+ *   +0x78..+0x9C words 30..39, five (last, max) pairs of waits, CNTVCT
+ *         ticks: 30/31 core 0 join_scene, 32/33 core 0 join_setup, 34/35
+ *         core 0 join_core1, 36/37 core 1 waiting for setup_go (after
+ *         scene_done), 38/39 core 1 waiting for frame_go (after setup_done) */
 #define RENDER_STATS_ADDR   TR_RENDER_STATS_ADDR
 #define RENDER_STATS        ((volatile uint32_t *)RENDER_STATS_ADDR)
 #define RENDER_STATS_MARKER TR_RENDER_STATS_MARKER
+#define RS_PEAK             17u /* words 17..22 */
+#define RS_FB_A             24u /* frames, sum us, max us; FB B at +3 */
+#define RS_WAIT_BASE        30u /* (last, max) pairs */
+#define RS_W_SCENE          0u
+#define RS_W_SETUP          1u
+#define RS_W_JOIN           2u
+#define RS_W_C1_SETUP       3u
+#define RS_W_C1_FRAME       4u
+#define RS_LAST_WORD        39u
 _Static_assert(RENDER_STATS_ADDR + 12u * 4u == TR_RENDER_T_ADDR,
                "tr_mbox.h TR_RENDER_T_ADDR: words 12..14");
 _Static_assert(RENDER_STATS_ADDR + 6u * 4u == TR_RENDER_IMG_END_ADDR,
                "tr_mbox.h TR_RENDER_IMG_END_ADDR");
 extern char __bss_end[]; /* renderer.ld */
+
+/* Core 0 only: one (last, max) wait pair per join, ticks. */
+static void rs_wait(uint32_t i, uint32_t w)
+{
+	static uint32_t wmax[5];
+
+	if (w > wmax[i]) wmax[i] = w;
+	RENDER_STATS[RS_WAIT_BASE + 2u * i]      = w;
+	RENDER_STATS[RS_WAIT_BASE + 2u * i + 1u] = wmax[i];
+}
 
 #ifdef TR_RASTER_PROF
 #define RENDER_PROF_ADDR   ((volatile uint32_t *)0x02401800u)
@@ -392,6 +424,8 @@ static volatile uint32_t band_claim __attribute__((aligned(64)));
 static volatile uint32_t core1_done
     __attribute__((aligned(64)));     /* seq core 1 finished, core 1 writes */
 static volatile uint32_t core1_ticks; /* its busy ticks for core1_done's frame */
+/* its waits for setup_go / frame_go this frame, ticks; written before core1_done */
+static volatile uint32_t core1_wait_setup, core1_wait_frame;
 static volatile uint32_t scene_go
     __attribute__((aligned(64))); /* seq whose scene part 2 core 1 builds */
 static volatile uint32_t scene_done __attribute__((aligned(64))); /* seq core 1 finished building */
@@ -468,20 +502,25 @@ void renderer_core1(volatile tr_mbox_t *m)
 		scene_done = seq;
 		barrier();
 		sev();
+		uint32_t tw = cntvct_lo();
+
 		while (setup_go != seq) {
 			if (m->ctrl_cmd == STUB_CMD_HALT) return;
 			wfe();
 		}
+		core1_wait_setup = cntvct_lo() - tw;
 		dmb_ish(); /* DL, setup_lo/hi before setup_go */
 		render_setup_part(setup_lo, setup_hi);
 		dmb_ish(); /* records (WB S=1) before the flag */
 		setup_done = seq;
 		barrier();
 		sev();
+		tw = cntvct_lo();
 		while (frame_go != seq) {
 			if (m->ctrl_cmd == STUB_CMD_HALT) return;
 			wfe();
 		}
+		core1_wait_frame = cntvct_lo() - tw;
 		dmb_ish(); /* frame_fb, bins, band_claim before frame_go */
 		band_loop(1, seq, frame_fb);
 		core1_ticks = cntvct_lo() - t0;
@@ -509,6 +548,7 @@ static int join_scene(uint32_t seq)
 		if (cntvct_lo() - t0 > RENDER_SETUP_TIMEOUT) return 0;
 		wfe();
 	}
+	rs_wait(RS_W_SCENE, cntvct_lo() - t0);
 	dmb_ish();
 	return 1;
 }
@@ -525,6 +565,7 @@ static int join_setup(uint32_t seq)
 		}
 		wfe();
 	}
+	rs_wait(RS_W_SETUP, cntvct_lo() - t0);
 	dmb_ish();
 	return 1;
 }
@@ -548,6 +589,7 @@ static int join_core1(uint32_t seq)
 		}
 		wfe();
 	}
+	rs_wait(RS_W_JOIN, cntvct_lo() - t0);
 	dmb_ish();
 	return 1;
 }
@@ -586,7 +628,9 @@ void renderer_main(volatile tr_mbox_t *m)
 	RENDER_STATS[12] = cntvct_lo();
 	RENDER_STATS[13] = 0;
 	RENDER_STATS[14] = 0;
-	m->pad3[0]       = RENDER_MARKER;
+	for (uint32_t i = RS_PEAK; i <= RS_LAST_WORD; i++)
+		RENDER_STATS[i] = 0;
+	m->pad3[0] = RENDER_MARKER;
 	for (uint32_t i = 1; i < 8u; i++)
 		m->pad3[i] = 0;
 	checks     = 0x80000000u | (tr_span_selfcheck() ? 1u : 0u) | (tr_raster_selfcheck() ? 2u : 0u) |
@@ -728,6 +772,8 @@ void renderer_main(volatile tr_mbox_t *m)
 					checks &= ~4u;
 				} else {
 					o.ticks1 = core1_ticks;
+					rs_wait(RS_W_C1_SETUP, core1_wait_setup);
+					rs_wait(RS_W_C1_FRAME, core1_wait_frame);
 				}
 			}
 			/* fix round 10: every band is drawn now, 3D AND video (either
@@ -753,8 +799,27 @@ void renderer_main(volatile tr_mbox_t *m)
 				RENDER_STATS[16] = panel_us_max; /* max since this LAUNCH */
 			}
 			barrier(); /* pixels reach SRAM0 before out_seq says so (plan sec 3) */
-			t      = cntvct_lo() - t0;
-			tmax   = t > tmax ? t : tmax;
+			t = cntvct_lo() - t0;
+			{
+				/* Per-FB frame time (A = SRAM0, B = SRAM1), us. */
+				volatile uint32_t *f  = &RENDER_STATS[fb == TR_FB_A ? RS_FB_A : RS_FB_A + 3u];
+				uint32_t           us = t / 100u;
+
+				f[0]++;
+				f[1] += us;
+				if (us > f[2]) f[2] = us;
+			}
+			if (t > tmax) {
+				/* The peak frame's own breakdown, not the last frame's. */
+				tmax                       = t;
+				RENDER_STATS[RS_PEAK + 0u] = render_stats.bin;
+				RENDER_STATS[RS_PEAK + 1u] = render_core_stats[0].raster;
+				RENDER_STATS[RS_PEAK + 2u] = render_core_stats[0].copy;
+				RENDER_STATS[RS_PEAK + 3u] = render_stats.scene;
+				RENDER_STATS[RS_PEAK + 4u] =
+				    render_stats.dl_dropped << 16 | (render_stats.max_bin & 0xFFFFu);
+				RENDER_STATS[RS_PEAK + 5u] = RENDER_STATS[15];
+			}
 			o.tris = render_stats.tris;
 			o.dropped += render_stats.dropped + render_stats.dl_dropped;
 			m->pad3[1] = checks | render_core_stats[0].bands << 16 |

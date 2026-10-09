@@ -6,12 +6,14 @@
                         ("02401000 = 54524D42 00000001 ...").
   decode.py --prof DUMP renderer-prof block: `mem32 0x02401800, 56` (or a raw
                         224-byte savebin) -> per-core cycles by span kind.
-  decode.py --stats DUMP renderer bench block: `mem32 0x02401900, 15` -> LOD
+  decode.py --stats DUMP renderer bench block: `mem32 0x02401900, 40` -> LOD
                         quality word + out->in gap (M55 turnaround) stats +
                         LAUNCH timing (entry -> init done -> first frame).
                         Set quality: `w4 0x02401904, <TR_LOD_* bits>` (bit0 no
                         back rank, bit1 near LOD, bit2 TR_LOD_STILL: no P12
-                        LEDs/fans -- the living-board A/B).
+                        LEDs/fans -- the living-board A/B). Words 17..39: peak
+                        frame breakdown, per-FB frame time, core join waits
+                        (map: a32/renderer/renderer.c RENDER_STATS).
   decode.py --selftest
 
 Two dumps a second apart tell parked from wedged: heartbeats advance
@@ -206,7 +208,7 @@ def prof_report(blob):
     return "\n".join(out)
 
 
-STATS_ADDR, STATS_MARKER, STATS_SIZE = 0x02401900, 0x5E4D5354, 60
+STATS_ADDR, STATS_MARKER, STATS_SIZE = 0x02401900, 0x5E4D5354, 160  # 40 words; 60 B (15 words) dumps still parse
 STAMP_MAX = 10 * 100000000  # CNTVCT ticks: a span above 10 s is an old image's garbage, not a stamp  # a32/renderer/renderer.c
 
 
@@ -221,6 +223,17 @@ def stats_report(blob):
             not w[14] or span(w[13], w[14]) <= STAMP_MAX):
         out += "\nlaunch: entry -> init done %.3f ms, init -> first frame %s" % (
             span(w[12], w[13]) / 1e5, "%.3f ms" % (span(w[13], w[14]) / 1e5) if w[14] else "(no frame yet)")
+    # words 17..39 (renderer.c RENDER_STATS perf-pass map); an older image leaves them garbage/0
+    if len(w) >= 40 and any(w[17:40]):
+        us = lambda t: "%.3f ms" % (t / 1e5)
+        out += "\npeak frame: setup+bin %s raster %s copy %s scene %s video %.3f ms, max bin %d dropped %d" % (
+            us(w[17]), us(w[18]), us(w[19]), us(w[20]), w[22] / 1e3, w[21] & 0xFFFF, w[21] >> 16)
+        for name, i in (("FB A (SRAM0)", 24), ("FB B (SRAM1)", 27)):
+            out += "\n%s: %d frames, mean %.3f ms, max %.3f ms" % (
+                name, w[i], (w[i + 1] / w[i] / 1e3) if w[i] else 0.0, w[i + 2] / 1e3)
+        out += "\nwaits last/max ms: " + ", ".join(
+            "%s %.3f/%.3f" % (n, w[30 + 2 * k] / 1e5, w[31 + 2 * k] / 1e5)
+            for k, n in enumerate(("c0 scene", "c0 setup", "c0 join", "c1 setup_go", "c1 frame_go")))
     return out
 
 
@@ -293,6 +306,17 @@ def selftest():
     assert "entry -> init done 20.000 ms, init -> first frame 40.000 ms" in sr
     sr = stats_report(struct.pack("<15I", STATS_MARKER, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0x9E3779B9, 0))
     assert "launch:" not in sr  # garbage words: nothing
+    wd = [0] * 40
+    wd[0] = STATS_MARKER
+    wd[17:23] = [200000, 1500000, 300000, 350000, (2 << 16) | 700, 3100]
+    wd[24:30] = [10, 300000, 33000, 20, 640000, 36000]
+    wd[30:40] = [100000, 200000, 5000, 9000, 1000, 6000, 40000, 80000, 2000, 7000]
+    sr = stats_report(struct.pack("<40I", *wd))
+    assert "peak frame: setup+bin 2.000 ms raster 15.000 ms copy 3.000 ms scene 3.500 ms video 3.100 ms, max bin 700 dropped 2" in sr
+    assert "FB A (SRAM0): 10 frames, mean 30.000 ms, max 33.000 ms" in sr
+    assert "FB B (SRAM1): 20 frames, mean 32.000 ms, max 36.000 ms" in sr
+    assert "c0 scene 1.000/2.000, c0 setup 0.050/0.090, c0 join 0.010/0.060, c1 setup_go 0.400/0.800, c1 frame_go 0.020/0.070" in sr
+    assert "peak frame" not in stats_report(struct.pack("<40I", STATS_MARKER, *[0] * 39))
     st = report(decode(synth(magic=MAGIC, version=1, t_copy0=100, t_copy1=500100, t_launch=0xFFFFFFF0, t_jump=999984)))
     assert "MRAM copy 5.000 ms, last LAUNCH CRC+sync 10.000 ms" in st
     old = report(decode(synth(magic=MAGIC, version=1, t_launch=0x1234, t_jump=0x9E3779B9)))
@@ -306,7 +330,12 @@ def main(argv):
         selftest()
         return 0
     if len(argv) == 2 and argv[0] == "--stats":
-        print(stats_report(parse(open(argv[1], "rb").read(), STATS_ADDR, STATS_SIZE)))
+        data = open(argv[1], "rb").read()
+        try:
+            blob = parse(data, STATS_ADDR, STATS_SIZE)
+        except ValueError:  # an older, shorter dump (15 words)
+            blob = parse(data, STATS_ADDR, 60)
+        print(stats_report(blob))
         return 0
     if len(argv) == 2 and argv[0] == "--prof":
         print(prof_report(parse(open(argv[1], "rb").read(), PROF_ADDR, PROF_SIZE)))
