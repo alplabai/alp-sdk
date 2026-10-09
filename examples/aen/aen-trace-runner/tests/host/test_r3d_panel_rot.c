@@ -118,7 +118,14 @@ static void check_blit(int rot, int W)
 	int             LH = W;
 	struct {
 		int x0, y0, w, h;
-	} blk[] = { { 0, 0, W, 32 }, { 0, 640, W, 32 }, { 0, 1248, W, 32 }, { 3, 5, 100, 11 } };
+	} blk[] = { { 0, 0, W, 32 },
+		        { 0, 640, W, 32 },
+		        { 0, 1248, W, 32 },
+		        { 3, 5, 100, 11 },
+		        /* the NEON path's ragged-by-8 bands (groups 3, 2, 1: no 64 B store) */
+		        { 0, 640, W, 24 },
+		        { 8, 64, W - 8, 16 },
+		        { 0, 8, W, 8 } };
 
 	for (unsigned k = 0; k < sizeof(blk) / sizeof(blk[0]); k++) {
 		memset(a, 0, sizeof(a));

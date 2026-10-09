@@ -11,6 +11,7 @@
 
 #include "../../tests/host/tr_golden_dl.h"
 #include "../common/crc32.h"
+#include "../../src/render/panel_rot.h"
 #include "isa_bench.h"
 
 #ifndef ISA_PAYLOAD
@@ -905,6 +906,136 @@ static void stage_fill(isa_res_t *r)
 	check(r, ISA_FILL_OK, ok);
 }
 
+/* ---- Rot-90 band copy-out: the store form (src/render/panel_rot.h) ---- */
+
+#define ROT_W  64u      /* columns per rep: 8 transposes, 64 runs */
+#define ROT_H  32u      /* one band */
+#define ROT_WL TR_R3D_H /* the layer's row pitch in px: 2560 B between column runs */
+
+static uint16_t rot_src[ROT_W * ROT_H] __attribute__((aligned(64)));
+#if ISA_PAYLOAD
+/* FB A, Normal NC in the stub's table: the target the renderer really writes. The HE is halted
+ * while a bench payload runs. */
+#define ROT_DST ((uint16_t *)0x02000000u)
+#else
+static uint16_t rot_dst_mem[ROT_W * ROT_WL] __attribute__((aligned(64)));
+#define ROT_DST rot_dst_mem
+#endif
+
+#if defined(__arm__) && defined(__ARM_NEON)
+/* panel_rot.h's rot-90 kernel with the store form picked by `how`: 0 = the old descending form,
+ * 2 = two vst1.16 {q, q}, 3 = vstmia. (1 is tr_rot_blit_neon itself.) */
+static inline __attribute__((always_inline)) void rot90_form(uint16_t *dst, const int how)
+{
+	for (uint32_t x = 0; x < ROT_W; x += 8) {
+		uint16x8_t out[4][8];
+
+		for (int g = 0; g < 4; g++) {
+			uint16x8_t in[8];
+
+			for (int r = 0; r < 8; r++) {
+				in[r] = vld1q_u16(rot_src + (uint32_t)(g * 8 + r) * ROT_W + x);
+			}
+			tr_rot_transpose8(in, out[g]);
+		}
+		for (int k = 0; k < 8; k++) {
+			uint16_t  *d = dst + tr_rot_idx(90, ROT_WL, ROT_W, (int)x + k, ROT_H - 1);
+			uint16x8_t v[4];
+
+			for (int g = 0; g < 4; g++) {
+				uint16x8_t t = out[g][k];
+
+				v[3 - g] = vcombine_u16(vrev64_u16(vget_high_u16(t)), vrev64_u16(vget_low_u16(t)));
+			}
+			if (how == 0) {
+				for (int g = 0; g < 4; g++) {
+					vst1q_u16(d + (3 - g) * 8, v[3 - g]);
+				}
+			} else if (how == 2) {
+				__asm__ volatile("vst1.16 {%q1, %q2}, [%0]!\n\tvst1.16 {%q3, %q4}, [%0]"
+				                 : "+r"(d)
+				                 : "w"(v[0]), "w"(v[1]), "w"(v[2]), "w"(v[3])
+				                 : "memory");
+			} else {
+				register uint16x8_t q0 __asm__("q0") = v[0];
+				register uint16x8_t q1 __asm__("q1") = v[1];
+				register uint16x8_t q2 __asm__("q2") = v[2];
+				register uint16x8_t q3 __asm__("q3") = v[3];
+
+				__asm__ volatile("vstmia %0, {d0-d7}" ::"r"(d), "w"(q0), "w"(q1), "w"(q2), "w"(q3)
+				                 : "memory");
+			}
+		}
+	}
+}
+#endif
+
+/* Every landed pixel against the source: the band's (x, y) is at the layer cell tr_rot_idx() says. */
+static int rot_dst_ok(void)
+{
+	for (uint32_t x = 0; x < ROT_W; x++) {
+		for (uint32_t y = 0; y < ROT_H; y++) {
+			if (ROT_DST[tr_rot_idx(90, ROT_WL, ROT_W, (int)x, (int)y)] != rot_src[y * ROT_W + x]) {
+				return 0;
+			}
+		}
+	}
+	return 1;
+}
+
+static void rot_clear_dst(void)
+{
+	for (uint32_t x = 0; x < ROT_W; x++) {
+		memset(&ROT_DST[tr_rot_idx(90, ROT_WL, ROT_W, (int)x, ROT_H - 1)], 0xA5, ROT_H * 2u);
+	}
+}
+
+static inline __attribute__((always_inline)) uint32_t rot_time(const int how, int *ok)
+{
+	uint32_t t0;
+
+	for (uint32_t i = 0; i < ROT_W * ROT_H; i++) {
+		rot_src[i] = (uint16_t)(i * 2654435761u >> 11);
+	}
+	rot_clear_dst();
+#if defined(__arm__) && defined(__ARM_NEON)
+	if (how == 1) {
+		tr_rot_blit_neon(90, ROT_DST, ROT_WL, ROT_W, rot_src, ROT_W, 0, 0, (int)ROT_W, (int)ROT_H);
+	} else {
+		rot90_form(ROT_DST, how); /* warm */
+	}
+	rot_clear_dst();
+	t0 = cyc();
+	for (int i = 0; i < 64; i++) {
+		if (how == 1) {
+			tr_rot_blit_neon(
+			    90, ROT_DST, ROT_WL, ROT_W, rot_src, ROT_W, 0, 0, (int)ROT_W, (int)ROT_H);
+		} else {
+			rot90_form(ROT_DST, how);
+		}
+	}
+	t0 = cyc() - t0;
+#else
+	(void)how;
+	t0 = cyc();
+	tr_rot_blit(90, ROT_DST, ROT_WL, ROT_W, rot_src, ROT_W, 0, 0, (int)ROT_W, (int)ROT_H);
+	t0 = cyc() - t0;
+#endif
+	*ok &= rot_dst_ok();
+	return t0;
+}
+
+static void stage_rot(isa_res_t *r)
+{
+	int ok = 1;
+
+	put(r, ISA_ROT90_OLD, rot_time(0, &ok), ROT_W * ROT_H * 64u);
+	put(r, ISA_ROT90_ASC, rot_time(1, &ok), ROT_W * ROT_H * 64u);
+	put(r, ISA_ROT90_VST1, rot_time(2, &ok), ROT_W * ROT_H * 64u);
+	put(r, ISA_ROT90_VSTM, rot_time(3, &ok), ROT_W * ROT_H * 64u);
+	check(r, ISA_ROT90_EXACT, ok);
+}
+
 /* ---- The golden frame: setup + bin, 40 bands, per-band CRC ---- */
 
 static tr_dl_t        gdl;
@@ -958,9 +1089,9 @@ static void stage_golden(isa_res_t *r)
 
 void isa_bench_run(isa_res_t *r)
 {
-	static void (*const stage[])(isa_res_t *) = { stage_pmu,  stage_fdiv,  stage_fz,  stage_gouraud,
-		                                          stage_edge, stage_div,   stage_tex, stage_gspan,
-		                                          stage_fill, stage_golden };
+	static void (*const stage[])(
+	    isa_res_t *) = { stage_pmu, stage_fdiv,  stage_fz,   stage_gouraud, stage_edge,  stage_div,
+		                 stage_tex, stage_gspan, stage_fill, stage_rot,     stage_golden };
 
 	r->opt = ISA_OPT;
 	for (uint32_t s = 0; s < sizeof(stage) / sizeof(stage[0]); s++) {
