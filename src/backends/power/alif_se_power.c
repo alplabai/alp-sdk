@@ -30,7 +30,8 @@
  * the 14 off_profile_t members by name (a test pre-fills the struct with a poison
  * pattern and proves none survives).  Only the three members the SE itself owns
  * are taken from the live profile: dcdc_voltage (range-checked), vtor_address and
- * vtor_address_ns (preserved so the wake still goes through the SES -> ATOC path).
+ * vtor_address_ns (the fallback; the default replaces both with SCB->VTOR, the vendor
+ * resume vector, which the bench showed is needed for the wake -- U8g).
  * After the SE has written the profile the backend reads back ALL 14 members,
  * re-asserts the retention LDO / RET_CTRL bits it needs and refuses to sleep if any
  * of it did not stick.  Before that call it snapshots RET_CTRL and VBAT_ANA_REG1 and
@@ -118,14 +119,23 @@
 /* Bench-only OFF-profile knobs (declared in som_power.h): Kconfig supplies the defaults, the
  * bench app may flip them in RAM before a sleep. */
 alp_som_bench_knobs_t alp_som_bench_knobs = {
-	.vtor_self  = IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_VTOR_SELF),
-	.mram_seram = IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_MRAM_SERAM),
+	.vtor_self  = !IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_NO_VTOR_SELF),
+	.mram_seram = !IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_NO_MRAM_SERAM),
 	.lfxo       = IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_FORCE_LFXO),
 	.stby_76_8  = IS_ENABLED(CONFIG_ALP_SDK_POWER_ALIF_SE_BENCH_STBY_76_8),
 };
 #define BENCH_KNOB(name) (alp_som_bench_knobs.name)
 #else
 #define BENCH_KNOB(name) false
+#endif
+/* The two OFF-profile fields that make the wake work (bench U8g: with both, STOP woke 2 of 2;
+ * with neither, no wake) are the product default; only a bench build can turn them off. */
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+#define OFF_VTOR_SELF  (alp_som_bench_knobs.vtor_self)
+#define OFF_MRAM_SERAM (alp_som_bench_knobs.mram_seram)
+#else
+#define OFF_VTOR_SELF  true
+#define OFF_MRAM_SERAM true
 #endif
 
 /* ---- Register facts (E8 SVD) ----------------------------------------------- */
@@ -415,10 +425,14 @@ plan_wake(const alp_power_backend_state_t *state, uint32_t wake_after_ms, sleep_
  * latches and /INT stays asserted.  So EVF and EIE are decoded by name. */
 #define RV3028_STATUS_PORF 0x01u
 #define RV3028_STATUS_EVF  0x02u
+#define RV3028_STATUS_AF   0x04u
+#define RV3028_STATUS_TF   0x08u
 #define RV3028_STATUS_UF   0x10u
 #define RV3028_STATUS_BSF  0x20u
 #define RV3028_STATUS_CLKF 0x40u
 #define RV3028_CTRL2_EIE   0x04u
+#define RV3028_CTRL2_AIE   0x08u
+#define RV3028_CTRL2_TIE   0x10u
 #define RV3028_CTRL2_UIE   0x20u
 #define RV3028_CTRL2_CLKIE 0x40u
 #define RV3028_EE37_BSIE   0x40u /* EEPROM_BACKUP (37h) bit 6 */
@@ -469,13 +483,48 @@ static void rtc_refusal_dump_once(void)
 	       (unsigned)alif_se_hw_lpperi_cken());
 }
 
+/* True when some RV-3028 flag that is both set AND enabled would hold /INT low.  A flag whose
+ * enable is off (bench U8g: UF=1 with UIE=0) never drives the pin and is not a reason to
+ * refuse.  PORF's enable lives in an EEPROM bit this SDK does not read: not counted. */
+static bool rtc_enabled_flag_set(const uint8_t r[6])
+{
+	const uint8_t st = r[0], c2 = r[2], e37 = r[5];
+
+	return ((st & RV3028_STATUS_EVF) != 0u && (c2 & RV3028_CTRL2_EIE) != 0u) ||
+	       ((st & RV3028_STATUS_UF) != 0u && (c2 & RV3028_CTRL2_UIE) != 0u) ||
+	       ((st & RV3028_STATUS_CLKF) != 0u && (c2 & RV3028_CTRL2_CLKIE) != 0u) ||
+	       ((st & RV3028_STATUS_BSF) != 0u && (e37 & RV3028_EE37_BSIE) != 0u) ||
+	       ((st & RV3028_STATUS_TF) != 0u && (c2 & RV3028_CTRL2_TIE) != 0u) ||
+	       ((st & RV3028_STATUS_AF) != 0u && (c2 & RV3028_CTRL2_AIE) != 0u);
+}
+
+/* /INT counts as asserted when the pad reads low (with the LPGPIO clock on: the hw seam
+ * enables it before the read) AND the part has an enabled flag set, or cannot be read to
+ * say otherwise.  A low pad with no enabled flag is not a reason to refuse here; the arm
+ * step re-reads the pad under the interrupt lock and still refuses a real low level. */
+static bool rtc_int_asserted_now(void)
+{
+	uint8_t r[6] = { 0 };
+
+	if (alif_se_hw_rtc_int_asserted() <= 0) {
+		return false;
+	}
+	if (alp_som_power_rtc_regs(r) != ALP_OK) {
+		return true;
+	}
+	return rtc_enabled_flag_set(r);
+}
+
 static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
 {
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
 		return refuse(2, "lptimer_pending", 1, ALP_ERR_BUSY);
 	}
+	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
+		(void)alp_som_power_rtc_clear_stale_uf(); /* harmless noise, kept out of the dumps */
+	}
 	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
-	    alif_se_hw_rtc_int_asserted() > 0) {
+	    rtc_int_asserted_now()) {
 		rtc_refusal_dump_once();
 		return refuse(2, "rtc_int_asserted", 1, ALP_ERR_BUSY);
 	}
@@ -551,8 +600,8 @@ static uint32_t ewic_for(const sleep_plan_t *plan)
  * Build the complete OFF profile for @p plan.  Every member of @p out is assigned
  * here by name; @p out is not read first.  @p live is the SE's current OFF profile,
  * consulted for exactly three things: dcdc_voltage (range-checked, not trusted),
- * vtor_address and vtor_address_ns (preserved, so the wake still goes through the
- * SES -> ATOC path).
+ * vtor_address and vtor_address_ns (the fallback when the vendor resume vector is switched
+ * off by a bench knob; by default both become SCB->VTOR).
  */
 static alp_status_t
 build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_plan_t *plan)
@@ -577,9 +626,10 @@ build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_pla
 	out->stby_clk_freq = (stop && !BENCH_KNOB(stby_76_8)) ? SCALED_FREQ_RC_STDBY_0_075_MHZ
 	                                                      : SCALED_FREQ_RC_STDBY_76_8_MHZ;
 	out->memory_blocks = plan->memory_blocks;
-	if (BENCH_KNOB(mram_seram)) {
-		/* Bench variant (vi): the vendor sample's MRAM-boot profile (sdk-alif
-		 * samples/drivers/pm/system_off) keeps MRAM and the SE RAM powered. */
+	if (OFF_MRAM_SERAM) {
+		/* The vendor sample's MRAM-boot profile (sdk-alif samples/drivers/pm/system_off)
+		 * keeps MRAM and the SE RAM powered; together with vtor below it is what made
+		 * the wake work on the bench (U8g). */
 		out->memory_blocks |= ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK;
 	}
 	/* The cold-boot RUN profile carries no IP clock gating and no PHY power gating
@@ -591,9 +641,10 @@ build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_pla
 	out->ewic_cfg        = ewic_for(plan);
 	out->vtor_address    = live->vtor_address;
 	out->vtor_address_ns = live->vtor_address_ns;
-	if (BENCH_KNOB(vtor_self)) {
-		/* Bench variant (v): resume at this image's own vector table, as the vendor
-		 * sample does (offp.vtor_address = SCB->VTOR), instead of through SES -> ATOC. */
+	if (OFF_VTOR_SELF) {
+		/* Resume at this image's own vector table, as the vendor sample does
+		 * (offp.vtor_address = SCB->VTOR), instead of through SES -> ATOC (bench U8g:
+		 * the wake needs it). */
 		out->vtor_address    = alif_se_hw_vtor_read();
 		out->vtor_address_ns = out->vtor_address;
 	}
@@ -1229,9 +1280,14 @@ bool alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
  * is how the retention bits were lost before.  The UART is not reconfigured: its divisor is
  * programmed against the nominal clock and is right again once the clock is.
  */
-#define ALIF_SE_PLL_CLK_SEL_RUN 0x00110111u
-#define ALIF_SE_PLL_WAIT_CYCLES 8000000u
-#define ALIF_SE_CGU_PLL_LOCK    BIT(0)
+/* PLL_CLK_SEL (E8 SVD): ES1 [20] selects the source of RTSS_HE_CLK, SYS [4] the CPUPLL/SYSPLL
+ * source, SYSREF [0] the SYST_REFCLK source.  The cold-boot value 0x00110111 also has ES0 [16]
+ * (RTSS_HP_CLK) and the oscillator-select fields set, which say nothing about this core: bench
+ * U8g read 0x00100111 after an nRESET with the clocks and the UART at their nominal rates, and
+ * an exact compare called that "unhealthy".  Health is the three bits that matter. */
+#define ALIF_SE_PLL_CLK_SEL_HE_MASK 0x00100011u
+#define ALIF_SE_PLL_WAIT_CYCLES     8000000u
+#define ALIF_SE_CGU_PLL_LOCK        BIT(0)
 
 _Static_assert(offsetof(run_profile_t, vdd_ioflex_3V3) + sizeof(uint32_t) == sizeof(run_profile_t),
                "run_profile_t changed: assign the new member in build_run_profile()");
@@ -1266,7 +1322,8 @@ static void build_run_profile(run_profile_t *r)
 static bool clocks_healthy(void)
 {
 	return (alif_se_hw_cgu_read(ALIF_SE_CGU_PLL_LOCK_CTRL) & ALIF_SE_CGU_PLL_LOCK) != 0u &&
-	       alif_se_hw_cgu_read(ALIF_SE_CGU_PLL_CLK_SEL) == ALIF_SE_PLL_CLK_SEL_RUN;
+	       (alif_se_hw_cgu_read(ALIF_SE_CGU_PLL_CLK_SEL) & ALIF_SE_PLL_CLK_SEL_HE_MASK) ==
+	           ALIF_SE_PLL_CLK_SEL_HE_MASK;
 }
 
 #if defined(CONFIG_ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS)

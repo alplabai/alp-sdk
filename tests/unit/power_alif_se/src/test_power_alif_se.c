@@ -371,6 +371,7 @@ static uint32_t      g_ccvr;
 static uint32_t      g_ccvr_now;
 static uint8_t       g_rtc_regs[6];
 static bool          g_rtc_regs_ok = true;
+static unsigned      g_uf_clears;
 static int           g_run_set_rc;
 static unsigned      g_run_set_calls;
 static run_profile_t g_run_set;
@@ -456,6 +457,12 @@ uint32_t alif_se_hw_lpperi_cken(void)
 uint32_t alif_se_hw_lpgpio_ext_porta(void)
 {
 	return 0x1u;
+}
+
+alp_status_t alp_som_power_rtc_clear_stale_uf(void)
+{
+	g_uf_clears++;
+	return ALP_OK;
 }
 
 alp_status_t alp_som_power_rtc_regs(uint8_t regs[6])
@@ -600,6 +607,8 @@ static void reset_fakes(void)
 	g_cgu[ALIF_SE_CGU_ACLK_CTRL]     = 0x202u;
 	g_ccvr = g_ccvr_now = 1000u;
 	g_rtc_regs_ok       = true;
+	memset(g_rtc_regs, 0, sizeof(g_rtc_regs));
+	g_uf_clears         = 0u;
 	g_run_set_rc        = 0;
 	g_run_set_calls     = 0;
 	g_run_set_locks_pll = true;
@@ -634,7 +643,15 @@ static void before(void *f)
 	reset_fakes();
 }
 
-ZTEST_SUITE(power_alif_se, NULL, NULL, before, NULL, NULL);
+static alp_som_bench_knobs_t g_initial_knobs;
+
+static void *suite_setup(void)
+{
+	g_initial_knobs = alp_som_bench_knobs; /* what the build defaults to, before any test */
+	return NULL;
+}
+
+ZTEST_SUITE(power_alif_se, NULL, suite_setup, before, NULL, NULL);
 
 static void assert_no_side_effect(void)
 {
@@ -1033,9 +1050,11 @@ ZTEST(power_alif_se, test_armed_source_already_pending_is_refused_with_busy)
 	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_OK);
 
-	/* RV-3028 /INT already low. */
+	/* RV-3028 /INT already low, with an enabled countdown flag behind it. */
 	reset_fakes();
 	g_int_level         = 1;
+	g_rtc_regs[0]       = 0x08u; /* TF */
+	g_rtc_regs[2]       = 0x10u; /* TIE */
 	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
 	assert_no_side_effect();
@@ -1909,7 +1928,8 @@ ZTEST(power_alif_se, test_the_run_profile_matches_the_cold_boot_profile)
 ZTEST(power_alif_se, test_int_asserted_refusal_dumps_the_rtc_registers_once)
 {
 	g_int_level         = 1;
-	g_rtc_regs[0]       = 0x08u;
+	g_rtc_regs[0]       = 0x08u; /* TF */
+	g_rtc_regs[2]       = 0x10u; /* TIE */
 	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
@@ -1991,4 +2011,106 @@ ZTEST(power_alif_se, test_the_runtime_knobs_select_each_vendor_difference_in_the
 	g_state.wake_bitmap      = ALP_POWER_WAKE_TIMER;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
 	zassert_equal(g_set.aon_clk_src, CLK_SRC_LFXO, "the LFXO knob reaches the plan");
+}
+
+/* ---- U8g: the /INT check, the product OFF profile, the restore health check ------------ */
+
+ZTEST(power_alif_se, test_the_u8g_dump_is_not_a_refusal)
+{
+	/* The refusal dump of bench U8g: STATUS=0x10 (UF) CTRL1=0 CTRL2=0 EVENT_CTRL=0 EE35=0xc7
+	 * EE37=0x90.  UF is set with UIE off, nothing is enabled: /INT is not asserted by the
+	 * part even though the (gated, stale) pad read said so. */
+	g_int_level   = 1;
+	g_rtc_regs[0] = 0x10u;
+	g_rtc_regs[4] = 0xc7u;
+	g_rtc_regs[5] = 0x90u;
+
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_OK);
+	zassert_true(g_uf_clears >= 1u, "the stale UF is cleared while preparing");
+}
+
+ZTEST(power_alif_se, test_every_enabled_flag_still_counts_and_a_disabled_one_never_does)
+{
+	static const struct {
+		uint8_t st, c2, e37;
+		bool    refuse;
+	} cases[] = {
+		{ 0x02u, 0x04u, 0x00u, true },  /* EVF + EIE */
+		{ 0x02u, 0x00u, 0x00u, false }, /* EVF, EIE off */
+		{ 0x10u, 0x20u, 0x00u, true },  /* UF + UIE */
+		{ 0x40u, 0x40u, 0x00u, true },  /* CLKF + CLKIE */
+		{ 0x20u, 0x00u, 0x40u, true },  /* BSF + BSIE (EEPROM 37h) */
+		{ 0x20u, 0x00u, 0x00u, false }, /* BSF, BSIE off */
+		{ 0x04u, 0x08u, 0x00u, true },  /* AF + AIE */
+		{ 0x08u, 0x00u, 0x00u, false }, /* TF, TIE off */
+	};
+
+	for (size_t i = 0; i < ARRAY_SIZE(cases); ++i) {
+		reset_fakes();
+		g_int_level         = 1;
+		g_rtc_regs[0]       = cases[i].st;
+		g_rtc_regs[2]       = cases[i].c2;
+		g_rtc_regs[5]       = cases[i].e37;
+		g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+		zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL),
+		              cases[i].refuse ? ALP_ERR_BUSY : ALP_OK,
+		              "case %u",
+		              (unsigned)i);
+	}
+}
+
+ZTEST(power_alif_se, test_a_low_pad_with_an_unreadable_rtc_still_refuses)
+{
+	g_int_level         = 1;
+	g_rtc_regs_ok       = false;
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_ERR_BUSY);
+}
+
+ZTEST(power_alif_se, test_the_product_default_is_the_vendor_off_profile)
+{
+	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,
+		                   .hw            = ALP_SOM_ARM_LPTIMER,
+		                   .memory_blocks = ALP_AIPM_GEN2_BACKUP4K_MASK };
+	off_profile_t out;
+
+	zassert_true(g_initial_knobs.vtor_self);
+	zassert_true(g_initial_knobs.mram_seram);
+	alp_som_bench_knobs = g_initial_knobs;
+	poison(&out);
+	zassert_ok(build_off_profile(&out, &g_live, &plan));
+	zassert_equal(out.vtor_address, 0x80010400u, "SCB->VTOR, not the live value");
+	zassert_equal(out.vtor_address_ns, 0x80010400u);
+	zassert_equal(out.memory_blocks,
+	              ALP_AIPM_GEN2_BACKUP4K_MASK | ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK);
+}
+
+ZTEST(power_alif_se, test_the_u8g_clock_tree_is_healthy)
+{
+	/* PLL locked and PLL_CLK_SEL 0x00100111 (ES0 [16] clear): the HE core's clock is right. */
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 1u;
+	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL]   = 0x00100111u;
+	zassert_true(clocks_healthy());
+	zassert_equal(clock_restore(), 0);
+	zassert_equal(g_run_set_calls, 0u, "no restore for a healthy tree");
+	zassert_equal(g_boot_w[40], 0u);
+
+	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL] = 0x00000111u; /* ES1 [20] clear: not the PLL */
+	zassert_false(clocks_healthy());
+	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL] = 0x00100110u; /* SYSREF [0] clear */
+	zassert_false(clocks_healthy());
+}
+
+ZTEST(power_alif_se, test_w40_reflects_real_health_after_a_restore)
+{
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
+	g_run_set_locks_pll              = false;
+	zassert_equal(clock_restore(), 0);
+	zassert_equal(g_boot_w[40], 2u, "the PLL never locked");
+
+	reset_fakes();
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
+	zassert_equal(clock_restore(), 0);
+	zassert_equal(g_boot_w[40], 1u, "locked and selected");
 }

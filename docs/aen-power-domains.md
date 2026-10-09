@@ -117,11 +117,11 @@ dropped `memory_blocks` bit 20, cleared the retention LDO enables in
 assigned by name: `power_domains` (STOP: VBAT AON; STANDBY: VBAT AON + SSE700 AON),
 `dcdc_mode` OFF (STANDBY adds PD2 to PD0), `aon_clk_src` (LFXO only when `ANA.MISC_CTRL.SEL_32K` and
 `XTAL32K_EN` already confirm it, else LFRC; with LFXO the 32 kHz crystal trim
-`XTAL32K_CAP_CONT` is set to its maximum, 63), `memory_blocks` (BKRAM = gen2 bit 21,
-plus the HE TCM banks the retention asks for), `vdd_ioflex_3V3` 1.8 V,
+`XTAL32K_CAP_CONT` is set to its maximum, 63), `memory_blocks` (BKRAM = gen2 bit 21 and
+MRAM \| SERAM, plus the HE TCM banks the retention asks for), `vdd_ioflex_3V3` 1.8 V,
 `wakeup_events` and `ewic_cfg` from the gen2 masks in `alif_aipm_gen2.h`, and
-`vtor_address` / `vtor_address_ns` preserved from the live profile so the wake still
-goes through SES -> ATOC. After the SE call the profile is read back, the retention
+`vtor_address` / `vtor_address_ns` = `SCB->VTOR` (the vendor resume vector; bench U8g: with
+this and MRAM \| SERAM in `memory_blocks` STOP woke 2 of 2, without both it never did). After the SE call the profile is read back, the retention
 bits it needs in `RET_CTRL` / `VBAT_ANA_REG1` are re-asserted, and the request is
 abandoned if any of it did not stick. All 14 members are compared on the readback.
 `RET_CTRL` and `VBAT_ANA_REG1` are snapshotted before the SE call; every later exit
@@ -166,12 +166,12 @@ set the OFF profile as follows. Differences against `build_off_profile()`:
 | `aon_clk_src` | **LFRC** unless confirmed | **LFXO** | **LFXO** |
 | `stby_clk_src` | HFRC | HFRC | HFRC |
 | `stby_clk_freq` | `RC_STDBY_0_075` | **`RC_STDBY_76_8`** | `RC_STDBY_0_075` |
-| `memory_blocks` | **BKRAM only** (bit 21, plus TCM on request) | **`MRAM_MASK` \| `SERAM_MASK`** | MRAM \| SERAM \| retention blocks |
+| `memory_blocks` | BKRAM (bit 21) \| MRAM \| SERAM, plus TCM on request | **`MRAM_MASK` \| `SERAM_MASK`** | MRAM \| SERAM \| retention blocks |
 | `ip_clock_gating` / `phy_pwr_gating` | 0 / 0 | 0 / 0 | 0 / 0 |
 | `vdd_ioflex_3V3` | 1.8 V | 1.8 V | 1.8 V |
 | `wakeup_events` / `ewic_cfg` | `WE_LPTIMER0` / `EWIC_VBAT_TIMER` (RTC: `WE_LPGPIO0` / `EWIC_VBAT_GPIO`) | `WE_LPTIMER0` / `EWIC_VBAT_TIMER` (or `WE_LPRTC` / `EWIC_RTC_A`) | same families |
-| `vtor_address` | **live value preserved** (so the wake goes through SES -> ATOC) | **`SCB->VTOR`** (this image's own vector table) | `SCB->VTOR` |
-| `vtor_address_ns` | live | not set (uninitialised) | `SCB->VTOR` |
+| `vtor_address` | `SCB->VTOR` | **`SCB->VTOR`** (this image's own vector table) | `SCB->VTOR` |
+| `vtor_address_ns` | `SCB->VTOR` | not set (uninitialised) | `SCB->VTOR` |
 
 Process differences: the vendor sample **re-applies a full explicit RUN profile at
 `PRE_KERNEL_1` priority 46 on every boot** (power domains `PD_SYST | PD_SSE700_AON`, DC-DC 825
@@ -183,9 +183,10 @@ PLL). The vendor writes the OFF profile from a PM notifier and never reads it ba
 the same sequence as ours, with `RTSS_HE_CTRL` written whole. The vendor wake timer is the same
 LPTIMER0 (`timer0`, `snps,dw-timers`, IRQ 60) through the Zephyr counter API.
 
-The three differences with the best chance of explaining a missing wake are `memory_blocks`
-without MRAM, `vtor_address` (a preserved value that may be 0 resumes at an empty ITCM), and
-`aon_clk_src`; they are bench variants (vi), (v) and (iv) of `aen-power-stop`.
+Bench U8g settled it: the two OFF fields that made the difference were `memory_blocks`
+(MRAM \| SERAM) and `vtor_address` (`SCB->VTOR`; a preserved value that may be 0 resumes at an
+empty ITCM), and both are now the backend default. `aon_clk_src` and `stby_clk_freq` remain
+bench knobs. The boot-time clock restore now exists (`ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS`).
 
 **Wake decode.** The record in BKRAM carries what was armed; on the cold boot the
 LPTIMER status is read before its driver initialises, and the RV-3028 flags and

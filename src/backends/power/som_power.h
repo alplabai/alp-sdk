@@ -336,6 +336,9 @@ bool alp_som_power_reset_syndrome_trusted(void);
  *  Read only: nothing is cleared, so the wake decode still sees it. */
 alp_status_t alp_som_power_rtc_flags_pending(bool *pending);
 
+/** Clear a stale UF (time-update flag) when UIE is off; nothing else is touched. */
+alp_status_t alp_som_power_rtc_clear_stale_uf(void);
+
 /** Read-only dump of RV-3028 STATUS 0Eh, CONTROL_1 0Fh, CONTROL_2 10h, Event Control 13h and
  *  the EEPROM mirrors 35h (CLKOUT) and 37h (BACKUP) into @p regs[6], in that order.  Nothing
  *  is written, EEPROM included. */

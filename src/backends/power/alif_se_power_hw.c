@@ -451,6 +451,22 @@ static const struct gpio_dt_spec *rtc_wake_gpio(void)
 	return (spec != NULL && device_is_ready(spec->port)) ? spec : NULL;
 }
 
+/* RTSS_HE_LPPERI_CKEN (AON 0x1A60401C): GPIO_IPCLK_FORCE [17], GPIO_PCLK_FORCE [16],
+ * GPIO_CKEN [11:10], GPIO_DB_CKEN [9:8] (E8 SVD).  Bench U8g read 0 here at the /INT refusal:
+ * a gated LPGPIO block reads stale pad levels.  OR in the clock enables for the pin read (only
+ * those bits, and never cleared again: the block is also the wake pad's). */
+#define HW_LPPERI_CKEN_REG  0x1A60401Cu
+#define HW_LPPERI_GPIO_BITS (BIT(17) | BIT(16) | (3u << 10))
+
+static void lpgpio_clock_ensure(void)
+{
+	uint32_t v = sys_read32(HW_LPPERI_CKEN_REG);
+
+	if ((v & HW_LPPERI_GPIO_BITS) != HW_LPPERI_GPIO_BITS) {
+		sys_write32(v | HW_LPPERI_GPIO_BITS, HW_LPPERI_CKEN_REG);
+	}
+}
+
 bool alif_se_hw_rtc_int_present(void)
 {
 	return rtc_wake_gpio() != NULL;
@@ -460,7 +476,11 @@ int alif_se_hw_rtc_int_asserted(void)
 {
 	const struct gpio_dt_spec *spec = rtc_wake_gpio();
 
-	return (spec != NULL) ? gpio_pin_get_dt(spec) : -ENODEV;
+	if (spec == NULL) {
+		return -ENODEV;
+	}
+	lpgpio_clock_ensure();
+	return gpio_pin_get_dt(spec);
 }
 
 /* Nothing interrupt-related is switched on here: an enabled interrupt line outside
@@ -473,6 +493,7 @@ alp_status_t alif_se_hw_rtc_int_arm(void)
 	if (spec == NULL) {
 		return ALP_ERR_NOT_READY;
 	}
+	lpgpio_clock_ensure();
 	return (gpio_pin_configure_dt(spec, GPIO_INPUT) == 0) ? ALP_OK : ALP_ERR_IO;
 }
 

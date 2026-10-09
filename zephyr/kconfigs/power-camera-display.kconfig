@@ -347,21 +347,22 @@ config ALP_SDK_POWER_ALIF_SE_BENCH_FORCE_LFXO
 	  vendor sample's choice, instead of the LFRC the SES boot leaves selected.  Changes
 	  one thing against the default.  Never for a product build.
 
-config ALP_SDK_POWER_ALIF_SE_BENCH_VTOR_SELF
-	bool "Bench only: OFF profile vtor_address = this image's VTOR (vendor sample)"
+config ALP_SDK_POWER_ALIF_SE_BENCH_NO_VTOR_SELF
+	bool "Bench only: OFF profile keeps the live vtor_address (ablation)"
 	depends on ALP_SDK_POWER_ALIF_SE && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	help
-	  The default preserves the live profile's vtor_address so the wake goes through
-	  SES -> ATOC.  The vendor system_off sample writes SCB->VTOR instead (the MRAM
-	  vector table, resumed directly).  Bench variant (v); never for a product build.
+	  The product default writes vtor_address = SCB->VTOR (the vendor system_off sample's
+	  resume vector); with the MRAM | SERAM memory blocks it is what made STOP wake on the
+	  bench (U8g, 2 of 2; neither: no wake).  This turns that one field off to ablate it.
+	  Default of the runtime knob alp_som_bench_knobs.vtor_self.  Never for a product build.
 
-config ALP_SDK_POWER_ALIF_SE_BENCH_MRAM_SERAM
-	bool "Bench only: OFF profile memory_blocks also includes MRAM and SERAM"
+config ALP_SDK_POWER_ALIF_SE_BENCH_NO_MRAM_SERAM
+	bool "Bench only: OFF profile memory_blocks without MRAM and SERAM (ablation)"
 	depends on ALP_SDK_POWER_ALIF_SE && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	help
-	  The default keeps BKRAM (plus any TCM bank asked for).  The vendor system_off
-	  sample's MRAM-boot profile is MRAM_MASK | SERAM_MASK.  Bench variant (vi); never
-	  for a product build.
+	  The product default keeps MRAM | SERAM | BKRAM (plus any TCM bank) powered in STOP, the
+	  vendor MRAM-boot profile.  This turns MRAM | SERAM off to ablate that one field.
+	  Never for a product build.
 
 config ALP_SDK_POWER_ALIF_SE_BENCH_STBY_76_8
 	bool "Bench only: OFF profile stby_clk_freq = 76.8 MHz for STOP too"

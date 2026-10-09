@@ -65,28 +65,28 @@ One variable each, selected with a config fragment on top of `prj.conf`
 | (i) default, instrumented | `i-default.conf` | nothing | the baseline: `diag pre` / `diag boot` / `se run` / `se off` |
 | (ii) RV-3028 first | `ii-rtc-first.conf` | cycle order: countdown, LPTIMER, alarm | if the countdown cycle wakes and the LPTIMER one does not, the INT path is sound and the LPTIMER path is the suspect |
 | (iii) LPTIMER 5 s | `iii-lptimer-5s.conf` | LPTIMER interval 5000 ms (the backend bench option raises the LPTIMER ceiling to 10 s; the RV-3028 countdown cycle moves to 11 s so it stays on the RV-3028) | whether a longer interval changes the outcome (a race with the SE calls, or the clock) |
-| (A) = (iii) | `iii-lptimer-5s.conf` | the 5 s LPTIMER cycle with the live vtor (the U8d plan's "A") | |
-| (A-vtor) | `a-vtor-lptimer-5s.conf` | (A) plus `vtor_address` = own VTOR | whether the vendor resume vector changes the outcome |
+| (A) = (iii) | `iii-lptimer-5s.conf` | the 5 s LPTIMER cycle (the U8d plan's "A"; the OFF profile is now the vendor one by default) | |
 | (B) = (i) | `i-default.conf` | LPTIMER 500 ms | the baseline |
 | (iv) LFXO | `iv-lfxo.conf` | OFF profile `aon_clk_src` = LFXO (cap 63) | the vendor sample's choice; compare the wake and `se off aon_clk` |
-| (v) VTOR self | `v-vtor-self.conf` | OFF profile `vtor_address` = this image's VTOR | the vendor sample's resume vector; the default keeps the live value |
-| (vi) MRAM+SERAM | `vi-mram-seram.conf` | OFF profile `memory_blocks` also MRAM \| SERAM | the vendor sample's MRAM-boot profile |
-| (A-norestore) | `vii-a-norestore.conf` | (A) with `RESTORE_CLOCKS=n` | the control for U8e: no boot-time `set_run_cfg` |
-| (V) vendor OFF | `viii-vendor-off.conf` | (A) with vtor = own VTOR and memory MRAM \| SERAM \| BKRAM, `RESTORE_CLOCKS=n` | the vendor OFF profile; ablate at run time with the console keys below |
+| (P) product | `p-product.conf` | vendor OFF (default) + fixed restore, LPTIMER 5 s, then countdown, then alarm | a wake at 115200 baud, `bkram live=1 selftest=1` |
+| (P-novtor) | `p-novtor.conf` | (P) with the live vtor_address | ablation of the resume vector |
+| (P-nomem) | `p-nomem.conf` | (P) without MRAM \| SERAM in memory_blocks | ablation of the memory blocks |
+| (P-500) | `p-500.conf` | (P) with LPTIMER 500 ms | the short interval |
+| (A-norestore) | `vii-a-norestore.conf` | (P) with `RESTORE_CLOCKS=n` | no boot-time `set_run_cfg`; the UART comes up at 1/5 baud |
 | (R-vendor) | `ix-repro-vendor.conf` | forces the boot-time restore on a cold boot (fixed profile), then BKRAM self-test, then cycle 1 in the same boot | `bkram live=1 selftest=1` and BOOT w40 = 1, w52 = 1 |
 | (R-legacy) | `x-repro-legacy.conf` | the same with the c6de654ff restore profile (0x16d, no BACKUP4K, no re-assert) | reproduces the U8e loss: `bkram live=0`, BOOT w52 = 2, the sleep refused `bkram_unusable` |
 
-Run-time knobs (bench build): during the 10 s awake window send `v` (OFF `vtor_address` =
-`SCB->VTOR`), `m` (`memory_blocks` |= MRAM \| SERAM), `l` (`aon_clk_src` LFXO) or `s`
-(`stby_clk_freq` 76.8 MHz) on the console; each toggles one knob and prints
-`POWER_STOP: knobs ...`. They live in RAM, so each wake starts from the Kconfig defaults. Every
-boot also prints `POWER_STOP: ses revision ...` (SE firmware revision and TOC version) and
-`POWER_STOP: bkram live=<0|1> selftest=<0|1>`; the BOOT diag words 52-55 hold the restore's
-BKRAM self-test result (1 ok, 2 failed), RET_CTRL and VBAT_ANA_REG1 before the re-assert, and
-VBAT_ANA_REG1 after it.
+Product OFF profile (bench U8g: STOP woke 2 of 2 with it, never without): `vtor_address` =
+`SCB->VTOR` and `memory_blocks` = MRAM \| SERAM \| BKRAM are the backend default. The bench
+build can turn each off (`alp_som_bench_knobs`, Kconfig `..._BENCH_NO_VTOR_SELF` /
+`..._BENCH_NO_MRAM_SERAM`, plus `..._BENCH_FORCE_LFXO` / `..._BENCH_STBY_76_8` for the other two
+vendor differences); the knobs are fixed per image because the Zephyr shell owns the console RX.
+Every boot prints `POWER_STOP: knobs ...`, `POWER_STOP: ses revision ...` (SE firmware revision
+and TOC version) and `POWER_STOP: bkram live=<0|1> selftest=<0|1>`; the BOOT diag words 52-55
+hold the restore's BKRAM self-test result (1 ok, 2 failed), RET_CTRL and VBAT_ANA_REG1 before the
+re-assert, and VBAT_ANA_REG1 after it.
 
-Variants (v) and (vi) are the two differences from the vendor `system_off` sample not
-covered by (i)-(iv); see `docs/aen-power-domains.md`.
+See `docs/aen-power-domains.md` for the comparison with the vendor `system_off` sample.
 
 ## What to read after a wake
 

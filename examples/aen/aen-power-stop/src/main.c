@@ -75,7 +75,6 @@
 #include <string.h>
 
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/sys_io.h>
 #include <zephyr/sys/util.h>
@@ -179,35 +178,6 @@ static void print_knobs(void)
 	       (int)alp_som_bench_knobs.stby_76_8);
 }
 
-/* Runtime OFF-profile knobs without a reflash: during the awake window the console UART is
- * polled and 'v' / 'm' / 'l' / 's' toggle vtor_self / mram_seram / lfxo / stby_76_8
- * (Kconfig supplies the starting values).  The knobs live in plain RAM: a wake is a cold
- * boot and falls back to the Kconfig defaults. */
-static void poll_knobs(void)
-{
-	const struct device *con = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
-	unsigned char        c;
-
-	while (device_is_ready(con) && uart_poll_in(con, &c) == 0) {
-		switch (c) {
-		case 'v':
-			alp_som_bench_knobs.vtor_self = !alp_som_bench_knobs.vtor_self;
-			break;
-		case 'm':
-			alp_som_bench_knobs.mram_seram = !alp_som_bench_knobs.mram_seram;
-			break;
-		case 'l':
-			alp_som_bench_knobs.lfxo = !alp_som_bench_knobs.lfxo;
-			break;
-		case 's':
-			alp_som_bench_knobs.stby_76_8 = !alp_som_bench_knobs.stby_76_8;
-			break;
-		default:
-			continue;
-		}
-		print_knobs();
-	}
-}
 #endif
 
 /* Raw always-on registers, as evidence for the bench record.  The first boot after
@@ -373,9 +343,6 @@ static void start_cycle(unsigned n)
 	printk("POWER_STOP: awake %u ms before cycle%u (%s)\n", (unsigned)AWAKE_MS, n, c->what);
 	for (unsigned s = 0; s < AWAKE_MS / 1000u; ++s) {
 		k_sleep(K_SECONDS(1));
-#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
-		poll_knobs();
-#endif
 		printk("POWER_STOP: awake %u/%u\n", s + 1u, (unsigned)(AWAKE_MS / 1000u));
 	}
 

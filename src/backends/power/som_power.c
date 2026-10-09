@@ -360,6 +360,7 @@ static alp_status_t rv3028_clkout_restore(const struct i2c_dt_spec *i2c, bool pr
 #define RV3028_STATUS_TF     0x08u
 #define RV3028_STATUS_UF     0x10u
 #define RV3028_STATUS_FLAGS  0x7Fu /* every latchable flag; EEbusy (bit7) is read-only */
+#define RV3028_CTRL2_UIE     0x20u
 #define RV3028_CTRL2_AIE     0x08u
 #define RV3028_CTRL2_TIE     0x10u
 
@@ -428,6 +429,32 @@ alp_status_t alp_som_power_rtc_regs(uint8_t regs[6])
 		}
 	}
 	return ALP_OK;
+}
+
+/* UF (the time-update flag) latches every second boundary of a running clock when nothing
+ * clears it; with UIE off it does not drive /INT, but it is noise in every dump (bench U8g:
+ * STATUS=0x10 at each refusal).  Clear it, and only it: a flag is cleared by writing 0, a 1 is
+ * ignored, so every other bit is written as 1 and an event latching between the read and the
+ * write survives.  Left alone when UIE is on (then it is somebody's event). */
+alp_status_t alp_som_power_rtc_clear_stale_uf(void)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   st = 0, c2 = 0;
+
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_STATUS, &st) != 0 ||
+	    i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
+		return ALP_ERR_IO;
+	}
+	if ((st & RV3028_STATUS_UF) == 0u || (c2 & RV3028_CTRL2_UIE) != 0u) {
+		return ALP_OK;
+	}
+	return (i2c_reg_write_byte_dt(
+	            i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_UF)) == 0)
+	           ? ALP_OK
+	           : ALP_ERR_IO;
 }
 
 alp_status_t alp_som_power_rtc_flags_pending(bool *pending)
