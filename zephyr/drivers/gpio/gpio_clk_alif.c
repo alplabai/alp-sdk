@@ -44,24 +44,19 @@
  * guarded there by `#if SOC_FEAT_GPIO_HAS_CLOCK_ENABLE`, which the DFP sets
  * per-part: AE822FA0E5597 soc_features.h:114 -> 1 (this file applies);
  * AE722F80F55D5 (E7) soc_features.h:109 -> 0 (E7 has no such gate -- writing
- * bit 16 there would be wrong).  This file gates on CONFIG_SOC_SERIES_E8, but
- * NOT because E8 is "the only Ensemble series alp-sdk boards" -- alp-sdk also
- * boards E4 (e1m_aen401_m55_hp, AE402FA0E5597) and E6 (e1m_aen601_m55_hp,
- * AE612FA0E5597LS0).  The real reason is narrower: this file is keyed off
- * `DT_HAS_COMPAT_STATUS_OKAY(snps_designware_gpio)` too, and today only the
- * E8 peripherals dtsi (zephyr/dts/alif/ensemble_e8_peripherals.dtsi)
- * instantiates any `snps,designware-gpio` node -- so the compat guard alone
- * already excludes E4/E6, and CONFIG_SOC_SERIES_E8 is redundant-but-cheap
- * belt-and-braces, not a considered "E8 only has the gate" claim.  AE402
- * DOES carry the same gate (AE402FA0E5597/include/soc_features.h:108 ->
- * SOC_FEAT_GPIO_HAS_CLOCK_ENABLE (1); AE1C1F4051920/include/soc_features.h:85
- * also -> 1) -- when an E4 or E6 dtsi grows a `snps,designware-gpio` node,
- * widen the `#if` here (or drop the series guard and rely on the compat
- * check alone) rather than assuming this file already covers it.
- *
- * E4 UPDATE: ensemble_e4_camera.dtsi now instantiates gpio12 on the E4, so the
- * gate is widened to CONFIG_SOC_SERIES_E4 (soc_features.h:108 (1); GPIO_CTRL[15]
- * at +0x80 in AE402FA0E5597 rtss_hp/soc.h:2477).
+ * bit 16 there would be wrong).  This file gates on CONFIG_SOC_SERIES_E8 or
+ * CONFIG_SOC_SERIES_E4, the two series alp-sdk boards whose DT instantiates
+ * `snps,designware-gpio` nodes behind a GPIO_CTRL[] gate (the file is also
+ * keyed off `DT_HAS_COMPAT_STATUS_OKAY(snps_designware_gpio)`).  On the E8 they
+ * come from zephyr/dts/alif/ensemble_e8_peripherals.dtsi; on the E4 the only
+ * one behind that gate is gpio12 (gpio@4900c000, GPIO_CTRL[12]) from
+ * zephyr/dts/alif/ensemble_e4_camera.dtsi.  Both parts carry the gate:
+ * AE402FA0E5597/include/soc_features.h:108 -> SOC_FEAT_GPIO_HAS_CLOCK_ENABLE
+ * (1), GPIO_CTRL[15] at +0x80 in AE402FA0E5597 rtss_hp/soc.h:2477.
+ * ensemble_e4_e6_power.dtsi also instantiates a designware-gpio node (lpgpio,
+ * 0x42002000), which is outside the GPIO_CTRL[] window and is skipped by the
+ * range check below.  AE612FA0E5597LS0 (E6, e1m_aen601_m55_hp) is not covered:
+ * when an E6 dtsi grows a GPIO_CTRL-gated node, widen the `#if` here.
  *
  * INSTANCE LIST: derived from DT, not a hardcoded 0..14 loop.  Every
  * `snps,designware-gpio` node with status = "okay" contributes its `reg`

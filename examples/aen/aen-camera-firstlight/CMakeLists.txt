@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # aen-camera-firstlight -- first-light bench proof for RPi-style CSI-2
-# camera shields on the E1M-AEN801/AEN803 EVK, via the portable
-# <alp/camera.h> API. See testcase.yaml for the six camera-shield
+# camera shields on the E1M-AEN801/AEN803 (E8, M55-HE or M55-HP) and
+# E1M-AEN401 (E4, M55-HP only, compile-only) EVK, via the portable
+# <alp/camera.h> API. See testcase.yaml for the seven camera-shield
 # scenarios and README.md for the build command / expected results.
 
 cmake_minimum_required(VERSION 3.20)

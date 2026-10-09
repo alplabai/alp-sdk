@@ -838,8 +838,8 @@ zephyr_library_sources_ifdef(CONFIG_SN65DSI83
 # has no bitfields): UNVERIFIED-ON-E4 assumption that they match the E8's.
 # Customer bench evidence on an E1M-AEN401: the identical local workaround reads
 # back CGU CLK_ENA 0x1a602014 = 0xfeb3fff1 and VBAT PWR_CTRL 0x1a609008 =
-# 0x03030000, same as the E8 readback.  Only when the D-PHY, DSI or CDC200 driver is configured, so a
-# CSI-camera build gets the D-PHY power-up too; each hook inside is further
+# 0x03030000, same as the E8 readback.  Only when the D-PHY, DSI or CDC200
+# driver is configured, so a CSI-camera build gets the D-PHY power-up too; each hook inside is further
 # gated on its DT node being okay.
 if((CONFIG_SOC_SERIES_E8 OR CONFIG_SOC_SERIES_E4) AND (CONFIG_MIPI_DPHY_DW OR CONFIG_MIPI_DSI_DW OR CONFIG_DISPLAY_CDC200))
     zephyr_library_sources(
