@@ -35,6 +35,6 @@
 		/* The HP's liveness word (tr_memmap.h TR_MEM_I2C1_ALIVE): a 10 ms timer the HP starts right
 		 * after it took the bus. With the record "taken" and this word moving, an HE reset is a warm
 		 * one and leaves I2C1 alone. */
-		alive-address = <0x0237FD80>;
+		alive-address = <0x0237FD90>;
 	};
 };

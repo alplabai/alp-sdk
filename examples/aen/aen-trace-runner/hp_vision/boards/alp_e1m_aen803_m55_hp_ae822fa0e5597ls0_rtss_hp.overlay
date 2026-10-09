@@ -127,7 +127,7 @@
 		flag-address = <0x0237FC94>;
 		/* Advanced by a 10 ms timer started right after this core took the bus (the HE's warm-boot
 		 * detection reads it; tr_memmap.h TR_MEM_I2C1_ALIVE). */
-		alive-address = <0x0237FD80>;
+		alive-address = <0x0237FD90>;
 	};
 };
 
