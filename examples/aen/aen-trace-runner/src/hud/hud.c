@@ -400,7 +400,13 @@ static void paint_vol(const canvas_t *cv, const tr_hud_view_t *v)
 	int w = tr_hud_text_w(TR_HUD_FONT_MED, b);
 
 	clear(cv, 0, INV_Y, TR_HUD_W, TR_HUD_H - INV_Y);
-	panel(cv, TR_HUD_W / 2 - w / 2 - 12, INV_Y, w + 24, INV_PANEL_H, C_PANEL, (A_PANEL * s + 8u) / 16u);
+	panel(cv,
+	      TR_HUD_W / 2 - w / 2 - 12,
+	      INV_Y,
+	      w + 24,
+	      INV_PANEL_H,
+	      C_PANEL,
+	      (A_PANEL * s + 8u) / 16u);
 	text_c(cv, TR_HUD_FONT_MED, TR_HUD_W / 2, INV_Y + 2, b, v->vol_pct == 0u ? C_RED : C_WHITE, s);
 }
 
@@ -961,9 +967,9 @@ tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, ui
 		return k;
 	default: /* T_INV */
 		if (v->vol_age1 != 0u) { /* the volume popup covers the row, whatever the screen */
-			return fnv(fnv(fnv(fnv(k, 9u), fade_alpha(v->vol_age1 - 1u, TR_HUD_VOL_FRAMES)),
-			               v->vol_pct),
-			           v->vol_seq);
+			return fnv(
+			    fnv(fnv(fnv(k, 9u), fade_alpha(v->vol_age1 - 1u, TR_HUD_VOL_FRAMES)), v->vol_pct),
+			    v->vol_seq);
 		}
 		if (v->mode == TR_HUD_PLAY && zone_on(frame, zone_start)) {
 			return fnv(fnv(fnv(k, 3u), zone_alpha(frame - zone_start)), v->zone);

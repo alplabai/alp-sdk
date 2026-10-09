@@ -938,7 +938,7 @@ static int run_game(void)
 	/* The volume word (src/ipc/tr_vol.h): the HE owns it, this core scales every block by it.
 	 * A software gain, so a change never touches I2C2 (leased) or SD_N; 0 is silence with the amps
 	 * running. Starts at the level already published: no ramp up from unity on the first block. */
-	static tr_vol_ramp_t ramp;
+	static tr_vol_ramp_t           ramp;
 	volatile const tr_vol_t *const vol = (volatile const tr_vol_t *)TR_MEM_VOL;
 
 	tr_vol_ramp_init(&ramp, tr_vol_read(vol->vol));

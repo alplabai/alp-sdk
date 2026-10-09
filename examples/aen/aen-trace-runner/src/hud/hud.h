@@ -117,7 +117,8 @@ typedef struct {
 #define TR_HUD_POPUP_FRAMES 32u /* 0.8 s */
 #define TR_HUD_ZONE_FRAMES \
 	110u /* 2.75 s: a zone's name on entry (P15), in the row under the play field's centre */
-#define TR_HUD_VOL_FRAMES 	60u /* 1.5 s: "VOL n%" over the bottom row (every screen) when the volume changes */
+#define TR_HUD_VOL_FRAMES \
+	60u /* 1.5 s: "VOL n%" over the bottom row (every screen) when the volume changes */
 #define TR_HUD_BLINK_FRAMES 40u /* invitation period, 1 s, on for the first 28 */
 #define TR_HUD_PAGE_FRAMES \
 	240u /* 6 s: the attract card turns between the logo and the high scores */

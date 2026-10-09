@@ -80,7 +80,8 @@ bool tr_vol_he_step(tr_vol_he_t *he, volatile tr_vol_t *r, int32_t detents, bool
 		int32_t d   = detents > lim ? lim : (detents < -lim ? -lim : detents);
 		int32_t p   = (int32_t)he->pct + d * (int32_t)TR_VOL_STEP;
 
-		changed |= set(he, r, (uint32_t)(p < 0 ? 0 : (p > (int32_t)TR_VOL_MAX ? (int32_t)TR_VOL_MAX : p)));
+		changed |=
+		    set(he, r, (uint32_t)(p < 0 ? 0 : (p > (int32_t)TR_VOL_MAX ? (int32_t)TR_VOL_MAX : p)));
 	}
 	if (press) {
 		changed |= set(he, r, he->pct != 0u ? 0u : he->unmute_pct);

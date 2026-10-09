@@ -51,7 +51,8 @@ _Static_assert(TR_MEM_VOL >= TR_MEM_BUS2 + sizeof(tr_bus2_t),
                "the volume record starts after the I2C2 lease record");
 _Static_assert(TR_MEM_VOL + sizeof(tr_vol_t) <= TR_MHU0_WINDOW_LO,
                "the volume record sits inside the shared NC page below the MHU0 window");
-_Static_assert(TR_MEM_VOL >= TR_MEM_ARING && TR_MEM_VOL + sizeof(tr_vol_t) <= TR_MEM_ARING + 0x1000u,
+_Static_assert(TR_MEM_VOL >= TR_MEM_ARING &&
+                   TR_MEM_VOL + sizeof(tr_vol_t) <= TR_MEM_ARING + 0x1000u,
                "the volume record is inside the shared NC page (0x0237F000..0x0237FFFF)");
 
 static inline uint32_t tr_vol_word(uint32_t pct)
