@@ -43,7 +43,9 @@ void tr_volume_he_init(void)
 
 	int rc = pinctrl_apply_state(PINCTRL_DT_DEV_CONFIG_GET(ENC_NODE), PINCTRL_STATE_DEFAULT);
 
-	s_enc = alp_qenc_open(&(alp_qenc_config_t)ALP_QENC_CONFIG_DEFAULT(BOARD_ENC_ROTARY));
+	const alp_qenc_config_t cfg = ALP_QENC_CONFIG_DEFAULT(BOARD_ENC_ROTARY);
+
+	s_enc = alp_qenc_open(&cfg);
 	s_sw  = alp_gpio_open(BOARD_PIN_ENCODER_SW);
 	if (s_enc != NULL) {
 		(void)alp_qenc_get_position(s_enc, &s_pos);
