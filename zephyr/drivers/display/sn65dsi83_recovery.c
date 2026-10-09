@@ -244,10 +244,8 @@ void sn65dsi83_report_print(const struct sn65dsi83_report *rep, const struct sn6
 		return;
 	}
 	printk("sn65dsi83: %s (0x0D=0x%02x 0x0A=0x%02x 0xE5=0x%02x) err=%d recoveries=%u failures=%u "
-	       "cleared=%u
-	       ",
-	           rep->suppressed
-	           ? "down, re-init rate-limited"
+	       "cleared=%u\n",
+	       rep->suppressed                           ? "down, re-init rate-limited"
 	       : rep->health == SN65_HEALTH_CLEAR_ERRORS ? "link errors cleared"
 	                                                 : "lost config, re-init",
 	       rep->pll_en,
