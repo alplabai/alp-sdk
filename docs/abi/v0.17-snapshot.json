@@ -8765,6 +8765,10 @@
         "tmp112_set_rate": {
           "hash": "a186a5c86f04d942",
           "signature": "alp_status_t tmp112_set_rate(tmp112_t *ctx, tmp112_rate_t rate);"
+        },
+        "tmp112_set_shutdown": {
+          "hash": "29c5f0327da7a048",
+          "signature": "alp_status_t tmp112_set_shutdown(tmp112_t *ctx, bool shutdown);"
         }
       },
       "macros": {
@@ -12925,6 +12929,10 @@
         "ALP_POWER_DEP_NONE": {
           "hash": "932ebdbf4c2b4efb",
           "value": "0x00000000u"
+        },
+        "ALP_POWER_DEP_PHY_REFCLK": {
+          "hash": "7b43fa3935f47a10",
+          "value": "0x00000004u"
         },
         "ALP_POWER_DEP_SD_EN": {
           "hash": "124a23d0311dfdec",

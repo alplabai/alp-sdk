@@ -80,8 +80,12 @@
  *      @ref alp_power_configure_wake_source).
  *      The SoM power-domain surface (@ref alp_power_domain_t,
  *      @ref alp_power_domain_policy_set, @ref alp_power_domain_info,
- *      @ref alp_power_boot_wake_info) is a contract only (#2784 U1):
- *      every backend currently answers @ref ALP_ERR_NOSUPPORT.
+ *      @ref alp_power_boot_wake_info) is implemented for the Alif Ensemble
+ *      E1M-AEN801 / E1M-AEN803 builds (#2784 U5; CONFIG_ALP_SDK_SOM_POWER,
+ *      default on there when CONFIG_GPIO and CONFIG_PINCTRL are on).  Every
+ *      other backend, and an AEN build without that option, answers
+ *      @ref ALP_ERR_NOSUPPORT.  Nothing calls the quiesce around STOP yet
+ *      (the STOP backend is #2784 U7).
  *      See docs/abi-markers.md for the convention.
  */
 
@@ -495,8 +499,8 @@ alp_status_t alp_power_profile_set(alp_power_profile_id_t     which,
 /* sensor, RTC clock-out, backlight) and restore them on the cold-boot */
 /* wake.  Domains are named by portable ROLE, not by chip or pad, so   */
 /* the same code keeps working when the SoM is swapped within a        */
-/* family.  This header is the CONTRACT only: no backend implements it */
-/* yet and every call below answers ALP_ERR_NOSUPPORT.                 */
+/* family.  The AEN801 / AEN803 builds implement it (#2784 U5); every  */
+/* other backend answers ALP_ERR_NOSUPPORT.                            */
 /* ------------------------------------------------------------------ */
 
 /** On-module power domains the SDK can quiesce, by portable role. */
@@ -536,11 +540,13 @@ typedef enum {
 #define ALP_POWER_ACTION_SHUTDOWN_REG        0x00000008u /**< Shutdown bit in the chip. */
 #define ALP_POWER_ACTION_RAIL_OFF            0x00000010u /**< Gate the supply. */
 
-/** Carrier-side loads that quiescing a domain also affects, bits of
- *  @ref alp_power_domain_info_t::dependents. */
-#define ALP_POWER_DEP_NONE    0x00000000u
-#define ALP_POWER_DEP_CAM_LDO 0x00000001u /**< Camera LDO enables. */
-#define ALP_POWER_DEP_SD_EN   0x00000002u /**< SD-card supply enable. */
+/** Loads that quiescing a domain also affects, bits of
+ *  @ref alp_power_domain_info_t::dependents.  @c PHY_REFCLK is the PHY's 50 MHz
+ *  reference oscillator, whose tri-state pin is the PHY power-down pad. */
+#define ALP_POWER_DEP_NONE       0x00000000u
+#define ALP_POWER_DEP_CAM_LDO    0x00000001u /**< Camera LDO enables. */
+#define ALP_POWER_DEP_SD_EN      0x00000002u /**< SD-card supply enable. */
+#define ALP_POWER_DEP_PHY_REFCLK 0x00000004u /**< PHY 50 MHz reference oscillator. */
 
 /** Static description of one domain on the running SoM. */
 typedef struct {
@@ -583,12 +589,13 @@ typedef struct {
  * @return ALP_OK / ALP_ERR_INVAL (@p domain or @p policy out of range) /
  *         ALP_ERR_NOT_READY (NULL or closed handle) /
  *         ALP_ERR_NOT_PRESENT_ON_THIS_SOC (domain not populated on this SKU) /
- *         ALP_ERR_NOSUPPORT (no backend implements domains, or RAIL_OFF is
- *         unavailable for this domain or its build-time gate is off).
+ *         ALP_ERR_NOSUPPORT (no backend implements domains -- only the AEN801 /
+ *         AEN803 build does -- or RAIL_OFF is unavailable for this domain or
+ *         its build-time gate is off).
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
- *      New in v0.17 (#2784) -- contract only; every backend returns
- *      @ref ALP_ERR_NOSUPPORT.
+ *      New in v0.17 (#2784).  Implemented on the AEN801 / AEN803 (U5); every
+ *      other backend returns @ref ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_power_domain_policy_set(alp_power_t              *handle,
                                          alp_power_domain_t        domain,
@@ -607,7 +614,7 @@ alp_status_t alp_power_domain_policy_set(alp_power_t              *handle,
  *         ALP_ERR_NOSUPPORT (no backend implements domains).
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
- *      New in v0.17 (#2784) -- contract only.
+ *      New in v0.17 (#2784).  Implemented on the AEN801 / AEN803 (U5).
  */
 alp_status_t alp_power_domain_info(alp_power_domain_t domain, alp_power_domain_info_t *out);
 
@@ -625,7 +632,9 @@ alp_status_t alp_power_domain_info(alp_power_domain_t domain, alp_power_domain_i
  *         ALP_ERR_NOSUPPORT (no backend keeps a wake record).
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
- *      New in v0.17 (#2784) -- contract only.
+ *      New in v0.17 (#2784).  The AEN801 / AEN803 build answers it; the record
+ *      is only written once the STOP backend lands (U7), so @c valid stays false
+ *      until then.
  */
 alp_status_t alp_power_boot_wake_info(alp_power_boot_info_t *out);
 

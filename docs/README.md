@@ -89,6 +89,8 @@ into the topic-specific docs.
 - [aen-bench-bringup.md](aen-bench-bringup.md) — E1M-AEN801 (E8)
   on-silicon bench bring-up: Flow A/C/D flashing, the validated
   peripheral matrix, and the NPU-from-MRAM path.
+- [aen-power-domains.md](aen-power-domains.md) — AEN SoM power domains:
+  quiesce / restore of the Wi-Fi, PHY, flash, sensor and backlight around STOP.
 - [aen-provisioning.md](aen-provisioning.md) — provisioning an
   E1M-AEN SoM (SES → MCUboot → slot0 chain, bench-proven at
   `0da1f1b4`, + the SoM-maker policy).

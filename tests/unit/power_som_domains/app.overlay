@@ -1,0 +1,160 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Stand-ins for the AEN LPGPIO (P15_n), GPIO11, GPIO5 and BRD_I2C blocks, and
+ * the generated alp,som-power node for an AEN801-style SoM (HyperRAM DNI, so
+ * no ext-ram domain).  Pins and polarities mirror the generated board dts.
+ */
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	lpgpio: gpio@200 {
+		compatible = "zephyr,gpio-emul";
+		reg = <0x200 0x4>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+		rising-edge;
+		falling-edge;
+		high-level;
+		low-level;
+	};
+
+	gpio11: gpio@300 {
+		compatible = "zephyr,gpio-emul";
+		reg = <0x300 0x4>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+		rising-edge;
+		falling-edge;
+		high-level;
+		low-level;
+	};
+
+	gpio5: gpio@400 {
+		compatible = "zephyr,gpio-emul";
+		reg = <0x400 0x4>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+		rising-edge;
+		falling-edge;
+		high-level;
+		low-level;
+	};
+
+	brd_i2c: i2c@500 {
+		compatible = "zephyr,i2c-emul-controller";
+		clock-frequency = <100000>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x500 4>;
+
+		tmp112: tmp112@48 {
+			compatible = "vnd,som-fake";
+			reg = <0x48>;
+		};
+
+		rv3028: rv3028@52 {
+			compatible = "vnd,som-fake";
+			reg = <0x52>;
+		};
+	};
+
+	/* Test stand-in for the generated pinctrl_som_power group (the real one is
+	 * alif,pinctrl pinmux + pad config; only the pinctrl-0 plumbing matters here). */
+	som_pinctrl {
+		compatible = "vnd,som-pinctrl-test";
+
+		pinctrl_som_power: pinctrl_som_power {
+			group0 {
+				pins = <1>, <4>, <5>, <6>, <7>;
+			};
+		};
+	};
+
+	/* STOP_MODE_STAT register window; the test replaces the read. */
+	stop_mode: stop-mode@600 {
+		compatible = "alif,stop-mode";
+		reg = <0x600 0x4>;
+	};
+
+	som_power: som-power {
+		compatible = "alp,som-power";
+		pinctrl-0 = <&pinctrl_som_power>;
+		pinctrl-names = "default";
+
+		wifi-ble {
+			compatible = "alp,som-power-domain";
+			alp,role = "wifi_ble";
+			reset-gpios = <&lpgpio 1 GPIO_ACTIVE_LOW>;
+			enable-gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>;
+			alp,chip = "cc3501e";
+			alp,default-action = "hold_reset";
+			alp,default-modes = "stop", "standby";
+			alp,stop-hold = "unproven";
+			alp,restore = "nreset_release";
+			alp,rail-off-opt-in;
+			alp,dependents = "cam_ldo";
+		};
+
+		eth-phy {
+			compatible = "alp,som-power-domain";
+			alp,role = "eth_phy";
+			powerdown-gpios = <&lpgpio 4 GPIO_ACTIVE_LOW>;
+			reset-gpios = <&gpio11 6 GPIO_ACTIVE_LOW>;
+			alp,chip = "dp83825";
+			alp,default-action = "powerdown_pin";
+			alp,default-modes = "stop", "standby";
+			alp,stop-hold = "unproven";
+			alp,restore = "pin_release";
+			alp,dependents = "phy_refclk";
+		};
+
+		ext-flash {
+			compatible = "alp,som-power-domain";
+			alp,role = "ext_flash";
+			reset-gpios = <&lpgpio 7 GPIO_ACTIVE_LOW>;
+			alp,chip = "IS25WX256-JHLE";
+			alp,default-action = "hold_reset";
+			alp,default-modes = "stop", "standby";
+			alp,stop-hold = "unproven";
+			alp,restore = "driver_release";
+		};
+
+		temp-sensor {
+			compatible = "alp,som-power-domain";
+			alp,role = "temp_sensor";
+			alp,device = <&tmp112>;
+			alp,chip = "tmp112";
+			alp,default-action = "shutdown_reg";
+			alp,default-modes = "stop", "standby";
+			alp,stop-hold = "none";
+			alp,restore = "register_write";
+		};
+
+		rtc {
+			compatible = "alp,som-power-domain";
+			alp,role = "rtc";
+			wake-gpios = <&lpgpio 0 GPIO_ACTIVE_LOW>;
+			alp,primary-rtc;
+			alp,device = <&rv3028>;
+			alp,chip = "rv3028c7";
+			alp,default-action = "keep_alive";
+			alp,default-modes = "stop", "standby";
+			alp,stop-hold = "none";
+			alp,restore = "none";
+		};
+
+		backlight {
+			compatible = "alp,som-power-domain";
+			alp,role = "backlight";
+			enable-gpios = <&gpio5 5 GPIO_ACTIVE_HIGH>;
+			alp,default-action = "enable_low";
+			alp,default-modes = "stop", "standby";
+			alp,stop-hold = "no";
+			alp,restore = "pin_release";
+		};
+	};
+};
