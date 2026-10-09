@@ -69,7 +69,10 @@ zephyr_sources_ifdef(CONFIG_DMA_PL330_ALIF
 # Ensemble family.  Needed for any Ensemble-E8 build that uses a DW GPIO port,
 # not just alp-feature builds, so this is applied before the CONFIG_ALP_SDK
 # early-return (the soc-bridge / MRAM-flash precedent above).
-if(CONFIG_SOC_SERIES_E8)
+# E4 (AE402FA0E5597) carries the same gate: AE402FA0E5597/include/soc_features.h:108
+# SOC_FEAT_GPIO_HAS_CLOCK_ENABLE (1), and its DFP rtss_hp/soc.h:2477 has the same
+# GPIO_CTRL[15] at CLKCTL_PER_SLV+0x80 (CLKCTL_PER_SLV_BASE 0x4902F000, :3639).
+if(CONFIG_SOC_SERIES_E8 OR CONFIG_SOC_SERIES_E4)
     zephyr_sources_ifdef(CONFIG_GPIO_DW
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/gpio/gpio_clk_alif.c)
 endif()
@@ -828,11 +831,17 @@ zephyr_library_sources_ifdef(CONFIG_SN65DSI83
 # ADR-0017-ADJACENT glue: the Alif E8 SoC-level setup the MIPI D-PHY and the
 # display chain need and no driver performs -- D-PHY clock sources + analog
 # power (CGU / VBAT), the CDC200 pixel-clock divider, and the DSI panel
-# backlight pad mux.  E8-only (the gate mirrors the GPIO clock-enable glue
-# above) and only when the D-PHY, DSI or CDC200 driver is configured, so a
+# backlight pad mux.  E8 and E4 (the gate mirrors the GPIO clock-enable glue
+# above).  E4: the CGU CLK_ENA (+0x14, DFP AE402FA0E5597 rtss_hp/soc.h:1090) and
+# VBAT PWR_CTRL (+0x08, :1151) registers exist at the same CGU_BASE 0x1A602000 /
+# VBAT_BASE 0x1A609000, but no E4 source backs the BIT POSITIONS (the DFP header
+# has no bitfields): UNVERIFIED-ON-E4 assumption that they match the E8's.
+# Customer bench evidence on an E1M-AEN401: the identical local workaround reads
+# back CGU CLK_ENA 0x1a602014 = 0xfeb3fff1 and VBAT PWR_CTRL 0x1a609008 =
+# 0x03030000, same as the E8 readback.  Only when the D-PHY, DSI or CDC200 driver is configured, so a
 # CSI-camera build gets the D-PHY power-up too; each hook inside is further
 # gated on its DT node being okay.
-if(CONFIG_SOC_SERIES_E8 AND (CONFIG_MIPI_DPHY_DW OR CONFIG_MIPI_DSI_DW OR CONFIG_DISPLAY_CDC200))
+if((CONFIG_SOC_SERIES_E8 OR CONFIG_SOC_SERIES_E4) AND (CONFIG_MIPI_DPHY_DW OR CONFIG_MIPI_DSI_DW OR CONFIG_DISPLAY_CDC200))
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mipi_display_e8.c)
 endif()

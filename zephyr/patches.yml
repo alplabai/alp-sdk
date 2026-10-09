@@ -1100,3 +1100,24 @@ patches:
       other slot pending at that moment, including A55 interrupts. Write
       only BIT(tint). Upstream to Zephyr then drop. Upstream submission text:
       zephyr/patches/zephyr/0005-UPSTREAM.md.
+  - path: zephyr/0006-imx335-wait-for-sensor-after-power-up.patch
+    sha256sum: bb5be8c04d3e743ea840b26f5d73a8e31bbd7b19b3af8786f3bb01da22a53983
+    module: zephyr
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-10-09
+    upstreamable: true
+    comments: |
+      Applies on top of 0004. drivers/video/imx335.c writes its init table as
+      soon as the driver initialises. A camera module with no reset line (the
+      RPi-style 15-pin connector carries none) is still powering up at that
+      point on a cold boot, so the first CCI write (STANDBY, 0x3000) NACKs, the
+      device stays NOT_READY for the rest of the boot, and alp_camera_open()
+      reports ALP_ERR_NOT_READY. A warm reset never shows it because the
+      module is already powered. Poll that first write (raw i2c_write_dt, so
+      the expected NACKs are not logged) every 10 ms for up to 1 s before the
+      table writes. Bench 2026-10-09, E1M-AEN803 2026W36-0009 on the E1M-EVK,
+      INNO-MAKER CAM-IMX335 on J5, both M55-HE and M55-HP from a DPS-150 cold
+      cycle: without the poll every cold boot failed sensor init; with it the
+      sensor answered after 4 NACKed attempts (~40 ms) and open succeeded.
+      Upstream to Zephyr then drop.

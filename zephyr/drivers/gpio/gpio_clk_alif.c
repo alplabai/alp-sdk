@@ -59,6 +59,10 @@
  * widen the `#if` here (or drop the series guard and rely on the compat
  * check alone) rather than assuming this file already covers it.
  *
+ * E4 UPDATE: ensemble_e4_camera.dtsi now instantiates gpio12 on the E4, so the
+ * gate is widened to CONFIG_SOC_SERIES_E4 (soc_features.h:108 (1); GPIO_CTRL[15]
+ * at +0x80 in AE402FA0E5597 rtss_hp/soc.h:2477).
+ *
  * INSTANCE LIST: derived from DT, not a hardcoded 0..14 loop.  Every
  * `snps,designware-gpio` node with status = "okay" contributes its `reg`
  * address; instance = (reg - 0x49000000) / 0x1000 (gpio0 is the base at
@@ -106,7 +110,7 @@
 #include <zephyr/sys/sys_io.h>
 #include <zephyr/sys/util.h>
 
-#if defined(CONFIG_SOC_SERIES_E8) && DT_HAS_COMPAT_STATUS_OKAY(snps_designware_gpio)
+#if (defined(CONFIG_SOC_SERIES_E8) || defined(CONFIG_SOC_SERIES_E4)) && DT_HAS_COMPAT_STATUS_OKAY(snps_designware_gpio)
 
 /* CLKCTL_PER_SLV->GPIO_CTRL[0]; instance n is this + 4*n (AE822 DFP
  * rtss_he/soc.h:2594; alp-sdk's own CLKCTRL_PER_SLV_GPIO_CTRLn in
@@ -159,4 +163,4 @@ static int alp_alif_gpio_clk_init(void)
 
 SYS_INIT(alp_alif_gpio_clk_init, PRE_KERNEL_1, 1);
 
-#endif /* CONFIG_SOC_SERIES_E8 && DT_HAS_COMPAT_STATUS_OKAY(snps_designware_gpio) */
+#endif /* (E8 || E4) && DT_HAS_COMPAT_STATUS_OKAY(snps_designware_gpio) */
