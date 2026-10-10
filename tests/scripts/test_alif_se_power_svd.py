@@ -81,14 +81,18 @@ def test_register_offsets_used_by_the_hw_seam():
         assert int(m.group(1), 16) == want, sym
 
 
-def test_rtss_he_ctrl_bits_match_svd():
-    reg = _register("AON", "RTSS_HE_CTRL")
-    assert int(reg.findtext("addressOffset"), 16) == 0x10
-    fields = _fields(reg)
-    assert fields["COLD_WAKEUP"] == (0, 1)
-    assert fields["WIC"] == (8, 2)
+def test_rtss_core_ctrl_bits_match_svd():
     text = HW.read_text(encoding="utf-8")
-    assert re.search(r"^#define\s+HW_RTSS_HE_CTRL\s+0x1A604010u", text, re.M)
+    hdr = (ROOT / "src/backends/power/alif_se_power_hw.h").read_text(encoding="utf-8")
+    cores = (("RTSS_HE_CTRL", 0x10, "0x1A604010u"), ("RTSS_HP_CTRL", 0x0, "0x1A604000u"))
+    for name, off, want in cores:
+        reg = _register("AON", name)
+        assert int(reg.findtext("addressOffset"), 16) == off, name
+        fields = _fields(reg)
+        assert fields["COLD_WAKEUP"] == (0, 1), name
+        assert fields["WIC"] == (8, 2), name
+        # the backend picks the core's own pair at build time: one #define per core
+        assert re.search(rf"^#define\s+HW_CORE_CTRL\s+{want}", text, re.M), name
     assert re.search(r"HE_CTRL_COLD_WAKEUP\s+BIT\(0\)", text)
-    assert re.search(r"HE_CTRL_WIC_EN\s+BIT\(8\)", text)
-    assert re.search(r"HE_CTRL_WIC_IWIC\s+BIT\(9\)", text)
+    assert re.search(r"ALIF_SE_CTRL_WIC_EN\s+\(1u << 8\)", hdr)
+    assert re.search(r"ALIF_SE_CTRL_WIC_IWIC\s+\(1u << 9\)", hdr)
