@@ -6,6 +6,10 @@ correction, and the item-2 injection-set / dtc-gperf corrections.
 Date: 2026-07-25
 Deciders: alpCaner
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). Lane 2 (Yocto on Cortex-A) now covers RZ/V2N / V2M only; read "(RZ/V2N, i.MX 93)" below accordingly.
+
 ## Amendment (2026-08-26 — the dtc/gperf-consumer citation named a retired file)
 
 The dtc/gperf open-evidence Amendment below (2026-07-26) names its

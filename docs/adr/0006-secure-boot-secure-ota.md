@@ -4,6 +4,10 @@ Status: Accepted, partially superseded (v0.4 delivery)
 Date: 2026-05-10
 Amended: 2026-05-11, 2026-07-31, 2026-08-25 (see "Amendment" sections at the bottom)
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The `E1M-N93` row, the NXP AHAB / `vendors/nxp/tools/cst.py` path and the `N93-RTcore` / `N93-Linux` backend lines below are history only: no NXP target ships. The decision for the remaining families is unchanged.
+
 ## Context
 
 Alp SDK targets connected, AI-enabled edge devices.  Every shipped
