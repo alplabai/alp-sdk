@@ -214,8 +214,8 @@ target_include_directories(app PRIVATE ${ZEPHYR_ALP_SDK_MODULE_DIR}/zephyr/drive
 # does not fit (a partner logo is the usual thing that pushes it over).
 if(TR_RENDER STREQUAL "A32") # the release image; the M55-render build is a different layout
 	add_custom_target(tr_itcm_check ALL
-		COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DELF=$<TARGET_FILE:zephyr_final> -DLIMIT=262144
-			-P ${CMAKE_CURRENT_LIST_DIR}/itcm_check.cmake
+		COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/itcm_check.py
+			${CMAKE_NM} $<TARGET_FILE:zephyr_final> 262144
 		VERBATIM)
 	add_dependencies(tr_itcm_check zephyr_final)
 endif()
