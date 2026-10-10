@@ -93,6 +93,10 @@ uint32_t alif_se_hw_lpperi_cken(void);
 /** LPRTC CCVR (the counter, units unproven: ~2 Hz on LFRC). */
 uint32_t alif_se_hw_lprtc_ccvr(void);
 
+/** Raw LPRTC register at byte offset @p off (CCR 0x0C, CPSR 0x20, CPCVR 0x24); no clock
+ *  enable. */
+uint32_t alif_se_hw_lprtc_read(unsigned off);
+
 /** This image's vector table base (SCB->VTOR), for the vendor-style OFF profile bench
  *  variant. */
 uint32_t alif_se_hw_vtor_read(void);

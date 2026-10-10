@@ -36,6 +36,13 @@ option(TR_HP_SOUND "Lease I2C2 to the HP's game sound for its amp bring-up (hp_v
 if(TR_HP_SOUND AND NOT TR_INPUT_NPU)
 	message(FATAL_ERROR "TR_HP_SOUND is the vision HP's sound: it needs -DTR_INPUT_NPU=ON")
 endif()
+if(TR_HP_SOUND)
+	# The game sound's volume (src/ipc/tr_vol.h): the EVK's rotary encoder + push switch and the
+	# bench's SWD request word. volume_he.overlay maps the pads, volume_he.conf turns the input
+	# subsystem on.
+	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/volume_he.overlay)
+	list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/volume_he.conf)
+endif()
 
 # Who draws the frame. A32 (default): the Cortex-A32 renderer draws every
 # pixel; this M55 image runs the game, flips the CDC200 and drives the SRAM1
@@ -134,7 +141,8 @@ endif()
 option(TR_BENCH_FAULT_INJECT "BENCH ONLY: SWD-armed fatal-error injector (inert until armed)" ON)
 target_compile_definitions(app PRIVATE TR_BENCH_FAULT_INJECT=$<BOOL:${TR_BENCH_FAULT_INJECT}>)
 if(TR_HP_SOUND)
-	target_sources(app PRIVATE src/platform/bus2_he.c src/ipc/tr_bus2.c)
+	target_sources(app PRIVATE src/platform/bus2_he.c src/ipc/tr_bus2.c
+		src/platform/volume_he.c src/ipc/tr_vol.c src/ipc/tr_knob.c)
 	# src/platform/tr_i2c2_rearm.h resets the i2c_dw driver's sync semaphore (struct
 	# i2c_dw_dev_config in drivers/i2c/i2c_dw.h, not a public header).
 	target_include_directories(app PRIVATE ${ZEPHYR_BASE}/drivers/i2c)

@@ -1,5 +1,10 @@
 # NPU body control — design (phase 1: host + build, no camera)
 
+> **Status note (2026-10-10):** the HP camera DT blocker described in section 10 / item 3 is
+> resolved for the stock tree: `zephyr/boards/shields/e1m_evk_rpi_csi/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`
+> landed with #2809 (06a0110be). The shield paths below refer to the then-separate sibling checkout
+> and are kept as design history.
+
 **Status:** host prototype and silicon probe built; nothing here has run on silicon.
 The camera is on `the E1M-AEN803 2026W36-0001 EVK`, the display on `the E1M-AEN803 2026W36-0009 EVK`, so phase 1 is proven
 without a camera. Every latency figure marked *Vela* is Vela's estimate, not a measurement.
@@ -223,7 +228,7 @@ Only the newest pose matters, so this is a seqlock slot, not a queue:
 | +0x80 | 64x40 GREY8 thumbnail of the letterboxed frame (2,560 B, to `0x0237FC7F`), for the HUD |
 
 No MHU doorbell (section 2). The existing mailbox and doorbell work
-(`project_aen_mhuv2_mailbox_driver`) stays available if the HE ever needs to wake on a pose.
+(the MHUv2 mailbox driver) stays available if the HE ever needs to wake on a pose.
 
 ## 5. What changes in the game (next phase, not in this commit)
 
@@ -378,12 +383,12 @@ entirely) -- restore its md5 `5839e003d5d069f6fd912eb22774d037` at the end of th
 maintainer's standing instruction; nothing in this phase moved it.
 
 **HP camera DT blocker (item 3).** `hp_vision` fails at the devicetree stage, not C compilation:
-`e1m_evk_rpi_csi`'s `boards/` directory (`alp-sdk-lcd/zephyr/boards/shields/e1m_evk_rpi_csi/boards/`)
+`e1m_evk_rpi_csi`'s `boards/` directory (`zephyr/boards/shields/e1m_evk_rpi_csi/boards/`)
 ships only `alp_e1m_aen80{1,3}_m55_he_..._rtss_he.overlay` (one line each,
 `#include "e1m_aen.dtsi"`). `e1m_aen.dtsi` itself names only SoC-level nodes (`&csi`, `&i2c1`,
 `&cam`, `&dphy`, `&gpio12`, `&pinctrl`) -- core-agnostic on their face. The fix this phase could
-not make (out of this repo's scope; `alp-sdk-lcd` is a sibling repo) is almost certainly one new
-file, `alp-sdk-lcd/zephyr/boards/shields/e1m_evk_rpi_csi/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`,
+not make (out of this repo's scope; the shield lived in a sibling checkout at the time) is almost certainly one new
+file, `zephyr/boards/shields/e1m_evk_rpi_csi/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`,
 containing exactly `#include "e1m_aen.dtsi"` (mirroring the HE variant byte for byte) -- but
 **this is inferred, not proven**: it removes the DT parse error this phase reproduced
 (`undefined node label 'csi_interface'`), not a claim that the CPI/CSI IP is actually reachable

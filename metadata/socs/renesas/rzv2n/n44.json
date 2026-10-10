@@ -237,7 +237,7 @@
       "shipment_suffixes": ["#AC0", "#AC1", "#BC0", "#BC1"]
     }
   ],
-  "cm33_boot": {"sram_base": 134217728, "image_pad": 12288, "image_max": 196608, "xspi_offset": 1703936,
+  "cm33_boot": {"sram_base": 134217728, "image_pad": 12288, "image_max": 196608, "xspi_offset": 1703936, "mtd_name": "fip",
     "note": "BL2 copies the stored CM33 image raw from mtd1 + xspi_offset (0x1A0000) to SRAM sram_base (0x08000000) and silently truncates past image_max (0x30000); the CM33 starts at sram_base + image_pad (0x08003000), so the stored image is image_pad zero bytes + zephyr.bin."},
   "openamp_carveout": {"a55_base": 1332740096, "cm33_ns_base": 2674917376, "size": 9437184,
     "regions": {

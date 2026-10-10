@@ -1,5 +1,7 @@
 # ONNX Runtime Own-Recipe Implementation Plan
 
+> **Note (2026-10-10):** E1M-NX9101 / NXP i.MX 93 was removed in #2781 / #2782 (67ed22d86; the module was never produced): the "enabled on `E1M-NX9101` first" scoping and the `meta-imx-ml` fallback below are moot because that module no longer exists; the E1M-X family is the only Cortex-A55 target left.
+
 > **STATUS — LANDED (partial).** `meta-alp-sdk/recipes-devtools/onnxruntime/onnxruntime_1.28.0.bb` exists at the `v1.28.0` pin this plan chose, and the `inference_ort.cpp` backend + dispatcher wiring landed behind `ALP_SDK_USE_ORT_CPU` (PR #1263). The plan's in-scope `E1M-NX9101` enablement did not land: the option defaults **OFF** everywhere and no board/metadata turns it on for `E1M-NX9101`. Kept for implementation-history context.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)

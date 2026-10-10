@@ -361,6 +361,7 @@ static alp_status_t rv3028_clkout_restore(const struct i2c_dt_spec *i2c, bool pr
 #define RV3028_STATUS_UF     0x10u
 #define RV3028_STATUS_FLAGS  0x7Fu /* every latchable flag; EEbusy (bit7) is read-only */
 #define RV3028_CTRL2_UIE     0x20u
+#define RV3028_CTRL1_TE      0x04u
 #define RV3028_CTRL2_AIE     0x08u
 #define RV3028_CTRL2_TIE     0x10u
 
@@ -453,6 +454,53 @@ alp_status_t alp_som_power_rtc_clear_stale_uf(void)
 	}
 	return (i2c_reg_write_byte_dt(
 	            i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_UF)) == 0)
+	           ? ALP_OK
+	           : ALP_ERR_IO;
+}
+
+/* Before this backend arms its own countdown: stop whatever an earlier cycle left running or
+ * latched.  The RV-3028 is backup-powered, so a countdown / alarm that fired while nobody
+ * handled it (an nRESET, a wake the decode never saw) keeps its enable and its flag across any
+ * power cycle of the module, holds /INT low and refused every later sleep (#2784).  Stopped
+ * here: the countdown (TE, TIE) and, unless @p keep_alarm (the caller may have armed its own
+ * alarm), the alarm enable (AIE); cleared: TF, AF (not with keep_alarm) and, with UIE off, UF.
+ * Each flag is cleared by writing 0 to it, every other bit is written as 1 (ignored by the
+ * part), so PORF / EVF / BSF / CLKF survive: EVF with EIE on is the EVI wake (#2811). */
+alp_status_t alp_som_power_rtc_clear_stale_wake(bool keep_alarm)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   c1 = 0, c2 = 0, st = 0, clear;
+
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_1, &c1) != 0 ||
+	    i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
+		return ALP_ERR_IO;
+	}
+	/* Enables first, flags after, so nothing can re-latch behind the clear. */
+	if ((c1 & RV3028_CTRL1_TE) != 0u &&
+	    i2c_reg_write_byte_dt(i2c, RV3028_REG_CONTROL_1, (uint8_t)(c1 & ~RV3028_CTRL1_TE)) != 0) {
+		return ALP_ERR_IO;
+	}
+	const uint8_t en = keep_alarm ? RV3028_CTRL2_TIE : (RV3028_CTRL2_TIE | RV3028_CTRL2_AIE);
+
+	if ((c2 & en) != 0u &&
+	    i2c_reg_write_byte_dt(i2c, RV3028_REG_CONTROL_2, (uint8_t)(c2 & ~en)) != 0) {
+		return ALP_ERR_IO;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_STATUS, &st) != 0) {
+		return ALP_ERR_IO;
+	}
+	clear = (uint8_t)(st & (keep_alarm ? RV3028_STATUS_TF : (RV3028_STATUS_TF | RV3028_STATUS_AF)));
+	if ((st & RV3028_STATUS_UF) != 0u && (c2 & RV3028_CTRL2_UIE) == 0u) {
+		clear |= RV3028_STATUS_UF;
+	}
+	if (clear == 0u) {
+		return ALP_OK;
+	}
+	return (i2c_reg_write_byte_dt(
+	            i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~clear)) == 0)
 	           ? ALP_OK
 	           : ALP_ERR_IO;
 }

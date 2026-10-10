@@ -104,7 +104,7 @@ SYS_INIT(tr_i2c1_unstick_init, POST_KERNEL, 1);
  * video control API at all, see apply_ae()'s own header comment for why)
  * -- an SDK GAP, the same shape as src/platform/display.c's cdc200_swap_fb()
  * bypass: <alp/camera.h> has no exposure/gain control, so this reaches the
- * sensor directly. ov9281@60 is on E1M I2C1 (csi_i2c), from alp-sdk-lcd's
+ * sensor directly. ov9281@60 is on E1M I2C1 (csi_i2c), from the
  * innomaker_cam_ov9281 shield -- probe/camera/src/main.c's SENSOR_NODE.
  * g_sensor itself is still needed for device_is_ready() (the driver's own
  * init, and the camera pipeline's use of the SAME device elsewhere in this

@@ -348,12 +348,25 @@ a_b2=$(sed -n '/^#define TR_MEM_BUS2 /{n;s/^[[:space:]]*\(0x[0-9A-Fa-f]*\)u.*/\1
 a_i2c1=$(sed -n '/^#define TR_MEM_I2C1_HANDOVER /{n;s/^[[:space:]]*\(0x[0-9A-Fa-f]*\)u.*/\1/p}' src/ipc/tr_memmap.h | head -1)
 { [ -n "$a_b2" ] && [ -n "$a_i2c1" ] && [ "$a_b2" != "$a_i2c1" ]; } || FAILS "TR_MEM_BUS2 ($a_b2) is the I2C1 handover address ($a_i2c1)"
 
+# the volume (src/ipc/tr_vol.h): the HP scales each block AFTER the synth rendered it, in software; the HE side never
+# touches I2C2 or GPIO5 (the lease is not its to take) -- comments aside
+awk '/tr_audio_render\(s_mono, BLOCK\);/ { r = NR } /tr_vol_apply\(&ramp, s_mono, BLOCK,/ { if (r && r < NR) ok = 1 } END { exit !ok }' sound/src/main.c ||
+	FAILS "sound/src/main.c: the volume is not applied to the block after tr_audio_render()"
+if grep -vE '^[[:space:]]*(/?\*|//)' src/platform/volume_he.c | grep -qiE 'i2c|gpio5|SD_N|tr_bus2'; then
+	FAILS "src/platform/volume_he.c touches I2C2 / GPIO5 / the lease"
+fi
+# the encoder phase order the bench confirmed (clockwise = louder): ENC0_Y / P3_1 first, ENC0_X / P3_0 second
+grep -Eq 'gpios = <&gpio3 1 GPIO_ACTIVE_HIGH>, <&gpio3 0 GPIO_ACTIVE_HIGH>;' volume_he.overlay ||
+	FAILS "volume_he.overlay: tr_enc phase order is not <&gpio3 1>, <&gpio3 0> (the bench-confirmed clockwise = louder)"
+a_vol=$(sed -n '/^#define TR_MEM_VOL /{n;s/^[[:space:]]*\(0x[0-9A-Fa-f]*\)u.*/\1/p}' src/ipc/tr_memmap.h | head -1)
+{ [ -n "$a_vol" ] && [ "$a_vol" != "$a_b2" ] && [ "$a_vol" != "$a_i2c1" ]; } || FAILS "TR_MEM_VOL ($a_vol) collides with the lease record or the I2C1 handover"
+
 # ---- real builds, when given (the gw build dirs) ---------------------------------------------
 NM=${NM:-$(command -v arm-zephyr-eabi-nm || true)}
 if [ -n "${TR_HP_COMBINED_BUILD:-}" ] && [ -x "${NM:-}" ] && [ -f "$TR_HP_COMBINED_BUILD/zephyr/zephyr.elf" ]; then
 	syms=$("$NM" "$TR_HP_COMBINED_BUILD/zephyr/zephyr.elf")
 	for s in tr_audio_render tas2563_init tas2563_resume cc3501e_bridge_bringup i2s_dw_initialize tr_bus2_hp_enter \
-		tr_bus2_hp_poll tr_snd_bus_enter abort_bringup snd_bus2_boot tr_pslot_write; do
+		tr_bus2_hp_poll tr_snd_bus_enter abort_bringup snd_bus2_boot tr_pslot_write tr_vol_apply; do
 		grep -qE " $s\$" <<<"$syms" || FAILS "$TR_HP_COMBINED_BUILD (combined) lacks $s"
 	done
 fi

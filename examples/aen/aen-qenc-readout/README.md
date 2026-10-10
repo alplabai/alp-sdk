@@ -210,7 +210,7 @@ in order:
    decoder's own register state is the correct resting state for a
    trigger-counting channel (`UTIMER_CNTR_CTRL` `0x00000021`), and
    `UTIMER_CNTR` itself read `0x00000000` at every point checked, including
-   under motion — see `changelog.d/2037.md` for the full register dump. This
+   under motion — see the `CHANGELOG.md` entries tagged (#2037) for the full register dump. This
    run could not tell a live decode from an unwired shaft.
 2. **`RESULT FAIL`, same pre-fix build, raw pad sampling added: pads
    toggled, angle never did.** GPIO3 `EXT_PORTA` (`0x49003050`, bits 0/1)

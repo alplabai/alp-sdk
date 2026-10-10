@@ -8,7 +8,7 @@
  * Registers "*" at priority 50: outranks the NOT_IMPLEMENTED stub
  * (priority 0, src/backends/jpeg/zephyr_stub.c) everywhere, and loses
  * to the Alif Hantro VC9000E hardware backend (priority 100,
- * "alif:ensemble:e8") once that lands.
+ * "alif:ensemble:e8", src/backends/jpeg/alif_hantro.c).
  *
  * ponytail: baseline sequential, 4:2:0 + 4:0:0 only -- no MJPEG,
  * progressive, 4:2:2, or rate-control.  Swap for libjpeg-turbo only if

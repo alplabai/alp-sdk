@@ -342,6 +342,7 @@ typedef struct {
 	uint32_t         rtc_seconds;   /* RTC_TIMER: requested countdown */
 	uint32_t         armed_ms;      /* nominal timed-wake length */
 	uint32_t         timed_bit;     /* ALP_POWER_WAKE_* a timed wake reports */
+	bool             keep_alarm;    /* WAKE_RTC asked: a caller-armed alarm must survive */
 	bool             lfxo;          /* AON clock source for the OFF profile */
 	uint32_t         memory_blocks;
 } sleep_plan_t;
@@ -401,6 +402,7 @@ plan_wake(const alp_power_backend_state_t *state, uint32_t wake_after_ms, sleep_
 		plan->wake |= plan->timed_bit;
 	}
 
+	plan->keep_alarm = (bitmap & ALP_POWER_WAKE_RTC) != 0u;
 	if ((bitmap & ALP_POWER_WAKE_RTC) != 0u) {
 		if ((plan->hw & ALP_SOM_ARM_RTC_TIMER) == 0u) {
 			/* The caller's own RV-3028 alarm / countdown: it must really be armed, or
@@ -423,10 +425,9 @@ plan_wake(const alp_power_backend_state_t *state, uint32_t wake_after_ms, sleep_
 	return ALP_OK;
 }
 
-/* Every armed path must be idle before arming: a latched status would end the sleep
- * at once, and clearing it here would swallow an event the application wants. */
-/* One-shot evidence when /INT reads asserted before a sleep (bench U8d: the RV-3028 cycles
- * always refused): what the RV-3028 itself says -- STATUS 0Eh (EVF is bit 1), CONTROL_1 0Fh,
+/* One-shot evidence when the RV-3028 holds /INT low or a wake is already latched (bench U8d:
+ * the RV-3028 cycles always refused; also dumped at the step-7 refusal): what the RV-3028
+ * itself says -- STATUS 0Eh (EVF is bit 1), CONTROL_1 0Fh,
  * CONTROL_2 10h (EIE is bit 2), Event Control 13h, and the EEPROM mirrors 35h CLKOUT, 37h
  * BACKUP -- and what the LPGPIO block sees on its pins.  Reads only: nothing here writes the
  * part or its EEPROM.
@@ -531,8 +532,18 @@ static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
 		return refuse(2, "lptimer_pending", 1, ALP_ERR_BUSY);
 	}
-	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
-		(void)alp_som_power_rtc_clear_stale_uf(); /* harmless noise, kept out of the dumps */
+	if ((plan->hw & ALP_SOM_ARM_RTC_TIMER) != 0u) {
+		/* This backend owns the countdown it is about to start: a stale TIE+TF left by an
+		 * earlier cycle would hold /INT low at the check below and is stopped here, and so
+		 * is a stale alarm (AIE/AF) unless the caller asked for WAKE_RTC and so may have
+		 * armed its own.  The backup-powered part keeps all of it across any power cycle. */
+		alp_status_t cs = alp_som_power_rtc_clear_stale_wake(plan->keep_alarm);
+
+		if (cs != ALP_OK) {
+			printk("alif_se_power: stale RV-3028 wake state not cleared (status %d)\n", (int)cs);
+		}
+	} else if ((plan->hw & ALP_SOM_ARM_RTC_INT) != 0u) {
+		(void)alp_som_power_rtc_clear_stale_uf(); /* the caller's own alarm: UF noise only */
 	}
 	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
 	    rtc_int_asserted_now()) {
@@ -868,8 +879,12 @@ static void save_cycle_record(const sleep_plan_t *plan)
 	rec.armed       = plan->wake;
 	rec.armed_hw    = plan->hw;
 	/* Probed NOW, before the sleep: only if the NSRST syndrome bit does clear can a set bit
-	 * at the next boot be read as a pin reset (see ALP_SOM_REC_NSRST_TRUSTED). */
-	if (alp_som_power_reset_syndrome_trusted()) {
+	 * at the next boot be read as a pin reset (see ALP_SOM_REC_NSRST_TRUSTED).  Never for a
+	 * sleep that retains HE TCM: on an E1M-AEN803 (2026W36-0001) every such STOP wake left
+	 * RTSS_HE_RESET = 0x01, the value the SVD names "NSRST pin asserted" and also the value
+	 * a cold power-on leaves, while a STOP wake without TCM leaves 0x10.  So the bit cannot
+	 * tell a pin reset from a TCM-retained wake. */
+	if (!tcm_requested(plan->memory_blocks) && alp_som_power_reset_syndrome_trusted()) {
 		rec.armed_hw |= ALP_SOM_REC_NSRST_TRUSTED;
 	}
 	rec.timed_bit   = plan->timed_bit;
@@ -1073,6 +1088,7 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 		bool spent = false;
 
 		if (alp_som_power_rtc_flags_pending(&spent) == ALP_OK && spent) {
+			rtc_refusal_dump_once();
 			s = refuse(7, "rtc_wake_already_latched", 1, ALP_ERR_BUSY);
 			goto unwind;
 		}

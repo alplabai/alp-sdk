@@ -45,7 +45,7 @@
 };
 
 /* Peripheral-ownership audit (fix round 6, silicon root cause): the base
- * board file (alp-sdk-lcd's alp_e1m_aen803_m55_hp_....dts) turns i2c0
+ * board file (alp_e1m_aen803_m55_hp_....dts) turns i2c0
  * (0x49010000) and i2c2 (0x49012000) "okay" UNCONDITIONALLY -- neither is
  * this app's camera bus (that is i2c1, enabled by the ordering-fix shield
  * above) or otherwise touched by any hp_vision source file. i2c2 is the
