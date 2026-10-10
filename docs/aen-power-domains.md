@@ -86,10 +86,9 @@ unverified.
 ## The STOP / STANDBY backend
 
 `src/backends/power/alif_se_power.c` implements `alp_power_request_sleep(STOP |
-STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and, **built but not bench-verified**,
-`STOP` on the E8 M55-HP (section "The M55-HP" below). It is registered for
+STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and `STOP` on the E8 M55-HP (**bench-proven HP-only** on the E1M-AEN803) (section "The M55-HP" below). It is registered for
 `alif:ensemble:e8` behind `CONFIG_ALP_SDK_POWER_ALIF_SE` (default **n**,
-experimental; STOP is bench-proven on the E1M-AEN803, STANDBY is not). The M55-HE subsystem is powered off and the
+experimental; STOP is bench-proven on the E1M-AEN803, STANDBY is not). This core's (HE or HP) subsystem is powered off and the
 wake is a cold boot through the Secure Enclave, so the call does not return: read
 the cause with `alp_power_boot_wake_info()`. `SLEEP` / `DEEP_SLEEP` are forwarded to
 the pm_policy backend when it is built.
@@ -173,17 +172,23 @@ STANDBY record is discarded when the RV-3028 reports its power-on-reset flag.
 The BKRAM placement exists only in a build with `CONFIG_ALP_SDK_POWER_ALIF_SE`;
 every other build keeps the record in RAM.
 
-### The M55-HP (built, not bench-verified)
+### The M55-HP (STOP bench-proven HP-only on the E1M-AEN803)
 
 The backend compiles and registers for the HP core too (`CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP`,
 board targets `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` and
 `alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`; `examples/aen/aen-power-stop` builds for both).
-**Nothing in this section has run on silicon.** Every difference below is transcribed from the
-Alif sources named in the code comments, not from a measurement.
+**Bench (2026-10-10, E1M-AEN803 2026W36-0001 on an E1M-EVK, HP-only ATOC, i.e. the HE was not booted):**
+`examples/aen/aen-power-stop` built for `alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`, linked in HP
+slot0 at `0x802b0000`, Flow D via tan. 3/3 STOP cycles PASS at 400 MHz with `RESTORE_CLOCKS` on: cycle 1
+LPTIMER 500 ms `mode=4 wake_source=0x8`, cycle 2 RV-3028 countdown 3 s `mode=4 wake_source=0x1`,
+cycle 3 RV-3028 alarm `mode=4 wake_source=0x1`, `quiesced=restored=0x7f`,
+`SUMMARY cycles=3 pass=5 fail=0`. Not verified: an HP STOP while the HE runs (needs a combined HE+HP
+ATOC the current tooling cannot build) and the E1M-AEN801 HP. The differences in the table below are
+transcribed from the Alif sources named in the code comments.
 
-| Aspect | M55-HE (bench-proven STOP) | M55-HP (built only) | Source |
+| Aspect | M55-HE (bench-proven STOP) | M55-HP (STOP bench-proven, AEN803) | Source |
 |---|---|---|---|
-| Sleep modes | `STOP`, `STANDBY` | `STOP` only (the vendor's SOFT_OFF-class profile); `STANDBY` is refused `ALP_ERR_NOSUPPORT` (`hp_standby_unsupported`) and the backend's per-mode wake caps for it are empty, so the dispatcher already answers `ALP_ERR_NOSUPPORT` | sdk-alif `samples/drivers/pm/system_off/src/main.c:89,305`, README ("S2RAM ... HE core only") |
+| Sleep modes | `STOP`, `STANDBY` | `STOP` only (the vendor's SOFT_OFF-class profile); `STANDBY`: the backend's per-mode wake caps for it are empty, so the dispatcher refuses it with `ALP_ERR_NOSUPPORT` before the backend runs (the backend's `hp_standby_unsupported` check is defence in depth) | sdk-alif `samples/drivers/pm/system_off/src/main.c:89,305`, README ("S2RAM ... HE core only") |
 | TCM retention | HE TCM banks (`SRAM4_x` / `SRAM5_x`) | none: `ALP_POWER_RETAIN_TCM` / `FULL` are `ALP_ERR_NOSUPPORT` (`hp_tcm_not_retainable`); `memory_blocks` is BKRAM \| MRAM \| SERAM only | `main.c:199-201`; hal_alif `aipm.h:195-259` has no HP TCM block |
 | Boot location | any (`vtor_address` optional, U8h) | MRAM only: `SCB->VTOR` below `0x80000000` is refused `ALP_ERR_NOSUPPORT` (`hp_vtor_not_mram`) | `main.c:80,85,199-201` |
 | Core control / reset registers | `AON.RTSS_HE_CTRL` `0x1A604010`, `RTSS_HE_RESET` `0x1A604014` | `AON.RTSS_HP_CTRL` `0x1A604000`, `RTSS_HP_RESET` `0x1A604004` (same bits: `COLD_WAKEUP` [0], `WIC` [9:8], `RESETSYNDROME` [5:0]) | DFP `Device/soc/AE822FA0E5597/include/rtss_hp/soc.h:1157-1158,3656`; `Device/core/common/source/pm.c:61-69`; HP SVD `:3890,3913` |
@@ -191,7 +196,7 @@ Alif sources named in the code comments, not from a measurement.
 | Wake events, EWIC | `WE_LPTIMER0` / `EWIC_VBAT_TIMER`, `WE_LPGPIO0` / `EWIC_VBAT_GPIO` | identical: SoC-level `off_profile_t` fields, and IRQ 57 (`LPGPIO_COMB_IRQ_IRQn`) and 60 (`LPTIMER0_IRQ_IRQn`) are the same lines in the HP header | `rtss_hp/soc.h:140,143`; `main.c:45-50` has no HP branch |
 | Power domains | `PD_VBAT_AON` (STOP) | `PD_VBAT_AON` (the HP is not in the list, so its subsystem is the one that powers off) | `main.c:214-215`; hal_alif `aipm.h:56,68` (`PD_RTSS_HP` = bit 7) |
 | BKRAM wake record | `0x4902C000`, retained | same SoC-level block, same record | `ensemble_e8_peripherals.dtsi` `bkram` node |
-| Clock restore (`..._RESTORE_CLOCKS`, default **off** for the HP boards, on in the example's HP fragment) | RUN profile 160 MHz; healthy = `PLL_CLK_SEL` `ES1` [20] \| `SYS` [4] \| `SYSREF` [0] (`0x00100011`) | RUN profile 400 MHz; healthy = `ES0` [16] \| `SYS` [4] \| `SYSREF` [0] (`0x00010011`) | `main.c:137-138`; HP SVD `PLL_CLK_SEL` `:1862` |
+| Clock restore (`..._RESTORE_CLOCKS`, default **off** for the HP boards, on in the example's HP fragment; measured on the AEN803 HP, unmeasured on the AEN801 HP) | RUN profile 160 MHz; healthy = `PLL_CLK_SEL` `ES1` [20] \| `SYS` [4] \| `SYSREF` [0] (`0x00100011`) | RUN profile 400 MHz; healthy = `ES0` [16] \| `SYS` [4] \| `SYSREF` [0] (`0x00010011`) | `main.c:137-138`; HP SVD `PLL_CLK_SEL` `:1862` |
 
 **What the backend does about the other core.** The OFF profile belongs to the calling core. The SE
 powers that core's subsystem off, and the SoC drops to its STOP state only once every subsystem has
@@ -205,12 +210,12 @@ sleep, each with its own OFF profile. The BKRAM record, the LPTIMER0 wake timer 
 single-owner resources: use the backend from one core only (the dtsi notes the same for the
 LPTIMER; the vendor README says the RTC is shared with the HE).
 
-**Open on the HP (bench):** that the SE accepts this profile from the HP and powers the HP subsystem
-off; that `STOP_MODE_STAT` (a SoC-level flag, `VBAT_STOP_MODE_REG`) is set by an HP-only sleep, which the
-record cross-check depends on (if not, the wake decodes as an aborted sleep and the domains are still
-restored); that the 400 MHz RUN profile is the right one for the E1M HP; the
-clock-restore trigger; the LPGPIO0 and LPTIMER0 wakes reaching the HP's EWIC; and the HP/HE co-sleep
-case above.
+**Open on the HP (bench):** an HP STOP while the HE runs. `STOP_MODE_STAT` (a SoC-level flag,
+`VBAT_STOP_MODE_REG`) is probably not set when only the HP powers off, and the record cross-check
+depends on it, so such a wake could decode as an aborted sleep (the domains are still restored). Also
+unmeasured: the E1M-AEN801 HP, and the HP/HE co-sleep case above. The HP-only AEN803 run above covers
+the SE accepting the profile, the 400 MHz RUN profile, the clock-restore trigger and the LPTIMER0 and
+RV-3028 wakes.
 
 ### Comparison with the vendor reference (bench U8c)
 

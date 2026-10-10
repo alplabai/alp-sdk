@@ -4,7 +4,7 @@
  *
  * aen-power-stop -- bench proof of the Alif SE STOP backend (#2784, unit U7) on
  * the E1M-AEN803 (Alif Ensemble E8, M55-HE), built as an MRAM image.  It also builds for the
- * M55-HP (E1M-AEN803 / E1M-AEN801), not bench-verified; the app code is core-agnostic and the
+ * M55-HP (E1M-AEN803 / E1M-AEN801; bench-proven HP-only on the AEN803); the app code is core-agnostic and the
  * backend refuses what the HP cannot do (see README.md, "M55-HP").
  *
  * STOP passed on silicon (U8h); STANDBY is untested.  Back up the MRAM image before flashing this (Flow D

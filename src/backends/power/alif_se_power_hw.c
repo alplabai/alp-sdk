@@ -365,7 +365,8 @@ static alp_status_t wake_timer_arm_locked(uint32_t ticks)
  *   11 NVIC ISER1 (IRQ 60 = bit 28)    12 NVIC ISPR1
  *   13 DWT CYCCNT delta, LPTIMER arm -> snapshot (PRE only; 0 in BOOT)
  *   14 VBAT RET_CTRL        15 ANA VBAT_ANA_REG1   16 STOP_MODE (0x1A60F000)
- *   17 AON core CTRL (HE: RTSS_HE_CTRL, HP: RTSS_HP_CTRL)     18 PWRMODCTL CPDLPSTATE  19 AON core RESET (0x1A604014 HE / 0x1A604004 HP)
+ *   17 AON core CTRL (HE: RTSS_HE_CTRL, HP: RTSS_HP_CTRL)     18 PWRMODCTL CPDLPSTATE
+ *   19 AON core RESET (0x1A604014 HE / 0x1A604004 HP)
  *   20 CGU OSC_CTRL (0x1A602000)  21 PLL_LOCK_CTRL (+4)  22 PLL_CLK_SEL (+8)
  *   23 ESCLK_SEL (+0x10)   24 CLK_ENA (+0x14)     25 CLKCTL_SYS ACLK_CTRL (0x1A010820)
  *   26 AON SYSTOP_CLK_DIV (0x1A604020)   27 CLKCTL_PER_SLV UART_CTRL (0x4902F008)
@@ -753,8 +754,8 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 	return ALP_OK;
 }
 
-/* AON.RTSS_HE_RESET (0x1A604014) / RTSS_HP_RESET (0x1A604004), this core's reset status: RESETSYNDROME [5:0], set by hardware
- * and cleared by software with a 1 (E8 SVD, oneToClear).  Values the SVD names: 0 = POR or
+/* AON.RTSS_HE_RESET (0x1A604014) / RTSS_HP_RESET (0x1A604004), this core's reset status:
+ * RESETSYNDROME [5:0], set by hardware and cleared by software with a 1 (E8 SVD, oneToClear).  Values the SVD names: 0 = POR or
  * Secure-Enclave-initiated reset, 1 = the NSRST pin was asserted, 4 = a reset request to
  * the power domain.  Read and acknowledge here, so the next boot reads its own cause
  * rather than a stale bit; the earliest bench snapshot (word 19) has the raw value first. */

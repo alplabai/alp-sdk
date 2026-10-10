@@ -26,9 +26,14 @@
 #define CONFIG_ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS 1
 #define ALP_TEST_NO_SYSINIT                         1 /* the test calls clock_restore() itself */
 
+/* The backend's printk() lands in test_printk() below, so a refusal test can assert the reason. */
+#define printk test_printk
+
 #include "../../../../src/backends/power/alif_se_power.c"
 
+#include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <zephyr/ztest.h>
@@ -2329,11 +2334,43 @@ ZTEST(power_alif_se, test_the_built_profile_is_checked_for_mram_and_seram)
  * answers from CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP.  What differs is cited at each branch in
  * alif_se_power.c (vendor sdk-alif samples/drivers/pm/system_off/src/main.c). */
 
+static char   g_log[512];
+static size_t g_log_len;
+static bool   g_log_on;
+
+void test_printk(const char *fmt, ...)
+{
+	va_list ap;
+
+	if (!g_log_on || g_log_len >= sizeof(g_log) - 1u) {
+		return;
+	}
+	va_start(ap, fmt);
+	(void)vsnprintf(g_log + g_log_len, sizeof(g_log) - g_log_len, fmt, ap);
+	va_end(ap);
+	g_log_len = strlen(g_log);
+}
+
+static void log_capture_start(void)
+{
+	g_log_len = 0u;
+	g_log[0]  = '\0';
+	g_log_on  = true;
+}
+
+static void log_capture_stop(void)
+{
+	g_log_on = false;
+}
+
 ZTEST(power_alif_se, test_hp_standby_is_refused_by_name_before_any_side_effect)
 {
 	g_core_hp = true;
+	log_capture_start();
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STANDBY, 500u, NULL),
 	              ALP_ERR_NOSUPPORT);
+	log_capture_stop();
+	zassert_not_null(strstr(g_log, "reason=hp_standby_unsupported"), "log: %s", g_log);
 	assert_no_side_effect();
 	zassert_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_STANDBY), 0u, "nothing can wake it");
 	zassert_not_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_STOP), 0u, "STOP is unchanged");
@@ -2356,7 +2393,10 @@ ZTEST(power_alif_se, test_hp_has_no_tcm_retention)
 	zassert_equal(se_configure_retention(&g_state, &r), ALP_OK, "BKRAM is always kept");
 
 	g_state.retain = (alp_power_retain_t){ .level = ALP_POWER_RETAIN_TCM, .retain_kb = 64u };
+	log_capture_start();
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOSUPPORT);
+	log_capture_stop();
+	zassert_not_null(strstr(g_log, "reason=hp_tcm_not_retainable"), "log: %s", g_log);
 	assert_no_side_effect();
 
 	reset_fakes(); /* the HE accepts the same request */
@@ -2368,11 +2408,17 @@ ZTEST(power_alif_se, test_hp_image_must_be_mram_booted)
 {
 	g_core_hp = true;
 	g_vtor    = 0x00000000u; /* TCM boot: the wake would resume into TCM that is not kept */
+	log_capture_start();
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOSUPPORT);
+	log_capture_stop();
+	zassert_not_null(strstr(g_log, "reason=hp_vtor_not_mram"), "log: %s", g_log);
 	assert_no_side_effect();
 
 	g_vtor = 0x7FFFFFFFu;
+	log_capture_start();
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOSUPPORT);
+	log_capture_stop();
+	zassert_not_null(strstr(g_log, "reason=hp_vtor_not_mram"), "log: %s", g_log);
 	assert_no_side_effect();
 
 	g_vtor = 0x80000000u; /* the MRAM base itself counts */

@@ -11,17 +11,21 @@ image), so a RAM-run image would not come back.
 
 See [`docs/aen-power-domains.md`](../../../docs/aen-power-domains.md) for the model.
 
-## M55-HP (built, not bench-verified)
+## M55-HP (STOP bench-proven HP-only on the E1M-AEN803)
 
 The same app builds for the HP core (`alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`,
 `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`); `boards/` carries the matching overlay and a
-config fragment that turns the boot-time clock restore on (its Kconfig default is HE-only). Nothing
-here has run on an HP yet. What differs from the HE, and what the backend answers when asked for it:
+config fragment that turns the boot-time clock restore on (its Kconfig default is HE-only; the AEN803
+HP fragment is bench-proven, the AEN801 HP one is unmeasured).
+
+Bench (2026-10-10, E1M-AEN803 2026W36-0001 on an E1M-EVK, HP-only ATOC so the HE was not booted; `examples/aen/aen-power-stop` built for `alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`, linked in the HP slot0 at `0x802b0000`, Flow D via tan): 3/3 STOP cycles PASS at 400 MHz with `RESTORE_CLOCKS` on. Cycle 1 LPTIMER 500 ms `mode=4 wake_source=0x8`, cycle 2 RV-3028 countdown 3 s `mode=4 wake_source=0x1`, cycle 3 RV-3028 alarm `mode=4 wake_source=0x1`; `quiesced=restored=0x7f`; `SUMMARY cycles=3 pass=5 fail=0`. Still open: an HP STOP while the HE runs (needs a combined HE+HP ATOC the current tooling cannot build; `STOP_MODE_STAT` is SoC-level and probably not set when only the HP powers off, so such a wake could decode as an aborted sleep), and the AEN801 HP.
+
+What differs from the HE, and what the app gets when it asks for it:
 
 | Request | HP answer |
 |---|---|
 | `STOP` | the vendor's SOFT_OFF-class sleep; the wake is a cold boot, as on the HE |
-| `STANDBY` | `ALP_ERR_NOSUPPORT`, `reason=hp_standby_unsupported` (the S2RAM sleep is HE-only) |
+| `STANDBY` | `ALP_ERR_NOSUPPORT` from the dispatcher before the backend runs (no wake source is valid for it on the HP; the S2RAM sleep is HE-only). The backend's own `reason=hp_standby_unsupported` check is defence in depth and is not reachable through `alp_power_request_sleep()` |
 | TCM / FULL retention | `ALP_ERR_NOSUPPORT`, `reason=hp_tcm_not_retainable` (no HP TCM retention) |
 | image not in MRAM (`VTOR` below `0x80000000`) | `ALP_ERR_NOSUPPORT`, `reason=hp_vtor_not_mram`; do not use the Flow C ITCM retarget |
 

@@ -820,8 +820,8 @@ void alp_som_power_unbind(alp_power_domain_t d)
 	k_mutex_unlock(&_lock);
 }
 
-/* This core's (M55-HE or M55-HP) reset syndrome, read and acknowledged (strong definition: alif_se_power_hw.c).
- * Without it every boot looks like a Secure-Enclave-initiated one. */
+/* This core's (M55-HE or M55-HP) reset syndrome, read and acknowledged (strong definition:
+ * alif_se_power_hw.c).  Without it every boot looks like a Secure-Enclave-initiated one. */
 __weak uint32_t alp_som_power_reset_syndrome_take(void)
 {
 	return 0u;

@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright 2026 Alp Lab AB
  *
- * Alif Secure Enclave STOP / STANDBY power backend for the Ensemble E8 M55-HE
+ * Alif Secure Enclave STOP / STANDBY power backend for the Ensemble E8 M55-HE and M55-HP
  * (#2784, unit U7).  alp_power_request_sleep(STOP | STANDBY) on E1M-AEN801 /
  * E1M-AEN803.
  *
@@ -11,8 +11,10 @@
  * bank sizes are not.  CONFIG_ALP_SDK_POWER_ALIF_SE is off by default.  Items marked
  * [BENCH] below are still open hypotheses.
  *
- * Cores: the M55-HE (E1M-AEN801 / E1M-AEN803, bench-proven) and, built but NOT bench-verified,
- * the M55-HP (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP).  The HP differs from the HE in the ways the
+ * Cores: the M55-HE (E1M-AEN801 / E1M-AEN803, bench-proven) and the M55-HP
+ * (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP; STOP bench-proven HP-only on the E1M-AEN803, 2026-10-10,
+ * 3/3 cycles; an HP STOP while the HE runs and the AEN801 HP are not verified).  The HP differs
+ * from the HE in the ways the
  * Alif vendor sample sdk-alif samples/drivers/pm/system_off/src/main.c shows (cited per use below):
  *   - only a SOFT_OFF-class sleep: STOP maps to it; STANDBY (the S2RAM sleep) is HE-only;
  *   - no TCM retention (memory_blocks never names HP TCM: aipm.h has no HP TCM block);
@@ -25,7 +27,7 @@
  *
  * What a STOP is on this part
  * ---------------------------
- * The M55-HE subsystem is powered OFF.  The Secure Enclave (SE) owns the power
+ * This core's (HE or HP) subsystem is powered OFF.  The Secure Enclave (SE) owns the power
  * tree: before the core sleeps, an OFF profile (off_profile_t) is handed to the SE
  * over its mailbox, then the core enters the EWIC subsystem-off sleep.  When a
  * wake event fires the SE powers the subsystem back up and boots it through the
@@ -82,7 +84,8 @@
  *                      wake source is already pending (the sleep would end at once).
  *   ALP_ERR_NOSUPPORT  the D-cache is enabled, or a wake bit / duration this
  *                      backend cannot arm.  On the HP also: STANDBY
- *                      (hp_standby_unsupported), TCM retention (hp_tcm_not_retainable) and an
+ *                      (hp_standby_unsupported; the dispatcher refuses it first), TCM
+ *                      retention (hp_tcm_not_retainable) and an
  *                      image that is not MRAM-booted (hp_vtor_not_mram).
  *   ALP_ERR_NOT_READY  the core's low-power-state requests are not all OFF.
  *   ALP_ERR_INVAL      bad mode, bad retention, a timed wake out of range, a
@@ -1038,6 +1041,8 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 
 	/* 1. Validate everything first. */
 	if (mode_unsupported_here(mode)) {
+		/* Defence in depth: se_mode_wake_caps(STANDBY) is 0 on the HP, so the dispatcher
+		 * (power_dispatch.c) answers ALP_ERR_NOSUPPORT before this backend runs. */
 		return refuse(1, "hp_standby_unsupported", (int)mode, ALP_ERR_NOSUPPORT);
 	}
 	if (!retention_valid(&state->retain, &why)) {
