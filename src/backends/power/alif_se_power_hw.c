@@ -789,6 +789,13 @@ uint32_t alif_se_hw_lprtc_ccvr(void)
 #endif
 }
 
+/* Raw LPRTC register read at @p off (a 4-byte aligned offset inside LPRTC_Type, DFP
+ * rtss_he/soc.h:1523-1532).  Does not touch RTC_CLK_EN: call alif_se_hw_lprtc_ccvr() first. */
+uint32_t alif_se_hw_lprtc_read(unsigned off)
+{
+	return (off < 0x30u && (off & 3u) == 0u) ? sys_read32(0x42000000u + off) : 0u;
+}
+
 /* CGU registers (base 0x1A602000, Alif DFP soc.h CGU_BASE): OSC_CTRL +0x00, PLL_LOCK_CTRL
  * +0x04, PLL_CLK_SEL +0x08.  CLKCTL_SYS ACLK_CTRL 0x1A010820. */
 uint32_t alif_se_hw_cgu_read(unsigned which)

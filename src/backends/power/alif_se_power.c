@@ -879,8 +879,12 @@ static void save_cycle_record(const sleep_plan_t *plan)
 	rec.armed       = plan->wake;
 	rec.armed_hw    = plan->hw;
 	/* Probed NOW, before the sleep: only if the NSRST syndrome bit does clear can a set bit
-	 * at the next boot be read as a pin reset (see ALP_SOM_REC_NSRST_TRUSTED). */
-	if (alp_som_power_reset_syndrome_trusted()) {
+	 * at the next boot be read as a pin reset (see ALP_SOM_REC_NSRST_TRUSTED).  Never for a
+	 * sleep that retains HE TCM: on an E1M-AEN803 (2026W36-0001) every such STOP wake left
+	 * RTSS_HE_RESET = 0x01, the value the SVD names "NSRST pin asserted" and also the value
+	 * a cold power-on leaves, while a STOP wake without TCM leaves 0x10.  So the bit cannot
+	 * tell a pin reset from a TCM-retained wake. */
+	if (!tcm_requested(plan->memory_blocks) && alp_som_power_reset_syndrome_trusted()) {
 		rec.armed_hw |= ALP_SOM_REC_NSRST_TRUSTED;
 	}
 	rec.timed_bit   = plan->timed_bit;
