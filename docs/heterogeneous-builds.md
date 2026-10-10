@@ -763,10 +763,7 @@ mailbox:
     - { id: 3, reserved_for: power_mgmt }
 ```
 
-A second `rpmsg` channel not named for a reservation is assigned the lowest
-unclaimed `reserved_for: app` channel (below), and is only rejected once none
-is left.  Don't
-override `reserved_for: power_mgmt` — that channel carries the PMIC's
+Don't override `reserved_for: power_mgmt` — that channel carries the PMIC's
 runtime power-state machine.
 
 An `ipc:` entry whose `name:` matches no `reserved_for` tag gets the lowest
