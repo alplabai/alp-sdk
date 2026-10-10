@@ -1826,6 +1826,7 @@ def _aen_dts(
     ethos_u: tuple[str, str] | None = None,
     memory_map: "list[dict[str, Any]] | None" = None,
     power_domains: "dict[str, Any] | None" = None,
+    wired_pads: "list[dict[str, Any]] | None" = None,
 ) -> str:
     role = core_id.split("_")[-1]                     # "hp" / "he"
     role_u = role.upper()
@@ -2129,7 +2130,7 @@ def _aen_dts(
     lines += _aen_brd_i2c_dts(links, part)
     lines += _aen_e1m_i2c0_dts(links)
     if power_domains:
-        lines += _aen_som_power_dts(sku_preset, power_domains, links)
+        lines += _aen_som_power_dts(sku_preset, power_domains, links, wired_pads or [])
 
     if ethos_u is not None:
         _accel, node = ethos_u
@@ -2173,6 +2174,20 @@ def _load_aen_power_domains(metadata_root: Path) -> dict[str, Any]:
     if not isinstance(domains, dict) or not domains:
         raise ZephyrBoardEmitError(f"{path} has no power_domains: block")
     return domains
+
+
+def _load_aen_wired_lpgpio_pads(metadata_root: Path) -> list[dict[str, Any]]:
+    """`wired_lpgpio_pads:` of on-module-links.yaml: LPGPIO pads the module wires
+    to an on-module chip without a power-domain control (the OSPI INTn / RESETn
+    nets).  `check_som_power_domains.py` pins each to its TSV row."""
+    doc = _load_yaml(metadata_root / "e1m_modules" / "aen" / "on-module-links.yaml")
+    pads = doc.get("wired_lpgpio_pads") or []
+    for p in pads:
+        if not re.fullmatch(r"P15_[0-7]", str(p.get("silicon_pad", ""))):
+            raise ZephyrBoardEmitError(
+                f"wired_lpgpio_pads entry {p.get('signal')!r}: silicon_pad "
+                f"{p.get('silicon_pad')!r} is not an LPGPIO pad P15_0..P15_7")
+    return pads
 
 
 def _aen_power_domain_presence(
@@ -2221,7 +2236,7 @@ _AEN_POWER_ROLE_PROP = {
 
 def _aen_som_power_dts(
         sku_preset: dict[str, Any], domains: dict[str, Any],
-        links: dict[str, Any],
+        links: dict[str, Any], wired_pads: list[dict[str, Any]],
 ) -> list[str]:
     """The `alp,som-power` node: one `alp,som-power-domain` child per domain
     this SKU actually carries (alp-sdk#2784, metadata-only -- nothing in the
@@ -2325,6 +2340,17 @@ def _aen_som_power_dts(
         f"<PIN_P{port}_{pin}__{'LPGPIO' if port == 15 else 'GPIO'}>"
         for port, pin in pads)
 
+    # LPGPIO pads the module wires without a domain control, so a wake-pad
+    # claim is per board (src/backends/power/som_power.c reads this property).
+    wired_line = []
+    if wired_pads:
+        cells = " ".join(str(int(p["silicon_pad"][4:])) for p in wired_pads)
+        wired_line = [
+            "\t\t/* SoM-wired LPGPIO pads without a domain node (alif-ospi.tsv):",
+            "\t\t * " + ", ".join(f"{p['signal']} {p['silicon_pad']}" for p in wired_pads) + ".",
+            "\t\t * Never an application wake pad. */",
+            f"\t\talp,wired-lpgpio-pads = <{cells}>;"]
+
     lines = [
         "/*",
         " * SoM power domains (alp-sdk#2784): which on-module chips this SKU carries,",
@@ -2351,6 +2377,7 @@ def _aen_som_power_dts(
         '\t\tcompatible = "alp,som-power";',
         "\t\tpinctrl-0 = <&pinctrl_som_power>;",
         '\t\tpinctrl-names = "default";',
+        *wired_line,
         *children,
         "\t};",
         "};",
@@ -3356,7 +3383,8 @@ def emit_zephyr_board(
             sku, sku_preset, core_id, soc_spec, variant, dir_name, basename,
             rx_row, tx_row, metadata_root, on_module_links,
             _aen_ethos_u(soc_spec), memory_map,
-            _load_aen_power_domains(metadata_root))
+            _load_aen_power_domains(metadata_root),
+            _load_aen_wired_lpgpio_pads(metadata_root))
         banner_extra_source.update(dict.fromkeys(
             (aen_pinctrl_relpath, aen_dts_relpath),
             "metadata/e1m_modules/aen/on-module-links.yaml"))

@@ -84,6 +84,7 @@
 		compatible = "alp,som-power";
 		pinctrl-0 = <&pinctrl_som_power>;
 		pinctrl-names = "default";
+		alp,wired-lpgpio-pads = <2 3 6 7>;
 
 		wifi-ble {
 			compatible = "alp,som-power-domain";

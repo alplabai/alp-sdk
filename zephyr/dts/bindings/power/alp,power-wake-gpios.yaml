@@ -1,0 +1,48 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# alp,power-wake-gpios -- the application's LPGPIO pads that may wake the Alif
+# Ensemble E8 from STOP / STANDBY (ALP_POWER_WAKE_GPIO, alp-sdk#2784).  Read by
+# src/backends/power/alif_se_power_hw.c; nothing in the public <alp/power.h>
+# names a pad, the devicetree does.
+
+description: |
+  Wake pads for ALP_POWER_WAKE_GPIO on the Alif SE STOP / STANDBY backend.
+
+  Only pads of the `lpgpio` controller (P15_n = line n) qualify: the LPGPIO island is in
+  the VBAT domain and stays powered through STOP.  The polarity flag of each entry is the
+  ASSERTED level, so GPIO_ACTIVE_LOW wakes on a falling edge and GPIO_ACTIVE_HIGH on a
+  rising edge.  A pad the SoM itself wires (the power-domain pads P15_0, P15_1, P15_4, P15_5
+  and the OSPI nets P15_2, P15_3, P15_6, P15_7, i.e. all eight lines on the E1M-AEN801 /
+  E1M-AEN803) is refused at run time: ALP_POWER_WAKE_GPIO is then not advertised and
+  alp_power_configure_wake_source() answers ALP_ERR_NOSUPPORT.
+
+  Example.  The line number is a placeholder: on the bare E1M-AEN801 / E1M-AEN803 every line
+  is SoM-wired, so the example is refused there; use it only for a pad that a variant or a
+  derivative frees.  `pinctrl_wake_pads` is the pad group that muxes the pad to LPGPIO and
+  enables its input buffer:
+
+    wake-pads {
+        compatible = "alp,power-wake-gpios";
+        wake-gpios = <&lpgpio N GPIO_ACTIVE_LOW>;   /* N: a freed line, 0..7 */
+        pinctrl-0 = <&pinctrl_wake_pads>;
+        pinctrl-names = "default";
+    };
+
+compatible: "alp,power-wake-gpios"
+
+include: [base.yaml, pinctrl-device.yaml]
+
+properties:
+  wake-gpios:
+    type: phandle-array
+    required: true
+    description: |
+      LPGPIO pads that may wake the SoC.  Flag = asserted level; the wake is the edge TO that
+      level.  Any one of them ends the sleep.
+
+  pinctrl-0:
+    required: true
+    description: |
+      Pad group for the wake pads: LPGPIO function with the input buffer (READ_ENABLE) and,
+      for an open-drain source, a pull-up.

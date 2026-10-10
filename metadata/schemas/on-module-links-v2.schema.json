@@ -15,6 +15,20 @@
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
     },
     "on_module_links": { "type": "object" },
+    "wired_lpgpio_pads": {
+      "description": "LPGPIO pads the module wires to an on-module chip with no power-domain control; emitted as `alp,wired-lpgpio-pads` and refused as application wake pads.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["signal", "silicon_pad", "source"],
+        "properties": {
+          "signal": { "type": "string", "minLength": 1 },
+          "silicon_pad": { "type": "string", "pattern": "^P15_[0-7]$" },
+          "source": { "$ref": "#/$defs/source" }
+        }
+      }
+    },
     "power_domains": {
       "type": "object",
       "additionalProperties": false,
