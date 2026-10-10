@@ -345,7 +345,10 @@ original planner as the reference/parity producer:
    per-core config to disk (`build/m33_sm-zephyr/alp.conf`,
    `build/a55_cluster-yocto/conf/local.conf`).
 4. `tan` writes the planner's shared generated artefacts
-   (`generated/alp/system_ipc.h`, `generated/dts-reservations.dtsi`).
+   (`generated/alp/system_ipc.h`, `generated/dts-reservations.dtsi`,
+   `generated/dts-partitions.dtsi`, plus `generated/storage_mount_table.c`
+   when `storage:` declares a mountable partition, and the sysbuild / TF-M
+   conf files when their emit is non-empty).
 5. `tan` materialises the helper-MCU artefacts (GD32, CC3501E) the
    plan registers.
 6. `tan` dispatches slice builds in parallel (`west` / `bitbake` /
@@ -761,6 +764,13 @@ Adding a second `rpmsg` channel with no free
 `reserved_for: alp_default_rpmsg` slot fails at validate time.  Don't
 override `reserved_for: power_mgmt` — that channel carries the PMIC's
 runtime power-state machine.
+
+An `ipc:` entry whose `name:` matches no `reserved_for` tag gets the lowest
+unclaimed `reserved_for: app` channel; when none is left the entry is marked
+`blocked` with a `no mailbox channel` reason naming the entry and the SoM's
+reservations. Channel 0 is only ever handed to an entry named for its
+reservation (`alp_default_rpmsg`), so two links never share one doorbell
+(#2822).
 
 **Forgetting `app:` is relative to the project root.**  `app: ./linux`
 resolves to `<project_root>/linux/`, not to wherever `tan build` is
