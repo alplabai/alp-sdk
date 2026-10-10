@@ -277,6 +277,35 @@ controller stopped, SCL bus-clear); an HE restart in the middle of the bring-up 
 the next access. The HP leases the bus only around the stretches that use it and keeps its I2C2
 interrupt off in between, so an HE-only reset never meets an armed HP interrupt.
 
+### Volume (`TR_HP_SOUND`)
+
+The sound has a volume, 0 to 100 % of the build's `TR_SND_VOLUME` ceiling (128, the level heard as safe
+on the reworked EVK's speakers; 100 % is that level, so it can only be turned down; the default and boot level is 30 %, so there is never a loud burst before the first control or request). The
+HP applies it as a software gain on every 16 ms block of mixed samples (`tr_vol_apply`, a linear ramp
+across the block, no click, no I2C: I2C2 is leased) and 0 is silence with the amps still running (SD_N is
+never toggled). The HE owns one word (`TR_MEM_VOL`, `0x0237FD80`, `src/ipc/tr_vol.h`, tagged `'VO'`: a cold
+SRAM0 reads as the 30 % default) and sets it from:
+
+- **The EVK's rotary encoder** (`EVK_ENC_ROTARY`, read with `alp_qenc_*`): 5 % per detent, clockwise
+  louder, clamped 0..100.
+- **Its push switch** (`EVK_PIN_ENCODER_SW`, `alp_gpio_*`): a SHORT press (under 1 s) switches what the knob turns,
+  VOLUME or BRIGHTNESS; a LONG press (1 s, it fires while held) mutes, a second long press restores the last level.
+  A short press while muted only switches the mode: just a long press unmutes (a turn in VOLUME mode unmutes too).
+  BRIGHTNESS goes back to VOLUME after 5 s with no turn or press.
+- **The panel backlight** (Riverdi RVT121, PWM on P10_7, the SDK's `alp,display-backlight` LED): in BRIGHTNESS mode
+  5 % per detent, 10..80 % (a hard floor of 10 %, so the screen can never go dark, and a hard ceiling of 80 %). It boots at the level the SDK
+  already set (30 %), so booting does not flicker. The RK055 shield has no PWM backlight, so there a short press does nothing.
+- **A request word over SWD** (`0x0237FD84`, `0x564F0000 | percent`), for the bench: no reflash, see
+  `a32/release/FLASH-RECIPE.md` ("Changing the volume without reflashing"). The HE validates it. The backlight
+  has its own (`TR_MEM_BL` `0x0237FDC0`, request word `0x0237FDC4`, `0x424C0000 | percent`, 10..80 in 5 % steps only). Both request words are
+  taken, not latched: the HE clears one to `0` once it has read it (accepted or refused).
+
+The HUD shows `VOLUME 40%` (or `MUTE`, or `BRIGHTNESS 60%`) over its bottom row for 1.5 s whenever the level or the mode changes. The encoder
+pads are GPIO3 / GPIO4 (P3_0, P3_1, P4_3): not the GPIO5 port or the lpgpio island the HP's amps use. The
+controls are not bench-verified on this image (the decode path is #2037 / #2095); `tests/host/test_vol.c`
+covers the word, the gain and the HE's rules, `tests/host/test_knob.c` the switch, the brightness and its word,
+`tests/host/test_hud.c` the popup.
+
 ## Tests
 
 ```sh
