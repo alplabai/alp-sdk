@@ -80,3 +80,33 @@ alp_status_t alp_som_power_bind_rv3028(rv3028c7_t *ctx)
 	}
 	return alp_som_power_bind(ALP_POWER_DOMAIN_RTC, &_hooks, ctx);
 }
+
+/* The bound context lives in the registry (cleared by unbind / test reset), so a
+ * stale pointer can never be used here. */
+static rv3028c7_t *bound_ctx(void)
+{
+	return (rv3028c7_t *)alp_som_power_bound_ctx(ALP_POWER_DOMAIN_RTC);
+}
+
+bool alp_som_power_rtc_countdown_ready(void)
+{
+	rv3028c7_t *ctx = bound_ctx();
+
+	return ctx != NULL && ctx->initialised;
+}
+
+alp_status_t alp_som_power_rtc_countdown_start(uint32_t seconds, uint32_t *actual_s)
+{
+	if (!alp_som_power_rtc_countdown_ready()) {
+		return ALP_ERR_NOT_READY;
+	}
+	return rv3028c7_timer_start(bound_ctx(), seconds, actual_s);
+}
+
+alp_status_t alp_som_power_rtc_countdown_cancel(void)
+{
+	if (!alp_som_power_rtc_countdown_ready()) {
+		return ALP_ERR_NOT_READY;
+	}
+	return rv3028c7_timer_stop(bound_ctx());
+}

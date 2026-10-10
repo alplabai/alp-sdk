@@ -119,6 +119,9 @@ int main(void)
 			render_setup_part(n / 2u, n);
 			render_setup_part(0, n / 2u);
 			render_bin();
+			/* part 2 stays in DL1 and reads as the tail of one list: no copy */
+			assert(DL->tail == DL1 && DL->split > 0u && DL->split < DL->n && DL1->n > 0u);
+			assert(DL->n == DL->split + DL1->n);
 		} else if (f == 0) { /* single-core front end (a core-1 fallback) */
 			render_front_begin(&in[f]);
 			render_front_part(0);
@@ -127,6 +130,7 @@ int main(void)
 
 			render_setup_part(0, n);
 			render_bin();
+			assert(DL->tail == NULL);
 		} else {
 			render_setup(&in[f]);
 		}
@@ -138,6 +142,33 @@ int main(void)
 		clear_below_view(ref);
 
 		uint32_t crc = render_fb_crc(fb);
+
+		/* the claim order (renderer.c band_loop): a permutation of every band, the 3D bands
+		 * fullest bin first, then the video bands -- and the frame in that order is the same */
+		{
+			uint8_t order[TR_BANDS + TR_VIDEO_BANDS];
+			bool    seen[TR_BANDS + TR_VIDEO_BANDS] = { false };
+
+			render_claim_order(order);
+			for (int i = 0; i < TR_BANDS + TR_VIDEO_BANDS; i++) {
+				assert(order[i] < TR_BANDS + TR_VIDEO_BANDS && !seen[order[i]]);
+				seen[order[i]] = true;
+				assert((i < TR_BANDS) == (order[i] < TR_BANDS)); /* 3D first, video last */
+				if (i > 0 && i < TR_BANDS) {
+					assert(counts[order[i - 1]] > counts[order[i]] ||
+					       (counts[order[i - 1]] == counts[order[i]] && order[i - 1] < order[i]));
+				}
+				if (i >= TR_BANDS && i > TR_BANDS) {
+					assert(order[i] == order[i - 1] + 1);
+				}
+			}
+			memset(hud, 0x3C, sizeof(hud));
+			for (int i = 0; i < TR_BANDS; i++) {
+				render_band((uint32_t)(i + f) & 1u, order[i], hud);
+			}
+			clear_below_view(hud);
+			assert(render_fb_crc(hud) == crc);
+		}
 
 		printf("a32 scene frame %d: %u tris, max bin %u, crc %08x\n",
 		       f,

@@ -23,14 +23,19 @@
 #define BAND_PX (TR_R3D_W * TR_BAND_H)
 
 /* The frame's rotation (panel_rot.h; in->rotation, from the display's
- * mount-rotation): the bands are always drawn portrait, 720 px wide, into the
- * cores' cached scratch, and only the copy out to the framebuffer turns them
- * (a 1280 x 720 window for 90 / 270 = the same RENDER_FB_BYTES). Set once a
- * frame by render_front_begin(), before any band is claimed. The golden
- * build's CRCs are of the portrait layout, so it always draws rotation 0. */
-static int frame_rot;
-_Static_assert(TR_R3D_W == TR_ROT_PORTRAIT_W && TR_R3D_H == TR_ROT_PORTRAIT_H,
-               "panel_rot.h: the portrait frame");
+ * mount-rotation) and width (in->fw, from the display's window): the bands are
+ * always drawn portrait, TR_R3D_W px wide, into the cores' cached scratch, and
+ * only the copy out to the framebuffer turns them and crops them to the centre
+ * frame_fw columns [frame_x0c, frame_x0c + frame_fw) (a 1280 x fw window for
+ * 90 / 270 = the same bytes: fw * 1280 * 2, inside RENDER_FB_BYTES). Set once
+ * a frame by render_front_begin(), before any band is claimed. The golden
+ * build's CRCs are of the whole portrait layout, so it always draws rotation 0
+ * at the full TR_R3D_W. */
+static int      frame_rot;
+static uint32_t frame_fw  = TR_R3D_W;
+static int      frame_x0c = 0;
+_Static_assert(TR_R3D_H == TR_ROT_PORTRAIT_H, "panel_rot.h: the portrait frame");
+_Static_assert(RENDER_FB_BYTES == TR_R3D_W * TR_R3D_H * 2u, "a slot holds the widest frame");
 _Static_assert(TR_BAND_H % 8 == 0 && TR_BAND_H <= 32,
                "panel_rot.h's NEON blit takes up to four 8-row groups");
 
@@ -41,8 +46,8 @@ _Static_assert(STUB_MHU0_WINDOW == TR_MHU0_WINDOW_LO &&
                "tr_mbox.h and stub_abi.h disagree on the MHU0 window");
 _Static_assert(TR_FB_CLEAR_OF_MHU0(TR_FB_A) && TR_FB_CLEAR_OF_MHU0(TR_FB_B),
                "a framebuffer overlaps the TF-A MHU0 window [0x02380000, 0x02381000)");
-_Static_assert(TR_FB_B + TR_FB_SIZE <= 0x027DE000u, "FB B runs into TF-A RW (0x027DE000)");
-_Static_assert(RENDER_FB_BYTES == TR_FB_SIZE, "framebuffer size");
+_Static_assert(TR_FB_B + TR_FB_SLOT_SIZE <= TR_MEM_TFA_RW, "FB B's slot runs into TF-A RW");
+_Static_assert(RENDER_FB_BYTES == TR_FB_SLOT_SIZE, "framebuffer slot size");
 /* The HE's HUD buffer (layer 2) sits above everything the renderer maps in SRAM0. */
 _Static_assert(TR_HUD_FB >= STUB_MHU0_WINDOW + STUB_MHU0_WINDOW_SIZE &&
                    TR_HUD_FB + TR_HUD_FB_SIZE <= STUB_EARLY_PARK,
@@ -68,12 +73,11 @@ _Static_assert(TR_MEM_NPU_ARENA + TR_MEM_NPU_ARENA_SIZE <= TR_MEM_ARING,
                "NPU arena runs into the MHU0 window / sound ring");
 #define ZBAND(c) ((uint16_t *)TR_MEM_A32_BANDS + (c) * 2u * BAND_PX)
 #define CBAND(c) (ZBAND(c) + BAND_PX)
-_Static_assert(TR_MEM_A32_DL >= TR_FB_A + TR_FB_SIZE &&
-                   TR_MEM_A32_DL + sizeof(tr_dl_t) <= TR_MEM_A32_SETUP,
-               "DL must sit between FB A and the setup records (SRAM0 MiB 1 tail)");
-_Static_assert(TR_MEM_A32_IMG_END <= TR_MEM_A32_BINS, "renderer image + .bss overrun the bins");
-_Static_assert(TR_MEM_A32_BINS + TR_BANDS * TR_BIN_MAX * 2u <= TR_MEM_A32_STACKS,
-               "bins overrun the stacks");
+_Static_assert(TR_MEM_A32_DL >= STUB_STACK1_TOP, "DL overlaps the stub stacks");
+_Static_assert(TR_MEM_A32_DL + sizeof(tr_dl_t) <= TR_MEM_A32_BINS, "DL overruns the bins");
+_Static_assert(TR_MEM_A32_BINS + TR_BANDS * TR_BIN_MAX * 2u <= TR_MEM_CAM_POOL,
+               "bins overrun the camera pool");
+_Static_assert(TR_MEM_A32_IMG_END <= TR_MEM_A32_STACKS, "renderer image + .bss overrun the stacks");
 _Static_assert(TR_MEM_A32_SETUP + sizeof(tr_tri_setup_t) * TR_DL_MAX_TRIS <= TR_MEM_A32_BANDS,
                "setup records overrun the bands");
 _Static_assert(TR_MEM_A32_BANDS + RENDER_CORES * 4u * BAND_PX <= TR_MEM_A32_ZTEX,
@@ -147,8 +151,11 @@ static tr_cam_t      scene_cam; /* part 1's camera (== part 2's), for the backgr
 #endif
 static uint32_t front_t0;
 
+static void dcache_line_init(void); /* the camera picture-in-picture's D-cache line size */
+
 void render_init(void)
 {
+	dcache_line_init();
 #if RENDER_DL_GOLDEN
 	tr_golden_tex_init(tex0);
 	tr_r3d_tex[0] = tex0;
@@ -239,7 +246,8 @@ static void hud_band(uint16_t *cband, int y_lo)
 	}
 
 	uint8_t d[TR_SCORE_MAX_DIGITS];
-	int     n = tr_score_to_digits(hud_score, d), x = HUD_X0;
+	/* the score sits at the PANEL's left edge: on a narrower panel's crop that is frame_x0c in */
+	int n = tr_score_to_digits(hud_score, d), x = frame_x0c + HUD_X0;
 
 	for (int i = 0; i < n; i++) {
 		tr_sprite_blit(cband,
@@ -254,38 +262,46 @@ static void hud_band(uint16_t *cband, int y_lo)
 	}
 }
 
-/* Video area (maintainer ruling "Half / half", supersedes fix rounds 8-10's
- * landscape fill): rows [TR_VID_Y0, TR_R3D_H) (cam_pip.h) of the SAME
- * 720x1280 framebuffer, dark background, no border. The camera at native
- * 1:1, turned upright (src/vision/cam_rot.h) -- 400x640 portrait at x
- * 160..559 with the sensor on its side -- with its skeleton on top; the
- * left 160-px strip holds the LEFT/RIGHT/JUMP/DUCK lamps stacked, the right
- * one the "CAMERA / NPU Hz" label. The rotation is whatever the HP applied
- * and published (tr_cam_view_t.rotate), so image and keypoints always
- * agree. Rotation 0 (the old landscape path, kept for comparison) centres
- * 640x400 at x 40..679 and the strips' lamps/label overlap its sides.
+/* Video area (maintainer ruling 2026-10-08, 3/5 game : 2/5 camera): rows
+ * [TR_VID_Y0, TR_R3D_H) (cam_pip.h) of the SAME framebuffer, 800 x 512. The
+ * camera (landscape, TR_CAM_ROTATE 0, 640x400) is scaled UP, keeping its
+ * aspect ratio, to COVER the whole area (x1.28, about 10 px cropped a side;
+ * cam_pip.h), with its skeleton on top by the exact inverse map. The intent
+ * lamps and the "CAMERA / NPU Hz" label sit on an opaque plate along the
+ * bottom edge, because the arm-raise controls throw the arms into the TOP of
+ * the picture, which must stay clear. A camera the HP turned (90 / 270) is
+ * not drawn: the area is dark and the label says "ROT nn". The plate is laid
+ * out over the panel's visible columns [frame_x0c, frame_x0c + frame_fw), so
+ * a narrower panel (the RK055's 720 of the 800 rendered) keeps all of it.
  *
  * Split like the 3D bands (fix round 10's lesson, 35.9 ms when it was one
  * uncached pass): render_video_band() is claimable band work, either core,
- * rendered into the core's cached CBAND scratch -- background, camera,
- * lamps, label -- then one write-only NEON copy out. Only the skeleton (a
- * few hundred px) is left to render_video_overlay(), core 0, after the
- * bands. Everything frame-constant the bands need (the camera view, the lamp
- * states, the label text) is taken ONCE a frame by video_frame_state(),
- * core 0, before any band is claimed, so both cores draw the same frame. */
+ * rendered into the core's cached CBAND scratch -- camera, plate, lamps,
+ * label -- then one write-only NEON copy out. Only the skeleton (a few
+ * hundred px) is left to render_video_overlay(), core 0, after the bands.
+ * Everything frame-constant the bands need (the camera view, the lamp states,
+ * the label text) is taken ONCE a frame by video_frame_state(), core 0,
+ * before any band is claimed, so both cores draw the same frame. */
 #ifndef TR_CAM_PIP_ENABLE
 #define TR_CAM_PIP_ENABLE 1 /* compile-time switch: 0 leaves the video area untouched */
 #endif
-#define COLOR_PANEL_BG  RGB565(12, 14, 18)    /* the video area's dark background */
+#define COLOR_PANEL_BG  RGB565(12, 14, 18)    /* the video area's dark background, the plate */
 #define COLOR_KP        RGB565(80, 255, 96)   /* skeleton: the HUD's accent green */
 #define COLOR_LAMP_ON   RGB565(255, 210, 40)  /* intent lamp, lit */
-#define COLOR_LAMP_OFF  RGB565(52, 54, 62)    /* intent lamp, unlit: visible on the dark strip */
+#define COLOR_LAMP_OFF  RGB565(52, 54, 62)    /* intent lamp, unlit: visible on the dark plate */
 #define COLOR_LABEL     RGB565(235, 245, 235) /* label/caption text */
-#define VID_STRIP_W     160                   /* each side strip: (720 - 400) / 2 */
-#define LAMP_CELL_H     (TR_VID_H / 4)        /* four lamps stacked down the left strip */
-#define LAMP_SQ         96                    /* lamp square, px */
-#define LAMP_CAP_SCALE  4                     /* caption: 3x5 font at 4x -> 20 px tall */
+#define PLATE_H         80                    /* the bottom plate: lamps + label, area rows */
+#define PLATE_Y         (TR_VID_H - PLATE_H)  /* its first area row; the camera ends above it */
+#define LAMP_SQ         40                    /* lamp square, px */
+#define LAMP_CAP_SCALE  3                     /* caption: 3x5 font at 3x -> 15 px tall */
 #define LAMP_HOLD_TICKS 10
+_Static_assert(PLATE_H < TR_VID_H, "the plate leaves the camera most of the area");
+/* The plate's arithmetic, checked where it is used: a lamp square over its caption (the widest,
+ * "RIGHT ARM" / "BOTH ARMS", is 37 font columns = 111 px at scale 3) in a cell of a quarter of
+ * three quarters of the visible width, and the label's four lines in the last quarter. */
+_Static_assert(8 + LAMP_SQ + 6 + 5 * LAMP_CAP_SCALE <= PLATE_H,
+               "the lamps and captions fit the plate");
+_Static_assert(58 + 5 * 3 <= PLATE_H, "the label's four lines fit the plate");
 
 #if TR_CAM_PIP_ENABLE
 #if RENDER_A32
@@ -294,15 +310,29 @@ static void hud_band(uint16_t *cband, int y_lo)
 #define HP_DBG_ADDR    ((const volatile hp_dbg_t *)TR_MEM_HP_DBG)
 /* DCIMVAC: Data Cache line Invalidate by VA to PoC (ARMv7-A, Cortex-A32) --
  * the camera writes CAM_POOL by DMA, so a cached A32 read of it needs this
- * before every access or it can read stale, pre-DMA bytes. 32 B lines;
- * walked from a line-aligned start so all of [addr, addr+bytes) is covered.
+ * before every access or it can read stale, pre-DMA bytes. Stepped by the
+ * smallest D-cache line, CTR.DminLine (log2 of words; the Cortex-A32's L1D
+ * is 64 B), read once in render_init(); 32 B until then (a smaller step
+ * only costs time). Walked from a line-aligned start so all of
+ * [addr, addr+bytes) is covered.
  * Always safe here: the A32 never writes CAM_POOL, so no line is ever dirty. */
+static uint32_t dcache_line; /* bytes; 0 until render_init() */
+
+static void dcache_line_init(void)
+{
+	uint32_t ctr;
+
+	__asm__ volatile("mrc p15, 0, %0, c0, c0, 1" : "=r"(ctr));
+	dcache_line = 4u << ((ctr >> 16) & 0xFu);
+}
+
 static inline void dcache_inval_range(const void *addr, uint32_t bytes)
 {
-	uintptr_t a   = (uintptr_t)addr & ~(uintptr_t)31u;
-	uintptr_t end = (uintptr_t)addr + bytes;
+	uintptr_t line = dcache_line ? dcache_line : 32u;
+	uintptr_t a    = (uintptr_t)addr & ~(line - 1u);
+	uintptr_t end  = (uintptr_t)addr + bytes;
 
-	for (; a < end; a += 32u) {
+	for (; a < end; a += line) {
 		__asm__ volatile("mcr p15, 0, %0, c7, c6, 1" ::"r"(a) : "memory");
 	}
 }
@@ -322,16 +352,27 @@ static inline void   dcache_inval_range(const void *addr, uint32_t bytes)
 	(void)addr;
 	(void)bytes;
 }
+static void dcache_line_init(void)
+{
+}
 #endif
+#else
+static void dcache_line_init(void)
+{
+}
 #endif /* TR_CAM_PIP_ENABLE */
 
 /* A drawing target: screen pixel (x, y) lives at px[(y - y0) * TR_R3D_W + x],
  * and only [x0, x1) x [y0, y1) is drawn -- a band's cached scratch (y0 its
- * first screen row) or the framebuffer itself. */
+ * first screen row) or the framebuffer itself. A framebuffer is fw wide and
+ * holds the render's columns [xoff, xoff + fw): its column is x - xoff, and
+ * the caller keeps [x0, x1) inside them. */
 typedef struct {
 	uint16_t *px;
 	int       x0, x1, y0, y1;
 	int       rot; /* -1: px is a band's scratch; else px is the framebuffer, turned by rot */
+	int       xoff;
+	uint32_t  fw;
 } vcv_t;
 
 static void cv_rect(const vcv_t *cv, int x, int y, int w, int h, uint16_t c)
@@ -342,7 +383,7 @@ static void cv_rect(const vcv_t *cv, int x, int y, int w, int h, uint16_t c)
 	if (cv->rot >= 0) {
 		for (int yy = ya; yy < yb; yy++) {
 			for (int xx = xa; xx < xb; xx++) {
-				cv->px[tr_rot_idx(cv->rot, TR_R3D_H, xx, yy)] = c;
+				cv->px[tr_rot_idx(cv->rot, TR_R3D_H, cv->fw, xx - cv->xoff, yy)] = c;
 			}
 		}
 		return;
@@ -488,6 +529,9 @@ static const glyph3x5_t font3x5[] = {
 	{ 'J', { "..#", "..#", "..#", "#.#", "###" } },
 	{ 'D', { "##.", "#.#", "#.#", "#.#", "##." } },
 	{ 'K', { "#.#", "#.#", "##.", "#.#", "#.#" } },
+	{ 'B', { "##.", "#.#", "##.", "#.#", "##." } },
+	{ 'O', { "###", "#.#", "#.#", "#.#", "###" } }, /* the same bitmap as '0': context tells */
+	{ 'S', { "###", "#..", "###", "..#", "###" } }, /* the same bitmap as '5' */
 };
 
 static const glyph3x5_t *video_glyph_find(char c)
@@ -547,12 +591,12 @@ static void video_text_c(const vcv_t *cv, int cx, int y0, const char *s, int sca
 
 /* This frame's video-area state, taken once by video_frame_state() (core 0,
  * before any band is claimed -- the frame_go barrier publishes it to core 1). */
-static tr_cam_view_t vid_cv;      /* the camera view, range-checked; .rotate also sets the layout */
-static bool          vid_have_cv; /* vid_cv is safe to read pixels through */
-static bool          vid_lamp[4]; /* LEFT, RIGHT, JUMP, DUCK */
+static tr_cam_view_t vid_cv;      /* the camera view, range-checked */
+static bool          vid_have_cv; /* vid_cv is a landscape frame safe to read pixels through */
+static bool          vid_lamp[4]; /* LEFT ARM, RIGHT ARM, BOTH ARMS (the jump), DUCK */
 static bool          vid_have_hz; /* hp_vision's loop rate is live */
 static char          vid_hz[12];  /* "NN.NHz" or "--" */
-static char          vid_dims[12]; /* the upright image's size, "400x640" */
+static char vid_dims[12];         /* the image's size, "640x400", or "ROT 90" for a turned camera */
 
 /* Unsigned decimal into out, no libc; returns the length. */
 static int u_dec(uint32_t v, char *out)
@@ -579,8 +623,8 @@ static void video_frame_state(void)
 
 	/* Range-checked BEFORE any pixel byte is read (fix round 12/13's
 	 * rule): the buffer lies wholly inside CAM_POOL, and is exactly the
-	 * mode every index below assumes -- the rotated reads walk all
-	 * TR_CAM_SRC_H rows, whatever a smaller published height would claim. */
+	 * mode every index below assumes -- the cover resample reads source rows
+	 * up to TR_CAM_SRC_H - 1, whatever a smaller published height would claim. */
 	if (ok) {
 		uint64_t lo = cv.buf_addr, hi = lo + (uint64_t)cv.width * cv.height;
 
@@ -588,16 +632,20 @@ static void video_frame_state(void)
 		     cv.width == TR_CAM_SRC_W && cv.height == TR_CAM_SRC_H &&
 		     (cv.rotate == 0u || cv.rotate == 90u || cv.rotate == 270u);
 	}
-	if (!ok) {
-		cv.rotate = TR_CAM_ROTATE; /* layout of the empty area: this build's default */
-	}
+	/* Only the landscape picture is drawn (cam_pip.h). A turned camera is a valid view that
+	 * this renderer does not scale: say so ("ROT 90") instead of showing it sideways, and
+	 * draw no skeleton (its keypoints are in the turned frame). */
 	vid_cv      = cv;
-	vid_have_cv = ok;
+	vid_have_cv = ok && cv.rotate == 0u;
+	if (ok && cv.rotate != 0u) {
+		vid_dims[0] = 'R', vid_dims[1] = 'O', vid_dims[2] = 'T', vid_dims[3] = ' ';
+		u_dec(cv.rotate, vid_dims + 4);
+	} else {
+		int n = u_dec((uint32_t)TR_CAM_SENSOR_W, vid_dims);
 
-	int n = u_dec((uint32_t)TR_CAM_UP_W(cv.rotate), vid_dims);
-
-	vid_dims[n++] = 'x';
-	u_dec((uint32_t)TR_CAM_UP_H(cv.rotate), vid_dims + n);
+		vid_dims[n++] = 'x';
+		u_dec((uint32_t)TR_CAM_SENSOR_H, vid_dims + n);
+	}
 
 	/* The HP's loop rate (src/ipc/tr_hp_dbg.h), a seqlock read (fix round
 	 * 11): a torn read just shows "--" for one frame. */
@@ -636,34 +684,45 @@ static void video_frame_state(void)
 #endif
 }
 
-/* The side strips, clipped to the canvas (one band's rows): four lamps
- * stacked down the left strip (a LAMP_SQ square over its caption, one
- * LAMP_CELL_H cell each), the label down the right. */
-static void draw_strips(const vcv_t *cv)
-{
-	static const char *const cap[4] = { "LEFT", "RIGHT", "JUMP", "DUCK" };
-	const int                lcx = VID_STRIP_W / 2, rcx = TR_VID_W - VID_STRIP_W / 2;
+/* The lamp captions: what the player DOES to make it light (the lane lamps
+ * follow the lane step, the jump lamp the jump -- game/step.c). */
+static const char *const lamp_cap[4] = { "LEFT ARM", "RIGHT ARM", "BOTH ARMS", "DUCK" };
 
+/* The plate along the bottom of the video area, clipped to the canvas (one band's rows). Opaque:
+ * dark across the whole render width, with a thin edge line on top; on the visible columns
+ * [frame_x0c, frame_x0c + frame_fw), the four lamps (a LAMP_SQ square over its caption) in the
+ * left three quarters and the label (CAMERA and its size, NPU and its rate) in the last quarter. */
+static void draw_plate(const vcv_t *cv)
+{
+	if (cv->y1 <= TR_VID_Y0 + PLATE_Y) {
+		return; /* a band wholly above the plate: nothing of it is in these rows */
+	}
+
+	const int top = TR_VID_Y0 + PLATE_Y, x0 = frame_x0c, fw = (int)frame_fw;
+	const int lamps_w = fw * 3 / 4, cell = lamps_w / 4, lcx = x0 + lamps_w + (fw - lamps_w) / 2;
+
+	cv_rect(cv, 0, top, TR_R3D_W, PLATE_H, COLOR_PANEL_BG);
+	cv_rect(cv, 0, top, TR_R3D_W, 2, COLOR_LAMP_OFF);
 	for (int i = 0; i < 4; i++) {
-		int y = TR_VID_Y0 + i * LAMP_CELL_H + 16;
+		int cx = x0 + i * cell + cell / 2;
 
 		cv_rect(cv,
-		        lcx - LAMP_SQ / 2,
-		        y,
+		        cx - LAMP_SQ / 2,
+		        top + 8,
 		        LAMP_SQ,
 		        LAMP_SQ,
 		        vid_lamp[i] ? COLOR_LAMP_ON : COLOR_LAMP_OFF);
 		video_text_c(cv,
-		             lcx,
-		             y + LAMP_SQ + 12,
-		             cap[i],
+		             cx,
+		             top + 8 + LAMP_SQ + 6,
+		             lamp_cap[i],
 		             LAMP_CAP_SCALE,
 		             vid_lamp[i] ? COLOR_LAMP_ON : COLOR_LABEL);
 	}
-	video_text_c(cv, rcx, TR_VID_Y0 + 32, "CAMERA", 4, COLOR_LABEL);
-	video_text_c(cv, rcx, TR_VID_Y0 + 64, vid_dims, 3, COLOR_LABEL);
-	video_text_c(cv, rcx, TR_VID_Y0 + 128, "NPU", 4, COLOR_LABEL);
-	video_text_c(cv, rcx, TR_VID_Y0 + 160, vid_hz, 5, vid_have_hz ? COLOR_KP : COLOR_LABEL);
+	video_text_c(cv, lcx, top + 6, "CAMERA", 3, COLOR_LABEL);
+	video_text_c(cv, lcx, top + 24, vid_dims, 2, COLOR_LABEL);
+	video_text_c(cv, lcx, top + 40, "NPU", 3, COLOR_LABEL);
+	video_text_c(cv, lcx, top + 58, vid_hz, 3, vid_have_hz ? COLOR_KP : COLOR_LABEL);
 }
 
 /* Band rows [y_lo, y_lo + rows) -> the framebuffer, write-only, 16 B at a
@@ -675,13 +734,15 @@ static void draw_strips(const vcv_t *cv)
 static inline __attribute__((always_inline)) void
 copy_rows_turned(int rot, uint16_t *fb, const uint16_t *cband, int y_lo, int rows)
 {
+	const uint16_t *src = cband + frame_x0c; /* the centre fw columns, at the surface's column 0 */
+
 #if RENDER_A32 && (defined(__ARM_NEON) || defined(__ARM_NEON__))
 	if (rows % 8 == 0 && y_lo % 8 == 0) {
-		tr_rot_blit_neon(rot, fb, TR_R3D_H, cband, TR_R3D_W, 0, y_lo, TR_R3D_W, rows);
+		tr_rot_blit_neon(rot, fb, TR_R3D_H, frame_fw, src, TR_R3D_W, 0, y_lo, (int)frame_fw, rows);
 		return;
 	}
 #endif
-	tr_rot_blit(rot, fb, TR_R3D_H, cband, TR_R3D_W, 0, y_lo, TR_R3D_W, rows);
+	tr_rot_blit(rot, fb, TR_R3D_H, frame_fw, src, TR_R3D_W, 0, y_lo, (int)frame_fw, rows);
 }
 
 static void copy_rows(uint16_t *fb, const uint16_t *cband, int y_lo, int rows)
@@ -694,14 +755,31 @@ static void copy_rows(uint16_t *fb, const uint16_t *cband, int y_lo, int rows)
 		copy_rows_turned(270, fb, cband, y_lo, rows);
 		break;
 	default: {
-		uint16_t *d = &fb[(uint32_t)y_lo * TR_R3D_W];
-		uint32_t  n = (uint32_t)rows * TR_R3D_W;
+		/* Row by row: the framebuffer's pitch is fw, the band's TR_R3D_W, and the
+		 * crop starts frame_x0c (a multiple of 8 px: 16 B aligned) into each band row. */
+		uint16_t       *d = &fb[(uint32_t)y_lo * frame_fw];
+		const uint16_t *s = cband + frame_x0c;
 
-		for (uint32_t x = 0; x < n; x += 8) {
-			copy16(&d[x], &cband[x]);
+		for (int r = 0; r < rows; r++, d += frame_fw, s += TR_R3D_W) {
+			for (uint32_t x = 0; x < frame_fw; x += 8) {
+				copy16(&d[x], &s[x]);
+			}
 		}
 	}
 	}
+}
+
+/* This frame's rotation and width from `in` (see frame_rot). A width that
+ * tr_fw_refuse() would have faulted on never gets here from the renderer; for
+ * any other caller it falls back to the whole render rather than write a
+ * framebuffer slot out of its bounds. */
+static void frame_set(const tr_frame_in_t *in)
+{
+	int use = in != NULL && !RENDER_DL_GOLDEN;
+
+	frame_rot = use ? in->rotation : 0;
+	frame_fw  = use && !tr_fw_refuse(1, in->fw) ? in->fw : TR_R3D_W;
+	frame_x0c = (int)(TR_R3D_W - frame_fw) / 2;
 }
 
 static void fill_px(uint16_t *d, int n, uint16_t c)
@@ -711,9 +789,9 @@ static void fill_px(uint16_t *d, int n, uint16_t c)
 	}
 }
 
-/* Video band vb: video-area rows [vb * TR_BAND_H, +TR_BAND_H). The camera
- * rows are ONE column strip of the raw frame when rotated (an upright row
- * is a raw column), invalidated raw row by raw row just before the read. */
+/* Video band vb: video-area rows [vb * TR_BAND_H, +TR_BAND_H). Above the plate, the camera
+ * rows (cam_pip.h's cover resample, invalidating just the source rows it reads) or, with no
+ * landscape frame, the dark background; below it, the plate (draw_plate). */
 void render_video_band(uint32_t core, int vb, uint16_t *fb)
 {
 	uint32_t  t0    = ticks();
@@ -722,57 +800,29 @@ void render_video_band(uint32_t core, int vb, uint16_t *fb)
 	int       rows  = ly0 + TR_BAND_H <= TR_VID_H ? TR_BAND_H : TR_VID_H - ly0;
 
 #if TR_CAM_PIP_ENABLE
-	const vcv_t cv  = { cband, 0, TR_R3D_W, TR_VID_Y0 + ly0, TR_VID_Y0 + ly0 + rows, -1 };
-	int         rot = vid_cv.rotate, ix0 = tr_cam_img_x0(rot), uw = TR_CAM_UP_W(rot);
-	int         top = tr_cam_img_y0(rot), iy0 = 0, iy1 = 0; /* this band's image rows, area-local */
+	const vcv_t cv = {
+		cband, 0, TR_R3D_W, TR_VID_Y0 + ly0, TR_VID_Y0 + ly0 + rows, -1, 0, TR_R3D_W
+	};
+	int cam = ly0 >= PLATE_Y ? 0 : (ly0 + rows <= PLATE_Y ? rows : PLATE_Y - ly0);
 
-	if (vid_have_cv) {
-		iy0 = ly0 > top ? ly0 : top;
-		iy1 = ly0 + rows < top + TR_CAM_UP_H(rot) ? ly0 + rows : top + TR_CAM_UP_H(rot);
-	}
-	for (int r = 0; r < rows; r++) {
-		uint16_t *d = cband + (uint32_t)r * TR_R3D_W;
-
-		if (ly0 + r >= iy0 && ly0 + r < iy1) {
-			fill_px(d, ix0, COLOR_PANEL_BG); /* the strips only: the image covers the middle */
-			fill_px(d + ix0 + uw, TR_R3D_W - ix0 - uw, COLOR_PANEL_BG);
-		} else {
-			fill_px(d, TR_R3D_W, COLOR_PANEL_BG);
-		}
-	}
-	if (iy1 > iy0) {
+	if (vid_have_cv && cam > 0) {
 		const uint8_t *buf = (const uint8_t *)(uintptr_t)vid_cv.buf_addr;
-		uint16_t      *dst = cband + (uint32_t)(iy0 - ly0) * TR_R3D_W + (uint32_t)ix0;
-		int            uy0 = iy0 - top, n = iy1 - iy0;
+		int            j0, j1;
 
-		if (rot == 0) {
-			/* Landscape comparison path: raw rows 1:1, scalar. */
-			dcache_inval_range(buf + (uint32_t)uy0 * TR_CAM_SRC_W, (uint32_t)n * TR_CAM_SRC_W);
-			for (int r = 0; r < n; r++) {
-				tr_cam_pip_row_grey_to_rgb565(buf + (uint32_t)(uy0 + r) * TR_CAM_SRC_W,
-				                              TR_CAM_SRC_W,
-				                              dst + (uint32_t)r * TR_R3D_W,
-				                              TR_CAM_SRC_W);
-			}
-		} else {
-			int c0, c1;
-
-			tr_cam_rot_src_cols(rot, uy0, n, &c0, &c1);
-			for (int s = 0; s < TR_CAM_SRC_H; s++) {
-				dcache_inval_range(buf + (uint32_t)s * TR_CAM_SRC_W + (uint32_t)c0,
-				                   (uint32_t)(c1 - c0));
-			}
+		tr_cam_cover_src_rows(ly0, cam, &j0, &j1);
+		dcache_inval_range(buf + (uint32_t)j0 * TR_CAM_SRC_W,
+		                   (uint32_t)(j1 - j0 + 1) * TR_CAM_SRC_W);
 #if RENDER_A32 && (defined(__ARM_NEON) || defined(__ARM_NEON__))
-			if (uy0 % 8 == 0 && n % 8 == 0) {
-				tr_cam_rot_rows_neon(buf, rot, uy0, n, dst, TR_R3D_W);
-			} else
+		tr_cam_cover_rows_neon(buf, ly0, cam, cband, TR_R3D_W);
+#else
+		tr_cam_cover_rows(buf, ly0, cam, cband, TR_R3D_W);
 #endif
-			{
-				tr_cam_rot_rows(buf, TR_CAM_SRC_W, TR_CAM_SRC_H, rot, uy0, n, dst, TR_R3D_W);
-			}
+	} else {
+		for (int r = 0; r < cam; r++) {
+			fill_px(cband + (uint32_t)r * TR_R3D_W, TR_R3D_W, COLOR_PANEL_BG);
 		}
 	}
-	draw_strips(&cv);
+	draw_plate(&cv); /* clipped to this band: nothing in the rows above the plate */
 	copy_rows(fb, cband, TR_VID_Y0 + ly0, rows);
 #else
 	(void)cband;
@@ -784,8 +834,8 @@ void render_video_band(uint32_t core, int vb, uint16_t *fb)
 
 /* The skeleton over the camera -- a few hundred px, core 0, once, after
  * every band (3D and video) has landed; straight into the framebuffer,
- * clipped to the image. Reads this frame's own vid_cv, so it matches the
- * image the bands drew. */
+ * clipped to the picture (above the plate, inside the panel's visible columns).
+ * Reads this frame's own vid_cv, so it matches the image the bands drew. */
 void render_video_overlay(uint16_t *fb)
 {
 	uint32_t t0 = ticks();
@@ -796,13 +846,19 @@ void render_video_overlay(uint16_t *fb)
 
 	if (vid_have_cv && tr_pslot_read(PIP_PSLOT_ADDR, 0u, &out, &seq, pip_barrier) &&
 	    out.hp_state == TR_HP_STATE_RUNNING) {
-		int rot = vid_cv.rotate, x0 = tr_cam_img_x0(rot), y0 = TR_VID_Y0 + tr_cam_img_y0(rot);
-		const vcv_t cv = { fb, x0, x0 + TR_CAM_UP_W(rot), y0, y0 + TR_CAM_UP_H(rot), frame_rot };
+		const vcv_t cv = { fb,
+			               frame_x0c,
+			               frame_x0c + (int)frame_fw,
+			               TR_VID_Y0,
+			               TR_VID_Y0 + PLATE_Y,
+			               frame_rot,
+			               frame_x0c,
+			               frame_fw };
 		int16_t     px[TR_POSE_KP], py[TR_POSE_KP];
 		bool        ok[TR_POSE_KP];
 
 		for (int k = 0; k < TR_POSE_KP; k++) {
-			ok[k] = tr_cam_pip_map_kp(&out.pose.kp[k], rot, &px[k], &py[k]);
+			ok[k] = tr_cam_pip_map_kp(&out.pose.kp[k], &px[k], &py[k]);
 		}
 		for (unsigned b = 0; b < 12u; b++) {
 			int a = bones[b][0], z = bones[b][1];
@@ -841,11 +897,12 @@ uint32_t render_front(const tr_frame_in_t *in)
 		scene_in = *in;
 	}
 #endif
+	DL->tail = NULL; /* one piece (the DL lives in uninitialised SRAM: set, never assumed) */
 	build_dl(in, DL, &frame_bg);
 	hud_score  = in != NULL ? in->score : 0u;
 	hud_banner = in != NULL ? in->banner : 0u;
 	hud_flags  = in != NULL ? in->flags : 0u;
-	frame_rot  = in != NULL && !RENDER_DL_GOLDEN ? in->rotation : 0;
+	frame_set(in);
 	video_frame_state();
 	render_stats = (render_stats_t){ ticks() - t0, 0, DL->n, 0, tr_dl_dropped, 0 };
 	return DL->n;
@@ -857,7 +914,8 @@ void render_front_begin(const tr_frame_in_t *in)
 	hud_score  = in != NULL ? in->score : 0u;
 	hud_banner = in != NULL ? in->banner : 0u;
 	hud_flags  = in != NULL ? in->flags : 0u;
-	frame_rot  = in != NULL && !RENDER_DL_GOLDEN ? in->rotation : 0;
+	frame_set(in);
+	DL->tail = NULL; /* part 2 is attached by render_front_end() */
 #if RENDER_DL_GOLDEN
 	build_dl(in, DL, &frame_bg);
 #else
@@ -897,8 +955,16 @@ uint32_t render_front_end(int part2)
 	if (part2) {
 		uint32_t room = TR_DL_MAX_TRIS - DL->n, k = DL1->n < room ? DL1->n : room;
 
-		memcpy(&DL->tri[DL->n], DL1->tri, k * sizeof(DL->tri[0]));
-		DL->n = (uint16_t)(DL->n + k);
+		/* Part 2 is NOT copied onto the end of part 1 (up to ~114 KB of serial core-0 work
+		 * before the setup could start): the list reads as one, triangles [DL->n, DL->n + k)
+		 * being DL1's first k (r3d.h tr_dl_tri). Indices, and so setup records, bins and the
+		 * painter's order, are exactly the copied list's. DL1 is not touched again until the
+		 * next frame's scene_go, after the bands have been joined. */
+		if (k != 0u) {
+			DL->split = DL->n;
+			DL->tail  = DL1;
+			DL->n     = (uint16_t)(DL->n + k);
+		}
 		tr_dl_dropped += DL1->n - k;
 	}
 	tr_scene_bg(&scene_in, &scene_cam, &frame_bg);
@@ -926,6 +992,25 @@ void render_bin(void)
 	}
 	render_stats.dropped = overflow;
 	render_stats.max_bin = max_bin;
+}
+
+void render_claim_order(uint8_t order[TR_BANDS + TR_VIDEO_BANDS])
+{
+	int n = 0;
+
+	/* insertion sort by bin fullness, descending and stable (24 entries) */
+	for (int b = 0; b < TR_BANDS; b++) {
+		int i = n++;
+
+		while (i > 0 && counts[order[i - 1]] < counts[b]) {
+			order[i] = order[i - 1];
+			i--;
+		}
+		order[i] = (uint8_t)b;
+	}
+	for (int vb = 0; vb < TR_VIDEO_BANDS; vb++) {
+		order[n++] = (uint8_t)(TR_BANDS + vb);
+	}
 }
 
 void render_setup(const tr_frame_in_t *in)

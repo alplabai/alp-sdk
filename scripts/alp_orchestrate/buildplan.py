@@ -22,7 +22,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
 
-from .headers import emit_dts_partitions, emit_dts_reservations, emit_ipc_contract_h
+from .headers import (
+    emit_dts_partitions,
+    emit_dts_reservations,
+    emit_ipc_contract_h,
+    emit_storage_mounts_c,
+    has_storage_mounts,
+)
 from .kconfig import (
     _resolve_console,
     _slice_alp_conf,
@@ -431,6 +437,12 @@ def _shared_artefacts(
     if tfm_conf:
         out.append((build_root / "sysbuild" / "tfm" / "tfm.conf",
                     tfm_conf))
+    # Opt-in C mount table: only when board.yaml `storage:` declares a
+    # mountable partition (the standalone emit otherwise prints an empty
+    # table, which a consumer has no reason to compile).
+    if has_storage_mounts(project):
+        out.append((gen / "storage_mount_table.c",
+                    emit_storage_mounts_c(project)))
     return out
 
 

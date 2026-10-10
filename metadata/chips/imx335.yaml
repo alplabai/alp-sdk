@@ -4,7 +4,7 @@ chip_id:          imx335
 driver_status:    none              # no chips/imx335/ portable chip-ID stub exists -- streaming
                                      # lives entirely in upstream Zephyr's drivers/video/imx335.c
                                      # (CONFIG_VIDEO_IMX335), reused as-is (ADR 0017 Tier 1,
-                                     # upstream-native, plus one repo patch -- unlike IMX296's
+                                     # upstream-native, plus two repo patches -- unlike IMX296's
                                      # ADR-0017-ADJACENT authored driver). This
                                      # manifest IS one (driver_status: none, no chips/ entry) --
                                      # catalogue-only, allowlisted in
@@ -21,8 +21,11 @@ datasheet:
 notes: |
   Streaming driver: upstream Zephyr v4.4.1 drivers/video/imx335.c
   (CONFIG_VIDEO_IMX335), NOT vendored -- consumed as-is per ADR 0017 Tier 1
-  (upstream-native). One repo-carried patch on top, zephyr/patches/zephyr/
-  0004-imx335-2lane-link-freq-and-binning.patch (zephyr/patches.yml), fixing
+  (upstream-native). Two repo-carried patches on top (zephyr/patches.yml):
+  0006-imx335-wait-for-sensor-after-power-up.patch polls the first register
+  write for up to 1 s (without it a cold power-up NACKs 0x3000 and the sensor
+  stays NOT_READY), and zephyr/patches/zephyr/
+  0004-imx335-2lane-link-freq-and-binning.patch fixes
   three real bugs bench-found at this sensor's 2-lane/10-bit/1188
   Mbps-per-lane configuration: (1) registers VIDEO_CID_LINK_FREQ so
   video_get_csi_link_freq() (video_common.c) reads the sensor's real 594 MHz
@@ -34,7 +37,8 @@ notes: |
   without them, a payload-checksum/CRC error storm; (3) fixes the
   2x2-binned mode's HNUM/Y_OUT_SIZE, which upstream leaves at values that
   transmit a 1308x984 frame into this driver's own 1296x972 buffer (a
-  12-pixel/12-line overrun). Shield: zephyr/boards/shields/
+  12-pixel/12-line overrun). M55-HP targets are supported too (E1M-AEN803
+  HP bench-verified 2026-10-09; E1M-AEN401 HP compile-only). Shield: zephyr/boards/shields/
   innomaker_cam_imx335/. See docs/camera-shields.md for the full
   driver/shield/control reference and changelog.d/2327.md for the bench
   history.

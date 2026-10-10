@@ -10,6 +10,23 @@
 
 #include "cc3501e_bridge.h"
 
+#if defined(TR_SND_EMBED) && TR_SND_EMBED
+/* Combined HP image (sound/src/main.c): the proxy attach below reads the identity EEPROM @0x50
+ * on I2C2, which the HE may own -- lease the bus for it (Dekker entry, src/ipc/tr_bus2.h) and
+ * GIVE IT BACK right after, before the long, bus-free CC3501E reset: this core's I2C2 IRQ is off
+ * and the HE owns the bus again for that whole stretch. A take-back seen at the entry aborts the
+ * bring-up (main.c reads its s_aborted); a retry reuses the control-pin and SPI handles opened
+ * here. */
+#include <stdbool.h>
+bool tr_snd_bus_enter(void);
+void tr_snd_bus_release(void);
+#define BRIDGE_EMBED 1
+static alp_gpio_t *s_wifi_en, *s_nrst;
+static alp_spi_t  *s_spi;
+#else
+#define BRIDGE_EMBED 0
+#endif
+
 #if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE) || defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 #include <zephyr/arch/cpu.h>
 #include <zephyr/sys/sys_io.h>
@@ -43,8 +60,15 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 
 	/* 1. Control pins: WIFI_EN (supply gate) + nRESET.  These are Alif LP-GPIO
 	 *    pads, not E1M edge pads -- the SoM owns them. */
+#if BRIDGE_EMBED
+	alp_gpio_t *wifi_en = s_wifi_en != NULL ? s_wifi_en : alp_gpio_open(CC3501E_BRIDGE_PIN_WIFI_EN);
+	alp_gpio_t *nrst    = s_nrst != NULL ? s_nrst : alp_gpio_open(CC3501E_BRIDGE_PIN_NRST);
+	s_wifi_en           = wifi_en;
+	s_nrst              = nrst;
+#else
 	alp_gpio_t *wifi_en = alp_gpio_open(CC3501E_BRIDGE_PIN_WIFI_EN);
 	alp_gpio_t *nrst    = alp_gpio_open(CC3501E_BRIDGE_PIN_NRST);
+#endif
 	if (wifi_en == NULL || nrst == NULL) {
 		if (wifi_en != NULL) {
 			alp_gpio_close(wifi_en);
@@ -62,13 +86,17 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	 *    muxed on P14_7; the app passes ALP_SPI_NO_CS so no software GPIO CS
 	 *    is installed and the SPI controller drives SS0 per transfer.  Mode 0
 	 *    matches the CC3501E vendor image frameFormat. */
+#if BRIDGE_EMBED
+	alp_spi_t *spi = s_spi != NULL ? s_spi : alp_spi_open(&(alp_spi_config_t) {
+#else
 	alp_spi_t *spi = alp_spi_open(&(alp_spi_config_t){
-	    .bus_id        = CC3501E_BRIDGE_SPI_BUS_ID,
-	    .freq_hz       = CC3501E_BRIDGE_SPI_FREQ_HZ,
-	    .mode          = ALP_SPI_MODE_0,
-	    .bits_per_word = 8u,
-	    .cs_pin_id     = ALP_SPI_NO_CS,
+#endif
+		.bus_id = CC3501E_BRIDGE_SPI_BUS_ID, .freq_hz = CC3501E_BRIDGE_SPI_FREQ_HZ,
+		.mode = ALP_SPI_MODE_0, .bits_per_word = 8u, .cs_pin_id = ALP_SPI_NO_CS,
 	});
+#if BRIDGE_EMBED
+	s_spi = spi;
+#endif
 	if (spi == NULL) {
 		alp_gpio_close(wifi_en);
 		alp_gpio_close(nrst);
@@ -111,7 +139,15 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	 * pin-routing fact, the bench evidence, and how a board that genuinely
 	 * wires it can opt back in via fw->ready_pin. */
 #ifdef CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
-	(void)alp_gpio_cc3501e_attach(fw);
+#if BRIDGE_EMBED
+	if (!tr_snd_bus_enter()) {
+		return ALP_ERR_BUSY; /* the HE took I2C2 back: no EEPROM read */
+	}
+#endif
+	(void)alp_gpio_cc3501e_attach(fw); /* reads the identity EEPROM @0x50 on I2C2 */
+#if BRIDGE_EMBED
+	tr_snd_bus_release();
+#endif
 #endif
 #ifdef CONFIG_ALP_SDK_WIFI_CC3501E
 	(void)alp_wifi_cc3501e_attach(fw);

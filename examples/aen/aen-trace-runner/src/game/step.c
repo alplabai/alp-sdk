@@ -89,9 +89,17 @@ void tr_game_step(tr_game_t *g, tr_intent_t in, int16_t track_h)
 
 	steer(g, in.lane_delta);
 
-	if (in.jump && !g->airborne && !g->ducking) {
-		g->airborne  = true;
-		g->air_ticks = TR_AIR_TICKS;
+	if (in.jump) {
+		g->jump_wait = TR_JUMP_BUFFER_TICKS; /* asked now: held until the runner is free */
+	}
+	if (g->jump_wait > 0u) {
+		if (!g->airborne && !g->ducking) {
+			g->airborne  = true;
+			g->air_ticks = TR_AIR_TICKS;
+			g->jump_wait = 0u;
+		} else {
+			g->jump_wait--;
+		}
 	}
 	if (in.duck && !g->airborne && !g->ducking) {
 		g->ducking    = true;

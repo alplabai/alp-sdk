@@ -14,7 +14,8 @@
  *     S=1 routes the M.2 card's 3.3 V I2S onto a 1.8 V pad
  *   3 I2S0 mux /E = 0 (enabled)
  *   4 SD_N (P5_2) low 24 ms then high: hardware reset of both amps
- *   5 carrier I2C bus 0 open
+ *   5 carrier I2C bus 0 open -- after a 2 ms settle (TR_SND_AMP_SETTLE_US, not the SDK's 200 us)
+ *  5b each amp polled for its address ACK (1 ms steps, <= 50 ms; src/audio/tr_amp_ready.h)
  *   6 tas2563_init() on 0x4D and 0x4E
  *   7 AMP_LEVEL MIN + configure_i2s (2 x 32-bit slots, U27 LEFT, U28 RIGHT)
  *   8 (TEST) PDM mics open + start, 48 kHz stereo
@@ -30,6 +31,23 @@
  * hp_state, hp_heartbeat (+1 per block), hp_underruns, hp_fault_step.
  *
  * TR_SND_TEST=1: the standalone 2026W36-0002 test -- see run_test().
+ *
+ * TR_SND_EMBED=1 (GAME only): this file is linked INTO the HP vision image (hp_vision/ with
+ * -DTR_HP_SOUND=ON, docs/2026-09-23-sound.md "Sound with the vision HP") -- no main() here;
+ * run_game() runs as its own cooperative thread, above the vision (main) thread. Same bring-up,
+ * same amp values, same stream. Additions, each inside `#if TR_SND_EMBED` (or SND_BUS() /
+ * SND_RELEASE(), empty without it): lease I2C2 + GPIO5 from the HE (src/ipc/tr_bus2.h) ONLY
+ * around the stretches that use them -- the proxy attach's EEPROM read in step 1, steps 4-7 and
+ * step 11 -- and give the bus BACK to the HE across the rest (the CC3501E reset and steps 2-3,
+ * the I2S3 bring-up of steps 8-10; the HUD power line needs the bus); every lease re-arms the
+ * DT-deferred I2C2 (IC_ENABLE = 0, INTR_MASK = 0, pending IRQ cleared, driver semaphore reset,
+ * bus-clear if stuck: src/platform/tr_i2c2_rearm.h); this core's I2C2 IRQ is armed only inside
+ * a Dekker-checked bus step (tr_snd_bus_enter) and off the moment it ends; a take-back seen at an
+ * entry aborts with no further bus access and waits again; the lease beats hp_beat at every
+ * enter / leave / poll (a step between two entries is <= 50 ms); the I2S3 underrun indications
+ * into the lease record; a paced retry after a failed write.
+ * With TR_SND_EMBED=0 none of this is compiled; the amp settle and ACK poll (steps 5 / 5b) apply
+ * to the standalone GAME and TEST images and the embedded one alike.
  *
  * The DesignWare I2S driver (i2s_dw.c) is FIFO/interrupt driven, not DMA:
  * the "double buffer" is the audio_out slab, which queues the block being
@@ -54,10 +72,59 @@
 #include "alp/i2s.h"
 #include "alp/peripheral.h"
 
+#include "audio/tr_amp_ready.h"
 #include "audio/tr_audio.h"
 #include "cc3501e_bridge.h"
 #include "snd_verdict.h"
 #include "ipc/tr_aring.h"
+
+#ifndef TR_SND_EMBED
+#define TR_SND_EMBED 0
+#endif
+#if TR_SND_EMBED
+#if TR_SND_TEST
+#error "TR_SND_EMBED is the GAME firmware inside hp_vision; the TEST image stays standalone"
+#endif
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/irq.h>
+
+#include "ipc/tr_bus2.h"
+#include "platform/tr_i2c2_rearm.h"
+
+#ifndef TR_SND_UNDERRUN_TEST
+#define TR_SND_UNDERRUN_TEST 0 /* DEV bench control; a release refuses an image that has it */
+#endif
+
+/* Entering a bring-up step that touches I2C2 or GPIO5 (tr_bus2.h): with no lease held, wait for
+ * the HE's offer and lease the bus; then hp_state = BUS, fence, THEN the HE's offer must still
+ * stand -- else stop HERE, before the access. This core's I2C2 IRQ is armed only after the entry
+ * passed. SND_RELEASE() ends a stretch: IRQ off, the lease handed BACK (the HE owns the bus for
+ * the CC3501E reset and the I2S3 bring-up). tr_snd_bus_enter() / _release() are also called by
+ * cc3501e_bridge.c around the proxy attach (its identity-EEPROM read @0x50). */
+#define SND_ABORTED 100
+bool tr_snd_bus_enter(void);
+void tr_snd_bus_leave(void);
+void tr_snd_bus_release(void);
+static bool
+    s_aborted; /* a bus entry saw the HE take the bus back (read after the CC3501E bridge) */
+/* What the lease wait does instead of sleeping (step 11 keeps the bit clock fed). */
+static void (*s_idle)(void);
+#define SND_BUS() \
+	do { \
+		if (!tr_snd_bus_enter()) { \
+			return SND_ABORTED; \
+		} \
+	} while (0)
+#define SND_RELEASE()   tr_snd_bus_release()
+#define SND_BEAT()      (((volatile tr_bus2_t *)TR_MEM_BUS2)->hp_beat++)
+#define SND_IDLE_SET(f) (s_idle = (f))
+static bool s_bridge_up; /* step 1 done: a retried bring-up keeps the bridge and its handles */
+#else
+#define SND_BUS()       (void)0
+#define SND_RELEASE()   (void)0
+#define SND_BEAT()      (void)0
+#define SND_IDLE_SET(f) (void)0
+#endif
 
 /* Digital volume, alp_audio_out_set_volume() 0..255 (255 = unity). 128 is the
  * level heard "louder and clean" on the 2026W36-0002 speakers (2026-09-15, amp
@@ -122,15 +189,60 @@ static alp_status_t out_block(const int16_t *mono)
 	return alp_audio_out_write(s.spk, s_stereo, BLOCK, NULL, WRITE_TMO);
 }
 
+/* Step 5b's I/O (tr_amp_ready.h): a 1-byte read on the carrier bus. */
+static bool amp_ack(void *ctx, uint8_t addr)
+{
+	uint8_t b;
+
+	(void)ctx;
+	return alp_i2c_read(s.bus, addr, &b, 1u) == ALP_OK;
+}
+
+static void amp_sleep_us(uint32_t us)
+{
+	k_usleep((int32_t)us);
+}
+
+static uint64_t amp_now_us(void)
+{
+	return k_cyc_to_us_floor64(k_cycle_get_64());
+}
+
+#if TR_SND_EMBED
+/* One silent block: feeds the running bit clock while a lease is awaited (out_block paces it). */
+static void keepalive_block(void)
+{
+	memset(s_mono, 0, sizeof(s_mono));
+	(void)out_block(s_mono);
+}
+#endif
+
 /* Steps 1..11 above; returns 0, or the failing step number. */
 static int bringup(bool with_mic)
 {
-	alp_status_t rc = cc3501e_bridge_bringup(&s.fw);
+	alp_status_t rc = ALP_OK;
+#if TR_SND_EMBED
+	if (!s_bridge_up) {
+		s_aborted = false;
+		rc =
+		    cc3501e_bridge_bringup(&s.fw); /* bus entry around its EEPROM read (cc3501e_bridge.c) */
+		if (s_aborted) {
+			return SND_ABORTED;
+		}
+		printk("[snd] 1 cc3501e_bridge_bringup -> %d\n", (int)rc);
+		if (rc != ALP_OK) return 1;
+		s_bridge_up = true;
+	}
+	if (s.mux_sel == NULL) s.mux_sel = alp_gpio_open(EVK_PIN_I2S_MUX_SEL);
+	if (s.mux_en == NULL) s.mux_en = alp_gpio_open(EVK_PIN_I2S_MUX_EN);
+#else
+	rc = cc3501e_bridge_bringup(&s.fw);
 	printk("[snd] 1 cc3501e_bridge_bringup -> %d\n", (int)rc);
 	if (rc != ALP_OK) return 1;
 
 	s.mux_sel = alp_gpio_open(EVK_PIN_I2S_MUX_SEL);
 	s.mux_en  = alp_gpio_open(EVK_PIN_I2S_MUX_EN);
+#endif
 	if (s.mux_sel == NULL || s.mux_en == NULL) {
 		printk("[snd] mux open failed (IO8 needs a CRC-valid manifest with hw_rev %s) err=%d\n",
 		       CONFIG_ALP_SDK_SOM_HW_REV,
@@ -147,6 +259,7 @@ static int bringup(bool with_mic)
 	if (rc != ALP_OK) return 3;
 	k_msleep(MUX_SETTLE_MS);
 
+	SND_BUS(); /* steps 4-7: GPIO5, then I2C2 -- one uninterrupted bus stretch */
 	s.gpio5 = DEVICE_DT_GET(DT_NODELABEL(gpio5));
 	int grc = device_is_ready(s.gpio5) ? 0 : -ENODEV;
 	if (grc == 0) grc = pinctrl_configure_pins(amp_enable_mux, ARRAY_SIZE(amp_enable_mux), 0U);
@@ -157,14 +270,48 @@ static int bringup(bool with_mic)
 	if (grc == 0) grc = gpio_pin_configure(s.gpio5, AMP_FAULT_PIN, GPIO_INPUT);
 	printk("[snd] 4 SD_N reset + release -> %d\n", grc);
 	if (grc != 0) return 4;
-	k_usleep(TAS2563_RESET_SETTLE_US);
+	/* Not the SDK's TAS2563_RESET_SETTLE_US (200 us): on the bench carrier U27 (0x4D) NACKs its
+	 * address 313 us after SD_N and first ACKs at 1142 us (2026-09-30) -- settle
+	 * TR_SND_AMP_SETTLE_US (2 ms), then poll each amp for its ACK below (step 5b). */
+	k_usleep(TR_SND_AMP_SETTLE_US);
 
-	s.bus =
-	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = EVK_I2C_BUS_SENSORS, .bitrate_hz = 100000u });
+	SND_BUS();
+#if TR_SND_EMBED
+	if (s.bus == NULL)
+#endif
+		s.bus = alp_i2c_open(
+		    &(alp_i2c_config_t){ .bus_id = EVK_I2C_BUS_SENSORS, .bitrate_hz = 100000u });
 	printk("[snd] 5 alp_i2c_open(bus %d) -> %s\n", (int)EVK_I2C_BUS_SENSORS, s.bus ? "ok" : "NULL");
 	if (s.bus == NULL) return 5;
 
+	/* 5b: each amp answers its address before tas2563_init (tr_amp_ready.h): a 1-byte read every
+	 * 1 ms, at most 50 ms. A timeout is a bring-up failure at step 6 (teardown, no sound). */
 	for (unsigned i = 0; i < AMP_COUNT; i++) {
+		static const tr_amp_io_t amp_io = { amp_ack, amp_sleep_us, amp_now_us, NULL };
+		uint32_t                 tries, waited;
+
+		SND_BUS();
+		if (!tr_amp_wait_ack(&amp_io,
+		                     amp_addrs[i],
+		                     TR_SND_AMP_POLL_US,
+		                     TR_SND_AMP_POLL_MAX_US,
+		                     &tries,
+		                     &waited)) {
+			printk("[snd] RESULT FAIL: amp 0x%02x did not ACK within %u ms (%u reads)\n",
+			       amp_addrs[i],
+			       (unsigned)(TR_SND_AMP_POLL_MAX_US / 1000u),
+			       (unsigned)tries);
+			return 6;
+		}
+		printk("[snd] 5b amp 0x%02x ACK: %u read(s), %u us after the %u us settle\n",
+		       amp_addrs[i],
+		       (unsigned)tries,
+		       (unsigned)waited,
+		       (unsigned)TR_SND_AMP_SETTLE_US);
+	}
+
+	for (unsigned i = 0; i < AMP_COUNT; i++) {
+		SND_BUS();
 		rc = tas2563_init(&s.amps[i], s.bus, amp_addrs[i], NULL);
 		printk("[snd] 6 tas2563_init(0x%02x) -> %d\n", amp_addrs[i], (int)rc);
 		if (rc != ALP_OK) return 6;
@@ -179,6 +326,7 @@ static int bringup(bool with_mic)
 		.block_frames   = BLOCK,
 	};
 	for (unsigned i = 0; i < AMP_COUNT; i++) {
+		SND_BUS();
 		rc = tas2563_set_amp_level(&s.amps[i], TAS2563_AMP_LEVEL_MIN);
 		if (rc == ALP_OK) rc = tas2563_configure_i2s(&s.amps[i], &i2s, amp_rx[i]);
 		printk("[snd] 7 amp 0x%02x level MIN + configure_i2s -> %d\n", amp_addrs[i], (int)rc);
@@ -187,7 +335,15 @@ static int bringup(bool with_mic)
 		/* Bench A/B: extra register writes from -DTR_SND_AMP_REGS_FILE
 		 * (sound/amp_regs_example.h), after the driver's own config. */
 		size_t bad = 0;
-		rc         = tas2563_load_tuning(&s.amps[i], k_amp_regs, ARRAY_SIZE(k_amp_regs), &bad);
+
+		rc = ALP_OK;
+		for (size_t k = 0; k < ARRAY_SIZE(k_amp_regs) && rc == ALP_OK; k++) {
+			size_t one_bad = 0;
+
+			SND_BEAT(); /* a long override list must not outlast the HE's 2 s heartbeat limit */
+			rc  = tas2563_load_tuning(&s.amps[i], &k_amp_regs[k], 1u, &one_bad);
+			bad = k + one_bad;
+		}
 		printk("[snd] 7b amp 0x%02x %u override writes -> %d (record %u)\n",
 		       amp_addrs[i],
 		       (unsigned)ARRAY_SIZE(k_amp_regs),
@@ -211,6 +367,7 @@ static int bringup(bool with_mic)
 		if (rc != ALP_OK) return 8;
 	}
 
+	SND_RELEASE(); /* steps 8-10: PDM / I2S3 only -- the bus goes back to the HE */
 	s.spk = alp_audio_out_open(&(alp_audio_config_t){ .peripheral_id    = 0,
 	                                                  .sample_rate_hz   = RATE,
 	                                                  .channels         = 2,
@@ -246,11 +403,17 @@ static int bringup(bool with_mic)
 		return 10; /* never wake the amps without a running clock */
 	}
 
+	/* The lease for step 11 is waited for with the bit clock RUNNING: silence is written while the
+	 * HE's offer is pending (a stopped clock would let the amp sleep before it is resumed). */
+	SND_IDLE_SET(keepalive_block);
 	for (unsigned i = 0; i < AMP_COUNT; i++) {
+		SND_BUS();
+		SND_IDLE_SET(NULL);
 		rc = tas2563_resume(&s.amps[i]);
 		printk("[snd] 11 tas2563_resume(0x%02x) -> %d\n", amp_addrs[i], (int)rc);
 		if (rc != ALP_OK) return 11;
 	}
+	SND_RELEASE();
 	return 0;
 }
 
@@ -528,12 +691,240 @@ static void dsb(void)
 	barrier_dsync_fence_full();
 }
 
+#if TR_SND_EMBED
+/* ---- the I2C2 + GPIO5 lease (src/ipc/tr_bus2.h) ----------------------------------------------
+ * This core's I2C2 (carrier bus 0, 0x49012000, IRQ 134) is DT `zephyr,deferred-init`
+ * (hp_vision/sound_hp.overlay): no register write, no ISR until the HE has leased the bus. The
+ * lease is taken lazily by the first bus entry of a stretch (tr_snd_bus_enter) and handed back by
+ * SND_RELEASE; this core's IRQ 134 is on only between an entry that passed and the release, so
+ * the HE alone resetting while this core holds or has returned the lease never meets an armed
+ * i2c_dw_isr. Any later runtime write to the amps (volume, resume) is bracketed the same way:
+ * SND_BUS(); ...; SND_RELEASE(). */
+#define SND_I2C2_NODE   TR_I2C2_NODE
+BUILD_ASSERT(DT_PROP(SND_I2C2_NODE, zephyr_deferred_init),
+             "hp_vision/sound_hp.overlay must defer the HP's I2C2 init");
+BUILD_ASSERT(DT_PROP(SND_I2C2_NODE, clock_frequency) == 100000,
+             "the HP's I2C2 is standard mode, as the HE's");
+
+static volatile tr_bus2_t *const s_b2 = (volatile tr_bus2_t *)TR_MEM_BUS2;
+static tr_bus2_hp_t              s_lease;
+static bool                      s_leased;    /* a lease is held: the HE stays off the bus */
+static bool                      s_i2c2_init; /* device_init() done once; a re-lease re-arms it */
+/* s_in_bus: this core has been inside ONE uninterrupted bus step since an entry that saw the
+ * offer standing -- a take-back seen now was made while the HE could read hp_state == BUS, so the
+ * HE is parked in its (<= 500 ms) boot wait and a GPIO5 write in the abort is safe. After a
+ * no-bus step it may not be: no GPIO5 then. */
+static bool s_in_bus, s_abort_gpio_ok;
+
+/* PRE_KERNEL_1, before any driver: forget what a previous session left. */
+static int snd_bus2_boot(void)
+{
+	tr_bus2_hp_boot(s_b2, dsb);
+	return 0;
+}
+SYS_INIT(snd_bus2_boot, PRE_KERNEL_1, 0);
+
+static void snd_irq_on(void)
+{
+	NVIC_ClearPendingIRQ(TR_I2C2_IRQN);
+	irq_enable(TR_I2C2_IRQN);
+}
+
+static void snd_irq_off(void)
+{
+	irq_disable(TR_I2C2_IRQN);
+}
+
+/* Wait for a live offer from the HE (it offers once its display is up and it sees this core
+ * waiting), enter the first bus step of the lease, and re-arm this core's I2C2 for it. A missing or
+ * dead HE: wait forever -- the vision thread is unaffected, there is only no sound. A core whose
+ * D-cache is on (a warm RAM-run inherits CCR.DC=1) never claims: the lease record is not coherent.
+ * The IRQ stays off here; the caller arms it. */
+static void lease_acquire(void)
+{
+	bool told = false, dc_told = false;
+
+	for (;;) {
+		while ((SCB->CCR & SCB_CCR_DC_Msk) != 0u) {
+			if (!dc_told) {
+				printk("[snd] D-cache is ON (SCB->CCR.DC): not claiming the I2C2 lease\n");
+				dc_told = true;
+			}
+			k_msleep(100);
+		}
+		tr_bus2_hp_want(&s_lease, s_b2, dsb);
+		while (!tr_bus2_hp_poll(&s_lease, s_b2)) {
+			if (!told) {
+				printk("[snd] waiting for the HE's I2C2 + GPIO5 offer (0x%08x) -- no bus access "
+				       "before it\n",
+				       (unsigned)TR_MEM_BUS2);
+				told = true;
+			}
+			if (s_idle != NULL) {
+				s_idle();
+			} else {
+				k_msleep(TR_BUS2_HP_POLL_MS);
+			}
+		}
+		if (tr_bus2_hp_enter(&s_lease, s_b2, dsb)) {
+			break;
+		}
+		tr_bus2_hp_abort(&s_lease, s_b2, dsb); /* withdrawn between the accept and the entry */
+	}
+	const struct device *i2c2 = DEVICE_DT_GET(SND_I2C2_NODE);
+	int                  rc;
+	bool                 sda = tr_i2c2_quiesce(i2c2, s_i2c2_init);
+
+	if (!s_i2c2_init) {
+		rc = device_init(i2c2);
+		snd_irq_off(); /* the driver armed it: only an accepted entry may */
+		s_i2c2_init = true;
+	} else {
+		/* the HE's own i2c_dw reprogrammed the controller in between */
+		rc = i2c_configure(i2c2, I2C_SPEED_SET(I2C_SPEED_STANDARD) | I2C_MODE_CONTROLLER);
+	}
+	printk("[snd] HE offered I2C2 + GPIO5: controller re-armed -> %d%s\n",
+	       rc,
+	       sda ? "" : " (SDA still low after the bus-clear)");
+	s_leased = true;
+	s_in_bus = true;
+}
+
+bool tr_snd_bus_enter(void)
+{
+	if (!s_leased) {
+		lease_acquire(); /* returns inside the first bus step of the lease */
+		snd_irq_on();
+		return true;
+	}
+	bool was = s_in_bus;
+
+	if (!tr_bus2_hp_enter(&s_lease, s_b2, dsb)) {
+		printk(
+		    "[snd] the HE took I2C2 + GPIO5 back -- bring-up aborted before its next bus access\n");
+		s_abort_gpio_ok = was;
+		s_in_bus        = false;
+		s_aborted       = true;
+		s_leased        = false;
+		return false;
+	}
+	s_in_bus = true;
+	snd_irq_on(); /* only after the entry passed */
+	return true;
+}
+
+/* A step on SPI1 / LP-GPIO / I2S3 only, the lease kept: IRQ off first (an HE-only reset in this
+ * window must not meet a live i2c_dw_isr), then HELD. The bring-up returns the lease instead
+ * (tr_snd_bus_release), except where it must keep it. */
+void tr_snd_bus_leave(void)
+{
+	snd_irq_off();
+	s_in_bus = false;
+	tr_bus2_hp_leave(&s_lease, s_b2, dsb);
+}
+
+/* End of a bus stretch (pass or fail): IRQ off, then the bus goes BACK to the HE (the HUD power
+ * line, the HE's own transfers). */
+void tr_snd_bus_release(void)
+{
+	if (!s_leased) {
+		return;
+	}
+	tr_snd_bus_leave();
+	tr_bus2_hp_return(&s_lease, s_b2, dsb);
+	s_leased = false;
+	printk("[snd] I2C2 + GPIO5 given back to the HE\n");
+}
+
+/* The HE took the bus back in the middle of the bring-up: stop WITHOUT another I2C2 transfer.
+ * I2S3 stopped; the mux disabled (/E high, a CC3501E GPIO over SPI1 -- not a shared bus: the
+ * amps see no I2S); S stays 0. SD_N low (both amps in hardware shutdown) only when the take-back
+ * came inside an uninterrupted bus step (s_abort_gpio_ok: the HE is parked in its boot wait).
+ * Then back to waiting for a NEW live offer. */
+static void abort_bringup(void)
+{
+	if (s_abort_gpio_ok && s.gpio5 != NULL && device_is_ready(s.gpio5)) {
+		(void)gpio_pin_set(s.gpio5, AMP_ENABLE_PIN, 0);
+	}
+	if (s.spk != NULL) {
+		(void)alp_audio_out_stop(s.spk);
+		alp_audio_out_close(s.spk);
+		s.spk = NULL;
+	}
+	if (s.mux_en != NULL) {
+		(void)alp_gpio_write(s.mux_en, true);
+	}
+	snd_irq_off();
+	s_leased        = false;
+	s_in_bus        = false;
+	s_abort_gpio_ok = false;
+	SND_IDLE_SET(NULL);
+	tr_bus2_hp_abort(&s_lease, s_b2, dsb);
+}
+
+/* The bring-up, retried after every abort. */
+static int bringup_handoff(void)
+{
+	for (;;) {
+		int step = bringup(false);
+
+		if (step != SND_ABORTED) {
+			return step;
+		}
+		abort_bringup();
+	}
+}
+
+/* I2S3 (0x49017000) status, read-only except TOR (reading it clears TXFO + TXFU on the E8;
+ * i2s_dw treats TXFO as "should not happen" and clears it the same way). */
+#define SND_I2S3_ITER   0x49017008u
+#define SND_I2S3_ISR    0x49017038u
+#define SND_I2S3_TOR    0x49017044u
+BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(i2s3)) == 0x49017000, "I2S3 status registers");
+/* The 500 us FIFO refill deadline (hp_vision/sound_hp.overlay): I2S3 above the camera, CSI, U55
+ * and I2C1. */
+#define SND_IRQ_PRIO(l) DT_IRQ(DT_NODELABEL(l), priority)
+BUILD_ASSERT(SND_IRQ_PRIO(i2s3) < SND_IRQ_PRIO(ethosu55) &&
+                 SND_IRQ_PRIO(i2s3) < SND_IRQ_PRIO(cam) && SND_IRQ_PRIO(i2s3) < SND_IRQ_PRIO(csi) &&
+                 SND_IRQ_PRIO(i2s3) < SND_IRQ_PRIO(i2c1),
+             "I2S3 must be the highest-priority IRQ of I2S3 / camera / CSI / U55 / I2C1 on the HP");
+#define SND_I2S_TXFU    (1u << 6) /* ISR0.TXFU: TX FIFO underrun (E8), sticky until TOR is read */
+#define SND_I2S_TXEN (1u << 0) /* ITER.TXEN: 0 = i2s_dw parked the TX block (its underrun exit) */
+
+static void i2s_status(void)
+{
+	if (*(volatile const uint32_t *)SND_I2S3_ISR & SND_I2S_TXFU) {
+		s_b2->hp_i2s_fu = s_b2->hp_i2s_fu + 1u;
+		(void)*(volatile const uint32_t *)SND_I2S3_TOR;
+	}
+	if ((*(volatile const uint32_t *)SND_I2S3_ITER & SND_I2S_TXEN) == 0u) {
+		s_b2->hp_i2s_err =
+		    s_b2->hp_i2s_err + 1u; /* the write below recovers it (PREPARE + START) */
+	}
+}
+#endif
+
 static int run_game(void)
 {
+#if TR_SND_EMBED
+	int step = bringup_handoff(); /* a success has already given the bus back */
+
+	if (step != 0) {
+		if (tr_snd_bus_enter()) {
+			teardown(); /* uses I2C2 + GPIO5 (amp shutdown) -- inside a bus step */
+			SND_RELEASE();
+		} else {
+			abort_bringup(); /* taken back at the same moment: no bus access */
+		}
+	}
+#else
 	int step = bringup(false);
+#endif
 	if (step != 0) {
 		printk("[snd] bring-up failed at step %d -- no game sound\n", step);
+#if !TR_SND_EMBED
 		teardown();
+#endif
 		for (;;) { /* keep reporting: the HE may re-init the ring after us */
 			s_ring->hp_state      = TR_ARING_HP_FAULT;
 			s_ring->hp_fault_step = (uint32_t)step;
@@ -545,6 +936,12 @@ static int run_game(void)
 	tr_audio_init(TR_SND_GAME_SEED);
 	printk("[snd] game sound running at %u Hz: ring at 0x%08x\n", RATE, TR_ARING_ADDR);
 	uint32_t fails = 0; /* consecutive failed block writes */
+#if TR_SND_EMBED
+	(void)*(volatile const uint32_t *)SND_I2S3_TOR; /* drop the bring-up's start-up TXFU */
+#if TR_SND_UNDERRUN_TEST
+	uint32_t blocks = 0;
+#endif
+#endif
 	for (;;) {
 		tr_aev_t e;
 		while (tr_aring_pop(s_ring, &e, dsb)) {
@@ -552,9 +949,32 @@ static int run_game(void)
 			s_ring->hp_events = s_ring->hp_events + 1u;
 		}
 		tr_audio_render(s_mono, BLOCK);
+#if TR_SND_EMBED
+#if TR_SND_UNDERRUN_TEST
+		/* DEV positive control (TR_SND_UNDERRUN_TEST, refused by a32/release/hp_vision_check.sh and
+		 * snd_hp_check.sh): once, after ~3 s of stream, hold the I2S3 IRQ off 2 ms -- four times
+		 * the 500 us FIFO refill deadline -- so the FIFO runs empty and hp_i2s_fu MUST count. The
+		 * bench uses it to prove the counter can count at all (the HWRM describes TXFU only under
+		 * TDM mode; the driver's 2-block queue never runs dry in 2 ms by itself): a 0 in
+		 * hp_i2s_fu proves nothing until this has made it count. */
+		if (++blocks == 200u) {
+			printk("[snd] underrun control: I2S3 IRQ held off 2000 us (hp_i2s_fu must count)\n");
+			irq_disable(DT_IRQN(DT_NODELABEL(i2s3)));
+			k_busy_wait(2000);
+			irq_enable(DT_IRQN(DT_NODELABEL(i2s3)));
+		}
+#endif
+		i2s_status(); /* before the write: a parked TX block is still parked here */
+#endif
 		if (out_block(s_mono) != ALP_OK) {
 			s_ring->hp_underruns = s_ring->hp_underruns + 1u;
 			fails++;
+#if TR_SND_EMBED
+			/* A failed write can return at once (the driver in its error state): a
+			 * cooperative thread that loops without blocking would starve the vision
+			 * thread for good. Pace the retry at the block rate. */
+			k_msleep(BLOCK * 1000u / RATE);
+#endif
 		} else {
 			fails = 0u;
 		}
@@ -572,6 +992,43 @@ static int run_game(void)
 }
 #endif
 
+#if TR_SND_EMBED
+/* The sound thread of the combined HP image. Cooperative, above the vision (main) thread: it
+ * runs ~0.5 ms per 16 ms block and must never wait behind the vision's CPU stages; the vision
+ * thread sleeps through every NPU invoke. */
+#ifndef TR_SND_EMBED_PRIO
+#define TR_SND_EMBED_PRIO \
+	K_PRIO_COOP(CONFIG_NUM_COOP_PRIORITIES - 2) /* -2: above the system workqueue (-1) */
+#endif
+#define TR_SND_EMBED_STACK 8192 /* the standalone image's CONFIG_MAIN_STACK_SIZE */
+BUILD_ASSERT(TR_SND_EMBED_PRIO < CONFIG_MAIN_THREAD_PRIORITY && TR_SND_EMBED_PRIO < 0,
+             "the sound thread must be cooperative and above the vision (main) thread");
+BUILD_ASSERT(IS_ENABLED(CONFIG_FPU_SHARING),
+             "the vision thread uses the FPU; the synth's MVE code may too");
+
+static void snd_thread(void *a, void *b, void *c)
+{
+	ARG_UNUSED(a);
+	ARG_UNUSED(b);
+	ARG_UNUSED(c);
+	(void)alp_init();
+	printk("[snd] Trace Runner game sound inside hp_vision (GAME, embedded), %u Hz, volume %u, "
+	       "prio %d\n",
+	       RATE,
+	       TR_SND_VOLUME,
+	       TR_SND_EMBED_PRIO);
+	(void)run_game();
+}
+K_THREAD_DEFINE(tr_snd_thread,
+                TR_SND_EMBED_STACK,
+                snd_thread,
+                NULL,
+                NULL,
+                NULL,
+                TR_SND_EMBED_PRIO,
+                0,
+                0);
+#else
 int main(void)
 {
 	(void)alp_init();
@@ -585,3 +1042,4 @@ int main(void)
 	return run_game();
 #endif
 }
+#endif

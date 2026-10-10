@@ -10,6 +10,8 @@
  * for why an app-level board overlay is too late in Zephyr's devicetree
  * concatenation order to supply what a SHIELD overlay (innomaker_cam_ov9281)
  * references. */
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
+
 / {
 	chosen {
 		zephyr,flash = &itcm;
@@ -20,8 +22,8 @@
 	 * reservation, NOT probe/camera/prj.conf's SRAM0 default -- that
 	 * default lands the pool at SRAM0's base (0x02000000), which is FB A
 	 * + the A32 renderer's triangle setup records when this app runs
-	 * alongside the game (../CMakeLists.txt's own TR_CAMERA+TR_RENDER=A32
-	 * guard exists for exactly this collision). SRAM1 needs the A32/stub
+	 * alongside the game (a pool there is why the HE's old TR_CAMERA option
+	 * is refused). SRAM1 needs the A32/stub
 	 * boot to have already powered it (AEN memory note: SRAM1 bus-faults
 	 * cold, before that sequencing) -- a real ordering dependency for the
 	 * bench-runner, not provable here. 512 KiB: 2 x 256,000 B GREY8
@@ -70,6 +72,22 @@
 	status = "disabled";
 };
 
+/* The SoC power-control register blocks the SoM power layer (alp-sdk#2784) describes in
+ * ensemble_e8_peripherals.dtsi (VBAT 0x1A609000, ANA 0x1A60A000, STOP_MODE 0x1A60F000) are inert
+ * register windows with no driver, always on: this app never drives them, and an enabled one is
+ * a stray HP peripheral to hp_vision_check.sh (the HP owns only what it drives). */
+&vbat {
+	status = "disabled";
+};
+
+&ana {
+	status = "disabled";
+};
+
+&stop_mode {
+	status = "disabled";
+};
+
 /* fix round 12 (review + silicon finding): the base board file also turns
  * &uart5 (0x4901D000) and &lpgpio (0x42002000) "okay" unconditionally.
  * uart5 is the SAME UART the HE's own console and shell run on -- with it
@@ -100,5 +118,26 @@
 		compatible = "alp,i2c-handover";
 		role = "acquire";
 		flag-address = <0x0237FC94>;
+	};
+};
+
+/*
+ * The shared page 0x0237F000..0x0237FFFF -- the event ring (sound), the I2C1 handover flag, the HP
+ * debug words, the camera view descriptor, the pose slot and the I2C2 + GPIO5 lease record
+ * (src/ipc/tr_memmap.h, src/ipc/tr_bus2.h) -- is written by the other M55 and the A32. The whole
+ * app relies on CONFIG_DCACHE=n for it, but CONFIG_DCACHE=n does not switch the cache off (Zephyr
+ * only disables it at boot when CONFIG_DCACHE=y), so a warm RAM-run after an image that left
+ * CCR.DC=1 would serve stale lines. This region makes the page Normal non-cacheable on this core
+ * whatever the cache state. The HE's board overlay carries the same node. It lies inside SRAM0
+ * (0x02000000, 4 MiB), which has NO MPU region of its own in this build (the board's fixed table,
+ * zephyr/soc-bridge/alif/mpu_regions_e8.c, covers MRAM, ITCM and DTCM only; SRAM0 is the default
+ * map), and ends below &sram1 (0x02400000): PMSAv8-M regions may not overlap, and none does.
+ */
+/ {
+	tr_shared_nc: sram@237f000 {
+		compatible = "zephyr,memory-region", "mmio-sram";
+		reg = <0x0237F000 0x1000>;
+		zephyr,memory-region = "TR_SHARED_NC"; /* required by the binding; nothing is linked there */
+		zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_RAM_NOCACHE)>;
 	};
 };

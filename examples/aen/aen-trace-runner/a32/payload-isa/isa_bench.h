@@ -37,7 +37,12 @@
  * loop (OLD) vs span_tex()'s hoisted one (CW).
  * Units: ops for the FP rows, px for spans / tex / golden raster, rows for
  * the edge walk, bytes for fills, reads/hooks for the PMU rows, divides for
- * UDIV/LDIV64/RECIP62, triangles for TRI_SETUP. */
+ * UDIV/LDIV64/RECIP62, triangles for TRI_SETUP, px for ROT90_*: the rot-90
+ * band copy-out (src/render/panel_rot.h) into the Normal-NC framebuffer at
+ * its real 2560 B column pitch, by store form: OLD = the descending 4 x
+ * vst1q the renderer shipped with, ASC = the renderer's tr_rot_blit_neon
+ * (ascending 4 x vst1q), VST1 = ascending 2 x vst1.16 {q,q}, VSTM = one
+ * vstmia {d0-d7} per 64 B run. */
 #define ISA_TIMINGS(X) \
 	X(PMU_READ) \
 	X(PROF_HOOK) \
@@ -52,7 +57,8 @@
 	                                X(FILL45K_MEMSET) X(FILL45K_VST1Q) X(FILL45K_VST256) \
 	                                    X(FILL45K_VSTM) X(FILL45K_STRD) X(UDIV_LAT) X(LDIV64) \
 	                                        X(RECIP62_FAST) X(TRI_SETUP) X(GOLD_SETUP) \
-	                                            X(GOLD_RASTER)
+	                                            X(GOLD_RASTER) X(ROT90_OLD) X(ROT90_ASC) \
+	                                                X(ROT90_VST1) X(ROT90_VSTM)
 
 /* Scalar results. */
 #define ISA_VALS(X) \
@@ -65,7 +71,7 @@
 	X(GZ_CUR_EXACT) \
 	X(GZ_MASK_EXACT) \
 	X(EDGE_REG_EXACT) X(TEX_PLD_EXACT) X(FILL_OK) X(GOLDEN_OK) X(FDIV_OK) X(FZ_RESTORED) \
-	    X(RECIP62_EXACT) X(GSPAN_EXACT)
+	    X(RECIP62_EXACT) X(GSPAN_EXACT) X(ROT90_EXACT)
 
 /* clang-format on */
 #define ISA_ENUM(n) ISA_##n,

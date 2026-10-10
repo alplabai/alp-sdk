@@ -179,7 +179,7 @@
     },
     "sharedArtefacts": {
       "type": "array",
-      "description": "Cross-slice generated artefacts (e.g. generated/alp/system_ipc.h, dts-reservations.dtsi, dts-partitions.dtsi, and -- only when the project declares them -- alp_sysbuild.conf / sysbuild/tfm/tfm.conf). Conditional artefacts follow absence-emits-nothing: they appear only when their emit is non-empty. Byte-identical to what the Orchestrator's own materialise step writes under buildRoot.",
+      "description": "Cross-slice generated artefacts (e.g. generated/alp/system_ipc.h, dts-reservations.dtsi, dts-partitions.dtsi, and -- only when the project declares them -- alp_sysbuild.conf / sysbuild/tfm/tfm.conf / generated/storage_mount_table.c, the latter when board.yaml storage: has a mountable partition). Conditional artefacts follow absence-emits-nothing: they appear only when their emit is non-empty. Byte-identical to what the Orchestrator's own materialise step writes under buildRoot.",
       "items": {
         "type": "object",
         "additionalProperties": false,

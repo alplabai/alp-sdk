@@ -84,8 +84,9 @@
  *      E1M-AEN801 / E1M-AEN803 builds (#2784 U5; CONFIG_ALP_SDK_SOM_POWER,
  *      default on there when CONFIG_GPIO and CONFIG_PINCTRL are on).  Every
  *      other backend, and an AEN build without that option, answers
- *      @ref ALP_ERR_NOSUPPORT.  Nothing calls the quiesce around STOP yet
- *      (the STOP backend is #2784 U7).
+ *      @ref ALP_ERR_NOSUPPORT.  The Alif E8 M55-HE STOP / STANDBY backend
+ *      (#2784 U7, CONFIG_ALP_SDK_POWER_ALIF_SE, default off; STOP bench-proven
+ *      on the E1M-AEN803, STANDBY not) calls the quiesce around the sleep.
  *      See docs/abi-markers.md for the convention.
  */
 
@@ -297,8 +298,13 @@ alp_status_t alp_power_configure_retention(alp_power_t *handle, const alp_power_
  * @param[in]  handle          Handle from @ref alp_power_open.
  * @param[in]  mode            Requested mode (RUN is invalid here;
  *                             use @ref alp_power_close to release).
- * @param[in]  wake_after_ms   Max wall-clock wait, or 0 for "wake
- *                             only on a non-timer source".  When
+ * @param[in]  wake_after_ms   Minimum wall-clock sleep, or 0 for "wake
+ *                             only on a non-timer source".  The timed wake
+ *                             is never EARLY: a backend whose timer is
+ *                             coarse or inaccurate rounds the length UP
+ *                             (the Alif STOP backend counts against the
+ *                             fastest its low-frequency clock can run), so
+ *                             the actual sleep can be longer.  When
  *                             non-zero the backend arms a timed wake
  *                             (RTC alarm or low-power timer, whichever
  *                             the mode can use) even if
@@ -323,7 +329,9 @@ alp_status_t alp_power_configure_retention(alp_power_t *handle, const alp_power_
  *         a backend that reports per-mode wake capabilities when the
  *         mode can arm neither @ref ALP_POWER_WAKE_TIMER nor
  *         @ref ALP_POWER_WAKE_RTC) / ALP_ERR_IO (backend transport
- *         failure mid-cycle).
+ *         failure mid-cycle) / ALP_ERR_BUSY (Alif STOP backend: a debugger
+ *         is attached, or an armed wake source is already pending, so the
+ *         sleep would not hold or would end at once).
  */
 alp_status_t alp_power_request_sleep(alp_power_t           *handle,
                                      alp_power_mode_t       mode,
@@ -631,10 +639,14 @@ alp_status_t alp_power_domain_info(alp_power_domain_t domain, alp_power_domain_i
  * @return ALP_OK / ALP_ERR_INVAL (NULL @p out) /
  *         ALP_ERR_NOSUPPORT (no backend keeps a wake record).
  *
+ * A cycle that an external reset (a debugger nRESET, a reset button) interrupted is
+ * reported with @c valid true, @c realised_mode @ref ALP_POWER_MODE_RUN and
+ * @c wake_source 0: the sleep was aborted, it did not wake.
+ *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      New in v0.17 (#2784).  The AEN801 / AEN803 build answers it; the record
- *      is only written once the STOP backend lands (U7), so @c valid stays false
- *      until then.
+ *      is written by the Alif STOP backend (U7, CONFIG_ALP_SDK_POWER_ALIF_SE),
+ *      so @c valid stays false on a build without it.
  */
 alp_status_t alp_power_boot_wake_info(alp_power_boot_info_t *out);
 
