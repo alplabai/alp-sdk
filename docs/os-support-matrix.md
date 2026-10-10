@@ -131,8 +131,16 @@ plan in `VERSIONS.md`.
 | **RTC** (`<alp/rtc.h>`)   | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)   | **GA** (Zephyr `rtc_*`)   | code complete¹     | code complete¹       |
 | **Watchdog** (`<alp/wdt.h>`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`)   | **GA** (Zephyr `wdt_*`)   | code complete¹     | code complete¹       |
 | **Audio** (`<alp/audio.h>`) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | stub | stub |
-| **Camera** (`<alp/camera.h>`) | planned              | planned                  | planned                   | planned                   | stub               | stub                 |
+| **Camera** (`<alp/camera.h>`) | code complete [^cam2]    | code complete [^cam2]    | code complete [^cam2]     | code complete [^cam2]     | stub               | stub                 |
 | **IoT** (`<alp/iot.h>`)   | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | stub | stub |
+
+[^cam2]: The AEN Zephyr camera path is the portable `zephyr_video` backend
+    (`src/backends/camera/zephyr_video.c`, `silicon_ref = "*"`, priority 50) plus,
+    on E8, the ISP-Pico backend (`src/backends/camera/alif_isp_pico.c`, priority 100).
+    Bench-verified on E8 (E1M-AEN803, E1M-EVK, J5): OV9281
+    ([camera-shields.md](camera-shields.md)) and an INNO-MAKER CAM-IMX335 on both
+    the M55-HE and the M55-HP (3/3 cold boots, 1296x972 RAW10, #2809).  The E4
+    (E1M-AEN401) M55-HP/HE overlays exist (#2809) but are not bench-verified.
 
 ¹ **code complete** — migrated to the registry/dispatcher pattern with real Linux
 backends in the v0.8 cycle (issue #33), which also lands the per-class
@@ -245,7 +253,7 @@ hasn't been measured.
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
 | 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) + Linux **Mali-G31 EGL/GLES** backend for the RZ/V2N family (`yocto_gles.c`, opt-in `ALP_SDK_USE_GPU2D_GLES`, **bench-unverified**, see `docs/v2n-mali-gpu.md`) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim + **E8 bench PASS** (RAM-run, 2026-06-17); D/AVE 2D code-complete, bench-unverified (ADDITIVE/MULTIPLY blends delegate to the sw path).  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; the sw fallback is also wired on `ALP_OS=yocto` plain-CMake builds (dispatcher + sw_fallback replace the NOSUPPORT stub, ctest-covered)) |
-| Power management | `power.h` | M (Zephyr `pm_*`) + A | surface present; **untested** |
+| Power management | `power.h` | M (Zephyr `pm_*`) + A; plus the Alif SE STOP/STANDBY backend on **AEN801 / AEN803 (`alif:ensemble:e8`, M55-HE)** and the SoM power-domain runtime (`CONFIG_ALP_SDK_POWER_ALIF_SE`, default n; `CONFIG_ALP_SDK_SOM_POWER`) | surface present; **untested** except E8 STOP, which is bench-proven on E1M-AEN803 (STANDBY is not) -- see [aen-power-domains.md](aen-power-domains.md) |
 | Heterogeneous RPC | `rpc.h` (+ generated `system_ipc.h`) | A↔M over RPMsg / OpenAMP | surface + scaffold; **untested** |
 | DAC | `dac.h` (split out of `adc.h` in v0.8) | M (Zephyr `dac_*`) + A (Yocto registry backend, issue #33) | Zephyr backend real — **E8 bench PASS** (`dac_alif`, v0.8.0 campaign); Yocto code-complete, HIL-gated; `alp_dac_capabilities()` additive in v0.9 (conformance-suite covered on native_sim) |
 | I²C/SPI target (slave) mode | `peripheral.h` (`alp_i2c_target_*` / `alp_spi_target_*`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Zephyr `i2c_target_register` / `SPI_OP_MODE_SLAVE`); Yocto + baremetal: NOSUPPORT stubs (no Linux slave-mode uAPI) | Zephyr backend real; `alp_spi_target_transceive` takes a `timeout_ms` bound (finite timeouts need `CONFIG_SPI_ASYNC` — sync-only builds answer `ALP_ERR_NOSUPPORT`) and `alp_spi_target_close` refuses `ALP_ERR_BUSY` while a transfer is in flight; drivers without target support degrade with `ALP_ERR_NOSUPPORT`; native_sim covers param-validation + degrade paths — **two-board HIL pending** |

@@ -564,7 +564,7 @@ ISP-window race entirely.
 (those writes are firewalled). Writing only the app (without the matching ATOC) fails
 secure-boot verification — always write both consistent blobs.
 
-> **Verified state on *this* Linux bench (alplab-gw, 2026-06-17): flow D WORKS.** The
+> **Verified state on *this* Linux bench (2026-06-17): flow D WORKS.** The
 > original probe (J-Link PLUS, old firmware) could not connect with
 > `-device AE822FA0E5597LS0_M55_HE` — it only worked with the generic `-device
 > Cortex-M55` (reads/RAM-run). Swapping to a probe on **J-Link V13 firmware (May 2026,

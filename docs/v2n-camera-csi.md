@@ -347,8 +347,8 @@ sensor is served as `ALP_PIXFMT_RAW10` (one `uint16` per pixel, still the
 mosaic); `RGB565` and `GREY8` stay `ALP_ERR_NOSUPPORT` and `RAW8` needs an
 8-bit Bayer code the sensor does not offer. The backend does not demosaic.
 Bench facts this path is written against (E1M-V2M103, IMX296LQ colour on
-CAM0/J5, 2026-10-08, observed with the V4L2 tools; the backend itself has not
-yet run on the board): the chain is `imx296 9-001a`:0 ->
+CAM0/J5, 2026-10-08, observed with the V4L2 tools; the backend's own RAW10
+capture was bench-verified on the same board, see the top of this section): the chain is `imx296 9-001a`:0 ->
 `csi-16000400.csi20`:0/1 -> `cru-ip-16000000.vide0`:0/1 -> `CRU output`
 (`/dev/video0`) with every link immutable and enabled; the sensor emits
 `SBGGR10_1X10/1456x1088`; the capture fourcc is `CR10`, 11648 bytes per line,
