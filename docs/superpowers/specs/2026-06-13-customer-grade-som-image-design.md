@@ -4,7 +4,6 @@
 
 > **Note (2026-10-10):** E1M-NX9101 / the NXP i.MX 93 port was removed in #2781 / #2782 (67ed22d86); the i.MX 93 mention below is historical.
 
-
 **Status:** Draft under finalization · decisions 1–4 locked 2026-06-13 · decisions 5–7 await owner sign-off
 **Owner:** Alp Lab
 **Branch:** `feat/customer-grade-edge-image` (off `dev`)
