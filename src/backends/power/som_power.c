@@ -631,6 +631,34 @@ __weak alp_status_t alp_som_power_rtc_countdown_cancel(void)
 	return ALP_ERR_NOSUPPORT;
 }
 
+/* Bit n when property @p prop of domain node @p n is a pad of the lpgpio controller. */
+#define SOMPD_LPGPIO_BIT(n, prop) \
+	COND_CODE_1(DT_NODE_HAS_PROP(n, prop), \
+	            (COND_CODE_1(DT_SAME_NODE(DT_GPIO_CTLR_BY_IDX(n, prop, 0), DT_NODELABEL(lpgpio)), \
+	                         (BIT(DT_GPIO_PIN_BY_IDX(n, prop, 0))), \
+	                         (0))), \
+	            (0))
+
+#define SOMPD_LPGPIO_BITS(n) \
+	(SOMPD_LPGPIO_BIT(n, reset_gpios) | SOMPD_LPGPIO_BIT(n, enable_gpios) | \
+	 SOMPD_LPGPIO_BIT(n, powerdown_gpios) | SOMPD_LPGPIO_BIT(n, wake_gpios)) |
+
+/* Bit n for every entry n of the `alp,wired-lpgpio-pads` property of the alp,som-power node: pads
+ * the board wires to an on-module chip without a power-domain node (the generated board dts
+ * lists the four OSPI nets there, from alif-ospi.tsv).  Per board, so a SoM without the node
+ * claims nothing it does not wire. */
+#define SOMPD_WIRED_PAD(n, prop, i) BIT(DT_PROP_BY_IDX(n, prop, i)) |
+#define SOMPD_WIRED_BITS(n) \
+	COND_CODE_1(DT_NODE_HAS_PROP(n, alp_wired_lpgpio_pads), \
+	            (DT_FOREACH_PROP_ELEM(n, alp_wired_lpgpio_pads, SOMPD_WIRED_PAD)), \
+	            ())
+
+uint32_t alp_som_power_lpgpio_claimed(void)
+{
+	return (DT_FOREACH_STATUS_OKAY(alp_som_power_domain, SOMPD_LPGPIO_BITS) 0u) |
+	       (DT_FOREACH_STATUS_OKAY(alp_som_power, SOMPD_WIRED_BITS) 0u);
+}
+
 const struct gpio_dt_spec *alp_som_power_wake_gpio(alp_power_domain_t d)
 {
 	if ((unsigned)d >= (unsigned)ALP_POWER_DOMAIN_COUNT || !_reg[d].present ||

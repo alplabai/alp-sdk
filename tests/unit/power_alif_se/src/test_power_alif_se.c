@@ -52,6 +52,9 @@ typedef enum {
 	EV_DISARM_LPTIMER,
 	EV_RESTORE,
 	EV_CLEAR_STALE_WAKE,
+	EV_ARM_WAKE_PADS,
+	EV_DISARM_WAKE_PADS,
+	EV_RELEASE_WAKE_PADS,
 } ev_t;
 
 #define EV_MAX 64
@@ -152,6 +155,12 @@ static int      g_arm_timer_rc, g_arm_int_rc;
 static unsigned g_enter_count;
 static uint8_t  g_rtc_flags; /* tentative: defined with the other som_power fakes below */
 static bool     g_enter_rtc_int;
+static uint32_t g_enter_pads;               /* the pads mask the entry was given */
+static uint32_t g_wake_pad_mask, g_claimed; /* DT-named pads / pads the SoM wires */
+static uint32_t g_pads_latched;      /* live RAW_INTSTATUS of the fake block (runtime path) */
+static uint32_t g_pads_boot_latched; /* the PRE_KERNEL_1 snapshot (cold-boot path) */
+static int      g_arm_pads_rc;
+static uint32_t g_released_pads;
 static bool     g_enter_fires; /* the fake sleep ends at once with the armed source fired */
 static int      g_enter_rc;
 static uint32_t g_regs_at_enter[3];
@@ -231,6 +240,47 @@ void alif_se_hw_rtc_int_disarm(void)
 	ev(EV_DISARM_INT_PAD);
 }
 
+uint32_t alif_se_hw_wake_pad_mask(void)
+{
+	return g_wake_pad_mask;
+}
+
+alp_status_t alif_se_hw_wake_pads_arm(void)
+{
+	if (g_arm_pads_rc != 0) {
+		return (alp_status_t)g_arm_pads_rc;
+	}
+	ev(EV_ARM_WAKE_PADS);
+	return ALP_OK;
+}
+
+void alif_se_hw_wake_pads_disarm(void)
+{
+	ev(EV_DISARM_WAKE_PADS);
+}
+
+uint32_t alif_se_hw_wake_pads_fired(uint32_t pads)
+{
+	return g_pads_latched & pads;
+}
+
+void alif_se_hw_wake_pads_release(uint32_t pads)
+{
+	ev(EV_RELEASE_WAKE_PADS);
+	g_released_pads |= pads;
+	g_pads_latched &= ~pads;
+}
+
+uint32_t alif_se_hw_wake_pads_boot_latched(void)
+{
+	return g_pads_boot_latched;
+}
+
+uint32_t alp_som_power_lpgpio_claimed(void)
+{
+	return g_claimed;
+}
+
 static bool     g_lptimer_fired_at_arm;
 static unsigned g_enter_lptimer_ticks;
 
@@ -244,7 +294,7 @@ uint32_t alif_se_hw_vtor_read(void)
 	return 0x80010400u;
 }
 
-alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
+alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t pads, uint32_t lptimer_ticks)
 {
 	if (lptimer_ticks != 0u) {
 		/* The real entry arms the timer last and proves it live, under the lock. */
@@ -261,11 +311,15 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 	ev(EV_ENTER);
 	g_enter_count++;
 	g_enter_rtc_int = rtc_int;
+	g_enter_pads    = pads;
 	memcpy(g_regs_at_enter, g_regs, sizeof(g_regs));
 	if (g_enter_rc != 0) {
 		return (alp_status_t)g_enter_rc;
 	}
 	if (g_enter_fires) {
+		if ((g_rec_at_set.armed_hw & ALP_SOM_ARM_LPGPIO) != 0u) {
+			g_pads_latched |= pads;
+		}
 		if ((g_rec_at_set.armed_hw & ALP_SOM_ARM_LPTIMER) != 0u) {
 			g_timer_pending = true;
 		}
@@ -637,8 +691,13 @@ static void reset_fakes(void)
 	g_arm_timer_rc = g_arm_int_rc = 0;
 	g_enter_count                 = 0;
 	g_enter_rtc_int               = false;
-	g_enter_fires                 = true;
-	g_enter_rc                    = 0;
+	g_enter_pads                  = 0u;
+	g_wake_pad_mask = g_claimed = 0u;
+	g_pads_latched = g_pads_boot_latched = 0u;
+	g_arm_pads_rc                        = 0;
+	g_released_pads                      = 0u;
+	g_enter_fires                        = true;
+	g_enter_rc                           = 0;
 	memset(g_regs_at_enter, 0, sizeof(g_regs_at_enter));
 	g_set_calls = 0;
 	memset(&g_set, 0, sizeof(g_set));
@@ -1595,6 +1654,143 @@ ZTEST(power_alif_se, test_entry_gets_the_pad_flag_only_for_rtc_wakes)
 	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 3000u, NULL), ALP_OK);
 	zassert_true(g_enter_rtc_int);
+}
+
+/* ---- LPGPIO wake pads (alp,power-wake-gpios) ---------------------------------- */
+
+#define PAD2 BIT(2)
+#define PAD3 BIT(3)
+
+ZTEST(power_alif_se, test_gpio_wake_is_advertised_only_for_free_named_pads)
+{
+	uint32_t caps = 0;
+
+	zassert_ok(se_open(&g_state, NULL, &caps));
+	zassert_equal(caps & ALP_POWER_WAKE_GPIO, 0u, "no node: not advertised");
+
+	g_wake_pad_mask = PAD2;
+	g_claimed       = 0x03u | PAD3; /* the SoM wires these, not P15_2 here */
+	zassert_ok(se_open(&g_state, NULL, &caps));
+	zassert_not_equal(caps & ALP_POWER_WAKE_GPIO, 0u);
+	zassert_not_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_STANDBY) & ALP_POWER_WAKE_GPIO,
+	                  0u);
+
+	g_claimed = PAD2;
+	zassert_ok(se_open(&g_state, NULL, &caps));
+	zassert_equal(caps & ALP_POWER_WAKE_GPIO, 0u, "a SoM-wired pad is refused");
+}
+
+ZTEST(power_alif_se, test_a_somwired_pad_refuses_the_whole_set)
+{
+	g_wake_pad_mask     = PAD2 | PAD3;
+	g_claimed           = PAD3;
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_NOSUPPORT);
+	assert_no_side_effect();
+}
+
+ZTEST(power_alif_se, test_gpio_wake_builds_the_wake_event_per_line)
+{
+	g_wake_pad_mask     = PAD2 | BIT(5);
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_OK);
+	zassert_equal(g_set.wakeup_events,
+	              ALP_AIPM_GEN2_WE_LPGPIO2 | ALP_AIPM_GEN2_WE_LPGPIO5,
+	              "line n is WE_LPGPIO<n>, bit 16 + n");
+	zassert_equal(g_set.ewic_cfg, ALP_AIPM_GEN2_EWIC_VBAT_GPIO);
+	zassert_equal(g_enter_pads, PAD2 | BIT(5));
+	zassert_false(g_enter_rtc_int, "the RV-3028 pad stays off for a pad-only wake");
+	zassert_equal(g_enter_lptimer_ticks, 0u);
+}
+
+ZTEST(power_alif_se, test_gpio_wake_joins_a_timed_wake)
+{
+	g_wake_pad_mask     = PAD2;
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+	zassert_equal(g_set.wakeup_events, ALP_AIPM_GEN2_WE_LPTIMER0 | ALP_AIPM_GEN2_WE_LPGPIO2);
+	zassert_equal(g_set.ewic_cfg, ALP_AIPM_GEN2_EWIC_VBAT_TIMER | ALP_AIPM_GEN2_EWIC_VBAT_GPIO);
+}
+
+ZTEST(power_alif_se, test_the_record_carries_the_armed_pads)
+{
+	g_wake_pad_mask     = PAD2;
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_OK);
+	zassert_not_equal(g_rec_at_set.armed_hw & ALP_SOM_ARM_LPGPIO, 0u);
+	zassert_equal((g_rec_at_set.armed_hw >> ALP_SOM_ARM_PADS_SHIFT) & ALP_SOM_PADS_MASK, PAD2);
+	zassert_not_equal(g_rec_at_set.armed & ALP_POWER_WAKE_GPIO, 0u);
+}
+
+ZTEST(power_alif_se, test_pad_arm_failure_unwinds_before_the_se_call)
+{
+	g_wake_pad_mask     = PAD2;
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	g_arm_pads_rc       = ALP_ERR_IO;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_IO);
+	zassert_equal(g_enter_count, 0u);
+	zassert_equal(g_set_calls, 0u, "the SE is never written");
+	zassert_equal(ev_count(EV_RESTORE), 1u, "the domains are put back");
+}
+
+ZTEST(power_alif_se, test_an_already_asserted_pad_is_refused_and_everything_put_back)
+{
+	g_wake_pad_mask     = PAD2;
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	g_enter_rc          = ALP_ERR_BUSY; /* the entry saw the pad at its asserted level */
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_BUSY);
+	zassert_equal(ev_count(EV_DISARM_WAKE_PADS), 1u);
+	zassert_equal(ev_count(EV_RESTORE), 1u);
+	zassert_equal(g_set_calls, 2u, "the profile is written, then written back");
+}
+
+ZTEST(power_alif_se, test_an_aborted_sleep_reports_gpio_and_consumes_the_edge)
+{
+	alp_power_wake_info_t info;
+
+	g_wake_pad_mask     = PAD2;
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, &info), ALP_OK);
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_GPIO);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+	zassert_equal(g_released_pads, PAD2, "the latched edge is acknowledged");
+	zassert_equal(g_pads_latched, 0u);
+}
+
+ZTEST(power_alif_se, test_decode_early_reads_the_boot_snapshot_not_the_live_register)
+{
+	alp_som_pd_record_t rec = {
+		.armed_hw = ALP_SOM_ARM_LPGPIO | ((PAD2 | PAD3) << ALP_SOM_ARM_PADS_SHIFT),
+	};
+
+	/* gpio_dw's init has already cleared the live register (g_pads_latched == 0); only the
+	 * PRE_KERNEL_1 snapshot still holds the edge. */
+	g_pads_latched      = 0u;
+	g_pads_boot_latched = PAD3;
+	alp_som_power_wake_decode_early(&rec);
+	zassert_equal(rec.wake_source, ALP_POWER_WAKE_GPIO);
+
+	/* and the other way round: a live edge that the snapshot never saw is not a boot wake */
+	rec = (alp_som_pd_record_t){
+		.armed_hw = ALP_SOM_ARM_LPGPIO | (PAD2 << ALP_SOM_ARM_PADS_SHIFT),
+	};
+	g_pads_latched      = PAD2;
+	g_pads_boot_latched = 0u;
+	alp_som_power_wake_decode_early(&rec);
+	zassert_equal(rec.wake_source, 0u);
+
+	/* a snapshot edge on a pad this cycle never armed proves nothing */
+	g_pads_boot_latched = PAD3;
+	rec                 = (alp_som_pd_record_t){
+		                .armed_hw = ALP_SOM_ARM_LPGPIO | (PAD2 << ALP_SOM_ARM_PADS_SHIFT),
+	};
+	alp_som_power_wake_decode_early(&rec);
+	zassert_equal(rec.wake_source, 0u);
+
+	/* a cycle that armed no pad never reports GPIO */
+	rec = (alp_som_pd_record_t){ .armed_hw = ALP_SOM_ARM_LPTIMER };
+	alp_som_power_wake_decode_early(&rec);
+	zassert_equal(rec.wake_source, 0u);
 }
 
 ZTEST(power_alif_se, test_entry_failure_unwinds)

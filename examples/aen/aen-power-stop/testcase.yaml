@@ -63,6 +63,18 @@ tests:
       - power
     build_only: true   # compile + link check of the variant; the behaviour is a bench run.
 
+  alp_sdk.examples.aen.power_stop.wake_pad.aen:
+    extra_dtc_overlay_files:
+      - variants/g-wake-pad.overlay
+    platform_allow:
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - power
+    build_only: true   # compile + link check of the wake-pad branch; the behaviour is a bench run.
+
   alp_sdk.examples.aen.power_stop.wake_timing.aen:
     extra_conf_files:
       - variants/w-wake-timing.conf

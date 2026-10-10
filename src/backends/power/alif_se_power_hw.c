@@ -36,6 +36,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/counter.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/pinctrl.h>
 #include <zephyr/irq.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/sys_io.h>
@@ -505,6 +506,30 @@ static void comb_isr(const void *arg)
 	irq_disable(HW_LPGPIO_COMB_IRQ);
 }
 
+/* The same preparation as the vendor's pm_prepare_lpgpio_nvic_mask(): the combined interrupt is
+ * the one that reaches the EWIC.  Line 57 is "57 LPGPIO combined interrupt request" for the E8
+ * M55-HE (Alif DFP Device/soc/AE822FA0E5597/include/rtss_he/soc.h:155, LPGPIO_COMB_IRQ_IRQn;
+ * the same constant as zephyr_alif soc/alif/common/rtss/power.c).  Shared by the RV-3028 pad
+ * and the application wake pads; idempotent. */
+static void comb_irq_open_locked(void)
+{
+	IRQ_CONNECT(HW_LPGPIO_COMB_IRQ, 3, comb_isr, NULL, 0);
+	if (!irq_is_enabled(HW_LPGPIO_COMB_IRQ)) {
+		NVIC_ClearPendingIRQ(HW_LPGPIO_COMB_IRQ);
+		irq_enable(HW_LPGPIO_COMB_IRQ);
+		_comb_irq_opened_by_us = true;
+	}
+}
+
+static void comb_irq_close(void)
+{
+	if (_comb_irq_opened_by_us) {
+		irq_disable(HW_LPGPIO_COMB_IRQ);
+		NVIC_ClearPendingIRQ(HW_LPGPIO_COMB_IRQ);
+		_comb_irq_opened_by_us = false;
+	}
+}
+
 /* Interrupt lock held (PRIMASK set) by the caller. */
 static alp_status_t rtc_int_open_locked(void)
 {
@@ -521,17 +546,7 @@ static alp_status_t rtc_int_open_locked(void)
 	if (gpio_pin_interrupt_configure_dt(spec, GPIO_INT_EDGE_FALLING) != 0) {
 		return ALP_ERR_IO;
 	}
-	/* Same preparation as the vendor's pm_prepare_lpgpio_nvic_mask(): the combined
-	 * interrupt is the one that reaches the EWIC.  Line 57 is
-	 * "57 LPGPIO combined interrupt request" for the E8 M55-HE (Alif DFP
-	 * Device/soc/AE822FA0E5597/include/rtss_he/soc.h:155, LPGPIO_COMB_IRQ_IRQn;
-	 * the same constant as zephyr_alif soc/alif/common/rtss/power.c). */
-	IRQ_CONNECT(HW_LPGPIO_COMB_IRQ, 3, comb_isr, NULL, 0);
-	if (!irq_is_enabled(HW_LPGPIO_COMB_IRQ)) {
-		NVIC_ClearPendingIRQ(HW_LPGPIO_COMB_IRQ);
-		irq_enable(HW_LPGPIO_COMB_IRQ);
-		_comb_irq_opened_by_us = true;
-	}
+	comb_irq_open_locked();
 
 	/* The RV-3028 countdown / alarm was started BEFORE this edge interrupt existed,
 	 * and an edge that happened in between is gone.  /INT is held low until the flag
@@ -557,12 +572,204 @@ void alif_se_hw_rtc_int_disarm(void)
 	if (spec != NULL) {
 		(void)gpio_pin_interrupt_configure_dt(spec, GPIO_INT_DISABLE);
 	}
-	if (_comb_irq_opened_by_us) {
-		irq_disable(HW_LPGPIO_COMB_IRQ);
-		NVIC_ClearPendingIRQ(HW_LPGPIO_COMB_IRQ);
-		_comb_irq_opened_by_us = false;
-	}
+	comb_irq_close();
 }
+
+/* ---- Application LPGPIO wake pads (alp,power-wake-gpios) -------------------- */
+
+/* The application names its wake pads in the devicetree, so no public symbol is needed:
+ *
+ *	wake-pads {
+ *		compatible = "alp,power-wake-gpios";
+ *		wake-gpios = <&lpgpio 2 GPIO_ACTIVE_LOW>;
+ *		pinctrl-0 = <&pinctrl_wake_pads>;
+ *		pinctrl-names = "default";
+ *	};
+ *
+ * Every entry must be a pad of the lpgpio controller (P15_n = line n): only the LPGPIO island
+ * is in the VBAT domain, which stays powered through STOP.  Line n is wake event WE_LPGPIO<n>
+ * (hal_alif se_services/include/aipm.h:320-327, bit 16 + n; the Alif DFP demo_pm.c:751 pairs
+ * "LPGPIO P15_4" with WE_LPGPIO4) and reaches the EWIC through the EWIC_VBAT_GPIO group.
+ *
+ * Armed as an EDGE to the asserted level (Zephyr GPIO_INT_EDGE_TO_ACTIVE: the polarity flag of
+ * the devicetree entry decides falling or rising), as the vendor does for its joyswitch pad
+ * (demo_pm.c:359-361: ARM_GPIO_IRQ_SENSITIVE_EDGE | ARM_GPIO_IRQ_POLARITY_LOW).  The GPIO block
+ * latches the edge in GPIO_RAW_INTSTATUS until it is acknowledged through GPIO_PORTA_EOI, which
+ * is how the wake decode learns which pad fired.  Register offsets: Alif DFP
+ * Device/soc/AE822FA0E5597/include/rtss_he/soc.h:1570-1578 (LPGPIO_Type, base 0x42002000 at
+ * soc.h:3675).
+ *
+ * Not done: the DW debounce filter (GPIO_DEBOUNCE, soc.h:1576; the DFP's gpio_enable_debounce(),
+ * drivers/include/gpio.h:351-353).  It needs the debounce clock (GPIO_DB_CKEN, RTSS_HE_LPPERI_CKEN
+ * [9:8]) to keep running through the SE's STOP profile, which nothing in the DFP states. */
+#if DT_HAS_COMPAT_STATUS_OKAY(alp_power_wake_gpios)
+#define HW_WPAD_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(alp_power_wake_gpios)
+
+#define HW_WPAD_SPEC(n, p, i) GPIO_DT_SPEC_GET_BY_IDX(n, p, i)
+#define HW_WPAD_BIT(n, p, i)  BIT(DT_GPIO_PIN_BY_IDX(n, p, i))
+#define HW_WPAD_CHECK(n, p, i) \
+	BUILD_ASSERT(DT_SAME_NODE(DT_GPIO_CTLR_BY_IDX(n, p, i), DT_NODELABEL(lpgpio)), \
+	             "alp,power-wake-gpios entries must be pads of the lpgpio controller (P15_n)"); \
+	BUILD_ASSERT(DT_GPIO_PIN_BY_IDX(n, p, i) < 8, "the LPGPIO island has eight lines");
+
+DT_FOREACH_PROP_ELEM(HW_WPAD_NODE, wake_gpios, HW_WPAD_CHECK)
+
+static const struct gpio_dt_spec _wpad[] = {
+	DT_FOREACH_PROP_ELEM_SEP(HW_WPAD_NODE, wake_gpios, HW_WPAD_SPEC, (, ))
+};
+#define HW_WPAD_MASK (DT_FOREACH_PROP_ELEM_SEP(HW_WPAD_NODE, wake_gpios, HW_WPAD_BIT, (|)))
+
+PINCTRL_DT_DEFINE(HW_WPAD_NODE);
+
+#define HW_LPGPIO_BASE        DT_REG_ADDR(DT_NODELABEL(lpgpio))
+#define HW_LPGPIO_INTEN       (HW_LPGPIO_BASE + 0x30u)
+#define HW_LPGPIO_RAW_INTSTAT (HW_LPGPIO_BASE + 0x44u)
+#define HW_LPGPIO_EOI         (HW_LPGPIO_BASE + 0x4Cu)
+
+static bool wpads_ready(void)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(_wpad); ++i) {
+		if (!device_is_ready(_wpad[i].port)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+uint32_t alif_se_hw_wake_pad_mask(void)
+{
+	return wpads_ready() ? (uint32_t)HW_WPAD_MASK : 0u;
+}
+
+/* What the GPIO block latched after the WFI, taken before the pads are disarmed: the
+ * individual-line ISR (which acknowledges the edge) may run as soon as PRIMASK is restored. */
+static uint32_t _wfi_pads_seen;
+
+alp_status_t alif_se_hw_wake_pads_arm(void)
+{
+	if (!wpads_ready()) {
+		return ALP_ERR_NOT_READY;
+	}
+	lpgpio_clock_ensure();
+	/* The pinctrl group enables the pad's input buffer and pull (the vendor demo sets
+	 * PADCTRL_READ_ENABLE | PADCTRL_DRIVER_DISABLED_PULL_UP on its wake pad, demo_pm.c:359-362). */
+	if (pinctrl_apply_state(PINCTRL_DT_DEV_CONFIG_GET(HW_WPAD_NODE), PINCTRL_STATE_DEFAULT) != 0) {
+		return ALP_ERR_IO;
+	}
+	for (size_t i = 0; i < ARRAY_SIZE(_wpad); ++i) {
+		if (gpio_pin_configure_dt(&_wpad[i], GPIO_INPUT) != 0) {
+			return ALP_ERR_IO;
+		}
+	}
+	sys_write32(HW_WPAD_MASK, HW_LPGPIO_EOI); /* a stale latched edge is not this cycle's wake */
+	return ALP_OK;
+}
+
+/* Interrupt lock held (PRIMASK set) by the caller. */
+static alp_status_t wpads_open_locked(void)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(_wpad); ++i) {
+		if (gpio_pin_interrupt_configure_dt(&_wpad[i], GPIO_INT_EDGE_TO_ACTIVE) != 0) {
+			return ALP_ERR_IO;
+		}
+	}
+	comb_irq_open_locked();
+	/* As for the RV-3028 pad: an edge before the interrupt existed is gone, so a pad that
+	 * already reads asserted is a wake that happened (BUSY); an unreadable one is refused. */
+	for (size_t i = 0; i < ARRAY_SIZE(_wpad); ++i) {
+		int level = gpio_pin_get_dt(&_wpad[i]);
+
+		if (level > 0) {
+			return ALP_ERR_BUSY;
+		}
+		if (level < 0) {
+			return ALP_ERR_IO;
+		}
+	}
+	return ALP_OK;
+}
+
+void alif_se_hw_wake_pads_disarm(void)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(_wpad); ++i) {
+		(void)gpio_pin_interrupt_configure_dt(&_wpad[i], GPIO_INT_DISABLE);
+	}
+	comb_irq_close();
+}
+
+uint32_t alif_se_hw_wake_pads_fired(uint32_t pads)
+{
+	pads &= 0xFFu;
+	return (_wfi_pads_seen | sys_read32(HW_LPGPIO_RAW_INTSTAT)) & pads;
+}
+
+/* Runtime path: disarm has already disabled the pads' interrupts through the driver. */
+void alif_se_hw_wake_pads_release(uint32_t pads)
+{
+	sys_write32(pads & 0xFFu, HW_LPGPIO_EOI);
+}
+
+/* LPGPIO RAW_INTSTATUS as the SE's wake left it.  gpio_dw's init (PRE_KERNEL_1,
+ * CONFIG_GPIO_INIT_PRIORITY) writes INTEN = 0 and PORTA_EOI = ~0 (zephyr drivers/gpio/gpio_dw.c:
+ * 460-461), so the latched edge is gone by the time the POST_KERNEL wake decode runs.  Capture it
+ * at priority 0, ahead of that init. */
+BUILD_ASSERT(CONFIG_GPIO_INIT_PRIORITY > 0,
+             "the wake-pad snapshot (priority 0) must precede gpio_dw");
+
+static uint32_t _boot_pads_latched;
+
+static int wpads_boot_snapshot(void)
+{
+	lpgpio_clock_ensure();
+	_boot_pads_latched = sys_read32(HW_LPGPIO_RAW_INTSTAT) & 0xFFu;
+	return 0;
+}
+SYS_INIT(wpads_boot_snapshot, PRE_KERNEL_1, 0);
+
+uint32_t alif_se_hw_wake_pads_boot_latched(void)
+{
+	return _boot_pads_latched;
+}
+
+#else /* no alp,power-wake-gpios node */
+
+static uint32_t _wfi_pads_seen;
+
+uint32_t alif_se_hw_wake_pad_mask(void)
+{
+	return 0u;
+}
+
+alp_status_t alif_se_hw_wake_pads_arm(void)
+{
+	return ALP_ERR_NOT_READY;
+}
+
+static alp_status_t wpads_open_locked(void)
+{
+	return ALP_ERR_NOT_READY;
+}
+
+void alif_se_hw_wake_pads_disarm(void)
+{
+}
+
+uint32_t alif_se_hw_wake_pads_fired(uint32_t pads)
+{
+	(void)pads;
+	return 0u;
+}
+
+void alif_se_hw_wake_pads_release(uint32_t pads)
+{
+	(void)pads;
+}
+
+uint32_t alif_se_hw_wake_pads_boot_latched(void)
+{
+	return 0u;
+}
+#endif
 
 /* ---- EWIC subsystem-off entry ---------------------------------------------- */
 
@@ -608,7 +815,7 @@ const char *alif_se_hw_enter_reason(void)
 	return _enter_reason;
 }
 
-alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
+alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t pads, uint32_t lptimer_ticks)
 {
 	uint32_t     orig_ctrl    = sys_read32(HW_RTSS_HE_CTRL);
 	uint32_t     orig_cppwr   = ICB->CPPWR;
@@ -640,11 +847,16 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 	__set_BASEPRI(0);
 
 	_wfi_lptimer_fired = false;
+	_wfi_pads_seen     = 0u;
 	_enter_reason      = "int_pad";
 	if (rtc_int) {
 		armed = rtc_int_open_locked();
 	}
 	_enter_reason = (armed == ALP_ERR_BUSY) ? "rtc_int_already_asserted" : "int_pad";
+	if (armed == ALP_OK && pads != 0u) {
+		armed         = wpads_open_locked();
+		_enter_reason = (armed == ALP_ERR_BUSY) ? "wake_pad_already_asserted" : "wake_pad";
+	}
 	/* The LPTIMER is armed LAST, here, so no SE call, readback or printk can outlast it. */
 	if (armed == ALP_OK && lptimer_ticks != 0u) {
 		armed         = wake_timer_arm_locked(lptimer_ticks);
@@ -661,6 +873,9 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 			alif_se_hw_wake_timer_disarm();
 		}
 		alif_se_hw_rtc_int_disarm();
+		if (pads != 0u) {
+			alif_se_hw_wake_pads_disarm();
+		}
 		DWT->CTRL  = orig_dwt; /* the arm turned the cycle counter on */
 		DCB->DEMCR = orig_demcr;
 		__set_BASEPRI(orig_basepri);
@@ -706,12 +921,16 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 	/* First thing after the WFI, interrupts still off: which source ended it.  IRQ 60 (the
 	 * LPTIMER, bit 28 of ISPR1) pending, or the channel's own INTSTATUS bit. */
 	_wfi_lptimer_fired = wfi_timer_seen();
+	_wfi_pads_seen     = (pads != 0u) ? alif_se_hw_wake_pads_fired(pads) : 0u;
 
 	/* A wake source fired before power was removed.  Put everything back, the wake
 	 * pad first, while interrupts are still off. */
 	SCB->SCR &= ~SCB_SCR_SLEEPDEEP_Msk;
 	sys_write32(orig_ctrl, HW_RTSS_HE_CTRL); /* the WIC bits and COLD_WAKEUP as found */
 	alif_se_hw_rtc_int_disarm();
+	if (pads != 0u) { /* else the app's own interrupt on a pad is not ours to disable */
+		alif_se_hw_wake_pads_disarm();
+	}
 
 	MEMSYSCTL->MSCR |= orig_mscr & (MEMSYSCTL_MSCR_ICACTIVE_Msk | MEMSYSCTL_MSCR_DCACTIVE_Msk);
 	SCB->CCR      = orig_ccr;

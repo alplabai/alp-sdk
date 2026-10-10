@@ -177,6 +177,18 @@ def find_problems(root: Path) -> list[str]:
         if key and not any(_dig(p.get("on_module") or {}, key) is not None for p in presets):
             problems.append(f"{where}: presence.on_module_key {key!r} resolves in "
                             "no E1M-AEN* SoM preset")
+
+    for ent in doc.get("wired_lpgpio_pads") or []:
+        sig = ent.get("signal", "?")
+        where = f"{LINKS_REL}: wired_lpgpio_pads.{sig}"
+        src = ent.get("source") or {}
+        row_pad = _tsv_pad(root, src.get("file", ""), src.get("signal", "")) \
+            if src.get("file") and (root / TSV_DIR_REL / src["file"]).is_file() else None
+        if row_pad is None:
+            problems.append(f"{where}: no row {src.get('signal')!r} with a pad in {src.get('file')}")
+        elif row_pad != ent.get("silicon_pad"):
+            problems.append(f"{where}: silicon_pad {ent.get('silicon_pad')} but "
+                            f"{src['file']} row {src['signal']} says {row_pad}")
     return problems
 
 
