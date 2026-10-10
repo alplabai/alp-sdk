@@ -250,7 +250,7 @@ banner covering `GD32_DPIDR` too; that banner cited
 `docs/aen-bench-bringup.md`, which does not mention the GD32 at all,
 and is now hedged (`scripts/bench/aen/bench-env.sh:394-397`).
 
-**Required step on the alplab-gw bench: read the DPIDR by hand before
+**Required step on the Linux bench: read the DPIDR by hand before
 flashing, and abort on a match to either of two known-wrong boards.**
 The GD32 probe (USB path `3-4.2`) and the AEN E8 probe (USB path
 resolved per-board from labgrid, e.g. `labgrid-client -p <your-bench-place>

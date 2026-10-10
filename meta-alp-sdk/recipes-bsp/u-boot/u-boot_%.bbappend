@@ -119,7 +119,8 @@ SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if bb.utils.to_boolean
 # why those vendor hunks fuzz against ALP's context.
 SRC_URI:append:rzv2n-family = "${@' file://0003-rzv2n-dev-ALP-E1M-4gb-memory-tier.patch' if d.getVar('MACHINE') in ('e1m-v2n103-a55', 'e1m-v2m103-a55') else ''}"
 
-# 0004 (DEEPX rail bring-up): board_late_init() sequences the on-module
+# 0004 (DEEPX rail bring-up): board_late_init() first drives M1_RESET (PA6)
+# low, then sequences the on-module
 # DA9292 PMIC's CH2 to 0.75V and confirms power-good BEFORE the 0001 mux/
 # M1_RESET-release step is allowed to run -- U-Boot is the sole writer of
 # the DA9292 and the sole driver of P64 (DEEPX_CORE_0P75_EN) / P65

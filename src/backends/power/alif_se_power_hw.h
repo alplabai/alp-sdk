@@ -98,6 +98,10 @@ uint32_t alif_se_hw_lprtc_ccvr(void);
  *  on it; it is a function so the host test can drive both cores from one binary. */
 bool alif_se_hw_core_is_hp(void);
 
+/** Raw LPRTC register at byte offset @p off (CCR 0x0C, CPSR 0x20, CPCVR 0x24); no clock
+ *  enable. */
+uint32_t alif_se_hw_lprtc_read(unsigned off);
+
 /** This image's vector table base (SCB->VTOR), for the vendor-style OFF profile bench
  *  variant. */
 uint32_t alif_se_hw_vtor_read(void);

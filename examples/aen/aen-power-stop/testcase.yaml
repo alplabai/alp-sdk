@@ -29,8 +29,8 @@ tests:
 
   # The M55-HP builds of the same backend (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP): the
   # HP-only branches (own AON registers, 400 MHz restore profile, STANDBY / TCM-retention /
-  # TCM-boot refusals) are covered on native_sim by tests/unit/power_alif_se.  BUILT, NOT
-  # BENCH-VERIFIED.
+  # TCM-boot refusals) are covered on native_sim by tests/unit/power_alif_se.  STOP is
+  # bench-proven on the AEN803 HP with only the HP booted (see the README).
   alp_sdk.examples.aen.power_stop.aen.hp:
     platform_allow:
       - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
@@ -40,4 +40,52 @@ tests:
       - example
       - aen
       - power
-    build_only: true   # not bench-verified on the HP yet.
+    build_only: true   # compile + link check; the behaviour is a bench run.
+
+  alp_sdk.examples.aen.power_stop.standby.aen:
+    extra_conf_files:
+      - variants/s-standby.conf
+    platform_allow:
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - power
+    build_only: true   # compile + link check of the variant; the behaviour is a bench run.
+
+  alp_sdk.examples.aen.power_stop.tcm_retain.aen:
+    extra_conf_files:
+      - variants/t-tcm-retain.conf
+    platform_allow:
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - power
+    build_only: true   # compile + link check of the variant; the behaviour is a bench run.
+
+  alp_sdk.examples.aen.power_stop.tcm_retain_128k.aen:
+    extra_conf_files:
+      - variants/t-tcm-retain-128k.conf
+    platform_allow:
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - power
+    build_only: true   # compile + link check of the variant; the behaviour is a bench run.
+
+  alp_sdk.examples.aen.power_stop.wake_timing.aen:
+    extra_conf_files:
+      - variants/w-wake-timing.conf
+    platform_allow:
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - power
+    build_only: true   # compile + link check of the variant; the behaviour is a bench run.

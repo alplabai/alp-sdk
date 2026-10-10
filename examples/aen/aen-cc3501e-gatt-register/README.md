@@ -77,12 +77,12 @@ silicon, the bench-runner needs:
   `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` and flashed to the
   E1M-AEN801's Alif M55-HE, per the two-J-Link recipe in
   `aen-cc3501e-bringup`'s README.
-- **CC3501E firmware**: the branch's `feat/480-cc3501e-gatt-register-fw`
-  firmware image (built from `firmware/cc3501e` with `build_ti.sh`, per
-  `reference_cc3501e_ti_build_local`), flashed to the on-module CC3501E --
-  this app exercises the NEW `BLE_GATT_REGISTER` (0x38) firmware handler,
-  so an older firmware image will answer with the old stub behaviour, not
-  the fix under test.
+- **CC3501E firmware**: a `cc3501e-bridge-firmware` image
+  (`alplabai/cc3501e-bridge-firmware`, `ti/build_ti.sh`; the firmware
+  lives in its own repository, ADR 0031) that includes the
+  `BLE_GATT_REGISTER` (0x38) handler, flashed to the on-module CC3501E --
+  this app exercises that handler, so an older firmware image will answer
+  with the old stub behaviour, not the behaviour under test.
 - Read `ram_console_buf` over SWD for the `RESULT PASS:` / `RESULT FAIL:`
   line (no serial console on this rig).
 
