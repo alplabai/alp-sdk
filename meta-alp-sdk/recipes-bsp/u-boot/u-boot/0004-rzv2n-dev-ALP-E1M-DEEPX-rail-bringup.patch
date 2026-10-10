@@ -149,7 +149,7 @@ index 7a9885f7..f1807399 100644
 +	  Set via meta-alp-sdk's deepx-rail.cfg for the V2M MACHINEs only;
 +	  leave off (default) for the V2N base build.
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
-index a20ccae8..689c3062 100644
+index a20ccae8..753039d0 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
 @@ -284,6 +284,7 @@ static void board_usb_init(void)
@@ -160,7 +160,7 @@ index a20ccae8..689c3062 100644
  #define ALP_PM_OUTPUT		0x2
  
  static void alp_gpio_output(unsigned int bank, unsigned int pin, int value)
-@@ -360,9 +361,364 @@ static void alp_deepx_pcie_bringup(void)
+@@ -360,10 +361,365 @@ static void alp_deepx_pcie_bringup(void)
  	printf("ALP: DEEPX DX-M1 PCIe path enabled (mux on, reset released)\n");
  }
  
@@ -526,6 +526,7 @@ index a20ccae8..689c3062 100644
 +		alp_deepx_reset_release();
  
  	return 0;
+ }
 -- 
 2.43.0
 
