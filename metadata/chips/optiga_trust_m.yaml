@@ -40,7 +40,6 @@ kconfig:
 
 families:
   - aen
-  - imx93
   - v2n
   - v2n-m1
 

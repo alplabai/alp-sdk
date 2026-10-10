@@ -40,12 +40,23 @@
  *     this PORTABLE header, on examples/aen/aen-isp-ov5647-viewfinder --
  *     30/30 colour frames captured with AE+AWB on E1M-AEN803 + OV5647
  *     (runs 156-166).
+ *   - **yocto_drv** (silicon_ref `"*"`, priority 100, Linux/Yocto
+ *     only): V4L2 + media-controller, SoC-agnostic.  `camera_id` N
+ *     is the device-tree alias `alp-camera<N>` (e.g.
+ *     `aliases { alp-camera0 = &sensor; };`); the sensor -> CSI-2 ->
+ *     capture-node chain is discovered from the media graph, so any
+ *     sensor with a mainline V4L2 subdev driver works with no
+ *     per-sensor code.  Supports ALP_PIXFMT_GREY8 / RAW8 / RAW10 only
+ *     (colour formats are ALP_ERR_NOSUPPORT).  RAW10 bench-verified
+ *     on E1M-V2M103 with an IMX296LQ (30.00 fps at a 30 fps request); RAW8
+ *     and the direct Y8 path are not.  Known limits and the static-link
+ *     caveat: docs/v2n-camera-csi.md.
  *   - **zephyr_stub** (silicon_ref `"*"`, priority 0): tracked
  *     fallback for silicon none of the above cover -- every op
  *     returns ALP_ERR_NOT_IMPLEMENTED (issue #223).
  *
- * On Yocto and baremetal only `zephyr_stub` is linked today, so
- * every call there returns ALP_ERR_NOT_IMPLEMENTED / NULL.
+ * On baremetal only `zephyr_stub` is linked today, so every call
+ * there returns ALP_ERR_NOT_IMPLEMENTED / NULL.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      v0.5 added alp_camera_configure_isp -- surface tentative pending real hardware feedback.  Base capture path stable; ISP block experimental.
@@ -131,6 +142,15 @@ typedef struct {
  *         requested @c camera_id, OR the aliased device -- or a device
  *         it depends on, e.g. an absent sensor that failed its own
  *         chip-ID check at init -- never reached device_is_ready()),
+ *         ALP_ERR_NOT_READY (yocto_drv: no `alp-camera<N>` DT alias,
+ *         or no matching sensor/capture chain in any media device),
+ *         ALP_ERR_NOSUPPORT (yocto_drv: colour pixel format, or the
+ *         sensor offers no media-bus code for the requested format),
+ *         ALP_ERR_INVAL (yocto_drv: width/height is not a size the
+ *         sensor produces natively, or a pipeline element adjusted the
+ *         requested format; an out-of-range fps is NOT a failure, it
+ *         settles on the nearest rate), ALP_ERR_IO / ALP_ERR_NOMEM
+ *         (yocto_drv: V4L2 ioctl failure, buffer allocation or mmap),
  *         or ALP_ERR_NOT_IMPLEMENTED (zephyr_stub, on silicon with no
  *         real backend).
  */

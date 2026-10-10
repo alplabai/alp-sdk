@@ -80,6 +80,12 @@ _alp_pg_check(zephyr/0004 zephyr "${ZEPHYR_BASE}"
   drivers/video/imx335.c IMX335_LINK_FREQ_HZ
   CONFIG_VIDEO_IMX335)
 
+# IMX335: the first register write after power-up is polled for up to 1 s;
+# without it a cold power-up NACKs 0x3000 and the sensor stays NOT_READY.
+_alp_pg_check(zephyr/0006 zephyr "${ZEPHYR_BASE}"
+  drivers/video/imx335.c IMX335_POWER_UP_TIMEOUT_MS
+  CONFIG_VIDEO_IMX335)
+
 # ISP IMX335 AE envelope (hal_alif patch 0014 adds this header).
 _alp_pg_check(hal_alif/0014 alif "${ZEPHYR_ALIF_MODULE_DIR}"
   drivers/isp/isp_wrapper/inc/imx335_ae_envelope.h IMX335_AE_

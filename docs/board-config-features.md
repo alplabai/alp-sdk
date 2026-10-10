@@ -141,7 +141,7 @@ sysbuild.conf overlay with the corresponding `SB_CONFIG_*` lines
 for the underlying secure-boot contract.
 
 `method:` is optional and **the SoM family supplies its default** --
-AEN and N93 default to `mcuboot`, V2N and V2N-M1 to `none`, because on
+AEN defaults to `mcuboot`, V2N and V2N-M1 to `none`, because on
 the Renesas families U-Boot owns boot and the `boot:` block describes
 the U-Boot/FIT chain rather than sysbuild.  The sysbuild overlay is
 emitted only for a project that has at least one `os: zephyr` slice:
@@ -185,7 +185,7 @@ security than the schema claimed.  For an explicit `method: mcuboot`,
 `rsa3072` is rejected at emit time (sysbuild's RSA choice has no
 key-length knob); use `rsa2048` or `ecdsa_p256`/`ed25519`.  That
 refusal is scoped to the sysbuild path only -- `rsa2048`/`rsa3072`
-stay legal on V2N / i.MX 9, whose U-Boot/FIT signing never goes
+stay legal on V2N, whose U-Boot/FIT signing never goes
 through sysbuild.
 
 ### OTA (`ota:` -- Mender / MCUmgr)
@@ -324,7 +324,7 @@ unconditionally -- no `write_authority:` value makes a contained region
 eligible. A region OUTSIDE the aperture that the SoM preset authored
 itself needs `write_authority: customer_runtime` to land an IPC
 carve-out there. A region the loader DERIVED (SoC-level
-`memory_regions`, or the silicon-variant fallback, e.g. every V2N/V2M/NX9101
+`memory_regions`, or the silicon-variant fallback, e.g. every V2N/V2M
 row) needs no authority at all: it is RAM by construction. The legacy
 `carveout:` flag is honoured VERBATIM only where the derivation can't
 resolve an answer -- no aperture declared for this SoC (every non-Alif
@@ -358,8 +358,7 @@ value, and the remedy. An ABSENT `write_authority` on an authored region
 is refused too, but only where an on-die MRAM aperture resolves for the
 SoM (every Alif SoC/variant that declares `soc_flash_base:`) -- mirrors
 `carveout.py`'s own `_region_ipc_eligibility()` gate, which enforces the
-identical rule the same way; a no-op on every non-Alif SoM (V2N/V2M/
-NX9101), none of which author `write_authority` on a derived region in
+identical rule the same way; a no-op on every non-Alif SoM (V2N/V2M), none of which author `write_authority` on a derived region in
 the first place. `composite` -- the tag a whole-device alias like
 `mram_main` carries, meaning "consult the contained rows instead" -- is
 not an unconditional pass either: every OTHER `memory_map:` row that

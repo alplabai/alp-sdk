@@ -223,6 +223,178 @@ config ALP_SDK_POWER_PM_POLICY
 	  vanish); the zephyr_stub at priority 0 keeps alp_power_open
 	  succeeding so application setup code keeps linking unchanged.
 
+config ALP_SDK_SOM_POWER
+	bool "SoM power-domain runtime (quiesce / restore around STOP)"
+	depends on ALP_SDK_POWER && GPIO && PINCTRL
+	default y if DT_HAS_ALP_SOM_POWER_DOMAIN_ENABLED
+	select CRC
+	help
+	  Compile src/backends/power/som_power.c: the registry of on-module
+	  power domains (Wi-Fi/BLE coprocessor, Ethernet PHY, external flash
+	  and RAM, temperature sensor, RTC clock-out, backlight) built from the
+	  generated `alp,som-power-domain` devicetree nodes, the per-domain
+	  policy, the quiesce / restore pair the Alif STOP backend calls, and
+	  the early SYS_INIT that restores the domains after a STOP wake.
+
+	  Answers alp_power_domain_policy_set(), alp_power_domain_info() and
+	  alp_power_boot_wake_info() through the power-class vtable.  On a plain
+	  power-on reset the wake path finds no valid record and touches
+	  nothing.  Without this option those three calls return
+	  ALP_ERR_NOSUPPORT.  The node's pinctrl-0 state muxes every pad the
+	  layer drives, so it also needs CONFIG_GPIO and CONFIG_PINCTRL.
+
+config ALP_SDK_SOM_PD_WIFI_RAIL_OFF
+	bool "Allow gating the CC3501E supply (RAIL_OFF policy) around STOP"
+	depends on ALP_SDK_SOM_POWER
+	help
+	  Lets alp_power_domain_policy_set(ALP_POWER_DOMAIN_WIFI_BLE,
+	  ALP_POWER_DOMAIN_POLICY_RAIL_OFF) succeed: the quiesce then also pulls
+	  WIFI_EN low (after nRESET) and the restore raises it again.  Default
+	  off, and it should stay off on activated modules.
+
+	  HAZARD: on a unit with vendor_sbl_container_enable=1 a WIFI_EN cold
+	  cycle may never relaunch the CC3501E firmware.  The default Wi-Fi
+	  action (hold nRESET low, release it on wake) never touches the supply
+	  and has no such risk.  Without this option RAIL_OFF is refused with
+	  ALP_ERR_NOSUPPORT.
+
+config ALP_SDK_SOM_PD_WIFI_SETTLE_MS
+	int "CC3501E boot settle after nRESET release on a runtime restore (ms)"
+	depends on ALP_SDK_SOM_POWER
+	default 3500
+	help
+	  Blind wait, with no SPI clocking, after the default nRESET-release
+	  restore of the Wi-Fi/BLE domain.  3500 ms is cc3501e_hard_reset()'s
+	  boot settle (Puya double-boot plus crypto init).  The cold-boot wake
+	  path never waits; it leaves the settle to the bring-up code.
+
+config ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	bool "Bench-only retention counter in the BKRAM region"
+	depends on ALP_SDK_SOM_POWER
+	help
+	  Adds a small counter cell next to the wake record in the 4 KB Utility
+	  SRAM, so a bench image can prove BKRAM survives STOP without owning any
+	  of it.  BKRAM is reserved for the SDK; this exists for the bench example
+	  only and must stay off in a product build.
+
+config ALP_SDK_POWER_ALIF_SE
+	bool "Alif SE STOP / STANDBY power backend (E8 M55-HE, EXPERIMENTAL)"
+	depends on ALP_SDK_POWER && ALP_SDK_SOM_POWER
+	depends on HAS_ALIF_SE_SERVICES && SOC_AE822FA0E5597LS0_RTSS_HE
+	default n
+	help
+	  Compile src/backends/power/alif_se_power.c: alp_power_request_sleep()
+	  for STOP and STANDBY on the Alif Ensemble E8 M55-HE.  It builds a
+	  complete OFF profile for the Secure Enclave, quiesces the on-module
+	  domains, arms the wake source (the on-module RV-3028 on INT -> P15_0,
+	  or the LPTIMER for short intervals) and enters the EWIC subsystem-off
+	  sleep.  The wake is a COLD BOOT through the Secure Enclave; the call
+	  does not return, and the cause is read with alp_power_boot_wake_info().
+
+	  STOP is bench-proven on the E1M-AEN803 (U8h: LPTIMER, RV-3028 countdown
+	  and alarm wakes); STANDBY is not.  Off by default.  An image that gets the entry
+	  sequence wrong can stop at the Secure Enclave until the module is
+	  power-cycled; keep a way to restore the MRAM image before trying it.
+
+	  SLEEP and DEEP_SLEEP are forwarded to the pm_policy backend when that is
+	  built.  Needs CONFIG_DCACHE=n (the cache-clean loop hangs on this
+	  silicon); with the D-cache on, STOP is refused with ALP_ERR_NOSUPPORT.
+
+config ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS
+	bool "Re-apply the RUN profile at boot when the clock tree is not the running one"
+	depends on ALP_SDK_POWER_ALIF_SE
+	default y if BOARD_ALP_E1M_AEN803_M55_HE
+	help
+	  Default on for the E1M-AEN803 board only: that is the SoM it was measured on.  The
+	  E1M-AEN801 is unmeasured; set it to y there after a bench pass (without it a wake comes
+	  up with the SE-left RC clocks).
+
+	  A wake from STOP is a cold boot into whatever clock tree the Secure Enclave left:
+	  all-RC, i.e. UART5 at ~1/5 of its baud (23040 instead of 115200) and the kernel tick
+	  at half rate (bench U8c / U8d / U8g).  At PRE_KERNEL_1 (priority 46, after the SE
+	  service, before every peripheral) the backend checks the hardware state -- PLL not
+	  locked, or the PLL clock select not the running tree -- and, only then, calls
+	  se_service_set_run_cfg() with a complete explicit RUN profile (the vendor system_off
+	  sample does the same).  The profile uses the vendor power domains, names the Utility
+	  SRAM (gen2 BACKUP4K) in memory_blocks and re-asserts the BKRAM retention enables; the
+	  SDK's BKRAM data sits in a RAM shadow until the block passes a write/readback, and a
+	  sleep refuses (bkram_unusable) if it does not (bench U8e).
+	  Bench evidence (U8h, E1M-AEN803 on an E1M-EVK, three STOP cycles): on every wake boot
+	  the restore ran, BOOT diag w40 = 1 (locked and selected), the UART came up at 115200
+	  and BKRAM was live.  Measured on the AEN803 only; another SoM or silicon revision
+	  needs its own bench pass.
+	  TODO(#2784): evaluate hal_alif's CONFIG_ALIF_SE_DTS_RUN_PROFILE (the aipm-run
+	  devicetree node) instead of this hand-rolled profile.
+
+config ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER
+	bool "Allow STOP / STANDBY with a debugger attached (bench only)"
+	depends on ALP_SDK_POWER_ALIF_SE
+	help
+	  By default STOP / STANDBY is refused with ALP_ERR_BUSY while
+	  DHCSR.C_DEBUGEN is set: a connected debug port keeps PDDEBUG powered, so
+	  the subsystem never powers down and the sleep proves nothing (or hangs
+	  the probe).  Enable this for a bench run that sleeps under J-Link.
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_LPTIMER_MAX_MS
+	int "Bench only: longest wake_after_ms served by the LPTIMER (ms)"
+	depends on ALP_SDK_POWER_ALIF_SE && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	range 1000 60000
+	default 1000
+	help
+	  Longer intervals use the RV-3028 countdown.  Bench variant (iii) raises this so a
+	  5000 ms wake can be served by the LPTIMER and the interval compared.
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_FORCE_LFXO
+	bool "Bench only: select LFXO as the OFF profile's AON clock even when not confirmed"
+	depends on ALP_SDK_POWER_ALIF_SE && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	help
+	  Variant (iv) of the STOP bench: aon_clk_src = LFXO (with XTAL32K_CAP_CONT 63), the
+	  vendor sample's choice, instead of the LFRC the SES boot leaves selected.  Changes
+	  one thing against the default.  Never for a product build.
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_NO_VTOR_SELF
+	bool "Bench only: OFF profile keeps the live vtor_address (ablation)"
+	depends on ALP_SDK_POWER_ALIF_SE && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	help
+	  The product default writes vtor_address = SCB->VTOR (the vendor system_off sample's
+	  resume vector).  Bench U8h: STOP wakes 3 of 3 without it, so it is optional; it stays the
+	  default because the vendor sample does it.  This turns that one field off to ablate it.
+	  Default of the runtime knob alp_som_bench_knobs.vtor_self.  Never for a product build.
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_NO_MRAM_SERAM
+	bool "Bench only: OFF profile memory_blocks without MRAM and SERAM (ablation)"
+	depends on ALP_SDK_POWER_ALIF_SE && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	help
+	  The product default keeps MRAM | SERAM | BKRAM (plus any TCM bank) powered in STOP, the
+	  vendor MRAM-boot profile.  Bench U8h: with MRAM | SERAM off the SE reboots through the
+	  cold path instead of resuming (empty OFF profile on read-back, RET_CTRL 0x0002aaf0), so
+	  they are REQUIRED; this exists only to reproduce that.  A product build can not select it
+	  (and the backend refuses to send a profile without them).
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_STBY_76_8
+	bool "Bench only: OFF profile stby_clk_freq = 76.8 MHz for STOP too"
+	depends on ALP_SDK_POWER_ALIF_SE && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	help
+	  STOP normally carries SCALED_FREQ_RC_STDBY_0_075_MHZ; the vendor system_off sample
+	  uses 76.8 MHz.  Default of a runtime knob (alp_som_bench_knobs.stby_76_8).  Never for
+	  a product build.
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_FORCE_RESTORE
+	bool "Bench only: run the boot-time clock restore even when the clocks are healthy"
+	depends on ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	help
+	  Reproduces the restore's own side effects on a cold boot that never slept (bench
+	  U8e: set_run_cfg disturbed the Utility SRAM).  Never for a product build.
+
+config ALP_SDK_POWER_ALIF_SE_BENCH_RESTORE_LEGACY
+	bool "Bench only: restore with the old RUN profile (0x16d, no BACKUP4K, no re-assert)"
+	depends on ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS && ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	help
+	  The profile of c6de654ff, kept to reproduce the BKRAM loss of bench U8e.  The
+	  default restore uses the vendor power domains (PD_SYST | PD_SSE700_AON), names the
+	  Utility SRAM (gen2 BACKUP4K) in memory_blocks and re-asserts RET_CTRL bit 0 and
+	  VBAT_ANA_REG1 bit 8 afterwards.  Never for a product build.
+
 config ALP_SDK_POWER_EXT_RENESAS
 	bool "Compile the Renesas V2N power vendor-extension body"
 	depends on ALP_SDK_POWER

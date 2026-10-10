@@ -73,7 +73,9 @@ def _tree(tmp_path: Path, patched: bool):
         root = z if e["root"] == "ZEPHYR_BASE" else a
         f = root / e["file"]
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text((e["marker"] if patched else "upstream") + "\n", encoding="utf-8")
+        # Several patches can touch one file, so accumulate markers.
+        prev = f.read_text(encoding="utf-8") if f.exists() else ""
+        f.write_text(prev + (e["marker"] if patched else "upstream") + "\n", encoding="utf-8")
     return z, a
 
 

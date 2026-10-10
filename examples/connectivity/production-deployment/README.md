@@ -199,7 +199,7 @@ reboot.  Attestation heartbeats publish every 60 s regardless.
 
 Customer-side variants typically:
 
-- Fork this skeleton for V2N or i.MX 93 boards (`som.sku:` +
+- Fork this skeleton for V2N boards (`som.sku:` +
   `cores:` edits; the declarative blocks above stay portable).
 - Replace the Mender connection with a different OTA fabric
   (`ota.provider:` -- `mcumgr` support tracked in ADR 0009).

@@ -186,7 +186,7 @@ void stub_build_table(void)
 	for (uint32_t i = 0x020; i <= 0x023; i++) /* SRAM0: FB A/B, TF-A MHU0 window (never touched) */
 		t[i] = (i << 20) | SEC_NC;
 	t[0x024] = 0x02400000u | SEC_NC_X;   /* mailbox, tables, stub, stacks */
-	t[0x025] = 0x02500000u | SEC_WB_S_X; /* payload image + DL/bins/stacks */
+	t[0x025] = 0x02500000u | SEC_WB_S_X; /* payload image + stacks + gate, FB B's head */
 	t[0x026] = 0x02600000u | SEC_WB_S;
 	t[0x027] = SEC_FAULT;               /* TF-A RW 0x027DE000-0x027ED000 */
 	t[0x800] = 0x80000000u | SEC_WB_RO; /* MRAM: release payload source only */
@@ -227,6 +227,9 @@ static void launch(void)
 		return;
 	}
 	clear_fault();
+	/* A fresh, non-zero launch token for the payload's core-1 gate: the self-launch never
+	 * visits the park loop that used to be the only thing bumping it. */
+	m->stub_heartbeat0 = stub_next_token(m->stub_heartbeat0);
 	cache_sync_all(); /* DCCISW all levels, ICIALLU, BPIALL, DSB, ISB */
 	m->pad4[TR_STUB_T_JUMP] = cntvct_lo();
 	m->stub_state           = STUB_STATE_RUNNING;
@@ -295,7 +298,7 @@ void stub_main(void)
 	 * from before this boot is dropped rather than obeyed. The previous
 	 * boot's fault record survives in pad4[0..3] (MBOX_OFF_LAST_FAULT_*) when
 	 * the magic says the page was ours; cold SRAM is garbage, so zero then. */
-	uint32_t warm = m->magic == TR_MBOX_MAGIC;
+	uint32_t warm = (uint32_t)tr_mbox_stub_page_init(m); /* cold or old-version: cleared */
 	m->pad4[0]    = warm ? m->fault_core : 0;
 	m->pad4[1]    = warm ? m->fault_code : 0;
 	m->pad4[2]    = warm ? m->lr : 0;

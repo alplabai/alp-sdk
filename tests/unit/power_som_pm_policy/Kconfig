@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+mainmenu "SoM power domains through the pm_policy backend"
+
+# native_sim has no power-management support of its own, so CONFIG_PM cannot be
+# selected there and the pm_policy power backend is never built by any other
+# native_sim suite.  Declare the capability here so this suite compiles it (and
+# its SoM domain-op vtable entries).
+config HAS_PM
+	bool
+	default y
+
+source "Kconfig.zephyr"

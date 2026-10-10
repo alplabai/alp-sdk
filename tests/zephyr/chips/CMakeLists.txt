@@ -67,6 +67,7 @@ target_sources(app PRIVATE
     src/test_gd32_bridge.c
     src/test_industrial.c
     src/test_platform_ics.c
+    src/test_rv3028c7_wake.c
     src/test_ina228.c
     src/test_power.c
     src/test_security.c

@@ -1204,8 +1204,7 @@ stage_required_gate_scripts() {
 
     # board.yaml schema sweep -- canonical template + every
     # examples/*/board.yaml + tests/*/board.yaml, mirroring the
-    # pr-metadata-validate.yml "schema sweep" step (including its
-    # rpmsg-imx93 exclusion -- see board-yaml-sweep-exclude.sh).
+    # pr-metadata-validate.yml "schema sweep" step.
     if [ -f scripts/validate_board_yaml.py ]; then
         ran=1
         if [ -f metadata/templates/board.yaml.example ]; then
@@ -1213,13 +1212,10 @@ stage_required_gate_scripts() {
             python3 scripts/validate_board_yaml.py \
                 --input metadata/templates/board.yaml.example || failed=1
         fi
-        # shellcheck source=scripts/board-yaml-sweep-exclude.sh
-        source "${REPO_ROOT}/scripts/board-yaml-sweep-exclude.sh"
         while IFS= read -r f; do
             echo "--- validate_board_yaml.py ${f} ---"
             python3 scripts/validate_board_yaml.py --input "${f}" || failed=1
-        done < <(find examples tests -name board.yaml 2>/dev/null \
-                  | grep -v "${BOARD_YAML_SWEEP_EXCLUDE_PATTERN}")
+        done < <(find examples tests -name board.yaml 2>/dev/null)
     fi
 
     # gd32-bridge protocol vectors must not drift from the generator

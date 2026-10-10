@@ -95,6 +95,22 @@ catch-all); higher-priority vendor backends still win selection whenever
 they are also in the link (always true for the whole-archive shared
 `libalp_sdk.so` that is the real Linux/Yocto shipping artifact).
 
+The anchor reaches only the catch-all. A backend that sits in its OWN TU
+beside it (every `src/backends/<class>/yocto_drv.c`, rpc's
+`yocto_uio_drv.c`) is still unreferenced, so a static link used to drop it
+and the app silently got the stub (#2790). `ALP_BACKEND_REGISTER` therefore
+also expands `ALP_BACKEND_FORCE_DEFINE`, which defines the hidden symbol
+`_alp_backend_force_<class>_<name>`. Once every source is on the target,
+`cmake/alp-sdk-static-backends.cmake` scans each `alp_sdk` C source for its
+column-0 registrations, skips those whose TU defines an anchor, and adds
+`--undefined=_alp_backend_force_<class>_<name>` for the rest to `alp::sdk`'s
+INTERFACE link options (static ELF builds only). The forced pairs are on the
+`alp_sdk` target's `ALP_SDK_FORCED_BACKENDS` property; a non-CMake static
+link must pass the same options itself. A consumer that compiles its own
+copy of a backend opts out by setting `ALP_SDK_NO_FORCED_BACKENDS` on
+itself. `alp_test_static_link_backends` reads the expected set straight from
+the archive with `nm`, so a registration the scan misses still fails it.
+
 `src/backend.c` carries the same anchor for the `alp_backend_classes`
 class table, so a consumer that calls only `alp_backend_count()` /
 `ALP_BACKEND_AVAILABLE(...)` (e.g. a diagnostic tool) without pulling

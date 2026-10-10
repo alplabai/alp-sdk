@@ -22,7 +22,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
 
-from .headers import emit_dts_partitions, emit_dts_reservations, emit_ipc_contract_h
+from .headers import (
+    emit_dts_partitions,
+    emit_dts_reservations,
+    emit_ipc_contract_h,
+    emit_storage_mounts_c,
+    has_storage_mounts,
+)
 from .kconfig import (
     _resolve_console,
     _slice_alp_conf,
@@ -188,12 +194,27 @@ DTS_OVERLAY_ARTEFACT = "alp.overlay"
 #: Filename of the rendered full `-D` listing config artefact.
 CMAKE_ARGS_ARTEFACT = "cmake-args.txt"
 
+#: Filename of the rendered build-identifier header config artefact
+#: (`--emit hw-info-h --core <id>`). Same name `<alp/hw_info.h>` documents.
+HW_INFO_ARTEFACT = "alp_hw_info_build.h"
+
+#: Filename of the rendered west manifest fragment config artefact
+#: (`--emit west-libraries --core <id>`).
+WEST_LIBS_ARTEFACT = "alp-west-libs.yml"
+
 
 class DtsOverlayUnavailable(OrchestratorError):
     """The board has nothing to render a DTS overlay from: no header under
     `include/alp/boards/`, or a SKU outside the production families. The one
     failure `emit_build_plan` downgrades to a `dts-overlay-unavailable`
     warning; every other `OrchestratorError` still fails the plan."""
+
+
+class HwInfoUnavailable(OrchestratorError):
+    """The slice's SKU is outside the production families, so there is no
+    family to put in `ALP_HW_BUILD_SOM_FAMILY`. Downgraded by
+    `emit_build_plan` to a `hw-info-unavailable` warning, like
+    `DtsOverlayUnavailable`; any other failure still fails the plan."""
 
 
 def _v1_shaped_project(project: BoardProject) -> dict[str, Any]:
@@ -299,6 +320,92 @@ def _slice_cmake_args_artefact(
     return (CMAKE_ARGS_ARTEFACT, _slice_cmake_args(project, slice_))
 
 
+def _slice_hw_info_h(project: BoardProject, slice_: Slice) -> str:
+    """The slice's build-identifier header -- exactly what
+    `alp_project.py --emit hw-info-h --core <id>` prints.
+
+    `ALP_HW_BUILD_CORES` / `HAS_<id>` range over EVERY core of the project
+    (`v2_cores`), and `ALP_HW_BUILD_OS` / `PRIMARY_CORE` track the slice
+    (`v2_selected_core`). Single source for the standalone emit and the
+    build plan's `alp_hw_info_build.h` config artefact.
+    """
+    import sys as _sys
+    _scripts = Path(__file__).resolve().parent.parent
+    if str(_scripts) not in _sys.path:
+        _sys.path.insert(0, str(_scripts))
+    from alp_project_emit.hw_info import _emit_hw_info_h  # type: ignore
+
+    return _emit_hw_info_h(
+        _v1_shaped_project(project), project.som_preset,
+        project.board_preset,
+        v2_cores={cid: s.os for cid, s in project.cores.items()},
+        v2_selected_core=slice_.core_id,
+        # Same tree alp.conf's `CONFIG_ALP_SDK_SOM_HW_REV` reads, so the two
+        # composed hw_rev designators cannot disagree under --metadata-root.
+        metadata_root=project.effective_metadata_root(),
+    )
+
+
+def _slice_west_libraries(project: BoardProject, slice_: Slice) -> str:
+    """The slice's west manifest fragment -- exactly what
+    `alp_project.py --emit west-libraries --core <id>` prints.
+
+    Single source for that standalone emit and the build plan's
+    `alp-west-libs.yml` config artefact.
+    """
+    import sys as _sys
+    _scripts = Path(__file__).resolve().parent.parent
+    if str(_scripts) not in _sys.path:
+        _sys.path.insert(0, str(_scripts))
+    from alp_project_emit.west_libs import _emit_west_libraries  # type: ignore
+
+    return _emit_west_libraries(
+        _v1_shaped_project(project), project.som_preset,
+        project.board_preset,
+        v2_libraries=sorted(set(slice_.libraries)),
+        v2_project_libraries=sorted(project.libraries),
+        metadata_root=project.effective_metadata_root(),
+    )
+
+
+def _slice_hw_info_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's rendered `alp_hw_info_build.h`, or
+    None for an os that has none (see `_DTS_OVERLAY_OS`).
+
+    A REFERENCE artefact (ADR-0026 §D), like `cmake-args.txt`: no build
+    command, CMake file or Kconfig in this SDK reads it. The firmware's
+    own `ALP_HW_BUILD_*` values still come from the build, not this file.
+    """
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    # Only the SKU->family lookup is "unavailable" (same narrow pattern as
+    # `_slice_dts_overlay`); a damaged hw-revisions table etc. must still fail
+    # the plan, so the render itself runs outside any except.
+    from alp_project_loader import _sku_family  # type: ignore
+    try:
+        _sku_family(project.sku)
+    except ValueError as exc:
+        raise HwInfoUnavailable(str(exc)) from None
+    return (HW_INFO_ARTEFACT, _slice_hw_info_h(project, slice_))
+
+
+def _slice_west_libs_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's rendered west fragment, or None
+    for an os that has none. Emitted even when the slice selects no
+    libraries: the emitter renders a well-formed empty allowlist, and
+    byte-identity with `--emit west-libraries --core` is the contract.
+    Reference only, like `cmake-args.txt`."""
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    return (WEST_LIBS_ARTEFACT, _slice_west_libraries(project, slice_))
+
+
 def _shared_artefacts(
     project: BoardProject,
     build_root: Path,
@@ -330,6 +437,12 @@ def _shared_artefacts(
     if tfm_conf:
         out.append((build_root / "sysbuild" / "tfm" / "tfm.conf",
                     tfm_conf))
+    # Opt-in C mount table: only when board.yaml `storage:` declares a
+    # mountable partition (the standalone emit otherwise prints an empty
+    # table, which a consumer has no reason to compile).
+    if has_storage_mounts(project):
+        out.append((gen / "storage_mount_table.c",
+                    emit_storage_mounts_c(project)))
     return out
 
 
@@ -623,6 +736,7 @@ def emit_build_plan(
     """
     # Orchestrator-side (stay inline until orchestrator.py); lazy to avoid
     # a buildplan<->package import cycle.
+    from .cameras import CameraSelectError
     from .orchestrator import (
         STOCK_IMAGE_APP,
         UnbuildableYoctoMachineError,
@@ -687,6 +801,17 @@ def emit_build_plan(
                 "coreId":  slice_.core_id,
                 "message": str(e),
             })
+        except CameraSelectError as e:
+            # A `cameras:` entry that cannot become a -DSHIELD for this
+            # slice (module without a zephyr_shield, or a carrier shield
+            # with no overlay for the board target): block, never emit a
+            # command that silently drops the camera.
+            cmd = None
+            warnings.append({
+                "code":    "camera-select-failed",
+                "coreId":  slice_.core_id,
+                "message": str(e),
+            })
         except UnbuildableYoctoMachineError as e:
             # The slice's `machine:` is a known-non-buildable Yocto MACHINE
             # (issue #1982 -- the two AEN A32-cluster carriers, unbuildable
@@ -743,8 +868,9 @@ def emit_build_plan(
                 "contents": contents,
             })
         # Additive rendered-text artefacts (ADR-0026 §D, tan-cli#1216): the
-        # DTS overlay and the full `-D` listing, byte-identical to the
-        # standalone `--emit dts-overlay --core` / `--emit cmake-args`
+        # DTS overlay, the full `-D` listing, the build-identifier header and
+        # the west fragment, byte-identical to the standalone
+        # `--emit dts-overlay|cmake-args|hw-info-h|west-libraries --core`
         # renders. Always AFTER the slice's primary config artefact, so a
         # consumer that reads `configArtefacts[0]` is unaffected.
         extras: list[Optional[tuple[str, str]]] = []
@@ -765,7 +891,28 @@ def emit_build_plan(
                     "message": (f"core '{slice_.core_id}': no `alp.overlay` "
                                 f"artefact -- {exc}"),
                 })
-            extras.append(_slice_cmake_args_artefact(project, slice_))
+            try:
+                extras.append(_slice_cmake_args_artefact(project, slice_))
+            except CameraSelectError as exc:
+                # The listing is not emitted; make sure the plan still says
+                # why (the command path usually already did).
+                if not any(w["code"] == "camera-select-failed"
+                           and w["coreId"] == slice_.core_id for w in warnings):
+                    warnings.append({
+                        "code":    "camera-select-failed",
+                        "coreId":  slice_.core_id,
+                        "message": str(exc),
+                    })
+            try:
+                extras.append(_slice_hw_info_artefact(project, slice_))
+            except HwInfoUnavailable as exc:
+                warnings.append({
+                    "code":    "hw-info-unavailable",
+                    "coreId":  slice_.core_id,
+                    "message": (f"core '{slice_.core_id}': no "
+                                f"`alp_hw_info_build.h` artefact -- {exc}"),
+                })
+            extras.append(_slice_west_libs_artefact(project, slice_))
         for extra in extras:
             if extra is not None:
                 config_artefacts.append({

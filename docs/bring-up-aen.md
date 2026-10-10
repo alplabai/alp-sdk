@@ -7,8 +7,7 @@ or ST-Link), an external 5 V bench supply, and a USB-UART
 adapter.
 
 > Peer docs: [`bring-up-v2n.md`](bring-up-v2n.md),
-> [`bring-up-v2n-m1.md`](bring-up-v2n-m1.md),
-> [`bring-up-imx93.md`](bring-up-imx93.md).  This guide covers the
+> [`bring-up-v2n-m1.md`](bring-up-v2n-m1.md).  This guide covers the
 > AEN family specifically (AEN301..801 plus AEN803, Alif Ensemble silicon).
 
 ## 0. Pre-flight
@@ -642,10 +641,7 @@ top of the per-subsystem checks.
       AEN801), and runs the first inference on the NPU.
 
    3. Confirm the prediction matches the reference output within
-      floating-point tolerance -- the same end-to-end gate the
-      i.MX 93 bring-up uses in
-      [`bring-up-imx93.md`](bring-up-imx93.md) §6.3, here driven
-      from the M55 side rather than from Linux.
+      floating-point tolerance, driven from the M55 side.
 
    If the `.alpmodel` has no Ethos-U blob the loader falls back to
    the CPU path -- correct behaviour, but it means the Vela target

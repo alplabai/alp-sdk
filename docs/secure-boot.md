@@ -146,7 +146,7 @@ single-slot target such as E1M-AEN801 is a build-time error -- there
 is no slot1/scratch partition for it to use (#1413).
 
 Keeping the block but omitting `method:` inherits the family's
-bootloader strategy the same way -- `mcuboot` on AEN/N93, `none` on
+bootloader strategy the same way -- `mcuboot` on AEN, `none` on
 V2N/V2N-M1, where U-Boot owns boot.  This overlay is a Zephyr
 artefact: a project with no `os: zephyr` slice never runs sysbuild and
 gets none.  Slot/scratch partition *sizes* come from the board DT

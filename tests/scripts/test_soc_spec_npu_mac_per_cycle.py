@@ -78,15 +78,17 @@ def test_every_committed_soc_doc_still_validates() -> None:
 
 
 @pytest.mark.parametrize(
-    ("rel", "index", "expected_type"),
+    ("rel", "index", "expected_type", "retype_as"),
     [
-        ("alif/ensemble/e8.json", 0, "ethos-u85"),
-        ("alif/ensemble/e8.json", 1, "ethos-u55"),
-        ("nxp/imx9/imx93.json", 0, "ethos-u65"),
+        ("alif/ensemble/e8.json", 0, "ethos-u85", None),
+        ("alif/ensemble/e8.json", 1, "ethos-u55", None),
+        # No shipped SoC carries a U65; retyping an E8 entry exercises the
+        # same `^ethos-u` prefix rule.
+        ("alif/ensemble/e8.json", 1, "ethos-u55", "ethos-u65"),
     ],
 )
 def test_an_ethos_u_npu_missing_mac_per_cycle_is_refused(
-    rel: str, index: int, expected_type: str
+    rel: str, index: int, expected_type: str, retype_as: str | None
 ) -> None:
     """The defect this gate exists to catch, on all three Ethos-U widths.
 
@@ -97,6 +99,8 @@ def test_an_ethos_u_npu_missing_mac_per_cycle_is_refused(
     validator = _validator()
     doc = _doc(rel)
     assert doc["npus"][index]["type"] == expected_type, "fixture drifted"
+    if retype_as:
+        doc["npus"][index]["type"] = retype_as
     assert validator.is_valid(doc)
 
     stripped = copy.deepcopy(doc)

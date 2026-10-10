@@ -24,9 +24,8 @@
  *                                     dispatch lands in v0.4 once
  *                                     deepx-dxm1-host-sdk is on the
  *                                     sysroot; v0.3 wires routing only.
- *   ALP_INFERENCE_BACKEND_ETHOS_U  -> reserved for the i.MX 93 Yocto
- *                                     path (task #14).  Adapter slot
- *                                     stays empty until that lands.
+ *   ALP_INFERENCE_BACKEND_ETHOS_U  -> reserved (no Yocto adapter;
+ *                                     the slot stays empty).
  *   ALP_INFERENCE_BACKEND_DRPAI    -> reserved for the V2N Yocto path
  *                                     (task #14 sibling).
  *   ALP_INFERENCE_BACKEND_CPU      -> ONNX Runtime (own-recipe upstream

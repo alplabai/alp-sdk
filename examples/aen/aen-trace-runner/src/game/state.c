@@ -11,6 +11,7 @@ void tr_game_init(tr_game_t *g, uint32_t seed)
 	g->air_ticks   = 0;
 	g->ducking     = false;
 	g->duck_ticks  = 0;
+	g->jump_wait   = 0;
 	g->score       = 0;
 	g->alive       = true;
 	g->crashed     = false;

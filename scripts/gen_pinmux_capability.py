@@ -77,11 +77,6 @@ SCHEMA = REPO / "metadata" / "schemas" / "pinmux-capability-v1.schema.json"
 #   "e1m_claim" (default) -- (e1m_pad, e1m_function, peripheral, pad)
 #   "pad_first"           -- (peripheral, pad); e1m_pad is unmappable -> "TBD"
 #
-# imx93 deliberately has no entry: the family ships no pinout TSV yet
-# (metadata/e1m_modules/imx93/ holds only hw-revisions.yaml pending the
-# IMX93RM ingestion / HW-config writeup), so there is nothing to project.
-# Add it here when the TSV lands.
-#
 # v2n-m1 deliberately has no entry either, despite shipping a pinout TSV:
 # it reuses the v2n edge pinout in full (the m1-additions are SoM-internal
 # nets, not new E1M edge pads), so consumers resolve E1M-V2M SKUs to the

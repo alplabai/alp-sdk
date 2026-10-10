@@ -89,6 +89,8 @@ into the topic-specific docs.
 - [aen-bench-bringup.md](aen-bench-bringup.md) — E1M-AEN801 (E8)
   on-silicon bench bring-up: Flow A/C/D flashing, the validated
   peripheral matrix, and the NPU-from-MRAM path.
+- [aen-power-domains.md](aen-power-domains.md) — AEN SoM power domains:
+  quiesce / restore of the Wi-Fi, PHY, flash, sensor and backlight around STOP.
 - [aen-provisioning.md](aen-provisioning.md) — provisioning an
   E1M-AEN SoM (SES → MCUboot → slot0 chain, bench-proven at
   `0da1f1b4`, + the SoM-maker policy).
@@ -112,7 +114,6 @@ into the topic-specific docs.
   image wiring, model compile and microSD deploy. Kernel driver
   proven on silicon; userspace packaging is written but has never been
   baked, no model compiled and no inference run yet.
-- [bring-up-imx93.md](bring-up-imx93.md) — NXP i.MX 93.
 - [e1m-x-v2n-sdk-integration.md](e1m-x-v2n-sdk-integration.md) —
   landing the bench-validated V2N-M1 / E1M-X-EVK carrier bring-up
   into alp-sdk as the single source of truth.
@@ -287,7 +288,7 @@ into the topic-specific docs.
 
 - [v1.0-readiness.md](v1.0-readiness.md) — a 2026-05-14 execution-plan
   snapshot toward the v1.0.0 tag.  Not maintained current past the
-  session that wrote it (the SDK has since shipped through v0.16.0) —
+  session that wrote it (the SDK has since shipped through v0.17.0-rc1) —
   cross-check any status claim against `VERSIONS.md` and
   `CHANGELOG.md`, which are.
 - [v0.6-tbd-and-assumptions.md](v0.6-tbd-and-assumptions.md) —

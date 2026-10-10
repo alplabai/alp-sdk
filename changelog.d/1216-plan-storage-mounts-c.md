@@ -1,0 +1,3 @@
+### Added — build-plan-v1 `sharedArtefacts` carries `generated/storage_mount_table.c` when the project has mountable storage (tan-cli#1216)
+
+When board.yaml `storage:` declares a mountable partition (a `mount:` on a non-`raw` fs), `sharedArtefacts` gains `build/generated/storage_mount_table.c`, byte-identical to `--emit storage-mounts-c` (`emit_storage_mounts_c`); the standalone emit and the plan call the same function. Projects with no mountable storage get no entry, since the standalone emit would only print an empty table. The emit registry now records the same path. Additive under `schemaVersion` 1, no bump. Nothing in the CMake or Zephyr build reads the file; apps that opt in include it.

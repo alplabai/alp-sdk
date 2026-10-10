@@ -12,8 +12,8 @@
 #include "stub_abi.h"
 
 	.equ RENDER_TTB,       0x02408000
-	.equ RENDER_STACK0_TOP, 0x025EE000   @ tr_memmap.h TR_MEM_A32_STACKS 0x025DE000 + 64 KiB (core 0)
-	.equ RENDER_STACK1_TOP, 0x025FE000   @ + 64 KiB (core 1)
+	.equ RENDER_STACK0_TOP, 0x025D0000   @ tr_memmap.h TR_MEM_A32_STACKS 0x025C0000 + 64 KiB (core 0)
+	.equ RENDER_STACK1_TOP, 0x025E0000   @ + 64 KiB (core 1)
 
 	.syntax unified
 	.arm

@@ -32,7 +32,7 @@
 #   * licence Apache-2.0 (~/tflite-micro/LICENSE: Apache License 2.0 header).
 #
 # HW-backends: this manifest's own `integration.zephyr.hw_backends:`
-# block below carries per-accelerator priority binding (Ethos-U85/U65/
+# block below carries per-accelerator priority binding (Ethos-U85/
 # U55, Helium/NEON, DMA); folded in from the retired standalone
 # metadata/library-profiles/tflite_micro/hw-backends.yaml in WS6-c
 # Phase 3.
@@ -77,8 +77,6 @@ integration:
           priority:
             # U85 is the headline NPU on every SKU that has one (E4/E6/E8).
             - { requires_cap: ethos_u85_count, backend: ethos_u85, kconfig: CONFIG_ALP_TFLM_ETHOS_U85=y }
-            # U65 on NXP i.MX 93 / E1M-NX9101.
-            - { requires_cap: ethos_u65_count, backend: ethos_u65, kconfig: CONFIG_ALP_TFLM_ETHOS_U65=y }
             # U55 is the family-wide primary on E3/E5/E7 (no U85).
             - { requires_cap: ethos_u55_count, backend: ethos_u55, kconfig: CONFIG_ALP_TFLM_ETHOS_U55=y }
             # DRP-AI and DEEPX are A55/Linux-side runtimes, not TFLM

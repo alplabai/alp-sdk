@@ -1,5 +1,7 @@
 # `alp model zoo` / `alp model add` — Model Zoo Machinery (Slice 2a) Implementation Plan
 
+> **Status (2026-10-08): Superseded** — `alp model zoo`/`add` and `scripts/alp_cli/model.py` were retired (#1727); only the `metadata/model_zoo/` data asset landed (#2542), the engine moves to tan per ADR 0028.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use `- [ ]` checkboxes.
 
 **Goal:** `alp model zoo [--sku]` (browse curated zoo entries + which run on your SoM) and `alp model add <id> [--board]` (fetch/cache the source model + append it to `board.yaml` `models:`), so a customer goes from "browse → one-click add → it's in my build" without hunting for weights or config.

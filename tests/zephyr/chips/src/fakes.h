@@ -93,6 +93,11 @@ void fake_rv3028c7_fail_next_write(uint8_t reg, uint8_t val);
  *  armed fault. */
 void fake_rv3028c7_reset(void);
 
+/** Model STATUS (0Eh) as a plain read/write byte, i.e. writing 1 SETS a
+ *  flag, instead of the default write-0-clears / write-1-ignored model.
+ *  Cleared by fake_rv3028c7_reset(). */
+void fake_rv3028c7_set_write1_sets(bool on);
+
 /* ------------------------------------------------------------------ */
 /* fake TCAL9538 / TCA6408A                                            */
 /* ------------------------------------------------------------------ */

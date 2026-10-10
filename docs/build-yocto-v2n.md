@@ -129,9 +129,9 @@ not the distro.
 > **Machine fragments:** `alp-image-edge` picks up per-machine `.cfg`
 > fragments from `meta-alp-sdk/recipes-kernel/linux/`.  Merged
 > unconditionally: `uio.cfg`, `rv3028-rtc.cfg`, `wifi-bt.cfg`,
-> `trim-unused-storage-net-fs.cfg`, `no-kernel-audit.cfg`. Per carrier:
+> `trim-unused-storage-net-fs.cfg`, `no-kernel-audit.cfg`, and the generated `camera-sensors.cfg`. Per carrier:
 > `display.cfg` and `tas2563-audio.cfg` (with kernel patches `0009` and
-> `0014`). Opt-in: `camera-csi.cfg`.
+> `0014`). Opt-in camera DT: `ALP_CAMERA_CAM0` (see `v2n-camera-csi.md`).
 > To build a minimal image without
 > Weston/display, remove the `alp-lvgl-dashboard`, `weston`, and
 > `weston-init` packages from `IMAGE_INSTALL` in your `local.conf` and

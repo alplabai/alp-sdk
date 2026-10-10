@@ -275,6 +275,46 @@ class TestSimConsole(unittest.TestCase):
         self.assertNotIn("CONFIG_RAM_CONSOLE=y", out)
 
 
+class TestRamConsoleKeepsAppSize(unittest.TestCase):
+    """`diagnostics.console: ram` must never SHRINK an app-set
+    `CONFIG_RAM_CONSOLE_BUFFER_SIZE` (tan-cli#1401): the generated alp.conf
+    is merged after prj.conf, so a bare `=2048` clobbered an app's 8192 and
+    its console wrapped.  The knob's 2048 is a floor, not an override."""
+
+    def _emit(self, prj_conf: str | None) -> str:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            if prj_conf is not None:
+                (tmp / "src").mkdir()
+                (tmp / "src" / "prj.conf").write_text(prj_conf, encoding="utf-8")
+            path = _write_board(tmp, """
+                som:
+                  sku: E1M-AEN801
+                diagnostics:
+                  console: ram
+                cores:
+                  m55_he:
+                    os: zephyr
+                    app: ./src
+            """)
+            rv = _run_loader(input_path=path, core="m55_he")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        return rv.stdout
+
+    def test_larger_app_size_wins(self) -> None:
+        out = self._emit("CONFIG_RAM_CONSOLE_BUFFER_SIZE=8192\n")
+        self.assertIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=8192", out)
+        self.assertNotIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048", out)
+
+    def test_smaller_app_size_keeps_floor(self) -> None:
+        out = self._emit("CONFIG_RAM_CONSOLE_BUFFER_SIZE=1024\n")
+        self.assertIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048", out)
+
+    def test_no_app_size_keeps_floor(self) -> None:
+        out = self._emit("CONFIG_FOO=y\n")
+        self.assertIn("CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048", out)
+
+
 class TestAlpBoardDefineEmit(unittest.TestCase):
     """ALP_BOARD_<SLUG> compile define is emitted automatically from
     the board preset name -- the build-system hook that makes

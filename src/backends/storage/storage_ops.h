@@ -6,7 +6,7 @@
  *
  * Storage has two Zephyr-side backends (raw flash_area, littlefs)
  * plus a stateless SW fallback.  Vendor extensions for inline AES
- * (Alif OSPI SecAES, NXP FlexSPI OTFAD) plug in via additional
+ * (Alif OSPI SecAES) plug in via additional
  * registrations once their vendor packs land; the
  * configure_inline_aes op is part of every backend's vtable so the
  * portable code path treats it as a first-class operation.

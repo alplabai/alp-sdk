@@ -1,8 +1,8 @@
 som:
-  sku: E1M-NX9101   # NXP i.MX 93 -- metadata/socs/nxp/imx9/imx93.json lists no DAC
-preset: e1m-evk     # (reference-manual ingestion still pending, #380)
+  sku: E1M-AEN801   # Alif Ensemble E8 -- the E8 SoC JSON lists no eMMC
+preset: e1m-evk
 cores:
-  m33:
+  m55_hp:
     app: ./src
     peripherals:
-      - dac           # triggers ALP-B010: 'dac' not in i.MX 93 SoC caps (count=0)
+      - emmc          # triggers ALP-B010: 'emmc' not in E8 SoC caps

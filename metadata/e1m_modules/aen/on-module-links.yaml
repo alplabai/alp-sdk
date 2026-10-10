@@ -44,10 +44,18 @@
 # files comes from here.  Edit here, then regenerate (see
 # docs/porting-new-som.md, "Regenerating a board").
 #
+# v2 (alp-sdk#2784) adds the `power_domains:` block at the end of this file:
+# the SoM's quiesce-able power domains (Wi-Fi/BLE, Ethernet PHY, external
+# flash/RAM, temperature sensor, RTC, backlight), their control pads, and the
+# measured savings.  scripts/gen_zephyr_board.py projects it into the
+# generated board dts as the `alp,som-power` node;
+# scripts/check_som_power_domains.py pins every control pad to the pad TSVs
+# beside this file (inter-chip.tsv, alif-ethernet-phy.tsv, alif-ospi.tsv).
+#
 # Every entry carries an `evidence:` string citing a NON-DERIVATIVE
 # source -- the E1M-AEN-2626-R2 netlist, the AE822 DFP pin table, or a
 # dated bench measurement -- never a generated file.
-schemaVersion: on-module-links-v1
+schemaVersion: on-module-links-v2
 families:
   - aen
 
@@ -293,3 +301,348 @@ on_module_links:
       display connector.  Neither pad is backed by Alif (or any other)
       silicon, so neither belongs in from-alif.tsv / pinmux/aen.yaml, and
       neither is assignable as a general-purpose GPIO/PWM pad by any app.
+
+# ---------------------------------------------------------------------------
+# power_domains -- the SoM's quiesce-able domains (alp-sdk#2784).
+#
+# DATA ONLY at this layer: nothing in the SDK reads these controls at run time
+# yet; the generator turns them into the `alp,som-power` devicetree node.
+#
+# `chip` is omitted where the part differs per SKU (ext_flash, ext_ram) or the
+# SKU presets name none (backlight); the generator then reads the SKU's own
+# `on_module` chip name.
+#
+# Per-domain shape (metadata/schemas/on-module-links-v2.schema.json):
+#   presence       which SKU `on_module` key decides whether the domain exists.
+#                  A string-valued key (wifi_ble, ethernet_phy, ...) is present
+#                  when it names a real part; a block with `assembled:` (the
+#                  OSPI0 NOR, the HyperRAM) follows that tri-state field --
+#                  true = present, "optional" = present but BOM-variant (the
+#                  generated node carries `alp,bom-optional`), false = omitted.
+#   controls[]     the SoC pads that gate the domain.  `source` names the TSV
+#                  row the pad comes from; check_som_power_domains.py re-reads
+#                  that row and fails on any disagreement.  `holds_through_stop`
+#                  is "unproven" for every LPGPIO (VBAT-domain, P15_n) pad --
+#                  whether an LPGPIO output holds through STOP and through the
+#                  Secure Enclave's wake boot is a bench question (#2784 U8) --
+#                  and "no" for main-domain pads, which are powered down in STOP.
+#                  `polarity_basis` says how the asserted level was decided:
+#                  `bench_verified` (measured on hardware, see evidence),
+#                  `net_name` (an n/N suffix in the netlist name), `datasheet`,
+#                  or `assumed` (NOT yet confirmed -- bench-verify before relying).
+#   actions{}      what the SDK may do; `default_action` is the AUTO choice for
+#                  `default_modes`.  `opt_in` actions are never AUTO.  `measured`
+#                  figures are dated and input-referred.
+#   restore        the wake-side inverse of the default action.
+#   dependents[]   other nets the domain's chip drives.
+# ---------------------------------------------------------------------------
+power_domains:
+  # TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor.
+  wifi_ble:
+    chip: cc3501e
+    presence: { on_module_key: wifi_ble }
+    controls:
+      - signal: E_WIFI_NRST
+        net: "E_WIFI_NRST"
+        silicon_pad: "P15_1"
+        gpio_node: lpgpio
+        gpio_pin: 1
+        direction: out
+        polarity: active_low
+        polarity_basis: bench_verified
+        role: reset
+        holds_through_stop: unproven
+        source: { file: inter-chip.tsv, signal: E_WIFI_NRST }
+      - signal: WIFI_EN
+        net: "WIFI_EN"
+        silicon_pad: "P15_5"
+        gpio_node: lpgpio
+        gpio_pin: 5
+        direction: out
+        polarity: active_high
+        polarity_basis: net_name
+        role: rail_enable
+        holds_through_stop: unproven
+        source: { file: inter-chip.tsv, signal: WIFI_EN }
+    default_modes: [stop, standby]
+    default_action: hold_reset
+    actions:
+      hold_reset:
+        control: E_WIFI_NRST
+        opt_in: false
+        measured:
+          - { saving: "≈2 mA", input_voltage: "16 V", bench: "E1M-AEN803 on E1M-EVK", date: "2026-10-08",
+              method: ram-run,
+              note: "CC3501E nRESET held low; board-input PSU telemetry at 16.0 V, 1 mA resolution" }
+      rail_off:
+        control: WIFI_EN
+        opt_in: true
+        requires_kconfig: CONFIG_ALP_SDK_SOM_PD_WIFI_RAIL_OFF
+        hazard: >-
+          Cutting WIFI_EN removes the CC3501E supply.  On units whose
+          CC3501E is activated (`vendor_sbl_container_enable=1`) the vendor
+          bootloader may never relaunch after the rail returns, leaving the
+          radio dead until it is re-flashed.  Opt-in only; validated on
+          non-activated units first.  NOT measured.
+    restore:
+      method: nreset_release
+      note: >-
+        Release E_WIFI_NRST through `cc3501e_hard_reset()` (50 ms nRESET
+        pulse, rails stay up).  NEVER `cc3501e_reset()`: it drops WIFI_EN for
+        50 ms, i.e. a supply cold cycle -- the exact path that may never
+        relaunch on a `vendor_sbl_container_enable=1` unit.
+    dependents:
+      # The CC3501E drives the carrier's camera LDO enables from its own
+      # GPIO_0/GPIO_1, so quiescing it switches those camera rails.
+      - { kind: cam_ldo, net: CAM_EN_LDO0, driver_pin: GPIO_0,
+          source: { file: inter-chip.tsv, signal: CAM_EN_LDO0 } }
+      - { kind: cam_ldo, net: CAM_EN_LDO1, driver_pin: GPIO_1,
+          source: { file: inter-chip.tsv, signal: CAM_EN_LDO1 } }
+      # The carrier SD-enable line the CC3501E also drives is NOT listed:
+      # inter-chip.tsv carries no row for it and no netlist net name has been
+      # read, so there is nothing to cite.  Add it from an actual netlist row.
+    evidence: >-
+      E_WIFI_NRST / WIFI_EN pads: inter-chip.tsv rows E_WIFI_NRST (P15_1_FLEX)
+      and WIFI_EN (P15_5); roles per docs/cc3501e-bridge.md ("WIFI_EN gates
+      VPA", "E_WIFI.NRST: Alif resets the CC3501E").  Savings: bench
+      2026-10-08, E1M-AEN803 on an E1M-EVK (board-input PSU telemetry at 16.0 V,
+      1 mA resolution, RAM-run).  E_WIFI_NRST is active-low, bench-verified the
+      same run: held LOW the CC3501E PING returns -5, released it returns 0.
+      Restore semantics:
+      chips/cc3501e/cc3501e_core.c cc3501e_reset() vs cc3501e_hard_reset().
+
+  # DP83825 RMII Ethernet PHY.  The three methods below are ALTERNATIVES, not
+  # additive: each saves the same ≈10 mA.  An unpowered PHY reads stale MDIO
+  # data, so power state is tracked in software, never inferred from MDIO.
+  eth_phy:
+    chip: dp83825
+    presence: { on_module_key: ethernet_phy }
+    controls:
+      - signal: E_PHY_PWRDWN
+        net: "E_PHY_PWRDWN"
+        silicon_pad: "P15_4"
+        gpio_node: lpgpio
+        gpio_pin: 4
+        direction: out
+        polarity: active_low
+        polarity_basis: bench_verified
+        role: powerdown
+        holds_through_stop: unproven
+        source: { file: alif-ethernet-phy.tsv, signal: E_PHY_PWRDWN }
+      - signal: E_PHY_RESET
+        net: "E_PHY_RESET"
+        silicon_pad: "P11_6"
+        gpio_node: gpio11
+        gpio_pin: 6
+        direction: out
+        polarity: active_low
+        polarity_basis: bench_verified
+        role: reset
+        holds_through_stop: "no"
+        source: { file: alif-ethernet-phy.tsv, signal: E_PHY_RESET }
+    default_modes: [stop, standby]
+    default_action: powerdown_pin
+    actions:
+      powerdown_pin:
+        control: E_PHY_PWRDWN
+        opt_in: false
+        measured:
+          - { saving: "≈10 mA", input_voltage: "16 V", bench: "E1M-AEN803 on E1M-EVK", date: "2026-10-08",
+              method: ram-run }
+      hold_reset:
+        control: E_PHY_RESET
+        opt_in: false
+        measured:
+          - { saving: "≈10 mA", input_voltage: "16 V", bench: "E1M-AEN803 on E1M-EVK", date: "2026-10-08",
+              method: ram-run }
+      bmcr_powerdown:
+        opt_in: false
+        note: >-
+          BMCR bit 11 over MDIO.  Needs a live PHY and MDIO, so it cannot be
+          held across STOP (P11_6 is main-domain and not held either); only
+          P15_4 can hold.
+        measured:
+          - { saving: "≈10 mA", input_voltage: "16 V", bench: "E1M-AEN803 on E1M-EVK", date: "2026-10-08",
+              method: ram-run }
+    dependents:
+      # Y3 (KC2016Z50.0000C15XXK, 50 MHz) is the PHY reference oscillator: OUT ->
+      # R40 -> E_PHY_REFCLK (SoC P11_0 and the DP83825 XI / 50MHzIn).  Its TRI pin
+      # is E_PHY_PWRDWN (P15_4), so driving P15_4 low also tri-states the clock
+      # (E1M-AEN-2626-R2 netlist, 2026-10-08).
+      - { kind: phy_refclk, net: E_PHY_REFCLK, driver_pin: "Y3 TRI (E_PHY_PWRDWN)",
+          source: { file: alif-ethernet-phy.tsv, signal: E_PHY_PWRDWN } }
+    restore:
+      method: pin_release
+      note: Release E_PHY_PWRDWN, then let the PHY re-negotiate the link.
+    evidence: >-
+      alif-ethernet-phy.tsv rows E_PHY_RESET (P11_6) and E_PHY_PWRDWN (P15_4);
+      docs/aen-bench-bringup.md ("PHY power E_PHY_PWRDWN = P15_4 lpgpio, PHY
+      reset E_PHY_RESET = P11_6 gpio11").  Polarity bench-verified 2026-10-08
+      (E1M-AEN803 on an E1M-EVK, RAM-run, MDIO): E_PHY_PWRDWN HIGH powers the
+      PHY (ID 2000a140 reads), LOW turns it off (ID gone, stale reads);
+      E_PHY_RESET held LOW reads every MDIO register as 0xffff, release brings
+      the ID back.  Savings: bench 2026-10-08,
+      RAM-run, all three methods.
+
+  # External NOR flash: the U10 footprint, chip-select OSPI0_SS1, reset/INT on
+  # the nets named OSPI1_RESETn / OSPI1_INTn (a labelling quirk of U10's own
+  # pins, not an OSPI1 device -- CHANGELOG "OSPI1_INTn/OSPI1_RESETn").
+  ext_flash:
+    presence: { on_module_key: ospi_memories.ospi0 }
+    controls:
+      - signal: OSPI1_RESETn
+        net: "OSPI1_RESETn"
+        silicon_pad: "P15_7"
+        gpio_node: lpgpio
+        gpio_pin: 7
+        direction: out
+        polarity: active_low
+        polarity_basis: net_name
+        role: reset
+        holds_through_stop: unproven
+        source: { file: alif-ospi.tsv, signal: OSPI1_RESETn }
+    default_modes: [stop, standby]
+    default_action: hold_reset
+    actions:
+      hold_reset:
+        control: OSPI1_RESETn
+        opt_in: false
+        note: >-
+          flash_ospi_alif (zephyr/drivers/flash/flash_ospi_alif.c) exposes no
+          power-management or deep-power-down hook, so reset-hold is the
+          action.  The reset returns the part to its power-on 1-1-1 framing and
+          the driver is held out of service across the reset (flash_ospi_alif_suspend / flash_ospi_alif_resume): it takes the driver lock and waits for WIP to clear before RESETn is asserted, so a write or erase is never cut off.
+    restore:
+      method: driver_release
+      note: Release OSPI1_RESETn, then the flash driver re-enters Octal DDR on its next write or erase.
+    evidence: >-
+      alif-ospi.tsv row OSPI1_RESETn (P15_7); net-to-part mapping per
+      E1M-AEN-2626-R2 (U10 NOR) as recorded in CHANGELOG.md (the OSPI1_INTn/OSPI1_RESETn entry).
+
+  # External HyperRAM: the U9 footprint, chip-select OSPI0_SS0.
+  ext_ram:
+    presence: { on_module_key: hyperram }
+    controls:
+      - signal: OSPI0_RESETn
+        net: "OSPI0_RESETn"
+        silicon_pad: "P15_6"
+        gpio_node: lpgpio
+        gpio_pin: 6
+        direction: out
+        polarity: active_low
+        polarity_basis: net_name
+        role: reset
+        holds_through_stop: unproven
+        source: { file: alif-ospi.tsv, signal: OSPI0_RESETn }
+    default_modes: [stop, standby]
+    default_action: hold_reset
+    actions:
+      hold_reset:
+        control: OSPI0_RESETn
+        opt_in: false
+        note: >-
+          No HyperRAM driver exists in the tree to issue the part's own
+          low-power command, so reset-hold is the action.
+    restore:
+      method: pin_release
+      note: Release OSPI0_RESETn, then re-run the HyperRAM init.
+    evidence: >-
+      alif-ospi.tsv row OSPI0_RESETn (P15_6); U9 -> OSPI0_SS0 per the
+      E1M-AEN-2626-R2 netlist (metadata/e1m_modules/E1M-AEN803.yaml
+      `ospi_memories` comment).
+
+  # TI TMP112 on BRD_I2C (see on_module_links.brd_i2c.devices).  No control
+  # pad: the shutdown bit is in its configuration register.
+  temp_sensor:
+    chip: tmp112
+    presence: { on_module_key: temperature_sensor }
+    device_label: tmp112
+    controls: []
+    default_modes: [stop, standby]
+    default_action: shutdown_reg
+    actions:
+      shutdown_reg:
+        opt_in: false
+        note: TMP112 configuration-register SD bit.
+    restore:
+      method: register_write
+      note: Clear the SD bit; the first conversion follows.
+    evidence: >-
+      Part and bus per on_module_links.brd_i2c.devices (U20 TMP112DIDPWR).
+
+  # Micro Crystal RV-3028-C7 (0x52 on BRD_I2C): the PRIMARY RTC and the
+  # primary RTC wake source.  The internal LPRTC is not trusted for time or
+  # accurate timed wake (see the evidence).  Stays powered: KEEP_ALIVE with
+  # CLKOUT off (CLKOUT reaches only the E1M edge pin).  Powered from +1V8, so it
+  # lives while MODULE_EN is high; VBACKUP is not populated, so nothing persists
+  # once MODULE_EN is low.
+  rtc:
+    chip: rv3028c7
+    presence: { on_module_key: rtc_external }
+    device_label: rv3028
+    controls:
+      # RV-3028 /INT -> RTC_ALARM -> P15_0 (LPGPIO0): the wake INPUT.
+      - signal: RTC_ALARM
+        net: "RTC_ALARM"
+        silicon_pad: "P15_0"
+        gpio_node: lpgpio
+        gpio_pin: 0
+        direction: in
+        polarity: active_low
+        polarity_basis: net_name
+        role: wake_in
+        holds_through_stop: n/a
+        source: { file: inter-chip.tsv, signal: RTC_ALARM }
+    default_modes: [stop, standby]
+    default_action: keep_alive
+    actions:
+      keep_alive:
+        opt_in: false
+        note: >-
+          Never powered down; only CLKOUT is switched off.  Alarm or
+          countdown-timer interrupt on RTC_ALARM (P15_0) is the primary
+          ALP_POWER_WAKE_RTC source; long wake_after_ms intervals (>= 1 s)
+          use the countdown timer.
+    restore:
+      method: none
+    secondary_rtc: >-
+      Internal LPRTC (rtc0) is SECONDARY and not trusted for time or timed
+      wake: Alif ER001 (A0: a STOP wake resets the prescaler) and ER002 (A1:
+      falls back to LFRC).  The SES boot leaves the LF clock on LFRC
+      (`[SES] No LF XTAL`, about 5 % error); LFXO works when selected (about
+      32785 Hz measured) but selecting it via `se_service_set_run_cfg` has side
+      effects, so LPRTC stays secondary until the full-profile backend (U5/U7).
+      See the CHANGELOG alp-sdk#1814 section.
+    evidence: >-
+      Part per on_module_links.brd_i2c.devices (U21); /INT -> P15_0 per
+      on_module_links.rtc_alarm and the inter-chip.tsv RTC_ALARM row.  VBACKUP
+      unpopulated: see the rv3028 device evidence.
+
+  # On-module backlight driver.  Family-wide: one PCB, and no SKU preset
+  # carries a backlight key to read.
+  backlight:
+    presence: { family_invariant: true }
+    controls:
+      - signal: BACKLIGHT_EN
+        silicon_pad: "P5_5"
+        gpio_node: gpio5
+        gpio_pin: 5
+        direction: out
+        polarity: active_high
+        polarity_basis: assumed
+        role: enable
+        holds_through_stop: "no"
+        source: { file: on-module-links.yaml, key: backlight.enable }
+    default_modes: [stop, standby]
+    default_action: enable_low
+    actions:
+      enable_low:
+        control: BACKLIGHT_EN
+        opt_in: false
+        note: P5_5 is main-domain and does not hold through STOP.
+    restore:
+      method: pin_release
+    evidence: >-
+      on_module_links.backlight.enable (P5_5, E1M-AEN-2626-R2 netlist).
+      `BACKLIGHT_EN` is this file's label, not a netlist name; the asserted
+      polarity is `assumed`.

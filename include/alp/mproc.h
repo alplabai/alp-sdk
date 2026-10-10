@@ -24,7 +24,7 @@
  * surface carries OpenAMP / RPMsg framing, looks up endpoint IDs +
  * mailbox channels + carve-out addresses from the build-time-generated
  * `<alp/system_ipc.h>`, and works identically on every heterogeneous
- * SoM (AEN E5+, V2N, V2M, NX9).  rpc.h is the right answer for almost
+ * SoM (AEN E5+, V2N, V2M).  rpc.h is the right answer for almost
  * every "two cores talk to each other" use case; mproc.h is the
  * escape hatch when you need to bypass RPMsg overhead.
  *
@@ -37,7 +37,7 @@
  * The @ref alp_core_id_t enum enumerates every core that appears in
  * any shipped SoM preset's `topology:` block, so apps can address
  * peers on AEN (M55-HP / M55-HE / A32 cluster), V2N (M33-SM / A55
- * cluster), V2M (same as V2N), or NX9 (M33 / A55 cluster) through
+ * cluster), or V2M (same as V2N) through
  * the same surface.  Adding a new SoM SKU MUST extend the enum and
  * the test in `tests/scripts/test_core_id_enum_coverage.py` enforces
  * that.
@@ -117,13 +117,8 @@ typedef enum {
 	ALP_CORE_M33_SM      = 6, /**< V2N Cortex-M33 system-manager
                                      (matches `m33_sm` in V2N101/V2M101
                                      topology). */
-	ALP_CORE_A55_CLUSTER = 7, /**< V2N / NX9 Cortex-A55 cluster as a single
+	ALP_CORE_A55_CLUSTER = 7  /**< V2N Cortex-A55 cluster as a single
                                      endpoint (matches `a55_cluster`). */
-
-	/* ---- NXP i.MX 93 (NX9 family) ---- */
-	ALP_CORE_M33 = 8 /**< NX9 Cortex-M33 (no _sm suffix -- NX9's
-                                     M33 doesn't carry the system-manager
-                                     role; matches `m33` in NX9101 topology). */
 } alp_core_id_t;
 
 /* ------------------------------------------------------------------ */
