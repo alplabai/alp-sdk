@@ -139,7 +139,7 @@
 #define TR_MEM_BL_GAP_LO          TR_MEM_SN65_RESERVED_A_HI
 #define TR_MEM_BL_GAP_HI          TR_MEM_SN65_RESERVED_B_LO
 #define TR_MEM_BL 0x0237FDC0u /* HE: the backlight level + the bench's request word */
-#define TR_MEM_BL_SIZE 0x14u /* tr_bl_t: 20 B (led_errs at +0x10): 0x0237FDC0..0x0237FDD3 */
+#define TR_MEM_BL_SIZE 0x14u       /* tr_bl_t: 20 B (led_errs at +0x10): 0x0237FDC0..0x0237FDD3 */
 #define TR_MEM_SN65_RECIPE \
 	0x0237FE00u /* HE -> HP: the SN65DSI83 bridge's CSR table (struct sn65dsi83_recipe, zephyr/drivers/
                                        * display/sn65dsi83_recovery.h, 0x54 B, the RVT121 + TR_INPUT_NPU builds). The HE's
