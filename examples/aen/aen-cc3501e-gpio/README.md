@@ -156,7 +156,8 @@ The native_sim build mechanism mirrors aen-cc3501e-bringup:
 Two J-Links: one on the Alif, one on the CC3501E.
 
 ```sh
-# 1. Build + flash the CC3501E peer firmware first (see firmware/cc3501e).
+# 1. Build + flash the CC3501E peer firmware first (alplabai/cc3501e-bridge-firmware,
+#    ADR 0031; `ti/build_ti.ps1`).
 #    The CC3501E reads VTref=0V until this app powers it, so flash it with
 #    the Alif app already powering WIFI_EN, or hold WIFI_EN externally.
 
