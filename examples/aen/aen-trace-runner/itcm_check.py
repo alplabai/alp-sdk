@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 nm, elf, limit = sys.argv[1], sys.argv[2], int(sys.argv[3])
-out = subprocess.run([nm, elf], capture_output=True, text=True, check=True).stdout
+out = subprocess.run([nm, elf], capture_output=True, encoding="utf-8", check=True).stdout
 m = re.search(r"^([0-9a-fA-F]+) A _flash_used$", out, re.M)
 if not m:
     sys.exit("itcm_check: no _flash_used in %s" % elf)
