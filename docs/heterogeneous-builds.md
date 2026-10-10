@@ -343,7 +343,10 @@ original planner as the reference/parity producer:
    effective per-core mapping.
 3. For each core with `os: != off`, `tan` materialises the planner's
    per-core config to disk (`build/m33_sm-zephyr/alp.conf`,
-   `build/a55_cluster-yocto/conf/local.conf`).
+   `build/a55_cluster-yocto/conf/local.conf`); zephyr and baremetal slices
+   also carry `alp.overlay`, `cmake-args.txt`, `alp_hw_info_build.h` and
+   `alp-west-libs.yml` (see "Other rendered plan artefacts" in
+   [`board-config-emit.md`](board-config-emit.md)).
 4. `tan` writes the planner's shared generated artefacts
    (`generated/alp/system_ipc.h`, `generated/dts-reservations.dtsi`,
    `generated/dts-partitions.dtsi`, plus `generated/storage_mount_table.c`
@@ -760,8 +763,9 @@ mailbox:
     - { id: 3, reserved_for: power_mgmt }
 ```
 
-Adding a second `rpmsg` channel with no free
-`reserved_for: alp_default_rpmsg` slot fails at validate time.  Don't
+A second `rpmsg` channel not named for a reservation is assigned the lowest
+unclaimed `reserved_for: app` channel (below), and is only rejected once none
+is left.  Don't
 override `reserved_for: power_mgmt` — that channel carries the PMIC's
 runtime power-state machine.
 

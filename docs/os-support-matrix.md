@@ -160,7 +160,7 @@ opt-in ISP Pico backend (`CONFIG_ALP_SDK_CAMERA_ALIF_ISP`, default n, E8 only). 
 sensor comes from a camera shield (see [`camera-shields.md`](camera-shields.md)).
 Bench-verified on the E1M-AEN803 (E8) — M55-HE and, since #2809, M55-HP (IMX335, 3/3
 cold boots with an HP-only image) — see the AEN801 camera row in
-[`verification-status.md`](verification-status.md).  The E1M-AEN401 (E4, M55-HP only)
+[`verification-status.md`](verification-status.md).  The E1M-AEN401 (E4) M55-HP camera build
 M55-HP build is wired by #2809 but not bench-verified.
 
 ### Cross-cutting v0.2 capability infrastructure
