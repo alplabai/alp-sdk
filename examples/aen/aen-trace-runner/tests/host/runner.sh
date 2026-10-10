@@ -9,7 +9,10 @@ RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/tr-run.XXXXXX") || exit 1
 trap 'rm -rf "$RUN_TMP"' EXIT
 # TR_RASTER_CHECKS: r3d_raster.c's invariant asserts (never in the A32 image).
 CHECKS="-DTR_RASTER_CHECKS"
-for t in tests/host/test_*.c; do
+# Each test is one compile + run, independent of the others: run them in parallel (each one's output is
+# kept whole and printed in test order, so the log reads as it did serially).
+run_one() {
+	local t=$1 out extra_cflags
 	out="$RUN_TMP/tr-$(basename "$t" .c)"
 	extra_cflags=""
 	# test_track_cam_orientation.c needs TR_CAM_FLIP_Y compiled in as 1
@@ -41,9 +44,18 @@ for t in tests/host/test_*.c; do
 		$(ls src/game/*.c src/vision/*.c src/hud/*.c src/render/sprite.c src/render/proj.c \
 		     src/render/r3d_math.c src/render/r3d_raster.c src/render/r3d_scene.c src/render/r3d_rig.c \
 		     src/render/cam_pip.c src/ipc/*.c src/audio/*.c 2>/dev/null | grep -v main.c) -lm; then
-		echo "BUILD FAIL: $t"; rc=1; continue
+		echo "BUILD FAIL: $t"; return 1
 	fi
-	if "$out"; then echo "PASS: $t"; else echo "FAIL: $t"; rc=1; fi
+	if "$out"; then echo "PASS: $t"; else echo "FAIL: $t"; return 1; fi
+}
+export -f run_one
+export RUN_TMP CHECKS
+JOBS=$(nproc 2>/dev/null || echo 2)
+ls tests/host/test_*.c | xargs -P"$JOBS" -I{} bash -c 'run_one {} > "$RUN_TMP/log-$(basename {} .c)" 2>&1; echo $? > "$RUN_TMP/rc-$(basename {} .c)"'
+for t in tests/host/test_*.c; do
+	n=$(basename "$t" .c)
+	cat "$RUN_TMP/log-$n"
+	[ "$(cat "$RUN_TMP/rc-$n")" = 0 ] || rc=1
 done
 # The arm controls with the sensor NOT mirrored (cam_rot.h TR_CAM_MIRROR=0: a
 # camera that sees the player face to face): the same physical player's LEFT

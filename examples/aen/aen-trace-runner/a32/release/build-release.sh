@@ -144,8 +144,9 @@ fi
 # 0b. The partner logo: what the HE's CMakeCache says must be what its elf carries (hud.c's
 #     tr_partner_logo[]), so a stale build dir cannot ship a logo nobody asked for, or lose one.
 logo=$(sed -n 's/^TR_PARTNER_LOGO:[A-Z]*=//p' "$hed/CMakeCache.txt" 2>/dev/null | tr -d '\r')
+syms=$("$NM" "$elf" 2>/dev/null) && [ -n "$syms" ] || die "$NM could not read the symbols of $elf"
 has_logo=0
-grep -q ' tr_partner_logo$' <<<"$("$NM" "$elf" 2>/dev/null)" && has_logo=1
+grep -q ' tr_partner_logo$' <<<"$syms" && has_logo=1
 if [ -n "$logo" ] && [ "$has_logo" = 0 ]; then
 	die "$hed was configured with TR_PARTNER_LOGO=$logo but zephyr.elf has no tr_partner_logo -- rebuild the HE"
 elif [ -z "$logo" ] && [ "$has_logo" = 1 ]; then

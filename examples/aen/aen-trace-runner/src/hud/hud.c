@@ -345,6 +345,10 @@ _Static_assert(INV_Y + INV_PANEL_H <= TR_HUD_H, "the invitation panels stay in t
 _Static_assert(TR_PARTNER_LOGO_W <= CB_BOX_W && TR_PARTNER_LOGO_H <= CB_BOX_H,
                "the partner logo is larger than the header allows (tools/genlogo.py --box)");
 _Static_assert(TR_LOGO_HDR_H <= LOGO_CARD_H && CB_BOX_H <= LOGO_CARD_H, "both marks fit the card");
+/* Flash: the HE image is loaded whole into 256 KiB of ITCM (CMakeLists.txt checks the whole image after
+ * the link); the logo's pixels and palette may take 8 KiB of it, the header's ALP LAB mark is fixed. */
+_Static_assert(sizeof(tr_partner_logo) + sizeof(tr_partner_logo_pal) <= 8192,
+               "the partner logo's pixels and palette are over the 8 KiB flash allowance");
 _Static_assert(LOGO_CARD_X + CB_W <= 400, "the header stays in the T_SCORE / T_SUB tiles");
 _Static_assert(LOGO_CARD_X + CB_W + 8 <= PERF_X, "the header keeps 8 px from the stats panel");
 

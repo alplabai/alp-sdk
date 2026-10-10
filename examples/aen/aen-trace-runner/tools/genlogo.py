@@ -57,7 +57,6 @@ def load(path, tw, th):
             big = big.convert("RGBa").resize((w * SS, h * SS), Image.LANCZOS).convert("RGBA")
     else:
         big = probe.convert("RGBa").resize((w * SS, h * SS), Image.LANCZOS).convert("RGBA")
-        big = Image.fromarray(np.asarray(big))
     return np.asarray(big, dtype=np.float64) / 255.0, w, h
 
 
@@ -74,31 +73,29 @@ def to_argb4444(rgba, w, h):
     return px
 
 
-def variant(path, box, prefix, lname):
-    """C text for one size of the logo: TR_PARTNER_LOGO<prefix>_W / _H / _NPAL / _PX(i)."""
+def render(path, box):
+    """C text for the logo fitted to `box` ("WxH"): TR_PARTNER_LOGO_W / _H / _NPAL / _PX(i)."""
     tw, th = (int(v) for v in box.lower().split("x"))
     rgba, w, h = load(path, tw, th)
     flat = to_argb4444(rgba, w, h).reshape(-1)
     pal = [0] + sorted(set(int(v) for v in flat) - {0})  # index 0 = clear
     if len(pal) > 256:
-        sys.exit("genlogo: %d distinct pixel values in the %s size, more than the 256 an index holds -- use a smaller box" % (len(pal), box))
+        sys.exit("genlogo: %d distinct pixel values, more than the 256 an index holds -- use a smaller box" % len(pal))
     lut = {v: i for i, v in enumerate(pal)}
     idx = [lut[int(v)] for v in flat]
     o = [
-        "/* %s: %d x %d px, row-major, 8-bit indices into the palette */" % (box, w, h),
-        "#define TR_PARTNER_LOGO%s_W %d" % (prefix, w),
-        "#define TR_PARTNER_LOGO%s_H %d" % (prefix, h),
-        "#define TR_PARTNER_LOGO%s_NPAL %d" % (prefix, len(pal)),
-        "static const uint16_t %s_pal[TR_PARTNER_LOGO%s_NPAL] = {" % (lname, prefix),
+        "#define TR_PARTNER_LOGO_W %d" % w,
+        "#define TR_PARTNER_LOGO_H %d" % h,
+        "#define TR_PARTNER_LOGO_NPAL %d" % len(pal),
+        "static const uint16_t tr_partner_logo_pal[TR_PARTNER_LOGO_NPAL] = {",
         "	" + ", ".join("0x%04X" % v for v in pal) + ",",
         "};",
-        "static const uint8_t %s[TR_PARTNER_LOGO%s_W * TR_PARTNER_LOGO%s_H] = {" % (lname, prefix, prefix),
+        "static const uint8_t tr_partner_logo[TR_PARTNER_LOGO_W * TR_PARTNER_LOGO_H] = {",
     ]
     for i in range(0, len(idx), 24):
         o.append("	" + ", ".join("%d" % v for v in idx[i : i + 24]) + ",")
-    o.append("};")
-    o.append("#define TR_PARTNER_LOGO%s_PX(i) (%s_pal[%s[i]])" % (prefix, lname, lname))
-    return o, w, h, int((flat >> 12 != 0).sum())
+    o += ["};", "#define TR_PARTNER_LOGO_PX(i) (tr_partner_logo_pal[tr_partner_logo[i]])"]
+    return o, w, h
 
 
 def main():
@@ -115,7 +112,7 @@ def main():
     if a.source:
         o.append(" * Source: %s" % a.source)
     o.append(" * ARGB4444 straight alpha. Partner artwork: keep out of public repos. */")
-    body, w, h, _ = variant(a.logo, a.box, "", "tr_partner_logo")
+    body, w, h = render(a.logo, a.box)
     o += body
     with open(a.out, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(o) + "\n")
