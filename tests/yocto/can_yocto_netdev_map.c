@@ -77,6 +77,20 @@ int main(void)
 	put_map(big, sizeof(big));
 	ALP_ASSERT_EQ_INT(resolve(0, out, sizeof(out)), ALP_ERR_NOT_READY);
 
+	/* Truncation edge: exactly the buffer size (64) is rejected as "maybe
+	 * truncated" (the read cannot prove it hit EOF). */
+	char edge[64];
+	memset(edge, 'x', sizeof(edge));
+	put_map(edge, sizeof(edge));
+	ALP_ASSERT_EQ_INT(resolve(0, out, sizeof(out)), ALP_ERR_NOT_READY);
+
+	/* Unreadable path (not ENOENT): the map "file" has a regular file as a
+	 * directory component -> ENOTDIR.  Must fail closed, NOT fall back. */
+	put_map(swapped, sizeof(swapped));
+	char bad_path[512];
+	snprintf(bad_path, sizeof(bad_path), "%s/x", ALP_CAN_NETDEV_MAP_PATH);
+	ALP_ASSERT_EQ_INT(y_can_netdev_name_at(bad_path, 0, out, sizeof(out)), ALP_ERR_NOT_READY);
+
 	/* Property absent (non-V2N SoMs): literal can<bus_id>. */
 	remove(ALP_CAN_NETDEV_MAP_PATH);
 	ALP_ASSERT_EQ_INT(resolve(1, out, sizeof(out)), ALP_OK);

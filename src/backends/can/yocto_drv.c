@@ -414,14 +414,25 @@ y_can_netdev_from_map(const char *map, size_t len, unsigned bus_id, char *out, s
 	return -1;
 }
 
-/* Resolve the netdev name for @p bus_id.  ALP_OK, ALP_ERR_NOT_READY (property
- * present but no usable entry, or unreadable/oversized), or ALP_ERR_INVAL. */
-static alp_status_t y_can_netdev_name(unsigned bus_id, char *out, size_t cap)
+/* Resolve the netdev name for @p bus_id from the map at @p path.  ALP_OK,
+ * ALP_ERR_NOT_READY (property present but no usable entry, or
+ * unreadable/oversized), or ALP_ERR_INVAL.
+ *
+ * The map is read into a 64-byte buffer: two entries ("can1\0can0\0") use 10
+ * bytes, so 64 holds ~12 five-byte names.  A longer property is rejected as
+ * NOT_READY (truncating it could shift entries and open the wrong port). */
+static alp_status_t y_can_netdev_name_at(const char *path, unsigned bus_id, char *out, size_t cap)
 {
-	char  map[64]; /* 2 entries today; a longer property is rejected below */
-	FILE *f = fopen(ALP_CAN_NETDEV_MAP_PATH, "rb");
+	char  map[64];
+	FILE *f = fopen(path, "rb");
 	if (f == NULL) {
-		if (errno != ENOENT) return ALP_ERR_NOT_READY; /* present but unreadable */
+		if (errno != ENOENT) {
+			/* Present but unreadable (EACCES, ENOTDIR, ...).  Failing closed is
+			 * deliberate: guessing can<bus_id> could reopen the swapped port. */
+			fprintf(stderr, "alp_can: cannot read %s (errno %d); refusing to guess the netdev\n",
+			        path, errno);
+			return ALP_ERR_NOT_READY;
+		}
 		int k = snprintf(out, cap, "can%u", bus_id);
 		return (k < 0 || (size_t)k >= cap) ? ALP_ERR_INVAL : ALP_OK;
 	}
@@ -430,6 +441,11 @@ static alp_status_t y_can_netdev_name(unsigned bus_id, char *out, size_t cap)
 	fclose(f);
 	if (bad) return ALP_ERR_NOT_READY;
 	return y_can_netdev_from_map(map, n, bus_id, out, cap) == 0 ? ALP_OK : ALP_ERR_NOT_READY;
+}
+
+static alp_status_t y_can_netdev_name(unsigned bus_id, char *out, size_t cap)
+{
+	return y_can_netdev_name_at(ALP_CAN_NETDEV_MAP_PATH, bus_id, out, cap);
 }
 
 /**

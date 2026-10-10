@@ -229,13 +229,17 @@ not 3.3 V tolerant.
 order of the enabled channels, so the E1M bus ids are swapped: `E1M_X_CAN0`
 (CANFD ch 3) is `can1` and `E1M_X_CAN1` (CANFD ch 2) is `can0`. The channel is
 not readable at runtime (`dev_id`/`dev_port` read 0), so the generated ownership
-dtsi publishes the map as the root property `alp,e1m-can-netdev = "can1", "can0";`
-(index = E1M bus id; the rank of each a55-owned CAN instance's SoC channel in
-`metadata/socs/renesas/rzv2n/*.json` `linux_dt`), and `alp_can_open()` on Yocto
+dtsi publishes the map as the root property (index = E1M bus id; the rank of each
+CAN instance's SoC channel in `metadata/socs/renesas/rzv2n/*.json` `linux_dt`, among
+the channels the metadata enables with `linux_enable`). With both enabled it is
+`alp,e1m-can-netdev = "can1", "can0";`; with only CANFD3 enabled `"can0", "";`. An
+instance without `linux_enable` gets an empty entry (no netdev, the open fails), which
+is the shipped default today. `alp_can_open()` on Yocto
 reads `/proc/device-tree/alp,e1m-can-netdev`, falling back to `can<bus_id>` only when
 the property is absent (a present property with no entry for the bus fails the open).
-The same dtsi disables CANFD channels 0/1/4/5 explicitly so the rank equals the enabled order. Which
-physical port moves is not yet bench-verified.
+The same dtsi disables every CANFD channel that is not enabled so the rank equals the enabled order.
+The CAN0 = channel 3 / CAN1 = channel 2 mapping is not bench-verified: no CAN netdev
+exists on any current image.
 
 A `board.yaml` `ownership:` entry may differ from the SoM default only where
 both cores' trees can follow it: the instance lists `m33` in `candidates` and

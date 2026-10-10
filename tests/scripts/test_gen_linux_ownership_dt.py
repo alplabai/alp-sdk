@@ -226,25 +226,50 @@ def test_default_kernel_build_includes_the_ownership_fragment():
     assert all(f'"{c}"' in frag for c in SOC["linux_dt"]["SCI7"]["cpg_clocks"])
 
 
-def test_can_netdev_map_is_rank_of_channel_not_bus_id():
-    """#2352: E1M CAN0 = CANFD3 -> can1, E1M CAN1 = CANFD2 -> can0."""
+def _with_can_pfc(soc):
+    soc = copy.deepcopy(soc)
+    soc["linux_dt"]["CANFD3"]["pinmux"] = {"CANFD3_CRX3": 9, "CANFD3_CTX3": 9}
+    soc["linux_dt"]["CANFD2"]["pinmux"] = {"CANFD2_CRX2": 9, "CANFD2_CTX2": 9}
+    return soc
+
+
+def test_can_netdev_map_is_rank_among_enabled_channels():
+    """#2352: rank over the `linux_enable` channels only (the only ones set okay)."""
+    both = _enabled(DOC, "e1m_can0", "e1m_can1")
+    soc = _with_can_pfc(SOC)
+    own = resolve_ownership(both)
+    # Both enabled: E1M CAN0 = CANFD3 -> can1, E1M CAN1 = CANFD2 -> can0.
+    assert lo.can_netdev_map(both, soc, own) == ["can1", "can0"]
+    assert 'alp,e1m-can-netdev = "can1", "can0";' in lo.render(both, soc, LINKS)[0]
+    # Only CANFD3 enabled: it is the first (only) enabled channel -> can0; CAN1 has none.
+    one = _enabled(DOC, "e1m_can0")
+    assert lo.can_netdev_map(one, soc, resolve_ownership(one)) == ["can0", ""]
+    # Only CANFD2 enabled: CAN0 has none.
+    two = _enabled(DOC, "e1m_can1")
+    assert lo.can_netdev_map(two, soc, resolve_ownership(two)) == ["", "can0"]
+    # linux_enable on a channel whose PFC codes are missing (GAP) leaves it disabled: not ranked.
+    assert lo.can_netdev_map(one, SOC, resolve_ownership(one)) == ["", ""]
+    # Shipped default enables nothing: map present, every entry empty (fail closed).
     own = resolve_ownership(DOC)
-    assert lo.can_netdev_map(DOC, SOC, own) == ["can1", "can0"]
-    assert 'alp,e1m-can-netdev = "can1", "can0";' in lo.render(DOC, SOC, LINKS)[0]
-    # An M33-owned CAN0 leaves no Linux netdev for it; CAN1 is then the only channel.
-    assert lo.can_netdev_map(DOC, SOC, {**own, "e1m_can0": "m33"}) == ["", "can0"]
+    assert lo.can_netdev_map(DOC, soc, own) == ["", ""]
+    # An M33-owned CAN0 is never a Linux netdev.
+    assert lo.can_netdev_map(both, soc, {**own, "e1m_can0": "m33"}) == ["", "can0"]
     # No CAN instances -> no property.
     doc = copy.deepcopy(DOC)
     for k in ("e1m_can0", "e1m_can1"):
         del doc["assignable"][k]
-    assert lo.can_netdev_map(doc, SOC, resolve_ownership(doc)) == []
+    assert lo.can_netdev_map(doc, soc, resolve_ownership(doc)) == []
     assert "alp,e1m-can-netdev" not in lo.render(doc, SOC, LINKS)[0]
 
 
 def test_can_unused_channels_are_forced_disabled_so_rank_is_enabled_order():
-    """#2352: the netdev map counts only channels 2 and 3, so channels 0/1/4/5
-    are disabled explicitly; the driven ones are left at the vendor status."""
-    text, labels = lo.render(DOC, SOC, LINKS)
-    for c in (0, 1, 4, 5):
+    """#2352: every channel Linux does not enable is disabled explicitly, so the
+    kernel's probe order equals the rank the map was computed from."""
+    text, labels = lo.render(DOC, SOC, LINKS)  # default: nothing enabled
+    for c in range(6):
         assert f'channel{c} {{\n\t\tstatus = "disabled";' in text and f"canfd/channel{c}" in labels
-    assert "channel2 {" not in text and "channel3 {" not in text
+    one = _enabled(DOC, "e1m_can0")
+    text, labels = lo.render(one, _with_can_pfc(SOC), LINKS)
+    for c in (0, 1, 2, 4, 5):
+        assert f'channel{c} {{\n\t\tstatus = "disabled";' in text
+    assert 'channel3 {\n\t\tstatus = "okay";' in text and 'channel3 {\n\t\tstatus = "disabled"' not in text
