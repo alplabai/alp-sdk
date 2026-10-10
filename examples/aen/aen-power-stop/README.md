@@ -77,10 +77,11 @@ One variable each, selected with a config fragment on top of `prj.conf`
 | (R-vendor) | `ix-repro-vendor.conf` | forces the boot-time restore on a cold boot (fixed profile), then BKRAM self-test, then cycle 1 in the same boot | `bkram live=1 selftest=1` and BOOT w40 = 1, w52 = 1 |
 | (R-legacy) | `x-repro-legacy.conf` | the same with the c6de654ff restore profile (0x16d, no BACKUP4K, no re-assert) | reproduces the U8e loss: `bkram live=0`, BOOT w52 = 2, the sleep refused `bkram_unusable` |
 
-### STANDBY, TCM retention and wake-to-main() timing (code-complete, unverified)
+### STANDBY, TCM retention and wake-to-main() timing
 
-Three further fragments cover what is implemented but has never run on silicon. **None of them has
-been run: every expected line below is what the code prints, not a measured result.** Each is
+Three further fragments. Bench result on e1m-aen-evk-02 (E1M-AEN803, 2026-10-10): `s-standby` and
+`t-tcm-retain` ran 3/3 cycles with every verdict PASS; `w-wake-timing` ran but its counters are too
+coarse to resolve wake-to-`main()` (see the timing note below). `t-tcm-retain-128k` was not run. Each is
 selected like the others (`-DEXTRA_CONF_FILE=variants/<name>.conf`); the default image is unchanged.
 
 | Variant | Fragment | Changes | Expected evidence |

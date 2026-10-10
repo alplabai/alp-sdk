@@ -88,7 +88,7 @@ unverified.
 `src/backends/power/alif_se_power.c` implements `alp_power_request_sleep(STOP |
 STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803). It is registered for
 `alif:ensemble:e8` behind `CONFIG_ALP_SDK_POWER_ALIF_SE` (default **n**,
-experimental; STOP is bench-proven on the E1M-AEN803, STANDBY is not). The M55-HE subsystem is powered off and the
+experimental; STOP and STANDBY are bench-proven on the E1M-AEN803). The M55-HE subsystem is powered off and the
 wake is a cold boot through the Secure Enclave, so the call does not return: read
 the cause with `alp_power_boot_wake_info()`. `SLEEP` / `DEEP_SLEEP` are forwarded to
 the pm_policy backend when it is built.
@@ -217,9 +217,18 @@ resolution).
 **Verified on silicon (bench U8h, E1M-AEN803):** the SE accepts the profile, the EWIC entry
 removes power and the wake is a cold boot, BKRAM (bit 21) retains the record across STOP, and
 the LPTIMER (500 ms, 5 s) and the RV-3028 countdown (3 s, 11 s) and alarm wake the SoC.
-**Not verified:** STANDBY, the HE TCM bank sizes and ITCM / DTCM split, retention of
-application RAM, that the LPGPIO holds survive the SE's wake boot on every board population,
-the E1M-AEN801, and the E4. `examples/aen/aen-power-stop` is the bench (its `s-standby`,
-`t-tcm-retain`, `t-tcm-retain-128k` and `w-wake-timing` variants are code-complete for STANDBY,
-TCM retention and wake-to-`main()` timing, and unverified until run; the
-`product-noscratch` variant is the shipping configuration without the bench cell).
+**Verified on silicon (e1m-aen-evk-02, E1M-AEN803 2026W36-0001, 2026-10-10):** STANDBY
+(`s-standby`: the LPTIMER, countdown and alarm cycles all woke with `realised_mode` STANDBY) and
+DTCM retention across STOP (`t-tcm-retain`, `retain_kb` 256: a CRC-checked pattern in both
+DTCM halves survived all three cycles). A TCM-retained STOP wake leaves `RTSS_HE_RESET` = 0x01,
+the value the SVD names "NSRST pin asserted" and also the value a cold power-on leaves (a STOP
+wake without TCM leaves 0x10), so a sleep that retains TCM does not mark its record
+`ALP_SOM_REC_NSRST_TRUSTED` and its wake is never read as a pin reset. `w-wake-timing` ran but
+cannot resolve wake-to-`main()`: the LPRTC ticks at about 2 Hz and the RV-3028 at 1 s, so the
+only measured figure is Zephyr start to `main()` = 85 ms (`main_uptime_ms`); the SE boot before
+it needs a GPIO edge on a scope or a SoM current trace.
+**Not verified:** the HE TCM bank sizes and the ITCM / DTCM split (both DTCM halves stay
+powered whenever any TCM is asked for), retention of application RAM, that the LPGPIO holds
+survive the SE's wake boot on every board population, the E1M-AEN801, and the E4. The
+`product-noscratch` variant of `examples/aen/aen-power-stop` is the shipping configuration without
+the bench cell.
