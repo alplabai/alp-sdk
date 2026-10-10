@@ -631,6 +631,39 @@ __weak alp_status_t alp_som_power_rtc_countdown_cancel(void)
 	return ALP_ERR_NOSUPPORT;
 }
 
+/* Bit n when property @p prop of domain node @p n is a pad of the lpgpio controller. */
+#define SOMPD_LPGPIO_BIT(n, prop) \
+	COND_CODE_1(DT_NODE_HAS_PROP(n, prop), \
+	            (COND_CODE_1(DT_SAME_NODE(DT_GPIO_CTLR_BY_IDX(n, prop, 0), DT_NODELABEL(lpgpio)), \
+	                         (BIT(DT_GPIO_PIN_BY_IDX(n, prop, 0))), \
+	                         (0))), \
+	            (0))
+
+#define SOMPD_LPGPIO_BITS(n) \
+	(SOMPD_LPGPIO_BIT(n, reset_gpios) | SOMPD_LPGPIO_BIT(n, enable_gpios) | \
+	 SOMPD_LPGPIO_BIT(n, powerdown_gpios) | SOMPD_LPGPIO_BIT(n, wake_gpios)) |
+
+/* P15_2 = OSPI1_INTn, P15_3 = OSPI0_INTn: wired to the memory footprints (U10 pin A5, U9 pin A5
+ * \INT, each with a pull resistor) in the E1M-AEN-2626-R2 netlist, listed in alif-ospi.tsv
+ * lines 15-16, and not part of any power domain, so no devicetree node names them. */
+#define SOMPD_OSPI_INT_PADS (BIT(2) | BIT(3))
+
+uint32_t alp_som_power_lpgpio_claimed(void)
+{
+	return (DT_FOREACH_STATUS_OKAY(alp_som_power_domain, SOMPD_LPGPIO_BITS) 0u) |
+	       SOMPD_OSPI_INT_PADS;
+}
+
+uint32_t alp_som_power_boot_wake_pads(void)
+{
+	/* Only while the boot is still reported as a GPIO wake: an aborted sleep or a discarded
+	 * record clears wake_source, and the pads go with it. */
+	if (!_boot.valid || (_boot.wake_source & ALP_POWER_WAKE_GPIO) == 0u) {
+		return 0u;
+	}
+	return (_boot_rec.armed_hw >> ALP_SOM_FIRED_PADS_SHIFT) & ALP_SOM_PADS_MASK;
+}
+
 const struct gpio_dt_spec *alp_som_power_wake_gpio(alp_power_domain_t d)
 {
 	if ((unsigned)d >= (unsigned)ALP_POWER_DOMAIN_COUNT || !_reg[d].present ||

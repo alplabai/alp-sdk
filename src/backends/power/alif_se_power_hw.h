@@ -71,6 +71,25 @@ alp_status_t alif_se_hw_rtc_int_arm(void);
 /** Switch the pad interrupt and the combined line off.  Idempotent. */
 void alif_se_hw_rtc_int_disarm(void);
 
+/* ---- Application LPGPIO wake pads (the `alp,power-wake-gpios` node) -------- */
+
+/** The pads the application named, as a bit mask (bit n = P15_n); 0 when the node is absent or a
+ *  pad's controller is not ready. */
+uint32_t alif_se_hw_wake_pad_mask(void);
+/** Mux the pads (pinctrl-0), make them plain inputs and drop any stale latched edge.  The
+ *  interrupt itself is switched on only inside alif_se_hw_enter_ewic(), under the lock. */
+alp_status_t alif_se_hw_wake_pads_arm(void);
+/** Pads that read at their asserted level right now (an edge wake would never fire on them). */
+uint32_t alif_se_hw_wake_pads_asserted(void);
+/** Switch the pad interrupts and the combined line off.  Idempotent. */
+void alif_se_hw_wake_pads_disarm(void);
+/** Pads of @p pads whose edge the GPIO block latched.  Reads the register directly (plus what
+ *  the entry saw right after the WFI), so it is valid on the early cold-boot path. */
+uint32_t alif_se_hw_wake_pads_fired(uint32_t pads);
+/** Cold-boot path, no driver up: acknowledge the latched edge of @p pads and disable their
+ *  interrupt enable, so the next cycle starts clean. */
+void alif_se_hw_wake_pads_release(uint32_t pads);
+
 /** CGU / CLKCTL_SYS registers for the clock-restore trigger and its log. */
 #define ALIF_SE_CGU_OSC_CTRL      0u
 #define ALIF_SE_CGU_PLL_LOCK_CTRL 1u
@@ -101,8 +120,9 @@ uint32_t alif_se_hw_vtor_read(void);
 
 /**
  * Enter the EWIC subsystem-off sleep: interrupts off (PRIMASK, BASEPRI 0, as the
- * DFP does), the wake pad armed (@p rtc_int: falling-edge interrupt on the
- * RV-3028 /INT pad plus the LPGPIO combined line toward the EWIC), read-modify-write
+ * DFP does), the wake pads armed (@p rtc_int: falling-edge interrupt on the
+ * RV-3028 /INT pad; @p pads: edge-to-active interrupts on the application LPGPIO pads, bit n =
+ * P15_n; both plus the LPGPIO combined line toward the EWIC), read-modify-write
  * of RTSS_HE_CTRL (WIC on, EWIC selected, COLD_WAKEUP cleared so the power domain
  * may drop), SLEEPDEEP, WFI.  When @p lptimer_ticks is non-zero the wake timer is armed
  * LAST, inside the interrupt-off section, and verified live (enabled, unmasked, not
@@ -115,7 +135,7 @@ uint32_t alif_se_hw_vtor_read(void);
  * entering, and so does a pad that already reads asserted once the edge is armed
  * (ALP_ERR_BUSY: the RV-3028 fired before the interrupt existed).
  */
-alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks);
+alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t pads, uint32_t lptimer_ticks);
 
 /** Why the last alif_se_hw_enter_ewic() refused (a static string), for the diagnostic. */
 const char *alif_se_hw_enter_reason(void);

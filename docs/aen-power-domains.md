@@ -118,6 +118,7 @@ vendor sample.
 |---|---|---|
 | `ALP_POWER_WAKE_RTC` | on-module RV-3028, `INT` -> P15_0 -> `WE_LPGPIO0` | primary RTC (the internal LPRTC is not trusted: ER001 / ER002, LFRC-only boot). With `wake_after_ms == 0` the caller's own alarm / countdown must already be armed, or the request is `ALP_ERR_INVAL`. |
 | `ALP_POWER_WAKE_TIMER` | LPTIMER (`alp,power-wake-timer`, `WE_LPTIMER0`) for `wake_after_ms < 1000` | runs from the AON low-frequency clock. `wake_after_ms` is a **minimum**: the tick count is rounded up against the fastest the clock can run (LFRC 36045 Hz = +10 %, the top of its trim range; measured 34251.7 Hz; LFXO 32775 Hz), so on LFRC a short wake is never early but can be late: ~5 % at the 34251.7 Hz this module measured, up to ~16 % if the clock sits at the bottom of the trim range (-5 %, ~31130 Hz). |
+| `ALP_POWER_WAKE_GPIO` | application LPGPIO pads named by an `alp,power-wake-gpios` devicetree node, `WE_LPGPIO<n>` | advertised only when the node exists and none of its pads is wired by the SoM (see "LPGPIO wake pads" below). |
 | (timed wake >= 1 s) | RV-3028 countdown (`rv3028c7_timer_start`) | whole seconds, rounded up. Needs the chip context bound (`alp_som_power_bind_rv3028`). |
 
 A timed wake reports the source the caller asked for, whichever hardware serves it:
@@ -128,6 +129,49 @@ section, so the edge is latched even by a short pulse (the part's pulse mode,
 tRTN1 = 7.8 ms, is never enabled by the SDK: `INT` stays low until the wake decode
 clears the flag). The LPGPIO combined line (IRQ 57) is the one that reaches the
 EWIC; its handler only masks the line again.
+
+**LPGPIO wake pads (`ALP_POWER_WAKE_GPIO`).** The application names its pads in the devicetree, so
+`<alp/power.h>` gains no symbol:
+
+```dts
+wake-pads {
+	compatible = "alp,power-wake-gpios";
+	wake-gpios = <&lpgpio 2 GPIO_ACTIVE_LOW>;   /* P15_2: line 2 of the LPGPIO island */
+	pinctrl-0 = <&pinctrl_wake_pads>;           /* LPGPIO function, input buffer, pull */
+	pinctrl-names = "default";
+};
+```
+
+- *Which hardware.* Only the LPGPIO island (P15_0..P15_7) is in the VBAT domain that stays powered
+  through STOP. Line n is wake event `WE_LPGPIO<n>` (bit 16 + n of `off_profile_t.wakeup_events`,
+  hal_alif `se_services/include/aipm.h:320-327`; the Alif DFP `demo_pm.c:751` pairs P15_4 with
+  `WE_LPGPIO4`) and the whole group reaches the EWIC through `EWIC_VBAT_GPIO` (`aipm.h:353`).
+  Those wake-event bits are the ones `ANA.WKUP_CTRL.LPGPIO` [23:16] carries (`alif_aipm_gen2.h`); the backend does not write that register.
+- *Polarity and edge.* Each entry is armed as an edge TO its asserted level (`GPIO_ACTIVE_LOW`:
+  falling, `GPIO_ACTIVE_HIGH`: rising), the way the vendor demo arms its joyswitch pad
+  (`demo_pm.c:359-361`). The pad must be idle when the request is made: a pad that already reads
+  asserted once the edge is armed is `ALP_ERR_BUSY`, as for the RV-3028 `INT`.
+- *Which pad fired.* The DW GPIO block latches the edge in `GPIO_RAW_INTSTATUS` (LPGPIO base
+  `0x42002000` + `0x44`, DFP `soc.h:1575`) until `GPIO_PORTA_EOI` (+ `0x4C`) is written. The BKRAM
+  record keeps the armed pads in `armed_hw` bits 23:16; the early cold-boot decode reads the latch,
+  sets `ALP_POWER_WAKE_GPIO` in `wake_source`, stores the fired pads in `armed_hw` bits 31:24 and
+  acknowledges the latch and the enable. An aborted sleep reads the same latch right after the
+  `WFI`. `alp_power_boot_wake_info()` reports only the bit; internally
+  `alp_som_power_boot_wake_pads()` returns the pad mask, and an application with several pads reads
+  its own pads' levels.
+- *Refused pads.* A pad the SoM wires is never a wake pad. `alp_som_power_lpgpio_claimed()` is every
+  LPGPIO pad of an `alp,som-power-domain` node (P15_0 RV-3028 `INT`, P15_1 `E_WIFI_NRST`, P15_4
+  `E_PHY_PWRDWN`, P15_5 `WIFI_EN`, P15_6 `OSPI0_RESETn`, P15_7 `OSPI1_RESETn`) plus P15_2 and P15_3
+  (the `OSPI1_INTn` / `OSPI0_INTn` nets, `alif-ospi.tsv`, wired to the memory footprints in the
+  E1M-AEN-2626-R2 netlist). One claimed pad in the node makes `ALP_POWER_WAKE_GPIO` unadvertised
+  and `alp_power_configure_wake_source()` answers `ALP_ERR_NOSUPPORT`.
+  **On the E1M-AEN801 / E1M-AEN803 R2 all eight lines are SoM-wired, so no pad is accepted on the
+  bare module**; the path is for a variant or a derivative where a line is freed.
+- *Not done.* The DW debounce filter (`GPIO_DEBOUNCE`, `gpio_enable_debounce()` in the DFP
+  `drivers/include/gpio.h:351`) needs its clock (`GPIO_DB_CKEN`, `RTSS_HE_LPPERI_CKEN` [9:8]) to keep
+  running through the SE's STOP profile; nothing in the DFP states that, so it is left off.
+  [BENCH] that the latch survives the SES boot, and that `EWIC_VBAT_GPIO` wakes on the pad edge,
+  are unverified: only the P15_0 path has run on silicon.
 
 **The OFF profile is complete and explicit.** `se_service_set_run_cfg()` /
 `set_off_cfg()` are not side-effect-free (bench: a one-field read-modify-write
@@ -218,6 +262,6 @@ resolution).
 removes power and the wake is a cold boot, BKRAM (bit 21) retains the record across STOP, and
 the LPTIMER (500 ms, 5 s) and the RV-3028 countdown (3 s, 11 s) and alarm wake the SoC.
 **Not verified:** STANDBY, the HE TCM bank sizes and ITCM / DTCM split, retention of
-application RAM, that the LPGPIO holds survive the SE's wake boot on every board population,
+application RAM, the LPGPIO wake pads (`ALP_POWER_WAKE_GPIO`), that the LPGPIO holds survive the SE's wake boot on every board population,
 the E1M-AEN801, and the E4. `examples/aen/aen-power-stop` is the bench (the
 `product-noscratch` variant is the shipping configuration without the bench cell).

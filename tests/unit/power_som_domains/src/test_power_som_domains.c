@@ -1053,7 +1053,7 @@ ZTEST(power_som_domains, test_wake_gpio_is_the_rtc_int_pad)
  * untouched", which test_weak_decode_defaults_pass_the_record_through proves by
  * leaving the hooks disarmed. */
 static struct {
-	bool                armed, discard;
+	bool                armed, discard, fire_pad;
 	unsigned            early_calls, i2c_calls;
 	unsigned            early_order, i2c_order, seq;
 	alp_som_pd_record_t early_seen;
@@ -1067,6 +1067,12 @@ void alp_som_power_wake_decode_early(alp_som_pd_record_t *rec)
 	g_dec.early_calls++;
 	g_dec.early_order = ++g_dec.seq;
 	g_dec.early_seen  = *rec;
+	if (g_dec.fire_pad) {
+		/* what the STOP backend's early decode does for a latched LPGPIO edge on P15_3 */
+		rec->wake_source |= ALP_POWER_WAKE_GPIO;
+		rec->armed_hw |= BIT(3) << ALP_SOM_FIRED_PADS_SHIFT;
+		return;
+	}
 	rec->wake_source |= ALP_POWER_WAKE_TIMER;
 }
 
@@ -1124,6 +1130,41 @@ ZTEST(power_som_domains, test_weak_decode_defaults_pass_the_record_through)
 	zassert_true(info.valid);
 	zassert_equal(info.wake_source, 0u, "nothing decoded: nothing claimed");
 	zassert_equal(info.slept_ms, 0u);
+}
+
+ZTEST(power_som_domains, test_lpgpio_claimed_is_the_somwired_set)
+{
+	/* This overlay's domains sit on P15_0 (rtc wake), P15_1 + P15_5 (wifi), P15_4 (phy) and
+	 * P15_7 (flash); the HyperRAM is DNI so P15_6 is free here.  P15_2 / P15_3 are the OSPI
+	 * INTn nets (no domain node), always claimed; gpio11 / gpio5 pads are not LPGPIO. */
+	zassert_equal(alp_som_power_lpgpio_claimed(), 0xBFu);
+}
+
+ZTEST(power_som_domains, test_boot_reports_the_pad_that_woke_the_soc)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed    = true;
+	g_dec.fire_pad = true;
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_GPIO);
+	zassert_equal(alp_som_power_boot_wake_pads(), BIT(3));
+}
+
+ZTEST(power_som_domains, test_no_pad_is_reported_for_a_timer_wake)
+{
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_equal(alp_som_power_boot_wake_pads(), 0u);
 }
 
 ZTEST(power_som_domains, test_boot_runs_the_decode_hooks_early_then_i2c)

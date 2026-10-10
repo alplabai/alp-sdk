@@ -59,8 +59,21 @@
  *                         fastest the clock can run; a short LFRC wake can be late.
  *                         wake_after_ms >= 1000 uses the RV-3028 countdown instead
  *                         (whole seconds, rounded up; > 4095 s in whole minutes).
- *   Nothing else is advertised.  GPIO, UART RX, comparator, brown-out and USB wake
- *   are real hardware features of the part but are not wired by this backend.
+ *   ALP_POWER_WAKE_GPIO   application LPGPIO pads (P15_n), named in the devicetree by an
+ *                         `alp,power-wake-gpios` node (no public symbol: the node's
+ *                         wake-gpios entries are the pads).  Line n is wake event
+ *                         WE_LPGPIO<n> (bit 16 + n) and reaches the EWIC through the
+ *                         EWIC_VBAT_GPIO group.  Armed as an edge to the entry's asserted
+ *                         level; the GPIO block latches it (GPIO_RAW_INTSTATUS) and the
+ *                         early wake decode reads which pads fired.  Advertised only when
+ *                         the node exists and NONE of its pads is wired by the SoM
+ *                         (alp_som_power_lpgpio_claimed(): every pad of a power-domain node,
+ *                         P15_0 the RV-3028 /INT included, plus P15_2 / P15_3, the OSPI
+ *                         INTn nets) -- on the E1M-AEN801 / AEN803 R2 that is all eight
+ *                         lines, so a pad can only be wired on a carrier-side variant.  No
+ *                         debounce (see alif_se_power_hw.c).
+ *   Nothing else is advertised.  UART RX, comparator, brown-out and USB wake are real
+ *   hardware features of the part but are not wired by this backend.
  *
  * Refusals (steps 1-3 below change no SE or domain state; the pre-sleep check clears a
  * stale RV-3028 UF flag and the BKRAM self-test writes and restores spare SRAM words)
@@ -259,10 +272,27 @@ static bool rtc_int_usable(void)
 	return alif_se_hw_rtc_int_present();
 }
 
+/* The application wake pads that are fit to arm: named in the devicetree, and none of them
+ * wired by the SoM.  One claimed pad refuses the whole set (a half-honoured list would let the
+ * caller sleep on a pad that cannot wake it). */
+static uint32_t usable_wake_pads(void)
+{
+	uint32_t pads = alif_se_hw_wake_pad_mask();
+
+	if (pads == 0u || (pads & alp_som_power_lpgpio_claimed()) != 0u) {
+		return 0u;
+	}
+	return pads;
+}
+
 /* The wake bits STOP / STANDBY can arm right now. */
 static uint32_t stop_wake_caps(void)
 {
 	uint32_t caps = 0u;
+
+	if (usable_wake_pads() != 0u) {
+		caps |= ALP_POWER_WAKE_GPIO;
+	}
 
 	if (rtc_int_usable()) {
 		caps |= ALP_POWER_WAKE_RTC;
@@ -343,6 +373,7 @@ typedef struct {
 	uint32_t         armed_ms;      /* nominal timed-wake length */
 	uint32_t         timed_bit;     /* ALP_POWER_WAKE_* a timed wake reports */
 	bool             keep_alarm;    /* WAKE_RTC asked: a caller-armed alarm must survive */
+	uint32_t         pads;          /* LPGPIO wake pads armed, bit n = P15_n */
 	bool             lfxo;          /* AON clock source for the OFF profile */
 	uint32_t         memory_blocks;
 } sleep_plan_t;
@@ -353,6 +384,15 @@ plan_wake(const alp_power_backend_state_t *state, uint32_t wake_after_ms, sleep_
 {
 	const uint32_t bitmap = state->wake_bitmap;
 
+	if ((bitmap & ALP_POWER_WAKE_GPIO) != 0u) {
+		uint32_t named = alif_se_hw_wake_pad_mask();
+
+		if ((named & alp_som_power_lpgpio_claimed()) != 0u) {
+			printk("alif_se_power: wake pads 0x%02x include a pad the SoM wires (0x%02x)\n",
+			       (unsigned)named,
+			       (unsigned)alp_som_power_lpgpio_claimed());
+		}
+	}
 	if ((bitmap & ~stop_wake_caps()) != 0u) {
 		return ALP_ERR_NOSUPPORT;
 	}
@@ -400,6 +440,12 @@ plan_wake(const alp_power_backend_state_t *state, uint32_t wake_after_ms, sleep_
 		        ? ALP_POWER_WAKE_RTC
 		        : ALP_POWER_WAKE_TIMER;
 		plan->wake |= plan->timed_bit;
+	}
+
+	if ((bitmap & ALP_POWER_WAKE_GPIO) != 0u) {
+		plan->pads = usable_wake_pads();
+		plan->hw |= ALP_SOM_ARM_LPGPIO;
+		plan->wake |= ALP_POWER_WAKE_GPIO;
 	}
 
 	plan->keep_alarm = (bitmap & ALP_POWER_WAKE_RTC) != 0u;
@@ -585,9 +631,20 @@ static bool lfxo_confirmed(void)
 	       (alif_se_hw_reg_read(ALIF_SE_REG_ANA_REG1) & ANA_REG1_XTAL32K_EN) != 0u;
 }
 
+/* Line n of the LPGPIO island is wake event WE_LPGPIO<n> = bit 16 + n and EWIC input group
+ * EWIC_VBAT_GPIO (hal_alif se_services/include/aipm.h:320-327, 353). */
+_Static_assert(ALP_AIPM_GEN2_WE_LPGPIO7 == (ALP_AIPM_GEN2_WE_LPGPIO0 << 7),
+               "WE_LPGPIO<n> is WE_LPGPIO0 << n");
+
 static uint32_t wake_events_for(const sleep_plan_t *plan)
 {
 	uint32_t we = 0u;
+
+	for (unsigned n = 0; n < 8u; ++n) {
+		if ((plan->pads & BIT(n)) != 0u) {
+			we |= ALP_AIPM_GEN2_WE_LPGPIO0 << n;
+		}
+	}
 
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u) {
 		we |= ALP_AIPM_GEN2_WE_LPTIMER0; /* lptimer0 is the `alp,power-wake-timer` */
@@ -612,7 +669,7 @@ static uint32_t ewic_for(const sleep_plan_t *plan)
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u) {
 		ewic |= ALP_AIPM_GEN2_EWIC_VBAT_TIMER;
 	}
-	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
+	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u || plan->pads != 0u) {
 		ewic |= ALP_AIPM_GEN2_EWIC_VBAT_GPIO;
 	}
 	return ewic;
@@ -818,10 +875,14 @@ typedef struct {
 	bool lptimer;
 	bool rtc_timer;
 	bool int_pad;
+	bool wake_pads;
 } armed_t;
 
 static void disarm(const armed_t *a)
 {
+	if (a->wake_pads) {
+		alif_se_hw_wake_pads_disarm();
+	}
 	if (a->int_pad) {
 		alif_se_hw_rtc_int_disarm();
 	}
@@ -860,6 +921,13 @@ static alp_status_t arm(const sleep_plan_t *plan, armed_t *a)
 		}
 		a->int_pad = true;
 	}
+	if (plan->pads != 0u) {
+		s = alif_se_hw_wake_pads_arm();
+		if (s != ALP_OK) {
+			return s;
+		}
+		a->wake_pads = true;
+	}
 	return ALP_OK;
 }
 
@@ -877,7 +945,7 @@ static void save_cycle_record(const sleep_plan_t *plan)
 	rec.wake_source = 0u;
 	rec.slept_ms    = 0u;
 	rec.armed       = plan->wake;
-	rec.armed_hw    = plan->hw;
+	rec.armed_hw    = plan->hw | ((plan->pads & ALP_SOM_PADS_MASK) << ALP_SOM_ARM_PADS_SHIFT);
 	/* Probed NOW, before the sleep: only if the NSRST syndrome bit does clear can a set bit
 	 * at the next boot be read as a pin reset (see ALP_SOM_REC_NSRST_TRUSTED). */
 	if (alp_som_power_reset_syndrome_trusted()) {
@@ -915,6 +983,9 @@ static uint32_t fired_sources(const sleep_plan_t *plan)
 	    alp_som_power_rtc_wake_service(&flags) == ALP_OK &&
 	    (flags & (RV3028C7_WAKE_TF | RV3028C7_WAKE_AF)) != 0u) {
 		fired |= ((plan->hw & ALP_SOM_ARM_RTC_TIMER) != 0u) ? plan->timed_bit : ALP_POWER_WAKE_RTC;
+	}
+	if (plan->pads != 0u && alif_se_hw_wake_pads_fired(plan->pads) != 0u) {
+		fired |= ALP_POWER_WAKE_GPIO;
 	}
 	return fired;
 }
@@ -1093,6 +1164,7 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	/* 7. Enter.  Interrupts are off and the wake pad is armed inside; this does not
 	 * return when the subsystem powers down. */
 	s = alif_se_hw_enter_ewic((plan.hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u,
+	                          plan.pads,
 	                          ((plan.hw & ALP_SOM_ARM_LPTIMER) != 0u) ? plan.lptimer_ticks : 0u);
 	if (s != ALP_OK) {
 		/* INT already asserted / LPTIMER already fired (BUSY), LPTIMER not live (IO), ... */
@@ -1104,6 +1176,9 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	 * nothing did.  Either way the SE profile and the domains are put back. */
 	fired = fired_sources(&plan);
 	disarm(&armed);
+	if (plan.pads != 0u) {
+		alif_se_hw_wake_pads_release(plan.pads); /* the edge is consumed: next cycle starts clean */
+	}
 	rs = rollback_domains();
 
 	s = undo_se(&undo);
@@ -1253,6 +1328,20 @@ void alp_som_power_wake_decode_early(alp_som_pd_record_t *rec)
 {
 	if ((rec->armed_hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
 		rec->wake_source |= rec->timed_bit;
+	}
+	/* The LPGPIO block is in the VBAT domain, so a pad's latched edge survives the STOP.  Which
+	 * pads fired goes into the record's upper armed_hw byte (alp_som_power_boot_wake_pads()).
+	 * Acknowledged either way, so a stale edge cannot be read as the next cycle's wake. */
+	uint32_t pads = (rec->armed_hw >> ALP_SOM_ARM_PADS_SHIFT) & ALP_SOM_PADS_MASK;
+
+	if ((rec->armed_hw & ALP_SOM_ARM_LPGPIO) != 0u && pads != 0u) {
+		uint32_t fired = alif_se_hw_wake_pads_fired(pads);
+
+		if (fired != 0u) {
+			rec->wake_source |= ALP_POWER_WAKE_GPIO;
+			rec->armed_hw |= fired << ALP_SOM_FIRED_PADS_SHIFT;
+		}
+		alif_se_hw_wake_pads_release(pads);
 	}
 }
 
