@@ -89,7 +89,8 @@
  *                                  sleep entry, at PRE_KERNEL_1 and at main(), and the
  *                                  wake-to-main() figure derived from them.
  *
- * All three are code-complete and unverified until a bench run reads those lines.
+ * STANDBY and TCM retention are bench-proven on the E1M-AEN803; the timing lines run but the
+ * counters are too coarse to resolve wake-to-main() (see the README).
  *
  * A cold power cycle (not a reset) starts the sequence over: the counter lives in
  * SRAM that a reset keeps and a power cycle loses.
@@ -798,12 +799,17 @@ int main(void)
 		 * app armed in a run that lost power mid-sleep keeps AIE and AF set across every
 		 * power cycle, and the backend then refuses each later RTC sleep at step 7
 		 * (rtc_wake_already_latched: it keeps a caller's alarm for WAKE_RTC sleeps).
-		 * Disarm and clear it here, before the first cycle. */
+		 * Disarm and clear it here, before the first cycle.  A counter of 0 can also be a
+		 * failed counter read; that is still before this run arms anything, so the worst
+		 * case is disarming an alarm a lost run left behind. */
 		bool fired = false;
 
-		(void)rv3028c7_alarm_int_enable(&g_rtc, false);
-		(void)rv3028c7_alarm_check_and_clear(&g_rtc, &fired);
-		if (fired) {
+		if (rv3028c7_alarm_int_enable(&g_rtc, false) != ALP_OK ||
+		    rv3028c7_alarm_check_and_clear(&g_rtc, &fired) != ALP_OK) {
+			printk("POWER_STOP: stale RV-3028 alarm clear FAIL err=%d (an RTC sleep may "
+			       "refuse rtc_wake_already_latched)\n",
+			       (int)alp_last_error());
+		} else if (fired) {
 			printk("POWER_STOP: stale RV-3028 alarm from an earlier run cleared\n");
 		}
 	}

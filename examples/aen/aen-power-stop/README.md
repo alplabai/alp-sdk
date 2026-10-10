@@ -88,7 +88,7 @@ selected like the others (`-DEXTRA_CONF_FILE=variants/<name>.conf`); the default
 |---|---|---|---|
 | (S) STANDBY | `s-standby.conf` | every cycle requests `ALP_POWER_MODE_STANDBY` | `cycle<n> enter STANDBY (...)`, then per cycle `cycle<n> mode_standby PASS` (the wake record's `realised_mode` reads STANDBY) next to the same `record_valid`, `wake_source`, `restored_all`, `bkram_counter` checks. A `request FAIL rc=... realised=...` line, or `valid=0` after the wake, means the SE did not take the STANDBY profile or the record did not survive. |
 | (T) TCM, both banks | `t-tcm-retain.conf` | `ALP_POWER_RETAIN_TCM`, `retain_kb = 256` (DTCM SRAM5_1 + SRAM5_2), plus a pattern probe | before each sleep `POWER_STOP: tcm cycle<n> wrote retain_kb=256 addr=0x... bank0_bytes=... bank1_bytes=... crc_a=0x... crc_b=0x...`; after the wake `tcm cycle<n> read asked_banks=2 bank0=retained bank1=retained` and `cycle<n> tcm_retained PASS` |
-| (T-128) TCM, one bank | `t-tcm-retain-128k.conf` | `retain_kb = 128` (SRAM5_1 requested) | `asked_banks=1`; the verdict covers bank 0. `bank1=` is NOT mapping evidence: with any TCM asked for the backend ORs both `RET_CTRL.HETCM1 \| HETCM2` after the SE call (`alif_se_power.c:780-782`), so both DTCM halves stay powered. Mapping evidence needs a backend change that sets only the matching bit (to be tracked) |
+| (T-128) TCM, one bank | `t-tcm-retain-128k.conf` | `retain_kb = 128` (SRAM5_1 requested) | `asked_banks=1`; the verdict covers bank 0. `bank1=` is NOT mapping evidence: with any TCM asked for the backend ORs both `RET_CTRL.HETCM1 \| HETCM2` after the SE call (the `tcm_requested()` branch of the retention setup in `alif_se_power.c`), so both DTCM halves stay powered. Mapping evidence needs a backend change that sets only the matching bit (to be tracked) |
 | (W) timing | `w-wake-timing.conf` | prints the LPRTC counter at sleep entry, at `PRE_KERNEL_1` and at `main()` | `POWER_STOP: timing cycle<n> lprtc pre=... boot=... main=... ccr=0x... cpsr=... cpcvr=... armed_ms=... main_uptime_ms=...`, then `ticks entry_to_boot=... boot_to_main=... entry_to_main=... tick_ms_nominal=...`, then `lprtc_rate_mhz=...`, `entry_to_main_nominal_ms=...`, and `entry_to_main_min_ms=... rtc_slept_ms=... armed_ms=... wake_to_main_min_ms=... wake_to_main_rtc_ms=...` (cycle 3, the alarm, prints `wake_to_main_ms=n/a`). No verdict. |
 
 **How the TCM probe works.** The whole of Zephyr's RAM is the 256 KiB M55-HE DTCM (CPU-local
@@ -153,7 +153,9 @@ profiles as they stand). The word index of the diag blocks is listed in
   `UART_CTRL`) against the cold-boot values, and `se run` against the cold-boot profile.
 - **Was it a wake or a reset?** `boot` word 19 (`RTSS_HE_RESET`: 0 SE-initiated, 1 NSRST
   pin, 4 power-domain request) and `boot` word 16 (`STOP_MODE_STAT`, bit 4). A pin reset
-  is reported as an aborted sleep (`valid=1 mode=0 wake_source=0x0`), not a wake.
+  is reported as an aborted sleep (`valid=1 mode=0 wake_source=0x0`), not a wake -- except
+  after a sleep that retains TCM: its wake also leaves `RTSS_HE_RESET` = 1, so such a record
+  never trusts the bit, and a real pin reset during a TCM-retaining sleep reads as a wake.
 
 ## Bench contract
 
