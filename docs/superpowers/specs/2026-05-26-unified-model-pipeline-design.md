@@ -1,5 +1,7 @@
 # Unified AI-accelerator model pipeline — design
 
+> **Note (2026-10-10):** E1M-NX9101 / NXP i.MX 93 was removed in #2781 / #2782 (67ed22d86; the module was never produced): the `ethos_u_n93.cpp` backend named below is deleted.
+
 - **Date:** 2026-05-26
 - **Status:** **Implemented.** The `.alpmodel` pipeline (Stages 1a-1c) landed
   in v0.6.0 (CHANGELOG "Added -- portable `.alpmodel` model pipeline

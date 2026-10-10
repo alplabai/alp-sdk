@@ -121,7 +121,7 @@ Workflow filenames follow `{stage}-{target}.yml` for the per-PR,
 nightly, and release gates; other stages carry their own prefix:
 
 - `pr-`, `nightly-`, `release` — the gates above (e.g. `pr-twister`,
-  `nightly-v2n`, `release.yml`).
+  `nightly-cloud-sdks`, `release.yml`).
 - `merge-queue-` — checks that can only be graded against the merge
   group itself (e.g. `merge-queue-changelog-citations.yml`).
 - Other standing workflows use their own stage prefix
