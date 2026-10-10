@@ -429,8 +429,10 @@ static alp_status_t y_can_netdev_name_at(const char *path, unsigned bus_id, char
 		if (errno != ENOENT) {
 			/* Present but unreadable (EACCES, ENOTDIR, ...).  Failing closed is
 			 * deliberate: guessing can<bus_id> could reopen the swapped port. */
-			fprintf(stderr, "alp_can: cannot read %s (errno %d); refusing to guess the netdev\n",
-			        path, errno);
+			fprintf(stderr,
+			        "alp_can: cannot read %s (errno %d); refusing to guess the netdev\n",
+			        path,
+			        errno);
 			return ALP_ERR_NOT_READY;
 		}
 		int k = snprintf(out, cap, "can%u", bus_id);
