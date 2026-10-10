@@ -338,9 +338,9 @@ tr_box_t tr_detect_frame(tr_detect_t *d, const uint8_t *grey8, size_t len)
 		 * one-cell change in either peak that crosses the
 		 * TR_DETECT_PEAK_SIMILAR_PCT line, or flips which run is bigger,
 		 * can swap the chosen subject between two people who did not
-		 * move -- track.c's TR_TRACK_HYST_PX (24 px) cannot absorb a
-		 * multi-lane jump, and the tracker's baseline then chases whichever
-		 * body is newly "current", injecting false jumps and ducks. Once
+		 * move -- the swap would hand the tracker a different body, whose
+		 * baseline then chases whichever body is newly "current", injecting
+		 * false ducks. Once
 		 * a subject has been reported, prefer whichever candidate is
 		 * nearest to where THAT subject was, so the game keeps following
 		 * the same person unless they genuinely leave. Only on the very

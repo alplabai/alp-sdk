@@ -37,7 +37,7 @@ int main(void)
 		/* Straight ahead at z == f_px: scale is 1x, lands dead on centre. */
 		assert(tr_r3d_project(&c, (tr_v3_t){ 0, 0, 256 }, &out, &view_z));
 		assert(view_z == 256.0f);
-		assert(out.x == 360 * (1 << TR_R3D_SUB));
+		assert(out.x == (TR_R3D_W / 2) * (1 << TR_R3D_SUB));
 		/* fix round 8: cy is TR_VIEW_H/2 now -- (TR_VIEW_H << SUB) / 2,
 		 * not 640 * (1 << SUB) (TR_R3D_H/2's old fixed-point value); exact
 		 * since TR_VIEW_H << TR_R3D_SUB is always even. */
@@ -47,7 +47,7 @@ int main(void)
 		 * screen px coincide 1:1 (same anchor proj.c uses at its own
 		 * Z_RUNNER, see proj.h). */
 		assert(tr_r3d_project(&c, (tr_v3_t){ 100, 50, 256 }, &out, &view_z));
-		assert(out.x == 460 * (1 << TR_R3D_SUB));
+		assert(out.x == (TR_R3D_W / 2 + 100) * (1 << TR_R3D_SUB));
 		/* fix round 8: cy-centred, not 640 - 50 -- see the centre assert above. */
 		assert(out.y == (TR_VIEW_H << TR_R3D_SUB) / 2 -
 		                    50 * (1 << TR_R3D_SUB)); /* y UP -> smaller screen y */

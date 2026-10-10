@@ -34,9 +34,8 @@ for the SKU breakdown:
   (Renesas RZ/V2N): A55 cluster + M33-SM.
 - **E1M-X V2N-M1 family** — `E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103`
   (RZ/V2N + DEEPX DX-M1): same topology as V2N.
-- **E1M-N93 family** — iMX93: A55 cluster + M33.
 
-Because the per-core matrix is 11 columns wide, the per-version
+Because the per-core matrix is 9 columns wide, the per-version
 tables below are split into a **Cortex-A (Yocto)** table and a
 **Cortex-M (Zephyr)** table.  Read both for a given SoM to get the
 full per-(library × core × runtime) picture.
@@ -45,27 +44,30 @@ full per-(library × core × runtime) picture.
 
 ### Cortex-A (Yocto)
 
-| Library     | AEN E5..E8: a32_cluster Yocto | V2N: a55_cluster Yocto | V2N-M1: a55_cluster Yocto | iMX93: a55_cluster Yocto |
-|-------------|-------------------------------|------------------------|---------------------------|--------------------------|
-| Peripherals (I2C/SPI/GPIO/UART) | stub | stub | stub | planned |
-| Display     | stub                          | stub [^disp1]          | stub [^disp1]             | planned |
-| Camera      | stub                          | stub (planned v0.2 MIPI CSI-2) | stub (planned v0.2) | planned |
-| GUI/LVGL    | planned                       | planned                | planned                   | planned |
-| IoT         | stub                          | stub                   | stub                      | planned |
+| Library     | AEN E5..E8: a32_cluster Yocto | V2N: a55_cluster Yocto | V2N-M1: a55_cluster Yocto |
+|-------------|-------------------------------|------------------------|---------------------------|
+| Peripherals (I2C/SPI/GPIO/UART) | stub | stub | stub |
+| Display     | stub                          | stub [^disp1]          | stub [^disp1]             |
+| Camera      | stub                          | stub (planned v0.2 MIPI CSI-2) | stub (planned v0.2) |
+| GUI/LVGL    | planned                       | planned                | planned                   |
+| IoT         | stub                          | stub                   | stub                      |
 
-[^disp1]: Display 1 (RK055HDMIPI4MA0, HX8394-F, 2-lane MIPI-DSI) bring-up code-complete on
-    `feat/v2n-lcd-display1` (kernel patches 0004–0006, weston image, LVGL example); row flips
-    on HIL pass.  Display 2 (J28, DSI1 lane set) is permanently unavailable on V2N/V2M SoMs.
+[^disp1]: Display 1 (RK055HDMIPI4MA0, HX8394-F, 2-lane MIPI-DSI) is partly verified (kernel
+    patches 0004–0006, weston image, LVGL example merged): on E1M-V2M103 (2026-09-30) `rzg2l-du`
+    binds, fbcon is on fb0, `panel-himax-hx8394` is bound and DSI-1 reads connected, with no panel
+    attached; a rendered frame on a panel is not yet recorded
+    ([display-support-matrix.md](display-support-matrix.md), row 7).  The row flips on that pass.
+    Display 2 (J28, DSI1 lane set) is permanently unavailable on V2N/V2M SoMs.
 
 ### Cortex-M (Zephyr)
 
-| Library     | AEN E3/E4: m55_hp Zephyr | AEN E3/E4: m55_he Zephyr | AEN E5..E8: m55_hp Zephyr | AEN E5..E8: m55_he Zephyr | V2N: m33_sm Zephyr | V2N-M1: m33_sm Zephyr | iMX93: m33 Zephyr |
-|-------------|--------------------------|--------------------------|---------------------------|---------------------------|--------------------|----------------------|--------------------|
-| Peripherals (I2C/SPI/GPIO/UART) | **GA** | **GA** | **GA** | **GA** | stub | stub | stub |
-| Display     | **GA** (SSD1306)         | **GA** (SSD1306)         | **GA** (SSD1306)          | **GA** (SSD1306)          | stub               | stub                 | stub               |
-| Camera      | stub                     | stub                     | stub                      | stub                      | stub               | stub                 | stub               |
-| GUI/LVGL    | **GA** (re-export)       | **GA** (re-export)       | **GA** (re-export)        | **GA** (re-export)        | stub               | stub                 | stub               |
-| IoT         | stub (real Wi-Fi+MQTT in v0.2) | stub (real Wi-Fi+MQTT in v0.2) | stub | stub | stub | stub | stub |
+| Library     | AEN E3/E4: m55_hp Zephyr | AEN E3/E4: m55_he Zephyr | AEN E5..E8: m55_hp Zephyr | AEN E5..E8: m55_he Zephyr | V2N: m33_sm Zephyr | V2N-M1: m33_sm Zephyr |
+|-------------|--------------------------|--------------------------|---------------------------|---------------------------|--------------------|----------------------|
+| Peripherals (I2C/SPI/GPIO/UART) | **GA** | **GA** | **GA** | **GA** | stub | stub |
+| Display     | **GA** (SSD1306)         | **GA** (SSD1306)         | **GA** (SSD1306)          | **GA** (SSD1306)          | stub               | stub                 |
+| Camera      | stub                     | stub                     | stub                      | stub                      | stub               | stub                 |
+| GUI/LVGL    | **GA** (re-export)       | **GA** (re-export)       | **GA** (re-export)        | **GA** (re-export)        | stub               | stub                 |
+| IoT         | stub (real Wi-Fi+MQTT in v0.2) | stub (real Wi-Fi+MQTT in v0.2) | stub | stub | stub | stub |
 
 > **Note:** CMSIS-DSP is consumed directly via `arm_math.h` from app code; the SDK does not re-export it.
 
@@ -86,42 +88,61 @@ plan in `VERSIONS.md`.
 
 ### Cortex-A (Yocto)
 
-| Library                   | AEN E5..E8: a32_cluster Yocto | V2N: a55_cluster Yocto | V2N-M1: a55_cluster Yocto | iMX93: a55_cluster Yocto |
-|---------------------------|-------------------------------|------------------------|---------------------------|--------------------------|
-| **PWM** (`<alp/pwm.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
-| **ADC** (`<alp/adc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
-| **Counter / QEnc** (`<alp/counter.h>`) | code complete¹  | code complete¹         | code complete¹            | code complete¹            |
-| **I²S / SAI** (`<alp/i2s.h>`) | code complete¹ (ALSA)     | code complete¹ (ALSA)  | code complete¹ (ALSA)     | code complete¹ (ALSA)     |
-| **CAN / CAN-FD** (`<alp/can.h>`) | code complete¹         | code complete¹         | code complete¹            | code complete¹            |
-| **RTC** (`<alp/rtc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
-| **Watchdog** (`<alp/wdt.h>`) | code complete¹             | code complete¹         | code complete¹            | code complete¹            |
-| **Audio** (`<alp/audio.h>`) | code complete¹              | code complete¹         | code complete¹            | code complete¹            |
-| **Camera** (`<alp/camera.h>`) | planned                   | stub [^cam1]            | stub [^cam1]               | planned |
-| **IoT** (`<alp/iot.h>`)   | **GA**                        | **GA**                 | **GA**                    | planned |
+| Library                   | AEN E5..E8: a32_cluster Yocto | V2N: a55_cluster Yocto | V2N-M1: a55_cluster Yocto |
+|---------------------------|-------------------------------|------------------------|---------------------------|
+| **PWM** (`<alp/pwm.h>`)   | code complete¹                | code complete¹         | code complete¹            |
+| **ADC** (`<alp/adc.h>`)   | code complete¹                | code complete¹         | code complete¹            |
+| **Counter / QEnc** (`<alp/counter.h>`) | code complete¹  | code complete¹         | code complete¹            |
+| **I²S / SAI** (`<alp/i2s.h>`) | code complete¹ (ALSA)     | code complete¹ (ALSA)  | code complete¹ (ALSA)     |
+| **CAN / CAN-FD** (`<alp/can.h>`) | code complete¹         | code complete¹         | code complete¹            |
+| **RTC** (`<alp/rtc.h>`)   | code complete¹                | code complete¹         | code complete¹            |
+| **Watchdog** (`<alp/wdt.h>`) | code complete¹             | code complete¹         | code complete¹            |
+| **Audio** (`<alp/audio.h>`) | code complete¹              | code complete¹         | code complete¹            |
+| **Camera** (`<alp/camera.h>`) | planned                   | code complete¹ [^cam1]  | code complete¹ [^cam1]     |
+| **IoT** (`<alp/iot.h>`)   | **GA**                        | **GA**                 | **GA**                    |
 
-[^cam1]: The Yocto/A55 camera backend (`src/backends/camera/zephyr_stub.c`, linked
-    unconditionally at `src/yocto/CMakeLists.txt:323`, `silicon_ref = "*"`, priority
-    0) returns `ALP_ERR_NOT_IMPLEMENTED` for every op on every SoM, V2N/V2N-M1
-    included — that is a **stub** per the status key above, not GA.  The real
-    MIPI CSI-2 ISP-aware camera backend (`src/backends/camera/v2n_n44_isp.c`) is a
-    **Zephyr** backend for the V2N `m33_sm` core (`zephyr/CMakeLists.txt:812`,
-    opt-in via `CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP`); it does not link on Yocto and
-    does not back this Cortex-A cell.
+[^cam1]: The Yocto/A55 camera backend (`src/backends/camera/yocto_drv.c`,
+    `silicon_ref = "*"`, priority 100) is a real V4L2 + media-controller backend:
+    it discovers the sensor -> CSI-2 -> capture-node chain from the media graph
+    and works with any sensor that has a mainline V4L2 subdev driver (GREY8 /
+    RAW8 / RAW10 only; colour formats return `ALP_ERR_NOSUPPORT`).  RAW10 is
+    **bench-verified** on E1M-V2M103 with an IMX296LQ (30.00 fps at a 30 fps
+    request, data matches `v4l2-ctl`); RAW8 and the direct Y8 path are not.
+    Known limits: a 60 fps request settles near 40 fps (#2792), and a plain
+    non-CMake static link needs `-Wl,--undefined=_alp_backend_force_camera_yocto_drv`
+    or it gets the stub, plus one such option per other Linux backend
+    (the list is the `alp_sdk` target's `ALP_SDK_FORCED_BACKENDS` property, or
+    `nm -A libalp_sdk.a | grep ' _alp_backend_force_'`); CMake consumers get them all
+    automatically (#2790).  The sensor must be named by an `alp-camera0`, `alp-camera1`, …
+    devicetree alias (see `docs/v2n-camera-csi.md`).  The MIPI CSI-2 ISP-aware backend
+    (`src/backends/camera/v2n_n44_isp.c`) is a separate **Zephyr** backend for
+    the V2N `m33_sm` core (`zephyr/CMakeLists.txt:812`, opt-in via
+    `CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP`); it does not link on Yocto.
 
 ### Cortex-M (Zephyr)
 
-| Library                   | AEN E3/E4: m55_hp Zephyr | AEN E3/E4: m55_he Zephyr | AEN E5..E8: m55_hp Zephyr | AEN E5..E8: m55_he Zephyr | V2N: m33_sm Zephyr | V2N-M1: m33_sm Zephyr | iMX93: m33 Zephyr |
-|---------------------------|--------------------------|--------------------------|---------------------------|---------------------------|--------------------|----------------------|--------------------|
-| **PWM** (`<alp/pwm.h>`)   | **GA** (Zephyr `pwm_*`)  | **GA** (Zephyr `pwm_*`)  | **GA** (Zephyr `pwm_*`)   | **GA** (Zephyr `pwm_*`)   | stub               | stub                 | stub               |
-| **ADC** (`<alp/adc.h>`)   | **GA** (Zephyr `adc_*`)  | **GA** (Zephyr `adc_*`)  | **GA** (Zephyr `adc_*`)   | **GA** (Zephyr `adc_*`)   | stub               | stub                 | stub               |
-| **Counter / QEnc** (`<alp/counter.h>`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | stub | stub | stub |
-| **I²S / SAI** (`<alp/i2s.h>`) | **GA** (Zephyr `i2s_*`) | **GA** (Zephyr `i2s_*`) | **GA** (Zephyr `i2s_*`)   | **GA** (Zephyr `i2s_*`)   | stub               | stub                 | stub               |
-| **CAN / CAN-FD** (`<alp/can.h>`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | stub               | stub                 | stub               |
-| **RTC** (`<alp/rtc.h>`)   | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)   | **GA** (Zephyr `rtc_*`)   | code complete¹     | code complete¹       | code complete¹     |
-| **Watchdog** (`<alp/wdt.h>`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`)   | **GA** (Zephyr `wdt_*`)   | code complete¹     | code complete¹       | code complete¹     |
-| **Audio** (`<alp/audio.h>`) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | stub | stub | stub |
-| **Camera** (`<alp/camera.h>`) | planned              | planned                  | planned                   | planned                   | stub               | stub                 | stub               |
-| **IoT** (`<alp/iot.h>`)   | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | stub | stub | stub |
+| Library                   | AEN E3/E4: m55_hp Zephyr | AEN E3/E4: m55_he Zephyr | AEN E5..E8: m55_hp Zephyr | AEN E5..E8: m55_he Zephyr | V2N: m33_sm Zephyr | V2N-M1: m33_sm Zephyr |
+|---------------------------|--------------------------|--------------------------|---------------------------|---------------------------|--------------------|----------------------|
+| **PWM** (`<alp/pwm.h>`)   | **GA** (Zephyr `pwm_*`)  | **GA** (Zephyr `pwm_*`)  | **GA** (Zephyr `pwm_*`)   | **GA** (Zephyr `pwm_*`)   | stub               | stub                 |
+| **ADC** (`<alp/adc.h>`)   | **GA** (Zephyr `adc_*`)  | **GA** (Zephyr `adc_*`)  | **GA** (Zephyr `adc_*`)   | **GA** (Zephyr `adc_*`)   | stub               | stub                 |
+| **Counter / QEnc** (`<alp/counter.h>`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | **GA** (Zephyr `counter_*` + `sensor_*`) | stub | stub |
+| **I²S / SAI** (`<alp/i2s.h>`) | **GA** (Zephyr `i2s_*`) | **GA** (Zephyr `i2s_*`) | **GA** (Zephyr `i2s_*`)   | **GA** (Zephyr `i2s_*`)   | stub               | stub                 |
+| **CAN / CAN-FD** (`<alp/can.h>`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | **GA** (Zephyr `can_*`) | stub               | stub                 |
+| **RTC** (`<alp/rtc.h>`)   | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)   | **GA** (Zephyr `rtc_*`)   | code complete¹     | code complete¹       |
+| **Watchdog** (`<alp/wdt.h>`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`)   | **GA** (Zephyr `wdt_*`)   | code complete¹     | code complete¹       |
+| **Audio** (`<alp/audio.h>`) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | stub | stub |
+| **Camera** (`<alp/camera.h>`) | E4: compile-only; E3: no camera DT [^cam2] | no camera DT (E3, E4) [^cam2] | E8: bench-verified; E5..E7: no camera DT [^cam2] | E8: bench-verified; E5..E7: no camera DT [^cam2] | stub               | stub                 |
+| **IoT** (`<alp/iot.h>`)   | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | stub | stub |
+
+[^cam2]: The AEN Zephyr camera path is the portable `zephyr_video` backend
+    (`src/backends/camera/zephyr_video.c`, `silicon_ref = "*"`, priority 50) plus,
+    on E8, the ISP-Pico backend (`src/backends/camera/alif_isp_pico.c`, priority 100).
+    Bench-verified on E8 (E1M-AEN803, E1M-EVK, J5): OV9281
+    ([camera-shields.md](camera-shields.md)) and an INNO-MAKER CAM-IMX335 on both
+    the M55-HE and the M55-HP (3/3 cold boots, 1296x972 RAW10, #2809).  The E4
+    (E1M-AEN401) M55-HP overlay and `ensemble_e4_camera.dtsi` exist (#2809,
+    compile-only, not bench-verified); there is no E4 M55-HE camera overlay, and
+    E3 and E5..E7 have no camera DT or shield overlay.
 
 ¹ **code complete** — migrated to the registry/dispatcher pattern with real Linux
 backends in the v0.8 cycle (issue #33), which also lands the per-class
@@ -170,37 +191,37 @@ need v0.4 fall back cleanly to the v0.3 state above.
 
 ### Cortex-A (Yocto)
 
-| Library                              | AEN E5..E8: a32_cluster Yocto | V2N: a55_cluster Yocto | V2N-M1: a55_cluster Yocto | iMX93: a55_cluster Yocto |
-|--------------------------------------|-------------------------------|------------------------|---------------------------|--------------------------|
-| **Peripherals (I2C)** (`<alp/peripheral.h>`) | code complete (untested) — i2c-dev | code complete (untested) — i2c-dev | code complete (untested) — i2c-dev | planned |
-| **Peripherals (SPI)** (`<alp/peripheral.h>`) | code complete (untested) — spidev | code complete (untested) — spidev | code complete (untested) — spidev | planned |
-| **Peripherals (UART)** (`<alp/peripheral.h>`)| code complete (untested) — termios | code complete (untested) — termios | code complete (untested) — termios | planned |
-| **Peripherals (GPIO + IRQ)** (`<alp/peripheral.h>`) | code complete (untested) — chardev v2 + pthread `poll()` | code complete (untested) — chardev v2 + pthread `poll()` | code complete (untested) | planned |
-| **Peripherals (UART RX ringbuf)** (`<alp/peripheral.h>`) | n/a (Linux kernel already buffers) | n/a (Linux kernel already buffers) | n/a | n/a |
-| **IoT — MQTT cleartext** (`<alp/iot.h>`) | code complete (untested) — libmosquitto | code complete (untested) — libmosquitto | code complete (untested) — libmosquitto | planned |
-| **IoT — MQTT TLS** (`mqtts://`)      | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) | planned |
-| **IoT — Wi-Fi station** (`<alp/iot.h>`) | sw_fallback by design (system-config via wpa_supplicant/NM) | sw_fallback by design (system-config via wpa_supplicant/NM) | sw_fallback by design | planned |
-| **Audio** (`<alp/audio.h>`)          | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) | planned |
-| **Security** (`<alp/security.h>`)    | code complete (KATs green; image bake pending) — OpenSSL `EVP_*` | code complete (KATs green; `drpai`-OFF `alp-image-edge` bake complete, image boot pending; see [`bring-up-drpai-v2n.md`](bring-up-drpai-v2n.md)) — OpenSSL `EVP_*` | code complete (KATs green) | planned |
-| **Mender OTA (meta-alp-sdk opt-in)**     | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) | planned |
+| Library                              | AEN E5..E8: a32_cluster Yocto | V2N: a55_cluster Yocto | V2N-M1: a55_cluster Yocto |
+|--------------------------------------|-------------------------------|------------------------|---------------------------|
+| **Peripherals (I2C)** (`<alp/peripheral.h>`) | code complete (untested) — i2c-dev | code complete (untested) — i2c-dev | code complete (untested) — i2c-dev |
+| **Peripherals (SPI)** (`<alp/peripheral.h>`) | code complete (untested) — spidev | code complete (untested) — spidev | code complete (untested) — spidev |
+| **Peripherals (UART)** (`<alp/peripheral.h>`)| code complete (untested) — termios | code complete (untested) — termios | code complete (untested) — termios |
+| **Peripherals (GPIO + IRQ)** (`<alp/peripheral.h>`) | code complete (untested) — chardev v2 + pthread `poll()` | code complete (untested) — chardev v2 + pthread `poll()` | code complete (untested) |
+| **Peripherals (UART RX ringbuf)** (`<alp/peripheral.h>`) | n/a (Linux kernel already buffers) | n/a (Linux kernel already buffers) | n/a |
+| **IoT — MQTT cleartext** (`<alp/iot.h>`) | code complete (untested) — libmosquitto | code complete (untested) — libmosquitto | code complete (untested) — libmosquitto |
+| **IoT — MQTT TLS** (`mqtts://`)      | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) — mosquitto_tls_set + system / pinned CA | code complete (untested) |
+| **IoT — Wi-Fi station** (`<alp/iot.h>`) | sw_fallback by design (system-config via wpa_supplicant/NM) | sw_fallback by design (system-config via wpa_supplicant/NM) | sw_fallback by design |
+| **Audio** (`<alp/audio.h>`)          | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) — ALSA `snd_pcm_*` | code complete (untested) |
+| **Security** (`<alp/security.h>`)    | code complete (KATs green; image bake pending) — OpenSSL `EVP_*` | code complete (KATs green; `drpai`-OFF `alp-image-edge` bake complete, image boot pending; see [`bring-up-drpai-v2n.md`](bring-up-drpai-v2n.md)) — OpenSSL `EVP_*` | code complete (KATs green) |
+| **Mender OTA (meta-alp-sdk opt-in)**     | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) — `require conf/distro/include/mender.inc` | code complete (untested) |
 
 ### Cortex-M (Zephyr)
 
-| Library                              | AEN E3/E4: m55_hp Zephyr | AEN E3/E4: m55_he Zephyr | AEN E5..E8: m55_hp Zephyr | AEN E5..E8: m55_he Zephyr | V2N: m33_sm Zephyr | V2N-M1: m33_sm Zephyr | iMX93: m33 Zephyr |
-|--------------------------------------|--------------------------|--------------------------|---------------------------|---------------------------|--------------------|----------------------|--------------------|
-| **Peripherals (I2C)** (`<alp/peripheral.h>`) | **GA**          | **GA**                   | **GA**                    | **GA**                    | stub               | stub                 | stub               |
-| **Peripherals (SPI)** (`<alp/peripheral.h>`) | **GA**          | **GA**                   | **GA**                    | **GA**                    | stub               | stub                 | stub               |
-| **Peripherals (UART)** (`<alp/peripheral.h>`)| **GA**          | **GA**                   | **GA**                    | **GA**                    | stub               | stub                 | stub               |
-| **Peripherals (GPIO + IRQ)** (`<alp/peripheral.h>`) | **GA**   | **GA**                   | **GA**                    | **GA**                    | stub               | stub                 | stub               |
-| **Peripherals (UART RX ringbuf)** (`<alp/peripheral.h>`) | code complete (untested) — LwRB-backed IRQ drain | code complete (untested) — LwRB-backed IRQ drain | code complete (untested) | code complete (untested) | stub | stub | stub |
-| **IoT — MQTT cleartext** (`<alp/iot.h>`) | planned (Zephyr `mqtt_*`) | planned (Zephyr `mqtt_*`) | planned (Zephyr `mqtt_*`) | planned (Zephyr `mqtt_*`) | stub | stub | stub |
-| **IoT — MQTT TLS** (`mqtts://`)      | planned                  | planned                  | planned                   | planned                   | stub               | stub                 | stub               |
-| **IoT — Wi-Fi station** (`<alp/iot.h>`) | CC3501E backend       | CC3501E backend          | CC3501E backend           | CC3501E backend           | stub               | stub                 | stub               |
-| **Audio** (`<alp/audio.h>`)          | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | stub | stub | stub |
-| **Security** (`<alp/security.h>`)    | surface declared (impl v0.3) | surface declared (impl v0.3) | surface declared (impl v0.3) | surface declared (impl v0.3) | stub | stub | stub |
-| **mproc IPC framing** (`<alp/mproc.h>`) | code complete (untested) — placeholder 12-byte envelope; replaced by nanopb-generated codec once `extras-lwrb-nanopb` lands (interim/deferred as of v0.9, no committed version) | code complete (untested) — placeholder 12-byte envelope | code complete (untested) | code complete (untested) | stub | stub | stub |
-| **MCUboot secure-boot scaffolding**  | sysbuild profile + dev-key generator + `docs/secure-boot.md` (compile-verification gates on the in-tree `alp_e1m_aen801_m55_he` board file) | sysbuild profile + dev-key generator + `docs/secure-boot.md` | sysbuild profile + dev-key generator + `docs/secure-boot.md` | sysbuild profile + dev-key generator + `docs/secure-boot.md` | stub | stub | stub |
-| **Mender OTA (meta-alp-sdk opt-in)**     | doc-only (`mender-mcu-client` vs Hawkbit decision pending) | doc-only | doc-only | doc-only | n/a | n/a | n/a |
+| Library                              | AEN E3/E4: m55_hp Zephyr | AEN E3/E4: m55_he Zephyr | AEN E5..E8: m55_hp Zephyr | AEN E5..E8: m55_he Zephyr | V2N: m33_sm Zephyr | V2N-M1: m33_sm Zephyr |
+|--------------------------------------|--------------------------|--------------------------|---------------------------|---------------------------|--------------------|----------------------|
+| **Peripherals (I2C)** (`<alp/peripheral.h>`) | **GA**          | **GA**                   | **GA**                    | **GA**                    | stub               | stub                 |
+| **Peripherals (SPI)** (`<alp/peripheral.h>`) | **GA**          | **GA**                   | **GA**                    | **GA**                    | stub               | stub                 |
+| **Peripherals (UART)** (`<alp/peripheral.h>`)| **GA**          | **GA**                   | **GA**                    | **GA**                    | stub               | stub                 |
+| **Peripherals (GPIO + IRQ)** (`<alp/peripheral.h>`) | **GA**   | **GA**                   | **GA**                    | **GA**                    | stub               | stub                 |
+| **Peripherals (UART RX ringbuf)** (`<alp/peripheral.h>`) | code complete (untested) — LwRB-backed IRQ drain | code complete (untested) — LwRB-backed IRQ drain | code complete (untested) | code complete (untested) | stub | stub |
+| **IoT — MQTT cleartext** (`<alp/iot.h>`) | planned (Zephyr `mqtt_*`) | planned (Zephyr `mqtt_*`) | planned (Zephyr `mqtt_*`) | planned (Zephyr `mqtt_*`) | stub | stub |
+| **IoT — MQTT TLS** (`mqtts://`)      | planned                  | planned                  | planned                   | planned                   | stub               | stub                 |
+| **IoT — Wi-Fi station** (`<alp/iot.h>`) | CC3501E backend       | CC3501E backend          | CC3501E backend           | CC3501E backend           | stub               | stub                 |
+| **Audio** (`<alp/audio.h>`)          | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | stub | stub |
+| **Security** (`<alp/security.h>`)    | surface declared (impl v0.3) | surface declared (impl v0.3) | surface declared (impl v0.3) | surface declared (impl v0.3) | stub | stub |
+| **mproc IPC framing** (`<alp/mproc.h>`) | code complete (untested) — placeholder 12-byte envelope; replaced by nanopb-generated codec once `extras-lwrb-nanopb` lands (interim/deferred as of v0.9, no committed version) | code complete (untested) — placeholder 12-byte envelope | code complete (untested) | code complete (untested) | stub | stub |
+| **MCUboot secure-boot scaffolding**  | sysbuild profile + dev-key generator + `docs/secure-boot.md` (compile-verification gates on the in-tree `alp_e1m_aen801_m55_he` board file) | sysbuild profile + dev-key generator + `docs/secure-boot.md` | sysbuild profile + dev-key generator + `docs/secure-boot.md` | sysbuild profile + dev-key generator + `docs/secure-boot.md` | stub | stub |
+| **Mender OTA (meta-alp-sdk opt-in)**     | doc-only (`mender-mcu-client` vs Hawkbit decision pending) | doc-only | doc-only | doc-only | n/a | n/a |
 
 The Yocto MQTT / audio / security backends are each conditional on
 their own `pkg_check_modules` check (`libmosquitto`, `alsa`,
@@ -228,13 +249,13 @@ hasn't been measured.
 
 | Surface | Header(s) | Cores / backing | Status |
 |---------|-----------|-----------------|--------|
-| Display class | `display.h` | M (Zephyr `display_*` driver-class wrapper, `alp-display0..3` DT aliases, issue #23); A (Yocto) + baremetal: NOSUPPORT stub | Zephyr backend **code complete (untested on silicon)** — native_sim ZTESTs against the upstream dummy display cover open/get_caps/blit/clear/close + degrade paths; a build-only native_sim scenario instantiates Zephyr MIPI DBI Type C (`zephyr,mipi-dbi-spi`) with an ST7789V child panel and proves the DT/Kconfig/backend wiring.  No panel has been driven on real hardware through this class yet.  AEN (Alif E8): no vendor backend needed -- the `e1m_evk_rk055hdmipi4ma0` shield turns the CDC200 -> DesignWare MIPI-DSI -> D-PHY chain into a Zephyr display device behind `alp-display0` (build-verified on E1M-AEN801/803; pixels on glass not yet observed).  V2N DSI / parallel-RGB backends still pending |
+| Display class | `display.h` | M (Zephyr `display_*` driver-class wrapper, `alp-display0..3` DT aliases, issue #23); A (Yocto) + baremetal: NOSUPPORT stub | Zephyr backend **code complete; bench-verified on E1M-AEN803 with the RK055HDMIPI4MA0 panel (#2199, #2204)** — native_sim ZTESTs against the upstream dummy display cover open/get_caps/blit/clear/close + degrade paths; a build-only native_sim scenario instantiates Zephyr MIPI DBI Type C (`zephyr,mipi-dbi-spi`) with an ST7789V child panel and proves the DT/Kconfig/backend wiring.  On the MIPI DBI Type C path no panel has been driven on real hardware yet.  AEN (Alif E8): no vendor backend needed -- the `e1m_evk_rk055hdmipi4ma0` shield turns the CDC200 -> DesignWare MIPI-DSI -> D-PHY chain into a Zephyr display device behind `alp-display0` (bench-verified on E1M-AEN803: colour bars and page-flips on glass, #2199/#2204; E1M-AEN801 not re-run).  V2N DSI / parallel-RGB backends still pending |
 | GUI/LVGL bridge | `gui.h` (`alp_gui_lvgl_attach`, issue #23) | M (Zephyr): real LVGL v9 hand-off (`src/gui_lvgl.c`) — creates an `lv_display_t` over any `alp_display_t`, wires LVGL's flush callback to `alp_display_blit()`; `ALP_HAS_LVGL` auto-derives from `CONFIG_LVGL` via `CONFIG_ALP_SDK_HAS_LVGL`. A (Yocto) + baremetal / no-LVGL builds: guard-clause NOSUPPORT | **code complete, native_sim-tested** (`tests/zephyr/gui_lvgl/`) — a priority-255 test-double display backend proves a forced LVGL refresh reaches `alp_display_blit()`, plus NULL/unsupported-pixel-format/no-LVGL-build degrade paths. RGB565/RGB888/ARGB8888 mapped; `ALP_PIXFMT_MONO_VLSB` has no LVGL v9 equivalent and is refused. No real panel driven through this bridge yet — real-silicon bench run still pending |
 | Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr): registry over `tflm` / `ethos_u`; A (Yocto): dispatcher over `ort` (CPU) / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** + **CPU (ONNX Runtime, `src/yocto/inference_ort.cpp`)** backend bodies are **real** (all three run on E1M-V2M103 silicon against a CPU reference: DeepX #1262, DRP-AI #1268, ORT #1255 -- ORT with the DEEPX layer's `libonnxruntime` 1.20.1, the own 1.28.0 recipe not yet on silicon; link needs the Yocto sysroot; default-off CMake options — `ALP_SDK_USE_ORT_CPU` off by default in CMake, on by default in the V2M101/V2M102/V2M103/V2N101/V2N102/V2N103 images via `ALP_ENABLE_ORT_CPU` (#1259; V2M with the DEEPX runtime builds against dx-rt's libonnxruntime instead of the layer's)); `resolve_auto()` orders CPU strictly last so an NPU-bearing SoM never silently falls back to it; the former M-class DRP-AI/DEEPX stubs are removed — all three A55 engines are A55-only, M-class runs TFLM (code-complete) — #58/#59; `tflm`/`ethos_u` paths still untested. No `.alpmodel` → ORT route exists yet (`CONFIG_ALP_SDK_MODEL_READER` undefined on Yocto): ORT is reachable only via a hand-built `alp_inference_config_t` |
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
-| 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) + Linux **Mali-G31 EGL/GLES** backend for the RZ/V2N family (`yocto_gles.c`, opt-in `ALP_SDK_USE_GPU2D_GLES`, **bench-unverified**, see `docs/v2n-mali-gpu.md`) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim + **E8 bench PASS** (RAM-run, 2026-06-17); D/AVE 2D code-complete, bench-unverified (ADDITIVE/MULTIPLY blends delegate to the sw path).  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; i.MX 93 = **PXP**, no Vivante — N93 is served by the sw fallback today, now wired on `ALP_OS=yocto` plain-CMake builds too (dispatcher + sw_fallback replace the NOSUPPORT stub, ctest-covered); a Linux-side PXP/`libg2d` backend is future work gated on the `meta-imx` machine wiring + an in-repo API source, see #24) |
-| Power management | `power.h` | M (Zephyr `pm_*`) + A | surface present; **untested** |
+| 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) + Linux **Mali-G31 EGL/GLES** backend for the RZ/V2N family (`yocto_gles.c`, opt-in `ALP_SDK_USE_GPU2D_GLES`, **bench-unverified**, see `docs/v2n-mali-gpu.md`) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim + **E8 bench PASS** (RAM-run, 2026-06-17); D/AVE 2D code-complete, bench-unverified (ADDITIVE/MULTIPLY blends delegate to the sw path).  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; the sw fallback is also wired on `ALP_OS=yocto` plain-CMake builds (dispatcher + sw_fallback replace the NOSUPPORT stub, ctest-covered)) |
+| Power management | `power.h` | M (Zephyr `pm_*`) + A; plus the Alif SE STOP/STANDBY backend on **AEN801 / AEN803 (`alif:ensemble:e8`, M55-HE)** and the SoM power-domain runtime (`CONFIG_ALP_SDK_POWER_ALIF_SE`, default n; `CONFIG_ALP_SDK_SOM_POWER`) | surface present; **untested** except E8 STOP, which is bench-proven on E1M-AEN803 (STANDBY is not) -- see [aen-power-domains.md](aen-power-domains.md) |
 | Heterogeneous RPC | `rpc.h` (+ generated `system_ipc.h`) | A↔M over RPMsg / OpenAMP | surface + scaffold; **untested** |
 | DAC | `dac.h` (split out of `adc.h` in v0.8) | M (Zephyr `dac_*`) + A (Yocto registry backend, issue #33) | Zephyr backend real — **E8 bench PASS** (`dac_alif`, v0.8.0 campaign); Yocto code-complete, HIL-gated; `alp_dac_capabilities()` additive in v0.9 (conformance-suite covered on native_sim) |
 | I²C/SPI target (slave) mode | `peripheral.h` (`alp_i2c_target_*` / `alp_spi_target_*`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Zephyr `i2c_target_register` / `SPI_OP_MODE_SLAVE`); Yocto + baremetal: NOSUPPORT stubs (no Linux slave-mode uAPI) | Zephyr backend real; `alp_spi_target_transceive` takes a `timeout_ms` bound (finite timeouts need `CONFIG_SPI_ASYNC` — sync-only builds answer `ALP_ERR_NOSUPPORT`) and `alp_spi_target_close` refuses `ALP_ERR_BUSY` while a transfer is in flight; drivers without target support degrade with `ALP_ERR_NOSUPPORT`; native_sim covers param-validation + degrade paths — **two-board HIL pending** |

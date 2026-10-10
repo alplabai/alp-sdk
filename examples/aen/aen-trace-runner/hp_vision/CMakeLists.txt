@@ -7,21 +7,90 @@
 # this app is both together, on the HP, publishing into the same tr_pslot.h
 # slot the HE's TR_INPUT_NPU build (../CMakeLists.txt) reads.
 #
-# alp-sdk-lcd's e1m_evk_rpi_csi shield ships a boards/<qualified-board>.overlay
-# for rtss_he only, not rtss_hp -- boards/shields/tr_hp_csi_complete/ is a
-# local ordering fix (ponytail; its own header explains why an app-level
-# board overlay alone cannot substitute) that supplies the same content
-# BEFORE innomaker_cam_ov9281 needs it. Delete tr_hp_csi_complete once
-# alp-sdk-lcd ships the real per-board overlay (see that file's header for
-# the exact upstream path) and this SHIELD list reverts to just the two
-# lines design sec 2 originally called for.
+# boards/shields/tr_hp_csi_complete/ is a local ordering fix (ponytail; its
+# own header explains why an app-level board overlay alone cannot
+# substitute) that supplied the e1m_evk_rpi_csi per-board overlay for
+# rtss_hp BEFORE innomaker_cam_ov9281 needs it, back when that shield shipped
+# a boards/<qualified-board>.overlay for rtss_he only. The shield now ships
+# alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay itself (#2809), so
+# tr_hp_csi_complete is redundant and can be deleted, reverting this SHIELD
+# list to just e1m_evk_rpi_csi + innomaker_cam_ov9281.
 cmake_minimum_required(VERSION 3.20)
 
 list(APPEND BOARD_ROOT ${CMAKE_CURRENT_LIST_DIR}) # shields live under <root>/boards/shields/ (list_shields.py --board-root)
 list(APPEND SHIELD e1m_evk_rpi_csi tr_hp_csi_complete innomaker_cam_ov9281)
 
+# The combined HP unit (docs/2026-09-23-sound.md "Sound with the vision HP"): TR_HP_SOUND=ON
+# links the game sound -- sound/src/main.c as the GAME firmware (TR_SND_EMBED: its own
+# cooperative thread above the vision's), the tr_audio synth, the ring pop, I2S3 -> both TAS2563
+# amps and the proven bring-up -- into THIS image, so the Riverdi build plays its music and SFX
+# beside the camera + NPU. Only with -DTR_SND_REWORKED_U46=ON (sound_gate.cmake: the i2s3 node
+# contends on a stock 74LVC157 U46). Opt-in: without TR_HP_SOUND this image is unchanged. The HE
+# is built with the same -DTR_HP_SOUND=ON (../CMakeLists.txt): it leases I2C2 + GPIO5 to this
+# core for the amp bring-up and takes them back (src/ipc/tr_bus2.h).
+# Release: a32/release/build-release.sh TR_HP_VISION=ON TR_SND_HP=ON (hp_vision_check.sh and
+# snd_hp_check.sh run on this one image).
+option(TR_SND_REWORKED_U46 "Carrier's U46 I2S mux is a reworked 3257-type switch on +3V3 (sound/CMakeLists.txt)" OFF)
+option(TR_HP_SOUND "Game sound (I2S3 + TAS2563) in this image: REWORKED-U46 carriers only (needs the clockctrl-patched ZEPHYR_BASE)" OFF)
+include(${CMAKE_CURRENT_LIST_DIR}/sound_gate.cmake)
+if(TR_HP_SOUND)
+	# set(), not list(APPEND): defining DTC_OVERLAY_FILE switches off Zephyr's pick-up of
+	# boards/<board>.overlay, so it is named here. Order matters: the board overlay disables
+	# i2c2 and lpgpio, sound.overlay turns gpio5 / lpgpio / i2s3 / SPI1 on, sound_hp.overlay
+	# turns i2c2 back on (deferred) and orders the IRQ priorities.
+	set(DTC_OVERLAY_FILE
+		${CMAKE_CURRENT_LIST_DIR}/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay
+		${CMAKE_CURRENT_LIST_DIR}/../sound/sound.overlay
+		${CMAKE_CURRENT_LIST_DIR}/sound_hp.overlay)
+	list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/sound.conf)
+endif()
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(trace_runner_hp_vision LANGUAGES C CXX)
+
+if(TR_HP_SOUND)
+	# sound/CMakeLists.txt's refusal, in effect: I2S3 runs off the CGU 76.8 MHz audio source only
+	# alp-sdk's clockctrl patch turns on; unpatched, the build is clean and nothing ever clocks out.
+	file(READ ${ZEPHYR_BASE}/drivers/clock_control/clock_control_alif.c _tr_clkctl)
+	string(FIND "${_tr_clkctl}" "ALIF_EXPMST0_CTRL_REG_OFF" _tr_patched)
+	# (hp_vision/Kconfig reads the same fact as CONFIG_TR_CLKCTL_PATCHED, for twister's filter.)
+	if(_tr_patched EQUAL -1)
+		message(FATAL_ERROR "${ZEPHYR_BASE}/drivers/clock_control/clock_control_alif.c lacks alp-sdk's "
+			"clockctrl patch (no 76.8 MHz audio clock for I2S3). TR_HP_SOUND=ON needs a patched tree "
+			"(zephyr/patches/zephyr/0001-clock_control_alif-*), docs/2026-09-23-sound.md.")
+	endif()
+	target_sources(app PRIVATE
+		../sound/src/main.c
+		../sound/src/cc3501e_bridge.c
+		../sound/src/cc3501e_gpio_routes.c
+		../src/audio/tr_audio.c
+		../src/audio/tr_amp_ready.c
+		../src/ipc/tr_aring.c
+		../src/ipc/tr_bus2.c
+	)
+	target_include_directories(app PRIVATE ../sound/src)
+	# src/platform/tr_i2c2_rearm.h resets the i2c_dw driver's sync semaphore (struct
+	# i2c_dw_dev_config in drivers/i2c/i2c_dw.h, not a public header).
+	target_include_directories(app PRIVATE ${ZEPHYR_BASE}/drivers/i2c)
+	# The game's sound, as the standalone GAME image builds it by default (sound/CMakeLists.txt:
+	# V2 + V3 voicing, 16 kHz, round-4 amp config = no override writes): the synth defines are
+	# the same bits the host goldens pin.
+	set(TR_SND_VOLUME "" CACHE STRING "Digital volume 0..128 (empty = 128; sound/src/main.c caps it)")
+	set(TR_SND_AMP_REGS_FILE NONE CACHE STRING "Header defining TR_SND_AMP_REGS (extra TAS2563 writes), or NONE")
+	target_compile_definitions(app PRIVATE TR_HP_SOUND=1 TR_SND_EMBED=1 TR_SND_TEST=0 TR_SND_MIC=0
+		TR_AUDIO_V2=1 TR_AUDIO_V3=1 TR_AUDIO_RATE=16000u)
+	if(TR_SND_VOLUME)
+		target_compile_definitions(app PRIVATE TR_SND_VOLUME=${TR_SND_VOLUME}u)
+	endif()
+	# DEV bench control (sound/src/main.c): once, after ~3 s of stream, hold the I2S3 IRQ off 2 ms so
+	# hp_i2s_fu MUST count -- the positive control for that counter. Never in a release:
+	# a32/release/hp_vision_check.sh and snd_hp_check.sh refuse an image that carries it.
+	option(TR_SND_UNDERRUN_TEST "DEV: I2S3 FIFO underrun positive control (hp_i2s_fu must count)" OFF)
+	target_compile_definitions(app PRIVATE TR_SND_UNDERRUN_TEST=$<BOOL:${TR_SND_UNDERRUN_TEST}>)
+	if(TR_SND_AMP_REGS_FILE AND NOT TR_SND_AMP_REGS_FILE STREQUAL "NONE")
+		target_compile_definitions(app PRIVATE TR_SND_AMP_REGS_FILE="${TR_SND_AMP_REGS_FILE}")
+	endif()
+endif()
 
 target_sources(app PRIVATE
 	src/main.c
@@ -53,4 +122,11 @@ if(TR_CAM_MIRROR)
 	target_compile_definitions(app PRIVATE TR_CAM_MIRROR=1)
 else()
 	target_compile_definitions(app PRIVATE TR_CAM_MIRROR=0)
+endif()
+# Bench knob (../src/vision/cam_rot.h TR_OV9281_HMIRROR_ACTIVE_LOW): write the
+# rot-0 mirror bit the other way round, if the bench shows it mirrors the
+# opposite way to the one assumed. The HE follows through tr_cam_view_t.mirror.
+option(TR_OV9281_HMIRROR_ACTIVE_LOW "The rot-0 HMIRROR bit mirrors when CLEAR (bench-verified only)" OFF)
+if(TR_OV9281_HMIRROR_ACTIVE_LOW)
+	target_compile_definitions(app PRIVATE TR_OV9281_HMIRROR_ACTIVE_LOW=1)
 endif()

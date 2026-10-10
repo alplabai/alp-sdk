@@ -13,7 +13,9 @@
  * (1/4/16/64 B) + the GHSA-xhm8 external concurrent-close all pass end-to-end.
  * The doorbell is asymmetric -- forward A55->M33 via R_MHU_NS5.MSG (M33 NVIC
  * IRQ 293), reverse M33->A55 via a CA55-routed MHU-B SWINT unit (12 -> GIC_SPI
- * 404); see mailbox_notify() below and yocto_uio_drv.c for the register map.
+ * 404) or, with CONFIG_ALP_V2N_DOORBELL_RSP_CH8, Renesas' rsp_ch8_ns (GIC_SPI
+ * 385, bench-pending); see mailbox_notify() below and
+ * <alp/protocol/v2n_mhu_doorbell.h> for the register map.
  *
  * Adapted near-verbatim from Renesas's own sample --
  * zephyr/samples/boards/renesas/openamp_linux_zephyr/src/main_remote.c --
@@ -60,6 +62,9 @@
 #include <metal/device.h>
 #include <openamp/open_amp.h>
 
+#include <alp/protocol/amp_beacon.h>
+#include <alp/protocol/v2n_mhu_doorbell.h>
+
 #include "resource_table.h"
 
 LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
@@ -90,13 +95,13 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
  * table itself gets memcpy'd into RSC_TABLE_ADDR by platform_init() below,
  * so it owns the low end of the `rsctbl` region -- the beacon lives at the
  * TOP of the region instead, out of the resource table's way.  A Linux-side
- * `devmem 0x4F700FF0` (rsctbl's A55 alias) read after this app boots proves,
+ * `devmem` of the beacon's A55 alias (see README.md) read after this app boots proves,
  * in one shot, that the M33 is alive, the DDR window is backed, and the
  * CM33<->A55 address translation in resource_table.h is correct -- and the
  * heartbeat word lets a re-read tell "alive" apart from "wrote once, then
  * faulted".
  *
- * Version 2 (#2586) adds the attach-epoch word at +0xFFC, which publishes
+ * Version 2 (#2586) adds the attach-epoch word (end-0x04 of the rsctbl page), which publishes
  * whether this firmware is bound to an A55 session: ODD = bound (bumped
  * after rpmsg_init_vdev() returned), EVEN = waiting for an attach (starts
  * at 0, bumped again after cleanup_system() on an A55 attach reset; see
@@ -105,13 +110,13 @@ LOG_MODULE_REGISTER(rpmsg_v2n_m33_sm, LOG_LEVEL_INF);
  * vdev.status says, and waits for EVEN.  It refuses a re-attach outright
  * when the version is below 2.
  */
-#define RSCTBL_BEACON_MAGIC_OFFSET     (0xFF0)
-#define RSCTBL_BEACON_VERSION_OFFSET   (0xFF4)
-#define RSCTBL_BEACON_HEARTBEAT_OFFSET (0xFF8)
-#define RSCTBL_ATTACH_EPOCH_OFFSET     (0xFFC)
-
-#define RSCTBL_BEACON_MAGIC   (0xA10D0683U) /* "Alp Lab, #683" -- arbitrary, just distinctive */
 #define RSCTBL_BEACON_VERSION (2U)
+
+/* The beacon: the top 16 bytes of the rsctbl page, laid out by
+ * <alp/protocol/amp_beacon.h> (shared with the A55 backend and the stock
+ * shim).  DT_REG_SIZE of `rsctbl` is that page's size, from the SoC
+ * metadata via the generated board .dts. */
+#define RSCTBL_BEACON ALP_AMP_BEACON_AT(RSC_TABLE_ADDR, DT_REG_SIZE(DT_NODELABEL(rsctbl)))
 
 /* 2048 not 1024: the RX callback + echo thread now hold a struct sc_frame (~520 B)
  * on the stack for the queued-echo path (#707); the deep OpenAMP rx call chain
@@ -248,20 +253,21 @@ static void new_service_cb(struct rpmsg_device *rdev, const char *name, uint32_t
  * in shared memory -- the mailbox only ever carries a wakeup, never
  * data). */
 /* #697 cycle 10 (GIC-measured): the A55 GIC only receives the MHU-B CA55-routed
- * SWINT units 12-15 (-> INTID 436-439 = GIC_SPI 404-407); the NS-channel RSP
- * interrupt the FSP/mbox send raises (R_MHU_NS5.RSP) routes to NO A55 GIC line,
- * so a reply sent that way is never delivered.  Ring the A55 by asserting SWINT
- * unit 12's SET directly instead.  (Forward A55->M33 is unaffected: it uses
- * R_MHU_NS5.MSG -> the M33's own NVIC IRQ 293.)  SWINT units live in the MHU-B
- * block at +0x800, 0x10 stride, STS/SET/CLR @ +0x00/04/08; unit 12 SET =
- * CM33 0x50480000 + 0x800 + 12*0x10 + 0x04. */
-#define ALP_M33_MHU_SWINT12_SET (0x504808C4U)
+ * SWINT units 12-15 (-> INTID 436-439 = GIC_SPI 404-407); the RSP interrupt of
+ * NS slot 5, which the FSP/mbox send raises, routes to NO A55 GIC line, so a
+ * reply sent that way is never delivered.  Ring the A55 by writing the
+ * doorbell's SET register directly instead.  (Forward A55->M33 is unaffected:
+ * it uses R_MHU_NS5.MSG -> the M33's own NVIC IRQ 293.)  Which register that
+ * is -- SWINT unit 12 SET (default) or RSP_INT_SET of NS slot 8 with
+ * CONFIG_ALP_V2N_DOORBELL_RSP_CH8 -- and its offset come from
+ * <alp/protocol/v2n_mhu_doorbell.h>; the A55 must be built for the same line. */
+#define ALP_M33_DOORBELL_SET (ALP_V2N_MHU_B_CM33_BASE + ALP_V2N_DOORBELL_SET_OFF)
 
 int mailbox_notify(void *priv, uint32_t id)
 {
 	ARG_UNUSED(priv);
 	ARG_UNUSED(id);
-	*(volatile uint32_t *)ALP_M33_MHU_SWINT12_SET = 1U;
+	*(volatile uint32_t *)ALP_M33_DOORBELL_SET = 1U;
 	return 0;
 }
 
@@ -556,46 +562,34 @@ static void rpmsg_mng_task(void *arg1, void *arg2, void *arg3)
 }
 
 /* Writes the one-shot magic+version half of the beacon -- see the
- * RSCTBL_BEACON_* macros' header comment. */
+ * header comment above. */
 static void rsctbl_beacon_publish(void)
 {
-	volatile uint32_t *magic = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_BEACON_MAGIC_OFFSET);
-	volatile uint32_t *version =
-	    (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_BEACON_VERSION_OFFSET);
-
-	volatile uint32_t *epoch = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_ATTACH_EPOCH_OFFSET);
-
-	*epoch   = 0U;
-	*version = RSCTBL_BEACON_VERSION;
+	RSCTBL_BEACON->attach_epoch = 0U;
+	RSCTBL_BEACON->version      = RSCTBL_BEACON_VERSION;
 	/* Magic last: the A55 trusts epoch + version only once it reads the magic. */
 	barrier_dsync_fence_full();
-	*magic = RSCTBL_BEACON_MAGIC;
+	RSCTBL_BEACON->magic = ALP_AMP_BEACON_MAGIC;
 	barrier_dsync_fence_full();
 }
 
-/* Flips the attach epoch's parity (even <-> odd) -- see the RSCTBL_BEACON_*
- * macros' header comment.  Called after the virtio device is bound (-> odd)
- * and after it is gone (-> even). */
+/* Flips the attach epoch's parity (even <-> odd).  Called after the virtio
+ * device is bound (-> odd) and after it is gone (-> even). */
 static void rsctbl_attach_epoch_bump(void)
 {
-	volatile uint32_t *epoch = (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_ATTACH_EPOCH_OFFSET);
-
 	barrier_dsync_fence_full();
-	*epoch = *epoch + 1U;
+	RSCTBL_BEACON->attach_epoch = RSCTBL_BEACON->attach_epoch + 1U;
 	barrier_dsync_fence_full();
 }
 
-/* ~1 Hz heartbeat -- see the RSCTBL_BEACON_* macros' header comment. */
+/* ~1 Hz heartbeat -- see the header comment above. */
 static uint32_t rsctbl_heartbeat_count;
 
 static void rsctbl_heartbeat_expiry(struct k_timer *timer)
 {
-	volatile uint32_t *heartbeat =
-	    (volatile uint32_t *)(RSC_TABLE_ADDR + RSCTBL_BEACON_HEARTBEAT_OFFSET);
-
 	ARG_UNUSED(timer);
 	rsctbl_heartbeat_count++;
-	*heartbeat = rsctbl_heartbeat_count;
+	RSCTBL_BEACON->heartbeat = rsctbl_heartbeat_count;
 	barrier_dsync_fence_full();
 }
 

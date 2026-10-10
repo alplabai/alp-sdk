@@ -46,6 +46,16 @@
                          * duplicated up here too. */
 #define TR_PERF_COLS 40
 
+/* ---------------------------------------------------------------- power
+ * The +5V net's power graph (the HUD's T_PWR tile, "+5V net (SoM+LCD)", a line graph): the last TR_PWR_N
+ * samples of platform/rail5v_power.c, oldest first, ~10 Hz so about 10 s, in mW. A sample the
+ * poll could not take (the HP holds I2C2, a read missed, the rail below 4.5 V) is TR_PWR_GAP and
+ * draws as a hole, never as a zero. pwr_seq counts every sample pushed: the repaint key. */
+#define TR_PWR_N           96
+#define TR_PWR_GAP         (-1)
+#define TR_PWR_MIN_SPAN_MW 100 /* the graph's full scale is never less ... */
+#define TR_PWR_STEP_MW     50  /* ... and its ends sit on multiples of this */
+
 typedef struct {
 	uint8_t  mode;   /* TR_HUD_* */
 	uint8_t  banner; /* TR_BANNER_* (tr_mbox.h), TR_HUD_BANNER only */
@@ -60,13 +70,26 @@ typedef struct {
 	uint32_t zone_seq; /* ... and its entry count: a change shows its name */
 	uint32_t score, metres, best;
 	char     perf[TR_PERF_LINES][TR_PERF_COLS]; /* NUL-terminated, "" = blank line */
+	int16_t  pwr[TR_PWR_N];                     /* the power graph, oldest first (see TR_PWR_N) */
+	uint32_t pwr_seq;                           /* samples pushed so far: the tile's repaint key */
 	/* Booth (tr_hud_view_booth()): */
 	uint8_t popup_hs;  /* the popup is the new-high-score celebration (score.h), not a pickup's */
 	tr_hiscore_t  hs;  /* the table: a page of the attract card */
 	tr_initials_t ini; /* TR_HUD_INITIALS: the entry as it stands */
 } tr_hud_view_t;
 
-#define TR_HUD_TILES 7
+/* The window's readouts: *now the newest sample (-1: it is a gap), *avg the mean and *peak the
+ * largest of the real ones (-1 with none); returns how many are real. */
+int tr_hud_pwr_stats(const int16_t pwr[TR_PWR_N], int32_t *now, int32_t *avg, int32_t *peak);
+
+/* The graph's vertical scale, mW: *lo at the bottom, *span from it to the top. Tight on the data -- the
+ * rail sits at ~4.85 W and swings ~50 mW, which a scale from 0 hides: span = the data's range x 1.25,
+ * at least TR_PWR_MIN_SPAN_MW, rounded UP to TR_PWR_STEP_MW, centred on the data, *lo a multiple of
+ * TR_PWR_STEP_MW (never below 0) and raised span so the peak is always inside. No data: 0 and the
+ * minimum span. */
+void tr_hud_pwr_scale(const int16_t pwr[TR_PWR_N], int32_t *lo, int32_t *span);
+
+#define TR_HUD_TILES 9
 
 typedef struct {
 	uint32_t key[TR_HUD_TILES]; /* what each tile last showed */
@@ -78,6 +101,10 @@ typedef struct {
 	bool     drawn;             /* false: every tile repaints on the next update */
 	uint32_t budget; /* px repainted per update at most (0: no cap); see tr_hud_update() */
 	int      next;   /* the tile a capped update stopped at */
+	/* Clockwise degrees the buffer is turned (render/panel_rot.h): 0 the 720 x 352
+	 * portrait HUD, 90 / 270 the 352 x 720 layer of a panel mounted turned
+	 * (hud_l2.c sets it at open). tr_hud_paint_all() always paints rotation 0. */
+	int rot;
 } tr_hud_t;
 
 /* Blink and popup run on a 40 Hz frame clock (tr_hz_to40() of the update
@@ -164,7 +191,8 @@ typedef struct {
 	uint32_t hp_magic;    /* sound ring identity word (tr_aring.h TR_ARING_MAGIC) */
 	uint32_t hp_state;    /* sound ring hp_state */
 	int32_t
-	    rail5v_mw; /* platform/rail5v_power.h tr_rail5v_avg_mw: carrier +5V net (SoM+LCD+regs), EMA mW */
+	    rail5v_mw; /* platform/rail5v_power.h tr_rail5v_avg_mw: carrier +5V net (SoM+LCD+regs), EMA mW;
+	       * -1 = stale (the HP holds I2C2 for its amp bring-up): the HUD prints "--" */
 	/* fix round 5: hp_vision's OWN beacon (src/ipc/tr_hp_dbg.h), read
 	 * alongside the sound ring's -- only one of the two is ever meaningful
 	 * on a given HP_APP (see tr_hp_dbg_magic's use in tr_perf_sample()).
@@ -218,7 +246,7 @@ typedef struct {
 	uint32_t    base, size;
 } tr_mem_region_t;
 
-#define TR_MEM_REGIONS    21
+#define TR_MEM_REGIONS    23
 #define TR_MEM_SRAM_BASE  0x02000000u
 #define TR_MEM_SRAM_TOTAL 0x00800000u /* SRAM0 4 MiB + SRAM1 4 MiB, contiguous */
 

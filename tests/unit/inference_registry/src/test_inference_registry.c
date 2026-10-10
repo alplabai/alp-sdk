@@ -5,7 +5,7 @@
  * Backends visible on this test build:
  *   sw_fallback     (priority 0,   "*" wildcard, vendor "sw_fallback")
  *
- * Real bodies (tflm, ethos_u_aen, ethos_u_n93) do NOT link into
+ * Real bodies (tflm, ethos_u_aen) do NOT link into
  * this native_sim test build -- they all depend on either TFLM
  * (not on native_sim) or vendor silicon-specific Kconfigs.  The
  * A55/Linux-only DRP-AI / DEEPX DX-M1 engines never register on

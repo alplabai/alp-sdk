@@ -2,12 +2,21 @@
  * src/platform/hud_l2.c -- the HUD on CDC200 layer 2 (P9, TR_RENDER=A32).
  *
  * The HE owns layer 2 outright: a 720 x 352 ARGB4444 window over the top of
- * the panel, scanned from its own buffer TR_HUD_FB (tr_mbox.h, SRAM0
+ * the picture (centred on it when the panel is wider than 720: the buffer
+ * cannot grow, SRAM0 has no room for an 800-wide one, tr_memmap.h), scanned from its own buffer TR_HUD_FB (tr_mbox.h, SRAM0
  * 0x02382000..0x023FDBFF), blended per pixel over layer 1 (the A32's 3D
  * frame). Zero A32 cost: the renderer skips its own sprite HUD on frames
  * flagged TR_FLAG_HUD_L2, which main.c sets only once tr_hud_l2_open() says
  * the layer is up. Everything drawn is src/hud/hud.c (host-tested); this
  * file is only the registers, the counters and the call.
+ *
+ * Rotated panel (alp_display_caps_t.rotation 90 or 270, the RVT121): the layer
+ * is a 352 x 720 window, TR_HUD_H landscape columns wide at the layer-1
+ * window's edge the portrait top lands on (render/panel_rot.h) -- right for 90,
+ * left for 270 -- and centred along that edge (the Riverdi's 800 rows hold the
+ * 720-px HUD with 40 above and below), same bytes, same buffer, hud.c writes it
+ * rotated. The window is computed here at open from the rotation and the
+ * layer-1 window.
  *
  * Register programming follows the Alif DFP driver's own sequence,
  * cdc_set_layer_cfg() in alif-dfp drivers/source/cdc.c (register map
@@ -60,27 +69,37 @@
 #include "../ipc/tr_aring.h"
 #include "../ipc/tr_mbox.h"
 #include "../ipc/tr_memmap.h"
+#include "../render/panel_rot.h"
+#include "display.h"
 #include "hud_l2.h"
+#include "bus2_he.h"
 #include "rail5v_power.h"
 
 #define CDC_REGS DT_REG_ADDR(DT_NODELABEL(cdc200))
 BUILD_ASSERT(DT_REG_ADDR(DT_NODELABEL(cdc200)) == 0x49031000u, "CDC200 base (soc.h CDC_BASE)");
-BUILD_ASSERT(DT_PROP(DT_NODELABEL(cdc200), width) == TR_HUD_W, "the HUD spans the panel width");
+/* The layer-1 window the HUD sits on (the whole panel unless a shield-fit overlay
+ * narrows it), in panel coordinates. */
+#define L1_NODE DT_NODELABEL(cdc200)
+#define L1_X0   DT_PROP_OR(L1_NODE, win_x0_l1, 0)
+#define L1_Y0   DT_PROP_OR(L1_NODE, win_y0_l1, 0)
+#define L1_W    (DT_PROP_OR(L1_NODE, win_x1_l1, DT_PROP(L1_NODE, width)) - L1_X0)
+#define L1_H    (DT_PROP_OR(L1_NODE, win_y1_l1, DT_PROP(L1_NODE, height)) - L1_Y0)
 BUILD_ASSERT(TR_HUD_FB_SIZE == TR_HUD_W * TR_HUD_H * 2u, "tr_mbox.h TR_HUD_FB_SIZE");
 BUILD_ASSERT(TR_HUD_FB % 64u == 0u,
              "CDC200 fetch address alignment (bus width 8 B; 64 B for burst)");
 /* The layer never touches what the A32 renders into or TF-A's window. */
-BUILD_ASSERT(TR_HUD_FB >= TR_MHU0_WINDOW_HI && TR_HUD_FB >= TR_FB_A + TR_FB_SIZE,
+BUILD_ASSERT(TR_HUD_FB >= TR_MHU0_WINDOW_HI && TR_HUD_FB >= TR_FB_A + TR_FB_SLOT_SIZE,
              "HUD buffer placement");
-
-#define HUD_PITCH (TR_HUD_W * 2u)
 
 /* Repaint cap per presented frame (tr_hud_t.budget). Host-counted M55
  * instructions (qemu-arm -cpu cortex-m55, tools/hud_preview.c's layouts):
  * ~9.4 per repainted px on average, so 110,000 px is ~1.0 M instructions,
  * ~6-10 ms at 160 MHz -- well inside the ~20 ms the HE waits on the A32
  * every frame. Only a screen change hits it (spread over 3 frames); a
- * score + popup frame is ~101,000 px. */
+ * score + popup frame is ~101,000 px.
+ * ponytail: measured on the unrotated (RK055) copy; the rotated path (hud.c
+ * tr_rot_blit, a strided store per px) costs more per px on a panel mounted
+ * turned. Re-measure on the RVT121 and lower this cap if the HE misses frames. */
 #define HUD_PX_BUDGET 110000u
 
 static uint16_t *const g_fb = (uint16_t *)TR_HUD_FB;
@@ -115,31 +134,52 @@ static inline void wr(uint32_t off, uint32_t v)
 
 bool tr_hud_l2_open(void)
 {
+	int rot = tr_display_rotation();
+
 	uint32_t lcnt = rd(CDC_LCNT), bp = rd(CDC_BP_CFG);
 	/* accumulated HSYNC + HBP (minus 1) in [31:16], VSYNC + VBP in [15:0] */
 	uint32_t ahbp = (bp >> 16) & 0xFFFFu, avbp = bp & 0xFFFFu;
 	uint32_t hs = ahbp + 1u, vs = avbp + 1u;
+	/* The window and pitch of the layer: 720 x 352, or turned 352 x 720. */
+	uint32_t win_w = rot ? TR_ROT_HUD_W : TR_HUD_W, win_h = rot ? TR_HUD_W : TR_HUD_H;
+	uint32_t pitch = win_w * 2u;
 
+	if (!tr_rot_valid(rot) || win_w > L1_W || win_h > L1_H) {
+		printk("hud     : %ux%u layer 2 (rotation %d) does not fit the %ux%u scan-out window -- "
+		       "A32 keeps the HUD\n",
+		       (unsigned)win_w,
+		       (unsigned)win_h,
+		       rot,
+		       (unsigned)L1_W,
+		       (unsigned)L1_H);
+		return false;
+	}
 	if (lcnt < 2u) {
 		printk("hud     : CDC200 reports %u layer(s) -- no layer 2, A32 keeps the HUD\n", lcnt);
 		return false;
 	}
 	memset(g_fb, 0, TR_HUD_FB_SIZE); /* transparent before the layer is ever shown */
 	tr_hud_init(&g_hud);
+	g_hud.rot    = rot;
 	g_hud.budget = HUD_PX_BUDGET;
 	memset(&g_view, 0, sizeof(g_view));
 
 	wr(CDC_L2_REL_CTRL, CDC_LN_REL_CTRL_SH_MASK);
-	wr(CDC_L2_WIN_HPOS, (hs + TR_HUD_W - 1u) << CDC_LN_WIN_HPOS_STOP_POS_SHIFT | hs);
-	wr(CDC_L2_WIN_VPOS, (vs + TR_HUD_H - 1u) << CDC_LN_WIN_VPOS_STOP_POS_SHIFT | vs);
+	uint32_t dx, dy;
+
+	tr_hud_window_off(rot, L1_W, L1_H, win_w, win_h, &dx, &dy); /* flush + centred (panel_rot.h) */
+	hs += L1_X0 + dx;
+	vs += L1_Y0 + dy;
+	wr(CDC_L2_WIN_HPOS, (hs + win_w - 1u) << CDC_LN_WIN_HPOS_STOP_POS_SHIFT | hs);
+	wr(CDC_L2_WIN_VPOS, (vs + win_h - 1u) << CDC_LN_WIN_VPOS_STOP_POS_SHIFT | vs);
 	wr(CDC_L2_PIX_FORMAT, CDC_PIXEL_FORMAT_ARGB4444);
 	wr(CDC_L2_CONST_ALPHA, 255u);
 	wr(CDC_L2_BLEND_CFG,
 	   CDC_BLEND_PIXEL_ALPHA_X_CONST_ALPHA << CDC_LN_BLEND_CFG_F1_SEL_SHIFT |
 	       CDC_BLEND_PIXEL_ALPHA_X_CONST_ALPHA_INV);
 	wr(CDC_L2_CFB_ADDR, TR_HUD_FB);
-	wr(CDC_L2_CFB_LENGTH, HUD_PITCH << CDC_LN_CFB_LENGTH_PITCH_SHIFT | (HUD_PITCH + BUS_WIDTH));
-	wr(CDC_L2_CFB_LINES, TR_HUD_H);
+	wr(CDC_L2_CFB_LENGTH, pitch << CDC_LN_CFB_LENGTH_PITCH_SHIFT | (pitch + BUS_WIDTH));
+	wr(CDC_L2_CFB_LINES, win_h);
 	wr(CDC_L2_CTRL, CDC_LN_CTRL_LAYER_EN);
 	wr(CDC_L2_REL_CTRL, rd(CDC_L2_REL_CTRL) | CDC_LN_REL_CTRL_SH_VBLANK);
 
@@ -156,8 +196,8 @@ bool tr_hud_l2_open(void)
 	tr_hud_l2_regs[3] = rd(CDC_L2_CFB_ADDR);
 	tr_hud_l2_regs[4] = rd(CDC_L2_REL_CTRL);
 	printk("hud     : layer 2 %ux%u ARGB4444 @0x%08x win h 0x%08x v 0x%08x rel 0x%x (%d ms)\n",
-	       TR_HUD_W,
-	       TR_HUD_H,
+	       (unsigned)win_w,
+	       (unsigned)win_h,
 	       (unsigned)tr_hud_l2_regs[3],
 	       (unsigned)tr_hud_l2_regs[1],
 	       (unsigned)tr_hud_l2_regs[2],
@@ -208,8 +248,9 @@ static void perf(void)
 	/* The HP's own status word (P10's sound ring, SRAM0: powered from reset). */
 	raw.hp_magic = ((volatile tr_aring_t *)TR_ARING_ADDR)->magic;
 	raw.hp_state = ((volatile tr_aring_t *)TR_ARING_ADDR)->hp_state;
-	raw.rail5v_mw =
-	    tr_rail5v_avg_mw; /* platform/rail5v_power.c, polled off this frame's hot path */
+	/* platform/rail5v_power.c, polled off this frame's hot path. -1 = stale: the HP holds I2C2
+	 * (the HUD prints "--"). */
+	raw.rail5v_mw = tr_bus2_he_owns() ? tr_rail5v_avg_mw : -1;
 	/* fix round 5: hp_vision's own beacon (src/ipc/tr_hp_dbg.h), SRAM0, no
 	 * cache maintenance needed (this build runs CONFIG_DCACHE=n, same as
 	 * every other fixed-address cross-core read in this file). Zeroed/
@@ -243,6 +284,8 @@ static void perf(void)
 	mem.img = mem.itcm;
 #endif
 	tr_perf_sample(&g_perf, &raw, &mem, &g_view);
+	/* The power graph's window (platform/rail5v_power.c): every present, it is 192 bytes. */
+	g_view.pwr_seq = tr_rail5v_ring_read(g_view.pwr);
 }
 
 void tr_hud_l2_present(const tr_score_t    *s,

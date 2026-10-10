@@ -48,6 +48,10 @@
 #include "../../src/vision/movenet_mram.h"
 #include "../../src/vision/pose.h"
 
+/* The board overlay's side of the I2C1 handover names the same flag words the HE's does. */
+BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), flag_address) == TR_MEM_I2C1_HANDOVER,
+             "i2c1_handover flag-address != tr_memmap.h TR_MEM_I2C1_HANDOVER");
+
 /* ---- I2C1 SCCB unstick (task facts, silicon-proven on 2026W36-0009 today) --
  * I2C1 (0x49011000, the camera SCCB bus, shared with GT911 touch at 0x14)
  * latches stuck after boot: every transfer times out with rc -116. Cure:
@@ -70,10 +74,9 @@
  * itself needing the I2C1 controller already initialised) happens entirely
  * BEFORE main() ever runs. If I2C1 was left stuck from a prior boot, the
  * sensor's own init fails first and the camera never comes up, no matter
- * what main() does afterward. Fixed with SYS_INIT at PRE_KERNEL_1 priority
- * 0 -- the earliest init stage Zephyr runs, strictly before every driver's
- * own init (which starts no earlier than PRE_KERNEL_1 at a higher, later
- * priority number). This works with NO devicetree change (no
+ * what main() does afterward. Fixed with SYS_INIT at POST_KERNEL priority
+ * 1 -- ahead of the i2c_dw instance (POST_KERNEL priority 40) and the sensor
+ * driver after it, and behind the HE handover wait (priority 0, see below). This works with NO devicetree change (no
  * zephyr,deferred-init) because the unstick is raw MMIO on the pad control
  * registers directly, independent of whatever init order pinctrl or the
  * i2c1 controller driver use -- it does not need either to have run first.
@@ -86,7 +89,10 @@ static int tr_i2c1_unstick_init(void)
 	sys_write32(TR_I2C1_PAD_I2C1, TR_I2C1_PAD_P7_2);
 	return 0;
 }
-SYS_INIT(tr_i2c1_unstick_init, PRE_KERNEL_1, 0);
+/* POST_KERNEL priority 1, after the alp,i2c-handover wait (priority 0, boards/<board>.overlay:
+ * the HE may be using this bus for a display bridge until it releases it) and
+ * still ahead of every driver (the i2c_dw instance is POST_KERNEL priority 40). */
+SYS_INIT(tr_i2c1_unstick_init, POST_KERNEL, 1);
 
 /* ---- software AE: apply tr_ae_step()'s result directly over I2C to the
  * sensor's own AE registers (chips/ov9281/zephyr/drivers/video/ov9281.c
@@ -94,7 +100,7 @@ SYS_INIT(tr_i2c1_unstick_init, PRE_KERNEL_1, 0);
  * video control API at all, see apply_ae()'s own header comment for why)
  * -- an SDK GAP, the same shape as src/platform/display.c's cdc200_swap_fb()
  * bypass: <alp/camera.h> has no exposure/gain control, so this reaches the
- * sensor directly. ov9281@60 is on E1M I2C1 (csi_i2c), from alp-sdk-lcd's
+ * sensor directly. ov9281@60 is on E1M I2C1 (csi_i2c), from the
  * innomaker_cam_ov9281 shield -- probe/camera/src/main.c's SENSOR_NODE.
  * g_sensor itself is still needed for device_is_ready() (the driver's own
  * init, and the camera pipeline's use of the SAME device elsewhere in this
@@ -236,13 +242,13 @@ static void tr_cam_mirror_apply(void)
 	int      rc  = ov9281_read_reg8(reg, &v);
 
 	if (rc >= 0) {
-		v  = TR_CAM_MIRROR ? (uint8_t)(v | TR_OV9281_FLIP_BIT) : (uint8_t)(v & ~TR_OV9281_FLIP_BIT);
+		v  = (uint8_t)((v & ~TR_OV9281_FLIP_BIT) | tr_cam_mirror_bit(TR_CAM_ROTATE, TR_CAM_MIRROR));
 		rc = ov9281_write_reg8(reg, v);
 	}
 	if (rc >= 0) {
 		rc = ov9281_read_reg8(reg, &v);
 	}
-	g_cam_mirrored = (uint16_t)(rc >= 0 && (v & TR_OV9281_FLIP_BIT) != 0u);
+	g_cam_mirrored = (uint16_t)(rc >= 0 && tr_cam_mirrored_from_reg(TR_CAM_ROTATE, v));
 	printk("camera  : mirror %d -> 0x%04x = 0x%02x (rc %d)%s\n",
 	       TR_CAM_MIRROR,
 	       reg,
@@ -538,15 +544,19 @@ int main(void)
 	/* Start mid-range; tr_ae_camera_opened() clamps it to the live ceiling. */
 	tr_ae_init(&g_ae, (uint16_t)(g_ae_exp_max / 2u), TR_AE_GAIN_IDX_0);
 
-	bool sram1_ok = tr_sram1_ready();
+	bool    sram1_ok        = tr_sram1_ready();
+	int64_t sram1_t0_ms     = k_uptime_get();
+	bool    sram1_fail_seen = false;
 
 	if (sram1_ok) {
 		g_dbg->sram1_ready_seen         = 1u;
 		g_dbg->sram1_ready_at_heartbeat = g_dbg->heartbeat;
 		printk("sram1   : ready word seen -- CAM_POOL (SRAM1) safe to touch\n");
 	} else {
-		printk("RESULT FAIL: SRAM1 ready word not seen yet -- CAM_POOL (SRAM1) NOT touched this "
-		       "pass\n");
+		/* Not a failure: the A32 stub may still be powering SRAM1 at HP boot; the retry below
+		 * prints "ready word seen (after retry)" when it lands. */
+		printk("WARN: SRAM1 ready word not seen yet -- CAM_POOL (SRAM1) NOT touched this "
+		       "pass, will retry\n");
 	}
 
 	/* Gates the pool's own first real use: tr_camera_open() is where the
@@ -618,6 +628,12 @@ int main(void)
 					g_dbg->sram1_ready_at_heartbeat = g_dbg->heartbeat;
 					printk("sram1   : ready word seen (after retry) -- CAM_POOL (SRAM1) safe to "
 					       "touch\n");
+				} else if (!sram1_fail_seen && k_uptime_get() - sram1_t0_ms > 10000) {
+					/* The transient case (the A32 stub still powering SRAM1) recovers in a
+					 * retry or two; ~10 s of 200 ms retries is a real fault, said once. */
+					sram1_fail_seen = true;
+					printk("RESULT FAIL: SRAM1 ready word still not seen after ~10 s -- CAM_POOL "
+					       "(SRAM1) NOT touched\n");
 				}
 			}
 			i2c1_ok = device_is_ready(g_sensor);
@@ -747,6 +763,14 @@ int main(void)
 		}
 		if (!out_ok) {
 			g_dbg->status = alp_last_error();
+			tr_camera_release();
+			continue;
+		}
+
+		/* tr_movenet_decode() copies the centre and heat maps out of the arena (movenet.c): a
+		 * model with smaller output tensors would be read past its end. */
+		if (o[0].size_bytes < TR_MN_CELLS || o[1].size_bytes < TR_MN_CELLS * TR_POSE_KP) {
+			g_dbg->status = ALP_ERR_INVAL;
 			tr_camera_release();
 			continue;
 		}

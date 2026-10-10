@@ -578,7 +578,7 @@ ZTEST(alp_chips, test_gd32g553_v05_calls_reject_uninitialised)
 	zassert_equal(gd32g553_pwm_capture_end(&ctx, 0u), ALP_ERR_NOT_READY);
 	zassert_equal(gd32g553_pwm_single_pulse(&ctx, 0u, 1000u), ALP_ERR_NOT_READY);
 	zassert_equal(gd32g553_timer_sync(&ctx, 0u, 1u, 0u), ALP_ERR_NOT_READY);
-	zassert_equal(gd32g553_power_mode_set(&ctx, 1u, 0u, 0u), ALP_ERR_NOT_READY);
+	zassert_equal(gd32g553_set_power_mode(&ctx, 1u, NULL), ALP_ERR_NOT_READY);
 	/* §2B wave-2 chunked DSP-chain upload helpers honour the same
      * NOT_READY contract -- chain_open, stage_push, chain_bind all
      * short-circuit before serialising the wire envelope. */
@@ -614,8 +614,8 @@ ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
 
 	/* power_mode_set rejects mode > 3 (outside RUN / SLEEP /
      * DEEP_SLEEP / STANDBY). */
-	zassert_equal(gd32g553_power_mode_set(&ctx, 4u, 0u, 0u), ALP_ERR_INVAL);
-	zassert_equal(gd32g553_power_mode_set(&ctx, 99u, 0u, 0u), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_set_power_mode(&ctx, 4u, NULL), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_set_power_mode(&ctx, 99u, NULL), ALP_ERR_INVAL);
 
 	/* §2B wave-2 DSP-chain helpers reject malformed args before they
      * hit cmd_send.  Each constraint mirrors the firmware-side

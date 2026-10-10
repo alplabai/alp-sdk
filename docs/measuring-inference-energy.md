@@ -155,8 +155,8 @@ the exact build and flash commands.
    computes P = V x I in hardware, so there is no software multiply.
 
 4. **Integrate, then subtract.** Energy is the trapezoidal integral of
-   (timestamp, power) over each window, timestamped with the Cortex-M55 DWT
-   cycle counter at 160 MHz. The reported figure is
+   (timestamp, power) over each window, timestamped with the kernel cycle
+   counter (`k_cycle_get_32()`) at 160 MHz. The reported figure is
    `(E_active - E_idle) / n_inferences`, repeated over three window pairs for a
    spread. The device integrates on-target AND emits every raw sample so the
    host can re-integrate independently, for cross-checking against a second
@@ -328,7 +328,7 @@ runner that lives in `tan-cli` (see alp-sdk#1470 / ADR-0028), tracked by
 > **Not yet validated on hardware.** The on-board RP2040 debug probe arrives
 > with the next EVK revision. This path is tested against a synthetic capture
 > with known idle and active power (`tests/scripts/fixtures/alp_power/`), not
-> against a real board. The DWT-timestamped on-target method above remains
+> against a real board. The cycle-counter-timestamped on-target method above remains
 > the measured one.
 
 The probe (CMSIS-DAP v2 vendor commands, protocol in

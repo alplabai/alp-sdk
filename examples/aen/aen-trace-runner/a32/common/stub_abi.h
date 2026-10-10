@@ -42,17 +42,18 @@
  *
  * HARD RULE: never write [0x02380000, 0x02381000) (STUB_MHU0_WINDOW), the
  *   TF-A MHU0 payload window; a write can corrupt TF-A/SE messaging. No
- *   framebuffer contains it any more (TR_FB_B moved to SRAM1 0x02600000,
+ *   framebuffer contains it any more (TR_FB_B moved to SRAM1 0x025EA000,
  *   tr_mbox.h); the old stub-table test payloads, pinned to the original FB B
  *   0x02200000, still skip it byte-exactly.
  *
- * Payload page tables: 0x024xxxxx MUST be Normal Non-cacheable, VA == PA,
+ * Payload page tables: [0x02400000, 0x02424000) MUST be Normal Non-cacheable, VA == PA,
  *   executable, in every table a payload installs, for the whole run. The
  *   mailbox, stub code/.bss, stub stacks and tables live there; the stub's
  *   fault path runs under the payload's table until it switches back, and
  *   the M55 / debug AP read that page uncached. A cacheable alias would
  *   leave stale or dirty lines the stub never maintains. Nothing else needs
- *   restoring -- the re-entry path itself sets SVC, SP, VBAR, TTBR0 back to
+ *   restoring (the renderer's WB carve-outs above it -- DL, bins, camera pool -- are A32-only
+ *   or cleaned by the set/way pass below) -- the re-entry path itself sets SVC, SP, VBAR, TTBR0 back to
  *   STUB_TTB (+TLBIALL), SCTLR, NEON/FPSCR, CNTKCTL, cleans+invalidates the
  *   D-cache by set/way (all levels) and invalidates I-cache + BTB, then sets
  *   stub_state = PARKED (from RUNNING) / stub_core1_state = PARKED.
@@ -125,6 +126,19 @@
 
 /* fault_code values. fault_lr carries the banked LR for 1-4, and the
  * detail value noted for the software faults. */
+/* The payload's launch token (renderer core-1 gate): stub_heartbeat0, bumped by every
+ * launch, never 0. The renderer's RENDER_GATE is a fixed word at 0x025E0000, outside
+ * .bss (core 0's zeroing never touches it), so on a cold page it holds power-on
+ * garbage or an earlier launch's token; a token of 0 (the self-launch never ran the
+ * park loop that used to bump it) could meet a gate word that reads 0 and open core 1
+ * before core 0 has written the token. */
+#ifndef __ASSEMBLER__
+static inline unsigned stub_next_token(unsigned hb)
+{
+	return hb + 1u == 0u ? 1u : hb + 1u;
+}
+#endif
+
 #define STUB_FAULT_NONE          0u
 #define STUB_FAULT_UNDEF         1u  /* fault PC = lr - 4 */
 #define STUB_FAULT_PABORT        2u  /* fault PC = lr - 4; IFSR/IFAR */

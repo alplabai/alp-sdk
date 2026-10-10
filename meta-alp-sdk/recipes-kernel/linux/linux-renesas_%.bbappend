@@ -15,7 +15,7 @@
 #                       lane mux + NPU reset release (gpio-hogs).
 #   e1m-x-evk.dtsi      E1M-X-EVK carrier: eth/i2c/usb/console enables,
 #                       USB-OVC hog, DSI display, TAS2563 audio. (CAN is TODO;
-#                       cameras are opt-in, see camera-csi.cfg.)
+#                       cameras are opt-in via ALP_CAMERA_CAM0, see below.)
 #   e1m-v2n101-x-evk.dts / e1m-v2m101-x-evk.dts  product boards.
 #
 # These compose up from the upstream Renesas SoC dtsi (r9a09g056.dtsi,
@@ -83,13 +83,62 @@ SRC_URI:append = " \
     file://0016-media-rzg2l-cru-add-Y10-Y8-greyscale-formats.patch \
     file://0017-media-rzg2l-csi2-honour-lane-polarities-via-SWAPCTL.patch \
     file://0020-clk-renesas-r9a09g056-add-the-PDM-module-clocks-and-resets.patch \
+    file://0025-gpio-gd32-bridge-add-cam-en-ldo-lines-and-make-can-stby-requestable.patch \
+    file://0026-gpio-gd32-bridge-i2c3-proxy-adapter-and-polled-irqchip.patch \
+    file://0027-pwm-gd32-bridge-provider-over-cmd-pwm-set-get.patch \
+    file://0028-media-i2c-add-imx296-backport.patch \
+    file://0029-media-i2c-imx335-2-lane-10-bit-binned-mode.patch \
+    file://0030-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch \
     file://uio.cfg \
+    file://e1m-v2n-doorbell.dtsi \
     file://panic.cfg \
 "
+
+# CM33 -> CA55 doorbell SPI (decision Q52): "404" = MHU-B SWINT unit 12, the
+# path bench-proven in #697 (default until the bench proves 385); "385" =
+# Renesas' documented rsp_ch8_ns.  This rewrites e1m-v2n-doorbell.dtsi; the
+# CM33 firmware (CONFIG_ALP_V2N_DOORBELL_RSP_CH8) and libalp_sdk
+# (ALP_SDK_V2N_DOORBELL_RSP_CH8, alp-sdk recipe) must be built to match --
+# one bitbake variable drives all three, offsets live in
+# include/alp/protocol/v2n_mhu_doorbell.h.
+ALP_V2N_DOORBELL_SPI ??= "404"
+
+# CM33 remoteproc, OPT-IN until the bench proves attach + stop/start/reload
+# (docs/rzv2n-m33-secure-boot.md "Lifecycle").  "1" applies the Renesas RZ
+# remoteproc driver (0022/0023, GPL-2.0, Renesas authorship kept), the Alp
+# changes on top (0021 CPG syscon, 0024 userspace-owned vrings),
+# remoteproc.cfg, and the real cm33_rproc node in e1m-v2n-remoteproc.dtsi.
+ALP_V2N_REMOTEPROC ??= "0"
+# Dev-only (decision Q53): "1" lets Linux stop/reload the CM33 -- the node
+# loses alp,rz-attach-only.  Needs the matching TF-A (same variable, see
+# trusted-firmware-a_%.bbappend); production images refuse it.
+ALP_V2N_CM33_SRAM_NS ??= "0"
+SRC_URI += "${@' file://0021-arm64-dts-r9a09g056-make-the-CPG-a-syscon.patch file://0022-dt-bindings-remoteproc-add-Renesas-RZ-remoteproc.patch file://0023-remoteproc-add-Renesas-RZ-remoteproc-driver.patch file://0024-remoteproc-rz-let-userspace-own-the-vrings.patch file://remoteproc.cfg file://e1m-v2n-remoteproc.dtsi' if d.getVar('ALP_V2N_REMOTEPROC') == '1' else ''}"
+python () {
+    if d.getVar('ALP_V2N_DOORBELL_SPI') not in ('404', '385'):
+        bb.fatal("ALP_V2N_DOORBELL_SPI must be 404 or 385")
+    if d.getVar('ALP_V2N_REMOTEPROC') not in ('0', '1'):
+        bb.fatal("ALP_V2N_REMOTEPROC must be 0 or 1")
+}
 
 # panic.cfg (#2734): CONFIG_PANIC_TIMEOUT=10 -- a panic reboots the board after
 # 10 s instead of hanging forever (panic_timeout defaults to 0).
 #
+# 0025..0027 (GD32 bridge, bridge protocol 0.17; all patch gpio-gd32-bridge.c
+# that 0005 adds, so they apply strictly after it and in this order):
+#   0025  CAM_EN_LDO0..3 as gpio lines 24..27 (gated on minor >= 17) and
+#         can-stby (line 20) made requestable for a phy-can-transceiver
+#         standby-gpios.
+#   0026  an i2c_adapter for E1M-X I2C3 (GD32 PC8/PC9) from the bridge node's
+#         "i2c" child (label e1m_x_i2c3), checked lazily per transfer against
+#         minor >= 17, plus a polled irqchip on the bridge gpiochip (10 ms
+#         GPIO_READ while any line is unmasked).
+#   0027  a PWM provider for E1M PWM0..7 over PWM_SET/PWM_GET (minor >= 17,
+#         #pwm-cells = <2>), so pwm-backlight can drive a panel backlight;
+#         compiled in only when PWM is reachable (no select PWM).
+# The kernel option they need (GPIOLIB_IRQCHIP) is selected by the
+# GPIO_GD32_BRIDGE Kconfig entry.  (0021..0024 are the remoteproc patches.)
+
 # 0020 (PDM clocks, audit MM-02/MM-X2): the V2N CPG driver had no PDM0/PDM1
 # module clocks or resets, so no pdm node could bind.  The patch adds them
 # with V2N parents from the RZ/V2N hardware manual (PCLK = PLLCM33 gear / 2,
@@ -112,6 +161,24 @@ SRC_URI:append = " \
 # 0x30.  The patch programs it from lane-polarities (all data lanes or none);
 # the cam0 dtsi fragments set <1 1 1> on the csi20 endpoint.  Applied
 # unconditionally: with no lane-polarities the register is still written 0.
+#
+# 0028 (IMX296 driver, #2618): the 6.1 tree has no Sony IMX296 driver.  The
+# patch backports v6.6 imx296.c (1-lane 1456x1088, colour SBGGR10 / mono Y10;
+# .probe_new for the 6.1 i2c_driver API) with a 6.1-style Kconfig entry that
+# selects REGMAP_I2C.  A new driver: nothing else changes, so unconditional.
+#
+# 0029 (IMX335 2-lane, #2618): the 6.1 imx335 accepts four data lanes and one
+# 2592x1940 SRGGB12 mode.  The patch reads 2 or 4 lanes from the endpoint,
+# programs LANEMODE, adds a 1296x972 SRGGB10 2x2 binned mode and derives the
+# pixel rate from lanes and bit depth; on 2 lanes only the binned mode is
+# offered (the 12-bit full frame cannot fit the link at the default HMAX).
+# 4-lane behaviour is unchanged.
+#
+# 0030 (OV9282 v6.6 modes, #2618): replaces the 6.1 ov9282.c with the v6.6
+# one: 1280x800 and 640x400 modes next to the default 1280x720, Y8_1X8 next
+# to Y10_1X10, and the ovti,ov9281 compatible.  v6.6 only writes the gated
+# MIPI clock (0x4800 = 0x20) when the endpoint has clock-noncontinuous, which
+# the bench-proven 0016/0017 run used, so the generated e1m-x-evk-cam0-innomaker_cam_ov9281.dtsi sets it.
 #
 # 0012 (UIO default match, #2374): uio_pdrv_genirq binds no DT node until
 # of_id is set, and the stored U-Boot bootargs cannot be relied on to carry
@@ -211,8 +278,8 @@ SRC_URI:append = " \
 #
 # Chosen over promoting meta-rz-drpai to LAYERDEPENDS_alp-sdk: a hard dep
 # would make an RZ/V-only vendor layer mandatory for EVERY meta-alp-sdk
-# consumer, including the e1m-aen801-a32 / e1m-nx9101-a55 machines that have
-# no DRP-AI silicon at all and never build linux-renesas.  This keeps the
+# consumer, including the e1m-aen801-a32 machine that has
+# no DRP-AI silicon at all and never builds linux-renesas.  This keeps the
 # blast radius inside the one recipe that actually compiles the node.
 #
 # Guarded on the LAYER because the layer is what supplies both the label and
@@ -284,7 +351,27 @@ do_configure:prepend() {
         "${WORKDIR}/e1m-v2m-deepx.dtsi" \
         "${WORKDIR}/e1m-v2n101-x-evk.dts" \
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
+        "${WORKDIR}/e1m-v2n-doorbell.dtsi" \
         "${ALP_DTS_DST}/"
+    sed -i 's/^#define ALP_V2N_DOORBELL_SPI .*/#define ALP_V2N_DOORBELL_SPI ${ALP_V2N_DOORBELL_SPI}/' \
+        "${ALP_DTS_DST}/e1m-v2n-doorbell.dtsi"
+
+    # CM33 remoteproc node: real body only when opted in (same branch-on-the-
+    # variable rule as the DRP-AI block below).
+    if [ "${ALP_V2N_REMOTEPROC}" = "1" ]; then
+        install -m 0644 "${WORKDIR}/e1m-v2n-remoteproc.dtsi" "${ALP_DTS_DST}/"
+        # Stop/reload only on dev builds whose TF-A opens CM33 SRAM to Linux.
+        if [ "${ALP_V2N_CM33_SRAM_NS}" = "1" ]; then
+            sed -i '/alp,rz-attach-only;/d' "${ALP_DTS_DST}/e1m-v2n-remoteproc.dtsi"
+        fi
+    else
+        printf '%s\n' \
+            '/* CM33 remoteproc node not claimed: set ALP_V2N_REMOTEPROC = "1".' \
+            ' * See e1m-v2n-remoteproc.dtsi in' \
+            ' * meta-alp-sdk/recipes-kernel/linux/linux-renesas/. */' \
+            > "${ALP_DTS_DST}/e1m-v2n-remoteproc.dtsi"
+        chmod 0644 "${ALP_DTS_DST}/e1m-v2n-remoteproc.dtsi"
+    fi
 
     # Per-project ownership (see the two cases above).  A manifest renders
     # over the SoM-default fragment installed above, and every node it names
@@ -310,10 +397,10 @@ do_configure:prepend() {
         fi
     fi
 
-    # Opt-in CAM0 sources (#1149): the wrapper dts + fragment must sit next
+    # Opt-in CAM0 sources (#1149, #2633): the wrapper dts + fragment must sit next
     # to the board dts or the cam0 dtb has no rule to build.
-    if [ -n "${ALP_CAM0_SENSOR}" ]; then
-        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAM0_SENSOR}.dtsi" \
+    if [ -n "${ALP_CAMERA_CAM0}" ]; then
+        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAMERA_CAM0}.dtsi" \
             "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
         install -m 0644 \
             "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts" \
@@ -389,7 +476,6 @@ SRC_URI:append = " file://wifi-bt.cfg"
 # Display stack: RK055HDMIPI4MA0 panel on Display 1 (DSI + PWM backlight + GPT
 # + GD32-bridge GPIO for panel reset).
 SRC_URI:append:e1m-v2n101 = " file://display.cfg"
-SRC_URI:append:e1m-v2m101 = " file://display.cfg"
 
 # Audio: TAS2563 smart-amp pair on the E1M-X-EVK carrier (see e1m-x-evk.dtsi's
 # header comment + &i2c0's tas2563_left/tas2563_right nodes). Per-carrier like
@@ -406,27 +492,34 @@ SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg file://0009-ASoC-tas2562-
 # ALP_ENABLE_USB_GADGET = "1" (machines with the `usbgadget` MACHINE_FEATURES flag, the same gate as the image install).
 SRC_URI:append = "${@' file://usb-gadget.cfg' if d.getVar('ALP_ENABLE_USB_GADGET') == '1' and bb.utils.contains('MACHINE_FEATURES', 'usbgadget', True, False, d) else ''}"
 
-# Camera (#1149): OPT-IN IMX219 on the E1M-X-EVK CAM0 connector ->
-# CSI-2 receiver -> CRU0.  BENCH-UNVERIFIED.  Off by default: the shipped
-# dtb does not change.  Set ALP_ENABLE_CAM0_IMX219 = "1" in local.conf to
-# ALSO build renesas/e1m-v2{n,m}101-x-evk-cam0.dtb and merge
-# camera-csi.cfg; the bootloader `fdtfile` must then name that dtb (the
-# default dtb stays in KERNEL_DEVICETREE as the fallback).  Placeholder
-# sensor + assumed CSI/CRU labels: see e1m-x-evk-cam0-imx219.dtsi and
-# docs/v2n-camera-csi.md.
-ALP_ENABLE_CAM0_IMX219 ??= "0"
-# Camera (#2612): OPT-IN OV9281 (mono, RPi-style module) on the same CAM0
-# connector (J5).  Mutually exclusive with the IMX219 switch.  Adds
-# camera-csi.cfg (CONFIG_VIDEO_OV9282) and the same cam0 dtb; see
-# e1m-x-evk-cam0-ov9281.dtsi and docs/v2n-camera-csi.md.
-ALP_ENABLE_CAM0_OV9281 ??= "0"
+# Cameras (#2633).  camera-sensors.cfg is GENERATED (scripts/gen_camera_dt.py)
+# from the camera metadata: the CSI-2 receiver + capture unit and every camera
+# module's sensor driver, built in (=y, the images install no kernel-modules)
+# on every V2N/V2M machine, so a camera works once its DT is selected.
+SRC_URI:append = " file://camera-sensors.cfg"
+
+# Selecting a camera is one variable.  ALP_CAMERA_CAM0 = "<module_id>" (a file
+# stem in metadata/camera_modules/) builds renesas/e1m-v2{n,m}101-x-evk-cam0.dtb
+# in addition to the default dtb (which stays in KERNEL_DEVICETREE as the
+# fallback) from the generated fragment e1m-x-evk-cam0-<module_id>.dtsi; the
+# bootloader `fdtfile` must then name that dtb.  Unset (the default): the
+# shipped dtb is unchanged.  Adding a camera is a metadata-only change:
+# regenerate with scripts/gen_camera_dt.py.  See docs/v2n-camera-csi.md.
+ALP_CAMERA_CAM0 ??= ""
+ALP_CAM_FRAGMENT_DIR := "${THISDIR}/${PN}"
 python () {
-    imx219 = d.getVar('ALP_ENABLE_CAM0_IMX219') == '1'
-    ov9281 = d.getVar('ALP_ENABLE_CAM0_OV9281') == '1'
-    if imx219 and ov9281:
-        bb.fatal("ALP_ENABLE_CAM0_IMX219 and ALP_ENABLE_CAM0_OV9281 are mutually exclusive: both are CAM0 sensors")
-    d.setVar('ALP_CAM0_SENSOR', 'imx219' if imx219 else 'ov9281' if ov9281 else '')
+    sel = d.getVar('ALP_CAMERA_CAM0')
+    if not sel:
+        return
+    import glob, os
+    pre, suf = 'e1m-x-evk-cam0-', '.dtsi'
+    have = sorted(os.path.basename(f)[len(pre):-len(suf)]
+                  for f in glob.glob(os.path.join(d.getVar('ALP_CAM_FRAGMENT_DIR'), pre + '*' + suf))
+                  if not f.endswith('-sensor' + suf))
+    if sel not in have:
+        bb.fatal("ALP_CAMERA_CAM0 = '%s' has no generated fragment; available module ids: %s"
+                 % (sel, ', '.join(have)))
 }
 ALP_CAM0_DTB = "${@'e1m-v2m101-x-evk-cam0' if 'v2m' in d.getVar('MACHINE') else 'e1m-v2n101-x-evk-cam0'}"
-KERNEL_DEVICETREE:append = "${@' renesas/' + d.getVar('ALP_CAM0_DTB') + '.dtb' if d.getVar('ALP_CAM0_SENSOR') else ''}"
-SRC_URI += "${@' file://camera-csi.cfg file://e1m-x-evk-cam0-' + d.getVar('ALP_CAM0_SENSOR') + '.dtsi file://e1m-v2n101-x-evk-cam0.dts file://e1m-v2m101-x-evk-cam0.dts' if d.getVar('ALP_CAM0_SENSOR') else ''}"
+KERNEL_DEVICETREE:append = "${@' renesas/' + d.getVar('ALP_CAM0_DTB') + '.dtb' if d.getVar('ALP_CAMERA_CAM0') else ''}"
+SRC_URI += "${@' file://e1m-x-evk-cam0-' + d.getVar('ALP_CAMERA_CAM0') + '.dtsi file://e1m-v2n101-x-evk-cam0.dts file://e1m-v2m101-x-evk-cam0.dts' if d.getVar('ALP_CAMERA_CAM0') else ''}"

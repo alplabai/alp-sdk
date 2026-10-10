@@ -40,7 +40,6 @@ marks the ones locked to specific silicon:
 * **(AEN)** -- Alif Ensemble family (Ethos-U NPU, dual-M55).
 * **(V2N)** -- Renesas RZ/V2N.
 * **(V2N-M1)** -- V2N plus the DEEPX DX-M1 NPU.
-* **(iMX93)** -- NXP i.MX93.
 * **(E1M-X)** -- E1M-X form-factor pad / peripheral.
 
 "Portable" means the board/SoM is swappable across the tagged
@@ -219,8 +218,8 @@ its `cores:` keys.
 | Directory                | What it shows                                                                                |
 |--------------------------|----------------------------------------------------------------------------------------------|
 | `rpmsg-v2n`              | V2N flagship -- A55 Yocto consumer + M33-SM Zephyr producer, framed RPC over RPMsg. **(V2N)** |
+| `microros-ros2-v2n`       | micro-ROS node on the M33 publishing `std_msgs/Int32`, seen by ROS 2 on the A55 via a custom XRCE transport over RPMsg (ADR 0035; not built or run yet). **(V2N)** |
 | `rpmsg-aen`              | AEN E8 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
-| `rpmsg-imx93`            | iMX93 -- A55 Yocto consumer + M33 Zephyr producer (structural; **not buildable** -- imx93 r1's `status: tbd` is refused by the hw_rev-buildable gate, [#1025](https://github.com/alplabai/alp-sdk/issues/1025)). **(iMX93)** |
 | `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 1024-pt FFT to M33-SM via `alp_rpc_call`.     |
 | `mproc-mailbox`          | M55-HP ↔ M55-HE mailbox round-trip -- stage payload in shared SRAM, signal via HW mailbox, read the reply. **(AEN)** |
 
@@ -252,9 +251,9 @@ SoM EEPROM manifest).
 These live under `examples/aen/` and target the E1M-AEN (Alif
 Ensemble) family on the E1M-EVK board (lead part: E8).
 
-`examples/aen/` has 85 tracked directories; the 10 below are the
+`examples/aen/` has 89 tracked directories; the 10 below are the
 customer-facing catalog (the ones carrying a `board.yaml`).  The
-remaining 75 are internal bring-up/regression apps (per-driver
+remaining 79 are internal bring-up/regression apps (per-driver
 regcheck, bench smoke tests, dual-core internal validation) --
 `board.yaml` presence is the reliable way to tell them apart, not
 their filename (some of those internal dirs don't follow a

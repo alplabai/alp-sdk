@@ -22,13 +22,21 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
 
-from .headers import emit_dts_partitions, emit_dts_reservations, emit_ipc_contract_h
+from .headers import (
+    emit_dts_partitions,
+    emit_dts_reservations,
+    emit_ipc_contract_h,
+    emit_storage_mounts_c,
+    has_storage_mounts,
+)
 from .kconfig import (
     _resolve_console,
     _slice_alp_conf,
+    _slice_cmake_args,
     _slice_local_conf,
 )
 from .models import BoardProject, OrchestratorError, Slice
+from .ownership import project_m33_overlay
 from .paths import REPO
 from .secure import emit_sysbuild_conf, emit_tfm_sysbuild_conf
 
@@ -154,8 +162,8 @@ def _slice_config_artefact(
     guards, loudly (alplabai/tan-cli#551). The `=`-bearing cache entries
     from the same source ride the configure command line directly and are
     NOT duplicated here. The full human-readable `-D` listing remains
-    available on request via `--emit cmake-args` (`_slice_cmake_args`,
-    unchanged) -- see docs/board-config-emit.md.
+    also published as the plan's `cmake-args.txt` artefact
+    (`_slice_cmake_args_artefact`) -- see docs/board-config-emit.md.
     """
     if slice_.os == "zephyr":
         return ("alp.conf", _slice_alp_conf(project, slice_))
@@ -173,6 +181,229 @@ def _slice_config_artefact(
             return None
         return (BAREMETAL_PROJECT_INCLUDE, contents)
     return None
+
+
+#: The os classes a slice's `alp.overlay` artefact is emitted for: the
+#: classes `alp_project.py --emit dts-overlay` unions over. A yocto slice has
+#: none. `cmake-args.txt` is emitted for the same two (`--emit cmake-args`).
+_DTS_OVERLAY_OS = ("zephyr", "baremetal")
+
+#: Filename of the rendered DTS overlay config artefact (under `buildDir`).
+DTS_OVERLAY_ARTEFACT = "alp.overlay"
+
+#: Filename of the rendered full `-D` listing config artefact.
+CMAKE_ARGS_ARTEFACT = "cmake-args.txt"
+
+#: Filename of the rendered build-identifier header config artefact
+#: (`--emit hw-info-h --core <id>`). Same name `<alp/hw_info.h>` documents.
+HW_INFO_ARTEFACT = "alp_hw_info_build.h"
+
+#: Filename of the rendered west manifest fragment config artefact
+#: (`--emit west-libraries --core <id>`).
+WEST_LIBS_ARTEFACT = "alp-west-libs.yml"
+
+
+class DtsOverlayUnavailable(OrchestratorError):
+    """The board has nothing to render a DTS overlay from: no header under
+    `include/alp/boards/`, or a SKU outside the production families. The one
+    failure `emit_build_plan` downgrades to a `dts-overlay-unavailable`
+    warning; every other `OrchestratorError` still fails the plan."""
+
+
+class HwInfoUnavailable(OrchestratorError):
+    """The slice's SKU is outside the production families, so there is no
+    family to put in `ALP_HW_BUILD_SOM_FAMILY`. Downgraded by
+    `emit_build_plan` to a `hw-info-unavailable` warning, like
+    `DtsOverlayUnavailable`; any other failure still fails the plan."""
+
+
+def _v1_shaped_project(project: BoardProject) -> dict[str, Any]:
+    """The legacy `board:`-wrapper dict the project-wide emitters read.
+
+    The public board.yaml schema no longer uses this wrapper, but the
+    in-file emitters (dts-overlay, hw-info-h, west-libraries) still consume
+    it. Shared by `alp_project.py` and `_slice_dts_overlay`.
+    """
+    return {
+        "som": {
+            "sku":    project.sku,
+            "hw_rev": project.hw_rev,
+        },
+        "pins": list(project.raw.get("pins") or []),
+        "board": ({
+            "name":   project.board_name,
+            "hw_rev": project.board_hw_rev,
+        } if project.board_name else None),
+    }
+
+
+def _slice_dts_overlay(project: BoardProject, slice_: Slice) -> str:
+    """The slice's DTS overlay text -- exactly what
+    `alp_project.py --emit dts-overlay --core <id>` prints.
+
+    Single source for that standalone emit and the build plan's
+    `alp.overlay` config artefact (ADR-0026 §D: `tan` consumes these bytes
+    instead of re-rendering them). The overlay is shaped by the board
+    header (bus aliases + `alp,pin-array`), a SoM-mounting fact; the slice
+    contributes its peripheral list and, per-product, the assignable nodes
+    board.yaml `ownership:` gave the M33.
+    """
+    # Same lazy sys.path dance `kconfig._slice_alp_conf` does: the
+    # `alp_project_emit` package lives beside this one under scripts/ and a
+    # top-level import would cycle.
+    import sys as _sys
+    _scripts = Path(__file__).resolve().parent.parent
+    if str(_scripts) not in _sys.path:
+        _sys.path.insert(0, str(_scripts))
+    from alp_project_emit.dts import _emit_dts_overlay  # type: ignore
+
+    from alp_project_loader import _sku_family  # type: ignore
+
+    # Only the two facts the emitter itself cannot render are "unavailable"
+    # (the plan degrades to a warning); everything else propagates.
+    try:
+        _sku_family(project.sku)
+    except ValueError as exc:
+        raise DtsOverlayUnavailable(str(exc)) from None
+    try:
+        out = _emit_dts_overlay(
+            _v1_shaped_project(project), project.som_preset,
+            project.board_preset,
+            v2_peripherals=sorted(set(slice_.peripherals)),
+            v2_core_id=slice_.core_id,
+            v2_core_os=slice_.os,
+            v2_core_ids=[slice_.core_id],
+        )
+    except SystemExit as exc:
+        # The emitter `sys.exit`s when the board names no header under
+        # include/alp/boards/. The standalone emit prints this and exits 1.
+        msg = str(exc.code)
+        raise DtsOverlayUnavailable(
+            msg.removeprefix("alp_project: ")) from None
+    # Outside the degrade path above: an M33 ownership defect must still
+    # fail the plan, not turn into a missing artefact.
+    own_dts, _ = project_m33_overlay(project, slice_.core_id)
+    if own_dts:
+        out += ("\n/* Assignable peripherals owned by the M33 "
+                "(board.yaml `ownership:`). */\n" + "\n".join(own_dts) + "\n")
+    return out
+
+
+def _slice_dts_overlay_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's rendered DTS overlay, or None for
+    an os that has none (see `_DTS_OVERLAY_OS`)."""
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    return (DTS_OVERLAY_ARTEFACT, _slice_dts_overlay(project, slice_))
+
+
+def _slice_cmake_args_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's full `-D` listing -- exactly what
+    `alp_project.py --emit cmake-args --core <id>` prints after its
+    `# --- core ---` marker -- or None for an os that has none.
+
+    A rendered REFERENCE listing for consumers (ADR-0026 §D). The
+    `=`-bearing cache entries already ride the baremetal configure line and
+    the bare guards arrive via `alp-baremetal.cmake`; this file is not read
+    by any build command and so does not resurrect the dead `cmake-args.txt`
+    #1278 removed -- it is the same text, now published in the plan so `tan`
+    stops re-rendering it.
+    """
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    return (CMAKE_ARGS_ARTEFACT, _slice_cmake_args(project, slice_))
+
+
+def _slice_hw_info_h(project: BoardProject, slice_: Slice) -> str:
+    """The slice's build-identifier header -- exactly what
+    `alp_project.py --emit hw-info-h --core <id>` prints.
+
+    `ALP_HW_BUILD_CORES` / `HAS_<id>` range over EVERY core of the project
+    (`v2_cores`), and `ALP_HW_BUILD_OS` / `PRIMARY_CORE` track the slice
+    (`v2_selected_core`). Single source for the standalone emit and the
+    build plan's `alp_hw_info_build.h` config artefact.
+    """
+    import sys as _sys
+    _scripts = Path(__file__).resolve().parent.parent
+    if str(_scripts) not in _sys.path:
+        _sys.path.insert(0, str(_scripts))
+    from alp_project_emit.hw_info import _emit_hw_info_h  # type: ignore
+
+    return _emit_hw_info_h(
+        _v1_shaped_project(project), project.som_preset,
+        project.board_preset,
+        v2_cores={cid: s.os for cid, s in project.cores.items()},
+        v2_selected_core=slice_.core_id,
+        # Same tree alp.conf's `CONFIG_ALP_SDK_SOM_HW_REV` reads, so the two
+        # composed hw_rev designators cannot disagree under --metadata-root.
+        metadata_root=project.effective_metadata_root(),
+    )
+
+
+def _slice_west_libraries(project: BoardProject, slice_: Slice) -> str:
+    """The slice's west manifest fragment -- exactly what
+    `alp_project.py --emit west-libraries --core <id>` prints.
+
+    Single source for that standalone emit and the build plan's
+    `alp-west-libs.yml` config artefact.
+    """
+    import sys as _sys
+    _scripts = Path(__file__).resolve().parent.parent
+    if str(_scripts) not in _sys.path:
+        _sys.path.insert(0, str(_scripts))
+    from alp_project_emit.west_libs import _emit_west_libraries  # type: ignore
+
+    return _emit_west_libraries(
+        _v1_shaped_project(project), project.som_preset,
+        project.board_preset,
+        v2_libraries=sorted(set(slice_.libraries)),
+        v2_project_libraries=sorted(project.libraries),
+        metadata_root=project.effective_metadata_root(),
+    )
+
+
+def _slice_hw_info_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's rendered `alp_hw_info_build.h`, or
+    None for an os that has none (see `_DTS_OVERLAY_OS`).
+
+    A REFERENCE artefact (ADR-0026 §D), like `cmake-args.txt`: no build
+    command, CMake file or Kconfig in this SDK reads it. The firmware's
+    own `ALP_HW_BUILD_*` values still come from the build, not this file.
+    """
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    # Only the SKU->family lookup is "unavailable" (same narrow pattern as
+    # `_slice_dts_overlay`); a damaged hw-revisions table etc. must still fail
+    # the plan, so the render itself runs outside any except.
+    from alp_project_loader import _sku_family  # type: ignore
+    try:
+        _sku_family(project.sku)
+    except ValueError as exc:
+        raise HwInfoUnavailable(str(exc)) from None
+    return (HW_INFO_ARTEFACT, _slice_hw_info_h(project, slice_))
+
+
+def _slice_west_libs_artefact(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[tuple[str, str]]:
+    """(filename, contents) of the slice's rendered west fragment, or None
+    for an os that has none. Emitted even when the slice selects no
+    libraries: the emitter renders a well-formed empty allowlist, and
+    byte-identity with `--emit west-libraries --core` is the contract.
+    Reference only, like `cmake-args.txt`."""
+    if slice_.os not in _DTS_OVERLAY_OS:
+        return None
+    return (WEST_LIBS_ARTEFACT, _slice_west_libraries(project, slice_))
 
 
 def _shared_artefacts(
@@ -206,6 +437,12 @@ def _shared_artefacts(
     if tfm_conf:
         out.append((build_root / "sysbuild" / "tfm" / "tfm.conf",
                     tfm_conf))
+    # Opt-in C mount table: only when board.yaml `storage:` declares a
+    # mountable partition (the standalone emit otherwise prints an empty
+    # table, which a consumer has no reason to compile).
+    if has_storage_mounts(project):
+        out.append((gen / "storage_mount_table.c",
+                    emit_storage_mounts_c(project)))
     return out
 
 
@@ -499,6 +736,7 @@ def emit_build_plan(
     """
     # Orchestrator-side (stay inline until orchestrator.py); lazy to avoid
     # a buildplan<->package import cycle.
+    from .cameras import CameraSelectError
     from .orchestrator import (
         STOCK_IMAGE_APP,
         UnbuildableYoctoMachineError,
@@ -563,6 +801,17 @@ def emit_build_plan(
                 "coreId":  slice_.core_id,
                 "message": str(e),
             })
+        except CameraSelectError as e:
+            # A `cameras:` entry that cannot become a -DSHIELD for this
+            # slice (module without a zephyr_shield, or a carrier shield
+            # with no overlay for the board target): block, never emit a
+            # command that silently drops the camera.
+            cmd = None
+            warnings.append({
+                "code":    "camera-select-failed",
+                "coreId":  slice_.core_id,
+                "message": str(e),
+            })
         except UnbuildableYoctoMachineError as e:
             # The slice's `machine:` is a known-non-buildable Yocto MACHINE
             # (issue #1982 -- the two AEN A32-cluster carriers, unbuildable
@@ -618,6 +867,58 @@ def emit_build_plan(
                 "path":     (build_dir / name).as_posix(),
                 "contents": contents,
             })
+        # Additive rendered-text artefacts (ADR-0026 §D, tan-cli#1216): the
+        # DTS overlay, the full `-D` listing, the build-identifier header and
+        # the west fragment, byte-identical to the standalone
+        # `--emit dts-overlay|cmake-args|hw-info-h|west-libraries --core`
+        # renders. Always AFTER the slice's primary config artefact, so a
+        # consumer that reads `configArtefacts[0]` is unaffected.
+        extras: list[Optional[tuple[str, str]]] = []
+        # Same dangling-path rule as `alp-baremetal.cmake` above: a baremetal
+        # slice whose command was blocked will never configure its build dir,
+        # so promise it nothing.
+        if not (cmd is None and slice_.os == "baremetal"):
+            try:
+                extras.append(_slice_dts_overlay_artefact(project, slice_))
+            except DtsOverlayUnavailable as exc:
+                # Additive artefact: a board with no header (or an
+                # unrecognised SKU) must not stop a plan that emitted fine
+                # before. The consumer sees the warning and falls back.
+                # Any other OrchestratorError still fails the plan.
+                warnings.append({
+                    "code":    "dts-overlay-unavailable",
+                    "coreId":  slice_.core_id,
+                    "message": (f"core '{slice_.core_id}': no `alp.overlay` "
+                                f"artefact -- {exc}"),
+                })
+            try:
+                extras.append(_slice_cmake_args_artefact(project, slice_))
+            except CameraSelectError as exc:
+                # The listing is not emitted; make sure the plan still says
+                # why (the command path usually already did).
+                if not any(w["code"] == "camera-select-failed"
+                           and w["coreId"] == slice_.core_id for w in warnings):
+                    warnings.append({
+                        "code":    "camera-select-failed",
+                        "coreId":  slice_.core_id,
+                        "message": str(exc),
+                    })
+            try:
+                extras.append(_slice_hw_info_artefact(project, slice_))
+            except HwInfoUnavailable as exc:
+                warnings.append({
+                    "code":    "hw-info-unavailable",
+                    "coreId":  slice_.core_id,
+                    "message": (f"core '{slice_.core_id}': no "
+                                f"`alp_hw_info_build.h` artefact -- {exc}"),
+                })
+            extras.append(_slice_west_libs_artefact(project, slice_))
+        for extra in extras:
+            if extra is not None:
+                config_artefacts.append({
+                    "path":     (build_dir / extra[0]).as_posix(),
+                    "contents": extra[1],
+                })
         # `appDir` retains the resolved source directory independent of
         # `command` -- tooling that wants the app source (e.g. to watch
         # it for incremental rebuilds) doesn't have to reverse-engineer

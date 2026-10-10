@@ -1,5 +1,9 @@
 # Customer-grade SoM image architecture — composable, identified, reproducible
 
+> **Status (2026-10-08): Slice 1 landed, slices 2-4 open.** Slice 1 is on dev (#435): `meta-alp-sdk/recipes-images/alp-image-base.bb`, `alp-image-common.inc` with opt-in `IMAGE_FEATURES` (`alp-camera`, `alp-display`, `alp-ros`), and the `edge`/`prod` recompose. Slice 2 is partial: `conf/distro/alp.conf` derives `DISTRO_VERSION` from the SDK and adds the `ALP_*` provenance fields to `/etc/os-release`; no `/etc/alp-release` manifest exists. Slice 3 is not done (`alp-sdk` and `alp-chips` recipes still use `SRCREV = "${AUTOREV}"`). Slice 4 is not done (no read-only rootfs, data partition, health-check-gated A/B commit or license manifest). Decision 5 (signing, verified boot, dm-verity) stays deferred to the separate security workstream; the header below still lists decisions 5-7 as awaiting owner sign-off while section 3 says all are locked.
+
+> **Note (2026-10-10):** E1M-NX9101 / the NXP i.MX 93 port was removed in #2781 / #2782 (67ed22d86); the i.MX 93 mention below is historical.
+
 **Status:** Draft under finalization · decisions 1–4 locked 2026-06-13 · decisions 5–7 await owner sign-off
 **Owner:** Alp Lab
 **Branch:** `feat/customer-grade-edge-image` (off `dev`)

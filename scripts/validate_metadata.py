@@ -46,7 +46,6 @@ from alp_project_loader import (  # noqa: E402
     resolve_soc_path,
     resolve_targets,
 )
-from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
 from strict_loaders import strict_json_loads, strict_yaml_load  # noqa: E402
 
 # Power/ground nets are allowed as pin signals without a signals[] entry.
@@ -115,6 +114,8 @@ LINUX_KERNEL_DRIVERS = REPO / "metadata" / "os" / "linux-kernel-drivers.yaml"
 # unregistered schema is silently unvalidated -- so this constant pair is
 # load-bearing, not decorative.
 SUPERVISOR_LINKS_SCHEMA = REPO / "metadata" / "schemas" / "supervisor-links-v1.schema.json"
+ON_MODULE_LINKS_SCHEMA = REPO / "metadata" / "schemas" / "on-module-links-v2.schema.json"
+ON_MODULE_LINKS_DATA = REPO / "metadata" / "e1m_modules" / "aen" / "on-module-links.yaml"
 CORE_OWNERSHIP_SCHEMA = REPO / "metadata" / "schemas" / "core-ownership-v1.schema.json"
 CORE_OWNERSHIP_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "core-ownership.yaml"
 SUPERVISOR_LINKS_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "supervisor-links.yaml"
@@ -140,12 +141,17 @@ MODEL_ZOO_STARTERS = MODEL_ZOO / "starters"
 # The one root-level non-.yaml file this tree tolerates (its own doc),
 # mirroring `_MODEL_PERF_ALLOWED_ROOT_FILES`'s same allowance.
 _MODEL_ZOO_ALLOWED_ROOT_FILES = {"README.md"}
-# Mechanical "genuinely tiny, no weight redistribution" guard (#2539 review):
+# Mechanical "genuinely tiny, no weight redistribution" guard:
 # a byte-size ceiling on every starters/* file, not a human's judgment call
 # on review. 64 KiB is generous headroom over the real example-tiny.tflite
 # smoke fixture (712 B) while still ruling out anything that could plausibly
 # be a real model's weights.
 _MODEL_ZOO_STARTER_MAX_BYTES = 64 * 1024
+# Mirrors model-zoo-v1.schema.json's `example_app` pattern exactly -- used
+# to guard the on-disk probe below so a schema-invalid value (caught by
+# the schema pass already) doesn't ALSO trigger a misleading disk-probe
+# message.
+_MODEL_ZOO_EXAMPLE_APP_RE = re.compile(r"^examples/[a-z0-9_-]+/[a-z0-9_-]+$(?!\n)")
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
 # .yaml whose `identifier:` is the fully-qualified <board>/<soc>/<cpucluster>
 # triple `west build -b` resolves).  Ground truth for the board-target check.
@@ -650,7 +656,7 @@ def _check_som_memory_population(som_files) -> list:
       - `memory.dram_mbit` is decided by `on_module.hyperram`;
         `memory.flash_mbit` by every `on_module.ospi_memories[]` entry.
         A preset that declares neither block (V2N/V2M's LPDDR4X + eMMC,
-        E1M-NX9101's open capacities) states no population fact here and
+        an open-capacity preset) states no population fact here and
         is skipped -- there is nothing to bind to, and inventing one
         would be inventing a hardware value.  A skipped preset prints an
         explicit `SKIP <rel> (nothing bound ...)` line, so "this file was
@@ -675,7 +681,7 @@ def _check_som_memory_population(som_files) -> list:
       - Every relevant part `assembled: false` => the figure MUST be `0`.
         This is the `0`-vs-`TBD` distinction #915 established: `0` is a
         RESOLVED fact ("populates none"), `TBD` is an open question
-        ("nobody has written the capacity down yet", E1M-NX9101's state).
+        ("nobody has written the capacity down yet").
         A preset that has answered the question may not then spell the
         answer `TBD`, and may not claim a capacity either.
       - Any relevant part populated (`assembled: true`, or the key
@@ -929,7 +935,8 @@ def _check_board_camera_connectors(board_files) -> list:
         if not isinstance(doc, dict):
             continue
         msgs = camera_connector_problems(doc.get("camera_connectors"),
-                                         doc.get("e1m_routes"))
+                                         doc.get("e1m_routes"),
+                                         families=doc.get("hosts_som_families") or [])
         if msgs:
             print(f"FAIL {rel}")
             for m in msgs:
@@ -1125,9 +1132,10 @@ def _check_camera_module_semantics(module_files, *, chips_dir=None) -> list:
     """Cross-check beyond schema: `module_id` == filename stem and `chip`
     names a real chip manifest.
 
-    The lane/address parity against the chip manifest is deliberately NOT
-    here, nor is the `zephyr_shield` directory check: both belong to the
-    camera parity gate that lands with the generators.  Returns a failure list shaped like `_check_files()`.
+    Also `zephyr_shield` (when set) must be a directory under
+    zephyr/boards/shields/.  The lane/address parity against the chip manifest
+    is deliberately NOT here: it belongs to the camera parity gate that lands
+    with the generators.  Returns a failure list shaped like `_check_files()`.
     """
     chips_dir = chips_dir or CHIPS
     failures: list[tuple[Path, list[str]]] = []
@@ -1149,6 +1157,11 @@ def _check_camera_module_semantics(module_files, *, chips_dir=None) -> list:
         chip = doc.get("chip")
         if isinstance(chip, str) and not (chips_dir / f"{chip}.yaml").is_file():
             msgs.append(f"chip: `{chip}` has no metadata/chips/{chip}.yaml")
+        shield = doc.get("zephyr_shield")
+        if isinstance(shield, str) and not (
+                REPO / "zephyr" / "boards" / "shields" / shield).is_dir():
+            msgs.append(f"zephyr_shield: `{shield}` is not a shield under "
+                        f"zephyr/boards/shields/")
         if msgs:
             print(f"FAIL {rel}")
             for m in msgs:
@@ -1188,37 +1201,6 @@ def _check_soc_npu_pairing(soc_files) -> list:
     Table 4-13 fans NPU_HG_IRQ to all three cores -- GIC400_IRQS[355] on the
     A32, M55HP_IRQS[366] / M55HE_IRQS[366] on the M55s (366 is the M55 NVIC
     number, not an A32 IRQ; the A32's own number, via GIC400, is 355).
-
-    The i.MX 93 Ethos-U65 (`nxp:imx9:imx93`) is the same kind of omission but
-    on WEAKER evidence, and the two must not be conflated. IMX93RM Rev. 7
-    (2026-02-10) §2.2 "System memory map used by all initiators" Table 4
-    lists a 4 KB "NPU Controller" region (4A90_0000 (NS) / 5A90_0000 (S)) in
-    the memory map used by ALL initiators, not one; Table 5, "System memory
-    map (Cortex-M33)", repeats the identical row in the Cortex-M33's OWN
-    memory map too -- so the block sits in both, not exclusively in either.
-    §17.2.8 "Interrupt signals" says only "See Arm's General Interrupt
-    Controller (GIC) documentation for NPU block interrupts" -- the GIC is
-    the Cortex-A55's controller, not the M33's NVIC. Chapter 17 never names a
-    host core, repeatedly using Arm's generic Ethos-U wording ("the external
-    host application processor", §17.2 and §17.2.9) instead of an i.MX
-    93-specific assignment. Unlike the E8 HWRM's Table 10-2, this is an
-    all-initiators memory map plus a GIC pointer, not a per-master access
-    table: it does not enumerate which masters may reach the NPU Controller
-    (TRDC governs actual masters, not this chapter), and it names no host
-    core at all. So imx93's single Ethos-U65 instance also omits
-    `paired_core`, but not for the E8's reason ("verified as shared") --
-    for the opposite one ("no pairing documented, period"). Do not add a
-    `paired_core` to the imx93 SoC spec on the strength of this manual; the
-    absence stays deliberate.
-
-    That silicon-documentation gap does not mean no core drives the NPU
-    today: NXP's own shipped Yocto/Linux driver stack
-    (`nxp-imx/ethos-u-driver-stack-imx`) runs the Ethos-U driver on the
-    Cortex-M33, with Linux on the Cortex-A55 dispatching to it over shared
-    memory and mailbox IRQs -- a separate, sourced, software-stack fact (see
-    `vendors/nxp-imx93/README.md`) that this omission does not contradict.
-    `paired_core` records documented silicon wiring, not which core a given
-    software stack happens to run on, so it still carries no value here.
     Returns a failure list shaped like `_check_files()`.
     """
     failures: list[tuple[Path, list[str]]] = []
@@ -2512,7 +2494,6 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
             som_docs[doc["sku"]] = doc
 
     families_seen: set[str] = set()
-    family_to_som: dict[str, str] = {}
     for idx, cell in enumerate(_as_list(data.get("familyMatrix"))):
         if not isinstance(cell, dict):
             continue
@@ -2521,8 +2502,6 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
         core = cell.get("core")
         if isinstance(family, str):
             families_seen.add(family)
-            if isinstance(som, str):
-                family_to_som[family] = som
         if isinstance(som, (dict, list)):
             # A dict/list `som` is unhashable -- `som_docs.get(som)` below
             # would raise `TypeError: unhashable type`. Every other
@@ -2577,32 +2556,6 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     if missing_families:
         msgs.append("familyMatrix: missing supported SoM families: "
                     + ", ".join(sorted(missing_families)))
-
-    # `excludedFamilies` RATCHET (#1025 round-2 review): each entry claims
-    # its family's SoM has no buildable hw_rev at all -- assert that against
-    # live metadata the same way `excludedLibraries` above is asserted to
-    # still be Tier A, instead of trusting the prose forever.
-    for family, _reason in sorted(_as_dict(data.get("excludedFamilies")).items()):
-        som = family_to_som.get(family)
-        if som is None:
-            msgs.append(f"excludedFamilies[{family}]: no familyMatrix cell "
-                        f"for this family to check against")
-            continue
-        doc = som_docs.get(som)
-        hw_rev = doc.get("default_hw_rev") if doc else None
-        try:
-            family_dir = _sku_family(som) if doc else None
-        except ValueError:
-            family_dir = None
-        if not family_dir or not hw_rev:
-            msgs.append(f"excludedFamilies[{family}]: cannot resolve "
-                        f"family_dir/default_hw_rev for som `{som}`")
-            continue
-        stale = assert_exclusion_still_not_buildable(
-            REPO / "metadata", family_dir, hw_rev,
-            gate=f"tier-a-library-ci.json excludedFamilies[{family}]")
-        if stale:
-            msgs.append(stale)
 
     if msgs:
         print(f"FAIL {rel}")
@@ -3138,7 +3091,7 @@ def _check_model_perf_semantics(model_perf_files) -> list:
 def _collect_model_zoo_files(root: Path) -> tuple[list[Path], list[Path], list[tuple[str, list[str]]]]:
     """Collect metadata/model_zoo/<id>.yaml entries + metadata/model_zoo/
     starters/<file> data, and FAIL loudly on anything that doesn't fit
-    that exact two-tier shape (#2539 review), mirroring
+    that exact two-tier shape, mirroring
     `_collect_model_perf_files()`'s own structural-violation-as-failure
     design rather than a bare glob that silently never opens a
     misplaced file.
@@ -3235,17 +3188,31 @@ def _check_model_zoo_semantics(model_zoo_files) -> list:
          such preset exists) -- so a well-formed but fictitious SKU would
          otherwise validate clean and read as a real hardware claim.
       4. `kind: fixture` implies `validated_soms == []` AND a `bundled`
-         source -- a fixture is a wiring/smoke entry by definition and
-         must never carry a hardware claim or an unreviewed upstream
-         link. The schema's own `if`/`then` ALSO enforces this now (so a
+         source AND `task == "smoke"`; `kind: model` implies
+         `task != "smoke"` -- a fixture is a wiring/smoke entry by
+         definition and must never carry a hardware claim, an unreviewed
+         upstream link, or a real task. The schema's own `allOf` of two
+         `kind`-gated `if`/`then` pairs ALSO enforces this now (so a
          violation is caught even by a bare jsonschema validate with no
          Python involved) -- this repeats the check only to give a
          friendlier, specific message ("kind: fixture but validated_soms
-         is non-empty") than jsonschema's own if/then error text.
+         is non-empty", "kind: fixture but task is ...", "kind: model but
+         task is smoke") than jsonschema's own if/then error text.
       5. a resolved `source.bundled` path is a byte-exact (case-sensitive)
          match against the real starters/ directory listing -- see
          `_bundled_case_exact()`'s own docstring for why `is_file()` alone
          is not enough.
+      6. `example_app`, when present and schema-pattern-valid, names a
+         real directory under `examples/` that carries a `board.yaml`
+         (the board.yaml requirement is deliberate: only a tan-buildable
+         example is linkable today -- loosening it later is additive).
+         Only probed when `_MODEL_ZOO_EXAMPLE_APP_RE.fullmatch()` already
+         agrees with the schema's own pattern -- a schema-invalid value
+         is already reported by the schema pass and must not ALSO trigger
+         a misleading disk-probe message. Guarded by
+         `(REPO / "examples").is_dir()`: a metadata-only scratch checkout
+         (no `examples/` tree at all) skips this check rather than
+         failing every entry that names one.
 
     Returns a failure list shaped like `_check_files()`.
     """
@@ -3313,7 +3280,9 @@ def _check_model_zoo_semantics(model_zoo_files) -> list:
                         f"validated_soms: `{sku}`: no metadata/e1m_modules/"
                         f"{sku}.yaml preset -- this is not a real, shipped SKU")
 
-        if doc.get("kind") == "fixture":
+        kind = doc.get("kind")
+        task = doc.get("task")
+        if kind == "fixture":
             if validated_soms:
                 msgs.append(
                     f"kind: fixture but validated_soms is non-empty "
@@ -3324,6 +3293,30 @@ def _check_model_zoo_semantics(model_zoo_files) -> list:
                     f"kind: fixture but source is not `bundled` -- a "
                     f"fixture never links an external, unreviewed "
                     f"upstream model")
+            if task is not None and task != "smoke":
+                msgs.append(
+                    f"kind: fixture but task is `{task}`, not `smoke` -- "
+                    f"a fixture is always the reserved wiring/smoke task")
+        elif kind == "model" and task == "smoke":
+            msgs.append(
+                f"kind: model but task is `smoke` -- `smoke` is reserved "
+                f"for kind: fixture wiring entries, never a real model's "
+                f"claimed task")
+
+        example_app = doc.get("example_app")
+        if (isinstance(example_app, str)
+                and _MODEL_ZOO_EXAMPLE_APP_RE.fullmatch(example_app)
+                and (REPO / "examples").is_dir()):
+            example_dir = REPO / example_app
+            if not example_dir.is_dir():
+                msgs.append(
+                    f"example_app `{example_app}` is not a real directory "
+                    f"under examples/")
+            elif not (example_dir / "board.yaml").is_file():
+                msgs.append(
+                    f"example_app `{example_app}` has no board.yaml -- a "
+                    f"directory existing under examples/ is not proof it "
+                    f"is a real example app")
 
         if msgs:
             print(f"FAIL {rel}")
@@ -3335,7 +3328,7 @@ def _check_model_zoo_semantics(model_zoo_files) -> list:
 
 def _check_model_zoo_starters(model_zoo_files, starter_files) -> list:
     """Cross-check the whole `metadata/model_zoo/starters/` tree against
-    every entry's `source.bundled` reference (#2539 review):
+    every entry's `source.bundled` reference:
 
       1. every file under `starters/` is referenced by at least one
          entry's `source.bundled` -- an unreferenced ("orphan") starter is
@@ -3560,6 +3553,28 @@ def main() -> int:
             # core attribution) and metadata/chips/gd32g553.yaml (peer I2C
             # address) -- neither is expressible in the schema alone.
             supervisor_links_failures += _check_supervisor_links_cross_refs(supervisor_links_files)
+
+    # AEN on-module pad wiring + SoM power domains (#2784) against
+    # on-module-links-v2.  Single explicit file, so a deleted data file is a
+    # hard error rather than a silent no-op (same reasoning as above).
+    on_module_links_failures: list = []
+    if ON_MODULE_LINKS_SCHEMA.is_file():
+        print()
+        if not ON_MODULE_LINKS_DATA.is_file():
+            rel = ON_MODULE_LINKS_DATA.relative_to(REPO).as_posix()
+            msg = ("missing -- the AEN on-module pad + power-domain source "
+                   "must exist at this exact path")
+            print(f"FAIL {rel}")
+            print(f"  · {msg}")
+            on_module_links_failures.append((rel, [msg]))
+        else:
+            oml_validator = jsonschema.Draft202012Validator(
+                json.loads(ON_MODULE_LINKS_SCHEMA.read_text(encoding="utf-8")))
+            on_module_links_failures = _check_files(
+                "YAML", [ON_MODULE_LINKS_DATA], oml_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "schemaVersion",
+            )
 
     # AMP core-ownership policy (fixed rows + assignable per-product choices).
     core_ownership_failures: list = []
@@ -3793,6 +3808,7 @@ def main() -> int:
                       + len(peripheral_kconfig_failures)
                       + len(tier_a_library_ci_failures)
                       + len(supervisor_links_failures)
+                      + len(on_module_links_failures)
                       + len(core_ownership_failures)
                       + len(power_tree_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "

@@ -76,7 +76,7 @@ alp-sdk/
 │   ├── e1m_x_pinout.h               # E1M-X-family portable pad constants
 │   ├── chips/                       # one <alp/chips/<part>.h> per chip driver
 │   ├── blocks/                      # <alp/blocks/<name>.h> for SDK-level block helpers
-│   ├── ext/<vendor>/                # vendor escape-hatch headers (alif/renesas/nxp/deepx)
+│   ├── ext/<vendor>/                # vendor escape-hatch headers (alif/renesas/deepx)
 │   │                                 # for capabilities the portable <alp/*> API can't express
 │   └── boards/                      # GENERATED: per-board route headers
 ├── src/
@@ -100,7 +100,6 @@ alp-sdk/
 ├── vendors/
 │   ├── alif/                        # Alif HAL bindings (Ensemble)
 │   ├── renesas-rzv2n/               # Renesas FSP bindings (RZ/V2N)
-│   ├── nxp-imx93/                   # NXP i.MX 93 vendor bindings
 │   └── deepx-dxm1/                  # DEEPX DX-M1 NPU runtime bindings
 ├── metadata/                        # ALL HW + LIBRARY METADATA — single source of truth
 │   ├── schemas/                     # JSON Schemas (board, board-preset, soc-spec-v1, …)
@@ -110,9 +109,8 @@ alp-sdk/
 │   ├── library-profiles/<name>/     # per-library HW-accelerator binding tables
 │   ├── templates/board.yaml         # customer-facing board.yaml template
 │   └── protos/                      # protobuf schemas (mproc framing, …)
-├── firmware/                        # PREBUILT HELPER-MCU FIRMWARE BLOBS
-│   ├── gd32-bridge/                 # GD32G553 bridge firmware (V2N supervisor)
-│   └── cc3501e/                     # TI CC3501E Wi-Fi bridge firmware (AEN)
+├── firmware/                        # IN-TREE FIRMWARE IMAGES
+│   └── alp-stock-shim/              # minimal Zephyr M-core image (no peripheral/IRQ/IPC claims)
 ├── cmake/                           # find_package + Zephyr module helpers
 │   └── alp-sdk-config.cmake.in
 ├── scripts/                         # REFERENCE CODEGEN + ORCHESTRATION
@@ -129,7 +127,7 @@ alp-sdk/
 │   └── Kconfig                      # ALP_SDK_* options exposed to Zephyr apps
 ├── examples/<peripheral>-<demo>/    # hand-written firmware reference apps (~50% comment density)
 ├── tests/                           # Unity / ztest smoke tests, QEMU + real silicon
-├── meta-alp-sdk/                    # Yocto BSP layer (V2N / V2N-M1 / iMX93 SKUs)
+├── meta-alp-sdk/                    # Yocto BSP layer (V2N / V2N-M1 SKUs)
 └── .github/workflows/               # GitHub Actions workflows
 ```
 
@@ -443,7 +441,7 @@ not others.
 | BLE              | `alp/ble.h`          | AEN CC3501E backend or Zephyr `bt` host stack (peripheral + central + GATT). | v0.1 surface; impl v0.3 |
 | Security         | `alp/security.h`     | MbedTLS PSA Crypto API (Zephyr) + OpenSSL `EVP_*` (Yocto).      | v0.1 surface; Yocto OpenSSL backend (SHA-256/384/512, AES-128/256-GCM, ChaCha20-Poly1305, `alp_random_bytes`) code complete v0.4-prep with KATs green at `tests/yocto/security_openssl.c`; Zephyr MbedTLS impl v0.3 |
 | Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions, plus framed RPC over RPMsg / OpenAMP (`rpc.h`, opened with the generated `system_ipc.h`); placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` (replaced by nanopb-generated codec once `extras-lwrb-nanopb` lands -- interim/deferred as of v0.9, no committed version). | v0.1 surface; framing scaffolding shipping (interim); full impl v0.3+ |
-| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + SoM `auto_order` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`tan model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3, DEEPX DX-M1, and the ONNX Runtime CPU floor are A55/Linux-side only (`src/yocto/inference_{drpai,deepx,ort}.cpp`, #58/#59).  ORT is default-off in CMake (`ALP_SDK_USE_ORT_CPU`) but on by default in the V2M101/V2M102/V2M103/V2N101/V2N102/V2N103 images via `ALP_ENABLE_ORT_CPU` (#1259; V2M with the DEEPX runtime builds against dx-rt's libonnxruntime instead of the layer's), sits strictly last in `resolve_auto()` so an NPU-bearing SoM never silently falls back to it, and — unlike the other two — is reachable only via a hand-built `alp_inference_config_t` today: no `.alpmodel` → ORT route exists on Yocto.  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
+| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + SoM `auto_order` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`tan model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` (Arm Ethos-U), `sw_fallback`; DRP-AI3, DEEPX DX-M1, and the ONNX Runtime CPU floor are A55/Linux-side only (`src/yocto/inference_{drpai,deepx,ort}.cpp`, #58/#59).  ORT is default-off in CMake (`ALP_SDK_USE_ORT_CPU`) but on by default in the V2M101/V2M102/V2M103/V2N101/V2N102/V2N103 images via `ALP_ENABLE_ORT_CPU` (#1259; V2M with the DEEPX runtime builds against dx-rt's libonnxruntime instead of the layer's), sits strictly last in `resolve_auto()` so an NPU-bearing SoM never silently falls back to it, and — unlike the other two — is reachable only via a hand-built `alp_inference_config_t` today: no `.alpmodel` → ORT route exists on Yocto.  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
 | Storage          | `alp/storage.h`      | Block + filesystem (LittleFS) on Zephyr; standard FS on Yocto.  | v0.5 surface |
 | 2D graphics      | `alp/gpu2d.h`        | Portable blit/fill shim (Alif Dave2D / GPU2D); SW fallback.     | v0.5 surface; see [ADR 0008](adr/0008-gpu2d-portable-shim.md) |
 
@@ -455,7 +453,7 @@ Training stays off-device, in TensorFlow / PyTorch, producing a
 backend the target SoM declares and packs the results into one fat,
 multi-backend **`.alpmodel`** package (CBOR manifest + per-backend
 blobs).  The per-backend compiler differs by silicon: Arm **Vela**
-for Ethos-U (AEN, i.MX 93), the **DRP-AI translator** for Renesas
+for Ethos-U (AEN), the **DRP-AI translator** for Renesas
 RZ/V2N, **dxcom** for DEEPX DX-M1, plus a portable CPU/TFLM blob as
 the universal fallback.  At runtime, `alp_inference_open_alpmodel()`
 loads the package and its selection engine picks the matching blob
@@ -531,7 +529,7 @@ allocation), so each backend stays small.
 ## Why this wrapper exists (despite Zephyr already abstracting vendors)
 
 A common question on first contact with the SDK: "Zephyr already
-hides Alif HAL vs. Renesas FSP vs. NXP MCUXpresso below its driver
+hides Alif HAL vs. Renesas FSP below its driver
 classes — why add another wrapper on top?"
 
 The answer is that **vendor-driver diversity within Zephyr is not the
@@ -613,7 +611,7 @@ range against the SoC, DT alias unset, etc.) via the
 
 Every E1M or E1M-X SoM ships with a different peripheral inventory
 — Alif Ensemble E3 has a 24-bit ADC plus three 12-bit ADCs, an Alif
-E7 has the same, while NXP i.MX 93 tops out at 12 bits.  Apps that
+E7 has the same, and other SoCs differ.  Apps that
 declare a 16-bit ADC config must fail predictably when run on a SoC
 that can't satisfy it.
 

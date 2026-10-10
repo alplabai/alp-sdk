@@ -244,7 +244,7 @@ which carries the per-variant MRAM / SRAM / package /
 
 The reverse path (`alp_module_skus` arrays inside each SoC JSON
 variant) stays in place as a fallback for legacy presets that
-omit the field, AND for the placeholder `E1M-NX9101` preset which
+omit the field, AND for any preset that
 carries `silicon_variant: TBD` per the no-inventing-values rule.
 Resolver: `_resolve_silicon_variant()` in
 [`scripts/alp_project.py`](../scripts/alp_project.py).
@@ -306,7 +306,7 @@ with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 #### Preset mode (SDK-internal shortcut)
 
 Most example projects under `examples/` target the EVK or X-EVK
-(103 do today — 76 on `e1m-evk`, 27 on `e1m-x-evk`), so they share a
+(103 do today — 75 on `e1m-evk`, 28 on `e1m-x-evk`), so they share a
 single board definition each via the `preset:` field:
 
 ```yaml
@@ -383,8 +383,9 @@ cameras:
   `populated:` and `e1m_routes:`).  Per connector: `refdes`, `csi` (E1M CSI
   receiver), `lanes`, `i2c` (an `e1m_routes.buses` macro), and optionally
   `select` (mux GPIO levels), `enable`, `reset` (`e1m_routes.gpio` macros),
-  `supply` (what feeds the module, e.g. `fixed-3v3`), `lane_polarity` and
-  `notes`.  Signals reference macros already declared in `e1m_routes:`;
+  `supply` (what feeds the module, e.g. `fixed-3v3`), `lane_polarity`,
+  `zephyr_shields` (Zephyr carrier shields) and `linux` (true if a Linux core can
+  drive it) and `notes`.  Signals reference macros already declared in `e1m_routes:`;
   pads are never restated.
 - The `active_low` flag of the route behind `enable` / `reset` is
   **normative**: generators emit `GPIO_ACTIVE_LOW` from it.  An asserted
@@ -394,8 +395,53 @@ cameras:
 - `lane_polarity` holds one 0/1 inversion flag per lane, clock first:
   `lanes + 1` entries.
 
+- **`cameras:` selects the camera in the build.**  One resolver
+  (`scripts/alp_orchestrate/cameras.py`) turns each entry into the per-OS
+  build input, so the same line works on every SoM.  Each camera has exactly
+  ONE owner core and only that core's build is touched:
+  - **Owner:** `cameras[].core`, or, when omitted, the single core whose OS
+    the camera's CONNECTOR supports.  A Zephyr core running a customer app
+    (not `alp-stock-shim`) qualifies when the connector has a non-empty
+    `zephyr_shields:` AND the module has a `zephyr_shield:`; a Yocto core
+    qualifies when the connector declares `linux: true` (set on the X-EVK
+    CAM0 only, tied to the Linux sensor DT that `scripts/gen_camera_dt.py`
+    (#2736) generates; validated: only CAM0 of a `renesas-rzv2n*` board).  So the E1M-EVK CAM0 is
+    owned by the M55 app core and the X-EVK CAM0 by the A55, with no `core:`
+    needed, whatever else the SoM runs.  No qualifying core is an ALP-B003
+    error naming the OS the connector supports; several (e.g. AEN M55-HE and
+    M55-HP both running apps) is "ambiguous camera owner" until `core:` is
+    set.  An explicit `core:` must be a Zephyr customer-app or Yocto core, and
+    then gets the per-OS checks below.  The rule is
+    `scripts/alp_orchestrate/camera_owner.py`, shared by `tan validate` and the
+    planner.
+  - **Zephyr** owner: one `-DSHIELD="<carrier shields> <module shield>"` on
+    the `west build` command (one argv element `SHIELD=a b`; a shell needs the
+    quotes) and in `cmake-args.txt`.  On a sysbuild (`boot:`/`security.psa:`)
+    it is `-D<image>_SHIELD=...` so MCUboot does not get the shields.  Carrier
+    shields come from the connector's `zephyr_shields:` (ordered; e.g.
+    `[e1m_evk_rpi_csi]` on the E1M-EVK CAM0), the module shield from
+    `zephyr_shield:` in its `camera_modules/` YAML; a carrier shield shared by
+    two connectors collapses, carrier first.  Rejected (ALP-B003, with
+    `camera-select-failed` as the planner's backstop): a module with no
+    `zephyr_shield` (e.g. `raspberry_pi_camera_module_2`), a connector with no
+    `zephyr_shields` (the X-EVK CAM0: no CM33 camera shield exists), a carrier
+    shield with no `boards/<board>.overlay` for the owner's board target, and
+    two cameras on one owner using the same module shield (a Zephyr shield is
+    a single instance).
+  - **Yocto** owner: `ALP_CAMERA_CAM<n> = "<module_id>"` in that slice's
+    `local.conf`.  The kernel bbappend keys the generated sensor
+    devicetree include (`<board>-cam<n>-<module_id>.dtsi`, written by
+    `scripts/gen_camera_dt.py`, #2736) on this variable; it reads
+    `ALP_CAMERA_CAM0` only.
+  - Connector `CAMn` is camera index `n`: `alp-camera<n>` in Zephyr DT, the
+    `n` in `ALP_CAMERA_CAM<n>`.
+  - `zephyr_shields` is optional and only for connectors a Zephyr shield
+    exists for; each name must be a directory under
+    `zephyr/boards/shields/`.
+
 `tan validate` rejects an unknown connector, an unknown module, a
-duplicated connector, and (inline boards) an unresolvable macro or a wrong
+duplicated connector, a missing, ambiguous or non-candidate camera owner core, the Zephyr
+owner problems above, and (inline boards) an unresolvable macro or a wrong
 `lane_polarity` length, all as [ALP-B003](diagnostics/ALP-B003.md).
 
 #### Pin direction (NOT in `board.yaml`)
@@ -478,15 +524,13 @@ metadata/
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
 │   ├── E1M-V2M102.yaml      # V2N-M1 SKU
 │   ├── E1M-V2M103.yaml      # V2N-M1 SKU, 4 GB / 16 GB memory tier
-│   └── E1M-NX9101.yaml      # i.MX 93 placeholder MPN (production E1M-NX9xxx TBD)
 └── boards/
-    ├── e1m-evk.yaml            # 35x35 EVK (AEN / N93)
+    ├── e1m-evk.yaml            # 35x35 EVK (AEN)
     ├── e1m-x-evk.yaml          # 45x65 EVK (V2N / V2N-M1)
     └── custom-example.yaml     # template downstream consumers copy + edit
 ```
 
-v0.3 ships the schema + ten production SoM presets, the
-placeholder N93 bring-up preset (`E1M-NX9101`), the two stock
+The tree ships the schema + thirteen SoM presets, the two stock
 boards, and a copy-friendly custom-example template.  Two SKUs
 (`E1M-AEN801`, `E1M-V2N101`) are the primary worked presets; lower-priority
 or not-yet-final SKUs carry `partial_hw_config: true` so

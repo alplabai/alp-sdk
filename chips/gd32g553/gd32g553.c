@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "alp/chips/gd32g553.h"
+#include "alp/power.h"
 #include "alp/protocol/crc16.h"
 
 /* ----------------------------------------------------------------- */
@@ -691,9 +692,16 @@ static void spi_negotiate(gd32g553_t *ctx)
  *     command retries;
  *   - the ATTN fault limit was hit (3 lost / stuck edges): renegotiate with
  *     the ATTN bit cleared, which also returns PA14 to SWCLK on the slave. */
-static void spi_prepare(gd32g553_t *ctx)
+static alp_status_t spi_prepare(gd32g553_t *ctx)
 {
-	if (ctx->spi == NULL) return;
+	if (ctx->spi == NULL) return ALP_OK;
+	/* An accepted Deep-sleep: wake the bridge before this command's frame,
+	 * which would otherwise be the one a CS wake loses.  Every SPI caller
+	 * (cmd_send, READ2, BATCH) funnels through here. */
+	if (ctx->power_asleep) {
+		const alp_status_t w = gd32g553_power_wake(ctx);
+		if (w != ALP_OK) return w;
+	}
 	if (ctx->renegotiate_pending) {
 		uint8_t v[3];
 		if (spi_xfer(ctx, GD32G553_CMD_GET_VERSION, NULL, 0u, v, sizeof(v)) == ALP_OK) {
@@ -705,13 +713,14 @@ static void spi_prepare(gd32g553_t *ctx)
 			ctx->attn_unusable       = false;
 			spi_negotiate(ctx);
 		}
-		return;
+		return ALP_OK;
 	}
-	if (!ctx->attn_fault_pending) return;
+	if (!ctx->attn_fault_pending) return ALP_OK;
 	ctx->attn_fault_pending = false;
 	ctx->attn_active        = false;
 	ctx->attn_unusable      = true;
 	(void)link_features_ext(ctx, ctx->granted & ~GD32G553_LINK_FEAT_ATTN, ctx->max_payload);
+	return ALP_OK;
 }
 
 /* ----------------------------------------------------------------- */
@@ -796,13 +805,16 @@ static alp_status_t cmd_send(gd32g553_t          *ctx,
 {
 	if (t == GD32G553_TRANSPORT_DEFAULT) t = ctx->default_transport;
 	alp_status_t s;
+	/* An accepted Deep-sleep: wake the bridge before this command's frame,
+	 * which would otherwise be the one a CS wake loses. */
+	if (ctx->power_asleep && (s = gd32g553_power_wake(ctx)) != ALP_OK) return s;
 	switch (t) {
 	case GD32G553_TRANSPORT_SPI:
 		/* Deferred ATTN fault / post-reset renegotiation.  GET_VERSION is the
 		 * exception: gd32g553_refresh_version() finishes a pending
 		 * renegotiation itself, from its own reply, so a version read after an
 		 * OTA reset costs one GET_VERSION on the wire, not two. */
-		if (cmd != GD32G553_CMD_GET_VERSION) spi_prepare(ctx);
+		if (cmd != GD32G553_CMD_GET_VERSION && (s = spi_prepare(ctx)) != ALP_OK) return s;
 		s = spi_xfer(ctx, cmd, req_payload, req_payload_len, reply_payload, reply_payload_len);
 		break;
 	case GD32G553_TRANSPORT_I2C:
@@ -1606,7 +1618,10 @@ alp_status_t gd32g553_adc_stream_read2(gd32g553_t *ctx,
 	if (max_samples == 0u) return ALP_ERR_INVAL;
 	/* Deferred ATTN fault / post-reset renegotiation runs HERE, before this
 	 * command's frame is built -- never after its reply is received. */
-	spi_prepare(ctx);
+	{
+		const alp_status_t ps = spi_prepare(ctx);
+		if (ps != ALP_OK) return ps;
+	}
 	if (!stream2_granted(ctx)) return ALP_ERR_NOSUPPORT;
 	if (max_samples > read2_max_samples(ctx)) return ALP_ERR_OUT_OF_RANGE;
 
@@ -1731,7 +1746,10 @@ gd32g553_batch(gd32g553_t *ctx, gd32g553_batch_op_t *ops, uint8_t count, uint8_t
 	if (ops == NULL) return ALP_ERR_INVAL;
 	if (count == 0u) return ALP_ERR_INVAL;
 	if (count > GD32G553_BATCH_MAX_OPS) return ALP_ERR_OUT_OF_RANGE;
-	spi_prepare(ctx); /* before this command's frame is built (see READ2) */
+	{
+		const alp_status_t ps = spi_prepare(ctx); /* before this frame is built (see READ2) */
+		if (ps != ALP_OK) return ps;
+	}
 	if (ctx->spi == NULL || (ctx->granted & GD32G553_LINK_FEAT_BATCH) == 0u) {
 		return ALP_ERR_NOSUPPORT;
 	}
@@ -2008,18 +2026,103 @@ alp_status_t gd32g553_timer_sync(gd32g553_t *ctx, uint8_t master, uint8_t slave,
 	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_TIMER_SYNC, req, sizeof(req), NULL, 0u);
 }
 
+static alp_status_t power_mode_send(gd32g553_t *ctx,
+                                    uint8_t     mode,
+                                    uint8_t     flags,
+                                    uint32_t    wake_bitmap,
+                                    uint32_t    wake_after_ms)
+{
+	uint8_t req[10];
+	req[0] = mode;
+	req[1] = flags;
+	put_le32(&req[2], wake_bitmap);
+	put_le32(&req[6], wake_after_ms);
+	/* SPI when there is one: the opcode is not on the I2C allow-list. */
+	const gd32g553_transport_t t =
+	    (ctx->spi != NULL) ? GD32G553_TRANSPORT_SPI : GD32G553_TRANSPORT_DEFAULT;
+	return cmd_send(ctx, t, GD32G553_CMD_POWER_MODE_SET, req, sizeof(req), NULL, 0u);
+}
+
+/* Entry tick (50 ms) + boot of the new image, after the wake timer expires. */
+#define GD32G553_STANDBY_BOOT_MARGIN_MS 200u
+
+alp_status_t gd32g553_power_wake(gd32g553_t *ctx)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (!ctx->power_asleep) return ALP_OK;
+
+	/* Cleared first so the commands below do not recurse into this wake; put
+	 * back on failure so the next command retries it. */
+	ctx->power_asleep = false;
+	alp_status_t s    = ALP_ERR_IO;
+	/* uint32_t: a uint8_t counter never exceeds a retry count of 255. */
+	for (uint32_t attempt = 0u; attempt <= (uint32_t)ctx->power_wake_retries; ++attempt) {
+		/* Wake pulse.  A CS wake loses the frame clocked during it (it fails
+		 * its CRC on IRC8M and never reaches a handler), so the answer, or
+		 * the lack of one, means nothing. */
+		(void)cmd_send(ctx, GD32G553_TRANSPORT_SPI, GD32G553_CMD_PING, NULL, 0u, NULL, 0u);
+		alp_delay_us(ctx->power_wake_latency_us);
+		/* RUN: idempotent, proves the link is back, and cancels a request
+		 * that was accepted but never reached the sleep. */
+		s = power_mode_send(ctx, 0u, 0u, 0u, 0u);
+		if (s != ALP_ERR_IO && s != ALP_ERR_TIMEOUT) break;
+	}
+	if (s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT) ctx->power_asleep = true;
+	/* Any decoded status (OK, BUSY, NOSUPPORT, ...) proves the bridge is awake. */
+	return (s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT) ? s : ALP_OK;
+}
+
 alp_status_t
-gd32g553_power_mode_set(gd32g553_t *ctx, uint8_t mode, uint32_t wake_bitmap, uint32_t wake_after_ms)
+gd32g553_set_power_mode(gd32g553_t *ctx, uint8_t mode, const gd32g553_power_opts_t *opts)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (mode > 3u) return ALP_ERR_INVAL;
-	uint8_t req[10];
-	req[0] = mode;
-	req[1] = 0u; /* reserved */
-	put_le32(&req[2], wake_bitmap);
-	put_le32(&req[6], wake_after_ms);
-	return cmd_send(
-	    ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_POWER_MODE_SET, req, sizeof(req), NULL, 0u);
+	const gd32g553_power_opts_t zero = { 0 };
+	if (opts == NULL) opts = &zero;
+	if ((opts->flags & (uint8_t)~GD32G553_POWER_FLAG_WAKE_I2C) != 0u) return ALP_ERR_INVAL;
+	if (opts->flags != 0u && mode != 2u) return ALP_ERR_INVAL;
+	/* WAKE_I2C only adds an early wake to a TIMED sleep: the firmware refuses an
+	 * untimed one (OUT_OF_RANGE) until the I2C0 wake line is bench-proven, and a
+	 * firmware that predates the flags would ignore it and answer INVAL.  Same
+	 * answer here, without the wire trip. */
+	if ((opts->flags & GD32G553_POWER_FLAG_WAKE_I2C) != 0u && opts->wake_after_ms == 0u &&
+	    (opts->wake_bitmap & (ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_TIMER)) == 0u) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
+
+	/* Flags, BUSY gate and OUT_OF_RANGE ship with protocol 0.17; an older
+	 * firmware ignores the flags byte and would enter the mode unguarded. */
+	if (ctx->version.minor < GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR) return ALP_ERR_NOSUPPORT;
+
+	/* The bridge may still be asleep from an earlier request. */
+	alp_status_t s = gd32g553_power_wake(ctx);
+	if (s != ALP_OK) return s;
+
+	s = power_mode_send(ctx, mode, opts->flags, opts->wake_bitmap, opts->wake_after_ms);
+	/* A lost reply (IO / TIMEOUT) to a Deep-sleep request: the request may have
+	 * latched, so assume asleep; the wake's RUN is idempotent. */
+	const bool latched = (s == ALP_OK) || (s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT);
+	if (mode == 2u && latched) {
+		ctx->power_asleep          = true;
+		ctx->power_wake_latency_us = (opts->wake_latency_us != 0u)
+		                                 ? opts->wake_latency_us
+		                                 : GD32G553_POWER_WAKE_LATENCY_US_DEFAULT;
+		ctx->power_wake_retries =
+		    (opts->wake_retries != 0u) ? opts->wake_retries : GD32G553_POWER_WAKE_RETRIES_DEFAULT;
+	}
+	if (s != ALP_OK) return s;
+
+	if (mode == 3u) {
+		/* The wake is a reset: link features, sequencing and streams are gone. */
+		spi_drop_negotiated(ctx);
+		ctx->version_cached = false;
+		/* The firmware enters STANDBY up to one tick after this reply, and an
+		 * un-reset bridge would still answer the renegotiation's GET_VERSION.
+		 * Wait out the timer plus boot before arming it. */
+		alp_delay_ms(opts->wake_after_ms + GD32G553_STANDBY_BOOT_MARGIN_MS);
+		ctx->renegotiate_pending = (ctx->spi != NULL);
+	}
+	return ALP_OK;
 }
 
 /* ----------------------------------------------------------------- */

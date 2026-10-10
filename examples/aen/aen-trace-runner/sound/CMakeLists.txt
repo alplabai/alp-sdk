@@ -58,6 +58,7 @@ target_sources(app PRIVATE
 	src/cc3501e_bridge.c
 	src/cc3501e_gpio_routes.c
 	../src/audio/tr_audio.c
+	../src/audio/tr_amp_ready.c
 	../src/ipc/tr_aring.c
 )
 target_include_directories(app PRIVATE ../src)

@@ -643,5 +643,4 @@ Full list: [`docs/troubleshooting.md`](../troubleshooting.md).
 
 * [`v2n-m1.md`](v2n-m1.md) -- the AI-accelerator variant.
 * [`aen.md`](aen.md) -- the smaller Alif Ensemble form factor.
-* [`imx93.md`](imx93.md) -- the NXP i.MX 93 family.
 * [`../firmware-quickstart.md`](../firmware-quickstart.md) -- cross-family FW patterns.

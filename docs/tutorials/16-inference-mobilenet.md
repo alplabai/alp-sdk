@@ -3,13 +3,13 @@
 # Tutorial 16: Inference on Ethos-U (MobileNet)
 
 **Target audience:** developers running ML inference on AEN
-(Ethos-U55 + Ethos-U85 on E4/E6/E8) or N93 (Ethos-U65) via
+(Ethos-U55 + Ethos-U85 on E4/E6/E8) via
 `<alp/inference.h>`.
 
 **Prerequisites:**
 
 - Tutorial [01](01-first-build.md) completed.
-- An AEN EVK or N93 EVK on the bench.
+- An AEN EVK on the bench.
 - A Vela-compiled MobileNet TFLite model (~600 KiB).  Build
   one with `pip install ethos-u-vela` + the upstream
   MobileNet v2 reference model.  **You compile a different
@@ -58,16 +58,16 @@ Backend selection:
 
 | `backend` | Active on |
 |-----------|-----------|
-| `_AUTO` | Picks per SoM: Ethos-U on AEN/N93, DRP-AI on V2N, DEEPX on V2M, CPU fallback otherwise. |
-| `_ETHOS_U` | AEN (E3..E8 with Ethos-U55 + E4/E6/E8 with Ethos-U85) + N93 (Ethos-U65). |
+| `_AUTO` | Picks per SoM: Ethos-U on AEN, DRP-AI on V2N, DEEPX on V2M, CPU fallback otherwise. |
+| `_ETHOS_U` | AEN (E3..E8 with Ethos-U55 + E4/E6/E8 with Ethos-U85). |
 | `_DRPAI` | V2N + V2M (DRP-AI3). |
 | `_DEEPX_DXM1` | V2M101 / V2M102 / V2M103 (DEEPX DX-M1 on a PCIe-like link). |
 | `_CPU` | TFLM reference / Helium / NEON kernels; always available. |
 
 The `ETHOS_U` token is a single customer-facing handle that
 covers every Arm Ethos NPU variant. The planner emits
-per-variant `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}=y`
-gates from the silicon capability counts (`ethos_u{55,65,85}_count`,
+per-variant `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U85}=y`
+gates from the silicon capability counts (`ethos_u{55,85}_count`,
 resolved from the SoC JSON `npus[]`) (G-1
 selector); the driver code at runtime dispatches to the right
 shim and logs the active variant once per boot
@@ -193,9 +193,7 @@ CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y           # G-1: per-variant U55 
 
 …automatically, alongside the universal TFLM CPU fallback.
 For AEN801 (which carries the U85 too) the loader would also
-emit `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y`; for N93 it
-emits `_U65=y` plus `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y`
-(the i.MX 93 PHY shim).  Advanced readers: the emit logic
+emit `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y`.  Advanced readers: the emit logic
 lives in `scripts/alp_orchestrate/` § *Per-variant Ethos-U
 selector* (G-1) and § *CPU-class TFLM kernel selector* (G-2).
 
@@ -269,7 +267,6 @@ source, three SoMs.
 > |----------------------|---------------------------|-----------------------------|
 > | Ethos-U55 (AEN)      | `vela --accelerator-config ethos-u55-256`   | `.tflite` (Vela-rewritten)  |
 > | Ethos-U85 (AEN E4/E6/E8) | `vela --accelerator-config ethos-u85-256` | `.tflite` (Vela-rewritten)  |
-> | Ethos-U65 (N93)      | `vela --accelerator-config ethos-u65-256`   | `.tflite` (Vela-rewritten)  |
 > | DRP-AI3 (V2N / V2M)  | Renesas DRP-AI TVM        | DRP-AI runtime dir          |
 > | DEEPX DX-M1 (V2M)    | `dxcom` (license-gated)   | `.dxnn` binary              |
 >

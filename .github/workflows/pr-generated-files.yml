@@ -92,6 +92,8 @@ on:
       - 'scripts/gen_verification_status.py'
       - 'scripts/gen_chip_driver_classification.py'
       - 'docs/chip-driver-classification.md'
+      - 'scripts/gen_amp_window.py'
+      - 'src/backends/rpc/alp_amp_window.h'
       - '.github/workflows/pr-generated-files.yml'
   push:
     branches: [main, dev]
@@ -257,6 +259,11 @@ jobs:
       - name: Regenerate chip-driver classification from metadata
         run: python3 scripts/gen_chip_driver_classification.py
 
+      # src/backends/rpc/alp_amp_window.h is projected from the SoC's
+      # `openamp_carveout` (metadata/socs/renesas/rzv2n/n44.json).
+      - name: Regenerate the RPC backend's OpenAMP window header
+        run: python3 scripts/gen_amp_window.py
+
       # Single source: metadata/sdk_version.yaml declares MAJOR.MINOR.PATCH
       # and the CURRENT snapshot is docs/abi/vMAJOR.MINOR-snapshot.json
       # (docs/abi/README.md).  EVERY other docs/abi/v*-snapshot.json is a
@@ -337,6 +344,7 @@ jobs:
                      docs/chip-driver-classification.md \
                         examples/aen \
                         src/backends/gpio/cc3501e_rev_dependent_pins.c \
+                        src/backends/rpc/alp_amp_window.h \
                         include/alp/chips/*_power_tree.h \
                         meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi
           # No line-mask here: abi_snapshot.py's own write-skip guard
@@ -361,6 +369,7 @@ jobs:
                      docs/chip-driver-classification.md \
                      examples/aen \
                      src/backends/gpio/cc3501e_rev_dependent_pins.c \
+                     src/backends/rpc/alp_amp_window.h \
                      include/alp/chips/*_power_tree.h \
                      meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi; then
             echo "::error::Generated files are stale.  Run:"
@@ -377,6 +386,7 @@ jobs:
             echo "::error::  python3 scripts/gen_error_catalog.py"
             echo "::error::  python3 scripts/gen_verification_status.py"
             echo "::error::  python3 scripts/gen_chip_driver_classification.py"
+            echo "::error::  python3 scripts/gen_amp_window.py"
             echo "::error::  python3 scripts/abi_snapshot.py --version $ABI_VERSION --output $ABI_SNAPSHOT"
             echo "::error::and commit the result."
             exit 1

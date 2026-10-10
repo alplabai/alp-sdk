@@ -1,0 +1,59 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  One I2C controller shared between two cores of the same SoC, handed from
+  the core that configures a peripheral at boot to the core that owns the bus
+  afterwards (Alif Ensemble: the M55-HE configures a display bridge over
+  I2C1, the M55-HP then owns the same controller for the camera).
+
+  Each image carries one node; the roles pair through three flag words in
+  always-on shared SRAM (protocol: zephyr/soc-bridge/alif/i2c_handover.h):
+
+    release  (the first owner): once its drivers have finished with the bus
+             (the last step of APPLICATION init, after the display bridge),
+             masks this core's interrupt for the controller, stops it and
+             publishes a per-boot nonce and CLEAN. A controller that will not go
+             idle is still released, as DIRTY, with a warning: the other core
+             runs its bus recovery rather than wait forever. A `bus` that is
+             DISABLED in this image has nothing to stop and is released at once
+             (a shield that never needs the bus on this core keeps it disabled).
+    acquire  (the next owner): before ANY touch of the bus -- POST_KERNEL
+             priority 0, ahead of every driver and of an app's pad recovery --
+             waits for a release it has not taken yet, then consumes it (state
+             cleared, nonce recorded), so an already-taken release never
+             satisfies a later wait.
+
+  The release side clears the state first thing at boot. A release published
+  but not yet taken survives a warm reset (always-on SRAM), and an acquire side
+  that reaches its wait before the release side's boot-time clear can take it:
+  harmless where the release side keeps the bus disabled, a hazard with a bridge
+  on the bus. An image restarted alone after it took the bus waits for a release
+  that is not coming, and a release-side reset while the acquire side is running
+  reconfigures the bus under it: reset BOTH cores together, release side first.
+
+compatible: "alp,i2c-handover"
+
+include: base.yaml
+
+properties:
+  role:
+    type: string
+    required: true
+    enum:
+      - release
+      - acquire
+    description: Which side of the handover this image is.
+
+  bus:
+    type: phandle
+    description: |
+      The shared I2C controller, a snps,designware-i2c instance (asserted at
+      build time). Required for `release`; unused by `acquire`.
+
+  flag-address:
+    type: int
+    required: true
+    description: |
+      Address of the three 32-bit flag words (state, nonce, consumed: 12 bytes),
+      in SRAM both cores see and that survives a warm reset.

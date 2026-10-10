@@ -61,6 +61,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "amp-window",
+      "description": "The CM33 OpenAMP window is declared once (SoC openamp_carveout); the generated board .dts, the Linux reserved-memory/UIO nodes and the RPC backend's alp_amp_window.h must agree, and the beacon magic lives only in include/alp/protocol/amp_beacon.h.",
+      "runner": "check-script",
+      "script": "scripts/check_amp_window.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "board-id-doc-parity",
       "description": "docs/board-id.md's alp_hw_info_eeprom_t typedef struct (field names, order, widths) must match include/alp/hw_info.h, macros resolved (#1231).",
       "runner": "check-script",
@@ -146,6 +160,20 @@
       ],
       "output": "none",
       "ci": null
+    },
+    {
+      "id": "camera-parity",
+      "description": "Keep the V2N/V2M Linux camera devicetree fragments and camera-sensors.cfg identical to what scripts/gen_camera_dt.py generates from the camera metadata.",
+      "runner": "check-script",
+      "script": "scripts/check_camera_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
     },
     {
       "id": "cc3501e-bridge-copies",
@@ -870,6 +898,20 @@
       ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "som-power-domains",
+      "description": "Every SoM power-domain control pad in on-module-links.yaml matches the pad TSV row it cites (alp-sdk#2784).",
+      "runner": "check-script",
+      "script": "scripts/check_som_power_domains.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": null
     },
     {
       "id": "som-topology-parity",

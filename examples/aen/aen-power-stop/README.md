@@ -1,0 +1,193 @@
+# aen-power-stop
+
+Bench proof of the Alif SE STOP backend ([#2784](https://github.com/alplabai/alp-sdk/issues/2784),
+unit U7) on the **E1M-AEN803** (Alif Ensemble E8, M55-HE). STOP **passed on silicon** (U8h, 3 of 3 cycles); STANDBY is untested.
+Built as an **MRAM image**: STOP wakes through a cold boot (SES -> ATOC -> this
+image), so a RAM-run image would not come back.
+
+> Back up the module's MRAM image before flashing this and have the restore
+> procedure ready. If the entry sequence is wrong the Secure Enclave can keep the
+> module until it is power-cycled.
+
+See [`docs/aen-power-domains.md`](../../../docs/aen-power-domains.md) for the model.
+
+## What it does
+
+`alp_power_request_sleep(STOP)` does not return on this part, so `main()` runs again
+on every wake. A counter in the Utility SRAM (BKRAM; a bench-only cell,
+`CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH`) says which cycle it is.
+
+| Cycle | Wake source armed | Expected `wake_source` |
+|---|---|---|
+| 1 | LPTIMER, 500 ms | `ALP_POWER_WAKE_TIMER` |
+| 2 | RV-3028 countdown, 3 s | `ALP_POWER_WAKE_RTC` |
+| 3 | RV-3028 alarm, next minute change (INT -> P15_0) | `ALP_POWER_WAKE_RTC` |
+
+Every cycle stays awake 10 s first, so a console can attach. After each wake it
+judges the cycle that just ended from `alp_power_boot_wake_info()`, then starts the
+next. After the third wake it prints the summary and stays awake.
+
+A timed wake under 1 s uses the LPTIMER, whose 32 kHz source is the low-frequency
+clock the SES leaves on the ring oscillator (about 4.5 % fast); from 1 s up the
+RV-3028 countdown is used, because the RV-3028 is the trusted time base.
+
+## Build and run
+
+```
+ZEPHYR_BASE=<zephyr-base> west build \
+  -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-power-stop -- \
+  "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
+```
+
+Flash it to MRAM (Flow D, slot0 `he_slot0` at `0x80010000`). **The J-Link leaves
+`DHCSR.C_DEBUGEN` set after it detaches, and firmware cannot clear it**: the backend
+then refuses to sleep with `ALP_ERR_BUSY`. Clear it from the debugger BEFORE releasing
+the core (`w4 0xE000EDF0 0xA05F0000`), then detach the J-Link, then issue the
+flash-loader nRESET; or power-cycle the module with the probe detached. Read the
+console on the E1M edge UART0 at 115200 8N1. Start from a **cold power cycle**: the
+counter lives in SRAM that a reset keeps and a power cycle loses.
+
+A refused sleep prints `alif_se_power: refuse step=<n> reason=<...> rc=<raw>` (and
+`som_power: ...` for a pad or domain) before the `request FAIL` line.
+
+> **No J-Link connect-under-reset and no `tan flash --readback` during the sleep window.**
+> Either one asserts NSRST, which resets the module mid-sleep and looks like a failed wake
+> (it is reported as an aborted sleep, not a wake, but the cycle is lost). Attach only
+> before the first cycle or after the last one.
+
+## Bench variants (#2784 addendum 6)
+
+One variable each, selected with a config fragment on top of `prj.conf`
+(`-DEXTRA_CONF_FILE=variants/<name>.conf`). All of them print the same evidence.
+
+| Variant | Fragment | Changes | Read |
+|---|---|---|---|
+| (i) default, instrumented | `i-default.conf` | nothing | the baseline: `diag pre` / `diag boot` / `se run` / `se off` |
+| (ii) RV-3028 first | `ii-rtc-first.conf` | cycle order: countdown, LPTIMER, alarm | if the countdown cycle wakes and the LPTIMER one does not, the INT path is sound and the LPTIMER path is the suspect |
+| (iii) LPTIMER 5 s | `iii-lptimer-5s.conf` | LPTIMER interval 5000 ms (the backend bench option raises the LPTIMER ceiling to 10 s; the RV-3028 countdown cycle moves to 11 s so it stays on the RV-3028) | whether a longer interval changes the outcome (a race with the SE calls, or the clock) |
+| (A) = (iii) | `iii-lptimer-5s.conf` | the 5 s LPTIMER cycle (the U8d plan's "A"; the OFF profile is now the vendor one by default) | |
+| (B) = (i) | `i-default.conf` | LPTIMER 500 ms | the baseline |
+| (iv) LFXO | `iv-lfxo.conf` | OFF profile `aon_clk_src` = LFXO (cap 63) | the vendor sample's choice; compare the wake and `se off aon_clk` |
+| (P) product | `p-product.conf` | vendor OFF (default) + fixed restore, LPTIMER 5 s, then countdown, then alarm | a wake at 115200 baud, `bkram live=1 selftest=1` |
+| (P-novtor) | `p-novtor.conf` | (P) with the live vtor_address | ablation of the resume vector |
+| (P-nomem) | `p-nomem.conf` | (P) without MRAM \| SERAM in memory_blocks | ablation of the memory blocks |
+| (P-500) | `p-500.conf` | (P) with LPTIMER 500 ms | the short interval |
+| (product-noscratch) | `product-noscratch.conf` | the shipping configuration: no bench scratch option (no BKRAM bench cell, diag, image CRC, LPRTC witness or `RTC_CLK_EN` write), default 1 s LPTIMER ceiling, restore on; the cycle number is kept in the RV-3028 User RAM 1 | cycles LPTIMER 500 ms, countdown 3 s, alarm; prints `wake_source`, `slept_ms`, `clocks uart_baud=... tick_ms_per_2_rtc_s=...` and the verdicts (`tick_rate` instead of `bkram_counter`) |
+| (A-norestore) | `vii-a-norestore.conf` | (P) with `RESTORE_CLOCKS=n` | no boot-time `set_run_cfg`; the UART comes up at 1/5 baud |
+| (R-vendor) | `ix-repro-vendor.conf` | forces the boot-time restore on a cold boot (fixed profile), then BKRAM self-test, then cycle 1 in the same boot | `bkram live=1 selftest=1` and BOOT w40 = 1, w52 = 1 |
+| (R-legacy) | `x-repro-legacy.conf` | the same with the c6de654ff restore profile (0x16d, no BACKUP4K, no re-assert) | reproduces the U8e loss: `bkram live=0`, BOOT w52 = 2, the sleep refused `bkram_unusable` |
+
+### STANDBY, TCM retention and wake-to-main() timing
+
+Three further fragments. Bench result on an E1M-AEN803 (2026W36-0001) on an E1M-EVK, 2026-10-10: `s-standby` and
+`t-tcm-retain` ran 3/3 cycles with every verdict PASS; `w-wake-timing` ran but its counters are too
+coarse to resolve wake-to-`main()` (see the timing note below). `t-tcm-retain-128k` was not run. Each is
+selected like the others (`-DEXTRA_CONF_FILE=variants/<name>.conf`); the default image is unchanged.
+
+| Variant | Fragment | Changes | Expected evidence |
+|---|---|---|---|
+| (S) STANDBY | `s-standby.conf` | every cycle requests `ALP_POWER_MODE_STANDBY` | `cycle<n> enter STANDBY (...)`, then per cycle `cycle<n> mode_standby PASS` (the wake record's `realised_mode` reads STANDBY) next to the same `record_valid`, `wake_source`, `restored_all`, `bkram_counter` checks. A `request FAIL rc=... realised=...` line, or `valid=0` after the wake, means the SE did not take the STANDBY profile or the record did not survive. |
+| (T) TCM, both banks | `t-tcm-retain.conf` | `ALP_POWER_RETAIN_TCM`, `retain_kb = 256` (DTCM SRAM5_1 + SRAM5_2), plus a pattern probe | before each sleep `POWER_STOP: tcm cycle<n> wrote retain_kb=256 addr=0x... bank0_bytes=... bank1_bytes=... crc_a=0x... crc_b=0x...`; after the wake `tcm cycle<n> read asked_banks=2 bank0=retained bank1=retained` and `cycle<n> tcm_retained PASS` |
+| (T-128) TCM, one bank | `t-tcm-retain-128k.conf` | `retain_kb = 128` (SRAM5_1 requested) | `asked_banks=1`; the verdict covers bank 0. `bank1=` is NOT mapping evidence: with any TCM asked for the backend ORs both `RET_CTRL.HETCM1 \| HETCM2` after the SE call (the `tcm_requested()` branch of the retention setup in `alif_se_power.c`), so both DTCM halves stay powered. Mapping evidence needs a backend change that sets only the matching bit (to be tracked) |
+| (W) timing | `w-wake-timing.conf` | prints the LPRTC counter at sleep entry, at `PRE_KERNEL_1` and at `main()` | `POWER_STOP: timing cycle<n> lprtc pre=... boot=... main=... ccr=0x... cpsr=... cpcvr=... armed_ms=... main_uptime_ms=...`, then `ticks entry_to_boot=... boot_to_main=... entry_to_main=... tick_ms_nominal=...`, then `lprtc_rate_mhz=...`, `entry_to_main_nominal_ms=...`, and `entry_to_main_min_ms=... rtc_slept_ms=... armed_ms=... wake_to_main_min_ms=... wake_to_main_rtc_ms=...` (cycle 3, the alarm, prints `wake_to_main_ms=n/a`). No verdict. |
+
+**How the TCM probe works.** The whole of Zephyr's RAM is the 256 KiB M55-HE DTCM (CPU-local
+`0x20000000`). The probe is a 160 KiB `.noinit` array, so the C runtime neither copies nor zeroes it
+on the cold boot; it straddles the 128 KiB boundary wherever the linker puts it, so part A sits in
+the first bank and part B in the second. A different pattern is written each cycle (seeded by the
+cycle number) and checked by CRC-32 after the wake, with the expected CRC regenerated rather than
+stored. The bank size (two 128 KiB DTCM banks) is taken from hal_alif `se_services/include/aipm.h`
+(`MB_SRAM5_1`, `MB_SRAM5_2`, "dtcm 128kb") and the E8 DFP `SOC_FEAT_HE_DTCM_SIZE`. **Still
+unproven:** that `SRAM5_1` is the low half of the address range, and that the SRAM5_x bits drive
+`RET_CTRL.HETCM_RET1/2` (this example cannot show it: both RET_CTRL bits are always set). A `lost` on a bank that was asked for is a real finding (the SES may also
+scrub the TCM on the cold boot), not necessarily a test fault; read `bank0=`/`bank1=` together with
+`asked_banks=`.
+
+**How the timing is derived, and how good it is.** The LPRTC (VBAT domain, `0x42000000`) keeps running
+through STOP and the SE cold boot and is readable from `main()`. It is not the only such counter: the
+RV-3028 (+-1 ppm, backup supply) runs through it too and is the backend's time base for `slept_ms`.
+The LPRTC prescaler `CPSR` resets to `0x8000`, which the SVD says is 1 Hz on a precise 32.768 kHz
+clock. Here the clock is the SES-left LFRC (about 4.5 % fast, per the notes above) and an earlier
+bench counted about 2 Hz (155 ticks in 76 s, LFRC / 2^14), so a CPSR-based figure can be about 2x
+off; `cpsr` and `ccr` are printed raw, and `tick_ms_nominal=n/a (prescaler off)` appears when
+`LPRTC_CCR.LPRTC_PSCLR_EN` is clear. The example prints the result several ways:
+`entry_to_main_nominal_ms` (CPSR / 32768), `entry_to_main_min_ms` at the backend's fastest rate
+(2.2 Hz, a lower bound), and from the RV-3028 `rtc_slept_ms`, `lprtc_rate_mhz` (entry_to_main
+ticks / `rtc_slept_ms`, the measured LPRTC rate) and `wake_to_main_rtc_ms = rtc_slept_ms -
+armed_ms`, the calibrated bound. The wake event itself is not timestamped (it happens at entry +
+armed time), so wake-to-`main()` is a **bound with 1 s resolution at each end, not a measurement**.
+If the RV-3028 could not be read, `slept_ms` falls back to the armed length and the RTC figures are
+no witness. `armed_ms` is the requested interval; for the LPTIMER cycle the backend rounds the count
+UP against the fastest LFRC (36045 Hz, `alif_se_power.c:190-200`), so the real sleep runs about
+5-16 % longer and `wake_to_main_*` is biased high for that cycle. `main_uptime_ms` is the kernel's
+own time at the sample, so the SES + ATOC share is the remainder. It needs the bench scratch option
+(on in `prj.conf`) for the `PRE` / `BOOT` snapshots, so it does not exist in the
+`product-noscratch` image.
+
+Product OFF profile (bench U8g: STOP woke 2 of 2 with it, never without): `vtor_address` =
+`SCB->VTOR` and `memory_blocks` = MRAM \| SERAM \| BKRAM are the backend default. The bench
+build can turn each off (`alp_som_bench_knobs`, Kconfig `..._BENCH_NO_VTOR_SELF` /
+`..._BENCH_NO_MRAM_SERAM`, plus `..._BENCH_FORCE_LFXO` / `..._BENCH_STBY_76_8` for the other two
+vendor differences); the knobs are fixed per image because the Zephyr shell owns the console RX.
+Every boot prints `POWER_STOP: knobs ...`, `POWER_STOP: ses revision ...` (SE firmware revision
+and TOC version) and `POWER_STOP: bkram live=<0|1> selftest=<0|1>`; the BOOT diag words 52-55
+hold the restore's BKRAM self-test result (1 ok, 2 failed), RET_CTRL and VBAT_ANA_REG1 before the
+re-assert, and VBAT_ANA_REG1 after it.
+
+See `docs/aen-power-domains.md` for the comparison with the vendor `system_off` sample.
+
+## What to read after a wake
+
+Each boot prints, in order: `stop_mode_reg=...`, `diag pre` (the registers immediately
+before the WFI of the previous sleep, from BKRAM), `diag boot` (the registers at
+`PRE_KERNEL_1` of THIS boot, before any restore or driver), `se run` and `se off` (the SE's
+profiles as they stand). The word index of the diag blocks is listed in
+`src/backends/power/alif_se_power_hw.c`. The questions they answer:
+
+- **Did the LPTIMER count and fire before the WFI?** `pre` words 0 (CONTROLREG: bit 0 enable,
+  bit 2 interrupt mask), 1/2 (RAWINT/INTSTATUS), 3 (LOADCOUNT), 4 (CURRENTVAL), 13 (CYCCNT
+  between arm and snapshot) and 11/12 (NVIC ISER1/ISPR1, IRQ 60 = bit 28).
+- **Was the wake source reaching the SE?** `pre` word 5 (`WKUP_CTRL`: LPTIMER bits [11:8]).
+- **What did the clock tree look like after the wake?** `boot` words 20-27 (CGU `OSC_CTRL`,
+  `PLL_LOCK_CTRL`, `PLL_CLK_SEL`, `ESCLK_SEL`, `CLK_ENA`, `ACLK_CTRL`, `SYSTOP_CLK_DIV`,
+  `UART_CTRL`) against the cold-boot values, and `se run` against the cold-boot profile.
+- **Was it a wake or a reset?** `boot` word 19 (`RTSS_HE_RESET`: 0 SE-initiated, 1 NSRST
+  pin, 4 power-domain request) and `boot` word 16 (`STOP_MODE_STAT`, bit 4). A pin reset
+  is reported as an aborted sleep (`valid=1 mode=0 wake_source=0x0`), not a wake -- except
+  after a sleep that retains TCM: its wake also leaves `RTSS_HE_RESET` = 1, so such a record
+  never trusts the bit, and a real pin reset during a TCM-retaining sleep reads as a wake.
+
+## Bench contract
+
+```
+POWER_STOP: cycle<n> <check> <PASS|FAIL>
+POWER_STOP: SUMMARY cycles=<n> pass=<n> fail=<n>
+```
+
+Checks, per cycle: `record_valid mode_stop wake_source restored_all bkram_counter`
+(`mode_standby` replaces `mode_stop` in the STANDBY variant, and `tcm_retained` is added by the
+TCM variants).
+Evidence lines (no verdict): `POWER_STOP: boot`, `wake`, `regs` (RET_CTRL,
+VBAT_ANA_REG1, MISC_CTRL, STOP_MODE, RTSS_HE_CTRL), `alarm`.
+
+Acceptance (design U8): the counter reads 1, 2, 3 across the wakes; `STOP_MODE_STAT`
+(bit 4 of `STOP_MODE`) is set at each wake; `wake_source` matches the armed source;
+`quiesced` equals `restored`; no power cycle in between.
+
+## Hygiene added after bench U8d
+
+- **Image identity.** The record and the counter carry a CRC-32 of the running image's ROM
+  region. A clean flash of another image finds a foreign counter or record: it starts fresh
+  (counter 0, record cleared, PRE diag invalidated) and ignores `STOP_MODE_STAT` for that boot,
+  so a reset taken after a previous run's sleep is never read as this image's wake.
+- **`STOP_MODE_STAT` is acknowledged** (a write of exactly `0x00000010`, never bit 0 -- bit 0
+  is `STOP_MODE_CTRL` and enters stop mode) once the boot decode is done. Diag word 50 holds the
+  read-back.
+- **Clock restore.** If the PLL is not locked or the PLL clock select is not the running tree,
+  the backend re-applies the full RUN profile at `PRE_KERNEL_1` (priority 46). Diag words 40-46
+  hold what happened (40: 0 healthy, 1 restored, 2 failed; 41: the SE return code; 42-45: PLL
+  lock, PLL clock select, OSC and ACLK after; 46: the RUN `memory_blocks` the SE reports).
+- **Wake attribution is time-gated.** An LPTIMER wake is rejected when the RV-3028 (or LPRTC)
+  shows far more time than the armed interval plus a boot passed: the periodic LPTIMER stays
+  pending after any reset.
+

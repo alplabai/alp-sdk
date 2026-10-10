@@ -46,7 +46,6 @@ def test_non_object_topology_does_not_crash_the_gate(tmp_path, monkeypatch):
     registry.write_text(json.dumps({
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": "m33_sm"}],
-        "excludedFamilies": {},
     }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
 
@@ -68,7 +67,6 @@ def test_object_topology_with_matching_core_passes(tmp_path, monkeypatch):
     registry.write_text(json.dumps({
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": "m33_sm"}],
-        "excludedFamilies": {},
     }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
 
@@ -102,21 +100,6 @@ def test_excluded_libraries_as_a_list_does_not_crash_the_gate(tmp_path, monkeypa
     assert isinstance(failures, list)
 
 
-def test_excluded_families_as_a_list_does_not_crash_the_gate(tmp_path, monkeypatch):
-    """`excludedFamilies` is schema-typed as an object (family -> reason),
-    but a malformed registry can carry a list there instead -- `.items()` on
-    that used to raise `AttributeError: 'list' object has no attribute
-    'items'` here, aborting the whole gate mid-run instead of leaving the
-    schema FAIL line (which already flags the type mismatch) to explain the
-    real problem."""
-    vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_excluded_families_list")
-    registry = tmp_path / "tier-a-library-ci.json"
-    registry.write_text(json.dumps({"excludedFamilies": ["foo"]}), encoding="utf-8")
-    monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
-    failures = vm._check_tier_a_library_ci([], [])  # must not raise
-    assert failures == []  # a list `excludedFamilies` iterates to nothing meaningful to check
-
-
 def test_non_object_top_level_does_not_crash_the_gate(tmp_path, monkeypatch):
     """The registry's top level is schema-typed as an object, but a
     malformed file could parse to a bare JSON array -- `data.get("hostBuild",
@@ -148,7 +131,6 @@ def test_non_list_family_matrix_and_non_list_host_libraries_do_not_crash_the_gat
     registry.write_text(json.dumps({
         "hostBuild": {"libraries": 5, "excludedLibraries": {}},
         "familyMatrix": 5,
-        "excludedFamilies": {},
     }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     vm._check_tier_a_library_ci([], [])  # must not raise
@@ -164,7 +146,6 @@ def test_non_string_host_library_entry_does_not_crash_the_gate(tmp_path, monkeyp
     registry.write_text(json.dumps({
         "hostBuild": {"libraries": [{"nested": "dict"}], "excludedLibraries": {}},
         "familyMatrix": [],
-        "excludedFamilies": {},
     }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     failures = vm._check_tier_a_library_ci([], [])  # must not raise
@@ -180,7 +161,6 @@ def test_non_string_family_matrix_som_does_not_crash_the_gate(tmp_path, monkeypa
     registry.write_text(json.dumps({
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": {"nested": "dict"}, "core": "m33_sm"}],
-        "excludedFamilies": {},
     }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     failures = vm._check_tier_a_library_ci([], [])  # must not raise
@@ -197,7 +177,6 @@ def test_non_string_family_matrix_core_does_not_crash_the_gate(tmp_path, monkeyp
     registry.write_text(json.dumps({
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": {"nested": "dict"}}],
-        "excludedFamilies": {},
     }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     som = tmp_path / "E1M-TST001.yaml"
@@ -222,7 +201,6 @@ def test_non_string_topology_keys_do_not_crash_the_gate(tmp_path, monkeypatch):
     registry.write_text(json.dumps({
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": "m33_sm"}],
-        "excludedFamilies": {},
     }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     som = tmp_path / "E1M-TST001.yaml"
@@ -251,7 +229,6 @@ def test_all_non_string_topology_keys_do_not_crash_the_gate(tmp_path, monkeypatc
     registry.write_text(json.dumps({
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": "m33_sm"}],
-        "excludedFamilies": {},
     }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     som = tmp_path / "E1M-TST001.yaml"
@@ -276,7 +253,6 @@ def test_null_som_reports_diagnostic_not_silently_dropped(tmp_path, monkeypatch)
     registry.write_text(json.dumps({
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": None, "core": "m33_sm"}],
-        "excludedFamilies": {},
     }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     failures = vm._check_tier_a_library_ci([], [])  # must not raise
@@ -293,7 +269,6 @@ def test_null_core_reports_diagnostic_not_silently_dropped(tmp_path, monkeypatch
     registry.write_text(json.dumps({
         "hostBuild": {"libraries": [], "excludedLibraries": {}},
         "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": None}],
-        "excludedFamilies": {},
     }), encoding="utf-8")
     monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
     som = tmp_path / "E1M-TST001.yaml"

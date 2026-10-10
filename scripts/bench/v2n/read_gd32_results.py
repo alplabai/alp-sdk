@@ -68,7 +68,7 @@ ROWS = {
         "tmu_exp_nosupport", "tmu_tanh_nosupport", "tmu_q31_sqrt", "trng_lengths",
         "pwm_set_get", "pwm_configure", "adc_configure_error", "adc_all_channels",
         "link_features", "adc_stream2", "batch", "dsp_chain", "version_stable",
-        "da9292_sentinel",
+        "da9292_sentinel", "power_deep_sleep_wake", "power_busy_gate", "power_invalid",
     ),
     "soak": (
         "ping", "get_version", "get_build_id", "reset_reason", "gpio", "pwm_set_get",

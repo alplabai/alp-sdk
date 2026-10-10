@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 (V2N-family die): the CM33 started by TF-A is attached by Linux
+# remoteproc, then stopped and started again, and its OpenAMP beacon comes
+# back.  Spec for docs/rzv2n-m33-secure-boot.md "Lifecycle" -- NOT
+# BENCH-VERIFIED.
+#
+# PRECONDITIONS (the bench must arrange them):
+#   - Image built with ALP_V2N_REMOTEPROC = "1" (Renesas RZ remoteproc +
+#     cm33_rproc node), DSW1 mode 2 (xSPI BL2) cold boot, so TF-A started the
+#     CM33 (examples/multicore/rpmsg-v2n/m33_sm, beacon version 2).
+#   - Beacon layout: include/alp/protocol/amp_beacon.h.
+#   - /lib/firmware/m33_sm.elf is the same build's zephyr.elf.
+#   - For the stop/start half: TF-A grants Linux non-secure access to CM33
+#     SRAM (Renesas TF-A patch 0001-Change-MCPU-sram-to-unpriv.patch
+#     equivalent).  Without it `stop` takes a bus error, so that half only
+#     runs when the operator created /etc/alp-hil-rproc-stop after the docs'
+#     bench step 4 passed; otherwise the spec ends after the attach checks.
+#     Only a dev image (ALP_V2N_CM33_SRAM_NS = "1") has stop/start; the
+#     production image is attach-only and must never carry the marker.
+#   - No <alp/rpc.h> client is running (the stop zeroes the OpenAMP window).
+#
+# Beacon words (m33_sm/src/main.c): rsctbl+0xFF0 magic 0xA10D0683, +0xFF4
+# version, +0xFF8 ~1 Hz heartbeat, +0xFFC attach epoch; A55 0x4f700ff0...
+#
+# What this proves:
+#   - the rproc probes DETACHED and `start` attaches with the CM33 untouched
+#     (state attached, heartbeat still advancing, no virtio device).
+#   - `stop` takes the CM33 down (state offline, heartbeat stops).
+#   - `start` with the ELF reloads it (state running), the beacon is
+#     republished and the heartbeat resumes.
+# The RPMsg echo after the restart is v2m103-rpmsg-echo-uio, run after this
+# spec WITHOUT a cold cycle between the two.
+
+schema_version: 1
+name: v2m103-remoteproc-lifecycle
+description: |
+  remoteproc: detached -> attached -> offline -> running; CM33 beacon heartbeat stops on stop and resumes after start.
+
+flash_method: ssh-run
+ssh_command: |-
+  RP=/sys/class/remoteproc/remoteproc0
+  HB='devmem 0x4f700ff8 32'
+  bad() { echo "HIL_RPROC_BAD $*"; }
+  adv() { a=$($HB); sleep 3; b=$($HB); [ "$a" != "$b" ]; }
+  # Image without the opt-in remoteproc: nothing to test, not a failure.
+  [ -d $RP ] || { echo "HIL_RPROC_DONE no remoteproc in this image"; exit 0; }
+  [ "$(cat $RP/name)" = remoteproc-cm33 ] || bad "name $(cat $RP/name)"
+  [ "$(cat $RP/state)" = detached ] || bad "initial state $(cat $RP/state)"
+  adv || bad "heartbeat not advancing before attach"
+  echo start > $RP/state || bad "attach failed"
+  [ "$(cat $RP/state)" = attached ] || bad "state after attach $(cat $RP/state)"
+  adv || bad "heartbeat stopped by attach"
+  [ -z "$(ls /sys/bus/virtio/devices 2>/dev/null)" ] || bad "kernel virtio device present"
+  # Attach-only (production) node: stop must be refused, state stays attached,
+  # CM33 keeps running.  Never tried on a node without the property (it would
+  # really stop the CM33).
+  if [ -e /proc/device-tree/remoteproc-cm33/alp,rz-attach-only ]; then
+    echo stop > $RP/state 2>/dev/null && bad "stop accepted in attach-only mode"
+    [ "$(cat $RP/state)" = attached ] || bad "state after refused stop $(cat $RP/state)"
+    adv || bad "heartbeat stopped by refused stop"
+  fi
+  # stop writes CM33 SRAM from Linux: only after the operator proved TF-A
+  # grants that access and left the marker (docs bench step 4).
+  [ -e /etc/alp-hil-rproc-stop ] || { echo "HIL_RPROC_DONE attach only, no /etc/alp-hil-rproc-stop"; exit 0; }
+  echo stop > $RP/state || bad "stop failed"
+  [ "$(cat $RP/state)" = offline ] || bad "state after stop $(cat $RP/state)"
+  adv && bad "heartbeat still advancing after stop"
+  echo m33_sm.elf > $RP/firmware
+  echo start > $RP/state || bad "reload failed"
+  [ "$(cat $RP/state)" = running ] || bad "state after reload $(cat $RP/state)"
+  sleep 3
+  [ "$($HB | tr A-F a-f)" != 0x00000000 ] || bad "no heartbeat after reload"
+  [ "$(devmem 0x4f700ff0 32 | tr A-F a-f)" = 0xa10d0683 ] || bad "beacon magic after reload"
+  adv || bad "heartbeat not advancing after reload"
+  echo HIL_RPROC_DONE
+
+serial:
+  duration_s: 60
+  expect_contains:
+    - "HIL_RPROC_DONE"
+  expect_absent:
+    - "HIL_RPROC_BAD"

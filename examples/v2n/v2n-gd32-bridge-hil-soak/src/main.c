@@ -39,7 +39,7 @@
  * (test pass/fail/skip, negotiated features and payload ceiling, ATTN
  * state, READ2 index/dropped/gaps, soak cycles/errors/timeouts/elapsed) in
  * the `rsctbl` window (A55 0x4F700F00), just below the liveness beacon the
- * provisioning `cm33_running` check reads at 0x4F700FF0.  Layout:
+ * provisioning `cm33_running` check reads (amp_beacon.h).  Layout:
  * <alp/protocol/gd32_bridge_results.h>; reader:
  * scripts/bench/v2n/read_gd32_results.py or the
  * tests/hil/v2m103-x-evk/v2m103-gd32-bridge-results.yaml spec.  The SRAM0
@@ -343,14 +343,20 @@ static bool t_pwm_set_get(soak_stat_t *st)
  * The GD32 is NOT reset between CM33 images, so a previous app may still
  * hold the TIMER7 claim (the functional app's scope loop leaves PWM7
  * running).  Stop PWM4..PWM7 first: PWM_SET with period 0 / duty 0
- * releases the claim.  Firmware that predates stop answers an error;
- * ignore it and let the row's own status check decide. */
+ * releases the claim.  Firmware before protocol minor 17 has no stop, so
+ * a channel a previous image left running cannot be released: there a
+ * BUSY answer is reported as a SKIP (see row_is_skipped), not a failure. */
+static bool pwm_single_pulse_skipped;
+
 static bool t_pwm_single_pulse(soak_stat_t *st)
 {
 	for (uint8_t ch = 4u; ch <= 7u; ch++) {
 		(void)gd32g553_pwm_stop(&ctx, ch);
 	}
 	const alp_status_t s = gd32g553_pwm_single_pulse(&ctx, 4u, 1000u);
+	pwm_single_pulse_skipped =
+	    s == ALP_ERR_BUSY && ctx.version.minor < GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR;
+	if (pwm_single_pulse_skipped) return true;
 	if (s != ALP_OK) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "status=%d", (int)s);
@@ -926,7 +932,7 @@ static bool t_timer_sync(soak_stat_t *st)
  * own HIL rows (they tear down this very link). */
 static bool t_power_mode(soak_stat_t *st)
 {
-	const alp_status_t s = gd32g553_power_mode_set(&ctx, 0u, 0u, 0u);
+	const alp_status_t s = gd32g553_set_power_mode(&ctx, 0u, NULL);
 	if (s != ALP_OK) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "status=%d", (int)s);
@@ -1079,6 +1085,7 @@ static bool row_is_skipped(bool (*fn)(soak_stat_t *))
 {
 	if (fn == t_adc_stream2) return (ctx.granted & GD32G553_LINK_FEAT_ADC_STREAM2) == 0u;
 	if (fn == t_batch) return (ctx.granted & GD32G553_LINK_FEAT_BATCH) == 0u;
+	if (fn == t_pwm_single_pulse) return pwm_single_pulse_skipped;
 	return false;
 }
 

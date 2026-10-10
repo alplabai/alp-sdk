@@ -1,0 +1,17 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# alp,som-power -- container for the SoM's power domains (alp-sdk#2784).
+# Generated into the board dts by scripts/gen_zephyr_board.py from
+# `power_domains:` in metadata/e1m_modules/aen/on-module-links.yaml; one
+# `alp,som-power-domain` child per domain the SKU actually carries.
+
+description: |
+  Parent of the per-domain `alp,som-power-domain` nodes.  Its `pinctrl-0`
+  ("default") state muxes and pad-configures every pad the power layer drives
+  (the LPGPIO P15_n pads and the main-domain P11_6 / P5_5); the layer applies it
+  before its first drive and refuses to drive a pad without it.
+
+compatible: "alp,som-power"
+
+include: [base.yaml, pinctrl-device.yaml]

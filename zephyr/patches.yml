@@ -1082,3 +1082,42 @@ patches:
       any host configures its D-PHY. Bench, E1M-AEN803 2026W36-0001,
       aen-camera-firstlight after a power cycle: 2/2 fail without it, 3/3
       clean captures with it.
+  - path: zephyr/0005-intc_renesas_rz_tint-clear-only-own-status-bit.patch
+    sha256sum: 531bf2c26ee8a08a9927fe11736310313ac5e6b3dc9546659f182c511d25dee7
+    module: zephyr
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-10-05
+    upstreamable: true
+    comments: |
+      Issue #2692. On the RZ/V2H/V2N path (CONFIG_RENESAS_RZ_TINT_SUPPORT_STATUS_CLEAR_REG)
+      intc_renesas_rz_tint.c clears a TINT status with
+      REG_TSCLR_WRITE(tint, TINT_STATUS_READ(tint) | BIT(tint)). TSCLR is
+      write-1-to-clear, so that writes every currently pending TSCTR bit and
+      clears the pending status of ALL slots, including slots owned by the
+      A55 under AMP (e.g. the Linux AMP.FAULT edge interrupt). Every CM33 TINT
+      ISR and every edge set_type would silently drop the pending status of any
+      other slot pending at that moment, including A55 interrupts. Write
+      only BIT(tint). Upstream to Zephyr then drop. Upstream submission text:
+      zephyr/patches/zephyr/0005-UPSTREAM.md.
+  - path: zephyr/0006-imx335-wait-for-sensor-after-power-up.patch
+    sha256sum: bb5be8c04d3e743ea840b26f5d73a8e31bbd7b19b3af8786f3bb01da22a53983
+    module: zephyr
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-10-09
+    upstreamable: true
+    comments: |
+      Applies on top of 0004. drivers/video/imx335.c writes its init table as
+      soon as the driver initialises. A camera module with no reset line (the
+      RPi-style 15-pin connector carries none) is still powering up at that
+      point on a cold boot, so the first CCI write (STANDBY, 0x3000) NACKs, the
+      device stays NOT_READY for the rest of the boot, and alp_camera_open()
+      reports ALP_ERR_NOT_READY. A warm reset never shows it because the
+      module is already powered. Poll that first write (raw i2c_write_dt, so
+      the expected NACKs are not logged) every 10 ms for up to 1 s before the
+      table writes. Bench 2026-10-09, E1M-AEN803 2026W36-0009 on the E1M-EVK,
+      INNO-MAKER CAM-IMX335 on J5, both M55-HE and M55-HP from a DPS-150 cold
+      cycle: without the poll every cold boot failed sensor init; with it the
+      sensor answered after 4 NACKed attempts (~40 ms) and open succeeded.
+      Upstream to Zephyr then drop.

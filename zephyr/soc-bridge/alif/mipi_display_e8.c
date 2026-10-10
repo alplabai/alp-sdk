@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * ====== ADR-0017-ADJACENT (register sequence from the Alif DFP / DevKit, not a HAL consumer) ======
- * SoC-level setup the Alif E8 MIPI D-PHY and the display chain on it (CDC200 ->
+ * SoC-level setup the Alif E8 (and E4) MIPI D-PHY and the display chain on it (CDC200 ->
  * DesignWare DSI -> D-PHY) need and that none of their drivers, nor Zephyr's
  * upstream Alif clock control, performs.  No hal_alif library covers these
  * registers, so each step replays Alif's own documented sequence directly;
- * none reimplements a driver.  Built on E8 when the D-PHY, DSI or CDC200
- * driver is configured (zephyr/CMakeLists.txt), and each hook is gated on its
- * DT node.  See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * none reimplements a driver.  Built on E8 and E4 when the D-PHY, DSI or CDC200
+ * driver is configured (zephyr/CMakeLists.txt, whose comment there covers the
+ * unverified E4 CGU/VBAT bit positions), and each hook is gated on its DT
+ * node.  See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  *
  * BENCH: 2026-09-18, E1M-AEN803 2026W36-0009, aen-dsi-display Flow C
  * RAM-run.  Register readback after boot: CGU CLK_ENA 0x1a602014 =
@@ -174,6 +175,16 @@ SYS_INIT(alif_cdc200_pixclk_div_set, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DE
 static int alif_dsi_panel_bl_pad_to_gpio(void)
 {
 	int ret = 0;
+
+	/*
+	 * A shield whose panel/bridge is not itself a DSI peripheral (e.g. the
+	 * ti,sn65dsi83 DSI-to-LVDS bridge, controlled over I2C, not DCS) has no
+	 * panel@N child of this node to carry bl-gpios -- check the host node
+	 * itself too.  A no-op for a shield like e1m_evk_rk055hdmipi4ma0 that
+	 * never sets this property here (its hx8394 panel@0 child carries it
+	 * instead, and is still reached by the DT_FOREACH_CHILD below).
+	 */
+	ALIF_BL_PAD_TO_GPIO(DT_NODELABEL(mipi_dsi))
 
 	DT_FOREACH_CHILD_STATUS_OKAY(DT_NODELABEL(mipi_dsi), ALIF_BL_PAD_TO_GPIO)
 	return ret;

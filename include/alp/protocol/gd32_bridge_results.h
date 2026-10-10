@@ -40,6 +40,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <alp/protocol/amp_beacon.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -163,8 +165,8 @@ _Static_assert(sizeof(alp_gd32_fault_t) == ALP_GD32_FAULT_WORDS * 4u,
 
 /** Byte offset of the liveness beacon inside the `rsctbl` window. */
 #define ALP_GD32_RESULTS_BEACON_OFFSET 0xFF0u
-/** Beacon magic the provisioning `cm33_running` check reads. */
-#define ALP_GD32_RESULTS_BEACON_MAGIC 0xA10D0683u
+/** Beacon magic the provisioning `cm33_running` check reads (the one in amp_beacon.h). */
+#define ALP_GD32_RESULTS_BEACON_MAGIC ALP_AMP_BEACON_MAGIC
 /**
  * Beacon image kind of these test images: kind 2, rev 0.  Deliberately NOT the
  * idle shim's 0x100: these images own the GD32 SPI link and drive PWM7, so

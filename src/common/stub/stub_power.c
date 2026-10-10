@@ -8,6 +8,7 @@
  */
 
 #include <stdint.h>
+#include <string.h>
 
 #include "alp/peripheral.h"
 #include "alp/power.h"
@@ -46,5 +47,29 @@ alp_status_t alp_power_request_sleep(alp_power_t           *p,
 void alp_power_close(alp_power_t *p)
 {
 	(void)p;
+}
+alp_status_t alp_power_domain_policy_set(alp_power_t              *p,
+                                         alp_power_domain_t        domain,
+                                         alp_power_domain_policy_t policy)
+{
+	(void)p;
+	(void)domain;
+	(void)policy;
+	return ALP_ERR_NOSUPPORT;
+}
+alp_status_t alp_power_domain_info(alp_power_domain_t domain, alp_power_domain_info_t *out)
+{
+	(void)domain;
+	if (out != NULL) {
+		memset(out, 0, sizeof(*out));
+	}
+	return ALP_ERR_NOSUPPORT;
+}
+alp_status_t alp_power_boot_wake_info(alp_power_boot_info_t *out)
+{
+	if (out != NULL) {
+		memset(out, 0, sizeof(*out));
+	}
+	return ALP_ERR_NOSUPPORT;
 }
 #endif /* !ALP_VENDOR_OVERRIDES_POWER */

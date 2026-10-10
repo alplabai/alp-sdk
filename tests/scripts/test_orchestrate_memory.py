@@ -25,7 +25,7 @@ from _orchestrate_support import (              # noqa: E402
     V2N_HAPPY,
     _scratch_metadata_root,
     _synthetic_aen_unresolved_base_root,
-    _synthetic_nx9101_root,
+    _synthetic_tbd_mailbox_root,
     _write_board,
 )
 
@@ -35,20 +35,24 @@ from alp_orchestrate import (                       # noqa: E402
 )
 
 
-# NX9101 still has TBD mailbox metadata; any ipc carve-out must
-# surface that as a clear blocked entry.
-NX_TBD = """
+# A SoM with TBD mailbox metadata (the synthetic preset from
+# `_synthetic_tbd_mailbox_root`); any ipc carve-out must surface that
+# as a clear blocked entry.
+TBD_MAILBOX = """
 som:
-  sku: E1M-NX9101
+  sku: E1M-AEN898
 
 cores:
-  m33:
+  m55_hp:
     os: zephyr
-    app: ./m33
+    app: ./m55_hp
+  m55_he:
+    os: zephyr
+    app: ./m55_he
 
 ipc:
   - kind: rpmsg
-    endpoints: [m33, a55_cluster]
+    endpoints: [m55_hp, m55_he]
     carve_out_kb: 64
     name: alp_test_rpmsg
 """
@@ -146,20 +150,13 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
     see the gap; the actual slice-build step trips on the C header's
     `#error` directive.
 
-    This is the mailbox-controller-TBD placeholder (a genuinely
-    different `TBD` than #1025's hw_rev `status:` gate -- E1M-NX9101's
-    real `metadata/e1m_modules/E1M-NX9101.yaml` still carries both).
-    #1025 refuses the real E1M-NX9101 preset outright before
-    `resolve_carve_outs` is ever reached (its only hw_rev, imx93 r1,
-    is `status: tbd`), and there is no second hw_rev to pick and no
-    other SoM with this same mailbox-TBD placeholder to swap to -- so
-    this runs against `_synthetic_nx9101_root`'s scratch metadata root
-    (see its docstring for why the #1025 gate is a no-op there without
-    this being a claim about the real E1M-NX9101's buildability)."""
+    This is the mailbox-controller-TBD placeholder. No shipped preset
+    carries it, so this runs against `_synthetic_tbd_mailbox_root`'s
+    scratch metadata root."""
     import alp_orchestrate
 
-    meta = _synthetic_nx9101_root(tmp_path)
-    path = _write_board(tmp_path, NX_TBD)
+    meta = _synthetic_tbd_mailbox_root(tmp_path)
+    path = _write_board(tmp_path, TBD_MAILBOX)
     project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
     resolved = resolve_carve_outs(project)
     assert len(resolved) == 1
@@ -167,7 +164,7 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
     assert entry.status == "blocked"
     assert entry.reason is not None
     assert "TBD" in entry.reason
-    assert "E1M-NX9101" in entry.reason
+    assert "E1M-AEN898" in entry.reason
 
 
 @pytest.mark.parametrize(

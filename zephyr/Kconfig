@@ -1,6 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Alp SDK Kconfig fragment exposed to Zephyr applications.
 
+config ALIF_I2C_HANDOVER
+	bool "Alif Ensemble I2C controller handover between cores"
+	default y
+	depends on DT_HAS_ALP_I2C_HANDOVER_ENABLED
+	help
+	  Build zephyr/soc-bridge/alif/i2c_handover.c for the alp,i2c-handover
+	  node in the devicetree: the core that configures a peripheral over a
+	  shared I2C controller at boot releases it, the core that owns the bus
+	  afterwards waits for that before it touches it.
+
 config ALP_SDK
 	bool "Alp SDK"
 	help
@@ -47,6 +57,15 @@ rsource "Kconfig.alp-libraries"
 # the application.
 # ---------------------------------------------------------------------------
 rsource "drivers/usb/uhc/Kconfig"
+
+# ---------------------------------------------------------------------------
+# Ilitek ILI251x capacitive touch controller (ADR-0017-ADJACENT, board-unique
+# -- ILI2511 on the Riverdi RVT121HVDFWCA0-B panel). Sourced inside if
+# ALP_SDK for the same reason as the UHC skeleton above: it is an alp-sdk
+# module driver (wired from zephyr/CMakeLists.txt), not an upstream Zephyr
+# driver. See zephyr/drivers/input/input_ili251x.c for the STATUS block.
+# ---------------------------------------------------------------------------
+rsource "drivers/input/Kconfig.ili251x"
 
 endif # ALP_SDK
 

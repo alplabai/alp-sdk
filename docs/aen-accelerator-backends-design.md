@@ -128,7 +128,7 @@ range, row-fits-stride) stay reachable on every SoC.  The real
 D/AVE 2D backend registers against the concrete AEN silicon_refs at
 priority 100; the registry then prefers it over the wildcard
 fallback on those parts and leaves every other SoM (V2N — no on-die
-2D block — i.MX 93, and bare-metal) on the fallback's REAL CPU
+2D block — and bare-metal) on the fallback's REAL CPU
 fill/blit/blend.  Selection is per-SoC-exclusive — there is no
 per-op fallback in the dispatcher — so ops the engine cannot express
 single-pass (the ADDITIVE / MULTIPLY blend modes) are delegated to

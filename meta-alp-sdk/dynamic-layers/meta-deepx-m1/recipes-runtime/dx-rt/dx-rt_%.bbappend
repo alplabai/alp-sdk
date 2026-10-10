@@ -65,16 +65,20 @@ SRC_URI += "file://alp_fw_warning.cpp"
 
 do_configure:prepend() {
 	install -m 0644 ${WORKDIR}/alp_fw_warning.cpp ${S}/lib/alp_fw_warning.cpp
-	awk '
-		/^FWUpdateCommand::FWUpdateCommand\(/ { call = "0" }
-		/^FWUploadCommand::FWUploadCommand\(/ { call = "0" }
-		/^FWConfigCommandJson::FWConfigCommandJson\(/ { call = "1" }
-		{ print }
-		call != "" && $0 == "{" { print "    void AlpWarnFwWrite(int); AlpWarnFwWrite(" call ");"; call = "" }
-	' ${S}/lib/cli.cpp > ${S}/lib/cli.cpp.alp
-	n=$(grep -c "AlpWarnFwWrite(" ${S}/lib/cli.cpp.alp)
-	if [ "$n" != "3" ]; then
-		bbfatal "dx-rt: expected the three CLI command constructors in lib/cli.cpp (inserted $n of 3 calls); update this bbappend for the new dx-rt version"
+	# do_configure can re-run without a fresh unpack, when ${S}/lib/cli.cpp is
+	# already edited; the guard keeps the calls from being inserted twice.
+	if [ "$(grep -c "AlpWarnFwWrite(" ${S}/lib/cli.cpp)" != "3" ]; then
+		awk '
+			/^FWUpdateCommand::FWUpdateCommand\(/ { call = "0" }
+			/^FWUploadCommand::FWUploadCommand\(/ { call = "0" }
+			/^FWConfigCommandJson::FWConfigCommandJson\(/ { call = "1" }
+			{ print }
+			call != "" && $0 == "{" { print "    void AlpWarnFwWrite(int); AlpWarnFwWrite(" call ");"; call = "" }
+		' ${S}/lib/cli.cpp > ${S}/lib/cli.cpp.alp
+		n=$(grep -c "AlpWarnFwWrite(" ${S}/lib/cli.cpp.alp || true)
+		if [ "$n" != "3" ]; then
+			bbfatal "dx-rt: expected the three CLI command constructors in lib/cli.cpp (inserted $n of 3 calls); update this bbappend for the new dx-rt version"
+		fi
+		mv ${S}/lib/cli.cpp.alp ${S}/lib/cli.cpp
 	fi
-	mv ${S}/lib/cli.cpp.alp ${S}/lib/cli.cpp
 }

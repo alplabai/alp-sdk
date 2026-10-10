@@ -137,7 +137,19 @@ from .manifest import emit_system_manifest  # noqa: E402,F401  (re-export: cli +
 # The build-plan emitter now lives in buildplan.py (the #285 build-plan seam);
 # re-exported for cli + tests. (The shared materialise helpers are imported
 # directly by orchestrator.py now, not back through here.)
-from .buildplan import emit_build_plan  # noqa: E402,F401  (re-export: cli + tests)
+from .buildplan import (  # noqa: E402
+    _slice_cmake_args_artefact,  # noqa: F401  (re-export: tests)
+    _slice_dts_overlay,  # noqa: F401  (re-export: alp_project + tests)
+    _slice_dts_overlay_artefact,  # noqa: F401  (re-export: tests)
+    _slice_hw_info_artefact,  # noqa: F401  (re-export: tests)
+    _slice_hw_info_h,  # noqa: F401  (re-export: alp_project + tests)
+    _slice_west_libraries,  # noqa: F401  (re-export: alp_project + tests)
+    _slice_west_libs_artefact,  # noqa: F401  (re-export: tests)
+    _v1_shaped_project,  # noqa: F401  (re-export: alp_project)
+    DtsOverlayUnavailable,  # noqa: F401  (re-export: tests)
+    HwInfoUnavailable,  # noqa: F401  (re-export: tests)
+    emit_build_plan,  # noqa: F401  (re-export: cli + tests)
+)
 
 
 # ---------------------------------------------------------------------
