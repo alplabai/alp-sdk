@@ -120,7 +120,11 @@ typedef enum {
 	                                     state round down to their deepest supported mode
 	                                     and report it honestly in
 	                                     @ref alp_power_wake_info_t::realised_mode (the
-	                                     monotonic-mode contract documented above). */
+	                                     monotonic-mode contract documented above).  On a
+	                                     multi-core SoC the realised mode is the calling
+	                                     core's: it reports STOP once this core's
+	                                     subsystem is powered off, while the SoC itself
+	                                     reaches STOP only when every core is off. */
 } alp_power_mode_t;
 
 /** Wake-source bitmap.  OR together to enable multiple sources.

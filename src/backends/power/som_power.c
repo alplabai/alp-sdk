@@ -832,6 +832,16 @@ __weak bool alp_som_power_reset_syndrome_trusted(void)
 	return false;
 }
 
+/* This core's WIC bits say it was powered off (strong definition: alif_se_power_hw.c).  Read and
+ * cleared on every boot. */
+__weak bool alp_som_power_core_off_take(void)
+{
+	return false;
+}
+
+/* RESETSYNDROME bit 2: a reset request to the power domain (E8 SVD AON.RTSS_x_RESET). */
+#define SOMPD_RESET_PD_REQUEST BIT(2)
+
 /* RESETSYNDROME bit 0: the NSRST pin was asserted (E8 SVD AON.RTSS_HE_RESET / RTSS_HP_RESET). */
 #define SOMPD_RESET_NSRST BIT(0)
 
@@ -1120,7 +1130,12 @@ int alp_som_power_boot_restore(void)
 	 * STOP_MODE_STAT set and a valid record, and used to be reported as a wake with no
 	 * cause.  It is not one: the sleep was cut short from outside.  The domains still
 	 * have to be put back, so the restore below is unchanged; only the report differs. */
-	const bool nsrst = (alp_som_power_reset_syndrome_take() & SOMPD_RESET_NSRST) != 0u;
+	const uint32_t syndrome = alp_som_power_reset_syndrome_take();
+	const bool     nsrst    = (syndrome & SOMPD_RESET_NSRST) != 0u;
+	/* Second STOP witness, consumed on every path: with another core running the DC-DC
+	 * stays up and STOP_MODE_STAT never sets, but this core's WIC "subsystem off" bits
+	 * survive (bench run D, E1M-AEN803 2026W36-0001). */
+	const bool core_off = alp_som_power_core_off_take();
 
 	_boot_external   = false;
 	_ignore_stat     = false;
@@ -1153,7 +1168,7 @@ int alp_som_power_boot_restore(void)
 		foreign_rec      = true; /* restored from its record below, but not reported */
 	}
 	if (!have) {
-		if (stop_mode_stat_set() || foreign_cell) {
+		if (stop_mode_stat_set() || core_off || foreign_cell) {
 			/* A STOP wake with no usable record: never leave NOR, PHY or the CC3501E held. */
 			uint32_t restored, failed, named;
 
@@ -1175,7 +1190,8 @@ int alp_som_power_boot_restore(void)
 	 * bench / test cycle interrupted by a warm reset, and a STANDBY record's status
 	 * bit is not established (the register names STOP only): for both, leaving the
 	 * domains held would be the worse outcome, so they are restored. */
-	if (!foreign_rec && rec.mode == (uint32_t)ALP_POWER_MODE_STOP && !stop_mode_stat_agrees()) {
+	if (!foreign_rec && rec.mode == (uint32_t)ALP_POWER_MODE_STOP && !core_off &&
+	    !stop_mode_stat_agrees()) {
 		alp_som_pd_store_clear();
 		k_mutex_unlock(&_lock);
 		return 0;
@@ -1197,6 +1213,11 @@ int alp_som_power_boot_restore(void)
 	 * with reset value 1, and a stale bit must never turn a genuine wake into an aborted
 	 * sleep. */
 	_boot_external = nsrst && (rec.armed_hw & ALP_SOM_REC_NSRST_TRUSTED) != 0u;
+	/* core_off as the only witness: a power-domain reset request (syndrome bit2) means
+	 * the entry was cut short from outside. */
+	if (core_off && !stop_mode_stat_set() && (syndrome & SOMPD_RESET_PD_REQUEST) != 0u) {
+		_boot_external = true;
+	}
 
 	/* Wake cause, part 1: what needs no I2C (LPTIMER status).  This must run before
 	 * the timer driver initialises and clears the status; the RTC half follows in

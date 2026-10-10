@@ -183,8 +183,8 @@ board targets `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` and
 slot0 at `0x802b0000`, Flow D via tan. 3/3 STOP cycles PASS at 400 MHz with `RESTORE_CLOCKS` on: cycle 1
 LPTIMER 500 ms `mode=4 wake_source=0x8`, cycle 2 RV-3028 countdown 3 s `mode=4 wake_source=0x1`,
 cycle 3 RV-3028 alarm `mode=4 wake_source=0x1`, `quiesced=restored=0x7f`,
-`SUMMARY cycles=3 pass=5 fail=0`. Not verified: an HP STOP while the HE runs (needs a combined HE+HP
-ATOC the current tooling cannot build) and the E1M-AEN801 HP. The differences in the table below are
+`SUMMARY cycles=3 pass=5 fail=0`. Not verified: the E1M-AEN801 HP; an HP STOP while the HE runs failed on
+the `STOP_MODE_STAT` check (run D below) and is fixed pending a bench re-run. The differences in the table below are
 transcribed from the Alif sources named in the code comments.
 
 | Aspect | M55-HE (bench-proven STOP) | M55-HP (STOP bench-proven, AEN803) | Source |
@@ -211,12 +211,27 @@ sleep, each with its own OFF profile. The BKRAM record, the LPTIMER0 wake timer 
 single-owner resources: use the backend from one core only (the dtsi notes the same for the
 LPTIMER; the vendor README says the RTC is shared with the HE).
 
-**Open on the HP (bench):** an HP STOP while the HE runs. `STOP_MODE_STAT` (a SoC-level flag,
-`VBAT_STOP_MODE_REG`) is probably not set when only the HP powers off, and the record cross-check
-depends on it, so such a wake could decode as an aborted sleep (the domains are still restored). Also
-unmeasured: the E1M-AEN801 HP, and the HP/HE co-sleep case above. The HP-only AEN803 run above covers
-the SE accepting the profile, the 400 MHz RUN profile, the clock-restore trigger and the LPTIMER0 and
-RV-3028 wakes.
+**Run D, and the second STOP witness (HP with the HE running).** Combined ATOC on E1M-AEN803
+2026W36-0001: the HE ran an idle Zephyr app, the HP ran `examples/aen/aen-power-stop`. The HP requested
+STOP, the SE powered the HP subsystem off and re-booted it on the LPTIMER, but `STOP_MODE_STAT` (bit4 of
+`0x1A60F000`, raw `0x100`) stayed clear: the SVD says hardware sets it when the DC-DC was turned off, and
+the DC-DC stays up while the HE runs. `alp_som_power_boot_restore()` then discarded the record
+(`valid=0`, `record_valid` FAIL) and the example repeated cycle 1. At that boot `RTSS_HP_RESET` was
+`0x00` and `RTSS_HP_CTRL` `0x100`. After a SoC-level STOP (HE-only and HP-only images) the same register
+read 0 (diag word 17): the WIC bits do not survive the DC-DC going off, so the two witnesses cover
+disjoint cases.
+
+The rule (`alp_som_power_core_off_take()`, `src/backends/power/alif_se_power_hw.c`): this core's own
+`RTSS_HE_CTRL` / `RTSS_HP_CTRL` WIC [9:8] equal to `0b01` (EWIC, subsystem-off requested) is read and
+cleared on every boot (`COLD_WAKEUP` untouched; an aborted entry's stale bits are consumed by the next
+boot). `alp_som_power_boot_restore()` trusts a STOP record when `STOP_MODE_STAT` is set OR the core was
+off, and a record-less boot with either witness is a blind restore. When the core-off bit is the only
+witness, `RESETSYNDROME` bit2 (`0x4`, reset request to the power domain) marks an external or aborted
+reset and the realised mode is RUN. The realised mode is this core's: the SoC itself reaches STOP only
+when every core is off.
+
+**Open on the HP (bench):** run D's rule is implemented and unit-tested; the bench re-run of the combined
+HE+HP image is pending. Also unmeasured: the E1M-AEN801 HP.
 
 ### Comparison with the vendor reference (bench U8c)
 

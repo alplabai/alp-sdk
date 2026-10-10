@@ -777,6 +777,26 @@ uint32_t alp_som_power_reset_syndrome_take(void)
 	return v;
 }
 
+/* Second STOP witness: this core's own WIC bits.  A core that requested subsystem-off
+ * leaves RTSS_x_CTRL WIC [9:8] = 0b01 (bit 8 = WICCONTROL[0] enable, bit 9 = WICCONTROL[1]
+ * IWIC, 0 selects the EWIC: SVD RTSS_HP_CTRL "WIC" field, metadata/svd/alif/
+ * AE822FA0E5597BS0_CM55_HP_View.svd:3890; DFP Device/core/common/source/pm.c:209 sets
+ * WICCONTROL = WIC | IWIC<<1, pm.c:229 and system.c:155-158 clear it on an in-core wake).
+ * When the DC-DC stays up (the other M55 runs) STOP_MODE_STAT never sets, but this value
+ * survives the subsystem power-off; after a SoC-level STOP the DC-DC loss clears it (bench
+ * run D diag word 17 = 0), so STOP_MODE_STAT is the witness there.  Read and clear [9:8]
+ * on every boot so a stale value (an aborted entry) is never seen twice; COLD_WAKEUP and the
+ * other bits are left alone.  `true` = this core was powered off. */
+bool alp_som_power_core_off_take(void)
+{
+	uint32_t ctrl = sys_read32(HW_CORE_CTRL);
+
+	if ((ctrl & HE_CTRL_WIC_MASK) != 0u) {
+		sys_write32(ctrl & ~HE_CTRL_WIC_MASK, HW_CORE_CTRL);
+	}
+	return (ctrl & HE_CTRL_WIC_MASK) == HE_CTRL_WIC_EN;
+}
+
 /* Can bit 0 (NSRST) of the syndrome be trusted as a pin-reset marker?  Not if it is
  * stuck: set, and still set after a W1C acknowledge (a write-only field with reset
  * value 1 would look like that).  Probed BEFORE the sleep and carried in the record, so
