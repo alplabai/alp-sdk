@@ -7,8 +7,8 @@ its own `CMakeLists.txt` / `prj.conf` / `src/main.c`, no shared source with the 
 
 ## Build
 
-Zephyr module is `alp-sdk-lcd`, **not** `alp-sdk` -- a plain `west build` resolves a different Zephyr
-checkout that knows none of the alp-sdk shields and fails. `ZEPHYR_BASE` and `ZEPHYR_EXTRA_MODULES`
+Zephyr module is this `alp-sdk` checkout -- a plain `west build` from another workspace resolves a
+different Zephyr checkout that knows none of the alp-sdk shields and fails. `ZEPHYR_BASE` and `ZEPHYR_EXTRA_MODULES`
 must be passed explicitly; `-p always` forces a clean configure each time.
 
 **HE (160 MHz):**
@@ -37,7 +37,7 @@ board overlay and `examples/aen/aen-dsi-display` / `aen-hp-core-smoke`.
 
 ## Run (bench)
 
-From the `alp-sdk-lcd` checkout, using the OpenOCD RAM-run flow (the only one that can address either
+From the `alp-sdk` checkout, using the OpenOCD RAM-run flow (the only one that can address either
 M55 core on this bench, not just "whichever one the shared SW-DP happens to expose"):
 
 ```sh
@@ -69,7 +69,7 @@ measured wrong (wrong core attached over SWD, a cache left on, a build mismatch)
 
 `dcache: OFF` is the expected/intended state: `prj.conf` sets `CONFIG_DCACHE=n` because D-cache
 maintenance (`SCB_EnableDCache`) hangs on this silicon (the same SoC-wide erratum every RAM-run bench app
-in `alp-sdk-lcd/examples/aen` works around). If a run ever prints `dcache: ON`, that line alone means
+in `examples/aen` works around). If a run ever prints `dcache: ON`, that line alone means
 something is wrong with the build, not with the hardware -- do not trust any Phase 1 number from that run.
 D-cache's actual configured size on this part is undocumented (Cortex-M55 allows 4-64 KiB), which is
 exactly why Phase 1 sweeps the working-set size below instead of assuming a size fits or doesn't.

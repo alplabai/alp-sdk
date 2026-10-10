@@ -1,5 +1,7 @@
 # Heterogeneous OS orchestration — Zephyr + Yocto as peers, not alternatives
 
+> **Note (2026-10-10):** E1M-NX9101 / NXP i.MX 93 was removed in #2781 / #2782 (67ed22d86; the module was never produced): the E1M-NX9101 / iMX93 rows, the `a55_cluster`+`m33` iMX93 mapping and `examples/multicore/rpmsg-imx93/` below are history; the example and the SoC spec are deleted.
+
 **Status:** **Implemented.** Landed in v0.6.0 (released 2026-06-06, VERSIONS.md):
 `board.yaml` v2's per-core `cores:` block + cross-core `ipc:` carve-outs replaced
 the v1 single-OS model; `<alp/rpc.h>` (in the tree) + the generated

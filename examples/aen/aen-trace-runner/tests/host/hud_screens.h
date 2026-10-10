@@ -73,7 +73,7 @@ static void scr_paint(int which, uint16_t *fb)
 	}
 	tr_hud_view_booth(&v, &hs, which == SCR_INITIALS ? &ini : NULL);
 	strcpy(v.perf[0], "FPS 40.0");
-	tr_hud_paint_all(fb, &v, fr, 0u - 100u, 0u - 200u);
+	tr_hud_paint_all(fb, &v, fr, 0u - 100u, 0u - 200u, 0u - TR_HUD_VOL_FRAMES);
 }
 
 #endif

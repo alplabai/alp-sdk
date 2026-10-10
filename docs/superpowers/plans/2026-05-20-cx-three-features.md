@@ -1,5 +1,7 @@
 # CX Improvements Implementation Plan
 
+> **Note (2026-10-10):** E1M-NX9101 / NXP i.MX 93 was removed in #2781 / #2782 (67ed22d86; the module was never produced): the single NX9101 mention below is history; no NXP target ships.
+
 > **Note (2026-10-08):** the `alp` CLI (`init`/`run`/`validate`) this plan builds is retired; `tan` is the CLI (ADR 0020, #1727). Only the init/run/validate command wrappers moved to `tan`; the board.yaml validator (`validator.py`), `yaml_pos.py`, the diagnostics modules (`diagnostic.py`, `diagnostic_format.py`) and `_workspace.py` remain under `scripts/alp_cli/` as library code.
 
 > **Historical transcript.** Implementation plan dated 2026-05-20. The

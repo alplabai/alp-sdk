@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Bench variants of aen-power-stop (#2784 addendum 6): one variable each, chosen with a
+# config fragment (variants/<name>.conf) on top of prj.conf.
+
+mainmenu "aen-power-stop"
+
+config AEN_STOP_FIRST_RTC
+	bool "Variant (ii): run the RV-3028 countdown cycle first"
+	help
+	  Cycle order becomes RV-3028 countdown, LPTIMER, RV-3028 alarm.  If the first cycle
+	  wakes and the LPTIMER one does not, the RV-3028 INT path is sound and the
+	  LPTIMER path is the suspect (and the reverse).
+
+config AEN_STOP_LPTIMER_MS
+	int "LPTIMER cycle interval (ms)"
+	default 500
+	help
+	  Variant (iii) sets 5000 (with ALP_SDK_POWER_ALIF_SE_BENCH_LPTIMER_MAX_MS above it).
+
+config AEN_STOP_RTC_MS
+	int "RV-3028 countdown cycle length (ms)"
+	default 3000
+	help
+	  Must stay at or above the backend's LPTIMER ceiling (1000 ms, or the bench option
+	  ALP_SDK_POWER_ALIF_SE_BENCH_LPTIMER_MAX_MS) so the countdown is served by the
+	  RV-3028 and not the LPTIMER.  Variant (iii) raises the ceiling and moves this to
+	  11000 so that variant still changes ONE thing: the LPTIMER interval.
+
+config AEN_STOP_MODE_STANDBY
+	bool "Variant (S): sleep in ALP_POWER_MODE_STANDBY instead of STOP"
+	help
+	  Every cycle requests STANDBY and the verdict is mode_standby (the wake record's
+	  realised_mode must read ALP_POWER_MODE_STANDBY).  STANDBY keeps the SE's own
+	  always-on domain (PD2) powered on top of PD0; it is untested on silicon.
+
+config AEN_STOP_RETAIN_TCM_KB
+	int "Variant (T): TCM to retain across the sleep, KiB (0 = none)"
+	range 0 256
+	default 0
+	help
+	  Needs CONFIG_CRC=y (the variants/t-tcm-retain*.conf fragments set it); without it the
+	  link fails on crc32_ieee_update.  Non-zero asks for ALP_POWER_RETAIN_TCM with this retain_kb, writes a CRC-checked
+	  pattern into a 160 KiB .noinit array in the DTCM before every sleep, and checks it
+	  after the wake (verdict tcm_retained).  The M55-HE DTCM is two 128 KiB retention
+	  banks, so 128 asks for the first one and 256 for both.
+
+config AEN_STOP_WAKE_TIMING
+	bool "Variant (W): print the wake-to-main() timing evidence"
+	depends on ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	help
+	  Reads the LPRTC counter (VBAT domain, keeps running through STOP and the SE cold
+	  boot; so does the RV-3028) at main() and prints it against the sleep-entry and PRE_KERNEL_1 snapshots
+	  the backend keeps in BKRAM.  Needs the bench scratch option for those snapshots.
+
+source "Kconfig.zephyr"

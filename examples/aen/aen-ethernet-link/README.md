@@ -39,10 +39,10 @@ creates `gpio11` + `lpgpio` so main() can drive the PHY control pins.
 [eth] MDIO PHY@0 id=2000a140 (DP83825I=2000a140)
 [eth] PHY link UP after 1750 ms (BMSR=786d ANLPAR=dde1)
 [eth] admin_up=1 carrier_ok=1 wire_link=1 rx_bytes=1268 dhcp_bound=1
-[eth] DHCP lease = 192.168.10.137
+[eth] DHCP lease = <leased-ip>
 [eth] RESULT PASS: wire link UP + DHCP lease acquired = Ethernet fully WORKING
 ```
-Confirmed on the **server** too: `dnsmasq` handed `192.168.10.137` to the SOM MAC
+Confirmed on the **server** too: `dnsmasq` handed the leased address to the SOM MAC
 `02:01:56:78:43:21`, the SOM shows `REACHABLE` in the switch-port host's ARP table,
 and the server NIC RX counter moved off 0 — the SOM is discoverable on the wire.
 
@@ -94,7 +94,7 @@ and the server NIC RX counter moved off 0 — the SOM is discoverable on the wir
    (default y, relocates `subsys/net/ip/net_pkt.c`'s DATA/BSS/NOINIT into
    SRAM0 via `zephyr_code_relocate`, see `zephyr/CMakeLists.txt`). Bench run
    202 re-ran this exact mechanism on E1M-AEN803 (`b240f01cb`): DHCP lease
-   `192.168.10.123`, `PHY link UP after 2000 ms`, host ping 5/5 (avg
+   (a pool address), `PHY link UP after 2000 ms`, host ping 5/5 (avg
    0.271 ms), and the live descriptor rings resolved into
    `net_buf_data_rx/tx_bufs`, both in SRAM0, while `_kernel` and main RAM
    stayed on DTCM. E1M-AEN801 is build-verified only (same E8 memory map, not
@@ -121,5 +121,4 @@ and the server NIC RX counter moved off 0 — the SOM is discoverable on the wir
 > Once the buffers moved to SRAM0, `ANLPAR` populated (`0xdde1` = the switch's base
 > page) and DHCP completed on the first try. No scope was needed.
 
-See [[project_pending_hw_configs]]. Run on the bench switch (dnsmasq,
-192.168.10.50–150); the `[eth] DHCP lease = …` line is the full-link PASS.
+Run on a bench switch with a DHCP server (dnsmasq); the `[eth] DHCP lease = …` line is the full-link PASS.

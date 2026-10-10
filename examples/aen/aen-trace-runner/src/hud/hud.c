@@ -263,6 +263,16 @@ static void panel(const canvas_t *cv, int x, int y, int w, int h, uint32_t c, ui
 	}
 }
 
+static void clear(const canvas_t *cv, int x, int y, int w, int h)
+{
+	int y0 = y > cv->y ? y : cv->y, y1 = y + h < cv->y + cv->h ? y + h : cv->y + cv->h;
+	int x0 = x > cv->x ? x : cv->x, x1 = x + w < cv->x + cv->w ? x + w : cv->x + cv->w;
+
+	for (int yy = y0; yy < y1; yy++) {
+		memset(cv->px + (yy - cv->y) * cv->w - cv->x + x0, 0, (size_t)(x1 - x0) * sizeof(uint16_t));
+	}
+}
+
 static void rect(const canvas_t *cv, int x, int y, int w, int h, uint32_t c, uint32_t a)
 {
 	int y0 = y > cv->y ? y : cv->y, y1 = y + h < cv->y + cv->h ? y + h : cv->y + cv->h;
@@ -445,11 +455,57 @@ static bool zone_on(uint32_t frame, uint32_t start)
 /* A zone name's alpha (0..16) `age` frames into its popup: in over 8
  * frames, out over the last 16. The T_INV key holds this, not the age, so
  * the row repaints only while the name fades (~24 of its 110 frames). */
+static uint32_t fade_alpha(uint32_t age, uint32_t total)
+{
+	return age < 8u ? 2u * age + 2u : age + 16u > total ? total - age : 16u;
+}
+
+static bool vol_on(uint32_t frame, uint32_t start)
+{
+	return frame - start < TR_HUD_VOL_FRAMES;
+}
+
 static uint32_t zone_alpha(uint32_t age)
 {
-	return age < 8u                         ? 2u * age + 2u
-	       : age + 16u > TR_HUD_ZONE_FRAMES ? TR_HUD_ZONE_FRAMES - age
-	                                        : 16u;
+	return fade_alpha(age, TR_HUD_ZONE_FRAMES);
+}
+
+void tr_hud_vol_text(char *b, size_t n, uint8_t kind, uint8_t pct)
+{
+	if (kind == TR_HUD_KNOB_BRIGHTNESS) {
+		(void)snprintf(b, n, "BRIGHTNESS %u%%", (unsigned)pct);
+	} else if (pct == 0u) {
+		(void)snprintf(b, n, "MUTE");
+	} else {
+		(void)snprintf(b, n, "VOLUME %u%%", (unsigned)pct);
+	}
+}
+
+/* The volume popup, over the bottom row: the row's own content is cleared, then "VOLUME n%" (or
+ * "MUTE") on a panel centred on the HUD, fading like a zone name. */
+static void paint_vol(const canvas_t *cv, const tr_hud_view_t *v, uint32_t age)
+{
+	uint32_t s = fade_alpha(age, TR_HUD_VOL_FRAMES);
+	char     b[24];
+
+	tr_hud_vol_text(b, sizeof(b), v->vol_kind, v->vol_pct);
+	int w = tr_hud_text_w(TR_HUD_FONT_MED, b);
+
+	clear(cv, 0, INV_Y, TR_HUD_W, TR_HUD_H - INV_Y);
+	panel(cv,
+	      TR_HUD_W / 2 - w / 2 - 12,
+	      INV_Y,
+	      w + 24,
+	      INV_PANEL_H,
+	      C_PANEL,
+	      (A_PANEL * s + 8u) / 16u);
+	text_c(cv,
+	       TR_HUD_FONT_MED,
+	       TR_HUD_W / 2,
+	       INV_Y + 2,
+	       b,
+	       v->vol_kind == TR_HUD_KNOB_VOLUME && v->vol_pct == 0u ? C_RED : C_WHITE,
+	       s);
 }
 
 /* A zone's name, entering (P15): in its zone's colour, centred on x; a
@@ -882,7 +938,8 @@ static void paint(const canvas_t      *cv,
                   const tr_hud_view_t *v,
                   uint32_t             frame,
                   uint32_t             popup_start,
-                  uint32_t             zone_start)
+                  uint32_t             zone_start,
+                  uint32_t             vol_start)
 {
 	paint_perf(cv, v);
 	paint_power(cv, v);
@@ -917,6 +974,9 @@ static void paint(const canvas_t      *cv,
 			paint_zone(cv, v, frame - zone_start, TR_HUD_W / 2);
 		}
 		break;
+	}
+	if (vol_on(frame, vol_start)) {
+		paint_vol(cv, v, frame - vol_start);
 	}
 }
 
@@ -954,8 +1014,12 @@ static uint32_t fnv(uint32_t h, uint32_t v)
 	return h;
 }
 
-static uint32_t
-tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, uint32_t zone_start)
+static uint32_t tile_key(int                  t,
+                         const tr_hud_view_t *v,
+                         uint32_t             frame,
+                         uint32_t             popup_start,
+                         uint32_t             zone_start,
+                         uint32_t             vol_start)
 {
 	uint32_t k = fnv(2166136261u, v->mode);
 
@@ -1008,7 +1072,12 @@ tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, ui
 			        blink_on(frame));
 		}
 		return k;
-	default: /* T_INV */
+	default:                            /* T_INV */
+		if (vol_on(frame, vol_start)) { /* the volume popup covers the row, whatever the screen */
+			return fnv(
+			    fnv(fnv(fnv(k, 9u), fade_alpha(frame - vol_start, TR_HUD_VOL_FRAMES)), v->vol_pct),
+			    v->vol_seq * 2u + v->vol_kind);
+		}
 		if (v->mode == TR_HUD_PLAY && zone_on(frame, zone_start)) {
 			return fnv(fnv(fnv(k, 3u), zone_alpha(frame - zone_start)), v->zone);
 		}
@@ -1040,7 +1109,8 @@ static uint32_t paint_tile(uint16_t            *fb,
                            const tr_hud_view_t *v,
                            uint32_t             frame,
                            uint32_t             popup_start,
-                           uint32_t             zone_start)
+                           uint32_t             zone_start,
+                           uint32_t             vol_start)
 {
 	const tile_t *tl = &tiles[t];
 	int           w  = tl->x1 - tl->x0;
@@ -1050,7 +1120,7 @@ static uint32_t paint_tile(uint16_t            *fb,
 		canvas_t cv = { strip, tl->x0, y, w, h };
 
 		memset(strip, 0, (size_t)w * (size_t)h * sizeof(strip[0]));
-		paint(&cv, v, frame, popup_start, zone_start);
+		paint(&cv, v, frame, popup_start, zone_start, vol_start);
 		if (rot == 0) {
 			for (int r = 0; r < h; r++) {
 				memcpy(
@@ -1069,11 +1139,12 @@ void tr_hud_paint_all(uint16_t            *fb,
                       const tr_hud_view_t *v,
                       uint32_t             frame,
                       uint32_t             popup_start,
-                      uint32_t             zone_start)
+                      uint32_t             zone_start,
+                      uint32_t             vol_start)
 {
 	inv_init();
 	for (int t = 0; t < T_N; t++) {
-		paint_tile(fb, 0, t, v, frame, popup_start, zone_start);
+		paint_tile(fb, 0, t, v, frame, popup_start, zone_start, vol_start);
 	}
 }
 
@@ -1083,6 +1154,7 @@ void tr_hud_init(tr_hud_t *h)
 	memset(h, 0, sizeof(*h));
 	h->popup_start = 0u - TR_HUD_POPUP_FRAMES; /* no popup running */
 	h->zone_start  = 0u - TR_HUD_ZONE_FRAMES;
+	h->vol_start   = 0u - TR_HUD_VOL_FRAMES;
 }
 
 static uint32_t tile_area(int t)
@@ -1107,17 +1179,21 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32
 		h->zone_seq   = v->zone_seq;
 		h->zone_start = f;
 	}
+	if (v->vol_seq != h->vol_seq) {
+		h->vol_seq   = v->vol_seq;
+		h->vol_start = f;
+	}
 	if (!h->drawn) {
 		/* nothing on screen is ours yet: every tile mismatches once */
 		for (int t = 0; t < T_N; t++) {
-			h->key[t] = ~tile_key(t, v, f, h->popup_start, h->zone_start);
+			h->key[t] = ~tile_key(t, v, f, h->popup_start, h->zone_start, h->vol_start);
 		}
 		h->drawn = true;
 	}
 	/* From where the last capped frame stopped, so no tile starves. */
 	for (int i = 0; i < T_N; i++) {
 		int      t = (t0 + i) % T_N;
-		uint32_t k = tile_key(t, v, f, h->popup_start, h->zone_start);
+		uint32_t k = tile_key(t, v, f, h->popup_start, h->zone_start, h->vol_start);
 
 		if (k == h->key[t]) {
 			continue;
@@ -1133,8 +1209,9 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32
 		if (mid && (d & MID_BITS) == 0u) {
 			area = 0u;
 			for (int m = T_MIDL; m <= T_STRIP; m++) {
-				area += tile_key(m, v, f, h->popup_start, h->zone_start) != h->key[m] ? tile_area(m)
-				                                                                      : 0u;
+				area += tile_key(m, v, f, h->popup_start, h->zone_start, h->vol_start) != h->key[m]
+				            ? tile_area(m)
+				            : 0u;
 			}
 		}
 		if (h->budget != 0u && px != 0u && !(mid && (d & MID_BITS) != 0u) &&
@@ -1143,7 +1220,7 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32
 			break;
 		}
 		h->key[t] = k;
-		px += paint_tile(fb, h->rot, t, v, f, h->popup_start, h->zone_start);
+		px += paint_tile(fb, h->rot, t, v, f, h->popup_start, h->zone_start, h->vol_start);
 		d |= 1u << t;
 	}
 	if (dirty != NULL) {
@@ -1199,6 +1276,17 @@ void tr_hud_view_booth(tr_hud_view_t *v, const tr_hiscore_t *hs, const tr_initia
 		v->ini  = *ini;
 		v->mode = TR_HUD_INITIALS;
 	}
+}
+
+void tr_hud_view_vol(tr_hud_view_t *v, uint8_t pct, uint32_t seq)
+{
+	v->vol_pct = pct;
+	v->vol_seq = seq;
+}
+
+void tr_hud_view_vol_kind(tr_hud_view_t *v, uint8_t kind)
+{
+	v->vol_kind = kind;
 }
 
 void tr_hud_view_zone(tr_hud_view_t *v, uint8_t zone, uint32_t seq)

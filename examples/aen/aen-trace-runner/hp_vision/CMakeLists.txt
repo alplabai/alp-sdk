@@ -7,14 +7,14 @@
 # this app is both together, on the HP, publishing into the same tr_pslot.h
 # slot the HE's TR_INPUT_NPU build (../CMakeLists.txt) reads.
 #
-# alp-sdk-lcd's e1m_evk_rpi_csi shield ships a boards/<qualified-board>.overlay
-# for rtss_he only, not rtss_hp -- boards/shields/tr_hp_csi_complete/ is a
-# local ordering fix (ponytail; its own header explains why an app-level
-# board overlay alone cannot substitute) that supplies the same content
-# BEFORE innomaker_cam_ov9281 needs it. Delete tr_hp_csi_complete once
-# alp-sdk-lcd ships the real per-board overlay (see that file's header for
-# the exact upstream path) and this SHIELD list reverts to just the two
-# lines design sec 2 originally called for.
+# boards/shields/tr_hp_csi_complete/ is a local ordering fix (ponytail; its
+# own header explains why an app-level board overlay alone cannot
+# substitute) that supplied the e1m_evk_rpi_csi per-board overlay for
+# rtss_hp BEFORE innomaker_cam_ov9281 needs it, back when that shield shipped
+# a boards/<qualified-board>.overlay for rtss_he only. The shield now ships
+# alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay itself (#2809), so
+# tr_hp_csi_complete is redundant and can be deleted, reverting this SHIELD
+# list to just e1m_evk_rpi_csi + innomaker_cam_ov9281.
 cmake_minimum_required(VERSION 3.20)
 
 list(APPEND BOARD_ROOT ${CMAKE_CURRENT_LIST_DIR}) # shields live under <root>/boards/shields/ (list_shields.py --board-root)
@@ -67,6 +67,7 @@ if(TR_HP_SOUND)
 		../src/audio/tr_amp_ready.c
 		../src/ipc/tr_aring.c
 		../src/ipc/tr_bus2.c
+		../src/ipc/tr_vol.c
 	)
 	target_include_directories(app PRIVATE ../sound/src)
 	# src/platform/tr_i2c2_rearm.h resets the i2c_dw driver's sync semaphore (struct

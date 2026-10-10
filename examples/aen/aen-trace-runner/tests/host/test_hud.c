@@ -54,7 +54,8 @@ static void same_as_scratch(const tr_hud_t *h, const tr_hud_view_t *v)
 	                 v,
 	                 tr_hz_to40(h->frame - 1u),
 	                 h->popup_start,
-	                 h->zone_start); /* the HUD's 40 Hz clock */
+	                 h->zone_start,
+	                 h->vol_start); /* the HUD's 40 Hz clock */
 	assert(memcmp(fb, ref, sizeof(fb)) == 0);
 }
 
@@ -378,7 +379,8 @@ int main(void)
 			uint32_t fr = tr_hz_to40(h.frame - 1u), age = fr - h.zone_start;
 			int      rows;
 
-			tr_hud_paint_all(none, &v, fr, h.popup_start, h.zone_start - TR_HUD_ZONE_FRAMES);
+			tr_hud_paint_all(
+			    none, &v, fr, h.popup_start, h.zone_start - TR_HUD_ZONE_FRAMES, h.vol_start);
 			rows = memcmp(&fb[300 * TR_HUD_W],
 			              &none[300 * TR_HUD_W],
 			              (TR_HUD_H - 300) * TR_HUD_W * 2) != 0;
@@ -438,8 +440,8 @@ int main(void)
 		tr_hs_init(&hs);
 		tr_hud_view_set(&v, &ts, TR_BANNER_ATTRACT, true, TR_HUD_INVITE_TILT);
 		tr_hud_view_booth(&v, &hs, NULL);
-		tr_hud_paint_all(a, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, off);
-		tr_hud_paint_all(b, &v, P, 0u - TR_HUD_POPUP_FRAMES, P + off);
+		tr_hud_paint_all(a, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, off, 0u - TR_HUD_VOL_FRAMES);
+		tr_hud_paint_all(b, &v, P, 0u - TR_HUD_POPUP_FRAMES, P + off, 0u - TR_HUD_VOL_FRAMES);
 		assert(memcmp(a, b, sizeof(a)) == 0); /* empty table: the logo stays */
 		(void)tr_hs_insert(&hs, 15230u, "ACE");
 		(void)tr_hs_insert(&hs, 12480u, "E8 ");
@@ -451,8 +453,8 @@ int main(void)
 		for (uint32_t k = 0; k < 4u; k++) {
 			uint32_t fl = 2u * k * P, ft = fl + P; /* a logo page, then a table page */
 
-			tr_hud_paint_all(a, &v, fl, 0u - TR_HUD_POPUP_FRAMES, fl + off);
-			tr_hud_paint_all(b, &v, ft, 0u - TR_HUD_POPUP_FRAMES, ft + off);
+			tr_hud_paint_all(a, &v, fl, 0u - TR_HUD_POPUP_FRAMES, fl + off, 0u - TR_HUD_VOL_FRAMES);
+			tr_hud_paint_all(b, &v, ft, 0u - TR_HUD_POPUP_FRAMES, ft + off, 0u - TR_HUD_VOL_FRAMES);
 			assert(memcmp(a, b, 140 * row) == 0); /* above the card: untouched */
 			assert(memcmp(a + 140 * TR_HUD_W, b + 140 * TR_HUD_W, 160 * row) !=
 			       0); /* the card's middle turns */
@@ -460,7 +462,7 @@ int main(void)
 			       0); /* the invitation row: not */
 			assert(alpha_px(b, 60, 150, 660, 296) > 8000u);
 			/* the zone's name over the table page: only its row changes */
-			tr_hud_paint_all(c, &v, ft, 0u - TR_HUD_POPUP_FRAMES, ft);
+			tr_hud_paint_all(c, &v, ft, 0u - TR_HUD_POPUP_FRAMES, ft, 0u - TR_HUD_VOL_FRAMES);
 			assert(memcmp(b, c, 300 * row) == 0);
 			assert(memcmp(b + 300 * TR_HUD_W, c + 300 * TR_HUD_W, 52 * row) != 0);
 		}
@@ -492,8 +494,8 @@ int main(void)
 			uint32_t        seen_t = 0;
 			const size_t    mrow   = 160u * TR_HUD_W * 2u;
 
-			tr_hud_paint_all(lp, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, off);
-			tr_hud_paint_all(tp, &v, P, 0u - TR_HUD_POPUP_FRAMES, P + off);
+			tr_hud_paint_all(lp, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, off, 0u - TR_HUD_VOL_FRAMES);
+			tr_hud_paint_all(tp, &v, P, 0u - TR_HUD_POPUP_FRAMES, P + off, 0u - TR_HUD_VOL_FRAMES);
 			tr_hud_init(&hb);
 			hb.budget = bi ? 100000u : 110000u;
 			for (uint32_t f = 0; f < TR_HZ_FRAMES(3u * P); f++) {
@@ -570,8 +572,13 @@ int main(void)
 			ts.popup_mult = hsp ? 0u : 5u;
 			ts.combo      = hsp ? 0u : 5u;
 			tr_hud_view_set(&v, &ts, TR_BANNER_NONE, false, TR_HUD_INVITE_TILT);
-			tr_hud_paint_all(a, &v, 0u, 0u, 0u - TR_HUD_ZONE_FRAMES);
-			tr_hud_paint_all(b, &v, 0u, 0u - TR_HUD_POPUP_FRAMES, 0u - TR_HUD_ZONE_FRAMES);
+			tr_hud_paint_all(a, &v, 0u, 0u, 0u - TR_HUD_ZONE_FRAMES, 0u - TR_HUD_VOL_FRAMES);
+			tr_hud_paint_all(b,
+			                 &v,
+			                 0u,
+			                 0u - TR_HUD_POPUP_FRAMES,
+			                 0u - TR_HUD_ZONE_FRAMES,
+			                 0u - TR_HUD_VOL_FRAMES);
 			for (int y = 0; y < TR_HUD_H; y++) {
 				for (int x = 0; x < TR_HUD_W; x++) {
 					bool in_pop = y >= 140 && y < 300 && x >= 220 && x < 500;
@@ -679,19 +686,19 @@ int main(void)
 			const int       y = 202 + 24; /* mid-graph */
 
 			g.pwr_seq = 0u; /* nothing sampled: the empty panel */
-			tr_hud_paint_all(bare, &g, 0u, 0u, 0u);
+			tr_hud_paint_all(bare, &g, 0u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES);
 			for (int i = 0; i < TR_PWR_N; i++) {
 				g.pwr[i] = 1000;
 			}
 			g.pwr[40] = TR_PWR_GAP;
 			g.pwr_seq = 99u;
-			tr_hud_paint_all(ref, &g, 0u, 0u, 0u);
+			tr_hud_paint_all(ref, &g, 0u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES);
 			assert(ref[y * TR_HUD_W + 614 + 40] == bare[y * TR_HUD_W + 614 + 40]);
 			assert(ref[y * TR_HUD_W + 614 + 39] != bare[y * TR_HUD_W + 614 + 39]);
 			assert(ref[y * TR_HUD_W + 614 + 41] != bare[y * TR_HUD_W + 614 + 41]);
 			/* and a real zero is a bar of one pixel, not a hole */
 			g.pwr[40] = 0;
-			tr_hud_paint_all(ref, &g, 0u, 0u, 0u);
+			tr_hud_paint_all(ref, &g, 0u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES);
 			assert(ref[(202 + 47) * TR_HUD_W + 614 + 40] != bare[(202 + 47) * TR_HUD_W + 614 + 40]);
 		}
 
@@ -710,14 +717,14 @@ int main(void)
 			int row_hit[GH] = { 0 };
 
 			g.pwr_seq = 0u;
-			tr_hud_paint_all(bare, &g, 0u, 0u, 0u);
+			tr_hud_paint_all(bare, &g, 0u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES);
 
 			/* a flat 4850 mW */
 			for (int i = 0; i < TR_PWR_N; i++) {
 				g.pwr[i] = 4850;
 			}
 			g.pwr_seq = 500u;
-			tr_hud_paint_all(ref, &g, 0u, 0u, 0u);
+			tr_hud_paint_all(ref, &g, 0u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES);
 			for (int x = GX; x < GX + TR_PWR_N; x++) {
 				int n = 0;
 
@@ -736,7 +743,7 @@ int main(void)
 				g.pwr[i] = (int16_t)(4850 + wob[i % 12]);
 			}
 			g.pwr_seq = 501u;
-			tr_hud_paint_all(ref, &g, 0u, 0u, 0u);
+			tr_hud_paint_all(ref, &g, 0u, 0u, 0u, 0u - TR_HUD_VOL_FRAMES);
 			worst_col = 0;
 			for (int x = GX; x < GX + TR_PWR_N; x++) {
 				int n = 0;
@@ -773,7 +780,12 @@ int main(void)
 				m.hs.e[i].score = 4000u - 100u * (uint32_t)i;
 				memcpy(m.hs.e[i].name, "ABC", 4);
 			}
-			tr_hud_paint_all(ref, &m, 250u, 0u, 0u); /* a table page for the attract card */
+			tr_hud_paint_all(ref,
+			                 &m,
+			                 250u,
+			                 0u,
+			                 0u,
+			                 0u - TR_HUD_VOL_FRAMES); /* a table page for the attract card */
 			assert(alpha_px(ref, 610, 140, 612, 300) == 0u);
 			assert(alpha_px(ref, 712, 140, TR_HUD_W, 300) == 0u);
 			assert(alpha_px(ref, 612, 168, 712, 170) == 0u);
@@ -844,11 +856,12 @@ int main(void)
 		} while (p1 != 0u && frames < 10u);
 		assert(frames >= 3u &&
 		       frames <= 5u); /* 253,440 px at <= 100,000 a frame, then one quiet frame */
-		tr_hud_paint_all(ref, &v, tr_hz_to40(hc.frame - 1u), hc.popup_start, hc.zone_start);
+		tr_hud_paint_all(
+		    ref, &v, tr_hz_to40(hc.frame - 1u), hc.popup_start, hc.zone_start, hc.vol_start);
 		assert(memcmp(fb, ref, sizeof(fb)) == 0);
 	}
 
-	/* 9. The attract header card is pinned (hud_screens.h): six fixed screens hash to what origin/dev
+	/* 11. The attract header card is pinned (hud_screens.h): six fixed screens hash to what origin/dev
 	 * painted. A build WITHOUT a partner logo must match all six in full -- the ALP LAB banner alone,
 	 * exactly as before. A build WITH one changes the header card and nothing else: the two attract
 	 * screens match outside it (x 16 .. 399, y 74 .. 137), and the play, crash, banner and initials
@@ -882,7 +895,7 @@ int main(void)
 		}
 	}
 #ifdef TR_PARTNER_LOGO_HEADER
-	/* 10. The co-brand header (TR_PARTNER_LOGO_HEADER; runner.sh builds this test against a SYNTHETIC
+	/* 12. The co-brand header (TR_PARTNER_LOGO_HEADER; runner.sh builds this test against a SYNTHETIC
 	 * header): ALP LAB left, a divider, the partner's logo right, both centred in the card, which keeps
 	 * its place and height, stays in its tiles and 8 px short of the stats panel; the logo's own
 	 * pixels land where they should; and the update stays free (a static attract view repaints
@@ -946,6 +959,72 @@ int main(void)
 		       l.logo_h);
 	}
 #endif
+
+	/* 9. The volume popup ("VOLUME n%" / "MUTE"): a change of vol_seq shows it over the bottom row for
+	 * exactly TR_HUD_VOL_FRAMES of the 40 Hz clock, counted from the update that saw the change, on
+	 * any screen; incremental == from scratch every frame, and the row goes back to what the screen
+	 * has once it ends. The window is checked against the clock here, not against the HUD's own
+	 * vol_start, so a popup that starts or ends a frame off is caught. */
+	for (int attract = 0; attract < 2; attract++) {
+		tr_hud_t      hv;
+		tr_hud_view_t vv;
+		unsigned      i, u0 = 0, pops = 0;
+		bool          armed = false;
+
+		tr_hud_init(&hv);
+		view_play(&vv, 1234u, 56u);
+		if (attract) {
+			tr_hud_view_set(&vv, &s, TR_BANNER_ATTRACT, true, TR_HUD_INVITE_NONE);
+		}
+		tr_hud_view_vol(&vv, 100u, 0u); /* the HE's boot value: no change seen, no popup */
+		for (i = 0; i < 4u; i++) {
+			tr_hud_update(&hv, fb, &vv, &dirty);
+			assert(alpha_px(fb, 240, 300, 480, TR_HUD_H) == 0u || attract);
+		}
+		uint32_t before = alpha_px(fb, 0, 300, TR_HUD_W, TR_HUD_H);
+
+		for (i = 0; i < 120u; i++) {
+			if (i == 0u || i == 30u) { /* a change, then a second one that restarts the popup */
+				tr_hud_view_vol(&vv, i == 0u ? 40u : 0u, i == 0u ? 1u : 2u);
+				u0    = hv.frame; /* the update below is the one that sees it */
+				armed = true;
+			}
+			uint32_t vpx = tr_hud_update(&hv, fb, &vv, &dirty);
+
+			same_as_scratch(&hv, &vv);
+			/* the HUD budget: only the bottom-row tile (720 x 52) ever repaints for it */
+			assert(vpx <= (uint32_t)TR_HUD_W * (TR_HUD_H - 300) && (dirty & ~(1u << 8)) == 0u);
+			bool want = armed && tr_hz_to40(hv.frame - 1u) - tr_hz_to40(u0) < TR_HUD_VOL_FRAMES;
+			/* on the popup's frames the row carries the panel and text; off them, what it had */
+			bool shown = alpha_px(fb, 240, 300, 480, TR_HUD_H) != 0u && !attract;
+
+			if (!attract && tr_hz_to40(hv.frame - 1u) - tr_hz_to40(u0) >= 8u && want) {
+				assert(shown); /* faded in: a panel and text over the row's middle */
+			}
+			if (!want) {
+				assert(!shown);
+			}
+			pops += want;
+		}
+		assert(pops >= 30u);
+		assert(alpha_px(fb, 0, 300, TR_HUD_W, TR_HUD_H) == before); /* the row is back */
+	}
+
+	/* 10. The knob popup names its subject: the same level as BRIGHTNESS paints differently from
+	 * VOLUME, and flipping the subject alone (same seq-less view) repaints the row. */
+	{
+		tr_hud_t        hk;
+		tr_hud_view_t   kv;
+		static uint16_t va[TR_HUD_W * TR_HUD_H], vb[TR_HUD_W * TR_HUD_H];
+
+		tr_hud_init(&hk);
+		view_play(&kv, 1234u, 56u);
+		tr_hud_view_vol(&kv, 60u, 1u);
+		tr_hud_paint_all(va, &kv, 8u, 0u - TR_HUD_POPUP_FRAMES, 0u - TR_HUD_ZONE_FRAMES, 0u);
+		tr_hud_view_vol_kind(&kv, TR_HUD_KNOB_BRIGHTNESS);
+		tr_hud_paint_all(vb, &kv, 8u, 0u - TR_HUD_POPUP_FRAMES, 0u - TR_HUD_ZONE_FRAMES, 0u);
+		assert(memcmp(va, vb, sizeof(va)) != 0);
+	}
 
 	printf("hud: %u px repainted over %u frames, host %.2f ns/px (%.1f ms total)\n",
 	       (unsigned)n,
