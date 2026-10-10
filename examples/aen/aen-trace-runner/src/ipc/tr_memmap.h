@@ -192,8 +192,7 @@ _Static_assert(TR_MEM_HE_RESET_GUARD + TR_MEM_HE_RESET_GUARD_SIZE <= 0x02380000u
  * it by its global address with no local-to-global translation (src/platform/he_fault.c). */
 #define TR_MEM_SE_MSG_SIZE 8u
 _Static_assert(
-    TR_MEM_VOL >= TR_MEM_BUS2 + 48u &&
-        TR_MEM_I2C1_ALIVE >= TR_MEM_VOL + TR_MEM_VOL_SIZE &&
+    TR_MEM_VOL >= TR_MEM_BUS2 + 48u && TR_MEM_I2C1_ALIVE >= TR_MEM_VOL + TR_MEM_VOL_SIZE &&
         TR_MEM_I2C1_ALIVE + 4u <= TR_MEM_FAULT_INJECT &&
         TR_MEM_FAULT_INJECT + TR_MEM_FAULT_INJECT_SIZE <= TR_MEM_SE_MSG &&
         TR_MEM_SE_MSG + TR_MEM_SE_MSG_SIZE <= TR_MEM_BL &&
