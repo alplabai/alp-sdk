@@ -174,7 +174,7 @@
         "sram_base": {"type": "integer", "description": "SRAM address BL2 copies the stored CM33 image to."},
         "image_pad": {"type": "integer", "description": "Zero bytes before zephyr.bin in the stored image; the CM33 starts at sram_base + image_pad."},
         "image_max": {"type": "integer", "description": "Largest stored image BL2 loads (it silently truncates more)."},
-        "xspi_offset": {"type": "integer", "description": "Offset in the xSPI NOR boot partition (mtd1) where the stored image lives."},
+        "xspi_offset": {"type": "integer", "description": "Offset in the xSPI NOR boot partition (mtd1) where the stored image lives."}, "mtd_name": {"type": "string", "description": "Linux /proc/mtd name of the xSPI NOR boot partition xspi_offset is relative to (\"fip\" on RZ/V2N, per the e1m-v2n-som.dtsi &xspi partition table). Tools that write the CM33 image from running Linux must resolve the partition by this name, never by index alone."},
         "note": {"type": "string"}
       },
       "description": "OPTIONAL. How BL2 loads the CM33 image on this SoC (RZ/V2N): the single source for the provisioning gate and the bundle schema text."
