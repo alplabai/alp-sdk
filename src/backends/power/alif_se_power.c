@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright 2026 Alp Lab AB
  *
- * Alif Secure Enclave STOP / STANDBY power backend for the Ensemble E8 M55-HE
+ * Alif Secure Enclave STOP / STANDBY power backend for the Ensemble E8 M55-HE and M55-HP
  * (#2784, unit U7).  alp_power_request_sleep(STOP | STANDBY) on E1M-AEN801 /
  * E1M-AEN803.
  *
@@ -11,9 +11,22 @@
  * bank sizes are not.  CONFIG_ALP_SDK_POWER_ALIF_SE is off by default.  Items marked
  * [BENCH] below are still open hypotheses.
  *
+ * Cores: the M55-HE (E1M-AEN801 / E1M-AEN803, bench-proven) and the M55-HP
+ * (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP; STOP bench-proven HP-only on the E1M-AEN803, 2026-10-10,
+ * 3/3 cycles, and with the HE running 3/3 on a combined ATOC; the AEN801 HP is not verified).
+ * The HP differs from the HE in the ways the Alif vendor sample sdk-alif samples/drivers/pm/system_off/src/main.c shows (cited per use below):
+ *   - only a SOFT_OFF-class sleep: STOP maps to it; STANDBY (the S2RAM sleep) is HE-only;
+ *   - no TCM retention (memory_blocks never names HP TCM: aipm.h has no HP TCM block);
+ *   - the image must be MRAM-booted (VTOR >= 0x80000000), because the wake is a cold boot from
+ *     the vector the OFF profile names;
+ *   - its own AON control / reset-status registers (alif_se_power_hw.c HW_CORE_CTRL);
+ *   - 400 MHz RUN profile on the clock restore, and ES0 (not ES1) as its PLL_CLK_SEL bit.
+ * Everything else (BKRAM record, LPTIMER0 and LPGPIO0 wake, EWIC groups, IRQ 57 / 60) is the same
+ * SoC-level machinery and is shared with the HE.
+ *
  * What a STOP is on this part
  * ---------------------------
- * The M55-HE subsystem is powered OFF.  The Secure Enclave (SE) owns the power
+ * This core's (HE or HP) subsystem is powered OFF.  The Secure Enclave (SE) owns the power
  * tree: before the core sleeps, an OFF profile (off_profile_t) is handed to the SE
  * over its mailbox, then the core enters the EWIC subsystem-off sleep.  When a
  * wake event fires the SE powers the subsystem back up and boots it through the
@@ -69,13 +82,27 @@
  *                      CONFIG_ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER), or an armed
  *                      wake source is already pending (the sleep would end at once).
  *   ALP_ERR_NOSUPPORT  the D-cache is enabled, or a wake bit / duration this
- *                      backend cannot arm.
+ *                      backend cannot arm.  On the HP also: STANDBY
+ *                      (hp_standby_unsupported; the dispatcher refuses it first), TCM
+ *                      retention (hp_tcm_not_retainable) and an
+ *                      image that is not MRAM-booted (hp_vtor_not_mram).
  *   ALP_ERR_NOT_READY  the core's low-power-state requests are not all OFF.
  *   ALP_ERR_INVAL      bad mode, bad retention, a timed wake out of range, a
  *                      policy that conflicts with an armed source.
  *   ALP_ERR_IO         the SE refused or altered the profile, the retention bits
  *                      did not stick, or the subsystem stayed up with no wake
  *                      source to explain it.
+ *
+ * The other core.  The OFF profile is the CALLING core's: the SE powers that core's subsystem off,
+ * and the SoC drops to its STOP state only once every subsystem has configured and entered its
+ * sleep (DFP Device/core/common/source/pm.c, comment above
+ * pm_core_enter_deep_sleep_request_subsys_off()).  This backend cannot see the other core.  With
+ * the HE still running when the HP sleeps, only the HP subsystem goes down, the SoC stays in RUN
+ * and the HP wakes by a cold boot as usual; the on-module domains it quiesced stay held until it
+ * is back.  Nothing in the DFP / hal_alif names a register that tells one core whether the other
+ * is up, so there is no refusal for it: an application that shares the SoM with the other core
+ * must stop (or agree with) that core before sleeping, and must not run this backend on both
+ * cores (the BKRAM record, the LPTIMER0 wake timer and the RV-3028 are single-owner).
  *
  * Sequence of a STOP / STANDBY request
  * ------------------------------------
@@ -279,6 +306,19 @@ static bool is_deep_mode(alp_power_mode_t mode)
 	return mode == ALP_POWER_MODE_STOP || mode == ALP_POWER_MODE_STANDBY;
 }
 
+/* STANDBY is the vendor S2RAM sleep, which the HP does not have: "HP core: only SOFT_OFF (no
+ * S2RAM support)" (sdk-alif system_off/src/main.c:305; :89 and README "S2RAM ... HE core only"). */
+static bool mode_unsupported_here(alp_power_mode_t mode)
+{
+	return mode == ALP_POWER_MODE_STANDBY && alif_se_hw_core_is_hp();
+}
+
+/* The wake is a cold boot at the vector the OFF profile names, and the SDK writes SCB->VTOR
+ * there.  A TCM-booted HP image (VTOR in the TCM, below the MRAM base) would resume into TCM
+ * that is not retained; the vendor asserts exactly this (system_off/src/main.c:80,85,199-201,
+ * MRAM boot is VTOR >= 0x80000000). */
+#define ALIF_SE_HP_MRAM_BASE 0x80000000u
+
 /* ---- Retention -------------------------------------------------------------- */
 
 /* memory_blocks for @p r: the Utility SRAM (BKRAM, always, gen2 bit 21) plus the
@@ -299,8 +339,21 @@ static uint32_t retained_blocks(const alp_power_retain_t *r)
 	return blocks;
 }
 
+/* The HP has no TCM retention: sdk-alif system_off/src/main.c:199-201 ("Retention is not possible
+ * with HP-TCM") and its README ("HP Core (no retention support)"), and the gen2 memory_block_t
+ * of hal_alif aipm.h:195-259 has no HP TCM block (SRAM4_x / SRAM5_x are the M55-HE TCM). */
+static bool hp_wants_tcm(const alp_power_retain_t *r)
+{
+	return alif_se_hw_core_is_hp() &&
+	       (r->level == ALP_POWER_RETAIN_TCM || r->level == ALP_POWER_RETAIN_FULL);
+}
+
 static bool retention_valid(const alp_power_retain_t *r, alp_status_t *why)
 {
+	if (hp_wants_tcm(r)) {
+		*why = ALP_ERR_NOSUPPORT;
+		return false;
+	}
 	switch (r->level) {
 	case ALP_POWER_RETAIN_NONE:
 	case ALP_POWER_RETAIN_UTILITY: /* equivalent to NONE: BKRAM is always kept */
@@ -562,6 +615,9 @@ static alp_status_t refuse_if_unfit(void)
 #endif
 	if (alif_se_hw_dcache_active()) {
 		return refuse(2, "dcache_on", 1, ALP_ERR_NOSUPPORT);
+	}
+	if (alif_se_hw_core_is_hp() && alif_se_hw_vtor_read() < ALIF_SE_HP_MRAM_BASE) {
+		return refuse(2, "hp_vtor_not_mram", (int)alif_se_hw_vtor_read(), ALP_ERR_NOSUPPORT);
 	}
 	if (!alif_se_hw_lpstate_off()) {
 		/* a core power-state request keeps the subsystem up; raw = PWRMODCTL.CPDLPSTATE */
@@ -987,8 +1043,16 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	fill_info(info, ALP_POWER_MODE_RUN, 0u, 0u);
 
 	/* 1. Validate everything first. */
+	if (mode_unsupported_here(mode)) {
+		/* Defence in depth: se_mode_wake_caps(STANDBY) is 0 on the HP, so the dispatcher
+		 * (power_dispatch.c) answers ALP_ERR_NOSUPPORT before this backend runs. */
+		return refuse(1, "hp_standby_unsupported", (int)mode, ALP_ERR_NOSUPPORT);
+	}
 	if (!retention_valid(&state->retain, &why)) {
-		return refuse(1, "retention_invalid", (int)state->retain.level, why);
+		return refuse(1,
+		              hp_wants_tcm(&state->retain) ? "hp_tcm_not_retainable" : "retention_invalid",
+		              (int)state->retain.level,
+		              why);
 	}
 	plan.memory_blocks = retained_blocks(&state->retain);
 	plan.lfxo          = lfxo_confirmed() || BENCH_KNOB(lfxo); /* fixes the LPTIMER rate */
@@ -1210,6 +1274,9 @@ static void se_close(alp_power_backend_state_t *state)
 static uint32_t se_mode_wake_caps(const alp_power_backend_state_t *state, alp_power_mode_t mode)
 {
 	(void)state;
+	if (mode_unsupported_here(mode)) {
+		return 0u; /* the HP has no STANDBY: nothing can wake a mode it cannot enter */
+	}
 	if (is_deep_mode(mode)) {
 		return stop_wake_caps();
 	}
@@ -1345,6 +1412,9 @@ bool alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
  * U8g read 0x00100111 after an nRESET with the clocks and the UART at their nominal rates, and
  * an exact compare called that "unhealthy".  Health is the three bits that matter. */
 #define ALIF_SE_PLL_CLK_SEL_HE_MASK 0x00100011u
+/* The HP's own: ES0 [16] selects the source of RTSS_HP_CLK (same register, same SYS [4] and
+ * SYSREF [0]; AE822FA0E5597BS0_CM55_HP_View.svd PLL_CLK_SEL at :1862). */
+#define ALIF_SE_PLL_CLK_SEL_HP_MASK 0x00010011u
 #define ALIF_SE_PLL_WAIT_CYCLES     8000000u
 #define ALIF_SE_CGU_PLL_LOCK        BIT(0)
 
@@ -1366,11 +1436,13 @@ static void build_run_profile(run_profile_t *r)
 	                   PD_SYST_MASK | PD_DBSS_MASK;                        /* 0x16d */
 	r->memory_blocks = ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_FWRAM_MASK; /* 0x00108000 */
 #endif
-	r->dcdc_voltage    = 825u;
-	r->dcdc_mode       = DCDC_MODE_PWM;
-	r->aon_clk_src     = CLK_SRC_LFRC;
-	r->run_clk_src     = CLK_SRC_PLL;
-	r->cpu_clk_freq    = CLOCK_FREQUENCY_160MHZ;
+	r->dcdc_voltage = 825u;
+	r->dcdc_mode    = DCDC_MODE_PWM;
+	r->aon_clk_src  = CLK_SRC_LFRC;
+	r->run_clk_src  = CLK_SRC_PLL;
+	/* 160 MHz on the HE; the vendor RUN profile of the HP asks for 400 MHz
+	 * (sdk-alif system_off/src/main.c:137-138). */
+	r->cpu_clk_freq    = alif_se_hw_core_is_hp() ? CLOCK_FREQUENCY_400MHZ : CLOCK_FREQUENCY_160MHZ;
 	r->scaled_clk_freq = SCALED_FREQ_XO_LOW_DIV_38_4_MHZ;
 	r->ip_clock_gating = 0u;
 	r->phy_pwr_gating  = 0u;
@@ -1380,9 +1452,11 @@ static void build_run_profile(run_profile_t *r)
 /* True when the clock tree is the running one. */
 static bool clocks_healthy(void)
 {
+	const uint32_t mask =
+	    alif_se_hw_core_is_hp() ? ALIF_SE_PLL_CLK_SEL_HP_MASK : ALIF_SE_PLL_CLK_SEL_HE_MASK;
+
 	return (alif_se_hw_cgu_read(ALIF_SE_CGU_PLL_LOCK_CTRL) & ALIF_SE_CGU_PLL_LOCK) != 0u &&
-	       (alif_se_hw_cgu_read(ALIF_SE_CGU_PLL_CLK_SEL) & ALIF_SE_PLL_CLK_SEL_HE_MASK) ==
-	           ALIF_SE_PLL_CLK_SEL_HE_MASK;
+	       (alif_se_hw_cgu_read(ALIF_SE_CGU_PLL_CLK_SEL) & mask) == mask;
 }
 
 #if defined(CONFIG_ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS)

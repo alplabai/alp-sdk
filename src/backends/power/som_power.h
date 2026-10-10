@@ -316,10 +316,15 @@ alp_status_t alp_som_power_rtc_int_armed(bool *armed);
  *  cold-boot wake path. */
 alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags);
 
-/** M55-HE reset syndrome (AON.RTSS_HE_RESET.RESETSYNDROME), read and acknowledged:
- *  0 = POR or Secure-Enclave-initiated, 1 = the NSRST pin was asserted, 4 = reset
+/** This core's reset syndrome (AON.RTSS_HE_RESET / RTSS_HP_RESET .RESETSYNDROME), read and
+ *  acknowledged: 0 = POR or Secure-Enclave-initiated, 1 = the NSRST pin was asserted, 4 = reset
  *  request to the power domain.  Weak: 0 where there is no such register. */
 uint32_t alp_som_power_reset_syndrome_take(void);
+
+/** This core's own WIC bits (RTSS_HE_CTRL / RTSS_HP_CTRL [9:8]) say it requested subsystem-off
+ *  (EWIC, 0b01): a second STOP witness for when STOP_MODE_STAT stays clear because another core
+ *  keeps the DC-DC up.  Read and cleared (COLD_WAKEUP untouched) on every boot.  Weak: false. */
+bool alp_som_power_core_off_take(void);
 
 /** Acknowledge STOP_MODE_STAT (VBAT_STOP_MODE_REG bit 4), once the boot decode is done, so a
  *  later reset is not read as a STOP wake.  Writes exactly the STAT bit, never bit 0

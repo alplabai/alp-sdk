@@ -1,7 +1,7 @@
 # aen-power-stop
 
 Bench proof of the Alif SE STOP backend ([#2784](https://github.com/alplabai/alp-sdk/issues/2784),
-unit U7) on the **E1M-AEN803** (Alif Ensemble E8, M55-HE). STOP **passed on silicon** (U8h, 3 of 3 cycles); STANDBY is untested.
+unit U7) on the **E1M-AEN803** (Alif Ensemble E8, M55-HE; an HP build is described below). STOP **passed on silicon** (U8h, 3 of 3 cycles); STANDBY is untested.
 Built as an **MRAM image**: STOP wakes through a cold boot (SES -> ATOC -> this
 image), so a RAM-run image would not come back.
 
@@ -10,6 +10,29 @@ image), so a RAM-run image would not come back.
 > module until it is power-cycled.
 
 See [`docs/aen-power-domains.md`](../../../docs/aen-power-domains.md) for the model.
+
+## M55-HP (STOP bench-proven HP-only on the E1M-AEN803)
+
+The same app builds for the HP core (`alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`,
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`); `boards/` carries the matching overlay and a
+config fragment that turns the boot-time clock restore on (its Kconfig default is HE-only; the AEN803
+HP fragment is bench-proven, the AEN801 HP one is unmeasured).
+
+Bench (2026-10-10, E1M-AEN803 2026W36-0001 on an E1M-EVK, HP-only ATOC so the HE was not booted; `examples/aen/aen-power-stop` built for `alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`, linked in the HP slot0 at `0x802b0000`, Flow D via tan): 3/3 STOP cycles PASS at 400 MHz with `RESTORE_CLOCKS` on. Cycle 1 LPTIMER 500 ms `mode=4 wake_source=0x8`, cycle 2 RV-3028 countdown 3 s `mode=4 wake_source=0x1`, cycle 3 RV-3028 alarm `mode=4 wake_source=0x1`; `quiesced=restored=0x7f`; `SUMMARY cycles=3 pass=5 fail=0`. Run D (combined HE idle + HP this example): the HP woke from the LPTIMER but `STOP_MODE_STAT` stayed clear (raw `0x100`, the DC-DC stays up while the HE runs), so the record was discarded and cycle 1 repeated. The backend now also trusts this core's own `RTSS_HP_CTRL` WIC [9:8] = `0b01` as a STOP witness (`docs/aen-power-domains.md`); bench re-run: dual-core (HE idle Zephyr app + HP `aen-power-stop`) on E1M-AEN803 2026W36-0001 passes 3/3 (LPTIMER `wake_source=0x8`, countdown `0x1`, alarm `0x1`, all `mode=4`, `SUMMARY cycles=3 pass=5 fail=0`, boot diag w[16..19] = `00000100 00000100 00000333 00000000`), flashed as one combined ATOC (DEVICE + m55_he + m55_hp) written by tan's Flow D with the alplabai/tan-cli#1509 fix; the HE-only regression stays 3/3. Still open: the AEN801 HP.
+
+What differs from the HE, and what the app gets when it asks for it:
+
+| Request | HP answer |
+|---|---|
+| `STOP` | the vendor's SOFT_OFF-class sleep; the wake is a cold boot, as on the HE |
+| `STANDBY` | `ALP_ERR_NOSUPPORT` from the dispatcher before the backend runs (no wake source is valid for it on the HP; the S2RAM sleep is HE-only). The backend's own `reason=hp_standby_unsupported` check is defence in depth and is not reachable through `alp_power_request_sleep()` |
+| TCM / FULL retention | `ALP_ERR_NOSUPPORT`, `reason=hp_tcm_not_retainable` (no HP TCM retention) |
+| image not in MRAM (`VTOR` below `0x80000000`) | `ALP_ERR_NOSUPPORT`, `reason=hp_vtor_not_mram`; do not use the Flow C ITCM retarget |
+
+Flash it as the HP's own `slot0_partition` (from the board DTS). The HE core is left to whatever
+else runs on the module: the HP sleep powers only the HP subsystem down, and the SoC reaches its STOP
+state only when every subsystem has done the same, so the HE should be idle or off when measuring.
+The BKRAM record, the LPTIMER0 wake timer and the RV-3028 are single-owner: run this app on one core.
 
 ## What it does
 

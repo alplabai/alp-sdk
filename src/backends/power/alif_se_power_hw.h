@@ -93,6 +93,11 @@ uint32_t alif_se_hw_lpperi_cken(void);
 /** LPRTC CCVR (the counter, units unproven: ~2 Hz on LFRC). */
 uint32_t alif_se_hw_lprtc_ccvr(void);
 
+/** This image runs on the M55-HP (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP).  The HP has no TCM
+ *  retention and only a SOFT_OFF-class sleep (see alif_se_power.c), so the backend branches
+ *  on it; it is a function so the host test can drive both cores from one binary. */
+bool alif_se_hw_core_is_hp(void);
+
 /** Raw LPRTC register at byte offset @p off (CCR 0x0C, CPSR 0x20, CPCVR 0x24); no clock
  *  enable. */
 uint32_t alif_se_hw_lprtc_read(unsigned off);
@@ -123,5 +128,20 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks);
 
 /** Why the last alif_se_hw_enter_ewic() refused (a static string), for the diagnostic. */
 const char *alif_se_hw_enter_reason(void);
+
+/* RTSS_x_CTRL WIC [9:8]: bit 8 = WICCONTROL[0] (WIC enable), bit 9 = WICCONTROL[1] (IWIC,
+ * 0 selects the EWIC). */
+#define ALIF_SE_CTRL_WIC_EN   (1u << 8)
+#define ALIF_SE_CTRL_WIC_IWIC (1u << 9)
+#define ALIF_SE_CTRL_WIC_MASK (ALIF_SE_CTRL_WIC_EN | ALIF_SE_CTRL_WIC_IWIC)
+
+/** The pure half of alp_som_power_core_off_take(): `ctrl` is the raw RTSS_x_CTRL.  Returns
+ *  whether it says "EWIC subsystem-off requested" (WIC [9:8] == 0b01); `*cleared` is `ctrl`
+ *  with WIC [9:8] cleared and COLD_WAKEUP and every other bit untouched. */
+static inline bool alif_se_ctrl_core_off(uint32_t ctrl, uint32_t *cleared)
+{
+	*cleared = ctrl & ~ALIF_SE_CTRL_WIC_MASK;
+	return (ctrl & ALIF_SE_CTRL_WIC_MASK) == ALIF_SE_CTRL_WIC_EN;
+}
 
 #endif /* ALP_BACKENDS_POWER_ALIF_SE_POWER_HW_H */

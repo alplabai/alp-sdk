@@ -15,6 +15,7 @@
  *   ANA.MISC_CTRL        ANA_BASE  0x1A60A000 + 0x00   (E8 SVD, ana devicetree node)
  *   ANA.VBAT_ANA_REG1    ANA_BASE             + 0x38   (E8 SVD)
  *   AON.RTSS_HE_CTRL     AON_BASE  0x1A604000 + 0x10   (Alif DFP soc.h AON_Type)
+ *                        (on the M55-HP this is RTSS_HP_CTRL at + 0x00, see HW_CORE_CTRL below)
  *       [0]  COLD_WAKEUP  "set to wake the M55-HE power domain during cold boot
  *                          or waking up from stop mode, clear it once the
  *                          power-on sequence is complete to enable dynamic power
@@ -57,13 +58,28 @@
 BUILD_ASSERT(DT_REG_SIZE(DT_NODELABEL(vbat)) >= 0x10u, "vbat node must cover RET_CTRL");
 BUILD_ASSERT(DT_REG_SIZE(DT_NODELABEL(ana)) >= 0x3Cu, "ana node must cover VBAT_ANA_REG1");
 
-/* AON_BASE + 0x10: Alif DFP soc.h AON_Type RTSS_HE_CTRL; the same constant the
- * zephyr_alif fork's soc_common.h calls AON_RTSS_HE_CTRL. */
-#define HW_RTSS_HE_CTRL     0x1A604010u
+/* This core's AON control and reset-status registers.  The same bits (COLD_WAKEUP [0], WIC [9:8],
+ * RESETSYNDROME [5:0]) sit in two register pairs of AON_BASE 0x1A604000, one per M55
+ * (E8 SVD AON: RTSS_HP_CTRL / RTSS_HP_RESET at
+ * metadata/svd/alif/AE822FA0E5597BS0_CM55_HP_View.svd:3890 / 3913, RTSS_HE_CTRL at :3948;
+ * Alif DFP soc.h AON_Type).  The DFP picks the core's own pair with `#if defined(RTSS_HP)`
+ * (Device/core/common/source/pm.c:61-69).
+ *   HE: RTSS_HE_CTRL  AON_BASE + 0x10, RTSS_HE_RESET AON_BASE + 0x14
+ *       (zephyr_alif soc_common.h AON_RTSS_HE_CTRL).
+ *   HP: RTSS_HP_CTRL  AON_BASE + 0x00, RTSS_HP_RESET AON_BASE + 0x04
+ *       (Alif DFP Device/soc/AE822FA0E5597/include/rtss_hp/soc.h:1157-1158, AON_BASE at
+ *       :3656; zephyr_alif soc/alif/ensemble/common/soc_common.h:16-17).
+ * A core writes its own pair: the other core's WIC bits would arm the wrong subsystem's sleep. */
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
+#define HW_CORE_CTRL  0x1A604000u
+#define HW_CORE_RESET 0x1A604004u
+#else
+#define HW_CORE_CTRL  0x1A604010u
+#define HW_CORE_RESET 0x1A604014u
+#endif
 #define HE_CTRL_COLD_WAKEUP BIT(0)
-#define HE_CTRL_WIC_EN      BIT(8) /* WICCONTROL_WIC  */
-#define HE_CTRL_WIC_IWIC    BIT(9) /* WICCONTROL_IWIC: 0 selects the EWIC */
-#define HE_CTRL_WIC_MASK    (HE_CTRL_WIC_EN | HE_CTRL_WIC_IWIC)
+#define HE_CTRL_WIC_EN      ALIF_SE_CTRL_WIC_EN
+#define HE_CTRL_WIC_MASK    ALIF_SE_CTRL_WIC_MASK
 
 #define HW_DHCSR           0xE000EDF0u
 #define HW_DHCSR_C_DEBUGEN BIT(0)
@@ -111,6 +127,11 @@ void alif_se_hw_reg_write(alif_se_reg_t reg, uint32_t value)
 uint32_t alif_se_hw_vtor_read(void)
 {
 	return SCB->VTOR;
+}
+
+bool alif_se_hw_core_is_hp(void)
+{
+	return IS_ENABLED(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP);
 }
 
 bool alif_se_hw_debugger_attached(void)
@@ -343,7 +364,8 @@ static alp_status_t wake_timer_arm_locked(uint32_t ticks)
  *   11 NVIC ISER1 (IRQ 60 = bit 28)    12 NVIC ISPR1
  *   13 DWT CYCCNT delta, LPTIMER arm -> snapshot (PRE only; 0 in BOOT)
  *   14 VBAT RET_CTRL        15 ANA VBAT_ANA_REG1   16 STOP_MODE (0x1A60F000)
- *   17 AON RTSS_HE_CTRL     18 PWRMODCTL CPDLPSTATE  19 AON RTSS_HE_RESET (0x1A604014)
+ *   17 AON core CTRL (HE: RTSS_HE_CTRL, HP: RTSS_HP_CTRL)     18 PWRMODCTL CPDLPSTATE
+ *   19 AON core RESET (0x1A604014 HE / 0x1A604004 HP)
  *   20 CGU OSC_CTRL (0x1A602000)  21 PLL_LOCK_CTRL (+4)  22 PLL_CLK_SEL (+8)
  *   23 ESCLK_SEL (+0x10)   24 CLK_ENA (+0x14)     25 CLKCTL_SYS ACLK_CTRL (0x1A010820)
  *   26 AON SYSTOP_CLK_DIV (0x1A604020)   27 CLKCTL_PER_SLV UART_CTRL (0x4902F008)
@@ -395,9 +417,9 @@ static void diag_capture(uint32_t w[ALP_SOM_PD_DIAG_WORDS], bool with_lptimer)
 	w[14] = sys_read32(HW_RET_CTRL);
 	w[15] = sys_read32(HW_ANA_REG1);
 	w[16] = sys_read32(0x1A60F000u);
-	w[17] = sys_read32(HW_RTSS_HE_CTRL);
+	w[17] = sys_read32(HW_CORE_CTRL);
 	w[18] = PWRMODCTL->CPDLPSTATE;
-	w[19] = sys_read32(0x1A604014u);
+	w[19] = sys_read32(HW_CORE_RESET);
 	w[20] = sys_read32(0x1A602000u);
 	w[21] = sys_read32(0x1A602004u);
 	w[22] = sys_read32(0x1A602008u);
@@ -610,7 +632,7 @@ const char *alif_se_hw_enter_reason(void)
 
 alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 {
-	uint32_t     orig_ctrl    = sys_read32(HW_RTSS_HE_CTRL);
+	uint32_t     orig_ctrl    = sys_read32(HW_CORE_CTRL);
 	uint32_t     orig_cppwr   = ICB->CPPWR;
 	uint32_t     orig_ccr     = SCB->CCR;
 	uint32_t     orig_mscr    = MEMSYSCTL->MSCR;
@@ -687,7 +709,7 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 	 * COLD_WAKEUP cleared so the M55-HE power domain may actually drop.  Every
 	 * other bit keeps the value the Secure Enclave left. */
 	sys_write32((orig_ctrl & ~(HE_CTRL_COLD_WAKEUP | HE_CTRL_WIC_MASK)) | HE_CTRL_WIC_EN,
-	            HW_RTSS_HE_CTRL);
+	            HW_CORE_CTRL);
 
 	SCB->SCR |= SCB_SCR_SLEEPDEEP_Msk;
 	__DSB();
@@ -696,7 +718,7 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	/* Words 17 (RTSS_HE_CTRL) and 37 (SysTick CTRL) were captured before the writes
 	 * above; patch in what the hardware holds going into the WFI. */
-	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_PRE, 17u, sys_read32(HW_RTSS_HE_CTRL));
+	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_PRE, 17u, sys_read32(HW_CORE_CTRL));
 	alp_som_pd_diag_patch(ALP_SOM_PD_DIAG_PRE, 37u, SysTick->CTRL);
 #endif
 
@@ -710,7 +732,7 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 	/* A wake source fired before power was removed.  Put everything back, the wake
 	 * pad first, while interrupts are still off. */
 	SCB->SCR &= ~SCB_SCR_SLEEPDEEP_Msk;
-	sys_write32(orig_ctrl, HW_RTSS_HE_CTRL); /* the WIC bits and COLD_WAKEUP as found */
+	sys_write32(orig_ctrl, HW_CORE_CTRL); /* the WIC bits and COLD_WAKEUP as found */
 	alif_se_hw_rtc_int_disarm();
 
 	MEMSYSCTL->MSCR |= orig_mscr & (MEMSYSCTL_MSCR_ICACTIVE_Msk | MEMSYSCTL_MSCR_DCACTIVE_Msk);
@@ -731,27 +753,49 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 	return ALP_OK;
 }
 
-/* AON.RTSS_HE_RESET (0x1A604014), M55-HE reset status: RESETSYNDROME [5:0], set by hardware
- * and cleared by software with a 1 (E8 SVD, oneToClear).  Values the SVD names: 0 = POR or
+/* AON.RTSS_HE_RESET (0x1A604014) / RTSS_HP_RESET (0x1A604004), this core's reset status:
+ * RESETSYNDROME [5:0], set by hardware and cleared by software with a 1 (E8 SVD, oneToClear).  Values the SVD names: 0 = POR or
  * Secure-Enclave-initiated reset, 1 = the NSRST pin was asserted, 4 = a reset request to
  * the power domain.  Read and acknowledge here, so the next boot reads its own cause
  * rather than a stale bit; the earliest bench snapshot (word 19) has the raw value first. */
 uint32_t alp_som_power_reset_syndrome_take(void)
 {
-	uint32_t v = sys_read32(0x1A604014u) & 0x3Fu;
+	uint32_t v = sys_read32(HW_CORE_RESET) & 0x3Fu;
 
 	if (v != 0u) {
-		sys_write32(v, 0x1A604014u);
+		sys_write32(v, HW_CORE_RESET);
 	}
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	/* The SVD marks the field write-only with reset value 1: record what a re-read
 	 * shows, and whether bit 0 actually cleared. */
-	uint32_t v2 = sys_read32(0x1A604014u) & 0x3Fu;
+	uint32_t v2 = sys_read32(HW_CORE_RESET) & 0x3Fu;
 
 	alp_som_pd_diag_patch(
 	    ALP_SOM_PD_DIAG_BOOT, 39u, v2 | (((v & 1u) != 0u && (v2 & 1u) == 0u) ? BIT(31) : 0u));
 #endif
 	return v;
+}
+
+/* Second STOP witness: this core's own WIC bits.  A core that requested subsystem-off
+ * leaves RTSS_x_CTRL WIC [9:8] = 0b01 (bit 8 = WICCONTROL[0] enable, bit 9 = WICCONTROL[1]
+ * IWIC, 0 selects the EWIC: SVD RTSS_HP_CTRL "WIC" field, metadata/svd/alif/
+ * AE822FA0E5597BS0_CM55_HP_View.svd:3890; DFP Device/core/common/source/pm.c:209 sets
+ * WICCONTROL = WIC | IWIC<<1, pm.c:229 and system.c:155-158 clear it on an in-core wake).
+ * When the DC-DC stays up (the other M55 runs) STOP_MODE_STAT never sets, but this value
+ * survives the subsystem power-off; after a SoC-level STOP the DC-DC loss clears it (bench
+ * run D diag word 17 = 0), so STOP_MODE_STAT is the witness there.  Read and clear [9:8]
+ * on every boot so a stale value (an aborted entry) is never seen twice; COLD_WAKEUP and the
+ * other bits are left alone.  `true` = this core was powered off. */
+bool alp_som_power_core_off_take(void)
+{
+	uint32_t ctrl = sys_read32(HW_CORE_CTRL);
+	uint32_t cleared;
+	bool     off = alif_se_ctrl_core_off(ctrl, &cleared);
+
+	if (cleared != ctrl) {
+		sys_write32(cleared, HW_CORE_CTRL);
+	}
+	return off;
 }
 
 /* Can bit 0 (NSRST) of the syndrome be trusted as a pin-reset marker?  Not if it is
@@ -761,13 +805,13 @@ uint32_t alp_som_power_reset_syndrome_take(void)
  * reads 0 is trusted (it can only be set by a reset from now on). */
 bool alp_som_power_reset_syndrome_trusted(void)
 {
-	uint32_t v = sys_read32(0x1A604014u) & 0x3Fu;
+	uint32_t v = sys_read32(HW_CORE_RESET) & 0x3Fu;
 
 	if ((v & 1u) == 0u) {
 		return true;
 	}
-	sys_write32(v, 0x1A604014u);
-	return (sys_read32(0x1A604014u) & 1u) == 0u;
+	sys_write32(v, HW_CORE_RESET);
+	return (sys_read32(HW_CORE_RESET) & 1u) == 0u;
 }
 
 /* ---- LPRTC, CGU and STOP_MODE_STAT -------------------------------------------- */

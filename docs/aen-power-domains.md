@@ -86,9 +86,10 @@ unverified.
 ## The STOP / STANDBY backend
 
 `src/backends/power/alif_se_power.c` implements `alp_power_request_sleep(STOP |
-STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803). It is registered for
+STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and `STOP` on the E8 M55-HP (**bench-proven HP-only** on the E1M-AEN803) (section "The M55-HP" below). It is registered for
 `alif:ensemble:e8` behind `CONFIG_ALP_SDK_POWER_ALIF_SE` (default **n**,
-experimental; STOP and STANDBY are bench-proven on the E1M-AEN803). The M55-HE subsystem is powered off and the
+experimental; STOP and STANDBY are bench-proven on the E1M-AEN803 M55-HE, STOP also on its
+M55-HP with only the HP booted). This core's (HE or HP) subsystem is powered off and the
 wake is a cold boot through the Secure Enclave, so the call does not return: read
 the cause with `alp_power_boot_wake_info()`. `SLEEP` / `DEEP_SLEEP` are forwarded to
 the pm_policy backend when it is built.
@@ -171,6 +172,70 @@ off) and `alp_power_boot_wake_info()` reports a STOP cycle with no wake cause. A
 STANDBY record is discarded when the RV-3028 reports its power-on-reset flag.
 The BKRAM placement exists only in a build with `CONFIG_ALP_SDK_POWER_ALIF_SE`;
 every other build keeps the record in RAM.
+
+### The M55-HP (STOP bench-proven HP-only on the E1M-AEN803)
+
+The backend compiles and registers for the HP core too (`CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP`,
+board targets `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` and
+`alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`; `examples/aen/aen-power-stop` builds for both).
+**Bench (2026-10-10, E1M-AEN803 2026W36-0001 on an E1M-EVK, HP-only ATOC, i.e. the HE was not booted):**
+`examples/aen/aen-power-stop` built for `alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`, linked in HP
+slot0 at `0x802b0000`, Flow D via tan. 3/3 STOP cycles PASS at 400 MHz with `RESTORE_CLOCKS` on: cycle 1
+LPTIMER 500 ms `mode=4 wake_source=0x8`, cycle 2 RV-3028 countdown 3 s `mode=4 wake_source=0x1`,
+cycle 3 RV-3028 alarm `mode=4 wake_source=0x1`, `quiesced=restored=0x7f`,
+`SUMMARY cycles=3 pass=5 fail=0`. An HP STOP while the HE runs failed on the `STOP_MODE_STAT` check (run D
+below) and passes with the second witness. Not verified: the E1M-AEN801 HP. The differences in the table below are
+transcribed from the Alif sources named in the code comments.
+
+| Aspect | M55-HE (bench-proven STOP) | M55-HP (STOP bench-proven, AEN803) | Source |
+|---|---|---|---|
+| Sleep modes | `STOP`, `STANDBY` | `STOP` only (the vendor's SOFT_OFF-class profile); `STANDBY`: the backend's per-mode wake caps for it are empty, so the dispatcher refuses it with `ALP_ERR_NOSUPPORT` before the backend runs (the backend's `hp_standby_unsupported` check is defence in depth) | sdk-alif `samples/drivers/pm/system_off/src/main.c:89,305`, README ("S2RAM ... HE core only") |
+| TCM retention | HE TCM banks (`SRAM4_x` / `SRAM5_x`) | none: `ALP_POWER_RETAIN_TCM` / `FULL` are `ALP_ERR_NOSUPPORT` (`hp_tcm_not_retainable`); `memory_blocks` is BKRAM \| MRAM \| SERAM only | `main.c:199-201`; hal_alif `aipm.h:195-259` has no HP TCM block |
+| Boot location | any (`vtor_address` optional, U8h) | MRAM only: `SCB->VTOR` below `0x80000000` is refused `ALP_ERR_NOSUPPORT` (`hp_vtor_not_mram`) | `main.c:80,85,199-201` |
+| Core control / reset registers | `AON.RTSS_HE_CTRL` `0x1A604010`, `RTSS_HE_RESET` `0x1A604014` | `AON.RTSS_HP_CTRL` `0x1A604000`, `RTSS_HP_RESET` `0x1A604004` (same bits: `COLD_WAKEUP` [0], `WIC` [9:8], `RESETSYNDROME` [5:0]) | DFP `Device/soc/AE822FA0E5597/include/rtss_hp/soc.h:1157-1158,3656`; `Device/core/common/source/pm.c:61-69`; HP SVD `:3890,3913` |
+| Entry sequence | `pm_core_enter_deep_sleep_request_subsys_off()` step for step | the same, on the HP's own register pair | DFP `pm.c` (one function, `#if defined(RTSS_HP)` picks the registers) |
+| Wake events, EWIC | `WE_LPTIMER0` / `EWIC_VBAT_TIMER`, `WE_LPGPIO0` / `EWIC_VBAT_GPIO` | identical: SoC-level `off_profile_t` fields, and IRQ 57 (`LPGPIO_COMB_IRQ_IRQn`) and 60 (`LPTIMER0_IRQ_IRQn`) are the same lines in the HP header | `rtss_hp/soc.h:140,143`; `main.c:45-50` has no HP branch |
+| Power domains | `PD_VBAT_AON` (STOP) | `PD_VBAT_AON` (the HP is not in the list, so its subsystem is the one that powers off) | `main.c:214-215`; hal_alif `aipm.h:56,68` (`PD_RTSS_HP` = bit 7) |
+| BKRAM wake record | `0x4902C000`, retained | same SoC-level block, same record | `ensemble_e8_peripherals.dtsi` `bkram` node |
+| Clock restore (`..._RESTORE_CLOCKS`, default **off** for the HP boards, on in the example's HP fragment; measured on the AEN803 HP, unmeasured on the AEN801 HP) | RUN profile 160 MHz; healthy = `PLL_CLK_SEL` `ES1` [20] \| `SYS` [4] \| `SYSREF` [0] (`0x00100011`) | RUN profile 400 MHz; healthy = `ES0` [16] \| `SYS` [4] \| `SYSREF` [0] (`0x00010011`) | `main.c:137-138`; HP SVD `PLL_CLK_SEL` `:1862` |
+
+**What the backend does about the other core.** The OFF profile belongs to the calling core. The SE
+powers that core's subsystem off, and the SoC drops to its STOP state only once every subsystem has
+configured and entered its own sleep (DFP `pm.c`, header comment of
+`pm_core_enter_deep_sleep_request_subsys_off()`). The backend cannot see the other core, and no
+register in the DFP or hal_alif says whether it is up, so it neither waits for it nor refuses on
+it. With the HE running while the HP sleeps, only the HP subsystem goes down: the SoC stays in
+RUN, the HP still wakes by a cold boot, and the on-module domains the HP quiesced stay held until it is
+back, so the HE must not be using them. For a real SoC-level STOP both cores have to be in their own
+sleep, each with its own OFF profile. The BKRAM record, the LPTIMER0 wake timer and the RV-3028 are
+single-owner resources: use the backend from one core only (the dtsi notes the same for the
+LPTIMER; the vendor README says the RTC is shared with the HE).
+
+**Run D, and the second STOP witness (HP with the HE running).** Combined ATOC on E1M-AEN803
+2026W36-0001: the HE ran an idle Zephyr app, the HP ran `examples/aen/aen-power-stop`. The HP requested
+STOP, the SE powered the HP subsystem off and re-booted it on the LPTIMER, but `STOP_MODE_STAT` (bit4 of
+`0x1A60F000`, raw `0x100`) stayed clear: the SVD says hardware sets it when the DC-DC was turned off, and
+the DC-DC stays up while the HE runs. `alp_som_power_boot_restore()` then discarded the record
+(`valid=0`, `record_valid` FAIL) and the example repeated cycle 1. At that boot `RTSS_HP_RESET` was
+`0x00` and `RTSS_HP_CTRL` `0x100`. After a SoC-level STOP (HE-only and HP-only images) the same register
+read 0 (diag word 17): the WIC bits do not survive the DC-DC going off, so the two witnesses cover
+disjoint cases.
+
+The rule (`alp_som_power_core_off_take()`, `src/backends/power/alif_se_power_hw.c`): this core's own
+`RTSS_HE_CTRL` / `RTSS_HP_CTRL` WIC [9:8] equal to `0b01` (EWIC, subsystem-off requested) is read and
+cleared on every boot (`COLD_WAKEUP` untouched; an aborted entry's stale bits are consumed by the next
+boot). `alp_som_power_boot_restore()` trusts a STOP record when `STOP_MODE_STAT` is set OR the core was
+off, and a record-less boot with either witness is a blind restore. When the core-off bit is the only
+witness, `RESETSYNDROME` bit2 (`0x4`, reset request to the power domain) marks an external or aborted
+reset and the realised mode is RUN. Bit2 does not cover SYSRESETREQ or a local WDT reset (both leave
+`RESETSYNDROME` 0, DFP `pm.c:600-627`), so the DFP spurious-wake rule is applied too: with the WIC bits
+as the only witness, if neither decode pass (LPTIMER status early, RV-3028 flags in
+`alp_som_power_boot_restore_i2c()`) finds a wake source, the boot is reported as RUN with no wake cause
+and no slept time; the domains are restored either way. Both vetoes are unmeasured on silicon for a
+real reset during the off-time. The realised mode is this core's: the SoC itself reaches STOP only
+when every core is off.
+
+**Run D, re-run with the rule:** dual-core (HE idle Zephyr app + HP `aen-power-stop`) on E1M-AEN803 2026W36-0001 passes 3/3 (LPTIMER `wake_source=0x8`, countdown `0x1`, alarm `0x1`, all `mode=4`, `SUMMARY cycles=3 pass=5 fail=0`, boot diag w[16..19] = `00000100 00000100 00000333 00000000`), flashed as one combined ATOC (DEVICE + m55_he + m55_hp) written by tan's Flow D with the alplabai/tan-cli#1509 fix; the HE-only regression stays 3/3. Unmeasured: the E1M-AEN801 HP and the two reset vetoes above.
 
 ### Comparison with the vendor reference (bench U8c)
 

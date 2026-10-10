@@ -26,9 +26,14 @@
 #define CONFIG_ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS 1
 #define ALP_TEST_NO_SYSINIT                         1 /* the test calls clock_restore() itself */
 
+/* The backend's printk() lands in test_printk() below, so a refusal test can assert the reason. */
+#define printk test_printk
+
 #include "../../../../src/backends/power/alif_se_power.c"
 
+#include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <zephyr/ztest.h>
@@ -239,9 +244,17 @@ const char *alif_se_hw_enter_reason(void)
 	return "fake";
 }
 
+static bool     g_core_hp; /* the fake core: false = M55-HE, true = M55-HP */
+static uint32_t g_vtor;
+
 uint32_t alif_se_hw_vtor_read(void)
 {
-	return 0x80010400u;
+	return g_vtor;
+}
+
+bool alif_se_hw_core_is_hp(void)
+{
+	return g_core_hp;
 }
 
 alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
@@ -619,6 +632,9 @@ static void reset_fakes(void)
 	g_readback_overridden = false;
 	g_get_rc = g_set_rc    = 0;
 	g_se_drops_memory_bits = 0;
+
+	g_core_hp = false;
+	g_vtor    = 0x80010400u;
 
 	g_debugger    = false;
 	g_dcache      = false;
@@ -2324,9 +2340,163 @@ ZTEST(power_alif_se, test_the_built_profile_is_checked_for_mram_and_seram)
 	zassert_true(off_memory_ok(&p));
 }
 
+/* ---- The M55-HP (built, not bench-verified) ---------------------------------------------
+ *
+ * The same compiled backend drives both cores through alif_se_hw_core_is_hp(); the real seam
+ * answers from CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP.  What differs is cited at each branch in
+ * alif_se_power.c (vendor sdk-alif samples/drivers/pm/system_off/src/main.c). */
+
+static char   g_log[512];
+static size_t g_log_len;
+static bool   g_log_on;
+
+void test_printk(const char *fmt, ...)
+{
+	va_list ap;
+
+	if (!g_log_on || g_log_len >= sizeof(g_log) - 1u) {
+		return;
+	}
+	va_start(ap, fmt);
+	(void)vsnprintf(g_log + g_log_len, sizeof(g_log) - g_log_len, fmt, ap);
+	va_end(ap);
+	g_log_len = strlen(g_log);
+}
+
+static void log_capture_start(void)
+{
+	g_log_len = 0u;
+	g_log[0]  = '\0';
+	g_log_on  = true;
+}
+
+static void log_capture_stop(void)
+{
+	g_log_on = false;
+}
+
+ZTEST(power_alif_se, test_hp_standby_is_refused_by_name_before_any_side_effect)
+{
+	g_core_hp = true;
+	log_capture_start();
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STANDBY, 500u, NULL),
+	              ALP_ERR_NOSUPPORT);
+	log_capture_stop();
+	zassert_not_null(strstr(g_log, "reason=hp_standby_unsupported"), "log: %s", g_log);
+	assert_no_side_effect();
+	zassert_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_STANDBY), 0u, "nothing can wake it");
+	zassert_not_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_STOP), 0u, "STOP is unchanged");
+
+	reset_fakes();
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STANDBY, 500u, NULL),
+	              ALP_OK,
+	              "the HE keeps its STANDBY");
+}
+
+ZTEST(power_alif_se, test_hp_has_no_tcm_retention)
+{
+	alp_power_retain_t r = { .level = ALP_POWER_RETAIN_TCM, .retain_kb = 64u };
+
+	g_core_hp = true;
+	zassert_equal(se_configure_retention(&g_state, &r), ALP_ERR_NOSUPPORT);
+	r.level = ALP_POWER_RETAIN_FULL;
+	zassert_equal(se_configure_retention(&g_state, &r), ALP_ERR_NOSUPPORT);
+	r.level = ALP_POWER_RETAIN_UTILITY;
+	zassert_equal(se_configure_retention(&g_state, &r), ALP_OK, "BKRAM is always kept");
+
+	g_state.retain = (alp_power_retain_t){ .level = ALP_POWER_RETAIN_TCM, .retain_kb = 64u };
+	log_capture_start();
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOSUPPORT);
+	log_capture_stop();
+	zassert_not_null(strstr(g_log, "reason=hp_tcm_not_retainable"), "log: %s", g_log);
+	assert_no_side_effect();
+
+	reset_fakes(); /* the HE accepts the same request */
+	g_state.retain = (alp_power_retain_t){ .level = ALP_POWER_RETAIN_TCM, .retain_kb = 64u };
+	zassert_equal(se_configure_retention(&g_state, &g_state.retain), ALP_OK);
+}
+
+ZTEST(power_alif_se, test_hp_image_must_be_mram_booted)
+{
+	g_core_hp = true;
+	g_vtor    = 0x00000000u; /* TCM boot: the wake would resume into TCM that is not kept */
+	log_capture_start();
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOSUPPORT);
+	log_capture_stop();
+	zassert_not_null(strstr(g_log, "reason=hp_vtor_not_mram"), "log: %s", g_log);
+	assert_no_side_effect();
+
+	g_vtor = 0x7FFFFFFFu;
+	log_capture_start();
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOSUPPORT);
+	log_capture_stop();
+	zassert_not_null(strstr(g_log, "reason=hp_vtor_not_mram"), "log: %s", g_log);
+	assert_no_side_effect();
+
+	g_vtor = 0x80000000u; /* the MRAM base itself counts */
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+
+	reset_fakes(); /* the HE has no such rule (optional, bench U8h) */
+	g_vtor = 0u;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+}
+
+ZTEST(power_alif_se, test_hp_stop_builds_the_same_soc_level_profile)
+{
+	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,
+		                   .hw            = ALP_SOM_ARM_LPTIMER | ALP_SOM_ARM_RTC_INT,
+		                   .memory_blocks = ALP_AIPM_GEN2_BACKUP4K_MASK };
+	off_profile_t he;
+	off_profile_t hp;
+
+	poison(&he);
+	zassert_ok(build_off_profile(&he, &g_live, &plan));
+	g_core_hp = true;
+	poison(&hp);
+	zassert_ok(build_off_profile(&hp, &g_live, &plan));
+	assert_all_assigned(&hp);
+	zassert_mem_equal(&he, &hp, sizeof(he), "wake events, EWIC and domains are SoC-level");
+	zassert_equal(hp.power_domains, PD_VBAT_AON_MASK, "the vendor SOFT_OFF domain set");
+	zassert_equal(hp.wakeup_events, ALP_AIPM_GEN2_WE_LPTIMER0 | ALP_AIPM_GEN2_WE_LPGPIO0);
+}
+
+ZTEST(power_alif_se, test_hp_clock_health_and_run_profile)
+{
+	/* ES0 [16] selects RTSS_HP_CLK; the HE's ES1 [20] says nothing about this core. */
+	g_core_hp                      = true;
+	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL] = 0x00010011u;
+	zassert_true(clocks_healthy());
+	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL] = 0x00100011u; /* the HE-only healthy value */
+	zassert_false(clocks_healthy());
+	g_core_hp = false;
+	zassert_true(clocks_healthy(), "and the other way round");
+
+	g_core_hp                        = true;
+	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL]   = 0u;
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
+	zassert_equal(clock_restore(), 0);
+	zassert_equal(g_run_set_calls, 1u);
+	zassert_equal(g_run_set.cpu_clk_freq, CLOCK_FREQUENCY_400MHZ, "vendor HP RUN profile");
+	zassert_equal(g_run_set.power_domains, PD_SYST_MASK | PD_SSE700_AON_MASK);
+}
+
 #ifndef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 /* The product configuration (no bench scratch option): the OFF fields are fixed, the diag
  * patches are no-ops, and nothing bench-only is reachable. */
+ZTEST(power_alif_se, test_core_off_witness_decodes_wic_and_keeps_the_other_bits)
+{
+	uint32_t out;
+
+	zassert_true(alif_se_ctrl_core_off(0x101u, &out), "EWIC subsystem-off");
+	zassert_equal(out, 0x001u, "COLD_WAKEUP preserved");
+	zassert_false(alif_se_ctrl_core_off(0x300u, &out), "IWIC is not a subsystem-off request");
+	zassert_equal(out, 0u);
+	zassert_false(alif_se_ctrl_core_off(0x200u, &out));
+	zassert_equal(out, 0u);
+	zassert_false(alif_se_ctrl_core_off(0x001u, &out), "WIC clear");
+	zassert_equal(out, 0x001u);
+}
+
 ZTEST(power_alif_se, test_product_build_off_profile_is_the_vendor_one_and_not_switchable)
 {
 	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,
