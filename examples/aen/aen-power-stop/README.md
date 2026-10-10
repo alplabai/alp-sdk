@@ -87,8 +87,8 @@ selected like the others (`-DEXTRA_CONF_FILE=variants/<name>.conf`); the default
 |---|---|---|---|
 | (S) STANDBY | `s-standby.conf` | every cycle requests `ALP_POWER_MODE_STANDBY` | `cycle<n> enter STANDBY (...)`, then per cycle `cycle<n> mode_standby PASS` (the wake record's `realised_mode` reads STANDBY) next to the same `record_valid`, `wake_source`, `restored_all`, `bkram_counter` checks. A `request FAIL rc=... realised=...` line, or `valid=0` after the wake, means the SE did not take the STANDBY profile or the record did not survive. |
 | (T) TCM, both banks | `t-tcm-retain.conf` | `ALP_POWER_RETAIN_TCM`, `retain_kb = 256` (DTCM SRAM5_1 + SRAM5_2), plus a pattern probe | before each sleep `POWER_STOP: tcm cycle<n> wrote retain_kb=256 addr=0x... bank0_bytes=... bank1_bytes=... crc_a=0x... crc_b=0x...`; after the wake `tcm cycle<n> read asked_banks=2 bank0=retained bank1=retained` and `cycle<n> tcm_retained PASS` |
-| (T-128) TCM, one bank | `t-tcm-retain-128k.conf` | `retain_kb = 128` (SRAM5_1 only) | `asked_banks=1`; the verdict covers bank 0, and `bank1=` is evidence of which half of the DTCM address range the first retention bit covers |
-| (W) timing | `w-wake-timing.conf` | prints the LPRTC counter at sleep entry, at `PRE_KERNEL_1` and at `main()` | `POWER_STOP: timing cycle<n> lprtc pre=... boot=... main=... ccr=0x... cpsr=... cpcvr=... armed_ms=... main_uptime_ms=...`, then `ticks entry_to_boot=... boot_to_main=... entry_to_main=... tick_ms_nominal=...`, then `entry_to_main_nominal_ms=... wake_to_main_nominal_ms=... rtc_slept_ms=...` (cycle 3, the alarm, prints `wake_to_main_nominal_ms=n/a`). No verdict. |
+| (T-128) TCM, one bank | `t-tcm-retain-128k.conf` | `retain_kb = 128` (SRAM5_1 requested) | `asked_banks=1`; the verdict covers bank 0. `bank1=` is NOT mapping evidence: with any TCM asked for the backend ORs both `RET_CTRL.HETCM1 \| HETCM2` after the SE call (`alif_se_power.c:780-782`), so both DTCM halves stay powered. Mapping evidence needs a backend change that sets only the matching bit (to be tracked) |
+| (W) timing | `w-wake-timing.conf` | prints the LPRTC counter at sleep entry, at `PRE_KERNEL_1` and at `main()` | `POWER_STOP: timing cycle<n> lprtc pre=... boot=... main=... ccr=0x... cpsr=... cpcvr=... armed_ms=... main_uptime_ms=...`, then `ticks entry_to_boot=... boot_to_main=... entry_to_main=... tick_ms_nominal=...`, then `lprtc_rate_mhz=...`, `entry_to_main_nominal_ms=...`, and `entry_to_main_min_ms=... rtc_slept_ms=... armed_ms=... wake_to_main_min_ms=... wake_to_main_rtc_ms=...` (cycle 3, the alarm, prints `wake_to_main_ms=n/a`). No verdict. |
 
 **How the TCM probe works.** The whole of Zephyr's RAM is the 256 KiB M55-HE DTCM (CPU-local
 `0x20000000`). The probe is a 160 KiB `.noinit` array, so the C runtime neither copies nor zeroes it
@@ -98,23 +98,30 @@ cycle number) and checked by CRC-32 after the wake, with the expected CRC regene
 stored. The bank size (two 128 KiB DTCM banks) is taken from hal_alif `se_services/include/aipm.h`
 (`MB_SRAM5_1`, `MB_SRAM5_2`, "dtcm 128kb") and the E8 DFP `SOC_FEAT_HE_DTCM_SIZE`. **Still
 unproven:** that `SRAM5_1` is the low half of the address range, and that the SRAM5_x bits drive
-`RET_CTRL.HETCM_RET1/2`. A `lost` on a bank that was asked for is a real finding (the SES may also
+`RET_CTRL.HETCM_RET1/2` (this example cannot show it: both RET_CTRL bits are always set). A `lost` on a bank that was asked for is a real finding (the SES may also
 scrub the TCM on the cold boot), not necessarily a test fault; read `bank0=`/`bank1=` together with
 `asked_banks=`.
 
-**How the timing is derived, and how good it is.** The only counter that keeps running through STOP
-and the SE cold boot, and is readable from `main()` without the sleep disturbing it, is the LPRTC
-(VBAT domain, `0x42000000`). Its prescaler `CPSR` resets to `0x8000`, which the SVD says is 1 Hz on a
-precise 32.768 kHz clock. Here the clock is the SES-left LFRC (about 4.5 % fast, per the notes
-above) and an earlier bench counted about 2 Hz, so `tick_ms_nominal` is a nominal figure and `cpsr`
-and `ccr` are printed raw for the bench to settle the real rate. The wake event itself is not
-timestamped: wake-to-`main()` is `(main - pre) - armed_ms` (ticks converted at the nominal rate),
-which is a **bound with one-tick resolution (hundreds of ms) at each end, not a measurement**.
-`main_uptime_ms` is the kernel's own time at the sample, so the SES + ATOC share is the remainder.
-For a figure at millisecond resolution a counter running at a known rate through the sleep would be
-needed; this part offers none that the SDK may reprogram without breaking the backend's own LPRTC
-elapsed-time check, so none is used. It needs the bench scratch option (on in `prj.conf`) for the
-`PRE` / `BOOT` snapshots, so it does not exist in the `product-noscratch` image.
+**How the timing is derived, and how good it is.** The LPRTC (VBAT domain, `0x42000000`) keeps running
+through STOP and the SE cold boot and is readable from `main()`. It is not the only such counter: the
+RV-3028 (+-1 ppm, backup supply) runs through it too and is the backend's time base for `slept_ms`.
+The LPRTC prescaler `CPSR` resets to `0x8000`, which the SVD says is 1 Hz on a precise 32.768 kHz
+clock. Here the clock is the SES-left LFRC (about 4.5 % fast, per the notes above) and an earlier
+bench counted about 2 Hz (155 ticks in 76 s, LFRC / 2^14), so a CPSR-based figure can be about 2x
+off; `cpsr` and `ccr` are printed raw, and `tick_ms_nominal=n/a (prescaler off)` appears when
+`LPRTC_CCR.LPRTC_PSCLR_EN` is clear. The example prints the result several ways:
+`entry_to_main_nominal_ms` (CPSR / 32768), `entry_to_main_min_ms` at the backend's fastest rate
+(2.2 Hz, a lower bound), and from the RV-3028 `rtc_slept_ms`, `lprtc_rate_mhz` (entry_to_main
+ticks / `rtc_slept_ms`, the measured LPRTC rate) and `wake_to_main_rtc_ms = rtc_slept_ms -
+armed_ms`, the calibrated bound. The wake event itself is not timestamped (it happens at entry +
+armed time), so wake-to-`main()` is a **bound with 1 s resolution at each end, not a measurement**.
+If the RV-3028 could not be read, `slept_ms` falls back to the armed length and the RTC figures are
+no witness. `armed_ms` is the requested interval; for the LPTIMER cycle the backend rounds the count
+UP against the fastest LFRC (36045 Hz, `alif_se_power.c:190-200`), so the real sleep runs about
+5-16 % longer and `wake_to_main_*` is biased high for that cycle. `main_uptime_ms` is the kernel's
+own time at the sample, so the SES + ATOC share is the remainder. It needs the bench scratch option
+(on in `prj.conf`) for the `PRE` / `BOOT` snapshots, so it does not exist in the
+`product-noscratch` image.
 
 Product OFF profile (bench U8g: STOP woke 2 of 2 with it, never without): `vtor_address` =
 `SCB->VTOR` and `memory_blocks` = MRAM \| SERAM \| BKRAM are the backend default. The bench
