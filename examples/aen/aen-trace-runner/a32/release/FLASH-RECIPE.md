@@ -245,8 +245,20 @@ line reads `I2C2 leased by the HP and returned within one frame: back on the HE`
 3. Sound plays beside the camera: the pose slot's `hp_state` stays 0, the HP debug beacon's
    heartbeat (`0x0237FCAC`) keeps its frame rate, `hp_i2s_fu` stays 0 for 60 s.
 4. Reset the HP alone: its `PRE_KERNEL_1` forgets the lease, the HE (idle, it owns the bus)
-   sees the new `WANT`, offers a new token, and the bring-up runs again. An HE-only reset still
-   reconfigures I2C1 under the running camera exactly as before (`alp,i2c-handover`): reset both.
+   sees the new `WANT`, offers a new token, and the bring-up runs again.
+   Reset the HE alone (SYSRESETREQ on the HE AP, HP and A32 running): the HE sees the handover record
+   taken and the HP's liveness word (`0x0237FD90`, a 10 ms HP timer) moving, prints `i2c-handover: warm boot ... not touching it`,
+   and leaves I2C1 (no driver init, no NVIC line), the bridge's EN pin, the recipe (`0x0237FE00`) magic and the
+   counters alone; it re-initialises the DSI host and the CDC200 only. The HP's `sn65dsi83` agent
+   replays the CSRs if the DSI restart cost the bridge its PLL lock (`sn65dsi83: lost config, re-init` on
+   the HP console within ~2 polls of `CONFIG_SN65DSI83_RECOVERY_INTERVAL_MS`), the camera keeps streaming.
+   (Not bench-verified at the time of writing.)
+   Fatal-error test (TR_BENCH_FAULT_INJECT builds, inert until armed): over SWD write `0x0237FD98` =
+   delay in ms, then `0x0237FD9C` = `0x464A4E54` ('FJNT'). The HE panics once its uptime passes the delay
+   (`he-fault: fatal error ..., asking the SE to reset the SoC`), the SoC resets, and because the word stays set it
+   faults again every boot: the 3rd fatal error within 30 s of a boot must HALT (`... keep coming right after each
+   boot, halting`). If the count does not survive the SE reset (SRAM0 cleared) it never halts: build with
+   `-DTR_HE_FAULT_SOC_RESET=OFF`. Disarm: write 0 to `0x0237FD9C` (or power-cycle if SRAM0 is cleared).
    (An HE reset inside the HP's bring-up is covered by the host tests, not by a bench step.)
 5. Volume (record `TR_MEM_VOL` = `0x0237FD80`, `src/ipc/tr_vol.h`): HE console `[vol] 30% at 0x0237fd80: pads 0,
    encoder ok, switch ok, bench request word +4` (`encoder none` / `switch none` if that control failed to open); over SWD `+0x00` `vol` = `0x564F001E` (30 %), `+0x08` `rejects` 0, `+0x0C` `seq` 0. Turn the

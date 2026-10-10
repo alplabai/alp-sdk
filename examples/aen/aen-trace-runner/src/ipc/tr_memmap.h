@@ -126,6 +126,7 @@
                                        * tr_vol.h tr_vol_t, 16 B, TR_HP_SOUND builds). 16-B aligned, right after
                                        * TR_MEM_BUS2's end (0x0237FD70) and a 16-B gap; ends at 0x0237FD90, still
                                        * inside the shared NC page. tr_vol.h asserts all of that. */
+#define TR_MEM_VOL_SIZE 0x10u /* sizeof(tr_vol_t), asserted in tr_vol.h */
 /* The panel backlight's bench record (src/ipc/tr_knob.h tr_bl_t, 16 B), in the one gap left in the
  * shared NC page: 0x0237FDA8..0x0237FDFF, between the words fix/sn65dsi83-auto-recovery (#2816)
  * puts at 0x0237FD90..0x0237FDA7 (I2C1 liveness, fault injector, SE message) and its bridge recipe
@@ -138,6 +139,66 @@
 #define TR_MEM_BL_GAP_LO          TR_MEM_SN65_RESERVED_A_HI
 #define TR_MEM_BL_GAP_HI          TR_MEM_SN65_RESERVED_B_LO
 #define TR_MEM_BL 0x0237FDC0u /* HE: the backlight level + the bench's request word */
+#define TR_MEM_BL_SIZE 0x14u       /* tr_bl_t: 20 B (led_errs at +0x10): 0x0237FDC0..0x0237FDD3 */
+#define TR_MEM_SN65_RECIPE \
+	0x0237FE00u /* HE -> HP: the SN65DSI83 bridge's CSR table (struct sn65dsi83_recipe, zephyr/drivers/
+                                       * display/sn65dsi83_recovery.h, 0x54 B, the RVT121 + TR_INPUT_NPU builds). The HE's
+                                       * bridge driver publishes it before it hands I2C1 over; the HP's
+                                       * alp,sn65dsi83-recovery node replays it if the bridge resets itself. Both overlays
+                                       * (shield-fit-npu/e1m_evk_rvt121hvdfwca0.overlay, hp_vision's board overlay) carry this
+                                       * as recovery-recipe-address / recipe-address, asserted against it in src/main.c and
+                                       * hp_vision/src/main.c. 32-B aligned, past the lease record (0x0237FD70). */
+#define TR_MEM_SN65_RECIPE_SIZE \
+	0x54u /* sizeof(struct sn65dsi83_recipe), asserted in the SDK header */
+_Static_assert(TR_MEM_SN65_RECIPE % 32u == 0u, "the recipe is 32-B aligned");
+_Static_assert(TR_MEM_SN65_RECIPE >= TR_MEM_BUS2 + 48u,
+               "the recipe is clear of the I2C2 lease record");
+_Static_assert(TR_MEM_SN65_RECIPE >= TR_MEM_CAM_VIEW + 0x20u &&
+                   TR_MEM_SN65_RECIPE >= TR_MEM_HP_DBG + 0x68u,
+               "the recipe is clear of the camera view and hp_dbg");
+_Static_assert(TR_MEM_SN65_RECIPE >= 0x0237F000u &&
+                   TR_MEM_SN65_RECIPE + TR_MEM_SN65_RECIPE_SIZE <= 0x02380000u,
+               "the recipe sits inside the shared NC page 0x0237F000..0x0237FFFF");
+#define TR_MEM_HE_FAULT \
+	0x0237FE60u /* HE -> HE (next boot): the last fatal error + the console tail (src/ipc/tr_he_fault.h
+                                       * tr_he_fault_t, 0x18C B, src/platform/he_fault.c). 32-B aligned, right after
+                                       * TR_MEM_SN65_RECIPE's end (0x0237FE54); ends at 0x0237FFEC, inside the shared NC
+                                       * page, which survives a warm reset. */
+#define TR_MEM_HE_FAULT_SIZE 0x18Cu /* sizeof(tr_he_fault_t), asserted in tr_he_fault.h */
+_Static_assert(TR_MEM_HE_FAULT % 32u == 0u, "the HE fault record is 32-B aligned");
+_Static_assert(TR_MEM_HE_FAULT >= TR_MEM_SN65_RECIPE + TR_MEM_SN65_RECIPE_SIZE,
+               "the HE fault record is clear of the bridge recipe");
+_Static_assert(TR_MEM_HE_FAULT + TR_MEM_HE_FAULT_SIZE <= 0x02380000u,
+               "the HE fault record sits inside the shared NC page, below the MHU0 window");
+#define TR_MEM_HE_RESET_GUARD \
+	0x0237FFF0u /* HE -> HE (next boot): the loop guard of the last-resort SoC reset (src/ipc/
+                                       * tr_reset_guard.h tr_reset_guard_t, 8 B). Right after TR_MEM_HE_FAULT's end
+                                       * (0x0237FFEC), ends at 0x0237FFF8. */
+#define TR_MEM_HE_RESET_GUARD_SIZE 8u /* sizeof(tr_reset_guard_t), asserted in tr_reset_guard.h */
+_Static_assert(TR_MEM_HE_RESET_GUARD >= TR_MEM_HE_FAULT + TR_MEM_HE_FAULT_SIZE,
+               "the reset guard is clear of the HE fault record");
+_Static_assert(TR_MEM_HE_RESET_GUARD + TR_MEM_HE_RESET_GUARD_SIZE <= 0x02380000u,
+               "the reset guard sits inside the shared NC page, below the MHU0 window");
+#define TR_MEM_I2C1_ALIVE \
+	0x0237FD90u /* HP -> HE: the I2C1 handover's liveness word (alive-address of both alp,i2c-handover nodes): the HP
+ * advances it from a 10 ms timer started right after it took I2C1; the HE reads it at boot to tell a warm
+ * HE-only reset from a cold power-up. 4 B, clear of the I2C2 lease record (ends 0x0237FD70). */
+#define TR_MEM_FAULT_INJECT \
+	0x0237FD98u /* bench -> HE: tr_fault_inject_t (src/ipc/tr_fault_inject.h, 8 B, TR_BENCH_FAULT_INJECT builds): write
+ * magic + delay over SWD and the HE panics once its uptime passes the delay, on every boot until cleared. */
+#define TR_MEM_FAULT_INJECT_SIZE 8u
+#define TR_MEM_SE_MSG \
+	0x0237FDA0u /* HE: the SE service request of the fatal-error SoC reset (service_header_t, 8 B), in SRAM0 so the SE reads
+ * it by its global address with no local-to-global translation (src/platform/he_fault.c). */
+#define TR_MEM_SE_MSG_SIZE 8u
+_Static_assert(
+    TR_MEM_VOL >= TR_MEM_BUS2 + 48u && TR_MEM_I2C1_ALIVE >= TR_MEM_VOL + TR_MEM_VOL_SIZE &&
+        TR_MEM_I2C1_ALIVE + 4u <= TR_MEM_FAULT_INJECT &&
+        TR_MEM_FAULT_INJECT + TR_MEM_FAULT_INJECT_SIZE <= TR_MEM_SE_MSG &&
+        TR_MEM_SE_MSG + TR_MEM_SE_MSG_SIZE <= TR_MEM_BL &&
+        TR_MEM_BL + TR_MEM_BL_SIZE <= TR_MEM_SN65_RECIPE,
+    "the liveness word, the fault injector and the SE message sit between the volume record "
+    "and the backlight record, which ends before the recipe");
 /* Once fix/sn65dsi83-auto-recovery has landed, its real symbols must still match the ranges reserved
  * above (until then this #ifdef compiles to nothing). */
 #ifdef TR_MEM_I2C1_ALIVE

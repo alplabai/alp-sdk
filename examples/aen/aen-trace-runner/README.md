@@ -214,7 +214,11 @@ SDK glue in `zephyr/soc-bridge/alif/i2c_handover.c`, protocol in `i2c_handover.h
 a disabled bus is released at once, so on the RK055 the HE never touches I2C1. Otherwise, at the end
 of its boot the HE masks its I2C1 interrupt, stops its controller and publishes a per-boot nonce and
 a state (`TR_MEM_I2C1_HANDOVER`, `0x0237FC94`, three words in SRAM0); a controller that will not go
-idle is released DIRTY with a warning. The HP waits for a release it has not taken yet before it
+idle is released DIRTY with a warning. An HE-only reset while the HP runs is a *warm* boot: the HE
+recognises it (record taken, the HP's liveness word `0x0237FD90` moving: a 10 ms timer the HP starts right after it took the bus), never initialises I2C1 (the node
+is `zephyr,deferred-init`; only a cold boot `device_init()`s it), leaves the bridge's EN pin and the
+recipe alone and re-initialises the DSI host only; the HP's recovery agent repairs the bridge if the
+host restart cost it its lock. The HP waits for a release it has not taken yet before it
 unsticks the pads or initialises the bus and the camera (its unstick runs after the wait),
 reports on its console every 20 s while the release is missing, and consumes it. Start the HE
 first, then the HP. An HP restarted alone after it took the bus waits for a release that is not

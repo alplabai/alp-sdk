@@ -401,7 +401,17 @@ responder to 0 and back with `CAM_EN`.
   scanned out upright with the shield's `mount-rotation` of 90.  The touch
   controller's reset role is still carried over from the RK055 shield's
   role map and marked UNVERIFIED in the overlay (the game does not use
-  touch).  The panel's
+  touch).  **Bridge self-recovery:** the SN65DSI83 can reset itself to its
+  defaults mid-run (panel black, backlight on); the driver health-checks CSR
+  `0x0D`/`0x0A`/`0xE5` every `CONFIG_SN65DSI83_RECOVERY_INTERVAL_MS` (1000 ms)
+  and replays its init (`CONFIG_SN65DSI83_RECOVERY`, default y), rate-limited to
+  one per 5 s, counted by `sn65dsi83_recovery_count()` and reported with
+  `printk` (the example apps keep `CONFIG_LOG` off, so it is not a `LOG_WRN`).
+  When the display core hands I2C1 to another core (the Trace Runner with
+  `-DTR_INPUT_NPU=ON`: the HE configures the bridge, the HP owns the bus for
+  the camera) the HE never polls: the HP replays the CSR table the HE published
+  (`recovery-recipe-address`, `alp,sn65dsi83-recovery`).  Replay into a live
+  video stream is bench-unverified.  The panel's
   own **ILI2511** capacitive-touch controller (I2C `0x41`, same
   `EVK_I2C_BUS_DSI_CSI` bus as above) is bound by the shield
   (`ilitek,ili251x` Zephyr input driver) and POLLED: the carrier's touch
