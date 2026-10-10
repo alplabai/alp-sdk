@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-08",
+  "generated": "2026-10-10",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -15441,8 +15441,8 @@
           "value": "0"
         },
         "ALP_VERSION_STRING": {
-          "hash": "b0e812a2a6fa1962",
-          "value": "\"0.17.0-rc1\""
+          "hash": "da54f46fc3f0bace",
+          "value": "\"0.17.0-rc2\""
         }
       },
       "typedefs": {},

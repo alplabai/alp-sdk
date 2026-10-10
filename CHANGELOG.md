@@ -7,6 +7,395 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
+## [v0.17.0] - 2026-10-08 (release candidate: v0.17.0-rc2)
+
+### Added — build-plan-v1 `sharedArtefacts` carries `generated/storage_mount_table.c` when the project has mountable storage (tan-cli#1216)
+
+When board.yaml `storage:` declares a mountable partition (a `mount:` on a non-`raw` fs), `sharedArtefacts` gains `build/generated/storage_mount_table.c`, byte-identical to `--emit storage-mounts-c` (`emit_storage_mounts_c`); the standalone emit and the plan call the same function. Projects with no mountable storage get no entry, since the standalone emit would only print an empty table. The emit registry now records the same path. Additive under `schemaVersion` 1, no bump. Nothing in the CMake or Zephyr build reads the file; apps that opt in include it.
+
+### Added — soc-spec-v1 `cm33_boot.mtd_name`: the V2N xSPI boot partition `xspi_offset` is relative to (tan-cli#1314)
+
+RZ/V2N `n44.json` now records `"mtd_name": "fip"` beside `xspi_offset` (`0x1A0000`), and `soc-spec-v1` accepts the optional key. A tool writing the CM33 image from running Linux resolves `/proc/mtd` by this name, so a project manifest cannot point the offset-scoped erase at a different partition. Consumed by tan-cli's `linux_mtd` flash backend.
+
+### Fixed — planner no longer aliases mailbox channel 0 for unreserved `ipc:` entries or crashes on a leading-zero RAM console size (alplabai/tan-cli#1487)
+
+An `ipc:` entry not named after a `mailbox.channels[].reserved_for` tag used to fall back to mailbox channel 0, the channel reserved for `alp_default_rpmsg`, so two links silently shared one doorbell. `resolve_carve_outs()` now gives such an entry the lowest unclaimed `reserved_for: app` channel and, when none is left, marks the entry `blocked` with a `no mailbox channel` reason naming the entry and the SoM's reservations. Channel 0 is only ever handed to an entry named for its reservation.
+
+`CONFIG_RAM_CONSOLE_BUFFER_SIZE=016384` in an app `prj.conf` raised an uncaught `ValueError` from `int(x, 0)`. It is now read the way Kconfig reads an int symbol: `0x` prefix is hex, anything else is decimal, so `016384` is 16384.
+
+### Fixed — the trace-runner A32 renderer no longer faults on a cold mailbox page; the v0.17.0-rc1 known issue is fixed (#2257)
+
+The renderer fault listed as a known issue in v0.17.0-rc1 (4 of 5 cold boots on the bench, the HE watchdog relaunching it) was a power-on garbage mailbox. SRAM1 is uninitialised on a cold boot, so a release renderer that the stub self-launched before the HE's first frame found `in_seq != out_seq` and a random `in.rotation`, took it as a pending frame, and the rotation check trapped (`UNDEF`, `pad3[7] = 0xAB1D....`). Three changes: the stub clears the producer and consumer blocks of the mailbox on a cold page (`tr_mbox_cold_clear()`), so no power-on garbage is ever a waiting frame; the renderer holds a frame to the rotation ABI only if it will be drawn (a valid framebuffer), while a real HE frame with a bad rotation still faults; and the stub's `launch()` now bumps `stub_heartbeat0` to a fresh non-zero value before every jump, the self-launch included, so the core-1 gate token is never 0 (the renderer's gate word is a fixed word outside `.bss`, holding power-on garbage or an earlier launch's token until core 0 writes it, and a token of 0 could meet a gate that reads 0). A mailbox page of another `TR_MBOX_VERSION` is cleared like a cold one, the HE publishes only once the stub has initialised the page, and a stale fault record is printed once. The HE's watchdog now prints the stub's fault record (core, code, `lr`, `dfsr`, `dfar`, `ifsr`, `ifar`, `pad3[7]`) to the console before it writes a relaunch, so a future fault leaves evidence.
+
+### Added — Linux V4L2/media-controller backend for `<alp/camera.h>` (#2616)
+
+On Yocto only the `zephyr_stub` camera backend linked, so every
+`alp_camera_*` call returned `ALP_ERR_NOT_IMPLEMENTED`. New
+`src/backends/camera/yocto_drv.c` (priority 100, `silicon_ref "*"`) drives
+a sensor -> CSI-2 rx -> capture-node pipeline through V4L2 and the media
+controller. camera_id N resolves through the `alp-camera<N>` device-tree
+alias to the sensor's subdev, then the enabled links are followed to the
+`/dev/video*` node (no entity names hard-coded, no link changes); a missing
+alias or sensor is `ALP_ERR_NOT_READY`. `ALP_PIXFMT_GREY8` / `RAW8` /
+`RAW10` negotiate the media-bus code the sensor offers and propagate it
+along the chain; the RZ CRU CR10 packed layout is unpacked to GREY8 or
+one uint16 per pixel. A requested fps programs `V4L2_CID_VBLANK` from
+`PIXEL_RATE` + `HBLANK` (clamped to the sensor range, never an open
+failure) and `alp_camera_get_fps()` reports the result x1000; the sensor's
+own VBLANK is restored on close. A Bayer colour sensor (IMX296LQ,
+`SBGGR10_1X10`) is served as RAW10; colour formats and `configure_isp()` stay
+`ALP_ERR_NOSUPPORT`. An 8-bit capture node that pads its rows is repacked to
+`width*height` bytes; a failed device scan falls through to the next
+`/dev/media*`. Covered by `tests/yocto/peripheral_camera.c`.
+
+Bench-verified on E1M-V2M103 (`2026W38-0008`, IMX296LQ on CAM0): RAW10 data
+matches `v4l2-ctl`, 30.00 fps is delivered at a 30 fps request, VBLANK is
+restored after each run. A 60 fps request settles near 40 fps (#2792). RAW8
+and the direct Y8 path are not bench-verified.
+
+Static Linux builds: `libalp_sdk.a` dropped `yocto_drv.o` (the dispatcher
+anchor only reaches the stub), so a static consumer silently got the stub.
+New `ALP_BACKEND_ANCHOR_FORCE(class, name)` in `<alp/backend.h>` exports a
+symbol from the backend's TU, and `alp::sdk` now carries the INTERFACE link
+option `-Wl,--undefined=_alp_backend_force_camera_yocto_drv` on static Linux
+builds. A plain non-CMake static link must add that option itself (#2790
+tracks the other classes).
+
+### Added — IMX296 backport, IMX335 2-lane and OV9282 v6.6 modes for V2N/V2M Linux (#2618)
+
+Three `linux-renesas` kernel patches, applied unconditionally by `linux-renesas_%.bbappend`: `0028-media-i2c-add-imx296-backport.patch` (Sony IMX296 driver from v6.6; 1-lane 1456x1088 mono/colour, no external trigger), `0029-media-i2c-imx335-2-lane-10-bit-binned-mode.patch` (IMX335 on 2 or 4 lanes plus a 1296x972 `SRGGB10_1X10` binned mode; with 2 lanes only the binned mode is offered, as the 12-bit full frame cannot fit the link) and `0030-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch` (the v6.6 `ov9282.c`: 1280x800 and 640x400 modes, `Y8_1X8`, the `ovti,ov9281` compatible). The v6.6 OV9282 driver only selects the gated MIPI clock when the endpoint has `clock-noncontinuous`, so `e1m-x-evk-cam0-ov9281.dtsi` now sets it to keep the bench-proven 720p configuration.
+
+A new unconditional `camera-sensors.cfg` builds the IMX219, IMX296, IMX335, OV5647 and OV9282 drivers built in (`=y`) on every V2N/V2M machine. `docs/v2n-camera-csi.md` gains a "Sensor drivers available" table and the devicetree each sensor needs. Bench-unverified except OV9281 1280x720.
+
+The IMX296 patch makes `imx296_identify_model()` wait 2-5 ms after leaving standby: without it `SENSOR_INFO` reads `0x0000` and a plain `sony,imx296` node fails probe with `invalid device model 0x0000`. IMX296LQ (colour) is bench-verified on E1M-V2M103 CAM0/J5 at 60 fps; colour / AWB is not tuned.
+
+### Changed — the V2N/V2M Linux camera devicetree and kernel config are generated from metadata (#2633)
+
+The V2N/V2M Linux camera devicetree and kernel config now come from metadata instead of hand-written fragments.
+
+- **Generator:** `scripts/gen_camera_dt.py` writes `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk-<connector>-<module_id>.dtsi` for every carrier camera connector x camera module that fits it, plus `camera-sensors.cfg`. Inputs are `metadata/camera_modules/*.yaml`, each chip's `drivers.linux`, the board's `camera_connectors`, the SoM `pad_routes` and the SoC `linux_dt`. `--check` exits 1 on drift, and adding a camera is a metadata-only change plus a regeneration.
+- **Connectors:** a fragment is generated only for a board connector with `camera_connectors.<CAMn>.linux: true` (the flag #2791 added); the E1M-EVK's Zephyr-only CAM0 gets none.
+- **Gate:** `scripts/check_camera_parity.py` (registered as `camera-parity`, run by `pr-metadata-validate.yml`) fails when a committed generated file drifts, is missing, or outlives its module. When a module is skipped (a missing kernel patch, say) the message says why.
+- **Schema:** the SoC JSON gains `linux_dt.CSI0.kconfig`. The chip schema gains `drivers.linux.variants`. The camera-module schema gains optional `linux_compatible` (must be the chip's compatible or one of its `variants`) and `linux_bench` (`verified`/`unverified`; an unverified fragment carries a `BENCH-UNVERIFIED` header line). A chip with no `drivers.linux` block is skipped, not an error.
+- **Selection:** the per-sensor switches `ALP_ENABLE_CAM0_IMX219` and `ALP_ENABLE_CAM0_OV9281` are replaced by one `ALP_CAMERA_CAM0 = "<module_id>"` (an unknown id is rejected at parse time and the valid ids are listed). The hand-written `e1m-x-evk-cam0-imx219.dtsi` and `e1m-x-evk-cam0-ov9281.dtsi` and the opt-in `camera-csi.cfg` are deleted.
+- **Kernel config:** `camera-sensors.cfg` is merged on every V2N/V2M machine and builds the CSI-2 receiver, the CRU and every servable module's sensor driver in (the images install no kernel-modules).
+- **Alias:** every fragment sets `aliases { alp-camera<N> = &cam<N>_sensor; }` for its connector `CAM<N>`, the node the `<alp/camera.h>` Linux backend resolves `camera_id` N through before walking the media graph to `/dev/video*`.
+- **Behaviour differences from the hand-written fragments**, all read from metadata: the sensor `*-supply` properties bind to a fixed always-on 3.3 V regulator (the connector's `supply: fixed-3v3`) instead of logging dummy regulators; every module on CAM0 gets the connector's `lane-polarities` (`lane_polarity: [1, 1, 1]`, bench-proven with the OV9281 and IMX296 modules); the OV9281 node keeps `compatible = "ovti,ov9282"` and its gated clock lane (`clock-noncontinuous`). CAM0 enable and reset stay unmodelled because their SoM routes are `TBD`, and each fragment's header says so. `clock-noncontinuous` is ignored by the native 6.1 driver (it always writes the gated clock, `0x4800 = 0x20`) and required by the v6.6 backport of patch `0030`.
+- **Servable modules:** a module gets a fragment only when `metadata/os/linux-kernel-drivers.yaml` says the kernel can serve it (driver native, or its patch present), so `ALP_CAMERA_CAM0` only offers modules the kernel can serve. All five camera modules qualify now that patches `0028` (IMX296) and `0029` (2-lane IMX335) are present.
+- **IMX296:** the fragment names `sony,imx296lq`, the node bench-proven on E1M-V2M103 CAM0/J5 on 2026-10-08 (60.38 fps, `SBGGR10_1X10` 1456x1088, zero CSI/CRU errors; colour / AWB not tuned). Plain `sony,imx296` also passed 6/6 boots with patch `0028`'s settle delay.
+- **Bench status:** the generated cam0 DTB booted on V2M103 (dtc clean at the default level, alias resolves, `<alp/camera.h>` returns `ALP_OK`). The hand-written OV9281 DT was bench-proven 2026-10-02 and the generated OV9281 fragment is pending re-bench; every other module is BENCH-UNVERIFIED. bitbake was not run. The project `cameras:` to `ALP_CAMERA_CAM0` emit is not part of this change.
+
+### Added — board.yaml `cameras:` now selects the camera (Zephyr `-DSHIELD`, Yocto `ALP_CAMERA_CAM<n>`) (#2633)
+
+A project's `cameras: [{connector, module}]` block, until now only validated,
+drives the build, for the one core that owns the camera (`cameras[].core`, or the one core whose OS the connector supports: Zephyr needs `zephyr_shields` + a module `zephyr_shield`, Yocto needs `camera_connectors.<CAMn>.linux: true`; none or several is ALP-B003). That Zephyr core gets one
+`-DSHIELD="<carrier shields> <module shield>"` on its `west build` command and in
+`cmake-args.txt` (`-D<image>_SHIELD` on a sysbuild); a Yocto core gets `ALP_CAMERA_CAM<n> = "<module_id>"` in its
+`local.conf`. Connector `CAMn` is camera index `n`.
+
+- `camera_connectors.<CAMn>.zephyr_shields` (new, optional, ordered) names the
+  carrier-side Zephyr shields; the E1M-EVK CAM0 declares `[e1m_evk_rpi_csi]`.
+  `camera_connectors.<CAMn>.linux: true` (new, optional) marks a connector a Linux
+  core can drive; the X-EVK CAM0 sets it, and it is only valid on CAM0 of a
+  `renesas-rzv2n*` board.
+- On a Zephyr owner, a module without `zephyr_shield`, a connector without
+  `zephyr_shields`, or a carrier shield with no overlay for the board target is an
+  ALP-B003 error; the planner backstops it with a `camera-select-failed` warning.
+- `validate_metadata.py` now checks that every `zephyr_shield` /
+  `zephyr_shields` entry is a directory under `zephyr/boards/shields/`.
+- New fixture `tests/fixtures/cameras-select/board.yaml` pins the AEN OV9281 plan in the emit snapshots.
+
+tan-cli's planner mirror must resync `alp_orchestrate/orchestrator.py`,
+`buildplan.py`, `kconfig.py`, `alp_project.py` and the new `cameras.py` and `camera_owner.py`.
+
+### Fixed — `diagnostics.console: ram` no longer shrinks an app-set RAM console size (#2773, alplabai/tan-cli#1401)
+
+The generated per-core `alp.conf` is merged after the app's `prj.conf`, and the
+RAM-console block hard-coded `CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048`, so an app
+that asked for `8192` got `2048` and its console wrapped, losing the start of
+the run. The emitter now reads the slice's own `prj.conf` and emits the larger
+of that value and the 2048 floor. `BoardProject` gains `source_dir` (the
+board.yaml directory) so the emitter can find the app.
+
+### Fixed — `parity-seam1` is green on `dev` again: the comparator allows the rendered `alp.overlay` / `cmake-args.txt` (#2775)
+
+#2771 made each slice's `configArtefacts` carry the rendered `alp.overlay` and `cmake-args.txt`. The frozen 97ad481b oracle predates both, so `tests/parity/seam1_field_diff.py` reported `slices[N].configArtefacts[len]: oracle=1 live=3` on five boards and the `parity-seam1` check went red.
+
+The comparator gains a fourth, narrow allowance (the same one tan-cli's vendored copy took in tan-cli#1394). A slice's live `configArtefacts` may equal the oracle's list unchanged, followed by exactly `[alp.overlay, cmake-args.txt]`, `[cmake-args.txt]` or `[alp.overlay]`, matched by basename and in that order. A changed oracle entry, any other extra, reordered extras and extras placed before the oracle's entries still fail. Tests in `tests/parity/test_seam1_field_diff.py` pin each of those.
+
+Comparator and tests only; no workflow, emitter or oracle change.
+
+### Added — build-plan-v1 slices carry the rendered `alp_hw_info_build.h` and `alp-west-libs.yml` (tan-cli#1216, #2777)
+
+A zephyr or baremetal slice's `configArtefacts` gains, after `cmake-args.txt`, `alp_hw_info_build.h`, byte-identical to `alp_project.py --emit hw-info-h --core <id>` (`_slice_hw_info_h`), and `alp-west-libs.yml`, byte-identical to `--emit west-libraries --core <id>` (`_slice_west_libraries`); the standalone emits and the plan call the same helpers. Order is `alp.overlay`, `cmake-args.txt`, `alp_hw_info_build.h`, `alp-west-libs.yml`. Additive under `schemaVersion` 1, no bump. A SKU outside the production families emits a `hw-info-unavailable` warning and no header instead of failing the plan. A slice with no libraries still carries a well-formed empty `alp-west-libs.yml`. Both are reference files: nothing in the CMake or Zephyr build reads them.
+
+The seam-1 comparator (`tests/parity/seam1_field_diff.py`) allows exactly that ordered tail, the same tail without `alp.overlay` on a no-header board, and both of those without `alp_hw_info_build.h` for the `hw-info-unavailable` case, and nothing else, and the emit snapshots are regenerated, so `parity-seam1` stays green. Per ADR-0026 §D.
+
+### Removed — E1M-NX9101 / NXP i.MX 93 support (never produced) (#2781)
+
+The E1M-NX9101 module was never produced, so the SDK no longer carries it: the
+SoM preset and `imx93` family metadata, the `nxp:imx9:imx93` SoC spec, the
+`rpmsg-imx93` example, `vendors/nxp-imx93/`, the `e1m-nx9101-a55` Yocto machine,
+the Zephyr board overlay, the HIL board directory, and the four Murata Wi-Fi
+combo manifests that only listed it. `E1M-NX9xxx` no longer matches the SoM SKU
+pattern.
+
+Public symbols removed:
+
+- `alp/chips/pca9451a.h` — every `pca9451a_*` function and type and every
+  `PCA9451A_*` macro (driver `chips/pca9451a/`, `CONFIG_ALP_SDK_CHIP_PCA9451A`).
+- `alp/ext/nxp/storage.h` — `alp_nxp_storage_otfad_provision`,
+  `alp_nxp_storage_otfad_set_window`, `alp_nxp_storage_otfad_slot_t`,
+  `ALP_NXP_STORAGE_OTFAD_WINDOW_COUNT`, `ALP_EXT_NXP_STORAGE_AVAILABLE`.
+- `ALP_SOC_LCDIF_COUNT`, `ALP_CAP_HW_LCDIF`, `ALP_CAP_ID_HW_LCDIF` — no remaining
+  SoC has an LCDIF. **ABI value change:** `ALP_CAP_ID_HW_LCDIF` sat between
+  `ALP_CAP_ID_HW_MIPI_DSI` and `ALP_CAP_ID_XSPI_DMA`, so every later
+  `alp_cap_id_t` enumerator (`ALP_CAP_ID_XSPI_DMA` through `ALP_CAP_ID_HW_I3C`
+  and `ALP_CAP_ID_COUNT`) now has a value one lower. Rebuild anything that
+  stores or compares these numeric IDs.
+- `ALP_CORE_M33` (`alp_core_id_t`) — the other enumerators keep their values.
+
+Kconfig symbols removed: `ALP_SOC_NXP_IMX9_IMX93`, `ALP_SDK_CHIP_PCA9451A`,
+`ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93`, `ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65`,
+`ALP_TFLM_ETHOS_U65`. The `excludedFamilies` key of `tier-a-library-ci.json` and
+the `assert_exclusion_still_not_buildable` ratchet existed only for this SoM and
+are gone with it. Every removal is recorded in `docs/abi/removed-symbols.json`.
+
+### Added — SoM power-domain metadata and devicetree plumbing for STOP-mode quiesce (#2784, units U3 + U4)
+
+No runtime behaviour changes; this lays the data and devicetree the quiesce layer will read.
+
+- **`on-module-links` v2.** `metadata/e1m_modules/aen/on-module-links.yaml` gains a `power_domains:` block (Wi-Fi/BLE, Ethernet PHY, external flash, external RAM, temperature sensor, RTC, backlight) with each control pad, polarity, default action, restore path and dated bench savings (PHY off about 10 mA and CC3501E nRESET hold about 2 mA, both at a 16 V input). CC3501E rail-off is opt-in behind `CONFIG_ALP_SDK_SOM_PD_WIFI_RAIL_OFF` and carries a hazard note for `vendor_sbl_container_enable=1` units; restore is the nRESET release (`cc3501e_hard_reset`), never `cc3501e_reset()`. New schema `metadata/schemas/on-module-links-v2.schema.json`, wired into `validate_metadata.py`.
+- **`alp,som-power` node.** `gen_zephyr_board.py` emits one `alp,som-power-domain` child per domain a SKU carries, with presence read from that SKU's `on_module` block (an `assembled: "optional"` part gets `alp,bom-optional`). Bindings: `zephyr/dts/bindings/power/alp,som-power.yaml` and `alp,som-power-domain.yaml`. The AEN801 and AEN803 board trees are regenerated.
+- **New gate `check_som_power_domains.py`.** Every control pad must match the `inter-chip.tsv`, `alif-ethernet-phy.tsv` or `alif-ospi.tsv` row it cites (registered as `som-power-domains`).
+- **Power register nodes.** `vbat` (`0x1A609000`), `ana` (`0x1A60A000`) and `stop_mode` (`0x1A60F000`) register windows, with `alif,vbat`, `alif,ana` and `alif,stop-mode` bindings, and the `alp,power-wake-timer` chosen node (`lptimer0`) on the E8 overlay.
+- **E4 and E6 HP boards.** New `zephyr/dts/alif/ensemble_e4_e6_power.dtsi` adds `se_service`, the SE MHU pair, `lpgpio`, `rtc0`, `lptimer0` and the three register windows, all `disabled` so no E4/E6 image changes.
+
+`lptimer0` in `ensemble_e8_peripherals.dtsi` now states `status = "okay"` explicitly (it was `okay` by devicetree default); the generated build is unchanged.
+
+**RTC policy recorded.** The `rtc` power domain is the on-module RV-3028 (0x52 on BRD_I2C, INT to P15_0 / LPGPIO0 as the wake input), kept alive with CLKOUT off. The internal LPRTC is marked secondary (Alif ER001/ER002, `[SES] No LF XTAL`); `alp,power-wake-timer` (LPTIMER) is for short intervals only.
+
+**Deferred / not included.** The E4/E6 `alp,som-power` node is deferred (those boards are hand-authored; U10). BKRAM as `zephyr,retained-ram` is not included (no citable base address). Consumers of `alp,power-wake-timer` must check `DT_NODE_HAS_STATUS_OKAY(DT_CHOSEN(alp_power_wake_timer))`; dual-core ownership of the shared E8 timer is deferred. Polarity of E_PHY_PWRDWN, E_PHY_RESET and E_WIFI_NRST is bench-verified (E1M-AEN803 on an E1M-EVK, 2026-10-08, RAM-run); the backlight enable polarity is still assumed.
+
+### Added — alp-owned gen2 aiPM memory-block / wake-event / EWIC masks for the Alif Ensemble E8 and E4 (#2784)
+
+`src/backends/power/alif_aipm_gen2.h` carries the gen2 `memory_block` masks, `wakeup_events` bits and EWIC bits the upcoming Alif SE STOP/STANDBY backend needs, with `_Static_assert`s tying them to the E8 SVD `VBAT.RET_CTRL` / `ANA.WKUP_CTRL` field positions. hal_alif's `aipm.h` selects its layout with `CONFIG_ENSEMBLE_GEN2`, which no alp-sdk build defines, so stock builds get the gen1 layout where `BACKUP4K_MASK` is bit20 (gen2 `FWRAM_MASK`); gen2 `BACKUP4K` is bit21. `CONFIG_ENSEMBLE_GEN2` is deliberately not defined globally because it also changes hal_alif OSPI behaviour (tracked in #2785). Build-only: nothing includes the header at runtime yet; the asserts run in `tests/unit/power_alif_aipm_gen2` (native_sim) and `tests/scripts/test_alif_aipm_gen2_svd.py`.
+
+### Added — power: STOP/STANDBY contract, per-mode wake check, SoM power-domain API (Refs #2784)
+
+`alp/power.h` now documents that STOP and STANDBY may not return (wake is a cold
+boot on the Alif Ensemble family) and that the 4 KB Utility SRAM is always
+retained and SDK-reserved, so `ALP_POWER_RETAIN_NONE` means "no application RAM"
+and the retention floor is the Utility-SRAM-retained rung; the `wake_after_ms`
+wording now covers a timed wake bounded by a 32-bit low-power timer.
+
+`alp_power_request_sleep()` returns `ALP_ERR_NOSUPPORT`, before the backend runs,
+for a configured wake bitmap the requested mode cannot arm (new optional backend
+op `mode_wake_caps`; backends without it keep today's behaviour).
+
+New `[ABI-EXPERIMENTAL]` contract, `ALP_ERR_NOSUPPORT` on every backend for now:
+`alp_power_domain_t`, `alp_power_domain_policy_t`, `alp_power_domain_info_t`,
+`alp_power_boot_info_t`, `alp_power_domain_policy_set()`, `alp_power_domain_info()`,
+`alp_power_boot_wake_info()`, and the `ALP_POWER_DOMAIN_BIT`, `ALP_POWER_ACTION_*`
+and `ALP_POWER_DEP_*` macros.
+
+### Added — `rv3028c7`: countdown timer, alarm arm/clear and wake-flag service for low-power wake (Refs #2784)
+
+The RV-3028-C7 driver gains the wake-source surface a STOP-mode power path needs:
+`rv3028c7_timer_start()` (one-shot countdown, TD picked automatically: 1 Hz up to
+4095 s, 1/60 Hz above, rounded up), `rv3028c7_timer_stop()` / `rv3028c7_timer_read()`
+(running, expired, preset, remaining, elapsed), `rv3028c7_alarm_arm()` /
+`rv3028c7_alarm_clear()`, and `rv3028c7_wake_service()` (read and clear TF/AF/UF,
+PORF preserved). Registers 0Ah..0Dh and the Control 1 TRPT/TE/TD fields are cited to the
+Application Manual Rev. 1.4. None of these calls reads or writes the EEPROM or the
+backup-switch mode: an EEPROM write wears the part, and a changed backup mode changes
+how it is powered.
+
+### Added — SoM power-domain runtime: registry, policy, quiesce/restore, chip hooks (#2784, unit U5)
+
+The three `<alp/power.h>` domain calls now work on the Alif Ensemble boards (they answered `ALP_ERR_NOSUPPORT` until now) when the build has `CONFIG_GPIO`. No sleep backend calls the quiesce yet (that is U7), so no running image changes behaviour.
+
+- **Registry.** `src/backends/power/som_power.c` builds the per-domain table at compile time from the generated `alp,som-power-domain` nodes: pads, polarity, default action, restore path, dependents. `alp_power_domain_policy_set()` (AUTO / KEEP_ALIVE / RAIL_OFF), `alp_power_domain_info()` and `alp_power_boot_wake_info()` answer through the power-class vtable. `RAIL_OFF` is refused with `ALP_ERR_NOSUPPORT` unless `CONFIG_ALP_SDK_SOM_PD_WIFI_RAIL_OFF=y` and the domain is the Wi-Fi/BLE coprocessor; an absent domain answers `ALP_ERR_NOT_PRESENT_ON_THIS_SOC`. New `ALP_POWER_DEP_PHY_REFCLK` dependent bit.
+- **Default actions.** CC3501E nRESET (P15_1) held low; Ethernet PHY `E_PHY_PWRDWN` (P15_4) low, which also tri-states the Y3 50 MHz reference oscillator (its TRI pin is the same net, now a `phy_refclk` dependent in the metadata); NOR and HyperRAM reset-hold (P15_7 / P15_6); TMP112 shutdown bit; RV-3028 stays powered with CLKOUT low; backlight enable (P5_5) low. `flash_ospi_alif` has no power-management or deep-power-down hook, and no HyperRAM driver exists, so reset-hold is the memory action; the ext-flash metadata default changes from `deep_power_down_cmd` to `hold_reset`.
+- **Restore.** The CC3501E comes back through the nRESET release (`cc3501e_hard_reset()` semantics), never `cc3501e_reset()`, which would cycle `WIFI_EN`. The PHY comes back with P15_4 high plus an `E_PHY_RESET` pulse.
+- **Chip hooks.** Where a driver owns a domain the layer calls through it (`som_power_chips.h`): the CC3501E context (marked down while held; after the nRESET release it is PINGed before the context is re-armed, and stays down with the restore reporting an error if the chip never answers; Wi-Fi association, sockets and BLE state are lost and must be re-established), the TMP112 chip driver (new `tmp112_set_shutdown()`), the RV-3028 chip driver (`rv3028c7_route_clkout()` plus `CONTROL_1.EERD` so the 24 h EEPROM refresh cannot turn CLKOUT back on mid-sleep; EERD goes back to its pre-quiesce value, saved in the record), and `flash_ospi_alif` (new `flash_ospi_alif_suspend()` / `flash_ospi_alif_resume()`: the driver lock is taken and WIP cleared before RESETn is asserted, so a write or erase is never cut off, and the Octal DDR state is dropped on resume).
+- **Quiesce / restore.** An internal `alp_som_power_quiesce(mode)` / `alp_som_power_restore()` pair (consumers first, restored in reverse, rolled back on a failure) and `alp_som_power_cycle_run()` for RUN-mode bench cycles. The record (magic + CRC + quiesced set) sits behind a store abstraction backed by a `__noinit` RAM placeholder, to be moved to BKRAM in U7. The cold-boot restore is two `SYS_INIT` passes: pin domains at `POST_KERNEL` 0, the I2C-backed ones (TMP112, RV-3028) at 51, after `i2c_dw` and before the sensor and Ethernet drivers (build-asserted). It restores only when the record is valid (and `STOP_MODE_STAT` agrees); a plain POR touches nothing. A failing quiesce rolls back the failing domain's own partial step too and reports rollback failures to the caller; the retry record is a RUN-mode record so a warm reset still restores it.
+- **Tests and example.** `tests/unit/power_som_domains` (native_sim, GPIO and I2C emulators plus driver fakes) and `tests/unit/power_som_pm_policy` (the real library through the pm_policy backend and pinctrl): policy validation, quiesce order, restore never calling `cc3501e_reset`, record CRC, invalid-record boot touching nothing. New bench example `examples/aen/aen-power-domains` and `docs/aen-power-domains.md`.
+- **Pads.** The generated `alp,som-power` node now carries a `pinctrl-0` group (mux plus input buffer) covering every pad the layer drives; the layer applies it before its first drive and refuses to drive without it. Each hold is read back and a mismatch fails the quiesce. The LP-pad register layout is taken from the Zephyr Alif pinctrl driver and is TBD against the HWRM.
+- **Bindings.** `alp,som-power-domain` now enumerates `alp,default-action` and `alp,dependents`; the four AEN board trees are regenerated.
+
+**Not proven yet.** Whether the LPGPIO outputs hold through STOP itself, and the BKRAM base address for the record, are the STOP bench (U8) and U7.
+
+### Added — Alif SE STOP power backend for the E8 M55-HE (#2784, unit U7)
+
+`alp_power_request_sleep(STOP)` now works on the Alif Ensemble E8 M55-HE (E1M-AEN803; the E1M-AEN801 is unmeasured): `src/backends/power/alif_se_power.c`, registered for `alif:ensemble:e8` behind `CONFIG_ALP_SDK_POWER_ALIF_SE` (default n, experimental). STANDBY is implemented but not proven on silicon.
+
+**Bench-proven (U8h, E1M-AEN803 on an E1M-EVK).** Three STOP cycles in one image all woke and every verdict passed: LPTIMER 500 ms and 5 s, RV-3028 countdown 3 s and 11 s, RV-3028 alarm. BKRAM survived each STOP and every wake boot came up at nominal clocks (115200 baud) with the boot-time clock restore having run. About 0.043 A in STOP against 0.058 A awake on the EVK board rail at 16 V (a board-level reading, not a SoC measurement).
+
+- **Vendor OFF profile.** All 14 `off_profile_t` members are assigned by name (the SE calls are not side-effect-free). `memory_blocks` is BKRAM | MRAM | SERAM (+ the HE TCM banks the retention asks for) and MRAM | SERAM is **required**: without it the SE reboots through the cold path instead of resuming, which the wake path classifies as an aborted sleep (not a wake), and the backend refuses to send a profile without them. `vtor_address` is `SCB->VTOR` (optional on the bench, kept as the vendor default). `dcdc_mode` OFF, `aon_clk_src` LFXO only when the live clock tree confirms it, I/O flex 1.8 V, wake events and EWIC config from the gen2 masks. The profile is read back after the SE call, the retention bits are re-asserted, and every exit after the SE call writes the live profile and the `RET_CTRL` / `VBAT_ANA_REG1` snapshots back.
+- **Wake sources.** `ALP_POWER_WAKE_RTC` is the on-module RV-3028 on `/INT` -> P15_0 -> `WE_LPGPIO0` (falling edge, IRQ 57 acknowledge handler); `ALP_POWER_WAKE_TIMER` is the LPTIMER for `wake_after_ms < 1000` (a minimum: ticks are rounded up against the fastest clock); >= 1 s uses the RV-3028 countdown. The LPTIMER and the pad are armed last, inside the interrupt-off entry, and proven live; the source that ended an aborted sleep is captured right after the WFI. The pre-sleep `/INT` check turns the LPGPIO clock on and only counts RV-3028 flags whose enable is set; a stale UF is cleared.
+- **Refusals before any change.** `ALP_ERR_BUSY` (debugger attached, bench override `ALLOW_DEBUGGER`; an armed source already pending), `ALP_ERR_NOSUPPORT` (D-cache on, an unarmable wake bit), `ALP_ERR_NOT_READY` (core LPSTATE not OFF, or BKRAM unusable), each with a printed step and reason. A failure after the quiesce disarms the sources and restores the domains; a domain that cannot be restored is reported as `ALP_ERR_IO` and stays in the record for a retry.
+- **Wake path.** `alp_power_boot_wake_info()` is filled from the BKRAM record, the LPTIMER status (read before its driver clears it) and the RV-3028 flags and calendar (`slept_ms` = calendar delta). A pin reset (`RTSS_HE_RESET` NSRST, trusted only when probed before the sleep) is an aborted sleep, not a wake; the domains are restored either way, and `STOP_MODE_STAT` is acknowledged by a plain write of 0x10.
+- **Boot-time clock restore** (`CONFIG_ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS`, default y on the E1M-AEN803 board). A wake otherwise comes up on the SE-left RC clocks (UART at 23040 instead of 115200, a half-rate tick). At `PRE_KERNEL_1` 46 the backend re-applies a complete RUN profile only when the PLL is not locked or the three `PLL_CLK_SEL` bits for this core are wrong; the wait is bounded by the cycle counter. The profile uses the vendor power domains and names the Utility SRAM in `memory_blocks`; the SDK's BKRAM data sits in a RAM shadow until the block passes a write/readback, and a sleep refuses (`bkram_unusable`) when it does not.
+- **BKRAM.** The wake record moves into the 4 KB Utility SRAM (`0x4902C000`, bench-verified) through a new `bkram` DT node and a NOLOAD `ALP_BKRAM` section; a same-boot rollback no longer needs it (the quiesce keeps the record in RAM too).
+- **Bench-only options** (all depend on `CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH`, never in a product build): the BKRAM bench cell and diag slots, the image CRC, the LPRTC elapsed-time witness, a higher LPTIMER ceiling, and ablation knobs for the OFF profile (`NO_VTOR_SELF`, `NO_MRAM_SERAM`, `FORCE_LFXO`, `STBY_76_8`, `FORCE_RESTORE`, `RESTORE_LEGACY`).
+- **RV-3028 driver.** `rv3028c7_init` clears a stale EVF only while EIE is off, so a live external event survives for the wake decode.
+- **Tests and example.** `tests/unit/power_alif_se` (profile construction with a poison pre-fill, refusals, unwinds, restore failures, wake decode, clock restore; a bench and a product configuration), extra `power_som_domains` cases, `tests/scripts/test_alif_se_power_svd.py`, and the bench example `examples/aen/aen-power-stop` (MRAM image, three STOP cycles; the `product-noscratch` variant is the shipping configuration without the bench cell).
+
+**Not proven.** STANDBY, the HE TCM bank sizes and ITCM / DTCM split, application-RAM retention, the E1M-AEN801, the E4.
+
+### Changed — the trace-runner is played with the arms: left arm up is one lane left, right arm up one lane right, both arms up a jump; the camera view is landscape on the EVK
+
+The player no longer steps sideways to change lane or jumps with the whole body. Raising the player's
+left arm moves one lane left, the right arm one lane right, both arms together jump; the crouch duck
+is unchanged. "Raised" is the wrist more than `TR_ARM_UP_PCT` (50 %) of the shoulder width above the
+same-side shoulder, with both keypoints at or above `TR_ARM_KP_MIN` (77); it is edge-triggered, and the
+arm re-arms only below `TR_ARM_DOWN_PCT` (20 %). A lane step waits `TR_ARM_SETTLE_POSES` (4 poses, about
+100 ms, counted on every pose whether or not the wrist is still judged) for the other arm, so a
+both-arms raise is a jump and never also a lane step; a wrist that left the frame or fell back into the
+hysteresis band in that time never confirms its rise. The second arm of a staggered raise, while the
+first is still up, is a jump too. An arm already up when a player joins (judged per arm), a run
+restarts, the initials screen opens or a pause ends is spent until it is lowered. A jump asked during a
+duck or the end of a jump is held `TR_JUMP_BUFFER_TICKS` (4) steps and taken when the runner is free. Which arm is the
+player's left follows the shoulders' x order and whether the view is mirrored, not MoveNet's labels, so
+it holds at every `TR_CAM_ROTATE`; a 180 degree mount (`TR_CAM_FLIP_Y`) swaps the sides once more. The
+HE takes "mirrored" from the HP's camera descriptor (`tr_cam_view_t.mirror`, the sensor flip bit read
+back) and falls back to its new `TR_CAM_MIRROR` CMake option (default `ON`, to match the `hp_vision`
+build) until the HP publishes, printing a warning once if they differ. The new HP option
+`TR_OV9281_HMIRROR_ACTIVE_LOW` reverses the rot-0 flip bit if the bench shows it mirrors the other way
+(`FLASH-RECIPE.md` has the acceptance step).
+
+The rotation `TR_CAM_ROTATE=0` is the EVK bench release: the OV9281 is mounted upright and shown as a
+640x400 landscape picture, scaled up to fill the camera area (see the fill-800 fragment). The lamps read
+LEFT ARM, RIGHT ARM, BOTH ARMS and DUCK. `build-release.sh` now also refuses an HE and HP build that
+disagree on `TR_CAM_MIRROR` or on whether the rotation is `0`, or an HE that is not `TR_INPUT_NPU=ON`,
+and builds the A32 renderer with the HE's `TR_CAM_ROTATE` (`make -C a32/renderer TR_CAM_ROTATE=`) so the
+boot layout matches before the HP publishes.
+
+Removed with the old scheme: the lateral-position lane bands (`TR_TRACK_HYST_PX`, `TR_CAM_MIRROR_X`,
+the lane fields of `tr_track_t`), the torso-lift jump (`TR_TRACK_JUMP_*`, `TR_TRACK_WIN`,
+`TR_TRACK_LAND_COOLDOWN_FRAMES`), and the frame-width and game-lane arguments of `tr_track_init()`,
+`tr_track_calibrate()`, `tr_track_resync()`, `tr_ctl_step()`, `tr_ctl_reset()` and `tr_attract_step()`. The classical
+HE-side camera and detector (`TR_CAMERA`, `camera.conf`) had no keypoints and so no lane or jump: the
+option is refused at configure time, use `TR_INPUT_NPU=ON`. IMU tilt is untouched.
+
+### Fixed — the TAS2563 bring-up no longer hits the amp's NACK window after `SD_N` (standalone `sound/` too)
+
+On the bench carrier U27 (`0x4D`) NACKs its address 313 us after `SD_N` rises and first ACKs at 1142 us, and the SDK's 200 us settle landed in that window (`tas2563_init(0x4d)` returned -5). `sound/src/main.c` now waits 2 ms, then polls each amp for its address ACK every 1 ms, at most 50 ms; an amp that never answers fails the bring-up at step 6. It applies to the standalone GAME and TEST images and to the combined image.
+
+### Added — trace-runner: camera, NPU and game sound in one M55-HP image (`TR_HP_SOUND`)
+
+The Riverdi build can now play its music and effects while the HP runs the camera and the pose model. Build `examples/aen/aen-trace-runner/hp_vision` with `-DTR_SND_REWORKED_U46=ON -DTR_HP_SOUND=ON` and the HE with `-DTR_HP_SOUND=ON`, and the HP links the `sound/` game firmware as a cooperative thread above the vision thread (I2S3 interrupt priority 0, ahead of the camera, CSI and Ethos-U55, asserted at build time). `TR_HP_VISION=ON TR_SND_HP=ON build-release.sh` is the combined release mode (the old "only one HP image" refusal is replaced by a check that both `hp_vision_check.sh` and `snd_hp_check.sh` pass on the same image; `2026W36-0002` is allowed, `2026W36-0009` denied, a sound image without the carrier check is refused). The HP image is 213,468 B of ITCM (81.43 %) and 286,784 B of DTCM, against 178,788 B without the sound. Build-checked and host-tested; not yet run on the bench.
+
+The two cores share carrier bus 0 (SoC I2C2) and GPIO5, so they take turns. After its display is up, the HE leases both to the HP when the HP asks; the HP brings the amps up, holding the bus only around the stretches that use it (the identity-EEPROM read, the amp reset and programming, the final resume) with its I2C2 interrupt armed only inside them, and gives it back across the rest, so the HUD "5V ... mW" line keeps working (it shows `--` for those stretches). An HP that dies holding the bus is reclaimed by the HE after 2 s without a heartbeat (controller stopped, SCL bus-clear); an HP that is alive but never returns it leaves the HUD at `--` rather than hanging. Each side re-arms the controller the other used (IC_ENABLE and INTR_MASK cleared, pending IRQ cleared, driver semaphore reset, bus-clear if stuck), the lease page is an uncached MPU region on both cores, and neither core offers or claims a lease while the D-cache is on. The protocol (`src/ipc/tr_bus2.h`, record at `TR_MEM_BUS2 = 0x0237FD40`, clear of the I2C1 `alp,i2c-handover` flag at `0x0237FC94`) is host-tested with both cores simulated: a dead core's leftover offer or request is never taken, a late return of an earlier lease is ignored, a restarted HP or HE aborts or recovers before its next access, an unclaimed offer is withdrawn, and an HE with no HP, or an HP with no HE, keeps its own work running. The RK055 shield cannot be the HE of this build: its backlight uses GPIO5, and the HE build refuses it. The release checks now also compare the HE's camera (rotation shape, mirror, `TR_INPUT_NPU`) with the HP's and refuse an image carrying the dev-only `TR_SND_UNDERRUN_TEST` control; twister builds both halves (the combined HP only where `ZEPHYR_BASE` carries the clockctrl patch).
+
+### Fixed — a static `libalp_sdk.a` keeps every Linux backend, not just camera (#2790)
+
+A static plain-CMake link only pulls the archive members something
+references, and the class dispatchers reference only their catch-all stub or
+software fallback. Every backend that sits in its own TU beside that stub was
+dropped, and the app silently got the stub. That covered 18 Linux backends:
+the 17 `src/backends/<class>/yocto_drv.c` (adc, audio, camera, can, counter,
+display, i2s, i3c, mqtt, power, pwm, rpc, rtc, security, storage, usb, wdt)
+and rpc's `yocto_uio_drv.c`. #2616 had fixed camera alone with one
+hand-written link option.
+
+`ALP_BACKEND_REGISTER` now also defines the hidden symbol
+`_alp_backend_force_<class>_<name>` on plain-CMake builds (new
+`ALP_BACKEND_FORCE_DEFINE` in `<alp/backend.h>`).
+`cmake/alp-sdk-static-backends.cmake` scans every `alp_sdk` C source once all
+sources are added, and adds `--undefined=` for each registration outside an
+anchored catch-all to `alp::sdk`'s INTERFACE link options. A new backend
+therefore needs no CMake line of its own. Shared builds and non-ELF hosts are
+unchanged. jpeg's priority-0 `zephyr_stub.c` is forced too; that does no
+harm, because the anchored `sw_baseline.c` still wins.
+`ALP_BACKEND_ANCHOR_FORCE` is removed (recorded in
+`docs/abi/removed-symbols.json`); its only call site was camera's.
+
+A non-CMake static link needs one `--undefined=_alp_backend_force_<class>_<name>`
+option per backend. The list is on the `alp_sdk` target's
+`ALP_SDK_FORCED_BACKENDS` property. A consumer that compiles its own copy of
+a backend opts out with the `ALP_SDK_NO_FORCED_BACKENDS` target property;
+five yocto tests now do. `alp_test_static_link_backends` replaces the
+camera-only `nm` check. It reads the expected set from the archive itself,
+so a registration the scan misses still fails the test. Without this fix,
+every one of those backends is missing from a static binary and camera
+selects the stub.
+
+Behaviour change for static Linux apps: each class above now reaches its real
+Linux driver instead of the stub or test fallback, as a shared build always
+did. Most visibly:
+- `alp_wdt_open()` opens `/dev/watchdogN`, which arms the hardware watchdog;
+  an app that does not feed it resets the board.
+- `alp_power` sleep requests write `/sys/power/state` and really suspend.
+- rtc and counter read the real `/dev/rtcN` and counter driver instead of the
+  fixed fake clock and tick cursor.
+- adc, can, pwm, storage, usb and i3c return the real driver's
+  `ALP_ERR_NOT_READY` / I/O errors where the stub used to answer.
+- rpc: the two rpc Linux backends are compiled in only when open-amp and
+  libmetal are found, so a static app on a host without OpenAMP keeps the
+  software fallback (the dispatcher does not fall back after a failed
+  `open()`).
+
+Every static consumer also now links every forced backend, whether or not it
+uses the class. With them come the runtime libraries the build found
+(libasound, libssl/libcrypto, libmosquitto, open-amp/libmetal), the same set
+`libalp_sdk.so` already depends on.
+
+### Changed — the trace-runner fills the Riverdi natively at 800 wide, 3/5 game over 2/5 camera, with a power graph on the HUD
+
+Stage 0, the memory re-plan that makes room for it: a framebuffer slot is 800x1280x2 B = 2,048,000 B (`TR_FB_SLOT_SIZE`); FB B is
+derived as the last slot below TF-A RW, `0x025EA000` (TF-A RW starts at `0x027DE000`); the display list and the bins move to
+SRAM1 (`0x02424000`, `0x02460000`), the band buffers to `0x0229A000`, the stacks to `0x025C0000` and the gate word to
+`0x025E0000`. The HUD memory map and `TR_MEM_REGIONS` follow.
+
+The picture is rendered 800 columns wide (`TR_R3D_W`, was 720) and written to the panel `fw` columns wide: the
+Riverdi RVT121 shows all 800 on its whole 1280x800 window (no bars), the RK055 its centre 720, cropped, never
+scaled. `fw` is a new `uint16_t` in the mailbox frame (`tr_frame_in_t`, offset 174, the old trailing pad, 176 B; the
+mailbox version is 4 so a Stage 0 / 720-wide renderer and a Stage 1 HE can never pair silently): the HE sets it from the CDC200 layer-1 size, and the renderer faults (pad3[7]
+`0xAB1D0003 | fw/16 << 8`) on a frame whose `fw` is not a multiple of 16 in 16..800, so a Stage 0 HE (`fw` 0) and
+the new renderer cannot run together. The screen is split 3/5 game (`TR_VIEW_H` 768, 24 bands) and 2/5 camera (512
+rows, 16 bands) for every panel.
+
+The landscape camera (`TR_CAM_ROTATE=0`) is scaled up x1.28 (32/25) to cover its area, about 10 px cropped a
+side, by a NEON bilinear resample (a `vtbl4` gather per 32-column pattern, each source row filtered once),
+bit-exact against its scalar reference under qemu; the skeleton is placed by the exact inverse map. The lamps and
+the label sit on an opaque plate along the bottom edge, laid out over the panel's visible columns. A camera the HP
+turned (90 / 270) is no longer drawn (`ROT nn` in the label); the portrait path and `tr_cam_rot_rows_neon` are gone.
+
+The HUD stays 720 wide, centred on the Riverdi; its new rightmost tile shows the carrier +5V net's power ("+5V net
+(SoM+LCD)"): about 10 s at 10 Hz as a 96x48 graph with now / avg / peak in mW, and a hole for every sample the HE
+could not take while the HP holds I2C2. For that the INA236 `CONFIG` is now `0x485F` (AVG 128 of 204 us + 588 us,
+101 ms a result, was `0x4927`: 282 ms) and `RAIL5V_PERIOD_MS` 100. `panel_rot.h` takes the picture width:
+`tr_rot_idx`, `tr_rot_blit` and `tr_rot_blit_neon` gained a `pw` argument.
+
+Frame time, after the first bench run (peak 30.9 ms against the 31.2 ms real budget): the two cores claim the
+bands fullest-bin first, the video bands last (`render_claim_order()`); and the scene's second half is no longer
+copied onto the end of the first (`tr_dl_t` can read as two pieces, `tr_dl_tri()`), so setup and binning start
+sooner. Neither changes a pixel (the goldens are unchanged). The power poll keeps a true 10 Hz: its deadline advances
+a period from the last deadline instead of from the call, which the frame-rate quantised to 8.3 Hz.
+
+The camera's focal length follows the panel (`tr_scene_f_px(fw)`, at most `(fw / 2) / 0.74`): 540 at 800 as before, 486.5 on
+the RK055's 720 crop, where the taller viewport's larger focal length would have cut ~40 px off outer-lane obstacles.
+The A32 sprite score is drawn at the panel's left edge on the crop. A rot-90/270 camera is not drawn (`ROT nn`).
+
+### Added — MIPI CSI-2 camera on the M55-HP core and on the E1M-AEN401 (Ensemble E4) (#2803)
+
+- **M55-HP targets.** The `e1m_evk_rpi_csi` shield and `examples/aen/aen-camera-firstlight` now carry overlays for `alp_e1m_aen801_m55_hp` and `alp_e1m_aen803_m55_hp`, so `-DSHIELD="e1m_evk_rpi_csi <sensor shield>"` builds for the HP core instead of stopping on the undefined `csi_interface` label. Bench-verified on an E1M-AEN803 (E1M-EVK, INNO-MAKER CAM-IMX335 on J5) with an HP-only ATOC (the HE never boots, matching alp-sdk's HP-only E4 target): 3 of 3 cold boots captured a 1296x972 RAW10 frame (2519424 B) on the HP.
+- **E1M-AEN401 (E4).** New `zephyr/dts/alif/ensemble_e4_camera.dtsi` gives the E4 HP board the `i2c1`, `gpio12`, `dphy`, `csi` and `cam` nodes (same bases and IRQs as the E8, cited from the E4 DFP), plus a shield overlay for `alp_e1m_aen401_m55_hp`. The D-PHY clock/power glue (`mipi_display_e8.c`) and the DW GPIO clock enable (`gpio_clk_alif.c`) now build for E4 as well as E8. The E4 D-PHY CGU/VBAT bit positions are assumed to match the E8 (the E4 DFP gives the register offsets only). Compile-proven only.
+- **IMX335 cold-boot fix.** New Zephyr patch `0006-imx335-wait-for-sensor-after-power-up.patch`: the driver now polls the sensor's first register write for up to 1 s before its init table. Without it, every cold power-up failed sensor init (`Failed to write to register 0x3000`) and `alp_camera_open()` returned `ALP_ERR_NOT_READY` while a warm reset worked; bench-confirmed on both M55 cores (the sensor answered after about 40 ms).
+
+### Changed — trace-runner frame time and HP vision loop: rot-90 copy-out order, HP MoveNet bursts, paced `in_seq` polling, -O3 on the copy-out and camera objects (#2807)
+
+A performance pass on the trace-runner, measured on an E1M-EVK bench unit (Riverdi RVT121, rotation 90). Output is unchanged: the goldens, the NEON-vs-scalar qemu checks, a new `tr_movenet_input_rot` equivalence test, and, under qemu-arm at the image's -O3, `render.c` against the goldens, the NEON rot-90/270 copy-out inlined into it against the per-pixel mapping, and the `cam_pip.c` NEON kernels against their scalar reference all hold.
+
+- **Rot-90 copy-out:** each 64 B column run is stored in ascending address order (it was descending); `a32/payload-isa` gets `stage_rot`, a microbenchmark of the old form, ascending `vst1q`, `vst1.16 {q,q}` and `vstmia`.
+- **HP pre-processing and decode:** the HP runs with the D-cache off, so for the upright (rot 0), word-aligned case `tr_movenet_input_rot` bursts each output row's two source rows into DTCM and stores packed words, and `tr_movenet_decode` copies the centre and heat maps (41,472 B) to DTCM first. HP DTCM use rises from 286,984 B to 329,736 B of 1 MB (+42,752 B of `.bss`, also in `probe/npu`, which links `movenet.c` too).
+- **Renderer:** core 0 keeps polling `in_seq` every 10 us up to 35 ms after a publish (it fell to WFE after 3 ms); the camera-pool DCIMVAC walk steps by `CTR.DminLine` (64 B) instead of 32 B; `render.o` and `cam_pip.o` build at -O3; the renderer's `__bss_end` is then 0x02583108 with Arm GNU 13.2.rel1 (cap 0x025C0000). The 10 us polling's power draw was not measured.
+- **Measurement:** `RENDER_STATS` words 17..39 hold the peak frame's breakdown, per-framebuffer frame time and the core join waits (`decode.py --stats`; map in `renderer.c`). The `make prof` build now snapshots a 64-frame window (the 32-bit cycle sums wrapped in about 5 s, which made the instrumented kinds sum to a fraction of the frame and `decode.py` print a negative overhead), adds a `band` total, and `decode.py --prof` prints the remainder. Release renderers are unchanged by the profile changes; that profile fix has not been run on the bench yet.
+
+Measured on that bench unit, attract mode, 3 x 11 min, `pad3[7]` frame-time peak (CNTVCT ticks at 100 MHz): median 2,857,133 and worst 2,935,254, against 3,037,432 and 3,181,436 for the previous release. Zero flip misses. Copy 1.14-1.36 ms (was 1.7-1.9), video 2.2-2.5 / 2.7-2.8 ms (was 2.9-3.3 / 3.4-3.7), HP `pre_us` 4.9-5.9 ms (was 10.3), HP loop 33.3-34.0 Hz (was 25.3). Framebuffer A and B read the same.
+
 ### Fixed — Alif SE STOP backend no longer refuses every RV-3028 sleep after an unhandled wake (Refs #2784)
 
 The RV-3028 is backup-powered, so a countdown or alarm that fired with nobody
@@ -18,13 +407,12 @@ clears a stale AIE/AF. EVF, PORF, BSF and CLKF are left alone. A wake pending
 from the current arm still refuses the sleep, and that refusal now dumps the
 RTC registers.
 
-## [v0.17.0] - 2026-10-08 (release candidate: v0.17.0-rc1)
-
-### Known issue — trace-runner A32 renderer faulted once on the bench (v0.17.0-rc1)
+### Known issue — trace-runner A32 renderer faulted once on the bench (v0.17.0-rc1; renderer fault fixed in v0.17.0-rc2)
 
 In 1 of 3 cold boots on the bench, the trace-runner A32 renderer faulted once
-and the HE watchdog relaunched it. The cause is not captured. Body-control is
-not yet bench-tested on the Riverdi build.
+and the HE watchdog relaunched it. The cause was a garbage mailbox page on a
+cold boot, fixed in v0.17.0-rc2 (#2257, see above). Body-control is not yet
+bench-tested on the Riverdi build.
 
 ### Added — build-plan-v1 slices carry the rendered `alp.overlay` and `cmake-args.txt` (tan-cli#1216)
 
