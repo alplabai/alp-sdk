@@ -36,7 +36,9 @@ FONTS = [
     ("tr_font_big", 60, " +,0123456789x"),
 ]
 # Logo width in px: the attract card (beside BEST, half layout).
-LOGOS = [("tr_logo_mid", 280)]
+# The same logo smaller (210 wide, 45 tall): the co-brand header's ALP LAB side (hud.c, built only
+# with a partner logo; a build without one never references it).
+LOGOS = [("tr_logo_mid", 280), ("tr_logo_hdr", 210)]
 CORNER_R = 14  # rounded-panel corner radius
 
 

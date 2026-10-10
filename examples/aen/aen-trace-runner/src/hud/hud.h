@@ -151,6 +151,20 @@ void tr_hud_view_booth(tr_hud_view_t *v, const tr_hiscore_t *hs, const tr_initia
  * of the invitation. After tr_hud_view_set(). */
 void tr_hud_view_zone(tr_hud_view_t *v, uint8_t zone, uint32_t seq);
 
+#ifdef TR_PARTNER_LOGO_HEADER
+/* The optional co-brand header (CMake -DTR_PARTNER_LOGO=<header>, tools/genlogo.py): the attract
+ * header card holds the ALP LAB mark, a divider and the partner's logo. Where each sits, in HUD
+ * pixels (rotation 0). Only declared when the logo is built in. */
+typedef struct {
+	int card_x, card_y, card_w, card_h;
+	int alp_x, alp_y, alp_w, alp_h;
+	int div_x, div_y, div_h; /* the divider is 1 px wide */
+	int logo_x, logo_y, logo_w, logo_h;
+} tr_hud_partner_layout_t;
+
+void tr_hud_partner_layout(tr_hud_partner_layout_t *l);
+#endif
+
 /* view <- the game sound's volume (percent) and its change count (tr_vol_t.seq): the bottom row
  * shows "VOLUME n%" (or "MUTE" at 0) for TR_HUD_VOL_FRAMES whenever seq changes, over whatever the
  * screen has there. A seq that never moves shows nothing. */

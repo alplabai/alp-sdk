@@ -12,6 +12,9 @@
 #include "../render/panel_rot.h"       /* tr_rot_blit: the rotated layer-2 buffer */
 #include "../render/r3d.h"             /* the renderer's DL / setup / band sizes */
 #include "hud_assets.h"
+#ifdef TR_PARTNER_LOGO_HEADER
+#include TR_PARTNER_LOGO_HEADER /* tr_partner_logo[], _W, _H (tools/genlogo.py) */
+#endif
 
 _Static_assert(TR_HUD_FB_SIZE == TR_HUD_W * TR_HUD_H * 2, "tr_mbox.h TR_HUD_FB_SIZE");
 /* The layer-2 window (panel rows 0..TR_HUD_H-1) stays over the game
@@ -333,6 +336,83 @@ int tr_hud_fmt_u32(char *buf, uint32_t v)
 #define STRIP_END   (CARD_Y + 2 + TAGLINE_H) /* the tagline strip's last row + 1: 168 */
 _Static_assert(LOGO_CARD_Y + LOGO_CARD_H <= CARD_Y, "the logo card stays in the score tiles");
 _Static_assert(INV_Y + INV_PANEL_H <= TR_HUD_H, "the invitation panels stay in the HUD window");
+
+#ifdef TR_PARTNER_LOGO_HEADER
+/* The co-brand header: with a partner logo built in (-DTR_PARTNER_LOGO=<header from
+ * tools/genlogo.py>), the attract header card under BEST holds the ALP LAB mark on the left, a thin
+ * divider (a HUD accent colour at low alpha) and the partner's logo on the right, both the same
+ * height (45) and centred in the card. The card keeps its height and, if the pair needs it, grows
+ * only as far as it must, staying in the T_SCORE / T_SUB tiles it already sits in and at least 8 px
+ * short of the stats panel. It shows wherever the header card shows (attract), nowhere else. A build
+ * without a partner logo does not compile any of this and draws the banner alone. */
+#define CB_PAD   12
+#define CB_GAP   12 /* either side of the divider */
+#define CB_BOX_W 124
+#define CB_BOX_H 45 /* tools/genlogo.py's default --box: the same height as the ALP LAB mark */
+#define CB_DIV_H 40
+#define CB_NEED  (2 * CB_PAD + TR_LOGO_HDR_W + 2 * CB_GAP + 1 + TR_PARTNER_LOGO_W)
+#define CB_W     (CB_NEED > SCORE_W ? CB_NEED : SCORE_W)
+_Static_assert(TR_PARTNER_LOGO_W <= CB_BOX_W && TR_PARTNER_LOGO_H <= CB_BOX_H,
+               "the partner logo is larger than the header allows (tools/genlogo.py --box)");
+_Static_assert(TR_LOGO_HDR_H <= LOGO_CARD_H && CB_BOX_H <= LOGO_CARD_H, "both marks fit the card");
+/* Flash: the HE image is loaded whole into 256 KiB of ITCM (CMakeLists.txt checks the whole image after
+ * the link); the logo's pixels and palette may take 8 KiB of it, the header's ALP LAB mark is fixed. */
+_Static_assert(sizeof(tr_partner_logo) + sizeof(tr_partner_logo_pal) <= 8192,
+               "the partner logo's pixels and palette are over the 8 KiB flash allowance");
+_Static_assert(LOGO_CARD_X + CB_W <= 400, "the header stays in the T_SCORE / T_SUB tiles");
+_Static_assert(LOGO_CARD_X + CB_W + 8 <= PERF_X, "the header keeps 8 px from the stats panel");
+
+void tr_hud_partner_layout(tr_hud_partner_layout_t *l)
+{
+	int content = TR_LOGO_HDR_W + 2 * CB_GAP + 1 + TR_PARTNER_LOGO_W;
+	int x0      = LOGO_CARD_X + (CB_W - content) / 2;
+
+	l->card_x = LOGO_CARD_X;
+	l->card_y = LOGO_CARD_Y;
+	l->card_w = CB_W;
+	l->card_h = LOGO_CARD_H;
+	l->alp_x  = x0;
+	l->alp_y  = LOGO_CARD_Y + (LOGO_CARD_H - TR_LOGO_HDR_H) / 2;
+	l->alp_w  = TR_LOGO_HDR_W;
+	l->alp_h  = TR_LOGO_HDR_H;
+	l->div_x  = x0 + TR_LOGO_HDR_W + CB_GAP;
+	l->div_y  = LOGO_CARD_Y + (LOGO_CARD_H - CB_DIV_H) / 2;
+	l->div_h  = CB_DIV_H;
+	l->logo_x = l->div_x + 1 + CB_GAP;
+	l->logo_y = LOGO_CARD_Y + (LOGO_CARD_H - TR_PARTNER_LOGO_H) / 2;
+	l->logo_w = TR_PARTNER_LOGO_W;
+	l->logo_h = TR_PARTNER_LOGO_H;
+}
+
+static void paint_cobrand(const canvas_t *cv)
+{
+	tr_hud_partner_layout_t l;
+	int                     y0, y1, x0, x1;
+
+	tr_hud_partner_layout(&l);
+	panel(cv, l.card_x, l.card_y, l.card_w, l.card_h, C_PANEL, A_PANEL);
+	draw_map(cv, tr_logo_hdr, l.alp_w, l.alp_h, l.alp_x, l.alp_y, 0xEEEu, 16u);
+	rect(cv, l.div_x, l.div_y, 1, l.div_h, C_EDGE, 8u);
+	y0 = l.logo_y > cv->y ? l.logo_y : cv->y;
+	y1 = l.logo_y + l.logo_h < cv->y + cv->h ? l.logo_y + l.logo_h : cv->y + cv->h;
+	x0 = l.logo_x > cv->x ? l.logo_x : cv->x;
+	x1 = l.logo_x + l.logo_w < cv->x + cv->w ? l.logo_x + l.logo_w : cv->x + cv->w;
+	for (int y = y0; y < y1; y++) {
+		const uint8_t *s = &tr_partner_logo[(y - l.logo_y) * l.logo_w - l.logo_x];
+		uint16_t      *d = cv->px + (y - cv->y) * cv->w - cv->x;
+
+		for (int x = x0; x < x1; x++) {
+			uint32_t c = tr_partner_logo_pal[s[x]], a = c >> 12;
+
+			if (a == 15u) {
+				d[x] = (uint16_t)c;
+			} else if (a != 0u) {
+				blend(&d[x], c & 0xFFFu, a);
+			}
+		}
+	}
+}
+#endif
 
 /* The tagline strip; the refresh is a number derived from the display's timings
  * (panel_hz.h), so it is formatted, not pasted into the literal. */
@@ -728,6 +808,9 @@ paint_attract(const canvas_t *cv, const tr_hud_view_t *v, uint32_t frame, uint32
 	 * invitation row carries its own small panels: rows 170..300 and the
 	 * middle of the road stay clear. The high-score page keeps the card's
 	 * middle (it is the whole point of that page). */
+#ifdef TR_PARTNER_LOGO_HEADER
+	paint_cobrand(cv);
+#else
 	panel(cv, LOGO_CARD_X, LOGO_CARD_Y, SCORE_W, LOGO_CARD_H, C_PANEL, A_PANEL);
 	draw_map(cv,
 	         tr_logo_mid,
@@ -737,6 +820,7 @@ paint_attract(const canvas_t *cv, const tr_hud_view_t *v, uint32_t frame, uint32
 	         LOGO_CARD_Y + (LOGO_CARD_H - TR_LOGO_MID_H) / 2,
 	         0xEEEu,
 	         16u);
+#endif
 	if (table_page(v, frame)) {
 		panel(cv, 110, CARD_Y, TR_HUD_W - 220, INV_Y - 4 - CARD_Y, C_PANEL, A_PANEL);
 		paint_table(cv, &v->hs);
