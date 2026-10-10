@@ -219,5 +219,7 @@ removes power and the wake is a cold boot, BKRAM (bit 21) retains the record acr
 the LPTIMER (500 ms, 5 s) and the RV-3028 countdown (3 s, 11 s) and alarm wake the SoC.
 **Not verified:** STANDBY, the HE TCM bank sizes and ITCM / DTCM split, retention of
 application RAM, that the LPGPIO holds survive the SE's wake boot on every board population,
-the E1M-AEN801, and the E4. `examples/aen/aen-power-stop` is the bench (the
+the E1M-AEN801, and the E4. `examples/aen/aen-power-stop` is the bench (its `s-standby`,
+`t-tcm-retain`, `t-tcm-retain-128k` and `w-wake-timing` variants are code-complete for STANDBY,
+TCM retention and wake-to-`main()` timing, and unverified until run; the
 `product-noscratch` variant is the shipping configuration without the bench cell).

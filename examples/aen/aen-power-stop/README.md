@@ -77,6 +77,45 @@ One variable each, selected with a config fragment on top of `prj.conf`
 | (R-vendor) | `ix-repro-vendor.conf` | forces the boot-time restore on a cold boot (fixed profile), then BKRAM self-test, then cycle 1 in the same boot | `bkram live=1 selftest=1` and BOOT w40 = 1, w52 = 1 |
 | (R-legacy) | `x-repro-legacy.conf` | the same with the c6de654ff restore profile (0x16d, no BACKUP4K, no re-assert) | reproduces the U8e loss: `bkram live=0`, BOOT w52 = 2, the sleep refused `bkram_unusable` |
 
+### STANDBY, TCM retention and wake-to-main() timing (code-complete, unverified)
+
+Three further fragments cover what is implemented but has never run on silicon. **None of them has
+been run: every expected line below is what the code prints, not a measured result.** Each is
+selected like the others (`-DEXTRA_CONF_FILE=variants/<name>.conf`); the default image is unchanged.
+
+| Variant | Fragment | Changes | Expected evidence |
+|---|---|---|---|
+| (S) STANDBY | `s-standby.conf` | every cycle requests `ALP_POWER_MODE_STANDBY` | `cycle<n> enter STANDBY (...)`, then per cycle `cycle<n> mode_standby PASS` (the wake record's `realised_mode` reads STANDBY) next to the same `record_valid`, `wake_source`, `restored_all`, `bkram_counter` checks. A `request FAIL rc=... realised=...` line, or `valid=0` after the wake, means the SE did not take the STANDBY profile or the record did not survive. |
+| (T) TCM, both banks | `t-tcm-retain.conf` | `ALP_POWER_RETAIN_TCM`, `retain_kb = 256` (DTCM SRAM5_1 + SRAM5_2), plus a pattern probe | before each sleep `POWER_STOP: tcm cycle<n> wrote retain_kb=256 addr=0x... bank0_bytes=... bank1_bytes=... crc_a=0x... crc_b=0x...`; after the wake `tcm cycle<n> read asked_banks=2 bank0=retained bank1=retained` and `cycle<n> tcm_retained PASS` |
+| (T-128) TCM, one bank | `t-tcm-retain-128k.conf` | `retain_kb = 128` (SRAM5_1 only) | `asked_banks=1`; the verdict covers bank 0, and `bank1=` is evidence of which half of the DTCM address range the first retention bit covers |
+| (W) timing | `w-wake-timing.conf` | prints the LPRTC counter at sleep entry, at `PRE_KERNEL_1` and at `main()` | `POWER_STOP: timing cycle<n> lprtc pre=... boot=... main=... ccr=0x... cpsr=... cpcvr=... armed_ms=... main_uptime_ms=...`, then `ticks entry_to_boot=... boot_to_main=... entry_to_main=... tick_ms_nominal=...`, then `entry_to_main_nominal_ms=... wake_to_main_nominal_ms=... rtc_slept_ms=...` (cycle 3, the alarm, prints `wake_to_main_nominal_ms=n/a`). No verdict. |
+
+**How the TCM probe works.** The whole of Zephyr's RAM is the 256 KiB M55-HE DTCM (CPU-local
+`0x20000000`). The probe is a 160 KiB `.noinit` array, so the C runtime neither copies nor zeroes it
+on the cold boot; it straddles the 128 KiB boundary wherever the linker puts it, so part A sits in
+the first bank and part B in the second. A different pattern is written each cycle (seeded by the
+cycle number) and checked by CRC-32 after the wake, with the expected CRC regenerated rather than
+stored. The bank size (two 128 KiB DTCM banks) is taken from hal_alif `se_services/include/aipm.h`
+(`MB_SRAM5_1`, `MB_SRAM5_2`, "dtcm 128kb") and the E8 DFP `SOC_FEAT_HE_DTCM_SIZE`. **Still
+unproven:** that `SRAM5_1` is the low half of the address range, and that the SRAM5_x bits drive
+`RET_CTRL.HETCM_RET1/2`. A `lost` on a bank that was asked for is a real finding (the SES may also
+scrub the TCM on the cold boot), not necessarily a test fault; read `bank0=`/`bank1=` together with
+`asked_banks=`.
+
+**How the timing is derived, and how good it is.** The only counter that keeps running through STOP
+and the SE cold boot, and is readable from `main()` without the sleep disturbing it, is the LPRTC
+(VBAT domain, `0x42000000`). Its prescaler `CPSR` resets to `0x8000`, which the SVD says is 1 Hz on a
+precise 32.768 kHz clock. Here the clock is the SES-left LFRC (about 4.5 % fast, per the notes
+above) and an earlier bench counted about 2 Hz, so `tick_ms_nominal` is a nominal figure and `cpsr`
+and `ccr` are printed raw for the bench to settle the real rate. The wake event itself is not
+timestamped: wake-to-`main()` is `(main - pre) - armed_ms` (ticks converted at the nominal rate),
+which is a **bound with one-tick resolution (hundreds of ms) at each end, not a measurement**.
+`main_uptime_ms` is the kernel's own time at the sample, so the SES + ATOC share is the remainder.
+For a figure at millisecond resolution a counter running at a known rate through the sleep would be
+needed; this part offers none that the SDK may reprogram without breaking the backend's own LPRTC
+elapsed-time check, so none is used. It needs the bench scratch option (on in `prj.conf`) for the
+`PRE` / `BOOT` snapshots, so it does not exist in the `product-noscratch` image.
+
 Product OFF profile (bench U8g: STOP woke 2 of 2 with it, never without): `vtor_address` =
 `SCB->VTOR` and `memory_blocks` = MRAM \| SERAM \| BKRAM are the backend default. The bench
 build can turn each off (`alp_som_bench_knobs`, Kconfig `..._BENCH_NO_VTOR_SELF` /
@@ -115,7 +154,9 @@ POWER_STOP: cycle<n> <check> <PASS|FAIL>
 POWER_STOP: SUMMARY cycles=<n> pass=<n> fail=<n>
 ```
 
-Checks, per cycle: `record_valid mode_stop wake_source restored_all bkram_counter`.
+Checks, per cycle: `record_valid mode_stop wake_source restored_all bkram_counter`
+(`mode_standby` replaces `mode_stop` in the STANDBY variant, and `tcm_retained` is added by the
+TCM variants).
 Evidence lines (no verdict): `POWER_STOP: boot`, `wake`, `regs` (RET_CTRL,
 VBAT_ANA_REG1, MISC_CTRL, STOP_MODE, RTSS_HE_CTRL), `alarm`.
 

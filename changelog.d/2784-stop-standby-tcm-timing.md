@@ -1,0 +1,3 @@
+### Added — aen-power-stop variants for STANDBY, TCM retention and wake-to-main() timing (Refs #2784)
+
+`examples/aen/aen-power-stop` gains three opt-in config fragments so one bench run can exercise what the STOP backend implements but has never run on silicon: `s-standby.conf` (every cycle sleeps in `ALP_POWER_MODE_STANDBY`, verdict `mode_standby`), `t-tcm-retain.conf` / `t-tcm-retain-128k.conf` (`ALP_POWER_RETAIN_TCM` with a CRC-checked pattern in the DTCM, verdict `tcm_retained`, per-bank evidence) and `w-wake-timing.conf` (the LPRTC counter at sleep entry, `PRE_KERNEL_1` and `main()`, a wake-to-`main()` bound at one-tick resolution). The default image is unchanged. All three are unverified until the bench run.
