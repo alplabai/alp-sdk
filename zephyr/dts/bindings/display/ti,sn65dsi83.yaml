@@ -66,3 +66,16 @@ properties:
       (data lanes at LP-11) BEFORE EN is asserted high -- the bridge answers
       no I2C transaction at all until EN is high.  GPIO_ACTIVE_HIGH: driving
       the line "active" raises EN.
+
+  recovery-recipe-address:
+    type: int
+    description: |
+      Set when the core that initialises the bridge hands the I2C controller to
+      another core afterwards (alp,i2c-handover): the address of a
+      `struct sn65dsi83_recipe` in SRAM both cores see (zephyr/drivers/display/
+      sn65dsi83_recovery.h, 0x54 bytes).  The driver then never polls the bridge
+      itself (it may not touch the bus after the handover); it publishes its CSR
+      table here and the core that owns the bus replays it when the bridge has
+      reset itself to its defaults (an alp,sn65dsi83-recovery node on that core).
+      Unset: this core keeps the bus and the driver polls the bridge on its own
+      (CONFIG_SN65DSI83_RECOVERY).

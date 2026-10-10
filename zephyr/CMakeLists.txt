@@ -827,6 +827,14 @@ if(CONFIG_SN65DSI83)
 endif()
 zephyr_library_sources_ifdef(CONFIG_SN65DSI83
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/display_sn65dsi83.c)
+# The init's I2C half + the health pass: the driver's own recovery and the
+# bus-owning core's recovery agent (DT node alp,sn65dsi83-recovery) both use it.
+if(CONFIG_SN65DSI83 OR CONFIG_SN65DSI83_RECOVERY_AGENT)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/sn65dsi83_recovery.c)
+endif()
+zephyr_library_sources_ifdef(CONFIG_SN65DSI83_RECOVERY_AGENT
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/sn65dsi83_recovery_agent.c)
 
 # ADR-0017-ADJACENT glue: the Alif E8 SoC-level setup the MIPI D-PHY and the
 # display chain need and no driver performs -- D-PHY clock sources + analog

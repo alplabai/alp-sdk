@@ -9,7 +9,9 @@
  *
  * flag-address: the reserved block next to TR_MEM_SRAM1_READY (tr_memmap.h
  * TR_MEM_I2C1_HANDOVER, three words), SRAM0, always on. Both overlays carry the
- * same value.
+ * same value. alive-address is the HP's liveness word (TR_MEM_I2C1_ALIVE, asserted in
+ * src/main.c): with it an HE-only reset leaves I2C1, the bridge's EN pin and the HP's camera
+ * alone (the HP's sn65dsi83 agent repairs the bridge if the DSI restart cost it its lock).
  */
 
 /* The HE does not use I2C1 unless its shield needs the bus (a bridge): off here, and
@@ -17,6 +19,11 @@
  * back on. A disabled bus is released at once -- the HE never touches it. */
 &i2c1 {
 	status = "disabled";
+	/* The controller is initialised by hand, on a COLD boot only (the handover glue,
+	 * zephyr/soc-bridge/alif/i2c_handover.c): an HE-only reset while the HP runs its camera on
+	 * the same controller must not run the i2c_dw init (it resets the block and takes the pads
+	 * under the HP's transfer; bench: I2C1 wedged, bridge never reconfigured). */
+	zephyr,deferred-init;
 };
 
 / {
@@ -25,5 +32,9 @@
 		role = "release";
 		bus = <&i2c1>;
 		flag-address = <0x0237FC94>;
+		/* The HP's liveness word (tr_memmap.h TR_MEM_I2C1_ALIVE): a 10 ms timer the HP starts right
+		 * after it took the bus. With the record "taken" and this word moving, an HE reset is a warm
+		 * one and leaves I2C1 alone. */
+		alive-address = <0x0237FD90>;
 	};
 };
