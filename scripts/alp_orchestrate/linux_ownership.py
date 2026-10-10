@@ -10,6 +10,7 @@ supervisor-links.yaml and the SoC JSON `linux_dt` block (`project.soc_spec`).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -74,6 +75,43 @@ def cm33_clocks(doc: dict, soc: dict, links: dict, own: dict[str, str]) -> list[
                                "has no cpg_clocks")
             add(ent["cpg_clocks"])
     return clocks
+
+
+def _can_channels(doc: dict, soc: dict, own: dict[str, str]) -> tuple[dict[int, int], set[int], str]:
+    """({E1M CAN bus id: SoC channel} for every a55-owned, non-hw_blocked bus,
+    {bus ids Linux ENABLES (`linux_enable`)}, shared controller label)."""
+    linux_dt = soc.get("linux_dt") or {}
+    cans: dict[int, int] = {}
+    enabled: set[int] = set()
+    label = ""
+    for inst, e in doc["assignable"].items():
+        m = re.fullmatch(r"e1m_can(\d+)", inst)
+        ld = linux_dt.get(e.get("soc_instance")) or {}
+        if m and ld.get("channel") is not None and own[inst] == "a55" and not e.get("hw_blocked"):
+            bus = int(m.group(1))
+            cans[bus], label = ld["channel"], ld["label"]
+            # `render` only sets the node okay when linux_enable AND every pad has
+            # a PFC code (a GAP leaves the node at the vendor status).
+            if e.get("linux_enable") and all(p is not None for _, p in instance_pfc(soc, e)):
+                enabled.add(bus)
+    return cans, enabled, label
+
+
+def can_netdev_map(doc: dict, soc: dict, own: dict[str, str]) -> list[str]:
+    """Linux netdev per E1M CAN bus id (index = N of `e1m_canN`), "" = none.
+
+    rcar_canfd names netdevs `can0..` in probe order of the ENABLED channels
+    (ascending channel), and exposes no channel id at runtime (#2352), so the
+    name is the rank of the instance's SoC channel among the channels Linux
+    enables -- i.e. the `linux_enable` ones, the only nodes `render` sets to
+    "okay" (same rule as every other peripheral here).  `render` forces every
+    OTHER channel node disabled, so rank == enabled order by construction.
+    Buses that are not enabled map to "": alp_can_open fails closed."""
+    cans, enabled, _ = _can_channels(doc, soc, own)
+    if not cans:
+        return []
+    ranked = sorted(cans[b] for b in enabled)
+    return [f"can{ranked.index(cans[b])}" if b in enabled else "" for b in range(max(cans) + 1)]
 
 
 def _group(inst: str) -> tuple[str, str]:
@@ -156,4 +194,23 @@ def render(doc: dict, soc: dict, links: dict,
             " */\n"
             f"&cpg {{\n\trenesas,cm33-owned-clocks = {names};\n}};\n")
     labels.add("cpg")
+    nd = can_netdev_map(doc, soc, own)
+    if nd:
+        cans, enabled, clabel = _can_channels(doc, soc, own)
+        on = {cans[b] for b in enabled}
+        off = [c for c in range(int((soc.get("peripherals") or {}).get("can_fd", 0)))
+               if c not in on]
+        if off:
+            body = "\n".join(f'\tchannel{c} {{\n\t\tstatus = "disabled";\n\t}};\n' for c in off)
+            out += ("\n/*\n * Every CAN-FD channel Linux does not enable is disabled explicitly: rcar_canfd\n"
+                    " * numbers netdevs by probe order of the ENABLED channels, so the netdev map\n"
+                    " * below holds only if no other channel is enabled; an empty entry =\n"
+                    " * no netdev for that bus (#2352).\n */\n"
+                    f"&{clabel} {{\n{body}}};\n")
+            labels.update(f"{clabel}/channel{c}" for c in off)
+        names = ", ".join(f'"{n}"' for n in nd)
+        out += ("\n/*\n * Linux netdev per E1M CAN bus id (index = N of E1M_X_CANN): rcar_canfd numbers\n"
+                " * netdevs by probe order, not by channel, so the SDK's SocketCAN backend reads\n"
+                " * this instead of assuming can<N> (#2352).\n */\n"
+                f"/ {{\n\talp,e1m-can-netdev = {names};\n}};\n")
     return out, labels

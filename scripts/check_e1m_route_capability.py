@@ -99,10 +99,10 @@ def _v2n_function_aliases(silicon_peripheral: str) -> list[str]:
         return [f"UART{m.group(1)}_TX"]
 
     canfd_to_e1m = {
-        "CANFD2_CRX2": "CAN0_RX",
-        "CANFD2_CTX2": "CAN0_TX",
-        "CANFD3_CRX3": "CAN1_RX",
-        "CANFD3_CTX3": "CAN1_TX",
+        "CANFD2_CRX2": "CAN1_RX",
+        "CANFD2_CTX2": "CAN1_TX",
+        "CANFD3_CRX3": "CAN0_RX",
+        "CANFD3_CTX3": "CAN0_TX",
     }
     if silicon_peripheral in canfd_to_e1m:
         return [canfd_to_e1m[silicon_peripheral]]
