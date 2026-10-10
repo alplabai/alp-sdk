@@ -283,7 +283,11 @@ def _app_ram_console_size(project: BoardProject, slice_: Slice) -> int:
     for line in text.splitlines():
         m = _RAM_CONSOLE_SIZE_RE.match(line)
         if m:
-            size = int(m.group(1), 0)  # last assignment wins, like Kconfig
+            # Last assignment wins, like Kconfig.  Kconfig reads an int symbol
+            # as hex with a 0x prefix, else base 10 -- `016384` is 16384,
+            # where int(x, 0) would raise ValueError.
+            tok = m.group(1)
+            size = int(tok, 16) if tok[:2] in ("0x", "0X") else int(tok, 10)
     return size
 
 
