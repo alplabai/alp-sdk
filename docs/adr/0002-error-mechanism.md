@@ -1,6 +1,7 @@
 # 0002. `alp_last_error()` + compile-time SoC capability validation
 
-Status: Accepted — see **Amendment** below (2026-08-27): records the
+Status: Accepted — see **Amendment** below (2026-10-10: E1M-NX9101 / i.MX 93
+removed; 2026-08-27): records the
 `ALP_ERR_NOT_READY` / `ALP_ERR_INVAL` convention measured across the
 dispatch layer and corrects a scope misreading of the "programmer error"
 parenthetical. The decision below is otherwise unchanged.

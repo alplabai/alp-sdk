@@ -1,6 +1,6 @@
 # 0021. Toolchain provisioning: pin upstream, never rehost; onboard per lane
 
-Status: Proposed — see **Amendments** below (2026-07-26) for the Arm GNU
+Status: Proposed — see **Amendments** below (2026-10-10 E1M-NX9101 / i.MX 93 removal; 2026-07-26) for the Arm GNU
 Toolchain open-evidence answer, the tokened-toolchain-root-injection wording
 correction, and the item-2 injection-set / dtc-gperf corrections.
 Date: 2026-07-25

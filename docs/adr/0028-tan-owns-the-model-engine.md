@@ -13,7 +13,7 @@ Supersedes the pipeline-spine clause (§2 item 4) of
 
 ## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
 
-E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The `u65: E1M-NX9101` variant above is gone; shipped Ethos-U variants are u85 (E1M-AEN401/601/801/803) and u55 (E1M-AEN301/501/701), so the `u55-u65` table now serves u55 only and "eight Ethos-U SKUs" reads as seven.
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The `u65: E1M-NX9101` variant below is gone; shipped Ethos-U variants are u85 (E1M-AEN401/601/801/803) and u55 (E1M-AEN301/501/701), so the `u55-u65` table now serves u55 only and "eight Ethos-U SKUs" reads as seven.
 
 ## Amendment (2026-08-15 — what a static `check` may claim, and how the tables are keyed)
 

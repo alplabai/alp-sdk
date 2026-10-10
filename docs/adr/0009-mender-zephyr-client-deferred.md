@@ -1,6 +1,7 @@
 # 0009. Mender Zephyr client deferred to v1.1; secure OTA on Zephyr cuts from v0.4
 
-Status: Accepted — see **Amendment** below (2026-08-27): the AEN
+Status: Accepted — see **Amendment** below (2026-10-10: E1M-NX9101 / i.MX 93
+removed; 2026-08-27): the AEN
 secure-boot bullet's "swap-using-scratch" no longer describes the
 tree, which ships `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`.  The
 deferral decision itself is unchanged.

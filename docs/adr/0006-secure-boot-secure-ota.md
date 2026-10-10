@@ -2,7 +2,7 @@
 
 Status: Accepted, partially superseded (v0.4 delivery)
 Date: 2026-05-10
-Amended: 2026-05-11, 2026-07-31, 2026-08-25 (see "Amendment" sections at the bottom)
+Amended: 2026-10-10, 2026-05-11, 2026-07-31, 2026-08-25 (see "Amendment" sections at the bottom)
 
 ## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
 
