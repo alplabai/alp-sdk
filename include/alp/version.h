@@ -49,7 +49,7 @@ extern "C" {
  * `alp_version_string()` below, which returns it verbatim) that can tell an
  * rc build apart from the GA version it targets (#1902).
  */
-#define ALP_VERSION_STRING "0.17.0-rc1"
+#define ALP_VERSION_STRING "0.17.0-rc2"
 
 /**
  * @brief Encode a MAJOR.MINOR.PATCH triple into one comparable integer.

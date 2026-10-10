@@ -32,6 +32,10 @@
 #   With TR_HP_SOUND (the combined image below) the HE must also be built with
 #   -DTR_HP_SOUND=ON (src/platform/bus2_he.c): without it the HP's sound never
 #   gets the bus. Refused unless zephyr.elf carries tr_bus2_he_frame.
+# Partner logo (optional): the HE built with -DTR_PARTNER_LOGO=<header from tools/genlogo.py> puts it
+#   beside the ALP LAB mark in the attract header (src/hud/hud.c). Without the option the banner is unchanged. This script only checks
+#   that the elf and the build's CMakeCache agree (a configured logo is linked in, none otherwise)
+#   and says so; the header is the partner's artwork and lives outside this repo.
 # MRAM_READBACK (optional): a raw read-back of LIVE MRAM from 0x80000000
 #   (J-Link savebin, >= 0x580000 bytes). With it, flowd/ gets whole 16 KiB
 #   sector blobs whose bytes outside the images come from the read-back
@@ -136,6 +140,19 @@ elif [ "$snd" = ON ]; then
 	sd=$(realpath -m "${TR_SND_HP_BUILD:-/nonexistent-TR_SND_HP_BUILD-unset}")
 	snd_hp_check "$sd" "${TR_SND_CARRIER_SERIAL:-}" "$here/sound-carriers.txt" "$NM" || exit 3
 fi
+
+# 0b. The partner logo: what the HE's CMakeCache says must be what its elf carries (hud.c's
+#     tr_partner_logo[]), so a stale build dir cannot ship a logo nobody asked for, or lose one.
+logo=$(sed -n 's/^TR_PARTNER_LOGO:[A-Z]*=//p' "$hed/CMakeCache.txt" 2>/dev/null | tr -d '\r')
+syms=$("$NM" "$elf" 2>/dev/null) && [ -n "$syms" ] || die "$NM could not read the symbols of $elf"
+has_logo=0
+grep -q ' tr_partner_logo$' <<<"$syms" && has_logo=1
+if [ -n "$logo" ] && [ "$has_logo" = 0 ]; then
+	die "$hed was configured with TR_PARTNER_LOGO=$logo but zephyr.elf has no tr_partner_logo -- rebuild the HE"
+elif [ -z "$logo" ] && [ "$has_logo" = 1 ]; then
+	die "$hed's zephyr.elf carries a partner logo but its CMakeCache has no TR_PARTNER_LOGO -- rebuild the HE"
+fi
+[ -z "$logo" ] || echo "build-release: partner logo compiled in (TR_PARTNER_LOGO=$logo)" >&2
 
 # 1. stub + renderer (scene build) -> one A32_APP image, stub release mode:
 #    the stub copies the payload MRAM -> 0x02500000 and self-LAUNCHes.

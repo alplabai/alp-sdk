@@ -15,3 +15,13 @@ description: |
 compatible: "alp,som-power"
 
 include: [base.yaml, pinctrl-device.yaml]
+
+properties:
+  alp,wired-lpgpio-pads:
+    type: array
+    description: |
+      LPGPIO lines (n of P15_n) the module wires to an on-module chip that no
+      `alp,som-power-domain` node controls (the OSPI INTn / RESETn nets).  Together with the
+      pads of the domain nodes they are the SoM-wired set the power layer refuses as
+      application wake pads (`alp,power-wake-gpios`).  Generated from `wired_lpgpio_pads:`
+      in metadata/e1m_modules/aen/on-module-links.yaml.

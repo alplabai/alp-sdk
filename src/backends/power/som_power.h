@@ -77,6 +77,11 @@ extern alp_som_bench_knobs_t alp_som_bench_knobs;
 #define ALP_SOM_ARM_LPTIMER   0x00000001u /**< LPTIMER underflow (short timed wake). */
 #define ALP_SOM_ARM_RTC_TIMER 0x00000002u /**< RV-3028 countdown the SDK started. */
 #define ALP_SOM_ARM_RTC_INT   0x00000004u /**< RV-3028 /INT -> P15_0 armed by the caller. */
+#define ALP_SOM_ARM_LPGPIO    0x00000008u /**< One or more LPGPIO wake pads (P15_n) armed. */
+/** LPGPIO wake pads, one bit per line n of P15_n.  armed_hw bits 23:16 hold the pads this
+ *  cycle armed (the STOP backend writes them).  Bits 15:9 and 31:24 stay free. */
+#define ALP_SOM_ARM_PADS_SHIFT 16u
+#define ALP_SOM_PADS_MASK      0xFFu
 /** Record flag (not a wake path): the reset syndrome's NSRST bit was probed before the
  *  sleep and does clear, so a set bit at the next boot really is a pin reset. */
 #define ALP_SOM_REC_NSRST_TRUSTED 0x00000100u
@@ -305,6 +310,12 @@ struct gpio_dt_spec;
 /** The `wake-gpios` input of @p domain (the RV-3028 /INT pad P15_0 for the RTC
  *  domain), or NULL when the domain is absent or has none. */
 const struct gpio_dt_spec *alp_som_power_wake_gpio(alp_power_domain_t domain);
+
+/** LPGPIO lines (bit n = P15_n) the SoM itself wires: every pad of an `alp,som-power-domain`
+ *  node on the lpgpio controller, plus the pads listed in the `alp,wired-lpgpio-pads` property of
+ *  the `alp,som-power` node (the OSPI INTn / RESETn nets on the AEN801 / AEN803).  A pad in this
+ *  set is never an application wake pad. */
+uint32_t alp_som_power_lpgpio_claimed(void);
 
 /** True when the RV-3028 has its alarm or countdown interrupt enabled
  *  (CONTROL_2 AIE | TIE).  ALP_ERR_NOT_READY with no RTC domain / I2C bus. */

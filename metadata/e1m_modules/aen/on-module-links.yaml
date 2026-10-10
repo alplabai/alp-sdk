@@ -646,3 +646,18 @@ power_domains:
       on_module_links.backlight.enable (P5_5, E1M-AEN-2626-R2 netlist).
       `BACKLIGHT_EN` is this file's label, not a netlist name; the asserted
       polarity is `assumed`.
+
+# ---------------------------------------------------------------------------
+# wired_lpgpio_pads -- LPGPIO (P15_n) pads the module wires to an on-module
+# chip that no power domain controls.  The generator emits them as the
+# `alp,wired-lpgpio-pads` property of the `alp,som-power` node; the SDK refuses
+# them as application wake pads (alp,power-wake-gpios).  The list is the same
+# for every AEN SoM because the memory footprints (U9 HyperRAM, U10 NOR) and
+# their nets exist on the one E1M-AEN-2626-R2 PCB whether or not the part is
+# populated.  check_som_power_domains.py pins each pad to its alif-ospi.tsv row.
+# ---------------------------------------------------------------------------
+wired_lpgpio_pads:
+  - { signal: OSPI1_INTn,   silicon_pad: "P15_2", source: { file: alif-ospi.tsv, signal: OSPI1_INTn } }
+  - { signal: OSPI0_INTn,   silicon_pad: "P15_3", source: { file: alif-ospi.tsv, signal: OSPI0_INTn } }
+  - { signal: OSPI0_RESETn, silicon_pad: "P15_6", source: { file: alif-ospi.tsv, signal: OSPI0_RESETn } }
+  - { signal: OSPI1_RESETn, silicon_pad: "P15_7", source: { file: alif-ospi.tsv, signal: OSPI1_RESETn } }

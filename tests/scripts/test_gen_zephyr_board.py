@@ -168,6 +168,13 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
     def test_aen801_m55_he_full_tree(self) -> None:
         self._parity("e1m_aen801_m55_he")
 
+    def test_every_aen_som_lists_all_four_ospi_pads_as_wired(self) -> None:
+        # AEN801 has no ext-flash / ext-ram domain node, so P15_6 / P15_7 are claimed
+        # only through this property (alp_som_power_lpgpio_claimed() must be 0xFF).
+        for board_dir in ("e1m_aen801_m55_he", "e1m_aen803_m55_he"):
+            dts = next((BOARDS_ROOT / board_dir).glob("*_rtss_he.dts")).read_text(encoding="utf-8")
+            self.assertIn("alp,wired-lpgpio-pads = <2 3 6 7>;", dts, board_dir)
+
     def test_aen803_m55_hp_full_tree(self) -> None:
         self._parity("e1m_aen803_m55_hp")
 
