@@ -24,7 +24,7 @@ the flows here apply to both SKUs unchanged.
 | **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM ACKs at 0x50 and returns a **populated Alp manifest** (not blank) — magic `ALPH`, SKU, serial, mfg date, CRC-32 all decode; one of 12 devices on the bus (the same N24S128 part also answers its `1011` second device-select header at 0x58 — see §3) — once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
 | **PWM** (Tier-1.5) | ✅ PASS | pwm_set_cycles reg readback matches (CNTR_PTR/COMPARE/CTRL), shares the hal_alif UTIMER start-path the counter fix validated. |
 | **SPI** (`alif,dwc-ssi-spi`, Tier-2) | ✅ PASS *after a fix* | DWC-SSI stayed in slave mode → `spi_transceive` -116 (TX FIFO full, no SCLK). The Alif SoC gates master mode behind `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`), which upstream never sets. **PR #162** sets it in the driver. Re-validated: `rc=0`, internal-loopback `rx==tx`, CTRLR0=`0x80002007`. See §3. |
-| **Ethernet** (`alif,ethernet` / `eth_dwmac`, Tier-1.5) | ✅ PASS *after a fix* | Real cause of the long no-link: the GMAC DMA descriptor rings + net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** on the GMAC DMA bus. Fix: `zephyr,sram = &sram0` (global on-chip SRAM `0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n` -- moved ALL of main RAM to SRAM0. The PHY power (`E_PHY_PWRDWN` = P15_4), reset (`E_PHY_RESET` = P11_6), and RCSR bit7 `REF_CLK_SEL=1` were already correct. Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease + ARP `REACHABLE`). **Silicon-verified on E1M-AEN803 (bench run 202)**: only the Ethernet-owned buffers move now -- the ethernet node's `memory-region = <&sram0>;` (descriptor rings) + `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` (net_buf pool, `subsys/net/ip/net_pkt.c`) -- while main RAM stays on DTCM; DHCP lease `192.168.10.123`, ping 5/5 (avg 0.271 ms), rings resolving into `net_buf_data_rx/tx_bufs` in SRAM0, main RAM on DTCM. E1M-AEN801 is build-verified only. An earlier, different prototype of the same idea ran on silicon in scratch bench run 200 (a different app-level relocation, `CONFIG_NOCACHE_MEMORY=y`, and different ring addresses), not this exact mechanism. See §3. |
+| **Ethernet** (`alif,ethernet` / `eth_dwmac`, Tier-1.5) | ✅ PASS *after a fix* | Real cause of the long no-link: the GMAC DMA descriptor rings + net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** on the GMAC DMA bus. Fix: `zephyr,sram = &sram0` (global on-chip SRAM `0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n` -- moved ALL of main RAM to SRAM0. The PHY power (`E_PHY_PWRDWN` = P15_4), reset (`E_PHY_RESET` = P11_6), and RCSR bit7 `REF_CLK_SEL=1` were already correct. Re-validated end-to-end: a DHCP lease (server-side dnsmasq lease + ARP `REACHABLE`). **Silicon-verified on E1M-AEN803 (bench run 202)**: only the Ethernet-owned buffers move now -- the ethernet node's `memory-region = <&sram0>;` (descriptor rings) + `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` (net_buf pool, `subsys/net/ip/net_pkt.c`) -- while main RAM stays on DTCM; a DHCP lease, ping 5/5 (avg 0.271 ms), rings resolving into `net_buf_data_rx/tx_bufs` in SRAM0, main RAM on DTCM. E1M-AEN801 is build-verified only. An earlier, different prototype of the same idea ran on silicon in scratch bench run 200 (a different app-level relocation, `CONFIG_NOCACHE_MEMORY=y`, and different ring addresses), not this exact mechanism. See §3. |
 | **UART3** (`ns16550`, Tier-1) | ✅ PASS | Internal loopback. |
 | **Counter** (`utimer0`, Tier-1.5) | ✅ PASS | UTIMER0 counter advances. |
 | **Counter alarm** (`utimer0` COMPARE-A, Tier-1.5) | ✅ PASS *after a fix* (RAM-run, 2026-06-17) | The COMPARE-A one-shot **alarm** fires + re-arms (`fired=2`). Two bring-up bugs fixed in `counter_alif_utimer.c`: (1) the match interrupt compares the `COMPARE_A_BUF1` **shadow** register (`0xD4`), not the `COMPARE_A` reg (`0xD0`) the driver wrote — so the shadow stayed 0 and bit2 only matched at the start `CNTR==0` tick; (2) the alarm's NVIC line is `comp_a_buf1` (the bit2 event), not `comp_capt_a` (bit0/CAPTURE_A) — so even once bit2 latched its line was never enabled. Regression: `examples/aen/aen-counter-alarm-regcheck`. |
@@ -573,7 +573,7 @@ secure-boot verification — always write both consistent blobs.
 > programs + verifies the ATOC over SWD (`Verify successful.`, ~0.16 s @ ~200 KB/s), and
 > `RSetType 2` (nRESET pin) re-runs the SE boot ROM so the app boots from MRAM. Bench
 > proof: flashed `aen-ethernet-link` over flow D → `RESULT PASS` + DHCP lease
-> `192.168.10.137` (server-side dnsmasq lease + ARP `REACHABLE` confirm).
+> a DHCP lease (server-side dnsmasq lease + ARP `REACHABLE` confirm).
 >
 > **Two gotchas that block the probe (both bit us):** (1) a version-mismatched probe
 > triggers a mandatory **J-Link firmware update on first connect**, and that update
@@ -672,7 +672,7 @@ secure-boot verification — always write both consistent blobs.
   gpio11), and the RCSR bit7 `REF_CLK_SEL=1` ref-clock select were all already
   correct — the earlier "PHY RX path / `ANLPAR=0` / scope the REF_CLK"
   diagnosis was a red herring (a bad cable plus the DTCM starvation).
-  Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease
+  Re-validated end-to-end: a DHCP lease (server-side dnsmasq lease
   + ARP `REACHABLE`).
 
   **Silicon-verified on E1M-AEN803 (bench run 202)** narrower follow-up: pin
@@ -683,7 +683,7 @@ secure-boot verification — always write both consistent blobs.
   `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` relocating
   `subsys/net/ip/net_pkt.c` — while main RAM stays on DTCM. Bench run 202
   re-ran `aen-ethernet-link` (`b240f01cb`) on E1M-AEN803 with this exact
-  mechanism: DHCP lease `192.168.10.123`, `PHY link UP after 2000 ms`, host
+  mechanism: a DHCP lease, `PHY link UP after 2000 ms`, host
   ping 5/5 (avg 0.271 ms), neighbour `REACHABLE`, and the live descriptor
   rings resolved into `net_buf_data_rx/tx_bufs` (both in SRAM0) while
   `_kernel` and main RAM stayed on DTCM. E1M-AEN801 is build-verified only

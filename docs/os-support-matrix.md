@@ -131,7 +131,7 @@ plan in `VERSIONS.md`.
 | **RTC** (`<alp/rtc.h>`)   | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)   | **GA** (Zephyr `rtc_*`)   | code complete¹     | code complete¹       |
 | **Watchdog** (`<alp/wdt.h>`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`)   | **GA** (Zephyr `wdt_*`)   | code complete¹     | code complete¹       |
 | **Audio** (`<alp/audio.h>`) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | stub | stub |
-| **Camera** (`<alp/camera.h>`) | code complete [^cam2]    | code complete [^cam2]    | code complete [^cam2]     | code complete [^cam2]     | stub               | stub                 |
+| **Camera** (`<alp/camera.h>`) | E4: compile-only; E3: no camera DT [^cam2] | no camera DT (E3, E4) [^cam2] | E8: bench-verified; E5..E7: no camera DT [^cam2] | E8: bench-verified; E5..E7: no camera DT [^cam2] | stub               | stub                 |
 | **IoT** (`<alp/iot.h>`)   | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | stub | stub |
 
 [^cam2]: The AEN Zephyr camera path is the portable `zephyr_video` backend
@@ -140,7 +140,9 @@ plan in `VERSIONS.md`.
     Bench-verified on E8 (E1M-AEN803, E1M-EVK, J5): OV9281
     ([camera-shields.md](camera-shields.md)) and an INNO-MAKER CAM-IMX335 on both
     the M55-HE and the M55-HP (3/3 cold boots, 1296x972 RAW10, #2809).  The E4
-    (E1M-AEN401) M55-HP/HE overlays exist (#2809) but are not bench-verified.
+    (E1M-AEN401) M55-HP overlay and `ensemble_e4_camera.dtsi` exist (#2809,
+    compile-only, not bench-verified); there is no E4 M55-HE camera overlay, and
+    E3 and E5..E7 have no camera DT or shield overlay.
 
 ¹ **code complete** — migrated to the registry/dispatcher pattern with real Linux
 backends in the v0.8 cycle (issue #33), which also lands the per-class
