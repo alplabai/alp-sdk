@@ -1448,6 +1448,35 @@ ZTEST(power_som_domains, test_core_off_with_a_power_domain_reset_request_is_an_a
 	zassert_equal(info.wake_source, 0u);
 }
 
+ZTEST(power_som_domains, test_core_off_only_with_no_wake_source_is_an_aborted_sleep)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec)); /* neither decode pass finds a source */
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0u;
+	g_core_off  = true;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+	zassert_equal(info.wake_source, 0u);
+	zassert_equal(info.slept_ms, 0u);
+	zassert_equal(info.quiesced_domains, info.restored_domains, "domains still restored");
+}
+
+ZTEST(power_som_domains, test_stat_set_with_core_off_and_no_source_stays_a_stop_wake)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	g_core_off  = true;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+}
+
 ZTEST(power_som_domains, test_core_off_with_no_record_blind_restores)
 {
 	alp_power_boot_info_t info;

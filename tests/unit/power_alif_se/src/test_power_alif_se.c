@@ -2483,6 +2483,20 @@ ZTEST(power_alif_se, test_hp_clock_health_and_run_profile)
 #ifndef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 /* The product configuration (no bench scratch option): the OFF fields are fixed, the diag
  * patches are no-ops, and nothing bench-only is reachable. */
+ZTEST(power_alif_se, test_core_off_witness_decodes_wic_and_keeps_the_other_bits)
+{
+	uint32_t out;
+
+	zassert_true(alif_se_ctrl_core_off(0x101u, &out), "EWIC subsystem-off");
+	zassert_equal(out, 0x001u, "COLD_WAKEUP preserved");
+	zassert_false(alif_se_ctrl_core_off(0x300u, &out), "IWIC is not a subsystem-off request");
+	zassert_equal(out, 0u);
+	zassert_false(alif_se_ctrl_core_off(0x200u, &out));
+	zassert_equal(out, 0u);
+	zassert_false(alif_se_ctrl_core_off(0x001u, &out), "WIC clear");
+	zassert_equal(out, 0x001u);
+}
+
 ZTEST(power_alif_se, test_product_build_off_profile_is_the_vendor_one_and_not_switchable)
 {
 	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,

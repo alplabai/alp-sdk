@@ -191,6 +191,7 @@ static int64_t                      _assert_ms[ALP_POWER_DOMAIN_COUNT];
 static boot_capture_t               _boot;
 static alp_som_pd_record_t          _boot_rec; /* the cycle's record, kept for the wake decode */
 static bool                         _boot_external; /* this boot followed a pin / external reset */
+static bool _boot_core_off_only; /* the WIC bits were the only STOP witness this boot */
 static bool _ignore_stat; /* BKRAM held another image's data: STOP_MODE_STAT means nothing here */
 /* The record of the quiesce in progress, kept in plain RAM as well: a same-boot rollback
  * (a sleep that did not power down, a refusal after the quiesce) must not depend on BKRAM,
@@ -1062,11 +1063,12 @@ void alp_som_power_reset_for_test(void)
 	memset(_hook_ctx, 0, sizeof(_hook_ctx));
 	memset(&_boot, 0, sizeof(_boot));
 	memset(&_boot_rec, 0, sizeof(_boot_rec));
-	_boot_external   = false;
-	_boot_suppressed = false;
-	_ignore_stat     = false;
-	_pads_applied    = false;
-	_ram_rec_valid   = false;
+	_boot_external      = false;
+	_boot_core_off_only = false;
+	_boot_suppressed    = false;
+	_ignore_stat        = false;
+	_pads_applied       = false;
+	_ram_rec_valid      = false;
 	alp_som_pd_store_clear();
 	k_mutex_unlock(&_lock);
 }
@@ -1215,7 +1217,8 @@ int alp_som_power_boot_restore(void)
 	_boot_external = nsrst && (rec.armed_hw & ALP_SOM_REC_NSRST_TRUSTED) != 0u;
 	/* core_off as the only witness: a power-domain reset request (syndrome bit2) means
 	 * the entry was cut short from outside. */
-	if (core_off && !stop_mode_stat_set() && (syndrome & SOMPD_RESET_PD_REQUEST) != 0u) {
+	_boot_core_off_only = core_off && !stop_mode_stat_set();
+	if (_boot_core_off_only && (syndrome & SOMPD_RESET_PD_REQUEST) != 0u) {
 		_boot_external = true;
 	}
 
@@ -1272,6 +1275,14 @@ int alp_som_power_boot_restore_i2c(void)
 			} /* else: an external reset has no wake cause (decode only acknowledged flags) */
 		} else {
 			memset(&_boot, 0, sizeof(_boot)); /* untrusted record: report a plain boot */
+		}
+		/* DFP spurious-wake rule (pm.c:600-627): SYSRESETREQ and a local WDT reset leave
+		 * RESETSYNDROME 0, so with the WIC bits as the only STOP witness, a "wake" that
+		 * neither decode pass can attribute to a source is an aborted or external reset.
+		 * Domains are already restored; only the report changes. */
+		if (_boot.valid && _boot_core_off_only && _boot.wake_source == 0u) {
+			_boot.mode     = (uint32_t)ALP_POWER_MODE_RUN;
+			_boot.slept_ms = 0u;
 		}
 	}
 	/* The decode is done (pass 1 read the status, pass 2 the RTC): acknowledge the status. */

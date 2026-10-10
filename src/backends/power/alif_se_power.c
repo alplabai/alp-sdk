@@ -13,9 +13,8 @@
  *
  * Cores: the M55-HE (E1M-AEN801 / E1M-AEN803, bench-proven) and the M55-HP
  * (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP; STOP bench-proven HP-only on the E1M-AEN803, 2026-10-10,
- * 3/3 cycles; an HP STOP while the HE runs and the AEN801 HP are not verified).  The HP differs
- * from the HE in the ways the
- * Alif vendor sample sdk-alif samples/drivers/pm/system_off/src/main.c shows (cited per use below):
+ * 3/3 cycles, and with the HE running 3/3 on a combined ATOC; the AEN801 HP is not verified).
+ * The HP differs from the HE in the ways the Alif vendor sample sdk-alif samples/drivers/pm/system_off/src/main.c shows (cited per use below):
  *   - only a SOFT_OFF-class sleep: STOP maps to it; STANDBY (the S2RAM sleep) is HE-only;
  *   - no TCM retention (memory_blocks never names HP TCM: aipm.h has no HP TCM block);
  *   - the image must be MRAM-booted (VTOR >= 0x80000000), because the wake is a cold boot from

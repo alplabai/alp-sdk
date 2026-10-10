@@ -183,8 +183,8 @@ board targets `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` and
 slot0 at `0x802b0000`, Flow D via tan. 3/3 STOP cycles PASS at 400 MHz with `RESTORE_CLOCKS` on: cycle 1
 LPTIMER 500 ms `mode=4 wake_source=0x8`, cycle 2 RV-3028 countdown 3 s `mode=4 wake_source=0x1`,
 cycle 3 RV-3028 alarm `mode=4 wake_source=0x1`, `quiesced=restored=0x7f`,
-`SUMMARY cycles=3 pass=5 fail=0`. Not verified: the E1M-AEN801 HP; an HP STOP while the HE runs failed on
-the `STOP_MODE_STAT` check (run D below) and is fixed pending a bench re-run. The differences in the table below are
+`SUMMARY cycles=3 pass=5 fail=0`. An HP STOP while the HE runs failed on the `STOP_MODE_STAT` check (run D
+below) and passes with the second witness. Not verified: the E1M-AEN801 HP. The differences in the table below are
 transcribed from the Alif sources named in the code comments.
 
 | Aspect | M55-HE (bench-proven STOP) | M55-HP (STOP bench-proven, AEN803) | Source |
@@ -227,11 +227,15 @@ cleared on every boot (`COLD_WAKEUP` untouched; an aborted entry's stale bits ar
 boot). `alp_som_power_boot_restore()` trusts a STOP record when `STOP_MODE_STAT` is set OR the core was
 off, and a record-less boot with either witness is a blind restore. When the core-off bit is the only
 witness, `RESETSYNDROME` bit2 (`0x4`, reset request to the power domain) marks an external or aborted
-reset and the realised mode is RUN. The realised mode is this core's: the SoC itself reaches STOP only
+reset and the realised mode is RUN. Bit2 does not cover SYSRESETREQ or a local WDT reset (both leave
+`RESETSYNDROME` 0, DFP `pm.c:600-627`), so the DFP spurious-wake rule is applied too: with the WIC bits
+as the only witness, if neither decode pass (LPTIMER status early, RV-3028 flags in
+`alp_som_power_boot_restore_i2c()`) finds a wake source, the boot is reported as RUN with no wake cause
+and no slept time; the domains are restored either way. Both vetoes are unmeasured on silicon for a
+real reset during the off-time. The realised mode is this core's: the SoC itself reaches STOP only
 when every core is off.
 
-**Open on the HP (bench):** run D's rule is implemented and unit-tested; the bench re-run of the combined
-HE+HP image is pending. Also unmeasured: the E1M-AEN801 HP.
+**Run D, re-run with the rule:** dual-core (HE idle Zephyr app + HP `aen-power-stop`) on E1M-AEN803 2026W36-0001 passes 3/3 (LPTIMER `wake_source=0x8`, countdown `0x1`, alarm `0x1`, all `mode=4`, `SUMMARY cycles=3 pass=5 fail=0`, boot diag w[16..19] = `00000100 00000100 00000333 00000000`), flashed as one combined ATOC (DEVICE + m55_he + m55_hp) written by tan's Flow D with the alplabai/tan-cli#1509 fix; the HE-only regression stays 3/3. Unmeasured: the E1M-AEN801 HP and the two reset vetoes above.
 
 ### Comparison with the vendor reference (bench U8c)
 

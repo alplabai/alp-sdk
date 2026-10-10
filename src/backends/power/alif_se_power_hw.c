@@ -78,9 +78,8 @@ BUILD_ASSERT(DT_REG_SIZE(DT_NODELABEL(ana)) >= 0x3Cu, "ana node must cover VBAT_
 #define HW_CORE_RESET 0x1A604014u
 #endif
 #define HE_CTRL_COLD_WAKEUP BIT(0)
-#define HE_CTRL_WIC_EN      BIT(8) /* WICCONTROL_WIC  */
-#define HE_CTRL_WIC_IWIC    BIT(9) /* WICCONTROL_IWIC: 0 selects the EWIC */
-#define HE_CTRL_WIC_MASK    (HE_CTRL_WIC_EN | HE_CTRL_WIC_IWIC)
+#define HE_CTRL_WIC_EN      ALIF_SE_CTRL_WIC_EN
+#define HE_CTRL_WIC_MASK    ALIF_SE_CTRL_WIC_MASK
 
 #define HW_DHCSR           0xE000EDF0u
 #define HW_DHCSR_C_DEBUGEN BIT(0)
@@ -790,11 +789,13 @@ uint32_t alp_som_power_reset_syndrome_take(void)
 bool alp_som_power_core_off_take(void)
 {
 	uint32_t ctrl = sys_read32(HW_CORE_CTRL);
+	uint32_t cleared;
+	bool     off = alif_se_ctrl_core_off(ctrl, &cleared);
 
-	if ((ctrl & HE_CTRL_WIC_MASK) != 0u) {
-		sys_write32(ctrl & ~HE_CTRL_WIC_MASK, HW_CORE_CTRL);
+	if (cleared != ctrl) {
+		sys_write32(cleared, HW_CORE_CTRL);
 	}
-	return (ctrl & HE_CTRL_WIC_MASK) == HE_CTRL_WIC_EN;
+	return off;
 }
 
 /* Can bit 0 (NSRST) of the syndrome be trusted as a pin-reset marker?  Not if it is
