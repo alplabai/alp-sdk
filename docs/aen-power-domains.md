@@ -276,8 +276,9 @@ only measured figure is Zephyr start to `main()` = 85 ms (`main_uptime_ms`); the
 it needs a GPIO edge on a scope or a SoM current trace.
 **Not verified:** the HE TCM bank sizes and the ITCM / DTCM split (both DTCM halves stay
 powered whenever any TCM is asked for), retention of application RAM, the LPGPIO wake pads (`ALP_POWER_WAKE_GPIO`: no pad is free on
-the E1M-AEN801/803 R2, so it is never advertised there; a boot with the pad snapshot hook ran
-STOP 3/3 on the E1M-AEN803 2026W36-0001), that the LPGPIO holds
+the E1M-AEN801/803 R2, so it is never advertised there; the default image built from this
+branch ran STOP 3/3 on the E1M-AEN803 2026W36-0001, so the default build has no regression, but
+the wake-pad path itself, including the pad snapshot hook, is unverified on silicon), that the LPGPIO holds
 survive the SE's wake boot on every board population, the E1M-AEN801, and the E4. The
 `product-noscratch` variant of `examples/aen/aen-power-stop` is the shipping configuration without
 the bench cell.

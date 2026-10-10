@@ -273,6 +273,27 @@ static void print_regs(void)
 	       sys_read32(0x1A604010u)); /* AON.RTSS_HE_CTRL: bit0 COLD_WAKEUP, [9:8] WIC */
 }
 
+/* The LPGPIO wake pads (alp,power-wake-gpios) as the backend sees them: requested = the pads the
+ * devicetree names (0 when it names none), claimed = the part of them the SoM wires (a claimed
+ * pad refuses the whole set), advertised = whether ALP_POWER_WAKE_GPIO is offered.  The default
+ * image prints requested=0x0 advertised=0; the g-wake-pad variant names P15_2, which the SoM
+ * claims, so it prints requested=0x4 claimed=0x4 advertised=0. */
+static void print_wake_pads(void)
+{
+	uint32_t     requested  = alif_se_hw_wake_pad_mask();
+	alp_power_t *p          = alp_power_open();
+	int          advertised = -1;
+
+	if (p != NULL) {
+		advertised = (alp_power_wake_capabilities(p) & ALP_POWER_WAKE_GPIO) != 0u;
+		alp_power_close(p);
+	}
+	printk("POWER_STOP: wake_pads requested=0x%x claimed=0x%x advertised=%d\n",
+	       (unsigned)requested,
+	       (unsigned)(requested & alp_som_power_lpgpio_claimed()),
+	       advertised);
+}
+
 /* VBAT_STOP_MODE_REG (0x1A60F000), decoded: the hardware's own witness, independent of
  * the SDK's record.  STOP_MODE_STAT (bit 4) says the last reset was a STOP wake;
  * DC_DC_STAT (bit 8) the DC-DC state the SE left (SVD: 1 = off, 0 = on); STOP_MODE_CTRL
@@ -823,6 +844,7 @@ int main(void)
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	print_knobs();
 #endif
+	print_wake_pads();
 	print_stop_mode(); /* baseline on the first boot, the wake witness after one */
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	print_diag("pre", ALP_SOM_PD_DIAG_PRE);

@@ -69,7 +69,7 @@
  *                         the node exists and NONE of its pads is wired by the SoM
  *                         (alp_som_power_lpgpio_claimed(): every pad of a power-domain node,
  *                         P15_0 the RV-3028 /INT included, plus P15_2 / P15_3, the OSPI
- *                         INTn nets) -- on the E1M-AEN801 / AEN803 R2 that is all eight
+ *                         INTn nets, and P15_6 / P15_7, the OSPI RESETn nets) -- on the E1M-AEN801 / AEN803 R2 that is all eight
  *                         lines, so a pad can only be wired on a carrier-side variant.  No
  *                         debounce (see alif_se_power_hw.c).
  *   Nothing else is advertised.  UART RX, comparator, brown-out and USB wake are real

@@ -1133,11 +1133,11 @@ ZTEST(power_som_domains, test_weak_decode_defaults_pass_the_record_through)
 
 ZTEST(power_som_domains, test_lpgpio_claimed_is_the_somwired_set)
 {
-	/* This overlay mirrors the generated AEN801 dts: the domains sit on P15_0 (rtc wake),
-	 * P15_1 + P15_5 (wifi), P15_4 (phy) and P15_7 (flash), and there is no ext-ram domain.  The
-	 * alp,wired-lpgpio-pads property (the same `<2 3 6 7>` the generator emits for every AEN
-	 * SoM) is what claims P15_6, the HyperRAM reset, so the AEN801 mask is 0xFF, not 0xBF.
-	 * gpio11 / gpio5 pads are not LPGPIO. */
+	/* The domain nodes of this overlay sit on P15_0 (rtc wake), P15_1 + P15_5 (wifi), P15_4
+	 * (phy) and P15_7 (ext-flash, an AEN803 domain), so they alone claim 0xB3.  The
+	 * alp,wired-lpgpio-pads property (the `<2 3 6 7>` the generator emits for every AEN SoM)
+	 * adds P15_2, P15_3 and P15_6, which is what makes the mask 0xFF: drop the property and
+	 * this assertion fails.  gpio11 / gpio5 pads are not LPGPIO. */
 	zassert_equal(alp_som_power_lpgpio_claimed(), 0xFFu);
 }
 
@@ -1158,12 +1158,16 @@ ZTEST(power_som_domains, test_boot_reports_the_pad_that_woke_the_soc)
 
 ZTEST(power_som_domains, test_no_pad_is_reported_for_a_timer_wake)
 {
+	alp_power_boot_info_t info;
+
 	memset(&g_dec, 0, sizeof(g_dec));
 	g_dec.armed = true;
 	poke_cycle_record(ALP_POWER_MODE_STOP);
 	g_stop_mode = 0x10u;
 
 	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_equal(info.wake_source & ALP_POWER_WAKE_GPIO, 0u, "a timer wake names no pad");
 }
 
 ZTEST(power_som_domains, test_boot_runs_the_decode_hooks_early_then_i2c)
