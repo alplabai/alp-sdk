@@ -80,7 +80,9 @@ jobs:
           persist-credentials: false
         timeout-minutes: 3
       - name: Run host tests
-        timeout-minutes: 5
+        # The suite takes 3.5-5.2 min on the shared runners (the r3d/scene tests dominate and
+        # the fleet's speed varies by ~1.5x); a 5 min step budget made it flaky.
+        timeout-minutes: 8
         run: bash examples/aen/aen-trace-runner/tests/host/runner.sh
 
   baremetal-aen:
