@@ -131,7 +131,7 @@ plan in `VERSIONS.md`.
 | **RTC** (`<alp/rtc.h>`)   | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)  | **GA** (Zephyr `rtc_*`)   | **GA** (Zephyr `rtc_*`)   | code complete¹     | code complete¹       |
 | **Watchdog** (`<alp/wdt.h>`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`) | **GA** (Zephyr `wdt_*`)   | **GA** (Zephyr `wdt_*`)   | code complete¹     | code complete¹       |
 | **Audio** (`<alp/audio.h>`) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | surface declared (impl v0.2) | stub | stub |
-| **Camera** (`<alp/camera.h>`) | planned              | planned                  | planned                   | planned                   | stub               | stub                 |
+| **Camera** (`<alp/camera.h>`) | code complete² | code complete² | code complete² | code complete² | stub | stub |
 | **IoT** (`<alp/iot.h>`)   | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | **GA** (CC3501E Wi-Fi; MQTT planned) | stub | stub |
 
 ¹ **code complete** — migrated to the registry/dispatcher pattern with real Linux
@@ -153,6 +153,14 @@ sysroot / real device nodes in CI; the mqtt/security backends additionally lack
 `libmosquitto`/OpenSSL dev headers on the CI host, so their real paths are
 compile-verified only where those are installed).  The cross-core
 RPMsg proxy is a separate slice.
+
+² **Zephyr camera on AEN** — `src/backends/camera/zephyr_video.c` (`silicon_ref = "*"`,
+priority 50) wraps Zephyr `video_*`, and `src/backends/camera/alif_isp_pico.c` is the
+opt-in ISP Pico backend (`CONFIG_ALP_SDK_CAMERA_ALIF_ISP`, default n, E8 only).  A
+sensor comes from a camera shield (see [`camera-shields.md`](camera-shields.md)).
+Bench-verified on the E1M-AEN803 (E8) — M55-HE and, since #2809, M55-HP (IMX335, 3/3
+cold boots with an HP-only image) — see the AEN801 camera row in
+[`verification-status.md`](verification-status.md).  The E1M-AEN401 (E4) M55-HP camera build is wired by #2809 but not bench-verified.
 
 ### Cross-cutting v0.2 capability infrastructure
 
@@ -245,7 +253,7 @@ hasn't been measured.
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
 | 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) + Linux **Mali-G31 EGL/GLES** backend for the RZ/V2N family (`yocto_gles.c`, opt-in `ALP_SDK_USE_GPU2D_GLES`, **bench-unverified**, see `docs/v2n-mali-gpu.md`) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim + **E8 bench PASS** (RAM-run, 2026-06-17); D/AVE 2D code-complete, bench-unverified (ADDITIVE/MULTIPLY blends delegate to the sw path).  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; the sw fallback is also wired on `ALP_OS=yocto` plain-CMake builds (dispatcher + sw_fallback replace the NOSUPPORT stub, ctest-covered)) |
-| Power management | `power.h` | M (Zephyr `pm_*`) + A | surface present; **untested** |
+| Power management | `power.h` | M (Zephyr `pm_*`) + A; STOP / STANDBY + SoM power domains on **AEN801 / AEN803** (`alif:ensemble:e8`, M55-HE, `CONFIG_ALP_SDK_POWER_ALIF_SE`, default off; see [`aen-power-domains.md`](aen-power-domains.md)) | surface present; **untested**, except E8 STOP: **bench-proven on the E1M-AEN803** (STANDBY not verified) |
 | Heterogeneous RPC | `rpc.h` (+ generated `system_ipc.h`) | A↔M over RPMsg / OpenAMP | surface + scaffold; **untested** |
 | DAC | `dac.h` (split out of `adc.h` in v0.8) | M (Zephyr `dac_*`) + A (Yocto registry backend, issue #33) | Zephyr backend real — **E8 bench PASS** (`dac_alif`, v0.8.0 campaign); Yocto code-complete, HIL-gated; `alp_dac_capabilities()` additive in v0.9 (conformance-suite covered on native_sim) |
 | I²C/SPI target (slave) mode | `peripheral.h` (`alp_i2c_target_*` / `alp_spi_target_*`, v0.9, `[ABI-EXPERIMENTAL]`) | M (Zephyr `i2c_target_register` / `SPI_OP_MODE_SLAVE`); Yocto + baremetal: NOSUPPORT stubs (no Linux slave-mode uAPI) | Zephyr backend real; `alp_spi_target_transceive` takes a `timeout_ms` bound (finite timeouts need `CONFIG_SPI_ASYNC` — sync-only builds answer `ALP_ERR_NOSUPPORT`) and `alp_spi_target_close` refuses `ALP_ERR_BUSY` while a transfer is in flight; drivers without target support degrade with `ALP_ERR_NOSUPPORT`; native_sim covers param-validation + degrade paths — **two-board HIL pending** |
