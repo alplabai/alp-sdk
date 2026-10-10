@@ -5,6 +5,7 @@
 #define _POSIX_C_SOURCE 199309L /* clock_gettime */
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -14,6 +15,10 @@
 #include "../../src/ipc/tr_aring.h"
 #include "../../src/ipc/tr_mbox.h"
 #include "../../src/ipc/tr_memmap.h"
+#include "hud_screens.h"
+#ifdef TR_PARTNER_LOGO_HEADER
+#include TR_PARTNER_LOGO_HEADER /* tr_partner_logo[]: the pixels hud.c was built with */
+#endif
 
 static uint16_t fb[TR_HUD_W * TR_HUD_H], ref[TR_HUD_W * TR_HUD_H];
 
@@ -855,6 +860,105 @@ int main(void)
 		    ref, &v, tr_hz_to40(hc.frame - 1u), hc.popup_start, hc.zone_start, hc.vol_start);
 		assert(memcmp(fb, ref, sizeof(fb)) == 0);
 	}
+
+	/* 11. The attract header card is pinned (hud_screens.h): six fixed screens hash to what origin/dev
+	 * painted. A build WITHOUT a partner logo must match all six in full -- the ALP LAB banner alone,
+	 * exactly as before. A build WITH one changes the header card and nothing else: the two attract
+	 * screens match outside it (x 16 .. 399, y 74 .. 137), and the play, crash, banner and initials
+	 * screens, which have no header card, match in full (no logo anywhere but the attract header). */
+	{
+		static uint16_t       g[TR_HUD_W * TR_HUD_H];
+		static const uint32_t full[SCR_N] = {
+			[SCR_PLAY] = 0xA5195B46u,  [SCR_ATTRACT] = 0x2AC2A7A7u, [SCR_TABLE] = 0x4860E7CAu,
+			[SCR_CRASH] = 0x7F53952Au, [SCR_BANNER] = 0x57AFC2E8u,  [SCR_INITIALS] = 0xE3F894E1u
+		};
+		static const uint32_t rest[SCR_N] = { [SCR_ATTRACT] = 0x66BCBC9Fu,
+			                                  [SCR_TABLE]   = 0x2F1B8E72u };
+
+		for (int i = 0; i < SCR_N; i++) {
+			bool attract = i == SCR_ATTRACT || i == SCR_TABLE;
+
+			scr_paint(i, g);
+			if (attract && TR_PANEL_HZ != 40) {
+				continue; /* the tagline names the refresh: another hash at 30 Hz */
+			}
+			if (attract) {
+				assert(scr_hash(g, true) == rest[i]);
+			}
+#ifdef TR_PARTNER_LOGO_HEADER
+			if (!attract) {
+				assert(scr_hash(g, false) == full[i]);
+			}
+#else
+			assert(scr_hash(g, false) == full[i]);
+#endif
+		}
+	}
+#ifdef TR_PARTNER_LOGO_HEADER
+	/* 12. The co-brand header (TR_PARTNER_LOGO_HEADER; runner.sh builds this test against a SYNTHETIC
+	 * header): ALP LAB left, a divider, the partner's logo right, both centred in the card, which keeps
+	 * its place and height, stays in its tiles and 8 px short of the stats panel; the logo's own
+	 * pixels land where they should; and the update stays free (a static attract view repaints
+	 * nothing, and equals a scratch paint). */
+	{
+		tr_hud_partner_layout_t l;
+		tr_hud_t                hl;
+		tr_hud_view_t           vl;
+		tr_score_t              ls;
+		const uint16_t          panelpx = (uint16_t)(10u << 12 | 0x013u); /* C_PANEL at A_PANEL */
+
+		tr_hud_partner_layout(&l);
+		/* the card: today's place and height, wide enough (never narrower than the banner it
+		 * replaces), in the score tiles (hud.c T_SCORE / T_SUB: x < 400, y < 140), 8 px or more
+		 * short of the stats panel (hud.c PERF_X 454) */
+		assert(l.card_x == 16 && l.card_y == 74 && l.card_h == 64 && l.card_w >= 372);
+		assert(l.card_x + l.card_w <= 400 && l.card_y + l.card_h <= 140);
+		assert(l.card_x + l.card_w + 8 <= 454);
+		/* both marks fit the card, are the same height class (<= 45) and centred vertically */
+		assert(l.alp_h <= 45 && l.logo_h <= 45 && l.alp_w == 210);
+		assert(abs((l.alp_y - l.card_y) - (l.card_y + l.card_h - l.alp_y - l.alp_h)) <= 1);
+		assert(abs((l.logo_y - l.card_y) - (l.card_y + l.card_h - l.logo_y - l.logo_h)) <= 1);
+		/* left to right: padding, ALP LAB, gap, divider, gap, partner, padding */
+		assert(l.alp_x - l.card_x >= 12 && l.div_x - (l.alp_x + l.alp_w) >= 12);
+		assert(l.logo_x - (l.div_x + 1) >= 12 && l.card_x + l.card_w - (l.logo_x + l.logo_w) >= 12);
+		assert(l.div_y >= l.card_y + 8 && l.div_y + l.div_h <= l.card_y + l.card_h - 8);
+
+		tr_score_init(&ls);
+		ls.best = 5000u;
+		memset(&vl, 0, sizeof(vl));
+		tr_hud_view_set(&vl, &ls, TR_BANNER_ATTRACT, true, TR_HUD_INVITE_STEP_IN);
+		tr_hud_init(&hl);
+		(void)tr_hud_update(&hl, fb, &vl, NULL);
+		same_as_scratch(&hl, &vl);
+		assert(tr_hud_update(&hl, fb, &vl, NULL) == 0u); /* a static header repaints nothing */
+		assert(fb[(l.card_y + 2) * TR_HUD_W + l.card_x + l.card_w / 2] == panelpx);
+		for (int y = 0; y < l.logo_h;
+		     y++) { /* the partner's pixels: opaque ones land, clear ones leave the card */
+			for (int x = 0; x < l.logo_w; x++) {
+				uint16_t c = TR_PARTNER_LOGO_PX(y * l.logo_w + x);
+				uint16_t o = fb[(l.logo_y + y) * TR_HUD_W + l.logo_x + x];
+
+				assert(c >> 12 != 15u || o == c);
+				assert(c >> 12 != 0u || o == panelpx);
+			}
+		}
+		assert(alpha_px(fb, l.alp_x, l.alp_y, l.alp_x + l.alp_w, l.alp_y + l.alp_h) >
+		       1500u); /* ALP LAB */
+		assert((fb[(l.div_y + l.div_h / 2) * TR_HUD_W + l.div_x] >> 12) != 0u &&
+		       fb[(l.div_y + l.div_h / 2) * TR_HUD_W + l.div_x] != panelpx); /* the divider */
+		/* the card's tail pixel is clear of the header's neighbours: BEST above, the tagline strip below */
+		assert(alpha_px(fb, l.card_x, l.card_y + l.card_h, l.card_x + l.card_w, 140) == 0u);
+		printf("hud: co-brand header %d x %d at (%d, %d): ALP LAB %d x %d | partner %d x %d\n",
+		       l.card_w,
+		       l.card_h,
+		       l.card_x,
+		       l.card_y,
+		       l.alp_w,
+		       l.alp_h,
+		       l.logo_w,
+		       l.logo_h);
+	}
+#endif
 
 	/* 9. The volume popup ("VOLUME n%" / "MUTE"): a change of vol_seq shows it over the bottom row for
 	 * exactly TR_HUD_VOL_FRAMES of the 40 Hz clock, counted from the update that saw the change, on

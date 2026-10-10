@@ -9,7 +9,10 @@ RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/tr-run.XXXXXX") || exit 1
 trap 'rm -rf "$RUN_TMP"' EXIT
 # TR_RASTER_CHECKS: r3d_raster.c's invariant asserts (never in the A32 image).
 CHECKS="-DTR_RASTER_CHECKS"
-for t in tests/host/test_*.c; do
+# Each test is one compile + run, independent of the others: run them in parallel (each one's output is
+# kept whole and printed in test order, so the log reads as it did serially).
+run_one() {
+	local t=$1 out extra_cflags
 	out="$RUN_TMP/tr-$(basename "$t" .c)"
 	extra_cflags=""
 	# test_track_cam_orientation.c needs TR_CAM_FLIP_Y compiled in as 1
@@ -41,9 +44,18 @@ for t in tests/host/test_*.c; do
 		$(ls src/game/*.c src/vision/*.c src/hud/*.c src/render/sprite.c src/render/proj.c \
 		     src/render/r3d_math.c src/render/r3d_raster.c src/render/r3d_scene.c src/render/r3d_rig.c \
 		     src/render/cam_pip.c src/ipc/*.c src/audio/*.c 2>/dev/null | grep -v main.c) -lm; then
-		echo "BUILD FAIL: $t"; rc=1; continue
+		echo "BUILD FAIL: $t"; return 1
 	fi
-	if "$out"; then echo "PASS: $t"; else echo "FAIL: $t"; rc=1; fi
+	if "$out"; then echo "PASS: $t"; else echo "FAIL: $t"; return 1; fi
+}
+export -f run_one
+export RUN_TMP CHECKS
+JOBS=$(nproc 2>/dev/null || echo 2)
+ls tests/host/test_*.c | xargs -P"$JOBS" -I{} bash -c 'run_one {} > "$RUN_TMP/log-$(basename {} .c)" 2>&1; echo $? > "$RUN_TMP/rc-$(basename {} .c)"'
+for t in tests/host/test_*.c; do
+	n=$(basename "$t" .c)
+	cat "$RUN_TMP/log-$n"
+	[ "$(cat "$RUN_TMP/rc-$n")" = 0 ] || rc=1
 done
 # The arm controls with the sensor NOT mirrored (cam_rot.h TR_CAM_MIRROR=0: a
 # camera that sees the player face to face): the same physical player's LEFT
@@ -72,6 +84,41 @@ for t in test_panel_hz test_step test_pace test_tilt test_tilt_takeover test_att
 		echo "PASS: tests/host/$t.c -DTR_PANEL_HZ=30"
 	else
 		echo "FAIL: tests/host/$t.c -DTR_PANEL_HZ=30"; rc=1
+	fi
+done
+# The optional partner logo (hud.c TR_PARTNER_LOGO_HEADER, tools/genlogo.py): test_hud.c's co-brand header
+# section and the rotated-HUD test against a SYNTHETIC logo at the largest size the header accepts (124 x 45; an
+# opaque frame, half-alpha stripes, clear gaps -- every alpha class). No real partner artwork is in
+# this repo; the default build above runs the same tests with no logo (nothing drawn).
+logo_h="$RUN_TMP/synthetic_partner_logo.h"
+awk 'BEGIN {
+	w = 124; h = 45
+	print "#define TR_PARTNER_LOGO_W " w
+	print "#define TR_PARTNER_LOGO_H " h
+	print "#define TR_PARTNER_LOGO_NPAL 4"
+	print "static const uint16_t tr_partner_logo_pal[4] = { 0x0000, 0xFFFF, 0x8F63, 0x3ABC };"
+	print "static const uint8_t tr_partner_logo[TR_PARTNER_LOGO_W * TR_PARTNER_LOGO_H] = {"
+	for (y = 0; y < h; y++) {
+		for (x = 0; x < w; x++) {
+			if (x == 0 || y == 0 || x == w - 1 || y == h - 1) v = 1
+			else if ((x + y) % 8 < 3) v = 2
+			else if ((x + y) % 8 == 3) v = 3
+			else v = 0
+			printf "%d,", v
+		}
+		print ""
+	}
+	print "};"
+	print "#define TR_PARTNER_LOGO_PX(i) (tr_partner_logo_pal[tr_partner_logo[i]])"
+}' >"$logo_h"
+for t in test_hud test_hud_rot; do
+	out="$RUN_TMP/tr-$t-logo"
+	if cc -std=c11 -Wall -Wextra -Werror -ffp-contract=off -g -DTR_PARTNER_LOGO_HEADER="\"$logo_h\"" -o "$out" "tests/host/$t.c" \
+		$(ls src/game/*.c src/vision/*.c src/hud/*.c src/render/sprite.c src/render/proj.c src/ipc/*.c 2>/dev/null |
+			grep -v main.c) -lm && "$out" >/dev/null; then
+		echo "PASS: tests/host/$t.c -DTR_PARTNER_LOGO_HEADER"
+	else
+		echo "FAIL: tests/host/$t.c -DTR_PARTNER_LOGO_HEADER"; rc=1
 	fi
 done
 # The synth's other builds (bench A/B): V1 (must keep golden 0xDBF70C58), V2
