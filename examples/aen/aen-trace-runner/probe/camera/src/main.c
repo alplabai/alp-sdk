@@ -3,9 +3,9 @@
  *
  * DIAGNOSTIC, NOT PRODUCT CODE. E1M-AEN803 2026W36-0009 fails
  * alp_camera_open() with ALP_ERR_IO, reproducibly. The
- * src/backends/camera/zephyr_video.c (z_open(), ~line 200) calls
- * video_get_caps() (~line 228), video_set_format() (~line 250) and
- * video_enqueue() (~line 324); every failure from any of those three goes
+ * src/backends/camera/zephyr_video.c (z_open()) calls
+ * video_get_caps(), video_set_format() and
+ * video_enqueue(); every failure from any of those three goes
  * through _errno_to_alp(), which maps any errno it does not special-case to
  * ALP_ERR_IO. alp_last_error() returns that same translated status. So
  * ALP_ERR_IO alone says nothing about which call failed or why.
