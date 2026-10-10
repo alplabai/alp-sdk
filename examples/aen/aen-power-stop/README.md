@@ -1,7 +1,7 @@
 # aen-power-stop
 
 Bench proof of the Alif SE STOP backend ([#2784](https://github.com/alplabai/alp-sdk/issues/2784),
-unit U7) on the **E1M-AEN803** (Alif Ensemble E8, M55-HE). STOP **passed on silicon** (U8h, 3 of 3 cycles); STANDBY is untested.
+unit U7) on the **E1M-AEN803** (Alif Ensemble E8, M55-HE; an HP build is described below). STOP **passed on silicon** (U8h, 3 of 3 cycles); STANDBY is untested.
 Built as an **MRAM image**: STOP wakes through a cold boot (SES -> ATOC -> this
 image), so a RAM-run image would not come back.
 
@@ -10,6 +10,25 @@ image), so a RAM-run image would not come back.
 > module until it is power-cycled.
 
 See [`docs/aen-power-domains.md`](../../../docs/aen-power-domains.md) for the model.
+
+## M55-HP (built, not bench-verified)
+
+The same app builds for the HP core (`alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`,
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`); `boards/` carries the matching overlay and a
+config fragment that turns the boot-time clock restore on (its Kconfig default is HE-only). Nothing
+here has run on an HP yet. What differs from the HE, and what the backend answers when asked for it:
+
+| Request | HP answer |
+|---|---|
+| `STOP` | the vendor's SOFT_OFF-class sleep; the wake is a cold boot, as on the HE |
+| `STANDBY` | `ALP_ERR_NOSUPPORT`, `reason=hp_standby_unsupported` (the S2RAM sleep is HE-only) |
+| TCM / FULL retention | `ALP_ERR_NOSUPPORT`, `reason=hp_tcm_not_retainable` (no HP TCM retention) |
+| image not in MRAM (`VTOR` below `0x80000000`) | `ALP_ERR_NOSUPPORT`, `reason=hp_vtor_not_mram`; do not use the Flow C ITCM retarget |
+
+Flash it as the HP's own `slot0_partition` (from the board DTS). The HE core is left to whatever
+else runs on the module: the HP sleep powers only the HP subsystem down, and the SoC reaches its STOP
+state only when every subsystem has done the same, so the HE should be idle or off when measuring.
+The BKRAM record, the LPTIMER0 wake timer and the RV-3028 are single-owner: run this app on one core.
 
 ## What it does
 

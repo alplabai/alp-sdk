@@ -278,9 +278,10 @@ config ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	  only and must stay off in a product build.
 
 config ALP_SDK_POWER_ALIF_SE
-	bool "Alif SE STOP / STANDBY power backend (E8 M55-HE, EXPERIMENTAL)"
+	bool "Alif SE STOP / STANDBY power backend (E8 M55-HE / M55-HP, EXPERIMENTAL)"
 	depends on ALP_SDK_POWER && ALP_SDK_SOM_POWER
-	depends on HAS_ALIF_SE_SERVICES && SOC_AE822FA0E5597LS0_RTSS_HE
+	depends on HAS_ALIF_SE_SERVICES
+	depends on SOC_AE822FA0E5597LS0_RTSS_HE || SOC_AE822FA0E5597LS0_RTSS_HP
 	default n
 	help
 	  Compile src/backends/power/alif_se_power.c: alp_power_request_sleep()
@@ -291,8 +292,12 @@ config ALP_SDK_POWER_ALIF_SE
 	  sleep.  The wake is a COLD BOOT through the Secure Enclave; the call
 	  does not return, and the cause is read with alp_power_boot_wake_info().
 
-	  STOP is bench-proven on the E1M-AEN803 (U8h: LPTIMER, RV-3028 countdown
-	  and alarm wakes); STANDBY is not.  Off by default.  An image that gets the entry
+	  STOP is bench-proven on the E1M-AEN803 M55-HE (U8h: LPTIMER, RV-3028
+	  countdown and alarm wakes); STANDBY is not.  The M55-HP is BUILT but NOT
+	  bench-verified: it has STOP only (the vendor's SOFT_OFF-class sleep; STANDBY
+	  is refused with ALP_ERR_NOSUPPORT), no TCM retention (ALP_ERR_NOSUPPORT) and
+	  needs an MRAM-booted image (VTOR >= 0x80000000, else ALP_ERR_NOSUPPORT).
+	  Off by default.  An image that gets the entry
 	  sequence wrong can stop at the Secure Enclave until the module is
 	  power-cycled; keep a way to restore the MRAM image before trying it.
 

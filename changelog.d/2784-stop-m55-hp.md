@@ -1,0 +1,7 @@
+### Added — Alif SE STOP backend builds for the E8 M55-HP, not bench-verified (#2784)
+
+`CONFIG_ALP_SDK_POWER_ALIF_SE` now also selects on `SOC_AE822FA0E5597LS0_RTSS_HP` (E1M-AEN801 and E1M-AEN803 HP targets), and `examples/aen/aen-power-stop` builds for both, each with its own overlay and a config fragment that turns the boot-time clock restore on. Nothing here has run on an HP; the M55-HE STOP stays the only bench-proven path.
+
+The HP differs from the HE in the ways the Alif vendor sources show. It writes its own `AON.RTSS_HP_CTRL` / `RTSS_HP_RESET` (`0x1A604000` / `0x1A604004`), not the HE pair. It has `STOP` only (the vendor SOFT_OFF-class sleep), no TCM retention, and needs an MRAM-booted image. Its clock restore uses the 400 MHz RUN profile and the `PLL_CLK_SEL` `ES0` health bit. Each of the three refusals is named on the console: `STANDBY` is `ALP_ERR_NOSUPPORT` with `reason=hp_standby_unsupported`, TCM or full retention is `ALP_ERR_NOSUPPORT` with `reason=hp_tcm_not_retainable`, and a TCM-booted image is `ALP_ERR_NOSUPPORT` with `reason=hp_vtor_not_mram`. Wake events, EWIC groups and the BKRAM record are SoC-level and shared with the HE.
+
+The backend cannot see the other core: with the HE running, an HP STOP powers down only the HP subsystem. `docs/aen-power-domains.md` has the HP table, the sources, and the open bench items. `tests/unit/power_alif_se` covers each new branch.

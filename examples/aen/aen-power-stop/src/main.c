@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * aen-power-stop -- bench proof of the Alif SE STOP backend (#2784, unit U7) on
- * the E1M-AEN803 (Alif Ensemble E8, M55-HE), built as an MRAM image.
+ * the E1M-AEN803 (Alif Ensemble E8, M55-HE), built as an MRAM image.  It also builds for the
+ * M55-HP (E1M-AEN803 / E1M-AEN801), not bench-verified; the app code is core-agnostic and the
+ * backend refuses what the HP cannot do (see README.md, "M55-HP").
  *
  * STOP passed on silicon (U8h); STANDBY is untested.  Back up the MRAM image before flashing this (Flow D
  * backup / restore): if the entry sequence is wrong the module can sit with the
@@ -229,15 +231,24 @@ static void print_knobs(void)
 
 /* Raw always-on registers, as evidence for the bench record.  The first boot after
  * the SE cold start is the baseline; the ones after a wake show what the SE left. */
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
+/* This core's own AON control register (M55-HP: AON_BASE + 0x00; the HE's sits at + 0x10). */
+#define CORE_CTRL_NAME "RTSS_HP_CTRL"
+#define CORE_CTRL_ADDR 0x1A604000u
+#else
+#define CORE_CTRL_NAME "RTSS_HE_CTRL"
+#define CORE_CTRL_ADDR 0x1A604010u
+#endif
+
 static void print_regs(void)
 {
 	printk("POWER_STOP: regs RET_CTRL=0x%08x VBAT_ANA_REG1=0x%08x ANA_MISC=0x%08x "
-	       "STOP_MODE=0x%08x RTSS_HE_CTRL=0x%08x\n",
+	       "STOP_MODE=0x%08x " CORE_CTRL_NAME "=0x%08x\n",
 	       sys_read32(DT_REG_ADDR(DT_NODELABEL(vbat)) + 0x0Cu),
 	       sys_read32(DT_REG_ADDR(DT_NODELABEL(ana)) + 0x38u),
 	       sys_read32(DT_REG_ADDR(DT_NODELABEL(ana)) + 0x00u),
 	       sys_read32(DT_REG_ADDR(DT_NODELABEL(stop_mode))),
-	       sys_read32(0x1A604010u)); /* AON.RTSS_HE_CTRL: bit0 COLD_WAKEUP, [9:8] WIC */
+	       sys_read32(CORE_CTRL_ADDR)); /* bit0 COLD_WAKEUP, [9:8] WIC */
 }
 
 /* VBAT_STOP_MODE_REG (0x1A60F000), decoded: the hardware's own witness, independent of

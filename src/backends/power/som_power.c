@@ -820,7 +820,7 @@ void alp_som_power_unbind(alp_power_domain_t d)
 	k_mutex_unlock(&_lock);
 }
 
-/* M55-HE reset syndrome, read and acknowledged (strong definition: alif_se_power_hw.c).
+/* This core's (M55-HE or M55-HP) reset syndrome, read and acknowledged (strong definition: alif_se_power_hw.c).
  * Without it every boot looks like a Secure-Enclave-initiated one. */
 __weak uint32_t alp_som_power_reset_syndrome_take(void)
 {
@@ -832,7 +832,7 @@ __weak bool alp_som_power_reset_syndrome_trusted(void)
 	return false;
 }
 
-/* RESETSYNDROME bit 0: the NSRST pin was asserted (E8 SVD AON.RTSS_HE_RESET). */
+/* RESETSYNDROME bit 0: the NSRST pin was asserted (E8 SVD AON.RTSS_HE_RESET / RTSS_HP_RESET). */
 #define SOMPD_RESET_NSRST BIT(0)
 
 /* ---- Wake decode hooks ------------------------------------------------------ */

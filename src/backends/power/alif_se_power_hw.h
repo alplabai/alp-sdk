@@ -93,6 +93,11 @@ uint32_t alif_se_hw_lpperi_cken(void);
 /** LPRTC CCVR (the counter, units unproven: ~2 Hz on LFRC). */
 uint32_t alif_se_hw_lprtc_ccvr(void);
 
+/** This image runs on the M55-HP (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP).  The HP has no TCM
+ *  retention and only a SOFT_OFF-class sleep (see alif_se_power.c), so the backend branches
+ *  on it; it is a function so the host test can drive both cores from one binary. */
+bool alif_se_hw_core_is_hp(void);
+
 /** This image's vector table base (SCB->VTOR), for the vendor-style OFF profile bench
  *  variant. */
 uint32_t alif_se_hw_vtor_read(void);

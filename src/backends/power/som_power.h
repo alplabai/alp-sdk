@@ -316,7 +316,7 @@ alp_status_t alp_som_power_rtc_int_armed(bool *armed);
  *  cold-boot wake path. */
 alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags);
 
-/** M55-HE reset syndrome (AON.RTSS_HE_RESET.RESETSYNDROME), read and acknowledged:
+/** This core's reset syndrome (AON.RTSS_HE_RESET / RTSS_HP_RESET .RESETSYNDROME), read and acknowledged:
  *  0 = POR or Secure-Enclave-initiated, 1 = the NSRST pin was asserted, 4 = reset
  *  request to the power domain.  Weak: 0 where there is no such register. */
 uint32_t alp_som_power_reset_syndrome_take(void);
