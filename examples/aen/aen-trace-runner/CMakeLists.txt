@@ -213,8 +213,9 @@ target_include_directories(app PRIVATE ${ZEPHYR_ALP_SDK_MODULE_DIR}/zephyr/drive
 # The HE image is loaded whole into the 256 KiB ITCM: fail the link, not just the packaging, when it
 # does not fit (a partner logo is the usual thing that pushes it over).
 if(TR_RENDER STREQUAL "A32") # the release image; the M55-render build is a different layout
-	add_custom_command(TARGET zephyr_final POST_BUILD
+	add_custom_target(tr_itcm_check ALL
 		COMMAND ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DELF=$<TARGET_FILE:zephyr_final> -DLIMIT=262144
 			-P ${CMAKE_CURRENT_LIST_DIR}/itcm_check.cmake
 		VERBATIM)
+	add_dependencies(tr_itcm_check zephyr_final)
 endif()
