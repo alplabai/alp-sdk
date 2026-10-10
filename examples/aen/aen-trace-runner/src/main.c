@@ -16,6 +16,7 @@
 #include "platform/display.h"
 #include "platform/imu.h"
 #include "platform/bus2_he.h"
+#include "platform/volume_he.h"
 #include "platform/rail5v_power.h"
 #include "vision/camera_watchdog.h"
 #include "vision/pose.h" /* the presence rule, both input paths */
@@ -274,6 +275,7 @@ static void ui_present(const tr_game_t *g, bool attract_active, bool paused)
 	 * the HP's I2C2 lease moving, not only main's frame loop: an HE that stopped ticking would
 	 * neither offer the bus nor take it back (platform/bus2_he.h). */
 	tr_bus2_he_frame();
+	tr_volume_he_frame(); /* TR_HP_SOUND: the encoder / switch / bench request -> the sound volume */
 
 	tr_frame_in_from_game(&in, g, g_banner, attract_active, paused);
 	tr_frame_in_p16(&in, tr_tilt.character, &g_react, g_lobby.standing, g_lobby.idle_us);
@@ -418,6 +420,7 @@ static void ui_present(const tr_game_t *g, bool attract_active, bool paused)
 	(void)attract_active;
 	(void)paused;
 	tr_bus2_he_frame(); /* as the A32 variant above */
+	tr_volume_he_frame();
 	tr_display_flip();
 }
 
@@ -824,6 +827,7 @@ int main(void)
 	bool imu_ok = (tr_imu_open() == 0);
 	(void)tr_rail5v_open(); /* +5V power HUD line -- non-fatal, see rail5v_power.h */
 	tr_bus2_he_arm();       /* TR_HP_SOUND: only now may the HP be offered I2C2 */
+	tr_volume_he_init();    /* TR_HP_SOUND: publish the volume, open the encoder + switch */
 
 #if TR_INPUT_NPU
 	/* No local camera or detector to open/init: the HP owns both, and

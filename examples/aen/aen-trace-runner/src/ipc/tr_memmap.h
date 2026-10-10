@@ -121,6 +121,31 @@
                                        * a different bus, a different protocol) and of hp_dbg; ends at
                                        * 0x0237FD70, still inside the shared NC page (0x0237F000..0x0237FFFF).
                                        * tr_bus2.h asserts all of that. */
+#define TR_MEM_VOL \
+	0x0237FD80u /* HE -> HP: the game sound's volume word + the bench's request word (src/ipc/
+                                       * tr_vol.h tr_vol_t, 16 B, TR_HP_SOUND builds). 16-B aligned, right after
+                                       * TR_MEM_BUS2's end (0x0237FD70) and a 16-B gap; ends at 0x0237FD90, still
+                                       * inside the shared NC page. tr_vol.h asserts all of that. */
+/* The panel backlight's bench record (src/ipc/tr_knob.h tr_bl_t, 16 B), in the one gap left in the
+ * shared NC page: 0x0237FDA8..0x0237FDFF, between the words fix/sn65dsi83-auto-recovery (#2816)
+ * puts at 0x0237FD90..0x0237FDA7 (I2C1 liveness, fault injector, SE message) and its bridge recipe
+ * at 0x0237FE00..., which also owns everything above it up to the MHU0 window (HE fault record,
+ * reset guard). Those are reserved here by address, as that branch reserves TR_MEM_VOL, so neither
+ * branch can land on the other. */
+#define TR_MEM_SN65_RESERVED_A_LO 0x0237FD90u
+#define TR_MEM_SN65_RESERVED_A_HI 0x0237FDA8u
+#define TR_MEM_SN65_RESERVED_B_LO 0x0237FE00u
+#define TR_MEM_BL_GAP_LO          TR_MEM_SN65_RESERVED_A_HI
+#define TR_MEM_BL_GAP_HI          TR_MEM_SN65_RESERVED_B_LO
+#define TR_MEM_BL 0x0237FDC0u /* HE: the backlight level + the bench's request word */
+/* Once fix/sn65dsi83-auto-recovery has landed, its real symbols must still match the ranges reserved
+ * above (until then this #ifdef compiles to nothing). */
+#ifdef TR_MEM_I2C1_ALIVE
+_Static_assert(TR_MEM_I2C1_ALIVE == TR_MEM_SN65_RESERVED_A_LO &&
+                   TR_MEM_SE_MSG + TR_MEM_SE_MSG_SIZE <= TR_MEM_SN65_RESERVED_A_HI &&
+                   TR_MEM_SN65_RECIPE == TR_MEM_SN65_RESERVED_B_LO,
+               "the SN65DSI83 recovery words moved: update TR_MEM_SN65_RESERVED_*");
+#endif
 /* SRAM1 */
 #define TR_MEM_CAM_POOL \
 	0x02480000u /* HP: OV9281 camera frame pool (design sec 2), 2 x 256,000 B GREY8;
