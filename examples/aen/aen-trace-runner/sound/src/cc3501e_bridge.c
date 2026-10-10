@@ -33,8 +33,7 @@ static alp_spi_t  *s_spi;
 
 #if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE) || defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 #include <zephyr/arch/cpu.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/gpio.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/sys/sys_io.h>
 /*
  * AEN LP-pad mux (Alif Ensemble E8, M55-HE).  WIFI_EN (P15_5) and nRESET (P15_1)
@@ -57,22 +56,19 @@ static void aen_lp_pads_enable_output(void)
  * INPUT.  Switching the direction afterwards then drives the already-high level; the
  * other order (direction first, value second -- what gpio_dw's configure does even
  * with an init flag) drives whatever DR holds, and with DR bit 5 = 0 that glitches
- * the supply of a running chip low.  gpio_port_set_bits_raw() writes DR regardless
- * of direction. */
+ * the supply of a running chip low.  DR is written directly (read-modify-write, the
+ * same access gpio_dw's port_set_bits_raw makes) so this template stays on the
+ * portable <alp/*.h> surface: SWPORTA_DR is offset 0x00 of the DesignWare GPIO block
+ * (zephyr drivers/gpio/gpio_dw_registers.h), the block base is the `lpgpio` node's
+ * reg, and the LP-GPIO clock is already on because alp_gpio_open() opened the pin. */
+#define DW_GPIO_SWPORTA_DR 0x00u
 static void aen_wifi_en_latch_high(void)
 {
-	const struct device *lpgpio = DEVICE_DT_GET(DT_NODELABEL(lpgpio));
+	const mem_addr_t dr = DT_REG_ADDR(DT_NODELABEL(lpgpio)) + DW_GPIO_SWPORTA_DR;
 
-	if (device_is_ready(lpgpio)) {
-		(void)gpio_port_set_bits_raw(lpgpio, BIT(5));
-	}
+	sys_write32(sys_read32(dr) | (1u << 5), dr);
 }
 
-static void aen_lp_pads_enable_output(void)
-{
-	sys_write32(ALIF_PAD_GPIO_OUTPUT, ALIF_LPGPIO_PADCTRL_BASE + 5u * 4u); /* P15_5 WIFI_EN */
-	sys_write32(ALIF_PAD_GPIO_OUTPUT, ALIF_LPGPIO_PADCTRL_BASE + 1u * 4u); /* P15_1 nRESET  */
-}
 #else
 static inline void aen_lp_pads_enable_output(void)
 {
