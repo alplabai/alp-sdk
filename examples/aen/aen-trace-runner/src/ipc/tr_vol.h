@@ -12,7 +12,10 @@
  * writer:
  *   vol      HE   what the HP applies:  TR_VOL_TAG | percent
  *   req      the bench, over SWD: "please set":  TR_VOL_TAG | percent  (the HE validates it);
- *            0 = no request (writing it re-arms the same value, it is not a refusal)
+ *            0 = no request. The HE CLEARS it to 0 once it has taken it (accepted or refused), so
+ *            the same word written again is a new request, and a bad word written twice is
+ *            counted twice. A write that lands in the instant between the HE's read and its
+ *            clear is lost: read req back, it is 0 once taken.
  *   rejects  HE   requests it refused (bad tag or percent above 100)
  *   seq      HE   changes adopted, for the HUD's "VOL" popup
  * A cold SRAM0 holds garbage: a vol word without the tag (or with a percent above 100) is read
@@ -91,11 +94,10 @@ typedef struct {
 	uint32_t pct;        /* the level published: 0 while muted */
 	uint32_t unmute_pct; /* last non-zero level: the switch restores it, a turn steps from it */
 	bool     muted;      /* the switch muted it: resume from unmute_pct */
-	uint32_t last_req;   /* the req word as last seen: only a CHANGE is a request */
 } tr_vol_he_t;
 
-/* HE boot: level = TR_VOL_DEFAULT, publish it, zero rejects and seq (SRAM0 powers up with
- * garbage and survives warm resets). A req left over from before is remembered, not obeyed. */
+/* HE boot: level = TR_VOL_DEFAULT, publish it, zero rejects, seq and req (SRAM0 powers up with
+ * garbage and survives warm resets): a req left over from before is dropped, not obeyed. */
 void tr_vol_he_boot(tr_vol_he_t *he, volatile tr_vol_t *r);
 
 /* One HE frame. `detents`: encoder detents since the last call (clockwise positive = louder);

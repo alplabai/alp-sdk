@@ -158,7 +158,8 @@ static void test_boot(void)
 	assert(TR_VOL_DEFAULT == 30u);
 	fresh(&he);
 	assert(he.pct == 30u && rec.vol == tr_vol_word(30u) && rec.seq == 0u && rec.rejects == 0u);
-	assert(!tr_vol_he_step(&he, &rec, 0, false)); /* the 0xA5A5A5A5 req left over: not a request */
+	assert(rec.req == 0u); /* the 0xA5A5A5A5 req left over: dropped at boot */
+	assert(!tr_vol_he_step(&he, &rec, 0, false));
 	assert(he.pct == 30u && rec.rejects == 0u);
 	/* the HP reads a cold or garbage word as that same level, so the stream starts at 30 % too */
 	assert(tr_vol_read(0xA5A5A5A5u) == 30u && tr_vol_read(0u) == 30u);
@@ -260,42 +261,45 @@ static void test_request(void)
 	fresh100(&he);
 	uint32_t seq = rec.seq;
 
-	/* a valid request is adopted once */
+	/* a valid request is adopted, and the word is handed back (0) */
 	rec.req = tr_vol_word(30u);
 	assert(tr_vol_he_step(&he, &rec, 0, false) && he.pct == 30u && rec.vol == tr_vol_word(30u));
-	assert(rec.seq == seq + 1u && rec.rejects == 0u);
-	assert(!tr_vol_he_step(&he, &rec, 0, false)); /* same word again: nothing to do */
+	assert(rec.seq == seq + 1u && rec.rejects == 0u && rec.req == 0u);
+	assert(!tr_vol_he_step(&he, &rec, 0, false)); /* nothing pending */
 
-	/* the local control moved on; the same request word does not drag it back */
+	/* the local control moved on; the SAME word written again is a new request and takes it back */
 	assert(tr_vol_he_step(&he, &rec, 1, false) && he.pct == 35u);
-	assert(!tr_vol_he_step(&he, &rec, 0, false) && he.pct == 35u);
-	/* a new request word does */
+	rec.req = tr_vol_word(30u);
+	assert(tr_vol_he_step(&he, &rec, 0, false) && he.pct == 30u && rec.req == 0u);
 	rec.req = tr_vol_word(0u);
-	assert(tr_vol_he_step(&he, &rec, 0, false) && he.pct == 0u);
+	assert(tr_vol_he_step(&he, &rec, 0, false) && he.pct == 0u && rec.req == 0u);
 
-	/* invalid requests are refused, counted once each, and change nothing */
+	/* invalid requests are refused, counted every time (the same bad word twice is two), and change nothing */
 	rec.req = TR_VOL_TAG | 101u;
 	assert(!tr_vol_he_step(&he, &rec, 0, false) && he.pct == 0u && rec.rejects == 1u);
+	assert(rec.req == 0u);
 	rec.req = 0x00000032u; /* 50 without the tag */
 	assert(!tr_vol_he_step(&he, &rec, 0, false) && rec.rejects == 2u);
-	assert(!tr_vol_he_step(&he, &rec, 0, false) && rec.rejects == 2u); /* not recounted */
+	rec.req = 0x00000032u;
+	assert(!tr_vol_he_step(&he, &rec, 0, false) && rec.rejects == 3u && rec.req == 0u);
+	assert(!tr_vol_he_step(&he, &rec, 0, false) && rec.rejects == 3u); /* no request, no count */
 	rec.req = 0xFFFFFFFFu;
-	assert(!tr_vol_he_step(&he, &rec, 0, false) && rec.rejects == 3u && he.pct == 0u);
+	assert(!tr_vol_he_step(&he, &rec, 0, false) && rec.rejects == 4u && he.pct == 0u);
 	assert(rec.vol == tr_vol_word(0u));
 
-	/* 0 is "no request": not a refusal, no change; and it re-arms a value already sent */
-	rec.req = tr_vol_word(60u);
-	assert(tr_vol_he_step(&he, &rec, 0, false) && he.pct == 60u);
-	rec.req = 0u;
-	assert(!tr_vol_he_step(&he, &rec, 0, false) && he.pct == 60u && rec.rejects == 3u);
-	assert(tr_vol_he_step(&he, &rec, -4, false) && he.pct == 40u);
-	rec.req = tr_vol_word(60u); /* the same word as before the 0: taken again */
-	assert(tr_vol_he_step(&he, &rec, 0, false) && he.pct == 60u && rec.rejects == 3u);
+	/* a repeated identical valid request works each time */
+	for (int i = 0; i < 3; i++) {
+		rec.req = tr_vol_word(60u);
+		assert(tr_vol_he_step(&he, &rec, 0, false) && he.pct == 60u && rec.req == 0u);
+		assert(tr_vol_he_step(&he, &rec, -4, false) && he.pct == 40u);
+	}
+	assert(rec.rejects == 4u);
 
-	/* a stale valid req from before the boot is not obeyed ... */
+	/* a stale valid req from before the boot is dropped, not obeyed ... */
 	memset((void *)&rec, 0, sizeof(rec));
 	rec.req = tr_vol_word(10u);
 	tr_vol_he_boot(&he, &rec);
+	assert(rec.req == 0u);
 	assert(!tr_vol_he_step(&he, &rec, 0, false) && he.pct == TR_VOL_DEFAULT);
 	/* ... but a new one is */
 	rec.req = tr_vol_word(20u);

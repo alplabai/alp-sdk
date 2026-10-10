@@ -5,7 +5,8 @@ bool tr_bl_valid(uint32_t word, uint32_t *pct)
 {
 	uint32_t p = word & ~TR_VOL_TAG_MASK;
 
-	if ((word & TR_VOL_TAG_MASK) != TR_BL_TAG || p < TR_BL_MIN || p > TR_BL_MAX) {
+	if ((word & TR_VOL_TAG_MASK) != TR_BL_TAG || p < TR_BL_MIN || p > TR_BL_MAX ||
+	    p % TR_BL_STEP != 0u) {
 		return false;
 	}
 	*pct = p;
@@ -35,8 +36,9 @@ void tr_knob_boot(tr_knob_t *k, volatile tr_bl_t *r, uint32_t bl_pct, bool has_b
 	k->mode     = TR_KNOB_VOLUME;
 	k->bl_pct   = bl_pct;
 	k->has_bl   = has_bl;
-	k->last_req = r->req;
 	r->rejects  = 0u;
+	r->led_errs = 0u;
+	r->req      = 0u;
 	r->seq      = 0u;
 	r->bl       = tr_bl_word(bl_pct);
 }
@@ -45,6 +47,8 @@ tr_knob_out_t
 tr_knob_step(tr_knob_t *k, volatile tr_bl_t *r, uint32_t now_ms, int32_t detents, bool sw)
 {
 	tr_knob_out_t out = { 0 };
+
+	out.bl_prev = k->bl_pct;
 
 	/* debounce: a new raw state counts once it has held TR_KNOB_DEBOUNCE_MS */
 	if (sw != k->raw) {
@@ -62,9 +66,12 @@ tr_knob_step(tr_knob_t *k, volatile tr_bl_t *r, uint32_t now_ms, int32_t detents
 			k->seq++;
 		}
 	}
+	/* The long press is measured to the RAW edge: the switch still held (raw) and TR_KNOB_LONG_MS
+	 * since it went down. A release at 970..999 ms is inside the debounce window, k->down is not
+	 * cleared yet, and it must stay a short press. */
 	if (k->down) {
 		k->last_act_ms = now_ms; /* a held switch is activity: no revert under the finger */
-		if (!k->long_fired && now_ms - k->down_ms >= TR_KNOB_LONG_MS) {
+		if (k->raw && !k->long_fired && now_ms - k->down_ms >= TR_KNOB_LONG_MS) {
 			k->long_fired = true;
 			out.mute      = true;
 			k->mode       = TR_KNOB_VOLUME; /* the mute popup names the volume */
@@ -89,30 +96,32 @@ tr_knob_step(tr_knob_t *k, volatile tr_bl_t *r, uint32_t now_ms, int32_t detents
 
 	uint32_t q = r->req;
 
-	if (q != k->last_req) {
+	if (q != 0u) { /* a request: taken once, accepted or refused, and the word handed back */
 		uint32_t pct;
 
-		k->last_req = q;
-		if (q == 0u) {
-			/* "no request": the word cleared */
-		} else if (tr_bl_valid(q, &pct)) {
-			if (k->has_bl) {
-				out.bl_changed |= set_bl(k, r, pct);
-				k->mode        = TR_KNOB_BRIGHTNESS; /* the popup names what was changed */
-				k->last_act_ms = now_ms;
-				k->seq++;
-			}
+		r->req = 0u;
+		if (k->has_bl && tr_bl_valid(q, &pct)) {
+			out.bl_changed |= set_bl(k, r, pct);
+			k->mode        = TR_KNOB_BRIGHTNESS; /* the popup names what was changed */
+			k->last_act_ms = now_ms;
+			k->seq++;
 		} else {
-			r->rejects = r->rejects + 1u;
+			r->rejects = r->rejects + 1u; /* bad word, or no backlight to set */
 		}
 	}
 
 	if (k->mode == TR_KNOB_BRIGHTNESS && !k->down && now_ms - k->last_act_ms >= TR_KNOB_IDLE_MS) {
-		k->mode = TR_KNOB_VOLUME;
-		k->seq++;
+		k->mode = TR_KNOB_VOLUME; /* no seq: the revert is silent, no popup */
 	}
 	if (r->bl != tr_bl_word(k->bl_pct)) {
 		r->bl = tr_bl_word(k->bl_pct); /* the bench moves the level with req, not by writing bl */
 	}
 	return out;
+}
+
+void tr_knob_bl_failed(tr_knob_t *k, volatile tr_bl_t *r, uint32_t prev_pct)
+{
+	k->bl_pct   = prev_pct;
+	r->bl       = tr_bl_word(prev_pct);
+	r->led_errs = r->led_errs + 1u;
 }

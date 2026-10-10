@@ -257,12 +257,16 @@ line reads `I2C2 leased by the HP and returned within one frame: back on the HE`
 
 **Changing the backlight without reflashing (record `TR_MEM_BL` = `0x0237FDC0`, `src/ipc/tr_knob.h`).** Console
 `[vol] ... backlight 30% at 0x0237fdc0`. Words: `+0x00` `bl` (`0x424C001E` at the 30 % boot level), `+0x04` `req`,
-`+0x08` `rejects`, `+0x0C` `seq`. Write the REQUEST word, never `bl`: 10..80 % only (`0x424C000A` .. `0x424C0050`);
-anything else (below 10 %, above 80 %, a wrong tag) is counted in `rejects` and ignored, so the panel can be neither turned dark nor past 80 %.
+`+0x08` `rejects`, `+0x0C` `seq`, `+0x10` `led_errs`. Write the REQUEST word, never `bl`: 10..80 % in 5 % steps only
+(`0x424C000A` .. `0x424C0050`, e.g. `0x424C003C` = 60 %); anything else (below 10 %, above 80 %, off the 5 % grid, a
+wrong tag) is counted in `rejects` and ignored, so the panel can be neither turned dark nor past 80 %. `req` is a
+REQUEST, not a level: the HE takes it and writes `0` back (accepted or refused), so read `req` back after writing: `0`
+means it was taken, and writing the same word again is a new request (and the same bad word twice counts twice). If the
+LED driver refuses a level the HE puts the old one back and counts it in `led_errs` (`+0x10`).
 
 ```
 J-Link> w4 0x0237FDC4, 0x424C003C     // 60 %      (0x424C0000 | percent)
-J-Link> mem32 0x0237FDC0, 4           // bl, req, rejects, seq
+J-Link> mem32 0x0237FDC0, 5           // bl, req (0 once taken), rejects, seq, led_errs
 ```
 
 **Changing the volume without reflashing (any SWD probe, HE or HP running, nothing halted).** The sound's
@@ -284,10 +288,10 @@ J-Link> mem32 0x0237FD80, 4           // vol, req, rejects, seq
 | 100 % | `0x564F0064` |
 | 30 % (boot default) | `0x564F001E` |
 
-The HE adopts a request when the word CHANGES: writing the value it already holds again does nothing, and
-writing `0` first (`0` is "no request", not a refusal) is the way to resend it after a local change. Anything without the `0x564F` tag, or with a
-percent above 100, is refused (the word `0` itself is not): `rejects` (`+0x08`) counts it and the level stays. A `req` left over from
-before an HE boot is ignored (the HE records it at boot), so write after the HE console says `[vol]`.
+`req` is a REQUEST: the HE takes it and writes `0` back, accepted or refused, so read it back after writing (`0` = taken)
+and writing the same word again is a new request. Anything without the `0x564F` tag, or with a
+percent above 100, is refused (the word `0` itself is not a request): `rejects` (`+0x08`) counts it, every time, and the level stays. A `req` left over from
+before an HE boot is dropped (the HE clears it at boot), so write after the HE console says `[vol]`.
 A cold SRAM0 reads as the default, 30 %, on both cores (the HP plays at 30 % from its first block, before the HE has published): a garbage `vol` word is never a level. Because the
 change goes through the HE, it shows on the HUD and bumps `seq` (`+0x0C`).
 

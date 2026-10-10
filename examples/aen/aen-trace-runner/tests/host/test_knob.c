@@ -152,15 +152,19 @@ static void test_idle_revert(void)
 	(void)frame(1, false);                /* a turn restarts the count */
 	hold(false, TR_KNOB_IDLE_MS - 400u);
 	assert(k.mode == TR_KNOB_BRIGHTNESS && k.bl_pct == 35u);
+	uint32_t seq = k.seq;
+
 	hold(false, 600u);
 	assert(k.mode == TR_KNOB_VOLUME && k.bl_pct == 35u); /* reverts, keeps the level */
+	assert(k.seq == seq);                                /* silently: no popup for the revert */
 	assert(frame(1, false).vol_detents == 1);
 	/* a short press is activity too: the count restarts at its release */
 	press_short();
 	hold(false, TR_KNOB_IDLE_MS - 400u);
 	assert(k.mode == TR_KNOB_BRIGHTNESS);
+	seq = k.seq;
 	hold(false, 600u);
-	assert(k.mode == TR_KNOB_VOLUME);
+	assert(k.mode == TR_KNOB_VOLUME && k.seq == seq);
 }
 
 static void test_mute(void)
@@ -201,35 +205,49 @@ static void test_short_while_muted(void)
 static void test_request(void)
 {
 	fresh(30u);
-	assert(!frame(0, false).bl_changed); /* the 0xA5A5A5A5 req left over: not a request */
+	assert(rec.req == 0u && rec.rejects == 0u); /* the cold-SRAM garbage req is dropped at boot */
+	assert(!frame(0, false).bl_changed);
 	rec.req         = tr_bl_word(60u);
 	tr_knob_out_t o = frame(0, false);
-	assert(o.bl_changed && k.bl_pct == 60u && rec.bl == tr_bl_word(60u) &&
-	       k.mode == TR_KNOB_BRIGHTNESS);
-	assert(!frame(0, false).bl_changed); /* same word again: nothing */
-	rec.req = TR_BL_TAG | 5u;            /* under the floor */
-	assert(!frame(0, false).bl_changed && rec.rejects == 1u && k.bl_pct == 60u);
-	rec.req = TR_BL_TAG | 0u; /* a bare zero is not "dark" */
-	assert(!frame(0, false).bl_changed && rec.rejects == 2u);
-	rec.req = TR_BL_TAG | 101u;
-	assert(!frame(0, false).bl_changed && rec.rejects == 3u);
-	rec.req = TR_BL_TAG | 85u; /* over the 80 % ceiling */
-	assert(!frame(0, false).bl_changed && rec.rejects == 4u && k.bl_pct == 60u);
-	rec.req = TR_BL_TAG | 100u;
-	assert(!frame(0, false).bl_changed && rec.rejects == 5u && k.bl_pct == 60u);
-	rec.req = tr_bl_word(80u); /* the ceiling itself is fine */
-	assert(frame(0, false).bl_changed && k.bl_pct == 80u);
+	assert(o.bl_changed && o.bl_prev == 30u && k.bl_pct == 60u && rec.bl == tr_bl_word(60u));
+	assert(k.mode == TR_KNOB_BRIGHTNESS && rec.req == 0u); /* taken: the word is handed back */
+	assert(!frame(0, false).bl_changed);                   /* nothing pending */
+
+	/* the knob moved on; the SAME word again is a new request and takes it back */
+	assert(frame(-1, false).bl_changed && k.bl_pct == 55u);
 	rec.req = tr_bl_word(60u);
-	assert(frame(0, false).bl_changed && k.bl_pct == 60u);
-	rec.req = 0x564F0028u; /* the volume tag */
-	assert(!frame(0, false).bl_changed && rec.rejects == 6u && k.bl_pct == 60u);
-	rec.req = 0u; /* re-arm */
-	(void)frame(0, false);
+	assert(frame(0, false).bl_changed && k.bl_pct == 60u && rec.req == 0u);
+	/* at that level already: consumed, no change, no reject */
 	rec.req = tr_bl_word(60u);
-	assert(!frame(0, false).bl_changed && rec.rejects == 6u); /* same level: no change, no reject */
-	assert(tr_bl_valid(tr_bl_word(10u), &(uint32_t){ 0 }) &&
-	       tr_bl_valid(tr_bl_word(80u), &(uint32_t){ 0 }));
+	assert(!frame(0, false).bl_changed && rec.req == 0u && rec.rejects == 0u);
+	/* repeated identical valid requests all work */
+	for (int i = 0; i < 3; i++) {
+		(void)frame(-1, false);
+		rec.req = tr_bl_word(60u);
+		assert(frame(0, false).bl_changed && k.bl_pct == 60u && rec.req == 0u);
+	}
+	assert(rec.rejects == 0u);
+
+	/* refused: under the floor, a bare zero, over the ceiling, OFF the 5 % grid, the volume tag
+	 * and junk -- each counted, the same bad word twice counted twice, and the level never moves */
+	const uint32_t bad[] = { TR_BL_TAG | 5u,   TR_BL_TAG | 0u,  TR_BL_TAG | 101u, TR_BL_TAG | 85u,
+		                     TR_BL_TAG | 100u, TR_BL_TAG | 33u, TR_BL_TAG | 11u,  TR_BL_TAG | 79u,
+		                     0x564F0028u,      0xA5A5A5A5u,     0xFFFFFFFFu };
+	uint32_t       n     = 0u;
+
+	for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+		for (int twice = 0; twice < 2; twice++) {
+			rec.req = bad[i];
+			assert(!frame(0, false).bl_changed && ++n == rec.rejects);
+			assert(rec.req == 0u && k.bl_pct == 60u);
+		}
+	}
+	for (uint32_t pct = TR_BL_MIN; pct <= TR_BL_MAX; pct++) { /* the grid, exactly */
+		assert(tr_bl_valid(tr_bl_word(pct), &(uint32_t){ 0 }) == (pct % 5u == 0u));
+	}
 	assert(!tr_bl_valid(TR_BL_TAG | 85u, &(uint32_t){ 0 }));
+	rec.req = tr_bl_word(80u); /* the ceiling itself is fine */
+	assert(frame(0, false).bl_changed && k.bl_pct == 80u && rec.rejects == n);
 }
 
 static void test_no_backlight(void)
@@ -238,10 +256,77 @@ static void test_no_backlight(void)
 	tr_knob_boot(&k, &rec, 30u, false); /* the RK055 shield: no PWM backlight */
 	press_short();
 	assert(k.mode == TR_KNOB_VOLUME && k.seq == 0u);
-	rec.req = tr_bl_word(60u);
-	assert(!frame(0, false).bl_changed && k.bl_pct == 30u);
+	rec.req = tr_bl_word(60u); /* swallowed, and counted as refused */
+	assert(!frame(0, false).bl_changed && k.bl_pct == 30u && rec.rejects == 1u && rec.req == 0u);
 	press_long(); /* the mute still works */
 	assert(he.pct == 0u);
+}
+
+static void test_led_failure(void)
+{
+	fresh(30u);
+	press_short();
+	tr_knob_out_t o = frame(1, false);
+	assert(o.bl_changed && o.bl_prev == 30u && k.bl_pct == 35u);
+	tr_knob_bl_failed(&k, &rec, o.bl_prev); /* the driver said no */
+	assert(k.bl_pct == 30u && rec.bl == tr_bl_word(30u) && rec.led_errs == 1u);
+	o = frame(1, false); /* the next detent steps from the level that is really lit */
+	assert(o.bl_changed && k.bl_pct == 35u);
+	/* a request and a turn in one step roll back to where the step began */
+	rec.req = tr_bl_word(60u);
+	o       = frame(1, false);
+	assert(o.bl_changed && o.bl_prev == 35u && k.bl_pct == 60u);
+	tr_knob_bl_failed(&k, &rec, o.bl_prev);
+	assert(k.bl_pct == 35u && rec.bl == tr_bl_word(35u) && rec.led_errs == 2u);
+}
+
+/* The release lands 970..999 ms after the press: inside the debounce window, k->down is not
+ * cleared yet, and the press must still be a SHORT one (the long press is timed to the raw edge). */
+static void test_release_near_long(void)
+{
+	for (uint32_t rel = 970u; rel < TR_KNOB_LONG_MS; rel += 5u) {
+		fresh(30u);
+		uint32_t t0         = t;
+		bool     muted_seen = false;
+
+		for (uint32_t d = 0u; d < rel; d += 10u) {
+			muted_seen |= tr_knob_step(&k, &rec, t0 + d, 0, true).mute;
+		}
+		for (uint32_t d = rel; d < rel + 100u; d += 10u) {
+			muted_seen |= tr_knob_step(&k, &rec, t0 + d, 0, false).mute;
+		}
+		assert(!muted_seen && k.mode == TR_KNOB_BRIGHTNESS);
+	}
+	/* held to the threshold on the raw switch it is long: exactly TR_KNOB_LONG_MS after the edge */
+	fresh(30u);
+	uint32_t t0 = t;
+
+	for (uint32_t d = 0u; d < TR_KNOB_LONG_MS; d += 10u) {
+		assert(!tr_knob_step(&k, &rec, t0 + d, 0, true).mute);
+	}
+	assert(tr_knob_step(&k, &rec, t0 + TR_KNOB_LONG_MS, 0, true).mute);
+}
+
+/* A GPIO read error mid-hold keeps the last raw state: it is no release, the hold goes on and
+ * the long press still fires once; an error while idle is no press. */
+static void test_read_error(void)
+{
+	fresh(30u);
+	uint32_t t0   = t;
+	unsigned mute = 0;
+
+	for (uint32_t d = 0u; d < 1400u; d += 25u) {
+		bool ok  = !(d >= 300u && d < 600u); /* a 300 ms burst of read errors ... */
+		bool lvl = ok; /* ... where the failed read leaves "released" behind */
+
+		mute += tr_knob_step(&k, &rec, t0 + d, 0, tr_knob_raw(&k, ok, lvl)).mute;
+	}
+	assert(mute == 1u && k.mode == TR_KNOB_VOLUME && k.seq == 1u); /* no phantom short press */
+	fresh(30u);
+	for (uint32_t d = 0u; d < 500u; d += 25u) { /* errors with the switch idle */
+		assert(!tr_knob_step(&k, &rec, t0 + d, 0, tr_knob_raw(&k, false, true)).mute);
+	}
+	assert(!k.down && k.mode == TR_KNOB_VOLUME && k.seq == 0u);
 }
 
 static void test_popup_text(void)
@@ -273,6 +358,9 @@ int main(void)
 	test_short_while_muted();
 	test_request();
 	test_no_backlight();
+	test_led_failure();
+	test_release_near_long();
+	test_read_error();
 	test_popup_text();
 	printf("knob: ok\n");
 	return 0;

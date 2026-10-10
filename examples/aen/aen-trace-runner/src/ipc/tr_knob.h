@@ -13,9 +13,13 @@
  * neither the knob nor the bench word can turn the panel dark or past 80 %. The HE owns the PWM (UTIMER3 on P10_7,
  * through the LED API), so nothing crosses a core but the bench record TR_MEM_BL:
  *   bl       HE      the level now:  TR_BL_TAG | percent
- *   req      bench   "please set":   TR_BL_TAG | percent, TR_BL_MIN..TR_BL_MAX (0 = no request)
- *   rejects  HE      requests refused (bad tag, or a percent outside the range)
- *   seq      HE      level changes adopted
+ *   req      bench   "please set":   TR_BL_TAG | percent, on the TR_BL_STEP grid within
+ *                    TR_BL_MIN..TR_BL_MAX (0 = no request). The HE CLEARS it to 0 once taken
+ *                    (accepted or refused), so the same word again is a new request and a bad
+ *                    word written twice is counted twice
+ *   rejects  HE      requests refused (bad tag, off the grid, outside the range, or no backlight)
+ *   seq      HE      level changes tried
+ *   led_errs HE      times the LED driver refused a level (the level is then rolled back)
  * The boot level is the one the SDK already set (alp,display-backlight default-brightness), so
  * booting never flickers the panel; a default above the ceiling is clamped to it.
  *
@@ -44,9 +48,10 @@ typedef struct {
 	uint32_t req;
 	uint32_t rejects;
 	uint32_t seq;
+	uint32_t led_errs;
 } tr_bl_t;
 
-_Static_assert(sizeof(tr_bl_t) == 16u, "tr_bl_t is 4 words on the wire");
+_Static_assert(sizeof(tr_bl_t) == 20u, "tr_bl_t is 5 words on the wire");
 _Static_assert(TR_MEM_BL % 16u == 0u, "the record is 16-B aligned");
 _Static_assert(TR_MEM_BL >= TR_MEM_VOL + sizeof(tr_vol_t),
                "the backlight record starts after the volume record");
@@ -61,7 +66,8 @@ static inline uint32_t tr_bl_word(uint32_t pct)
 	return TR_BL_TAG | (pct > TR_BL_MAX ? TR_BL_MAX : pct);
 }
 
-/* A tagged word with a percent in TR_BL_MIN..TR_BL_MAX. *pct is written only when it is. */
+/* A tagged word with a percent in TR_BL_MIN..TR_BL_MAX on the TR_BL_STEP grid. *pct is written
+ * only when it is. */
 bool tr_bl_valid(uint32_t word, uint32_t *pct);
 
 typedef enum { TR_KNOB_VOLUME = 0, TR_KNOB_BRIGHTNESS = 1 } tr_knob_mode_t;
@@ -70,7 +76,6 @@ typedef struct {
 	tr_knob_mode_t mode;
 	uint32_t       bl_pct;      /* the backlight level now */
 	uint32_t       seq;         /* mode / level / mute events: the HUD popup's trigger */
-	uint32_t       last_req;    /* the req word as last seen */
 	uint32_t       last_act_ms; /* last turn / press / bench request */
 	uint32_t       raw_ms;      /* when the raw switch last changed */
 	uint32_t       down_ms;     /* when the debounced press began */
@@ -81,18 +86,30 @@ typedef struct {
 } tr_knob_t;
 
 typedef struct {
-	int32_t vol_detents; /* feed to tr_vol_he_step */
-	bool    mute;        /* long press: feed as tr_vol_he_step's press */
-	bool    bl_changed;  /* apply k->bl_pct to the LED */
+	int32_t  vol_detents; /* feed to tr_vol_he_step */
+	bool     mute;        /* long press: feed as tr_vol_he_step's press */
+	bool     bl_changed; /* apply k->bl_pct to the LED; if that fails, tr_knob_bl_failed(bl_prev) */
+	uint32_t bl_prev;    /* the level before this step */
 } tr_knob_out_t;
 
 /* HE boot: the backlight is already at `bl_pct` (published, not re-applied). A req left over
- * from before is remembered, not obeyed. */
+ * from before is dropped, not obeyed. */
 void tr_knob_boot(tr_knob_t *k, volatile tr_bl_t *r, uint32_t bl_pct, bool has_bl);
 
 /* One HE frame at `now_ms`: `detents` since the last call (clockwise positive), `sw` the raw
  * switch (true = pressed). Order: switch, encoder, then the bench's req. */
 tr_knob_out_t
 tr_knob_step(tr_knob_t *k, volatile tr_bl_t *r, uint32_t now_ms, int32_t detents, bool sw);
+
+/* The LED driver refused the level of the step that reported bl_changed: put the level back to
+ * `prev_pct` (the step's bl_prev), publish it and count the failure in led_errs. */
+void tr_knob_bl_failed(tr_knob_t *k, volatile tr_bl_t *r, uint32_t prev_pct);
+
+/* The switch level to feed tr_knob_step: a failed GPIO read keeps the last raw state instead of
+ * reading as a release (a glitch must not end a hold). */
+static inline bool tr_knob_raw(const tr_knob_t *k, bool read_ok, bool sw)
+{
+	return read_ok ? sw : k->raw;
+}
 
 #endif /* TR_KNOB_H */

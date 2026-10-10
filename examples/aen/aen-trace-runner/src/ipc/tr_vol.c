@@ -74,7 +74,7 @@ void tr_vol_he_boot(tr_vol_he_t *he, volatile tr_vol_t *r)
 	he->pct        = TR_VOL_DEFAULT;
 	he->unmute_pct = TR_VOL_DEFAULT;
 	he->muted      = false;
-	he->last_req   = r->req;
+	r->req         = 0u;
 	r->rejects     = 0u;
 	r->seq         = 0u;
 	publish(he, r);
@@ -100,13 +100,11 @@ bool tr_vol_he_step(tr_vol_he_t *he, volatile tr_vol_t *r, int32_t detents, bool
 	}
 	uint32_t q = r->req;
 
-	if (q != he->last_req) {
+	if (q != 0u) { /* a request: taken once, accepted or refused, and the word handed back */
 		uint32_t pct;
 
-		he->last_req = q;
-		if (q == 0u) {
-			/* "no request": the word cleared (a cold SRAM0 or a bench that wrote 0 to re-arm) */
-		} else if (tr_vol_valid(q, &pct)) {
+		r->req = 0u;
+		if (tr_vol_valid(q, &pct)) {
 			he->muted = pct == 0u && he->pct != 0u; /* a muting request keeps the level to resume */
 			changed |= set(he, r, pct);
 		} else {

@@ -54,7 +54,7 @@ static int32_t     s_pos;
 #define HAVE_BL     0
 #define BL_BOOT_PCT 30
 #endif
-static bool s_up; /* init done: before it the record holds cold-SRAM garbage */
+static volatile bool s_up; /* init done: before it the record holds cold-SRAM garbage */
 
 void tr_volume_he_init(void)
 {
@@ -63,7 +63,9 @@ void tr_volume_he_init(void)
 	s_vol_seq = s_rec->seq;
 #if HAVE_BL
 	if (s_knob.bl_pct != BL_BOOT_PCT) { /* the SDK's default is past the ceiling: pull it down */
-		(void)led_set_brightness(BL_LED_DEV, BL_LED_IDX, (uint8_t)s_knob.bl_pct);
+		if (led_set_brightness(BL_LED_DEV, BL_LED_IDX, (uint8_t)s_knob.bl_pct) != 0) {
+			tr_knob_bl_failed(&s_knob, s_bl, s_knob.bl_pct); /* counted; the level stays */
+		}
 	}
 #endif
 
@@ -99,7 +101,7 @@ void tr_volume_he_init(void)
 void tr_volume_he_frame(void)
 {
 	int32_t pos = s_pos;
-	bool    now = false;
+	bool    now = s_knob.raw; /* a failed read keeps the last state: no phantom release */
 
 	if (!s_up) {
 		return; /* the first presents run before tr_volume_he_init() */
@@ -107,8 +109,10 @@ void tr_volume_he_frame(void)
 	if (s_enc != NULL && alp_qenc_get_position(s_enc, &pos) != ALP_OK) {
 		pos = s_pos;
 	}
-	if (s_sw != NULL && alp_gpio_read(s_sw, &now) != ALP_OK) {
-		now = false;
+	if (s_sw != NULL) {
+		bool lvl = false;
+
+		now = tr_knob_raw(&s_knob, alp_gpio_read(s_sw, &lvl) == ALP_OK, lvl);
 	}
 	/* wrap-safe: the accumulator is 32-bit, the difference is the detents since last frame */
 	int32_t detents = (int32_t)((uint32_t)pos - (uint32_t)s_pos);
@@ -128,6 +132,9 @@ void tr_volume_he_frame(void)
 #if HAVE_BL
 		int rc = led_set_brightness(BL_LED_DEV, BL_LED_IDX, (uint8_t)s_knob.bl_pct);
 
+		if (rc != 0) { /* the LED did not take it: back to what it shows */
+			tr_knob_bl_failed(&s_knob, s_bl, out.bl_prev);
+		}
 		printk("[bl] backlight %u%% -> %d\n", (unsigned)s_knob.bl_pct, rc);
 #endif
 	}

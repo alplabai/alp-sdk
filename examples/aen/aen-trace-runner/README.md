@@ -297,7 +297,8 @@ SRAM0 reads as the 30 % default) and sets it from:
   already set (30 %), so booting does not flicker. The RK055 shield has no PWM backlight, so there a short press does nothing.
 - **A request word over SWD** (`0x0237FD84`, `0x564F0000 | percent`), for the bench: no reflash, see
   `a32/release/FLASH-RECIPE.md` ("Changing the volume without reflashing"). The HE validates it. The backlight
-  has its own (`TR_MEM_BL` `0x0237FDC0`, request word `0x0237FDC4`, `0x424C0000 | percent`, 10..80 only).
+  has its own (`TR_MEM_BL` `0x0237FDC0`, request word `0x0237FDC4`, `0x424C0000 | percent`, 10..80 in 5 % steps only). Both request words are
+  taken, not latched: the HE clears one to `0` once it has read it (accepted or refused).
 
 The HUD shows `VOLUME 40%` (or `MUTE`, or `BRIGHTNESS 60%`) over its bottom row for 1.5 s whenever the level or the mode changes. The encoder
 pads are GPIO3 / GPIO4 (P3_0, P3_1, P4_3): not the GPIO5 port or the lpgpio island the HP's amps use. The
