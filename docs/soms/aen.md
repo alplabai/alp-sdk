@@ -53,7 +53,7 @@ says explicitly that result is silent on the HyperRAM's own behaviour
 | Application SoC         | Alif Ensemble E3..E8       | --               | (vendor HAL)                            |
 | Wi-Fi 6 + BLE 5.4       | TI CC3501E                 | inter-chip SPI1 + SDIO | App APIs: [`<alp/iot.h>`](../../include/alp/iot.h), [`<alp/ble.h>`](../../include/alp/ble.h); diagnostics: [`<alp/chips/cc3501e.h>`](../../include/alp/chips/cc3501e.h) |
 | Secure element          | Infineon OPTIGA Trust M    | BRD_I2C†          | [`<alp/chips/optiga_trust_m.h>`](../../include/alp/chips/optiga_trust_m.h) |
-| RTC                     | Micro Crystal RV-3028-C7   | BRD_I2C†          | Upstream Zephyr `CONFIG_RTC_RV3028` (`rtc_*` API) -- see [BRD_I2C](#on-module-housekeeping-i2c-brd_i2c) |
+| RTC                     | Micro Crystal RV-3028-C7   | BRD_I2C†          | Upstream Zephyr `CONFIG_RTC_RV3028` (`rtc_*` API); countdown / alarm / wake-flag service in [`<alp/chips/rv3028c7.h>`](../../include/alp/chips/rv3028c7.h), and its `INT` -> P15_0 line is the STOP wake source ([aen-power-domains.md](../aen-power-domains.md)) -- see [BRD_I2C](#on-module-housekeeping-i2c-brd_i2c) |
 | Temperature sensor      | TI TMP112                  | BRD_I2C†          | Upstream Zephyr `CONFIG_TMP112` (sensor API) -- see [BRD_I2C](#on-module-housekeeping-i2c-brd_i2c) |
 | EEPROM (SoM manifest)   | Onsemi N24S128             | SoC I2C2 (bridge/DNP-selected, a separate bus from BRD_I2C) | [`<alp/chips/eeprom_24c128.h>`](../../include/alp/chips/eeprom_24c128.h) |
 | Ethernet PHY            | TI DP83825 (exact order code TBD) | RMII      | none -- see [`metadata/chips/dp83825.yaml`](../../metadata/chips/dp83825.yaml) |
@@ -197,6 +197,10 @@ The RV-3028's `/INT` output (U21 pin 2, net `RTC_ALARM`) reaches the SoC:
 ```
 RV-3028-C7 /INT  ->  RTC_ALARM  ->  P15_0_FLEX (ball V2)  ->  LPGPIO bit 0  ->  IRQ 171
 ```
+
+This line is also the STOP wake source (`ALP_POWER_WAKE_RTC`); the alarm / countdown / wake-flag
+API is `<alp/chips/rv3028c7.h>` and the power-domain runtime is described in
+[aen-power-domains.md](../aen-power-domains.md).
 
 It is **open-drain, active low**, and `R98` (100 kΩ to `+1V8`) is fitted as
 its pull-up, so no carrier-side resistor is needed. The pin is described to

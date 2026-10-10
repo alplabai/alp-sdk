@@ -42,6 +42,8 @@
  *                at protocol v0.5).  The supervisor wakes the
  *                Renesas SoC, then re-runs its own handshake so
  *                the bridge stays usable after deep-sleep cycles.
+ *   - Alif E8  : M55-HE SE STOP/STANDBY via the Secure Enclave
+ *                (`CONFIG_ALP_SDK_POWER_ALIF_SE`).
  *   - Yocto    : `/sys/power/state` write + `/sys/class/rtc/rtcN/
  *                wakealarm` for timed wakes.
  *   - Baremetal: vendor HAL low-power primitives.
@@ -206,16 +208,16 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_
  *  backend's own retention granularity and sized by @ref
  *  alp_power_retain_t::retain_kb.
  *
- *  Once the Alif STOP backend lands (#2784), the E8's 4 KB Utility SRAM
- *  ("BKRAM") is ALWAYS retained and reserved for the SDK (wake record,
- *  domain-restore state): it is not application RAM at any level.  The
- *  lowest floor an app can select is then the Utility-SRAM-retained
- *  rung (STOP_2, 1.1 uA typ., Table 5-5), never the no-retention
- *  STOP_5/4/3 rungs.  Today's backends have no STOP retention and
+ *  With the Alif STOP backend (CONFIG_ALP_SDK_POWER_ALIF_SE, #2784), the
+ *  E8's 4 KB Utility SRAM ("BKRAM") is ALWAYS retained and reserved for
+ *  the SDK (wake record, domain-restore state): it is not application
+ *  RAM at any level.  The lowest floor an app can select is then the
+ *  Utility-SRAM-retained rung (STOP_2, 1.1 uA typ., Table 5-5), never
+ *  the no-retention STOP_5/4/3 rungs.  Backends without STOP retention
  *  answer NOSUPPORT for everything but NONE. */
 typedef enum {
-	ALP_POWER_RETAIN_NONE    = 0, /**< No application RAM retained.  Once the Alif STOP
-	                                    backend lands (#2784) only the SDK-reserved boot
+	ALP_POWER_RETAIN_NONE    = 0, /**< No application RAM retained.  With the Alif STOP
+	                                    backend (#2784) only the SDK-reserved boot
 	                                    state survives (E8: the 4 KB Utility SRAM, STOP_2,
 	                                    ~1.1 uA typ.) and that is the lowest floor the API
 	                                    can select.  Size a battery off the mode your
@@ -224,8 +226,8 @@ typedef enum {
 	                                    4 KB Utility SRAM, STOP_2, ~1.1 uA typ.).  The
 	                                    Alif STOP backend (#2784) treats this as
 	                                    equivalent to @ref ALP_POWER_RETAIN_NONE -- it
-	                                    returns ALP_OK and retains nothing extra.  Today's
-	                                    backends still return ALP_ERR_NOSUPPORT. */
+	                                    returns ALP_OK and retains nothing extra.  Backends
+	                                    without STOP retention return ALP_ERR_NOSUPPORT. */
 	ALP_POWER_RETAIN_TCM     = 2, /**< @ref alp_power_retain_t::retain_kb KiB of
 	                                    tightly-coupled memory; the backend rounds UP to
 	                                    its own retention granularity (never NOSUPPORT

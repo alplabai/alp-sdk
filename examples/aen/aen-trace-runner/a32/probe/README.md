@@ -3,7 +3,7 @@
 First numbers from the Cortex-A32 pair (E1M-AEN803 2026W36-0009) for scalar,
 NEON and D-cache-clean throughput, PMU clock speed, dual-core coherency, and
 CDC200 NS-access reachability -- feeding the T-A0 open questions in
-`docs/superpowers/plans/2026-09-22-a32-renderer.md`. No OS, no libc: this is
+`../../docs/superpowers/plans/2026-09-22-a32-renderer.md`. No OS, no libc: this is
 a bare-metal payload that TF-A jumps to directly.
 
 Stage 1 = single core (core0), SRAM0 only. Stage 2 = adds core1 (PSCI
@@ -34,7 +34,7 @@ stage-2 field is appended after the stage-1 layout, never inserted into it.
 - `decode.py` -- host-side: turns a raw dump of `0x023FF000..+0x350` into a
   per-test MB/s + stage-2 report.
 
-See `docs/2026-09-22-a32-probe-spec.md` for the full spec (memory plan,
+See `../../docs/2026-09-22-a32-probe-spec.md` for the full spec (memory plan,
 exact MMU attribute encoding, results layout) and
 `IMPLEMENTATION-NOTES.md` for the line-by-line design record, deviations,
 and self-review of the cache/MMU sequence.
@@ -109,7 +109,7 @@ instead.
 
 ## The TF-A boot contract this relies on
 
-All from `docs/2026-09-22-a32-probe-spec.md`, "Boot contract" (sourced from
+All from `../../docs/2026-09-22-a32-probe-spec.md`, "Boot contract" (sourced from
 TF-A `alif_lts-v2.10.8`, `PLAT=devkit_e7`):
 
 - SE releases `A32_0` into TF-A `sp_min`; `sp_min` erets to BL33 at

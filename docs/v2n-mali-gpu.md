@@ -125,6 +125,10 @@ No `WARNING ... GPU backend is NOT compiled in` line means pkg-config found
 - No bench run of any of the above. The GPU-vs-CPU crossover size is a guess.
 - GPU ops use a CPU-memory round trip; dma-buf zero-copy is future work.
 - Other formats (RGB565, A8, RGBA8888, RGB888) always take the CPU path.
-- A plain-CMake **static** `libalp_sdk.a` does not pull `yocto_gles.c` (no
-  link anchor references it, like the other Linux-only backends); the Yocto
-  recipe builds the shared library, where it is always linked.
+- A CMake consumer of the static `libalp_sdk.a` gets `yocto_gles.c` (when
+  `ALP_SDK_USE_GPU2D_GLES` is on) force-linked automatically, like every other
+  Linux backend (`cmake/alp-sdk-static-backends.cmake`, #2790); a plain
+  non-CMake static link still needs the per-backend
+  `-Wl,--undefined=_alp_backend_force_*` options (see
+  [`v2n-camera-csi.md`](v2n-camera-csi.md)). The Yocto recipe builds the shared
+  library, where it is always linked.
