@@ -1333,7 +1333,7 @@ def _emit_inference(
     # Look up this slice's core in the SoC spec; pick exactly one of
     # NEON / HELIUM / REF based on the vector_extension field.  Defaults
     # to REF when the SoC JSON is silent (paper-correct on the scalar
-    # M33s -- V2N m33_sm).
+    # M33s -- iMX 93 m33, V2N m33_sm).
     tflm_kernel_kc: str = "CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y"
     for c in (project.soc_spec.get("cores") or []):
         if c.get("id") != slice_.core_id:
