@@ -58,7 +58,7 @@ static void aen_lp_pads_enable_output(void)
  * with an init flag) drives whatever DR holds, and with DR bit 5 = 0 that glitches
  * the supply of a running chip low.  DR is written directly (read-modify-write, the
  * same access gpio_dw's port_set_bits_raw makes) so this template stays on the
- * portable <alp/*.h> surface: SWPORTA_DR is offset 0x00 of the DesignWare GPIO block
+ * portable <alp/...> headers: SWPORTA_DR is offset 0x00 of the DesignWare GPIO block
  * (zephyr drivers/gpio/gpio_dw_registers.h), the block base is the `lpgpio` node's
  * reg, and the LP-GPIO clock is already on because alp_gpio_open() opened the pin. */
 #define DW_GPIO_SWPORTA_DR 0x00u
