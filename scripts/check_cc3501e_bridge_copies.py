@@ -66,11 +66,6 @@ DIVERGENT_COPIES = {
         "cold-boot soak instead of returning the first cc3501e_reset() "
         "status, and omits the RX_SAMPLE_DLY poke (issue #2163)"
     ),
-    "examples/aen/aen-power-domains/src": (
-        "the bring-up is warm-aware: when WIFI_EN already reads high it resets "
-        "through nRESET only (cc3501e_hard_reset()) instead of cc3501e_reset(), "
-        "which would cycle the supply of a running chip (issue #2784)"
-    ),
     "examples/aen/aen-trace-runner/sound/src": (
         "the game's sound image runs on the M55-HP, so the LP-pad output "
         "enable is compiled for CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP as well "

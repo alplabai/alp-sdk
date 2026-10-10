@@ -4,17 +4,15 @@
  *
  * E1M-AEN SoM CC3501E bridge bring-up helper -- see cc3501e_bridge.h.
  *
- * LOCAL CHANGE vs the sibling aen-cc3501e-* copies (aen-power-domains only): the
- * final reset is warm-aware.  cc3501e_reset() drops WIFI_EN for 50 ms, a supply
- * cold cycle; on a CC3501E that is already running (an activated unit with
- * vendor_sbl_container_enable=1 may then never relaunch) that is exactly what the
- * power-domain layer exists to avoid.  So when WIFI_EN already reads high AND the
- * chip answers a PING the
- * bring-up resets through nRESET only (cc3501e_hard_reset()), and uses
- * cc3501e_reset() only from WIFI_EN low or, as a last resort, from a chip that stays
- * silent through an nRESET-only reset.  WIFI_EN reading high alone is not trusted: a
- * pull-up would make every power-on look warm (whether the module has one is an open
- * question).
+ * The final reset is warm-aware.  cc3501e_reset() drops WIFI_EN for 50 ms, a
+ * supply cold cycle; on a CC3501E that is already running (an activated unit with
+ * vendor_sbl_container_enable=1 may then never relaunch) that must not happen on a
+ * mere re-run or warm reset of the application.  So when WIFI_EN already reads high
+ * AND the chip answers a PING the bring-up resets through nRESET only
+ * (cc3501e_hard_reset()), and uses cc3501e_reset() only from WIFI_EN low or, as a
+ * last resort, from a chip that stays silent through an nRESET-only reset.  WIFI_EN
+ * reading high alone is not trusted: a pull-up would make every power-on look warm
+ * (whether the module has one is an open question, issue #2797).
  */
 
 #include "cc3501e_bridge.h"
