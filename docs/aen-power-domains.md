@@ -168,8 +168,8 @@ wake-pads {
   nets, `alif-ospi.tsv`, wired to the memory footprints on the one E1M-AEN-2626-R2 PCB whether or
   not the part is populated); the source is `wired_lpgpio_pads:` in `on-module-links.yaml`. One claimed pad in the node makes `ALP_POWER_WAKE_GPIO` unadvertised
   and `alp_power_configure_wake_source()` answers `ALP_ERR_NOSUPPORT`.
-  **On the E1M-AEN801 / E1M-AEN803 R2 all eight lines are SoM-wired, so no pad is accepted on the
-  bare module**; the path is for a variant or a derivative where a line is freed.
+  On the E1M-AEN801 / E1M-AEN803 R2 all eight lines are SoM-wired: no pad is accepted on the
+  bare module; the path is for a variant or a derivative where a line is freed.
 - *Not done.* The DW debounce filter (`GPIO_DEBOUNCE`, `gpio_enable_debounce()` in the DFP
   `drivers/include/gpio.h:351`) needs its clock (`GPIO_DB_CKEN`, `RTSS_HE_LPPERI_CKEN` [9:8]) to keep
   running through the SE's STOP profile; nothing in the DFP states that, so it is left off.
