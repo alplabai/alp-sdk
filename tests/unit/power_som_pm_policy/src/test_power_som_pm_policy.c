@@ -17,6 +17,14 @@
 
 #include "som_power.h"
 
+/* The STOP_MODE register window of the test devicetree is a made-up address.  The
+ * cold-boot restore reads it on every boot that has no record, so stand in for it:
+ * this image is a plain power-on reset (STOP_MODE_STAT clear). */
+uint32_t alp_som_power_stop_mode_read(void)
+{
+	return 0u;
+}
+
 /* The emulator keeps a driven output apart from its input side; read the output
  * latch the way a pad with an input buffer reads back on silicon. */
 int alp_som_power_pad_read(const struct gpio_dt_spec *s)

@@ -2,15 +2,15 @@
  * (TI SBOSA81D), reading only the raw SHUNT (0x01) and BUS (0x02) registers.
  *
  * Deliberately does NOT go through the part's CALIBRATION/CURRENT/POWER
- * registers. The alp-sdk chips/ina236 driver this SDK build (alp-sdk-lcd)
- * ships has two real scaling bugs in that path (alp-sdk commit 38784b723,
- * not yet on alp-sdk dev/main, so alp-sdk-lcd still carries them):
- *   1. ina236_read_power_uw() applies the 1.6 mV bus LSB a second time on
+ * registers. Earlier revisions of the chips/ina236 driver had two scaling
+ * bugs in that path (fixed since, #2299):
+ *   1. ina236_read_power_uw() applied the 1.6 mV bus LSB a second time on
  *      top of the 32 that already carries it (eq. 4) -- 625x under-report.
- *   2. apply_calibration() never divides SHUNT_CAL by 4 for ADCRANGE=1
+ *   2. apply_calibration() never divided SHUNT_CAL by 4 for ADCRANGE=1
  *      (section 8.1.2) -- 4x high current/power on the fine range.
  * Computing P = V_bus * (V_shunt / R_shunt) straight from the two raw ADC
- * registers cannot inherit either bug -- there is no SHUNT_CAL in this path.
+ * registers needs no SHUNT_CAL at all, so it is independent of the driver's
+ * calibration path; it is kept as the cheap path for the HUD's ~10 Hz sample.
  *
  * Header-only + static inline: usable unmodified from both the target build
  * (platform/rail5v_power.c) and the host tests (tests/host/runner.sh's generic

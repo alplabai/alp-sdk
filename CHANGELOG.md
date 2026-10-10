@@ -7,6 +7,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
+### Fixed — Alif SE STOP backend no longer refuses every RV-3028 sleep after an unhandled wake (Refs #2784)
+
+The RV-3028 is backup-powered, so a countdown or alarm that fired with nobody
+handling it kept its enable (TIE/AIE) and flag (TF/AF) across nRESET and power
+cycles. Before starting its own countdown the backend now stops a stale TE/TIE
+and clears TF (and UF with UIE off) by writing 0, so a stale TIE+TF no longer
+holds `/INT` low at the pre-arm check; unless `WAKE_RTC` was requested it also
+clears a stale AIE/AF. EVF, PORF, BSF and CLKF are left alone. A wake pending
+from the current arm still refuses the sleep, and that refusal now dumps the
+RTC registers.
+
 ## [v0.17.0] - 2026-10-08 (release candidate: v0.17.0-rc1)
 
 ### Known issue — trace-runner A32 renderer faulted once on the bench (v0.17.0-rc1)

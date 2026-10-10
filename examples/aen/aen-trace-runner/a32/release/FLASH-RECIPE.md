@@ -8,8 +8,8 @@ read-back proof to the SAME proven Flow D machinery `probe/npu/flash-probe.sh` a
 (alp-sdk's `scripts/bench/aen/bench-env.sh`) instead of hand-rolled J-Link text.**
 
 **Fix round 2 (reviewer, see the implementor report): round 1's write session still had a RESET
-before the halt (`RSetType 2; r; h`) -- that reset was measured (alp-sdk-lcd
-`scripts/bench/aen/flash-jlink-mramxip.sh:296-321`) to DESTROY the debug access the halt needs on
+before the halt (`RSetType 2; r; h`) -- that reset was measured
+in `scripts/bench/aen/flash-jlink-mramxip.sh:296-321` to DESTROY the debug access the halt needs on
 this part: 0 of 8 halts succeeded after a reset in that bench log, versus 12/12 with a plain `h` on
 the live core. **The correct v5.2 session is `connect` -> `exec SetSkipProgOnCRCMatch = 0` -> `h`
 (NO prior reset) -> the loadbins, each `, noreset` -> `RSetType 2; r; g` ONLY AT THE END**, and the

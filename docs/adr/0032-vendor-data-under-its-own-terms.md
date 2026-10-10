@@ -4,6 +4,10 @@ Status: Proposed
 Date: 2026-08-30
 Deciders: alpCaner
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The `vendors/nxp-imx93` directory named below is deleted (`vendors/` no longer carries it).
+
 ## Context
 
 **Terminology, because this repo already uses the phrase the other way.**

@@ -4,7 +4,7 @@ Reference applications for the E1M-AEN family (lead part: Alif
 Ensemble E8 -- dual-M55 + Ethos-U85/U55 NPUs, on-module ISP /
 camera path, GPU2D).  Build any of these against an E1M-AEN SoM
 populated on the E1M-EVK board; where an example ships a
-per-example `board.yaml` (10 of the 84 tracked directories here), that
+per-example `board.yaml` (10 of the 89 tracked directories here), that
 file carries the exact SKU + board.
 
 Apps tagged **bench** are on-silicon RAM-run validations read over SWD via the
@@ -24,6 +24,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-power-iwic`](aen-power-iwic/)                | **bench** -- Stage-B IWIC deep-sleep over the Alif PM layer on pinned Zephyr 4.4.0. |
 | [`aen-aipm-read`](aen-aipm-read/)                  | **bench** -- READ-ONLY dump of the live RUN/STANDBY operating-point profiles via the portable `alp_power_profile_get()` (SE aiPM-backed on AEN). |
 | [`aen-wdt-feed`](aen-wdt-feed/)                    | CMSDK watchdog install + feed over the upstream `arm,cmsdk-watchdog` driver (Tier-1). |
+| [`aen-evk-demo`](aen-evk-demo/) | phased full-board demo on the E1M-EVK: every phase reports its own PASS/FAIL, so one failing sensor cannot hide behind a blanket `RESULT PASS` (see its README for the phase table). |
 
 ### Dual-core (B1) + IPC
 
@@ -45,6 +46,8 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-se-service-query`](aen-se-service-query/)    | **bench** -- READ-ONLY dump of the portable SE-backed surfaces: SoC identity (`<alp/hw_info.h>`), RUN/STANDBY profiles (`<alp/power.h>`), TRNG (`<alp/security.h>`). |
 | [`aen-se-crypto`](aen-se-crypto/)                  | SHA-256 known-answer + AES-128-GCM round-trip + TRNG through `<alp/security.h>`, backed by the SE CryptoCell (else MbedTLS-PSA fallback). |
 | [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M probe and Coprocessor UID read over BRD_I2C (I2C0, M55-HE). |
+| [`aen-tz-secure-log-append`](aen-tz-secure-log-append/) | single-core TrustZone-M proof: the Non-Secure application can append to the audit log only through the Secure owner and cannot write the log store directly. |
+| [`aen-tz-secure-log-probe`](aen-tz-secure-log-probe/) | negative proof that on one M55 the application is hardware-blocked (ARMv8-M SAU + Alif TGU) from writing the MRAM audit-log window. |
 
 ### NPU + AI accelerators
 
@@ -63,7 +66,8 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
-| [`aen-camera-firstlight`](aen-camera-firstlight/)  | **bench** -- Raspberry-Pi-style CSI-2 camera first light (OV5647 / OV9281 / IMX296 / IMX335 on the E1M-EVK's J5) through the portable `<alp/camera.h>` API; OV9281 bench-verified on an E1M-AEN803 on the E1M-EVK (2026-09-21, all three modes); OV5647 bench-verified (2026-09-22, RAW10 640x480, issue #2248) -- both due for a re-bench after issue #2287 Stage B's shared CPI driver change, pending; IMX296 Stage A + Stage B (Stage B via `aen-isp-capture` / `camera-mjpeg-stream`) bench-verified (issue #2287); IMX335 raw-capture bench-verified (issue #2327, runs 316-330: 6/6 clean 1296x972 frames) -- see [`docs/camera-shields.md`](../../docs/camera-shields.md). |
+| [`aen-camera-firstlight`](aen-camera-firstlight/)  | **bench** -- Raspberry-Pi-style CSI-2 camera first light (OV5647 / OV9281 / IMX296 / IMX335 on the E1M-EVK's J5) through the portable `<alp/camera.h>` API; OV9281 bench-verified on an E1M-AEN803 on the E1M-EVK (2026-09-21, all three modes); OV5647 bench-verified (2026-09-22, RAW10 640x480, issue #2248) -- both due for a re-bench after issue #2287 Stage B's shared CPI driver change, pending; IMX296 Stage A + Stage B (Stage B via `aen-isp-capture` / `camera-mjpeg-stream`) bench-verified (issue #2287); IMX335 raw-capture bench-verified (issue #2327, runs 316-330: 6/6 clean 1296x972 frames); also builds for the M55-HP (IMX335 on the E1M-AEN803 M55-HP bench-verified 2026-10-09) and, compile-only, the E1M-AEN401 (E4, M55-HP) -- see [`docs/camera-shields.md`](../../docs/camera-shields.md). |
+| [`aen-isp-capture`](aen-isp-capture/)              | **bench** -- real sensor frame through the Alif ISP-Pico (`sensor -> csi -> cam -> isp -> memory`) with AE/AWB on the E1M-AEN801/AEN803 (M55-HE); see the README for the IMX296/IMX335 overlays. |
 | [`aen-isp-regcheck`](aen-isp-regcheck/)            | **staging** -- VeriSilicon ISP Pico (`vsi,isp-pico`) bind-only staging check. |
 | [`aen-dsi-regcheck`](aen-dsi-regcheck/)            | **staging** -- Alif C2-MIPI-DSI display stack bind-only check (the TX twin of the CSI camera path). |
 | [`aen-dsi-display`](aen-dsi-display/)              | **bench** -- live RK055HDMIPI4MA0 pixels-on-glass path through CDC200 + DesignWare MIPI-DSI + D-PHY, via the `e1m_evk_rk055hdmipi4ma0` shield. |
@@ -76,9 +80,18 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`aen-ethernet-link`](aen-ethernet-link/)          | Bring up the E8 GMAC (`eth_dwmac` + the `alif,ethernet` glue) and report net-if state (Zephyr net-if API). |
 | [`aen-power-domains`](aen-power-domains/)          | **bench** -- SoM power-domain runtime (#2784): quiesce the Wi-Fi/BLE coprocessor, Ethernet PHY, NOR, TMP112, RTC clock-out and backlight, hold 5 s, restore, and check each chip answers again (CC3501E PING with no `WIFI_EN` toggle, PHY ID, NOR JEDEC ID, TMP112 temperature). |
+| [`aen-power-stop`](aen-power-stop/)                | **bench** -- Alif SE STOP backend (#2784, STOP passed on the E1M-AEN803): MRAM image that sleeps three times (LPTIMER, RV-3028 countdown, RV-3028 alarm), judging after each cold-boot wake the wake source, the BKRAM counter and the domain restore. |
 | [`aen-cc3501e-bringup`](aen-cc3501e-bringup/)      | Host (Alif M55-HE) side of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor bring-up (power-gate, reset, control link). |
 | [`aen-cc3501e-companion-tour`](aen-cc3501e-companion-tour/) | **capstone** -- full-surface tour of the CC3501E companion API: init -> ping -> diag -> Wi-Fi scan/connect/IP -> TCP socket -> BLE enable/scan -> proxied-GPIO read. |
 | [`aen-cc3501e-ble-gatt`](aen-cc3501e-ble-gatt/)    | **bench** -- CC3501E BLE GATT-SERVER path (#480) through the portable `<alp/ble.h>` surface: register/advertise/gatt read-write-notify, server-only, no live central peer. |
+| [`aen-cc3501e-gatt-register`](aen-cc3501e-gatt-register/) | **bench** -- PASS/FAIL gate for `alp_ble_gatt_register_service()` (#480/#892) over the inter-chip bridge; peer-free. |
+| [`aen-cc3501e-gpio`](aen-cc3501e-gpio/) | CC3501E GPIO proxy + camera-enable demo over the inter-chip SPI bridge (M55-HE host side). |
+| [`aen-cc3501e-command-sweep`](aen-cc3501e-command-sweep/) | **bench** -- exercises every opcode of the CC3501E wire protocol and measures inter-chip link throughput. |
+| [`aen-cc3501e-handshake-probe`](aen-cc3501e-handshake-probe/) | **bench** -- diagnostic that discriminates competing explanations for a CC3501E link failure seen after a wire-protocol-4.0 reflash. |
+| [`aen-cc3501e-silent-scan-probe`](aen-cc3501e-silent-scan-probe/) | **bench** -- tests whether one `WIFI_SCAN_START` submit survives 25 seconds of a completely silent host bus. |
+| [`aen-cc3501e-connect-twice-probe`](aen-cc3501e-connect-twice-probe/) | **bench** -- tests whether a `WIFI_DISCONNECT` against a never-associated station clears the vendor SDK's `WLAN_IF_DISCONNECT_IN_PROGRESS` bit. |
+| [`aen-cc3501e-socket-throughput`](aen-cc3501e-socket-throughput/) | **bench** -- end-to-end TCP socket throughput of the CC3501E, Wi-Fi association through `cc3501e_sock_recv()`. |
+| [`aen-cc3501e-wedge-postmortem`](aen-cc3501e-wedge-postmortem/) | **bench** -- reproduces the CC3501E `WIFI_CONNECT_STA` wedge and captures forensic evidence while the link is still down. |
 | [`aen-can-regcheck`](aen-can-regcheck/)            | **staging** -- Alif CAN-FD controller bind-only staging check (bus wiring HW-blocked). |
 | [`aen-sdhc-probe`](aen-sdhc-probe/)        | Register-level bring-up probes for the E8 SD Host Controller (`snps,dwc-sdhc`) -- **on the E1M-EVK 2626-R2, `sdhc0` stays disabled; the card-path probes compile out to a pad-free clock-gate proof instead** (#2051, SD mux hardware defect); see the example's own README. Renamed from `aen-sdcard-readout` (#2051). |
 | [`aen-spi-regcheck`](aen-spi-regcheck/)            | **bench** -- Alif DWC_ssi SPI driver (`alif,dwc-ssi-spi`, spi0 @ 0x48103000) register validation. |
@@ -89,6 +102,8 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`aen-eeprom-manifest`](aen-eeprom-manifest/)      | Read + decode the on-module 24C128 Alp hardware-info manifest over SoC I2C2 (upstream `i2c_dw`) via `<alp/*>`. |
+| [`aen-eeprom-provision`](aen-eeprom-provision/) | Write (and verify) the 128-byte Alp hardware-info manifest into the on-module 24C128 EEPROM -- the write sibling of `aen-eeprom-manifest`. |
+| [`aen-bmi323-regcheck`](aen-bmi323-regcheck/) | **bench** -- diagnostic instrument for the on-module BMI323 IMU (E1M-AEN801/AEN803, M55-HE); `chips/bmi323/bmi323.c` is untouched by it. |
 | [`aen-i2c2-eeprom-regcheck`](aen-i2c2-eeprom-regcheck/) | **regcheck** -- I2C2 + EEPROM over the upstream DesignWare `i2c_dw` driver (Tier-1, `snps,designware-i2c`). |
 | [`aen-temp-sensor`](aen-temp-sensor/)              | Read the on-module TMP112 through the upstream Zephyr sensor API (`CONFIG_SENSOR` + `CONFIG_TMP112`, `SENSOR_CHAN_AMBIENT_TEMP`), in integer milli-degrees C. |
 | [`aen-gpio-bench`](aen-gpio-bench/)                | **bench** -- GPIO over the upstream DesignWare `gpio_dw` driver (Tier-1, `snps,designware-gpio`). |
@@ -121,6 +136,8 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`aen-rtc-regcheck`](aen-rtc-regcheck/)            | **regcheck** -- always-on LPRTC (`snps,dw-apb-rtc`, lprtc @ 0x42000000) counter readout via the `counter_*` API. |
 | [`aen-rtc-calendar`](aen-rtc-calendar/)            | **bench** -- the portable `alp_rtc_set_time()` / `alp_rtc_get_time()` calendar surface over the LPRTC counter (shim). |
+| [`aen-rtc-alarm`](aen-rtc-alarm/) | On-module RV-3028-C7 time + alarm interrupt over upstream Zephyr's `rtc_*` API (`CONFIG_RTC_RV3028`, ADR 0017 Tier-1). |
+| [`aen-rtc-tick-probe`](aen-rtc-tick-probe/) | **bench** -- diagnostic settling whether an intermittent RV-3028-C7 seconds-field stall (#2037) is the RTC, the I2C read, or the host timebase. |
 
 ## Why a separate index here
 

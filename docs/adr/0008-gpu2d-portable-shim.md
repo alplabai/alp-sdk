@@ -3,6 +3,10 @@
 Status: Accepted
 Date: 2026-05-14
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The i.MX 93 mentions below, including the "i.MX 93 has no Vivante GPU" finding, are history; with no NXP target there is no NXP GPU2D question left to answer. The D/AVE 2D-only conclusion is unchanged.
+
 ## Context
 
 The Alif Ensemble (AEN family) carries a TES **D/AVE 2D** GPU2D
