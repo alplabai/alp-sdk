@@ -44,9 +44,9 @@
  * }
  * @endcode
  *
- * The `ALP_HW_BUILD_*` constants come from `"alp_hw_info_build.h"` (generated under build/generated/),
- * which `scripts/alp_project.py` emits from `board.yaml` at
- * configure time.  Apps pass NULL for a given field to skip
+ * The `ALP_HW_BUILD_*` constants come from `"alp_hw_info_build.h"` (generated
+ * under build/generated/), which `scripts/alp_project.py` emits from
+ * `board.yaml` at configure time.  Apps pass NULL for a given field to skip
  * matching it.
  *
  * The app-level assert above is opt-in and SKU-aware; separately, when
