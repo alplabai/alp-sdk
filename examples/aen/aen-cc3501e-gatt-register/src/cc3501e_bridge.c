@@ -17,6 +17,8 @@
 
 #include "cc3501e_bridge.h"
 
+#include <stdio.h>
+
 #if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE) || defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 #include <zephyr/arch/cpu.h>
 #include <zephyr/device.h>
@@ -166,12 +168,15 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 #ifdef CONFIG_ALP_SDK_BLE_CC3501E
 	(void)alp_ble_cc3501e_attach(fw);
 #endif
+	/* One line naming the path taken, so a log shows whether the supply was cycled. */
 	if (!wifi_was_high) {
+		printf("[cc3501e_bridge] WIFI_EN low: cold power-up (cc3501e_reset)\n");
 		return cc3501e_reset(fw); /* supply low: the full cold-boot sequence */
 	}
 	/* WIFI_EN reads high.  Warm = the chip ANSWERS a PING; a pull-up alone proves
 	 * nothing.  Warm: nRESET only, never a WIFI_EN toggle. */
 	if (cc3501e_ping(fw) == ALP_OK) {
+		printf("[cc3501e_bridge] WIFI_EN high, PING ok: warm, nRESET only\n");
 		return cc3501e_hard_reset(fw);
 	}
 	/* High but silent: powered-and-hung, or unpowered behind a pull-up.  Try the
@@ -179,7 +184,9 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	 * not answer is the supply cycled -- the last resort, taken from a chip that is
 	 * already unresponsive. */
 	if (cc3501e_hard_reset(fw) == ALP_OK && cc3501e_ping(fw) == ALP_OK) {
+		printf("[cc3501e_bridge] WIFI_EN high, silent: recovered by nRESET only\n");
 		return ALP_OK;
 	}
+	printf("[cc3501e_bridge] WIFI_EN high, silent after nRESET: supply cycle (cc3501e_reset)\n");
 	return cc3501e_reset(fw);
 }
