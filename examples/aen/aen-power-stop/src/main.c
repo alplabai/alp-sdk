@@ -793,6 +793,20 @@ int main(void)
 	unsigned done = cycle_get();
 
 	printk("POWER_STOP: boot valid=%d counter=%u\n", (int)bi.valid, done);
+	if (done == 0u) {
+		/* A fresh run owns no alarm yet.  The RV-3028 is backup-powered, so an alarm this
+		 * app armed in a run that lost power mid-sleep keeps AIE and AF set across every
+		 * power cycle, and the backend then refuses each later RTC sleep at step 7
+		 * (rtc_wake_already_latched: it keeps a caller's alarm for WAKE_RTC sleeps).
+		 * Disarm and clear it here, before the first cycle. */
+		bool fired = false;
+
+		(void)rv3028c7_alarm_int_enable(&g_rtc, false);
+		(void)rv3028c7_alarm_check_and_clear(&g_rtc, &fired);
+		if (fired) {
+			printk("POWER_STOP: stale RV-3028 alarm from an earlier run cleared\n");
+		}
+	}
 	print_ses_version();
 	print_regs();
 	/* BKRAM after the boot-time clock restore: served from the RAM shadow (live=0) means the
