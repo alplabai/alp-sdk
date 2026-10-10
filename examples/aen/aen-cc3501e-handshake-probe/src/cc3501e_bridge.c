@@ -100,7 +100,10 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	 * power-on read high (whether the module has one is an OPEN QUESTION; the
 	 * netlist has not been checked), so the decision below also needs a PING. */
 	bool wifi_was_high = false;
-	(void)alp_gpio_read(wifi_en, &wifi_was_high);
+	/* A failed read leaves the level unknown: never take the supply-cycling cold path
+	 * on that alone -- go through the PING path below, which still ends in
+	 * cc3501e_reset() if the chip turns out to be silent. */
+	const bool wifi_unknown = alp_gpio_read(wifi_en, &wifi_was_high) != ALP_OK;
 	if (wifi_was_high) {
 		/* Latch the level in DR first so the direction change cannot glitch it low. */
 		aen_wifi_en_latch_high();
@@ -170,7 +173,7 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	(void)alp_ble_cc3501e_attach(fw);
 #endif
 	/* One line naming the path taken, so a log shows whether the supply was cycled. */
-	if (!wifi_was_high) {
+	if (!wifi_was_high && !wifi_unknown) {
 		printf("[cc3501e_bridge] WIFI_EN low: cold power-up (cc3501e_reset)\n");
 		return cc3501e_reset(fw); /* supply low: the full cold-boot sequence */
 	}
