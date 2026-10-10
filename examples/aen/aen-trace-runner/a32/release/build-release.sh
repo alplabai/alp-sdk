@@ -29,6 +29,9 @@
 #   (panel_hz_check.sh reads it from zephyr/zephyr.dts: the RK055 shield's
 #   stock timing is 40 Hz -- add panel_30hz.overlay; the RVT121 is 30 Hz;
 #   TR_ALLOW_PANEL_HZ_40=ON overrides for a genuine 40 Hz release).
+#   With TR_HP_SOUND (the combined image below) the HE must also be built with
+#   -DTR_HP_SOUND=ON (src/platform/bus2_he.c): without it the HP's sound never
+#   gets the bus. Refused unless zephyr.elf carries tr_bus2_he_frame.
 # MRAM_READBACK (optional): a raw read-back of LIVE MRAM from 0x80000000
 #   (J-Link savebin, >= 0x580000 bytes). With it, flowd/ gets whole 16 KiB
 #   sector blobs whose bytes outside the images come from the read-back
@@ -54,11 +57,20 @@
 #   bytes, exactly TR_MOVENET_MRAM_SIZE> -- hp_vision_check.sh, checked BEFORE
 #   any packaging. The model is NOT part of the ATOC: it is written as its
 #   own Flow D item at TR_MOVENET_MRAM_ADDR (src/vision/movenet_mram.h), read
-#   in place by the NPU (design sec 2 pass B, no SRAM copy). Exclusive with
-#   TR_SND_HP: only one image can be HP_APP. Pair with the HE's own
+#   in place by the NPU (design sec 2 pass B, no SRAM copy). Pair with the HE's own
 #   -DTR_INPUT_NPU=ON build (../CMakeLists.txt) -- an HE built without it
 #   still runs (its own camera/detector, or TR_FALLBACK_MODE), just not
 #   reading the pose this HP image publishes.
+#
+# TR_HP_VISION=ON TR_SND_HP=ON together = the COMBINED mode: ONE HP image with the
+#   camera + NPU AND the game sound (hp_vision built with -DTR_SND_REWORKED_U46=ON
+#   -DTR_HP_SOUND=ON; the HE with -DTR_HP_SOUND=ON). TR_HP_VISION_BUILD is that
+#   image; hp_vision_check.sh (combined) AND snd_hp_check.sh (combined: carrier
+#   serial allowed in sound-carriers.txt, REWORKED_U46=ON, embedded GAME build,
+#   synth linked, sound buffers/heap/stack in the HP DTCM) must pass on it. A
+#   TR_SND_HP_BUILD, if given, must name the same directory: two separate HP
+#   images are refused (only one can be HP_APP). A sound-carrying hp_vision with
+#   TR_HP_VISION=ON alone is refused -- the sound never skips the carrier list.
 #
 # Writes into SETOOLS_COPY/build: AppTocPackage.bin (+ .sign), the package
 # map, flowd/ (+ recipe.txt: address, size, md5 per blob). Writes nothing to
@@ -87,34 +99,51 @@ source "$here/panel_hz_check.sh"
 panel_hz_check "$hed" || exit 3
 
 # 0. The HP interlocks (sound, vision), before anything is built or copied.
-#    Only one of TR_SND_HP / TR_HP_VISION may be ON: both want HP_APP.
-if [ "${TR_SND_HP:-OFF}" = ON ] && [ "${TR_HP_VISION:-OFF}" = ON ]; then
-	die "TR_SND_HP=ON and TR_HP_VISION=ON together -- only one image can be HP_APP"
-fi
-sd=""
-if [ "${TR_SND_HP:-OFF}" = ON ]; then
-	# shellcheck source=a32/release/snd_hp_check.sh
-	source "$here/snd_hp_check.sh"
-	sd=$(realpath -m "${TR_SND_HP_BUILD:-/nonexistent-TR_SND_HP_BUILD-unset}")
-	snd_hp_check "$sd" "${TR_SND_CARRIER_SERIAL:-}" "$here/sound-carriers.txt" "$NM" || exit 3
-elif [ -n "${TR_SND_HP:-}" ] && [ "$TR_SND_HP" != OFF ]; then
-	die "TR_SND_HP must be ON or OFF, got '$TR_SND_HP'"
-fi
-hv="" hv_model=""
-if [ "${TR_HP_VISION:-OFF}" = ON ]; then
-	# shellcheck source=a32/release/hp_vision_check.sh
-	source "$here/hp_vision_check.sh"
+#    One HP_APP: the standalone sound image, the vision image, or the combined vision +
+#    sound image (TR_HP_VISION=ON TR_SND_HP=ON, ONE build). Two separate images are refused.
+for v in TR_SND_HP TR_HP_VISION; do
+	case "${!v:-OFF}" in
+	ON | OFF) ;;
+	*) die "$v must be ON or OFF, got '${!v}'" ;;
+	esac
+done
+snd=${TR_SND_HP:-OFF} vis=${TR_HP_VISION:-OFF}
+# shellcheck source=a32/release/snd_hp_check.sh
+source "$here/snd_hp_check.sh"
+# shellcheck source=a32/release/hp_vision_check.sh
+source "$here/hp_vision_check.sh"
+sd="" hv="" hv_model="" combined=0
+if [ "$vis" = ON ]; then
 	hv=$(realpath -m "${TR_HP_VISION_BUILD:-/nonexistent-TR_HP_VISION_BUILD-unset}")
 	hv_model=$(realpath -m "${TR_HP_VISION_MODEL:-/nonexistent-TR_HP_VISION_MODEL-unset}")
-	hp_vision_check "$hv" "$hv_model" "$NM" || exit 3
-elif [ -n "${TR_HP_VISION:-}" ] && [ "$TR_HP_VISION" != OFF ]; then
-	die "TR_HP_VISION must be ON or OFF, got '$TR_HP_VISION'"
+	if [ "$snd" = ON ]; then
+		if [ -n "${TR_SND_HP_BUILD:-}" ] && [ "$(realpath -m "$TR_SND_HP_BUILD")" != "$hv" ]; then
+			snd_hp_refuse "two separate HP images (TR_SND_HP_BUILD=$TR_SND_HP_BUILD, TR_HP_VISION_BUILD=$hv): only one can be HP_APP -- build hp_vision with -DTR_SND_REWORKED_U46=ON -DTR_HP_SOUND=ON and leave TR_SND_HP_BUILD unset"
+			exit 3
+		fi
+		hp_vision_check "$hv" "$hv_model" "$NM" "$hed" combined || exit 3
+		snd_hp_check "$hv" "${TR_SND_CARRIER_SERIAL:-}" "$here/sound-carriers.txt" "$NM" combined || exit 3
+		combined=1
+		# The HE must run its side of the I2C2 + GPIO5 lease, or the HP's amp bring-up waits for ever.
+		if ! grep -q ' tr_bus2_he_frame$' <<<"$("$NM" "$elf" 2>/dev/null)"; then
+			snd_hp_refuse "$hed's zephyr.elf lacks tr_bus2_he_frame: build the HE with -DTR_HP_SOUND=ON (the HP's amp bring-up needs the HE to lease it I2C2 + GPIO5)"
+			exit 3
+		fi
+	else
+		hp_vision_check "$hv" "$hv_model" "$NM" "$hed" || exit 3
+	fi
+elif [ "$snd" = ON ]; then
+	sd=$(realpath -m "${TR_SND_HP_BUILD:-/nonexistent-TR_SND_HP_BUILD-unset}")
+	snd_hp_check "$sd" "${TR_SND_CARRIER_SERIAL:-}" "$here/sound-carriers.txt" "$NM" || exit 3
 fi
 
 # 1. stub + renderer (scene build) -> one A32_APP image, stub release mode:
 #    the stub copies the payload MRAM -> 0x02500000 and self-LAUNCHes.
 make -s -C "$repo/a32/stub" >/dev/null
-make -s -C "$repo/a32/renderer" >/dev/null
+# The renderer's boot layout follows the HE's camera rotation (same as the HP's, hp_vision_check.sh).
+hrot=$(sed -n 's/^TR_CAM_ROTATE:[A-Z]*=//p' "$hed/CMakeCache.txt" 2>/dev/null | tr -d '\r')
+case "${hrot:-90}" in 0 | 90 | 270) ;; *) die "HE TR_CAM_ROTATE='$hrot' must be 0, 90 or 270" ;; esac
+make -s -C "$repo/a32/renderer" TR_CAM_ROTATE="${hrot:-90}" >/dev/null
 rend="$repo/a32/renderer/renderer.bin"
 python3 "$repo/a32/stub/mkpayload.py" release "$repo/a32/stub/a32_stub.bin" "$rend" \
 	-o "$st/build/images/trace_runner_a32.bin"
@@ -166,7 +195,11 @@ if [ -n "$hv" ]; then # passed hp_vision_check above
 	sz=$(stat -c %s "$st/build/images/trace_runner_hp_vision.bin")
 	truncate -s $(( (sz + 15) / 16 * 16 )) "$st/build/images/trace_runner_hp_vision.bin"
 	sed -i 's/"m55_stub_hp.bin"/"trace_runner_hp_vision.bin"/' "$st/build/config/e1m-aen-evk-trace-runner.json"
-	echo "build-release: TR_HP_VISION=ON -- HP_APP = camera+NPU vision firmware ($hv)" >&2
+	if [ "$combined" = 1 ]; then
+		echo "build-release: TR_HP_VISION=ON TR_SND_HP=ON -- HP_APP = camera+NPU vision AND game sound in ONE image ($hv); REWORKED-U46 CARRIERS ONLY" >&2
+	else
+		echo "build-release: TR_HP_VISION=ON -- HP_APP = camera+NPU vision firmware ($hv)" >&2
+	fi
 fi
 
 # 3. ATOC package, in the private copy.

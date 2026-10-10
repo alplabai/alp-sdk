@@ -402,6 +402,11 @@ class BoardProject:
     # validated against, instead of quietly falling back to the SDK's own
     # in-tree metadata (#1485).
     metadata_root: Optional[Path] = None
+    # Directory of the board.yaml this project was loaded from; anchors a
+    # slice's relative `app:` so the emitters can read the app's own
+    # `prj.conf` (e.g. to avoid shrinking an app-set RAM console size,
+    # tan-cli#1401).  `None` for a project built without a file.
+    source_dir: Optional[Path] = None
 
     def effective_metadata_root(self) -> Path:
         """The metadata root every resolver must use for this project --

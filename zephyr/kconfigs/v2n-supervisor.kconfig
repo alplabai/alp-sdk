@@ -31,7 +31,7 @@ config ALP_SDK_V2N_SUPERVISOR
 	  the GD32 over SPI only (RIIC8/BRD_I2C is Cortex-A55/Linux-
 	  exclusive; see the file header above).
 
-	  Off-V2N builds (native_sim, AEN, i.MX 93) leave this off and
+	  Off-V2N builds (native_sim, AEN) leave this off and
 	  the backends route through the per-class DT aliases as usual.
 
 if ALP_SDK_V2N_SUPERVISOR

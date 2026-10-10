@@ -449,7 +449,6 @@ _SHIPPED_BOARDS = (
     "aen701-evk", "aen801-evk",
     "v2n101-x-evk", "v2n102-x-evk", "v2n103-x-evk",
     "v2m101-x-evk", "v2m102-x-evk", "v2m103-x-evk",
-    "nx9101-evk",
 )
 
 
@@ -514,7 +513,7 @@ def test_v2n101_board_carries_v2n_specific_specs() -> None:
     """The V2N101 board dir adds GD32-bridge + temp-sensor specs on
     top of _common/.  Catches a regression where the per-board
     extensions get accidentally moved into _common/ (where they'd
-    fail on AEN / NX9 silicon)."""
+    fail on AEN silicon)."""
     pairs = run_smoke.discover_specs_for_board(
         _SHIPPED_HIL_DIR / "v2n101-x-evk",
     )

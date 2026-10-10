@@ -122,7 +122,6 @@ or by editing the dir's `_runner.yaml` once a target exists.
 | `v2m101-x-evk/`        | E1M-V2M101   | E1M-X-EVK     | yes     | `alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33`          |
 | `v2m102-x-evk/`        | E1M-V2M102   | E1M-X-EVK     | pending | `alp_e1m_v2m102_m33_sm` (unqualified placeholder)     |
 | `v2m103-x-evk/`        | E1M-V2M103   | E1M-X-EVK     | pending | `alp_e1m_v2m103_m33_sm` (unqualified placeholder)     |
-| `nx9101-evk/`          | E1M-NX9101   | E1M-EVK       | pending | `alp_e1m_nx9101_m33` (unqualified placeholder)        |
 
 ---
 

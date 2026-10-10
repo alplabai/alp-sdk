@@ -45,7 +45,7 @@ the old plan to this one:
 | v0.14.0 | **released 2026-07-29** | Portable `<alp/i3c.h>` MIPI I3C Basic controller surface (`[ABI-EXPERIMENTAL]`, `alp_i3c_open/write/read/write_read/close/capabilities`) — Zephyr backend over upstream `i3c_dw.c` on the Alif Ensemble E8 (lpi3c0); controller init **bench-proven** on E1M-AEN801 (Flow C RAM-run, 2026-07-25), live transfer still unproven.  `metadata/bootstrap.json` + `metadata/toolchains.json` single-source the cross-platform bootstrap facts + Zephyr-SDK toolchain pin as data (#949); the `hw_rev`/SDK-version compatibility gate reinstated (#1019).  Zephyr v4.4.0 → v4.4.1 patch bump; Alif E8 SoC peripheral coverage extended (I3C, OSPI/HexSPI, managed-MDIO, build-only); a clean refusal when a GD32 bridge image is absent, and provenance recorded for unverified peripheral counts.  See CHANGELOG [v0.14.0]. |
 | v0.15.0 | **released 2026-08-07** | `alp_mproc_boot_core()`'s image-residency precondition + a direction-specific M55-HP TCM-invalidation erratum documented from E8 bench evidence (#1070); `CONFIG_DCACHE=n` fixed across eight AEN dual-core / SRAM0-beacon examples that were silently exposed to cross-core cache incoherence; five AEN examples stopped mis-reporting `ALP_ERR_NOSUPPORT` as an unreachable-in-practice SKIP (#1071).  The `hw_rev`-exists-but-not-buildable status gate (#1025, the status half) IS in this release: it landed on `dev` as `1a91a232` on 2026-08-02, after the 2026-08-01 `v0.15.0-rc1` tag (`git merge-base --is-ancestor 1a91a232 v0.15.0-rc1` exits non-zero) but before the final `v0.15.0` tag (`git merge-base --is-ancestor 1a91a232 v0.15.0` exits zero), so it missed the rc but shipped in the GA.  See CHANGELOG [v0.15.0]. |
 | v0.16.0 | **released 2026-08-23** | Ongoing dev-review hardening sweep: five memory-safety defects fixed across the AEN Zephyr drivers (#1119-#1124); a release-blocker where E1M-AEN801 M55-HP and M55-HE both linked to slot0 `0x80010000`, so flashing both cores silently overwrote one image (#1069); two path-traversal bugs in `tan model build` + untrusted template catalogs (#1125/#1126); per-instance RZ/V2N peripheral register data (#1154); several V2N/V2M metadata-declaration and build/boot fixes (#1155, #1158, #1161, #1166-#1170, #1175, #1176); the AEN E8 SW-DP IDR published so a host writer can refuse an unidentified board before it writes MRAM, emitted paired with the live-core attach profile (#1355).  Also a real ONNX Runtime CPU inference backend for the Cortex-A55/Yocto peer, closing the `ALP_INFERENCE_BACKEND_CPU` stub that had reached a no-op on every A55 SKU since v0.4 — default off, build-verified on `E1M-V2N101`, **not yet run on silicon** (#1255).  See CHANGELOG [v0.16.0]. |
-| v0.17.0 | **release candidate v0.17.0-rc1 (2026-10-08)** | Pre-1.0 minor, public ABI changes (323 symbols added, 53 changed, 27 recorded removals in `docs/abi/removed-symbols.json`; snapshot `docs/abi/v0.17-snapshot.json`).  **GD32 bridge:** wire protocol v0.15 host side (negotiation, `BATCH`, `STREAM2`, `ATTN`, connect-under-reset, #2692) and v0.17 host mirrors (I2C3 master proxy opcodes, `CAM_EN_LDO` bits, #2748), `gd32g553_set_power_mode` low-power modes, persistent `BOOT_CONFIG` (#2697).  **V2N/V2M:** Linux remoteproc attaches to the TF-A-started CM33 (opt-in, #2671), portable `<alp/gpu2d.h>` on the Mali-G31 via the vendor EGL/GLES stack with CPU fallback (#2678), ROS 2 Humble as an opt-in layer-gated feature (#2672), a persistent allowlisted U-Boot environment on eMMC boot partition 2 (#2675), Linux GD32 bridge v0.17 (#2750).  **Display:** Riverdi RVT121 LVDS panel (SN65DSI83) and a display-agnostic SDK layer (backlight, mount rotation; `alp_display_caps_t.rotation` is `[ABI-EXPERIMENTAL]`) with the `aen-trace-runner` exhibition game on it (#2254, #2257).  **AEN:** documented recovery of an Alif E8 whose Secure Enclave is stuck in Recovery (`debugging-aen.md` §7.4, ROM → MRAM Recovery over SEUART, `0x4C013477` SW-DP ID check, #1699), D/AVE 2D `<alp/gpu2d.h>` backend on silicon (#2515).  **Tooling:** per-PR `tan` build gate for AEN + V2N, pinned tan v0.6.0 (#2751); the bridge firmwares live in their own repos.  **HELD:** CC3501E wire protocol 7 to 8 (request identity for every worker-routed opcode) needs `cc3501e-bridge-firmware` v0.6.0, which is not yet published; for the rc, build it from source -- publishing waits for the final v0.17.0.  Known issue: in 1 of 3 cold boots on the bench the trace-runner A32 renderer faulted once and the HE watchdog relaunched it (cause not captured); body-control is not yet bench-tested on the Riverdi build.  See CHANGELOG [v0.17.0]. |
+| v0.17.0 | **release candidate v0.17.0-rc2 (2026-10-10)** | Pre-1.0 minor, public ABI changes (323 symbols added, 53 changed, 27 recorded removals in `docs/abi/removed-symbols.json`; snapshot `docs/abi/v0.17-snapshot.json`).  **GD32 bridge:** wire protocol v0.15 host side (negotiation, `BATCH`, `STREAM2`, `ATTN`, connect-under-reset, #2692) and v0.17 host mirrors (I2C3 master proxy opcodes, `CAM_EN_LDO` bits, #2748), `gd32g553_set_power_mode` low-power modes, persistent `BOOT_CONFIG` (#2697).  **V2N/V2M:** Linux remoteproc attaches to the TF-A-started CM33 (opt-in, #2671), portable `<alp/gpu2d.h>` on the Mali-G31 via the vendor EGL/GLES stack with CPU fallback (#2678), ROS 2 Humble as an opt-in layer-gated feature (#2672), a persistent allowlisted U-Boot environment on eMMC boot partition 2 (#2675), Linux GD32 bridge v0.17 (#2750).  **Display:** Riverdi RVT121 LVDS panel (SN65DSI83) and a display-agnostic SDK layer (backlight, mount rotation; `alp_display_caps_t.rotation` is `[ABI-EXPERIMENTAL]`) with the `aen-trace-runner` exhibition game on it (#2254, #2257).  **AEN:** documented recovery of an Alif E8 whose Secure Enclave is stuck in Recovery (`debugging-aen.md` §7.4, ROM → MRAM Recovery over SEUART, `0x4C013477` SW-DP ID check, #1699), D/AVE 2D `<alp/gpu2d.h>` backend on silicon (#2515).  **Tooling:** per-PR `tan` build gate for AEN + V2N, pinned tan v0.6.0 (#2751); the bridge firmwares live in their own repos.  **HELD:** CC3501E wire protocol 7 to 8 (request identity for every worker-routed opcode) needs `cc3501e-bridge-firmware` v0.6.0, which is not yet published; for the rc, build it from source -- publishing waits for the final v0.17.0.  **rc2 adds** (public ABI unchanged from rc1): the Alif SE STOP/STANDBY power backend for the E8 M55-HE with the SoM power-domain runtime, `rv3028c7` wake service and gen2 aiPM masks (#2784); a Linux V4L2 camera backend with metadata-generated V2N/V2M camera DT and board.yaml `cameras:` selection (#2616, #2633); MIPI CSI-2 camera on the M55-HP core and E1M-AEN401 (#2803); trace-runner arm-controlled play, sound and performance pass; build-plan-v1 carries the rendered `alp.overlay`, `cmake-args.txt`, `storage_mount_table.c`, `alp_hw_info_build.h` and `alp-west-libs.yml` (tan-cli#1216); the trace-runner A32 cold-mailbox renderer fault is fixed (#2257); E1M-NX9101 / i.MX 93 support removed (#2781).  Known issue: body-control is not yet bench-tested on the Riverdi build.  See CHANGELOG [v0.17.0]. |
 | **Backlog** | (cherry-pick into future tags) | See "Backlog -- cherry-pick into future tags" section below.  No per-version commitments for future items; releases tag whatever's ready at the time. |
 
 > **Note on v0.1.0-v0.5.0's status cells.**  `git tag --list` carries
@@ -85,7 +85,7 @@ versions cleanly.
 | Peripherals | full      | `alp_i2c_*`, `alp_spi_*`, `alp_gpio_*`, `alp_uart_*` (Zephyr backend, AEN) |
 | Chips       | full      | `lsm6dso_*`, `ssd1306_*`, `button_led_*` (no `alp_` prefix on chip drivers) |
 | Display     | minimal   | `alp_display_init/clear/print` routes through Zephyr `display_*`         |
-| Math / DSP  | purpose-built | ALP does not provide a general `arm_math.h` re-export; for ad-hoc math app code uses CMSIS-DSP directly. But ALP DOES ship purpose-built *portable* DSP surfaces that wrap it where cross-silicon portability (Alif M55 / Renesas A55+DRP-AI / NXP) matters: the `<alp/dsp.h>` chain (FIR/IIR/WINDOW/FFT, float or int16 I/O, one-sided or two-sided FFT), `alp_dsp_stats_f32` (mean/RMS/variance/min/max/abs-peak), and `alp_dsp_biquad_design` (RBJ cookbook LP/HP/BP/notch). All select CMSIS-DSP (`ALP_HAS_CMSIS_DSP`) on Cortex-M and a portable-C fallback elsewhere. |
+| Math / DSP  | purpose-built | ALP does not provide a general `arm_math.h` re-export; for ad-hoc math app code uses CMSIS-DSP directly. But ALP DOES ship purpose-built *portable* DSP surfaces that wrap it where cross-silicon portability (Alif M55 / Renesas A55+DRP-AI) matters: the `<alp/dsp.h>` chain (FIR/IIR/WINDOW/FFT, float or int16 I/O, one-sided or two-sided FFT), `alp_dsp_stats_f32` (mean/RMS/variance/min/max/abs-peak), and `alp_dsp_biquad_design` (RBJ cookbook LP/HP/BP/notch). All select CMSIS-DSP (`ALP_HAS_CMSIS_DSP`) on Cortex-M and a portable-C fallback elsewhere. |
 | Control     | portable  | `<alp/pid.h>` caller-owned PID (`alp_pid_init`/`alp_pid_step`/`alp_pid_reset`) with output clamp + anti-windup + derivative-on-measurement; pure C on all OS targets, opt-in via `libraries: [pid]`. |
 | Sensor fusion | portable | `<alp/ahrs.h>` caller-owned Madgwick IMU filter (`alp_ahrs_init`/`alp_ahrs_update_imu`/`alp_ahrs_euler`/`alp_ahrs_reset`) fusing gyro+accel into a drift-corrected quaternion; pure C on all OS targets, opt-in via `libraries: [madgwick_ahrs]`. |
 | Camera      | header    | `<alp/camera.h>` API frozen; impl returns `ALP_ERR_NOSUPPORT`            |
@@ -256,11 +256,6 @@ more sensors) and add a second SoM family.
   25 TOPS @ 1.0 GHz, FC-BGA 625-ball.
 - `alif:ensemble:e4/e5/e6` upgraded from preliminary to released
   (if Alif publishes datasheets in time).
-- `nxp:imx9:imx93` (`metadata/socs/nxp/imx9/imx93.json`) — first
-  v0.1 stub shipped early; per-variant peripheral counts and the
-  orderable SKU list fill in for v0.4 (Yocto first-class)
-  alongside the i.MX 93 BSP work.  Vendor wrapper directory
-  scaffolded at `vendors/nxp-imx93/`.
 
 ### Build matrix
 
@@ -345,7 +340,7 @@ roadmap's "IoT Application Example" deliverable.
 
 ## v0.4.0 — "Yocto first-class" (~6 weeks after v0.3)
 
-**Goal:** Linux variants (V2N family + i.MX 93 family) become
+**Goal:** Linux variants (V2N family) become
 first-class with full Yocto support and Linux-native versions of
 every library.
 
@@ -438,7 +433,7 @@ target verification still gated on an explicit Yocto bench run
 - **Mender OTA opt-in on meta-alp.**
   `meta-alp-sdk/conf/distro/include/mender.inc` configures
   Mender's `mender-full` class with A/B rootfs + storage layout +
-  server/tenant placeholders.  V2N / V2N-M1 / i.MX 93 machine
+  server/tenant placeholders.  V2N / V2N-M1 machine
   configs gain `require` opt-in hook blocks.  Mender server
   ownership: see project memory + `docs/ota.md` -- the server
   itself is a separate-repo product owned outside alp-sdk.
@@ -450,7 +445,7 @@ target verification still gated on an explicit Yocto bench run
 
 - **Yocto:** `meta-alp` recipes actually building (currently
   parse-clean shells); image templates for vision/audio/IoT
-  product classes; full V2N / V2N-M1 / i.MX 93 BSP fleshout.
+  product classes; full V2N / V2N-M1 BSP fleshout.
 - **IoT:** Wi-Fi station on Yocto (NetworkManager / wpa_supplicant
   glue); HTTP/HTTPS client; time-series buffering helpers.
 - **Camera:** `alp_camera_v4l2` wrapper, GStreamer pipeline helpers.
@@ -474,7 +469,6 @@ target verification still gated on an explicit Yocto bench run
   body is now real (`dxrt::InferenceEngine`, replacing the earlier
   `dxnn_*` plan); the remaining work is the cross-link against `dx_rt`
   on the RZ/V Yocto sysroot + an on-silicon run on the DX-M1 PCIe card.
-- **Ethos-U65 real attach on i.MX 93:** Vela toolchain integration.
 
 See [`docs/secure-boot.md`](docs/secure-boot.md) and
 [`docs/ota.md`](docs/ota.md) for the full secure boot / OTA
@@ -559,7 +553,7 @@ cut criteria:
 Cherry-picked into v1.x point releases as items land.  Grouped by what
 they unlock; items are sized roughly small (≤2 engineer-weeks) /
 medium (2-8 weeks) / large (8+ weeks).  Sizing assumes one SoM
-target — porting across all four SoMs is additive.
+target — porting across all three SoM families is additive.
 
 **Connectivity & protocols** (boosts IoT + industrial verticals):
 
@@ -751,7 +745,6 @@ target — porting across all four SoMs is additive.
 (No version commitment — revisit when customer pull + ecosystem state make it worthwhile.)
 
 - Ubuntu backend (`cores.<id>.os: ubuntu`) — non-trivial lift (RZ/V2N mainline-kernel coverage is the long pole, plus apt packaging + image flow + per-distro PPA infra).
-- NXP NX9101 silicon enablement — pairs naturally with Ubuntu if/when both pick up (i.MX 93 has the better Ubuntu mainline-kernel story).
 - FreeRTOS / Azure RTOS / NuttX backends — H2-2026 has zero OS expansion; later cycles only if customer asks.
 - Apple HomeKit Accessory Protocol (HAP) — Matter supersedes for most consumer use cases; deferred unless a customer specifically asks.
 - Zigbee 3.0 stack — Matter/Thread coverage probably enough; revisit if industrial customer asks.

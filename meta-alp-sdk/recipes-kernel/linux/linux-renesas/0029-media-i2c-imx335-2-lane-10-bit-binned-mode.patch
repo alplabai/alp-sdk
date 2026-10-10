@@ -1,0 +1,664 @@
+From 82ab28e84a4de238b04fab20ef7e46c98fa9a68c Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Fri, 2 Oct 2026 05:42:52 +0000
+Subject: [PATCH 2/3] media: i2c: imx335: add 2-lane support and a 10-bit
+ binned mode
+
+The 6.1 driver only accepts four CSI-2 data lanes and one mode,
+2592x1940 SRGGB12_1X12. The InnoMaker IMX335 module routes two lanes.
+
+Read the lane count (2 or 4) from the endpoint data-lanes and program
+LANEMODE accordingly, as mainline does. Move the 24 MHz
+INCK PLL registers into the 1188 Mbps/lane MIPI data rate table, also
+writing SYSMODE and the MIPI output timing block (0x3a18-0x3a28), which
+the 6.1 driver left at their reset values.
+
+Add a second mode, 1296x972 SRGGB10_1X10 (2x2 binned), and select the
+12/10-bit AD, MIPI data width and ADBIT1 registers per mode. The mode
+register lists also restore the registers the other mode changes, so
+switching modes on a running device is safe. The binned list uses
+HNUM 0x0a08 and Y_OUT_SIZE 0x03cc: the sensor otherwise transmits
+1308x984 into a 1296x972 buffer.
+
+Derive V4L2_CID_PIXEL_RATE from link frequency, lane count and bits per
+pixel instead of the fixed 396 MHz. The RZ/G2L CSI-2 receiver sets its
+D-PHY rate from pixel rate * bpp / lanes, so 2 lanes at 10 bit must
+report 237.6 MHz to land on 1188 Mbps/lane. The link frequency stays
+594 MHz for both lane counts.
+
+Hide modes that do not fit the link at the connected lane count: 2592x1940
+12-bit needs 13.1 us per line on 2 lanes against the 7.41 us line period
+at the default HMAX, so with 2 lanes enum_mbus_code, enum_frame_size and
+set_fmt only offer the binned mode, which is also the default. The binned
+hblank is 464 so its line time stays 7.41 us at the 237.6 MHz pixel rate.
+
+Reject set_fmt on a streaming sensor and size the exposure range per
+mode (shutter minimum is 17 lines when binned).
+
+Upstream-Status: Pending [2-lane/10-bit exists upstream with a different
+register split; this is a 6.1 backport for the Renesas BSP]
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ drivers/media/i2c/imx335.c | 420 ++++++++++++++++++++++++++++++++-----
+ 1 file changed, 363 insertions(+), 57 deletions(-)
+
+diff --git a/drivers/media/i2c/imx335.c b/drivers/media/i2c/imx335.c
+index d8f47cf335d1..15deaf088260 100644
+--- a/drivers/media/i2c/imx335.c
++++ b/drivers/media/i2c/imx335.c
+@@ -31,7 +31,6 @@
+ /* Exposure control */
+ #define IMX335_REG_SHUTTER	0x3058
+ #define IMX335_EXPOSURE_MIN	1
+-#define IMX335_EXPOSURE_OFFSET	9
+ #define IMX335_EXPOSURE_STEP	1
+ #define IMX335_EXPOSURE_DEFAULT	0x0648
+ 
+@@ -50,7 +49,11 @@
+ 
+ /* CSI2 HW configuration */
+ #define IMX335_LINK_FREQ	594000000
+-#define IMX335_NUM_DATA_LANES	4
++
++/* Data lane count selection */
++#define IMX335_REG_LANEMODE	0x3a01
++#define IMX335_2LANE		1
++#define IMX335_4LANE		3
+ 
+ #define IMX335_REG_MIN		0x00
+ #define IMX335_REG_MAX		0xfffff
+@@ -90,7 +93,9 @@ static const char * const imx335_supply_name[] = {
+  * @vblank: Vertical blanking in lines
+  * @vblank_min: Minimum vertical blanking in lines
+  * @vblank_max: Maximum vertical blanking in lines
+- * @pclk: Sensor pixel clock
++ * @exp_offset: Minimum distance between the shutter and the frame end
++ * @bpp: Bits per pixel on the CSI-2 link
++ * @min_lanes: Fewest CSI-2 data lanes the mode fits on at the default HMAX
+  * @link_freq_idx: Link frequency index
+  * @reg_list: Register list for sensor mode
+  */
+@@ -102,7 +107,9 @@ struct imx335_mode {
+ 	u32 vblank;
+ 	u32 vblank_min;
+ 	u32 vblank_max;
+-	u64 pclk;
++	u32 exp_offset;
++	u32 bpp;
++	u32 min_lanes;
+ 	u32 link_freq_idx;
+ 	struct imx335_reg_list reg_list;
+ };
+@@ -125,6 +132,8 @@ struct imx335_mode {
+  * @again_ctrl: Pointer to analog gain control
+  * @vblank: Vertical blanking in lines
+  * @cur_mode: Pointer to current selected sensor mode
++ * @lane_mode: LANEMODE register value for the connected data lanes
++ * @num_lanes: Number of connected CSI-2 data lanes
+  * @mutex: Mutex for serializing sensor controls
+  * @streaming: Flag indicating streaming state
+  */
+@@ -148,31 +157,18 @@ struct imx335 {
+ 	};
+ 	u32 vblank;
+ 	const struct imx335_mode *cur_mode;
++	u32 lane_mode;
++	u32 num_lanes;
+ 	struct mutex mutex;
+ 	bool streaming;
+ };
+ 
+-static const s64 link_freq[] = {
+-	IMX335_LINK_FREQ,
+-};
+-
+-/* Sensor mode registers */
+-static const struct imx335_reg mode_2592x1940_regs[] = {
++/* Registers shared by all modes */
++static const struct imx335_reg common_regs[] = {
+ 	{0x3000, 0x01},
+ 	{0x3002, 0x00},
+-	{0x300c, 0x3b},
+-	{0x300d, 0x2a},
+-	{0x3018, 0x04},
+ 	{0x302c, 0x3c},
+-	{0x302e, 0x20},
+-	{0x3056, 0x94},
+-	{0x3074, 0xc8},
+-	{0x3076, 0x28},
+ 	{0x304c, 0x00},
+-	{0x314c, 0xc6},
+-	{0x315a, 0x02},
+-	{0x3168, 0xa0},
+-	{0x316a, 0x7e},
+ 	{0x31a1, 0x00},
+ 	{0x3288, 0x21},
+ 	{0x328a, 0x02},
+@@ -244,20 +240,202 @@ static const struct imx335_reg mode_2592x1940_regs[] = {
+ 	{0x3a00, 0x01},
+ };
+ 
++/* 12-bit AD/MIPI output, used by the 2592x1940 mode */
++static const struct imx335_reg raw12_framefmt_regs[] = {
++	{0x3050, 0x01},
++	{0x319d, 0x01},
++	{0x341c, 0x47},
++	{0x341d, 0x00},
++};
++
++/* 10-bit AD/MIPI output, used by the 1296x972 binned mode */
++static const struct imx335_reg raw10_framefmt_regs[] = {
++	{0x3050, 0x00},
++	{0x319d, 0x00},
++	{0x341c, 0xff},
++	{0x341d, 0x01},
++};
++
++/* PLL (24 MHz INCK) and MIPI output timing for the 1188 Mbps/lane data rate */
++static const struct imx335_reg mipi_data_rate_1188Mbps[] = {
++	{0x300c, 0x3b},
++	{0x300d, 0x2a},
++	{0x314c, 0xc6},
++	{0x314d, 0x00},
++	{0x315a, 0x02},
++	{0x3168, 0xa0},
++	{0x316a, 0x7e},
++	{0x319e, 0x01},
++	{0x3a18, 0x8f},
++	{0x3a19, 0x00},
++	{0x3a1a, 0x4f},
++	{0x3a1b, 0x00},
++	{0x3a1c, 0x47},
++	{0x3a1d, 0x00},
++	{0x3a1e, 0x37},
++	{0x3a1f, 0x01},
++	{0x3a20, 0x4f},
++	{0x3a21, 0x00},
++	{0x3a22, 0x87},
++	{0x3a23, 0x00},
++	{0x3a24, 0x4f},
++	{0x3a25, 0x00},
++	{0x3a26, 0x7f},
++	{0x3a27, 0x00},
++	{0x3a28, 0x3f},
++	{0x3a29, 0x00},
++};
++
++/* All-pixel (window crop) scan; also undoes everything the binned list sets */
++static const struct imx335_reg mode_2592x1940_regs[] = {
++	{0x3018, 0x04},
++	{0x302e, 0x20},
++	{0x302f, 0x0a},
++	{0x3056, 0x94},
++	{0x3057, 0x07},
++	{0x3072, 0x28},
++	{0x3073, 0x00},
++	{0x3074, 0xc8},
++	{0x3075, 0x00},
++	{0x3076, 0x28},
++	{0x3077, 0x0f},
++	{0x3078, 0x01},
++	{0x3079, 0x02},
++	{0x307a, 0xff},
++	{0x307b, 0x02},
++	{0x307c, 0x00},
++	{0x307d, 0x00},
++	{0x307e, 0x00},
++	{0x307f, 0x00},
++	{0x3080, 0x01},
++	{0x3081, 0x02},
++	{0x3082, 0xff},
++	{0x3083, 0x02},
++	{0x3084, 0x00},
++	{0x3085, 0x00},
++	{0x3086, 0x00},
++	{0x3087, 0x00},
++	{0x30a4, 0x33},
++	{0x30a8, 0x10},
++	{0x30a9, 0x04},
++	{0x30ac, 0x00},
++	{0x30ad, 0x00},
++	{0x30b0, 0x10},
++	{0x30b1, 0x08},
++	{0x30b4, 0x00},
++	{0x30b5, 0x00},
++	{0x30b6, 0x00},
++	{0x30b7, 0x00},
++	{0x3112, 0x08},
++	{0x3113, 0x00},
++	{0x3116, 0x08},
++	{0x3117, 0x00},
++	{0x3199, 0x00},
++	{0x3300, 0x00},
++};
++
++/*
++ * 2x2 binned scan. HNUM is 2 * width - 24 and Y_OUT_SIZE the exact line
++ * count: the sensor otherwise transmits 1308x984, 12 samples/lines more than
++ * the 1296x972 the receiver is set up for. Values taken from the alp-sdk
++ * Zephyr IMX335 driver's bin_2x2 set, where they are bench-proven.
++ */
++static const struct imx335_reg mode_1296x972_regs[] = {
++	{0x3018, 0x01},
++	{0x302e, 0x08},
++	{0x302f, 0x0a},
++	{0x3056, 0xcc},
++	{0x3057, 0x03},
++	{0x3072, 0x30},
++	{0x3073, 0x00},
++	{0x3074, 0xa8},
++	{0x3075, 0x00},
++	{0x3076, 0x60},
++	{0x3077, 0x0f},
++	{0x3078, 0x04},
++	{0x3079, 0xfd},
++	{0x307a, 0x04},
++	{0x307b, 0xfe},
++	{0x307c, 0x04},
++	{0x307d, 0xfb},
++	{0x307e, 0x04},
++	{0x307f, 0x02},
++	{0x3080, 0x04},
++	{0x3081, 0xfd},
++	{0x3082, 0x04},
++	{0x3083, 0xfe},
++	{0x3084, 0x04},
++	{0x3085, 0xfb},
++	{0x3086, 0x04},
++	{0x3087, 0x02},
++	{0x30a4, 0x77},
++	{0x30a8, 0x20},
++	{0x30a9, 0x00},
++	{0x30ac, 0x08},
++	{0x30ad, 0x08},
++	{0x30b0, 0x20},
++	{0x30b1, 0x00},
++	{0x30b4, 0x10},
++	{0x30b5, 0x10},
++	{0x30b6, 0x00},
++	{0x30b7, 0x00},
++	{0x3112, 0x10},
++	{0x3113, 0x00},
++	{0x3116, 0x10},
++	{0x3117, 0x00},
++	{0x3199, 0x30},
++	{0x3300, 0x01},
++};
++
++static const s64 link_freq[] = {
++	/* Corresponds to 1188Mbps data lane rate */
++	IMX335_LINK_FREQ,
++};
++
+ /* Supported sensor mode configurations */
+-static const struct imx335_mode supported_mode = {
+-	.width = 2592,
+-	.height = 1940,
+-	.hblank = 342,
+-	.vblank = 2560,
+-	.vblank_min = 2560,
+-	.vblank_max = 133060,
+-	.pclk = 396000000,
+-	.link_freq_idx = 0,
+-	.code = MEDIA_BUS_FMT_SRGGB12_1X12,
+-	.reg_list = {
+-		.num_of_regs = ARRAY_SIZE(mode_2592x1940_regs),
+-		.regs = mode_2592x1940_regs,
++static const struct imx335_mode supported_modes[] = {
++	{
++		.width = 2592,
++		.height = 1940,
++		.hblank = 342,
++		.vblank = 2560,
++		.vblank_min = 2560,
++		.vblank_max = 133060,
++		.exp_offset = 9,
++		/*
++		 * 2592 * 12 bit at 1188 Mbps/lane needs 6.5 us on 4 lanes but
++		 * 13.1 us on 2, longer than the 7.41 us line period at the
++		 * default HMAX, so this mode is 4-lane only.
++		 */
++		.bpp = 12,
++		.min_lanes = 4,
++		.link_freq_idx = 0,
++		.code = MEDIA_BUS_FMT_SRGGB12_1X12,
++		.reg_list = {
++			.num_of_regs = ARRAY_SIZE(mode_2592x1940_regs),
++			.regs = mode_2592x1940_regs,
++		},
++	},
++	{
++		/*
++		 * Same 7.41 us line time as above, which is 1760 pixel clocks at
++		 * this mode's 237.6 MHz pixel rate (1296 + 464).
++		 */
++		.width = 1296,
++		.height = 972,
++		.hblank = 464,
++		.vblank = 3528,
++		.vblank_min = 3528,
++		.vblank_max = 133060,
++		.exp_offset = 17,
++		.bpp = 10,
++		.min_lanes = 2,
++		.link_freq_idx = 0,
++		.code = MEDIA_BUS_FMT_SRGGB10_1X10,
++		.reg_list = {
++			.num_of_regs = ARRAY_SIZE(mode_1296x972_regs),
++			.regs = mode_1296x972_regs,
++		},
+ 	},
+ };
+ 
+@@ -367,6 +545,23 @@ static int imx335_write_regs(struct imx335 *imx335,
+ 	return 0;
+ }
+ 
++/**
++ * imx335_calc_pixel_rate() - Pixel rate matching the CSI-2 link
++ * @imx335: pointer to imx335 device
++ * @mode: pointer to imx335_mode sensor mode
++ *
++ * The CSI-2 receiver derives the D-PHY rate from this control, so it must
++ * equal what the lanes carry: link frequency * 2 (DDR) * lanes / bpp.
++ *
++ * Return: pixel rate in Hz
++ */
++static u64 imx335_calc_pixel_rate(struct imx335 *imx335,
++				  const struct imx335_mode *mode)
++{
++	return div_u64((u64)link_freq[mode->link_freq_idx] * 2 *
++		       imx335->num_lanes, mode->bpp);
++}
++
+ /**
+  * imx335_update_controls() - Update control ranges based on streaming mode
+  * @imx335: pointer to imx335 device
+@@ -377,18 +572,38 @@ static int imx335_write_regs(struct imx335 *imx335,
+ static int imx335_update_controls(struct imx335 *imx335,
+ 				  const struct imx335_mode *mode)
+ {
++	u64 pclk = imx335_calc_pixel_rate(imx335, mode);
+ 	int ret;
+ 
+ 	ret = __v4l2_ctrl_s_ctrl(imx335->link_freq_ctrl, mode->link_freq_idx);
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = __v4l2_ctrl_s_ctrl(imx335->hblank_ctrl, mode->hblank);
++	ret = __v4l2_ctrl_modify_range(imx335->pclk_ctrl, pclk, pclk, 1, pclk);
+ 	if (ret)
+ 		return ret;
+ 
+-	return __v4l2_ctrl_modify_range(imx335->vblank_ctrl, mode->vblank_min,
+-					mode->vblank_max, 1, mode->vblank);
++	ret = __v4l2_ctrl_modify_range(imx335->hblank_ctrl, mode->hblank,
++				       mode->hblank, 1, mode->hblank);
++	if (ret)
++		return ret;
++
++	ret = __v4l2_ctrl_modify_range(imx335->exp_ctrl, IMX335_EXPOSURE_MIN,
++				       mode->vblank + mode->height -
++				       mode->exp_offset, 1,
++				       IMX335_EXPOSURE_DEFAULT);
++	if (ret)
++		return ret;
++
++	ret = __v4l2_ctrl_modify_range(imx335->vblank_ctrl, mode->vblank_min,
++				       mode->vblank_max, 1, mode->vblank);
++	if (ret)
++		return ret;
++
++	/* cur_mode already points at @mode, see imx335_set_pad_format() */
++	imx335->vblank = mode->vblank;
++
++	return __v4l2_ctrl_s_ctrl(imx335->vblank_ctrl, mode->vblank);
+ }
+ 
+ /**
+@@ -462,7 +677,7 @@ static int imx335_set_ctrl(struct v4l2_ctrl *ctrl)
+ 					       IMX335_EXPOSURE_MIN,
+ 					       imx335->vblank +
+ 					       imx335->cur_mode->height -
+-					       IMX335_EXPOSURE_OFFSET,
++					       imx335->cur_mode->exp_offset,
+ 					       1, IMX335_EXPOSURE_DEFAULT);
+ 		break;
+ 	case V4L2_CID_EXPOSURE:
+@@ -494,6 +709,41 @@ static const struct v4l2_ctrl_ops imx335_ctrl_ops = {
+ 	.s_ctrl = imx335_set_ctrl,
+ };
+ 
++/**
++ * imx335_mode_fits() - Check a mode fits the link at the connected lane count
++ * @imx335: pointer to imx335 device
++ * @mode: mode to check
++ *
++ * Return: true when the mode can be sent within one line period.
++ */
++static bool imx335_mode_fits(const struct imx335 *imx335,
++			     const struct imx335_mode *mode)
++{
++	return imx335->num_lanes >= mode->min_lanes;
++}
++
++/**
++ * imx335_nth_mode() - Get the n-th mode usable at the connected lane count
++ * @imx335: pointer to imx335 device
++ * @n: index among the usable modes
++ *
++ * Return: the mode, or NULL when @n is past the last usable mode.
++ */
++static const struct imx335_mode *imx335_nth_mode(const struct imx335 *imx335,
++						 unsigned int n)
++{
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
++		if (!imx335_mode_fits(imx335, &supported_modes[i]))
++			continue;
++		if (!n--)
++			return &supported_modes[i];
++	}
++
++	return NULL;
++}
++
+ /**
+  * imx335_enum_mbus_code() - Enumerate V4L2 sub-device mbus codes
+  * @sd: pointer to imx335 V4L2 sub-device structure
+@@ -506,10 +756,13 @@ static int imx335_enum_mbus_code(struct v4l2_subdev *sd,
+ 				 struct v4l2_subdev_state *sd_state,
+ 				 struct v4l2_subdev_mbus_code_enum *code)
+ {
+-	if (code->index > 0)
++	const struct imx335_mode *mode = imx335_nth_mode(to_imx335(sd),
++							 code->index);
++
++	if (!mode)
+ 		return -EINVAL;
+ 
+-	code->code = supported_mode.code;
++	code->code = mode->code;
+ 
+ 	return 0;
+ }
+@@ -526,15 +779,15 @@ static int imx335_enum_frame_size(struct v4l2_subdev *sd,
+ 				  struct v4l2_subdev_state *sd_state,
+ 				  struct v4l2_subdev_frame_size_enum *fsize)
+ {
+-	if (fsize->index > 0)
+-		return -EINVAL;
++	const struct imx335_mode *mode = imx335_nth_mode(to_imx335(sd),
++							 fsize->index);
+ 
+-	if (fsize->code != supported_mode.code)
++	if (!mode || fsize->code != mode->code)
+ 		return -EINVAL;
+ 
+-	fsize->min_width = supported_mode.width;
++	fsize->min_width = mode->width;
+ 	fsize->max_width = fsize->min_width;
+-	fsize->min_height = supported_mode.height;
++	fsize->min_height = mode->height;
+ 	fsize->max_height = fsize->min_height;
+ 
+ 	return 0;
+@@ -609,7 +862,16 @@ static int imx335_set_pad_format(struct v4l2_subdev *sd,
+ 
+ 	mutex_lock(&imx335->mutex);
+ 
+-	mode = &supported_mode;
++	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE && imx335->streaming) {
++		mutex_unlock(&imx335->mutex);
++		return -EBUSY;
++	}
++
++	mode = v4l2_find_nearest_size(supported_modes,
++				      ARRAY_SIZE(supported_modes), width, height,
++				      fmt->format.width, fmt->format.height);
++	if (!imx335_mode_fits(imx335, mode))
++		mode = imx335_nth_mode(imx335, 0);
+ 	imx335_fill_pad_format(imx335, mode, fmt);
+ 
+ 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
+@@ -618,9 +880,12 @@ static int imx335_set_pad_format(struct v4l2_subdev *sd,
+ 		framefmt = v4l2_subdev_get_try_format(sd, sd_state, fmt->pad);
+ 		*framefmt = fmt->format;
+ 	} else {
++		const struct imx335_mode *prev = imx335->cur_mode;
++
++		imx335->cur_mode = mode;
+ 		ret = imx335_update_controls(imx335, mode);
+-		if (!ret)
+-			imx335->cur_mode = mode;
++		if (ret)
++			imx335->cur_mode = prev;
+ 	}
+ 
+ 	mutex_unlock(&imx335->mutex);
+@@ -642,7 +907,7 @@ static int imx335_init_pad_cfg(struct v4l2_subdev *sd,
+ 	struct v4l2_subdev_format fmt = { 0 };
+ 
+ 	fmt.which = sd_state ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
+-	imx335_fill_pad_format(imx335, &supported_mode, &fmt);
++	imx335_fill_pad_format(imx335, imx335_nth_mode(imx335, 0), &fmt);
+ 
+ 	return imx335_set_pad_format(sd, sd_state, &fmt);
+ }
+@@ -658,12 +923,44 @@ static int imx335_start_streaming(struct imx335 *imx335)
+ 	const struct imx335_reg_list *reg_list;
+ 	int ret;
+ 
+-	/* Write sensor mode registers */
++	/* Setup PLL and MIPI output timing */
++	ret = imx335_write_regs(imx335, mipi_data_rate_1188Mbps,
++				ARRAY_SIZE(mipi_data_rate_1188Mbps));
++	if (ret) {
++		dev_err(imx335->dev, "fail to set plls");
++		return ret;
++	}
++
++	/* Write common and sensor mode registers */
++	ret = imx335_write_regs(imx335, common_regs, ARRAY_SIZE(common_regs));
++	if (ret) {
++		dev_err(imx335->dev, "fail to write initial registers");
++		return ret;
++	}
++
+ 	reg_list = &imx335->cur_mode->reg_list;
+ 	ret = imx335_write_regs(imx335, reg_list->regs,
+ 				reg_list->num_of_regs);
+ 	if (ret) {
+-		dev_err(imx335->dev, "fail to write initial registers");
++		dev_err(imx335->dev, "fail to write mode registers");
++		return ret;
++	}
++
++	if (imx335->cur_mode->bpp == 10)
++		ret = imx335_write_regs(imx335, raw10_framefmt_regs,
++					ARRAY_SIZE(raw10_framefmt_regs));
++	else
++		ret = imx335_write_regs(imx335, raw12_framefmt_regs,
++					ARRAY_SIZE(raw12_framefmt_regs));
++	if (ret) {
++		dev_err(imx335->dev, "fail to set frame format");
++		return ret;
++	}
++
++	ret = imx335_write_reg(imx335, IMX335_REG_LANEMODE, 1,
++			       imx335->lane_mode);
++	if (ret) {
++		dev_err(imx335->dev, "fail to set lane mode");
+ 		return ret;
+ 	}
+ 
+@@ -832,13 +1129,21 @@ static int imx335_parse_hw_config(struct imx335 *imx335)
+ 	if (ret)
+ 		return ret;
+ 
+-	if (bus_cfg.bus.mipi_csi2.num_data_lanes != IMX335_NUM_DATA_LANES) {
++	switch (bus_cfg.bus.mipi_csi2.num_data_lanes) {
++	case 2:
++		imx335->lane_mode = IMX335_2LANE;
++		break;
++	case 4:
++		imx335->lane_mode = IMX335_4LANE;
++		break;
++	default:
+ 		dev_err(imx335->dev,
+ 			"number of CSI2 data lanes %d is not supported",
+ 			bus_cfg.bus.mipi_csi2.num_data_lanes);
+ 		ret = -EINVAL;
+ 		goto done_endpoint_free;
+ 	}
++	imx335->num_lanes = bus_cfg.bus.mipi_csi2.num_data_lanes;
+ 
+ 	if (!bus_cfg.nr_of_link_frequencies) {
+ 		dev_err(imx335->dev, "no link frequencies defined");
+@@ -945,6 +1250,7 @@ static int imx335_init_controls(struct imx335 *imx335)
+ {
+ 	struct v4l2_ctrl_handler *ctrl_hdlr = &imx335->ctrl_handler;
+ 	const struct imx335_mode *mode = imx335->cur_mode;
++	u64 pclk;
+ 	u32 lpfr;
+ 	int ret;
+ 
+@@ -961,7 +1267,7 @@ static int imx335_init_controls(struct imx335 *imx335)
+ 					     &imx335_ctrl_ops,
+ 					     V4L2_CID_EXPOSURE,
+ 					     IMX335_EXPOSURE_MIN,
+-					     lpfr - IMX335_EXPOSURE_OFFSET,
++					     lpfr - mode->exp_offset,
+ 					     IMX335_EXPOSURE_STEP,
+ 					     IMX335_EXPOSURE_DEFAULT);
+ 
+@@ -983,11 +1289,11 @@ static int imx335_init_controls(struct imx335 *imx335)
+ 						1, mode->vblank);
+ 
+ 	/* Read only controls */
++	pclk = imx335_calc_pixel_rate(imx335, mode);
+ 	imx335->pclk_ctrl = v4l2_ctrl_new_std(ctrl_hdlr,
+ 					      &imx335_ctrl_ops,
+ 					      V4L2_CID_PIXEL_RATE,
+-					      mode->pclk, mode->pclk,
+-					      1, mode->pclk);
++					      pclk, pclk, 1, pclk);
+ 
+ 	imx335->link_freq_ctrl = v4l2_ctrl_new_int_menu(ctrl_hdlr,
+ 							&imx335_ctrl_ops,
+@@ -1061,8 +1367,8 @@ static int imx335_probe(struct i2c_client *client)
+ 		goto error_power_off;
+ 	}
+ 
+-	/* Set default mode to max resolution */
+-	imx335->cur_mode = &supported_mode;
++	/* Default to the largest mode that fits the connected lanes */
++	imx335->cur_mode = imx335_nth_mode(imx335, 0);
+ 	imx335->vblank = imx335->cur_mode->vblank;
+ 
+ 	ret = imx335_init_controls(imx335);
+-- 
+2.43.0
+

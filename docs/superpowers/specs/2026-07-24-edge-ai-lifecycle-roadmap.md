@@ -1,5 +1,7 @@
 # Edge-AI model lifecycle — value-add roadmap + sub-project 1 (pre-flight fit/perf)
 
+> **Status (2026-10-08): Historical; the delivery premise below is false.** The pipeline PRs named in the *Builds on* line (alp-sdk #907, tan-cli #47, alp-sdk-vscode #310) were all closed unmerged, and the `alp model check` / `alp model` surface this roadmap extends was never ported to alp-sdk. Superseded by ADR 0028 (`docs/adr/0028-tan-owns-the-model-engine.md`, Proposed): tan owns the model engine and alp-sdk keeps the NPU truth (`metadata/npu_ops/`, #1470). The design record itself landed in #1468; lifecycle subcommands are tracked in alplabai/tan-cli#674.
+
 - **Date:** 2026-07-24
 - **Status:** Design (brainstormed + approved; program vision + sub-project-1 detail)
 - **Builds on:** the model & edge-AI management pipeline (`docs/superpowers/specs/2026-07-24-model-edge-ai-management-design.md` + Plans A/B/C — declare → compile → package `.alpmodel` → inspect, shipped as PRs alp-sdk #907, tan-cli #47, vscode #310). This roadmap adds the value-adds *around* that pipeline to make edge-AI development easy + smooth.

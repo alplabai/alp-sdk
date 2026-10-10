@@ -187,8 +187,7 @@ do_compile:prepend:rzv2n-family() {
 # F2/G2 = P3_5/P3_4 with no per-SKU variant) and both build TF-A via
 # the shared PLAT=devkit_e7 plat directory this patch touches. The two
 # MACHINEs have no common MACHINEOVERRIDES tag other than the
-# repo-wide `e1m` (also shared by e1m-nx9101-a55, which must NOT pick
-# this up), so the knobs are duplicated per-override below rather than
+# repo-wide `e1m`, so the knobs are duplicated per-override below rather than
 # hung off a shared override.
 #
 # INERT TODAY: neither MACHINE=e1m-aen801-a32 nor e1m-aen701-a32 parses

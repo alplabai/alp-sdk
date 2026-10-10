@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/on-module-links-v2.schema.json",
+  "title": "ALP AEN on-module pad wiring + power-domain source (metadata/e1m_modules/aen/on-module-links.yaml) v2",
+  "description": "Alp Lab hand-authored generation authority for the AEN family's on-module (non-edge) pads and the SoM power domains (alp-sdk#2784). v2 adds `power_domains`. The `on_module_links` block keeps its v1 shape and is shape-checked by scripts/gen_zephyr_board.py `_load_aen_on_module_links()`; this schema pins only that it is an object. Every power-domain control pad is cross-checked against the pad TSVs beside the file by scripts/check_som_power_domains.py.",
+  "type": "object",
+  "required": ["schemaVersion", "families", "on_module_links", "power_domains"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "on-module-links-v2" },
+    "families": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "on_module_links": { "type": "object" },
+    "power_domains": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wifi_ble", "eth_phy", "ext_flash", "ext_ram", "temp_sensor", "rtc", "backlight"],
+      "properties": {
+        "wifi_ble": { "$ref": "#/$defs/domain" },
+        "eth_phy": { "$ref": "#/$defs/domain" },
+        "ext_flash": { "$ref": "#/$defs/domain" },
+        "ext_ram": { "$ref": "#/$defs/domain" },
+        "temp_sensor": { "$ref": "#/$defs/domain" },
+        "rtc": { "$ref": "#/$defs/domain" },
+        "backlight": { "$ref": "#/$defs/domain" }
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "description": "Where the fact is read from. A TSV source names the signal row; an on-module-links.yaml source names a dotted key under on_module_links.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file", "signal"],
+          "properties": {
+            "file": { "enum": ["inter-chip.tsv", "alif-ethernet-phy.tsv", "alif-ospi.tsv"] },
+            "signal": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file", "key"],
+          "properties": {
+            "file": { "const": "on-module-links.yaml" },
+            "key": { "type": "string", "pattern": "^[a-z0-9_.]+$" }
+          }
+        }
+      ]
+    },
+    "measured": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["saving", "input_voltage", "bench", "date"],
+      "properties": {
+        "saving": { "type": "string", "minLength": 1 },
+        "input_voltage": { "type": "string", "minLength": 1 },
+        "bench": { "type": "string", "minLength": 1 },
+        "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "method": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    },
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signal", "silicon_pad", "gpio_node", "gpio_pin", "direction", "polarity",
+                   "polarity_basis", "role", "holds_through_stop", "source"],
+      "properties": {
+        "signal": { "type": "string", "minLength": 1 },
+        "net": { "type": "string" },
+        "silicon_pad": { "type": "string", "pattern": "^P[0-9]{1,2}_[0-7]$" },
+        "gpio_node": { "type": "string", "pattern": "^(lpgpio|gpio[0-9]{1,2})$" },
+        "gpio_pin": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "direction": { "enum": ["out", "in"] },
+        "polarity": { "enum": ["active_high", "active_low"] },
+        "polarity_basis": {
+          "enum": ["bench_verified", "net_name", "datasheet", "assumed"],
+          "description": "How the asserted level was decided; `assumed` is not yet confirmed and must be bench-verified before the runtime drives the pad."
+        },
+        "role": { "enum": ["reset", "rail_enable", "powerdown", "enable", "wake_in"] },
+        "holds_through_stop": {
+          "enum": ["yes", "no", "unproven", "n/a"],
+          "description": "`unproven` for every LPGPIO (VBAT-domain) pad until the STOP bench proves the output holds; `no` for main-domain pads."
+        },
+        "source": { "$ref": "#/$defs/source" }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["opt_in"],
+      "properties": {
+        "control": { "type": "string", "description": "Signal of the control this action drives." },
+        "opt_in": { "type": "boolean" },
+        "requires_kconfig": { "type": "string", "pattern": "^CONFIG_[A-Z0-9_]+$" },
+        "hazard": { "type": "string", "minLength": 1 },
+        "note": { "type": "string" },
+        "measured": { "type": "array", "items": { "$ref": "#/$defs/measured" } }
+      }
+    },
+    "dependent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "net", "driver_pin", "source"],
+      "properties": {
+        "kind": { "enum": ["cam_ldo", "sd_enable", "phy_refclk"] },
+        "net": { "type": "string", "minLength": 1 },
+        "driver_pin": { "type": "string", "minLength": 1 },
+        "source": { "$ref": "#/$defs/source" }
+      }
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["presence", "controls", "default_modes", "default_action", "actions", "restore", "evidence"],
+      "properties": {
+        "chip": { "type": "string" },
+        "presence": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["on_module_key"],
+              "properties": {
+                "on_module_key": { "type": "string", "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)*$" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["family_invariant"],
+              "properties": { "family_invariant": { "const": true } }
+            }
+          ]
+        },
+        "device_label": { "type": "string", "description": "node_label of the on_module_links i2c device that owns this domain." },
+        "controls": { "type": "array", "items": { "$ref": "#/$defs/control" } },
+        "default_modes": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "enum": ["stop", "standby"] }
+        },
+        "default_action": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "actions": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+          "additionalProperties": { "$ref": "#/$defs/action" }
+        },
+        "restore": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method"],
+          "properties": {
+            "method": { "enum": ["nreset_release", "pin_release", "driver_release", "register_write", "none"] },
+            "note": { "type": "string" }
+          }
+        },
+        "dependents": { "type": "array", "items": { "$ref": "#/$defs/dependent" } },
+        "secondary_rtc": { "type": "string", "description": "Why the internal LPRTC is secondary (rtc domain only)." },
+        "evidence": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -34,29 +34,38 @@
 #include "../game/zone.h"  /* tr_zone_t -- tr_frame_in_set_zone() */
 #include "../game/state.h" /* tr_game_t -- source struct for tr_frame_in_from_game(), never embedded on the wire */
 #include "../game/tilt.h" /* TR_TILT_CHARS */
+#include "tr_memmap.h"    /* TR_MEM_TFA_RW: FB B is placed against it */
 
 #define TR_MBOX_ADDR  0x02401000u
 #define TR_MBOX_MAGIC 0x54524D42u /* 'TRMB' */
 /* 2: tr_frame_in_t grew a rotation field (the `in` block 172 -> 176 B). The stub
  * writes its own TR_MBOX_VERSION at init and the renderer refuses to run
- * against a different one; the HE refuses a stub of another version too. */
-#define TR_MBOX_VERSION 2u
+ * against a different one; the HE refuses a stub of another version too.
+ * 3: memory re-plan (stage 0) -- FB B, the DL, the bins, the stacks and the gate moved, so a
+ * matched stub/renderer/HE set is required.
+ * 4: tr_frame_in_t.fw (the panel width, stage 1): the renderer is 800 wide and crops. A stage-1 HE
+ * (fw set) and a stage-0 / 720-wide renderer both said 3, so they paired silently -- the HE's frames
+ * written 800 wide into a framebuffer the old renderer filled 720 wide. Now the stub and the HE each
+ * refuse the other's version at once, and a warm page of version 3 is cleared. */
+#define TR_MBOX_VERSION 4u
 #define TR_FB_A         0x02000000u /* SRAM0, DT sram0 */
-/* FB B: SRAM1 0x02600000..0x027C1FFF, below TF-A RW 0x027DE000 (the
- * CDC200 scans SRAM1 fine, measured). It used to be the shield's lcd_fb
- * 0x02200000, which overlaps the TF-A MHU0 payload window. Override only to
+/* A framebuffer SLOT is 800 x 1280 x 2 B, the widest frame (r3d.h TR_R3D_W): a panel of fw
+ * columns scans and is drawn the first fw * 1280 * 2 bytes of it (tr_frame_in_t.fw). */
+#define TR_FB_SLOT_SIZE 2048000u
+/* FB B: the last slot below TF-A RW (TR_MEM_TFA_RW, bench-verified), 4 KiB aligned:
+ * 0x025EA000..0x027DDFFF (the CDC200 scans SRAM1 fine, measured). It used to be the
+ * shield's lcd_fb 0x02200000, which overlaps the TF-A MHU0 payload window. Override only to
  * pair with an old test payload: -DTR_FB_B_ADDR=0x02200000u. */
 #ifndef TR_FB_B_ADDR
-#define TR_FB_B_ADDR 0x02600000u
+#define TR_FB_B_ADDR ((TR_MEM_TFA_RW - TR_FB_SLOT_SIZE) & ~0xFFFu)
 #endif
-#define TR_FB_B    TR_FB_B_ADDR
-#define TR_FB_SIZE 1843200u /* 720 x 1280 RGB565 */
+#define TR_FB_B TR_FB_B_ADDR
 /* TF-A MHU0 payload window (== a32/common/stub_abi.h STUB_MHU0_WINDOW):
  * no A32 code ever writes it, so no framebuffer may contain it. */
 #define TR_MHU0_WINDOW_LO 0x02380000u
 #define TR_MHU0_WINDOW_HI 0x02381000u
 #define TR_FB_CLEAR_OF_MHU0(fb) \
-	((fb) + TR_FB_SIZE <= TR_MHU0_WINDOW_LO || (fb) >= TR_MHU0_WINDOW_HI)
+	((fb) + TR_FB_SLOT_SIZE <= TR_MHU0_WINDOW_LO || (fb) >= TR_MHU0_WINDOW_HI)
 /* HUD buffer (P9): CDC200 layer 2, drawn by the HE only (src/hud/hud.h:
  * 720 x 352 ARGB4444). SRAM0 above the MHU0 window, below the stub's early
  * fault park page (a32/common/stub_abi.h STUB_EARLY_PARK 0x023FE000): no
@@ -82,7 +91,9 @@
  * LAUNCH. Published here (not render_core_stats, which stays in D-cache and
  * reads 0 to a raw external SRAM read unless explicitly cleaned) because
  * this block is the one already proven bench-readable without a prof build
- * (decode.py's own use of words 12..14). */
+ * (decode.py's own use of words 12..14). Words 17..39 (peak-frame breakdown,
+ * per-FB frame time, core join waits): the map is in renderer.c's RENDER_STATS
+ * comment and decode.py --stats. */
 #define TR_RENDER_T_ADDR                  0x02401930u
 #define TR_RENDER_STATS_ADDR              0x02401900u
 #define TR_RENDER_STATS_MARKER            0x5E4D5354u
@@ -248,6 +259,11 @@ typedef struct {
 	 * not fit a byte). Anything else (180 included) is a fault in
 	 * the renderer, never a silent fallback. */
 	uint16_t rotation;
+	/* Version 4: the panel's width in px (the DT window's short side, 16 px aligned, <= TR_R3D_W).
+	 * The renderer draws TR_R3D_W wide and writes the framebuffer fw wide, cropping the centre
+	 * columns (panel_rot.h); 0 is an HE that never set it and the renderer refuses it
+	 * (tr_fw_refuse). Appended into what was the block's trailing pad: sizeof stays 176. */
+	uint16_t fw;
 } tr_frame_in_t;
 _Static_assert(sizeof(tr_frame_in_t) == 176,
                "tr_frame_in_t layout drifted -- see file header note");
@@ -265,6 +281,26 @@ _Static_assert(offsetof(tr_frame_in_t, crash_tick) == 152,
 _Static_assert(offsetof(tr_frame_in_t, pace_q8) == 158, "pace_q8 is the old pad3's first byte");
 _Static_assert(offsetof(tr_frame_in_t, hz) == 159, "hz is the old pad3's second byte");
 _Static_assert(offsetof(tr_frame_in_t, rotation) == 172, "rotation follows gate_y");
+_Static_assert(offsetof(tr_frame_in_t, fw) == 174,
+               "fw is the block's last two bytes (the old trailing pad)");
+
+/* The renderer's ABI refusal record (a32/renderer/renderer.c abi_fault): pad3[7] = 0xAB1D in the
+ * top half and a code and detail below, pad3[6] = the offending value. Codes: 1 a stub of another
+ * TR_MBOX_VERSION (arg: that version), 2 a rotation the renderer cannot produce (arg: the rotation,
+ * degrees), 3 a panel width tr_fw_refuse() rejects (arg: fw, 16 bits). 0: no record. */
+#define TR_ABI_FAULT_TAG      0xAB1D0000u
+#define TR_ABI_FAULT_VERSION  1u
+#define TR_ABI_FAULT_ROTATION 2u
+#define TR_ABI_FAULT_FW       3u
+static inline uint32_t tr_abi_fault_code(uint32_t pad3_7)
+{
+	return (pad3_7 & 0xFFFF0000u) == TR_ABI_FAULT_TAG ? pad3_7 & 0xFFu : 0u;
+}
+
+static inline uint32_t tr_abi_fault_arg(uint32_t pad3_6)
+{
+	return pad3_6 & 0xFFFFu;
+}
 
 /* A32 -> M55 per-frame stats payload (28 B): the fields after out_seq in
  * tr_mbox_t, bundled so publish/take can move them in one copy. Not a
@@ -311,6 +347,35 @@ _Static_assert(offsetof(tr_mbox_t, ctrl_cmd) == 0x180,
                "stub control block moved -- see file header note");
 _Static_assert(offsetof(tr_mbox_t, fault_core) == 0x1C0,
                "fault record block moved -- see file header note");
+
+/* Stub, on a COLD page (the magic is not ours): SRAM1 holds power-on garbage, and a
+ * renderer launched before the HE's first frame would read it as a pending frame
+ * (in_seq != out_seq) with a random rotation. Zero the producer and consumer blocks
+ * -- [in_seq, ctrl_cmd): in_seq, in_fb, the `in` snapshot, out_seq, the out_* stats --
+ * so in_seq == out_seq == 0 and nothing is owed. Identity and the control / stub-state
+ * blocks are the caller's to set. */
+static inline void tr_mbox_cold_clear(volatile tr_mbox_t *m)
+{
+	volatile uint32_t *w = (volatile uint32_t *)&m->in_seq;
+	volatile uint32_t *e = (volatile uint32_t *)&m->ctrl_cmd;
+
+	while (w < e) {
+		*w++ = 0u;
+	}
+}
+
+/* Stub, first thing in stub_main(): is this page warm (ours, of THIS mailbox layout)?
+ * A cold page, or a warm page of another TR_MBOX_VERSION (an older stub's, whose blocks
+ * sit at other offsets), is garbage to this stub: it is cleared (tr_mbox_cold_clear).
+ * Returns 1 for a warm page, 0 for one it cleared. */
+static inline int tr_mbox_stub_page_init(volatile tr_mbox_t *m)
+{
+	if (m->magic == TR_MBOX_MAGIC && m->version == TR_MBOX_VERSION) {
+		return 1;
+	}
+	tr_mbox_cold_clear(m);
+	return 0;
+}
 
 /* Field-by-field snapshot of `g` into `out` (see the header comment on why
  * tr_game_t is never embedded). `banner`, `attract_active` and `paused` are

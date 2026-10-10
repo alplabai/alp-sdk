@@ -29,7 +29,7 @@ OV5640 ──▶ <alp/camera.h> ──▶ <alp/inference.h> ──▶ post-proce
   - the §D.lib.loader's `metadata/libraries/tflite-micro.yaml`
     `hw_backends` block selects the TFLM shim --
     `CONFIG_ALP_TFLM_ETHOS_U85=y` (with `_U55=y` linked alongside it on
-    U85 SKUs), or `CONFIG_ALP_TFLM_ETHOS_U65=y` on NX9101;
+    U85 SKUs);
   - the capability-derived block in `scripts/alp_orchestrate/kconfig.py`
     emits the backend/variant selects resolved from the SKU's
     `capabilities:` block:
@@ -37,8 +37,6 @@ OV5640 ──▶ <alp/camera.h> ──▶ <alp/inference.h> ──▶ post-proce
       `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y` +
       `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y` +
       `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y`
-    - NX9101 → `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y` +
-      `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y`
   - V2N M33 → TFLM CPU kernels; DRP-AI3 remains on the A55/Yocto side
 - **LVGL** composes the preview, bounding-box overlay, and
   latency / FPS strip, bound to the panel via `<alp/display.h>` +
@@ -55,9 +53,9 @@ Three questions answered side-by-side:
 2. **How fast?**  The on-screen latency strip prints per-invoke
    microseconds.  Flip `som.sku` in `board.yaml` between E8, E6,
    and E4 AEN SKUs to compare the preferred NPU path.
-3. **Does it run portably?**  Re-target to NX9101 (Ethos-U65) by
-   changing one line in `board.yaml`.  Same model file; the
-   loader emits the right Kconfig set and Vela's
+3. **Does it run portably?**  Re-target between AEN SKUs (E8 with
+   Ethos-U85 + U55, or a U55-only E3 / E5) by changing one line in
+   `board.yaml`.  The loader emits the matching Kconfig set and Vela's
    `--accelerator-config` adapts the binary.
 
 ## Hardware needed
@@ -104,5 +102,5 @@ mock-up before touching hardware.
 ## Showcase pointers
 
 This is the v1.0 readiness pitch for the SDK's edge-AI story:
-the same app source runs on every AEN / V2N / NX9101 SoM by
+the same app source runs on every AEN / V2N SoM by
 swapping a single `som.sku` line.

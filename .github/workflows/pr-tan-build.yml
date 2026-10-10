@@ -24,11 +24,6 @@
 #                       skipped by tan's missingTool=skip policy because the
 #                       runner has no bitbake -- the Yocto lane is pr-bitbake.yml)
 #
-# NX91 (E1M-NX9101) is deliberately absent: zephyr/boards/alp/ carries no
-# i.MX 93 board, so there is no Zephyr slice for `tan build` to compile on a
-# stock runner (its Linux slice is Yocto-only, covered by pr-bitbake.yml).
-# Add an NX91 leg in the same PR that adds an NX91 Zephyr board.
-#
 # Install/cache mechanics are reused, not invented: tan comes from a
 # tan-cli checkout + `pip install ./tan-cli/python` (onramp-clean-container.yml
 # `full-quickstart-build`), the Zephyr workspace from scripts/bootstrap.sh and

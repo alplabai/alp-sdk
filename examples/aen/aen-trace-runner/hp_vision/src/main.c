@@ -242,13 +242,13 @@ static void tr_cam_mirror_apply(void)
 	int      rc  = ov9281_read_reg8(reg, &v);
 
 	if (rc >= 0) {
-		v  = TR_CAM_MIRROR ? (uint8_t)(v | TR_OV9281_FLIP_BIT) : (uint8_t)(v & ~TR_OV9281_FLIP_BIT);
+		v  = (uint8_t)((v & ~TR_OV9281_FLIP_BIT) | tr_cam_mirror_bit(TR_CAM_ROTATE, TR_CAM_MIRROR));
 		rc = ov9281_write_reg8(reg, v);
 	}
 	if (rc >= 0) {
 		rc = ov9281_read_reg8(reg, &v);
 	}
-	g_cam_mirrored = (uint16_t)(rc >= 0 && (v & TR_OV9281_FLIP_BIT) != 0u);
+	g_cam_mirrored = (uint16_t)(rc >= 0 && tr_cam_mirrored_from_reg(TR_CAM_ROTATE, v));
 	printk("camera  : mirror %d -> 0x%04x = 0x%02x (rc %d)%s\n",
 	       TR_CAM_MIRROR,
 	       reg,
@@ -544,15 +544,19 @@ int main(void)
 	/* Start mid-range; tr_ae_camera_opened() clamps it to the live ceiling. */
 	tr_ae_init(&g_ae, (uint16_t)(g_ae_exp_max / 2u), TR_AE_GAIN_IDX_0);
 
-	bool sram1_ok = tr_sram1_ready();
+	bool    sram1_ok        = tr_sram1_ready();
+	int64_t sram1_t0_ms     = k_uptime_get();
+	bool    sram1_fail_seen = false;
 
 	if (sram1_ok) {
 		g_dbg->sram1_ready_seen         = 1u;
 		g_dbg->sram1_ready_at_heartbeat = g_dbg->heartbeat;
 		printk("sram1   : ready word seen -- CAM_POOL (SRAM1) safe to touch\n");
 	} else {
-		printk("RESULT FAIL: SRAM1 ready word not seen yet -- CAM_POOL (SRAM1) NOT touched this "
-		       "pass\n");
+		/* Not a failure: the A32 stub may still be powering SRAM1 at HP boot; the retry below
+		 * prints "ready word seen (after retry)" when it lands. */
+		printk("WARN: SRAM1 ready word not seen yet -- CAM_POOL (SRAM1) NOT touched this "
+		       "pass, will retry\n");
 	}
 
 	/* Gates the pool's own first real use: tr_camera_open() is where the
@@ -624,6 +628,12 @@ int main(void)
 					g_dbg->sram1_ready_at_heartbeat = g_dbg->heartbeat;
 					printk("sram1   : ready word seen (after retry) -- CAM_POOL (SRAM1) safe to "
 					       "touch\n");
+				} else if (!sram1_fail_seen && k_uptime_get() - sram1_t0_ms > 10000) {
+					/* The transient case (the A32 stub still powering SRAM1) recovers in a
+					 * retry or two; ~10 s of 200 ms retries is a real fault, said once. */
+					sram1_fail_seen = true;
+					printk("RESULT FAIL: SRAM1 ready word still not seen after ~10 s -- CAM_POOL "
+					       "(SRAM1) NOT touched\n");
 				}
 			}
 			i2c1_ok = device_is_ready(g_sensor);
@@ -753,6 +763,14 @@ int main(void)
 		}
 		if (!out_ok) {
 			g_dbg->status = alp_last_error();
+			tr_camera_release();
+			continue;
+		}
+
+		/* tr_movenet_decode() copies the centre and heat maps out of the arena (movenet.c): a
+		 * model with smaller output tensors would be read past its end. */
+		if (o[0].size_bytes < TR_MN_CELLS || o[1].size_bytes < TR_MN_CELLS * TR_POSE_KP) {
+			g_dbg->status = ALP_ERR_INVAL;
 			tr_camera_release();
 			continue;
 		}

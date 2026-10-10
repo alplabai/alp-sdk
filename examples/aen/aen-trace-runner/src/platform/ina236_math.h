@@ -65,10 +65,14 @@ static inline int32_t tr_ina236_power_mw(int32_t bus_mv, int32_t current_ua)
  * MODE[2:0]. Power-on reset 0x4127 = AVG 1: one 1.1 ms shunt conversion.
  * rail5v_power.c writes TR_INA236_CONFIG instead: ADCRANGE 0 (+-81.92 mV,
  * what tr_ina236_shunt_uv(.., false) assumes), AVG 128 (100b), VBUSCT =
- * VSHCT = 1.1 ms (100b), continuous shunt + bus (111b) -- one result is
- * the mean over 128 x 2.2 ms = 282 ms, just under the 320 ms poll. */
+ * 204 us (001b), VSHCT = 588 us (011b), continuous shunt + bus (111b) -- one
+ * result is the mean over 128 x (204 + 588) us = 101.4 ms, the 100 ms poll of the
+ * HUD's power graph. (It was VBUSCT = VSHCT = 1.1 ms: 282 ms, a 3 Hz graph.) Every
+ * field value is from TI SBOSA81D table 7-4 (AVG 100b = 128; VBUSCT/VSHCT 001b =
+ * 204 us, 011b = 588 us, 100b = 1100 us; MODE 111b = continuous shunt + bus),
+ * checked against the datasheet text, not recalled. */
 #define TR_INA236_REG_CONFIG 0x00u
-#define TR_INA236_CONFIG     0x4927u
+#define TR_INA236_CONFIG     0x485Fu
 #define TR_INA236_CONFIG_RW  0x1FFFu /* the bits a write sets: ADCRANGE..MODE */
 
 /* A CONFIG readback carries the settings this file's maths assumes. */

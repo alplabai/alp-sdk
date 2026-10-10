@@ -233,7 +233,7 @@ artifact per silicon SKU.
 | `cores[].type`                  | Used by codegen + by `<alp/system_ipc.h>` ARM core checks.                                                                                              |
 | `capabilities`                  | Drives `include/alp/soc_caps.h` boolean macros (`ALP_SOC_HELIUM_MVE`, `ALP_SOC_NEON`, etc.) via `scripts/gen_soc_caps.py`.                              |
 | `peripherals`                   | Counts per peripheral kind; drives `ALP_SOC_*_COUNT` ceilings in the same generated header.  `{}` is legal but trips the `pending_*` warning.          |
-| `peripherals_unverified`        | Array of `peripherals` keys whose count has no datasheet/DFP/HWRM citation in this file (#936) — e.g. a value copied from a sibling part and never independently confirmed. `scripts/gen_soc_caps.py` prints an `UNVERIFIED` comment above the SoC's block in `soc_caps.h`; `validate_metadata.py` warns if a listed key doesn't exist in `peripherals`. Use this — listing every key, if that's every key — even when the WHOLE block is inherited wholesale from a sibling (e.g. E5 from E7): `pending_reference_manual_ingestion: true` means something narrower, "`peripherals: {}` / counts default to zero," which is false for a fully-populated-but-uncited block and produces a wrong `validate_metadata.py` WARN. `pending_reference_manual_ingestion` is for a file that genuinely has no populated counts yet (e.g. i.MX93, whose RM pass has not run); a file can combine both flags when the block is still pending but some keys are populated — its own `peripherals_unverified` list (even `[]`) then replaces the wholesale fallback, so `gen_soc_caps.py` marks exactly the keys it names. |
+| `peripherals_unverified`        | Array of `peripherals` keys whose count has no datasheet/DFP/HWRM citation in this file (#936) — e.g. a value copied from a sibling part and never independently confirmed. `scripts/gen_soc_caps.py` prints an `UNVERIFIED` comment above the SoC's block in `soc_caps.h`; `validate_metadata.py` warns if a listed key doesn't exist in `peripherals`. Use this — listing every key, if that's every key — even when the WHOLE block is inherited wholesale from a sibling (e.g. E5 from E7): `pending_reference_manual_ingestion: true` means something narrower, "`peripherals: {}` / counts default to zero," which is false for a fully-populated-but-uncited block and produces a wrong `validate_metadata.py` WARN. `pending_reference_manual_ingestion` is for a file that genuinely has no populated counts yet (a part whose RM pass has not run); a file can combine both flags when the block is still pending but some keys are populated — its own `peripherals_unverified` list (even `[]`) then replaces the wholesale fallback, so `gen_soc_caps.py` marks exactly the keys it names. |
 | `peripheral_instances`          | OPTIONAL, keyed by a SUBSET of `peripherals`' keys (issue #1154). Per-instance register `base`/`size` (lowercase `0x`-prefixed hex strings, `^0x[0-9a-f]+$`) + `interrupts` (`irq`/`priority` decimal ints, `name` when the DTSI names it), one entry per physical instance. `peripherals` stays the count map every other consumer reads; this is additive, for a consumer that needs an actual address rather than just a ceiling. Only populated where a real vendor devicetree/SVD source gives a grounded 1:1 instance count — a key absent here means "not yet projected," not "doesn't exist," same as an absent `peripherals` key. RZ/V2N n44 is the only populated example today: `scripts/gen_soc_peripheral_instances.py` mechanically projects it from the vendored Zephyr `r9a09g056.dtsi`; never hand-edit, regenerate. |
 | `soc_flash_base`                | OPTIONAL base address of the on-die non-volatile aperture (`2147483648` = `0x80000000` on Alif Ensemble, matching upstream Zephyr's `mram: flash@80000000`). Declared once **per SoC, not per variant** — only the aperture's LENGTH varies by SKU, and that already comes from `variants[].mram_mb` (an E3-family SoC ships both 5.5 MB and 1.5 MB order codes off one base). A SKU's aperture is `[soc_flash_base, soc_flash_base + variants[].mram_mb * 1 MiB)`. Scoped to the on-die DEVICE WINDOW, never to a controller: a NOR and a HyperRAM behind the same OSPI controller, distinguished only by `chip_select:`, must not both fall inside it. **Omit** for a SoC whose flash never enters `memory_map:` (e.g. Renesas RZ/V2N, where every `memory_regions` entry is RAM) — an aperture there would gate nothing. If declared on an Alif SoC it must agree with `scripts/gen_zephyr_board.py`'s `_AEN_MRAM_BASE`; `scripts/validate_metadata.py` enforces the agreement. |
 | `variants[].order_code`         | Vendor order code; **must match** the SoM preset's `silicon_variant:` field for the loader to resolve memory layout from this entry's `sram_banks_kb`. |
@@ -486,7 +486,7 @@ new YAML with:
 
 ```
 FAIL metadata/e1m_modules/E1M-AEN901.yaml
-  · sku: 'E1M-AEN901' does not match '^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$'
+  · sku: 'E1M-AEN901' does not match '^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3})$'
 ```
 
 Edit the pattern in **both** schema files to accept `AEN[3-9][0-9]{2}`:
@@ -494,7 +494,7 @@ Edit the pattern in **both** schema files to accept `AEN[3-9][0-9]{2}`:
 ```jsonc
 "sku": {
   "type": "string",
-  "pattern": "^E1M-(AEN[3-9][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$"
+  "pattern": "^E1M-(AEN[3-9][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3})$"
 }
 ```
 
@@ -535,7 +535,7 @@ is named `metadata/e1m_modules/aen/hw-revisions.yaml`; the SoM
 preset's `family: alif-ensemble` is the human-readable family
 slug, NOT the directory name — see `scripts/alp_project.py`
 `_sku_family()` for the SKU-prefix → directory map: `AEN` → `aen`,
-`V2N` → `v2n`, `V2M` → `v2n-m1`, `NX9` → `imx93`).
+`V2N` → `v2n`, `V2M` → `v2n-m1`).
 
 **Future revision rows.**  If the AEN9 generation introduces a true
 PCB respin (different stack-up, different connector position, …)

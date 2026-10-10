@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # <alp/iot.h> Wi-Fi/MQTT, <alp/audio.h> PDM input + I2S output, and
-# <alp/inference.h> backend registry (TFLM, Ethos-U on AEN/i.MX93, per-variant
+# <alp/inference.h> backend registry (TFLM, Ethos-U on AEN, per-variant
 # NPU + CPU kernel selectors).
 
 # IoT (Wi-Fi station + MQTT) — v0.2 deliverable.  When OFF the
@@ -202,7 +202,7 @@ config ALP_SDK_INFERENCE_BACKEND_TFLM
 	  tflite::MicroInterpreter + tflite::MicroMutableOpResolver
 	  onto the inference ops vtable.  Registers at priority 50
 	  against silicon_ref="*" so it wins on any silicon unless a
-	  vendor-specific NPU backend (ETHOS_U_AEN / ETHOS_U_N93)
+	  vendor-specific NPU backend (ETHOS_U_AEN)
 	  registers at priority 100 on the matching silicon_ref.
 	  Pulls in TFLM via the upstream tflite-micro Zephyr module
 	  (see west.yml's name-allowlist).  An alp-sdk-topdir workspace
@@ -248,17 +248,6 @@ config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
 	  ETHOS_U_DCACHE, DCACHE=n and the driver heap are emitted per
 	  inference app by the orchestrator (scripts/alp_orchestrate/kconfig.py).
 
-config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93
-	bool "Ethos-U on NXP i.MX 93 (priority 100 on nxp:imx9:imx93)"
-	default n
-	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
-	select ETHOS_U if DT_HAS_ARM_ETHOS_U_ENABLED
-	help
-	  Compile src/backends/inference/ethos_u_n93.cpp.  Registers
-	  the same TFLM ops table against silicon_ref="nxp:imx9:imx93"
-	  at priority 100 so it wins over the portable tflm backend on
-	  i.MX 93.
-
 # There is deliberately NO Zephyr-side DRP-AI or DEEPX DX-M1 backend
 # Kconfig.  Both engines are A55/Linux-side only: DRP-AI3 is driven by
 # the MERA/DRP-AI TVM userspace runtime and the DX-M1 hangs off the
@@ -302,16 +291,6 @@ config ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55
 	  config so Vela-compiled U55 models dispatch.  Vela target on
 	  the build host must match: `--accelerator-config ethos-u55-256`.
 
-config ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65
-	bool "Compile against Arm Ethos-U65 NPU kernels"
-	depends on ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93
-	help
-	  Selected by the orchestrator on i.MX 93 builds.  The upstream
-	  Arm Ethos-U driver library is compiled with the U65-256
-	  accelerator config.  Vela target: `--accelerator-config
-	  ethos-u65-256`.  Required by the ETHOS_U_N93 backend's
-	  compile-time consistency check.
-
 config ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85
 	bool "Compile against Arm Ethos-U85 NPU kernels (Generative AI)"
 	depends on ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
@@ -341,8 +320,8 @@ config ALP_SDK_INFERENCE_TFLM_KERNEL_NEON
 	  Emitted by the orchestrator for cortex-a* slices (A32 / A55).
 	  Selects upstream TFLM's NEON kernel implementation -- 64/128-bit
 	  vector intrinsics tuned for ARMv8-A.  Applies to the AEN family's
-	  A32 cluster (E5 / E6 / E7 / E8), the V2N family's A55 cluster, and
-	  the i.MX 93's A55 cluster.
+	  A32 cluster (E5 / E6 / E7 / E8), and the V2N family's A55
+	  cluster.
 
 config ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM
 	bool "TFLM Helium MVE-I kernels (Cortex-M55)"
@@ -359,9 +338,8 @@ config ALP_SDK_INFERENCE_TFLM_KERNEL_REF
 	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
 	help
 	  Emitted by the orchestrator for baseline Cortex-M slices without
-	  Helium / DSP extensions (the V2N's m33_sm system-manager core,
-	  the i.MX 93's m33 real-time core).  Selects upstream TFLM's
-	  scalar reference kernel implementation -- the floor that always
-	  works.  Slower than NEON / Helium, but the right answer when the
+	  Helium / DSP extensions (the V2N's m33_sm system-manager core).  Selects
+	  upstream TFLM's scalar reference kernel implementation -- the
+	  floor that always works.  Slower than NEON / Helium, but the right answer when the
 	  target core has neither.
 

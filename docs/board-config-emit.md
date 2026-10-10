@@ -82,6 +82,23 @@ input to a Zephyr tree built from a different one. A clean cross-version skew
 error (rather than a Kconfig "assign to undefined symbol" abort) is #855's
 version-detection work, not this loader's.
 
+### Other rendered plan artefacts (reference only)
+
+A zephyr or baremetal slice's `configArtefacts` carries four rendered-text
+files after its primary config artefact, in this order: `alp.overlay`
+(`--emit dts-overlay --core <id>`), `cmake-args.txt` (`--emit cmake-args --core
+<id>` minus the marker line), `alp_hw_info_build.h` (`--emit hw-info-h --core
+<id>`) and `alp-west-libs.yml` (`--emit west-libraries --core <id>`). Each is
+byte-identical to the standalone render because both call one shared helper, so
+`tan` consumes the plan's bytes instead of re-rendering them. They are reference
+files: no build command, CMake file or Kconfig in this SDK reads them
+(`ALP_HW_BUILD_*` for the firmware still comes from the build itself).
+`alp.overlay` is absent, with a `dts-overlay-unavailable` warning, on a board
+with no header, and `alp_hw_info_build.h` is absent, with a `hw-info-unavailable`
+warning, for a SKU outside the production families; `cmake-args.txt` and
+`alp-west-libs.yml` are always present (a slice with no libraries gets a
+well-formed empty `alp-west-libs.yml`).
+
 ### Plain CMake (baremetal / yocto) -- generated `-D` args (reference / inspection)
 
 `--emit cmake-args` renders a slice's would-be `-D` arguments as text: an
@@ -92,7 +109,7 @@ slice's `cmake-args.txt` configArtefact, so `tan` does not re-render it. It is *
 shell-pipeable recipe -- `cmake -B build $(... --emit cmake-args) .` fails
 CMake's own argument parser today, for two independent reasons: the CLI's
 leading `# --- core: <id> (<os>) ---` section marker
-(`scripts/alp_project.py:519` prepends it unconditionally for
+(`scripts/alp_project.py:528` prepends it unconditionally for
 `cmake-args`, unlike the `zephyr-conf` branch, which only adds it in the
 unscoped multi-core sum case), and the board-facade selector's bare
 `-DALP_BOARD_<SLUG>` (a compile-time `#if defined(...)` guard consumed by

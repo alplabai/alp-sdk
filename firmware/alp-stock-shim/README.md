@@ -12,7 +12,7 @@ enable the GD32 link for real CM33 firmware, so
 `boards/<board>.conf` turns SPI and GPIO off and `boards/<board>.overlay`
 disables `&sci7` and `&gpio9`: P96 (SCK7) and P97 (chip-select) are left
 untouched. Those files are per board because the other boards that default to
-this app (AEN M55 cores, NX9101) have no `sci7` / `gpio9` nodes. It gives the orchestrator a buildable, bootable
+this app (AEN M55 cores) have no `sci7` / `gpio9` nodes. It gives the orchestrator a buildable, bootable
 peer-core image when a project leaves a secondary M-core at the SoM default,
 while customer applications can still override `cores.<id>.app` with their own
 firmware.

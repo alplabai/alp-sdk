@@ -454,7 +454,7 @@ def test_config_ifdef_reference_in_c_source_does_not_confirm_symbol(tmp_path):
     # ALP_SDK_FOO identifier.  If nothing defines the Kconfig symbol any
     # more (renamed/removed), a doc that names it is dead -- even though a
     # stale #ifdef of the old name still sits in the source.  Mutation on
-    # the real tree: renaming `config ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65`
+    # the real tree: renaming `config ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85`
     # out of zephyr/kconfigs/iot-audio-inference.kconfig left
     # src/backends/inference/tflm.cpp's `#elif defined(CONFIG_...)`
     # unchanged, and the known-symbol harvest treated that reference as

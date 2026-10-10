@@ -1600,19 +1600,6 @@
         "summary": "> `[UNTESTED]` -- v0.6 structural draft. Board.yaml + sources are > shape-correct, but the end-to-end RPMsg path still needs AEN801 > bench validation."
       },
       {
-        "board": "e1m-evk",
-        "declares": {
-          "chips": false,
-          "ipc": true,
-          "models": false,
-          "peripherals": true
-        },
-        "name": "rpmsg-imx93",
-        "path": "examples/multicore/rpmsg-imx93",
-        "som": "E1M-NX9101",
-        "summary": "> `[UNTESTED]` -- v0.6 structural draft, targeting **E1M-NX9101** > (NXP i.MX 93), which is **not yet buildable**. Its only hw_rev, > `metadata/e1m_modules/imx93/hw-revisions.yaml`'s `r1`, is > `status: tbd` -- the hw_rev-buildable gate > ([#1025](https://github.com/alplabai/alp-sdk/issues/1025)) refuses > it outright, before the orchestrator ever reaches carve-out > resolution against the iMX93 memory map, which > `metadata/e1m_modules/E1M-NX9101.yaml` cannot resolve either > (`silicon_variant: TBD`). Both are TBD by design > (project memory note: don't invent HW values) pending real NX9101 > silicon; this example is excluded from the build/emit-snapshot/ > build-plan/system-manifest/parity-oracle gates for the same reason > (see those gates' own `#1025` comments) but its source and this > README stay -- the declarative structural files are the contract > that lets the orchestrator land cleanly the moment a real hw_rev > status lands."
-      },
-      {
         "board": "e1m-x-evk",
         "coreCount": 2,
         "cores": [
@@ -3394,6 +3381,10 @@
       "script": "scripts/check_build_receipt.py"
     },
     {
+      "purpose": "Gate: the committed V2N/V2M Linux camera files match the camera metadata (#2633).",
+      "script": "scripts/check_camera_parity.py"
+    },
+    {
       "purpose": "CI gate: every in-tree copy of `cc3501e_bridge.{c,h}` under `examples/**` is byte-identical to the canonical pair, except the copies this gate declares divergent by name.",
       "script": "scripts/check_cc3501e_bridge_copies.py"
     },
@@ -3596,6 +3587,10 @@
     {
       "purpose": "Validate SoM-release bundle manifests against the public metadata/schemas/som-release-bundle-v1.schema.json contract.",
       "script": "scripts/check_som_bundle.py"
+    },
+    {
+      "purpose": "Pin every SoM power-domain control pad to the pad TSVs (alp-sdk#2784).",
+      "script": "scripts/check_som_power_domains.py"
     },
     {
       "purpose": "CI gate: every `id:` in every `metadata/socs/**/*.json` `cores[]` block must have a matching key in every consuming SoM preset's `topology:` block. Catches the case where a silicon update adds a new core (e.g. m33_sm) but the SoM preset's topology stops declaring an OS for it. Per design doc section 4.2 the topology key set is required to mirror the SoC's `cores[].id` set exactly.",
@@ -4034,10 +4029,13 @@
     },
     {
       "functions": [
+        "alp_power_boot_wake_info",
         "alp_power_capabilities",
         "alp_power_close",
         "alp_power_configure_retention",
         "alp_power_configure_wake_source",
+        "alp_power_domain_info",
+        "alp_power_domain_policy_set",
         "alp_power_open",
         "alp_power_profile_get",
         "alp_power_profile_set",
@@ -4648,66 +4646,6 @@
         "m55_hp": {
           "app": "alp-stock-shim",
           "board": "alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp",
-          "os": "zephyr",
-          "toolchain": "arm-zephyr-eabi"
-        }
-      }
-    },
-    {
-      "boot": {
-        "allowed_swap_algorithms": [
-          "scratch",
-          "move",
-          "overwrite"
-        ],
-        "default_swap_algorithm": "scratch",
-        "single_slot": false
-      },
-      "capabilities": {
-        "emmc_dma": true,
-        "ethos_u65_count": 1,
-        "neon": true
-      },
-      "family": "nxp-imx9",
-      "silicon": "nxp:imx9:imx93",
-      "sku": "E1M-NX9101",
-      "soc_part": "i.MX 93",
-      "soc_peripherals": {
-        "adc": false,
-        "can": true,
-        "dac": false,
-        "ethernet": true,
-        "i2c": true,
-        "i2s": true,
-        "i3c": false,
-        "mipi_csi": false,
-        "mipi_dsi": true,
-        "npu": true,
-        "pcie": false,
-        "pdm": false,
-        "pwm": false,
-        "quadrature_encoder": false,
-        "rtc": false,
-        "sd1": false,
-        "sdio_emmc": false,
-        "spi": true,
-        "timer": true,
-        "uart": true,
-        "usb": true,
-        "watchdog": true,
-        "wifi_sdio": false,
-        "xspi_ospi": true
-      },
-      "topology": {
-        "a55_cluster": {
-          "app": "alp-image-edge",
-          "machine": "e1m-nx9101-a55",
-          "os": "yocto",
-          "toolchain": "poky-glibc"
-        },
-        "m33": {
-          "app": "alp-stock-shim",
-          "board": "alp_e1m_nx9101_m33",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }

@@ -7,8 +7,8 @@
  * Every op, including open, returns ALP_ERR_NOSUPPORT (close is a
  * no-op).  Apps that link this backend should never reach get_input / invoke
  * on a real silicon build -- tflm (priority 50) wins on any
- * silicon_ref, and the Ethos-U backends (ethos_u_aen at 100 on
- * AEN, ethos_u_n93 at 100 on N93) win on theirs.  DRP-AI / DX-M1
+ * silicon_ref, and the Ethos-U backend (ethos_u_aen at 100 on
+ * AEN) wins on its silicon.  DRP-AI / DX-M1
  * are A55/Linux-side engines outside this registry (#58/#59).
  *
  * Priority 0, silicon_ref=\"*\": picked only when no real backend

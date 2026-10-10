@@ -12,17 +12,22 @@ CHECKS="-DTR_RASTER_CHECKS"
 for t in tests/host/test_*.c; do
 	out="$RUN_TMP/tr-$(basename "$t" .c)"
 	extra_cflags=""
-	# test_track_cam_orientation.c needs TR_CAM_MIRROR_X/TR_CAM_FLIP_Y compiled
-	# in as 1 (track.h #ifndef-guards both) to exercise the `1` state of the
-	# camera-orientation constants against the real track.c -- see that file's
-	# header comment (whole-branch fix round B, B2).
+	# test_track_cam_orientation.c needs TR_CAM_FLIP_Y compiled in as 1
+	# (track.h #ifndef-guards it) to exercise the `1` state of the
+	# camera-orientation constant against the real track.c / pose.c -- see
+	# that file's header comment.
 	if [ "$(basename "$t")" = "test_track_cam_orientation.c" ]; then
-		extra_cflags="-DTR_CAM_MIRROR_X=1 -DTR_CAM_FLIP_Y=1"
+		extra_cflags="-DTR_CAM_FLIP_Y=1"
 	fi
 	# test_tilt_takeover.c re-runs test_tilt.c with the bench/dev takeover
 	# compiled in (tilt.h's TR_TILT_TAKEOVER, default OFF).
 	if [ "$(basename "$t")" = "test_tilt_takeover.c" ]; then
 		extra_cflags="-DTR_TILT_TAKEOVER=1"
+	fi
+	# test_a32_turned.c compares a 720-wide panel's frame with the centre crop of the 800-wide one,
+	# which only holds with the focal length pinned (r3d_scene.h tr_scene_f_px: it follows fw).
+	if [ "$(basename "$t")" = "test_a32_turned.c" ]; then
+		extra_cflags="-DTR_SCENE_F_PX_FIXED=1"
 	fi
 	# test_r3d_zones.c reads the raster's TR_PROF_* counters for its per-zone
 	# cost estimate (the A32 qemu stage below builds it without: goldens only).
@@ -40,7 +45,20 @@ for t in tests/host/test_*.c; do
 	fi
 	if "$out"; then echo "PASS: $t"; else echo "FAIL: $t"; rc=1; fi
 done
-# The 30 Hz panel build (P11a, -DTR_PANEL_HZ=30): the frame-counted game
+# The arm controls with the sensor NOT mirrored (cam_rot.h TR_CAM_MIRROR=0: a
+# camera that sees the player face to face): the same physical player's LEFT
+# arm must still be the left lane, at every rotation (the default build above
+# is the release's selfie mirror).
+for t in test_arms test_cam_mirror; do
+	out="$RUN_TMP/tr-$t-nomirror"
+	if cc -std=c11 -Wall -Wextra -Werror -ffp-contract=off -g -DTR_CAM_MIRROR=0 -o "$out" "tests/host/$t.c" \
+		$(ls src/game/*.c src/vision/*.c src/ipc/*.c 2>/dev/null | grep -v main.c) -lm && "$out" >/dev/null; then
+		echo "PASS: tests/host/$t.c -DTR_CAM_MIRROR=0"
+	else
+		echo "FAIL: tests/host/$t.c -DTR_CAM_MIRROR=0"; rc=1
+	fi
+done
+# The 30 Hz panel build (P11a,-DTR_PANEL_HZ=30): the frame-counted game
 # logic re-run with its constants scaled -- test_panel_hz.c checks the real
 # times, the others that the logic holds at the 30 Hz counts.
 for t in test_panel_hz test_step test_pace test_tilt test_tilt_takeover test_attract test_mbox test_hud test_score test_react \
@@ -91,6 +109,20 @@ if bash tests/host/test_hp_vision_check.sh; then
 else
 	echo "FAIL: tests/host/test_hp_vision_check.sh"; rc=1
 fi
+# The combined HP image (camera + NPU + game sound in one HP_APP): its build gate, release
+# interlocks and the source-level wiring of the I2C2/GPIO5 lease (a32/release/*_check.sh).
+if bash tests/host/test_hp_combined.sh; then
+	echo "PASS: tests/host/test_hp_combined.sh"
+else
+	echo "FAIL: tests/host/test_hp_combined.sh"; rc=1
+fi
+# The power graph's source interlock: the I2C2 lease check before any transfer, a gap for every slot the poll
+# cannot sample, never blocking (platform/rail5v_power.c is a Zephyr file with no host build).
+if bash tests/host/test_rail5v_gap.sh; then
+	echo "PASS: tests/host/test_rail5v_gap.sh"
+else
+	echo "FAIL: tests/host/test_rail5v_gap.sh"; rc=1
+fi
 # The TR_PANEL_HZ release interlock (a32/release/panel_hz_check.sh).
 if bash tests/host/test_panel_hz_check.sh; then
 	echo "PASS: tests/host/test_panel_hz_check.sh"
@@ -120,12 +152,16 @@ skip() {
 R3D_SRC="src/render/sprite.c src/render/proj.c src/render/r3d_math.c src/render/r3d_raster.c src/render/r3d_scene.c src/render/r3d_rig.c src/render/cam_pip.c"
 AUDIO_SRC="src/audio/tr_audio.c src/ipc/tr_aring.c"
 WARN="-std=c11 -Wall -Wextra -Wdouble-promotion -Werror -ffp-contract=off -O2"
-# r3d_raster.c at the renderer's RASTER_OPT (a32/renderer/Makefile), the rest
-# at -O2 like the image: the A32 r3d tests prove the goldens as shipped.
+# r3d_raster.c at the renderer's RASTER_OPT and cam_pip.c at its HOT_OPT (a32/renderer/Makefile), the
+# rest at -O2 like the image: the A32 r3d tests prove the goldens and the NEON kernels as shipped.
 A32_RASTER_OPT="-O3 -funroll-loops"
+A32_HOT_OPT="-O3"
 
 if [ -n "$A32_GCC" ] && [ -n "$QEMU_ARM" ]; then
 	A32_R3D="${R3D_SRC/src\/render\/r3d_raster.c/} $RUN_TMP/r3d_raster.o"
+	A32_R3D="${A32_R3D/src\/render\/cam_pip.c/} $RUN_TMP/cam_pip.o"
+	"$A32_GCC" $WARN $A32_HOT_OPT -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
+		-c -o "$RUN_TMP/cam_pip.o" src/render/cam_pip.c || { echo "BUILD FAIL (A32): cam_pip.c"; rc=1; }
 	"$A32_GCC" $WARN $A32_RASTER_OPT $CHECKS -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
 		-c -o "$RUN_TMP/r3d_raster.o" src/render/r3d_raster.c || { echo "BUILD FAIL (A32): r3d_raster.c"; rc=1; }
 	for t in tests/host/test_r3d_*.c tests/host/test_audio.c; do
@@ -136,6 +172,15 @@ if [ -n "$A32_GCC" ] && [ -n "$QEMU_ARM" ]; then
 		fi
 		if "$QEMU_ARM" -cpu max "$out" >/dev/null; then echo "PASS (A32 qemu): $t"; else echo "FAIL (A32 qemu): $t"; rc=1; fi
 	done
+	# The rot-90/270 NEON copy-out header (tr_rot_blit_neon) at the image's -O3 too.
+	out="$RUN_TMP/tr-a32-panel_rot-O3.elf"
+	if "$A32_GCC" $WARN $A32_HOT_OPT -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
+		--specs=rdimon.specs -o "$out" tests/host/test_r3d_panel_rot.c $A32_R3D -lm &&
+		"$QEMU_ARM" -cpu max "$out" >/dev/null; then
+		echo "PASS (A32 qemu -O3): tests/host/test_r3d_panel_rot.c"
+	else
+		echo "FAIL (A32 qemu -O3): tests/host/test_r3d_panel_rot.c"; rc=1
+	fi
 	for f in "-DTR_AUDIO_V2=0" "-DTR_AUDIO_V3=0" "-DTR_AUDIO_RATE=48000u"; do
 		out="$RUN_TMP/tr-a32-test_audio$(echo "$f" | tr -dc 'A-Za-z0-9_').elf"
 		if "$A32_GCC" $WARN -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard --specs=rdimon.specs \
@@ -147,6 +192,33 @@ if [ -n "$A32_GCC" ] && [ -n "$QEMU_ARM" ]; then
 	done
 else
 	skip "A32 NEON stage (set TR_A32_GCC / TR_QEMU_ARM)"
+fi
+
+# render.c at the renderer image's HOT_OPT (a32/renderer/Makefile, -O3) on Cortex-A32 under qemu-arm:
+# the test_a32_*.c suites include it (RENDER_A32=0: the scalar paths, no CP15), so the goldens hold
+# for what the image's -O3 objects compute; test_a32_copyout_neon.c includes it as RENDER_A32=1 and runs
+# the NEON rot-90/270 copy-out (tr_rot_blit_neon inlined into copy_rows_turned) against the mapping.
+# Only the test's own TU (render.c) is -O3; the game / vision / hud / ipc sources it links are built at -O2 like the other A32 stages.
+if [ -n "$A32_GCC" ] && [ -n "$QEMU_ARM" ]; then
+	A32_DEPS=""
+	for f in $(ls src/game/*.c src/vision/*.c src/hud/*.c src/render/sprite.c src/render/proj.c \
+		src/render/r3d_math.c src/render/r3d_scene.c src/render/r3d_rig.c src/render/cam_pip.c \
+		src/ipc/*.c src/audio/*.c 2>/dev/null | grep -v main.c); do
+		o="$RUN_TMP/a32d-$(echo "$f" | tr / _).o"
+		"$A32_GCC" $WARN -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard -c -o "$o" "$f" ||
+			{ echo "BUILD FAIL (A32): $f"; rc=1; }
+		A32_DEPS="$A32_DEPS $o"
+	done
+	# (test_a32_turned.c / test_a32_video.c mmap a host scratch: host cc only)
+	for t in tests/host/test_a32_cold_mailbox.c tests/host/test_a32_font.c tests/host/test_a32_render.c \
+		tests/host/test_a32_scene.c tests/host/test_a32_copyout_neon.c; do
+		out="$RUN_TMP/tr-a32o3-$(basename "$t" .c).elf"
+		if ! "$A32_GCC" $WARN -O3 -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
+			--specs=rdimon.specs -o "$out" "$t" $A32_DEPS "$RUN_TMP/r3d_raster.o" -lm; then
+			echo "BUILD FAIL (A32 -O3): $t"; rc=1; continue
+		fi
+		if "$QEMU_ARM" -cpu max "$out" >/dev/null; then echo "PASS (A32 qemu -O3): $t"; else echo "FAIL (A32 qemu -O3): $t"; rc=1; fi
+	done
 fi
 
 # A32 renderer image (a32/renderer), scene and golden builds: must build warning-free and fit its
@@ -187,7 +259,7 @@ else
 fi
 
 if [ -n "$M55_GCC" ]; then
-	for f in $R3D_SRC $AUDIO_SRC src/game/sfx.c src/vision/movenet.c src/vision/pose.c \
+	for f in $R3D_SRC $AUDIO_SRC src/game/sfx.c src/vision/movenet.c src/vision/pose.c src/vision/arms.c \
 		src/vision/camera_ae.c src/vision/kp_smooth.c src/ipc/tr_pslot.c src/ipc/tr_cam_view.c; do
 		if "$M55_GCC" $WARN -mcpu=cortex-m55 -mthumb -mfloat-abi=hard -c -o /dev/null "$f"; then
 			echo "PASS (M55 compile): $f"

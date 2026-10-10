@@ -47,7 +47,7 @@ is left carrying whatever application the line intends — not this tool.
 
 ```sh
 # 0. Hold the bench reservation, as for any bench operation.
-export LG_COORDINATOR=100.64.0.1:20408
+export LG_COORDINATOR=<coordinator>
 labgrid-client -p <your-bench-place> acquire
 
 # 1. Pack this unit's identity on the host.  The serial must come from the
@@ -143,7 +143,7 @@ Page** that can be permanently locked. This app also carries the write +
 lock tooling for it, as two build-time modes distinct from the array write
 above. Do this only after the array manifest has been written and verified
 (this file's default flow) and, per
-`docs/som-batch-provisioning-procedure.md` §7 (alp-sdk-internal), only after
+the internal batch-provisioning procedure (not part of this public tree), only after
 cold-cycling the board.
 
 ```sh
