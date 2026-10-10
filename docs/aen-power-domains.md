@@ -217,7 +217,7 @@ resolution).
 **Verified on silicon (bench U8h, E1M-AEN803):** the SE accepts the profile, the EWIC entry
 removes power and the wake is a cold boot, BKRAM (bit 21) retains the record across STOP, and
 the LPTIMER (500 ms, 5 s) and the RV-3028 countdown (3 s, 11 s) and alarm wake the SoC.
-**Verified on silicon (e1m-aen-evk-02, E1M-AEN803 2026W36-0001, 2026-10-10):** STANDBY
+**Verified on silicon (E1M-AEN803 2026W36-0001 on an E1M-EVK, 2026-10-10):** STANDBY
 (`s-standby`: the LPTIMER, countdown and alarm cycles all woke with `realised_mode` STANDBY) and
 DTCM retention across STOP (`t-tcm-retain`, `retain_kb` 256: a CRC-checked pattern in both
 DTCM halves survived all three cycles). A TCM-retained STOP wake leaves `RTSS_HE_RESET` = 0x01,

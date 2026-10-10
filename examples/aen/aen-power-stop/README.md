@@ -79,7 +79,7 @@ One variable each, selected with a config fragment on top of `prj.conf`
 
 ### STANDBY, TCM retention and wake-to-main() timing
 
-Three further fragments. Bench result on e1m-aen-evk-02 (E1M-AEN803, 2026-10-10): `s-standby` and
+Three further fragments. Bench result on an E1M-AEN803 (2026W36-0001) on an E1M-EVK, 2026-10-10: `s-standby` and
 `t-tcm-retain` ran 3/3 cycles with every verdict PASS; `w-wake-timing` ran but its counters are too
 coarse to resolve wake-to-`main()` (see the timing note below). `t-tcm-retain-128k` was not run. Each is
 selected like the others (`-DEXTRA_CONF_FILE=variants/<name>.conf`); the default image is unchanged.

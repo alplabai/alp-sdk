@@ -1795,7 +1795,7 @@ ZTEST(power_alif_se, test_the_record_says_whether_nsrst_can_be_trusted)
 
 ZTEST(power_alif_se, test_a_tcm_retaining_sleep_never_trusts_nsrst)
 {
-	/* Bench e1m-aen-evk-02: a TCM-retained STOP wake reads RTSS_HE_RESET = 0x01, the same
+	/* Bench (E1M-AEN803 2026W36-0001): a TCM-retained STOP wake reads RTSS_HE_RESET = 0x01, the same
 	 * as a pin reset, so the record must not let the next boot read the bit as one. */
 	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
 	g_state.retain      = (alp_power_retain_t){ .level = ALP_POWER_RETAIN_TCM, .retain_kb = 128u };
