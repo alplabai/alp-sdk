@@ -12,17 +12,19 @@ description: |
   Only pads of the `lpgpio` controller (P15_n = line n) qualify: the LPGPIO island is in
   the VBAT domain and stays powered through STOP.  The polarity flag of each entry is the
   ASSERTED level, so GPIO_ACTIVE_LOW wakes on a falling edge and GPIO_ACTIVE_HIGH on a
-  rising edge.  A pad the SoM itself wires (the power-domain pads P15_0, P15_1, P15_4 ..
-  P15_7 and the OSPI INTn nets P15_2 / P15_3 on the E1M-AEN801 / E1M-AEN803) is refused at
-  run time: ALP_POWER_WAKE_GPIO is then not advertised and
+  rising edge.  A pad the SoM itself wires (the power-domain pads P15_0, P15_1, P15_4, P15_5
+  and the OSPI nets P15_2, P15_3, P15_6, P15_7, i.e. all eight lines on the E1M-AEN801 /
+  E1M-AEN803) is refused at run time: ALP_POWER_WAKE_GPIO is then not advertised and
   alp_power_configure_wake_source() answers ALP_ERR_NOSUPPORT.
 
-  Example (the pad must be free on your carrier; `pinctrl_wake_pads` is the pad group
-  that muxes the pad to LPGPIO and enables its input buffer):
+  Example.  The line number is a placeholder: on the bare E1M-AEN801 / E1M-AEN803 every line
+  is SoM-wired, so the example is refused there; use it only for a pad that a variant or a
+  derivative frees.  `pinctrl_wake_pads` is the pad group that muxes the pad to LPGPIO and
+  enables its input buffer:
 
     wake-pads {
         compatible = "alp,power-wake-gpios";
-        wake-gpios = <&lpgpio 2 GPIO_ACTIVE_LOW>;
+        wake-gpios = <&lpgpio N GPIO_ACTIVE_LOW>;   /* N: a freed line, 0..7 */
         pinctrl-0 = <&pinctrl_wake_pads>;
         pinctrl-names = "default";
     };

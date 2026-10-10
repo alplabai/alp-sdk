@@ -79,16 +79,18 @@ uint32_t alif_se_hw_wake_pad_mask(void);
 /** Mux the pads (pinctrl-0), make them plain inputs and drop any stale latched edge.  The
  *  interrupt itself is switched on only inside alif_se_hw_enter_ewic(), under the lock. */
 alp_status_t alif_se_hw_wake_pads_arm(void);
-/** Pads that read at their asserted level right now (an edge wake would never fire on them). */
-uint32_t alif_se_hw_wake_pads_asserted(void);
 /** Switch the pad interrupts and the combined line off.  Idempotent. */
 void alif_se_hw_wake_pads_disarm(void);
-/** Pads of @p pads whose edge the GPIO block latched.  Reads the register directly (plus what
- *  the entry saw right after the WFI), so it is valid on the early cold-boot path. */
+/** Runtime path (after the WFI, driver live): pads of @p pads whose edge the GPIO block latched,
+ *  from a live register read plus what the entry saw right after the WFI. */
 uint32_t alif_se_hw_wake_pads_fired(uint32_t pads);
-/** Cold-boot path, no driver up: acknowledge the latched edge of @p pads and disable their
- *  interrupt enable, so the next cycle starts clean. */
+/** Runtime path: acknowledge (PORTA_EOI) the latched edge of @p pads so the next cycle starts
+ *  clean.  Disarm has already cleared their interrupt enable through the GPIO driver. */
 void alif_se_hw_wake_pads_release(uint32_t pads);
+/** Cold-boot path: the LPGPIO RAW_INTSTATUS captured at PRE_KERNEL_1 priority 0, before the GPIO
+ *  driver's init clears it.  0 without an `alp,power-wake-gpios` node.  The wake decode (POST_KERNEL)
+ *  must read this, never the live register. */
+uint32_t alif_se_hw_wake_pads_boot_latched(void);
 
 /** CGU / CLKCTL_SYS registers for the clock-restore trigger and its log. */
 #define ALIF_SE_CGU_OSC_CTRL      0u

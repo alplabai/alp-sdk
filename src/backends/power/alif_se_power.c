@@ -1329,19 +1329,16 @@ void alp_som_power_wake_decode_early(alp_som_pd_record_t *rec)
 	if ((rec->armed_hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
 		rec->wake_source |= rec->timed_bit;
 	}
-	/* The LPGPIO block is in the VBAT domain, so a pad's latched edge survives the STOP.  Which
-	 * pads fired goes into the record's upper armed_hw byte (alp_som_power_boot_wake_pads()).
-	 * Acknowledged either way, so a stale edge cannot be read as the next cycle's wake. */
+	/* The LPGPIO block is in the VBAT domain, so a pad's latched edge survives the STOP.  This
+	 * hook runs at POST_KERNEL, after gpio_dw's init has already cleared INTEN and written
+	 * PORTA_EOI (zephyr drivers/gpio/gpio_dw.c:460-461), so RAW_INTSTATUS is read from the
+	 * PRE_KERNEL_1 snapshot (alif_se_hw_wake_pads_boot_latched()), not live.  Nothing to
+	 * acknowledge here: that same init did it. */
 	uint32_t pads = (rec->armed_hw >> ALP_SOM_ARM_PADS_SHIFT) & ALP_SOM_PADS_MASK;
 
-	if ((rec->armed_hw & ALP_SOM_ARM_LPGPIO) != 0u && pads != 0u) {
-		uint32_t fired = alif_se_hw_wake_pads_fired(pads);
-
-		if (fired != 0u) {
-			rec->wake_source |= ALP_POWER_WAKE_GPIO;
-			rec->armed_hw |= fired << ALP_SOM_FIRED_PADS_SHIFT;
-		}
-		alif_se_hw_wake_pads_release(pads);
+	if ((rec->armed_hw & ALP_SOM_ARM_LPGPIO) != 0u &&
+	    (alif_se_hw_wake_pads_boot_latched() & pads) != 0u) {
+		rec->wake_source |= ALP_POWER_WAKE_GPIO;
 	}
 }
 

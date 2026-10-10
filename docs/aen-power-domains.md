@@ -136,7 +136,7 @@ EWIC; its handler only masks the line again.
 ```dts
 wake-pads {
 	compatible = "alp,power-wake-gpios";
-	wake-gpios = <&lpgpio 2 GPIO_ACTIVE_LOW>;   /* P15_2: line 2 of the LPGPIO island */
+	wake-gpios = <&lpgpio N GPIO_ACTIVE_LOW>;   /* P15_N: a line the variant frees (see "Refused pads") */
 	pinctrl-0 = <&pinctrl_wake_pads>;           /* LPGPIO function, input buffer, pull */
 	pinctrl-names = "default";
 };
@@ -153,17 +153,20 @@ wake-pads {
   asserted once the edge is armed is `ALP_ERR_BUSY`, as for the RV-3028 `INT`.
 - *Which pad fired.* The DW GPIO block latches the edge in `GPIO_RAW_INTSTATUS` (LPGPIO base
   `0x42002000` + `0x44`, DFP `soc.h:1575`) until `GPIO_PORTA_EOI` (+ `0x4C`) is written. The BKRAM
-  record keeps the armed pads in `armed_hw` bits 23:16; the early cold-boot decode reads the latch,
-  sets `ALP_POWER_WAKE_GPIO` in `wake_source`, stores the fired pads in `armed_hw` bits 31:24 and
-  acknowledges the latch and the enable. An aborted sleep reads the same latch right after the
-  `WFI`. `alp_power_boot_wake_info()` reports only the bit; internally
-  `alp_som_power_boot_wake_pads()` returns the pad mask, and an application with several pads reads
-  its own pads' levels.
+  record keeps the armed pads in `armed_hw` bits 23:16. `gpio_dw`'s init (PRE_KERNEL_1) writes
+  `INTEN = 0` and `PORTA_EOI = ~0` (Zephyr `drivers/gpio/gpio_dw.c:460-461`), which would erase the
+  latch before the POST_KERNEL wake decode runs, so a PRE_KERNEL_1 priority-0 hook snapshots
+  `GPIO_RAW_INTSTATUS` first and the decode reads that snapshot, sets `ALP_POWER_WAKE_GPIO` in
+  `wake_source` and has nothing left to acknowledge. An aborted sleep reads the live latch right
+  after the `WFI` and acknowledges it. `alp_power_boot_wake_info()` reports only the bit; an
+  application with several pads reads its own pads' levels.
 - *Refused pads.* A pad the SoM wires is never a wake pad. `alp_som_power_lpgpio_claimed()` is every
   LPGPIO pad of an `alp,som-power-domain` node (P15_0 RV-3028 `INT`, P15_1 `E_WIFI_NRST`, P15_4
-  `E_PHY_PWRDWN`, P15_5 `WIFI_EN`, P15_6 `OSPI0_RESETn`, P15_7 `OSPI1_RESETn`) plus P15_2 and P15_3
-  (the `OSPI1_INTn` / `OSPI0_INTn` nets, `alif-ospi.tsv`, wired to the memory footprints in the
-  E1M-AEN-2626-R2 netlist). One claimed pad in the node makes `ALP_POWER_WAKE_GPIO` unadvertised
+  `E_PHY_PWRDWN`, P15_5 `WIFI_EN`, and on the AEN803 P15_6 `OSPI0_RESETn`, P15_7 `OSPI1_RESETn`)
+  plus the pads in the `alp,wired-lpgpio-pads` property of the `alp,som-power` node. The generated
+  board dts of every AEN SoM lists P15_2, P15_3, P15_6 and P15_7 there (the OSPI `INTn` / `RESETn`
+  nets, `alif-ospi.tsv`, wired to the memory footprints on the one E1M-AEN-2626-R2 PCB whether or
+  not the part is populated); the source is `wired_lpgpio_pads:` in `on-module-links.yaml`. One claimed pad in the node makes `ALP_POWER_WAKE_GPIO` unadvertised
   and `alp_power_configure_wake_source()` answers `ALP_ERR_NOSUPPORT`.
   **On the E1M-AEN801 / E1M-AEN803 R2 all eight lines are SoM-wired, so no pad is accepted on the
   bare module**; the path is for a variant or a derivative where a line is freed.

@@ -79,11 +79,9 @@ extern alp_som_bench_knobs_t alp_som_bench_knobs;
 #define ALP_SOM_ARM_RTC_INT   0x00000004u /**< RV-3028 /INT -> P15_0 armed by the caller. */
 #define ALP_SOM_ARM_LPGPIO    0x00000008u /**< One or more LPGPIO wake pads (P15_n) armed. */
 /** LPGPIO wake pads, one bit per line n of P15_n.  armed_hw bits 23:16 hold the pads this
- *  cycle armed (the STOP backend writes them); bits 31:24 hold the pads whose edge was
- *  latched at the cold boot (the early wake decode writes them).  Bits 15:9 stay free. */
-#define ALP_SOM_ARM_PADS_SHIFT   16u
-#define ALP_SOM_FIRED_PADS_SHIFT 24u
-#define ALP_SOM_PADS_MASK        0xFFu
+ *  cycle armed (the STOP backend writes them).  Bits 15:9 and 31:24 stay free. */
+#define ALP_SOM_ARM_PADS_SHIFT 16u
+#define ALP_SOM_PADS_MASK      0xFFu
 /** Record flag (not a wake path): the reset syndrome's NSRST bit was probed before the
  *  sleep and does clear, so a set bit at the next boot really is a pin reset. */
 #define ALP_SOM_REC_NSRST_TRUSTED 0x00000100u
@@ -313,16 +311,11 @@ struct gpio_dt_spec;
  *  domain), or NULL when the domain is absent or has none. */
 const struct gpio_dt_spec *alp_som_power_wake_gpio(alp_power_domain_t domain);
 
-/** LPGPIO lines (bit n = P15_n) the SoM itself wires: every pad of an
- *  `alp,som-power-domain` node on the lpgpio controller, plus P15_2 / P15_3 (the OSPI1_INTn /
- *  OSPI0_INTn nets, which have no domain node).  A pad in this set is never an application
- *  wake pad. */
+/** LPGPIO lines (bit n = P15_n) the SoM itself wires: every pad of an `alp,som-power-domain`
+ *  node on the lpgpio controller, plus the pads listed in the `alp,wired-lpgpio-pads` property of
+ *  the `alp,som-power` node (the OSPI INTn / RESETn nets on the AEN801 / AEN803).  A pad in this
+ *  set is never an application wake pad. */
 uint32_t alp_som_power_lpgpio_claimed(void);
-
-/** LPGPIO pads (bit n = P15_n) whose edge was latched at the last cold boot, from the early
- *  wake decode; 0 when the boot was not a GPIO wake.  Internal: <alp/power.h> reports only
- *  ALP_POWER_WAKE_GPIO, so an application with several wake pads reads its own pads. */
-uint32_t alp_som_power_boot_wake_pads(void);
 
 /** True when the RV-3028 has its alarm or countdown interrupt enabled
  *  (CONTROL_2 AIE | TIE).  ALP_ERR_NOT_READY with no RTC domain / I2C bus. */

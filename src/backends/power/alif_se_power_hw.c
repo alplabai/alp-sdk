@@ -665,22 +665,6 @@ alp_status_t alif_se_hw_wake_pads_arm(void)
 	return ALP_OK;
 }
 
-uint32_t alif_se_hw_wake_pads_asserted(void)
-{
-	uint32_t asserted = 0u;
-
-	if (!wpads_ready()) {
-		return 0u;
-	}
-	lpgpio_clock_ensure();
-	for (size_t i = 0; i < ARRAY_SIZE(_wpad); ++i) {
-		if (gpio_pin_get_dt(&_wpad[i]) > 0) {
-			asserted |= BIT(_wpad[i].pin);
-		}
-	}
-	return asserted;
-}
-
 /* Interrupt lock held (PRIMASK set) by the caller. */
 static alp_status_t wpads_open_locked(void)
 {
@@ -719,12 +703,32 @@ uint32_t alif_se_hw_wake_pads_fired(uint32_t pads)
 	return (_wfi_pads_seen | sys_read32(HW_LPGPIO_RAW_INTSTAT)) & pads;
 }
 
-/* Cold-boot path: no driver is up, so plain register writes. */
+/* Runtime path: disarm has already disabled the pads' interrupts through the driver. */
 void alif_se_hw_wake_pads_release(uint32_t pads)
 {
-	pads &= 0xFFu;
-	sys_write32(sys_read32(HW_LPGPIO_INTEN) & ~pads, HW_LPGPIO_INTEN);
-	sys_write32(pads, HW_LPGPIO_EOI);
+	sys_write32(pads & 0xFFu, HW_LPGPIO_EOI);
+}
+
+/* LPGPIO RAW_INTSTATUS as the SE's wake left it.  gpio_dw's init (PRE_KERNEL_1,
+ * CONFIG_GPIO_INIT_PRIORITY) writes INTEN = 0 and PORTA_EOI = ~0 (zephyr drivers/gpio/gpio_dw.c:
+ * 460-461), so the latched edge is gone by the time the POST_KERNEL wake decode runs.  Capture it
+ * at priority 0, ahead of that init. */
+BUILD_ASSERT(CONFIG_GPIO_INIT_PRIORITY > 0,
+             "the wake-pad snapshot (priority 0) must precede gpio_dw");
+
+static uint32_t _boot_pads_latched;
+
+static int wpads_boot_snapshot(void)
+{
+	lpgpio_clock_ensure();
+	_boot_pads_latched = sys_read32(HW_LPGPIO_RAW_INTSTAT) & 0xFFu;
+	return 0;
+}
+SYS_INIT(wpads_boot_snapshot, PRE_KERNEL_1, 0);
+
+uint32_t alif_se_hw_wake_pads_boot_latched(void)
+{
+	return _boot_pads_latched;
 }
 
 #else /* no alp,power-wake-gpios node */
@@ -739,11 +743,6 @@ uint32_t alif_se_hw_wake_pad_mask(void)
 alp_status_t alif_se_hw_wake_pads_arm(void)
 {
 	return ALP_ERR_NOT_READY;
-}
-
-uint32_t alif_se_hw_wake_pads_asserted(void)
-{
-	return 0u;
 }
 
 static alp_status_t wpads_open_locked(void)
@@ -764,6 +763,11 @@ uint32_t alif_se_hw_wake_pads_fired(uint32_t pads)
 void alif_se_hw_wake_pads_release(uint32_t pads)
 {
 	(void)pads;
+}
+
+uint32_t alif_se_hw_wake_pads_boot_latched(void)
+{
+	return 0u;
 }
 #endif
 
@@ -869,7 +873,9 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t pads, uint32_t lptimer
 			alif_se_hw_wake_timer_disarm();
 		}
 		alif_se_hw_rtc_int_disarm();
-		alif_se_hw_wake_pads_disarm();
+		if (pads != 0u) {
+			alif_se_hw_wake_pads_disarm();
+		}
 		DWT->CTRL  = orig_dwt; /* the arm turned the cycle counter on */
 		DCB->DEMCR = orig_demcr;
 		__set_BASEPRI(orig_basepri);
@@ -922,7 +928,9 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t pads, uint32_t lptimer
 	SCB->SCR &= ~SCB_SCR_SLEEPDEEP_Msk;
 	sys_write32(orig_ctrl, HW_RTSS_HE_CTRL); /* the WIC bits and COLD_WAKEUP as found */
 	alif_se_hw_rtc_int_disarm();
-	alif_se_hw_wake_pads_disarm();
+	if (pads != 0u) { /* else the app's own interrupt on a pad is not ours to disable */
+		alif_se_hw_wake_pads_disarm();
+	}
 
 	MEMSYSCTL->MSCR |= orig_mscr & (MEMSYSCTL_MSCR_ICACTIVE_Msk | MEMSYSCTL_MSCR_DCACTIVE_Msk);
 	SCB->CCR      = orig_ccr;

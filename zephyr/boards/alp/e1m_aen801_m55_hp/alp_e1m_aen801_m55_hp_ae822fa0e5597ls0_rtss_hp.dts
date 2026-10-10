@@ -336,6 +336,10 @@
 		compatible = "alp,som-power";
 		pinctrl-0 = <&pinctrl_som_power>;
 		pinctrl-names = "default";
+		/* SoM-wired LPGPIO pads without a domain node (alif-ospi.tsv):
+		 * OSPI1_INTn P15_2, OSPI0_INTn P15_3, OSPI0_RESETn P15_6, OSPI1_RESETn P15_7.
+		 * Never an application wake pad. */
+		alp,wired-lpgpio-pads = <2 3 6 7>;
 
 		/*
 		 * E_WIFI_NRST / WIFI_EN pads: inter-chip.tsv rows E_WIFI_NRST (P15_1_FLEX)

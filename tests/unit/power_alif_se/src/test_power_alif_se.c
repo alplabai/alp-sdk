@@ -155,9 +155,10 @@ static int      g_arm_timer_rc, g_arm_int_rc;
 static unsigned g_enter_count;
 static uint8_t  g_rtc_flags; /* tentative: defined with the other som_power fakes below */
 static bool     g_enter_rtc_int;
-static uint32_t g_enter_pads;                    /* the pads mask the entry was given */
-static uint32_t g_wake_pad_mask, g_claimed;      /* DT-named pads / pads the SoM wires */
-static uint32_t g_pads_asserted, g_pads_latched; /* levels read / edges latched by the fake block */
+static uint32_t g_enter_pads;               /* the pads mask the entry was given */
+static uint32_t g_wake_pad_mask, g_claimed; /* DT-named pads / pads the SoM wires */
+static uint32_t g_pads_latched;      /* live RAW_INTSTATUS of the fake block (runtime path) */
+static uint32_t g_pads_boot_latched; /* the PRE_KERNEL_1 snapshot (cold-boot path) */
 static int      g_arm_pads_rc;
 static uint32_t g_released_pads;
 static bool     g_enter_fires; /* the fake sleep ends at once with the armed source fired */
@@ -253,11 +254,6 @@ alp_status_t alif_se_hw_wake_pads_arm(void)
 	return ALP_OK;
 }
 
-uint32_t alif_se_hw_wake_pads_asserted(void)
-{
-	return g_pads_asserted;
-}
-
 void alif_se_hw_wake_pads_disarm(void)
 {
 	ev(EV_DISARM_WAKE_PADS);
@@ -273,6 +269,11 @@ void alif_se_hw_wake_pads_release(uint32_t pads)
 	ev(EV_RELEASE_WAKE_PADS);
 	g_released_pads |= pads;
 	g_pads_latched &= ~pads;
+}
+
+uint32_t alif_se_hw_wake_pads_boot_latched(void)
+{
+	return g_pads_boot_latched;
 }
 
 uint32_t alp_som_power_lpgpio_claimed(void)
@@ -692,11 +693,11 @@ static void reset_fakes(void)
 	g_enter_rtc_int               = false;
 	g_enter_pads                  = 0u;
 	g_wake_pad_mask = g_claimed = 0u;
-	g_pads_asserted = g_pads_latched = 0u;
-	g_arm_pads_rc                    = 0;
-	g_released_pads                  = 0u;
-	g_enter_fires                    = true;
-	g_enter_rc                       = 0;
+	g_pads_latched = g_pads_boot_latched = 0u;
+	g_arm_pads_rc                        = 0;
+	g_released_pads                      = 0u;
+	g_enter_fires                        = true;
+	g_enter_rc                           = 0;
 	memset(g_regs_at_enter, 0, sizeof(g_regs_at_enter));
 	g_set_calls = 0;
 	memset(&g_set, 0, sizeof(g_set));
@@ -1718,7 +1719,6 @@ ZTEST(power_alif_se, test_the_record_carries_the_armed_pads)
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_OK);
 	zassert_not_equal(g_rec_at_set.armed_hw & ALP_SOM_ARM_LPGPIO, 0u);
 	zassert_equal((g_rec_at_set.armed_hw >> ALP_SOM_ARM_PADS_SHIFT) & ALP_SOM_PADS_MASK, PAD2);
-	zassert_equal(g_rec_at_set.armed_hw >> ALP_SOM_FIRED_PADS_SHIFT, 0u, "nothing fired yet");
 	zassert_not_equal(g_rec_at_set.armed & ALP_POWER_WAKE_GPIO, 0u);
 }
 
@@ -1757,40 +1757,40 @@ ZTEST(power_alif_se, test_an_aborted_sleep_reports_gpio_and_consumes_the_edge)
 	zassert_equal(g_pads_latched, 0u);
 }
 
-ZTEST(power_alif_se, test_decode_early_names_the_pad_that_fired)
+ZTEST(power_alif_se, test_decode_early_reads_the_boot_snapshot_not_the_live_register)
 {
 	alp_som_pd_record_t rec = {
 		.armed_hw = ALP_SOM_ARM_LPGPIO | ((PAD2 | PAD3) << ALP_SOM_ARM_PADS_SHIFT),
 	};
 
-	g_pads_latched = PAD3;
+	/* gpio_dw's init has already cleared the live register (g_pads_latched == 0); only the
+	 * PRE_KERNEL_1 snapshot still holds the edge. */
+	g_pads_latched      = 0u;
+	g_pads_boot_latched = PAD3;
 	alp_som_power_wake_decode_early(&rec);
 	zassert_equal(rec.wake_source, ALP_POWER_WAKE_GPIO);
-	zassert_equal(rec.armed_hw >> ALP_SOM_FIRED_PADS_SHIFT, PAD3);
-	zassert_equal(g_released_pads, PAD2 | PAD3, "armed pads are acknowledged either way");
-	zassert_equal(g_pads_latched, 0u);
 
-	/* nothing latched: no claim, still acknowledged */
+	/* and the other way round: a live edge that the snapshot never saw is not a boot wake */
 	rec = (alp_som_pd_record_t){
 		.armed_hw = ALP_SOM_ARM_LPGPIO | (PAD2 << ALP_SOM_ARM_PADS_SHIFT),
 	};
+	g_pads_latched      = PAD2;
+	g_pads_boot_latched = 0u;
 	alp_som_power_wake_decode_early(&rec);
 	zassert_equal(rec.wake_source, 0u);
-	zassert_equal(rec.armed_hw >> ALP_SOM_FIRED_PADS_SHIFT, 0u);
 
-	/* a latched edge on a pad this cycle never armed proves nothing */
-	g_pads_latched = PAD3;
-	rec            = (alp_som_pd_record_t){
-		           .armed_hw = ALP_SOM_ARM_LPGPIO | (PAD2 << ALP_SOM_ARM_PADS_SHIFT),
+	/* a snapshot edge on a pad this cycle never armed proves nothing */
+	g_pads_boot_latched = PAD3;
+	rec                 = (alp_som_pd_record_t){
+		                .armed_hw = ALP_SOM_ARM_LPGPIO | (PAD2 << ALP_SOM_ARM_PADS_SHIFT),
 	};
 	alp_som_power_wake_decode_early(&rec);
 	zassert_equal(rec.wake_source, 0u);
 
-	/* a cycle that armed no pad never touches the block */
-	g_released_pads = 0u;
-	rec             = (alp_som_pd_record_t){ .armed_hw = ALP_SOM_ARM_LPTIMER };
+	/* a cycle that armed no pad never reports GPIO */
+	rec = (alp_som_pd_record_t){ .armed_hw = ALP_SOM_ARM_LPTIMER };
 	alp_som_power_wake_decode_early(&rec);
-	zassert_equal(g_released_pads, 0u);
+	zassert_equal(rec.wake_source, 0u);
 }
 
 ZTEST(power_alif_se, test_entry_failure_unwinds)
