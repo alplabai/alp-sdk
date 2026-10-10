@@ -80,7 +80,7 @@ BUILD_ASSERT(ALP_I2C_HANDOVER_ALIVE_PERIOD_MS * 1000u * 2u < ALP_I2C_HANDOVER_AL
              "the liveness timer must tick at least twice inside the sampling window");
 
 /* Release side: the record read "taken" at PRE_KERNEL_1 (before anything could change it). */
-static bool i2c_handover_taken_at_boot;
+static bool __maybe_unused i2c_handover_taken_at_boot;
 static bool i2c_handover_warm;
 
 bool alp_i2c_handover_warm_boot(void)
@@ -101,7 +101,7 @@ static bool __maybe_unused i2c_handover_stop(uintptr_t base, unsigned int irq)
 	return !(sys_read32(base + DW_IC_ENABLE_STATUS) & DW_IC_EN_BIT);
 }
 
-static void i2c_handover_delay_us(uint32_t us)
+static void __maybe_unused i2c_handover_delay_us(uint32_t us)
 {
 	k_busy_wait(us);
 }
