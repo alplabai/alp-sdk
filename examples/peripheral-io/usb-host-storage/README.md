@@ -5,13 +5,28 @@ mass-storage device on the E1M-AEN401 Cortex-M55-HP.
 
 ## Status
 
-**Compile-only skeleton; enumeration bench-gated.**
+**Driver implemented; end-to-end enumeration bench-gated on the EVK D+/D- path.**
 
-The `uhc_xhci_alif` driver is a compile-only skeleton: the `uhc_api` op table
-is complete and every function is reachable, but the ring processing, transfer
-scheduling, IRQ wiring, and root-hub enumeration are marked `TODO(aen401-bench)`
-pending hardware access to the AEN401 SoC.  The USB host controller is grounded
-at `0x48200000` / IRQ 101 from the Alif DFP `soc.h` (AE402FA0E5597).
+The `uhc_xhci_alif` driver implements the full `uhc_api`: DWC3 host-mode init +
+xHCI reset (`first_light`), command-ring/event-ring processing, root-hub port
+reset + single-device enumeration, `ep_enqueue`/`ep_dequeue` (control, bulk --
+NOT interrupt: `ep_enqueue` is fully synchronous, and a real interrupt-IN
+endpoint needs periodic, asynchronous completion this driver doesn't
+implement, so it returns `-ENOTSUP` rather than claim support it can't back),
+bus reset/suspend/resume, disable/shutdown, and an event-ring IRQ for hotplug
+(connect/disconnect) notification.  The USB host controller is grounded at
+`0x48200000` / IRQ 101 from the Alif DFP `soc.h` (AE402FA0E5597).
+
+What has actually run on silicon: `first_light` plus `enable()`'s own
+controller bring-up (DWC3 host-mode init, xHCI reset, the command/event-ring
+round trip), proven on an E8 EVK (2026-07-04 -- see the timing comments in
+`uhc_xhci_alif_first_light()`).  `enumerate()`'s device-dependent stages
+(Address Device, the GET_DESCRIPTOR control transfer) did **not** reach
+completion on that same bench session -- blocked on the EVK's D+/D- signal
+path, independent of the driver's software state (issue #388's triage
+comments).  `ep_enqueue`/`ep_dequeue`, bus suspend/resume, disable/shutdown,
+and the event-ring ISR follow the same register sequencing but have **not
+themselves been bench-run**.
 
 ## Build
 
@@ -36,17 +51,24 @@ west flash -d /tmp/usb_host
 3. Waits 2 seconds (placeholder for the enumeration wait).
 4. Calls `alp_usb_host_disable()` then `alp_usb_host_close()`.
 
-## Bench bring-up checklist (TODO(aen401-bench))
+## Bench verification checklist (needs-silicon, issue #388)
 
-- Wire `IRQ_CONNECT` in `uhc_xhci_alif_irq_config_0()` (IRQ 101).
-- Implement DWC3 soft-reset + host-mode init in `uhc_xhci_alif_init()`:
-  DCTL.CoreSoftReset (0xC704 bit 30), GCTL.PrtCapDir (0xC110 bits 13:12 = 01),
-  GUSB2PHYCFG0 (0xC200) HS-PHY parameters, GTXFIFOSIZ0/GRXFIFOSIZ0 FIFO sizing.
-- Implement xHCI cap-register read + DCBAA/command-ring/event-ring allocation
-  in `uhc_xhci_alif_enable()`.
-- Implement port-reset sequence in `uhc_xhci_alif_bus_reset()`.
-- Implement per-slot transfer TRB scheduling in `uhc_xhci_alif_ep_enqueue()`.
-- Implement the event-ring ISR and complete-transfer path.
+Everything below is implemented in software and needs a bench pass to confirm
+it behaves as designed on real silicon -- none of it is unwritten:
+
+- Confirm the EVK's D+/D- signal path so a real device actually enumerates
+  (the independent hardware blocker triage recorded on issue #388).
+- Bench-run `ep_enqueue`/`ep_dequeue` against a real bulk-only mass-storage
+  device (BOT protocol: control + one bulk OUT + one bulk IN).
+- Bench-run bus suspend/resume and disable/shutdown.
+- Confirm the event-ring IRQ (hotplug connect/disconnect while idle) actually
+  fires and that it never races a synchronous `ep_enqueue`/command poll over
+  the shared event-ring consumer state (`uhc_xhci_alif_wait_event()`'s
+  `irq_disable`/`irq_enable` bracketing is a software-only argument for why
+  it shouldn't -- not bench-proven).
+- Confirm cache-maintenance calls around the DMA rings/buffers
+  (`xhci_alif_flush`/`xhci_alif_invd`) are actually needed/sufficient for this
+  target's D-cache configuration.
 
 ## Sibling example
 

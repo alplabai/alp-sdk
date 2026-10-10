@@ -38,6 +38,35 @@ ZTEST(alp_xhci_core, test_ring_enqueue_cycle_and_link_wrap)
 	             "Link TRB cycle was the producer cycle (1)");
 }
 
+/* xhci_ring_next_index() must predict xhci_ring_enqueue()'s own wrap
+ * exactly: a plain `(index + 1) % size` gets the slot right before the Link
+ * TRB wrong (it would predict landing ON the Link TRB slot; the ring
+ * actually skips straight from size-2 to 0). */
+ZTEST(alp_xhci_core, test_ring_next_index_matches_enqueue_wrap)
+{
+	struct xhci_trb  seg[4];
+	struct xhci_ring ring;
+
+	xhci_ring_init(&ring, seg, 4); /* usable slots 0,1,2; slot 3 is the Link TRB */
+
+	zassert_equal(xhci_ring_next_index(&ring, 0u), 1u, "0 -> 1");
+	zassert_equal(xhci_ring_next_index(&ring, 1u), 2u, "1 -> 2");
+	/* The critical case: from the LAST usable slot, the next producer
+	 * index is 0 (skipping the Link TRB at index 3), not 3. */
+	zassert_equal(
+	    xhci_ring_next_index(&ring, 2u), 0u, "last usable slot wraps to 0, skipping the Link TRB");
+
+	/* Confirm this actually matches xhci_ring_enqueue()'s real behaviour. */
+	struct xhci_trb in = { .param_lo = 0xAA, .control = 0 };
+
+	xhci_ring_enqueue(&ring, &in);
+	xhci_ring_enqueue(&ring, &in);
+	uint32_t predicted = xhci_ring_next_index(&ring, ring.enqueue);
+
+	xhci_ring_enqueue(&ring, &in); /* the wrapping enqueue */
+	zassert_equal(ring.enqueue, predicted, "prediction matches the real wrap");
+}
+
 ZTEST(alp_xhci_core, test_dcbaa_and_context_build)
 {
 	uint64_t dcbaa[8] = { 0 };
@@ -51,15 +80,49 @@ ZTEST(alp_xhci_core, test_dcbaa_and_context_build)
 	zassert_equal((sc[0] >> 20) & 0xFu, 3u, "speed");
 	zassert_equal((sc[0] >> 27) & 0x1Fu, 1u, "context entries");
 
-	/* EP context (spec §6.2.3): dword1 ep_type(5:3) | max_packet(31:16);
-	 * dword2/3 = TR dequeue ptr | DCS(bit0). */
+	/* EP context (spec §6.2.3): dword0 interval(23:16); dword1
+	 * CErr(2:1)|ep_type(5:3)|max_packet(31:16); dword2/3 = TR dequeue ptr
+	 * | DCS(bit0); dword4 average TRB length(15:0). */
 	uint32_t ep[8] = { 0 };
-	xhci_build_ep_context(
-	    ep, 4u /* Control Bidirectional (xHCI spec §6.2.3) */, 64u, 0xCAFE0000ull, 1);
+	xhci_build_ep_context(ep,
+	                      4u /* Control Bidirectional (xHCI spec §6.2.3) */,
+	                      64u,
+	                      0xCAFE0000ull,
+	                      1,
+	                      9u /* interval */,
+	                      64u /* average TRB length */);
+	zassert_equal((ep[0] >> 16) & 0xFFu, 9u, "interval");
+	zassert_equal((ep[1] >> 1) & 0x3u, 3u, "CErr is always the spec max (3)");
 	zassert_equal((ep[1] >> 3) & 0x7u, 4u, "ep type");
 	zassert_equal((ep[1] >> 16) & 0xFFFFu, 64u, "max packet size");
 	zassert_equal(ep[2] & 0x1u, 1u, "dequeue cycle state (DCS)");
 	zassert_equal(ep[2] & ~0xFu, (uint32_t)(0xCAFE0000ull & ~0xFull), "TR dequeue ptr lo");
+	zassert_equal(ep[4] & 0xFFFFu, 64u, "average TRB length");
+}
+
+ZTEST(alp_xhci_core, test_dci_for_ep)
+{
+	zassert_equal(xhci_dci_for_ep(0x00u), 1u, "EP0 OUT is always DCI 1");
+	zassert_equal(xhci_dci_for_ep(0x80u), 1u, "EP0 IN is also DCI 1 (control is bidi)");
+	zassert_equal(xhci_dci_for_ep(0x01u), 2u, "EP1 OUT -> DCI 2 (2*1+0)");
+	zassert_equal(xhci_dci_for_ep(0x81u), 3u, "EP1 IN -> DCI 3 (2*1+1)");
+	zassert_equal(xhci_dci_for_ep(0x02u), 4u, "EP2 OUT -> DCI 4");
+	zassert_equal(xhci_dci_for_ep(0x82u), 5u, "EP2 IN -> DCI 5");
+}
+
+ZTEST(alp_xhci_core, test_validate_xfer_len)
+{
+	zassert_equal(xhci_validate_xfer_len(0u, 1024u), -EINVAL, "0-byte transfer rejected");
+	zassert_equal(xhci_validate_xfer_len(512u, 256u),
+	              -EINVAL,
+	              "length exceeding the caller's actual buffer room rejected");
+	zassert_equal(xhci_validate_xfer_len(512u, 1024u), 0, "in-bounds length accepted");
+	zassert_equal(xhci_validate_xfer_len(XHCI_TRB_MAX_LEN, XHCI_TRB_MAX_LEN),
+	              0,
+	              "exactly the 64 KiB single-TRB cap is still accepted");
+	zassert_equal(xhci_validate_xfer_len(XHCI_TRB_MAX_LEN + 1u, XHCI_TRB_MAX_LEN + 1u),
+	              -EINVAL,
+	              "one byte past the single-TRB 64 KiB cap is rejected");
 }
 
 ZTEST(alp_xhci_core, test_init_sequence_writes_expected_regs)
