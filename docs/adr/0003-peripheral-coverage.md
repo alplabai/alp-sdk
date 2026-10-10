@@ -3,6 +3,10 @@
 Status: Accepted — the **Ethernet** row (Deferred-classes table) partially superseded by [0023](0023-ethernet-out-of-the-alp-surface.md) (Proposed)
 Date: 2026-05-10
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The "V2N or i.MX93" migration example in Rejected option A is historical; no i.MX 93 target remains.
+
 ## Context
 
 The v0.1 SDK shipped wrappers for four peripheral classes: I2C, SPI,

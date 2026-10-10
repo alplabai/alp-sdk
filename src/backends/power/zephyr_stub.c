@@ -6,7 +6,7 @@
  * #include <alp/power.h> link cleanly on every supported SoC.
  *
  * @par Tracking: github.com/alplabai/alp-sdk/issues/613 (Yocto/Linux
- *      power backend; wildcard stub returns ALP_ERR_NOSUPPORT until it lands).
+ *      power backend; landed as src/backends/power/yocto_drv.c, see below).
  *
  * Behaviour differs from the Camera / Display / GPU2D stubs:
  * stub_open returns ALP_OK so the dispatcher hands the caller a
@@ -31,7 +31,9 @@
  * ALP_SDK_POWER_EXT_RENESAS), and src/backends/power/
  * alif_se_profile.c (Alif SE aiPM operating-point profile on the
  * separate "power_profile" class, gated by
- * ALP_SDK_POWER_PROFILE_ALIF_SE), and src/backends/power/yocto_drv.c
+ * ALP_SDK_POWER_PROFILE_ALIF_SE), src/backends/power/alif_se_power.c
+ * (Alif SE STOP/STANDBY, "alif:ensemble:e8" at priority 100, gated by
+ * ALP_SDK_POWER_ALIF_SE), and src/backends/power/yocto_drv.c
  * (real Linux `/sys/power/state` + `/sys/class/rtc/rtc0/wakealarm`
  * backend, "*" at priority 100, #613).  This stub only wins where none
  * of those are linked into the build, or none claims the build's

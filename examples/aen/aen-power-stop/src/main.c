@@ -73,6 +73,25 @@
  * Evidence lines (no verdict): POWER_STOP: boot ..., POWER_STOP: wake ...,
  * POWER_STOP: regs ....  Keep these strings byte-for-byte.
  *
+ *
+ * ==== THREE VARIANTS NOT YET RUN ON SILICON (#2784) ===================
+ *
+ * Each is a config fragment (variants/<name>.conf); the default image is unchanged.
+ *
+ *   CONFIG_AEN_STOP_MODE_STANDBY   every cycle sleeps in ALP_POWER_MODE_STANDBY; the
+ *                                  check "mode_stop" becomes "mode_standby" (realised_mode
+ *                                  must read STANDBY).
+ *   CONFIG_AEN_STOP_RETAIN_TCM_KB  ALP_POWER_RETAIN_TCM with that retain_kb; a CRC-checked
+ *                                  pattern in the DTCM is written before the sleep and
+ *                                  checked after the wake: check "tcm_retained", evidence
+ *                                  "POWER_STOP: tcm ...".
+ *   CONFIG_AEN_STOP_WAKE_TIMING    "POWER_STOP: timing ..." lines: the LPRTC counter at
+ *                                  sleep entry, at PRE_KERNEL_1 and at main(), and the
+ *                                  wake-to-main() figure derived from them.
+ *
+ * STANDBY and TCM retention are bench-proven on the E1M-AEN803; the timing lines run but the
+ * counters are too coarse to resolve wake-to-main() (see the README).
+ *
  * A cold power cycle (not a reset) starts the sequence over: the counter lives in
  * SRAM that a reset keeps and a power cycle loses.
  */
@@ -85,6 +104,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/crc.h>
 #include <zephyr/sys/sys_io.h>
 #include <zephyr/sys/util.h>
 
@@ -96,11 +116,24 @@
 #include <alp/peripheral.h>
 #include <alp/power.h>
 
-#include "som_power.h"       /* bench counter (SDK-internal) */
-#include "som_power_chips.h" /* alp_som_power_bind_rv3028() (SDK-internal) */
+#include "alif_se_power_hw.h" /* LPRTC register read (SDK-internal) */
+#include "som_power.h"        /* bench counter (SDK-internal) */
+#include "som_power_chips.h"  /* alp_som_power_bind_rv3028() (SDK-internal) */
 
 #define N_CYCLES 3
 #define AWAKE_MS 10000u
+
+/* The sleep mode every cycle requests, and the name of the check that judges it.  STOP is the
+ * default and bench-proven; the STANDBY variant swaps both (verdict "mode_standby"). */
+#ifdef CONFIG_AEN_STOP_MODE_STANDBY
+#define SLEEP_MODE      ALP_POWER_MODE_STANDBY
+#define SLEEP_MODE_NAME "STANDBY"
+#define MODE_CHECK_NAME "mode_standby"
+#else
+#define SLEEP_MODE      ALP_POWER_MODE_STOP
+#define SLEEP_MODE_NAME "STOP"
+#define MODE_CHECK_NAME "mode_stop"
+#endif
 
 /* BRD_I2C, the on-module housekeeping bus the RV-3028 sits on (portable bus 2). */
 #define BRD_I2C_BUS 2u
@@ -331,6 +364,242 @@ static void print_se_profiles(void)
 	       (unsigned)off.vtor_address_ns);
 }
 
+#if CONFIG_AEN_STOP_RETAIN_TCM_KB > 0
+/* ==== TCM retention probe (variant T) =================================================
+ *
+ * Zephyr's whole RAM is the M55-HE DTCM (zephyr,sram = &dtcm), 256 KiB at CPU-local
+ * 0x20000000 (DFP AE822FA0E5597 core_defines.h DTCM_BASE, soc_features.h:59
+ * SOC_FEAT_HE_DTCM_SIZE 0x00040000).  The SE's memory-retention bitmap splits it into two
+ * 128 KiB banks, SRAM5_1 and SRAM5_2 (hal_alif se_services/include/aipm.h:207-208, "M55-HE
+ * DTCM RET1 / RET2 dtcm 128kb"); the backend claims them in that order.  Which half of the
+ * address range each bit covers, and that SRAM5_x maps onto RET_CTRL.HETCM_RET1/2, are NOT
+ * proven: this probe is how the bench finds out.
+ *
+ * The probe is a .noinit array, so the C runtime neither copies nor zeroes it on the cold boot
+ * the wake goes through: whatever the DTCM kept is what the check reads.  It is larger than one
+ * bank so it straddles the bank boundary wherever the linker puts it: part A is the bytes
+ * below base + 128 KiB (bank 0), part B the bytes above (bank 1).
+ */
+#define TCM_BANK_BYTES  (128u * 1024u)
+#define TCM_PROBE_BYTES (160u * 1024u)
+#define TCM_BANKS       2u
+#define TCM_CHUNK_WORDS 64u
+
+BUILD_ASSERT(CONFIG_SRAM_SIZE * 1024 >= TCM_BANKS * TCM_BANK_BYTES,
+             "the probe assumes the 256 KiB M55-HE DTCM is the whole of RAM");
+BUILD_ASSERT(CONFIG_AEN_STOP_RETAIN_TCM_KB <= TCM_BANKS * 128,
+             "the DTCM is two 128 KiB banks; the ITCM is not probed by this app");
+
+static uint32_t tcm_probe[TCM_PROBE_BYTES / 4u] __noinit;
+
+/* The pattern word at index @p i for cycle @p seed: a different pattern every cycle, so memory
+ * left over from the previous cycle (or the previous run) can never read as retained. */
+static uint32_t tcm_word(unsigned seed, uint32_t i)
+{
+	return ((seed + 1u) * 0x9E3779B1u) ^ (i * 0x85EBCA6Bu + 0x5BD1E995u);
+}
+
+/* Part A / B of the probe as word counts, from where the linker put it.  False when the array
+ * does not straddle the bank boundary (cannot happen with 160 KiB in 256 KiB, but a silent
+ * wrong answer is worse than a printed one). */
+static bool tcm_parts(uint32_t *a_words, uint32_t *b_words)
+{
+	uintptr_t first = (uintptr_t)tcm_probe;
+	uintptr_t split = (uintptr_t)CONFIG_SRAM_BASE_ADDRESS + TCM_BANK_BYTES;
+
+	if (first >= split || first + TCM_PROBE_BYTES <= split) {
+		return false;
+	}
+	*a_words = (uint32_t)((split - first) / 4u);
+	*b_words = (uint32_t)(TCM_PROBE_BYTES / 4u) - *a_words;
+	return true;
+}
+
+/* CRC-32 of pattern words [first, first + n), generated in chunks rather than stored: the
+ * expected value must not live in memory that the test is about to lose. */
+static uint32_t tcm_expected_crc(unsigned seed, uint32_t first, uint32_t n)
+{
+	uint32_t buf[TCM_CHUNK_WORDS];
+	uint32_t crc = 0u;
+
+	for (uint32_t done = 0u; done < n;) {
+		uint32_t k = MIN(n - done, TCM_CHUNK_WORDS);
+
+		for (uint32_t j = 0u; j < k; ++j) {
+			buf[j] = tcm_word(seed, first + done + j);
+		}
+		crc = crc32_ieee_update(crc, (const uint8_t *)buf, k * 4u);
+		done += k;
+	}
+	return crc;
+}
+
+static uint32_t tcm_memory_crc(uint32_t first, uint32_t n)
+{
+	return crc32_ieee_update(0u, (const uint8_t *)&tcm_probe[first], n * 4u);
+}
+
+/* Write cycle @p seed's pattern over the whole probe, before the sleep. */
+static void tcm_fill(unsigned seed)
+{
+	uint32_t a, b;
+
+	for (uint32_t i = 0u; i < TCM_PROBE_BYTES / 4u; ++i) {
+		tcm_probe[i] = tcm_word(seed, i);
+	}
+	if (!tcm_parts(&a, &b)) {
+		printk("POWER_STOP: tcm cycle%u layout FAIL addr=0x%08x\n",
+		       seed,
+		       (unsigned)(uintptr_t)tcm_probe);
+		return;
+	}
+	printk("POWER_STOP: tcm cycle%u wrote retain_kb=%u addr=0x%08x bank0_bytes=%u bank1_bytes=%u "
+	       "crc_a=0x%08x crc_b=0x%08x\n",
+	       seed,
+	       (unsigned)CONFIG_AEN_STOP_RETAIN_TCM_KB,
+	       (unsigned)(uintptr_t)tcm_probe,
+	       (unsigned)(a * 4u),
+	       (unsigned)(b * 4u),
+	       (unsigned)tcm_expected_crc(seed, 0u, a),
+	       (unsigned)tcm_expected_crc(seed, a, b));
+}
+
+/* After the wake: did each bank's part of the pattern survive?  The verdict covers the banks
+ * the request asked for (retain_kb rounded UP to 128 KiB banks, DTCM RET1 first); a bank that
+ * was not asked for is evidence only -- "retained" there means it kept its content anyway.
+ * NB: with any TCM asked for, the backend's reassert_retention ORs BOTH RET_CTRL HETCM1 and
+ * HETCM2 (alif_se_power.c:780-782), so both DTCM halves stay powered whatever retain_kb is;
+ * bank1=retained on a 128 KiB request therefore says nothing about which half SRAM5_1 covers. */
+static void tcm_check(unsigned cycle)
+{
+	uint32_t a = 0u, b = 0u;
+	bool     layout = tcm_parts(&a, &b);
+	bool     ok0    = layout && tcm_memory_crc(0u, a) == tcm_expected_crc(cycle, 0u, a);
+	bool     ok1    = layout && tcm_memory_crc(a, b) == tcm_expected_crc(cycle, a, b);
+	unsigned asked =
+	    (CONFIG_AEN_STOP_RETAIN_TCM_KB + TCM_BANK_BYTES / 1024u - 1u) / (TCM_BANK_BYTES / 1024u);
+
+	printk("POWER_STOP: tcm cycle%u read asked_banks=%u bank0=%s bank1=%s\n",
+	       cycle,
+	       asked,
+	       ok0 ? "retained" : "lost",
+	       ok1 ? "retained" : "lost");
+	verdict(cycle, "tcm_retained", layout && ok0 && (asked < 2u || ok1));
+}
+#endif /* CONFIG_AEN_STOP_RETAIN_TCM_KB */
+
+#ifdef CONFIG_AEN_STOP_WAKE_TIMING
+/* ==== Wake-to-main() timing evidence (variant W) =======================================
+ *
+ * One counter runs through STOP and the SE cold boot at a rate this part does not pin down:
+ * the LPRTC (VBAT domain, base 0x42000000: DFP AE822FA0E5597 rtss_he/soc.h:1523-1532
+ * LPRTC_Type; its clock is gated by VBAT RTC_CLK_EN, +0x10, which the SVD says "must be set
+ * before any programming to LPRTC").  Its prescaler CPSR (+0x20) resets to 0x8000 and "by
+ * default, the counter increments at a 1 Hz rate when the prescaler is enabled and precise
+ * 32.768 kHz clock source is used" (SVD LPRTC_CPSR).  Here the source is the SES-left LFRC,
+ * not a precise 32.768 kHz, and the bench counted ~2 Hz (155 ticks in 76 s, LFRC / 2^14), so
+ * the CPSR/32768 figure can be ~2x off.  The RV-3028 (+-1 ppm, backup supply) also runs
+ * through the sleep and the backend uses it as the time base for bi->slept_ms, so the rate
+ * is derived per cycle from it: rate = entry_to_main ticks / rtc_slept_ms.
+ *
+ * Three samples of the same counter:
+ *   pre   BKRAM diag PRE word 8,  taken with interrupts off right before the WFI;
+ *   boot  BKRAM diag BOOT word 8, taken at PRE_KERNEL_1 of the wake boot;
+ *   main  the first thing main() does.
+ * The wake event itself is not timestamped.  It happens at entry + armed time (the LPTIMER
+ * interval or the RV-3028 countdown), so wake-to-main = (main - entry) - armed_ms.  Printed
+ * two ways: as a lower bound at the backend's fastest LFRC rate, and from the RV-3028 delta
+ * (1 s resolution at each end).  A bound, not a measurement.
+ */
+#define LPRTC_CCR_OFF      0x0Cu /* soc.h:1523-1532 LPRTC_Type offsets */
+#define LPRTC_CPSR_OFF     0x20u
+#define LPRTC_CPCVR_OFF    0x24u
+#define LPRTC_CCR_PSCLR_EN BIT(4) /* SVD AE822FA0E5597BS0_CM55_HE_View.svd:13007, rtc.h:31 */
+#define LPRTC_NOMINAL_HZ   32768u /* the clock CPSR is specified against (SVD LPRTC_CPSR) */
+/* The backend's fastest LPRTC rate, milli-Hz: 36045 Hz LFRC max / 2^14 (alif_se_power.c:203). */
+#define LPRTC_MAX_MHZ 2200u
+
+static uint32_t g_main_ccvr;
+static int64_t  g_main_uptime_ms;
+
+static void timing_sample_main(void)
+{
+	g_main_ccvr      = alif_se_hw_lprtc_ccvr(); /* also switches the LPRTC clock on */
+	g_main_uptime_ms = k_uptime_get();
+}
+
+static void print_wake_timing(unsigned cycle, const alp_power_boot_info_t *bi)
+{
+	alp_som_pd_diag_t pre, boot;
+
+	if (!alp_som_pd_diag_load(ALP_SOM_PD_DIAG_PRE, &pre) ||
+	    !alp_som_pd_diag_load(ALP_SOM_PD_DIAG_BOOT, &boot)) {
+		printk("POWER_STOP: timing cycle%u unavailable (no PRE or BOOT snapshot)\n", cycle);
+		return;
+	}
+
+	const cycle_t *c         = &cycles[cycle - 1u];
+	uint32_t       ccr       = alif_se_hw_lprtc_read(LPRTC_CCR_OFF);
+	uint32_t       cpsr      = alif_se_hw_lprtc_read(LPRTC_CPSR_OFF);
+	bool           psclr_on  = (ccr & LPRTC_CCR_PSCLR_EN) != 0u;
+	uint32_t       ticks_all = g_main_ccvr - pre.w[8];
+	uint32_t       ticks_pb  = boot.w[8] - pre.w[8];
+	uint32_t       ticks_bm  = g_main_ccvr - boot.w[8];
+	uint64_t       nom_ms    = (uint64_t)ticks_all * cpsr * 1000u / LPRTC_NOMINAL_HZ;
+	uint64_t       min_ms    = (uint64_t)ticks_all * 1000000u / LPRTC_MAX_MHZ;
+
+	printk("POWER_STOP: timing cycle%u lprtc pre=%u boot=%u main=%u ccr=0x%x cpsr=%u cpcvr=%u "
+	       "armed_ms=%u main_uptime_ms=%d\n",
+	       cycle,
+	       (unsigned)pre.w[8],
+	       (unsigned)boot.w[8],
+	       (unsigned)g_main_ccvr,
+	       (unsigned)ccr,
+	       (unsigned)cpsr,
+	       (unsigned)alif_se_hw_lprtc_read(LPRTC_CPCVR_OFF),
+	       (unsigned)c->wake_after_ms,
+	       (int)g_main_uptime_ms);
+	printk("POWER_STOP: timing cycle%u ticks entry_to_boot=%u boot_to_main=%u entry_to_main=%u\n",
+	       cycle,
+	       (unsigned)ticks_pb,
+	       (unsigned)ticks_bm,
+	       (unsigned)ticks_all);
+	if (psclr_on) {
+		printk("POWER_STOP: timing cycle%u tick_ms_nominal=%u\n",
+		       cycle,
+		       (unsigned)((uint64_t)cpsr * 1000u / LPRTC_NOMINAL_HZ));
+	} else {
+		printk("POWER_STOP: timing cycle%u tick_ms_nominal=n/a (prescaler off)\n", cycle);
+	}
+	/* The RV-3028 delta is the calibrated time base; bi->slept_ms is 1 s resolution and falls
+	 * back to the armed length when the RV-3028 could not be read (then it is no witness). */
+	if (ticks_all != 0u && bi->slept_ms >= 1000u) {
+		printk("POWER_STOP: timing cycle%u lprtc_rate_mhz=%u\n",
+		       cycle,
+		       (unsigned)((uint64_t)ticks_all * 1000000u / bi->slept_ms));
+	}
+	if (c->wake_after_ms == 0u) {
+		printk("POWER_STOP: timing cycle%u wake_to_main_ms=n/a (no armed length)\n", cycle);
+		return;
+	}
+	if (psclr_on) {
+		printk("POWER_STOP: timing cycle%u entry_to_main_nominal_ms=%u\n", cycle, (unsigned)nom_ms);
+	} else {
+		printk("POWER_STOP: timing cycle%u entry_to_main_nominal_ms=n/a (prescaler off)\n", cycle);
+	}
+	/* wake_to_main = entry_to_main - armed.  _min uses the fastest rate, so it is a lower
+	 * bound on elapsed time; _rtc is the calibrated one (+-1 s). */
+	printk("POWER_STOP: timing cycle%u entry_to_main_min_ms=%u rtc_slept_ms=%u armed_ms=%u "
+	       "wake_to_main_min_ms=%d wake_to_main_rtc_ms=%d\n",
+	       cycle,
+	       (unsigned)min_ms,
+	       (unsigned)bi->slept_ms,
+	       (unsigned)c->wake_after_ms,
+	       (int)((int64_t)min_ms - (int64_t)c->wake_after_ms),
+	       (int)((int64_t)bi->slept_ms - (int64_t)c->wake_after_ms));
+}
+#endif /* CONFIG_AEN_STOP_WAKE_TIMING */
+
 /* Judge the cycle that ended with this boot.  @p done is how many STOPs were
  * started before it (the bench counter), so the cycle is cycles[done - 1]. */
 static void judge(unsigned done, const alp_power_boot_info_t *bi)
@@ -350,7 +619,7 @@ static void judge(unsigned done, const alp_power_boot_info_t *bi)
 	       (unsigned)bi->restore_failed_domains);
 
 	verdict(done, "record_valid", bi->valid);
-	verdict(done, "mode_stop", bi->valid && bi->realised_mode == ALP_POWER_MODE_STOP);
+	verdict(done, MODE_CHECK_NAME, bi->valid && bi->realised_mode == SLEEP_MODE);
 	verdict(done, "wake_source", bi->valid && bi->wake_source == c->expect);
 	verdict(done,
 	        "restored_all",
@@ -362,6 +631,9 @@ static void judge(unsigned done, const alp_power_boot_info_t *bi)
 	verdict(done, "bkram_counter", cycle_get() == done);
 #else
 	verdict(done, "cycle_counter", cycle_get() == done);
+#endif
+#if CONFIG_AEN_STOP_RETAIN_TCM_KB > 0
+	tcm_check(done);
 #endif
 }
 
@@ -414,9 +686,14 @@ static void start_cycle(unsigned n)
 	}
 	printk("POWER_STOP: wake_capabilities=0x%x\n", (unsigned)alp_power_wake_capabilities(p));
 
-	/* No application RAM is kept: the SDK-reserved BKRAM is the floor. */
+	/* No application RAM is kept: the SDK-reserved BKRAM is the floor.  Variant T asks for
+	 * the DTCM banks instead (retain_kb rounds UP to whole 128 KiB banks). */
 	alp_power_retain_t keep = { .level = ALP_POWER_RETAIN_NONE };
-	alp_status_t       rc   = alp_power_configure_retention(p, &keep);
+#if CONFIG_AEN_STOP_RETAIN_TCM_KB > 0
+	keep.level     = ALP_POWER_RETAIN_TCM;
+	keep.retain_kb = CONFIG_AEN_STOP_RETAIN_TCM_KB;
+#endif
+	alp_status_t rc = alp_power_configure_retention(p, &keep);
 
 	if (rc == ALP_OK) {
 		rc = alp_power_configure_wake_source(p, c->wake_bitmap);
@@ -431,12 +708,15 @@ static void start_cycle(unsigned n)
 	/* The counter is written BEFORE the sleep: this boot cannot know whether the
 	 * next one happens. */
 	cycle_set(n);
-	printk("POWER_STOP: cycle%u enter STOP (%s)\n", n, c->what);
+#if CONFIG_AEN_STOP_RETAIN_TCM_KB > 0
+	tcm_fill(n); /* last, so nothing the sleep entry needs is written after the pattern */
+#endif
+	printk("POWER_STOP: cycle%u enter %s (%s)\n", n, SLEEP_MODE_NAME, c->what);
 	k_msleep(100); /* let the UART FIFO drain before the clocks go away */
 
 	alp_power_wake_info_t wi = { 0 };
 
-	rc = alp_power_request_sleep(p, ALP_POWER_MODE_STOP, c->wake_after_ms, &wi);
+	rc = alp_power_request_sleep(p, SLEEP_MODE, c->wake_after_ms, &wi);
 
 	/* Reaching here means the sleep did not happen (a refusal) or was cut short. */
 	printk("POWER_STOP: cycle%u request FAIL rc=%d realised=%d wake_source=0x%x\n",
@@ -491,6 +771,9 @@ static void check_clocks(unsigned cycle)
 
 int main(void)
 {
+#ifdef CONFIG_AEN_STOP_WAKE_TIMING
+	timing_sample_main(); /* before anything that takes time: this is the "main()" instant */
+#endif
 	printk("\n=== aen-power-stop: Alif SE STOP backend bench (STOP bench-proven) ===\n");
 
 	(void)alp_init();
@@ -511,6 +794,25 @@ int main(void)
 	unsigned done = cycle_get();
 
 	printk("POWER_STOP: boot valid=%d counter=%u\n", (int)bi.valid, done);
+	if (done == 0u) {
+		/* A fresh run owns no alarm yet.  The RV-3028 is backup-powered, so an alarm this
+		 * app armed in a run that lost power mid-sleep keeps AIE and AF set across every
+		 * power cycle, and the backend then refuses each later RTC sleep at step 7
+		 * (rtc_wake_already_latched: it keeps a caller's alarm for WAKE_RTC sleeps).
+		 * Disarm and clear it here, before the first cycle.  A counter of 0 can also be a
+		 * failed counter read; that is still before this run arms anything, so the worst
+		 * case is disarming an alarm a lost run left behind. */
+		bool fired = false;
+
+		if (rv3028c7_alarm_int_enable(&g_rtc, false) != ALP_OK ||
+		    rv3028c7_alarm_check_and_clear(&g_rtc, &fired) != ALP_OK) {
+			printk("POWER_STOP: stale RV-3028 alarm clear FAIL err=%d (an RTC sleep may "
+			       "refuse rtc_wake_already_latched)\n",
+			       (int)alp_last_error());
+		} else if (fired) {
+			printk("POWER_STOP: stale RV-3028 alarm from an earlier run cleared\n");
+		}
+	}
 	print_ses_version();
 	print_regs();
 	/* BKRAM after the boot-time clock restore: served from the RAM shadow (live=0) means the
@@ -524,6 +826,11 @@ int main(void)
 	print_stop_mode(); /* baseline on the first boot, the wake witness after one */
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 	print_diag("pre", ALP_SOM_PD_DIAG_PRE);
+#ifdef CONFIG_AEN_STOP_WAKE_TIMING
+	if (done != 0u && done <= N_CYCLES && bi.valid) {
+		print_wake_timing(done, &bi); /* needs PRE: before it is invalidated below */
+	}
+#endif
 	alp_som_pd_diag_invalidate(ALP_SOM_PD_DIAG_PRE); /* printed once; never read as stale later */
 	print_diag("boot", ALP_SOM_PD_DIAG_BOOT);
 	{

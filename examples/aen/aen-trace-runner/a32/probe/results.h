@@ -117,7 +117,7 @@ typedef struct {
 
 	uint32_t cdc_reg0[3];   /* +0x30C: first read of {0x49031134, 0x49031024, POS_STAT
 	                               * 0x49031044} (CDC_L1_CFB_ADDR, CDC_SRCTRL, CDC_POS_STAT --
-	                               * offsets from alp-sdk-lcd's display_cdc200.h) */
+	                               * offsets from zephyr/drivers/display/display_cdc200.h) */
 	uint32_t cdc_fault0[3]; /* +0x318: bit0 = synchronous fault (probe_read32 caught a data
 	                               * abort, non-fatal); bit1 = ISR.A was set right after the read
 	                               * (an asynchronous/external abort was pending -- CPSR.A is

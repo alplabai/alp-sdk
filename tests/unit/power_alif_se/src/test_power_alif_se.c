@@ -1989,6 +1989,18 @@ ZTEST(power_alif_se, test_the_record_says_whether_nsrst_can_be_trusted)
 	zassert_equal(g_rec_at_set.armed_hw & ALP_SOM_ARM_LPTIMER, ALP_SOM_ARM_LPTIMER);
 }
 
+ZTEST(power_alif_se, test_a_tcm_retaining_sleep_never_trusts_nsrst)
+{
+	/* Bench (E1M-AEN803 2026W36-0001): a TCM-retained STOP wake reads RTSS_HE_RESET = 0x01, the same
+	 * as a pin reset, so the record must not let the next boot read the bit as one. */
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	g_state.retain      = (alp_power_retain_t){ .level = ALP_POWER_RETAIN_TCM, .retain_kb = 128u };
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+	zassert_equal(g_rec_at_set.armed_hw & ALP_SOM_REC_NSRST_TRUSTED, 0u);
+	zassert_equal(g_rec_at_set.armed_hw & ALP_SOM_ARM_LPTIMER, ALP_SOM_ARM_LPTIMER);
+	g_state.retain = (alp_power_retain_t){ .level = ALP_POWER_RETAIN_NONE };
+}
+
 /* ---- Elapsed-time gate on wake attribution (bench U8d) ------------------------------- */
 
 static alp_som_pd_record_t lptimer_record(uint32_t armed_ms)

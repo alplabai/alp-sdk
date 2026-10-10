@@ -326,7 +326,10 @@ responder to 0 and back with `CAM_EN`.
   [`docs/camera-shields.md`](../camera-shields.md)'s IMX335 driver
   section. That bench also ran on the same E1M-AEN803 (serial
   2026W36-0001) on the same reworked E1M-EVK; whether the IMX335 module
-  self-enables without that rework is likewise not established.
+  self-enables without that rework is likewise not established. The same IMX335 shield
+  also captures on the M55-HP core (HP-only ATOC, 3/3 cold boots, 1296x972 RAW10,
+  #2809; build line in the example README); the E1M-AEN401 (E4) HP build is
+  compile-only.
 
   > **Important.**  E1M `IO2` was previously documented as the RGB
   > LED-blue channel.  That was a placeholder guess; the EVK
