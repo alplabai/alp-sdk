@@ -13,7 +13,7 @@
  * Choice made explicit: an input gets REN + ODS 4 mA and nothing else.  That is
  * exactly the word the aen-trace-runner pinctrl workaround produced
  * (input-enable on the binding defaults: drive-strength 4, slew slow, no
- * Schmitt), bench-proven on EVK-03 as register 0x00210000, so moving the
+ * Schmitt), bench-proven on the AEN EVK as register 0x00210000, so moving the
  * workaround into the SDK changes no pad bit.  SMT is NOT set: the reset state
  * has it on (0x00220000) but that is not what the proven word did, and the
  * encoder / switch have external RC debounce.  Writing REN alone would also have

@@ -82,7 +82,7 @@ ZTEST(alp_gpio_input_pad, test_pad_failure_is_reported_not_swallowed)
 /* The exact pad word (port 3 pin 0, AF 0 = GPIO).  The pinctrl driver writes the
  * low AF bits plus word[23:16] to the pad register, so the register is
  * 0x00210000 for no pull: REN (bit 16) + ODS 4 mA (bit 21), the value the
- * trace-runner workaround produced on EVK-03.  Not 0x00010000 (ODS dropped to
+ * trace-runner workaround produced on the AEN EVK bench.  Not 0x00010000 (ODS dropped to
  * 2 mA, the #2844 bench finding) and not 0x00230000 (SMT, bit 17, is off). */
 ZTEST(alp_gpio_input_pad, test_alif_input_pad_word_is_exact)
 {
