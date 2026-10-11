@@ -70,6 +70,16 @@ for t in test_arms test_cam_mirror; do
 		echo "FAIL: tests/host/$t.c -DTR_CAM_MIRROR=0"; rc=1
 	fi
 done
+# The backlight ceiling as the 5 V-droop exhibition build sets it (-DTR_BL_MAX_PCT=40): the knob,
+# the bench word and the boot clamp all stop at 40 %.
+out="$RUN_TMP/tr-knob-bl40"
+if cc -std=c11 -Wall -Wextra -Werror -ffp-contract=off -g -DTR_BL_MAX_PCT=40 -o "$out" tests/host/test_knob.c \
+	$(ls src/game/*.c src/vision/*.c src/hud/*.c src/render/sprite.c src/render/proj.c src/ipc/*.c 2>/dev/null |
+		grep -v main.c) -lm && "$out" >/dev/null; then
+	echo "PASS: tests/host/test_knob.c -DTR_BL_MAX_PCT=40"
+else
+	echo "FAIL: tests/host/test_knob.c -DTR_BL_MAX_PCT=40"; rc=1
+fi
 # The 30 Hz panel build (P11a,-DTR_PANEL_HZ=30): the frame-counted game
 # logic re-run with its constants scaled -- test_panel_hz.c checks the real
 # times, the others that the logic holds at the 30 Hz counts.

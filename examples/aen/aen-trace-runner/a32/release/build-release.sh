@@ -36,6 +36,9 @@
 #   beside the ALP LAB mark in the attract header (src/hud/hud.c). Without the option the banner is unchanged. This script only checks
 #   that the elf and the build's CMakeCache agree (a configured logo is linked in, none otherwise)
 #   and says so; the header is the partner's artwork and lives outside this repo.
+# Backlight ceiling (optional): the HE's -DTR_BL_MAX_PCT=<5..80, a multiple of 5> (default 80, src/ipc/tr_knob.h).
+#   This script prints what the HE's CMakeCache holds, and with TR_BL_MAX_PCT=<n> in the environment refuses an
+#   HE built with any other ceiling -- the 5 V-droop exhibition units must not ship a 80 % image.
 # MRAM_READBACK (optional): a raw read-back of LIVE MRAM from 0x80000000
 #   (J-Link savebin, >= 0x580000 bytes). With it, flowd/ gets whole 16 KiB
 #   sector blobs whose bytes outside the images come from the read-back
@@ -153,6 +156,14 @@ elif [ -z "$logo" ] && [ "$has_logo" = 1 ]; then
 	die "$hed's zephyr.elf carries a partner logo but its CMakeCache has no TR_PARTNER_LOGO -- rebuild the HE"
 fi
 [ -z "$logo" ] || echo "build-release: partner logo compiled in (TR_PARTNER_LOGO=$logo)" >&2
+
+# 0c. The backlight ceiling the HE was built with (default 80 when the cache has none).
+bl_max=$(sed -n 's/^TR_BL_MAX_PCT:[A-Z]*=//p' "$hed/CMakeCache.txt" 2>/dev/null | tr -d '\r')
+bl_max=${bl_max:-80}
+if [ -n "${TR_BL_MAX_PCT:-}" ] && [ "$TR_BL_MAX_PCT" != "$bl_max" ]; then
+	die "TR_BL_MAX_PCT=$TR_BL_MAX_PCT was asked for but $hed was configured with TR_BL_MAX_PCT=$bl_max -- rebuild the HE"
+fi
+echo "build-release: backlight ceiling TR_BL_MAX_PCT=$bl_max %" >&2
 
 # 1. stub + renderer (scene build) -> one A32_APP image, stub release mode:
 #    the stub copies the payload MRAM -> 0x02500000 and self-LAUNCHes.

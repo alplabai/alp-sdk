@@ -170,6 +170,7 @@ rewrites whole 16 KiB sectors, and that read-back is the only way to restore the
 | `TR_CAM_MIRROR` | `ON` | With `TR_INPUT_NPU`: the HP mirrors the view like a selfie; decides which arm is the player's left. Same value on the HP build |
 | `TR_M55_AUTOLAUNCH` | `OFF` | HE launches the A32 renderer at boot (release) |
 | `TR_TILT_TAKEOVER` | `OFF` | The IMU tilt takes over steering when no player is seen |
+| `TR_BL_MAX_PCT` | 80 | The backlight's ceiling in percent, a multiple of 5 between 10 and 80 (configure refuses anything else). The knob, the bench request word and the boot level never go past it. Lower it for a carrier whose 5 V net droops under the backlight, see "Carrier note: 5 V droop" below |
 | `TR_PARTNER_LOGO` | empty | Path of a header from `tools/genlogo.py`: the attract header card then holds the ALP LAB mark, a divider and that partner logo. Empty draws the ALP LAB banner alone and leaves the image unchanged. The artwork is the partner's trademark and is not in this repo |
 
 ## Switching the display: Riverdi RVT121 (12.1" LVDS)
@@ -298,12 +299,18 @@ SRAM0 reads as the 30 % default) and sets it from:
   A short press while muted only switches the mode: just a long press unmutes (a turn in VOLUME mode unmutes too).
   BRIGHTNESS goes back to VOLUME after 5 s with no turn or press.
 - **The panel backlight** (Riverdi RVT121, PWM on P10_7, the SDK's `alp,display-backlight` LED): in BRIGHTNESS mode
-  5 % per detent, 10..80 % (a hard floor of 10 %, so the screen can never go dark, and a hard ceiling of 80 %). It boots at the level the SDK
+  5 % per detent, 10..`TR_BL_MAX_PCT` % (80 by default; a hard floor of 10 %, so the screen can never go dark, and a hard ceiling). It boots at the level the SDK
   already set (30 %), so booting does not flicker. The RK055 shield has no PWM backlight, so there a short press does nothing.
 - **A request word over SWD** (`0x0237FD84`, `0x564F0000 | percent`), for the bench: no reflash, see
   `a32/release/FLASH-RECIPE.md` ("Changing the volume without reflashing"). The HE validates it. The backlight
-  has its own (`TR_MEM_BL` `0x0237FDC0`, request word `0x0237FDC4`, `0x424C0000 | percent`, 10..80 in 5 % steps only). Both request words are
+  has its own (`TR_MEM_BL` `0x0237FDC0`, request word `0x0237FDC4`, `0x424C0000 | percent`, 10..`TR_BL_MAX_PCT` in 5 % steps only). Both request words are
   taken, not latched: the HE clears one to `0` once it has read it (accepted or refused).
+
+**Carrier note: 5 V droop.** The backlight's boost converter loads the carrier's 5 V net, and on some carriers that
+net droops under the extra load: one measured 4.68 V unloaded and about 0.12 ohm in series (input diode, eFuse and
+shunt), enough to brown out the DSI-to-LVDS bridge at 60 % brightness and above. For such a carrier build with
+`-DTR_BL_MAX_PCT=40` (the knob, the bench word and the boot level then stop at 40 %); `build-release.sh` prints the
+ceiling the HE was built with, and `TR_BL_MAX_PCT=40` in its environment refuses an image built with another one.
 
 The HUD shows `VOLUME 40%` (or `MUTE`, or `BRIGHTNESS 60%`) over its bottom row for 1.5 s whenever the level or the mode changes. The encoder
 pads are GPIO3 / GPIO4 (P3_0, P3_1, P4_3): not the GPIO5 port or the lpgpio island the HP's amps use. The

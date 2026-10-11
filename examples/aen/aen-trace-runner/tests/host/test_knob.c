@@ -1,5 +1,5 @@
 /* tests/host/test_knob.c -- src/ipc/tr_knob.c: the encoder switch's short / long press (with
- * debounce), the BRIGHTNESS mode and its 5 s revert, the 10..80 % clamps, a long press that
+ * debounce), the BRIGHTNESS mode and its 5 s revert, the 10..TR_BL_MAX % clamps, a long press that
  * mutes and restores through tr_vol_he_step, a short press while muted, the bench's request word
  * and the HUD popup's text. */
 #include <assert.h>
@@ -8,6 +8,9 @@
 
 #include "../../src/hud/hud.h"
 #include "../../src/ipc/tr_knob.h"
+
+/* A level well inside the range: 60 at the default 80 % ceiling, 20 at -DTR_BL_MAX_PCT=40. */
+#define LVL (TR_BL_MAX - 20u)
 
 static volatile tr_bl_t  rec;
 static volatile tr_vol_t vrec;
@@ -61,9 +64,10 @@ static void test_boot(void)
 	tr_knob_boot(&k, &rec, 3u, true); /* below the floor: raised, never dark */
 	assert(k.bl_pct == TR_BL_MIN);
 	tr_knob_boot(&k, &rec, 250u, true);
-	assert(k.bl_pct == TR_BL_MAX && TR_BL_MAX == 80u && rec.bl == tr_bl_word(80u));
-	tr_knob_boot(&k, &rec, 90u, true); /* a boot default past the ceiling */
-	assert(k.bl_pct == 80u && tr_bl_word(100u) == tr_bl_word(80u));
+	assert(k.bl_pct == TR_BL_MAX && TR_BL_MAX == (uint32_t)TR_BL_MAX_PCT &&
+	       rec.bl == tr_bl_word(TR_BL_MAX));
+	tr_knob_boot(&k, &rec, TR_BL_MAX + 10u, true); /* a boot default past the ceiling */
+	assert(k.bl_pct == TR_BL_MAX && tr_bl_word(100u) == tr_bl_word(TR_BL_MAX));
 	assert(TR_MEM_BL == 0x0237FDC0u && TR_BL_TAG == 0x424C0000u);
 }
 
@@ -130,8 +134,8 @@ static void test_brightness(void)
 	assert(frame(-1000000, false).bl_changed && k.bl_pct == TR_BL_MIN);
 	assert(!frame(-1, false).bl_changed && k.bl_pct == TR_BL_MIN && rec.bl == tr_bl_word(10u));
 	assert(frame(2147483647, false).bl_changed && k.bl_pct == TR_BL_MAX);
-	assert(k.bl_pct == 80u && rec.bl == tr_bl_word(80u));
-	assert(!frame(1, false).bl_changed && k.bl_pct == 80u);
+	assert(k.bl_pct == TR_BL_MAX && rec.bl == tr_bl_word(TR_BL_MAX));
+	assert(!frame(1, false).bl_changed && k.bl_pct == TR_BL_MAX);
 	assert(frame((-2147483647 - 1), false).bl_changed && k.bl_pct == TR_BL_MIN);
 	assert(frame(1, false).bl_changed && k.bl_pct == 15u);
 	/* the volume did not move */
@@ -207,47 +211,49 @@ static void test_request(void)
 	fresh(30u);
 	assert(rec.req == 0u && rec.rejects == 0u); /* the cold-SRAM garbage req is dropped at boot */
 	assert(!frame(0, false).bl_changed);
-	rec.req         = tr_bl_word(60u);
+	rec.req         = tr_bl_word(LVL);
 	tr_knob_out_t o = frame(0, false);
-	assert(o.bl_changed && o.bl_prev == 30u && k.bl_pct == 60u && rec.bl == tr_bl_word(60u));
+	assert(o.bl_changed && o.bl_prev == 30u && k.bl_pct == LVL && rec.bl == tr_bl_word(LVL));
 	assert(k.mode == TR_KNOB_BRIGHTNESS && rec.req == 0u); /* taken: the word is handed back */
 	assert(!frame(0, false).bl_changed);                   /* nothing pending */
 
 	/* the knob moved on; the SAME word again is a new request and takes it back */
-	assert(frame(-1, false).bl_changed && k.bl_pct == 55u);
-	rec.req = tr_bl_word(60u);
-	assert(frame(0, false).bl_changed && k.bl_pct == 60u && rec.req == 0u);
+	assert(frame(-1, false).bl_changed && k.bl_pct == (LVL - 5u));
+	rec.req = tr_bl_word(LVL);
+	assert(frame(0, false).bl_changed && k.bl_pct == LVL && rec.req == 0u);
 	/* at that level already: consumed, no change, no reject */
-	rec.req = tr_bl_word(60u);
+	rec.req = tr_bl_word(LVL);
 	assert(!frame(0, false).bl_changed && rec.req == 0u && rec.rejects == 0u);
 	/* repeated identical valid requests all work */
 	for (int i = 0; i < 3; i++) {
 		(void)frame(-1, false);
-		rec.req = tr_bl_word(60u);
-		assert(frame(0, false).bl_changed && k.bl_pct == 60u && rec.req == 0u);
+		rec.req = tr_bl_word(LVL);
+		assert(frame(0, false).bl_changed && k.bl_pct == LVL && rec.req == 0u);
 	}
 	assert(rec.rejects == 0u);
 
 	/* refused: under the floor, a bare zero, over the ceiling, OFF the 5 % grid, the volume tag
 	 * and junk -- each counted, the same bad word twice counted twice, and the level never moves */
-	const uint32_t bad[] = { TR_BL_TAG | 5u,   TR_BL_TAG | 0u,  TR_BL_TAG | 101u, TR_BL_TAG | 85u,
-		                     TR_BL_TAG | 100u, TR_BL_TAG | 33u, TR_BL_TAG | 11u,  TR_BL_TAG | 79u,
-		                     0x564F0028u,      0xA5A5A5A5u,     0xFFFFFFFFu };
-	uint32_t       n     = 0u;
+	const uint32_t bad[] = {
+		TR_BL_TAG | 5u,   TR_BL_TAG | 0u,  TR_BL_TAG | 101u, TR_BL_TAG | (TR_BL_MAX + 5u),
+		TR_BL_TAG | 100u, TR_BL_TAG | 33u, TR_BL_TAG | 11u,  TR_BL_TAG | 79u,
+		0x564F0028u,      0xA5A5A5A5u,     0xFFFFFFFFu
+	};
+	uint32_t n = 0u;
 
 	for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
 		for (int twice = 0; twice < 2; twice++) {
 			rec.req = bad[i];
 			assert(!frame(0, false).bl_changed && ++n == rec.rejects);
-			assert(rec.req == 0u && k.bl_pct == 60u);
+			assert(rec.req == 0u && k.bl_pct == LVL);
 		}
 	}
 	for (uint32_t pct = TR_BL_MIN; pct <= TR_BL_MAX; pct++) { /* the grid, exactly */
 		assert(tr_bl_valid(tr_bl_word(pct), &(uint32_t){ 0 }) == (pct % 5u == 0u));
 	}
-	assert(!tr_bl_valid(TR_BL_TAG | 85u, &(uint32_t){ 0 }));
-	rec.req = tr_bl_word(80u); /* the ceiling itself is fine */
-	assert(frame(0, false).bl_changed && k.bl_pct == 80u && rec.rejects == n);
+	assert(!tr_bl_valid(TR_BL_TAG | (TR_BL_MAX + 5u), &(uint32_t){ 0 }));
+	rec.req = tr_bl_word(TR_BL_MAX); /* the ceiling itself is fine */
+	assert(frame(0, false).bl_changed && k.bl_pct == TR_BL_MAX && rec.rejects == n);
 }
 
 static void test_no_backlight(void)
@@ -256,7 +262,7 @@ static void test_no_backlight(void)
 	tr_knob_boot(&k, &rec, 30u, false); /* the RK055 shield: no PWM backlight */
 	press_short();
 	assert(k.mode == TR_KNOB_VOLUME && k.seq == 0u);
-	rec.req = tr_bl_word(60u); /* swallowed, and counted as refused */
+	rec.req = tr_bl_word(LVL); /* swallowed, and counted as refused */
 	assert(!frame(0, false).bl_changed && k.bl_pct == 30u && rec.rejects == 1u && rec.req == 0u);
 	press_long(); /* the mute still works */
 	assert(he.pct == 0u);
@@ -273,9 +279,9 @@ static void test_led_failure(void)
 	o = frame(1, false); /* the next detent steps from the level that is really lit */
 	assert(o.bl_changed && k.bl_pct == 35u);
 	/* a request and a turn in one step roll back to where the step began */
-	rec.req = tr_bl_word(60u);
+	rec.req = tr_bl_word(TR_BL_MAX);
 	o       = frame(1, false);
-	assert(o.bl_changed && o.bl_prev == 35u && k.bl_pct == 60u);
+	assert(o.bl_changed && o.bl_prev == 35u && k.bl_pct == TR_BL_MAX);
 	tr_knob_bl_failed(&k, &rec, o.bl_prev);
 	assert(k.bl_pct == 35u && rec.bl == tr_bl_word(35u) && rec.led_errs == 2u);
 }

@@ -10,7 +10,7 @@
  * TR_KNOB_DEBOUNCE_MS before it counts, so a contact bounce is neither a press nor a short one.
  *
  * THE BACKLIGHT. TR_BL_MIN..TR_BL_MAX percent in TR_BL_STEP steps; the floor AND the ceiling are hard, so
- * neither the knob nor the bench word can turn the panel dark or past 80 %. The HE owns the PWM (UTIMER3 on P10_7,
+ * neither the knob nor the bench word can turn the panel dark or past the ceiling. The HE owns the PWM (UTIMER3 on P10_7,
  * through the LED API), so nothing crosses a core but the bench record TR_MEM_BL:
  *   bl       HE      the level now:  TR_BL_TAG | percent
  *   req      bench   "please set":   TR_BL_TAG | percent, on the TR_BL_STEP grid within
@@ -34,10 +34,16 @@
 #include "tr_memmap.h"
 #include "tr_vol.h"
 
-#define TR_BL_TAG  0x424C0000u /* 'BL' */
-#define TR_BL_MIN  10u         /* percent: never dark */
-#define TR_BL_MAX  80u         /* percent: the panel's ceiling, a hard one like the floor */
-#define TR_BL_STEP 5u          /* percent per encoder detent */
+#define TR_BL_TAG 0x424C0000u /* 'BL' */
+#define TR_BL_MIN 10u         /* percent: never dark */
+/* The ceiling, percent: a build option (CMake -DTR_BL_MAX_PCT=, default 80), a multiple of
+ * TR_BL_STEP in TR_BL_MIN..80. A carrier whose 5 V net droops under the backlight's load needs
+ * it lower (README, "Carrier note: 5 V droop"). */
+#ifndef TR_BL_MAX_PCT
+#define TR_BL_MAX_PCT 80
+#endif
+#define TR_BL_MAX  ((uint32_t)TR_BL_MAX_PCT)
+#define TR_BL_STEP 5u /* percent per encoder detent */
 
 #define TR_KNOB_DEBOUNCE_MS 30u
 #define TR_KNOB_LONG_MS     1000u
@@ -51,6 +57,8 @@ typedef struct {
 	uint32_t led_errs;
 } tr_bl_t;
 
+_Static_assert(TR_BL_MAX_PCT >= 10 && TR_BL_MAX_PCT <= 80 && TR_BL_MAX_PCT % 5 == 0,
+               "TR_BL_MAX_PCT: a multiple of 5 between 10 and 80");
 _Static_assert(sizeof(tr_bl_t) == 20u, "tr_bl_t is 5 words on the wire");
 _Static_assert(TR_MEM_BL % 16u == 0u, "the record is 16-B aligned");
 _Static_assert(TR_MEM_BL >= TR_MEM_VOL + sizeof(tr_vol_t),
