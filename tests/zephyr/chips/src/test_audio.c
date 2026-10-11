@@ -1185,12 +1185,8 @@ ZTEST(alp_chips, test_tas2563_i2c_cksum_matches_bench_measured_crc8)
 		size_t  n;
 		uint8_t want;
 	} v[] = {
-		{ { 0x01u }, 1u, 0x07u },
-		{ { 0x02u }, 1u, 0x0Eu },
-		{ { 0x80u }, 1u, 0x89u },
-		{ { 0xFFu }, 1u, 0xF3u },
-		{ { 0x5Au }, 1u, 0x81u },
-		{ { 0x10u, 0x20u }, 2u, 0xB7u },
+		{ { 0x01u }, 1u, 0x07u },        { { 0x02u }, 1u, 0x0Eu }, { { 0x80u }, 1u, 0x89u },
+		{ { 0xFFu }, 1u, 0xF3u },        { { 0x5Au }, 1u, 0x81u }, { { 0x10u, 0x20u }, 2u, 0xB7u },
 		{ { 0x20u, 0x10u }, 2u, 0xDEu },
 	};
 
@@ -1204,7 +1200,9 @@ ZTEST(alp_chips, test_tas2563_i2c_cksum_matches_bench_measured_crc8)
 		for (size_t j = 0; j < v[i].n; ++j)
 			recs[j] = (tas2563_tuning_reg_t){ 0u, 1u, (uint8_t)(0x10u + j), v[i].d[j] };
 		zassert_equal(tas2563_load_tuning_verified(&ctx, recs, v[i].n, v[i].want, NULL, &got),
-		              ALP_OK, "vector %u", (unsigned)i);
+		              ALP_OK,
+		              "vector %u",
+		              (unsigned)i);
 		zassert_equal(got, v[i].want, "vector %u", (unsigned)i);
 		alp_i2c_close(bus);
 	}
