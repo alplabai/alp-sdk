@@ -517,8 +517,9 @@ def _slice_artifacts(build_dir: Path, slice_: Slice,
     `build/` level.  It used to be missing (issue #1360): the plan named
     `<buildDir>/zephyr/zephyr.elf`, a path west never creates, and every
     consumer had to re-derive the real one from `buildDir` instead of
-    reading the block it was given -- `tan renode` looked for
-    `build/m55_he-zephyr/zephyr/zephyr.elf` and found nothing.  The
+    reading the block it was given -- tan's since-retired `renode`
+    verb (ADR 0022) looked for `build/m55_he-zephyr/zephyr/zephyr.elf`
+    and found nothing.  The
     `build/` level is west's, not this planner's, which is exactly why
     it belongs in the reported path and not in each reader's head.
 
