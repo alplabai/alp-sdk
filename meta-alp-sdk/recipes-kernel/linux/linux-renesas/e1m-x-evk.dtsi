@@ -129,7 +129,7 @@
  *     active-low), the camera-side control buses (XEVK_I2C_BUS_DSI_CSI0
  *     = E1M_X_I2C2, XEVK_I2C_BUS_DSI_CSI1 = E1M_X_I2C3), and the CRU +
  *     ISP DMA pools, which e1m-v2n-som.dtsi already reserves
- *     (isp@90000000 and cru_buffer@b4000000).
+ *     (isp_reserved@90000000 and cru_buffer@b4000000).
  *
  *     What is missing is four things, none of them guessable:
  *       1. The SENSOR.  No part is chosen: e1m-x-evk.yaml sets

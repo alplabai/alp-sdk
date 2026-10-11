@@ -1,0 +1,21 @@
+[Unit]
+Description=Alp: initialise the RZ/V2N ISP (Mali-C55) camera pipeline
+Documentation=https://github.com/alplabai/alp-sdk/blob/dev/docs/v2n-isp.md
+After=systemd-modules-load.service local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# ISP_MODE: IMX415 sensor mode, forwarded to v4l2-init.sh (4k 2k hdr dol
+# 2khdr 2kdol).  2k = 1920x1080 at 60 fps, the lightest full-colour mode.
+Environment=ISP_MODE=2k
+EnvironmentFile=-/etc/default/alp-isp
+# The ISP driver registers /dev/video0fr after the CRU/sensor probe; wait for
+# it (10 s cap) rather than racing it ($$ = a literal $ for the shell).  v4l2-init.sh itself skips an absent node.
+ExecStartPre=/bin/sh -c 'i=0; while [ ! -c /dev/video0fr ] && [ $$i -lt 50 ]; do i=$$((i+1)); sleep 0.2; done; exit 0'
+# Vendor script (v2n-isp-scripts): media-ctl pipeline, ISP sensor preset, crop
+# and the userspace ISP daemon (mali_iv021_isp*.elf).  Not reimplemented here.
+ExecStart=/root/v4l2-init.sh $ISP_MODE
+
+[Install]
+WantedBy=multi-user.target
