@@ -224,3 +224,31 @@ def test_yocto_derived_distro_version_passes(tmp_path):
 def test_real_meta_alp_sdk_derives_distro_version():
     proc = _run()
     assert "HARDCODED" not in proc.stdout + proc.stderr
+
+
+def _recipe_pv_check():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("cvds", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_recipe_pv_prerelease_uses_tilde():
+    assert _recipe_pv_check().expected_recipe_pv("0.17.0-rc2") == "0.17.0~rc2"
+    assert _recipe_pv_check().expected_recipe_pv("0.17.0") == "0.17.0"
+
+
+def test_recipe_pv_drift_detected(tmp_path):
+    mod = _recipe_pv_check()
+    recipe = tmp_path / "meta-alp-sdk/recipes-core/alp-sdk/alp-sdk_0.6.bb"
+    recipe.parent.mkdir(parents=True)
+    recipe.write_text('PV      = "0.6.0"\n', encoding="utf-8")
+    assert mod.check_yocto_recipe_pv(tmp_path, "0.17.0-rc2")
+    recipe.write_text('PV      = "0.17.0~rc2"\n', encoding="utf-8")
+    assert mod.check_yocto_recipe_pv(tmp_path, "0.17.0-rc2") == []
+
+
+def test_real_recipe_pv_in_sync():
+    mod = _recipe_pv_check()
+    assert mod.check_yocto_recipe_pv(REPO, mod.declared_version_full(REPO)) == []

@@ -194,6 +194,25 @@ def check_yocto_distro_version(repo: pathlib.Path) -> list[str]:
     return drifts
 
 
+def expected_recipe_pv(pre_version: str) -> str:
+    m = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-([\w.]+))?", pre_version)
+    return m.group(1) + (f"~{m.group(2)}" if m.group(2) else "") if m else pre_version
+
+
+def check_yocto_recipe_pv(repo: pathlib.Path, full: str) -> list[str]:
+    """The alp-sdk recipe's PV must track the release (#2827); bump_version.py writes it."""
+    rel = "meta-alp-sdk/recipes-core/alp-sdk/alp-sdk_0.6.bb"
+    f = repo / rel
+    if not f.is_file():
+        return []
+    m = re.search(r'^PV\s*=\s*"([^"]*)"', f.read_text(encoding="utf-8"), re.MULTILINE)
+    want = expected_recipe_pv(full)
+    if m is None or m.group(1) != want:
+        return [f"  DRIFT    {rel}: PV = {m.group(1) if m else '<missing>'!r}, "
+                f"want {want!r} (scripts/bump_version.py rewrites it)"]
+    return []
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1] if __doc__ else "")
     ap.add_argument("--root", default=None,
@@ -212,6 +231,7 @@ def main() -> int:
         + check_banner_c(repo, want_str)
         + check_versions_md(repo, want_str)
         + check_yocto_distro_version(repo)
+        + check_yocto_recipe_pv(repo, want_full)
     )
 
     if drifts:
