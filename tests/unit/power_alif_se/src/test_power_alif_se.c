@@ -162,6 +162,9 @@ static int      g_arm_timer_rc, g_arm_int_rc;
 static unsigned g_enter_count;
 static uint8_t  g_rtc_flags; /* tentative: defined with the other som_power fakes below */
 static bool     g_enter_rtc_int;
+/* RV-3028 EVI (MODULE_STBY): ready flag, arm failure, and the latched-event (EVF) model. */
+static bool g_evi_ready, g_evi_latched;
+static int  g_evi_arm_rc;
 static uint32_t g_enter_pads;               /* the pads mask the entry was given */
 static uint32_t g_wake_pad_mask, g_claimed; /* DT-named pads / pads the SoM wires */
 static uint32_t g_pads_latched;      /* live RAW_INTSTATUS of the fake block (runtime path) */
@@ -619,10 +622,6 @@ alp_status_t alp_som_power_rtc_countdown_start(uint32_t seconds, uint32_t *actua
 	}
 	return ALP_OK;
 }
-
-/* RV-3028 EVI (MODULE_STBY): ready flag, arm/disarm log, and the latched-event model. */
-static bool g_evi_ready, g_evi_latched;
-static int  g_evi_arm_rc;
 
 bool alp_som_power_rtc_event_ready(void)
 {

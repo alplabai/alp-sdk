@@ -971,7 +971,7 @@ ZTEST(power_som_domains, test_rtc_event_service_reports_evf_and_disarms)
 	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_EIE | RTC_C2_TIE;
 	zassert_ok(alp_som_power_rtc_event_service(&fired));
 	zassert_true(fired);
-	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_PORF, "EVF cleared, PORF kept");
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~RTC_SF_EVF, "constant-mask ack");
 	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], RTC_C2_TIE, "EIE cleared, TIE kept");
 
 	/* Armed, nothing latched: not fired, but still disarmed. */
