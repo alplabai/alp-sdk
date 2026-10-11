@@ -1204,7 +1204,9 @@ ZTEST(power_alif_se, test_ext_event_sleep_clears_stale_evf_then_arms_evi_and_the
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_OK);
 	zassert_equal(g_rec_at_set.armed_hw & ~ALP_SOM_REC_NSRST_TRUSTED, ALP_SOM_ARM_RTC_EVI);
 	zassert_equal(g_rec_at_set.armed, ALP_POWER_WAKE_EXT_EVENT);
-	zassert_equal(ev_count(EV_DISARM_EVI), 1u, "the stale EIE / EVF is cleared before the check");
+	zassert_equal(ev_count(EV_DISARM_EVI),
+	              2u,
+	              "the stale EIE / EVF is cleared before the check, then the sleep ends early");
 	zassert_equal(ev_count(EV_ARM_EVI), 1u);
 	zassert_equal(ev_count(EV_ARM_INT_PAD), 1u, "EVI wakes through /INT -> P15_0");
 	zassert_equal(ev_count(EV_ARM_RTC_TIMER), 0u, "no countdown of its own");
