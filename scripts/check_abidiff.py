@@ -105,8 +105,9 @@ def soname_only(report: str) -> bool:
     it to a same-minor head always sets ABI_CHANGE for that rename alone.
     Every "changes summary" line being all-zero means nothing else moved.
     """
-    sums = re.findall(r"changes summary: (\d+) Removed, (\d+) Changed, (\d+) Added", report)
-    return bool(sums) and all(n == "0" for t in sums for n in t) and "SONAME changed" in report
+    lines = re.findall(r"changes summary: (.*)", report)
+    nums = [n for ln in lines for n in re.findall(r"(\d+) (?:Removed|Changed|Added)", ln)]
+    return len(lines) >= 2 and all(n == "0" for n in nums) and "SONAME changed" in report
 
 
 def soname_of(lib: Path) -> str | None:

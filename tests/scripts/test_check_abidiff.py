@@ -88,3 +88,12 @@ def test_soname_only_noise_detected():
     assert mod.soname_only(only)
     assert not mod.soname_only(only.replace("0 Removed, 0 Changed, 0 Added function",
                                             "1 Removed, 0 Changed, 0 Added function"))
+
+
+def test_soname_only_not_fooled_by_filtered_change():
+    rep = "\n".join([
+        "Functions changes summary: 0 Removed, 1 Changed (9 filtered out), 0 Added functions",
+        "Variables changes summary: 0 Removed, 0 Changed, 0 Added variable",
+        "SONAME changed from 'a' to 'b'",
+    ])
+    assert not mod.soname_only(rep)
