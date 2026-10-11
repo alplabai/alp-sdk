@@ -18,6 +18,8 @@
 # The tarball is the fallback for hosts that cannot use the release URL as an
 # opkg base: unpack and `src/gz alp-devkit file:///path`. Run it where the
 # private key is available (the internal runner), never in public Actions.
+# Cross-platform: Linux-only by design (gpg + bash on the runner); on Windows
+# use WSL. There is no native Windows equivalent.
 set -euo pipefail
 
 ipk_dir= machine= tag= out= key=2B7807E20B75B471BF88FD7AC9AB032782D3143B
