@@ -48,7 +48,7 @@ gzip -9nc "$out/Packages" > "$out/Packages.gz"
 gpg --batch --yes --pinentry-mode loopback --passphrase '' \
     --local-user "$key" --detach-sign -o "$out/Packages.sig" "$out/Packages"
 gpg --batch --verify "$out/Packages.sig" "$out/Packages"
-tmp_tar=$(mktemp)
+tmp_tar=$(mktemp "${TMPDIR:-/tmp}/feed-tar.XXXXXX")
 tar -C "$out" -czf "$tmp_tar" .
 mv "$tmp_tar" "$out/alp-devkit-feed-$tag.tar.gz"
 echo "feed ready: $out ($(ls "$out"/*.ipk | wc -l) ipks)"

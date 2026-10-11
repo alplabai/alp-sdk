@@ -21,8 +21,8 @@ RECIPE = LAYER / "recipes-core/alp-devkit-feed/alp-devkit-feed-config_0.1.bb"
 TEMPLATE = LAYER / "recipes-core/alp-devkit-feed/files/alp-devkit-feed.conf.in"
 PACKAGER = REPO / "scripts/package_devkit_feed.sh"
 
-# gpg-agent sockets under the long Windows tmp path fail; CI is Linux.
-HAVE_GPG = shutil.which("gpg") and shutil.which("bash") and sys.platform != "win32"
+# gpg-agent sockets under the long Windows/macOS tmp paths fail; the packager is Linux-only.
+HAVE_GPG = shutil.which("gpg") and shutil.which("bash") and sys.platform.startswith("linux")
 
 
 def _fingerprint() -> str:
