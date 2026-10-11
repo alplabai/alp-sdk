@@ -776,14 +776,14 @@ build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_pla
 		 * the wake work on the bench (U8g). */
 		out->memory_blocks |= ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK;
 	}
-	/* The cold-boot RUN profile carries no IP clock gating and no PHY power gating
-	 * (E1M-AEN803, 2026-10-08); nothing here changes that. */
 	/* Memory another core (or a DMA master) still uses while this one sleeps.  The SE
 	 * power-gates every block the OFF profile does not name as soon as this core's subsystem
 	 * goes off, not only when the whole SoC stops: an HE STOP that left SRAM0 out took
 	 * SRAM0 away from the running M55-HP, which faulted on its next store (E1M-AEN803,
 	 * 2026-10-11; with SRAM0 | SRAM1 named it ran through three HE STOPs). */
 	out->memory_blocks |= ALIF_SE_OFF_KEEP_MEMORY;
+	/* The cold-boot RUN profile carries no IP clock gating and no PHY power gating
+	 * (E1M-AEN803, 2026-10-08); nothing here changes that. */
 	out->ip_clock_gating = 0u;
 	out->phy_pwr_gating  = 0u;
 	out->vdd_ioflex_3V3  = IOFLEX_LEVEL_1V8; /* this SoM's I/O flex rail is 1.8 V */

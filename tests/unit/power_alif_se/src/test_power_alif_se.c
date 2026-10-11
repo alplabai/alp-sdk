@@ -876,8 +876,8 @@ ZTEST(power_alif_se, test_off_profile_keeps_the_configured_memory)
 		plan.mode = m == 0 ? ALP_POWER_MODE_STOP : ALP_POWER_MODE_STANDBY;
 		poison(&out);
 		zassert_ok(build_off_profile(&out, &g_live, &plan));
-		zassert_equal(out.memory_blocks & ~plan.memory_blocks & ~(ALP_AIPM_GEN2_MRAM_MASK |
-		                                                          ALP_AIPM_GEN2_SERAM_MASK),
+		zassert_equal(out.memory_blocks & ~plan.memory_blocks &
+		                  ~(ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK),
 		              (uint32_t)CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY);
 	}
 }
@@ -893,7 +893,9 @@ ZTEST(power_alif_se, test_off_profile_masks_come_from_the_gen2_header)
 	plan.memory_blocks = retained_blocks(&(alp_power_retain_t){ .level = ALP_POWER_RETAIN_NONE });
 	poison(&out);
 	zassert_ok(build_off_profile(&out, &g_live, &plan));
-	zassert_equal(out.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY, UINT32_C(0x00200000), "BKRAM is gen2 bit 21, not gen1 bit 20");
+	zassert_equal(out.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY,
+	              UINT32_C(0x00200000),
+	              "BKRAM is gen2 bit 21, not gen1 bit 20");
 	zassert_equal(out.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY, ALP_AIPM_GEN2_BACKUP4K_MASK);
 	zassert_equal(out.memory_blocks & ALP_AIPM_GEN2_FWRAM_MASK, 0u, "bit 20 is FWRAM on gen2");
 	zassert_equal(out.wakeup_events, ALP_AIPM_GEN2_WE_LPTIMER0);
@@ -1375,7 +1377,8 @@ ZTEST(power_alif_se, test_tcm_retention_needs_ldo2_and_tcm_masks)
 	g_regs[ALIF_SE_REG_RET_CTRL] = RET_CTRL_BKRAM;
 	g_regs[ALIF_SE_REG_ANA_REG1] = ANA_REG1_RET_LDO_VBAT_EN;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
-	zassert_equal(g_set.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY, ALP_AIPM_GEN2_BACKUP4K_MASK | ALP_AIPM_GEN2_SRAM5_1_MASK);
+	zassert_equal(g_set.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY,
+	              ALP_AIPM_GEN2_BACKUP4K_MASK | ALP_AIPM_GEN2_SRAM5_1_MASK);
 	zassert_true((g_regs_at_enter[ALIF_SE_REG_ANA_REG1] & ANA_REG1_RET_LDO_VDDMAIN_EN) != 0u);
 	zassert_true((g_regs_at_enter[ALIF_SE_REG_RET_CTRL] & (RET_CTRL_HETCM1 | RET_CTRL_HETCM2)) ==
 	             (RET_CTRL_HETCM1 | RET_CTRL_HETCM2));
@@ -2002,7 +2005,9 @@ ZTEST(power_alif_se, test_bench_variants_default_to_the_documented_profile)
 	off_profile_t out;
 
 	zassert_ok(build_off_profile(&out, &g_live, &plan));
-	zassert_equal(out.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY, ALP_AIPM_GEN2_BACKUP4K_MASK, "no MRAM / SERAM by default");
+	zassert_equal(out.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY,
+	              ALP_AIPM_GEN2_BACKUP4K_MASK,
+	              "no MRAM / SERAM by default");
 	zassert_equal(out.vtor_address, g_live.vtor_address, "the live vtor is preserved by default");
 }
 #endif

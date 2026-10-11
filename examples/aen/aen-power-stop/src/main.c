@@ -538,9 +538,9 @@ static void tcm_check(unsigned cycle)
  * against two RV-3028 seconds (+-1 ppm, backup supply).
  *
  * The wake instant is known only for the LPTIMER cycle: the timer is armed with LOADCOUNT
- * (PRE word 3) DWT-cycles (PRE word 13) before the PRE snapshot and counts the same AON
+ * (PRE word 3), PRE word 13 DWT cycles before the PRE snapshot, and counts the same AON
  * 32 kHz clock (VBAT TIMER_CLKSEL, PRE word 6, printed), so
- *   wake = pre - arm_to_pre + LOADCOUNT + 1   (in LPRTC clocks, +-1 clock).
+ *   wake = pre - arm_to_pre + LOADCOUNT + 1   (in LPRTC clocks, +-2 clocks: one per end).
  * The RV-3028 cycles wake on a 1 s-resolution timer: only entry-to-main is printed there.
  */
 #define LPRTC_CPSR_OFF 0x20u /* soc.h:1523-1532 LPRTC_Type offsets */
@@ -584,6 +584,7 @@ static uint32_t lprtc_hz(uint32_t cpsr, unsigned *backwards)
 {
 	uint32_t s0 = 0u, s = 0u;
 	uint64_t last = lprtc_now(cpsr), t0 = 0u, now;
+	int64_t  deadline = k_uptime_get() + 5000; /* an RV-3028 whose seconds never move */
 
 	*backwards = 0u;
 	if (alp_som_power_rtc_seconds(&s0) != ALP_OK) {
@@ -601,7 +602,7 @@ static uint32_t lprtc_hz(uint32_t cpsr, unsigned *backwards)
 			now = lprtc_now(cpsr);
 			*backwards += now < last;
 			last = now;
-		} while (s < target && (uint32_t)(s - s0) < 10u);
+		} while (s < target && (uint32_t)(s - s0) < 10u && k_uptime_get() < deadline);
 		if (s != target) {
 			return 0u;
 		}
@@ -627,10 +628,10 @@ static void print_wake_timing(unsigned cycle, const alp_power_boot_info_t *bi)
 		return;
 	}
 
-	const cycle_t *c    = &cycles[cycle - 1u];
-	uint32_t       cpsr = alif_se_hw_lprtc_read(LPRTC_CPSR_OFF);
-	unsigned       back = 0u;
-	uint32_t       hz   = lprtc_hz(cpsr, &back);
+	const cycle_t *c      = &cycles[cycle - 1u];
+	uint32_t       cpsr   = alif_se_hw_lprtc_read(LPRTC_CPSR_OFF);
+	unsigned       back   = 0u;
+	uint32_t       hz     = lprtc_hz(cpsr, &back);
 	uint64_t       t_pre  = lprtc_clocks(pre.w[8], pre.w[9], cpsr);
 	uint64_t       t_boot = lprtc_clocks(boot.w[8], boot.w[9], cpsr);
 	uint64_t       t_main = lprtc_clocks(g_main_ccvr, g_main_cpcvr, cpsr);
@@ -664,11 +665,10 @@ static void print_wake_timing(unsigned cycle, const alp_power_boot_info_t *bi)
 		return;
 	}
 
-	/* DWT counts CPU clocks; the arm-to-snapshot gap is microseconds, converted at the
-	 * kernel's CPU rate. */
-	uint64_t arm_to_pre =
-	    (uint64_t)pre.w[13] * hz / (uint64_t)sys_clock_hw_cycles_per_sec();
-	uint64_t t_wake = t_pre - arm_to_pre + pre.w[3] + 1u;
+	/* PRE word 13 is DWT cycles (the core clock), converted to LPRTC clocks at the kernel's
+	 * hardware cycle rate: SysTick on the core clock, so the same rate. */
+	uint64_t arm_to_pre = (uint64_t)pre.w[13] * hz / (uint64_t)sys_clock_hw_cycles_per_sec();
+	uint64_t t_wake     = t_pre - arm_to_pre + pre.w[3] + 1u;
 
 	printk("POWER_STOP: timing cycle%u lptimer load=%u timer_clksel=0x%x wake_to_boot_us=%d "
 	       "wake_to_main_us=%d (+-%d us)\n",

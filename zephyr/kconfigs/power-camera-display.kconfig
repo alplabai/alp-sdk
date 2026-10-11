@@ -348,6 +348,8 @@ config ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY
 	  then faulted on its next SRAM0 store.  0x3 (SRAM0 | SRAM1) kept it running through
 	  three HE STOPs.  Keeping memory powered raises the sleep floor, so the default keeps
 	  none: set it only when the other core really runs across this core's sleep.
+	  Not for this core's TCM: retain the M55-HE TCM banks through alp_power_retain_t
+	  (ALP_POWER_RETAIN_TCM), which also sets the matching retention enables.
 
 config ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER
 	bool "Allow STOP / STANDBY with a debugger attached (bench only)"
