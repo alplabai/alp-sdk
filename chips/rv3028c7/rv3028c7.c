@@ -744,7 +744,7 @@ alp_status_t rv3028c7_route_clkout(rv3028c7_t *ctx, rv3028c7_clkout_src_t src)
 /* ---------------------------------------------------------------- */
 
 /* Read-modify-write one RAM register.  Never used on 0x25..0x27 or
- * 0x30..0x37: the wake services touch only 0x07..0x10. */
+ * 0x30..0x37: the wake services touch only 0x07..0x10 and the Event Control register 0x13. */
 static alp_status_t rv3028_update_reg(rv3028c7_t *ctx, uint8_t reg, uint8_t clear, uint8_t set)
 {
 	uint8_t      v = 0;
@@ -950,15 +950,34 @@ alp_status_t rv3028c7_wake_service(rv3028c7_t *ctx, uint8_t *flags)
 	return rv3028_status_clear(ctx, latched);
 }
 
+alp_status_t rv3028c7_event_disarm(rv3028c7_t *ctx)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+
+	alp_status_t s = rv3028_update_reg(ctx, RV3028_REG_CONTROL_2, RV3028_CTRL2_EIE, 0);
+	if (s != ALP_OK) return s;
+	return rv3028_status_clear(ctx, RV3028_STATUS_EVF);
+}
+
 alp_status_t rv3028c7_event_arm(rv3028c7_t *ctx, bool active_high, rv3028c7_evi_filter_t filter)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if ((unsigned)filter > (unsigned)RV3028C7_EVI_FILTER_125_MS) return ALP_ERR_INVAL;
 
+	/* TSE (Control 2 bit 7) with TSS = 1 means the time stamp belongs to the backup switchover;
+     * forcing TSS = 0 below would silently move it to the EVI pin.  Refuse instead. */
+	uint8_t      ctrl2 = 0, evctrl = 0;
+	alp_status_t s = rv3028_read(ctx, RV3028_REG_CONTROL_2, &ctrl2, 1);
+	if (s != ALP_OK) return s;
+	s = rv3028_read(ctx, RV3028_REG_EVENT_CTRL, &evctrl, 1);
+	if (s != ALP_OK) return s;
+	if ((ctrl2 & RV3028_CTRL2_TSE) && (evctrl & RV3028_EVCTRL_TSS)) return ALP_ERR_BUSY;
+
 	/* EIE off and EVF clear first, so reconfiguring cannot assert INT (Sec. 4.11.1 step 1,
      * p.71).  Then EHL / ET (and TSS = 0, the External Event source) in Event Control, a
-     * read-modify-write that leaves TSOW alone; TSR reads 0, so writing it back is a no-op. */
-	alp_status_t s = rv3028_update_reg(ctx, RV3028_REG_CONTROL_2, RV3028_CTRL2_EIE, 0);
+     * read-modify-write that leaves TSOW alone; TSR reads 0, so writing it back is a no-op.
+     * EVF is cleared again after the reconfiguration (a level can latch it meanwhile). */
+	s = rv3028c7_event_disarm(ctx);
 	if (s != ALP_OK) return s;
 	const uint8_t set = (uint8_t)((active_high ? RV3028_EVCTRL_EHL : 0u) |
 	                              ((unsigned)filter << RV3028_EVCTRL_ET_SHIFT));
@@ -970,15 +989,6 @@ alp_status_t rv3028c7_event_arm(rv3028c7_t *ctx, bool active_high, rv3028c7_evi_
 	s = rv3028_status_clear(ctx, RV3028_STATUS_EVF);
 	if (s != ALP_OK) return s;
 	return rv3028_update_reg(ctx, RV3028_REG_CONTROL_2, 0, RV3028_CTRL2_EIE);
-}
-
-alp_status_t rv3028c7_event_disarm(rv3028c7_t *ctx)
-{
-	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-
-	alp_status_t s = rv3028_update_reg(ctx, RV3028_REG_CONTROL_2, RV3028_CTRL2_EIE, 0);
-	if (s != ALP_OK) return s;
-	return rv3028_status_clear(ctx, RV3028_STATUS_EVF);
 }
 
 void rv3028c7_deinit(rv3028c7_t *ctx)

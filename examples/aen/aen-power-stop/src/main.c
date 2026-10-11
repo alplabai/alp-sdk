@@ -82,8 +82,8 @@
  * Each is a config fragment (variants/<name>.conf); the default image is unchanged.
  *
  *   CONFIG_AEN_STOP_EVI_WAKE       cycle 3 sleeps on ALP_POWER_WAKE_EXT_EVENT (the RV-3028 EVI
- *                                  input = MODULE_STBY) instead of the alarm and waits for a
- *                                  falling edge on it; expected wake_source
+ *                                  input = MODULE_STBY) instead of the alarm and waits for it
+ *                                  to go low; expected wake_source
  *                                  ALP_POWER_WAKE_EXT_EVENT (0x100).  Bench wiring in the README.
  *   CONFIG_AEN_STOP_MODE_STANDBY   every cycle sleeps in ALP_POWER_MODE_STANDBY; the
  *                                  check "mode_stop" becomes "mode_standby" (realised_mode
@@ -176,7 +176,7 @@ typedef struct {
 BUILD_ASSERT(CONFIG_AEN_STOP_RTC_MS >= 1000, "the countdown cycle must be at least 1 s");
 #ifdef CONFIG_AEN_STOP_EVI_WAKE
 /* Variant (E): the third cycle sleeps on the RV-3028 External Event input instead of an alarm.
- * The backend arms EVI itself (falling edge, EIE on, EVF clear); the app only asks for the wake
+ * The backend arms EVI itself (active low, 3.9 ms level filter, EIE on, EVF clear); the app only asks for the wake
  * source.  There is no timer: the cycle waits until MODULE_STBY is pulled low. */
 #define ALARM_CYCLE \
 	{ "RV-3028 EVI (MODULE_STBY low)", \

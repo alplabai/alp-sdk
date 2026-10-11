@@ -109,14 +109,18 @@ bool alp_som_power_rtc_event_ready(void)
 }
 
 /* MODULE_STBY idles high (R43 pull-up to +1V8) and the CC3501E pulls it low through an
- * open-drain GPIO, so the event is the falling edge; no filter (an edge, not a level that
- * would re-latch while the line stays low). */
+ * open-drain GPIO, so the event is the LOW level.  Level detection with the 3.9 ms filter
+ * (ET = 01, App. Manual Rev. 1.4 p.26): EVF is set again after tDELAY (tSP < tDELAY < 2 tSP) for
+ * as long as the line stays low, even after EVF was cleared (p.71 note 6).  So a request that
+ * is already held low when the sleep starts is not missed (an edge would never see it): it
+ * re-latches, the pad reads asserted and the sleep ends at once.  The price is that a pulse
+ * shorter than ~3.9 ms may go unseen. */
 alp_status_t alp_som_power_rtc_event_arm(void)
 {
 	if (!alp_som_power_rtc_event_ready()) {
 		return ALP_ERR_NOT_READY;
 	}
-	return rv3028c7_event_arm(bound_ctx(), false, RV3028C7_EVI_FILTER_NONE);
+	return rv3028c7_event_arm(bound_ctx(), false, RV3028C7_EVI_FILTER_3_9_MS);
 }
 
 alp_status_t alp_som_power_rtc_event_disarm(void)

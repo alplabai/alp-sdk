@@ -380,6 +380,24 @@ ZTEST(alp_chips, test_rv3028c7_event_arm_sequence_and_bits)
 	wake_end();
 }
 
+ZTEST(alp_chips, test_rv3028c7_event_arm_does_not_take_over_a_backup_switchover_time_stamp)
+{
+	wake_begin();
+	/* TSE = 1 and TSS = 1: the time stamp belongs to the backup switchover. */
+	fake_rv3028c7_set_reg(R_CTRL2, 0x80u);
+	fake_rv3028c7_set_reg(R_EVCTRL, 0x01u);
+	fake_rv3028c7_wlog_reset();
+	zassert_equal(rv3028c7_event_arm(&g_ctx, false, RV3028C7_EVI_FILTER_NONE), ALP_ERR_BUSY);
+	zassert_equal(fake_rv3028c7_wlog_len(), 0u, "nothing written");
+	zassert_equal(fake_rv3028c7_get_reg(R_EVCTRL), 0x01u);
+
+	/* TSE = 1 with TSS = 0 is the EVI time stamp: armed, TSE kept. */
+	fake_rv3028c7_set_reg(R_EVCTRL, 0x00u);
+	zassert_equal(rv3028c7_event_arm(&g_ctx, false, RV3028C7_EVI_FILTER_NONE), ALP_OK);
+	zassert_equal(fake_rv3028c7_get_reg(R_CTRL2), 0x80u | 0x04u);
+	wake_end();
+}
+
 ZTEST(alp_chips, test_rv3028c7_event_wake_service_reports_and_clears_evf)
 {
 	wake_begin();

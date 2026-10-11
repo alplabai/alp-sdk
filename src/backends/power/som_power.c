@@ -468,7 +468,8 @@ alp_status_t alp_som_power_rtc_clear_stale_uf(void)
  * here: the countdown (TE, TIE) and, unless @p keep_alarm (the caller may have armed its own
  * alarm), the alarm enable (AIE); cleared: TF, AF (not with keep_alarm) and, with UIE off, UF.
  * Each flag is cleared by writing 0 to it, every other bit is written as 1 (ignored by the
- * part), so PORF / EVF / BSF / CLKF survive: EVF with EIE on is the EVI wake (#2811). */
+ * part), so PORF / EVF / BSF / CLKF survive here: a stale EIE + EVF is cleared by
+ * alp_som_power_rtc_event_service() (#2811), which the backend calls for every /INT plan. */
 alp_status_t alp_som_power_rtc_clear_stale_wake(bool keep_alarm)
 {
 	const struct i2c_dt_spec *i2c = rtc_i2c();
@@ -525,7 +526,8 @@ alp_status_t alp_som_power_rtc_flags_pending(bool *pending)
 		return ALP_ERR_IO;
 	}
 	*pending = ((st & RV3028_STATUS_TF) && (c2 & RV3028_CTRL2_TIE)) ||
-	           ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE));
+	           ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE)) ||
+	           ((st & RV3028_STATUS_EVF) && (c2 & RV3028_CTRL2_EIE));
 	return ALP_OK;
 }
 

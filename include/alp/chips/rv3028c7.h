@@ -271,7 +271,7 @@ alp_status_t rv3028c7_set_int_enable(rv3028c7_t *ctx, rv3028c7_src_t src, bool e
  * EEPROM or any register of the EEPROM RAM mirror (0x30..0x37,
  * including EEPROM_BACKUP 0x37 and its backup-switchover mode BSM
  * field), and none touches EEADDR/EEDATA/EECMD (0x25..0x27) or the
- * EERD bit.  Every register they use (0x07..0x0F, 0x10) is a plain
+ * EERD bit.  Every register they use (0x07..0x10, 0x13) is a plain
  * RAM register.  This is deliberate: an EEPROM write wears the part
  * (nCYCLE endurance, p.98, as low as 100 cycles at the hot corner)
  * and a changed backup-switchover mode changes how the part is
@@ -452,7 +452,9 @@ typedef enum {
  * @param ctx          Initialised driver context.
  * @param active_high  true: rising edge / high level is the event; false: falling / low (POR).
  * @param filter       EVI filter.
- * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (@p filter out of range), or ALP_ERR_IO.
+ * @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL (@p filter out of range), ALP_ERR_BUSY
+ *         (TSE = 1 with TSS = 1: the time stamp is bound to the backup switchover and is not
+ *         taken over), or ALP_ERR_IO.
  */
 alp_status_t rv3028c7_event_arm(rv3028c7_t *ctx, bool active_high, rv3028c7_evi_filter_t filter);
 

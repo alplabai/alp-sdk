@@ -991,7 +991,20 @@ ZTEST(power_som_domains, test_rtc_event_service_reports_evf_and_disarms)
 	zassert_equal(alp_som_power_rtc_event_service(NULL), ALP_ERR_INVAL);
 }
 
-ZTEST(power_som_domains, test_rtc_event_arm_needs_a_bound_chip_and_arms_a_falling_edge)
+ZTEST(power_som_domains, test_rtc_flags_pending_counts_an_enabled_evf)
+{
+	bool pending = true;
+
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF;
+	rtc_regs()[RTC_CONTROL2_REG] = 0u;
+	zassert_ok(alp_som_power_rtc_flags_pending(&pending));
+	zassert_false(pending, "EVF with EIE off drives nothing");
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_EIE;
+	zassert_ok(alp_som_power_rtc_flags_pending(&pending));
+	zassert_true(pending);
+}
+
+ZTEST(power_som_domains, test_rtc_event_arm_needs_a_bound_chip_and_arms_the_low_level)
 {
 	zassert_false(alp_som_power_rtc_event_ready());
 	zassert_equal(alp_som_power_rtc_event_arm(), ALP_ERR_NOT_READY);
@@ -1004,8 +1017,10 @@ ZTEST(power_som_domains, test_rtc_event_arm_needs_a_bound_chip_and_arms_a_fallin
 	zassert_true(alp_som_power_rtc_event_ready());
 	zassert_ok(alp_som_power_rtc_event_arm());
 	zassert_equal(g_evi_arms, 1u);
-	zassert_equal(g_evi_active_high, 0, "MODULE_STBY idles high: the event is the falling edge");
-	zassert_equal(g_evi_filter, (int)RV3028C7_EVI_FILTER_NONE);
+	zassert_equal(g_evi_active_high, 0, "MODULE_STBY idles high: the event is the low level");
+	zassert_equal(g_evi_filter,
+	              (int)RV3028C7_EVI_FILTER_3_9_MS,
+	              "level detection: a held-low request re-latches");
 	zassert_ok(alp_som_power_rtc_event_disarm());
 	zassert_equal(g_evi_disarms, 1u);
 }

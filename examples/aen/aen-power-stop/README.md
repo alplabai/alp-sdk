@@ -120,8 +120,8 @@ the others (`-DEXTRA_CONF_FILE=variants/<name>.conf`); the default image is unch
 ### EVI wake: MODULE_STBY (variant E, #2811)
 
 `e-evi-wake.conf` replaces the alarm in cycle 3 with `ALP_POWER_WAKE_EXT_EVENT`: no timer, the
-backend arms the RV-3028 External Event input (EVI, U21.8) and the cycle sleeps until a falling edge
-on `MODULE_STBY` (E1.O2). The SoM ties `MODULE_STBY` to EVI with a pull-up R43 to `+1V8`; the RV-3028
+backend arms the RV-3028 External Event input (EVI, U21.8) and the cycle sleeps until `MODULE_STBY`
+(E1.O2) is pulled low. The SoM ties `MODULE_STBY` to EVI with a pull-up R43 to `+1V8`; the RV-3028
 `/INT` output is the same `RTC_ALARM` line -> P15_0 (LPGPIO0) as the alarm and countdown wake, so
 the cause is told apart by the RV-3028 `EVF` flag (STATUS 0Eh bit 1), reported as
 `wake_source=0x100` (`ALP_POWER_WAKE_EXT_EVENT`), not `0x1` (`ALP_POWER_WAKE_RTC`). All levels are 1.8 V.
@@ -136,13 +136,24 @@ pin 1. Join the two with one jumper wire: `WIFI_GPIO18` (M.2 J16 pin 21) -> `MOD
 `GPIO18` must be driven open-drain by the CC3501E firmware (the line idles high on the pull-ups). To
 test without CC3501E firmware, leave the jumper off and touch P14 pin 1 to GND instead.
 
+Why the jumper is safe, and the one way to hurt it. On the EVK carrier R184 pulls `M2E_SDIO_WAKEn` up
+to `+1V8` (R184 pin 1 is `M2E_SDIO_WAKEn`, pin 2 is `+1V8`), the same 1.8 V domain as `MODULE_STBY`,
+so joining the two puts no level conflict on either net. `M2E_SDIO_WAKEn` is not private to the
+jumper: it also reaches the the SoM connector pad `I3` (`IO18`) and M.2 connector `J16` pin 21. Leave `J16`
+empty, or make sure the card fitted there is the thing meant to drive the net: a second driver on
+it (an M.2 module pulling its own wake pin) fights the CC3501E `GPIO_18` or your hand. `MODULE_STBY`
+itself is the SoM connector pad `O2` and header `P14` pin 1.
+
 Steps: (1) wire the jumper; (2) build and flash the variant (`-DEXTRA_CONF_FILE=variants/e-evi-wake.conf`);
 (3) cold power cycle; cycles 1 and 2 run unattended; (4) when the console prints
 `cycle3 waits for MODULE_STBY ... to go LOW` and `cycle3 enter STOP`, wait until it goes quiet (the SoC
 is in STOP), then pull `MODULE_STBY` low (CC3501E `GPIO18` low, or P14 pin 1 to GND) for at least
-10 ms and release; (5) read `wake_source=0x100` and the cycle 3 verdicts. The event is a falling edge
-(no filter), so a line still held low after the wake does not re-trigger; the wake decode clears `EVF`
-and then `EIE`, and the next sleep arms it again.
+10 ms and release; (5) read `wake_source=0x100` and the cycle 3 verdicts. The input is level
+detected with the part's 3.9 ms filter, not edge detected: a request that is already low when the
+sleep starts is not missed, `EVF` re-latches while the line stays low and the sleep ends at once
+(an early wake, `realised_mode` RUN, `wake_source=0x100`). The cost is that a pulse shorter than about
+4 ms may go unseen, and that a line still held low keeps the SoC from sleeping on this source until
+it is released. After a wake the decode clears `EVF` and then `EIE`; the next sleep arms it again.
 
 **How the TCM probe works.** The whole of Zephyr's RAM is the 256 KiB M55-HE DTCM (CPU-local
 `0x20000000`). The probe is a 160 KiB `.noinit` array, so the C runtime neither copies nor zeroes it

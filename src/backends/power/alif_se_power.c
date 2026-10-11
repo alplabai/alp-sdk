@@ -88,7 +88,7 @@
  *   ALP_POWER_WAKE_EXT_EVENT  the RV-3028 External Event input EVI, which the SoM wires to
  *                         MODULE_STBY (E1.O2, pull-up R43 to +1V8).  /INT -> P15_0 -> LPGPIO0
  *                         again, so the same wake event as RTC; reported as its own bit.
- *                         Armed (falling edge, no filter, EIE on, EVF clear) through the chip
+ *                         Armed (active low, level detection with the 3.9 ms filter, EIE on, EVF clear) through the chip
  *                         driver just before the sleep; the wake decode reads EVF, clears it
  *                         and EIE, and reports the bit.  Needs wake_after_ms == 0 or any
  *                         timed source alongside; whichever fires first reports its own bit.
@@ -671,14 +671,16 @@ static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
 	} else if ((plan->hw & ALP_SOM_ARM_RTC_INT) != 0u) {
 		(void)alp_som_power_rtc_clear_stale_uf(); /* the caller's own alarm: UF noise only */
 	}
-	if ((plan->hw & ALP_SOM_ARM_RTC_EVI) != 0u) {
-		/* An event latched before this request (a wake the decode never saw, an nRESET) is not a
-		 * wake for this one: the part is backup-powered and keeps EIE / EVF across a power cycle,
-		 * and an enabled EVF holds /INT low.  Disarmed here, armed again in arm(). */
-		alp_status_t es = alp_som_power_rtc_event_disarm();
+	if ((plan->hw & RTC_INT_PATHS) != 0u) {
+		/* Whatever plan reaches the SoC through /INT: a stale EIE + EVF (EVI armed by an earlier
+		 * cycle, a wake the decode never saw, an nRESET) holds /INT low the same way a stale
+		 * TIE + TF does (#2784).  The part is backup-powered and keeps both across a power cycle.
+		 * Cleared here (EIE off, EVF written 0); an EVI plan arms it afresh in arm().  A request
+		 * still held low re-latches by itself (level detection) and is caught again below. */
+		bool stale = false;
 
-		if (es != ALP_OK) {
-			printk("alif_se_power: stale RV-3028 EVI state not cleared (status %d)\n", (int)es);
+		if (alp_som_power_rtc_event_service(&stale) != ALP_OK) {
+			printk("alif_se_power: stale RV-3028 EVI state not cleared\n");
 		}
 	}
 	if ((plan->hw & RTC_INT_PATHS) != 0u && rtc_int_asserted_now()) {
@@ -1017,11 +1019,11 @@ static alp_status_t arm(const sleep_plan_t *plan, armed_t *a)
 		a->lptimer = true;
 	}
 	if ((plan->hw & ALP_SOM_ARM_RTC_EVI) != 0u) {
-		s = alp_som_power_rtc_event_arm();
+		a->evi = true; /* recorded first: a half-done arm is disarmed by the unwind too */
+		s      = alp_som_power_rtc_event_arm();
 		if (s != ALP_OK) {
 			return s;
 		}
-		a->evi = true;
 	}
 	if ((plan->hw & RTC_INT_PATHS) != 0u) {
 		s = alif_se_hw_rtc_int_arm();
@@ -1081,6 +1083,18 @@ fill_info(alp_power_wake_info_t *info, alp_power_mode_t mode, uint32_t wake, uin
 		info->wake_source   = wake;
 		info->slept_ms      = ms;
 	}
+}
+
+/* An EVI event latched since arm(), serviced (EVF written 0, EIE off) BEFORE disarm() would
+ * clear it unseen.  It is a wake, not a failure to hide. */
+static uint32_t evi_taken(const armed_t *a)
+{
+	bool evi = false;
+
+	if (a->evi && alp_som_power_rtc_event_service(&evi) == ALP_OK && evi) {
+		return ALP_POWER_WAKE_EXT_EVENT;
+	}
+	return 0u;
 }
 
 /* Which armed source ended an aborted sleep (the sleep did not power the core down). */
@@ -1277,7 +1291,7 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	 * flag means the wake is spent (and with pulse mode the pad may even have gone
 	 * high again), so do not sleep on it.  The entry re-reads the pad too, with the
 	 * edge interrupt armed. */
-	if ((plan.hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
+	if ((plan.hw & RTC_INT_PATHS) != 0u) {
 		bool spent = false;
 
 		if (alp_som_power_rtc_flags_pending(&spent) == ALP_OK && spent) {
@@ -1320,11 +1334,21 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	return (fired != 0u) ? ALP_OK : refuse(7, "stayed_up_no_source", 0, ALP_ERR_IO);
 
 unwind:
+	/* Every exit after arm(): an EVI event between arm() and the EWIC entry makes the entry (or
+	 * the check before it) answer BUSY.  Serviced first, so the request is reported instead of
+	 * lost: a latched EVF at the entry is an early wake, like fired_sources() above. */
+	fired = evi_taken(&armed);
 	disarm(&armed);
 	rs = rollback_domains();
 
 	if (se_touched && undo_se(&undo) != ALP_OK) {
 		return ALP_ERR_IO;
+	}
+	if (fired != 0u) {
+		fill_info(info, ALP_POWER_MODE_RUN, fired, 0u);
+		if (s == ALP_ERR_BUSY && se_touched && rs == ALP_OK) {
+			return ALP_OK;
+		}
 	}
 	return (rs != ALP_OK && s == ALP_OK) ? rs : s;
 }

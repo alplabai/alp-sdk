@@ -30,8 +30,8 @@ config AEN_STOP_RTC_MS
 config AEN_STOP_EVI_WAKE
 	bool "Variant (E): cycle 3 wakes from the RV-3028 EVI input (MODULE_STBY) instead of the alarm"
 	help
-	  Cycle 3 requests ALP_POWER_WAKE_EXT_EVENT with no timer and the app waits for a falling
-	  edge on MODULE_STBY.  On the E1M-AEN EVK jumper WIFI_GPIO18 (M2E_SDIO_WAKEn, M.2 J16
+	  Cycle 3 requests ALP_POWER_WAKE_EXT_EVENT with no timer and the app waits for
+	  MODULE_STBY to go low.  On the E1M-AEN EVK jumper WIFI_GPIO18 (M2E_SDIO_WAKEn, M.2 J16
 	  pin 21) to MODULE_STBY (header P14 pin 1), or touch P14 pin 1 to GND.  Verdict
 	  wake_source must read ALP_POWER_WAKE_EXT_EVENT, not ALP_POWER_WAKE_RTC.
 
