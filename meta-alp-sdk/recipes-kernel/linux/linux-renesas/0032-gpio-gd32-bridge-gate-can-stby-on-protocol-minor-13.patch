@@ -1,0 +1,110 @@
+From 6f4bc2f90ae9905c44d0b266e6ab64c1c90501ae Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <dev@alplab.ai>
+Date: Sun, 11 Oct 2026 14:52:33 +0000
+Subject: [PATCH] gpio: gd32-bridge: gate can-stby on protocol minor 13, not on
+ the IO15/IO26 minor
+
+can-stby (bridge bit 20) is part of the 21-pad map and exists from minor 13.  It shared the IO15/IO26 status cache, so raising that gate to minor 16 took CAN standby away from 0.13..0.15 bridges.  Give it its own status cache resolved by the same GET_VERSION.
+---
+ drivers/gpio/gpio-gd32-bridge.c | 42 +++++++++++++++++++++++++++++----
+ 1 file changed, 38 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
+index 2dc5a63b28f7..90baec979e1f 100644
+--- a/drivers/gpio/gpio-gd32-bridge.c
++++ b/drivers/gpio/gpio-gd32-bridge.c
+@@ -241,6 +241,10 @@
+ #define GD32_LINE_CAM_EN_LDO0	24
+ #define GD32_NGPIO_TOTAL	28
+ 
++/* Bridge protocol minor at which bit 20 (CAN_STBY) first exists; the
++ * GD32G553_CAN_STBY_MIN_PROTOCOL_MINOR of include/alp/chips/gd32g553.h. */
++#define GD32_PROTO_MINOR_CAN_STBY	13
++
+ /* Bridge protocol minor at which bits 21/22 (IO15/IO26) first exist. */
+ #define GD32_PROTO_MINOR_IO_EXT		16
+ #define GD32_IO_EXT_BIT_MASK		(BIT(21) | BIT(22))
+@@ -364,6 +368,9 @@ struct gd32_bridge_gpio {
+ 	 * resolved by the same GET_VERSION as wifi_bt_reg_on_status, under
+ 	 * status_lock. */
+ 	int io_ext_status;
++	/* Same rule for line 20 (can-stby, minor >= 13), kept apart from
++	 * io_ext_status so a 0.13..0.15 bridge keeps CAN standby. */
++	int can_stby_status;
+ 	/* Same rule for protocol minor >= 17: lines 24..27 (CAM_EN_LDO0..3)
+ 	 * and the I2C3 proxy (gd32_bridge_i2c_xfer() gates on it per transfer). */
+ 	int cam_ldo_status;
+@@ -475,6 +482,18 @@ static int gd32_bridge_io_ext_status(struct gd32_bridge_gpio *gd32)
+ 	return status;
+ }
+ 
++/* Peek the cached line-20 (can-stby) status; same contract as the wifi/bt one. */
++static int gd32_bridge_can_stby_status(struct gd32_bridge_gpio *gd32)
++{
++	int status;
++
++	mutex_lock(&gd32->status_lock);
++	status = gd32->can_stby_status;
++	mutex_unlock(&gd32->status_lock);
++
++	return status;
++}
++
+ /* Peek the cached lines-24..27 status; same contract as the wifi/bt one. */
+ static int gd32_bridge_cam_ldo_status(struct gd32_bridge_gpio *gd32)
+ {
+@@ -959,6 +978,16 @@ static int gd32_bridge_wifi_bt_poll_once(struct gd32_bridge_gpio *gd32)
+ 	} else {
+ 		gd32->io_ext_status = 0;
+ 	}
++	if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_CAN_STBY) {
++		if (gd32->can_stby_status != -ENODEV)
++			dev_warn(gd32->chip.parent,
++				 "bridge protocol %u.%u.%u has no can-stby line (need major 0, minor >= %u); line 20 will not be usable on this firmware
++",
++				 ver[0], ver[1], ver[2], GD32_PROTO_MINOR_CAN_STBY);
++		gd32->can_stby_status = -ENODEV;
++	} else {
++		gd32->can_stby_status = 0;
++	}
+ 	if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_CAM_LDO) {
+ 		if (gd32->cam_ldo_status != -ENODEV)
+ 			dev_warn(gd32->chip.parent,
+@@ -1048,11 +1077,11 @@ static int gd32_bridge_gpio_request(struct gpio_chip *chip,
+ 		return gd32_bridge_defer_or_again(ret);
+ 	}
+ 
+-	/* can-stby exists from minor 13; gated on the minor >= 16 cache (a
+-	 * bridge older than that minor is refused here too).  Kernel
+-	 * consumer (phy-can-transceiver): defer on a silent bridge. */
++	/* can-stby exists from minor 13 and is gated on its own cache, not the
++	 * IO15/IO26 one (minor 16).  Kernel consumer (phy-can-transceiver):
++	 * defer on a silent bridge. */
+ 	if (offset == GD32_CAN_STBY_LINE) {
+-		ret = gd32_bridge_resolve_late(gd32, gd32_bridge_io_ext_status);
++		ret = gd32_bridge_resolve_late(gd32, gd32_bridge_can_stby_status);
+ 		return gd32_bridge_defer_or_again(ret);
+ 	}
+ 
+@@ -1991,6 +2020,7 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+ 	gd32->i2cm_khz = GD32_I2CM_DEFAULT_KHZ;
+ 	gd32->wifi_bt_reg_on_status = -EPROBE_DEFER;	/* not yet resolved */
+ 	gd32->io_ext_status = -EPROBE_DEFER;
++	gd32->can_stby_status = -EPROBE_DEFER;
+ 	gd32->cam_ldo_status = -EPROBE_DEFER;
+ 
+ 	gd32->chip.label	  = "gd32-bridge-gpio";
+@@ -2042,6 +2072,10 @@ static int gd32_bridge_gpio_probe(struct i2c_client *client)
+ 			gd32->io_ext_status = -ENODEV;
+ 		else
+ 			gd32->io_ext_status = 0;
++		if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_CAN_STBY)
++			gd32->can_stby_status = -ENODEV;
++		else
++			gd32->can_stby_status = 0;
+ 		if (ver[0] != 0 || ver[1] < GD32_PROTO_MINOR_CAM_LDO)
+ 			gd32->cam_ldo_status = -ENODEV;
+ 		else
+-- 
+2.53.0
+
