@@ -29,12 +29,12 @@ def test_baseline_none_for_new_minor():
 
 @pytest.mark.parametrize("rc", [4, 8, 12])
 def test_change_fails_in_same_minor(rc):
-    failed, why = mod.evaluate(rc, same_soname=True)
+    failed, why = mod.evaluate(rc, same_minor=True)
     assert failed and "patch release" in why
 
 
-def test_change_reports_only_when_soname_differs():
-    assert mod.evaluate(12, same_soname=False)[0] is False
+def test_change_reports_only_for_other_minor():
+    assert mod.evaluate(12, same_minor=False)[0] is False
 
 
 def test_clean_and_tool_error():
@@ -76,3 +76,15 @@ def test_main_wires_abidiff_exit_code(tmp_path, monkeypatch):
     assert mod.main() == 1
     fake_run.rc = 0
     assert mod.main() == 0
+
+
+def test_soname_only_noise_detected():
+    only = "\n".join([
+        "ELF SONAME changed",
+        "Functions changes summary: 0 Removed, 0 Changed, 0 Added function",
+        "Variables changes summary: 0 Removed, 0 Changed, 0 Added variable",
+        "SONAME changed from 'a' to 'b'",
+    ])
+    assert mod.soname_only(only)
+    assert not mod.soname_only(only.replace("0 Removed, 0 Changed, 0 Added function",
+                                            "1 Removed, 0 Changed, 0 Added function"))

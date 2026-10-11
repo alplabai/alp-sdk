@@ -21,8 +21,9 @@ What it does:
      include/ (public surface only).  Added symbols are compatible and
      are not reported.
   4. Fails when abidiff reports ABI_CHANGE (4) or ABI_INCOMPATIBLE_CHANGE
-     (8) and both libraries carry the same SONAME.  When the SONAME
-     differs (a new minor) the diff is reported and the gate passes.
+     (8) and the baseline is the same minor as the head.  Against a
+     different-minor baseline (--baseline-tag; the SONAME differs) the
+     diff is reported and the gate passes.
 
 [ABI-EXPERIMENTAL] is deliberately NOT suppressed: it is a header-comment
 tag that no tool extracts per symbol, and its "may change in any minor"
@@ -81,20 +82,31 @@ def pick_baseline(minor: str, tags: list[str]) -> str | None:
     return max(rcs)[2] if rcs else None
 
 
-def evaluate(rc: int, same_soname: bool) -> tuple[bool, str]:
+def evaluate(rc: int, same_minor: bool) -> tuple[bool, str]:
     """(failed, reason) for an abidiff exit status."""
     if rc & (ABI_ERROR | ABI_USAGE):
         return True, f"abidiff itself failed (exit {rc})"
     changed = bool(rc & (ABI_CHANGE | ABI_INCOMPATIBLE))
     if not changed:
         return False, "no ABI change"
-    if not same_soname:
+    if not same_minor:
         return False, "ABI changed but SONAME differs (new minor): report only"
     return True, (
         "incompatible ABI change inside one minor line: a patch release must "
         "stay ABI-compatible (in-place package upgrades depend on it). Revert "
         "the change, or make it in a new minor (which bumps the SONAME)"
     )
+
+
+def soname_only(report: str) -> bool:
+    """True when abidiff's only finding is the ELF SONAME rename.
+
+    A baseline built before #2839 carries SONAME libalp_sdk.so.0; comparing
+    it to a same-minor head always sets ABI_CHANGE for that rename alone.
+    Every "changes summary" line being all-zero means nothing else moved.
+    """
+    sums = re.findall(r"changes summary: (\d+) Removed, (\d+) Changed, (\d+) Added", report)
+    return bool(sums) and all(n == "0" for t in sums for n in t) and "SONAME changed" in report
 
 
 def soname_of(lib: Path) -> str | None:
@@ -180,7 +192,13 @@ def main() -> int:
         )
         print(proc.stdout, end="")
         print(proc.stderr, end="", file=sys.stderr)
-        failed, why = evaluate(proc.returncode, s1 == s2)
+        same_minor = tag.startswith(f"v{minor}.")
+        rc = proc.returncode
+        if same_minor and s1 != s2 and soname_only(proc.stdout):
+            print("note: only the SONAME rename differs (pre-#2839 baseline); ignored")
+            rc = 0
+        # same_minor is false only with a --baseline-tag override.
+        failed, why = evaluate(rc, same_minor)
         print(("FAIL: " if failed else "OK: ") + why)
         return 1 if failed else 0
     finally:
