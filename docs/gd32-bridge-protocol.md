@@ -431,7 +431,7 @@ it is never replayed, so a bridge reset leaves the part released. Userspace
 pulses it through the gpiochip labelled `gd32-bridge-gpio` instead of opening
 the bridge itself (#2507).
 
-At protocol minor `>= 15` (firmware `0.3.1`), the pad map grows from 21 to 23
+At protocol minor `>= 16`, the pad map grows from 21 to 23
 lines, adding two ordinary E1M pads after the sideband block (no earlier bit
 moves; bit 20 is `CAN_STBY`):
 
@@ -453,7 +453,8 @@ enables (SoM power-supply sheet, not E1M-X pads), bit `n` = Linux line `n + 1`
 
 A bridge older than 0.17 refuses these lines. Kernel consumers (`can-stby`,
 `cam-en-ldo*`) get `-EPROBE_DEFER` while the bridge is silent, so their probe is
-retried.
+retried.  `can-stby` is gated on its own minor (13), not on the IO15/IO26 or
+camera-LDO minors.
 
 Also at minor `>= 17` the Linux driver exposes, on the same gpio node:
 
