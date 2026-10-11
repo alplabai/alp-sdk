@@ -370,7 +370,7 @@ must add `-Wl,--undefined=_alp_backend_force_camera_yocto_drv`, otherwise only
 the stub is linked; CMake consumers of `alp::sdk` get that option, and the
 matching one for every other Linux backend, automatically (#2790). A
 non-CMake link takes them from the installed `alp-sdk.pc`:
-`pkg-config --static --cflags --libs alp-sdk` (#2829).
+`pkg-config --cflags --libs alp-sdk` (#2829).
 (3) One thread per handle: do not run `capture()` and
 `release()` on the same handle concurrently.
 

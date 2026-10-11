@@ -575,6 +575,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set(_alp_sdk_link_visibility PUBLIC)
     endif()
 
+    # Each pkg-config module linked below is also recorded on the global
+    # ALP_SDK_PC_REQUIRES property: alp-sdk.pc names them in Requires: so a
+    # non-CMake static link resolves them from its sysroot (#2829).
+
     # The backends/<class>/yocto_drv.c sources below each sit in their own TU
     # beside the class's catch-all stub, so a static libalp_sdk.a would drop
     # them.  The top-level alp_sdk_force_static_backends() call keeps them
@@ -693,6 +697,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 ALP_SDK_HAVE_OPENAMP_USERLAND=1
             )
             target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} PkgConfig::OPENAMP_USER)
+            set_property(GLOBAL APPEND PROPERTY ALP_SDK_PC_REQUIRES open-amp libmetal)
             # RPMsg /dev/rpmsg* backend, plus RZ/V2N Path B (#683):
             # yocto_uio_drv.c is the same <alp/rpc.h> surface over userspace
             # open-amp/libmetal UIO ATTACH.  It registers at priority 150
@@ -734,6 +739,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 ${CMAKE_CURRENT_SOURCE_DIR}/../backends/mqtt/yocto_drv.c
             )
             target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} PkgConfig::MOSQUITTO)
+            set_property(GLOBAL APPEND PROPERTY ALP_SDK_PC_REQUIRES libmosquitto)
         else()
             message(STATUS
                 "alp-sdk yocto: libmosquitto not found via pkg-config; "
@@ -765,6 +771,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 ${CMAKE_CURRENT_SOURCE_DIR}/../backends/security/yocto_drv.c
             )
             target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} PkgConfig::OPENSSL)
+            set_property(GLOBAL APPEND PROPERTY ALP_SDK_PC_REQUIRES libssl libcrypto)
         else()
             message(STATUS
                 "alp-sdk yocto: OpenSSL (libssl + libcrypto) not found via pkg-config; "
@@ -804,6 +811,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             # above -- audio_dispatch.c owns alp_audio_* whether or not ALSA is
             # present; this block only adds the real ALSA backend + link.)
             target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} PkgConfig::ALSA)
+            set_property(GLOBAL APPEND PROPERTY ALP_SDK_PC_REQUIRES alsa)
         else()
             message(STATUS
                 "alp-sdk yocto: ALSA libasound not found via pkg-config; "
@@ -840,6 +848,7 @@ if(ALP_SDK_USE_GPU2D_GLES)
             set(_alp_gles_vis PUBLIC)
         endif()
         target_link_libraries(alp_sdk ${_alp_gles_vis} PkgConfig::ALP_EGL PkgConfig::ALP_GLESV2)
+        set_property(GLOBAL APPEND PROPERTY ALP_SDK_PC_REQUIRES egl glesv2)
         unset(_alp_gles_vis)
     elseif(ALP_SDK_GPU2D_GLES_REQUIRED)
         message(FATAL_ERROR

@@ -96,44 +96,70 @@ function(alp_sdk_force_static_backends target)
     set_property(TARGET ${target} PROPERTY ALP_SDK_FORCED_BACKENDS "${_forced}")
 endfunction()
 
-# Non-CMake consumers (a Yocto recipe or Makefile doing `gcc app.c
-# $(pkg-config --static --libs alp-sdk)`) never see the INTERFACE link
-# options above, so a plain `-lalp_sdk` drops every forced backend and the
-# app silently runs on the sw_fallback (#2829).  This writes
-# <out_dir>/alp-sdk.pc whose Libs: carries the same
-# `-Wl,--undefined=_alp_backend_force_<class>_<name>` list, placed BEFORE
-# -lalp_sdk: the linker must already hold the undefined symbol when it scans
-# the archive.  No file is written when nothing was forced (shared, Apple,
-# Windows, or no second backends).  The system libraries the forced backends
-# need (libasound, libssl, ...) go in Libs.private, flattened from the
-# libraries alp_sdk was configured with, so `pkg-config --static --libs`
-# returns a complete link line.
-# Libs.private items from the target's link interface string: the
-# pkg-config modules it links (PkgConfig::<PFX> -> <PFX>_LDFLAGS, set
-# by pkg_check_modules) and the absolute library paths it names (zcbor,
-# DEEPX, MERA, ...).  Read as text rather than walked as a list: the property
-# carries $<LINK_ONLY:...> wrappers.
-function(_alp_pc_private deps out_var)
+# Non-CMake consumers (a Yocto recipe or Makefile doing `cc app.c
+# $(pkg-config --static --cflags --libs alp-sdk)`) never see the INTERFACE
+# link options above, so a plain `-lalp_sdk` drops every forced backend and
+# the app silently runs on the sw_fallback (#2829).  This writes
+# <out_dir>/alp-sdk.pc (Linux/Yocto static builds only; the caller guards on
+# ALP_OS):
+#   - Libs: carries the same `-Wl,--undefined=_alp_backend_force_<class>_<name>`
+#     list BEFORE -lalp_sdk (the linker must already hold the undefined symbol
+#     when it scans the archive), then the libraries the archive needs;
+#   - Requires: names the pkg-config modules alp_sdk was configured with
+#     (libssl, alsa, ...), so the consumer's sysroot resolves them;
+#   - everything is in Libs/Requires, not the .private variants: this is an
+#     archive-only package, so plain `pkg-config --libs` must link too.
+# No file is written (and a stale one is removed) when nothing was forced
+# (shared, Apple, Windows, or no second backends).
+#
+# The file is relocatable: prefix is ${pcfiledir} plus the relative path to
+# CMAKE_INSTALL_PREFIX, and libdir/includedir are relative to that prefix, so
+# a multiarch CMAKE_INSTALL_LIBDIR (lib/x86_64-linux-gnu), an absolute
+# LIBDIR/INCLUDEDIR, or `cmake --install --prefix` all resolve.
+
+# Libs entries from the target's link-interface string: -lpthread for
+# Threads, -l<name> for a find_library result (the absolute path is dropped,
+# the consumer's sysroot has it on the default search path), -l:<file> for a
+# versioned libfoo.so.N.  Read as text: the property carries $<LINK_ONLY:...>.
+function(_alp_pc_libs deps out_var)
     set(_out "-lm")
     if(deps MATCHES "Threads::Threads")
         list(APPEND _out "-lpthread")
     endif()
-    string(REGEX MATCHALL "PkgConfig::[A-Za-z0-9_]+" _mods "${deps}")
-    foreach(_m IN LISTS _mods)
-        string(REPLACE "PkgConfig::" "" _pfx "${_m}")
-        if(DEFINED ${_pfx}_LDFLAGS)
-            list(APPEND _out ${${_pfx}_LDFLAGS})
+    string(REGEX MATCHALL "/[^;>$<]+\\.(a|so)(\\.[0-9]+)*" _paths "${deps}")
+    foreach(_p IN LISTS _paths)
+        get_filename_component(_n "${_p}" NAME)
+        if(_n MATCHES "^lib(.+)\\.(so|a)$")
+            list(APPEND _out "-l${CMAKE_MATCH_1}")
+        else()
+            list(APPEND _out "-l:${_n}")
         endif()
     endforeach()
-    string(REGEX MATCHALL "/[^;>$<]+\\.(a|so)" _paths "${deps}")
-    list(APPEND _out ${_paths})
     list(REMOVE_DUPLICATES _out)
     set(${out_var} "${_out}" PARENT_SCOPE)
+endfunction()
+
+# pkg-config module names behind the PkgConfig:: imported targets the archive
+# links; src/yocto/CMakeLists.txt records them on ALP_SDK_PC_REQUIRES.
+function(_alp_pc_requires out_var)
+    get_property(_out GLOBAL PROPERTY ALP_SDK_PC_REQUIRES)
+    list(REMOVE_DUPLICATES _out)
+    set(${out_var} "${_out}" PARENT_SCOPE)
+endfunction()
+
+# path of `to` relative to `from`, "." when equal.
+function(_alp_pc_rel out_var from to)
+    file(RELATIVE_PATH _r "${from}" "${to}")
+    if(_r STREQUAL "")
+        set(_r ".")
+    endif()
+    set(${out_var} "${_r}" PARENT_SCOPE)
 endfunction()
 
 function(alp_sdk_write_static_pkgconfig target out_dir)
     get_target_property(_forced ${target} ALP_SDK_FORCED_BACKENDS)
     if(NOT _forced)
+        file(REMOVE ${out_dir}/alp-sdk.pc)
         return()
     endif()
     set(ALP_SDK_PC_FORCED_FLAGS "")
@@ -142,17 +168,39 @@ function(alp_sdk_write_static_pkgconfig target out_dir)
         string(APPEND ALP_SDK_PC_FORCED_FLAGS
             " -Wl,--undefined=_alp_backend_force_${_sym}")
     endforeach()
-    # Libraries alp_sdk itself links (PUBLIC when static): flatten the
-    # imported pkg-config targets to -l/-L/path items for Libs.private.
+
     get_target_property(_deps ${target} INTERFACE_LINK_LIBRARIES)
-    _alp_pc_private("${_deps}" _priv)
-    set(ALP_SDK_PC_LIBS_PRIVATE "")
-    foreach(_l IN LISTS _priv)
-        string(APPEND ALP_SDK_PC_LIBS_PRIVATE " ${_l}")
+    _alp_pc_libs("${_deps}" _libs)
+    get_target_property(_srcs ${target} SOURCES)
+    foreach(_src IN LISTS _srcs)
+        if(_src MATCHES "\\.(cpp|cc|cxx)$")
+            list(APPEND _libs "-lstdc++")
+            break()
+        endif()
     endforeach()
+    set(ALP_SDK_PC_LIBS "")
+    foreach(_l IN LISTS _libs)
+        string(APPEND ALP_SDK_PC_LIBS " ${_l}")
+    endforeach()
+    _alp_pc_requires(_req)
+    list(JOIN _req ", " ALP_SDK_PC_REQUIRES)
+
+    # Same defines alp_sdk_headers hands CMake consumers.
+    set(ALP_SDK_PC_DEFINES "")
+    get_target_property(_defs alp_sdk_headers INTERFACE_COMPILE_DEFINITIONS)
+    foreach(_d IN LISTS _defs)
+        if(_d)
+            string(APPEND ALP_SDK_PC_DEFINES " -D${_d}")
+        endif()
+    endforeach()
+
+    _alp_pc_rel(_pfx_rel "${CMAKE_INSTALL_FULL_LIBDIR}/pkgconfig" "${CMAKE_INSTALL_PREFIX}")
+    _alp_pc_rel(_lib_rel "${CMAKE_INSTALL_PREFIX}" "${CMAKE_INSTALL_FULL_LIBDIR}")
+    _alp_pc_rel(_inc_rel "${CMAKE_INSTALL_PREFIX}" "${CMAKE_INSTALL_FULL_INCLUDEDIR}")
+    set(ALP_SDK_PC_PREFIX "\${pcfiledir}/${_pfx_rel}")
+    set(ALP_SDK_PC_LIBDIR "\${prefix}/${_lib_rel}")
+    set(ALP_SDK_PC_INCLUDEDIR "\${prefix}/${_inc_rel}")
     set(ALP_SDK_PC_VERSION "${PROJECT_VERSION}")
-    set(ALP_SDK_PC_LIBDIR "${CMAKE_INSTALL_LIBDIR}")
-    set(ALP_SDK_PC_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}")
     configure_file(${PROJECT_SOURCE_DIR}/cmake/alp-sdk.pc.in
         ${out_dir}/alp-sdk.pc @ONLY)
 endfunction()

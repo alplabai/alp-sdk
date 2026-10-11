@@ -112,7 +112,7 @@ plan in `VERSIONS.md`.
     non-CMake static link needs `-Wl,--undefined=_alp_backend_force_camera_yocto_drv`
     or it gets the stub, plus one such option per other Linux backend;
     CMake consumers get them all automatically (#2790) and non-CMake consumers
-    get them from `pkg-config --static --libs alp-sdk` (#2829).  The sensor must be named by an `alp-camera0`, `alp-camera1`, …
+    get them from `pkg-config --cflags --libs alp-sdk` (#2829).  The sensor must be named by an `alp-camera0`, `alp-camera1`, …
     devicetree alias (see `docs/v2n-camera-csi.md`).  The MIPI CSI-2 ISP-aware backend
     (`src/backends/camera/v2n_n44_isp.c`) is a separate **Zephyr** backend for
     the V2N `m33_sm` core (`zephyr/CMakeLists.txt:812`, opt-in via

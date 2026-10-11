@@ -1035,22 +1035,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                          -P ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/check-static-backends.cmake)
         add_test(NAME alp_test_static_link_camera_selects_yocto
                  COMMAND alp_test_static_link_camera)
-        # Same probe, linked by the plain compiler with the flags from the
-        # generated alp-sdk.pc (no alp::sdk INTERFACE options): the
-        # non-CMake / Yocto-recipe path (#2829).
+        # Install the static archive into a scratch multiarch prefix and link
+        # the same probe with the plain compiler through the INSTALLED
+        # alp-sdk.pc (no alp::sdk INTERFACE options): the non-CMake /
+        # Yocto-recipe path (#2829).  Re-configures and builds the SDK in a
+        # scratch dir, so it takes a few seconds.
         find_program(_alp_pkg_config pkg-config)
         if(_alp_pkg_config AND CMAKE_C_COMPILER
                 AND EXISTS ${CMAKE_BINARY_DIR}/pkgconfig/alp-sdk.pc)
             add_test(NAME alp_test_static_link_pkgconfig
                      COMMAND ${CMAKE_COMMAND}
+                             -DSRC_DIR=${CMAKE_SOURCE_DIR}
+                             -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/static_link_pkgconfig
                              -DPKG_CONFIG=${_alp_pkg_config}
-                             -DPC_DIR=${CMAKE_BINARY_DIR}/pkgconfig
-                             -DLIB=$<TARGET_FILE:alp_sdk>
-                             -DINCLUDE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../../include
                              -DCC=${CMAKE_C_COMPILER}
                              -DNM=${CMAKE_NM}
                              -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/static_link_camera_backend.c
-                             -DBIN=${CMAKE_CURRENT_BINARY_DIR}/alp_test_static_link_pkgconfig_bin
                              -P ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/check-static-pkgconfig.cmake)
         else()
             message(STATUS "SKIP alp_test_static_link_pkgconfig: needs pkg-config and alp-sdk.pc")

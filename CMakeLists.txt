@@ -115,7 +115,8 @@ option(ALP_SDK_STATUS_DESCRIPTIONS
 # headers.  Linux/Yocto consumers (e.g. the meta-alp-sdk recipe, ROS 2
 # nodes that link libalp_sdk.so) set this ON; embedded users who
 # add_subdirectory() the SDK leave it OFF and get the static,
-# install-free build they expect.
+# install-free build they expect (the one exception: a static ALP_OS=yocto
+# build installs the archive, headers and alp-sdk.pc, see the end of this file).
 option(ALP_SDK_BUILD_SHARED "Build libalp_sdk.so + install lib/headers (Linux/Yocto)"  OFF)
 
 # Alp-maintainer strict-warning profile (issue #634) -- defines the
@@ -330,12 +331,14 @@ if(NOT DEFINED ZEPHYR_BASE)
     # Same ordering constraint: keep every second backend (yocto_drv.c, ...)
     # in a static link -- see cmake/alp-sdk-static-backends.cmake (#2790).
     alp_sdk_force_static_backends(alp_sdk)
-    # alp-sdk.pc for non-CMake static links (#2829); a no-op unless the
-    # static Linux archive forced backends.  Written before tests/ so ctest
-    # can use it; installed as lib/pkgconfig/alp-sdk.pc, so ${pcfiledir}/../..
-    # is the install prefix.
-    include(GNUInstallDirs)
-    alp_sdk_write_static_pkgconfig(alp_sdk ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig)
+    # alp-sdk.pc for non-CMake static links (#2829).  Linux/Yocto only: the
+    # baremetal static build stays install-free.  Written before tests/ so
+    # ctest can use it; a no-op (and a stale file removed) unless the static
+    # archive forced backends.
+    if(ALP_OS STREQUAL "yocto")
+        include(GNUInstallDirs)
+        alp_sdk_write_static_pkgconfig(alp_sdk ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------
@@ -424,9 +427,12 @@ if(ALP_SDK_BUILD_SHARED AND NOT DEFINED ZEPHYR_BASE)
         DESTINATION ${ALP_SDK_INSTALL_CMAKEDIR})
 endif()
 
-# Static Linux build: ship the archive, headers and alp-sdk.pc so a non-CMake
-# consumer links with `pkg-config --static --libs alp-sdk` (#2829).
+# Static Linux/Yocto build (ALP_OS=yocto only; baremetal and add_subdirectory
+# flows stay install-free): ship the archive, headers and alp-sdk.pc to
+# ${CMAKE_INSTALL_LIBDIR}/pkgconfig so a non-CMake consumer links with
+# `pkg-config --static --cflags --libs alp-sdk` (#2829).
 if(NOT ALP_SDK_BUILD_SHARED AND NOT DEFINED ZEPHYR_BASE
+        AND ALP_OS STREQUAL "yocto"
         AND EXISTS ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig/alp-sdk.pc)
     install(TARGETS alp_sdk ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
     install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/alp
