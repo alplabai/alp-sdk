@@ -250,7 +250,7 @@ jobs:
     # for both SKU legs post-split rather than tightened per leg (see the
     # per-SKU build/time estimate in the job comment above) -- each leg's
     # own worst case, ~20min, is well inside it either way.
-    timeout-minutes: 41
+    timeout-minutes: 47
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
@@ -588,10 +588,13 @@ jobs:
         # with a cold ccache, and the 62-configuration halves then ran out of
         # this cap four times in a row (26, 55 and 34 of 62 built, no build
         # failed). The split is now `SUBSETS` (scripts/select_aen_twister.py,
-        # four) shards per SKU, ~26 configurations each, which at the worst
-        # cold rate seen (~37 s per configuration) is ~16 min. Cap and job
-        # ceiling are unchanged.
-        timeout-minutes: 34
+        # six) shards per SKU, ~17 configurations each. With four, the full
+        # run on PR #2849 gave shard times of 10-19 min and one 4/4 shard at
+        # 23 of 31 configurations in 34 min (a single build took 13 min), so
+        # the cap goes 34 -> 40 as the ceiling a heavy cold shard trips, and
+        # the job ceiling 41 -> 47 to keep its ~7 min of setup and
+        # save steps behind it.
+        timeout-minutes: 40
         run: |
           # Zero the counters so the summary below reports this run only.
           ccache -z >/dev/null
