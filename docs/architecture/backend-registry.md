@@ -105,8 +105,20 @@ also expands `ALP_BACKEND_FORCE_DEFINE`, which defines the hidden symbol
 column-0 registrations, skips those whose TU defines an anchor, and adds
 `--undefined=_alp_backend_force_<class>_<name>` for the rest to `alp::sdk`'s
 INTERFACE link options (static ELF builds only). The forced pairs are on the
-`alp_sdk` target's `ALP_SDK_FORCED_BACKENDS` property; a non-CMake static
-link must pass the same options itself. A consumer that compiles its own
+`alp_sdk` target's `ALP_SDK_FORCED_BACKENDS` property. A non-CMake static
+link (a Yocto recipe or Makefile) gets the same options from the generated
+`alp-sdk.pc` (`ALP_OS=yocto`, static build; installed to
+`${CMAKE_INSTALL_LIBDIR}/pkgconfig` together with `libalp_sdk.a` and the
+headers): `cc app.c $(pkg-config --cflags --libs alp-sdk)` puts every
+`-Wl,--undefined=_alp_backend_force_...` before `-lalp_sdk`. The package is
+archive-only, so the libraries the forced backends need are in `Libs:` and
+`Requires:` (`libssl`, `alsa`, ...), not the `.private` variants; `--static`
+is not needed, and on a host without static dependency archives it fails with
+`cannot find -l:libjitterentropy.a` (via libcrypto's `Libs.private`). The file is relocatable (`${pcfiledir}`-relative, multiarch
+libdirs work). Linking plain `-lalp_sdk` drops the backends and the app
+silently runs on the sw_fallback (#2829); `alp_test_static_link_pkgconfig`
+installs into a multiarch prefix, links through the installed `.pc` and
+checks the result. A consumer that compiles its own
 copy of a backend opts out by setting `ALP_SDK_NO_FORCED_BACKENDS` on
 itself. `alp_test_static_link_backends` reads the expected set straight from
 the archive with `nm`, so a registration the scan misses still fails it.
