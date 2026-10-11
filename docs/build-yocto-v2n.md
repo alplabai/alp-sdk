@@ -289,8 +289,9 @@ stay on image-based A/B OTA (Mender).
 it: opkg with GPG and HTTPS support, `/etc/opkg/alp-devkit-feed.conf`
 (`option check_signature 1`) and the Alp feed public key
 (`keys/alp_devkit_feed_signing.pub.asc`, fingerprint
-`2B7807E20B75B471BF88FD7AC9AB032782D3143B`) in the opkg keyring. Then, on the
-board:
+`2B7807E20B75B471BF88FD7AC9AB032782D3143B`) in the opkg keyring. The fragment also switches the build to the ipk
+packager (`PACKAGE_CLASSES = "package_ipk"`; the poky default is rpm), so a
+dev-kit image is a different build from a stock one. Then, on the board:
 
 ```sh
 opkg update && opkg upgrade alp-sdk
@@ -308,7 +309,7 @@ a single merged `Packages`, `Packages.gz`, `Packages.sig` and the ipks
 (`all` + the machine arch); the base URL is
 `https://github.com/alplabai/alp-sdk/releases/download/<tag>`. The release is
 refreshed in place, so the URL stays stable. Each release also carries
-`alp-devkit-feed-<tag>.tar.gz`, the same files for hosts that cannot use the URL
+`<tag>.tar.gz`, the same files for hosts that cannot use the URL
 as a base: unpack it and use `src/gz alp-devkit file:///path/to/feed` in a
 `/etc/opkg/*.conf`.
 

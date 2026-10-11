@@ -18,6 +18,11 @@
 
 ALP_DEVKIT_FEED = "1"
 
+# The feed is ipk/opkg. The poky default is package_rpm, so a dev-kit image is
+# built with the ipk packager (rootfs package manager = opkg, which is also what
+# the feed config below drives).
+PACKAGE_CLASSES = "package_ipk"
+
 # The feed line is the SDK major.minor (0.17.0~rc2 -> 0.17); one signed feed per
 # line and per MACHINE (alp-sdk is PACKAGE_ARCH = MACHINE_ARCH). Override
 # ALP_DEVKIT_FEED_URL to host the feed elsewhere (e.g. a file:// mirror).

@@ -47,6 +47,7 @@ def test_template_forces_signature_check_and_has_url_placeholder():
 def test_recipe_installs_the_committed_key_and_config():
     r = RECIPE.read_text(encoding="utf-8")
     assert KEY.name in r and "alp-devkit-feed.conf" in r and "opkg-key populate" in r
+    assert "--import-ownertrust" in r  # opkg rejects a signature from an untrusted key
 
 
 @pytest.mark.skipif(not shutil.which("gpg"), reason="needs gpg")
@@ -77,5 +78,5 @@ def test_packager_builds_a_verifiable_flat_feed(tmp_path):
                    env=env, check=True, capture_output=True)
     names = {p.name for p in out.iterdir()}
     assert {"Packages", "Packages.gz", "Packages.sig", "p-all.ipk",
-            "p-e1m_v2n101_a55.ipk", "alp-devkit-feed-feed-v0-e1m-v2n101-a55.tar.gz"} <= names
+            "p-e1m_v2n101_a55.ipk", "feed-v0-e1m-v2n101-a55.tar.gz"} <= names
     assert "p-cortexa55.ipk" not in names  # tune arch is not part of the dev-kit feed

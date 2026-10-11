@@ -14,7 +14,7 @@
 #       --tag feed-v0.17-e1m-v2n101-a55 --out feed-out [--gnupghome DIR] [--key FPR]
 #
 # Output (all in --out, upload them as release assets):
-#   Packages Packages.gz Packages.sig  *.ipk   alp-devkit-feed-<tag>.tar.gz
+#   Packages Packages.gz Packages.sig  *.ipk   <tag>.tar.gz
 # The tarball is the fallback for hosts that cannot use the release URL as an
 # opkg base: unpack and `src/gz alp-devkit file:///path`. Run it where the
 # private key is available (the internal runner), never in public Actions.
@@ -50,5 +50,5 @@ gpg --batch --yes --pinentry-mode loopback --passphrase '' \
 gpg --batch --verify "$out/Packages.sig" "$out/Packages"
 tmp_tar=$(mktemp "${TMPDIR:-/tmp}/feed-tar.XXXXXX")
 tar -C "$out" -czf "$tmp_tar" .
-mv "$tmp_tar" "$out/alp-devkit-feed-$tag.tar.gz"
+mv "$tmp_tar" "$out/$tag.tar.gz"
 echo "feed ready: $out ($(ls "$out"/*.ipk | wc -l) ipks)"

@@ -16,6 +16,10 @@ SRC_URI = "file://alp-devkit-feed.conf.in file://alp_devkit_feed_signing.pub.asc
 
 S = "${WORKDIR}"
 
+# opkg-key populate imports only *.gpg (binary) keyring files, so the committed
+# armored key is dearmored at install time.
+DEPENDS += "gnupg-native"
+
 # The feed URL names the MACHINE.
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
@@ -32,19 +36,27 @@ do_install() {
 	sed -e 's|@ALP_DEVKIT_FEED_URL@|${ALP_DEVKIT_FEED_URL}|' \
 		${WORKDIR}/alp-devkit-feed.conf.in \
 		> ${D}${sysconfdir}/opkg/alp-devkit-feed.conf
-	install -Dm 0644 ${WORKDIR}/alp_devkit_feed_signing.pub.asc \
-		${D}${datadir}/opkg/keyrings/alp-devkit-feed.asc
+	install -d ${D}${datadir}/opkg/keyrings
+	gpg --homedir ${WORKDIR}/gnupg-dearmor --batch --dearmor \
+		< ${WORKDIR}/alp_devkit_feed_signing.pub.asc \
+		> ${D}${datadir}/opkg/keyrings/alp-devkit-feed.gpg
+	chmod 0644 ${D}${datadir}/opkg/keyrings/alp-devkit-feed.gpg
 }
 
 FILES:${PN} = "${sysconfdir}/opkg/alp-devkit-feed.conf ${datadir}/opkg/keyrings"
 CONFFILES:${PN} = "${sysconfdir}/opkg/alp-devkit-feed.conf"
 
-# opkg-key imports every file under the keyrings dir into opkg's keyring.
+# opkg-key populate imports every *.gpg under the keyrings dir into opkg's keyring.
 RDEPENDS:${PN} = "opkg"
 
 pkg_postinst_ontarget:${PN} () {
 	if test -x ${bindir}/opkg-key
 	then
 		${bindir}/opkg-key populate
+		# opkg only accepts a signature from a key it fully trusts; every key in
+		# this keyring was put there on purpose, so mark them ultimately trusted.
+		gpg --homedir ${sysconfdir}/opkg/gpg --list-keys --with-colons | \
+			awk -F: '/^fpr:/ {print $10 ":6:"}' | \
+			gpg --homedir ${sysconfdir}/opkg/gpg --batch --import-ownertrust
 	fi
 }
