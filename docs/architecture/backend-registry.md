@@ -105,8 +105,14 @@ also expands `ALP_BACKEND_FORCE_DEFINE`, which defines the hidden symbol
 column-0 registrations, skips those whose TU defines an anchor, and adds
 `--undefined=_alp_backend_force_<class>_<name>` for the rest to `alp::sdk`'s
 INTERFACE link options (static ELF builds only). The forced pairs are on the
-`alp_sdk` target's `ALP_SDK_FORCED_BACKENDS` property; a non-CMake static
-link must pass the same options itself. A consumer that compiles its own
+`alp_sdk` target's `ALP_SDK_FORCED_BACKENDS` property. A non-CMake static
+link (a Yocto recipe or Makefile) gets the same options from the generated
+`alp-sdk.pc` (installed to `lib/pkgconfig/`): `cc app.c $(pkg-config --static
+--cflags --libs alp-sdk)` puts every `-Wl,--undefined=_alp_backend_force_...`
+before `-lalp_sdk`, and `Libs.private` carries the libraries the forced
+backends need (`-lssl`, `-lasound`, ...). Linking plain `-lalp_sdk` drops the
+backends and the app silently runs on the sw_fallback (#2829);
+`alp_test_static_link_pkgconfig` links through the `.pc` and checks the result. A consumer that compiles its own
 copy of a backend opts out by setting `ALP_SDK_NO_FORCED_BACKENDS` on
 itself. `alp_test_static_link_backends` reads the expected set straight from
 the archive with `nm`, so a registration the scan misses still fails it.

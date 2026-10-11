@@ -1,0 +1,10 @@
+prefix=${pcfiledir}/../..
+libdir=${prefix}/@ALP_SDK_PC_LIBDIR@
+includedir=${prefix}/@ALP_SDK_PC_INCLUDEDIR@
+
+Name: alp-sdk
+Description: Alp SDK static library (Linux/Yocto); Libs keeps the second backends the archive would drop
+Version: @ALP_SDK_PC_VERSION@
+Cflags: -I${includedir}
+Libs: -L${libdir}@ALP_SDK_PC_FORCED_FLAGS@ -lalp_sdk
+Libs.private:@ALP_SDK_PC_LIBS_PRIVATE@

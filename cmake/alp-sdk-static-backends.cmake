@@ -95,3 +95,64 @@ function(alp_sdk_force_static_backends target)
     endforeach()
     set_property(TARGET ${target} PROPERTY ALP_SDK_FORCED_BACKENDS "${_forced}")
 endfunction()
+
+# Non-CMake consumers (a Yocto recipe or Makefile doing `gcc app.c
+# $(pkg-config --static --libs alp-sdk)`) never see the INTERFACE link
+# options above, so a plain `-lalp_sdk` drops every forced backend and the
+# app silently runs on the sw_fallback (#2829).  This writes
+# <out_dir>/alp-sdk.pc whose Libs: carries the same
+# `-Wl,--undefined=_alp_backend_force_<class>_<name>` list, placed BEFORE
+# -lalp_sdk: the linker must already hold the undefined symbol when it scans
+# the archive.  No file is written when nothing was forced (shared, Apple,
+# Windows, or no second backends).  The system libraries the forced backends
+# need (libasound, libssl, ...) go in Libs.private, flattened from the
+# libraries alp_sdk was configured with, so `pkg-config --static --libs`
+# returns a complete link line.
+# Libs.private items from the target's link interface string: the
+# pkg-config modules it links (PkgConfig::<PFX> -> <PFX>_LDFLAGS, set
+# by pkg_check_modules) and the absolute library paths it names (zcbor,
+# DEEPX, MERA, ...).  Read as text rather than walked as a list: the property
+# carries $<LINK_ONLY:...> wrappers.
+function(_alp_pc_private deps out_var)
+    set(_out "-lm")
+    if(deps MATCHES "Threads::Threads")
+        list(APPEND _out "-lpthread")
+    endif()
+    string(REGEX MATCHALL "PkgConfig::[A-Za-z0-9_]+" _mods "${deps}")
+    foreach(_m IN LISTS _mods)
+        string(REPLACE "PkgConfig::" "" _pfx "${_m}")
+        if(DEFINED ${_pfx}_LDFLAGS)
+            list(APPEND _out ${${_pfx}_LDFLAGS})
+        endif()
+    endforeach()
+    string(REGEX MATCHALL "/[^;>$<]+\\.(a|so)" _paths "${deps}")
+    list(APPEND _out ${_paths})
+    list(REMOVE_DUPLICATES _out)
+    set(${out_var} "${_out}" PARENT_SCOPE)
+endfunction()
+
+function(alp_sdk_write_static_pkgconfig target out_dir)
+    get_target_property(_forced ${target} ALP_SDK_FORCED_BACKENDS)
+    if(NOT _forced)
+        return()
+    endif()
+    set(ALP_SDK_PC_FORCED_FLAGS "")
+    foreach(_pair IN LISTS _forced)
+        string(REPLACE ":" "_" _sym "${_pair}")
+        string(APPEND ALP_SDK_PC_FORCED_FLAGS
+            " -Wl,--undefined=_alp_backend_force_${_sym}")
+    endforeach()
+    # Libraries alp_sdk itself links (PUBLIC when static): flatten the
+    # imported pkg-config targets to -l/-L/path items for Libs.private.
+    get_target_property(_deps ${target} INTERFACE_LINK_LIBRARIES)
+    _alp_pc_private("${_deps}" _priv)
+    set(ALP_SDK_PC_LIBS_PRIVATE "")
+    foreach(_l IN LISTS _priv)
+        string(APPEND ALP_SDK_PC_LIBS_PRIVATE " ${_l}")
+    endforeach()
+    set(ALP_SDK_PC_VERSION "${PROJECT_VERSION}")
+    set(ALP_SDK_PC_LIBDIR "${CMAKE_INSTALL_LIBDIR}")
+    set(ALP_SDK_PC_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}")
+    configure_file(${PROJECT_SOURCE_DIR}/cmake/alp-sdk.pc.in
+        ${out_dir}/alp-sdk.pc @ONLY)
+endfunction()
