@@ -74,6 +74,26 @@ alp_status_t rv3028c7_route_clkout(rv3028c7_t *ctx, rv3028c7_clkout_src_t src)
 	return ALP_OK;
 }
 
+unsigned int g_evi_arms, g_evi_disarms;
+int          g_evi_active_high = -1;
+int          g_evi_filter      = -1;
+
+alp_status_t rv3028c7_event_arm(rv3028c7_t *ctx, bool active_high, rv3028c7_evi_filter_t filter)
+{
+	(void)ctx;
+	g_evi_arms++;
+	g_evi_active_high = active_high ? 1 : 0;
+	g_evi_filter      = (int)filter;
+	return ALP_OK;
+}
+
+alp_status_t rv3028c7_event_disarm(rv3028c7_t *ctx)
+{
+	(void)ctx;
+	g_evi_disarms++;
+	return ALP_OK;
+}
+
 void alp_delay_ms(uint32_t ms)
 {
 	k_msleep((int32_t)ms);

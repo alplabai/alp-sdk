@@ -34,6 +34,8 @@ uint8_t *fake_regs(const struct emul *e);
 extern uint8_t g_chip_regs[256];
 
 extern unsigned int g_clkout_calls;
+extern unsigned int g_evi_arms, g_evi_disarms;
+extern int          g_evi_active_high, g_evi_filter;
 extern int          g_clkout_src;
 
 /* alp_som_power_pads_apply() stand-in: call count and the status it returns. */

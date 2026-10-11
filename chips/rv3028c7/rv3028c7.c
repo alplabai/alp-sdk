@@ -54,6 +54,18 @@
 #define RV3028_CTRL2_CLKIE 0x40 /* Clock-out sync INT enable     */
 #define RV3028_CTRL2_TSE   0x80 /* Time Stamp Enable (not driven by this driver) */
 
+/* Event Control (13h, App. Manual Rev. 1.4 Sec. 3.8, p.26): bit 7 and bit 3 read 0, bit 6 EHL
+ * (0 = falling edge / low level is the External Event, the POR default; 1 = rising edge / high
+ * level), bits 5:4 ET (00 = no filtering, edge detection; 01 / 10 / 11 = level detection with a
+ * sampling period of 3.9 ms / 15.6 ms / 125 ms), bit 2 TSR (write 1 resets the time stamp, reads
+ * 0), bit 1 TSOW, bit 0 TSS (0 = the External Event on EVI is the source, 1 = the Backup
+ * Switchover is).  A plain RAM register, not part of the EEPROM mirror (0x30..0x37). */
+#define RV3028_REG_EVENT_CTRL  0x13u
+#define RV3028_EVCTRL_EHL      0x40u
+#define RV3028_EVCTRL_ET_MASK  0x30u
+#define RV3028_EVCTRL_ET_SHIFT 4u
+#define RV3028_EVCTRL_TSS      0x01u
+
 /* CONTROL_1 / EEPROM_BACKUP additional masks (BSF Backup-switchover
  * INT enable lives in EEPROM_BACKUP at 0x37 bit 6 BSIE). */
 #define RV3028_EEPROM_BACKUP_ADDR 0x37u
@@ -732,7 +744,7 @@ alp_status_t rv3028c7_route_clkout(rv3028c7_t *ctx, rv3028c7_clkout_src_t src)
 /* ---------------------------------------------------------------- */
 
 /* Read-modify-write one RAM register.  Never used on 0x25..0x27 or
- * 0x30..0x37: the wake services touch only 0x07..0x10. */
+ * 0x30..0x37: the wake services touch only 0x07..0x10 and the Event Control register 0x13. */
 static alp_status_t rv3028_update_reg(rv3028c7_t *ctx, uint8_t reg, uint8_t clear, uint8_t set)
 {
 	uint8_t      v = 0;
@@ -923,15 +935,60 @@ alp_status_t rv3028c7_wake_service(rv3028c7_t *ctx, uint8_t *flags)
 
 	/* UF latches every second whether or not UIE is set (p.22, Sec.
      * 4.9), and TF/AF latch independently of TIE/AIE, so only a source
-     * whose interrupt enable is on is reported as a wake cause.  All
-     * three latched flags are still cleared. */
-	const uint8_t latched = status & (RV3028_STATUS_TF | RV3028_STATUS_AF | RV3028_STATUS_UF);
-	const uint8_t enabled = (uint8_t)(((ctrl2 & RV3028_CTRL2_TIE) ? RV3028_STATUS_TF : 0) |
+     * whose interrupt enable is on is reported as a wake cause.  TF, AF
+     * and UF are cleared either way; EVF only with EIE on (then it is the
+     * wake cause, and it holds INT low until cleared, p.24). */
+	const uint8_t evf = (ctrl2 & RV3028_CTRL2_EIE) ? (status & RV3028_STATUS_EVF) : 0u;
+	const uint8_t latched =
+	    (uint8_t)((status & (RV3028_STATUS_TF | RV3028_STATUS_AF | RV3028_STATUS_UF)) | evf);
+	const uint8_t enabled = (uint8_t)(((ctrl2 & RV3028_CTRL2_EIE) ? RV3028_STATUS_EVF : 0) |
+	                                  ((ctrl2 & RV3028_CTRL2_TIE) ? RV3028_STATUS_TF : 0) |
 	                                  ((ctrl2 & RV3028_CTRL2_AIE) ? RV3028_STATUS_AF : 0) |
 	                                  ((ctrl2 & RV3028_CTRL2_UIE) ? RV3028_STATUS_UF : 0));
 	if (flags != NULL) *flags = latched & enabled;
 	if (latched == 0) return ALP_OK;
 	return rv3028_status_clear(ctx, latched);
+}
+
+alp_status_t rv3028c7_event_disarm(rv3028c7_t *ctx)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+
+	alp_status_t s = rv3028_update_reg(ctx, RV3028_REG_CONTROL_2, RV3028_CTRL2_EIE, 0);
+	if (s != ALP_OK) return s;
+	return rv3028_status_clear(ctx, RV3028_STATUS_EVF);
+}
+
+alp_status_t rv3028c7_event_arm(rv3028c7_t *ctx, bool active_high, rv3028c7_evi_filter_t filter)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if ((unsigned)filter > (unsigned)RV3028C7_EVI_FILTER_125_MS) return ALP_ERR_INVAL;
+
+	/* TSE (Control 2 bit 7) with TSS = 1 means the time stamp belongs to the backup switchover;
+     * forcing TSS = 0 below would silently move it to the EVI pin.  Refuse instead. */
+	uint8_t      ctrl2 = 0, evctrl = 0;
+	alp_status_t s = rv3028_read(ctx, RV3028_REG_CONTROL_2, &ctrl2, 1);
+	if (s != ALP_OK) return s;
+	s = rv3028_read(ctx, RV3028_REG_EVENT_CTRL, &evctrl, 1);
+	if (s != ALP_OK) return s;
+	if ((ctrl2 & RV3028_CTRL2_TSE) && (evctrl & RV3028_EVCTRL_TSS)) return ALP_ERR_BUSY;
+
+	/* EIE off and EVF clear first, so reconfiguring cannot assert INT (Sec. 4.11.1 step 1,
+     * p.71).  Then EHL / ET (and TSS = 0, the External Event source) in Event Control, a
+     * read-modify-write that leaves TSOW alone; TSR reads 0, so writing it back is a no-op.
+     * EVF is cleared again after the reconfiguration (a level can latch it meanwhile). */
+	s = rv3028c7_event_disarm(ctx);
+	if (s != ALP_OK) return s;
+	const uint8_t set = (uint8_t)((active_high ? RV3028_EVCTRL_EHL : 0u) |
+	                              ((unsigned)filter << RV3028_EVCTRL_ET_SHIFT));
+	s = rv3028_update_reg(ctx,
+	                      RV3028_REG_EVENT_CTRL,
+	                      RV3028_EVCTRL_EHL | RV3028_EVCTRL_ET_MASK | RV3028_EVCTRL_TSS,
+	                      set);
+	if (s != ALP_OK) return s;
+	s = rv3028_status_clear(ctx, RV3028_STATUS_EVF);
+	if (s != ALP_OK) return s;
+	return rv3028_update_reg(ctx, RV3028_REG_CONTROL_2, 0, RV3028_CTRL2_EIE);
 }
 
 void rv3028c7_deinit(rv3028c7_t *ctx)

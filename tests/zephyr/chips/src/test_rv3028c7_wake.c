@@ -25,6 +25,7 @@
 #define R_STATUS    0x0Eu
 #define R_CTRL1     0x0Fu
 #define R_CTRL2     0x10u
+#define R_EVCTRL    0x13u
 
 static rv3028c7_t g_ctx;
 static alp_i2c_t *g_bus;
@@ -342,6 +343,99 @@ ZTEST(alp_chips, test_rv3028c7_wake_service_if_write1_sets_latches_spurious_flag
 	wake_end();
 }
 
+/* EVI (External Event input), App. Manual Rev. 1.4: Event Control 13h Sec. 3.8 p.26 (EHL bit 6,
+ * ET bits 5:4, TSOW bit 1, TSS bit 0), EIE Control 2 10h bit 2 p.24, EVF Status 0Eh bit 1 p.22. */
+ZTEST(alp_chips, test_rv3028c7_event_arm_sequence_and_bits)
+{
+	wake_begin();
+	/* Start with leftovers: TSOW set, a stale EVF, PORF, TSS = 1 (backup-switchover source). */
+	fake_rv3028c7_set_reg(R_EVCTRL, 0x02u | 0x01u);
+	fake_rv3028c7_set_reg(R_STATUS, 0x02u | 0x01u);
+	fake_rv3028c7_set_reg(R_CTRL2, 0x10u); /* TIE already on: must survive */
+
+	zassert_equal(rv3028c7_event_arm(&g_ctx, false, RV3028C7_EVI_FILTER_NONE), ALP_OK);
+	zassert_equal(fake_rv3028c7_get_reg(R_EVCTRL), 0x02u, "EHL 0, ET 00, TSS 0, TSOW kept");
+	zassert_equal(fake_rv3028c7_get_reg(R_CTRL2), 0x10u | 0x04u, "EIE on, TIE kept");
+	zassert_equal(fake_rv3028c7_get_reg(R_STATUS), 0x01u, "EVF cleared, PORF kept");
+
+	/* Order: EIE off first, EVF cleared before EIE goes on (no stray INT). */
+	int eie_off = wlog_find(R_CTRL2, 0);
+	int evctrl  = wlog_find(R_EVCTRL, eie_off);
+	int evf     = wlog_find(R_STATUS, evctrl);
+	int eie_on  = wlog_find(R_CTRL2, evf);
+	zassert_true(eie_off >= 0 && evctrl > eie_off && evf > evctrl && eie_on > evf);
+	zassert_equal(fake_rv3028c7_wlog_val((size_t)eie_off) & 0x04u, 0u);
+	zassert_equal(fake_rv3028c7_wlog_val((size_t)eie_on) & 0x04u, 0x04u);
+
+	/* Rising edge, 15.6 ms filter: EHL (0x40) | ET = 10 (0x20). */
+	zassert_equal(rv3028c7_event_arm(&g_ctx, true, RV3028C7_EVI_FILTER_15_6_MS), ALP_OK);
+	zassert_equal(fake_rv3028c7_get_reg(R_EVCTRL), 0x40u | 0x20u | 0x02u);
+	zassert_equal(rv3028c7_event_arm(&g_ctx, false, RV3028C7_EVI_FILTER_125_MS), ALP_OK);
+	zassert_equal(fake_rv3028c7_get_reg(R_EVCTRL), 0x30u | 0x02u);
+	zassert_equal(rv3028c7_event_arm(&g_ctx, false, RV3028C7_EVI_FILTER_3_9_MS), ALP_OK);
+	zassert_equal(fake_rv3028c7_get_reg(R_EVCTRL), 0x10u | 0x02u);
+
+	zassert_equal(rv3028c7_event_arm(&g_ctx, false, (rv3028c7_evi_filter_t)4), ALP_ERR_INVAL);
+	assert_no_eeprom_access();
+	wake_end();
+}
+
+ZTEST(alp_chips, test_rv3028c7_event_arm_does_not_take_over_a_backup_switchover_time_stamp)
+{
+	wake_begin();
+	/* TSE = 1 and TSS = 1: the time stamp belongs to the backup switchover. */
+	fake_rv3028c7_set_reg(R_CTRL2, 0x80u);
+	fake_rv3028c7_set_reg(R_EVCTRL, 0x01u);
+	fake_rv3028c7_wlog_reset();
+	zassert_equal(rv3028c7_event_arm(&g_ctx, false, RV3028C7_EVI_FILTER_NONE), ALP_ERR_BUSY);
+	zassert_equal(fake_rv3028c7_wlog_len(), 0u, "nothing written");
+	zassert_equal(fake_rv3028c7_get_reg(R_EVCTRL), 0x01u);
+
+	/* TSE = 1 with TSS = 0 is the EVI time stamp: armed, TSE kept. */
+	fake_rv3028c7_set_reg(R_EVCTRL, 0x00u);
+	zassert_equal(rv3028c7_event_arm(&g_ctx, false, RV3028C7_EVI_FILTER_NONE), ALP_OK);
+	zassert_equal(fake_rv3028c7_get_reg(R_CTRL2), 0x80u | 0x04u);
+	wake_end();
+}
+
+ZTEST(alp_chips, test_rv3028c7_event_wake_service_reports_and_clears_evf)
+{
+	wake_begin();
+	uint8_t flags = 0xFFu;
+
+	zassert_equal(rv3028c7_event_arm(&g_ctx, false, RV3028C7_EVI_FILTER_NONE), ALP_OK);
+	fake_rv3028c7_wlog_reset();
+
+	/* The edge latches EVF (hardware): reported once, cleared, PORF / BSF preserved. */
+	fake_rv3028c7_set_reg(R_STATUS, 0x02u | 0x01u | 0x20u);
+	zassert_equal(rv3028c7_wake_service(&g_ctx, &flags), ALP_OK);
+	zassert_equal(flags, RV3028C7_WAKE_EVF);
+	zassert_equal(fake_rv3028c7_get_reg(R_STATUS), 0x01u | 0x20u);
+	zassert_equal(rv3028c7_wake_service(&g_ctx, &flags), ALP_OK);
+	zassert_equal(flags, 0u, "already cleared");
+
+	/* EIE off: an EVF is not a wake cause and is left latched. */
+	zassert_equal(rv3028c7_event_disarm(&g_ctx), ALP_OK);
+	fake_rv3028c7_set_reg(R_STATUS, 0x02u);
+	zassert_equal(rv3028c7_wake_service(&g_ctx, &flags), ALP_OK);
+	zassert_equal(flags, 0u);
+	zassert_equal(fake_rv3028c7_get_reg(R_STATUS), 0x02u);
+	wake_end();
+}
+
+ZTEST(alp_chips, test_rv3028c7_event_disarm_clears_eie_and_evf_only)
+{
+	wake_begin();
+	fake_rv3028c7_set_reg(R_CTRL2, 0x04u | 0x08u); /* EIE + AIE */
+	fake_rv3028c7_set_reg(R_STATUS, 0x02u | 0x04u | 0x01u);
+	zassert_equal(rv3028c7_event_disarm(&g_ctx), ALP_OK);
+	zassert_equal(fake_rv3028c7_get_reg(R_CTRL2), 0x08u);
+	zassert_equal(fake_rv3028c7_get_reg(R_STATUS), 0x04u | 0x01u);
+	zassert_equal(rv3028c7_event_disarm(&g_ctx), ALP_OK, "idempotent");
+	assert_no_eeprom_access();
+	wake_end();
+}
+
 ZTEST(alp_chips, test_rv3028c7_wake_calls_reject_bad_state)
 {
 	rv3028c7_t             ctx = { 0 };
@@ -356,6 +450,8 @@ ZTEST(alp_chips, test_rv3028c7_wake_calls_reject_bad_state)
 	zassert_equal(rv3028c7_alarm_arm(&ctx, &when, &match), ALP_ERR_NOT_READY);
 	zassert_equal(rv3028c7_alarm_clear(&ctx), ALP_ERR_NOT_READY);
 	zassert_equal(rv3028c7_wake_service(&ctx, &f), ALP_ERR_NOT_READY);
+	zassert_equal(rv3028c7_event_arm(&ctx, false, RV3028C7_EVI_FILTER_NONE), ALP_ERR_NOT_READY);
+	zassert_equal(rv3028c7_event_disarm(&ctx), ALP_ERR_NOT_READY);
 
 	wake_begin();
 	zassert_equal(rv3028c7_timer_read(&g_ctx, NULL), ALP_ERR_INVAL);

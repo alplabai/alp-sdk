@@ -357,10 +357,12 @@ static alp_status_t rv3028_clkout_restore(const struct i2c_dt_spec *i2c, bool pr
 #define RV3028_REG_STATUS    0x0Eu
 #define RV3028_REG_CONTROL_2 0x10u
 #define RV3028_STATUS_PORF   0x01u
+#define RV3028_STATUS_EVF    0x02u
 #define RV3028_STATUS_AF     0x04u
 #define RV3028_STATUS_TF     0x08u
 #define RV3028_STATUS_UF     0x10u
 #define RV3028_STATUS_FLAGS  0x7Fu /* every latchable flag; EEbusy (bit7) is read-only */
+#define RV3028_CTRL2_EIE     0x04u
 #define RV3028_CTRL2_UIE     0x20u
 #define RV3028_CTRL1_TE      0x04u
 #define RV3028_CTRL2_AIE     0x08u
@@ -466,7 +468,8 @@ alp_status_t alp_som_power_rtc_clear_stale_uf(void)
  * here: the countdown (TE, TIE) and, unless @p keep_alarm (the caller may have armed its own
  * alarm), the alarm enable (AIE); cleared: TF, AF (not with keep_alarm) and, with UIE off, UF.
  * Each flag is cleared by writing 0 to it, every other bit is written as 1 (ignored by the
- * part), so PORF / EVF / BSF / CLKF survive: EVF with EIE on is the EVI wake (#2811). */
+ * part), so PORF / EVF / BSF / CLKF survive here: a stale EIE + EVF is cleared by
+ * alp_som_power_rtc_event_service() (#2811), which the backend calls for every /INT plan. */
 alp_status_t alp_som_power_rtc_clear_stale_wake(bool keep_alarm)
 {
 	const struct i2c_dt_spec *i2c = rtc_i2c();
@@ -523,7 +526,8 @@ alp_status_t alp_som_power_rtc_flags_pending(bool *pending)
 		return ALP_ERR_IO;
 	}
 	*pending = ((st & RV3028_STATUS_TF) && (c2 & RV3028_CTRL2_TIE)) ||
-	           ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE));
+	           ((st & RV3028_STATUS_AF) && (c2 & RV3028_CTRL2_AIE)) ||
+	           ((st & RV3028_STATUS_EVF) && (c2 & RV3028_CTRL2_EIE));
 	return ALP_OK;
 }
 
@@ -562,6 +566,42 @@ alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags)
 		return ALP_ERR_IO;
 	}
 	return ALP_OK;
+}
+
+alp_status_t alp_som_power_rtc_event_service(bool *fired)
+{
+	const struct i2c_dt_spec *i2c = rtc_i2c();
+	uint8_t                   st = 0, c2 = 0;
+
+	if (fired == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	*fired = false;
+	if (i2c == NULL) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (i2c_reg_read_byte_dt(i2c, RV3028_REG_STATUS, &st) != 0 ||
+	    i2c_reg_read_byte_dt(i2c, RV3028_REG_CONTROL_2, &c2) != 0) {
+		return ALP_ERR_IO;
+	}
+	if ((c2 & RV3028_CTRL2_EIE) == 0u) {
+		return ALP_OK; /* EVI not armed: nothing of ours to report or clear */
+	}
+	*fired = (st & RV3028_STATUS_EVF) != 0u;
+	/* Disarm: an EIE left on would hold /INT (P15_0) low on the next edge and refuse the next
+	 * sleep, whichever source it arms.  Enable first, flag after, so nothing re-latches. */
+	if (i2c_reg_write_byte_dt(i2c, RV3028_REG_CONTROL_2, (uint8_t)(c2 & ~RV3028_CTRL2_EIE)) != 0) {
+		return ALP_ERR_IO;
+	}
+	if (!*fired) {
+		return ALP_OK;
+	}
+	/* Same constant-mask acknowledge as alp_som_power_rtc_wake_service(): 0 for EVF, 1 for every
+	 * other latchable flag (App. Manual Rev. 1.4 p.22: a flag is cleared by writing 0). */
+	return (i2c_reg_write_byte_dt(
+	            i2c, RV3028_REG_STATUS, (uint8_t)(RV3028_STATUS_FLAGS & ~RV3028_STATUS_EVF)) == 0)
+	           ? ALP_OK
+	           : ALP_ERR_IO;
 }
 
 static uint8_t rv_bcd(uint8_t v, bool *ok)
