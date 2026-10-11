@@ -97,7 +97,7 @@ function(alp_sdk_force_static_backends target)
 endfunction()
 
 # Non-CMake consumers (a Yocto recipe or Makefile doing `cc app.c
-# $(pkg-config --static --cflags --libs alp-sdk)`) never see the INTERFACE
+# $(pkg-config --cflags --libs alp-sdk)`) never see the INTERFACE
 # link options above, so a plain `-lalp_sdk` drops every forced backend and
 # the app silently runs on the sw_fallback (#2829).  This writes
 # <out_dir>/alp-sdk.pc (Linux/Yocto static builds only; the caller guards on

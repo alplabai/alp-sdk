@@ -1045,7 +1045,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 AND EXISTS ${CMAKE_BINARY_DIR}/pkgconfig/alp-sdk.pc)
             add_test(NAME alp_test_static_link_pkgconfig
                      COMMAND ${CMAKE_COMMAND}
-                             -DSRC_DIR=${CMAKE_SOURCE_DIR}
+                             -DSRC_DIR=${PROJECT_SOURCE_DIR}
                              -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/static_link_pkgconfig
                              -DPKG_CONFIG=${_alp_pkg_config}
                              -DCC=${CMAKE_C_COMPILER}

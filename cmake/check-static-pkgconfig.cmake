@@ -47,7 +47,7 @@ file(MAKE_DIRECTORY "${WORK_DIR}")
 _alp_run("configure" "${CMAKE_COMMAND}" -S "${SRC_DIR}" -B "${_build}"
     -DALP_OS=yocto -DALP_BUILD_TESTS=OFF -DCMAKE_C_COMPILER=${CC}
     -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu)
-_alp_run("build" "${CMAKE_COMMAND}" --build "${_build}" --target alp_sdk)
+_alp_run("build" "${CMAKE_COMMAND}" --build "${_build}" --target alp_sdk --parallel)
 _alp_run("install" "${CMAKE_COMMAND}" --install "${_build}" --prefix "${_prefix}")
 
 set(_pcdir "${_prefix}/lib/x86_64-linux-gnu/pkgconfig")

@@ -113,7 +113,8 @@ headers): `cc app.c $(pkg-config --cflags --libs alp-sdk)` puts every
 `-Wl,--undefined=_alp_backend_force_...` before `-lalp_sdk`. The package is
 archive-only, so the libraries the forced backends need are in `Libs:` and
 `Requires:` (`libssl`, `alsa`, ...), not the `.private` variants; `--static`
-is not needed. The file is relocatable (`${pcfiledir}`-relative, multiarch
+is not needed, and on a host without static dependency archives it fails with
+`cannot find -l:libjitterentropy.a` (via libcrypto's `Libs.private`). The file is relocatable (`${pcfiledir}`-relative, multiarch
 libdirs work). Linking plain `-lalp_sdk` drops the backends and the app
 silently runs on the sw_fallback (#2829); `alp_test_static_link_pkgconfig`
 installs into a multiarch prefix, links through the installed `.pc` and

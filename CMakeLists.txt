@@ -338,6 +338,8 @@ if(NOT DEFINED ZEPHYR_BASE)
     if(ALP_OS STREQUAL "yocto")
         include(GNUInstallDirs)
         alp_sdk_write_static_pkgconfig(alp_sdk ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig)
+    else()
+        file(REMOVE ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig/alp-sdk.pc)
     endif()
 endif()
 
@@ -430,7 +432,7 @@ endif()
 # Static Linux/Yocto build (ALP_OS=yocto only; baremetal and add_subdirectory
 # flows stay install-free): ship the archive, headers and alp-sdk.pc to
 # ${CMAKE_INSTALL_LIBDIR}/pkgconfig so a non-CMake consumer links with
-# `pkg-config --static --cflags --libs alp-sdk` (#2829).
+# `pkg-config --cflags --libs alp-sdk` (#2829).
 if(NOT ALP_SDK_BUILD_SHARED AND NOT DEFINED ZEPHYR_BASE
         AND ALP_OS STREQUAL "yocto"
         AND EXISTS ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig/alp-sdk.pc)
