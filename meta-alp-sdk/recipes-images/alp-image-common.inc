@@ -15,6 +15,12 @@ inherit core-image
 
 IMAGE_FEATURES += "ssh-server-openssh"
 
+# Dev-kit signed opkg feed (opt-in: require conf/distro/include/alp-devkit-feed.inc,
+# alp-sdk #2841). Needs the package manager on the target; dev kits only, field
+# devices update by image (Mender).
+IMAGE_FEATURES += "${@'package-management' if d.getVar('ALP_DEVKIT_FEED') == '1' else ''}"
+IMAGE_INSTALL:append = "${@' alp-devkit-feed-config' if d.getVar('ALP_DEVKIT_FEED') == '1' else ''}"
+
 # Block map next to the .wic.gz: scripts/provision_som.py write_rootfs writes and
 # verifies only the mapped ranges (system_image_bmap bundle role) instead of the
 # full ~7 GB image. wic.bmap pulls in bmaptool-native (oe-core). The V2N family
