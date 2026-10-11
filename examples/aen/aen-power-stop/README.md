@@ -117,6 +117,33 @@ the others (`-DEXTRA_CONF_FILE=variants/<name>.conf`); the default image is unch
 | (H) HP running | `h-hp-running.conf` | flashed with `examples/aen/aen-hp-core-smoke` on the M55-HP in one ATOC (`tan flash`, one system manifest naming both cores; the smoke built MRAM-linked with an empty `DTC_OVERLAY_FILE`); sets `CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY=0x3` | after each wake `POWER_STOP: hp_beacon cycle<n> magic=0xa11fe000 heartbeat=... he_uptime_ms=... slept_ms=...` and `cycle<n> hp_kept_running PASS`: the HP's 100 ms heartbeat counted more than this boot plus the sleep, so the HP ran through the HE's STOP. Measured heartbeat 115, 251, 439. With the keep mask at 0 the same run reads `magic=0x00000000 heartbeat=0` and fails 3/3: the SE powers SRAM0 off when the HE's subsystem goes off, and the HP faults on its next SRAM0 store |
 | (G) wake pad | `g-wake-pad.overlay` (a devicetree overlay, selected with `-DEXTRA_DTC_OVERLAY_FILE=variants/g-wake-pad.overlay`, not `EXTRA_CONF_FILE`) | an `alp,power-wake-gpios` node naming P15_2, so the wake-pad branch of the STOP backend (and its `PRE_KERNEL_1` pad snapshot hook) is compiled | Bench-run on the E1M-AEN803 2026W36-0001 (2026-10-10): exactly as expected, STOP 3/3. At boot `POWER_STOP: wake_pads requested=0x4 claimed=0x4 advertised=0` (P15_2 is the SoM's OSPI INTn net, so the pad is refused and `ALP_POWER_WAKE_GPIO` is not advertised; the default image prints `requested=0x0 claimed=0x0 advertised=0`), then the same three STOP cycles and `wake_source` verdicts as the default image. `requested=0x4 ... advertised=1` would mean the SoM no longer claims the pad. |
 
+### EVI wake: MODULE_STBY (variant E, #2811)
+
+`e-evi-wake.conf` replaces the alarm in cycle 3 with `ALP_POWER_WAKE_EXT_EVENT`: no timer, the
+backend arms the RV-3028 External Event input (EVI, U21.8) and the cycle sleeps until a falling edge
+on `MODULE_STBY` (E1.O2). The SoM ties `MODULE_STBY` to EVI with a pull-up R43 to `+1V8`; the RV-3028
+`/INT` output is the same `RTC_ALARM` line -> P15_0 (LPGPIO0) as the alarm and countdown wake, so
+the cause is told apart by the RV-3028 `EVF` flag (STATUS 0Eh bit 1), reported as
+`wake_source=0x100` (`ALP_POWER_WAKE_EXT_EVENT`), not `0x1` (`ALP_POWER_WAKE_RTC`). All levels are 1.8 V.
+
+| Variant | Fragment | Changes | Expected evidence |
+|---|---|---|---|
+| (E) EVI wake | `e-evi-wake.conf` | cycle 3 = `ALP_POWER_WAKE_EXT_EVENT`, `wake_after_ms = 0` | `POWER_STOP: wake_capabilities=0x...` includes `0x100`; `cycle3 waits for MODULE_STBY (E1.O2, header P14 pin 1) to go LOW`; after the pull-down `wake cycle3 (RV-3028 EVI (MODULE_STBY low)) ... wake_source=0x100` and `cycle3 wake_source PASS`. **Bench-pending.** |
+
+Bench wiring (E1M-AEN EVK, one jumper): `WIFI_GPIO18` is the CC3501E `GPIO_18` (U4.31), on E1.I3; on
+the EVK that net is `M2E_SDIO_WAKEn` (pull-up R184, M.2 J16 pin 21). `MODULE_STBY` is on header P14
+pin 1. Join the two with one jumper wire: `WIFI_GPIO18` (M.2 J16 pin 21) -> `MODULE_STBY` (P14 pin 1).
+`GPIO18` must be driven open-drain by the CC3501E firmware (the line idles high on the pull-ups). To
+test without CC3501E firmware, leave the jumper off and touch P14 pin 1 to GND instead.
+
+Steps: (1) wire the jumper; (2) build and flash the variant (`-DEXTRA_CONF_FILE=variants/e-evi-wake.conf`);
+(3) cold power cycle; cycles 1 and 2 run unattended; (4) when the console prints
+`cycle3 waits for MODULE_STBY ... to go LOW` and `cycle3 enter STOP`, wait until it goes quiet (the SoC
+is in STOP), then pull `MODULE_STBY` low (CC3501E `GPIO18` low, or P14 pin 1 to GND) for at least
+10 ms and release; (5) read `wake_source=0x100` and the cycle 3 verdicts. The event is a falling edge
+(no filter), so a line still held low after the wake does not re-trigger; the wake decode clears `EVF`
+and then `EIE`, and the next sleep arms it again.
+
 **How the TCM probe works.** The whole of Zephyr's RAM is the 256 KiB M55-HE DTCM (CPU-local
 `0x20000000`). The probe is a 160 KiB `.noinit` array, so the C runtime neither copies nor zeroes it
 on the cold boot; it straddles the 128 KiB boundary wherever the linker puts it, so part A sits in

@@ -45,6 +45,7 @@
  *     1    LPTIMER, 500 ms                      ALP_POWER_WAKE_TIMER
  *     2    RV-3028 countdown, 3 s               ALP_POWER_WAKE_RTC
  *     3    RV-3028 alarm (next minute change)   ALP_POWER_WAKE_RTC
+ *          (variant E: RV-3028 EVI, MODULE_STBY low   ALP_POWER_WAKE_EXT_EVENT)
  *
  * A timed wake under 1 s uses the LPTIMER; from 1 s up it uses the RV-3028
  * countdown, because the internal low-frequency clock is not trustworthy (the SES
@@ -80,6 +81,10 @@
  *
  * Each is a config fragment (variants/<name>.conf); the default image is unchanged.
  *
+ *   CONFIG_AEN_STOP_EVI_WAKE       cycle 3 sleeps on ALP_POWER_WAKE_EXT_EVENT (the RV-3028 EVI
+ *                                  input = MODULE_STBY) instead of the alarm and waits for a
+ *                                  falling edge on it; expected wake_source
+ *                                  ALP_POWER_WAKE_EXT_EVENT (0x100).  Bench wiring in the README.
  *   CONFIG_AEN_STOP_MODE_STANDBY   every cycle sleeps in ALP_POWER_MODE_STANDBY; the
  *                                  check "mode_stop" becomes "mode_standby" (realised_mode
  *                                  must read STANDBY).
@@ -169,7 +174,19 @@ typedef struct {
 
 /* The countdown is the RV-3028's only if the backend does not route it to the LPTIMER. */
 BUILD_ASSERT(CONFIG_AEN_STOP_RTC_MS >= 1000, "the countdown cycle must be at least 1 s");
+#ifdef CONFIG_AEN_STOP_EVI_WAKE
+/* Variant (E): the third cycle sleeps on the RV-3028 External Event input instead of an alarm.
+ * The backend arms EVI itself (falling edge, EIE on, EVF clear); the app only asks for the wake
+ * source.  There is no timer: the cycle waits until MODULE_STBY is pulled low. */
+#define ALARM_CYCLE \
+	{ "RV-3028 EVI (MODULE_STBY low)", \
+	  ALP_POWER_WAKE_EXT_EVENT, \
+	  0u, \
+	  ALP_POWER_WAKE_EXT_EVENT, \
+	  false }
+#else
 #define ALARM_CYCLE { "RV-3028 alarm", ALP_POWER_WAKE_RTC, 0u, ALP_POWER_WAKE_RTC, true }
+#endif
 
 static const cycle_t cycles[N_CYCLES] = {
 #ifdef CONFIG_AEN_STOP_FIRST_RTC
@@ -821,6 +838,10 @@ static void start_cycle(unsigned n)
 #if CONFIG_AEN_STOP_RETAIN_TCM_KB > 0
 	tcm_fill(n); /* last, so nothing the sleep entry needs is written after the pattern */
 #endif
+	if (c->wake_bitmap == ALP_POWER_WAKE_EXT_EVENT) {
+		printk("POWER_STOP: cycle%u waits for MODULE_STBY (E1.O2, header P14 pin 1) to go LOW\n",
+		       n);
+	}
 	printk("POWER_STOP: cycle%u enter %s (%s)\n", n, SLEEP_MODE_NAME, c->what);
 	k_msleep(100); /* let the UART FIFO drain before the clocks go away */
 

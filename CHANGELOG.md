@@ -7,6 +7,10 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
+### Added — `ALP_POWER_WAKE_EXT_EVENT`: STOP wake from the RV-3028 EVI input (MODULE_STBY) on E1M-AEN (#2811)
+
+A new wake bit lets a carrier signal or the CC3501E wake the Alif from STOP through the RV-3028 External Event input `EVI`, which the SoM wires to `MODULE_STBY` (E1.O2). It is reported as its own `wake_source` (`0x100`), separate from the RTC alarm and countdown. The `chips/rv3028c7` driver gains `rv3028c7_event_arm()` / `rv3028c7_event_disarm()` (Event Control 13h `EHL` / `ET` / `TSS`, `EIE`, `EVF`) and `rv3028c7_wake_service()` now reports and clears `EVF` when `EIE` is on. The AEN STOP backend arms EVI before the sleep, clears the stale `EVF` first so it no longer refuses with `rtc_int_asserted`, and on wake reads and clears `EVF` and `EIE`. Every other backend answers `ALP_ERR_NOSUPPORT`. `examples/aen/aen-power-stop` gets variant `e-evi-wake.conf`; bench wiring is one jumper `WIFI_GPIO18` -> `MODULE_STBY` (see `docs/aen-power-domains.md`). Bench-pending.
+
 ## [v0.17.0] - 2026-10-08 (release candidate: v0.17.0-rc2)
 
 ### Added — build-plan-v1 `sharedArtefacts` carries `generated/storage_mount_table.c` when the project has mountable storage (tan-cli#1216)

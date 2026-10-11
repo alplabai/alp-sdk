@@ -80,6 +80,7 @@
  *      "unsupported bits are silently ignored" wake-source contract
  *      with a reported-capability + error contract (see
  *      @ref alp_power_configure_wake_source).
+ *      #2811 adds the @c ALP_POWER_WAKE_EXT_EVENT wake bit.
  *      The SoM power-domain surface (@ref alp_power_domain_t,
  *      @ref alp_power_domain_policy_set, @ref alp_power_domain_info,
  *      @ref alp_power_boot_wake_info) is implemented for the Alif Ensemble
@@ -152,6 +153,11 @@ typedef enum {
 #define ALP_POWER_WAKE_ETH_LINK   0x00000020u /**< Ethernet link-up / WoL packet. */
 #define ALP_POWER_WAKE_COMPARATOR 0x00000040u /**< Analog comparator threshold (e.g. LPCMP). */
 #define ALP_POWER_WAKE_BROWNOUT   0x00000080u /**< Brown-out / under-voltage detect. */
+/** External event input of the board's RTC (an event pin the carrier or a radio coprocessor
+ *  pulls, separate from the RTC alarm / timer).  On the E1M-AEN801 / E1M-AEN803 it is the
+ *  RV-3028 EVI input, wired to MODULE_STBY (E1.O2); a falling edge wakes the SoC from STOP and
+ *  is reported as this bit, not as @ref ALP_POWER_WAKE_RTC.  Needs no wake_after_ms. */
+#define ALP_POWER_WAKE_EXT_EVENT 0x00000100u
 
 /** Information returned by @ref alp_power_request_sleep about how the
  *  sleep round-trip resolved. */

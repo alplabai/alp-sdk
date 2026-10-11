@@ -958,6 +958,58 @@ ZTEST(power_som_domains, test_rtc_wake_service_reports_enabled_flags_and_clears)
 	zassert_equal(alp_som_power_rtc_wake_service(NULL), ALP_ERR_INVAL);
 }
 
+#define RTC_SF_EVF 0x02u
+#define RTC_C2_EIE 0x04u
+
+ZTEST(power_som_domains, test_rtc_event_service_reports_evf_and_disarms)
+{
+	bool fired = true;
+
+	/* Armed and latched: reported; EVF written 0 (the constant mask keeps every other flag) and
+	 * EIE cleared, so a later edge cannot hold /INT low into a sleep that arms something else. */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF | RTC_SF_PORF;
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_EIE | RTC_C2_TIE;
+	zassert_ok(alp_som_power_rtc_event_service(&fired));
+	zassert_true(fired);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_PORF, "EVF cleared, PORF kept");
+	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], RTC_C2_TIE, "EIE cleared, TIE kept");
+
+	/* Armed, nothing latched: not fired, but still disarmed. */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_PORF;
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_EIE;
+	zassert_ok(alp_som_power_rtc_event_service(&fired));
+	zassert_false(fired);
+	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], 0u);
+
+	/* EIE off: an EVF is not ours and is left latched, nothing written. */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF;
+	rtc_regs()[RTC_CONTROL2_REG] = 0u;
+	zassert_ok(alp_som_power_rtc_event_service(&fired));
+	zassert_false(fired);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_EVF);
+
+	zassert_equal(alp_som_power_rtc_event_service(NULL), ALP_ERR_INVAL);
+}
+
+ZTEST(power_som_domains, test_rtc_event_arm_needs_a_bound_chip_and_arms_a_falling_edge)
+{
+	zassert_false(alp_som_power_rtc_event_ready());
+	zassert_equal(alp_som_power_rtc_event_arm(), ALP_ERR_NOT_READY);
+	zassert_equal(alp_som_power_rtc_event_disarm(), ALP_ERR_NOT_READY);
+
+	rv3028c7_t ctx = { .bus = (alp_i2c_t *)&g_chip_regs, .initialised = true };
+
+	g_evi_arms = g_evi_disarms = 0u;
+	zassert_ok(alp_som_power_bind_rv3028(&ctx));
+	zassert_true(alp_som_power_rtc_event_ready());
+	zassert_ok(alp_som_power_rtc_event_arm());
+	zassert_equal(g_evi_arms, 1u);
+	zassert_equal(g_evi_active_high, 0, "MODULE_STBY idles high: the event is the falling edge");
+	zassert_equal(g_evi_filter, (int)RV3028C7_EVI_FILTER_NONE);
+	zassert_ok(alp_som_power_rtc_event_disarm());
+	zassert_equal(g_evi_disarms, 1u);
+}
+
 ZTEST(power_som_domains, test_rtc_int_armed_reads_control2)
 {
 	bool armed = true;

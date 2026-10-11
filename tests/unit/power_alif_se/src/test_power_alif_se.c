@@ -54,6 +54,8 @@ typedef enum {
 	EV_ENTER,
 	EV_DISARM_INT_PAD,
 	EV_CANCEL_RTC_TIMER,
+	EV_ARM_EVI,
+	EV_DISARM_EVI,
 	EV_DISARM_LPTIMER,
 	EV_RESTORE,
 	EV_CLEAR_STALE_WAKE,
@@ -339,6 +341,9 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t pads, uint32_t lptimer
 		if ((g_rec_at_set.armed_hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
 			g_rtc_flags = RV3028C7_WAKE_TF;
 		}
+		if ((g_rec_at_set.armed_hw & ALP_SOM_ARM_RTC_EVI) != 0u) {
+			g_evi_latched = true;
+		}
 	}
 	return ALP_OK;
 }
@@ -615,6 +620,37 @@ alp_status_t alp_som_power_rtc_countdown_start(uint32_t seconds, uint32_t *actua
 	return ALP_OK;
 }
 
+/* RV-3028 EVI (MODULE_STBY): ready flag, arm/disarm log, and the latched-event model. */
+static bool g_evi_ready, g_evi_latched;
+static int  g_evi_arm_rc;
+
+bool alp_som_power_rtc_event_ready(void)
+{
+	return g_evi_ready;
+}
+
+alp_status_t alp_som_power_rtc_event_arm(void)
+{
+	if (g_evi_arm_rc != 0) {
+		return (alp_status_t)g_evi_arm_rc;
+	}
+	ev(EV_ARM_EVI);
+	return ALP_OK;
+}
+
+alp_status_t alp_som_power_rtc_event_disarm(void)
+{
+	ev(EV_DISARM_EVI);
+	return ALP_OK;
+}
+
+alp_status_t alp_som_power_rtc_event_service(bool *fired)
+{
+	*fired        = g_evi_latched;
+	g_evi_latched = false; /* EVF written 0 */
+	return ALP_OK;
+}
+
 alp_status_t alp_som_power_rtc_countdown_cancel(void)
 {
 	ev(EV_CANCEL_RTC_TIMER);
@@ -740,6 +776,10 @@ static void reset_fakes(void)
 	g_flags_pending        = false;
 	g_fire_on_arm          = false;
 	g_last_keep_alarm      = false;
+
+	g_evi_ready   = false;
+	g_evi_latched = false;
+	g_evi_arm_rc  = 0;
 
 	g_countdown_ready = true;
 	g_rtc_int_armed   = false;
@@ -1130,6 +1170,92 @@ ZTEST(power_alif_se, test_advertised_wake_caps_are_the_real_ones)
 	zassert_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_SLEEP),
 	              0u,
 	              "no pm_policy in this image: SLEEP arms nothing");
+}
+
+/* ---- ALP_POWER_WAKE_EXT_EVENT (RV-3028 EVI = MODULE_STBY, #2811) ---------------------- */
+
+ZTEST(power_alif_se, test_ext_event_is_advertised_only_with_a_bound_rtc)
+{
+	uint32_t caps = 0;
+
+	zassert_ok(se_open(&g_state, NULL, &caps));
+	zassert_equal(caps & ALP_POWER_WAKE_EXT_EVENT, 0u, "no chip context: EVI cannot be armed");
+
+	g_evi_ready = true;
+	zassert_ok(se_open(&g_state, NULL, &caps));
+	zassert_equal(caps, ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_EXT_EVENT);
+
+	g_int_present = false;
+	zassert_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_STOP) & ALP_POWER_WAKE_EXT_EVENT,
+	              0u,
+	              "EVI reaches the SoC through /INT -> P15_0: no pad, no wake");
+}
+
+ZTEST(power_alif_se, test_ext_event_unbound_is_nosupport)
+{
+	g_state.wake_bitmap = ALP_POWER_WAKE_EXT_EVENT;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_NOSUPPORT);
+	assert_no_side_effect();
+}
+
+ZTEST(power_alif_se, test_ext_event_sleep_clears_stale_evf_then_arms_evi_and_the_int_pad)
+{
+	g_evi_ready         = true;
+	g_state.wake_bitmap = ALP_POWER_WAKE_EXT_EVENT;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_OK);
+	zassert_equal(g_rec_at_set.armed_hw & ~ALP_SOM_REC_NSRST_TRUSTED, ALP_SOM_ARM_RTC_EVI);
+	zassert_equal(g_rec_at_set.armed, ALP_POWER_WAKE_EXT_EVENT);
+	zassert_equal(ev_count(EV_DISARM_EVI), 1u, "the stale EIE / EVF is cleared before the check");
+	zassert_equal(ev_count(EV_ARM_EVI), 1u);
+	zassert_equal(ev_count(EV_ARM_INT_PAD), 1u, "EVI wakes through /INT -> P15_0");
+	zassert_equal(ev_count(EV_ARM_RTC_TIMER), 0u, "no countdown of its own");
+}
+
+ZTEST(power_alif_se, test_ext_event_arm_failure_unwinds)
+{
+	g_evi_ready         = true;
+	g_evi_arm_rc        = ALP_ERR_IO;
+	g_state.wake_bitmap = ALP_POWER_WAKE_EXT_EVENT;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_IO);
+	zassert_equal(ev_count(EV_ENTER), 0u, "never slept");
+	zassert_equal(ev_count(EV_ARM_INT_PAD), 0u);
+}
+
+ZTEST(power_alif_se, test_ext_event_wake_cause_is_reported_and_evf_is_cleared)
+{
+	/* Cold-boot decode: EVF latched with EIE on -> EXT_EVENT, and the service cleared it. */
+	alp_som_pd_record_t rec = { .armed_hw = ALP_SOM_ARM_RTC_EVI, .entry_rtc_s = 10u };
+
+	g_rtc_seconds = 14u;
+	g_evi_latched = true;
+	zassert_true(alp_som_power_wake_decode_i2c(&rec));
+	zassert_equal(rec.wake_source, ALP_POWER_WAKE_EXT_EVENT, "its own bit, not RTC");
+	zassert_false(g_evi_latched, "EVF written 0");
+	zassert_equal(rec.slept_ms, 4000u);
+
+	/* No EVF: nothing is claimed (the wake was something else). */
+	rec = (alp_som_pd_record_t){ .armed_hw = ALP_SOM_ARM_RTC_EVI };
+	alp_som_power_wake_decode_i2c(&rec);
+	zassert_equal(rec.wake_source, 0u);
+
+	/* A cycle that never armed EVI does not read it. */
+	g_evi_latched = true;
+	rec           = (alp_som_pd_record_t){ .armed_hw = ALP_SOM_ARM_RTC_TIMER };
+	alp_som_power_wake_decode_i2c(&rec);
+	zassert_equal(rec.wake_source & ALP_POWER_WAKE_EXT_EVENT, 0u);
+	zassert_true(g_evi_latched);
+}
+
+ZTEST(power_alif_se, test_ext_event_aborted_sleep_reports_ext_event)
+{
+	alp_power_wake_info_t info;
+
+	g_evi_ready         = true;
+	g_state.wake_bitmap = ALP_POWER_WAKE_EXT_EVENT;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, &info), ALP_OK);
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_EXT_EVENT);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN, "it never reached STOP");
+	zassert_equal(ev_count(EV_DISARM_EVI), 2u, "stale clear before arming, disarm on unwind");
 }
 
 ZTEST(power_alif_se, test_rtc_domain_rail_off_conflicts_with_rtc_wake)

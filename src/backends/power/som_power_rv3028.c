@@ -103,6 +103,30 @@ alp_status_t alp_som_power_rtc_countdown_start(uint32_t seconds, uint32_t *actua
 	return rv3028c7_timer_start(bound_ctx(), seconds, actual_s);
 }
 
+bool alp_som_power_rtc_event_ready(void)
+{
+	return alp_som_power_rtc_countdown_ready();
+}
+
+/* MODULE_STBY idles high (R43 pull-up to +1V8) and the CC3501E pulls it low through an
+ * open-drain GPIO, so the event is the falling edge; no filter (an edge, not a level that
+ * would re-latch while the line stays low). */
+alp_status_t alp_som_power_rtc_event_arm(void)
+{
+	if (!alp_som_power_rtc_event_ready()) {
+		return ALP_ERR_NOT_READY;
+	}
+	return rv3028c7_event_arm(bound_ctx(), false, RV3028C7_EVI_FILTER_NONE);
+}
+
+alp_status_t alp_som_power_rtc_event_disarm(void)
+{
+	if (!alp_som_power_rtc_event_ready()) {
+		return ALP_ERR_NOT_READY;
+	}
+	return rv3028c7_event_disarm(bound_ctx());
+}
+
 alp_status_t alp_som_power_rtc_countdown_cancel(void)
 {
 	if (!alp_som_power_rtc_countdown_ready()) {

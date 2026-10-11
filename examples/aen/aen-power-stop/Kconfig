@@ -27,6 +27,14 @@ config AEN_STOP_RTC_MS
 	  RV-3028 and not the LPTIMER.  Variant (iii) raises the ceiling and moves this to
 	  11000 so that variant still changes ONE thing: the LPTIMER interval.
 
+config AEN_STOP_EVI_WAKE
+	bool "Variant (E): cycle 3 wakes from the RV-3028 EVI input (MODULE_STBY) instead of the alarm"
+	help
+	  Cycle 3 requests ALP_POWER_WAKE_EXT_EVENT with no timer and the app waits for a falling
+	  edge on MODULE_STBY.  On the E1M-AEN EVK jumper WIFI_GPIO18 (M2E_SDIO_WAKEn, M.2 J16
+	  pin 21) to MODULE_STBY (header P14 pin 1), or touch P14 pin 1 to GND.  Verdict
+	  wake_source must read ALP_POWER_WAKE_EXT_EVENT, not ALP_POWER_WAKE_RTC.
+
 config AEN_STOP_MODE_STANDBY
 	bool "Variant (S): sleep in ALP_POWER_MODE_STANDBY instead of STOP"
 	help
