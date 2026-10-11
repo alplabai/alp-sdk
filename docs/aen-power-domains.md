@@ -258,6 +258,17 @@ sleep, each with its own OFF profile. The BKRAM record, the LPTIMER0 wake timer 
 single-owner resources: use the backend from one core only (the dtsi notes the same for the
 LPTIMER; the vendor README says the RTC is shared with the HE).
 
+**Memory the other core still uses.** The SE powers off every memory block the OFF profile does not
+name as soon as the sleeping core's subsystem goes off, without waiting for the SoC-level STOP. On
+E1M-AEN803 2026W36-0001 (2026-10-11) an HE STOP with the HP running `examples/aen/aen-hp-core-smoke`
+took SRAM0 away: the HP's SRAM0 heartbeat read `magic=0x00000000 heartbeat=0` after each of three
+wakes, while `STOP_MODE_STAT` stayed 0 and the HE's WIC bits showed a core-only STOP. Adding
+`PD_SYST | PD_RTSS_HP` to the OFF profile did not help; naming SRAM0 | SRAM1 in `memory_blocks` did
+(heartbeat 115, 251, 439 across the three STOPs). Set `CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY`
+to the gen2 memory blocks the running core needs (`0x3` for SRAM0 | SRAM1); the default 0 keeps none,
+for the lowest floor when nothing else runs. The `h-hp-running` variant of `aen-power-stop` is the
+bench check.
+
 **Run D, and the second STOP witness (HP with the HE running).** Combined ATOC on E1M-AEN803
 2026W36-0001: the HE ran an idle Zephyr app, the HP ran `examples/aen/aen-power-stop`. The HP requested
 STOP, the SE powered the HP subsystem off and re-booted it on the LPTIMER, but `STOP_MODE_STAT` (bit4 of
@@ -282,7 +293,7 @@ and no slept time; the domains are restored either way. Both vetoes are unmeasur
 real reset during the off-time. The realised mode is this core's: the SoC itself reaches STOP only
 when every core is off.
 
-**Run D, re-run with the rule:** dual-core (HE idle Zephyr app + HP `aen-power-stop`) on E1M-AEN803 2026W36-0001 passes 3/3 (LPTIMER `wake_source=0x8`, countdown `0x1`, alarm `0x1`, all `mode=4`, `SUMMARY cycles=3 pass=5 fail=0`, boot diag w[16..19] = `00000100 00000100 00000333 00000000`), flashed as one combined ATOC (DEVICE + m55_he + m55_hp) written by tan's Flow D with the alplabai/tan-cli#1509 fix; the HE-only regression stays 3/3. Unmeasured: the E1M-AEN801 HP and the two reset vetoes above.
+**Run D, re-run with the rule:** dual-core (HE idle Zephyr app + HP `aen-power-stop`) on E1M-AEN803 2026W36-0001 passes 3/3 (LPTIMER `wake_source=0x8`, countdown `0x1`, alarm `0x1`, all `mode=4`, `SUMMARY cycles=3 pass=5 fail=0`, boot diag w[16..19] = `00000100 00000100 00000333 00000000`), flashed as one combined ATOC (DEVICE + m55_he + m55_hp) written by tan's Flow D with the alplabai/tan-cli#1509 fix; the HE-only regression stays 3/3. Unmeasured: the E1M-AEN801 HP (no board; the same AE822FA0E5597LS0 part, and the example builds for it) and the two reset vetoes above. The reset vetoes cannot be driven on this bench: the probe's `r0`/`r1` leave a running HP image untouched, and its RESETPIN reset strategy leaves an HP-only image stopped until a power cycle.
 
 ### Comparison with the vendor reference (bench U8c)
 

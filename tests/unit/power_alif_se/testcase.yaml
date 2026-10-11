@@ -18,3 +18,6 @@ tests:
   # The product configuration: no bench scratch option (OFF fields fixed, diag no-ops).
   alp.unit.power_alif_se.product:
     extra_args: ALP_TEST_PRODUCT=1
+  # Memory the other core keeps using: ORed into every OFF profile.
+  alp.unit.power_alif_se.keep_memory:
+    extra_args: ALP_TEST_KEEP_MEMORY=1

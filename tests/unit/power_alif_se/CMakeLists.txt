@@ -24,6 +24,10 @@ if(ALP_TEST_ALLOW_DEBUGGER)
     target_compile_definitions(app PRIVATE CONFIG_ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER=1)
 endif()
 
+if(ALP_TEST_KEEP_MEMORY)
+    target_compile_definitions(app PRIVATE CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY=0x3)
+endif()
+
 # The bench scratch build: the clock restore writes its progress to the BOOT diag slot.
 if(NOT ALP_TEST_PRODUCT)
     target_compile_definitions(app PRIVATE CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH=1)
