@@ -348,6 +348,31 @@ def update_banner_c(new_version: str, dry_run: bool) -> None:
     print(f"  updated {BANNER_C.relative_to(REPO)}: sample banner -> \"Alp SDK {core}\"")
 
 
+ALP_SDK_RECIPE = REPO / "meta-alp-sdk" / "recipes-core" / "alp-sdk" / "alp-sdk_0.6.bb"
+
+
+def update_yocto_recipe(new_version: str, dry_run: bool) -> None:
+    """Rewrite PV in the alp-sdk Yocto recipe (#2827).
+
+    Core version, with a SemVer pre-release written as `~suffix` (not `-`)
+    so 0.17.0~rc2 sorts before 0.17.0 in opkg/dpkg/rpm feeds.
+    """
+    major, minor, patch, pre = parse_version(new_version)
+    pv = f"{major}.{minor}.{patch}" + (f"~{pre}" if pre else "")
+    text = ALP_SDK_RECIPE.read_text(encoding="utf-8")
+    new_text, n = re.subn(r'^(PV\s*=\s*)"[^"]*"', lambda m: f'{m.group(1)}"{pv}"', text,
+                          count=1, flags=re.MULTILINE)
+    if n != 1:
+        raise SystemExit(f"bump_version: no 'PV = \"...\"' line in "
+                         f"{ALP_SDK_RECIPE.relative_to(REPO)}")
+    if new_text == text:
+        print(f"  unchanged {ALP_SDK_RECIPE.relative_to(REPO)} (already at {pv})")
+        return
+    if not dry_run:
+        ALP_SDK_RECIPE.write_text(new_text, encoding="utf-8", newline="")
+    print(f"  updated {ALP_SDK_RECIPE.relative_to(REPO)}: -> PV = \"{pv}\"")
+
+
 def update_pyproject(new_version: str, dry_run: bool) -> None:
     """Rewrite the [project] version in pyproject.toml (alp-sdk-cli).
 
@@ -427,6 +452,7 @@ def main() -> int:
     slice_changelog(args.to, args.dry_run)
     update_version_h(args.to, args.dry_run)
     update_pyproject(args.to, args.dry_run)
+    update_yocto_recipe(args.to, args.dry_run)
     update_banner_c(args.to, args.dry_run)
     regenerate_abi_snapshot(args.to, args.dry_run)
     regenerate_emit_snapshots(args.dry_run)

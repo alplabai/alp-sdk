@@ -261,9 +261,19 @@ endif()
 if(NOT DEFINED ZEPHYR_BASE)
     if(ALP_SDK_BUILD_SHARED)
         add_library(alp_sdk SHARED)
+        # SONAME (#2827): a 0.x MINOR may remove public symbols, so until
+        # 1.0 the minor is part of the SONAME (libalp_sdk.so.0.17) and a
+        # package-manager upgrade across minors cannot silently load an
+        # incompatible library into an app linked against the old one.
+        # From 1.0 the MAJOR alone is the ABI contract.
+        if(PROJECT_VERSION_MAJOR EQUAL 0)
+            set(_alp_sdk_soversion "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+        else()
+            set(_alp_sdk_soversion "${PROJECT_VERSION_MAJOR}")
+        endif()
         set_target_properties(alp_sdk PROPERTIES
             VERSION   ${PROJECT_VERSION}
-            SOVERSION ${PROJECT_VERSION_MAJOR})
+            SOVERSION ${_alp_sdk_soversion})
         # #1145: a shared library permits undefined symbols at link time by
         # default -- libalp_sdk.so built "successfully" with the DRP-AI
         # backend compiled in while MeraDrpRuntimeWrapper's symbols were
