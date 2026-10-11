@@ -17,6 +17,7 @@
  */
 
 #include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/input/input.h>
 #include <zephyr/ztest.h>
