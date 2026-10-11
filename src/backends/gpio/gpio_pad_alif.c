@@ -8,6 +8,8 @@
  * only BUILDS a pinctrl word and hands it to pinctrl_configure_pins(); no
  * register is touched here.  Retires if upstream gpio_dw learns pinctrl.
  *
+ * The pad word (which bits an input gets) is in gpio_pad_alif_word.h.
+ *
  * Pad <-> pin: gpioN is pad port N, lpgpio is pad port 15 (pinctrl_soc.h), the
  * pin number is the same on both.  The port is read off the controller's DT
  * register base (gpioN @ 0x49000000 + N * 0x1000, lpgpio @ 0x42002000) so no
@@ -26,14 +28,19 @@
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 
 #include "gpio_pad.h"
+#include "gpio_pad_alif_word.h"
 
 #define ALP_ALIF_GPIO_BASE   0x49000000u
 #define ALP_ALIF_LPGPIO_BASE 0x42002000u
 #define ALP_ALIF_LPGPIO_PORT 15u
 
-/* DSC bias field, pinctrl_soc.h: 0 = high-Z, 1 = pull-up, 2 = pull-down. */
-#define ALP_ALIF_DSC_PULL_UP   1u
-#define ALP_ALIF_DSC_PULL_DOWN 2u
+/* The word layout lives in gpio_pad_alif_word.h (testable on the host); pin it to
+ * the real pinctrl_soc.h here so it cannot drift. */
+BUILD_ASSERT(ALP_PAD_REN == ALIF_PAD_CONF_REN(1));
+BUILD_ASSERT(ALP_PAD_ODS_4MA == ALIF_PAD_CONF_ODS(1));
+BUILD_ASSERT((ALP_PAD_DSC_UP << ALP_PAD_DSC_SHIFT) == ALIF_PAD_CONF_DSC(1));
+BUILD_ASSERT((ALP_PAD_DSC_DOWN << ALP_PAD_DSC_SHIFT) == ALIF_PAD_CONF_DSC(2));
+BUILD_ASSERT(ALIF_PINMUX(3, 5, 0) == ((3u << ALP_PAD_PORT_SHIFT) | (5u << ALP_PAD_PIN_SHIFT)));
 
 struct pad_port {
 	const struct device *dev;
@@ -61,13 +68,9 @@ int alp_z_gpio_pad_input(const struct gpio_dt_spec *spec, alp_gpio_pull_t pull)
 	for (size_t i = 0; _ports[i].dev != NULL; ++i) {
 		if (_ports[i].dev != spec->port) continue;
 
-		uint32_t dsc = (pull == ALP_GPIO_PULL_UP)     ? ALP_ALIF_DSC_PULL_UP
-		               : (pull == ALP_GPIO_PULL_DOWN) ? ALP_ALIF_DSC_PULL_DOWN
-		                                              : 0u;
-		/* AF 0 = GPIO.  Opening the pad as a GPIO input is the caller's choice
-		 * to own it, so taking the mux is correct. */
-		pinctrl_soc_pin_t pad = ALIF_PINMUX(_ports[i].port, spec->pin, 0) | ALIF_PAD_CONF_REN(1) |
-		                        ALIF_PAD_CONF_DSC(dsc);
+		/* Opening the pad as a GPIO input is the caller's choice to own it, so taking
+		 * the mux is correct.  Which pad bits an input gets: see the header. */
+		pinctrl_soc_pin_t pad = alp_alif_pad_input_word(_ports[i].port, spec->pin, pull);
 		return pinctrl_configure_pins(&pad, 1, PINCTRL_REG_NONE);
 	}
 	return 0; /* not an Alif DW port (e.g. an emulated controller) */

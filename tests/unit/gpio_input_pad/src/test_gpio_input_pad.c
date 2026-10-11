@@ -15,6 +15,7 @@
 #include <alp/peripheral.h>
 
 #include "backends/gpio/gpio_pad.h"
+#include "backends/gpio/gpio_pad_alif_word.h"
 
 static int             calls;
 static uint8_t         last_pin;
@@ -76,4 +77,25 @@ ZTEST(alp_gpio_input_pad, test_pad_failure_is_reported_not_swallowed)
 	next_rc = -EIO;
 	zassert_not_equal(alp_gpio_configure(h, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE), ALP_OK);
 	alp_gpio_close(h);
+}
+
+/* The exact pad word (port 3 pin 0, AF 0 = GPIO).  The pinctrl driver writes the
+ * low AF bits plus word[23:16] to the pad register, so the register is
+ * 0x00210000 for no pull: REN (bit 16) + ODS 4 mA (bit 21), the value the
+ * trace-runner workaround produced on EVK-03.  Not 0x00010000 (ODS dropped to
+ * 2 mA, the #2844 bench finding) and not 0x00230000 (SMT, bit 17, is off). */
+ZTEST(alp_gpio_input_pad, test_alif_input_pad_word_is_exact)
+{
+	const uint32_t addr = (3u << 6) | (0u << 3);
+
+	zassert_equal(alp_alif_pad_input_word(3, 0, ALP_GPIO_PULL_NONE), addr | 0x00210000u);
+	zassert_equal(alp_alif_pad_input_word(3, 1, ALP_GPIO_PULL_NONE),
+	              (3u << 6) | (1u << 3) | 0x00210000u);
+	zassert_equal(alp_alif_pad_input_word(4, 3, ALP_GPIO_PULL_NONE),
+	              (4u << 6) | (3u << 3) | 0x00210000u);
+	/* Pull is the DSC field, bits 19:20. */
+	zassert_equal(alp_alif_pad_input_word(3, 0, ALP_GPIO_PULL_UP), addr | 0x00290000u);
+	zassert_equal(alp_alif_pad_input_word(3, 0, ALP_GPIO_PULL_DOWN), addr | 0x00310000u);
+	/* Register content = word[23:16] << 16 | AF. */
+	zassert_equal(alp_alif_pad_input_word(4, 3, ALP_GPIO_PULL_NONE) & 0x00ff0000u, 0x00210000u);
 }
