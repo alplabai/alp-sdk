@@ -138,7 +138,7 @@ static volatile tr_vol_t rec;
 static void fresh(tr_vol_he_t *he)
 {
 	memset((void *)&rec, 0xA5, sizeof(rec)); /* cold SRAM0 */
-	tr_vol_he_boot(he, &rec);
+	tr_vol_he_boot(he, &rec, false);
 }
 
 /* A boot at the default, then moved to 100 % so the step arithmetic below starts from full. */
@@ -298,7 +298,7 @@ static void test_request(void)
 	/* a stale valid req from before the boot is dropped, not obeyed ... */
 	memset((void *)&rec, 0, sizeof(rec));
 	rec.req = tr_vol_word(10u);
-	tr_vol_he_boot(&he, &rec);
+	tr_vol_he_boot(&he, &rec, false);
 	assert(rec.req == 0u);
 	assert(!tr_vol_he_step(&he, &rec, 0, false) && he.pct == TR_VOL_DEFAULT);
 	/* ... but a new one is */
@@ -323,6 +323,49 @@ static void test_single_writer(void)
 	assert(tr_vol_read(rec.vol) == 50u);
 }
 
+/* An HE-only warm reset keeps the level the HP is playing at; a cold boot and garbage take the default. */
+static void test_warm_boot(void)
+{
+	tr_vol_he_t he;
+
+	/* warm + a valid record: restored, published, and the next turn steps from it */
+	memset((void *)&rec, 0xA5, sizeof(rec));
+	rec.vol = tr_vol_word(55u);
+	tr_vol_he_boot(&he, &rec, true);
+	assert(he.pct == 55u && he.unmute_pct == 55u && !he.muted && rec.vol == tr_vol_word(55u));
+	assert(rec.seq == 0u && rec.rejects == 0u && rec.req == 0u);
+	assert(tr_vol_he_step(&he, &rec, 1, false) && he.pct == 60u);
+
+	/* warm + a muted record: stays muted, the unmute goes to the default (the old level is not recorded) */
+	memset((void *)&rec, 0xA5, sizeof(rec));
+	rec.vol = tr_vol_word(0u);
+	tr_vol_he_boot(&he, &rec, true);
+	assert(he.pct == 0u && he.muted && rec.vol == tr_vol_word(0u));
+	assert(tr_vol_he_step(&he, &rec, 0, true) && he.pct == TR_VOL_DEFAULT && !he.muted);
+
+	/* warm + garbage (untagged, a percent over 100, cold-SRAM patterns): the default */
+	const uint32_t junk[] = {
+		0xA5A5A5A5u, 0x00000000u, 0xFFFFFFFFu, TR_VOL_TAG | 101u, 0x564E0028u
+	};
+	for (unsigned i = 0; i < sizeof(junk) / sizeof(junk[0]); i++) {
+		memset((void *)&rec, 0, sizeof(rec));
+		rec.vol = junk[i];
+		tr_vol_he_boot(&he, &rec, true);
+		assert(he.pct == TR_VOL_DEFAULT && !he.muted && rec.vol == tr_vol_word(TR_VOL_DEFAULT));
+	}
+
+	/* cold, even with a valid record left in SRAM0: the default, exactly as before */
+	memset((void *)&rec, 0, sizeof(rec));
+	rec.vol = tr_vol_word(55u);
+	tr_vol_he_boot(&he, &rec, false);
+	assert(he.pct == TR_VOL_DEFAULT && rec.vol == tr_vol_word(TR_VOL_DEFAULT));
+
+	/* the bounds of a valid record */
+	rec.vol = tr_vol_word(100u);
+	tr_vol_he_boot(&he, &rec, true);
+	assert(he.pct == 100u);
+}
+
 int main(void)
 {
 	test_word();
@@ -332,6 +375,7 @@ int main(void)
 	test_he();
 	test_mute();
 	test_request();
+	test_warm_boot();
 	test_single_writer();
 	puts("test_vol: ok");
 	return 0;

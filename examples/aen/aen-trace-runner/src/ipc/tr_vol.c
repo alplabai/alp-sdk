@@ -69,14 +69,23 @@ static bool set(tr_vol_he_t *he, volatile tr_vol_t *r, uint32_t pct)
 	return true;
 }
 
-void tr_vol_he_boot(tr_vol_he_t *he, volatile tr_vol_t *r)
+void tr_vol_he_boot(tr_vol_he_t *he, volatile tr_vol_t *r, bool warm)
 {
+	uint32_t kept;
+
 	he->pct        = TR_VOL_DEFAULT;
 	he->unmute_pct = TR_VOL_DEFAULT;
 	he->muted      = false;
-	r->req         = 0u;
-	r->rejects     = 0u;
-	r->seq         = 0u;
+	if (warm && tr_vol_valid(r->vol, &kept)) { /* read BEFORE the publish below */
+		he->pct   = kept;
+		he->muted = kept == 0u;
+		if (kept != 0u) {
+			he->unmute_pct = kept;
+		}
+	}
+	r->req     = 0u;
+	r->rejects = 0u;
+	r->seq     = 0u;
 	publish(he, r);
 }
 

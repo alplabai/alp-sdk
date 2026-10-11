@@ -22,8 +22,8 @@ static void fresh(uint32_t bl)
 {
 	memset((void *)&rec, 0xA5, sizeof(rec)); /* cold SRAM0 */
 	memset((void *)&vrec, 0xA5, sizeof(vrec));
-	tr_knob_boot(&k, &rec, bl, true);
-	tr_vol_he_boot(&he, &vrec);
+	tr_knob_boot(&k, &rec, bl, true, false);
+	tr_vol_he_boot(&he, &vrec, false);
 	t = 100000u;
 }
 
@@ -61,12 +61,12 @@ static void test_boot(void)
 	fresh(30u);
 	assert(k.mode == TR_KNOB_VOLUME && k.bl_pct == 30u && rec.bl == tr_bl_word(30u));
 	assert(rec.rejects == 0u && rec.seq == 0u);
-	tr_knob_boot(&k, &rec, 3u, true); /* below the floor: raised, never dark */
+	tr_knob_boot(&k, &rec, 3u, true, false); /* below the floor: raised, never dark */
 	assert(k.bl_pct == TR_BL_MIN);
-	tr_knob_boot(&k, &rec, 250u, true);
+	tr_knob_boot(&k, &rec, 250u, true, false);
 	assert(k.bl_pct == TR_BL_MAX && TR_BL_MAX == (uint32_t)TR_BL_MAX_PCT &&
 	       rec.bl == tr_bl_word(TR_BL_MAX));
-	tr_knob_boot(&k, &rec, TR_BL_MAX + 10u, true); /* a boot default past the ceiling */
+	tr_knob_boot(&k, &rec, TR_BL_MAX + 10u, true, false); /* a boot default past the ceiling */
 	assert(k.bl_pct == TR_BL_MAX && tr_bl_word(100u) == tr_bl_word(TR_BL_MAX));
 	assert(TR_MEM_BL == 0x0237FDC0u && TR_BL_TAG == 0x424C0000u);
 }
@@ -259,7 +259,7 @@ static void test_request(void)
 static void test_no_backlight(void)
 {
 	fresh(30u);
-	tr_knob_boot(&k, &rec, 30u, false); /* the RK055 shield: no PWM backlight */
+	tr_knob_boot(&k, &rec, 30u, false, false); /* the RK055 shield: no PWM backlight */
 	press_short();
 	assert(k.mode == TR_KNOB_VOLUME && k.seq == 0u);
 	rec.req = tr_bl_word(LVL); /* swallowed, and counted as refused */
@@ -335,6 +335,56 @@ static void test_read_error(void)
 	assert(!k.down && k.mode == TR_KNOB_VOLUME && k.seq == 0u);
 }
 
+/* An HE-only warm reset keeps the panel where it is: the record's level comes back, clamped. */
+static void test_warm_restore(void)
+{
+	uint32_t keep = TR_BL_MAX >= 40u ? 40u : TR_BL_MAX;
+
+	/* warm + a valid record: restored and published; k->bl_pct differs from the default, so the HE re-applies it */
+	memset((void *)&rec, 0xA5, sizeof(rec));
+	rec.bl = tr_bl_word(keep);
+	tr_knob_boot(&k, &rec, 30u, true, true);
+	assert(k.bl_pct == keep && rec.bl == tr_bl_word(keep) && k.mode == TR_KNOB_VOLUME);
+	assert(rec.req == 0u && rec.seq == 0u && rec.rejects == 0u && rec.led_errs == 0u);
+
+	/* warm + garbage: the default */
+	const uint32_t junk[] = { 0xA5A5A5A5u, 0u, 0xFFFFFFFFu, TR_BL_TAG | 101u, 0x564F0028u };
+	for (unsigned i = 0; i < sizeof(junk) / sizeof(junk[0]); i++) {
+		memset((void *)&rec, 0, sizeof(rec));
+		rec.bl = junk[i];
+		tr_knob_boot(&k, &rec, 30u, true, true);
+		assert(k.bl_pct == 30u && rec.bl == tr_bl_word(30u));
+	}
+
+	/* cold, with a valid record left behind: the default, exactly as before */
+	memset((void *)&rec, 0, sizeof(rec));
+	rec.bl = tr_bl_word(keep);
+	tr_knob_boot(&k, &rec, 30u, true, false);
+	assert(k.bl_pct == 30u && rec.bl == tr_bl_word(30u));
+
+	/* a restored value above the ceiling (a record from a build with a higher one) is clamped, and one
+	 * below the floor is raised: the panel is never dark and never past this build's limit */
+	memset((void *)&rec, 0, sizeof(rec));
+	rec.bl = TR_BL_TAG | 100u;
+	tr_knob_boot(&k, &rec, 30u, true, true);
+	assert(k.bl_pct == TR_BL_MAX && rec.bl == tr_bl_word(TR_BL_MAX));
+	rec.bl = TR_BL_TAG | (TR_BL_MAX + 5u);
+	tr_knob_boot(&k, &rec, 30u, true, true);
+	assert(k.bl_pct == TR_BL_MAX);
+	rec.bl = TR_BL_TAG | 5u;
+	tr_knob_boot(&k, &rec, 30u, true, true);
+	assert(k.bl_pct == TR_BL_MIN);
+	rec.bl = TR_BL_TAG | 0u;
+	tr_knob_boot(&k, &rec, 30u, true, true);
+	assert(k.bl_pct == TR_BL_MIN);
+	{
+		uint32_t p = 7u;
+
+		assert(!tr_bl_restore(TR_BL_TAG | 101u, &p) && p == 7u);
+		assert(tr_bl_restore(TR_BL_TAG | 100u, &p) && p == TR_BL_MAX);
+	}
+}
+
 static void test_popup_text(void)
 {
 	char b[24];
@@ -367,6 +417,7 @@ int main(void)
 	test_led_failure();
 	test_release_near_long();
 	test_read_error();
+	test_warm_restore();
 	test_popup_text();
 	printf("knob: ok\n");
 	return 0;

@@ -97,8 +97,13 @@ typedef struct {
 } tr_vol_he_t;
 
 /* HE boot: level = TR_VOL_DEFAULT, publish it, zero rejects, seq and req (SRAM0 powers up with
- * garbage and survives warm resets): a req left over from before is dropped, not obeyed. */
-void tr_vol_he_boot(tr_vol_he_t *he, volatile tr_vol_t *r);
+ * garbage and survives warm resets): a req left over from before is dropped, not obeyed.
+ * `warm`: this is an HE-only warm reset (the HP kept running and kept playing at `vol`): a valid
+ * tagged `vol` word is restored instead of the default, so the reset does not change the level. A
+ * restored 0 is the mute: it stays muted, and the long press that unmutes it goes to
+ * TR_VOL_DEFAULT (the level before the mute is not recorded). Garbage, or a cold boot, takes the
+ * default exactly as before. */
+void tr_vol_he_boot(tr_vol_he_t *he, volatile tr_vol_t *r, bool warm);
 
 /* One HE frame. `detents`: encoder detents since the last call (clockwise positive = louder);
  * `press`: the switch went down (mutes; pressed again restores the level it muted). A turn while

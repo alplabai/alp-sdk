@@ -27,6 +27,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
+#include "warm_boot_he.h"
 #include "../hud/hud.h"
 #include "../ipc/tr_knob.h"
 #include "../ipc/tr_vol.h"
@@ -58,11 +59,14 @@ static volatile bool s_up; /* init done: before it the record holds cold-SRAM ga
 
 void tr_volume_he_init(void)
 {
-	tr_vol_he_boot(&s_he, s_rec);
-	tr_knob_boot(&s_knob, s_bl, BL_BOOT_PCT, HAVE_BL);
+	/* An HE-only warm reset (the HP and the panel kept going): keep the levels they are at. */
+	const bool warm = tr_warm_boot();
+
+	tr_vol_he_boot(&s_he, s_rec, warm);
+	tr_knob_boot(&s_knob, s_bl, BL_BOOT_PCT, HAVE_BL, warm);
 	s_vol_seq = s_rec->seq;
 #if HAVE_BL
-	if (s_knob.bl_pct != BL_BOOT_PCT) { /* the SDK's default is past the ceiling: pull it down */
+	if (s_knob.bl_pct != BL_BOOT_PCT) { /* a warm boot's level, or a default past the ceiling */
 		if (led_set_brightness(BL_LED_DEV, BL_LED_IDX, (uint8_t)s_knob.bl_pct) != 0) {
 			tr_knob_bl_failed(&s_knob, s_bl, s_knob.bl_pct); /* counted; the level stays */
 		}
@@ -86,15 +90,17 @@ void tr_volume_he_init(void)
 			s_sw = NULL;
 		}
 	}
-	printk("[vol] %u%% at 0x%08x, backlight %u%% at 0x%08x: pads %d, encoder %s, switch %s, bench "
-	       "request word +4\n",
-	       (unsigned)s_he.pct,
-	       (unsigned)TR_MEM_VOL,
-	       (unsigned)s_knob.bl_pct,
-	       (unsigned)TR_MEM_BL,
-	       rc,
-	       s_enc != NULL ? "ok" : "none",
-	       s_sw != NULL ? "ok" : "none");
+	printk(
+	    "[vol] %u%% at 0x%08x%s, backlight %u%% at 0x%08x: pads %d, encoder %s, switch %s, bench "
+	    "request word +4\n",
+	    (unsigned)s_he.pct,
+	    (unsigned)TR_MEM_VOL,
+	    warm ? " (warm: levels kept)" : "",
+	    (unsigned)s_knob.bl_pct,
+	    (unsigned)TR_MEM_BL,
+	    rc,
+	    s_enc != NULL ? "ok" : "none",
+	    s_sw != NULL ? "ok" : "none");
 	s_up = true;
 }
 
