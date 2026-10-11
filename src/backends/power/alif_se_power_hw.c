@@ -361,7 +361,8 @@ static alp_status_t wake_timer_arm_locked(uint32_t ticks)
  *    0 LPTIMER CONTROLREG   1 LPTIMER RAWINTSTATUS  2 LPTIMER INTSTATUS
  *    3 LPTIMER LOADCOUNT    4 LPTIMER CURRENTVAL    5 ANA WKUP_CTRL  (0x1A60A008)
  *    6 VBAT TIMER_CLKSEL    7 ANA MISC_CTRL         8 LPRTC CCVR (+0x00)
- *    9 LPRTC CMR (+0x04)   10 VBAT RTC_CLK_EN as found (set here when clear)
+ *    9 LPRTC CPCVR (+0x24), read with word 8 as one consistent pair
+ *   10 VBAT RTC_CLK_EN as found (set here when clear)
  *   11 NVIC ISER1 (IRQ 60 = bit 28)    12 NVIC ISPR1
  *   13 DWT CYCCNT delta, LPTIMER arm -> snapshot (PRE only; 0 in BOOT)
  *   14 VBAT RET_CTRL        15 ANA VBAT_ANA_REG1   16 STOP_MODE (0x1A60F000)
@@ -411,8 +412,7 @@ static void diag_capture(uint32_t w[ALP_SOM_PD_DIAG_WORDS], bool with_lptimer)
 	if ((w[10] & 1u) == 0u) {
 		sys_write32(w[10] | 1u, HW_VBAT_BASE + 0x10u);
 	}
-	w[8]  = sys_read32(0x42000000u);
-	w[9]  = sys_read32(0x42000004u);
+	alif_se_hw_lprtc_sample(&w[8], &w[9]);
 	w[11] = NVIC->ISER[1];
 	w[12] = NVIC->ISPR[1];
 	w[14] = sys_read32(HW_RET_CTRL);
@@ -1050,6 +1050,30 @@ uint32_t alif_se_hw_lprtc_ccvr(void)
 	}
 	return sys_read32(0x42000000u);
 #endif
+}
+
+/* CCVR and CPCVR (+0x24, the prescaler's own count of LPRTC clocks within the current CCVR
+ * tick) are two reads: re-read until CCVR did not tick between them, so the pair names one
+ * instant to one LPRTC clock (~29 us on the SES-left LFRC). */
+void alif_se_hw_lprtc_sample(uint32_t *ccvr, uint32_t *cpcvr)
+{
+	uint32_t c = alif_se_hw_lprtc_ccvr();
+	uint32_t p = 0u;
+
+#ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
+	for (unsigned i = 0; i < 4u; ++i) {
+		p = sys_read32(0x42000024u);
+
+		uint32_t again = sys_read32(0x42000000u);
+
+		if (again == c) {
+			break;
+		}
+		c = again;
+	}
+#endif
+	*ccvr  = c;
+	*cpcvr = p;
 }
 
 /* Raw LPRTC register read at @p off (a 4-byte aligned offset inside LPRTC_Type, DFP

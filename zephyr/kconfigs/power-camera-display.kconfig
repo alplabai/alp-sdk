@@ -335,6 +335,20 @@ config ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS
 	  TODO(#2784): evaluate hal_alif's CONFIG_ALIF_SE_DTS_RUN_PROFILE (the aipm-run
 	  devicetree node) instead of this hand-rolled profile.
 
+config ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY
+	hex "Memory blocks kept powered while this core is in STOP / STANDBY"
+	depends on ALP_SDK_POWER_ALIF_SE
+	default 0x0
+	help
+	  aiPM gen2 memory_blocks bits (alif_aipm_gen2.h) ORed into the OFF profile, for
+	  memory that the other M55 core or a DMA master still uses while this core sleeps.
+	  The Secure Enclave powers off every block the OFF profile does not name as soon as
+	  this core's subsystem goes off, even while the other core is running: on an
+	  E1M-AEN803 (2026-10-11) an M55-HE STOP took SRAM0 away from a running M55-HP, which
+	  then faulted on its next SRAM0 store.  0x3 (SRAM0 | SRAM1) kept it running through
+	  three HE STOPs.  Keeping memory powered raises the sleep floor, so the default keeps
+	  none: set it only when the other core really runs across this core's sleep.
+
 config ALP_SDK_POWER_ALIF_SE_ALLOW_DEBUGGER
 	bool "Allow STOP / STANDBY with a debugger attached (bench only)"
 	depends on ALP_SDK_POWER_ALIF_SE

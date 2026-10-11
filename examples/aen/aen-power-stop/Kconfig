@@ -45,6 +45,14 @@ config AEN_STOP_RETAIN_TCM_KB
 	  after the wake (verdict tcm_retained).  The M55-HE DTCM is two 128 KiB retention
 	  banks, so 128 asks for the first one and 256 for both.
 
+config AEN_STOP_HP_BEACON
+	bool "Variant (H): check the M55-HP kept running through each HE STOP"
+	help
+	  Pair with examples/aen/aen-hp-core-smoke on the M55-HP (one ATOC naming both cores).
+	  After each wake, reads the HP's SRAM0 beacon (0x02000000: magic 0xA11FE000, word 3
+	  counts up once per 100 ms) and passes when it counts more time than this HE boot's
+	  uptime plus the sleep: the HP ran through the HE's STOP instead of booting with it.
+
 config AEN_STOP_WAKE_TIMING
 	bool "Variant (W): print the wake-to-main() timing evidence"
 	depends on ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH

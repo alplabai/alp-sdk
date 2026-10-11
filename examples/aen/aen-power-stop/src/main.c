@@ -87,12 +87,15 @@
  *                                  pattern in the DTCM is written before the sleep and
  *                                  checked after the wake: check "tcm_retained", evidence
  *                                  "POWER_STOP: tcm ...".
- *   CONFIG_AEN_STOP_WAKE_TIMING    "POWER_STOP: timing ..." lines: the LPRTC counter at
- *                                  sleep entry, at PRE_KERNEL_1 and at main(), and the
- *                                  wake-to-main() figure derived from them.
+ *   CONFIG_AEN_STOP_WAKE_TIMING    "POWER_STOP: timing ..." lines: the LPRTC counter and
+ *                                  prescaler sub-count at sleep entry, at PRE_KERNEL_1 and
+ *                                  at main(), and the wake-to-main() figure derived from them.
+ *   CONFIG_AEN_STOP_HP_BEACON      with aen-hp-core-smoke on the M55-HP: check
+ *                                  "hp_kept_running", the HP's SRAM0 heartbeat outlived this
+ *                                  core's STOP.
  *
- * STANDBY and TCM retention are bench-proven on the E1M-AEN803; the timing lines run but the
- * counters are too coarse to resolve wake-to-main() (see the README).
+ * STANDBY, TCM retention, the timing (wake-to-main() 92.6 ms) and the HP-running case are
+ * bench-proven on the E1M-AEN803 (see the README).
  *
  * A cold power cycle (not a reset) starts the sequence over: the counter lives in
  * SRAM that a reset keeps and a power cycle loses.
@@ -521,43 +524,97 @@ static void tcm_check(unsigned cycle)
 #endif /* CONFIG_AEN_STOP_RETAIN_TCM_KB */
 
 #ifdef CONFIG_AEN_STOP_WAKE_TIMING
-/* ==== Wake-to-main() timing evidence (variant W) =======================================
+/* ==== Wake-to-main() timing (variant W) ================================================
  *
- * One counter runs through STOP and the SE cold boot at a rate this part does not pin down:
- * the LPRTC (VBAT domain, base 0x42000000: DFP AE822FA0E5597 rtss_he/soc.h:1523-1532
- * LPRTC_Type; its clock is gated by VBAT RTC_CLK_EN, +0x10, which the SVD says "must be set
- * before any programming to LPRTC").  Its prescaler CPSR (+0x20) resets to 0x8000 and "by
- * default, the counter increments at a 1 Hz rate when the prescaler is enabled and precise
- * 32.768 kHz clock source is used" (SVD LPRTC_CPSR).  Here the source is the SES-left LFRC,
- * not a precise 32.768 kHz, and the bench counted ~2 Hz (155 ticks in 76 s, LFRC / 2^14), so
- * the CPSR/32768 figure can be ~2x off.  The RV-3028 (+-1 ppm, backup supply) also runs
- * through the sleep and the backend uses it as the time base for bi->slept_ms, so the rate
- * is derived per cycle from it: rate = entry_to_main ticks / rtc_slept_ms.
- *
- * Three samples of the same counter:
- *   pre   BKRAM diag PRE word 8,  taken with interrupts off right before the WFI;
- *   boot  BKRAM diag BOOT word 8, taken at PRE_KERNEL_1 of the wake boot;
+ * The LPRTC (VBAT domain, base 0x42000000: DFP AE822FA0E5597 rtss_he/soc.h:1523-1532
+ * LPRTC_Type) keeps counting through STOP and the SE cold boot.  CCVR (+0x00) ticks once per
+ * CPSR (+0x20) LPRTC clocks; CPCVR (+0x24) is the prescaler's count inside the current tick.
+ * So CCVR * CPSR + CPCVR counts single LPRTC clocks (~29 us on the SES-left LFRC), and the
+ * backend reads that pair in both BKRAM snapshots:
+ *   pre   diag PRE words 8/9, interrupts off, right after the LPTIMER is armed;
+ *   boot  diag BOOT words 8/9, PRE_KERNEL_1 priority 0 of the wake boot;
  *   main  the first thing main() does.
- * The wake event itself is not timestamped.  It happens at entry + armed time (the LPTIMER
- * interval or the RV-3028 countdown), so wake-to-main = (main - entry) - armed_ms.  Printed
- * two ways: as a lower bound at the backend's fastest LFRC rate, and from the RV-3028 delta
- * (1 s resolution at each end).  A bound, not a measurement.
+ * The LFRC rate is not pinned (SVD VBAT_ANA_REG1: -5 % .. +10 %), so it is measured here
+ * against two RV-3028 seconds (+-1 ppm, backup supply).
+ *
+ * The wake instant is known only for the LPTIMER cycle: the timer is armed with LOADCOUNT
+ * (PRE word 3) DWT-cycles (PRE word 13) before the PRE snapshot and counts the same AON
+ * 32 kHz clock (VBAT TIMER_CLKSEL, PRE word 6, printed), so
+ *   wake = pre - arm_to_pre + LOADCOUNT + 1   (in LPRTC clocks, +-1 clock).
+ * The RV-3028 cycles wake on a 1 s-resolution timer: only entry-to-main is printed there.
  */
-#define LPRTC_CCR_OFF      0x0Cu /* soc.h:1523-1532 LPRTC_Type offsets */
-#define LPRTC_CPSR_OFF     0x20u
-#define LPRTC_CPCVR_OFF    0x24u
-#define LPRTC_CCR_PSCLR_EN BIT(4) /* SVD AE822FA0E5597BS0_CM55_HE_View.svd:13007, rtc.h:31 */
-#define LPRTC_NOMINAL_HZ   32768u /* the clock CPSR is specified against (SVD LPRTC_CPSR) */
-/* The backend's fastest LPRTC rate, milli-Hz: 36045 Hz LFRC max / 2^14 (alif_se_power.c:203). */
-#define LPRTC_MAX_MHZ 2200u
+#define LPRTC_CPSR_OFF 0x20u /* soc.h:1523-1532 LPRTC_Type offsets */
 
-static uint32_t g_main_ccvr;
+static uint32_t g_main_ccvr, g_main_cpcvr;
 static int64_t  g_main_uptime_ms;
 
 static void timing_sample_main(void)
 {
-	g_main_ccvr      = alif_se_hw_lprtc_ccvr(); /* also switches the LPRTC clock on */
+	alif_se_hw_lprtc_sample(&g_main_ccvr, &g_main_cpcvr);
 	g_main_uptime_ms = k_uptime_get();
+}
+
+/* The bench image identity (som_power_record.c) is a CRC32 over the whole ROM, first run by
+ * the BOOT snapshot at PRE_KERNEL_1 on the SE-left clocks: ~197 ms of every wake boot, which
+ * a product build (no bench scratch) never pays.  This variant replaces it with a constant
+ * so the figure below is the product's boot.  The cost: a reflash of another build keeps
+ * this one's BKRAM counter, so start each run from a power cycle (the bench script does). */
+uint32_t alp_som_pd_image_id(void)
+{
+	return 0x57414b45u; /* "WAKE" */
+}
+
+static uint64_t lprtc_clocks(uint32_t ccvr, uint32_t cpcvr, uint32_t cpsr)
+{
+	return (uint64_t)ccvr * cpsr + cpcvr;
+}
+
+static uint64_t lprtc_now(uint32_t cpsr)
+{
+	uint32_t c, p;
+
+	alif_se_hw_lprtc_sample(&c, &p);
+	return lprtc_clocks(c, p, cpsr);
+}
+
+/* LPRTC clocks per RV-3028 second, measured over two seconds; 0 when the RV-3028 cannot be
+ * read.  *backwards counts samples where the clock count went down: it must be 0, or the
+ * CCVR * CPSR + CPCVR model is wrong for this part. */
+static uint32_t lprtc_hz(uint32_t cpsr, unsigned *backwards)
+{
+	uint32_t s0 = 0u, s = 0u;
+	uint64_t last = lprtc_now(cpsr), t0 = 0u, now;
+
+	*backwards = 0u;
+	if (alp_som_power_rtc_seconds(&s0) != ALP_OK) {
+		return 0u;
+	}
+	/* Tight polls (one I2C read, well under a millisecond each): the edges are caught to
+	 * one read, small next to two seconds. */
+	for (unsigned phase = 0u; phase < 2u; ++phase) {
+		uint32_t target = s0 + (phase == 0u ? 1u : 3u);
+
+		do {
+			if (alp_som_power_rtc_seconds(&s) != ALP_OK) {
+				return 0u;
+			}
+			now = lprtc_now(cpsr);
+			*backwards += now < last;
+			last = now;
+		} while (s < target && (uint32_t)(s - s0) < 10u);
+		if (s != target) {
+			return 0u;
+		}
+		if (phase == 0u) {
+			t0 = now;
+		}
+	}
+	return (uint32_t)((last - t0) / 2u);
+}
+
+static int us_between(uint64_t from, uint64_t to, uint32_t hz)
+{
+	return (int)(((int64_t)to - (int64_t)from) * 1000000 / (int64_t)hz);
 }
 
 static void print_wake_timing(unsigned cycle, const alp_power_boot_info_t *bi)
@@ -570,67 +627,88 @@ static void print_wake_timing(unsigned cycle, const alp_power_boot_info_t *bi)
 		return;
 	}
 
-	const cycle_t *c         = &cycles[cycle - 1u];
-	uint32_t       ccr       = alif_se_hw_lprtc_read(LPRTC_CCR_OFF);
-	uint32_t       cpsr      = alif_se_hw_lprtc_read(LPRTC_CPSR_OFF);
-	bool           psclr_on  = (ccr & LPRTC_CCR_PSCLR_EN) != 0u;
-	uint32_t       ticks_all = g_main_ccvr - pre.w[8];
-	uint32_t       ticks_pb  = boot.w[8] - pre.w[8];
-	uint32_t       ticks_bm  = g_main_ccvr - boot.w[8];
-	uint64_t       nom_ms    = (uint64_t)ticks_all * cpsr * 1000u / LPRTC_NOMINAL_HZ;
-	uint64_t       min_ms    = (uint64_t)ticks_all * 1000000u / LPRTC_MAX_MHZ;
+	const cycle_t *c    = &cycles[cycle - 1u];
+	uint32_t       cpsr = alif_se_hw_lprtc_read(LPRTC_CPSR_OFF);
+	unsigned       back = 0u;
+	uint32_t       hz   = lprtc_hz(cpsr, &back);
+	uint64_t       t_pre  = lprtc_clocks(pre.w[8], pre.w[9], cpsr);
+	uint64_t       t_boot = lprtc_clocks(boot.w[8], boot.w[9], cpsr);
+	uint64_t       t_main = lprtc_clocks(g_main_ccvr, g_main_cpcvr, cpsr);
 
-	printk("POWER_STOP: timing cycle%u lprtc pre=%u boot=%u main=%u ccr=0x%x cpsr=%u cpcvr=%u "
-	       "armed_ms=%u main_uptime_ms=%d\n",
+	printk("POWER_STOP: timing cycle%u lprtc cpsr=%u hz=%u backwards=%u pre=%u/%u boot=%u/%u "
+	       "main=%u/%u main_uptime_ms=%d\n",
 	       cycle,
-	       (unsigned)pre.w[8],
-	       (unsigned)boot.w[8],
-	       (unsigned)g_main_ccvr,
-	       (unsigned)ccr,
 	       (unsigned)cpsr,
-	       (unsigned)alif_se_hw_lprtc_read(LPRTC_CPCVR_OFF),
-	       (unsigned)c->wake_after_ms,
+	       (unsigned)hz,
+	       back,
+	       (unsigned)pre.w[8],
+	       (unsigned)pre.w[9],
+	       (unsigned)boot.w[8],
+	       (unsigned)boot.w[9],
+	       (unsigned)g_main_ccvr,
+	       (unsigned)g_main_cpcvr,
 	       (int)g_main_uptime_ms);
-	printk("POWER_STOP: timing cycle%u ticks entry_to_boot=%u boot_to_main=%u entry_to_main=%u\n",
-	       cycle,
-	       (unsigned)ticks_pb,
-	       (unsigned)ticks_bm,
-	       (unsigned)ticks_all);
-	if (psclr_on) {
-		printk("POWER_STOP: timing cycle%u tick_ms_nominal=%u\n",
-		       cycle,
-		       (unsigned)((uint64_t)cpsr * 1000u / LPRTC_NOMINAL_HZ));
-	} else {
-		printk("POWER_STOP: timing cycle%u tick_ms_nominal=n/a (prescaler off)\n", cycle);
-	}
-	/* The RV-3028 delta is the calibrated time base; bi->slept_ms is 1 s resolution and falls
-	 * back to the armed length when the RV-3028 could not be read (then it is no witness). */
-	if (ticks_all != 0u && bi->slept_ms >= 1000u) {
-		printk("POWER_STOP: timing cycle%u lprtc_rate_mhz=%u\n",
-		       cycle,
-		       (unsigned)((uint64_t)ticks_all * 1000000u / bi->slept_ms));
-	}
-	if (c->wake_after_ms == 0u) {
-		printk("POWER_STOP: timing cycle%u wake_to_main_ms=n/a (no armed length)\n", cycle);
+	if (hz == 0u || cpsr == 0u || back != 0u) {
+		printk("POWER_STOP: timing cycle%u n/a (no RV-3028 rate or a non-monotonic count)\n",
+		       cycle);
 		return;
 	}
-	if (psclr_on) {
-		printk("POWER_STOP: timing cycle%u entry_to_main_nominal_ms=%u\n", cycle, (unsigned)nom_ms);
-	} else {
-		printk("POWER_STOP: timing cycle%u entry_to_main_nominal_ms=n/a (prescaler off)\n", cycle);
-	}
-	/* wake_to_main = entry_to_main - armed.  _min uses the fastest rate, so it is a lower
-	 * bound on elapsed time; _rtc is the calibrated one (+-1 s). */
-	printk("POWER_STOP: timing cycle%u entry_to_main_min_ms=%u rtc_slept_ms=%u armed_ms=%u "
-	       "wake_to_main_min_ms=%d wake_to_main_rtc_ms=%d\n",
+	printk("POWER_STOP: timing cycle%u entry_to_main_us=%d boot_to_main_us=%d rtc_slept_ms=%u\n",
 	       cycle,
-	       (unsigned)min_ms,
-	       (unsigned)bi->slept_ms,
-	       (unsigned)c->wake_after_ms,
-	       (int)((int64_t)min_ms - (int64_t)c->wake_after_ms),
-	       (int)((int64_t)bi->slept_ms - (int64_t)c->wake_after_ms));
+	       us_between(t_pre, t_main, hz),
+	       us_between(t_boot, t_main, hz),
+	       (unsigned)bi->slept_ms);
+	if (c->wake_bitmap != ALP_POWER_WAKE_TIMER) {
+		printk("POWER_STOP: timing cycle%u wake_to_main_us=n/a (RV-3028 wake, 1 s resolution)\n",
+		       cycle);
+		return;
+	}
+
+	/* DWT counts CPU clocks; the arm-to-snapshot gap is microseconds, converted at the
+	 * kernel's CPU rate. */
+	uint64_t arm_to_pre =
+	    (uint64_t)pre.w[13] * hz / (uint64_t)sys_clock_hw_cycles_per_sec();
+	uint64_t t_wake = t_pre - arm_to_pre + pre.w[3] + 1u;
+
+	printk("POWER_STOP: timing cycle%u lptimer load=%u timer_clksel=0x%x wake_to_boot_us=%d "
+	       "wake_to_main_us=%d (+-%d us)\n",
+	       cycle,
+	       (unsigned)pre.w[3],
+	       (unsigned)pre.w[6],
+	       us_between(t_wake, t_boot, hz),
+	       us_between(t_wake, t_main, hz),
+	       (int)(2000000u / hz + 1u));
 }
 #endif /* CONFIG_AEN_STOP_WAKE_TIMING */
+
+#ifdef CONFIG_AEN_STOP_HP_BEACON
+/* The M55-HP's liveness beacon (examples/aen/aen-hp-core-smoke): global SRAM0, word 0 the
+ * magic, word 3 a heartbeat it bumps once per k_msleep(100).  An HP that ran through this
+ * core's STOP has counted the whole run since power-on; one that was stopped and rebooted
+ * with this core has counted only since this boot.  The count understates the HP's run time
+ * (each step is 100 ms plus the loop), so "more than this boot's uptime plus the sleep" can
+ * only come from an HP that kept running. */
+#define HP_BEACON       ((volatile const uint32_t *)0x02000000u)
+#define HP_BEACON_MAGIC 0xA11FE000u
+
+static void hp_beacon_check(unsigned cycle, const alp_power_boot_info_t *bi)
+{
+	uint32_t magic = HP_BEACON[0];
+	uint32_t hb    = HP_BEACON[3];
+	int64_t  up    = k_uptime_get();
+
+	printk("POWER_STOP: hp_beacon cycle%u magic=0x%08x heartbeat=%u he_uptime_ms=%d "
+	       "slept_ms=%u\n",
+	       cycle,
+	       (unsigned)magic,
+	       (unsigned)hb,
+	       (int)up,
+	       (unsigned)bi->slept_ms);
+	verdict(cycle,
+	        "hp_kept_running",
+	        magic == HP_BEACON_MAGIC && (int64_t)hb * 100 > up + (int64_t)bi->slept_ms);
+}
+#endif
 
 /* Judge the cycle that ended with this boot.  @p done is how many STOPs were
  * started before it (the bench counter), so the cycle is cycles[done - 1]. */
@@ -893,6 +971,9 @@ int main(void)
 		cycle_set(0u);
 	} else if (done != 0u) {
 		judge(done, &bi);
+#ifdef CONFIG_AEN_STOP_HP_BEACON
+		hp_beacon_check(done, &bi);
+#endif
 	}
 
 	if (done < N_CYCLES) {

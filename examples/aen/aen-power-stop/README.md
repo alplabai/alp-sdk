@@ -102,17 +102,19 @@ One variable each, selected with a config fragment on top of `prj.conf`
 
 ### STANDBY, TCM retention and wake-to-main() timing
 
-Three further fragments. Bench result on an E1M-AEN803 (2026W36-0001) on an E1M-EVK, 2026-10-10: `s-standby` and
-`t-tcm-retain` ran 3/3 cycles with every verdict PASS; `w-wake-timing` ran but its counters are too
-coarse to resolve wake-to-`main()` (see the timing note below). `t-tcm-retain-128k` was not run. Each is
-selected like the others (`-DEXTRA_CONF_FILE=variants/<name>.conf`); the default image is unchanged.
+Further fragments. Bench results on an E1M-AEN803 (2026W36-0001) on an E1M-EVK: `s-standby` and
+`t-tcm-retain` ran 3/3 cycles with every verdict PASS (2026-10-10); `w-wake-timing` measured
+wake-to-`main()` = 92.6 ms three times within 61 us (2026-10-11, see the timing note below); `h-hp-running`
+ran 3/3 cycles with every verdict PASS (2026-10-11). `t-tcm-retain-128k` was not run. Each is selected like
+the others (`-DEXTRA_CONF_FILE=variants/<name>.conf`); the default image is unchanged.
 
 | Variant | Fragment | Changes | Expected evidence |
 |---|---|---|---|
 | (S) STANDBY | `s-standby.conf` | every cycle requests `ALP_POWER_MODE_STANDBY` | `cycle<n> enter STANDBY (...)`, then per cycle `cycle<n> mode_standby PASS` (the wake record's `realised_mode` reads STANDBY) next to the same `record_valid`, `wake_source`, `restored_all`, `bkram_counter` checks. A `request FAIL rc=... realised=...` line, or `valid=0` after the wake, means the SE did not take the STANDBY profile or the record did not survive. |
 | (T) TCM, both banks | `t-tcm-retain.conf` | `ALP_POWER_RETAIN_TCM`, `retain_kb = 256` (DTCM SRAM5_1 + SRAM5_2), plus a pattern probe | before each sleep `POWER_STOP: tcm cycle<n> wrote retain_kb=256 addr=0x... bank0_bytes=... bank1_bytes=... crc_a=0x... crc_b=0x...`; after the wake `tcm cycle<n> read asked_banks=2 bank0=retained bank1=retained` and `cycle<n> tcm_retained PASS` |
 | (T-128) TCM, one bank | `t-tcm-retain-128k.conf` | `retain_kb = 128` (SRAM5_1 requested) | `asked_banks=1`; the verdict covers bank 0. `bank1=` is NOT mapping evidence: with any TCM asked for the backend ORs both `RET_CTRL.HETCM1 \| HETCM2` after the SE call (the `tcm_requested()` branch of the retention setup in `alif_se_power.c`), so both DTCM halves stay powered. Mapping evidence needs a backend change that sets only the matching bit (to be tracked) |
-| (W) timing | `w-wake-timing.conf` | prints the LPRTC counter at sleep entry, at `PRE_KERNEL_1` and at `main()` | `POWER_STOP: timing cycle<n> lprtc pre=... boot=... main=... ccr=0x... cpsr=... cpcvr=... armed_ms=... main_uptime_ms=...`, then `ticks entry_to_boot=... boot_to_main=... entry_to_main=... tick_ms_nominal=...`, then `lprtc_rate_mhz=...`, `entry_to_main_nominal_ms=...`, and `entry_to_main_min_ms=... rtc_slept_ms=... armed_ms=... wake_to_main_min_ms=... wake_to_main_rtc_ms=...` (cycle 3, the alarm, prints `wake_to_main_ms=n/a`). No verdict. |
+| (W) timing | `w-wake-timing.conf` | samples the LPRTC (counter and prescaler sub-count) at sleep entry, at `PRE_KERNEL_1` and at `main()`, calibrates its clock against two RV-3028 seconds, and replaces the bench image CRC with a constant (see the note) | `POWER_STOP: timing cycle<n> lprtc cpsr=... hz=... backwards=0 pre=<ccvr>/<cpcvr> boot=... main=... main_uptime_ms=...`, then `entry_to_main_us=... boot_to_main_us=... rtc_slept_ms=...`; for the LPTIMER cycle also `lptimer load=... timer_clksel=0x0 wake_to_boot_us=... wake_to_main_us=... (+-<n> us)`, for the RV-3028 cycles `wake_to_main_us=n/a`. Measured: `hz=34257`, `wake_to_boot_us=5108`..`5166`, `wake_to_main_us=92562`..`92623` (+-59 us). No verdict. |
+| (H) HP running | `h-hp-running.conf` | flashed with `examples/aen/aen-hp-core-smoke` on the M55-HP in one ATOC (`tan flash`, one system manifest naming both cores; the smoke built MRAM-linked with an empty `DTC_OVERLAY_FILE`); sets `CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY=0x3` | after each wake `POWER_STOP: hp_beacon cycle<n> magic=0xa11fe000 heartbeat=... he_uptime_ms=... slept_ms=...` and `cycle<n> hp_kept_running PASS`: the HP's 100 ms heartbeat counted more than this boot plus the sleep, so the HP ran through the HE's STOP. Measured heartbeat 115, 251, 439. With the keep mask at 0 the same run reads `magic=0x00000000 heartbeat=0` and fails 3/3: the SE powers SRAM0 off when the HE's subsystem goes off, and the HP faults on its next SRAM0 store |
 | (G) wake pad | `g-wake-pad.overlay` (a devicetree overlay, selected with `-DEXTRA_DTC_OVERLAY_FILE=variants/g-wake-pad.overlay`, not `EXTRA_CONF_FILE`) | an `alp,power-wake-gpios` node naming P15_2, so the wake-pad branch of the STOP backend (and its `PRE_KERNEL_1` pad snapshot hook) is compiled | Bench-run on the E1M-AEN803 2026W36-0001 (2026-10-10): exactly as expected, STOP 3/3. At boot `POWER_STOP: wake_pads requested=0x4 claimed=0x4 advertised=0` (P15_2 is the SoM's OSPI INTn net, so the pad is refused and `ALP_POWER_WAKE_GPIO` is not advertised; the default image prints `requested=0x0 claimed=0x0 advertised=0`), then the same three STOP cycles and `wake_source` verdicts as the default image. `requested=0x4 ... advertised=1` would mean the SoM no longer claims the pad. |
 
 **How the TCM probe works.** The whole of Zephyr's RAM is the 256 KiB M55-HE DTCM (CPU-local
@@ -128,24 +130,31 @@ scrub the TCM on the cold boot), not necessarily a test fault; read `bank0=`/`ba
 `asked_banks=`.
 
 **How the timing is derived, and how good it is.** The LPRTC (VBAT domain, `0x42000000`) keeps running
-through STOP and the SE cold boot and is readable from `main()`. It is not the only such counter: the
-RV-3028 (+-1 ppm, backup supply) runs through it too and is the backend's time base for `slept_ms`.
-The LPRTC prescaler `CPSR` resets to `0x8000`, which the SVD says is 1 Hz on a precise 32.768 kHz
-clock. Here the clock is the SES-left LFRC (about 4.5 % fast, per the notes above) and an earlier
-bench counted about 2 Hz (155 ticks in 76 s, LFRC / 2^14), so a CPSR-based figure can be about 2x
-off; `cpsr` and `ccr` are printed raw, and `tick_ms_nominal=n/a (prescaler off)` appears when
-`LPRTC_CCR.LPRTC_PSCLR_EN` is clear. The example prints the result several ways:
-`entry_to_main_nominal_ms` (CPSR / 32768), `entry_to_main_min_ms` at the backend's fastest rate
-(2.2 Hz, a lower bound), and from the RV-3028 `rtc_slept_ms`, `lprtc_rate_mhz` (entry_to_main
-ticks / `rtc_slept_ms`, the measured LPRTC rate) and `wake_to_main_rtc_ms = rtc_slept_ms -
-armed_ms`, the calibrated bound. The wake event itself is not timestamped (it happens at entry +
-armed time), so wake-to-`main()` is a **bound with 1 s resolution at each end, not a measurement**.
-If the RV-3028 could not be read, `slept_ms` falls back to the armed length and the RTC figures are
-no witness. `armed_ms` is the requested interval; for the LPTIMER cycle the backend rounds the count
-UP against the fastest LFRC (36045 Hz, `alif_se_power.c:190-200`), so the real sleep runs about
-5-16 % longer and `wake_to_main_*` is biased high for that cycle. `main_uptime_ms` is the kernel's
-own time at the sample, so the SES + ATOC share is the remainder. It needs the bench scratch option
-(on in `prj.conf`) for the `PRE` / `BOOT` snapshots, so it does not exist in the
+through STOP and the SE cold boot. Its counter `CCVR` ticks once per `CPSR` LPRTC clocks (16926 here,
+about 2 Hz), and `CPCVR` (+0x24) is the prescaler's count inside the current tick, so
+`CCVR * CPSR + CPCVR` counts single LPRTC clocks (about 29 us). The backend samples that pair, re-read
+until `CCVR` did not tick between the two reads, into the `PRE` snapshot (right after the LPTIMER is
+armed, interrupts off) and the `BOOT` snapshot (`PRE_KERNEL_1` priority 0); `main()` samples it first
+thing. The LPRTC runs on the SES-left LFRC, whose rate is not pinned, so after the wake the example
+measures it against two RV-3028 seconds (+-1 ppm): 34252 to 34268 Hz on the bench. `backwards=0` says
+the clock count never went down over that measurement, i.e. the counter model holds on this part.
+The wake instant is known only for the LPTIMER cycle: the timer is armed `LOADCOUNT` (PRE word 3)
+before the snapshot, minus the arm-to-snapshot gap (DWT, PRE word 13), on the same 32 kHz clock
+(`timer_clksel=0x0`), so `wake_to_main_us` is a measurement to +-2 LPRTC clocks. The RV-3028 cycles
+wake on a 1 s timer and print only entry-to-main.
+
+What the 92.6 ms is made of (temporary LPRTC probes, 2026-10-11; each probe read costs about 1 ms, so
+the split is approximate): about 5 ms from the wake to Zephyr's first `PRE_KERNEL_1` hook (the SE cold
+boot), about 71 ms in the SoM domain restore's first pass (`POST_KERNEL` 0), and the remaining ~16 ms
+for the clock check, the I2C pass and the rest of init. The 71 ms are the restore's datasheet
+busy-waits (Ethernet PHY power-up, reset and settle; the memory resets; the Wi-Fi rail) for the
+domains this example quiesces, which is all of them; an application that quiesces fewer waits less.
+`main_uptime_ms` reads 85 because the
+kernel's clock starts at `PRE_KERNEL_2`. The bench image identity (a CRC32 over the whole ROM) runs at
+`PRE_KERNEL_1` on the SE-left clocks and costs 197 ms there; a product build does not have it, and this
+variant overrides it with a constant so the figure is the product's boot. That override means a reflash
+of another build keeps this one's BKRAM counter: start each run from a power cycle. It needs the bench
+scratch option (on in `prj.conf`) for the `PRE` / `BOOT` snapshots, so it does not exist in the
 `product-noscratch` image.
 
 Product OFF profile (bench U8g: STOP woke 2 of 2 with it, never without): `vtor_address` =

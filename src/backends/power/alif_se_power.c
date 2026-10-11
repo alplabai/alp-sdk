@@ -116,6 +116,10 @@
  * is up, so there is no refusal for it: an application that shares the SoM with the other core
  * must stop (or agree with) that core before sleeping, and must not run this backend on both
  * cores (the BKRAM record, the LPTIMER0 wake timer and the RV-3028 are single-owner).
+ * Memory is the trap: the SE powers off every block the OFF profile does not name as soon as
+ * this subsystem goes off, even with the other core running, so a core that keeps running
+ * needs its global SRAM listed in CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY (bench: an HE
+ * STOP took SRAM0 from a running M55-HP until SRAM0 | SRAM1 were named there).
  *
  * Sequence of a STOP / STANDBY request
  * ------------------------------------
@@ -188,6 +192,11 @@ alp_som_bench_knobs_t alp_som_bench_knobs = {
 #error \
     "BENCH_NO_MRAM_SERAM is a bench-only ablation: a product OFF profile always keeps MRAM | SERAM"
 #endif
+
+#ifndef CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY
+#define CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY 0
+#endif
+#define ALIF_SE_OFF_KEEP_MEMORY ((uint32_t)(CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY))
 
 /* ---- Register facts (E8 SVD) ----------------------------------------------- */
 
@@ -769,6 +778,12 @@ build_off_profile(off_profile_t *out, const off_profile_t *live, const sleep_pla
 	}
 	/* The cold-boot RUN profile carries no IP clock gating and no PHY power gating
 	 * (E1M-AEN803, 2026-10-08); nothing here changes that. */
+	/* Memory another core (or a DMA master) still uses while this one sleeps.  The SE
+	 * power-gates every block the OFF profile does not name as soon as this core's subsystem
+	 * goes off, not only when the whole SoC stops: an HE STOP that left SRAM0 out took
+	 * SRAM0 away from the running M55-HP, which faulted on its next store (E1M-AEN803,
+	 * 2026-10-11; with SRAM0 | SRAM1 named it ran through three HE STOPs). */
+	out->memory_blocks |= ALIF_SE_OFF_KEEP_MEMORY;
 	out->ip_clock_gating = 0u;
 	out->phy_pwr_gating  = 0u;
 	out->vdd_ioflex_3V3  = IOFLEX_LEVEL_1V8; /* this SoM's I/O flex rail is 1.8 V */

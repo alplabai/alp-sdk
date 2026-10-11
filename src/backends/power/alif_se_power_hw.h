@@ -114,6 +114,11 @@ uint32_t alif_se_hw_lpperi_cken(void);
 /** LPRTC CCVR (the counter, units unproven: ~2 Hz on LFRC). */
 uint32_t alif_se_hw_lprtc_ccvr(void);
 
+/** LPRTC CCVR and CPCVR (the prescaler sub-count, one LPRTC clock per step) as one
+ *  consistent pair; switches the LPRTC clock on like alif_se_hw_lprtc_ccvr().  A product
+ *  build (no bench scratch) returns 0 for both. */
+void alif_se_hw_lprtc_sample(uint32_t *ccvr, uint32_t *cpcvr);
+
 /** This image runs on the M55-HP (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP).  The HP has no TCM
  *  retention and only a SOFT_OFF-class sleep (see alif_se_power.c), so the backend branches
  *  on it; it is a function so the host test can drive both cores from one binary. */
