@@ -1105,23 +1105,15 @@ alp_status_t tas2563_resume(const tas2563_t *ctx);
  *   not verify.
  *
  * @par Why no host-side checksum.
- *   SLASET3D §7.3.2 "Device Mode and Address Selection" (p.29) itself
- *   calls `I2C_CKSUM` a CRC and says it should be checked, over each
- *   device's own local address, after writing multiple devices via the
- *   global broadcast address (where individual ACK/NACK cannot be used
- *   since every device on the bus answers at once).  TI's application
- *   notes (SLAA765 §16, p.25) separately show the command syntax for
- *   reading it back -- examples only, no algorithm.  SLASET3D §7.5.61
- *   (p.93) documents the register -- 8 bits, RW,
+ *   SLASET3D §7.5.61 (p.93) documents `I2C_CKSUM` as 8 bits, RW,
  *   "updated on writes to other registers on all books and pages,"
- *   writing it resets it to the written value -- but nowhere specifies
- *   the checksum ALGORITHM: not what it sums (register address, data,
- *   both?), not whether `PAGE`/`BOOK` select writes count as "other
- *   registers," not an initial value beyond the POR `0h`.  Without
- *   that, a host-side expected value cannot be computed, only guessed,
- *   so this function does not attempt it.  A future implementation
- *   needs the algorithm from TI support or from reading it back
- *   against known writes on real silicon.
+ *   but not the algorithm.  It was measured on a real TAS2563 (rev
+ *   0x10 at 0x4D): CRC-8, polynomial 0x07, init 0x00, over the written
+ *   DATA bytes only; register-address bytes, PAGE (0x00) writes, BOOK
+ *   (0x7F) writes and reads are not counted.  Data writes on B0/P1, P2
+ *   and P4 are counted.  Not compared against a real PPC3 `PChkSum`
+ *   blob, so this driver still takes the expected byte from the caller
+ *   rather than computing it.
  *
  * Book and page are restored to 0 before returning, on both the
  * success and the failure path, because every other function in this
@@ -1172,10 +1164,12 @@ alp_status_t tas2563_load_tuning(tas2563_t                  *ctx,
  * Mirrors Linux `tasdev_load_blk()` (sound/soc/codecs/tas2781-fmwlib.c)
  * and TI's vendor driver: select B0/P0, write 0 to `I2C_CKSUM`
  * (0x7E, SLASET3D §7.5.61 Table 7-161, p.93), replay the records, read
- * 0x7E back, compare with @p expected_cksum.  The checksum algorithm is
- * undocumented, so the expected byte is NOT computed here: it is the
- * `PChkSum` PPC3 stores per block (PPC3 output, a .bin block header,
- * or a value captured from a known-good load).
+ * 0x7E back, compare with @p expected_cksum.  The device computes
+ * CRC-8 (poly 0x07, init 0x00) over the written data bytes only,
+ * excluding PAGE/BOOK writes (bench-measured on a real TAS2563; see
+ * @ref tas2563_load_tuning).  The expected byte is not computed here:
+ * it is the `PChkSum` PPC3 stores per block (PPC3 output, a .bin block
+ * header, or a value captured from a known-good load).
  *
  * @par Retry contract.  A mismatch returns ALP_ERR_IO with
  *   @p failed_index_out == @p count and the readback in
@@ -1186,10 +1180,9 @@ alp_status_t tas2563_load_tuning(tas2563_t                  *ctx,
  *   @p failed_index_out to SIZE_MAX, so a mismatch (index == @p count)
  *   is never confused with a bus failure.
  *
- * @warning Unverified on silicon: whether the explicit PAGE/BOOK writes
- *   of @ref tas2563_load_tuning are counted by the device the same way
- *   as PPC3's own paging is unknown.  A bench check against a block
- *   with a known `PChkSum` is outstanding (#2580).
+ * @note Bench result (real TAS2563, rev 0x10): a wrong expected value
+ *   gives ALP_ERR_IO with the correct @p failed_index_out; a correct one
+ *   gives ALP_OK.  Not yet compared against a real PPC3 `PChkSum` blob.
  *
  * @param[in]  ctx               Initialised context.
  * @param[in]  records           Tuning records (same rules as @ref

@@ -167,16 +167,21 @@ static int apply_write(struct fake_tas2563_data *d, uint8_t reg, uint8_t val)
 		d->write_count[reg]++;
 		return 0;
 	}
-	/* I2C_CKSUM (§7.5.61): a write sets it; every other non-paging write
-	 * on any book/page updates it.  The real algorithm is undocumented --
-	 * this fake uses a byte sum of the data as a stand-in, so a test can
-	 * compute the "PPC3 value" for a block.  Not silicon behaviour. */
+	/* I2C_CKSUM (§7.5.61): a write sets it.  Bench-measured on a real
+	 * TAS2563 (rev 0x10): every other data write on any book/page folds
+	 * into it as CRC-8 (poly 0x07, init 0x00, over the data byte only;
+	 * register addresses, PAGE/BOOK writes and reads are not counted). */
 	if (d->cur_book == 0u && d->cur_page == 0u && reg == REG_I2C_CKSUM) {
 		d->regs[reg] = val;
 		d->write_count[reg]++;
 		return 0;
 	}
-	d->regs[REG_I2C_CKSUM] = (uint8_t)(d->regs[REG_I2C_CKSUM] + val);
+	{
+		uint8_t crc = (uint8_t)(d->regs[REG_I2C_CKSUM] ^ val);
+		for (int i = 0; i < 8; ++i)
+			crc = (uint8_t)((crc & 0x80u) ? (crc << 1) ^ 0x07u : crc << 1);
+		d->regs[REG_I2C_CKSUM] = crc;
+	}
 
 	if (d->cur_book != 0u || d->cur_page != 0u) {
 		/* Off the modelled page: the write is logged (that is what

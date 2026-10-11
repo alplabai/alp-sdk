@@ -1134,9 +1134,10 @@ ZTEST(alp_chips, test_tas2563_load_tuning_restores_paging_after_a_bus_failure)
 	alp_i2c_close(bus);
 }
 
-/* I2C_CKSUM (B0/P0/0x7E) verified load.  The fake sums the data bytes
- * of every non-paging write (a stand-in for the undocumented device
- * algorithm), so 0xAA + 0xBB = 0x165 -> 0x65 plays the PPC3 PChkSum. */
+/* I2C_CKSUM (B0/P0/0x7E) verified load.  The fake models the algorithm
+ * measured on a real TAS2563: CRC-8 (poly 0x07, init 0x00) over the
+ * data bytes of every non-PAGE/BOOK write.  CRC-8 of 0xAA,0xBB = 0xB2
+ * plays the PPC3 PChkSum. */
 static const tas2563_tuning_reg_t tas_ck_records[] = {
 	{ 0u, 0u, 0x10u, 0xAAu },
 	{ 0u, 1u, 0x20u, 0xBBu },
@@ -1150,9 +1151,9 @@ ZTEST(alp_chips, test_tas2563_load_tuning_verified_passes_on_matching_checksum)
 	uint8_t    got    = 0u;
 
 	fake_tas2563_set_reg(0x7Eu, 0x5Au); /* stale value: must be zeroed first */
-	zassert_equal(tas2563_load_tuning_verified(&ctx, tas_ck_records, 2u, 0x65u, &failed, &got),
+	zassert_equal(tas2563_load_tuning_verified(&ctx, tas_ck_records, 2u, 0xB2u, &failed, &got),
 	              ALP_OK);
-	zassert_equal(got, 0x65u);
+	zassert_equal(got, 0xB2u);
 	zassert_equal(fake_tas2563_cur_page(), 0u);
 	zassert_equal(fake_tas2563_cur_book(), 0u);
 
@@ -1166,12 +1167,47 @@ ZTEST(alp_chips, test_tas2563_load_tuning_verified_reports_checksum_mismatch)
 	size_t     failed = SIZE_MAX;
 	uint8_t    got    = 0u;
 
-	zassert_equal(tas2563_load_tuning_verified(&ctx, tas_ck_records, 2u, 0x66u, &failed, &got),
+	zassert_equal(tas2563_load_tuning_verified(&ctx, tas_ck_records, 2u, 0xB3u, &failed, &got),
 	              ALP_ERR_IO);
-	zassert_equal(got, 0x65u, "the readback is reported");
+	zassert_equal(got, 0xB2u, "the readback is reported");
 	zassert_equal(failed, 2u, "failed index == count marks a checksum mismatch");
 
 	alp_i2c_close(bus);
+}
+
+/* Vectors read back from a real TAS2563 at 0x4D (rev 0x10): CRC-8, poly 0x07,
+ * init 0x00, over written data bytes only.  Each load starts with the
+ * checksum zeroed; PAGE/BOOK writes must not move it. */
+ZTEST(alp_chips, test_tas2563_i2c_cksum_matches_bench_measured_crc8)
+{
+	static const struct {
+		uint8_t d[2];
+		size_t  n;
+		uint8_t want;
+	} v[] = {
+		{ { 0x01u }, 1u, 0x07u },
+		{ { 0x02u }, 1u, 0x0Eu },
+		{ { 0x80u }, 1u, 0x89u },
+		{ { 0xFFu }, 1u, 0xF3u },
+		{ { 0x5Au }, 1u, 0x81u },
+		{ { 0x10u, 0x20u }, 2u, 0xB7u },
+		{ { 0x20u, 0x10u }, 2u, 0xDEu },
+	};
+
+	for (size_t i = 0; i < ARRAY_SIZE(v); ++i) {
+		tas2563_t            ctx;
+		alp_i2c_t           *bus = tas_init(&ctx, 0x0Eu, NULL);
+		tas2563_tuning_reg_t recs[2];
+		uint8_t              got = 0u;
+
+		/* Page 1 so the load also issues PAGE writes, which are not counted. */
+		for (size_t j = 0; j < v[i].n; ++j)
+			recs[j] = (tas2563_tuning_reg_t){ 0u, 1u, (uint8_t)(0x10u + j), v[i].d[j] };
+		zassert_equal(tas2563_load_tuning_verified(&ctx, recs, v[i].n, v[i].want, NULL, &got),
+		              ALP_OK, "vector %u", (unsigned)i);
+		zassert_equal(got, v[i].want, "vector %u", (unsigned)i);
+		alp_i2c_close(bus);
+	}
 }
 
 ZTEST(alp_chips, test_tas2563_load_tuning_rejects_i2c_cksum_record)
