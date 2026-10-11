@@ -55,7 +55,7 @@ static int check(uint32_t w, uint32_t pad_words, unsigned out_bytes, unsigned sh
 	/* the last row's data ends exactly at the guard page */
 	uint8_t *src = m + len - (stride * (H - 1u) + row_bytes);
 
-	size_t   npx = (size_t)w * H;
+	size_t   npx  = (size_t)w * H;
 	uint8_t *want = malloc(npx * out_bytes);
 	uint8_t *got  = malloc(npx * out_bytes + 2u * FENCE);
 	uint8_t *dst  = got + FENCE;
@@ -65,10 +65,12 @@ static int check(uint32_t w, uint32_t pad_words, unsigned out_bytes, unsigned sh
 
 	for (uint32_t y = 0; y < H; ++y) {
 		uint8_t *row = src + stride * y;
-		for (size_t i = 0; i < row_bytes; ++i) row[i] = 0;
+		for (size_t i = 0; i < row_bytes; ++i)
+			row[i] = 0;
 		/* padding between rows is junk the unpacker must never read into the result */
 		if (y + 1u < H) {
-			for (size_t i = row_bytes; i < stride; ++i) row[i] = (uint8_t)rnd();
+			for (size_t i = row_bytes; i < stride; ++i)
+				row[i] = (uint8_t)rnd();
 		}
 		for (uint32_t x = 0; x < w; ++x) {
 			uint32_t v = rnd() & 0x3FFu;
@@ -94,7 +96,7 @@ static int check(uint32_t w, uint32_t pad_words, unsigned out_bytes, unsigned sh
 	for (int variant = 0; variant < 1 + CAM_CR10_HAVE_NEON; ++variant) {
 		memset(dst, 0, npx * out_bytes);
 		for (uint32_t y = 0; y < H; ++y) {
-			uint8_t *d = dst + (size_t)y * w * out_bytes;
+			uint8_t       *d = dst + (size_t)y * w * out_bytes;
 			const uint8_t *r = src + stride * y;
 			if (variant == 0) {
 				cam_cr10_unpack_row_scalar(r, w, d, out_bytes, shift);
@@ -109,8 +111,13 @@ static int check(uint32_t w, uint32_t pad_words, unsigned out_bytes, unsigned sh
 			ok = ok && got[i] == CANARY && dst[npx * out_bytes + i] == CANARY;
 		}
 		if (!ok) {
-			fprintf(stderr, "FAIL w=%u pad=%u out=%u shift=%u variant=%d\n", (unsigned)w,
-			        (unsigned)pad_words, out_bytes, shift, variant);
+			fprintf(stderr,
+			        "FAIL w=%u pad=%u out=%u shift=%u variant=%d\n",
+			        (unsigned)w,
+			        (unsigned)pad_words,
+			        out_bytes,
+			        shift,
+			        variant);
 			break;
 		}
 		memset(got, CANARY, npx * out_bytes + 2u * FENCE);

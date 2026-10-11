@@ -27,8 +27,14 @@ static double now_ms(void)
 
 typedef void (*row_fn)(const uint8_t *, uint32_t, uint8_t *, unsigned, unsigned);
 
-static double bench(row_fn fn, const uint8_t *src, size_t row_bytes, uint32_t w, uint32_t h,
-                    uint8_t *dst, unsigned ob, unsigned sh)
+static double bench(row_fn         fn,
+                    const uint8_t *src,
+                    size_t         row_bytes,
+                    uint32_t       w,
+                    uint32_t       h,
+                    uint8_t       *dst,
+                    unsigned       ob,
+                    unsigned       sh)
 {
 	enum { ITERS = 50 };
 	double best = 1e30;
@@ -56,7 +62,8 @@ int main(int argc, char **argv)
 	uint8_t *a         = malloc((size_t)w * h * ob);
 	uint8_t *b         = malloc((size_t)w * h * ob);
 	if (!src || !a || !b) return 1;
-	for (size_t i = 0; i < row_bytes * h; ++i) src[i] = (uint8_t)(i * 2654435761u >> 24);
+	for (size_t i = 0; i < row_bytes * h; ++i)
+		src[i] = (uint8_t)(i * 2654435761u >> 24);
 
 	double ts = bench(cam_cr10_unpack_row_scalar, src, row_bytes, w, h, a, ob, sh);
 	printf("%ux%u out_bytes=%u shift=%u\n", (unsigned)w, (unsigned)h, ob, sh);
