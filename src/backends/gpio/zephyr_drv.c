@@ -31,6 +31,7 @@
 #include "alp_errno.h"
 #include "alp_slot_claim.h"
 #include "gpio_ops.h"
+#include "gpio_pad.h"
 #include "gpio_resolve.h"
 
 #define DT_DRV_COMPAT alp_pin_array
@@ -216,6 +217,13 @@ z_configure(alp_gpio_backend_state_t *st, alp_gpio_dir_t dir, alp_gpio_pull_t pu
 {
 	alp_z_gpio_side_t *s = (alp_z_gpio_side_t *)st->be_data;
 	if (s == NULL) return ALP_ERR_NOT_READY;
+
+	/* An input needs the pad's input buffer on, which gpio_dw never sets
+	 * (issue #2808); it also carries the requested pull as pad bias. */
+	if (dir == ALP_GPIO_INPUT) {
+		int perr = alp_z_gpio_pad_input(&s->spec, pull);
+		if (perr != 0) return _errno_to_alp(perr);
+	}
 
 	int err = gpio_pin_configure_dt(&s->spec, _to_gpio_flags(dir, pull));
 	/* Some GPIO controllers (e.g. the DesignWare gpio_dw used on Alif Ensemble)

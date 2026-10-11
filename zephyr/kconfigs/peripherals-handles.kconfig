@@ -49,6 +49,19 @@ config ALP_SDK_MAX_GPIO_HANDLES
 	int "Maximum concurrent alp_gpio_t handles"
 	default 16
 
+config ALP_GPIO_PAD_INPUT
+	bool "Enable the pad input buffer when a GPIO / qenc pin is opened as an input"
+	depends on ALP_SDK && GPIO
+	default y if SOC_FAMILY_ENSEMBLE || SOC_FAMILY_ENSEMBLE_RTSS
+	help
+	  On Alif Ensemble the pad input buffer (REN) is only set by pinctrl, and
+	  neither gpio_dw nor gpio-qdec sets it, so an input read through the
+	  portable API reads idle (issue #2808).  Enabling this makes the zephyr
+	  gpio backend and the gpio-qdec qenc backend call
+	  alp_z_gpio_pad_input() on every input they open.  The Alif
+	  implementation (gpio_pad_alif.c) is built on Ensemble; elsewhere the
+	  call is a no-op unless a test supplies its own.
+
 config ALP_SDK_GPIO_SW_FALLBACK
 	bool "Software GPIO fallback (stateless stub)"
 	depends on ALP_SDK
