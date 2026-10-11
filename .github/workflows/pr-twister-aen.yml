@@ -233,7 +233,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.select.outputs.matrix) }}
-    name: twister · ${{ matrix.label }} · ${{ matrix.subset }}/2
+    name: twister · ${{ matrix.label }} · ${{ matrix.subset }}/${{ matrix.subsets }}
     runs-on: ubuntu-latest
     # #1477: raised from 30 -> 41 (corrected from a 3-run sample that
     # overstated this to 60). True worst observed job wall, pre-split, was
@@ -250,7 +250,7 @@ jobs:
     # for both SKU legs post-split rather than tightened per leg (see the
     # per-SKU build/time estimate in the job comment above) -- each leg's
     # own worst case, ~20min, is well inside it either way.
-    timeout-minutes: 41
+    timeout-minutes: 47
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
@@ -553,7 +553,7 @@ jobs:
       # ships an AEN803 twin overlay/.conf pair for both cores already
       # (`examples/peripheral-io/qenc-readout/boards/`), so adding the root
       # here is a pure CI-coverage gap fix, not a new example change.
-      - name: twister · ${{ matrix.label }} · ${{ matrix.subset }}/2 on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard + alp-console + blink + pwm-led-fade + qenc-readout
+      - name: twister · ${{ matrix.label }} · ${{ matrix.subset }}/${{ matrix.subsets }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + iot-dashboard + alp-console + blink + pwm-led-fade + qenc-readout
         id: twister
         working-directory: ${{ github.workspace }}
         env:
@@ -584,7 +584,17 @@ jobs:
         # above (one half of a SKU leg per job) the cap has wide headroom;
         # it stays at 34 as the ceiling a hang trips, not a performance
         # target.
-        timeout-minutes: 34
+        # #2848: a PR touching a shared backend rebuilds every configuration
+        # with a cold ccache, and the 62-configuration halves then ran out of
+        # this cap four times in a row (26, 55 and 34 of 62 built, no build
+        # failed). The split is now `SUBSETS` (scripts/select_aen_twister.py,
+        # six) shards per SKU, ~17 configurations each. With four, the full
+        # run on PR #2849 gave shard times of 10-19 min and one 4/4 shard at
+        # 23 of 31 configurations in 34 min (a single build took 13 min), so
+        # the cap goes 34 -> 40 as the ceiling a heavy cold shard trips, and
+        # the job ceiling 41 -> 47 to keep its ~7 min of setup and
+        # save steps behind it.
+        timeout-minutes: 40
         run: |
           # Zero the counters so the summary below reports this run only.
           ccache -z >/dev/null
@@ -594,7 +604,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/alp-sdk/scripts/gen_example_alp_conf.py"
           python3 zephyr/scripts/twister \
             ${{ matrix.platform_flags }} \
-            --subset ${{ matrix.subset }}/2 \
+            --subset ${{ matrix.subset }}/${{ matrix.subsets }} \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/firmware-update-log" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-dashboard" \
