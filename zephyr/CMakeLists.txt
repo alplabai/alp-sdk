@@ -1790,6 +1790,12 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpio_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_GPIO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/zephyr_drv.c)
+# Tier-1.5 glue: pad input-buffer (REN) enable for portable GPIO / qenc inputs on
+# Alif Ensemble (#2808).  Ensemble only; native_sim tests supply their own.
+if(CONFIG_ALP_GPIO_PAD_INPUT AND (CONFIG_SOC_FAMILY_ENSEMBLE OR CONFIG_SOC_FAMILY_ENSEMBLE_RTSS))
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/gpio_pad_alif.c)
+endif()
 # CC3501E GPIO proxy: routes proxied IOs through the inter-chip bridge,
 # delegates the rest to zephyr_drv.  AEN-only (CONFIG_ALP_SDK_GPIO_CC3501E_PROXY).
 # cc3501e_proxy_routes_weak.c is the WEAK empty route-table default, split

@@ -11,24 +11,11 @@
  * volume), so tr_enc lists ENC0_Y (P3_1) first and ENC0_X (P3_0) second. That is also the order
  * aen-evk-demo's netlist note gives. tests/host/test_hp_combined.sh pins it.
  *
- * REN. A pad's input buffer is on only once pinctrl sets `input-enable`, and neither gpio_dw nor
- * gpio-qdec applies a pinctrl state (alp-sdk#2808 is the SDK gap). Until that is fixed in the
- * portable layer, the state sits on /zephyr,user and src/platform/volume_he.c applies it with
- * pinctrl_apply_state(): the sanctioned ad hoc pattern, as in
- * examples/aen/aen-camera-firstlight/trigger_gpio.overlay.
+ * No pinctrl here: the SDK's gpio and gpio-qdec backends enable each input pad's buffer (REN)
+ * themselves when the pin is opened as an input (alp-sdk#2808).
  */
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
-#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
-
-&pinctrl {
-	pinctrl_tr_enc: pinctrl_tr_enc {
-		group0 {
-			pinmux = <PIN_P3_0__GPIO>, <PIN_P3_1__GPIO>, <PIN_P4_3__GPIO>;
-			input-enable;
-		};
-	};
-};
 
 &gpio3 {
 	status = "okay";
@@ -41,11 +28,6 @@
 / {
 	aliases {
 		alp-qenc0 = &tr_enc;
-	};
-
-	zephyr,user {
-		pinctrl-0 = <&pinctrl_tr_enc>;
-		pinctrl-names = "default";
 	};
 
 	/* Software quadrature decode (the SoC's UTIMER QEC block is an edge counter, not a decoder,
