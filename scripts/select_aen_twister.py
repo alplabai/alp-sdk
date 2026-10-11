@@ -16,7 +16,7 @@ other SKU.  Anything uncertain (no base, failed git call) runs every SKU; the
 workflow always runs full on push, schedule and dispatch.
 
 Prints the matrix as a JSON list for `strategy.matrix.include`: one entry per
-SKU x twister `--subset i/2` shard.  An empty list means "run nothing".
+SKU x twister `--subset i/SUBSETS` shard.  An empty list means "run nothing".
 """
 
 from __future__ import annotations
@@ -57,6 +57,15 @@ def affected_skus(paths: list[str]) -> list[str]:
     return out
 
 
+# Twister --subset shards per SKU.  A leg is ~100 build-only configurations;
+# a cold-ccache run (a PR touching a shared backend rebuilds everything) was
+# measured at 26-55 of 62 configurations in the 34 min step cap with two
+# shards (#2848), so four brings a leg to ~26 configurations.  The workflow
+# reads the count from the matrix (`matrix.subsets`), so this is the only
+# place to change it.
+SUBSETS = 4
+
+
 def matrix(skus: list[str]) -> list[dict]:
     legs = []
     for sku in skus:
@@ -64,11 +73,17 @@ def matrix(skus: list[str]) -> list[dict]:
         flags = " ".join(
             f"-p alp_{prefix}{cpu}/ae822fa0e5597ls0/{soc}" for cpu, soc in CPU.items()
         )
-        # Two twister --subset shards per SKU: halves the leg wall time, and
-        # spreads the slow HE builds (skewed heavy) across both legs.
-        for subset in (1, 2):
+        # SUBSETS twister --subset shards per SKU: divides the leg wall time and
+        # spreads the slow HE builds (skewed heavy) across the legs.
+        for subset in range(1, SUBSETS + 1):
             legs.append(
-                {"sku": sku, "subset": subset, "label": label, "platform_flags": flags}
+                {
+                    "sku": sku,
+                    "subset": subset,
+                    "subsets": SUBSETS,
+                    "label": label,
+                    "platform_flags": flags,
+                }
             )
     return legs
 
