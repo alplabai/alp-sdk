@@ -27,12 +27,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
-#ifdef CONFIG_ALIF_I2C_HANDOVER
-#include "../../../../../zephyr/soc-bridge/alif/i2c_handover.h"
-#define TR_WARM_BOOT() alp_i2c_handover_warm_boot()
-#else
-#define TR_WARM_BOOT() false /* no handover node: no warm-boot verdict, every boot is cold */
-#endif
+#include "warm_boot_he.h"
 #include "../hud/hud.h"
 #include "../ipc/tr_knob.h"
 #include "../ipc/tr_vol.h"
@@ -65,7 +60,7 @@ static volatile bool s_up; /* init done: before it the record holds cold-SRAM ga
 void tr_volume_he_init(void)
 {
 	/* An HE-only warm reset (the HP and the panel kept going): keep the levels they are at. */
-	const bool warm = TR_WARM_BOOT();
+	const bool warm = tr_warm_boot();
 
 	tr_vol_he_boot(&s_he, s_rec, warm);
 	tr_knob_boot(&s_knob, s_bl, BL_BOOT_PCT, HAVE_BL, warm);
