@@ -58,7 +58,7 @@ def test_missing_abidiff_fails_when_required(monkeypatch):
 
 def test_main_wires_abidiff_exit_code(tmp_path, monkeypatch):
     (tmp_path / "metadata").mkdir()
-    (tmp_path / "metadata" / "sdk_version.yaml").write_text("version: 0.17.2\n")
+    (tmp_path / "metadata" / "sdk_version.yaml").write_text("version: 0.17.2\n", encoding="utf-8")
     monkeypatch.setattr(mod.shutil, "which", lambda t: "/usr/bin/" + t)
     monkeypatch.setattr(mod, "export_tag", lambda *a: None)
     monkeypatch.setattr(mod, "build_lib", lambda src, b: b / "libalp_sdk.so")

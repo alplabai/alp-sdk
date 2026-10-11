@@ -114,7 +114,7 @@ def soname_of(lib: Path) -> str | None:
     if not shutil.which("readelf"):
         return None
     out = subprocess.run(
-        ["readelf", "-d", str(lib)], capture_output=True, text=True, check=False
+        ["readelf", "-d", str(lib)], capture_output=True, text=True, encoding="utf-8", check=False
     ).stdout
     m = re.search(r"SONAME.*\[(.+)\]", out)
     return m[1] if m else None
@@ -168,7 +168,7 @@ def main() -> int:
     root = args.root
     minor = sdk_minor(root)
     tags = subprocess.run(["git", "-C", str(root), "tag", "--list", f"v{minor}.*"],
-                          capture_output=True, text=True, check=True).stdout.split()
+                          capture_output=True, text=True, encoding="utf-8", check=True).stdout.split()
     tag = args.baseline_tag or pick_baseline(minor, tags)
     if tag is None:
         print(f"SKIP: first release of minor {minor}, nothing to compare "
@@ -189,7 +189,7 @@ def main() -> int:
              "--headers-dir1", str(base_src / "include"),
              "--headers-dir2", str(root / "include"),
              str(base_lib), str(head_lib)],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, encoding="utf-8", check=False,
         )
         print(proc.stdout, end="")
         print(proc.stderr, end="", file=sys.stderr)
