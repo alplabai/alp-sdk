@@ -41,7 +41,7 @@ def test_default_fragment_enables_nothing_new():
     text, labels = lo.render(DOC, SOC, LINKS)
     assert "GENERATED (scripts/gen_linux_ownership_dt.py" in text and "DO NOT EDIT" in text
     assert 'status = "okay"' not in text and "&pinctrl" not in text and "PORT_PINMUX" not in text
-    assert labels == {"cpg"}
+    assert {l for l in labels if "/" not in l} == {"cpg"}  # + disabled canfd channels
     assert not any(e.get("linux_enable") for e in DOC["assignable"].values())
     assert "3.3 V tolerant" in text  # rspi0: hw_blocked reason quoted
     assert "left at the vendor status" in text
@@ -53,7 +53,7 @@ def test_enabled_uart0_gets_pinctrl_from_the_soc_metadata():
     soc["linux_dt"]["UART0"]["label"] = "sciX"
     text, labels = lo.render(_enabled(DOC, "e1m_uart0"), soc, LINKS)
     assert "RZV2N_PORT_PINMUX(5, 0, 7)" in text and "&sciX {" in text and 'status = "okay"' in text
-    assert labels == {"sciX", "cpg"}
+    assert {l for l in labels if "/" not in l} == {"sciX", "cpg"}
 
 
 def test_linux_enable_needs_evidence_and_a_pfc_code_is_never_guessed():
@@ -150,7 +150,9 @@ def test_project_emit_cli_and_fragment_verification(tmp_path):
     assert r.returncode == 0, r.stderr
     assert out.read_text(encoding="utf-8") == (REPO / g.OUT).read_text(encoding="utf-8")
     v = tmp_path / "r9a09g056.dtsi"
-    v.write_text("\t\tcpg: clock-controller@10420000 {\n\t\t};\n", encoding="utf-8")
+    v.write_text("\t\tcpg: clock-controller@10420000 {\n\t\t};\n\t\tcanfd: can@12440000 {\n"
+                 + "".join(f"\t\t\tchannel{c} {{\n\t\t\t}};\n" for c in range(6)) + "\t\t};\n",
+                 encoding="utf-8")
     cmd = [sys.executable, GEN, "--fragment", str(out), "--vendor-dtsi", str(v)]
     assert subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8").returncode == 0
     out.write_text(out.read_text(encoding="utf-8") + '&nope {\n\tstatus = "disabled";\n};\n', encoding="utf-8")
@@ -222,3 +224,52 @@ def test_default_kernel_build_includes_the_ownership_fragment():
         assert (KERNEL / "linux-renesas" / dts).read_text(encoding="utf-8").count('#include "e1m-v2n-ownership.dtsi"') == 1
     frag = (REPO / g.OUT).read_text(encoding="utf-8")
     assert all(f'"{c}"' in frag for c in SOC["linux_dt"]["SCI7"]["cpg_clocks"])
+
+
+def _with_can_pfc(soc):
+    soc = copy.deepcopy(soc)
+    soc["linux_dt"]["CANFD3"]["pinmux"] = {"CANFD3_CRX3": 9, "CANFD3_CTX3": 9}
+    soc["linux_dt"]["CANFD2"]["pinmux"] = {"CANFD2_CRX2": 9, "CANFD2_CTX2": 9}
+    return soc
+
+
+def test_can_netdev_map_is_rank_among_enabled_channels():
+    """#2352: rank over the `linux_enable` channels only (the only ones set okay)."""
+    both = _enabled(DOC, "e1m_can0", "e1m_can1")
+    soc = _with_can_pfc(SOC)
+    own = resolve_ownership(both)
+    # Both enabled: E1M CAN0 = CANFD3 -> can1, E1M CAN1 = CANFD2 -> can0.
+    assert lo.can_netdev_map(both, soc, own) == ["can1", "can0"]
+    assert 'alp,e1m-can-netdev = "can1", "can0";' in lo.render(both, soc, LINKS)[0]
+    # Only CANFD3 enabled: it is the first (only) enabled channel -> can0; CAN1 has none.
+    one = _enabled(DOC, "e1m_can0")
+    assert lo.can_netdev_map(one, soc, resolve_ownership(one)) == ["can0", ""]
+    # Only CANFD2 enabled: CAN0 has none.
+    two = _enabled(DOC, "e1m_can1")
+    assert lo.can_netdev_map(two, soc, resolve_ownership(two)) == ["", "can0"]
+    # linux_enable on a channel whose PFC codes are missing (GAP) leaves it disabled: not ranked.
+    assert lo.can_netdev_map(one, SOC, resolve_ownership(one)) == ["", ""]
+    # Shipped default enables nothing: map present, every entry empty (fail closed).
+    own = resolve_ownership(DOC)
+    assert lo.can_netdev_map(DOC, soc, own) == ["", ""]
+    # An M33-owned CAN0 is never a Linux netdev.
+    assert lo.can_netdev_map(both, soc, {**own, "e1m_can0": "m33"}) == ["", "can0"]
+    # No CAN instances -> no property.
+    doc = copy.deepcopy(DOC)
+    for k in ("e1m_can0", "e1m_can1"):
+        del doc["assignable"][k]
+    assert lo.can_netdev_map(doc, soc, resolve_ownership(doc)) == []
+    assert "alp,e1m-can-netdev" not in lo.render(doc, SOC, LINKS)[0]
+
+
+def test_can_unused_channels_are_forced_disabled_so_rank_is_enabled_order():
+    """#2352: every channel Linux does not enable is disabled explicitly, so the
+    kernel's probe order equals the rank the map was computed from."""
+    text, labels = lo.render(DOC, SOC, LINKS)  # default: nothing enabled
+    for c in range(6):
+        assert f'channel{c} {{\n\t\tstatus = "disabled";' in text and f"canfd/channel{c}" in labels
+    one = _enabled(DOC, "e1m_can0")
+    text, labels = lo.render(one, _with_can_pfc(SOC), LINKS)
+    for c in (0, 1, 2, 4, 5):
+        assert f'channel{c} {{\n\t\tstatus = "disabled";' in text
+    assert 'channel3 {\n\t\tstatus = "okay";' in text and 'channel3 {\n\t\tstatus = "disabled"' not in text

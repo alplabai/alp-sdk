@@ -32,3 +32,44 @@
 &cpg {
 	renesas,cm33-owned-clocks = "rsci_7_pclk", "rsci_7_tclk", "rsci_7_ps_ps3_n", "rsci_7_ps_ps2_n", "rsci_7_ps_ps1_n";
 };
+
+/*
+ * Every CAN-FD channel Linux does not enable is disabled explicitly: rcar_canfd
+ * numbers netdevs by probe order of the ENABLED channels, so the netdev map
+ * below holds only if no other channel is enabled; an empty entry =
+ * no netdev for that bus (#2352).
+ */
+&canfd {
+	channel0 {
+		status = "disabled";
+	};
+
+	channel1 {
+		status = "disabled";
+	};
+
+	channel2 {
+		status = "disabled";
+	};
+
+	channel3 {
+		status = "disabled";
+	};
+
+	channel4 {
+		status = "disabled";
+	};
+
+	channel5 {
+		status = "disabled";
+	};
+};
+
+/*
+ * Linux netdev per E1M CAN bus id (index = N of E1M_X_CANN): rcar_canfd numbers
+ * netdevs by probe order, not by channel, so the SDK's SocketCAN backend reads
+ * this instead of assuming can<N> (#2352).
+ */
+/ {
+	alp,e1m-can-netdev = "", "";
+};
