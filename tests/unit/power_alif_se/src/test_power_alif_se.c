@@ -839,7 +839,10 @@ ZTEST_SUITE(power_alif_se, NULL, NULL, before, NULL, NULL);
 
 static void assert_no_side_effect(void)
 {
-	zassert_equal(g_ev_n, ev_count(EV_GET_OFF_CFG), "only read-only SE getter calls may happen");
+	/* The stale EIE / EVF clear is an RTC write, not SE or domain state: tolerated. */
+	zassert_equal(g_ev_n,
+	              ev_count(EV_GET_OFF_CFG) + ev_count(EV_SERVICE_EVI),
+	              "only read-only SE getter calls may happen");
 	zassert_equal(ev_count(EV_QUIESCE), 0u);
 	zassert_equal(ev_count(EV_SET_OFF_CFG), 0u);
 	zassert_equal(ev_count(EV_ENTER), 0u);
