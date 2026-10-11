@@ -25,8 +25,24 @@ static bool set_bl(tr_knob_t *k, volatile tr_bl_t *r, uint32_t pct)
 	return true;
 }
 
-void tr_knob_boot(tr_knob_t *k, volatile tr_bl_t *r, uint32_t bl_pct, bool has_bl)
+bool tr_bl_restore(uint32_t word, uint32_t *pct)
 {
+	uint32_t p = word & ~TR_VOL_TAG_MASK;
+
+	if ((word & TR_VOL_TAG_MASK) != TR_BL_TAG || p > 100u) {
+		return false;
+	}
+	*pct = p < TR_BL_MIN ? TR_BL_MIN : (p > TR_BL_MAX ? TR_BL_MAX : p);
+	return true;
+}
+
+void tr_knob_boot(tr_knob_t *k, volatile tr_bl_t *r, uint32_t bl_pct, bool has_bl, bool warm)
+{
+	uint32_t kept;
+
+	if (warm && tr_bl_restore(r->bl, &kept)) { /* read BEFORE the publish below */
+		bl_pct = kept;
+	}
 	*k = (tr_knob_t){ 0 };
 	if (bl_pct < TR_BL_MIN) {
 		bl_pct = TR_BL_MIN;

@@ -312,6 +312,8 @@ shunt), enough to brown out the DSI-to-LVDS bridge at 60 % brightness and above.
 `-DTR_BL_MAX_PCT=40` (the knob, the bench word and the boot level then stop at 40 %); `build-release.sh` prints the
 ceiling the HE was built with, and `TR_BL_MAX_PCT=40` in its environment refuses an image built with another one.
 
+**HE-only warm reset.** A reset of the HE alone (the HP keeps playing, the panel keeps its backlight) restores the volume and brightness records instead of applying the defaults, clamped to this build's limits (`TR_BL_MAX_PCT`; volume 0..100 %), when `alp_i2c_handover_warm_boot()` (the I2C1 handover's warm verdict, `TR_INPUT_NPU` builds) says the boot is warm and the tagged word is valid. A mute survives; its unmute goes to the 30 % default, because the level before the mute is not recorded. A cold boot, or a garbage word, takes the defaults as before.
+
 The HUD shows `VOLUME 40%` (or `MUTE`, or `BRIGHTNESS 60%`) over its bottom row for 1.5 s whenever the level or the mode changes. The encoder
 pads are GPIO3 / GPIO4 (P3_0, P3_1, P4_3): not the GPIO5 port or the lpgpio island the HP's amps use. The
 controls are not bench-verified on this image (the decode path is #2037 / #2095); `tests/host/test_vol.c`

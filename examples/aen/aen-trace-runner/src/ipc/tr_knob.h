@@ -101,8 +101,16 @@ typedef struct {
 } tr_knob_out_t;
 
 /* HE boot: the backlight is already at `bl_pct` (published, not re-applied). A req left over
- * from before is dropped, not obeyed. */
-void tr_knob_boot(tr_knob_t *k, volatile tr_bl_t *r, uint32_t bl_pct, bool has_bl);
+ * from before is dropped, not obeyed. `warm`: an HE-only warm reset, the panel kept the level the
+ * record holds: a tagged `bl` word is restored instead of `bl_pct` (clamped to the current
+ * TR_BL_MIN..TR_BL_MAX, so a record from a build with a higher ceiling cannot exceed this one), and
+ * k->bl_pct then differs from `bl_pct` when the caller must re-apply it to the LED. Garbage, or a
+ * cold boot, takes `bl_pct` exactly as before. */
+void tr_knob_boot(tr_knob_t *k, volatile tr_bl_t *r, uint32_t bl_pct, bool has_bl, bool warm);
+
+/* A tagged bl word (any percent up to 100) as the level a warm boot restores, clamped to
+ * TR_BL_MIN..TR_BL_MAX. false for anything else (*pct untouched). */
+bool tr_bl_restore(uint32_t word, uint32_t *pct);
 
 /* One HE frame at `now_ms`: `detents` since the last call (clockwise positive), `sw` the raw
  * switch (true = pressed). Order: switch, encoder, then the bench's req. */
