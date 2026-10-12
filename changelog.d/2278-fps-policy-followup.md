@@ -58,7 +58,7 @@ which sensor the request reaches.
 **Behaviour changes for existing callers:**
 
   - `ALP_CAMERA_CONFIG_DEFAULT`'s `fps` field changes from `30` to `0`
-    (`include/alp/camera.h:119` ("fps = 0u, .format = ALP_PIXFMT_RGB565"))
+    (`include/alp/camera.h:130` ("fps = 0u, .format = ALP_PIXFMT_RGB565"))
     -- any caller that left `cfg.fps` unset and relied on the implicit 30
     now gets "backend default" instead. `0` means "let the backend pick its
     own default" per the field's own doc.
