@@ -413,3 +413,28 @@ cores:
     assert "CONFIG_SCRATCH_ONLY_MARKER=y" not in out_intree
 
 
+
+
+def test_fatfs_library_emits_elm_fatfs_kconfig(tmp_path: Path) -> None:
+    """`libraries: [fatfs]` selects ELM FatFs: the filesystem subsystem
+    plus the ELM backend, and does NOT force exFAT/LFN (opt-in, see
+    metadata/libraries/fatfs.yaml)."""
+    body = """
+name: test-v2n-fatfs
+som:
+  sku: E1M-V2N101
+  hw_rev: r1
+
+libraries:
+  - fatfs
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+"""
+    project = load_board_yaml(_write_board(tmp_path, body))
+    out = _slice_alp_conf(project, project.cores["m33_sm"])
+    assert "CONFIG_FILE_SYSTEM=y" in out
+    assert "CONFIG_FAT_FILESYSTEM_ELM=y" in out
+    assert "CONFIG_FS_FATFS_EXFAT" not in out
