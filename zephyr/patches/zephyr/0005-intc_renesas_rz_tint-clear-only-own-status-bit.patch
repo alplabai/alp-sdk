@@ -1,0 +1,13 @@
+diff --git a/drivers/interrupt_controller/intc_renesas_rz_tint.c b/drivers/interrupt_controller/intc_renesas_rz_tint.c
+index d7d85e2..3fffba5 100644
+--- a/drivers/interrupt_controller/intc_renesas_rz_tint.c
++++ b/drivers/interrupt_controller/intc_renesas_rz_tint.c
+@@ -58,7 +58,7 @@ struct intc_rz_tint_data {
+ #define REG_TSCTR_READ(tint)     sys_read32(RZ_INTC_TSCR)
+ #define REG_TSCLR_WRITE(tint, v) sys_write32((v), RZ_INTC_TSCR + 4)
+ #define TINT_STATUS_READ(tint)   REG_TSCTR_READ(tint)
+-#define TINT_STATUS_CLEAR(tint)  REG_TSCLR_WRITE(tint, TINT_STATUS_READ(tint) | BIT(tint))
++#define TINT_STATUS_CLEAR(tint)  REG_TSCLR_WRITE(tint, BIT(tint))
+ #else
+ #define REG_TSCR_READ(tint)     sys_read32(RZ_INTC_TSCR)
+ #define REG_TSCR_WRITE(tint, v) sys_write32((v), RZ_INTC_TSCR)

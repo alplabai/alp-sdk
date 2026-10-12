@@ -47,45 +47,20 @@ from alp_orchestrate.kconfig import _slice_alp_conf  # noqa: E402
 from alp_orchestrate.orchestrator import (  # noqa: E402
     STOCK_SHIM_APP, _zephyr_app_dir,
 )
-from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
 
 # Any `--emit zephyr-conf` in an example CMakeLists.txt is the retired
 # configure-time bridge.
 _EMIT_RE = re.compile(r"--emit\s+zephyr-conf\b")
-
-# board.yaml paths (repo-relative) that cannot load AT ALL right now, with the
-# reason -- same allowlist-with-reason shape as
-# check_cmake_chip_list_parity.py's CHIP_LIST_EXCLUDED_WITH_REASON. A gate
-# that can't even load a board.yaml has nothing to byte-diff; that's a
-# different, honest failure this gate isn't the one to report. RATCHET:
-# `main()` re-asserts each entry's (family_dir, hw_rev) via
-# assert_exclusion_still_not_buildable every run, and fails loudly the
-# moment a reason stops holding -- this dict alone is not self-enforcing.
-EXCLUDED_WITH_REASON: dict[str, str] = {
-    "examples/multicore/rpmsg-imx93/board.yaml":
-        "E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd` -- refused "
-        "outright by the hw_rev-buildable gate (#1025). Remove this entry "
-        "once metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a "
-        "buildable status.",
-}
-# (family_dir, hw_rev) each excluded path's reason cites, for the ratchet
-# assertion above -- keyed the same as EXCLUDED_WITH_REASON.
-EXCLUDED_FAMILY_HWREV: dict[str, tuple[str, str]] = {
-    "examples/multicore/rpmsg-imx93/board.yaml": ("imx93", "r1"),
-}
 
 
 def find_cases(root: Path = REPO / "examples") -> list[tuple[Path, Path, str]]:
     """(app dir, board.yaml path, core id) for every enabled Zephyr core whose
     `app:` resolves to a customer app dir under `root` (default `examples/`;
     public so gen_example_alp_conf.py and alp_template.py share it). The
-    per-core `generated/alp.conf` lives in the app dir. A board.yaml named in
-    EXCLUDED_WITH_REASON is skipped; any other that fails to load raises."""
-    excluded = {(REPO / rel).resolve() for rel in EXCLUDED_WITH_REASON}
+    per-core `generated/alp.conf` lives in the app dir. A board.yaml that
+    fails to load raises."""
     cases = []
     for board_yaml in sorted(root.glob("**/board.yaml")):
-        if board_yaml.resolve() in excluded:
-            continue
         project = load_board_yaml(board_yaml)
         for slice_ in iter_buildable_slices(project):
             if (slice_.os != "zephyr" or not slice_.app
@@ -105,15 +80,6 @@ def find_bridges(repo: Path = REPO) -> list[Path]:
 
 def main() -> int:
     failures: list[str] = []
-
-    for rel, (family_dir, hw_rev) in EXCLUDED_FAMILY_HWREV.items():
-        stale = assert_exclusion_still_not_buildable(
-            REPO / "metadata", family_dir, hw_rev,
-            gate=f"check_zephyr_conf_parity.py ({rel})")
-        if stale:
-            failures.append(stale)
-        else:
-            print(f"SKIP {rel}: {EXCLUDED_WITH_REASON[rel]}")
 
     for cmakelists in find_bridges():
         failures.append(

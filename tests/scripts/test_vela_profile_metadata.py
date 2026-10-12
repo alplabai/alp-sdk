@@ -109,7 +109,7 @@ def _accelerator_identities(spec: dict) -> set:
     """The distinct `(type, subtype)` Ethos-U descriptions on this SoC.
 
     The E8 carries three (`ethos-u85/generative`, `ethos-u55/high-perf`,
-    `ethos-u55/high-efficiency`); the i.MX 93 carries one.
+    `ethos-u55/high-efficiency`).
     """
     return {(n.get("type"), n.get("subtype"))
             for n in spec.get("npus", [])
@@ -226,13 +226,11 @@ def test_every_vela_profile_cites_a_source_that_states_its_memory_mode():
     # "the cited RANGE contains the string" was too weak twice over, and both
     # holes were measured:
     #   * a 1-line shift left the needle inside the window, so the drift the
-    #     check exists to catch drifted right past it -- widest on
-    #     `vendors/nxp-imx93/README.md:103-108`, a 6-line window;
-    #   * that same README then grew a provenance note whose whole job is to
-    #     say the citation proves nothing about NXP -- and the note itself
-    #     contains `Shared_Sram`, so sliding the window onto the DISCLAIMER
-    #     kept the check green. A disclaimer that satisfies the check it
-    #     disclaims is worse than no note.
+    #     check exists to catch drifted right past it;
+    #   * a provenance note disclaiming the citation can itself contain the
+    #     mode string, so sliding the window onto the DISCLAIMER kept the
+    #     check green. A disclaimer that satisfies the check it disclaims is
+    #     worse than no note.
     #
     # Anchoring on the first line kills the shift; requiring that line's text
     # to be unique in the file kills the slide, wherever the prose lives --

@@ -125,7 +125,7 @@ gd32_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabili
 	st->resolution_bits = 16u;
 
 	caps_out->max_resolution_bits = 12u; /* the SoC actually delivers 12-bit */
-	caps_out->max_rate_hz         = 0u;  /* not advertised at v0.7 */
+	caps_out->max_rate_hz         = GD32G553_BRIDGE_ADC_STREAM_MAX_RATE_HZ; /* streaming path */
 	caps_out->channel_count       = 8u;
 	return ALP_OK;
 }
@@ -149,6 +149,31 @@ static alp_status_t gd32_read_raw(alp_adc_backend_state_t *st, int32_t *raw_out)
 	return ALP_OK;
 }
 
+/* One ADC_READ round trip carries up to GD32G553_BRIDGE_ADC_MAX_SAMPLES
+ * readings; chunk larger bursts so a long burst costs ceil(n / 8) trips. */
+static alp_status_t gd32_read_raw_n(alp_adc_backend_state_t *st, int32_t *raw_out, size_t n)
+{
+	gd32_bridge_state_t *bs = (gd32_bridge_state_t *)st->be_data;
+
+	gd32g553_t  *ctx = NULL;
+	alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
+	if (s != ALP_OK) {
+		return s;
+	}
+	uint16_t mv[GD32G553_BRIDGE_ADC_MAX_SAMPLES];
+	for (size_t done = 0; done < n && s == ALP_OK;) {
+		size_t chunk = n - done;
+		if (chunk > GD32G553_BRIDGE_ADC_MAX_SAMPLES) chunk = GD32G553_BRIDGE_ADC_MAX_SAMPLES;
+		s = gd32g553_adc_read(ctx, bs->channel_id, (uint8_t)chunk, mv);
+		for (size_t i = 0; s == ALP_OK && i < chunk; ++i) {
+			raw_out[done + i] = (int32_t)mv[i];
+		}
+		done += chunk;
+	}
+	alp_z_v2n_supervisor_release();
+	return s;
+}
+
 static void gd32_close(alp_adc_backend_state_t *st)
 {
 	if (st->be_data != NULL) {
@@ -158,9 +183,10 @@ static void gd32_close(alp_adc_backend_state_t *st)
 }
 
 static const alp_adc_ops_t gd32_ops = {
-	.open     = gd32_open,
-	.read_raw = gd32_read_raw,
-	.close    = gd32_close,
+	.open       = gd32_open,
+	.read_raw   = gd32_read_raw,
+	.read_raw_n = gd32_read_raw_n,
+	.close      = gd32_close,
 };
 
 ALP_BACKEND_REGISTER(adc,

@@ -126,6 +126,12 @@ ZTEST(alp_adc_registry, test_read_raw_inval_on_null_handle)
 	zassert_equal(alp_adc_read_raw(NULL, &raw), ALP_ERR_INVAL);
 }
 
+ZTEST(alp_adc_registry, test_read_raw_n_inval_on_bad_args)
+{
+	int32_t raw[2] = { 0 };
+	zassert_equal(alp_adc_read_raw_n(NULL, raw, 2u), ALP_ERR_INVAL);
+}
+
 ZTEST(alp_adc_registry, test_read_uv_inval_on_null_handle)
 {
 	int32_t uv = 0;

@@ -12,6 +12,16 @@ static tr_box_t box(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t conf)
 	return (tr_box_t){ .x = x, .y = y, .w = w, .h = h, .confidence = conf, .valid = true };
 }
 
+/* A torso box with the left and right arm raise levels (arms.h) given. */
+static tr_box_t arm_box(int16_t left, int16_t right)
+{
+	tr_box_t b = box(270, 100, 100, 300, 90);
+
+	b.arm_raise[TR_ARM_LEFT]  = left;
+	b.arm_raise[TR_ARM_RIGHT] = right;
+	return b;
+}
+
 static tr_box_t none(void)
 {
 	return (tr_box_t){ .valid = false };
@@ -24,8 +34,8 @@ int main(void)
 		tr_track_t t;
 		tr_ctl_t   c;
 
-		tr_track_init(&t, 640, 400);
-		tr_track_calibrate(&t, box(270, 100, 100, 300, 90), 640);
+		tr_track_init(&t, 400);
+		tr_track_calibrate(&t, box(270, 100, 100, 300, 90));
 		tr_ctl_init(&c, TR_MODE_VISION);
 
 		bool run = true;
@@ -33,7 +43,7 @@ int main(void)
 		for (int k = 0; k < TR_TRACK_LOST_LIMIT + 1; k++) {
 			(void)tr_track_update(&t, none());
 
-			run = tr_ctl_step(&c, &t, tr_track_player_lost(&t), 1u);
+			run = tr_ctl_step(&c, &t, tr_track_player_lost(&t));
 		}
 		assert(c.paused);
 		assert(!run);
@@ -52,15 +62,15 @@ int main(void)
 		tr_ctl_t   c;
 		tr_game_t  g;
 
-		tr_track_init(&t, 640, 400);
-		tr_track_calibrate(&t, box(270, 100, 100, 300, 90), 640);
+		tr_track_init(&t, 400);
+		tr_track_calibrate(&t, box(270, 100, 100, 300, 90));
 		tr_ctl_init(&c, TR_MODE_VISION);
 		tr_game_init(&g, 1);
 
 		for (int k = 0; k < TR_TRACK_LOST_LIMIT + 1; k++) {
 			tr_intent_t in = tr_track_update(&t, none());
 
-			if (tr_ctl_step(&c, &t, tr_track_player_lost(&t), g.lane)) {
+			if (tr_ctl_step(&c, &t, tr_track_player_lost(&t))) {
 				tr_game_step(&g, in, TRACK_H);
 			}
 		}
@@ -69,7 +79,7 @@ int main(void)
 
 		for (int k = 0; k < 5; k++) {
 			tr_intent_t in  = tr_track_update(&t, none());
-			bool        run = tr_ctl_step(&c, &t, tr_track_player_lost(&t), g.lane);
+			bool        run = tr_ctl_step(&c, &t, tr_track_player_lost(&t));
 
 			assert(!run);
 			if (run) {
@@ -80,140 +90,98 @@ int main(void)
 	}
 
 	/* 3. On the frame the player is re-acquired, the run unpauses AND
-	 * tr_track_resync() is called with the game's current lane -- passed
-	 * here as 0, deliberately different from anything track_update() itself
-	 * would compute, so the assertion can only pass if the resync argument
-	 * (not the tracker's own delta) is what lands in t.lane. */
+	 * tr_track_resync() forgets the arm edges (the tracker is primed again). */
 	{
 		tr_track_t t;
 		tr_ctl_t   c;
 
-		tr_track_init(&t, 640, 400);
-		tr_track_calibrate(&t, box(270, 100, 100, 300, 90), 640);
+		tr_track_init(&t, 400);
+		tr_track_calibrate(&t, box(270, 100, 100, 300, 90));
 		tr_ctl_init(&c, TR_MODE_VISION);
 		c.paused = true; /* as if a prior pause was already in effect */
 
 		(void)tr_track_update(&t, box(270, 100, 100, 300, 90)); /* valid: reacquired */
-		bool run = tr_ctl_step(&c, &t, tr_track_player_lost(&t), 0u);
+		assert(tr_arms_primed(&t.arms));
+		bool run = tr_ctl_step(&c, &t, tr_track_player_lost(&t));
 
 		assert(!c.paused);
 		assert(!run); /* this tick is spent resyncing, not stepping -- see case 2 */
-		assert(t.lane == 0u);
+		assert(!tr_arms_primed(&t.arms));
 	}
 
 	/*
 	 * 4. Regression test for mode.c's pause-exit resync (RESYNC SITE 1/2).
-	 *
-	 * NOTE (fix round 1): this does NOT reproduce the original plan's
-	 * pseudocode failing -- reviewed and confirmed: the plan clears `paused`
-	 * and applies that tick's delta on the very same tick the box goes
-	 * valid, and an invalid box never touches t.lane (track.c early-returns
-	 * before reaching it), so the plan's logic actually stays in sync for
-	 * this exact scenario. Case 5 below is the one that fails against the
-	 * plan's literal logic. What THIS case pins is a real hazard this
-	 * design's own tr_ctl_step() deliberately creates: it returns false (does
-	 * not step the game) on the tick pause is left, and tr_track_update()
-	 * still mutates t.lane on that same tick regardless. Without the resync
-	 * call, that mutation is never corrected and the tracker silently
-	 * disagrees with the game from then on.
-	 *
-	 * tr_track_update() mutates its own t.lane on every call, whether or not
-	 * the caller ever applies the result to the game -- and Step 5's loop
-	 * shape calls it every tick even while paused (that is the only way to
-	 * notice the player came back). So: drive the player to lane 2 for
-	 * real, force a pause, then -- while still paused -- call
-	 * tr_track_update() directly several more times (bypassing tr_ctl_step,
-	 * exactly as the main loop's per-tick camera feed would) with the box
-	 * standing somewhere that pulls the tracker's lane belief away from 2.
-	 * None of those deltas may ever reach the game (asserted below), and
-	 * when the player is genuinely re-acquired, the tracker's lane must
-	 * equal the game's lane -- not the lane those ignored deltas would have
-	 * left it at, and not even the transition tick's own delta.
+	 * tr_track_update() runs every tick even while paused (that is the only
+	 * way to notice the player came back), so an arm raised during the pause
+	 * -- or still up as the player walks back in -- is seen by the tracker
+	 * and never by the game. When play resumes it must not turn into a lane
+	 * step: the arm has to be lowered and raised again first.
 	 */
 	{
 		tr_track_t t;
 		tr_ctl_t   c;
-		tr_game_t  g;
 
-		tr_track_init(&t, 640, 400);
-		tr_track_calibrate(&t, box(270, 100, 100, 300, 90), 640);
+		tr_track_init(&t, 400);
+		tr_track_calibrate(&t, box(270, 100, 100, 300, 90));
 		tr_ctl_init(&c, TR_MODE_VISION);
-		tr_game_init(&g, 1);
-		assert(g.lane == 1u); /* TR_LANES/2 */
 
-		/* Drive to lane 2 for real: box centred at 500 is right of the
-		 * right-hand edge (426 for a 640-wide frame), one step right. */
-		tr_intent_t in = tr_track_update(&t, box(450, 100, 100, 300, 90));
+		/* Raise the left arm for real: one lane left. */
+		tr_intent_t in = tr_track_update(&t, arm_box(0, 0)); /* the priming pose */
 
-		assert(tr_ctl_step(&c, &t, tr_track_player_lost(&t), g.lane));
-		tr_game_step(&g, in, TRACK_H);
-		assert(t.lane == 2u && g.lane == 2u);
+		for (int k = 0; k < TR_ARM_SETTLE_POSES; k++) {
+			in = tr_track_update(&t, arm_box(80, 0));
+		}
+		assert(in.lane_delta == -1);
+		assert(tr_ctl_step(&c, &t, tr_track_player_lost(&t)));
 
-		/* Lose the player: pause. Below TR_TRACK_LOST_LIMIT consecutive
-		 * misses the game is still legitimately ticking on a no-op intent
-		 * (see case 2's comment) -- only c.paused at the end matters here. */
+		/* Lose the player: pause. */
 		for (int k = 0; k < TR_TRACK_LOST_LIMIT + 1; k++) {
-			in = tr_track_update(&t, none());
-			if (tr_ctl_step(&c, &t, tr_track_player_lost(&t), g.lane)) {
-				tr_game_step(&g, in, TRACK_H);
-			}
+			(void)tr_track_update(&t, none());
+			(void)tr_ctl_step(&c, &t, tr_track_player_lost(&t));
 		}
 		assert(c.paused);
-		assert(t.lane == 2u && g.lane == 2u); /* invalid frames never touch t.lane; a no-op
-							* intent never moves the lane either */
 
-		/* Several frames' worth of deltas that WOULD move the tracker if
-		 * applied -- fed straight to tr_track_update(), as the camera loop
-		 * does every tick regardless of pause. A box centred at 40 is left
-		 * of the left-hand edge; one lane steps left per call. */
-		(void)tr_track_update(&t, box(40, 100, 100, 300, 90)); /* 2 -> 1 */
-		(void)tr_track_update(&t, box(40, 100, 100, 300, 90)); /* 1 -> 0 */
-		(void)tr_track_update(&t, box(40, 100, 100, 300, 90)); /* stays 0 */
-		assert(t.lane == 0u);                                  /* proof the drift really happened */
-		assert(g.lane == 2u);                                  /* and the game never moved */
+		/* The player comes back with the left arm still raised: the pause
+		 * ends on a spent tick, and the arm stays spent. */
+		(void)tr_track_update(&t, arm_box(80, 0));
+		bool run = tr_ctl_step(&c, &t, tr_track_player_lost(&t));
 
-		/* Re-acquire: box back in the centre. */
-		in       = tr_track_update(&t, box(270, 100, 100, 300, 90));
-		bool run = tr_ctl_step(&c, &t, tr_track_player_lost(&t), g.lane);
-
-		assert(!run);
-		assert(!c.paused);
-		/* THE assertion: the tracker's lane equals the game's lane (2), not
-		 * the drifted 0, and not the 1 this same reacquisition call's own
-		 * delta would have produced (0 -> 1) had resync not overridden it.
-		 * Measured with mode.c's resync call removed (verification only,
-		 * never committed that way): t.lane == 1, g.lane == 2 -- a
-		 * permanent, silent one-lane desync from that point on. Removing
-		 * the tr_track_resync() call in mode.c's tr_ctl_step() reproduces
-		 * exactly that and fails this assertion.
-		 */
-		assert(t.lane == g.lane);
+		assert(!run && !c.paused);
+		for (int k = 0; k < 3 * TR_ARM_SETTLE_POSES; k++) {
+			in = tr_track_update(&t, arm_box(80, 0));
+			assert(in.lane_delta == 0 && !in.jump);
+		}
+		/* Lowered, then raised again: an ordinary step. */
+		(void)tr_track_update(&t, arm_box(-60, 0));
+		for (int k = 0; k < TR_ARM_SETTLE_POSES; k++) {
+			in = tr_track_update(&t, arm_box(80, 0));
+		}
+		assert(in.lane_delta == -1);
 	}
 
-	/* 5. A run reset calls tr_track_resync() with the reset lane -- THIS is
-	 * the case that fails against the plan's own literal pause logic: the
-	 * plan never resyncs on a run reset at all. tr_game_init() snaps g.lane
-	 * back to TR_LANES/2 while t.lane still holds wherever the previous
-	 * run's player last stood (or died), and nothing in the plan's pause
-	 * logic -- which only ever looks at tr_track_player_lost() and
-	 * in.source -- has any path that corrects it. Confirmed by removing
-	 * mode.c's tr_ctl_reset() resync call: the suite fails right here. */
+	/* 5. A run reset forgets the arm edges too -- a player who restarts with an
+	 * arm still up must lower it before it counts, or the new run's first
+	 * tick would step a lane on the old gesture. */
 	{
 		tr_track_t t;
 		tr_ctl_t   c;
 
-		tr_track_init(&t, 640, 400);
-		tr_track_calibrate(&t, box(270, 100, 100, 300, 90), 640);
+		tr_track_init(&t, 400);
+		tr_track_calibrate(&t, box(270, 100, 100, 300, 90));
 		tr_ctl_init(&c, TR_MODE_VISION);
 		c.paused = true;
 
-		/* Drift the tracker away from the reset lane first. */
-		(void)tr_track_update(&t, box(450, 100, 100, 300, 90)); /* 1 -> 2 */
-		assert(t.lane == 2u);
+		(void)tr_track_update(&t, arm_box(80, 0));
+		assert(tr_arms_primed(&t.arms));
 
-		tr_ctl_reset(&c, &t, 1u); /* TR_LANES/2, the lane tr_game_init() resets to */
-		assert(t.lane == 1u);
+		tr_ctl_reset(&c, &t);
+		assert(!tr_arms_primed(&t.arms));
 		assert(!c.paused);
+		for (int k = 0; k < 3 * TR_ARM_SETTLE_POSES; k++) {
+			tr_intent_t in = tr_track_update(&t, arm_box(80, 0));
+
+			assert(in.lane_delta == 0);
+		}
 	}
 
 	/* 6. Tilt mode never consults the tracker and never pauses on
@@ -224,7 +192,7 @@ int main(void)
 
 		tr_ctl_init(&c, TR_MODE_TILT);
 
-		bool run = tr_ctl_step(&c, NULL, /*player_lost=*/true, 0u);
+		bool run = tr_ctl_step(&c, NULL, /*player_lost=*/true);
 
 		assert(run);
 		assert(!c.paused);
@@ -241,7 +209,7 @@ int main(void)
 
 		tr_ctl_init(&c, TR_MODE_ATTRACT);
 
-		bool run = tr_ctl_step(&c, NULL, /*player_lost=*/true, 0u);
+		bool run = tr_ctl_step(&c, NULL, /*player_lost=*/true);
 
 		assert(run);
 		assert(!c.paused);
@@ -295,20 +263,20 @@ int main(void)
 		tr_track_t t;
 		tr_ctl_t   c;
 
-		tr_track_init(&t, 640, 400);
+		tr_track_init(&t, 400);
 		tr_ctl_init(&c, TR_MODE_VISION);
 		assert(!t.calibrated);
 
 		for (int k = 0; k < 50; k++) {
-			tr_track_calibrate(&t, none(), 640); /* fails every time: box is invalid */
+			tr_track_calibrate(&t, none()); /* fails every time: box is invalid */
 			assert(!t.calibrated);
 
 			(void)tr_track_update(&t, none());
-			(void)tr_ctl_step(&c, &t, tr_track_player_lost(&t), 1u); /* must not crash or wedge */
+			(void)tr_ctl_step(&c, &t, tr_track_player_lost(&t)); /* must not crash or wedge */
 		}
 
 		/* A valid box still calibrates after 50 prior failures. */
-		tr_track_calibrate(&t, box(270, 100, 100, 300, 90), 640);
+		tr_track_calibrate(&t, box(270, 100, 100, 300, 90));
 		assert(t.calibrated);
 
 		/* And tracking resumes immediately -- no lingering damage from the

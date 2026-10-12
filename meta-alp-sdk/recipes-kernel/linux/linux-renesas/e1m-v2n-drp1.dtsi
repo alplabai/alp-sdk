@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * ALP E1M-V2N SoM -- on-die DRP1 enable (OpenCVA + hardware codec).
+ *
+ * CONDITIONAL, like e1m-v2n-drpai.dtsi: the `drp1` label does not exist in
+ * the pristine linux-renesas tree.  meta-rz-opencva and meta-rz-codecs each
+ * ship the patch that creates it (0001-add-drp-property-to-devicetree*.patch:
+ * `drp1: drp1@17000000`, compatible "renesas,rzv2n-drp", status "disabled"),
+ * so the linux-renesas bbappend installs this body only when one of those
+ * layers is in bblayers.conf and a comment-only stub otherwise.
+ *
+ * The three properties are property-for-property the vendor EVK override:
+ *
+ *   memory-region                      -> drp_codec (0xafd00000, 3 MiB)
+ *   memory-oca-region                  -> opencva_reserved (0xa8000000)
+ *   memory-shared-for-drpai-ext-cont   -> shared_drp_reserved (0xafcff000)
+ *
+ * shared_drp_reserved is the same 4 KiB page &drpai0 uses; the vendor EVK
+ * enables both nodes against it, as does this SoM.  All three reserved
+ * regions are declared in e1m-v2n-som.dtsi.
+ */
+
+&drp1 {
+	memory-region = <&drp_codec>;
+	memory-oca-region = <&opencva_reserved>;
+	memory-shared-for-drpai-ext-cont = <&shared_drp_reserved>;
+	status = "okay";
+};

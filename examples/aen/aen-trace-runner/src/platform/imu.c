@@ -7,6 +7,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
+#include "bus2_he.h"
 #include "imu.h"
 
 /*
@@ -145,6 +146,13 @@ void tr_imu_read_q8(int16_t *x_q8, int16_t *y_q8)
 		tr_imu_y_q8 = 0;
 		*x_q8       = 0;
 		*y_q8       = 0;
+		return;
+	}
+
+	if (!tr_bus2_he_owns()) {
+		/* I2C2 is the HP's for its amp bring-up: coast on the last sample, count no failure. */
+		*x_q8 = tr_imu_x_q8;
+		*y_q8 = tr_imu_y_q8;
 		return;
 	}
 

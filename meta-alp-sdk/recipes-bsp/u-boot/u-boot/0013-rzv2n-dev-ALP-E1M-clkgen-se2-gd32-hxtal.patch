@@ -1,0 +1,176 @@
+From 378befa9347f299ce03f0e289a6b2409231ea889 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Sun, 4 Oct 2026 15:27:40 +0200
+Subject: [PATCH] rzv2n-dev: ALP E1M route 5L35023B SE2 from DIV4 so the GD32
+ HXTAL gets 24.576 MHz
+
+SE2 of the on-module 5L35023B (7-bit 0x69) drives the GD32 supervisor's
+OSCIN (net GD32_OSC). The OTP image has reg 0x1F = 0x46, whose bit 7
+SE2_Freerun_32K = 0, so SE2 free-runs at 32.768 kHz and the GD32 HXTAL
+oscillator never starts (the stock HXTAL init hangs forever).
+
+alp_clk5l_fixup() now also routes SE2 from DIV4, the same 24.576 MHz
+source SE3 already uses (5L35023 datasheet Table 18, SE2 from PLL2 +
+DIV4: B31<7>=1, B31<0>=1, B36<0>=1, B31<1>=1, B29<3>=0):
+
+  reg 0x24: 0x9c -> 0x8f   was 0x9c -> 0x8e; additionally sets bit0
+                            DIV4_CH2_EN (DIV4 channel 2 -> SE2 source).
+  reg 0x1f: 0x46 -> 0xc7   sets bit7 SE2_Freerun_32K (SE2 follows the
+                            B31 bit 0 select) and bit0 SE2_CLKSEL1
+                            (DIV4, was DIV5); VDD2_SEL (bits 6:5)
+                            unchanged.
+
+reg 0x24 is written before reg 0x1f so DIV4 channel 2 is live before SE2
+selects it; then reg 0x21 as before. Each register is idempotent (as
+shipped -> write and read back, already fixed -> skip, anything else ->
+warn and stop). All writes are volatile shadow-register writes; nothing
+is burned to OTP and reg 0x00 is never written. reg 0x20 (SE2_EN = 1,
+OE2 = DIFF1/2 OE) already enables SE2 and is not touched. Logs one line:
+"ALP: 5L35023B clock: SE1 32.768 kHz, SE2 24.576 MHz, SE3 24.576 MHz
+(0x24=0x8f 0x1f=0xc7 0x21=0xc0)".
+
+SE2 must not change after this: the GD32 locks its PLL to it once the
+host triggers the clock switch.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 68 +++++++++++++++++++++++++----
+ 1 file changed, 60 insertions(+), 8 deletions(-)
+
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index fcd8d67..19f17fd 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -740,6 +740,7 @@
+ #define ALP_CLK5L_I2C_ADDR 0x69	/* 7-bit; matches CLK_5L35023B_I2C_ADDR_DEFAULT in alp-sdk */
+ 
+ #define CLK5L_REG_GENERAL_CTRL   0x00
++#define CLK5L_REG_SE2_CTRL       0x1F
+ #define CLK5L_REG_SE3_CTRL       0x21
+ #define CLK5L_REG_SE1_DIV4_CTRL  0x24
+ 
+@@ -751,7 +752,7 @@
+  * map, "Byte 36: SE1 and DIV4 control" = reg 0x24, "Byte 33: SE3 and
+  * DIFF1 Control Register" = reg 0x21):
+  *
+- *   reg 0x24  0x9c (1001_1100) -> 0x8e (1000_1110)
++ *   reg 0x24  0x9c (1001_1100) -> 0x8f (1000_1111)
+  *     bit 7 I2C_PDB        1 -> 1  unchanged (chip powered, not down)
+  *     bit 6 Ref_free_run   0 -> 0  unchanged
+  *     bit 5 free_run_output_config
+@@ -762,7 +763,8 @@
+  *     bit 3 SE1_CLKSEL1    1 -> 1  unchanged
+  *     bit 2 REF_EN         1 -> 1  unchanged
+  *     bit 1 DIV4_CH3_EN    0 -> 1  CHANGED: DIV4 channel 3 output enabled
+- *     bit 0 DIV4_CH2_EN    0 -> 0  unchanged
++ *     bit 0 DIV4_CH2_EN    0 -> 1  CHANGED: DIV4 channel 2 output enabled
++ *                                  (feeds SE2 -- Table 18, B36<0>)
+  *
+  *   reg 0x21  0x80 (1000_0000) -> 0xc0 (1100_0000)
+  *     bit 7 SE3_Freerun_32K
+@@ -778,13 +780,34 @@
+  *     bit 0 DIFF2_CMOS2_FLIP
+  *                          0 -> 0  unchanged
+  *
++ *   reg 0x1f  0x46 (0100_0110) -> 0xc7 (1100_0111), written AFTER 0x24
++ *     bit 7 SE2_Freerun_32K
++ *                          0 -> 1  CHANGED: 0 = SE2 free-runs at 32.768 kHz
++ *                                  (the as-shipped state: the GD32 HXTAL
++ *                                  input never sees a MHz clock), 1 = SE2
++ *                                  follows the B31 bit 0 source select
++ *     bit 6:5 VDD2_SEL     10 unchanged (SE2 rail level)
++ *     bit 4 SE2_SLEW        0 unchanged
++ *     bit 3 PLL2_3rd_EN_CFG 0 unchanged
++ *     bit 2 PLL2_EN_CH2     1 unchanged
++ *     bit 1 PLL2_EN_3rdpole 1 unchanged (Table 18 wants B31<1> = 1 for
++ *                                  the PLL2 + DIV4 route; already set)
++ *     bit 0 SE2_CLKSEL1    0 -> 1  CHANGED: SE2 from DIV4 (was DIV5) =
++ *                                  PLL2 / OUTDIV4 = 24.576 MHz
++ *   SE2 drives the GD32 OSCIN (net GD32_OSC) and, once the host triggers
++ *   the clock switch, the GD32 locks its PLL to it -- SE2 must never change
++ *   again after this write. reg 0x20 (SE2_EN=1, OE2 = DIFF1/2 OE) is
++ *   already correct in the OTP and is not touched.
++ *
+  * Neither write touches a DIFF1 or DIFF2 register (those are the
+  * SEPARATE Byte 34/35 registers, reg 0x22/0x23 -- untouched here); reg
+  * 0x21's own DIFF1_CMOS2_FLIP/DIFF2_CMOS2_FLIP bits (1/0) are also
+  * unchanged.
+  */
+ #define CLK5L_SE1_DIV4_CTRL_OTP  0x9C	/* as-shipped: SE1 = 24.576 MHz (wrong) */
+-#define CLK5L_SE1_DIV4_CTRL_WANT 0x8E	/* fixed: SE1 = 32.768 kHz DCO */
++#define CLK5L_SE1_DIV4_CTRL_WANT 0x8F	/* fixed: SE1 = 32.768 kHz DCO, DIV4 CH2 (SE2) + CH3 (SE3) on */
++#define CLK5L_SE2_CTRL_OTP       0x46	/* as-shipped: SE2 free-runs at 32.768 kHz (GD32 HXTAL dead) */
++#define CLK5L_SE2_CTRL_WANT      0xC7	/* fixed: SE2 = DIV4 = PLL2 / OUTDIV4 = 24.576 MHz */
+ #define CLK5L_SE3_CTRL_OTP       0x80	/* as-shipped: SE3 = 22.5792 MHz (wrong) */
+ #define CLK5L_SE3_CTRL_WANT      0xC0	/* fixed: SE3 = DIV4 = PLL2/5 = 24.576 MHz */
+ 
+@@ -801,7 +824,7 @@ static int alp_clk5l_reg_write(struct udevice *dev, u8 reg, u8 val)
+ static void alp_clk5l_fixup(void)
+ {
+ 	struct udevice *dev;
+-	u8 general_ctrl = 0, se1_div4 = 0, se3_ctrl = 0, val = 0;
++	u8 general_ctrl = 0, se1_div4 = 0, se2_ctrl = 0, se3_ctrl = 0, val = 0;
+ 	int ret;
+ 
+ 	ret = i2c_get_chip_for_busnum(ALP_CLK5L_I2C_BUS, ALP_CLK5L_I2C_ADDR, 1, &dev);
+@@ -818,7 +841,8 @@ static void alp_clk5l_fixup(void)
+ 	}
+ 
+ 	/*
+-	 * reg 0x24 first, then reg 0x21 -- each register is handled
++	 * reg 0x24 first (it also enables DIV4 channel 2, which SE2 needs),
++	 * then reg 0x21, then reg 0x1f (SE2 -> DIV4) -- each register is handled
+ 	 * independently (OTP -> write the fix, already-fixed -> skip,
+ 	 * anything else -> warn and stop) so a partial prior run (0x24
+ 	 * already fixed, 0x21 still OTP) is recognised and completed
+@@ -832,7 +856,7 @@ static void alp_clk5l_fixup(void)
+ 	}
+ 
+ 	if (se1_div4 == CLK5L_SE1_DIV4_CTRL_WANT) {
+-		printf("ALP: 5L35023B clock: reg 0x24 already 0x%02x (SE1 32.768 kHz) -- skip\n", se1_div4);
++		printf("ALP: 5L35023B clock: reg 0x24 already 0x%02x (SE1 32.768 kHz, DIV4 CH2/CH3 on) -- skip\n", se1_div4);
+ 	} else if (se1_div4 == CLK5L_SE1_DIV4_CTRL_OTP) {
+ 		ret = alp_clk5l_reg_write(dev, CLK5L_REG_SE1_DIV4_CTRL, CLK5L_SE1_DIV4_CTRL_WANT);
+ 		if (!ret)
+@@ -873,8 +897,36 @@ static void alp_clk5l_fixup(void)
+ 	}
+ 
+ done:
+-	printf("ALP: 5L35023B clock: SE1 32.768 kHz, SE3 24.576 MHz (0x24=0x%02x 0x21=0x%02x)\n",
+-	       CLK5L_SE1_DIV4_CTRL_WANT, CLK5L_SE3_CTRL_WANT);
++	/*
++	 * SE2 last: DIV4 channel 2 was enabled by the reg 0x24 write above, so
++	 * the output has a live source before reg 0x1f selects it. The GD32
++	 * OSCIN (net GD32_OSC) sees 32.768 kHz until this write.
++	 */
++	ret = alp_clk5l_reg_read(dev, CLK5L_REG_SE2_CTRL, &se2_ctrl);
++	if (ret) {
++		printf("ALP: 5L35023B clock: reg 0x1f read failed (%d) -- not touching\n", ret);
++		return;
++	}
++
++	if (se2_ctrl == CLK5L_SE2_CTRL_WANT) {
++		printf("ALP: 5L35023B clock: reg 0x1f already 0x%02x (SE2 24.576 MHz) -- skip\n", se2_ctrl);
++	} else if (se2_ctrl != CLK5L_SE2_CTRL_OTP) {
++		printf("ALP: 5L35023B clock: reg 0x1f=0x%02x is neither the as-shipped OTP value (0x%02x) nor the fixed value (0x%02x) -- not touching\n",
++		       se2_ctrl, CLK5L_SE2_CTRL_OTP, CLK5L_SE2_CTRL_WANT);
++		return;
++	} else {
++		ret = alp_clk5l_reg_write(dev, CLK5L_REG_SE2_CTRL, CLK5L_SE2_CTRL_WANT);
++		if (!ret)
++			ret = alp_clk5l_reg_read(dev, CLK5L_REG_SE2_CTRL, &val);
++		if (ret || val != CLK5L_SE2_CTRL_WANT) {
++			printf("ALP: 5L35023B clock: reg 0x1f write/readback failed (wrote 0x%02x read 0x%02x ret=%d)\n",
++			       CLK5L_SE2_CTRL_WANT, val, ret);
++			return;
++		}
++	}
++
++	printf("ALP: 5L35023B clock: SE1 32.768 kHz, SE2 24.576 MHz, SE3 24.576 MHz (0x24=0x%02x 0x1f=0x%02x 0x21=0x%02x)\n",
++	       CLK5L_SE1_DIV4_CTRL_WANT, CLK5L_SE2_CTRL_WANT, CLK5L_SE3_CTRL_WANT);
+ }
+ 
+ /*
+-- 
+2.38.1.windows.1
+

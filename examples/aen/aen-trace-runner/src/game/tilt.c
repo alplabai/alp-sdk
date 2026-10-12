@@ -32,7 +32,7 @@ tr_intent_t tr_tilt_intent(tr_tilt_t *t, int16_t x_q8, int16_t y_q8)
 
 	/*
 	 * Pitch sign is a physical-orientation assumption (like track.c's
-	 * TR_CAM_MIRROR_X/TR_CAM_FLIP_Y): top of the board tilted TOWARD the
+	 * TR_CAM_FLIP_Y): top of the board tilted TOWARD the
 	 * player (y more positive) = jump, AWAY (nose down) = duck. If it reads
 	 * backwards on the bench, swap the two branches, not the sign of y.
 	 *

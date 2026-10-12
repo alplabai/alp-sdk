@@ -33,7 +33,9 @@ alp_status_t alp_z_v2n_supervisor_acquire(gd32g553_t **ctx_out)
 	} else if (g_stub.always_busy) {
 		return ALP_ERR_BUSY;
 	}
-	*ctx_out = &s_fake_ctx;
+	s_fake_ctx.granted     = g_stub.grant_stream2 ? GD32G553_LINK_FEAT_ADC_STREAM2 : 0u;
+	s_fake_ctx.max_payload = (g_stub.max_payload != 0u) ? g_stub.max_payload : 65u;
+	*ctx_out               = &s_fake_ctx;
 	return ALP_OK;
 }
 
@@ -50,6 +52,7 @@ alp_status_t gd32g553_adc_stream_begin(gd32g553_t *ctx,
 	(void)ctx;
 	(void)channel;
 	(void)sample_rate_hz;
+	g_stub.begin_calls++;
 	if (g_stub.gd32_stream_active[stream_id]) return ALP_ERR_INVAL;
 	g_stub.gd32_stream_active[stream_id] = true;
 	return ALP_OK;
@@ -74,6 +77,48 @@ alp_status_t gd32g553_adc_stream_read(gd32g553_t *ctx,
 	(void)max_samples;
 	(void)mv;
 	*got_samples = 0u;
+	return ALP_OK;
+}
+
+/* v0.15 stream pair: reached only while a test sets g_stub.grant_stream2. */
+alp_status_t gd32g553_adc_stream_begin2(gd32g553_t                  *ctx,
+                                        uint8_t                      stream_id,
+                                        uint8_t                      channel,
+                                        uint32_t                     sample_rate_hz,
+                                        uint16_t                     watermark,
+                                        gd32g553_adc_stream2_info_t *info)
+{
+	(void)ctx;
+	(void)channel;
+	(void)sample_rate_hz;
+	g_stub.begin2_calls++;
+	g_stub.begin2_watermark = watermark;
+	if (g_stub.gd32_stream_active[stream_id]) return ALP_ERR_INVAL;
+	g_stub.gd32_stream_active[stream_id] = true;
+	if (info != NULL) {
+		*info = (gd32g553_adc_stream2_info_t){ .full_scale = g_stub.full_scale,
+			                                   .vref_mv    = g_stub.vref_mv };
+	}
+	return ALP_OK;
+}
+
+alp_status_t gd32g553_adc_stream_read2(gd32g553_t *ctx,
+                                       uint8_t     stream_id,
+                                       uint8_t     max_samples,
+                                       uint32_t   *first_index,
+                                       uint32_t   *dropped,
+                                       uint8_t    *got,
+                                       uint16_t   *codes)
+{
+	(void)ctx;
+	(void)stream_id;
+	g_stub.read2_last_max = max_samples;
+	*first_index          = g_stub.r2_first;
+	*dropped              = g_stub.r2_dropped;
+	*got                  = (g_stub.r2_got > max_samples) ? max_samples : g_stub.r2_got;
+	for (uint8_t i = 0u; i < *got; ++i) {
+		codes[i] = g_stub.r2_codes[i];
+	}
 	return ALP_OK;
 }
 

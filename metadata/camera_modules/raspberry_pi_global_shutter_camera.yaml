@@ -4,6 +4,12 @@ schema_version: 1
 module_id:      raspberry_pi_global_shutter_camera
 display_name:   "Raspberry Pi Global Shutter Camera (IMX296LQR-C colour, 1-lane CSI-2)"
 chip:           imx296
+# The module carries the colour LQR-C sensor, so name the variant: sony,imx296lq
+# skips the driver's SENSOR_INFO auto-identify, which reads 0x0000 right after
+# standby on V2M103 (kernel patch 0028 adds a settle delay; the LQ node was the
+# bench-proven configuration).
+linux_compatible: "sony,imx296lq"
+linux_bench:    verified   # generated fragment booted + captured on V2M103 2026-10-08 (60.38 fps)
 i2c_addr_7bit:  0x1A
 xclk_hz:        54000000
 lanes:          1

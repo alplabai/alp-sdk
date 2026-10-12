@@ -1,5 +1,7 @@
 # Heterogeneous OS orchestration — Zephyr + Yocto as peers, not alternatives
 
+> **Note (2026-10-10):** E1M-NX9101 / NXP i.MX 93 was removed in #2781 / #2782 (67ed22d86; the module was never produced): the E1M-NX9101 / iMX93 rows, the `a55_cluster`+`m33` iMX93 mapping and `examples/multicore/rpmsg-imx93/` below are history; the example and the SoC spec are deleted.
+
 **Status:** **Implemented.** Landed in v0.6.0 (released 2026-06-06, VERSIONS.md):
 `board.yaml` v2's per-core `cores:` block + cross-core `ipc:` carve-outs replaced
 the v1 single-OS model; `<alp/rpc.h>` (in the tree) + the generated
@@ -8,6 +10,10 @@ is now the package `scripts/alp_orchestrate/` (`orchestrator.py`, `buildplan.py`
 `carveout.py`, ...) -- still live, and per ADR 0020 (v0.12.0) it now emits
 `--emit build-plan` / `--emit system-manifest` for the standalone `tan` CLI to
 execute, rather than driving `west` directly.
+**Retired since:** the Renode pieces of this design (`west alp-renode`,
+`pr-renode-dual-os.yml`, the Renode dual-OS smoke test) no longer exist --
+see [ADR 0022](../../adr/0022-python-executor-renode-retirement.md),
+Amendment 2. The text below is the original design and is kept as written.
 **Owner:** alpCaner
 **Replaced:** `board.yaml` v1 single-OS model
 **Landed in:** v0.6.0 (2026-06-06)

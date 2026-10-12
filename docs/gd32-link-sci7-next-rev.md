@@ -91,8 +91,11 @@ Silicon-validated state after the FIFO/pacing rework (see
 
 ## Carry-over facts
 
-- Kernel AMP gating: the `DEF_MOD_CRITICAL` patch already holds the
-  DMAC0 clocks; no kernel change needed for item 1.
+- Kernel AMP gating: the `renesas,cm33-owned-clocks` CPG patch holds only the
+  clocks listed in `e1m-v2n-ownership.dtsi`, which is generated from metadata
+  (RSCI7 for the GD32 link; no DMAC clock is listed today).  Item 1 (SCI7 DMAC)
+  therefore needs the DMAC0 module clocks recorded as `cpg_clocks` of a
+  `linux_dt` entry owned by the M33 first -- they are NOT held implicitly.
 - GD32 firmware is master-agnostic on the data path; items 3-4 are
   firmware-internal and wire-compatible.
 - Port-9 AMP ownership rules stand: keep the carrier DT free of port-9

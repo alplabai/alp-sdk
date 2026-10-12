@@ -358,7 +358,7 @@ def test_vela_compile_passes_a_built_in_system_config_unconditionally(tmp_path, 
     # false is an Arm BUILT-IN -- safe to pass alone, no vendor .ini needed.
     src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
     seen = {}
-    builtin_target = TargetSpec(backend="ethos_u", silicon_ref="nxp:imx9:imx93", accel_config="",
+    builtin_target = TargetSpec(backend="ethos_u", silicon_ref="acme:soc:x1", accel_config="",
                                 vela_memory_mode="Shared_Sram", vela_system_config="Ethos_U65_Embedded")
 
     monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run",
@@ -1027,3 +1027,40 @@ def test_deepx_real_compile_of_tiny_fixture(tmp_path):
     assert blob.format == "dxnn"
     assert blob.payload[:4] == b"DXNN"        # self-describing .dxnn flatbuffer magic
     assert blob.compiler_version.startswith("DX-COM")
+
+
+def _drpai_block_schema():
+    import json
+    schema = json.loads((_ROOT / "metadata" / "schemas" / "board.schema.json")
+                        .read_text(encoding="utf-8"))
+    return schema["properties"]["models"]["items"]["properties"]["compile"][
+        "properties"]["drpai"]
+
+
+def test_drpai_compile_block_schema_matches_what_the_adapter_reads(tmp_path):
+    # NPU-05: the schema used to declare only `spec`, which the adapter never
+    # reads, so `tan validate` rejected every block the adapter accepts.
+    import jsonschema
+    schema = _drpai_block_schema()
+    for shape in ("1,3,224,224", [1, 3, 224, 224]):
+        opts = {**_drpai_opts(tmp_path), "input_shape": shape}
+        jsonschema.validate(opts, schema)
+    jsonschema.validate({k: v for k, v in _drpai_opts(tmp_path).items()
+                         if k != "product"}, schema)          # product optional
+    for bad in ({"spec": "x.yaml"},
+                {**_drpai_opts(tmp_path), "product": "V2X"},
+                {k: v for k, v in _drpai_opts(tmp_path).items() if k != "images"}):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(bad, schema)
+
+
+def test_drpai_ci_dry_run_skips_when_translator_absent(tmp_path, monkeypatch):
+    # CI has no DRP-AI TVM / Translator: a schema-valid compile block must end
+    # in a recorded coverage skip, never a compile attempt or a crash.
+    from alp_model.build import build_model
+    monkeypatch.delenv("ALP_DRPAI_TVM_HOME", raising=False)
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX")
+    with pytest.raises(ValueError, match=r"drpai:skipped \(drpai compiler not installed\)"):
+        build_model(sku="E1M-V2N101", name="m", source=src, out_dir=tmp_path / "out",
+                    metadata_root=_ROOT / "metadata", adapters=[DrpaiAdapter()],
+                    compile_opts={"drpai": _drpai_opts(tmp_path)})

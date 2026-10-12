@@ -1,0 +1,26 @@
+# board.yaml -- `cameras:` selects the camera module (emit-snapshot + build-proof
+# fixture; builds the examples/aen/aen-camera-firstlight app).
+#
+# `cameras:` is the one line that selects the camera.  The build resolver turns
+# it into `-DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"` for the Zephyr core
+# (carrier shield from the e1m-evk preset's camera_connectors.CAM0, module
+# shield from metadata/camera_modules/<module>.yaml), so no hand-written
+# -DSHIELD is needed.  Connector CAMn becomes camera index n (`alp-camera<n>`).
+# See docs/camera-shields.md.
+
+som:
+  sku: E1M-AEN803
+
+preset: e1m-evk
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_he:
+    app: ../../../examples/aen/aen-camera-firstlight
+
+cameras:
+  - { connector: CAM0, module: innomaker_cam_ov9281 }
+
+diagnostics:
+  log_level: info

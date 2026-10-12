@@ -7,7 +7,7 @@
  * Two Zephyr-side backends compete for selection on real silicon
  * (zephyr_flash, zephyr_littlefs); a stateless sw_fallback wildcards
  * in at priority 0 for native_sim builds.  Vendor inline-AES
- * extensions (Alif OSPI SecAES, NXP FlexSPI OTFAD) plug in as
+ * extensions (Alif OSPI SecAES) plug in as
  * additional registrations once their vendor packs land.
  *
  * The configure_inline_aes input validation (mode range, NULL key /

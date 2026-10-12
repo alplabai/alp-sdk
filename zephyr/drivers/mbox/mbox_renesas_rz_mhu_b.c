@@ -19,8 +19,10 @@
  *   - mbox_send() (M33->A55) is UNEXERCISED and does NOT reach the A55 on this topology: the
  *     NS-channel RSP interrupt it raises (R_MHU_NS5.RSP) routes to no A55 GIC line -- the A55
  *     GIC only receives the MHU-B CA55-routed SWINT units 12-15 (INTID 436-439 / GIC_SPI
- *     404-407). The working M33->A55 path in examples/multicore/rpmsg-v2n is a direct SWINT
- *     unit 12 SET write, not this driver's mbox_send().
+ *     404-407). The working M33->A55 path in examples/multicore/rpmsg-v2n is a direct
+ *     doorbell SET write (SWINT unit 12, or RSP_INT_SET of NS slot 8 = Renesas rsp_ch8_ns,
+ *     GIC_SPI 385, with CONFIG_ALP_V2N_DOORBELL_RSP_CH8; <alp/protocol/v2n_mhu_doorbell.h>),
+ *     not this driver's mbox_send().
  * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ============================================================================
  */

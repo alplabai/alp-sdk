@@ -548,6 +548,10 @@ extern "C" alp_status_t alp_inference_ort_open(struct alp_inference         *h_,
 	if (h_ == nullptr || cfg == nullptr || cfg->model_data == nullptr || cfg->model_size == 0) {
 		return ALP_ERR_INVAL;
 	}
+	/* CPU backend: no selectable accelerator unit. */
+	if (cfg->accel_unit_mask != 0u) {
+		return ALP_ERR_NOSUPPORT;
+	}
 	auto *h = h_;
 
 	const OrtApi *api = _ort_api();

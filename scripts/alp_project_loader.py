@@ -48,7 +48,7 @@ SDK_VERSION_FILE = METADATA_ROOT / "sdk_version.yaml"
 # (The silicon -> Kconfig mapping, by contrast, now lives in the
 # versioned registry below -- see silicon_to_kconfig().)
 
-_SKU_FAMILY = re.compile(r"^E1M-(AEN|V2N|V2M|NX9)")
+_SKU_FAMILY = re.compile(r"^E1M-(AEN|V2N|V2M)")
 
 
 def _sku_family(sku: str) -> str:
@@ -56,7 +56,7 @@ def _sku_family(sku: str) -> str:
     m = _SKU_FAMILY.match(sku)
     if m is None:
         raise ValueError(f"unrecognised SoM SKU pattern: {sku}")
-    return {"AEN": "aen", "V2N": "v2n", "V2M": "v2n-m1", "NX9": "imx93"}[m.group(1)]
+    return {"AEN": "aen", "V2N": "v2n", "V2M": "v2n-m1"}[m.group(1)]
 
 
 def _sku_form_factor(sku: str) -> str:
@@ -358,7 +358,7 @@ def _resolve_pad_routes(
     `e1m_routes:` block: when an E1M pad appears in both, the board
     supplies the role (e.g. `bmi323_int1`) and the SoM supplies the
     dispatch path (e.g. CC3501E GPIO 14). The two blocks together
-    let a customer swap SoMs (AEN801 -> NX9101) without touching the
+    let a customer swap SoMs (AEN801 -> another AEN SKU) without touching the
     board YAML or any app source -- the [[som-swappable-without-board-changes]]
     promise.
     """
@@ -528,7 +528,7 @@ def resolve_memory_map(
     to use the silicon's defaults).
 
     Returns an empty list when the silicon_variant cannot be resolved
-    (e.g. NX9101's `silicon_variant: TBD`) -- callers should treat
+    (e.g. a preset with `silicon_variant: TBD`) -- callers should treat
     that as "memory layout pending the HW-config writeup".
     """
     declared = sku_preset.get("memory_map")
@@ -635,6 +635,14 @@ def resolve_capabilities(
 
     # SoM side wins on collision (bridge / add-on overrides silicon default).
     merged: dict[str, Any] = {**soc_caps, **som_caps}
+
+    # GPU: a per-die fact (variants[].optional_features.gpu_mali_g31, the one
+    # source) -- the SoC-level capabilities block cannot carry it because
+    # four of the eight RZ/V2N dies are fused without the Mali-G31.
+    variant = _resolve_silicon_variant(sku_preset, metadata_root)
+    mali = ((variant or {}).get("optional_features") or {}).get("gpu_mali_g31")
+    if mali is not None:
+        merged["gpu2d"] = bool(mali)
 
     # SKU-level restriction: capabilities the silicon offers but this SKU
     # leaves unpopulated (per-SKU granularity -- one family, many SKUs).

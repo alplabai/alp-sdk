@@ -10,20 +10,34 @@
  *
  * This is the recovery / first-flash path documented in
  * docs/gd32-bridge-protocol.md §10 Path B + docs/bring-up-v2n.md §2b:
- * three GPIOs (SWDIO + SWCLK + optional NRST) routed from the
- * Renesas host to the GD32, no external probe required.  The path
- * stays available even when the application-bootloader OTA path is
- * unreachable (corrupt bridge image, factory first-flash).
+ * three GPIOs (SWDIO + SWCLK + NRST) routed from the Renesas host to
+ * the GD32, no external probe required.  The path stays available even
+ * when the application-bootloader OTA path is unreachable (corrupt
+ * bridge image, factory first-flash).
  *
  * **Pin assignment (resolved 2026-05-12):** SWDIO -> Renesas `P70`,
  * SWCLK -> Renesas `P71`, NRST -> Renesas `P74` (open-drain, shared
  * with the primary PMIC reset-out).  Authoritative source:
  * `metadata/chips/gd32_swd.yaml` + `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`.
- * The studio's pin allocator resolves these to the integer pin ids
- * below at build time from the board preset.  If the board
- * preset hasn't propagated the routing yet, the alp_gpio_open call
- * below will return NULL -- the example prints the failure and exits
- * cleanly rather than wedging the host.
+ * The CM33 board publishes these as the `swdio` / `swclk` / `nrst` pads of
+ * its dedicated `alp,gd32-pads` devicetree node (generated from
+ * `metadata/e1m_modules/v2n/supervisor-links.yaml`).  They are deliberately
+ * NOT portable pins: the portable alp_gpio_open() REFUSES their reserved ids,
+ * because SWCLK (P71) is also the bridge ATTN pin and NRST is a net shared
+ * with the PMIC's open-drain reset-out.  gd32_swd_init() opens its own pads
+ * through the platform glue, so this application passes no pin handles at
+ * all.  If the board does not publish the pads, gd32_swd_init() answers
+ * ALP_ERR_NOT_READY and the example prints the failure and exits cleanly.
+ *
+ * **Connect-under-reset, and why NRST is mandatory.**  P71 is also the
+ * bridge's ATTN input (GD32 PA14), which the GD32 drives while the v0.15
+ * ATTN link feature is granted -- so the host may only drive it as an
+ * SWD clock output while GD32_NRST holds the GD32 in reset.  gd32_swd_init()
+ * asserts NRST first (and refuses a NULL one), gd32_swd_connect() arms
+ * halt-on-reset and only then releases it, so the core stops at its reset
+ * vector before any application code runs.  For the whole session the
+ * supervisor closes the SPI bridge link and answers every bridge command
+ * BUSY; gd32_swd_deinit() gives P70/P71 back as inputs.
  *
  * **Safety:**
  *   * This example writes to the *last sector* of the GD32G553's
@@ -41,17 +55,6 @@
 
 #include "alp/peripheral.h"
 #include "alp/chips/gd32_swd.h"
-
-/* Studio-resolved pin ids for the V2N gd32_swd routing.  The
- * board preset (`metadata/boards/E1M-X-EVK/board.yaml`) declares
- * the gd32_swd block; `alp_project.py` emits these as part of the
- * studio's generated build.  The integer values below are the
- * canonical preset ordering (SWDIO first, SWCLK second, NRST third)
- * resolved against the board's auxiliary-GPIO array -- if the
- * board shuffles the array the example follows the board. */
-#define V2N_GD32_SWDIO_PIN_ID 0u /* Renesas P70 on V2N */
-#define V2N_GD32_SWCLK_PIN_ID 1u /* Renesas P71 on V2N */
-#define V2N_GD32_NRST_PIN_ID  2u /* Renesas P74 (open-drain) on V2N */
 
 /* Write target: the top sector of the GD32G553's 512 KB flash.
  * 0x08080000 - 2048 = 0x0807F800 is the last sector start address. */
@@ -74,39 +77,20 @@ int main(void)
 {
 	printf("[swd] v2n-gd32-swd-flash\n");
 
-	/* Open the three GPIO handles.  Each call resolves a
-     * studio-supplied pin id; failure usually means the board
-     * preset hasn't picked up the SWD routing yet -- the pads
-     * themselves are resolved (P70/P71/P74, maintainer-confirmed
-     * 2026-05-12; see metadata/chips/gd32_swd.yaml), this is a
-     * preset-generation gap, not a schematic TBD. */
-	alp_gpio_t *swdio = alp_gpio_open(V2N_GD32_SWDIO_PIN_ID);
-	alp_gpio_t *swclk = alp_gpio_open(V2N_GD32_SWCLK_PIN_ID);
-	alp_gpio_t *nrst  = alp_gpio_open(V2N_GD32_NRST_PIN_ID);
-	if (swdio == NULL || swclk == NULL) {
-		printf("[swd] alp_gpio_open failed (SWDIO + SWCLK required); "
-		       "board may not have routed SWD lines yet\n");
-		alp_gpio_close(swdio);
-		alp_gpio_close(swclk);
-		alp_gpio_close(nrst);
-		return 0;
-	}
-	/* NRST is optional -- boards that don't route it work via
-     * software AIRCR.SYSRESETREQ in the driver's reset path. */
-	if (nrst == NULL) {
-		printf("[swd] note: NRST not opened; software-reset fallback will be used\n");
-	}
-
-	/* Bind the SWD controller.  init configures both lines as
-     * outputs at the SWD idle state + leaves NRST released. */
+	/* Bind the SWD controller.  init closes the bridge link (the supervisor
+	 * hook), opens the three GD32 pads itself, ASSERTS NRST (driven low from
+	 * the first instant, never high) and only then makes SWDIO/SWCLK outputs
+	 * at the SWD idle state; NRST stays asserted until connect() releases it. */
 	gd32_swd_t   swd;
-	alp_status_t s = gd32_swd_init(&swd, swdio, swclk, nrst);
+	alp_status_t s = gd32_swd_init(&swd);
 	if (s != ALP_OK) {
 		printf("[swd] gd32_swd_init -> %d\n", (int)s);
 		goto out;
 	}
 
-	/* Connect: line reset + JTAG-to-SWD switch + DPIDR read.
+	/* Connect (under reset): line reset + JTAG-to-SWD switch + DPIDR read, then
+	 * enable debug + halt-on-reset and release NRST so the core stops at its
+	 * reset vector.
      * GD32_SWD_GENERIC_CM33_R0P1_IDCODE (0x6BA02477) is the GENERIC
      * Cortex-M33 r0p1 SW-DPv2 architectural default, never measured on
      * a GD32G553 with a probe attached (see the @warning on the macro
@@ -190,9 +174,6 @@ deinit:
 	gd32_swd_deinit(&swd);
 
 out:
-	alp_gpio_close(swdio);
-	alp_gpio_close(swclk);
-	alp_gpio_close(nrst);
 	printf("[swd] done\n");
 	return 0;
 }

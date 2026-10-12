@@ -1,12 +1,13 @@
 /* tests/host/test_cam_mirror.c -- the selfie mirror (src/vision/cam_rot.h
  * TR_CAM_MIRROR): the sensor bit tr_cam_mirror_reg() names, followed by
  * the software rotation tr_cam_rot_src(), must mirror the UPRIGHT view
- * left/right -- on every pixel, at every rotation -- and the game must read
- * the player's physical left as screen-left and lane-left.
+ * left/right -- on every pixel, at every rotation -- and the arm controls
+ * must read the player's physical left arm as LEFT through that whole chain.
  *
  * The sensor is modelled by what its flip bits do to the raw readout: VFLIP
  * (0x3820 bit 2) reverses the rows, HMIRROR (0x3821 bit 2) the columns. */
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 #include "../../src/vision/cam_rot.h"
@@ -66,32 +67,70 @@ static void find(int rot, uint16_t flip_reg, int id, int *ux, int *uy)
 	assert(0 && "pixel not in the upright view");
 }
 
-static tr_pose_t figure(int cx)
+/* A player facing the camera in the UNMIRRORED upright frame (uw x uh), as
+ * MoveNet would report them: the label-LEFT keypoints sit at larger x. The
+ * torso is centred at (uw / 2, uh / 3) with a shoulder width of uh / 5 (the
+ * frame is 400 or 640 wide, 640 or 400 tall: the figure fits all of them);
+ * a raised wrist is 120 % of the shoulder width above its shoulder, a lowered
+ * one 80 % below it. `*_up` is the player's own PHYSICAL arm. */
+static tr_pose_t player(int uw, int uh, bool left_up, bool right_up)
 {
-	tr_pose_t p = { 0 };
+	tr_pose_t p  = { 0 };
+	int       sw = uh / 5, cx = uw / 2, cy = uh / 3;
 
 	for (int k = 0; k < TR_POSE_KP; k++) {
-		p.kp[k] = (tr_kp_t){ (int16_t)cx, 300, 200 };
+		p.kp[k] = (tr_kp_t){ (int16_t)cx, (int16_t)cy, 200 };
 	}
-	p.kp[TR_KP_NOSE] = (tr_kp_t){ (int16_t)cx, 100, 200 };
-	p.kp[TR_KP_LSHO] = (tr_kp_t){ (int16_t)(cx + 40),
-		                          160,
-		                          200 }; /* anatomical left: image right, facing the camera */
-	p.kp[TR_KP_RSHO] = (tr_kp_t){ (int16_t)(cx - 40), 160, 200 };
-	p.kp[TR_KP_LHIP] = (tr_kp_t){ (int16_t)(cx + 30), 360, 200 };
-	p.kp[TR_KP_RHIP] = (tr_kp_t){ (int16_t)(cx - 30), 360, 200 };
-	p.kp[TR_KP_LANK] = (tr_kp_t){ (int16_t)(cx + 30), 600, 200 };
-	p.kp[TR_KP_RANK] = (tr_kp_t){ (int16_t)(cx - 30), 600, 200 };
+	p.kp[TR_KP_LSHO] = (tr_kp_t){ (int16_t)(cx + sw / 2), (int16_t)cy, 200 };
+	p.kp[TR_KP_RSHO] = (tr_kp_t){ (int16_t)(cx - sw / 2), (int16_t)cy, 200 };
+	p.kp[TR_KP_LHIP] = (tr_kp_t){ (int16_t)(cx + sw / 3), (int16_t)(cy + sw * 3 / 2), 200 };
+	p.kp[TR_KP_RHIP] = (tr_kp_t){ (int16_t)(cx - sw / 3), (int16_t)(cy + sw * 3 / 2), 200 };
+	p.kp[TR_KP_LWRI] = (tr_kp_t){ (int16_t)(cx + sw),
+		                          (int16_t)(left_up ? cy - sw * 12 / 10 : cy + sw * 8 / 10),
+		                          200 };
+	p.kp[TR_KP_RWRI] = (tr_kp_t){ (int16_t)(cx - sw),
+		                          (int16_t)(right_up ? cy - sw * 12 / 10 : cy + sw * 8 / 10),
+		                          200 };
 	return p;
 }
 
-/* The same pose as the mirrored sensor delivers it: every x reflected. */
-static tr_pose_t mirrored(tr_pose_t p, int uw)
+/* The same pose as the (possibly flipped) sensor and rotation deliver it:
+ * every keypoint is the scene pixel it names, found again in the upright view
+ * of `flip_reg`. MoveNet then labels what it SEES, so the pair with the
+ * larger shoulder x is the "left" one whatever body it belongs to. */
+static tr_pose_t as_delivered(tr_pose_t p, int rot, uint16_t flip_reg)
 {
 	for (int k = 0; k < TR_POSE_KP; k++) {
-		p.kp[k].x = (int16_t)(uw - 1 - p.kp[k].x);
+		int ux, uy;
+
+		find(rot, flip_reg, upright(rot, 0u, p.kp[k].x, p.kp[k].y), &ux, &uy);
+		p.kp[k].x = (int16_t)ux;
+		p.kp[k].y = (int16_t)uy;
+	}
+	if (p.kp[TR_KP_LSHO].x < p.kp[TR_KP_RSHO].x) {
+		for (int k = TR_KP_LEYE; k < TR_POSE_KP; k += 2) {
+			tr_kp_t tmp = p.kp[k];
+
+			p.kp[k]     = p.kp[k + 1];
+			p.kp[k + 1] = tmp;
+		}
 	}
 	return p;
+}
+
+/* The intent after `n` poses of the player holding the given arms up. */
+static tr_intent_t hold(tr_track_t *t, int rot, uint16_t flip, bool l, bool r, int n)
+{
+	tr_pose_t   p   = as_delivered(player(TR_CAM_UP_W(rot), TR_CAM_UP_H(rot), l, r), rot, flip);
+	tr_intent_t sum = tr_intent_none();
+
+	for (int k = 0; k < n; k++) {
+		tr_intent_t in = tr_track_update(t, tr_pose_box(&p));
+
+		sum.lane_delta = (int8_t)(sum.lane_delta + in.lane_delta);
+		sum.jump       = sum.jump || in.jump;
+	}
+	return sum;
 }
 
 int main(void)
@@ -113,6 +152,21 @@ int main(void)
 		                      : TR_OV9281_REG_TIMING_FORMAT1));
 	}
 
+	/* 1b. The flip-bit helpers: the bit written for "mirrored" reads back as mirrored, and
+	 * "not mirrored" as not, at every rotation, whichever sense the rot-0 bit has. */
+	for (int rot = 0; rot <= 270; rot += 90) {
+		if (rot == 180) {
+			continue;
+		}
+		for (int want = 0; want < 2; want++) {
+			uint8_t reg = (uint8_t)(0x60u | tr_cam_mirror_bit(rot, want));
+
+			assert(tr_cam_mirrored_from_reg(rot, reg) == want);
+			assert((reg & 0x60u) == 0x60u); /* the neighbouring bits are untouched */
+		}
+	}
+	assert(TR_OV9281_HMIRROR_ACTIVE_LOW || tr_cam_mirror_bit(0, 1) == TR_OV9281_FLIP_BIT);
+
 	/* 2. A marked corner, the bench's TR_CAM_ROTATE=90: the scene's raw
 	 * top-left pixel shows at the upright TOP-RIGHT unmirrored (the image
 	 * turned clockwise), and a selfie puts it at the TOP-LEFT. */
@@ -125,51 +179,56 @@ int main(void)
 		assert(ux == 0 && uy == 0);
 	}
 
-	/* 3. Game intent in the mirrored view (track.h TR_CAM_MIRROR_X stays 0:
-	 * the mirror is already in the pixels). Facing the camera, a player who
-	 * steps to their OWN left moves to larger x in the unmirrored upright
-	 * frame; the mirrored sensor puts them at screen-left, and the tracker
-	 * must say LEFT. The box is anatomy-agnostic (L/R means and the
-	 * shoulder width's magnitude), so MoveNet's L/R labels -- which side of the
-	 * image they sit on flips with the mirror -- cannot swap the lane. */
-	{
-		int         uw = TR_CAM_UP_W(90), uh = TR_CAM_UP_H(90);
-		tr_track_t  t;
-		tr_pose_t   stand = mirrored(figure(uw / 2), uw);
-		tr_pose_t   step  = mirrored(figure(uw / 2 + 130), uw); /* the player's own left */
-		tr_intent_t in;
-
-		assert(tr_pose_box(&step).x + tr_pose_box(&step).w / 2 < uw / 3);
-		tr_track_init(&t, (int16_t)uw, (int16_t)uh);
-		tr_track_calibrate(&t, tr_pose_box(&stand), (int16_t)uw);
-		in = tr_track_update(&t, tr_pose_box(&step));
-		assert(in.lane_delta == -1 && !in.jump && !in.duck);
-
-		/* L/R labels swapped (MoveNet reading the mirrored body): same box. */
-		tr_pose_t sw = step;
-
-		for (int k = TR_KP_LEYE; k < TR_POSE_KP; k += 2) {
-			tr_kp_t tmp = sw.kp[k];
-
-			sw.kp[k]     = sw.kp[k + 1];
-			sw.kp[k + 1] = tmp;
+	/* 3. The arm controls through the whole chain, at every rotation: the
+	 * player's PHYSICAL left arm (the scene's, facing the camera) must read
+	 * as LEFT, the right as RIGHT, both as a jump -- whichever rotation the
+	 * camera is mounted at, and with the selfie mirror on or off
+	 * (TR_CAM_MIRROR, this file is built both ways by runner.sh). The mirror
+	 * flips which screen side a limb shows on; MoveNet relabels by what it
+	 * sees; pose.c's rule (shoulder x order + TR_CAM_MIRROR) must still land
+	 * on the player's own side. */
+	for (int rot = 0; rot <= 270; rot += 90) {
+		if (rot == 180) {
+			continue;
 		}
-		tr_box_t a = tr_pose_box(&step), b = tr_pose_box(&sw);
+		uint16_t   flip = TR_CAM_MIRROR ? tr_cam_mirror_reg(rot) : 0u;
+		int        uh   = TR_CAM_UP_H(rot);
+		tr_track_t t;
 
-		assert(a.x == b.x && a.w == b.w && a.y == b.y && a.h == b.h);
+		tr_pose_t down = as_delivered(player(TR_CAM_UP_W(rot), uh, false, false), rot, flip);
 
-		/* jump unchanged by the mirror: a vertical move only */
-		tr_track_resync(&t, 1u);
-		tr_track_calibrate(&t, tr_pose_box(&stand), (int16_t)uw);
-		(void)tr_track_update(&t, tr_pose_box(&stand)); /* seeds the baseline */
-		tr_pose_t up = stand;
+		tr_track_init(&t, (int16_t)uh);
+		tr_track_calibrate(&t, tr_pose_box(&down));
+		assert(t.calibrated);
+		(void)hold(&t, rot, flip, false, false, 3); /* primed, both arms down */
 
-		for (int k = 0; k < TR_POSE_KP; k++) {
-			up.kp[k].y = (int16_t)(up.kp[k].y - 120);
+		/* MoveNet's own L/R labels play no part: a pose with every pair swapped (as if
+		 * the model had labelled the mirrored body the other way round) measures the
+		 * same arms. */
+		{
+			tr_pose_t p = as_delivered(player(TR_CAM_UP_W(rot), uh, true, false), rot, flip);
+			tr_pose_t q = p;
+
+			for (int k = TR_KP_LEYE; k < TR_POSE_KP; k += 2) {
+				q.kp[k]     = p.kp[k + 1];
+				q.kp[k + 1] = p.kp[k];
+			}
+			tr_box_t a = tr_pose_box(&p), b = tr_pose_box(&q);
+
+			assert(a.arm_raise[TR_ARM_LEFT] == b.arm_raise[TR_ARM_LEFT] &&
+			       a.arm_raise[TR_ARM_RIGHT] == b.arm_raise[TR_ARM_RIGHT]);
+			assert(a.arm_raise[TR_ARM_LEFT] >= TR_ARM_UP_PCT && a.arm_raise[TR_ARM_RIGHT] < 0);
 		}
-		(void)tr_track_update(&t, tr_pose_box(&up));
-		in = tr_track_update(&t, tr_pose_box(&up)); /* the second frame: TR_TRACK_DEBOUNCE */
-		assert(in.jump && in.lane_delta == 0);
+
+		tr_intent_t in = hold(&t, rot, flip, true, false, 10);
+
+		assert(in.lane_delta == -1 && !in.jump);
+		(void)hold(&t, rot, flip, false, false, 3);
+		in = hold(&t, rot, flip, false, true, 10);
+		assert(in.lane_delta == +1 && !in.jump);
+		(void)hold(&t, rot, flip, false, false, 3);
+		in = hold(&t, rot, flip, true, true, 10);
+		assert(in.lane_delta == 0 && in.jump);
 	}
 
 	printf("PASS: tests/host/test_cam_mirror.c\n");

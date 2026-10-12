@@ -2,7 +2,7 @@
 # linux-kernel-drivers-v1).  The camera completeness gate checks every camera
 # module's chip `drivers.linux` against this list, and that each named patch
 # file exists.  Native entries were read from the 6.1.141-cip43 tree
-# (drivers/media/i2c).  Patches 0018-0020 are PENDING -- their branches are not
+# (drivers/media/i2c).  Patches 0028-0030 are PENDING -- their branches are not
 # merged yet, so the files do not exist in meta-alp-sdk until they land.
 schema_version: 1
 kernels:
@@ -20,16 +20,16 @@ kernels:
         kconfig:    CONFIG_VIDEO_IMX335
         native:     true
         native_lanes: [4]
-        patches:    [0019-media-i2c-imx335-2-lane-10-bit-binned-mode.patch]
-        notes:      "2-lane operation needs patch 0019 (pending)."
+        patches:    [0029-media-i2c-imx335-2-lane-10-bit-binned-mode.patch]
+        notes:      "2-lane operation needs patch 0029 (pending)."
       - compatible: "ovti,ov9282"
         kconfig:    CONFIG_VIDEO_OV9282
         native:     true
         native_lanes: [2]
-        patches:    [0020-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch]
-        notes:      "Native driver has one 1280x720 mode; patch 0020 (pending) is the v6.6 driver with 1280x800/640x400 modes, supplies and clock-noncontinuous handling."
+        patches:    [0030-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch]
+        notes:      "Native driver has one 1280x720 mode; patch 0030 (pending) is the v6.6 driver with 1280x800/640x400 modes, supplies and clock-noncontinuous handling."
       - compatible: "sony,imx296"
         kconfig:    CONFIG_VIDEO_IMX296
         native:     false
-        patches:    [0018-media-i2c-add-imx296-backport.patch]
+        patches:    [0028-media-i2c-add-imx296-backport.patch]
         notes:      "Not in 6.1; v6.6 backport (pending)."

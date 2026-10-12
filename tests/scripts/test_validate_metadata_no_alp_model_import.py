@@ -36,6 +36,11 @@ def test_validate_metadata_survives_alp_model_deletion(tmp_path):
         _REPO / "zephyr" / "boards" / "alp",
         tmp_path / "zephyr" / "boards" / "alp",
     )
+    # zephyr_shield(s) existence checks read zephyr/boards/shields/ directory names.
+    shutil.copytree(
+        _REPO / "zephyr" / "boards" / "shields",
+        tmp_path / "zephyr" / "boards" / "shields",
+    )
     # ignore_errors=True is load-bearing, not defensive tidiness: this test
     # exists to prove validate_metadata.py survives ADR-0028 Task 6 deleting
     # scripts/alp_model/, and once Task 6 lands the package is already gone from

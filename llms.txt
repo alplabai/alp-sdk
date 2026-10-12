@@ -1,6 +1,6 @@
 # Alp SDK
 
-> A vendor-neutral SDK for heterogeneous E1M / E1M-X system-on-modules (Alif Ensemble, Renesas RZ/V2N, NXP i.MX 93). One declarative `board.yaml` fans out into per-core Zephyr (Cortex-M) and Yocto (Cortex-A) build slices; apps target one portable `<alp/*>` C API and stay source-compatible across a SoM family.
+> A vendor-neutral SDK for heterogeneous E1M / E1M-X system-on-modules (Alif Ensemble, Renesas RZ/V2N). One declarative `board.yaml` fans out into per-core Zephyr (Cortex-M) and Yocto (Cortex-A) build slices; apps target one portable `<alp/*>` C API and stay source-compatible across a SoM family.
 
 For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent guide). Claude Code users at Alp Lab additionally get a local `CLAUDE.md` wiring up internal-only tooling (an internal workflow-skills plugin + a `code-review-graph` MCP server); none of it is required — every fact an agent needs is reachable from AGENTS.md and the docs it points to.
 
@@ -29,7 +29,6 @@ For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent gu
 - [docs/soms/aen.md](docs/soms/aen.md): Alif Ensemble (E1M-AEN) SoM family.
 - [docs/soms/v2n.md](docs/soms/v2n.md): Renesas RZ/V2N (E1M-X V2N) SoM family.
 - [docs/soms/v2n-m1.md](docs/soms/v2n-m1.md): RZ/V2N + DEEPX DX-M1 (E1M-X V2N-M1) family.
-- [docs/soms/imx93.md](docs/soms/imx93.md): NXP i.MX 93 (E1M-NX9101) family.
 - [docs/boards/e1m-evk.md](docs/boards/e1m-evk.md): 35×35 EVK reference board (AEN family).
 - [docs/boards/e1m-x-evk.md](docs/boards/e1m-x-evk.md): 45×65 X-EVK reference board (V2N / V2N-M1).
 - [docs/e1m-pinout.md](docs/e1m-pinout.md): the canonical 52-pad E1M pinout and instance-ID order.

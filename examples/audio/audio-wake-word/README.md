@@ -28,7 +28,7 @@ bursting the convolutions on demand.
 > [`docs/verification-status.md`](../../../docs/verification-status.md)
 > (generated from [`docs/test-plan.md`](../../../docs/test-plan.md)),
 > the SDK's own per-NPU TFLM driver gates
-> (`CONFIG_ALP_TFLM_ETHOS_U85/U65/U55`) are Kconfig-reachable, but no
+> (`CONFIG_ALP_TFLM_ETHOS_U85/U55`) are Kconfig-reachable, but no
 > Vela-compiled model has been dispatched THROUGH this portable
 > backend yet -- only through the vendor-direct examples named above,
 > which bypass it. This example's own MFCC feature extraction and wake-word decode

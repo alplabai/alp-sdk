@@ -102,8 +102,7 @@ typedef enum {
  *
  * `player_present` is vision/pose.h tr_presence_step()'s verdict this tick
  * -- the robust X-of-Y torso rule, never a single box. `track` is the live
- * tracker; `game_lane` is the game's current lane, needed only for the
- * leaving-attract resync below.
+ * tracker, resynced when attract is left (below).
  *
  * While inactive (a run): presence resets idle_ticks; its absence
  * accumulates them, and at TR_ATTRACT_ENTER_TICKS attract starts
@@ -112,15 +111,14 @@ typedef enum {
  *
  * While active: presence counts join_ticks (the join lobby, "STEP INTO
  * VIEW", tr_attract_joining()); absence resets them. At
- * TR_ATTRACT_JOIN_TICKS this resyncs the tracker to `game_lane` -- leaving
+ * TR_ATTRACT_JOIN_TICKS this resyncs the tracker (its arm edges) -- leaving
  * attract into a real run is a discontinuity exactly like leaving pause
  * (mode.c) or a run reset, per tr_track_resync()'s contract in
  * vision/track.h -- clears `active` and returns TR_ATTRACT_LEFT: the
  * caller's cue to tr_game_init() a fresh run and tr_ctl_reset() the control
  * layer. Never latches: every transition clears both counters.
  */
-tr_attract_ev_t
-tr_attract_step(tr_attract_t *a, tr_track_t *track, bool player_present, uint8_t game_lane);
+tr_attract_ev_t tr_attract_step(tr_attract_t *a, tr_track_t *track, bool player_present);
 
 /* Active with a player in the join lobby: the screen asks them to step in. */
 bool tr_attract_joining(const tr_attract_t *a);

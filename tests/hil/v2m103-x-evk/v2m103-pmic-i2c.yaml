@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 on-module PMICs on BRD_I2C (i2c-8): ACT88760 at 0x25 and
+# DA9292 at 0x1E each ACK a 1-byte read (the same bare read
+# examples/v2n/v2n-brd-i2c-bringup uses).  Both addresses are bench-observed
+# on V2M103.  -f because a kernel driver may already own an address.  Read-only:
+# nothing is written to either PMIC.
+
+schema_version: 1
+name: v2m103-pmic-i2c
+description: |
+  ACT88760 (0x25) and DA9292 (0x1E) ACK a 1-byte read on i2c-8.
+
+flash_method: ssh-run
+ssh_command: |-
+  i2ctransfer -f -y 8 r1@0x25 >/dev/null 2>&1 && echo HIL_ACT88760_ACK_0x25
+  i2ctransfer -f -y 8 r1@0x1e >/dev/null 2>&1 && echo HIL_DA9292_ACK_0x1E
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_ACT88760_ACK_0x25"
+    - "HIL_DA9292_ACK_0x1E"

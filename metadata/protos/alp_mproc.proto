@@ -3,7 +3,7 @@
 // alp_mproc.proto -- the wire schema for messages passed through
 // <alp/mproc.h>'s alp_mbox_send + shared-memory pipeline between
 // the two M55 cores on E1M-AEN (M55-HP application core <-> M55-HE
-// real-time core), and between the M33 + A55 cores on E1M-N93.
+// real-time core).
 //
 // Why protobuf?  Self-describing payloads + forward/backward
 // compatibility on a wire that survives independent firmware

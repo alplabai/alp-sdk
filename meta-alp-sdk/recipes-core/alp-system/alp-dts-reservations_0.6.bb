@@ -76,4 +76,4 @@ do_install() {
 
 FILES:${PN} = "${datadir}/alp-sdk/dts/alp-dts-reservations.dtsi"
 
-COMPATIBLE_MACHINE = "(e1m-v2n.*|e1m-v2m.*|e1m-aen.*|e1m-nx9101.*)"
+COMPATIBLE_MACHINE = "(e1m-v2n.*|e1m-v2m.*|e1m-aen.*)"

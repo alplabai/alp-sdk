@@ -2,9 +2,11 @@
 #
 # Runner defaults for E1M-V2M101 (V2N101 silicon + on-module DEEPX
 # DX-M1 NPU) + E1M-X-EVK.  Inherits the portable spec set from
-# tests/hil/_common/.  No SoM-specific specs exist in this dir yet.
-# TODO(#1160): not yet written — v2n-m1-deepx-inference, DEEPX
-# 0.75 V rail.
+# tests/hil/_common/.  No spec lives here: a run must target
+# ../v2m103-x-evk/ explicitly for the v2m103-* and A55 ssh-run set
+# (nothing includes it automatically).  Those specs are bench-observed on
+# V2M103 only; on V2M101 they are UNVERIFIED, and v2m103-chosen-sku and
+# v2m103-eeprom-manifest assert the E1M-V2M103 SKU string, so they fail by design.
 
 schema_version: 1
 board: alp_e1m_v2m101_m33_sm

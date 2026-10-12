@@ -4,8 +4,8 @@ Empirical proof of the alp-sdk's load-bearing customer promise:
 
 > Change `som.sku:` in `board.yaml`, rebuild, ship — **within a SoM family**.
 
-Cross-family portability between E1M (35×35 mm, Alif Ensemble / NXP
-i.MX 93) and E1M-X (45×65 mm, Cortex-A55 + Cortex-M33, Renesas RZ/V2N)
+Cross-family portability between E1M (35×35 mm, Alif Ensemble)
+and E1M-X (45×65 mm, Cortex-A55 + Cortex-M33, Renesas RZ/V2N)
 is intentionally NOT a goal — they are separate product lines with
 different form factors, different power envelopes, different SoCs, and
 a separate `<alp/*_pinout.h>` namespace.  See
@@ -19,8 +19,8 @@ For each (SKU × example) cell:
 
 1. Copy the example's `board.yaml` to a temp working directory.
 2. Set `som.sku:` to the target SKU and adjust `cores.<key>:` to match
-   the SKU's `topology:` block (`m55_hp` for E1M-AEN, `m33` for
-   E1M-NX9101, `m33_sm` for E1M-X V2N/V2M).
+   the SKU's `topology:` block (`m55_hp` for E1M-AEN, `m33_sm` for
+   E1M-X V2N/V2M).
 3. If the original `preset:` does not host the target SoM family, select a
    compatible preset from the example's `supported_boards:` list and remap
    `pins:` through matching `board_alias:` route roles.
@@ -67,9 +67,8 @@ prose and survives regeneration.
 | E1M-AEN701 | `alif:ensemble:e7` | ✅ | ✅ | ✅ | Ethos-U U55 · `partial_hw_config: true` |
 | E1M-AEN801 | `alif:ensemble:e8` | ✅ | ✅ | ✅ | no external DRAM · no external flash · Ethos-U U55+U85 · `partial_hw_config: true` |
 | E1M-AEN803 | `alif:ensemble:e8` | ✅ | ✅ | ✅ | 512 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
-| E1M-NX9101 | `nxp:imx9:imx93` | ❌ | ❌ | ❌ | Ethos-U U65 · `partial_hw_config: true` |
 
-**21 / 24 cells generate cleanly (3 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
+**21 / 21 cells generate cleanly.**
 
 ## E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -126,45 +125,45 @@ reports before a build.
 
 ### E1M family
 
-| Library | Tier | Version | License | E1M-AEN301 | E1M-AEN401 | E1M-AEN501 | E1M-AEN601 | E1M-AEN701 | E1M-AEN801 | E1M-AEN803 | E1M-NX9101 |
-| --- | :---: | --- | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `aws-iot` | B | `202412.00` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `bearssl` | B | `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `gfx-compat` | B | `1a7b16034ec123e92c25e9ec13fb3508e7041a23` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `jsmn` | B | `1.1.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `libwebsockets` | B | `v4.3.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `madgwick-ahrs` | B | `v1.3.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `minimp3` | B | `ea99364f61c14656440e8d77e9c233ccf3124633` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `onnxruntime` | B | `1.28.0` | MIT & Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `ros2` | B | `humble` | Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `tflite-micro` | B | `fcc760af130f3a595b5802cdebcc77461e54f382` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Library | Tier | Version | License | E1M-AEN301 | E1M-AEN401 | E1M-AEN501 | E1M-AEN601 | E1M-AEN701 | E1M-AEN801 | E1M-AEN803 |
+| --- | :---: | --- | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `aws-iot` | B | `202412.00` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `bearssl` | B | `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `gfx-compat` | B | `1a7b16034ec123e92c25e9ec13fb3508e7041a23` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `jsmn` | B | `1.1.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `libwebsockets` | B | `v4.3.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `madgwick-ahrs` | B | `v1.3.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `minimp3` | B | `ea99364f61c14656440e8d77e9c233ccf3124633` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `onnxruntime` | B | `1.28.0` | MIT & Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `ros2` | B | `humble` | Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `tflite-micro` | B | `fcc760af130f3a595b5802cdebcc77461e54f382` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**276 / 280 (library × SKU) cells compatible (4 incompatible, 0 n/a).**
+**241 / 245 (library × SKU) cells compatible (4 incompatible, 0 n/a).**
 
 ### E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -214,8 +213,7 @@ Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (t
 ## Hand-maintained analysis (expected diffs)
 
 The generated tables above prove every ✅ cell *generates* cleanly
-(that's 21 of the 24 E1M cells — NX9101's 3 are ❌ per
-#1025).  The analytical claims below — the cross-SKU shape of the
+(that's all 21 E1M cells).  The analytical claims below — the cross-SKU shape of the
 emitted `alp.conf` and the classification of legitimate diff
 lines — are hand-maintained against the swap-test evidence under
 `build/portability-test/` (gitignored), per the Method's step 4.
@@ -246,20 +244,13 @@ whose `memory:` block resolves non-TBD `dram_mbit`/`flash_mbit` for the
 loader to emit. All five line families are now rows in the Expected
 diffs table below. That set of documented lines is still the
 load-bearing intra-AEN portability proof, and it is a claim about the
-*emitted Kconfig content*, unaffected by the paragraph below. E1M-NX9101
-is currently NOT buildable at all
-(`partial_hw_config: true` — see the generated Notes column — and, as
-of #1025, its only hw_rev, imx93 r1, is `status: tbd`, which the
-hw_rev-buildable gate refuses outright); the diff-family rows below
-describing its Kconfig lines document what its `alp.conf` looks like
-once a real hw_rev lands, not a cell that generates today. The
+*emitted Kconfig content*, unaffected by the paragraph below. The
 U85-carrying SKUs (AEN401 / AEN601 / AEN801, visible as
 `Ethos-U U55+U85` in the Notes column) are the population that
 motivated Gap G-1 below.
 
 **AEN301 / AEN501 / AEN601 / AEN701 were briefly RECORDED here as ❌
-under #1295, for a different reason than NX9101 — not a Kconfig-content
-regression.**
+under #1295 — not a Kconfig-content regression.**
 #1295 populated `debug.jlink_flash_device` for the E3/E5/E6/E7 SoC
 variants (previously only E8's did), which is what promotes an AEN
 Zephyr slice to J-Link Flow D flashing in the first place. Doing so
@@ -296,18 +287,14 @@ Expected diffs (legitimate — driven by silicon / SoM facts):
 | Line family                                       | Differs how                                         |
 | ------------------------------------------------- | --------------------------------------------------- |
 | `CONFIG_ALP_SOC_ALIF_ENSEMBLE_{E3..E8}=y`         | one per silicon variant, not one per AEN SKU -- AEN801 and AEN803 share E8 silicon and both emit `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y` (#2084) |
-| `CONFIG_ALP_SDK_SOC_{NAME,CPUS,NPUS,SRAM_KB}`     | per-silicon-variant identity block; differs across every SoC part (E3..E8, imx93) |
+| `CONFIG_ALP_SDK_SOC_{NAME,CPUS,NPUS,SRAM_KB}`     | per-silicon-variant identity block; differs across every SoC part (E3..E8) |
 | `CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M=y`            | present when `optiga_trust_m` is `assembled: true` -- AEN301/401/501/601/701 default it true; AEN801/AEN803 both carry `assembled: false` (DNP this batch) |
 | `CONFIG_ALP_SDK_SOM_{DRAM,FLASH}_MBIT`            | only on E1M-AEN803 -- the only AEN SKU whose external OSPI0 memories (`hyperram`/`ospi_memories.ospi0`) are `assembled: true`, so the only one whose `memory:` block resolves non-TBD (#2084) |
-| `CONFIG_ALP_SOC_NXP_IMX9_IMX93=y`                 | only on E1M-NX9101                                  |
 | `CONFIG_ALP_SDK_CHIP_CC3501E=y`                   | on all AEN (on-module Wi-Fi/BLE coprocessor)        |
-| `CONFIG_ALP_SDK_CHIP_PCA9451A=y`                  | only on E1M-NX9101 (its on-module PMIC)             |
-| `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y`          | only on E1M-NX9101                                  |
-| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y`          | on every AEN (every E3..E8 carries a U55 pair) + NX9101 fallback (none) |
-| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y`          | only on E1M-NX9101                                  |
+| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y`          | on every AEN (every E3..E8 carries a U55 pair) |
 | `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y`          | AEN401 / AEN601 / AEN801 / AEN803 only (E4 / E6 / E8 silicon; AEN803 shares AEN801's E8 -- measured on `examples/ai/wearable-activity-fall`, m55_hp, #2084) |
 | `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y`          | every AEN m55_hp / m55_he slice (ARMv8.1-M Helium)  |
-| `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y`             | every NX9101 m33 slice (baseline ARMv8-M, no MVE)   |
+| `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y`             | baseline ARMv8-M slices with no MVE (e.g. the V2N M33_SM slice) |
 | `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_NEON=y`            | every cortex-a* slice across all SoMs               |
 | `CONFIG_SPI=y`                                    | auto-enabled on AEN because CC3501E drives an SPI master |
 
@@ -384,12 +371,11 @@ for V2M101 vs V2N101 and V2M102 vs V2N102 are now byte-identical;
 swap-test sweep on both V2M SKUs reports 40 routes including all 8
 IO27..IO35 entries, 0 namespace leaks.
 
-### G-1 — Ethos-U variant (U55 / U65 / U85) is invisible to the build  *(RESOLVED 2026-05-18)*
+### G-1 — Ethos-U variant (U55 / U85) is invisible to the build  *(RESOLVED 2026-05-18)*
 
 Originally: `scripts/alp_orchestrate/` emitted a single
 `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y` regardless of whether the SoM
-carried U55, U65, or U85.  The only variant-specific line was
-`CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y` (hard-coded for i.MX 93).
+carried U55 or U85.
 
 Cross-checked: AEN401/601/801 (U85-carrying per their SoC `npus[]`)
 generated byte-identical `alp.conf` to AEN301/501/701 (U55 only).
@@ -397,12 +383,12 @@ The U85's TensorOptimized kernels and larger MAC array could not be
 selected at compile time from the generated config alone.
 
 **Fix landed:** the orchestrator reads the silicon capability counts
-(`capabilities.ethos_u{55,65,85}_count`, resolved from the SoC JSON
+(`capabilities.ethos_u{55,85}_count`, resolved from the SoC JSON
 `npus[]`) and emits one
-`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}=y`
+`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U85}=y`
 line per variant present.  AEN401/601/801 now emit BOTH `_U55=y` and
 `_U85=y` (the U55 pair alongside the U85); AEN301/501/701 emit only
-`_U55=y`; NX9101 emits `_U65=y`; the existing N93 PHY switch coexists.
+`_U55=y`.
 Matching Kconfig entries live at `zephyr/kconfigs/iot-audio-inference.kconfig`
 § *Per-variant Ethos-U silicon switches*; the TFLM driver source
 (`src/backends/inference/tflm.cpp`) reads the per-variant macros via
@@ -421,8 +407,8 @@ M33).
 can host multiple CPU classes — E7's A32 + M55 mix) and emits exactly
 one `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_{NEON,HELIUM,REF}=y` per slice.
 Verified: M55_HP slices on every AEN SKU emit `_HELIUM=y`; A55 slices
-on V2N101 emit `_NEON=y`; the V2N M33_SM slice + NX9101 M33 slice
-both emit `_REF=y` (baseline ARMv8-M, no DSP / MVE).  Matching Kconfig
+on V2N101 emit `_NEON=y`; the V2N M33_SM slice
+emits `_REF=y` (baseline ARMv8-M, no DSP / MVE).  Matching Kconfig
 entries live at `zephyr/kconfigs/iot-audio-inference.kconfig` § *Per-CPU-class
 TFLM kernel selectors*; the TFLM driver source surfaces the choice via
 `alp_inference_tflm_cpu_kernel_variant()`.
@@ -430,13 +416,13 @@ TFLM kernel selectors*; the TFLM driver source surfaces the choice via
 ### G-4 — `cores.<key>` rename diagnostic for cross-core-class swaps  *(RESOLVED 2026-05-18)*
 
 Originally: customer promise "change `som.sku:`" — reality: a swap
-from E1M-AEN701 to E1M-NX9101 also requires renaming `cores.m55_hp:`
-to `cores.m33:` because `m55_hp` is not a key in NX9101's `topology:`.
-The orchestrator silently dropped the unmatched key.
+to a SKU whose `topology:` lacks the `cores.<key>:` the project uses
+also requires renaming that key.  The orchestrator silently dropped
+the unmatched key.
 
 **Fix landed:** `load_board_yaml` in `scripts/alp_orchestrate/` now
 hard-fails with `OrchestratorError` carrying a "did you mean one of:
-['a55_cluster', 'm33']?" hint when NO `cores:` key intersects the
+['m55_he', 'm55_hp']?" hint when NO `cores:` key intersects the
 preset's `topology:` keys.  Soft-warns on stderr (per dropped key)
 when SOME `cores:` keys match and others don't.  Two new tests
 (`test_unknown_cores_key_raises`, `test_partial_match_warns`) lock
@@ -444,10 +430,10 @@ the contract.
 
 ### G-5 — `CONFIG_SPI=y` auto-enables from SoM-intrinsic chip presence
 
-CC3501E forces `CONFIG_SPI=y` on AEN; NX9101 has no on-module SPI
-device so the line is absent.  An app calling `alp_spi_open()`
+CC3501E forces `CONFIG_SPI=y` on AEN; a SoM with no on-module SPI
+device omits the line.  An app calling `alp_spi_open()`
 without declaring `peripherals: [spi]` in its `board.yaml` builds
-fine on AEN and link-fails on NX9101.
+fine on AEN and link-fails on such a SoM.
 
 **Fix layer:** doc-only.  `docs/portability.md` (cookbook) section
 *Capability validation* explains: `peripherals:` is the

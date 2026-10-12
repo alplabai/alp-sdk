@@ -33,12 +33,12 @@ To run the same fan curve on a different SoM, edit `board.yaml`:
 
 ```yaml
 som:
-  sku: E1M-AEN801      # or E1M-V2M101, E1M-N93xxx, ...
+  sku: E1M-AEN801      # or E1M-V2M101, ...
 ```
 
 The `alp_pwm_open(ALP_E1M_PWM0)` call dispatches to whichever
 peripheral physically drives the pad on the active SoM (Alif GPT on
-AEN, GD32 IO-MCU bridge on V2N, NXP TPU on i.MX 93) -- the
+AEN, GD32 IO-MCU bridge on V2N) -- the
 application never names a specific block.
 
 ## Scoping it

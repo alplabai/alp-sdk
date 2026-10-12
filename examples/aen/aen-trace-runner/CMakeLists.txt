@@ -1,29 +1,47 @@
 cmake_minimum_required(VERSION 3.20)
 
-# The camera is opt-in: -DTR_CAMERA=ON. Default OFF because the board the game
-# runs on, the E1M-AEN803 2026W36-0009 EVK, has the display panel and
-# no camera on J5 -- the only camera rig is on 2026W36-0001. A camera build also costs
-# a 512 KiB video pool at the base of SRAM0 (camera.conf), which is exactly the
-# space the renderer's back buffer needs; without it the game double-buffers
-# in SRAM0 instead of reaching for SRAM1, which is unpowered at boot.
-option(TR_CAMERA "Stack the OV9281 camera shields and the video buffer pool" OFF)
+# The camera is the M55-HP's (hp_vision, TR_INPUT_NPU=ON). The old
+# camera-on-the-HE path (TR_CAMERA) had no keypoints, so none of the arm
+# controls (lane, jump), left the game unwinnable, and cost a 512 KiB video
+# pool at the base of SRAM0, on top of the renderer's back buffer: refused.
+option(TR_CAMERA "Removed: use TR_INPUT_NPU=ON (the HP owns the camera)" OFF)
+if(TR_CAMERA)
+	message(FATAL_ERROR "TR_CAMERA is removed: the HE-side camera and classical detector have no "
+			     "keypoints, so no lane or jump control. Use -DTR_INPUT_NPU=ON with the "
+			     "hp_vision image (README 'Controls').")
+endif()
 
 # NPU body control (docs/superpowers/specs/2026-09-24-npu-body-control-design.md):
 # the HE reads the HP's pose slot (src/ipc/tr_pslot.h) instead of running a
 # local camera + classical detector -- the M55-HP now owns the camera, the
-# Ethos-U NPU and (separately, TR_SND_HP) sound. Exclusive with TR_CAMERA:
-# that option is the OTHER, camera-on-THIS-core path (the TR_RENDER=M55
-# booth fallback / 2026W36-0001 rig), and the two body-detection sources are never
-# both wanted in one image.
+# Ethos-U NPU and (separately, TR_SND_HP) sound.
 option(TR_INPUT_NPU "Read body position from the HP's pose slot instead of a local camera" OFF)
-if(TR_INPUT_NPU AND TR_CAMERA)
-	message(FATAL_ERROR "TR_INPUT_NPU and TR_CAMERA are exclusive -- pick one body-detection source")
-endif()
 if(TR_INPUT_NPU)
-	# The HP now owns I2C1 -- see i2c1_off.overlay's header for why the HE
-	# must stop touching the same controller (its own display shield
-	# enables it too, on the same pads).
-	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/i2c1_off.overlay)
+	# The HP owns I2C1 (the camera SCCB bus, 0x49011000) once the HE has
+	# finished with it: the HE's display shield may configure a bridge over the
+	# same controller at boot (the RVT121's SN65DSI83). The alp,i2c-handover
+	# node hands it over -- the HE releases it at the end of its boot, the HP
+	# (hp_vision) waits for that before it touches the bus -- instead of this
+	# image switching I2C1 off. Any shield, no app code.
+	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/i2c_handover_he.overlay)
+endif()
+
+# The HP's game sound (hp_vision/ built with -DTR_HP_SOUND=ON: camera + NPU + the TAS2563 amps in
+# ONE HP image, docs/2026-09-23-sound.md "Sound with the vision HP"): the HP's amp bring-up needs
+# I2C2 + GPIO5, which this core also uses (INA236 power line, BMI323). With TR_HP_SOUND=ON this
+# image offers I2C2 to the HP once its display is up and takes it back when the HP is done
+# (src/platform/bus2_he.c, src/ipc/tr_bus2.h); the HUD shows "5V -- mW" while it is away. Needs
+# TR_INPUT_NPU (the HP is the vision HP) and a shield that leaves GPIO5 alone (the RVT121).
+option(TR_HP_SOUND "Lease I2C2 to the HP's game sound for its amp bring-up (hp_vision TR_HP_SOUND=ON)" OFF)
+if(TR_HP_SOUND AND NOT TR_INPUT_NPU)
+	message(FATAL_ERROR "TR_HP_SOUND is the vision HP's sound: it needs -DTR_INPUT_NPU=ON")
+endif()
+if(TR_HP_SOUND)
+	# The game sound's volume (src/ipc/tr_vol.h): the EVK's rotary encoder + push switch and the
+	# bench's SWD request word. volume_he.overlay maps the pads, volume_he.conf turns the input
+	# subsystem on.
+	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/volume_he.overlay)
+	list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/volume_he.conf)
 endif()
 
 # Who draws the frame. A32 (default): the Cortex-A32 renderer draws every
@@ -47,11 +65,6 @@ if(TR_INPUT_NPU AND TR_RENDER STREQUAL "M55")
 	message(FATAL_ERROR "TR_INPUT_NPU needs TR_RENDER=A32 -- TR_RENDER=M55 runs CONFIG_DCACHE=y "
 			     "(m55_render.conf) and the pose slot has no cache maintenance")
 endif()
-if(TR_RENDER STREQUAL "A32" AND TR_CAMERA)
-	# The camera pool sits at the base of SRAM0 -- on top of TR_FB_A -- until
-	# plan task T-A8 moves it to SRAM1 0x02480000.
-	message(FATAL_ERROR "TR_CAMERA needs TR_RENDER=M55 until the video pool moves to SRAM1 (plan T-A8)")
-endif()
 if(TR_RENDER STREQUAL "M55")
 	# prj.conf pins CONFIG_DCACHE=n for the A32 link (the M55 must see the
 	# mailbox uncached); the M55 renderer keeps the D-cache it was measured
@@ -68,33 +81,27 @@ if(TR_M55_AUTOLAUNCH AND NOT EXISTS "${TR_A32_LAUNCH_H}")
 	message(FATAL_ERROR "TR_M55_AUTOLAUNCH=ON needs -DTR_A32_LAUNCH_H=<header with TR_A32_ENTRY/LEN/CRC>")
 endif()
 
-list(APPEND SHIELD e1m_evk_rk055hdmipi4ma0)
-# The panel inits from main() with retries (src/platform/panel.c), not at boot.
-list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/panel_deferred.overlay)
-
-# Panel refresh (P11a). 40: the shield's timing. 30: panel_30hz.overlay
-# stretches the vertical front porch (same pixel clock and DSI link) for
-# 33.3 ms of render time a frame, and the game's frame-counted constants
-# scale with it (src/game/panel_hz.h). A32 render only: the M55 renderer
-# runs its own TICK_MS loop.
-set(TR_PANEL_HZ 40 CACHE STRING "Panel refresh, Hz: 40 or 30")
-set_property(CACHE TR_PANEL_HZ PROPERTY STRINGS 40 30)
-if(NOT TR_PANEL_HZ MATCHES "^(40|30)$")
-	message(FATAL_ERROR "TR_PANEL_HZ must be 40 or 30, got '${TR_PANEL_HZ}'")
+# The display is a shield: -DSHIELD=<name> picks it, the RK055 panel by default.
+# Nothing else in this app names a panel -- its timings (refresh), geometry,
+# mount-rotation and backlight all come from the shield's devicetree, through
+# the SDK's display API. A shield whose panel does not scan the game's
+# 720 x 1280 portrait content as-is gets a fit overlay of the same name under
+# shield-fit/ (layer-1 window), applied automatically. A different refresh is an
+# extra overlay (panel_30hz.overlay for the RK055), passed with
+# -DEXTRA_DTC_OVERLAY_FILE=.
+if(NOT SHIELD)
+	set(SHIELD e1m_evk_rk055hdmipi4ma0)
 endif()
-if(TR_PANEL_HZ STREQUAL "30")
-	if(NOT TR_RENDER STREQUAL "A32")
-		message(FATAL_ERROR "TR_PANEL_HZ=30 needs TR_RENDER=A32")
+foreach(shield IN LISTS SHIELD)
+	if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/shield-fit/${shield}.overlay)
+		list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/shield-fit/${shield}.overlay)
 	endif()
-	list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/panel_30hz.overlay)
-endif()
+	# The shield's bridge recovery recipe, only where the HE hands I2C1 to the HP (TR_INPUT_NPU).
+	if(TR_INPUT_NPU AND EXISTS ${CMAKE_CURRENT_LIST_DIR}/shield-fit-npu/${shield}.overlay)
+		list(APPEND EXTRA_DTC_OVERLAY_FILE ${CMAKE_CURRENT_LIST_DIR}/shield-fit-npu/${shield}.overlay)
+	endif()
+endforeach()
 
-if(TR_CAMERA)
-	# Carrier CSI connector + OV9281 sensor -- the shield string
-	# examples/aen/aen-camera-firstlight (PR #2247) verified on the bench.
-	list(APPEND SHIELD e1m_evk_rpi_csi innomaker_cam_ov9281)
-	list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_LIST_DIR}/camera.conf)
-endif()
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(trace_runner LANGUAGES C)
 
@@ -109,13 +116,40 @@ target_sources(app PRIVATE
 	src/game/state.c
 	src/game/step.c
 	src/platform/imu.c
-	src/platform/panel.c
 	src/platform/rail5v_power.c
+	src/vision/arms.c
 	src/vision/pose.c
 	src/vision/track.c
 )
+# Why did the HE restart? A fatal error record + the console tail of the previous boot, kept in the
+# shared SRAM0 page and printed at the next boot (src/ipc/tr_he_fault.h, src/platform/he_fault.c).
+option(TR_HE_FAULT_LOG "Keep the HE's last fatal error and console tail across a restart, print them at boot" ON)
+if(TR_HE_FAULT_LOG)
+	target_sources(app PRIVATE src/platform/he_fault.c src/ipc/tr_he_fault.c)
+endif()
+# After a fatal error the HE asks the Secure Enclave to reset the whole SoC (bounded, direct MHUv2 send,
+# src/platform/he_fault.c) instead of halting; the third quick fatal error in a row still halts
+# (src/ipc/tr_reset_guard.h). OFF: a fatal error halts the HE, as Zephyr's default does. Needs TR_HE_FAULT_LOG.
+option(TR_HE_FAULT_SOC_RESET "HE fatal error -> SE whole-SoC reset (loop-guarded) instead of a halt" ON)
+if(TR_HE_FAULT_LOG)
+	target_compile_definitions(app PRIVATE TR_HE_FAULT_SOC_RESET=$<BOOL:${TR_HE_FAULT_SOC_RESET}>)
+endif()
+# BENCH ONLY: the HE panics on demand once the bench writes tr_fault_inject_t over SWD to
+# TR_MEM_FAULT_INJECT (src/ipc/tr_fault_inject.h). Inert until the magic is written. Default ON for the
+# exhibition build so the SoC-reset loop guard can be tested on the real unit; turn OFF for a
+# customer-facing build.
+option(TR_BENCH_FAULT_INJECT "BENCH ONLY: SWD-armed fatal-error injector (inert until armed)" ON)
+target_compile_definitions(app PRIVATE TR_BENCH_FAULT_INJECT=$<BOOL:${TR_BENCH_FAULT_INJECT}>)
+if(TR_HP_SOUND)
+	target_sources(app PRIVATE src/platform/bus2_he.c src/ipc/tr_bus2.c
+		src/platform/volume_he.c src/ipc/tr_vol.c src/ipc/tr_knob.c)
+	# src/platform/tr_i2c2_rearm.h resets the i2c_dw driver's sync semaphore (struct
+	# i2c_dw_dev_config in drivers/i2c/i2c_dw.h, not a public header).
+	target_include_directories(app PRIVATE ${ZEPHYR_BASE}/drivers/i2c)
+	target_compile_definitions(app PRIVATE TR_HP_SOUND=1)
+endif()
 if(TR_INPUT_NPU)
-	target_sources(app PRIVATE src/ipc/tr_pslot.c)
+	target_sources(app PRIVATE src/ipc/tr_pslot.c src/ipc/tr_cam_view.c)
 	target_compile_definitions(app PRIVATE TR_INPUT_NPU=1)
 	# The camera's mounting rotation (src/vision/cam_rot.h; empty = its
 	# default). The HE only needs 0 vs 90/270 (the upright frame's
@@ -127,6 +161,17 @@ if(TR_INPUT_NPU)
 		endif()
 		target_compile_definitions(app PRIVATE TR_CAM_ROTATE=${TR_CAM_ROTATE})
 	endif()
+	# Whether the HP mirrors the upright view like a selfie (cam_rot.h
+	# TR_CAM_MIRROR; the HP's own option of the same name). The arm controls
+	# need it: with the mirror the arm on the screen's left is the player's
+	# LEFT arm, without it their RIGHT (src/vision/pose.c). Set it exactly as
+	# the HP build -- build-release.sh refuses a pair that disagrees.
+	option(TR_CAM_MIRROR "The HP mirrors the upright camera view like a selfie (match the hp_vision build)" ON)
+	if(TR_CAM_MIRROR)
+		target_compile_definitions(app PRIVATE TR_CAM_MIRROR=1)
+	else()
+		target_compile_definitions(app PRIVATE TR_CAM_MIRROR=0)
+	endif()
 else()
 	target_sources(app PRIVATE src/platform/camera.c src/vision/detect.c)
 	target_compile_definitions(app PRIVATE TR_INPUT_NPU=0)
@@ -137,6 +182,30 @@ endif()
 option(TR_TILT_TAKEOVER "IMU tilt takes over camera-less attract (bench/dev)" OFF)
 if(TR_TILT_TAKEOVER)
 	target_compile_definitions(app PRIVATE TR_TILT_TAKEOVER=1)
+endif()
+# The backlight's ceiling in percent (src/ipc/tr_knob.h): the knob, the bench request word and the boot
+# level never go past it. 80 by default; lower it for a carrier whose 5 V net droops under the
+# backlight (README, "Carrier note: 5 V droop").
+set(TR_BL_MAX_PCT 80 CACHE STRING "Backlight ceiling, percent: a multiple of 5, 10..80")
+if(NOT TR_BL_MAX_PCT MATCHES "^[0-9]+$")
+	message(FATAL_ERROR "TR_BL_MAX_PCT='${TR_BL_MAX_PCT}': a multiple of 5 between 10 and 80")
+endif()
+math(EXPR tr_bl_rem "${TR_BL_MAX_PCT} % 5")
+if(TR_BL_MAX_PCT LESS 10 OR TR_BL_MAX_PCT GREATER 80 OR NOT tr_bl_rem EQUAL 0)
+	message(FATAL_ERROR "TR_BL_MAX_PCT=${TR_BL_MAX_PCT}: a multiple of 5 between 10 and 80")
+endif()
+target_compile_definitions(app PRIVATE TR_BL_MAX_PCT=${TR_BL_MAX_PCT})
+# Optional partner logo beside the ALP LAB mark in the HUD's attract header card (src/hud/hud.c). The header is generated by
+# tools/genlogo.py from the partner's own artwork, which is NOT in this repo: pass its path for a build
+# that carries the logo. Empty (the default) draws nothing and leaves the image unchanged.
+set(TR_PARTNER_LOGO "" CACHE FILEPATH "Generated partner-logo header (tools/genlogo.py); empty = no logo")
+if(TR_PARTNER_LOGO)
+	file(TO_CMAKE_PATH "${TR_PARTNER_LOGO}" TR_PARTNER_LOGO)
+	if(NOT EXISTS "${TR_PARTNER_LOGO}")
+		message(FATAL_ERROR "TR_PARTNER_LOGO=${TR_PARTNER_LOGO} does not exist (tools/genlogo.py makes it)")
+	endif()
+	target_compile_definitions(app PRIVATE TR_PARTNER_LOGO_HEADER="${TR_PARTNER_LOGO}")
+	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${TR_PARTNER_LOGO}")
 endif()
 if(TR_RENDER STREQUAL "A32")
 	target_sources(app PRIVATE
@@ -151,10 +220,10 @@ if(TR_RENDER STREQUAL "A32")
 		src/hud/hud.c
 	)
 	target_compile_definitions(app PRIVATE TR_RENDER_A32=1)
-	# FB B defaults to SRAM1 0x02600000 (src/ipc/tr_mbox.h). Override only to
+	# FB B defaults to SRAM1 0x025EA000 (src/ipc/tr_mbox.h). Override only to
 	# pair with the old stub-table test payloads (payload-echo/-colorbar):
 	# -DTR_FB_B_ADDR=0x02200000u (the shield's lcd_fb).
-	set(TR_FB_B_ADDR "" CACHE STRING "Override TR_FB_B (A32 render only; empty = 0x02600000)")
+	set(TR_FB_B_ADDR "" CACHE STRING "Override TR_FB_B (A32 render only; empty = 0x025EA000)")
 	if(TR_FB_B_ADDR)
 		target_compile_definitions(app PRIVATE TR_FB_B_ADDR=${TR_FB_B_ADDR})
 	endif()
@@ -170,7 +239,6 @@ else()
 	target_compile_definitions(app PRIVATE TR_RENDER_A32=0)
 endif()
 target_include_directories(app PRIVATE src)
-target_compile_definitions(app PRIVATE TR_PANEL_HZ=${TR_PANEL_HZ})
 
 # No fused multiply-add: float code must compute the same bits as the host
 # tests (tests/host/runner.sh passes the same flag; see the plan's section 5).
@@ -184,3 +252,13 @@ target_compile_options(app PRIVATE -ffp-contract=off)
 # driver-side change breaks the BUILD instead of silently corrupting a swap
 # descriptor.  Delete this line when the alp-sdk surface grows a flip op.
 target_include_directories(app PRIVATE ${ZEPHYR_ALP_SDK_MODULE_DIR}/zephyr/drivers/display)
+
+# The HE image is loaded whole into the 256 KiB ITCM: fail the link, not just the packaging, when it
+# does not fit (a partner logo is the usual thing that pushes it over).
+if(TR_RENDER STREQUAL "A32") # the release image; the M55-render build is a different layout
+	add_custom_target(tr_itcm_check ALL
+		COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/itcm_check.py
+			${CMAKE_NM} $<TARGET_FILE:zephyr_final> 262144
+		VERBATIM)
+	add_dependencies(tr_itcm_check zephyr_final)
+endif()

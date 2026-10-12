@@ -16,21 +16,24 @@
  * that documentation alone -- clean-room, same treatment
  * tests/yocto/fakes/dxrt/ already gives dx_rt.
  *
- * Unlike the ORT/DEEPX fakes, this one carries no dxrt_test::-style
- * seam: inference_drpai.cpp's open() resolves the DRP-AI reserved-memory
- * arena via a REAL `::open("/dev/drpai0", ...)` + `::ioctl()` (see the
- * fake linux/drpai.h next to this file) BEFORE it ever touches
- * MeraDrpRuntimeWrapper, and a CI runner has no such device -- that call
- * always fails, so open() never reaches LoadModel()/GetInputInfo() in
- * these tests regardless of what this class does. See
- * inference_drpai_regression.cpp's header comment for what IS covered.
+ * inference_drpai.cpp's open() resolves the DRP-AI arena through
+ * `::open("/dev/drpai0")` + `::ioctl()` BEFORE it touches this class.
+ * The fake linux/drpai.h next to this file intercepts both: by default
+ * the device is absent (ENOENT, as on a CI host); drpai_test::g_device_present
+ * (drpai_test_seam.h) lets a test reach LoadModel()/Run().  The seam also
+ * records LoadModel start addresses and detects overlapping Run() calls.
+ * See inference_drpai_regression.cpp for what is covered.
  */
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <vector>
+
+#include "drpai_test_seam.h"
 
 enum class InOutDataType { FLOAT32, FLOAT16, INT32, INT64, OTHER };
 
@@ -42,8 +45,25 @@ class MeraDrpRuntimeWrapper
 	bool LoadModel(const std::string &model_dir, uint64_t start_address)
 	{
 		(void)model_dir;
-		(void)start_address;
+		if (drpai_test::g_in_flight.load() > 0) {
+			++drpai_test::g_overlap_events;
+		}
+		drpai_test::g_load_starts.push_back(start_address);
+		last_address_ = drpai_test::g_cpu_only ? 0 : start_address + drpai_test::g_model_bytes;
 		return true;
+	}
+
+	~MeraDrpRuntimeWrapper()
+	{
+		if (drpai_test::g_in_flight.load() > 0) {
+			++drpai_test::g_overlap_events;
+		}
+	}
+
+	/* End of the model placed by LoadModel(), like the real wrapper. */
+	uint64_t GetLastAddress()
+	{
+		return last_address_;
 	}
 
 	void SetInput(int idx, const float *data)
@@ -74,7 +94,22 @@ class MeraDrpRuntimeWrapper
 		return std::make_tuple(InOutDataType::FLOAT32, nullptr, static_cast<int64_t>(0));
 	}
 
+	/* Records how many Run()s are in flight at once; the SDK must never
+	 * let that exceed 1 (DRP-AI is one job at a time). */
 	void Run()
 	{
+		const int now  = ++drpai_test::g_in_flight;
+		int       prev = drpai_test::g_max_in_flight.load();
+		while (now > prev && !drpai_test::g_max_in_flight.compare_exchange_weak(prev, now)) {
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		while (drpai_test::g_run_block.load()) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+		++drpai_test::g_runs;
+		--drpai_test::g_in_flight;
 	}
+
+  private:
+	uint64_t last_address_ = 0;
 };

@@ -268,10 +268,10 @@ def _sku_family_slug(sku: str) -> str:
     """AEN/V2N/V2M -- see alp_project_loader._sku_family (kept independent
     here so this module has no import-cycle risk on alp_project_loader's
     fuller SKU-family table; the two must agree, pinned by the test)."""
-    m = re.match(r"^E1M-(AEN|V2N|V2M|NX9)", sku)
+    m = re.match(r"^E1M-(AEN|V2N|V2M)", sku)
     if not m:
         raise ZephyrBoardEmitError(f"unrecognised SoM SKU pattern: {sku!r}")
-    return {"AEN": "aen", "V2N": "v2n", "V2M": "v2n-m1", "NX9": "imx93"}[m.group(1)]
+    return {"AEN": "aen", "V2N": "v2n", "V2M": "v2n-m1"}[m.group(1)]
 
 
 # ---------------------------------------------------------------------
@@ -344,12 +344,13 @@ def _twister_yaml(
 
     # Non-AEN families: no on-die MRAM/TCM concept surfaced here (the A55
     # cluster boots Linux from eMMC/xSPI; the M33 board file has no
-    # zephyr,flash of its own), so no ram:/flash:.  supported: reflects
-    # the on-module supervisor-MCU bridge (SPI + I2C + a GPIO chip-select)
-    # plus the always-declared (possibly disabled) console UART -- the
-    # shape shared by every current V2N-family SoM (same PCB, same GD32
-    # bridge; see the porting-a-new-som "same-PCB families" rule).
-    supported = ["gpio", "i2c", "spi", "uart"] if has_supervisor_mcu else ["uart"]
+    # zephyr,flash of its own), so no ram:/flash:.  supported: lists only
+    # what the board dts leaves `status = "okay"` (audit CM33-14): the GD32
+    # bridge's SCI7 Simple-SPI plus its GPIO chip-select port.  RIIC8
+    # (A55/Linux-exclusive) and the sci0 console UART are disabled, so
+    # i2c/uart are not advertised.  Same PCB, same GD32 bridge on every
+    # current V2N-family SoM (porting-a-new-som "same-PCB families" rule).
+    supported = ["gpio", "spi"] if has_supervisor_mcu else []
     lines = [
         f"identifier: {identifier}",
         f"name: {twister_name}",
@@ -358,7 +359,7 @@ def _twister_yaml(
         "toolchain:",
         "  - zephyr",
         "  - gnuarmemb",
-        "supported:",
+        "supported:" if supported else "supported: []",
     ]
     lines += [f"  - {p}" for p in supported]
     lines.append("vendor: alp")
@@ -1824,6 +1825,8 @@ def _aen_dts(
     metadata_root: Path, links: dict[str, Any],
     ethos_u: tuple[str, str] | None = None,
     memory_map: "list[dict[str, Any]] | None" = None,
+    power_domains: "dict[str, Any] | None" = None,
+    wired_pads: "list[dict[str, Any]] | None" = None,
 ) -> str:
     role = core_id.split("_")[-1]                     # "hp" / "he"
     role_u = role.upper()
@@ -2126,6 +2129,8 @@ def _aen_dts(
     ]
     lines += _aen_brd_i2c_dts(links, part)
     lines += _aen_e1m_i2c0_dts(links)
+    if power_domains:
+        lines += _aen_som_power_dts(sku_preset, power_domains, links, wired_pads or [])
 
     if ethos_u is not None:
         _accel, node = ethos_u
@@ -2148,6 +2153,237 @@ def _aen_dts(
             "",
         ]
     return "\n".join(lines)
+
+
+def _load_aen_power_domains(metadata_root: Path) -> dict[str, Any]:
+    """Load + shape-check `power_domains:` of
+    `metadata/e1m_modules/aen/on-module-links.yaml` (v2, alp-sdk#2784).
+
+    The JSON schema (`on-module-links-v2.schema.json`) pins the shape in
+    `validate_metadata.py`; this refuses only what the emitter itself cannot
+    work without, so a hand-made `--metadata-root` copy fails loudly instead
+    of emitting a board with no SoM power node.
+    """
+    path = metadata_root / "e1m_modules" / "aen" / "on-module-links.yaml"
+    doc = _load_yaml(path)
+    if doc.get("schemaVersion") != "on-module-links-v2":
+        raise ZephyrBoardEmitError(
+            f"{path} schemaVersion is {doc.get('schemaVersion')!r}, expected "
+            "'on-module-links-v2' (the `power_domains:` block, alp-sdk#2784)")
+    domains = doc.get("power_domains")
+    if not isinstance(domains, dict) or not domains:
+        raise ZephyrBoardEmitError(f"{path} has no power_domains: block")
+    return domains
+
+
+def _load_aen_wired_lpgpio_pads(metadata_root: Path) -> list[dict[str, Any]]:
+    """`wired_lpgpio_pads:` of on-module-links.yaml: LPGPIO pads the module wires
+    to an on-module chip without a power-domain control (the OSPI INTn / RESETn
+    nets).  `check_som_power_domains.py` pins each to its TSV row."""
+    doc = _load_yaml(metadata_root / "e1m_modules" / "aen" / "on-module-links.yaml")
+    pads = doc.get("wired_lpgpio_pads") or []
+    for p in pads:
+        if not re.fullmatch(r"P15_[0-7]", str(p.get("silicon_pad", ""))):
+            raise ZephyrBoardEmitError(
+                f"wired_lpgpio_pads entry {p.get('signal')!r}: silicon_pad "
+                f"{p.get('silicon_pad')!r} is not an LPGPIO pad P15_0..P15_7")
+    return pads
+
+
+def _aen_power_domain_presence(
+        domain: dict[str, Any], on_module: dict[str, Any],
+) -> "tuple[str, str | None] | None":
+    """`(state, chip)` for a power domain on THIS SoM preset, or `None` when
+    the domain is absent.  `state` is `"populated"` or `"optional"`.
+
+    Presence is never assumed from the family: it is read from the SKU's own
+    `on_module` block (`presence.on_module_key`, a dotted path).  A string
+    value (`wifi_ble: cc3501e`) is present unless it is a TBD placeholder; a
+    block with the tri-state `assembled:` follows that field via
+    `_aen_ospi_device_state()` (false -> absent, "optional" -> BOM variant).
+    `presence.family_invariant` is for the one domain no SKU preset describes.
+    """
+    presence = domain["presence"]
+    if presence.get("family_invariant"):
+        return "populated", domain.get("chip")
+    node: Any = on_module
+    for part in presence["on_module_key"].split("."):
+        node = node.get(part) if isinstance(node, dict) else None
+    if node is None:
+        return None
+    if isinstance(node, dict):
+        state, chip = _aen_ospi_device_state(node)
+        if state == "not_populated":
+            return None
+        return state, chip or domain.get("chip")
+    if not node or is_tbd(node):
+        return None
+    return "populated", str(node)
+
+
+#: `alp,stop-hold` strength order: the weakest control decides.
+_AEN_STOP_HOLD_RANK = {"no": 0, "unproven": 1, "yes": 2}
+
+#: Control role -> the DT gpio property name `alp,som-power-domain` uses.
+_AEN_POWER_ROLE_PROP = {
+    "reset": "reset-gpios",
+    "rail_enable": "enable-gpios",
+    "powerdown": "powerdown-gpios",
+    "enable": "enable-gpios",
+    "wake_in": "wake-gpios",
+}
+
+
+def _aen_som_power_dts(
+        sku_preset: dict[str, Any], domains: dict[str, Any],
+        links: dict[str, Any], wired_pads: list[dict[str, Any]],
+) -> list[str]:
+    """The `alp,som-power` node: one `alp,som-power-domain` child per domain
+    this SKU actually carries (alp-sdk#2784, metadata-only -- nothing in the
+    SDK drives these pads yet).
+
+    Pad, polarity and action facts come from `power_domains:` in
+    on-module-links.yaml; whether the domain exists on this SKU comes from the
+    SKU's own `on_module:` block (`_aen_power_domain_presence()`).
+    """
+    on_module = sku_preset.get("on_module") or {}
+    device_labels = {
+        d["node_label"]
+        for d in (links["brd_i2c"].get("devices") or []) if d.get("node_label")}
+    children: list[str] = []
+    for name, dom in domains.items():
+        found = _aen_power_domain_presence(dom, on_module)
+        if found is None:
+            continue
+        state, chip = found
+        label = dom.get("device_label")
+        if label and label not in device_labels:
+            raise ZephyrBoardEmitError(
+                f"power_domains.{name}.device_label {label!r} is not a "
+                "node_label under on_module_links.brd_i2c.devices")
+        action = dom["default_action"]
+        actions = dom["actions"]
+        if action not in actions:
+            raise ZephyrBoardEmitError(
+                f"power_domains.{name}.default_action {action!r} is not in "
+                "its actions:")
+        by_signal = {c["signal"]: c for c in dom["controls"]}
+        # The hold level that matters is the default action's own pad; a
+        # command-only action falls back to the domain's pads (weakest wins).
+        ctl = by_signal.get(actions[action].get("control", ""))
+        held = ([ctl] if ctl else
+                [c for c in dom["controls"] if c["direction"] == "out"])
+        stop_hold = (min((c["holds_through_stop"] for c in held),
+                         key=_AEN_STOP_HOLD_RANK.__getitem__)
+                     if held else "none")
+        node = name.replace("_", "-")
+        child = [""]
+        child += _c_comment(dom["evidence"], "\t\t")
+        child += [f"\t\tsom_pd_{name}: {node} {{",
+                  '\t\t\tcompatible = "alp,som-power-domain";',
+                  f'\t\t\talp,role = "{name}";']
+        seen_props: set[str] = set()
+        for c in dom["controls"]:
+            prop = _AEN_POWER_ROLE_PROP[c["role"]]
+            if prop in seen_props:
+                raise ZephyrBoardEmitError(
+                    f"power_domains.{name}: two controls map to {prop}")
+            seen_props.add(prop)
+            flag = ("GPIO_ACTIVE_LOW" if c["polarity"] == "active_low"
+                    else "GPIO_ACTIVE_HIGH")
+            child.append(
+                f"\t\t\t{prop} = <&{c['gpio_node']} {c['gpio_pin']} {flag}>;"
+                f" /* {c['signal']} {c['silicon_pad']} */")
+        if dom.get("secondary_rtc"):
+            child.append("\t\t\talp,primary-rtc;")
+        if label:
+            child.append(f"\t\t\talp,device = <&{label}>;")
+        if chip:
+            child.append(f'\t\t\talp,chip = "{chip}";')
+        child += [
+            f'\t\t\talp,default-action = "{action}";',
+            "\t\t\talp,default-modes = "
+            + ", ".join(f'"{m}"' for m in dom["default_modes"]) + ";",
+            f'\t\t\talp,stop-hold = "{stop_hold}";',
+            f'\t\t\talp,restore = "{dom["restore"]["method"]}";']
+        if actions.get("rail_off", {}).get("opt_in"):
+            child.append("\t\t\talp,rail-off-opt-in;")
+        if state == "optional":
+            child.append("\t\t\talp,bom-optional;")
+        deps = sorted({d["kind"] for d in dom.get("dependents") or []})
+        if deps:
+            child.append("\t\t\talp,dependents = "
+                         + ", ".join(f'"{d}"' for d in deps) + ";")
+        child.append("\t\t};")
+        children += child
+
+    # Every output control pad the layer drives, muxed and pad-configured by the
+    # `alp,som-power` node's own pinctrl-0 state.  Pad config is input-enable +
+    # schmitt (0x23 with the default 4 mA drive on the LP pads: the value the
+    # bench-proven CC3501E bring-up writes by hand) so the output driver is on
+    # and the pad can be read back.  Port 15 is the LPGPIO island.  The group sets
+    # mux / pad configuration only, never direction or level (those are GPIO-port
+    # state), so applying it to a pad whose domain is KEEP_ALIVE changes nothing.
+    pads: list[tuple[int, int]] = []
+    for name, dom in domains.items():
+        if _aen_power_domain_presence(dom, on_module) is None:
+            continue
+        for c in dom["controls"]:
+            m = re.fullmatch(r"P(\d+)_(\d)", c["silicon_pad"])
+            if c["direction"] != "out" or m is None:
+                continue
+            pad = (int(m.group(1)), int(m.group(2)))
+            if pad not in pads:
+                pads.append(pad)
+    pads.sort()
+    pinmux = ", ".join(
+        f"<PIN_P{port}_{pin}__{'LPGPIO' if port == 15 else 'GPIO'}>"
+        for port, pin in pads)
+
+    # LPGPIO pads the module wires without a domain control, so a wake-pad
+    # claim is per board (src/backends/power/som_power.c reads this property).
+    wired_line = []
+    if wired_pads:
+        cells = " ".join(str(int(p["silicon_pad"][4:])) for p in wired_pads)
+        wired_line = [
+            "\t\t/* SoM-wired LPGPIO pads without a domain node (alif-ospi.tsv):",
+            "\t\t * " + ", ".join(f"{p['signal']} {p['silicon_pad']}" for p in wired_pads) + ".",
+            "\t\t * Never an application wake pad. */",
+            f"\t\talp,wired-lpgpio-pads = <{cells}>;"]
+
+    lines = [
+        "/*",
+        " * SoM power domains (alp-sdk#2784): which on-module chips this SKU carries,",
+        " * the SoC pads that gate them, and the default quiesce action per domain.",
+        " * Presence follows this SKU's `on_module` block; pads, polarity and actions",
+        " * come from `power_domains:` in metadata/e1m_modules/aen/on-module-links.yaml.",
+        " * The SoM power layer (src/backends/power/som_power.c) reads this node and",
+        " * applies its pinctrl-0 state before it first drives a pad.  `alp,stop-hold` is",
+        " * \"unproven\" for every LPGPIO (P15_n) pad until the STOP bench shows the output",
+        " * holds.",
+        " */",
+        "&pinctrl {",
+        "\tpinctrl_som_power: pinctrl_som_power {",
+        "\t\tgroup0 {",
+        f"\t\t\tpinmux = {pinmux};",
+        "\t\t\tinput-enable;",
+        "\t\t\tinput-schmitt-enable;",
+        "\t\t};",
+        "\t};",
+        "};",
+        "",
+        "/ {",
+        "\tsom_power: som-power {",
+        '\t\tcompatible = "alp,som-power";',
+        "\t\tpinctrl-0 = <&pinctrl_som_power>;",
+        '\t\tpinctrl-names = "default";',
+        *wired_line,
+        *children,
+        "\t};",
+        "};",
+        "",
+    ]
+    return lines
 
 
 # ---------------------------------------------------------------------
@@ -2246,7 +2482,78 @@ def _v2n_spi_pfc_mnemonic(row: dict[str, Any], channel: str) -> str:
     return f"{_V2N_SPI_ROLE_MNEMONIC[role]}{channel}"
 
 
-def _v2n_pinctrl_dtsi(links: dict[str, Any]) -> str:
+def _v2n_assignable_m33(
+    metadata_root: Path, soc_spec: dict[str, Any],
+) -> list[tuple[str, dict[str, Any], list[tuple[dict[str, Any], tuple[str, int, int]]]]]:
+    """(instance, entry, [(row, (port, pin, func))]) for every `assignable:`
+    instance of core-ownership.yaml that carries an `m33:` devicetree block --
+    the peripherals the CM33 board tree declares `disabled`, left for a
+    project's `--emit dts-overlay` / `zephyr-conf` to enable (board.yaml
+    `ownership:`).  The PFC function codes are the SoC JSON's
+    `linux_dt[soc_instance].pinmux` -- one silicon-fact source for both cores."""
+    from alp_orchestrate.ownership import instance_pfc
+    path = metadata_root / "e1m_modules" / "v2n" / "core-ownership.yaml"
+    if not path.is_file():
+        return []
+    out = []
+    for inst, e in sorted((_load_yaml(path).get("assignable") or {}).items()):
+        if "m33" not in e:
+            continue
+        rows = instance_pfc(soc_spec, e)
+        for r, pfc in rows:
+            if pfc is None:
+                raise ZephyrBoardEmitError(
+                    f"core-ownership.yaml assignable.{inst} has an m33: block but the SoC "
+                    f"linux_dt.{e.get('soc_instance')}.pinmux has no function code for "
+                    f"{r['peripheral']}")
+        out.append((inst, e, rows))
+    return out
+
+
+def _v2n_assignable_pinctrl(assignable: list) -> str:
+    """`&pinctrl { ... };` groups for the assignable instances (empty when
+    none).  Pins are the rows' own pfc_* triples -- no literals here."""
+    out = ""
+    for inst, e, rows in assignable:
+        pc = e["m33"]["pinctrl"]
+        pins = "".join(
+            ("\t\t\tpinmux = " if i == 0 else "\t\t\t\t ")
+            + f"<RZV_PINMUX({port}, {pin}, {func})>{';' if i == len(rows) - 1 else ','} "
+            f"/* {r['peripheral']} {r['pad']} */\n"
+            for i, (r, (port, pin, func)) in enumerate(rows))
+        out += (
+            "\n&pinctrl {\n"
+            f"\t/* {inst}: pad group for the CM33 when a project assigns it (board.yaml\n"
+            "\t * `ownership:`); unreferenced while the node stays disabled. */\n"
+            f"\t{pc['group_label']}: {pc['node']} {{\n"
+            f"\t\t{pc['child_node']} {{\n"
+            f"{pins}"
+            "\t\t};\n\t};\n};\n")
+    return out
+
+
+def _v2n_assignable_dts(assignable: list) -> list[str]:
+    """Board-dts lines declaring each assignable node `disabled` with its
+    pinctrl group; the owning project's overlay flips it to `okay`."""
+    lines: list[str] = []
+    for inst, e, _rows in assignable:
+        m = e["m33"]
+        lines += [
+            "/*",
+            f" * {inst} (assignable, metadata/e1m_modules/v2n/core-ownership.yaml): disabled on",
+            " * the board; a project that assigns it to m33 enables it in its own overlay.",
+            " */",
+            f"&{m['dt_label']} {{",
+            f"\tpinctrl-0 = <&{m['pinctrl']['group_label']}>;",
+            '\tpinctrl-names = "default";',
+            '\tstatus = "disabled";',
+            "};",
+            "",
+        ]
+    return lines
+
+
+def _v2n_pinctrl_dtsi(links: dict[str, Any], assignable: list = ()) -> str:
     """`<board>-pinctrl.dtsi` for a V2N/V2M `m33_sm` board.
 
     Prose (the GD32 SPI block comment, the console/BRD_I2C one-liners)
@@ -2293,6 +2600,11 @@ def _v2n_pinctrl_dtsi(links: dict[str, Any]) -> str:
         f"\t\t{console['pinctrl_child_node']} {{\n"
         f"\t\t\tpinmux = <{_rzv_pinmux(txd0)}>, /* TXD */\n"
         f"\t\t\t\t <{_rzv_pinmux(rxd0)}>; /* RXD */\n"
+        "\t\t\t/* RXD resets Hi-Z with no pull: a floating RXD0 raises sci0 eri.\n"
+        "\t\t\t * Renesas' own RSCI UART pin groups always carry bias-pull-up\n"
+        "\t\t\t * (audit CM33-01/IO-01/CM33-M3).  Whole group; a pull-up on TXD is\n"
+        "\t\t\t * harmless. */\n"
+        "\t\t\tbias-pull-up;\n"
         "\t\t};\n"
         "\t};\n"
         "\n"
@@ -2325,7 +2637,7 @@ def _v2n_pinctrl_dtsi(links: dict[str, Any]) -> str:
         "\t\t};\n"
         "\t};\n"
         "};\n"
-    )
+    ) + _v2n_assignable_pinctrl(assignable)
 
 
 def _v2n_part_display(order_code: str) -> tuple[str, str]:
@@ -2346,24 +2658,6 @@ def _v2n_part_display(order_code: str) -> tuple[str, str]:
     base, variant_code, _pkg = m.groups()
     return f"{base}-{variant_code}", f"arm/renesas/rz/rzv/{base.lower()}.dtsi"
 
-
-_V2N_WDT0_MID_OPENAMP: tuple[str, ...] = (
-    ' * hand-author one from (unlike mbox1 below, which had a real FSP',
-    ' * register map, bsp_mhu_b.h, to draw from).  Full analysis:',
-)
-
-_V2N_WDT0_MID_PLAIN: tuple[str, ...] = (
-    " * hand-author one from (contrast the V2N101 sibling board's mbox1",
-    ' * node, which had a real FSP register map, bsp_mhu_b.h, to draw',
-    ' * from).  Full analysis:',
-)
-
-_V2N_WDT0_TAIL: tuple[str, ...] = (
-    " * meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi's",
-    ' * &wdt1 comment block.  <alp/wdt.h> on this core returns',
-    ' * ALP_ERR_NOT_PRESENT_ON_THIS_SOC (src/wdt_dispatch.c).',
-    ' */',
-)
 
 _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '',
@@ -2517,62 +2811,67 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
     '',
     '\t\t/* Whole OpenAMP region as one reservation to save MPU entries',
     "\t\t * (matches the vendor sample's rationale). */",
-    '\t\topenamp_shm: memory@9f700000 {',
+    '\t\topenamp_shm: memory@@carveout.hex@ {',
     '\t\t\tcompatible = "zephyr,memory-region";',
-    '\t\t\treg = <0x9f700000 0x900000>;',
+    '\t\t\treg = <@carveout.addr@ @carveout.size@>;',
     '\t\t\tzephyr,memory-region = "openamp_memory";',
     '\t\t\tzephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_IO)>;',
     '\t\t};',
     '\t};',
     '',
+    '\t/* CM33-NS view minus A55 view of the OpenAMP reservation (from metadata) */',
+    '\tzephyr,user {',
+    '\t\talp,cm33-ns-to-a55-offset = <@carveout.offset@>;',
+    '\t};',
+    '',
     '\tchosen {',
     '\t\t/* The A55 master (DRIVER role) allocates every rpmsg buffer from',
-    '\t\t * vring_shm1 (0x4fc00000 A55 / 0x9fc00000 CM33-NS) -- the',
+    '\t\t * vring_shm1 (@vring-shm1.a55@ A55 / @vring-shm1.addr@ CM33-NS) -- the',
     '\t\t * "mst-alloc = vring-shm1" contract in the backend REFERENCE.  The',
     "\t\t * M33's descriptor-translation window MUST cover that pool, so it",
     '\t\t * points at vring_shm1, not vring_shm0 (whose window ends exactly at',
-    '\t\t * 0x9fc00000, leaving every buffer outside it).  Silicon-root-caused',
+    '\t\t * @vring-shm0.end@, leaving every buffer outside it).  Silicon-root-caused',
     '\t\t * alongside the vring-DA fix (#683/#697 bench, 2026-07-11). */',
     '\t\tzephyr,ipc_shm = &vring_shm1;',
     '\t\tzephyr,ipc = &mbox_consumer;',
     '\t};',
     '',
-    '\trsctbl: memory@9f700000 {',
+    '\trsctbl: memory@@rsctbl.hex@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <0x9f700000 0x1000>;',
+    '\t\treg = <@rsctbl.addr@ @rsctbl.size@>;',
     '\t};',
     '',
     "\t/* Widened from the RZ/V2L layout's 8-byte mhu1_shm (@ +0x1008) to a",
     '\t * full 4 KiB region immediately after rsctbl, so it lines up with the',
-    "\t * A55/kernel-overlay side's 4f701000.mhu-shm node 1:1 (alp-sdk #683",
+    "\t * A55/kernel-overlay side's @mhu-shm.a55hex@.mhu-shm node 1:1 (alp-sdk #683",
     '\t * address fix). */',
-    '\tmhu1_shm: memory@9f701000 {',
+    '\tmhu1_shm: memory@@mhu-shm.hex@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <0x9f701000 0x1000>;',
+    '\t\treg = <@mhu-shm.addr@ @mhu-shm.size@>;',
     '\t};',
     '',
-    '\tvring_ctrl0: memory@9f800000 {',
+    '\tvring_ctrl0: memory@@vring-ctl0.hex@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <0x9f800000 0x50000>;',
+    '\t\treg = <@vring-ctl0.addr@ @vring-ctl0.size@>;',
     '\t};',
     '',
-    '\tvring_ctrl1: memory@9f850000 {',
+    '\tvring_ctrl1: memory@@vring-ctl1.hex@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <0x9f850000 0x50000>;',
+    '\t\treg = <@vring-ctl1.addr@ @vring-ctl1.size@>;',
     '\t};',
     '',
-    '\tvring_shm0: memory@9f900000 {',
+    '\tvring_shm0: memory@@vring-shm0.hex@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <0x9f900000 0x300000>;',
+    '\t\treg = <@vring-shm0.addr@ @vring-shm0.size@>;',
     '\t};',
     '',
     '\t/* The rpmsg buffer pool: the A55 master allocates from here, so this is',
     "\t * the M33's zephyr,ipc_shm window (see the chosen node above).",
     '\t * vring_shm0 is kept reserved so the region layout still matches the A55',
     "\t * kernel overlay's 6 nodes 1:1. */",
-    '\tvring_shm1: memory@9fc00000 {',
+    '\tvring_shm1: memory@@vring-shm1.hex@ {',
     '\t\tcompatible = "mmio-sram";',
-    '\t\treg = <0x9fc00000 0x300000>;',
+    '\t\treg = <@vring-shm1.addr@ @vring-shm1.size@>;',
     '\t};',
     '',
     '\tmbox_consumer: mbox-consumer {',
@@ -2601,9 +2900,52 @@ _V2N_OPENAMP_TAIL: tuple[str, ...] = (
 )
 
 
+def _openamp_subst(tail: tuple[str, ...], soc_spec: dict[str, Any]) -> list[str]:
+    """Fill the OpenAMP window tokens from the SoC's `openamp_carveout`
+    (metadata/socs/**.json; the one declaration the Linux DT, the backend
+    header and scripts/check_amp_window.py also read).  Tokens:
+    `@carveout.{addr,hex,size}@` for the whole reservation and, per name in
+    `regions`, `@<name>.{addr,hex,size,end,a55,a55hex}@` -- addr/hex/end in
+    the CM33-NS view, a55/a55hex in the A55 view."""
+    c = soc_spec["openamp_carveout"]
+    base, a55 = c["cm33_ns_base"], c["a55_base"]
+    tok = {
+        "@carveout.addr@": f"{base:#x}",
+        "@carveout.hex@": f"{base:x}",
+        "@carveout.size@": f"{c['size']:#x}",
+        "@carveout.offset@": f"{base - a55:#x}",
+    }
+    for name, r in c["regions"].items():
+        off, size = r["offset"], r["size"]
+        tok.update({
+            f"@{name}.addr@": f"{base + off:#x}",
+            f"@{name}.hex@": f"{base + off:x}",
+            f"@{name}.size@": f"{size:#x}",
+            f"@{name}.end@": f"{base + off + size:#x}",
+            f"@{name}.a55@": f"{a55 + off:#x}",
+            f"@{name}.a55hex@": f"{a55 + off:x}",
+        })
+    out = []
+    for line in tail:
+        for k, v in tok.items():
+            line = line.replace(k, v)
+        out.append(line)
+    return out
+
+
+def _ram_console(soc_spec: dict[str, Any]) -> tuple[int, int, int]:
+    """(A55 address, CM33-NS address, size) of the CM33 RAM console, from the
+    SoC's `openamp_carveout.ram_console` (the one declaration; the dts node,
+    CONFIG_RAM_CONSOLE_BUFFER_SIZE and scripts/gen_amp_window.py all read it)."""
+    c = soc_spec["openamp_carveout"]
+    off = c["ram_console"]["offset"]
+    return c["a55_base"] + off, c["cm33_ns_base"] + off, c["ram_console"]["size"]
+
+
 def _v2n_dts(
     sku: str, dir_name: str, soc_spec: dict[str, Any], variant: dict[str, Any],
     sku_preset: dict[str, Any], links: dict[str, Any],
+    assignable: list = (),
 ) -> str:
     """Board `.dts` for a V2N/V2M `m33_sm` board (#655 slice 2).
 
@@ -2634,6 +2976,13 @@ def _v2n_dts(
     console = links["console"]
     gd32_spi = links["gd32_spi"]
     brd_i2c = links["brd_i2c"]
+    wdt = _find_core(soc_spec, "m33_sm").get("watchdog") or {}
+    if not wdt:
+        raise ZephyrBoardEmitError(
+            f"SoC spec {soc_spec.get('ref')} core m33_sm declares no `watchdog` "
+            "block (base/size/counting_clock_hz) -- the V2N/V2M board emits the "
+            "CM33 watchdog node and the alp-wdt0 alias from it")
+    wdt_base = wdt["base"]
     txd0 = _pin_by_peripheral(console["pins"], "UART0_TXD0")
     rxd0 = _pin_by_peripheral(console["pins"], "UART0_RXD0")
     mosi = _pin_by_peripheral(gd32_spi["pins"], "GD32_SPI.MOSI")
@@ -2642,11 +2991,14 @@ def _v2n_dts(
     sda = _pin_by_peripheral(brd_i2c["pins"], "RIIC8_SDA8")
     scl = _pin_by_peripheral(brd_i2c["pins"], "RIIC8_SCL8")
     cs0 = gd32_spi["gpio_chip_select"]
+    pads = links.get("gd32_pads")  # optional: GD32 SWD + ATTN pads (alp,gd32-pads)
     peer_addr = brd_i2c["peer_address_7bit"]
     ch = _v2n_sci_channel(gd32_spi["dt_label"])  # "7"
 
     has_openamp = bool(
         (sku_preset.get("topology") or {}).get("m33_sm", {}).get("openamp_ipc"))
+    rc_a55, rc_addr, rc_size = _ram_console(soc_spec)
+    win_base, win_size = soc_spec["openamp_carveout"]["cm33_ns_base"], soc_spec["openamp_carveout"]["size"]
 
     lines: list[str] = [
         "/*",
@@ -2686,6 +3038,7 @@ def _v2n_dts(
         "",
         "\tchosen {",
         "\t\tzephyr,sram = &sram;",
+        "\t\tzephyr,ram-console = &ram_console;",
         "\t\t/*",
         "\t\t * No CM33 serial console on this board.  The only console is the",
         "\t\t * A55's (Linux, on the shared debug UART); sci0 here is the EVK",
@@ -2693,13 +3046,15 @@ def _v2n_dts(
         "\t\t * Bringing it up enables RX on a floating RXD, whose receive-error",
         "\t\t * interrupt (sci0 eri = NVIC 114) escalates to a Zephyr fatal",
         "\t\t * (arch_system_halt) and hangs the CM33 before main() ever runs.",
-        "\t\t * Leave the console unset (sci0 is disabled below).  Re-add these",
-        "\t\t * and re-enable sci0 only when a Pmod USB-UART is attached.",
+        "\t\t * Leave the UART console unset (sci0 is disabled below); only the",
+        "\t\t * RAM console is chosen.  Re-add zephyr,console/zephyr,shell-uart and",
+        "\t\t * re-enable sci0 only when a Pmod USB-UART is attached.",
         "\t\t */",
         "\t};",
         "",
         "\taliases {",
         f"\t\t{gd32_spi['alias']} = &gd32_spi;",
+        "\t\talp-wdt0 = &wdt0;",
         "\t};",
         "",
         "\tsram: memory@8003000 {",
@@ -2708,15 +3063,62 @@ def _v2n_dts(
         "\t};",
         "",
         "\t/*",
+        f"\t * RAM console buffer (audit CM33-M2): {rc_size // 1024} KiB at CM33-NS {rc_addr:#x} (A55",
+        f"\t * view {rc_a55:#x}), from the SoC's openamp_carveout.ram_console: inside the",
+        f"\t * {win_size // 1048576} MiB {win_base:#x} window Linux reserves no-map and clear of every",
+        "\t * region listed there (rsctbl with the liveness beacon in its top 16",
+        "\t * bytes, mhu-shm, the vring control and buffer areas).",
+        "\t */",
+        f"\tram_console: memory@{rc_addr:x} {{",
+        '\t\tcompatible = "zephyr,memory-region";',
+        '\t\tzephyr,memory-region = "RAM_CONSOLE";',
+        f"\t\treg = <{rc_addr:#x} {rc_size:#x}>;",
+        "\t};",
+        "",
+        "\t/*",
         "\t * alp pin map for alp_spi/alp_gpio id resolution.  alp_spi_open(cs_pin_id=N)",
         "\t * resolves its chip-select gpio_dt_spec from gpios[N] of this node (see the",
         "\t * SPI backend's alp_z_gpio_resolve()).  Index 0 = the GD32 SPI chip-select",
         f"\t * on {cs0['silicon_pad']}, matching the example's cs_pin_id = 0.",
+    ]
+    lines += [
         "\t */",
         "\talp_pins: alp-pins {",
         '\t\tcompatible = "alp,pin-array";',
         f"\t\tgpios = <&{cs0['gpio_node']} {cs0['gpio_pin']} GPIO_ACTIVE_LOW>;",
         "\t};",
+    ]
+    if pads:
+
+        def pol(pad: dict[str, Any]) -> str:
+            return "GPIO_ACTIVE_LOW" if pad["active_low"] else "GPIO_ACTIVE_HIGH"
+
+        def spec(role: str) -> str:
+            pad = pads[role]
+            return f"<&{pad['gpio_node']} {pad['gpio_pin']} {pol(pad)}>"
+
+        lines += [
+            "",
+            "\t/*",
+            "\t * The GD32 control pads outside the SPI link (protocol v0.15, section 3.17).",
+            "\t * A DEDICATED node, deliberately not entries of alp_pins above (whose index 0",
+            "\t * is the GD32 SPI chip-select): resolved only through the INTERNAL pad opener",
+            "\t * (the portable alp_gpio_open() refuses GD32G553_PAD_ID_*).  All four are plain GPIO, inputs out of",
+            "\t * reset.  swclk and attn are the SAME pad (P71 = GD32 PA14): the host drives it",
+            "\t * only inside an SWD session, with GD32_NRST asserted first, and otherwise uses",
+            "\t * it as the bridge ATTN input with a rising-edge IRQ.  nrst is open-drain on the",
+            "\t * board; the Renesas GPIO driver has no open-drain mode, so the SWD driver",
+            "\t * emulates it (low = assert, input = release) and never drives the pad high.",
+            "\t */",
+            "\tgd32_pads: gd32-pads {",
+            '\t\tcompatible = "alp,gd32-pads";',
+            f"\t\tswdio-gpios = {spec('swdio')};",
+            f"\t\tswclk-gpios = {spec('swclk')};",
+            f"\t\tnrst-gpios = {spec('nrst')};",
+            f"\t\tattn-gpios = {spec('attn')};",
+            "\t};",
+        ]
+    lines += [
         "};",
         "",
         "/*",
@@ -2768,6 +3170,31 @@ def _v2n_dts(
         '\tstatus = "okay";',
         "};",
         "",
+    ]
+    if pads and pads["attn"].get("tint_slot") is not None and pads["swdio"]["gpio_node"] == cs0["gpio_node"]:
+        raise SystemExit("gd32_pads.attn.tint_slot set but the pads block is skipped (swdio shares CS0's gpio node)")
+    if pads and pads["swdio"]["gpio_node"] != cs0["gpio_node"]:
+        tint = pads["attn"].get("tint_slot")
+        if tint is not None:
+            if pads["attn"]["gpio_node"] != pads["swdio"]["gpio_node"]:
+                raise SystemExit("gd32_pads.attn.tint_slot needs attn on the swdio gpio node")
+            lines += [
+                "/*",
+                " * ATTN (P71) interrupt: the RZ GPIO driver routes a pin to a TINT slot through",
+                " * the port's `irqs`; without it alp_gpio_irq_enable() has no route and the",
+                " * supervisor stays on the staging-gap fallback.  The slot is a shared ICU",
+                " * resource, claimed here for the CM33 (supervisor-links.yaml gd32_pads.attn).",
+                " */",
+                f"&tint{tint} {{",
+                '\tstatus = "okay";',
+                "};",
+                "",
+            ]
+        lines += [f"&{pads['swdio']['gpio_node']} {{", '\tstatus = "okay";']
+        if tint is not None:
+            lines.append(f"\tirqs = <&tint{tint} {pads['attn']['gpio_pin']}>;")
+        lines += ["};", ""]
+    lines += [
         "/*",
         f" * {brd_i2c['peripheral']} / BRD_I2C is Cortex-A55/Linux-exclusive",
         " * (metadata/e1m_modules/v2n/core-ownership.yaml) -- the CM33 must never",
@@ -2780,22 +3207,37 @@ def _v2n_dts(
         '\tstatus = "disabled";',
         "};",
         "",
+    ] + _v2n_assignable_dts(assignable) + [
         "/*",
-        " * No wdt0 node here (alp-sdk#1153): the upstream Zephyr RZ/V2N SoC",
-        " * devicetree (arm/renesas/rz/rzv/r9a09g056.dtsi, checked against the",
-        " * pinned v4.4.0 tag) declares no watchdog node and no driver binds",
-        " * this SoC's WDT hardware at all yet -- there is no label to",
-        " * reference and no register base address in this tree to",
+        f" * wdt0 = the Cortex-M33's own watchdog (base {wdt_base} and counting clock",
+        " * from the SoC spec's m33_sm `watchdog` block; hal_renesas R9A09G056N",
+        " * wdt_iodefine.h R_WDT0_BASE).  The upstream SoC devicetree",
+        " * (arm/renesas/rz/rzv/r9a09g056.dtsi) declares no watchdog, and upstream's",
+        " * `renesas,rz-wdt` driver cannot bind RZ/V2N, so the node uses the alp-sdk",
+        " * driver zephyr/drivers/watchdog/wdt_renesas_rzv.c (compatible",
+        " * `renesas,rzv-wdt`; alp-sdk#2660).  DISABLED by default: an expiry resets the",
+        " * WHOLE SoM, not just the M33, so a product opts in with `&wdt0 { status =",
+        ' * "okay"; };`.  <alp/wdt.h> then reaches it through alias alp-wdt0.  Enabling it',
+        " * also needs the CPG module clocks held for the CM33 (renesas,cm33-owned-clocks,",
+        " * docs/bench/rzv-wdt0-cm33.md).  clock-freq is the WDT0 counting clock",
+        " * (WDT_0_clk_loco, 24 MHz Main OSC; RZ/V2N hardware manual Table 4.4-2).",
+        " */",
+        "&{/soc} {",
+        f"\twdt0: watchdog@{wdt_base[2:]} {{",
+        '\t\tcompatible = "renesas,rzv-wdt";',
+        f"\t\treg = <{wdt_base} {wdt['size']}>;",
+        f"\t\tclock-freq = <{wdt['counting_clock_hz']}>;",
+        '\t\tstatus = "disabled";',
+        "\t};",
+        "};",
     ]
-    lines += list(_V2N_WDT0_MID_OPENAMP if has_openamp else _V2N_WDT0_MID_PLAIN)
-    lines += list(_V2N_WDT0_TAIL)
     if has_openamp:
-        lines += list(_V2N_OPENAMP_TAIL)
+        lines += _openamp_subst(_V2N_OPENAMP_TAIL, soc_spec)
     lines.append("")
     return "\n".join(lines)
 
 
-def _v2n_defconfig(links: dict[str, Any]) -> str:
+def _v2n_defconfig(links: dict[str, Any], soc_spec: dict[str, Any]) -> str:
     """`<board>_defconfig` for a V2N/V2M `m33_sm` board.
 
     `CONFIG_XIP=n` has no supervisor-link source -- it's a documented V2N/
@@ -2808,6 +3250,8 @@ def _v2n_defconfig(links: dict[str, Any]) -> str:
     disables the GD32 bridge fails loudly here instead of silently drifting
     the committed `_defconfig`.
     """
+    rc_a55, _, rc_size = _ram_console(soc_spec)
+    win_base = soc_spec["openamp_carveout"]["cm33_ns_base"]
     console = links["console"]
     gd32_spi = links["gd32_spi"]
     brd_i2c = links["brd_i2c"]
@@ -2837,10 +3281,28 @@ def _v2n_defconfig(links: dict[str, Any]) -> str:
         "# CM33 serial console (sci0 = EVK \"Pmod USB-UART\") DISABLED on this board:\n"
         "# the only console is the A55's; sci0 is not wired as a CM33 console here, and\n"
         "# opening it faults on the floating RX (sci0 eri -> Zephyr fatal -> hang before\n"
-        "# main()).  Re-enable all three (and sci0 in the dts) only with a Pmod attached.\n"
+        "# main()).  Re-enable UART_CONSOLE (and sci0 in the dts) only with a Pmod\n"
+        "# attached AND once Linux cannot gate the rsci_0_* clocks (audit CM33-05).\n"
         "CONFIG_SERIAL=y\n"
-        "CONFIG_CONSOLE=n\n"
         "CONFIG_UART_CONSOLE=n\n"
+        "\n"
+        "# Enabling sci0 also needs CONFIG_UART_INTERRUPT_DRIVEN=y: the FSP always\n"
+        "# enables the rxi/eri IRQs, and the Zephyr driver only IRQ_CONNECTs them\n"
+        "# under it -- otherwise an unhandled NVIC line goes fatal.  Not set here:\n"
+        "# with sci0 disabled it resolves to n and Kconfig warns.\n"
+        "\n"
+        "# RAM console: the CM33 has no UART and no SWD yet, so printk lands in a\n"
+        f"# fixed buffer (zephyr,ram-console node in the dts, inside the {win_base:#x}\n"
+        "# window Linux reserves) that the A55 reads post-mortem via /dev/mem at\n"
+        f"# {rc_a55:#x}.  CONFIG_CONSOLE=y only pulls the RAM console in; with\n"
+        "# UART_CONSOLE=n nothing touches sci0.  Size must equal the dts node's reg.\n"
+        "CONFIG_CONSOLE=y\n"
+        "CONFIG_RAM_CONSOLE=y\n"
+        f"CONFIG_RAM_CONSOLE_BUFFER_SIZE={rc_size}\n"
+        "# With CONFIG_LOG=y, printk is routed into the logging core by default\n"
+        "# (LOG_PRINTK), and no CM33 log backend reaches this buffer, so it would\n"
+        "# stay empty.  Keep printk direct to the RAM console.\n"
+        "CONFIG_LOG_PRINTK=n\n"
         "\n"
         "# On-module GD32G553 supervisor bridge transport.  SPI only: RIIC8/\n"
         "# BRD_I2C is Cortex-A55/Linux-exclusive, so no CONFIG_I2C here.\n"
@@ -2920,7 +3382,9 @@ def emit_zephyr_board(
         files[aen_dts_relpath] = _aen_dts(
             sku, sku_preset, core_id, soc_spec, variant, dir_name, basename,
             rx_row, tx_row, metadata_root, on_module_links,
-            _aen_ethos_u(soc_spec), memory_map)
+            _aen_ethos_u(soc_spec), memory_map,
+            _load_aen_power_domains(metadata_root),
+            _load_aen_wired_lpgpio_pads(metadata_root))
         banner_extra_source.update(dict.fromkeys(
             (aen_pinctrl_relpath, aen_dts_relpath),
             "metadata/e1m_modules/aen/on-module-links.yaml"))
@@ -2937,10 +3401,12 @@ def emit_zephyr_board(
         v2n_pinctrl_relpath = f"{dir_name}/{dir_name}-pinctrl.dtsi"
         v2n_defconfig_relpath = f"{dir_name}/{basename}_defconfig"
         v2n_dts_relpath = f"{dir_name}/{basename}.dts"
-        files[v2n_pinctrl_relpath] = _v2n_pinctrl_dtsi(supervisor_links)
-        files[v2n_defconfig_relpath] = _v2n_defconfig(supervisor_links)
+        assignable = _v2n_assignable_m33(metadata_root, soc_spec)
+        files[v2n_pinctrl_relpath] = _v2n_pinctrl_dtsi(supervisor_links, assignable)
+        files[v2n_defconfig_relpath] = _v2n_defconfig(supervisor_links, soc_spec)
         files[v2n_dts_relpath] = _v2n_dts(
-            sku, dir_name, soc_spec, variant, sku_preset, supervisor_links)
+            sku, dir_name, soc_spec, variant, sku_preset, supervisor_links,
+            assignable)
         # None of the three carries a single pad, PFC triple or I2C address
         # from sku_rel/soc_json_rel below -- every one of those facts comes
         # from supervisor-links.yaml, so its path is threaded into all three

@@ -108,6 +108,19 @@ alp_status_t tmp112_set_extended_mode(tmp112_t *ctx, bool extended)
 	return s;
 }
 
+alp_status_t tmp112_set_shutdown(tmp112_t *ctx, bool shutdown)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	uint16_t     conf = 0;
+	alp_status_t s    = tmp112_read_reg16(ctx, TMP112_REG_CONF, &conf);
+	if (s != ALP_OK) return s;
+	if (shutdown)
+		conf |= TMP112_CONF_SD;
+	else
+		conf &= ~TMP112_CONF_SD;
+	return tmp112_write_reg16(ctx, TMP112_REG_CONF, conf);
+}
+
 alp_status_t tmp112_read_temp_milli_c(tmp112_t *ctx, int32_t *temp_milli_c)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;

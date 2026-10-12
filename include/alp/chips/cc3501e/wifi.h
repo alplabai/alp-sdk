@@ -265,7 +265,9 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  * @ref cc3501e_diag_info -- which is non-disturbing, so it cannot perturb the
  * AP it is confirming -- until the role reads @c ALP_CC3501E_ROLE_WIFI_AP
  * (@ref alp_cc3501e_role_t)
- * (ALP_OK) or @p timeout_ms is exhausted (ALP_ERR_TIMEOUT).
+ * (ALP_OK) or @p timeout_ms is exhausted (ALP_ERR_TIMEOUT).  Once the role
+ * confirms, the call adds a fixed 300 ms settle before returning ALP_OK; that
+ * delay is outside @p timeout_ms, so the total can exceed it by 300 ms.
  *
  * @note Against CC3501E firmware protocol v4 this call could not report
  *       success at all: it returned ALP_ERR_TIMEOUT for an AP that came up

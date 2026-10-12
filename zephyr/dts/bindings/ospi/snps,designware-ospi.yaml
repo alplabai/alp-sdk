@@ -17,8 +17,8 @@
 # only proves the ospi0 node BINDS + the hal_alif init entry point compiles
 # and links on that SKU. E1M-AEN803 fits an OSPI0 NOR (ISSI IS25WX256-JHLE)
 # and its flash_driver_api read path (JEDEC ID / SFDP / addressed read) is
-# bench-verified there; write/erase are fail-closed stubs pending the part's
-# Octal-DDR mode switch (#915). See examples/aen/aen-ospi-regcheck and
+# bench-verified there; write/erase (#915) first switch the part to Octal DDR
+# (1-1-1 SPI never sets WEL on it), then program/erase. See examples/aen/aen-ospi-regcheck and
 # docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
 #
 # Vendored VERBATIM from here down, except `clock-frequency: required` --

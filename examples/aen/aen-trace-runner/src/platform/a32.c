@@ -16,6 +16,7 @@
 #include "../ipc/tr_flip.h"
 #include "../ipc/tr_memmap.h" /* TR_MEM_SRAM1_READY -- HP camera-pool gate, see tr_a32_boot() */
 #include "../ipc/tr_wd.h"
+#include "../render/r3d.h" /* TR_R3D_W: the widest panel the renderer takes */
 #include "a32.h"
 #include "display.h"
 
@@ -86,8 +87,10 @@ static void dsb(void)
  * there -- if THIS boot's tr_a32_boot() has not run yet (or is still
  * retrying sram1_answers()), the HP could read a stale "ready" from the
  * last boot and touch CAM_POOL (SRAM1) before this boot has confirmed it
- * itself. PRE_KERNEL_1, priority 0: as early as tr_i2c1_unstick_init() is
- * on the HP side, before anything on this core could plausibly race it.
+ * itself. PRE_KERNEL_1, priority 0: the earliest init this core runs, before
+ * anything on it could plausibly race the HP's reads (the HP's own first bus
+ * touch, tr_i2c1_unstick_init(), is POST_KERNEL priority 1, behind its
+ * alp,i2c-handover wait).
  */
 static int tr_sram1_ready_clear_init(void)
 {
@@ -143,14 +146,30 @@ static void log_first_frame(uint64_t waited_us)
 	       (unsigned)total);
 }
 
-#if TR_M55_AUTOLAUNCH
 /* The stub initialised the page this boot (or an earlier one): stub_state
  * and ctrl_cmd are real, not power-on garbage. */
 static bool stub_alive(void)
 {
-	return g_mbox->magic == TR_MBOX_MAGIC;
+	if (g_mbox->magic != TR_MBOX_MAGIC) {
+		return false;
+	}
+	/* A stub of another mailbox layout cannot be driven: this HE's frames are
+	 * TR_MBOX_VERSION, so it is not "alive" for us (reported once). */
+	if (g_mbox->version != TR_MBOX_VERSION) {
+		static bool warned;
+
+		if (!warned) {
+			warned = true;
+			printk("a32     : stub speaks mailbox version %u, this HE %u -- not driving it\n",
+			       (unsigned)g_mbox->version,
+			       (unsigned)TR_MBOX_VERSION);
+		}
+		return false;
+	}
+	return true;
 }
 
+#if TR_M55_AUTOLAUNCH
 /* The mailbox's ctrl_entry/len/crc name the image this HE LAUNCHes (the
  * release stub self-LAUNCHes with its own header's values). */
 static bool stub_image_ours(void)
@@ -186,6 +205,35 @@ static void wd_poll(bool missed)
 	last_pending_s = pending_ms / 1000u;
 
 	if (cmd != TR_CTRL_NONE) {
+		if (cmd == TR_CTRL_LAUNCH &&
+		    (g_mbox->fault_code != 0u || (g_mbox->pad3[7] >> 16) == 0xAB1Du)) {
+			/* A LAUNCH clears the stub's fault record: leave it on the console first. */
+			printk("a32     : fault record before relaunch: core %u code %u lr 0x%08x dfsr "
+			       "0x%08x dfar 0x%08x ifsr 0x%08x ifar 0x%08x abi 0x%08x\n",
+			       g_mbox->fault_core,
+			       g_mbox->fault_code,
+			       g_mbox->lr,
+			       g_mbox->dfsr,
+			       g_mbox->dfar,
+			       g_mbox->ifsr,
+			       g_mbox->ifar,
+			       g_mbox->pad3[7]);
+			if (tr_abi_fault_code(g_mbox->pad3[7]) == TR_ABI_FAULT_FW) {
+				printk("a32     : renderer refused fw=%u (a panel width must be a multiple of 16, "
+				       "16..%u)\n",
+				       (unsigned)tr_abi_fault_arg(g_mbox->pad3[6]),
+				       (unsigned)TR_R3D_W);
+			} else if (tr_abi_fault_code(g_mbox->pad3[7]) == TR_ABI_FAULT_ROTATION) {
+				printk("a32     : renderer refused rotation=%u (0, 90 or 270)\n",
+				       (unsigned)tr_abi_fault_arg(g_mbox->pad3[6]));
+			} else if (tr_abi_fault_code(g_mbox->pad3[7]) == TR_ABI_FAULT_VERSION) {
+				printk("a32     : renderer faulted on mailbox version %u (this HE %u)\n",
+				       (unsigned)tr_abi_fault_arg(g_mbox->pad3[6]),
+				       (unsigned)TR_MBOX_VERSION);
+			}
+			g_mbox->pad3[6] = 0u;
+			g_mbox->pad3[7] = 0u; /* said once: a stale record is not repeated */
+		}
 		if (cmd == TR_CTRL_LAUNCH) {
 			g_mbox->ctrl_entry = tr_a32_autolaunch_id[0];
 			g_mbox->ctrl_len   = tr_a32_autolaunch_id[1];
@@ -448,7 +496,9 @@ void tr_a32_flush(void)
 
 void tr_a32_present(const tr_frame_in_t *in)
 {
-	if (!g_link_ok) {
+	/* The stub must have initialised the page: publishing into a cold page it has not
+	 * cleared yet (the "starting anyway" boot path) would be overwritten by that clear. */
+	if (!g_link_ok || !stub_alive()) {
 		return;
 	}
 	tr_a32_flush();

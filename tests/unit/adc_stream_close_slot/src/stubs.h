@@ -23,6 +23,19 @@ struct stub_state {
 	int          script_pos;
 	bool         always_busy;
 
+	/* v0.15: what the modelled link negotiated, and the BEGIN2/READ2 script. */
+	bool     grant_stream2;
+	uint16_t max_payload; /* 0 = the 65 B base envelope */
+	unsigned begin_calls; /* legacy BEGIN */
+	unsigned begin2_calls;
+	uint16_t begin2_watermark;
+	uint16_t full_scale; /* BEGIN2 reply scaling */
+	uint16_t vref_mv;
+	uint8_t  read2_last_max; /* max_samples of the last READ2 */
+	uint32_t r2_first, r2_dropped;
+	uint8_t  r2_got;
+	uint16_t r2_codes[32];
+
 	bool     gd32_stream_active[2]; /* the modelled GD32's per-slot state */
 	unsigned acquire_calls;
 	unsigned release_calls;

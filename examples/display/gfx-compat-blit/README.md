@@ -66,5 +66,5 @@ backend for the target SoM automatically (same pattern every other
 
 ## Reference
 
-- `src/lib/gfx_compat/gfx_compat.h` -- the full API contract.
+- `src/lib/gfx_compat/include/gfx_compat.h` -- the full API contract.
 - `docs/recommended-libraries.md` -- where gfx_compat is tracked.

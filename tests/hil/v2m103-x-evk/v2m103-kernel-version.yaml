@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 A55 Linux kernel release: 6.1.141-cip43-yocto-standard, the
+# exact `uname -r` of the bench image (2026W38-0004, 2026-10-03).  Fails on a different kernel build, which is the
+# point: bump this when the image's kernel is deliberately moved.
+
+schema_version: 1
+name: v2m103-kernel-version
+description: |
+  uname -r is 6.1.141-cip43-yocto-standard.
+
+flash_method: ssh-run
+ssh_command: |-
+  r=$(uname -r)
+  echo "HIL_KERNEL $r"
+  [ "$r" = 6.1.141-cip43-yocto-standard ] && echo HIL_KERNEL_OK
+
+serial:
+  duration_s: 10
+  expect_contains:
+    - "HIL_KERNEL_OK"

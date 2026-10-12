@@ -31,12 +31,11 @@ signals:
 
 # SoM families this chip is mechanically + electrically compatible with.
 # The EVK populates the SSD1306 on its 35x35 board directly off the
-# host SoC's I2C0; AEN / V2N / V2M / NX9 are all wired the same way.
+# host SoC's I2C0; AEN / V2N / V2M are all wired the same way.
 families:
   - aen
   - v2n
   - v2n-m1
-  - imx93
 
 kconfig:
   zephyr:         ALP_SDK_CHIP_SSD1306

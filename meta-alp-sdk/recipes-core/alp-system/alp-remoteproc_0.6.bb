@@ -55,4 +55,4 @@ FILES:${PN} += " \
 # boot.  Non-heterogeneous machines simply never install this
 # package; the systemd unit becomes a no-op anyway when no ALP
 # firmware is present (exits 1 cleanly).
-COMPATIBLE_MACHINE = "(e1m-v2n.*|e1m-v2m.*|e1m-aen.*|e1m-nx9101.*)"
+COMPATIBLE_MACHINE = "(e1m-v2n.*|e1m-v2m.*|e1m-aen.*)"

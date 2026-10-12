@@ -31,6 +31,9 @@ on:
       # missing here until #1997: PR #1996 guarded a tests/yocto/ target
       # behind CMAKE_SYSTEM_NAME and this workflow did not run on it at all.
       - 'tests/**'
+      - 'examples/aen/aen-trace-runner/**'
+      - 'scripts/check_abidiff.py'
+      - 'metadata/sdk_version.yaml'
       - '.github/workflows/pr-plain-cmake.yml'
   push:
     branches: [main, dev]
@@ -41,6 +44,7 @@ on:
       - 'cmake/**'
       - 'meta-alp-sdk/recipes-devtools/zcbor/**'
       - 'tests/**'
+      - 'examples/aen/aen-trace-runner/**'
   workflow_dispatch:
 
 concurrency:
@@ -63,6 +67,23 @@ jobs:
       - name: Build
         timeout-minutes: 3
         run: cmake --build build/baremetal --parallel
+
+  aen-trace-runner-host:
+    # The aen-trace-runner host unit tests (game logic, vision post-processing,
+    # renderer goldens, release interlocks) ran nowhere in CI before this job.
+    # The A32/qemu stage inside runner.sh skips itself when arm-none-eabi-gcc
+    # or qemu-arm is absent.
+    name: plain-cmake · aen-trace-runner host tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
+      - name: Run host tests
+        timeout-minutes: 12
+        run: bash examples/aen/aen-trace-runner/tests/host/runner.sh
 
   baremetal-aen:
     # ALP_OS=baremetal + ALP_SOM=aen activates the vendors/alif/
@@ -195,6 +216,35 @@ jobs:
           [ "$missing" -eq 0 ]
       - name: Test
         run: ctest --test-dir build/yocto --output-on-failure
+
+  abidiff:
+    # Issue #2840: within one minor line (the SONAME carries the minor
+    # while the major is 0, #2839) libalp_sdk.so must stay ABI-compatible
+    # with the latest release tag of that minor, or an in-place package
+    # upgrade is unsafe.  Builds both with the yocto shared configuration
+    # and runs libabigail's abidiff (scripts/check_abidiff.py).
+    name: plain-cmake · abidiff vs same-minor release (#2840)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+        timeout-minutes: 3
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 3
+        with:
+          python-version: '3.11'
+      - name: Install libabigail + Yocto-side runtime deps
+        timeout-minutes: 20
+        run: |
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y --no-install-recommends               abigail-tools libmosquitto-dev libasound2-dev libssl-dev pkg-config
+      - name: abidiff
+        timeout-minutes: 15
+        run: python3 scripts/check_abidiff.py --require-tool
 
   yocto-zcbor:
     # Issue #1254 CI-coverage follow-up (adversarial review on PR #1280):

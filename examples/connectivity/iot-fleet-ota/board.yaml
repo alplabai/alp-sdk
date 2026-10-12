@@ -138,10 +138,11 @@ boot:
 #     ignored -- MCUboot's slot layout owns the on-device geometry,
 #     not the OTA block).
 #
-# Tokens stay outside the repo: `${MENDER_TENANT_TOKEN}` is
-# expanded by the build host's environment (Yocto bblayers) or
-# the device's Mender provisioning step (Zephyr).  See
-# docs/ota.md "Secrets handling".
+# Tokens stay outside the repo: `${MENDER_TENANT_TOKEN}` is a
+# placeholder only.  The Yocto emit skips it (BitBake does not
+# expand it); set MENDER_TENANT_TOKEN in conf/local.conf
+# (meta-alp-sdk/README.md) or in the device's Mender provisioning
+# step (Zephyr).
 ota:
   provider: mender
   artifact_name: iot-fleet-ota

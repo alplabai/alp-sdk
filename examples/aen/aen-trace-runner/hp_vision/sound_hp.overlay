@@ -1,0 +1,44 @@
+/* SPDX-License-Identifier: Apache-2.0
+ *
+ * hp_vision/sound_hp.overlay -- TR_HP_SOUND=ON only (hp_vision/CMakeLists.txt), applied AFTER
+ * boards/<board>.overlay and ../sound/sound.overlay:
+ *
+ * i2c2 (0x49012000, carrier bus 0 = alp-i2c0: the identity EEPROM @0x50, TAS2563 0x4D/0x4E,
+ * broadcast 0x48, the HE's INA236 0x4A, BMI323 and the panel expander 0x73) is back "okay" --
+ * boards/<board>.overlay turns it off because a core with the i2c_dw driver up runs its ISR on
+ * the OTHER core's traffic (hp_vision fix round 6, silicon). Here it is needed for the amp
+ * bring-up, so it is `zephyr,deferred-init`: Zephyr neither programs the controller nor enables
+ * IRQ 134 at boot; sound/src/main.c device_init()s it only after the HE leased it (src/ipc/
+ * tr_bus2.h), irq_disable()s it once the bring-up is over and gives the bus back.
+ *
+ * gpio5 (SD_N P5_2 / IRQZ P5_0) and lpgpio (CC3501E WIFI_EN P15_5 / nRESET P15_1) are enabled
+ * by sound.overlay itself. i2c0 and uart5 stay disabled (the HP owns only what it drives).
+ */
+&i2c2 {
+	status = "okay";
+	zephyr,deferred-init;
+};
+
+/* The I2S3 FIFO deadline: i2s_dw refills the 16-deep TX FIFO from its TXFE interrupt at the
+ * trigger level 8 (TX_FIFO_TRG_LVL), i.e. with 8 frames left = 500 us at 16 kHz -- the ISR must
+ * run within that. The SoC dtsi gives i2s3 priority 3 (sound.overlay) and the camera (cam 345,
+ * csi 344) and the Ethos-U55 (55) priority 0, so any of those could hold it off. Here I2S3 is
+ * the highest of them (0); cam, csi and the U55 go to 1 (still above I2C1, the GPIO ports, SPI1
+ * and I2C2 at 3). Each of those ISRs only acknowledges an event and wakes a thread, so the
+ * camera frame / NPU completion latency changes by at most one I2S3 ISR (a few us every
+ * 500 us). sound/src/main.c asserts the order. */
+&i2s3 {
+	interrupts = <144 0>;
+};
+
+&ethosu55 {
+	interrupts = <55 1>;
+};
+
+&cam {
+	interrupts = <345 1>;
+};
+
+&csi {
+	interrupts = <344 1>;
+};

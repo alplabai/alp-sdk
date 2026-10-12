@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# hp_vision application Kconfig.
+
+# Whether ZEPHYR_BASE carries alp-sdk's clockctrl patch (zephyr/patches/zephyr/0001-clock_control_alif-*),
+# which the combined image's I2S3 needs for its 76.8 MHz audio clock. Read from the tree itself, in
+# the Kconfig stage, so that twister can FILTER the combined build_only scenario (testcase.yaml) on
+# CONFIG_TR_CLKCTL_PATCHED before CMake configures the app: a CI Zephyr without the patch skips it
+# instead of failing it. hp_vision/CMakeLists.txt keeps the hard refusal for a real build.
+config TR_CLKCTL_PATCHED
+	def_bool $(shell,$(PYTHON_EXECUTABLE) -c "import os;print('y' if 'ALIF_EXPMST0_CTRL_REG_OFF' in open(os.environ['ZEPHYR_BASE']+'/drivers/clock_control/clock_control_alif.c').read() else 'n')")
+
+source "Kconfig.zephyr"

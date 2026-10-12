@@ -1,0 +1,70 @@
+From: Alp Lab AB <contact@alplab.ai>
+Subject: libmicroros: add MICROROS_TRANSPORT_CUSTOM (no bundled transport)
+
+Pinned micro_ros_zephyr_module (8477de12) always builds one of serial,
+serial-usb or udp; none is usable on a board that supplies its own
+transport. Add a choice entry that compiles no transport source.
+
+diff --git a/modules/libmicroros/CMakeLists.txt b/modules/libmicroros/CMakeLists.txt
+index 4e8c213..2a82c91 100644
+--- a/modules/libmicroros/CMakeLists.txt
++++ b/modules/libmicroros/CMakeLists.txt
+@@ -75,24 +75,30 @@ endforeach()
+ 
+ # micro-ROS transport library
+ 
+-if(CONFIG_MICROROS_TRANSPORT_SERIAL)
+-    set(MICROROS_TRANSPORT_DIR ${MICROROS_DIR}/microros_transports/serial)
+-elseif(CONFIG_MICROROS_TRANSPORT_SERIAL_USB)
+-    set(MICROROS_TRANSPORT_DIR ${MICROROS_DIR}/microros_transports/serial-usb)
+-elseif(CONFIG_MICROROS_TRANSPORT_UDP)
+-    set(MICROROS_TRANSPORT_DIR ${MICROROS_DIR}/microros_transports/udp)
++if(CONFIG_MICROROS_TRANSPORT_CUSTOM)
++    # The application registers its own transport with
++    # rmw_uros_set_custom_transport(); no transport source is built here.
++    add_library(microros_transports INTERFACE)
+ else()
+-    message(FATAL_ERROR Please set a micro-ROS transport)
++    if(CONFIG_MICROROS_TRANSPORT_SERIAL)
++        set(MICROROS_TRANSPORT_DIR ${MICROROS_DIR}/microros_transports/serial)
++    elseif(CONFIG_MICROROS_TRANSPORT_SERIAL_USB)
++        set(MICROROS_TRANSPORT_DIR ${MICROROS_DIR}/microros_transports/serial-usb)
++    elseif(CONFIG_MICROROS_TRANSPORT_UDP)
++        set(MICROROS_TRANSPORT_DIR ${MICROROS_DIR}/microros_transports/udp)
++    else()
++        message(FATAL_ERROR Please set a micro-ROS transport)
++    endif()
++
++    zephyr_library_named(microros_transports)
++    zephyr_include_directories(${MICROROS_DIR}/include)
++    zephyr_include_directories(${MICROROS_TRANSPORT_DIR})
++
++    zephyr_library_sources(
++       ${MICROROS_TRANSPORT_DIR}/microros_transports.c
++    )
+ endif()
+ 
+-zephyr_library_named(microros_transports)
+-zephyr_include_directories(${MICROROS_DIR}/include)
+-zephyr_include_directories(${MICROROS_TRANSPORT_DIR})
+-
+-zephyr_library_sources(
+-   ${MICROROS_TRANSPORT_DIR}/microros_transports.c
+-)
+-
+ add_dependencies(microros microros_transports)
+ add_dependencies(microros_transports libmicroros_project)
+ 
+diff --git a/modules/libmicroros/Kconfig b/modules/libmicroros/Kconfig
+index d918025..338a732 100644
+--- a/modules/libmicroros/Kconfig
++++ b/modules/libmicroros/Kconfig
+@@ -25,6 +25,8 @@ if MICROROS
+              select USB_DEVICE_STACK
+         config MICROROS_TRANSPORT_UDP
+             bool "micro-ROS UDP network transport"
++        config MICROROS_TRANSPORT_CUSTOM
++            bool "micro-ROS custom transport (supplied by the application)"
+         
+     endchoice
+ 

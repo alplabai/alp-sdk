@@ -97,6 +97,16 @@ def test_load_writer_streams_lf_only_mot_as_crlf(tmp_path):
     assert _written_blob(con, 0) == b"S0030000FC\r\nS70500000000FA\r\n"
 
 
+def test_load_writer_names_the_cause_when_the_rom_rejects_the_load_address(tmp_path):
+    mot = tmp_path / "writer.mot"
+    mot.write_bytes(b"S0030000FC\nS70500000000FA\n")
+    banner = "SCI Download mode (Normal SCI boot)\r\n-- Load Program to SRAM ---------------\r\n"
+    con = FakeConsole([(None, banner), (r"(?s).", "\r\nAddress Error!!!\r\n")])
+    with pytest.raises(BenchError, match="boot ROM rejected the Flash Writer load address") as e:
+        sw.load_writer(con, mot, timeout=1)             # a 1 s timeout: it must not be what ends this
+    assert "CA55" in str(e.value) and "around 50 mA at 15 V instead of ~90 mA" in str(e.value)
+
+
 # --- EM_W ------------------------------------------------------------------
 
 def _em_w_script(image: bytes, start: int, sector: int, done: str):

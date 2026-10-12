@@ -30,12 +30,14 @@ target_sources(app PRIVATE src/cc3501e_gpio_routes.c)
 #                             (v0.0.4.0), so FINISH reaches a real STAGED. This
 #                             compiles the shared candidate blob from firmware/
 #                             so the extern resolves; it implies OTA_DEMO.
-#   -DCC3501E_OTA_PROMOTE=ON -- do not stream; request the swap-reboot for an
-#                             image a prior OTA_REAL run left STAGED-but-pending
-#                             (unjams the slot). Implies OTA_DEMO (the call site).
+#   -DCC3501E_OTA_PROMOTE=ON -- do not stream; PROMOTE an image a prior OTA_REAL
+#                             run left STAGED. It runs in a later boot, so the
+#                             device refuses (OTA_STATUS reserved[0] = 119) and
+#                             the image stays STAGED (#2741): this mode shows
+#                             the refusal, it cannot swap. Implies OTA_DEMO.
 option(CC3501E_OTA_DEMO "Enable the opt-in CC3501E OTA streaming demo" OFF)
 option(CC3501E_OTA_REAL "OTA demo streams the real signed candidate image" OFF)
-option(CC3501E_OTA_PROMOTE "OTA demo promotes an already-committed pending image" OFF)
+option(CC3501E_OTA_PROMOTE "OTA demo shows that a PROMOTE in a later boot is refused" OFF)
 if(CC3501E_OTA_DEMO OR CC3501E_OTA_REAL OR CC3501E_OTA_PROMOTE)
     target_compile_definitions(app PRIVATE CC3501E_OTA_DEMO)
 endif()

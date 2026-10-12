@@ -4,9 +4,7 @@ CMakeLists.txt mapping gate (issue #1275 Unit A).
 
 Each case scaffolds a scratch `examples/<name>/` tree under `tmp_path` but
 loads it against the REAL `metadata/` (E1M-AEN801 is a real, fully-defined,
-buildable SoM -- no synthetic SoM preset needed, unlike the NX9101 fixture
-`_orchestrate_support._synthetic_nx9101_root` uses to dodge a real
-`status: tbd` hw_rev). `load_board_yaml` resolves `metadata_root` from the
+buildable SoM -- no synthetic SoM preset needed). `load_board_yaml` resolves `metadata_root` from the
 real repo unconditionally (`alp_orchestrate.paths.METADATA_ROOT`), so this
 works regardless of where the board.yaml itself lives.
 

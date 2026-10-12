@@ -1,0 +1,34 @@
+# board.yaml -- microros-ros2-v2n
+#
+# micro-ROS (Zephyr, Cortex-M33-SM) <-> ROS 2 (Yocto, Cortex-A55) on one
+# E1M-V2N101.  The XRCE-DDS byte stream between the micro-ROS client and the
+# micro-ROS agent rides the same ADR 0016 RPMsg channel as ../rpmsg-v2n;
+# see docs/adr/0035-micro-ros-cross-core-transport.md (Option B) and
+# README.md.  The ipc: block is deliberately identical to rpmsg-v2n's so the
+# two examples share one carve-out and one M33 endpoint convention.
+libraries:
+  - name: micro-ros
+    cores: [m33_sm]
+
+som:
+  sku: E1M-V2N101
+  hw_rev: r1
+
+preset: e1m-x-evk
+cores:
+  a55_cluster:
+    app: ./linux
+    image: alp-image-edge
+    peripherals: [ethernet, usb, emmc]
+  m33_sm:
+    app: ./m33_sm
+    peripherals: [gpio]
+
+ipc:
+  - kind: rpmsg
+    endpoints: [a55_cluster, m33_sm]
+    carve_out_kb: 512
+    name: alp_default_rpmsg
+
+diagnostics:
+  log_level: info

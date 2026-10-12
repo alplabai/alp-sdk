@@ -33,12 +33,13 @@ pinctrl gap that used to be the operative blocker is closed:
 `flash_ospi_alif.c` applies `PINCTRL_STATE_DEFAULT` in its init as of
 #2041 (closed 2026-09-12), bench-verified on two modules -- though
 that proof is bind-level, since the pad-mux registers were not read
-back and nothing in tree makes an OSPI device-level transfer. The
+back and only the opt-in #915 self-test in `aen-ospi-regcheck` makes OSPI device-level transfers. The
 driver now registers a `flash_driver_api` (#915) with a working
-`read`/`read_jedec_id`/`sfdp_read` side; `write`/`erase` remain
-deliberate fail-closed `-ENOTSUP` stubs pending the fitted part's
-Octal-DDR mode switch, so there is still no write/erase path a
-partition could use -- recheck when #915 closes.
+`read`/`read_jedec_id`/`sfdp_read` side, and `write`/`erase` are
+implemented too (#915, bench-verified): the driver switches the part to
+Octal DDR first, writes in 2-byte granules and erases on 4 KiB
+alignment. The driver exposes no `page_layout`, so the parts are still not in a
+flash partition.
 Bench evidence for the physical fit is **NOR only**: [`docs/bring-up-aen.md`](../bring-up-aen.md)
 §0 reads the ISSI JEDEC ID off OSPI0 CS1 on the AEN803 bench module and
 says explicitly that result is silent on the HyperRAM's own behaviour
@@ -52,7 +53,7 @@ says explicitly that result is silent on the HyperRAM's own behaviour
 | Application SoC         | Alif Ensemble E3..E8       | --               | (vendor HAL)                            |
 | Wi-Fi 6 + BLE 5.4       | TI CC3501E                 | inter-chip SPI1 + SDIO | App APIs: [`<alp/iot.h>`](../../include/alp/iot.h), [`<alp/ble.h>`](../../include/alp/ble.h); diagnostics: [`<alp/chips/cc3501e.h>`](../../include/alp/chips/cc3501e.h) |
 | Secure element          | Infineon OPTIGA Trust M    | BRD_I2C†          | [`<alp/chips/optiga_trust_m.h>`](../../include/alp/chips/optiga_trust_m.h) |
-| RTC                     | Micro Crystal RV-3028-C7   | BRD_I2C†          | Upstream Zephyr `CONFIG_RTC_RV3028` (`rtc_*` API) -- see [BRD_I2C](#on-module-housekeeping-i2c-brd_i2c) |
+| RTC                     | Micro Crystal RV-3028-C7   | BRD_I2C†          | Upstream Zephyr `CONFIG_RTC_RV3028` (`rtc_*` API); countdown / alarm / wake-flag service in [`<alp/chips/rv3028c7.h>`](../../include/alp/chips/rv3028c7.h), and its `INT` -> P15_0 line is the STOP wake source ([aen-power-domains.md](../aen-power-domains.md)) -- see [BRD_I2C](#on-module-housekeeping-i2c-brd_i2c) |
 | Temperature sensor      | TI TMP112                  | BRD_I2C†          | Upstream Zephyr `CONFIG_TMP112` (sensor API) -- see [BRD_I2C](#on-module-housekeeping-i2c-brd_i2c) |
 | EEPROM (SoM manifest)   | Onsemi N24S128             | SoC I2C2 (bridge/DNP-selected, a separate bus from BRD_I2C) | [`<alp/chips/eeprom_24c128.h>`](../../include/alp/chips/eeprom_24c128.h) |
 | Ethernet PHY            | TI DP83825 (exact order code TBD) | RMII      | none -- see [`metadata/chips/dp83825.yaml`](../../metadata/chips/dp83825.yaml) |
@@ -196,6 +197,10 @@ The RV-3028's `/INT` output (U21 pin 2, net `RTC_ALARM`) reaches the SoC:
 ```
 RV-3028-C7 /INT  ->  RTC_ALARM  ->  P15_0_FLEX (ball V2)  ->  LPGPIO bit 0  ->  IRQ 171
 ```
+
+This line is also the STOP wake source (`ALP_POWER_WAKE_RTC`); the alarm / countdown / wake-flag
+API is `<alp/chips/rv3028c7.h>` and the power-domain runtime is described in
+[aen-power-domains.md](../aen-power-domains.md).
 
 It is **open-drain, active low**, and `R98` (100 kΩ to `+1V8`) is fitted as
 its pull-up, so no carrier-side resistor is needed. The pin is described to
@@ -424,6 +429,13 @@ examples already work against it.
 * `metadata/e1m_modules/aen/from-alif.tsv` -- E1M pad → Alif silicon.
 * `metadata/e1m_modules/aen/from-cc3501e.tsv` -- E1M pad → CC3501E MCU.
 * `metadata/e1m_modules/aen/inter-chip.tsv` -- Alif ↔ CC3501E wiring.
+* **GPIO / qenc inputs need no pinctrl in the app.** On the Alif Ensemble a pad's input
+  buffer (REN) is only set by pinctrl, and neither `gpio_dw` nor `gpio-qdec` sets it, so an
+  input would read idle. The SDK's gpio and gpio-qdec backends do it when a pin is opened as
+  an input (`alp_gpio_configure(..., ALP_GPIO_INPUT, ...)`, `alp_qenc_open()`): the pad is
+  muxed to GPIO, REN is set and the requested pull becomes the pad bias (ADR 0017 Tier-1.5,
+  `CONFIG_ALP_GPIO_PAD_INPUT`, `src/backends/gpio/gpio_pad_alif.c`; #2808). An app only
+  needs its own pinctrl for a pad it drives through a non-GPIO function.
 
 ## Example apps targeting AEN
 

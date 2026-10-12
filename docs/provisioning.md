@@ -22,17 +22,14 @@ The flat form runs a linear, stop-on-first-failure sequence:
    system image to eMMC (`yocto_wic`) — the image is skipped for a
    `bootloader-only:image-pending-hw` bundle. **Re-flashing FIP on a unit
    that has already been provisioned** (a field/repair FIP upgrade, not
-   first-time provisioning of a fresh module): if that unit ever had a
-   *saved* U-Boot env (an MMC-resident `bootcmd` from before the
-   `alp_eth_mac` V2N/V2M command existed, or a manual `setenv
-   bootcmd; saveenv`), the new FIP's compiled-in `CONFIG_BOOTCOMMAND`
-   is never reached -- the saved one runs instead, and `env default -a`
-   in it still wipes whatever `board_late_init()` derived, leaving Linux
-   with the DRP-AI vendor default MAC (see
-   `docs/soms/v2n.md#ethernet-mac-address-policy`). Reset the saved env
-   as part of the same upgrade: `env default -a; saveenv` from the
-   U-Boot prompt (or erase the env partition/offset the saved copy lives
-   at) before the unit next autoboots.
+   first-time provisioning of a fresh module): a FIP older than the
+   persistent-environment change keeps its saved environment at the old
+   location (end of the eMMC user area) and a new FIP ignores it, so
+   nothing needs resetting; the new environment (eMMC boot partition 2,
+   offsets `0x220000` / `0x230000`, see
+   `docs/soms/v2n.md#uboot-environment`) is created on its first boot.
+   The provisioning boot write never touches it: `write_emmc_boot`
+   refuses an image that would reach offset `0x220000`.
 4. **EEPROM** — allocate a serial, build the 128-byte manifest (`program_eeprom.py`).
    The RIIC0 @0x50 write + read-back-verify is HW-gated (see below) — this step only
    plans it, even under `--execute`.

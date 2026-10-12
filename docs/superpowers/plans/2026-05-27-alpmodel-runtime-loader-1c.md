@@ -1,5 +1,7 @@
 # `.alpmodel` Runtime Loader + Blob Selection (Stage 1c) — Implementation Plan
 
+> **Note (2026-10-10):** E1M-NX9101 / NXP i.MX 93 was removed in #2781 / #2782 (67ed22d86; the module was never produced): the `metadata/socs/nxp/imx9/imx93.json` entry in the SoC JSON list below refers to a deleted file.
+
 > **Historical transcript.** Implementation plan dated 2026-05-27. The
 > SDK has since shipped through the v0.15.0 release candidate
 > (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing

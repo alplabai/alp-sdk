@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NOT BENCH-VERIFIED. E1M-V2N101 ROS 2 smoke for the alp_som_temperature
+# node (examples/v2n/v2n-ros2-som-temperature, meta-alp-sdk recipe
+# alp-ros2-temperature). Needs an image built with ALP_ENABLE_ROS2 = "1"
+# (docs/bring-up-ros2.md), e.g. alp-image-edge with meta-ros2-humble.
+#
+# What this proves, in order:
+#   1. The node starts and registers on the ROS 2 graph (HIL_ROS2_NODE_OK).
+#   2. /alp/soc_temperature carries a sample (HIL_ROS2_SOC_TEMP_OK): the
+#      Linux backend of alp_temperature_read_die_milli_c() reads the
+#      cpu-thermal zones.
+#   3. /alp/som_temperature: the Linux build returns ALP_ERR_NOSUPPORT for
+#      alp_temperature_read_milli_c(), so the expected outcome is the one-time
+#      NOSUPPORT notice (HIL_ROS2_SOM_TEMP_NOSUPPORT).  Once a Linux
+#      on-module backend lands a sample is published instead
+#      (HIL_ROS2_SOM_TEMP_OK); tighten expect_contains then.
+#
+# Fixtures: ssh to the unit, ROS 2 Humble at /opt/ros/humble.
+
+schema_version: 1
+name: v2n101-ros2-som-temperature
+description: |
+  alp_som_temperature node registers; /alp/soc_temperature carries a sample;
+  /alp/som_temperature carries a sample or the documented NOSUPPORT notice.
+  Not bench-verified.
+
+flash_method: ssh-run
+ssh_command: |-
+  . /opt/ros/humble/setup.sh
+  ros2 run alp_som_temperature som_temperature_node >/tmp/alp_som_temp.log 2>&1 &
+  pid=$!
+  sleep 4
+  ros2 node list 2>/dev/null | grep -q alp_som_temperature && echo HIL_ROS2_NODE_OK
+  timeout 6 ros2 topic echo --once /alp/soc_temperature >/dev/null 2>&1 && echo HIL_ROS2_SOC_TEMP_OK
+  if timeout 6 ros2 topic echo --once /alp/som_temperature >/dev/null 2>&1; then
+    echo HIL_ROS2_SOM_TEMP_OK
+  elif grep -q ALP_ERR_NOSUPPORT /tmp/alp_som_temp.log; then
+    echo HIL_ROS2_SOM_TEMP_NOSUPPORT
+  fi
+  kill $pid 2>/dev/null
+
+serial:
+  duration_s: 25
+  expect_contains:
+    - "HIL_ROS2_NODE_OK"
+    - "HIL_ROS2_SOC_TEMP_OK"
+  expect_absent:
+    - "Traceback"
+    - "error while loading shared libraries"

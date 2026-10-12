@@ -134,11 +134,12 @@ contract stays portable.
 `${MENDER_TENANT_TOKEN}` is intentionally a placeholder. Real
 tokens never live in the repo:
 
-- Yocto: expanded by the build host's environment when the
-  orchestrator-emitted `local.conf` is sourced.
+- Yocto: the orchestrator-emitted `local.conf` skips the placeholder
+  (BitBake does not expand it); set `MENDER_TENANT_TOKEN` in
+  `conf/local.conf` (see the Mender section of
+  [`meta-alp-sdk/README.md`](../../../meta-alp-sdk/README.md)).
 - Zephyr: written into device-provisioning storage at first boot.
 
-See [`docs/ota.md`](../../../docs/ota.md) "Secrets handling".
 
 ## References
 

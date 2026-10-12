@@ -50,6 +50,9 @@ def bv(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "VERSION_H", tmp_path / "version.h")
     monkeypatch.setattr(module, "PYPROJECT", tmp_path / "pyproject.toml")
     monkeypatch.setattr(module, "BANNER_C", tmp_path / "alp_banner.c")
+    recipe = tmp_path / "alp-sdk.bb"
+    recipe.write_text('PV      = "0.0.0"\n', encoding="utf-8")
+    monkeypatch.setattr(module, "ALP_SDK_RECIPE", recipe)
     return module
 
 
@@ -417,3 +420,10 @@ def test_the_strict_citation_check_runs_only_on_ga_bumps(bv, monkeypatch, target
     monkeypatch.setattr(sys, "argv", ["bump_version.py", "--to", target, "--dry-run"])
     assert bv.main() == 0
     assert calls == expected
+
+
+def test_prerelease_bump_pins_recipe_pv_with_tilde(bv):
+    bv.update_yocto_recipe("0.17.0-rc2", dry_run=False)
+    assert bv.ALP_SDK_RECIPE.read_text(encoding="utf-8") == 'PV      = "0.17.0~rc2"\n'
+    bv.update_yocto_recipe("0.17.0", dry_run=False)
+    assert bv.ALP_SDK_RECIPE.read_text(encoding="utf-8") == 'PV      = "0.17.0"\n'

@@ -1,5 +1,7 @@
 # Model & Edge-AI Management in VS Code — cross-repo design
 
+> **Status (2026-10-08): Superseded by ADR 0028** (`docs/adr/0028-tan-owns-the-model-engine.md`, Proposed) — the host-side model engine belongs in tan's model engine, not alp-sdk. The `alp model` implementation PRs alp-sdk #907 and #933 were closed unmerged, as were tan-cli #47 and alp-sdk-vscode #310. What landed on dev: this design record (#1468), the ADR 0028 per-NPU op tables and vela memory profiles under `metadata/npu_ops/` (#1470), and the model-zoo-v1 schema (#2542). The lifecycle subcommands are tracked in alplabai/tan-cli#674.
+
 - **Date:** 2026-07-24
 - **Status:** Design (brainstormed + approved section-by-section; pending written-spec review)
 - **Repos touched:** `alp-sdk` (pipeline + device runner), `tan-cli` (executor), `alp-sdk-vscode` (GUI)

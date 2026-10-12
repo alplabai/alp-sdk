@@ -1,9 +1,9 @@
 /*
  * panel_30hz.overlay -- P11a: the RK055HDMIPI4MA0 at 30 Hz instead of 40 Hz,
- * 33.3 ms of render time a frame instead of 25 ms. CMake -DTR_PANEL_HZ=30
- * applies it after the e1m_evk_rk055hdmipi4ma0 shield (EXTRA_DTC_OVERLAY_FILE)
- * and compiles the game's frame-counted constants for 30 Hz
- * (src/game/panel_hz.h).
+ * 33.3 ms of render time a frame instead of 25 ms. Opt-in: pass it after the
+ * e1m_evk_rk055hdmipi4ma0 shield with -DEXTRA_DTC_OVERLAY_FILE=; the game
+ * derives its refresh from the cdc200 timings, so its frame-counted constants
+ * follow (src/game/panel_hz.h).
  *
  * ONE property changes: the vertical front porch, 16 -> 454 lines. refresh =
  * pclk / (htotal * vtotal):

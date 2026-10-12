@@ -413,3 +413,10 @@ def test_test_all_only_asks_for_smoke_when_not_forced_or_main():
     m = re.search(r'if \[ "\$\{TARGET\}" != "main" \] && \[ "\$\{FORCE_FULL\}" -eq 0 \]; then\n'
                   r'\s+twister_plan="\$\(python3 scripts/select_checks.py [^\n]*--local\)"', text)
     assert m, "--full / --target main must bypass select_checks --local"
+
+
+def test_deleted_script_is_full(tmp_path):
+    root = _base_tree(tmp_path)
+    decision, reasons = sc.classify(["scripts/removed_helper.py"], root)
+    assert decision == "full"
+    assert "deleted" in reasons[0]

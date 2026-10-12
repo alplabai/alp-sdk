@@ -111,10 +111,10 @@ FAMILIES: list[dict] = [
     {
         # Not "(Cortex-M-class)": the family's core mix is per-SKU, not
         # uniform -- AEN301/AEN401 are Cortex-M-only, AEN501..AEN801 add
-        # a Cortex-A32 cluster, and NX9101 is Cortex-A55 + Cortex-M33
+        # a Cortex-A32 cluster
         # (see docs/adr/0011-intra-family-portability.md).
         "title": "E1M family",
-        "sku_prefixes": ("E1M-AEN", "E1M-NX9"),
+        "sku_prefixes": ("E1M-AEN",),
         "examples": (
             ("i2c-scanner", "examples/peripheral-io/i2c-scanner"),
             ("gpio-button-led", "examples/peripheral-io/gpio-button-led"),
@@ -185,7 +185,7 @@ def remap_cores(cores: dict, src_topology: dict, dst_topology: dict) -> dict:
     This is step 2 of the doc's Method: exact key matches are kept
     (`m33_sm` exists on every E1M-X SKU); a missing key is mapped to the
     UNIQUE same-OS-class key of the target topology (`m55_hp` on AEN ->
-    `m33` on NX9101 -- both Zephyr-class).  Anything ambiguous fails the
+    the single Zephyr-class core of the target topology).  Anything ambiguous fails the
     cell rather than guessing.
     """
     out: dict = {}
@@ -374,13 +374,13 @@ def notes_for(preset: dict) -> str:
     0 is a resolved fact ("this SKU populates no such external memory"
     -- the AEN family), and rendering it as silence would make it
     indistinguishable from `TBD` ("nobody has written the capacity down
-    yet" -- E1M-NX9101), which is the exact distinction the schema's
+    yet"), which is the exact distinction the schema's
     `memory:` block asks consumers to preserve.  `TBD` stays untagged,
     since a Notes cell has nothing true to say about it.
 
     That rule applies to BOTH figures.  It shipped on `dram_mbit` alone,
     which left `E1M-AEN801` (`flash_mbit: 0`, resolved: MRAM-only) and
-    `E1M-NX9101` (`flash_mbit: TBD`, open) rendering identically -- the
+    a `flash_mbit: TBD` (open) preset rendering identically -- the
     same silence this docstring calls a defect, on the figure that
     decides storage and MCUboot partitioning.  A POSITIVE `flash_mbit`
     stays untagged: the eMMC densities it would print are an editorial

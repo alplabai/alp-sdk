@@ -55,6 +55,7 @@
 #define REG_SW_RESET   0x01u
 #define SW_RESET_BIT   0x01u
 #define REG_BOOK       0x7Fu
+#define REG_I2C_CKSUM  0x7Eu
 #define REG_INT_CLK    0x30u
 #define INT_CLK_CLR    0x04u
 #define REG_LTCH_FIRST 0x24u
@@ -65,6 +66,7 @@ struct fake_tas2563_data {
 	uint32_t write_count[256];
 	uint8_t  cur_book;
 	uint8_t  cur_page;
+	uint8_t  app_mode; /* B0/P1/0x02, test-seeded via fake_tas2563_set_app_mode(). */
 
 	struct fake_tas2563_write log[FAKE_TAS2563_LOG_MAX];
 	size_t                    log_len;
@@ -165,6 +167,22 @@ static int apply_write(struct fake_tas2563_data *d, uint8_t reg, uint8_t val)
 		d->write_count[reg]++;
 		return 0;
 	}
+	/* I2C_CKSUM (§7.5.61): a write sets it.  Bench-measured on a real
+	 * TAS2563 (rev 0x10): every other data write on any book/page folds
+	 * into it as CRC-8 (poly 0x07, init 0x00, over the data byte only;
+	 * register addresses, PAGE/BOOK writes and reads are not counted). */
+	if (d->cur_book == 0u && d->cur_page == 0u && reg == REG_I2C_CKSUM) {
+		d->regs[reg] = val;
+		d->write_count[reg]++;
+		return 0;
+	}
+	{
+		uint8_t crc = (uint8_t)(d->regs[REG_I2C_CKSUM] ^ val);
+		for (int i = 0; i < 8; ++i)
+			crc = (uint8_t)((crc & 0x80u) ? (crc << 1) ^ 0x07u : crc << 1);
+		d->regs[REG_I2C_CKSUM] = crc;
+	}
+
 	if (d->cur_book != 0u || d->cur_page != 0u) {
 		/* Off the modelled page: the write is logged (that is what
 		 * the tuning-replay tests check) but there is no backing
@@ -213,6 +231,8 @@ fake_tas2563_transfer(const struct emul *target, struct i2c_msg *msgs, int num_m
 			msgs[1].buf[0] = d->cur_page;
 		} else if (reg == REG_BOOK) {
 			msgs[1].buf[0] = d->cur_book;
+		} else if (d->cur_book == 0u && d->cur_page == 1u && reg == 0x02u) {
+			msgs[1].buf[0] = d->app_mode;
 		} else if (d->cur_book != 0u || d->cur_page != 0u) {
 			msgs[1].buf[0] = 0u;
 		} else {
@@ -305,6 +325,11 @@ void fake_tas2563_fail_write_at(uint8_t book, uint8_t page, uint8_t reg)
 	g_fake_tas2563->fault_book  = book;
 	g_fake_tas2563->fault_page  = page;
 	g_fake_tas2563->fault_reg   = reg;
+}
+
+void fake_tas2563_set_app_mode(uint8_t val)
+{
+	if (g_fake_tas2563) g_fake_tas2563->app_mode = val;
 }
 
 void fake_tas2563_reset(void)

@@ -95,6 +95,106 @@ ZTEST(adc_stream_close_slot, test_open_rollback_retries_busy_acquire)
 	alp_adc_stream_close(held);
 }
 
+/* ---- v0.15 ADC_STREAM2 (BEGIN2 / READ2) path ---------------------------- *
+ * With ADC_STREAM2 granted the backend starts the stream with BEGIN2 (poll
+ * driven: watermark 0) and reads it with READ2, converting the raw codes to
+ * millivolts exactly as the legacy path did.  Not granted: the legacy BEGIN. */
+
+ZTEST(adc_stream_close_slot, test_stream2_open_uses_begin2_when_granted)
+{
+	g_stub.grant_stream2 = true;
+	g_stub.full_scale    = 4095u;
+	g_stub.vref_mv       = 1800u;
+	alp_adc_stream_t *h  = open_ch(0u);
+	zassert_not_null(h);
+	zassert_equal(g_stub.begin2_calls, 1u);
+	zassert_equal(g_stub.begin_calls, 0u, "legacy BEGIN must not run when STREAM2 is granted");
+	zassert_equal(g_stub.begin2_watermark, 0u, "poll-driven API: no watermark events");
+	alp_adc_stream_close(h);
+	zassert_false(g_stub.gd32_stream_active[0]);
+}
+
+ZTEST(adc_stream_close_slot, test_stream2_not_granted_keeps_legacy_begin)
+{
+	alp_adc_stream_t *h = open_ch(0u);
+	zassert_not_null(h);
+	zassert_equal(g_stub.begin_calls, 1u);
+	zassert_equal(g_stub.begin2_calls, 0u);
+	alp_adc_stream_close(h);
+}
+
+ZTEST(adc_stream_close_slot, test_stream2_read_scales_codes_to_millivolts)
+{
+	g_stub.grant_stream2 = true;
+	g_stub.full_scale    = 4095u;
+	g_stub.vref_mv       = 1800u;
+	alp_adc_stream_t *h  = open_ch(0u);
+	zassert_not_null(h);
+
+	g_stub.r2_got      = 4u;
+	g_stub.r2_codes[0] = 0u;
+	g_stub.r2_codes[1] = 2048u;
+	g_stub.r2_codes[2] = 4095u;
+	g_stub.r2_codes[3] = 5000u; /* above full scale: clamped */
+	uint16_t mv[8]     = { 0 };
+	size_t   got       = 99u;
+	zassert_equal(alp_adc_stream_read_mv(h, mv, 8u, &got), ALP_OK);
+	zassert_equal(got, 4u);
+	zassert_equal(mv[0], 0u);
+	zassert_equal(mv[1], (2048u * 1800u) / 4095u, "integer truncation, as the legacy maths");
+	zassert_equal(mv[2], 1800u);
+	zassert_equal(mv[3], 1800u, "codes clamp to full_scale");
+	alp_adc_stream_close(h);
+}
+
+ZTEST(adc_stream_close_slot, test_stream2_busy_only_on_the_discontinuity_sentinel)
+{
+	g_stub.grant_stream2 = true;
+	g_stub.full_scale    = 4095u;
+	g_stub.vref_mv       = 1800u;
+	alp_adc_stream_t *h  = open_ch(0u);
+	zassert_not_null(h);
+	uint16_t mv[8];
+	size_t   got = 99u;
+
+	/* Overrun with a KNOWN drop count: the freshest samples, ALP_OK. */
+	g_stub.r2_got      = 2u;
+	g_stub.r2_dropped  = 32u;
+	g_stub.r2_codes[0] = 100u;
+	g_stub.r2_codes[1] = 200u;
+	zassert_equal(alp_adc_stream_read_mv(h, mv, 8u, &got), ALP_OK, "overrun is not BUSY");
+	zassert_equal(got, 2u);
+
+	/* Discontinuity of unknown length: the one BUSY. */
+	g_stub.r2_got     = 0u;
+	g_stub.r2_dropped = 0xFFFFFFFFu;
+	got               = 99u;
+	zassert_equal(alp_adc_stream_read_mv(h, mv, 8u, &got), ALP_ERR_BUSY);
+	zassert_equal(got, 0u);
+	alp_adc_stream_close(h);
+}
+
+ZTEST(adc_stream_close_slot, test_stream2_read_ceiling_follows_the_negotiated_link)
+{
+	g_stub.grant_stream2 = true;
+	g_stub.full_scale    = 4095u;
+	g_stub.vref_mv       = 1800u;
+	alp_adc_stream_t *h  = open_ch(0u);
+	zassert_not_null(h);
+	uint16_t mv[64];
+	size_t   got = 0u;
+
+	/* 65 B link: READ2 carries at most (65 - 9) / 2 = 28 codes. */
+	zassert_equal(alp_adc_stream_read_mv(h, mv, 64u, &got), ALP_OK);
+	zassert_equal(g_stub.read2_last_max, 28u);
+
+	/* BIG_FRAME link: the per-call cap is the backend's 32. */
+	g_stub.max_payload = 252u;
+	zassert_equal(alp_adc_stream_read_mv(h, mv, 64u, &got), ALP_OK);
+	zassert_equal(g_stub.read2_last_max, 32u);
+	alp_adc_stream_close(h);
+}
+
 /* MUST stay the last test in this file (and sorted last by name): it
  * permanently leaves slot 0 reserved -- that IS the behaviour under test --
  * and the bookkeeping is process-global, so any later test would see one

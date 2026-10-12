@@ -61,7 +61,7 @@ PR #24, substitutes them at materialise time). The frozen 97ad481b oracle
 predates that and stays absolute -- `normalize_plan` reconciles the two
 shapes onto the same normalized form; see its docstring for the mapping.
 
-Three hand-reviewed deltas are allowed to pass without failing the gate.
+Four hand-reviewed deltas are allowed to pass without failing the gate.
 
 The first is ``slices[*].debug.probe`` going from ``"openocd"`` (the oracle,
 at 97ad481b)
@@ -89,6 +89,16 @@ slice's ``command`` runs with cwd=``buildDir`` and no ``-d``, so west
 appends its own default ``build`` level. Allowed ONLY for the six named
 fields and ONLY for that exact one-segment insertion -- see
 ``_NESTED_ARTIFACT_TAILS``.
+
+The fourth is a slice's ``configArtefacts`` list gaining the plan's rendered
+reference artefacts AFTER the oracle's own entries -- ``alp.overlay`` and
+``cmake-args.txt``, in that order (alp-sdk #2771). The oracle predates them.
+Allowed ONLY when the live list is the oracle's list unchanged followed by
+exactly ``[alp.overlay, cmake-args.txt]``, ``[cmake-args.txt]`` (a board with
+no header) or ``[alp.overlay]``, matched by basename -- see
+``_RENDERED_TAILS``. Any change to the oracle's own entries, any other extra
+entry, a different order of these two, and extras placed before the oracle's
+entries still FAIL.
 
 alp-sdk #1982 (the AEN801/AEN701 ``a32_cluster`` MACHINE refusal) is
 NOT a fourth allowance: it is the same class of change as alp-sdk#999
@@ -382,7 +392,40 @@ def normalize_plan(plan: dict) -> dict:
     # the #863/#871 command-arg addition above) -- drop it rather than diff
     # it; the token-vs-absolute SHAPE it flags is already reconciled above.
     normalized.pop("planPathMode", None)
+    # `deferredPlaceholders` (#2696) is another addition the oracle predates.
+    # It is derived purely from config-artefact CONTENTS, which this
+    # comparator deliberately no longer diffs (`_drop_artefact_contents`
+    # above; the emit-snapshot goldens pin them), so drop it too.
+    normalized.pop("deferredPlaceholders", None)
     return normalized
+
+
+#: Basename sequences a slice's ``configArtefacts`` may GAIN, after the oracle's
+#: own entries (alp-sdk #2771, #2777). Exact and ordered: the full tail is
+#: ``alp.overlay, cmake-args.txt, alp_hw_info_build.h, alp-west-libs.yml``.
+#: ``cmake-args.txt`` and ``alp-west-libs.yml`` are unconditional;
+#: ``alp.overlay`` drops on a board with no header (``dts-overlay-unavailable``)
+#: and ``alp_hw_info_build.h`` on a SKU outside the production families
+#: (``hw-info-unavailable``), so those two subsets are legal independently.
+_RENDERED_TAILS = (
+    ("alp.overlay", "cmake-args.txt", "alp_hw_info_build.h", "alp-west-libs.yml"),
+    ("cmake-args.txt", "alp_hw_info_build.h", "alp-west-libs.yml"),
+    ("alp.overlay", "cmake-args.txt", "alp-west-libs.yml"),
+    ("cmake-args.txt", "alp-west-libs.yml"),
+)
+
+#: Synthetic path suffix `_walk_diff` yields for an allowed rendered tail.
+_RENDERED_SUFFIX = "[+rendered]"
+
+
+def _is_rendered_append(path: str, old: list, new: list) -> bool:
+    """True when `new` is `old` unchanged plus one `_RENDERED_TAILS` entry."""
+    if not path.endswith(".configArtefacts") or len(new) <= len(old):
+        return False
+    if new[:len(old)] != old:
+        return False
+    tail = tuple(str(a.get("path", "")).rsplit("/", 1)[-1] for a in new[len(old):])
+    return tail in _RENDERED_TAILS
 
 
 def _walk_diff(path: str, old: Any, new: Any) -> Iterator[tuple[str, Any, Any]]:
@@ -400,6 +443,10 @@ def _walk_diff(path: str, old: Any, new: Any) -> Iterator[tuple[str, Any, Any]]:
         return
     if isinstance(old, list) and isinstance(new, list):
         if len(old) != len(new):
+            if _is_rendered_append(path, old, new):
+                yield (path + _RENDERED_SUFFIX, [],
+                       [a["path"].rsplit("/", 1)[-1] for a in new[len(old):]])
+                return
             yield (f"{path}[len]", len(old), len(new))
             return
         for i, (old_item, new_item) in enumerate(zip(old, new)):
@@ -464,6 +511,8 @@ def diff_plans(oracle: dict, live: dict) -> tuple[list[tuple[str, Any, Any]], li
         elif _is_allowed_additive(path, old, new):
             allowed.append((path, old, new))
         elif _is_allowed_west_nesting(path, old, new):
+            allowed.append((path, old, new))
+        elif path.endswith(_RENDERED_SUFFIX):
             allowed.append((path, old, new))
         else:
             failing.append((path, old, new))

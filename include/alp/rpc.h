@@ -314,10 +314,21 @@ typedef void (*alp_rpc_link_cb_t)(alp_rpc_link_state_t state, void *user);
  *                                       method-name too long
  *           - @ref ALP_ERR_NOMEM     — channel pool exhausted
  *           - @ref ALP_ERR_NOT_READY — RPMsg device or memory
- *                                       region not yet up
+ *                                       region not yet up, or (Linux
+ *                                       UIO) no CM33 beacon
+ *           - @ref ALP_ERR_BUSY      — Linux UIO: the CM33 is still
+ *                                       attached to an earlier session
+ *                                       and cannot reset, or another
+ *                                       process holds the link; also
+ *                                       the single-link busy of a
+ *                                       second concurrent open
+ *           - @ref ALP_ERR_TIMEOUT   — Linux UIO: the CM33 did not
+ *                                       acknowledge the attach reset
  *           - @ref ALP_ERR_NOSUPPORT — SDK built without
  *                                       CONFIG_ALP_SDK_RPC / no
- *                                       OpenAMP backend available
+ *                                       OpenAMP backend available, or
+ *                                       (Linux UIO) the CM33 image
+ *                                       serves no RPC
  */
 alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg);
 
@@ -528,7 +539,9 @@ alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, siz
  *                                    channel's link has already
  *                                    observed @ref ALP_RPC_LINK_LOST --
  *                                    see @ref alp_rpc_link_state and
- *                                    the note below
+ *                                    the note below, OR an earlier call
+ *                                    on this channel timed out (see the
+ *                                    note below)
  *          - @ref ALP_ERR_INVAL   @c method invalid, or
  *                                  @c resp != NULL with
  *                                  @c resp_len == NULL
@@ -546,6 +559,11 @@ alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, siz
  *
  * @note Do not call this from a subscribe callback on the UIO/OpenAMP
  *       backend: it returns @ref ALP_ERR_BUSY instead of blocking.
+ * @note Replies are matched by method name only (the frame has no
+ *       sequence id), so after a call times out (or its wait fails) the
+ *       channel refuses every later call with @ref ALP_ERR_NOT_READY
+ *       until it is closed and reopened -- otherwise that call's late
+ *       reply would be returned to the next call of the same method.
  * @note Concurrent calls on the same channel from multiple threads
  *       are serialised by the SDK; the second caller blocks until
  *       the first call returns or times out.

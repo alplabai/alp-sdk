@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+description: Register-file fake standing in for the TMP112 / RV-3028 on the BRD_I2C emulator.
+compatible: "vnd,som-fake"
+include: [i2c-device.yaml]

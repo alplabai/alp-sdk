@@ -1032,6 +1032,16 @@ def load_removed_allowlist(path: Path) -> dict[tuple[str, str, str], dict[str, A
     return out
 
 
+def _allowed_msg(entry: dict[str, Any], header: str, cat: str, sym: str) -> str:
+    """The `ALLOWED` line for one allowlisted removal (`cat` is the plural
+    snapshot key, e.g. `macros`)."""
+    replacement = entry["replacement"] or "no replacement"
+    return (
+        f"ALLOWED {cat[:-1]} {header}::{sym} "
+        f"(intentional removal, #{entry['issue']} -> {replacement})"
+    )
+
+
 def diff(
     prev: dict[str, Any],
     curr: dict[str, Any],
@@ -1132,7 +1142,20 @@ def diff(
 
     for name in sorted(set(prev_h) | set(curr_h)):
         if name not in curr_h:
-            msgs.append(f"REMOVED header {name}")
+            # A whole header deleted on purpose: if EVERY symbol it
+            # carried has a removed-symbols.json entry, report each as
+            # ALLOWED; one unexplained symbol keeps the single
+            # `REMOVED header` line (and so blocks the gate).
+            gone = [
+                (cat, sym)
+                for cat in ("functions", "typedefs", "macros", "variables")
+                for sym in sorted(prev_h[name].get(cat, {}))
+            ]
+            if gone and all((name, cat[:-1], sym) in removed_allowlist for cat, sym in gone):
+                msgs.extend(_allowed_msg(removed_allowlist[(name, cat[:-1], sym)], name, cat, sym)
+                            for cat, sym in gone)
+            else:
+                msgs.append(f"REMOVED header {name}")
             continue
         if name not in prev_h:
             msgs.append(f"ADDED   header {name}")
@@ -1235,11 +1258,7 @@ def diff(
             continue
         allow_entry = removed_allowlist.get((r_header, r_cat[:-1], r_sym))
         if allow_entry is not None:
-            replacement = allow_entry["replacement"] or "no replacement"
-            msgs.append(
-                f"ALLOWED {r_cat[:-1]} {r_header}::{r_sym} "
-                f"(intentional removal, #{allow_entry['issue']} -> {replacement})"
-            )
+            msgs.append(_allowed_msg(allow_entry, r_header, r_cat, r_sym))
         else:
             msgs.append(f"REMOVED {r_cat[:-1]} {r_header}::{r_sym}")
 

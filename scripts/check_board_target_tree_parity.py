@@ -8,8 +8,8 @@ triple is explicitly named in `_NOT_YET_SUPPORTED` below.
 
 Why this exists (issue #999): a full sweep of `origin/dev` @ 8879597d
 found 11 of 17 declared `topology.<core>.board:` targets -- 8 of 12
-across the AEN family, plus `E1M-NX9101` (m33), `E1M-V2M102`
-(m33_sm), and `E1M-V2N102` (m33_sm) -- naming a board that has no
+across the AEN family, plus `E1M-V2M102`
+(m33_sm) and `E1M-V2N102` (m33_sm) -- naming a board that has no
 tree, e.g. `E1M-AEN701`'s `m55_he` names `alp_e1m_aen701_m55_he`,
 which `zephyr/boards/alp/` does not ship.
 Nothing caught it: alp-sdk's own planner (`--emit build-plan`) emits
@@ -20,7 +20,7 @@ own tooling would have hit first.
 
 Declaring a SKU ahead of its board bring-up is a legitimate roadmap
 state (AEN801 is the lead part; 301/501/701 are deprioritised;
-NX9101 is a placeholder MPN; V2M102/V2N102 are larger-memory variants
+V2M102/V2N102 are larger-memory variants
 of a shipping PCB awaiting their own board tree) -- so this gate does
 NOT require deleting the `board:` key or shipping a stub tree. It
 requires the gap be *declared*: every missing target must be named,
@@ -79,9 +79,6 @@ _NOT_YET_SUPPORTED: frozenset[tuple[str, str, str]] = frozenset(
         # AEN801 lead part; no board bring-up yet.
         ("E1M-AEN701", "m55_hp", "alp_e1m_aen701_m55_hp"),
         ("E1M-AEN701", "m55_he", "alp_e1m_aen701_m55_he"),
-        # E1M-NX9101 (NXP i.MX 93): status.preliminary=true -- the
-        # SKU string itself is a placeholder MPN pending a real BOM.
-        ("E1M-NX9101", "m33", "alp_e1m_nx9101_m33"),
         # E1M-V2M102 / E1M-V2N102: larger-memory BOM variants of the
         # same V2N-family PCB as the shipped V2M101/V2N101 boards
         # (see the V2N-family-is-one-PCB project note); the 101

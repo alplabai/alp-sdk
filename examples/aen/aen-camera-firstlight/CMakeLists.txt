@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # aen-camera-firstlight -- first-light bench proof for RPi-style CSI-2
-# camera shields on the E1M-AEN801/AEN803 EVK, via the portable
-# <alp/camera.h> API. See testcase.yaml for the six camera-shield
+# camera shields on the E1M-AEN801/AEN803 (E8, M55-HE or M55-HP) and
+# E1M-AEN401 (E4, M55-HP only, compile-only) EVK, via the portable
+# <alp/camera.h> API. See testcase.yaml for the seven camera-shield
 # scenarios and README.md for the build command / expected results.
 
 cmake_minimum_required(VERSION 3.20)
@@ -13,12 +14,13 @@ cmake_minimum_required(VERSION 3.20)
 # name (see aen-jpeg-regcheck/CMakeLists.txt for the same note); a plain
 # `west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` would
 # otherwise drop the ITCM RAM-run retarget both overlays carry.
-if(BOARD MATCHES "^alp_e1m_aen801_m55_he")
+if(BOARD MATCHES "^alp_e1m_aen80([13])_m55_(he|hp)")
     set(DTC_OVERLAY_FILE
-        "${CMAKE_CURRENT_SOURCE_DIR}/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay")
-elseif(BOARD MATCHES "^alp_e1m_aen803_m55_he")
+        "${CMAKE_CURRENT_SOURCE_DIR}/boards/alp_e1m_aen80${CMAKE_MATCH_1}_m55_${CMAKE_MATCH_2}_ae822fa0e5597ls0_rtss_${CMAKE_MATCH_2}.overlay")
+elseif(BOARD MATCHES "^alp_e1m_aen401_m55_hp")
+    # E4 (AE402FA0E5597LE0) has only the M55-HP target here.
     set(DTC_OVERLAY_FILE
-        "${CMAKE_CURRENT_SOURCE_DIR}/boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay")
+        "${CMAKE_CURRENT_SOURCE_DIR}/boards/alp_e1m_aen401_m55_hp_ae402fa0e5597le0_rtss_hp.overlay")
 endif()
 
 # Opt-in external-trigger demo (issue #2287): IMX296's fast-trigger exposure

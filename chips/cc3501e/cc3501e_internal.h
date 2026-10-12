@@ -133,11 +133,18 @@ void cc3501e_set_peer_polled(bool on);
 /* True when the host believes the peer is running the POLLED update-mode boot. */
 bool cc3501e_peer_is_polled(void);
 
-/* #1818: max data bytes per OTA_WRITE frame while the peer is polled.  Bench: the
- * update-mode polled slave receives a request payload phase of <= 70 B intact and
- * loses >= 71 B (-5, zero reply header); >= 1024 B misframes.  4 (offset) + 64 +
- * 2 (CRC) = 70 B, the largest frame on the proven side of that boundary. */
-#define CC3501E_POLLED_OTA_CHUNK 64u
+/* #1818, #2728: max data bytes per OTA_WRITE frame while the peer is polled.
+ * The update-mode slave reads each request payload phase byte by byte from its
+ * 32-byte SPI RX FIFO in a polled loop running from XIP flash, and the host
+ * clocks that phase TX-only at full wire speed (#2052) -- a phase longer than
+ * the FIFO overruns it, the slave comes up short, and its CRC check rejects
+ * the frame (RESP_ERR_PROTOCOL, reply one exchange late).  #1818 measured the
+ * edge at 70 B; on bridge fw v0.9.2 a 70 B frame (64 data bytes) failed on the
+ * first write (E1M-AEN803 2026W36-0009, 25 MHz, 2026-10-06).  16 data bytes =
+ * 4 (offset) + 16 + 2 (CRC) = 22 B per phase, inside the FIFO even if the
+ * slave reads nothing during the phase, so it holds regardless of host speed
+ * or firmware build; 16 also divides the 64/256 B window alignment. */
+#define CC3501E_POLLED_OTA_CHUNK 16u
 
 /* True once cc3501e_reply_gate() has ever given up waiting on a stuck-LOW
  * ready_pin (CC3501E_READY_STUCK_LOW_STREAK consecutive full-budget

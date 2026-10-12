@@ -210,3 +210,38 @@ ZTEST(gd32_link_seq_reset, test_stamp_wrap_is_not_a_reset)
 	zassert_equal(g_br.exec[GD32G553_CMD_GPIO_WRITE], 40u);
 	zassert_equal(g_ctx.seq_stale_count, 0u);
 }
+
+/* ---- GET_VERSION cache ------------------------------------------------- */
+
+/* init primes the cache: gd32g553_get_version() must not touch the bus. */
+ZTEST(gd32_link_seq_reset, test_get_version_served_from_cache)
+{
+	gd32g553_version_t v = { 0 };
+
+	zassert_equal(gd32g553_get_version(&g_ctx, &v), ALP_OK);
+	zassert_equal(v.minor, 12u);
+	zassert_equal(g_br.exec[GD32G553_CMD_GET_VERSION], 0u, "cache hit hit the wire");
+
+	/* refresh always goes to the wire. */
+	zassert_equal(gd32g553_refresh_version(&g_ctx, &v), ALP_OK);
+	zassert_equal(g_br.exec[GD32G553_CMD_GET_VERSION], 1u);
+}
+
+/* OTA commit reboots the bridge into a possibly different image. */
+ZTEST(gd32_link_seq_reset, test_ota_commit_invalidates_version_cache)
+{
+	gd32g553_version_t v = { 0 };
+
+	zassert_equal(gd32g553_ota_commit(&g_ctx), ALP_OK);
+	zassert_equal(gd32g553_get_version(&g_ctx, &v), ALP_OK);
+	zassert_equal(g_br.exec[GD32G553_CMD_GET_VERSION], 1u, "stale version served after OTA");
+	zassert_equal(gd32g553_get_version(&g_ctx, &v), ALP_OK);
+	zassert_equal(g_br.exec[GD32G553_CMD_GET_VERSION], 1u, "cache not re-armed");
+}
+
+/* Re-init and deinit drop the cache. */
+ZTEST(gd32_link_seq_reset, test_deinit_invalidates_version_cache)
+{
+	gd32g553_deinit(&g_ctx);
+	zassert_false(g_ctx.version_cached);
+}

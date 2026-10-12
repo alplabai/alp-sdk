@@ -326,13 +326,13 @@ _decide_overlap() {
         return 1
     fi
     if [ -n "${ALP_TWISTER_JOBS:-}" ]; then
-        echo "test-all.sh: ALP_TWISTER_JOBS is set -- running stages serially (no overlap)."
+        echo "test-all.sh: ALP_TWISTER_JOBS is set -- running stages serially (no overlap)." >&2
         return 1
     fi
     local avail_kb min_kb="${ALP_GATE_MIN_MEM_KB:-12582912}"
     avail_kb="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
     if [ -n "${avail_kb}" ] && [ "${avail_kb}" -lt "${min_kb}" ]; then
-        echo "test-all.sh: MemAvailable ${avail_kb} kB < ${min_kb} kB -- running stages serially (no overlap)."
+        echo "test-all.sh: MemAvailable ${avail_kb} kB < ${min_kb} kB -- running stages serially (no overlap)." >&2
         return 1
     fi
     return 0
@@ -1147,6 +1147,14 @@ if [ "${LIST_REQUIRED_GATE_SCRIPTS}" -eq 1 ]; then
     exit 0
 fi
 
+stage_aen_trace_runner_host() {
+    # examples/aen/aen-trace-runner host unit tests (CI: pr-plain-cmake.yml
+    # aen-trace-runner-host).  Needs a POSIX cc; the script self-skips its
+    # A32/qemu stage when the cross toolchain is absent.
+    command -v cc >/dev/null 2>&1 || return 99
+    bash examples/aen/aen-trace-runner/tests/host/runner.sh
+}
+
 stage_required_gate_scripts() {
     if ! command -v python3 >/dev/null 2>&1; then
         return 99
@@ -1196,8 +1204,7 @@ stage_required_gate_scripts() {
 
     # board.yaml schema sweep -- canonical template + every
     # examples/*/board.yaml + tests/*/board.yaml, mirroring the
-    # pr-metadata-validate.yml "schema sweep" step (including its
-    # rpmsg-imx93 exclusion -- see board-yaml-sweep-exclude.sh).
+    # pr-metadata-validate.yml "schema sweep" step.
     if [ -f scripts/validate_board_yaml.py ]; then
         ran=1
         if [ -f metadata/templates/board.yaml.example ]; then
@@ -1205,13 +1212,10 @@ stage_required_gate_scripts() {
             python3 scripts/validate_board_yaml.py \
                 --input metadata/templates/board.yaml.example || failed=1
         fi
-        # shellcheck source=scripts/board-yaml-sweep-exclude.sh
-        source "${REPO_ROOT}/scripts/board-yaml-sweep-exclude.sh"
         while IFS= read -r f; do
             echo "--- validate_board_yaml.py ${f} ---"
             python3 scripts/validate_board_yaml.py --input "${f}" || failed=1
-        done < <(find examples tests -name board.yaml 2>/dev/null \
-                  | grep -v "${BOARD_YAML_SWEEP_EXCLUDE_PATTERN}")
+        done < <(find examples tests -name board.yaml 2>/dev/null)
     fi
 
     # gd32-bridge protocol vectors must not drift from the generator
@@ -1379,10 +1383,11 @@ stage_generated_files() {
     # some of its artifacts is not a drift check.
     require_jsonschema_2020 stage_generated_files || return 99
     local gens=(gen_soc_caps gen_status_strings gen_board_header
-                gen_cc3501e_gpio_routes gen_power_tree
+                gen_cc3501e_gpio_routes gen_power_tree gen_linux_ownership_dt
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
-                gen_verification_status gen_chip_driver_classification)
+                gen_verification_status gen_chip_driver_classification
+                gen_amp_window)
     local g rc
     local gen_total=0 gen_skipped=0
     for g in "${gens[@]}"; do
@@ -1527,11 +1532,13 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
         include/alp docs/abi src/cap.c src/status_strings.c \
         metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
         metadata/socs/renesas/rzv2n/n44.json \
+        meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi \
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
         docs/verification-status.md \
         docs/chip-driver-classification.md \
         examples/aen \
         src/backends/gpio/cc3501e_rev_dependent_pins.c \
+        src/backends/rpc/alp_amp_window.h \
         docs/diagnostics 2>/dev/null; then
         echo "git add -N failed -- an expected generated path is missing from the tree"
         return 1
@@ -1553,22 +1560,26 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             include/alp docs/abi src/cap.c src/status_strings.c \
             metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
             metadata/socs/renesas/rzv2n/n44.json \
+            meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
             docs/chip-driver-classification.md \
             examples/aen \
             src/backends/gpio/cc3501e_rev_dependent_pins.c \
+            src/backends/rpc/alp_amp_window.h \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
         git --no-pager diff --stat -- \
             include/alp docs/abi src/cap.c src/status_strings.c \
             metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
             metadata/socs/renesas/rzv2n/n44.json \
+            meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-ownership.dtsi \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
             docs/chip-driver-classification.md \
             examples/aen \
             src/backends/gpio/cc3501e_rev_dependent_pins.c \
+            src/backends/rpc/alp_amp_window.h \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
     fi
@@ -1671,6 +1682,7 @@ else
     fi
 
     launch "metadata-validate" stage_metadata_validate
+    launch "aen-trace-runner-host" stage_aen_trace_runner_host
 
     # Documentation lint -- cheap, always runnable, no special tooling.
     if [ -f scripts/lint_doc_yaml_fragments.py ]; then

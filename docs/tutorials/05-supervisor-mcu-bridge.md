@@ -52,7 +52,7 @@ advanced-timer blocks) lives in
 | Opcode  | Helper                            | What it does                                  |
 |---------|-----------------------------------|-----------------------------------------------|
 | 0x00    | `gd32g553_ping`                   | Liveness probe                                |
-| 0x01    | `gd32g553_get_version`            | Firmware version triple                       |
+| 0x01    | `gd32g553_get_version`            | Firmware version triple (cached after init; `gd32g553_refresh_version` re-reads) |
 | 0x02    | `gd32g553_get_build_id`           | 20-char SHA-1 truncation                      |
 | 0x03    | `gd32g553_get_reset_reason`       | Why the GD32 last reset                       |
 | 0x10/11 | `gd32g553_gpio_read/write`        | Masked GD32-side GPIO access                  |

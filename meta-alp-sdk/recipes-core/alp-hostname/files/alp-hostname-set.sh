@@ -13,8 +13,19 @@
 # "e1m-v2m103-2026w38-0001". The whole serial, not just its index: the
 # index restarts every ISO week.
 #
-# ALP_SKU_PROP / ALP_SERIAL_PROP / ALP_HOSTNAME_FILE / ALP_KERNEL_HOSTNAME
-# override the paths for tests/scripts/test_alp_hostname_set.py only.
+# The serial stays out of the root shell prompt (alp-prompt.sh strips it from
+# the hostname there) and appears in the pre-login banner instead: a
+# "Module: <SKU>  Serial: <serial>" line written to /run/alp-module.issue. The
+# image ships /etc/issue.d/10-alp-module.issue as a symlink to it, and agetty
+# (util-linux 2.39.3) appends /etc/issue.d/*.issue to /etc/issue; it ignores
+# /run/issue.d whenever /etc/issue exists, and silently skips a dangling link,
+# so a blank module simply shows no line. systemd's own "Welcome to <distro>!"
+# line is printed by PID 1 before the identity is known, so it cannot carry
+# it. No SKU, no banner line.
+#
+# ALP_SKU_PROP / ALP_SERIAL_PROP / ALP_HOSTNAME_FILE / ALP_KERNEL_HOSTNAME /
+# ALP_ISSUE_FILE override the paths for tests/scripts/test_alp_hostname_set.py
+# only.
 
 set -u
 
@@ -22,14 +33,18 @@ prop=${ALP_SKU_PROP:-/proc/device-tree/chosen/alp,sku}
 sprop=${ALP_SERIAL_PROP:-/proc/device-tree/chosen/alp,serial}
 etc=${ALP_HOSTNAME_FILE:-/etc/hostname}
 kern=${ALP_KERNEL_HOSTNAME:-/proc/sys/kernel/hostname}
+issue=${ALP_ISSUE_FILE:-/run/alp-module.issue}
 [ -r "$prop" ] || exit 0
 
 # "E1M-V2M103" -> "e1m-v2m103": lowercase, [a-z0-9-] only, no stray dashes.
 # This is the whole trust boundary for a raw EEPROM field: tr -c maps every
 # other byte to '-' before the value is used anywhere.
-sanitise() {
-	tr -d '\0' <"$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' |
+sanitise_keep_case() {
+	tr -d '\0' <"$1" | tr -c 'A-Za-z0-9-' '-' |
 		sed -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+}
+sanitise() {
+	sanitise_keep_case "$1" | tr '[:upper:]' '[:lower:]'
 }
 
 name=$(sanitise "$prop")
@@ -37,6 +52,15 @@ name=$(sanitise "$prop")
 if [ -r "$sprop" ]; then
 	serial=$(sanitise "$sprop")
 	[ -n "$serial" ] && name="$name-$serial"
+fi
+
+# Pre-login banner line: the SKU and serial as provisioned (original case).
+banner="Module: $(sanitise_keep_case "$prop")"
+[ -r "$sprop" ] && [ -n "$serial" ] && banner="$banner  Serial: $(sanitise_keep_case "$sprop")"
+if mkdir -p "$(dirname "$issue")" 2>/dev/null && echo "$banner" >"$issue" 2>/dev/null; then
+	echo "alp-hostname: login banner written to $issue"
+else
+	echo "alp-hostname: WARNING: could not write the login banner to $issue" >&2
 fi
 
 # Write the kernel hostname directly (no dependency on a hostname binary)

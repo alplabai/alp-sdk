@@ -15,7 +15,7 @@ every planner change.
 | Seam | Checks | Status |
 |---|---|---|
 | **1 — plan shape** | Does a live `--emit build-plan` still match a frozen, hand-verified oracle's command / env / appDir / skip-fail-decision *shape*, field for field, over the SoM matrix? Deliberately does NOT re-diff the materialised config-artefact content (alp.conf/local.conf/sysbuild-conf bytes) — see "Seam-1 scope" below. Toolchain-free; runs on any `ubuntu-latest` runner. | **Implemented here**: `seam1_field_diff.py` + `.github/workflows/parity-seam1.yml`'s `seam1` job. |
-| **2 — real build** | Materialise byte-check and an actual `west`/Zephyr build off the plan — the thing seam 1 can't catch (a plan that *looks* right but doesn't build). Renode boot was part of this seam's original design; Renode is now retired for alp-sdk's own build validation (ADR [0022](../../docs/adr/0022-python-executor-renode-retirement.md)). | **Not seeded here — implemented on the tan-cli side.** alp-sdk has no job for this seam. tan-cli's own `.github/workflows/parity.yml` `seam2` job runs it against alp-sdk's pinned tag: `tan build --materialise`, a real `west`/Zephyr build driven through `tan build` (not plain `west`, so the executor itself is under test), and a Renode boot smoke assertion on the resulting ELF. It is a working job, not a placeholder — `ubuntu-latest` installs the whole toolchain (west / Zephyr SDK / Renode) in-job. |
+| **2 — real build** | Materialise byte-check and an actual `west`/Zephyr build off the plan — the thing seam 1 can't catch (a plan that *looks* right but doesn't build). Renode boot was part of this seam's original design; Renode is now retired for alp-sdk's own build validation (ADR [0022](../../docs/adr/0022-python-executor-renode-retirement.md)). | **Not seeded here — implemented on the tan-cli side.** alp-sdk has no job for this seam. tan-cli's own `.github/workflows/parity.yml` `seam2` job runs it against alp-sdk's pinned tag: `tan build --materialise`, and a real `west`/Zephyr build driven through `tan build` (not plain `west`, so the executor itself is under test), ending at an ARM-ELF assertion on the result. It is a working job, not a placeholder — `ubuntu-latest` installs the whole toolchain (west / Zephyr SDK) in-job. The former Renode boot stage was removed with the retirement. |
 
 Yocto/A-core artefact parity is explicitly **out of scope** for both seams —
 no bitbake-capable runner infra exists, and bitbake output isn't
@@ -79,14 +79,6 @@ uncovered content-check hole):
 | `multicore_heterogeneous-offload` | `examples/multicore/heterogeneous-offload/board.yaml` | `hetero-offload.build-plan.snap` |
 | `multicore_rpmsg-aen` | `examples/multicore/rpmsg-aen/board.yaml` | `rpmsg-aen.build-plan.snap` |
 | `multicore_rpmsg-v2n` | `examples/multicore/rpmsg-v2n/board.yaml` | `rpmsg-v2n.build-plan.snap` |
-
-`multicore_rpmsg-imx93` is REMOVED from the oracle corpus (#1025): `seam1_
-field_diff.py` re-emits every corpus member's `boardYaml` live, and
-`E1M-NX9101`'s only hw_rev (imx93 r1) is `status: tbd` -- refused outright
-by the hw_rev-buildable gate, so its live emit no longer succeeds at all.
-See `tests/parity/oracle/ORACLE-PROVENANCE.txt`'s #1025 entry. Re-add the
-fixture (a fresh capture, not a git-history restore) once imx93 r1 carries
-a buildable status.
 
 A future oracle fixture MUST get a matching emit-snapshot `build-plan` case
 in the same change, or this coverage table (and the content-check it

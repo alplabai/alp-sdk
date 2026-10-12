@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1M-V2M103 on E1M-X EVK, running the CM33 GD32-bridge test image
+# (examples/v2n/v2n-gd32-bridge-functional or v2n-gd32-bridge-hil-soak,
+# packaged as m33_fw.bin and flashed with the provisioning write_cm33 step at
+# mtd1 0x1a0000, then a FULL SoC reboot on a DSW1 mode 2 xSPI boot).
+#
+# The CM33 has no console and its verdict sits in secure SRAM0, which Linux
+# cannot read.  The apps also publish a versioned 20-word record at A55
+# 0x4F700F00 (include/alp/protocol/gd32_bridge_results.h), just below the
+# liveness beacon at 0x4F700FF0 that provisioning's cm33_running reads.  This
+# spec reads it with python3 over /dev/mem (read-only; the same mechanism as
+# cm33_running's fallback) and asserts: no failed tests, tests ran, the
+# beacon kind is the test image's 0x200 (so a stale record left by another image cannot pass), the beacon heartbeat advances, and on a protocol 0.15 bridge the negotiated
+# word 0x1B (STATUS_SEQ|BIG_FRAME|ADC_STREAM2|BATCH), a 252-byte payload,
+# BATCH and ADC_STREAM2 both OK, nothing skipped, READ2 gaps 0.  For a soak
+# image it waits 5 s and asserts soak_cycles and soak_elapsed_s strictly
+# increase (the heartbeat is a timer and keeps ticking if the soak hangs).
+# scripts/bench/v2n/read_gd32_results.py prints the same record for humans.
+#
+# ssh_command spec: no example binary, no scp.
+
+schema_version: 1
+name: v2m103-gd32-bridge-results
+description: |
+  CM33 GD32-bridge test image published a clean result record to Linux.
+
+flash_method: ssh-run
+ssh_command: |-
+  python3 - <<'PY'
+  import mmap, os, struct, time
+  def snap():
+      m = mmap.mmap(os.open('/dev/mem', os.O_RDONLY | os.O_SYNC), 4096, mmap.MAP_SHARED, mmap.PROT_READ, offset=0x4F700000)
+      # One aligned u32 per load: the no-map range is Device memory under /dev/mem.
+      rd = lambda off, n: tuple(struct.unpack_from('<I', m, off + 4 * i)[0] for i in range(n))
+      for _ in range(50):
+          a = rd(0xF00, 20)
+          if a[2] % 2 == 0 and a == rd(0xF00, 20):
+              return a, rd(0xFF0, 3)
+          time.sleep(0.01)
+      return None, None
+  r, b = snap()
+  bad = []
+  if r is None or r[0] != 0x47443352 or r[1] != 2:
+      print('HIL_GD32R_BAD no valid record (magic/layout)')
+  else:
+      (magic, layout, seq, kind, state, p, f, sk, fw, feat, mp, flags, first, drop, gaps, cyc, err, tmo, el, fmask) = r
+      if b[0] != 0xA10D0683 or b[1] != 0x200: bad.append('beacon magic/kind %#x/%#x (want 0xA10D0683/0x200: not the test image)' % (b[0], b[1]))
+      if kind not in (1, 2): bad.append('kind %d' % kind)
+      if state != 2: bad.append('state %#x (want 2)' % state)
+      if f or (kind == 2 and err): bad.append('failures fail=%d err=%d fail_rows=%s' % (f, err, [i for i in range(32) if fmask >> i & 1]))
+      if p == 0: bad.append('no test passed')
+      if gaps: bad.append('read2 gaps %d' % gaps)
+      if (fw >> 16, (fw >> 8) & 0xFF) >= (0, 15):
+          if feat & 0x1B != 0x1B: bad.append('features %#x' % feat)
+          if mp != 252: bad.append('max_payload %d' % mp)
+          if flags & 0x18 != 0x18: bad.append('batch/stream2 flags %#x' % flags)
+          if sk: bad.append('skipped %d' % sk)
+      wait = 5.2 if kind == 2 else 2.2
+      time.sleep(wait)
+      r2, b2 = snap()
+      if r2 is None or not 1 <= (b2[2] - b[2]) & 0xFFFFFFFF <= int(wait) + 2: bad.append('beacon heartbeat did not advance 1..%d in %.1f s' % (int(wait) + 2, wait))
+      if kind == 2 and (r2 is None or r2[15] <= cyc or r2[18] <= el): bad.append('soak not cycling: cycles %d->%s elapsed_s %d->%s' % (cyc, r2 and r2[15], el, r2 and r2[18]))
+      for x in bad: print('HIL_GD32R_BAD', x)
+      print('HIL_GD32R kind=%d fw=%d.%d.%d pass=%d fail=%d skip=%d features=%#x max_payload=%d flags=%#x read2_first=%d dropped=%d gaps=%d cycles=%d errors=%d timeouts=%d elapsed_s=%d' % (kind, fw >> 16, (fw >> 8) & 255, fw & 255, p, f, sk, feat, mp, flags, first, drop, gaps, cyc, err, tmo, el))
+  print('HIL_GD32R_DONE')
+  PY
+
+serial:
+  duration_s: 20
+  expect_contains:
+    - "HIL_GD32R kind="
+    - "HIL_GD32R_DONE"
+  expect_absent:
+    - "HIL_GD32R_BAD"

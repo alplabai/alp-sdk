@@ -29,6 +29,13 @@ alp_status_t alp_adc_read_raw(alp_adc_t *a, int32_t *r)
 	(void)r;
 	return ALP_ERR_NOSUPPORT;
 }
+alp_status_t alp_adc_read_raw_n(alp_adc_t *a, int32_t *r, size_t n)
+{
+	(void)a;
+	(void)r;
+	(void)n;
+	return ALP_ERR_NOSUPPORT;
+}
 alp_status_t alp_adc_read_uv(alp_adc_t *a, int32_t *u)
 {
 	(void)a;

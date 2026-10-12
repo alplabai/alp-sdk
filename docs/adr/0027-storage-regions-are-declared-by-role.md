@@ -7,6 +7,10 @@ Relates to: [0011](0011-intra-family-portability.md) (portability is
 INTRA-family), [0020](0020-sdk-owns-build-execution.md) (the planner emits the
 partition table)
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The preset table below was measured at `f30f4d4b` over 11 presets including E1M-NX9101. `metadata/e1m_modules/` now holds 13 presets (AEN301/401/501/601/701/801/803, V2M101/102/103, V2N101/102/103) and none is NX9101; read the non-AEN gap as the V2N/V2M presets only.
+
 ## Context
 
 The customer-facing question this answers: **"if I want a storage region, how

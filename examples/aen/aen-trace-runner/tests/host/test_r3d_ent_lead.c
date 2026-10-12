@@ -28,6 +28,11 @@
 #define W TR_R3D_W
 #define H TR_R3D_H
 
+#ifndef TR_REACT_MS
+/* ms before impact (about 1.5 frames) that a whole part must still lie inside the panel: the nearest
+   it is judged at */
+#define TR_REACT_MS 50
+#endif
 #define TR_LEAD_S 8 /* seconds of warning the player gets: recognisable by then */
 /* Screen-size targets tuned at TR_VIEW_TUNED_H and rescaled to the game
  * viewport (r3d.h TR_VIEW_PX): the whole picture scales with TR_VIEW_H. */
@@ -41,6 +46,12 @@
 #define ROAD_CONTRAST \
 	40 /* ... of the road against the haze: neon city's dark board under its dark purple glow is 52
 			  * at the far end (the board's own colour, not the fog: 0.2 of it was 8,800 deep) */
+
+/* ... of a pixel of the scenery off the first pixel of its span. 30 until the native-800 /
+ * 3-5-game framing: MEMORY CANYON's first far row under the skyline then has its left
+ * scenery at 28 -- fogged to the haze, still a visible step, and an EMPTY span (the defect
+ * this guards) reads 0. */
+#define SCENERY_CONTRAST 24
 
 /* Game steps per second at the play pace (state.h: 0.5x = 20). */
 #define STEPS_S (TR_GAME_PACE_Q8 * 40u / 256u)
@@ -133,7 +144,7 @@ int main(void)
 
 		/* The far road: every row from the skyline's foot down to
 		 * TR_APPEAR_PX under the horizon shows the board over the lanes
-		 * (x 300..420, a majority >= ROAD_CONTRAST off the fog colour) -- the
+		 * (x 340..460, the 120 px about the centre, a majority >= ROAD_CONTRAST off the fog colour) -- the
 		 * haze no longer eats it (nearer, the zones' own ground art sets
 		 * the contrast, not the fog). */
 		assert(tr_r3d_project(
@@ -146,7 +157,7 @@ int main(void)
 		for (int y = foot + 1; y <= hz + TR_APPEAR_PX; y++) {
 			int n = 0;
 
-			for (int x = 300; x <= 420; x++) {
+			for (int x = W / 2 - 60; x <= W / 2 + 60; x++) {
 				n += contrast(fb0[y * W + x], bg.ground) >= ROAD_CONTRAST;
 			}
 			if (n <= 60) {
@@ -214,7 +225,8 @@ int main(void)
 					x1s = sv.x >> TR_R3D_SUB;
 					for (int x = x0s < x1s ? x0s : x1s; x <= (x0s < x1s ? x1s : x0s); x++) {
 						n += x >= 0 && x < W &&
-						     contrast(fb0[y * W + x], fb0[y * W + (x0s < x1s ? x0s : x1s)]) >= 30;
+						     contrast(fb0[y * W + x], fb0[y * W + (x0s < x1s ? x0s : x1s)]) >=
+						         SCENERY_CONTRAST;
 					}
 					side += n > 0;
 				}
@@ -286,6 +298,104 @@ int main(void)
 			assert((w >= TR_REC_PX && h >= TR_REC_MIN) || (h >= TR_REC_PX && w >= TR_REC_MIN));
 			assert((sv.y >> TR_R3D_SUB) > foot); /* on the visible road */
 		}
+	}
+
+	/* 2b. Framing at the narrower panel: the render is 800 wide and the RK055 shows its centre
+	 * 720 columns [40, 760) (tr_frame_in_t.fw). With the runner in the middle lane, the centre of
+	 * either OUTER lane at the runner's own depth -- the nearest a part is drawn before it passes
+	 * the camera -- and a whole pickup standing there must lie inside them. (An obstacle's body is
+	 * lane-wide and so, at that depth, reaches past 40 / 760 on the narrower panel: it is on its way
+	 * out of the picture by then; the run is lost or won before. The spans are printed.) */
+	{
+		tr_frame_in_t none = tr_scene_golden_in(3000, 1);
+		tr_sv_t       sv;
+		float         vz;
+
+		tr_scene_init(&s);
+		tr_scene_step(&s, &none);
+		render(&s, &none, fb0);
+		for (unsigned j = 0; j < sizeof(k) / sizeof(k[0]); j++) {
+			for (uint8_t lane = 0; lane < TR_LANES; lane += 2) {
+				tr_frame_in_t in = none;
+				int           x0, y0, x1, y1;
+
+				in.ents[5] = (tr_pkt_ent_t){ k[j].kind, lane, k[j].low, 0, (int16_t)ry, 0 };
+				render(&s, &in, fb);
+				assert(part_box(&x0, &y0, &x1, &y1) > 0);
+				assert(tr_r3d_project(&cam,
+				                      (tr_v3_t){ (lane == 0 ? -1.0f : 1.0f) * (float)TR_PROJ_LANE_W,
+				                                 0.0f,
+				                                 tr_scene_ent_z(&in, 5) },
+				                      &sv,
+				                      &vz));
+				int cx = sv.x >> TR_R3D_SUB;
+
+				printf("  %-13s outer lane %d at the runner: lane centre column %d, part columns "
+				       "%d..%d\n",
+				       k[j].name,
+				       lane,
+				       cx,
+				       x0,
+				       x1);
+				assert(cx >= (W - 720) / 2 + 60 && cx < (W + 720) / 2 - 60); /* room for a body */
+				if (k[j].kind == 2) { /* a pickup is small: all of it inside the crop */
+					assert(x0 >= (W - 720) / 2 && x1 < (W + 720) / 2);
+				}
+			}
+		}
+	}
+
+	/* 2c. Framing on BOTH panels (the focal length follows the panel: r3d_scene.h tr_scene_f_px):
+	 * a whole obstacle in an OUTER lane, at the depth a player still has TR_REACT_MS to react at,
+	 * lies inside the columns the panel shows -- all 800 on the Riverdi, the centre 720 on the
+	 * RK055 (which used to lose ~40 px of it at the edges). Lane spacing and collision are world
+	 * units and not touched. */
+	assert(tr_scene_f_px(800u) == TR_CAM_F_PX &&
+	       tr_scene_f_px(0u) == TR_CAM_F_PX); /* the Riverdi: untouched */
+	assert(tr_scene_f_px(720u) > 486.0f && tr_scene_f_px(720u) < 487.0f); /* (720 / 2) / 0.74 */
+	assert(tr_scene_f_px(816u) == TR_CAM_F_PX); /* a width the renderer refuses: the whole render */
+	for (int pass = 0; pass < 2; pass++) {
+		const unsigned fw   = pass ? 800u : 720u;
+		const int      x0c  = (W - (int)fw) / 2;
+		tr_frame_in_t  none = tr_scene_golden_in(3000, 1);
+		int            lo = W, hi = -1;
+
+		none.fw = (uint16_t)fw;
+		tr_scene_init(&s);
+		tr_scene_step(&s, &none);
+		render(&s, &none, fb0);
+		for (unsigned j = 0; j < 2; j++) { /* the low and the high obstacle: lane-wide bodies */
+			for (uint8_t lane = 0; lane < TR_LANES; lane += 2) {
+				tr_frame_in_t in = none;
+				int           x0, y0, x1, y1;
+
+				in.ents[5] = (tr_pkt_ent_t){
+					k[j].kind,
+					lane,
+					k[j].low,
+					0,
+					(int16_t)(ry - TR_REACT_MS * (int)STEPS_S * TR_SCROLL_PX / 1000),
+					0
+				};
+				render(&s, &in, fb);
+				assert(part_box(&x0, &y0, &x1, &y1) > 0);
+				/* the OUTER edge of the outer lane's body (the inner one is the runner's side) */
+				if (lane == 0) {
+					lo = x0 < lo ? x0 : lo;
+				} else {
+					hi = x1 > hi ? x1 : hi;
+				}
+			}
+		}
+		printf("fw %u: outer-lane obstacles %d ms before the runner span columns %d..%d (panel "
+		       "shows %d..%d)\n",
+		       fw,
+		       TR_REACT_MS,
+		       lo,
+		       hi,
+		       x0c,
+		       x0c + (int)fw - 1);
+		assert(lo >= x0c && hi < x0c + (int)fw);
 	}
 
 	/* 3. A run's worth of parts: one spawned every TR_SPAWN_TICKS steps

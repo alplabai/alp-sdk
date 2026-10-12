@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+description: Test stand-in for a pinctrl controller holding the SoM power pad state.
+compatible: "vnd,som-pinctrl-test"
+child-binding:
+  description: A pinctrl state.
+  child-binding:
+    description: A pin group.
+    properties:
+      pins:
+        type: array
+        required: true

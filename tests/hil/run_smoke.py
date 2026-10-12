@@ -110,6 +110,7 @@ class SmokeResult:
     spec: SmokeSpec
     ok: bool
     failures: tuple[str, ...]    # empty when ok=True
+    output: str = ""             # captured board output, printed on FAIL
 
 
 # ---------------------------------------------------------------------
@@ -412,7 +413,9 @@ def capture_command(spec: SmokeSpec) -> list[str]:
     port isn't resolved yet (--dry-run touches no hardware)."""
     if spec.flash_method == SSH_RUN and spec.ssh_command:
         host = spec.ssh_host or "<unresolved: pass --ssh-host or set ALP_HIL_SSH_HOST>"
-        return ["ssh", host, spec.ssh_command]
+        # The command travels on stdin (see _run_ssh_spec), not argv:
+        # Windows ssh.exe mangles quotes/`$(...)` in an argv string.
+        return ["ssh", host, "sh", "-s"]
     if spec.flash_method == SSH_RUN:
         host = spec.ssh_host or "<unresolved: pass --ssh-host or set ALP_HIL_SSH_HOST>"
         remote = f"/tmp/{_artifact_name(spec)}"
@@ -464,15 +467,18 @@ def assert_serial(spec: SmokeSpec, captured: str) -> list[str]:
 # ---------------------------------------------------------------------
 
 
-def _run(cmd: list[str]) -> tuple[int, str]:
+def _run(cmd: list[str], stdin: str | None = None) -> tuple[int, str]:
     """Run a subprocess and capture combined stdout+stderr.  Returns
     (returncode, output).  Doesn't raise on non-zero exit -- the
-    caller decides whether to fail the spec."""
+    caller decides whether to fail the spec.  `stdin` is fed to the child."""
+    # Bytes mode: on Windows, text mode would write each stdin newline as
+    # CRLF, and the target's sh then chokes on the carriage return.
     proc = subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        cmd, input=None if stdin is None else stdin.encode("utf-8"), capture_output=True,
         env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
     )
-    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+    out = (proc.stdout or b"") + (proc.stderr or b"")
+    return proc.returncode, out.decode("utf-8", errors="replace")
 
 
 def run_spec(spec: SmokeSpec, *, dry_run: bool = False) -> SmokeResult:
@@ -534,9 +540,9 @@ def _run_ssh_spec(spec: SmokeSpec) -> SmokeResult:
         return SmokeResult(spec, False, (
             "no ssh host resolved -- pass --ssh-host or set ALP_HIL_SSH_HOST",))
     if spec.ssh_command:
-        _, out = _run(capture_command(spec))
+        _, out = _run(capture_command(spec), stdin=spec.ssh_command + "\n")
         failures = assert_serial(spec, out)
-        return SmokeResult(spec, not failures, tuple(failures))
+        return SmokeResult(spec, not failures, tuple(failures), out)
     artifact = Path(spec.artifact_dir) / _artifact_name(spec)
     if not spec.artifact_dir or not artifact.is_file():
         return SmokeResult(spec, False, (
@@ -560,12 +566,15 @@ def _run_ssh_spec(spec: SmokeSpec) -> SmokeResult:
     # on stdout, which the spec's expectations check.
     _, out = _run(capture_command(spec))
     failures = assert_serial(spec, out)
-    return SmokeResult(spec, not failures, tuple(failures))
+    return SmokeResult(spec, not failures, tuple(failures), out)
 
 
 # ---------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------
+
+
+_OUTPUT_TAIL = 2000  # chars of board output shown per failed spec
 
 
 def _print_summary(results: list[SmokeResult]) -> int:
@@ -578,6 +587,13 @@ def _print_summary(results: list[SmokeResult]) -> int:
         print(f"  [{marker}] {r.spec.name}  ({r.spec.source_path.name})")
         for f in r.failures:
             print(f"     - {f}")
+        if not r.ok and r.output.strip():
+            out = r.output.strip()
+            if len(out) > _OUTPUT_TAIL:
+                out = "...[truncated]\n" + out[-_OUTPUT_TAIL:]
+            print("     board output:")
+            for line in out.splitlines():
+                print(f"       | {line}")
     return 0 if not failed else 1
 
 

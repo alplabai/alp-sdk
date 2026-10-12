@@ -94,10 +94,10 @@ void alp_inference_deepx_close(struct alp_inference *h)
 
 /* <alp/ext/deepx/inference.h> hooks -- unused here, present so the
  * dispatcher links (see src/yocto/inference_yocto.c). */
-alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, unsigned bound)
+alp_status_t alp_inference_deepx_bind_cores(struct alp_inference *h, uint32_t mask)
 {
 	(void)h;
-	(void)bound;
+	(void)mask;
 	return ALP_ERR_NOSUPPORT;
 }
 

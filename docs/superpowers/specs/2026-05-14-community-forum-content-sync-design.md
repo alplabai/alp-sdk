@@ -1,5 +1,7 @@
 # community.alplab.ai — content sync (scope A)
 
+> **Note (2026-10-10):** E1M-NX9101 / NXP i.MX 93 was removed in #2781 / #2782 (67ed22d86; the module was never produced): the `imx93` SoM tag below is obsolete.
+
 > **Historical transcript.** Design spec dated 2026-05-14. The SDK
 > has since shipped through the v0.15.0 release candidate
 > (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing

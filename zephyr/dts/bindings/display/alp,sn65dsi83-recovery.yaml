@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Health check and recovery of a TI SN65DSI83 bridge, run by the core that owns
+  its I2C bus when a DIFFERENT core initialised the bridge (alp,i2c-handover:
+  the display core configures the bridge, then gives the I2C controller to the
+  core that owns it for good).  Declare it as a child of the I2C bus at the
+  bridge's address, next to the bridge owner's ti,sn65dsi83 node with the same
+  recovery-recipe-address.
+
+  The agent does nothing until the recipe's magic word is set (a build whose
+  display is not behind a bridge never publishes one), and never writes unless
+  the bridge's ID registers read back.  Driver: zephyr/drivers/display/
+  sn65dsi83_recovery_agent.c.
+
+compatible: "alp,sn65dsi83-recovery"
+
+include: [i2c-device.yaml]
+
+properties:
+  recipe-address:
+    type: int
+    required: true
+    description: |
+      Address of the shared `struct sn65dsi83_recipe`; the same value as the
+      bridge node's recovery-recipe-address on the display core.

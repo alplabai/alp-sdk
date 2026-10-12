@@ -14,7 +14,7 @@
  * ("renesas:rzv2n:n44", ALP_SOC_REF_STR on this SoC -- see
  * include/alp/soc_caps.h) so it outranks yocto_drv.c's
  * silicon_ref="*"/priority=100 registration on V2N builds only; every
- * other Linux target (i.MX93, DEEPX DX-M1, ...) keeps using the
+ * other Linux target (DEEPX DX-M1, ...) keeps using the
  * `/dev/rpmsg*` backend unchanged (mirrors the exact pattern
  * src/backends/camera/v2n_n44_isp.c already uses to override
  * src/backends/camera/zephyr_video.c on this one SoC -- see that
@@ -49,12 +49,13 @@
  *      directly rather than assuming the callback is required.
  *   3. `remoteproc_add_mem()` for rsctbl / vring-ctl0 / vring-ctl1 /
  *      vring-shm0 / vring-shm1, each with `da = pa + 0x50000000`
- *      (`ALP_V2N_A55_TO_M33_NS_OFFSET` -- CORRECTED alp-sdk #683 from
+ *      (`ALP_AMP_A55_TO_CM33_NS_OFFSET` -- CORRECTED alp-sdk #683 from
  *      0x20000000, the RZ/V2L offset this file was ported from; see
  *      that macro's doc comment) and the metal-mapped `io` region.
  *   4. `remoteproc_set_rsc_table()` pointed at the rsctbl UIO mapping
  *      (the M33 already wrote it there; this call PARSES, never
  *      writes, matching "attach, no load").
+ *   4b. `uio_attach_reset()` (#2586) -- see "Re-attach" below.
  *   5. `remoteproc_create_virtio(&ch->rproc, 0, VIRTIO_DEV_DRIVER,
  *      NULL)` -- reads the resource table's single `fw_rsc_vdev`
  *      entry, creates both vrings by looking up their `da` in the
@@ -175,6 +176,27 @@
  * it cleared, so the caller may free `user` on return; it skips the
  * wait on the IRQ thread itself.
  *
+ * @par Re-attach in one CM33 boot and timed-out calls (#2586)
+ * Every open re-creates the virtio driver state and OpenAMP zeroes both
+ * vrings, while the CM33 keeps its ring indices for its whole boot.
+ * `uio_attach_reset()` therefore asks a CM33 still bound to an earlier
+ * session to drop its virtio device first: the CM33 publishes "bound" as an
+ * ODD attach-epoch word at rsctbl+0xFFC (EVEN = waiting), so on an odd
+ * epoch the A55 writes vdev.status = 0, kicks, and waits for the epoch to
+ * turn even.  A CM33 whose beacon version is below 2 cannot, and a second
+ * open is refused with ALP_ERR_BUSY.  The same check fails the open when
+ * there is no beacon (ALP_ERR_NOT_READY) or the beacon says the image
+ * serves no RPC (version >= 0x100, the idle stock shim with the heartbeat
+ * beacon, which is still a pending branch: ALP_ERR_NOSUPPORT; a shim
+ * without a beacon fails NOT_READY).  Open also takes flock(LOCK_EX |
+ * LOCK_NB) on the rsctbl UIO device node, so a second PROCESS attaching
+ * to the same CM33 gets ALP_ERR_BUSY instead of resetting a live link.
+ *
+ * Replies match calls by method name only (no sequence id), so a call
+ * that gives up after its request went out poisons the channel: later
+ * calls return ALP_ERR_NOT_READY until close + reopen, instead of
+ * receiving the previous call's late reply.
+ *
  * @par Known limitation (ponytail)
  * Between libmetal's IRQ thread loading the handler/arg and
  * `uio_rproc_notify_isr()` raising `isr_active`, a concurrent external
@@ -188,7 +210,7 @@
  * `y_open()` with ALP_ERR_BUSY rather than pretending to support
  * multiple simultaneous UIO/OpenAMP links this hardware doesn't have.
  *
- * @par A55 receive line = GIC_SPI 404 (MHU-B SWINT unit 12)
+ * @par A55 receive line = GIC_SPI 404 (MHU-B SWINT unit 12) or 385 (rsp_ch8_ns)
  * `uio_rproc_notify()`/`uio_mhu_ack()` below poke the MHU channel-1
  * scratch (`mhu-shm`) + the MHU-B NS message registers inside `mhu-uio`.
  * CORRECTED (alp-sdk #683/#697 bench cycle 2): earlier revisions aimed first
@@ -199,9 +221,10 @@
  * fw's channel 5 actually uses, R_MHU_NS5 (MSG_INT_SET, A55 0x104800A4, see
  * the comment below).  The ACK clears SWINT unit 12 CLR (A55 0x104808C8),
  * not an NS slot.  The A55 receive line is
- * declared by `mhu-uio@10480000` in e1m-v2n-som.dtsi as GIC_SPI 404
- * (INTID 436, MHU-B SWINT unit 12, GIC-measured in #697 cycle 10); the M33
- * rings the A55 through that SWINT unit, and `uio_mhu_ack()` clears it.
+ * declared by `mhu-uio@10480000` in e1m-v2n-som.dtsi as GIC_SPI 404 by
+ * default (INTID 436, MHU-B SWINT unit 12, GIC-measured in #697 cycle 10) or
+ * 385 (Renesas rsp_ch8_ns, ALP_V2N_DOORBELL_RSP_CH8, bench-pending); the M33
+ * rings the A55 through the matching register and `uio_mhu_ack()` clears it.
  *
  * @par What is NOT vendored here
  * The Renesas Multi-OS Package's `meta-rz-multi-os` layer (the Linux
@@ -246,14 +269,19 @@
 
 #if defined(ALP_SDK_HAVE_OPENAMP_USERLAND)
 
+#include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <metal/device.h>
 #include <metal/io.h>
@@ -261,6 +289,10 @@
 #include <metal/sys.h>
 #include <openamp/open_amp.h>
 
+#include <alp/protocol/amp_beacon.h>
+#include <alp/protocol/v2n_mhu_doorbell.h>
+
+#include "alp_amp_window.h"
 #include "alp_checked_arith.h"
 
 #ifndef ALP_RPC_SUBS_PER_CHANNEL
@@ -277,7 +309,7 @@
 
 /* A55-side physical base of each named region; `da` (the M33 non-secure
  * device address the resource table / vring descriptors reference) is
- * always `pa + ALP_V2N_A55_TO_M33_NS_OFFSET`.
+ * always `pa + ALP_AMP_A55_TO_CM33_NS_OFFSET`.
  *
  * CORRECTED (alp-sdk #683, address root-cause fix): this used to be
  * 0x20000000 (the RZ/V2L offset), which put every region below the A55
@@ -285,8 +317,8 @@
  * V2N map (Renesas FSP
  * drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_slave_address.h) is CM33-secure
  * 0x80000000 / CM33-non-secure 0x90000000 / A55 0x40000000, so
- * da = pa + 0x50000000. */
-#define ALP_V2N_A55_TO_M33_NS_OFFSET 0x50000000u
+ * da = pa + 0x50000000.  The offset and every region below come from the
+ * SoC metadata's `openamp_carveout` via the generated alp_amp_window.h. */
 
 enum uio_region_id {
 	UIO_RSCTBL = 0,
@@ -307,18 +339,36 @@ struct uio_region_def {
 };
 
 /* Addresses corrected (alp-sdk #683, address root-cause fix) to the
- * authoritative V2N map -- see ALP_V2N_A55_TO_M33_NS_OFFSET's comment
+ * authoritative V2N map -- see ALP_AMP_A55_TO_CM33_NS_OFFSET's comment
  * above and the board overlay's matching CM33-side nodes
  * (zephyr/boards/alp/e1m_v2n101_m33_sm/...cm33.dts). UIO_MHU also
  * changed WHICH register block it maps -- see this file's header
  * comment's doorbell-fix note. */
 static const struct uio_region_def g_uio_regions[UIO_REGION_COUNT] = {
-	[UIO_RSCTBL]     = { "4f700000.rsctbl", "ALP_UIO_RSCTBL", 0x4F700000u, 0x1000u },
-	[UIO_MHU_SHM]    = { "4f701000.mhu-shm", "ALP_UIO_MHU_SHM", 0x4F701000u, 0x1000u },
-	[UIO_VRING_CTL0] = { "4f800000.vring-ctl0", "ALP_UIO_VRING_CTL0", 0x4F800000u, 0x50000u },
-	[UIO_VRING_CTL1] = { "4f850000.vring-ctl1", "ALP_UIO_VRING_CTL1", 0x4F850000u, 0x50000u },
-	[UIO_VRING_SHM0] = { "4f900000.vring-shm0", "ALP_UIO_VRING_SHM0", 0x4F900000u, 0x300000u },
-	[UIO_VRING_SHM1] = { "4fc00000.vring-shm1", "ALP_UIO_VRING_SHM1", 0x4FC00000u, 0x300000u },
+	[UIO_RSCTBL]     = { ALP_AMP_UIO_RSCTBL_NAME,
+	                     "ALP_UIO_RSCTBL",
+	                     ALP_AMP_RSCTBL_A55_BASE,
+	                     ALP_AMP_RSCTBL_SIZE },
+	[UIO_MHU_SHM]    = { ALP_AMP_UIO_MHU_SHM_NAME,
+	                     "ALP_UIO_MHU_SHM",
+	                     ALP_AMP_MHU_SHM_A55_BASE,
+	                     ALP_AMP_MHU_SHM_SIZE },
+	[UIO_VRING_CTL0] = { ALP_AMP_UIO_VRING_CTL0_NAME,
+	                     "ALP_UIO_VRING_CTL0",
+	                     ALP_AMP_VRING_CTL0_A55_BASE,
+	                     ALP_AMP_VRING_CTL0_SIZE },
+	[UIO_VRING_CTL1] = { ALP_AMP_UIO_VRING_CTL1_NAME,
+	                     "ALP_UIO_VRING_CTL1",
+	                     ALP_AMP_VRING_CTL1_A55_BASE,
+	                     ALP_AMP_VRING_CTL1_SIZE },
+	[UIO_VRING_SHM0] = { ALP_AMP_UIO_VRING_SHM0_NAME,
+	                     "ALP_UIO_VRING_SHM0",
+	                     ALP_AMP_VRING_SHM0_A55_BASE,
+	                     ALP_AMP_VRING_SHM0_SIZE },
+	[UIO_VRING_SHM1] = { ALP_AMP_UIO_VRING_SHM1_NAME,
+	                     "ALP_UIO_VRING_SHM1",
+	                     ALP_AMP_VRING_SHM1_A55_BASE,
+	                     ALP_AMP_VRING_SHM1_SIZE },
 	[UIO_MHU]        = { "10480000.mhu-uio", "ALP_UIO_MHU", 0x10480000u, 0x1000u },
 };
 
@@ -370,9 +420,11 @@ static const char *uio_dev_name(enum uio_region_id id)
  *   - KICK the M33 (raise MHU_MSG5_NS_IRQn=293) = MSG_INT_SET on R_MHU_NS5
  *                                                 -> A55 0x104800A4.
  *   - RECEIVE/ack the M33's send: R_MHU_NS5's RSP half (MHU_RSP5_NS_IRQn=299)
- *     does not reach the CA55.  The A55 line is SWINT unit 12 = GIC_SPI 404,
- *     and the ack is SWINT unit 12 CLR (ALP_MHU_SWINT_RECV_CLR_OFF =
- *     0x800 + 12*0x10 + 0x08 -> A55 0x104808C8), see uio_mhu_ack().
+ *     does not reach the CA55.  The A55 line is SWINT unit 12 = GIC_SPI 404
+ *     (ack: SWINT unit 12 CLR, A55 0x104808C8) or, with
+ *     ALP_V2N_DOORBELL_RSP_CH8, rsp_ch8_ns = GIC_SPI 385 (ack: RSP_INT_CLR of
+ *     NS slot 8, A55 0x10480118); see ALP_V2N_DOORBELL_CLR_OFF and
+ *     uio_mhu_ack().
  * The M33 side must correspondingly bind its ch5 RX/TX to R_MHU_NS5 (see the
  * r_mhu_b_ns.c port's channel-5 override) -- otherwise its ISR clears the
  * wrong register and the interrupt storms.  Earlier revisions aimed the kick
@@ -383,32 +435,20 @@ static const char *uio_dev_name(enum uio_region_id id)
  * (uio0 rsctbl 0x4f700000/0x1000 ... uio6 mhu-uio 0x10480000/0x1000),
  * /proc/interrupts shows "GICv3 436 Level mhu-uio", and
  * 0x4f700000-0x4fffffff is listed "reserved" in /proc/iomem. */
-/* R_MHU0_Type layout (hal_renesas mhu_iodefine.h): MSG_INT STS/SET/CLR at
- * +0x00/04/08, then a RESERVED[4] word at +0x0C, then RSP_INT STS/SET/CLR at
- * +0x10/14/18.  The RESERVED gap was silicon-confirmed on the #697 cycle-9
- * bench (writing +0x18 cleared the M33's reply STS at +0x10; +0x0C read 0). */
-#define ALP_MHU_NS_SLOT_MSG_INT_STS 0x00u
-#define ALP_MHU_NS_SLOT_MSG_INT_SET 0x04u
-#define ALP_MHU_NS_SLOT_MSG_INT_CLR 0x08u
-#define ALP_MHU_NS_SLOT_RSP_INT_STS 0x10u
-#define ALP_MHU_NS_SLOT_RSP_INT_SET 0x14u
-#define ALP_MHU_NS_SLOT_RSP_INT_CLR 0x18u
-
-/* Channel-5 register slot within the A55-mapped MHU-B block: R_MHU_NS5, the
- * channel-numbered slot (bench-proven, #697 cycle 5).  Both directions share
- * it -- MSG half = A55->M33 kick, RSP half = M33->A55. */
-#define ALP_MHU_NS_CH5_KICK_SLOT 0xA0u /* R_MHU_NS5.MSG -- A55->M33 kick (fires IRQ 293) */
-
-/* M33->A55 REVERSE doorbell is ASYMMETRIC to the forward one.  #697 cycle 10
- * (GIC-measured): the NS-channel RSP interrupt does NOT reach the A55 GIC on any
- * SPI -- only the MHU-B CA55-routed SWINT units 12-15 do (SWINT unit N SET ->
- * INTID 436+(N-12) = GIC_SPI 404+(N-12); units 0-11 don't reach CA55).  So the
- * M33 rings the A55 by asserting SWINT unit 12 (m33_sm/main.c mailbox_notify),
- * the A55 mhu-uio DT interrupt MUST be GIC_SPI 404, and the receive ack clears
- * SWINT unit 12's CLR.  SWINT block @ MHU +0x800, 0x10 stride, STS/SET/CLR @
- * +0x00/04/08. */
-#define ALP_MHU_SWINT_RECV_UNIT    12u
-#define ALP_MHU_SWINT_RECV_CLR_OFF (0x800u + ALP_MHU_SWINT_RECV_UNIT * 0x10u + 0x08u)
+/* NS-slot register offsets, the channel-5 kick slot (R_MHU_NS5.MSG,
+ * bench-proven #697 cycle 5: MSG half = A55->M33 kick, fires M33 IRQ 293) and
+ * the reverse-doorbell offsets are shared with the CM33 firmware and live in
+ * <alp/protocol/v2n_mhu_doorbell.h>.
+ *
+ * The M33->A55 reverse doorbell is ASYMMETRIC to the forward one.  #697
+ * cycle 10 (GIC-measured): the RSP interrupt of NS slot 5 does NOT reach the
+ * A55 GIC on any SPI -- only the MHU-B CA55-routed SWINT units 12-15 do, so
+ * by default the M33 asserts SWINT unit 12 (GIC_SPI 404) and the ack clears
+ * its CLR.  Renesas documents a second line, rsp_ch8_ns = RSP of NS slot 8 =
+ * GIC_SPI 385 (ALP_V2N_DOORBELL_RSP_CH8 / ALP_SDK_V2N_DOORBELL_RSP_CH8,
+ * bench-pending); the header picks the ack register for whichever is built.
+ * The A55 mhu-uio DT interrupt MUST be the matching SPI
+ * (ALP_V2N_DOORBELL_SPI in meta-alp-sdk's e1m-v2n-doorbell.dtsi). */
 
 static volatile uint32_t *
 mhu_ns_reg(struct metal_io_region *mhu, uint32_t slot_offset, uint32_t reg_offset)
@@ -514,7 +554,8 @@ struct rpc_be {
 	 * qemu-aarch64 (no real UIO devices -> metal_init() fails -> this
 	 * exact early-`goto err` path). */
 	bool rproc_ready;
-	int  mhu_irq; /* fd cast from dev[UIO_MHU]->irq_info */
+	int  rsctbl_lock_fd; /* flock holder on the rsctbl UIO node, -1 = none */
+	int  mhu_irq;        /* fd cast from dev[UIO_MHU]->irq_info */
 
 	/* tx_mutex guards only tx_scratch + the trysend (never held across a
 	 * wait); call_serial serialises alp_rpc_call()s and is never taken on
@@ -548,10 +589,16 @@ struct rpc_be {
 	size_t          call_resp_len;
 	alp_status_t    call_result;
 	bool            call_pending;
-	bool            closing;
-	bool            recv_active; /* true only while uio_ept_cb() runs for THIS channel */
-	pthread_t       recv_thread; /* identity of the CURRENT recv (valid iff recv_active) */
-	atomic_int      cb_active;   /* drain count -- external y_shutdown() waits for 0 */
+	/* #2586: set when a call gave up waiting after its request went out.
+	 * Replies carry no sequence id (they match on method name), so the
+	 * abandoned call's late reply would be returned to the next call of
+	 * the same method; every later y_call() refuses instead.  Sticky until
+	 * close + reopen. */
+	bool       call_poisoned;
+	bool       closing;
+	bool       recv_active; /* true only while uio_ept_cb() runs for THIS channel */
+	pthread_t  recv_thread; /* identity of the CURRENT recv (valid iff recv_active) */
+	atomic_int cb_active;   /* drain count -- external y_shutdown() waits for 0 */
 	/* Whole-ISR in-flight count (ack + get_notification + epilogue), not just
 	 * the uio_ept_cb() window -- y_shutdown() drains it so y_destroy() cannot
 	 * free ch under a running uio_rproc_notify_isr(). */
@@ -738,9 +785,9 @@ static const struct remoteproc_ops g_rproc_ops = {
 /* Notification worker -- runs on libmetal's SHARED linux IRQ thread    */
 /* ------------------------------------------------------------------ */
 
-/* Ack the M33->A55 doorbell by clearing SWINT unit 12's CLR -- the CA55-routed
- * reverse doorbell (GIC_SPI 404).  See the ALP_MHU_SWINT_RECV_* comment above
- * for why the reverse path uses a SWINT unit, not the NS-channel RSP register. */
+/* Ack the M33->A55 doorbell (GIC_SPI ALP_V2N_DOORBELL_GIC_SPI): SWINT unit 12
+ * CLR by default, RSP_INT_CLR of NS slot 8 with ALP_V2N_DOORBELL_RSP_CH8.  See
+ * the doorbell comment above for why. */
 static void uio_mhu_ack(struct rpc_be *ch)
 {
 	struct metal_io_region *mhu = metal_device_io_region(ch->dev[UIO_MHU], 0);
@@ -748,7 +795,7 @@ static void uio_mhu_ack(struct rpc_be *ch)
 		return;
 	}
 	volatile uint32_t *clr_reg =
-	    (volatile uint32_t *)((uint8_t *)mhu->virt + ALP_MHU_SWINT_RECV_CLR_OFF);
+	    (volatile uint32_t *)((uint8_t *)mhu->virt + ALP_V2N_DOORBELL_CLR_OFF);
 	*clr_reg = 1u;
 }
 
@@ -950,6 +997,198 @@ static int uio_rproc_notify_isr(int irq, void *arg)
 }
 
 /* ------------------------------------------------------------------ */
+/* Attach reset handshake (#2586)                                      */
+/* ------------------------------------------------------------------ */
+
+/* CM33 beacon words in the last 16 bytes of the rsctbl page: layout, magic
+ * and version meaning are defined once in <alp/protocol/amp_beacon.h>; the
+ * page size comes from the SoC metadata via alp_amp_window.h.  Writers: the
+ * RPC firmware examples/multicore/rpmsg-v2n/m33_sm and the idle stock shim
+ * firmware/alp-stock-shim. */
+#ifndef ALP_UIO_ATTACH_ACK_TIMEOUT_MS
+#define ALP_UIO_ATTACH_ACK_TIMEOUT_MS 500u
+#endif
+
+/* Offset of the resource table's first RSC_VDEV entry inside `io`.  The
+ * table lives in memory the CM33 writes, so every offset is range- and
+ * alignment-checked before it is dereferenced (Device memory faults on an
+ * unaligned 32-bit load). */
+static bool rsctbl_vdev_offset(struct metal_io_region *io, size_t *out)
+{
+	const size_t hdr = offsetof(struct resource_table, offset);
+	if (!alp_size_range_valid(0, hdr, io->size)) {
+		return false;
+	}
+	uint32_t num = metal_io_read32(io, offsetof(struct resource_table, num));
+	for (uint32_t i = 0; i < num; ++i) {
+		size_t ent = hdr + (size_t)i * sizeof(uint32_t);
+		if (!alp_size_range_valid(ent, sizeof(uint32_t), io->size)) {
+			return false;
+		}
+		size_t off = metal_io_read32(io, ent);
+		if ((off % sizeof(uint32_t)) != 0u ||
+		    !alp_size_range_valid(off, sizeof(struct fw_rsc_vdev), io->size)) {
+			return false;
+		}
+		if (metal_io_read32(io, off) == RSC_VDEV) {
+			*out = off;
+			return true;
+		}
+	}
+	return false;
+}
+
+/* Takes an exclusive non-blocking flock on the rsctbl UIO device node so a
+ * second process cannot attach to (and reset) a CM33 link another process
+ * owns; the lock lives as long as *fd_out stays open.  libmetal keeps its
+ * own fd private, so the node is found the way libmetal finds it: sysfs
+ * <bus>/devices/<dev>/uio/uioN -> /dev/uioN.  ponytail: a sysfs layout that
+ * does not resolve (udev-renamed class, no /dev node) skips the lock rather
+ * than failing the open; make it fatal if such layouts turn out not to exist. */
+static alp_status_t uio_rsctbl_lock(int *fd_out)
+{
+	char dir[256];
+	(void)snprintf(
+	    dir, sizeof(dir), "/sys/bus/%s/devices/%s/uio", uio_bus_name(), uio_dev_name(UIO_RSCTBL));
+	DIR *d = opendir(dir);
+	if (d == NULL) {
+		return ALP_OK;
+	}
+	char path[64] = "";
+	for (struct dirent *e = readdir(d); e != NULL; e = readdir(d)) {
+		if (strncmp(e->d_name, "uio", 3) == 0) {
+			(void)snprintf(path, sizeof(path), "/dev/%s", e->d_name);
+			break;
+		}
+	}
+	closedir(d);
+	if (path[0] == '\0') {
+		return ALP_OK;
+	}
+	int fd = open(path, O_RDWR | O_CLOEXEC);
+	if (fd < 0) {
+		return ALP_OK;
+	}
+	if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+		int busy = (errno == EWOULDBLOCK);
+		close(fd);
+		if (busy) {
+			fprintf(stderr,
+			        "alp_rpc: %s is locked by another process (one process per CM33 link)\n",
+			        path);
+			return ALP_ERR_BUSY;
+		}
+		return ALP_OK;
+	}
+	*fd_out = fd;
+	return ALP_OK;
+}
+
+/* Runs before remoteproc_create_virtio().  First classifies the CM33 by its
+ * beacon: no magic = no CM33 beacon (CM33 not running, or an image without
+ * one); version >= 0x100 = an image that serves no RPC (the idle shim).
+ * Both fail the open without writing anything the CM33 reads.
+ *
+ * Then the re-attach reset (#2586): OpenAMP's driver role zeroes both
+ * vrings on every attach, but the CM33 keeps its private ring indices for
+ * its whole boot, so a second attach in one CM33 boot desyncs the rings.
+ * vdev.status cannot say whether the CM33 is bound (a timed-out open leaves
+ * it 0 with the CM33 still bound), so the CM33 publishes that through the
+ * attach epoch: odd = bound, even = waiting.  On an odd epoch write status
+ * 0, kick, and wait for the epoch to turn even.  RPC firmware older than
+ * beacon version 2 has no epoch, so there only a DRIVER_OK status is
+ * detectable and refused (ALP_ERR_BUSY) instead of desyncing. */
+static alp_status_t uio_attach_reset(struct rpc_be *ch)
+{
+	struct metal_io_region *io = metal_device_io_region(ch->dev[UIO_RSCTBL], 0);
+	if (io == NULL || !alp_size_range_valid(ALP_AMP_BEACON_EPOCH_OFF(ALP_AMP_RSCTBL_SIZE),
+	                                        sizeof(uint32_t),
+	                                        io->size)) {
+		fprintf(stderr, "alp_rpc: rsctbl mapping too small for the CM33 beacon\n");
+		return ALP_ERR_NOT_READY;
+	}
+
+	uint32_t magic   = metal_io_read32(io, ALP_AMP_BEACON_MAGIC_OFF(ALP_AMP_RSCTBL_SIZE));
+	uint32_t version = metal_io_read32(io, ALP_AMP_BEACON_VERSION_OFF(ALP_AMP_RSCTBL_SIZE));
+	if (magic != ALP_AMP_BEACON_MAGIC) {
+		fprintf(stderr,
+		        "alp_rpc: no CM33 beacon at rsctbl+0x%x (read 0x%08x, expect 0x%08x): the "
+		        "CM33 is not running or its image publishes no beacon\n",
+		        (unsigned)ALP_AMP_BEACON_MAGIC_OFF(ALP_AMP_RSCTBL_SIZE),
+		        (unsigned)magic,
+		        (unsigned)ALP_AMP_BEACON_MAGIC);
+		return ALP_ERR_NOT_READY;
+	}
+	if (version >= ALP_AMP_BEACON_VERSION_NO_RPC) {
+		fprintf(stderr,
+		        "alp_rpc: the CM33 runs an image without RPC (beacon version 0x%08x; 0x%08x = "
+		        "idle stock shim); flash an RPC firmware such as "
+		        "examples/multicore/rpmsg-v2n/m33_sm\n",
+		        (unsigned)version,
+		        (unsigned)ALP_AMP_BEACON_VERSION_NO_RPC);
+		return ALP_ERR_NOSUPPORT;
+	}
+
+	uint32_t epoch = metal_io_read32(io, ALP_AMP_BEACON_EPOCH_OFF(ALP_AMP_RSCTBL_SIZE));
+	if (version >= ALP_AMP_BEACON_VERSION_ATTACH_ACK && (epoch & 1u) == 0u) {
+		return ALP_OK; /* CM33 waiting for an attach: nothing to reset */
+	}
+
+	size_t vdev_off;
+	if (!rsctbl_vdev_offset(io, &vdev_off)) {
+		fprintf(stderr, "alp_rpc: CM33 resource table has no readable vdev entry\n");
+		return ALP_ERR_NOT_READY;
+	}
+	size_t  status_off = vdev_off + offsetof(struct fw_rsc_vdev, status);
+	uint8_t status     = metal_io_read8(io, status_off);
+	if (version < ALP_AMP_BEACON_VERSION_ATTACH_ACK) {
+		if ((status & VIRTIO_CONFIG_STATUS_DRIVER_OK) == 0u) {
+			return ALP_OK;
+		}
+		fprintf(stderr,
+		        "alp_rpc: CM33 link is still attached from an earlier session (vdev.status=0x%02x) "
+		        "and this CM33 RPC firmware cannot reset it (beacon version %u, attach reset "
+		        "needs version >= %u); a second attach would desync the vrings. Update the CM33 "
+		        "firmware or restart the CM33 (cold cycle).\n",
+		        (unsigned)status,
+		        (unsigned)version,
+		        (unsigned)ALP_AMP_BEACON_VERSION_ATTACH_ACK);
+		return ALP_ERR_BUSY;
+	}
+
+	uint32_t notifyid = metal_io_read32(io, vdev_off + offsetof(struct fw_rsc_vdev, notifyid));
+	metal_io_write8(io, status_off, 0u);
+	/* uio_rproc_notify() fences before the doorbell, so the CM33 sees
+	 * status 0 before its doorbell IRQ. */
+	if (uio_rproc_notify(&ch->rproc, notifyid) != 0) {
+		return ALP_ERR_NOT_READY;
+	}
+
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	int64_t deadline_ns = (int64_t)now.tv_sec * 1000000000LL + now.tv_nsec +
+	                      (int64_t)ALP_UIO_ATTACH_ACK_TIMEOUT_MS * 1000000LL;
+	for (;;) {
+		epoch = metal_io_read32(io, ALP_AMP_BEACON_EPOCH_OFF(ALP_AMP_RSCTBL_SIZE));
+		if ((epoch & 1u) == 0u) {
+			return ALP_OK;
+		}
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		if ((int64_t)now.tv_sec * 1000000000LL + now.tv_nsec >= deadline_ns) {
+			break;
+		}
+		struct timespec ts = { .tv_sec = 0, .tv_nsec = 1000000L };
+		nanosleep(&ts, NULL);
+	}
+	fprintf(stderr,
+	        "alp_rpc: CM33 did not acknowledge the attach reset within %u ms (attach epoch "
+	        "still %u, odd = bound)\n",
+	        (unsigned)ALP_UIO_ATTACH_ACK_TIMEOUT_MS,
+	        (unsigned)epoch);
+	return ALP_ERR_TIMEOUT;
+}
+
+/* ------------------------------------------------------------------ */
 /* Teardown                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -981,6 +1220,9 @@ static void rpc_be_teardown(struct rpc_be *ch)
 	}
 	if (ch->metal_ready) {
 		metal_finish();
+	}
+	if (ch->rsctbl_lock_fd >= 0) {
+		close(ch->rsctbl_lock_fd); /* drops the flock */
 	}
 
 	pthread_mutex_destroy(&ch->tx_mutex);
@@ -1039,8 +1281,9 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 		atomic_store(&g_chan_claimed, 0);
 		return ALP_ERR_INVAL;
 	}
-	ch->dst_ept = cfg->dst_ept;
-	ch->mhu_irq = -1;
+	ch->dst_ept        = cfg->dst_ept;
+	ch->mhu_irq        = -1;
+	ch->rsctbl_lock_fd = -1;
 
 	pthread_mutex_init(&ch->tx_mutex, NULL);
 	pthread_mutex_init(&ch->call_serial, NULL);
@@ -1048,6 +1291,8 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	pthread_mutex_init(&ch->call_mutex, NULL);
 	pthread_cond_init(&ch->call_cond, NULL);
 	ch->owner = st->owner;
+
+	alp_status_t err_rc = ALP_ERR_NOT_READY;
 
 	static const struct metal_init_params metal_params = METAL_INIT_DEFAULTS;
 	if (metal_init(&metal_params) != 0) {
@@ -1066,6 +1311,12 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 			goto err;
 		}
 	}
+
+	err_rc = uio_rsctbl_lock(&ch->rsctbl_lock_fd);
+	if (err_rc != ALP_OK) {
+		goto err;
+	}
+	err_rc = ALP_ERR_NOT_READY;
 
 	if (remoteproc_init(&ch->rproc, &g_rproc_ops, ch) != &ch->rproc) {
 		fprintf(stderr, "alp_rpc: remoteproc_init() failed\n");
@@ -1093,7 +1344,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 		 * resource-table `da` up in these registered regions, and the M33
 		 * resource table publishes vring DAs in A55-physical space
 		 * (VRING_*_ADDR_A55 = 0x4f8xxxxx, resource_table.c).  The
-		 * ALP_V2N_A55_TO_M33_NS_OFFSET (+0x50000000) is the CM33-NS<->A55
+		 * ALP_AMP_A55_TO_CM33_NS_OFFSET (+0x50000000) is the CM33-NS<->A55
 		 * view translation for the M33's OWN addressing (resource_table.h,
 		 * m33_sm/main.c) -- it must NOT be applied to the master-side DA
 		 * registration, or the vring lookup (da=0x4f8xxxxx) matches no
@@ -1120,6 +1371,14 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 		fprintf(stderr, "alp_rpc: remoteproc_config() failed\n");
 		goto err;
 	}
+
+	/* #2586: reset a CM33 still bound to an earlier session BEFORE the
+	 * driver-role create below zeroes the vrings under it. */
+	err_rc = uio_attach_reset(ch);
+	if (err_rc != ALP_OK) {
+		goto err;
+	}
+	err_rc = ALP_ERR_NOT_READY;
 
 	struct virtio_device *vdev = remoteproc_create_virtio(&ch->rproc, 0, VIRTIO_DEV_DRIVER, NULL);
 	if (vdev == NULL) {
@@ -1179,7 +1438,7 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 
 err:
 	rpc_be_teardown(ch);
-	return ALP_ERR_NOT_READY;
+	return err_rc;
 }
 
 static alp_status_t y_unsubscribe(alp_rpc_backend_state_t *st, const char *method);
@@ -1341,7 +1600,7 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 	pthread_mutex_lock(&ch->call_serial);
 
 	pthread_mutex_lock(&ch->call_mutex);
-	if (ch->closing) {
+	if (ch->closing || ch->call_poisoned) {
 		pthread_mutex_unlock(&ch->call_mutex);
 		pthread_mutex_unlock(&ch->call_serial);
 		return ALP_ERR_NOT_READY;
@@ -1407,15 +1666,20 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 		}
 	}
 
+	bool poisoned_now = false;
 	if (ch->closing) {
 		ch->call_pending = false;
 		s                = ALP_ERR_NOT_READY;
-	} else if (rc == ETIMEDOUT) {
-		ch->call_pending = false;
-		s                = ALP_ERR_TIMEOUT;
-	} else if (rc != 0) {
-		ch->call_pending = false;
-		s                = ALP_ERR_IO;
+	} else if (ch->call_pending) {
+		/* The wait ended (timeout or wait error) with no reply consumed,
+		 * but the request is already on the wire: poison the channel so
+		 * its late reply can never be handed to a later call (#2586).  A
+		 * reply that landed while the wait was reacquiring call_mutex
+		 * cleared call_pending and is returned below instead. */
+		ch->call_pending  = false;
+		ch->call_poisoned = true;
+		poisoned_now      = true;
+		s                 = (rc == ETIMEDOUT) ? ALP_ERR_TIMEOUT : ALP_ERR_IO;
 	} else {
 		s = ch->call_result;
 		if (resp_len != NULL && (s == ALP_OK || s == ALP_ERR_NOMEM)) {
@@ -1423,6 +1687,16 @@ static alp_status_t y_call(alp_rpc_backend_state_t *st,
 		}
 	}
 	pthread_mutex_unlock(&ch->call_mutex);
+
+	if (poisoned_now) {
+		fprintf(stderr,
+		        "alp_rpc: call '%s' on channel '%s' got no reply (%s); replies are matched by "
+		        "method name only, so later calls on this channel now fail with "
+		        "ALP_ERR_NOT_READY until it is closed and reopened\n",
+		        method,
+		        ch->name,
+		        s == ALP_ERR_TIMEOUT ? "timeout" : "wait error");
+	}
 
 	pthread_mutex_unlock(&ch->call_serial);
 	return s;

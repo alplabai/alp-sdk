@@ -959,6 +959,72 @@ config MIPI_DSI_DW
 	  sdk-alif fork once the dsi node is repointed AND bench-verified.  Task #21.
 	  Driver: zephyr/drivers/mipi_dsi/dsi_dw.c.
 
+config SN65DSI83
+	bool "TI SN65DSI83 DSI-to-LVDS bridge (ADR-0017-ADJACENT, BENCH-UNVERIFIED)"
+	default y
+	depends on MIPI_DSI_DW
+	depends on DT_HAS_TI_SN65DSI83_ENABLED
+	select I2C
+	help
+	  TI SN65DSI83 single-channel MIPI DSI receiver to single-link FlatLink
+	  LVDS bridge (datasheet SLLSEC1) -- a maintainer-built adapter-PCB bridge
+	  chip that lets an E1M-EVK DSI connector drive a native-LVDS panel (the
+	  Riverdi RVT121HVDFWCA0-B).  Authored clean-room from the public TI
+	  datasheet: no upstream Zephyr driver, no hal_alif library, and no
+	  sdk-alif fork driver exists for this part class.
+
+	  ADR-0017-ADJACENT (authored from spec, not consumed from a vendor SDK).
+	  BENCH-UNVERIFIED: no adapter-PCB hardware was on hand for this change.
+	  Driver: zephyr/drivers/display/display_sn65dsi83.c.
+
+config SN65DSI83_TEST_PATTERN
+	bool "SN65DSI83: force the built-in LVDS test-pattern generator"
+	depends on SN65DSI83
+	default n
+	help
+	  Sets CHA_TEST_PATTERN (CSR 0x3C.4): the bridge drives its own internal
+	  colour-bar test pattern onto LVDS instead of forwarding DSI video, using
+	  the same timing registers the driver already programs from the panel's
+	  DT timings.  For bench isolation of the PLL + LVDS link + panel from the
+	  DSI video path -- if the panel shows the pattern with this on but stays
+	  dark with it off, the fault is upstream of the bridge (CDC200/DSI/D-PHY),
+	  not the bridge-to-panel link.  No DSI data is received while the pattern
+	  generator runs (datasheet Section 7.4.5).
+
+config SN65DSI83_RECOVERY
+	bool "SN65DSI83: re-initialise the bridge if it resets itself"
+	depends on SN65DSI83
+	default y
+	help
+	  The bridge can reset itself to its power-on defaults (ESD, supply
+	  glitch) with EN high and the DSI clock still running: the panel goes
+	  black and nothing sets the bridge up again.  Health-check it every
+	  SN65DSI83_RECOVERY_INTERVAL_MS (CSR 0x0D PLL_EN, 0x0A PLL_EN_STAT
+	  and HS_CLK_SRC, 0xE5) and replay the init sequence when the PLL is off,
+	  not locked or the configuration is gone.  Latched error flags with the PLL
+	  fine are cleared and counted (the same errors on 3 polls in a row, or on
+	  the first poll after a re-init, are not transient and re-init too).
+	  Re-inits are rate-limited, counted (sn65dsi83_recovery_count()) and
+	  reported with printk and the register values -- not through the log
+	  subsystem, which the apps that use this bridge keep off.
+
+config SN65DSI83_RECOVERY_INTERVAL_MS
+	int "SN65DSI83 health-check interval (ms)"
+	depends on SN65DSI83_RECOVERY || SN65DSI83_RECOVERY_AGENT
+	default 1000
+	range 100 60000
+
+config SN65DSI83_RECOVERY_AGENT
+	bool "SN65DSI83 recovery on the core that owns the I2C bus"
+	default y
+	depends on DT_HAS_ALP_SN65DSI83_RECOVERY_ENABLED
+	select I2C
+	help
+	  Health-checks and re-initialises a bridge that ANOTHER core configured
+	  (the Trace Runner: the HE initialises it, I2C1 then belongs to the HP's
+	  camera), by replaying the CSR table the display core published in shared
+	  SRAM.  See the alp,sn65dsi83-recovery binding.
+
 config VIDEO_MIPI_CSI2_DW
 	bool "DesignWare MIPI CSI-2 host bridge for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
 	default y
@@ -1551,8 +1617,9 @@ config CAN_RBUF_AFWL
 # (JEDEC ID / SFDP / addressed read) matches issue #915's own bench capture
 # against it (CS1 @ 20 MHz) -- not yet re-run from this tree, see
 # zephyr/drivers/flash/flash_ospi_alif.c and examples/aen/aen-ospi-regcheck.
-# write/erase remain fail-closed stubs (#915): the bench evidence is that
-# they need the fitted part's Octal-DDR mode switch, not 1-1-1 SPI.
+# write/erase (#915) are real: the driver switches the part to Octal DDR
+# first (1-1-1 SPI never sets WEL on it), then programs/erases; see the
+# header of flash_ospi_alif.c.
 # ---------------------------------------------------------------------------
 config USE_ALIF_HAL_OSPI
 	bool

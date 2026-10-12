@@ -969,7 +969,7 @@ ZTEST(alp_chips, test_tcal9538_init_validates_address_strap_range)
  * no fake TCA6408A/TCAL9538 target attached, so init() can't reach
  * ALP_OK here (reg_read fails past the address check, same as every
  * other post-init-transfer case in this file -- e.g.
- * test_pca9451a_post_init_calls_reject_uninitialised); what this test
+ * test_act8760_calls_reject_uninitialised); what this test
  * pins is that the address itself is NOT rejected as ALP_ERR_INVAL,
  * i.e. it clears the strap-range guard this fix widens. Before the
  * fix, tcal9538_init() returns ALP_ERR_INVAL for 0x20/0x21 before

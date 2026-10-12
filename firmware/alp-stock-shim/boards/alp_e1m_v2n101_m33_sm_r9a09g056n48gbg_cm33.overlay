@@ -1,0 +1,15 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/*
+ * The idle stock shim claims no peripheral.  The board DTS enables the GD32
+ * link (&sci7 Simple-SPI on P96 SCK7, chip-select P97 on &gpio9) for real
+ * CM33 firmware; disable both here so the shim never muxes those pads or
+ * drives the chip-select.
+ */
+&sci7 {
+	status = "disabled";
+};
+
+&gpio9 {
+	status = "disabled";
+};

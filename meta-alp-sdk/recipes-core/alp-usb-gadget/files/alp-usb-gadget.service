@@ -1,0 +1,12 @@
+[Unit]
+Description=Alp USB gadget (NCM + ACM) on the USB 2.0 device port
+After=sys-kernel-config.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/alp-usb-gadget.sh start
+ExecStop=/usr/bin/alp-usb-gadget.sh stop
+
+[Install]
+WantedBy=multi-user.target

@@ -77,11 +77,6 @@ SCHEMA = REPO / "metadata" / "schemas" / "pinmux-capability-v1.schema.json"
 #   "e1m_claim" (default) -- (e1m_pad, e1m_function, peripheral, pad)
 #   "pad_first"           -- (peripheral, pad); e1m_pad is unmappable -> "TBD"
 #
-# imx93 deliberately has no entry: the family ships no pinout TSV yet
-# (metadata/e1m_modules/imx93/ holds only hw-revisions.yaml pending the
-# IMX93RM ingestion / HW-config writeup), so there is nothing to project.
-# Add it here when the TSV lands.
-#
 # v2n-m1 deliberately has no entry either, despite shipping a pinout TSV:
 # it reuses the v2n edge pinout in full (the m1-additions are SoM-internal
 # nets, not new E1M edge pads), so consumers resolve E1M-V2M SKUs to the
@@ -89,6 +84,7 @@ SCHEMA = REPO / "metadata" / "schemas" / "pinmux-capability-v1.schema.json"
 FAMILIES: dict[str, dict] = {
     "aen": {
         "display_name": "E1M-AEN (Alif Ensemble)",
+        "som_families": ["alif-ensemble"],
         "sources": [
             {"file": "aen/from-alif.tsv", "owner": "alif"},
             {"file": "aen/from-cc3501e.tsv", "owner": "cc3501e"},
@@ -96,6 +92,7 @@ FAMILIES: dict[str, dict] = {
     },
     "v2n": {
         "display_name": "E1M-V2N (Renesas RZ/V2N + GD32 IO MCU)",
+        "som_families": ["renesas-rzv2n", "renesas-rzv2n-deepx"],
         "sources": [
             {"file": "v2n/renesas-peripheral-map.tsv", "owner": "renesas",
              "shape": "pad_first"},
@@ -244,6 +241,7 @@ def _render(family: str, spec: dict, pads: list[dict[str, str]]) -> str:
         "schemaVersion: pinmux-capability-v1",
         f"family: {family}",
         f"display_name: {_yaml_quote(spec['display_name'])}",
+        f"som_families: [{', '.join(spec['som_families'])}]",
         "pads:",
     ]
     for p in pads:

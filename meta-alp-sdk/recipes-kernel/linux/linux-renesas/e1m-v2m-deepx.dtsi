@@ -5,13 +5,14 @@
  * The on-module DEEPX DXM1 NPU sits on a PCIe lane behind an on-module
  * lane mux. Route the mux to the DEEPX path; M1_RESET itself is released
  * by U-Boot, not a gpio-hog here (see the Rails note below) -- only the
- * mux gpio-hogs live in this file. They apply at pinctrl probe (before
- * the PCIe controller), which is the order the link needs. Power
+ * P80 mux-enable gpio-hog lives in this file (P95 is U-Boot-only too).
+ * It applies at pinctrl probe (before the PCIe controller), which is the
+ * order the link needs. Power
  * sequencing for the NPU rail is handled entirely in U-Boot.
  *
  *   M1_RESET     = PA6  (active-low; released by U-Boot, no Linux hog)
  *   PCIe.MUX_PD  = P80  (LOW = muxes enabled; PD is active-low)
- *   PCIe.MUX_SEL = P95  (LOW  = path_0 = DEEPX; HIGH = E1M edge)
+ *   PCIe.MUX_SEL = P95  (LOW  = path_0 = DEEPX; HIGH = E1M edge; U-Boot only, no Linux hog)
  *
  * Source: alp-sdk include/alp/chips/{deepx_dxm1,pi3dbs12212}.h +
  * alp-sdk-internal metadata/e1m_modules/v2n-m1/. gpio-hogs apply at
@@ -22,7 +23,7 @@
  * sequenced and confirmed power-good in U-Boot's board_late_init()
  * BEFORE M1_RESET is ever released -- see meta-alp-sdk's
  * 0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch. That is also why
- * M1_RESET has NO gpio-hog here, unlike the two mux pads below: U-Boot
+ * M1_RESET has NO gpio-hog here, unlike the P80 mux pad below: U-Boot
  * is the sole owner of P64/P65/M1_RESET (PA6), and a Linux-side hog
  * driving PA6 at pinctrl probe would race U-Boot's own sequencing and
  * could release the reset before the rail is confirmed up.
@@ -51,19 +52,16 @@
 		line-name = "deepx_pcie_mux_pd";
 	};
 
-	/* PCIe lane-mux select: drive to the DEEPX path.
-	 * KNOWN RACE: P9.5 shares the PMC9/PM9 byte registers with the
-	 * CM33's P9.6/P9.7 (GD32 supervisor SPI), and this hog's
-	 * non-atomic RMW lands at ~1.9 s -- inside the CM33's pin-setup
-	 * window.  Tolerated so far on the bench; if the link ever
-	 * glitches at Linux boot on V2M, sequence or move this hog (the
-	 * port-9 AMP rule in e1m-x-evk.dtsi). */
-	deepx-pcie-mux-sel-hog {
-		gpio-hog;
-		gpios = <RZV2N_GPIO(9, 5) GPIO_ACTIVE_HIGH>;
-		output-low;
-		line-name = "deepx_pcie_mux_sel";
-	};
+	/* PCIe lane-mux select (PCIe.MUX_SEL = P95): deliberately NO hog here.
+	 * U-Boot's board_late_init() drives P95 LOW (DEEPX path_0) together with
+	 * the P80 enable above, gated on the SoM EEPROM manifest family
+	 * "v2n-m1".  A Linux hog would be a second, redundant writer: P9.5
+	 * shares the PMC9/PM9 byte registers with the CM33's P9.6/P9.7 (GD32
+	 * supervisor SPI), and the hog's non-atomic RMW at ~1.9 s landed inside
+	 * the CM33's pin-setup window (the port-9 AMP rule in e1m-x-evk.dtsi).
+	 * The pin keeps the level U-Boot set across the handover.  Without the
+	 * EEPROM-gated U-Boot step (blank/invalid manifest) the mux stays on the
+	 * E1M-edge path and the DX-M1 does not enumerate. */
 
 	/* No deepx-m1-reset-release-hog here: M1_RESET (PA6) is released by
 	 * U-Boot's board_late_init() ONLY after the DA9292 CH2 rail is

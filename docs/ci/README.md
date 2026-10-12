@@ -12,7 +12,7 @@ reference.
 
 ## Workflows shipped
 
-`.github/workflows/` carries **26** workflow files as of this revision
+`.github/workflows/` carries **27** workflow files as of this revision
 (counted via `ls .github/workflows/*.yml .github/workflows/*.yaml
 2>/dev/null | wc -l`; recount before trusting this number, it moves
 every time a workflow is added or retired).  The table below is a
@@ -38,6 +38,7 @@ that replaced it).
 | [`coverity.yml`](../../.github/workflows/coverity.yml)                            | weekly + manual  | active     | Coverity Scan submission against <https://scan.coverity.com/projects/alplabai-alp-sdk>.  Secrets (`COVERITY_TOKEN`, `COVERITY_EMAIL`) provisioned; project name in the `COVERITY_PROJECT` Actions variable.       |
 | [`pr-bitbake.yml`](../../.github/workflows/pr-bitbake.yml)                        | PR to `main` (paths) | active | Dispatch bridge to the private `alp-sdk-internal` repo's self-hosted Yocto runner — see [`runner-architecture.md`](runner-architecture.md). |
 | [`onramp-clean-container.yml`](../../.github/workflows/onramp-clean-container.yml)| PR (paths) + weekly + manual + `run-full-quickstart` label | active | Runs the documented first-install journey (`docs/getting-started.md` §1–4) inside a genuinely bare `ubuntu:24.04` container — no apt package this job doesn't itself install. `prereqs-and-bootstrap` (every relevant PR) proves `bash scripts/bootstrap.sh` refuses with actionable hints then succeeds. `full-quickstart-build` (weekly cron + `workflow_dispatch` — both inert until this file reaches the default branch — or a PR carrying the `run-full-quickstart` label) walks the rest: installs `tan`, `west sdk install`s the Zephyr SDK, `tan build --sdk-root` (plus a `tan init` scaffold and a build of it), and asserts a real `zephyr.elf` came out. See issue #949. |
+| [`pr-tan-build.yml`](../../.github/workflows/pr-tan-build.yml) | PR (paths) + merge queue | active | Builds one Zephyr example per SoM family (AEN `gpio-button-led`, V2N `rpmsg-v2n`) through the pinned tan-cli release's `tan build --format json` (`TAN_REF`); fails on `ok:false`, a non-`ok` Zephyr slice, or a missing `zephyr.elf`; uploads the envelope. Not a required context. Bump `TAN_REF` in the workflow whenever tan-cli cuts a release. |
 | [`pr-bootstrap-distro-install.yml`](../../.github/workflows/pr-bootstrap-distro-install.yml)| PR to `main` (paths), merge queue | active | Deferred to the merge-queue run on PRs into `dev`. Container-job proof for `metadata/bootstrap.json`'s `prerequisites.install.linux` (issue #1464): a 3-leg matrix (`debian:12`/apt, `fedora:42`/dnf, `rockylinux:9`/dnf) derives the install commands from the manifest at run time, actually runs them, and asserts every declared tool lands on `PATH` — the admission bar that keeps a guessed package name from ever shipping. |
 
 ## Workflows planned
@@ -67,7 +68,7 @@ result attached to the PR or release that needs it — see
   stable ABI fingerprint from `include/alp/**`.  Re-run by
   `pr-generated-files.yml` to catch drift; gates `include/alp/**`
   diffs against `docs/abi/v<MINOR>-snapshot.json` — the snapshot for the
-  version `metadata/sdk_version.yaml` declares (`v0.16-snapshot.json`
+  version `metadata/sdk_version.yaml` declares (`v0.17-snapshot.json`
   today) — after v1.0.
 - [`scripts/bootstrap.sh`](../../scripts/bootstrap.sh) — fresh-clone
   developer setup (west workspace + Python deps + apt hints).
@@ -120,7 +121,7 @@ Workflow filenames follow `{stage}-{target}.yml` for the per-PR,
 nightly, and release gates; other stages carry their own prefix:
 
 - `pr-`, `nightly-`, `release` — the gates above (e.g. `pr-twister`,
-  `nightly-v2n`, `release.yml`).
+  `nightly-cloud-sdks`, `release.yml`).
 - `merge-queue-` — checks that can only be graded against the merge
   group itself (e.g. `merge-queue-changelog-citations.yml`).
 - Other standing workflows use their own stage prefix

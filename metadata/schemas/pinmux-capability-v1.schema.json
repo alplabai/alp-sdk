@@ -4,12 +4,19 @@
   "title": "ALP per-family pin-mux capability table (metadata/pinmux/<family>.yaml) v1",
   "description": "Structured, queryable projection of a SoM family's pin-mux: each E1M edge pad maps to the silicon function/peripheral that backs it and the on-module silicon that owns it.  GENERATED from metadata/e1m_modules/<family>/*.tsv by scripts/gen_pinmux_capability.py and gated byte-in-sync (the TSVs remain the single source).  A CLI/IDE queries this table instead of parsing the heterogeneous raw TSVs.  Pad exclusivity (no silicon pad backing two E1M functions) is enforced separately by scripts/check_pin_conflicts.py.",
   "type": "object",
-  "required": ["schemaVersion", "family", "display_name", "pads"],
+  "required": ["schemaVersion", "family", "display_name", "som_families", "pads"],
   "additionalProperties": false,
   "properties": {
     "schemaVersion": { "const": "pinmux-capability-v1" },
     "family": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
     "display_name": { "type": "string", "minLength": 1 },
+    "som_families": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "description": "SoM preset `family:` values (metadata/e1m_modules/E1M-*.yaml) this table describes.  Lets a consumer reach the table, and through the SoM's `silicon:` the host SoC, from a board preset's `hosts_som_families`."
+    },
     "pads": {
       "type": "array",
       "minItems": 1,

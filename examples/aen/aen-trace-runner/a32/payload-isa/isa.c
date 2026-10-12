@@ -6,7 +6,7 @@
  * Reads only: never writes a clock, ACTLR or any IMPLEMENTATION DEFINED
  * register; the FPSCR change in stage_fz() is restored and checked.
  * Reads 0x02600000..+1 MiB (FB B, clean lines only) to evict the caches.
- * Writes: its own image/.bss (0x02500000..0x025F0000, isa.ld) and the
+ * Writes: its own image/.bss (0x02500000..0x025E0000, isa.ld) and the
  * results block 0x02401C00..0x02401FFF.
  */
 #include <stdint.h>

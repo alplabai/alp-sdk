@@ -19,10 +19,13 @@ On alp-sdk that carrier connector shield is the E1M-EVK's
 
 Driver: this shield reuses upstream Zephyr v4.4.1's
 ``drivers/video/imx335.c`` (``CONFIG_VIDEO_IMX335``) as-is (ADR 0017 Tier 1,
-upstream-native) -- there is no alp-sdk-vendored IMX335 driver. One repo
-patch applies on top of it,
+upstream-native) -- there is no alp-sdk-vendored IMX335 driver. Two repo
+patches apply on top of it:
+``zephyr/patches/zephyr/0006-imx335-wait-for-sensor-after-power-up.patch`` polls the first
+register write for up to 1 s (without it a cold power-up NACKs ``0x3000``
+and the sensor stays NOT_READY), and
 ``zephyr/patches/zephyr/0004-imx335-2lane-link-freq-and-binning.patch``
-(registered in ``zephyr/patches.yml``, applied per-module by
+(both registered in ``zephyr/patches.yml``, applied per-module by
 ``scripts/bootstrap.sh`` via ``west patch apply``, and checked by
 ``scripts/verify_west_patches.py``). Bench runs 316-331 (E1M-AEN803
 2026W36-0001) found and fixed three real upstream-driver bugs at this

@@ -310,6 +310,9 @@ def classify(paths: list[str], root: Path = REPO,
         if path in FULL_EXACT:
             return "full", [f"{path}: defines how twister runs"]
         if path.startswith("scripts/"):
+            if not (root / path).exists():
+                # A deleted file is never in the closure built from the live tree.
+                return "full", [f"{path}: deleted scripts/ file (cannot prove it was unused)"]
             if path in tree.closure():
                 return "full", [f"{path}: in the native_sim build-time closure"]
             if path.endswith(".py") or path.startswith("scripts/bench/"):

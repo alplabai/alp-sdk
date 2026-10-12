@@ -67,13 +67,13 @@
  * OSPI0 pinout both that measurement and this app's pinctrl group (see the
  * board overlay) derive from.
  *
- * That measurement was NOT taken through this app: everything below is a
- * controller-register proof (DT bind, reg/aes-reg/irq match, CTRLR0 readback)
- * with ZERO device-level transfers -- no opcode is ever shifted out to a chip
- * select.  So "the OSPI memories are silent" was never actually tested at the
- * device level by anything in this repo; this app's PASS has never been, and
- * still is not, evidence either way about whether a part answers on ITS
- * specific board.
+ * That measurement was NOT taken through this app.  In its DEFAULT mode
+ * everything below is a controller-register proof (DT bind, reg/aes-reg/irq
+ * match, CTRLR0 readback) with ZERO device-level transfers -- no opcode is
+ * shifted out to a chip select -- so a default-mode PASS is not evidence
+ * either way about whether a part answers on ITS specific board.  The
+ * opt-in #915 self-test further down is the device-level check: it erases,
+ * programs, reads back and restores one sector.
  *
  * BOTH SKUs, SAME APP (#2198): E1M-AEN803 fits the OSPI0 HyperRAM
  * (S80KS5122GABHM02, SS0) and the xSPI NOR (IS25WX256-JHLE, SS1) that

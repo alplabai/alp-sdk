@@ -147,6 +147,28 @@ alp_status_t alp_adc_read_raw(alp_adc_t *h, int32_t *raw_out)
 	return rc;
 }
 
+alp_status_t alp_adc_read_raw_n(alp_adc_t *h, int32_t *raw_out, size_t n)
+{
+	if (h == NULL || raw_out == NULL || n == 0u) {
+		return ALP_ERR_INVAL;
+	}
+	if (!alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc = ALP_OK;
+	if (h->state.ops->read_raw_n != NULL) {
+		rc = h->state.ops->read_raw_n(&h->state, raw_out, n);
+	} else if (h->state.ops->read_raw == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		for (size_t i = 0; i < n && rc == ALP_OK; ++i) {
+			rc = h->state.ops->read_raw(&h->state, &raw_out[i]);
+		}
+	}
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
+}
+
 alp_status_t alp_adc_read_uv(alp_adc_t *h, int32_t *uv_out)
 {
 	if (h == NULL || uv_out == NULL) {
