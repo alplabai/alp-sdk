@@ -210,8 +210,9 @@ void cc_feat_extract(const struct cc_window_state *st,
  * Feature packing -- lay the metrics out in a fixed order for the AI model.
  *
  * The order here must match the column order used when the classifier was
- * trained (see tools/training/feature_extractor.py).  If a feature is added
- * or removed, CC_FEATURE_DIM must be updated AND the model must be retrained.
+ * trained (the training script is not shipped with this example).  If a feature
+ * is added or removed, CC_FEATURE_DIM must be updated AND the model must be
+ * retrained.
  *
  * The function intentionally takes a raw float pointer + capacity so that the
  * same vector can be passed directly to the .alpmodel inference call without
@@ -226,7 +227,7 @@ size_t cc_feat_pack(const struct cc_features *f, float *vec, size_t cap)
 		return 0;
 	}
 	/* Pack in the same order the training pipeline used to build the model.
-	 * Any reordering here must be mirrored in the Python feature_extractor. */
+	 * Any reordering here must be mirrored in the training pipeline. */
 	size_t i = 0;
 	/* Temperature statistics (3 floats): mean captures the typical exposure
 	 * level; min and max bound the extremes.  Together they let the autoencoder

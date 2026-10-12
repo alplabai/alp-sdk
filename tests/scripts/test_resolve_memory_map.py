@@ -86,11 +86,11 @@ def test_preset_with_memory_map_override_wins_verbatim(alp_project):
 
 
 def test_silicon_variant_tbd_returns_empty(alp_project):
-    """E1M-NX9101 carries silicon_variant: TBD; the resolver
+    """A preset carrying silicon_variant: TBD; the resolver
     returns an empty list -- callers see 'pending HW config'."""
     preset = {
-        "sku": "E1M-NX9101",
-        "silicon": "nxp:imx9:imx93",
+        "sku": "E1M-V2N999",
+        "silicon": "renesas:rzv2n:n44",
         "silicon_variant": "TBD",
     }
     regions = alp_project.resolve_memory_map(preset, METADATA)

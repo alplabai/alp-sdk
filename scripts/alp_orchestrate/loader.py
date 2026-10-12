@@ -849,7 +849,7 @@ def _validate_topology_cores(
     # `som.sku:` swap where `cores.<key>` doesn't match this SoM preset's
     # `topology:`.  Example: customer has `cores.m55_hp:` and swaps
     # som.sku from E1M-AEN801 (topology: m55_hp + m55_he + a32_cluster)
-    # to E1M-NX9101 (topology: m33 + a55_cluster).  Pre-fix the slice-
+    # to E1M-V2N101 (topology: m33_sm + a55_cluster).  Pre-fix the slice-
     # build loop iterated topology keys, NOT project_cores keys, so
     # `cores.m55_hp:` was silently dropped and the customer got an
     # empty slice with no diagnostic.
@@ -1395,11 +1395,22 @@ def load_board_yaml(path: Path, *,
         ownership=ownership,
         raw=project,
         metadata_root=metadata_root,
+        source_dir=Path(path).resolve().parent,
     )
 
     # Cross-field consistency pass (v0.6 P2.3).  Runs last so it can
     # inspect the fully-assembled project + every per-core
     # extra_libraries: entry the schema couldn't validate cleanly.
     _validate_consistency(out)
+
+    # `diagnostics.link: itcm` (tan-cli#1350) is implemented by tan's planner
+    # only (ADR-0026).  This planner would otherwise accept the schema-valid
+    # knob and silently emit an MRAM-linked image: refuse instead.
+    if str(out.diagnostics.get("link") or "auto").strip().lower() != "auto":
+        raise OrchestratorError(
+            "diagnostics.link: itcm is implemented by `tan build` only "
+            "(ADR-0026: tan owns the planner); alp_orchestrate would emit an "
+            "MRAM-linked image and silently ignore it.  Build with `tan build`, "
+            "or remove `diagnostics.link`.")
 
     return out

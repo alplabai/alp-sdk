@@ -2,9 +2,10 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * e1m_evk_rpi_csi on an E1M-AEN SoM (Alif Ensemble E8): the SoC side of the
- * J5 camera connector.  Included by every boards/<E1M-AEN target>.overlay of
- * this shield, so the AEN801 and AEN803 targets share one copy.
+ * e1m_evk_rpi_csi on an E1M-AEN SoM: the SoC side of the J5 camera
+ * connector.  Included by every boards/<E1M-AEN target>.overlay of this
+ * shield, so the AEN801/AEN803 (Alif Ensemble E8, M55-HE and M55-HP) and the
+ * AEN401 (Alif Ensemble E4, M55-HP) targets share one copy.
  *
  *   csi_interface     &csi -- the DesignWare CSI-2 host
  *   csi_ep_in         &csi port@0 endpoint
@@ -22,7 +23,9 @@
  * phy-if entry selects BOTH the sensor port and dphy_dw_slave_setup()'s id).
  * The SoC default `phy-if = <&dphy 1>, <&dphy 0>` selects id 1 = the DSI TX
  * D-PHY running in RX mode; J5 lands on the E8's dedicated CSI RX lanes, so
- * this selects id 0 with the sensor on port@0.  The dphy clocks are the SoC
+ * this selects id 0 with the sensor on port@0.  The E4 D-PHY id and lane
+ * mapping are assumed to match the E8's (compile-only, not bench-verified).
+ * The dphy clocks are the SoC
  * node's real MIPI_CKEN gates, shared with a DSI panel, so only status is set.
  */
 

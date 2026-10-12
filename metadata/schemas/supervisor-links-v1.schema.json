@@ -151,6 +151,12 @@
         "gpio_node": { "type": "string", "pattern": "^gpio[0-9]+$" },
         "gpio_pin": { "type": "integer", "minimum": 0 },
         "active_low": { "type": "boolean" },
+        "tint_slot": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31,
+          "description": "Optional: the RZ/V2N ICU TINT slot (tintN) that routes this pad as a CM33 GPIO interrupt.  Emitted as `&tintN { status = okay; }` + `irqs = <&tintN pin>` on the pad gpio node.  The slot is a shared ICU resource (TSSR/TITSR), so it is a CM33 claim Linux must not take."
+        },
         "evidence": {
           "type": "string",
           "minLength": 1,

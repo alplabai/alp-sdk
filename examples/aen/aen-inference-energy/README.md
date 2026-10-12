@@ -24,7 +24,8 @@ module-isolated power.
    headroom, else stays on +/-81.92 mV.
 3. Runs M pairs of equal-length (active, idle) windows, sampling on the INA236
    conversion-ready flag so each conversion is consumed exactly once, and
-   timestamping with the M55 DWT cycle counter.
+   timestamping with the kernel cycle counter (`k_cycle_get_32()`; the DWT is not
+   used, a J-Link close clears TRCENA and freezes it).
 4. Prints every raw sample so the host re-integrates independently, plus its own
    on-target integral as a cross-check, plus a `RESULT PASS/FAIL` line.
 

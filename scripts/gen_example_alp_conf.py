@@ -112,13 +112,7 @@ def main(argv: list[str]) -> int:
         except (OrchestratorError, OSError) as e:
             failures.append(f"{app_dir.relative_to(REPO).as_posix()}: {e}")
     for d in sorted(only - seen):
-        for rel, why in parity.EXCLUDED_WITH_REASON.items():
-            bdir = (REPO / rel).parent.resolve()
-            if d == bdir or bdir in d.parents:
-                print(f"SKIP {rel}: {why}")
-                break
-        else:
-            failures.append(f"{d}: matches no Zephyr example core")
+        failures.append(f"{d}: matches no Zephyr example core")
     for f in failures:
         print(f"gen_example_alp_conf: {f}", file=sys.stderr)
     print(f"gen_example_alp_conf: wrote {n} generated/alp.conf")

@@ -361,6 +361,46 @@ ZTEST(alp_chips, test_gd32g553_pwm_set_invalid_duty)
 {
 	gd32g553_t ctx = { .initialised = true };
 	zassert_equal(gd32g553_pwm_set(&ctx, 0u, 100000u, 200000u), ALP_ERR_INVAL);
+	/* period 0 is the wire's stop request; pwm_set must never send it. */
+	zassert_equal(gd32g553_pwm_set(&ctx, 0u, 0u, 0u), ALP_ERR_INVAL);
+}
+
+/* E1M IO24 (bit 8) is unrouted: refused before any wire traffic. */
+ZTEST(alp_chips, test_gd32g553_gpio_unrouted_io24_refused)
+{
+	gd32g553_t ctx        = { 0 };
+	uint32_t   levels     = 0u;
+	ctx.initialised       = true;
+	ctx.default_transport = (gd32g553_transport_t)0x7Fu;
+	ctx.version.minor     = GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR;
+
+	zassert_equal(gd32g553_gpio_read(&ctx, 1u << 8, &levels), ALP_ERR_NOSUPPORT);
+	zassert_equal(gd32g553_gpio_write(&ctx, 1u << 8, 0u), ALP_ERR_NOSUPPORT);
+}
+
+/* Stop = PWM_SET period 0 / duty 0, which firmware below protocol 0.17 would
+ * take as ARR = 0xFFFFFFFF and use to retune the shared timer: it must not be
+ * sent there.  Wire traffic is counted via the fake bridge. */
+ZTEST(alp_chips, test_gd32g553_pwm_stop_gated_on_protocol_minor)
+{
+	fake_gd32bridge_reset();
+	fake_gd32bridge_set_version(
+	    GD32G553_HOST_PROTOCOL_MAJOR, GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR - 1u, 0u);
+	alp_i2c_t *bus = open_fake_gd32bridge_bus();
+	gd32g553_t ctx;
+	zassert_equal(gd32g553_init(&ctx, NULL, bus, 0x2Cu), ALP_OK);
+
+	uint32_t before = fake_gd32bridge_calls_seen();
+	zassert_equal(gd32g553_pwm_stop(&ctx, 4u), ALP_ERR_NOSUPPORT);
+	zassert_equal(fake_gd32bridge_calls_seen(), before, "nothing may be sent below 0.17");
+
+	ctx.version.minor = GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR;
+	before            = fake_gd32bridge_calls_seen();
+	(void)gd32g553_pwm_stop(&ctx, 4u); /* the fake answers BUSY to PWM_SET; only the send matters */
+	zassert_equal(fake_gd32bridge_calls_seen(), before + 1u, "PWM_SET must be sent at 0.17");
+
+	alp_i2c_close(bus);
+	fake_gd32bridge_reset();
 }
 
 ZTEST(alp_chips, test_gd32g553_adc_read_invalid_samples)
@@ -538,7 +578,7 @@ ZTEST(alp_chips, test_gd32g553_v05_calls_reject_uninitialised)
 	zassert_equal(gd32g553_pwm_capture_end(&ctx, 0u), ALP_ERR_NOT_READY);
 	zassert_equal(gd32g553_pwm_single_pulse(&ctx, 0u, 1000u), ALP_ERR_NOT_READY);
 	zassert_equal(gd32g553_timer_sync(&ctx, 0u, 1u, 0u), ALP_ERR_NOT_READY);
-	zassert_equal(gd32g553_power_mode_set(&ctx, 1u, 0u, 0u), ALP_ERR_NOT_READY);
+	zassert_equal(gd32g553_set_power_mode(&ctx, 1u, NULL), ALP_ERR_NOT_READY);
 	/* §2B wave-2 chunked DSP-chain upload helpers honour the same
      * NOT_READY contract -- chain_open, stage_push, chain_bind all
      * short-circuit before serialising the wire envelope. */
@@ -574,8 +614,8 @@ ZTEST(alp_chips, test_gd32g553_v05_invalid_args)
 
 	/* power_mode_set rejects mode > 3 (outside RUN / SLEEP /
      * DEEP_SLEEP / STANDBY). */
-	zassert_equal(gd32g553_power_mode_set(&ctx, 4u, 0u, 0u), ALP_ERR_INVAL);
-	zassert_equal(gd32g553_power_mode_set(&ctx, 99u, 0u, 0u), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_set_power_mode(&ctx, 4u, NULL), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_set_power_mode(&ctx, 99u, NULL), ALP_ERR_INVAL);
 
 	/* §2B wave-2 DSP-chain helpers reject malformed args before they
      * hit cmd_send.  Each constraint mirrors the firmware-side

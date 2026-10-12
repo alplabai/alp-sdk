@@ -217,6 +217,17 @@ def emit_dts_partitions(project: BoardProject) -> str:
     return "\n".join(lines)
 
 
+def _mountable_partitions(project: BoardProject):
+    """Resolved storage partitions that get a row in the mount table."""
+    return [p for p in resolve_storage_partitions(project)
+            if p.status == "ok" and p.mount and p.fs != "raw"]
+
+
+def has_storage_mounts(project: BoardProject) -> bool:
+    """True when `emit_storage_mounts_c` would emit a non-empty table."""
+    return bool(_mountable_partitions(project))
+
+
 def emit_storage_mounts_c(project: BoardProject) -> str:
     """Generate storage_mount_table.c -- a static fs_mount_t[] array.
 
@@ -225,9 +236,7 @@ def emit_storage_mounts_c(project: BoardProject) -> str:
     `alp_storage_mount_all()` (or iterate the table manually).
     Partitions with no `mount:` declared are omitted from the table.
     """
-    partitions = resolve_storage_partitions(project)
-    mountable = [p for p in partitions
-                 if p.status == "ok" and p.mount and p.fs != "raw"]
+    mountable = _mountable_partitions(project)
 
     lines: list[str] = [
         "/*",

@@ -10,8 +10,6 @@
  *   - tflm           (priority 50, "*")  -- portable TFLM CPU executor.
  *   - ethos_u_aen    (priority 100, alif:ensemble:e3/e4/e5/e6/e7/e8)
  *                                       -- TFLM + Ethos-U op resolver on AEN.
- *   - ethos_u_n93    (priority 100, nxp:imx9:imx93)
- *                                       -- TFLM + Ethos-U op resolver on i.MX 93.
  *   - sw_fallback    (priority 0,   "*") -- stateless NOSUPPORT stub.
  *
  * There is deliberately NO M-class DRP-AI or DEEPX DX-M1 backend:

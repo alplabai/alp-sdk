@@ -36,3 +36,10 @@ def test_udev_package_rides_packageconfig_drpai():
     assert 'KERNEL=="rgnmm|rgnmmbuf", MODE="0660", GROUP="drpai"' in _t(
         "recipes-bsp/alp-drpai-udev/files/99-alp-drpai.rules"
     )
+
+
+def test_recipe_inherits_pkgconfig():
+    # gles PACKAGECONFIG detects egl/glesv2 via pkg_check_modules.
+    s = _t("recipes-core/alp-sdk/alp-sdk_0.6.bb")
+    line = next(x for x in s.splitlines() if x.startswith("inherit "))
+    assert "pkgconfig" in line.split()

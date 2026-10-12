@@ -14,7 +14,7 @@
 # v2m103-gd32-getversion-i2c, v2m103-thermal-zones, v2m103-gd32-gpiochip,
 # v2m103-gd32-io15-io26-gpio,
 # v2m103-rtc-ticks, v2m103-wifi-present, v2m103-bt-hci-up, v2m103-dx-m1-pcie,
-# v2m103-audio-tas2563, v2m103-openamp-uio,
+# v2m103-audio-tas2563, v2m103-openamp-uio, v2m103-remoteproc-lifecycle,
 # v2m103-optiga-se-rst-line, v2m103-drpai-present, v2m103-mali-gpu-present,
 # v2m103-gd32-bridge-results (CM33 GD32-bridge test image); bench-observed identity values:
 # v2m103-pmic-i2c (ACT88760 0x25, DA9292 0x1E), v2m103-ethernet-phy-id (MII ID 001c.c916 x2),

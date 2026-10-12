@@ -118,6 +118,19 @@ alp_status_t tmp112_set_extended_mode(tmp112_t *ctx, bool extended);
  */
 alp_status_t tmp112_read_temp_milli_c(tmp112_t *ctx, int32_t *temp_milli_c);
 
+/**
+ * @brief Enter or leave the shutdown state (CONF.SD).
+ *
+ * In shutdown the sensor stops converting and draws well under 1 uA; leaving
+ * it starts a conversion at the configured rate.  Other CONF bits are kept.
+ * Used by the SoM power-domain layer to quiesce the sensor around STOP.
+ *
+ * @param ctx       Initialised context.
+ * @param shutdown  true -> shutdown, false -> continuous conversion.
+ * @return ALP_OK / ALP_ERR_NOT_READY (NULL or not initialised) / bus error.
+ */
+alp_status_t tmp112_set_shutdown(tmp112_t *ctx, bool shutdown);
+
 /** @brief Release resources.  Idempotent. */
 void tmp112_deinit(tmp112_t *ctx);
 

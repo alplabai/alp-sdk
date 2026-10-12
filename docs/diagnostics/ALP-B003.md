@@ -6,7 +6,7 @@ constraint. Examples in
 `diagnostics.log_level` (enum: `error`, `warn`, `info`, `debug`, `trace`),
 `boot.method` (enum: `mcuboot`, `none`), `ota.provider` (enum: `mender`,
 `hawkbit`, `mcumgr`, `none`), `som.sku` (pattern:
-`^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$`), and
+`^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3})$`), and
 `preset` (pattern: `^[a-z][a-z0-9-]*$`).
 
 The same code covers the camera declarations the schema cannot judge

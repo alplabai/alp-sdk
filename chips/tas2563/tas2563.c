@@ -38,7 +38,15 @@
 #define TAS2563_REG_MISC      0x32u /* IRQZ pin polarity    (§7.5.45, p.87). */
 #define TAS2563_REG_TG_CFG0   0x3Fu /* Tone generator       (§7.5.50, p.89). */
 #define TAS2563_REG_REVID     0x7Du /* Revision + PG ID, RO (§7.5.60, p.93). */
-#define TAS2563_REG_BOOK      0x7Fu /* Device book          (§7.5.62, p.94). */
+#define TAS2563_REG_I2C_CKSUM 0x7Eu /* B0/P0 I2C checksum, RW (§7.5.61 Table 7-161, p.93). */
+
+/* B0 / P1 / 0x02: ROM vs tuning program select.  NOT in SLASET3D -- the
+ * source is a TI E2E answer (unverified, thread not yet cited) plus
+ * the first write of every PPC3 program block (0x20).  Read-only here. */
+#define TAS2563_PAGE_APP_MODE       1u
+#define TAS2563_REG_APP_MODE        0x02u
+#define TAS2563_APP_MODE_TUNING_BIT 0x20u
+#define TAS2563_REG_BOOK            0x7Fu /* Device book          (§7.5.62, p.94). */
 
 /* PWR_CTL (0x02) fields -- §7.5.4 Table 7-104, p.66.  MODE is bits
  * 1..0 ONLY; bit 2 is VSNS_PD and bit 3 is ISNS_PD, so a mode change
@@ -848,8 +856,11 @@ alp_status_t tas2563_resume(const tas2563_t *ctx)
 static bool tuning_reg_is_reserved(const tas2563_tuning_reg_t *r)
 {
 	if (r->book != 0u || r->page != 0u) return false;
-	return r->reg == TAS2563_REG_SW_RESET || r->reg == TAS2563_REG_PWR_CTL ||
-	       r->reg == TAS2563_REG_MISC || r->reg == TAS2563_REG_TG_CFG0;
+	/* I2C_CKSUM: a write resets the running checksum (Table 7-161), so a
+	 * blob carrying it would invalidate tas2563_load_tuning_verified(). */
+	return r->reg == TAS2563_REG_I2C_CKSUM || r->reg == TAS2563_REG_SW_RESET ||
+	       r->reg == TAS2563_REG_PWR_CTL || r->reg == TAS2563_REG_MISC ||
+	       r->reg == TAS2563_REG_TG_CFG0;
 }
 
 /* A record is rejected if it would write one of this function's own
@@ -912,6 +923,66 @@ alp_status_t tas2563_load_tuning(tas2563_t                  *ctx,
 		return s;
 	}
 	return select_book0_page0(ctx);
+}
+
+alp_status_t tas2563_load_tuning_verified(tas2563_t                  *ctx,
+                                          const tas2563_tuning_reg_t *records,
+                                          size_t                      count,
+                                          uint8_t                     expected_cksum,
+                                          size_t                     *failed_index_out,
+                                          uint8_t                    *cksum_read_out)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (count == 0u) return ALP_OK;
+	if (records == NULL) return ALP_ERR_INVAL;
+
+	/* Reject a bad stream before the checksum is zeroed. */
+	for (size_t i = 0; i < count; ++i) {
+		if (!tuning_record_is_legal(&records[i])) {
+			if (failed_index_out != NULL) *failed_index_out = i;
+			return ALP_ERR_INVAL;
+		}
+	}
+
+	/* Bus errors outside the record loop report SIZE_MAX, so a caller can
+	 * tell them from a checksum mismatch (failed index == count). */
+	alp_status_t s = select_book0_page0(ctx);
+	if (s == ALP_OK) s = reg_write(ctx, TAS2563_REG_I2C_CKSUM, 0x00u);
+	if (s != ALP_OK) {
+		if (failed_index_out != NULL) *failed_index_out = SIZE_MAX;
+		return s;
+	}
+
+	s = tas2563_load_tuning(ctx, records, count, failed_index_out);
+	if (s != ALP_OK) return s; /* load_tuning already restored B0/P0. */
+
+	uint8_t got = 0;
+	s           = reg_read(ctx, TAS2563_REG_I2C_CKSUM, &got);
+	if (s != ALP_OK) {
+		if (failed_index_out != NULL) *failed_index_out = SIZE_MAX;
+		return s;
+	}
+	if (cksum_read_out != NULL) *cksum_read_out = got;
+	if (got != expected_cksum) {
+		if (failed_index_out != NULL) *failed_index_out = count;
+		return ALP_ERR_IO;
+	}
+	return ALP_OK;
+}
+
+alp_status_t tas2563_read_tuning_mode(tas2563_t *ctx, bool *tuning_out)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (tuning_out == NULL) return ALP_ERR_INVAL;
+
+	uint8_t      v = 0;
+	alp_status_t s = select_page(ctx, TAS2563_PAGE_APP_MODE);
+	if (s == ALP_OK) s = reg_read(ctx, TAS2563_REG_APP_MODE, &v);
+	alp_status_t s2 = select_page(ctx, 0);
+	if (s != ALP_OK) return s;
+	if (s2 != ALP_OK) return s2;
+	*tuning_out = (v & TAS2563_APP_MODE_TUNING_BIT) != 0u;
+	return ALP_OK;
 }
 
 void tas2563_deinit(tas2563_t *ctx)

@@ -3,7 +3,8 @@
  * int8 on a synthetic 640x400 GREY8 clip of two public-domain photographs)
  * through pose.c + track.c exactly as the HE will: stillness arms
  * calibration, then one tr_track_update() per frame. Frame ranges are the
- * tool's script(). */
+ * tool's script(): a player who walks around, jumps and crouches with their
+ * arms down. */
 #include <assert.h>
 #include <stdio.h>
 
@@ -37,7 +38,7 @@ int main(void)
 	int        calibrated_at = -1;
 	bool       lost_at_end   = false;
 
-	tr_track_init(&t, FW, FH);
+	tr_track_init(&t, FH);
 	tr_still_reset(&still);
 	for (int n = 0; n < TR_POSE_CLIP_FRAMES; n++) {
 		tr_box_t b = tr_pose_box(&tr_pose_clip[n]);
@@ -45,7 +46,7 @@ int main(void)
 		g_in[n] = tr_intent_none();
 		if (!t.calibrated) {
 			if (tr_still_step(&still, b)) {
-				tr_track_calibrate(&t, b, FW);
+				tr_track_calibrate(&t, b);
 				calibrated_at = n;
 			}
 			continue;
@@ -79,16 +80,12 @@ int main(void)
 	tally_t s;
 	s = span(calibrated_at + 1, 59); /* standing still: nothing */
 	assert(s.lane == 0 && s.jumps == 0 && s.ducks == 0);
-	s = span(60, 89); /* steps left */
-	assert(s.lane == -1 && s.jumps == 0 && s.ducks == 0);
-	s = span(90, 129); /* steps right two lanes */
-	assert(s.lane == +2 && s.jumps == 0 && s.ducks == 0);
-	s = span(130, 159); /* back to centre */
-	assert(s.lane == -1 && s.jumps == 0 && s.ducks == 0);
-	s = span(160, 173); /* jump */
-	assert(s.jumps >= 1 && s.ducks == 0 && s.lane == 0);
-	s = span(174, 197); /* standing */
-	assert(s.jumps == 0 && s.ducks == 0 && s.lane == 0);
+	/* The recorded player steps left (60..89), right two lanes (90..129), back
+	 * (130..159) and jumps (160..173) -- with their arms down the whole time. Where they
+	 * stand and how high the body is are no lane and no jump any more (the arms
+	 * are, test_arms.c): real MoveNet output of all of it asks for nothing. */
+	s = span(60, 197);
+	assert(s.lane == 0 && s.jumps == 0 && s.ducks == 0);
 	s = span(198, 227); /* crouch, 30 frames */
 	assert(s.ducks >= 25 && s.jumps == 0 && s.lane == 0);
 	s = span(230, 251); /* standing again (2 frames to rise) */

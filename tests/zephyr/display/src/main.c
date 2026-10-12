@@ -151,6 +151,10 @@ ZTEST(alp_display, test_get_caps_matches_dt)
 	zassert_equal(caps.width, 320);
 	zassert_equal(caps.height, 240);
 	zassert_equal(caps.format, ALP_PIXFMT_ARGB8888);
+	/* The dummy panel declares no mount-rotation: scanned as mounted. (The
+	 * property lives on tes,cdc-2.1; the dummy-dc binding does not allow it, so
+	 * a non-zero value is covered by the Alif board builds, not here.) */
+	zassert_equal(caps.rotation, 0);
 
 	zassert_equal(alp_display_get_caps(d, NULL), ALP_ERR_INVAL);
 

@@ -129,9 +129,9 @@ not the distro.
 > **Machine fragments:** `alp-image-edge` picks up per-machine `.cfg`
 > fragments from `meta-alp-sdk/recipes-kernel/linux/`.  Merged
 > unconditionally: `uio.cfg`, `rv3028-rtc.cfg`, `wifi-bt.cfg`,
-> `trim-unused-storage-net-fs.cfg`, `no-kernel-audit.cfg`. Per carrier:
+> `trim-unused-storage-net-fs.cfg`, `no-kernel-audit.cfg`, and the generated `camera-sensors.cfg`. Per carrier:
 > `display.cfg` and `tas2563-audio.cfg` (with kernel patches `0009` and
-> `0014`). Opt-in: `camera-csi.cfg`.
+> `0014`). Opt-in camera DT: `ALP_CAMERA_CAM0` (see `v2n-camera-csi.md`).
 > To build a minimal image without
 > Weston/display, remove the `alp-lvgl-dashboard`, `weston`, and
 > `weston-init` packages from `IMAGE_INSTALL` in your `local.conf` and
@@ -276,6 +276,61 @@ When off (the default) the build is unchanged. When on, the kernel deploys
 > path, not a bootable board, and the §4 "Fast dev iteration" copy-`Image`
 > recipe does not apply while it is on. Booting the FIT comes with the
 > phase-2 U-Boot work.
+
+## Dev-kit package feed (opkg)
+
+Dev boards can take `alp-sdk`, `alp-sdk-dev` and the example packages without a
+reflash, from a **signed opkg feed** published per image release line and per
+machine. **Dev kits only: this is not a field-update channel.** Field devices
+stay on image-based A/B OTA (Mender).
+
+**Adding the feed.** An image built with
+`require conf/distro/include/alp-devkit-feed.inc` (in `local.conf`) already has
+it: opkg with GPG and HTTPS support, `/etc/opkg/alp-devkit-feed.conf`
+(`option check_signature 1`) and the Alp feed public key
+(`keys/alp_devkit_feed_signing.pub.asc`, fingerprint
+`2B7807E20B75B471BF88FD7AC9AB032782D3143B`) in the opkg keyring. The fragment also switches the build to the ipk
+packager (`PACKAGE_CLASSES = "package_ipk"`; the poky default is rpm), so a
+dev-kit image is a different build from a stock one. Then, on the board:
+
+```sh
+opkg update && opkg upgrade alp-sdk
+```
+
+`opkg update` fails if the index signature does not verify; there is no
+unsigned fallback.
+
+**Where it lives.** The feed of release line `0.17` for machine
+`e1m-v2n101-a55` is the GitHub Release tagged `feed-v0.17-e1m-v2n101-a55`
+(`feed-v<major.minor>-<MACHINE>`). opkg needs `<base>/Packages.gz` and every
+`<base>/<ipk>` by name under one base URL, and a release's assets are a flat
+namespace, so the feed is **one release per line and machine** whose assets are
+a single merged `Packages`, `Packages.gz`, `Packages.sig` and the ipks
+(`all` + the machine arch); the base URL is
+`https://github.com/alplabai/alp-sdk/releases/download/<tag>`. The release is
+refreshed in place, so the URL stays stable. Each release also carries
+`<tag>.tar.gz`, the same files for hosts that cannot use the URL
+as a base: unpack it and use `src/gz alp-devkit file:///path/to/feed` in a
+`/etc/opkg/*.conf`.
+
+**ABI.** Keep the image and the feed on the same line. While the SDK is 0.x the
+minor is part of the soname (`libalp_sdk.so.0.17`), so an upgrade cannot load an
+incompatible library into an app linked against the old one: moving to the next
+line means a new image, not `opkg upgrade`. The feed holds only our own layers'
+packages (`all` and the machine arch), not the toolchain's libraries, so it
+relies on the image having been built from the same layers and toolchain.
+
+**Building and signing (release builder only).** Signing uses Yocto's
+`sign_package_feed` (`PACKAGE_FEED_SIGN`, `PACKAGE_FEED_GPG_NAME`,
+`PACKAGE_FEED_GPG_PASSPHRASE_FILE`, `PACKAGE_FEED_GPG_SIGNATURE_TYPE`), enabled
+by `require conf/distro/include/alp-devkit-feed-sign.inc` plus
+`GPG_PATH = "<gnupg home holding the key>"`. It is opt-in so a customer build is
+never forced to sign. The private key lives only in `alp-sdk-internal/signing/`
+and in the internal runner's secret store; signing never runs in public
+Actions. After `bitbake alp-image-edge package-index`,
+`scripts/package_devkit_feed.sh --ipk-dir tmp/deploy/ipk --machine <MACHINE> --tag <tag> --out <dir>`
+merges the arches into the flat feed, signs it and writes the tarball; the
+internal `devkit-feed` workflow uploads the result to the release.
 
 ## Notes
 

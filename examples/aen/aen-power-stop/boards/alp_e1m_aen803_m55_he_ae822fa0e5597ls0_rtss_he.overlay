@@ -1,0 +1,27 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-power-stop overlay for the E1M-AEN803 (Ensemble E8, M55-HE), MRAM image.
+ *
+ * Deliberately NO ITCM retarget: this image runs from MRAM, because STOP wakes
+ * through a cold boot (SES -> ATOC -> this image).
+ *
+ * The SoM power layer drives the pads of every present domain, and a pad whose GPIO
+ * controller is disabled in the devicetree is unusable: the quiesce then fails with
+ * ALP_ERR_NOT_READY and the sleep is refused (bench U8, 2026-10-09: backlight enable
+ * on GPIO5, PHY reset on GPIO11).  The board layer enables only the LPGPIO bank
+ * (the RV-3028 alarm pad), so the other two are enabled here, as in
+ * aen-power-domains.
+ */
+&lpgpio {
+	status = "okay";
+};
+
+&gpio11 {
+	status = "okay"; /* E_PHY_RESET (P11_6), eth_phy domain */
+};
+
+&gpio5 {
+	status = "okay"; /* BACKLIGHT_EN (P5_5), backlight domain */
+};

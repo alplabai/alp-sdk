@@ -8,8 +8,8 @@ read-back proof to the SAME proven Flow D machinery `probe/npu/flash-probe.sh` a
 (alp-sdk's `scripts/bench/aen/bench-env.sh`) instead of hand-rolled J-Link text.**
 
 **Fix round 2 (reviewer, see the implementor report): round 1's write session still had a RESET
-before the halt (`RSetType 2; r; h`) -- that reset was measured (alp-sdk-lcd
-`scripts/bench/aen/flash-jlink-mramxip.sh:296-321`) to DESTROY the debug access the halt needs on
+before the halt (`RSetType 2; r; h`) -- that reset was measured
+in `scripts/bench/aen/flash-jlink-mramxip.sh:296-321` to DESTROY the debug access the halt needs on
 this part: 0 of 8 halts succeeded after a reset in that bench log, versus 12/12 with a plain `h` on
 the live core. **The correct v5.2 session is `connect` -> `exec SetSkipProgOnCRCMatch = 0` -> `h`
 (NO prior reset) -> the loadbins, each `, noreset` -> `RSetType 2; r; g` ONLY AT THE END**, and the
@@ -64,51 +64,249 @@ Confirm against a fresh read-back before trusting these against live hardware --
 round 13's own image was flash-ready by every local gate and still froze the
 camera on first silicon boot.
 
-**Camera orientation (npu-body review round): `TR_CAM_ROTATE` now defaults to `90`
-(`src/vision/cam_rot.h`), the bench-verified 2026W36-0009 mount -- `270` showed the player upside
-down, the maintainer confirmed `90` by eye. Build the HP image with it spelled out anyway:
-`-DTR_CAM_ROTATE=90 -DTR_CAM_MIRROR=ON`. `build-release.sh` (`hp_vision_check.sh`) prints
-`TR_CAM_ROTATE=... TR_CAM_MIRROR=...` from the HP build's `CMakeCache.txt` and REFUSES any
-rotation but `0`/`90`/`270` -- including an EMPTY one, which only means "cam_rot.h's default
-when it was built" (`270` before this round). An HP build dir from before the option existed
-(e.g. `/tmp/tr-hp-vision-build10`, no `TR_CAM_ROTATE` entry at all) is refused for the same
-reason: rebuild it. Check the printed line before flashing: `TR_CAM_ROTATE=90
-TR_CAM_MIRROR=ON` for 2026W36-0009.**
+**Camera orientation: the E1M-EVK bench release is LANDSCAPE, `-DTR_CAM_ROTATE=0 -DTR_CAM_MIRROR=ON`
+on BOTH the HE and the HP build.** The arm-raise controls (README "Controls") want the wider field
+of view -- arms reach sideways -- so the OV9281 on the E1M-EVK's RPi CSI connector is mounted
+upright and shown as a 640x400 picture scaled up x1.28 to cover the camera area (the bottom 2/5 of
+the screen, about 10 px cropped a side), with the lamps and the "CAMERA / NPU Hz" label on a plate
+along its bottom edge. Mirror ON makes the player see a mirror image of
+themselves, which is also what tells the HE which arm is their left (`src/vision/pose.c`). A rig
+with the camera mounted on its SIDE uses `90` (the 2026W36-0009 mount; `270` showed the player upside
+down, the maintainer confirmed `90` by eye -- `src/vision/cam_rot.h` defaults to it) with
+`-DTR_CAM_MIRROR=ON`. **Since Stage 1 the A32 renderer draws only rotation 0.** A rot-90 / 270 build
+(the side-mounted 2026W36-0009 rig) still plays -- the HP decodes and the game reads the pose -- but
+the video area shows `ROT 90` in its label instead of the camera picture, and draws no skeleton.
+Spell the rotation out in every build: `build-release.sh`
+(`hp_vision_check.sh`) prints `TR_CAM_ROTATE=... TR_CAM_MIRROR=...` for the HP build and for the HE
+from their `CMakeCache.txt`, REFUSES any HP rotation but `0`/`90`/`270` -- including an EMPTY one,
+which only means "cam_rot.h's default when it was built" -- and REFUSES an HE/HP pair that disagrees
+on `TR_CAM_MIRROR` or on whether the rotation is `0` (landscape and portrait frames differ in size;
+an HE built before `TR_CAM_MIRROR` existed has no entry and is refused too: rebuild it). An HP build
+dir from before the option existed (e.g. `/tmp/tr-hp-vision-build10`, no `TR_CAM_ROTATE` entry at
+all) is refused for the same reason: rebuild it. Check the printed lines before flashing:
+`TR_CAM_ROTATE=0 TR_CAM_MIRROR=ON` (HP and HE) for E1M-EVK, `TR_CAM_ROTATE=90 TR_CAM_MIRROR=ON` for
+2026W36-0009.
 
-## Final blob list (real model, this release)
+**Bench acceptance: the arm lanes (do this before calling an E1M-EVK release good).** With the game
+running and a player in front of the camera:
 
-`sha256 6099cdcdff295e25a59107a5318df92f79cfc58ea8c366f5a806f53cf753e898` (the design doc's cut
-model) Vela'd exactly as the design doc's table (`ethos-u55-256`, `RTSS_HP_SRAM_MRAM`,
-`Shared_Sram`, 400 MHz, `--optimise Size`; Vela's own log confirms 277.50 KiB SRAM, 119/0 NPU/CPU
-ops -- matches the design table verbatim), packaged with `a32/release/build-release.sh
-TR_HP_VISION=ON` against a real `hp_vision` build and the `TR_INPUT_NPU=ON` HE build:
+1. Raise your physical LEFT arm. The figure's raised arm must appear on the screen's LEFT, and the
+   runner must move ONE lane left (the "LEFT ARM" lamp lights). Lower it and raise the RIGHT arm: the
+   figure's arm on the screen's RIGHT, one lane right ("RIGHT ARM" lamp).
+2. Raise both arms together: the runner jumps ("BOTH ARMS" lamp) and does not change lane.
+3. If the picture is not mirrored (your left arm shows on the screen's RIGHT), the sensor flip did
+   not take: look for `camera  : mirror 1 -> ... -- MIRROR NOT APPLIED` on the HP console.
+4. If the picture IS mirrored correctly but the runner moves the OPPOSITE way, or if the picture
+   looks mirrored the wrong way round, the rot-0 flip bit (0x3821 bit 2) mirrors the other way to
+   the one assumed. The Linux `ov9282` driver has had its hflip inverted against the silicon, and
+   nothing here had put a rot-0 picture on glass before this release. Rebuild ONLY the HP image with
+   `-DTR_OV9281_HMIRROR_ACTIVE_LOW=ON` (`src/vision/cam_rot.h`): it writes the bit the other way
+   round and still reports the truth in the camera descriptor. The HE does not need rebuilding:
+   it takes "is the view mirrored" from that descriptor (`tr_cam_view_t.mirror`), not from its own
+   `TR_CAM_MIRROR`, and prints `!!!!! HE built for TR_CAM_MIRROR=...` once if the two differ.
 
-| item | address | size (B) | md5 |
-|---|---|---|---|
-| bl32 | `0x80002000` | 28,816 | `766122d9cebb80bde9a0e346b8a806a2` |
-| a32_app | `0x80020000` | 460,800 | `8f7027fd4dd278740fbfa536a5364143` |
-| atoc | `0x8051BF90` | 409,712 | `26daa777886b2c13d9f35c7490f3ca75` |
-| movenet_model | `0x80100000` | 2,429,520 | `51f3fac2d27a8e2048bc77e0b8010815` |
+## This release reflashes the HE, the HP, the A32 app and the ATOC together
 
-**Regenerated fix round 12 (review: this table dated from fix round 4) against commit head at the
-time, `a32/release/build-release.sh` run with no read-back argument, printing `flowd/recipe.txt`
-directly -- `bl32`'s md5 is STILL UNCHANGED across every release so far (the board already holds
-it, so `flash-release.sh write`'s skip-if-identical check is expected to skip it, not write it);
-`movenet_model`'s is unchanged too (same Vela'd cut model, unaffected by this round's fixes).
-`a32_app`/`atoc` DID change (round 12's own fixes -- the MMU NC-page split, the completed font,
-the AE register readback fields all changed what the renderer/stub image actually contains, and
-by extension the ATOC's own size and address) -- confirm the board's actual MRAM state with a
-fresh read-back before trusting any md5 here against live hardware; these are the freshly-built
-images' own, not a read-back-merged flash image's.**
+Compared with the previous release this one changes the HE image (mailbox version 4: Stage 1's
+panel width `fw` in every frame, on top of version 3's memory re-plan, which moved FB B to
+0x025EA000 and the DL, bins, stacks and gate; frames carry a rotation since version 2), the HP vision image (it waits for the HE's I2C1 release before it touches
+the bus), `a32_app` (the stub and renderer, now speaking mailbox version 4) and therefore the
+ATOC that carries the HE. Flash all of them from ONE build. `bl32` and `movenet_model` are
+unchanged (the board already holds them; `flash-release.sh write` skips an identical sector).
+Do not mix images across releases:
 
-**These md5s are of the EXACT images (build-release.sh run without a read-back argument).** The
-sector-merged blobs `flash-release.sh write` actually flashes are different files (each padded
-out to whole 16 KiB sectors with the live read-back's own neighbouring bytes) and will have
-different md5s each run, by design -- `flash-release.sh`'s own fresh-session proof checks the
-padded images it built, not these four. `atoc`'s address is computed per-release by `app-gen-toc`
-from the package size -- do not reuse `0x8051BF00` for a future release without re-reading
-`flowd/recipe.txt`. `build-release.sh`'s own all-pairs sector-overlap assert (`0x4000`-aligned)
-proves these four never share a 16 KiB sector.
+| Mixed set | What happens |
+|---|---|
+| new HE, old `a32_app` (stub v2 or v3) | the HE logs `stub speaks mailbox version 3, this HE 4 -- not driving it`; it never treats the stub as alive, so no frames are drawn (a Stage 0 renderer is v3: it cannot crop to `fw`, an 800-wide HE frame would be written 720 wide into a framebuffer scanned 800 wide) |
+| old HE (v2 or v3), new `a32_app` (stub v4, new renderer) | the old HE refuses the stub: its mailbox version is not the stub's 4, so no frames are drawn; an HE that ignored the check would scan FB B at 0x02600000 while the renderer draws at 0x025EA000, or never set `fw` (the renderer would fault: `renderer refused fw=0`) |
+| new HP, old HE | the HP waits for an I2C1 release that the old HE never publishes: `i2c-handover: waiting ...` on its console, no camera, no pose, the game runs on its fallback |
+| old HP, new HE | the old HP touches I2C1 at its boot without waiting; on the RVT121 that collides with the bridge configuration |
+| new ATOC, old `a32_app` (or the reverse) | the ATOC's HE and the MRAM renderer disagree on length and CRC: the stub refuses the LAUNCH (`BAD_CRC`) and the HE's watchdog relaunches the same bytes |
+
+`flash-release.sh` writes the images `build-release.sh` packaged together, in one pass; the proof
+step reads the same set back. Build the whole release on ONE machine with ONE toolchain (see
+`README.md`): `build-release.sh` refuses an HE whose launch header came from a different
+`renderer.bin`.
+
+**The table below is PRE-STAGE-1 and historical** (mailbox version 2, 720 wide, `TR_CAM_ROTATE=90`):
+none of it matches a current release. A current release's image md5s are the ones its packaging run
+prints (`flowd/recipe.txt`, and the `images.md5` the release script writes next to it); compare
+those, never this table.
+
+Image md5s of the builds this recipe was last regenerated from (the exact images; the
+sector-merged blobs `flash-release.sh write` flashes are padded with the live read-back and have
+different md5s each run, by design; the `hp_vision` image's md5 is whatever the packaging run's
+`TR_HP_VISION_BUILD` produced and is printed with it). Riverdi RVT121 release, RK055 release (30 Hz via
+`panel_30hz.overlay`), both `TR_INPUT_NPU=ON`, `TR_CAM_ROTATE=90`; the renderer, stub and launch
+header are the SAME files in both:
+
+| image | md5 |
+|---|---|
+| `renderer.bin` (460,460 B, `TR_A32_CRC 0xD6605303`) | `47e15a9eecddba4fb21116b7c7b9f7be` |
+| `a32_stub.bin` | `c4cd1b52855bfbc329f0bf625df3f3f5` |
+| `tr_launch.h` | `282bf49ccf63ead0b651270f96e5b378` |
+| RVT121 `he_zephyr.bin` | `69c7e605e77357e8309199aa586d7a86` |
+| RK055 `he_zephyr.bin` | `8547ba008af1fa5b9b360b5b649716a5` |
+
+The packaged items' addresses and sizes (`a32_app`, `atoc`, `bl32`, `movenet_model`) come from the
+`flowd/recipe.txt` the packaging run prints; this file no longer carries a table of them, because
+`atoc`'s address and size follow the package and change with every HE and HP. The release is
+packaged with `a32/release/build-release.sh TR_HP_VISION=ON` against a real `hp_vision` build and
+the `TR_INPUT_NPU=ON` HE build, the Vela'd cut MoveNet model
+(`sha256 6099cdcdff295e25a59107a5318df92f79cfc58ea8c366f5a806f53cf753e898`, `ethos-u55-256`,
+`RTSS_HP_SRAM_MRAM`, `Shared_Sram`, 400 MHz, `--optimise Size`; Vela's log confirms 277.50 KiB
+SRAM, 119/0 NPU/CPU ops). `build-release.sh`'s own all-pairs sector-overlap assert
+(`0x4000`-aligned) proves the items never share a 16 KiB sector.
+
+**Another display (the Riverdi RVT121, `-DSHIELD=e1m_evk_rvt121hvdfwca0`):** the renderer is one
+binary for every display (the HE sends the panel's rotation in every frame), so `a32_app`, `bl32`
+and `movenet_model` do not change between displays. Only the HE image differs, and with it the
+ATOC. The HP image is the same `hp_vision`; it waits for the HE's I2C1 release
+(`alp,i2c-handover`), so start the HE first.
+
+## Combined HP image: camera + NPU + game sound (`TR_HP_SOUND`, reworked carriers only)
+
+The HP's one image slot can carry `hp_vision` and the game sound together (design and protocol:
+`docs/2026-09-23-sound.md`, "Sound with the vision HP"). **Reworked-U46 carriers only: unit
+`2026W36-0002` is allowed, `2026W36-0009` is denied** (`sound-carriers.txt`; `build-release.sh`
+refuses the denied unit before it builds anything). **Not run on the bench yet: this recipe only
+packages and checks; the bench run below is still to be done.**
+
+```sh
+# HP: hp_vision with the sound linked in (needs the clockctrl-patched ZEPHYR_BASE)
+west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp -d "$HP_BUILD" hp_vision -- \
+  -DTR_CAM_ROTATE=90 -DTR_CAM_MIRROR=ON -DTR_SND_REWORKED_U46=ON -DTR_HP_SOUND=ON
+# HE: the Riverdi build, with the HE's side of the I2C2 + GPIO5 lease
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he -d "$HE_BUILD" . -- \
+  -DSHIELD=e1m_evk_rvt121hvdfwca0 -DTR_M55_AUTOLAUNCH=ON -DTR_A32_LAUNCH_H="$LAUNCH_H" \
+  -DTR_INPUT_NPU=ON -DTR_HP_SOUND=ON -DTR_CAM_ROTATE=90
+ST=$(mktemp -d)/setools && cp -a "$SETOOLS_DIR" "$ST"
+TR_HP_VISION=ON TR_SND_HP=ON TR_SND_CARRIER_SERIAL=2026W36-0002 \
+  TR_HP_VISION_BUILD="$HP_BUILD" TR_HP_VISION_MODEL="$MODEL" \
+  bash a32/release/build-release.sh "$ST" "$HE_BUILD" "$RB_PRE"
+```
+
+`build-release.sh` runs `hp_vision_check.sh` (combined) AND `snd_hp_check.sh` (combined) on that one
+HP build, and refuses: a build without `-DTR_SND_REWORKED_U46=ON` or `-DTR_HP_SOUND=ON`; a
+`TR_SND_HP_BUILD` that is a different directory (two HP images); a sound-carrying `hp_vision` with
+`TR_HP_VISION=ON` alone, or the combined directory as `TR_SND_HP_BUILD` alone; the sound buffers,
+heap or thread stack outside the HP DTCM; an HP image over 256 KiB; and an HE image without
+`tr_bus2_he_frame` (an HE built without `-DTR_HP_SOUND=ON` never leases the bus: the HP would wait
+for ever); an HE whose `TR_CAM_ROTATE` shape (landscape 0 / portrait 90|270) or `TR_CAM_MIRROR`
+differs from the HP's, or that was built without `TR_INPUT_NPU` (`hp_vision_check HP MODEL NM HE_DIR
+[MODE]`: the HE dir is argument 4); and an HP carrying the DEV underrun positive control
+(`-DTR_SND_UNDERRUN_TEST=ON`, by cache entry or by its console text in the ELF). The RK055 shield cannot be the HE of a combined release: it uses GPIO5 for its backlight,
+and the HE build refuses `-DTR_HP_SOUND=ON` with it.
+
+What flashes does not change: `bl32`, `a32_app`, `atoc` (which carries the HE and the HP image) and
+`movenet_model` are the same four items, and `flash-release.sh write` / `restore` flash them the same
+way, with one difference at the end of the session: **`write` does not issue the warm pin reset
+(`RSetType 2; r; g`) into a package whose HP image carries the game sound** (detected from the packaged
+HP image; force either way with `--no-reset` / `--reset`). A TR_HP_SOUND image must COLD-boot (both cores
+come up together, the lease record starts clean); after the write, power-cycle the board (step 6) and do
+not resume the old image.
+Flash the HE and the HP from ONE build: the pairings that matter are in the table above, plus
+`new HP (TR_HP_SOUND) + HE without TR_HP_SOUND`: the HP prints `waiting for the HE's I2C2 + GPIO5
+offer` for ever, vision runs, no sound.
+
+**Do not halt the HP (debugger halt, breakpoint, J-Link `h`) during the amp bring-up.** While the HP holds the
+bus it beats `hp_beat`; a halted HP stops beating, and after 2 s the HE reclaims the lease (controller stopped, SCL
+bus-clear) under a core that is only paused, which then resumes into a bus it no longer owns (its next entry is
+refused and the bring-up aborts and starts over). Read the lease record (`0x0237FD40`) and the console without
+halting, or halt only when the HP waits for the offer or streams.
+
+Order is free (the lease does not need the HE first; the I2C1 handover still wants both reset
+together, as before). Nothing waits on the sound: the camera, the NPU and the pose slot run whether
+or not the amps come up.
+
+**The console symbols move per build.** Read `ram_console_buf` from each build's own ELF
+(`arm-zephyr-eabi-nm zephyr.elf | grep ram_console_buf`), never from a remembered address: the 26b8855cd
+build had the HE's at `0x20006550` (global `0x58806550`) and the HP's at `0x2002CE92`.
+
+The HE console says what the lease did from the evidence: `I2C2 offered to the HP`, `I2C2 leased by the HP`,
+`I2C2 back on the HE`; when the whole lease passes between two HE frames the claim is never observed, and the
+line reads `I2C2 leased by the HP and returned within one frame: back on the HE`; an unclaimed offer reads
+`I2C2 offer withdrawn (not claimed): back on the HE`. Each line ends with `hp_acq=` and `he_regains=`.
+
+**Bench checks to run (not done):**
+
+1. HP RAM console (`ram_console_buf`): `[snd] waiting for the HE's I2C2 + GPIO5 offer`, then
+   `HE offered I2C2 + GPIO5: I2C2 device_init -> 0`, steps `1` to `11` with `5b amp 0x4d ACK` and
+   `5b amp 0x4e ACK`, `I2C2 + GPIO5 given back to the HE`, `game sound running at 16000 Hz`. HE
+   console: `bus2    : I2C2 offered to the HP`, `leased by the HP`, `back on the HE`; the HUD
+   `5V -- mW` for the length of the bring-up (a couple of seconds), then a number, and it keeps
+   updating.
+2. The lease record over SWD at `0x0237FD40`: `+0x00` `he_state` `0x42320000`, `+0x10` `hp_state`
+   `0x42320004` (returned), `+0x0C` `he_regains` 1, `+0x28` `hp_acq` 1, `+0x1C` `hp_aborts` 0 (each core zeroes the
+   counters it owns at its own boot, `tr_bus2_he_boot` / `tr_bus2_hp_boot`: `he_regains`, `he_reclaims` by the
+   HE; `hp_aborts`, `hp_i2s_fu`, `hp_i2s_err`, `hp_acq` by the HP; a cold SRAM0 no longer shows power-up garbage),
+   `+0x08` `he_beat` advancing every frame, `+0x20` `hp_i2s_fu` 0 and `+0x24` `hp_i2s_err` 0 while
+   streaming. `0x0237FC94` (the I2C1 handover) is untouched by it.
+3. Sound plays beside the camera: the pose slot's `hp_state` stays 0, the HP debug beacon's
+   heartbeat (`0x0237FCAC`) keeps its frame rate, `hp_i2s_fu` stays 0 for 60 s.
+4. Reset the HP alone: its `PRE_KERNEL_1` forgets the lease, the HE (idle, it owns the bus)
+   sees the new `WANT`, offers a new token, and the bring-up runs again.
+   Reset the HE alone (SYSRESETREQ on the HE AP, HP and A32 running): the HE sees the handover record
+   taken and the HP's liveness word (`0x0237FD90`, a 10 ms HP timer) moving, prints `i2c-handover: warm boot ... not touching it`,
+   and leaves I2C1 (no driver init, no NVIC line), the bridge's EN pin, the recipe (`0x0237FE00`) magic and the
+   counters alone; it re-initialises the DSI host and the CDC200 only. The HP's `sn65dsi83` agent
+   replays the CSRs if the DSI restart cost the bridge its PLL lock (`sn65dsi83: lost config, re-init` on
+   the HP console within ~2 polls of `CONFIG_SN65DSI83_RECOVERY_INTERVAL_MS`), the camera keeps streaming.
+   (Not bench-verified at the time of writing.)
+   Fatal-error test (TR_BENCH_FAULT_INJECT builds, inert until armed): over SWD write `0x0237FD98` =
+   delay in ms, then `0x0237FD9C` = `0x464A4E54` ('FJNT'). The HE panics once its uptime passes the delay
+   (`he-fault: fatal error ..., asking the SE to reset the SoC`), the SoC resets, and because the word stays set it
+   faults again every boot: the 3rd fatal error within 30 s of a boot must HALT (`... keep coming right after each
+   boot, halting`). If the count does not survive the SE reset (SRAM0 cleared) it never halts: build with
+   `-DTR_HE_FAULT_SOC_RESET=OFF`. Disarm: write 0 to `0x0237FD9C` (or power-cycle if SRAM0 is cleared).
+   (An HE reset inside the HP's bring-up is covered by the host tests, not by a bench step.)
+5. Volume (record `TR_MEM_VOL` = `0x0237FD80`, `src/ipc/tr_vol.h`): HE console `[vol] 30% at 0x0237fd80: encoder ok, switch ok, bench request word +4` (`encoder none` / `switch none` if that control failed to open); over SWD `+0x00` `vol` = `0x564F001E` (30 %), `+0x08` `rejects` 0, `+0x0C` `seq` 0. Turn the
+   encoder: 5 % a detent, `[vol] 35% (seq 1)` (clockwise, from the 30 % boot level), the HUD shows `VOLUME 35%` for 1.5 s over its bottom row, `vol`
+   follows, and the sound gets louder inside one 16 ms block with no click. HOLD the switch for 1 s (a long press; it fires while held): `MUTE`, the
+   amps keep running (`hp_i2s_fu` stays 0, SD_N is never touched), hold again: the level it muted; turning while muted unmutes and steps from that saved level. A SHORT press (under 1 s) is not a mute any more: it switches the knob to BRIGHTNESS (HUD `BRIGHTNESS 30%`, console `[bl] backlight 35% -> 0` on the first detent), and a short press while muted only switches the mode (a long press unmutes). BRIGHTNESS is 10..80 % in 5 % steps (never dark, never past 80 %) and returns to VOLUME after 5 s with no turn or press. The first bench run found the phase order reversed (clockwise lowered it) and the
+   overlay now lists ENC0_Y / P3_1 first; the rotary decode over GPIO3 (#2037 / #2095) and the switch (GPIO4 P4_3) are bench-exercised on that run only, not yet on the final order. If the encoder is dead, the request word below still works.
+
+**Changing the backlight without reflashing (record `TR_MEM_BL` = `0x0237FDC0`, `src/ipc/tr_knob.h`).** Console
+`[vol] ... backlight 30% at 0x0237fdc0`. Words: `+0x00` `bl` (`0x424C001E` at the 30 % boot level), `+0x04` `req`,
+`+0x08` `rejects`, `+0x0C` `seq`, `+0x10` `led_errs`. Write the REQUEST word, never `bl`: 10..`TR_BL_MAX_PCT` % (80 by default) in 5 % steps only
+(`0x424C000A` .. `0x424C0050` at 80 %, e.g. `0x424C003C` = 60 %; `0x424C0028` is the top at `TR_BL_MAX_PCT=40`); anything else (below 10 %, above the ceiling, off the 5 % grid, a
+wrong tag) is counted in `rejects` and ignored, so the panel can be neither turned dark nor past the ceiling. Carrier note: a carrier whose 5 V net droops under the backlight (one measured 4.68 V unloaded, ~0.12 ohm in series) browns the bridge out at 60 % and above, so build it with `-DTR_BL_MAX_PCT=40` and package with `TR_BL_MAX_PCT=40` set, which makes `build-release.sh` refuse an HE built with another ceiling. `req` is a
+REQUEST, not a level: the HE takes it and writes `0` back (accepted or refused), so read `req` back after writing: `0`
+means it was taken, and writing the same word again is a new request (and the same bad word twice counts twice). If the
+LED driver refuses a level the HE puts the old one back and counts it in `led_errs` (`+0x10`).
+
+```
+J-Link> w4 0x0237FDC4, 0x424C003C     // 60 %      (0x424C0000 | percent)
+J-Link> mem32 0x0237FDC0, 5           // bl, req (0 once taken), rejects, seq, led_errs
+```
+
+After an HE-only warm reset the console line reads `[vol] N% at 0x0237fd80 (warm: levels kept), backlight M% ...` and `vol` / `bl` still hold the levels from before the reset (a valid tagged word is restored, the backlight is re-applied to the LED, both clamped to this build's limits); a cold power-up shows 30 % / 30 %.
+
+**Changing the volume without reflashing (any SWD probe, HE or HP running, nothing halted).** The sound's
+volume is 0..100 % of the build's `TR_SND_VOLUME` ceiling (128, the level heard as safe on the 2026W36-0002
+speakers; 100 % is that level, the word can only turn it down). Write the REQUEST word, never `vol`:
+the HE is `vol`'s only writer and puts its own level back on the next frame.
+
+```
+J-Link> w4 0x0237FD84, 0x564F001E     // 30 %      (0x564F0000 | percent)
+J-Link> mem32 0x0237FD80, 4           // vol, req, rejects, seq
+```
+
+| Level | `req` |
+| --- | --- |
+| mute (amps keep running) | `0x564F0000` |
+| 25 % | `0x564F0019` |
+| 50 % | `0x564F0032` |
+| 75 % | `0x564F004B` |
+| 100 % | `0x564F0064` |
+| 30 % (boot default) | `0x564F001E` |
+
+`req` is a REQUEST: the HE takes it and writes `0` back, accepted or refused, so read it back after writing (`0` = taken)
+and writing the same word again is a new request. Anything without the `0x564F` tag, or with a
+percent above 100, is refused (the word `0` itself is not a request): `rejects` (`+0x08`) counts it, every time, and the level stays. A `req` left over from
+before an HE boot is dropped (the HE clears it at boot), so write after the HE console says `[vol]`.
+A cold SRAM0 reads as the default, 30 %, on both cores (the HP plays at 30 % from its first block, before the HE has published): a garbage `vol` word is never a level. Because the
+change goes through the HE, it shows on the HUD and bumps `seq` (`+0x0C`).
 
 ## Preconditions
 
@@ -185,7 +383,7 @@ ONLY rollback basis.
 **The first flash uses the FROZEN, already-reviewed artifacts below -- do not rebuild into, modify
 or delete them** (but see "Camera orientation" above: `hp_vision_check.sh` now refuses an HP build
 without an explicit `TR_CAM_ROTATE`, so a pre-rotation HP dir like `build10` needs replacing by a
-build with `-DTR_CAM_ROTATE=90 -DTR_CAM_MIRROR=ON`):
+build with `-DTR_CAM_ROTATE=0 -DTR_CAM_MIRROR=ON` (E1M-EVK; `90` for a camera on its side)):
 
 ```sh
 TR_HP_VISION_BUILD=/tmp/tr-hp-vision-build10

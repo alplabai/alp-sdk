@@ -1,3 +1,0 @@
-### Fixed — `scripts/test-all.sh` clang-format stage now grades the whole branch, not just the last commit
-
-The `clang-format-diff` stage diffed against `HEAD~1` by default, while CI's `clang-format · diff-only` diffs against `git merge-base origin/dev HEAD`. On a batch branch built by `git merge --no-edit` (or any multi-commit branch) `HEAD~1` is only the final merge's delta, so every earlier branch's C/H changes were never read and the local stage reported PASS while CI failed. The stage now defaults to the merge-base with `origin/dev` (falling back to `HEAD~1` when `origin/dev` is missing or `HEAD` is on it); `DIFF_BASE` still overrides. Regression: `tests/scripts/test_test_all_clang_format_base.py`.

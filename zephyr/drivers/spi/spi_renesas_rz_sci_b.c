@@ -58,26 +58,31 @@
  * CRC and answers STATUS_IO.  Proven on silicon 2026-06-03: with SCK (1 MHz)
  * and MOSI/MISO live, the GD32's spi_rx_len pegs at 69 (buffer full, never
  * reset).  So drive the P97 output latch DIRECTLY via the CM33's secure GPIO
- * alias.  The pin direction (PM9 P97 output: on THIS pad field 0b11/0xC000 =
- * push-pull, set by alp_v2n_pins_assert() below -- field 0b01/0x4000 was swept
- * and drives HIGH-only so CS never pulls low; do NOT "simplify" it to 0x4000)
- * and the SCK7/MOSI/MISO mux are held by the platform against Linux's SD1_CD
- * (P94) clobber; here we only flip the per-transaction output bit.
+ * alias.  The pin direction (PM9 P97 field 0b11/0xC000 = OUTPUT with input
+ * enabled, set by alp_v2n_pins_assert() below) and the SCK7/MOSI/MISO mux are
+ * re-asserted against a Linux port-9 read-modify-write; here we only flip the
+ * per-transaction output bit.  PM field encoding (FSP r_ioport.h): 00 Hi-Z,
+ * 01 INPUT, 10 OUTPUT, 11 OUTPUT with input enabled -- there is no
+ * "push-pull" or "high-only" mode.  Field 0b01 leaves the pad an INPUT, which
+ * is why a swept 0x4000 never pulled CS low; do NOT use it.  That something
+ * left 0b01 in PM9 under gpio_rz (which writes 0b10 for GPIO_OUTPUT) is
+ * suspected to be a byte-wide Linux PM9 write, NOT verified.
  * P97 = port 9 pin 7, active-low.  Address = R_GPIO secure base 0x40410020 +
  * P29 (port-9 output-data register, offset 0x09) = 0x40410029.
  * NOTE: board-specific bring-up shim for the gd32 bridge; the durable fix is
- * the gpio_rz/IDAU output path + dropping the Linux SD1_CD pin claim. */
+ * the gpio_rz/IDAU output path and keeping port 9 on a single core. */
 /* CS OWNERSHIP (silicon-resolved 2026-06-03): the direct latch below is THE
  * chip-select owner on RZ/V2N.  Setting this to 0 routes CS through the
  * standard spi_context GPIO path (gpio_rz) instead and skips the
  * per-transceive pin re-own -- tested on silicon WITH the carrier P94/SD1_CD
- * clobber fix deployed, and it FAILS: zero bytes reach the GD32.  Root cause:
- * the gpio_rz configure/output path leaves PM9's P97 field in the high-only
- * drive mode (0b01; empirically swept -- the pad needs 0b11), and the alp SPI
- * backend's gpio_pin_configure_dt() at alp_spi_open() re-applies that broken
- * mode even with Linux's port-9 clobber gone -- which is also why the
- * per-transceive alp_v2n_pins_assert() below must stay.  Re-test with 0 only
- * after the gpio_rz output path is fixed for this pad. */
+ * clobber fix deployed, and it FAILS: zero bytes reach the GD32.  Observed:
+ * PM9's P97 field ends up 0b01 (INPUT) after the alp SPI backend's
+ * gpio_pin_configure_dt() at alp_spi_open(), while the pad works with 0b11.
+ * gpio_rz maps GPIO_OUTPUT to 0b10, so the writer of 0b01 is unidentified
+ * (suspect: a Linux byte-wide PM9 write).  Open item: re-test with 0 using
+ * PM=0b10, capturing PM9 before and after alp_spi_open().  Until a Linux
+ * port-9 writer is ruled out, the per-transceive alp_v2n_pins_assert() below
+ * must stay. */
 #ifndef ALP_V2N_DIRECT_CS_SHIM
 #define ALP_V2N_DIRECT_CS_SHIM 1
 #endif
@@ -154,31 +159,35 @@ static ALWAYS_INLINE void alp_v2n_cs_deassert(void)
 }
 
 /* ── RZ/V2N CM33 pin-ownership: hold P96(SCK7)/P97(CS) against the AMP clobber ──
- * Port 9 is shared across the A55+CM33 AMP split: Linux owns P94 (SD1_CD) and its
- * byte/half-word write to the port-9 PMC9/PM9 registers wipes the CM33's P96
- * (SCK7 peripheral-enable) and P97 (CS output-direction) bits.  The CM33 re-owns
- * them via secure-alias read-modify-write, preserving Linux's P94 bits (PMC9 bit4,
- * PM9 bits[9:8]).  Proven on silicon 2026-06-03 -- identical writes to the bench
- * /dev/mem poke that held the link: PMC9 bit6=1 (P96 peripheral = SCK7); PM9 P97
- * field[15:14]=0b11 (0xC000 = full push-pull output -- field 01/0x4000 drives
- * HIGH-ONLY so CS never pulls low; empirically swept).  PFC9 P96=func2 is applied
- * by pinctrl_apply_state() at init and survives (Linux does a per-nibble RMW on
+ * Port 9 is shared across the A55+CM33 AMP split: PMC9/PM9/P9 are byte/half-word
+ * registers with no per-bit set/clear alias, so ANY Linux read-modify-write of
+ * port 9 (a pinctrl claim or a gpio hog on another port-9 pin, e.g. the V2M
+ * DEEPX P95 mux-select hog) can wipe the CM33's P96 (SCK7 peripheral-enable) and
+ * P97 (CS output-direction) bits.  The old SD1_CD (P94) claim is gone (card
+ * detect is PA1 now).  The CM33 re-owns its bits via secure-alias
+ * read-modify-write, preserving the other pins' bits (PMC9 bit4, PM9 bits[9:8]).
+ * Silicon-held 2026-06-03 with the same writes as a /dev/mem poke: PMC9 bit6=1
+ * (P96 peripheral = SCK7); PM9 P97 field[15:14]=0b11 (0xC000, OUTPUT with input
+ * enabled; 0b01 = INPUT, CS never pulls low).  PFC9 P96=func2 is applied by
+ * pinctrl_apply_state() at init and survives (Linux does a per-nibble RMW on
  * PFC).  Called once at init AND just before each transceive so it wins whenever
- * Linux's clobber lands.  Durable carrier-side fix: drop the Linux SD1_CD (P94)
- * pin claim (meta-alp-sdk .../e1m-x-evk.dtsi); then the init call alone suffices. */
+ * a Linux port-9 write lands.
+ *
+ * PWPR (0x40413C04 bit6, REGWE) is a SHARED gate: Linux pinctrl also toggles it.
+ * Leave REGWE set and never write back a previously-read value -- restoring a
+ * stale PWPR could re-lock the registers in the middle of a Linux pinctrl write.
+ * Durable fix: keep port 9 on one core (next-rev RSPI0 plan). */
 #define ALP_V2N_PWPR        0x40413C04u
 #define ALP_V2N_PMC9        0x40410229u
 #define ALP_V2N_PM9         0x40410152u
 #define ALP_V2N_PWPR_REGWE  (1u << 6)
 #define ALP_V2N_PMC9_SCK7   (1u << 6)
-#define ALP_V2N_PM9_P97_OUT 0xC000u   /* PM9 bits[15:14]=0b11 = push-pull output */
+#define ALP_V2N_PM9_P97_OUT 0xC000u   /* PM9 bits[15:14]=0b11 = OUTPUT, input enabled */
 static ALWAYS_INLINE void alp_v2n_pins_assert(void)
 {
-	const uint8_t pwpr = sys_read8(ALP_V2N_PWPR);
-	sys_write8(pwpr | ALP_V2N_PWPR_REGWE, ALP_V2N_PWPR);
+	sys_write8(sys_read8(ALP_V2N_PWPR) | ALP_V2N_PWPR_REGWE, ALP_V2N_PWPR);
 	sys_write8(sys_read8(ALP_V2N_PMC9) | ALP_V2N_PMC9_SCK7, ALP_V2N_PMC9);
 	sys_write16((sys_read16(ALP_V2N_PM9) & 0x3FFFu) | ALP_V2N_PM9_P97_OUT, ALP_V2N_PM9);
-	sys_write8(pwpr, ALP_V2N_PWPR);
 }
 
 #include <zephyr/logging/log.h>
@@ -954,7 +963,7 @@ static int rz_sci_b_spi_init(const struct device *dev)
 	}
 
 	/* Own SCK7(P96)/CS(P97): pinctrl above set the mux/PFC; this holds PMC9
-	 * bit6 + PM9 P97 against Linux's shared port-9 (P94 SD1_CD) clobber. */
+	 * bit6 + PM9 P97 against Linux's shared port-9 read-modify-writes. */
 	alp_v2n_pins_assert();
 
 	ret = spi_context_cs_configure_all(&data->ctx);

@@ -64,8 +64,8 @@ respective component (under vendors/<name>/ or the referenced upstream).
 --------------------------------------------------------------------------------
 Vendor BSPs and SDK binaries
 
-Silicon-vendor BSPs and SDK binaries (Alif Ensemble, Renesas RZ/V2N, NXP
-i.MX93, DEEPX DX-M1) are NOT redistributed in this repository. They are
+Silicon-vendor BSPs and SDK binaries (Alif Ensemble, Renesas RZ/V2N,
+DEEPX DX-M1) are NOT redistributed in this repository. They are
 obtained directly from the vendor under the vendor's own license. The
 vendors/<name>/ directories here contain only Alp Lab's own integration
 shims (Apache-2.0) plus instructions; see each vendors/<name>/README.md.

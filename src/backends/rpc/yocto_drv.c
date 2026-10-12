@@ -124,10 +124,11 @@
  * Linking: src/yocto/CMakeLists.txt gates this file behind
  * find_package(Threads) + pkg_check_modules(libmetal librpmsg) and
  * the ALP_SDK_HAVE_OPENAMP_USERLAND define.  When the host doesn't
- * have the OpenAMP user-space libraries (e.g. a macOS / Windows dev
- * box, or a host-only syntax check) the ops compile to NOSUPPORT via
- * the #else branch below, so the TU still builds + links cleanly and
- * the dispatcher falls through to the SW fallback.
+ * have the OpenAMP user-space libraries the CMake build leaves this
+ * file out, so the registry selects the SW fallback.  A build that
+ * compiles it anyway (a host-only syntax check, a test) gets NOSUPPORT
+ * ops from the #else branch below, and open() returns ALP_ERR_NOSUPPORT:
+ * the dispatcher does not fall back after a failed open().
  *
  * STATUS: real impl, Yocto-link + on-target run BENCH-UNVERIFIED (no
  *         sysroot / no real /dev/rpmsg* nodes in this environment) --
@@ -1291,9 +1292,10 @@ static void y_destroy(alp_rpc_backend_state_t *st)
 
 /* Build-time fallback: no OpenAMP user-space libs available on the
  * host (typical for Windows / macOS dev boxes, or a host-only syntax
- * check).  Compile the ops to NOSUPPORT so the TU still links cleanly
- * and the dispatcher falls through to the SW fallback; a customer who
- * forces this backend still sees a clear runtime error. */
+ * check).  Compile the ops to NOSUPPORT so the TU still links cleanly.
+ * open() returns ALP_ERR_NOSUPPORT and the dispatcher does not fall back
+ * to the SW fallback, so the CMake build omits this file instead of
+ * registering it without OpenAMP. */
 
 /** @brief NOSUPPORT open() -- no OpenAMP user-space libraries linked. */
 static alp_status_t

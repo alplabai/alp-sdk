@@ -709,6 +709,56 @@ def gd32_parse_version(out: str) -> tuple[int, int, int]:
     return rsp[1], rsp[2], rsp[3]
 
 
+GD32_CMD_BOOT_CONFIG = 0x42                 # include/alp/chips/gd32g553.h GD32G553_CMD_BOOT_CONFIG
+GD32_BOOT_CONFIG_SDMUX_EN_HIGH = 0x00000001  # GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH
+GD32_BOOT_CONFIG_POLLS = 100                # x GD32_BOOT_CONFIG_GAP_S: the async flash commit
+GD32_BOOT_CONFIG_GAP_S = 0.05
+
+
+def gd32_boot_config_cmd(bus: int, flags: int | None = None, addr: int = 0x70) -> str:
+    """BOOT_CONFIG over the bridge's I2C link (docs/gd32-bridge-protocol.md 3.19, 5): GET when
+    `flags` is None, else SET. Same frame as GET_VERSION: write [0x00 reg][0x42][op][flags
+    u32 LE][crc lo][crc hi], repeated-start read of 7 bytes [status][flags u32 LE][crc]."""
+    body = bytes((GD32_CMD_BOOT_CONFIG, 0 if flags is None else 1)) + (flags or 0).to_bytes(4, "little")
+    crc = _crc16_ccitt_false(body)
+    return xfer_cmd(bus, addr, b"\x00" + body + bytes((crc & 0xFF, crc >> 8)), 7, force=True)
+
+
+def gd32_parse_boot_config(out: str) -> int:
+    """The stored flag word of a BOOT_CONFIG reply (on a SET: the value before the commit)."""
+    rsp = _parse_bytes(out, 7)
+    if rsp[0] != 0:
+        hint = (" (NOSUPPORT: GD32 firmware predates the opcode, a build without the flash HAL, a "
+                "single-bank part, or the GD32 is running from slot B; if it is on slot B, OTA the "
+                "same image into slot A, then retry)") if rsp[0] == 0x06 else ""
+        raise BenchError(f"GD32 BOOT_CONFIG status {rsp[0]:#04x}{hint}")
+    if _crc16_ccitt_false(rsp[:5]) != rsp[5] | rsp[6] << 8:
+        raise BenchError(f"GD32 BOOT_CONFIG reply CRC mismatch: {rsp.hex(' ')}")
+    return int.from_bytes(rsp[1:5], "little")
+
+
+def gd32_boot_config(t: LinuxTarget, bus: int, flags: int | None = None, addr: int = 0x70) -> int:
+    return gd32_parse_boot_config(t.run(gd32_boot_config_cmd(bus, flags, addr)).stdout)
+
+
+def gd32_sd_out_flag_set(t: LinuxTarget, bus: int, addr: int = 0x70) -> int:
+    """Persist SDMUX_EN_HIGH (the GD32 drives IO29 high from every reset: SD out across cold
+    cycles) and wait until a GET returns it. Other stored bits are kept. A SET moves no pad."""
+    cur = gd32_boot_config(t, bus, None, addr)
+    want = cur | GD32_BOOT_CONFIG_SDMUX_EN_HIGH
+    if cur == want:
+        return cur
+    gd32_boot_config(t, bus, want, addr)
+    for _ in range(GD32_BOOT_CONFIG_POLLS):
+        time.sleep(GD32_BOOT_CONFIG_GAP_S)
+        try:
+            if gd32_boot_config(t, bus, None, addr) == want:
+                return want
+        except BenchError:
+            pass                              # the commit blacks the link out for ~40 ms
+    raise BenchError(f"GD32 BOOT_CONFIG never read back {want:#010x} after the SET")
+
+
 def i2c_scan(t: LinuxTarget, bus: int, span: tuple[int, int] | None = None,
              wake: bool = False) -> set[int]:
     """i2cdetect -r (read-byte probe, no quick-write), optionally limited to
@@ -909,6 +959,27 @@ def dxm1_drive_high(t: LinuxTarget, label: str, line: int) -> str:
     """Export `line` and drive it high (a sysfs direction write holds on its own)."""
     d = _sysfs_gpio_dir(t, label, line)
     t.run(f"echo high > {d}/direction")
+    return d
+
+
+# EVK SDIO path mux (#2697). Bench, E1M-V2M103 2026W38-0008: gpiochip `gd32-bridge-gpio`
+# IO29 `SDIO_MUX_EN` (GD32 PD11) = line 12; the chip base is resolved by label at runtime
+# (it moves with the kernel: 394 on the older image, 392 on r3). Active-LOW (low = microSD
+# connected, high = disconnected). IO27 `SDIO_MUX_SEL` is never touched.
+GD32_GPIO_LABEL = "gd32-bridge-gpio"
+SDIO_MUX_EN_LINE = 12
+
+
+def sdio_mux_set(t: LinuxTarget, connected: bool) -> str:
+    """Drive IO29 `SDIO_MUX_EN` (write-only: a bridge GPIO READ reconfigures the pad as an
+    input with a pull-up and moved the mux on the bench, #2701, so this never reads the
+    value). Disconnecting is refused while `/` is on the SD (mmcblk1), which would pull the
+    root filesystem out. The pad stays push-pull until the GD32 resets, and the mux
+    survives a warm reboot but not a power cycle."""
+    if not connected and "mmcblk1" in root_device(t):
+        raise BenchError("refusing to disconnect the SD: Linux root is on it")
+    d = _sysfs_gpio_dir(t, GD32_GPIO_LABEL, SDIO_MUX_EN_LINE)
+    t.run(f"echo {'low' if connected else 'high'} > {d}/direction")
     return d
 
 

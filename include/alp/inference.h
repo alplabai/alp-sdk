@@ -20,8 +20,7 @@
  *   - **Ethos-U**: real, via the same TFLM executor plus the
  *     Ethos-U op resolver against a Vela-compiled model --
  *     registered per-part on Alif Ensemble E3/E4/E5/E6/E7/E8
- *     (`ethos_u_aen_e3`..`ethos_u_aen_e8`, priority 100 each) and
- *     NXP i.MX 93 (`ethos_u_n93`, priority 100).
+ *     (`ethos_u_aen_e3`..`ethos_u_aen_e8`, priority 100 each).
  *   - **DRP-AI3** (Renesas RZ/V2N N44): real A55/Yocto-side backend
  *     (`src/yocto/inference_drpai.cpp`) against the real
  *     `MeraDrpRuntimeWrapper` DRP-AI TVM runtime -- an M-class
@@ -84,8 +83,6 @@ extern "C" {
  *    `CONFIG_ALP_TFLM_ETHOS_U85=y` per-NPU driver gate).
  *  - Ethos-U55 on every Alif Ensemble SKU (two per SoC;
  *    `CONFIG_ALP_TFLM_ETHOS_U55=y`).
- *  - Ethos-U65 on NXP i.MX 93 / E1M-NX9101 (`CONFIG_ALP_TFLM_ETHOS_U65=y`
- *    + the N93-specific driver shim `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y`).
  *  Customers don't have to know which variant the silicon carries;
  *  Vela picks at model-compile time and the runtime dispatches via
  *  the matching driver shim emitted by `scripts/alp_project.py`. */

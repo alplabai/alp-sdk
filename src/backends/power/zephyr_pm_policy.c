@@ -92,6 +92,7 @@
 
 #include "alp_slot_claim.h"
 #include "power_ops.h"
+#include "som_power.h"
 
 /* Held-lock bookkeeping so close() / repeated request_sleep can
  * unwind without leaking pm_policy lock references.  The Power
@@ -383,11 +384,23 @@ static void z_close(alp_power_backend_state_t *state)
 	state->be_data = NULL;
 }
 
-static const alp_power_ops_t _ops = {
+/* Not static: the Alif STOP backend (alif_se_power.c) forwards SLEEP / DEEP_SLEEP here. */
+const alp_power_ops_t alp_power_pm_policy_ops = {
 	.open                  = z_open,
 	.configure_wake_source = z_configure_wake_source,
 	.request_sleep         = z_request_sleep,
 	.close                 = z_close,
+	.mode_wake_caps        = NULL, /* #2784: every reported bit works in every mode */
+#ifdef CONFIG_ALP_SDK_SOM_POWER
+	/* #2784 U5: the SoM power-domain runtime (som_power.c). */
+	.domain_policy_set = alp_som_power_ops_policy_set,
+	.domain_info       = alp_som_power_ops_domain_info,
+	.boot_wake_info    = alp_som_power_ops_boot_wake_info,
+#else
+	.domain_policy_set = NULL, /* #2784: dispatcher answers NOSUPPORT */
+	.domain_info       = NULL,
+	.boot_wake_info    = NULL,
+#endif
 };
 
 ALP_BACKEND_REGISTER(power,
@@ -397,6 +410,6 @@ ALP_BACKEND_REGISTER(power,
                          .vendor      = "zephyr",
                          .base_caps   = 0u,
                          .priority    = 100,
-                         .ops         = &_ops,
+                         .ops         = &alp_power_pm_policy_ops,
                          .probe       = NULL,
                      });

@@ -1,6 +1,6 @@
 /* tests/host/test_pose.c -- pose -> box, stillness calibration, and the
- * intents they drive through track.c: lane change, jump, duck, no-person
- * noise. Synthetic poses; test_pose_clip.c replays a real MoveNet trace. */
+ * intents they drive through track.c: arm-raise lane change and jump, duck,
+ * no-person noise. Synthetic poses; test_pose_clip.c replays a real MoveNet trace. */
 #include <assert.h>
 #include <stdlib.h>
 
@@ -125,8 +125,8 @@ static void intents(void)
 	tr_pose_t   stand = figure(320, 80, 380, 150);
 	tr_intent_t i;
 
-	tr_track_init(&t, FW, FH);
-	tr_track_calibrate(&t, tr_pose_box(&stand), FW);
+	tr_track_init(&t, FH);
+	tr_track_calibrate(&t, tr_pose_box(&stand));
 	assert(t.calibrated);
 
 	/* Standing, with keypoint noise: nothing. */
@@ -136,29 +136,51 @@ static void intents(void)
 		assert(i.source == TR_INPUT_VISION && i.lane_delta == 0 && !i.jump && !i.duck);
 	}
 
-	/* Step left one lane: exactly one -1. */
-	tr_pose_t left = figure(107, 80, 380, 150);
-	int       sum  = 0;
+	/* One arm up: exactly one lane step. The label-LEFT keypoints sit at larger x, and
+	 * with the default TR_CAM_MIRROR (a selfie view) that is the player's RIGHT
+	 * arm (pose.c; the other mirror setting is test_arms.c's). */
+	tr_pose_t one        = stand;
+	int       sum        = 0;
+	one.kp[TR_KP_LWRI].y = (int16_t)(one.kp[TR_KP_LSHO].y - 60); /* 1.2 shoulder widths up */
 	for (int n = 0; n < 20; n++) {
-		i = tr_track_update(&t, tr_pose_box(&left));
+		i = tr_track_update(&t, tr_pose_box(&one));
 		sum += i.lane_delta;
 		assert(!i.jump && !i.duck);
 	}
-	assert(sum == -1);
+	assert(sum == +1);
 	for (int n = 0; n < 20; n++) {
 		sum += tr_track_update(&t, tr_pose_box(&stand)).lane_delta;
 	}
-	assert(sum == 0);
+	assert(sum == +1); /* lowering asks for nothing */
 
-	/* Jump: the whole body lifts 20 % of its height (0.6 of the torso). */
-	tr_pose_t air    = figure(320, 20, 320, 150);
-	bool      jumped = false;
+	/* Walking sideways asks for nothing. */
+	tr_pose_t aside = figure(107, 80, 380, 150);
+	for (int n = 0; n < 20; n++) {
+		i = tr_track_update(&t, tr_pose_box(&aside));
+		assert(i.lane_delta == 0 && !i.jump && !i.duck);
+	}
+	for (int n = 0; n < 20; n++) {
+		(void)tr_track_update(&t, tr_pose_box(&stand));
+	}
+
+	/* Jump: both arms up, once; the whole body lifting is not one. */
+	tr_pose_t air = figure(320, 20, 320, 150);
 	for (int n = 0; n < 4; n++) {
 		i = tr_track_update(&t, tr_pose_box(&air));
-		jumped |= i.jump;
+		assert(!i.jump && !i.duck && i.lane_delta == 0);
+	}
+	for (int n = 0; n < 20; n++) {
+		(void)tr_track_update(&t, tr_pose_box(&stand));
+	}
+	tr_pose_t both        = stand;
+	int       jumps       = 0;
+	both.kp[TR_KP_LWRI].y = both.kp[TR_KP_RWRI].y = (int16_t)(both.kp[TR_KP_LSHO].y - 60);
+	for (int n = 0; n < 20; n++) {
+		i = tr_track_update(&t, tr_pose_box(&both));
+		jumps += i.jump;
 		assert(!i.duck && i.lane_delta == 0);
 	}
-	assert(jumped);
+	assert(jumps == 1);
 	for (int n = 0; n < 20; n++) {
 		(void)tr_track_update(&t, tr_pose_box(&stand));
 	}

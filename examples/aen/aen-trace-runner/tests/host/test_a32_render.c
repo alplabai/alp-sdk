@@ -9,7 +9,7 @@
 #include "../../a32/common/crc32.c"
 #include "../../a32/renderer/render.c"
 
-static uint16_t fb[720 * 1280] __attribute__((aligned(16)));
+static uint16_t fb[TR_R3D_W * 1280] __attribute__((aligned(16)));
 
 /* render_band() is contractually responsible for rows [0, TR_VIEW_H) only
  * (a ragged last band, if TR_VIEW_H is ever not TR_BAND_H-aligned, copies a
@@ -18,7 +18,7 @@ static uint16_t fb[720 * 1280] __attribute__((aligned(16)));
  * produces. */
 static void clear_below_view(uint16_t *f)
 {
-	memset(&f[TR_VIEW_H * 720], 0, (size_t)(1280 - TR_VIEW_H) * 720 * sizeof(uint16_t));
+	memset(&f[TR_VIEW_H * TR_R3D_W], 0, (size_t)(1280 - TR_VIEW_H) * TR_R3D_W * sizeof(uint16_t));
 }
 
 int main(void)

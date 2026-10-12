@@ -244,6 +244,9 @@ PY_SCAN_ROOTS: tuple[str, ...] = ("scripts", "tests", "examples")
 # whitelist exists so we can ratchet down the lint without flagging
 # the well-documented exceptions.
 INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
+    # Release-builder helper (needs gpg + the private feed key on the internal
+    # Linux runner); no Windows equivalent by design. Header note says so.
+    "scripts/package_devkit_feed.sh",
     # examples/aen/aen-trace-runner: the game's A32 release packaging /
     # J-Link flash scripts and its host-test runner -- Linux-side bench and
     # host tooling (SETOOLS, JLinkExe, cc), each with a header note.
@@ -251,16 +254,14 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     "examples/aen/aen-trace-runner/a32/release/flash-release.sh",
     "examples/aen/aen-trace-runner/probe/npu/flash-probe.sh",
     "examples/aen/aen-trace-runner/tests/host/runner.sh",
+    "examples/aen/aen-trace-runner/tests/host/test_hp_combined.sh",
     "examples/aen/aen-trace-runner/tests/host/test_hp_vision_check.sh",
     "examples/aen/aen-trace-runner/tests/host/test_panel_hz_check.sh",
+    "examples/aen/aen-trace-runner/tests/host/test_rail5v_gap.sh",
     "examples/aen/aen-trace-runner/tests/host/test_snd_hp_check.sh",
     "scripts/bootstrap.sh",
     "scripts/test-all.sh",
     "scripts/setup-clang-format.sh",
-    # Sourced (not executed) by scripts/test-all.sh and
-    # pr-metadata-validate.yml's ubuntu-latest `run:` steps -- carries a
-    # "Cross-platform scope:" header note.
-    "scripts/board-yaml-sweep-exclude.sh",
     # CI-only helper for dispatch-tan-parity.yml, which runs solely on
     # ubuntu-latest; carries a "Cross-platform scope:" header note.
     "scripts/dispatch-confirm.sh",

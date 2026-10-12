@@ -113,8 +113,7 @@
             /* V2N power tree (BRD_I2C on silicon): ACT88760 ADD1/ADD2
              * share one register image; DA9292 at its OTP address; the
              * V2N-M1 TPS628640 bucks except 0x4D (fake_tas2563 above
-             * holds it).  0x25 is also PCA9451A_I2C_ADDR, so the
-             * pca9451a probe smoke now ACKs and takes its skip branch. */
+             * holds it). */
             fake_act8760_add1: fake_act8760@25 {
                 compatible = "alp,fake-act8760";
                 reg = <0x25>;

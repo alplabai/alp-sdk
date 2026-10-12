@@ -3,6 +3,20 @@
   "description": "Single source of truth for the SDK's quality tasks: which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles (quick/pr/full/release) run it. check_quality_registry.py keeps it == scripts/check_*.py on disk and (#1463 round 2) enforces `quick`'s own membership bar: non-empty, a subset of `pr`, and no member's script executing `import subprocess` at module load time. Additive-only within schemaVersion 1. `quick` membership criterion (#1463, measured against the `pr` set): pure-Python (no `subprocess` call of any kind -- not even `git`), no build/toolchain dependency, and a median wall-clock time under 0.5s (median of 5 interleaved reps on an otherwise-idle checkout -- a sequential sweep under load inverts this measurement, don't trust one of those). The subprocess/toolchain exclusion is a hermeticity rule, not a speed rule: `quick` must stay runnable in a dirty working tree or a bare checkout with no `git`/`west` on PATH, which is why it excludes some of the fastest gates in the whole registry (e.g. changelog-citations at ~0.05s) alongside genuinely slow ones -- do not read the exclusion as \"shells out, therefore slow\". Add `quick` only once you've measured a task against this bar, not by assuming a short script qualifies.",
   "tasks": [
     {
+      "id": "abidiff",
+      "description": "abidiff (libabigail) on the built libalp_sdk.so vs the latest same-minor release tag: a patch release must stay ABI-compatible (#2840).",
+      "runner": "check-script",
+      "script": "scripts/check_abidiff.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-plain-cmake.yml:abidiff"
+    },
+    {
       "id": "agents-md-generators",
       "description": "AGENTS.md's ALP_E1M_*/ALP_E1M_X_* identifiers and --emit choice lists must exist in the real generators (#1264).",
       "runner": "check-script",
@@ -51,6 +65,20 @@
       "description": "Every AEN board .dts and every SoM preset memory_map reserves the top of the App MRAM window as an 'atoc' region -- SETOOLS top-anchors the ATOC boot table there (#1289) -- and every AEN board .dts with an m55_he/m55_hp role publishes a slot0 flash address that agrees with loader._resolve_slot0_load_address() (#1482).",
       "runner": "check-script",
       "script": "scripts/check_atoc_reservation.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "amp-window",
+      "description": "The CM33 OpenAMP window is declared once (SoC openamp_carveout); the generated board .dts, the Linux reserved-memory/UIO nodes and the RPC backend's alp_amp_window.h must agree, and the beacon magic lives only in include/alp/protocol/amp_beacon.h.",
+      "runner": "check-script",
+      "script": "scripts/check_amp_window.py",
       "gate": true,
       "profiles": [
         "pr",
@@ -146,6 +174,20 @@
       ],
       "output": "none",
       "ci": null
+    },
+    {
+      "id": "camera-parity",
+      "description": "Keep the V2N/V2M Linux camera devicetree fragments and camera-sensors.cfg identical to what scripts/gen_camera_dt.py generates from the camera metadata.",
+      "runner": "check-script",
+      "script": "scripts/check_camera_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
     },
     {
       "id": "cc3501e-bridge-copies",
@@ -870,6 +912,20 @@
       ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "som-power-domains",
+      "description": "Every SoM power-domain control pad in on-module-links.yaml matches the pad TSV row it cites (alp-sdk#2784).",
+      "runner": "check-script",
+      "script": "scripts/check_som_power_domains.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": null
     },
     {
       "id": "som-topology-parity",

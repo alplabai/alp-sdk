@@ -15,6 +15,12 @@ inherit core-image
 
 IMAGE_FEATURES += "ssh-server-openssh"
 
+# Dev-kit signed opkg feed (opt-in: require conf/distro/include/alp-devkit-feed.inc,
+# alp-sdk #2841). Needs the package manager on the target; dev kits only, field
+# devices update by image (Mender).
+IMAGE_FEATURES += "${@'package-management' if d.getVar('ALP_DEVKIT_FEED') == '1' else ''}"
+IMAGE_INSTALL:append = "${@' alp-devkit-feed-config' if d.getVar('ALP_DEVKIT_FEED') == '1' else ''}"
+
 # Block map next to the .wic.gz: scripts/provision_som.py write_rootfs writes and
 # verifies only the mapped ranges (system_image_bmap bundle role) instead of the
 # full ~7 GB image. wic.bmap pulls in bmaptool-native (oe-core). The V2N family
@@ -79,7 +85,7 @@ IMAGE_INSTALL = " \
 # not its directory name; see conf/layer.conf) AND MACHINE_FEATURES
 # containing "v2n" (set on all six V2N/V2M machine confs): a build can
 # legitimately carry this layer in bblayers.conf while building a
-# different MACHINE in the same tree (AEN, NX91 -- neither ever builds
+# different MACHINE in the same tree (AEN -- never builds
 # linux-renesas), and kernel-module-mmngr has no COMPATIBLE_MACHINE guard
 # of its own to fall back on, so an unconditional RDEPENDS here would be
 # a hard `do_rootfs` dependency with no guaranteed provider on those
@@ -111,7 +117,7 @@ IMAGE_INSTALL += " ${ALP_RZ_DRPAI_INSTALL}"
 # MACHINE_FEATURES containing "v2n" -- because every V2N/V2M SKU carries
 # the same on-module part (see wifi_ble: in each
 # metadata/e1m_modules/E1M-V2{N,M}10{1,2,3}.yaml), but a shared
-# bblayers.conf building a non-RZ MACHINE (AEN, NX91) must not pull a
+# bblayers.conf building a non-RZ MACHINE (AEN) must not pull a
 # dependency with no provider there.
 ALP_V2N_WIFI_BT_INSTALL = "${@bb.utils.contains('MACHINE_FEATURES', 'v2n', \
     'cyw-fmac cyw-fmac-firmware wireless-regdb-static iw wpa-supplicant bluez5 kernel-module-bluetooth kernel-module-hci-uart kernel-module-btbcm', '', d)}"

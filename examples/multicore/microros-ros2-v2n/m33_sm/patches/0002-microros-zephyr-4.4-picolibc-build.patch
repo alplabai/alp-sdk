@@ -1,0 +1,137 @@
+From: Alp Lab AB <contact@alplab.ai>
+Subject: libmicroros: build against Zephyr 4.4 and its picolibc toolchain
+
+Upstream supports Zephyr 4.0/4.1 only (micro_ros_zephyr_module#158). Against
+Zephyr 4.4 + zephyr-sdk 1.0.1 (picolibc, CONFIG_POSIX_API=y) the colcon
+cross-build of the ROS 2 packages and the final link fail. The ROS packages
+keep taking the application's own compile flags; this patch only undoes what
+is specific to compiling Zephyr's sources. Applies to 8477de12, with or
+without 0001.
+
+- libmicroros.mk: -D__STDC_WANT_LIB_EXT1__=0.  rcutils defines the macro to 1
+  after <stdlib.h>/<stdio.h> were included.  picolibc's <sys/_types.h> emits
+  __errno_t/__rsize_t only if the macro is set on its first inclusion while
+  <string.h>/<stdlib.h> test it again later: "unknown type name '__errno_t'".
+- libmicroros.mk: -D_DEFAULT_SOURCE.  Zephyr's -D_POSIX_C_SOURCE=200809L
+  narrows picolibc to strict POSIX, <string.h> stops including <strings.h>
+  and rcutils' strcasecmp() is undeclared.
+- libmicroros.mk: drop -I<zephyr>/include/zephyr/posix from the ROS package
+  flags.  CONFIG_POSIX_SYSTEM_INTERFACES adds it as a plain -I directory
+  (lib/posix/options/CMakeLists.txt), so Zephyr's <unistd.h> shadows the
+  libc's and hides isatty().  Also drops the hardcoded
+  -I$(ZEPHYR_BASE)/include/posix, a directory Zephyr no longer has.
+- compat/zephyr/posix/time.h: rcutils includes <zephyr/posix/time.h>, which
+  Zephyr 4.3 removed (zephyr 5cbb2a421d9).  Forward to <time.h>; the
+  directory is last on the include path so a real header always wins.
+- CMakeLists.txt: export __STDC_WANT_LIB_EXT1__=0 to consumers of the
+  microros interface library (the installed rcutils headers have the same
+  late define).
+- Kconfig: select STATIC_INIT_GNU.  libmicroros.a holds C++ rosidl
+  typesupport objects with .init_array; without it the link fails unless the
+  application sets CONFIG_CPP=y.
+
+diff --git a/modules/libmicroros/CMakeLists.txt b/modules/libmicroros/CMakeLists.txt
+index 2a82c91..7dfcd58 100644
+--- a/modules/libmicroros/CMakeLists.txt
++++ b/modules/libmicroros/CMakeLists.txt
+@@ -57,6 +57,11 @@ zephyr_link_libraries(${MICROROS_DIR}/libmicroros.a)
+ zephyr_interface_library_named(microros)
+ add_dependencies(microros libmicroros_project)
+ target_include_directories(microros INTERFACE ${MICROROS_DIR}/include)
++# Same reason as LIBC_FLAGS_INTERNAL in libmicroros.mk: the installed rcutils
++# headers define __STDC_WANT_LIB_EXT1__ only after <stdlib.h>/<stdio.h>, which
++# breaks picolibc's Annex K typedefs in every translation unit that includes
++# <rcl/...> after a libc header.  Settle it on the command line for consumers.
++target_compile_definitions(microros INTERFACE __STDC_WANT_LIB_EXT1__=0)
+ 
+ execute_process(
+     COMMAND
+diff --git a/modules/libmicroros/Kconfig b/modules/libmicroros/Kconfig
+index 338a732..a054fae 100644
+--- a/modules/libmicroros/Kconfig
++++ b/modules/libmicroros/Kconfig
+@@ -3,6 +3,11 @@ menuconfig MICROROS
+ 	default n
+     prompt "micro-ROS Support"
+     select APP_LINK_WITH_MICROROS
++    # libmicroros.a contains C++ objects (the rosidl_typesupport_c *.cpp type
++    # supports) with static initializers in .init_array.  STATIC_INIT_GNU
++    # defaults to y only when CONFIG_CPP is set; without it the link fails with
++    # "GNU-style constructors required but STATIC_INIT_GNU not enabled".
++    select STATIC_INIT_GNU if TOOLCHAIN_SUPPORTS_STATIC_INIT_GNU
+     help
+         Enables a micro-ROS library
+ 
+diff --git a/modules/libmicroros/compat/zephyr/posix/time.h b/modules/libmicroros/compat/zephyr/posix/time.h
+new file mode 100644
+index 0000000..d10ec03
+--- /dev/null
++++ b/modules/libmicroros/compat/zephyr/posix/time.h
+@@ -0,0 +1,19 @@
++/*
++ * SPDX-License-Identifier: Apache-2.0
++ *
++ * Compatibility header for Zephyr >= 4.3.
++ *
++ * rcutils (time_unix.c) includes <zephyr/posix/time.h> on every Zephyr >= 3.1.
++ * Zephyr 4.3 removed that header: the POSIX time declarations moved to
++ * <zephyr/posix/posix_time.h> and the C library's own <time.h> is used
++ * directly (zephyr commit 5cbb2a421d9, "posix: switch to using posix_time.h
++ * and posix_signal.h").  libmicroros.mk appends this directory to the end of
++ * the include path of the ROS 2 packages, so an older Zephyr that still ships
++ * the real header always wins.
++ */
++#ifndef MICROROS_COMPAT_ZEPHYR_POSIX_TIME_H_
++#define MICROROS_COMPAT_ZEPHYR_POSIX_TIME_H_
++
++#include <time.h>
++
++#endif /* MICROROS_COMPAT_ZEPHYR_POSIX_TIME_H_ */
+diff --git a/modules/libmicroros/libmicroros.mk b/modules/libmicroros/libmicroros.mk
+index b76b649..5974805 100644
+--- a/modules/libmicroros/libmicroros.mk
++++ b/modules/libmicroros/libmicroros.mk
+@@ -7,11 +7,39 @@ else
+ 	BUILD_TYPE = Release
+ endif
+ 
+-CFLAGS_INTERNAL := $(X_CFLAGS)
+-CXXFLAGS_INTERNAL := $(X_CXXFLAGS)
++# Flags for the ROS 2 packages come from the Zephyr application build
++# (X_CFLAGS/X_CXXFLAGS) so they are compiled for the same CPU, libc and
++# feature macros as the application.  The adjustments below only undo what
++# is specific to compiling Zephyr's own sources.
+ 
+-CFLAGS_INTERNAL := -c -I$(ZEPHYR_BASE)/include/posix -I$(PROJECT_BINARY_DIR)/include/generated $(CFLAGS_INTERNAL)
+-CXXFLAGS_INTERNAL := -c -I$(ZEPHYR_BASE)/include/posix -I$(PROJECT_BINARY_DIR)/include/generated $(CXXFLAGS_INTERNAL)
++# rcutils defines __STDC_WANT_LIB_EXT1__ to 1 in its headers, but only after
++# <stdlib.h>/<stdio.h> were already included.  picolibc's <sys/_types.h> emits
++# __errno_t/__rsize_t only if the macro is set on its FIRST inclusion while
++# <string.h> tests it again later, so the later definition yields
++# "unknown type name '__errno_t'".  picolibc has no Annex K, so settle the
++# macro on the command line to 0 (rcutils only guards with #ifndef).
++#
++# Zephyr also compiles with -D_POSIX_C_SOURCE=200809L (lib/posix/options), which
++# makes picolibc expose strict POSIX only: <string.h> then no longer pulls in
++# <strings.h> and rcutils' strcasecmp() has no declaration.  The ROS sources
++# are written against the libc default feature set, so ask for it back.
++LIBC_FLAGS_INTERNAL := -D__STDC_WANT_LIB_EXT1__=0 -D_DEFAULT_SOURCE
++
++# With CONFIG_POSIX_SYSTEM_INTERFACES (selected by CONFIG_POSIX_API) Zephyr adds
++# include/zephyr/posix as a plain -I directory (lib/posix/options/CMakeLists.txt).
++# That puts Zephyr's <unistd.h>, <pthread.h>, ... in front of the C library's
++# own, so packages that expect libc declarations (rcutils' isatty()) fail.
++# Zephyr's POSIX headers describe Zephyr's implementation, not the libc these
++# plain-C packages are written against; the C library's POSIX headers come
++# from the compiler sysroot anyway.
++POSIX_SHADOW_INCLUDES := -I%/include/zephyr/posix
++
++# Headers that Zephyr >= 4.3 removed but the ROS sources still include.  Last
++# on the include path: a real header from the Zephyr tree always wins.
++COMPAT_FLAGS_INTERNAL := -I$(COMPONENT_PATH)/compat
++
++CFLAGS_INTERNAL := -c -I$(PROJECT_BINARY_DIR)/include/generated $(LIBC_FLAGS_INTERNAL) $(filter-out $(POSIX_SHADOW_INCLUDES),$(X_CFLAGS)) $(COMPAT_FLAGS_INTERNAL)
++CXXFLAGS_INTERNAL := -c -I$(PROJECT_BINARY_DIR)/include/generated $(LIBC_FLAGS_INTERNAL) $(filter-out $(POSIX_SHADOW_INCLUDES),$(X_CXXFLAGS)) $(COMPAT_FLAGS_INTERNAL)
+ 
+ all: $(COMPONENT_PATH)/libmicroros.a
+ 

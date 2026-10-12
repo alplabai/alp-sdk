@@ -36,7 +36,7 @@ extern "C" {
 
 #define XEVK_PIN_PCIE_MUX_PD   ALP_E1M_X_GPIO_IO0  /**< Drive HIGH to power down the PCIe lane mux. */
 #define XEVK_PIN_PCIE_MUX_SEL  ALP_E1M_X_GPIO_IO1  /**< PCIe lane-mux routing select. */
-#define XEVK_PIN_PCIE0_I2C_EN  ALP_E1M_X_GPIO_IO2  /**< Drive high to enable the I2C mux to the PCIe slot. */
+#define XEVK_PIN_PCIE0_I2C_EN  ALP_E1M_X_GPIO_IO2  /**< Drive LOW to enable the I2C switch to the PCIe/M.2 slots (TMUX121 EN is active-low, no pull on the net). */
 #define XEVK_PIN_I2S_MUX_EN    ALP_E1M_X_GPIO_IO4  /**< I2S path-mux (TMUX1574 U46) enable -- active-low; drive LOW to enable. Active-low. */
 #define XEVK_PIN_I2S_MUX_SEL   ALP_E1M_X_GPIO_IO5  /**< I2S path-mux (TMUX1574 U46) select: LOW = TAS2563 amps (A side), HIGH = M.2 E-key I2S (B side). */
 #define XEVK_PIN_M2E_UART_WAKE ALP_E1M_X_GPIO_IO6  /**< M.2 E-key UART-path wake (active-low). Active-low. */

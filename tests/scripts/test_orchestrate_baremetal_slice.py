@@ -276,8 +276,10 @@ def test_baremetal_compile_guards_reach_the_preprocessor(
     READS, unlike the `cmake-args.txt` removed in #1278."""
     _, slice_ = _baremetal_plan(tmp_path)
 
-    assert [a["path"] for a in slice_["configArtefacts"]] == \
-        ["build/m55_hp-baremetal/alp-baremetal.cmake"]
+    # `alp-baremetal.cmake` first; the rendered reference artefacts
+    # (ADR-0026 §D) follow it.
+    assert slice_["configArtefacts"][0]["path"] == \
+        "build/m55_hp-baremetal/alp-baremetal.cmake"
     contents = slice_["configArtefacts"][0]["contents"]
     assert "add_compile_definitions(ALP_BOARD_E1M_EVK)" in contents
 

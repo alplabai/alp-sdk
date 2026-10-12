@@ -2,7 +2,7 @@
 
 DIAGNOSTIC, NOT PRODUCT CODE. This probe proves the NPU body-control pipeline on silicon
 before the camera comes back to the game board. Design:
-`docs/superpowers/specs/2026-09-24-npu-body-control-design.md`.
+`../../docs/superpowers/specs/2026-09-24-npu-body-control-design.md`.
 
 The M55-HP runs the cut MoveNet (`tools/movenet_cut.py`) on its Ethos-U55-256 through
 `<alp/inference.h>`. It runs three canned 640x400 GREY8 frames (empty, standing, crouching)

@@ -15,7 +15,7 @@ binding; these tests are the second, independent copy of it, so removing
 the check reddens something other than the check's own file.  The `0`
 vs `TBD` semantics are #915's and are load-bearing here: `0` is a
 RESOLVED fact ("this SKU populates none"), `TBD` an open question
-("nobody has written the capacity down yet", E1M-NX9101's state).
+("nobody has written the capacity down yet").
 """
 
 import importlib.util
@@ -259,8 +259,8 @@ def test_missing_assembled_key_reads_as_populated():
 # --- presets that declare no population fact are SKIPPED, not guessed --
 
 def test_skips_a_preset_that_declares_no_on_module_memory_parts():
-    """V2N/V2M carry LPDDR4X + eMMC and declare neither block; E1M-NX9101
-    declares neither and leaves both figures TBD.  There is nothing to
+    """V2N/V2M carry LPDDR4X + eMMC and declare neither block; a preset
+    may also leave both figures TBD.  There is nothing to
     bind to, and inventing a population fact would be inventing a
     hardware value."""
     assert not _check(
@@ -446,10 +446,10 @@ def test_the_requirement_is_derived_from_the_silicon_ref_not_a_sku_list():
 
 
 @pytest.mark.parametrize("silicon", [
-    "renesas:rzv2n:n44", "nxp:imx9:imx93", "deepx:dx:m1",
+    "renesas:rzv2n:n44", "deepx:dx:m1",
 ])
 def test_a_non_ensemble_preset_may_still_omit_the_blocks(silicon):
-    """The control side: V2N/V2M/NX9101 declare neither block by design and
+    """The control side: V2N/V2M declare neither block by design and
     must keep skipping, not start failing."""
     body = (
         f"silicon: {silicon}\n"

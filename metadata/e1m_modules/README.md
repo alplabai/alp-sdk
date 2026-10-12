@@ -1,8 +1,8 @@
 # `metadata/e1m_modules/`
 
 Per-SoM-family metadata for the E1M module catalogue -- both form
-factors.  AEN (`E1M-AEN301..803`) and imx93 (`E1M-NX9101` [^imx93-tbd])
-are **E1M** (35×35, `default_board: E1M-EVK` in each SKU's preset);
+factors.  AEN (`E1M-AEN301..803`)
+is **E1M** (35×35, `default_board: E1M-EVK` in each SKU's preset);
 v2n and v2n-m1 are **E1M-X** (45×65, `default_board: E1M-X-EVK`).
 
 Each family directory carries the pin-to-function mapping for the
@@ -23,22 +23,8 @@ for E1M-X).  `scripts/check_e1m_pinout.py` cross-checks every non-`TBD`
 | Family | SKUs                          | Silicon                           |
 |--------|-------------------------------|-----------------------------------|
 | AEN    | `E1M-AEN301..803`             | Alif Ensemble E3..E8              |
-| imx93  | `E1M-NX9101` [^imx93-tbd]     | NXP i.MX 93 (i.MX 9352 variant)   |
 | v2n    | `E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103` | Renesas RZ/V2N          |
 | v2n-m1 | `E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103` | Renesas RZ/V2N + DEEPX DX-M1 |
-
-[^imx93-tbd]: `E1M-NX9101` is a **placeholder MPN** — the production SKU is
-TBD pending the hand-written HW config (see the header of
-`E1M-NX9101.yaml`).  The `som.sku` regex accepts `E1M-NX9xxx` for any
-4-digit tail, so the real SKU drops in as a sibling preset; do not treat
-`E1M-NX9101` as the canonical, released MPN and **never hardcode the
-string `E1M-NX9101`** in tooling, docs, or examples as if it were a
-shipping part.  The machine-visible marker is the preset's
-`status.preliminary: true` (paired with `status.partial_hw_config:
-true`) — tools that filter for released SoMs must key off that flag,
-not off the SKU string.  When the real SKU lands, its preset flips
-`preliminary` to `false` and this placeholder is deleted (no
-legacy-compat alias).
 
 ## Schema + validation
 

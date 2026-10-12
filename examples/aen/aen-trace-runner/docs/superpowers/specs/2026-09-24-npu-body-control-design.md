@@ -1,5 +1,10 @@
 # NPU body control — design (phase 1: host + build, no camera)
 
+> **Status note (2026-10-10):** the HP camera DT blocker described in section 10 / item 3 is
+> resolved for the stock tree: `zephyr/boards/shields/e1m_evk_rpi_csi/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`
+> landed with #2809 (06a0110be). The shield paths below refer to the then-separate sibling checkout
+> and are kept as design history.
+
 **Status:** host prototype and silicon probe built; nothing here has run on silicon.
 The camera is on `the E1M-AEN803 2026W36-0001 EVK`, the display on `the E1M-AEN803 2026W36-0009 EVK`, so phase 1 is proven
 without a camera. Every latency figure marked *Vela* is Vela's estimate, not a measurement.
@@ -165,6 +170,11 @@ integration task after the probe passes.
 
 ## 3. Motion logic (HE, pure C, host-tested)
 
+> **Superseded by #2788** (the arm-raise controls): lane and jump are no longer read from the
+> torso, so the lane-band, jump and `TR_CAM_MIRROR_X` items below no longer exist; lane and jump
+> are arm raises (`src/vision/arms.h`) and only the duck is read from the torso. The rest of this
+> section is the design history it was built from.
+
 `src/vision/pose.c` turns a pose into a torso box; `track.c` reads intent from it. Revised
 2026-09-25 after the 2026W36-0009 finding "it always sees me jumping": with the legs out of frame the
 first box (head top to ankle, else frame bottom) read a player walking toward the camera as a
@@ -218,7 +228,7 @@ Only the newest pose matters, so this is a seqlock slot, not a queue:
 | +0x80 | 64x40 GREY8 thumbnail of the letterboxed frame (2,560 B, to `0x0237FC7F`), for the HUD |
 
 No MHU doorbell (section 2). The existing mailbox and doorbell work
-(`project_aen_mhuv2_mailbox_driver`) stays available if the HE ever needs to wake on a pose.
+(the MHUv2 mailbox driver) stays available if the HE ever needs to wake on a pose.
 
 ## 5. What changes in the game (next phase, not in this commit)
 
@@ -373,12 +383,12 @@ entirely) -- restore its md5 `5839e003d5d069f6fd912eb22774d037` at the end of th
 maintainer's standing instruction; nothing in this phase moved it.
 
 **HP camera DT blocker (item 3).** `hp_vision` fails at the devicetree stage, not C compilation:
-`e1m_evk_rpi_csi`'s `boards/` directory (`alp-sdk-lcd/zephyr/boards/shields/e1m_evk_rpi_csi/boards/`)
+`e1m_evk_rpi_csi`'s `boards/` directory (`zephyr/boards/shields/e1m_evk_rpi_csi/boards/`)
 ships only `alp_e1m_aen80{1,3}_m55_he_..._rtss_he.overlay` (one line each,
 `#include "e1m_aen.dtsi"`). `e1m_aen.dtsi` itself names only SoC-level nodes (`&csi`, `&i2c1`,
 `&cam`, `&dphy`, `&gpio12`, `&pinctrl`) -- core-agnostic on their face. The fix this phase could
-not make (out of this repo's scope; `alp-sdk-lcd` is a sibling repo) is almost certainly one new
-file, `alp-sdk-lcd/zephyr/boards/shields/e1m_evk_rpi_csi/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`,
+not make (out of this repo's scope; the shield lived in a sibling checkout at the time) is almost certainly one new
+file, `zephyr/boards/shields/e1m_evk_rpi_csi/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`,
 containing exactly `#include "e1m_aen.dtsi"` (mirroring the HE variant byte for byte) -- but
 **this is inferred, not proven**: it removes the DT parse error this phase reproduced
 (`undefined node label 'csi_interface'`), not a claim that the CPI/CSI IP is actually reachable
@@ -416,7 +426,7 @@ bench-runner's to confirm on the next flash.
 Audited every layer on this path -- `tr_rail5v_open()`/`tr_rail5v_poll()`'s call sites in `main.c`
 (present, unconditional, not gated on `TR_INPUT_NPU`), the DT/pinctrl for `EVK_I2C_BUS_SENSORS`
 (`== ALP_E1M_I2C0 == SoC I2C2`, confirmed `status = "okay"` in the generated dts, on pads P5_6/P5_7
--- NOT the I2C1 pads `i2c1_off.overlay` disables), the SDK's I2C handle pool (a fixed 4-slot pool,
+-- NOT the I2C1 pads `i2c_handover_he.overlay` disables on the HE), the SDK's I2C handle pool (a fixed 4-slot pool,
 not DT-derived, two concurrent opens on one `bus_id` are explicitly supported by the backend), and
 the HUD's own read-through (`hud_l2.c` -> `hud.c`, unconditional, correct) -- **no logic bug found
 anywhere on this path**. The one live difference from the isolated test is TIMING: `tr_rail5v_open()`
@@ -545,13 +555,15 @@ overlay, not left to whatever the base board file happens to default to):
 
 | peripheral | M55-HP (`hp_vision`) | M55-HE (this game) | enforcement |
 |---|---|---|---|
-| I2C1 (`0x49011000`, camera SCCB) | **owns** (`csi_i2c`, ordering-fix shield) | disabled (`i2c1_off.overlay`, `TR_INPUT_NPU` builds) | `hp_vision_check.sh` i2c audit; existing overlay |
+| I2C1 (`0x49011000`, camera SCCB) | **owns** (`csi_i2c`, ordering-fix shield) | disabled on the HE (`i2c_handover_he.overlay`, `TR_INPUT_NPU` builds; a shield whose bridge needs the bus enables it and the HE releases it at boot end, `alp,i2c-handover`) | `hp_vision_check.sh` i2c audit; the HP waits for the release |
 | I2C2 (`0x49012000`, BMI323 + INA236) | **disabled** (fix round 6 -- was left `okay` by the base board file, the actual bug) | **owns** | `hp_vision_check.sh` i2c audit (new) |
 | I2C0 (`0x49010000`) | **disabled** (fix round 6 -- unused by any hp_vision source, same audit) | n/a (HE base board leaves it as the board default; unrelated to this round's finding) | `hp_vision_check.sh` i2c audit (new) |
 | CSI / CAM / D-PHY | **owns** (camera capture) | disabled by default (no camera shield attached) -- **except D-PHY**, which the display shield (`e1m_evk_rk055hdmipi4ma0`) also needs `okay` for its own DSI TX link; that is the HE's OWN dependency, not a camera leak, and stays on | build-time board default; confirmed via generated `zephyr.dts`, not asserted in code (no false leak to catch) |
 | CDC200 / MIPI-DSI (display) | disabled by default (no display shield) | **owns** | build-time board default |
 | Ethos-U55 | **owns** (256 MAC, HP-paired instance) | n/a (HE never opens `<alp/inference.h>`) | `hp_vision`'s own `&ethosu55 { status = "okay"; }` + `&ethosu85 { status = "disabled"; }` |
 | UART / SPI / GPIO0-11,13,14 | disabled by default on both cores (neither app's source touches them) | disabled by default | build-time board default; confirmed via generated `zephyr.dts` |
+
+**Update, `TR_HP_SOUND` builds (2026-10-08):** with the game sound linked into `hp_vision` the HP is no longer the "disabled" side of the I2C2 row. I2C2 (and GPIO5, I2S3, SPI1, LP-GPIO) are enabled in the HP image, I2C2 as `zephyr,deferred-init`, and the HE *leases* I2C2 + GPIO5 to the HP for the amp bring-up and takes them back (`src/ipc/tr_bus2.h`, `docs/2026-09-23-sound.md`). The table above is the plain image.
 
 **Fix:** `hp_vision/boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay` now force-disables
 `&i2c0` and `&i2c2`. **Enforcement, not just a one-time overlay edit:** `a32/release/hp_vision_check.sh`
@@ -565,7 +577,7 @@ exact bug this check's first draft had: a naive linear scan for the LAST `status
 node's braces matches the CHILD device's status, not the parent bus controller's -- the real i2c2 leak
 was invisible to that naive version. The shipped check tracks brace depth instead.
 
-**HE side:** already correct -- `i2c1_off.overlay` predates this round; CSI/CAM are off by board
+**HE side:** already correct -- `i2c_handover_he.overlay` keeps I2C1 off on the HE; CSI/CAM are off by board
 default (no camera shield); D-PHY's `okay` is the display's own DSI dependency, not a leak (see table).
 No HE-side code or overlay change was needed for this fix.
 

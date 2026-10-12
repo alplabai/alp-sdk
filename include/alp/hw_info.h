@@ -44,9 +44,9 @@
  * }
  * @endcode
  *
- * The `ALP_HW_BUILD_*` constants come from `<alp/hw_info_build.h>`,
- * which `scripts/alp_project.py` emits from `board.yaml` at
- * configure time.  Apps pass NULL for a given field to skip
+ * The `ALP_HW_BUILD_*` constants come from `"alp_hw_info_build.h"` (generated
+ * under build/generated/), which `scripts/alp_project.py` emits from
+ * `board.yaml` at configure time.  Apps pass NULL for a given field to skip
  * matching it.
  *
  * The app-level assert above is opt-in and SKU-aware; separately, when
@@ -357,7 +357,7 @@ alp_status_t alp_hw_info_read(alp_hw_info_t *out);
  *
  * Compares @p info against compile-time constants the application
  * supplies (typically from the auto-generated
- * `<alp/hw_info_build.h>`).  NULL arguments skip the matching
+ * `"alp_hw_info_build.h"` (generated under build/generated/)).  NULL arguments skip the matching
  * field, letting partial builds (e.g. firmware portable across
  * an MPN family) match on the bits they care about.
  *

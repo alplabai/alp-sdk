@@ -276,7 +276,7 @@ def test_the_memory_key_is_omitted_when_no_region_resolves(
     project = load_board_yaml(_write_board(tmp_path, AEN_BOARD))
     project.som_preset.pop("memory_map", None)
     # No authored table AND no resolvable SoC to derive one from -- the
-    # shape NX9101 is in today with `silicon_variant: TBD`.
+    # shape of a preset with `silicon_variant: TBD`.
     project.som_preset["silicon"] = "vendor:family:not-a-real-soc"
     project.som_preset.pop("silicon_variant", None)
 
@@ -388,7 +388,7 @@ def test_a_preset_authored_region_outside_the_aperture_is_unclassified() -> None
 
 def test_a_derived_region_outside_the_aperture_is_ram() -> None:
     """The same extent, NOT preset-authored, is RAM by construction --
-    this is the leg that keeps every V2N/V2M/NX9101 derivation intact."""
+    this is the leg that keeps every V2N/V2M derivation intact."""
     row = memory._resolved_row(
         {"name": "sram0", "base": 0x90000000, "size_kib": 64},
         _AEN_APERTURE, False, "soc_derived")

@@ -90,8 +90,8 @@ alp_power_t *alp_power_open(void)
 		alp_z_set_last_error(ALP_ERR_NOMEM);
 		return NULL;
 	}
-	h->backend              = be;
-	h->state.ops            = ops;
+	h->backend                   = be;
+	h->state.ops                 = ops;
 	alp_capabilities_t caps      = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	uint32_t           wake_caps = 0u;
 	alp_status_t       rc        = ops->open(&h->state, &caps, &wake_caps);
@@ -202,6 +202,26 @@ alp_status_t alp_power_request_sleep(alp_power_t           *h,
 		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
+	/* Per-mode wake check (#2784): the bitmap was accepted against the
+	 * backend's overall wake_caps at configure time, but a source the
+	 * backend can arm in SLEEP may be unarmable in the requested mode
+	 * (e.g. a GPIO bank that is powered down in STOP).  Refuse here,
+	 * before anything is touched, rather than sleeping on a source that
+	 * can never fire.  Backends without mode_wake_caps arm every
+	 * reported bit in every mode. */
+	uint32_t mode_caps = h->wake_caps;
+	if (h->state.ops->mode_wake_caps != NULL) {
+		mode_caps = h->state.ops->mode_wake_caps(&h->state, mode);
+	}
+	/* A timed wake needs a timer-class source in the mode; a backend that
+	 * reports per-mode caps and has neither TIMER nor RTC there cannot
+	 * honour wake_after_ms. */
+	bool timed_unarmable = h->state.ops->mode_wake_caps != NULL && wake_after_ms != 0u &&
+	                       (mode_caps & (ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_RTC)) == 0u;
+	if ((h->state.wake_bitmap & ~mode_caps) != 0u || timed_unarmable) {
+		alp_handle_op_leave(&h->active_ops);
+		return ALP_ERR_NOSUPPORT;
+	}
 	alp_status_t rc;
 	if (h->state.ops->request_sleep == NULL) {
 		rc = ALP_ERR_NOSUPPORT;
@@ -230,6 +250,26 @@ void alp_power_close(alp_power_t *h)
 	_free(h);
 }
 
+alp_status_t alp_power_domain_policy_set(alp_power_t              *h,
+                                         alp_power_domain_t        domain,
+                                         alp_power_domain_policy_t policy)
+{
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	if ((unsigned)domain >= (unsigned)ALP_POWER_DOMAIN_COUNT ||
+	    (unsigned)policy > (unsigned)ALP_POWER_DOMAIN_POLICY_RAIL_OFF) {
+		alp_handle_op_leave(&h->active_ops);
+		return ALP_ERR_INVAL;
+	}
+	alp_status_t rc = ALP_ERR_NOSUPPORT;
+	if (h->state.ops->domain_policy_set != NULL) {
+		rc = h->state.ops->domain_policy_set(&h->state, domain, policy);
+	}
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
+}
+
 const alp_capabilities_t *alp_power_capabilities(const alp_power_t *h)
 {
 	return (h != NULL) ? &h->cached_caps : NULL;
@@ -238,6 +278,44 @@ const alp_capabilities_t *alp_power_capabilities(const alp_power_t *h)
 uint32_t alp_power_wake_capabilities(const alp_power_t *h)
 {
 	return (h != NULL) ? h->wake_caps : 0u;
+}
+
+/* Handle-less #2784 queries: select the power backend per call (cheap,
+ * no cached pointer to race) and answer NOSUPPORT when the winner has
+ * no such op. */
+static const alp_power_ops_t *_select_power_ops(void)
+{
+	const alp_backend_t *be = alp_backend_select("power", ALP_SOC_REF_STR);
+	return (be != NULL) ? (const alp_power_ops_t *)be->ops : NULL;
+}
+
+alp_status_t alp_power_domain_info(alp_power_domain_t domain, alp_power_domain_info_t *out)
+{
+	if (out == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	memset(out, 0, sizeof(*out));
+	if ((unsigned)domain >= (unsigned)ALP_POWER_DOMAIN_COUNT) {
+		return ALP_ERR_INVAL;
+	}
+	const alp_power_ops_t *ops = _select_power_ops();
+	if (ops == NULL || ops->domain_info == NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	return ops->domain_info(domain, out);
+}
+
+alp_status_t alp_power_boot_wake_info(alp_power_boot_info_t *out)
+{
+	if (out == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	memset(out, 0, sizeof(*out));
+	const alp_power_ops_t *ops = _select_power_ops();
+	if (ops == NULL || ops->boot_wake_info == NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
+	return ops->boot_wake_info(out);
 }
 
 /* ================================================================== */

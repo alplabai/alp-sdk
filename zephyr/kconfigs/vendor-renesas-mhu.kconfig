@@ -62,3 +62,15 @@ config USE_RZ_FSP_MHU_B
 	  USE_RZ_FSP_MHU, which gates the hal_renesas plain-MHU r_mhu_ns.c) --
 	  the module lives entirely inside this SDK, so alp-sdk's own
 	  zephyr/CMakeLists.txt gates on it directly.
+
+config ALP_V2N_DOORBELL_RSP_CH8
+	bool "V2N CM33->CA55 doorbell on rsp_ch8_ns (GIC_SPI 385)"
+	depends on MBOX_RENESAS_RZ_MHU_B
+	help
+	  Ring the Cortex-A55 through Renesas' documented rsp_ch8_ns line
+	  (RSP_INT_SET of MHU-B NS slot 8, GIC_SPI 385, level-high) instead of
+	  the default MHU-B SWINT unit 12 (GIC_SPI 404).  Bench-pending: leave
+	  off until the 385 path is proven on silicon.  The A55 side must match
+	  (ALP_SDK_V2N_DOORBELL_RSP_CH8 in libalp_sdk, ALP_V2N_DOORBELL_SPI = "385"
+	  in the kernel devicetree); offsets live in
+	  <alp/protocol/v2n_mhu_doorbell.h>.

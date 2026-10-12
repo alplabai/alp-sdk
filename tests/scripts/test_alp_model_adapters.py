@@ -358,7 +358,7 @@ def test_vela_compile_passes_a_built_in_system_config_unconditionally(tmp_path, 
     # false is an Arm BUILT-IN -- safe to pass alone, no vendor .ini needed.
     src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
     seen = {}
-    builtin_target = TargetSpec(backend="ethos_u", silicon_ref="nxp:imx9:imx93", accel_config="",
+    builtin_target = TargetSpec(backend="ethos_u", silicon_ref="acme:soc:x1", accel_config="",
                                 vela_memory_mode="Shared_Sram", vela_system_config="Ethos_U65_Embedded")
 
     monkeypatch.setattr("alp_model.adapters.ethos_u.subprocess.run",

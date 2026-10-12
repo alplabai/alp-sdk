@@ -1204,8 +1204,7 @@ stage_required_gate_scripts() {
 
     # board.yaml schema sweep -- canonical template + every
     # examples/*/board.yaml + tests/*/board.yaml, mirroring the
-    # pr-metadata-validate.yml "schema sweep" step (including its
-    # rpmsg-imx93 exclusion -- see board-yaml-sweep-exclude.sh).
+    # pr-metadata-validate.yml "schema sweep" step.
     if [ -f scripts/validate_board_yaml.py ]; then
         ran=1
         if [ -f metadata/templates/board.yaml.example ]; then
@@ -1213,13 +1212,10 @@ stage_required_gate_scripts() {
             python3 scripts/validate_board_yaml.py \
                 --input metadata/templates/board.yaml.example || failed=1
         fi
-        # shellcheck source=scripts/board-yaml-sweep-exclude.sh
-        source "${REPO_ROOT}/scripts/board-yaml-sweep-exclude.sh"
         while IFS= read -r f; do
             echo "--- validate_board_yaml.py ${f} ---"
             python3 scripts/validate_board_yaml.py --input "${f}" || failed=1
-        done < <(find examples tests -name board.yaml 2>/dev/null \
-                  | grep -v "${BOARD_YAML_SWEEP_EXCLUDE_PATTERN}")
+        done < <(find examples tests -name board.yaml 2>/dev/null)
     fi
 
     # gd32-bridge protocol vectors must not drift from the generator
@@ -1390,7 +1386,8 @@ stage_generated_files() {
                 gen_cc3501e_gpio_routes gen_power_tree gen_linux_ownership_dt
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
-                gen_verification_status gen_chip_driver_classification)
+                gen_verification_status gen_chip_driver_classification
+                gen_amp_window)
     local g rc
     local gen_total=0 gen_skipped=0
     for g in "${gens[@]}"; do
@@ -1541,6 +1538,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
         docs/chip-driver-classification.md \
         examples/aen \
         src/backends/gpio/cc3501e_rev_dependent_pins.c \
+        src/backends/rpc/alp_amp_window.h \
         docs/diagnostics 2>/dev/null; then
         echo "git add -N failed -- an expected generated path is missing from the tree"
         return 1
@@ -1568,6 +1566,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             docs/chip-driver-classification.md \
             examples/aen \
             src/backends/gpio/cc3501e_rev_dependent_pins.c \
+            src/backends/rpc/alp_amp_window.h \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
         git --no-pager diff --stat -- \
@@ -1580,6 +1579,7 @@ $(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null 
             docs/chip-driver-classification.md \
             examples/aen \
             src/backends/gpio/cc3501e_rev_dependent_pins.c \
+            src/backends/rpc/alp_amp_window.h \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
     fi

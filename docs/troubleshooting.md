@@ -22,7 +22,7 @@ for the catalogue):
 
 ```yaml
 som:
-  sku: E1M-V2N101    # or E1M-AEN801, E1M-V2M101, E1M-NX9101, etc.
+  sku: E1M-V2N101    # or E1M-AEN801, E1M-V2M101, etc.
 ```
 
 ### `alp_project: schema violation at <loc>: ...`
@@ -37,7 +37,7 @@ third entry).  Common slip-ups:
   `uart`, `usb`, `watchdog`).  Note: under v2 `peripherals:` lives
   per-core under `cores.<id>:`, not at top level; and `watchdog`
   (not `wdt`) is the canonical name.
-* `som.sku` follows `E1M-{AEN,V2N,V2M,NX9}\d{3}` (case-sensitive).
+* `som.sku` follows `E1M-{AEN,V2N,V2M}\d{3}` (case-sensitive).
 * the `preset:` (or use an inline board) must point at a preset under
   `metadata/boards/<name>.yaml` OR carry an inline
   `board.populated:` block.

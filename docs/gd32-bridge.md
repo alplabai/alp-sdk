@@ -31,6 +31,7 @@ build it, how to flash it, and what state the implementation is in.
 | HAL                 | Stub default; `BRIDGE_HAL_BACKEND=gd32` consumes the GigaDevice firmware library, fetched at build time from [GigaDevice's official repository](https://github.com/GigaDevice-GD32-MCU/GD32G5x3_Firmware_Library) by `tools/fetch_gd32_library.sh` in the firmware repo (this repo does not redistribute it) |
 | Protocol coverage   | `PING`, `GET_VERSION`, `GET_BUILD_ID` working end-to-end without HW dependency    |
 | Transport coverage  | SPI1 slave (25 MHz full-DMA, silicon-validated) + I2C0 slave in `hal/transport_hw_gd32.c` (gd32 backend) |
+| I2C3 master proxy   | Protocol v0.17: the bridge masters E1M-X I2C3 (`PC8` SCL / `PC9` SDA) for Linux over the I2C link only (`I2CM_CONFIG` / `I2CM_XFER` / `I2CM_RESULT`, [protocol section 3.20](gd32-bridge-protocol.md)); Linux exposes it as an `i2c_adapter` from `gpio-gd32-bridge`.  Silicon-verified (`CONFIG`, NACK).  I2C3 has no pull-ups on the SoM or X-EVK I2C3 segment; the X-EVK V2 J6 display I2C is designed to be I2C3 but not connected (carrier fix needed). |
 | Datasheet           | GD32G553 datasheet + user manual (held in the vendor datasheet) |
 | Flash size on chip  | 512 KB (per datasheet)                                                            |
 | RAM size on chip    | 128 KB                                                                            |
@@ -249,7 +250,7 @@ banner covering `GD32_DPIDR` too; that banner cited
 `docs/aen-bench-bringup.md`, which does not mention the GD32 at all,
 and is now hedged (`scripts/bench/aen/bench-env.sh:394-397`).
 
-**Required step on the alplab-gw bench: read the DPIDR by hand before
+**Required step on the Linux bench: read the DPIDR by hand before
 flashing, and abort on a match to either of two known-wrong boards.**
 The GD32 probe (USB path `3-4.2`) and the AEN E8 probe (USB path
 resolved per-board from labgrid, e.g. `labgrid-client -p <your-bench-place>

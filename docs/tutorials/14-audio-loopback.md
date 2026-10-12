@@ -4,7 +4,7 @@
 
 **Target audience:** developers building audio-aware firmware
 on AEN-Zephyr (where PDM mic + I²S DAC are both routed) or
-Yocto (V2N / N93 with ALSA backend).
+Yocto (V2N with ALSA backend).
 
 **Prerequisites:** Tutorial [01](01-first-build.md) completed.
 A working AEN EVK with a PDM mic + I²S DAC populated (or a Yocto

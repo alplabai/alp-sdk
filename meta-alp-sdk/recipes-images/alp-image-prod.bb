@@ -66,3 +66,16 @@ BAD_RECOMMENDATIONS += " \
 # above) via packagegroup-alp-camera.bb's own RDEPENDS -- see those two
 # files for the full rationale (issue #1176) and the vendor-bbappend
 # exclusions.
+
+# Production units keep CM33 SRAM secure (decision Q53).  ALP_V2N_CM33_SRAM_NS
+# = "1" is the dev-only flag that lets a Linux root process rewrite CM33 code
+# memory (non-secure TZC access + remoteproc stop/reload); refuse to build a
+# shipped image with it.  The TF-A it controls is a separate recipe, so also
+# keep the flag out of any local.conf used for production builds. Skip (not
+# bb.fatal) so a dev local.conf with the flag can still parse and build every
+# other recipe; `bitbake alp-image-prod` then reports this reason and stops.
+python () {
+    if d.getVar('ALP_V2N_CM33_SRAM_NS') == '1':
+        raise bb.parse.SkipRecipe('ALP_V2N_CM33_SRAM_NS = "1" makes CM33 code memory writable '
+                                  'from Linux: dev images only, never alp-image-prod')
+}

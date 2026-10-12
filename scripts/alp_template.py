@@ -500,10 +500,10 @@ def render(
 def default_sku(record: dict[str, Any], *, base_dir: Path | None = None) -> str:
     """The catalog record's canonical example's OWN `som.sku:` -- what
     `render_to_envelope()` (and now `render(..., sku=...)`) treats as a
-    byte-identical passthrough. `alp generate` (issue #864 Fable-review
-    MINOR G) has no `--sku` flag of its own; it always scaffold-adapts
-    for the template's own sku, so its output matches `alp emit
-    scaffold --sku <that sku>` exactly rather than the two commands
+    byte-identical passthrough. The retired `alp generate` (issue #864
+    Fable-review MINOR G) had no `--sku` flag of its own; it always
+    scaffold-adapted for the template's own sku, so its output matched
+    `alp_project.py --emit scaffold --sku <that sku>` exactly rather than the two commands
     silently disagreeing on content."""
     base = base_dir or REPO
     example = _safe_join(base, record["example"], what="template example directory")

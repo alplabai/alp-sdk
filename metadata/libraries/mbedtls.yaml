@@ -74,7 +74,7 @@ integration:
             # CAU on V2N + V2N-M1 via the GD32 bridge.
             - { requires_cap: cau,            backend: cau,                      status: planned, kconfig: CONFIG_ALP_MBEDTLS_CAU=y }
             # OPTIGA Trust M is the planned handshake offload on any
-            # module that populates it (AEN + V2N + NX9101).
+            # module that populates it (AEN + V2N).
             - { requires_cap: optiga_trust_m, backend: optiga_trust_m_handshake, status: planned, kconfig: CONFIG_ALP_MBEDTLS_OPTIGA=y }
       sw_fallback:
         required: true

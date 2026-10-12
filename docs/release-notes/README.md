@@ -31,7 +31,7 @@ gets its own file, patch releases included). The file's content is the
 release body **exactly as it should appear** on the GitHub Release page:
 nothing is rewrapped or summarised further downstream.
 
-Shape (see `v0.16.0` or later releases at
+Shape (see [`v0.17.0.md`](v0.17.0.md) or later releases at
 <https://github.com/alplabai/alp-sdk/releases> for real examples):
 
 ```

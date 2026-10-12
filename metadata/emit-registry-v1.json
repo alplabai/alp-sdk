@@ -396,7 +396,7 @@
       "output": {
         "media": "c-source",
         "schema_id": null,
-        "path": null,
+        "path": "build/generated/storage_mount_table.c",
         "consumer_hint": "C build -- optional fs_mount_t[] table + alp_storage_mount_all(), included by apps that opt in"
       }
     },

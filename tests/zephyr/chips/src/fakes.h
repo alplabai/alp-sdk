@@ -93,6 +93,11 @@ void fake_rv3028c7_fail_next_write(uint8_t reg, uint8_t val);
  *  armed fault. */
 void fake_rv3028c7_reset(void);
 
+/** Model STATUS (0Eh) as a plain read/write byte, i.e. writing 1 SETS a
+ *  flag, instead of the default write-0-clears / write-1-ignored model.
+ *  Cleared by fake_rv3028c7_reset(). */
+void fake_rv3028c7_set_write1_sets(bool on);
+
 /* ------------------------------------------------------------------ */
 /* fake TCAL9538 / TCA6408A                                            */
 /* ------------------------------------------------------------------ */
@@ -218,6 +223,9 @@ void fake_tas2563_fail_write_at(uint8_t book, uint8_t page, uint8_t reg);
 /** Reset registers to their datasheet POR values, clear the write
  *  log, the counters, the book/page selection and any armed fault. */
 void fake_tas2563_reset(void);
+
+/** Value the fake returns for a B0/P1/0x02 read (ROM/tuning select). */
+void fake_tas2563_set_app_mode(uint8_t val);
 
 /* ------------------------------------------------------------------ */
 /* fake GD32G553 supervisor-MCU bridge (PING/GET_VERSION/GET_STATE)    */

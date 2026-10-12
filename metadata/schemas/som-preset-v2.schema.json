@@ -59,7 +59,7 @@
     },
     "sku": {
       "type": "string",
-      "pattern": "^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$"
+      "pattern": "^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3})$"
     },
     "family": {
       "type": "string"
@@ -67,7 +67,7 @@
     "silicon": {
       "type": "string",
       "pattern": "^[a-z0-9_-]+:[a-z0-9_-]+:[a-z0-9_-]+$",
-      "description": "Triple-colon silicon ref, e.g. `renesas:rzv2n:n44`, `alif:ensemble:e7`, `nxp:imx9:imx93`."
+      "description": "Triple-colon silicon ref, e.g. `renesas:rzv2n:n44`, `alif:ensemble:e7`."
     },
     "silicon_variant": {
       "oneOf": [
@@ -80,7 +80,7 @@
           "const": "TBD"
         }
       ],
-      "description": "SoC variant order code matching the vendor's datasheet (e.g. `AE302F80F55D5LE` for Alif E3, `R9A09G056N44GBG` for Renesas RZ/V2N, `MIMX9352xxxxM` for NXP i.MX 93 \u2014 the latter is partial pending the HW config writeup, encoded as `silicon_variant: TBD` per the project's no-inventing-values rule). Enables forward lookup of per-variant memory, optional features, and package-specific GPIO counts without reverse-scanning all SoC JSON files. Optional; when absent the loader falls back to reverse lookup via `alp_module_skus` in the SoC JSON."
+      "description": "SoC variant order code matching the vendor's datasheet (e.g. `AE302F80F55D5LE` for Alif E3, `R9A09G056N44GBG` for Renesas RZ/V2N, partial values encoded as `silicon_variant: TBD` per the project's no-inventing-values rule). Enables forward lookup of per-variant memory, optional features, and package-specific GPIO counts without reverse-scanning all SoC JSON files. Optional; when absent the loader falls back to reverse lookup via `alp_module_skus` in the SoC JSON."
     },
     "display_name": {
       "type": "string"
@@ -100,7 +100,7 @@
         },
         "pmic_main": {
           "$ref": "#/$defs/chip_ref",
-          "description": "Primary PMIC.  Canonical key on every family that populates one (imx93's former `pmic:` normalised to this)."
+          "description": "Primary PMIC.  Canonical key on every family that populates one."
         },
         "pmic_secondary": {
           "$ref": "#/$defs/chip_ref",
@@ -331,7 +331,7 @@
     },
     "mailbox": {
       "type": "object",
-      "description": "Vendor mailbox / IPC controller + channel reservations.  Required when any topology entry runs Zephyr or baremetal.  Per the project's standing convention, AEN / iMX93 controller name may be TBD until the user supplies the HW-config writeup.",
+      "description": "Vendor mailbox / IPC controller + channel reservations.  Required when any topology entry runs Zephyr or baremetal.  Per the project's standing convention, AEN controller name may be TBD until the user supplies the HW-config writeup.",
       "required": [
         "controller",
         "channels"
@@ -349,7 +349,7 @@
               "const": "TBD"
             }
           ],
-          "description": "Vendor mailbox controller identifier (e.g. `renesas_mhu`, `nxp_mu`, `alif_mhuv2`).  TBD when the hand-written HW config still owes the value."
+          "description": "Vendor mailbox controller identifier (e.g. `renesas_mhu`, `alif_mhuv2`).  TBD when the hand-written HW config still owes the value."
         },
         "channels": {
           "type": "array",

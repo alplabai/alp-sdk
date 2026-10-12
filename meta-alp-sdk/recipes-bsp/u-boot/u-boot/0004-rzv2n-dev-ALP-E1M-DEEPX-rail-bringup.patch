@@ -21,7 +21,10 @@ sequences it even before its manifest is burned, and any V2N-family image
 still sequences it on physical V2N-M1 hardware without needing the
 Kconfig.  alp_deepx_pcie_bringup() keeps its own alp_som_is_v2n_m1() gate
 unchanged and additionally requires the rail step to have succeeded --
-M1_RESET is never released with the rail down.
+M1_RESET is never released with the rail down.  On a V2M image whose
+EEPROM manifest does not say v2n-m1 (not yet provisioned), a successful
+rail step releases M1_RESET through alp_deepx_reset_release() without
+touching the PCIe mux, so an unprovisioned module still boots its DX-M1.
 
 Sequence, over DM I2C bus 8 (RIIC8 / BRD_I2C) at 7-bit address 0x1E:
 
@@ -55,9 +58,17 @@ Sequence, over DM I2C bus 8 (RIIC8 / BRD_I2C) at 7-bit address 0x1E:
        clear, and PMC_EVENT_00 free of a latched CH2_OV/OC.
     9. On failure, immediately clear CH2_EN, drive P64 and PA6 low, and
        return false.
-    10. On success, drive P64 (DEEPX_CORE_0P75_EN) high, wait 5ms, and
-        re-read STATUS_00 to confirm PG held with no UV before handing
-        off to alp_deepx_pcie_bringup().
+    10. On success, drive P64 (DEEPX_CORE_0P75_EN) high, wait 15ms
+        (ALP_DEEPX_PORES_HOLD_MS) with PA6 still low, and re-read
+        STATUS_00 to confirm PG held with no UV before handing off to
+        alp_deepx_pcie_bringup().
+
+  PA6 (M1_RESET -> DX-M1 PORES_N) is driven low on entry, before any
+  I2C access, so PORES_N is actively held low for the whole ramp of the
+  rails P64 enables instead of following its pull-up.  P64 -> PA6
+  release is then >= 16ms (15ms here + 0001's 1ms mux settle), covering
+  the DEEPX DX-M1 reference design's 11ms reset-supervisor delay
+  (BD5215G on VDD18IO) after the ~1-2ms rail ramp.
 
 Adds two small GPIO helpers (alp_gpio_input_configure /
 alp_gpio_input_get) alongside patch 0001's alp_gpio_output -- same
@@ -101,8 +112,8 @@ sequence itself (CH2_EN over I2C, poll PG, then P64) is unchanged.
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  board/renesas/rzv2n-dev/Kconfig     |  25 +++
- board/renesas/rzv2n-dev/rzv2n-dev.c | 330 +++++++++++++++++++++++++++-
- 2 files changed, 354 insertions(+), 1 deletion(-)
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 358 +++++++++++++++++++++++++++-
+ 2 files changed, 382 insertions(+), 1 deletion(-)
 
 diff --git a/board/renesas/rzv2n-dev/Kconfig b/board/renesas/rzv2n-dev/Kconfig
 index 7a9885f7..f1807399 100644
@@ -138,7 +149,7 @@ index 7a9885f7..f1807399 100644
 +	  Set via meta-alp-sdk's deepx-rail.cfg for the V2M MACHINEs only;
 +	  leave off (default) for the V2N base build.
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
-index a20ccae8..689c3062 100644
+index a20ccae8..753039d0 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
 @@ -284,6 +284,7 @@ static void board_usb_init(void)
@@ -149,7 +160,7 @@ index a20ccae8..689c3062 100644
  #define ALP_PM_OUTPUT		0x2
  
  static void alp_gpio_output(unsigned int bank, unsigned int pin, int value)
-@@ -360,9 +361,336 @@ static void alp_deepx_pcie_bringup(void)
+@@ -360,10 +361,365 @@ static void alp_deepx_pcie_bringup(void)
  	printf("ALP: DEEPX DX-M1 PCIe path enabled (mux on, reset released)\n");
  }
  
@@ -172,8 +183,10 @@ index a20ccae8..689c3062 100644
 + * EEPROM manifest is burned, and a V2N-family image still sequences the
 + * rail on physical V2N-M1 hardware even without the Kconfig.
 + * alp_deepx_pcie_bringup() keeps its OWN alp_som_is_v2n_m1() gate
-+ * unchanged -- M1_RESET is only ever released on confirmed V2N-M1
-+ * hardware, never merely because the Kconfig forced a rail attempt.
++ * unchanged -- the PCIe mux is only ever enabled on confirmed V2N-M1
++ * hardware.  M1_RESET is released once the rail is confirmed good:
++ * by alp_deepx_pcie_bringup() on a v2n-m1 manifest, otherwise (Kconfig
++ * only) by alp_deepx_reset_release() without touching the mux.
 + *
 + * Returns true only when CH2 is confirmed power-good (STATUS_00 CH2_PG=1,
 + * no UV/OV/OC) and P64 has been driven high.  Any other return means the
@@ -214,6 +227,13 @@ index a20ccae8..689c3062 100644
 +
 +#define DA9292_DEV_ID_EXPECTED 0xEA	/* DA9292-AROVx OTP variant on this SoM */
 +#define DA9292_VOUT_750MV_BYTE 0x96	/* VSTEP=0 (5 mV/step) encoding of 0.75 V */
++
++/* P64 high -> PA6 release hold.  The DEEPX reference design releases
++ * PORES_N 11 ms after VDD18IO is valid (BD5215G, 2.2 nF CD); 15 ms here
++ * plus patch 0001's 1 ms mux settle covers the ~1-2 ms ramp of the rails
++ * P64 enables (M1_VDD_1V8, VDD2H/VDD2L, VDD0V85, VDDA_1P2) and VDDQ
++ * behind M1_VDD_1V8. */
++#define ALP_DEEPX_PORES_HOLD_MS 15
 +
 +static int alp_da9292_reg_read(struct udevice *dev, u8 reg, u8 *val)
 +{
@@ -256,8 +276,18 @@ index a20ccae8..689c3062 100644
 + * an unconfirmed or dropped rail. */
 +static void alp_deepx_rail_safe_off(void)
 +{
-+	alp_gpio_output(6, 4, 0);	/* P64 low */
-+	alp_gpio_output(10, 6, 0);	/* PA6 M1_RESET asserted */
++	alp_gpio_output(10, 6, 0);	/* PA6 M1_RESET asserted first ... */
++	alp_gpio_output(6, 4, 0);	/* ... then P64 low */
++}
++
++/* V2M image (CONFIG_ALP_E1M_DEEPX_RAIL) on a module whose EEPROM manifest
++ * does not say v2n-m1, e.g. not yet provisioned: the rail is confirmed
++ * good, so release the DX-M1 from reset.  The PCIe mux stays untouched --
++ * that remains gated on the manifest in alp_deepx_pcie_bringup(). */
++static void alp_deepx_reset_release(void)
++{
++	alp_gpio_output(10, 6, 1);	/* PA6 M1_RESET released */
++	printf("ALP: DEEPX DX-M1 reset released (no v2n-m1 manifest, PCIe mux untouched)\n");
 +}
 +
 +static bool alp_deepx_rail_bringup(void)
@@ -272,6 +302,12 @@ index a20ccae8..689c3062 100644
 +	bool already_programmed;
 +	int ret, level, waited_ms;
 +	unsigned int t;
++
++	/* Hold the DX-M1 in reset (PA6 low) before anything else, so PORES_N
++	 * is driven low -- not left to its pull-up -- for the whole rail ramp
++	 * once P64 goes high.  Matches the hold-low role of the reset
++	 * supervisor (BD5215G) in the DEEPX DX-M1 reference design. */
++	alp_gpio_output(10, 6, 0);
 +
 +	ret = i2c_get_chip_for_busnum(ALP_DA9292_I2C_BUS, ALP_DA9292_I2C_ADDR, 1, &dev);
 +	if (ret) {
@@ -452,9 +488,10 @@ index a20ccae8..689c3062 100644
 +		return false;
 +	}
 +
-+	/* 10. Success: drive P64 high, settle, re-verify before handing off. */
++	/* 10. Success: drive P64 high, hold PA6 low while the P64 rails ramp,
++	 * re-verify before handing off. */
 +	alp_gpio_output(6, 4, 1);
-+	mdelay(5);
++	mdelay(ALP_DEEPX_PORES_HOLD_MS);
 +	ret = alp_da9292_reg_read(dev, DA9292_REG_STATUS_00, &status00);
 +	if (ret || !(status00 & DA9292_STATUS00_CH2_PG) || (status00 & DA9292_STATUS00_CH2_UV)) {
 +		/* P64/PA6 go low FIRST, unconditionally, before
@@ -485,8 +522,11 @@ index a20ccae8..689c3062 100644
 +
 +	if (v2n_m1 && rail_ok)
  		alp_deepx_pcie_bringup();
++	else if (IS_ENABLED(CONFIG_ALP_E1M_DEEPX_RAIL) && rail_ok)
++		alp_deepx_reset_release();
  
  	return 0;
+ }
 -- 
 2.43.0
 

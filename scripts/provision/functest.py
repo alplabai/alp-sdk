@@ -345,7 +345,7 @@ def _beacon_address(preset: dict) -> int | None:
         vendor, family, part = str(preset["silicon"]).split(":")
         doc = json.loads((REPO / "metadata" / "socs" / vendor / family / f"{part}.json").read_text(encoding="utf-8"))
         c = doc["openamp_carveout"]
-        return c["a55_base"] + c["rsctbl_size"] - 16
+        return c["a55_base"] + c["regions"]["rsctbl"]["size"] - 16
     except (KeyError, ValueError, OSError):
         return None
 

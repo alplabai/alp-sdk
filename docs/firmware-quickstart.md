@@ -11,7 +11,7 @@ real firmware.
 ## Who this is for
 
 You're writing Zephyr or bare-metal C against an E1M or E1M-X
-System-on-Module (AEN, V2N, V2N-M1, or N93 family) and you want:
+System-on-Module (AEN, V2N, or V2N-M1 family) and you want:
 
 * A clear picture of what the SDK gives you per-SoM.
 * Idiomatic patterns for the on-module chips (PMICs, RTC, Wi-Fi/BT
@@ -34,7 +34,6 @@ own quickstart.
 | E1M-AEN3..803 SoM on E1M EVK                | `E1M-AEN801` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 | [`docs/bring-up-aen.md`](bring-up-aen.md) | `examples/peripheral-io/gpio-button-led`, `i2c-scanner`, `rtc-clock`, `hello-world` |
 | E1M-X V2N101 / V2N102 / V2N103 SoM on E1M-X-EVK | `E1M-V2N101`     | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 | [`docs/bring-up-v2n.md`](bring-up-v2n.md) | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `dac-waveform` |
 | E1M-X V2N-M1 (V2M101 / V2M102 / V2M103) SoM | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           | [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) | DEEPX bring-up delta on top of V2N |
-| E1M-NX9101 (NXP i.MX 93)                    | `E1M-NX9101`         | `E1M-EVK`           | [`docs/soms/imx93.md`](soms/imx93.md)             | [`docs/getting-started.md`](getting-started.md) §4-5 | same cross-family examples as AEN |
 
 The per-SoM one-pager covers what's populated, which examples
 target it, the bring-up flow, and common gotchas.  The full

@@ -3,12 +3,12 @@
 Date: 2026-07-29 (drafted); reconciled 2026-08-05 (alp-sdk#1194)
 Status: Sub-project 1 SHIPPED — `tan` v0.5.0 is the released PyInstaller
 freeze of the Python package `alp-tan` (verified against
-`alplabai/tan-cli@0277b4c`, `python/pyproject.toml:12,17,35`). Renode's
-alp-sdk-side doc/ADR record is retired ([ADR 0022](../../adr/0022-python-executor-renode-retirement.md)),
-but the `tan renode` command itself is **not yet removed** — `python/tan/cli.py`
-still registers `app.command("renode")` in `alplabai/tan-cli@0277b4c`; removal
-is tracked as `tan-cli`#448, scheduled after the v0.5.0 tags (see Sub-project 4
-below). Distribution is decided, not open (below). Sub-projects 2-4 remain the
+`alplabai/tan-cli@0277b4c`, `python/pyproject.toml:12,17,35`). Renode is retired
+repo-wide ([ADR 0022](../../adr/0022-python-executor-renode-retirement.md),
+Amendment 2): the `tan renode` command has since been removed from `tan-cli`
+(it was still registered at `alplabai/tan-cli@0277b4c`, the commit this
+status was verified against), and alp-sdk's `pr-renode-*` CI and the
+`aen-sim-vision` example are deleted. Distribution is decided, not open (below). Sub-projects 2-4 remain the
 open work.
 
 **Provenance note (2026-08-05):** this file was carried over from
@@ -298,7 +298,7 @@ the fixture in the same change, citing the issue.
 | **`tan` must never learn a hardware fact** — no SKU, address, pin or vendor branch | spec, commit `c103d4ae` |
 | `metadata/**` stays in alp-sdk; generators move, facts do not | ADR-0017; spec `6301d754` |
 | Target 1 requires **persistence** — a RAM-run blink does not count | maintainer, 2026-07-29 |
-| Renode is retired (the `tan renode` verb; alp-sdk's own Renode CI is untouched) | maintainer, 2026-08-04; [ADR 0022](../../adr/0022-python-executor-renode-retirement.md) |
+| Renode is retired (the `tan renode` verb; alp-sdk's own Renode CI and example were deleted later, ADR 0022 Amendment 2) | maintainer, 2026-08-04; [ADR 0022](../../adr/0022-python-executor-renode-retirement.md) |
 | Rust's open bugs are **fixed** during the port, not replicated | maintainer, 2026-07-29 |
 | Distribution is **4 GitHub-release assets**, PyInstaller **`--onedir`** (not `--onefile` — dropped for a macOS startup regression, `tan-cli`#349); PyPI publication **not enabled** | `alplabai/tan-cli` `.github/workflows/release.yml`; `docs/cli.md:30,46-47`; see "Distribution" section below |
 
@@ -520,8 +520,8 @@ survive the port.
   warns on skew by itself. **Not independently verified in this reconciliation
   pass** — check `alp-sdk-vscode`'s current pin before relying on this line.
 - **Renode is retired** — done, not open work. [ADR 0022](../../adr/0022-python-executor-renode-retirement.md)
-  covers the alp-sdk-side doc/ADR record; `tan-cli`#448 covers the `tan
-  renode` command removal, scheduled after the `tan` v0.5.0 tags. Retire the
+  covers the alp-sdk-side doc/ADR record; the `tan renode` command has
+  since been removed from `tan-cli` (`tan-cli`#448 was retired with it). Retire the
   Rust crates last, and only for capabilities the parity harness has
   confirmed — done: `tan-cli`'s `2883cdf4` (2026-08-10) deleted `crates/`
   and the oracle-parity suite outright (#269, #601); `git ls-tree

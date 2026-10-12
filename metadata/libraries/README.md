@@ -52,7 +52,7 @@ headers rather than papered over:
 
 - `micro-ros` is pinned in `west.yml` from the upstream
   `micro_ros_zephyr_module` Humble branch at
-  `cfbddc5e4334317a1036e883ce8f6af12b1da66a`. Its Zephyr integration names the
+  `8477de124763e4701f8029d01216d6f6b524dde9`. Its Zephyr integration names the
   west module and transcribes the real master symbol from
   `modules/libmicroros/Kconfig`: `CONFIG_MICROROS=y`.
 - `ros2` is **Tier B (recipe-only)**: its wiring is grounded in-tree
@@ -115,7 +115,7 @@ ARM-software` repos, all Tier B (recipe-only):
   names a real module and a real `CONFIG_CMSISSTREAM=y` symbol. Its
   `CMSISSTREAM_POOL_SECTION` Kconfig defaults to `.alif_sram0.evt_pool`, a
   linker section that exists only on Alif Ensemble (E1M-AEN); apps on the
-  Renesas RZ/V2N or NXP i.MX 93 M33 cores MUST override it with a real
+  Renesas RZ/V2N M33 cores MUST override it with a real
   section from their own memory map or the link fails — the manifest does
   not re-emit that default and invents no replacement. Separately,
   `CONFIG_CMSISSTREAM=y` unconditionally compiles two C++ translation

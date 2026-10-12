@@ -93,6 +93,12 @@
           "properties": {
             "compatible": { "type": "string", "pattern": "^[a-z0-9]+,[a-z0-9._-]+$", "description": "Linux devicetree compatible string the in-kernel driver matches (may differ from the part number, e.g. OV9281 probes as ovti,ov9282)." },
             "kconfig": { "type": "string", "pattern": "^CONFIG_[A-Z0-9_]+$", "description": "Kernel config symbol that builds the driver." },
+            "variants": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[a-z0-9]+,[a-z0-9._-]+$" },
+              "description": "Other compatibles the same in-kernel driver matches (e.g. the colour / mono part of a sensor family).  A camera module may name one in `linux_compatible`."
+            },
             "link_freqs": {
               "type": "array",
               "minItems": 1,

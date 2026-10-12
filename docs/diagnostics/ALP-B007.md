@@ -11,8 +11,8 @@ to report, not this one's.
 ## Cause
 
 - Picking an EVK preset by habit or copy/paste instead of by family --
-  `metadata/boards/e1m-evk.yaml` hosts `alif-ensemble` and `nxp-imx9`
-  (E1M-AEN3xx..AEN8xx, E1M-NX9101); `metadata/boards/e1m-x-evk.yaml` hosts
+  `metadata/boards/e1m-evk.yaml` hosts `alif-ensemble`
+  (E1M-AEN3xx..AEN8xx); `metadata/boards/e1m-x-evk.yaml` hosts
   `renesas-rzv2n` and `renesas-rzv2n-deepx` (E1M-V2N1xx, E1M-V2M1xx). Per
   [ADR-0011](../adr/0011-intra-family-portability.md), the two families
   are not interchangeable -- there is no single preset that hosts both.
@@ -36,7 +36,7 @@ exists, suggests one:
 
 ```
 error[ALP-B007]: board preset 'e1m-evk' hosts SoM families
-  ['alif-ensemble', 'nxp-imx9'], but E1M-V2N101 is family 'renesas-rzv2n'
+  ['alif-ensemble'], but E1M-V2N101 is family 'renesas-rzv2n'
   --> board.yaml:4:9
    |
  4 | preset: e1m-evk

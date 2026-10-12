@@ -12,7 +12,7 @@ enable the GD32 link for real CM33 firmware, so
 `boards/<board>.conf` turns SPI and GPIO off and `boards/<board>.overlay`
 disables `&sci7` and `&gpio9`: P96 (SCK7) and P97 (chip-select) are left
 untouched. Those files are per board because the other boards that default to
-this app (AEN M55 cores, NX9101) have no `sci7` / `gpio9` nodes. It gives the orchestrator a buildable, bootable
+this app (AEN M55 cores) have no `sci7` / `gpio9` nodes. It gives the orchestrator a buildable, bootable
 peer-core image when a project leaves a secondary M-core at the SoM default,
 while customer applications can still override `cores.<id>.app` with their own
 firmware.
@@ -23,15 +23,18 @@ Only the V2N / V2M CM33 boards have the `rsctbl` window; on any other board
 `main.c` compiles to a plain idle loop with no beacon.
 
 The CM33 has no console on these SoMs, so the shim proves it is running with
-plain memory stores to the top of the `rsctbl` window (the board DTS's
-`openamp_shm` reservation, CM33 view `0x9F700FF0`, which the A55 DT keeps
-`no-map`). Layout and magic are the same as the `rpmsg-v2n` example:
+plain memory stores to the last 16 bytes of the `rsctbl` page (inside the board
+DTS's `openamp_shm` reservation, CM33 view `0x9F700FF0`, which the A55 DT keeps
+`no-map`). Layout and magic are the same as the `rpmsg-v2n` example, both from
+`include/alp/protocol/amp_beacon.h` (the rsctbl page address is the SoC metadata's
+`openamp_carveout.regions.rsctbl`):
 
 | A55 address  | Word      | Value                                          |
 |--------------|-----------|------------------------------------------------|
 | `0x4F700FF0` | magic     | `0xA10D0683`, written last                     |
 | `0x4F700FF4` | image kind/version | `0x00000100` (idle shim, no RPC) |
 | `0x4F700FF8` | heartbeat | 0 at boot, then +1 about every second (`k_sleep`) |
+| `0x4F700FFC` | attach epoch | `0` at boot, never changed (this image serves no RPC) |
 
 Other images use the same three words with their own kind: `0x200` is the
 GD32-bridge test images (`v2n-gd32-bridge-functional`, `v2n-gd32-bridge-hil-soak`),

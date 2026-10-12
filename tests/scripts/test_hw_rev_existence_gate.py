@@ -92,7 +92,6 @@ def test_status_reserved_and_no_status_key_both_pass():
     ("v2n", "r1"),      # status: production
     ("v2n", "r2"),      # status: production
     ("v2n-m1", "r2"),   # status: production
-    ("imx93", "r1"),    # status: tbd, and an in-tree example builds it
 ])
 def test_family_revision_known_passes_every_real_status_in_tree(family, rev):
     """EXISTENCE is unaffected by the status half -- every one of these
@@ -166,41 +165,9 @@ def test_revision_buildable_is_false_for_a_malformed_present_entry():
     ("v2n", "r1", True),         # status: production
     ("v2n", "r2", True),         # status: production (board 2625-R2)
     ("v2n-m1", "r2", True),      # status: production (board 2625-R2)
-    ("imx93", "r1", False),      # status: tbd -- the KNOWN FALLOUT
 ])
 def test_family_revision_buildable_matches_every_real_status_in_tree(family, rev, expected):
     assert sc.family_revision_buildable(METADATA_ROOT, family, rev) is expected
-
-
-# --------------------------------------------------------------------------
-# The RATCHET -- #1025 round-2 review.  Every rpmsg-imx93-shaped exclusion
-# (check_build_plan.py, check_system_manifest.py, check_emit_snapshots.py,
-# check_zephyr_conf_parity.py, tier-a-library-ci.json's excludedFamilies)
-# calls this instead of hand-rolling `if status == "tbd"`, so a status flip
-# turns every exclusion red instead of letting some silently keep skipping
-# forever.
-# --------------------------------------------------------------------------
-
-def test_assert_exclusion_still_not_buildable_is_quiet_while_honest():
-    """The real imx93 r1 is still `tbd` in the tree today -- the exclusion
-    every gate cites is honest, so the ratchet has nothing to say."""
-    assert sc.assert_exclusion_still_not_buildable(
-        METADATA_ROOT, "imx93", "r1", gate="test") is None
-
-
-def test_assert_exclusion_still_not_buildable_fires_once_the_reason_stops_holding(tmp_path):
-    """Mirrors the reviewer's proven experiment: flip the cited hw_rev to a
-    buildable status and the ratchet must fail loudly and actionably,
-    naming the gate, instead of staying silent."""
-    fam = tmp_path / "e1m_modules" / "imx93"
-    fam.mkdir(parents=True)
-    (fam / "hw-revisions.yaml").write_text(
-        "hw_revisions:\n  r1:\n    status: preliminary\n", encoding="utf-8")
-    msg = sc.assert_exclusion_still_not_buildable(
-        tmp_path, "imx93", "r1", gate="check_build_plan.py")
-    assert msg is not None
-    assert "check_build_plan.py" in msg
-    assert "remove the exclusion" in msg.lower()
 
 
 # --------------------------------------------------------------------------
@@ -296,33 +263,6 @@ def test_a_status_reserved_som_hw_rev_is_refused(tmp_path):
     message = str(excinfo.value)
     assert "r3" in message
     assert "reserved" in message
-
-
-def test_imx93_r1_status_tbd_som_hw_rev_is_refused(tmp_path):
-    """The KNOWN FALLOUT this decision creates: E1M-NX9101's only
-    revision, `imx93` r1, is `status: tbd` -- and
-    `examples/multicore/rpmsg-imx93/board.yaml` builds against it today.
-    Refusing `tbd` (#1025's broad reading) means that revision, and that
-    example, are not buildable until the maintainer picks a real status
-    for it.  This is deliberate on this branch -- see the PR description."""
-    path = _write_board(tmp_path, """
-        som:
-          sku: E1M-NX9101
-          hw_rev: r1
-        preset: e1m-evk
-        cores:
-          a55_cluster:
-            app: .
-          m33:
-            app: .
-        """)
-
-    with pytest.raises(SdkRevisionNotBuildable) as excinfo:
-        load_board_yaml(path)
-
-    message = str(excinfo.value)
-    assert "r1" in message
-    assert "tbd" in message
 
 
 def test_the_refusal_is_an_orchestrator_error_subclass(tmp_path):

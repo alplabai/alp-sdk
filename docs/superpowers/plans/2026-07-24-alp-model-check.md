@@ -1,5 +1,9 @@
 # `alp model check` — Pre-flight Fit/Perf Analyzer (Slice 1a) Implementation Plan
 
+> **STATUS — NOT LANDED HERE; SUPERSEDED.** `scripts/alp_model/` has no `analyze.py`
+> module. [ADR 0028](../../adr/0028-tan-owns-the-model-engine.md) (Proposed)
+> moves the `alp model` engine to tan (`python/tan/model/`). Kept as design history.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add `alp model check <model> --sku <SKU>` — an offline, no-toolchain static analyzer that answers "will this model fit my SoM's NPU, and roughly how fast?" before any compile.

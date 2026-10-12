@@ -4,9 +4,9 @@
  *   1. tr_movenet_decode() back-maps the portrait letterbox (36 pad input
  *      columns each side) -- the content corners of the 192 square land on
  *      the upright frame's corners, the padding off the frame;
- *   2. pose -> box -> tracker intents from a synthetic upright pose: lane
- *      from torso x across 400 px, jump from the head/shoulders rising,
- *      duck from the box shrinking, over a 640-px-tall frame. */
+ *   2. pose -> box -> tracker intents from a synthetic upright pose: jump
+ *      from both wrists rising, duck from the box shrinking, over a
+ *      640-px-tall frame. */
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -111,37 +111,48 @@ int main(void)
 
 		assert(b.valid && b.x == UW / 2 - 25 && b.w == 50 && b.y == 200 &&
 		       b.h == 160); /* the torso box */
-		tr_track_init(&t, UW, UH);
-		assert(t.lane_edges[0] == UW / 3 && t.lane_edges[1] == 2 * UW / 3);
-		tr_track_calibrate(&t, b, UW);
-		assert(t.calibrated && t.lane == 1u);
+		tr_track_init(&t, UH);
+		tr_track_calibrate(&t, b);
+		assert(t.calibrated);
 
 		in = tr_track_update(&t, b); /* standing still: nothing */
 		assert(in.source == TR_INPUT_VISION && in.lane_delta == 0 && !in.jump && !in.duck);
 
-		tr_pose_t left = figure(60, 100, 600); /* torso into the left third */
+		/* The torso into the left third, or the whole body 120 px up (0.75 of the
+		 * torso): neither is a lane or a jump any more -- arms are (test_arms.c). */
+		tr_pose_t left = figure(60, 100, 600);
+		tr_pose_t up   = figure(UW / 2, 100 - 120, 600 - 120);
 
 		in = tr_track_update(&t, tr_pose_box(&left));
-		assert(in.lane_delta == -1 && t.lane == 0u);
-		tr_track_resync(&t, 1u);
-
-		tr_pose_t up =
-		    figure(UW / 2, 100 - 120, 600 - 120); /* the whole body 120 px up (0.75 of the torso) */
-
-		(void)tr_track_update(&t, tr_pose_box(&up));
-		in = tr_track_update(&t, tr_pose_box(&up)); /* the second frame: TR_TRACK_DEBOUNCE */
-		assert(in.jump && !in.duck && in.lane_delta == 0);
-
-		for (int i = 0; i < TR_TRACK_HOLD_MIN + TR_TRACK_LAND_COOLDOWN_FRAMES + 2; i++) {
-			(void)tr_track_update(&t, b); /* land */
+		assert(in.lane_delta == 0 && !in.jump && !in.duck);
+		for (int i = 0; i < 2; i++) {
+			in = tr_track_update(&t, tr_pose_box(&up));
+			assert(in.lane_delta == 0 && !in.jump && !in.duck);
 		}
+		for (int i = 0; i < TR_TRACK_HOLD_MIN + 2; i++) {
+			(void)tr_track_update(&t, b); /* back */
+		}
+
+		/* Both arms up over the 640-px-tall frame: the wrist 0.5 shoulder
+		 * widths above the shoulder (the figure's are at 168 % BELOW). */
+		tr_pose_t both = stand;
+
+		both.kp[TR_KP_LWRI].y = both.kp[TR_KP_RWRI].y = (int16_t)(both.kp[TR_KP_LSHO].y - 60);
+		in = tr_track_update(&t, tr_pose_box(&both)); /* both cross together: at once */
+		assert(in.jump && !in.duck && in.lane_delta == 0);
+		in = tr_track_update(&t, tr_pose_box(&both)); /* held up: the edge is spent */
+		assert(!in.jump && in.lane_delta == 0);
+		for (int i = 0; i < TR_TRACK_HOLD_MIN + 2; i++) {
+			(void)tr_track_update(&t, b);
+		}
+
 		tr_pose_t crouch =
 		    figure(UW / 2, 100 + 80, 600 + 80); /* the torso 80 px down (0.5 of it) */
 
 		(void)tr_track_update(&t, tr_pose_box(&crouch));
 		in = tr_track_update(&t, tr_pose_box(&crouch));
 		assert(in.duck && !in.jump);
-		printf("intents: lane from torso x over %d px, jump, duck over %d px -- upright\n", UW, UH);
+		printf("intents: jump (both arms), duck over %d px -- upright\n", UH);
 	}
 	return 0;
 }

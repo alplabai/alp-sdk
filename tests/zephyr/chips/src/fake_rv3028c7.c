@@ -51,6 +51,7 @@
 
 #include "fakes.h"
 
+#define REG_STATUS   0x0Eu
 #define REG_EE_ADDR  0x25u
 #define REG_EE_DATA  0x26u
 #define REG_EE_CMD   0x27u
@@ -69,6 +70,7 @@ struct fake_rv3028c7_data {
 	} wlog[WLOG_CAP];
 	size_t wlog_len;
 
+	bool    write1_sets;
 	bool    fail_armed;
 	uint8_t fail_reg;
 	uint8_t fail_val;
@@ -82,6 +84,7 @@ static void seed_defaults(struct fake_rv3028c7_data *d)
 	memset(d->eeprom, 0, sizeof d->eeprom);
 	d->wlog_len   = 0;
 	d->fail_armed = false;
+	d->write1_sets = false;
 }
 
 static void apply_write(struct fake_rv3028c7_data *d, uint8_t reg, uint8_t val)
@@ -91,7 +94,19 @@ static void apply_write(struct fake_rv3028c7_data *d, uint8_t reg, uint8_t val)
 		d->wlog[d->wlog_len].val = val;
 		d->wlog_len++;
 	}
-	d->regs[reg] = val;
+	if (reg == REG_STATUS && d->write1_sets) {
+		/* Alternative hardware model: STATUS behaves as a plain
+		 * read/write byte, so writing 1 sets a flag.  EEbusy (bit 7)
+		 * stays read-only. */
+		d->regs[reg] = (uint8_t)((d->regs[reg] & 0x80u) | (val & 0x7Fu));
+	} else if (reg == REG_STATUS) {
+		/* Flag semantics the driver assumes: a 0 clears a latched
+		 * flag, a 1 leaves it unchanged (never sets it); EEbusy
+		 * (bit 7) is read-only. */
+		d->regs[reg] = (uint8_t)(d->regs[reg] & (val | 0x80u));
+	} else {
+		d->regs[reg] = val;
+	}
 
 	if (reg == REG_EE_CMD) {
 		if (val == EE_CMD_WRITE) {
@@ -220,4 +235,9 @@ void fake_rv3028c7_fail_next_write(uint8_t reg, uint8_t val)
 void fake_rv3028c7_reset(void)
 {
 	if (g_fake_rv3028c7) seed_defaults(g_fake_rv3028c7);
+}
+
+void fake_rv3028c7_set_write1_sets(bool on)
+{
+	if (g_fake_rv3028c7) g_fake_rv3028c7->write1_sets = on;
 }

@@ -204,7 +204,7 @@ def test_classify_ignores_block_slug_alongside_resolvable_chip() -> None:
     chip -- not fall to ring-unknown because the block-slug's family
     set is empty."""
     ring = portability.classify(
-        {"ssd1306": ["aen", "v2n", "v2n-m1", "imx93"]},
+        {"ssd1306": ["aen", "v2n", "v2n-m1"]},
         ["button_led", "ssd1306"],
         "aen",
     )
@@ -225,7 +225,7 @@ def test_classify_all_block_slugs_falls_back_to_no_chip_ring() -> None:
 
 def test_load_board_host_families_translates_vendor_family_names() -> None:
     families = portability.load_board_host_families()
-    assert families["e1m-evk"] == {"aen", "imx93"}
+    assert families["e1m-evk"] == {"aen"}
     assert families["e1m-x-evk"] == {"v2n", "v2n-m1"}
 
 

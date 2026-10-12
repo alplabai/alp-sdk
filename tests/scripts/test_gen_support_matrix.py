@@ -73,9 +73,8 @@ def test_known_presence_cells():
     # V2N declares no DAC; the Alif E8 declares dac_12bit.
     assert not _present(text, "E1M-V2N101", "DAC")
     assert _present(text, "E1M-AEN801", "DAC")
-    # Every SoM resolves to a SoC with at least one NPU, including the
-    # otherwise-sparse NXP i.MX 93 module.
-    assert _present(text, "E1M-NX9101", "NPU")
+    # Every SoM resolves to a SoC with at least one NPU.
+    assert _present(text, "E1M-V2N101", "NPU")
 
 
 def test_every_module_resolves_to_a_soc():

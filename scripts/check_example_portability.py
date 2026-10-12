@@ -137,19 +137,16 @@ from alp_orchestrate.slugs import _BLOCK_SLUGS  # noqa: E402
 # E1M-AEN... -> aen
 # E1M-V2N... -> v2n
 # E1M-V2M... -> v2n-m1   (E1M-V2M is the V2N-M1 part numbering)
-# E1M-NX9... -> imx93
 _SKU_FAMILY_TABLE = (
     ("E1M-V2M", "v2n-m1"),
     ("E1M-V2N", "v2n"),
     ("E1M-AEN", "aen"),
-    ("E1M-NX9", "imx93"),
 )
 
 _SKU_PINOUT_TABLE = (
     ("E1M-V2M", "e1m-x"),
     ("E1M-V2N", "e1m-x"),
     ("E1M-AEN", "e1m"),
-    ("E1M-NX9", "e1m"),
 )
 
 # metadata/boards/<slug>.yaml's `hosts_som_families:` uses the
@@ -161,7 +158,6 @@ _VENDOR_FAMILY_TO_SLUG = {
     "alif-ensemble": "aen",
     "renesas-rzv2n": "v2n",
     "renesas-rzv2n-deepx": "v2n-m1",
-    "nxp-imx9": "imx93",
 }
 
 # SDK-level block helpers live under `blocks/<name>/`, not
@@ -217,6 +213,15 @@ _ZEPHYR_DRIVER_INCLUDE_ALLOWLIST: dict[str, dict[str, str]] = {
         "mbox": (
             "raw OpenAMP/MHU mailbox transport for AMP core-to-core "
             "messaging; no portable <alp/*.h> IPC surface exists yet."
+        ),
+    },
+    "multicore/microros-ros2-v2n": {
+        "mbox": (
+            "m33_sm/src/rpmsg_link.c, the raw OpenAMP/MHU mailbox "
+            "transport under the micro-ROS XRCE-DDS custom transport; "
+            "<alp/rpc.h> is framed request/response RPC, not the raw "
+            "datagram endpoint XRCE needs, so no portable <alp/*.h> IPC "
+            "surface fits yet (same gap as multicore/rpmsg-v2n)."
         ),
     },
     "peripheral-io/alp-console": {
@@ -609,7 +614,7 @@ def load_som_optional_chips() -> dict[str, set[str]]:
 
 def load_board_host_families() -> dict[str, set[str]]:
     """Map board preset slug -> the set of chip-family slugs
-    (aen / v2n / v2n-m1 / imx93) it hosts.
+    (aen / v2n / v2n-m1) it hosts.
 
     Scraped from metadata/boards/<slug>.yaml's `hosts_som_families:`
     and translated through _VENDOR_FAMILY_TO_SLUG.  Used to decide

@@ -39,7 +39,12 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["core_id", "os", "status", "flash_method", "flash_args"],
+        "required": ["core_id", "os", "status"],
+        "if": {
+          "properties": { "os": { "not": { "const": "off" } } },
+          "not": { "required": ["reason"] }
+        },
+        "then": { "required": ["flash_method", "flash_args"] },
         "properties": {
           "core_id": { "type": "string" },
           "os": { "type": "string", "description": "Resolved runtime (zephyr | yocto | baremetal | off); the value-set is owned by metadata/schemas/board.schema.json cores.<core>.os." },
@@ -54,8 +59,9 @@
           "status": { "type": "string", "enum": ["pending", "ok", "failed", "skipped"] },
           "log_path": { "type": "string" },
           "reason": { "type": "string", "description": "Why a slice was skipped/failed." },
-          "flash_method": { "type": "string", "description": "Backend the flasher dispatches to (e.g. zephyr_west_flash, yocto_wic_to_sd_or_emmc)." },
-          "flash_args": { "type": "object", "description": "Method-specific flash arguments (shape varies by flash_method)." }
+          "flash_method": { "type": "string", "description": "Backend the flasher dispatches to (e.g. zephyr_west_flash, yocto_wic_to_sd_or_emmc). REQUIRED, together with `flash_args`, on every slice that is not `os: off` and carries no `reason`; an `os: off` slice (nothing is built, so nothing is flashed) or a slice with a `reason` (skipped/failed/unflashable) may omit both. Reserved value `none`: the flasher (tan) cannot flash this slice -- an unknown target -- emitted with `flash_args: {}` and a `reason`; a consumer must treat it as \"nothing to flash\", not dispatch it to a backend." },
+          "flash_args": { "type": "object", "description": "Method-specific flash arguments (shape varies by flash_method). `{}` when `flash_method` is `none`. Required exactly when `flash_method` is (see there)." },
+          "flash_method_resolved": { "type": "string", "description": "OPTIONAL, additive. The flash backend the flasher actually dispatched to, recorded by the flasher (tan) when it differs from the declared `flash_method` (e.g. declared `zephyr_west_flash`, resolved `alif_mram_jlink` because `flash_args.jlink_flash_device` is set). Same type as `flash_method` (an open string -- `flash_method` carries no enum). The emitter never writes it; absence means 'no override was recorded'. Readers that predate it ignore it." }
         }
       }
     },
@@ -110,7 +116,7 @@
     },
     "memory": {
       "type": "array",
-      "description": "Resolved memory-region view of the SoM: the regions `resolve_memory_map()` yields, each with the flash/RAM class derived from the SoC's declared aperture and the region's authored `write_authority` (#1365).  Emitted since #1365 item 3 by `scripts/alp_orchestrate/memory.py`; before that the key was declared ahead of its producer and nothing wrote it.  OMITTED, never emitted empty: a SoM that resolves no regions at all (an unresolvable `silicon_variant`, e.g. NX9101's `TBD`) carries no `memory:` key, so a consumer must read an ABSENT `memory:` as either a producer older than #1365 item 3 or a SoM whose memory layout is still pending -- NEVER as \"this SoM has no memory regions\".  Rows join the other panes by NAME: `ipc[].carve_out_region` and `storage[].flash_device` each name a `memory[].name`.  That join is partial by construction -- an `on_module.ospi_memories:` key is a legal `storage[].flash_device` target but is a controller-instance name carrying a `capacity_mbit` and no base, so it lies outside every aperture and gets no `memory[]` row.  Partitions stay in `storage[]` and carve-outs in `ipc[]`; this array is the set of SoM-declared regions those two refer INTO, not a third copy of them.",
+      "description": "Resolved memory-region view of the SoM: the regions `resolve_memory_map()` yields, each with the flash/RAM class derived from the SoC's declared aperture and the region's authored `write_authority` (#1365).  Emitted since #1365 item 3 by `scripts/alp_orchestrate/memory.py`; before that the key was declared ahead of its producer and nothing wrote it.  OMITTED, never emitted empty: a SoM that resolves no regions at all (an unresolvable `silicon_variant`, e.g. `TBD`) carries no `memory:` key, so a consumer must read an ABSENT `memory:` as either a producer older than #1365 item 3 or a SoM whose memory layout is still pending -- NEVER as \"this SoM has no memory regions\".  Rows join the other panes by NAME: `ipc[].carve_out_region` and `storage[].flash_device` each name a `memory[].name`.  That join is partial by construction -- an `on_module.ospi_memories:` key is a legal `storage[].flash_device` target but is a controller-instance name carrying a `capacity_mbit` and no base, so it lies outside every aperture and gets no `memory[]` row.  Partitions stay in `storage[]` and carve-outs in `ipc[]`; this array is the set of SoM-declared regions those two refer INTO, not a third copy of them.",
       "items": {
         "type": "object",
         "required": [

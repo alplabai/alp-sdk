@@ -9,12 +9,11 @@
 > `alp-image-edge` bake has since completed too -- see
 > [`docs/bring-up-drpai-v2n.md`](../docs/bring-up-drpai-v2n.md)'s status
 > banner for the task count and artefact.  On-bench boot and a
-> `drpai`-enabled bake are the remaining gates; the i.MX 93 path is
-> still paper-correct (gates on v0.7 HiL).
+> `drpai`-enabled bake are the remaining gates.
 
 Yocto layer that packages the **Alp SDK** runtime, on-board chip
 drivers, edge-AI examples, and reference ROS 2 nodes for the
-V2N / V2N-M1 / i.MX 93 Linux side of every supported E1M SoM.
+V2N / V2N-M1 Linux side of every supported E1M SoM.
 
 The orchestrator (`scripts/alp_orchestrate/`) emits per-MACHINE
 build invocations against this layer; customers who hand-write
@@ -37,7 +36,6 @@ meta-alp-sdk/
 │       ├── e1m-v2m101-a55.conf          # V2N + DEEPX DX-M1.
 │       ├── e1m-v2m102-a55.conf          # V2N + DEEPX variant.
 │       ├── e1m-v2m103-a55.conf          # V2N + DEEPX variant (4 GB / 16 GB).
-│       ├── e1m-nx9101-a55.conf          # NXP i.MX 93.
 │       └── include/
 │           └── e1m-v2m-deepx.inc        # Shared DEEPX block `require`d by the three V2M confs above.
 ├── dynamic-layers/
@@ -94,10 +92,10 @@ meta-alp-sdk/
 
 MACHINE names follow the per-cluster pattern `e1m-<sku>-<cluster>`:
 
-- `<sku>` is the lowercase SoM SKU (`v2n101`, `v2m101`, `nx9101`, ...).
+- `<sku>` is the lowercase SoM SKU (`v2n101`, `v2m101`, ...).
 - `<cluster>` is the cluster identifier from
   `metadata/e1m_modules/<SKU>.yaml`'s `topology:` block (`a55` for
-  the Linux cluster on V2N / iMX93; the M33 system core builds via
+  the Linux cluster on V2N; the M33 system core builds via
   Zephyr, not Yocto).
 
 This matches what `scripts/alp_orchestrate/` writes into the
@@ -185,8 +183,8 @@ libraries and the Translator are Renesas/EdgeCortix account-gated and
 are not vendored here or anywhere else in this public repo.
 
 `meta-rz-drpai` is a **soft** dep of this layer
-(`LAYERRECOMMENDS_alp-sdk`, not `LAYERDEPENDS_alp-sdk`) — the AEN and
-NX91 machines have no DRP-AI silicon and must not be forced to carry an
+(`LAYERRECOMMENDS_alp-sdk`, not `LAYERDEPENDS_alp-sdk`) — the AEN
+machines have no DRP-AI silicon and must not be forced to carry an
 RZ/V-only vendor layer.  The `linux-renesas` bbappend therefore gates
 the `&drpai0` overlay on the layer being in `bblayers.conf`
 (`ALP_DRPAI_LAYER`): present → the real override in
@@ -319,21 +317,6 @@ rootfs (the bootloader is production-flashed by Alp).  See
 [`../docs/build-yocto-v2n.md`](../docs/build-yocto-v2n.md) for the
 deploy + on-board verification steps.
 
-### i.MX 93 — via meta-imx
-
-The NX9101 path tracks NXP's
-[`meta-imx`](https://github.com/nxp-imx/meta-imx) for the i.MX 93
-base BSP plus
-[`meta-freescale`](https://git.yoctoproject.org/meta-freescale) for
-the broader i.MX userspace stack.  The `e1m-nx9101-a55.conf`
-MACHINE ships today; board DTB + full image-bake gate on v0.7
-HW-in-loop.
-
-```bash
-MACHINE = "e1m-nx9101-a55"
-bitbake alp-image-edge
-```
-
 ### Alif Ensemble E8 — via meta-alif-ensemble (BROKEN today — see #264)
 
 > **This path does not build. Do not follow the steps below as
@@ -444,7 +427,6 @@ dependency of the recipe.
 | `e1m-v2m102-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
 | `e1m-v2m103-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
 
-| `e1m-nx9101-a55`     | Ethos-U65                            | NXP i.MX 93 Ethos-U userspace via the image                           |
 | `e1m-aen801-a32`     | Ethos-U85 + 2x U55                   | Ethos-U path inside the alp-sdk library                               |
 | `e1m-aen701-a32`     | 2x Ethos-U55                         | Ethos-U path inside the alp-sdk library                               |
 
@@ -613,17 +595,16 @@ DEEPX section for the full licensing detail.
   the carrier DTB + TF-A memory map + full image-bake for whichever
   SKU #264 lands first also await the maintainer's AEN HW config (the
   `# TBD(alif-hw-config)` overrides in the machine confs).
-- The DRP-AI3 backend (`PACKAGECONFIG[drpai]`) ships OFF, and NO
-  `drpai`-enabled `alp-image-edge` bake has completed on any host yet;
-  no `bitbake` run of `mera2-drpai-tvm_2.7.0.bb` -- with or without
-  `do_compile` -- has happened at all.  See
+- The DRP-AI3 backend (`PACKAGECONFIG[drpai]`) is auto-enabled by
+  `alp-sdk_0.6.bb` on an `rzv2n-family` MACHINE when `ALP_ENABLE_DRPAI` is
+  `"1"` and `RUHMI_DRPAI_TVM_DIR` is set;
+  `mera2-drpai-tvm_2.7.0.bb`'s `do_compile` and packaging have run in a
+  `drpai`-enabled `alp-image-edge` bake (#2400, which found and fixed the
+  missing `-lfmt` link gap there).  See
   [`docs/bring-up-drpai-v2n.md`](../docs/bring-up-drpai-v2n.md) section 4
-  for exactly what IS established (a hand-run `g++` against RUHMI's real
-  headers on an x86_64 dev host proved `MeraDrpRuntimeWrapper.cpp`
-  compiles clean with every needed symbol defined) and what is UNTESTED
-  (the final aarch64 link against the real RUHMI payload, packaging QA,
-  symbol resolution, and everything downstream of it — including
-  on-silicon inference; no compiled YOLOX-S/VOC bundle exists yet
+  for exactly what IS established and what is still UNTESTED (everything
+  downstream of the bake — including on-silicon inference from a baked
+  image; no compiled YOLOX-S/VOC bundle exists yet
   either, since the documented compile path can't calibrate a
   1,3,640,640 detector against real images (RUHMI's 200 calibration
   images ship as 129-byte Git LFS pointer stubs in this checkout, and
@@ -648,8 +629,7 @@ DEEPX section for the full licensing detail.
 + image build.  A `drpai`-OFF `alp-image-edge` bake has since completed
 too — see `docs/bring-up-drpai-v2n.md` for the task count and artefact.
 Still pending: a `drpai`-enabled bake, the ROS 2 + DEEPX + Mender
-feature set together, and on-bench boot — the v0.7 V2N HiL gate.  The
-i.MX 93 path remains unbaked.
+feature set together, and on-bench boot — the v0.7 V2N HiL gate.
 
 DRP-AI3 specifically: **never run on silicon.**  The `&drpai0` overlay,
 the `drpai` PACKAGECONFIG and `src/yocto/inference_drpai.cpp` are

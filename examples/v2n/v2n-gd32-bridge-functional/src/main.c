@@ -41,11 +41,17 @@
  * CM33 J-Link, and Linux cannot see it.  So the same verdict is ALSO
  * published as a compact, versioned record in the `rsctbl` window
  * (A55 0x4F700F00, CM33-NS 0x9F700F00), right below the liveness
- * beacon the provisioning `cm33_running` check reads at 0x4F700FF0.
+ * beacon the provisioning `cm33_running` check reads (amp_beacon.h).
  * The layout lives in <alp/protocol/gd32_bridge_results.h>; read it
  * on the A55 with scripts/bench/v2n/read_gd32_results.py or the
  * tests/hil/v2m103-x-evk/v2m103-gd32-bridge-results.yaml spec.  The
  * SRAM0 block above is unchanged for J-Link users.
+ *
+ * Rows 29-31 exercise the low-power host API through the same SPI link:
+ * a timed Deep-sleep + the documented wake + GET_VERSION, the BUSY gate
+ * (a claimed PWM channel refuses Deep-sleep), and the INVAL rejections.
+ * They SKIP on a bridge too old for CMD_POWER_MODE_SET; STANDBY is never
+ * requested (it resets the GD32 and cuts the Wi-Fi power).
  *
  * This is a maintainer bench tool in example form; like the soak it
  * exercises the gd32g553 chip driver directly (the documented
@@ -96,6 +102,54 @@ static void beacon_tick(struct k_timer *t)
 	alp_gd32_results_beacon_tick(RESULTS_WINDOW);
 }
 K_TIMER_DEFINE(beacon_timer, beacon_tick, NULL);
+
+#ifdef CONFIG_CPU_CORTEX_M
+/* Fatal-error trail.  This image has no console, so a fault (the usual
+ * suspect: a stack overflow on the main thread) used to look like a silent
+ * freeze -- the heartbeat just stopped.  Overriding Zephyr's weak
+ * k_sys_fatal_error_handler() lets us leave the faulting PC/LR/xPSR and the
+ * SCB fault status in the `rsctbl` window (layout: alp_gd32_fault_t) for
+ * `read_gd32_results.py --fault`, then park the core with IRQs off, exactly
+ * as the default handler would.  Keep it to low-risk reads (thread name, current
+ * thread, uptime) and take no locks and make no blocking calls: the kernel
+ * state may be what is broken. */
+static uint32_t fault_thread_hash(void)
+{
+	const char *n = k_thread_name_get(k_current_get());
+	uint32_t    h = 2166136261u; /* FNV-1a 32 */
+
+	for (; n != NULL && *n != '\0'; ++n) {
+		h = (h ^ (uint8_t)*n) * 16777619u;
+	}
+	return h;
+}
+
+void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
+{
+	volatile const uint32_t *scb =
+	    (volatile const uint32_t *)0xE000ED28u; /* CFSR, HFSR, DFSR, MMFAR, BFAR */
+	alp_gd32_fault_t f = {
+		.reason      = reason,
+		.cfsr        = scb[0],
+		.hfsr        = scb[1],
+		.mmfar       = scb[3],
+		.bfar        = scb[4],
+		.thread_hash = fault_thread_hash(),
+		.uptime_ms   = (uint32_t)k_uptime_get(),
+		.sp          = (uint32_t)(uintptr_t)esf,
+	};
+
+	if (esf != NULL) {
+		f.pc   = esf->basic.pc;
+		f.lr   = esf->basic.lr;
+		f.xpsr = esf->basic.xpsr;
+	}
+	(void)irq_lock();
+	alp_gd32_results_fault_publish(RESULTS_WINDOW, &f);
+	for (;;) {
+	}
+}
+#endif /* CONFIG_CPU_CORTEX_M */
 
 /* Snapshot what init() negotiated: the bridge firmware version, the
  * granted feature word, the payload ceiling and the ATTN state.  ATTN
@@ -149,6 +203,9 @@ static void record_ex(alp_status_t s, bool value_ok, bool skip)
 	if (test_idx < FUNC_MAX_TESTS) {
 		func_results[4u + test_idx] = cell;
 	}
+	/* Row index -> bit: Linux learns WHICH row failed, not just how many.
+	 * Rows past 31 do not fit the 32-bit mask and are only counted. */
+	if (cell != 0u && test_idx < 32u) rec.fail_mask |= 1u << test_idx;
 	test_idx++;
 	if (skip && s == ALP_OK && value_ok) skipped++;
 	rec.tests_pass = func_results[2] - skipped;
@@ -430,7 +487,7 @@ static void t_adc_stream2(void)
 	record(worst, value_ok);
 }
 
-/* BATCH: PING + a full-mask GPIO_READ + COUNTER_READ in ONE transaction
+/* BATCH: PING + a routed-mask GPIO_READ + COUNTER_READ in ONE transaction
  * pair.  The driver validates the request against the allow-list and the
  * reply against the request (executed <= count, per-op lengths); here we
  * only assert the outcome.  A second batch whose middle op fails (READ2
@@ -438,7 +495,12 @@ static void t_adc_stream2(void)
  * 2, the third op never ran.  Without the grant: NOSUPPORT. */
 static void t_batch(void)
 {
-	const uint8_t       mask_all[4] = { 0xFFu, 0xFFu, 0xFFu, 0xFFu };
+	/* Routed lines only: bit 8 (E1M IO24) is unrouted (gh#298), so an all-ones
+	 * mask makes the bridge answer STATUS_IO and the batch stops at op 2. */
+	const uint8_t       mask_all[4] = { (uint8_t)GD32G553_GPIO_ROUTED_MASK,
+		                                (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 8),
+		                                (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 16),
+		                                (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 24) };
 	const uint8_t       counter0[1] = { 0u };
 	const uint8_t       read2_s1[2] = { 1u, 4u }; /* stream 1, never started */
 	uint8_t             gpio_rep[4], counter_rep[4], read2_rep[GD32G553_READ2_HDR_BYTES + 2u * 4u];
@@ -526,9 +588,171 @@ static void t_da9292_sentinel(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Low-power modes: Deep-sleep + wake, BUSY gate, invalid requests      */
+/* ------------------------------------------------------------------ */
+
+/* CMD_POWER_MODE_SET with the flags byte, the BUSY gate and the timed-only
+ * rule ships with the firmware that also has PWM stop/release (minor 17):
+ * the BUSY row below needs that release, so one gate (the larger of
+ * GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR and GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR)
+ * serves all three rows.
+ * A peer below it, or one that answers NOSUPPORT, makes the row a SKIP.
+ *
+ * STANDBY (mode 3) is deliberately never requested: it resets the GD32 and
+ * cuts the Wi-Fi power rail, which would kill the link under test.
+ *
+ * 250 ms, not longer: with the FWDGT left running in Deep-sleep the firmware
+ * refuses a timer above 300 ms (ALP_ERR_OUT_OF_RANGE).
+ *
+ * The driver does not expose the wake source.  The firmware holds the
+ * Deep-sleep entry until the host has read the reply, so an early CS (the
+ * wake pulse) or the timer ends the sleep; either is fine, the pass
+ * criterion is that a GET_VERSION after the wake answers and matches. */
+#define POWER_TEST_MIN_MINOR \
+	(GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR > GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR \
+	     ? GD32G553_POWER_FLAGS_MIN_PROTOCOL_MINOR \
+	     : GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR)
+#define POWER_SLEEP_MS 250u
+
+static bool power_unsupported(void)
+{
+	return ctx.version.minor < POWER_TEST_MIN_MINOR;
+}
+
+/* Wake (explicitly, so a failure is attributed here) and prove the link:
+ * GET_VERSION must succeed and agree with what init() read. */
+static alp_status_t power_wake_and_verify(bool *value_ok)
+{
+	gd32g553_version_t v;
+	alp_status_t       s = gd32g553_power_wake(&ctx);
+
+	if (s == ALP_OK) s = gd32g553_refresh_version(&ctx, &v);
+	*value_ok = (s == ALP_OK) && !ctx.power_asleep && (v.major == ctx.version.major) &&
+	            (v.minor == ctx.version.minor) && (v.patch == ctx.version.patch);
+	return s;
+}
+
+static alp_status_t power_deep_sleep_timed(void)
+{
+	const gd32g553_power_opts_t opts = { .wake_after_ms = POWER_SLEEP_MS };
+
+	return gd32g553_set_power_mode(&ctx, 2u, &opts);
+}
+
+static void t_power_deep_sleep_wake(void)
+{
+	bool         ok = false;
+	alp_status_t s;
+
+	if (power_unsupported()) {
+		record_ex(ALP_OK, true, true);
+		return;
+	}
+	/* The scope-channel PWM row leaves SCOPE_PWM_CH claimed, and a claimed
+	 * PWM makes Deep-sleep answer BUSY (that case is the next row's job).
+	 * Release it first so this row tests the plain sleep + wake path. */
+	s = gd32g553_pwm_stop(&ctx, SCOPE_PWM_CH);
+	if (s != ALP_OK) {
+		record(s, false);
+		return;
+	}
+	s = power_deep_sleep_timed();
+	if (s == ALP_ERR_NOSUPPORT) {
+		record_ex(ALP_OK, true, true);
+		return;
+	}
+	if (s == ALP_OK) {
+		alp_delay_ms(POWER_SLEEP_MS + 50u); /* past the timer: it is awake or waking */
+		s = power_wake_and_verify(&ok);
+	}
+	record(s, ok);
+}
+
+/* A claimed PWM channel makes Deep-sleep answer BUSY and change nothing;
+ * once released the same request is accepted and the wake works. */
+static void t_power_busy_gate(void)
+{
+	bool         ok = false;
+	alp_status_t s;
+
+	if (power_unsupported()) {
+		record_ex(ALP_OK, true, true);
+		return;
+	}
+	s = gd32g553_pwm_set(&ctx, SCOPE_PWM_CH, 1000000u, 500000u);
+	if (s == ALP_OK) {
+		const alp_status_t busy = power_deep_sleep_timed();
+
+		ok = (busy == ALP_ERR_BUSY) && !ctx.power_asleep;
+		s  = gd32g553_pwm_stop(&ctx, SCOPE_PWM_CH);
+	}
+	if (s == ALP_OK) {
+		s = power_deep_sleep_timed();
+	}
+	if (s == ALP_OK) {
+		bool woke;
+
+		alp_delay_ms(POWER_SLEEP_MS + 50u);
+		s  = power_wake_and_verify(&woke);
+		ok = ok && woke;
+	}
+	record(s, ok);
+}
+
+/* Requests the host/firmware must refuse: an untimed Deep-sleep and an
+ * unknown mode both answer INVAL.  Nothing is latched, so no wake follows. */
+static void t_power_invalid(void)
+{
+	if (power_unsupported()) {
+		record_ex(ALP_OK, true, true);
+		return;
+	}
+	const alp_status_t untimed = gd32g553_set_power_mode(&ctx, 2u, NULL);
+	const alp_status_t bad     = gd32g553_set_power_mode(&ctx, 4u, NULL);
+
+	record(ALP_OK, (untimed == ALP_ERR_INVAL) && (bad == ALP_ERR_INVAL));
+}
+
+/* ------------------------------------------------------------------ */
 /* The single-pass table                                               */
 /* ------------------------------------------------------------------ */
 
+/* Row order, one record() per row.  read_gd32_results.py names the
+ * fail_mask bits from this list; tests/scripts/test_gd32_results_reader.py
+ * keeps the two in step:
+ *   row 0 tmu_sqrt_4
+ *   row 1 tmu_sqrt_2
+ *   row 2 tmu_sin_0
+ *   row 3 tmu_sin_pi_2
+ *   row 4 tmu_sin_pi_6
+ *   row 5 tmu_cos_0
+ *   row 6 tmu_cos_pi
+ *   row 7 tmu_cos_pi_3
+ *   row 8 tmu_atan
+ *   row 9 tmu_atan2
+ *   row 10 tmu_hypot
+ *   row 11 tmu_log
+ *   row 12 tmu_sinh
+ *   row 13 tmu_cosh
+ *   row 14 tmu_tan_nosupport
+ *   row 15 tmu_exp_nosupport
+ *   row 16 tmu_tanh_nosupport
+ *   row 17 tmu_q31_sqrt
+ *   row 18 trng_lengths
+ *   row 19 pwm_set_get
+ *   row 20 pwm_configure
+ *   row 21 adc_configure_error
+ *   row 22 adc_all_channels
+ *   row 23 link_features
+ *   row 24 adc_stream2
+ *   row 25 batch
+ *   row 26 dsp_chain
+ *   row 27 version_stable
+ *   row 28 da9292_sentinel
+ *   row 29 power_deep_sleep_wake
+ *   row 30 power_busy_gate
+ *   row 31 power_invalid
+ */
 static void run_suite(void)
 {
 	/* -- math: every native CORDIC primitive, value-asserted -------- */
@@ -573,6 +797,11 @@ static void run_suite(void)
 	/* -- identity ------------------------------------------------------ */
 	t_version_stable();
 	t_da9292_sentinel();
+
+	/* -- low power (self-gating on the peer's protocol minor) ---------- */
+	t_power_deep_sleep_wake();
+	t_power_busy_gate();
+	t_power_invalid();
 }
 
 /* ------------------------------------------------------------------ */

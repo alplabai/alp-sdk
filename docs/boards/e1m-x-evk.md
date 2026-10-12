@@ -95,9 +95,9 @@ Per-path status and bench record: [display-support-matrix.md](../display-support
 | Backlight | SoM-side PWM exposed to Linux as a `pwm-backlight` device tree node; 5 kHz PWM. |
 | Panel reset | LCD1_RST = E1M-X IO13; Linux drives it via `gpio-gd32-bridge` on V2N-family SoMs. |
 | Panel power | LCD1_PWR_EN = E1M-X IO15 — pulled high on the carrier, so the panel powers by default without explicit firmware action. A SoM's route to the pad (the V2N family's bridge bit and minimum protocol minor) is in its `pad_routes` and `docs/gd32-bridge-protocol.md`. |
-| Touch controller | Goodix GT911 on DSI1_CSI_I2C = E1M-X I2C3. **Linux has no I2C master to this bus today on V2N-family SoMs**. Touch support is deferred to a bridge I2C-proxy follow-up; a goodix polled-mode patch ships dormant on the branch in the meantime. |
+| Touch controller | Goodix GT911 on the J6 display I2C.  That I2C is designed to be E1M-X I2C3 (pads A23/A24, through a level shifter), but the X-EVK V2 carrier does not connect it: a carrier fix is needed (bench bodge: J12 pin 21 to the SCL pull-up side, J12 pin 27 to the SDA pull-up side).  On V2N-family SoMs E1M-X I2C3 reaches only the GD32 (`PC8`/`PC9`) and is a Linux I2C adapter served by the GD32 bridge I2C proxy ([`../gd32-bridge-protocol.md`](../gd32-bridge-protocol.md) section 3.20). |
 | Silicon note | Datasheet R01DS0466 rev 1.20 section `#AC0`/`#BC0` states those part suffixes do not support MIPI-DSI Display Command Set (DCS) control — HX8394 init (which uses DCS commands) is impossible on `#AC0` parts. The SoM is moving to a later-suffix DCS-capable part; older `#AC0` boards will fail at panel init by design. |
-| Bring-up status | Code complete on `feat/v2n-lcd-display1` (kernel patches 0004–0006, DT nodes, weston image, LVGL example); **HIL on silicon pending** (bench ladder G0–G8). |
+| Bring-up status | Partly verified. Merged (PR #266): kernel patches 0004–0006, DT nodes, weston image, LVGL example. On E1M-V2M103 (2026-09-30) `rzg2l-du` binds, fbcon is on fb0, `panel-himax-hx8394` is bound and connector DSI-1 reads `connected`/`enabled` at 720x1280@62.36 — with no panel attached on that bench, so this is not proof of a rendered frame. PR #266 recorded G1 DCS probe + G2 pixels on E1M-V2M101. DPMS (G6), LVGL-on-panel (G7) and soak (G8) are pending. See [`../display-support-matrix.md`](../display-support-matrix.md). |
 
 ### Display 2 (J28) — carrier-ready, unavailable on V2N/V2M
 
@@ -138,13 +138,14 @@ row says so.
 | I2C0, PCIe / M.2 branch | same bus, through a level shifter | `i2c-0` | 100 kHz | PCIe I/O expander, then a 2:1 switch to the M.2 E-key or M.2 M-key slot |
 | I2C1 | RZ/V2N RIIC1 | `i2c-1` | 400 kHz | 14-pin expansion header only; no fixed device |
 | I2C2 (`XEVK_I2C_BUS_DSI_CSI0`) | RZ/V2N RIIC2 | enabled only by the camera device trees; it has no alias, so read its number from `i2cdetect -l` | 400 kHz | Camera connectors (CAM0 pair and the parallel-camera connector); no fixed device |
-| I2C3 (`XEVK_I2C_BUS_DSI_CSI1`) | SoM bridge MCU (no RZ/V2N master) | none | n/a | CAM1 connector; no fixed device |
+| Display 1 touch controller | Goodix GT911 (on the panel cable) | `0x5D` or `0x14`, chosen by the controller's reset sequence | Interrupt on E1M-X IO9, reset on IO11.  The J6 display I2C is designed to be E1M-X I2C3 but is not connected on the X-EVK V2 carrier (carrier fix needed), so the GT911 is not reachable through the bridge I2C proxy on this carrier until it is fixed or bodged.  The device answering at `0x41` on `i2c-0` on 2026-10-06 is not the Riverdi touch controller.  **Never seen on a real unit** |
 | I3C | RZ/V2N I3C | none | n/a | 3-pin header, not fitted |
 | SoM-internal power / clock bus | RZ/V2N RIIC8 | `i2c-8` | 400 kHz | On-module parts only, see the last table |
 
-The PCIe / M.2 switch is enabled by `XEVK_PIN_PCIE0_I2C_EN` and its
-direction is set by line P0 of the PCIe I/O expander.  The enable polarity
-recorded for that pin has not been checked on a board (#2645).
+The PCIe / M.2 switch is a TI TMUX121 enabled by `XEVK_PIN_PCIE0_I2C_EN`
+(E1M-X IO2) and steered by line P0 of the PCIe I/O expander.  Its EN input
+is active-low and the net has no pull resistor, so drive the pin low to
+connect the M.2 slots and do not leave it floating.
 
 ### Fixed devices on I2C0 (`i2c-0`)
 
@@ -160,7 +161,7 @@ recorded for that pin has not been checked on a board (#2645).
 | +5V input monitor | INA228 | `0x42` | A1 = GND, A0 = SDA | Alert pin not connected | `0x42` answered on 2026-10-02; nothing on 2026-09-26 (#2343).  No ID read.  On the current EVK revision the device's bus pins are documented as swapped and corrected by a hand rework; it answers only on carriers with that rework, so treat no answer as "part absent", not a fault | `chips/ina228` (read over i2c-dev, as `chips/ina236`; `examples/v2n/v2n-power-monitor`); upstream Zephyr's `ti,ina228` is the path for a Zephyr-mastered bus.  Sense shunt 100 mOhm; two selectable shunt scales: +/-163.84 mV (1.6384 A full scale, 3.125 uA/LSB, the board default `XEVK_INA228_ADCRANGE_5V`) or +/-40.96 mV (0.4096 A, 0.78125 uA/LSB).  Not run on hardware |
 | Main I/O expander | TCAL9538 | `0x73` | A1 high, A0 high | Reset and interrupt pins are pulled up on the carrier and do not reach the SoM | Yes | `chips/tcal9538` |
 | PCIe I/O expander | TCAL9538 | `0x71` | A1 low, A0 high | Same.  P0 = PCIe / M.2 I²C switch select, P1 = M.2 E-key alert, P2 to P4 = E-key reset / wake / clock request, P5 to P7 = M-key reset / wake / clock request (port map from the design data, not bench-verified) | Yes | `chips/tcal9538` |
-| Audio amplifier, left | TAS2563 | `0x4D` | Strap resistor | Shutdown and fault lines are shared by both amplifiers, on the E1M-X I2S1_SCLK and I2S1_SDI pads | Yes; kernel codec bound | Linux `tas2562` codec (`e1m-x-evk.dtsi`); `chips/tas2563` |
+| Audio amplifier, left | TAS2563 | `0x4D` | Strap resistor (X-EVK V2: both amplifiers are strapped identically as built, so the carrier needs a strap rework before they answer at separate addresses) | Shutdown and fault lines are shared by both amplifiers, on the E1M-X I2S1_SCLK and I2S1_SDI pads | Yes; kernel codec bound | Linux `tas2562` codec (`e1m-x-evk.dtsi`); `chips/tas2563` |
 | Audio amplifier, right | TAS2563 | `0x4E` | Strap resistor | shared, as above | Yes; kernel codec bound | same |
 | SoM identity EEPROM (on the module) | N24S128 | `0x50`, plus `0x58` for its identity page | Fixed | none | Yes; written and read back during provisioning | `chips/eeprom_24c128` |
 
@@ -176,8 +177,8 @@ amplifiers are the exception: the kernel owns them for ALSA.
 
 | Device | Part | Address | Status |
 |---|---|---|---|
-| Display 1 touch controller | Goodix GT911 (on the panel cable) | `0x5D` or `0x14`, chosen by the controller's reset sequence | Interrupt on E1M-X IO9, reset on IO11.  The bus is documented above as E1M-X I2C3, but which controller the touch lines reach has not been confirmed (#2645).  **Never seen on a real unit** |
-| mikroBUS socket I²C | plug-in | depends on the Click board | Controller not confirmed (#2645).  Never scanned |
+| Display 1 touch controller | Goodix GT911 (on the panel cable) | `0x5D` or `0x14`, chosen by the controller's reset sequence | Interrupt on E1M-X IO9, reset on IO11.  On the X-EVK V2 the J6 display I²C is an isolated level-shifted segment with its own pull-ups and is not wired to E1M-X I2C3 or any other module bus (carrier gap, #2645), so neither the touch controller nor the panel bridge is reachable from the SoM.  Touch INT and RST are wired through.  The device answering at `0x41` on `i2c-0` on 2026-10-06 is not the Riverdi touch controller.  **Never seen on a real unit** |
+| mikroBUS socket I²C | plug-in | depends on the Click board | Not reachable from the SoM on the X-EVK V2: the socket I²C sits behind its own level shifter whose module side is not wired to any E1M-X I²C bus (I2C0..I2C3).  Carrier fix needed (#2645) |
 | M.2 E-key / M-key slot I²C | plug-in | depends on the card | Behind the PCIe / M.2 switch on I2C0.  Never scanned with a card fitted |
 | Camera modules | plug-in | depends on the sensor | On I2C2 (CAM0) or I2C3 (CAM1); see [`../v2n-camera-csi.md`](../v2n-camera-csi.md) |
 | USB-PD sink controller | CYPD3177 | n/a | Its I²C port is not connected to any host bus; it runs from its strap resistors |
@@ -262,8 +263,7 @@ UHS, no card-detect), `mmc2` = SDHI2 Wi-Fi SDIO.
 - Authoritative pad-by-pad routing (which E1M-X pad maps to which
   feature on the board).
 - The open I²C items listed under "Not on a scannable bus, or not
-  resolved" above (touch controller bus, mikroBUS I²C, PCIe / M.2 switch
-  enable polarity).
+  resolved" above (the J6 display and mikroBUS I²C carrier gaps).
 - Boot-strap dipswitch positions for V2N vs V2N-M1.
 
 When that lands, this doc becomes the SDK-side cheat sheet for

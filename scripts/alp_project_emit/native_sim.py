@@ -21,7 +21,7 @@ from . import _e1m_gpio_canonical, _e1m_x_gpio_canonical
 # native_sim overlay emission (canonical alp,pin-array on gpio-emul)
 # ---------------------------------------------------------------------
 #
-# Studio + `alp init` want a native_sim board overlay so a scaffolded GPIO
+# Studio and scaffolded projects want a native_sim board overlay so a scaffolded GPIO
 # app links + runs on `native_sim/native/64` (host emulation, emulated CI)
 # with no silicon.  Unlike `--emit dts-overlay` -- which stubs every
 # pin-array triplet at <&gpio0 0> pending the upstream SoM board file --

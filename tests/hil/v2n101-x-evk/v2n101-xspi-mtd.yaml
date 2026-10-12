@@ -16,9 +16,14 @@ ssh_command: |-
   for m in mtd0 mtd1; do
     awk -v m="$m:" '$1==m && $2!="00000000"{f=1} END{exit !f}' /proc/mtd && echo HIL_${m}_OK
   done
-  a=$(head -c 4194304 /dev/mtd0ro | md5sum)
-  b=$(head -c 4194304 /dev/mtd0ro | md5sum)
-  [ -n "$a" ] && [ "$a" = "$b" ] && echo HIL_MTD0_STABLE
+  # Read all of mtd0 (bl2): its size comes from /proc/mtd (0x60000 on V2N/V2M).
+  sz=$((0x$(awk '$1=="mtd0:"{print $2}' /proc/mtd)))
+  a=$(dd if=/dev/mtd0ro bs=4096 2>/dev/null | md5sum)
+  b=$(dd if=/dev/mtd0ro bs=4096 2>/dev/null | md5sum)
+  n=$(dd if=/dev/mtd0ro bs=4096 2>/dev/null | wc -c)
+  echo "HIL_MTD0_BYTES $n"
+  # d41d8cd98f00b204e9800998ecf8427e = md5 of empty input (failed read).
+  [ "$sz" -gt 0 ] && [ "$n" -eq "$sz" ] && [ "${a%% *}" != d41d8cd98f00b204e9800998ecf8427e ] && [ "$a" = "$b" ] && echo HIL_MTD0_STABLE
 
 serial:
   duration_s: 60

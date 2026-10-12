@@ -21,7 +21,7 @@
  * @par Presence is a SoM fact, not a SoC one.
  *      Whether a build has an on-module sensor comes from the SoM preset's
  *      `on_module` device population (e.g. `metadata/e1m_modules/E1M-AEN801.yaml`
- *      declares one; `E1M-NX9101.yaml` declares none) -- never from
+ *      declares one; a preset without it declares none) -- never from
  *      `<alp/soc_caps.h>` / `<alp/cap.h>`, which are generated per-SoC and
  *      would wrongly claim the sensor for every SoM sharing that die.
  *
@@ -93,8 +93,8 @@ extern "C" {
  * @return  @ref ALP_OK on a valid read.
  *          @ref ALP_ERR_INVAL when @p milli_c is NULL.
  *          @ref ALP_ERR_NOSUPPORT when this build has no on-module
- *                                 temperature sensor (e.g. E1M-NX9101, or
- *                                 any non-AEN target today), or when a
+ *                                 temperature sensor (any non-AEN
+ *                                 target today), or when a
  *                                 sensor is declared but no driver ever
  *                                 bound the device at all.
  *          @ref ALP_ERR_NOT_READY when a sensor is declared and a driver

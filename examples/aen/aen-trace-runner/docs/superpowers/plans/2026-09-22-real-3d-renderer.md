@@ -1,5 +1,7 @@
 # Trace Runner — real-3D renderer plan (2026-09-22)
 
+> **Status (2026-10-08): Landed** — the 3D renderer shipped in `examples/aen/aen-trace-runner` (#2452); sections 3-5 are superseded by `2026-09-22-a32-renderer.md`.
+
 Status: plan. Every number marked (M) is measured in `docs/2026-09-22-measurements.md`; every number marked (E) is an estimate to be replaced by the CP2/CP3 counters below.
 
 Core note (maintainer direction, 2026-09-22): bare-metal A32 is being brought up in parallel (BL33 payload under TF-A). Everything in T3-T6 is pure C and core-agnostic, so the same renderer can be retargeted to the A32 pair if the A32 probe (section 4) justifies it.

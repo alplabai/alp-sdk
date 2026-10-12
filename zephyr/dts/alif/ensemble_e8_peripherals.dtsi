@@ -254,6 +254,62 @@
 		status = "disabled";
 	};
 
+	/*
+	 * Always-on power-management register blocks (no driver binds them yet;
+	 * they are the plumbing the SoM power/quiesce layer (#2784) addresses by
+	 * DT instead of by a hard-coded literal).  Base + size are the Alif DFP
+	 * for the E8 part AE822FA0E5597 (Device/soc/AE822FA0E5597/include/
+	 * rtss_he/soc.h and rtss_hp/soc.h -- the same addresses from both M55
+	 * views): VBAT_BASE 0x1A609000 (VBAT_Type, 0x14), ANA_BASE 0x1A60A000
+	 * (ANA_Type, 0x44), STOP_MODE_BASE 0x1A60F000 (STOP_MODE_Type, 0x4).
+	 * VBAT overlaps the clock controller's own 0x1A609000/0x14 window
+	 * (ensemble_common.dtsi) by design: the clock driver and the power layer
+	 * touch different registers of the same block.  Always on, no clocks, no
+	 * pinctrl.
+	 */
+	vbat: vbat@1a609000 {
+		compatible = "alif,vbat";
+		reg = <0x1a609000 0x14>;
+	};
+
+	ana: ana@1a60a000 {
+		compatible = "alif,ana";
+		reg = <0x1a60a000 0x44>;
+	};
+
+	stop_mode: stop-mode@1a60f000 {
+		compatible = "alif,stop-mode";
+		reg = <0x1a60f000 0x4>;
+	};
+
+	/*
+	 * BKRAM -- the 4 KB Utility SRAM, always retained across STOP and reserved
+	 * for the SDK (the SoM power layer's wake record, #2784).  The
+	 * `zephyr,memory-region` property makes the Zephyr linker emit a NOLOAD
+	 * output section named ALP_BKRAM at this address, so nothing zeroes or loads
+	 * it at boot.
+	 *
+	 * Base and size: BENCH-VERIFIED on the E8 (E1M-AEN803 on an E1M-EVK, RAM-run,
+	 * 2026-10-09): 0x4902C000..0x4902CFFF is 4 KiB read/write (1024-word pattern,
+	 * 0 mismatches), does not alias at +0x800, PDM at 0x4902D000 is unaffected,
+	 * the contents survive AIRCR.SYSRESETREQ and are lost on a cold power cycle
+	 * (no backup supply).  Clock gate: BKRAM_CKEN = CLKCTL_PER_SLV (0x4902F000)
+	 * bit 4, reset value 0x00000010.  Retention: VBAT.RET_CTRL (0x1A60900C)
+	 * BKRAM_RET_MASK bit 0, BKRAM_RET_FORCE bit 1.
+	 * Also in the Alif DFP Debug/SVD/<part>_CM55_HE_View.svd as <memory
+	 * name="Backup_SRAM" start="0x4902C000" size="0x00001000" access="rw"/> for
+	 * the E1C, E3, E5 and E7; the E8 (AE822FA0E5597) SVD omits its <memory> list.
+	 * Survival across STOP itself is still the U8 bench test; E4 is unverified.
+	 */
+	bkram: memory@4902c000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x4902c000 0x1000>;
+		zephyr,memory-region = "ALP_BKRAM";
+		/* Normal, non-cacheable RAM: a record write must reach the SRAM itself,
+		 * never sit in a data cache across the STOP entry. */
+		zephyr,memory-attr = <DT_MEM_ARM_MPU_RAM_NOCACHE>;
+	};
+
 	lpgpio: gpio@42002000 {
 		compatible = "snps,designware-gpio";
 		reg = <0x42002000 0x1000>;
@@ -857,6 +913,12 @@
 	 * the always-on VBAT domain already has it running (read CCVR; if it never
 	 * advances, the VBAT gate is the cause).  Tier-2, INTERIM.
 	 */
+	/*
+	 * SECONDARY RTC (#2784): not trusted for time or accurate timed wake -- Alif
+	 * ER001 (A0: a STOP wake resets the prescaler), ER002 (A1: LFRC fallback) and
+	 * the bench SES's "[SES] No LF XTAL".  The primary RTC is the on-module
+	 * RV-3028 on BRD_I2C (INT -> P15_0 / LPGPIO0).
+	 */
 	rtc0: lprtc@42000000 {
 		compatible = "snps,dw-apb-rtc";
 		reg = <0x42000000 0x1000>;
@@ -902,6 +964,14 @@
 		channel = <0>;
 		clock-source = <0>;       /* 0 = 32 kHz VBAT LF source */
 		clock-frequency = <32768>;
+		/*
+		 * Explicit, like channels 1..3 below.  This node has been "okay" by
+		 * DT default since it landed (COUNTER_ALIF_LPTIMER is default y and
+		 * the hp_vision_check.sh peripheral audit allow-lists 0x42001000),
+		 * so "okay" keeps every build as it was; the power layer also
+		 * claims it as the alp,power-wake-timer chosen node.
+		 */
+		status = "okay";
 	};
 
 	/*
@@ -2129,6 +2199,17 @@
 
 	chosen {
 		zephyr,entropy = &se_trng;
+		/*
+		 * The always-on LPTIMER channel the SoM power layer arms as a STOP
+		 * wake source (#2784).  Plumbing only: nothing consumes it yet.
+		 * SHORT intervals only: it runs on the VBAT LF source, which on the
+		 * bench SES is the LFRC (about 5 % error; "[SES] No LF XTAL").  Long
+		 * intervals use the on-module RV-3028 countdown timer on RTC_ALARM
+		 * (P15_0 / LPGPIO0), the primary RTC wake source.
+		 * Consumers must check DT_NODE_HAS_STATUS_OKAY(DT_CHOSEN(alp_power_wake_timer)).
+		 * Dual-core ownership of this shared timer is deferred.
+		 */
+		alp,power-wake-timer = &lptimer0;
 	};
 };
 

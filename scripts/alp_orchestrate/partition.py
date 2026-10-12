@@ -562,7 +562,7 @@ def _resolve_flash_device(
         # non-Alif SoM, and any Alif SoC/variant that hasn't declared
         # one, short-circuits before this rule even runs -- see
         # `_candidate_regions()`). Mirrored here: refusing
-        # unconditionally would fire on every V2N/V2M/NX9101 preset's
+        # unconditionally would fire on every V2N/V2M preset's
         # `memory_map:` rows, none of which author `write_authority` at
         # all and none of which a customer can fix by authoring a field
         # this guard doesn't even apply to.

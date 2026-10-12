@@ -45,7 +45,7 @@
 # (measured via `--emit dts-partitions`) -- there is no free MRAM left
 # to place any of them, including `settings` / `app_data`.
 #
-# Real customer shipping variants fork this for V2N or i.MX 93
+# Real customer shipping variants fork this for V2N
 # boards; the SDK's declarative surface stays identical across
 # SoMs.
 libraries:

@@ -64,6 +64,13 @@ get_filename_component(_alp_sdk_yocto_root "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 target_include_directories(alp_sdk PRIVATE ${_alp_sdk_yocto_root}/src)
 unset(_alp_sdk_yocto_root)
 
+option(ALP_SDK_V2N_DOORBELL_RSP_CH8
+    "RZ/V2N: acknowledge the CM33 -> CA55 OpenAMP doorbell on Renesas' rsp_ch8_ns line (GIC_SPI 385) instead of MHU-B SWINT unit 12 (GIC_SPI 404). Must match the CM33 firmware (CONFIG_ALP_V2N_DOORBELL_RSP_CH8) and the kernel devicetree (ALP_V2N_DOORBELL_SPI).  Bench-pending; default OFF (404)."
+    OFF)
+if(ALP_SDK_V2N_DOORBELL_RSP_CH8)
+    target_compile_definitions(alp_sdk PRIVATE ALP_V2N_DOORBELL_RSP_CH8=1)
+endif()
+
 set(ALP_SDK_INFERENCE_AUTO_ORDER "" CACHE STRING
     "Comma-separated accelerator preference for ALP_INFERENCE_BACKEND_AUTO, best first (e.g. deepx_dxm1,drpai,cpu).  Generated from the SoM preset's inference.auto_order into local.conf (--emit yocto-conf) and forwarded by the alp-sdk recipe's EXTRA_OECMAKE.   Consumed only by the .alpmodel selector tiebreak; empty: the first fitting target wins.")
 if(ALP_SDK_INFERENCE_AUTO_ORDER)
@@ -291,10 +298,8 @@ target_sources(alp_sdk PRIVATE
     # dispatcher owns the public alp_gpu2d_* symbols (the split stub backend
     # is muted below via ALP_VENDOR_OVERRIDES_GPU2D); the portable
     # sw_fallback is a REAL pure-C fill/blit/blend (the same backend
-    # native_sim unit-tests + the E8 bench ran), so Linux apps --
-    # including the i.MX 93 A55 cluster, whose PXP/libg2d silicon
-    # backend is future work (see ADR 0008) -- get working 2D ops
-    # rather than NOSUPPORT.  A future Linux 2D-engine backend
+    # native_sim unit-tests + the E8 bench ran), so Linux apps get
+    # working 2D ops rather than NOSUPPORT.  A future Linux 2D-engine backend
     # registers at priority 100 above it, exactly like the
     # yocto_drv.c backends of the classes above.
     ${CMAKE_CURRENT_SOURCE_DIR}/../gpu2d_dispatch.c
@@ -570,6 +575,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set(_alp_sdk_link_visibility PUBLIC)
     endif()
 
+    # Each pkg-config module linked below is also recorded on the global
+    # ALP_SDK_PC_REQUIRES property: alp-sdk.pc names them in Requires: so a
+    # non-CMake static link resolves them from its sysroot (#2829).
+
+    # The backends/<class>/yocto_drv.c sources below each sit in their own TU
+    # beside the class's catch-all stub, so a static libalp_sdk.a would drop
+    # them.  The top-level alp_sdk_force_static_backends() call keeps them
+    # (cmake/alp-sdk-static-backends.cmake, #2790); nothing to add here.
+
     target_sources(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2c.c
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi.c
@@ -587,6 +601,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # gated below behind pkg_check_modules(ALSA), mirroring audio_yocto.c.)
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/can/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/pwm/yocto_drv.c
+        # Camera: backends/camera/yocto_drv.c is the V4L2 + media-controller
+        # backend (sensor found via the alp-camera<N> DT alias, link chain
+        # walked to the capture node).  Self-gates on __linux__ and
+        # registers at priority 100 above the zephyr_stub wildcard.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/camera/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/adc/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/counter/yocto_drv.c
         # RTC + WDT are now REAL registry backends (#33), not stubs:
@@ -641,30 +660,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # unconditionally above) so request_sleep no longer returns
         # ALP_ERR_NOSUPPORT on a Linux build.  Self-gates on __linux__.
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/power/yocto_drv.c
-        # <alp/rpc.h> is now a REAL registry backend (#33), not the old
-        # rpc_yocto.c direct-impl: backends/rpc/yocto_drv.c is the
-        # userspace RPMsg backend.  It self-gates on __linux__ and gates
-        # its full OpenAMP implementation behind ALP_SDK_HAVE_OPENAMP_USERLAND
-        # (set in the open-amp pkg block below); the NOSUPPORT fallback is
-        # compile-tested on every Linux build so apps that don't pull in
-        # OpenAMP still link cleanly.  The dispatcher + sw_fallback +
-        # backend.c are pulled in unconditionally above; rpc_dispatch.c
-        # owns the public alp_rpc_* symbols (the split stub backend is muted via
-        # ALP_VENDOR_OVERRIDES_RPC in the unconditional block above).
-        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/yocto_drv.c
-        # RZ/V2N Path B (#683): backends/rpc/yocto_uio_drv.c is the SAME
-        # <alp/rpc.h> surface over userspace open-amp/libmetal UIO ATTACH
-        # (no /dev/rpmsg* on this BSP) -- see that file's own header
-        # comment for the full attach-flow design.  Registers at
-        # priority 150 with an EXACT silicon_ref ("renesas:rzv2n:n44"),
-        # so it only overrides yocto_drv.c above on a V2N-targeted
-        # build; every other Linux target keeps using the /dev/rpmsg*
-        # backend unchanged.  Shares the SAME ALP_SDK_HAVE_OPENAMP_USERLAND
-        # gate + open-amp/libmetal pkg-config find below -- no separate
-        # wiring needed; unconditionally listed here (like yocto_drv.c)
-        # so a non-V2N Linux build still compile-tests its NOSUPPORT
-        # fallback branch.
-        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/yocto_uio_drv.c
+        # <alp/rpc.h>: the real Linux backends (backends/rpc/yocto_drv.c,
+        # yocto_uio_drv.c) are added only when open-amp/libmetal are found,
+        # in the OPENAMP_USER_FOUND block below.  The dispatcher +
+        # sw_fallback + backend.c are pulled in unconditionally above;
+        # rpc_dispatch.c owns the public alp_rpc_* symbols (the split stub
+        # backend is muted via ALP_VENDOR_OVERRIDES_RPC in the unconditional
+        # block above).
     )
     # Only the I2C/SPI/UART/GPIO wrappers are Linux-gated here; the
     # can/pwm/adc/i2s/counter/rtc/wdt overrides moved to the unconditional
@@ -684,9 +686,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # OpenAMP user-space libraries (libmetal + open-amp).  On Yocto
     # these come from meta-openamp; on plain Debian/Ubuntu install
     # libopen-amp-dev + libmetal-dev.  When the host doesn't have them
-    # the backends/rpc/yocto_drv.c file falls back to NOSUPPORT stubs at
-    # compile time (gated on ALP_SDK_HAVE_OPENAMP_USERLAND) so the SDK
-    # still links cleanly.
+    # the rpc yocto backends are not compiled in, so the registry selects
+    # backends/rpc/sw_fallback.c (the dispatcher never falls back after a
+    # failed open(), so a registered NOSUPPORT backend would hide it).
     find_package(PkgConfig)
     if(PkgConfig_FOUND)
         pkg_check_modules(OPENAMP_USER IMPORTED_TARGET open-amp libmetal)
@@ -695,6 +697,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 ALP_SDK_HAVE_OPENAMP_USERLAND=1
             )
             target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} PkgConfig::OPENAMP_USER)
+            set_property(GLOBAL APPEND PROPERTY ALP_SDK_PC_REQUIRES open-amp libmetal)
+            # RPMsg /dev/rpmsg* backend, plus RZ/V2N Path B (#683):
+            # yocto_uio_drv.c is the same <alp/rpc.h> surface over userspace
+            # open-amp/libmetal UIO ATTACH.  It registers at priority 150
+            # with an EXACT silicon_ref ("renesas:rzv2n:n44"), so it only
+            # overrides yocto_drv.c on a V2N-targeted build.
+            target_sources(alp_sdk PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/yocto_drv.c
+                ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rpc/yocto_uio_drv.c
+            )
         else()
             message(STATUS
                 "alp-sdk yocto: open-amp/libmetal not found via pkg-config; "
@@ -727,6 +739,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 ${CMAKE_CURRENT_SOURCE_DIR}/../backends/mqtt/yocto_drv.c
             )
             target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} PkgConfig::MOSQUITTO)
+            set_property(GLOBAL APPEND PROPERTY ALP_SDK_PC_REQUIRES libmosquitto)
         else()
             message(STATUS
                 "alp-sdk yocto: libmosquitto not found via pkg-config; "
@@ -758,6 +771,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 ${CMAKE_CURRENT_SOURCE_DIR}/../backends/security/yocto_drv.c
             )
             target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} PkgConfig::OPENSSL)
+            set_property(GLOBAL APPEND PROPERTY ALP_SDK_PC_REQUIRES libssl libcrypto)
         else()
             message(STATUS
                 "alp-sdk yocto: OpenSSL (libssl + libcrypto) not found via pkg-config; "
@@ -797,6 +811,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             # above -- audio_dispatch.c owns alp_audio_* whether or not ALSA is
             # present; this block only adds the real ALSA backend + link.)
             target_link_libraries(alp_sdk ${_alp_sdk_link_visibility} PkgConfig::ALSA)
+            set_property(GLOBAL APPEND PROPERTY ALP_SDK_PC_REQUIRES alsa)
         else()
             message(STATUS
                 "alp-sdk yocto: ALSA libasound not found via pkg-config; "
@@ -833,6 +848,7 @@ if(ALP_SDK_USE_GPU2D_GLES)
             set(_alp_gles_vis PUBLIC)
         endif()
         target_link_libraries(alp_sdk ${_alp_gles_vis} PkgConfig::ALP_EGL PkgConfig::ALP_GLESV2)
+        set_property(GLOBAL APPEND PROPERTY ALP_SDK_PC_REQUIRES egl glesv2)
         unset(_alp_gles_vis)
     elseif(ALP_SDK_GPU2D_GLES_REQUIRED)
         message(FATAL_ERROR

@@ -3,20 +3,19 @@
  *
  * Portable TFLM-backed inference backend.  Registered at
  * priority 50 against silicon_ref="*" so it wins everywhere
- * unless a vendor-specific NPU backend (ethos_u_aen on AEN,
- * ethos_u_n93 on i.MX 93) registers at priority 100 on the
- * matching silicon.
+ * unless a vendor-specific NPU backend (ethos_u_aen on AEN)
+ * registers at priority 100 on the matching silicon.
  *
  * Why C++?  TFLM exposes tflite::MicroInterpreter +
  * tflite::MicroMutableOpResolver only via its C++ surface; the
  * C wrapper in TFL is for the full runtime, not the micro
  * variant.  The .cpp file keeps the binding simple and lets
- * the AEN / N93 Ethos-U backends layer on top by reusing
+ * the AEN Ethos-U backend layers on top by reusing
  * AddEthosU() against the same op resolver.
  *
  * Variant logging
  *   The build-time CPU-kernel + Ethos-U variant pair (NEON /
- *   Helium / scalar-ref and U55 / U65 / U85 / none) get logged
+ *   Helium / scalar-ref and U55 / U85 / none) get logged
  *   once on first open() so a HIL operator running on a multi-
  *   variant SoM (E4 / E6 / E8 ship U55 pair + U85) can confirm
  *   which kernel set the build linked against.
@@ -71,12 +70,11 @@ extern "C" {
  * alp_inference_tflm_ops + the variant helpers.  Including it here is
  * load-bearing: without the prior extern "C" declaration the `const`
  * vtable definition below gets C++ INTERNAL linkage and every
- * ethos_u_aen / ethos_u_n93 build fails to link with undefined
+ * ethos_u_aen build fails to link with undefined
  * references to alp_inference_tflm_ops. */
 #include "tflm_shared.h"
 
-#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) || \
-    defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
+#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN)
 /* The Register_ETHOSU() registration header lives at kernels/ethosu.h in the
  * pinned (Zephyr v4.4) tflite-micro fork -- NOT kernels/ethos_u/ethosu.h.  The
  * fork keeps the kernel implementation in kernels/ethos_u/ethosu.cc but the
@@ -94,8 +92,6 @@ namespace
 
 #if defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85)
 constexpr const char *kEthosUVariantName = "ethos-u85";
-#elif defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65)
-constexpr const char *kEthosUVariantName = "ethos-u65";
 #elif defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55)
 constexpr const char *kEthosUVariantName = "ethos-u55";
 #else
@@ -271,7 +267,7 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 	 * src/inference_dispatch.c: a pinned open the serving backend
 	 * cannot honour returns NOSUPPORT).  This vtable serves the CPU
 	 * TFLM executor and -- when the Ethos-U op-resolver entry is
-	 * compiled in -- the ethos_u_aen / ethos_u_n93 registrations.
+	 * compiled in -- the ethos_u_aen registration.
 	 * DRP-AI3 and DEEPX DX-M1 are A55/Linux-side engines (issues
 	 * #58/#59): no Zephyr registry backend can ever serve those
 	 * pins, so reject them here instead of failing deep inside the
@@ -472,10 +468,10 @@ static void tflm_close(alp_inference_backend_state_t *state)
 }
 
 /* Shared ops vtable.  Exported via the C ABI as
- * alp_inference_tflm_ops so the ethos_u_aen / ethos_u_n93
- * backends can register against the same body without
+ * alp_inference_tflm_ops so the ethos_u_aen
+ * backend can register against the same body without
  * duplicating it -- the only thing that changes across the
- * three registrations is silicon_ref + vendor + priority. */
+ * registrations is silicon_ref + vendor + priority. */
 const alp_inference_ops_t alp_inference_tflm_ops = {
 	/* .open        */ tflm_open,
 	/* .num_inputs  */ tflm_num_inputs,

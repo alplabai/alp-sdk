@@ -148,7 +148,7 @@ the command's documented defaults.
 ### `tan new-som` -- scaffold metadata for a new SoM port
 
 ```bash
-tan new-som --sku E1M-NX9555 --soc-ref nxp:imx9:imx95 --family nxp-imx9
+tan new-som --sku E1M-V2N104 --soc-ref renesas:rzv2n:n44 --family renesas-rzv2n
 tan new-som               # interactive: prompts for every field
 ```
 
@@ -186,9 +186,9 @@ with an explicit list instead of dropping into the prompts.
 
 | Option | Meaning |
 |---|---|
-| `--sku` | New SoM SKU, e.g. `E1M-NX9555` |
-| `--soc-ref` | Silicon triple-colon ref, e.g. `nxp:imx9:imx95` |
-| `--family` | Human-readable family slug, e.g. `nxp-imx9` |
+| `--sku` | New SoM SKU, e.g. `E1M-V2N104` |
+| `--soc-ref` | Silicon triple-colon ref, e.g. `renesas:rzv2n:n44` |
+| `--family` | Human-readable family slug, e.g. `renesas-rzv2n` |
 | `--vendor` | Vendor display name for the SoC JSON (default: soc-ref vendor segment) |
 | `--display-name` | Preset display name (default derived from the SKU) |
 | `--inference-backend` | `ethos_u` / `drpai` / `deepx_dxm1` / `tbd` (default `tbd`) |

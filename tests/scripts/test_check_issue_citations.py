@@ -132,8 +132,8 @@ def test_landed_phrasing_is_not_flagged(tmp_path):
     mod = _load()
     _chip_yaml(
         tmp_path,
-        "pca9451a",
-        "chip_id: pca9451a\n"
+        "act8760",
+        "chip_id: act8760\n"
         "driver_status:    partial   # probe + raw R/W + per-rail voltage\n"
         "                            # (mV) on all 6 bucks + 5 LDOs now land\n"
         "                            # (issue #474).\n",

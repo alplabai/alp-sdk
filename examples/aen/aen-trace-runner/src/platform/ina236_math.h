@@ -2,15 +2,15 @@
  * (TI SBOSA81D), reading only the raw SHUNT (0x01) and BUS (0x02) registers.
  *
  * Deliberately does NOT go through the part's CALIBRATION/CURRENT/POWER
- * registers. The alp-sdk chips/ina236 driver this SDK build (alp-sdk-lcd)
- * ships has two real scaling bugs in that path (alp-sdk commit 38784b723,
- * not yet on alp-sdk dev/main, so alp-sdk-lcd still carries them):
- *   1. ina236_read_power_uw() applies the 1.6 mV bus LSB a second time on
+ * registers. Earlier revisions of the chips/ina236 driver had two scaling
+ * bugs in that path (fixed since, #2299):
+ *   1. ina236_read_power_uw() applied the 1.6 mV bus LSB a second time on
  *      top of the 32 that already carries it (eq. 4) -- 625x under-report.
- *   2. apply_calibration() never divides SHUNT_CAL by 4 for ADCRANGE=1
+ *   2. apply_calibration() never divided SHUNT_CAL by 4 for ADCRANGE=1
  *      (section 8.1.2) -- 4x high current/power on the fine range.
  * Computing P = V_bus * (V_shunt / R_shunt) straight from the two raw ADC
- * registers cannot inherit either bug -- there is no SHUNT_CAL in this path.
+ * registers needs no SHUNT_CAL at all, so it is independent of the driver's
+ * calibration path; it is kept as the cheap path for the HUD's ~10 Hz sample.
  *
  * Header-only + static inline: usable unmodified from both the target build
  * (platform/rail5v_power.c) and the host tests (tests/host/runner.sh's generic
@@ -65,10 +65,14 @@ static inline int32_t tr_ina236_power_mw(int32_t bus_mv, int32_t current_ua)
  * MODE[2:0]. Power-on reset 0x4127 = AVG 1: one 1.1 ms shunt conversion.
  * rail5v_power.c writes TR_INA236_CONFIG instead: ADCRANGE 0 (+-81.92 mV,
  * what tr_ina236_shunt_uv(.., false) assumes), AVG 128 (100b), VBUSCT =
- * VSHCT = 1.1 ms (100b), continuous shunt + bus (111b) -- one result is
- * the mean over 128 x 2.2 ms = 282 ms, just under the 320 ms poll. */
+ * 204 us (001b), VSHCT = 588 us (011b), continuous shunt + bus (111b) -- one
+ * result is the mean over 128 x (204 + 588) us = 101.4 ms, the 100 ms poll of the
+ * HUD's power graph. (It was VBUSCT = VSHCT = 1.1 ms: 282 ms, a 3 Hz graph.) Every
+ * field value is from TI SBOSA81D table 7-4 (AVG 100b = 128; VBUSCT/VSHCT 001b =
+ * 204 us, 011b = 588 us, 100b = 1100 us; MODE 111b = continuous shunt + bus),
+ * checked against the datasheet text, not recalled. */
 #define TR_INA236_REG_CONFIG 0x00u
-#define TR_INA236_CONFIG     0x4927u
+#define TR_INA236_CONFIG     0x485Fu
 #define TR_INA236_CONFIG_RW  0x1FFFu /* the bits a write sets: ADCRANGE..MODE */
 
 /* A CONFIG readback carries the settings this file's maths assumes. */

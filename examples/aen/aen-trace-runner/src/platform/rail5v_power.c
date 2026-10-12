@@ -7,7 +7,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
+#include "bus2_he.h"
 #include "ina236_math.h"
+#include "pwr_ring.h"
 #include "rail5v_power.h"
 
 /*
@@ -40,10 +42,18 @@
 #define REG_MFG_ID 0x3Eu
 #define MFG_ID_TI  0x5449u
 
-/* ~3 Hz: inside the task's 2-5 Hz band, off the ~30 Hz render hot path. */
-#define RAIL5V_PERIOD_MS 320
+/* 10 Hz: the HUD's power graph takes ~10 s of history at this rate (hud.h TR_PWR_N), one INA236
+ * result (ina236_math.h: 101.4 ms) a poll. Still off the ~30 Hz render hot path: most calls are
+ * a timestamp compare. */
+#define RAIL5V_PERIOD_MS 100
 
-volatile int32_t  tr_rail5v_avg_mw;
+volatile int32_t     tr_rail5v_avg_mw;
+static tr_pwr_ring_t g_ring;
+
+uint32_t tr_rail5v_ring_read(int16_t out[TR_PWR_N])
+{
+	return tr_pwr_ring_read(&g_ring, out);
+}
 volatile uint32_t tr_rail5v_config_rb;
 
 /* Polish round (silicon: one of three cold boots read 856-966 mW, the
@@ -56,9 +66,10 @@ volatile uint32_t tr_rail5v_config_rb;
  * phase fixed per boot. Not ADCRANGE (0 on every boot: a 4x error would be
  * 4x, not ~2.3x) and not CALIBRATION (never used); not the other I2C2
  * user either (the IMU is on this core, the Zephyr controller serialises
- * the transfers; the HP's i2c2 is disabled, fix round 6). Fix: AVG 128 --
- * each result the mean over 282 ms, i.e. over ~8 frames -- written and
- * read back at open, re-checked every poll. */
+ * the transfers; the HP's i2c2 is disabled, fix round 6). Fix: AVG 128, written
+ * and read back at open, re-checked every poll -- first with 1.1 ms conversions
+ * (each result the mean over 282 ms, ~8 frames), now (the 10 Hz power graph) with
+ * VBUSCT 204 us + VSHCT 588 us: ~101 ms a result (ina236_math.h). */
 static uint16_t g_cfg_rb;
 static uint8_t  g_cfg_rewrites;
 static bool     g_cfg_verified;
@@ -158,8 +169,9 @@ int tr_rail5v_open(void)
 
 	g_ok          = true;
 	g_have_sample = false;
+	tr_pwr_ring_init(&g_ring);
 	g_next_ms =
-	    k_uptime_get() + RAIL5V_PERIOD_MS; /* the first 282 ms average under the new CONFIG */
+	    k_uptime_get() + RAIL5V_PERIOD_MS; /* the first ~101 ms average under the new CONFIG */
 	printk("rail5v  : READY (+5V net, 0x%02x, CONFIG 0x%04x)\n", RAIL5V_ADDR, g_cfg_rb);
 	return 0;
 }
@@ -174,7 +186,17 @@ void tr_rail5v_poll(void)
 	if (now < g_next_ms) {
 		return;
 	}
-	g_next_ms = now + RAIL5V_PERIOD_MS;
+	g_next_ms = tr_pwr_next_deadline(
+	    g_next_ms, now, RAIL5V_PERIOD_MS); /* a true 10 Hz, not frame-quantised */
+
+	/* The HP holds I2C2 for its amp bring-up (bus2_he.h): no transfer at all -- never wait for
+	 * it, never touch the bus -- the last average stays (the HUD marks it "--" for as long as
+	 * the bus is away) and the graph gets a gap for this slot. Every other sample the poll
+	 * cannot take below is a gap too: a missed sample is a hole in the graph, not a zero. */
+	if (!tr_bus2_he_owns()) {
+		tr_pwr_ring_push(&g_ring, TR_PWR_GAP);
+		return;
+	}
 
 	/* The part keeps its CONFIG across our resets but not its own (a
 	 * brown-out on the carrier's 3V3): re-checked every poll, rewritten
@@ -183,6 +205,7 @@ void tr_rail5v_poll(void)
 		(void)config_write();
 		g_cfg_rewrites = g_cfg_rewrites < 0xFFu ? g_cfg_rewrites + 1u : 0xFFu;
 		publish_config();
+		tr_pwr_ring_push(&g_ring, TR_PWR_GAP);
 		return;
 	}
 	publish_config();
@@ -193,6 +216,7 @@ void tr_rail5v_poll(void)
 		/* Leave the last good average on the HUD rather than blanking it;
 		 * a transient bus miss here does not touch imu.c's own fail
 		 * counter or vice versa -- each context gives up independently. */
+		tr_pwr_ring_push(&g_ring, TR_PWR_GAP);
 		return;
 	}
 
@@ -217,12 +241,17 @@ void tr_rail5v_poll(void)
 	 * ramp noise: skip it entirely (no seed, no EMA update, same as an
 	 * I2C-read miss just above) rather than let it corrupt the average. */
 	if (bus_mv < 4500) {
+		tr_pwr_ring_push(&g_ring, TR_PWR_GAP);
 		return;
 	}
 	int32_t shunt_uv =
 	    tr_ina236_shunt_uv(shunt_raw, false /* ADCRANGE=0, checked in CONFIG this poll */);
 	int32_t current_ua = tr_ina236_current_ua(shunt_uv, RAIL5V_SHUNT_OHMS);
 	int32_t sample_mw  = tr_ina236_power_mw(bus_mv, current_ua);
+
+	tr_pwr_ring_push(
+	    &g_ring,
+	    sample_mw); /* the graph shows the raw sample; the EMA below is the "5V .. mW" line */
 
 	if (!g_have_sample) {
 		tr_rail5v_avg_mw = sample_mw; /* seed, not a slow climb from 0 (fix round 8 item 5) */

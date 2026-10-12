@@ -110,7 +110,6 @@ metadata/
 │   │                                            #  no `board_id:` block here.
 │   ├── v2n/hw-revisions.yaml                   # V2N family revs (same: no board_id)
 │   ├── v2n-m1/hw-revisions.yaml                # V2N-M1 family revs (mirrors V2N + DEEPX)
-│   ├── imx93/hw-revisions.yaml                 # i.MX 93 family revs (same: no board_id)
 │   └── E1M-AEN801.yaml                     # MPN preset; `default_hw_rev: r2`
 │                                                #  points into the family table.
 └── boards/

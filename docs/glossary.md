@@ -126,8 +126,8 @@ stages under `<alp/dsp.h>` (standalone) and
 
 ## E-K
 
-**E1M** -- 35 × 35 mm SoM form factor (312 pads).  AEN + i.MX 93
-families ship in this size.
+**E1M** -- 35 × 35 mm SoM form factor (312 pads).  The AEN
+family ships in this size.
 
 **E1M-X** -- 45 × 65 mm SoM form factor (496 pads).  V2N family.
 
@@ -135,8 +135,7 @@ families ship in this size.
 bring-up.  Two flavours: E1M-EVK (35 × 35) and E1M-X-EVK (45 × 65).
 
 **Ethos-U** -- Arm's micro-NPU IP.  AEN modules carry Ethos-U55 on
-every SKU plus Ethos-U85 on the E4/E6/E8 silicon (AEN401/601/801/803);
-N93 modules carry Ethos-U65.
+every SKU plus Ethos-U85 on the E4/E6/E8 silicon (AEN401/601/801/803).
 
 **GPU2D** -- 2D compositing accelerator (alpha blending, rotation,
 scaling) for OLED/TFT pipelines.  AEN's "GPU2D" is the TES **D/AVE
@@ -242,7 +241,7 @@ lives at `zephyr/sysbuild/aen/sysbuild.conf`.
 to configure Ethernet PHYs.
 
 **Mender** -- The OTA update system used on Yocto-side E1M
-modules (V2N, V2N-M1, i.MX 93).  Zephyr-side equivalent
+modules (V2N, V2N-M1).  Zephyr-side equivalent
 deferred to v1.1 per [ADR 0009](adr/0009-mender-zephyr-client-deferred.md).
 
 **`metadata/`** -- Repo subtree carrying chip manifests, SoC
@@ -320,7 +319,7 @@ host reflash the on-module GD32G553 over three GPIOs -- see
 flow.
 
 **Silicon ref** -- Triple-colon string identifying SoC silicon
-(e.g. `renesas:rzv2n:n44`, `alif:ensemble:e7`, `nxp:imx9:imx93`).
+(e.g. `renesas:rzv2n:n44`, `alif:ensemble:e7`).
 Used in the per-SKU SoM preset (`E1M-<MPN>.yaml`) and
 `<alp/soc_caps.h>` selection.
 
@@ -331,8 +330,8 @@ around (`AE302F80F55D5LE` for `E1M-AEN301`, `R9A09G056N44GBG` for
 active SoC variant in `metadata/socs/<vendor>/<family>/<part>.json`
 without scanning the reverse `alp_module_skus[]` arrays.  Alp-set
 on released presets; customers don't write it.  `TBD` is honoured
-per the no-inventing-values rule (e.g. the current `E1M-NX9101`
-preset).
+per the no-inventing-values rule (e.g. a preset whose
+variant is not yet written down).
 
 **SKU** -- Stock-Keeping Unit.  In Alp terminology: an MPN that
 identifies a specific SoM configuration (e.g. `E1M-V2N101`).

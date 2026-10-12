@@ -35,7 +35,6 @@ _SOC_FAMILY_TOKEN: dict[str, str] = {
     "aen":    "alif_ensemble",
     "v2n":    "renesas_rzv2n",
     "v2n-m1": "renesas_rzv2n",     # DEEPX add-on; HW-acc tokens still resolve via host family.
-    "imx93":  "nxp_imx9",
 }
 
 

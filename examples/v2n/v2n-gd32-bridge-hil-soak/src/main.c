@@ -39,7 +39,7 @@
  * (test pass/fail/skip, negotiated features and payload ceiling, ATTN
  * state, READ2 index/dropped/gaps, soak cycles/errors/timeouts/elapsed) in
  * the `rsctbl` window (A55 0x4F700F00), just below the liveness beacon the
- * provisioning `cm33_running` check reads at 0x4F700FF0.  Layout:
+ * provisioning `cm33_running` check reads (amp_beacon.h).  Layout:
  * <alp/protocol/gd32_bridge_results.h>; reader:
  * scripts/bench/v2n/read_gd32_results.py or the
  * tests/hil/v2m103-x-evk/v2m103-gd32-bridge-results.yaml spec.  The SRAM0
@@ -85,6 +85,54 @@ static void beacon_tick(struct k_timer *t)
 	alp_gd32_results_beacon_tick(RESULTS_WINDOW);
 }
 K_TIMER_DEFINE(beacon_timer, beacon_tick, NULL);
+
+#ifdef CONFIG_CPU_CORTEX_M
+/* Fatal-error trail.  This image has no console, so a fault (the usual
+ * suspect: a stack overflow on the main thread) used to look like a silent
+ * freeze -- the heartbeat just stopped.  Overriding Zephyr's weak
+ * k_sys_fatal_error_handler() lets us leave the faulting PC/LR/xPSR and the
+ * SCB fault status in the `rsctbl` window (layout: alp_gd32_fault_t) for
+ * `read_gd32_results.py --fault`, then park the core with IRQs off, exactly
+ * as the default handler would.  Keep it to low-risk reads (thread name, current
+ * thread, uptime) and take no locks and make no blocking calls: the kernel
+ * state may be what is broken. */
+static uint32_t fault_thread_hash(void)
+{
+	const char *n = k_thread_name_get(k_current_get());
+	uint32_t    h = 2166136261u; /* FNV-1a 32 */
+
+	for (; n != NULL && *n != '\0'; ++n) {
+		h = (h ^ (uint8_t)*n) * 16777619u;
+	}
+	return h;
+}
+
+void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
+{
+	volatile const uint32_t *scb =
+	    (volatile const uint32_t *)0xE000ED28u; /* CFSR, HFSR, DFSR, MMFAR, BFAR */
+	alp_gd32_fault_t f = {
+		.reason      = reason,
+		.cfsr        = scb[0],
+		.hfsr        = scb[1],
+		.mmfar       = scb[3],
+		.bfar        = scb[4],
+		.thread_hash = fault_thread_hash(),
+		.uptime_ms   = (uint32_t)k_uptime_get(),
+		.sp          = (uint32_t)(uintptr_t)esf,
+	};
+
+	if (esf != NULL) {
+		f.pc   = esf->basic.pc;
+		f.lr   = esf->basic.lr;
+		f.xpsr = esf->basic.xpsr;
+	}
+	(void)irq_lock();
+	alp_gd32_results_fault_publish(RESULTS_WINDOW, &f);
+	for (;;) {
+	}
+}
+#endif /* CONFIG_CPU_CORTEX_M */
 
 /* The working copy; publish_results() pushes it to Linux under the seqlock. */
 static alp_gd32_results_t rec;
@@ -229,7 +277,9 @@ static bool t_reset_reason(soak_stat_t *st)
 	return true;
 }
 
-/* 0x10/0x11 GPIO_READ + GPIO_WRITE.  mask=0 makes the write a
+/* 0x10/0x11 GPIO_READ + GPIO_WRITE.  The read names every ROUTED line
+ * (GD32G553_GPIO_ROUTED_MASK): bit 8 = E1M IO24 is not wired to the GD32
+ * (gh#298), so a literal all-ones mask would draw STATUS_IO.  mask=0 makes the write a
  * provable no-op (atomically changes nothing) while still pushing the
  * full request/decode/dispatch path through the wire -- the soak must
  * not flip real supervisor pads (camera LDOs, REG_ONs, SE_RST live
@@ -237,7 +287,7 @@ static bool t_reset_reason(soak_stat_t *st)
 static bool t_gpio(soak_stat_t *st)
 {
 	uint32_t     levels = 0;
-	alp_status_t s      = gd32g553_gpio_read(&ctx, 0xFFFFFFFFu, &levels);
+	alp_status_t s      = gd32g553_gpio_read(&ctx, GD32G553_GPIO_ROUTED_MASK, &levels);
 	if (s != ALP_OK) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "read status=%d", (int)s);
@@ -283,11 +333,30 @@ static bool t_pwm_set_get(soak_stat_t *st)
 	return ok;
 }
 
-/* 0x26 PWM_SINGLE_PULSE -- one 1 us one-shot on PWM1.  Status-only
- * here; the pulse itself is a scope row in the HIL-PLAN. */
+/* 0x26 PWM_SINGLE_PULSE -- one 1 us one-shot on PWM4 (TIMER7, GD32 pad
+ * PC10).  Single-pulse flips the WHOLE timer, so the firmware answers
+ * STATUS_BUSY while a sibling on the same timer is live; PWM0..3 share
+ * TIMER0 with the pwm_set_get row (which never releases PWM0), hence a
+ * TIMER7 channel nothing else claims.  Status-only here; the pulse itself
+ * is a scope row in the HIL-PLAN.
+ *
+ * The GD32 is NOT reset between CM33 images, so a previous app may still
+ * hold the TIMER7 claim (the functional app's scope loop leaves PWM7
+ * running).  Stop PWM4..PWM7 first: PWM_SET with period 0 / duty 0
+ * releases the claim.  Firmware before protocol minor 17 has no stop, so
+ * a channel a previous image left running cannot be released: there a
+ * BUSY answer is reported as a SKIP (see row_is_skipped), not a failure. */
+static bool pwm_single_pulse_skipped;
+
 static bool t_pwm_single_pulse(soak_stat_t *st)
 {
-	const alp_status_t s = gd32g553_pwm_single_pulse(&ctx, 1u, 1000u);
+	for (uint8_t ch = 4u; ch <= 7u; ch++) {
+		(void)gd32g553_pwm_stop(&ctx, ch);
+	}
+	const alp_status_t s = gd32g553_pwm_single_pulse(&ctx, 4u, 1000u);
+	pwm_single_pulse_skipped =
+	    s == ALP_ERR_BUSY && ctx.version.minor < GD32G553_PWM_STOP_MIN_PROTOCOL_MINOR;
+	if (pwm_single_pulse_skipped) return true;
 	if (s != ALP_OK) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "status=%d", (int)s);
@@ -298,9 +367,9 @@ static bool t_pwm_single_pulse(soak_stat_t *st)
 
 /* 0x23/0x24/0x25 PWM capture begin/read/end on PWM2.  Nothing drives
  * the pad on the bench, so READ legitimately reports "no edges yet"
- * -- the firmware maps an empty capture ring to NOSUPPORT today (the
- * input pad routing is a known follow-up), so OK and NOSUPPORT both
- * pass; any other status (or a failing begin/end) is a real fault. */
+ * -- the firmware answers NOT_READY for an empty capture ring (and
+ * NOSUPPORT where the input pad routing is absent), so OK, NOT_READY
+ * and NOSUPPORT all pass; any other status (or a failing begin/end) is a real fault. */
 static bool t_pwm_capture(soak_stat_t *st)
 {
 	alp_status_t s = gd32g553_pwm_capture_begin(&ctx, 2u, 2u /* both edges */);
@@ -311,7 +380,7 @@ static bool t_pwm_capture(soak_stat_t *st)
 	}
 	uint32_t period = 0, pulse = 0;
 	s = gd32g553_pwm_capture_read(&ctx, 2u, &period, &pulse);
-	if (s != ALP_OK && s != ALP_ERR_NOSUPPORT) {
+	if (s != ALP_OK && s != ALP_ERR_NOT_READY && s != ALP_ERR_NOSUPPORT) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "read status=%d", (int)s);
 		(void)gd32g553_pwm_capture_end(&ctx, 2u);
@@ -507,7 +576,7 @@ static bool t_adc_stream2(soak_stat_t *st)
 }
 
 /* v0.15 BATCH (0x04): up to 16 allow-listed sub-operations in ONE SPI
- * transaction pair.  Here: PING + a full-mask GPIO_READ + COUNTER_READ,
+ * transaction pair.  Here: PING + a routed-mask GPIO_READ + COUNTER_READ,
  * i.e. three opcodes for one round trip.  The reply is self-delimiting
  * (executed:u8 then {status, len, payload} per op) and the driver has
  * already cross-checked every length against the request, so the row only
@@ -517,7 +586,12 @@ static bool t_batch(soak_stat_t *st)
 {
 	if ((ctx.granted & GD32G553_LINK_FEAT_BATCH) == 0u) return true;
 
-	const uint8_t       gpio_args[4]    = { 0xFFu, 0xFFu, 0xFFu, 0xFFu }; /* mask: all lines */
+	/* Routed lines only (little-endian): a batch sub-op bypasses the driver's
+	 * IO24 refusal, and the bridge would answer STATUS_IO and stop the batch. */
+	const uint8_t       gpio_args[4]    = { (uint8_t)GD32G553_GPIO_ROUTED_MASK,
+		                                    (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 8),
+		                                    (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 16),
+		                                    (uint8_t)(GD32G553_GPIO_ROUTED_MASK >> 24) };
 	const uint8_t       counter_args[1] = { 0u };
 	uint8_t             gpio_reply[4], counter_reply[4];
 	gd32g553_batch_op_t ops[3] = {
@@ -558,7 +632,7 @@ static bool t_batch(soak_stat_t *st)
 /* fw v0.2.8 converter-ownership guard -- the targeted probe for the
  * delta-review fix: while a stream owns an ADC converter, a single-
  * shot ADC_READ on EITHER logical channel of that converter must be
- * REFUSED (ALP_ERR_IO on the wire) instead of silently re-pointing
+ * REFUSED (STATUS_BUSY on the wire, ALP_ERR_BUSY) instead of silently re-pointing
  * routine rank 0 out from under the stream's DMA; a read on a
  * DIFFERENT converter must keep working; and the refusal must not be
  * sticky after STREAM_END.  Channel pairs per converter: ch0/1 ->
@@ -583,10 +657,10 @@ static bool t_adc_stream_guard(soak_stat_t *st)
 	const alp_status_t s_end   = gd32g553_adc_stream_end(&ctx, 0u);
 	const alp_status_t s_after = gd32g553_adc_read(&ctx, 1u, 1u, mv); /* unstuck?       */
 
-	if (s_sib != ALP_ERR_IO) {
+	if (s_sib != ALP_ERR_BUSY) {
 		st->last_status = (int)s_sib;
 		SOAK_FAIL(st,
-		          "sibling read during stream answered %d (want ALP_ERR_IO: converter owned)",
+		          "sibling read during stream answered %d (want ALP_ERR_BUSY: converter owned)",
 		          (int)s_sib);
 		return false;
 	}
@@ -858,7 +932,7 @@ static bool t_timer_sync(soak_stat_t *st)
  * own HIL rows (they tear down this very link). */
 static bool t_power_mode(soak_stat_t *st)
 {
-	const alp_status_t s = gd32g553_power_mode_set(&ctx, 0u, 0u, 0u);
+	const alp_status_t s = gd32g553_set_power_mode(&ctx, 0u, NULL);
 	if (s != ALP_OK) {
 		st->last_status = (int)s;
 		SOAK_FAIL(st, "status=%d", (int)s);
@@ -1001,6 +1075,9 @@ static struct {
 
 #define SOAK_TEST_COUNT (sizeof tests / sizeof tests[0])
 
+/* fail_mask is one bit per row of tests[]; a 33rd row would not be reported. */
+_Static_assert(SOAK_TEST_COUNT <= 32u, "soak table exceeds the 32-bit fail_mask");
+
 /* A self-gating v0.15 row whose feature the peer did not grant "passes" by
  * returning true without touching the wire.  Linux sees that as a SKIP, not
  * a PASS, so a v0.14 bridge cannot look like it soaked the v0.15 wire. */
@@ -1008,6 +1085,7 @@ static bool row_is_skipped(bool (*fn)(soak_stat_t *))
 {
 	if (fn == t_adc_stream2) return (ctx.granted & GD32G553_LINK_FEAT_ADC_STREAM2) == 0u;
 	if (fn == t_batch) return (ctx.granted & GD32G553_LINK_FEAT_BATCH) == 0u;
+	if (fn == t_pwm_single_pulse) return pwm_single_pulse_skipped;
 	return false;
 }
 
@@ -1031,8 +1109,13 @@ static void publish_results(uint32_t cycle, int64_t start_ms)
 	if (ctx.attn_unusable) rec.flags |= ALP_GD32_RESULTS_FLAG_ATTN_FALLBACK;
 	if (batch_last_ok) rec.flags |= ALP_GD32_RESULTS_FLAG_BATCH_OK;
 	if (stream2_last_ok) rec.flags |= ALP_GD32_RESULTS_FLAG_STREAM2_OK;
-	rec.read2_dropped  = read2_dropped_total;
-	rec.read2_gaps     = ctx.stream2_gaps;
+	rec.read2_dropped = read2_dropped_total;
+	rec.read2_gaps    = ctx.stream2_gaps;
+	/* One bit per tests[] row that has failed at least once since start. */
+	rec.fail_mask = 0u;
+	for (unsigned i = 0; i < SOAK_TEST_COUNT; ++i) {
+		if (tests[i].stat.fail != 0u) rec.fail_mask |= 1u << i;
+	}
 	rec.soak_cycles    = cycle;
 	rec.soak_errors    = soak_errors;
 	rec.soak_timeouts  = ctx.attn_timeouts;

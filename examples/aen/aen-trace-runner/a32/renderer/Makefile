@@ -24,21 +24,34 @@ else
 NAME     = renderer
 VDEFS    = -DRENDER_DL_GOLDEN=0
 endif
-O        = build-$(V)
+# TR_CAM_ROTATE (0, 90 or 270; empty = src/vision/cam_rot.h's default): the layout
+# of the camera area before the HP has published a view (render.c video_frame_state()).
+# Once it publishes, the HP's own rotation wins, so this only decides what the first
+# frames show; build it as the HE and HP are built (build-release.sh passes the HE's).
+TR_CAM_ROTATE ?=
+ifneq ($(TR_CAM_ROTATE),)
+ROT_DEFS = -DTR_CAM_ROTATE=$(TR_CAM_ROTATE)
+endif
+O        = build-$(V)$(if $(TR_CAM_ROTATE),-r$(TR_CAM_ROTATE))
 # -ffp-contract=off on every renderer build (plan sec 5): no FMA drift vs host goldens.
 # ROPT: the image's optimisation; RASTER_OPT: r3d_raster.c's (the span / row /
 # setup kernels), -O3 -funroll-loops as measured on silicon (a32/payload-isa,
 # 2026-09-23: row loop 137.6 -> 107.2 cyc/row, setup 1661 -> 1414 cyc/tri,
 # Gouraud 9 px span 270 -> 255 cyc vs -O2). Not the whole image: at -O3
-# -funroll-loops everywhere __bss_end lands 1.9 KB under the DL (0x02580000).
+# -funroll-loops everywhere the image grows further. The cap on __bss_end is 0x025C0000
+# (renderer.ld asserts it); with HOT_OPT below, Arm GNU 13.2.rel1 lands at 0x02583108.
 # tests/host/runner.sh builds the A32 qemu r3d tests' r3d_raster.c at the same
 # RASTER_OPT. A/B: make ROPT=... RASTER_OPT=...; docs/superpowers/specs/
 # 2026-09-23-a32-isa-opportunities.md.
 ROPT       ?= -O2
 RASTER_OPT ?= -O3 -funroll-loops
+# render.o (the band copy-out, video panel, overlay) and cam_pip.o (the camera picture resample)
+# at plain -O3: bit-identical (tests/host/runner.sh builds test_a32_*.c at this -O3 under
+# qemu-arm and holds it to the goldens). Watch __bss_end against the 0x025C0000 cap.
+HOT_OPT    ?= -O3
 CFLAGS  = -mcpu=cortex-a32 -marm -mfpu=neon-fp-armv8 -mfloat-abi=hard \
           $(ROPT) -ffreestanding -std=c11 -Wall -Wextra -Wdouble-promotion -Werror \
-          -ffp-contract=off -ffunction-sections -fdata-sections -DRENDER_A32=1 $(VDEFS) $(RENDER_DEFS) \
+          -ffp-contract=off -ffunction-sections -fdata-sections -DRENDER_A32=1 $(VDEFS) $(ROT_DEFS) $(RENDER_DEFS) \
           -I../common -I../../src/ipc -I../../src/render
 # --gc-sections: the golden build links the scene objects but never calls
 # them -- their zone textures (P15) must not count against its budget.
@@ -49,7 +62,7 @@ HDRS    = $(wildcard ../common/*.h ../../src/ipc/*.h ../../src/render/*.h ../../
           ../../tests/host/tr_golden_dl.h
 vpath %.c . ../../src/render ../../src/ipc ../common
 
-.PHONY: all golden prof clean
+.PHONY: all golden prof clean $(NAME).bin
 all: $(NAME).bin
 	$(SIZE) -A $(O)/$(NAME).elf | grep -E '^\.(image|data|bss) '
 	python3 ../stub/mkpayload.py info $(NAME).bin \
@@ -67,9 +80,13 @@ $(O)/start.o: start.S ../common/stub_abi.h | $(O)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(O)/r3d_raster.o: r3d_raster.c $(HDRS) | $(O)
 	$(CC) $(CFLAGS) $(RASTER_OPT) -c $< -o $@
+$(O)/render.o: render.c $(HDRS) | $(O)
+	$(CC) $(CFLAGS) $(HOT_OPT) -c $< -o $@
+$(O)/cam_pip.o: cam_pip.c $(HDRS) | $(O)
+	$(CC) $(CFLAGS) $(HOT_OPT) -c $< -o $@
 $(O)/%.o: %.c $(HDRS) | $(O)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(O):
 	mkdir -p $@
 clean:
-	rm -rf build-scene build-golden build-prof renderer.bin renderer-golden.bin renderer-prof.bin *.jlink
+	rm -rf build-scene* build-golden* build-prof* renderer.bin renderer-golden.bin renderer-prof.bin *.jlink

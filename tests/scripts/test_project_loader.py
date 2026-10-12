@@ -111,7 +111,7 @@ class TestLoaderContract(unittest.TestCase):
             self.assertIn("CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y", rv.stdout)
 
     def test_bad_sku_pattern_fails_schema(self) -> None:
-        """The schema enforces the E1M-(AEN|V2N|V2M|NX9)... SKU pattern;
+        """The schema enforces the E1M-(AEN|V2N|V2M)... SKU pattern;
         an arbitrary string must fail schema validation with a non-zero
         exit.  The loader surfaces schema violations via
         OrchestratorError ('schema validation failed' or
@@ -146,9 +146,9 @@ class TestLoaderContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """
                 som:
-                  sku: E1M-NX9999
+                  sku: E1M-V2N999
                 cores:
-                  m33:
+                  m33_sm:
                     os: zephyr
                     app: ./src
             """)

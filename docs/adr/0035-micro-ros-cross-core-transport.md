@@ -19,7 +19,7 @@ ADR 0018's flagship is a micro-ROS node on the Cortex-M33 (Zephyr) exchanging
 topics with ROS 2 on the Cortex-A55 (Yocto). What exists today:
 
 - `micro_ros_zephyr_module` is pinned in `west.yml` (Humble branch, revision
-  `cfbddc5e4334317a1036e883ce8f6af12b1da66a`, #370/#371), enabled by
+  `8477de124763e4701f8029d01216d6f6b524dde9`, #370/#371), enabled by
   `CONFIG_MICROROS=y`. `metadata/libraries/micro-ros.yaml` is Tier B.
 - ROS 2 Humble on the A side is grounded in `meta-alp-sdk`
   (`dynamic-layers/ros2-humble-layer/recipes-ros/alp-perception`). No micro-ROS **agent** is packaged; #372 is
@@ -139,7 +139,7 @@ Evidence must come from a real run, not simulation.
 
 ## Minimal implementation plan (no code in this ADR)
 
-1. West pin: **done** (`micro_ros_zephyr_module` at `cfbddc5e`, #370/#371).
+1. West pin: **done** (`micro_ros_zephyr_module` at `8477de12`, #370/#371).
 2. #2374: `meta-alp-sdk` DT reserved-memory + UIO nodes, gated, so the V2N A55
    has a peer.
 3. CM33: a transport shim behind `CONFIG_MICROROS` registering the

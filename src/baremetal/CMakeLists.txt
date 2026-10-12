@@ -9,8 +9,7 @@
 #     Used as the link-complete fall-back so a bare-metal app builds
 #     even with ALP_SOM=none.
 #   - vendors/<som>/ pulls in vendor-specific real impls (Alif HAL
-#     for ALP_SOM=aen, Renesas FSP for v2n, NXP MCUXpresso for
-#     imx93) when ALP_HAS_<VENDOR>_HAL is also ON.
+#     for ALP_SOM=aen, Renesas FSP for v2n) when ALP_HAS_<VENDOR>_HAL is also ON.
 #
 # When a vendor wrapper provides an alp_* symbol the corresponding
 # stub in src/common/stub/ is excluded via the

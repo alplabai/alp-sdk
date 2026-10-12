@@ -30,13 +30,15 @@ captured in [`docs/bring-up-v2n-m1.md`](../../docs/bring-up-v2n-m1.md).
 | [`v2n-pmic-inspect`](v2n-pmic-inspect/)                | Read-only-by-default inspector for the on-module ACT88760 / DA9292 / TPS628640 from a Linux/Yocto user-space app on the V2N A55; guarded `--write` actions go through the metadata-generated limits tables. No `testcase.yaml`; not built or gated by CI. |
 | [`v2n-gpu2d-compose`](v2n-gpu2d-compose/)              | Fill / blit / SRC_OVER-blend ARGB8888 layers through `<alp/gpu2d.h>`; Mali-G31 via EGL/GLES when the image has it, CPU fallback otherwise, and says which. `[UNTESTED]`; no `testcase.yaml`; not built or gated by CI. |
 | [`v2n-power-monitor`](v2n-power-monitor/)              | Live per-rail power table (3V3/1V8/VCAM3 via on-board INA236s, +5V via the INA228) from a Linux/Yocto user-space app on the V2N A55. No `testcase.yaml`; not built or gated by CI. |
+| [`v2n-soc-temperature`](v2n-soc-temperature/) | Print the SoC die (junction) temperature once per second from Linux/Yocto user space on the A55 via `alp_temperature_read_die_milli_c()` (not the on-module TMP112). |
+| [`v2n-two-models`](v2n-two-models/) | DRP-AI3 and DEEPX DX-M1 running two models at the same time on an E1M-V2M, one thread each, through `<alp/inference.h>`; `[UNTESTED on silicon]`. |
 
 ## Why a separate index here
 
 The top-level [`examples/README.md`](../README.md) lists every
 example.  This sub-index exists because V2N-specific examples
 need V2N-family hardware (GD32 supervisor, OPTIGA, dual PHY,
-on-module RTC) that doesn't exist on AEN or N93.  Keeping them
+on-module RTC) that doesn't exist on AEN.  Keeping them
 under `examples/v2n/` makes that constraint visible from the
 filesystem layout alone.  Cross-family examples (gpio, i2c,
 pwm, audio, ...) stay at the top level of `examples/`.

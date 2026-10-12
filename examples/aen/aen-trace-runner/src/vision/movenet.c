@@ -22,6 +22,34 @@ static uint32_t isqrt(uint32_t v)
 	return r;
 }
 
+/* The HP runs with the D-cache off (hp_vision/prj.conf), so every load from the camera pool
+ * (SRAM1) or the NPU arena (SRAM0) is its own bus transaction. Both stages below therefore
+ * pull what they read into the HP's DTCM (this file's statics live in .bss) in word bursts
+ * first and work from there. Output bytes are unchanged: tests/host/test_movenet_input_rot.c
+ * holds tr_movenet_input_rot() to the straight per-pixel loads it replaced. */
+/* bytes in, words out: not a strict-aliasing bet */
+typedef uint32_t __attribute__((may_alias)) word_t;
+
+static void burst_copy(void *dst, const void *src, uint32_t n)
+{
+	word_t       *d = dst;
+	const word_t *s = src;
+
+	if ((((uintptr_t)dst | (uintptr_t)src) & 3u) == 0u) {
+		for (; n >= 32u; n -= 32u, d += 8, s += 8) {
+			uint32_t a0 = s[0], a1 = s[1], a2 = s[2], a3 = s[3];
+			uint32_t a4 = s[4], a5 = s[5], a6 = s[6], a7 = s[7];
+
+			d[0] = a0, d[1] = a1, d[2] = a2, d[3] = a3;
+			d[4] = a4, d[5] = a5, d[6] = a6, d[7] = a7;
+		}
+	}
+	memcpy(d, s, n);
+}
+
+/* The frame's two source rows of an output row, DTCM. */
+static uint8_t g_line[2][TR_CAM_SENSOR_W] __attribute__((aligned(32)));
+
 void tr_movenet_input(const uint8_t *grey, int16_t frame_w, int16_t frame_h, int8_t *in)
 {
 	tr_movenet_input_rot(grey, frame_w, frame_h, 0, in);
@@ -34,6 +62,10 @@ void tr_movenet_input_rot(const uint8_t *grey, int16_t src_w, int16_t src_h, int
 	int cols = uw * TR_MN_IN / m, rows = uh * TR_MN_IN / m;
 	int padx = (TR_MN_IN - cols) / 2, pady = (TR_MN_IN - rows) / 2;
 	int sx, sy;
+	/* Upright camera, word-aligned rows that fit the line buffers (the release: 640 x 400,
+	 * rot 0): burst each output row's two source rows into DTCM, then store packed words. */
+	int fast = rot == 0 && src_w <= TR_CAM_SENSOR_W &&
+	           (((uintptr_t)grey | (uintptr_t)in | (uintptr_t)src_w) & 3u) == 0u;
 
 	/* The rotation is affine, so a raw byte offset splits into an upright-x
 	 * part plus an upright-y part: off(ux, uy) = off(ux, 0) + off(0, uy) -
@@ -60,6 +92,45 @@ void tr_movenet_input_rot(const uint8_t *grey, int16_t src_w, int16_t src_h, int
 
 	for (int r = 0; r < TR_MN_IN; r++) {
 		int8_t *o = in + r * TR_MN_IN * 3;
+
+		if (fast) {
+			word_t *o32 = (word_t *)(void *)o;
+
+			if (r < pady || r >= pady + rows) {
+				for (int i = 0; i < TR_MN_IN * 3 / 4; i++) {
+					o32[i] = 0u;
+				}
+				continue;
+			}
+			int uy = (r - pady) * m / TR_MN_IN;
+			int y1 = uy + 1 < uh ? uy + 1 : uy;
+
+			burst_copy(g_line[0], grey + uy * src_w, (uint32_t)src_w);
+			burst_copy(g_line[1], grey + y1 * src_w, (uint32_t)src_w);
+
+			uint8_t q[TR_MN_IN];
+
+			for (int c = 0; c < TR_MN_IN; c++) {
+				if (c < padx || c >= padx + cols) {
+					q[c] = 0;
+					continue;
+				}
+				int32_t a = cx0[c], b = cx1[c];
+				int     v = (g_line[0][a] + g_line[0][b] + g_line[1][a] + g_line[1][b] + 2) >> 2;
+
+				q[c] = (uint8_t)(v - 128);
+			}
+			/* 4 pixels = 12 B = 3 words, each pixel's byte three times (little-endian) */
+			for (int c = 0; c < TR_MN_IN; c += 4) {
+				uint32_t q0 = q[c], q1 = q[c + 1], q2 = q[c + 2], q3 = q[c + 3];
+
+				o32[0] = q0 * 0x010101u | q1 << 24;
+				o32[1] = q1 * 0x0101u | q2 * 0x01010000u;
+				o32[2] = q2 | q3 * 0x01010100u;
+				o32 += 3;
+			}
+			continue;
+		}
 
 		if (r < pady || r >= pady + rows) {
 			memset(o, 0, (size_t)TR_MN_IN * 3);
@@ -105,8 +176,24 @@ static uint32_t score_at(const tr_movenet_out_t *o, int k, int j, int32_t ry, in
 	return (h << 16) / (isqrt((uint32_t)(dy * dy + dx * dx)) + 29u);
 }
 
-void tr_movenet_decode(const tr_movenet_out_t *o, int16_t frame_w, int16_t frame_h, tr_pose_t *out)
+/* The two maps the argmax passes sweep (centre once, heat 17 times, 41,472 B): DTCM copies. */
+static int8_t g_centre[TR_MN_CELLS] __attribute__((aligned(32)));
+static int8_t g_heat[TR_MN_CELLS * TR_POSE_KP] __attribute__((aligned(32)));
+
+void tr_movenet_decode(const tr_movenet_out_t *src,
+                       int16_t                 frame_w,
+                       int16_t                 frame_h,
+                       tr_pose_t              *out)
 {
+	burst_copy(g_centre, src->centre, sizeof(g_centre));
+	burst_copy(g_heat, src->heat, sizeof(g_heat));
+
+	tr_movenet_out_t  local = *src;
+	tr_movenet_out_t *o     = &local;
+
+	local.centre = g_centre;
+	local.heat   = g_heat;
+
 	/* 1. The person centre: first maximum, as TFLite ARG_MAX picks. */
 	int ci = 0;
 

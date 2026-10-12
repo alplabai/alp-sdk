@@ -23,7 +23,7 @@
  * build records per-frame front-end stats instead (pad3 below).
  *
  * Core 1 (renderer_core1): waits for the gate, switches to the renderer
- * table (0x022/0x026/0x027 differ from the stub's), then loops: wait scene_go
+ * table (0x022/0x024/0x025/0x026/0x027 differ from the stub's), then loops: wait scene_go
  * (WFE, event stream on per the stub), build scene part 2, scene_done = seq;
  * sev; wait setup_go, set up its half, dmb ish,
  * setup_done = seq; sev; wait frame_go == seq, claim + render bands with its
@@ -32,9 +32,12 @@
  * The gate: core 0 zeroes .bss at entry and core 1 runs concurrently (the
  * stub releases it just before core 0 jumps), so core 1 touches nothing of
  * ours until core 0 writes RENDER_GATE = the launch token. The token is
- * stub_heartbeat0, which the stub's park loop bumps before every LAUNCH and
- * which stays frozen while a payload runs: fresh per launch, same on both
- * cores, so a gate value left by an earlier launch never matches.
+ * stub_heartbeat0, which the stub's launch() bumps (to a non-zero value) before every
+ * jump -- the release self-LAUNCH included, which never visits the park loop -- and
+ * which stays frozen while a payload runs: fresh per launch, same on both cores, so
+ * a gate value left by an earlier launch never matches, and a zero token cannot
+ * meet a gate word that happens to read 0 (RENDER_GATE sits outside .bss, so power-on
+ * garbage or an earlier launch's token is all it holds until core 0 writes it).
  *
  * HALT (contract: core 1 returns first): core 1 sees ctrl_cmd == HALT while
  * idle and returns; core 0 sees it, waits (<= RENDER_HALT_WAIT) for
@@ -73,13 +76,16 @@
  * drops.
  *
  * Profile build (`make prof`, TR_RASTER_PROF): PMCCNTR (A32 core cycles)
- * counters per core from src/render/r3d.h's TR_PROF_* hooks, accumulated
- * since LAUNCH, snapshotted by core 0 after every frame's join into the
- * NC block RENDER_PROF_ADDR (the unused tail of the mailbox page; debug-AP
- * readable, decode.py --prof):
- *   +0x00 RENDER_PROF_MARKER 0x5E4D5052, +0x04 frames rendered,
+ * counters per core from src/render/r3d.h's TR_PROF_* hooks, accumulated over
+ * a window of RENDER_PROF_WINDOW frames (the 32-bit cycle sums wrap in ~5 s at
+ * 800 MHz, so a since-LAUNCH total is garbage after the first seconds), then
+ * snapshotted by core 0 into the NC block RENDER_PROF_ADDR (the unused tail
+ * of the mailbox page; debug-AP readable, decode.py --prof) and cleared. The
+ * block therefore holds the last COMPLETE window, none before the first (the
+ * marker is cleared at LAUNCH; a window with a core-1 join timeout is dropped):
+ *   +0x00 RENDER_PROF_MARKER 0x5E4D5052, +0x04 frames in that window,
  *   +0x08 core 0 then core 1: TR_PROF_N x {cycles, px, calls}
- *   (FLAT, GOURAUD, TEX, TRI, BG, SETUP, BIN, NOZ_TEX, NOZ_FILL -- see r3d.h).
+ *   (FLAT, GOURAUD, TEX, TRI, BG, SETUP, BIN, NOZ_TEX, NOZ_FILL, BAND -- see r3d.h).
  * The hooks cost a few cycles per span; compare stage times against the
  * plain build, not this one.
  */
@@ -87,6 +93,8 @@
 #include <stdint.h>
 
 #include "render.h"
+
+#include "../../src/render/panel_rot.h"
 #include "stub_abi.h"
 #include "tr_mbox.h"
 #include "tr_memmap.h"
@@ -103,11 +111,11 @@
 #define RENDER_MARKER 0x5E4D0003u
 #endif
 #define RENDER_TTB ((volatile uint32_t *)TR_MEM_RENDER_TTB)
-/* SRAM1 MiB 1 spare tail above the core-1 stack (tr_memmap.h: stacks end at
- * 0x025FE000, FB B starts at 0x02600000), WB S=1 in both tables; outside .bss
+/* The page right above the core-1 stack (tr_memmap.h: stacks end at
+ * 0x025E0000, FB B starts at 0x025EA000), WB S=1 in both tables; outside .bss
  * so core 0's zeroing never races core 1's wait. */
-#define RENDER_GATE ((volatile uint32_t *)0x025FE000u)
-_Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == 0x025FE000u,
+#define RENDER_GATE ((volatile uint32_t *)TR_MEM_A32_GATE)
+_Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == TR_MEM_A32_GATE,
                "the gate sits on the core-1 stack top (start.S)");
 #ifndef RENDER_SINGLE_CORE
 #define RENDER_SINGLE_CORE 0
@@ -119,9 +127,17 @@ _Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == 0x025FE000u,
 #define RENDER_JOIN_TIMEOUT 600000u /* 6 ms of CNTVCT */
 /* After publishing, core 0 polls in_seq flat out this long (the M55's
  * out -> in turnaround, flip + vblank wait included, measured <= 2.05 ms),
- * then drops to WFE with the event stream: a held or dead M55 does not get
- * a core spinning on uncached SRAM1 (which the CDC200 is scanning) forever. */
-#define RENDER_SPIN_TICKS 300000u /* 3 ms */
+ * then PACED -- one in_seq read per RENDER_PACE_TICKS, the wait between
+ * reads on the CNTVCT register, not the bus -- up to RENDER_PACED_TICKS after
+ * the publish (one 30 Hz vsync period and a bit: the turnaround is the
+ * frame's flip + vblank wait, so the M55's next frame normally lands inside
+ * it, which a WFE with a wake of up to ~0.66 ms would otherwise delay).
+ * Then WFE with the event stream: a held or dead M55 does not get a core
+ * spinning on uncached SRAM1 (which the CDC200 is scanning) forever. */
+#define RENDER_SPIN_TICKS  300000u  /* 3 ms flat out */
+#define RENDER_PACED_TICKS 3500000u /* 35 ms */
+#define RENDER_PACE_TICKS  1000u    /* 10 us between reads */
+#define RENDER_PACED_SLICE 20000u   /* 200 us per pass, then the heartbeat/HALT/take run */
 /* Both halves of the setup take about as long; core 1 is idle and waiting. */
 #define RENDER_SETUP_TIMEOUT 500000u   /* 5 ms */
 #define RENDER_HALT_WAIT     50000000u /* 500 ms, inside the stub's 1 s core-1 wait */
@@ -137,17 +153,19 @@ _Static_assert(TR_MEM_A32_STACKS + TR_MEM_A32_STACKS_SIZE == 0x025FE000u,
 #define L1_PAGE       0x00000001u /* page-table pointer, domain 0 */
 #define PTE_NC        0x00000073u /* small page, TEX=001 C=B=0 (Normal NC), AP=11, XN */
 #define PTE_NC_X      0x00000072u /* same, XN cleared (bit0): exec, like SEC_NC_X's section */
+#define PTE_WB_S_X    0x0000047Eu /* PTE_WB_S with XN cleared: exec, like SEC_WB_S_X's section */
 #define PTE_WB_S      0x0000047Fu /* small page, TEX=001 C=B=1 (WB-WA), AP=11, S=1, XN */
 /* 0x023 likewise, second table right after: WB pages below the MHU0 window
  * only (scene part 2's DL), the window and everything above fault. */
 #define RENDER_L2_023 ((volatile uint32_t *)0x02402400u)
-/* 0x021 likewise, third table: FB A's second MiB as NC pages (the same
- * Normal NC XN it had as a section), then the DL (TR_MEM_A32_DL) WB-WA S=1. */
-#define RENDER_L2_021 ((volatile uint32_t *)0x02402800u)
+/* 0x025 likewise, third table: the image, stacks, gate and spare as WB-WA S=1 exec pages,
+ * then FB B's head (TR_FB_B..0x025FFFFF) Normal NC XN (FB B shares the MiB with the image). */
+#define RENDER_L2_025 ((volatile uint32_t *)0x02402800u)
 /* 0x024 likewise, fourth table (fix round 10, silicon finding: the camera
  * pool at TR_MEM_CAM_POOL, 0x02480000, is HP-DMA'd GREY8 the video panel
  * reads every frame -- mapped Normal NC like the rest of the old 0x024
- * SECTION, every read was an individual uncached bus transaction, the
+ * SECTION (the stub table still maps it as one NC_X section; the DL at
+ * TR_MEM_A32_DL and the bins are WB here too), every read was an individual uncached bus transaction, the
  * dominant term in the panel's measured ~117 ns/px, ~50x the ~2 ns/px a
  * cached read + NEON copy-out costs). Mailbox/stub/tables (below
  * TR_MEM_CAM_POOL, same NC-exec permission the section had) stay NC: cross-
@@ -178,19 +196,56 @@ _Static_assert(0x02402C00u + 0x400u <= TR_MEM_MBOX_PAGE_END,
  *   +0x1C..+0x2C: words 7..11 are feat/edge-aa's / feat/dma-copyout's
  *   +0x30 CNTVCT at renderer_main entry, +0x34 after the self-checks +
  *         render_init, +0x38 when the first out_seq went out (0 before):
- *         LAUNCH -> first frame, which the HE logs (TR_RENDER_T_ADDR) */
+ *         LAUNCH -> first frame, which the HE logs (TR_RENDER_T_ADDR)
+ *   +0x3C, +0x40 words 15, 16: the bottom video panel's us, this frame / max
+ *   Perf-pass words (17..39, all zeroed at LAUNCH; decode.py --stats):
+ *   +0x44..+0x58 words 17..22: the PEAK frame's breakdown, latched with
+ *         pad3[7] whenever a frame sets a new max: pad3[2], pad3[3], pad3[4],
+ *         pad3[5], pad3[6] (CNTVCT ticks / scene packing as above), then
+ *         word 15's video-panel us
+ *   +0x60..+0x74 words 24..26 FB A (TR_FB_A, SRAM0), 27..29 FB B (TR_FB_B,
+ *         SRAM1): frames drawn into it, sum of their frame times (us, wraps
+ *         after ~71 min), max frame time (us); word 23 is reserved
+ *   +0x78..+0x9C words 30..39, five (last, max) pairs of waits, CNTVCT
+ *         ticks: 30/31 core 0 join_scene, 32/33 core 0 join_setup, 34/35
+ *         core 0 join_core1, 36/37 core 1 waiting for setup_go (after
+ *         scene_done), 38/39 core 1 waiting for frame_go (after setup_done) */
 #define RENDER_STATS_ADDR   TR_RENDER_STATS_ADDR
 #define RENDER_STATS        ((volatile uint32_t *)RENDER_STATS_ADDR)
 #define RENDER_STATS_MARKER TR_RENDER_STATS_MARKER
+#define RS_PEAK             17u /* words 17..22 */
+#define RS_FB_A             24u /* frames, sum us, max us; FB B at +3 */
+#define RS_WAIT_BASE        30u /* (last, max) pairs */
+#define RS_W_SCENE          0u
+#define RS_W_SETUP          1u
+#define RS_W_JOIN           2u
+#define RS_W_C1_SETUP       3u
+#define RS_W_C1_FRAME       4u
+#define RS_LAST_WORD        39u
+_Static_assert(RENDER_STATS_ADDR + (RS_LAST_WORD + 1u) * 4u <= 0x02401A00u,
+               "stats words 17..39 end below the accel probe block (0x02401A00)");
 _Static_assert(RENDER_STATS_ADDR + 12u * 4u == TR_RENDER_T_ADDR,
                "tr_mbox.h TR_RENDER_T_ADDR: words 12..14");
 _Static_assert(RENDER_STATS_ADDR + 6u * 4u == TR_RENDER_IMG_END_ADDR,
                "tr_mbox.h TR_RENDER_IMG_END_ADDR");
 extern char __bss_end[]; /* renderer.ld */
 
+/* Core 0 only: one (last, max) wait pair per join, ticks. */
+static void rs_wait(uint32_t i, uint32_t w)
+{
+	static uint32_t wmax[5];
+
+	if (w > wmax[i]) wmax[i] = w;
+	RENDER_STATS[RS_WAIT_BASE + 2u * i]      = w;
+	RENDER_STATS[RS_WAIT_BASE + 2u * i + 1u] = wmax[i];
+}
+
 #ifdef TR_RASTER_PROF
 #define RENDER_PROF_ADDR   ((volatile uint32_t *)0x02401800u)
 #define RENDER_PROF_MARKER 0x5E4D5052u
+#define RENDER_PROF_WINDOW 64u /* frames: 64 x ~27 ms x 800 MHz < 2^32 cycles */
+_Static_assert(0x1800u + 8u + 2u * TR_PROF_N * 12u <= 0x1900u,
+               "the prof block ends below the stats block");
 static tr_prof_t prof[2][TR_PROF_N] __attribute__((aligned(64)));
 
 tr_prof_t *tr_prof_core(void)
@@ -212,28 +267,44 @@ uint32_t tr_prof_now(void)
 /* PMCR.E (enable) | PMCR.C (reset the cycle counter); PMCNTENSET.C. */
 static void prof_enable(void)
 {
+	RENDER_PROF_ADDR[0] = 0; /* a stale window of an earlier LAUNCH is not this one's */
 	__asm__ volatile("mcr p15, 0, %0, c9, c12, 0\n\t"
 	                 "mcr p15, 0, %1, c9, c12, 1\n\tisb" ::"r"(5u),
 	                 "r"(0x80000000u));
 }
 
-static void prof_publish(void)
+/* `timeouts`: renderer_main's core-1 timeout count. A window in which a join timed out mixes a late
+ * core 1 into the sums, so it is dropped (counters cleared, nothing published), not shown. */
+static void prof_publish(uint32_t timeouts)
 {
-	static uint32_t    frames;
+	static uint32_t    frames, timeouts0;
 	volatile uint32_t *d = RENDER_PROF_ADDR;
-	const uint32_t    *p = (const uint32_t *)prof;
+	uint32_t          *p = (uint32_t *)prof;
 
+	if (timeouts != timeouts0) {
+		timeouts0 = timeouts;
+		frames    = 0;
+		for (uint32_t i = 0; i < sizeof(prof) / 4u; i++) {
+			p[i] = 0;
+		}
+		return;
+	}
+	if (++frames < RENDER_PROF_WINDOW) return;
 	d[0] = RENDER_PROF_MARKER;
-	d[1] = ++frames;
-	for (uint32_t i = 0; i < sizeof(prof) / 4u; i++)
+	d[1] = frames;
+	for (uint32_t i = 0; i < sizeof(prof) / 4u; i++) {
 		d[2 + i] = p[i];
+		p[i]     = 0; /* core 1 is parked in its wait after the join */
+	}
+	frames = 0;
 }
 #else
 static void prof_enable(void)
 {
 }
-static void prof_publish(void)
+static void prof_publish(uint32_t timeouts)
 {
+	(void)timeouts;
 }
 #endif
 
@@ -242,20 +313,21 @@ void renderer_main(volatile tr_mbox_t *m);
 void renderer_core1(volatile tr_mbox_t *m);
 
 /* Everything not listed faults. Both cores run on this table (core 1
- * switches after the gate): 0x022 and 0x026 differ from the stub table.
- *   0x020-0x021 FB A           Normal NC, XN (the FB is only written); 0x021
- *               through 4 KiB pages: FB A's tail NC, then the frame's DL
- *               0x021C2000..0x021FFFFF Normal WB-WA S=1, XN
+ * switches after the gate): 0x022, 0x024 (DL, bins, camera pool WB), 0x025 (4 KiB
+ * pages, FB B's head NC) and 0x026 differ from the stub table.
+ *   0x020-0x021 FB A slot      Normal NC, XN sections (the FB is only written);
+ *               the slot ends 0x021F4000, the rest of 0x021 is free
  *   0x022       setup + bands + zone textures + zone indices  Normal WB-WA S=1, XN (A32-only, cached RMW)
  *   0x023       scene part-2 DL 0x02300000..0x0237FFFF as WB-WA S=1 4 KiB
  *               pages; 0x02380000.. (the TF-A MHU0 window) faults
  *   0x024       mailbox, stub, tables -- NC, VA == PA, exec (contract), through
- *               4 KiB pages below TR_MEM_CAM_POOL; TR_MEM_CAM_POOL..+SIZE
- *               (0x02480000..0x024FFFFF, the MiB's own upper half) Normal
- *               WB-WA S=1, XN (fix round 10: camera pool cacheable)
- *   0x025       image + .bss (to 0x025C0000), bins, stacks -- WB-WA S=1, exec
- *   0x026       FB B (first MiB)  Normal NC, XN
- *   0x027       FB B tail 0x02700000..0x027C1FFF as NC 4 KiB pages; the rest
+ *               4 KiB pages below TR_MEM_A32_DL (0x02424000); from there the DL,
+ *               bins and the camera pool (TR_MEM_CAM_POOL..+SIZE, fix round 10)
+ *               Normal WB-WA S=1, XN
+ *   0x025       4 KiB pages: image + .bss (to 0x025C0000), stacks, gate, spare --
+ *               WB-WA S=1, exec; from TR_FB_B (0x025EA000) FB B's head, Normal NC, XN
+ *   0x026       FB B (middle MiB)  Normal NC, XN
+ *   0x027       FB B tail 0x02700000..0x027DDFFF as NC 4 KiB pages; the rest
  *               of the MiB (TF-A RW 0x027DE000..) faults */
 void render_build_table(void)
 {
@@ -264,25 +336,25 @@ void render_build_table(void)
 	for (uint32_t i = 0; i < 4096u; i++)
 		t[i] = 0;
 	t[0x020] = 0x02000000u | SEC_NC;
-	for (uint32_t p = 0; p < 256u; p++) {
-		uint32_t va = 0x02100000u + (p << 12);
-
-		RENDER_L2_021[p] = va | (va < TR_MEM_A32_DL ? PTE_NC : PTE_WB_S);
-	}
-	t[0x021] = 0x02402800u | L1_PAGE;
+	t[0x021] = 0x02100000u | SEC_NC;
 	t[0x022] = 0x02200000u | SEC_WB_S;
 	for (uint32_t p = 0; p < 256u; p++) {
 		uint32_t va = 0x02400000u + (p << 12);
 
-		RENDER_L2_024[p] = va | (va < TR_MEM_CAM_POOL ? PTE_NC_X : PTE_WB_S);
+		RENDER_L2_024[p] = va | (va < TR_MEM_A32_DL ? PTE_NC_X : PTE_WB_S);
 	}
 	t[0x024] = 0x02402C00u | L1_PAGE;
-	t[0x025] = 0x02500000u | SEC_WB_S_X;
+	for (uint32_t p = 0; p < 256u; p++) {
+		uint32_t va = 0x02500000u + (p << 12);
+
+		RENDER_L2_025[p] = va < TR_FB_B ? (va | PTE_WB_S_X) : (va | PTE_NC);
+	}
+	t[0x025] = 0x02402800u | L1_PAGE;
 	t[0x026] = 0x02600000u | SEC_NC;
 	for (uint32_t p = 0; p < 256u; p++) {
 		uint32_t va = 0x02700000u + (p << 12);
 
-		RENDER_L2_027[p] = va < TR_FB_B + TR_FB_SIZE ? (va | PTE_NC) : 0u;
+		RENDER_L2_027[p] = va < TR_FB_B + TR_FB_SLOT_SIZE ? (va | PTE_NC) : 0u;
 	}
 	t[0x027] = 0x02402000u | L1_PAGE;
 	for (uint32_t p = 0; p < 256u; p++) {
@@ -319,13 +391,19 @@ _Static_assert(TR_MEM_PSLOT >= TR_MEM_ARING && TR_MEM_HP_DBG >= TR_MEM_ARING &&
                    TR_MEM_CAM_VIEW >= TR_MEM_ARING &&
                    TR_MEM_CAM_VIEW + sizeof(tr_cam_view_t) <= TR_MHU0_WINDOW_LO,
                "tr_pslot_t/hp_dbg_t/tr_cam_view_t must all sit inside the one NC page above");
-_Static_assert(TR_FB_A == 0x02000000u && TR_FB_A + TR_FB_SIZE <= 0x02200000u,
-               "FB A must be SRAM0 MiB 0-1");
-_Static_assert(TR_MEM_A32_DL == TR_FB_A + TR_FB_SIZE && (TR_MEM_A32_DL & 0xFFFu) == 0 &&
-                   TR_MEM_A32_DL >= 0x02100000u,
-               "the DL pages start on the 4 KiB page right after FB A, in MiB 0x021");
-_Static_assert(TR_FB_B == 0x02600000u && TR_FB_B + TR_FB_SIZE <= 0x027DE000u,
-               "FB B must be 0x02600000, below TF-A RW");
+_Static_assert(TR_FB_A == 0x02000000u, "FB A must start SRAM0 MiB 0");
+_Static_assert(TR_FB_A + TR_FB_SLOT_SIZE <= 0x02200000u, "FB A's slot must end in SRAM0 MiB 1");
+_Static_assert((TR_MEM_A32_DL & 0xFFFu) == 0 && TR_MEM_A32_DL >= STUB_STACK1_TOP &&
+                   TR_MEM_A32_DL < TR_MEM_CAM_POOL,
+               "the DL starts on a page after the stub stacks, in the 0x024 MiB's WB-page span");
+_Static_assert(TR_MEM_A32_GATE + 0x1000u <= TR_FB_B && (TR_FB_B & 0xFFFu) == 0u,
+               "FB B must be page aligned and start above the gate page");
+_Static_assert(TR_FB_B == 0x025EA000u && TR_FB_B + TR_FB_SLOT_SIZE <= TR_MEM_TFA_RW,
+               "FB B must be 0x025EA000 and its slot must end at or below TF-A RW");
+_Static_assert(TR_FB_B > TR_MEM_A32_IMG_END && TR_FB_B < 0x02600000u,
+               "FB B's head must be in the 0x025 MiB (the L2_025 split), above the image cap");
+_Static_assert(TR_FB_B + TR_FB_SLOT_SIZE > 0x02700000u && TR_FB_B + TR_FB_SLOT_SIZE <= 0x027E0000u,
+               "FB B's slot must reach into 0x027 (the L2_027 map) and end inside it");
 
 /* Core 1's switch to the renderer table: the start.S sequence core 0 ran. */
 static void core1_use_render_table(void)
@@ -378,6 +456,8 @@ static volatile uint32_t band_claim __attribute__((aligned(64)));
 static volatile uint32_t core1_done
     __attribute__((aligned(64)));     /* seq core 1 finished, core 1 writes */
 static volatile uint32_t core1_ticks; /* its busy ticks for core1_done's frame */
+/* its waits for setup_go / frame_go this frame, ticks; written before core1_done */
+static volatile uint32_t core1_wait_setup, core1_wait_frame;
 static volatile uint32_t scene_go
     __attribute__((aligned(64))); /* seq whose scene part 2 core 1 builds */
 static volatile uint32_t scene_done __attribute__((aligned(64))); /* seq core 1 finished building */
@@ -397,6 +477,9 @@ static uint32_t setup_lo, setup_hi; /* core 1's half, written before setup_go */
 static volatile uint32_t band_seq[TR_TOTAL_BANDS]
     __attribute__((aligned(64))); /* seq each band last landed for */
 static uint16_t *frame_fb;        /* written before frame_go */
+/* The band each claim index stands for this frame (render_claim_order()): written by core 0
+ * after the bins and before frame_go, which publishes it to core 1 with them. */
+static uint8_t band_order[TR_TOTAL_BANDS];
 
 /* Claim + render bands (3D, then video) until none are left; each band's
  * pixels are out (dsb) before band_seq says so. */
@@ -410,7 +493,7 @@ static void band_loop(uint32_t core, uint32_t seq, uint16_t *fb)
 		        &band_claim, &v, v + 1u, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
 			continue; /* v reloaded */
 
-		uint32_t b = v & 0xFFu;
+		uint32_t b = band_order[v & 0xFFu];
 
 		if (b < TR_BANDS)
 			render_band(core, (int)b, fb);
@@ -451,20 +534,25 @@ void renderer_core1(volatile tr_mbox_t *m)
 		scene_done = seq;
 		barrier();
 		sev();
+		uint32_t tw = cntvct_lo();
+
 		while (setup_go != seq) {
 			if (m->ctrl_cmd == STUB_CMD_HALT) return;
 			wfe();
 		}
+		core1_wait_setup = cntvct_lo() - tw;
 		dmb_ish(); /* DL, setup_lo/hi before setup_go */
 		render_setup_part(setup_lo, setup_hi);
 		dmb_ish(); /* records (WB S=1) before the flag */
 		setup_done = seq;
 		barrier();
 		sev();
+		tw = cntvct_lo();
 		while (frame_go != seq) {
 			if (m->ctrl_cmd == STUB_CMD_HALT) return;
 			wfe();
 		}
+		core1_wait_frame = cntvct_lo() - tw;
 		dmb_ish(); /* frame_fb, bins, band_claim before frame_go */
 		band_loop(1, seq, frame_fb);
 		core1_ticks = cntvct_lo() - t0;
@@ -492,6 +580,7 @@ static int join_scene(uint32_t seq)
 		if (cntvct_lo() - t0 > RENDER_SETUP_TIMEOUT) return 0;
 		wfe();
 	}
+	rs_wait(RS_W_SCENE, cntvct_lo() - t0);
 	dmb_ish();
 	return 1;
 }
@@ -508,6 +597,7 @@ static int join_setup(uint32_t seq)
 		}
 		wfe();
 	}
+	rs_wait(RS_W_SETUP, cntvct_lo() - t0);
 	dmb_ish();
 	return 1;
 }
@@ -531,8 +621,24 @@ static int join_core1(uint32_t seq)
 		}
 		wfe();
 	}
+	rs_wait(RS_W_JOIN, cntvct_lo() - t0);
 	dmb_ish();
 	return 1;
+}
+
+/* The mailbox ABI is wrong (a stub of another TR_MBOX_VERSION, or a frame whose
+ * rotation or width this renderer cannot produce): record what in pad3[7] -- 0xAB1D in
+ * the top half, 1 version / 2 rotation | rotation << 8 / 3 width | fw / 16 << 8 below -- and the
+ * offending value itself in pad3[6] (tr_mbox.h TR_ABI_FAULT_*: fw 721 does not hide behind
+ * 721 / 16 = 45), and fault.
+ * The stub records the fault (UNDEF) and parks; there is no fallback drawing
+ * of a frame the HE did not ask for. */
+static void __attribute__((noreturn)) abi_fault(volatile tr_mbox_t *m, uint32_t what, uint32_t arg)
+{
+	m->pad3[6] = arg & 0xFFFFu;
+	m->pad3[7] = TR_ABI_FAULT_TAG | what;
+	barrier();
+	__builtin_trap();
 }
 
 void renderer_main(volatile tr_mbox_t *m)
@@ -554,12 +660,17 @@ void renderer_main(volatile tr_mbox_t *m)
 	RENDER_STATS[12] = cntvct_lo();
 	RENDER_STATS[13] = 0;
 	RENDER_STATS[14] = 0;
-	m->pad3[0]       = RENDER_MARKER;
+	for (uint32_t i = RS_PEAK; i <= RS_LAST_WORD; i++)
+		RENDER_STATS[i] = 0;
+	m->pad3[0] = RENDER_MARKER;
 	for (uint32_t i = 1; i < 8u; i++)
 		m->pad3[i] = 0;
 	checks     = 0x80000000u | (tr_span_selfcheck() ? 1u : 0u) | (tr_raster_selfcheck() ? 2u : 0u) |
 	             (dual ? 4u : 0u);
 	m->pad3[1] = checks;
+	if (m->version != TR_MBOX_VERSION) {
+		abi_fault(m, TR_ABI_FAULT_VERSION, m->version);
+	}
 	RENDER_STATS[1] = 0;
 	RENDER_STATS[2] = 0;
 	RENDER_STATS[3] = 0xFFFFFFFFu;
@@ -593,16 +704,43 @@ void renderer_main(volatile tr_mbox_t *m)
 		/* Within RENDER_SPIN_TICKS of a publish: spin (the event stream
 		 * would add up to ~0.66 ms before every frame -- the M55 cannot SEV
 		 * us); the heartbeat, HALT and the full take run every ~2000 polls
-		 * of in_seq. Later (held or dead M55): WFE, event-stream paced. */
-		if (t_pub_valid && cntvct_lo() - t_pub < RENDER_SPIN_TICKS) {
+		 * of in_seq. Then paced polls up to RENDER_PACED_TICKS, then (held or
+		 * dead M55): WFE, event-stream paced. */
+		uint32_t age = t_pub_valid ? cntvct_lo() - t_pub : 0xFFFFFFFFu;
+
+		if (age < RENDER_SPIN_TICKS) {
 			for (uint32_t i = 0; i < 2000u && m->in_seq == last; i++) {
 				__asm__ volatile("" ::: "memory");
+			}
+		} else if (age < RENDER_PACED_TICKS) {
+			uint32_t t1 = cntvct_lo();
+
+			while (m->in_seq == last && cntvct_lo() - t1 < RENDER_PACED_SLICE) {
+				uint32_t t2 = cntvct_lo();
+
+				while (cntvct_lo() - t2 < RENDER_PACE_TICKS) {
+				}
 			}
 		} else if (m->in_seq == last) {
 			wfe();
 		}
 		if (!tr_mbox_take_in(m, last, &in, &fb, &seq, barrier)) {
 			continue;
+		}
+		/* Only a frame that WILL be drawn is held to the rotation ABI: a frame with no
+		 * valid framebuffer is dropped below (out_dropped++), whatever its other
+		 * fields hold. */
+		int drawn = fb == TR_FB_A || fb == TR_FB_B;
+
+		if (tr_rot_refuse(drawn, in.rotation)) {
+			abi_fault(m,
+			          TR_ABI_FAULT_ROTATION | ((uint32_t)in.rotation & 0xFFu) << 8,
+			          in.rotation); /* the code's low byte only: 270 -> 14 */
+		}
+		if (tr_fw_refuse(drawn, in.fw)) {
+			abi_fault(m,
+			          TR_ABI_FAULT_FW | ((uint32_t)in.fw / 16u) << 8,
+			          in.fw); /* fw / 16 in the code: 800 -> 50, 0 -> 0; pad3[6] has fw */
 		}
 		if (t_pub_valid) {
 			uint32_t gap = cntvct_lo() - t_pub;
@@ -615,8 +753,7 @@ void renderer_main(volatile tr_mbox_t *m)
 		render_set_quality(
 		    (uint8_t)(RENDER_STATS[1] & (TR_LOD_NO_BACK_RANK | TR_LOD_NEAR | TR_LOD_STILL)));
 
-		uint32_t t     = 0;
-		int      drawn = fb == TR_FB_A || fb == TR_FB_B;
+		uint32_t t = 0;
 
 		o.ticks1 = 0;
 		if (drawn) {
@@ -662,8 +799,9 @@ void renderer_main(volatile tr_mbox_t *m)
 			}
 			render_bin();
 			render_stats.bin = cntvct_lo() - tb;
-			frame_fb         = (uint16_t *)fb;
-			band_claim       = seq << 8; /* this frame's generation, band 0 */
+			render_claim_order(band_order);
+			frame_fb   = (uint16_t *)fb;
+			band_claim = seq << 8; /* this frame's generation, band 0 */
 			if (dual) {
 				dmb_ish(); /* bins, frame_fb, band_claim before frame_go */
 				frame_go = seq;
@@ -678,6 +816,8 @@ void renderer_main(volatile tr_mbox_t *m)
 					checks &= ~4u;
 				} else {
 					o.ticks1 = core1_ticks;
+					rs_wait(RS_W_C1_SETUP, core1_wait_setup);
+					rs_wait(RS_W_C1_FRAME, core1_wait_frame);
 				}
 			}
 			/* fix round 10: every band is drawn now, 3D AND video (either
@@ -703,8 +843,27 @@ void renderer_main(volatile tr_mbox_t *m)
 				RENDER_STATS[16] = panel_us_max; /* max since this LAUNCH */
 			}
 			barrier(); /* pixels reach SRAM0 before out_seq says so (plan sec 3) */
-			t      = cntvct_lo() - t0;
-			tmax   = t > tmax ? t : tmax;
+			t = cntvct_lo() - t0;
+			{
+				/* Per-FB frame time (A = SRAM0, B = SRAM1), us. */
+				volatile uint32_t *f  = &RENDER_STATS[fb == TR_FB_A ? RS_FB_A : RS_FB_A + 3u];
+				uint32_t           us = t / 100u;
+
+				f[0]++;
+				f[1] += us;
+				if (us > f[2]) f[2] = us;
+			}
+			if (t > tmax) {
+				/* The peak frame's own breakdown, not the last frame's. */
+				tmax                       = t;
+				RENDER_STATS[RS_PEAK + 0u] = render_stats.bin;
+				RENDER_STATS[RS_PEAK + 1u] = render_core_stats[0].raster;
+				RENDER_STATS[RS_PEAK + 2u] = render_core_stats[0].copy;
+				RENDER_STATS[RS_PEAK + 3u] = render_stats.scene;
+				RENDER_STATS[RS_PEAK + 4u] =
+				    render_stats.dl_dropped << 16 | (render_stats.max_bin & 0xFFFFu);
+				RENDER_STATS[RS_PEAK + 5u] = RENDER_STATS[15];
+			}
 			o.tris = render_stats.tris;
 			o.dropped += render_stats.dropped + render_stats.dl_dropped;
 			m->pad3[1] = checks | render_core_stats[0].bands << 16 |
@@ -720,7 +879,7 @@ void renderer_main(volatile tr_mbox_t *m)
 		} else {
 			o.dropped++;
 		}
-		if (drawn) prof_publish();
+		if (drawn) prof_publish(timeouts);
 		o.fb     = fb;
 		o.ticks0 = t;
 		o.frames++;

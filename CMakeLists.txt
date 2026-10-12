@@ -85,11 +85,11 @@ endif()
 
 # SoM family selector -- picks which vendor wrapper layer the
 # bare-metal backend pulls in.  none = peripheral stubs only;
-# aen = vendors/alif/ wrappers (Alif Ensemble); v2n / imx93
-# slot in once their respective vendor packs land.
-set(ALP_SUPPORTED_SOM "none;aen;v2n;imx93" CACHE INTERNAL "")
+# aen = vendors/alif/ wrappers (Alif Ensemble); v2n slots in once
+# its vendor pack lands.
+set(ALP_SUPPORTED_SOM "none;aen;v2n" CACHE INTERNAL "")
 set(ALP_SOM "none" CACHE STRING
-    "Target SoM family for bare-metal: none, aen, v2n, imx93")
+    "Target SoM family for bare-metal: none, aen, v2n")
 set_property(CACHE ALP_SOM PROPERTY STRINGS ${ALP_SUPPORTED_SOM})
 if(NOT ALP_SOM IN_LIST ALP_SUPPORTED_SOM)
     message(FATAL_ERROR
@@ -115,7 +115,8 @@ option(ALP_SDK_STATUS_DESCRIPTIONS
 # headers.  Linux/Yocto consumers (e.g. the meta-alp-sdk recipe, ROS 2
 # nodes that link libalp_sdk.so) set this ON; embedded users who
 # add_subdirectory() the SDK leave it OFF and get the static,
-# install-free build they expect.
+# install-free build they expect (the one exception: a static ALP_OS=yocto
+# build installs the archive, headers and alp-sdk.pc, see the end of this file).
 option(ALP_SDK_BUILD_SHARED "Build libalp_sdk.so + install lib/headers (Linux/Yocto)"  OFF)
 
 # Alp-maintainer strict-warning profile (issue #634) -- defines the
@@ -126,6 +127,7 @@ option(ALP_SDK_BUILD_SHARED "Build libalp_sdk.so + install lib/headers (Linux/Yo
 # 100% first-party, no vendor sources ever land in it); alp_sdk instead
 # calls the per-source helper further down, once its SOURCES are complete.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/alp-sdk-warnings.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/alp-sdk-static-backends.cmake)
 
 # ---------------------------------------------------------------------
 # Public header library
@@ -187,7 +189,7 @@ set(ALP_SDK_CHIP_LIST
     ina228 ina236 inmp441 lis2dw12 lps22hb lsm6dso max31855 max31865
     max98357a maxim_max9295_9296 ms5611 mt6701 murata_lbee5hy2fy
     optiga_trust_m ov2640 ov5640 ov5645 ov7670 ov9281
-    pca9451a pi3dbs12212 qmc5883l quectel_bg77 quectel_bg95 ra8875
+    pi3dbs12212 qmc5883l quectel_bg77 quectel_bg95 ra8875
     rtl8211fdi rv3028c7 semtech_sx1262 semtech_sx1276 sh1106
     ssd1306 ssd1331 st7789 tas2563 tcal9538 ti_ds90ub953_954
     tlv320aic3204 tmc2209 tmp112 tps628640 tsl2591 ublox_max_m10s
@@ -259,9 +261,19 @@ endif()
 if(NOT DEFINED ZEPHYR_BASE)
     if(ALP_SDK_BUILD_SHARED)
         add_library(alp_sdk SHARED)
+        # SONAME (#2827): a 0.x MINOR may remove public symbols, so until
+        # 1.0 the minor is part of the SONAME (libalp_sdk.so.0.17) and a
+        # package-manager upgrade across minors cannot silently load an
+        # incompatible library into an app linked against the old one.
+        # From 1.0 the MAJOR alone is the ABI contract.
+        if(PROJECT_VERSION_MAJOR EQUAL 0)
+            set(_alp_sdk_soversion "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+        else()
+            set(_alp_sdk_soversion "${PROJECT_VERSION_MAJOR}")
+        endif()
         set_target_properties(alp_sdk PROPERTIES
             VERSION   ${PROJECT_VERSION}
-            SOVERSION ${PROJECT_VERSION_MAJOR})
+            SOVERSION ${_alp_sdk_soversion})
         # #1145: a shared library permits undefined symbols at link time by
         # default -- libalp_sdk.so built "successfully" with the DRP-AI
         # backend compiled in while MeraDrpRuntimeWrapper's symbols were
@@ -326,6 +338,19 @@ if(NOT DEFINED ZEPHYR_BASE)
     # Must run AFTER add_subdirectory(src/${ALP_OS}) so alp_sdk's SOURCES
     # property already includes every backend/vendor file.
     alp_sdk_apply_strict_warnings(alp_sdk "${CMAKE_CURRENT_SOURCE_DIR}/src/")
+    # Same ordering constraint: keep every second backend (yocto_drv.c, ...)
+    # in a static link -- see cmake/alp-sdk-static-backends.cmake (#2790).
+    alp_sdk_force_static_backends(alp_sdk)
+    # alp-sdk.pc for non-CMake static links (#2829).  Linux/Yocto only: the
+    # baremetal static build stays install-free.  Written before tests/ so
+    # ctest can use it; a no-op (and a stale file removed) unless the static
+    # archive forced backends.
+    if(ALP_OS STREQUAL "yocto")
+        include(GNUInstallDirs)
+        alp_sdk_write_static_pkgconfig(alp_sdk ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig)
+    else()
+        file(REMOVE ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig/alp-sdk.pc)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------
@@ -412,4 +437,19 @@ if(ALP_SDK_BUILD_SHARED AND NOT DEFINED ZEPHYR_BASE)
         ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake
         DESTINATION ${ALP_SDK_INSTALL_CMAKEDIR})
+endif()
+
+# Static Linux/Yocto build (ALP_OS=yocto only; baremetal and add_subdirectory
+# flows stay install-free): ship the archive, headers and alp-sdk.pc to
+# ${CMAKE_INSTALL_LIBDIR}/pkgconfig so a non-CMake consumer links with
+# `pkg-config --cflags --libs alp-sdk` (#2829).
+if(NOT ALP_SDK_BUILD_SHARED AND NOT DEFINED ZEPHYR_BASE
+        AND ALP_OS STREQUAL "yocto"
+        AND EXISTS ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig/alp-sdk.pc)
+    install(TARGETS alp_sdk ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/alp
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        PATTERN "chips" EXCLUDE)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig/alp-sdk.pc
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 endif()

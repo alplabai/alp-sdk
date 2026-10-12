@@ -112,7 +112,7 @@ def test_remap_cores_exact_key_kept():
 
 
 def test_remap_cores_maps_unique_same_class_key():
-    # AEN m55_hp (Zephyr class) -> NX9101 m33 (its only Zephyr slice).
+    # AEN m55_hp (Zephyr class) -> a target whose only Zephyr slice is m33.
     src = {"a32_cluster": {"machine": "a"}, "m55_hp": {"board": "b"},
            "m55_he": {"board": "c"}}
     dst = {"a55_cluster": {"machine": "d"}, "m33": {"board": "e"}}
@@ -139,22 +139,6 @@ def test_known_pass_cells(generated):
     assert _cell(generated, "E1M-V2M102", "pwm-led-fade") == gpm.PASS
 
 
-def test_nx9101_cells_fail_honestly_on_the_tbd_hw_rev(generated):
-    """E1M-NX9101 x every pinned example is FAIL, not a remap bug.
-
-    Was PASS (including the cross-core-class m55_hp -> m33 swap this
-    once anchored) until #1025's hw_rev-buildable gate: NX9101's only
-    hw_rev (imx93 r1) is `status: tbd`, so `--emit zephyr-conf` now
-    refuses the SoM outright before it ever reaches core-remap or
-    Kconfig generation. This is the gate doing its job, not a
-    portability regression -- flip these back to PASS only alongside
-    metadata/e1m_modules/imx93/hw-revisions.yaml:r1 gaining a buildable
-    status; `test_remap_cores_maps_unique_same_class_key` above still
-    covers the m55_hp -> m33 remap logic in isolation."""
-    for example in ("i2c-scanner", "gpio-button-led", "pwm-led-fade"):
-        assert _cell(generated, "E1M-NX9101", example) == gpm.FAIL, example
-
-
 def test_notes_derive_from_metadata(generated):
     # AEN801 carries a U85 alongside its U55 pair (SoC JSON npus[]).
     assert "Ethos-U U55+U85" in _cell(generated, "E1M-AEN801",
@@ -177,19 +161,19 @@ def test_notes_derive_from_metadata(generated):
     assert "no external DRAM" in aen
     assert "Mbit DRAM" not in aen and "Gbit DRAM" not in aen
     # ...and the same for flash (memory.flash_mbit: 0 -- MRAM-only).  The tag
-    # shipped on dram_mbit alone, so AEN801's RESOLVED `0` and E1M-NX9101's
-    # OPEN `TBD` rendered identically in this cell, on the figure that decides
+    # shipped on dram_mbit alone, so a RESOLVED `0` and an OPEN `TBD`
+    # rendered identically in this cell, on the figure that decides
     # storage and MCUboot partitioning.
     assert "no external flash" in aen
 
 
-def test_resolved_and_open_flash_capacities_render_differently(generated):
-    """`flash_mbit: 0` (AEN, resolved) must not read like `TBD` (NX9101, open)."""
-    aen = _cell(generated, "E1M-AEN801", "Notes (from metadata)")
-    nx = _cell(generated, "E1M-NX9101", "Notes (from metadata)")
-    assert "no external flash" in aen
-    assert "no external flash" not in nx
-    assert aen != nx
+def test_resolved_and_open_flash_capacities_render_differently():
+    """`flash_mbit: 0` (resolved) must not read like `TBD` (open)."""
+    resolved = gpm.notes_for({"memory": {"dram_mbit": "TBD", "flash_mbit": 0}})
+    open_ = gpm.notes_for({"memory": {"dram_mbit": "TBD", "flash_mbit": "TBD"}})
+    assert "no external flash" in resolved
+    assert "no external flash" not in open_
+    assert resolved != open_
 
 
 def test_every_family_sku_has_a_row(generated):

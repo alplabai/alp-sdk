@@ -11,7 +11,7 @@
  * all three).  SD/MMC opens are deferred to other backends.
  *
  * Inline AES on plain Zephyr flash is not portable -- vendor packs
- * (Alif SecAES, NXP OTFAD) register their own backends to implement
+ * (Alif SecAES) register their own backends to implement
  * the configure_inline_aes op when they ship.
  *
  * Registered as silicon_ref="*" at priority 100; the dispatcher's
@@ -133,7 +133,7 @@ static alp_status_t z_configure_inline_aes(alp_storage_backend_state_t    *st,
 	(void)st;
 	(void)cfg;
 	/* Plain Zephyr flash has no inline-AES path -- vendor packs
-     * (Alif SecAES, NXP OTFAD) register dedicated backends that
+     * (Alif SecAES) register dedicated backends that
      * win on priority and implement this op. */
 	return ALP_ERR_NOSUPPORT;
 }

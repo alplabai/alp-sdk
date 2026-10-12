@@ -55,7 +55,7 @@ MENDER_TENANT_TOKEN ?= ""
 MENDER_ARTIFACT_NAME ?= "alp-${DISTRO_VERSION}-${MACHINE}-${PV}"
 
 # U-Boot is the standard bootloader integration point for Mender
-# on i.MX + Renesas.  Each machine .conf picks the matching
+# on Renesas.  Each machine .conf picks the matching
 # `u-boot-mender` provider when this include is used.
 PREFERRED_PROVIDER_virtual/bootloader ?= "u-boot"
 

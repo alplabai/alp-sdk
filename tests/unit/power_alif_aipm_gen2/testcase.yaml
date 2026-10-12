@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+common:
+  platform_allow:
+    - native_sim
+    - native_sim/native/64
+  integration_platforms:
+    - native_sim/native/64
+  tags:
+    - alp
+    - unit
+    - power
+tests:
+  # The header's own asserts + the BACKUP4K/FWRAM pin; runs everywhere.
+  alp.unit.power_alif_aipm_gen2:
+    extra_args: ALP_AIPM_TWIN=0
+  # Adds src/aipm_twin.c: every ALP_AIPM_GEN2_* equals hal_alif's gen2
+  # aipm.h twin.  Needs the alif west module; filtered out where absent.
+  alp.unit.power_alif_aipm_gen2.twin:
+    extra_args: ALP_AIPM_TWIN=1
+    modules:
+      - alif

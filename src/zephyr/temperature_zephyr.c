@@ -183,7 +183,7 @@ alp_status_t alp_temperature_read_milli_c(int32_t *milli_c)
 
 #if !ALP_TEMPERATURE_SENSOR_ENABLED
 	/* No on-module sensor on this build: either the SoM preset declares
-     * none (e.g. E1M-NX9101), the target's board tree doesn't emit the
+     * none, the target's board tree doesn't emit the
      * alias yet (every non-AEN target today, including V2N -- see the
      * header's "Today's coverage" note), or the app never turned on
      * CONFIG_SENSOR. */

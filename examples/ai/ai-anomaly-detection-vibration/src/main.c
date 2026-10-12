@@ -345,7 +345,7 @@ int main(void)
 	/* Inference bring-up.  AUTO routes to the on-die NPU on real
      * silicon, falls back to CPU on native_sim.  TODO: when the
      * v0.6 real-model artifact lands, switch format to
-     * ALP_INFERENCE_MODEL_VELA for AEN / NX9101 + DXNN for V2N
+     * ALP_INFERENCE_MODEL_VELA for AEN + DXNN for V2N
      * (the loader-emitted preset will set this). */
 	alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
 	    .backend     = ALP_INFERENCE_BACKEND_AUTO,

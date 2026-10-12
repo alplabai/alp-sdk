@@ -237,4 +237,3 @@ them):
 The example pokes the CGU 76.8 MHz enable + the EXPMST0 force directly (with
 grounded reg/bit references) because the upstream clockctrl driver does neither;
 folding both into a Tier-1.5 clockctrl patch is the clean follow-up.
-[[project_pending_hw_configs]]
