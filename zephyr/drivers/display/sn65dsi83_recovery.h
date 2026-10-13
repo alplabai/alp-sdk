@@ -41,11 +41,25 @@
 #define SN65_REG_IRQ_EN     0xE0U
 #define SN65_REG_ERR_STAT   0xE5U
 
-/* CSR 0xE5 (IRQ_STAT, write-1-to-clear), datasheet SLLSEC1 Table 7-9.  Only bit 0 is named: it is
- * the one whose meaning the recovery policy depends on.  Every other set bit (the sync / SoT /
- * ECC / CRC flags) is treated as "a link error" without decoding it.  Table number checked
- * against the register-map layout of Tables 7-4..7-9, not against a local datasheet copy. */
-#define SN65_ERR_CHA_PLL_UNLOCK BIT(0)
+/* CSR 0xE5, R/W1C latched status.  Datasheet SLLSEC1I (Oct 2020) Table 7-9 "CSR Bit Field
+ * Definitions - IRQ Registers", register 0xE5.  Bit 1 is not defined there.  PLL_UNLOCK has reset
+ * value 1 and "is set whenever the PLL Lock status transitions from LOCK to UNLOCK": there is no
+ * live lock bit (0x0A.7 PLL_EN_STAT only says the PLL is enabled), so this latch is the only
+ * lock indicator -- and it is set again by every relock, our own re-init included. */
+#define SN65_ERR_CHA_SYNCH_ERR   BIT(7) /* unexpected HS/VS sync packet */
+#define SN65_ERR_CHA_CRC_ERR     BIT(6) /* data stream CRC error */
+#define SN65_ERR_CHA_UNC_ECC_ERR BIT(5) /* uncorrectable ECC error */
+#define SN65_ERR_CHA_COR_ECC_ERR BIT(4) /* correctable ECC error */
+#define SN65_ERR_CHA_LLP_ERR     BIT(3) /* low level protocol error (SoT/EoT sync, escape, LP) */
+#define SN65_ERR_CHA_SOT_BIT_ERR BIT(2) /* SoT leader sequence bit error */
+#define SN65_ERR_CHA_PLL_UNLOCK  BIT(0) /* PLL lock -> unlock transition (latched) */
+
+/* PLL_UNLOCK alone on this many polls in a row (about 10 s at the default 1 s interval): the
+ * latch is re-setting after every clear, i.e. a PLL that really is not holding lock.  Reported
+ * once per episode, in the counters and the log line.  NOT acted on: a re-init cannot fix a
+ * marginal DSI clock (Toradex saw the PLL fail to lock reliably in some in-spec DSI clock
+ * ranges) and re-initing on it is the blink this policy exists to avoid. */
+#define SN65_PLL_UNLOCK_STUCK_POLLS 10U
 
 /* CSR 0x0A.7: PLL_EN_STAT (not itself named "PLL locked" -- Table 7-2's own
  * init sequence wants >= 10 ms after PLL_EN regardless, see sn65dsi83_pll_start()). */
@@ -82,9 +96,10 @@ enum sn65dsi83_health {
  * same errors on SN65_ERR_POLLS_REINIT polls in a row, or on the first poll after a
  * re-init, mean the link does not hold and the sequence is replayed.
  *
- * CHA_PLL_UNLOCK alone never escalates: it is a LATCHED flag, set while the PLL (re)acquires
- * lock -- including during our own re-init -- so the first poll after a replay sees it even
- * though the PLL is locked now (PLL_EN_STAT is checked above).  Escalating on it re-inits every
+ * CHA_PLL_UNLOCK alone never escalates, config intact: it is a LATCHED flag, set whenever the PLL
+ * (re)acquires lock -- including during our own re-init -- so the first poll after a replay sees
+ * it although the PLL has locked since.  (PLL_EN_STAT, checked above, only says the PLL is
+ * enabled, not locked.)  Escalating on it re-inits every
  * SN65_REINIT_MIN_GAP_MS forever, a visible blink (Linux hit the same regression in its error
  * recovery: Toradex, LKML 2025-11, "TI SN65DSI83 is being reset making display to blink").
  */
@@ -184,6 +199,7 @@ struct sn65dsi83_stats {
 	uint32_t errors_cleared; /* CSR 0xE5 cleared with the PLL fine */
 	uint32_t err_polls;      /* consecutive polls with a CSR 0xE5 error other than PLL_UNLOCK */
 	uint32_t pll_unlock_events; /* polls with CSR 0xE5 == CHA_PLL_UNLOCK only (marginal PLL) */
+	uint32_t pll_unlock_streak; /* consecutive such polls */
 	int64_t  last_reinit_ms;
 	bool     have_last;
 	bool     last_failed;    /* the last replay failed */
@@ -194,6 +210,7 @@ struct sn65dsi83_stats {
 struct sn65dsi83_report {
 	enum sn65dsi83_health health;
 	bool                  suppressed; /* wanted a re-init, rate limit said not yet */
+	bool                  pll_unlock_stuck; /* PLL_UNLOCK re-latched, see ..._STUCK_POLLS */
 	int                   err;        /* re-init result (0 when none was attempted) */
 	uint8_t               pll_en;
 	uint8_t               clk_src;

@@ -219,8 +219,10 @@ int sn65dsi83_health_poll(const struct i2c_dt_spec   *i2c,
 	/* A lone latched PLL_UNLOCK is counted apart and never builds the escalation streak. */
 	if (rep->err_stat == SN65_ERR_CHA_PLL_UNLOCK) {
 		st->pll_unlock_events++;
+		rep->pll_unlock_stuck = ++st->pll_unlock_streak == SN65_PLL_UNLOCK_STUCK_POLLS;
 	} else {
-		st->err_polls = rep->err_stat != 0U ? st->err_polls + 1U : 0U;
+		st->pll_unlock_streak = 0U;
+		st->err_polls         = rep->err_stat != 0U ? st->err_polls + 1U : 0U;
 	}
 	rep->health        = sn65dsi83_health_decide(rep->pll_en,
 	                                             rep->clk_src,
@@ -288,7 +290,8 @@ void sn65dsi83_report_print(const struct sn65dsi83_report *rep, const struct sn6
 	}
 	printk("sn65dsi83: %s (0x0D=0x%02x 0x0A=0x%02x 0xE5=0x%02x) err=%d recoveries=%u failures=%u "
 	       "cleared=%u\n",
-	       rep->suppressed                           ? "down, re-init rate-limited"
+	       rep->pll_unlock_stuck                     ? "PLL_UNLOCK keeps re-latching (marginal PLL)"
+	       : rep->suppressed                         ? "down, re-init rate-limited"
 	       : rep->health == SN65_HEALTH_CLEAR_ERRORS ? "link errors cleared"
 	                                                 : "lost config, re-init",
 	       rep->pll_en,
