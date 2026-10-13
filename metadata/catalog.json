@@ -289,6 +289,35 @@
           "models": false,
           "peripherals": true
         },
+        "name": "aen-sdcard-file",
+        "osSet": [
+          "zephyr"
+        ],
+        "path": "examples/aen/aen-sdcard-file",
+        "som": "E1M-AEN801",
+        "summary": "Write, read back and list a file on the **E1M-EVK microSD card** (slot J7) with **FatFs**, from the Alif **M55-HE** of an **E1M-AEN801/AEN803** SoM."
+      },
+      {
+        "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "aen-secure-element-sign",
         "osSet": [
           "zephyr"

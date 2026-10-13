@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright 2026 Alp Lab AB
  *
- * Auto-generated for aen-cc3501e-gpio by scripts/gen_cc3501e_gpio_routes.py
+ * Auto-generated for aen-sdcard-file by scripts/gen_cc3501e_gpio_routes.py
  * from metadata/e1m_modules/E1M-AEN801.yaml `pad_routes:` (resolved for
  * hw_rev=r2 -- see metadata/e1m_modules/aen/hw-revisions.yaml
  * `pad_route_overrides:` when board.yaml sets `som.hw_rev:`).
