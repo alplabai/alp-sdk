@@ -71,6 +71,27 @@ alp_status_t alif_se_hw_rtc_int_arm(void);
 /** Switch the pad interrupt and the combined line off.  Idempotent. */
 void alif_se_hw_rtc_int_disarm(void);
 
+/* ---- Application LPGPIO wake pads (the `alp,power-wake-gpios` node) -------- */
+
+/** The pads the application named, as a bit mask (bit n = P15_n); 0 when the node is absent or a
+ *  pad's controller is not ready. */
+uint32_t alif_se_hw_wake_pad_mask(void);
+/** Mux the pads (pinctrl-0), make them plain inputs and drop any stale latched edge.  The
+ *  interrupt itself is switched on only inside alif_se_hw_enter_ewic(), under the lock. */
+alp_status_t alif_se_hw_wake_pads_arm(void);
+/** Switch the pad interrupts and the combined line off.  Idempotent. */
+void alif_se_hw_wake_pads_disarm(void);
+/** Runtime path (after the WFI, driver live): pads of @p pads whose edge the GPIO block latched,
+ *  from a live register read plus what the entry saw right after the WFI. */
+uint32_t alif_se_hw_wake_pads_fired(uint32_t pads);
+/** Runtime path: acknowledge (PORTA_EOI) the latched edge of @p pads so the next cycle starts
+ *  clean.  Disarm has already cleared their interrupt enable through the GPIO driver. */
+void alif_se_hw_wake_pads_release(uint32_t pads);
+/** Cold-boot path: the LPGPIO RAW_INTSTATUS captured at PRE_KERNEL_1 priority 0, before the GPIO
+ *  driver's init clears it.  0 without an `alp,power-wake-gpios` node.  The wake decode (POST_KERNEL)
+ *  must read this, never the live register. */
+uint32_t alif_se_hw_wake_pads_boot_latched(void);
+
 /** CGU / CLKCTL_SYS registers for the clock-restore trigger and its log. */
 #define ALIF_SE_CGU_OSC_CTRL      0u
 #define ALIF_SE_CGU_PLL_LOCK_CTRL 1u
@@ -93,6 +114,20 @@ uint32_t alif_se_hw_lpperi_cken(void);
 /** LPRTC CCVR (the counter, units unproven: ~2 Hz on LFRC). */
 uint32_t alif_se_hw_lprtc_ccvr(void);
 
+/** LPRTC CCVR and CPCVR (the prescaler sub-count, one LPRTC clock per step) as one
+ *  consistent pair; switches the LPRTC clock on like alif_se_hw_lprtc_ccvr().  A product
+ *  build (no bench scratch) returns 0 for both. */
+void alif_se_hw_lprtc_sample(uint32_t *ccvr, uint32_t *cpcvr);
+
+/** This image runs on the M55-HP (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP).  The HP has no TCM
+ *  retention and only a SOFT_OFF-class sleep (see alif_se_power.c), so the backend branches
+ *  on it; it is a function so the host test can drive both cores from one binary. */
+bool alif_se_hw_core_is_hp(void);
+
+/** Raw LPRTC register at byte offset @p off (CCR 0x0C, CPSR 0x20, CPCVR 0x24); no clock
+ *  enable. */
+uint32_t alif_se_hw_lprtc_read(unsigned off);
+
 /** This image's vector table base (SCB->VTOR), for the vendor-style OFF profile bench
  *  variant. */
 uint32_t alif_se_hw_vtor_read(void);
@@ -101,8 +136,9 @@ uint32_t alif_se_hw_vtor_read(void);
 
 /**
  * Enter the EWIC subsystem-off sleep: interrupts off (PRIMASK, BASEPRI 0, as the
- * DFP does), the wake pad armed (@p rtc_int: falling-edge interrupt on the
- * RV-3028 /INT pad plus the LPGPIO combined line toward the EWIC), read-modify-write
+ * DFP does), the wake pads armed (@p rtc_int: falling-edge interrupt on the
+ * RV-3028 /INT pad; @p pads: edge-to-active interrupts on the application LPGPIO pads, bit n =
+ * P15_n; both plus the LPGPIO combined line toward the EWIC), read-modify-write
  * of RTSS_HE_CTRL (WIC on, EWIC selected, COLD_WAKEUP cleared so the power domain
  * may drop), SLEEPDEEP, WFI.  When @p lptimer_ticks is non-zero the wake timer is armed
  * LAST, inside the interrupt-off section, and verified live (enabled, unmasked, not
@@ -115,9 +151,24 @@ uint32_t alif_se_hw_vtor_read(void);
  * entering, and so does a pad that already reads asserted once the edge is armed
  * (ALP_ERR_BUSY: the RV-3028 fired before the interrupt existed).
  */
-alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks);
+alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t pads, uint32_t lptimer_ticks);
 
 /** Why the last alif_se_hw_enter_ewic() refused (a static string), for the diagnostic. */
 const char *alif_se_hw_enter_reason(void);
+
+/* RTSS_x_CTRL WIC [9:8]: bit 8 = WICCONTROL[0] (WIC enable), bit 9 = WICCONTROL[1] (IWIC,
+ * 0 selects the EWIC). */
+#define ALIF_SE_CTRL_WIC_EN   (1u << 8)
+#define ALIF_SE_CTRL_WIC_IWIC (1u << 9)
+#define ALIF_SE_CTRL_WIC_MASK (ALIF_SE_CTRL_WIC_EN | ALIF_SE_CTRL_WIC_IWIC)
+
+/** The pure half of alp_som_power_core_off_take(): `ctrl` is the raw RTSS_x_CTRL.  Returns
+ *  whether it says "EWIC subsystem-off requested" (WIC [9:8] == 0b01); `*cleared` is `ctrl`
+ *  with WIC [9:8] cleared and COLD_WAKEUP and every other bit untouched. */
+static inline bool alif_se_ctrl_core_off(uint32_t ctrl, uint32_t *cleared)
+{
+	*cleared = ctrl & ~ALIF_SE_CTRL_WIC_MASK;
+	return (ctrl & ALIF_SE_CTRL_WIC_MASK) == ALIF_SE_CTRL_WIC_EN;
+}
 
 #endif /* ALP_BACKENDS_POWER_ALIF_SE_POWER_HW_H */

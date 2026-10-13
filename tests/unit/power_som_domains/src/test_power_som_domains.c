@@ -1053,7 +1053,7 @@ ZTEST(power_som_domains, test_wake_gpio_is_the_rtc_int_pad)
  * untouched", which test_weak_decode_defaults_pass_the_record_through proves by
  * leaving the hooks disarmed. */
 static struct {
-	bool                armed, discard;
+	bool                armed, discard, fire_pad;
 	unsigned            early_calls, i2c_calls;
 	unsigned            early_order, i2c_order, seq;
 	alp_som_pd_record_t early_seen;
@@ -1067,6 +1067,11 @@ void alp_som_power_wake_decode_early(alp_som_pd_record_t *rec)
 	g_dec.early_calls++;
 	g_dec.early_order = ++g_dec.seq;
 	g_dec.early_seen  = *rec;
+	if (g_dec.fire_pad) {
+		/* what the STOP backend's early decode does for a latched LPGPIO edge on P15_3 */
+		rec->wake_source |= ALP_POWER_WAKE_GPIO;
+		return;
+	}
 	rec->wake_source |= ALP_POWER_WAKE_TIMER;
 }
 
@@ -1124,6 +1129,45 @@ ZTEST(power_som_domains, test_weak_decode_defaults_pass_the_record_through)
 	zassert_true(info.valid);
 	zassert_equal(info.wake_source, 0u, "nothing decoded: nothing claimed");
 	zassert_equal(info.slept_ms, 0u);
+}
+
+ZTEST(power_som_domains, test_lpgpio_claimed_is_the_somwired_set)
+{
+	/* The domain nodes of this overlay sit on P15_0 (rtc wake), P15_1 + P15_5 (wifi), P15_4
+	 * (phy) and P15_7 (ext-flash, an AEN803 domain), so they alone claim 0xB3.  The
+	 * alp,wired-lpgpio-pads property (the `<2 3 6 7>` the generator emits for every AEN SoM)
+	 * adds P15_2, P15_3 and P15_6, which is what makes the mask 0xFF: drop the property and
+	 * this assertion fails.  gpio11 / gpio5 pads are not LPGPIO. */
+	zassert_equal(alp_som_power_lpgpio_claimed(), 0xFFu);
+}
+
+ZTEST(power_som_domains, test_boot_reports_the_pad_that_woke_the_soc)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed    = true;
+	g_dec.fire_pad = true;
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_GPIO);
+}
+
+ZTEST(power_som_domains, test_no_pad_is_reported_for_a_timer_wake)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+
+	zassert_equal(alp_som_power_boot_restore(), 0);
+	zassert_ok(alp_som_power_ops_boot_wake_info(&info));
+	zassert_equal(info.wake_source & ALP_POWER_WAKE_GPIO, 0u, "a timer wake names no pad");
 }
 
 ZTEST(power_som_domains, test_boot_runs_the_decode_hooks_early_then_i2c)
@@ -1292,6 +1336,18 @@ uint32_t alp_som_power_reset_syndrome_take(void)
 	return v;
 }
 
+static bool g_core_off; /* this core's WIC bits say subsystem-off */
+static int  g_core_off_takes;
+
+bool alp_som_power_core_off_take(void)
+{
+	bool v = g_core_off;
+
+	g_core_off = false; /* cleared by the take */
+	g_core_off_takes++;
+	return v;
+}
+
 static void wake_boot(alp_power_boot_info_t *info)
 {
 	zassert_equal(alp_som_power_boot_restore(), 0);
@@ -1387,6 +1443,123 @@ ZTEST(power_som_domains, test_only_the_pin_bit_marks_an_external_reset)
 	g_stop_mode = 0x10u;
 	g_syndrome  = 4u; /* reset request to the power domain: not proven to be a pin reset */
 	wake_boot(&info);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+}
+
+/* A STOP with another core running keeps the DC-DC up: STOP_MODE_STAT stays clear and only
+ * this core's WIC bits witness the power-off (E1M-AEN803 2026W36-0001, run D). */
+ZTEST(power_som_domains, test_core_off_witness_makes_a_stat_clear_stop_a_valid_wake)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	g_dec.armed = true;
+	poke_trusted_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0u;
+	g_core_off  = true;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_RTC);
+	zassert_false(g_core_off, "the WIC bits were consumed");
+	g_dec.armed = false;
+}
+
+ZTEST(power_som_domains, test_stat_clear_and_core_on_still_discards_the_record)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	poke_trusted_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0u;
+	g_core_off  = false;
+	wake_boot(&info);
+	zassert_false(info.valid);
+}
+
+ZTEST(power_som_domains, test_core_off_with_a_power_domain_reset_request_is_an_aborted_sleep)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	poke_trusted_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0u;
+	g_core_off  = true;
+	g_syndrome  = 4u;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+	zassert_equal(info.wake_source, 0u);
+}
+
+ZTEST(power_som_domains, test_core_off_only_with_no_wake_source_is_an_aborted_sleep)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec)); /* neither decode pass finds a source */
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0u;
+	g_core_off  = true;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+	zassert_equal(info.wake_source, 0u);
+	zassert_equal(info.slept_ms, 0u);
+	zassert_equal(info.quiesced_domains, info.restored_domains, "domains still restored");
+}
+
+ZTEST(power_som_domains, test_stat_set_with_core_off_and_no_source_stays_a_stop_wake)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	g_core_off  = true;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+}
+
+ZTEST(power_som_domains, test_core_off_with_no_record_blind_restores)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	alp_som_pd_store_clear();
+	hold_everything();
+	g_stop_mode = 0u;
+	g_core_off  = true;
+	wake_boot(&info);
+	zassert_true(info.valid);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
+	zassert_equal(level(LPGPIO, NRST_PIN), 1, "released");
+}
+
+ZTEST(power_som_domains, test_wic_is_consumed_on_a_plain_por_boot)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	alp_som_pd_store_clear();
+	g_stop_mode      = 0u;
+	g_core_off       = false;
+	g_core_off_takes = 0;
+	wake_boot(&info);
+	zassert_false(info.valid);
+	zassert_equal(g_core_off_takes, 1, "taken on every boot path");
+}
+
+ZTEST(power_som_domains, test_stat_set_without_core_off_is_unchanged)
+{
+	alp_power_boot_info_t info;
+
+	memset(&g_dec, 0, sizeof(g_dec));
+	poke_cycle_record(ALP_POWER_MODE_STOP);
+	g_stop_mode = 0x10u;
+	g_core_off  = false;
+	wake_boot(&info);
+	zassert_true(info.valid);
 	zassert_equal(info.realised_mode, ALP_POWER_MODE_STOP);
 }
 

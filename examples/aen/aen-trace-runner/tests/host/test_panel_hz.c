@@ -22,7 +22,7 @@
 #include "../../src/ipc/tr_flip.h"
 #include "../../src/ipc/tr_mbox.h"
 
-/* The shield's timing (alp-sdk-lcd zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/
+/* The shield's timing (zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/
  * e1m_evk_rk055hdmipi4ma0.overlay, &cdc200). */
 #define W         720
 #define HSYNC     6

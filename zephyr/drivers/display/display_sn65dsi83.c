@@ -24,14 +24,16 @@
  * Once its CSR bank is programmed the bridge is a transparent DSI-to-LVDS
  * converter -- the CDC200 (tes,cdc-2.1) stays the `zephyr,display` chosen
  * node and owns the framebuffer, layers and blanking.  This device exists
- * only to get itself into that transparent state once, at init, which is why
+ * only to get itself into that transparent state at init -- and again, through
+ * the same init sequence, if the bridge later resets itself to its defaults
+ * (CONFIG_SN65DSI83_RECOVERY, sn65dsi83_recovery.h) -- which is why
  * `DEVICE_DT_INST_DEFINE()` below passes no display_driver_api.
  *
- * INIT ORDER (why this runs at CONFIG_APPLICATION_INIT_PRIORITY, matching
+ * INIT ORDER (why this runs at POST_KERNEL, CONFIG_APPLICATION_INIT_PRIORITY, matching
  * upstream Zephyr's himax,hx8394 panel driver): by the time this device
  * initializes, the I2C bus, the EN pin's GPIO controller (a plain SoC GPIO on
  * this shield: P13_4, the mikroBUS INT pin, gpio13) and the DesignWare
- * MIPI-DSI host all need to be ready.  APPLICATION (90, kernel/Kconfig.device) is
+ * MIPI-DSI host all need to be ready.  CONFIG_APPLICATION_INIT_PRIORITY (90, kernel/Kconfig.device) is
  * after the GPIO and I2C controllers (I2C bus priority, KERNEL_INIT_PRIORITY_DEVICE = 50,
  * drivers/i2c/Kconfig), the fixed regulators (REGULATOR_FIXED_INIT_PRIORITY
  * = 75, drivers/regulator/Kconfig.fixed) and the DSI host + CDC200
@@ -96,6 +98,14 @@
  * dsi_dw_attach() only ever ORs the host's flags onto whatever the
  * peripheral already set -- it never clears one.
  *
+ * WARM BOOT (this core alone reset while the core that owns the bus runs; needs the
+ * alp,i2c-handover alive-address, see sn65dsi83_boot_plan_for()): the sequence above is NOT
+ * run.  EN stays high (low would reset a bridge the owner is watching), the I2C controller
+ * is neither initialised nor used (the owner may be mid-transfer), the recipe magic and the
+ * owner's counters are kept and the recipe is re-published unchanged.  Steps 2-3 still run:
+ * the DSI host and the CDC200 need them.  Restarting the host's clock lane can cost the
+ * bridge its PLL lock; the bus owner's recovery agent notices and replays the CSR table.
+ *
  * BLANKING IS NOT SUPPORTED: an app must not call display_blanking_on() on
  * the CDC200 behind this bridge (the first blanking_off(), which starts
  * video, is the supported use).
@@ -122,11 +132,23 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/mipi_dsi.h>
+#include <zephyr/init.h>
 #include <zephyr/drivers/mipi_dsi/dsi_dw.h>
 #include <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/barrier.h>
+#include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
+
+#include "sn65dsi83_recovery.h"
+
+#ifdef CONFIG_ALIF_I2C_HANDOVER
+#include "../../soc-bridge/alif/i2c_handover.h"
+#define SN65_BOOT_IS_WARM() alp_i2c_handover_warm_boot()
+#else
+#define SN65_BOOT_IS_WARM() false
+#endif
 
 LOG_MODULE_REGISTER(sn65dsi83, CONFIG_DISPLAY_LOG_LEVEL);
 
@@ -145,13 +167,24 @@ LOG_MODULE_REGISTER(sn65dsi83, CONFIG_DISPLAY_LOG_LEVEL);
 BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(ti_sn65dsi83) <= 1,
              "display_sn65dsi83.c assumes a single ti,sn65dsi83 instance");
 
+/*
+ * A core that releases this bridge's I2C bus (alp,i2c-handover) may not touch the bridge
+ * afterwards, so its recovery has to run on the core that gets the bus: the recipe address
+ * says where this driver publishes the table that core replays.  A handover without it
+ * would leave the bridge unwatched.
+ */
+#define SN65_HANDOVER_NEEDS_RECIPE(node) \
+	BUILD_ASSERT(!(DT_ENUM_HAS_VALUE(node, role, release) && \
+	               COND_CODE_1(DT_NODE_HAS_PROP(node, bus), \
+	                           (DT_SAME_NODE(DT_PROP(node, bus), DT_INST_BUS(0))), \
+	                           (0))) || \
+	                 DT_INST_NODE_HAS_PROP(0, recovery_recipe_address), \
+	             "ti,sn65dsi83: an alp,i2c-handover release node hands this bridge's I2C bus to " \
+	             "another core, so recovery-recipe-address is required");
+DT_FOREACH_STATUS_OKAY(alp_i2c_handover, SN65_HANDOVER_NEEDS_RECIPE)
+
 /* CSR addresses (datasheet Tables 7-4..7-9). */
-#define SN65_REG_ID_BASE    0x00U /* 9-byte burst: CSR 0x00..0x08. */
-#define SN65_REG_ID_LEN     9U
-#define SN65_REG_SOFT_RESET 0x09U
-#define SN65_REG_CLK_SRC    0x0AU /* LVDS_CLK_RANGE[3:1], HS_CLK_SRC[0]; PLL_EN_STAT[7] (R/O). */
-#define SN65_REG_CLK_DIV    0x0BU /* DSI_CLK_DIVIDER[7:3], REFCLK_MULTIPLIER[1:0]. */
-#define SN65_REG_PLL_EN     0x0DU
+#define SN65_REG_CLK_DIV 0x0BU /* DSI_CLK_DIVIDER[7:3], REFCLK_MULTIPLIER[1:0]. */
 #define SN65_REG_DSI_LANE \
 	0x10U /* bit7/6:5 reserved (default 0/01), CHA_DSI_LANES[4:3] (Table 7-6). */
 #define SN65_REG_DSI_CLK_RANGE 0x12U
@@ -171,17 +204,6 @@ BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(ti_sn65dsi83) <= 1,
 #define SN65_REG_HFP           0x38U /* test-pattern only. */
 #define SN65_REG_VFP           0x3AU /* test-pattern only. */
 #define SN65_REG_TEST_PATTERN  0x3CU
-#define SN65_REG_IRQ_EN        0xE0U
-#define SN65_REG_ERR_STAT      0xE5U
-
-/* CSR 0x0A.7: PLL_EN_STAT (not itself named "PLL locked" -- Table 7-2's own
- * init sequence wants >= 10 ms after PLL_EN regardless, see
- * sn65dsi83_pll_start()). */
-#define SN65_CLK_SRC_PLL_EN_STAT BIT(7)
-
-/* CSR 0x0D / 0x09. */
-#define SN65_PLL_EN_BIT     BIT(0)
-#define SN65_SOFT_RESET_BIT BIT(0)
 
 /* CSR 0x18 (datasheet Table 7-7). */
 #define SN65_LVDS_FMT_DE_POS    0U                /* bit7=0: DE positive (default). */
@@ -414,187 +436,120 @@ BUILD_ASSERT(SN65_SYNC_DELAY >= 32U && SN65_SYNC_DELAY <= 0xFFFU,
              "the 12-bit field");
 
 struct sn65dsi83_config {
-	struct i2c_dt_spec   i2c;
-	const struct device *mipi_dsi;
-	struct gpio_dt_spec  enable_gpio;
+	struct i2c_dt_spec       i2c;
+	const struct device     *mipi_dsi;
+	struct gpio_dt_spec      enable_gpio;
+	struct sn65dsi83_recipe *recipe; /* NULL: this core keeps the bus and polls the bridge itself */
+};
+
+struct sn65dsi83_data {
+	struct k_work_delayable health_work;
+	struct sn65dsi83_stats  stats;
 };
 
 /*
- * Datasheet Table 7-4: "Addresses 0x08 - 0x00 = {0x01, 0x20, 0x20, 0x20,
- * 0x44, 0x53, 0x49, 0x38, 0x35}" -- the list is high-address-first, so 0x08
- * holds 0x01 and 0x00 holds 0x35.  A 9-byte burst read ascending from 0x00
- * therefore returns the list REVERSED: "58ISD   " + 0x01, i.e. "DSI85" read
- * backwards.  BENCH-UNVERIFIED -- the first real read-back settles it.
+ * The CSR bank, written at init and replayed verbatim by a recovery
+ * (sn65dsi83_recovery.c).  A table would hide which value is a fixed datasheet
+ * constant (format polarities) versus a DT-derived one (the clock/lane/timing
+ * values above) -- the comments say which.
  */
-static const uint8_t sn65dsi83_expected_id[SN65_REG_ID_LEN] = {
-	0x35U, 0x38U, 0x49U, 0x53U, 0x44U, 0x20U, 0x20U, 0x20U, 0x01U,
+#define SN65_CSR(r, v) { (r), (uint8_t)(v) }
+
+static const struct sn65dsi83_csr sn65dsi83_csr[] = {
+	SN65_CSR(SN65_REG_CLK_SRC, (SN65_LVDS_CLK_RANGE << 1) | 1U /* HS_CLK_SRC */),
+	SN65_CSR(SN65_REG_CLK_DIV, (SN65_DSI_CLK_DIV_FIELD << 3) /* REFCLK_MULTIPLIER=0 */),
+	SN65_CSR(SN65_REG_DSI_LANE, SN65_DSI_LANE_REG),
+	SN65_CSR(0x11U, 0x00U), /* CHA_DSI_DATA_EQ/CLK_EQ: no equalization */
+	SN65_CSR(SN65_REG_DSI_CLK_RANGE, SN65_DSI_CLK_RANGE),
+	SN65_CSR(SN65_REG_LVDS_FMT, SN65_LVDS_FMT_REG),
+	SN65_CSR(SN65_REG_LINE_LEN_LOW, SN65_HACTIVE & 0xFFU),
+	SN65_CSR(SN65_REG_LINE_LEN_HIGH, (SN65_HACTIVE >> 8) & 0x0FU),
+	SN65_CSR(SN65_REG_VDISP_LOW, SN65_VACTIVE & 0xFFU),
+	SN65_CSR(SN65_REG_VDISP_HIGH, (SN65_VACTIVE >> 8) & 0x0FU),
+	SN65_CSR(SN65_REG_SYNC_DLY_LOW, SN65_SYNC_DELAY & 0xFFU),
+	SN65_CSR(SN65_REG_SYNC_DLY_HIGH, (SN65_SYNC_DELAY >> 8) & 0x0FU),
+	SN65_CSR(SN65_REG_HSYNC_PW_LOW, SN65_HSYNC_LEN & 0xFFU),
+	SN65_CSR(SN65_REG_HSYNC_PW_HIGH, (SN65_HSYNC_LEN >> 8) & 0x03U),
+	SN65_CSR(SN65_REG_VSYNC_PW_LOW, SN65_VSYNC_LEN & 0xFFU),
+	SN65_CSR(SN65_REG_VSYNC_PW_HIGH, (SN65_VSYNC_LEN >> 8) & 0x03U),
+	SN65_CSR(SN65_REG_HBP, SN65_HBACK_PORCH & 0xFFU),
+	SN65_CSR(SN65_REG_VBP, SN65_VBACK_PORCH & 0xFFU),
+	SN65_CSR(SN65_REG_HFP, SN65_HFRONT_PORCH & 0xFFU),
+	SN65_CSR(SN65_REG_VFP, SN65_VFRONT_PORCH & 0xFFU),
+	SN65_CSR(SN65_REG_TEST_PATTERN,
+	         IS_ENABLED(CONFIG_SN65DSI83_TEST_PATTERN) ? SN65_TEST_PATTERN_EN : 0x00U),
 };
 
-static int sn65dsi83_check_id(const struct device *dev)
+BUILD_ASSERT(ARRAY_SIZE(sn65dsi83_csr) <= SN65_RECIPE_MAX,
+             "sn65dsi83: the CSR table no longer fits the shared recovery recipe");
+
+#ifdef CONFIG_SN65DSI83_RECOVERY
+/* The bridge's health pass on the core that owns its I2C bus; serialised with every other
+ * user of the bus by the I2C driver (one core, one driver instance).  Reported with printk:
+ * the apps this runs in keep CONFIG_LOG off, so a LOG_WRN here would never be seen. */
+static void sn65dsi83_health_work(struct k_work *work)
 {
-	const struct sn65dsi83_config *config = dev->config;
-	uint8_t                        id[SN65_REG_ID_LEN];
-	int                            ret;
+	struct k_work_delayable       *dwork  = k_work_delayable_from_work(work);
+	struct sn65dsi83_data         *data   = CONTAINER_OF(dwork, struct sn65dsi83_data, health_work);
+	const struct sn65dsi83_config *config = DEVICE_DT_INST_GET(0)->config;
+	struct sn65dsi83_report        rep;
 
-	ret = i2c_burst_read_dt(&config->i2c, SN65_REG_ID_BASE, id, sizeof(id));
-	if (ret != 0) {
-		LOG_ERR("ID read failed (%d) -- EN high but the bridge did not answer I2C", ret);
-		return ret;
+	if (sn65dsi83_health_poll(&config->i2c,
+	                          sn65dsi83_csr,
+	                          ARRAY_SIZE(sn65dsi83_csr),
+	                          &data->stats,
+	                          &rep,
+	                          k_uptime_get()) == 0) {
+		sn65dsi83_report_print(&rep, &data->stats);
 	}
 
-	if (memcmp(id, sn65dsi83_expected_id, sizeof(id)) != 0) {
-		LOG_ERR("Unexpected ID: got %02x %02x %02x %02x %02x %02x %02x %02x %02x, "
-		        "want %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-		        id[0],
-		        id[1],
-		        id[2],
-		        id[3],
-		        id[4],
-		        id[5],
-		        id[6],
-		        id[7],
-		        id[8],
-		        sn65dsi83_expected_id[0],
-		        sn65dsi83_expected_id[1],
-		        sn65dsi83_expected_id[2],
-		        sn65dsi83_expected_id[3],
-		        sn65dsi83_expected_id[4],
-		        sn65dsi83_expected_id[5],
-		        sn65dsi83_expected_id[6],
-		        sn65dsi83_expected_id[7],
-		        sn65dsi83_expected_id[8]);
-		return -ENODEV;
-	}
-
-	return 0;
+	k_work_reschedule(dwork, K_MSEC(CONFIG_SN65DSI83_RECOVERY_INTERVAL_MS));
 }
 
-static int sn65dsi83_program_csr(const struct device *dev)
+/* Called as soon as the bridge has answered its ID check, BEFORE the CSR bank is written: a
+ * boot init that then fails half-way is recoverable by the same replay.  A warm boot calls it
+ * without the check: the recipe is a compile-time constant, publishing it again changes nothing. */
+static void sn65dsi83_arm_recovery(const struct device *dev)
 {
 	const struct sn65dsi83_config *config = dev->config;
-	const struct i2c_dt_spec      *i2c    = &config->i2c;
-	int                            ret;
 
-	/*
-	 * Every one of these is a single-byte write; a table would save lines
-	 * but would also hide which value is a fixed datasheet constant
-	 * (SOFT_RESET-adjacent, format polarities) versus a DT-derived one
-	 * (the clock/lane/timing values above) -- worth the repetition.
-	 */
-	static const struct {
-		uint8_t  reg;
-		uint32_t val; /* uint32_t: several are compile-time expressions, not all fit uint8_t
-				 statically, though every one is masked to a byte before use. */
-	} csr[] = {
-		{ SN65_REG_CLK_SRC, (SN65_LVDS_CLK_RANGE << 1) | 1U /* HS_CLK_SRC */ },
-		{ SN65_REG_CLK_DIV, (SN65_DSI_CLK_DIV_FIELD << 3) /* REFCLK_MULTIPLIER=0 */ },
-		{ SN65_REG_DSI_LANE, SN65_DSI_LANE_REG },
-		{ 0x11U, 0x00U }, /* CHA_DSI_DATA_EQ/CLK_EQ: no equalization */
-		{ SN65_REG_DSI_CLK_RANGE, SN65_DSI_CLK_RANGE },
-		{ SN65_REG_LVDS_FMT, SN65_LVDS_FMT_REG },
-		{ SN65_REG_LINE_LEN_LOW, SN65_HACTIVE & 0xFFU },
-		{ SN65_REG_LINE_LEN_HIGH, (SN65_HACTIVE >> 8) & 0x0FU },
-		{ SN65_REG_VDISP_LOW, SN65_VACTIVE & 0xFFU },
-		{ SN65_REG_VDISP_HIGH, (SN65_VACTIVE >> 8) & 0x0FU },
-		{ SN65_REG_SYNC_DLY_LOW, SN65_SYNC_DELAY & 0xFFU },
-		{ SN65_REG_SYNC_DLY_HIGH, (SN65_SYNC_DELAY >> 8) & 0x0FU },
-		{ SN65_REG_HSYNC_PW_LOW, SN65_HSYNC_LEN & 0xFFU },
-		{ SN65_REG_HSYNC_PW_HIGH, (SN65_HSYNC_LEN >> 8) & 0x03U },
-		{ SN65_REG_VSYNC_PW_LOW, SN65_VSYNC_LEN & 0xFFU },
-		{ SN65_REG_VSYNC_PW_HIGH, (SN65_VSYNC_LEN >> 8) & 0x03U },
-		{ SN65_REG_HBP, SN65_HBACK_PORCH & 0xFFU },
-		{ SN65_REG_VBP, SN65_VBACK_PORCH & 0xFFU },
-		{ SN65_REG_HFP, SN65_HFRONT_PORCH & 0xFFU },
-		{ SN65_REG_VFP, SN65_VFRONT_PORCH & 0xFFU },
-		{ SN65_REG_TEST_PATTERN,
-		  IS_ENABLED(CONFIG_SN65DSI83_TEST_PATTERN) ? SN65_TEST_PATTERN_EN : 0x00U },
-	};
+	if (config->recipe != NULL) {
+		/* The bus goes to another core after this init (alp,i2c-handover): hand it
+		 * the table; it polls, this core never touches the bridge again. */
+		struct sn65dsi83_recipe *r = config->recipe;
 
-	for (size_t i = 0; i < ARRAY_SIZE(csr); i++) {
-		ret = i2c_reg_write_byte_dt(i2c, csr[i].reg, (uint8_t)csr[i].val);
-		if (ret != 0) {
-			LOG_ERR("CSR 0x%02x write failed (%d)", csr[i].reg, ret);
-			return ret;
+		for (size_t i = 0; i < ARRAY_SIZE(sn65dsi83_csr); i++) {
+			r->csr[i] = sn65dsi83_csr[i];
 		}
+		r->n = ARRAY_SIZE(sn65dsi83_csr);
+		barrier_dmem_fence_full();
+		r->magic = SN65_RECIPE_MAGIC;
+		barrier_dmem_fence_full();
+	} else {
+		struct sn65dsi83_data *data = dev->data;
+
+		k_work_init_delayable(&data->health_work, sn65dsi83_health_work);
+		k_work_schedule(&data->health_work, K_MSEC(CONFIG_SN65DSI83_RECOVERY_INTERVAL_MS));
 	}
-
-	return 0;
 }
-
-static int sn65dsi83_pll_start(const struct device *dev)
+#else
+static inline void sn65dsi83_arm_recovery(const struct device *dev)
 {
-	const struct sn65dsi83_config *config = dev->config;
-	const struct i2c_dt_spec      *i2c    = &config->i2c;
-	int                            ret;
-
-	/* Datasheet init seq 6: set PLL_EN.  The input clock (the DSI clock lane,
-	 * already HS since step 3 of sn65dsi83_init()) must already be stable. */
-	ret = i2c_reg_write_byte_dt(i2c, SN65_REG_PLL_EN, SN65_PLL_EN_BIT);
-	if (ret != 0) {
-		LOG_ERR("PLL_EN write failed (%d)", ret);
-		return ret;
-	}
-
-	/*
-	 * CSR 0x0A.7 is named PLL_EN_STAT, not a "PLL locked" bit -- poll it
-	 * instead of a fixed sleep so a PLL that never comes up at all is
-	 * reported as such, distinct from a PLL that is merely still settling.
-	 * Table 7-2's own init sequence (step 6) asks for a flat 10 ms wait
-	 * after PLL_EN regardless of PLL_EN_STAT; give that margin here too
-	 * rather than the smaller 3 ms the CSR 0x0A bit-field note alone would
-	 * suggest.
-	 */
-	for (int i = 0; i < 20; i++) {
-		uint8_t clk_src;
-
-		ret = i2c_reg_read_byte_dt(i2c, SN65_REG_CLK_SRC, &clk_src);
-		if (ret != 0) {
-			LOG_ERR("PLL_EN_STAT poll read failed (%d)", ret);
-			return ret;
-		}
-		if (clk_src & SN65_CLK_SRC_PLL_EN_STAT) {
-			break;
-		}
-		k_msleep(1);
-		if (i == 19) {
-			LOG_ERR("PLL_EN_STAT did not assert within 20 ms (CSR 0x0A=0x%02x)", clk_src);
-			return -ETIMEDOUT;
-		}
-	}
-	/* Table 7-2 init sequence's own margin after PLL_EN (see the comment above). */
-	k_msleep(10);
-
-	/* Datasheet init seq 7: SOFT_RESET, then wait 10 ms. */
-	ret = i2c_reg_write_byte_dt(i2c, SN65_REG_SOFT_RESET, SN65_SOFT_RESET_BIT);
-	if (ret != 0) {
-		LOG_ERR("SOFT_RESET write failed (%d)", ret);
-		return ret;
-	}
-	k_msleep(10);
-
-	/* Datasheet init seq 10: no IRQ pin wired on this adapter, so IRQ_EN stays
-	 * off; clear whatever the reset/PLL-lock sequence latched into 0xE5. */
-	ret = i2c_reg_write_byte_dt(i2c, SN65_REG_IRQ_EN, 0x00U);
-	if (ret != 0) {
-		LOG_ERR("IRQ_EN write failed (%d)", ret);
-		return ret;
-	}
-	ret = i2c_reg_write_byte_dt(i2c, SN65_REG_ERR_STAT, 0xFFU);
-	if (ret != 0) {
-		LOG_ERR("Error-register clear failed (%d)", ret);
-		return ret;
-	}
-
-	return 0;
+	ARG_UNUSED(dev);
 }
+#endif /* CONFIG_SN65DSI83_RECOVERY */
 
 static int sn65dsi83_init(const struct device *dev)
 {
 	const struct sn65dsi83_config *config = dev->config;
 	struct mipi_dsi_device         mdev   = { 0 };
-	int                            ret;
+	const struct sn65dsi83_boot_plan plan =
+	    sn65dsi83_boot_plan_for(SN65_BOOT_IS_WARM(), config->recipe != NULL);
+	int ret;
 
-	if (!device_is_ready(config->i2c.bus)) {
+	/* A warm boot never looks at the bus: it is not initialised on this core and belongs to
+	 * the core that took it (alp,i2c-handover). */
+	if (plan.touch_bus && !device_is_ready(config->i2c.bus)) {
 		LOG_ERR("I2C bus not ready");
 		return -ENODEV;
 	}
@@ -607,13 +562,32 @@ static int sn65dsi83_init(const struct device *dev)
 		return -ENODEV;
 	}
 
-	/* Step 1: EN low for >= 10 ms (datasheet init seq 3). */
-	ret = gpio_pin_configure_dt(&config->enable_gpio, GPIO_OUTPUT_INACTIVE);
-	if (ret != 0) {
-		LOG_ERR("EN GPIO configure failed (%d)", ret);
-		return ret;
+	if (plan.clear_recipe) {
+		/* A recipe and counters left in SRAM by a previous boot are not ours. */
+		config->recipe->magic          = 0U;
+		config->recipe->recoveries     = 0U;
+		config->recipe->failures       = 0U;
+		config->recipe->errors_cleared = 0U;
+		barrier_dmem_fence_full();
 	}
-	k_msleep(10);
+
+	if (plan.toggle_en) {
+		/* Step 1: EN low for >= 10 ms (datasheet init seq 3). */
+		ret = gpio_pin_configure_dt(&config->enable_gpio, GPIO_OUTPUT_INACTIVE);
+		if (ret != 0) {
+			LOG_ERR("EN GPIO configure failed (%d)", ret);
+			return ret;
+		}
+		k_msleep(10);
+	} else {
+		/* Warm boot: EN stays high (the bridge keeps its configuration); the pin is only
+		 * claimed as an output at its current level. */
+		ret = gpio_pin_configure_dt(&config->enable_gpio, GPIO_OUTPUT_ACTIVE);
+		if (ret != 0) {
+			LOG_ERR("EN GPIO configure failed (%d)", ret);
+			return ret;
+		}
+	}
 
 	/* Step 2: attach to the DSI host (configures it, leaves the clock lane LP). */
 	mdev.data_lanes = SN65_DATA_LANES;
@@ -651,6 +625,14 @@ static int sn65dsi83_init(const struct device *dev)
 		return ret;
 	}
 
+	if (!plan.touch_bus) {
+		/* Warm boot: the bus owner replays the CSRs if the host restart cost the bridge its
+		 * PLL lock; this core only keeps the owner's recipe valid. */
+		sn65dsi83_arm_recovery(dev);
+		printk("sn65dsi83: warm boot, bridge and I2C bus left to the bus owner\n");
+		return 0;
+	}
+
 	/* Step 4: EN high, wait 10 ms (datasheet init seq 4). */
 	ret = gpio_pin_set_dt(&config->enable_gpio, 1);
 	if (ret != 0) {
@@ -661,19 +643,22 @@ static int sn65dsi83_init(const struct device *dev)
 
 	/* Step 5: the bridge answers I2C for the first time -- confirm it is
 	 * actually there before writing a single CSR into the dark. */
-	ret = sn65dsi83_check_id(dev);
+	ret = sn65dsi83_check_id(&config->i2c);
 	if (ret != 0) {
 		return ret;
 	}
 
+	/* From here a failure is recoverable by replaying the init: arm that first. */
+	sn65dsi83_arm_recovery(dev);
+
 	/* Step 6: program the CSR bank (datasheet init seq 5). */
-	ret = sn65dsi83_program_csr(dev);
+	ret = sn65dsi83_csr_write(&config->i2c, sn65dsi83_csr, ARRAY_SIZE(sn65dsi83_csr));
 	if (ret != 0) {
 		return ret;
 	}
 
 	/* Step 7: PLL_EN, poll lock, SOFT_RESET, clear errors (init seq 6-10). */
-	return sn65dsi83_pll_start(dev);
+	return sn65dsi83_pll_start(&config->i2c);
 }
 
 int sn65dsi83_read_errors(const struct device *dev, uint8_t *e5)
@@ -688,25 +673,71 @@ int sn65dsi83_read_errors(const struct device *dev, uint8_t *e5)
 	return i2c_reg_read_byte_dt(&config->i2c, SN65_REG_ERR_STAT, e5);
 }
 
+uint32_t sn65dsi83_recovery_count(const struct device *dev)
+{
+	const struct sn65dsi83_config *config;
+
+	if (dev == NULL) {
+		return 0;
+	}
+
+	config = dev->config;
+	if (config->recipe != NULL) {
+		return config->recipe->recoveries; /* counted by the core that owns the bus */
+	}
+	return ((const struct sn65dsi83_data *)dev->data)->stats.recoveries;
+}
+
 /* The bridge is driven through dsi_dw_set_mode(), which only the DesignWare DSI host provides. */
 #define SN65DSI83_ASSERT_HOST(inst) \
 	BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_INST_PHANDLE(inst, mipi_dsi), snps_designware_dsi), \
 	             "ti,sn65dsi83 mipi-dsi must point at a snps,designware-dsi host");
 DT_INST_FOREACH_STATUS_OKAY(SN65DSI83_ASSERT_HOST)
 
+#define SN65DSI83_RECIPE(inst) \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, recovery_recipe_address), \
+	            ((struct sn65dsi83_recipe *)DT_INST_PROP(inst, recovery_recipe_address)), \
+	            (NULL))
+
 #define SN65DSI83_INIT(inst) \
+	static struct sn65dsi83_data         sn65dsi83_data_##inst; \
 	static const struct sn65dsi83_config sn65dsi83_config_##inst = { \
 		.i2c         = I2C_DT_SPEC_INST_GET(inst), \
 		.mipi_dsi    = DEVICE_DT_GET(DT_INST_PHANDLE(inst, mipi_dsi)), \
 		.enable_gpio = GPIO_DT_SPEC_INST_GET(inst, enable_gpios), \
+		.recipe      = SN65DSI83_RECIPE(inst), \
 	}; \
 	DEVICE_DT_INST_DEFINE(inst, \
 	                      sn65dsi83_init, \
 	                      NULL, \
-	                      NULL, \
+	                      &sn65dsi83_data_##inst, \
 	                      &sn65dsi83_config_##inst, \
 	                      POST_KERNEL, \
 	                      CONFIG_APPLICATION_INIT_PRIORITY, \
 	                      NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(SN65DSI83_INIT)
+
+/*
+ * A bridge on a deferred-init bus must itself be deferred (Zephyr's build-time init-priority check:
+ * "non-deferred device depends on deferred device"), and the bus is deferred so that a warm boot of
+ * this core can leave a controller the other core is using untouched (alp,i2c-handover alive-address).
+ * The driver then starts itself from a SYS_INIT at APPLICATION level, priority 90 (a deferred device
+ * is not part of the POST_KERNEL 90 slot the non-deferred one takes; APPLICATION comes after every
+ * POST_KERNEL driver, so the DSI host, the CDC200 and the GPIO controller are up, and before the
+ * handover release at APPLICATION 99).  The bus is up by then on a cold boot (the handover glue
+ * initialises it at POST_KERNEL 49), and a warm boot's sn65dsi83_init() never opens it.  The
+ * priority has to be a literal (SYS_INIT pastes it).
+ */
+#define SN65_START_PRIO 90
+BUILD_ASSERT(CONFIG_APPLICATION_INIT_PRIORITY == SN65_START_PRIO,
+             "display_sn65dsi83.c: SN65_START_PRIO must equal CONFIG_APPLICATION_INIT_PRIORITY");
+
+#define SN65DSI83_DEFERRED_START(inst) \
+	COND_CODE_1(DT_INST_PROP_OR(inst, zephyr_deferred_init, 0), \
+	            (static int sn65dsi83_start_##inst(void) \
+	             { \
+		             return device_init(DEVICE_DT_INST_GET(inst)); \
+	             } SYS_INIT(sn65dsi83_start_##inst, APPLICATION, SN65_START_PRIO);), \
+	            ())
+DT_INST_FOREACH_STATUS_OKAY(SN65DSI83_DEFERRED_START)

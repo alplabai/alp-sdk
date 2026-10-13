@@ -1013,6 +1013,30 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_camera
              COMMAND alp_test_peripheral_camera)
 
+    # CR10 unpack: AArch64 NEON == scalar == an independent packer (#2792).
+    # Header-only, so no alp::sdk link.  On a non-AArch64 host only the scalar
+    # path exists and the test checks it against the independent packer.
+    add_executable(alp_test_camera_cr10_unpack
+        ${CMAKE_CURRENT_SOURCE_DIR}/camera_cr10_unpack.c
+    )
+    target_include_directories(alp_test_camera_cr10_unpack PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/camera
+    )
+    target_compile_features(alp_test_camera_cr10_unpack PRIVATE c_std_99)
+
+    add_test(NAME alp_test_camera_cr10_unpack
+             COMMAND alp_test_camera_cr10_unpack)
+
+    # Microbenchmark (not a ctest): run on the target aarch64 board, not an emulator.
+    add_executable(alp_bench_camera_cr10
+        ${CMAKE_CURRENT_SOURCE_DIR}/camera_cr10_bench.c
+    )
+    target_include_directories(alp_bench_camera_cr10 PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/camera
+    )
+    target_compile_features(alp_bench_camera_cr10 PRIVATE c_std_99)
+
     # A static libalp_sdk.a must keep every Linux backend that sits in its own
     # TU beside the class's catch-all stub (#2790): only the stub is reachable
     # from the dispatcher.  Link a tiny binary against alp::sdk, then require
@@ -1035,6 +1059,26 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                          -P ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/check-static-backends.cmake)
         add_test(NAME alp_test_static_link_camera_selects_yocto
                  COMMAND alp_test_static_link_camera)
+        # Install the static archive into a scratch multiarch prefix and link
+        # the same probe with the plain compiler through the INSTALLED
+        # alp-sdk.pc (no alp::sdk INTERFACE options): the non-CMake /
+        # Yocto-recipe path (#2829).  Re-configures and builds the SDK in a
+        # scratch dir, so it takes a few seconds.
+        find_program(_alp_pkg_config pkg-config)
+        if(_alp_pkg_config AND CMAKE_C_COMPILER
+                AND EXISTS ${CMAKE_BINARY_DIR}/pkgconfig/alp-sdk.pc)
+            add_test(NAME alp_test_static_link_pkgconfig
+                     COMMAND ${CMAKE_COMMAND}
+                             -DSRC_DIR=${PROJECT_SOURCE_DIR}
+                             -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/static_link_pkgconfig
+                             -DPKG_CONFIG=${_alp_pkg_config}
+                             -DCC=${CMAKE_C_COMPILER}
+                             -DNM=${CMAKE_NM}
+                             -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/static_link_camera_backend.c
+                             -P ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/check-static-pkgconfig.cmake)
+        else()
+            message(STATUS "SKIP alp_test_static_link_pkgconfig: needs pkg-config and alp-sdk.pc")
+        endif()
     else()
         message(STATUS "SKIP alp_test_static_link_backends: needs CMAKE_NM and a static ELF alp_sdk")
     endif()
@@ -1550,6 +1594,26 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_test(NAME alp_test_can_yocto_filter_ext_id
              COMMAND alp_test_can_yocto_filter_ext_id)
+
+    # Issue #2352: E1M bus id -> Linux netdev via the devicetree
+    # `alp,e1m-can-netdev` map; same #include-the-.c technique.
+    add_executable(alp_test_can_yocto_netdev_map
+        ${CMAKE_CURRENT_SOURCE_DIR}/can_yocto_netdev_map.c
+    )
+    target_link_libraries(alp_test_can_yocto_netdev_map PRIVATE Threads::Threads)
+    target_include_directories(alp_test_can_yocto_netdev_map PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/can
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_can_yocto_netdev_map PRIVATE c_std_99)
+    target_compile_definitions(alp_test_can_yocto_netdev_map PRIVATE
+        ALP_CAN_NETDEV_MAP_PATH="${CMAKE_CURRENT_BINARY_DIR}/can_netdev_map.tmp")
+
+    add_test(NAME alp_test_can_yocto_netdev_map
+             COMMAND alp_test_can_yocto_netdev_map)
 
     # Dev-review follow-up on issue #756: alp_can_close() racing the
     # FIRST-EVER alp_can_add_filter() (the one that lazily spawns the RX

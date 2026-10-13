@@ -1,0 +1,28 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-power-stop overlay for the E1M-AEN803 (Ensemble E8, M55-HP), MRAM image.
+ * BUILT, NOT BENCH-VERIFIED: the HE overlay beside it is the bench-proven one.
+ *
+ * The HP image must be MRAM-booted (VTOR >= 0x80000000): STOP wakes through a cold boot
+ * and the HP has no TCM retention, so the backend refuses a TCM-booted HP image
+ * (hp_vtor_not_mram).  Do NOT use the Flow C ITCM retarget for this app.
+ *
+ * Same pad controllers as the HE overlay: the SoM power layer drives the pads of every
+ * present domain, and a pad whose GPIO controller is disabled makes the quiesce fail with
+ * ALP_ERR_NOT_READY (backlight enable on GPIO5, PHY reset on GPIO11, RV-3028 INT on
+ * LPGPIO).  The HP board file already enables the LPGPIO bank; it is repeated so the
+ * overlay states everything the app needs.
+ */
+&lpgpio {
+	status = "okay";
+};
+
+&gpio11 {
+	status = "okay"; /* E_PHY_RESET (P11_6), eth_phy domain */
+};
+
+&gpio5 {
+	status = "okay"; /* BACKLIGHT_EN (P5_5), backlight domain */
+};

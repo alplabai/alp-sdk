@@ -12,6 +12,9 @@
 #include "../render/panel_rot.h"       /* tr_rot_blit: the rotated layer-2 buffer */
 #include "../render/r3d.h"             /* the renderer's DL / setup / band sizes */
 #include "hud_assets.h"
+#ifdef TR_PARTNER_LOGO_HEADER
+#include TR_PARTNER_LOGO_HEADER /* tr_partner_logo[], _W, _H (tools/genlogo.py) */
+#endif
 
 _Static_assert(TR_HUD_FB_SIZE == TR_HUD_W * TR_HUD_H * 2, "tr_mbox.h TR_HUD_FB_SIZE");
 /* The layer-2 window (panel rows 0..TR_HUD_H-1) stays over the game
@@ -260,6 +263,16 @@ static void panel(const canvas_t *cv, int x, int y, int w, int h, uint32_t c, ui
 	}
 }
 
+static void clear(const canvas_t *cv, int x, int y, int w, int h)
+{
+	int y0 = y > cv->y ? y : cv->y, y1 = y + h < cv->y + cv->h ? y + h : cv->y + cv->h;
+	int x0 = x > cv->x ? x : cv->x, x1 = x + w < cv->x + cv->w ? x + w : cv->x + cv->w;
+
+	for (int yy = y0; yy < y1; yy++) {
+		memset(cv->px + (yy - cv->y) * cv->w - cv->x + x0, 0, (size_t)(x1 - x0) * sizeof(uint16_t));
+	}
+}
+
 static void rect(const canvas_t *cv, int x, int y, int w, int h, uint32_t c, uint32_t a)
 {
 	int y0 = y > cv->y ? y : cv->y, y1 = y + h < cv->y + cv->h ? y + h : cv->y + cv->h;
@@ -324,6 +337,83 @@ int tr_hud_fmt_u32(char *buf, uint32_t v)
 _Static_assert(LOGO_CARD_Y + LOGO_CARD_H <= CARD_Y, "the logo card stays in the score tiles");
 _Static_assert(INV_Y + INV_PANEL_H <= TR_HUD_H, "the invitation panels stay in the HUD window");
 
+#ifdef TR_PARTNER_LOGO_HEADER
+/* The co-brand header: with a partner logo built in (-DTR_PARTNER_LOGO=<header from
+ * tools/genlogo.py>), the attract header card under BEST holds the ALP LAB mark on the left, a thin
+ * divider (a HUD accent colour at low alpha) and the partner's logo on the right, both the same
+ * height (45) and centred in the card. The card keeps its height and, if the pair needs it, grows
+ * only as far as it must, staying in the T_SCORE / T_SUB tiles it already sits in and at least 8 px
+ * short of the stats panel. It shows wherever the header card shows (attract), nowhere else. A build
+ * without a partner logo does not compile any of this and draws the banner alone. */
+#define CB_PAD   12
+#define CB_GAP   12 /* either side of the divider */
+#define CB_BOX_W 124
+#define CB_BOX_H 45 /* tools/genlogo.py's default --box: the same height as the ALP LAB mark */
+#define CB_DIV_H 40
+#define CB_NEED  (2 * CB_PAD + TR_LOGO_HDR_W + 2 * CB_GAP + 1 + TR_PARTNER_LOGO_W)
+#define CB_W     (CB_NEED > SCORE_W ? CB_NEED : SCORE_W)
+_Static_assert(TR_PARTNER_LOGO_W <= CB_BOX_W && TR_PARTNER_LOGO_H <= CB_BOX_H,
+               "the partner logo is larger than the header allows (tools/genlogo.py --box)");
+_Static_assert(TR_LOGO_HDR_H <= LOGO_CARD_H && CB_BOX_H <= LOGO_CARD_H, "both marks fit the card");
+/* Flash: the HE image is loaded whole into 256 KiB of ITCM (CMakeLists.txt checks the whole image after
+ * the link); the logo's pixels and palette may take 8 KiB of it, the header's ALP LAB mark is fixed. */
+_Static_assert(sizeof(tr_partner_logo) + sizeof(tr_partner_logo_pal) <= 8192,
+               "the partner logo's pixels and palette are over the 8 KiB flash allowance");
+_Static_assert(LOGO_CARD_X + CB_W <= 400, "the header stays in the T_SCORE / T_SUB tiles");
+_Static_assert(LOGO_CARD_X + CB_W + 8 <= PERF_X, "the header keeps 8 px from the stats panel");
+
+void tr_hud_partner_layout(tr_hud_partner_layout_t *l)
+{
+	int content = TR_LOGO_HDR_W + 2 * CB_GAP + 1 + TR_PARTNER_LOGO_W;
+	int x0      = LOGO_CARD_X + (CB_W - content) / 2;
+
+	l->card_x = LOGO_CARD_X;
+	l->card_y = LOGO_CARD_Y;
+	l->card_w = CB_W;
+	l->card_h = LOGO_CARD_H;
+	l->alp_x  = x0;
+	l->alp_y  = LOGO_CARD_Y + (LOGO_CARD_H - TR_LOGO_HDR_H) / 2;
+	l->alp_w  = TR_LOGO_HDR_W;
+	l->alp_h  = TR_LOGO_HDR_H;
+	l->div_x  = x0 + TR_LOGO_HDR_W + CB_GAP;
+	l->div_y  = LOGO_CARD_Y + (LOGO_CARD_H - CB_DIV_H) / 2;
+	l->div_h  = CB_DIV_H;
+	l->logo_x = l->div_x + 1 + CB_GAP;
+	l->logo_y = LOGO_CARD_Y + (LOGO_CARD_H - TR_PARTNER_LOGO_H) / 2;
+	l->logo_w = TR_PARTNER_LOGO_W;
+	l->logo_h = TR_PARTNER_LOGO_H;
+}
+
+static void paint_cobrand(const canvas_t *cv)
+{
+	tr_hud_partner_layout_t l;
+	int                     y0, y1, x0, x1;
+
+	tr_hud_partner_layout(&l);
+	panel(cv, l.card_x, l.card_y, l.card_w, l.card_h, C_PANEL, A_PANEL);
+	draw_map(cv, tr_logo_hdr, l.alp_w, l.alp_h, l.alp_x, l.alp_y, 0xEEEu, 16u);
+	rect(cv, l.div_x, l.div_y, 1, l.div_h, C_EDGE, 8u);
+	y0 = l.logo_y > cv->y ? l.logo_y : cv->y;
+	y1 = l.logo_y + l.logo_h < cv->y + cv->h ? l.logo_y + l.logo_h : cv->y + cv->h;
+	x0 = l.logo_x > cv->x ? l.logo_x : cv->x;
+	x1 = l.logo_x + l.logo_w < cv->x + cv->w ? l.logo_x + l.logo_w : cv->x + cv->w;
+	for (int y = y0; y < y1; y++) {
+		const uint8_t *s = &tr_partner_logo[(y - l.logo_y) * l.logo_w - l.logo_x];
+		uint16_t      *d = cv->px + (y - cv->y) * cv->w - cv->x;
+
+		for (int x = x0; x < x1; x++) {
+			uint32_t c = tr_partner_logo_pal[s[x]], a = c >> 12;
+
+			if (a == 15u) {
+				d[x] = (uint16_t)c;
+			} else if (a != 0u) {
+				blend(&d[x], c & 0xFFFu, a);
+			}
+		}
+	}
+}
+#endif
+
 /* The tagline strip; the refresh is a number derived from the display's timings
  * (panel_hz.h), so it is formatted, not pasted into the literal. */
 static const char *tagline(void)
@@ -365,11 +455,57 @@ static bool zone_on(uint32_t frame, uint32_t start)
 /* A zone name's alpha (0..16) `age` frames into its popup: in over 8
  * frames, out over the last 16. The T_INV key holds this, not the age, so
  * the row repaints only while the name fades (~24 of its 110 frames). */
+static uint32_t fade_alpha(uint32_t age, uint32_t total)
+{
+	return age < 8u ? 2u * age + 2u : age + 16u > total ? total - age : 16u;
+}
+
+static bool vol_on(uint32_t frame, uint32_t start)
+{
+	return frame - start < TR_HUD_VOL_FRAMES;
+}
+
 static uint32_t zone_alpha(uint32_t age)
 {
-	return age < 8u                         ? 2u * age + 2u
-	       : age + 16u > TR_HUD_ZONE_FRAMES ? TR_HUD_ZONE_FRAMES - age
-	                                        : 16u;
+	return fade_alpha(age, TR_HUD_ZONE_FRAMES);
+}
+
+void tr_hud_vol_text(char *b, size_t n, uint8_t kind, uint8_t pct)
+{
+	if (kind == TR_HUD_KNOB_BRIGHTNESS) {
+		(void)snprintf(b, n, "BRIGHTNESS %u%%", (unsigned)pct);
+	} else if (pct == 0u) {
+		(void)snprintf(b, n, "MUTE");
+	} else {
+		(void)snprintf(b, n, "VOLUME %u%%", (unsigned)pct);
+	}
+}
+
+/* The volume popup, over the bottom row: the row's own content is cleared, then "VOLUME n%" (or
+ * "MUTE") on a panel centred on the HUD, fading like a zone name. */
+static void paint_vol(const canvas_t *cv, const tr_hud_view_t *v, uint32_t age)
+{
+	uint32_t s = fade_alpha(age, TR_HUD_VOL_FRAMES);
+	char     b[24];
+
+	tr_hud_vol_text(b, sizeof(b), v->vol_kind, v->vol_pct);
+	int w = tr_hud_text_w(TR_HUD_FONT_MED, b);
+
+	clear(cv, 0, INV_Y, TR_HUD_W, TR_HUD_H - INV_Y);
+	panel(cv,
+	      TR_HUD_W / 2 - w / 2 - 12,
+	      INV_Y,
+	      w + 24,
+	      INV_PANEL_H,
+	      C_PANEL,
+	      (A_PANEL * s + 8u) / 16u);
+	text_c(cv,
+	       TR_HUD_FONT_MED,
+	       TR_HUD_W / 2,
+	       INV_Y + 2,
+	       b,
+	       v->vol_kind == TR_HUD_KNOB_VOLUME && v->vol_pct == 0u ? C_RED : C_WHITE,
+	       s);
 }
 
 /* A zone's name, entering (P15): in its zone's colour, centred on x; a
@@ -672,6 +808,9 @@ paint_attract(const canvas_t *cv, const tr_hud_view_t *v, uint32_t frame, uint32
 	 * invitation row carries its own small panels: rows 170..300 and the
 	 * middle of the road stay clear. The high-score page keeps the card's
 	 * middle (it is the whole point of that page). */
+#ifdef TR_PARTNER_LOGO_HEADER
+	paint_cobrand(cv);
+#else
 	panel(cv, LOGO_CARD_X, LOGO_CARD_Y, SCORE_W, LOGO_CARD_H, C_PANEL, A_PANEL);
 	draw_map(cv,
 	         tr_logo_mid,
@@ -681,6 +820,7 @@ paint_attract(const canvas_t *cv, const tr_hud_view_t *v, uint32_t frame, uint32
 	         LOGO_CARD_Y + (LOGO_CARD_H - TR_LOGO_MID_H) / 2,
 	         0xEEEu,
 	         16u);
+#endif
 	if (table_page(v, frame)) {
 		panel(cv, 110, CARD_Y, TR_HUD_W - 220, INV_Y - 4 - CARD_Y, C_PANEL, A_PANEL);
 		paint_table(cv, &v->hs);
@@ -798,7 +938,8 @@ static void paint(const canvas_t      *cv,
                   const tr_hud_view_t *v,
                   uint32_t             frame,
                   uint32_t             popup_start,
-                  uint32_t             zone_start)
+                  uint32_t             zone_start,
+                  uint32_t             vol_start)
 {
 	paint_perf(cv, v);
 	paint_power(cv, v);
@@ -833,6 +974,9 @@ static void paint(const canvas_t      *cv,
 			paint_zone(cv, v, frame - zone_start, TR_HUD_W / 2);
 		}
 		break;
+	}
+	if (vol_on(frame, vol_start)) {
+		paint_vol(cv, v, frame - vol_start);
 	}
 }
 
@@ -870,8 +1014,12 @@ static uint32_t fnv(uint32_t h, uint32_t v)
 	return h;
 }
 
-static uint32_t
-tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, uint32_t zone_start)
+static uint32_t tile_key(int                  t,
+                         const tr_hud_view_t *v,
+                         uint32_t             frame,
+                         uint32_t             popup_start,
+                         uint32_t             zone_start,
+                         uint32_t             vol_start)
 {
 	uint32_t k = fnv(2166136261u, v->mode);
 
@@ -924,7 +1072,12 @@ tile_key(int t, const tr_hud_view_t *v, uint32_t frame, uint32_t popup_start, ui
 			        blink_on(frame));
 		}
 		return k;
-	default: /* T_INV */
+	default:                            /* T_INV */
+		if (vol_on(frame, vol_start)) { /* the volume popup covers the row, whatever the screen */
+			return fnv(
+			    fnv(fnv(fnv(k, 9u), fade_alpha(frame - vol_start, TR_HUD_VOL_FRAMES)), v->vol_pct),
+			    v->vol_seq * 2u + v->vol_kind);
+		}
 		if (v->mode == TR_HUD_PLAY && zone_on(frame, zone_start)) {
 			return fnv(fnv(fnv(k, 3u), zone_alpha(frame - zone_start)), v->zone);
 		}
@@ -956,7 +1109,8 @@ static uint32_t paint_tile(uint16_t            *fb,
                            const tr_hud_view_t *v,
                            uint32_t             frame,
                            uint32_t             popup_start,
-                           uint32_t             zone_start)
+                           uint32_t             zone_start,
+                           uint32_t             vol_start)
 {
 	const tile_t *tl = &tiles[t];
 	int           w  = tl->x1 - tl->x0;
@@ -966,7 +1120,7 @@ static uint32_t paint_tile(uint16_t            *fb,
 		canvas_t cv = { strip, tl->x0, y, w, h };
 
 		memset(strip, 0, (size_t)w * (size_t)h * sizeof(strip[0]));
-		paint(&cv, v, frame, popup_start, zone_start);
+		paint(&cv, v, frame, popup_start, zone_start, vol_start);
 		if (rot == 0) {
 			for (int r = 0; r < h; r++) {
 				memcpy(
@@ -985,11 +1139,12 @@ void tr_hud_paint_all(uint16_t            *fb,
                       const tr_hud_view_t *v,
                       uint32_t             frame,
                       uint32_t             popup_start,
-                      uint32_t             zone_start)
+                      uint32_t             zone_start,
+                      uint32_t             vol_start)
 {
 	inv_init();
 	for (int t = 0; t < T_N; t++) {
-		paint_tile(fb, 0, t, v, frame, popup_start, zone_start);
+		paint_tile(fb, 0, t, v, frame, popup_start, zone_start, vol_start);
 	}
 }
 
@@ -999,6 +1154,7 @@ void tr_hud_init(tr_hud_t *h)
 	memset(h, 0, sizeof(*h));
 	h->popup_start = 0u - TR_HUD_POPUP_FRAMES; /* no popup running */
 	h->zone_start  = 0u - TR_HUD_ZONE_FRAMES;
+	h->vol_start   = 0u - TR_HUD_VOL_FRAMES;
 }
 
 static uint32_t tile_area(int t)
@@ -1023,17 +1179,21 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32
 		h->zone_seq   = v->zone_seq;
 		h->zone_start = f;
 	}
+	if (v->vol_seq != h->vol_seq) {
+		h->vol_seq   = v->vol_seq;
+		h->vol_start = f;
+	}
 	if (!h->drawn) {
 		/* nothing on screen is ours yet: every tile mismatches once */
 		for (int t = 0; t < T_N; t++) {
-			h->key[t] = ~tile_key(t, v, f, h->popup_start, h->zone_start);
+			h->key[t] = ~tile_key(t, v, f, h->popup_start, h->zone_start, h->vol_start);
 		}
 		h->drawn = true;
 	}
 	/* From where the last capped frame stopped, so no tile starves. */
 	for (int i = 0; i < T_N; i++) {
 		int      t = (t0 + i) % T_N;
-		uint32_t k = tile_key(t, v, f, h->popup_start, h->zone_start);
+		uint32_t k = tile_key(t, v, f, h->popup_start, h->zone_start, h->vol_start);
 
 		if (k == h->key[t]) {
 			continue;
@@ -1049,8 +1209,9 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32
 		if (mid && (d & MID_BITS) == 0u) {
 			area = 0u;
 			for (int m = T_MIDL; m <= T_STRIP; m++) {
-				area += tile_key(m, v, f, h->popup_start, h->zone_start) != h->key[m] ? tile_area(m)
-				                                                                      : 0u;
+				area += tile_key(m, v, f, h->popup_start, h->zone_start, h->vol_start) != h->key[m]
+				            ? tile_area(m)
+				            : 0u;
 			}
 		}
 		if (h->budget != 0u && px != 0u && !(mid && (d & MID_BITS) != 0u) &&
@@ -1059,7 +1220,7 @@ uint32_t tr_hud_update(tr_hud_t *h, uint16_t *fb, const tr_hud_view_t *v, uint32
 			break;
 		}
 		h->key[t] = k;
-		px += paint_tile(fb, h->rot, t, v, f, h->popup_start, h->zone_start);
+		px += paint_tile(fb, h->rot, t, v, f, h->popup_start, h->zone_start, h->vol_start);
 		d |= 1u << t;
 	}
 	if (dirty != NULL) {
@@ -1115,6 +1276,17 @@ void tr_hud_view_booth(tr_hud_view_t *v, const tr_hiscore_t *hs, const tr_initia
 		v->ini  = *ini;
 		v->mode = TR_HUD_INITIALS;
 	}
+}
+
+void tr_hud_view_vol(tr_hud_view_t *v, uint8_t pct, uint32_t seq)
+{
+	v->vol_pct = pct;
+	v->vol_seq = seq;
+}
+
+void tr_hud_view_vol_kind(tr_hud_view_t *v, uint8_t kind)
+{
+	v->vol_kind = kind;
 }
 
 void tr_hud_view_zone(tr_hud_view_t *v, uint8_t zone, uint32_t seq)

@@ -347,8 +347,9 @@ sensor is served as `ALP_PIXFMT_RAW10` (one `uint16` per pixel, still the
 mosaic); `RGB565` and `GREY8` stay `ALP_ERR_NOSUPPORT` and `RAW8` needs an
 8-bit Bayer code the sensor does not offer. The backend does not demosaic.
 Bench facts this path is written against (E1M-V2M103, IMX296LQ colour on
-CAM0/J5, 2026-10-08, observed with the V4L2 tools; the backend itself has not
-yet run on the board): the chain is `imx296 9-001a`:0 ->
+CAM0/J5, 2026-10-08, observed with the V4L2 tools; the backend's own RAW10
+capture was bench-verified on the same board, see the top of this section):
+the chain is `imx296 9-001a`:0 ->
 `csi-16000400.csi20`:0/1 -> `cru-ip-16000000.vide0`:0/1 -> `CRU output`
 (`/dev/video0`) with every link immutable and enabled; the sensor emits
 `SBGGR10_1X10/1456x1088`; the capture fourcc is `CR10`, 11648 bytes per line,
@@ -368,9 +369,8 @@ path cannot yet (#2792). (2) A plain non-CMake static link of `libalp_sdk.a`
 must add `-Wl,--undefined=_alp_backend_force_camera_yocto_drv`, otherwise only
 the stub is linked; CMake consumers of `alp::sdk` get that option, and the
 matching one for every other Linux backend, automatically (#2790). A
-non-CMake link needs one `--undefined=_alp_backend_force_<class>_<name>` per
-backend; the list is the `alp_sdk` target's `ALP_SDK_FORCED_BACKENDS` property, or
-`nm -A libalp_sdk.a | grep ' _alp_backend_force_'`.
+non-CMake link takes them from the installed `alp-sdk.pc`:
+`pkg-config --cflags --libs alp-sdk` (#2829).
 (3) One thread per handle: do not run `capture()` and
 `release()` on the same handle concurrently.
 

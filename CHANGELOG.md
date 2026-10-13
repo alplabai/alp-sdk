@@ -7,7 +7,149 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
-## [v0.17.0] - 2026-10-08 (release candidate: v0.17.0-rc2)
+## [v0.17.0] - 2026-10-13
+
+### Fixed — the Yocto `alp-chips` package no longer re-installs `libalp_sdk.a`, `alp-sdk.pc` and the `<alp/*.h>` headers (#2829)
+
+The static `ALP_OS=yocto` install rules added for `alp-sdk.pc` (#2829) also fired in the `ALP_BUILD_CHIPS_ONLY` build the `alp-chips` recipe runs, so that recipe installed `libalp_sdk.a`, `alp-sdk.pc` and every `<alp/*.h>` header besides `libalp_chips.a`. bitbake then failed `alp-chips` `do_package` ("Files/directories were installed but not shipped in any package") and `alp-perception` `do_prepare_recipe_sysroot` ("The file /usr/include/alp/camera.h is installed by both alp-sdk and alp-chips"), on all six V2N/V2M MACHINEs. The chips-only build now installs only `libalp_chips.a` and `<alp/chips/*.h>`; the normal static build is unchanged.
+
+### Fixed — a Yocto build without the dev-kit feed fragment no longer aborts while parsing `alp-devkit-feed-config` (#2853)
+
+`alp-devkit-feed-config_0.1.bb` (added in #2841) called `bb.fatal` from its anonymous python when `ALP_DEVKIT_FEED_URL` was unset. Anonymous python runs at parse time for every recipe `BBFILES` matches, so every build without the opt-in `conf/distro/include/alp-devkit-feed.inc` fragment (`alp-image-edge`, `alp-image-prod`, `alp-image-base`, customer builds) stopped at "Parsing halted due to errors". The recipe now raises `bb.parse.SkipRecipe`, the pattern `alp-cm33-firmware_0.1.bb` uses for its dev-only gate; opt-in builds are unchanged.
+
+### Fixed — U-Boot holds the V2N-M1 DX-M1 in reset through the DEEPX rail ramp (#2045)
+
+`alp_deepx_rail_bringup()` (U-Boot patch `0004`) now drives `M1_RESET`
+(`PA6`, the DX-M1 `PORES_N`) low on entry, before any I2C access and
+before `P64` (`DEEPX_CORE_0P75_EN`) enables the DX-M1 I/O, LPDDR5X and
+PLL rails. Previously `PA6` was only driven on an abort, so on the normal
+path `PORES_N` was left undriven while those rails ramped; with the
+`PORES_N` pull-up planned for the next SoM revision it would follow
+`M1_VDD_1V8` and release the DX-M1 before `VDDQ` was up.
+
+The settle after `P64` goes high grows from 5 ms to 15 ms
+(`ALP_DEEPX_PORES_HOLD_MS`), so `P64` to `PA6` release is now at least
+16 ms including patch `0001`'s 1 ms mux settle. This matches the DEEPX
+DX-M1 reference design, which holds `PORES_N` low with a BD5215G reset
+supervisor for 11 ms after `VDD18IO` is valid.
+
+On a V2M image whose on-module EEPROM manifest does not say `v2n-m1`
+(an unprovisioned module), a successful rail step now releases `PA6`
+through `alp_deepx_reset_release()` without touching the PCIe mux, which
+stays gated on the manifest. Before this change nothing drove `PA6` on
+such modules and the DX-M1 left reset only through its internal
+`PORES_N` pull-up; with `PA6` now held low, it would otherwise never
+leave reset.
+
+On an abort, `alp_deepx_rail_safe_off()` now asserts `PA6` before
+dropping `P64`, so the DX-M1 is in reset before its rails go down.
+
+Checked by re-applying the full U-Boot patch chain (`0004` to `0017`)
+on the bitbake work tree and cross-compiling `rzv2n-dev.c` with
+`-Werror`. Not yet run on silicon.
+
+### Fixed — `<alp/can.h>` opened the swapped CAN port on V2N-family Linux (#2352)
+
+`alp_can_open(E1M_X_CAN0)` bound `can0`, which `rcar_canfd` assigns to CANFD channel 2 (E1M CAN1); E1M CAN0 is channel 3 = `can1`. The channel is not exposed at runtime (`dev_id`/`dev_port` read 0), so the generated Linux ownership dtsi (`e1m-v2n-ownership.dtsi`, from `core-ownership.yaml` + the SoC JSON `linux_dt` channels) now carries `alp,e1m-can-netdev = "can1", "can0";` (index = E1M bus id, the rank of each `linux_enable`d CAN channel; a bus without it gets an empty entry), and the Yocto CAN backend reads `/proc/device-tree/alp,e1m-can-netdev`, falling back to the literal `can<bus_id>` ONLY when the property is absent (every other SoM); a present property with no entry for the bus fails the open (`ALP_ERR_NOT_READY`) instead of reopening the swapped port. The same dtsi now disables every CANFD channel Linux does not enable so the netdev rank equals the enabled order. The route-capability check had the CANFD2/CANFD3 -> E1M CAN aliases swapped; fixed. The portable API is unchanged. Bench check of which physical port moves is pending.
+
+### Added — TAS2563 verified tuning load and ROM/tuning mode readback (#2580)
+
+`tas2563_load_tuning_verified()` zeroes `I2C_CKSUM` (B0/P0/0x7E), replays a tuning stream, reads the register back and compares it with the PPC3-supplied `PChkSum`. Measured on a real TAS2563 (rev 0x10): the device checksum is CRC-8, polynomial 0x07, init 0x00, over the written data bytes only (PAGE, BOOK and register-address bytes excluded). The expected byte still comes from the caller; a mismatch returns `ALP_ERR_IO` (caller retries) with the readback reported. `tas2563_read_tuning_mode()` reports ROM vs tuning mode from B0/P1/0x02 (read-only; the register is not in SLASET3D and is sourced from TI E2E and PPC3 program blocks, unverified).
+
+### Fixed — tuning streams could reset the I2C checksum mid-load (#2580)
+
+`tas2563_load_tuning()` now refuses a record that writes B0/P0/0x7E. The TAS2563 header also no longer claims SLASET3D never mentions ROM mode (it does, PCM playback table, p.11).
+
+Bench: PASS on a real TAS2563 at 0x4D (rev 0x10). Not yet compared against a real PPC3 `PChkSum` blob.
+
+### Fixed — Linux can-stby keeps its own minor-13 gate (#2725)
+
+The Linux `gpio-gd32-bridge` `can-stby` line (bridge bit 20) is gated on protocol minor 13 again, through its own status cache (new kernel patch 0032, follow-up to #2725), instead of sharing the IO15/IO26 cache that #2739 moved to minor 16. Without this a 0.13..0.15 bridge lost CAN standby on Linux. The userspace `chips/gd32g553` table already gated `CAN_STBY` at 13. `docs/gd32-bridge-protocol.md` now says the IO15/IO26 pad map starts at minor 16.
+
+### Fixed
+
+- GD32 bridge: gate E1M IO15/IO26 (bridge bits 21/22) on protocol minor 16 instead of 15 (#2725). A firmware reporting minor 15 may carry a 21-pad map that ignores bits 21/22 yet answers `STATUS_OK`, so the minor-15 gate granted lines the firmware lacks and writes silently "succeeded". `GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR`, the Linux `gpio-gd32-bridge` patch 0031 (bumps `GD32_PROTO_MINOR_IO_EXT`) and `min_bridge_protocol` in the six V2N/V2M SoM presets move together. Firmware must report 0.16 or newer for the pads to be granted; until it does they are refused (`ALP_ERR_NOSUPPORT` / `-ENODEV`), never silently accepted.
+
+### Added — `ALP_POWER_WAKE_GPIO` on the Alif SE STOP / STANDBY backend, for LPGPIO pads named in the devicetree (Refs #2784)
+
+The application names its wake pads with an `alp,power-wake-gpios` devicetree node (`wake-gpios = <&lpgpio N GPIO_ACTIVE_LOW>;` plus a `pinctrl-0` group), so `<alp/power.h>` gains no symbol and the ABI snapshot is unchanged. Line N of the LPGPIO island is wake event `WE_LPGPIO<N>`; the pad is armed as an edge to its asserted level and the GPIO block's latched edge, captured by a PRE_KERNEL_1 priority-0 snapshot before `gpio_dw`'s init clears it, tells the cold-boot wake decode that a pad fired (`alp_power_boot_wake_info().wake_source` carries `ALP_POWER_WAKE_GPIO`). Every pad the SoM wires (P15_0 the RV-3028 `INT`, the Wi-Fi, PHY and OSPI reset / enable pads, and the OSPI `INTn` nets P15_2 / P15_3) is refused, per board through the generated `alp,wired-lpgpio-pads` property of the `alp,som-power` node (`wired_lpgpio_pads:` in `on-module-links.yaml`), which carries P15_2, P15_3, P15_6 and P15_7 on every AEN SoM: `ALP_POWER_WAKE_GPIO` is then not advertised and `alp_power_configure_wake_source()` answers `ALP_ERR_NOSUPPORT`.
+
+All eight LPGPIO lines are SoM-wired on the E1M-AEN801 / E1M-AEN803 R2, so no pad is accepted on the bare module. The silicon path (latch survives the SES boot, `EWIC_VBAT_GPIO` wakes on the pad edge) is not bench-verified, and the DW debounce filter is not enabled. See `docs/aen-power-domains.md`, "LPGPIO wake pads".
+
+### Added — Alif SE STOP backend for the E8 M55-HP, bench-proven HP-only on the E1M-AEN803 (#2784)
+
+`CONFIG_ALP_SDK_POWER_ALIF_SE` now also selects on `SOC_AE822FA0E5597LS0_RTSS_HP` (E1M-AEN801 and E1M-AEN803 HP targets), and `examples/aen/aen-power-stop` builds for both, each with its own overlay and a config fragment that turns the boot-time clock restore on. On the E1M-AEN803 HP (module 2026W36-0001 on an E1M-EVK, HP-only ATOC, 2026-10-10) three STOP cycles passed at 400 MHz with the clock restore on: LPTIMER 500 ms, RV-3028 countdown 3 s and RV-3028 alarm all woke (`mode=4`), `quiesced=restored=0x7f`, `SUMMARY cycles=3 pass=5 fail=0`. An HP STOP while the HE runs also passes on the bench (see below). Not verified: the E1M-AEN801 HP.
+
+The HP differs from the HE in the ways the Alif vendor sources show. It writes its own `AON.RTSS_HP_CTRL` / `RTSS_HP_RESET` (`0x1A604000` / `0x1A604004`), not the HE pair. It has `STOP` only (the vendor SOFT_OFF-class sleep), no TCM retention, and needs an MRAM-booted image. Its clock restore uses the 400 MHz RUN profile and the `PLL_CLK_SEL` `ES0` health bit. `STANDBY` is `ALP_ERR_NOSUPPORT` from the dispatcher before the backend runs (the backend's own `hp_standby_unsupported` check is defence in depth). The other two refusals are named on the console: TCM or full retention is `ALP_ERR_NOSUPPORT` with `reason=hp_tcm_not_retainable`, and a TCM-booted image is `ALP_ERR_NOSUPPORT` with `reason=hp_vtor_not_mram`. Wake events, EWIC groups and the BKRAM record are SoC-level and shared with the HE.
+
+The backend cannot see the other core: with the HE running, an HP STOP powers down only the HP subsystem. `docs/aen-power-domains.md` has the HP table, the sources, and the remaining open item (the E1M-AEN801 HP). `tests/unit/power_alif_se` covers each new branch.
+
+**HP STOP while the HE runs.** Measured on E1M-AEN803 2026W36-0001 (combined ATOC, HE idle, HP `aen-power-stop`): the HP is powered off and re-booted on the LPTIMER, but `STOP_MODE_STAT` stays clear because the DC-DC never turns off, so the wake record was discarded and cycle 1 repeated. This core's own `RTSS_HE_CTRL` / `RTSS_HP_CTRL` WIC [9:8] = `0b01` is now a second STOP witness, consumed on every boot; a STOP record is trusted when either witness holds, and `RESETSYNDROME` bit2 with the WIC bits as the only witness marks an aborted entry. `ALP_POWER_MODE_STOP` in `alp/power.h` now says the realised mode is the calling core's. Bench: dual-core (HE idle Zephyr app + HP `aen-power-stop`) on E1M-AEN803 2026W36-0001 passes 3/3 (LPTIMER `wake_source=0x8`, countdown `0x1`, alarm `0x1`, all `mode=4`, `SUMMARY cycles=3 pass=5 fail=0`, boot diag w[16..19] = `00000100 00000100 00000333 00000000`), flashed as one combined ATOC (DEVICE + m55_he + m55_hp) written by tan's Flow D with the alplabai/tan-cli#1509 fix; the HE-only regression stays 3/3.
+
+With the WIC bits as the only witness, a wake that neither decode pass can attribute to a source (SYSRESETREQ and a local WDT reset leave `RESETSYNDROME` 0, DFP `pm_core_wakeup_is_spurious()`) is reported as an aborted entry (realised mode RUN); the domains are still restored. That path is unmeasured on silicon.
+
+### Added — aen-power-stop variants for STANDBY, TCM retention and wake-to-main() timing (Refs #2784)
+
+`examples/aen/aen-power-stop` gains three opt-in config fragments so one bench run can exercise what the STOP backend implements but has never run on silicon: `s-standby.conf` (every cycle sleeps in `ALP_POWER_MODE_STANDBY`, verdict `mode_standby`), `t-tcm-retain.conf` / `t-tcm-retain-128k.conf` (`ALP_POWER_RETAIN_TCM` with a CRC-checked pattern in the DTCM, verdict `tcm_retained`, per-bank evidence) and `w-wake-timing.conf` (the LPRTC counter at sleep entry, `PRE_KERNEL_1` and `main()`, a wake-to-`main()` bound at one-tick resolution). The default image is unchanged. On an E1M-AEN803 (2026W36-0001) STANDBY and 256 KiB DTCM retention across STOP passed 3/3 cycles; the timing variant ran but resolves only Zephyr start to `main()` (85 ms). A sleep that retains TCM no longer marks its record NSRST-trusted: the TCM-retained STOP wake leaves `RTSS_HE_RESET` = 0x01, the pin-reset value, which had turned every such wake into a reported external reset. The example also disarms an RV-3028 alarm left latched by a run that lost power mid-sleep, which had made every later RTC sleep refuse `rtc_wake_already_latched`.
+
+### Fixed — a STOP on one AEN core no longer takes SRAM from the other, running core; wake-to-main() measured (Refs #2784)
+
+The Alif SE STOP backend gains `CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY`, aiPM gen2 memory blocks ORed into every OFF profile. The Secure Enclave powers off each memory block the OFF profile does not name as soon as the sleeping core's subsystem goes off, even while the other M55 keeps running: on an E1M-AEN803 an M55-HE STOP took SRAM0 away from a running M55-HP, which faulted on its next SRAM0 store. With `0x3` (SRAM0 | SRAM1) the HP ran through three HE STOPs. The default stays 0 (keeping memory powered raises the sleep floor); a dual-core application that keeps one core running sets it. `examples/aen/aen-power-stop` adds the `h-hp-running.conf` variant for that case, paired with `aen-hp-core-smoke` on the HP. The `w-wake-timing.conf` variant now samples the LPRTC prescaler sub-count with its counter, calibrates the LFRC against the RV-3028 and timestamps the LPTIMER wake: wake-to-`main()` is 92.6 ms (+-59 us, three runs), of which about 5 ms is the SE cold boot and about 71 ms the SoM domain restore of an all-domains sleep. The bench-only image CRC (197 ms at `PRE_KERNEL_1`, not 15-30 ms as its comment said) is kept out of that figure.
+
+### Fixed — AEN examples no longer cycle the supply of a running CC3501E on bring-up (#2797)
+
+The shared `cc3501e_bridge_bringup()` template (`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c` and every synced copy) ended with `cc3501e_reset()`, which drops `WIFI_EN` (P15_5) for 50 ms. Re-running or warm-resetting any example on an activated unit (`vendor_sbl_container_enable=1`) therefore cold-cycled the CC3501E supply, a path that may never relaunch its firmware. The template now carries the warm-aware bring-up first written for `aen-power-domains`: it latches `WIFI_EN` high in the GPIO data register before the direction change, so the pad cannot glitch low; when `WIFI_EN` reads high and the chip answers a PING it resets through nRESET only (`cc3501e_hard_reset()`); it uses `cc3501e_reset()` only from `WIFI_EN` low, or as a last resort for a chip that stays silent after an nRESET-only reset. `aen-power-domains` is no longer a declared divergent copy in `scripts/check_cc3501e_bridge_copies.py`, and the trace-runner sound copy carries the same logic. Each path prints one `[cc3501e_bridge]` line naming it. `examples/peripheral-io/alp-console` keeps its own cold-boot soak and is unchanged.
+
+### Added — the trace-runner's game sound has an adjustable volume: EVK rotary encoder, push switch, and an SWD request word (#2801)
+
+With `TR_HP_SOUND=ON` the volume is one tagged word in the shared SRAM0 page (`TR_MEM_VOL`, `0x0237FD80`, `src/ipc/tr_vol.h`; a cold-SRAM value reads as the default and the HE boots at 30 %, never a 100 % burst), 0..100 % of the build's `TR_SND_VOLUME` ceiling. The HP scales every 16 ms block of mixed samples by it (a linear ramp across the block, so a step is never a click) and never touches I2C2 or SD_N: 0 is silence with the amps running, and the I2C2 lease rules are unchanged. The HE owns the word and sets it from the EVK's rotary encoder through `alp_qenc_*` (`EVK_ENC_ROTARY`, 5 % a detent), its push switch through `alp_gpio_*` (`EVK_PIN_ENCODER_SW`, mute and back to the level it muted; a turn while muted unmutes and steps from it), and a request word a bench writes over SWD (`0x0237FD84`, `0x564F0000 | percent`, validated, refused values counted); `a32/release/FLASH-RECIPE.md` has the recipe. The HUD shows `VOL n%` (or `MUTE`) for 1.5 s over its bottom row on every screen. The encoder pads are GPIO3 / GPIO4, clear of the HP's GPIO5 and lpgpio lines. Host-tested (`tests/host/test_vol.c`, `test_hud.c`); the encoder and switch themselves are bench-unverified.
+
+The encoder switch now picks what the knob turns: a short press toggles VOLUME / BRIGHTNESS (the HUD popup names the mode and level, `VOLUME 30%` / `BRIGHTNESS 60%`), a long press (1 s) mutes and unmutes with the same restore, and BRIGHTNESS falls back to VOLUME after 5 s idle. Brightness drives the Riverdi panel's PWM backlight from the HE in 5 % steps, 10..80 % (a hard floor of 10 % and a hard ceiling of 80 %), booting at the SDK's level; a short press while muted only switches the mode. The bench can set it with a tagged request word (`TR_MEM_BL`, `0x0237FDC0`, `0x424C0000 | percent`), a slot clear of the SN65DSI83 recovery words in #2816 (`tr_knob.h`, `test_knob.c`). The request words (volume and backlight) are consumed: the HE clears one to `0` once it has taken it, so the same request can be sent again and a repeated bad word is counted each time; the backlight word takes the 5 % grid only, and a refused LED write rolls the level back and counts in `led_errs`.
+
+### Added — trace-runner HUD: an optional co-brand header, built in only when `-DTR_PARTNER_LOGO=<header>` is passed (#2812)
+
+`tools/genlogo.py` turns a partner's PNG or SVG into an ARGB4444 C header (scaled to fit 124 x 45 with the aspect kept, stored as 8-bit palette indices, which halves its flash against raw pixels); the HE build takes it as `-DTR_PARTNER_LOGO=<header>`. The attract header card under BEST then holds the ALP LAB mark on the left (a new 210 x 45 size of the logo, `tr_logo_hdr`), a thin divider in the HUD's copper accent at low alpha, and the partner's logo on the right, both 45 px tall and centred. The card keeps its place and height and grows only as far as the pair needs (to 382 px for a 123 px logo, in the same two tiles and 8 px or more short of the stats panel). It shows wherever the header card shows (the attract screen, both pages); the play, crash, banner and initials screens are unchanged. With no header nothing is compiled and the screens are exactly what they were: `test_hud` pins six fixed screens to hashes taken from the previous code. No partner artwork is in this repository: the logo tests build against a synthetic header, and `a32/release/build-release.sh` refuses a build dir whose CMakeCache and elf disagree about whether a logo is built in.
+
+### Fixed — the SN65DSI83 bridge recovers by itself after it resets to its defaults (panel black, backlight on) (#2815)
+
+On the bench (E1M-AEN803 + Riverdi RVT121) the panel went black with the backlight on while the SoC side stayed healthy (CDC200 scanning, DSI PHY locked, EN `P13_4` high): the bridge had reset itself (CSR `0x0D` `0x00`, `0x0A` `0x0A`, `0xE5` `0x3D`; healthy reads `0x01`, `0x81`, `0x00`) and its init ran only once at boot. The driver now health-checks the bridge every `CONFIG_SN65DSI83_RECOVERY_INTERVAL_MS` (default 1000, `CONFIG_SN65DSI83_RECOVERY`, default y) and, when PLL_EN is clear, the PLL is not locked or `HS_CLK_SRC` reads back different from the table, replays the same init from PLL off (ID check, CSR table, PLL start, `0xE5` clear), rate-limited to one re-init per 5 s (a replay that FAILED, e.g. the PLL cannot lock while the display core's DSI host restart has the HS clock down, is retried at the next poll, at most 3 times per episode, before the 5 s window applies again), counted and reported with `printk` and the register values (the apps keep `CONFIG_LOG` off). `0xE5` error bits with the PLL fine are cleared and counted, and re-init only when they persist on 3 polls in a row or show on the first poll after a re-init; a replay that fails part-way writes `0x0D` = `0x00` so the next window retries. `sn65dsi83_recovery_count()` returns the counter. The recipe is published right after the ID check, before the CSR bank is written, so a boot init that fails half-way is recoverable too. When the display core hands I2C1 to another core after init (the Trace Runner with `-DTR_INPUT_NPU=ON`: the HE configures the bridge, the HP owns the controller for the camera), the display core never touches the bus again: the driver publishes its CSR table in shared SRAM (`recovery-recipe-address`, `0x0237FE00`, `TR_MEM_SN65_RECIPE`) and an `alp,sn65dsi83-recovery` node on the bus-owning core replays it from that core's own I2C driver on its own low-priority work queue, so the check cannot race the camera's transfers; a build that hands the bridge's bus away without the recipe address fails at compile time. Replay into a live video stream is bench-unverified. The bus-owning core latches the first valid recipe in its own RAM, so a warm reboot of the display core (which clears the recipe magic and may lose the race for the bus it handed away) still leaves the bridge watched. An HE-only reset under the running HP is now a recognised warm boot (`alp,i2c-handover` `alive-address` = a liveness word `0x0237FD90` the HP advances from a 10 ms timer started right after it took the bus: record taken (snapshotted at PRE_KERNEL_1, where an untaken release is also cleared) and the word moving, sampled up to 100 ms): the HE does not initialise I2C1 (`zephyr,deferred-init` on its `&i2c1`, `device_init()` on a cold boot only), keeps the bridge EN pin high, does not touch the bridge or release the bus, keeps the recipe magic and counters and republishes the recipe, and re-initialises only the DSI host and the CDC200; the HP agent replays the CSRs if the host restart cost the bridge its PLL lock, rides out I2C errors (retry at the next interval, one report per episode of 3 failing polls in a row, never touching the shared controller). Bench-unverified. The Trace Runner HE also asks the Secure Enclave to reset the SoC after a fatal error (`TR_HE_FAULT_SOC_RESET`, default ON: a bounded direct MHUv2 request, not the mutex-guarded `se_service_boot_reset_soc()`), unless the fatal errors repeat within 30 s of each boot (3rd in a row halts, `TR_MEM_HE_RESET_GUARD`); `TR_BENCH_FAULT_INJECT` (default ON, inert until armed over SWD at `TR_MEM_FAULT_INJECT`) lets the bench test that. The Trace Runner HE also keeps its last fatal error (reason, PC, LR, CFSR, HFSR, MMFAR, BFAR) and the tail of its console in the shared SRAM0 page (`TR_MEM_HE_FAULT`, `TR_HE_FAULT_LOG`, default ON) and prints them at the next boot.
+
+### Changed — packaging: minor-carrying SONAME, release-tracking recipe PV, per-machine package arch (#2827)
+
+`libalp_sdk` now ships as `libalp_sdk.so.0.17` (SONAME `libalp_sdk.so.0.17`) while the major version is 0, because a 0.x minor may remove public symbols; from 1.0 the SONAME is the major alone. Anything that linked `libalp_sdk.so.0` must be relinked, and `FILES:${PN}` already globs `libalp_sdk.so.*`. The `meta-alp-sdk` `alp-sdk` recipe's `PV` now tracks the SDK release (`0.17.0~rc2`; a pre-release uses `~` so it sorts before the final) instead of the stale `0.6.0`, `scripts/bump_version.py` rewrites it, and `scripts/check_version_doc_sync.py` fails on drift. The recipe sets `PACKAGE_ARCH = "${MACHINE_ARCH}"` because the build content differs per machine (V2N doorbell SPI, `ALP_SDK_INFERENCE_AUTO_ORDER`, auto-enabled `PACKAGECONFIG`), so each machine needs its own feed lane. `SRCREV` is still repinned at release time.
+
+### Fixed — a non-CMake static link of `libalp_sdk.a` on Yocto no longer drops the second backends (#2829)
+
+`gcc app.c -lalp_sdk` pulled only the archive members something referenced, so `src/backends/can/yocto_drv.c` and every other Linux `yocto_drv.c` were dropped and the app silently ran on `sw_fallback`; only CMake consumers got the `--undefined=_alp_backend_force_<class>_<name>` options (#2790). A static `ALP_OS=yocto` build now writes `alp-sdk.pc` and installs it to `${CMAKE_INSTALL_LIBDIR}/pkgconfig` with `libalp_sdk.a` and the `<alp/*>` headers (the baremetal static build stays install-free). `Libs:` carries those options before `-lalp_sdk`, then the libraries the archive needs; `Requires:` names the pkg-config modules it was built against; `Cflags:` carries the `ALP_HAS_LVGL`/`ALP_HAS_CMSIS_DSP` defines. Everything is in `Libs`/`Requires` (archive-only package), so a recipe or Makefile links with `cc app.c $(pkg-config --cflags --libs alp-sdk)`; `--static` is not needed. The file is relocatable, so a multiarch `CMAKE_INSTALL_LIBDIR` (`lib/x86_64-linux-gnu`) and `cmake --install --prefix` resolve. The new `alp_test_static_link_pkgconfig` ctest installs into a multiarch prefix, links a probe through the installed `.pc` with a plain `cc` and checks every non-anchor backend is in the binary. The `meta-alp-sdk` recipe still builds the shared library and is unchanged.
+
+### Added — the trace-runner's backlight ceiling is a build option, `TR_BL_MAX_PCT`
+
+`-DTR_BL_MAX_PCT=<5..80, a multiple of 5>` (default 80, checked at configure time) sets the hard ceiling of the encoder's BRIGHTNESS mode, the bench request word and the boot level, for carriers whose 5 V net droops under the backlight (40 for the exhibition unit). `a32/release/build-release.sh` prints the ceiling the HE was built with and, with `TR_BL_MAX_PCT=<n>` in the environment, refuses an HE built with another one; `tests/host/test_knob.c` also runs at `-DTR_BL_MAX_PCT=40`.
+
+### Fixed — the trace-runner keeps its volume and brightness across an HE-only warm reset
+
+When the I2C1 handover reports a warm boot, `tr_vol_he_boot()` and `tr_knob_boot()` restore the tagged `vol` / `bl` records (clamped to the build's limits, the backlight re-applied to the LED, a mute kept) instead of publishing the 30 % defaults; a cold boot and a garbage word behave as before.
+
+### Added — abidiff gate on the built libalp_sdk.so (#2840)
+
+`scripts/check_abidiff.py` (CI: `pr-plain-cmake.yml:abidiff`) builds `libalp_sdk.so` from the
+latest release tag of the current minor (else that minor's latest rc tag) and from the PR head
+with the yocto shared configuration, and fails on any `abidiff` ABI_CHANGE or
+ABI_INCOMPATIBLE_CHANGE inside the minor line, so patch releases stay safe for in-place
+package upgrades. A missing `abidiff` skips loudly locally; CI passes `--require-tool`.
+
+### Added — signed opkg dev-kit feed per image release line (Refs #2841)
+
+`meta-alp-sdk` gains the opt-in pieces of a signed opkg feed for dev kits (not a field-update channel; field devices stay on Mender A/B). `conf/distro/include/alp-devkit-feed.inc` makes an image ship opkg with GPG and curl, `/etc/opkg/alp-devkit-feed.conf` with `option check_signature 1`, and the feed public key (`keys/alp_devkit_feed_signing.pub.asc`, fingerprint `2B7807E20B75B471BF88FD7AC9AB032782D3143B`) through the new `alp-devkit-feed-config` recipe; `conf/distro/include/alp-devkit-feed-sign.inc` turns on Yocto's `sign_package_feed` for the release builder. `scripts/package_devkit_feed.sh` merges the `all` and machine-arch indexes into one flat, signed feed, because a GitHub Release's assets are a flat namespace. See `docs/build-yocto-v2n.md`, "Dev-kit package feed".
+
+### Fixed — the SN65DSI83 recovery no longer re-inits the bridge every 5 s on a latched PLL_UNLOCK (display blink)
+
+`CHA_PLL_UNLOCK` (CSR `0xE5` bit 0) is a latched flag set while the PLL (re)acquires lock, including during our own re-init. The first poll after a replay saw it, `after_recovery` turned it into another re-init, and the cycle repeated every `SN65_REINIT_MIN_GAP_MS` (5 s). With PLL_EN, `PLL_EN_STAT` (the PLL is enabled; the datasheet has no live lock bit) and `HS_CLK_SRC` all intact, a lone `0xE5` = `0x01` is now cleared and counted (`pll_unlock_events`, printed with the recovery line) and never escalates (if it re-latches on 10 polls in a row it is reported once as a marginal PLL, still not re-inited); any other `0xE5` bit keeps the existing escalation (3 polls in a row, or the first poll after a re-init), and lost config (`0x0D` PLL_EN clear, `PLL_EN_STAT` clear, `HS_CLK_SRC` mismatch) still re-inits. Upstream Linux had the same regression in its error recovery (Toradex, LKML 2025-11, "[REGRESSION] TI SN65DSI83 is being reset making display to blink On/Off"). Bench observation: `0xE5` = `0x01` after HE warm resets, previously logged as "link errors cleared".
+
+### Fixed — AEN: portable GPIO and qenc inputs read idle because nothing enabled the pad input buffer (#2808)
+
+On the Alif Ensemble a pad's input buffer (REN) is set only by pinctrl, and neither `gpio_dw` nor Zephyr's `gpio-qdec` sets it, so an `alp_gpio_*` input or an `alp_qenc_*` encoder read 0 whatever was on the wire. The zephyr gpio backend now muxes the pad to GPIO, sets REN and applies the requested pull as pad bias when a pin is configured as an input, and the gpio-qdec backend does the same for both phase pads at `alp_qenc_open()`. It is a small Tier-1.5 hook over the existing Alif pinctrl driver (`CONFIG_ALP_GPIO_PAD_INPUT`, default on for Ensemble); no devicetree change is needed, so every existing `alp,pin-array` and `gpio-qdec` overlay works. A pull the controller cannot do (`gpio_dw` has none) is now honoured at the pad instead of dropped. `aen-trace-runner` loses its app-level `/zephyr,user` pinctrl workaround.
+
 
 ### Added — build-plan-v1 `sharedArtefacts` carries `generated/storage_mount_table.c` when the project has mountable storage (tan-cli#1216)
 
@@ -1155,7 +1297,7 @@ by hand (the library manifest's `west:` block cannot carry it yet).
 
 ### Added — Zephyr build glue for the AWS IoT and Azure IoT embedded-C SDKs (#382)
 
-`CONFIG_ALP_AWS_IOT` (`zephyr/Kconfig.alp-libraries:457` ("config ALP_AWS_IOT")) builds coreMQTT and coreJSON from the west-pinned `aws-iot-device-sdk-embedded-C` (`202412.00`), and `CONFIG_ALP_AZURE_IOT` (`zephyr/Kconfig.alp-libraries:475` ("config ALP_AZURE_IOT")) builds az_core and the IoT Hub client from the pinned `azure-sdk-for-c` (`1.5.0`). The glue lives in-tree under `vendors/aws-iot/` and `vendors/azure-iot/`, added from `zephyr/CMakeLists.txt:1630` ("if(CONFIG_ALP_AWS_IOT)") so nothing compiles unless the symbol is set. Neither upstream ships a `zephyr/module.yml`, so the `extras-cloud` checkouts are found at `modules/lib/<project>` or via `ALP_AWS_IOT_SDK_DIR` / `ALP_AZURE_IOT_SDK_DIR`.
+`CONFIG_ALP_AWS_IOT` (`zephyr/Kconfig.alp-libraries:457` ("config ALP_AWS_IOT")) builds coreMQTT and coreJSON from the west-pinned `aws-iot-device-sdk-embedded-C` (`202412.00`), and `CONFIG_ALP_AZURE_IOT` (`zephyr/Kconfig.alp-libraries:475` ("config ALP_AZURE_IOT")) builds az_core and the IoT Hub client from the pinned `azure-sdk-for-c` (`1.5.0`). The glue lives in-tree under `vendors/aws-iot/` and `vendors/azure-iot/`, added from `zephyr/CMakeLists.txt:1666` ("if(CONFIG_ALP_AWS_IOT)") so nothing compiles unless the symbol is set. Neither upstream ships a `zephyr/module.yml`, so the `extras-cloud` checkouts are found at `modules/lib/<project>` or via `ALP_AWS_IOT_SDK_DIR` / `ALP_AZURE_IOT_SDK_DIR`.
 
 `metadata/libraries/aws-iot.yaml:63` ("CONFIG_ALP_AWS_IOT=y") and `metadata/libraries/azure-iot.yaml:54` ("CONFIG_ALP_AZURE_IOT=y") now carry the matching `kconfig:` entries, so `libraries: [aws-iot]` emits the symbol. `tests/zephyr/cloud_sdks/` links both on `native_sim/native/64`; `tests/zephyr/cloud_sdks/testcase.yaml:6` ("filter: CONFIG_CLOUD_SDKS_PRESENT") skips it unless both checkouts exist. The mbedtls TLS transport shim is not part of this change. `CONFIG_ALP_AWS_IOT_DEFAULT_CONFIG` (default `y`) controls whether coreMQTT uses its built-in defaults; set it to `n` to provide your own `core_mqtt_config.h`. The new `nightly-cloud-sdks.yml` workflow (nightly and manual, not a PR gate) fetches the pinned `extras-cloud` revisions and runs the test, which `pr-twister` skips.
 
@@ -1770,7 +1912,7 @@ Two changes close it, and both are visible in the gate's own output:
   source for `memory:` — they are its whole source, and omitting one deletes
   the fact rather than leaving a question open. The trigger is the `silicon:`
   ref, never a SKU allow-list, so a future `E1M-AEN901` is covered the day it
-  lands (`scripts/validate_metadata.py:517`
+  lands (`scripts/validate_metadata.py:518`
   ("a SKU allow-list so a future E1M-AEN901 is covered the day it lands")) —
   `test_the_requirement_is_derived_from_the_silicon_ref_not_a_sku_list` pins
   that.
@@ -1819,9 +1961,9 @@ one `memory` key a consumer *does* read is a DIFFERENT block: per-core
 `cores.<id>.memory` (`heap_kib` / `stack_kib` / `isr_stack_kib`), copied onto
 the `Slice` at `scripts/alp_orchestrate/loader.py:585`
 (`memory=dict(entry.get("memory") or {}),`) and read back at
-`scripts/alp_orchestrate/validate.py:272`
+`scripts/alp_orchestrate/validate.py:269`
 (`heap_kib = (slice_.memory or {}).get("heap_kib")`) and
-`scripts/alp_orchestrate/kconfig.py:1521`
+`scripts/alp_orchestrate/kconfig.py:1554`
 (`mem = slice_.memory or {}`). That block never carries `dram_mbit` or
 `flash_mbit`, so it is not evidence for the no-consumer claim and must not
 be cited as though the SoM-preset `memory:` block flowed through it.
@@ -2013,7 +2155,7 @@ D/AVE 2D driver or run on a board; every earlier "GPU2D PASS" was the software
 fallback. Brought up on E1M-AEN803 serial 2026W36-0001 (M55-HE) against the
 driver at its existing `vendor-sdks` pin in `west.yml`:
 
-- The E8 devicetree gains the engine (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:1708`
+- The E8 devicetree gains the engine (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:1778`
   ("gpu2d: dave2d@49040000 {")), disabled by default: `0x49040000`, IRQ 332,
   clock gate `PERIPH_CLK_ENA.GPU_CKEN` (bit 8 of `0x4903F00C`) as the new
   `ALIF_GPU_CLK`. A header named after Alif's fork
@@ -3045,9 +3187,9 @@ LPI2C bus" on E1M-AEN, naming the one family where it is unreachable and
 omitting the two where it is populated. AEN's BRD_I2C was believed at the time
 to be LPI2C0, where the Alif silicon can only be a slave --
 **since corrected by #1848: BRD_I2C is SoC I2C0, master-capable, not LPI2C0**
-(`docs/bring-up-aen.md:263` ("so the M55 can master BRD_I2C directly")) -- and
+(`docs/bring-up-aen.md:262` ("so the M55 can master BRD_I2C directly")) -- and
 the part is marked `DNI` on the current batch
-(`docs/bring-up-aen.md:304` ("DNI on this bench batch")). The chip is populated
+(`docs/bring-up-aen.md:303` ("DNI on this bench batch")). The chip is populated
 on E1M-X V2N / V2M at `0x30` on BRD_I2C with the RZ/V2N as bus master
 (`metadata/e1m_modules/E1M-V2N101.yaml:50` ("role: secure_element")). The header
 now says so
@@ -4660,7 +4802,7 @@ Every declared `memory_mode` is a section Arm's own `vela.ini` ships, so the
 flag works for a customer with no license. Sourced from
 `examples/aen/aen-npu-inference-alp/CMakeLists.txt:43` (`AEN_NPU_MEMORY_MODE   "Sram_Only"`, U85),
 `examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:52` (`AEN_NPU_MEMORY_MODE   "Sram_Only"`, U55) and
-`vendors/nxp-imx93/README.md:106` (`--memory-mode Shared_Sram`, U65) — never invented.
+`vendors/nxp-imx93/README.md` (removed in #2781) (`--memory-mode Shared_Sram`, U65) — never invented.
 
 **The U65 citation is weaker than the other two, and now says so.** The two
 Alif citations point at build files that pass the flag to a real toolchain;
@@ -4767,7 +4909,7 @@ into `examples/` and `vendors/`, which do not exist in the metadata-only
 scratch clone that `validate_metadata.py` is run against in a bare `board.yaml`
 checkout (formerly exercised by `tests/scripts/test_alp_cli_new_som.py`,
 deleted along with the rest of `scripts/alp_cli/` by #1727), so a copy there
-could only be a silent skip (`scripts/validate_metadata.py:1353-1361`
+could only be a silent skip (`scripts/validate_metadata.py:1337-1345`
 ("deliberately does NOT live here")).
 The test requires the FIRST cited line to state the `memory_mode` and that
 line's text to appear exactly once in the file. "The cited RANGE contains the
@@ -4777,7 +4919,7 @@ cite (`vendors/nxp-imx93/README.md`, lines 103-108) a seven-line shift slid
 that window clean off the vela command onto the provenance note that disclaims
 it — the note names `Shared_Sram` too, so the disclaimer satisfied the check it
 was written to weaken. Each `source` now cites the single line that states the
-mode: `vendors/nxp-imx93/README.md:106` ("--memory-mode Shared_Sram"),
+mode: `vendors/nxp-imx93/README.md` (removed in #2781) ("--memory-mode Shared_Sram"),
 `examples/aen/aen-npu-inference-alp/CMakeLists.txt:43` (`AEN_NPU_MEMORY_MODE   "Sram_Only"`),
 `examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:52` (`AEN_NPU_MEMORY_MODE   "Sram_Only"`).
 `soc-spec-v1.schema.json`'s `source` pattern accepts a bare `:<line>`
@@ -5144,7 +5286,7 @@ odds with row 62 (ADR-0023's own row, which still reads "narrowly
 supersedes ADR 0003's Ethernet-into-`<alp/iot.h>` row"), inverted issue
 #1516's own framing ("ADR-0003 Status omits the 0023 supersession"), and
 implied a "a Proposed ADR can't supersede" rule that ADR-0023's own body
-contradicts (`docs/adr/0023-ethernet-out-of-the-alp-surface.md:14-15`
+contradicts (`docs/adr/0023-ethernet-out-of-the-alp-surface.md:18-19`
 ("This ADR supersedes") says it supersedes "that one row of ADR 0003 and
 nothing else", written while its Status line still reads `Proposed`). Reverted: both rows now read
 "(partially / narrowly) supersede[d]", and row 42 adds an inline "0023
@@ -5232,16 +5374,16 @@ without it, a re-capture under a newer compiler silently overwrites the old
 point at the same filename.
 
 A dedicated collector (`_collect_model_perf_files`,
-`scripts/validate_metadata.py:2753` ("def _collect_model_perf_files(root: Path) -> tuple[list[Path], list[tuple[str, list[str]]]]:")) walks the whole
+`scripts/validate_metadata.py:2701` ("def _collect_model_perf_files(root: Path) -> tuple[list[Path], list[tuple[str, list[str]]]]:")) walks the whole
 `metadata/model_perf/` tree and FAILS on anything that isn't exactly
 `<SKU>/<hash>.yaml` two levels deep — a stray file, a `.yml` sibling, or a
 point nested one level too deep (`<SKU>/_fixture/<hash>.yaml`, the precise
 evasion the `_fixture` refusal below exists to catch) — rather than the
 one-level glob it replaces silently never opening it.
-`scripts/validate_metadata.py:2914` (`_check_model_perf_semantics`) adds the
+`scripts/validate_metadata.py:2862` (`_check_model_perf_semantics`) adds the
 semantic cross-checks a schema can't express: the path reproduces the body
 (directory == `sku`, filename == a content hash of the identity fields —
-`scripts/validate_metadata.py:2808` ("def _model_perf_identity_hash(doc) -> str:"), `_model_perf_identity_hash`); the SKU
+`scripts/validate_metadata.py:2756` ("def _model_perf_identity_hash(doc) -> str:"), `_model_perf_identity_hash`); the SKU
 exists; the `(backend, accel_config)` pair and `core` are ones the SKU
 actually resolves (cross-checked against `alp_project_loader.resolve_targets`
 and `npus[].paired_core`); `hw_rev` is a key in the family
@@ -5251,7 +5393,7 @@ profile (vela otherwise silently falls back to its own DRAM-backed default,
 and a non-`ethos_u` point carries no leftover `vela:` block; `req_sram_kib`
 covers `arena_bytes`; `p95` is never below `mean` and `p50` is never above
 `p95`; a `latency_ms` block needs at least
-`scripts/validate_metadata.py:2749` (`_MODEL_PERF_LATENCY_RUN_FLOOR = 30`)
+`scripts/validate_metadata.py:2697` (`_MODEL_PERF_LATENCY_RUN_FLOOR = 30`)
 runs; `capture.date` parses as ISO-8601; and any `_fixture`-named SKU
 directory or filename is refused outright in the published tree.
 
@@ -9175,7 +9317,7 @@ SE's own boot line `[SES] SE frequency is 78.31 MHz`, exactly half. So even the
 maximum divisor 16 gives ~9.8 MHz against the `ADTS0013` v1.2 maximum of
 **5000 kHz**. The DT nodes already carry `clock_div = <16>`, the lowest
 `ADC_CLK` reachable
-(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:1402` ("lowest ADC_CLK reachable")).
+(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:1472` ("lowest ADC_CLK reachable")).
 
 `adc_alif.c` now emits one `LOG_WRN` per instance at init naming the datasheet
 limit and stating that its ENOB and linearity figures do not apply to these
@@ -9229,7 +9371,7 @@ invalidated, so it is unaffected.
 
 `zephyr/drivers/flash/flash_ospi_alif.c`'s `OSPI_ALIF_INIT` macro fed `core_clk` from `DT_INST_PROP_OR(inst, clock_frequency, DT_INST_PROP(inst, bus_speed))` — the node never set `clock-frequency`, so `core_clk` fell back to `bus-speed` (100 MHz). `alif_hal_ospi_initialize()` writes the whole `OSPI_BAUDR` register from `core_clk / bus_speed`, so `core_clk == bus_speed` wrote `OSPI_BAUDR = 1`. HWRM `AHRM0012NDA v0.3` §16.1.5.3.5 defines `OSPI_BAUDR[SCKDV]` as bits 15:1 (bit 0 is RESERVED and forced to 0 on every write): "If this field is set to all 0s, the serial output clock (OSPI_SCLK) is disabled." A written value of 1 leaves `SCKDV` all zero — **the old fallback disabled `OSPI_SCLK` entirely. It was a dead bus, not an overclock.** (An earlier revision of this PR, its changelog fragment, and both touched header comments claimed the old fallback would overclock an external device past its rating; that claim was wrong and is corrected here. HWRM §16.1.4.2 also makes `SCLK ≤ OSPI_CLK/2` a hardware property of Master mode, so an overclock past the core clock was structurally impossible regardless.) Latent on this batch only because no such part is populated on the E1M-AEN801 (bench module is board rev r1, `2617-0001`; E1M-AEN801 populates neither external OSPI memory on any revision -- E1M-AEN803 is the SKU that fits OSPI0, measured in #2041 as an ISSI `IS25WX256-JHLE`, not the Macronix part this fragment originally named -- corrected per #2062).
 
-The file's own header comment justified the placeholder as "must come from the Alif Ensemble E8 TRM, not be invented" — stale: HWRM Table 16-2 sources HEXSPI0's internal core clock (OSPI0_CLK) from "SYST_ACLK or 266M_CLK", selected by `MISC_CLK_CTRL[SEL_OSPI_CLK]` (`zephyr/drivers/flash/flash_ospi_alif.c:97-102` ("the true OSPI core-clock source is NOT an unavailable HW")); HWRM §8.3.2.3.7 gives that bit's silicon reset value 0x0 as "400 MHz (SYST_ACLK)" (`AHRM0012NDA v0.3`). `zephyr/dts/alif/ensemble_e8_peripherals.dtsi` now declares `clock-frequency = <400000000>` (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:751` ("That was UNSAFE on Flow D")), and the driver macro now reads it with a plain `DT_INST_PROP(inst, clock_frequency)` (`zephyr/drivers/flash/flash_ospi_alif.c:1283` ("the exact dead-bus failure this file fixed for a MISSING")) — no fallback: a board/SoM that omits `clock-frequency` on its `ospi0` node now fails to build instead of silently programming a disabled clock. Worked through: `400000000 / 100000000 = 4`, `SCKDV = 2`, `BAUDR = SCKDV × 2 = 4`, `SCLK = 400/4 = ` **100 MHz** — exactly the node's `bus-speed`, and half the §10.5 200 MHz HEXSPI controller cap. The example that independently exercises this same call, `examples/aen/aen-ospi-regcheck/src/main.c`, carried the identical `DT_PROP_OR` fallback one file over from the driver fix; it is corrected the same way (`examples/aen/aen-ospi-regcheck/src/main.c:390` ("instead of quietly re-growing the same fallback")).
+The file's own header comment justified the placeholder as "must come from the Alif Ensemble E8 TRM, not be invented" — stale: HWRM Table 16-2 sources HEXSPI0's internal core clock (OSPI0_CLK) from "SYST_ACLK or 266M_CLK", selected by `MISC_CLK_CTRL[SEL_OSPI_CLK]` (`zephyr/drivers/flash/flash_ospi_alif.c:97-102` ("the true OSPI core-clock source is NOT an unavailable HW")); HWRM §8.3.2.3.7 gives that bit's silicon reset value 0x0 as "400 MHz (SYST_ACLK)" (`AHRM0012NDA v0.3`). `zephyr/dts/alif/ensemble_e8_peripherals.dtsi` now declares `clock-frequency = <400000000>` (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:807` ("That was UNSAFE on Flow D")), and the driver macro now reads it with a plain `DT_INST_PROP(inst, clock_frequency)` (`zephyr/drivers/flash/flash_ospi_alif.c:1328` ("the exact dead-bus failure this file fixed for a MISSING")) — no fallback: a board/SoM that omits `clock-frequency` on its `ospi0` node now fails to build instead of silently programming a disabled clock. Worked through: `400000000 / 100000000 = 4`, `SCKDV = 2`, `BAUDR = SCKDV × 2 = 4`, `SCLK = 400/4 = ` **100 MHz** — exactly the node's `bus-speed`, and half the §10.5 200 MHz HEXSPI controller cap. The example that independently exercises this same call, `examples/aen/aen-ospi-regcheck/src/main.c`, carried the identical `DT_PROP_OR` fallback one file over from the driver fix; it is corrected the same way (`examples/aen/aen-ospi-regcheck/src/main.c:390` ("instead of quietly re-growing the same fallback")).
 
 `zephyr/drivers/flash/flash_ospi_alif.c:481` adds `OSPI_ALIF_CHECK_SCLK()`, three `BUILD_ASSERT`s beside the macro so a *present but wrong* `clock-frequency`/`bus-speed` ratio fails the build the same way a *missing* `clock-frequency` now does: the effective divider (`clock-frequency / bus-speed`, HAL-truncated, bit 0 forced to 0 by `OSPI_BAUDR[SCKDV]`) must be ≥ 2 (else `SCKDV` is all zero and `OSPI_SCLK` is disabled, per §16.1.5.3.5 above), the raw ratio must be even (else the bit-0 truncation rounds the divider **down**, so `SCLK` silently **overshoots** the requested `bus-speed` -- e.g. a ratio of 3 becomes a divider of 2), and the resulting `SCLK` must stay ≤ 200 MHz (HWRM §10.5).
 
@@ -9504,10 +9646,10 @@ guard:
   `scripts/alp_project_loader.py:743-745`
   ("it must never be silently masked into a") chose a crash over emitting
   the truncated `ethos-u55-`.
-- `scripts/alp_orchestrate/kconfig.py:1374`
+- `scripts/alp_orchestrate/kconfig.py:1408`
   (`n.get("mac_per_cycle")`) filters the incomplete entry out, which makes it
   indistinguishable from an absent `npus[]` block, and
-  `scripts/alp_orchestrate/kconfig.py:1405`
+  `scripts/alp_orchestrate/kconfig.py:1439`
   (`mac = macs[0] if macs else 256`) then defaults to **256**. On a part whose
   U55 is really 128-MAC that emits `CONFIG_ETHOS_U55_256=y` — a legal
   `ETHOS_U_NPU_CONFIG` member, so neither the `_valid_accel` guard nor
@@ -9560,10 +9702,10 @@ that opened it overstated the hole. A typo *inside* a revision entry was never a
 `summary`, and `hw_revisions` constrains its own keys with
 `propertyNames: {"pattern": "^r[0-9]+$"}`. Only a stray key at the top level was admitted.
 
-Nothing downstream depended on the open root. `scripts/validate_metadata.py:92`
+Nothing downstream depended on the open root. `scripts/validate_metadata.py:91`
 ("HWREV_SCHEMA = REPO") loads this schema and validates every
 `metadata/e1m_modules/*/hw-revisions.yaml` against it --
-`scripts/validate_metadata.py:3494-3506`
+`scripts/validate_metadata.py:3442-3454`
 ("# Per-family hw-revisions files (YAML) against hw-revisions v1.") -- and reports
 `4 hw-revisions file(s) ... 0 failure(s)` after the change. No
 generator in this repo writes these files; tan reads them and touches only `hw_revisions`
@@ -9670,7 +9812,7 @@ schema-invalid-`--metadata-root` precondition, and still raising: driving it wit
 attribute 'lower'`. So `--emit os-topology` was fixed while `--emit kconfig` was left crashing.
 Every other reader in the tree (`scripts/alp_orchestrate/loader.py:865`,
 `scripts/alp_orchestrate/libraries.py:83`, `scripts/alp_orchestrate/libraries.py:95`,
-`scripts/gen_portability_matrix.py:550` ("): str(c.get("), `scripts/validate_metadata.py:1520` ("), str) and str(c.get(")) coerces with
+`scripts/gen_portability_matrix.py:550` ("): str(c.get("), `scripts/validate_metadata.py:1497` ("), str) and str(c.get(")) coerces with
 `str(...)` and cannot raise.
 
 The neighbouring `vector_extension` read is guarded in the same change: it is the identical
@@ -10356,7 +10498,7 @@ The accepted-connection event is a compact 12-byte IPv4 form, not a 20-byte
 `alp_cc3501e_sock_addr_t`: the firmware event ring caps a per-entry payload at
 `ALP_CC3501E_EVENT_PAYLOAD_MAX` (16) and **clamps** anything longer, i.e.
 silently truncates it on the wire, so `_Static_assert`s pin the size against
-that cap (`include/alp/protocol/cc3501e.h:1941`
+that cap (`include/alp/protocol/cc3501e.h:1942`
 (`sock_accepted must fit ALP_CC3501E_EVENT_PAYLOAD_MAX`)). Use
 `cc3501e_sock_accepted_decode()` rather than casting the callback's payload
 pointer — it aims into the driver's event buffer at whatever offset the entry
@@ -10876,7 +11018,7 @@ Registered in `metadata/quality-tasks-v1.json` (`issue-citations`, `pr` /
 Run against the real tree, the gate found three pre-existing instances of the
 exact defect it exists to catch, not just the `gd32g553.yaml` case described
 above: `metadata/chips/dp83825.yaml:4` citing the now-closed #1241/#1244, and
-`include/alp/chips/pca9451a.h:10` citing the now-closed #474. Both files'
+`include/alp/chips/pca9451a.h` (removed in #2781) citing the now-closed #474. Both files'
 prose is fixed in this same change -- a new gate that ships pointing at
 findings it doesn't itself resolve would land red. `gd32g553.yaml`'s own
 citations are fixed by #1949, which landed on `dev` first and gets the
@@ -11190,7 +11332,7 @@ Declined. Not widened; closing #1958 with this measurement rather than
 leaving it open or landing the widening unmeasured. The ADR-0023 drift
 found above is real and is fixed directly in this change: "#1241, still
 open" became "#1241, now closed"
-(`docs/adr/0023-ethernet-out-of-the-alp-surface.md:221` ("now closed (every AEN"))
+(`docs/adr/0023-ethernet-out-of-the-alp-surface.md:225` ("now closed (every AEN"))
 since the repo's rule is docs change with
 the code, not left for a mechanical gate that cannot make this call given
 the false-positive rate above.
@@ -11341,7 +11483,7 @@ right; the three sites below now follow the same shape:
   `_rx_loop()` now breaks (the same terminal action its existing `rc < 0`
   branch already takes) instead of `continue`-ing back into another
   immediate poll().
-* `src/backends/rpc/yocto_drv.c:413` ("POLLERR | POLLHUP | POLLNVAL") —
+* `src/backends/rpc/yocto_drv.c:414` ("POLLERR | POLLHUP | POLLNVAL") —
   `rpc_rx_main()` now reports `ALP_RPC_LINK_LOST` (the same call its
   `rc < 0` and read()-EOF branches already make) and breaks.
 * `src/yocto/peripheral_gpio.c:383` ("POLLERR | POLLHUP | POLLNVAL") — the
@@ -12297,7 +12439,7 @@ Closes #1987.
 it is the single on-module-pad authority shared
 by every AEN SKU (E1M-AEN301/401/501/601/701/801/803). Its `rtc_alarm.risk`
 string, though, was evidenced against exactly one document:
-`metadata/e1m_modules/aen/on-module-links.yaml:255` ("The AE822 DFP warns for port 15").
+`metadata/e1m_modules/aen/on-module-links.yaml:263` ("The AE822 DFP warns for port 15").
 AE822 is the E8's own part number — there is no citation against the
 E3/E4/E6/E7 DFPs, and `scripts/gen_zephyr_board.py`'s `_aen_brd_i2c_dts()`
 (`scripts/gen_zephyr_board.py:1300` ("def _aen_brd_i2c_dts")) emitted that
@@ -12320,7 +12462,7 @@ cannot attribute to that DFP.
 
 Fixed by scoping the DATA, not by hardcoding a part check in the generator:
 `rtc_alarm.risk` is now a map keyed by the SoC's own `part` designator
-(`metadata/e1m_modules/aen/on-module-links.yaml:247` ("Keyed by the SoC"))
+(`metadata/e1m_modules/aen/on-module-links.yaml:255` ("Keyed by the SoC"))
 with a single `E8:` entry carrying the existing AE822 text.
 `_aen_brd_i2c_dts()` now takes `part` and looks up `risk.get(part)`
 (`scripts/gen_zephyr_board.py:1360` ("risk_text = (alarm.get(")) — a part
@@ -12497,7 +12639,7 @@ That block's own comment named the assumption behind it: "no platform
 guard here beyond the one this whole `yocto` leg already implies (issue
 #1747's CI gate runs on ubuntu-latest)". The implication holds for CI
 and not for `test-all.sh`, which at
-`scripts/test-all.sh:1621` ("--target dev (release-grade build)")
+`scripts/test-all.sh:1618` ("--target dev (release-grade build)")
 skips the yocto leg only for `--target dev` and otherwise runs it
 wherever it is invoked.
 
@@ -17408,7 +17550,7 @@ CC3501E bridge (phase 8) for Wi-Fi/BLE.
 the DWC SDHC block was entirely unclocked — every register, including
 read-only `CAPABILITIES1`, read `0x00000000`. Fixed by declaring `sdhc0`
 once, in the shared SoC dtsi with `clocks = <&clockctrl ALIF_SDC_CLK>`
-(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:665` ("sdhc0: sdhc@48102000 {")),
+(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:721` ("sdhc0: sdhc@48102000 {")),
 and calling `clock_control_on()` as the first action in `sdhc_dwc_init()`
 (`zephyr/drivers/sdhc/sdhc_dwc.c`). **This explains the all-zero
 readback on E1M-AEN803 serial 2026W36-0002 only** — it does not close the original open question, a
@@ -18128,7 +18270,7 @@ independently:
   in-repo precedent at `changelog.d/1164.md:20` ("since corrected by #1848"),
   itself amended by six later, differently-numbered issues while still
   unreleased.
-- `metadata/schemas/soc-spec-v1.schema.json:221` (`soc_flash_base`'s own
+- `metadata/schemas/soc-spec-v1.schema.json:222` (`soc_flash_base`'s own
   worked example named the wrong SKU, part, and chip-select).
 - **`scripts/gen_zephyr_board.py`, two separate generator defects, both in
   `_aen_dts()`:**
@@ -18250,7 +18392,7 @@ files -- AEN801's own preset (`assembled: false` on both devices) never
 exercised the `"populated"`/`"optional"` branches these fixes touch, so
 its wording is unchanged; only a scratch `E1M-AEN803` emit and the
 synthetic mutated cases exercise the corrected paths.
-- `zephyr/kconfigs/peripherals-handles.kconfig:182`
+- `zephyr/kconfigs/peripherals-handles.kconfig:195`
   (`config ALP_SDK_STORAGE_ALIF_SECAES`'s help text said "R2 BOM only; see
   the file header" -- the file header it pointed to said the opposite;
   reworded to point at "whichever SKU" the
@@ -18783,7 +18925,7 @@ itself halted moments before -- a narrower and better-grounded claim than
 this fix's first draft made by citing `flash-jlink.sh`'s `RSetType 2`/`r`/
 `g`/`exit` (`scripts/bench/aen/flash-jlink.sh:144-147`) as precedent: there
 the pin reset reboots the Secure Enclave and J-Link's own attach fails
-afterwards (`docs/aen-bench-bringup.md:541-543` ("Attach to CPU failed")), so
+afterwards (`docs/aen-bench-bringup.md:549-551` ("Attach to CPU failed")), so
 `g`/`exit` act on a core J-Link no longer controls -- that shows closing
 J-Link does not stop an SE-booted core, not that `exit` after resuming a
 core J-Link itself halted leaves it running. Whether `qc` behaves the same
@@ -19369,7 +19511,7 @@ than the loose earlier claim, none change behaviour:
   prose; §7.3.7 (p.33), a different, later section, merely doesn't restate
   it. `tas2563_load_tuning()`'s doc now cites §7.3.5 and frames single-byte
   writes as deliberate conservatism pending silicon, not an undocumented gap
-  (`include/alp/chips/tas2563.h:1079-1093` ("§7.3.5")). The same imprecise framing in the
+  (`include/alp/chips/tas2563.h:1076-1090` ("§7.3.5")). The same imprecise framing in the
   still-unreleased `changelog.d/2040-tas2563-v03x-tuning-i2s-faults.md` is
   corrected in place rather than left to ship self-contradicting notes —
   this does not close any part of #2040 otherwise.
@@ -19379,7 +19521,7 @@ than the loose earlier claim, none change behaviour:
   page" — is a PPC3-GUI workflow note, not a register rule; SLASET3D itself
   never mentions ROM mode. No register in SLASET3D's map selects or reports
   ROM vs Smart Amp/Tuning mode (searched exhaustively); documented, not
-  gated in code (`include/alp/chips/tas2563.h:602-621` ("SLAA953 §1.9")).
+  gated in code (`include/alp/chips/tas2563.h:600-619` ("SLAA953 §1.9")).
 - `tas2563_load_tuning()`: TI's `I2C_CKSUM` (0x7E) write-verification CRC
   (SLASET3D §7.3.2, p.29, not just SLAA765's command-syntax examples) is
   documented but its algorithm is never specified — not what it sums, not
@@ -19393,11 +19535,11 @@ than the loose earlier claim, none change behaviour:
 **Tests** (`tests/zephyr/chips/src/test_audio.c`): SW_RESET write-ordering
 (`:360`), SW_RESET settle wait with `sd_n == NULL` (`:409`, 1x floor), the
 sd_n-owned settle wait in `test_tas2563_init_settles_sdz_before_first_access_when_sd_n_owned`
-(`tests/zephyr/chips/src/test_audio.c:1193`
+(`tests/zephyr/chips/src/test_audio.c:1310`
 ("test_tas2563_init_settles_sdz_before_first_access_when_sd_n_owned")),
 tightened to 2x — one wait alone no longer passes), the NACK-propagation
 test (`:440`), and a new `test_tas2563_init_writes_sd_n_before_configuring_it`
-(`tests/zephyr/chips/src/test_audio.c:1278`
+(`tests/zephyr/chips/src/test_audio.c:1395`
 ("test_tas2563_init_writes_sd_n_before_configuring_it")) for the SD_N
 glitch fix. `test_tas2563_configure_i2s_writes_tdm_fields` (`:499`) already
 covered `TDM_CFG2` bits `[5:4]` = `01b`/`10b` for `TAS2563_RX_LEFT`/`_RIGHT`
@@ -19627,9 +19769,9 @@ override, which nothing in the tree declares yet (`on_module.ospi_memories:` dev
 entirely, `scripts/alp_orchestrate/partition.py:918` ("is_ospi_device or _has_real_dt_label")); and
 `check_atoc_reservation.py` itself only ever walks the in-tree `metadata/e1m_modules/` preset
 directory (run with no metadata-root argument at
-`.github/workflows/pr-metadata-validate.yml:621` ("python3 scripts/check_atoc_reservation.py")), so a customer
+`.github/workflows/pr-metadata-validate.yml:612` ("python3 scripts/check_atoc_reservation.py")), so a customer
 preset loaded through a `--metadata-root` override (`effective_metadata_root()`,
-`scripts/alp_orchestrate/models.py:406` ("effective_metadata_root")) never runs through this CI
+`scripts/alp_orchestrate/models.py:411` ("effective_metadata_root")) never runs through this CI
 gate at all. #2088 tracks `partition.py`'s own gap as a follow-up.
 
 ### Fixed — `partition.py` placed a runtime mount on any `memory_map` region without checking `write_authority` (#2088)
@@ -19808,7 +19950,7 @@ anticipated exactly this ("Real pulse counts come via the v0.3
 input-subsystem fast-path") but nothing implemented it until now.
 
 `src/backends/qenc/gpio_qdec.c` is a new QENC backend, registered at
-priority 110 (`src/backends/qenc/gpio_qdec.c:141`
+priority 110 (`src/backends/qenc/gpio_qdec.c:166`
 (".priority    = 110,")) — above `zephyr_drv`'s 100 — so it is tried
 first. For each `alp-qenc<N>` alias whose devicetree node is compatible
 `gpio-qdec`, it registers an `INPUT_CALLBACK_DEFINE_NAMED` that
@@ -19819,7 +19961,7 @@ baselines each handle to that shared accumulator's value at open time, so
 baseline instead of the raw accumulator — two handles opened at different
 times don't zero each other out. An alias that is NOT a `gpio-qdec` node
 makes `open()` decline with `ALP_ERR_NOSUPPORT`
-(`src/backends/qenc/gpio_qdec.c:101`
+(`src/backends/qenc/gpio_qdec.c:120`
 ("if (dev == NULL) return ALP_ERR_NOSUPPORT;")).
 
 `src/qenc_dispatch.c`'s `alp_qenc_open()` gained the same open-time
@@ -19835,7 +19977,7 @@ backend exists", so it must not silently land on the software fallback's
 fake counter.
 
 Compiled only under `CONFIG_INPUT`
-(`zephyr/CMakeLists.txt:1130`
+(`zephyr/CMakeLists.txt:1139`
 ("zephyr_library_sources_ifdef(CONFIG_INPUT")), selected purely by the
 alias's devicetree `compatible` — no new Kconfig knob to choose between the
 two qenc backends.
@@ -20469,7 +20611,7 @@ before `alp_wifi_open()`, so on real AEN801 silicon all three failed at
 `alp_wifi_open()` and never reached `alp_wifi_connect()` — only the
 `examples/aen/aen-cc3501e-*` apps and `iot-dashboard`'s own doc comment
 already showed the working pattern
-(`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c:124`
+(`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c:170`
 ("(void)alp_wifi_cc3501e_attach(fw);")).
 
 Fixed at the example level, not the backend: each of the three AEN-targeted
@@ -20633,7 +20775,7 @@ them.
 
 ### Fixed — `EVK_PIN_SDIO_MUX_SEL` doc string and `evk_sdio_select_t` enum had the SDIO mux select polarity inverted (#2129)
 
-`metadata/boards/e1m-evk.yaml:140` ("SDIO mux S") (the `EVK_PIN_SDIO_MUX_SEL` `doc:` field) said
+`metadata/boards/e1m-evk.yaml:156` ("SDIO mux S") (the `EVK_PIN_SDIO_MUX_SEL` `doc:` field) said
 "0 = M.2 E-key SDIO, 1 = microSD slot" -- the opposite of the carrier
 netlist. `E1M-EVK-2626-R2_pinmap.csv` (internal repo, `grep -a ',U38,'`)
 shows `SD_D3` on U38 pin 2 (`1|0`) and `M2E_SDIO_D3` on pin 3 (`1|1`); U39
@@ -20645,7 +20787,7 @@ E1M-AEN803 serial 2026W36-0002, header P18 open pulls `S` low through `R27` (100
 `0V`) via `R198` (0 ohm to `NetP18_2`), and a microSD card in `J7`
 enumerated and read a real sector 0 with the `55 AA` boot signature --
 proving `S` LOW is the microSD slot on this hardware.
-`metadata/boards/e1m-evk.yaml:140` ("SDIO mux S") (the pin's IDE hover doc string) is
+`metadata/boards/e1m-evk.yaml:156` ("SDIO mux S") (the pin's IDE hover doc string) is
 corrected and now carries the full r1/r2 split rather than just r2: on
 r1 `S` IS firmware-drivable, via CC3501E `GPIO_30`
 (`metadata/e1m_modules/aen/hw-revisions.yaml:46`
@@ -20657,7 +20799,7 @@ r2 it is `dispatch: unrouted`
 `R198`/`R27`/header `P18` instead.
 
 The same inversion was baked into the generated `evk_sdio_select_t` enum:
-`metadata/boards/e1m-evk.yaml:372-373`
+`metadata/boards/e1m-evk.yaml:389-390`
  ("MUX_SEL.SDIO low.") paired `EVK_SDIO_M2E_KEY` with `value: 0` and
 `EVK_SDIO_SDCARD` with `value: 1` (now swapped, so `EVK_SDIO_SDCARD = 0`
 / `EVK_SDIO_M2E_KEY = 1`, matching `MUX_SEL.SDIO low`/`high` in the same
@@ -20692,7 +20834,7 @@ hand-edited);
 `proj-aen.composed-route-table.snap` were refreshed via
 `scripts/check_emit_snapshots.py --update` in the same pass.
 
-**`include/alp/boards/alp_e1m_evk.h:96-157`
+**`include/alp/boards/alp_e1m_evk.h:94-155`
  ("SDIO multiplexer (M.2 E-key SDIO vs microSD card slot).")'s
 hand-written SDIO mux block carried the same inverted `S` mapping, plus
 a deeper problem: it presented `/E = 0` as a working route on the stock
@@ -20762,7 +20904,7 @@ none of TMUX1574's packages fit U46's NXP DHVQFN-16 2.5x3mm land
 pattern without an adapter or flying leads) -- UNTESTED in-house. The
 SDIO block's truth table is now scoped to "with a 3257-type switch
 fitted" rather than presented as universal, and the I2S block
-(`include/alp/boards/alp_e1m_evk.h:159-260`
+(`include/alp/boards/alp_e1m_evk.h:157-258`
  ("I2S0 multiplexer (TAS2563 amplifier vs M.2 E-key I2S).")) gets the
 same per-part contention wording for `/E` PLUS this `+VIO`/`+3V3`
 power-rail finding, alongside a separate pre-existing bug in that
@@ -20780,7 +20922,7 @@ unrouted` and hardware-strapped, exactly as described above, but r1
 (`metadata/e1m_modules/aen/hw-revisions.yaml:46`
  ("r1: CC3501E GPIO_30 (r2 unrouted).")) DOES proxy it to CC3501E
 `GPIO_30` and IS firmware-drivable there -- with a hardware hazard the
-block (`include/alp/boards/alp_e1m_evk.h:137-142`
+block (`include/alp/boards/alp_e1m_evk.h:136-141`
  ("HAZARD: the same select net also reaches header")) now documents:
 the same select net reaches header P18 pin 2 (`NetP18_2`) through R198
 (0 ohm), and P18's jumper, when fitted, ties pin 1 (`+3V3`) to pin 2 --
@@ -20828,7 +20970,7 @@ change): `examples/aen/aen-evk-demo/src/main.c:1919`
 outright when #2051 renamed this app to `aen-sdhc-probe` and dropped
 its CC3501E-driven design, so neither comment exists in the current
 tree, `docs/aen-bench-bringup.md:41`
- ("SD card**"), `docs/test-plan.md:313`
+ ("SD card**"), `docs/test-plan.md:312`
  ("AEN801 peripheral matrix — SD card") (regenerating
 `docs/verification-status.md` via `scripts/gen_verification_status.py`,
 its single source of truth per #1200), and
@@ -20844,7 +20986,7 @@ the post-#2129 values, and its docstring now cites #2129 for why
 `EVK_SDIO_M2E_KEY`/`EVK_SDIO_SDCARD` no longer carry their pre-#2129
 hand-authored values.
 
-The I2S twin, `metadata/boards/e1m-evk.yaml:124-125`
+The I2S twin, `metadata/boards/e1m-evk.yaml:141-142`
  ("0 = TAS2563 amps, 1 = M.2 E-key I2S."), was checked against its
 own netlist (`U46` pin 2 `1|0` = `AMP_I2S0_WS`) and is correct -- not
 touched by this fix.
@@ -20855,7 +20997,7 @@ reads 4-bit, at 25 MHz, after a U38 solder fix, on E1M-AEN803 serial 2026W36-000
 the UNMERGED `test/2051-sdhc-enable-on-reworked-mux` branch plus
 PR #2122 (open, issue #2051), which would disable `sdhc0` by default
 for the defective 2626-R2 mux, fix the SD clock gate and harden reset;
-until it merges, `origin/dev` still enables `sdhc0`. `docs/test-plan.md:313`
+until it merges, `origin/dev` still enables `sdhc0`. `docs/test-plan.md:312`
  ("AEN801 peripheral matrix — SD card") and
 `docs/aen-bench-bringup.md:41`  ("SD card**") are reverted to 🟡
 partial/PARTIAL with: "4-bit SD read proven 2026-09-15 at 25 MHz, after
@@ -20864,7 +21006,7 @@ E1M-AEN803 serial 2026W36-0002 (U38/U39/U46 hand-reworked to 3257-type) with the
 unmerged enable path (#2122, clock gate) plus the unmerged
 `test/2051-sdhc-enable-on-reworked-mux` branch (ADMA address
 translation, system RAM in SRAM0); dev's SD path unverified until that
-lands." `docs/test-plan.md:311`
+lands." `docs/test-plan.md:310`
  ("AEN801 peripheral matrix — I2S TX") (whose prior pass wrongly
 reused the row's original "same" 2026-06-24 v0.8.0-session evidence
 pointer for the unrelated, later amp-audibility fact) and
@@ -20897,8 +21039,8 @@ full finding.
 fixed.** First: at dev `5b7f1f3c6`, `docs/boards/e1m-evk.md` said `+VIO`
 is selectable via header P17 -- the `+VIO` "(selectable" rails bullet and
 the IO-voltage-select table's "jumper between" row. Now corrected at
-`docs/boards/e1m-evk.md:49-53` ("the plugged-in") and
-`docs/boards/e1m-evk.md:176` ("jumper connects"): P17 selects `+V_ANA`
+`docs/boards/e1m-evk.md:48-52` ("the plugged-in") and
+`docs/boards/e1m-evk.md:175` ("jumper connects"): P17 selects `+V_ANA`
 (2626-R2 netlist, `P17`
 pins 1/3/5 = `+5V`/`+3V3`/`+1V8`, pins 2/4/6 = `+V_ANA`), and `+VIO` is
 the plugged-in SoM's own `VIO_OUT` (`E2` pins P1/P2), unaffected by
@@ -20910,7 +21052,7 @@ earlier pass of this same branch, `docs/boards/e1m-evk.md` briefly said
 (`E1M-EVK-2626-R2_pinmap.csv`, internal repo, `grep -a ',P17,\|,P9,'`).
 A user jumpering pins 1-2 expecting 1.8 V would have put 5 V on
 `+V_ANA` instead. Fixed the order to "`+5V`/`+3V3`/`+1V8`" at
-`docs/boards/e1m-evk.md:49-52`
+`docs/boards/e1m-evk.md:48-51`
  ("the plugged-in"), with the pin numbers (pins 1/3/5) at `:142`
  ("jumper connects"); every other P17/P9 pin statement in the tree
 was checked against the netlist and already had the correct order.
@@ -20923,9 +21065,9 @@ LSF0108 level shifters U18/U22/U40 have `VREF_A` = `+VIO` and `VREF_B`
 pulled to a DIFFERENT rail, `+VARD`, through R176/R177/R178; `+VARD` is
 selected by header **P9** (netlist: pins 1/3/5 = `+5V`/`+3V3`/`+1V8`,
 pins 2/4/6 = `+VARD` -- the same shape as P17/`+V_ANA`). Added as a new
-`docs/boards/e1m-evk.md:177`  ("same shape as P17") table row and folded
+`docs/boards/e1m-evk.md:176`  ("same shape as P17") table row and folded
 into the rails bullet (`:49-63`  ("the plugged-in")) and the
-"Expansion" bullet (`docs/boards/e1m-evk.md:360-362`
+"Expansion" bullet (`docs/boards/e1m-evk.md:363-365`
  ("Expansion:**"), reworded from "the IO-voltage select rail" to
 name `+VARD`/P9 specifically). **`+VARD`'s own scope was ALSO
 under-stated on the first pass**: it is not only the Arduino/mikroBUS
@@ -20937,7 +21079,7 @@ R95/R96) and `ENC1..3_X`/`Y` to encoder header J18 (via R97-R102), and
 `CK_SCL`/`CK_SDA` pull-ups R146/R147, and U16/U17's `REFB` via
 R173/R174. Setting P9 to `+5V` therefore puts 5 V on J17, J18, and
 those I2C pull-ups too, not just the Arduino/mikroBUS shifters --
-folded into the same `docs/boards/e1m-evk.md:49-63`
+folded into the same `docs/boards/e1m-evk.md:48-62`
  ("the plugged-in") and `:143`  ("same shape as P17") edits.
 
 **A second, later pass over `+VARD` found one more load the netlist grep
@@ -20946,15 +21088,15 @@ above had missed: `R175` is a `+VARD` pull-up on `CK_RST`**
 `"+VARD",R175,2`), and `CK_RST` itself reaches mikroBUS header P7 pin
 2, P3 pin 3, and U17 pin B1 (`"CK_RST",P7,2` / `"CK_RST",P3,3` /
 `"CK_RST",U17,6`). Added to the same rails bullet
-(`docs/boards/e1m-evk.md:49-63`  ("the plugged-in")) and the `+VARD`
+(`docs/boards/e1m-evk.md:48-62`  ("the plugged-in")) and the `+VARD`
 select table row (`:143`  ("same shape as P17")), and folded into the
 "Setting P9 to `+5V` puts 5 V on ..." warning in both places. Also
 corrected in the same pass: the same bullet's own earlier text named
 J18 "mikroBUS/encoder header" -- per the netlist J18 carries `+VARD`,
 `ENC1..3_X`/`Y`, and `0V`, not any mikroBUS signal (mikroBUS is header
 **P7**, the `CK_*` net prefix); now "encoder header J18" at
-`docs/boards/e1m-evk.md:58`  ("encoder header J18 pin 1"). The same
-table's Comparator row was also wrong: `docs/boards/e1m-evk.md:175`
+`docs/boards/e1m-evk.md:57`  ("encoder header J18 pin 1"). The same
+table's Comparator row was also wrong: `docs/boards/e1m-evk.md:174`
  ("Comparator") claimed `CMP0`/`CMP1` exposed on header J18 -- the
 netlist has no CMP net at all, and J18 carries only
 `+VARD`/`ENC1..3_X`/`Y`/`0V`; corrected to "not broken out on a
@@ -21997,14 +22139,14 @@ value-may-differ match when the symbol name is **unambiguous** — exactly one
 header lost it, exactly one header gained it, reachable via the same one-hop
 `#include` graph MOVED already used. That reports `MOVED` plus an accompanying
 `CHANGED` line
-(`scripts/abi_snapshot.py:1225` ("CHANGED {r_cat[:-1]} {a_header}::{r_sym} (moved from {r_header})"))
+(`scripts/abi_snapshot.py:1248` ("CHANGED {r_cat[:-1]} {a_header}::{r_sym} (moved from {r_header})"))
 with the same per-field/enumerator detail a same-header CHANGED already gets, or a
 "content hash changed" fallback for a record schema with nothing more descriptive
 than the hash
 (`scripts/abi_snapshot.py:790` ("content hash changed")). Several headers losing or
 gaining the same name at once is left alone rather than guessed at — it falls back
 to the pre-fix REMOVED + ADDED behaviour
-(`scripts/abi_snapshot.py:1198` ("value_changed = False")). The freeze gate's own
+(`scripts/abi_snapshot.py:1221` ("value_changed = False")). The freeze gate's own
 `^  REMOVED ` grep is unaffected: a true removal (no reachable candidate at all)
 still reports a bare `REMOVED` and still fails the gate. `CHANGED` follows the
 existing pre-1.0 policy already documented for a same-header value change — it
@@ -22018,7 +22160,7 @@ paired as a false MOVED + CHANGED — hiding a genuine removal from the freeze
 gate. The pairing and its ambiguity counts now also key on the typedef's own
 `kind` (struct/union/enum/opaque/fnptr/alias; `None` for every non-typedef
 category, so functions/macros/variables are unaffected)
-(`scripts/abi_snapshot.py:1215` ("and a_kind == r_kind")), refusing to pair
+(`scripts/abi_snapshot.py:1238` ("and a_kind == r_kind")), refusing to pair
 across a kind change even when the bare name is unambiguous.
 
 Seven regression cases in `tests/scripts/test_abi_snapshot.py` total: moved+changed
@@ -22043,7 +22185,7 @@ entry and drops it once this merges.
 ### Fixed — TAS2563 TDM clock fault is now armed, and a live TDM-detect readback is now available (#2140)
 
 `TAS2563_FAULT_TDM_CLOCK` reads `INT_LTCH0[2]`
-(`include/alp/chips/tas2563.h:346` ("TAS2563_FAULT_TDM_CLOCK")), but
+(`include/alp/chips/tas2563.h:347` ("TAS2563_FAULT_TDM_CLOCK")), but
 `INT_MASK0`'s reset value `FCh` leaves that bit masked, and `INT_MASK`
 gates the IRQZ / `AMP_FAULT` pin only -- not the latched readback
 (SLASET3D §7.4.x p.35: "the IRQZ pin will assert low if the clock error
@@ -22063,17 +22205,17 @@ during the same investigation, and no surviving log reconciles the two.
 
 `tas2563_configure_fault_pin()` now clears `INT_MASK0` bit 2 as part of
 binding the fault pin
-(`chips/tas2563/tas2563.c:647` ("reg_update(ctx, TAS2563_REG_INT_MASK0")),
+(`chips/tas2563/tas2563.c:655` ("reg_update(ctx, TAS2563_REG_INT_MASK0")),
 citing the register address already modelled by the fake at
-`tests/zephyr/chips/src/fake_tas2563.c:97` ("INT_MASK0   §7.5.28 p.77") and the
+`tests/zephyr/chips/src/fake_tas2563.c:99` ("INT_MASK0   §7.5.28 p.77") and the
 bit position already recorded in the driver header
-(`include/alp/chips/tas2563.h:776` ("INT_MASK0[2]"), pre-fix). Unmasking
+(`include/alp/chips/tas2563.h:773` ("INT_MASK0[2]"), pre-fix). Unmasking
 `INT_MASK0[2]` is what routes the TDM clock fault to the IRQZ /
 `AMP_FAULT` pin -- `tas2563_read_faults()` already saw the latch either
 way -- so a caller that binds a fault pin now gets an edge on TDM clock
 loss too, rather than silence, without having to know to write
 `INT_MASK0` directly. `tas2563_read_faults()`'s doc comment
-(`include/alp/chips/tas2563.h:880` ("@note `INT_MASK` gates the IRQZ / fault pin"))
+(`include/alp/chips/tas2563.h:877` ("@note `INT_MASK` gates the IRQZ / fault pin"))
 now states that the mask governs the pin only, not the
 latch, with the per-register POR mask values kept for reference:
 over-temperature/over-current unmasked to the pin at reset (`INT_MASK0`),
@@ -22084,8 +22226,8 @@ from the pin with nothing in this driver unmasking it -- those bits still
 latch and `tas2563_read_faults()` still reports them.
 
 A new public accessor, `tas2563_read_tdm_detect()`
-(`include/alp/chips/tas2563.h:975` ("tas2563_read_tdm_detect(tas2563_t *ctx, tas2563_tdm_detect_t *detect_out)"), implemented at
-`chips/tas2563/tas2563.c:761` ("tas2563_read_tdm_detect(tas2563_t *ctx, tas2563_tdm_detect_t *detect_out)")), decodes the LIVE auto-rate detector at `DSP
+(`include/alp/chips/tas2563.h:972` ("tas2563_read_tdm_detect(tas2563_t *ctx, tas2563_tdm_detect_t *detect_out)"), implemented at
+`chips/tas2563/tas2563.c:769` ("tas2563_read_tdm_detect(tas2563_t *ctx, tas2563_tdm_detect_t *detect_out)")), decodes the LIVE auto-rate detector at `DSP
 Mode & TDM_DET` (register `0x11`, read-only, SLASET3D §7.5.19 Table 7-119,
 p.73) into a `tas2563_tdm_detect_t` (`include/alp/chips/tas2563.h:387`): a
 detected SBCLK:FSYNC ratio, a detected sample-rate pair, and a `clock_valid`
@@ -22181,7 +22323,7 @@ their own -- bench-measured within roughly 100 ms of their TDM/I2S bit clock
 stopping, not the ~1 s an earlier pass of this note claimed (see the
 register-level bench evidence below) -- and nothing in the audio stack
 re-armed them afterwards
-(`TAS2563_FAULT_SHUTDOWN_CAUSES`, `include/alp/chips/tas2563.h:376`
+(`TAS2563_FAULT_SHUTDOWN_CAUSES`, `include/alp/chips/tas2563.h:377`
 ("#define TAS2563_FAULT_SHUTDOWN_CAUSES"), citing SLASET3D §7.3.12). The
 clock stops on every I2S stop path and on an underrun
 (`zephyr/drivers/i2s/i2s_dw.c`'s `tx_stream_disable()`
@@ -22195,7 +22337,7 @@ which also explains why
 playback, not only after a stop/restart.
 
 Added `tas2563_resume()` (`chips/tas2563/tas2563.c`,
-`include/alp/chips/tas2563.h:1060` ("alp_status_t tas2563_resume")): clears
+`include/alp/chips/tas2563.h:1057` ("alp_status_t tas2563_resume")): clears
 the latched faults via the existing self-clearing `CLR_INTP_LTCH` bit
 (`INT & CLK CFG`, 0x30 bit 2 -- the same mechanism `tas2563_clear_faults()`
 already used), then switches `PWR_CTL.MODE` to ACTIVE, in that order --
@@ -22286,7 +22428,7 @@ E1M-AEN803 serial 2026W36-0002, test branch `test/u46-i2s-tas2563-on-reworked-mu
   does not separate a power-up pop from a shutdown-on-clock-loss
   transient, so it does not say which one caused it -- see the ordering
   contract on `tas2563_resume()`
-  (`include/alp/chips/tas2563.h:1026-1034` ("@par Ordering contract"))
+  (`include/alp/chips/tas2563.h:1023-1031` ("@par Ordering contract"))
   and on `alp_audio_out_stop()`
   (`include/alp/audio.h:268-278` ("@note Ordering contract")).
 
@@ -22899,7 +23041,7 @@ gate landed, plus one deliberately different -- and nothing asserted the copies
 stayed in sync. It is not boilerplate: it writes the LP-GPIO pad control
 registers for `WIFI_EN` / nRESET, runs the reset pulse, and pokes the
 silicon-tuned DW SSI `RX_SAMPLE_DLY` register that makes the 25 MHz link sample
-MISO correctly (`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c:86`
+MISO correctly (`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c:132`
 ("the DW SSI RX_SAMPLE_DLY register (0xf0) delays")). A silicon fix applied to
 one copy and missed in the other fifteen compiles clean, passes CI, and shows
 up only on hardware. #1859 is the same failure already realised once: the
@@ -22928,13 +23070,13 @@ bring-up retries `cc3501e_hard_reset()` in a cold-boot soak instead of
 returning the first `cc3501e_reset()` status, and carries no `RX_SAMPLE_DLY`
 poke. That list is graded in both directions -- an entry naming a directory
 with no copy fails, and so does one whose copy has come back into line
-(`scripts/check_cc3501e_bridge_copies.py:150` ("declared divergent in")) --
+(`scripts/check_cc3501e_bridge_copies.py:152` ("declared divergent in")) --
 because an exemption nobody removes is where the next drift hides. A directory
 carrying one half of the pair without the other fails too.
 
 Registered as a hard gate in the quick / pr / full / release profiles
-(`metadata/quality-tasks-v1.json:165` ("cc3501e-bridge-copies")) and wired into
-CI (`.github/workflows/pr-metadata-validate.yml:775`
+(`metadata/quality-tasks-v1.json:193` ("cc3501e-bridge-copies")) and wired into
+CI (`.github/workflows/pr-metadata-validate.yml:766`
 ("cc3501e_bridge copies are in sync")). The tree passes today: 15 copies byte-identical to the
 canonical pair, one declared divergent. Note that the 18-copy survey in #2163
 counted a copy under `examples/aen/aen-sdcard-readout`, which no longer carries
@@ -23057,7 +23199,7 @@ DevKit board, which no `-p` flag in this repo selects — and `mqtt-telemetry`
 had no AEN scenario at all. Both now name the target their own `board.yaml`
 describes (`examples/connectivity/mqtt-telemetry/testcase.yaml:53`
 ("alp_e1m_aen801_m55_hp")), and both are added as bounded testsuite roots of
-the AEN twister job (`.github/workflows/pr-twister-aen.yml:602`
+the AEN twister job (`.github/workflows/pr-twister-aen.yml:612`
 ("alp-sdk/examples/connectivity/mqtt-telemetry")), build_only, so the next regression
 in this path fails a PR instead of a bench session.
 
@@ -23092,7 +23234,7 @@ non-prompt result symbol is y when the PSA core is compiled against
 randomness that is not cryptographically secure
 (`zephyr/Kconfig.alp-libraries:390` ("config ALP_SDK_MBEDTLS_WEAK_RNG")), and
 CMake turns that into a hard failure naming the board and the fix
-(`zephyr/CMakeLists.txt:1875` ("CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG AND NOT")).
+(`zephyr/CMakeLists.txt:1917` ("CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG AND NOT")).
 Kconfig cannot refuse a configuration, hence the CMake half.
 
 The check is `CSPRNG_ENABLED` — Zephyr's own "a true entropy driver is in this
@@ -23212,7 +23354,7 @@ drivers it compiles into this app, none previously covered by this gate), and
 adds the
 example as the third `--testsuite-root` line in this job's (now
 seven-root) list
-(`.github/workflows/pr-twister-aen.yml:600`
+(`.github/workflows/pr-twister-aen.yml:610`
 ("alp-sdk/examples/connectivity/iot-dashboard")) — besides `examples/aen`,
 one of only two roots (with `camera-mjpeg-stream`, added by #2265) that
 contributes a scenario to *both* SKU matrix legs, since mqtt-telemetry and
@@ -23255,7 +23397,7 @@ first commit (73a6f2752), not the PR review: the C-side pad-mux poke was
 M55-HE only.** `aen_lp_pads_enable_output()` -- the raw LP-GPIO pad-config
 store that actually powers WIFI_EN/nRESET -- was guarded
 `#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE)` only
-(`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c:10`
+(`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c:22`
 ("#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE) || defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)")
 shows the fixed guard). The HP boards select
 `CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP`, so even with the DT wiring above
@@ -23722,13 +23864,13 @@ read-modify-write apart from a blind write landing on the same byte.
 
 `tas2563_configure_fault_pin()` is now a thin wrapper around a new
 `tas2563_arm_fault_irq(tas2563_t *ctx, bool chip_internal_pullup)`
-(`include/alp/chips/tas2563.h:801` ("tas2563_arm_fault_irq(tas2563_t *ctx, bool chip_internal_pullup);"),
-implemented at `chips/tas2563/tas2563.c:626` ("alp_status_t tas2563_arm_fault_irq(tas2563_t *ctx, bool chip_internal_pullup)")):
+(`include/alp/chips/tas2563.h:798` ("tas2563_arm_fault_irq(tas2563_t *ctx, bool chip_internal_pullup);"),
+implemented at `chips/tas2563/tas2563.c:634` ("alp_status_t tas2563_arm_fault_irq(tas2563_t *ctx, bool chip_internal_pullup)")):
 the chip-only half -- page select, `MISC_CFG1.IRQZ_PU`, `INT & CLK
 CFG.IRQZ_PIN_CFG` and the `INT_MASK0[2]` clear
-(`chips/tas2563/tas2563.c:647` ("return reg_update(ctx, TAS2563_REG_INT_MASK0, TAS2563_INT_MASK0_TDM_CLOCK, 0u);")),
+(`chips/tas2563/tas2563.c:655` ("return reg_update(ctx, TAS2563_REG_INT_MASK0, TAS2563_INT_MASK0_TDM_CLOCK, 0u);")),
 with no GPIO touched and `ctx->irq_n` left unbound. `tas2563_configure_fault_pin()`
-(`chips/tas2563/tas2563.c:651` ("tas2563_configure_fault_pin(tas2563_t *ctx, alp_gpio_t *irq_n, bool chip_internal_pullup)"))
+(`chips/tas2563/tas2563.c:659` ("tas2563_configure_fault_pin(tas2563_t *ctx, alp_gpio_t *irq_n, bool chip_internal_pullup)"))
 now only configures the host pin, calls the new function, and binds
 `ctx->irq_n` -- unchanged behaviour for every existing caller. This exists
 for boards where the fault pin is not reachable via `alp_gpio` and the
@@ -23745,7 +23887,7 @@ initialised amp gets `tas2563_arm_fault_irq(&amps[i], false)`
 (`examples/aen/aen-evk-demo/src/main.c:4459` ("alp_status_t arm_rc = tas2563_arm_fault_irq(&amps[i], false);")),
 `false` because the 0x4D/0x4E pair share IRQZ on P5_0 behind the R124
 external pull-up
-(`metadata/boards/e1m-evk.yaml:345` ("R124 a fitted 10 kOhm pull-up")),
+(`metadata/boards/e1m-evk.yaml:361` ("R124 a fitted 10 kOhm pull-up")),
 with the rc printed per amp. The phase's step-list header comment
 (`examples/aen/aen-evk-demo/src/main.c:3721` ("*   6. Arm each amp's fault IRQ -- tas2563_arm_fault_irq() on every"))
 gains that step and renumbers every step after it. This is now the only
@@ -23967,9 +24109,9 @@ is exempt, because the release-cut fold moves hundreds of grandfathered
 citations into `[Unreleased]` at once and moving a citation is not writing
 one. A foreign-repo citation is still only SKIPPED. CI turns the rule on for a
 PR into `dev` with `DIFF_BASE=HEAD^1`
-(`.github/workflows/pr-metadata-validate.yml:652` ("github.base_ref == 'dev' && 'HEAD^1'")),
+(`.github/workflows/pr-metadata-validate.yml:643` ("github.base_ref == 'dev' && 'HEAD^1'")),
 the first parent of the PR's merge commit, which the checkout now fetches with
-`.github/workflows/pr-metadata-validate.yml:246` ("Depth 2 fetches its parents"). Not on a
+`.github/workflows/pr-metadata-validate.yml:250` ("Depth 2 fetches its parents"). Not on a
 PR into `main`: `HEAD^1` is `main` there, and every line of every fragment
 `dev` has not folded yet would count as new (272 errors measured), so the gate
 warns that the rule did not run. A `workflow_dispatch` of `dev` runs it
@@ -24011,7 +24153,7 @@ now says so instead of claiming the code moved.
 
 **`--against-merge` grades what will land.** CI already grades the merge
 result: `pr-metadata-validate.yml` runs on `pull_request` and its
-`.github/workflows/pr-metadata-validate.yml:242` ("uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")
+`.github/workflows/pr-metadata-validate.yml:246` ("uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")
 pins no `ref:`, so it checks out `refs/pull/N/merge`. The gap was local, where
 a green run on the branch tip said nothing about citations into files `dev`
 had since moved. The new mode builds BASE merged into HEAD with
@@ -24026,7 +24168,7 @@ as grading HEAD's own tree, not a merge; and it refuses `--fix`, because the
 merge is not in the working tree. `scripts/test-all.sh` runs it as its own
 `changelog-citations-merge` stage with `origin/dev` passed explicitly, since
 `DIFF_BASE` is shared with the clang-format stage
-(`scripts/test-all.sh:1260` ("DIFF_BASE=origin/dev python3 scripts/check_changelog_citations.py --against-merge")).
+(`scripts/test-all.sh:1256` ("DIFF_BASE=origin/dev python3 scripts/check_changelog_citations.py --against-merge")).
 A host without `git merge-tree --write-tree` (git before 2.38: Ubuntu 22.04
 ships 2.34, Apple's git is 2.37) or without `origin/dev` gets a `[GAP]` SKIP
 naming the reason instead of a failed stage, and the pytest cases that need
@@ -24297,7 +24439,7 @@ flags, when no `encoding=` keyword is present: `Path.read_text()`/
 `encoding=` (including `encoding=locale.getpreferredencoding()`) are correct
 and never flagged.
 
-The check is AST-driven — `scripts/check_cross_platform.py:582`
+The check is AST-driven — `scripts/check_cross_platform.py:583`
 ("def scan_python_encoding") — not regex-driven like the existing five
 `LINUX-ONLY-IDIOM` patterns: the flagged calls routinely spread their keyword
 arguments across several lines, and "does this Call node have an `encoding=`
@@ -24383,11 +24525,11 @@ then printed 478 `IMPLICIT-ENCODING` lines about Python files under `scripts/`
 and `tests/`; the same paragraph also called the lint "soft", which was
 already wrong *before* this branch — CI flipped it to `--fail-on-warning` in
 #1032 A5 — so the expected output and the soft-lint claim are both fixed.
-And the gate's one-line description at `metadata/quality-tasks-v1.json:313`
+And the gate's one-line description at `metadata/quality-tasks-v1.json:341`
 ("cross-platform hazards") no longer says only "Linux-only idioms in
 customer-facing surfaces", which never covered this category: `scripts/` and
 `tests/` are not customer-facing and an encoding default is not a Linux-only
-idiom. That one line is generated into `metadata/catalog.json:3437`
+idiom. That one line is generated into `metadata/catalog.json:3432`
 ("cross-platform hazards") from the module docstring's first paragraph by
 `gen_catalog.py`, so the docstring, the regenerated catalog, and the registry
 moved together.
@@ -24416,7 +24558,7 @@ passed. The harness now makes the child write UTF-8 as well, at
 `tests/scripts/test_check_cross_platform.py:74` ("env={**os.environ"). Forcing
 `PYTHONIOENCODING=cp1252` on a Linux run reproduces all five failures before
 the fix and passes after it. The rule's own advice for `subprocess` calls now
-says the same thing, at `scripts/check_cross_platform.py:688`
+says the same thing, at `scripts/check_cross_platform.py:689`
 ("sure the child WRITES UTF-8"), so draining #2197 does not repeat this at
 every call site that spawns a Python child.
 
@@ -24485,7 +24627,7 @@ text-mode open: its `"w"` is a tar mode. Four baselined sites had these shapes,
 and one of them used a function-scope `import tarfile as _tf`. The check now
 resolves the call's owner through `import m` / `import m as a` at any scope,
 and through a module-level `from m import open`. It skips modules whose `open`
-takes no `encoding=`: `scripts/check_cross_platform.py:513`
+takes no `encoding=`: `scripts/check_cross_platform.py:514`
 ("_OPEN_WITHOUT_ENCODING_MODULES: frozenset"). The list also includes `os`,
 because `os.open(path, flags=...)` would otherwise be read as a text open.
 `from m import open` inside a function is not honoured, because treating it
@@ -24497,7 +24639,7 @@ taken from the second positional argument. That is correct for
 `open(file, mode)`, but `Path.open(mode)` takes the mode first. As a result,
 `path.open("rb")` in `scripts/provision_som.py` was flagged while
 `open(p, "rb")` was not. The slot now depends on the call shape:
-`scripts/check_cross_platform.py:667`
+`scripts/check_cross_platform.py:668`
 ("_open_mode_is_binary(node, 1 if builtin_shape else 0)"). The builtin, every
 module-level `m.open(file, mode)` (so `gzip.open(p, "rb")` stays unflagged and
 `gzip.open(p, "rt")` stays flagged) and any call with two or more positionals
@@ -24507,7 +24649,7 @@ read the second slot. Only a one-argument method call such as
 **`os.fdopen()` was never checked.** Its call name is `fdopen`, so the check
 never matched it, although it opens text mode by default just like `open()`.
 It is now matched when its owner resolves to `os`, with the builtin
-`(fd, mode)` shape: `scripts/check_cross_platform.py:516`
+`(fd, mode)` shape: `scripts/check_cross_platform.py:517`
 ("_OPEN_CALL_NAMES: frozenset[str]"). This adds one finding,
 `scripts/flash_backends/swd_probe.py`'s `os.fdopen(fd, "w")`, under that
 file's existing baseline entry.
@@ -24517,7 +24659,7 @@ file's existing baseline entry.
 `subprocess.run([sys.executable, ...], text=True, **kw)`. Their `**kw` passes
 through `cwd`/`env`/`check`, not an encoding. A subprocess call whose explicit
 `text=True` proves text mode is now flagged even when `**kw` is also passed:
-`scripts/check_cross_platform.py:630`
+`scripts/check_cross_platform.py:631`
 ("if name not in _SUBPROCESS_TEXT_CALLS and any("). `read_text`, `write_text`
 and `open` calls with `**kw` are still skipped: nothing in the call proves the
 mode or rules out an encoding, so the check does not guess. Three of the 13
@@ -24604,7 +24746,7 @@ Calls whose output is parsed as data stay strict: git paths, `nm` symbols and
 **Four `read_text()` calls inside double-quoted f-strings use
 `encoding='utf-8'`.** `requires-python` is `>=3.10`, and reusing an f-string's
 own quote inside `{}` needs Python 3.12:
-`scripts/gen_soc_caps.py:632` ("read_text(encoding='utf-8')").
+`scripts/gen_soc_caps.py:634` ("read_text(encoding='utf-8')").
 
 **The edit was mechanical and checked file by file.** The keyword was inserted
 at each linter-reported (line, column) position, guided by the AST. Two checks
@@ -24757,7 +24899,7 @@ does not keep those. `Finding.baselined`, the scan's `file_baselined` branch,
 and the `n_baselined` summary trailer go with it, and `main()` now fails
 `--fail-on-warning` on every IMPLICIT-ENCODING finding, the same as every
 other category:
-`scripts/check_cross_platform.py:1218` ("if findings and args.fail_on_warning").
+`scripts/check_cross_platform.py:1219` ("if findings and args.fail_on_warning").
 
 `tests/scripts/test_check_cross_platform.py` drops the four baseline-specific
 tests in section 12; the behaviour they covered -- an IMPLICIT-ENCODING
@@ -24858,7 +25000,7 @@ app does no device I/O at all. It binds the node, checks the rc of
 value, `examples/aen/aen-ospi-regcheck/src/main.c:165` ("#define OSPI_CTRLR0_RESET_VALUE 0x00C00407U").
 It sends no transfer, pulses no reset on `P15_6`/`P15_7`, enables no XIP and
 writes nothing. It has also already run on AEN803 silicon:
-`docs/verification-status.md:479` ("Bench-verified 2026-09-13 on two E1M-AEN803 modules")
+`docs/verification-status.md:480` ("Bench-verified 2026-09-13 on two E1M-AEN803 modules")
 records serial `2026W36-0001` and serial `2026W36-0002` giving
 `alif_hal_ospi_initialize() rc=0`, `CTRLR0=0x00c00407` and
 `RESULT PASS: OSPI/HexSPI node BINDS` through the AEN801 board target. The
@@ -24904,7 +25046,7 @@ AEN803 overlays this change repairs (`aen-evk-demo`, `aen-pdm-mic-alif`,
 `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` next to their AEN801 target,
 as at `examples/aen/aen-aipm-read/testcase.yaml:23` ("alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he").
 `pr-twister-aen.yml` already hands that platform to twister at
-`scripts/select_aen_twister.py:65` ("-p alp_{prefix}{cpu}/ae822fa0e5597ls0/{soc}"),
+`scripts/select_aen_twister.py:76` ("-p alp_{prefix}{cpu}/ae822fa0e5597ls0/{soc}"),
 but twister builds a scenario there only if its `platform_allow` names it, so
 until now CI never compiled these AEN803 overlays. A twister `--dry-run` over
 `examples/aen` now selects 14 AEN803 scenarios: these twelve on the HE target
@@ -25795,7 +25937,7 @@ that past the cap.
 
 **`twister-aen` is now a 2-way SKU matrix.** Each leg selects only its own
 SKU's two platforms via `matrix.platform_flags`, at
-`scripts/select_aen_twister.py:71` ("platform_flags"), and the
+`scripts/select_aen_twister.py:87` ("platform_flags"), and the
 two legs run in parallel. Neither is a required branch-protection context on
 `dev` (the required contexts are `twister-shard 1/4`..`4/4`, `clang-format
 · diff-only` and `distro install · all`, verified against the branch's
@@ -25806,7 +25948,7 @@ block shared by both matrix legs rather than duplicated per SKU, at
 `.github/workflows/pr-twister-aen.yml:455` ("here. The --testsuite-root list below is scoped to examples/aen --").
 The per-SKU report artefact is renamed to avoid an upload collision between
 the two legs now running in the same workflow run, at
-`.github/workflows/pr-twister-aen.yml:632` ("name: twister-out-${{ matrix.sku }}").
+`.github/workflows/pr-twister-aen.yml:642` ("name: twister-out-${{ matrix.sku }}").
 
 A local `--dry-run` against this tree (examples/aen + firmware-update-log +
 drone-autopilot) counts 153 configurations total: 78 AEN801, 75 AEN803 (up
@@ -25928,7 +26070,7 @@ compiled OUT entirely on AEN803, so the CC3501E companion would never
 power. All 29 now gate on the SoC-core symbol instead, at
 `examples/aen/aen-dualcore-he-master/src/main.c:108` ("#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)")
 and
-`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c:10` ("#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE)").
+`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c:22` ("#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE)").
 clang-format-22 diff-only: clean.
 
 Proof for the cc3501e fix: a direct `west build` of `aen-cc3501e-bringup`
@@ -26385,7 +26527,7 @@ AEN801 M55-HP, now also declares AEN803 M55-HP, at
 
 `.github/workflows/pr-twister-aen.yml` gains all three new roots as
 `--testsuite-root` entries, at
-`.github/workflows/pr-twister-aen.yml:605` ("GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/alp-console"),
+`.github/workflows/pr-twister-aen.yml:615` ("GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/alp-console"),
 bringing the job's per-run scenario count from 80 AEN801 + 75 AEN803 to 85
 AEN801 + 81 AEN803 (166 total) at the time of this change -- the extra
 AEN803 build beyond the three new roots' own additions is drone-autopilot's
@@ -26416,7 +26558,7 @@ resulting 8-configuration set is CI's twister AEN legs
 scenario (landed by #2522) names all four AEN board targets --
 `.github/workflows/pr-twister-aen.yml` had no `--testsuite-root` entry for
 it, so no CI job ever built it. It is now the tenth bounded root, at
-`.github/workflows/pr-twister-aen.yml:608` ("qenc-readout"). A fresh
+`.github/workflows/pr-twister-aen.yml:618` ("qenc-readout"). A fresh
 `twister --dry-run` over the merged eleven-root tree (examples/aen plus the
 ten bounded roots) at this PR's head measures 107 AEN801 (90 M55-HE + 17
 M55-HP) and 105 AEN803 (88 M55-HE + 17 M55-HP), 212 total, recorded at
@@ -26659,10 +26801,10 @@ point at. Every re-pointed citation here was re-verified against the current
 tree first.
 
 `docs/board-config-emit.md`'s cmake-args section-marker citation now reads
-`scripts/alp_project.py:519` ("{cid} ({slice_.os})");
+`scripts/alp_project.py:523` ("{cid} ({slice_.os})");
 `docs/board-config-schema.md` and
 `docs/adr/0034` re-point `_enforce_os_matches_core_class` at
-`scripts/alp_orchestrate/validate.py:296` ("def _enforce_os_matches_core_class(slice_: Slice, core_type: str) -> None:"),
+`scripts/alp_orchestrate/validate.py:293` ("def _enforce_os_matches_core_class(slice_: Slice, core_type: str) -> None:"),
 its call site at `scripts/alp_orchestrate/loader.py:928` ("_enforce_os_matches_core_class("),
 and the "A Cortex-A can't run Zephyr" comment at
 `scripts/alp_orchestrate/topology.py:112` ("A Cortex-A can't run Zephyr; a Cortex-M can't run Yocto."); the
@@ -26680,7 +26822,7 @@ newer opcodes; `docs/tutorials/07` re-points the `bench-env.sh` GD32_DPIDR
 hedge to `:391-396`; `docs/tutorials/13` re-points V2M101's `e1m_i2c0:` block
 to `:67-69`; `docs/tutorials/16` names the real `tests/bench/baselines/`
 contents; `docs/diagnostics/ALP-B099.md` re-points `supported_boards:` to
-`metadata/schemas/board.schema.json:527-529` ("^[a-z][a-z0-9-]*$"); `docs/aen-bench-bringup.md`'s lead notes the bench
+`metadata/schemas/board.schema.json:532-534` ("^[a-z][a-z0-9-]*$"); `docs/aen-bench-bringup.md`'s lead notes the bench
 farm moved to E1M-AEN803 (#2226); and `audio-wake-word`'s "TODO(v0.6)"
 milestone framing is re-phrased at ten minor versions past that marker.
 
@@ -30450,7 +30592,7 @@ flip between `allow`/`guarded`/`deny`, built and tested clean with no error.
 The new gate, `scripts/check_chip_reg_parity.py:4` ("Cross-check a chip"),
 hand-parses each driver's raw-write allow surface and per-rail/per-channel
 register `#define`s or macro-computed offsets and diffs them against the
-manifest, wired into `.github/workflows/pr-metadata-validate.yml:572` ("check_chip_reg_parity.py") and `metadata/quality-tasks-v1.json`'s `chip-reg-parity` task.
+manifest, wired into `.github/workflows/pr-metadata-validate.yml:560` ("check_chip_reg_parity.py") and `metadata/quality-tasks-v1.json`'s `chip-reg-parity` task.
 
 Not done here: `chip-v1.schema.json` typing `rails[]`/`channels[]`/
 `register_table[]` items (also proposed in #2347) touches all 88 chip
@@ -30610,7 +30752,7 @@ DW CSI-2 host failed with `D-PHY not locked to Stop-state. PHY status -
 attempted. After a power-up the sensor's data lanes are not in LP-11 until it
 has streamed once. The IMX335 driver patch now ends sensor init with a 20 ms
 STANDBY 0 -> 1 pulse, which parks the lanes in LP-11 before any host
-configures its D-PHY (`docs/camera-shields.md:774`
+configures its D-PHY (`docs/camera-shields.md:783`
 ("5. **First boot after a power cycle fails the D-PHY check")).
 
 Verified on E1M-AEN803 serial 2026W36-0001 with an INNO-MAKER CAM-IMX335-5MP:
@@ -31183,7 +31325,7 @@ announced the wrong one: `blink` built for the M55-HE of an E1M-AEN803
 printed `M55-HP @400MHz (active)`.
 
 The orchestrator now tags each core that has a Zephyr CPU cluster with it
-(`scripts/alp_orchestrate/kconfig.py:605`
+(`scripts/alp_orchestrate/kconfig.py:651`
 ("zephyr_cpucluster")), and the banner and the
 console's `res` command mark the core whose tag matches the last segment of
 `CONFIG_BOARD_TARGET`, listing it first
@@ -31218,12 +31360,12 @@ shell's current directory had drifted by the time this stage ran, so doxygen
 resolved the relative markdown links in `docs/**/*.md` against the wrong base
 and reported `unable to resolve reference to
 '<home>/vendors/alif/README.md'` for the link at
-`docs/boards/e1m-evk.md:464` ("](../../vendors/alif/README.md)") —
+`docs/boards/e1m-evk.md:481` ("](../../vendors/alif/README.md)") —
 a false FAIL, since a fresh `--depth 1` clone of the identical commit built
 with 0 warnings.
 
 The doxygen invocation now runs in its own subshell that `cd`s to
-`${REPO_ROOT}` first, at `scripts/test-all.sh:1319` ("cat docs/doxygen/Doxyfile"),
+`${REPO_ROOT}` first, at `scripts/test-all.sh:1315` ("cat docs/doxygen/Doxyfile"),
 so the stage's result no longer depends on whatever left the shell's cwd
 wherever it was before this stage ran.
 
@@ -31243,7 +31385,7 @@ variable, `pytest-scripts` (`test_emit_kconfig_workspace.py`) and
 was unaffected because its workflows set the variable themselves.
 
 The pin now runs once at top level, before any stage starts
-(`scripts/test-all.sh:1603` ("pin_alp_zephyr_module")), and a test locks
+(`scripts/test-all.sh:1599` ("pin_alp_zephyr_module")), and a test locks
 that placement (`tests/scripts/test_test_all_worktree.py:275`
 ("def test_module_is_pinned_before_any_stage_forks")).
 
@@ -31592,8 +31734,8 @@ removal is not closed. Checked with `git apply --check` against the real
 ### Changed
 
 - CI: the AEN twister legs (`twister · AEN801` / `twister · AEN803`) now keep their compiler cache between runs. Zephyr already sent every compile through ccache, but the job left it in the runner's home directory and threw it away, so all of each leg's ~100 arm-zephyr-eabi configurations compiled from scratch every time. The cache now lives in the workspace, at `.github/workflows/pr-twister-aen.yml:263` ("CCACHE_DIR: ${{ github.workspace }}/.ccache"), and is restored per SKU at the start of every run, at `.github/workflows/pr-twister-aen.yml:441` ("- name: Restore ccache objects"). Only a dev push or a new nightly run saves it, so PR runs cannot evict dev's copy from the repo's 10 GB Actions cache budget. The save also runs after a red or timed-out twister step, because a partial cache is still valid, but not after a run that failed before twister started (#2541).
-- CI: the AEN twister step's time limit rises from 30 to 34 minutes, at `.github/workflows/pr-twister-aen.yml:587` ("timeout-minutes: 34"). On PR #2239's merged head (103 AEN801 + 101 AEN803 configurations) the step measured 1730 s on AEN801, 70 s under the old limit. This is a stop-gap until the cache brings the step back down. A `ccache -s -v` step now prints the cache size and hit rate on every run (#2541).
-- CI: each AEN SKU leg is now split in two with twister's `--subset`, so the workflow runs four jobs, at `.github/workflows/pr-twister-aen.yml:597` ("--subset ${{ matrix.subset }}/2"). The job names change from `twister · AEN801 (M55-HE + M55-HP)` to `twister · AEN801 (M55-HE + M55-HP) · 1/2` and `· 2/2`, likewise for AEN803. Neither is a required context on `dev`. One unsplit leg of ~100 configurations measured anywhere from 1521 s to 2172 s depending on the runner, so it could time out cold. A warm cache cannot help a PR that changes Kconfig or the AEN devicetree, because that changes every configuration. The two halves together cover the same configurations as before (#2541).
+- CI: the AEN twister step's time limit rises from 30 to 34 minutes, in `.github/workflows/pr-twister-aen.yml` (`timeout-minutes: 34`; since reworked by #2848). On PR #2239's merged head (103 AEN801 + 101 AEN803 configurations) the step measured 1730 s on AEN801, 70 s under the old limit. This is a stop-gap until the cache brings the step back down. A `ccache -s -v` step now prints the cache size and hit rate on every run (#2541).
+- CI: each AEN SKU leg is now split in two with twister's `--subset`, so the workflow runs four jobs, in `.github/workflows/pr-twister-aen.yml` (`--subset ${{ matrix.subset }}/2`; four shards per SKU since #2848). The job names change from `twister · AEN801 (M55-HE + M55-HP)` to `twister · AEN801 (M55-HE + M55-HP) · 1/2` and `· 2/2`, likewise for AEN803. Neither is a required context on `dev`. One unsplit leg of ~100 configurations measured anywhere from 1521 s to 2172 s depending on the runner, so it could time out cold. A warm cache cannot help a PR that changes Kconfig or the AEN devicetree, because that changes every configuration. The two halves together cover the same configurations as before (#2541).
 
 ### Fixed
 
@@ -32712,7 +32854,7 @@ old submodule pointer and wrapper.
 
 ### Fixed — a `${MENDER_TENANT_TOKEN}` placeholder is no longer emitted as a self-referencing BitBake assignment (#2706)
 
-The Yocto `local.conf` emit wrote `MENDER_TENANT_TOKEN ?= "${MENDER_TENANT_TOKEN}"` for a `${NAME}` tenant in `board.yaml`, but BitBake never expands that from the host environment. The line is now skipped for placeholders and replaced by a comment pointing at the `conf/local.conf` override documented in `meta-alp-sdk/README.md:551` ("MENDER_TENANT_TOKEN = "). A literal tenant value is still emitted as before. The `iot-fleet-ota` and `production-deployment` example comments no longer claim the build host expands it.
+The Yocto `local.conf` emit wrote `MENDER_TENANT_TOKEN ?= "${MENDER_TENANT_TOKEN}"` for a `${NAME}` tenant in `board.yaml`, but BitBake never expands that from the host environment. The line is now skipped for placeholders and replaced by a comment pointing at the `conf/local.conf` override documented in `meta-alp-sdk/README.md:533` ("MENDER_TENANT_TOKEN = "). A literal tenant value is still emitted as before. The `iot-fleet-ota` and `production-deployment` example comments no longer claim the build host expands it.
 
 ### Fixed — chip driver and backend sweep: RV-3028 alarm ack, DA9292 enable window, OPTIGA receive capacity, D/AVE 2D hang, ISP timestamp (#2715)
 

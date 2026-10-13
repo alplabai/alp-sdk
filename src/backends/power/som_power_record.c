@@ -234,8 +234,10 @@ bool alp_som_pd_store_load(alp_som_pd_record_t *out)
 }
 
 /* CRC-32 of the ROM region (vector table, code, rodata): changes with any rebuild or
- * variant.  Computed once per boot.  Bench builds only: it costs 15-30 ms, which a product
- * boot must not pay; there the identity is the constant 0 (every image's data is "ours"). */
+ * variant.  Computed once per boot.  Bench builds only: its first caller is the BOOT diag
+ * snapshot at PRE_KERNEL_1, still on the SE-left clocks, where it measured 197 ms on an
+ * E1M-AEN803 (2026-10-11).  A product boot must not pay that; there the identity is the
+ * constant 0 (every image's data is "ours"). */
 #if SOMPD_IN_BKRAM && defined(CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH)
 #include <zephyr/linker/linker-defs.h>
 

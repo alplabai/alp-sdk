@@ -512,7 +512,7 @@ that costs you the probe-identity gate the helper performs, so check the part
 with `tools-config` (§3) first.
 
 **`[BENCH-VERIFIED 2026-08-30]`** — first real run of `erase-storage.sh` on a
-module (off-labgrid E1M-AEN801, `AE822FA0E5597LS0`, J-Link `000821005680`).
+module (standalone E1M-AEN801, `AE822FA0E5597LS0`, J-Link `000821005680`).
 Both things a first run owed are below. **This transcript predates the
 alp-sdk#2233 fix** (2026-09-19) and still shows the old `verifybin` line the
 script no longer gates on, and no ATOC-trailer check — kept verbatim as the

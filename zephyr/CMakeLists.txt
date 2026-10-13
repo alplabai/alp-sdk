@@ -827,6 +827,14 @@ if(CONFIG_SN65DSI83)
 endif()
 zephyr_library_sources_ifdef(CONFIG_SN65DSI83
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/display_sn65dsi83.c)
+# The init's I2C half + the health pass: the driver's own recovery and the
+# bus-owning core's recovery agent (DT node alp,sn65dsi83-recovery) both use it.
+if(CONFIG_SN65DSI83 OR CONFIG_SN65DSI83_RECOVERY_AGENT)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/sn65dsi83_recovery.c)
+endif()
+zephyr_library_sources_ifdef(CONFIG_SN65DSI83_RECOVERY_AGENT
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/display/sn65dsi83_recovery_agent.c)
 
 # ADR-0017-ADJACENT glue: the Alif E8 SoC-level setup the MIPI D-PHY and the
 # display chain need and no driver performs -- D-PHY clock sources + analog
@@ -1237,7 +1245,7 @@ if(CONFIG_ALP_SDK_SOM_POWER AND CONFIG_OSPI_ALIF)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/power/som_power_flash.c)
 endif()
 
-# Alif Secure Enclave STOP / STANDBY backend for the E8 M55-HE (#2784, U7),
+# Alif Secure Enclave STOP / STANDBY backend for the E8 M55-HE and M55-HP (#2784, U7),
 # registered for alif:ensemble:e8 in the "power" class.  EXPERIMENTAL, off by
 # default; alif_se_power_hw.c is the only file that touches registers.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_POWER_ALIF_SE
@@ -1782,6 +1790,12 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/gpio_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_GPIO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/zephyr_drv.c)
+# Tier-1.5 glue: pad input-buffer (REN) enable for portable GPIO / qenc inputs on
+# Alif Ensemble (#2808).  Ensemble only; native_sim tests supply their own.
+if(CONFIG_ALP_GPIO_PAD_INPUT AND (CONFIG_SOC_FAMILY_ENSEMBLE OR CONFIG_SOC_FAMILY_ENSEMBLE_RTSS))
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/gpio_pad_alif.c)
+endif()
 # CC3501E GPIO proxy: routes proxied IOs through the inter-chip bridge,
 # delegates the rest to zephyr_drv.  AEN-only (CONFIG_ALP_SDK_GPIO_CC3501E_PROXY).
 # cc3501e_proxy_routes_weak.c is the WEAK empty route-table default, split

@@ -12,12 +12,26 @@ HOMEPAGE = "https://github.com/alplabai/alp-sdk"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=787726818c896f394f6627ab59d98d69"
 
-# Track the alp-sdk default branch; CI repins SRCREV to the release-tag
-# commit when alp-sdk tags a new release (same pattern as the other
-# alp-* recipes in this layer, e.g. alp-chips_0.6.bb).
+# Track the alp-sdk default branch; SRCREV is repinned to the release-tag
+# commit at release time (same pattern as the other alp-* recipes in this
+# layer, e.g. alp-chips_0.6.bb), not by this file's PV bump.
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
 SRCREV  = "${AUTOREV}"
-PV      = "0.6.0"
+
+# PV is the SDK release version, so a package feed offers a newer
+# alp-sdk when a release ships (#2827).  It cannot be read from
+# metadata/sdk_version.yaml here: the source is only fetched after
+# parse.  scripts/bump_version.py rewrites this line and
+# scripts/check_version_doc_sync.py fails on drift.  A SemVer
+# pre-release uses "~" (0.17.0~rc2 sorts BEFORE 0.17.0 under opkg/dpkg/rpm);
+# this filename's _0.6 is inert because PV is set explicitly.
+PV      = "0.17.0"
+
+# The build content differs per MACHINE (V2N doorbell SPI,
+# ALP_SDK_INFERENCE_AUTO_ORDER, PACKAGECONFIG auto-enables below), so the
+# package must not be shared across machines in a feed (#2827 blocker 3).
+# Long-term alternative: runtime-loaded backend plugins, see #2827 option E.
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 S = "${WORKDIR}/git"
 

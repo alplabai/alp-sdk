@@ -77,6 +77,11 @@ extern alp_som_bench_knobs_t alp_som_bench_knobs;
 #define ALP_SOM_ARM_LPTIMER   0x00000001u /**< LPTIMER underflow (short timed wake). */
 #define ALP_SOM_ARM_RTC_TIMER 0x00000002u /**< RV-3028 countdown the SDK started. */
 #define ALP_SOM_ARM_RTC_INT   0x00000004u /**< RV-3028 /INT -> P15_0 armed by the caller. */
+#define ALP_SOM_ARM_LPGPIO    0x00000008u /**< One or more LPGPIO wake pads (P15_n) armed. */
+/** LPGPIO wake pads, one bit per line n of P15_n.  armed_hw bits 23:16 hold the pads this
+ *  cycle armed (the STOP backend writes them).  Bits 15:9 and 31:24 stay free. */
+#define ALP_SOM_ARM_PADS_SHIFT 16u
+#define ALP_SOM_PADS_MASK      0xFFu
 /** Record flag (not a wake path): the reset syndrome's NSRST bit was probed before the
  *  sleep and does clear, so a set bit at the next boot really is a pin reset. */
 #define ALP_SOM_REC_NSRST_TRUSTED 0x00000100u
@@ -306,6 +311,12 @@ struct gpio_dt_spec;
  *  domain), or NULL when the domain is absent or has none. */
 const struct gpio_dt_spec *alp_som_power_wake_gpio(alp_power_domain_t domain);
 
+/** LPGPIO lines (bit n = P15_n) the SoM itself wires: every pad of an `alp,som-power-domain`
+ *  node on the lpgpio controller, plus the pads listed in the `alp,wired-lpgpio-pads` property of
+ *  the `alp,som-power` node (the OSPI INTn / RESETn nets on the AEN801 / AEN803).  A pad in this
+ *  set is never an application wake pad. */
+uint32_t alp_som_power_lpgpio_claimed(void);
+
 /** True when the RV-3028 has its alarm or countdown interrupt enabled
  *  (CONTROL_2 AIE | TIE).  ALP_ERR_NOT_READY with no RTC domain / I2C bus. */
 alp_status_t alp_som_power_rtc_int_armed(bool *armed);
@@ -316,10 +327,15 @@ alp_status_t alp_som_power_rtc_int_armed(bool *armed);
  *  cold-boot wake path. */
 alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags);
 
-/** M55-HE reset syndrome (AON.RTSS_HE_RESET.RESETSYNDROME), read and acknowledged:
- *  0 = POR or Secure-Enclave-initiated, 1 = the NSRST pin was asserted, 4 = reset
+/** This core's reset syndrome (AON.RTSS_HE_RESET / RTSS_HP_RESET .RESETSYNDROME), read and
+ *  acknowledged: 0 = POR or Secure-Enclave-initiated, 1 = the NSRST pin was asserted, 4 = reset
  *  request to the power domain.  Weak: 0 where there is no such register. */
 uint32_t alp_som_power_reset_syndrome_take(void);
+
+/** This core's own WIC bits (RTSS_HE_CTRL / RTSS_HP_CTRL [9:8]) say it requested subsystem-off
+ *  (EWIC, 0b01): a second STOP witness for when STOP_MODE_STAT stays clear because another core
+ *  keeps the DC-DC up.  Read and cleared (COLD_WAKEUP untouched) on every boot.  Weak: false. */
+bool alp_som_power_core_off_take(void);
 
 /** Acknowledge STOP_MODE_STAT (VBAT_STOP_MODE_REG bit 4), once the boot decode is done, so a
  *  later reset is not read as a STOP wake.  Writes exactly the STAT bit, never bit 0

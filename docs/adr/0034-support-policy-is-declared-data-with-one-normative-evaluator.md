@@ -6,6 +6,10 @@ Deciders: alpCaner
 Relates to: [0020](0020-sdk-owns-build-execution.md),
 [0026](0026-tan-owns-the-planner-outright.md)
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The `multicore/rpmsg-imx93/m33` example named in the historical note under the evaluator's consumers is deleted.
+
 ## Context
 
 The SDK refuses builds on grounds it presents as facts about silicon. Some of

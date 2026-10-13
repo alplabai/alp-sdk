@@ -3,6 +3,10 @@
 Status: Accepted
 Date: 2026-05-10
 
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). The SoM-swap families in the Context below are now Alif (AEN) to Renesas (V2N/V2M); the i.MX 93 step no longer exists. The decision is unchanged and the text below is left as written.
+
 ## Context
 
 The E1M open standard (`alplabai/e1m-spec`) fixes which peripheral

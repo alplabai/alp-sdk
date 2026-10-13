@@ -251,9 +251,9 @@ SoM EEPROM manifest).
 These live under `examples/aen/` and target the E1M-AEN (Alif
 Ensemble) family on the E1M-EVK board (lead part: E8).
 
-`examples/aen/` has 85 tracked directories; the 10 below are the
+`examples/aen/` has 89 tracked directories; the 10 below are the
 customer-facing catalog (the ones carrying a `board.yaml`).  The
-remaining 75 are internal bring-up/regression apps (per-driver
+remaining 79 are internal bring-up/regression apps (per-driver
 regcheck, bench smoke tests, dual-core internal validation) --
 `board.yaml` presence is the reliable way to tell them apart, not
 their filename (some of those internal dirs don't follow a

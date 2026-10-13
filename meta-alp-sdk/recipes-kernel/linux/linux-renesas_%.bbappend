@@ -89,6 +89,8 @@ SRC_URI:append = " \
     file://0028-media-i2c-add-imx296-backport.patch \
     file://0029-media-i2c-imx335-2-lane-10-bit-binned-mode.patch \
     file://0030-media-i2c-ov9282-add-1280x800-and-640x400-modes.patch \
+    file://0031-gpio-gd32-bridge-gate-IO15-IO26-on-protocol-minor-16.patch \
+    file://0032-gpio-gd32-bridge-gate-can-stby-on-protocol-minor-13.patch \
     file://uio.cfg \
     file://e1m-v2n-doorbell.dtsi \
     file://panic.cfg \

@@ -18,7 +18,7 @@
  *   3. requests a DHCP lease as the definitive end-to-end link test.
  *
  * RESULT PASS (bench-validated, both sides): the SOM pulls a real DHCP lease off
- * the bench switch (e.g. 192.168.10.137) and is REACHABLE in the server's ARP
+ * the bench switch (an address from the DHCP pool) and is REACHABLE in the server's ARP
  * table. Three things had to be right, in order:
  *   1. PHY power before the probe -> the AUTO probe selects the EXTERNAL 50 MHz
  *      oscillator (ETH_CTRL bit4: 1->0); the PHY is clocked. The "needs power

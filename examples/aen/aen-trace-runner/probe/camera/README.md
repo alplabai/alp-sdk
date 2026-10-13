@@ -1,7 +1,7 @@
 # camera probe
 
 DIAGNOSTIC, NOT PRODUCT CODE. Camera open fails `ALP_ERR_IO` on **E1M-AEN803 2026W36-0009**,
-reproducibly. `<alp/camera.h>`'s Zephyr backend (`alp-sdk-lcd/src/backends/camera/zephyr_video.c`,
+reproducibly. `<alp/camera.h>`'s Zephyr backend (`src/backends/camera/zephyr_video.c`,
 `z_open()`) collapses every failure from `video_get_caps()`, `video_set_format()` and
 `video_enqueue()` into `ALP_ERR_IO` by design (`_errno_to_alp()` maps any errno it does not
 recognise to it) -- so `ALP_ERR_IO` alone never says which call failed or why, and
@@ -20,8 +20,8 @@ bus and again after the video sequence.
 
 ## Build
 
-Zephyr module is `alp-sdk-lcd`, **not** `alp-sdk` -- a plain `west build` resolves a different Zephyr
-checkout that knows none of the alp-sdk shields and fails.
+Zephyr module is this `alp-sdk` checkout (`-DEXTRA_ZEPHYR_MODULES` below) -- a plain `west build` from
+another workspace resolves a different Zephyr checkout that knows none of the alp-sdk shields and fails.
 
 ```sh
 cd examples/aen/aen-trace-runner
@@ -37,7 +37,7 @@ Both shields (`e1m_evk_rpi_csi` + `innomaker_cam_ov9281`) are hardcoded in `CMak
 
 ## Run (bench)
 
-From the `alp-sdk-lcd` checkout, using the OpenOCD RAM-run flow (the only one that can address either
+From the `alp-sdk` checkout, using the OpenOCD RAM-run flow (the only one that can address either
 M55 core on this bench):
 
 ```sh
@@ -128,7 +128,7 @@ reads `NULL return (no errno available)` instead of a fabricated errno.
 
 - **Does not use `<alp/camera.h>` or any other `<alp/*>` header.** That is the entire point: it
   exists to see the raw errnos the portable API's `_errno_to_alp()` throws away, not to demonstrate
-  the portable call sequence (that is `aen-camera-firstlight` in `alp-sdk-lcd`, already bench-verified
+  the portable call sequence (that is `aen-camera-firstlight`, already bench-verified
   on this hardware).
 - **Does not touch anything outside `probe/camera/`.** Nothing under `src/`, `tests/`, `art/`,
   `tools/`, or the top-level `CMakeLists.txt` is read or written by anything here.

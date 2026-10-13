@@ -1,0 +1,17 @@
+/*
+ * shield-fit-npu/e1m_evk_rvt121hvdfwca0.overlay -- the RVT121 under TR_INPUT_NPU only
+ * (CMakeLists.txt applies shield-fit-npu/<shield>.overlay next to shield-fit/<shield>.overlay).
+ *
+ * With TR_INPUT_NPU the HE gives I2C1 to the HP after the bridge is up (i2c_handover_he.overlay),
+ * so the HE may not poll the bridge itself: its driver publishes the CSR table at this address and
+ * the HP re-initialises a bridge that reset itself (hp_vision's sn65dsi83_agent, same address;
+ * tr_memmap.h TR_MEM_SN65_RECIPE, 0x54 B in the shared NC page). Without TR_INPUT_NPU the HE keeps
+ * I2C1 and its driver polls the bridge on its own, so this file is not applied. The SDK driver
+ * refuses a build that hands the bridge's bus to another core without this property.
+ */
+&bridge {
+	recovery-recipe-address = <0x0237FE00>;
+	/* Its bus (&i2c1) is deferred-init (i2c_handover_he.overlay): Zephyr refuses a non-deferred
+	 * device on a deferred bus. The driver starts itself at its usual priority. */
+	zephyr,deferred-init;
+};

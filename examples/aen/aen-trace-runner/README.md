@@ -170,6 +170,8 @@ rewrites whole 16 KiB sectors, and that read-back is the only way to restore the
 | `TR_CAM_MIRROR` | `ON` | With `TR_INPUT_NPU`: the HP mirrors the view like a selfie; decides which arm is the player's left. Same value on the HP build |
 | `TR_M55_AUTOLAUNCH` | `OFF` | HE launches the A32 renderer at boot (release) |
 | `TR_TILT_TAKEOVER` | `OFF` | The IMU tilt takes over steering when no player is seen |
+| `TR_BL_MAX_PCT` | 80 | The backlight's ceiling in percent, a multiple of 5 between 10 and 80 (configure refuses anything else). The knob, the bench request word and the boot level never go past it. Lower it for a carrier whose 5 V net droops under the backlight, see "Carrier note: 5 V droop" below |
+| `TR_PARTNER_LOGO` | empty | Path of a header from `tools/genlogo.py`: the attract header card then holds the ALP LAB mark, a divider and that partner logo. Empty draws the ALP LAB banner alone and leaves the image unchanged. The artwork is the partner's trademark and is not in this repo |
 
 ## Switching the display: Riverdi RVT121 (12.1" LVDS)
 
@@ -213,7 +215,11 @@ SDK glue in `zephyr/soc-bridge/alif/i2c_handover.c`, protocol in `i2c_handover.h
 a disabled bus is released at once, so on the RK055 the HE never touches I2C1. Otherwise, at the end
 of its boot the HE masks its I2C1 interrupt, stops its controller and publishes a per-boot nonce and
 a state (`TR_MEM_I2C1_HANDOVER`, `0x0237FC94`, three words in SRAM0); a controller that will not go
-idle is released DIRTY with a warning. The HP waits for a release it has not taken yet before it
+idle is released DIRTY with a warning. An HE-only reset while the HP runs is a *warm* boot: the HE
+recognises it (record taken, the HP's liveness word `0x0237FD90` moving: a 10 ms timer the HP starts right after it took the bus), never initialises I2C1 (the node
+is `zephyr,deferred-init`; only a cold boot `device_init()`s it), leaves the bridge's EN pin and the
+recipe alone and re-initialises the DSI host only; the HP's recovery agent repairs the bridge if the
+host restart cost it its lock. The HP waits for a release it has not taken yet before it
 unsticks the pads or initialises the bus and the camera (its unstick runs after the wait),
 reports on its console every 20 s while the release is missing, and consumes it. Start the HE
 first, then the HP. An HP restarted alone after it took the bus waits for a release that is not
@@ -276,6 +282,43 @@ never a hang (and an HP that dies holding the lease, no beat for 2 s, is reclaim
 controller stopped, SCL bus-clear); an HE restart in the middle of the bring-up aborts it before
 the next access. The HP leases the bus only around the stretches that use it and keeps its I2C2
 interrupt off in between, so an HE-only reset never meets an armed HP interrupt.
+
+### Volume (`TR_HP_SOUND`)
+
+The sound has a volume, 0 to 100 % of the build's `TR_SND_VOLUME` ceiling (128, the level heard as safe
+on the reworked EVK's speakers; 100 % is that level, so it can only be turned down; the default and boot level is 30 %, so there is never a loud burst before the first control or request). The
+HP applies it as a software gain on every 16 ms block of mixed samples (`tr_vol_apply`, a linear ramp
+across the block, no click, no I2C: I2C2 is leased) and 0 is silence with the amps still running (SD_N is
+never toggled). The HE owns one word (`TR_MEM_VOL`, `0x0237FD80`, `src/ipc/tr_vol.h`, tagged `'VO'`: a cold
+SRAM0 reads as the 30 % default) and sets it from:
+
+- **The EVK's rotary encoder** (`EVK_ENC_ROTARY`, read with `alp_qenc_*`): 5 % per detent, clockwise
+  louder, clamped 0..100.
+- **Its push switch** (`EVK_PIN_ENCODER_SW`, `alp_gpio_*`): a SHORT press (under 1 s) switches what the knob turns,
+  VOLUME or BRIGHTNESS; a LONG press (1 s, it fires while held) mutes, a second long press restores the last level.
+  A short press while muted only switches the mode: just a long press unmutes (a turn in VOLUME mode unmutes too).
+  BRIGHTNESS goes back to VOLUME after 5 s with no turn or press.
+- **The panel backlight** (Riverdi RVT121, PWM on P10_7, the SDK's `alp,display-backlight` LED): in BRIGHTNESS mode
+  5 % per detent, 10..`TR_BL_MAX_PCT` % (80 by default; a hard floor of 10 %, so the screen can never go dark, and a hard ceiling). It boots at the level the SDK
+  already set (30 %), so booting does not flicker. The RK055 shield has no PWM backlight, so there a short press does nothing.
+- **A request word over SWD** (`0x0237FD84`, `0x564F0000 | percent`), for the bench: no reflash, see
+  `a32/release/FLASH-RECIPE.md` ("Changing the volume without reflashing"). The HE validates it. The backlight
+  has its own (`TR_MEM_BL` `0x0237FDC0`, request word `0x0237FDC4`, `0x424C0000 | percent`, 10..`TR_BL_MAX_PCT` in 5 % steps only). Both request words are
+  taken, not latched: the HE clears one to `0` once it has read it (accepted or refused).
+
+**Carrier note: 5 V droop.** The backlight's boost converter loads the carrier's 5 V net, and on some carriers that
+net droops under the extra load: one measured 4.68 V unloaded and about 0.12 ohm in series (input diode, eFuse and
+shunt), enough to brown out the DSI-to-LVDS bridge at 60 % brightness and above. For such a carrier build with
+`-DTR_BL_MAX_PCT=40` (the knob, the bench word and the boot level then stop at 40 %); `build-release.sh` prints the
+ceiling the HE was built with, and `TR_BL_MAX_PCT=40` in its environment refuses an image built with another one.
+
+**HE-only warm reset.** A reset of the HE alone (the HP keeps playing, the panel keeps its backlight) restores the volume and brightness records instead of applying the defaults, clamped to this build's limits (`TR_BL_MAX_PCT`; volume 0..100 %), when `alp_i2c_handover_warm_boot()` (the I2C1 handover's warm verdict, `TR_INPUT_NPU` builds) says the boot is warm and the tagged word is valid. A mute survives; its unmute goes to the 30 % default, because the level before the mute is not recorded. A cold boot, or a garbage word, takes the defaults as before.
+
+The HUD shows `VOLUME 40%` (or `MUTE`, or `BRIGHTNESS 60%`) over its bottom row for 1.5 s whenever the level or the mode changes. The encoder
+pads are GPIO3 / GPIO4 (P3_0, P3_1, P4_3): not the GPIO5 port or the lpgpio island the HP's amps use. The
+controls are not bench-verified on this image (the decode path is #2037 / #2095); `tests/host/test_vol.c`
+covers the word, the gain and the HE's rules, `tests/host/test_knob.c` the switch, the brightness and its word,
+`tests/host/test_hud.c` the popup.
 
 ## Tests
 

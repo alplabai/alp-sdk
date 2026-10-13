@@ -360,7 +360,7 @@ DHCP server:
 [evkdemo] ETH: RCSR 0x0001 -> 0x0081 (REF_CLK_SEL = 50 MHz reference)
 [evkdemo] ETH: wire link UP after 2500 ms (BMSR=786d ANLPAR=45e1)
 [evkdemo] ETH: admin_up=1 carrier_ok=1(SYNTHETIC, not a link proof) tx_bytes=1188 rx_bytes=684 dhcp_bound=1
-[evkdemo] ETH: DHCP lease = 192.168.10.xxx -- wire link UP and both DMA directions proven end to end
+[evkdemo] ETH: DHCP lease = <leased-ip> -- wire link UP and both DMA directions proven end to end
 ```
 
 The addresses, register values and byte counts are **shape, not expected

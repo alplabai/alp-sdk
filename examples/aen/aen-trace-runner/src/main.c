@@ -13,9 +13,14 @@
 #include "game/zone.h"
 #include "ipc/tr_aring.h" /* TR_AEV_* -- sound events (A32 build pushes them) */
 #include "ipc/tr_mbox.h"  /* TR_BANNER_* -- the banner ids both render modes share */
+#if TR_BENCH_FAULT_INJECT
+#include "ipc/tr_fault_inject.h"
+#include "ipc/tr_memmap.h"
+#endif
 #include "platform/display.h"
 #include "platform/imu.h"
 #include "platform/bus2_he.h"
+#include "platform/volume_he.h"
 #include "platform/rail5v_power.h"
 #include "vision/camera_watchdog.h"
 #include "vision/pose.h" /* the presence rule, both input paths */
@@ -35,6 +40,15 @@
  * flag word hp_vision waits on (tr_memmap.h). */
 BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), flag_address) == TR_MEM_I2C1_HANDOVER,
              "i2c1_handover flag-address != tr_memmap.h TR_MEM_I2C1_HANDOVER");
+/* ... and the HP's liveness word it uses to tell a warm HE-only reset from a cold power-up. */
+BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), alive_address) == TR_MEM_I2C1_ALIVE,
+             "i2c1_handover alive-address != tr_memmap.h TR_MEM_I2C1_ALIVE");
+#if DT_HAS_COMPAT_STATUS_OKAY(ti_sn65dsi83)
+/* The bridge's recovery recipe (shield-fit-npu/): the HP's agent reads the same address. */
+BUILD_ASSERT(DT_PROP(DT_COMPAT_GET_ANY_STATUS_OKAY(ti_sn65dsi83), recovery_recipe_address) ==
+                 TR_MEM_SN65_RECIPE,
+             "bridge recovery-recipe-address != tr_memmap.h TR_MEM_SN65_RECIPE");
+#endif
 #else
 #include "platform/camera.h"
 #include "vision/detect.h"
@@ -274,6 +288,7 @@ static void ui_present(const tr_game_t *g, bool attract_active, bool paused)
 	 * the HP's I2C2 lease moving, not only main's frame loop: an HE that stopped ticking would
 	 * neither offer the bus nor take it back (platform/bus2_he.h). */
 	tr_bus2_he_frame();
+	tr_volume_he_frame(); /* TR_HP_SOUND: the encoder / switch / bench request -> the sound volume */
 
 	tr_frame_in_from_game(&in, g, g_banner, attract_active, paused);
 	tr_frame_in_p16(&in, tr_tilt.character, &g_react, g_lobby.standing, g_lobby.idle_us);
@@ -418,6 +433,7 @@ static void ui_present(const tr_game_t *g, bool attract_active, bool paused)
 	(void)attract_active;
 	(void)paused;
 	tr_bus2_he_frame(); /* as the A32 variant above */
+	tr_volume_he_frame();
 	tr_display_flip();
 }
 
@@ -824,6 +840,7 @@ int main(void)
 	bool imu_ok = (tr_imu_open() == 0);
 	(void)tr_rail5v_open(); /* +5V power HUD line -- non-fatal, see rail5v_power.h */
 	tr_bus2_he_arm();       /* TR_HP_SOUND: only now may the HP be offered I2C2 */
+	tr_volume_he_init();    /* TR_HP_SOUND: publish the volume, open the encoder + switch */
 
 #if TR_INPUT_NPU
 	/* No local camera or detector to open/init: the HP owns both, and
@@ -912,6 +929,13 @@ int main(void)
 
 		tr_bus2_he_frame(); /* TR_HP_SOUND: offer / take back I2C2 for the HP's amp bring-up */
 		tr_rail5v_poll();   /* internally paced to 10 Hz -- see rail5v_power.c */
+#if TR_BENCH_FAULT_INJECT
+		/* Bench only: a fatal error on demand (tr_fault_inject.h), to test the SoC reset + guard. */
+		if (tr_fault_inject_due((const tr_fault_inject_t *)(uintptr_t)TR_MEM_FAULT_INJECT,
+		                        k_uptime_get_32())) {
+			k_panic();
+		}
+#endif
 
 		tr_intent_t in          = tr_intent_none();
 		bool        pace_step   = true; /* false on the frames between paced game steps */
