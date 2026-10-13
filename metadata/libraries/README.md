@@ -40,6 +40,7 @@ manifest-driven **top-level** `libraries:` selection.
 | `cmsis-cv`  | B    | (SHA pin, no upstream tags) | Apache-2.0 | zephyr | no upstream Zephyr module glue yet; recipe-only |
 | `arm-2d`    | B    | v1.2.6     | Apache-2.0 | zephyr    | no upstream Zephyr module glue yet; recipe-only |
 | `onnxruntime` | B  | 1.28.0     | MIT & Apache-2.0 | yocto | Cortex-A; own `meta-alp-sdk` recipe, upstream (not a vendor fork) |
+| `fatfs`     | B    | 0.16       | BSD-1-Clause | zephyr | Zephyr fs subsystem; exFAT cards need `CONFIG_FS_FATFS_EXFAT=y` + `CONFIG_FS_FATFS_LFN=y` in the app |
 
 `tan doctor` reports the selection for the project in scope (tier + licence +
 compatibility), reading these same manifests — so the CLI and alp-studio's
@@ -223,7 +224,7 @@ copyleft or proprietary surprise cannot ride in through a `libraries:`
 selection:
 
 ```
-Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, Zlib, MIT-0, BSL-1.0, CC0-1.0,
+Apache-2.0, MIT, BSD-1-Clause, BSD-2-Clause, BSD-3-Clause, Zlib, MIT-0, BSL-1.0, CC0-1.0,
 MIT & Apache-2.0
 ```
 
