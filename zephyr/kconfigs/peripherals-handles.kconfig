@@ -180,6 +180,37 @@ config ALP_SDK_STORAGE_ZEPHYR_LITTLEFS
 	  zephyr_flash on priority when both are present; pick the
 	  storage_kind explicitly to force one over the other.
 
+config ALP_SDK_STORAGE_ZEPHYR_DISK
+	bool "Zephyr disk_access backend for <alp/storage.h> (SD/MMC)"
+	depends on ALP_SDK && DISK_ACCESS
+	default y if DISK_ACCESS
+	default n
+	help
+	  Compiles src/backends/storage/zephyr_disk.c.  Serves
+	  ALP_STORAGE_KIND_SD_MMC through <zephyr/storage/disk_access.h>
+	  (byte-addressed over the disk's sectors, read-modify-write for
+	  ragged edges).  Registered below zephyr_flash and
+	  zephyr_littlefs, which decline SD_MMC; alp_storage_open falls
+	  through to it.  erase and inline AES return ALP_ERR_NOSUPPORT.
+
+config ALP_SDK_STORAGE_ZEPHYR_DISK_NAME
+	string "Zephyr disk name opened for ALP_STORAGE_KIND_SD_MMC"
+	depends on ALP_SDK_STORAGE_ZEPHYR_DISK
+	default "SD"
+	help
+	  The disk-name of the Zephyr disk driver instance (the sdmmc
+	  node's disk-name property).  alp_storage_config_t has no name
+	  field, so every SD_MMC open targets this disk.
+
+config ALP_SDK_STORAGE_ZEPHYR_DISK_MAX_SECTOR_SIZE
+	int "Largest disk sector size the disk backend accepts (bytes)"
+	depends on ALP_SDK_STORAGE_ZEPHYR_DISK
+	default 512
+	help
+	  Size of the one shared bounce sector used for unaligned
+	  transfers.  Opening a disk with a larger sector returns
+	  ALP_ERR_NOSUPPORT.
+
 config ALP_SDK_STORAGE_SW_FALLBACK
 	bool "Software storage fallback (stateless stub)"
 	depends on ALP_SDK

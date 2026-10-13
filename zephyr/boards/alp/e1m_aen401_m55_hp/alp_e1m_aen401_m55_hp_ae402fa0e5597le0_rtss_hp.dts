@@ -35,6 +35,7 @@
 #include <alif/ensemble/common/ensemble_rtss_hp.dtsi>
 #include <alif/ensemble_e4_e6_power.dtsi>
 #include <alif/ensemble_e4_camera.dtsi>
+#include <alif/ensemble_e4_peripherals.dtsi>
 #include "alp_e1m_aen401_m55_hp-pinctrl.dtsi"
 
 / {

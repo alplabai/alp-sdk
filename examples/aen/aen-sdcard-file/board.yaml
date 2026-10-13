@@ -1,0 +1,29 @@
+# board.yaml -- per-app project configuration for aen-sdcard-file.
+#
+# Write, read back and list a file on the E1M-EVK microSD card (J7) with
+# FatFs, from the Alif M55-HE. The card sits behind the carrier's SDIO mux,
+# whose enable (E1M IO20) is a CC3501E GPIO, so the app brings the CC3501E
+# bridge up first.
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_he:
+    app: ./src
+    peripherals:
+      - spi
+      - gpio
+
+chips:
+  - cc3501e               # owns E1M IO20, the SDIO mux enable.
+
+libraries:
+  - name: fatfs
+
+diagnostics:
+  log_level: info

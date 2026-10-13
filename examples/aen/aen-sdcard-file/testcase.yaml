@@ -1,0 +1,34 @@
+sample:
+  name: aen-sdcard-file
+  description: |
+    FatFs on the E1M-EVK microSD slot from the Alif M55-HE: bring up the
+    CC3501E bridge, enable the SDIO mux (E1M IO20), mount the card, write a
+    file, read it back, list the root directory and report free space.
+
+tests:
+  alp_sdk.examples.aen.sdcard_file.native_sim:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - sdhc
+      - fatfs
+    build_only: true
+
+  # Real-target compile: the e1m_evk_microsd shield, the SDHC bounce buffer
+  # and the CC3501E bridge only build here (native_sim skips the shield).
+  alp_sdk.examples.aen.sdcard_file.aen:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - sdhc
+      - fatfs
+    build_only: true
