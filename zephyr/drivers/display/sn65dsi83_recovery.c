@@ -216,7 +216,12 @@ int sn65dsi83_health_poll(const struct i2c_dt_spec   *i2c,
 		return ret;
 	}
 
-	st->err_polls      = rep->err_stat != 0U ? st->err_polls + 1U : 0U;
+	/* A lone latched PLL_UNLOCK is counted apart and never builds the escalation streak. */
+	if (rep->err_stat == SN65_ERR_CHA_PLL_UNLOCK) {
+		st->pll_unlock_events++;
+	} else {
+		st->err_polls = rep->err_stat != 0U ? st->err_polls + 1U : 0U;
+	}
 	rep->health        = sn65dsi83_health_decide(rep->pll_en,
 	                                             rep->clk_src,
 	                                             rep->err_stat,
@@ -292,5 +297,6 @@ void sn65dsi83_report_print(const struct sn65dsi83_report *rep, const struct sn6
 	       rep->err,
 	       st->recoveries,
 	       st->failures,
-	       st->errors_cleared);
+	       st->errors_cleared,
+	       st->pll_unlock_events);
 }

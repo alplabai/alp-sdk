@@ -41,6 +41,12 @@
 #define SN65_REG_IRQ_EN     0xE0U
 #define SN65_REG_ERR_STAT   0xE5U
 
+/* CSR 0xE5 (IRQ_STAT, write-1-to-clear), datasheet SLLSEC1 Table 7-9.  Only bit 0 is named: it is
+ * the one whose meaning the recovery policy depends on.  Every other set bit (the sync / SoT /
+ * ECC / CRC flags) is treated as "a link error" without decoding it.  Table number checked
+ * against the register-map layout of Tables 7-4..7-9, not against a local datasheet copy. */
+#define SN65_ERR_CHA_PLL_UNLOCK BIT(0)
+
 /* CSR 0x0A.7: PLL_EN_STAT (not itself named "PLL locked" -- Table 7-2's own
  * init sequence wants >= 10 ms after PLL_EN regardless, see sn65dsi83_pll_start()). */
 #define SN65_CLK_SRC_PLL_EN_STAT BIT(7)
@@ -75,6 +81,12 @@ enum sn65dsi83_health {
  * re-init.  A single transient sync error with the PLL fine is cleared and counted; the
  * same errors on SN65_ERR_POLLS_REINIT polls in a row, or on the first poll after a
  * re-init, mean the link does not hold and the sequence is replayed.
+ *
+ * CHA_PLL_UNLOCK alone never escalates: it is a LATCHED flag, set while the PLL (re)acquires
+ * lock -- including during our own re-init -- so the first poll after a replay sees it even
+ * though the PLL is locked now (PLL_EN_STAT is checked above).  Escalating on it re-inits every
+ * SN65_REINIT_MIN_GAP_MS forever, a visible blink (Linux hit the same regression in its error
+ * recovery: Toradex, LKML 2025-11, "TI SN65DSI83 is being reset making display to blink").
  */
 static inline enum sn65dsi83_health sn65dsi83_health_decide(uint8_t  pll_en,
                                                             uint8_t  clk_src,
@@ -89,6 +101,9 @@ static inline enum sn65dsi83_health sn65dsi83_health_decide(uint8_t  pll_en,
 	}
 	if (err_stat == 0U) {
 		return SN65_HEALTH_OK;
+	}
+	if ((err_stat & ~SN65_ERR_CHA_PLL_UNLOCK) == 0U) {
+		return SN65_HEALTH_CLEAR_ERRORS;
 	}
 	return (after_recovery || err_polls >= SN65_ERR_POLLS_REINIT) ? SN65_HEALTH_REINIT
 	                                                              : SN65_HEALTH_CLEAR_ERRORS;
@@ -167,7 +182,8 @@ struct sn65dsi83_stats {
 	uint32_t recoveries;     /* successful re-inits */
 	uint32_t failures;       /* re-inits that failed (ID mismatch, I2C error, PLL never locked) */
 	uint32_t errors_cleared; /* CSR 0xE5 cleared with the PLL fine */
-	uint32_t err_polls;      /* consecutive polls with CSR 0xE5 non-zero */
+	uint32_t err_polls;      /* consecutive polls with a CSR 0xE5 error other than PLL_UNLOCK */
+	uint32_t pll_unlock_events; /* polls with CSR 0xE5 == CHA_PLL_UNLOCK only (marginal PLL) */
 	int64_t  last_reinit_ms;
 	bool     have_last;
 	bool     last_failed;    /* the last replay failed */
