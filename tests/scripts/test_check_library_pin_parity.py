@@ -336,7 +336,7 @@ _WEST_AXIS_IN_TREE_OR_NO_UPSTREAM_PIN = {
     "onnxruntime",
 }
 _WEST_AXIS_ALLOWLIST_ONLY = {
-    "cmsis-dsp", "cmsis-nn", "littlefs", "lvgl", "mbedtls", "nanopb",
+    "cmsis-dsp", "cmsis-nn", "fatfs", "littlefs", "lvgl", "mbedtls", "nanopb",
     "tflite-micro", "zcbor",
 }
 _WEST_AXIS_KNOWN_GAP = {"arm-2d", "cmsis-cv"}
