@@ -442,8 +442,11 @@ endif()
 # Static Linux/Yocto build (ALP_OS=yocto only; baremetal and add_subdirectory
 # flows stay install-free): ship the archive, headers and alp-sdk.pc to
 # ${CMAKE_INSTALL_LIBDIR}/pkgconfig so a non-CMake consumer links with
-# `pkg-config --cflags --libs alp-sdk` (#2829).
-if(NOT ALP_SDK_BUILD_SHARED AND NOT DEFINED ZEPHYR_BASE
+# `pkg-config --cflags --libs alp-sdk` (#2829).  Not under
+# ALP_BUILD_CHIPS_ONLY: the alp-chips recipe ships only libalp_chips.a and
+# <alp/chips/*.h>, and these files already belong to the alp-sdk package, so
+# installing them again fails bitbake's do_package and sysroot checks.
+if(NOT ALP_SDK_BUILD_SHARED AND NOT ALP_BUILD_CHIPS_ONLY AND NOT DEFINED ZEPHYR_BASE
         AND ALP_OS STREQUAL "yocto"
         AND EXISTS ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig/alp-sdk.pc)
     install(TARGETS alp_sdk ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
