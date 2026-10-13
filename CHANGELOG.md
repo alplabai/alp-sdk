@@ -9,6 +9,10 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [v0.17.0] - 2026-10-13
 
+### Fixed — a Yocto build without the dev-kit feed fragment no longer aborts while parsing `alp-devkit-feed-config` (#2853)
+
+`alp-devkit-feed-config_0.1.bb` (added in #2841) called `bb.fatal` from its anonymous python when `ALP_DEVKIT_FEED_URL` was unset. Anonymous python runs at parse time for every recipe `BBFILES` matches, so every build without the opt-in `conf/distro/include/alp-devkit-feed.inc` fragment (`alp-image-edge`, `alp-image-prod`, `alp-image-base`, customer builds) stopped at "Parsing halted due to errors". The recipe now raises `bb.parse.SkipRecipe`, the pattern `alp-cm33-firmware_0.1.bb` uses for its dev-only gate; opt-in builds are unchanged.
+
 ### Fixed — U-Boot holds the V2N-M1 DX-M1 in reset through the DEEPX rail ramp (#2045)
 
 `alp_deepx_rail_bringup()` (U-Boot patch `0004`) now drives `M1_RESET`
