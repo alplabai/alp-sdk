@@ -58,11 +58,11 @@
 #define MNT       "/SD:"
 #define FILE_PATH MNT "/alp_sdcard_file.txt"
 
-static FATFS fat;
+static FATFS             fat;
 static struct fs_mount_t mnt = {
-	.type = FS_FATFS,
+	.type      = FS_FATFS,
 	.mnt_point = MNT,
-	.fs_data = &fat,
+	.fs_data   = &fat,
 };
 
 static char wbuf[4096];
@@ -72,7 +72,7 @@ static char rbuf[sizeof(wbuf)];
 static int sd_mux_enable(void)
 {
 	static cc3501e_t fw;
-	alp_status_t s = cc3501e_bridge_bringup(&fw);
+	alp_status_t     s = cc3501e_bridge_bringup(&fw);
 
 	printf("[sd] CC3501E bridge bring-up -> %d\n", (int)s);
 	if (s != ALP_OK) {
@@ -98,8 +98,8 @@ static int sd_mux_enable(void)
 static int write_read_back(void)
 {
 	struct fs_file_t f;
-	ssize_t n;
-	int rc;
+	ssize_t          n;
+	int              rc;
 
 	for (size_t i = 0; i < sizeof(wbuf); i++) {
 		wbuf[i] = (char)('a' + i % 26);
@@ -139,7 +139,7 @@ static int write_read_back(void)
 
 static void list_root(void)
 {
-	struct fs_dir_t dir;
+	struct fs_dir_t  dir;
 	struct fs_dirent ent;
 
 	fs_dir_t_init(&dir);
@@ -149,7 +149,9 @@ static void list_root(void)
 	}
 	printf("[fs] %s contents:\n", MNT);
 	while (fs_readdir(&dir, &ent) == 0 && ent.name[0] != '\0') {
-		printf("  %s %-32s %u\n", ent.type == FS_DIR_ENTRY_DIR ? "d" : "f", ent.name,
+		printf("  %s %-32s %u\n",
+		       ent.type == FS_DIR_ENTRY_DIR ? "d" : "f",
+		       ent.name,
 		       (unsigned int)ent.size);
 	}
 	fs_closedir(&dir);
@@ -161,9 +163,10 @@ static void report_space(void)
 
 	if (fs_statvfs(MNT, &sv) == 0) {
 		uint64_t total = (uint64_t)sv.f_frsize * sv.f_blocks;
-		uint64_t free = (uint64_t)sv.f_frsize * sv.f_bfree;
+		uint64_t free  = (uint64_t)sv.f_frsize * sv.f_bfree;
 
-		printf("[fs] %u MiB free of %u MiB\n", (unsigned int)(free >> 20),
+		printf("[fs] %u MiB free of %u MiB\n",
+		       (unsigned int)(free >> 20),
 		       (unsigned int)(total >> 20));
 	}
 }

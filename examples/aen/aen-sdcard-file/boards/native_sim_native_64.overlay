@@ -43,6 +43,16 @@
                 <&gpio_emul0 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
     };
 
+    /* Stand-in for the microSD slot: a RAM disk with the same disk name,
+     * so FatFs has a volume to bind to in this build-only target.
+     */
+    ramdisk0 {
+        compatible = "zephyr,ram-disk";
+        disk-name = "SD";
+        sector-size = <512>;
+        sector-count = <128>;
+    };
+
     soc {
         spi1_emul: spi@200 {
             compatible = "zephyr,spi-emul-controller";

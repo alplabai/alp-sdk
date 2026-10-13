@@ -923,8 +923,10 @@ static int sdhc_dwc_send_cmd_no_data(const struct device *dev,
 	return sdhc_dwc_send_cmd(dev, dev->data, cmd, false);
 }
 
-static int sdhc_dwc_xfer(const struct device *dev, struct sdhc_command *cmd,
-			  struct sdhc_data *sdhc_data, bool read)
+static int sdhc_dwc_xfer(const struct device *dev,
+                         struct sdhc_command *cmd,
+                         struct sdhc_data    *sdhc_data,
+                         bool                 read)
 {
 	struct sdhc_dwc_data *data = dev->data;
 	int ret;
@@ -962,19 +964,17 @@ static int sdhc_dwc_xfer(const struct device *dev, struct sdhc_command *cmd,
 
 #if defined(CONFIG_SDHC_DWC_BOUNCE_BUFFER)
 BUILD_ASSERT(CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE % 512 == 0,
-	     "CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE must be a multiple of 512");
+             "CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE must be a multiple of 512");
 
 /* True when [p, p + len) touches a CPU-local TCM, at its local address or at
  * the global_base alias the board dts gives it. The SDHC master reaches
  * neither on Ensemble (#2858).
  */
-#define SDHC_DWC_IN(p, len, base, size)                                                    \
-	((uintptr_t)(p) < (uintptr_t)(base) + (size) &&                                    \
-	 (uintptr_t)(p) + (len) > (uintptr_t)(base))
-#define SDHC_DWC_IN_TCM(node, p, len)                                                      \
-	(SDHC_DWC_IN(p, len, DT_REG_ADDR(node), DT_REG_SIZE(node)) ||                      \
-	 SDHC_DWC_IN(p, len, DT_PROP_OR(node, global_base, DT_REG_ADDR(node)),             \
-		     DT_REG_SIZE(node)))
+#define SDHC_DWC_IN(p, len, base, size) \
+	((uintptr_t)(p) < (uintptr_t)(base) + (size) && (uintptr_t)(p) + (len) > (uintptr_t)(base))
+#define SDHC_DWC_IN_TCM(node, p, len) \
+	(SDHC_DWC_IN(p, len, DT_REG_ADDR(node), DT_REG_SIZE(node)) || \
+	 SDHC_DWC_IN(p, len, DT_PROP_OR(node, global_base, DT_REG_ADDR(node)), DT_REG_SIZE(node)))
 
 static bool sdhc_dwc_dma_unreachable(const void *p, size_t len)
 {
@@ -994,33 +994,37 @@ static bool sdhc_dwc_dma_unreachable(const void *p, size_t len)
  * commands (SCR, SD status, CMD6, EXT_CSD) are at most 512 bytes and fit; an
  * SDIO CMD53 larger than the bounce buffer is refused with -ENOMEM.
  */
-static int sdhc_dwc_send_cmd_bounced(const struct device *dev, struct sdhc_command *cmd,
-				     struct sdhc_data *sdhc_data, bool read)
+static int sdhc_dwc_send_cmd_bounced(const struct device *dev,
+                                     struct sdhc_command *cmd,
+                                     struct sdhc_data    *sdhc_data,
+                                     bool                 read)
 {
 	struct sdhc_dwc_data *data = dev->data;
-	const uint32_t bs = sdhc_data->block_size;
-	const uint32_t step = CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE / bs;
-	uint8_t *buf = sdhc_data->data;
-	uint32_t done = 0;
-	int ret = 0;
+	const uint32_t        bs   = sdhc_data->block_size;
+	const uint32_t        step = CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE / bs;
+	uint8_t              *buf  = sdhc_data->data;
+	uint32_t              done = 0;
+	int                   ret  = 0;
 
 	if (bs == 0 || step == 0) {
 		return -EINVAL;
 	}
 	if (sdhc_data->blocks > step && cmd->opcode != SD_READ_MULTIPLE_BLOCK &&
 	    cmd->opcode != SD_WRITE_MULTIPLE_BLOCK) {
-		LOG_ERR("CMD%u: %u B does not fit the %u B bounce buffer", cmd->opcode,
-			sdhc_data->blocks * bs, CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE);
+		LOG_ERR("CMD%u: %u B does not fit the %u B bounce buffer",
+		        cmd->opcode,
+		        sdhc_data->blocks * bs,
+		        CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE);
 		return -ENOMEM;
 	}
 
 	while (done < sdhc_data->blocks) {
-		uint32_t n = MIN(sdhc_data->blocks - done, step);
+		uint32_t            n       = MIN(sdhc_data->blocks - done, step);
 		struct sdhc_command sub_cmd = *cmd;
-		struct sdhc_data sub = *sdhc_data;
+		struct sdhc_data    sub     = *sdhc_data;
 
-		sub.data = data->bounce;
-		sub.blocks = n;
+		sub.data    = data->bounce;
+		sub.blocks  = n;
 		sub_cmd.arg = cmd->arg + done * (data->block_addressed ? 1U : bs);
 		/* A 1-block multi-block command gets no auto CMD12 (see
 		 * sdhc_dwc_init_xfr), so send the single-block form instead.
@@ -1049,12 +1053,13 @@ static int sdhc_dwc_send_cmd_bounced(const struct device *dev, struct sdhc_comma
 }
 #endif /* CONFIG_SDHC_DWC_BOUNCE_BUFFER */
 
-static int sdhc_dwc_send_cmd_data(const struct device *dev, struct sdhc_command *cmd,
-				  struct sdhc_data *sdhc_data, bool read)
+static int sdhc_dwc_send_cmd_data(const struct device *dev,
+                                  struct sdhc_command *cmd,
+                                  struct sdhc_data    *sdhc_data,
+                                  bool                 read)
 {
 #if defined(CONFIG_SDHC_DWC_BOUNCE_BUFFER)
-	if (sdhc_dwc_dma_unreachable(sdhc_data->data,
-				     sdhc_data->blocks * sdhc_data->block_size)) {
+	if (sdhc_dwc_dma_unreachable(sdhc_data->data, sdhc_data->blocks * sdhc_data->block_size)) {
 		return sdhc_dwc_send_cmd_bounced(dev, cmd, sdhc_data, read);
 	}
 #endif
@@ -1700,63 +1705,66 @@ static void sdhc_dwc_wakeup_isr(const struct device *dev)
 	COND_CODE_1(DT_INST_NODE_HAS_PROP(n, clocks),                                 \
 		((clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, clkid)), (NULL))
 
-#define SDHC_DWC_INIT(n)                                                           \
-	PINCTRL_DT_INST_DEFINE(n);                                                     \
-                                                                                   \
-	static void sdhc_dwc_irq_config_func_##n(const struct device *dev)            \
-	{                                                                              \
-		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, sdmmc, irq),                            \
-			    DT_INST_IRQ_BY_NAME(n, sdmmc, priority),                           \
-			    sdhc_dwc_isr, DEVICE_DT_INST_GET(n), 0);                          \
-		irq_enable(DT_INST_IRQ_BY_NAME(n, sdmmc, irq));                            \
-                                                                                   \
-		if (DT_INST_IRQ_HAS_NAME(n, sdmmc_wakeup)) {                               \
-			IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, sdmmc_wakeup, irq),                 \
-				    DT_INST_IRQ_BY_NAME(n, sdmmc_wakeup, priority),              \
-				    sdhc_dwc_wakeup_isr, DEVICE_DT_INST_GET(n), 0);              \
-			irq_enable(DT_INST_IRQ_BY_NAME(n, sdmmc_wakeup, irq));                 \
-		}                                                                          \
-	}                                                                              \
-                                                                                   \
-	IF_ENABLED(CONFIG_SDHC_DWC_ADMA, (                                            \
-		static adma2_desc_t sdhc_adma_desc_tbl_##n[CONFIG_SDHC_DWC_ADMA_MAX_DESC]  \
-			SDHC_DWC_ADMA_DESC_SECTION                                    \
-			__aligned(CONFIG_SDHC_BUFFER_ALIGNMENT);                               \
-	))                                                                             \
-	IF_ENABLED(CONFIG_SDHC_DWC_BOUNCE_BUFFER, (                                    \
-		static uint8_t sdhc_bounce_##n[CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE]         \
-			Z_GENERIC_SECTION(CONFIG_SDHC_DWC_BOUNCE_BUFFER_SECTION)           \
-			__aligned(CONFIG_SDHC_BUFFER_ALIGNMENT);                               \
-	))                                                                             \
-	static struct sdhc_dwc_data sdhc_dwc_data_##n = {                             \
-		IF_ENABLED(CONFIG_SDHC_DWC_ADMA, (                                         \
-			.adma_desc = sdhc_adma_desc_tbl_##n,                                   \
-		))                                                                         \
-		IF_ENABLED(CONFIG_SDHC_DWC_BOUNCE_BUFFER, (                                \
-			.bounce = sdhc_bounce_##n,                                             \
-		))                                                                         \
-	};                               \
-                                                                                   \
-	static const struct sdhc_dwc_config sdhc_dwc_config_##n = {                    \
-		.regs = (struct dwc_sdhc_regs *)DT_INST_REG_ADDR(n),                       \
-		.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),                                 \
-		.irq_config_func = sdhc_dwc_irq_config_func_##n,                           \
-		.max_bus_freq = DT_INST_PROP_OR(n, max_bus_freq, 50000000),                \
-		.min_bus_freq = DT_INST_PROP_OR(n, min_bus_freq, 400000),                  \
-		.power_delay_ms = DT_INST_PROP_OR(n, power_delay_ms, 500),                 \
-		.bus_width = DT_INST_PROP_OR(n, bus_width, 4),                             \
-		.no_1_8_v = DT_INST_PROP_OR(n, no_1_8_v, false),                           \
-		IF_ENABLED(CONFIG_REGULATOR, (                                            \
-			.vmmc = SDHC_DWC_REGULATOR_GET_OR_NULL(DT_DRV_INST(n), vmmc_supply),   \
-			.vqmmc = SDHC_DWC_REGULATOR_GET_OR_NULL(DT_DRV_INST(n), vqmmc_supply),\
-		))                                                                         \
-		.cd_gpio = SDHC_DWC_GPIO_OR_ZERO(n, cd_gpios),                             \
-		.clock_dev = SDHC_DWC_CLOCK_DEV_OR_NULL(n),                                \
-		.clock_subsys = SDHC_DWC_CLOCK_SUBSYS_OR_ZERO(n),                          \
-	};                                                                             \
-                                                                                   \
-	DEVICE_DT_INST_DEFINE(n, sdhc_dwc_init, NULL, &sdhc_dwc_data_##n,             \
-			      &sdhc_dwc_config_##n, POST_KERNEL, CONFIG_SDHC_INIT_PRIORITY,   \
-			      &sdhc_dwc_api);
+#define SDHC_DWC_INIT(n) \
+	PINCTRL_DT_INST_DEFINE(n); \
+\
+	static void sdhc_dwc_irq_config_func_##n(const struct device *dev) \
+	{ \
+		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, sdmmc, irq), \
+		            DT_INST_IRQ_BY_NAME(n, sdmmc, priority), \
+		            sdhc_dwc_isr, \
+		            DEVICE_DT_INST_GET(n), \
+		            0); \
+		irq_enable(DT_INST_IRQ_BY_NAME(n, sdmmc, irq)); \
+\
+		if (DT_INST_IRQ_HAS_NAME(n, sdmmc_wakeup)) { \
+			IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, sdmmc_wakeup, irq), \
+			            DT_INST_IRQ_BY_NAME(n, sdmmc_wakeup, priority), \
+			            sdhc_dwc_wakeup_isr, \
+			            DEVICE_DT_INST_GET(n), \
+			            0); \
+			irq_enable(DT_INST_IRQ_BY_NAME(n, sdmmc_wakeup, irq)); \
+		} \
+	} \
+\
+	IF_ENABLED( \
+	    CONFIG_SDHC_DWC_ADMA, \
+	    (static adma2_desc_t \
+	             sdhc_adma_desc_tbl_##n[CONFIG_SDHC_DWC_ADMA_MAX_DESC] SDHC_DWC_ADMA_DESC_SECTION \
+	             __aligned(CONFIG_SDHC_BUFFER_ALIGNMENT);)) \
+	IF_ENABLED( \
+	    CONFIG_SDHC_DWC_BOUNCE_BUFFER, \
+	    (static uint8_t sdhc_bounce_##n[CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE] Z_GENERIC_SECTION( \
+	         CONFIG_SDHC_DWC_BOUNCE_BUFFER_SECTION) __aligned(CONFIG_SDHC_BUFFER_ALIGNMENT);)) \
+	static struct sdhc_dwc_data sdhc_dwc_data_##n = { \
+		IF_ENABLED(CONFIG_SDHC_DWC_ADMA, (.adma_desc = sdhc_adma_desc_tbl_##n, )) \
+		    IF_ENABLED(CONFIG_SDHC_DWC_BOUNCE_BUFFER, (.bounce = sdhc_bounce_##n, )) \
+	}; \
+\
+	static const struct sdhc_dwc_config sdhc_dwc_config_##n = { \
+		.regs            = (struct dwc_sdhc_regs *)DT_INST_REG_ADDR(n), \
+		.pcfg            = PINCTRL_DT_INST_DEV_CONFIG_GET(n), \
+		.irq_config_func = sdhc_dwc_irq_config_func_##n, \
+		.max_bus_freq    = DT_INST_PROP_OR(n, max_bus_freq, 50000000), \
+		.min_bus_freq    = DT_INST_PROP_OR(n, min_bus_freq, 400000), \
+		.power_delay_ms  = DT_INST_PROP_OR(n, power_delay_ms, 500), \
+		.bus_width       = DT_INST_PROP_OR(n, bus_width, 4), \
+		.no_1_8_v        = DT_INST_PROP_OR(n, no_1_8_v, false), \
+		IF_ENABLED(CONFIG_REGULATOR, \
+		           (.vmmc  = SDHC_DWC_REGULATOR_GET_OR_NULL(DT_DRV_INST(n), vmmc_supply), \
+		            .vqmmc = SDHC_DWC_REGULATOR_GET_OR_NULL(DT_DRV_INST(n), vqmmc_supply), )) \
+		    .cd_gpio  = SDHC_DWC_GPIO_OR_ZERO(n, cd_gpios), \
+		.clock_dev    = SDHC_DWC_CLOCK_DEV_OR_NULL(n), \
+		.clock_subsys = SDHC_DWC_CLOCK_SUBSYS_OR_ZERO(n), \
+	}; \
+\
+	DEVICE_DT_INST_DEFINE(n, \
+	                      sdhc_dwc_init, \
+	                      NULL, \
+	                      &sdhc_dwc_data_##n, \
+	                      &sdhc_dwc_config_##n, \
+	                      POST_KERNEL, \
+	                      CONFIG_SDHC_INIT_PRIORITY, \
+	                      &sdhc_dwc_api);
 
 DT_INST_FOREACH_STATUS_OKAY(SDHC_DWC_INIT)

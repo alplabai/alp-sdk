@@ -46,7 +46,7 @@ needs no special placement.
 
 ## Verified
 
-2026-10-13, E1M-AEN803 2026W36-0002 on `e1m-aen-evk-03`, 128 GB exFAT card,
+2026-10-13, E1M-AEN803 2026W36-0002 on an E1M-EVK 2626-R2 with the reworked mux, 128 GB exFAT card,
 4-bit at 25 MHz, M55-HE RAM-run with the data cache on: `RESULT PASS: file`.
 A 48 KB variant (6 split 8 KB bounce transfers per read) also passed, and a
 96-sector raw read matched 96 single-sector reads. The same shield and driver
