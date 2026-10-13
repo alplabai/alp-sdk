@@ -22,6 +22,7 @@
 ZTEST_SUITE(sn65dsi83_decide, NULL, NULL, NULL, NULL, NULL);
 
 #define D(pll, clk, err, polls, after) sn65dsi83_health_decide(pll, clk, err, 1U, polls, after)
+
 #define UNLOCK_SOT (SN65_ERR_CHA_PLL_UNLOCK | SN65_ERR_CHA_SOT_BIT_ERR)
 
 ZTEST(sn65dsi83_decide, test_healthy)
