@@ -173,7 +173,7 @@ ZTEST(alp_peripheral, test_camera_config_default)
 	zassert_equal(cfg.camera_id, 0u, NULL);
 	zassert_equal(cfg.width, 0u, "sentinel -- caller MUST set a resolution");
 	zassert_equal(cfg.height, 0u, "sentinel -- caller MUST set a resolution");
-	zassert_equal(cfg.fps, 30u, "common video frame rate");
+	zassert_equal(cfg.fps, 0u, "0 = let the backend pick its own default (#2278)");
 	zassert_equal(cfg.format, ALP_PIXFMT_RGB565, "widely-supported embedded default");
 }
 

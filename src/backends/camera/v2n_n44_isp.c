@@ -100,6 +100,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/video.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
 #include <alp/backend.h>
@@ -107,15 +108,13 @@
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
 
+LOG_MODULE_REGISTER(alp_camera_v2n_n44_isp, CONFIG_LOG_DEFAULT_LEVEL);
+
 #include "alp_errno.h"
+#include "camera_frmival.h"
 #include "camera_ops.h"
 #include "v2n_n44_isp.h"
 #include "alp_slot_claim.h"
-
-#include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(alp_camera_v2n_n44_isp, CONFIG_LOG_DEFAULT_LEVEL);
-
-#include "camera_frmival.h"
 
 #ifndef CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP_VBUF_COUNT
 #define CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP_VBUF_COUNT 2
@@ -280,6 +279,21 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 		(void)video_get_format(dev, &st->fmt);
 	}
 
+	/* fps AFTER format, same ordering rationale as zephyr_video.c (#2278).
+	 * No backend default -- cfg->fps == 0 leaves the device at its own
+	 * rate.  Unexercised on real silicon until the N44 CSI-2 receiver
+	 * driver lands (#1149) -- see the DATA-GATED block above: `dev` is
+	 * already known non-NULL by this point (the _devs[]/device_is_ready
+	 * check above returns ALP_ERR_NOT_READY before this line), but no
+	 * V2N board or overlay in this repo populates alp-camera0..3 with a
+	 * real drivers/video/ device today, so this call has never had a
+	 * real device to reach in practice, same as the rest of isp_open(). */
+	alp_status_t fps_status = camera_apply_fps(dev, cfg->camera_id, cfg->fps, 0u, NULL);
+	if (fps_status != ALP_OK) {
+		_free_state(st);
+		return fps_status;
+	}
+
 	uint8_t want = ARRAY_SIZE(st->vbufs);
 	if (vcaps.min_vbuf_count > want) {
 		_free_state(st);
@@ -338,7 +352,6 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	}
 	st->vbuf_count = want;
 
-	alp_camera_apply_fps(dev, cfg->camera_id, cfg->fps);
 	state->fps_x1000 = alp_camera_read_fps_x1000(dev); /* #2279 */
 
 	state->be_data = st;
