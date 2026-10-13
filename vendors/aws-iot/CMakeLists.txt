@@ -43,3 +43,10 @@ zephyr_include_directories(${MQTT_INCLUDE_PUBLIC_DIRS} ${JSON_INCLUDE_PUBLIC_DIR
 if(CONFIG_ALP_AWS_IOT_DEFAULT_CONFIG)
     zephyr_compile_definitions(MQTT_DO_NOT_USE_CUSTOM_CONFIG)
 endif()
+
+# coreMQTT TransportInterface_t over <alp/cloud_transport.h>
+# ("alp_cloud_transport_coremqtt.h", in this directory).
+if(CONFIG_ALP_CLOUD_TRANSPORT)
+    zephyr_library_sources(alp_cloud_transport_coremqtt.c)
+    zephyr_include_directories(${CMAKE_CURRENT_LIST_DIR})
+endif()

@@ -84,8 +84,9 @@ device-to-cloud story; all Tier B (recipe-only), split by grounding:
   upstream repo, `west:` carrying the exact project pin, and an alp-sdk-owned
   `kconfig:` gate (`CONFIG_ALP_AWS_IOT` / `CONFIG_ALP_AZURE_IOT`) over the
   in-tree build glue under `vendors/aws-iot/` and `vendors/azure-iot/`
-  (coreMQTT + coreJSON; az_core + the IoT Hub client). The TLS transport shim is
-  not provided.
+  (coreMQTT + coreJSON; az_core + the IoT Hub client). The TLS transport is
+  `<alp/cloud_transport.h>` (`CONFIG_ALP_CLOUD_TRANSPORT`): a TLS socket for
+  both, plus a coreMQTT `TransportInterface_t` in `vendors/aws-iot/`.
   The same pins also sit in the repo's `west.yml` under the opt-in `extras-cloud`
   group (off by default; `west update --group-filter +extras-cloud`), tier stays
   B (no CI build lane).

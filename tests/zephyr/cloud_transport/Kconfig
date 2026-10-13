@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# True when the west `extras-cloud` AWS checkout exists with its coreMQTT
+# submodule: at $ALP_AWS_IOT_SDK_DIR if set, else where west puts it (the same
+# probe as tests/zephyr/cloud_sdks/Kconfig, minus Azure).  Evaluated during
+# twister's Kconfig-only filter pass, so it reads ENVIRONMENT variables only.
+config CLOUD_TRANSPORT_AWS_PRESENT
+	def_bool "$(shell,test -f "${ALP_AWS_IOT_SDK_DIR:-$ZEPHYR_BASE/../modules/lib/aws-iot-device-sdk-embedded-C}/libraries/standard/coreMQTT/mqttFilePaths.cmake" && echo y)" = "y"
+
+source "Kconfig.zephyr"
