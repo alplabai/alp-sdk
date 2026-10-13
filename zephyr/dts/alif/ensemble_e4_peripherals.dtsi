@@ -1,0 +1,89 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * alp-sdk peripheral nodes for the Alif Ensemble E4 (AE402FA0E5597) M55-HP
+ * board (E1M-AEN401) that upstream Zephyr's Alif SoC layer does not declare:
+ *
+ *   gpio2    -- CC3501E bridge READY line (P2_6)
+ *   i2c2     -- E1M I2C0 / EEPROM identity bus (0x50, 0x58)
+ *   dma0 + evtrtr0 -- PL330 system DMA and its event router (SPI1 DMA)
+ *   sdhc0    -- SD/MMC host (microSD in the EVK J7 slot)
+ *
+ * The node bodies are copied VERBATIM from ensemble_e8_peripherals.dtsi.
+ * They hold on the E4 because the Alif DFP for THIS part,
+ * Device/soc/AE402FA0E5597/include/rtss_hp/soc.h, gives the same values:
+ * SDMMC_BASE 0x48102000 (:3571), SDMMC_IRQ_IRQn 102 and
+ * SDMMC_WAKEUP_IRQ_IRQn 103 (:182-183), GPIO2_BASE 0x49002000 (:3581),
+ * GPIO2_IRQ0..7_IRQn 195..202 (:276-283), I2C2_BASE 0x49012000 (:3596),
+ * I2C2_IRQ_IRQn 134 (:214), EVTRTR0_BASE 0x49035000 (:3645),
+ * DMA0_SEC_BASE 0x49080000 (:3652), DMA0_IRQ0..7_IRQn 299..306 (:380-394),
+ * DMA0_IRQ_ABORT_IRQn 331 (:444).
+ *
+ * Every node stays status = "disabled"; a board overlay or shield enables
+ * what its carrier wires (e.g. the e1m_evk_microsd shield for sdhc0).
+ * gpio2, i2c2 and sdhc0 were bench-verified on an E1M-AEN401 M55-HP on
+ * 2026-10-12 (bridge READY, EEPROM read/write, 4-bit SD at 25 MHz) from an
+ * app overlay with these exact values; dma0/evtrtr0 are not yet verified on
+ * the E4.
+ */
+
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+&soc {
+	gpio2: gpio@49002000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x49002000 0x1000>;
+		ngpios = <8>;
+		interrupts = <195 3>, <196 3>, <197 3>, <198 3>,
+			     <199 3>, <200 3>, <201 3>, <202 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	i2c2: i2c@49012000 {
+		compatible = "snps,designware-i2c";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x49012000 0x1000>;
+		interrupts = <134 3>;
+		clock-frequency = <I2C_BITRATE_STANDARD>;
+		fs-spike-len = <5>;
+		hs-spike-len = <1>;
+		status = "disabled";
+	};
+
+	dma0: dma@49080000 {
+		compatible = "alif,dma-pl330";
+		reg = <0x49080000 0x1000>;
+		#dma-cells = <2>;
+		dma-channels = <8>;
+		interrupt-parent = <&nvic>;
+		interrupts = <299 3>, <300 3>, <301 3>, <302 3>, <303 3>,
+			     <304 3>, <305 3>, <306 3>, <331 3>;
+		interrupt-names = "channel0", "channel1", "channel2", "channel3",
+				  "channel4", "channel5", "channel6", "channel7", "abort";
+		status = "disabled";
+	};
+
+	evtrtr0: event-router@49035000 {
+		compatible = "alif,dma-event-router";
+		reg = <0x49035000 0x100>;
+		dma-controller = <&dma0>;
+		channels = <32>;
+		dma-groups = <4>;  /* SYSTOP router: 4 ACK_TYPE groups (0-3) */
+		#dma-cells = <2>;
+		status = "disabled";
+	};
+
+	sdhc0: sdhc@48102000 {
+		compatible = "snps,dwc-sdhc";
+		reg = <0x48102000 0xF70>;
+		interrupts = <102 3>, <103 3>;
+		interrupt-names = "sdmmc", "sdmmc_wakeup";
+		clocks = <&clockctrl ALIF_SDC_CLK>;
+		status = "disabled";
+	};
+};

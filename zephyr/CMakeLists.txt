@@ -260,6 +260,11 @@ if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_FLASH)
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_flash.c)
 endif()
 
+if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_DISK)
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_disk.c)
+endif()
+
 if(CONFIG_ALP_SDK_STORAGE_ZEPHYR_LITTLEFS)
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/storage/zephyr_littlefs.c)

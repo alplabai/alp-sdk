@@ -1,0 +1,19 @@
+sample:
+  name: aen-sdcard-file
+  description: |
+    FatFs on the E1M-EVK microSD slot from the Alif M55-HE: bring up the
+    CC3501E bridge, enable the SDIO mux (E1M IO20), mount the card, write a
+    file, read it back, list the root directory and report free space.
+
+tests:
+  alp_sdk.examples.aen.sdcard_file.native_sim:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - sdhc
+      - fatfs
+    build_only: true

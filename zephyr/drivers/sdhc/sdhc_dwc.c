@@ -103,6 +103,14 @@ struct sdhc_dwc_data {
 #if defined(CONFIG_SDHC_DWC_ADMA)
 	adma2_desc_t *adma_desc;
 #endif
+#if defined(CONFIG_SDHC_DWC_BOUNCE_BUFFER)
+	uint8_t *bounce;
+	/* OCR CCS from the last ready ACMD41/CMD1 reply: true when the card
+	 * takes block numbers as the address argument, false when it takes
+	 * byte offsets (SDSC). Needed to split a block transfer.
+	 */
+	bool block_addressed;
+#endif
 };
 
 #define ERR_INTR_STATUS_EVENT(bits) ((uint32_t)(bits) << 16)
@@ -916,9 +924,8 @@ static int sdhc_dwc_send_cmd_no_data(const struct device *dev,
 	return sdhc_dwc_send_cmd(dev, dev->data, cmd, false);
 }
 
-static int sdhc_dwc_send_cmd_data(const struct device *dev,
-				   struct sdhc_command *cmd,
-				   struct sdhc_data *sdhc_data, bool read)
+static int sdhc_dwc_xfer(const struct device *dev, struct sdhc_command *cmd,
+			  struct sdhc_data *sdhc_data, bool read)
 {
 	struct sdhc_dwc_data *data = dev->data;
 	int ret;
@@ -954,6 +961,106 @@ static int sdhc_dwc_send_cmd_data(const struct device *dev,
 	return 0;
 }
 
+#if defined(CONFIG_SDHC_DWC_BOUNCE_BUFFER)
+BUILD_ASSERT(CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE % 512 == 0,
+	     "CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE must be a multiple of 512");
+
+/* True when [p, p + len) touches a CPU-local TCM, at its local address or at
+ * the global_base alias the board dts gives it. The SDHC master reaches
+ * neither on Ensemble (#2858).
+ */
+#define SDHC_DWC_IN(p, len, base, size)                                                    \
+	((uintptr_t)(p) < (uintptr_t)(base) + (size) &&                                    \
+	 (uintptr_t)(p) + (len) > (uintptr_t)(base))
+#define SDHC_DWC_IN_TCM(node, p, len)                                                      \
+	(SDHC_DWC_IN(p, len, DT_REG_ADDR(node), DT_REG_SIZE(node)) ||                      \
+	 SDHC_DWC_IN(p, len, DT_PROP_OR(node, global_base, DT_REG_ADDR(node)),             \
+		     DT_REG_SIZE(node)))
+
+static bool sdhc_dwc_dma_unreachable(const void *p, size_t len)
+{
+	bool tcm = false;
+
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(itcm))
+	tcm = tcm || SDHC_DWC_IN_TCM(DT_NODELABEL(itcm), p, len);
+#endif
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(dtcm))
+	tcm = tcm || SDHC_DWC_IN_TCM(DT_NODELABEL(dtcm), p, len);
+#endif
+	return tcm;
+}
+
+/* Run one data command through data->bounce. A block read/write bigger than
+ * the bounce buffer is split into consecutive commands; every other data
+ * command (SCR, SD status, CMD6, EXT_CSD) is at most 512 bytes and fits.
+ */
+static int sdhc_dwc_send_cmd_bounced(const struct device *dev, struct sdhc_command *cmd,
+				     struct sdhc_data *sdhc_data, bool read)
+{
+	struct sdhc_dwc_data *data = dev->data;
+	const uint32_t bs = sdhc_data->block_size;
+	const uint32_t step = CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE / bs;
+	uint8_t *buf = sdhc_data->data;
+	uint32_t done = 0;
+	int ret = 0;
+
+	if (bs == 0 || step == 0) {
+		return -EINVAL;
+	}
+	if (sdhc_data->blocks > step && cmd->opcode != SD_READ_MULTIPLE_BLOCK &&
+	    cmd->opcode != SD_WRITE_MULTIPLE_BLOCK) {
+		LOG_ERR("CMD%u: %u B does not fit the %u B bounce buffer", cmd->opcode,
+			sdhc_data->blocks * bs, CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE);
+		return -ENOMEM;
+	}
+
+	while (done < sdhc_data->blocks) {
+		uint32_t n = MIN(sdhc_data->blocks - done, step);
+		struct sdhc_command sub_cmd = *cmd;
+		struct sdhc_data sub = *sdhc_data;
+
+		sub.data = data->bounce;
+		sub.blocks = n;
+		sub_cmd.arg = cmd->arg + done * (data->block_addressed ? 1U : bs);
+		/* A 1-block multi-block command gets no auto CMD12 (see
+		 * sdhc_dwc_init_xfr), so send the single-block form instead.
+		 */
+		if (n == 1 && cmd->opcode == SD_READ_MULTIPLE_BLOCK) {
+			sub_cmd.opcode = SD_READ_SINGLE_BLOCK;
+		} else if (n == 1 && cmd->opcode == SD_WRITE_MULTIPLE_BLOCK) {
+			sub_cmd.opcode = SD_WRITE_SINGLE_BLOCK;
+		}
+
+		if (!read) {
+			memcpy(data->bounce, buf + done * bs, n * bs);
+		}
+		ret = sdhc_dwc_xfer(dev, &sub_cmd, &sub, read);
+		if (ret) {
+			break;
+		}
+		if (read) {
+			memcpy(buf + done * bs, data->bounce, n * bs);
+		}
+		memcpy(cmd->response, sub_cmd.response, sizeof(cmd->response));
+		done += n;
+	}
+
+	return ret;
+}
+#endif /* CONFIG_SDHC_DWC_BOUNCE_BUFFER */
+
+static int sdhc_dwc_send_cmd_data(const struct device *dev, struct sdhc_command *cmd,
+				  struct sdhc_data *sdhc_data, bool read)
+{
+#if defined(CONFIG_SDHC_DWC_BOUNCE_BUFFER)
+	if (sdhc_dwc_dma_unreachable(sdhc_data->data,
+				     sdhc_data->blocks * sdhc_data->block_size)) {
+		return sdhc_dwc_send_cmd_bounced(dev, cmd, sdhc_data, read);
+	}
+#endif
+	return sdhc_dwc_xfer(dev, cmd, sdhc_data, read);
+}
+
 static int sdhc_dwc_request(const struct device *dev, struct sdhc_command *cmd,
 			     struct sdhc_data *data_req)
 {
@@ -982,6 +1089,14 @@ static int sdhc_dwc_request(const struct device *dev, struct sdhc_command *cmd,
 	} else {
 		ret = sdhc_dwc_send_cmd_no_data(dev, cmd);
 	}
+
+#if defined(CONFIG_SDHC_DWC_BOUNCE_BUFFER)
+	/* OCR bit 31 = power-up done, bit 30 = CCS / sector mode. */
+	if (ret == 0 && (cmd->opcode == SD_APP_SEND_OP_COND || cmd->opcode == MMC_SEND_OP_COND) &&
+	    (cmd->response[0] & BIT(31))) {
+		data->block_addressed = (cmd->response[0] & BIT(30)) != 0;
+	}
+#endif
 
 	k_sem_give(&data->lock);
 	return ret;
@@ -1608,9 +1723,17 @@ static void sdhc_dwc_wakeup_isr(const struct device *dev)
 			SDHC_DWC_ADMA_DESC_SECTION                                    \
 			__aligned(CONFIG_SDHC_BUFFER_ALIGNMENT);                               \
 	))                                                                             \
+	IF_ENABLED(CONFIG_SDHC_DWC_BOUNCE_BUFFER, (                                    \
+		static uint8_t sdhc_bounce_##n[CONFIG_SDHC_DWC_BOUNCE_BUFFER_SIZE]         \
+			Z_GENERIC_SECTION(CONFIG_SDHC_DWC_BOUNCE_BUFFER_SECTION)           \
+			__aligned(CONFIG_SDHC_BUFFER_ALIGNMENT);                               \
+	))                                                                             \
 	static struct sdhc_dwc_data sdhc_dwc_data_##n = {                             \
 		IF_ENABLED(CONFIG_SDHC_DWC_ADMA, (                                         \
 			.adma_desc = sdhc_adma_desc_tbl_##n,                                   \
+		))                                                                         \
+		IF_ENABLED(CONFIG_SDHC_DWC_BOUNCE_BUFFER, (                                \
+			.bounce = sdhc_bounce_##n,                                             \
 		))                                                                         \
 	};                               \
                                                                                    \

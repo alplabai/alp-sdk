@@ -1,0 +1,8 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+shield:
+  name: e1m_evk_microsd
+  full_name: E1M-EVK microSD slot (J7, 4-bit SD through the SDIO mux)
+  vendor: alp
+  supported_features:
+    - sdhc

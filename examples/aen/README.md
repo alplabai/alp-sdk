@@ -86,6 +86,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-cc3501e-ble-gatt`](aen-cc3501e-ble-gatt/)    | **bench** -- CC3501E BLE GATT-SERVER path (#480) through the portable `<alp/ble.h>` surface: register/advertise/gatt read-write-notify, server-only, no live central peer. |
 | [`aen-cc3501e-gatt-register`](aen-cc3501e-gatt-register/) | **bench** -- PASS/FAIL gate for `alp_ble_gatt_register_service()` (#480/#892) over the inter-chip bridge; peer-free. |
 | [`aen-cc3501e-gpio`](aen-cc3501e-gpio/) | CC3501E GPIO proxy + camera-enable demo over the inter-chip SPI bridge (M55-HE host side). |
+| [`aen-sdcard-file`](aen-sdcard-file/) | FatFs file write/read/list on the E1M-EVK microSD slot (J7) through the e1m_evk_microsd shield (M55-HE). |
 | [`aen-cc3501e-command-sweep`](aen-cc3501e-command-sweep/) | **bench** -- exercises every opcode of the CC3501E wire protocol and measures inter-chip link throughput. |
 | [`aen-cc3501e-handshake-probe`](aen-cc3501e-handshake-probe/) | **bench** -- diagnostic that discriminates competing explanations for a CC3501E link failure seen after a wire-protocol-4.0 reflash. |
 | [`aen-cc3501e-silent-scan-probe`](aen-cc3501e-silent-scan-probe/) | **bench** -- tests whether one `WIFI_SCAN_START` submit survives 25 seconds of a completely silent host bus. |

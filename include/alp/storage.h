@@ -13,8 +13,8 @@
  *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH (`kind`); `instance_id`
  *     maps to a flash-area ID.  Returns ALP_ERR_NOSUPPORT for
  *     `kind == ALP_STORAGE_KIND_SD_MMC` (no flash_area backing for
- *     SD/MMC; `alp_storage_open` fails outright -- there is no
- *     fallback to a second backend) and for `configure_inline_aes`
+ *     SD/MMC; `alp_storage_open` then tries the next-ranked backend,
+ *     zephyr_disk) and for `configure_inline_aes`
  *     (no inline-AES path on plain Zephyr flash -- a higher-priority
  *     vendor backend implements it once one lands).
  *   - **zephyr_littlefs** (silicon_ref `"*"`, priority 90): real
@@ -24,6 +24,15 @@
  *     overwriting the region with 0xFF.  Same SD_MMC /
  *     `configure_inline_aes` ALP_ERR_NOSUPPORT posture as
  *     zephyr_flash.
+ *   - **zephyr_disk** (silicon_ref `"*"`, priority 80): real
+ *     `<zephyr/storage/disk_access.h>` backing for
+ *     `ALP_STORAGE_KIND_SD_MMC`; byte-addressed read/write over the
+ *     disk's sectors (read-modify-write for unaligned edges),
+ *     get_info reports sector size as block_size/erase_size, sync is
+ *     DISK_IOCTL_CTRL_SYNC.  The disk is named by
+ *     `CONFIG_ALP_SDK_STORAGE_ZEPHYR_DISK_NAME` (default `"SD"`);
+ *     `instance_id` is ignored.  `erase` and `configure_inline_aes`
+ *     are ALP_ERR_NOSUPPORT.  Declines every other `kind`.
  *   - **sw_fallback** (priority 0): every op past open/close
  *     returns ALP_ERR_NOSUPPORT; wins only when neither Zephyr
  *     backend links (e.g. a trimmed `native_sim` image).
@@ -144,9 +153,9 @@ typedef struct {
  *         (no backend registered for the active silicon),
  *         ALP_ERR_NOT_IMPLEMENTED (registered backend has no open
  *         hook), ALP_ERR_NOMEM (handle-pool or backend-state
- *         allocation failure), ALP_ERR_NOSUPPORT (@c kind ==
- *         ALP_STORAGE_KIND_SD_MMC -- neither zephyr_flash nor
- *         zephyr_littlefs backs SD/MMC today), or a backend I/O
+ *         allocation failure), ALP_ERR_NOSUPPORT (no registered
+ *         backend serves @c kind -- backends are tried in priority
+ *         order and each declines the kinds it does not serve), or a backend I/O
  *         failure (ALP_ERR_NOT_READY / ALP_ERR_BUSY /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_OUT_OF_RANGE)
  *         translated from the underlying flash-area / littlefs

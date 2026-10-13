@@ -268,6 +268,7 @@ their filename (some of those internal dirs don't follow a
 | `aen/aen-cc3501e-companion-tour` | Capstone full-surface tour of the CC3501E coprocessor: the portable wireless checkpoint plus every companion surface `aen-cc3501e-bringup` doesn't exercise. |
 | `aen/aen-cc3501e-gatt-register` | Bench PASS/FAIL gate for `alp_ble_gatt_register_service()` (#480/#892) -- registers a service on the CC3501E's NimBLE host over the inter-chip bridge; peer-free, no central-side discovery. |
 | `aen/aen-cc3501e-gpio`          | CC3501E GPIO proxy + camera-enable demo over the inter-chip SPI bridge. |
+| `aen/aen-sdcard-file`          | FatFs file write/read/list on the E1M-EVK microSD slot (J7). |
 | `aen/aen-eeprom-manifest`       | Read + decode the 128-byte Alp hardware-info manifest from the on-module 24C128 EEPROM over the portable `<alp/*>` API. |
 | `aen/aen-eeprom-provision`      | Write (and lock down) the 128-byte Alp hardware-info manifest into the on-module 24C128 EEPROM -- the production sibling of `aen-eeprom-manifest`. |
 | `aen/aen-secure-element-sign`   | OPTIGA Trust M probe and Coprocessor UID read over BRD_I2C (M55-HE). |

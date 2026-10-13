@@ -1,0 +1,32 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-EVK J7 -- the microSD slot, as the Zephyr disk "SD":
+ *
+ *   west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
+ *     -DSHIELD=e1m_evk_microsd
+ *
+ * then disk_access_init("SD") or fs_mount() a FatFs volume on "/SD:".
+ *
+ * Carrier wiring (E1M-EVK-2626-R2):
+ *   - The card sits behind the SDIO mux U38/U39. Its select input (E1M IO21)
+ *     is not routed to firmware: header P18 open straps it LOW, which picks
+ *     the microSD slot (P18 fitted picks the M.2 E-key card instead).
+ *   - The mux output enable /E is E1M IO20, active low. On the E1M-AEN SoMs
+ *     IO20 is a CC3501E GPIO, so it can only be driven once the CC3501E
+ *     bridge is up: the app drives alp_gpio IO20 LOW before it first touches
+ *     the disk. The SD host driver itself never touches the card before
+ *     disk_access_init()/fs_mount(), so that order is safe.
+ *   - Only enable the mux on a carrier whose U38/U39 are the reworked
+ *     74LV3257 bus switches. The stock 74LVC157 parts drive their outputs at
+ *     all times and fight the SoC's SD pins while /E is low.
+ *   - 4-bit, 3.3 V signalling only (no 1.8 V switch on the carrier), 25 MHz
+ *     default speed.
+ *
+ * The SoC host node and its pins differ per SoM, so each supported target
+ * has its own boards/<qualified-board>.overlay; the E1M-AEN targets share
+ * boards/e1m_aen.dtsi.
+ *
+ * ADR 0017 Tier-1 (DT wiring only, no code).
+ */
