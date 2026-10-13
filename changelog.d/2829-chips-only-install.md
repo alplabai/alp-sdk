@@ -1,3 +1,0 @@
-### Fixed — the Yocto `alp-chips` package no longer re-installs `libalp_sdk.a`, `alp-sdk.pc` and the `<alp/*.h>` headers (#2829)
-
-The static `ALP_OS=yocto` install rules added for `alp-sdk.pc` (#2829) also fired in the `ALP_BUILD_CHIPS_ONLY` build the `alp-chips` recipe runs, so that recipe installed `libalp_sdk.a`, `alp-sdk.pc` and every `<alp/*.h>` header besides `libalp_chips.a`. bitbake then failed `alp-chips` `do_package` ("Files/directories were installed but not shipped in any package") and `alp-perception` `do_prepare_recipe_sysroot` ("The file /usr/include/alp/camera.h is installed by both alp-sdk and alp-chips"), on all six V2N/V2M MACHINEs. The chips-only build now installs only `libalp_chips.a` and `<alp/chips/*.h>`; the normal static build is unchanged.

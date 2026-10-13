@@ -25,7 +25,7 @@ SRCREV  = "${AUTOREV}"
 # scripts/check_version_doc_sync.py fails on drift.  A SemVer
 # pre-release uses "~" (0.17.0~rc2 sorts BEFORE 0.17.0 under opkg/dpkg/rpm);
 # this filename's _0.6 is inert because PV is set explicitly.
-PV      = "0.17.0~rc2"
+PV      = "0.17.0"
 
 # The build content differs per MACHINE (V2N doorbell SPI,
 # ALP_SDK_INFERENCE_AUTO_ORDER, PACKAGECONFIG auto-enables below), so the
