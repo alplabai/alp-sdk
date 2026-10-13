@@ -72,10 +72,12 @@ ZTEST(sn65dsi83_decide, test_persistent_errors_reinit)
 ZTEST(sn65dsi83_decide, test_pll_unlock_alone_never_reinits)
 {
 	zassert_equal(D(0x01, 0x81, SN65_ERR_CHA_PLL_UNLOCK, 1, false), SN65_HEALTH_CLEAR_ERRORS);
-	zassert_equal(D(0x01, 0x81, SN65_ERR_CHA_PLL_UNLOCK, 1, true), SN65_HEALTH_CLEAR_ERRORS,
+	zassert_equal(D(0x01, 0x81, SN65_ERR_CHA_PLL_UNLOCK, 1, true),
+	              SN65_HEALTH_CLEAR_ERRORS,
 	              "first poll after a re-init");
 	zassert_equal(D(0x01, 0x81, SN65_ERR_CHA_PLL_UNLOCK, SN65_ERR_POLLS_REINIT + 10U, false),
-	              SN65_HEALTH_CLEAR_ERRORS, "however many polls");
+	              SN65_HEALTH_CLEAR_ERRORS,
+	              "however many polls");
 }
 
 ZTEST(sn65dsi83_decide, test_pll_unlock_plus_another_error_escalates)
