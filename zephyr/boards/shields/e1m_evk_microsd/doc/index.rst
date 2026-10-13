@@ -25,6 +25,13 @@ Requirements
 - A SoM target this shield has a ``boards/`` overlay for: E1M-AEN401 (M55-HP),
   E1M-AEN801 and E1M-AEN803 (M55-HE and M55-HP).
 
+The SD host's DMA engine cannot reach the M55 TCMs, so the driver copies
+through an 8 KB buffer in SRAM0 (``CONFIG_SDHC_DWC_BOUNCE_BUFFER``). Each
+core's image places its SRAM0 sections from ``0x02000000``: when the other
+M55 also uses SRAM0 (NPU arena, video buffers), give one of them its own
+window. Do not set ``chosen { zephyr,sram = &sram0; }`` with this shield; the
+build refuses it.
+
 Programming
 ***********
 

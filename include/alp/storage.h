@@ -34,8 +34,10 @@
  *     `instance_id` is ignored.  `erase` and `configure_inline_aes`
  *     are ALP_ERR_NOSUPPORT.  Declines every other `kind`.
  *   - **sw_fallback** (priority 0): every op past open/close
- *     returns ALP_ERR_NOSUPPORT; wins only when neither Zephyr
- *     backend links (e.g. a trimmed `native_sim` image).
+ *     returns ALP_ERR_NOSUPPORT; reached when every higher backend
+ *     is absent or declines the `kind` (e.g. a trimmed `native_sim`
+ *     image), so open can then succeed into a handle whose ops all
+ *     return ALP_ERR_NOSUPPORT.  Off by default on silicon.
  *   - **alp_testing** (file `testing_drv.c`; priority 255,
  *     `CONFIG_ALP_SDK_TESTING_STORAGE`): fault-injectable test
  *     double for host/unit tests -- not present in a shipping

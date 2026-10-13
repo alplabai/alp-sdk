@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Inter-chip wiring for the microSD file example on the E1M-AEN803 (Alif
+ * Inter-chip wiring for the microSD file example on the E1M-AEN801 (Alif
  * Ensemble E8, M55-HE).  Declares the SoM-internal Alif<->CC3501E link:
  * the SPI1 master bus + the two host-driven control nets, all from
  * metadata/e1m_modules/aen/inter-chip.tsv:

@@ -492,6 +492,28 @@ if(CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION)
     endif()
 endif()
 
+# HAZARD GUARD (#2858), same class as the ethernet one above: the SDHC bounce
+# buffer and ADMA descriptor table default to the "SRAM0" memory-region on
+# Ensemble. An app that ALSO moves main RAM there with `chosen { zephyr,sram =
+# &sram0; }` (the pre-#2858 SD workaround) gets .data/.bss and the DMA
+# buffers linked into the same window with no warning, and every descriptor
+# write lands on live data. Refuse at configure time.
+if(CONFIG_SDHC_DWC_BOUNCE_BUFFER OR CONFIG_SDHC_DESCRIPTOR_USE_SECTION)
+    dt_chosen(alif_sdhc_chosen_sram PROPERTY "zephyr,sram")
+    dt_nodelabel(alif_sdhc_sram0 NODELABEL "sram0")
+    if(DEFINED alif_sdhc_chosen_sram AND alif_sdhc_sram0
+       AND alif_sdhc_chosen_sram STREQUAL alif_sdhc_sram0
+       AND (CONFIG_SDHC_DWC_BOUNCE_BUFFER_SECTION STREQUAL "SRAM0"
+            OR CONFIG_SDHC_DESCRIPTOR_SECTION STREQUAL "SRAM0"))
+        message(FATAL_ERROR
+            "chosen zephyr,sram is sram0 and the SDHC bounce buffer / ADMA "
+            "descriptor table are placed in the SRAM0 memory-region: the linker "
+            "would put main RAM and the SD DMA buffers in the SAME window. Drop "
+            "the `zephyr,sram = &sram0` override -- since #2858 the driver "
+            "bounces DTCM buffers itself, so main RAM can stay in DTCM.")
+    endif()
+endif()
+
 # Alif Ensemble GMAC embedded Clause-22 MDIO (compatible snps,designware-mdio);
 # driver: zephyr/drivers/ethernet/mdio/mdio_dwmac_alif.c, binding:
 # zephyr/dts/bindings/mdio/snps,designware-mdio.yaml.  Reuses eth_dwmac_priv.h's

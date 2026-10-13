@@ -6,7 +6,13 @@ Register-level bring-up probes for the Ensemble **E8 SD Host Controller**
 is: inert register-level probes, not a working card-readout path (see
 below for why).
 
-## SD is disabled entirely on the E1M-EVK 2626-R2 (#2051)
+> **Working SD on a reworked carrier:** if your E1M-EVK's U38/U39 are the
+> reworked 74LV3257 bus switches, use the
+> [`e1m_evk_microsd`](../../../zephyr/boards/shields/e1m_evk_microsd) shield and
+> [`aen-sdcard-file`](../aen-sdcard-file) instead. This app documents the stock
+> 74LVC157 carrier, where SD stays off.
+
+## SD is disabled entirely on the stock E1M-EVK 2626-R2 (#2051)
 
 The board's SDIO 74LVC157 mux (`U38`/`U39`) has **no high-impedance state**:
 with its `/E` ENABLE input HIGH, the part's Y outputs are forced LOW, not

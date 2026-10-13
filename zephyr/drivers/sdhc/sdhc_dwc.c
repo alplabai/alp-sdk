@@ -52,11 +52,10 @@
  * which says nothing about what to set.  sizeof a string literal counts the
  * NUL, so "" is 1.
  *
- * NOTE on placement: .bss on the AEN801 boards resolves to DTCM
- * (`zephyr,sram = &dtcm`), which is CPU-local.  With
- * CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE=n the driver programs that same local
- * address into DWC_SDHC_ADMA_SA_LOW_R, so a board that actually moves data
- * over ADMA must revisit both this section and that translate symbol.
+ * NOTE on placement: .bss on the AEN boards resolves to DTCM, which the
+ * ADMA engine cannot reach, so on Ensemble the table defaults to the SRAM0
+ * memory-region (#2858) and CONFIG_SDHC_DWC_BOUNCE_BUFFER copies TCM data
+ * buffers through SRAM0 too.
  */
 #if defined(CONFIG_SDHC_DESCRIPTOR_USE_SECTION)
 BUILD_ASSERT(sizeof(CONFIG_SDHC_DESCRIPTOR_SECTION) > 1,
@@ -991,8 +990,9 @@ static bool sdhc_dwc_dma_unreachable(const void *p, size_t len)
 }
 
 /* Run one data command through data->bounce. A block read/write bigger than
- * the bounce buffer is split into consecutive commands; every other data
- * command (SCR, SD status, CMD6, EXT_CSD) is at most 512 bytes and fits.
+ * the bounce buffer is split into consecutive commands. Other SD data
+ * commands (SCR, SD status, CMD6, EXT_CSD) are at most 512 bytes and fit; an
+ * SDIO CMD53 larger than the bounce buffer is refused with -ENOMEM.
  */
 static int sdhc_dwc_send_cmd_bounced(const struct device *dev, struct sdhc_command *cmd,
 				     struct sdhc_data *sdhc_data, bool read)
