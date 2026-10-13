@@ -9,6 +9,10 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [v0.17.0] - 2026-10-13
 
+### Fixed — the Yocto `alp-chips` package no longer re-installs `libalp_sdk.a`, `alp-sdk.pc` and the `<alp/*.h>` headers (#2829)
+
+The static `ALP_OS=yocto` install rules added for `alp-sdk.pc` (#2829) also fired in the `ALP_BUILD_CHIPS_ONLY` build the `alp-chips` recipe runs, so that recipe installed `libalp_sdk.a`, `alp-sdk.pc` and every `<alp/*.h>` header besides `libalp_chips.a`. bitbake then failed `alp-chips` `do_package` ("Files/directories were installed but not shipped in any package") and `alp-perception` `do_prepare_recipe_sysroot` ("The file /usr/include/alp/camera.h is installed by both alp-sdk and alp-chips"), on all six V2N/V2M MACHINEs. The chips-only build now installs only `libalp_chips.a` and `<alp/chips/*.h>`; the normal static build is unchanged.
+
 ### Fixed — a Yocto build without the dev-kit feed fragment no longer aborts while parsing `alp-devkit-feed-config` (#2853)
 
 `alp-devkit-feed-config_0.1.bb` (added in #2841) called `bb.fatal` from its anonymous python when `ALP_DEVKIT_FEED_URL` was unset. Anonymous python runs at parse time for every recipe `BBFILES` matches, so every build without the opt-in `conf/distro/include/alp-devkit-feed.inc` fragment (`alp-image-edge`, `alp-image-prod`, `alp-image-base`, customer builds) stopped at "Parsing halted due to errors". The recipe now raises `bb.parse.SkipRecipe`, the pattern `alp-cm33-firmware_0.1.bb` uses for its dev-only gate; opt-in builds are unchanged.
