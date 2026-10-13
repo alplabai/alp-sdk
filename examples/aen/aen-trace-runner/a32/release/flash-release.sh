@@ -92,8 +92,8 @@ do_write() { # <tag> <flags...> <file:addr>...
 	loadbin="$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 1)" || exit 9 # noreset=1: every loadbin, no implicit reset
 	[ -n "$loadbin" ] || die "no loadbin lines -- refusing"
 	prewrite="$(bench_flowd_prewrite_lines "$FLOWD_SECTORS_FILE" "$scratch/prewrite")"
-	# NO RESET BEFORE PROGRAMMING (fix round 2 finding, and #1902/alp-sdk-lcd
-	# flash-jlink-mramxip.sh's own header, whose bench-measured evidence this
+	# NO RESET BEFORE PROGRAMMING (fix round 2 finding, and #1902:
+	# scripts/bench/aen/flash-jlink-mramxip.sh's own header, whose bench-measured evidence this
 	# follows verbatim): `RSetType 2; r` before the halt was found to DESTROY
 	# the debug access the halt needs on this part (AP[3], the M55 debug
 	# domain, is present pre-reset 8/8 and absent post-reset 8/8 in that
@@ -123,8 +123,8 @@ do_write() { # <tag> <flags...> <file:addr>...
 	"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "$T/write.jlink" >"$T/write.out" 2>&1 || rc=$?
 	[ "$rc" -ne 13 ] || die "bench_jlink_run refused the write session (rc=13)"
 	grep -qi "Could not connect to the target device" "$T/write.out" && die "$JLINK_DEVICE_FLASH did not connect"
-	# CONFIRM THE HALT, SCOPED TO BEFORE PROGRAMMING (alp-sdk-lcd
-	# flash-jlink-mramxip.sh:420-446, adopted verbatim): `h` prints a
+	# CONFIRM THE HALT, SCOPED TO BEFORE PROGRAMMING
+	# (scripts/bench/aen/flash-jlink-mramxip.sh:420-446, adopted verbatim): `h` prints a
 	# "PC = ........, CycleCnt = ..." register dump ONLY when the core
 	# actually halted; on failure it prints "WARNING: CPU could not be
 	# halted" and no PC line. The trailing RSetType 2/r/g that BOOTS the

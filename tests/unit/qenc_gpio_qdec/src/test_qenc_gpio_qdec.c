@@ -17,6 +17,7 @@
  */
 
 #include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/input/input.h>
 #include <zephyr/ztest.h>
@@ -24,7 +25,22 @@
 #include <alp/counter.h>
 #include <alp/peripheral.h>
 
+#include "backends/gpio/gpio_pad.h"
+
 #define QDEC_NODE DT_ALIAS(alp_qenc0)
+
+/* Stand-in for the Alif pad input-buffer hook (not built on native_sim):
+ * records which pins the backend asked to make readable (issue #2808). */
+static int     pad_calls;
+static uint8_t pad_pins[4];
+
+int alp_z_gpio_pad_input(const struct gpio_dt_spec *spec, alp_gpio_pull_t pull)
+{
+	zassert_equal(pull, ALP_GPIO_PULL_NONE);
+	if (pad_calls < (int)ARRAY_SIZE(pad_pins)) pad_pins[pad_calls] = spec->pin;
+	pad_calls++;
+	return 0;
+}
 
 ZTEST_SUITE(alp_qenc_gpio_qdec, NULL, NULL, NULL, NULL, NULL);
 
@@ -47,6 +63,19 @@ ZTEST(alp_qenc_gpio_qdec, test_open_get_position_uses_gpio_qdec_backend_not_zeph
 	int32_t pos = -1;
 	zassert_equal(alp_qenc_get_position(h, &pos), ALP_OK);
 
+	alp_qenc_close(h);
+}
+
+ZTEST(alp_qenc_gpio_qdec, test_open_enables_both_phase_pads)
+{
+	pad_calls             = 0;
+	alp_qenc_config_t cfg = ALP_QENC_CONFIG_DEFAULT(0);
+	alp_qenc_t       *h   = alp_qenc_open(&cfg);
+	zassert_not_null(h);
+	/* qdec0 in app.overlay: gpios = <&gpio0 10>, <&gpio0 11>. */
+	zassert_equal(pad_calls, 2);
+	zassert_equal(pad_pins[0], 10);
+	zassert_equal(pad_pins[1], 11);
 	alp_qenc_close(h);
 }
 

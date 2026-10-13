@@ -47,7 +47,14 @@ remains a bench-diagnostic check, not an automated bring-up step:
 3. **Route the PCIe muxes** to the DEEPX path with the PI3DBS12212A
    driver (PD pin on Renesas `P80`, SEL pin on `P95`).
 4. **Release `M1_RESET`** (Renesas `PA6`; active-low) -- ONLY once
-   step 1 confirms the rail is power-good.
+   step 1 confirms the rail is power-good.  U-Boot drives `PA6` low on
+   entry to the rail step, before `P64` goes high, so `PORES_N` is held
+   low through the whole ramp of the `P64` rails, and releases it no
+   sooner than 16 ms after `P64` (15 ms hold + 1 ms mux settle).  That
+   covers the 11 ms reset-supervisor delay of the DEEPX DX-M1 reference
+   design (BD5215G on `VDD18IO`).  On a V2M image whose EEPROM manifest
+   is not (yet) `v2n-m1`, U-Boot still releases `M1_RESET` after a good
+   rail step but leaves the PCIe mux alone.
 
 ### `deepx_lpddr_0v85` strap is resolved: `0x48` (#1163, #1845)
 

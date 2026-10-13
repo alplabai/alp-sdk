@@ -51,6 +51,10 @@
 /* The board overlay's side of the I2C1 handover names the same flag words the HE's does. */
 BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), flag_address) == TR_MEM_I2C1_HANDOVER,
              "i2c1_handover flag-address != tr_memmap.h TR_MEM_I2C1_HANDOVER");
+BUILD_ASSERT(DT_PROP(DT_NODELABEL(i2c1_handover), alive_address) == TR_MEM_I2C1_ALIVE,
+             "i2c1_handover alive-address != tr_memmap.h TR_MEM_I2C1_ALIVE");
+BUILD_ASSERT(DT_PROP(DT_NODELABEL(sn65dsi83_agent), recipe_address) == TR_MEM_SN65_RECIPE,
+             "sn65dsi83_agent recipe-address != tr_memmap.h TR_MEM_SN65_RECIPE");
 
 /* ---- I2C1 SCCB unstick (task facts, silicon-proven on 2026W36-0009 today) --
  * I2C1 (0x49011000, the camera SCCB bus, shared with GT911 touch at 0x14)
@@ -100,7 +104,7 @@ SYS_INIT(tr_i2c1_unstick_init, POST_KERNEL, 1);
  * video control API at all, see apply_ae()'s own header comment for why)
  * -- an SDK GAP, the same shape as src/platform/display.c's cdc200_swap_fb()
  * bypass: <alp/camera.h> has no exposure/gain control, so this reaches the
- * sensor directly. ov9281@60 is on E1M I2C1 (csi_i2c), from alp-sdk-lcd's
+ * sensor directly. ov9281@60 is on E1M I2C1 (csi_i2c), from the
  * innomaker_cam_ov9281 shield -- probe/camera/src/main.c's SENSOR_NODE.
  * g_sensor itself is still needed for device_is_ready() (the driver's own
  * init, and the camera pipeline's use of the SAME device elsewhere in this

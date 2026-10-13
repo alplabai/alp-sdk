@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # aen-power-stop -- bench proof of the Alif SE STOP backend (#2784, unit U7) on
-# the E1M-AEN803 (Alif Ensemble E8, M55-HE).  Built as an MRAM image: STOP wakes
+# the E1M-AEN803 (Alif Ensemble E8, M55-HE; the M55-HP builds too, not bench-verified).  Built as an MRAM image: STOP wakes
 # through a cold boot, so the image has to be the one the Secure Enclave boots
 # (a RAM-run image would not come back).
 #

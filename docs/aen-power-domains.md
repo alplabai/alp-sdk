@@ -86,9 +86,10 @@ unverified.
 ## The STOP / STANDBY backend
 
 `src/backends/power/alif_se_power.c` implements `alp_power_request_sleep(STOP |
-STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803). It is registered for
+STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and `STOP` on the E8 M55-HP (**bench-proven HP-only** on the E1M-AEN803) (section "The M55-HP" below). It is registered for
 `alif:ensemble:e8` behind `CONFIG_ALP_SDK_POWER_ALIF_SE` (default **n**,
-experimental; STOP is bench-proven on the E1M-AEN803, STANDBY is not). The M55-HE subsystem is powered off and the
+experimental; STOP and STANDBY are bench-proven on the E1M-AEN803 M55-HE, STOP also on its
+M55-HP with only the HP booted). This core's (HE or HP) subsystem is powered off and the
 wake is a cold boot through the Secure Enclave, so the call does not return: read
 the cause with `alp_power_boot_wake_info()`. `SLEEP` / `DEEP_SLEEP` are forwarded to
 the pm_policy backend when it is built.
@@ -118,6 +119,7 @@ vendor sample.
 |---|---|---|
 | `ALP_POWER_WAKE_RTC` | on-module RV-3028, `INT` -> P15_0 -> `WE_LPGPIO0` | primary RTC (the internal LPRTC is not trusted: ER001 / ER002, LFRC-only boot). With `wake_after_ms == 0` the caller's own alarm / countdown must already be armed, or the request is `ALP_ERR_INVAL`. |
 | `ALP_POWER_WAKE_TIMER` | LPTIMER (`alp,power-wake-timer`, `WE_LPTIMER0`) for `wake_after_ms < 1000` | runs from the AON low-frequency clock. `wake_after_ms` is a **minimum**: the tick count is rounded up against the fastest the clock can run (LFRC 36045 Hz = +10 %, the top of its trim range; measured 34251.7 Hz; LFXO 32775 Hz), so on LFRC a short wake is never early but can be late: ~5 % at the 34251.7 Hz this module measured, up to ~16 % if the clock sits at the bottom of the trim range (-5 %, ~31130 Hz). |
+| `ALP_POWER_WAKE_GPIO` | application LPGPIO pads named by an `alp,power-wake-gpios` devicetree node, `WE_LPGPIO<n>` | advertised only when the node exists and none of its pads is wired by the SoM (see "LPGPIO wake pads" below). |
 | (timed wake >= 1 s) | RV-3028 countdown (`rv3028c7_timer_start`) | whole seconds, rounded up. Needs the chip context bound (`alp_som_power_bind_rv3028`). |
 
 A timed wake reports the source the caller asked for, whichever hardware serves it:
@@ -128,6 +130,52 @@ section, so the edge is latched even by a short pulse (the part's pulse mode,
 tRTN1 = 7.8 ms, is never enabled by the SDK: `INT` stays low until the wake decode
 clears the flag). The LPGPIO combined line (IRQ 57) is the one that reaches the
 EWIC; its handler only masks the line again.
+
+**LPGPIO wake pads (`ALP_POWER_WAKE_GPIO`).** The application names its pads in the devicetree, so
+`<alp/power.h>` gains no symbol:
+
+```dts
+wake-pads {
+	compatible = "alp,power-wake-gpios";
+	wake-gpios = <&lpgpio N GPIO_ACTIVE_LOW>;   /* P15_N: a line the variant frees (see "Refused pads") */
+	pinctrl-0 = <&pinctrl_wake_pads>;           /* LPGPIO function, input buffer, pull */
+	pinctrl-names = "default";
+};
+```
+
+- *Which hardware.* Only the LPGPIO island (P15_0..P15_7) is in the VBAT domain that stays powered
+  through STOP. Line n is wake event `WE_LPGPIO<n>` (bit 16 + n of `off_profile_t.wakeup_events`,
+  hal_alif `se_services/include/aipm.h:320-327`; the Alif DFP `demo_pm.c:751` pairs P15_4 with
+  `WE_LPGPIO4`) and the whole group reaches the EWIC through `EWIC_VBAT_GPIO` (`aipm.h:353`).
+  Those wake-event bits are the ones `ANA.WKUP_CTRL.LPGPIO` [23:16] carries (`alif_aipm_gen2.h`); the backend does not write that register.
+- *Polarity and edge.* Each entry is armed as an edge TO its asserted level (`GPIO_ACTIVE_LOW`:
+  falling, `GPIO_ACTIVE_HIGH`: rising), the way the vendor demo arms its joyswitch pad
+  (`demo_pm.c:359-361`). The pad must be idle when the request is made: a pad that already reads
+  asserted once the edge is armed is `ALP_ERR_BUSY`, as for the RV-3028 `INT`.
+- *Which pad fired.* The DW GPIO block latches the edge in `GPIO_RAW_INTSTATUS` (LPGPIO base
+  `0x42002000` + `0x44`, DFP `soc.h:1575`) until `GPIO_PORTA_EOI` (+ `0x4C`) is written. The BKRAM
+  record keeps the armed pads in `armed_hw` bits 23:16. `gpio_dw`'s init (PRE_KERNEL_1) writes
+  `INTEN = 0` and `PORTA_EOI = ~0` (Zephyr `drivers/gpio/gpio_dw.c:460-461`), which would erase the
+  latch before the POST_KERNEL wake decode runs, so a PRE_KERNEL_1 priority-0 hook snapshots
+  `GPIO_RAW_INTSTATUS` first and the decode reads that snapshot, sets `ALP_POWER_WAKE_GPIO` in
+  `wake_source` and has nothing left to acknowledge. An aborted sleep reads the live latch right
+  after the `WFI` and acknowledges it. `alp_power_boot_wake_info()` reports only the bit; an
+  application with several pads reads its own pads' levels.
+- *Refused pads.* A pad the SoM wires is never a wake pad. `alp_som_power_lpgpio_claimed()` is every
+  LPGPIO pad of an `alp,som-power-domain` node (P15_0 RV-3028 `INT`, P15_1 `E_WIFI_NRST`, P15_4
+  `E_PHY_PWRDWN`, P15_5 `WIFI_EN`, and on the AEN803 P15_6 `OSPI0_RESETn`, P15_7 `OSPI1_RESETn`)
+  plus the pads in the `alp,wired-lpgpio-pads` property of the `alp,som-power` node. The generated
+  board dts of every AEN SoM lists P15_2, P15_3, P15_6 and P15_7 there (the OSPI `INTn` / `RESETn`
+  nets, `alif-ospi.tsv`, wired to the memory footprints on the one E1M-AEN-2626-R2 PCB whether or
+  not the part is populated); the source is `wired_lpgpio_pads:` in `on-module-links.yaml`. One claimed pad in the node makes `ALP_POWER_WAKE_GPIO` unadvertised
+  and `alp_power_configure_wake_source()` answers `ALP_ERR_NOSUPPORT`.
+  On the E1M-AEN801 / E1M-AEN803 R2 all eight lines are SoM-wired: no pad is accepted on the
+  bare module; the path is for a variant or a derivative where a line is freed.
+- *Not done.* The DW debounce filter (`GPIO_DEBOUNCE`, `gpio_enable_debounce()` in the DFP
+  `drivers/include/gpio.h:351`) needs its clock (`GPIO_DB_CKEN`, `RTSS_HE_LPPERI_CKEN` [9:8]) to keep
+  running through the SE's STOP profile; nothing in the DFP states that, so it is left off.
+  [BENCH] that the latch survives the SES boot, and that `EWIC_VBAT_GPIO` wakes on the pad edge,
+  are unverified: only the P15_0 path has run on silicon.
 
 **The OFF profile is complete and explicit.** `se_service_set_run_cfg()` /
 `set_off_cfg()` are not side-effect-free (bench: a one-field read-modify-write
@@ -171,6 +219,81 @@ off) and `alp_power_boot_wake_info()` reports a STOP cycle with no wake cause. A
 STANDBY record is discarded when the RV-3028 reports its power-on-reset flag.
 The BKRAM placement exists only in a build with `CONFIG_ALP_SDK_POWER_ALIF_SE`;
 every other build keeps the record in RAM.
+
+### The M55-HP (STOP bench-proven HP-only on the E1M-AEN803)
+
+The backend compiles and registers for the HP core too (`CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP`,
+board targets `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` and
+`alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`; `examples/aen/aen-power-stop` builds for both).
+**Bench (2026-10-10, E1M-AEN803 2026W36-0001 on an E1M-EVK, HP-only ATOC, i.e. the HE was not booted):**
+`examples/aen/aen-power-stop` built for `alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`, linked in HP
+slot0 at `0x802b0000`, Flow D via tan. 3/3 STOP cycles PASS at 400 MHz with `RESTORE_CLOCKS` on: cycle 1
+LPTIMER 500 ms `mode=4 wake_source=0x8`, cycle 2 RV-3028 countdown 3 s `mode=4 wake_source=0x1`,
+cycle 3 RV-3028 alarm `mode=4 wake_source=0x1`, `quiesced=restored=0x7f`,
+`SUMMARY cycles=3 pass=5 fail=0`. An HP STOP while the HE runs failed on the `STOP_MODE_STAT` check (run D
+below) and passes with the second witness. Not verified: the E1M-AEN801 HP. The differences in the table below are
+transcribed from the Alif sources named in the code comments.
+
+| Aspect | M55-HE (bench-proven STOP) | M55-HP (STOP bench-proven, AEN803) | Source |
+|---|---|---|---|
+| Sleep modes | `STOP`, `STANDBY` | `STOP` only (the vendor's SOFT_OFF-class profile); `STANDBY`: the backend's per-mode wake caps for it are empty, so the dispatcher refuses it with `ALP_ERR_NOSUPPORT` before the backend runs (the backend's `hp_standby_unsupported` check is defence in depth) | sdk-alif `samples/drivers/pm/system_off/src/main.c:89,305`, README ("S2RAM ... HE core only") |
+| TCM retention | HE TCM banks (`SRAM4_x` / `SRAM5_x`) | none: `ALP_POWER_RETAIN_TCM` / `FULL` are `ALP_ERR_NOSUPPORT` (`hp_tcm_not_retainable`); `memory_blocks` is BKRAM \| MRAM \| SERAM only | `main.c:199-201`; hal_alif `aipm.h:195-259` has no HP TCM block |
+| Boot location | any (`vtor_address` optional, U8h) | MRAM only: `SCB->VTOR` below `0x80000000` is refused `ALP_ERR_NOSUPPORT` (`hp_vtor_not_mram`) | `main.c:80,85,199-201` |
+| Core control / reset registers | `AON.RTSS_HE_CTRL` `0x1A604010`, `RTSS_HE_RESET` `0x1A604014` | `AON.RTSS_HP_CTRL` `0x1A604000`, `RTSS_HP_RESET` `0x1A604004` (same bits: `COLD_WAKEUP` [0], `WIC` [9:8], `RESETSYNDROME` [5:0]) | DFP `Device/soc/AE822FA0E5597/include/rtss_hp/soc.h:1157-1158,3656`; `Device/core/common/source/pm.c:61-69`; HP SVD `:3890,3913` |
+| Entry sequence | `pm_core_enter_deep_sleep_request_subsys_off()` step for step | the same, on the HP's own register pair | DFP `pm.c` (one function, `#if defined(RTSS_HP)` picks the registers) |
+| Wake events, EWIC | `WE_LPTIMER0` / `EWIC_VBAT_TIMER`, `WE_LPGPIO0` / `EWIC_VBAT_GPIO` | identical: SoC-level `off_profile_t` fields, and IRQ 57 (`LPGPIO_COMB_IRQ_IRQn`) and 60 (`LPTIMER0_IRQ_IRQn`) are the same lines in the HP header | `rtss_hp/soc.h:140,143`; `main.c:45-50` has no HP branch |
+| Power domains | `PD_VBAT_AON` (STOP) | `PD_VBAT_AON` (the HP is not in the list, so its subsystem is the one that powers off) | `main.c:214-215`; hal_alif `aipm.h:56,68` (`PD_RTSS_HP` = bit 7) |
+| BKRAM wake record | `0x4902C000`, retained | same SoC-level block, same record | `ensemble_e8_peripherals.dtsi` `bkram` node |
+| Clock restore (`..._RESTORE_CLOCKS`, default **off** for the HP boards, on in the example's HP fragment; measured on the AEN803 HP, unmeasured on the AEN801 HP) | RUN profile 160 MHz; healthy = `PLL_CLK_SEL` `ES1` [20] \| `SYS` [4] \| `SYSREF` [0] (`0x00100011`) | RUN profile 400 MHz; healthy = `ES0` [16] \| `SYS` [4] \| `SYSREF` [0] (`0x00010011`) | `main.c:137-138`; HP SVD `PLL_CLK_SEL` `:1862` |
+
+**What the backend does about the other core.** The OFF profile belongs to the calling core. The SE
+powers that core's subsystem off, and the SoC drops to its STOP state only once every subsystem has
+configured and entered its own sleep (DFP `pm.c`, header comment of
+`pm_core_enter_deep_sleep_request_subsys_off()`). The backend cannot see the other core, and no
+register in the DFP or hal_alif says whether it is up, so it neither waits for it nor refuses on
+it. With the HE running while the HP sleeps, only the HP subsystem goes down: the SoC stays in
+RUN, the HP still wakes by a cold boot, and the on-module domains the HP quiesced stay held until it is
+back, so the HE must not be using them. For a real SoC-level STOP both cores have to be in their own
+sleep, each with its own OFF profile. The BKRAM record, the LPTIMER0 wake timer and the RV-3028 are
+single-owner resources: use the backend from one core only (the dtsi notes the same for the
+LPTIMER; the vendor README says the RTC is shared with the HE).
+
+**Memory the other core still uses.** The SE powers off every memory block the OFF profile does not
+name as soon as the sleeping core's subsystem goes off, without waiting for the SoC-level STOP. On
+E1M-AEN803 2026W36-0001 (2026-10-11) an HE STOP with the HP running `examples/aen/aen-hp-core-smoke`
+took SRAM0 away: the HP's SRAM0 heartbeat read `magic=0x00000000 heartbeat=0` after each of three
+wakes, while `STOP_MODE_STAT` stayed 0 and the HE's WIC bits showed a core-only STOP. Adding
+`PD_SYST | PD_RTSS_HP` to the OFF profile did not help; naming SRAM0 | SRAM1 in `memory_blocks` did
+(heartbeat 115, 251, 439 across the three STOPs). Set `CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY`
+to the gen2 memory blocks the running core needs (`0x3` for SRAM0 | SRAM1); the default 0 keeps none,
+for the lowest floor when nothing else runs. The `h-hp-running` variant of `aen-power-stop` is the
+bench check.
+
+**Run D, and the second STOP witness (HP with the HE running).** Combined ATOC on E1M-AEN803
+2026W36-0001: the HE ran an idle Zephyr app, the HP ran `examples/aen/aen-power-stop`. The HP requested
+STOP, the SE powered the HP subsystem off and re-booted it on the LPTIMER, but `STOP_MODE_STAT` (bit4 of
+`0x1A60F000`, raw `0x100`) stayed clear: the SVD says hardware sets it when the DC-DC was turned off, and
+the DC-DC stays up while the HE runs. `alp_som_power_boot_restore()` then discarded the record
+(`valid=0`, `record_valid` FAIL) and the example repeated cycle 1. At that boot `RTSS_HP_RESET` was
+`0x00` and `RTSS_HP_CTRL` `0x100`. After a SoC-level STOP (HE-only and HP-only images) the same register
+read 0 (diag word 17): the WIC bits do not survive the DC-DC going off, so the two witnesses cover
+disjoint cases.
+
+The rule (`alp_som_power_core_off_take()`, `src/backends/power/alif_se_power_hw.c`): this core's own
+`RTSS_HE_CTRL` / `RTSS_HP_CTRL` WIC [9:8] equal to `0b01` (EWIC, subsystem-off requested) is read and
+cleared on every boot (`COLD_WAKEUP` untouched; an aborted entry's stale bits are consumed by the next
+boot). `alp_som_power_boot_restore()` trusts a STOP record when `STOP_MODE_STAT` is set OR the core was
+off, and a record-less boot with either witness is a blind restore. When the core-off bit is the only
+witness, `RESETSYNDROME` bit2 (`0x4`, reset request to the power domain) marks an external or aborted
+reset and the realised mode is RUN. Bit2 does not cover SYSRESETREQ or a local WDT reset (both leave
+`RESETSYNDROME` 0, DFP `pm.c:600-627`), so the DFP spurious-wake rule is applied too: with the WIC bits
+as the only witness, if neither decode pass (LPTIMER status early, RV-3028 flags in
+`alp_som_power_boot_restore_i2c()`) finds a wake source, the boot is reported as RUN with no wake cause
+and no slept time; the domains are restored either way. Both vetoes are unmeasured on silicon for a
+real reset during the off-time. The realised mode is this core's: the SoC itself reaches STOP only
+when every core is off.
+
+**Run D, re-run with the rule:** dual-core (HE idle Zephyr app + HP `aen-power-stop`) on E1M-AEN803 2026W36-0001 passes 3/3 (LPTIMER `wake_source=0x8`, countdown `0x1`, alarm `0x1`, all `mode=4`, `SUMMARY cycles=3 pass=5 fail=0`, boot diag w[16..19] = `00000100 00000100 00000333 00000000`), flashed as one combined ATOC (DEVICE + m55_he + m55_hp) written by tan's Flow D with the alplabai/tan-cli#1509 fix; the HE-only regression stays 3/3. Unmeasured: the E1M-AEN801 HP (no board; the same AE822FA0E5597LS0 part, and the example builds for it) and the two reset vetoes above. The reset vetoes cannot be driven on this bench: the probe's `r0`/`r1` leave a running HP image untouched, and its RESETPIN reset strategy leaves an HP-only image stopped until a power cycle.
 
 ### Comparison with the vendor reference (bench U8c)
 
@@ -217,7 +340,22 @@ resolution).
 **Verified on silicon (bench U8h, E1M-AEN803):** the SE accepts the profile, the EWIC entry
 removes power and the wake is a cold boot, BKRAM (bit 21) retains the record across STOP, and
 the LPTIMER (500 ms, 5 s) and the RV-3028 countdown (3 s, 11 s) and alarm wake the SoC.
-**Not verified:** STANDBY, the HE TCM bank sizes and ITCM / DTCM split, retention of
-application RAM, that the LPGPIO holds survive the SE's wake boot on every board population,
-the E1M-AEN801, and the E4. `examples/aen/aen-power-stop` is the bench (the
-`product-noscratch` variant is the shipping configuration without the bench cell).
+**Verified on silicon (E1M-AEN803 2026W36-0001 on an E1M-EVK, 2026-10-10):** STANDBY
+(`s-standby`: the LPTIMER, countdown and alarm cycles all woke with `realised_mode` STANDBY) and
+DTCM retention across STOP (`t-tcm-retain`, `retain_kb` 256: a CRC-checked pattern in both
+DTCM halves survived all three cycles). A TCM-retained STOP wake leaves `RTSS_HE_RESET` = 0x01,
+the value the SVD names "NSRST pin asserted" and also the value a cold power-on leaves (a STOP
+wake without TCM leaves 0x10), so a sleep that retains TCM does not mark its record
+`ALP_SOM_REC_NSRST_TRUSTED` and its wake is never read as a pin reset. `w-wake-timing` ran but
+cannot resolve wake-to-`main()`: the LPRTC ticks at about 2 Hz and the RV-3028 at 1 s, so the
+only measured figure is Zephyr start to `main()` = 85 ms (`main_uptime_ms`); the SE boot before
+it needs a GPIO edge on a scope or a SoM current trace.
+**Not verified:** the HE TCM bank sizes and the ITCM / DTCM split (both DTCM halves stay
+powered whenever any TCM is asked for), retention of application RAM, the LPGPIO wake pads (`ALP_POWER_WAKE_GPIO`: no pad is free on
+the E1M-AEN801/803 R2, so it is never advertised there. On the E1M-AEN803 2026W36-0001 the
+`g-wake-pad` variant, which compiles the pad branch and its `PRE_KERNEL_1` snapshot hook, refused
+P15_2 as SoM-claimed and ran STOP 3/3; a wake through a pad has never run, because no pad is
+free), that the LPGPIO holds
+survive the SE's wake boot on every board population, the E1M-AEN801, and the E4. The
+`product-noscratch` variant of `examples/aen/aen-power-stop` is the shipping configuration without
+the bench cell.

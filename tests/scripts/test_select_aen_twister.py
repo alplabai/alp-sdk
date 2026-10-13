@@ -30,7 +30,8 @@ def test_only_neutral_paths_run_nothing():
 
 def test_matrix_shape():
     legs = s.matrix(["aen803"])
-    assert [(x["sku"], x["subset"]) for x in legs] == [("aen803", 1), ("aen803", 2)]
+    assert [(x["sku"], x["subset"]) for x in legs] == [("aen803", i) for i in range(1, s.SUBSETS + 1)]
+    assert {x["subsets"] for x in legs} == {s.SUBSETS}
     assert "alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp" in legs[0]["platform_flags"]
 
 
@@ -51,4 +52,4 @@ def test_bad_base_fails_safe_to_all_legs(tmp_path, monkeypatch):
     assert line.startswith("matrix=")
     import json
 
-    assert len(json.loads(line[len("matrix="):])) == 4
+    assert len(json.loads(line[len("matrix="):])) == 2 * s.SUBSETS

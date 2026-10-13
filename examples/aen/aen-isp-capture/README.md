@@ -9,7 +9,7 @@ driving a real ISP rather than a raw sensor capture (see
 `examples/aen/aen-camera-firstlight` for that raw-capture proof instead).
 Mirrors Alif's own `sdk-alif` `samples/drivers/viewfinder` recipe. See
 `docs/camera-shields.md` for the full driver/shield/control reference and
-`changelog.d/2287.md` for the IMX296 bring-up's bench history.
+the `CHANGELOG.md` entries tagged (#2287) for the IMX296 bring-up's bench history.
 
 ## OV5647 (default) vs. IMX296 (`-DAEN_ISP_IMX296=ON`)
 

@@ -437,6 +437,9 @@ The planner emits two artefacts per project:
 An optional static C mount table (`--emit storage-mounts-c`)
 generates a `fs_mount_t` per entry with a `mount:` declared, plus an
 aggregate `alp_storage_mounts[]` array for boot-time iteration.
+The build plan carries the same bytes as `generated/storage_mount_table.c` in
+`sharedArtefacts` whenever a resolved partition has `mount:` set and `fs` other than `raw`; nothing in
+the CMake or Zephyr build reads it, so an app opts in by including it.
 
 Inspect the resolved layout with:
 

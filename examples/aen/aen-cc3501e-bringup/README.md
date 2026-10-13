@@ -77,7 +77,7 @@ SS0 from the controller.
 Two J-Links: one on the Alif, one on the CC3501E.
 
 ```sh
-# 1. Build + flash the CC3501E peer firmware first (see firmware/cc3501e):
+# 1. Build + flash the CC3501E peer firmware first (alplabai/cc3501e-bridge-firmware, ADR 0031):
 #    powershell cc3501e-bridge-firmware:ti/build_ti.ps1   (after repinning the
 #    SysConfig board file to the AEN GPIO_27/28/29 inter-chip pins)
 #    -> flash cc3501e-bridge.hex over the CC3501E J-Link.

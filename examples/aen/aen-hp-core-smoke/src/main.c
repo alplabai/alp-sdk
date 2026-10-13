@@ -19,9 +19,11 @@
  * -------------
  * The bench reads memory over SWD via the HE/AXI debug AP, not the HP core's AP,
  * so this app does NOT rely on the HP core's RAM console being reachable.
- * Instead it writes a LIVENESS BEACON to global SRAM0 (0x02000000) -- always-on
- * on-chip SRAM at the same address from every master, so the host reads it over
- * the system AXI-AP regardless of HP core state:
+ * Instead it writes a LIVENESS BEACON to global SRAM0 (0x02000000) -- on-chip SRAM
+ * at the same address from every master, so the host reads it over the system
+ * AXI-AP regardless of HP core state.  SRAM0 is NOT always-on: an M55-HE STOP
+ * powers it off unless the HE image names it in
+ * CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY (aen-power-stop h-hp-running):
  *
  *   SRAM0[0] = 0xA11FE000  magic  ("ALIVE")
  *   SRAM0[1] = SCB.CPUID          (0x411FD220 = Cortex-M55)
@@ -45,7 +47,7 @@
 #define SCB_CPUID (*(volatile uint32_t *)0xE000ED00U)
 #define SCB_VTOR  (*(volatile uint32_t *)0xE000ED08U)
 
-/* Global SRAM0 liveness beacon (always-on on-chip SRAM, master-agnostic addr). */
+/* Global SRAM0 liveness beacon (on-chip SRAM, master-agnostic address). */
 #define SRAM0_BEACON ((volatile uint32_t *)0x02000000U)
 #define BEACON_MAGIC 0xA11FE000U /* "ALIVE" */
 

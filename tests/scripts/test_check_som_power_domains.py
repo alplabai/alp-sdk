@@ -103,3 +103,17 @@ def test_dependent_driver_pin_must_match_tsv(tmp_path):
     problems = gate.find_problems(root)
     assert any("driver_pin 'GPIO_7' but inter-chip.tsv cc3501e_pad is 'GPIO_0'" in p
                for p in problems), problems
+
+
+def test_wired_pad_drifting_from_tsv_fails(tmp_path):
+    wired = (
+        "wired_lpgpio_pads:\n"
+        "  - { signal: OSPI1_INTn, silicon_pad: P15_2,"
+        " source: { file: alif-ospi.tsv, signal: OSPI1_INTn } }\n"
+    )
+    root = _tree(tmp_path, LINKS + wired)
+    (root / "metadata/e1m_modules/aen/alif-ospi.tsv").write_text(
+        "ospi_signal\talif_pad\nOSPI1_INTn\tP15_3\n", encoding="utf-8")
+    problems = gate.find_problems(root)
+    assert any("silicon_pad P15_2 but alif-ospi.tsv row OSPI1_INTn says P15_3" in p
+               for p in problems), problems

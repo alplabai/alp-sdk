@@ -7,6 +7,10 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
+### Fixed — AEN: portable GPIO and qenc inputs read idle because nothing enabled the pad input buffer (#2808)
+
+On the Alif Ensemble a pad's input buffer (REN) is set only by pinctrl, and neither `gpio_dw` nor Zephyr's `gpio-qdec` sets it, so an `alp_gpio_*` input or an `alp_qenc_*` encoder read 0 whatever was on the wire. The zephyr gpio backend now muxes the pad to GPIO, sets REN and applies the requested pull as pad bias when a pin is configured as an input, and the gpio-qdec backend does the same for both phase pads at `alp_qenc_open()`. It is a small Tier-1.5 hook over the existing Alif pinctrl driver (`CONFIG_ALP_GPIO_PAD_INPUT`, default on for Ensemble); no devicetree change is needed, so every existing `alp,pin-array` and `gpio-qdec` overlay works. A pull the controller cannot do (`gpio_dw` has none) is now honoured at the pad instead of dropped. `aen-trace-runner` loses its app-level `/zephyr,user` pinctrl workaround.
+
 ## [v0.17.0] - 2026-10-08 (release candidate: v0.17.0-rc2)
 
 ### Added — build-plan-v1 `sharedArtefacts` carries `generated/storage_mount_table.c` when the project has mountable storage (tan-cli#1216)

@@ -1,10 +1,15 @@
 # 0009. Mender Zephyr client deferred to v1.1; secure OTA on Zephyr cuts from v0.4
 
-Status: Accepted — see **Amendment** below (2026-08-27): the AEN
+Status: Accepted — see **Amendment** below (2026-10-10: E1M-NX9101 / i.MX 93
+removed; 2026-08-27): the AEN
 secure-boot bullet's "swap-using-scratch" no longer describes the
 tree, which ships `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`.  The
 deferral decision itself is unchanged.
 Date: 2026-05-14
+
+## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
+
+E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). "i.MX 93-Yocto" below no longer exists; the Mender Yocto side is V2N / V2M only.
 
 ## Amendment (2026-08-27 — the AEN sysbuild overlay ships single-application-slot, not swap-using-scratch)
 

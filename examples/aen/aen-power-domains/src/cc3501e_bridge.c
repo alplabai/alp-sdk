@@ -4,25 +4,24 @@
  *
  * E1M-AEN SoM CC3501E bridge bring-up helper -- see cc3501e_bridge.h.
  *
- * LOCAL CHANGE vs the sibling aen-cc3501e-* copies (aen-power-domains only): the
- * final reset is warm-aware.  cc3501e_reset() drops WIFI_EN for 50 ms, a supply
- * cold cycle; on a CC3501E that is already running (an activated unit with
- * vendor_sbl_container_enable=1 may then never relaunch) that is exactly what the
- * power-domain layer exists to avoid.  So when WIFI_EN already reads high AND the
- * chip answers a PING the
- * bring-up resets through nRESET only (cc3501e_hard_reset()), and uses
- * cc3501e_reset() only from WIFI_EN low or, as a last resort, from a chip that stays
- * silent through an nRESET-only reset.  WIFI_EN reading high alone is not trusted: a
- * pull-up would make every power-on look warm (whether the module has one is an open
- * question).
+ * The final reset is warm-aware.  cc3501e_reset() drops WIFI_EN for 50 ms, a
+ * supply cold cycle; on a CC3501E that is already running (an activated unit with
+ * vendor_sbl_container_enable=1 may then never relaunch) that must not happen on a
+ * mere re-run or warm reset of the application.  So when WIFI_EN already reads high
+ * AND the chip answers a PING the bring-up resets through nRESET only
+ * (cc3501e_hard_reset()), and uses cc3501e_reset() only from WIFI_EN low or, as a
+ * last resort, from a chip that stays silent through an nRESET-only reset.  WIFI_EN
+ * reading high alone is not trusted: a pull-up would make every power-on look warm
+ * (whether the module has one is an open question, issue #2797).
  */
 
 #include "cc3501e_bridge.h"
 
+#include <stdio.h>
+
 #if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE) || defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 #include <zephyr/arch/cpu.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/gpio.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/sys/sys_io.h>
 /*
  * AEN LP-pad mux (Alif Ensemble E8, both M55-HE and M55-HP cores).  WIFI_EN
@@ -49,15 +48,17 @@
  * INPUT.  Switching the direction afterwards then drives the already-high level; the
  * other order (direction first, value second -- what gpio_dw's configure does even
  * with an init flag) drives whatever DR holds, and with DR bit 5 = 0 that glitches
- * the supply of a running chip low.  gpio_port_set_bits_raw() writes DR regardless
- * of direction. */
+ * the supply of a running chip low.  DR is written directly (read-modify-write, the
+ * same access gpio_dw's port_set_bits_raw makes) so this template stays on the
+ * portable <alp/...> headers: SWPORTA_DR is offset 0x00 of the DesignWare GPIO block
+ * (zephyr drivers/gpio/gpio_dw_registers.h), the block base is the `lpgpio` node's
+ * reg, and the LP-GPIO clock is already on because alp_gpio_open() opened the pin. */
+#define DW_GPIO_SWPORTA_DR 0x00u
 static void aen_wifi_en_latch_high(void)
 {
-	const struct device *lpgpio = DEVICE_DT_GET(DT_NODELABEL(lpgpio));
+	const mem_addr_t dr = DT_REG_ADDR(DT_NODELABEL(lpgpio)) + DW_GPIO_SWPORTA_DR;
 
-	if (device_is_ready(lpgpio)) {
-		(void)gpio_port_set_bits_raw(lpgpio, BIT(5));
-	}
+	sys_write32(sys_read32(dr) | (1u << 5), dr);
 }
 
 static void aen_lp_pads_enable_output(void)
@@ -99,7 +100,10 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	 * power-on read high (whether the module has one is an OPEN QUESTION; the
 	 * netlist has not been checked), so the decision below also needs a PING. */
 	bool wifi_was_high = false;
-	(void)alp_gpio_read(wifi_en, &wifi_was_high);
+	/* A failed read leaves the level unknown: never take the supply-cycling cold path
+	 * on that alone -- go through the PING path below, which still ends in
+	 * cc3501e_reset() if the chip turns out to be silent. */
+	const bool wifi_unknown = alp_gpio_read(wifi_en, &wifi_was_high) != ALP_OK;
 	if (wifi_was_high) {
 		/* Latch the level in DR first so the direction change cannot glitch it low. */
 		aen_wifi_en_latch_high();
@@ -168,12 +172,15 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 #ifdef CONFIG_ALP_SDK_BLE_CC3501E
 	(void)alp_ble_cc3501e_attach(fw);
 #endif
-	if (!wifi_was_high) {
+	/* One line naming the path taken, so a log shows whether the supply was cycled. */
+	if (!wifi_was_high && !wifi_unknown) {
+		printf("[cc3501e_bridge] WIFI_EN low: cold power-up (cc3501e_reset)\n");
 		return cc3501e_reset(fw); /* supply low: the full cold-boot sequence */
 	}
 	/* WIFI_EN reads high.  Warm = the chip ANSWERS a PING; a pull-up alone proves
 	 * nothing.  Warm: nRESET only, never a WIFI_EN toggle. */
 	if (cc3501e_ping(fw) == ALP_OK) {
+		printf("[cc3501e_bridge] WIFI_EN high, PING ok: warm, nRESET only\n");
 		return cc3501e_hard_reset(fw);
 	}
 	/* High but silent: powered-and-hung, or unpowered behind a pull-up.  Try the
@@ -181,7 +188,9 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	 * not answer is the supply cycled -- the last resort, taken from a chip that is
 	 * already unresponsive. */
 	if (cc3501e_hard_reset(fw) == ALP_OK && cc3501e_ping(fw) == ALP_OK) {
+		printf("[cc3501e_bridge] WIFI_EN high, silent: recovered by nRESET only\n");
 		return ALP_OK;
 	}
+	printf("[cc3501e_bridge] WIFI_EN high, silent after nRESET: supply cycle (cc3501e_reset)\n");
 	return cc3501e_reset(fw);
 }

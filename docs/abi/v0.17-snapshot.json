@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-10",
+  "generated": "2026-10-11",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -4708,8 +4708,8 @@
           "value": "17u"
         },
         "GD32G553_IO15_IO26_MIN_PROTOCOL_MINOR": {
-          "hash": "6146719067cb04dc",
-          "value": "15u"
+          "hash": "7e1c816b43ed120f",
+          "value": "16u"
         },
         "GD32G553_LINK_FEAT_ADC_STREAM2": {
           "hash": "3d4c2f35654db723",
@@ -8267,6 +8267,10 @@
           "hash": "5c5062e39f3472ab",
           "signature": "alp_status_t tas2563_load_tuning(tas2563_t *ctx, const tas2563_tuning_reg_t *records, size_t count, size_t *failed_index_out);"
         },
+        "tas2563_load_tuning_verified": {
+          "hash": "8df1404ecd0c3e35",
+          "signature": "alp_status_t tas2563_load_tuning_verified(tas2563_t *ctx, const tas2563_tuning_reg_t *records, size_t count, uint8_t expected_cksum, size_t *failed_index_out, uint8_t *cksum_read_out);"
+        },
         "tas2563_read_faults": {
           "hash": "c8d8ce05ed13619a",
           "signature": "alp_status_t tas2563_read_faults(tas2563_t *ctx, uint32_t *faults_out);"
@@ -8278,6 +8282,10 @@
         "tas2563_read_tdm_detect": {
           "hash": "1dec84db189195bd",
           "signature": "alp_status_t tas2563_read_tdm_detect(tas2563_t *ctx, tas2563_tdm_detect_t *detect_out);"
+        },
+        "tas2563_read_tuning_mode": {
+          "hash": "93beb41faffb8959",
+          "signature": "alp_status_t tas2563_read_tuning_mode(tas2563_t *ctx, bool *tuning_out);"
         },
         "tas2563_resume": {
           "hash": "2d4bace192240033",

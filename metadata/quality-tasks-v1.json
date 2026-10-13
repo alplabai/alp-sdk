@@ -3,6 +3,20 @@
   "description": "Single source of truth for the SDK's quality tasks: which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles (quick/pr/full/release) run it. check_quality_registry.py keeps it == scripts/check_*.py on disk and (#1463 round 2) enforces `quick`'s own membership bar: non-empty, a subset of `pr`, and no member's script executing `import subprocess` at module load time. Additive-only within schemaVersion 1. `quick` membership criterion (#1463, measured against the `pr` set): pure-Python (no `subprocess` call of any kind -- not even `git`), no build/toolchain dependency, and a median wall-clock time under 0.5s (median of 5 interleaved reps on an otherwise-idle checkout -- a sequential sweep under load inverts this measurement, don't trust one of those). The subprocess/toolchain exclusion is a hermeticity rule, not a speed rule: `quick` must stay runnable in a dirty working tree or a bare checkout with no `git`/`west` on PATH, which is why it excludes some of the fastest gates in the whole registry (e.g. changelog-citations at ~0.05s) alongside genuinely slow ones -- do not read the exclusion as \"shells out, therefore slow\". Add `quick` only once you've measured a task against this bar, not by assuming a short script qualifies.",
   "tasks": [
     {
+      "id": "abidiff",
+      "description": "abidiff (libabigail) on the built libalp_sdk.so vs the latest same-minor release tag: a patch release must stay ABI-compatible (#2840).",
+      "runner": "check-script",
+      "script": "scripts/check_abidiff.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-plain-cmake.yml:abidiff"
+    },
+    {
       "id": "agents-md-generators",
       "description": "AGENTS.md's ALP_E1M_*/ALP_E1M_X_* identifiers and --emit choice lists must exist in the real generators (#1264).",
       "runner": "check-script",

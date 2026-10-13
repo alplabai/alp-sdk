@@ -26,9 +26,14 @@
 #define CONFIG_ALP_SDK_POWER_ALIF_SE_RESTORE_CLOCKS 1
 #define ALP_TEST_NO_SYSINIT                         1 /* the test calls clock_restore() itself */
 
+/* The backend's printk() lands in test_printk() below, so a refusal test can assert the reason. */
+#define printk test_printk
+
 #include "../../../../src/backends/power/alif_se_power.c"
 
+#include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include <zephyr/ztest.h>
@@ -52,6 +57,9 @@ typedef enum {
 	EV_DISARM_LPTIMER,
 	EV_RESTORE,
 	EV_CLEAR_STALE_WAKE,
+	EV_ARM_WAKE_PADS,
+	EV_DISARM_WAKE_PADS,
+	EV_RELEASE_WAKE_PADS,
 } ev_t;
 
 #define EV_MAX 64
@@ -152,6 +160,12 @@ static int      g_arm_timer_rc, g_arm_int_rc;
 static unsigned g_enter_count;
 static uint8_t  g_rtc_flags; /* tentative: defined with the other som_power fakes below */
 static bool     g_enter_rtc_int;
+static uint32_t g_enter_pads;               /* the pads mask the entry was given */
+static uint32_t g_wake_pad_mask, g_claimed; /* DT-named pads / pads the SoM wires */
+static uint32_t g_pads_latched;      /* live RAW_INTSTATUS of the fake block (runtime path) */
+static uint32_t g_pads_boot_latched; /* the PRE_KERNEL_1 snapshot (cold-boot path) */
+static int      g_arm_pads_rc;
+static uint32_t g_released_pads;
 static bool     g_enter_fires; /* the fake sleep ends at once with the armed source fired */
 static int      g_enter_rc;
 static uint32_t g_regs_at_enter[3];
@@ -231,6 +245,47 @@ void alif_se_hw_rtc_int_disarm(void)
 	ev(EV_DISARM_INT_PAD);
 }
 
+uint32_t alif_se_hw_wake_pad_mask(void)
+{
+	return g_wake_pad_mask;
+}
+
+alp_status_t alif_se_hw_wake_pads_arm(void)
+{
+	if (g_arm_pads_rc != 0) {
+		return (alp_status_t)g_arm_pads_rc;
+	}
+	ev(EV_ARM_WAKE_PADS);
+	return ALP_OK;
+}
+
+void alif_se_hw_wake_pads_disarm(void)
+{
+	ev(EV_DISARM_WAKE_PADS);
+}
+
+uint32_t alif_se_hw_wake_pads_fired(uint32_t pads)
+{
+	return g_pads_latched & pads;
+}
+
+void alif_se_hw_wake_pads_release(uint32_t pads)
+{
+	ev(EV_RELEASE_WAKE_PADS);
+	g_released_pads |= pads;
+	g_pads_latched &= ~pads;
+}
+
+uint32_t alif_se_hw_wake_pads_boot_latched(void)
+{
+	return g_pads_boot_latched;
+}
+
+uint32_t alp_som_power_lpgpio_claimed(void)
+{
+	return g_claimed;
+}
+
 static bool     g_lptimer_fired_at_arm;
 static unsigned g_enter_lptimer_ticks;
 
@@ -239,12 +294,20 @@ const char *alif_se_hw_enter_reason(void)
 	return "fake";
 }
 
+static bool     g_core_hp; /* the fake core: false = M55-HE, true = M55-HP */
+static uint32_t g_vtor;
+
 uint32_t alif_se_hw_vtor_read(void)
 {
-	return 0x80010400u;
+	return g_vtor;
 }
 
-alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
+bool alif_se_hw_core_is_hp(void)
+{
+	return g_core_hp;
+}
+
+alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t pads, uint32_t lptimer_ticks)
 {
 	if (lptimer_ticks != 0u) {
 		/* The real entry arms the timer last and proves it live, under the lock. */
@@ -261,11 +324,15 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t lptimer_ticks)
 	ev(EV_ENTER);
 	g_enter_count++;
 	g_enter_rtc_int = rtc_int;
+	g_enter_pads    = pads;
 	memcpy(g_regs_at_enter, g_regs, sizeof(g_regs));
 	if (g_enter_rc != 0) {
 		return (alp_status_t)g_enter_rc;
 	}
 	if (g_enter_fires) {
+		if ((g_rec_at_set.armed_hw & ALP_SOM_ARM_LPGPIO) != 0u) {
+			g_pads_latched |= pads;
+		}
 		if ((g_rec_at_set.armed_hw & ALP_SOM_ARM_LPTIMER) != 0u) {
 			g_timer_pending = true;
 		}
@@ -620,6 +687,9 @@ static void reset_fakes(void)
 	g_get_rc = g_set_rc    = 0;
 	g_se_drops_memory_bits = 0;
 
+	g_core_hp = false;
+	g_vtor    = 0x80010400u;
+
 	g_debugger    = false;
 	g_dcache      = false;
 	g_lpstate_off = true;
@@ -637,8 +707,13 @@ static void reset_fakes(void)
 	g_arm_timer_rc = g_arm_int_rc = 0;
 	g_enter_count                 = 0;
 	g_enter_rtc_int               = false;
-	g_enter_fires                 = true;
-	g_enter_rc                    = 0;
+	g_enter_pads                  = 0u;
+	g_wake_pad_mask = g_claimed = 0u;
+	g_pads_latched = g_pads_boot_latched = 0u;
+	g_arm_pads_rc                        = 0;
+	g_released_pads                      = 0u;
+	g_enter_fires                        = true;
+	g_enter_rc                           = 0;
 	memset(g_regs_at_enter, 0, sizeof(g_regs_at_enter));
 	g_set_calls = 0;
 	memset(&g_set, 0, sizeof(g_set));
@@ -790,6 +865,23 @@ ZTEST(power_alif_se, test_off_profile_vtor_preserved_from_live)
 }
 #endif
 
+/* The keep mask reaches the OFF profile on top of the retention plan, for STOP and STANDBY. */
+ZTEST(power_alif_se, test_off_profile_keeps_the_configured_memory)
+{
+	sleep_plan_t  plan = { .mode = ALP_POWER_MODE_STOP, .hw = ALP_SOM_ARM_LPTIMER };
+	off_profile_t out;
+
+	plan.memory_blocks = retained_blocks(&(alp_power_retain_t){ .level = ALP_POWER_RETAIN_NONE });
+	for (int m = 0; m < 2; ++m) {
+		plan.mode = m == 0 ? ALP_POWER_MODE_STOP : ALP_POWER_MODE_STANDBY;
+		poison(&out);
+		zassert_ok(build_off_profile(&out, &g_live, &plan));
+		zassert_equal(out.memory_blocks & ~plan.memory_blocks &
+		                  ~(ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK),
+		              (uint32_t)CONFIG_ALP_SDK_POWER_ALIF_SE_OFF_KEEP_MEMORY);
+	}
+}
+
 #ifdef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 ZTEST(power_alif_se, test_off_profile_masks_come_from_the_gen2_header)
 {
@@ -801,8 +893,10 @@ ZTEST(power_alif_se, test_off_profile_masks_come_from_the_gen2_header)
 	plan.memory_blocks = retained_blocks(&(alp_power_retain_t){ .level = ALP_POWER_RETAIN_NONE });
 	poison(&out);
 	zassert_ok(build_off_profile(&out, &g_live, &plan));
-	zassert_equal(out.memory_blocks, UINT32_C(0x00200000), "BKRAM is gen2 bit 21, not gen1 bit 20");
-	zassert_equal(out.memory_blocks, ALP_AIPM_GEN2_BACKUP4K_MASK);
+	zassert_equal(out.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY,
+	              UINT32_C(0x00200000),
+	              "BKRAM is gen2 bit 21, not gen1 bit 20");
+	zassert_equal(out.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY, ALP_AIPM_GEN2_BACKUP4K_MASK);
 	zassert_equal(out.memory_blocks & ALP_AIPM_GEN2_FWRAM_MASK, 0u, "bit 20 is FWRAM on gen2");
 	zassert_equal(out.wakeup_events, ALP_AIPM_GEN2_WE_LPTIMER0);
 	zassert_equal(out.wakeup_events, UINT32_C(0x100));
@@ -1283,7 +1377,8 @@ ZTEST(power_alif_se, test_tcm_retention_needs_ldo2_and_tcm_masks)
 	g_regs[ALIF_SE_REG_RET_CTRL] = RET_CTRL_BKRAM;
 	g_regs[ALIF_SE_REG_ANA_REG1] = ANA_REG1_RET_LDO_VBAT_EN;
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
-	zassert_equal(g_set.memory_blocks, ALP_AIPM_GEN2_BACKUP4K_MASK | ALP_AIPM_GEN2_SRAM5_1_MASK);
+	zassert_equal(g_set.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY,
+	              ALP_AIPM_GEN2_BACKUP4K_MASK | ALP_AIPM_GEN2_SRAM5_1_MASK);
 	zassert_true((g_regs_at_enter[ALIF_SE_REG_ANA_REG1] & ANA_REG1_RET_LDO_VDDMAIN_EN) != 0u);
 	zassert_true((g_regs_at_enter[ALIF_SE_REG_RET_CTRL] & (RET_CTRL_HETCM1 | RET_CTRL_HETCM2)) ==
 	             (RET_CTRL_HETCM1 | RET_CTRL_HETCM2));
@@ -1597,6 +1692,143 @@ ZTEST(power_alif_se, test_entry_gets_the_pad_flag_only_for_rtc_wakes)
 	zassert_true(g_enter_rtc_int);
 }
 
+/* ---- LPGPIO wake pads (alp,power-wake-gpios) ---------------------------------- */
+
+#define PAD2 BIT(2)
+#define PAD3 BIT(3)
+
+ZTEST(power_alif_se, test_gpio_wake_is_advertised_only_for_free_named_pads)
+{
+	uint32_t caps = 0;
+
+	zassert_ok(se_open(&g_state, NULL, &caps));
+	zassert_equal(caps & ALP_POWER_WAKE_GPIO, 0u, "no node: not advertised");
+
+	g_wake_pad_mask = PAD2;
+	g_claimed       = 0x03u | PAD3; /* the SoM wires these, not P15_2 here */
+	zassert_ok(se_open(&g_state, NULL, &caps));
+	zassert_not_equal(caps & ALP_POWER_WAKE_GPIO, 0u);
+	zassert_not_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_STANDBY) & ALP_POWER_WAKE_GPIO,
+	                  0u);
+
+	g_claimed = PAD2;
+	zassert_ok(se_open(&g_state, NULL, &caps));
+	zassert_equal(caps & ALP_POWER_WAKE_GPIO, 0u, "a SoM-wired pad is refused");
+}
+
+ZTEST(power_alif_se, test_a_somwired_pad_refuses_the_whole_set)
+{
+	g_wake_pad_mask     = PAD2 | PAD3;
+	g_claimed           = PAD3;
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_NOSUPPORT);
+	assert_no_side_effect();
+}
+
+ZTEST(power_alif_se, test_gpio_wake_builds_the_wake_event_per_line)
+{
+	g_wake_pad_mask     = PAD2 | BIT(5);
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_OK);
+	zassert_equal(g_set.wakeup_events,
+	              ALP_AIPM_GEN2_WE_LPGPIO2 | ALP_AIPM_GEN2_WE_LPGPIO5,
+	              "line n is WE_LPGPIO<n>, bit 16 + n");
+	zassert_equal(g_set.ewic_cfg, ALP_AIPM_GEN2_EWIC_VBAT_GPIO);
+	zassert_equal(g_enter_pads, PAD2 | BIT(5));
+	zassert_false(g_enter_rtc_int, "the RV-3028 pad stays off for a pad-only wake");
+	zassert_equal(g_enter_lptimer_ticks, 0u);
+}
+
+ZTEST(power_alif_se, test_gpio_wake_joins_a_timed_wake)
+{
+	g_wake_pad_mask     = PAD2;
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+	zassert_equal(g_set.wakeup_events, ALP_AIPM_GEN2_WE_LPTIMER0 | ALP_AIPM_GEN2_WE_LPGPIO2);
+	zassert_equal(g_set.ewic_cfg, ALP_AIPM_GEN2_EWIC_VBAT_TIMER | ALP_AIPM_GEN2_EWIC_VBAT_GPIO);
+}
+
+ZTEST(power_alif_se, test_the_record_carries_the_armed_pads)
+{
+	g_wake_pad_mask     = PAD2;
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_OK);
+	zassert_not_equal(g_rec_at_set.armed_hw & ALP_SOM_ARM_LPGPIO, 0u);
+	zassert_equal((g_rec_at_set.armed_hw >> ALP_SOM_ARM_PADS_SHIFT) & ALP_SOM_PADS_MASK, PAD2);
+	zassert_not_equal(g_rec_at_set.armed & ALP_POWER_WAKE_GPIO, 0u);
+}
+
+ZTEST(power_alif_se, test_pad_arm_failure_unwinds_before_the_se_call)
+{
+	g_wake_pad_mask     = PAD2;
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	g_arm_pads_rc       = ALP_ERR_IO;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_IO);
+	zassert_equal(g_enter_count, 0u);
+	zassert_equal(g_set_calls, 0u, "the SE is never written");
+	zassert_equal(ev_count(EV_RESTORE), 1u, "the domains are put back");
+}
+
+ZTEST(power_alif_se, test_an_already_asserted_pad_is_refused_and_everything_put_back)
+{
+	g_wake_pad_mask     = PAD2;
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	g_enter_rc          = ALP_ERR_BUSY; /* the entry saw the pad at its asserted level */
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_BUSY);
+	zassert_equal(ev_count(EV_DISARM_WAKE_PADS), 1u);
+	zassert_equal(ev_count(EV_RESTORE), 1u);
+	zassert_equal(g_set_calls, 2u, "the profile is written, then written back");
+}
+
+ZTEST(power_alif_se, test_an_aborted_sleep_reports_gpio_and_consumes_the_edge)
+{
+	alp_power_wake_info_t info;
+
+	g_wake_pad_mask     = PAD2;
+	g_state.wake_bitmap = ALP_POWER_WAKE_GPIO;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, &info), ALP_OK);
+	zassert_equal(info.wake_source, ALP_POWER_WAKE_GPIO);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+	zassert_equal(g_released_pads, PAD2, "the latched edge is acknowledged");
+	zassert_equal(g_pads_latched, 0u);
+}
+
+ZTEST(power_alif_se, test_decode_early_reads_the_boot_snapshot_not_the_live_register)
+{
+	alp_som_pd_record_t rec = {
+		.armed_hw = ALP_SOM_ARM_LPGPIO | ((PAD2 | PAD3) << ALP_SOM_ARM_PADS_SHIFT),
+	};
+
+	/* gpio_dw's init has already cleared the live register (g_pads_latched == 0); only the
+	 * PRE_KERNEL_1 snapshot still holds the edge. */
+	g_pads_latched      = 0u;
+	g_pads_boot_latched = PAD3;
+	alp_som_power_wake_decode_early(&rec);
+	zassert_equal(rec.wake_source, ALP_POWER_WAKE_GPIO);
+
+	/* and the other way round: a live edge that the snapshot never saw is not a boot wake */
+	rec = (alp_som_pd_record_t){
+		.armed_hw = ALP_SOM_ARM_LPGPIO | (PAD2 << ALP_SOM_ARM_PADS_SHIFT),
+	};
+	g_pads_latched      = PAD2;
+	g_pads_boot_latched = 0u;
+	alp_som_power_wake_decode_early(&rec);
+	zassert_equal(rec.wake_source, 0u);
+
+	/* a snapshot edge on a pad this cycle never armed proves nothing */
+	g_pads_boot_latched = PAD3;
+	rec                 = (alp_som_pd_record_t){
+		                .armed_hw = ALP_SOM_ARM_LPGPIO | (PAD2 << ALP_SOM_ARM_PADS_SHIFT),
+	};
+	alp_som_power_wake_decode_early(&rec);
+	zassert_equal(rec.wake_source, 0u);
+
+	/* a cycle that armed no pad never reports GPIO */
+	rec = (alp_som_pd_record_t){ .armed_hw = ALP_SOM_ARM_LPTIMER };
+	alp_som_power_wake_decode_early(&rec);
+	zassert_equal(rec.wake_source, 0u);
+}
+
 ZTEST(power_alif_se, test_entry_failure_unwinds)
 {
 	g_enter_rc          = ALP_ERR_IO;
@@ -1773,7 +2005,9 @@ ZTEST(power_alif_se, test_bench_variants_default_to_the_documented_profile)
 	off_profile_t out;
 
 	zassert_ok(build_off_profile(&out, &g_live, &plan));
-	zassert_equal(out.memory_blocks, ALP_AIPM_GEN2_BACKUP4K_MASK, "no MRAM / SERAM by default");
+	zassert_equal(out.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY,
+	              ALP_AIPM_GEN2_BACKUP4K_MASK,
+	              "no MRAM / SERAM by default");
 	zassert_equal(out.vtor_address, g_live.vtor_address, "the live vtor is preserved by default");
 }
 #endif
@@ -1791,6 +2025,18 @@ ZTEST(power_alif_se, test_the_record_says_whether_nsrst_can_be_trusted)
 	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
 	zassert_equal(g_rec_at_set.armed_hw & ALP_SOM_REC_NSRST_TRUSTED, 0u);
 	zassert_equal(g_rec_at_set.armed_hw & ALP_SOM_ARM_LPTIMER, ALP_SOM_ARM_LPTIMER);
+}
+
+ZTEST(power_alif_se, test_a_tcm_retaining_sleep_never_trusts_nsrst)
+{
+	/* Bench (E1M-AEN803 2026W36-0001): a TCM-retained STOP wake reads RTSS_HE_RESET = 0x01, the same
+	 * as a pin reset, so the record must not let the next boot read the bit as one. */
+	g_state.wake_bitmap = ALP_POWER_WAKE_TIMER;
+	g_state.retain      = (alp_power_retain_t){ .level = ALP_POWER_RETAIN_TCM, .retain_kb = 128u };
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+	zassert_equal(g_rec_at_set.armed_hw & ALP_SOM_REC_NSRST_TRUSTED, 0u);
+	zassert_equal(g_rec_at_set.armed_hw & ALP_SOM_ARM_LPTIMER, ALP_SOM_ARM_LPTIMER);
+	g_state.retain = (alp_power_retain_t){ .level = ALP_POWER_RETAIN_NONE };
 }
 
 /* ---- Elapsed-time gate on wake attribution (bench U8d) ------------------------------- */
@@ -2060,7 +2306,7 @@ ZTEST(power_alif_se, test_the_runtime_knobs_select_each_vendor_difference_in_the
 	poison(&out);
 	zassert_ok(build_off_profile(&out, &g_live, &plan));
 	zassert_equal(out.vtor_address, g_live.vtor_address, "knobs off: the live vtor is kept");
-	zassert_equal(out.memory_blocks, ALP_AIPM_GEN2_BACKUP4K_MASK);
+	zassert_equal(out.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY, ALP_AIPM_GEN2_BACKUP4K_MASK);
 	zassert_equal(out.stby_clk_freq, SCALED_FREQ_RC_STDBY_0_075_MHZ);
 
 	alp_som_bench_knobs.vtor_self = true;
@@ -2071,7 +2317,7 @@ ZTEST(power_alif_se, test_the_runtime_knobs_select_each_vendor_difference_in_the
 	alp_som_bench_knobs.mram_seram = true;
 	poison(&out);
 	zassert_ok(build_off_profile(&out, &g_live, &plan));
-	zassert_equal(out.memory_blocks,
+	zassert_equal(out.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY,
 	              ALP_AIPM_GEN2_BACKUP4K_MASK | ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK);
 
 	alp_som_bench_knobs.stby_76_8 = true;
@@ -2230,7 +2476,7 @@ ZTEST(power_alif_se, test_the_product_default_is_the_vendor_off_profile)
 	zassert_ok(build_off_profile(&out, &g_live, &plan));
 	zassert_equal(out.vtor_address, 0x80010400u, "SCB->VTOR, not the live value");
 	zassert_equal(out.vtor_address_ns, 0x80010400u);
-	zassert_equal(out.memory_blocks,
+	zassert_equal(out.memory_blocks & ~ALIF_SE_OFF_KEEP_MEMORY,
 	              ALP_AIPM_GEN2_BACKUP4K_MASK | ALP_AIPM_GEN2_MRAM_MASK | ALP_AIPM_GEN2_SERAM_MASK);
 }
 #endif
@@ -2312,9 +2558,163 @@ ZTEST(power_alif_se, test_the_built_profile_is_checked_for_mram_and_seram)
 	zassert_true(off_memory_ok(&p));
 }
 
+/* ---- The M55-HP (built, not bench-verified) ---------------------------------------------
+ *
+ * The same compiled backend drives both cores through alif_se_hw_core_is_hp(); the real seam
+ * answers from CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP.  What differs is cited at each branch in
+ * alif_se_power.c (vendor sdk-alif samples/drivers/pm/system_off/src/main.c). */
+
+static char   g_log[512];
+static size_t g_log_len;
+static bool   g_log_on;
+
+void test_printk(const char *fmt, ...)
+{
+	va_list ap;
+
+	if (!g_log_on || g_log_len >= sizeof(g_log) - 1u) {
+		return;
+	}
+	va_start(ap, fmt);
+	(void)vsnprintf(g_log + g_log_len, sizeof(g_log) - g_log_len, fmt, ap);
+	va_end(ap);
+	g_log_len = strlen(g_log);
+}
+
+static void log_capture_start(void)
+{
+	g_log_len = 0u;
+	g_log[0]  = '\0';
+	g_log_on  = true;
+}
+
+static void log_capture_stop(void)
+{
+	g_log_on = false;
+}
+
+ZTEST(power_alif_se, test_hp_standby_is_refused_by_name_before_any_side_effect)
+{
+	g_core_hp = true;
+	log_capture_start();
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STANDBY, 500u, NULL),
+	              ALP_ERR_NOSUPPORT);
+	log_capture_stop();
+	zassert_not_null(strstr(g_log, "reason=hp_standby_unsupported"), "log: %s", g_log);
+	assert_no_side_effect();
+	zassert_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_STANDBY), 0u, "nothing can wake it");
+	zassert_not_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_STOP), 0u, "STOP is unchanged");
+
+	reset_fakes();
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STANDBY, 500u, NULL),
+	              ALP_OK,
+	              "the HE keeps its STANDBY");
+}
+
+ZTEST(power_alif_se, test_hp_has_no_tcm_retention)
+{
+	alp_power_retain_t r = { .level = ALP_POWER_RETAIN_TCM, .retain_kb = 64u };
+
+	g_core_hp = true;
+	zassert_equal(se_configure_retention(&g_state, &r), ALP_ERR_NOSUPPORT);
+	r.level = ALP_POWER_RETAIN_FULL;
+	zassert_equal(se_configure_retention(&g_state, &r), ALP_ERR_NOSUPPORT);
+	r.level = ALP_POWER_RETAIN_UTILITY;
+	zassert_equal(se_configure_retention(&g_state, &r), ALP_OK, "BKRAM is always kept");
+
+	g_state.retain = (alp_power_retain_t){ .level = ALP_POWER_RETAIN_TCM, .retain_kb = 64u };
+	log_capture_start();
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOSUPPORT);
+	log_capture_stop();
+	zassert_not_null(strstr(g_log, "reason=hp_tcm_not_retainable"), "log: %s", g_log);
+	assert_no_side_effect();
+
+	reset_fakes(); /* the HE accepts the same request */
+	g_state.retain = (alp_power_retain_t){ .level = ALP_POWER_RETAIN_TCM, .retain_kb = 64u };
+	zassert_equal(se_configure_retention(&g_state, &g_state.retain), ALP_OK);
+}
+
+ZTEST(power_alif_se, test_hp_image_must_be_mram_booted)
+{
+	g_core_hp = true;
+	g_vtor    = 0x00000000u; /* TCM boot: the wake would resume into TCM that is not kept */
+	log_capture_start();
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOSUPPORT);
+	log_capture_stop();
+	zassert_not_null(strstr(g_log, "reason=hp_vtor_not_mram"), "log: %s", g_log);
+	assert_no_side_effect();
+
+	g_vtor = 0x7FFFFFFFu;
+	log_capture_start();
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_ERR_NOSUPPORT);
+	log_capture_stop();
+	zassert_not_null(strstr(g_log, "reason=hp_vtor_not_mram"), "log: %s", g_log);
+	assert_no_side_effect();
+
+	g_vtor = 0x80000000u; /* the MRAM base itself counts */
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+
+	reset_fakes(); /* the HE has no such rule (optional, bench U8h) */
+	g_vtor = 0u;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 500u, NULL), ALP_OK);
+}
+
+ZTEST(power_alif_se, test_hp_stop_builds_the_same_soc_level_profile)
+{
+	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,
+		                   .hw            = ALP_SOM_ARM_LPTIMER | ALP_SOM_ARM_RTC_INT,
+		                   .memory_blocks = ALP_AIPM_GEN2_BACKUP4K_MASK };
+	off_profile_t he;
+	off_profile_t hp;
+
+	poison(&he);
+	zassert_ok(build_off_profile(&he, &g_live, &plan));
+	g_core_hp = true;
+	poison(&hp);
+	zassert_ok(build_off_profile(&hp, &g_live, &plan));
+	assert_all_assigned(&hp);
+	zassert_mem_equal(&he, &hp, sizeof(he), "wake events, EWIC and domains are SoC-level");
+	zassert_equal(hp.power_domains, PD_VBAT_AON_MASK, "the vendor SOFT_OFF domain set");
+	zassert_equal(hp.wakeup_events, ALP_AIPM_GEN2_WE_LPTIMER0 | ALP_AIPM_GEN2_WE_LPGPIO0);
+}
+
+ZTEST(power_alif_se, test_hp_clock_health_and_run_profile)
+{
+	/* ES0 [16] selects RTSS_HP_CLK; the HE's ES1 [20] says nothing about this core. */
+	g_core_hp                      = true;
+	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL] = 0x00010011u;
+	zassert_true(clocks_healthy());
+	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL] = 0x00100011u; /* the HE-only healthy value */
+	zassert_false(clocks_healthy());
+	g_core_hp = false;
+	zassert_true(clocks_healthy(), "and the other way round");
+
+	g_core_hp                        = true;
+	g_cgu[ALIF_SE_CGU_PLL_CLK_SEL]   = 0u;
+	g_cgu[ALIF_SE_CGU_PLL_LOCK_CTRL] = 0u;
+	zassert_equal(clock_restore(), 0);
+	zassert_equal(g_run_set_calls, 1u);
+	zassert_equal(g_run_set.cpu_clk_freq, CLOCK_FREQUENCY_400MHZ, "vendor HP RUN profile");
+	zassert_equal(g_run_set.power_domains, PD_SYST_MASK | PD_SSE700_AON_MASK);
+}
+
 #ifndef CONFIG_ALP_SDK_SOM_POWER_BKRAM_BENCH_SCRATCH
 /* The product configuration (no bench scratch option): the OFF fields are fixed, the diag
  * patches are no-ops, and nothing bench-only is reachable. */
+ZTEST(power_alif_se, test_core_off_witness_decodes_wic_and_keeps_the_other_bits)
+{
+	uint32_t out;
+
+	zassert_true(alif_se_ctrl_core_off(0x101u, &out), "EWIC subsystem-off");
+	zassert_equal(out, 0x001u, "COLD_WAKEUP preserved");
+	zassert_false(alif_se_ctrl_core_off(0x300u, &out), "IWIC is not a subsystem-off request");
+	zassert_equal(out, 0u);
+	zassert_false(alif_se_ctrl_core_off(0x200u, &out));
+	zassert_equal(out, 0u);
+	zassert_false(alif_se_ctrl_core_off(0x001u, &out), "WIC clear");
+	zassert_equal(out, 0x001u);
+}
+
 ZTEST(power_alif_se, test_product_build_off_profile_is_the_vendor_one_and_not_switchable)
 {
 	sleep_plan_t  plan = { .mode          = ALP_POWER_MODE_STOP,
