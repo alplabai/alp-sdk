@@ -63,7 +63,7 @@ ZTEST(sn65dsi83_decide, test_single_error_clears_only)
 ZTEST(sn65dsi83_decide, test_persistent_errors_reinit)
 {
 	zassert_equal(D(0x01, 0x81, 0x3D, SN65_ERR_POLLS_REINIT, false), SN65_HEALTH_REINIT);
-	zassert_equal(D(0x01, 0x81, 0x01, 1, true), SN65_HEALTH_REINIT);
+	zassert_equal(D(0x01, 0x81, 0x02, 1, true), SN65_HEALTH_REINIT);
 	zassert_equal(D(0x01, 0x81, 0x00, 0, true), SN65_HEALTH_OK, "clean after a re-init is fine");
 }
 
@@ -393,7 +393,7 @@ ZTEST(sn65dsi83_poll, test_errors_right_after_a_recovery_escalate)
 	zassert_equal(poll(1000), 0);
 	zassert_equal(st.recoveries, 1U);
 
-	fake.regs[0xE5] = 0x01;
+	fake.regs[0xE5] = 0x02; /* a non-PLL_UNLOCK error bit */
 	zassert_equal(poll(1000 + SN65_REINIT_MIN_GAP_MS), 0);
 	zassert_equal(rep.health, SN65_HEALTH_REINIT);
 	zassert_equal(st.recoveries, 2U);
