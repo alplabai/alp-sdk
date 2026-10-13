@@ -23,6 +23,8 @@ ZTEST_SUITE(sn65dsi83_decide, NULL, NULL, NULL, NULL, NULL);
 
 #define D(pll, clk, err, polls, after) sn65dsi83_health_decide(pll, clk, err, 1U, polls, after)
 
+#define UNLOCK_SOT (SN65_ERR_CHA_PLL_UNLOCK | SN65_ERR_CHA_SOT_BIT_ERR)
+
 ZTEST(sn65dsi83_decide, test_healthy)
 {
 	zassert_equal(D(0x01, 0x81, 0x00, 0, false), SN65_HEALTH_OK);
@@ -63,8 +65,35 @@ ZTEST(sn65dsi83_decide, test_single_error_clears_only)
 ZTEST(sn65dsi83_decide, test_persistent_errors_reinit)
 {
 	zassert_equal(D(0x01, 0x81, 0x3D, SN65_ERR_POLLS_REINIT, false), SN65_HEALTH_REINIT);
-	zassert_equal(D(0x01, 0x81, 0x01, 1, true), SN65_HEALTH_REINIT);
+	zassert_equal(D(0x01, 0x81, SN65_ERR_CHA_SOT_BIT_ERR, 1, true), SN65_HEALTH_REINIT);
 	zassert_equal(D(0x01, 0x81, 0x00, 0, true), SN65_HEALTH_OK, "clean after a re-init is fine");
+}
+
+/* PLL_UNLOCK is a latched flag set while the PLL relocks, our own re-init included: with the PLL
+ * locked now it is cleared and counted, never escalated (Toradex / LKML 2025-11 blink). */
+ZTEST(sn65dsi83_decide, test_pll_unlock_alone_never_reinits)
+{
+	zassert_equal(D(0x01, 0x81, SN65_ERR_CHA_PLL_UNLOCK, 1, false), SN65_HEALTH_CLEAR_ERRORS);
+	zassert_equal(D(0x01, 0x81, SN65_ERR_CHA_PLL_UNLOCK, 1, true),
+	              SN65_HEALTH_CLEAR_ERRORS,
+	              "first poll after a re-init");
+	zassert_equal(D(0x01, 0x81, SN65_ERR_CHA_PLL_UNLOCK, SN65_ERR_POLLS_REINIT + 10U, false),
+	              SN65_HEALTH_CLEAR_ERRORS,
+	              "however many polls");
+}
+
+ZTEST(sn65dsi83_decide, test_pll_unlock_plus_another_error_escalates)
+{
+	zassert_equal(D(0x01, 0x81, UNLOCK_SOT, 1, true), SN65_HEALTH_REINIT);
+	zassert_equal(D(0x01, 0x81, 0x3D, SN65_ERR_POLLS_REINIT, false), SN65_HEALTH_REINIT);
+	zassert_equal(D(0x01, 0x81, UNLOCK_SOT, 1, false), SN65_HEALTH_CLEAR_ERRORS);
+}
+
+ZTEST(sn65dsi83_decide, test_lost_config_reinits_despite_pll_unlock)
+{
+	zassert_equal(D(0x00, 0x0A, SN65_ERR_CHA_PLL_UNLOCK, 1, false), SN65_HEALTH_REINIT);
+	zassert_equal(D(0x01, 0x01, SN65_ERR_CHA_PLL_UNLOCK, 1, false), SN65_HEALTH_REINIT);
+	zassert_equal(D(0x01, 0x80, SN65_ERR_CHA_PLL_UNLOCK, 1, false), SN65_HEALTH_REINIT);
 }
 
 ZTEST(sn65dsi83_decide, test_reinit_rate_limit)
@@ -368,10 +397,64 @@ ZTEST(sn65dsi83_poll, test_errors_right_after_a_recovery_escalate)
 	zassert_equal(poll(1000), 0);
 	zassert_equal(st.recoveries, 1U);
 
-	fake.regs[0xE5] = 0x01;
+	fake.regs[0xE5] = SN65_ERR_CHA_SOT_BIT_ERR; /* a non-PLL_UNLOCK bit */
 	zassert_equal(poll(1000 + SN65_REINIT_MIN_GAP_MS), 0);
 	zassert_equal(rep.health, SN65_HEALTH_REINIT);
 	zassert_equal(st.recoveries, 2U);
+}
+
+/* The blink: after a replay the relock latches PLL_UNLOCK.  Many polls must stay quiet. */
+ZTEST(sn65dsi83_poll, test_post_recovery_pll_unlock_latch_does_not_loop)
+{
+	black();
+	zassert_equal(poll(1000), 0);
+	zassert_equal(st.recoveries, 1U);
+
+	for (int i = 1; i <= 10; i++) {
+		fake.regs[0xE5] = SN65_ERR_CHA_PLL_UNLOCK;
+		fake.nwrites    = 0;
+		zassert_equal(poll(1000 + i * SN65_REINIT_MIN_GAP_MS), 0);
+		zassert_equal(rep.health, SN65_HEALTH_CLEAR_ERRORS, "poll %d", i);
+		zassert_equal(fake.nwrites, 1);
+		zassert_equal(fake.wlog[0].reg, 0xE5);
+		zassert_equal(fake.regs[0xE5], 0x00);
+	}
+	zassert_equal(st.recoveries, 1U, "no second re-init");
+	zassert_equal(st.pll_unlock_events, 10U);
+	zassert_equal(st.err_polls, 0U);
+}
+
+ZTEST(sn65dsi83_poll, test_replay_leaves_errors_cleared_after_pll_en_stat)
+{
+	black();
+	zassert_equal(poll(1000), 0);
+	/* the last writes: SOFT_RESET, then IRQ_EN, then the 0xE5 clear -- after PLL_EN */
+	zassert_equal(fake.wlog[fake.nwrites - 1].reg, 0xE5);
+	zassert_equal(fake.wlog[fake.nwrites - 1].val, 0xFF);
+	zassert_equal(fake.wlog[fake.nwrites - 3].reg, 0x09);
+}
+
+/* PLL_UNLOCK re-latching after every clear is reported once, never answered with a re-init. */
+ZTEST(sn65dsi83_poll, test_stuck_pll_unlock_is_reported_not_reinited)
+{
+	for (uint32_t i = 1; i <= 3U * SN65_PLL_UNLOCK_STUCK_POLLS; i++) {
+		fake.regs[0xE5] = SN65_ERR_CHA_PLL_UNLOCK;
+		zassert_equal(poll(1000 + i * 1000), 0);
+		zassert_equal(rep.health, SN65_HEALTH_CLEAR_ERRORS);
+		zassert_equal(rep.pll_unlock_stuck, i == SN65_PLL_UNLOCK_STUCK_POLLS, "poll %u", i);
+	}
+	zassert_equal(st.recoveries, 0U);
+	zassert_equal(st.failures, 0U);
+}
+
+/* Any other error bit on the same poll breaks the streak. */
+ZTEST(sn65dsi83_poll, test_other_bit_breaks_the_unlock_streak)
+{
+	fake.regs[0xE5] = SN65_ERR_CHA_PLL_UNLOCK;
+	zassert_equal(poll(1000), 0);
+	fake.regs[0xE5] = SN65_ERR_CHA_PLL_UNLOCK | SN65_ERR_CHA_SOT_BIT_ERR;
+	zassert_equal(poll(2000), 0);
+	zassert_equal(st.pll_unlock_streak, 0U);
 }
 
 /* ---- the bus owner's latched recipe ------------------------------------------------------- */
