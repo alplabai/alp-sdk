@@ -50,6 +50,39 @@ def test_recipe_installs_the_committed_key_and_config():
     assert "--import-ownertrust" in r  # opkg rejects a signature from an untrusted key
 
 
+
+class _SkipRecipe(Exception):
+    pass
+
+
+class _Fatal(Exception):
+    pass
+
+
+def _run_anonymous_python(feed_url: str | None) -> None:
+    """Run the recipe's `python () {}` block the way bitbake does at parse time,
+    against a stub datastore holding only ALP_DEVKIT_FEED_URL."""
+    body = re.search(r"^python \(\) \{\n(.*?)^\}", RECIPE.read_text(encoding="utf-8"),
+                     re.M | re.S).group(1)
+    bb = type("bb", (), {
+        "parse": type("parse", (), {"SkipRecipe": _SkipRecipe}),
+        "fatal": staticmethod(lambda msg: (_ for _ in ()).throw(_Fatal(msg))),
+    })
+    d = type("d", (), {"getVar": staticmethod(
+        lambda name: feed_url if name == "ALP_DEVKIT_FEED_URL" else None)})
+    exec("def _anon():\n" + body + "\n_anon()\n", {"bb": bb, "d": d})
+
+
+def test_recipe_skips_itself_when_the_feed_is_not_enabled():
+    # Bitbake parses every recipe BBFILES matches, so a bb.fatal here would break
+    # every build that does not opt into the feed (#2853).
+    with pytest.raises(_SkipRecipe):
+        _run_anonymous_python(None)
+
+
+def test_recipe_parses_when_the_feed_url_is_set():
+    _run_anonymous_python("https://example.invalid/feed")
+
 @pytest.mark.skipif(not shutil.which("gpg"), reason="needs gpg")
 def test_signing_fragment_names_the_committed_key():
     assert _fingerprint() in SIGN_INC.read_text(encoding="utf-8")

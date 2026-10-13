@@ -23,12 +23,14 @@ DEPENDS += "gnupg-native"
 # The feed URL names the MACHINE.
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-# Set by conf/distro/include/alp-devkit-feed.inc; a build that pulls this recipe
-# without it has no feed URL to write.
+# Set by conf/distro/include/alp-devkit-feed.inc. Bitbake parses every recipe
+# BBFILES matches, so a bb.fatal here would break every build that does not opt
+# in (#2853); skip instead, and an image that installs this without the fragment
+# fails with "nothing provides alp-devkit-feed-config".
 python () {
     if not d.getVar('ALP_DEVKIT_FEED_URL'):
-        bb.fatal('alp-devkit-feed-config: ALP_DEVKIT_FEED_URL unset; add '
-                 '"require conf/distro/include/alp-devkit-feed.inc" to local.conf')
+        raise bb.parse.SkipRecipe('ALP_DEVKIT_FEED_URL unset (dev-kit feed not enabled; '
+                                  'require conf/distro/include/alp-devkit-feed.inc)')
 }
 
 do_install() {
