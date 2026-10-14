@@ -213,6 +213,30 @@ static void csi2_dw_irq_on(uintptr_t regs, struct csi2_dw_data *data)
 	sys_write32(INT_ECC_CORRECT_MASK, regs + CSI_INT_MSK_ECC_CORRECT);
 }
 
+/*
+ * Alp Lab AB: CSI-2 error events per cause since boot, counted in csi2_dw_irq()
+ * whether or not logging is on (a bright frame can raise hundreds of payload-CRC
+ * events, far more than a log can carry).  One receiver on the Ensemble parts, so
+ * one array; never reset -- take the difference across N frames for a per-frame
+ * rate.  Read it with `extern const volatile uint32_t csi2_dw_err_events[];` or
+ * over SWD.  Index order: CSI2_DW_EV_* below.
+ */
+enum {
+	CSI2_DW_EV_PLD_CRC,       /* payload checksum error (one long packet) */
+	CSI2_DW_EV_FRAME_CRC,     /* frame with at least one CRC error */
+	CSI2_DW_EV_ECC_CORRECTED, /* packet header error corrected */
+	CSI2_DW_EV_DATA_ID,
+	CSI2_DW_EV_LINE,
+	CSI2_DW_EV_PHY,
+	CSI2_DW_EV_PKT,
+	CSI2_DW_EV_PHY_FATAL,
+	CSI2_DW_EV_FRAME_SEQ,
+	CSI2_DW_EV_FRAME_BNDRY,
+	CSI2_DW_EV_IPI_FATAL,
+	CSI2_DW_EV_COUNT,
+};
+volatile uint32_t csi2_dw_err_events[CSI2_DW_EV_COUNT];
+
 static void csi2_dw_irq(const struct device *dev)
 {
 	struct csi2_dw_data *data = dev->data;
@@ -222,6 +246,7 @@ static void csi2_dw_irq(const struct device *dev)
 
 	global_st = sys_read32(regs + CSI_INT_ST_MAIN);
 	if (global_st & CSI_INT_ST_MAIN_IPI_FATAL) {
+		csi2_dw_err_events[CSI2_DW_EV_IPI_FATAL]++;
 		event_st = sys_read32(regs + CSI_INT_ST_IPI_FATAL);
 		data->ipi_fatal_count++;
 		data->ipi_fatal_total++;
@@ -249,60 +274,70 @@ static void csi2_dw_irq(const struct device *dev)
 		}
 	}
 	if (global_st & CSI_INT_ST_MAIN_LINE) {
+		csi2_dw_err_events[CSI2_DW_EV_LINE]++;
 		event_st = sys_read32(regs + CSI_INT_ST_LINE);
 		LOG_ERR("Interrupt due to error in Line construction. "
 			"status - 0x%x",
 			event_st);
 	}
 	if (global_st & CSI_INT_ST_MAIN_PHY) {
+		csi2_dw_err_events[CSI2_DW_EV_PHY]++;
 		event_st = sys_read32(regs + CSI_INT_ST_PHY);
 		LOG_ERR("Fatal Interrupt caused by PHY due to TX errors. "
 			"status - 0x%x",
 			event_st);
 	}
 	if (global_st & CSI_INT_ST_MAIN_ECC_CORRECTED) {
+		csi2_dw_err_events[CSI2_DW_EV_ECC_CORRECTED]++;
 		event_st = sys_read32(regs + CSI_INT_ST_ECC_CORRECT);
 		LOG_ERR("Interrupt for header error detection and correction "
 			"for specific VC-ID. status - 0x%x",
 			event_st);
 	}
 	if (global_st & CSI_INT_ST_MAIN_DATA_ID) {
+		csi2_dw_err_events[CSI2_DW_EV_DATA_ID]++;
 		event_st = sys_read32(regs + CSI_INT_ST_DATA_ID);
 		LOG_ERR("Interrupt due to unknown data type detected in a "
 			"specific VC. Packet discarded. status - 0x%x",
 			event_st);
 	}
 	if (global_st & CSI_INT_ST_MAIN_PLD_CRC) {
+		csi2_dw_err_events[CSI2_DW_EV_PLD_CRC]++;
 		event_st = sys_read32(regs + CSI_INT_ST_PLD_CRC_FATAL);
 		LOG_ERR("Fatal Interrupt due to payload checksum error."
 			"status - 0x%x",
 			event_st);
 	}
 	if (global_st & CSI_INT_ST_MAIN_FRAME_CRC) {
+		csi2_dw_err_events[CSI2_DW_EV_FRAME_CRC]++;
 		event_st = sys_read32(regs + CSI_INT_ST_CRC_FRAME_FATAL);
 		LOG_ERR("Fatal Interrupt due to frames with at least one CRC "
 			"error. status - 0x%x",
 			event_st);
 	}
 	if (global_st & CSI_INT_ST_MAIN_FRAME_SEQ) {
+		csi2_dw_err_events[CSI2_DW_EV_FRAME_SEQ]++;
 		event_st = sys_read32(regs + CSI_INT_ST_SEQ_FRAME_FATAL);
 		LOG_ERR("Fatal Interrupt due to incorrect frame sequence for "
 			"a specific VC. status - 0x%x",
 			event_st);
 	}
 	if (global_st & CSI_INT_ST_MAIN_FRAME_BNDRY) {
+		csi2_dw_err_events[CSI2_DW_EV_FRAME_BNDRY]++;
 		event_st = sys_read32(regs + CSI_INT_ST_BNDRY_FRAME_FATAL);
 		LOG_ERR("Fatal Interrupt due to mismatch of Frame Start and "
 			"Frame End for a specific VC. status - 0x%x",
 			event_st);
 	}
 	if (global_st & CSI_INT_ST_MAIN_PKT) {
+		csi2_dw_err_events[CSI2_DW_EV_PKT]++;
 		event_st = sys_read32(regs + CSI_INT_ST_PKT_FATAL);
 		LOG_ERR("Fatal Interrupt related to Packet construction. "
 			"Packet discarded. status - 0x%x",
 			event_st);
 	}
 	if (global_st & CSI_INT_ST_MAIN_PHY_FATAL) {
+		csi2_dw_err_events[CSI2_DW_EV_PHY_FATAL]++;
 		event_st = sys_read32(regs + CSI_INT_ST_PHY_FATAL);
 		LOG_ERR("Fatal Interrupt due to PHY Packet discard. "
 			"status - 0x%x",
