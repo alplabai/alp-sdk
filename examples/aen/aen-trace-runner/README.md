@@ -170,7 +170,7 @@ rewrites whole 16 KiB sectors, and that read-back is the only way to restore the
 | `TR_CAM_MIRROR` | `ON` | With `TR_INPUT_NPU`: the HP mirrors the view like a selfie; decides which arm is the player's left. Same value on the HP build |
 | `TR_M55_AUTOLAUNCH` | `OFF` | HE launches the A32 renderer at boot (release) |
 | `TR_TILT_TAKEOVER` | `OFF` | The IMU tilt takes over steering when no player is seen |
-| `TR_BL_MAX_PCT` | 80 | The backlight's ceiling in percent, a multiple of 5 between 10 and 80 (configure refuses anything else). The knob, the bench request word and the boot level never go past it. Lower it for a carrier whose 5 V net droops under the backlight, see "Carrier note: 5 V droop" below |
+| `TR_BL_MAX_PCT` | 100 | The backlight's ceiling in percent, a multiple of 5 between 10 and 100 (configure refuses anything else). The knob, the bench request word and the boot level never go past it. Lower it for a carrier whose 5 V net droops under the backlight, see "Carrier note: 5 V droop" below |
 | `TR_PARTNER_LOGO` | empty | Path of a header from `tools/genlogo.py`: the attract header card then holds the ALP LAB mark, a divider and that partner logo. Empty draws the ALP LAB banner alone and leaves the image unchanged. The artwork is the partner's trademark and is not in this repo |
 
 ## Switching the display: Riverdi RVT121 (12.1" LVDS)
@@ -299,7 +299,7 @@ SRAM0 reads as the 30 % default) and sets it from:
   A short press while muted only switches the mode: just a long press unmutes (a turn in VOLUME mode unmutes too).
   BRIGHTNESS goes back to VOLUME after 5 s with no turn or press.
 - **The panel backlight** (Riverdi RVT121, PWM on P10_7, the SDK's `alp,display-backlight` LED): in BRIGHTNESS mode
-  5 % per detent, 10..`TR_BL_MAX_PCT` % (80 by default; a hard floor of 10 %, so the screen can never go dark, and a hard ceiling). It boots at the level the SDK
+  5 % per detent, 10..`TR_BL_MAX_PCT` % (100 by default; a hard floor of 10 %, so the screen can never go dark, and a hard ceiling). It boots at the level the SDK
   already set (30 %), so booting does not flicker. The RK055 shield has no PWM backlight, so there a short press does nothing.
 - **A request word over SWD** (`0x0237FD84`, `0x564F0000 | percent`), for the bench: no reflash, see
   `a32/release/FLASH-RECIPE.md` ("Changing the volume without reflashing"). The HE validates it. The backlight
@@ -308,9 +308,10 @@ SRAM0 reads as the 30 % default) and sets it from:
 
 **Carrier note: 5 V droop.** The backlight's boost converter loads the carrier's 5 V net, and on some carriers that
 net droops under the extra load: one measured 4.68 V unloaded and about 0.12 ohm in series (input diode, eFuse and
-shunt), enough to brown out the DSI-to-LVDS bridge at 60 % brightness and above. For such a carrier build with
-`-DTR_BL_MAX_PCT=40` (the knob, the bench word and the boot level then stop at 40 %); `build-release.sh` prints the
+shunt), enough to brown out the DSI-to-LVDS bridge at 60 % brightness and above. Only on a carrier whose 5 V net droops,
+lower the ceiling with `-DTR_BL_MAX_PCT=40` (the knob, the bench word and the boot level then stop at 40 %); `build-release.sh` prints the
 ceiling the HE was built with, and `TR_BL_MAX_PCT=40` in its environment refuses an image built with another one.
+The reworked 5 V carrier (E1M-AEN803 2026W36-0002) runs 100 %.
 
 **HE-only warm reset.** A reset of the HE alone (the HP keeps playing, the panel keeps its backlight) restores the volume and brightness records instead of applying the defaults, clamped to this build's limits (`TR_BL_MAX_PCT`; volume 0..100 %), when `alp_i2c_handover_warm_boot()` (the I2C1 handover's warm verdict, `TR_INPUT_NPU` builds) says the boot is warm and the tagged word is valid. A mute survives; its unmute goes to the 30 % default, because the level before the mute is not recorded. A cold boot, or a garbage word, takes the defaults as before.
 

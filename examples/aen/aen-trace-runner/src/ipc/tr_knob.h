@@ -36,11 +36,11 @@
 
 #define TR_BL_TAG 0x424C0000u /* 'BL' */
 #define TR_BL_MIN 10u         /* percent: never dark */
-/* The ceiling, percent: a build option (CMake -DTR_BL_MAX_PCT=, default 80), a multiple of
- * TR_BL_STEP in TR_BL_MIN..80. A carrier whose 5 V net droops under the backlight's load needs
+/* The ceiling, percent: a build option (CMake -DTR_BL_MAX_PCT=, default 100), a multiple of
+ * TR_BL_STEP in TR_BL_MIN..100. A carrier whose 5 V net droops under the backlight's load needs
  * it lower (README, "Carrier note: 5 V droop"). */
 #ifndef TR_BL_MAX_PCT
-#define TR_BL_MAX_PCT 80
+#define TR_BL_MAX_PCT 100
 #endif
 #define TR_BL_MAX  ((uint32_t)TR_BL_MAX_PCT)
 #define TR_BL_STEP 5u /* percent per encoder detent */
@@ -57,8 +57,8 @@ typedef struct {
 	uint32_t led_errs;
 } tr_bl_t;
 
-_Static_assert(TR_BL_MAX_PCT >= 10 && TR_BL_MAX_PCT <= 80 && TR_BL_MAX_PCT % 5 == 0,
-               "TR_BL_MAX_PCT: a multiple of 5 between 10 and 80");
+_Static_assert(TR_BL_MAX_PCT >= 10 && TR_BL_MAX_PCT <= 100 && TR_BL_MAX_PCT % 5 == 0,
+               "TR_BL_MAX_PCT: a multiple of 5 between 10 and 100");
 _Static_assert(sizeof(tr_bl_t) == 20u, "tr_bl_t is 5 words on the wire");
 _Static_assert(TR_MEM_BL % 16u == 0u, "the record is 16-B aligned");
 _Static_assert(TR_MEM_BL >= TR_MEM_VOL + sizeof(tr_vol_t),
