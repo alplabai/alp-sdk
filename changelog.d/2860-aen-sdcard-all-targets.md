@@ -1,0 +1,3 @@
+### Changed — `aen-sdcard-file` builds for every E1M-AEN board tree (#2860)
+
+The microSD example now has overlays and twister scenarios for the AEN801 and AEN803 M55-HP and the AEN401 M55-HP, beside the AEN801/803 M55-HE. On the AEN401 the CC3501E bridge runs in PIO mode (`CONFIG_DMA=n`, as on the 2026-10-12 E4 bench run) and the twister scenario selects the E4 capability profile; a tan build with `sku: E1M-AEN401` and an `m55_hp` core emits it from `board.yaml`. `prj.conf` no longer forces `CONFIG_FLASH_LOAD_OFFSET=0x10000` (the HE slot0); every board's code partition gives the link address, so an HP image links in its own slot. The HP and AEN401 builds are compile-checked, not yet run on silicon.
