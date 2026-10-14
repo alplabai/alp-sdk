@@ -1,0 +1,3 @@
+### Added — CMSDK watchdog node on the E4 / E8 boards (#2877)
+
+Every E1M-AEN401, AEN801 and AEN803 board devicetree now carries the core's own watchdog, `wdog0@40100000` (`arm,cmsdk-watchdog`, upstream `wdt_cmsdk_apb.c`), disabled, with its clock: `zephyr/dts/alif/ensemble_rtss_he_wdog.dtsi` (160 MHz, measured 160009 kHz on an AEN803) and `ensemble_rtss_hp_wdog.dtsi` (400 MHz, the fork's value, not measured). An app enables it with `&wdog0 { status = "okay"; };` and `CONFIG_WATCHDOG=y`, `CONFIG_RUNTIME_NMI=y`. The board generator emits the include for E4 and E8 parts. `examples/aen/aen-wdt-feed` drops its private copy of the node and adds the AEN401 M55-HP target.

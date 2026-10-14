@@ -1,0 +1,37 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The M55-HP's own CMSDK watchdog (Ensemble E4 / E8).  Each M55 sees its own
+ * watchdog at 0x40100000 (DFP soc.h WDT_HP_CTRL_BASE, the same address on
+ * AE402FA0E5597 and AE822FA0E5597; register layout = ARM CMSDK APB watchdog,
+ * WDT_HP_CTRL_Type).  Node transcribed from the Apache-2.0 zephyr_alif fork
+ * (dts/arm/alif/ensemble/common/ensemble_rtss_hp.dtsi).  Driver = upstream
+ * Zephyr wdt_cmsdk_apb.c; it takes its tick rate from the clocks phandle's
+ * clock-frequency at build time and signals the timeout through the NMI
+ * (CONFIG_RUNTIME_NMI=y).
+ *
+ * Disabled here; an app enables it with
+ *     &wdog0 { status = "okay"; };
+ *
+ * Clock: the M55-HP core clock, 400 MHz (fork value, the same as the cpu0
+ * clock-frequency in ensemble_rtss_hp.dtsi).  Not yet measured on silicon: if
+ * the SE runs the HP at another rate, every timeout scales by 400 MHz / rate.
+ */
+
+/ {
+	rtss_hp_clk: rtss_hp_clk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <400000000>;
+	};
+};
+
+&{/soc} {
+	wdog0: wdog0@40100000 {
+		compatible = "arm,cmsdk-watchdog";
+		reg = <0x40100000 0x1000>;
+		clocks = <&rtss_hp_clk>;
+		status = "disabled";
+	};
+};

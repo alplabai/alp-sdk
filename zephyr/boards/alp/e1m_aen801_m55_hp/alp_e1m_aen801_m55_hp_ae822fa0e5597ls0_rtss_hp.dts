@@ -35,6 +35,7 @@
 
 #include <alif/ensemble/ae822fa0e5597ls0.dtsi>
 #include <alif/ensemble/common/ensemble_rtss_hp.dtsi>
+#include <alif/ensemble_rtss_hp_wdog.dtsi>
 #include <alif/ensemble_e8_peripherals.dtsi>
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/i2c/i2c.h>

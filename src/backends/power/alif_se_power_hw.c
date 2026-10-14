@@ -70,11 +70,15 @@ BUILD_ASSERT(DT_REG_SIZE(DT_NODELABEL(ana)) >= 0x3Cu, "ana node must cover VBAT_
  *   HP: RTSS_HP_CTRL  AON_BASE + 0x00, RTSS_HP_RESET AON_BASE + 0x04
  *       (Alif DFP Device/soc/AE822FA0E5597/include/rtss_hp/soc.h:1157-1158, AON_BASE at
  *       :3656; zephyr_alif soc/alif/ensemble/common/soc_common.h:16-17).
+ * The E4 (AE402FA0E5597) has the same AON_BASE and the same AON_Type layout
+ * (Device/soc/AE402FA0E5597/include/rtss_hp/soc.h AON_Type, AON_BASE 0x1A604000).
  * A core writes its own pair: the other core's WIC bits would arm the wrong subsystem's sleep. */
-#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP) || defined(CONFIG_SOC_AE402FA0E5597LE0_RTSS_HP)
+#define HW_CORE_IS_HP 1
 #define HW_CORE_CTRL  0x1A604000u
 #define HW_CORE_RESET 0x1A604004u
 #else
+#define HW_CORE_IS_HP 0
 #define HW_CORE_CTRL  0x1A604010u
 #define HW_CORE_RESET 0x1A604014u
 #endif
@@ -132,7 +136,7 @@ uint32_t alif_se_hw_vtor_read(void)
 
 bool alif_se_hw_core_is_hp(void)
 {
-	return IS_ENABLED(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP);
+	return HW_CORE_IS_HP;
 }
 
 bool alif_se_hw_debugger_attached(void)
