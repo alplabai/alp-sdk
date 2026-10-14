@@ -1051,6 +1051,60 @@ static int imx296_init_ctrls(const struct device *dev)
 	return 0;
 }
 
+/*
+ * Sony's undocumented initial register settings: none of these addresses is in the
+ * IMX296LQR-C datasheet's register map, and the values are the ones the mainline Linux
+ * imx296 driver writes (drivers/media/i2c/imx296.c, imx296_init_table; 0x3005 is already
+ * IMX296_REG_CSI_LANE_HS above).  Written in STANDBY from imx296_init().  Without them
+ * (issue #2881, E1M-AEN803 2026W36-0001, 2026-10-14): GAIN 0x3204 latched (read back) but
+ * did not change the image at all -- 48 dB gave the same frame as 0 dB -- and the sensor
+ * ran at ~30 frame/s instead of the 60.3 its HMAX/VMAX give.  With them: 24 dB raised the
+ * mean of a dim scene from 118 to 515 (of 1023), 48 dB to 1015, at ~59 frame/s, with 0
+ * CSI-2 errors over 210 frames.
+ */
+static const struct video_reg imx296_sony_init[] = {
+	{IMX296_REG8(0x309e), 0x04},
+	{IMX296_REG8(0x30a0), 0x04},
+	{IMX296_REG8(0x30a1), 0x3c},
+	{IMX296_REG8(0x30a4), 0x5f},
+	{IMX296_REG8(0x30a8), 0x91},
+	{IMX296_REG8(0x30ac), 0x28},
+	{IMX296_REG8(0x30af), 0x09},
+	{IMX296_REG8(0x30df), 0x00},
+	{IMX296_REG8(0x3165), 0x00},
+	{IMX296_REG8(0x3169), 0x10},
+	{IMX296_REG8(0x316a), 0x02},
+	{IMX296_REG8(0x31c8), 0xf3},
+	{IMX296_REG8(0x31d0), 0xf4},
+	{IMX296_REG8(0x321a), 0x00},
+	{IMX296_REG8(0x3226), 0x02},
+	{IMX296_REG8(0x3256), 0x01},
+	{IMX296_REG8(0x3541), 0x72},
+	{IMX296_REG8(0x3516), 0x77},
+	{IMX296_REG8(0x350b), 0x7f},
+	{IMX296_REG8(0x3758), 0xa3},
+	{IMX296_REG8(0x3759), 0x00},
+	{IMX296_REG8(0x375a), 0x85},
+	{IMX296_REG8(0x375b), 0x00},
+	{IMX296_REG8(0x3832), 0xf5},
+	{IMX296_REG8(0x3833), 0x00},
+	{IMX296_REG8(0x38a2), 0xf6},
+	{IMX296_REG8(0x38a3), 0x00},
+	{IMX296_REG8(0x3a00), 0x80},
+	{IMX296_REG8(0x3d48), 0xa3},
+	{IMX296_REG8(0x3d49), 0x00},
+	{IMX296_REG8(0x3d4a), 0x85},
+	{IMX296_REG8(0x3d4b), 0x00},
+	{IMX296_REG8(0x400e), 0x58},
+	{IMX296_REG8(0x4014), 0x1c},
+	{IMX296_REG8(0x4041), 0x2a},
+	{IMX296_REG8(0x40a2), 0x06},
+	{IMX296_REG8(0x40c1), 0xf6},
+	{IMX296_REG8(0x40c7), 0x0f},
+	{IMX296_REG8(0x40c8), 0x00},
+	{IMX296_REG8(0x4174), 0x00},
+};
+
 static int imx296_init(const struct device *dev)
 {
 	const struct imx296_config    *cfg = dev->config;
@@ -1182,6 +1236,11 @@ static int imx296_init(const struct device *dev)
 
 	/* See IMX296_REG_CSI_LANE_HS's own comment above: bench-derived, no datasheet coverage. */
 	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_CSI_LANE_HS, IMX296_CSI_LANE_HS_VAL);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = video_write_cci_multiregs(&cfg->i2c, imx296_sony_init, ARRAY_SIZE(imx296_sony_init));
 	if (ret < 0) {
 		return ret;
 	}

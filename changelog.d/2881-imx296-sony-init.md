@@ -1,0 +1,3 @@
+### Fixed — IMX296 gain had no effect and the sensor ran at half rate (#2881)
+
+`zephyr/drivers/video/imx296.c` now writes Sony's initial register settings in STANDBY at init (40 undocumented addresses, the values the mainline Linux imx296 driver writes). Without them `VIDEO_CID_ANALOGUE_GAIN` set GAIN 0x3204 (it read back correctly) but the image did not change, and the sensor delivered ~30 frame/s instead of 60.3. Bench 2026-10-14, E1M-AEN803 2026W36-0001 with the Raspberry Pi Global Shutter camera: 24 dB now raises a dim scene's mean from 117 to 506 (of 1023), 48 dB to 1015, at ~59 frame/s, with 0 CSI-2 errors over 210 frames.
