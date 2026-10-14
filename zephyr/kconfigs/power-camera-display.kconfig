@@ -299,10 +299,9 @@ config ALP_SDK_POWER_ALIF_SE
 	  bench-proven on the E1M-AEN803 (2026-10-10), HP-only and with the HE
 	  running; the AEN801 HP is not verified.  The E4 M55-HP (E1M-AEN401)
 	  uses the same registers; a customer bench ran 14/14 RV-3028 wakes on
-	  it, Alp Lab has not.  On the E4 the wake record is not retained (no
-	  BKRAM node), so alp_power_boot_wake_info() reports no STOP wake, and
-	  with no alp,som-power node no on-module domain is quiesced and an
-	  ALP_POWER_WAKE_GPIO pad on a SoM net is not refused.
+	  it, Alp Lab has not.  The E4 BKRAM address (the wake record) is
+	  inferred from the E3 / E7 SVDs and the E8, not read from an E4
+	  source.
 	  The HP has STOP only (the
 	  vendor's SOFT_OFF-class sleep; STANDBY is refused with
 	  ALP_ERR_NOSUPPORT), no TCM retention (ALP_ERR_NOSUPPORT) and needs an
