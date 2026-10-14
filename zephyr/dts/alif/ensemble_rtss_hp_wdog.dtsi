@@ -15,8 +15,9 @@
  *     &wdog0 { status = "okay"; };
  *
  * Clock: the M55-HP core clock, 400 MHz (fork value, the same as the cpu0
- * clock-frequency in ensemble_rtss_hp.dtsi).  Not yet measured on silicon: if
- * the SE runs the HP at another rate, every timeout scales by 400 MHz / rate.
+ * clock-frequency in ensemble_rtss_hp.dtsi).  Measured on an E1M-AEN801 M55-HP
+ * (2026-10-14): WDOGVALUE fell 800072600 counts in 2.0 s over SWD, and a 10 s
+ * timeout (LOAD 0xEE6B2800) reset the core.
  */
 
 / {
