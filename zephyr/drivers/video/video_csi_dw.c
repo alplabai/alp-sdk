@@ -218,8 +218,8 @@ static void csi2_dw_irq_on(uintptr_t regs, struct csi2_dw_data *data)
  * whether or not logging is on (a bright frame can raise hundreds of payload-CRC
  * events, far more than a log can carry).  One receiver on the Ensemble parts, so
  * one array; never reset -- take the difference across N frames for a per-frame
- * rate.  Read it with `extern const volatile uint32_t csi2_dw_err_events[];` or
- * over SWD.  Index order: CSI2_DW_EV_* below.
+ * rate.  Read it with `extern volatile uint32_t csi2_dw_err_events[];` or over
+ * SWD.  Index order: CSI2_DW_EV_* below.
  */
 enum {
 	CSI2_DW_EV_PLD_CRC,       /* payload checksum error (one long packet) */

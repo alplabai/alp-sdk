@@ -12,15 +12,17 @@
  * has ov9281, consumed separately in ov9281.c). The only other IMX296
  * drivers known to exist are Linux's (GPL-2.0) and libcamera's helpers
  * (also GPL/LGPL) -- neither is consumable under this project's licence.
- * Linux's imx296.c was used strictly as a REGISTER-NAME reference for a
- * handful of names this datasheet leaves unnamed (e.g. SENSOR_INFO,
- * 0x3148) -- it was not opened for, and no code, text or table from it was
- * copied into, this file; every register address and value below is
- * independently cited to a datasheet section/table in the comment above it,
- * with ONE bench-derived exception: IMX296_REG_CSI_LANE_HS (0x3005 = 0xF0,
- * see that macro's own comment) has no datasheet citation at all -- it is a
- * silicon fact found by sweeping an undocumented register address, not a
- * documented one this driver merely transcribes.
+ * Linux's imx296.c was used as a REGISTER-NAME reference for a handful of
+ * names this datasheet leaves unnamed (e.g. SENSOR_INFO, 0x3148); no code or
+ * text from it is in this file. Every register address and value below is
+ * cited to a datasheet section/table in the comment above it, with two
+ * exceptions that have no datasheet coverage:
+ *   - IMX296_REG_CSI_LANE_HS (0x3005 = 0xF0, see that macro's own comment),
+ *     a silicon fact found by sweeping an undocumented address;
+ *   - imx296_sony_init[] (40 address/value pairs): Sony's initial register
+ *     settings, which no Sony document available to us lists; the values are
+ *     the hardware configuration the mainline Linux imx296 driver writes
+ *     (imx296_init_table), taken as data, and bench-verified (#2881).
  *
  * BENCH STATUS (issue #2287, E1M-AEN803 2026W36-0001, csi_i2c = I2C1 @
  * 0x49011000): the I2C identity path is silicon-verified (bench run 229 --
@@ -1052,15 +1054,10 @@ static int imx296_init_ctrls(const struct device *dev)
 }
 
 /*
- * Sony's undocumented initial register settings: none of these addresses is in the
- * IMX296LQR-C datasheet's register map, and the values are the ones the mainline Linux
- * imx296 driver writes (drivers/media/i2c/imx296.c, imx296_init_table; 0x3005 is already
- * IMX296_REG_CSI_LANE_HS above).  Written in STANDBY from imx296_init().  Without them
- * (issue #2881, E1M-AEN803 2026W36-0001, 2026-10-14): GAIN 0x3204 latched (read back) but
- * did not change the image at all -- 48 dB gave the same frame as 0 dB -- and the sensor
- * ran at ~30 frame/s instead of the 60.3 its HMAX/VMAX give.  With them: 24 dB raised the
- * mean of a dim scene from 118 to 515 (of 1023), 48 dB to 1015, at ~59 frame/s, with 0
- * CSI-2 errors over 210 frames.
+ * Sony's initial register settings (see the file header): none of these addresses is in
+ * the IMX296LQR-C datasheet's register map; 0x3005 is IMX296_REG_CSI_LANE_HS above.
+ * Written in STANDBY from imx296_init(). Without them GAIN 0x3204 latches but does not
+ * change the image, and the sensor runs at ~30 frame/s instead of 60.3 (#2881).
  */
 static const struct video_reg imx296_sony_init[] = {
 	{IMX296_REG8(0x309e), 0x04},
