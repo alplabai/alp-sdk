@@ -17,7 +17,7 @@
  *   5 carrier I2C bus 0 open -- after a 2 ms settle (TR_SND_AMP_SETTLE_US, not the SDK's 200 us)
  *  5b each amp polled for its address ACK (1 ms steps, <= 50 ms; src/audio/tr_amp_ready.h)
  *   6 tas2563_init() on 0x4D and 0x4E
- *   7 AMP_LEVEL MIN + configure_i2s (2 x 32-bit slots, U27 LEFT, U28 RIGHT)
+ *   7 AMP_LEVEL TR_SND_AMP_LEVEL + configure_i2s (2 x 32-bit slots, U27 LEFT, U28 RIGHT)
  *   8 (TEST) PDM mics open + start, 48 kHz stereo
  *   9 I2S3 open, digital volume TR_SND_VOLUME, start
  *  10 one silent block: the bit clock actually runs before any amp wakes
@@ -129,15 +129,23 @@ static bool s_bridge_up; /* step 1 done: a retried bring-up keeps the bridge and
 #define SND_IDLE_SET(f) (void)0
 #endif
 
-/* Digital volume, alp_audio_out_set_volume() 0..255 (255 = unity). 128 is the
- * level heard "louder and clean" on the 2026W36-0002 speakers (2026-09-15, amp
- * analog level MIN); the speakers' power rating is unknown, so it is also
- * the cap. */
+/* Speakers: Electrokit 8 ohm 5 W, one per TAS2563. Power into 8 ohm is Vpk^2 / 16 for a
+ * full-scale sine: the amp analog level (PB_CFG1) sets Vpk, the digital volume scales it.
+ *   level 0x0D = 14.5 dBV = 5.3 Vpk -> 1.76 W at unity (default, under 5 W even at 0 dBFS)
+ *   level 0x10 = 16.0 dBV = 8.9 Vpk -> 4.97 W at unity (the 5 W rating: hard cap)
+ * TR_SND_VOLUME is alp_audio_out_set_volume() 0..255 (255 = unity). */
 #ifndef TR_SND_VOLUME
-#define TR_SND_VOLUME 128u
+#define TR_SND_VOLUME 255u
 #endif
-BUILD_ASSERT(TR_SND_VOLUME <= 128u,
-             "above the bench-heard level: ask before raising (speaker rating unknown)");
+BUILD_ASSERT(TR_SND_VOLUME <= 255u, "alp_audio_out_set_volume() takes 0..255 (255 = unity)");
+
+#ifndef TR_SND_AMP_LEVEL
+#define TR_SND_AMP_LEVEL 0x0Du
+#endif
+BUILD_ASSERT(TR_SND_AMP_LEVEL >= TAS2563_AMP_LEVEL_MIN && TR_SND_AMP_LEVEL <= TAS2563_AMP_LEVEL_MAX,
+             "TR_SND_AMP_LEVEL outside the TAS2563 listed range 0x01..0x1C");
+BUILD_ASSERT(TR_SND_AMP_LEVEL <= 0x10u,
+             "above 0x10 (16 dBV) a full-scale sine exceeds the 5 W / 8 ohm speaker rating");
 
 #define RATE      TR_AUDIO_RATE
 #define BLOCK     (RATE * 16u / 1000u) /* frames per 16 ms block: 256 at 16 kHz, 768 at 48 kHz */
@@ -330,9 +338,12 @@ static int bringup(bool with_mic)
 	};
 	for (unsigned i = 0; i < AMP_COUNT; i++) {
 		SND_BUS();
-		rc = tas2563_set_amp_level(&s.amps[i], TAS2563_AMP_LEVEL_MIN);
+		rc = tas2563_set_amp_level(&s.amps[i], TR_SND_AMP_LEVEL);
 		if (rc == ALP_OK) rc = tas2563_configure_i2s(&s.amps[i], &i2s, amp_rx[i]);
-		printk("[snd] 7 amp 0x%02x level MIN + configure_i2s -> %d\n", amp_addrs[i], (int)rc);
+		printk("[snd] 7 amp 0x%02x level 0x%02x + configure_i2s -> %d\n",
+		       amp_addrs[i],
+		       (unsigned)TR_SND_AMP_LEVEL,
+		       (int)rc);
 		if (rc != ALP_OK) return 7;
 #ifdef TR_SND_AMP_REGS
 		/* Bench A/B: extra register writes from -DTR_SND_AMP_REGS_FILE

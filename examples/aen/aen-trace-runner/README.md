@@ -285,8 +285,8 @@ interrupt off in between, so an HE-only reset never meets an armed HP interrupt.
 
 ### Volume (`TR_HP_SOUND`)
 
-The sound has a volume, 0 to 100 % of the build's `TR_SND_VOLUME` ceiling (128, the level heard as safe
-on the reworked EVK's speakers; 100 % is that level, so it can only be turned down; the default and boot level is 30 %, so there is never a loud burst before the first control or request). The
+The sound has a volume, 0 to 100 % of the build's `TR_SND_VOLUME` ceiling (255, unity; 100 % is that level, so it can only be turned down;
+the speakers are 8 ohm 5 W, driven at amp level `TR_SND_AMP_LEVEL` `0x0D` = 14.5 dBV, 1.76 W full scale, capped at `0x10` = 4.97 W; the default and boot level is 30 %, so there is never a loud burst before the first control or request). The
 HP applies it as a software gain on every 16 ms block of mixed samples (`tr_vol_apply`, a linear ramp
 across the block, no click, no I2C: I2C2 is leased) and 0 is silence with the amps still running (SD_N is
 never toggled). The HE owns one word (`TR_MEM_VOL`, `0x0237FD80`, `src/ipc/tr_vol.h`, tagged `'VO'`: a cold
