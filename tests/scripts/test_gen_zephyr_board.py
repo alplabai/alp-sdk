@@ -104,8 +104,9 @@ PARITY_COVERED: dict[str, tuple[str, str]] = {
 NOT_EMITTABLE: dict[str, str] = {
     "e1m_aen401_m55_hp":
         "metadata/socs/alif/ensemble/e4.json has no `zephyr_peripherals_dtsi`; "
-        "alp-sdk ships no zephyr/dts/alif/ensemble_e4_peripherals.dtsi for the "
-        "E4's own peripheral/NPU node set (the E8 overlay is different silicon)",
+        "the AEN401 board tree stays hand-written (its E4 camera, power and "
+        "xHCI nodes have no generator path). Its on-module dtsi IS generator "
+        "output, pinned by test_aen401_on_module_dtsi_is_generator_output",
     "e1m_aen601_m55_hp":
         "metadata/socs/alif/ensemble/e6.json has no `zephyr_peripherals_dtsi`; "
         "alp-sdk ships no zephyr/dts/alif/ensemble_e6_peripherals.dtsi for the "
@@ -682,6 +683,35 @@ class _MutatedMetadata:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("/* test double, not a real overlay */\n",
                          encoding="utf-8")
+
+
+class TestAen401OnModuleDtsi(unittest.TestCase):
+    """The hand-written AEN401 board includes
+    `alp_e1m_aen401_m55_hp-on-module.dtsi`: the BRD_I2C bus and the
+    `alp,som-power` node for that SKU (#2876).  Its body must stay exactly what
+    the generator emits for the E1M-AEN401 preset, so a change to
+    on-module-links.yaml reaches this board too."""
+
+    def test_aen401_on_module_dtsi_is_generator_output(self) -> None:
+        import yaml
+        links = gzb._load_aen_on_module_links(METADATA_ROOT)
+        preset = yaml.safe_load(
+            (METADATA_ROOT / "e1m_modules" / "E1M-AEN401.yaml").read_text(
+                encoding="utf-8"))
+        body = "\n".join(
+            gzb._aen_brd_i2c_dts(links, "E4")
+            + gzb._aen_som_power_dts(
+                preset, gzb._load_aen_power_domains(METADATA_ROOT), links,
+                gzb._load_aen_wired_lpgpio_pads(METADATA_ROOT)))
+        committed = (BOARDS_ROOT / "e1m_aen401_m55_hp"
+                     / "alp_e1m_aen401_m55_hp-on-module.dtsi").read_text(
+                         encoding="utf-8")
+        marker = "#include <zephyr/dt-bindings/gpio/gpio.h>\n\n"
+        self.assertIn(marker, committed)
+        self.assertEqual(committed.split(marker, 1)[1].rstrip("\n"),
+                         body.rstrip("\n"),
+                         "regenerate alp_e1m_aen401_m55_hp-on-module.dtsi "
+                         "from scripts/gen_zephyr_board.py")
 
 
 class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):

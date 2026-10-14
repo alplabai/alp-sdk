@@ -86,7 +86,7 @@ unverified.
 ## The STOP / STANDBY backend
 
 `src/backends/power/alif_se_power.c` implements `alp_power_request_sleep(STOP |
-STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and `STOP` on the E8 M55-HP (**bench-proven HP-only** on the E1M-AEN803) (section "The M55-HP" below) and on the E4 M55-HP (E1M-AEN401: same registers per the AE402 DFP, customer-reported 14/14 RV-3028 wakes, not bench-run by Alp Lab; no `bkram` and no `alp,som-power` node there yet, so no wake record and no domain quiesce). It is registered for
+STANDBY)` on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and `STOP` on the E8 M55-HP (**bench-proven HP-only** on the E1M-AEN803) (section "The M55-HP" below) and on the E4 M55-HP (E1M-AEN401: same registers per the AE402 DFP, customer-reported 14/14 RV-3028 wakes, not bench-run by Alp Lab; the AEN401 board now carries the same `alp,som-power` node and BRD_I2C bus as the E8 boards, and its `bkram` address is inferred from the E3 / E7 SVDs and the E8, so the wake record surviving STOP is unverified on E4). It is registered for
 `alif:ensemble:e8` and `alif:ensemble:e4` behind `CONFIG_ALP_SDK_POWER_ALIF_SE` (default **n**,
 experimental; STOP and STANDBY are bench-proven on the E1M-AEN803 M55-HE, STOP also on its
 M55-HP with only the HP booted). This core's (HE or HP) subsystem is powered off and the

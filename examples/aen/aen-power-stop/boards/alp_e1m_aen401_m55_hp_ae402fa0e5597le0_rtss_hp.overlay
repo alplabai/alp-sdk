@@ -4,13 +4,15 @@
  *
  * aen-power-stop overlay for the E1M-AEN401 (Ensemble E4, M55-HP), MRAM image.
  * BUILT, NOT BENCH-VERIFIED on an Alp Lab bench (a customer ran 14/14 RV-3028
- * countdown wakes with the same nodes enabled).
+ * countdown wakes with se_service, lptimer0, lpgpio and rtc0 enabled, before the
+ * AEN401 board had its alp,som-power node).
  *
  * The HP image must be MRAM-booted (VTOR >= 0x80000000), see the AEN803 HP overlay.
  * ensemble_e4_e6_power.dtsi declares the always-on nodes disabled; this app needs the
  * SE service channel, the LPTIMER wake, the LPRTC and the LPGPIO bank (RV-3028 INT on P15_0).
- * The AEN401 board has no `alp,som-power` node yet, so no on-module domain is quiesced
- * around STOP and no GPIO bank beyond LPGPIO is needed.
+ * As on the AEN803: the SoM power layer drives the pads of every present domain, and a pad
+ * whose GPIO controller is disabled makes the quiesce fail with ALP_ERR_NOT_READY
+ * (backlight enable on GPIO5, PHY reset on GPIO11).
  */
 &se_service {
 	status = "okay";
@@ -34,4 +36,12 @@
 
 &lpgpio {
 	status = "okay";
+};
+
+&gpio11 {
+	status = "okay"; /* E_PHY_RESET (P11_6), eth_phy domain */
+};
+
+&gpio5 {
+	status = "okay"; /* BACKLIGHT_EN (P5_5), backlight domain */
 };

@@ -17,9 +17,9 @@
  * The E4 M55-HP (CONFIG_SOC_AE402FA0E5597LE0_RTSS_HP, E1M-AEN401) uses the same register
  * addresses (AE402FA0E5597 soc.h: AON, VBAT, ANA, STOP_MODE, CGU, LPTIMER, LPGPIO bases equal
  * the E8's); a customer ran 14/14 RV-3028 countdown wakes with this port on an AEN401,
- * not yet re-run on an Alp Lab bench.  E4 has no `bkram` node yet (no E4 SVD names the
- * Utility SRAM), so its wake record is not retained and alp_power_boot_wake_info()
- * reports no STOP wake there.
+ * not yet re-run on an Alp Lab bench.  The E4 `bkram` node (ensemble_e4_peripherals.dtsi)
+ * is inferred from the E3 / E7 SVDs and the E8 address: no E4 source names the Utility
+ * SRAM, so the wake record surviving STOP on the E4 is unverified.
  * The HP differs from the HE in the ways the Alif vendor sample sdk-alif samples/drivers/pm/system_off/src/main.c shows (cited per use below):
  *   - only a SOFT_OFF-class sleep: STOP maps to it; STANDBY (the S2RAM sleep) is HE-only;
  *   - no TCM retention (memory_blocks never names HP TCM: aipm.h has no HP TCM block);
