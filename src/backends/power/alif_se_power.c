@@ -1534,7 +1534,7 @@ bool alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
 _Static_assert(offsetof(run_profile_t, vdd_ioflex_3V3) + sizeof(uint32_t) == sizeof(run_profile_t),
                "run_profile_t changed: assign the new member in build_run_profile()");
 
-static void build_run_profile(run_profile_t *r)
+static __maybe_unused void build_run_profile(run_profile_t *r)
 {
 	/* The vendor profile asks only for PD_SYST | PD_SSE700_AON (sdk-alif-ref
 	 * samples/drivers/pm/system_off/src/main.c:129) and the Utility SRAM must be named in
@@ -1563,7 +1563,7 @@ static void build_run_profile(run_profile_t *r)
 }
 
 /* True when the clock tree is the running one. */
-static bool clocks_healthy(void)
+static __maybe_unused bool clocks_healthy(void)
 {
 	const uint32_t mask =
 	    alif_se_hw_core_is_hp() ? ALIF_SE_PLL_CLK_SEL_HP_MASK : ALIF_SE_PLL_CLK_SEL_HE_MASK;

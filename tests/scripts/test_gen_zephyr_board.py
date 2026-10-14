@@ -719,6 +719,20 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
             self.assertNotIn("Alif E8", emitted)
             self.assertNotIn("AE822 DFP", emitted)
 
+    def test_watchdog_include_is_scoped_to_the_parts_it_was_checked_against(
+            self) -> None:
+        """`ensemble_rtss_{role}_wdog.dtsi` carries a watchdog address checked
+        against the E4 and E8 DFPs only (#2877): an E8 board includes it, a
+        board mutated to another part does not."""
+        files = emit_zephyr_board("E1M-AEN801", "m55_he", METADATA_ROOT)
+        dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        self.assertIn("#include <alif/ensemble_rtss_he_wdog.dtsi>", dts)
+        with _MutatedMetadata() as mm:
+            mm.json_set(E8_SOC, "part", "E9")
+            files = emit_zephyr_board("E1M-AEN801", "m55_he", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        self.assertNotIn("_wdog.dtsi", dts)
+
     def test_rtc_alarm_risk_is_scoped_to_the_part_it_was_evidenced_against(
             self) -> None:
         """`on_module_links.rtc_alarm.risk` is a per-part map, keyed by the
