@@ -58,7 +58,7 @@ for that SoC:
 | Target | `som.sku` | core key | Notes |
 |---|---|---|---|
 | AEN801 / AEN803 M55-HE | `E1M-AEN801` / `E1M-AEN803` | `m55_he` | bridge SPI on DMA0 |
-| AEN801 / AEN803 M55-HP | `E1M-AEN801` / `E1M-AEN803` | `m55_hp` | bridge SPI on DMA0 |
+| AEN801 / AEN803 M55-HP | `E1M-AEN801` / `E1M-AEN803` | `m55_hp` | bridge in PIO mode: the DMA0 boot latch also resets the HE's DMA2 |
 | AEN401 M55-HP | `E1M-AEN401` | `m55_hp` | bridge in PIO mode (`boards/*aen401*.conf`); drop the `a32_cluster` entry, the E4 has no A32 |
 
 Each target has its own overlay in `boards/` (the CC3501E link, the EEPROM

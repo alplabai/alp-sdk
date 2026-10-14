@@ -36,7 +36,6 @@
 
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
-#include <zephyr/dt-bindings/dma/alif_dma_event_router.h>
 #include <zephyr/dt-bindings/i2c/i2c.h>
 
 &pinctrl {
@@ -135,7 +134,7 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 		reg = <0x48104000 0x1000>;
-		interrupts = <138 3>;          /* BENCH-TBD: confirm SPI1 IRQ */
+		interrupts = <138 3>;          /* SPI1_IRQ_IRQn = 138 (AE402 rtss_hp soc.h) */
 		clocks = <&clockctrl ALIF_SPI_CLK>;
 		/*
 		 * ROOT-CAUSE FIX 2026-06-16: spi_dw_alif's configure takes the
