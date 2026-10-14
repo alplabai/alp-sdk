@@ -33,6 +33,7 @@
 
 #include <alif/ensemble/ae402fa0e5597le0.dtsi>
 #include <alif/ensemble/common/ensemble_rtss_hp.dtsi>
+#include <alif/ensemble_rtss_hp_wdog.dtsi>
 #include <alif/ensemble_e4_e6_power.dtsi>
 #include <alif/ensemble_e4_camera.dtsi>
 #include <alif/ensemble_e4_peripherals.dtsi>
