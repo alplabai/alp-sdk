@@ -104,8 +104,9 @@ PARITY_COVERED: dict[str, tuple[str, str]] = {
 NOT_EMITTABLE: dict[str, str] = {
     "e1m_aen401_m55_hp":
         "metadata/socs/alif/ensemble/e4.json has no `zephyr_peripherals_dtsi`; "
-        "alp-sdk ships no zephyr/dts/alif/ensemble_e4_peripherals.dtsi for the "
-        "E4's own peripheral/NPU node set (the E8 overlay is different silicon)",
+        "the AEN401 board tree stays hand-written (its E4 camera, power and "
+        "xHCI nodes have no generator path). Its on-module dtsi IS generator "
+        "output, pinned by test_aen401_on_module_dtsi_is_generator_output",
     "e1m_aen601_m55_hp":
         "metadata/socs/alif/ensemble/e6.json has no `zephyr_peripherals_dtsi`; "
         "alp-sdk ships no zephyr/dts/alif/ensemble_e6_peripherals.dtsi for the "
@@ -684,6 +685,35 @@ class _MutatedMetadata:
                          encoding="utf-8")
 
 
+class TestAen401OnModuleDtsi(unittest.TestCase):
+    """The hand-written AEN401 board includes
+    `alp_e1m_aen401_m55_hp-on-module.dtsi`: the BRD_I2C bus and the
+    `alp,som-power` node for that SKU (#2876).  Its body must stay exactly what
+    the generator emits for the E1M-AEN401 preset, so a change to
+    on-module-links.yaml reaches this board too."""
+
+    def test_aen401_on_module_dtsi_is_generator_output(self) -> None:
+        import yaml
+        links = gzb._load_aen_on_module_links(METADATA_ROOT)
+        preset = yaml.safe_load(
+            (METADATA_ROOT / "e1m_modules" / "E1M-AEN401.yaml").read_text(
+                encoding="utf-8"))
+        body = "\n".join(
+            gzb._aen_brd_i2c_dts(links, "E4")
+            + gzb._aen_som_power_dts(
+                preset, gzb._load_aen_power_domains(METADATA_ROOT), links,
+                gzb._load_aen_wired_lpgpio_pads(METADATA_ROOT)))
+        committed = (BOARDS_ROOT / "e1m_aen401_m55_hp"
+                     / "alp_e1m_aen401_m55_hp-on-module.dtsi").read_text(
+                         encoding="utf-8")
+        marker = "#include <zephyr/dt-bindings/gpio/gpio.h>\n\n"
+        self.assertIn(marker, committed)
+        self.assertEqual(committed.split(marker, 1)[1].rstrip("\n"),
+                         body.rstrip("\n"),
+                         "regenerate alp_e1m_aen401_m55_hp-on-module.dtsi "
+                         "from scripts/gen_zephyr_board.py")
+
+
 class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
     """Every SKU, part designator, pin name and base address in a generated
     AEN board tree must be transcribed from metadata, never inherited from
@@ -718,6 +748,20 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
             self.assertNotIn("Ensemble E8", emitted)
             self.assertNotIn("Alif E8", emitted)
             self.assertNotIn("AE822 DFP", emitted)
+
+    def test_watchdog_include_is_scoped_to_the_parts_it_was_checked_against(
+            self) -> None:
+        """`ensemble_rtss_{role}_wdog.dtsi` carries a watchdog address checked
+        against the E4 and E8 DFPs only (#2877): an E8 board includes it, a
+        board mutated to another part does not."""
+        files = emit_zephyr_board("E1M-AEN801", "m55_he", METADATA_ROOT)
+        dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        self.assertIn("#include <alif/ensemble_rtss_he_wdog.dtsi>", dts)
+        with _MutatedMetadata() as mm:
+            mm.json_set(E8_SOC, "part", "E9")
+            files = emit_zephyr_board("E1M-AEN801", "m55_he", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        self.assertNotIn("_wdog.dtsi", dts)
 
     def test_rtc_alarm_risk_is_scoped_to_the_part_it_was_evidenced_against(
             self) -> None:

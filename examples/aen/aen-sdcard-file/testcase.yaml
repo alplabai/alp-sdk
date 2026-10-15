@@ -32,3 +32,38 @@ tests:
       - sdhc
       - fatfs
     build_only: true
+
+  # generated/alp.conf is emitted for board.yaml's target (E1M-AEN801
+  # M55-HE), so the HP and E4 scenarios correct the banner and the E4 capability
+  # profile here; a tan build with the target's `sku` and `m55_hp` core in
+  # board.yaml emits them itself (checked for E1M-AEN401, 2026-10-14).
+  alp_sdk.examples.aen.sdcard_file.aen.hp:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
+    extra_configs:
+      - CONFIG_ALP_SDK_SOC_CPUS="M55-HP @400MHz (active)|rtss_hp + 2x Cortex-A32 @800MHz + M55-HE @160MHz|rtss_he"
+    platform_allow:
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - sdhc
+      - fatfs
+    build_only: true
+
+  alp_sdk.examples.aen.sdcard_file.aen401:
+    extra_args: EXTRA_CONF_FILE=generated/alp.conf
+    extra_configs:
+      - CONFIG_ALP_SOC_ALIF_ENSEMBLE_E4=y
+      - CONFIG_ALP_SDK_SOC_NAME="Alif Ensemble E4"
+      - CONFIG_ALP_SDK_SOC_CPUS="M55-HP @400MHz (active)|rtss_hp + M55-HE @160MHz|rtss_he"
+    platform_allow:
+      - alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - sdhc
+      - fatfs
+    build_only: true

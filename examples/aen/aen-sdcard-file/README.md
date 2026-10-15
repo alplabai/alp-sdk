@@ -1,7 +1,9 @@
 # aen-sdcard-file
 
 Write, read back and list a file on the **E1M-EVK microSD card** (slot J7)
-with **FatFs**, from the Alif **M55-HE** of an **E1M-AEN801/AEN803** SoM.
+with **FatFs**, from either M55 of any E1M-AEN SoM with a board tree:
+the M55-HE or M55-HP of the **E1M-AEN801/AEN803** (Ensemble E8) and the
+M55-HP of the **E1M-AEN401** (Ensemble E4).
 
 ```
 [sd] CC3501E bridge bring-up -> 0
@@ -34,6 +36,22 @@ cannot reach DTCM; the driver copies through a buffer in SRAM0
 (`CONFIG_SDHC_DWC_BOUNCE_BUFFER`, on by default for Ensemble), so the app
 needs no special placement.
 
+## Building for another SoM or core
+
+`board.yaml` names the E1M-AEN801 M55-HE. For another target, change `som.sku`
+and the core key, then build with tan, which regenerates `generated/alp.conf`
+for that SoC:
+
+| Target | `som.sku` | core key | Notes |
+|---|---|---|---|
+| AEN801 / AEN803 M55-HE | `E1M-AEN801` / `E1M-AEN803` | `m55_he` | bridge SPI on DMA0 |
+| AEN801 / AEN803 M55-HP | `E1M-AEN801` / `E1M-AEN803` | `m55_hp` | bridge in PIO mode: the DMA0 boot latch also resets the HE's DMA2 |
+| AEN401 M55-HP | `E1M-AEN401` | `m55_hp` | bridge in PIO mode (`boards/*aen401*.conf`); drop the `a32_cluster` entry, the E4 has no A32 |
+
+Each target has its own overlay in `boards/` (the CC3501E link, the EEPROM
+bus) and the `e1m_evk_microsd` shield has one per board. The twister
+scenarios in `testcase.yaml` build all five.
+
 ## Hardware
 
 - E1M-EVK 2626-R2 whose SDIO mux parts U38/U39 are the **reworked 74LV3257**
@@ -51,3 +69,6 @@ needs no special placement.
 A 48 KB variant (6 split 8 KB bounce transfers per read) also passed, and a
 96-sector raw read matched 96 single-sector reads. The same shield and driver
 mounted and listed the card from the M55-HP with Zephyr's `fs_sample`.
+On 2026-10-12 the CC3501E bridge, the EEPROM and a 4-bit card at 25 MHz
+worked on an E1M-AEN401 M55-HP from a bench app with the same overlay values.
+This example's own HP and AEN401 builds are compile-checked, not yet run.

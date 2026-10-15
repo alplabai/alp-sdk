@@ -14,6 +14,12 @@
  * Cores: the M55-HE (E1M-AEN801 / E1M-AEN803, bench-proven) and the M55-HP
  * (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP; STOP bench-proven HP-only on the E1M-AEN803, 2026-10-10,
  * 3/3 cycles, and with the HE running 3/3 on a combined ATOC; the AEN801 HP is not verified).
+ * The E4 M55-HP (CONFIG_SOC_AE402FA0E5597LE0_RTSS_HP, E1M-AEN401) uses the same register
+ * addresses (AE402FA0E5597 soc.h: AON, VBAT, ANA, STOP_MODE, CGU, LPTIMER, LPGPIO bases equal
+ * the E8's); a customer ran 14/14 RV-3028 countdown wakes with this port on an AEN401,
+ * not yet re-run on an Alp Lab bench.  The E4 `bkram` node (ensemble_e4_peripherals.dtsi)
+ * is inferred from the E3 / E7 SVDs and the E8 address: no E4 source names the Utility
+ * SRAM, so the wake record surviving STOP on the E4 is unverified.
  * The HP differs from the HE in the ways the Alif vendor sample sdk-alif samples/drivers/pm/system_off/src/main.c shows (cited per use below):
  *   - only a SOFT_OFF-class sleep: STOP maps to it; STANDBY (the S2RAM sleep) is HE-only;
  *   - no TCM retention (memory_blocks never names HP TCM: aipm.h has no HP TCM block);
@@ -1390,16 +1396,22 @@ static const alp_power_ops_t _ops = {
 	.boot_wake_info        = alp_som_power_ops_boot_wake_info,
 };
 
-ALP_BACKEND_REGISTER(power,
-                     alif_se_stop,
-                     {
-                         .silicon_ref = "alif:ensemble:e8",
-                         .vendor      = "alif",
-                         .base_caps   = 0u,
-                         .priority    = 100,
-                         .ops         = &_ops,
-                         .probe       = NULL,
-                     });
+/* One registration per silicon_ref the Kconfig admits: the E8 (HE and HP) and the
+ * E4 HP.  The registry matches silicon_ref exactly, so each part needs its own entry. */
+#define ALIF_SE_STOP_REGISTER(_name, _ref) \
+	ALP_BACKEND_REGISTER(power, \
+	                     _name, \
+	                     { \
+	                         .silicon_ref = _ref, \
+	                         .vendor      = "alif", \
+	                         .base_caps   = 0u, \
+	                         .priority    = 100, \
+	                         .ops         = &_ops, \
+	                         .probe       = NULL, \
+	                     })
+
+ALIF_SE_STOP_REGISTER(alif_se_stop, "alif:ensemble:e8");
+ALIF_SE_STOP_REGISTER(alif_se_stop_e4, "alif:ensemble:e4");
 
 /* ---- Cold-boot wake decode ------------------------------------------------------ */
 
@@ -1522,7 +1534,7 @@ bool alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
 _Static_assert(offsetof(run_profile_t, vdd_ioflex_3V3) + sizeof(uint32_t) == sizeof(run_profile_t),
                "run_profile_t changed: assign the new member in build_run_profile()");
 
-static void build_run_profile(run_profile_t *r)
+static __maybe_unused void build_run_profile(run_profile_t *r)
 {
 	/* The vendor profile asks only for PD_SYST | PD_SSE700_AON (sdk-alif-ref
 	 * samples/drivers/pm/system_off/src/main.c:129) and the Utility SRAM must be named in
@@ -1551,7 +1563,7 @@ static void build_run_profile(run_profile_t *r)
 }
 
 /* True when the clock tree is the running one. */
-static bool clocks_healthy(void)
+static __maybe_unused bool clocks_healthy(void)
 {
 	const uint32_t mask =
 	    alif_se_hw_core_is_hp() ? ALIF_SE_PLL_CLK_SEL_HP_MASK : ALIF_SE_PLL_CLK_SEL_HE_MASK;
