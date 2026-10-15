@@ -283,8 +283,7 @@ J-Link> mem32 0x0237FDC0, 5           // bl, req (0 once taken), rejects, seq, l
 After an HE-only warm reset the console line reads `[vol] N% at 0x0237fd80 (warm: levels kept), backlight M% ...` and `vol` / `bl` still hold the levels from before the reset (a valid tagged word is restored, the backlight is re-applied to the LED, both clamped to this build's limits); a cold power-up shows 30 % / 30 %.
 
 **Changing the volume without reflashing (any SWD probe, HE or HP running, nothing halted).** The sound's
-volume is 0..100 % of the build's `TR_SND_VOLUME` ceiling (128, the level heard as safe on the 2026W36-0002
-speakers; 100 % is that level, the word can only turn it down). Write the REQUEST word, never `vol`:
+volume is 0..100 % of the build's `TR_SND_VOLUME` ceiling (255, unity; 100 % is that level, the word can only turn it down). Write the REQUEST word, never `vol`:
 the HE is `vol`'s only writer and puts its own level back on the next frame.
 
 ```

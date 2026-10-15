@@ -76,12 +76,16 @@ if(TR_HP_SOUND)
 	# The game's sound, as the standalone GAME image builds it by default (sound/CMakeLists.txt:
 	# V2 + V3 voicing, 16 kHz, round-4 amp config = no override writes): the synth defines are
 	# the same bits the host goldens pin.
-	set(TR_SND_VOLUME "" CACHE STRING "Digital volume 0..128 (empty = 128; sound/src/main.c caps it)")
+	set(TR_SND_VOLUME "" CACHE STRING "Digital volume 0..255 (empty = 255, unity)")
+	set(TR_SND_AMP_LEVEL "" CACHE STRING "TAS2563 amp analog level code, int or hex 0x01..0x10 (empty = 0x10, 16.0 dBV)")
 	set(TR_SND_AMP_REGS_FILE NONE CACHE STRING "Header defining TR_SND_AMP_REGS (extra TAS2563 writes), or NONE")
 	target_compile_definitions(app PRIVATE TR_HP_SOUND=1 TR_SND_EMBED=1 TR_SND_TEST=0 TR_SND_MIC=0
 		TR_AUDIO_V2=1 TR_AUDIO_V3=1 TR_AUDIO_RATE=16000u)
 	if(TR_SND_VOLUME)
 		target_compile_definitions(app PRIVATE TR_SND_VOLUME=${TR_SND_VOLUME}u)
+	endif()
+	if(TR_SND_AMP_LEVEL)
+		target_compile_definitions(app PRIVATE TR_SND_AMP_LEVEL=${TR_SND_AMP_LEVEL}u)
 	endif()
 	# DEV bench control (sound/src/main.c): once, after ~3 s of stream, hold the I2S3 IRQ off 2 ms so
 	# hp_i2s_fu MUST count -- the positive control for that counter. Never in a release:
