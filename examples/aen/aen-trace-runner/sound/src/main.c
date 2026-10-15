@@ -131,8 +131,8 @@ static bool s_bridge_up; /* step 1 done: a retried bring-up keeps the bridge and
 
 /* Speakers: Electrokit 8 ohm 5 W, one per TAS2563. Power into 8 ohm is Vpk^2 / 16 for a
  * full-scale sine: the amp analog level (PB_CFG1) sets Vpk, the digital volume scales it.
- *   level 0x0D = 14.5 dBV = 5.3 Vpk -> 1.76 W at unity (default, under 5 W even at 0 dBFS)
- *   level 0x10 = 16.0 dBV = 8.9 Vpk -> 4.97 W at unity (the 5 W rating: hard cap)
+ *   level 0x0D = 14.5 dBV = 5.3 Vpk -> 1.76 W at unity
+ *   level 0x10 = 16.0 dBV = 8.9 Vpk -> 4.97 W at unity (default and hard cap: the 5 W rating)
  * TR_SND_VOLUME is alp_audio_out_set_volume() 0..255 (255 = unity). */
 #ifndef TR_SND_VOLUME
 #define TR_SND_VOLUME 255u
@@ -140,7 +140,7 @@ static bool s_bridge_up; /* step 1 done: a retried bring-up keeps the bridge and
 BUILD_ASSERT(TR_SND_VOLUME <= 255u, "alp_audio_out_set_volume() takes 0..255 (255 = unity)");
 
 #ifndef TR_SND_AMP_LEVEL
-#define TR_SND_AMP_LEVEL 0x0Du
+#define TR_SND_AMP_LEVEL 0x10u
 #endif
 BUILD_ASSERT(TR_SND_AMP_LEVEL >= TAS2563_AMP_LEVEL_MIN && TR_SND_AMP_LEVEL <= TAS2563_AMP_LEVEL_MAX,
              "TR_SND_AMP_LEVEL outside the TAS2563 listed range 0x01..0x1C");

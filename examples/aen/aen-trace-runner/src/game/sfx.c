@@ -60,7 +60,9 @@ unsigned tr_sfx_watch(tr_sfx_watch_t  *w,
 			w->foot ^= 1u;
 			n = emit(out, n, TR_AEV_FOOTSTEP, w->foot);
 		}
-		if (g->alive && g->tick % TR_SFX_WIRE_TICKS == 0u) {
+		/* no live-wire hum in a demo run: the autopilot passes wires all the time, and the
+		 * swelling hum over the music is noise in the booth; a player still hears it */
+		if (g->alive && !attract_on && g->tick % TR_SFX_WIRE_TICKS == 0u) {
 			uint8_t lvl = tr_game_wire_level(g, track_h);
 			if (lvl != 0u) {
 				n = emit(out, n, TR_AEV_WIRE, lvl);
