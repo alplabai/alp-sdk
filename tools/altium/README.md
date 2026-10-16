@@ -9,12 +9,13 @@ of truth" principle.
 ## `export_e1m_pinmap.pas`
 
 A single reusable procedure — **`ExportAll`** — that works on any board
-project (E1M-EVK, E1M-X-EVK, a SoM project, …). One run writes two CSVs:
+project (E1M-EVK, E1M-X-EVK, a SoM project, …). One run writes three CSVs:
 
 | File | Columns |
 |------|---------|
 | `<base>_pinmap.csv` | `Net, Designator, PinNumber, PinName` |
-| `<base>_components.csv` | `Designator, Comment, DNP, Parameters` |
+| `<base>_components.csv` | `Designator, Comment, DNP, Parameters, UniqueId` |
+| `<base>_variants.csv` | `Variant, Designator, Kind, UniqueId` (every variation, for tracing DNP) |
 
 The **pin map** is the key one: a normal netlist export gives
 `net ↔ pin number` but drops the **pin name**, and for an E1M / E1M-X
@@ -39,9 +40,10 @@ base design (no variant) and every component reads `0`.
    (e.g. `…\xevk`, `…\e1m_evk`, `…\v2n`). Default base:
    `%TEMP%\board`.
 5. At the next prompt, pick the **assembly variant** to read for DNP
-   (the prompt lists the project's variants; default is the first, blank =
-   base design / all fitted).
-6. Send both CSVs over.
+   (the prompt lists the project's variants; default is the current
+   variant, else the first; blank = base design / all fitted; an unknown
+   name aborts the run).
+6. Send all three CSVs over.
 
 Uses the Document-Manager API on the flattened document; builds output in
 memory and writes with `SaveToFile` (no lingering file handle — the cause
