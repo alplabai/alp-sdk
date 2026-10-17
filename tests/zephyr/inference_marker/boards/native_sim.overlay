@@ -1,0 +1,23 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	aliases {
+		alp-inference-marker = &marker_led;
+	};
+
+	gpio_emul0: gpio_emul0 {
+		compatible = "zephyr,gpio-emul";
+		status = "okay";
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		marker_led: marker_led {
+			gpios = <&gpio_emul0 5 GPIO_ACTIVE_HIGH>;
+		};
+	};
+};

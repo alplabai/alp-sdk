@@ -384,6 +384,15 @@ config ALP_SDK_MAX_BLE_CONN_HANDLES
 	  ALP_SDK_BLE_MAX_CONNS so transient close/reopen flows do not
 	  starve.
 
+config ALP_INFERENCE_MARKER
+	bool "Drive a GPIO high during each alp_inference_invoke()"
+	depends on GPIO && $(dt_alias_enabled,alp-inference-marker)
+	help
+	  Drives the GPIO behind the `alp-inference-marker` devicetree
+	  alias (a node with `gpios`, e.g. a gpio-leds child) high for
+	  the duration of every alp_inference_invoke(), so an external
+	  probe can window per-inference energy.  Off by default.
+
 config ALP_SDK_MAX_INFERENCE_HANDLES
 	int "Maximum concurrent alp_inference_t handles"
 	default 2

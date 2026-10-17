@@ -67,6 +67,34 @@ ALP_BACKEND_DEFINE_CLASS(inference);
 
 static struct alp_inference _pool[CONFIG_ALP_SDK_MAX_INFERENCE_HANDLES];
 
+#if defined(CONFIG_ALP_INFERENCE_MARKER)
+/* Opt-in probe marker: the GPIO behind the `alp-inference-marker` DT alias is
+ * high exactly while alp_inference_invoke() runs, so an external probe can
+ * window per-inference energy. Parked inactive once at boot. */
+#include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/init.h>
+
+static const struct gpio_dt_spec _marker = GPIO_DT_SPEC_GET(DT_ALIAS(alp_inference_marker), gpios);
+
+static int _marker_init(void)
+{
+	if (!gpio_is_ready_dt(&_marker)) return -ENODEV;
+	return gpio_pin_configure_dt(&_marker, GPIO_OUTPUT_INACTIVE);
+}
+SYS_INIT(_marker_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+
+static inline void _marker_set(int level)
+{
+	if (gpio_is_ready_dt(&_marker)) (void)gpio_pin_set_dt(&_marker, level);
+}
+#else
+static inline void _marker_set(int level)
+{
+	(void)level;
+}
+#endif
+
 static struct alp_inference *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_INFERENCE_HANDLES; ++i) {
@@ -239,6 +267,9 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
 	 * floor-then-truncate-to-32-bit an app-level k_cycle_get_32()
 	 * harness would do), so a very fast invoke rounds sub-us to 0
 	 * rather than truncating with a bias. */
+	/* Marker goes high BEFORE t0 and low AFTER t1, so the GPIO toggle cost
+	 * sits outside the latency bracket and the reported number is unchanged. */
+	_marker_set(1);
 #if defined(CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER)
 	uint64_t t0 = k_cycle_get_64();
 #else
@@ -252,6 +283,7 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
 #else
 	uint32_t t1 = k_cycle_get_32();
 #endif
+	_marker_set(0);
 	if (rc == ALP_OK) {
 		uint64_t delta_cycles = (uint64_t)(t1 - t0); /* correct across a single wrap */
 		uint64_t us64         = k_cyc_to_us_near64(delta_cycles);

@@ -402,6 +402,37 @@ latency together (info/warning issues `partial_pulse_start`,
 `partial_pulse_end`, `pulse_spans_drop`). Measurement scope
 is whatever rail the monitor sits on; the "NOT" list above applies unchanged.
 
+## Inference marker GPIO (`CONFIG_ALP_INFERENCE_MARKER`)
+
+A probe that samples the module rail needs to know when an inference is
+running. With `CONFIG_ALP_INFERENCE_MARKER=y` the Zephyr dispatcher drives a
+GPIO high for the duration of every `alp_inference_invoke()` and low again on
+return (success or error). The pin is parked inactive at boot. The toggles sit
+outside the latency bracket, so `alp_inference_last_invoke_latency_us()` is
+unchanged. The option is off by default and is only offered when the
+devicetree has an `alp-inference-marker` alias pointing at a node with
+`gpios`. Non-Zephyr builds compile it out.
+
+Example overlay (illustrative, not shipped board support): marker on Alif
+P13_5, which is E1M pad AG6 (`I2S1_SDO`) on an AEN module.
+
+```dts
+/ {
+	aliases {
+		alp-inference-marker = &inference_marker;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		inference_marker: inference_marker {
+			gpios = <&gpio13 5 GPIO_ACTIVE_HIGH>;
+		};
+	};
+};
+```
+
+The pad must not be used by another peripheral in the same build.
+
 ## Bench notes that cost time
 
 - **A J-Link `qc` leaves the core halted.** Every console read
