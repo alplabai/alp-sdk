@@ -24,6 +24,16 @@ actually buying you at runtime:
   through the portable `<alp/display.h>` + `<alp/gui.h>` surfaces
   (no SDL2 window) -- the CPU-only baseline.
 
+## Panel
+
+On the E1M-EVK (AEN M55-HP targets) the build applies the
+`e1m_evk_rk055hdmipi4ma0` shield automatically: a RK055HDMIPI4MA0
+720×1280 MIPI-DSI panel (Himax HX8394) on the EVK's J6 connector, the same
+panel `examples/connectivity/iot-dashboard` uses.
+The UI is laid out for 240×320 and is not scaled to the DSI panel; this
+pairing is build-checked in CI only, not yet run on the bench. Pass
+`-DSHIELD=<other>` to use a different panel.
+
 ## Build
 
 From this directory, or from your own copy of it:

@@ -22,6 +22,15 @@ tree -- the headline showcase of every standard LVGL widget
 
 ## Hardware needed
 
+On the E1M-EVK (AEN M55-HP targets) the build applies the
+`e1m_evk_rk055hdmipi4ma0` shield automatically: a RK055HDMIPI4MA0
+720×1280 MIPI-DSI panel (Himax HX8394) on the EVK's J6 connector, the same
+panel `examples/connectivity/iot-dashboard` uses. The EVK has no working SPI
+route for an ST7789, so the panel described below applies to other boards.
+The UI is laid out for 240×320 and is not scaled to the DSI panel; this
+pairing is build-checked in CI only, not yet run on the bench. Pass
+`-DSHIELD=<other>` to use a different panel.
+
 - An E1M-AEN-family SoM (E8 recommended for the SRAM headroom).
 - E1M-EVK board (or any board exposing SPI1 + two GPIOs).
 - 240 x 320 ST7789 TFT panel wired to:
