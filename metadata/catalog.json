@@ -3534,6 +3534,10 @@
       "script": "scripts/check_example_portability.py"
     },
     {
+      "purpose": "Gate: example READMEs must teach the `tan build` flow and name the right board.",
+      "script": "scripts/check_example_readme.py"
+    },
+    {
       "purpose": "CI gate: no `examples/**/CMakeLists.txt` may reach `scripts/alp_project.py` through a bare relative hop -- every invocation resolves the script under `${ALP_SDK_ROOT}`.",
       "script": "scripts/check_example_sdk_root.py"
     },
