@@ -8,7 +8,6 @@ per-example `board.yaml` (11 of the 90 directories here), that
 file carries the exact SKU + board.
 
 Examples with a `board.yaml` build from their own directory with `tan build`
-(from an alp-workspace root: `tan build --project alp-sdk/examples/aen/<name>`).
 The rest are standalone Zephyr apps with no `board.yaml`, so they are not
 buildable with `tan build`; their READMEs give a `west build` recipe that works
 from an alp-sdk checkout only. Where a `board.yaml` declares only the M55-HE

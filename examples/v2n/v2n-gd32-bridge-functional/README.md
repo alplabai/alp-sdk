@@ -121,8 +121,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-gd32-bridge-functional`)
-
 `board.yaml` targets the E1M-V2M101 SoM's M33 core on the
 `e1m-x-evk` preset (SPI is the 25 MHz fast path under test; the
 suite passes `i2c = NULL`).

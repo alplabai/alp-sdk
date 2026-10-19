@@ -69,8 +69,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-eeprom-manifest-dump`)
-
 ## See also
 
 * [`docs/board-id.md`](../../../docs/board-id.md) -- customer-facing

@@ -30,8 +30,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-gpu2d-compose`)
-
 ### Yocto and standalone builds
 
 Yocto (recommended): `alp-image-edge` installs the `alp-gpu2d-compose` recipe on

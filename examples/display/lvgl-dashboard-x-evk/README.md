@@ -38,8 +38,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/display/lvgl-dashboard-x-evk`)
-
 `board.yaml` declares the A55 cluster app (`./src`, Yocto recipe
 `alp-lvgl-dashboard`) and leaves `m33_sm` off, so `tan build` plans a Yocto
 slice for it.  The two consumer paths below do the same steps by hand.

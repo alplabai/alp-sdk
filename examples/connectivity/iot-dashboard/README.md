@@ -39,9 +39,7 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/connectivity/iot-dashboard`)
-
-board.yaml declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 A real-silicon build refuses to configure without a real entropy
 source (#2192: AEN has no Ensemble entropy driver yet, so the weak-RNG

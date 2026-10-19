@@ -156,8 +156,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-gd32-bridge-loopback`)
-
 `board.yaml` targets the E1M-V2M101 SoM's M33 core on the `e1m-x-evk` preset.
 
 This example is **jumpered-bench-only** and targets the E1M-V2M101 SoM

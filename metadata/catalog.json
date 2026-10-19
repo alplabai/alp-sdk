@@ -179,7 +179,7 @@
         ],
         "path": "examples/aen/aen-cc3501e-gatt-register",
         "som": "E1M-AEN801",
-        "summary": "Bench check for the **NEW CC3501E dynamic GATT registration** path (#480/#892) on the Alif **M55-HE** (**E1M-AEN801**, Alif Ensemble E8) SoM. `alp_ble_gatt_register_service()` (`<alp/ble.h>`) used to be a stub; on this branch it really registers a service on the CC3501E's NimBLE host over the inter-chip bridge and fills in a real attribute handle per characteristic."
+        "summary": "Bench check for the **NEW CC3501E dynamic GATT registration** path (#480/#892) on the Alif **M55-HE** (**E1M-AEN801**, Alif Ensemble E8) SoM. `alp_ble_gatt_register_service()` (`<alp/ble.h>`) really registers a service on the CC3501E's NimBLE host over the inter-chip bridge and fills in a real attribute handle per characteristic."
       },
       {
         "board": "e1m-evk",
@@ -384,7 +384,7 @@
         ],
         "path": "examples/ai/ai-anomaly-detection-vibration",
         "som": "E1M-AEN801",
-        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to > `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`. HiL bring-up with a > real motor / pump and a customer-trained model is v0.6 work.",
+        "summary": "> ⚠️ **`[UNTESTED]` on hardware.** Compiles on > `native_sim/native/64` + cross-compiles to > `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`. HiL bring-up with a > real motor / pump and a customer-trained model is still open.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -417,7 +417,7 @@
         ],
         "path": "examples/ai/cold-chain-monitor",
         "som": "E1M-AEN801",
-        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `cold_chain` core > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on > native_sim with synthetic environment data covering the states. HiL with a > real BME280 + a trained model is bench-gated.",
+        "summary": "> **`[UNTESTED]` on hardware -- paper-correct.** The `cold_chain` core > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on > native_sim with synthetic environment data covering the states. HiL with a > real BME280 + a trained model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -450,7 +450,7 @@
         ],
         "path": "examples/ai/motor-current-signature",
         "som": "E1M-AEN801",
-        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `current_features` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic current covering all five states. HiL > on a real motor + a trained model is bench-gated.",
+        "summary": "> **`[UNTESTED]` on hardware -- paper-correct.** The `current_features` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic current covering all five states. HiL > on a real motor + a trained model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -483,7 +483,7 @@
         ],
         "path": "examples/ai/multimodal-fusion-pdm",
         "som": "E1M-AEN801",
-        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `fusion_health` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic per-modality data covering every > scenario. HiL with the three real sensors + a trained model is bench-gated.",
+        "summary": "> **`[UNTESTED]` on hardware -- paper-correct.** The `fusion_health` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic per-modality data covering every > scenario. HiL with the three real sensors + a trained model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -516,7 +516,7 @@
         ],
         "path": "examples/ai/rail-predictive-maintenance",
         "som": "E1M-AEN801",
-        "summary": "> **`[UNTESTED]` on hardware -- v0.6 paper-correct.** The DSP cores > (`rail_features`, `rail_position`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > a canned NMEA track + synthetic vibration. HiL on a real bogie with a > customer-trained model is bench-gated.",
+        "summary": "> **`[UNTESTED]` on hardware -- paper-correct.** The DSP cores > (`rail_features`, `rail_position`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > a canned NMEA track + synthetic vibration. HiL on a real bogie with a > customer-trained model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -549,7 +549,7 @@
         ],
         "path": "examples/ai/visual-defect-detection",
         "som": "E1M-AEN801",
-        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `defect_map` core > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on > native_sim with synthetic clean + defect frames. HiL with a real CSI camera + > a trained autoencoder is bench-gated.",
+        "summary": "> **`[UNTESTED]` on hardware -- paper-correct.** The `defect_map` core > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on > native_sim with synthetic clean + defect frames. HiL with a real CSI camera + > a trained autoencoder is bench-gated.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -582,7 +582,7 @@
         ],
         "path": "examples/ai/wearable-activity-fall",
         "som": "E1M-AEN801",
-        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The two cores > (`motion_features`, `fall_detect`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > synthetic motion (incl. an injected fall). HiL on a real wearable + a trained > model is bench-gated.",
+        "summary": "> **`[UNTESTED]` on hardware -- paper-correct.** The two cores > (`motion_features`, `fall_detect`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > synthetic motion (incl. an injected fall). HiL on a real wearable + a trained > model is bench-gated.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -617,7 +617,7 @@
         ],
         "path": "examples/audio/acoustic-anomaly-wind-turbine",
         "som": "E1M-AEN801",
-        "summary": "> **`[UNTESTED]` on hardware -- v0.6 paper-correct.** The three DSP cores > (`acoustic_features`, `rotor_speed`, `bpf_modulation`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > synthetic acoustics + a canned RPM track. HiL on a real nacelle with a > customer-trained model is bench-gated."
+        "summary": "> **`[UNTESTED]` on hardware -- paper-correct.** The three DSP cores > (`acoustic_features`, `rotor_speed`, `bpf_modulation`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > synthetic acoustics + a canned RPM track. HiL on a real nacelle with a > customer-trained model is bench-gated."
       },
       {
         "board": "e1m-evk",
@@ -646,7 +646,7 @@
         ],
         "path": "examples/audio/acoustic-safety-events",
         "som": "E1M-AEN801",
-        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `acoustic_event` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic audio cycling the four event types. > HiL with a real mic + a trained model is bench-gated."
+        "summary": "> **`[UNTESTED]` on hardware -- paper-correct.** The `acoustic_event` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic audio cycling the four event types. > HiL with a real mic + a trained model is bench-gated."
       },
       {
         "board": "e1m-evk",
@@ -681,7 +681,7 @@
         ],
         "path": "examples/audio/audio-loopback",
         "som": "E1M-AEN801",
-        "summary": "Per-peripheral example for `<alp/audio.h>`. Reads PCM blocks from the on-module PDM microphone, runs them through the ALP DSP chain (DC-block in v0.2), and pushes them straight back out over I²S. Demonstrates the full `audio_in` / `audio_out` lifecycle."
+        "summary": "Per-peripheral example for `<alp/audio.h>`. Reads PCM blocks from the on-module PDM microphone, runs them through the ALP DSP chain (DC-block), and pushes them straight back out over I²S. Demonstrates the full `audio_in` / `audio_out` lifecycle."
       },
       {
         "board": "e1m-x-evk",
@@ -705,7 +705,7 @@
         ],
         "path": "examples/audio/audio-noise-suppression",
         "som": "E1M-V2N101",
-        "summary": "Real-time noise suppression demo on the V2N (and V2H by SKU flip). Target market: USB-C headsets, true-wireless hearables, desktop conferencing rigs -- anywhere you want cloud-grade denoising at sub-perceptual latency without shipping audio off-device.",
+        "summary": "Real-time noise suppression demo on the V2N (`E1M-V2N101`; the other V2N and V2M SKUs share the M33 slice). Target market: USB-C headsets, true-wireless hearables, desktop conferencing rigs -- anywhere you want cloud-grade denoising at sub-perceptual latency without shipping audio off-device.",
         "supported_boards": [
           "e1m-x-evk"
         ]
@@ -805,7 +805,7 @@
         ],
         "path": "examples/audio/i2s-tone",
         "som": "E1M-AEN801",
-        "summary": "Per-peripheral example for `<alp/i2s.h>`. Generates a 1 kHz sine wave and writes it as 16-bit stereo PCM to ALP_E1M_I2S0.",
+        "summary": "Per-peripheral example for `<alp/i2s.h>`. Generates a 1 kHz triangle wave and writes it as 16-bit stereo PCM to ALP_E1M_I2S0.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -916,7 +916,7 @@
         ],
         "path": "examples/camera-vision/ai-camera-viewer",
         "som": "E1M-AEN801",
-        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on > `native_sim/native/64` against the full `<alp/camera.h>` / > `<alp/inference.h>` surfaces (both ship today; Ethos-U dispatch > runs through `alp_inference_open(...)` same as any other backend). > What's still missing is a real Vela-compiled `person_detect.tflite` > model and AEN HiL bench validation."
+        "summary": "> **`[UNTESTED]` on hardware -- paper-correct.** Builds clean on > `native_sim/native/64` against the full `<alp/camera.h>` / > `<alp/inference.h>` surfaces (both ship today; Ethos-U dispatch > runs through `alp_inference_open(...)` same as any other backend). > What's still missing is a real Vela-compiled `person_detect.tflite` > model and AEN HiL bench validation."
       },
       {
         "board": "e1m-x-evk",
@@ -940,7 +940,7 @@
         ],
         "path": "examples/camera-vision/ai-object-detection-realtime",
         "som": "E1M-V2M101",
-        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on > `native_sim/native/64` + the AEN fallback target against the full > `<alp/camera.h>` / `<alp/inference.h>` / `<alp/display.h>` surfaces. > The checked-in V2M101 project enables only its M33/Zephyr slice, so TFLM > CPU is its only inference backend; the placeholder DXNN request remains > an intentional NOSUPPORT skeleton. A real DX-M1 run still needs an > A55/Yocto app, a compiled YOLOv8-tiny model, and V2N-M1 HiL validation."
+        "summary": "> **`[UNTESTED]` on hardware -- paper-correct.** Builds clean on > `native_sim/native/64` + the V2M101 M33 target against the full > `<alp/camera.h>` / `<alp/inference.h>` / `<alp/display.h>` surfaces. > The checked-in V2M101 project enables only its M33/Zephyr slice, so TFLM > CPU is its only inference backend; the placeholder DXNN request remains > an intentional NOSUPPORT skeleton. A real DX-M1 run still needs an > A55/Yocto app, a compiled YOLOv8-tiny model, and V2M101 HiL validation."
       }
     ],
     "connectivity": [
@@ -1059,7 +1059,7 @@
         ],
         "path": "examples/connectivity/iot-dashboard",
         "som": "E1M-AEN801",
-        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds clean on > `native_sim/native/64`; real WiFi + MQTT + TLS bring-up gates on > v0.6 AEN HiL."
+        "summary": "> ⚠️ **`[UNTESTED]` on hardware.** Builds clean on > `native_sim/native/64`; real WiFi + MQTT + TLS bring-up still needs > AEN HiL."
       },
       {
         "board": "e1m-evk",
@@ -1247,7 +1247,7 @@
         ],
         "path": "examples/connectivity/production-deployment",
         "som": "E1M-AEN801",
-        "summary": "The v1.0 reference application for a field-deployable IoT product. Demonstrates the full manufactured -> deployed -> updated -> attested lifecycle on a single app, so customers see how the SDK's secure-boot, OTA, EEPROM-provisioning, and remote-attestation pieces fit together."
+        "summary": "The reference application for a field-deployable IoT product. Demonstrates the full manufactured -> deployed -> updated -> attested lifecycle on a single app, so customers see how the SDK's secure-boot, OTA, EEPROM-provisioning, and remote-attestation pieces fit together."
       },
       {
         "board": "e1m-evk",
@@ -1313,7 +1313,7 @@
         ],
         "path": "examples/display/drone-hud",
         "som": "E1M-AEN801",
-        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds on > `native_sim/native/64`; HiL silicon bring-up of the IMU + GPS + > battery + display chain lands in v0.6."
+        "summary": "> ⚠️ **`[UNTESTED]` on hardware.** Builds on > `native_sim/native/64`; HiL silicon bring-up of the IMU + GPS + > battery + display chain is still open."
       },
       {
         "board": "e1m-evk",
@@ -1526,7 +1526,7 @@
         ],
         "path": "examples/multicore/heterogeneous-offload",
         "som": "E1M-V2N101",
-        "summary": "> `[UNTESTED]` -- v0.6 paper-correct. Builds against the same V2N > memory_map as rpmsg-v2n (no TBD addresses). HiL bring-up gates > on v0.8."
+        "summary": "> `[UNTESTED]` -- builds against the same V2N memory_map as rpmsg-v2n > (no TBD addresses). The underlying rpmsg-v2n transport is > bench-proven (#697, #2374); the FFT offload itself has not been > benched."
       },
       {
         "board": "e1m-x-evk",
@@ -1626,7 +1626,7 @@
         ],
         "path": "examples/multicore/rpmsg-aen",
         "som": "E1M-AEN801",
-        "summary": "> `[UNTESTED]` -- v0.6 structural draft. Board.yaml + sources are > shape-correct, but the end-to-end RPMsg path still needs AEN801 > bench validation."
+        "summary": "> `[UNTESTED]` -- the M55-HP slice builds; the `a32_cluster` Yocto slice > is not buildable today (#1982, see Build). Board.yaml + sources are > shape-correct, but the end-to-end RPMsg path still needs AEN801 > bench validation."
       },
       {
         "board": "e1m-x-evk",
@@ -1857,7 +1857,7 @@
         ],
         "path": "examples/peripheral-io/drone-autopilot",
         "som": "E1M-AEN801",
-        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
+        "summary": "> ⚠️ **`[UNTESTED]` -- paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
       },
       {
         "board": "e1m-evk",
@@ -2161,7 +2161,7 @@
         ],
         "path": "examples/peripheral-io/i2c-slave",
         "som": "E1M-AEN801",
-        "summary": "Make this MCU answer on the bus as a register-mapped I2C target (slave) using the register-file helper from `<alp/i2c_regfile.h>` (v0.9, `[ABI-EXPERIMENTAL]`), a pure layer over the portable `alp_i2c_target_*` surface in `<alp/peripheral.h>`.",
+        "summary": "Make this MCU answer on the bus as a register-mapped I2C target (slave) using the register-file helper from `<alp/i2c_regfile.h>` (`[ABI-EXPERIMENTAL]`), a pure layer over the portable `alp_i2c_target_*` surface in `<alp/peripheral.h>`.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -2356,7 +2356,7 @@
         ],
         "path": "examples/peripheral-io/spi-slave",
         "som": "E1M-AEN801",
-        "summary": "Claim the bus in target (slave) mode using the portable `alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.9, `[ABI-EXPERIMENTAL]`) and answer an external SPI controller.",
+        "summary": "Claim the bus in target (slave) mode using the portable `alp_spi_target_*` surface from `<alp/peripheral.h>` (`[ABI-EXPERIMENTAL]`) and answer an external SPI controller.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -3132,7 +3132,7 @@
         ],
         "path": "examples/v2n/v2n-m1-ros-perception",
         "som": "E1M-V2M101",
-        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds against a > Yocto SDK that includes ROS 2 + the alp-sdk runtime. Real > bring-up (V2N-M1 + DEEPX runtime + camera capture pipeline) > gates on v0.8 V2M HiL."
+        "summary": "> ⚠️ **`[UNTESTED]`** Builds against a > Yocto SDK that includes ROS 2 + the alp-sdk runtime. Real > bring-up (V2N-M1 + DEEPX runtime + camera capture pipeline) > gates on V2M HiL."
       },
       {
         "board": "e1m-x-evk",
@@ -3216,7 +3216,7 @@
         ],
         "path": "examples/v2n/v2n-pwm-fan-control",
         "som": "E1M-V2N101",
-        "summary": "Drive a fan from `ALP_E1M_PWM0` on V2N. Walks duty cycle through a five-stop curve at a fixed 25 kHz board (above audible) using the portable `<alp/pwm.h>` surface, so the wave shape is observable on a scope."
+        "summary": "Drive a fan from `ALP_E1M_X_PWM0` on V2N. Walks duty cycle through a five-stop curve at a fixed 25 kHz PWM frequency (above audible) using the portable `<alp/pwm.h>` surface, so the wave shape is observable on a scope."
       },
       {
         "board": "e1m-x-evk",

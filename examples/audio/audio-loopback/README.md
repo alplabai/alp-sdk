@@ -31,9 +31,7 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/audio/audio-loopback`)
-
-board.yaml declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 `board.yaml` supplies `CONFIG_I2S=y`, but not the PDM microphone path. For a hardware build, add `CONFIG_AUDIO_DMIC=y` to this directory's `prj.conf` first (the twister scenario passes it as an extra argument instead).
 

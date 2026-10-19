@@ -44,8 +44,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-ros2-som-temperature`)
-
 ### Yocto image or colcon in the Yocto SDK
 
 Two ways, same `CMakeLists.txt`:

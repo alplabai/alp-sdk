@@ -54,8 +54,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-m1-deepx-inference`)
-
 `board.yaml` targets the E1M-V2M101 SoM's M33 core on the `e1m-x-evk` preset.
 
 This `m33_sm` image does not run DEEPX inference on silicon: the rail

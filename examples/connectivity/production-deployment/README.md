@@ -176,8 +176,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/connectivity/production-deployment`)
-
 Real silicon (AEN-Zephyr) requires a staged Mender server.  `board.yaml`
 runs the app on `m55_hp`; `a32_cluster` and `m55_he` are off (this is a
 security skeleton with no HE firmware).

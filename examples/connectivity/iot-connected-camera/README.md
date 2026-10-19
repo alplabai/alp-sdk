@@ -62,8 +62,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/connectivity/iot-connected-camera`)
-
 The V2N board file ships in-tree at
 [`zephyr/boards/alp/e1m_v2n101_m33_sm/`](../../../zephyr/boards/alp/e1m_v2n101_m33_sm/).
 You'll need a TLS CA bundle and (optionally) a client cert in

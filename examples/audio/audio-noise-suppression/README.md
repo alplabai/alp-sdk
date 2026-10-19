@@ -66,8 +66,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/audio/audio-noise-suppression`)
-
 ## Reference
 
 - [`<alp/audio.h>`](../../../include/alp/audio.h)

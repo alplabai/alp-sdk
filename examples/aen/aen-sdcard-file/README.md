@@ -43,9 +43,7 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/aen/aen-sdcard-file`)
-
-`board.yaml` declares only `m55_he`, so tan also builds the SDK's idle alp-stock-shim image for `m55_hp` (`build/m55_hp-zephyr/`); see [`docs/heterogeneous-builds.md`](../../../docs/heterogeneous-builds.md).
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 `board.yaml` sets `som.sku: E1M-AEN801`. The bench verification below ran on an E1M-AEN803; to build for it, set `som.sku: E1M-AEN803` (it has the same `m55_he` core, and the example ships an AEN803 overlay).
 

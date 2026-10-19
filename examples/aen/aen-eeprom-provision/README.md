@@ -48,11 +48,9 @@ From this directory, or from your own copy of it:
 tan build
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/aen/aen-eeprom-provision`)
-
 Do not use `tan flash` for this tool: it must be RAM-run (Flow C) so nothing is written to MRAM. The bench recipe below is the SDK-internal path by design; it has no `tan` equivalent until RAM-run mode ships (tan-cli#1313).
 
-`board.yaml` declares only `m55_he`, so `tan` also builds the SDK's idle `alp-stock-shim` image for `m55_hp` (`build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 ## Run it
 

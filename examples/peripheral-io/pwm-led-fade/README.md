@@ -21,8 +21,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/peripheral-io/pwm-led-fade`)
-
 `board.yaml`'s declarative `pins:`/`peripherals:` route alone emits no
 devicetree alias -- this example ships its own board-qualified overlay,
 [`boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`](boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay),
@@ -33,7 +31,7 @@ wiring.  The shared EVK board tree
 ([`zephyr/boards/alp/e1m_aen801_m55_hp/`](../../../zephyr/boards/alp/e1m_aen801_m55_hp/))
 carries only the base boot + console wiring, not this alias.
 
-board.yaml declares only m55_hp, so tan also builds the SDK's idle alp-stock-shim image for m55_he (build/m55_he-zephyr/); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 ### Inside an SDK checkout (twister / CI)
 

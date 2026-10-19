@@ -188,8 +188,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-drpai-inference`)
-
 ### Yocto (recommended)
 
 The `alp-drpai-inference` recipe

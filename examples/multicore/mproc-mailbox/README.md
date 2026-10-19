@@ -33,8 +33,6 @@ tan flash --core m55_hp
 tan flash --core m55_he
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/multicore/mproc-mailbox`)
-
 `board.yaml` declares both `m55_hp` (`app: ./src`) and `m55_he`
 (`app: ./peer`) as real project cores, so one `tan build` produces both
 images -- no topology-default `alp-stock-shim` placeholder on the HE side.

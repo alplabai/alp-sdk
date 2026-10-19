@@ -113,8 +113,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-gd32-swd-flash`)
-
 `board.yaml` targets the E1M-V2N101 SoM's M33 core on the `e1m-x-evk` preset.
 
 ## See also

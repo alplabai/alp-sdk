@@ -20,8 +20,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/connectivity/modbus-server`)
-
 `board.yaml` targets `E1M-V2N101` (`m33_sm`, `os: zephyr`); the example is hardware-free, so the native_sim run below is the quick check.
 
 ### Inside an SDK checkout (twister / CI)

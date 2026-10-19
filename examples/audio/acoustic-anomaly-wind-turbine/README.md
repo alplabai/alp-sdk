@@ -61,9 +61,7 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/audio/acoustic-anomaly-wind-turbine`)
-
-board.yaml declares only `m55_he`, so tan also builds the SDK's idle alp-stock-shim image for `m55_hp` (`build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 The DEEPX DX-M1 path runs on the A55 side, so it needs a separate E1M-V2M101 project (`som.sku`, an `m33_sm` core and an A55/Yocto app), not a `som.sku` edit here.
 

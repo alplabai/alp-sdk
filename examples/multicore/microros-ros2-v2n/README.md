@@ -89,8 +89,6 @@ tan build            # both slices; same flow as rpmsg-v2n
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/multicore/microros-ros2-v2n`)
-
 ### Inside an SDK checkout (twister / CI)
 
 These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.

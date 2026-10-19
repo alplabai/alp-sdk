@@ -64,15 +64,13 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/peripheral-io/drone-autopilot`)
-
 This app also ships an E1M-AEN803 twin of the AEN801 overlay
 (`boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`):
 [`boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`](boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay)
 (identical DT content). After setting `som.sku: E1M-AEN803` in
 `board.yaml`, `tan build` picks it up.
 
-board.yaml declares only m55_hp, so tan also builds the SDK's idle alp-stock-shim image for m55_he (build/m55_he-zephyr/); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 ### Inside an SDK checkout (twister / CI)
 

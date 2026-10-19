@@ -53,8 +53,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-board-id-readout`)
-
 ## See also
 
 * [`docs/board-id.md`](../../../docs/board-id.md) -- full identification

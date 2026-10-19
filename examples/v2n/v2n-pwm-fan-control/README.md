@@ -68,8 +68,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-pwm-fan-control`)
-
 ## See also
 
 * [`<alp/pwm.h>`](../../../include/alp/pwm.h) -- portable PWM surface.

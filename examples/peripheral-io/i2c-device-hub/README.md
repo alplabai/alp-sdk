@@ -112,11 +112,9 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/peripheral-io/i2c-device-hub`)
-
 board.yaml targets the E1M-AEN801 (E8) SoM on the e1m-evk preset, M55-HE core.
 
-board.yaml declares only m55_he, so tan also builds the SDK's idle alp-stock-shim image for m55_hp (build/m55_hp-zephyr/); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 ### Inside an SDK checkout (twister / CI)
 

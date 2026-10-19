@@ -120,8 +120,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/power-timing/power-managed-sensor`)
-
 board.yaml declares both cores (`m55_hp` is parked with `os: "off"`), so only `m55_he` builds an application image.
 
 The generated `alp.conf` carries the `CONFIG_PM=y` /

@@ -25,9 +25,7 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/aen/aen-eeprom-manifest`)
-
-`board.yaml` declares only `m55_he`, so `tan` also builds the SDK's idle `alp-stock-shim` image for `m55_hp` (`build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 ### Inside an SDK checkout (twister / CI)
 

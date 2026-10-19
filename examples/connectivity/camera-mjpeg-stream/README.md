@@ -20,9 +20,7 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/connectivity/camera-mjpeg-stream`)
-
-board.yaml declares only `m55_he`, so tan also builds the SDK's idle alp-stock-shim image for `m55_hp` (`build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 This build targets E1M-AEN803 (ISP-Pico + Hantro). The camera shield is selected with `-DSHIELD=...`, as the west commands below show; the 1280x960 and sensor variants below use the same SDK-checkout form.
 

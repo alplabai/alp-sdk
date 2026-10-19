@@ -140,8 +140,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/peripheral-io/alp-console`)
-
 This app also ships an E1M-AEN803 twin of the AEN801 overlay + `.conf` pair
 (`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`,
 `boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf`):

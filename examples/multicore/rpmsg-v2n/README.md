@@ -120,8 +120,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/multicore/rpmsg-v2n`)
-
 `tan build` is a single command that:
 
 1. Reads `board.yaml`, resolves the V2N101 preset's topology.

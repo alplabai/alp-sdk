@@ -44,8 +44,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-m1-ros-perception`)
-
 ### Building the ROS 2 package in the Yocto SDK
 
 This is a ROS 2 colcon package that lives inside the alp-sdk's

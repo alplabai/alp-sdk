@@ -69,8 +69,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/multicore/heterogeneous-offload`)
-
 Fan-out:
 
 - `build/a55_cluster-yocto/` (bitbake against `MACHINE = e1m-v2n101-a55`).

@@ -102,8 +102,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-pmic-inspect`)
-
 ### Manual build in the Yocto SDK
 
 ```sh

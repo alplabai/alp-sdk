@@ -81,9 +81,7 @@ To exercise this app on silicon you need two images.
   tan flash
   ```
 
-  (from an alp-workspace root instead: `tan build --project alp-sdk/examples/aen/aen-cc3501e-gatt-register`)
-
-  `board.yaml` declares only `m55_he`, so `tan` also builds the SDK's idle `alp-stock-shim` image for `m55_hp` (`build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+  `tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 - **CC3501E firmware**: a `cc3501e-bridge-firmware` image
   (`alplabai/cc3501e-bridge-firmware`, `ti/build_ti.ps1`; the firmware
   lives in its own repository, ADR 0031) that includes the

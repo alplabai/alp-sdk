@@ -21,14 +21,12 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/peripheral-io/qenc-readout`)
-
 On the E1M EVK with an AEN SoM (M55-HP), the board overlay in `boards/`
 binds `ALP_E1M_ENC0` to the EVK's rotary encoder through Zephyr's
 `gpio-qdec` driver (the E8 has no hardware quadrature decoder). Turn the
 knob while it runs; at rest the position stays 0.
 
-board.yaml declares only m55_hp, so tan also builds the SDK's idle alp-stock-shim image for m55_he (build/m55_he-zephyr/); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 ### Inside an SDK checkout (twister / CI)
 

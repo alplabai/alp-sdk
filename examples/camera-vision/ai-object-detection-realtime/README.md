@@ -52,8 +52,6 @@ tan build
 tan flash
 ```
 
-(from an alp-workspace root instead: `tan build --project alp-sdk/examples/camera-vision/ai-object-detection-realtime`)
-
 The M33 build does not run the A55-owned DX-M1 runtime.  Add an A55/Yocto
 app to the project for real DEEPX inference.
 
