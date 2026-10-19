@@ -105,6 +105,23 @@ both IMU rows fail until the respin.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/peripheral-io/i2c-device-hub`)
+
+board.yaml targets the E1M-AEN801 (E8) SoM on the e1m-evk preset, M55-HE core.
+
+board.yaml declares only m55_he, so tan also builds the SDK's idle alp-stock-shim image for m55_hp (build/m55_hp-zephyr/); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```bash
 # Standalone, native_sim (emul I2C; every device reports absent):
 # writes examples/peripheral-io/i2c-device-hub/generated/alp.conf, which west reads below (#866)
@@ -113,10 +130,6 @@ west build -b native_sim/native/64 examples/peripheral-io/i2c-device-hub \
     -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd) \
        -DCONFIG_COMPILER_OPT='"-DALP_BOARD_E1M_EVK"'
 west build -t run
-
-# On real silicon: board.yaml targets the E1M-AEN801 (E8) SoM on
-# the e1m-evk preset, M55-HE core -- build via the SDK wrapper:
-tan build --project examples/peripheral-io/i2c-device-hub
 ```
 
 (The `ALP_BOARD_E1M_EVK` define selects the EVK route table for

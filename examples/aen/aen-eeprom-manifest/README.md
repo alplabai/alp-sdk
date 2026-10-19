@@ -16,6 +16,23 @@ per [ADR 0017](../../../docs/adr/0017-alp-sdk-over-the-vendor-sdk.md) — no ven
 driver, just the DT node (`i2c2@49012000`, authoritative `I2C2_BASE`/`I2C2_IRQ`
 from the AE822 DFP device header) + the portable backend.
 
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/aen/aen-eeprom-manifest`)
+
+`board.yaml` declares only `m55_he`, so `tan` also builds the SDK's idle `alp-stock-shim` image for `m55_hp` (`build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```bash
 # writes examples/aen/aen-eeprom-manifest/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/aen/aen-eeprom-manifest

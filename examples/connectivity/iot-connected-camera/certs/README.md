@@ -1,21 +1,21 @@
 # certs/
 
-TLS material for the MQTT-over-TLS path.  v0.3 deliverable.
+TLS material for the MQTT-over-TLS path (target; not wired up yet).
 
-## v0.1 status
+## Current status
 
-Empty.  v0.1 doesn't compile MbedTLS; the IoT stub returns
+Empty.  The skeleton doesn't compile MbedTLS; the IoT stub returns
 `ALP_ERR_NOSUPPORT` for every connect call regardless of cert
 presence.
 
-## What goes here (v0.3)
+## What goes here
 
 - `ca.pem` — broker root CA bundle (PEM).  Required.
 - `client.pem` — client certificate (PEM).  Optional, for mutual-TLS.
 - `client.key` — client private key (PEM, unencrypted).  Required if
   `client.pem` is provided.
 
-`prj.conf` for v0.3 turns on:
+Once the TLS path lands, `prj.conf` turns on:
 
 ```
 CONFIG_MBEDTLS=y
@@ -37,9 +37,7 @@ client opens its socket.
   `.gitignore` are the only tracked files here.
 - Use a per-device certificate when shipping at any scale; reuse
   is a security smell.
-- Rotate the CA bundle when your broker rotates.  v0.3.x will ship
-  a `cert-pull` helper that fetches the bundle from a provisioning
-  endpoint at first boot.
+- Rotate the CA bundle when your broker rotates.
 
 ## Dev / test broker
 
@@ -52,4 +50,5 @@ docker run --rm -p 8883:8883 \
     eclipse-mosquitto:2
 ```
 
-Sample `dev-broker.conf` lands in v0.3 alongside this README.
+The `dev-broker.conf` in that command is yours to write: a Mosquitto
+listener on 8883 pointing at the `ca.pem` and server cert/key under `/certs`.

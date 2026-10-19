@@ -13,6 +13,8 @@ must be passed explicitly; `-p always` forces a clean configure each time.
 
 **HE (160 MHz):**
 
+Bench probe (no `board.yaml`, so not buildable with `tan build`); alp-sdk checkout only.
+
 ```sh
 cd examples/aen/aen-trace-runner
 ZEPHYR_BASE=$ZEPHYR_BASE \

@@ -73,15 +73,30 @@ WIC (mic activity)  ──▶  M55 HE wakes from STOP
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/audio/audio-wake-word`)
+
+board.yaml declares only `m55_he`, so tan also builds the SDK's idle alp-stock-shim image for `m55_hp` (`build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```
 # writes examples/audio/audio-wake-word/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/audio/audio-wake-word
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/audio/audio-wake-word -- -DEXTRA_CONF_FILE=generated/alp.conf
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/audio/audio-wake-word -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 
 On `native_sim` the PDM mic + Ethos-U paths NOSUPPORT-stub; the
 loop still exercises the inference dispatch + post-process
-plumbing and prints `[wake] done`. TODO(v0.6): drop the
+plumbing and prints `[wake] done`. To go further, drop a
 Vela-compiled `hey_alp_vela.tflite` into `models/` and replace
 the `s_model[]` placeholder.

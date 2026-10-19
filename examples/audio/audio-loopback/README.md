@@ -2,7 +2,7 @@
 
 Per-peripheral example for `<alp/audio.h>`.  Reads PCM blocks
 from the on-module PDM microphone, runs them through the ALP
-DSP chain (DC-block in v0.2), and pushes them straight back
+DSP chain (DC-block), and pushes them straight back
 out over I²S.  Demonstrates the full `audio_in` / `audio_out`
 lifecycle.
 
@@ -15,7 +15,7 @@ lifecycle.
   block-API.  Reading blocks of `FRAMES` samples at a time
   keeps latency bounded while letting the driver amortise
   the DMA transfers.
-- Wrapper-managed DSP: the v0.2 DC-block runs inside
+- Wrapper-managed DSP: the DC-block runs inside
   `alp_audio_in_read` so the user loop stays trivial.  Real
   apps drop additional stages into the same chain via
   `<alp/dsp.h>` without touching the I/O path.
@@ -24,7 +24,24 @@ lifecycle.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/audio/audio-loopback`)
+
+board.yaml declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+`board.yaml` supplies `CONFIG_I2S=y`, but not the PDM microphone path. For a hardware build, add `CONFIG_AUDIO_DMIC=y` to this directory's `prj.conf` first (the twister scenario passes it as an extra argument instead).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```
 # writes examples/audio/audio-loopback/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/audio/audio-loopback
 west build -b native_sim/native/64 examples/audio/audio-loopback \

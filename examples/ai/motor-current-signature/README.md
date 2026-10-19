@@ -1,6 +1,6 @@
 # motor-current-signature
 
-> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `current_features`
+> **`[UNTESTED]` on hardware -- paper-correct.** The `current_features`
 > core is host-unit-tested on `native_sim/native/64`; the full app runs
 > end-to-end on native_sim with synthetic current covering all five states. HiL
 > on a real motor + a trained model is bench-gated.
@@ -44,14 +44,27 @@ CURR,5.12,STALL,3.10,37.2,0.0,0.90
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/ai/motor-current-signature`)
+
+board.yaml declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```
 # writes examples/ai/motor-current-signature/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/ai/motor-current-signature
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/motor-current-signature -- -DEXTRA_CONF_FILE=generated/alp.conf
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/ai/motor-current-signature -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
-
-Flip `som.sku` in `board.yaml` to `E1M-V2M101` for the DEEPX DX-M1 path.
 
 ## Model
 

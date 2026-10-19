@@ -1,6 +1,7 @@
 # rpmsg-aen
 
-> `[UNTESTED]` -- v0.6 structural draft.  Board.yaml + sources are
+> `[UNTESTED]` -- the M55-HP slice builds; the `a32_cluster` Yocto slice
+> is not buildable today (#1982, see Build).  Board.yaml + sources are
 > shape-correct, but the end-to-end RPMsg path still needs AEN801
 > bench validation.
 
@@ -9,7 +10,7 @@ Heterogeneous compute on **E1M-AEN801** (Alif Ensemble E8):
 - The 2-core **Cortex-A32 cluster** boots Yocto Linux from MRAM and
   runs the consumer under `linux/`.
 - The **Cortex-M55 HP** core boots from MRAM, reads the board's
-  on-board LSM6DSO IMU + BMP581 barometer, and publishes one
+  on-board BMI323 IMU + BMP581 barometer, and publishes one
   `imu_sample` event per second over `<alp/rpc.h>`.
 - The **Cortex-M55 HE** core stays at the SoM topology default
   (stock-shim Zephyr image) -- alive for future low-power offload,
@@ -45,7 +46,7 @@ Tracked as #1088; see `docs/heterogeneous-builds.md`.
 
 | Range                     | Owner                  | Notes                                                |
 |---------------------------|------------------------|------------------------------------------------------|
-| `mram_main`              | All cores              | On-die MRAM, cacheable. Holds the RPMsg carve-out.   |
+| `mram_main`              | All cores              | On-die MRAM. Holds the RPMsg carve-out, which this example keeps non-cacheable (`CONFIG_DCACHE=n` on `m55_hp`, see above). |
 | `sram_main`              | All cores              | On-die SRAM, non-cacheable scratch.                  |
 
 ## Boot order
@@ -68,10 +69,16 @@ ships the authoritative `boot_order:` block.)
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
-cd alp-workspace/alp-sdk/examples/multicore/rpmsg-aen
 tan build
+tan flash
 ```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/multicore/rpmsg-aen`)
+
+board.yaml declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 Tan's relocated planner fans out:
 
@@ -83,7 +90,8 @@ Tan's relocated planner fans out:
   regardless, #1971), so the planner emits `command: null` plus a
   `yocto-machine-unbuildable` warning for this slice instead of a
   `bitbake` command. Track the rebuild at #264.
-- `build/m55_hp-zephyr/` (Zephyr against `BOARD = alp_e1m_aen801_m55_hp`)
+- `build/m55_hp-zephyr/` (Zephyr against
+  `BOARD = alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`)
   -- this slice is real and builds today; see
   [`docs/bring-up-aen.md`](../../../docs/bring-up-aen.md).
 - `build/m55_he-zephyr/` (Zephyr against

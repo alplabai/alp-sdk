@@ -29,7 +29,22 @@ A minimal LVGL 9 dashboard on the E1M-X V2N MIPI-DSI panel
   pins 21 and 27).  I2C3 also has no pull-ups on the SoM or carrier
   segment.  The dashboard runs display-only until touch is wired.
 
-## Consumer path 1 -- Yocto image (recommended)
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/display/lvgl-dashboard-x-evk`)
+
+`board.yaml` declares the A55 cluster app (`./src`, Yocto recipe
+`alp-lvgl-dashboard`) and leaves `m33_sm` off, so `tan build` plans a Yocto
+slice for it.  The two consumer paths below do the same steps by hand.
+
+## Consumer path 1 -- Yocto image
 
 The `alp-lvgl-dashboard` Yocto recipe (in
 `meta-alp-sdk/recipes-examples/alp-lvgl-dashboard/`) packages this
@@ -92,5 +107,4 @@ available.
 
 `[UNTESTED on silicon]` -- CMake parses cleanly; LVGL 9.1 API verified
 against the upstream v9.1.0 tag.  Real-hardware bring-up is gated on
-the display pipeline patches landing in the Yocto layer (Tasks 1-7 of
-the v2n-lcd-display1 branch).
+the display pipeline patches landing in the Yocto layer.

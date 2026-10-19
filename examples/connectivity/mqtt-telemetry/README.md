@@ -14,7 +14,7 @@ alp_mqtt_close()                                # clean disconnect
 
 ## Supported hardware -- AEN only
 
-This template ships for **E1M-AEN801 only**. Its transport is the
+This template ships for **E1M-AEN801** (and its same-PCB AEN803 twin). Its transport is the
 **CC3501E Wi-Fi6+BLE coprocessor bridge**
 ([`docs/cc3501e-bridge.md`](../../../docs/cc3501e-bridge.md)),
 silicon-validated 2026-06-24. The app never names the bridge -- the
@@ -56,11 +56,27 @@ over `<alp/chips/bmp581.h>`) -- and the publish path is unchanged.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
-# Standalone, native_sim (no radio, so the app prints the framing it
-# would publish; mbedTLS is built in):
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/connectivity/mqtt-telemetry`)
+
+board.yaml declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```
 # writes examples/connectivity/mqtt-telemetry/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/connectivity/mqtt-telemetry
+
+# Standalone, native_sim (no radio, so the app prints the framing it
+# would publish; mbedTLS is built in):
 west build -b native_sim/native/64 examples/connectivity/mqtt-telemetry \
     -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run

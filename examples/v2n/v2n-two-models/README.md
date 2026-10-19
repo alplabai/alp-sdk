@@ -53,6 +53,15 @@ Expected output (shape only; numbers depend on the models):
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-two-models`)
+
 Linux-only. Build it with the Yocto recipe `meta-alp-sdk/recipes-examples/alp-two-models-inference/` (add the package to your image), or cross-compile against the SDK sysroot as the header of `CMakeLists.txt` shows. Not built by twister: there is no Zephyr target (both NPUs are A55/Linux-owned).
 
 ## Image requirements

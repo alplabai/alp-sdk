@@ -2,7 +2,7 @@
 
 Make this MCU answer on the bus as a register-mapped I2C target
 (slave) using the register-file helper from `<alp/i2c_regfile.h>`
-(v0.9, `[ABI-EXPERIMENTAL]`), a pure layer over the portable
+(`[ABI-EXPERIMENTAL]`), a pure layer over the portable
 `alp_i2c_target_*` surface in `<alp/peripheral.h>`.
 
 ## What it shows
@@ -26,8 +26,7 @@ Make this MCU answer on the bus as a register-mapped I2C target
 Need a shape the register-file idiom doesn't fit (command/response
 protocols, FIFOs)?  Drop down to the raw byte-granular callbacks:
 `alp_i2c_target_open()` with `on_write` / `on_read` / `on_stop` in
-`<alp/peripheral.h>`.  This example's git history shows the same
-register file hand-rolled on those callbacks.
+`<alp/peripheral.h>`.
 
 ## Availability
 
@@ -48,6 +47,19 @@ emulated bus -- the ticks simply show `writes_seen=0`:
 ...
 [i2c-slave] done
 ```
+
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/peripheral-io/i2c-slave`)
+
+board.yaml declares only m55_hp, so tan also builds the SDK's idle alp-stock-shim image for m55_he (build/m55_he-zephyr/); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 ## Test setup (real hardware)
 

@@ -1,8 +1,8 @@
 # spi-slave
 
 Claim the bus in target (slave) mode using the portable
-`alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.9,
-`[ABI-EXPERIMENTAL]`) and answer an external SPI controller.
+`alp_spi_target_*` surface from `<alp/peripheral.h>`
+(`[ABI-EXPERIMENTAL]`) and answer an external SPI controller.
 
 ## What it shows
 
@@ -51,6 +51,19 @@ outcome on **native_sim**, which does not wire `BOARD_SPI_ARDUINO`
 [spi-slave]   SPI target (slave) mode is unavailable here
 [spi-slave] done
 ```
+
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/peripheral-io/spi-slave`)
+
+board.yaml declares only m55_hp, so tan also builds the SDK's idle alp-stock-shim image for m55_he (build/m55_he-zephyr/); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 ## Test setup (real hardware)
 

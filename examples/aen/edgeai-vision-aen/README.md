@@ -6,18 +6,23 @@ with an **E1M-AEN801** SoM (Alif Ensemble E8 -- the lead AEN part).
 ```
         ┌──────────────────┐    ┌──────────────┐    ┌────────────────┐
         │  Camera          │    │  ISP Pico    │    │  Ethos-U55     │
-RPi CSI │  (e.g. ARX3A0    │ →  │  (vsi,       │ →  │  inference     │
-        │   on the EVK)    │    │   isp-pico)  │    │  (Vela model)  │
+RPi CSI │  (e.g. ARX3A0;   │ →  │  (vsi,       │ →  │  inference     │
+        │   not populated  │    │   isp-pico)  │    │  (Vela model)  │
+        │   on this batch) │
         └──────────────────┘    └──────────────┘    └────────────────┘
                                                             │
                                                             ▼
                                                    ┌────────────────┐
                                                    │  Result        │
                                                    │  overlay on    │
-                                                   │  the on-board  │
+                                                   │  an external   │
                                                    │  SSD1306 OLED  │
                                                    └────────────────┘
 ```
+
+The camera stage is a stub on the current EVK batch (no sensor populated, no
+camera DT node), and the OLED is an external SSD1306 on the EVK I2C0 header;
+neither is soldered on the EVK.
 
 > **On-die VeriSilicon ISP Pico (vsi,isp-pico) on E8.**  Unlike E3 / E5 / E7,
 > the E1M-AEN801 (Ensemble E8) ships the **VeriSilicon ISP Pico
@@ -42,7 +47,7 @@ RPi CSI │  (e.g. ARX3A0    │ →  │  (vsi,       │ →  │  inference  
 
 | Version | Status   | What works                                                                                                |
 |---------|----------|-----------------------------------------------------------------------------------------------------------|
-| v0.1    | skeleton | Compiles under `native_sim/native/64` and on the EVK (`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`, in-tree).  Init flow is real (I²C, OLED, IMU init); camera + Ethos-U inference are stubbed. |
+| v0.1    | current  | Compiles under `native_sim/native/64` and on the EVK (`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`, in-tree).  Init flow is real (I²C, OLED, IMU init); camera + Ethos-U inference are stubbed. |
 | v0.2    | target   | Real ARX3A0 (ON Semi MIPI sensor) capture via `<alp/camera.h>`, Vela-compiled MobileNetV2 inference on Ethos-U55-HP, results overlay on OLED. **Acceptance ≥ 10 fps.** |
 
 The full pipeline is the v0.2 [EdgeAI Application Example](../../../VERSIONS.md#v020--richer-blocks--v2n-intro-6-weeks-after-v01)
@@ -55,6 +60,7 @@ edgeai-vision-aen/
 ├── README.md                     # this file
 ├── CMakeLists.txt                # Zephyr app
 ├── prj.conf                      # SDK + chips + camera + math toggles
+├── board.yaml                    # som.sku, preset, pins, chips, cores
 ├── testcase.yaml                 # twister: compile under native_sim
 ├── boards/
 │   ├── alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay
@@ -62,6 +68,9 @@ edgeai-vision-aen/
 │   │                                    # (fully-qualified board id -- Zephyr
 │   │                                    # only auto-applies a boards/<name>
 │   │                                    # overlay when <name> matches it)
+│   ├── alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay
+│   │                                    # same routing for E1M-AEN803
+│   ├── native_sim_native_64.conf
 │   └── native_sim_native_64.overlay
 ├── src/
 │   └── main.c                    # skeleton with v0.1 init + v0.2 stubs
@@ -71,25 +80,35 @@ edgeai-vision-aen/
     └── pipeline.md               # data flow + memory budget
 ```
 
-## Build (v0.1, host smoke)
+## Build
+
+From this directory, or from your own copy of it:
 
 ```bash
-# writes examples/aen/edgeai-vision-aen/generated/alp.conf, which west reads below (#866)
-python3 scripts/gen_example_alp_conf.py examples/aen/edgeai-vision-aen
-west build -b native_sim/native/64 examples/aen/edgeai-vision-aen \
-    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
+tan build
+tan flash
 ```
 
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/aen/edgeai-vision-aen`)
+
+`board.yaml` declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [`docs/heterogeneous-builds.md`](../../../docs/heterogeneous-builds.md).
+
+The board file ships in-tree at
+[`zephyr/boards/alp/e1m_aen801_m55_hp/`](../../../zephyr/boards/alp/e1m_aen801_m55_hp/).
 The app prints which v0.1 SDK pieces it successfully initialised
 and which v0.2 stubs it skipped.
 
-## Build (v0.1+, on the EVK)
+### Inside an SDK checkout (twister / CI)
 
-The board file ships in-tree at
-[`zephyr/boards/alp/e1m_aen801_m55_hp/`](../../../zephyr/boards/alp/e1m_aen801_m55_hp/):
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 ```bash
-# from the example directory; writes ./generated/alp.conf (#866)
+# host smoke (native_sim); writes examples/aen/edgeai-vision-aen/generated/alp.conf (#866)
+python3 scripts/gen_example_alp_conf.py examples/aen/edgeai-vision-aen
+west build -b native_sim/native/64 examples/aen/edgeai-vision-aen \
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
+
+# on the EVK, from the example directory
 python3 ../../../scripts/gen_example_alp_conf.py .
 west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp . -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash

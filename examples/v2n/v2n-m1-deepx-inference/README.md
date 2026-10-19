@@ -47,7 +47,33 @@ customer-only licence -- see
 
 ## Build
 
-### native_sim (framing test only)
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-m1-deepx-inference`)
+
+`board.yaml` targets the E1M-V2M101 SoM's M33 core on the `e1m-x-evk` preset.
+
+This `m33_sm` image does not run DEEPX inference on silicon: the rail
+and PCIe link are already handled entirely by U-Boot before this image
+starts (see point 1 above), this app does not call
+`deepx_dxm1_bring_up()`, and it has no Zephyr DEEPX backend.  Real DEEPX
+inference runs on the A55 Yocto image against `dx_rt`.  The steps
+above build and flash the `m33_sm` image only.
+
+Replace `k_placeholder_model` in `src/main.c` with your own
+DXNN-compiled model (use DEEPX's `dxcom` host compiler to produce
+a `.dxnn` file from an ONNX source) before flashing.
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+native_sim (framing test only):
 
 ```bash
 # writes examples/v2n/v2n-m1-deepx-inference/generated/alp.conf, which west reads below (#866)
@@ -67,29 +93,6 @@ host-emulated path; the example reports the failure cleanly):
 [deepx]   (expected under native_sim and on builds without dx_rt)
 [deepx] done
 ```
-
-### Real V2N-M1 silicon
-
-This `m33_sm` image does not run DEEPX inference on silicon: the rail
-and PCIe link are already handled entirely by U-Boot before this image
-starts (see point 1 above), this app does not call
-`deepx_dxm1_bring_up()`, and it has no Zephyr DEEPX backend.  Real DEEPX
-inference runs on the A55 Yocto image against `dx_rt`.  The steps
-below build and flash the `m33_sm` image only.
-
-```bash
-# Pull in the DEEPX runtime per the customer-licence story
-# documented in docs/vendor-partnerships.md §DEEPX.
-git clone https://github.com/DEEPX-AI/dx_rt modules/dx_rt
-git clone https://github.com/DEEPX-AI/dx_rt_npu_linux_driver modules/dx_rt_driver
-
-tan build --project examples/v2n/v2n-m1-deepx-inference
-west flash
-```
-
-Replace `k_placeholder_model` in `src/main.c` with your own
-DXNN-compiled model (use DEEPX's `dxcom` host compiler to produce
-a `.dxnn` file from an ONNX source) before flashing.
 
 ## Verification
 

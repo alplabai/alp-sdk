@@ -23,18 +23,15 @@ tests:
     # native_sim-only panel wiring; see native_sim.conf.
     extra_args:
       - "EXTRA_CONF_FILE=generated/alp.conf;native_sim.conf"
-  # Issue #2173 item (3): this scenario used to name `ensemble_e8_dk/...`
-  # -- Alif's own DevKit board, which no -p flag in this repo selects --
-  # so it built nowhere and never had. The panel gap that stalled the
-  # retarget (LVGL needs a `zephyr,display` chosen node and this app's
-  # ST7789 SPI0 pads are all repurposed on the 2626-R2 netlist) is now
-  # closed by the e1m_evk_rk055hdmipi4ma0 DSI shield CMakeLists.txt
-  # applies automatically for these two board targets -- the same panel
-  # #2204 wires up for aen-dsi-display. platform_allow now names both AEN
-  # SKUs the bench farm carries (AEN801 + AEN803); pr-twister-aen.yml's
-  # matrix builds each leg separately. build_only asserts the image
-  # links, nothing more -- see changelog.d/2173-iot-dashboard-aen-
-  # display.md for what that does and doesn't prove.
+  # LVGL needs a `zephyr,display` chosen node, and this app's ST7789 SPI0
+  # pads are all repurposed on the 2626-R2 netlist, so CMakeLists.txt
+  # applies the e1m_evk_rk055hdmipi4ma0 DSI shield for these two board
+  # targets -- the same panel #2204 wires up for aen-dsi-display (#2173).
+  # platform_allow names both AEN SKUs the bench farm carries (AEN801 +
+  # AEN803); pr-twister-aen.yml's matrix builds each leg separately.
+  # build_only asserts the image links, nothing more -- see
+  # changelog.d/2173-iot-dashboard-aen-display.md for what that does and
+  # doesn't prove.
   alp_sdk.examples.iot_dashboard.aen:
     extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:

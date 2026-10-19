@@ -26,17 +26,32 @@ does not decode or play any audio.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/display/lvgl-music-player`)
+
+board.yaml declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+native_sim builds the UI against the dummy display.
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```
 # writes examples/display/lvgl-music-player/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/display/lvgl-music-player
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/display/lvgl-music-player -- -DEXTRA_CONF_FILE=generated/alp.conf
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/display/lvgl-music-player -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
-
-native_sim builds the UI against the dummy display.
 
 ## Verification status
 
 `[UNTESTED]` -- the UI is the upstream lv_demo_music() reference;
-panel bring-up gates on the v1.0 HiL sweep.  Use the
+panel bring-up still needs HiL.  Use the
 `lvgl-widgets-demo` for the simplest LVGL test first.

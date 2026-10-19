@@ -1,8 +1,8 @@
 # drone-hud
 
-> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds on
+> ⚠️ **`[UNTESTED]` on hardware.** Builds on
 > `native_sim/native/64`; HiL silicon bring-up of the IMU + GPS +
-> battery + display chain lands in v0.6.
+> battery + display chain is still open.
 
 Marketing-grade demo: an E1M-AEN module renders a full drone
 telemetry HUD on a 240×320 TFT, sourcing live data from four
@@ -44,18 +44,28 @@ on-board sensor chips.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/display/drone-hud`)
+
+board.yaml declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```
 # writes examples/display/drone-hud/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/display/drone-hud
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/display/drone-hud -- -DEXTRA_CONF_FILE=generated/alp.conf
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/display/drone-hud -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
-```
 
-Or in the desktop simulator:
-
-```
-# writes examples/display/drone-hud/generated/alp.conf, which west reads below (#866)
-python3 scripts/gen_example_alp_conf.py examples/display/drone-hud
+# Or in the desktop simulator:
 west build -b native_sim/native/64 examples/display/drone-hud -- -DEXTRA_CONF_FILE=generated/alp.conf
 build/zephyr/zephyr.exe
 ```
@@ -72,7 +82,7 @@ ladder, change the colour scheme.  The data path
 
 ## Showcase pointers
 
-This demo is the v1.0 readiness pitch for the SDK: one Customer
+This demo is the SDK's portability pitch: one customer
 copies this `examples/display/drone-hud/` to start their own UAV
 firmware, swaps the chips list in `board.yaml`, and inherits the
 SDK's portability guarantees.

@@ -35,11 +35,25 @@ bus/address/offset into `system-manifest.yaml`.
 
 ```
 [board-id] read SoM hardware-info manifest
-[board-id] manifest CRC mismatch or magic byte wrong
-[board-id]   factory programming has not run on this
-[board-id]   module; flag for production-test follow-up.
+[board-id] EEPROM is blank -- module not yet provisioned
+[board-id]   run scripts/program_eeprom.py at production
+[board-id]   test to write the SoM manifest.
 [board-id] done
 ```
+
+A manifest whose magic is present but fails its integrity check prints
+`manifest is corrupt (bad schema or CRC)` instead.
+
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-board-id-readout`)
 
 ## See also
 

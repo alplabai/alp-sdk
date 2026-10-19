@@ -82,7 +82,7 @@ mirrors the sdk-alif reference `samples/drivers/cmp/src/main.c`.
 
 ## Build
 
-Standalone Zephyr app (no `alp_project.py` board.yaml flow):
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout:
 
 ```sh
 export ZEPHYR_BASE=<zephyr-base>
@@ -91,6 +91,8 @@ west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>" \
     -DEXTRA_DTC_OVERLAY_FILE=examples/aen/aen-cmp-regcheck/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
 ```
+
+For E1M-AEN803 use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`; the board overlay `boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay` auto-applies the same way.
 
 ## Bench run (human-operated; not done by the SDK)
 

@@ -1,7 +1,7 @@
 # audio-noise-suppression  ![UNTESTED](https://img.shields.io/badge/status-UNTESTED-yellow)
 
-Real-time noise suppression demo on the V2N (and V2H by SKU
-flip).  Target market: USB-C headsets, true-wireless hearables,
+Real-time noise suppression demo on the V2N (`E1M-V2N101`; the
+other V2N and V2M SKUs share the M33 slice).  Target market: USB-C headsets, true-wireless hearables,
 desktop conferencing rigs -- anywhere you want cloud-grade
 denoising at sub-perceptual latency without shipping audio
 off-device.
@@ -17,13 +17,11 @@ TAS2563 mic  ──▶  <alp/audio.h>  ──▶  <alp/dsp.h>     ──▶  <al
 The spectral work routes through whichever backend the SoM has:
 
 - **V2N M33 supervisor**: there's no native math accelerator on
-  the RZ/V2N M33 (see project memory
-  `v2n_no_dedicated_math_accelerator`); `<alp/dsp.h>` offloads
+  the RZ/V2N M33 (see [docs/gd32-bridge-protocol.md](../../../docs/gd32-bridge-protocol.md)); `<alp/dsp.h>` offloads
   the FFT/FAC to the GD32G553 bridge over the existing SPI/I²C
   command frame.
-- **V2N A55 (Yocto)**: CMSIS-DSP on Neon directly -- the Neon
-  path beats a bridge round-trip for the A55.
-- **V2H**: same shape as V2N once the V2H DSP path lands.
+- **V2N A55 (Yocto)**: CMSIS-DSP on Neon directly. Not built here
+  (`a55_cluster: os: "off"`); it is the path an A55 app would take.
 - **native_sim**: portable C reference kernels; framing only.
 
 Inference dispatches via `<alp/inference.h>` AUTO, scoped to the
@@ -58,6 +56,17 @@ grabs the next one.
   weights -- all still TODO.
 - IFFT + overlap-add synthesis path -- passthroughs the
   mic block to the speaker so HiL still hears the loop.
+
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/audio/audio-noise-suppression`)
 
 ## Reference
 

@@ -1,7 +1,7 @@
 # aen-aipm-read -- read the RUN/STANDBY operating-point profiles (portable)
 
 Read the **live power/clock operating-point profiles** on the
-**E1M-AEN801** (Ensemble E8, M55-HE) through the portable
+**E1M-AEN801 / E1M-AEN803** (Ensemble E8, M55-HE) through the portable
 `<alp/power.h>` profile surface, and print every portable field.
 **READ-ONLY** -- this app never changes the operating point.
 
@@ -65,10 +65,11 @@ On builds without a profile-capable backend (native_sim, SoMs whose
 power tree the application core owns directly) the same code links
 and runs; the calls report `ALP_ERR_NOSUPPORT` and the app says so.
 
-## Build + bench (serial bench, not part of this commit)
+## Build + bench (serial bench)
 
-This is a bench RAM-run with the RAM console (the app UART is
-not on USB on this bench):
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. For E1M-AEN803, use
+`-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` instead. This is a bench
+RAM-run with the RAM console (the app UART is not on USB on this bench):
 
 ```sh
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
@@ -96,13 +97,12 @@ per-call `rc` above.
   maker-provisioned E8 reports are whatever the controller returns
   on the bench -- this app prints them, it does not assert any
   specific value.
-- **Vendor-legend decode moved behind the SDK.**  The previous
-  revision of this example decoded the vendor enum ordinals
-  (clock-source names, `PD_*` / `MB_*` bit legends) in application
-  code, which required `<se_service.h>` in the app.  That decode now
-  lives in the SDK's E8 backend (`src/backends/power/alif_se_profile.c`
-  maps ordinals to Hz/mV); the per-bit domain/memory legends are
-  per-SoM HW-reference material rather than portable API.
+- **Vendor-legend decode lives behind the SDK.**  The vendor enum
+  ordinals (clock-source names, `PD_*` / `MB_*` bit legends) are decoded
+  in the SDK's E8 backend (`src/backends/power/alif_se_profile.c` maps
+  ordinals to Hz/mV), so the app needs no `<se_service.h>`; the per-bit
+  domain/memory legends are per-SoM HW-reference material rather than
+  portable API.
 
 ## See also
 

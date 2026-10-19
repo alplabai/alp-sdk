@@ -26,7 +26,18 @@ and `cpu-thermal1` in the vendor device tree). Zones are chosen by
 type, never by index, because the index follows probe order. The kernel
 keeps ownership of the TSU.
 
-## Build (Yocto SDK)
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-soc-temperature`)
+
+### Manual build in the Yocto SDK
 
 ```sh
 . /opt/poky/<ver>/environment-setup-aarch64-poky-linux

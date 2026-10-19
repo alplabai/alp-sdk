@@ -33,6 +33,19 @@ isn't captured (only the SE-UART FT232R is on USB, SETOOLS-only), so the
 `RESULT PASS:`/`RESULT FAIL:` line is read from `ram_console_buf` over SWD
 (see `flashing-and-bench-debugging-aen`), not a serial terminal.
 
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/aen/aen-cc3501e-ble-gatt`)
+
+`board.yaml` declares only `m55_he`, so `tan` also builds the SDK's idle `alp-stock-shim` image for `m55_hp` (`build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
 ## Builds verified (off-silicon)
 
 - **native_sim/native/64** (`twister`, `build_only`) — against the emulated

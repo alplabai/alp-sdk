@@ -31,10 +31,29 @@ firmware image built without BLE the enable returns `NOT_READY`; the example
 still runs end to end and shows the shape of each call. A real application
 would branch on these statuses instead of just logging them.
 
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/aen/aen-cc3501e-companion-tour`)
+
+`board.yaml` declares only `m55_he`, so `tan` also builds the SDK's idle `alp-stock-shim` image for `m55_hp` (`build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
 ## Wi-Fi credentials + socket target (build-time)
 
 Credentials are **deliberately empty by default** — never hardcode them in a
-public example. Set them at build time without editing the source:
+public example. Set them at build time without editing the source. The
+`-DTOUR_*` defines below are passed through the west recipe, which works
+only from an alp-sdk checkout:
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 ```sh
 # writes examples/aen/aen-cc3501e-companion-tour/generated/alp.conf, which west reads below (#866)
@@ -46,8 +65,10 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
 
 When `TOUR_WIFI_SSID` is empty the connect / IP / socket steps are skipped
 (they need an association) and the tour jumps to the BLE section. The TCP
-destination defaults to `93.184.216.34:80` (`TOUR_TCP_IP` / `TOUR_TCP_PORT` in
-`src/main.c`) — change it to a host reachable from your bench network.
+destination defaults to `192.168.1.1:80` (`TOUR_TCP_A`..`TOUR_TCP_D` for the
+four address octets and `TOUR_TCP_PORT` in `src/main.c`) — override them with
+`-DTOUR_TCP_A=... -DTOUR_TCP_B=... -DTOUR_TCP_C=... -DTOUR_TCP_D=...` (and
+`-DTOUR_TCP_PORT=...`) to point at a host reachable from your bench network.
 
 ## SoM bring-up is one call
 

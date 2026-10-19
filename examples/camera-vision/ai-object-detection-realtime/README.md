@@ -1,12 +1,12 @@
 # ai-object-detection-realtime
 
-> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on
-> `native_sim/native/64` + the AEN fallback target against the full
+> **`[UNTESTED]` on hardware -- paper-correct.** Builds clean on
+> `native_sim/native/64` + the V2M101 M33 target against the full
 > `<alp/camera.h>` / `<alp/inference.h>` / `<alp/display.h>` surfaces.
 > The checked-in V2M101 project enables only its M33/Zephyr slice, so TFLM
 > CPU is its only inference backend; the placeholder DXNN request remains
 > an intentional NOSUPPORT skeleton.  A real DX-M1 run still needs an
-> A55/Yocto app, a compiled YOLOv8-tiny model, and V2N-M1 HiL validation.
+> A55/Yocto app, a compiled YOLOv8-tiny model, and V2M101 HiL validation.
 
 Portable realtime YOLOv8-tiny object-detection skeleton.  Camera
 frames flow through `<alp/camera.h>`, inference is requested via
@@ -18,9 +18,13 @@ TFLM; the intended DX-M1 deployment moves inference to an A55/Yocto app.
 
 ```
 OV5640 --> <alp/camera.h> --> <alp/inference.h> --> <alp/display.h>
-(MIPI)      RGB565 frame        YOLOv8-tiny.dxnn        bbox overlay
-                                on DEEPX DX-M1          + FPS counter
+(MIPI)      RGB565 frame        YOLOv8-tiny (TFLM       bbox overlay
+                                CPU on the M33)         + FPS counter
 ```
+
+The M33 path above is what the checked-in project builds.  The
+DEEPX DX-M1 path (`YOLOv8-tiny.dxnn` on the NPU) is the intended
+A55/Yocto deployment and is not built here.
 
 - **OV5640** SCCB + MIPI CSI-2 capture via the portable
   `<alp/camera.h>` surface.
@@ -29,57 +33,47 @@ OV5640 --> <alp/camera.h> --> <alp/inference.h> --> <alp/display.h>
   slice-scoped, not merely SoM-scoped:
   - **V2M101 M33/Zephyr** -> TFLM CPU
   - **V2M101 A55/Yocto** -> DEEPX DX-M1 (29 TOPS), once an A55 app is added
-  - **V2M201 (V2H-M1)** -> DEEPX DX-M2 (113 TOPS) -- planned SKU,
-    not yet in `metadata/e1m_modules/`
-  - AEN801 -> Ethos-U85 (lead target for this skeleton)
 - **Display** bounding-box overlay + FPS counter via portable
   framebuffer blits.
 
 ## Hardware needed
 
 - E1M-V2M101 SoM (V2N + DEEPX DX-M1).
-- E1M-EVK board.
+- E1M-X-EVK board.
 - OV5640 camera on the EVK MIPI connector.
 - ST7789 240x320 TFT on SPI1.
 
 ## Build
 
-**V2N-M1 M33 skeleton:**
+From this directory, or from your own copy of it:
 
-The Renesas RZ/V2N Zephyr board file currently lives in a private
-Renesas Zephyr fork; once the public board lands the M33 build will be:
-
-```
-# writes examples/camera-vision/ai-object-detection-realtime/generated/alp.conf, which west reads below (#866)
-python3 scripts/gen_example_alp_conf.py examples/camera-vision/ai-object-detection-realtime
-west build -b rzv2n_evk examples/camera-vision/ai-object-detection-realtime -- -DEXTRA_CONF_FILE=generated/alp.conf
+```bash
+tan build
+tan flash
 ```
 
-That build does not run the A55-owned DX-M1 runtime.  Add an A55/Yocto
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/camera-vision/ai-object-detection-realtime`)
+
+The M33 build does not run the A55-owned DX-M1 runtime.  Add an A55/Yocto
 app to the project for real DEEPX inference.
 
-**AEN fallback (works today on the public stack):**
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 ```
 # writes examples/camera-vision/ai-object-detection-realtime/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/camera-vision/ai-object-detection-realtime
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp \
-           examples/camera-vision/ai-object-detection-realtime -- -DEXTRA_CONF_FILE=generated/alp.conf
-```
 
-The AEN fallback dispatches inference to Ethos-U instead of
-DEEPX DX-M1 -- same app source, different NPU shim wired in by
-the §D.lib.loader based on the SKU's `capabilities:` block.
+# V2M101 M33 (Zephyr) slice:
+west build -b alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33 \
+    examples/camera-vision/ai-object-detection-realtime -- -DEXTRA_CONF_FILE=generated/alp.conf
 
-**native_sim (build smoke-test, no hardware):**
-
-```
-# writes examples/camera-vision/ai-object-detection-realtime/generated/alp.conf, which west reads below (#866)
-python3 scripts/gen_example_alp_conf.py examples/camera-vision/ai-object-detection-realtime
+# native_sim (build smoke-test, no hardware):
 west build -b native_sim/native/64 examples/camera-vision/ai-object-detection-realtime -- -DEXTRA_CONF_FILE=generated/alp.conf
 ```
 
-The camera + NPU surfaces NOSUPPORT-stub on native_sim; the
+On native_sim the camera + NPU surfaces NOSUPPORT-stub; the
 skeleton walks a single capture/infer/display pass and exits via
 the `[obj-det] done` marker the harness checks for.
 
@@ -101,6 +95,3 @@ xxd -i out/yolov8n.dxnn > models/yolov8n_dxnn.h
 #    .model_data = yolov8n_dxnn,
 #    .model_size = yolov8n_dxnn_len,
 ```
-
-For the AEN fallback target use Arm's Vela compiler with
-`--accelerator-config ethos-u55-256` instead.

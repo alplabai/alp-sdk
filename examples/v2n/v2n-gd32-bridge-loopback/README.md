@@ -29,10 +29,6 @@ forever. Every stimulus is parked at 0 on the way out of its test.
 
 ## Bench wiring (E1M-X V2 carrier, wired 2026-06-04)
 
-> _Wiring photo placeholder:_ add a labelled bench photo here showing
-> the three jumper wires seated on the header pins below
-> (`docs/img/v2n-gd32-bridge-loopback-jumpers.jpg`, not yet captured).
-
 | Jumper | From (header.pin) | To (header.pin) | Signal path |
 | ------ | ----------------- | --------------- | ----------- |
 | **A** | **raw `DAC0` net** (E1M-X pin A19; see safety note 1) | `P7.1` (CK_ANA) | **Direct 1:1** analog loopback -> raw passthrough to E1M-X pin **A17 = ANA_S0 = bridge ADC channel 0** (GD32 `PD9`, ADC3_CH12). The carrier's buffered J15.2 `DAC0_OUT` path is NOT usable on this carrier rev (erratum, fixed next rev). |
@@ -140,7 +136,7 @@ There is no console on this SoM, so the verdict block is read over SWD.
 The block's address is **not fixed** -- pull it from the build's ELF:
 
 ```sh
-arm-none-eabi-nm build/zephyr/zephyr.elf | grep loopback_results
+arm-none-eabi-nm build/m33_sm-zephyr/zephyr/zephyr.elf | grep loopback_results
 # -> <addr> B loopback_results
 ```
 
@@ -153,13 +149,29 @@ before trusting `[2]`/`[3]` and the raw forensics slots.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-gd32-bridge-loopback`)
+
+`board.yaml` targets the E1M-V2M101 SoM's M33 core on the `e1m-x-evk` preset.
+
+This example is **jumpered-bench-only** and targets the E1M-V2M101 SoM
+(V2N-family bridge, E1M-X V2 carrier). It builds clean everywhere as a CI
+artifact (`build_only: true`), but only produces meaningful results on an
+E1M-X V2 carrier wired per the table above.
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```sh
-# from the repo root, native_sim build-only (CI artifact; bench-only at runtime)
+# native_sim build-only (CI artifact; bench-only at runtime)
 # writes examples/v2n/v2n-gd32-bridge-loopback/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/v2n/v2n-gd32-bridge-loopback
 west build -b native_sim/native/64 examples/v2n/v2n-gd32-bridge-loopback -- -DEXTRA_CONF_FILE=generated/alp.conf
 ```
-
-This example is **V2N-only and jumpered-bench-only**. It builds clean
-everywhere as a CI artifact (`build_only: true`), but only produces
-meaningful results on an E1M-X V2 carrier wired per the table above.

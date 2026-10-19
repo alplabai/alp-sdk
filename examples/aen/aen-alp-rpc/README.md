@@ -106,6 +106,10 @@ itself stops moving once `main()` has exited.
 Zephyr-pinned modules), so a `west update` fetches them and they are
 auto-discovered — no manual `-DEXTRA_ZEPHYR_MODULES` for them:
 
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. The same commands build for
+E1M-AEN803 with `alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp` and
+`alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`.
+
 ```sh
 west build -p always -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/aen-alp-rpc -d build/hp -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
 west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-alp-rpc -d build/he -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"

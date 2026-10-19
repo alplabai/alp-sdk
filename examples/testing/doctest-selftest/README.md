@@ -17,8 +17,8 @@ test framework with no hardware surface.
 * The **vendoring** mechanism: doctest is a genuine single-header
   library with no Zephyr `zephyr/module.yml`, so it can't ride in as
   a normal west-fetched module. It's vendored verbatim at
-  `vendors/doctest/include/doctest/doctest.h` (Task 0 of this
-  library-examples batch); `zephyr/CMakeLists.txt` adds that path
+  `vendors/doctest/include/doctest/doctest.h`;
+  `zephyr/CMakeLists.txt` adds that path
   plus `metadata/library-profiles/doctest/` to every app's include
   path unconditionally.
 * The **profile header** contract: `doctest_config.h` must be
@@ -35,10 +35,24 @@ test framework with no hardware surface.
   `main()` as `extern int main(void); main();` unless
   `CONFIG_BOOTARGS=y` -- no argc/argv are ever placed on the
   stack/registers, so asking for them reads garbage. See
-  `catch2-selftest`'s README for the segfault this exact mistake
-  caused there.
+  `catch2-selftest`'s README for the segfault this mistake causes.
 
 ## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/testing/doctest-selftest`)
+
+board.yaml declares only m55_hp, so tan also builds the SDK's idle alp-stock-shim image for m55_he (build/m55_he-zephyr/); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 ```bash
 # Standalone, native_sim (host binary; no hardware needed):

@@ -1,6 +1,6 @@
 # acoustic-anomaly-wind-turbine
 
-> **`[UNTESTED]` on hardware -- v0.6 paper-correct.** The three DSP cores
+> **`[UNTESTED]` on hardware -- paper-correct.** The three DSP cores
 > (`acoustic_features`, `rotor_speed`, `bpf_modulation`) are host-unit-tested on
 > `native_sim/native/64`; the full app runs end-to-end on native_sim with
 > synthetic acoustics + a canned RPM track. HiL on a real nacelle with a
@@ -54,15 +54,30 @@ tacholess estimate has not converged.
 
 ## Build
 
-```sh
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/audio/acoustic-anomaly-wind-turbine`)
+
+board.yaml declares only `m55_he`, so tan also builds the SDK's idle alp-stock-shim image for `m55_hp` (`build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+The DEEPX DX-M1 path runs on the A55 side, so it needs a separate E1M-V2M101 project (`som.sku`, an `m33_sm` core and an A55/Yocto app), not a `som.sku` edit here.
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```
 # writes examples/audio/acoustic-anomaly-wind-turbine/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/audio/acoustic-anomaly-wind-turbine
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp \
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/audio/acoustic-anomaly-wind-turbine -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
-
-Flip `som.sku` in `board.yaml` to `E1M-V2M101` for the DEEPX DX-M1 path.
 
 ## Model
 

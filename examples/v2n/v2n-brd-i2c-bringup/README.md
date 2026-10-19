@@ -44,7 +44,18 @@ register (DA9292 CH2 is U-Boot's alone -- see
 `meta-alp-sdk/recipes-bsp/u-boot/u-boot/
 0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch`).
 
-## Build (Yocto SDK)
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-brd-i2c-bringup`)
+
+### Manual build in the Yocto SDK
 
 ```sh
 # Source the SDK that includes meta-alp-sdk (libalp_sdk.so + libalp_chips.a):

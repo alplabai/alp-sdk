@@ -66,12 +66,29 @@ entirely off caller-owned stack/static buffers, no `k_malloc()`).
 ## board.yaml HW swap
 
 `som.sku: E1M-AEN801` / `preset: e1m-evk`. This example does no I/O --
-swap `som.sku` to any SoM/preset pair and it still builds; PDU
-build/parse is entirely in-RAM.
+the PDU build/parse is entirely in-RAM, so nothing in `src/` is
+SoM-specific.  `board.yaml` declares only `m55_hp`, so moving to a
+V2N/V2M SoM means swapping `som.sku` **and** the `cores:` key
+(`m55_hp` -> `m33_sm`, plus the `libraries:` `cores:` scope).
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/connectivity/coap-client-get`)
+
+board.yaml declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```
 # writes examples/connectivity/coap-client-get/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/connectivity/coap-client-get
 west build -b native_sim/native/64 examples/connectivity/coap-client-get -- -DEXTRA_CONF_FILE=generated/alp.conf

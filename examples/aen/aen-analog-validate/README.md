@@ -84,10 +84,23 @@ as (same TSV):
 > Also bench-confirm the tolerance window (`TOLERANCE_UV`) once the
 > converters are characterised.
 
-## Build + run (bench)
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/aen/aen-analog-validate`)
+
+`board.yaml` declares only `m55_he`, so `tan` also builds the SDK's idle `alp-stock-shim` image for `m55_hp` (`build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+## Run (bench)
 
 RAM-run app (no app UART on USB on this bench; console is the RAM
-console). Build for `alp_e1m_aen801_m55_he/.../rtss_he`, load the image
+console). Build as above (target `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`), load the image
 into ITCM over J-Link, run, then read `ram_console_buf` over SWD and
 ASCII-decode -- the same flow as `aen-dac-regcheck` / `aen-adc-regcheck`.
 Look for the single `RESULT PASS` / `RESULT FAIL` line.

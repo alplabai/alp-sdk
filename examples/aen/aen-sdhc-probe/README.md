@@ -122,6 +122,8 @@ without a second app to maintain:
 call, no `disk_access_write`, no `mkfs` anywhere in this app; none of that
 machinery is even linked in any more (see the CHANGELOG).
 
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); the commands below only work from an alp-sdk checkout. For E1M-AEN803 use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`.
+
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-sdhc-probe
 # flash + run per docs/aen-bench-bringup.md, then read ram_console_buf over SWD.

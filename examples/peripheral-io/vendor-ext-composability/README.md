@@ -32,9 +32,15 @@ pins, in the same firmware.
 
 ## Running under native_sim
 
+`native_sim` builds go through the SDK checkout (twister / CI); `tan build`
+targets the real E1M-AEN801 declared in `board.yaml`, not the host:
+
 ```bash
-tan build --native --project examples/peripheral-io/vendor-ext-composability
-west build -d build -t run
+# writes examples/peripheral-io/vendor-ext-composability/generated/alp.conf, which west reads below
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/vendor-ext-composability
+west build -b native_sim/native/64 examples/peripheral-io/vendor-ext-composability \
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
+west build -t run
 ```
 
 The host overlay wires a GPIO-emul controller, so **Way 1 actually
@@ -47,7 +53,22 @@ Reaching `ALP_E1M_GPIO_ADC1` (index 43) needs two GPIO-emul controllers,
 since a single emul controller caps at 32 pins; the overlay shows the
 canonical two-controller split a full 52-slot board file uses.
 
-## Build (on the EVK)
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/peripheral-io/vendor-ext-composability`)
+
+board.yaml declares only m55_hp, so tan also builds the SDK's idle alp-stock-shim image for m55_he (build/m55_he-zephyr/); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 The board file ships in-tree at
 [`zephyr/boards/alp/e1m_aen801_m55_hp/`](../../../zephyr/boards/alp/e1m_aen801_m55_hp/):

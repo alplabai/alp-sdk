@@ -21,7 +21,18 @@ two.
 3. Why the surface is 640x360: the GPU path uploads, draws and reads back, so
    small rects are cheaper on the CPU and the SDK sends them there op by op.
 
-## Build and run
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-gpu2d-compose`)
+
+### Yocto and standalone builds
 
 Yocto (recommended): `alp-image-edge` installs the `alp-gpu2d-compose` recipe on
 every `mali-family` machine. Standalone: see the comment in
@@ -30,7 +41,7 @@ the GPU engine to be selected the image needs the Renesas `meta-rz-graphics`
 layer and a running weston (`IMAGE_FEATURES += "alp-display"`) -- see
 [`docs/v2n-mali-gpu.md`](../../../docs/v2n-mali-gpu.md).
 
-Expected output:
+## Expected output
 
 ```
 [gpu2d] engine: GPU context up (EGL/GLES)      # or "CPU fallback"

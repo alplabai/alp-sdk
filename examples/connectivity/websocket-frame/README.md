@@ -7,9 +7,8 @@ trip. No socket, no TLS, no handshake -- this is the frame-layout
 byte accounting you'd want to get right before ever opening a real
 connection.
 
-**[UNTESTED]** -- both in the "native_sim only, no bench" sense every
-example in this batch carries, AND more specifically: the real
-libwebsockets library is not linked here. See "Integration reality"
+**[UNTESTED]** -- both in the "native_sim only, no bench" sense, AND
+more specifically: the real libwebsockets library is not linked here. See "Integration reality"
 below.
 
 ## Integration reality
@@ -20,9 +19,7 @@ SW-fallback default from the `integration.zephyr.hw_backends:` block
 in `metadata/libraries/libwebsockets.yaml`). It does
 **not** get the real library linked in, for two compounding reasons
 (both confirmed by reading the actual checkout at
-`modules/lib/libwebsockets` -- this module
-fetch *did* succeed and the full ~230 KB upstream source tree is
-present):
+`modules/lib/libwebsockets`, a full ~230 KB upstream source tree):
 
 1. libwebsockets ships no `zephyr/module.yml`, so west's module
    scanner never adds its include path or CMakeLists.txt to a Zephyr
@@ -33,8 +30,7 @@ present):
    own `CMakeLists.txt` `configure_file()` step, gated on OpenSSL/
    mbedTLS/zlib discovery and dozens of `LWS_HAVE_*` feature probes.
    Running that full configure is more than "a small local CMake
-   source-compile" for a teaching example (see the work plan) --
-   out of scope here.
+   source-compile" for a teaching example -- out of scope here.
 
 Even past the headers: libwebsockets' only public framing entry point,
 `lws_write()` (`include/libwebsockets/lws-write.h`), takes a live
@@ -76,7 +72,22 @@ lws_write_protocol`'s value `0`) are both defined in
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/connectivity/websocket-frame`)
+
+board.yaml declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```
 # Standalone, native_sim (host binary; no hardware needed):
 # writes examples/connectivity/websocket-frame/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/connectivity/websocket-frame

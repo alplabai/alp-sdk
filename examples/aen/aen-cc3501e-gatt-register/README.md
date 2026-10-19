@@ -2,8 +2,7 @@
 
 Bench check for the **NEW CC3501E dynamic GATT registration** path
 (#480/#892) on the Alif **M55-HE** (**E1M-AEN801**, Alif Ensemble E8) SoM.
-`alp_ble_gatt_register_service()` (`<alp/ble.h>`) used to be a stub; on this
-branch it really registers a service on the CC3501E's NimBLE host over the
+`alp_ble_gatt_register_service()` (`<alp/ble.h>`) really registers a service on the CC3501E's NimBLE host over the
 inter-chip bridge and fills in a real attribute handle per characteristic.
 
 This is a **BENCH-VALIDATION** app, not a customer teaching example -- see
@@ -68,17 +67,25 @@ table and bench-unverified-overlay notes.
 wired to USB, so the app's output goes to the Zephyr RAM console
 (`ram_console_buf`), read back over SWD.
 
-## What the bench-runner must build + flash
+## Build
 
-This app AUTHOR pass does not flash or run anything. To exercise it on
-silicon, the bench-runner needs:
+To exercise this app on silicon you need two images.
 
-- **Host app**: this example, built for
-  `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` and flashed to the
-  E1M-AEN801's Alif M55-HE, per the two-J-Link recipe in
-  `aen-cc3501e-bringup`'s README.
+- **Host app**: this example, flashed to the E1M-AEN801's Alif M55-HE (target
+  `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`), per the two-J-Link
+  recipe in `aen-cc3501e-bringup`'s README. From this directory, or from your
+  own copy of it:
+
+  ```bash
+  tan build
+  tan flash
+  ```
+
+  (from an alp-workspace root instead: `tan build --project alp-sdk/examples/aen/aen-cc3501e-gatt-register`)
+
+  `board.yaml` declares only `m55_he`, so `tan` also builds the SDK's idle `alp-stock-shim` image for `m55_hp` (`build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 - **CC3501E firmware**: a `cc3501e-bridge-firmware` image
-  (`alplabai/cc3501e-bridge-firmware`, `ti/build_ti.sh`; the firmware
+  (`alplabai/cc3501e-bridge-firmware`, `ti/build_ti.ps1`; the firmware
   lives in its own repository, ADR 0031) that includes the
   `BLE_GATT_REGISTER` (0x38) handler, flashed to the on-module CC3501E --
   this app exercises that handler, so an older firmware image will answer

@@ -9,7 +9,7 @@ exhibition booth runs (issue #1268).
 > unit against the real `<alp/inference.h>` header (see "What actually
 > ran" below). Linking against a real `libalp_sdk` (`ALP_OS=yocto`) and
 > running end-to-end through the documented NOSUPPORT path have **not**
-> been re-verified by this PR. The DRP-AI backend itself has run on
+> been verified. The DRP-AI backend itself has run on
 > silicon (E1M-V2M103, #1268: YOLOX-S/VOC through `<alp/inference.h>`,
 > ~40 ms per frame, correct detections); this app has not -- see
 > [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
@@ -143,7 +143,7 @@ tar -cf model.tar -C <obj_dir> .
 
 Any flat, relative-path layout works: `open()` extracts with
 `tar -xf - -C <mkdtemp dir>`
-([`src/yocto/inference_drpai.cpp:264`](../../../src/yocto/inference_drpai.cpp)),
+([`src/yocto/inference_drpai.cpp`](../../../src/yocto/inference_drpai.cpp)),
 so it does not care how the tar was produced, only that entries are
 relative to the object dir with no leading path component.
 [`scripts/alp_model/adapters/drpai.py`](../../../scripts/alp_model/adapters/drpai.py)'s
@@ -180,6 +180,15 @@ team productising this demo adds the real decoder once a board
 confirms the raw tensor's actual layout.
 
 ## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-drpai-inference`)
 
 ### Yocto (recommended)
 
@@ -219,7 +228,7 @@ cmake --build build/drpai-demo
 scp build/drpai-demo/v2n-drpai-inference root@<board-ip>:
 ```
 
-### Host build (no DRP-AI; the link and the NOSUPPORT path have NOT been re-verified by this PR)
+### Host build (no DRP-AI; the link and the NOSUPPORT path are unverified)
 
 ```sh
 cmake -S . -B build/host -DALP_OS=yocto
@@ -247,17 +256,9 @@ gcc -I include -o v2n-drpai-inference \
 
 - **Builds clean as a standalone C translation unit** against the real
   `<alp/inference.h>` header. **Linking against a real `libalp_sdk` and
-  running end-to-end through the documented NOSUPPORT path have NOT
-  been re-verified by this PR**: that claim was carried over from
-  `feat/1145-drpai-v2n-bringup` -- the branch whose self-reported
-  claims were found false and which is the reason this salvage PR
-  exists -- and was never independently re-run. This PR's own review
-  host is macOS, where the full SDK does not build at all for an
-  unrelated reason (a `section` attribute error blocks `src/backend.c`
-  / `src/backends/storage/sw_fallback.c` repo-wide), so the claim stays
-  open, not confirmed, until it runs on Linux. The frame-size guard and
-  argv parsing have been read and hand-traced for correctness, not
-  executed.
+  running end-to-end through the documented NOSUPPORT path are
+  unverified.** The frame-size guard and argv parsing have been read and
+  hand-traced for correctness, not executed.
 - **`print_top_scores()`'s top-N selection is unit-tested** against
   hand-built float arrays (descending order, ties, negative values,
   `count < TOP_N`, empty input, non-finite values) -- the selection

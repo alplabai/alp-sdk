@@ -15,6 +15,21 @@ at `0x48200000` / IRQ 101 from the Alif DFP `soc.h` (AE402FA0E5597).
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/peripheral-io/usb-host-storage`)
+
+board.yaml declares only m55_hp, so tan also builds the SDK's idle alp-stock-shim image for m55_he (build/m55_he-zephyr/); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `-DEXTRA_ZEPHYR_MODULES=$PWD` points at the SDK root.
+
 ```bash
 # From the alp-sdk root:
 west build \

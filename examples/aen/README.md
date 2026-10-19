@@ -4,8 +4,16 @@ Reference applications for the E1M-AEN family (lead part: Alif
 Ensemble E8 -- dual-M55 + Ethos-U85/U55 NPUs, on-module ISP /
 camera path, GPU2D).  Build any of these against an E1M-AEN SoM
 populated on the E1M-EVK board; where an example ships a
-per-example `board.yaml` (10 of the 89 tracked directories here), that
+per-example `board.yaml` (11 of the 90 directories here), that
 file carries the exact SKU + board.
+
+Examples with a `board.yaml` build from their own directory with `tan build`
+(from an alp-workspace root: `tan build --project alp-sdk/examples/aen/<name>`).
+The rest are standalone Zephyr apps with no `board.yaml`, so they are not
+buildable with `tan build`; their READMEs give a `west build` recipe that works
+from an alp-sdk checkout only. Where a `board.yaml` declares only the M55-HE
+core, `tan` also builds the SDK's idle `alp-stock-shim` image for the M55-HP;
+see [`docs/heterogeneous-builds.md`](../../docs/heterogeneous-builds.md).
 
 Apps tagged **bench** are on-silicon RAM-run validations read over SWD via the
 RAM console; **regcheck/staging** apps prove a driver binds + programs its
@@ -19,7 +27,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`edgeai-vision-aen`](edgeai-vision-aen/)          | End-to-end EdgeAI vision pipeline -- CSI camera -> ISP Pico -> Ethos-U55 inference -> OLED overlay. The flagship AEN demo. |
 | [`aen-trace-runner`](aen-trace-runner/)            | **bench** -- Trace Runner, the exhibition endless-runner game: M55-HE game + HUD, M55-HP camera + Ethos-U55 MoveNet pose input, bare-metal Cortex-A32 3D renderer on the RK055HDMIPI4MA0 panel; built from this directory and flashed onto an E1M-AEN803 (2026W36-0009): 30.0 fps, 0 dropped frames over three cold boots (2026-09-29). |
 | [`aen-mcuboot-smoke`](aen-mcuboot-smoke/)          | **bench** -- production secure-boot chain `SES -> MCUboot -> slot0 -> app` on the E8 (SE root-of-trust, `sysbuild/aen`); RESULT PASS end-to-end. |
-| [`aen-hp-core-smoke`](aen-hp-core-smoke/)          | **bench** -- first light on the second M55 (RTSS-HP); every other AEN app runs on the M55-HE. |
+| [`aen-hp-core-smoke`](aen-hp-core-smoke/)          | **bench** -- first light on the second M55 (RTSS-HP); the other single-core AEN apps run on the M55-HE. |
 | [`aen-power-smoke`](aen-power-smoke/)              | **bench** -- Stage-A low-power smoke: architectural Cortex-M55 WFI sleep + wake, no PM subsystem. |
 | [`aen-power-iwic`](aen-power-iwic/)                | **bench** -- Stage-B IWIC deep-sleep over the Alif PM layer on pinned Zephyr 4.4.0. |
 | [`aen-aipm-read`](aen-aipm-read/)                  | **bench** -- READ-ONLY dump of the live RUN/STANDBY operating-point profiles via the portable `alp_power_profile_get()` (SE aiPM-backed on AEN). |
@@ -58,6 +66,8 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-npu-inference`](aen-npu-inference/)          | **bench** -- first on-silicon NPU inference: a fused subgraph dispatched to the Ethos-U85 (256-MAC) via the Arm core driver. |
 | [`aen-npu-inference-alif`](aen-npu-inference-alif/)| **bench** -- matched-runtime Vela int8 inference end-to-end via the Arm `InferenceProcess` wrapper -> TFLM; hermetic fixture. |
 | [`aen-npu-inference-person-mram`](aen-npu-inference-person-mram/) | **bench** -- the real `person_detect` MobileNet (int8) end-to-end with the model resident in MRAM slot0 (production-scale). |
+| [`aen-npu-inference-alp`](aen-npu-inference-alp/) | **bench** -- the real `person_detect` MobileNet on the Ethos-U85 through the portable `<alp/inference.h>` API (SDK-backed sibling of `aen-npu-inference-person-mram`). |
+| [`aen-npu-inference-alp-u55`](aen-npu-inference-alp-u55/) | **bench** -- the same `<alp/inference.h>` `person_detect` run on the HE-core-local Ethos-U55. |
 | [`aen-inference-latency`](aen-inference-latency/)  | **bench** -- cycles and milliseconds per inference of any Vela-compiled int8 model plus the tensor-arena high-water mark. No INA236, no I2C; console-only, fits the Flow C ITCM RAM-run for small models, and prints the `ENERGY-CFG`/`ENERGY-W` subset the tan on-device model-run capture parser reads (tan-cli#1287). |
 | [`aen-inference-energy`](aen-inference-energy/)    | **bench** -- millijoules per inference, measured: picks the compute rail from the six EVK INA236 monitors, then integrates matched active/idle windows. A trivial model reports FAIL by design. |
 | [`aen-gpu2d-bench`](aen-gpu2d-bench/)              | **bench** -- GPU2D software-fallback validation on the M55-HE. |
@@ -68,9 +78,12 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`aen-camera-firstlight`](aen-camera-firstlight/)  | **bench** -- Raspberry-Pi-style CSI-2 camera first light (OV5647 / OV9281 / IMX296 / IMX335 on the E1M-EVK's J5) through the portable `<alp/camera.h>` API; OV9281 bench-verified on an E1M-AEN803 on the E1M-EVK (2026-09-21, all three modes); OV5647 bench-verified (2026-09-22, RAW10 640x480, issue #2248) -- both due for a re-bench after issue #2287 Stage B's shared CPI driver change, pending; IMX296 Stage A + Stage B (Stage B via `aen-isp-capture` / `camera-mjpeg-stream`) bench-verified (issue #2287); IMX335 raw-capture bench-verified (issue #2327, runs 316-330: 6/6 clean 1296x972 frames); also builds for the M55-HP (IMX335 on the E1M-AEN803 M55-HP bench-verified 2026-10-09) and, compile-only, the E1M-AEN401 (E4, M55-HP) -- see [`docs/camera-shields.md`](../../docs/camera-shields.md). |
 | [`aen-isp-capture`](aen-isp-capture/)              | **bench** -- real sensor frame through the Alif ISP-Pico (`sensor -> csi -> cam -> isp -> memory`) with AE/AWB on the E1M-AEN801/AEN803 (M55-HE); see the README for the IMX296/IMX335 overlays. |
+| [`aen-isp-ov5647-viewfinder`](aen-isp-ov5647-viewfinder/) | **bench** -- the portable `<alp/camera.h>` counterpart of `aen-isp-capture`: a real OV5647 frame through the ISP-Pico (AE + AWB on). |
+| [`aen-jpeg-regcheck`](aen-jpeg-regcheck/) | **regcheck** -- `<alp/jpeg.h>` backend-selection proof: software fallback on native_sim, hardware backend on silicon. |
 | [`aen-isp-regcheck`](aen-isp-regcheck/)            | **staging** -- VeriSilicon ISP Pico (`vsi,isp-pico`) bind-only staging check. |
 | [`aen-dsi-regcheck`](aen-dsi-regcheck/)            | **staging** -- Alif C2-MIPI-DSI display stack bind-only check (the TX twin of the CSI camera path). |
 | [`aen-dsi-display`](aen-dsi-display/)              | **bench** -- live RK055HDMIPI4MA0 pixels-on-glass path through CDC200 + DesignWare MIPI-DSI + D-PHY, via the `e1m_evk_rk055hdmipi4ma0` shield. |
+| [`aen-lvds-display`](aen-lvds-display/) | **bench** -- Riverdi RVT121HVDFWCA0-B 12.1" LVDS panel through the E8 MIPI-DSI chain plus a TI SN65DSI83 DSI-to-LVDS bridge on an adapter PCB. |
 | [`aen-i2s-amp-alif`](aen-i2s-amp-alif/)            | Drive a tone out of the E8 audio I2S (`i2s3`) over the vendored DesignWare I2S driver (Zephyr I2S API). |
 | [`aen-pdm-mic-alif`](aen-pdm-mic-alif/)            | Capture PCM from the EVK's PDM mics (MP34DT05) through the HP PDM block + the vendored `alif,alif-pdm` DMIC driver (Zephyr DMIC API). |
 
@@ -79,6 +92,9 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`aen-ethernet-link`](aen-ethernet-link/)          | Bring up the E8 GMAC (`eth_dwmac` + the `alif,ethernet` glue) and report net-if state (Zephyr net-if API). |
+| [`aen-usb-firstlight`](aen-usb-firstlight/) | **bench** -- xHCI USB host enumeration driving the board `USB2_SELECT` mux. |
+| [`aen-mram-flash-validate`](aen-mram-flash-validate/) | **bench** -- on-die MRAM flash erase/program/readback validation over the Tier-2 `flash_mram_alif` driver. |
+| [`aen-ospi-regcheck`](aen-ospi-regcheck/) | **regcheck** -- DesignWare OSPI/HexSPI controller (`snps,designware-ospi`) compile + DT-bind + register-file proof. |
 | [`aen-power-domains`](aen-power-domains/)          | **bench** -- SoM power-domain runtime (#2784): quiesce the Wi-Fi/BLE coprocessor, Ethernet PHY, NOR, TMP112, RTC clock-out and backlight, hold 5 s, restore, and check each chip answers again (CC3501E PING with no `WIFI_EN` toggle, PHY ID, NOR JEDEC ID, TMP112 temperature). |
 | [`aen-power-stop`](aen-power-stop/)                | **bench** -- Alif SE STOP backend (#2784, STOP passed on the E1M-AEN803): MRAM image that sleeps three times (LPTIMER, RV-3028 countdown, RV-3028 alarm), judging after each cold-boot wake the wake source, the BKRAM counter and the domain restore. |
 | [`aen-cc3501e-bringup`](aen-cc3501e-bringup/)      | Host (Alif M55-HE) side of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor bring-up (power-gate, reset, control link). |
@@ -104,6 +120,9 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`aen-eeprom-manifest`](aen-eeprom-manifest/)      | Read + decode the on-module 24C128 Alp hardware-info manifest over SoC I2C2 (upstream `i2c_dw`) via `<alp/*>`. |
 | [`aen-eeprom-provision`](aen-eeprom-provision/) | Write (and verify) the 128-byte Alp hardware-info manifest into the on-module 24C128 EEPROM -- the write sibling of `aen-eeprom-manifest`. |
+| [`aen-brd-i2c-scan`](aen-brd-i2c-scan/) | **bench** -- BRD_I2C (SoC I2C0) housekeeping-bus probe over the upstream `i2c_dw` driver. |
+| [`aen-i3c-regcheck`](aen-i3c-regcheck/) | **bench** -- controller-init validation of the portable `<alp/i3c.h>` surface. |
+| [`aen-sensor-int-probe`](aen-sensor-int-probe/) | **bench** -- ICM-42670 / BMP581 / TCAL9538 interrupt-routing chain, end to end. |
 | [`aen-bmi323-regcheck`](aen-bmi323-regcheck/) | **bench** -- diagnostic instrument for the on-module BMI323 IMU (E1M-AEN801/AEN803, M55-HE); `chips/bmi323/bmi323.c` is untouched by it. |
 | [`aen-i2c2-eeprom-regcheck`](aen-i2c2-eeprom-regcheck/) | **regcheck** -- I2C2 + EEPROM over the upstream DesignWare `i2c_dw` driver (Tier-1, `snps,designware-i2c`). |
 | [`aen-temp-sensor`](aen-temp-sensor/)              | Read the on-module TMP112 through the upstream Zephyr sensor API (`CONFIG_SENSOR` + `CONFIG_TMP112`, `SENSOR_CHAN_AMBIENT_TEMP`), in integer milli-degrees C. |
@@ -139,6 +158,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-rtc-calendar`](aen-rtc-calendar/)            | **bench** -- the portable `alp_rtc_set_time()` / `alp_rtc_get_time()` calendar surface over the LPRTC counter (shim). |
 | [`aen-rtc-alarm`](aen-rtc-alarm/) | On-module RV-3028-C7 time + alarm interrupt over upstream Zephyr's `rtc_*` API (`CONFIG_RTC_RV3028`, ADR 0017 Tier-1). |
 | [`aen-rtc-tick-probe`](aen-rtc-tick-probe/) | **bench** -- diagnostic settling whether an intermittent RV-3028-C7 seconds-field stall (#2037) is the RTC, the I2C read, or the host timebase. |
+| [`aen-rtc-control2-probe`](aen-rtc-control2-probe/) | **bench** -- read-only settlement of the RV-3028-C7 `CONTROL_2` 12_24 fix. |
 
 ## Why a separate index here
 

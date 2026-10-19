@@ -1,8 +1,8 @@
 # iot-dashboard
 
-> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds clean on
-> `native_sim/native/64`; real WiFi + MQTT + TLS bring-up gates on
-> v0.6 AEN HiL.
+> ⚠️ **`[UNTESTED]` on hardware.** Builds clean on
+> `native_sim/native/64`; real WiFi + MQTT + TLS bring-up still needs
+> AEN HiL.
 
 Customer-facing IoT demo: an E1M-AEN module reads BME280
 environment samples (temperature / humidity / pressure),
@@ -32,37 +32,45 @@ LVGL dashboard on a RK055HDMIPI4MA0 720×1280 MIPI-DSI panel
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/connectivity/iot-dashboard`)
+
+board.yaml declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
 A real-silicon build refuses to configure without a real entropy
 source (#2192: AEN has no Ensemble entropy driver yet, so the weak-RNG
-guard in `zephyr/CMakeLists.txt` trips), so the plain command below
-fails at configure time without the opt-in shown. CI's `testcase.yaml`
+guard in `zephyr/CMakeLists.txt` trips), so it fails at configure time
+without the opt-in shown in the west commands below. CI's `testcase.yaml`
 opts in the same way to get a build-only compile check; the
 `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y` acknowledgement is
 **bench-only -- never ship it**.
 
-Compile-only check (matches CI, no MCUboot signing, not flashable):
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 ```
+# Compile-only check (matches CI, no MCUboot signing, not flashable):
 # writes examples/connectivity/iot-dashboard/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/connectivity/iot-dashboard
-west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp \
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
     examples/connectivity/iot-dashboard -- \
     -DEXTRA_CONF_FILE=generated/alp.conf \
     -DCONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y   # bench-only -- never ship this flag
-```
 
-The documented AEN flow builds with `--sysbuild` instead, so MCUboot
-signs the image into slot0 (see `docs/_aen-runbook-section.md`). Under
-`--sysbuild`, sysbuild does not forward a plain `-DBOARD=`/`-DCONFIG_...`
-pair to the app image's own CMake invocation the way a non-sysbuild
-build does, so the config override below must be passed unprefixed at
-the sysbuild command line, which sysbuild then routes to the main app
-image (`iot-dashboard`) only:
-
-```
-# writes examples/connectivity/iot-dashboard/generated/alp.conf, which west reads below (#866)
+# Documented AEN flow: --sysbuild, so MCUboot signs the image into slot0
+# (see docs/_aen-runbook-section.md).  Sysbuild does not forward a plain
+# -DBOARD=/-DCONFIG_... pair to the app image's own CMake invocation, so the
+# config override is passed unprefixed at the sysbuild command line, which
+# sysbuild routes to the main app image (iot-dashboard) only:
 python3 scripts/gen_example_alp_conf.py examples/connectivity/iot-dashboard
-west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp \
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
     examples/connectivity/iot-dashboard --sysbuild -- \
     -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf \
     -Diot-dashboard_EXTRA_CONF_FILE=generated/alp.conf \
@@ -70,10 +78,11 @@ west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp \
 west flash
 ```
 
-(`alp_e1m_aen801_m55_hp/...` also builds -- pick the target matching
-your SoM SKU.) `CMakeLists.txt` applies the `e1m_evk_rk055hdmipi4ma0`
-shield automatically for these two AEN M55-HP board targets under
-either build form, so no `-DSHIELD=...` flag is needed.
+`alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp` also builds, for the
+AEN803 twin of this SoM -- pick the target matching your SoM SKU.
+`CMakeLists.txt` applies the `e1m_evk_rk055hdmipi4ma0` shield
+automatically for these two AEN M55-HP board targets under either build
+form, so no `-DSHIELD=...` flag is needed.
 
 > The display chain above is compile-proven, not bench-proven: no
 > pixels have been confirmed on glass yet. It depends on #2204 (the

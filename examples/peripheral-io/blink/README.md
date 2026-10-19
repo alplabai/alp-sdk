@@ -32,7 +32,7 @@ same pad).
 ## Why `BOARD_PIN_LED_RED`, not a raw pin number
 
 The source opens `BOARD_PIN_LED_RED` from `<alp/board.h>`, never
-`ALP_E1M_GPIO_PWM3` / `ALP_E1M_X_GPIO_PWM5` directly.  The facade
+`ALP_E1M_GPIO_PWM0` / `ALP_E1M_X_GPIO_PWM5` directly.  The facade
 picks the active board's generated routes header at compile time
 from the `ALP_BOARD_<SLUG>` define the build emits from this
 example's `board.yaml` `preset:`, so the exact same `src/main.c`
@@ -61,17 +61,16 @@ Want green or blue?  Both EVK route tables declare the full RGB set
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
-cd examples/peripheral-io/blink
 tan build
+tan flash
 ```
 
-`tan build` takes no positional path -- from elsewhere, point it at
-the project explicitly:
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/peripheral-io/blink`)
 
-```bash
-tan build --project examples/peripheral-io/blink
-```
+board.yaml declares only m55_hp, so tan also builds the SDK's idle alp-stock-shim image for m55_he (build/m55_he-zephyr/); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
 `tan` is the SDK's standalone build executor (a separate install --
 see [`docs/getting-started.md`](../../../docs/getting-started.md)).
@@ -90,7 +89,8 @@ twin of its board-qualified overlay, with DT content identical to the
 AEN801 file beside it. After you set `som.sku: E1M-AEN803` in
 `board.yaml`, `tan build` applies
 [`boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`](boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay)
-(this app declares only `cores: m55_hp`). There is no M55-HE twin: the
+(this app declares only `cores: m55_hp`). There is an AEN801 M55-HE
+overlay but no AEN803 M55-HE twin: the
 AEN bench farm's default target
 (`scripts/bench/aen/bench-env.sh`'s `AEN_BOARD`) is M55-HE, an
 undeclared core for this app. `scripts/bench/aen/build.sh`, run with
@@ -103,12 +103,14 @@ The preflight guards only
 alp_e1m_aen803_m55_he/...` bypasses it, applies no overlay, and is
 unsupported.
 
-### native_sim (host, no hardware)
+### Inside an SDK checkout (twister / CI): native_sim, no hardware
 
 This is the SDK-contributor / CI path, and it is deliberately `west`
 rather than `tan`: `native_sim` is a Twister platform, not something
 `board.yaml` can select (`os:` is `zephyr`/`yocto`/`baremetal`/`off`),
 so `tan build` always targets the real SKU and has no `-b` equivalent.
+These commands only work from an alp-sdk checkout, because
+`scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 ```bash
 # writes examples/peripheral-io/blink/generated/alp.conf, which west reads below (#866)

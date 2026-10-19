@@ -26,10 +26,10 @@ values is on the caller; `src/main.c` shows the pattern (a string field
 jsmn is **vendored**, not west-fetched: `vendors/jsmn/include/jsmn.h`
 is the unmodified upstream single header (tag `v1.1.0`, MIT). See
 [`vendors/jsmn/README.md`](../../../vendors/jsmn/README.md) for why
-(the `west.yml` `extras-tier1` pin is the audit trail, but this
-worktree's west topdir hasn't fetched it). `CMakeLists.txt` adds
+(the `west.yml` `extras-tier1` pin is the audit trail; it is vendored
+because the `extras-tier1` west group is not fetched by default). `CMakeLists.txt` adds
 `vendors/jsmn/include` to the app's include path directly --
-`board.yaml`'s `cores.m55_hp.libraries: [jsmn]` only carries the
+`board.yaml`'s top-level `libraries: [{name: jsmn, cores: [m55_hp]}]` only carries the
 `CONFIG_ALP_JSMN_SW=y` SW-fallback marker (jsmn has no HW-accelerator
 class; see the `integration.zephyr.hw_backends:` block in
 `metadata/libraries/jsmn.yaml`), not an include-path hook.
@@ -37,13 +37,30 @@ class; see the `integration.zephyr.hw_backends:` block in
 ## board.yaml HW swap
 
 `som.sku: E1M-AEN801` / `preset: e1m-evk`. This example does no I/O --
-swap `som.sku` to any SoM/preset pair (e.g. `E1M-V2N101` /
-`e1m-x-evk`) and it still builds; jsmn parses an in-RAM string, no
-peripheral or board-specific macro involved.
+nothing in `src/` is board-specific, since jsmn parses an in-RAM string.
+`board.yaml` declares only `m55_hp` (and scopes the `jsmn` library to
+it), so moving to another SoM/preset pair (e.g. `E1M-V2N101` /
+`e1m-x-evk`) means changing `som.sku` **and** the `cores:` block plus the
+library's `cores:` scope (`m55_hp` -> `m33_sm` on V2N).
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/connectivity/jsmn-json-parse`)
+
+board.yaml declares only `m55_hp`, so tan also builds the SDK's idle alp-stock-shim image for `m55_he` (`build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```
 # writes examples/connectivity/jsmn-json-parse/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/connectivity/jsmn-json-parse
 west build -b native_sim/native/64 examples/connectivity/jsmn-json-parse \

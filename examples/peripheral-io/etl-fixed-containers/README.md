@@ -14,7 +14,7 @@ calls build and run unchanged.
 ## What this shows
 
 * `board.yaml`'s `libraries: [etl]` -> the loader adds
-  `vendors/etl/include` (the vendored ETL 20.39.4 headers, Task 0)
+  `vendors/etl/include` (the vendored ETL 20.39.4 headers)
   and `metadata/library-profiles/etl/etl_profile.h` to the include
   path.
 * `etl::vector<int, 8>`: `push_back()`, `size()`, `capacity()`,
@@ -30,6 +30,21 @@ calls build and run unchanged.
   most Cortex-M builds) or silently corrupting memory.
 
 ## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/peripheral-io/etl-fixed-containers`)
+
+board.yaml declares only m55_hp, so tan also builds the SDK's idle alp-stock-shim image for m55_he (build/m55_he-zephyr/); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 ```bash
 # Standalone, native_sim (host binary; no hardware needed):

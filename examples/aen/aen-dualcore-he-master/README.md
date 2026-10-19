@@ -87,6 +87,10 @@ known. Don't rely on either — match the key exactly.
 
 ## Build
 
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. The same commands build for E1M-AEN803 with
+`alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` and
+`alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp`.
+
 ```sh
 # master (HE):
 west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-dualcore-he-master -d build/he -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"

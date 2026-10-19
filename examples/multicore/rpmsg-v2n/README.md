@@ -27,7 +27,9 @@
 Heterogeneous-compute flagship: **Yocto Linux on the V2N's Cortex-A55
 cluster, Zephyr RTOS on the same V2N's Cortex-M33 system-manager**,
 talking over RPMsg.  One SoM, real-time plus Linux, one declarative
-source of truth.
+source of truth: the orchestrator (`scripts/alp_orchestrate/`) reads one
+`board.yaml`, fans out per-core slices, and emits a system manifest that
+the image-bundle + flash + OTA tooling consume.
 
 ```
 examples/multicore/rpmsg-v2n/
@@ -41,16 +43,6 @@ examples/multicore/rpmsg-v2n/
     ├── prj.conf
     └── src/main.c      (raw OpenAMP echo slave; NOT <alp/rpc.h>)
 ```
-
-## What changed vs v0.5
-
-Prior to v0.6 the dual-OS framing lived in two places that had to
-stay in sync by hand: this directory's `board.yaml` covered the
-Zephyr/M33 half, and the Yocto/A55 half hid behind a separate
-bitbake recipe that didn't consume the same config.  v0.6's
-orchestrator (`scripts/alp_orchestrate/`) reads **one**
-`board.yaml`, fans out per-core slices, and emits a system manifest
-that the image-bundle + flash + OTA tooling consume.
 
 ## What it shows
 
@@ -82,10 +74,18 @@ default non-cacheable region is `ocram_low` (512 KiB at
 re-runs of `tan build` produce byte-identical placements
 (spec §6.1).
 
+That tan-resolved carve-out is what the generated `<alp/system_ipc.h>`
+carries.  It is not the window the M33 slice's raw OpenAMP transport
+uses: the resource table, vrings and shared buffers live in the SoC's
+`openamp_carveout` (`metadata/socs/renesas/rzv2n/n44.json`), 9 MiB at
+`0x4f700000` (A55 view) = `0x9f700000` (CM33-NS view).  The bench
+section below works with that window.
+
 | Range                       | Owner       | Notes                                                |
 |-----------------------------|-------------|------------------------------------------------------|
 | `0x48000000 + 0x000`        | A55 (DDR)   | Linux kernel + rootfs (LPDDR4X main memory).         |
-| `0x00010000 – 0x00090000`   | **IPC**     | `alp_default_rpmsg` -- ocram_low, no-cache.          |
+| `0x00010000 – 0x00090000`   | **IPC**     | `alp_default_rpmsg` -- ocram_low, no-cache (tan-resolved carve-out). |
+| `0x4f700000 + 9 MiB`        | **IPC**     | `openamp_carveout` -- the M33 slice's OpenAMP resource table, vrings and shared buffers (A55 view). |
 | `0x80000000 + 0x000`        | M33-SM      | M33 TCM (Zephyr image + .data + .bss).               |
 
 The generated `<alp/system_ipc.h>` carries the resolved address +
@@ -113,12 +113,16 @@ to `meta-alp-sdk` (spec §6.5).
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
-cd alp-workspace/alp-sdk/examples/multicore/rpmsg-v2n
 tan build
+tan flash
 ```
 
-That single command:
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/multicore/rpmsg-v2n`)
+
+`tan build` is a single command that:
 
 1. Reads `board.yaml`, resolves the V2N101 preset's topology.
 2. Fans out two slices in parallel:
@@ -145,12 +149,13 @@ seconds, skipping Yocto's hour-long rebuild:
 tan build
 ```
 
-Image + flash:
+Image bundle:
 
 ```bash
 tan image     # -> build/image-bundle/alp-system.zip + .swu
-tan flash     # walks boot_order: from the manifest
 ```
+
+`tan flash` walks `boot_order:` from the manifest.
 
 ## Bench: one RPC round trip over the UIO backend (V2N / V2M)
 
@@ -159,8 +164,11 @@ IPC-enabled CM33 image through `yocto_uio_drv.c`.  The CM33 window is
 `0x9f700000` (CM33-NS view) = `0x4f700000` (A55 view), 9 MiB.
 
 1. **Build the CM33 image** (V2M shown; use
-   `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33` on V2N):
+   `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33` on V2N).  This raw west
+   bench step only works from an alp-sdk checkout, and the bench SoM is
+   a V2M101 while `board.yaml` declares E1M-V2N101:
 
+   <!-- example-readme:other-sku -->
    ```bash
    west build -p always -b alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33        examples/multicore/rpmsg-v2n/m33_sm
    ```

@@ -71,7 +71,18 @@ kernel driver already holds the address), never as "not present".
 > carriers; production E1M-X SoMs do not carry them. This is a
 > bring-up / demo utility, not a production telemetry path.
 
-## Build (Yocto SDK)
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-power-monitor`)
+
+### Manual build in the Yocto SDK
 
 ```sh
 # Source the SDK that includes meta-alp-sdk (libalp_sdk.so + libalp_chips.a):

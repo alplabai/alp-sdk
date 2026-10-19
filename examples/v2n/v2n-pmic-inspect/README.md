@@ -93,7 +93,18 @@ mode is not recorded yet, so the app prints it but cannot gate on it.
 
 Nothing here has been run on silicon yet.
 
-## Build (Yocto SDK)
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+(from an alp-workspace root instead: `tan build --project alp-sdk/examples/v2n/v2n-pmic-inspect`)
+
+### Manual build in the Yocto SDK
 
 ```sh
 # Source the SDK that includes meta-alp-sdk (libalp_sdk.so + libalp_chips.a
