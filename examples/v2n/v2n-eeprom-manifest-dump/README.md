@@ -60,6 +60,15 @@ block emits the corresponding `CONFIG_ALP_SDK_HW_INFO_EEPROM_*`
 values and records the resolved bus/address/offset in
 `system-manifest.yaml`.
 
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
 ## See also
 
 * [`docs/board-id.md`](../../../docs/board-id.md) -- customer-facing

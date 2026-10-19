@@ -66,6 +66,15 @@ driver registered with `<alp/security.h>`'s MbedTLS wrapper so
 `alp_aead_open` / future `alp_sign_*` use the chip transparently, are
 still to come.
 
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
 ## See also
 
 * [`<alp/chips/optiga_trust_m.h>`](../../../include/alp/chips/optiga_trust_m.h)

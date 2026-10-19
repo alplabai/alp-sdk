@@ -108,7 +108,15 @@ bus; this app's overlay carries only the bench ITCM retarget.
 
 ## Build (bench)
 
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. The bench evidence above was taken on an
+E1M-AEN803, so the AEN803 build is given first; the AEN801 build follows.
+
 ```
+ZEPHYR_BASE=<zephyr-base> west build \
+  -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-bmi323-regcheck -- \
+  "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>" \
+  -DEXTRA_DTC_OVERLAY_FILE=examples/aen/aen-bmi323-regcheck/boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+
 ZEPHYR_BASE=<zephyr-base> west build \
   -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-bmi323-regcheck -- \
   "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>" \

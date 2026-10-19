@@ -56,6 +56,8 @@ RV-3028 countdown is used, because the RV-3028 is the trusted time base.
 
 ## Build and run
 
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); the commands below only work from an alp-sdk checkout.
+
 ```
 ZEPHYR_BASE=<zephyr-base> west build \
   -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-power-stop -- \

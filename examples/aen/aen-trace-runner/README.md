@@ -88,7 +88,7 @@ covers the game design, and `docs/superpowers/` holds the implementation plans.
 ## Build
 
 The game can also run without the A32 and without the HP: `-DTR_RENDER=M55` renders on the HE
-itself, and tilting the board (IMU) steers. The steps below build the full exhibition release.
+itself, and tilting the board (IMU) steers. The steps below build the full exhibition release. Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); the `west build` commands in this README only work from an alp-sdk checkout, and all target E1M-AEN803.
 
 1. Build the A32 stub and renderer, then generate the header the HE needs to launch them. The
    A32 images are built with GNU make; on Windows, run this step in WSL2.

@@ -34,6 +34,19 @@ want when shipping binary protocols (`printf` is text-only).
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```bash
 # Standalone, native_sim (host binary -- writes go to stdout):
 # writes examples/peripheral-io/uart-hello-world/generated/alp.conf, which west reads below (#866)
@@ -54,7 +67,13 @@ The output appears on whatever the board wires `ALP_E1M_UART0` to.
 On the E1M-EVK and E1M-X-EVK that's the on-board FTDI USB-UART
 (115200 8N1, 8 data bits, no parity, 1 stop bit).
 
-Recommended cross-platform invocation (one binary, one syntax,
+Open the console with tan:
+
+```bash
+tan monitor --port <your-serial-device>
+```
+
+Or use `tio`, a cross-platform terminal (one binary, one syntax,
 on Linux + macOS + Windows):
 
 ```

@@ -1,8 +1,8 @@
 # aen-hp-core-smoke — M55-HP first light
 
 First-light smoke for the **M55-HP** (RTSS-HP) core of the E1M-AEN801 (Alif
-Ensemble E8). Every other AEN bench app runs on the **M55-HE** core; this is the
-first alp-sdk image on the **second** M55.
+Ensemble E8) and E1M-AEN803. The single-core AEN bench apps run on the **M55-HE**
+core; this was the first alp-sdk image on the **second** M55.
 
 ## The HP boot model
 
@@ -39,6 +39,10 @@ executing, not a stale value left by a prior image.
 
 ## Build + flash
 
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. For E1M-AEN803 use
+`-b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp` and
+`boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`.
+
 ```bash
 # Build for the HP board target (note rtss_hp, not rtss_he):
 ZEPHYR_BASE=<zephyr> west build \
@@ -56,6 +60,3 @@ scripts/bench/aen/flash-jlink-hp.sh build/aen-hp-core-smoke
 An HP ATOC becomes the **active** boot image (the SES boots HP instead of the
 slot0 self-test). After HP bring-up, restore the canonical image:
 `scripts/bench/aen/flash-jlink-mramxip.sh <person_detect-build-dir>`.
-
-This unblocks the **HE↔HP MHUv2 doorbell** bring-up (which needs both cores
-running).

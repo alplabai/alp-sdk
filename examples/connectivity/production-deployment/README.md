@@ -1,13 +1,13 @@
 # production-deployment
 
-The v1.0 reference application for a field-deployable IoT
+The reference application for a field-deployable IoT
 product.  Demonstrates the full manufactured -> deployed ->
 updated -> attested lifecycle on a single app, so customers see
 how the SDK's secure-boot, OTA, EEPROM-provisioning, and
 remote-attestation pieces fit together.
 
 This is also the SDK's **declarative-stack flagship**: every
-v0.6 block (`boot:`, `ota:`, `security.psa:`, `storage:`,
+declarative block (`boot:`, `ota:`, `security.psa:`, `storage:`,
 `cores.<id>.memory:`, `cores.<id>.power:`,
 `diagnostics.modules:`) appears in this `board.yaml` at the
 production stance the SDK recommends for shipping product.
@@ -20,7 +20,7 @@ production stance the SDK recommends for shipping product.
 > hardware entropy. The native_sim build has no such source and
 > acknowledges that explicitly in its own `native_sim.conf`.
 
-## The v0.6 block walkthrough
+## The block walkthrough
 
 ### `boot:` -- signed bootloader
 
@@ -169,21 +169,16 @@ the rest stays quiet to save flash and console bandwidth.
 
 ## Build
 
-### native_sim (framing test, no real ops)
+From this directory, or from your own copy of it:
 
 ```bash
-# writes examples/connectivity/production-deployment/generated/alp.conf, which west reads below (#866)
-python3 scripts/gen_example_alp_conf.py examples/connectivity/production-deployment
-west build -b native_sim/native/64 examples/connectivity/production-deployment -- -DEXTRA_CONF_FILE=generated/alp.conf
-west build -t run
+tan build
+tan flash
 ```
 
-### Real silicon (AEN-Zephyr, requires a staged Mender server)
-
-```bash
-tan build --project examples/connectivity/production-deployment
-west flash
-```
+Real silicon (AEN-Zephyr) requires a staged Mender server.  `board.yaml`
+runs the app on `m55_hp`; `a32_cluster` and `m55_he` are off (this is a
+security skeleton with no HE firmware).
 
 On HiL the qualified path runs: boot from a factory-signed
 image, read the EEPROM manifest, inspect MCUboot slots, connect
@@ -194,6 +189,18 @@ this SKU (E1M-AEN801) OTA *apply* is DEFERRED (#1069, see
 write, and self-overwriting the running slot0 is not a supported
 flow, so the SDK stops after verification and does not write or
 reboot.  Attestation heartbeats publish every 60 s regardless.
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```
+# native_sim (framing test, no real ops):
+# writes examples/connectivity/production-deployment/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/connectivity/production-deployment
+west build -b native_sim/native/64 examples/connectivity/production-deployment -- -DEXTRA_CONF_FILE=generated/alp.conf
+west build -t run
+```
 
 ## Production variants
 

@@ -26,16 +26,16 @@
 > periodically, not only after a POR, if wall-clock accuracy matters.
 >
 > **Alif's own workaround for ER002 is "use an external real-time clock source",
-> and the SoM does carry one -- an `rv3028c7` at 7-bit `0x52` -- but it is NOT
-> reachable from the M55 today.** `BRD_I2C` is SoC I2C0 (function C,
-> `P7_0`/`P7_1`), a master-capable Tier-1 upstream `i2c_dw` controller
-> (`ADTS0013` v1.2 Table 3-16 + HWRM Sec.15.4.1) -- not the slave-only LPI2C0
-> this bus was first believed to be (alp-sdk#1848). The transport exists;
-> what blocks it is electrical, bench-settled 2026-08-31 on the r1 module: pads
-> High-Z abort every address (`-116`/`-ETIMEDOUT`), and the pad's internal
-> ~50 kOhm pull-up only trades that for no ACK (`-5`/`-EIO`) -- the R2 netlist
-> shows `BRD_I2C`'s bridging jumpers (`R93`/`R94`) DNP. It needs a board
-> rework, not firmware -- see alp-sdk#1814.
+> and the SoM carries one -- an `rv3028c7` at 7-bit `0x52` -- on `BRD_I2C`.**
+> `BRD_I2C` is SoC I2C0 (function C, `P7_0`/`P7_1`), a master-capable Tier-1
+> upstream `i2c_dw` controller (`ADTS0013` v1.2 Table 3-16 + HWRM Sec.15.4.1) --
+> not the slave-only LPI2C0 this bus was first believed to be (alp-sdk#1848).
+> On the r1 module the bus was dead (pads High-Z aborted every address with
+> `-116`/`-ETIMEDOUT`; the pad's internal ~50 kOhm pull-up only traded that for
+> no ACK, `-5`/`-EIO`, because `R93`/`R94` are DNP in the R2 netlist). On
+> E1M-AEN801 2626-R2 the RV-3028 is reachable: it ACKs at `0x52` with the pull-up
+> supplied by pad bias. See [`aen-rtc-alarm`](../aen-rtc-alarm/README.md) for
+> the working external RTC; this example exercises only the on-die LPRTC.
 
 
 On-silicon validation for the **E1M-AEN801** (Alif Ensemble E8, M55-HE),
@@ -124,6 +124,8 @@ bench check (see the backend header + `aen-rtc-regcheck/README.md`).
 Standalone Zephyr app (no `alp_project.py` board.yaml flow); alp-sdk is
 added as an EXTRA module so the `alp_rtc_*` dispatcher + the E8 calendar
 shim backend link in:
+
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); the commands below only work from an alp-sdk checkout. For E1M-AEN803 use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`.
 
 ```sh
 export ZEPHYR_BASE=<zephyr-base>

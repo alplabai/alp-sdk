@@ -30,9 +30,11 @@ Either way the example sees a working DAC0 -- neither EVK lacks one.
 The GD32 dispatch on E1M-X is transparent to the `<alp/dac.h>` DAC API.
 
 The shipped `board.yaml` defaults to the **E1M EVK** (Alif Ensemble E8,
-`som.sku: E1M-AEN801`) -- the native DAC12 path.  Switch to the V2N
-GD32-bridged path with `preset: e1m-x-evk` + a V2N SKU (both are listed
-under `supported_boards:`).
+`som.sku: E1M-AEN801`) -- the native DAC12 path.  The M55-HE core
+runs the demo.  Switch to the V2N GD32-bridged path by setting
+`preset: e1m-x-evk` and `som.sku: E1M-V2N101` (both boards are listed under
+`supported_boards:`) and replacing the `m55_he` entry in `cores:` with
+`m33_sm` -- the V2N SoM has no M55 cores.
 
 ## What this shows
 
@@ -45,6 +47,19 @@ under `supported_boards:`).
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```bash
 # Standalone, native_sim (compiles + open returns NOT_READY -- no
 # DAC controller on the host build):
@@ -53,8 +68,15 @@ python3 scripts/gen_example_alp_conf.py examples/peripheral-io/dac-waveform
 west build -b native_sim/native/64 examples/peripheral-io/dac-waveform \
     -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
+```
 
-# On real V2N silicon:
+For V2N silicon, make the `board.yaml` changes above first (`som.sku`,
+`preset`, `cores:`) and then run `tan build`; the SDK-checkout equivalent
+re-runs the generator against the edited `board.yaml`:
+
+<!-- example-readme:other-sku -->
+```bash
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/dac-waveform
 west build -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 \
     examples/peripheral-io/dac-waveform -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash

@@ -133,27 +133,21 @@ nodes (native_sim, V2N) it compiles out and nothing is spawned.
 
 ## Build & flash (E1M-AEN801)
 
-```sh
-# writes examples/peripheral-io/alp-console/generated/alp.conf, which west reads below (#866)
-python3 scripts/gen_example_alp_conf.py examples/peripheral-io/alp-console
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-           -d build_console examples/peripheral-io/alp-console -- -DEXTRA_CONF_FILE=generated/alp.conf
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
 ```
 
 This app also ships an E1M-AEN803 twin of the AEN801 overlay + `.conf` pair
-above
 (`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`,
 `boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf`):
 `boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay` and
 `boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.conf` (identical
 DT/Kconfig content) -- it is the AEN bench farm's default target
 (`scripts/bench/aen/bench-env.sh`'s `AEN_BOARD`). After setting
-`som.sku: E1M-AEN803` in `board.yaml`:
-
-```sh
-west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
-           -d build_console examples/peripheral-io/alp-console
-```
+`som.sku: E1M-AEN803` in `board.yaml`, `tan build` picks it up.
 
 The app is slot0-linked (`CONFIG_FLASH_LOAD_OFFSET=0x10000`, reset vector
 `0x8001xxxx`), so it flashes via the **Flow D** MRAM path: `app-gen-toc` builds a
@@ -161,6 +155,22 @@ signed ATOC, then J-Link `loadbin`s the image to `0x80010000` and the ATOC to it
 per-build start address. See `docs/aen-bench-bringup.md` and the
 `flashing-and-bench-debugging-aen` workflow for the bench recipe. The companion
 CC3501E must be running its bridge firmware (`docs/cc3501e-production.md`).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```sh
+# writes examples/peripheral-io/alp-console/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/alp-console
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+           -d build_console examples/peripheral-io/alp-console -- -DEXTRA_CONF_FILE=generated/alp.conf
+
+# E1M-AEN803, after setting som.sku: E1M-AEN803 in board.yaml:
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/alp-console
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+           -d build_console examples/peripheral-io/alp-console -- -DEXTRA_CONF_FILE=generated/alp.conf
+```
 
 ## Portability
 

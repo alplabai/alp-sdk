@@ -82,10 +82,16 @@ resource table is compiled straight from `../rpmsg-v2n/m33_sm/src/`.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
-cd alp-workspace/alp-sdk/examples/multicore/microros-ros2-v2n
 tan build            # both slices; same flow as rpmsg-v2n
+tan flash
 ```
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 M33 only, for iteration (needs a west workspace, network access, and the ROS 2
 colcon build prerequisites the module documents):

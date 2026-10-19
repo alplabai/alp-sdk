@@ -1,6 +1,6 @@
 # drone-autopilot
 
-> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on
+> ⚠️ **`[UNTESTED]` -- paper-correct.** Compiles on
 > `native_sim/native/64` + cross-compiles to `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`.
 > **Do NOT fly this build.**  The PID gains, sensor scales,
 > failsafe thresholds, and motor mapping are starting-point
@@ -33,7 +33,10 @@ motor mixer → ESCs.
   AEN; TMU CORDIC on V2N.
 - **MAVLink v2 ground-station link** -- minimal in-tree stack
   (`src/mavlink.{c,h}`) talks to QGroundControl / Mission Planner
-  over a SiK telemetry radio on UART2 @ 57600 baud.
+  over a SiK telemetry radio @ 57600 baud.  The GCS link currently
+  opens `ALP_E1M_UART0`, which the GNSS also uses (E1M exposes only
+  UART0 and UART1, and the GNSS and SBUS receiver already take both),
+  so it needs a dedicated port before flight.
   - Tx: `HEARTBEAT` (1 Hz), `ATTITUDE` (10 Hz), `GPS_RAW_INT` +
     `GLOBAL_POSITION_INT` (5 Hz), `BATTERY_STATUS` (1 Hz).
   - Rx: `COMMAND_LONG` for arm/disarm + mode change, `HEARTBEAT`
@@ -54,21 +57,35 @@ motor mixer → ESCs.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
 ```
+
+This app also ships an E1M-AEN803 twin of the AEN801 overlay
+(`boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`):
+[`boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`](boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay)
+(identical DT content). After setting `som.sku: E1M-AEN803` in
+`board.yaml`, `tan build` picks it up.
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```bash
+# E1M-AEN801:
 # writes examples/peripheral-io/drone-autopilot/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/peripheral-io/drone-autopilot
 west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/drone-autopilot -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
-```
 
-This app also ships an E1M-AEN803 twin of the AEN801 overlay above
-(`boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`):
-[`boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`](boards/alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay)
-(identical DT content). After setting `som.sku: E1M-AEN803` in
-`board.yaml`, build it with:
-
-```
-west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/drone-autopilot
+# E1M-AEN803, after setting som.sku: E1M-AEN803 in board.yaml:
+python3 scripts/gen_example_alp_conf.py examples/peripheral-io/drone-autopilot
+west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/drone-autopilot -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 

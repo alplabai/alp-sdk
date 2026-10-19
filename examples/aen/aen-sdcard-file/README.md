@@ -34,6 +34,19 @@ cannot reach DTCM; the driver copies through a buffer in SRAM0
 (`CONFIG_SDHC_DWC_BOUNCE_BUFFER`, on by default for Ensemble), so the app
 needs no special placement.
 
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+`board.yaml` sets `som.sku: E1M-AEN801`. The bench verification below ran on an E1M-AEN803; to build for it, set `som.sku: E1M-AEN803` (it has the same `m55_he` core, and the example ships an AEN803 overlay).
+
 ## Hardware
 
 - E1M-EVK 2626-R2 whose SDIO mux parts U38/U39 are the **reworked 74LV3257**

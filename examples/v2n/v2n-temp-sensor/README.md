@@ -25,7 +25,16 @@ ten-sample loop.
   returned as signed milli-degrees.
 * Clean shutdown in `_deinit`.
 
-## Build (Yocto SDK)
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+### Manual build in the Yocto SDK
 
 ```sh
 # Source the SDK that includes meta-alp-sdk (libalp_sdk.so + libalp_chips.a):

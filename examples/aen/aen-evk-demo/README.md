@@ -1,7 +1,7 @@
 # aen-evk-demo
 
-Phased full-board demo for the **E1M-AEN801** (Alif Ensemble E8, M55-HE) on
-the **E1M EVK** carrier. Bench target: E1M-AEN803 serial
+Phased full-board demo for the **E1M-AEN801 / E1M-AEN803** (Alif Ensemble E8,
+M55-HE) on the **E1M EVK** carrier. Bench target: E1M-AEN803 serial
 2026W36-0002, EVK rev 2626-R2.
 
 ## Why a phase framework
@@ -162,8 +162,8 @@ Shrinking `&sram0`'s `reg` to that 64 KiB window is the safety property, not a
 tidy-up: it turns a future oversized `SRAM0`-tagged buffer into a **link error**
 instead of a silent walk into system RAM. It already caught one: bench runs
 203/204 (E1M-AEN803) found the Zephyr default `CONFIG_NET_BUF_DATA_SIZE=128`
-silently drops any Ethernet frame needing more than 7 fragments (see
-`aen-ethernet-link`'s README); the fix, `CONFIG_NET_BUF_DATA_SIZE=1536` for
+silently drops any Ethernet frame needing more than 7 fragments (see the
+`CONFIG_NET_BUF_*` comment in `prj.conf`); the fix, `CONFIG_NET_BUF_DATA_SIZE=1536` for
 every `ETH_DWMAC_ALIF` build, applies here too and, at this app's original
 `CONFIG_NET_BUF_RX/TX_COUNT=16`, overflowed this window by 320 B -- caught at
 link time, not silently. `prj.conf` trims the count to 6 instead: phase 10
@@ -217,7 +217,7 @@ flipped in byte 0, and every structural test still accepted it.
 Both are already enabled by the board layer
 (`metadata/e1m_modules/aen/on-module-links.yaml`, `metadata/pinmux/aen.yaml`)
 -- this app's own overlay adds nothing for either. Confusing the two buses
-wastes a bench run; see `EVK-BRIEFING.md`.
+wastes a bench run.
 
 Three further buses are **not** shared through `demo_ctx_t`:
 
@@ -229,8 +229,7 @@ Three further buses are **not** shared through `demo_ctx_t`:
   rather than either peripheral directly.
 - **RMII + MDIO** -- phase 10's Ethernet route to the on-module DP83825 PHY.
   These *are* published by `metadata/e1m_modules/aen/alif-ethernet-phy.tsv`
-  (the authoritative SoM route -- **not** the Alif fork's reference route, which
-  an earlier cut of `aen-ethernet-link` wrongly used), but the `ethernet` node
+  (the authoritative SoM route, **not** the Alif fork's reference route), but the `ethernet` node
   ships `status = "disabled"` in the SoC dtsi, so this app's overlay enables it
   and supplies the pin group. Phase 10 owns it end to end.
 - **SPI1** -- the SoM-internal Alif <-> CC3501E inter-chip link (SCK P14_6,
@@ -283,7 +282,7 @@ on real silicon, which is why this phase verifies by register readback
 
 ## Build
 
-Standalone Zephyr app (no `alp_project.py` board.yaml flow):
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. For E1M-AEN803 (the bench target) use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` instead of the AEN801 target below:
 
 ```bash
 source <workspace>/alp-env.sh   # ZEPHYR_BASE, toolchain
@@ -443,8 +442,6 @@ bench sessions, and so are
 
 ## Reference
 
-- `EVK-BRIEFING.md` / `DEMO-DESIGN.md` (dispatch scratchpad) -- the verified
-  board facts and phase design this app implements.
 - [`examples/peripheral-io/i2c-device-hub`](../../peripheral-io/i2c-device-hub/)
   -- the data-ready-poll pattern phases 1-2 copy, and the PASS/PARTIAL bug
   this app's whole verdict design exists to avoid repeating.
@@ -483,10 +480,7 @@ bench sessions, and so are
 - [`examples/aen/aen-i2s-amp-alif`](../aen-i2s-amp-alif/) -- the I2S3 overlay
   (node, pinctrl, `alp-i2s0` alias) phase 11 transcribes; its silicon-proven
   TX path (SCLK/WS/SDO genuinely toggling under the patched Tier-1.5
-  clockctrl). Its README still describes an earlier hand-poked clock
-  enable and an "Alif side P7.1" mux-ENABLE claim this app's overlay
-  disagrees with (see the overlay's Phase 11 header) -- both are stale;
-  trust its `src/main.c`, not its prose.
+  clockctrl).
 - [`examples/aen/aen-pdm-mic-alif`](../aen-pdm-mic-alif/) -- the HP PDM
   overlay phase 11 transcribes; that example's own README has the current
   silicon status (48 kHz rate verified; acoustic capture at 48 kHz on mic

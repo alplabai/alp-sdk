@@ -35,8 +35,12 @@ path correctly. The model rodata lives in MRAM (XIP) and is `memcpy`'d into an
 
 ## Build
 
+This app intentionally keeps its two strong Ethos-U overrides in-app (`src/main.cpp`) and does not set `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN`; they are not hoisted into the backend.
+
 Silicon-only (board `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`); needs the
 alp-sdk, hal_alif, hal/ethos_u, and lib/tflite-micro modules plus Vela:
+
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. For E1M-AEN803, use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` and `boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay` in place of the AEN801 ones below.
 
 ```sh
 west build -p always \

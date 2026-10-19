@@ -10,9 +10,9 @@ the carrier console. It is the AEN analog of
 [`examples/v2n/v2n-gd32-bridge-ping`](../../v2n/v2n-gd32-bridge-ping) (the
 GD32 supervisor bring-up) — same shape, different coprocessor.
 
-The CC3501E peer firmware is ALP-authored and lives in this repo at
-[`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) (embedded, per ADR 0015 —
-like the gd32-bridge).
+The CC3501E peer firmware is ALP-authored and lives in the separate
+[`alplabai/cc3501e-bridge-firmware`](https://github.com/alplabai/cc3501e-bridge-firmware)
+repo (ADR 0031).
 
 ## Why this app is the gating step
 
@@ -72,21 +72,35 @@ SS0 from the controller.
    for the full model, including why there is no deeper sleep tier and how waking
    works.
 
-## Build + flash (bench)
+## Build
 
-Two J-Links: one on the Alif, one on the CC3501E.
+Two J-Links (bench): one on the Alif, one on the CC3501E.
+
+First build and flash the CC3501E peer firmware
+(alplabai/cc3501e-bridge-firmware, ADR 0031):
 
 ```sh
-# 1. Build + flash the CC3501E peer firmware first (alplabai/cc3501e-bridge-firmware, ADR 0031):
 #    powershell cc3501e-bridge-firmware:ti/build_ti.ps1   (after repinning the
 #    SysConfig board file to the AEN GPIO_27/28/29 inter-chip pins)
 #    -> flash cc3501e-bridge.hex over the CC3501E J-Link.
 #    NOTE: the CC3501E reads VTref=0V until this app powers it, so flash it
 #    with the Alif app already powering WIFI_EN, or hold WIFI_EN externally.
+```
 
-# 2. Build + flash this Alif app (use the FULL qualified board target so the
-#    per-board overlay boards/<target>.overlay is auto-applied):
-# writes examples/aen/aen-cc3501e-bringup/generated/alp.conf, which west reads below (#866)
+Then this Alif app. From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_hp` here, in `build/m55_hp-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there. Use the FULL qualified board target so the per-board overlay `boards/<target>.overlay` is auto-applied:
+
+```sh
 python3 scripts/gen_example_alp_conf.py examples/aen/aen-cc3501e-bringup
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-cc3501e-bringup -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash                      # over the Alif J-Link (AE822FA0E5597LS0_M55_HE)
@@ -96,7 +110,7 @@ west flash                      # over the Alif J-Link (AE822FA0E5597LS0_M55_HE)
 > (`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`); Zephyr's
 > auto-discovery matches the qualified target, not the bare board name.
 
-Watch the carrier console (Alif **UART5**, P3_4/P3_5, 115200 8N1 — the E1M
+Watch the carrier console (`tan monitor --port <port>`; Alif **UART5**, P3_4/P3_5, 115200 8N1 — the E1M
 edge "UART0") for the `[cc3501e-bringup]` log. If the link wedges, cold-cycle
 via the bench PSU CH2.
 

@@ -2,10 +2,13 @@
 
 Minimal slot0 application used to bench-validate the **production** secure-boot
 chain on the Alif Ensemble E8: `SES ──ATOC──▶ MCUboot ──verify slot0──▶ app`
-(the `sysbuild/aen` MCUboot profile). It only proves it BOOTED — it prints to
+(the `zephyr/sysbuild/aen` MCUboot profile). It only proves it BOOTED — it prints to
 the RAM console (read over SWD) and reports `VTOR` to show where it runs from.
 
 ## Build (sysbuild: MCUboot + signed slot0 app)
+
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout.
+Use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` instead for E1M-AEN803.
 
 ```bash
 west build -p always --sysbuild \

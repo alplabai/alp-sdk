@@ -55,7 +55,7 @@ core was genuinely Non-Secure and its write to the Secure log window was rejecte
 ## Running (non-destructive — Flow C RAM-run)
 
 The probe is ITCM-linked, so it runs from a J-Link RAM load and never touches
-MRAM (the canonical slot0 image is preserved):
+MRAM (the canonical slot0 image is preserved). Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); the commands below only work from an alp-sdk checkout.
 
 ```
 scripts/bench/aen/build.sh   $PWD/examples/aen/aen-tz-secure-log-probe

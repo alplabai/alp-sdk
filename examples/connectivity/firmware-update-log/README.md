@@ -48,7 +48,8 @@ store and counter consistently. App-immutability requires the `HW_ENFORCED`
 tier (secure isolation + protected counter).
 
 On the E1M-AEN801 / Alif E8 board, this example carries AEN-specific overlays
-for a dual-M55 image. The SE ATOC package loads HP to its ITCM global alias
+for a dual-M55 image. These overlays and every documented board target are
+AEN801-only; E1M-AEN803 is untested. The SE ATOC package loads HP to its ITCM global alias
 (`0x50000000`) and loads HE to its ITCM global alias (`0x58000000`). The update
 log itself is stored in a dedicated MRAM `alp_ulog_partition` for NVS, kept away
 from the top-of-MRAM ATOC package used by the SE boot flow.
@@ -245,8 +246,10 @@ stays intact and verifiable.
 
 ## Running the example
 
+This example has no `board.yaml`, so there is no `tan build` path and no
+`generated/alp.conf` step; run it from an alp-sdk checkout with twister:
+
 ```
-python3 scripts/gen_example_alp_conf.py examples/connectivity/firmware-update-log   # writes generated/alp.conf (#866)
 west twister -p native_sim/native/64 \
     -T examples/connectivity/firmware-update-log --inline-logs
 ```

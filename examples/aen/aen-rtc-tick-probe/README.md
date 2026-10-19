@@ -200,12 +200,15 @@ with TEST A having already shown a kernel-timebase mismatch.
 Standalone Zephyr app (no `alp_project.py` `board.yaml` flow), same target as
 `aen-rtc-control2-probe`:
 
+Standalone Zephyr bench app (no `board.yaml`, so not buildable with `tan build`); the commands below only work from an alp-sdk checkout. For E1M-AEN803 use `-b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`.
+
 ```
 ZEPHYR_BASE=<zephyr-base> west build \
   -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-rtc-tick-probe -- \
-  "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>" \
-  -DEXTRA_DTC_OVERLAY_FILE=examples/aen/aen-rtc-tick-probe/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+  "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
 ```
+
+The overlay is named for the fully-qualified board, so it auto-applies.
 
 RAM-run over J-Link (no MRAM programming needed -- the overlay retargets
 `zephyr,flash` to ITCM); read `ram_console_buf` over SWD, or the E1M edge

@@ -34,6 +34,15 @@ For full command-set coverage (GPIO/PWM/ADC/DAC/QENC/TRNG/TMU/...,
 pass/fail accounting, transport recovery) see
 [`v2n-gd32-bridge-hil-soak`](../v2n-gd32-bridge-hil-soak).
 
+## Build
+
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
 ## See also
 
 * [`docs/gd32-bridge-protocol.md`](../../../docs/gd32-bridge-protocol.md) — wire spec.

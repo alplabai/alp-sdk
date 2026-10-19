@@ -12,7 +12,7 @@ No panel, no peripherals -- just RAM buffers.
 
 * `gfx_compat` is **not** a fetched third-party library like the rest
   of `examples/display/`'s siblings -- `west.yml` documents it as
-  shipping in-tree, and `board.yaml`'s `libraries: [gfx_compat]` just
+  shipping in-tree, and `board.yaml`'s `libraries:` entry (`name: gfx-compat`, scoped to `m55_hp`) just
   flips `CONFIG_ALP_GFX_COMPAT_SW` (see
   `zephyr/Kconfig.alp-libraries`) to compile
   `src/lib/gfx_compat/gfx_compat.c` into the build.
@@ -26,13 +26,26 @@ No panel, no peripherals -- just RAM buffers.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
 ```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```
 python3 scripts/gen_example_alp_conf.py examples/display/gfx-compat-blit   # writes generated/alp.conf (#866)
 west twister -T examples/display/gfx-compat-blit -p native_sim/native/64
 
 # Equivalent `west build`:
 west build -b native_sim/native/64 examples/display/gfx-compat-blit \
-    -- -DZEPHYR_MODULES=$(pwd)
+    -- -DEXTRA_CONF_FILE=generated/alp.conf -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 ```
 
@@ -60,7 +73,7 @@ the library `hil_silicon: untested` / `smoke_tests: build_only` --
 see `src/lib/gfx_compat/Kconfig` for the reserved
 `CONFIG_ALP_GFX_COMPAT_GPU2D` / `_DMA2D` / `_SPI_DMA` knobs. This
 example's `board.yaml` doesn't need to change when those land: the
-`libraries: [gfx_compat]` loader hook picks the highest-priority
+`libraries:` loader hook picks the highest-priority
 backend for the target SoM automatically (same pattern every other
 `libraries:` entry in this SDK follows).
 

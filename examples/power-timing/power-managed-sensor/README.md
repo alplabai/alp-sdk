@@ -11,8 +11,8 @@ example of sleep-mode selection + multi-source wakeup.
 > "re-entering deep sleep" lines below are literal `printf` string
 > constants that frame where a real node's `alp_*` calls would go.
 > What is real and worth copying is the **declarative half**: the
-> `power:` block and the `CONFIG_PM_*` set the planner emits
-> from it. Despite the example's name, no BME280 or IMU is driven
+> `power:` block and the `CONFIG_PM` / `CONFIG_PM_DEVICE` lines the planner
+> emits from it. Despite the example's name, no BME280 or IMU is driven
 > here (the SDK does ship a BME280 driver -- see
 > [`<alp/chips/bme280.h>`](../../../include/alp/chips/bme280.h) --
 > this example simply does not use it).
@@ -51,17 +51,20 @@ The orchestrator (`scripts/alp_orchestrate/`)
 turns the `power:` block into:
 
 ```
+# Per-slice power-management profile (board.yaml cores.<id>.power:)
 CONFIG_PM=y
 CONFIG_PM_DEVICE=y
 # Sleep target: deep
-CONFIG_PM_DEVICE_WAKE_UART=y     # wakeup source
-CONFIG_PM_DEVICE_WAKE_GPIO_INT=y # wakeup source
-CONFIG_PM_DEVICE_WAKE_RTC=y      # wakeup source
+# wakeup source: uart (DT wakeup-source; + pm_device_wakeup_enable() pending v0.7)
+# wakeup source: gpio_int (DT wakeup-source; + pm_device_wakeup_enable() pending v0.7)
+# wakeup source: rtc (DT wakeup-source; + pm_device_wakeup_enable() pending v0.7)
 ```
 
-into the slice's generated `alp.conf`. The customer never hand-
-edits a single `CONFIG_PM_*` line; the policy lives in
-`board.yaml`.
+into the slice's generated `alp.conf`. Only `CONFIG_PM` and
+`CONFIG_PM_DEVICE` are real Kconfig lines; the sleep target and the wake
+sources are documentation hints until the per-silicon devicetree and
+runtime-enable plumbing lands in v0.7. The customer never hand-edits the
+`CONFIG_PM*` lines; the policy lives in `board.yaml`.
 
 ## SoM choice: AEN301
 
@@ -90,11 +93,11 @@ the same for one-shot maintenance actions. `uart` is the
 back-door for field debugging -- typing in the console wakes
 the device long enough to dump diagnostics.
 
-Wake-source enable lines have to come from `board.yaml` rather
-than the app because the silicon's PM controller needs the
-Kconfig set at *build time* (the relevant peripheral clocks +
-retention domains are configured during boot, before `main()`
-ever runs).
+The wake-source list lives in `board.yaml` rather than the app so the
+declared policy sits next to the rest of the slice config. Today it
+lands in `alp.conf` as hint comments only: marking a device
+wakeup-capable needs the DT `wakeup-source;` property plus a runtime
+`pm_device_wakeup_enable()` call, and that plumbing is pending v0.7.
 
 ## Memory tuning
 
@@ -110,7 +113,27 @@ underused).
 
 ## Build
 
-### native_sim (framing test, no real sleep)
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+board.yaml declares both cores (`m55_hp` is parked with `os: "off"`), so only `m55_he` builds an application image.
+
+The generated `alp.conf` carries the `CONFIG_PM=y` /
+`CONFIG_PM_DEVICE=y` lines and the sleep-target / wake-source hint
+comments above -- so you can verify the declarative path. The runtime behaviour is
+the same three printf stages as on native_sim: the example does not
+sleep, so a current probe will show the active draw throughout,
+not a duty-cycled average. Measuring real deep-sleep current
+requires replacing the printf bodies with actual sensor + PM
+calls, as described under "Customising the cadence" below.
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `scripts/gen_example_alp_conf.py` writes `generated/alp.conf` there.
 
 ```bash
 # writes examples/power-timing/power-managed-sensor/generated/alp.conf, which west reads below (#866)
@@ -119,7 +142,7 @@ west build -b native_sim/native/64 examples/power-timing/power-managed-sensor --
 west build -t run
 ```
 
-Expected output:
+Expected output (native_sim; real silicon prints the same three stages):
 
 ```
 [pm] power-managed-sensor (AEN301 / M55-HE)
@@ -136,22 +159,6 @@ Expected output:
 [pm]   re-entering deep sleep
 [pm] done
 ```
-
-### Real silicon (AEN301)
-
-```bash
-tan build --project examples/power-timing/power-managed-sensor
-west flash
-```
-
-This builds and boots on AEN301, and the generated `alp.conf`
-carries the `CONFIG_PM_*` set above -- so you can verify the
-declarative path lands on real silicon. The runtime behaviour is
-the same three printf stages as native_sim: the example does not
-sleep, so a current probe will show the active draw throughout,
-not a duty-cycled average. Measuring real deep-sleep current
-requires replacing the printf bodies with actual sensor + PM
-calls, as described under "Customising the cadence" below.
 
 ## Customising the cadence
 
@@ -172,4 +179,5 @@ stays the same.
   wake-on-network for the Mender poll thread).
 - [`docs/portability.md`](../../../docs/portability.md) -- which
   parts of this example stay portable across SoM families
-  (everything except the `som.sku:` line).
+  (moving to another family changes the `som.sku:` line and the `cores:`
+  block).

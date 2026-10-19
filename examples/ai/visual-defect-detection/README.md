@@ -1,6 +1,6 @@
 # visual-defect-detection
 
-> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `defect_map` core
+> **`[UNTESTED]` on hardware -- paper-correct.** The `defect_map` core
 > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on
 > native_sim with synthetic clean + defect frames. HiL with a real CSI camera +
 > a trained autoencoder is bench-gated.
@@ -38,12 +38,25 @@ DEFECT,2,FAIL,0.98,1.6,5,3,1.98
 
 ## Build
 
-```
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/visual-defect-detection
-west flash
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
 ```
 
-Flip `som.sku` in `board.yaml` to `E1M-V2M101` for the V2N accelerator path.
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
+```
+# writes examples/ai/visual-defect-detection/generated/alp.conf, which west reads below (#866)
+python3 scripts/gen_example_alp_conf.py examples/ai/visual-defect-detection
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/ai/visual-defect-detection -- -DEXTRA_CONF_FILE=generated/alp.conf
+west flash
+```
 
 ## Model
 

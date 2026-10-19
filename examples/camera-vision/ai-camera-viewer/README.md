@@ -1,6 +1,6 @@
 # ai-camera-viewer
 
-> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on
+> **`[UNTESTED]` on hardware -- paper-correct.** Builds clean on
 > `native_sim/native/64` against the full `<alp/camera.h>` /
 > `<alp/inference.h>` surfaces (both ship today; Ethos-U dispatch
 > runs through `alp_inference_open(...)` same as any other backend).
@@ -37,7 +37,8 @@ OV5640 ──▶ <alp/camera.h> ──▶ <alp/inference.h> ──▶ post-proce
       `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y` +
       `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y` +
       `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y`
-  - V2N M33 → TFLM CPU kernels; DRP-AI3 remains on the A55/Yocto side
+  - V2N/V2M M33 → TFLM CPU kernels; DRP-AI3 remains on the A55/Yocto side.
+    That is a different project (`m33_sm` core), not a `som.sku` flip of this one.
 - **LVGL** composes the preview, bounding-box overlay, and
   latency / FPS strip, bound to the panel via `<alp/display.h>` +
   `alp_gui_lvgl_attach()` (`<alp/gui.h>`) -- no direct
@@ -60,10 +61,21 @@ Three questions answered side-by-side:
 
 ## Hardware needed
 
+On the E1M-EVK (AEN M55-HP targets) the build applies the
+`e1m_evk_rk055hdmipi4ma0` shield automatically: a RK055HDMIPI4MA0
+720×1280 MIPI-DSI panel (Himax HX8394) on the EVK's J6 connector, the same
+panel `examples/connectivity/iot-dashboard` uses. The EVK has no working SPI
+route for an ST7789, so the panel described below applies to other boards.
+The UI is laid out for 240×320 and is not scaled to the DSI panel; this
+pairing is build-checked in CI only, not yet run on the bench. Pass
+`-DSHIELD=<other>` to use a different panel.
+
 - E1M-AEN family SoM (E8 recommended).
 - E1M-EVK board.
 - OV5640 camera on the EVK camera connector (MIPI / DVP).
-- ST7789 240×320 TFT on SPI1 + 2 GPIOs.
+- ST7789 240×320 TFT on the EVK Arduino UNO header SPI (`E1M_SPI1`,
+  `EVK_SPI_BUS_ARDUINO`) + 2 GPIOs.  `board.yaml` notes that this bus
+  terminates on the on-module CC3501E, not the main SoC.
 
 ## Adding your own model
 
@@ -87,10 +99,23 @@ bytes.
 
 ## Build
 
+From this directory, or from your own copy of it:
+
+```bash
+tan build
+tan flash
+```
+
+`tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
+
+### Inside an SDK checkout (twister / CI)
+
+These commands only work from an alp-sdk checkout, because `gen_example_alp_conf.py` writes `generated/alp.conf` there.
+
 ```
 # writes examples/camera-vision/ai-camera-viewer/generated/alp.conf, which west reads below (#866)
 python3 scripts/gen_example_alp_conf.py examples/camera-vision/ai-camera-viewer
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/camera-vision/ai-camera-viewer -- -DEXTRA_CONF_FILE=generated/alp.conf
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/camera-vision/ai-camera-viewer -- -DEXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 
@@ -101,6 +126,6 @@ mock-up before touching hardware.
 
 ## Showcase pointers
 
-This is the v1.0 readiness pitch for the SDK's edge-AI story:
-the same app source runs on every AEN / V2N SoM by
-swapping a single `som.sku` line.
+This is the SDK's edge-AI showcase: the same app source runs on
+every AEN SoM that has an `m55_hp` core by swapping a single
+`som.sku` line.

@@ -5,8 +5,9 @@ SPDX-License-Identifier: Apache-2.0
 
 # aen-dualcore-master — boot BOTH M55 cores via the runtime SE boot service (B1)
 
-`aen-dualcore-probe` proved a dual-boot ATOC boots only **one** core. This is the
-fix: the SES-booted core starts the **other** M55 at runtime through the portable
+A dual-entry ATOC (see `aen-dualcore-probe`, which supersedes its earlier
+one-core finding) is not the only way to bring up both M55 cores. Here the
+SES-booted core starts the **other** M55 at runtime through the portable
 `alp_mproc_boot_core(core, entry_addr)` (`<alp/mproc.h>`). On AEN the backend
 registry routes that to the Secure Enclave's boot service over the `seservice0`
 MHU — `se_service_boot_cpu()` (`SERVICE_BOOT_CPU`), a wrapper added to hal_alif
@@ -21,6 +22,10 @@ The partner is the `aen-dualcore-probe` build for the other core, packaged
 `se_service_boot_cpu()` (service 501) release path, and for the HP-master →
 HE-peer direction shown here it works fine with the DEFAULT config
 (bench-proven 2026-06-17 and re-confirmed 2026-08-01).
+
+Standalone Zephyr app (no `board.yaml`, so not buildable with `tan build`); run from an alp-sdk checkout. The same commands work for E1M-AEN803 with
+`alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp` and
+`alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`.
 
 ```sh
 # master (HP) + the HE probe as the released core:
@@ -105,7 +110,8 @@ heartbeat, and this is reported as `RESULT SKIP` (accepted, peer never
 advanced) — not `RESULT FAIL`, since the local request path is fine.
 
 With the deferred-TOC path ON
-(`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y`, see above),
+(`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y`, which is
+how `aen-dualcore-he-master` is built),
 `ALP_ERR_NOSUPPORT` DOES become reachable: a build whose `PEER_IS_HP` doesn't
 match which core this role's `TARGET_CORE` actually releases is a
 build-config bug, not a bench/silicon state, and now correctly falls into
@@ -113,6 +119,5 @@ build-config bug, not a bench/silicon state, and now correctly falls into
 
 The peer-heartbeat wait (2000 ms, polled every 20 ms) is bounded, so an
 accepted request whose peer never actually comes up produces a verdict
-instead of a hang. To make the HE build actually release an HP peer, use the
-deferred-TOC path (`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y`,
-see above and `docs/aen-bench-bringup.md`).
+instead of a hang. To release an HP peer from HE, use `aen-dualcore-he-master`
+(see also `docs/aen-bench-bringup.md`).
