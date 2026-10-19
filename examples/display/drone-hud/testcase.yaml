@@ -21,5 +21,5 @@ tests:
   alp_sdk.examples.drone_hud.aen:
     extra_args: EXTRA_CONF_FILE=generated/alp.conf
     platform_allow:
-      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
     build_only: true
