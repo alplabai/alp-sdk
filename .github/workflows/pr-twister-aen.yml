@@ -223,12 +223,13 @@ jobs:
   # Change-aware selection (#2541, #2885).  On a pull_request this drops the
   # SKU whose legs cannot build anything the PR changed, and an examples-only
   # PR builds just the changed examples (their --testsuite-root arguments
-  # ride in matrix.roots, in min(SUBSETS, examples) shards; see
-  # scripts/select_aen_twister.py).  A narrowed leg restores its subset
+  # ride in matrix.roots, per SKU in min(SUBSETS, configurations) shards;
+  # see scripts/select_aen_twister.py).  A narrowed leg restores its subset
   # number's ccache, which holds a different slice of the full split, so it
-  # often builds cold -- bounded by the slowest single example, the same
-  # floor the full split has.  push, schedule and dispatch always run every
-  # leg over every root.  Any error falls back to the full matrix.  This workflow is
+  # usually builds cold and can take longer than the warm full-split shard
+  # holding the same example would -- the win is the configurations it does
+  # not build at all.  push, schedule and dispatch always run every leg over
+  # every root.  Any error falls back to the full matrix.  This workflow is
   # path-filtered, so it is not a required context: a zero-leg PR run simply
   # skips `twister-aen`.
   select:

@@ -18,10 +18,12 @@ workflow always runs full on push, schedule and dispatch.
 When every non-neutral changed path sits inside an example that twister
 builds here (the nearest directory holding a testcase.yaml lies under one of
 ROOTS), the PR is narrowed: twister builds just those example directories,
-in min(SUBSETS, examples) shuffled shards, and only for a SKU some narrowed
-testcase.yaml names (#2885).  Anything else -- shared code, a file outside
-every example, a directory name outside SAFE_DIR, more than NARROW_MAX
-examples -- runs the full split.
+per SKU in min(SUBSETS, configurations) shuffled shards, where configurations
+counts the narrowed testcase.yaml `platform_allow` entries for that SKU; a
+SKU with none gets no leg (#2885).  Anything else -- shared code, a file
+outside every example, a directory name outside SAFE_DIR, more than
+NARROW_MAX examples, a test with no platform_allow (twister would build it
+for every -p platform), or no PyYAML -- runs the full split.
 
 Prints the matrix as a JSON list for `strategy.matrix.include`: one entry per
 SKU x twister `--subset i/SUBSETS` shard, each carrying the `--testsuite-root`
@@ -141,14 +143,34 @@ def root_args(roots) -> str:
     return " ".join(f"--testsuite-root alp-sdk/{r}" for r in roots)
 
 
-def narrowed_skus(skus: list[str], roots: list[str], repo: Path) -> list[str]:
-    """Drop a SKU no narrowed example builds: twister walks each root
-    recursively, so every testcase.yaml under it counts."""
-    text = "".join(
-        tc.read_text(encoding="utf-8", errors="replace")
-        for r in roots for tc in (repo / r).rglob("testcase.yaml")
-    )
-    return [sku for sku in skus if f"alp_{SKUS[sku][1]}" in text]
+def config_counts(roots: list[str], repo: Path) -> dict[str, int] | None:
+    """Configurations per SKU twister selects under `roots` (it walks each
+    root recursively, so nested testcase.yaml files count): one per test x
+    matching `platform_allow` entry.  None when that cannot be told -- no
+    PyYAML, an unreadable file, or a test without platform_allow, which
+    twister builds for every -p platform."""
+    try:
+        import yaml
+    except ImportError:
+        print("select_aen_twister: no PyYAML, examples-only narrowing off",
+              file=sys.stderr)
+        return None
+    counts = dict.fromkeys(SKUS, 0)
+    for r in roots:
+        for tc in sorted((repo / r).rglob("testcase.yaml")):
+            try:
+                data = yaml.safe_load(tc.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError):
+                return None
+            common = (data.get("common") or {}).get("platform_allow")
+            for test in (data.get("tests") or {}).values():
+                allow = (test or {}).get("platform_allow", common)
+                if not allow:
+                    return None
+                names = allow.split() if isinstance(allow, str) else list(allow)
+                for sku, (_, prefix) in SKUS.items():
+                    counts[sku] += sum(1 for n in names if str(n).startswith(f"alp_{prefix}"))
+    return counts
 
 
 def affected_skus(paths: list[str]) -> list[str]:
@@ -179,15 +201,16 @@ def affected_skus(paths: list[str]) -> list[str]:
 SUBSETS = 6
 
 
-def matrix(skus: list[str], roots: list[str] | None = None) -> list[dict]:
-    """One leg per SKU x shard.  `roots` narrows to those example directories
-    in min(SUBSETS, len(roots)) shards -- the shuffle still spreads the heavy
-    TFLM builds, so six heavy examples never share one leg; None builds every
-    root in SUBSETS shards."""
-    subsets = min(SUBSETS, len(roots)) if roots else SUBSETS
+def matrix(skus: list[str], roots: list[str] | None = None,
+           counts: dict[str, int] | None = None) -> list[dict]:
+    """One leg per SKU x shard.  None builds every root in SUBSETS shards.
+    `roots` + `counts` narrow to those example directories, a SKU in
+    min(SUBSETS, counts[sku]) shards (none when 0): never a shard with
+    nothing to build, and a many-configuration example keeps its split."""
     args = root_args(roots or ROOTS)
     legs = []
     for sku in skus:
+        subsets = min(SUBSETS, counts[sku]) if roots else SUBSETS
         label, prefix = SKUS[sku]
         flags = " ".join(
             f"-p alp_{prefix}{cpu}/ae822fa0e5597ls0/{soc}" for cpu, soc in CPU.items()
@@ -229,10 +252,12 @@ def main(argv: list[str] | None = None) -> int:
     roots = narrowed_roots(paths, REPO) if paths else None
     if roots == []:
         legs = []
-    elif roots:
-        legs = matrix(narrowed_skus(affected_skus(paths), roots, REPO), roots)
     else:
-        legs = matrix(affected_skus(paths))
+        counts = config_counts(roots, REPO) if roots else None
+        if counts is None:
+            legs = matrix(affected_skus(paths))
+        else:
+            legs = matrix(affected_skus(paths), roots, counts)
     text = json.dumps(legs, separators=(",", ":"))
     print(f"select_aen_twister: {len(legs)} leg(s)", file=sys.stderr)
     if args.github_output:
