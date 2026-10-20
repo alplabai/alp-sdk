@@ -143,6 +143,12 @@ def root_args(roots) -> str:
     return " ".join(f"--testsuite-root alp-sdk/{r}" for r in roots)
 
 
+def _names(value) -> list[str]:
+    if not value:
+        return []
+    return value.split() if isinstance(value, str) else [str(v) for v in value]
+
+
 def config_counts(roots: list[str], repo: Path) -> dict[str, int] | None:
     """Configurations per SKU twister selects under `roots` (it walks each
     root recursively, so nested testcase.yaml files count): one per test x
@@ -162,14 +168,15 @@ def config_counts(roots: list[str], repo: Path) -> dict[str, int] | None:
                 data = yaml.safe_load(tc.read_text(encoding="utf-8")) or {}
             except (OSError, yaml.YAMLError):
                 return None
-            common = (data.get("common") or {}).get("platform_allow")
+            common = _names((data.get("common") or {}).get("platform_allow"))
             for test in (data.get("tests") or {}).values():
-                allow = (test or {}).get("platform_allow", common)
-                if not allow:
+                # twister concatenates common: and the test's own list
+                # (config_parser.get_scenario), it does not pick one.
+                names = common + _names((test or {}).get("platform_allow"))
+                if not names:
                     return None
-                names = allow.split() if isinstance(allow, str) else list(allow)
                 for sku, (_, prefix) in SKUS.items():
-                    counts[sku] += sum(1 for n in names if str(n).startswith(f"alp_{prefix}"))
+                    counts[sku] += sum(1 for n in names if n.startswith(f"alp_{prefix}"))
     return counts
 
 
@@ -207,10 +214,12 @@ def matrix(skus: list[str], roots: list[str] | None = None,
     `roots` + `counts` narrow to those example directories, a SKU in
     min(SUBSETS, counts[sku]) shards (none when 0): never a shard with
     nothing to build, and a many-configuration example keeps its split."""
+    if roots and counts is None:
+        raise ValueError("narrowed roots need their configuration counts")
     args = root_args(roots or ROOTS)
     legs = []
     for sku in skus:
-        subsets = min(SUBSETS, counts[sku]) if roots else SUBSETS
+        subsets = min(SUBSETS, counts[sku]) if roots and counts is not None else SUBSETS
         label, prefix = SKUS[sku]
         flags = " ".join(
             f"-p alp_{prefix}{cpu}/ae822fa0e5597ls0/{soc}" for cpu, soc in CPU.items()

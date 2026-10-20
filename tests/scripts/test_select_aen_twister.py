@@ -230,3 +230,19 @@ def test_main_runs_full_split_when_configurations_cannot_be_counted(monkeypatch,
     monkeypatch.setattr(s, "REPO", repo)
     legs = _run_main(monkeypatch, tmp_path, ["examples/aen/demo/src/main.c"])
     assert len(legs) == 2 * s.SUBSETS and legs[0]["roots"] == s.root_args(s.ROOTS)
+
+
+def test_common_and_test_platform_allow_are_concatenated(tmp_path):
+    """twister appends a test's platform_allow to common's; counting only one
+    would drop the other SKU's leg (#2885 review round 3)."""
+    repo, roots = _repo_with_testcase(tmp_path, (
+        "common:\n  platform_allow: alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp\n"
+        "tests:\n  demo.a:\n    platform_allow: alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp\n"))
+    assert s.config_counts(roots, repo) == {"aen801": 1, "aen803": 1}
+
+
+def test_matrix_refuses_roots_without_counts():
+    import pytest
+
+    with pytest.raises(ValueError):
+        s.matrix(["aen801"], [EX])
