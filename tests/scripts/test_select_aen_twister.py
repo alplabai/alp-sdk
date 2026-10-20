@@ -139,7 +139,10 @@ def test_common_platform_allow_and_comments(tmp_path):
         "# mentions alp_e1m_aen803_m55_he only in a comment\n"
         "common:\n  platform_allow: alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp native_sim\n"
         "tests:\n  demo.a: {}\n  demo.b:\n    platform_allow: [native_sim]\n"))
-    assert s.config_counts(roots, repo) == {"aen801": 1, "aen803": 0}
+    # demo.a inherits common's AEN801 target; demo.b's list is appended to
+    # common's (twister concatenates), so it builds AEN801 too.  The
+    # comment-only AEN803 mention counts for nothing.
+    assert s.config_counts(roots, repo) == {"aen801": 2, "aen803": 0}
 
 
 def test_path_with_its_own_testcase_outside_examples_runs_full_split():
