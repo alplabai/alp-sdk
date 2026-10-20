@@ -35,6 +35,7 @@ def test_matrix_shape():
     assert [(x["sku"], x["subset"]) for x in legs] == [("aen803", i) for i in range(1, s.SUBSETS + 1)]
     assert {x["subsets"] for x in legs} == {s.SUBSETS}
     assert "alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp" in legs[0]["platform_flags"]
+    assert legs[0]["roots"] == s.root_args(s.ROOTS)
 
 
 def test_md_and_tests_scripts_neutral():
@@ -69,3 +70,48 @@ def test_workflow_shuffles_subsets_with_a_fixed_seed():
     m = re.search(r"--shuffle-tests --shuffle-tests-seed (\S+)", twister)
     assert m, "pr-twister-aen.yml twister call lost --shuffle-tests --shuffle-tests-seed"
     assert m.group(1).isdigit()
+
+
+EX = "examples/ai/motor-current-signature"
+
+
+def test_examples_only_change_narrows_to_one_leg_per_sku():
+    paths = [f"{EX}/src/main.c", f"{EX}/README.md", "changelog.d/x.md"]
+    roots = s.narrowed_roots(paths, REPO)
+    assert roots == [EX]
+    legs = s.matrix(s.affected_skus(paths), roots)
+    assert [(x["sku"], x["subset"], x["subsets"]) for x in legs] == [("aen801", 1, 1), ("aen803", 1, 1)]
+    assert legs[0]["roots"] == f"--testsuite-root alp-sdk/{EX}"
+
+
+def test_nested_testcase_dir_is_its_own_root():
+    assert s.narrowed_roots(["examples/multicore/mproc-mailbox/peer/src/main.c"], REPO) == [
+        "examples/multicore/mproc-mailbox/peer"]
+
+
+def test_shared_code_runs_full_split():
+    assert s.narrowed_roots([f"{EX}/src/main.c", "src/backends/mproc/x.c"], REPO) is None
+
+
+def test_example_file_without_testcase_runs_full_split():
+    assert s.narrowed_roots(["examples/aen/common/shared.h"], REPO) is None
+
+
+def test_example_outside_roots_builds_nothing_here():
+    assert s.narrowed_roots(["examples/peripheral-io/hello-world/src/main.c"], REPO) == []
+    assert s.narrowed_roots(["examples/peripheral-io/hello-world/src/main.c", f"{EX}/x.c"], REPO) == [EX]
+
+
+def test_too_many_examples_runs_full_split():
+    many = [d for d in s.ROOTS if d.count("/") == 2][: s.NARROW_MAX + 1]
+    assert len(many) == s.NARROW_MAX + 1
+    assert s.narrowed_roots([f"{d}/src/main.c" for d in many], REPO) is None
+
+
+def test_every_root_exists_and_is_in_both_paths_filters():
+    wf = (REPO / ".github" / "workflows" / "pr-twister-aen.yml").read_text(encoding="utf-8")
+    for r in s.ROOTS:
+        assert (REPO / r).is_dir(), r
+        assert wf.count(f"- '{r}/**'") == 2, f"{r}/** missing from a paths: filter"
+    assert "${{ matrix.roots }}" in wf
+    assert '--testsuite-root "$GITHUB_WORKSPACE' not in wf, "roots belong in ROOTS, not the workflow"

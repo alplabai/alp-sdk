@@ -486,7 +486,10 @@ jobs:
       # job-level `strategy:` above). alp-sdk#2084 -- a board's generated
       # tree gets no real CI coverage without a -p flag AND a matching
       # platform_allow entry; a testcase.yaml change alone selects nothing
-      # here. The --testsuite-root list below is scoped to examples/aen --
+      # here. The roots themselves now live in ROOTS in
+      # scripts/select_aen_twister.py and reach twister as matrix.roots
+      # (#2885); the history below says why each one is there.
+      # The --testsuite-root list is scoped to examples/aen --
       # plus the bounded roots enumerated below; the testcase.yaml files
       # whose platform_allow names an AEN target are the entire point;
       # nothing outside these ten roots is in scope for this job.
@@ -666,38 +669,14 @@ jobs:
           # generated/alp.conf; twister configures from the source tree, so
           # write those fragments first (#866).
           python3 "$GITHUB_WORKSPACE/alp-sdk/scripts/gen_example_alp_conf.py"
+          # matrix.roots: the --testsuite-root arguments for this leg, from
+          # ROOTS in scripts/select_aen_twister.py (every root on a full run;
+          # just the changed examples on an examples-only PR, #2885).
           python3 zephyr/scripts/twister \
             ${{ matrix.platform_flags }} \
             --subset ${{ matrix.subset }}/${{ matrix.subsets }} \
             --shuffle-tests --shuffle-tests-seed 2885 \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/firmware-update-log" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-dashboard" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/drone-autopilot" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/mqtt-telemetry" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-fleet-ota" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/camera-mjpeg-stream" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/alp-console" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/blink" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/pwm-led-fade" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/qenc-readout" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/ai/ai-anomaly-detection-vibration" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/ai/motor-current-signature" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/ai/multimodal-fusion-pdm" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/ai/rail-predictive-maintenance" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/ai/visual-defect-detection" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/ai/wearable-activity-fall" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/audio/acoustic-anomaly-wind-turbine" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/audio/acoustic-safety-events" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/audio/audio-wake-word" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/audio/butterworth-lowpass" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/camera-vision/ai-camera-viewer" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/production-deployment" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/display/drone-hud" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/display/lvgl-benchmark" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/display/lvgl-music-player" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/display/lvgl-widgets-demo" \
-            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/multicore/mproc-mailbox" \
+            ${{ matrix.roots }} \
             --inline-logs \
             --no-detailed-test-id
 
