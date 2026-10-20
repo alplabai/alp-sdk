@@ -62,7 +62,9 @@ def affected_skus(paths: list[str]) -> list[str]:
 # measured at 26-55 of 62 configurations in the 34 min step cap with two
 # shards (#2848).  Four shards still left AEN803 4/4 at 23 of 31 when it timed
 # out (one build alone took 13 min, and the sorted split clusters the heavy
-# HE builds), so six: ~17 configurations a leg.  The workflow
+# HE builds), so six: ~17 configurations a leg.  The workflow also passes
+# --shuffle-tests with a fixed seed so heavy builds do not cluster in one
+# shard (#2885); with that, more shards do not lower the slowest one.  The workflow
 # reads the count from the matrix (`matrix.subsets`), so this is the only
 # place to change it.
 SUBSETS = 6
