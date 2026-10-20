@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
+import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "scripts"))
 import select_aen_twister as s  # noqa: E402
 
 B803 = "zephyr/boards/alp/e1m_aen803_m55_he/board.yml"
@@ -53,3 +55,17 @@ def test_bad_base_fails_safe_to_all_legs(tmp_path, monkeypatch):
     import json
 
     assert len(json.loads(line[len("matrix="):])) == 2 * s.SUBSETS
+
+
+def test_workflow_shuffles_subsets_with_a_fixed_seed():
+    """#2885: twister slices its sorted configuration list, which clustered
+    the heavy TFLM builds into one shard. The workflow must shuffle with a
+    FIXED seed: an unseeded shuffle reshuffles every run, so no shard's
+    per-subset ccache would match its previous contents."""
+    wf = (REPO / ".github" / "workflows" / "pr-twister-aen.yml").read_text(encoding="utf-8")
+    twister = wf[wf.index("python3 zephyr/scripts/twister"):]
+    twister = twister[: twister.index("--inline-logs")]
+    assert "--subset ${{ matrix.subset }}/${{ matrix.subsets }}" in twister
+    m = re.search(r"--shuffle-tests --shuffle-tests-seed (\S+)", twister)
+    assert m, "pr-twister-aen.yml twister call lost --shuffle-tests --shuffle-tests-seed"
+    assert m.group(1).isdigit()

@@ -645,6 +645,19 @@ jobs:
         # the cap goes 34 -> 40 as the ceiling a heavy cold shard trips, and
         # the job ceiling 41 -> 47 to keep its ~7 min of setup and
         # save steps behind it.
+        # #2885: twister sorts the configurations by name before slicing
+        # them into subsets, so the six heavy TFLM/CMSIS-DSP builds that
+        # #2886 brought in (`alp_sdk.example.*`, 14-19 min each from a cold
+        # ccache) all landed in AEN801 5/6: 134 min of builds in one shard,
+        # 41m32s job wall on PR #2887, against 3-28 min for the others.
+        # `--shuffle-tests` with a FIXED seed spreads them across the shards
+        # (twister seeds random.shuffle after its own sort, so the split is
+        # the same on every run until the configuration list changes).
+        # Replayed against #2887's measured build times, the slowest cold
+        # shard drops from 33.7 to ~19 min of builds -- the single heaviest
+        # build -- and an 8-way split gains nothing more, so SUBSETS stays
+        # 6. Never drop the seed: without it twister picks a random one,
+        # every run reshuffles, and each shard's ccache stops matching.
         timeout-minutes: 40
         run: |
           # Zero the counters so the summary below reports this run only.
@@ -656,6 +669,7 @@ jobs:
           python3 zephyr/scripts/twister \
             ${{ matrix.platform_flags }} \
             --subset ${{ matrix.subset }}/${{ matrix.subsets }} \
+            --shuffle-tests --shuffle-tests-seed 2885 \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/firmware-update-log" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-dashboard" \
