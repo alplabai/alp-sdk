@@ -17,10 +17,11 @@ workflow always runs full on push, schedule and dispatch.
 
 When every non-neutral changed path sits inside an example that twister
 builds here (the nearest directory holding a testcase.yaml lies under one of
-ROOTS), the PR is narrowed: each SKU runs ONE leg over just those example
-directories instead of SUBSETS legs over every root (#2885).  Anything else --
-shared code, a file outside every example, more than NARROW_MAX examples --
-runs the full split.
+ROOTS), the PR is narrowed: twister builds just those example directories,
+in min(SUBSETS, examples) shuffled shards, and only for a SKU some narrowed
+testcase.yaml names (#2885).  Anything else -- shared code, a file outside
+every example, a directory name outside SAFE_DIR, more than NARROW_MAX
+examples -- runs the full split.
 
 Prints the matrix as a JSON list for `strategy.matrix.include`: one entry per
 SKU x twister `--subset i/SUBSETS` shard, each carrying the `--testsuite-root`
@@ -32,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -80,9 +82,13 @@ ROOTS = (
     "examples/multicore/mproc-mailbox",
 )
 
-# A PR touching more examples than this runs the full split instead: past a
-# handful, one unsplit leg would be slower than the shards.
+# A PR touching more examples than this runs the full split instead.
 NARROW_MAX = 10
+
+# matrix.roots is pasted unquoted into the workflow's `run:` block, so a
+# narrowed root must be a plain path: no spaces or glob characters.  Anything
+# else falls back to the full (fixed) root list.
+SAFE_DIR = re.compile(r"[A-Za-z0-9._/-]+")
 
 
 def _exclusive_to(path: str) -> str | None:
@@ -122,6 +128,8 @@ def narrowed_roots(paths: list[str], repo: Path) -> list[str] | None:
         d = _example_dir(p, repo) if p.startswith("examples/") else None
         if d is None:
             return None
+        if not SAFE_DIR.fullmatch(d):
+            return None
         if _in_roots(d):
             dirs.add(d)
     if len(dirs) > NARROW_MAX:
@@ -131,6 +139,16 @@ def narrowed_roots(paths: list[str], repo: Path) -> list[str] | None:
 
 def root_args(roots) -> str:
     return " ".join(f"--testsuite-root alp-sdk/{r}" for r in roots)
+
+
+def narrowed_skus(skus: list[str], roots: list[str], repo: Path) -> list[str]:
+    """Drop a SKU no narrowed example builds: twister walks each root
+    recursively, so every testcase.yaml under it counts."""
+    text = "".join(
+        tc.read_text(encoding="utf-8", errors="replace")
+        for r in roots for tc in (repo / r).rglob("testcase.yaml")
+    )
+    return [sku for sku in skus if f"alp_{SKUS[sku][1]}" in text]
 
 
 def affected_skus(paths: list[str]) -> list[str]:
@@ -163,8 +181,10 @@ SUBSETS = 6
 
 def matrix(skus: list[str], roots: list[str] | None = None) -> list[dict]:
     """One leg per SKU x shard.  `roots` narrows to those example directories
-    in one unsplit leg per SKU; None builds every root in SUBSETS shards."""
-    subsets = 1 if roots else SUBSETS
+    in min(SUBSETS, len(roots)) shards -- the shuffle still spreads the heavy
+    TFLM builds, so six heavy examples never share one leg; None builds every
+    root in SUBSETS shards."""
+    subsets = min(SUBSETS, len(roots)) if roots else SUBSETS
     args = root_args(roots or ROOTS)
     legs = []
     for sku in skus:
@@ -209,8 +229,10 @@ def main(argv: list[str] | None = None) -> int:
     roots = narrowed_roots(paths, REPO) if paths else None
     if roots == []:
         legs = []
+    elif roots:
+        legs = matrix(narrowed_skus(affected_skus(paths), roots, REPO), roots)
     else:
-        legs = matrix(affected_skus(paths), roots)
+        legs = matrix(affected_skus(paths))
     text = json.dumps(legs, separators=(",", ":"))
     print(f"select_aen_twister: {len(legs)} leg(s)", file=sys.stderr)
     if args.github_output:
