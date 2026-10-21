@@ -55,9 +55,9 @@ turns the `power:` block into:
 CONFIG_PM=y
 CONFIG_PM_DEVICE=y
 # Sleep target: deep
-# wakeup source: uart (DT wakeup-source; + pm_device_wakeup_enable() pending v0.7)
-# wakeup source: gpio_int (DT wakeup-source; + pm_device_wakeup_enable() pending v0.7)
-# wakeup source: rtc (DT wakeup-source; + pm_device_wakeup_enable() pending v0.7)
+# wakeup source: uart (DT wakeup-source; + pm_device_wakeup_enable() not implemented)
+# wakeup source: gpio_int (DT wakeup-source; + pm_device_wakeup_enable() not implemented)
+# wakeup source: rtc (DT wakeup-source; + pm_device_wakeup_enable() not implemented)
 ```
 
 into the slice's generated `alp.conf`. Only `CONFIG_PM` and
@@ -97,7 +97,7 @@ The wake-source list lives in `board.yaml` rather than the app so the
 declared policy sits next to the rest of the slice config. Today it
 lands in `alp.conf` as hint comments only: marking a device
 wakeup-capable needs the DT `wakeup-source;` property plus a runtime
-`pm_device_wakeup_enable()` call, and that plumbing is pending v0.7.
+`pm_device_wakeup_enable()` call, and that plumbing is not implemented.
 
 ## Memory tuning
 

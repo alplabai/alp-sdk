@@ -120,7 +120,7 @@ Kconfig fragment + devicetree overlay beside the slice's `alp.conf`; the
 content mirrors `scripts/bench/aen/aen-flowc-itcm.{conf,overlay}`. Proven on the
 E8 M55-HE (E1M-AEN801 / E1M-AEN803) and HE-only: a project with no M55-HE app
 (an M55-HP-only one included) or any other SKU is refused
-(`build.link-itcm-unsupported`), as is an explicit non-RAM
+(`build.link-itcm-unsupported`), as is an explicit `linux`/`none`
 `diagnostics.console:` (`build.link-itcm-console-conflict`). Details and the
 Flow C procedure: `docs/aen-bench-bringup.md`.
 

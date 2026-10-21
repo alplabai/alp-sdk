@@ -415,7 +415,7 @@ does not need those two files copied in: set
 ```yaml
 diagnostics:
   link: itcm        # auto (default) | itcm
-  console: ram      # optional here -- `auto` is promoted to `ram`; uart/alp/linux/none are refused
+  console: ram      # optional here -- `auto` is promoted to `ram`; linux/none are refused; ram/uart/alp are accepted
 ```
 
 and the planner writes the retarget itself next to the slice's `alp.conf`
@@ -431,7 +431,7 @@ image) and reads `ram_console_buf`. The knob is proven on the E8 M55-HE
 (E1M-AEN801 / E1M-AEN803) and is HE-only: `tan build` refuses it
 (`build.link-itcm-unsupported`) for a project with no M55-HE app of its own (an
 M55-HP-only project included), any other SKU, or a `boot:`/sysbuild project, and
-refuses an explicit non-RAM console (`build.link-itcm-console-conflict`). The
+refuses an explicit `linux`/`none` console (`build.link-itcm-console-conflict`). The
 slice's manifest entry carries `flash_method: ram_run_only`, so plain
 `tan flash` refuses it and points at `tan flash --ram`. It links at `0x0` --
 never flash that image to MRAM. The planner lives in tan-cli
