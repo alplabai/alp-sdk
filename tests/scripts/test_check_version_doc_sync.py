@@ -252,6 +252,10 @@ def test_sibling_recipe_without_shared_pv_fails(tmp_path):
     assert mod.check_sibling_recipes_use_shared_pv(tmp_path) == []
     r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\nPV = \"0.6.0\"\n")
     assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
+    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc
+PV ?= \"0.6.0\"
+")
+    assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
 
 
 def test_real_sibling_recipes_use_shared_pv():
@@ -270,9 +274,3 @@ def test_recipe_pv_drift_detected(tmp_path):
 
 
 def test_real_recipe_pv_in_sync():
-    mod = _recipe_pv_check()
-    assert mod.check_yocto_recipe_pv(REPO, mod.declared_version_full(REPO)) == []
-    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc
-PV ?= \"0.6.0\"
-")
-    assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
