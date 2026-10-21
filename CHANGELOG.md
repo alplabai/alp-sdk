@@ -593,7 +593,7 @@ console from `aen-bench-shared.conf`) and layers them after the slice's
 `alp.conf`. Proven on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and refused
 elsewhere: `tan build` rejects a project with no M55-HE app (an M55-HP-only
 project included), any other SKU or a sysbuild project
-(`build.link-itcm-unsupported`), and an explicit non-RAM console
+(`build.link-itcm-unsupported`), and an explicit `linux`/`none` console
 (`build.link-itcm-console-conflict`). The slice's manifest entry carries
 `flash_method: ram_run_only`, so plain `tan flash` cannot write the 0x0-linked
 image to MRAM. alp-sdk's own `alp_orchestrate` refuses the knob with a message

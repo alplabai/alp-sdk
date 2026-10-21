@@ -422,7 +422,7 @@ and the planner writes the retarget itself next to the slice's `alp.conf`
 (`alp-link-itcm.conf` + `alp-link-itcm.overlay`: the same `zephyr,flash = &itcm;`
 / `/delete-property/ zephyr,code-partition;` overlay and the same
 `CONFIG_USE_DT_CODE_PARTITION=n` + `CONFIG_FLASH_LOAD_OFFSET=0x0` conf as above,
-plus `CONFIG_DCACHE=n` and the 16 KiB RAM console of `aen-bench-shared.conf`) and
+plus, for `console: auto`/`ram`, `CONFIG_DCACHE=n` and the 16 KiB RAM console of `aen-bench-shared.conf`; a `console: uart`/`alp` image gets neither) and
 passes them via `-DEXTRA_CONF_FILE` / `-DEXTRA_DTC_OVERLAY_FILE`. Then
 `tan flash --ram --ram-console --core m55_he` loads the ELF at its link base
 `0x0` (the HE-local ITCM, reached through the HE access port; `0x58000000` is
