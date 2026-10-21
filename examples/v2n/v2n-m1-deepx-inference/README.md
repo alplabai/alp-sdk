@@ -87,7 +87,7 @@ host-emulated path; the example reports the failure cleanly):
 [deepx] v2n-m1-deepx-inference flagship
 [deepx] stage 1: PCIe mux + DEEPX rail bring-up (already done by U-Boot)
 [deepx] stage 2: opening DEEPX inference handle
-[deepx]   open returned NULL: last_err=-8
+[deepx]   open returned NULL: last_err=-6
 [deepx]   (expected under native_sim and on builds without dx_rt)
 [deepx] done
 ```

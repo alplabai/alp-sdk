@@ -9,9 +9,7 @@
 # the dispatch (select it with `preset: e1m-x-evk` + the V2N SKU).
 #
 # The DAC is exposed through <alp/dac.h>.  The board.yaml peripherals
-# enum carries only `adc` for the analog-converter family (no separate
-# `dac` token), so the `adc` entry lights the analog subsystem; the DAC
-# subsystem (CONFIG_DAC) is turned on in prj.conf.
+# enum carries a `dac` token, which lights the DAC subsystem.
 #
 # Customer workflow: `tan init --from-example peripheral-io/dac-waveform`, change `som.sku` to
 # your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
@@ -33,12 +31,11 @@ cores:
     os: "off"
   m55_he:
     app: ./src
-    # The `adc` peripheral token lights CONFIG_ADC + the analog
-    # subsystem; CONFIG_DAC is set in prj.conf (the schema enum has no
-    # separate `dac` token).  alp_dac_* resolves the alp-dac0 alias the
+    # The `dac` peripheral token lights the DAC subsystem.
+    # alp_dac_* resolves the alp-dac0 alias the
     # generated overlay emits from the board's e1m_routes.dac.
     peripherals:
-      - adc
+      - dac
 
 diagnostics:
   log_level: info
