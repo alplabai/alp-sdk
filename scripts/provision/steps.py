@@ -2152,10 +2152,18 @@ class SdOutEmmcBoot(Step):
                                 "SD-out flag persisted", ev)
 
 
-    # BOOT_CONFIG arrived in GD32 protocol 0.15.0; the released v0.3.0 speaks 0.14.0 and answers
-    # NOSUPPORT. A GD32 that DOES speak 0.15+ and still says NOSUPPORT has a real fault (slot B,
-    # no flash HAL): that is not the released-firmware case and stays an error.
+    # The released GD32 v0.3.0 speaks protocol 0.14.0 and answers BOOT_CONFIG with NOSUPPORT.
+    # 0.15.0 is NOT a clean boundary (a feat/protocol-0.15 build reports 0.15.0 without the
+    # opcode), so the gate fails closed: only a protocol BELOW 0.15.0 takes the operator path. A
+    # NOSUPPORT from anything newer is a real fault (slot B, no flash HAL, unreleased build): the
+    # operator stops and reports the GD32 build, nothing is overridden.
     BOOT_CONFIG_MIN_PROTOCOL = (0, 15, 0)
+
+    @staticmethod
+    def _sd_cards(cards):
+        """SD memory cards in lt.mmc_devices(): type SD (or SDcombo), never SDIO (the CYW55513
+        sits on SDHI2 as SDIO and is not the microSD)."""
+        return sorted(k for k, v in cards.items() if v.startswith("SD") and v != "SDIO")
 
     def _operator_path(self, ctx, t, bus, err, ev):
         ver = lt.gd32_bridge_version(t, bus, GD32_BRIDGE_ADDR)
@@ -2163,14 +2171,18 @@ class SdOutEmmcBoot(Step):
             raise err
         ev.update(sd_out_method="operator-removed", gd32_protocol="%d.%d.%d" % ver)
         root = lt.root_device(t)
-        if "mmcblk1" in root:
-            if ctx.sd_removed_by_operator:
-                raise Refused(f"--sd-removed-by-operator given but Linux root {root} is the microSD: "
-                              "the card cannot have been removed")
-            b = ctx.need_bench()
+        on_emmc = root.startswith(lt.resolve_emmc(t))
+        if ctx.sd_removed_by_operator and not on_emmc:
+            raise Refused(f"--sd-removed-by-operator given but Linux root {root} is not the eMMC: "
+                          "the card cannot have been removed")
+        if not ctx.sd_removed_by_operator and on_emmc:
+            raise Refused(f"Linux root is {root} (the eMMC) and the GD32 cannot hold the SD out: "
+                          "re-run with --sd-removed-by-operator to record that the operator removed it")
+        b = ctx.need_bench()
 
-            def prompt():
-                note = halt_note(clean_shutdown(ctx))
+        def halt_and_confirm():
+            note = halt_note(clean_shutdown(ctx))
+            if not ctx.sd_removed_by_operator:
                 try:
                     b.operator.confirm(
                         f"{note} The GD32 (protocol {ev['gd32_protocol']}) cannot hold the SD out (BOOT_CONFIG "
@@ -2178,22 +2190,21 @@ class SdOutEmmcBoot(Step):
                         "tool asks.")
                 except EOFError:
                     raise Refused("no operator on stdin to confirm the microSD removal: remove the card, "
-                                  "cold boot the unit, and re-run with --sd-removed-by-operator") from None
-                _forget_halt_if_console_spoke(ctx)
-            ctx.mutate("operator: power off and remove the microSD", prompt)
-            ctx.mutate("cold cycle: no SD present, U-Boot boots the eMMC", lambda: cold_boot_phy_retry(ctx, ev))
-            t = ctx.need_linux()
-        elif not ctx.sd_removed_by_operator:
-            raise Refused(f"Linux root is {root} (not the SD) and the GD32 cannot hold the SD out: "
-                          "re-run with --sd-removed-by-operator to record that the operator removed it")
-        root = lt.root_device(t)
-        cards = lt.mmc_devices(t)
+                                  "boot the unit from the eMMC, and re-run with --sd-removed-by-operator") from None
+            _forget_halt_if_console_spoke(ctx)
+        ctx.mutate("operator: clean halt" + ("" if ctx.sd_removed_by_operator else ", power off, remove the microSD"),
+                   halt_and_confirm)
+        ctx.mutate("cold cycle: no SD present, U-Boot boots the eMMC", lambda: cold_boot_phy_retry(ctx, ev))
+        t = ctx.need_linux()
+        root, cards = lt.root_device(t), lt.mmc_devices(t)
         ev["sd_out_evidence"] = f"root {root}; mmc devices: " + (
             ", ".join(f"{k} {v}" for k, v in sorted(cards.items())) or "none")
-        if "mmcblk1" in root or "SD" in cards.values():
+        if self._sd_cards(cards):
             raise Refused(f"microSD still present after the operator removal ({ev['sd_out_evidence']})")
         if "MMC" not in cards.values():
             raise Refused(f"no eMMC enumerated, cannot judge the card gone ({ev['sd_out_evidence']})")
+        if not root.startswith(lt.resolve_emmc(t)):
+            raise Refused(f"Linux root {root} is not the eMMC after the operator removal ({ev['sd_out_evidence']})")
         return self.result(ctx, "microSD removed by the operator (GD32 BOOT_CONFIG NOSUPPORT on protocol "
                                 f"{ev['gd32_protocol']}); root on the eMMC, no SD card enumerated", ev)
 
@@ -2341,12 +2352,14 @@ class ClkgenVerify(Step):
         # The fixup is what THIS bundle's U-Boot writes: the per-bundle functest-expect overlay
         # can pin it (a bundle built before patch 0013 leaves 0x1F at OTP 0x46), else the tool's.
         try:
-            pinned = lt.clkgen_fixup_from_expect(ctx.functest_expect or functest.load_expect())
+            pinned = lt.clkgen_fixup_from_expect(ctx.functest_expect or functest.load_expect(),
+                                                 ctx.bundle.get("sku", ""), ctx.bundle.get("release_version", ""))
         except ValueError as e:
             raise Refused(f"--functest-expect: {e}") from None
         fixup = lt.CLKGEN_FIXUP_REGS if pinned is None else pinned
         source = ("default (this tool's CLKGEN_FIXUP_REGS)" if pinned is None
-                  else "functest-expect overlay clkgen_fixup_regs")
+                  else f"functest-expect overlay clkgen_fixup_regs for bundle {ctx.bundle.get('sku')} "
+                       f"{ctx.bundle.get('release_version')}")
         source += " {" + ", ".join(f"{r:#04x}: {v:#04x}" for r, v in sorted(fixup.items())) + "}"
         bad = lt.clkgen_diff(image, fixup)
         line = uboot.parse_clkgen_line(ctx.boot_text)

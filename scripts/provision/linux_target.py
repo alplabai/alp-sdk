@@ -96,7 +96,7 @@ CLKGEN_OTP_IMAGE = bytes.fromhex(
     "a0 00 bb 04 32 08 cc 21 19 4c f2 16 5f 22 f0 3e 00 80 00 00 00 00 00 00 "
     "0e 0c 19 12 3f f0 90 46 a0 80 b0 b0 9c")
 CLKGEN_REG_COUNT = len(CLKGEN_OTP_IMAGE)  # 0x25 (37): reg 0x00..0x24 inclusive
-# U-Boot's 5L35023B fixup (U-Boot patches 0007, #2293, and 0012) rewrites these
+# U-Boot's 5L35023B fixup (U-Boot patches 0007, #2293, and 0013) rewrites these
 # three OTP registers every boot; a post-boot read must expect the fixed-up
 # values, not the factory ones. 0x1F = 0xC7 routes SE2 (the GD32 HXTAL input) from
 # DIV4 = 24.576 MHz (OTP 0x46 leaves it free-running at 32.768 kHz); 0x24 = 0x8F
@@ -732,6 +732,9 @@ def gd32_parse_boot_config(out: str) -> int:
     """The stored flag word of a BOOT_CONFIG reply (on a SET: the value before the commit)."""
     rsp = _parse_bytes(out, 7)
     if rsp[0] != 0:
+        if rsp[0] == 0x06 and _crc16_ccitt_false(rsp[:1]) != rsp[1] | rsp[2] << 8:
+            raise BenchError(f"GD32 BOOT_CONFIG status 0x06 with a bad reply CRC (transport error, "
+                             f"not NOSUPPORT): {rsp.hex(' ')}")
         hint = (" (NOSUPPORT: GD32 firmware predates the opcode, a build without the flash HAL, a "
                 "single-bank part, or the GD32 is running from slot B; if it is on slot B, OTA the "
                 "same image into slot A, then retry)") if rsp[0] == 0x06 else ""
@@ -856,22 +859,35 @@ def _clkgen_expected(fixup: dict[int, int] | None = None) -> bytes:
     return bytes(img)
 
 
-def clkgen_fixup_from_expect(expect: dict | None) -> dict[int, int] | None:
+def clkgen_fixup_from_expect(expect: dict | None, sku: str = "",
+                             release_version: str = "") -> dict[int, int] | None:
     """The per-bundle `clkgen_fixup_regs` (reg -> value) of the functest-expect overlay, or None
     when the key is absent (the caller then uses CLKGEN_FIXUP_REGS). A bundle built before a
     U-Boot clkgen patch landed (e.g. som-0.2.2: only patch 0007, 0x1F stays at OTP 0x46) is
-    judged against what ITS U-Boot writes. Malformed -> ValueError, never a silent default."""
+    judged against what ITS U-Boot writes. The overlay must name that bundle
+    (`bundle: {sku, release_version}`, the bundle.json fields) and it must be the one being
+    provisioned. Malformed or mismatched -> ValueError, never a silent default.
+
+    Registers and values are QUOTED strings ("0x1f": "0x46"): an unquoted 010 is octal 8 in
+    YAML 1.1 and would pass silently, while int("010", 0) is rejected."""
     if not expect or "clkgen_fixup_regs" not in expect:
         return None
     raw = expect["clkgen_fixup_regs"]
     if not isinstance(raw, dict) or not raw:
         raise ValueError("clkgen_fixup_regs: want a non-empty mapping of register -> value")
+    who = expect.get("bundle")
+    if not isinstance(who, dict) or not who.get("sku") or not who.get("release_version"):
+        raise ValueError("clkgen_fixup_regs: the overlay must declare the bundle it applies to "
+                         "(bundle: {sku: ..., release_version: ...})")
+    if (str(who["sku"]), str(who["release_version"])) != (sku, release_version):
+        raise ValueError(f"clkgen_fixup_regs is pinned to bundle {who['sku']} {who['release_version']}, "
+                         f"but this run provisions {sku} {release_version}")
 
     def num(x, what, hi):
-        if isinstance(x, bool) or not isinstance(x, (int, str)):
-            raise ValueError(f"clkgen_fixup_regs: {what} {x!r} is not an integer")
+        if not isinstance(x, str):
+            raise ValueError(f"clkgen_fixup_regs: {what} {x!r} must be a quoted string like \"0x1f\"")
         try:
-            n = int(x, 0) if isinstance(x, str) else x
+            n = int(x, 0)
         except ValueError:
             raise ValueError(f"clkgen_fixup_regs: {what} {x!r} is not an integer") from None
         if not 0 <= n <= hi:
