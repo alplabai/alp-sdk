@@ -65,6 +65,12 @@ criterion, but nothing in the correction moves GPIO out of the PASS column.
 
 ## 2. The four flashing / observation flows
 
+> On the E1M EVK 2641-R3 the on-board RP2040 (`U55`, CMSIS-DAP) is the
+> primary debug probe and J-Link is the optional alternative
+> ([`aen-rp2040-debug-probe.md`](aen-rp2040-debug-probe.md)). The RP2040 path
+> is not bench-verified and its flash/debug steps are TBD; the flows below
+> are the proven ones.
+
 | Flow | Use it for | Touches MRAM? | Tooling |
 |---|---|---|---|
 | **A. Production MRAM flash (SETOOLS/ISP)** | shipping image, QA, re-keying | **Yes** | SETOOLS over the SE-UART (`west flash` = `alif_flash` runner) |

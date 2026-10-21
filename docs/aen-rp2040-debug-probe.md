@@ -32,11 +32,16 @@ contract, board/runner representation and the HIL flow.
 One USB device, three functions. Host tooling must identify the serial ports
 by **interface string**, not by enumeration order.
 
-| Interface | Function | Interface string | UART |
+| Interface | Function | Interface string | RP2040 UART (board-config dependent) |
 |---:|---|---|---|
 | 0 | CMSIS-DAP v2 (bulk) | `CMSIS-DAP v2 Interface` | n/a (SWD) |
 | 1, 2 | CDC-ACM 0 | `Alp SE-UART` (secure-enclave ISP / recovery) | UART0 |
 | 3, 4 | CDC-ACM 1 | `Alp App Console` (application console) | UART1 |
+
+The UART column is the RP2040's own UART peripheral as named in the firmware
+README; it changes per board config (on the Debug Probe board CDC0 is RP2040
+`UART1`). Which CDC channel carries module `UART0` (`F2` / `G2`) is TBD until
+the EVK board config lands.
 
 CDC1 is compile-time optional per board; without it the build is single-CDC
 (interfaces 0-2, string `CDC-ACM UART Interface`). The product string contains
