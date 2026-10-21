@@ -272,3 +272,7 @@ def test_recipe_pv_drift_detected(tmp_path):
 def test_real_recipe_pv_in_sync():
     mod = _recipe_pv_check()
     assert mod.check_yocto_recipe_pv(REPO, mod.declared_version_full(REPO)) == []
+    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc
+PV ?= \"0.6.0\"
+")
+    assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
