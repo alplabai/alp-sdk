@@ -88,8 +88,7 @@ def test_signing_fragment_names_the_committed_key():
     assert _fingerprint() in SIGN_INC.read_text(encoding="utf-8")
 
 
-@pytest.mark.skipif(not HAVE_GPG, reason="needs gpg + bash")
-def test_packager_builds_a_verifiable_flat_feed(tmp_path):
+def _gpg_env(tmp_path):
     home = tmp_path / "gnupg"
     home.mkdir(mode=0o700)
     env = {"GNUPGHOME": str(home), "PATH": __import__("os").environ["PATH"]}
@@ -99,17 +98,74 @@ def test_packager_builds_a_verifiable_flat_feed(tmp_path):
     fpr = re.search(r"^fpr:+(\w{40}):", subprocess.run(
         ["gpg", "--with-colons", "--list-keys"], env=env, capture_output=True,
         text=True, encoding="utf-8", check=True).stdout, re.M).group(1)
+    pub = tmp_path / "pub.asc"
+    pub.write_bytes(subprocess.run(["gpg", "--armor", "--export", fpr], env=env,
+                                   capture_output=True, check=True).stdout)
+    return home, env, fpr, pub
+
+
+def _ipk_tree(tmp_path, extra=()):
     ipk = tmp_path / "ipk"
     for arch in ("all", "e1m_v2n101_a55", "cortexa55"):
         (ipk / arch).mkdir(parents=True)
-        (ipk / arch / "Packages").write_text(f"Package: p-{arch}\nFilename: p-{arch}.ipk\n\n", encoding="utf-8")
-        (ipk / arch / f"p-{arch}.ipk").write_bytes(b"x")
-    out = tmp_path / "out"
-    subprocess.run(["bash", str(PACKAGER), "--ipk-dir", str(ipk), "--machine",
-                    "e1m-v2n101-a55", "--tag", "feed-v0-e1m-v2n101-a55", "--out",
-                    str(out), "--gnupghome", str(home), "--key", fpr],
-                   env=env, check=True, capture_output=True)
+        pk = [f"alp-sdk-{arch}", f"kernel-module-{arch}", *extra]
+        (ipk / arch / "Packages").write_text(
+            "".join(f"Package: {n}\nFilename: {n}.ipk\n\n" for n in pk), encoding="utf-8")
+        for n in pk:
+            (ipk / arch / f"{n}.ipk").write_bytes(b"x")
+    return ipk
+
+
+def _pack(tmp_path, ipk, home, env, fpr, extra_args, name="out"):
+    out = tmp_path / name
+    r = subprocess.run(["bash", str(PACKAGER), "--ipk-dir", str(ipk), "--machine",
+                        "e1m-v2n101-a55", "--tag", "feed-v0-e1m-v2n101-a55", "--out",
+                        str(out), "--gnupghome", str(home), "--key", fpr,
+                        "--allow", "alp-sdk-all alp-sdk-e1m_v2n101_a55 bad+name", *extra_args],
+                       env=env, capture_output=True, text=True)
+    return out, r
+
+
+@pytest.mark.skipif(not HAVE_GPG, reason="needs gpg + bash")
+def test_packager_publishes_only_the_allowlist_and_verifies(tmp_path):
+    home, env, fpr, pub = _gpg_env(tmp_path)
+    out, r = _pack(tmp_path, _ipk_tree(tmp_path), home, env, fpr, ["--pubkey", str(pub)])
+    assert r.returncode == 0, r.stderr
     names = {p.name for p in out.iterdir()}
-    assert {"Packages", "Packages.gz", "Packages.sig", "p-all.ipk",
-            "p-e1m_v2n101_a55.ipk", "feed-v0-e1m-v2n101-a55.tar.gz"} <= names
-    assert "p-cortexa55.ipk" not in names  # tune arch is not part of the dev-kit feed
+    assert {"Packages", "Packages.gz", "Packages.sig", "alp-sdk-all.ipk",
+            "alp-sdk-e1m_v2n101_a55.ipk", "feed-v0-e1m-v2n101-a55.tar.gz"} <= names
+    assert not any(n.startswith(("kernel-module", "alp-sdk-cortexa55")) for n in names)
+    assert "kernel-module" not in (out / "Packages").read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(not HAVE_GPG, reason="needs gpg + bash")
+def test_packager_rejects_a_signature_the_committed_key_does_not_verify(tmp_path):
+    home, env, fpr, _ = _gpg_env(tmp_path)  # throwaway key, default (committed) pubkey
+    _, r = _pack(tmp_path, _ipk_tree(tmp_path), home, env, fpr, [])
+    assert r.returncode != 0
+
+
+@pytest.mark.skipif(not HAVE_GPG, reason="needs gpg + bash")
+def test_packager_fails_on_a_special_character_ipk_name(tmp_path):
+    home, env, fpr, pub = _gpg_env(tmp_path)
+    _, r = _pack(tmp_path, _ipk_tree(tmp_path, extra=("bad+name",)), home, env, fpr,
+                 ["--pubkey", str(pub)])
+    assert r.returncode != 0 and "outside" in r.stderr
+
+
+@pytest.mark.skipif(not HAVE_GPG, reason="needs gpg + bash")
+def test_packager_refuses_a_non_empty_out_dir(tmp_path):
+    home, env, fpr, pub = _gpg_env(tmp_path)
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "keep").write_text("x")
+    _, r = _pack(tmp_path, _ipk_tree(tmp_path), home, env, fpr, ["--pubkey", str(pub)])
+    assert r.returncode == 2 and (tmp_path / "out" / "keep").exists()
+
+
+def test_feed_is_applied_only_in_the_edge_image_with_a_prod_guard():
+    imgs = LAYER / "recipes-images"
+    common = (imgs / "alp-image-common.inc").read_text(encoding="utf-8")
+    assert "ALP_DEVKIT_FEED" not in common
+    assert "ALP_DEVKIT_FEED" in (imgs / "alp-image-edge.bb").read_text(encoding="utf-8")
+    prod = (imgs / "alp-image-prod.bb").read_text(encoding="utf-8")
+    assert "bb.fatal" in prod and "ALP_DEVKIT_FEED" in prod

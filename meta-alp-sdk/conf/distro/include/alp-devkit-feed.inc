@@ -6,7 +6,7 @@
 #
 #     require conf/distro/include/alp-devkit-feed.inc
 #
-# Effect: the image ships opkg with GPG + HTTPS support, the feed config
+# Effect: the alp-image-edge image ships opkg with GPG + HTTPS support, the feed config
 # /etc/opkg/alp-devkit-feed.conf (signature checking ON) and the Alp feed
 # public key, so `opkg update && opkg upgrade alp-sdk` works against the
 # signed feed published for this image's release line.
@@ -32,4 +32,6 @@ ALP_DEVKIT_FEED_URL  ?= "https://github.com/alplabai/alp-sdk/releases/download/$
 
 # opkg verifies signatures through gpgme and must follow GitHub's redirect to
 # the CDN for release assets; its default wget fetcher does neither reliably.
-PACKAGECONFIG:append:pn-opkg = " gpg curl ssl-curl"
+# sha256: ipks are bound only by the checksum in the signed index, so it must be
+# SHA-256 (the scarthgap opkg PACKAGECONFIG name is unverified without a build).
+PACKAGECONFIG:append:pn-opkg = " gpg curl ssl-curl sha256"

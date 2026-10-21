@@ -284,9 +284,9 @@ reflash, from a **signed opkg feed** published per image release line and per
 machine. **Dev kits only: this is not a field-update channel.** Field devices
 stay on image-based A/B OTA (Mender).
 
-**Adding the feed.** An image built with
+**Adding the feed.** An `alp-image-edge` image built with
 `require conf/distro/include/alp-devkit-feed.inc` (in `local.conf`) already has
-it: opkg with GPG and HTTPS support, `/etc/opkg/alp-devkit-feed.conf`
+it (`alp-image-prod` never does: it fails the build if the fragment is set): opkg with GPG and HTTPS support, `/etc/opkg/alp-devkit-feed.conf`
 (`option check_signature 1`) and the Alp feed public key
 (`keys/alp_devkit_feed_signing.pub.asc`, fingerprint
 `2B7807E20B75B471BF88FD7AC9AB032782D3143B`) in the opkg keyring. The fragment also switches the build to the ipk
@@ -306,7 +306,7 @@ unsigned fallback.
 `<base>/<ipk>` by name under one base URL, and a release's assets are a flat
 namespace, so the feed is **one release per line and machine** whose assets are
 a single merged `Packages`, `Packages.gz`, `Packages.sig` and the ipks
-(`all` + the machine arch); the base URL is
+(the allowlisted packages of `all` + the machine arch); the base URL is
 `https://github.com/alplabai/alp-sdk/releases/download/<tag>`. The release is
 refreshed in place, so the URL stays stable. Each release also carries
 `<tag>.tar.gz`, the same files for hosts that cannot use the URL
@@ -316,9 +316,15 @@ as a base: unpack it and use `src/gz alp-devkit file:///path/to/feed` in a
 **ABI.** Keep the image and the feed on the same line. While the SDK is 0.x the
 minor is part of the soname (`libalp_sdk.so.0.17`), so an upgrade cannot load an
 incompatible library into an app linked against the old one: moving to the next
-line means a new image, not `opkg upgrade`. The feed holds only our own layers'
-packages (`all` and the machine arch), not the toolchain's libraries, so it
-relies on the image having been built from the same layers and toolchain.
+line means a new image, not `opkg upgrade`. The feed publishes only an
+allowlist of our packages (`alp-sdk`, `alp-sdk-dev`, the example packages,
+`alp-devkit-feed-config`) from the `all` and machine-arch dirs; it carries no
+tune-arch (`cortexa55`/`aarch64`) packages and no poky/BSP packages. It can
+therefore only **upgrade packages already in the image** whose dependencies are
+already installed: a package that adds a new dependency, or `alp-sdk-dev` and the
+examples when the image lacks their tune-arch RDEPENDS, cannot be resolved from
+it. The packager fails on an ipk name outside `[A-Za-z0-9._-]` and on more assets
+than a GitHub release allows (1000).
 
 **Building and signing (release builder only).** Signing uses Yocto's
 `sign_package_feed` (`PACKAGE_FEED_SIGN`, `PACKAGE_FEED_GPG_NAME`,
@@ -329,7 +335,8 @@ never forced to sign. The private key lives only in `alp-sdk-internal/signing/`
 and in the internal runner's secret store; signing never runs in public
 Actions. After `bitbake alp-image-edge package-index`,
 `scripts/package_devkit_feed.sh --ipk-dir tmp/deploy/ipk --machine <MACHINE> --tag <tag> --out <dir>`
-merges the arches into the flat feed, signs it and writes the tarball; the
+merges the arches into the flat feed, signs it, verifies the signature against the
+committed public key and writes the tarball (`--out` must be empty or new); the
 internal `devkit-feed` workflow uploads the result to the release.
 
 ## Notes
