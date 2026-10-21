@@ -650,6 +650,9 @@ static bool rtc_int_asserted_now(void)
 	return rtc_enabled_flag_set(r);
 }
 
+/* Stale RV-3028 state is stopped here only for the sources this plan owns.  A stale EIE left by
+ * a lost wake record can still hold /INT low until an EVI cycle runs; EIE the caller armed
+ * itself is left alone by design. */
 static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
 {
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
@@ -673,8 +676,7 @@ static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
 		 * next EVI pulse would then latch EVF with EIE on and hold /INT low for every later
 		 * sleep.  This backend owns EVI here: stop it (EIE off, EVF cleared) like TE/TIE/TF. */
 		if (alp_som_power_rtc_evi_disarm() != ALP_OK) {
-			printk("alif_se_power: stale RV-3028 EVI state not cleared
-");
+			printk("alif_se_power: stale RV-3028 EVI state not cleared\n");
 		}
 	}
 	if ((plan->hw & ALP_SOM_ARM_RTC_ANY) != 0u && rtc_int_asserted_now()) {
@@ -1001,8 +1003,7 @@ static void evi_event_ctrl_print_once(void)
 
 	if (!done && alp_som_power_rtc_regs(r) == ALP_OK) {
 		done = true;
-		printk("alif_se_power: RV-3028 EVI armed, EVENT_CTRL(13h)=0x%02x CTRL2=0x%02x
-", r[3], r[2]);
+		printk("alif_se_power: RV-3028 EVI armed, EVENT_CTRL(13h)=0x%02x CTRL2=0x%02x\n", r[3], r[2]);
 	}
 }
 

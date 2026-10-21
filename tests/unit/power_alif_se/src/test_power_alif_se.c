@@ -339,6 +339,9 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t pads, uint32_t lptimer
 		if ((g_rec_at_set.armed_hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
 			g_rtc_flags = RV3028C7_WAKE_TF;
 		}
+		if ((g_rec_at_set.armed_hw & ALP_SOM_ARM_RTC_EVI) != 0u) {
+			g_rtc_flags = RV3028C7_WAKE_EVF;
+		}
 	}
 	return ALP_OK;
 }
