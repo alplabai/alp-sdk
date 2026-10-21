@@ -250,6 +250,8 @@ def test_sibling_recipe_without_shared_pv_fails(tmp_path):
     assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
     r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\n")
     assert mod.check_sibling_recipes_use_shared_pv(tmp_path) == []
+    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\nPV = \"0.6.0\"\n")
+    assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
 
 
 def test_real_sibling_recipes_use_shared_pv():

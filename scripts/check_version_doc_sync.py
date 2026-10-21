@@ -222,10 +222,14 @@ def check_sibling_recipes_use_shared_pv(repo: pathlib.Path) -> list[str]:
     drifts: list[str] = []
     for f in sorted(layer.rglob("*.bb")) if layer.is_dir() else []:
         text = f.read_text(encoding="utf-8", errors="replace")
-        if "alplabai/alp-sdk.git" in text and not re.search(
-                r"^require\s+\S*alp-sdk-version\.inc", text, re.MULTILINE):
-            drifts.append(f"  DRIFT    {f.relative_to(repo).as_posix()}: builds from this repo "
+        if "alplabai/alp-sdk.git" not in text:
+            continue
+        rel = f.relative_to(repo).as_posix()
+        if not re.search(r"^require\s+\S*alp-sdk-version\.inc", text, re.MULTILINE):
+            drifts.append(f"  DRIFT    {rel}: builds from this repo "
                           f"but does not `require recipes-core/alp-sdk/alp-sdk-version.inc`")
+        if re.search(r"^PV\s*=", text, re.MULTILINE):
+            drifts.append(f"  DRIFT    {rel}: sets its own PV; it must come from alp-sdk-version.inc")
     return drifts
 
 

@@ -23,7 +23,7 @@ DEPENDS = "alp-sdk"
 # then (the alp-edgeai recipe shows the end state).
 #
 # For a local bake that must pick up uncommitted work-in-progress on top
-# of this branch, override with EXTERNALSRC the same way alp-sdk_0.6.bb's
+# of this branch, override with EXTERNALSRC the same way alp-sdk_git.bb's
 # own bring-up flow is driven, e.g. in local.conf:
 #
 #   INHERIT += "externalsrc"
