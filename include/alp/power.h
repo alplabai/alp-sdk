@@ -140,7 +140,7 @@ typedef enum {
  *  separate accessor from @ref alp_power_capabilities -- that one's
  *  @c flags field is the cross-class @c alp_instance_cap_t bitmap
  *  every peripheral class shares -- e.g. @c ALP_INSTANCE_CAP_DMA is
- *  bit 0, the same numeric value as @c ALP_POWER_WAKE_RTC below --
+ *  bit 1, the same numeric value as @c ALP_POWER_WAKE_GPIO below --
  *  so wake-arm capability gets its own uint32_t rather than aliasing
  *  that one.) */
 #define ALP_POWER_WAKE_NONE       0x00000000u
@@ -380,7 +380,7 @@ const alp_capabilities_t *alp_power_capabilities(const alp_power_t *handle);
  * shared @c alp_capabilities_t -- that struct's @c flags is the
  * cross-class @c alp_instance_cap_t bitmap, whose bit values collide
  * numerically with @c ALP_POWER_WAKE_* (e.g. @c ALP_INSTANCE_CAP_DMA
- * == @c ALP_POWER_WAKE_RTC == bit 0).
+ * == @c ALP_POWER_WAKE_GPIO == bit 1).
  *
  * @param handle  Handle from @ref alp_power_open, or NULL.
  * @return Bitmap of @c ALP_POWER_WAKE_* macros; 0 if @p handle is NULL.

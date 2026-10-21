@@ -6,6 +6,43 @@ correction, and the item-2 injection-set / dtc-gperf corrections.
 Date: 2026-07-25
 Deciders: alpCaner
 
+## Amendment (2026-10-21 — Lane 1 P1: tan downloads the pinned archives itself, not `west sdk install --install-dir`)
+
+Since tan-cli#1558 (tan-cli#1556), `tan bootstrap`'s toolchain phase downloads
+both pinned archives itself: the Zephyr SDK **minimal bundle**, and the
+`arm-zephyr-eabi` toolchain (since tan-cli#1496). Each is hashed against the
+sha256 pins in `metadata/toolchains.json` while it streams. The minimal bundle
+is extracted, checked to hold exactly one top-level `zephyr-sdk-<v>/`
+directory, and moved into the artifact-keyed store; the toolchain lands in its
+`gnu/`. The design is unchanged (artifact-keyed store, hermetic install, sha256
+lockfile, no PATH mutation); only the tool that fetches the archives changed.
+
+`west sdk install` was retained as Lane 1 P1 (see Alternatives) until
+tan-cli#1556, then replaced. With tan's flags (`--no-gnu-toolchains
+--no-hosttools --install-dir <tmp>`) it did four things, of which only the
+third was wanted:
+
+1. `fetch_releases`: a rate-limited GitHub API call.
+2. `fetch_sdk_info`: CMake `FindZephyr-sdk` discovery. When the pinned version
+   was found anywhere (CMake package registry incl. Windows HKCU, `/usr`,
+   `/usr/local`, `/opt`, `~`, a `bin` dir on `PATH`), west ignored
+   `--install-dir` and reused that copy (tan-cli#1552, tan-cli#1556).
+3. Download, verify, extract and move the minimal bundle, verified against the
+   release `sha256.sum`, not alp-sdk's pin.
+4. `setup -c`: registered the temporary install dir in the CMake package
+   registry, a dead entry once tan moved the dir (tan-cli#1553).
+
+Extraction parity was measured before the switch: all three pinned bundles
+match their `metadata/toolchains.json` pins, and tan's
+`tarfile(filter="data")` extractor and system `tar` produce identical trees
+(`macos-aarch64`: 1344 entries, 21 symlinks, none absolute; `linux-x86_64`: 19
+entries; the `windows-x86_64` `.7z` extracts to the single top-level dir).
+
+Not affected: `west init` / `west update` / `west zephyr-export` in `tan
+bootstrap`; standalone users without tan can still run `west sdk install` by
+hand, and `tan doctor`'s `zephyrSdk` fix still names that command. The
+original text below is kept as the history of the decision.
+
 ## Amendment (2026-10-10 — E1M-NX9101 / i.MX 93 removed)
 
 E1M-NX9101 and the NXP i.MX 93 port were removed in #2781 / #2782 (67ed22d86; the module was never produced). Lane 2 (Yocto on Cortex-A) now covers RZ/V2N / V2M only; read "(RZ/V2N, i.MX 93)" below accordingly.
@@ -413,8 +450,8 @@ overrides the root for bench machines and CI.
 
 **Signed package manager stays primary for the small host tools** (`git`,
 `cmake`, `ninja`) — hermetic archives are primary only for the large pinned
-compilers, which `west sdk install --install-dir` already delivers
-hermetically.  Vendoring the Python interpreter is worth it regardless: it
+compilers, which tan downloads itself, hash-checked against the pins in
+`metadata/toolchains.json` (tan-cli#1556, see the 2026-10-21 Amendment).  Vendoring the Python interpreter is worth it regardless: it
 kills the Microsoft-Store alias and the version-drift traps.
 
 **Never mutate PATH.**  Resolve absolute paths and inject them
@@ -467,7 +504,9 @@ first rungs, and a single P0/P1/P2 list mis-prioritises two of them.
     `metadata/bootstrap.json` (the shape `nativeLibHints.command` already
     uses), and `tan doctor --fix` executes them.  This is what actually fixes
     the observed host.
-  - *P1* — `west sdk install --install-dir` into the artifact-keyed store, the
+  - *P1* — tan's own pinned download of the Zephyr SDK minimal bundle and the
+    `arm-zephyr-eabi` toolchain archive into the artifact-keyed store (was
+    `west sdk install --install-dir` until tan-cli#1556), the
     `sha256` lockfile, and build-plan path injection.
 - **Lane 2 — Yocto on Cortex-A** (RZ/V2N, i.MX 93).  First rung is a
   **published container image** (plus WSL2 distro provisioning on Windows), not

@@ -41,13 +41,11 @@ tan flash
 
 `tan` builds one image per Zephyr core on the SoM: a core this `board.yaml` does not declare gets the SDK's idle `alp-stock-shim` image (on an E1M-AEN SoM, `m55_he` here, in `build/m55_he-zephyr/`); see [docs/heterogeneous-builds.md](../../../docs/heterogeneous-builds.md).
 
-A real-silicon build refuses to configure without a real entropy
-source (#2192: AEN has no Ensemble entropy driver yet, so the weak-RNG
-guard in `zephyr/CMakeLists.txt` trips), so it fails at configure time
-without the opt-in shown in the west commands below. CI's `testcase.yaml`
-opts in the same way to get a build-only compile check; the
-`CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y` acknowledgement is
-**bench-only -- never ship it**.
+AEN hardware builds seed the PSA core from the Secure Enclave TRNG entropy
+driver (`alif,se-trng`, issue #2192), which every AEN board chooses as
+`zephyr,entropy` by default, so no weak-RNG opt-in is needed. Only the
+native_sim build, which has no real entropy source, sets
+`CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y` (in `native_sim.conf`).
 
 ### Inside an SDK checkout (twister / CI)
 
@@ -59,20 +57,18 @@ These commands only work from an alp-sdk checkout, because `gen_example_alp_conf
 python3 scripts/gen_example_alp_conf.py examples/connectivity/iot-dashboard
 west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
     examples/connectivity/iot-dashboard -- \
-    -DEXTRA_CONF_FILE=generated/alp.conf \
-    -DCONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y   # bench-only -- never ship this flag
+    -DEXTRA_CONF_FILE=generated/alp.conf
 
 # Documented AEN flow: --sysbuild, so MCUboot signs the image into slot0
 # (see docs/_aen-runbook-section.md).  Sysbuild does not forward a plain
 # -DBOARD=/-DCONFIG_... pair to the app image's own CMake invocation, so the
-# config override is passed unprefixed at the sysbuild command line, which
-# sysbuild routes to the main app image (iot-dashboard) only:
+# extra conf file is passed with the app-image prefix on the sysbuild
+# command line, which routes it to the main app image (iot-dashboard) only:
 python3 scripts/gen_example_alp_conf.py examples/connectivity/iot-dashboard
 west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
     examples/connectivity/iot-dashboard --sysbuild -- \
     -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf \
-    -Diot-dashboard_EXTRA_CONF_FILE=generated/alp.conf \
-    -DCONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y   # bench-only -- never ship this flag
+    -Diot-dashboard_EXTRA_CONF_FILE=generated/alp.conf
 west flash
 ```
 
