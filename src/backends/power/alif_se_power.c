@@ -668,6 +668,15 @@ static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
 	} else if ((plan->hw & ALP_SOM_ARM_RTC_INT) != 0u) {
 		(void)alp_som_power_rtc_clear_stale_uf(); /* the caller's own alarm: UF noise only */
 	}
+	if ((plan->hw & ALP_SOM_ARM_RTC_EVI) != 0u) {
+		/* The backup-powered part keeps EIE across a reset that skipped the wake decode; the
+		 * next EVI pulse would then latch EVF with EIE on and hold /INT low for every later
+		 * sleep.  This backend owns EVI here: stop it (EIE off, EVF cleared) like TE/TIE/TF. */
+		if (alp_som_power_rtc_evi_disarm() != ALP_OK) {
+			printk("alif_se_power: stale RV-3028 EVI state not cleared
+");
+		}
+	}
 	if ((plan->hw & ALP_SOM_ARM_RTC_ANY) != 0u && rtc_int_asserted_now()) {
 		rtc_refusal_dump_once();
 		return refuse(2, "rtc_int_asserted", 1, ALP_ERR_BUSY);
@@ -983,6 +992,20 @@ static void disarm(const armed_t *a)
 	}
 }
 
+/* Event Control (13h) is the one RV-3028 value the EVI wake relies on and this SDK never
+ * writes (power-on 0x00): print it the first time EVI is armed so a bench run can verify it. */
+static void evi_event_ctrl_print_once(void)
+{
+	static bool done;
+	uint8_t     r[6] = { 0 };
+
+	if (!done && alp_som_power_rtc_regs(r) == ALP_OK) {
+		done = true;
+		printk("alif_se_power: RV-3028 EVI armed, EVENT_CTRL(13h)=0x%02x CTRL2=0x%02x
+", r[3], r[2]);
+	}
+}
+
 static alp_status_t arm(const sleep_plan_t *plan, armed_t *a)
 {
 	alp_status_t s;
@@ -1003,6 +1026,7 @@ static alp_status_t arm(const sleep_plan_t *plan, armed_t *a)
 		if (s != ALP_OK) {
 			return s;
 		}
+		evi_event_ctrl_print_once();
 	}
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u) {
 		/* NOT armed here: the LPTIMER is armed last, inside the interrupt-off entry,

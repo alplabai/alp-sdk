@@ -551,6 +551,11 @@ alp_status_t alp_som_power_rtc_evi_arm(void)
 alp_status_t alp_som_power_rtc_evi_disarm(void)
 {
 	g_evi_disarms++;
+	g_rtc_regs[2] &= (uint8_t)~0x04u; /* EIE */
+	g_rtc_regs[0] &= (uint8_t)~0x02u; /* EVF */
+	if ((g_rtc_regs[0] & 0x04u) == 0u) {
+		g_int_level = 0; /* nothing left to hold /INT low */
+	}
 	return ALP_OK;
 }
 
@@ -2281,6 +2286,18 @@ ZTEST(power_alif_se, test_the_run_profile_matches_the_cold_boot_profile)
 	for (size_t i = 0; i < sizeof(r) / sizeof(uint32_t); ++i) {
 		zassert_not_equal(w[i], POISON32, "run_profile_t word %u never assigned", (unsigned)i);
 	}
+}
+
+ZTEST(power_alif_se, test_stale_evi_state_is_stopped_not_refused)
+{
+	/* A reset skipped the wake decode: EIE still on, EVF latched, /INT held low. */
+	g_int_level         = 1;
+	g_rtc_regs[0]       = 0x02u; /* EVF */
+	g_rtc_regs[2]       = 0x04u; /* EIE */
+	g_state.wake_bitmap = ALP_POWER_WAKE_EXT_EVENT;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_OK);
+	zassert_true(g_evi_disarms >= 1u, "stale EVI stopped before the /INT check");
+	zassert_equal(g_evi_arms, 1u);
 }
 
 /* ---- RV-3028 evidence at an /INT refusal ---------------------------------------------- */

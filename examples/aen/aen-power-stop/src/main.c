@@ -173,7 +173,7 @@ BUILD_ASSERT(CONFIG_AEN_STOP_RTC_MS >= 1000, "the countdown cycle must be at lea
 #ifdef CONFIG_AEN_STOP_EVI_CYCLE
 /* Variant (E): the third cycle waits for an external event on the RV-3028 EVI pin instead of
  * the alarm (#2811).  Pull MODULE_STBY (E1.O2) low within the timeout: from the CC3501E
- * (GPIO18 on E1.I3, open-drain) or, on the bench, a jumper wire to GND (EVK header P14 pin 2).
+ * (GPIO18 on E1.I3, open-drain) or, on the bench, a jumper wire from MODULE_STBY (EVK header P14 pin 1) to any GND.
  * The countdown is only a safety net so an unwired board does not sleep for ever; if IT is
  * what wakes the SoC, wake_source reads ALP_POWER_WAKE_TIMER and the verdict is FAIL. */
 #define ALARM_CYCLE \

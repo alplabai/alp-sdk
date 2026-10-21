@@ -922,6 +922,7 @@ ZTEST(power_som_domains, test_nor_write_in_flight_blocks_the_quiesce)
 #define RTC_SF_PORF      0x01u
 #define RTC_C2_TIE       0x10u
 #define RTC_C2_AIE       0x08u
+#define RTC_C2_UIE_BIT   0x20u
 
 ZTEST(power_som_domains, test_rtc_wake_service_reports_enabled_flags_and_clears)
 {
@@ -956,6 +957,57 @@ ZTEST(power_som_domains, test_rtc_wake_service_reports_enabled_flags_and_clears)
 	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_PORF, "PORF untouched");
 
 	zassert_equal(alp_som_power_rtc_wake_service(NULL), ALP_ERR_INVAL);
+}
+
+#define RTC_SF_EVF 0x02u
+#define RTC_C2_EIE 0x04u
+
+ZTEST(power_som_domains, test_rtc_evi_arm_clears_stale_evf_before_setting_eie)
+{
+	/* Stale EVF, EIE off: EVF cleared (constant mask, 0 only for EVF), then EIE set. */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF | RTC_SF_PORF;
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_UIE_BIT;
+	zassert_ok(alp_som_power_rtc_evi_arm());
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~RTC_SF_EVF);
+	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], RTC_C2_UIE_BIT | RTC_C2_EIE);
+
+	/* EIE already on: nothing is touched, a latched EVF is the wake and survives. */
+	rtc_regs()[RTC_STATUS_REG] = RTC_SF_EVF;
+	zassert_ok(alp_som_power_rtc_evi_arm());
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_EVF);
+	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], RTC_C2_UIE_BIT | RTC_C2_EIE);
+}
+
+ZTEST(power_som_domains, test_rtc_evi_disarm_clears_eie_and_evf)
+{
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF;
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_UIE_BIT | RTC_C2_EIE;
+	zassert_ok(alp_som_power_rtc_evi_disarm());
+	zassert_equal(rtc_regs()[RTC_CONTROL2_REG], RTC_C2_UIE_BIT);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~RTC_SF_EVF);
+}
+
+ZTEST(power_som_domains, test_rtc_evf_is_a_wake_only_with_eie)
+{
+	uint8_t flags = 0u;
+	bool    pending = false;
+
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF;
+	rtc_regs()[RTC_CONTROL2_REG] = RTC_C2_EIE;
+	zassert_ok(alp_som_power_rtc_flags_pending(&pending));
+	zassert_true(pending);
+	zassert_ok(alp_som_power_rtc_wake_service(&flags));
+	zassert_equal(flags, RTC_SF_EVF);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], 0x7Fu & ~RTC_SF_EVF);
+
+	/* EVF without EIE: not a wake cause and left set (only the EVI wake acknowledges it). */
+	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF;
+	rtc_regs()[RTC_CONTROL2_REG] = 0u;
+	zassert_ok(alp_som_power_rtc_flags_pending(&pending));
+	zassert_false(pending);
+	zassert_ok(alp_som_power_rtc_wake_service(&flags));
+	zassert_equal(flags, 0u);
+	zassert_equal(rtc_regs()[RTC_STATUS_REG], RTC_SF_EVF);
 }
 
 ZTEST(power_som_domains, test_rtc_int_armed_reads_control2)
