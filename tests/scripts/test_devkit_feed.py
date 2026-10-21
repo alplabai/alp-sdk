@@ -123,7 +123,7 @@ def _pack(tmp_path, ipk, home, env, fpr, extra_args, name="out",
                         "e1m-v2n101-a55", "--tag", "feed-v0-e1m-v2n101-a55", "--out",
                         str(out), "--gnupghome", str(home), "--key", fpr, "--allow", allow,
                         *extra_args],
-                       env=env, capture_output=True, text=True)
+                       env=env, capture_output=True, text=True, encoding="utf-8")
     return out, r
 
 
@@ -158,7 +158,7 @@ def test_packager_fails_on_a_special_character_ipk_name(tmp_path):
 def test_packager_refuses_a_non_empty_out_dir(tmp_path):
     home, env, fpr, pub = _gpg_env(tmp_path)
     (tmp_path / "out").mkdir()
-    (tmp_path / "out" / "keep").write_text("x")
+    (tmp_path / "out" / "keep").write_text("x", encoding="utf-8")
     _, r = _pack(tmp_path, _ipk_tree(tmp_path), home, env, fpr, ["--pubkey", str(pub)])
     assert r.returncode == 2 and (tmp_path / "out" / "keep").exists()
 
