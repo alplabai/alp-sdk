@@ -199,6 +199,19 @@ step recorded `done` whose probe now says `Unsatisfied` runs again, and a
 state recorded against a **different bundle or tool revision** is moved to
 `superseded` so every step runs again.
 
+### Voided verification
+
+The state file numbers every step entry (`seq`) and keeps a forward-only marker,
+`last_mutation_seq`, moved by the first real write of a write step (`gd32_flash`,
+`write_xspi`, `write_cm33`, `write_emmc_boot`, `write_rootfs`) and by `boot_sd_linux`
+clearing the GD32 SD hold. A verification step whose newest entry is older than the marker
+is voided: it is not "done" for the next run, `record` drops its facts, strikes its keys in
+`<serial>.unit.yaml` as `unread (voided, a write step ran after the step that read it)`, and
+reports `verification voided by a later write or SD-hold change, run again: <steps>` as a
+ship blocker. `bootstrap`, `eeprom_manifest`, `secure_page` and `dxm1_npu_flash` do not move
+the marker (same bytes for the same bundle, each with its own readback). A state file from
+before this mechanism is renumbered by wall clock once, then never re-derived.
+
 ## Power safety
 
 The RTL8211F(I) PHY needs both 3.3 V and its 1.0 V rail at 0 V when the 3.3 V

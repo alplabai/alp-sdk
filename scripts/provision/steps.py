@@ -411,7 +411,9 @@ def _now() -> str:
 # in wall-clock order (the entry's `at`, then superseded-before-current, then STEP_ORDER so a
 # write sorts before the verification after it), and places the marker at the newest old write. A verification that
 # finished after every old write stands; one before a write is void. It is saved and never
-# derived again.
+# derived again. ponytail: a legacy write entry the old code overwrote with `skipped` lost its
+# history and cannot be recovered here; an entry with no `at` sorts oldest (a timeless
+# verification is voided by any write, a timeless write voids nothing).
 WRITE_STEPS = ("gd32_flash", "write_xspi", "write_cm33", "write_emmc_boot", "write_rootfs")
 VERIFY_STEPS = ("sd_out_emmc_boot", "cold_boot_test", "census_final", "clkgen_verify", "rtc_set",
                 "functional_test", "hil_smoke")
