@@ -49,16 +49,16 @@ FILES:${PN} = "${sysconfdir}/opkg/alp-devkit-feed.conf ${datadir}/opkg/keyrings"
 CONFFILES:${PN} = "${sysconfdir}/opkg/alp-devkit-feed.conf"
 
 # opkg-key populate imports every *.gpg under the keyrings dir into opkg's keyring.
-RDEPENDS:${PN} = "opkg"
+RDEPENDS:${PN} = "opkg gnupg"
 
 pkg_postinst_ontarget:${PN} () {
 	if test -x ${bindir}/opkg-key
 	then
 		${bindir}/opkg-key populate
-		# opkg only accepts a signature from a key it fully trusts; every key in
-		# this keyring was put there on purpose, so mark them ultimately trusted.
-		gpg --homedir ${sysconfdir}/opkg/gpg --list-keys --with-colons | \
-			awk -F: '/^fpr:/ {print $10 ":6:"}' | \
+		# opkg only accepts a signature from a key it fully trusts; trust ONLY the
+		# dev-kit feed signing key (keys/alp_devkit_feed_signing.pub.asc), not
+		# whatever else lands in the keyring.
+		echo "2B7807E20B75B471BF88FD7AC9AB032782D3143B:6:" | \
 			gpg --homedir ${sysconfdir}/opkg/gpg --batch --import-ownertrust
 	fi
 }

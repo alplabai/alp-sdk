@@ -324,9 +324,9 @@ therefore only **upgrade packages already in the image** whose dependencies are
 already installed: a package that adds a new dependency, or `alp-sdk-dev` when the
 image lacks its tune-arch RDEPENDS, cannot be resolved from it. The example
 packages are not published: they are tune-arch until their recipes become
-MACHINE_ARCH (#2850 item 2). The packager also fails when an allowlisted package
-is missing from the index or a stanza has no `SHA256sum:`. The packager fails on an ipk name outside `[A-Za-z0-9._-]` and on more assets
-than a GitHub release allows (1000).
+MACHINE_ARCH (#2850 item 2). The packager fails when an allowlisted package is
+missing from the index, a stanza has no `SHA256sum:`, an ipk name falls outside
+`[A-Za-z0-9._-]`, or there are more assets than a GitHub release allows (1000).
 
 **Building and signing (release builder only).** Signing uses Yocto's
 `sign_package_feed` (`PACKAGE_FEED_SIGN`, `PACKAGE_FEED_GPG_NAME`,

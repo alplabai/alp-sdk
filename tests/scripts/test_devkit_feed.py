@@ -181,6 +181,21 @@ def test_packager_fails_on_a_stanza_without_sha256sum(tmp_path):
     assert r.returncode != 0 and "SHA256sum" in r.stderr
 
 
+@pytest.mark.skipif(not HAVE_GPG, reason="needs gpg + bash")
+def test_signature_fails_on_a_tampered_packages_file(tmp_path):
+    home, env, fpr, pub = _gpg_env(tmp_path)
+    out, r = _pack(tmp_path, _ipk_tree(tmp_path), home, env, fpr, ["--pubkey", str(pub)])
+    assert r.returncode == 0, r.stderr
+    f = out / "Packages"
+    f.write_bytes(f.read_bytes().replace(b"Package: alp-sdk-all", b"Package: alp-sdk-al1", 1))
+    keyring = tmp_path / "pub.gpg"
+    keyring.write_bytes(subprocess.run(["gpg", "--dearmor"], input=pub.read_bytes(), env=env,
+                                       capture_output=True, check=True).stdout)
+    v = subprocess.run(["gpgv", "--keyring", str(keyring), str(out / "Packages.sig"), str(f)],
+                       env=env, capture_output=True)
+    assert v.returncode != 0
+
+
 def test_feed_is_applied_only_in_the_edge_image_with_a_prod_guard():
     imgs = LAYER / "recipes-images"
     common = (imgs / "alp-image-common.inc").read_text(encoding="utf-8")

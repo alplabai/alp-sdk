@@ -65,7 +65,7 @@ for a in all "$arch"; do
   [ -f "$ipk_dir/$a/Packages" ] || { echo "no $ipk_dir/$a/Packages (run bitbake package-index)" >&2; exit 1; }
   # Keep only allowlisted stanzas, then copy exactly the ipks they name.
   awk -v allow=" $allow " 'BEGIN { RS = ""; FS = "\n"; ORS = "\n\n" }
-       { for (i = 1; i <= NF; i++) if ($i ~ /^Package: /) n = substr($i, 10)
+       { n = ""; for (i = 1; i <= NF; i++) if ($i ~ /^Package: /) n = substr($i, 10)
          if (index(allow, " " n " ")) print }' "$ipk_dir/$a/Packages" > "$out/Packages.part"
   while read -r f; do
     case $f in *[!A-Za-z0-9._-]*|"") echo "ipk name outside [A-Za-z0-9._-]: $f" >&2; exit 1 ;; esac
@@ -80,10 +80,10 @@ for n in $allow; do
   grep -qx "Package: $n" "$out/Packages" || { echo "allowlisted package missing from the index: $n" >&2; exit 1; }
 done
 awk 'BEGIN { RS = ""; FS = "[\n]" }
-     { ok = 0; for (i = 1; i <= NF; i++) if ($i ~ /^SHA256sum: [0-9a-f]{64}$/) ok = 1
+     { ok = 0; for (i = 1; i <= NF; i++) if ($i ~ /^SHA256sum: [0-9a-f]+$/ && length($i) == 75) ok = 1
        if (!ok) { print "stanza without SHA256sum: " $1 > "/dev/stderr"; bad = 1 } }
      END { exit bad }' "$out/Packages"
-n_ipk=$(ls "$out"/*.ipk 2>/dev/null | wc -l)
+shopt -s nullglob; ipks=("$out"/*.ipk); n_ipk=${#ipks[@]}
 [ "$n_ipk" -gt 0 ] || { echo "no allowlisted ipks found" >&2; exit 1; }
 [ $((n_ipk + 4)) -le "$max_assets" ] || { echo "$n_ipk ipks exceed the $max_assets-asset release limit" >&2; exit 1; }
 gzip -9nc "$out/Packages" > "$out/Packages.gz"
