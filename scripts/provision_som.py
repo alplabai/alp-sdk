@@ -410,6 +410,11 @@ def _v2n_parser() -> argparse.ArgumentParser:
                       help="default: Monday of the serial's ISO week (a different date is "
                            "recorded as an override)")
     work.add_argument("--allow-tier-mismatch", metavar="REASON")
+    work.add_argument("--sd-removed-by-operator", action="store_true",
+                      help="sd_out_emmc_boot: the GD32 cannot hold the SD out (released v0.3.0 answers "
+                           "BOOT_CONFIG NOSUPPORT); the operator removed the microSD and the unit already "
+                           "booted from the eMMC. Verified (no SD enumerated) and recorded as "
+                           "sd_out_method=operator-removed. Without it the tool prompts interactively.")
     work.add_argument("--accept-cid-change", metavar="REASON",
                       help="the unit's eMMC was legitimately replaced: adopt the CID now behind the "
                            "address as this serial's identity (recorded as an override; blocks shipping)")
@@ -630,7 +635,8 @@ def v2n_main(argv: list[str]) -> int:
                     ledger_root=a.ledger_root, execute=execute, lock=getattr(a, "lock", False),
                     bench=bench, tier_markers=markers, expected_registers=regs, functest_expect=expect,
                     allow_tier_mismatch=a.allow_tier_mismatch,
-                    accept_cid_change=a.accept_cid_change, reprovision_from=a.reprovision_from,
+                    accept_cid_change=a.accept_cid_change,
+                    sd_removed_by_operator=a.sd_removed_by_operator, reprovision_from=a.reprovision_from,
                     replace_identity=a.replace_identity,
                     cold_cycles=a.cold_cycles, hil_spec=hil, flash_writer=a.flash_writer,
                     gd32_fw=a.gd32_fw,

@@ -295,9 +295,9 @@ are not yet confirmed by a run of this code on a bench.
 | `dxm1_npu_flash` | `v2n-m1` bundles that carry the DX-M1 set: firmware over the ROM UART path, probe = PCIe `0x0000` + `dxrt-cli -s` version, see below |
 | `pmic_verify` | compare registers against `--pmic-expect` |
 | `secure_page` | write the 64-byte Secure Data Page, read back, compare. Never locks |
-| `sd_out_emmc_boot` | no operator. On the provisioning SD Linux: persist the GD32 `BOOT_CONFIG` flag `SDMUX_EN_HIGH` (bridge I2C `0x70`, opcode `0x42`; the SET moves no pad until the next GD32 reset, so it cannot pull the root) and wait until a GET returns it; cold-boot into the eMMC Linux (refused if the root is still `mmcblk1`); drive IO29 `SDIO_MUX_EN` (active-low, `gd32-bridge-gpio` line 12) high; re-read the flag. The mux is **write-only**: reading the pad reconfigures it (#2701). `SDIO_MUX_SEL` is never touched. A unit already on the eMMC still SETs the flag and skips only the cold cycle. Precondition: the GD32 runs from slot A; a SET from slot B is refused with `NOSUPPORT` (`0x06`, docs/gd32-bridge-protocol.md 3.19), so OTA the same image into slot A first. The flag keeps the SD out across the cold cycles of `cold_boot_test`; the mux write alone would not survive a power cycle |
+| `sd_out_emmc_boot` | no operator. On the provisioning SD Linux: persist the GD32 `BOOT_CONFIG` flag `SDMUX_EN_HIGH` (bridge I2C `0x70`, opcode `0x42`; the SET moves no pad until the next GD32 reset, so it cannot pull the root) and wait until a GET returns it; cold-boot into the eMMC Linux (refused if the root is still `mmcblk1`); drive IO29 `SDIO_MUX_EN` (active-low, `gd32-bridge-gpio` line 12) high; re-read the flag. The mux is **write-only**: reading the pad reconfigures it (#2701). `SDIO_MUX_SEL` is never touched. A unit already on the eMMC still SETs the flag and skips only the cold cycle. Precondition: the GD32 runs from slot A; a SET from slot B is refused with `NOSUPPORT` (`0x06`, docs/gd32-bridge-protocol.md 3.19), so OTA the same image into slot A first. The flag keeps the SD out across the cold cycles of `cold_boot_test`; the mux write alone would not survive a power cycle. **GD32 without `BOOT_CONFIG`:** the released v0.3.0 (protocol 0.14.0) answers `NOSUPPORT`. On a protocol below 0.15.0 the step then takes the operator path: it prompts (halt, power OFF, physically REMOVE the microSD), cold-boots, and passes only when Linux root is not `mmcblk1` and `/sys/bus/mmc/devices` shows no `SD` card and an `MMC` (eMMC) one. A non-interactive run (no operator on stdin), or a unit whose root is already the eMMC, needs `--sd-removed-by-operator` (the operator removed the card and the unit booted from the eMMC); the same evidence check applies. `NOSUPPORT` from a protocol 0.15.0+ GD32 stays an error. Evidence: `sd_out_method` (`gd32-boot-config` or `operator-removed`), plus `gd32_protocol` and `sd_out_evidence` (root device and the enumerated mmc devices) on the operator path |
 | `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, ACT88760 reg `0x10` after boot, I2C scans (GD32 exempted only while `0x10` still reads `0x88`). An `end0` without carrier (PHY latch, #2582) gets one extra cold cycle, noted as `end0_no_carrier_retries` in the step evidence (not a ledger key); it fails if `end0` is still down. With the `rtc_backup` fixture and N >= 2 it also sets the RTC from the host clock after the first cycle, so `functional_test` can judge `rtc_retention` |
-| `census_final` | the census again, on the unit as shipped (after the last cold boot: xSPI boot, eMMC root). Every key it reads replaces the first census's value. A key the first census recorded and this one could **not** produce (a census group that fails drops its keys) is set to `unread (not re-read by census_final)`, so a value read in the microSD boot never stands in for the shipping boot; an unread ship-required key blocks the ship check. The ACT88760 GPIO4 keys are `cold_boot_test`'s and are left alone |
+| `census_final` | the census again, on the unit as shipped (after the last cold boot: xSPI boot, eMMC root). Every key it reads replaces the first census's value. The secure page is re-read read-only (never written or locked) and its `secure_page_sha256` compared with `<serial>.secure-page.staged.bin`: equal gives `secure_page_state: written-verified` (a locked page stays `locked`); a differing or unstaged page is `unread (...)` and blocks the ship check. A key the first census recorded and this one could **not** produce (a census group that fails drops its keys) is set to `unread (not re-read by census_final)`, so a value read in the microSD boot never stands in for the shipping boot; an unread ship-required key blocks the ship check. The ACT88760 GPIO4 keys are `cold_boot_test`'s and are left alone |
 | `clkgen_verify` | the on-SoM 5L35023B (`BRD_I2C`, `0x69`) OTP image against U-Boot's fixup |
 | `rtc_set` | the RV-3028-C7: system time from this host (UTC), `hwclock -w`, read back (within 30 s of the host, else refused); backup switchover to level mode through the driver's `RTC_PARAM_SET`; trickle read back |
 | `functional_test` | every interface the tool can reach, on the unit as shipped: one generated script, one remote invocation, one `test_ft_<check>` value per check; a failing or unreadable check fails the step unless it is listed informational, and only `test_functional: pass` ships. See "Functional test coverage" |
@@ -401,20 +401,25 @@ no Enter to a unit at a U-Boot prompt, in the SCIF ROM / Flash Writer, or halted
 
 The on-SoM Renesas 5L35023B (`BRD_I2C` / Linux `i2c-8` on the reference
 bench, 7-bit `0x69`) ships with a fixed factory OTP image that cannot be
-re-burned in-system. U-Boot patches 0007 (#2293) and 0012 rewrite reg `0x1f`
-(`0xc7`, SE2 = 24.576 MHz for the GD32 HXTAL), `0x21` (`0xc0`) and `0x24`
-(`0x8f`) every boot (a volatile fixup, not an OTP change); the step reads reg
+re-burned in-system. U-Boot patches 0007 (#2293) and 0013 (SE2 / GD32 HXTAL) rewrite reg `0x1f`
+(`0xc7`, SE2 = 24.576 MHz), `0x21` (`0xc0`) and `0x24`
+(`0x8f`) every boot (a volatile fixup, not an OTP change); a bundle built before
+patch 0013 (e.g. som-0.2.2) writes only patch 0007's `0x21` = `0xc0`, `0x24` = `0x8e` and
+leaves `0x1f` at OTP `0x46`. The expectation is therefore pinned per bundle: an optional
+`clkgen_fixup_regs` map (register -> value, hex or decimal) in the `--functest-expect`
+overlay replaces the tool's default (`0x1f: 0xc7, 0x21: 0xc0, 0x24: 0x8f`); absent means the
+default, a malformed map refuses the step. The step reads reg
 `0x00..0x24` **one byte at a time** (`i2cget`, never a combined
 `i2ctransfer` read -- this part bit-slips on those), compares against the
-OTP image with `0x1f`/`0x21`/`0x24` expected at their post-fixup values
-(and reports `SE2 24.576 MHz` in the step detail), and
+OTP image with the fixup registers expected at their post-fixup values, and
 confirms the boot console showed U-Boot's own `ALP: 5L35023B clock:` line.
 **A boot log without that line means the unit's U-Boot lacks patch 0007
 (#2293)** -- the step keeps failing (a production unit without the fixup is
 a real defect, not a soft warning it can look past). Ledger facts:
 `clkgen_otp_raw` (all 37 bytes as read, hex), `clkgen_i2c_addr`,
 `clkgen_uboot_fixup` (`seen: <the boot-log line>`, or `unread (...)` when no
-boot console was captured).
+boot console was captured), `clkgen_fixup_source` (`default (...)` or
+`functest-expect overlay clkgen_fixup_regs`, with the register values judged against).
 
 ### `dxm1_npu_flash`: the DX-M1 NPU firmware (V2M only)
 
@@ -663,7 +668,7 @@ scan works while `bluetoothd` runs, is unverified.**
 
 All pass criteria live in `scripts/provision/functest-expect-v2n.yaml`; the code holds the
 commands only. `--functest-expect FILE` (private, like `--pmic-expect`) is merged over it key by
-key, e.g. to pin the xSPI JEDEC ID, the remaining regulator output codes, a tighter band, or to
+key (it also carries `clkgen_fixup_regs`, read by `clkgen_verify`), e.g. to pin the xSPI JEDEC ID, the remaining regulator output codes, a tighter band, or to
 move a check in or out of `informational`. Values that already have a home are read there and
 not repeated: DRAM and eMMC size and the I2C addresses from the SoM preset, the CPU count from
 the SoC description, the carrier's devices and shunt resistors from `metadata/boards/<carrier>.yaml`,

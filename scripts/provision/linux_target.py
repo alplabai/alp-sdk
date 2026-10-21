@@ -724,6 +724,10 @@ def gd32_boot_config_cmd(bus: int, flags: int | None = None, addr: int = 0x70) -
     return xfer_cmd(bus, addr, b"\x00" + body + bytes((crc & 0xFF, crc >> 8)), 7, force=True)
 
 
+class Gd32NoSupport(BenchError):
+    """The GD32 answered BOOT_CONFIG with status 0x06 (NOSUPPORT)."""
+
+
 def gd32_parse_boot_config(out: str) -> int:
     """The stored flag word of a BOOT_CONFIG reply (on a SET: the value before the commit)."""
     rsp = _parse_bytes(out, 7)
@@ -731,7 +735,8 @@ def gd32_parse_boot_config(out: str) -> int:
         hint = (" (NOSUPPORT: GD32 firmware predates the opcode, a build without the flash HAL, a "
                 "single-bank part, or the GD32 is running from slot B; if it is on slot B, OTA the "
                 "same image into slot A, then retry)") if rsp[0] == 0x06 else ""
-        raise BenchError(f"GD32 BOOT_CONFIG status {rsp[0]:#04x}{hint}")
+        raise (Gd32NoSupport if rsp[0] == 0x06 else BenchError)(
+            f"GD32 BOOT_CONFIG status {rsp[0]:#04x}{hint}")
     if _crc16_ccitt_false(rsp[:5]) != rsp[5] | rsp[6] << 8:
         raise BenchError(f"GD32 BOOT_CONFIG reply CRC mismatch: {rsp.hex(' ')}")
     return int.from_bytes(rsp[1:5], "little")
@@ -757,6 +762,13 @@ def gd32_sd_out_flag_set(t: LinuxTarget, bus: int, addr: int = 0x70) -> int:
         except BenchError:
             pass                              # the commit blacks the link out for ~40 ms
     raise BenchError(f"GD32 BOOT_CONFIG never read back {want:#010x} after the SET")
+
+
+def mmc_devices(t: LinuxTarget) -> dict[str, str]:
+    """Every card the kernel has enumerated: {mmc0:0001: "MMC", ...} (sysfs `type`: MMC / SD / SDIO)."""
+    out = t.run("for d in /sys/bus/mmc/devices/*; do [ -e \"$d/type\" ] && "
+                "echo \"$(basename $d) $(cat $d/type)\"; done; true", check=False).stdout
+    return {p[0]: p[1] for p in (ln.split() for ln in out.splitlines()) if len(p) == 2}
 
 
 def i2c_scan(t: LinuxTarget, bus: int, span: tuple[int, int] | None = None,
@@ -837,19 +849,50 @@ def clkgen_read_image(t: LinuxTarget, bus: int) -> bytes:
     return bytes(i2c_get(t, bus, CLKGEN_5L35023B_ADDR, reg) for reg in range(CLKGEN_REG_COUNT))
 
 
-def _clkgen_expected() -> bytes:
+def _clkgen_expected(fixup: dict[int, int] | None = None) -> bytes:
     img = bytearray(CLKGEN_OTP_IMAGE)
-    for reg, val in CLKGEN_FIXUP_REGS.items():
+    for reg, val in (CLKGEN_FIXUP_REGS if fixup is None else fixup).items():
         img[reg] = val
     return bytes(img)
 
 
-def clkgen_diff(image: bytes) -> list[str]:
-    """Mismatches of `image` against the OTP image with the U-Boot fixup
-    applied. [] means the image is exactly what a provisioned unit should read."""
+def clkgen_fixup_from_expect(expect: dict | None) -> dict[int, int] | None:
+    """The per-bundle `clkgen_fixup_regs` (reg -> value) of the functest-expect overlay, or None
+    when the key is absent (the caller then uses CLKGEN_FIXUP_REGS). A bundle built before a
+    U-Boot clkgen patch landed (e.g. som-0.2.2: only patch 0007, 0x1F stays at OTP 0x46) is
+    judged against what ITS U-Boot writes. Malformed -> ValueError, never a silent default."""
+    if not expect or "clkgen_fixup_regs" not in expect:
+        return None
+    raw = expect["clkgen_fixup_regs"]
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError("clkgen_fixup_regs: want a non-empty mapping of register -> value")
+
+    def num(x, what, hi):
+        if isinstance(x, bool) or not isinstance(x, (int, str)):
+            raise ValueError(f"clkgen_fixup_regs: {what} {x!r} is not an integer")
+        try:
+            n = int(x, 0) if isinstance(x, str) else x
+        except ValueError:
+            raise ValueError(f"clkgen_fixup_regs: {what} {x!r} is not an integer") from None
+        if not 0 <= n <= hi:
+            raise ValueError(f"clkgen_fixup_regs: {what} {x!r} out of range 0..{hi:#x}")
+        return n
+
+    out: dict[int, int] = {}
+    for k, v in raw.items():
+        reg = num(k, "register", CLKGEN_REG_COUNT - 1)
+        if reg in out:
+            raise ValueError(f"clkgen_fixup_regs: register {reg:#04x} given twice")
+        out[reg] = num(v, f"value of reg {reg:#04x}", 0xFF)
+    return out
+
+
+def clkgen_diff(image: bytes, fixup: dict[int, int] | None = None) -> list[str]:
+    """Mismatches of `image` against the OTP image with the U-Boot fixup applied (`fixup`, else
+    CLKGEN_FIXUP_REGS). [] means the image is exactly what a provisioned unit should read."""
     if len(image) != CLKGEN_REG_COUNT:
         raise ValueError(f"clkgen image must be {CLKGEN_REG_COUNT} bytes, got {len(image)}")
-    want = _clkgen_expected()
+    want = _clkgen_expected(fixup)
     return [f"reg {i:#04x}: {image[i]:#04x} != {want[i]:#04x}"
             for i in range(CLKGEN_REG_COUNT) if image[i] != want[i]]
 
