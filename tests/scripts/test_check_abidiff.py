@@ -142,3 +142,13 @@ def test_skip_warns_in_ci(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["x"])
     assert mod.main() == 0
     assert "::warning" in capsys.readouterr().out
+
+
+def test_no_minor_tag_warns_under_require_tool(tmp_path, monkeypatch, capsys):
+    _wire(tmp_path, monkeypatch, 0, "")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(mod.subprocess, "run",
+                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""))
+    monkeypatch.setattr("sys.argv", ["x", "--root", str(tmp_path), "--require-tool"])
+    assert mod.main() == 0
+    assert "::warning" in capsys.readouterr().out

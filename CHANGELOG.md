@@ -9,7 +9,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Fixed — abidiff gate honesty (#2851)
 
-**The `abidiff` gate is advisory, and now says so.** It is not a required context and `pr-plain-cmake.yml` has no `merge_group:` trigger, so a red run blocks nothing (maintainer decision: stays advisory). The SONAME-rename suppression no longer masks an abidiff error (applied only when the exit status has no ABI_ERROR/USAGE bit), every skip (tool missing, no tag of the current minor) emits a `::warning::` in CI or under `--require-tool`, and a fixture-backed test covers the SONAME-only report shape.
+**The `abidiff` gate is advisory, and now says so.** It is not a required context and `pr-plain-cmake.yml` has no `merge_group:` trigger, so a red run blocks nothing (maintainer decision: stays advisory). The SONAME-rename suppression no longer masks an abidiff error (applied only when the exit status has no ABI_ERROR/USAGE bit), every skip (tool missing, no tag of the current minor) emits a `::warning::` in CI or under `--require-tool`, and a test covers the SONAME-only report shape against a synthetic fixture (hand-written in the shape `soname_only()` parses, not a real capture; a recorded `check_abidiff.py --baseline-tag v0.17.0-rc2 --keep` run on a host with abigail-tools is still pending, #2851).
 
 ### Fixed — provisioning checks are pinned to the bundle being provisioned, and the released GD32 v0.3.0 no longer dead-ends a unit
 
