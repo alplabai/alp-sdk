@@ -246,13 +246,13 @@ def test_sibling_recipe_without_shared_pv_fails(tmp_path):
     r = tmp_path / "meta-alp-sdk/recipes-core/alp-chips/alp-chips_0.6.bb"
     r.parent.mkdir(parents=True)
     src = 'SRC_URI = "git://github.com/alplabai/alp-sdk.git;branch=main"\n'
-    r.write_text(src + 'PV = "0.6.0"\n')
+    r.write_text(src + 'PV = "0.6.0"\n', encoding="utf-8")
     assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
-    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\n")
+    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\n", encoding="utf-8")
     assert mod.check_sibling_recipes_use_shared_pv(tmp_path) == []
-    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\nPV = \"0.6.0\"\n")
+    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\nPV = \"0.6.0\"\n", encoding="utf-8")
     assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
-    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\nPV ?= \"0.6.0\"\n")
+    r.write_text(src + "require recipes-core/alp-sdk/alp-sdk-version.inc\nPV ?= \"0.6.0\"\n", encoding="utf-8")
     assert mod.check_sibling_recipes_use_shared_pv(tmp_path)
 
 
