@@ -22,7 +22,9 @@ LIC_FILES_CHKSUM = "file://../../../LICENSE;md5=787726818c896f394f6627ab59d98d69
 # Same pinning pattern as alp-perception (floats on edge; release builds repin).
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=main"
 SRCREV  = "${AUTOREV}"
-PV      = "0.6.0"
+require recipes-core/alp-sdk/alp-sdk-version.inc
+# Links the per-machine libalp_sdk.so, so must not be shared across machines (#2850).
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 S = "${WORKDIR}/git/examples/v2n/v2n-ros2-som-temperature"
 
