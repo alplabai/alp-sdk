@@ -4,8 +4,8 @@
 #
 # E1M-V2M101 on-module PMICs on BRD_I2C (i2c-8): ACT88760 at 0x25 and
 # DA9292 at 0x1E each ACK a 1-byte read (the same bare read
-# examples/v2n/v2n-brd-i2c-bringup uses).  Both addresses are bench-observed
-# on V2M101.  -f because a kernel driver may already own an address.  Read-only:
+# examples/v2n/v2n-brd-i2c-bringup uses).  Both addresses are observed on the
+# V2M103 bench unit (not yet on V2M101).  -f because a kernel driver may already own an address.  Read-only:
 # nothing is written to either PMIC.
 
 schema_version: 1

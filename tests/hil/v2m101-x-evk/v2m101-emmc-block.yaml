@@ -2,7 +2,7 @@
 # NOT BENCH-VERIFIED on E1M-V2M101: derived from the v2m103 spec of the same name
 # (v2m103-x-evk); the SoM preset populates the same hardware.  UNVERIFIED on a V2M101 unit.
 #
-# E1M-V2M101 eMMC (SD0, 16 GB): /dev/mmcblk0 exists, the host runs
+# E1M-V2M101 eMMC (SD0, 32 Gbit): /dev/mmcblk0 exists, the host runs
 # HS200 timing on mmcblk0's own host (RZ/V2N SDHI cannot run HS400; HS200 is
 # the ceiling), no `mmc_select_hs200 failed` in dmesg, and a 64 MiB sequential read from the
 # block device completes.  Strictly read-only: dd only ever reads.
