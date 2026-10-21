@@ -78,6 +78,9 @@ extern alp_som_bench_knobs_t alp_som_bench_knobs;
 #define ALP_SOM_ARM_RTC_TIMER 0x00000002u /**< RV-3028 countdown the SDK started. */
 #define ALP_SOM_ARM_RTC_INT   0x00000004u /**< RV-3028 /INT -> P15_0 armed by the caller. */
 #define ALP_SOM_ARM_LPGPIO    0x00000008u /**< One or more LPGPIO wake pads (P15_n) armed. */
+#define ALP_SOM_ARM_RTC_EVI   0x00000010u /**< RV-3028 EVI event (EIE) armed (#2811). */
+/** Any wake path that reaches the SoC through the RV-3028 /INT -> P15_0 pad. */
+#define ALP_SOM_ARM_RTC_ANY (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT | ALP_SOM_ARM_RTC_EVI)
 /** LPGPIO wake pads, one bit per line n of P15_n.  armed_hw bits 23:16 hold the pads this
  *  cycle armed (the STOP backend writes them).  Bits 15:9 and 31:24 stay free. */
 #define ALP_SOM_ARM_PADS_SHIFT 16u
@@ -322,8 +325,8 @@ uint32_t alp_som_power_lpgpio_claimed(void);
 alp_status_t alp_som_power_rtc_int_armed(bool *armed);
 
 /** RV-3028 interrupt service by devicetree I2C: reports the enabled, latched
- *  countdown / alarm flags (RV3028C7_WAKE_TF / _AF layout: 0x08 / 0x04) and
- *  clears every latched TF / AF / UF.  Needs no chip context, so it runs on the
+ *  countdown / alarm flags (RV3028C7_WAKE_TF / _AF / _EVF layout: 0x08 / 0x04 / 0x02) and
+ *  clears every latched TF / AF / UF (and EVF, when EIE is on).  Needs no chip context, so it runs on the
  *  cold-boot wake path. */
 alp_status_t alp_som_power_rtc_wake_service(uint8_t *flags);
 
@@ -351,6 +354,14 @@ bool alp_som_power_reset_syndrome_trusted(void);
 /** True when an enabled RV-3028 countdown / alarm flag (TF / AF) is already latched.
  *  Read only: nothing is cleared, so the wake decode still sees it. */
 alp_status_t alp_som_power_rtc_flags_pending(bool *pending);
+
+/** Arm the RV-3028 external-event wake (#2811): with EIE still off, write 0 to a stale EVF, then
+ *  set EIE (CONTROL_2 10h bit 2) so an EVI event drives /INT.  Event Control (13h) is not
+ *  written: its power-on value is the one this relies on (see alif_se_power.c). */
+alp_status_t alp_som_power_rtc_evi_arm(void);
+
+/** Clear EIE again and write 0 to EVF.  Idempotent. */
+alp_status_t alp_som_power_rtc_evi_disarm(void);
 
 /** Clear a stale UF (time-update flag) when UIE is off; nothing else is touched. */
 alp_status_t alp_som_power_rtc_clear_stale_uf(void);

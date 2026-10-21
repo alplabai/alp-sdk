@@ -152,6 +152,10 @@ typedef enum {
 #define ALP_POWER_WAKE_ETH_LINK   0x00000020u /**< Ethernet link-up / WoL packet. */
 #define ALP_POWER_WAKE_COMPARATOR 0x00000040u /**< Analog comparator threshold (e.g. LPCMP). */
 #define ALP_POWER_WAKE_BROWNOUT   0x00000080u /**< Brown-out / under-voltage detect. */
+#define ALP_POWER_WAKE_EXT_EVENT \
+	0x00000100u /**< External-event input of the on-module RTC (a carrier / radio
+                                                   signal on the RV-3028 EVI pin), reported separately from
+                                                   @ref ALP_POWER_WAKE_RTC.  Alif SoM backend only. */
 
 /** Information returned by @ref alp_power_request_sleep about how the
  *  sleep round-trip resolved. */

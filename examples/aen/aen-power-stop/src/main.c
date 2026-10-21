@@ -45,6 +45,7 @@
  *     1    LPTIMER, 500 ms                      ALP_POWER_WAKE_TIMER
  *     2    RV-3028 countdown, 3 s               ALP_POWER_WAKE_RTC
  *     3    RV-3028 alarm (next minute change)   ALP_POWER_WAKE_RTC
+ *          (variant E: EVI event on MODULE_STBY)   ALP_POWER_WAKE_EXT_EVENT
  *
  * A timed wake under 1 s uses the LPTIMER; from 1 s up it uses the RV-3028
  * countdown, because the internal low-frequency clock is not trustworthy (the SES
@@ -169,7 +170,21 @@ typedef struct {
 
 /* The countdown is the RV-3028's only if the backend does not route it to the LPTIMER. */
 BUILD_ASSERT(CONFIG_AEN_STOP_RTC_MS >= 1000, "the countdown cycle must be at least 1 s");
+#ifdef CONFIG_AEN_STOP_EVI_CYCLE
+/* Variant (E): the third cycle waits for an external event on the RV-3028 EVI pin instead of
+ * the alarm (#2811).  Pull MODULE_STBY (E1.O2) low within the timeout: from the CC3501E
+ * (GPIO18 on E1.I3, open-drain) or, on the bench, a jumper wire to GND (EVK header P14 pin 2).
+ * The countdown is only a safety net so an unwired board does not sleep for ever; if IT is
+ * what wakes the SoC, wake_source reads ALP_POWER_WAKE_TIMER and the verdict is FAIL. */
+#define ALARM_CYCLE \
+	{ "RV-3028 EVI event (" STRINGIFY(CONFIG_AEN_STOP_EVI_TIMEOUT_MS) " ms safety timer)", \
+	  ALP_POWER_WAKE_EXT_EVENT | ALP_POWER_WAKE_TIMER, \
+	  CONFIG_AEN_STOP_EVI_TIMEOUT_MS, \
+	  ALP_POWER_WAKE_EXT_EVENT, \
+	  false }
+#else
 #define ALARM_CYCLE { "RV-3028 alarm", ALP_POWER_WAKE_RTC, 0u, ALP_POWER_WAKE_RTC, true }
+#endif
 
 static const cycle_t cycles[N_CYCLES] = {
 #ifdef CONFIG_AEN_STOP_FIRST_RTC

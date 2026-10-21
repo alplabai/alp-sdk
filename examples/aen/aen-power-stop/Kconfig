@@ -12,6 +12,22 @@ config AEN_STOP_FIRST_RTC
 	  wakes and the LPTIMER one does not, the RV-3028 INT path is sound and the
 	  LPTIMER path is the suspect (and the reverse).
 
+config AEN_STOP_EVI_CYCLE
+	bool "Variant (E): the third cycle wakes on an RV-3028 EVI event (MODULE_STBY)"
+	help
+	  Replaces the alarm cycle with ALP_POWER_WAKE_EXT_EVENT (#2811).  Needs MODULE_STBY
+	  (E1.O2, the RV-3028 EVI pin) driven low during the cycle: by the CC3501E GPIO18 (E1.I3)
+	  joined to E1.O2 on the carrier, or by a jumper wire to GND on the EVK (header P14,
+	  pin 1 = MODULE_STBY, pin 2 = GND).  Bench-pending.
+
+config AEN_STOP_EVI_TIMEOUT_MS
+	int "Variant (E): safety countdown behind the EVI cycle (ms)"
+	default 30000
+	help
+	  The RV-3028 countdown armed next to EVI so an undriven pin does not park the board.
+	  Must be at least 1000 (RV-3028 countdown, not the LPTIMER).  If it is what wakes the
+	  SoC the cycle fails.
+
 config AEN_STOP_LPTIMER_MS
 	int "LPTIMER cycle interval (ms)"
 	default 500
