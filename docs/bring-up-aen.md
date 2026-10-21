@@ -100,6 +100,12 @@ PMIC's `EVENT_00` status register over BRD_I2C.
 
 ## 2. SWD probe attach
 
+> On the E1M EVK 2641-R3 the on-board RP2040 (`U55`, CMSIS-DAP) is the
+> primary debug probe and J-Link is the optional alternative
+> ([`aen-rp2040-debug-probe.md`](aen-rp2040-debug-probe.md)). The RP2040 path
+> is not bench-verified and its attach steps are TBD; the J-Link steps below
+> are the proven ones.
+
 1. Wire the SWD probe to the board's debug header
    (SWDIO/SWCLK/nRST/GND).  Power the board (probe stays
    unpowered; standard 1.8/3.3 V level convention applies).
