@@ -203,8 +203,10 @@ def test_sd_out_flag_with_a_root_that_is_not_the_emmc_refuses(tmp_path, monkeypa
     assert "cold" not in log
 
 
-def test_sd_out_nosupport_on_a_new_protocol_is_a_real_fault(tmp_path, monkeypatch):
-    ctx, log, _ = _sd_out(tmp_path, monkeypatch, ["/dev/mmcblk1p2"], {}, proto=(0, 15, 0),
+@pytest.mark.parametrize("proto", [(0, 14, 1), (0, 15, 0)])
+def test_sd_out_nosupport_on_a_new_protocol_is_a_real_fault(tmp_path, monkeypatch, proto):
+    # v0.3.1 (0.14.1) carries BOOT_CONFIG, so its NOSUPPORT means slot B or a single-bank part
+    ctx, log, _ = _sd_out(tmp_path, monkeypatch, ["/dev/mmcblk1p2"], {}, proto=proto,
                           sd_removed_by_operator=True)
     with pytest.raises(lt.Gd32NoSupport):
         steps.SdOutEmmcBoot().run(ctx)

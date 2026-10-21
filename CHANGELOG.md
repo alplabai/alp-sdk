@@ -11,9 +11,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 **`clkgen_verify` judges the bundle's own U-Boot fixup.** The expected 5L35023B registers were the tool tree's (`0x1f` = `0xc7`, patch 0013), so a unit from a bundle built before patch 0013 (som-0.2.2: `0x1f` stays at OTP `0x46`, `0x24` = `0x8e`) failed against a U-Boot it does not run. An optional `clkgen_fixup_regs` map in the `--functest-expect` overlay (quoted hex strings, plus `bundle: {sku, release_version}` naming the bundle it applies to) now pins the expectation per bundle; absent keeps the default, a malformed map or a different bundle refuses the step, and the evidence key `clkgen_fixup_source` records which one was used.
 
-**`sd_out_emmc_boot` has an operator path for a GD32 without `BOOT_CONFIG`.** The released v0.3.0 (protocol 0.14.0) answers `NOSUPPORT`; on a protocol below 0.15.0 the step now prompts the operator to power off and remove the microSD (a non-interactive run, or a unit already on the eMMC, takes `--sd-removed-by-operator` instead; the tool still halts and cold-cycles), and passes only with an eMMC root and no `SD` card enumerated. Evidence key `sd_out_method` is `gd32-boot-config` or `operator-removed`.
+**`sd_out_emmc_boot` has an operator path for a GD32 without `BOOT_CONFIG`.** The released v0.3.0 (protocol 0.14.0) answers `NOSUPPORT`; on a protocol below 0.14.1 (`BOOT_CONFIG` ships from GD32 v0.3.1, protocol 0.14.1) the step now prompts the operator to power off and remove the microSD (a non-interactive run, or a unit already on the eMMC, takes `--sd-removed-by-operator` instead; the tool still halts and cold-cycles), and passes only with an eMMC root and no `SD` card enumerated. Evidence key `sd_out_method` is `gd32-boot-config` or `operator-removed`.
 
 **`census_final` no longer leaves `secure_page_state` unread.** A written, unlocked secure page was dropped by the final census and marked `unread`, so a fully provisioned unit could not pass the ship check. The page is re-read read-only and compared with `<serial>.secure-page.staged.bin`; it is never written or locked.
+
+### Fixed — the functest finds the OPTIGA Trust M, and `BOOT_CONFIG` is documented at protocol 0.14.1
+
+**`secure_element` no longer misses a healthy OPTIGA.** The part sleeps about 10 ms after a completed read and NACKs its address once; that NACK wakes it for only about 8 ms. The probe slept 50 ms after every NACK, so all 100 tries landed on a sleeping part and every V2M103 unit failed the check (waived for som-0.2.2). The retry now follows the NACK at once, and an all-`0xff` read (seen with other traffic on `BRD_I2C`) counts as no answer instead of a pass (bench timing on 2026W38-0009; `SE_RST` polarity confirmed correct).
+
+**`BOOT_CONFIG` (`0x42`) is protocol 0.14.1.** GD32 firmware v0.3.1 ships the opcode on its own as a patch release; docs/gd32-bridge-protocol.md §3.19 now says so and adds the record-page addresses, the slot-B limit and the hold dropping during a GD32 reset. A `NOSUPPORT` from a 0.14.1+ bridge is a real fault in `sd_out_emmc_boot`. Text that called the unreleased protocol-0.15 bench build "firmware 0.3.1" now says the protocol-0.15 line.
 
 ## [v0.17.0] - 2026-10-13
 

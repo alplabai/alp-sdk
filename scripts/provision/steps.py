@@ -2141,7 +2141,7 @@ class SdOutEmmcBoot(Step):
             root = lt.root_device(t)
             if "mmcblk1" in root:
                 raise Refused(f"Linux root {root} is still the microSD after the cold cycle: "
-                              "the SD-out flag did not take (GD32 firmware older than protocol 0.15?)")
+                              "the SD-out flag did not take (GD32 firmware without BOOT_CONFIG, older than v0.3.1 / protocol 0.14.1?)")
         ctx.mutate("drive IO29 SDIO_MUX_EN high (SD disconnected), write-only",
                    lambda: lt.sdio_mux_set(t, False))
         flags = lt.gd32_boot_config(t, bus, None, GD32_BRIDGE_ADDR)
@@ -2152,12 +2152,12 @@ class SdOutEmmcBoot(Step):
                                 "SD-out flag persisted", ev)
 
 
-    # The released GD32 v0.3.0 speaks protocol 0.14.0 and answers BOOT_CONFIG with NOSUPPORT.
-    # 0.15.0 is NOT a clean boundary (a feat/protocol-0.15 build reports 0.15.0 without the
-    # opcode), so the gate fails closed: only a protocol BELOW 0.15.0 takes the operator path. A
-    # NOSUPPORT from anything newer is a real fault (slot B, no flash HAL, unreleased build): the
-    # operator stops and reports the GD32 build, nothing is overridden.
-    BOOT_CONFIG_MIN_PROTOCOL = (0, 15, 0)
+    # BOOT_CONFIG first shipped in GD32 v0.3.1 (protocol 0.14.1); v0.3.0 (0.14.0) answers it
+    # with NOSUPPORT. Only a protocol BELOW 0.14.1 takes the operator path. A NOSUPPORT from
+    # 0.14.1 or newer is a real fault (slot B, single-bank part, no flash HAL, or a
+    # protocol-0.15 build without the opcode): the operator stops and reports the GD32 build,
+    # nothing is overridden.
+    BOOT_CONFIG_MIN_PROTOCOL = (0, 14, 1)
 
     @staticmethod
     def _sd_cards(cards):
