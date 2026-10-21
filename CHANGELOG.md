@@ -19,6 +19,10 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 **`secure_element` no longer misses a healthy OPTIGA.** The part sleeps about 10 ms after a completed read and NACKs its address once; that NACK wakes it for only about 8 ms. The probe slept 50 ms after every NACK, so all 100 tries landed on a sleeping part and every V2M103 unit failed the check (waived for som-0.2.2). The retry now follows the NACK at once, and an all-`0xff` read (seen with other traffic on `BRD_I2C`) counts as no answer instead of a pass (bench timing on 2026W38-0009; `SE_RST` polarity confirmed correct).
 
+**`gd32_flash` no longer passes a GD32 that boots the wrong slot.** It wrote only the 44-byte OTA metadata record, so on a unit with OTA history an older, higher-counter record in the other metadata pages still won and the bootloader fell back to the image left in slot B, while the md5 readback and `GET_VERSION` (same protocol) passed (2026W38-0009). The step now erases the whole 8 KB metadata area before writing the record, reads it back in full, and requires slot A running the build-id embedded in `slot-a.bin`. Probes gain an `erase ADDR SIZE` operation.
+
+**Re-provisioning a unit whose GD32 holds the microSD out works.** `boot_sd_linux` refused such a unit (`Linux root ... is on the eMMC, not the microSD`): the `SDMUX_EN_HIGH` flag from its first run kept U-Boot from seeing the card. The step now clears the flag before its cold cycle when root is the eMMC.
+
 **`BOOT_CONFIG` (`0x42`) is protocol 0.14.1.** GD32 firmware v0.3.1 ships the opcode on its own as a patch release; docs/gd32-bridge-protocol.md §3.19 now says so and adds the record-page addresses, the slot-B limit and the hold dropping during a GD32 reset. A `NOSUPPORT` from a 0.14.1+ bridge is a real fault in `sd_out_emmc_boot`. Text that called the unreleased protocol-0.15 bench build "firmware 0.3.1" now says the protocol-0.15 line.
 
 ## [v0.17.0] - 2026-10-13

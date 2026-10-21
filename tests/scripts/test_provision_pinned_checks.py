@@ -276,3 +276,38 @@ def test_census_final_flags_a_page_that_differs_from_the_staged_blob(tmp_path):
 def test_census_final_without_a_staged_blob_stays_unread(tmp_path):
     res, _ = _final(tmp_path, None)
     assert res.evidence["secure_page_state"].startswith("unread (") and "staged.bin" in res.evidence["secure_page_state"]
+
+
+# --- boot_sd_linux on a unit whose GD32 already holds the microSD out -----------------------
+
+def _hold(tmp_path, monkeypatch, root, flags):
+    calls: list[tuple] = []
+
+    def cfg(t, bus, f, addr):
+        if isinstance(flags, Exception):
+            raise flags
+        return flags
+    monkeypatch.setattr(steps.lt, "root_device", lambda t: root)
+    monkeypatch.setattr(steps.lt, "resolve_emmc", lambda t: EMMC)
+    monkeypatch.setattr(steps.lt, "gd32_boot_config", cfg)
+    monkeypatch.setattr(steps.lt, "gd32_sd_out_flag_set",
+                        lambda t, bus, addr, on=True: calls.append(("set", on)) or 0)
+    ctx = _ctx(tmp_path, bench=_bench(), linux=Board(), execute=True)
+    ev: dict[str, str] = {}
+    steps.BootSdLinux._release_sd_hold(ctx, ev)
+    return calls, ev
+
+
+def test_boot_sd_clears_a_held_sd_out_flag_on_an_emmc_root(tmp_path, monkeypatch):
+    calls, ev = _hold(tmp_path, monkeypatch, "/dev/mmcblk0p2", lt.GD32_BOOT_CONFIG_SDMUX_EN_HIGH)
+    assert calls == [("set", False)] and ev["gd32_boot_config_cleared"] == "SDMUX_EN_HIGH"
+
+
+@pytest.mark.parametrize("root, flags", [
+    ("/dev/mmcblk0p2", 0),                                   # nothing held
+    ("/dev/mmcblk1p2", lt.GD32_BOOT_CONFIG_SDMUX_EN_HIGH),   # already on the SD: leave the flag
+    ("/dev/mmcblk0p2", lt.Gd32NoSupport("NOSUPPORT")),       # v0.3.0 holds nothing
+])
+def test_boot_sd_leaves_the_flag_alone_otherwise(tmp_path, monkeypatch, root, flags):
+    calls, ev = _hold(tmp_path, monkeypatch, root, flags)
+    assert calls == [] and "gd32_boot_config_cleared" not in ev

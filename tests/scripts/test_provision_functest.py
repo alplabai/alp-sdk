@@ -1425,16 +1425,13 @@ def test_eth_phy_id_accepts_a_list_of_variants(tmp_path):
     assert "want 0x001cc916" in _val(_run(ctx2), "eth_phy_id")
 
 
-def test_optiga_probe_retries_inside_the_wake_window():
-    # the part stays awake ~8 ms after the NACK that wakes it: any sleep in the loop misses it
-    assert "sleep" not in functest._HIL_OPTIGA
-
-
 @pytest.mark.skipif(shutil.which("sh") is None, reason="no POSIX sh on this host")
 @pytest.mark.parametrize("read, acks", [("0xff 0xff 0xff 0xff", False), ("0x08 0x80 0x00 0x00", True)])
 def test_optiga_probe_rejects_an_all_ff_read(read, acks):
     # a contended bus returned 0xff x4 on 2026W38-0009: that must retry, not pass
     fake = 'i2ctransfer() { case "$*" in *r4@*) echo "%s";; esac; }\n' % read
+    # The probe loop is 100 tries of two i2ctransfer forks, a few ms each: under about 1 s, well
+    # inside the 12 s check timeout (it must not sleep: the part is awake ~8 ms after the wake NACK).
     script = functest._HIL_OPTIGA.replace("@BRD@", "8").replace("@ADDR@", "0x30")
     out = subprocess.run(["sh", "-c", fake + script], capture_output=True, text=True,
                          encoding="utf-8", check=False, timeout=60).stdout
