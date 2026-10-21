@@ -279,7 +279,7 @@ When off (the default) the build is unchanged. When on, the kernel deploys
 
 ## Dev-kit package feed (opkg)
 
-Dev boards can take `alp-sdk`, `alp-sdk-dev` and the example packages without a
+Dev boards can take `alp-sdk` and `alp-sdk-dev` without a
 reflash, from a **signed opkg feed** published per image release line and per
 machine. **Dev kits only: this is not a field-update channel.** Field devices
 stay on image-based A/B OTA (Mender).
@@ -317,13 +317,15 @@ as a base: unpack it and use `src/gz alp-devkit file:///path/to/feed` in a
 minor is part of the soname (`libalp_sdk.so.0.17`), so an upgrade cannot load an
 incompatible library into an app linked against the old one: moving to the next
 line means a new image, not `opkg upgrade`. The feed publishes only an
-allowlist of our packages (`alp-sdk`, `alp-sdk-dev`, the example packages,
+allowlist of our packages (`alp-sdk`, `alp-sdk-dev`,
 `alp-devkit-feed-config`) from the `all` and machine-arch dirs; it carries no
 tune-arch (`cortexa55`/`aarch64`) packages and no poky/BSP packages. It can
 therefore only **upgrade packages already in the image** whose dependencies are
-already installed: a package that adds a new dependency, or `alp-sdk-dev` and the
-examples when the image lacks their tune-arch RDEPENDS, cannot be resolved from
-it. The packager fails on an ipk name outside `[A-Za-z0-9._-]` and on more assets
+already installed: a package that adds a new dependency, or `alp-sdk-dev` when the
+image lacks its tune-arch RDEPENDS, cannot be resolved from it. The example
+packages are not published: they are tune-arch until their recipes become
+MACHINE_ARCH (#2850 item 2). The packager also fails when an allowlisted package
+is missing from the index or a stanza has no `SHA256sum:`. The packager fails on an ipk name outside `[A-Za-z0-9._-]` and on more assets
 than a GitHub release allows (1000).
 
 **Building and signing (release builder only).** Signing uses Yocto's

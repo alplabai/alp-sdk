@@ -33,7 +33,9 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 pubkey=$here/../keys/alp_devkit_feed_signing.pub.asc
 max_assets=1000   # GitHub per-release asset limit
-allow="alp-sdk alp-sdk-dev alp-devkit-feed-config alp-drpai-inference alp-edgeai alp-gpu2d-compose alp-lvgl-dashboard alp-two-models-inference"
+allow="alp-sdk alp-sdk-dev alp-devkit-feed-config"
+# The example packages (alp-edgeai, ...) are tune-arch (cortexa55) and cannot be
+# published until their recipes are MACHINE_ARCH (#2850 item 2).
 
 ipk_dir= machine= tag= out= key=2B7807E20B75B471BF88FD7AC9AB032782D3143B
 while [ $# -gt 0 ]; do
@@ -71,6 +73,16 @@ for a in all "$arch"; do
   done < <(sed -n 's/^Filename: //p' "$out/Packages.part")
   cat "$out/Packages.part" >> "$out/Packages"; rm "$out/Packages.part"
 done
+# Every allowlisted package must be in the merged index (a feed without alp-sdk
+# would sign and publish as an empty upgrade) and every stanza needs the
+# SHA256sum opkg verifies the ipk against (opkg is built with sha256).
+for n in $allow; do
+  grep -qx "Package: $n" "$out/Packages" || { echo "allowlisted package missing from the index: $n" >&2; exit 1; }
+done
+awk 'BEGIN { RS = ""; FS = "[\n]" }
+     { ok = 0; for (i = 1; i <= NF; i++) if ($i ~ /^SHA256sum: [0-9a-f]{64}$/) ok = 1
+       if (!ok) { print "stanza without SHA256sum: " $1 > "/dev/stderr"; bad = 1 } }
+     END { exit bad }' "$out/Packages"
 n_ipk=$(ls "$out"/*.ipk 2>/dev/null | wc -l)
 [ "$n_ipk" -gt 0 ] || { echo "no allowlisted ipks found" >&2; exit 1; }
 [ $((n_ipk + 4)) -le "$max_assets" ] || { echo "$n_ipk ipks exceed the $max_assets-asset release limit" >&2; exit 1; }

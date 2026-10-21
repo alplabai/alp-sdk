@@ -110,18 +110,19 @@ def _ipk_tree(tmp_path, extra=()):
         (ipk / arch).mkdir(parents=True)
         pk = [f"alp-sdk-{arch}", f"kernel-module-{arch}", *extra]
         (ipk / arch / "Packages").write_text(
-            "".join(f"Package: {n}\nFilename: {n}.ipk\n\n" for n in pk), encoding="utf-8")
+            "".join(f"Package: {n}\nFilename: {n}.ipk\nSHA256sum: {'0' * 64}\n\n" for n in pk), encoding="utf-8")
         for n in pk:
             (ipk / arch / f"{n}.ipk").write_bytes(b"x")
     return ipk
 
 
-def _pack(tmp_path, ipk, home, env, fpr, extra_args, name="out"):
+def _pack(tmp_path, ipk, home, env, fpr, extra_args, name="out",
+          allow="alp-sdk-all alp-sdk-e1m_v2n101_a55"):
     out = tmp_path / name
     r = subprocess.run(["bash", str(PACKAGER), "--ipk-dir", str(ipk), "--machine",
                         "e1m-v2n101-a55", "--tag", "feed-v0-e1m-v2n101-a55", "--out",
-                        str(out), "--gnupghome", str(home), "--key", fpr,
-                        "--allow", "alp-sdk-all alp-sdk-e1m_v2n101_a55 bad+name", *extra_args],
+                        str(out), "--gnupghome", str(home), "--key", fpr, "--allow", allow,
+                        *extra_args],
                        env=env, capture_output=True, text=True)
     return out, r
 
@@ -149,7 +150,7 @@ def test_packager_rejects_a_signature_the_committed_key_does_not_verify(tmp_path
 def test_packager_fails_on_a_special_character_ipk_name(tmp_path):
     home, env, fpr, pub = _gpg_env(tmp_path)
     _, r = _pack(tmp_path, _ipk_tree(tmp_path, extra=("bad+name",)), home, env, fpr,
-                 ["--pubkey", str(pub)])
+                 ["--pubkey", str(pub)], allow="alp-sdk-all alp-sdk-e1m_v2n101_a55 bad+name")
     assert r.returncode != 0 and "outside" in r.stderr
 
 
@@ -162,10 +163,39 @@ def test_packager_refuses_a_non_empty_out_dir(tmp_path):
     assert r.returncode == 2 and (tmp_path / "out" / "keep").exists()
 
 
+@pytest.mark.skipif(not HAVE_GPG, reason="needs gpg + bash")
+def test_packager_fails_when_an_allowlisted_package_is_missing(tmp_path):
+    home, env, fpr, pub = _gpg_env(tmp_path)
+    _, r = _pack(tmp_path, _ipk_tree(tmp_path), home, env, fpr, ["--pubkey", str(pub)],
+                 allow="alp-sdk-all alp-sdk-e1m_v2n101_a55 not-built")
+    assert r.returncode != 0 and "missing from the index" in r.stderr
+
+
+@pytest.mark.skipif(not HAVE_GPG, reason="needs gpg + bash")
+def test_packager_fails_on_a_stanza_without_sha256sum(tmp_path):
+    home, env, fpr, pub = _gpg_env(tmp_path)
+    ipk = _ipk_tree(tmp_path)
+    f = ipk / "all" / "Packages"
+    f.write_text(re.sub(r"SHA256sum: .*[\r\n]", "", f.read_text(encoding="utf-8")), encoding="utf-8")
+    _, r = _pack(tmp_path, ipk, home, env, fpr, ["--pubkey", str(pub)])
+    assert r.returncode != 0 and "SHA256sum" in r.stderr
+
+
 def test_feed_is_applied_only_in_the_edge_image_with_a_prod_guard():
     imgs = LAYER / "recipes-images"
     common = (imgs / "alp-image-common.inc").read_text(encoding="utf-8")
     assert "ALP_DEVKIT_FEED" not in common
     assert "ALP_DEVKIT_FEED" in (imgs / "alp-image-edge.bb").read_text(encoding="utf-8")
     prod = (imgs / "alp-image-prod.bb").read_text(encoding="utf-8")
-    assert "bb.fatal" in prod and "ALP_DEVKIT_FEED" in prod
+    assert "alp_prod_no_devkit_feed" in prod and 'do_rootfs[prefuncs] += "alp_prod_no_devkit_feed"' in prod
+    body = re.search(r"^python alp_prod_no_devkit_feed\(\) \{\s*^(.*?)^\}", prod, re.M | re.S).group(1)
+    bb = type("bb", (), {"fatal": staticmethod(lambda m: (_ for _ in ()).throw(_Fatal(m)))})
+
+    def run(v):
+        d = type("d", (), {"getVar": staticmethod(lambda n: v if n == "ALP_DEVKIT_FEED" else None)})
+        exec("def _f():\n" + body + "\n_f()\n", {"bb": bb, "d": d})
+
+    with pytest.raises(_Fatal):
+        run("1")
+    run(None)
+    run("0")
