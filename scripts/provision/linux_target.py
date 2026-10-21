@@ -96,7 +96,7 @@ CLKGEN_OTP_IMAGE = bytes.fromhex(
     "a0 00 bb 04 32 08 cc 21 19 4c f2 16 5f 22 f0 3e 00 80 00 00 00 00 00 00 "
     "0e 0c 19 12 3f f0 90 46 a0 80 b0 b0 9c")
 CLKGEN_REG_COUNT = len(CLKGEN_OTP_IMAGE)  # 0x25 (37): reg 0x00..0x24 inclusive
-# U-Boot's 5L35023B fixup (U-Boot patches 0007, #2293, and 0012) rewrites these
+# U-Boot's 5L35023B fixup (U-Boot patches 0007, #2293, and 0013) rewrites these
 # three OTP registers every boot; a post-boot read must expect the fixed-up
 # values, not the factory ones. 0x1F = 0xC7 routes SE2 (the GD32 HXTAL input) from
 # DIV4 = 24.576 MHz (OTP 0x46 leaves it free-running at 32.768 kHz); 0x24 = 0x8F
@@ -724,14 +724,22 @@ def gd32_boot_config_cmd(bus: int, flags: int | None = None, addr: int = 0x70) -
     return xfer_cmd(bus, addr, b"\x00" + body + bytes((crc & 0xFF, crc >> 8)), 7, force=True)
 
 
+class Gd32NoSupport(BenchError):
+    """The GD32 answered BOOT_CONFIG with status 0x06 (NOSUPPORT)."""
+
+
 def gd32_parse_boot_config(out: str) -> int:
     """The stored flag word of a BOOT_CONFIG reply (on a SET: the value before the commit)."""
     rsp = _parse_bytes(out, 7)
     if rsp[0] != 0:
+        if rsp[0] == 0x06 and _crc16_ccitt_false(rsp[:1]) != rsp[1] | rsp[2] << 8:
+            raise BenchError(f"GD32 BOOT_CONFIG status 0x06 with a bad reply CRC (transport error, "
+                             f"not NOSUPPORT): {rsp.hex(' ')}")
         hint = (" (NOSUPPORT: GD32 firmware predates the opcode, a build without the flash HAL, a "
                 "single-bank part, or the GD32 is running from slot B; if it is on slot B, OTA the "
                 "same image into slot A, then retry)") if rsp[0] == 0x06 else ""
-        raise BenchError(f"GD32 BOOT_CONFIG status {rsp[0]:#04x}{hint}")
+        raise (Gd32NoSupport if rsp[0] == 0x06 else BenchError)(
+            f"GD32 BOOT_CONFIG status {rsp[0]:#04x}{hint}")
     if _crc16_ccitt_false(rsp[:5]) != rsp[5] | rsp[6] << 8:
         raise BenchError(f"GD32 BOOT_CONFIG reply CRC mismatch: {rsp.hex(' ')}")
     return int.from_bytes(rsp[1:5], "little")
@@ -757,6 +765,13 @@ def gd32_sd_out_flag_set(t: LinuxTarget, bus: int, addr: int = 0x70) -> int:
         except BenchError:
             pass                              # the commit blacks the link out for ~40 ms
     raise BenchError(f"GD32 BOOT_CONFIG never read back {want:#010x} after the SET")
+
+
+def mmc_devices(t: LinuxTarget) -> dict[str, str]:
+    """Every card the kernel has enumerated: {mmc0:0001: "MMC", ...} (sysfs `type`: MMC / SD / SDIO)."""
+    out = t.run("for d in /sys/bus/mmc/devices/*; do [ -e \"$d/type\" ] && "
+                "echo \"$(basename $d) $(cat $d/type)\"; done; true", check=False).stdout
+    return {p[0]: p[1] for p in (ln.split() for ln in out.splitlines()) if len(p) == 2}
 
 
 def i2c_scan(t: LinuxTarget, bus: int, span: tuple[int, int] | None = None,
@@ -837,19 +852,63 @@ def clkgen_read_image(t: LinuxTarget, bus: int) -> bytes:
     return bytes(i2c_get(t, bus, CLKGEN_5L35023B_ADDR, reg) for reg in range(CLKGEN_REG_COUNT))
 
 
-def _clkgen_expected() -> bytes:
+def _clkgen_expected(fixup: dict[int, int] | None = None) -> bytes:
     img = bytearray(CLKGEN_OTP_IMAGE)
-    for reg, val in CLKGEN_FIXUP_REGS.items():
+    for reg, val in (CLKGEN_FIXUP_REGS if fixup is None else fixup).items():
         img[reg] = val
     return bytes(img)
 
 
-def clkgen_diff(image: bytes) -> list[str]:
-    """Mismatches of `image` against the OTP image with the U-Boot fixup
-    applied. [] means the image is exactly what a provisioned unit should read."""
+def clkgen_fixup_from_expect(expect: dict | None, sku: str = "",
+                             release_version: str = "") -> dict[int, int] | None:
+    """The per-bundle `clkgen_fixup_regs` (reg -> value) of the functest-expect overlay, or None
+    when the key is absent (the caller then uses CLKGEN_FIXUP_REGS). A bundle built before a
+    U-Boot clkgen patch landed (e.g. som-0.2.2: only patch 0007, 0x1F stays at OTP 0x46) is
+    judged against what ITS U-Boot writes. The overlay must name that bundle
+    (`bundle: {sku, release_version}`, the bundle.json fields) and it must be the one being
+    provisioned. Malformed or mismatched -> ValueError, never a silent default.
+
+    Registers and values are QUOTED strings ("0x1f": "0x46"): an unquoted 010 is octal 8 in
+    YAML 1.1 and would pass silently, while int("010", 0) is rejected."""
+    if not expect or "clkgen_fixup_regs" not in expect:
+        return None
+    raw = expect["clkgen_fixup_regs"]
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError("clkgen_fixup_regs: want a non-empty mapping of register -> value")
+    who = expect.get("bundle")
+    if not isinstance(who, dict) or not who.get("sku") or not who.get("release_version"):
+        raise ValueError("clkgen_fixup_regs: the overlay must declare the bundle it applies to "
+                         "(bundle: {sku: ..., release_version: ...})")
+    if (str(who["sku"]), str(who["release_version"])) != (sku, release_version):
+        raise ValueError(f"clkgen_fixup_regs is pinned to bundle {who['sku']} {who['release_version']}, "
+                         f"but this run provisions {sku} {release_version}")
+
+    def num(x, what, hi):
+        if not isinstance(x, str):
+            raise ValueError(f"clkgen_fixup_regs: {what} {x!r} must be a quoted string like \"0x1f\"")
+        try:
+            n = int(x, 0)
+        except ValueError:
+            raise ValueError(f"clkgen_fixup_regs: {what} {x!r} is not an integer") from None
+        if not 0 <= n <= hi:
+            raise ValueError(f"clkgen_fixup_regs: {what} {x!r} out of range 0..{hi:#x}")
+        return n
+
+    out: dict[int, int] = {}
+    for k, v in raw.items():
+        reg = num(k, "register", CLKGEN_REG_COUNT - 1)
+        if reg in out:
+            raise ValueError(f"clkgen_fixup_regs: register {reg:#04x} given twice")
+        out[reg] = num(v, f"value of reg {reg:#04x}", 0xFF)
+    return out
+
+
+def clkgen_diff(image: bytes, fixup: dict[int, int] | None = None) -> list[str]:
+    """Mismatches of `image` against the OTP image with the U-Boot fixup applied (`fixup`, else
+    CLKGEN_FIXUP_REGS). [] means the image is exactly what a provisioned unit should read."""
     if len(image) != CLKGEN_REG_COUNT:
         raise ValueError(f"clkgen image must be {CLKGEN_REG_COUNT} bytes, got {len(image)}")
-    want = _clkgen_expected()
+    want = _clkgen_expected(fixup)
     return [f"reg {i:#04x}: {image[i]:#04x} != {want[i]:#04x}"
             for i in range(CLKGEN_REG_COUNT) if image[i] != want[i]]
 

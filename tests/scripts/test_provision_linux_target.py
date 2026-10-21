@@ -1029,10 +1029,12 @@ def test_gd32_boot_config_reply_parsing():
     assert lt.gd32_parse_boot_config(_bc_reply(1)) == 1
     with pytest.raises(BenchError, match="CRC mismatch"):
         lt.gd32_parse_boot_config(_bc_reply(1, bad_crc=True))
+    crc = lt._crc16_ccitt_false(bytes((6,)))    # the released v0.3.0 error frame: [status][crc over status] + padding
+    nosupport = _hx(bytes((6, crc & 0xFF, crc >> 8, 0, 0, 0, 0)))
     with pytest.raises(BenchError, match="status 0x06"):
-        lt.gd32_parse_boot_config(_bc_reply(0, status=6))
+        lt.gd32_parse_boot_config(nosupport)
     with pytest.raises(BenchError, match=r"NOSUPPORT.*single-bank.*slot B.*slot A"):
-        lt.gd32_parse_boot_config(_bc_reply(0, status=6))
+        lt.gd32_parse_boot_config(nosupport)
 
 
 def test_gd32_sd_out_flag_set_keeps_other_bits_and_waits_for_the_commit(monkeypatch):

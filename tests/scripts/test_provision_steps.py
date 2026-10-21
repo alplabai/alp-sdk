@@ -808,7 +808,7 @@ def test_clkgen_verify_pass(tmp_path):
     r = res[-1]
     assert r.name == "clkgen_verify" and r.status == "done", r.detail
     assert r.evidence["clkgen_i2c_addr"] == "0x69"
-    assert "SE2 24.576 MHz (0x1f=0xc7, 0x24=0x8f)" in r.detail
+    assert "0x1f=0xc7, 0x24=0x8f" in r.detail
     assert r.evidence["clkgen_otp_raw"] == " ".join(f"{b:02x}" for b in image)
 
 

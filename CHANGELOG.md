@@ -7,6 +7,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
+### Fixed — provisioning checks are pinned to the bundle being provisioned, and the released GD32 v0.3.0 no longer dead-ends a unit
+
+**`clkgen_verify` judges the bundle's own U-Boot fixup.** The expected 5L35023B registers were the tool tree's (`0x1f` = `0xc7`, patch 0013), so a unit from a bundle built before patch 0013 (som-0.2.2: `0x1f` stays at OTP `0x46`, `0x24` = `0x8e`) failed against a U-Boot it does not run. An optional `clkgen_fixup_regs` map in the `--functest-expect` overlay (quoted hex strings, plus `bundle: {sku, release_version}` naming the bundle it applies to) now pins the expectation per bundle; absent keeps the default, a malformed map or a different bundle refuses the step, and the evidence key `clkgen_fixup_source` records which one was used.
+
+**`sd_out_emmc_boot` has an operator path for a GD32 without `BOOT_CONFIG`.** The released v0.3.0 (protocol 0.14.0) answers `NOSUPPORT`; on a protocol below 0.15.0 the step now prompts the operator to power off and remove the microSD (a non-interactive run, or a unit already on the eMMC, takes `--sd-removed-by-operator` instead; the tool still halts and cold-cycles), and passes only with an eMMC root and no `SD` card enumerated. Evidence key `sd_out_method` is `gd32-boot-config` or `operator-removed`.
+
+**`census_final` no longer leaves `secure_page_state` unread.** A written, unlocked secure page was dropped by the final census and marked `unread`, so a fully provisioned unit could not pass the ship check. The page is re-read read-only and compared with `<serial>.secure-page.staged.bin`; it is never written or locked.
+
 ## [v0.17.0] - 2026-10-13
 
 ### Fixed — the Yocto `alp-chips` package no longer re-installs `libalp_sdk.a`, `alp-sdk.pc` and the `<alp/*.h>` headers (#2829)

@@ -126,6 +126,7 @@ class Ctx:
     allow_tier_mismatch: str | None = None
     accept_cid_change: str | None = None  # operator escape: the eMMC was legitimately replaced
     reprovision_from: Path | None = None
+    sd_removed_by_operator: bool = False  # --sd-removed-by-operator: sd_out_emmc_boot's non-interactive operator path
     replace_identity: bool = False       # --replace-identity: archive the old manifest / secure page
     cold_cycles: int = 3
     hil_spec: Path | None = None
@@ -1466,6 +1467,23 @@ class CensusFinal(Census):
     reads_gpio4_otp = False
     NOT_REREAD = "not re-read by census_final"
 
+    @staticmethod
+    def _reverify_secure_page(ctx, res) -> None:
+        """A written, unlocked secure page has no `secure_page_state` in the census (only the
+        secure_page step, which compares the page, may call it written-verified). The page was
+        just re-read, read-only, for `secure_page_sha256`: judge that against the staged blob
+        the secure_page step wrote. Never writes or locks the page."""
+        ev = res.evidence
+        if "secure_page_state" in ev or "secure_page_sha256" not in ev:
+            return
+        staged = ctx.unit_dir / f"{ctx.serial}.secure-page.staged.bin"
+        if not staged.exists():
+            ev["secure_page_state"] = lt.unread(f"{staged.name} not in the ledger: nothing to compare the page with")
+        elif hashlib.sha256(staged.read_bytes()).hexdigest() == ev["secure_page_sha256"]:
+            ev["secure_page_state"] = "written-verified"
+        else:
+            ev["secure_page_state"] = lt.unread(f"secure page differs from {staged.name}")
+
     def run(self, ctx):
         res = super().run(ctx)
         if res.status != "done":
@@ -1473,6 +1491,7 @@ class CensusFinal(Census):
         # A census group that fails drops its keys, and a key that is absent here would leave
         # the first census's value (read in the microSD boot) standing in the ledger. Every key
         # the first census recorded and this one did not produce is therefore marked unread.
+        self._reverify_secure_page(ctx, res)
         first = (_latest_entry(ctx, Census.name) or {}).get("evidence") or {}
         lost = sorted(k for k in first if k not in res.evidence and not k.startswith("act88760_gpio4_")
                       and k != "power_cut")
@@ -2107,8 +2126,12 @@ class SdOutEmmcBoot(Step):
         t = ctx.need_linux()
         bus = ctx.i2c("brd")
         # The SET moves no pad until the next GD32 reset, so it is safe on either root.
-        flags = ctx.mutate("persist the GD32 BOOT_CONFIG SDMUX_EN_HIGH flag (takes effect at the "
-                           "next GD32 reset)", lambda: lt.gd32_sd_out_flag_set(t, bus, GD32_BRIDGE_ADDR))
+        try:
+            flags = ctx.mutate("persist the GD32 BOOT_CONFIG SDMUX_EN_HIGH flag (takes effect at the "
+                               "next GD32 reset)", lambda: lt.gd32_sd_out_flag_set(t, bus, GD32_BRIDGE_ADDR))
+        except lt.Gd32NoSupport as e:
+            return self._operator_path(ctx, t, bus, e, ev)
+        ev["sd_out_method"] = "gd32-boot-config"
         ev["gd32_boot_config"] = f"{flags:#010x}"
         if "mmcblk1" in lt.root_device(t):
             # Still on the provisioning SD: the cold cycle boots U-Boot without it.
@@ -2127,6 +2150,63 @@ class SdOutEmmcBoot(Step):
         ev["gd32_boot_config"] = f"{flags:#010x}"
         return self.result(ctx, "microSD disconnected by the SDIO mux, root on the eMMC, "
                                 "SD-out flag persisted", ev)
+
+
+    # The released GD32 v0.3.0 speaks protocol 0.14.0 and answers BOOT_CONFIG with NOSUPPORT.
+    # 0.15.0 is NOT a clean boundary (a feat/protocol-0.15 build reports 0.15.0 without the
+    # opcode), so the gate fails closed: only a protocol BELOW 0.15.0 takes the operator path. A
+    # NOSUPPORT from anything newer is a real fault (slot B, no flash HAL, unreleased build): the
+    # operator stops and reports the GD32 build, nothing is overridden.
+    BOOT_CONFIG_MIN_PROTOCOL = (0, 15, 0)
+
+    @staticmethod
+    def _sd_cards(cards):
+        """SD memory cards in lt.mmc_devices(): type SD (or SDcombo), never SDIO (the CYW55513
+        sits on SDHI2 as SDIO and is not the microSD)."""
+        return sorted(k for k, v in cards.items() if v.startswith("SD") and v != "SDIO")
+
+    def _operator_path(self, ctx, t, bus, err, ev):
+        ver = lt.gd32_bridge_version(t, bus, GD32_BRIDGE_ADDR)
+        if ver >= self.BOOT_CONFIG_MIN_PROTOCOL:
+            raise err
+        ev.update(sd_out_method="operator-removed", gd32_protocol="%d.%d.%d" % ver)
+        root = lt.root_device(t)
+        on_emmc = root.startswith(lt.resolve_emmc(t))
+        if ctx.sd_removed_by_operator and not on_emmc:
+            raise Refused(f"--sd-removed-by-operator given but Linux root {root} is not the eMMC: "
+                          "the card cannot have been removed")
+        if not ctx.sd_removed_by_operator and on_emmc:
+            raise Refused(f"Linux root is {root} (the eMMC) and the GD32 cannot hold the SD out: "
+                          "re-run with --sd-removed-by-operator to record that the operator removed it")
+        b = ctx.need_bench()
+
+        def halt_and_confirm():
+            note = halt_note(clean_shutdown(ctx))
+            if not ctx.sd_removed_by_operator:
+                try:
+                    b.operator.confirm(
+                        f"{note} The GD32 (protocol {ev['gd32_protocol']}) cannot hold the SD out (BOOT_CONFIG "
+                        "NOSUPPORT). Power OFF, physically REMOVE the microSD, leave the unit OFF until the "
+                        "tool asks.")
+                except EOFError:
+                    raise Refused("no operator on stdin to confirm the microSD removal: remove the card, "
+                                  "boot the unit from the eMMC, and re-run with --sd-removed-by-operator") from None
+            _forget_halt_if_console_spoke(ctx)
+        ctx.mutate("operator: clean halt" + ("" if ctx.sd_removed_by_operator else ", power off, remove the microSD"),
+                   halt_and_confirm)
+        ctx.mutate("cold cycle: no SD present, U-Boot boots the eMMC", lambda: cold_boot_phy_retry(ctx, ev))
+        t = ctx.need_linux()
+        root, cards = lt.root_device(t), lt.mmc_devices(t)
+        ev["sd_out_evidence"] = f"root {root}; mmc devices: " + (
+            ", ".join(f"{k} {v}" for k, v in sorted(cards.items())) or "none")
+        if self._sd_cards(cards):
+            raise Refused(f"microSD still present after the operator removal ({ev['sd_out_evidence']})")
+        if "MMC" not in cards.values():
+            raise Refused(f"no eMMC enumerated, cannot judge the card gone ({ev['sd_out_evidence']})")
+        if not root.startswith(lt.resolve_emmc(t)):
+            raise Refused(f"Linux root {root} is not the eMMC after the operator removal ({ev['sd_out_evidence']})")
+        return self.result(ctx, "microSD removed by the operator (GD32 BOOT_CONFIG NOSUPPORT on protocol "
+                                f"{ev['gd32_protocol']}); root on the eMMC, no SD card enumerated", ev)
 
 
 class ColdBootTest(Step):
@@ -2255,7 +2335,8 @@ class ColdBootTest(Step):
 
 class ClkgenVerify(Step):
     """The on-SoM 5L35023B (BRD_I2C, 0x69) OTP image against U-Boot's
-    fixup (U-Boot patches 0007, #2293, and 0012: SE1/SE3/SE2). Read after the provisioned unit has
+    fixup (U-Boot patches 0007, #2293, and 0013: SE2 / gd32-hxtal; the expected registers can be
+    pinned per bundle by `clkgen_fixup_regs` in the --functest-expect overlay). Read after the provisioned unit has
     booted: the fixup runs every boot, so a unit shipped without it (or with
     a wrong OTP image) is caught here rather than downstream."""
     name = "clkgen_verify"
@@ -2268,7 +2349,19 @@ class ClkgenVerify(Step):
                                status="skipped")
         bus = ctx.i2c("brd")
         image = lt.clkgen_read_image(t, bus)
-        bad = lt.clkgen_diff(image)
+        # The fixup is what THIS bundle's U-Boot writes: the per-bundle functest-expect overlay
+        # can pin it (a bundle built before patch 0013 leaves 0x1F at OTP 0x46), else the tool's.
+        try:
+            pinned = lt.clkgen_fixup_from_expect(ctx.functest_expect or functest.load_expect(),
+                                                 ctx.bundle.get("sku", ""), ctx.bundle.get("release_version", ""))
+        except ValueError as e:
+            raise Refused(f"--functest-expect: {e}") from None
+        fixup = lt.CLKGEN_FIXUP_REGS if pinned is None else pinned
+        source = ("default (this tool's CLKGEN_FIXUP_REGS)" if pinned is None
+                  else f"functest-expect overlay clkgen_fixup_regs for bundle {ctx.bundle.get('sku')} "
+                       f"{ctx.bundle.get('release_version')}")
+        source += " {" + ", ".join(f"{r:#04x}: {v:#04x}" for r, v in sorted(fixup.items())) + "}"
+        bad = lt.clkgen_diff(image, fixup)
         line = uboot.parse_clkgen_line(ctx.boot_text)
         no_capture = line is None and not ctx.boot_text.strip()
         if line is None and not no_capture:
@@ -2278,14 +2371,15 @@ class ClkgenVerify(Step):
         if bad:
             raise Refused("5L35023B verification failed: " + "; ".join(bad))
         ev = {"clkgen_otp_raw": " ".join(f"{b:02x}" for b in image),
-              "clkgen_i2c_addr": f"{lt.CLKGEN_5L35023B_ADDR:#04x}"}
+              "clkgen_i2c_addr": f"{lt.CLKGEN_5L35023B_ADDR:#04x}",
+              "clkgen_fixup_source": source}
         ev["clkgen_uboot_fixup"] = "unread (no boot console captured in this run)" if no_capture else f"seen: {line}"
         if no_capture:      # --only runs / resumed runs: nothing to read the U-Boot fixup line from
             return self.result(ctx, "not verified: no boot console captured in this run (the OTP image "
                                f"matches, dash code {image[0x01]:#04x}; the U-Boot fixup line was not read)",
                                ev, status="skipped")
         return self.result(ctx, f"5L35023B OTP image matches (dash code {image[0x01]:#04x}); "
-                           f"SE2 24.576 MHz (0x1f={image[0x1F]:#04x}, 0x24={image[0x24]:#04x}); "
+                           f"0x1f={image[0x1F]:#04x}, 0x24={image[0x24]:#04x}; "
                            f"boot line: {line!r}", ev, status="done")
 
 
