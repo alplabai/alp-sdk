@@ -26,12 +26,19 @@
 #   cmake -B build/consumer -S tests/cmake-consumer/find-package-smoke \
 #       -DCMAKE_PREFIX_PATH=/tmp/alp-prefix
 #   cmake --build build/consumer
-#   ./build/consumer/find_package_smoke   # prints "alp-sdk version: 0.9.0"
+#   ./build/consumer/find_package_smoke   # prints "alp-sdk version: <X.Y.Z>"
 
 cmake_minimum_required(VERSION 3.20)
 project(alp_sdk_find_package_smoke LANGUAGES C)
 
-find_package(alp-sdk 0.9 REQUIRED CONFIG)
+# Request the checkout's own MAJOR.MINOR, read from the same header the
+# root CMakeLists.txt reads.  A hard-coded number goes stale on the next
+# minor, and pre-1.0 the package only accepts its own minor (#2850).
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../../../include/alp/version.h" _v
+    REGEX "^#define +ALP_VERSION_(MAJOR|MINOR) +[0-9]+")
+string(REGEX REPLACE ".*ALP_VERSION_MAJOR +([0-9]+).*" "\\1" _major "${_v}")
+string(REGEX REPLACE ".*ALP_VERSION_MINOR +([0-9]+).*" "\\1" _minor "${_v}")
+find_package(alp-sdk ${_major}.${_minor} REQUIRED CONFIG)
 
 add_executable(find_package_smoke main.c)
 target_link_libraries(find_package_smoke PRIVATE alp::sdk)
