@@ -585,7 +585,8 @@ def test_ros2_edge_image_pulls_rclcpp_and_alp_perception() -> None:
     """
     meta = REPO / "meta-alp-sdk"
     edge_image = (meta / "recipes-images" / "alp-image-edge.bb").read_text(encoding="utf-8")
-    assert "alp-ros" in edge_image.split('IMAGE_FEATURES += "', 1)[1].split('"', 1)[0]
+    features = " ".join(part.split('"', 1)[0] for part in edge_image.split('IMAGE_FEATURES += "')[1:])
+    assert "alp-ros" in features
 
     common_inc = (meta / "recipes-images" / "alp-image-common.inc").read_text(encoding="utf-8")
     assert 'FEATURE_PACKAGES_alp-ros     = "packagegroup-alp-ros"' in common_inc

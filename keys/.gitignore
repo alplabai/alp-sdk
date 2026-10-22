@@ -9,6 +9,13 @@
 *.key
 *.priv
 
+# Armored/binary secret exports -- never commit; public armored keys use the
+# *.pub.asc name.
+*.asc
+*.gpg
+*.sec
+!*.pub.asc
+
 # Allow public keys explicitly (production verification keys go
 # here once provisioning is in place).
 !*.pub.pem
