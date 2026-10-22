@@ -17,6 +17,7 @@ See docs/provisioning-v2n.md.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -39,7 +40,7 @@ from typing import TypeVar
 
 from provision import bmap, dxm1, functest, gates, ledger_out, payload_store, rtc, uboot
 from provision import linux_target as lt
-from provision.bench import Bench, BenchError, ExpectTimeout
+from provision.bench import Bench, BenchError, ExpectTimeout, Probe
 from provision.console_target import ConsoleTarget
 from provision.store_swd_probe import StoreSwdProbe
 
@@ -54,6 +55,13 @@ GD32_DP_REFUSE = {0x6BA02477: "the SoC's own debug port (wrong target)",
 GD32_IMAGES = (("bootloader.bin", 0x08000000, "gd32_bootloader_md5"),
                ("ota-meta.bin", 0x08008000, "gd32_ota_meta_md5"),
                ("slot-a.bin", 0x0800A000, "gd32_slot_a_md5"))
+# The OTA metadata area (gd32-bridge-firmware src/ota_layout.h): 8 KB, four pages, A/B records
+# written by rank. The bootloader boots the NEWEST valid record, so every page, not just the
+# first, must hold nothing but the shipped record.
+GD32_META_ADDR = 0x08008000
+GD32_META_SIZE = 0x2000
+GD32_SLOT_A_ADDR = 0x0800A000
+GD32_META_AREA_KEY = "gd32_ota_meta_area_md5"    # the whole 8 KB area; gd32_ota_meta_md5 stays the record's
 GD32_BRIDGE_ADDR = 0x70
 SYS_LSI_MODE_XSPI = "0x3c06"   # DSW1 label only; the boot-mode judgement decodes via the SoC description
 LOGIN_RE = r"login: *$"
@@ -174,12 +182,28 @@ class Ctx:
     power_cuts: list[str] = field(default_factory=list)
     step_logs: dict[str, str] = field(default_factory=dict)
     _cache: dict = field(default_factory=dict)
+    write_step: str = ""             # set by run_one while a WRITE_STEPS step runs
+    write_marked: bool = False       # its first real mutation already moved last_mutation_seq
+
+    def mark_mutation(self) -> None:
+        """The unit changed: every verification step older than this is void (see WRITE_STEPS).
+        Saved at once, so a kill right after still leaves the marker."""
+        if not self.execute:
+            return
+        self.state["last_mutation_seq"] = max(int(self.state.get("last_mutation_seq") or 0),
+                                              next_seq(self.state))
+        save_state(self.state_path, self.state)
 
     def mutate(self, description: str, action: Callable[[], T]) -> T | None:
         if not self.execute:
             self.plan_log.append("WOULD: " + description)
             return None
         self.plan_log.append(description)
+        if self.write_step and not self.write_marked:
+            # ponytail: a read-only ctx.mutate placed FIRST in a write step would over-void
+            # (fails safe: the proofs just run again); keep the first mutate a real write.
+            self.write_marked = True
+            self.mark_mutation()
         return action()
 
     @property
@@ -351,7 +375,9 @@ class Ctx:
             return False
 
     def state_done(self, name: str) -> bool:
-        return self.state.get("steps", {}).get(name, {}).get("status") == "done"
+        # a verification step is not done once a write step ran after it (voided_steps)
+        return (self.state.get("steps", {}).get(name, {}).get("status") == "done"
+                and name not in voided_steps(self.state))
 
     def i2c(self, key: str) -> int:
         bus = self.need_bench().i2c_bus.get(key) if self.bench else None
@@ -364,6 +390,87 @@ class Ctx:
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# Steps that put bytes on the unit. A verification step that finished BEFORE the unit last
+# changed proved nothing about what is on the unit now (2026W38-0009: a re-run of the writes was
+# recorded SHIPPABLE on the cold_boot_test / functional_test of the images before it).
+#
+# Ordering is a per-unit counter in the state file, not wall-clock time (which ties within a
+# second and skews across stations): ``state["seq"]`` numbers every step entry and every
+# mutation, ``state["last_mutation_seq"]`` is the number of the LAST mutation and only moves
+# forward, so a later `skipped` entry of a write step cannot hide an earlier real write.
+#   * a write step mutates: the first ctx.mutate of its run (a refusal before that voids nothing,
+#     a kill part-way keeps the marker: it is saved at once);
+#   * _release_sd_hold clears the GD32 SD-hold flag (it changes where the unit boots from).
+# Not counted: bootstrap, eeprom_manifest, secure_page and dxm1_npu_flash. For the same bundle
+# they write the same bytes, and each has its own readback, so a re-run cannot make an earlier
+# cold boot or functional test describe a different unit.
+# Migration: a state file without the marker predates it (its entries have no `seq`, or a
+# partial one from an intermediate version). seed_mutation_marker() renumbers ALL entries once,
+# in wall-clock order (the entry's `at`, then superseded-before-current, then STEP_ORDER so a
+# write sorts before the verification after it), and places the marker at the newest old write. A verification that
+# finished after every old write stands; one before a write is void. It is saved and never
+# derived again. ponytail: a legacy write entry the old code overwrote with `skipped` lost its
+# history and cannot be recovered here; an entry with no `at` sorts oldest (a timeless
+# verification is voided by any write, a timeless write voids nothing).
+WRITE_STEPS = ("gd32_flash", "write_xspi", "write_cm33", "write_emmc_boot", "write_rootfs")
+VERIFY_STEPS = ("sd_out_emmc_boot", "cold_boot_test", "census_final", "clkgen_verify", "rtc_set",
+                "functional_test", "hil_smoke")
+
+
+def next_seq(state: dict) -> int:
+    state["seq"] = int(state.get("seq") or 0) + 1
+    return state["seq"]
+
+
+def seed_mutation_marker(state: dict) -> bool:
+    """Renumber EVERY entry (also those that already carry a `seq`) by wall-clock order and set
+    `seq` and `last_mutation_seq` (see Migration above). A `seq` without a marker comes from an
+    older tool version and is never trusted: 2026W38-0009 had entries 5 and 6 beside many
+    unnumbered older ones, and numbering only the unnumbered put old writes after new proofs.
+    Does nothing, and returns False, when the marker already exists."""
+    if "last_mutation_seq" in state:
+        return False
+    order = {n: i for i, n in enumerate(STEP_NAMES)}
+    old = sorted(((e.get("at") or e.get("finished") or e.get("ts") or "", gi, order.get(n, 0), n, e)
+                  for gi, g in enumerate([*state.get("superseded", []), state])
+                  for n, e in g.get("steps", {}).items()),
+                 key=lambda t: t[:4])
+    state["seq"] = 0
+    last = 0
+    for _at, _gi, _i, n, e in old:
+        e["seq"] = next_seq(state)
+        if n in WRITE_STEPS and e.get("status") in ("done", "failed", "running"):
+            last = e["seq"]
+    state["last_mutation_seq"] = last
+    return True
+
+
+def voided_entries(state: dict) -> dict[str, tuple[dict, str]]:
+    """{verification step: (its newest entry, why)} for every verification step whose newest
+    done/skipped entry (this run's group, else the newest superseded one) has a `seq` below
+    `last_mutation_seq`. Its facts no longer describe the unit and it must run again."""
+    if "last_mutation_seq" not in state:        # read-only view of what run_steps will persist
+        state = copy.deepcopy(state)
+        seed_mutation_marker(state)
+    last = int(state.get("last_mutation_seq") or 0)
+    if not last:
+        return {}
+    out = {}
+    for n in VERIFY_STEPS:
+        for g in reversed([*state.get("superseded", []), state]):
+            e = g.get("steps", {}).get(n)
+            if e is not None:
+                at = int(e.get("seq") or 0)
+                if e.get("status") in ("done", "skipped") and at < last:
+                    out[n] = (e, f"the unit changed after it (entry seq {at}, last mutation seq {last})")
+                break
+    return out
+
+
+def voided_steps(state: dict) -> dict[str, str]:
+    return {n: why for n, (_e, why) in voided_entries(state).items()}
 
 
 def _md5(data: bytes) -> str:
@@ -1102,6 +1209,8 @@ class BootSdLinux(Step):
         if ctx.linux_up() and (why := leftover_dxuart2_swap(ctx)):
             raise Refused(why)
         ev: dict[str, str] = {}
+        if ctx.transfer == "sd" and ctx.linux_up():
+            self._release_sd_hold(ctx, ev)
         if ctx.transfer == "xmodem":
             addr = (b.raw.get("uboot") or {}).get("load_addr")
             chunk = int((b.raw.get("uboot") or {}).get("gzwrite_chunk") or 16 << 20)
@@ -1171,6 +1280,34 @@ class BootSdLinux(Step):
                           f"({ctx.sku}): " + "; ".join(probs))
         return self.result(ctx, f"Linux up on {getattr(t, 'host', '?')}" if ctx.linux is not None
                            else "Linux up on the console, no network yet", ev)
+
+
+    @staticmethod
+    def _release_sd_hold(ctx, ev):
+        """A unit already provisioned once boots the eMMC because its GD32 holds the microSD
+        out (BOOT_CONFIG SDMUX_EN_HIGH, set by sd_out_emmc_boot). Clear the flag before the
+        cold cycle, or U-Boot never sees the card. Only while root is the eMMC: on the SD root
+        nothing is held. A GD32 without BOOT_CONFIG, or one that does not answer the GET, holds
+        nothing either (the latter is recorded); a failed CLEAR after a GET that showed the flag
+        set still raises."""
+        t = ctx.linux
+        if not lt.root_device(t).startswith(lt.resolve_emmc(t)):
+            return
+        bus = ctx.i2c("brd")
+        try:
+            if not lt.gd32_boot_config(t, bus, None, GD32_BRIDGE_ADDR) & lt.GD32_BOOT_CONFIG_SDMUX_EN_HIGH:
+                return
+        except lt.Gd32NoSupport:
+            return
+        except BenchError as e:
+            # A GD32 that does not answer (held in reset by ACT88760 GPIO4, a dead app after a
+            # part-way flash, no ACK) drives nothing on PD11, so it holds nothing.
+            ev["gd32_boot_config_cleared"] = f"not read ({e})"
+            return
+        ctx.mark_mutation()     # the boot path changes: sd_out_emmc_boot and the proofs after it are void
+        ctx.mutate("clear the GD32 BOOT_CONFIG SDMUX_EN_HIGH flag (the microSD reconnects at the "
+                   "next GD32 reset)", lambda: lt.gd32_sd_out_flag_set(t, bus, GD32_BRIDGE_ADDR, on=False))
+        ev["gd32_boot_config_cleared"] = "SDMUX_EN_HIGH"
 
 
 def som_presence_problems(ctx, t=None) -> list[str]:
@@ -1595,8 +1732,49 @@ def _manifest_ev(arr: bytes) -> dict[str, str]:
             "manifest_sha256": hashlib.sha256(arr).hexdigest()}
 
 
+class WrongImage(BenchError):
+    """The GD32 answers, but runs something other than the flashed slot-A image."""
+
+
 class Gd32Flash(Step):
     name = "gd32_flash"
+
+    @staticmethod
+    def _want(p: Path, addr: int) -> bytes:
+        """The bytes a region must hold: the file, and for the metadata record the whole
+        area (record + 0xFF), so a stale newer record on another page shows up."""
+        data = p.read_bytes()
+        return data.ljust(GD32_META_SIZE, b"\xff") if addr == GD32_META_ADDR else data
+
+    @staticmethod
+    def _embedded_build_ids(slot_a: bytes) -> set[str]:
+        """`<ver>+<sha>` strings of exactly GET_BUILD_ID's 20 chars (cmake/gen_build_id.cmake
+        bakes one into the image as GD32_BRIDGE_BUILD_ID); empty for an image without one."""
+        return {m.decode() for m in re.findall(rb"\d+\.\d+\.\d+\+[0-9a-f]+", slot_a)
+                if len(m) == lt.GD32_BUILD_ID_LEN}
+
+    def _running_image(self, ctx, t, images) -> dict[str, str]:
+        """Ask the bridge WHAT runs: OTA_GET_STATE (the slot this build is linked for) and
+        GET_BUILD_ID. GET_VERSION cannot tell two builds of one protocol apart, and the
+        bootloader falls back to slot B when the newest record fails its slot-A CRC."""
+        bus = ctx.i2c("brd")
+        st = lt.gd32_ota_state(t, bus, GD32_BRIDGE_ADDR)
+        bid = lt.gd32_build_id(t, bus, GD32_BRIDGE_ADDR)
+        slot = {0: "A", 1: "B"}.get(st["active"], f"unknown({st['active']:#04x})")
+        ev = {"gd32_active_slot": slot, "gd32_build_id": bid}
+        if st["active"] != 0:
+            raise WrongImage(f"the GD32 runs slot {slot}, build-id {bid!r}, not the flashed slot A "
+                             f"(a stale newer OTA metadata record, or a slot-A image that fails its CRC)")
+        slot_a = next(p for p, a, _k in images if a == GD32_SLOT_A_ADDR)
+        want = self._embedded_build_ids(slot_a.read_bytes())
+        if not want:
+            # v0.3.0 and v0.3.1 both embed one: a shipping image without it is the wrong file
+            raise Refused(f"{slot_a.name} embeds no <ver>+<sha> build-id, so the running image "
+                          f"(slot {slot}, build-id {bid!r}) cannot be tied to it; not a release image")
+        elif bid not in want:
+            raise WrongImage(f"the GD32 runs slot {slot} with build-id {bid!r}, but {slot_a.name} "
+                             f"embeds {sorted(want)}")
+        return ev
 
     def _images(self, ctx):
         if ctx.gd32_fw is None:
@@ -1646,8 +1824,14 @@ class Gd32Flash(Step):
             with tempfile.TemporaryDirectory(prefix="gd32_") as td:
                 for i, (p, addr, key) in enumerate(images):
                     out = Path(td) / f"rb{i}.bin"
-                    probe.savebin(out, addr, p.stat().st_size)   # fresh session each
-                    ev[key] = _md5(out.read_bytes())
+                    probe.savebin(out, addr, len(self._want(p, addr)))   # fresh session each
+                    data = out.read_bytes()
+                    if addr == GD32_META_ADDR:
+                        # gd32_ota_meta_md5 keeps its shipped meaning: the record bytes only
+                        ev[key] = _md5(data[:p.stat().st_size])
+                        ev[GD32_META_AREA_KEY] = _md5(data)
+                    else:
+                        ev[key] = _md5(data)
         except (BenchError, OSError) as e:
             # the readback's own error stays the reason; a failed resume is appended to it
             if resume and (err := self._resume(ctx, probe)):
@@ -1677,15 +1861,20 @@ class Gd32Flash(Step):
             ev = self._readback(ctx, images)
         except (BenchError, OSError) as e:
             return Unknown(f"probe readback: {e}")
-        for p, _a, key in images:
-            if ev[key] != _md5(p.read_bytes()):
-                return Unsatisfied(f"{p.name} not on the GD32")
+        for p, a, key in images:
+            if ev[GD32_META_AREA_KEY if a == GD32_META_ADDR else key] != _md5(self._want(p, a)):
+                return Unsatisfied(f"{p.name} not on the GD32" + (
+                    " (the 8 KB metadata area is not exactly the record + 0xFF: a stale newer record?)"
+                    if a == GD32_META_ADDR else ""))
         # The images are on the chip and the core was just reset: it must answer again, or the
         # readback left the bus wedged and the next step (census) would read nothing on it.
         # Without a Linux target (an external probe, unit not booted) nobody can ask.
         if ctx.linux is not None:
             try:
                 ev["gd32_bridge_after_readback"] = self._bridge_alive(ctx, ctx.linux)
+                ev.update(self._running_image(ctx, ctx.linux, images))
+            except WrongImage as e:
+                return Unsatisfied(f"flash matches, but {e}")
             except (BenchError, Refused) as e:
                 return Unknown(f"firmware matches, but {e}")
         return Satisfied({**ev, "gd32_dp_id": f"0x{dp:08x}", **self._fw_version(ctx)})
@@ -1696,6 +1885,15 @@ class Gd32Flash(Step):
         readback above is what ties that name to the bytes on the chip."""
         v = Path(ctx.gd32_fw) / "VERSION"
         return {"gd32_fw_version": v.read_text(encoding="utf-8").strip()} if v.is_file() else {}
+
+    @staticmethod
+    def _write_order(images):
+        """The metadata record FIRST (its whole area is erased just before it is written), then
+        the bootloader and slot A. Erase-first fails early: a probe wrapper without `erase`, or
+        a failed erase, stops the step before any image is touched. With no valid record the
+        bootloader idles, the unit stays SWD-reachable, and the readback differs from the
+        files, so the step reads Unsatisfied and a re-run redoes everything."""
+        return sorted(images, key=lambda i: i[1] != GD32_META_ADDR)
 
     @staticmethod
     def _transport(ctx):
@@ -1731,11 +1929,15 @@ class Gd32Flash(Step):
                        "mismatching is pushed over the console instead (base64, md5-checked) and "
                        "cached in the store", lambda: None)
         ctx.mutate(f"DP-ID gate ({GD32_DP_OK:#010x} only)", lambda: None)
-        for p, addr, _key in images:
+        for p, addr, _key in self._write_order(images):
+            if addr == GD32_META_ADDR:
+                ctx.mutate(f"erase the whole metadata area {addr:#010x} + {GD32_META_SIZE:#x}", lambda: None)
             ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda: None)
         ctx.mutate("verify each region with savebin in a FRESH probe session, md5", lambda: None)
         ctx.mutate("reset/run the GD32 (also after a failed write or verify)", lambda: None)
         ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x} (polled)", lambda: None)
+        ctx.mutate("OTA_GET_STATE + GET_BUILD_ID: require slot A and the build-id embedded in slot-a.bin",
+                   lambda: None)
         if via_console:
             ctx.mutate("cold cycle; re-check the IP", lambda: None)
         return self.result(ctx, "would flash the GD32", ev)
@@ -1776,14 +1978,27 @@ class Gd32Flash(Step):
         if dp != GD32_DP_OK:
             why = GD32_DP_REFUSE.get(dp, "an unknown debug port")
             raise Refused(f"DP-ID {dp:#010x} is {why}; want {GD32_DP_OK:#010x}")
+        if type(probe).erase is Probe.erase:
+            raise Refused("this probe cannot erase, and the GD32's OTA metadata area (4 pages) must "
+                          "be erased whole before the record is written, else a stale newer record "
+                          "outranks the new one and boots slot B; use a probe with erase "
+                          "(script wrapper with an `erase ADDR SIZE` subcommand, console SWD)")
+        slot_a = next(p for p, a, _k in images if a == GD32_SLOT_A_ADDR)
+        if not self._embedded_build_ids(slot_a.read_bytes()):
+            raise Refused(f"{slot_a.name} embeds no <ver>+<sha> build-id (v0.3.0 and v0.3.1 both do): "
+                          "not a release image, and the running build could not be checked against it")
+
         def verify():
             got = self._readback(ctx, images, probe, resume=False)     # resumed in the finally below
-            for p, _a, key in images:
-                if got[key] != _md5(p.read_bytes()):
+            for p, a, key in images:
+                if got[GD32_META_AREA_KEY if a == GD32_META_ADDR else key] != _md5(self._want(p, a)):
                     raise BenchError(f"GD32 readback of {p.name} does not match")
             return got
         try:
-            for p, addr, _key in images:
+            for p, addr, _key in self._write_order(images):
+                if addr == GD32_META_ADDR:
+                    ctx.mutate(f"erase the whole metadata area {addr:#010x} + {GD32_META_SIZE:#x}",
+                               lambda a=addr: probe.erase(a, GD32_META_SIZE))
                 ctx.mutate(f"loadbin {p.name} @ {addr:#010x}", lambda q=p, a=addr: probe.loadbin(q, a))
             ev.update(ctx.mutate("verify each region with savebin in a FRESH probe session, md5", verify) or {})
         except (BenchError, Refused, ValueError, OSError) as e:
@@ -1799,6 +2014,8 @@ class Gd32Flash(Step):
         if t is not None:
             ev["gd32_protocol"] = ctx.mutate(f"GET_VERSION from the bridge at {GD32_BRIDGE_ADDR:#04x} (polled)",
                                              lambda: self._bridge_alive(ctx, t))
+            ev.update(ctx.mutate("OTA_GET_STATE + GET_BUILD_ID: require slot A and the flashed build-id",
+                                 lambda: self._running_image(ctx, t, images)))
         ev.update(self._fw_version(ctx))
         # the SSH path's probe wrapper scp's from the host; only the console path reads the store
         ev.update(payload_store.evidence(ctx._cache.get("gd32_store") if via_console else None))
@@ -2141,7 +2358,7 @@ class SdOutEmmcBoot(Step):
             root = lt.root_device(t)
             if "mmcblk1" in root:
                 raise Refused(f"Linux root {root} is still the microSD after the cold cycle: "
-                              "the SD-out flag did not take (GD32 firmware older than protocol 0.15?)")
+                              "the SD-out flag did not take (GD32 firmware without BOOT_CONFIG, older than v0.3.1 / protocol 0.14.1?)")
         ctx.mutate("drive IO29 SDIO_MUX_EN high (SD disconnected), write-only",
                    lambda: lt.sdio_mux_set(t, False))
         flags = lt.gd32_boot_config(t, bus, None, GD32_BRIDGE_ADDR)
@@ -2152,12 +2369,12 @@ class SdOutEmmcBoot(Step):
                                 "SD-out flag persisted", ev)
 
 
-    # The released GD32 v0.3.0 speaks protocol 0.14.0 and answers BOOT_CONFIG with NOSUPPORT.
-    # 0.15.0 is NOT a clean boundary (a feat/protocol-0.15 build reports 0.15.0 without the
-    # opcode), so the gate fails closed: only a protocol BELOW 0.15.0 takes the operator path. A
-    # NOSUPPORT from anything newer is a real fault (slot B, no flash HAL, unreleased build): the
-    # operator stops and reports the GD32 build, nothing is overridden.
-    BOOT_CONFIG_MIN_PROTOCOL = (0, 15, 0)
+    # BOOT_CONFIG first shipped in GD32 v0.3.1 (protocol 0.14.1); v0.3.0 (0.14.0) answers it
+    # with NOSUPPORT. Only a protocol BELOW 0.14.1 takes the operator path. A NOSUPPORT from
+    # 0.14.1 or newer is a real fault (slot B, single-bank part, no flash HAL, or a
+    # protocol-0.15 build without the opcode): the operator stops and reports the GD32 build,
+    # nothing is overridden.
+    BOOT_CONFIG_MIN_PROTOCOL = (0, 14, 1)
 
     @staticmethod
     def _sd_cards(cards):
@@ -2541,6 +2758,10 @@ class Record(Step):
             if g.get("bundle_sha256") == ctx.state.get("bundle_sha256") and old.get("status") in ("done", "skipped"):
                 recovered[n] = (f" (step {n} from superseded run, tool_rev {str(g.get('tool_rev'))[:12]}, "
                                 f"{old.get('finished') or old.get('ts') or old.get('at') or 'time n/a'})", old)
+        voided_e = voided_entries(ctx.state)
+        voided = {n: why for n, (_e, why) in voided_e.items()}
+        for n in voided:
+            recovered.pop(n, None)         # a voided entry's facts are never recovered
         flashed = {n: v for n, v in recovered.items() if n in FLASH_STEPS}
         # functional_test's verdict is its LATEST run's. A failed or interrupted run must not
         # leave an earlier `test_functional: pass` standing in the unit record (e.g. `--only
@@ -2565,6 +2786,19 @@ class Record(Step):
             for k in BUNDLE_FACTS:
                 auto.pop(k, None)
         before = ledger_out.read_unit_yaml(unit_yaml)
+        # Verification keys a later write step voided are struck from the record too (the
+        # committed unit.yaml still holds them from the earlier run): the ship check then
+        # reports them missing and the verification steps run again.
+        void_keys = {k for k, sp in catalogue.items() if sp.get("step") in voided}
+        for e, _why in voided_e.values():
+            void_keys |= set(e.get("evidence") or {})
+        if {FunctionalTest.name, "hil_smoke"} & set(voided):
+            void_keys |= {k for k in (*before, *facts) if k.startswith("test_")}
+        # a key a still-valid entry also reports (census and cold_boot_test both read some) stays
+        void_keys -= {k for _note, old in recovered.values() for k in (old.get("evidence") or {})}
+        for k in sorted(void_keys):
+            if k in before or k in auto:
+                auto[k] = lt.unread("voided: the unit changed after the step that read it")
         # act88760_gpio4_defect is a legacy key from before the maintainer decision
         # (2026-09-29) that the ACT88760 GPIO4 OTP default is an expected workaround,
         # not a defect; the tool no longer writes it, doesn't block on it (see
@@ -2581,6 +2815,8 @@ class Record(Step):
         for note, _ in recovered.values():
             if note:
                 body += f"\n- facts from{note}"
+        for n, why in voided.items():
+            body += f"\n- voided: {n} (its facts are no longer on the record): {why}"
         if legacy_defect:
             body += ("\n- `act88760_gpio4_defect` (legacy `yes`): informational only, no longer "
                      "ship-blocking; see `act88760_gpio4_workaround` / `act88760_gpio4_after_boot`")
@@ -2603,6 +2839,11 @@ class Record(Step):
         after = {**before, **{k: str(v) for k, v in auto.items() if catalogue.get(k, {}).get("mode") != "manual"},
                  **{k: v for k, v in defaults.items() if k not in before}}
         blockers = ledger_out.ship_check(after, catalogue, expected_family(ctx.preset))
+        if voided:
+            # not left to ship-required keys: sd_out, census_final, clkgen, rtc_set and hil_smoke
+            # have none, and a struck key is only as good as the catalogue that names it
+            blockers.insert(0, "verification voided by a later write or SD-hold change, run again: "
+                            + ", ".join(sorted(voided)))
         detail = f"{len(changed) if changed is not None else len(would)} key(s) " \
                  f"{'updated' if ctx.execute else 'would change'}; ship check: " + \
                  ("SHIPPABLE" if not blockers else "blocked: " + "; ".join(blockers))
@@ -2645,6 +2886,7 @@ class SecurePageLock(Step):
         unit = ledger_out.read_unit_yaml(ctx.unit_dir / f"{ctx.serial}.unit.yaml")
         catalogue = ledger_out.load_catalogue(ctx.ledger_root / "schema" / "v2n.keys.yaml")
         bad += [f"ship check: {b}" for b in ledger_out.ship_check(unit, catalogue, expected_family(ctx.preset))]
+        bad += [f"{n} is void ({why})" for n, why in voided_steps(ctx.state).items()]
         return bad
 
     def probe(self, ctx):
@@ -2747,14 +2989,20 @@ def run_one(step: Step, ctx: Ctx, force: bool = False) -> StepResult:
         tstart = len(ctx.bench.console.transcript) if ctx.bench is not None else 0
         cstart = len(ctx.power_cuts)
         try:
-            if ctx.execute and step.name not in ctx.state.get("steps", {}):
+            if ctx.execute and (step.name not in ctx.state.get("steps", {}) or step.name in WRITE_STEPS):
                 # A run killed mid-step must leave an entry, or Record would fall back
-                # to an older same-bundle done entry from a superseded group.
-                ctx.state.setdefault("steps", {})[step.name] = {"status": "running", "at": _now()}
+                # to an older same-bundle done entry from a superseded group. A write step
+                # replaces its entry even when it has one: killed part-way it must not keep the
+                # old `done` evidence for the keys it was rewriting.
+                ctx.state.setdefault("steps", {})[step.name] = {
+                    "status": "running", "at": _now(), "seq": next_seq(ctx.state)}
                 save_state(ctx.state_path, ctx.state)
+            ctx.write_step, ctx.write_marked = (step.name if step.name in WRITE_STEPS else ""), False
             res = step.run(ctx)
         except (BenchError, Refused, ValueError, OSError) as e:
             res = StepResult(step.name, "failed", str(e))
+        finally:
+            ctx.write_step = ""
         ctx.plan_log.extend(plog[pstart:])  # audit trail: every PSU command, timestamped
         if cuts := ctx.power_cuts[cstart:]:
             # how every power cut of this step was made: clean | fallback | blind | not-needed
@@ -2812,13 +3060,16 @@ def run_steps(ctx: Ctx, only: list[str] | None = None, start: str | None = None,
     if ctx.execute:
         ctx.state.setdefault("schema", 1)
         ctx.state.update(sku=ctx.sku, serial=ctx.serial)
+        if seed_mutation_marker(ctx.state):
+            save_state(ctx.state_path, ctx.state)
     selected = steps or select_steps(only, start, skip)
     for cls in selected:
         res = run_one(cls(), ctx, force=cls.name in (force or []))
         results.append(res)
         if ctx.execute:
             ctx.state.setdefault("steps", {})[res.name] = {
-                "status": res.status, "at": _now(), "detail": res.detail, "evidence": res.evidence}
+                "status": res.status, "at": _now(), "seq": next_seq(ctx.state),
+                "detail": res.detail, "evidence": res.evidence}
             save_state(ctx.state_path, ctx.state)
         if res.status == "failed":
             # Record still runs: facts learnt so far (the census, a

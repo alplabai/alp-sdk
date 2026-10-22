@@ -5,7 +5,7 @@
 # the gd32-bridge-gpio gpiochip exposes >= 24 lines (line 22 = IO15, line 23 =
 # IO26).  Read-only on purpose: IO15 is the carrier's LCD1_PWR_EN (pulled high),
 # so this spec never reads or drives either pad.  Needs bridge firmware that reports
-# protocol 0.16+ (firmware 0.3.1 reports 0.15 and does not qualify) (HIL spec, not bench-verified yet).
+# protocol 0.16+ (the protocol-0.15 line does not qualify; released firmware v0.3.1 reports 0.14.1) (HIL spec, not bench-verified yet).
 
 schema_version: 1
 name: v2n101-gd32-io15-io26-gpio

@@ -62,7 +62,7 @@ allow-list.  Command opcodes are 1 byte; their numeric encoding is:
 | `0x30` | `ADC_READ`            | `channel:u8 samples:u8`                            | `mv[samples]:u16` (millivolt, raw averaged)        |
 | `0x40` | `DA9292_STATUS_FORWARD` | _empty_                                          | `da9292_faults:u8` (always `0xFF` on this HW rev — see §3.4) |
 | `0x41` | `SE_RESET` (v0.8)       | `assert:u8` (`0` = release, `1` = hold in reset) | _empty_ (see §3.15) |
-| `0x42` | `BOOT_CONFIG` (v0.15)   | `op:u8 flags:u32` (`op` 0 = GET, 1 = SET; `flags` ignored on GET) | `flags:u32` (the stored value; see §3.19) |
+| `0x42` | `BOOT_CONFIG` (v0.14.1) | `op:u8 flags:u32` (`op` 0 = GET, 1 = SET; `flags` ignored on GET) | `flags:u32` (the stored value; see §3.19) |
 | `0x50` | `DAC_SET`             | `channel:u8 reserved:u8 value_mv:u16`              | _empty_                                            |
 | `0x51` | `DAC_GET`             | `channel:u8`                                       | `value_mv:u16`                                     |
 | `0x60` | `QENC_READ`           | `encoder:u8`                                       | `position:i32`                                     |
@@ -479,7 +479,7 @@ Also at minor `>= 17` the Linux driver exposes, on the same gpio node:
   older firmware underflows the shared timer reload on period 0.
 
 `PB4` resets as the JTAG `NJTRST` pin (alternate function, pull-up) on GD32
-parts, so firmware 0.3.1 parks it analog / no pull at boot; debug access on
+parts, so the protocol-0.15 firmware line parks it analog / no pull at boot; debug access on
 this board is SWD only. The `GD32G553_GPIO_LINE_*` host macros are bridge
 bit numbers, not Linux gpiochip line numbers.
 
@@ -1437,7 +1437,13 @@ Framing: the CRC follows the last code directly (§4).  The host clocks
 
 Host API: `gd32g553_adc_stream_begin2()` / `gd32g553_adc_stream_read2()`.
 
-### 3.19 Persistent boot configuration (`v0.15+`)
+### 3.19 Persistent boot configuration (`v0.14.1+`)
+
+Firmware v0.3.1 (protocol 0.14.1) is the first release with `BOOT_CONFIG`.
+It is v0.3.0 plus this opcode only, so it is a PATCH bump although it adds an
+opcode: minor 15 belongs to the separate protocol-0.15 line, and a 0.15.0 build
+may lack `0x42`.  Hosts detect the opcode by `STATUS_NOSUPPORT`, never by the
+version number.
 
 `BOOT_CONFIG` (`0x42`) reads or stores a small persistent flag word in GD32
 flash.  Request `op:u8 flags:u32` (little-endian, 5 bytes): `op` `0` = GET
@@ -1475,7 +1481,14 @@ as well as SPI**, because provisioning runs from Linux.
   length; `STATUS_BUSY` as above; `STATUS_NOSUPPORT` on firmware that
   predates the opcode, a build without the flash HAL, a single-bank part
   (`OBCTL.DBS` = 0) or an image running from slot B.  The host helpers map
-  it to `ALP_ERR_NOSUPPORT`.
+  it to `ALP_ERR_NOSUPPORT`.  On slot B the flag can only be changed after an
+  OTA back to slot A.
+* **Flash location.**  The two record pages are `0x08076000` (REC0) and
+  `0x08076800` (REC1).  A mass erase clears the flag.
+* **Held by the application, not the bootloader.**  The `PD11` drive is set in
+  the application's hardware init, so during any GD32-only reset (watchdog,
+  OTA commit, host-driven reset) the pad is undriven and the carrier pulls
+  can reconnect the microSD until the application is up again.
 
 Host API: `gd32g553_boot_config_get()` / `gd32g553_boot_config_set()` with
 `GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH`.
