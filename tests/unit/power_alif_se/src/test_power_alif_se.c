@@ -339,6 +339,9 @@ alp_status_t alif_se_hw_enter_ewic(bool rtc_int, uint32_t pads, uint32_t lptimer
 		if ((g_rec_at_set.armed_hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
 			g_rtc_flags = RV3028C7_WAKE_TF;
 		}
+		if ((g_rec_at_set.armed_hw & ALP_SOM_ARM_RTC_EVI) != 0u) {
+			g_rtc_flags = RV3028C7_WAKE_EVF;
+		}
 	}
 	return ALP_OK;
 }
@@ -540,6 +543,25 @@ uint32_t alif_se_hw_lpgpio_ext_porta(void)
 	return 0x1u;
 }
 
+static unsigned g_evi_arms, g_evi_disarms;
+
+alp_status_t alp_som_power_rtc_evi_arm(void)
+{
+	g_evi_arms++;
+	return ALP_OK;
+}
+
+alp_status_t alp_som_power_rtc_evi_disarm(void)
+{
+	g_evi_disarms++;
+	g_rtc_regs[2] &= (uint8_t)~0x04u; /* EIE */
+	g_rtc_regs[0] &= (uint8_t)~0x02u; /* EVF */
+	if ((g_rtc_regs[0] & 0x04u) == 0u) {
+		g_int_level = 0; /* nothing left to hold /INT low */
+	}
+	return ALP_OK;
+}
+
 alp_status_t alp_som_power_rtc_clear_stale_uf(void)
 {
 	g_uf_clears++;
@@ -650,6 +672,8 @@ static alp_power_backend_state_t g_state;
 
 static void reset_fakes(void)
 {
+	g_evi_arms         = 0u;
+	g_evi_disarms      = 0u;
 	g_bkram_ok         = true;
 	g_restore_failed   = 0u;
 	g_shadowed         = false;
@@ -1110,7 +1134,7 @@ ZTEST(power_alif_se, test_advertised_wake_caps_are_the_real_ones)
 	uint32_t caps = 0;
 
 	zassert_ok(se_open(&g_state, NULL, &caps));
-	zassert_equal(caps, ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_TIMER);
+	zassert_equal(caps, ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_EXT_EVENT);
 
 	g_int_present     = false;
 	g_countdown_ready = true;
@@ -1123,10 +1147,10 @@ ZTEST(power_alif_se, test_advertised_wake_caps_are_the_real_ones)
 
 	g_int_present = true;
 	zassert_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_STOP),
-	              ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_TIMER,
+	              ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_EXT_EVENT,
 	              "RV countdown stands in for the timer");
 	zassert_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_STANDBY),
-	              ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_TIMER);
+	              ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_TIMER | ALP_POWER_WAKE_EXT_EVENT);
 	zassert_equal(se_mode_wake_caps(&g_state, ALP_POWER_MODE_SLEEP),
 	              0u,
 	              "no pm_policy in this image: SLEEP arms nothing");
@@ -1457,6 +1481,39 @@ ZTEST(power_alif_se, test_decode_i2c_rtc_flags_and_slept_time)
 	alp_som_power_wake_decode_i2c(&rec);
 	zassert_equal(rec.wake_source, ALP_POWER_WAKE_RTC);
 	zassert_equal(rec.slept_ms, 1000u);
+}
+
+ZTEST(power_alif_se, test_ext_event_wake_arms_evi_and_is_its_own_source)
+{
+	g_state.wake_bitmap = ALP_POWER_WAKE_EXT_EVENT;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_OK);
+	zassert_equal(g_rec_at_set.armed_hw & ~ALP_SOM_REC_NSRST_TRUSTED, ALP_SOM_ARM_RTC_EVI);
+	zassert_equal(g_evi_arms, 1u);
+	zassert_equal(ev_count(EV_ARM_INT_PAD), 1u, "EVI reaches the SoC through /INT -> P15_0");
+	zassert_equal(ev_count(EV_ARM_RTC_TIMER), 0u);
+
+	/* Wake decode: EVF is EXT_EVENT, not RTC, and EIE is turned off again. */
+	alp_som_pd_record_t rec = { .armed_hw = ALP_SOM_ARM_RTC_EVI };
+
+	g_rtc_flags   = RV3028C7_WAKE_EVF;
+	g_evi_disarms = 0u;
+	alp_som_power_wake_decode_i2c(&rec);
+	zassert_equal(rec.wake_source, ALP_POWER_WAKE_EXT_EVENT);
+	zassert_equal(g_evi_disarms, 1u);
+
+	/* A stale AF with only EVI armed is not credited to the RTC. */
+	rec         = (alp_som_pd_record_t){ .armed_hw = ALP_SOM_ARM_RTC_EVI };
+	g_rtc_flags = RV3028C7_WAKE_AF;
+	alp_som_power_wake_decode_i2c(&rec);
+	zassert_equal(rec.wake_source, 0u);
+}
+
+ZTEST(power_alif_se, test_ext_event_wake_without_int_pad_is_nosupport)
+{
+	g_int_present       = false;
+	g_state.wake_bitmap = ALP_POWER_WAKE_EXT_EVENT;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_ERR_NOSUPPORT);
+	assert_no_side_effect();
 }
 
 ZTEST(power_alif_se, test_decode_i2c_no_flags_means_unknown_cause)
@@ -2232,6 +2289,18 @@ ZTEST(power_alif_se, test_the_run_profile_matches_the_cold_boot_profile)
 	for (size_t i = 0; i < sizeof(r) / sizeof(uint32_t); ++i) {
 		zassert_not_equal(w[i], POISON32, "run_profile_t word %u never assigned", (unsigned)i);
 	}
+}
+
+ZTEST(power_alif_se, test_stale_evi_state_is_stopped_not_refused)
+{
+	/* A reset skipped the wake decode: EIE still on, EVF latched, /INT held low. */
+	g_int_level         = 1;
+	g_rtc_regs[0]       = 0x02u; /* EVF */
+	g_rtc_regs[2]       = 0x04u; /* EIE */
+	g_state.wake_bitmap = ALP_POWER_WAKE_EXT_EVENT;
+	zassert_equal(se_request_sleep(&g_state, ALP_POWER_MODE_STOP, 0u, NULL), ALP_OK);
+	zassert_true(g_evi_disarms >= 1u, "stale EVI stopped before the /INT check");
+	zassert_equal(g_evi_arms, 1u);
 }
 
 /* ---- RV-3028 evidence at an /INT refusal ---------------------------------------------- */

@@ -113,3 +113,15 @@ tests:
       - aen
       - power
     build_only: true   # compile + link check of the variant; the behaviour is a bench run.
+
+  alp_sdk.examples.aen.power_stop.evi.aen:
+    extra_conf_files:
+      - variants/e-evi.conf
+    platform_allow:
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - power
+    build_only: true   # compile + link check of the variant; the EVI wake is a bench run.
