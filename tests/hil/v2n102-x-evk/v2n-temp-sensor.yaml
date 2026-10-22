@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+# NOT BENCH-VERIFIED on E1M-V2N102: derived from the v2n101 spec of the same name
+# (v2n101-x-evk); the SoM preset populates the same hardware.  UNVERIFIED on a V2N102 unit.
+#
+# V2N-family HiL smoke for examples/v2n/v2n-temp-sensor.  Reads the
+# on-module TMP112 over BRD_I2C @ 0x40 (ADD0 = GND on the fitted
+# TMP112DIDPWR, see metadata/chips/tmp112.yaml; 0x48 is the datasheet
+# default, and on V2M it is the DEEPX LPDDR buck).  V2N + V2M only --
+# the AEN family's TMP112 sits on a different bus.
+#
+# The example is an A55/Linux app (RIIC8/BRD_I2C is Linux-exclusive), so
+# this spec runs it over ssh (flash_method: ssh-run) instead of flashing
+# the CM33 the board runner targets.  Build it for the target first and
+# pass --artifact-dir + --ssh-host.
+#
+# What this proves end-to-end:
+#   - alp_i2c_open() on BRD_I2C (/dev/i2c-8).
+#   - tmp112_init() finds the part and reads return a temperature.
+
+schema_version: 1
+name: v2n-temp-sensor
+description: |
+  V2N-family on-module TMP112 read at BRD_I2C @ 0x40, run on the A55.
+
+example: examples/v2n/v2n-temp-sensor
+flash_method: ssh-run
+
+serial:
+  duration_s: 15
+  expect_contains:
+    - "[temp] v2n-temp-sensor"
+    - "[temp] sample 0:"
+    - "degC"
+    - "[temp] done"
+  expect_absent:
+    - "open failed"
+    - "tmp112_init ->"
+    - "read failed"
