@@ -1,0 +1,25 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * CMSDK watchdog overlay for the E1M-AEN401 (E4, M55-HP).
+ *
+ * The board devicetree carries wdog0@40100000 (arm,cmsdk-watchdog) and its
+ * clock, disabled (zephyr/dts/alif/ensemble_rtss_hp_wdog.dtsi); this overlay
+ * only enables it and names it for the app.  Driver = UPSTREAM Zephyr
+ * wdt_cmsdk_apb.c (Tier-1, NOT vendored).
+ */
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+	};
+	aliases {
+		alp-wdt0 = &wdog0;
+	};
+};
+
+&wdog0 {
+	status = "okay";
+};

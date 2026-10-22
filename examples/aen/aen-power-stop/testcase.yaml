@@ -27,7 +27,8 @@ tests:
       - power
     build_only: true   # the cycles are a bench flash, not a CI run.
 
-  # The M55-HP builds of the same backend (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP): the
+  # The M55-HP builds of the same backend (CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP, and the
+  # E4 HP CONFIG_SOC_AE402FA0E5597LE0_RTSS_HP on the AEN401, not bench-run by Alp Lab): the
   # HP-only branches (own AON registers, 400 MHz restore profile, STANDBY / TCM-retention /
   # TCM-boot refusals) are covered on native_sim by tests/unit/power_alif_se.  STOP is
   # bench-proven on the AEN803 HP with only the HP booted (see the README).
@@ -35,6 +36,7 @@ tests:
     platform_allow:
       - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
       - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp
     tags:
       - alp-sdk
       - example

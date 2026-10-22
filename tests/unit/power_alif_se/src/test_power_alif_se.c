@@ -2630,7 +2630,8 @@ ZTEST(power_alif_se, test_the_built_profile_is_checked_for_mram_and_seram)
 /* ---- The M55-HP (built, not bench-verified) ---------------------------------------------
  *
  * The same compiled backend drives both cores through alif_se_hw_core_is_hp(); the real seam
- * answers from CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP.  What differs is cited at each branch in
+ * answers from CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP or CONFIG_SOC_AE402FA0E5597LE0_RTSS_HP
+ * (HW_CORE_IS_HP).  What differs is cited at each branch in
  * alif_se_power.c (vendor sdk-alif samples/drivers/pm/system_off/src/main.c). */
 
 static char   g_log[512];

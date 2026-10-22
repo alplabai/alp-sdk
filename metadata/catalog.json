@@ -295,7 +295,7 @@
         ],
         "path": "examples/aen/aen-sdcard-file",
         "som": "E1M-AEN801",
-        "summary": "Write, read back and list a file on the **E1M-EVK microSD card** (slot J7) with **FatFs**, from the Alif **M55-HE** of an **E1M-AEN801/AEN803** SoM."
+        "summary": "Write, read back and list a file on the **E1M-EVK microSD card** (slot J7) with **FatFs**, from either M55 of any E1M-AEN SoM with a board tree: the M55-HE or M55-HP of the **E1M-AEN801/AEN803** (Ensemble E8) and the M55-HP of the **E1M-AEN401** (Ensemble E4)."
       },
       {
         "board": "e1m-evk",
