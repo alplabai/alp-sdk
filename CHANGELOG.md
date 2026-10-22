@@ -165,7 +165,7 @@ When board.yaml `storage:` declares a mountable partition (a `mount:` on a non-`
 
 ### Added — soc-spec-v1 `cm33_boot.mtd_name`: the V2N xSPI boot partition `xspi_offset` is relative to (tan-cli#1314)
 
-RZ/V2N `n44.json` now records `"mtd_name": "fip"` beside `xspi_offset` (`0x1A0000`), and `soc-spec-v1` accepts the optional key. A tool writing the CM33 image from running Linux resolves `/proc/mtd` by this name, so a project manifest cannot point the offset-scoped erase at a different partition. Consumed by tan-cli's `linux_mtd` flash backend.
+RZ/V2N `n44.json` now records `"mtd_name": "fip"` beside `xspi_offset` (`0x1A0000`), and `soc-spec-v1` accepts the optional key. A tool writing the CM33 image from running Linux resolves `/proc/mtd` by this name, so a project manifest cannot point the offset-scoped erase at a different partition. Intended for a Linux-side tool that writes the CM33 image; no tan-cli flash backend consumes it yet.
 
 ### Fixed — planner no longer aliases mailbox channel 0 for unreserved `ipc:` entries or crashes on a leading-zero RAM console size (alplabai/tan-cli#1487)
 
@@ -593,7 +593,7 @@ console from `aen-bench-shared.conf`) and layers them after the slice's
 `alp.conf`. Proven on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and refused
 elsewhere: `tan build` rejects a project with no M55-HE app (an M55-HP-only
 project included), any other SKU or a sysbuild project
-(`build.link-itcm-unsupported`), and an explicit non-RAM console
+(`build.link-itcm-unsupported`), and an explicit `linux`/`none` console
 (`build.link-itcm-console-conflict`). The slice's manifest entry carries
 `flash_method: ram_run_only`, so plain `tan flash` cannot write the 0x0-linked
 image to MRAM. alp-sdk's own `alp_orchestrate` refuses the knob with a message
