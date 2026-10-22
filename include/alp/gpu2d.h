@@ -20,8 +20,9 @@
  *
  * Backends:
  *   - AEN-family : D/AVE 2D hardware block (SDK backend; no vendor
- *                  SDK dependency in app code).  Bench-unverified
- *                  today -- see src/backends/gpu2d/alif_dave2d.c.
+ *                  SDK dependency in app code).  Bench-verified on
+ *                  E1M-AEN803 (M55-HE); see
+ *                  src/backends/gpu2d/alif_dave2d.c.
  *   - RZ/V2N Linux: the Mali-G31 through the vendor EGL/GLES stack
  *                  (src/backends/gpu2d/yocto_gles.c, opt-in
  *                  ALP_SDK_USE_GPU2D_GLES, bench-unverified); falls

@@ -38,10 +38,5 @@ tests:
       - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
       - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
     build_only: true
-    # The AEN targets have no Ensemble entropy driver at all (#2192), so the
-    # weak-RNG refusal in zephyr/CMakeLists.txt applies and this build has to
-    # acknowledge it to configure. Lives on the scenario, not in the app's
-    # prj.conf (see mqtt-telemetry/testcase.yaml), so a copy scaffolded by
-    # `tan init --from-example` and built for real hardware still refuses.
-    extra_configs:
-      - CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y
+    # No weak-RNG opt-in: every AEN board seeds its CSPRNG from the Secure
+    # Enclave TRNG by default (#2192), so this configures on real entropy.
