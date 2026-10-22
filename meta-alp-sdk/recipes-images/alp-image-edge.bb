@@ -66,7 +66,7 @@ IMAGE_INSTALL += " alp-lvgl-dashboard"
 # e1m-aen801-a32 build (see that guard's comment for
 # why 'rzv2n-family' is confirmed present at this parse point).
 # ...and only when alp-sdk's drpai backend is actually built (RUHMI
-# configured, see alp-sdk_0.6.bb): the demo is pointless without it.
+# configured, see alp-sdk_git.bb): the demo is pointless without it.
 IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '1' and \
     'rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and \
     d.getVar('RUHMI_DRPAI_TVM_DIR') else ''}"

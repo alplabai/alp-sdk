@@ -23,7 +23,7 @@
 # A build WITHOUT the layer still builds (minus the DX-M1 inference
 # path) instead of failing on "Nothing PROVIDES dx-rt".  Force it off
 # with ALP_ENABLE_DEEPX_DXM1 = "0" in local.conf; setting "1" without
-# the layer is a loud bb.fatal in alp-sdk_0.6.bb.
+# the layer is a loud bb.fatal in alp-sdk_git.bb.
 ALP_ENABLE_DEEPX_DXM1 ?= "${@'1' if 'meta-deepx-m1' in (d.getVar('BBFILE_COLLECTIONS') or '').split() else '0'}"
 
 # `dx-driver` builds the DX-M1 PCIe kernel module(s) (`dx_dma.ko` +

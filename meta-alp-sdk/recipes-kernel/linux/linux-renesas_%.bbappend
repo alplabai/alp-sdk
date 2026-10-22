@@ -303,7 +303,7 @@ ALP_DRPAI_LAYER[vardepvalue] = "${ALP_DRPAI_LAYER}"
 # the `??=` here is only the fallback for a consumer that uses this
 # bbappend without one of them.  Turning the SDK backend on
 # (PACKAGECONFIG "drpai") stays a separate switch: it needs a RUHMI
-# checkout, and alp-sdk_0.6.bb auto-enables it only when one is configured.
+# checkout, and alp-sdk_git.bb auto-enables it only when one is configured.
 ALP_ENABLE_DRPAI ??= "${@'1' if 'rz-drpai' in (d.getVar('BBFILE_COLLECTIONS') or '').split() else '0'}"
 ALP_DRPAI_DT_ENABLE = "${@'1' if (d.getVar('ALP_DRPAI_LAYER') == '1' and d.getVar('ALP_ENABLE_DRPAI') == '1') else '0'}"
 ALP_DRPAI_DT_ENABLE[vardepvalue] = "${ALP_DRPAI_DT_ENABLE}"

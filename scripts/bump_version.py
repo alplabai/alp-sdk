@@ -348,11 +348,11 @@ def update_banner_c(new_version: str, dry_run: bool) -> None:
     print(f"  updated {BANNER_C.relative_to(REPO)}: sample banner -> \"Alp SDK {core}\"")
 
 
-ALP_SDK_RECIPE = REPO / "meta-alp-sdk" / "recipes-core" / "alp-sdk" / "alp-sdk_0.6.bb"
+ALP_SDK_RECIPE = REPO / "meta-alp-sdk" / "recipes-core" / "alp-sdk" / "alp-sdk-version.inc"
 
 
 def update_yocto_recipe(new_version: str, dry_run: bool) -> None:
-    """Rewrite PV in the alp-sdk Yocto recipe (#2827).
+    """Rewrite PV in the shared recipe include every sibling requires (#2827, #2850).
 
     Core version, with a SemVer pre-release written as `~suffix` (not `-`)
     so 0.17.0~rc2 sorts before 0.17.0 in opkg/dpkg/rpm feeds.
