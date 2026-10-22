@@ -244,7 +244,8 @@ one is always from an earlier run, not this attempt's.
   (`app-release-exec-linux-SE_FW_x.y.z`). Contains `tools-config`,
   `maintenance`, `app-gen-toc`, `app-write-mram`, the stock `m55_blink_*`
   examples, and the user guide PDF.
-* **A 1.8 V-capable USB-UART** for the SE-UART (see §2 — this is the #1 trap).
+* **A 1.8 V-capable USB-UART** for the SE-UART (see §2 — this is the #1 trap). On the 2641-R3 the RP2040
+  CDC port may replace it (not bench-verified; see §2).
 * The board powered (1 A bench supply is plenty; a fresh SoM idles ~80-150 mA).
 * A **SWD/J-Link probe** — for **Flow D** it is the burn path itself (select
   the part-number device profile so the built-in Alif MRAM loader activates),
@@ -261,6 +262,12 @@ one is always from an earlier run, not this attempt's.
 > and how to read the running version.
 
 ## 2. Wire the SE-UART — the part everyone gets wrong
+
+> On the E1M EVK 2641-R3 the RP2040 (`U55`) exposes a CDC port named
+> `Alp SE-UART` on `J5`, so an external adapter may not be needed there. That
+> path is not bench-verified and which RP2040 channel carries the module's
+> SE-UART is TBD; see [`aen-rp2040-debug-probe.md`](aen-rp2040-debug-probe.md).
+> The wiring below is the proven one.
 
 The SES maintenance UART (**SEUART**) is **not** the application console. On
 E1M-AEN modules it is a dedicated, reserved service pair exposed by the carrier
