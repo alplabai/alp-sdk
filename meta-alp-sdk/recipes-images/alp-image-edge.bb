@@ -19,6 +19,12 @@ SUMMARY = "Alp SDK edge AI development image (all features, debug-tweaks)"
 
 require alp-image-common.inc
 
+# Dev-kit signed opkg feed (opt-in: require conf/distro/include/alp-devkit-feed.inc,
+# alp-sdk #2841). Edge only: needs the package manager on the target, and field
+# devices (alp-image-prod / -base) update by image (Mender), never by feed.
+IMAGE_FEATURES += "${@'package-management' if d.getVar('ALP_DEVKIT_FEED') == '1' else ''}"
+IMAGE_INSTALL:append = "${@' alp-devkit-feed-config' if d.getVar('ALP_DEVKIT_FEED') == '1' else ''}"
+
 # Dev kitchen-sink: every opt-in feature group + passwordless debug access.
 IMAGE_FEATURES += "alp-camera alp-display alp-ros debug-tweaks"
 
@@ -60,7 +66,7 @@ IMAGE_INSTALL += " alp-lvgl-dashboard"
 # e1m-aen801-a32 build (see that guard's comment for
 # why 'rzv2n-family' is confirmed present at this parse point).
 # ...and only when alp-sdk's drpai backend is actually built (RUHMI
-# configured, see alp-sdk_0.6.bb): the demo is pointless without it.
+# configured, see alp-sdk_git.bb): the demo is pointless without it.
 IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '1' and \
     'rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') and \
     d.getVar('RUHMI_DRPAI_TVM_DIR') else ''}"

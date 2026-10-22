@@ -7,13 +7,29 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
+### Fixed — abidiff gate honesty (#2851)
+
+**The `abidiff` gate is advisory, and now says so.** It is not a required context and `pr-plain-cmake.yml` has no `merge_group:` trigger, so a red run blocks nothing (maintainer decision: stays advisory). The SONAME-rename suppression no longer masks an abidiff error (applied only when the exit status has no ABI_ERROR/USAGE bit), every skip (tool missing, no tag of the current minor) emits a `::warning::` in CI or under `--require-tool`, and a test covers the SONAME-only report shape against a synthetic fixture (hand-written in the shape `soname_only()` parses, not a real capture; a recorded `check_abidiff.py --baseline-tag v0.17.0-rc2 --keep` run on a host with abigail-tools is still pending, #2851).
+
 ### Fixed — provisioning checks are pinned to the bundle being provisioned, and the released GD32 v0.3.0 no longer dead-ends a unit
 
 **`clkgen_verify` judges the bundle's own U-Boot fixup.** The expected 5L35023B registers were the tool tree's (`0x1f` = `0xc7`, patch 0013), so a unit from a bundle built before patch 0013 (som-0.2.2: `0x1f` stays at OTP `0x46`, `0x24` = `0x8e`) failed against a U-Boot it does not run. An optional `clkgen_fixup_regs` map in the `--functest-expect` overlay (quoted hex strings, plus `bundle: {sku, release_version}` naming the bundle it applies to) now pins the expectation per bundle; absent keeps the default, a malformed map or a different bundle refuses the step, and the evidence key `clkgen_fixup_source` records which one was used.
 
-**`sd_out_emmc_boot` has an operator path for a GD32 without `BOOT_CONFIG`.** The released v0.3.0 (protocol 0.14.0) answers `NOSUPPORT`; on a protocol below 0.15.0 the step now prompts the operator to power off and remove the microSD (a non-interactive run, or a unit already on the eMMC, takes `--sd-removed-by-operator` instead; the tool still halts and cold-cycles), and passes only with an eMMC root and no `SD` card enumerated. Evidence key `sd_out_method` is `gd32-boot-config` or `operator-removed`.
+**`sd_out_emmc_boot` has an operator path for a GD32 without `BOOT_CONFIG`.** The released v0.3.0 (protocol 0.14.0) answers `NOSUPPORT`; on a protocol below 0.14.1 (`BOOT_CONFIG` ships from GD32 v0.3.1, protocol 0.14.1) the step now prompts the operator to power off and remove the microSD (a non-interactive run, or a unit already on the eMMC, takes `--sd-removed-by-operator` instead; the tool still halts and cold-cycles), and passes only with an eMMC root and no `SD` card enumerated. Evidence key `sd_out_method` is `gd32-boot-config` or `operator-removed`.
 
 **`census_final` no longer leaves `secure_page_state` unread.** A written, unlocked secure page was dropped by the final census and marked `unread`, so a fully provisioned unit could not pass the ship check. The page is re-read read-only and compared with `<serial>.secure-page.staged.bin`; it is never written or locked.
+
+### Fixed — the functest finds the OPTIGA Trust M, and `BOOT_CONFIG` is documented at protocol 0.14.1
+
+**`secure_element` no longer misses a healthy OPTIGA.** The part sleeps about 10 ms after a completed read and NACKs its address once; that NACK wakes it for only about 8 ms. The probe slept 50 ms after every NACK, so all 100 tries landed on a sleeping part and every V2M103 unit failed the check (waived for som-0.2.2). The retry now follows the NACK at once, and an all-`0xff` read (seen with other traffic on `BRD_I2C`) counts as no answer instead of a pass (bench timing on 2026W38-0009; `SE_RST` polarity confirmed correct).
+
+**`gd32_flash` no longer passes a GD32 that boots the wrong slot.** It wrote only the 44-byte OTA metadata record, so on a unit with OTA history an older, higher-counter record in the other metadata pages still won and the bootloader fell back to the image left in slot B, while the md5 readback and `GET_VERSION` (same protocol) passed (2026W38-0009). The step now erases the whole 8 KB metadata area first, then writes the record, the bootloader and slot A; it reads the area back in full and requires slot A running the build-id embedded in `slot-a.bin`. Probes gain an `erase ADDR SIZE` operation; the J-Link probe refuses it until bench-proven, and a `slot-a.bin` without an embedded build-id is refused before any write.
+
+**A rewrite voids older verification.** A verification step (`sd_out_emmc_boot`, `cold_boot_test`, `census_final`, `clkgen_verify`, `rtc_set`, `functional_test`, `hil_smoke`) that ran before the last real write to the unit (any write step's first mutation, or `boot_sd_linux` clearing the GD32 SD hold) no longer counts: it re-runs, its keys in `<serial>.unit.yaml` are struck as `unread (voided, ...)`, and `record` reports a ship blocker naming it, so `--only record` cannot print SHIPPABLE on proof older than the images. Existing state files are renumbered by wall clock once.
+
+**Re-provisioning a unit whose GD32 holds the microSD out works.** `boot_sd_linux` refused such a unit (`Linux root ... is on the eMMC, not the microSD`): the `SDMUX_EN_HIGH` flag from its first run kept U-Boot from seeing the card. The step now clears the flag before its cold cycle when root is the eMMC.
+
+**`BOOT_CONFIG` (`0x42`) is protocol 0.14.1.** GD32 firmware v0.3.1 ships the opcode on its own as a patch release; docs/gd32-bridge-protocol.md §3.19 now says so and adds the record-page addresses, the slot-B limit and the hold dropping during a GD32 reset. A `NOSUPPORT` from a 0.14.1+ bridge is a real fault in `sd_out_emmc_boot`. Text that called the unreleased protocol-0.15 bench build "firmware 0.3.1" now says the protocol-0.15 line.
 
 ## [v0.17.0] - 2026-10-13
 
@@ -165,7 +181,7 @@ When board.yaml `storage:` declares a mountable partition (a `mount:` on a non-`
 
 ### Added — soc-spec-v1 `cm33_boot.mtd_name`: the V2N xSPI boot partition `xspi_offset` is relative to (tan-cli#1314)
 
-RZ/V2N `n44.json` now records `"mtd_name": "fip"` beside `xspi_offset` (`0x1A0000`), and `soc-spec-v1` accepts the optional key. A tool writing the CM33 image from running Linux resolves `/proc/mtd` by this name, so a project manifest cannot point the offset-scoped erase at a different partition. Consumed by tan-cli's `linux_mtd` flash backend.
+RZ/V2N `n44.json` now records `"mtd_name": "fip"` beside `xspi_offset` (`0x1A0000`), and `soc-spec-v1` accepts the optional key. A tool writing the CM33 image from running Linux resolves `/proc/mtd` by this name, so a project manifest cannot point the offset-scoped erase at a different partition. Intended for a Linux-side tool that writes the CM33 image; no tan-cli flash backend consumes it yet.
 
 ### Fixed — planner no longer aliases mailbox channel 0 for unreserved `ipc:` entries or crashes on a leading-zero RAM console size (alplabai/tan-cli#1487)
 
@@ -593,7 +609,7 @@ console from `aen-bench-shared.conf`) and layers them after the slice's
 `alp.conf`. Proven on the E8 M55-HE (E1M-AEN801 / E1M-AEN803) and refused
 elsewhere: `tan build` rejects a project with no M55-HE app (an M55-HP-only
 project included), any other SKU or a sysbuild project
-(`build.link-itcm-unsupported`), and an explicit non-RAM console
+(`build.link-itcm-unsupported`), and an explicit `linux`/`none` console
 (`build.link-itcm-console-conflict`). The slice's manifest entry carries
 `flash_method: ram_run_only`, so plain `tan flash` cannot write the 0x0-linked
 image to MRAM. alp-sdk's own `alp_orchestrate` refuses the knob with a message

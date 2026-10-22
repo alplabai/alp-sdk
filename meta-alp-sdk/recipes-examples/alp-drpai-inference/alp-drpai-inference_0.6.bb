@@ -23,7 +23,7 @@ DEPENDS = "alp-sdk"
 # then (the alp-edgeai recipe shows the end state).
 #
 # For a local bake that must pick up uncommitted work-in-progress on top
-# of this branch, override with EXTERNALSRC the same way alp-sdk_0.6.bb's
+# of this branch, override with EXTERNALSRC the same way alp-sdk_git.bb's
 # own bring-up flow is driven, e.g. in local.conf:
 #
 #   INHERIT += "externalsrc"
@@ -34,7 +34,9 @@ DEPENDS = "alp-sdk"
 # v2n-drpai-inference CMake target.)
 SRC_URI = "git://github.com/alplabai/alp-sdk.git;protocol=https;branch=dev"
 SRCREV  = "${AUTOREV}"
-PV      = "0.6.0"
+require recipes-core/alp-sdk/alp-sdk-version.inc
+# Links the per-machine libalp_sdk.so, so must not be shared across machines (#2850).
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 S = "${WORKDIR}/git/examples/v2n/v2n-drpai-inference"
 

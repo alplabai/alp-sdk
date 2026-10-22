@@ -170,7 +170,7 @@ def test_split_sections_ignores_h3_and_preamble():
 def test_count_glyphs_handles_compound_status_cell():
     """A single Status cell can carry two glyphs for two sub-claims (the
     real docs/test-plan.md GPU2D row does this: sw_fallback verified,
-    D/AVE-2D backend untested).  Both must count."""
+    D/AVE-2D backend verified on silicon).  Both must count."""
     table = [
         "| Feature | Status |",
         "|---|---|",

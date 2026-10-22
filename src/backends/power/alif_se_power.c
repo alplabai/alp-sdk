@@ -69,6 +69,15 @@
  *                         wake.  A countdown is started through the chip driver
  *                         (rv3028c7_timer_start); with wake_after_ms == 0 the
  *                         caller's own alarm / countdown must already be armed.
+ *   ALP_POWER_WAKE_EXT_EVENT  the RV-3028 external-event input EVI (U21.8, the SoM net
+ *                         MODULE_STBY / E1.O2, pulled up to +1V8 by R43) through the same
+ *                         /INT -> P15_0 path (#2811).  A carrier / CC3501E GPIO18 (E1.I3,
+ *                         open-drain) pulling it low latches EVF (STATUS 0Eh bit 1); the
+ *                         backend sets EIE (CONTROL_2 10h bit 2) for the cycle and leaves it
+ *                         off again at the wake decode.  Event Control (13h) is NOT written:
+ *                         the power-on value (0x00, bench TBD: confirm it reads 0x00 and
+ *                         that this is the edge / unfiltered setting wanted) is relied on.
+ *                         Reported as its own wake_source, never as ALP_POWER_WAKE_RTC.
  *   ALP_POWER_WAKE_TIMER  the LPTIMER (the `alp,power-wake-timer` chosen node,
  *                         WE_LPTIMER0) for wake_after_ms < 1000.  Its 32 kHz source
  *                         is the AON low-frequency clock: LFRC runs ~4.5 % fast
@@ -337,7 +346,7 @@ static uint32_t stop_wake_caps(void)
 	}
 
 	if (rtc_int_usable()) {
-		caps |= ALP_POWER_WAKE_RTC;
+		caps |= ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_EXT_EVENT;
 	}
 	if (alif_se_hw_wake_timer_present() ||
 	    (rtc_int_usable() && alp_som_power_rtc_countdown_ready())) {
@@ -531,8 +540,14 @@ plan_wake(const alp_power_backend_state_t *state, uint32_t wake_after_ms, sleep_
 		plan->wake |= ALP_POWER_WAKE_RTC;
 	}
 
+	if ((bitmap & ALP_POWER_WAKE_EXT_EVENT) != 0u) {
+		/* Caps already proved the /INT pad; the EVI enable is armed with the others. */
+		plan->hw |= ALP_SOM_ARM_RTC_EVI;
+		plan->wake |= ALP_POWER_WAKE_EXT_EVENT;
+	}
+
 	/* A policy that takes the RTC away conflicts with an RTC wake. */
-	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
+	if ((plan->hw & ALP_SOM_ARM_RTC_ANY) != 0u &&
 	    alp_som_power_policy(ALP_POWER_DOMAIN_RTC) == ALP_POWER_DOMAIN_POLICY_RAIL_OFF) {
 		return ALP_ERR_INVAL;
 	}
@@ -641,6 +656,9 @@ static bool rtc_int_asserted_now(void)
 	return rtc_enabled_flag_set(r);
 }
 
+/* Stale RV-3028 state is stopped here only for the sources this plan owns.  A stale EIE left by
+ * a lost wake record can still hold /INT low until an EVI cycle runs; EIE the caller armed
+ * itself is left alone by design. */
 static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
 {
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
@@ -659,8 +677,15 @@ static alp_status_t refuse_if_pending(const sleep_plan_t *plan)
 	} else if ((plan->hw & ALP_SOM_ARM_RTC_INT) != 0u) {
 		(void)alp_som_power_rtc_clear_stale_uf(); /* the caller's own alarm: UF noise only */
 	}
-	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
-	    rtc_int_asserted_now()) {
+	if ((plan->hw & ALP_SOM_ARM_RTC_EVI) != 0u) {
+		/* The backup-powered part keeps EIE across a reset that skipped the wake decode; the
+		 * next EVI pulse would then latch EVF with EIE on and hold /INT low for every later
+		 * sleep.  This backend owns EVI here: stop it (EIE off, EVF cleared) like TE/TIE/TF. */
+		if (alp_som_power_rtc_evi_disarm() != ALP_OK) {
+			printk("alif_se_power: stale RV-3028 EVI state not cleared\n");
+		}
+	}
+	if ((plan->hw & ALP_SOM_ARM_RTC_ANY) != 0u && rtc_int_asserted_now()) {
 		rtc_refusal_dump_once();
 		return refuse(2, "rtc_int_asserted", 1, ALP_ERR_BUSY);
 	}
@@ -720,7 +745,7 @@ static uint32_t wake_events_for(const sleep_plan_t *plan)
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u) {
 		we |= ALP_AIPM_GEN2_WE_LPTIMER0; /* lptimer0 is the `alp,power-wake-timer` */
 	}
-	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
+	if ((plan->hw & ALP_SOM_ARM_RTC_ANY) != 0u) {
 		we |= ALP_AIPM_GEN2_WE_LPGPIO0; /* RV-3028 /INT = P15_0 = LPGPIO bit 0 */
 	}
 	return we;
@@ -740,7 +765,7 @@ static uint32_t ewic_for(const sleep_plan_t *plan)
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u) {
 		ewic |= ALP_AIPM_GEN2_EWIC_VBAT_TIMER;
 	}
-	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u || plan->pads != 0u) {
+	if ((plan->hw & ALP_SOM_ARM_RTC_ANY) != 0u || plan->pads != 0u) {
 		ewic |= ALP_AIPM_GEN2_EWIC_VBAT_GPIO;
 	}
 	return ewic;
@@ -952,6 +977,7 @@ typedef struct {
 	bool lptimer;
 	bool rtc_timer;
 	bool int_pad;
+	bool evi;
 	bool wake_pads;
 } armed_t;
 
@@ -963,11 +989,28 @@ static void disarm(const armed_t *a)
 	if (a->int_pad) {
 		alif_se_hw_rtc_int_disarm();
 	}
+	if (a->evi) {
+		(void)alp_som_power_rtc_evi_disarm();
+	}
 	if (a->rtc_timer) {
 		(void)alp_som_power_rtc_countdown_cancel();
 	}
 	if (a->lptimer) {
 		alif_se_hw_wake_timer_disarm();
+	}
+}
+
+/* Event Control (13h) is the one RV-3028 value the EVI wake relies on and this SDK never
+ * writes (power-on 0x00): print it the first time EVI is armed so a bench run can verify it. */
+static void evi_event_ctrl_print_once(void)
+{
+	static bool done;
+	uint8_t     r[6] = { 0 };
+
+	if (!done && alp_som_power_rtc_regs(r) == ALP_OK) {
+		done = true;
+		printk(
+		    "alif_se_power: RV-3028 EVI armed, EVENT_CTRL(13h)=0x%02x CTRL2=0x%02x\n", r[3], r[2]);
 	}
 }
 
@@ -985,13 +1028,21 @@ static alp_status_t arm(const sleep_plan_t *plan, armed_t *a)
 		}
 		a->rtc_timer = true;
 	}
+	if ((plan->hw & ALP_SOM_ARM_RTC_EVI) != 0u) {
+		a->evi = true; /* recorded first: a half-done arm is unwound too */
+		s      = alp_som_power_rtc_evi_arm();
+		if (s != ALP_OK) {
+			return s;
+		}
+		evi_event_ctrl_print_once();
+	}
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u) {
 		/* NOT armed here: the LPTIMER is armed last, inside the interrupt-off entry,
 		 * so no SE call, readback or console output can outlast the interval (bench
 		 * U8c).  Recorded now so every unwind cancels it. */
 		a->lptimer = true;
 	}
-	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
+	if ((plan->hw & ALP_SOM_ARM_RTC_ANY) != 0u) {
 		s = alif_se_hw_rtc_int_arm();
 		if (s != ALP_OK) {
 			return s; /* the caller unwinds what is recorded in @p a */
@@ -1060,10 +1111,16 @@ static uint32_t fired_sources(const sleep_plan_t *plan)
 	if ((plan->hw & ALP_SOM_ARM_LPTIMER) != 0u && alif_se_hw_wake_timer_pending()) {
 		fired |= plan->timed_bit;
 	}
-	if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
-	    alp_som_power_rtc_wake_service(&flags) == ALP_OK &&
-	    (flags & (RV3028C7_WAKE_TF | RV3028C7_WAKE_AF)) != 0u) {
-		fired |= ((plan->hw & ALP_SOM_ARM_RTC_TIMER) != 0u) ? plan->timed_bit : ALP_POWER_WAKE_RTC;
+	if ((plan->hw & ALP_SOM_ARM_RTC_ANY) != 0u &&
+	    alp_som_power_rtc_wake_service(&flags) == ALP_OK) {
+		if ((plan->hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
+		    (flags & (RV3028C7_WAKE_TF | RV3028C7_WAKE_AF)) != 0u) {
+			fired |=
+			    ((plan->hw & ALP_SOM_ARM_RTC_TIMER) != 0u) ? plan->timed_bit : ALP_POWER_WAKE_RTC;
+		}
+		if ((plan->hw & ALP_SOM_ARM_RTC_EVI) != 0u && (flags & RV3028C7_WAKE_EVF) != 0u) {
+			fired |= ALP_POWER_WAKE_EXT_EVENT;
+		}
 	}
 	if (plan->pads != 0u && alif_se_hw_wake_pads_fired(plan->pads) != 0u) {
 		fired |= ALP_POWER_WAKE_GPIO;
@@ -1240,7 +1297,7 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 	 * flag means the wake is spent (and with pulse mode the pad may even have gone
 	 * high again), so do not sleep on it.  The entry re-reads the pad too, with the
 	 * edge interrupt armed. */
-	if ((plan.hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u) {
+	if ((plan.hw & ALP_SOM_ARM_RTC_ANY) != 0u) {
 		bool spent = false;
 
 		if (alp_som_power_rtc_flags_pending(&spent) == ALP_OK && spent) {
@@ -1252,7 +1309,7 @@ static alp_status_t deep_sleep(alp_power_backend_state_t *state,
 
 	/* 7. Enter.  Interrupts are off and the wake pad is armed inside; this does not
 	 * return when the subsystem powers down. */
-	s = alif_se_hw_enter_ewic((plan.hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u,
+	s = alif_se_hw_enter_ewic((plan.hw & ALP_SOM_ARM_RTC_ANY) != 0u,
 	                          plan.pads,
 	                          ((plan.hw & ALP_SOM_ARM_LPTIMER) != 0u) ? plan.lptimer_ticks : 0u);
 	if (s != ALP_OK) {
@@ -1457,13 +1514,23 @@ bool alp_som_power_wake_decode_i2c(alp_som_pd_record_t *rec)
 		return false;
 	}
 
-	if ((rec->armed_hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
-	    alp_som_power_rtc_wake_service(&flags) == ALP_OK &&
-	    (flags & (RV3028C7_WAKE_TF | RV3028C7_WAKE_AF)) != 0u) {
-		/* The countdown the SDK started reports the source the caller asked for; the
-		 * caller's own alarm is the RTC. */
-		rec->wake_source |=
-		    ((rec->armed_hw & ALP_SOM_ARM_RTC_TIMER) != 0u) ? rec->timed_bit : ALP_POWER_WAKE_RTC;
+	if ((rec->armed_hw & ALP_SOM_ARM_RTC_ANY) != 0u &&
+	    alp_som_power_rtc_wake_service(&flags) == ALP_OK) {
+		if ((rec->armed_hw & (ALP_SOM_ARM_RTC_TIMER | ALP_SOM_ARM_RTC_INT)) != 0u &&
+		    (flags & (RV3028C7_WAKE_TF | RV3028C7_WAKE_AF)) != 0u) {
+			/* The countdown the SDK started reports the source the caller asked for; the
+			 * caller's own alarm is the RTC. */
+			rec->wake_source |= ((rec->armed_hw & ALP_SOM_ARM_RTC_TIMER) != 0u)
+			                        ? rec->timed_bit
+			                        : ALP_POWER_WAKE_RTC;
+		}
+		if ((rec->armed_hw & ALP_SOM_ARM_RTC_EVI) != 0u && (flags & RV3028C7_WAKE_EVF) != 0u) {
+			rec->wake_source |= ALP_POWER_WAKE_EXT_EVENT;
+		}
+	}
+	/* The EVI enable is one cycle's: leave EIE off so a later cycle starts clean. */
+	if ((rec->armed_hw & ALP_SOM_ARM_RTC_EVI) != 0u) {
+		(void)alp_som_power_rtc_evi_disarm();
 	}
 
 	/* The RV-3028 is the time base (+-1 ppm): a calendar delta, 1 s resolution.  Only

@@ -150,7 +150,8 @@ tan build
 Image bundle:
 
 ```bash
-tan image     # -> build/image-bundle/alp-system.zip + .swu
+tan image     # -> build/image-bundle/: slices/<core_id>-<os>.tar.gz,
+              #    helper-mcus/, bundle-manifest.json
 ```
 
 `tan flash` walks `boot_order:` from the manifest.

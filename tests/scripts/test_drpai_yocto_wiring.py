@@ -26,7 +26,7 @@ def test_drp1_stub_or_real_switch():
 
 
 def test_udev_package_rides_packageconfig_drpai():
-    s = _t("recipes-core/alp-sdk/alp-sdk_0.6.bb")
+    s = _t("recipes-core/alp-sdk/alp-sdk_git.bb")
     line = next(x for x in s.splitlines() if x.startswith("PACKAGECONFIG[drpai]"))
     assert "alp-drpai-udev" in line
     assert "root drpai" in _t("recipes-bsp/alp-drpai-udev/files/alp-drpai-tmpfiles.conf")
@@ -40,6 +40,6 @@ def test_udev_package_rides_packageconfig_drpai():
 
 def test_recipe_inherits_pkgconfig():
     # gles PACKAGECONFIG detects egl/glesv2 via pkg_check_modules.
-    s = _t("recipes-core/alp-sdk/alp-sdk_0.6.bb")
+    s = _t("recipes-core/alp-sdk/alp-sdk_git.bb")
     line = next(x for x in s.splitlines() if x.startswith("inherit "))
     assert "pkgconfig" in line.split()

@@ -1585,13 +1585,13 @@ def _emit_power(slice_: Slice) -> list[str]:
         # no top-level CONFIG_PM_DEVICE_WAKE_<SUBSYS> Kconfig symbol, so
         # emitting one trips the build with `undefined symbol` warnings
         # (-> kconfig errors -> twister CMake build failure).  The real
-        # DT-overlay + runtime-enable plumbing lands per silicon in v0.7;
-        # until then the wake-source list is documented in the generated
+        # DT-overlay + runtime-enable plumbing is not implemented;
+        # the wake-source list is documented in the generated
         # alp.conf for the customer to wire by hand.
         if isinstance(wake, str) and not wake.startswith("E1M_"):
             pwr_lines.append(
                 f"# wakeup source: {wake} "
-                "(DT wakeup-source; + pm_device_wakeup_enable() pending v0.7)")
+                "(DT wakeup-source; + pm_device_wakeup_enable() not implemented)")
         elif isinstance(wake, str):
             pwr_lines.append(f"# wakeup source: {wake} (per-silicon Kconfig pending)")
     if pwr_lines:

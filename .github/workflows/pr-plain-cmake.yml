@@ -432,7 +432,7 @@ jobs:
 
   find-package-consumer:
     # Issue #607: an INSTALLED alp-sdk (ALP_SDK_BUILD_SHARED=ON) must be
-    # a real CMake package -- `find_package(alp-sdk 0.9 REQUIRED)`
+    # a real CMake package -- `find_package(alp-sdk <major.minor> REQUIRED)`
     # resolves, `alp::sdk` links, and the reported version matches the
     # authoritative include/alp/version.h (not a stale hardcoded 0.1.0).
     # Installs to a throwaway prefix, then configures/builds

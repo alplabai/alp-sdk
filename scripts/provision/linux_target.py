@@ -709,6 +709,47 @@ def gd32_parse_version(out: str) -> tuple[int, int, int]:
     return rsp[1], rsp[2], rsp[3]
 
 
+GD32_CMD_GET_BUILD_ID = 0x02
+GD32_BUILD_ID_LEN = 20                      # src/protocol.h GD32_BRIDGE_BUILD_ID_LEN
+GD32_CMD_OTA_GET_STATE = 0xF5
+GD32_OTA_STATE_LEN = 6                      # protocol >= 0.14 (gh#101); v0.3.0 is 0.14.0
+
+
+def gd32_query(t: LinuxTarget, bus: int, cmd: int, payload_len: int, addr: int = 0x70) -> bytes:
+    """One empty-request command over the I2C transport (same frame as GET_VERSION): write
+    [0x00 reg][cmd][crc lo][crc hi], repeated-start read [status][payload][crc lo][crc hi],
+    CRC-16/CCITT-FALSE over status+payload. Returns the payload; BenchError on a bad CRC or
+    a non-zero status."""
+    crc = _crc16_ccitt_false(bytes((cmd,)))
+    out = t.run(xfer_cmd(bus, addr, bytes((0x00, cmd, crc & 0xFF, crc >> 8)), payload_len + 3, force=True)).stdout
+    toks = re.findall(r"0x([0-9a-fA-F]{2})\b", out)
+    if toks and int(toks[0], 16) != 0:
+        # an error reply is status + CRC only, padded: check that CRC before trusting the status
+        rsp = bytes(int(x, 16) for x in toks)
+        if len(rsp) < 3 or _crc16_ccitt_false(rsp[:1]) != rsp[1] | rsp[2] << 8:
+            raise BenchError(f"GD32 cmd {cmd:#04x} status {rsp[0]:#04x} with a bad reply CRC "
+                             f"(transport error): {rsp.hex(' ')}")
+        raise (Gd32NoSupport if rsp[0] == 0x06 else BenchError)(
+            f"GD32 cmd {cmd:#04x} status {rsp[0]:#04x}" + (" (NOSUPPORT)" if rsp[0] == 0x06 else ""))
+    rsp = _parse_bytes(out, payload_len + 3)
+    if _crc16_ccitt_false(rsp[:-2]) != rsp[-2] | rsp[-1] << 8:
+        raise BenchError(f"GD32 cmd {cmd:#04x} reply CRC mismatch: {rsp.hex(' ')}")
+    return rsp[1:-2]
+
+
+def gd32_build_id(t: LinuxTarget, bus: int, addr: int = 0x70) -> str:
+    """GET_BUILD_ID (0x02): char[20] ASCII "<fw-version>+<git-sha-prefix>"."""
+    return gd32_query(t, bus, GD32_CMD_GET_BUILD_ID, GD32_BUILD_ID_LEN, addr).decode("ascii", "replace")
+
+
+def gd32_ota_state(t: LinuxTarget, bus: int, addr: int = 0x70) -> dict[str, int]:
+    """OTA_GET_STATE (0xF5): state:u8 active:u8 pending:u8 boot_count:u16 LE err:u8
+    (src/ota.c h_get_state). `active` is the slot the running build was linked for
+    (0 = A, 1 = B), not what the metadata says."""
+    p = gd32_query(t, bus, GD32_CMD_OTA_GET_STATE, GD32_OTA_STATE_LEN, addr)
+    return {"state": p[0], "active": p[1], "pending": p[2], "boot_count": p[3] | p[4] << 8, "err": p[5]}
+
+
 GD32_CMD_BOOT_CONFIG = 0x42                 # include/alp/chips/gd32g553.h GD32G553_CMD_BOOT_CONFIG
 GD32_BOOT_CONFIG_SDMUX_EN_HIGH = 0x00000001  # GD32G553_BOOT_CONFIG_SDMUX_EN_HIGH
 GD32_BOOT_CONFIG_POLLS = 100                # x GD32_BOOT_CONFIG_GAP_S: the async flash commit
@@ -749,11 +790,12 @@ def gd32_boot_config(t: LinuxTarget, bus: int, flags: int | None = None, addr: i
     return gd32_parse_boot_config(t.run(gd32_boot_config_cmd(bus, flags, addr)).stdout)
 
 
-def gd32_sd_out_flag_set(t: LinuxTarget, bus: int, addr: int = 0x70) -> int:
+def gd32_sd_out_flag_set(t: LinuxTarget, bus: int, addr: int = 0x70, on: bool = True) -> int:
     """Persist SDMUX_EN_HIGH (the GD32 drives IO29 high from every reset: SD out across cold
-    cycles) and wait until a GET returns it. Other stored bits are kept. A SET moves no pad."""
+    cycles), or clear it with on=False, and wait until a GET returns it. Other stored bits are
+    kept. A SET moves no pad: it takes effect at the next GD32 reset."""
     cur = gd32_boot_config(t, bus, None, addr)
-    want = cur | GD32_BOOT_CONFIG_SDMUX_EN_HIGH
+    want = cur | GD32_BOOT_CONFIG_SDMUX_EN_HIGH if on else cur & ~GD32_BOOT_CONFIG_SDMUX_EN_HIGH
     if cur == want:
         return cur
     gd32_boot_config(t, bus, want, addr)

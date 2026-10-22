@@ -398,10 +398,17 @@ configure_package_config_file(
     ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config.cmake
     INSTALL_DESTINATION ${ALP_SDK_INSTALL_CMAKEDIR}
 )
+# Same condition as the SOVERSION above (#2850): until 1.0 a minor may break
+# the ABI, so find_package(alp-sdk 0.9) must not accept 0.17.
+if(PROJECT_VERSION_MAJOR EQUAL 0)
+    set(_alp_sdk_compat SameMinorVersion)
+else()
+    set(_alp_sdk_compat SameMajorVersion)
+endif()
 write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake
     VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
+    COMPATIBILITY ${_alp_sdk_compat}
 )
 
 # Install rules.  Only emitted for the shared/standalone build

@@ -50,6 +50,9 @@ import pathlib
 import re
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from bump_version import parse_version  # noqa: E402  one SemVer parser (#2850)
+
 
 _VERSION_LINE_RE = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)(?:-([\w.]+))?\s*$", re.MULTILINE)
 
@@ -195,13 +198,13 @@ def check_yocto_distro_version(repo: pathlib.Path) -> list[str]:
 
 
 def expected_recipe_pv(pre_version: str) -> str:
-    m = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-([\w.]+))?", pre_version)
-    return m.group(1) + (f"~{m.group(2)}" if m.group(2) else "") if m else pre_version
+    major, minor, patch, pre = parse_version(pre_version)
+    return f"{major}.{minor}.{patch}" + (f"~{pre}" if pre else "")
 
 
 def check_yocto_recipe_pv(repo: pathlib.Path, full: str) -> list[str]:
-    """The alp-sdk recipe's PV must track the release (#2827); bump_version.py writes it."""
-    rel = "meta-alp-sdk/recipes-core/alp-sdk/alp-sdk_0.6.bb"
+    """The shared recipe PV include must track the release (#2827); bump_version.py writes it."""
+    rel = "meta-alp-sdk/recipes-core/alp-sdk/alp-sdk-version.inc"
     f = repo / rel
     if not f.is_file():
         return []
@@ -211,6 +214,23 @@ def check_yocto_recipe_pv(repo: pathlib.Path, full: str) -> list[str]:
         return [f"  DRIFT    {rel}: PV = {m.group(1) if m else '<missing>'!r}, "
                 f"want {want!r} (scripts/bump_version.py rewrites it)"]
     return []
+
+
+def check_sibling_recipes_use_shared_pv(repo: pathlib.Path) -> list[str]:
+    """Recipes built from this repo take PV from the shared include (#2850)."""
+    layer = repo / "meta-alp-sdk"
+    drifts: list[str] = []
+    for f in sorted(layer.rglob("*.bb")) if layer.is_dir() else []:
+        text = f.read_text(encoding="utf-8", errors="replace")
+        if "alplabai/alp-sdk.git" not in text:
+            continue
+        rel = f.relative_to(repo).as_posix()
+        if not re.search(r"^require\s+\S*alp-sdk-version\.inc", text, re.MULTILINE):
+            drifts.append(f"  DRIFT    {rel}: builds from this repo "
+                          f"but does not `require recipes-core/alp-sdk/alp-sdk-version.inc`")
+        if re.search(r"^PV(\s*[?:+.]?=|:)", text, re.MULTILINE):
+            drifts.append(f"  DRIFT    {rel}: sets its own PV; it must come from alp-sdk-version.inc")
+    return drifts
 
 
 def main() -> int:
@@ -232,6 +252,7 @@ def main() -> int:
         + check_versions_md(repo, want_str)
         + check_yocto_distro_version(repo)
         + check_yocto_recipe_pv(repo, want_full)
+        + check_sibling_recipes_use_shared_pv(repo)
     )
 
     if drifts:

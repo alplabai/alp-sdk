@@ -96,6 +96,9 @@ into the topic-specific docs.
   `0da1f1b4`, + the SoM-maker policy).
 - [aen-se-services.md](aen-se-services.md) — runtime `se_service_*`
   API (device/LCS/power queries + the gated DVFS / STOC-update path).
+- [aen-rp2040-debug-probe.md](aen-rp2040-debug-probe.md) — the EVK
+  2641-R3 on-board RP2040 CMSIS-DAP probe: USB identity (VID/PID TBD),
+  dual-CDC channel roles; not bench-verified.
 - [debugging-aen.md](debugging-aen.md) — attaching a debugger to
   E1M-AEN801: `west debug`, the generic-vs-Alif-part J-Link device
   trap, what J-Link is (and isn't) for, and the idle-core DAP-gating

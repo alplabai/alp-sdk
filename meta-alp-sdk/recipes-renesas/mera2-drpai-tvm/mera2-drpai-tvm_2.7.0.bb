@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Stages the MERA2 / DRP-AI TVM runtime -- the RESIDUAL GAP named in
-# alp-sdk_0.6.bb's PACKAGECONFIG[drpai] comment (#1145).  `drpai`
+# alp-sdk_git.bb's PACKAGECONFIG[drpai] comment (#1145).  `drpai`
 # (meta-rz-drpai) covers <linux/drpai.h>; this recipe supplies the rest of what
 # src/yocto/CMakeLists.txt probes for -- the header tree, the eight
 # prebuilt RUHMI libraries (plus the runtime CLOSURE those need, not
@@ -520,7 +520,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 # An earlier revision of this comment claimed a `drpai`-ENABLED
 # alp-image-edge bake had completed (12118 tasks, DT_NEEDED resolved, 0
 # unresolved symbols, ten libraries in the rootfs) before PACKAGECONFIG[drpai]
-# existed in alp-sdk_0.6.bb (until #1145); that claim was removed because OE
+# existed in alp-sdk_git.bb (until #1145); that claim was removed because OE
 # errors out on an append naming an undefined flag.  The bake status is now
 # the #2400 one below.
 #

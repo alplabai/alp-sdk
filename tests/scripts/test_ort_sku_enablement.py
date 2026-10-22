@@ -25,7 +25,7 @@ def test_ort_enabled_on_exactly_the_pinned_machines():
 
 
 def test_alp_sdk_recipe_wires_ort_packageconfig():
-    bb = (LAYER / "recipes-core" / "alp-sdk" / "alp-sdk_0.6.bb").read_text(encoding="utf-8")
+    bb = (LAYER / "recipes-core" / "alp-sdk" / "alp-sdk_git.bb").read_text(encoding="utf-8")
     assert "-DALP_SDK_USE_ORT_CPU=ON -DALP_SDK_ORT_REQUIRED=ON" in bb
     assert re.search(r"^PACKAGECONFIG:append = \"\$\{@' ort' if d.getVar\('ALP_ENABLE_ORT_CPU'\) == '1'", bb, re.M)
 
@@ -36,6 +36,6 @@ def test_v2m_keeps_ort_on_under_deepx_and_reuses_dx_rt_ort():
     for n in ("v2m101", "v2m102", "v2m103"):
         conf = (LAYER / "conf" / "machine" / f"e1m-{n}-a55.conf").read_text(encoding="utf-8")
         assert re.search(r'^ALP_ENABLE_ORT_CPU \?= "1"$', conf, re.M)
-    bb = (LAYER / "recipes-core" / "alp-sdk" / "alp-sdk_0.6.bb").read_text(encoding="utf-8")
+    bb = (LAYER / "recipes-core" / "alp-sdk" / "alp-sdk_git.bb").read_text(encoding="utf-8")
     assert "'libonnxruntime' if d.getVar('ALP_ENABLE_DEEPX_DXM1') == '1' else 'onnxruntime'" in bb
     assert "-DALP_SDK_USE_ORT_CPU=OFF,${ALP_ORT_PKG},${ALP_ORT_PKG}\"" in bb
