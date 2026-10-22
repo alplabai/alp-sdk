@@ -1003,7 +1003,8 @@ static void evi_event_ctrl_print_once(void)
 
 	if (!done && alp_som_power_rtc_regs(r) == ALP_OK) {
 		done = true;
-		printk("alif_se_power: RV-3028 EVI armed, EVENT_CTRL(13h)=0x%02x CTRL2=0x%02x\n", r[3], r[2]);
+		printk(
+		    "alif_se_power: RV-3028 EVI armed, EVENT_CTRL(13h)=0x%02x CTRL2=0x%02x\n", r[3], r[2]);
 	}
 }
 

@@ -989,7 +989,7 @@ ZTEST(power_som_domains, test_rtc_evi_disarm_clears_eie_and_evf)
 
 ZTEST(power_som_domains, test_rtc_evf_is_a_wake_only_with_eie)
 {
-	uint8_t flags = 0u;
+	uint8_t flags   = 0u;
 	bool    pending = false;
 
 	rtc_regs()[RTC_STATUS_REG]   = RTC_SF_EVF;
