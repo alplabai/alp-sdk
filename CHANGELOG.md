@@ -7,6 +7,10 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
+### Fixed — abidiff gate honesty (#2851)
+
+**The `abidiff` gate is advisory, and now says so.** It is not a required context and `pr-plain-cmake.yml` has no `merge_group:` trigger, so a red run blocks nothing (maintainer decision: stays advisory). The SONAME-rename suppression no longer masks an abidiff error (applied only when the exit status has no ABI_ERROR/USAGE bit), every skip (tool missing, no tag of the current minor) emits a `::warning::` in CI or under `--require-tool`, and a test covers the SONAME-only report shape against a synthetic fixture (hand-written in the shape `soname_only()` parses, not a real capture; a recorded `check_abidiff.py --baseline-tag v0.17.0-rc2 --keep` run on a host with abigail-tools is still pending, #2851).
+
 ### Fixed — provisioning checks are pinned to the bundle being provisioned, and the released GD32 v0.3.0 no longer dead-ends a unit
 
 **`clkgen_verify` judges the bundle's own U-Boot fixup.** The expected 5L35023B registers were the tool tree's (`0x1f` = `0xc7`, patch 0013), so a unit from a bundle built before patch 0013 (som-0.2.2: `0x1f` stays at OTP `0x46`, `0x24` = `0x8e`) failed against a U-Boot it does not run. An optional `clkgen_fixup_regs` map in the `--functest-expect` overlay (quoted hex strings, plus `bundle: {sku, release_version}` naming the bundle it applies to) now pins the expectation per bundle; absent keeps the default, a malformed map or a different bundle refuses the step, and the evidence key `clkgen_fixup_source` records which one was used.
