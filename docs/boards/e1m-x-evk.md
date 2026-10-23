@@ -243,14 +243,32 @@ line `MUX_SEL.SDIO` is not a GPIO: `R239` (100 kOhm) pulls it low (microSD)
 and header `P6` ties it to +3V3 (M.2). E1M `IO27` is unconnected. The
 active-low enable `SD_MUX_EN` is E1M `IO29` (a GD32 pad) with no external
 pull-down, so it rests on the TMUX1574's internal pull-downs; the slot works
-with a blank GD32.
+with a blank GD32. With bridge firmware running, the GD32 pad's input
+pull-up wins and the mux is off: `mmc1` then sees no card (U-Boot
+`Card did not respond to voltage select! : -110`) while `PA1` still reads
+present, because card detect bypasses the mux. Drive `IO29` low through the
+bridge GPIO (resolve the line by name, since its gpio number changes between
+kernels), then rebind or re-seat the card.
 
 Fastest mode is **SDR50** (1.8 V, 100 MHz). The SD1 pads use
 `renesas,output-impedance = <2>`, one step weaker than the eMMC's `<3>`:
 at `<3>` the data phase fails with `error -84` (CRC). SDR104 is not
-enabled: reads work there (about 78-85 MB/s, bench 2026-09-24/27), but
-host-to-card writes at 208 MHz never complete (`mmc1: Card stuck being
-busy!`, #2357). With kernel patch `0010` (bounce buffer for multi-segment
+enabled. At 200 MHz reads are clean (53-56 MB/s), but nearly every
+multi-block write ends in `error -84` and recovery, so writes crawl at
+about 50 KiB/s (#2357). The card accepts the data (its ACMD22 count covers
+the blocks); the host mis-frames the card's CRC-status token on DAT0:
+`SD_ERR_STS1` reports the token as `100`, `001` or `101` instead of `010`,
+each a whole-bit shift of a good token. The shift follows the SCC sampling
+tap. Only tap 2 frames it correctly here, but tuning picks tap 5 for reads,
+and tap 2 fails reads. Switching `SCC_TAPSET` to 2 for writes alone gives
+~23 MB/s writes and 56 MB/s reads, but that one-tap window still slips
+about 25 times per GB, so it is not shipped. Pad drive (`<2>`/`<3>`),
+slew, `SCC_DT2FF` (17 values, including the manual's `0x0207` written
+before `DTSEL`) and carrier ESD removal do not move it. The eMMC on SDHI0
+runs HS200 at 200 MHz cleanly on the same IP, so the framing depends on the
+card path's round-trip timing. The SDHI clock divides 200 MHz by powers of two, so there is no SDR104
+step between 200 and 100 MHz (SDR50 speed). Bench: E1M-V2M103 on
+E1M-X EVK V2, SanDisk 32 GB U1, 2026-10-23. With kernel patch `0010` (bounce buffer for multi-segment
 requests) SDR50 writes 512 MiB in 20 s and HS in 29 s (E1M-V2M103, bench
 2026-09-27); before it every write was a single 4 KiB request (~2.7 MB/s).
 
