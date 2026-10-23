@@ -232,9 +232,9 @@ on-module eMMC (SDHI0) is the production boot.
 
 | Signal | Pin | Behaviour |
 |---|---|---|
-| Card detect `SD1_SD1CD` | `PA1` | Socket switch to GND, pulled up to the switched card rail; active-low (`cd-gpios`) |
+| Card detect `SD1_SD1CD` | `PA1` | Socket switch to GND; active-low (`cd-gpios`, with the SoC's internal pull-up requested). On the V2 carrier `R53` (10 kOhm) also pulls it to the 3.3 V card rail, but `PA1` is a 1.8 V pad on the V2N SoMs, so an empty slot over-drives it. Remove `R53`; the internal pull-up then holds CD high |
 | IO voltage `µSD1_V_SEL` | `PA2` | SoM selector: low = 3.3 V, high = 1.8 V (`vqmmc_sdhi1`, `e1m-v2n-som.dtsi`) |
-| Card power `SD1_SD1PWEN` | `PA3` | Always-on hog; the card-detect pull-up lives on this rail |
+| Card power `SD1_SD1PWEN` | `PA3` | Always-on hog; the `R53` card-detect pull-up lives on this rail |
 | `SDCARD_RST` | `PA4` | M.2 Wi-Fi SDIO reset through the carrier mux, not a microSD signal; undriven |
 
 The carrier SDIO mux (TMUX1574 `U38`/`U39`) switches SD1 between the
