@@ -50,7 +50,10 @@ def test_patch_has_no_hard_coded_pad():
 
 
 def test_linux_cd_gpios_is_the_same_pad():
-    letter, num = re.search(r"cd-gpios = <&pinctrl RZV2N_GPIO\((\w), (\d+)\) GPIO_ACTIVE_LOW>",
-                            DTSI.read_text(encoding="utf-8")).groups()
+    m = re.search(r"cd-gpios = <&pinctrl RZV2N_GPIO\((\w), (\d+)\) \(?GPIO_ACTIVE_LOW([^>]*)>",
+                  DTSI.read_text(encoding="utf-8"))
+    letter, num, flags = m.groups()
+    # the CD pad is 1.8 V on the V2N SoMs: the SoC pull-up must stay requested (R53 rework)
+    assert "GPIO_PULL_UP" in flags
     cfg = _cfg()
     assert (int(cfg["CONFIG_ALP_E1M_SD1_CD_BANK"]), int(cfg["CONFIG_ALP_E1M_SD1_CD_PIN"])) == _bank_pin(f"P{letter}{num}")
