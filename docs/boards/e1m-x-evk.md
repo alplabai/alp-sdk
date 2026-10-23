@@ -264,9 +264,13 @@ and tap 2 fails reads. Switching `SCC_TAPSET` to 2 for writes alone gives
 ~23 MB/s writes and 56 MB/s reads, but that one-tap window still slips
 about 25 times per GB, so it is not shipped. Pad drive (`<2>`/`<3>`),
 slew, `SCC_DT2FF` (17 values, including the manual's `0x0207` written
-before `DTSEL`) and carrier ESD removal do not move it. The eMMC on SDHI0
-runs HS200 at 200 MHz cleanly on the same IP, so the framing depends on the
-card path's round-trip timing. The SDHI clock divides 200 MHz by powers of two, so there is no SDR104
+before `DTSEL`) and carrier ESD removal do not move it. Renesas's own RZ/V2N EVK pad setting (`<3>` in the DT, so tuning
+also runs at `<3>`) leaves only tap 2 clean too. The eMMC on SDHI0 runs
+HS200 at 200 MHz cleanly on the same IP, and the Renesas EVK routes its
+slot straight to the SoC. Here the path runs through the B2B connector and
+the TMUX1574 mux, so the framing most likely depends on that path's
+round-trip timing. A mux-bypass rework would test this; it is not yet
+tested. The SDHI clock divides 200 MHz by powers of two, so there is no SDR104
 step between 200 and 100 MHz (SDR50 speed). Bench: E1M-V2M103 on
 E1M-X EVK V2, SanDisk 32 GB U1, 2026-10-23. With kernel patch `0010` (bounce buffer for multi-segment
 requests) SDR50 writes 512 MiB in 20 s and HS in 29 s (E1M-V2M103, bench
