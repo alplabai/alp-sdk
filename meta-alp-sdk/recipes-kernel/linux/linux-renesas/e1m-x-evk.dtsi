@@ -575,7 +575,12 @@
 	vqmmc-supply = <&vqmmc_sdhi1>;
 	bus-width = <4>;
 	sd-uhs-sdr50;
-	cd-gpios = <&pinctrl RZV2N_GPIO(A, 1) GPIO_ACTIVE_LOW>;
+	/* PA1 runs at 1.8 V on the V2N SoMs, but the E1M-X EVK V2 pulls CD up
+	 * (R53) to the 3.3 V card rail, which over-drives PA1 whenever the slot
+	 * is empty. The board fix is to remove R53; the SoC's internal pull-up
+	 * then holds CD high, so request it here. With R53 still fitted it is
+	 * harmless. */
+	cd-gpios = <&pinctrl RZV2N_GPIO(A, 1) (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 	/* The RZ/V2N ICU has no both-edge TINT mode, so the card-detect GPIO
 	 * cannot be an interrupt (the MMC core asks for both edges and the request
 	 * failed with "Setting trigger mode 3 ... failed"). broken-cd sets
