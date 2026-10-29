@@ -349,8 +349,14 @@ static int isp_attach_buffer_to_hw(const struct device *dev, struct video_buffer
 		if (!i) {
 			planes[i] = POINTER_TO_UINT(local_to_global(vbuf->buffer));
 		} else {
-			size_plane = fourcc_to_plane_size(channel->output_fmt.pixelformat,
-					i - 1, vbuf->size);
+			/* Split the NEGOTIATED frame, not the whole buffer: a buffer
+			 * larger than the frame would put the chroma planes at the
+			 * wrong offset (isp_enqueue() guarantees size >= frame). */
+			size_plane = fourcc_to_plane_size(
+			    channel->output_fmt.pixelformat, i - 1,
+			    alp_isp_frame_size(channel->output_fmt.pixelformat,
+					       channel->output_fmt.width,
+					       channel->output_fmt.height));
 			if (size_plane == 0 || size_plane > vbuf->size) {
 				LOG_ERR("Unsupported format!");
 				return -ENOTSUP;
@@ -2558,6 +2564,22 @@ static int isp_enqueue(const struct device *dev, struct video_buffer *buf)
 		LOG_ERR("Video Buffer is not aligned to 8-byte boundary."
 			"It can result in corruption of captured image.");
 		return -ENOBUFS;
+	}
+
+	/*
+	 * The frame has to FIT.  The MI DMA writes the whole negotiated frame
+	 * from buf->buffer, so a smaller buffer is overrun into adjacent SRAM
+	 * (isp_dequeue() only warns after the fact).  Same check the CPI driver
+	 * makes in alif_cam_enqueue() (#1825).
+	 */
+	const struct channel_parameters *ch = &data->init_cfg.channel;
+	uint32_t frame_size = alp_isp_frame_size(ch->output_fmt.pixelformat, ch->output_fmt.width,
+						 ch->output_fmt.height);
+
+	if (frame_size > buf->size) {
+		LOG_ERR("Frame needs %u bytes, buffer holds %u -- refusing to DMA past the end",
+			frame_size, (uint32_t)buf->size);
+		return -EINVAL;
 	}
 
 	buf->bytesused = 0;

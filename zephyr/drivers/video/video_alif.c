@@ -788,6 +788,26 @@ static void alif_cam_work_helper(const struct device *dev)
 			goto done;
 		}
 
+		/*
+		 * The frame hit a FIFO overrun / BRESP error (flagged by the ISR,
+		 * which already raised VIDEO_BUF_ERROR).  Its pixels are not
+		 * trustworthy, so do not hand it to the app: leave the buffer at
+		 * the head of the IN-FIFO and capture the next frame into it.
+		 * Previously this STOP skipped the bottom half and zeroed
+		 * curr_vid_buf, so nothing re-armed the CPI, the buffer was never
+		 * returned and `starved` stayed false -- capture stalled until the
+		 * app stopped and restarted the stream.
+		 */
+		if (data->frame_error) {
+			data->frame_error = false;
+			LOG_WRN("Dropping corrupted frame, re-capturing into the same buffer");
+			sys_write32(local_to_global(UINT_TO_POINTER(data->curr_vid_buf)),
+				    regs + CAM_FRAME_ADDR);
+			hw_cam_start_video_capture(dev);
+			k_mutex_unlock(&data->lock);
+			return;
+		}
+
 		/* Move completed buffer from IN-FIFO to OUT-FIFO. */
 		vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT);
 		if (!vbuf) {
@@ -1143,6 +1163,7 @@ static int alif_cam_stream_start(const struct device *dev)
 
 	data->is_streaming = true;
 	data->starved = false;
+	data->frame_error = false;
 
 	k_mutex_unlock(&data->lock);
 
@@ -1608,7 +1629,6 @@ static DEVICE_API(video, cam_driver_api) = {
 
 static void __maybe_unused alif_video_cam_isr(const struct device *dev)
 {
-	static bool is_not_corrupted_frame = true;
 	const struct video_cam_config *config = dev->config;
 	struct video_cam_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
@@ -1637,7 +1657,7 @@ static void __maybe_unused alif_video_cam_isr(const struct device *dev)
 
 	if (int_st & err_mask) {
 		LOG_ERR("Frame Capture Error. int_st - 0x%08x", int_st);
-		is_not_corrupted_frame = false;
+		data->frame_error = true;
 #if defined(CONFIG_POLL)
 		if (data->signal) {
 			k_poll_signal_raise(data->signal, VIDEO_BUF_ERROR);
@@ -1700,15 +1720,9 @@ static void __maybe_unused alif_video_cam_isr(const struct device *dev)
 			data->rearm_pending = false;
 			hw_cam_start_video_capture(dev);
 		}
-		/* No corruption observed during dumping this frame. */
-		if (is_not_corrupted_frame) {
-			LOG_DBG("Video Capture stopped.");
-			k_work_submit_to_queue(&data->cb_workq, &data->cb_work);
-		} else {
-			/* Wait for user to handle corrupted frame capture. */
-			data->curr_vid_buf = 0;
-			is_not_corrupted_frame = true;
-		}
+		/* The bottom half decides: complete the frame, or (data->frame_error) retry it. */
+		LOG_DBG("Video Capture stopped.");
+		k_work_submit_to_queue(&data->cb_workq, &data->cb_work);
 	}
 }
 
