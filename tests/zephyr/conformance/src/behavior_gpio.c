@@ -414,8 +414,6 @@ ZTEST(alp_testing_gpio_behavior, test_stale_handle_after_reset_fails)
 
 static uint64_t g_cb_seen_ms;
 
-static uint64_t g_cb_seen_ms;
-
 static void clock_ts_cb(alp_gpio_t *pin, void *user)
 {
 	ARG_UNUSED(pin);
@@ -428,7 +426,7 @@ ZTEST(alp_testing_gpio_behavior, test_clock_callback_sees_own_timestamp)
 {
 	const uint32_t pin_id = 15;
 
-	g_cb_seen_ms = 0;
+	g_cb_seen_ms  = 0;
 	alp_gpio_t *h = alp_gpio_open(pin_id);
 	zassert_not_null(h, "alp_gpio_open(%u) failed", pin_id);
 	zassert_equal(alp_gpio_irq_enable(h, ALP_GPIO_EDGE_RISING, clock_ts_cb, NULL),
@@ -437,7 +435,8 @@ ZTEST(alp_testing_gpio_behavior, test_clock_callback_sees_own_timestamp)
 	zassert_equal(
 	    alp_testing_gpio_edge_at(pin_id, 5, ALP_GPIO_EDGE_RISING), ALP_OK, "edge_at() failed");
 	zassert_equal(alp_testing_clock_advance_ms(10), ALP_OK, "advance failed");
-	zassert_equal(g_cb_seen_ms, 5, "callback saw now=%llu, expected 5", (unsigned long long)g_cb_seen_ms);
+	zassert_equal(
+	    g_cb_seen_ms, 5, "callback saw now=%llu, expected 5", (unsigned long long)g_cb_seen_ms);
 	zassert_equal(alp_testing_clock_now_ms(), 10, "now must end at 10");
 	alp_gpio_close(h);
 }
