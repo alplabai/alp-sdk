@@ -16,8 +16,11 @@ Pins four review findings against `.github/workflows/`:
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -52,7 +55,9 @@ def _pattern_to_regex(pattern: str) -> re.Pattern[str]:
 
 
 def _covered(probe: str, patterns: list[str]) -> bool:
-    return any(_pattern_to_regex(p).match(probe) for p in patterns if not p.startswith("!"))
+    return any(
+        _pattern_to_regex(p).match(probe) for p in patterns if not p.startswith("!")
+    )
 
 
 def test_metadata_validate_triggers_on_public_headers() -> None:
@@ -93,22 +98,69 @@ def test_alp_build_has_no_silent_skip_gate() -> None:
 
 
 def test_coverity_does_not_splice_secrets_into_shell() -> None:
-    job = next(iter(_load("coverity.yml")["jobs"].values()))
-    for step in job["steps"]:
-        run = step.get("run")
-        if run:
-            assert "${{ secrets." not in run, f"step {step.get('name')!r} splices a secret into run:"
+    jobs = _load("coverity.yml")["jobs"]
+    assert jobs
+    for name, job in jobs.items():
+        for step in job["steps"]:
+            run = step.get("run")
+            if run:
+                assert "${{ secrets." not in run, (
+                    f"{name}: step {step.get('name')!r} splices a secret into run:"
+                )
 
 
-def test_cppcheck_step_fails_on_error_severity() -> None:
+def _cppcheck_gate_tail() -> str:
     job = _load("pr-static-analysis.yml")["jobs"]["cppcheck"]
     run = next(s["run"] for s in job["steps"] if s.get("name") == "Run cppcheck")
-    assert 'severity="error"' in run
-    assert "exit 1" in run
+    marker = "|| true\n"
+    assert marker in run, "cppcheck invocation no longer ends in '|| true'"
+    return run.split(marker, 1)[1]
+
+
+def test_cppcheck_step_fails_on_error_severity(tmp_path: Path) -> None:
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash not available")
+    tail = _cppcheck_gate_tail()
+    head = '<?xml version="1.0"?><results><errors>'
+    bad = head + '<error id="nullPointer" severity="error" msg="x"/></errors></results>'
+    ok = (
+        head
+        + '<error id="unusedVariable" severity="style" msg="x"/></errors></results>'
+    )
+
+    def run(xml: str) -> int:
+        (tmp_path / "cppcheck.xml").write_text(xml, encoding="utf-8")
+        return subprocess.run(
+            [bash, "-c", tail],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        ).returncode
+
+    assert run(bad) != 0
+    assert run(ok) == 0
+
+
+def test_cppcheck_baseline_suppressions_are_scoped() -> None:
+    job = _load("pr-static-analysis.yml")["jobs"]["cppcheck"]
+    run = next(s["run"] for s in job["steps"] if s.get("name") == "Run cppcheck")
+    for needed in (
+        "syntaxError",
+        "unknownMacro",
+        "ctuOneDefinitionRuleViolation",
+        "comparePointers",
+    ):
+        assert f"--suppress={needed}" in run, needed
 
 
 def test_test_coverage_audit_uses_fail_on_gaps() -> None:
-    job = next(iter(_load("pr-metadata-validate.yml")["jobs"].values()))
-    runs = [s.get("run", "") for s in job["steps"]]
-    hits = [r for r in runs if "check_test_coverage.py" in r]
+    jobs = _load("pr-metadata-validate.yml")["jobs"]
+    hits = []
+    for job in jobs.values():
+        for step in job["steps"]:
+            r = step.get("run", "")
+            if "check_test_coverage.py" in r:
+                hits.append(r)
     assert hits and all("--fail-on-gaps" in r for r in hits)
