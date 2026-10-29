@@ -360,3 +360,23 @@ ZTEST(alp_testing_uart_behavior, test_reset_all_frees_side_state)
 
 	alp_uart_close(h);
 }
+
+/* A handle left open across alp_testing_reset_all() must not alias the
+ * slot's next occupant: ops fail instead of touching another instance. */
+ZTEST(alp_testing_uart_behavior, test_stale_handle_after_reset_fails)
+{
+	alp_uart_t *stale = open_port(3);
+	zassert_not_null(stale, "uart test double must open ANY instance");
+
+	alp_testing_reset_all();
+	/* Takes over the slot the stale handle used to occupy. */
+	alp_uart_t *h = open_port(4);
+	zassert_not_null(h, "re-open after reset_all() failed");
+
+	const uint8_t msg[] = { 0x01 };
+	zassert_equal(
+	    alp_uart_write(stale, msg, sizeof(msg)), ALP_ERR_NOT_READY, "stale handle op must fail");
+
+	alp_uart_close(stale);
+	alp_uart_close(h);
+}

@@ -472,3 +472,22 @@ ZTEST(alp_testing_can_behavior, test_reset_all_frees_unfired_deferred_rx)
 		              i);
 	}
 }
+
+/* A handle left open across alp_testing_reset_all() must not alias the
+ * slot's next occupant: ops fail instead of touching another instance. */
+ZTEST(alp_testing_can_behavior, test_stale_handle_after_reset_fails)
+{
+	alp_can_t *stale = open_bus(3);
+	zassert_not_null(stale, "can test double must open ANY instance");
+
+	alp_testing_reset_all();
+	/* Takes over the slot the stale handle used to occupy. */
+	alp_can_t *h = open_bus(4);
+	zassert_not_null(h, "re-open after reset_all() failed");
+
+	alp_can_frame_t frame = { 0 };
+	zassert_equal(alp_can_send(stale, &frame, 0), ALP_ERR_NOT_READY, "stale handle op must fail");
+
+	alp_can_close(stale);
+	alp_can_close(h);
+}

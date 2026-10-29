@@ -7,6 +7,8 @@
  */
 #include <alp/pid.h>
 
+#include <math.h>
+
 alp_status_t alp_pid_init(alp_pid_t *pid, const alp_pid_config_t *cfg)
 {
 	if (pid == NULL || cfg == NULL) {
@@ -41,11 +43,16 @@ float alp_pid_step(alp_pid_t *pid, float setpoint, float measurement, float dt_s
 
 	/* Integrate the error, then clamp the accumulator (anti-windup).
 	 * integ_limit <= 0 auto-selects the limit at which the I term
-	 * (ki * integ) reaches half the output span, i.e. span / (2 * ki). */
+	 * (ki * integ) reaches half the output span, i.e. span / (2 * |ki|);
+	 * with ki == 0 (the accumulator cannot reach the output) it falls
+	 * back to span / 2 so it stays finite. */
 	pid->integ += err * dt_s;
 	float ilim = c->integ_limit;
-	if (ilim <= 0.0f && c->ki > 0.0f && c->out_max > c->out_min) {
-		ilim = (c->out_max - c->out_min) * 0.5f / c->ki;
+	if (ilim <= 0.0f && c->out_max > c->out_min) {
+		ilim = (c->out_max - c->out_min) * 0.5f;
+		if (c->ki != 0.0f) {
+			ilim /= fabsf(c->ki);
+		}
 	}
 	if (ilim > 0.0f) {
 		if (pid->integ > ilim) {

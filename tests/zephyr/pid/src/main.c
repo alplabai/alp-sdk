@@ -83,6 +83,35 @@ ZTEST(alp_pid, test_default_integ_limit_scales_with_ki)
 	zassert_within(pid.integ, 5.0f, 1e-3f, "integ not span/(2*ki): %f", (double)pid.integ);
 }
 
+/* Negative ki (reverse-acting loop): the default limit uses |ki|, so the
+ * accumulator still stops at span/(2*|ki|) instead of winding up. */
+ZTEST(alp_pid, test_default_integ_limit_negative_ki)
+{
+	alp_pid_t              pid;
+	const alp_pid_config_t cfg = {
+		.ki = -0.2f, .integ_limit = 0.0f, .out_min = -1.0f, .out_max = 1.0f
+	};
+	alp_pid_init(&pid, &cfg);
+	for (int i = 0; i < 1000; i++) {
+		(void)alp_pid_step(&pid, 100.0f, 0.0f, 0.1f);
+	}
+	zassert_within(pid.integ, 5.0f, 1e-3f, "integ not span/(2*|ki|): %f", (double)pid.integ);
+}
+
+/* ki == 0: default limit falls back to span/2 so the accumulator is finite. */
+ZTEST(alp_pid, test_default_integ_limit_zero_ki)
+{
+	alp_pid_t              pid;
+	const alp_pid_config_t cfg = {
+		.ki = 0.0f, .integ_limit = 0.0f, .out_min = -1.0f, .out_max = 1.0f
+	};
+	alp_pid_init(&pid, &cfg);
+	for (int i = 0; i < 1000; i++) {
+		(void)alp_pid_step(&pid, 100.0f, 0.0f, 0.1f);
+	}
+	zassert_within(pid.integ, 1.0f, 1e-3f, "integ not span/2: %f", (double)pid.integ);
+}
+
 ZTEST(alp_pid, test_reset_clears_integrator)
 {
 	alp_pid_t              pid;

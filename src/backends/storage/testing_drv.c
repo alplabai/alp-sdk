@@ -128,12 +128,26 @@ typedef struct {
 
 	bool     power_loss_armed;
 	uint64_t power_loss_bytes_written;
+	/* Handle state that opened this slot; cleared on close and by
+	 * alp_testing_reset_all() so stale handles are detected. */
+	const void *owner;
 } alp_testing_storage_slot_t;
 
 static alp_testing_storage_slot_t   g_slots[ALP_TESTING_STORAGE_MAX_DEVICES];
 static alp_testing_slot_hdr_t       g_hdrs[ALP_TESTING_STORAGE_MAX_DEVICES];
 static alp_testing_instance_table_t g_table;
 static bool                         g_table_ready;
+
+/* Resolve the slot a handle may touch.  alp_testing_reset_all() wipes
+ * the slot (owner included), so a handle left open across a reset, or
+ * whose slot a newer handle has since taken, no longer matches and its
+ * ops fail instead of touching the next occupant. */
+static alp_testing_storage_slot_t *live_slot(alp_storage_backend_state_t *st)
+{
+	alp_testing_storage_slot_t *slot = (alp_testing_storage_slot_t *)st->be_data;
+	if (slot == NULL || slot->owner != (const void *)st) return NULL;
+	return slot;
+}
 
 /* Every field's zero value IS the correct "never touched" state
  * EXCEPT capacity -- a zeroed capacity would reject every
@@ -286,12 +300,13 @@ static alp_status_t t_open(const alp_storage_config_t  *cfg,
 	 * mirrors zephyr_flash.c's z_open() / sw_fallback.c's sw_open(). */
 	st->dev     = NULL;
 	st->be_data = slot;
+	slot->owner = st;
 	return ALP_OK;
 }
 
 static alp_status_t t_get_info(alp_storage_backend_state_t *st, alp_storage_info_t *info)
 {
-	alp_testing_storage_slot_t *slot = (alp_testing_storage_slot_t *)st->be_data;
+	alp_testing_storage_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 
 	info->total_bytes = slot->capacity;
@@ -302,7 +317,7 @@ static alp_status_t t_get_info(alp_storage_backend_state_t *st, alp_storage_info
 
 static alp_status_t t_read(alp_storage_backend_state_t *st, uint64_t offset, void *data, size_t len)
 {
-	alp_testing_storage_slot_t *slot = (alp_testing_storage_slot_t *)st->be_data;
+	alp_testing_storage_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 	if (!alp_storage_range_in_capacity(offset, (uint64_t)len, slot->capacity)) {
 		return ALP_ERR_OUT_OF_RANGE;
@@ -327,7 +342,7 @@ static alp_status_t t_read(alp_storage_backend_state_t *st, uint64_t offset, voi
 static alp_status_t
 t_write(alp_storage_backend_state_t *st, uint64_t offset, const void *data, size_t len)
 {
-	alp_testing_storage_slot_t *slot = (alp_testing_storage_slot_t *)st->be_data;
+	alp_testing_storage_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 	if (!alp_storage_range_in_capacity(offset, (uint64_t)len, slot->capacity)) {
 		return ALP_ERR_OUT_OF_RANGE;
@@ -360,7 +375,7 @@ t_write(alp_storage_backend_state_t *st, uint64_t offset, const void *data, size
 
 static alp_status_t t_erase(alp_storage_backend_state_t *st, uint64_t offset, uint64_t len)
 {
-	alp_testing_storage_slot_t *slot = (alp_testing_storage_slot_t *)st->be_data;
+	alp_testing_storage_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 	if (!alp_storage_range_in_capacity(offset, len, slot->capacity)) {
 		return ALP_ERR_OUT_OF_RANGE;
@@ -388,7 +403,7 @@ static alp_status_t t_erase(alp_storage_backend_state_t *st, uint64_t offset, ui
 
 static alp_status_t t_sync(alp_storage_backend_state_t *st)
 {
-	alp_testing_storage_slot_t *slot = (alp_testing_storage_slot_t *)st->be_data;
+	alp_testing_storage_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 
 	if (slot->fail_armed && slot->fail_op == ALP_TESTING_STORAGE_OP_SYNC) {
@@ -412,6 +427,8 @@ static alp_status_t t_configure_inline_aes(alp_storage_backend_state_t    *st,
 
 static void t_close(alp_storage_backend_state_t *st)
 {
+	alp_testing_storage_slot_t *slot = live_slot(st);
+	if (slot != NULL) slot->owner = NULL;
 	st->be_data = NULL;
 }
 
