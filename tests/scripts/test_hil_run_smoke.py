@@ -767,3 +767,50 @@ def test_failed_spec_prints_board_output(capsys) -> None:
     ok = run_smoke.SmokeResult(spec, True, (), "quiet")
     run_smoke._print_summary([ok])
     assert "quiet" not in capsys.readouterr().out
+
+
+def test_ssh_command_nonzero_exit_fails_despite_matching_output(tmp_path: Path, monkeypatch) -> None:
+    import dataclasses
+    import subprocess
+
+    d = _make_spec_dir(tmp_path)
+    (d / "cmd.yaml").write_text(
+        "schema_version: 1\nname: cmd\nflash_method: ssh-run\n"
+        "ssh_command: \"echo HIL_OK\"\nserial:\n  expect_contains: [HIL_OK]\n",
+        encoding="utf-8")
+    spec = dataclasses.replace(run_smoke.parse_spec(d / "cmd.yaml"), ssh_host="root@board")
+    monkeypatch.setattr(
+        run_smoke.subprocess, "run",
+        lambda argv, **kw: subprocess.CompletedProcess(argv, 1, b"HIL_OK\n", b""))
+    result = run_smoke.run_spec(spec)
+    assert not result.ok
+    assert "rc=1" in result.failures[0]
+
+
+def test_ssh_run_binary_exit_code_feeds_verdict(tmp_path: Path, monkeypatch) -> None:
+    import dataclasses
+    import subprocess
+
+    artifact_dir = tmp_path / "art"
+    artifact_dir.mkdir()
+    spec = _args_files_spec(tmp_path)
+    (artifact_dir / run_smoke._artifact_name(spec)).write_bytes(b"binary")
+    for local, _remote in spec.ssh_files:
+        (artifact_dir / local).write_bytes(b"x")
+    spec = dataclasses.replace(
+        spec, ssh_host="root@board", artifact_dir=str(artifact_dir),
+        serial=dataclasses.replace(spec.serial, expect_contains=("HIL_OK",), expect_absent=()))
+
+    def run_with(final_rc: int):
+        def fake(argv, **kw):
+            is_capture = argv[0] == "ssh" and "wait $p" in argv[-1]
+            return subprocess.CompletedProcess(
+                argv, final_rc if is_capture else 0, b"HIL_OK\n", b"")
+        monkeypatch.setattr(run_smoke.subprocess, "run", fake)
+        return run_smoke.run_spec(spec)
+
+    assert run_with(0).ok
+    assert run_with(143).ok  # bounded-run sleeper stopped a forever-loop example
+    bad = run_with(139)  # segfault after the banner
+    assert not bad.ok
+    assert "rc=139" in bad.failures[0]

@@ -46,6 +46,12 @@ _alp_add_fuzz_target(eeprom_manifest)
 _alp_add_fuzz_target(gd32_bridge_frame)
 _alp_add_fuzz_target(swd_packet)
 _alp_add_fuzz_target(mproc_frame)
+# Link the production framing so the harness fuzzes the decoder the Zephyr
+# mproc driver actually calls, not an inline copy.
+target_sources(alp_fuzz_mproc_frame PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/common/proto/alp_mproc_frame.c)
+target_include_directories(alp_fuzz_mproc_frame PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/common)
 _alp_add_fuzz_target(ble_adv_parser)
 _alp_add_fuzz_target(optiga_apdu)
 _alp_add_fuzz_target(tls_handshake)
