@@ -16,7 +16,10 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+
 from pathlib import Path
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -105,6 +108,18 @@ class TestWestLibrariesEmit(unittest.TestCase):
             self.assertIn("url: https://github.com/zephyrproject-rtos/canopennode", out)
             self.assertIn("revision: dec12fa3f0d790cafa8414a4c2930ea71ab72ffd", out)
             self.assertIn("path: modules/lib/canopennode", out)
+            # Independent of Zephyr's optional group: a self-contained
+            # project entry (absolute url, no remote/groups) and no import.
+            frag = yaml.safe_load(out)
+            projects = {p["name"]: p for p in frag["manifest"]["projects"]}
+            can = projects["canopennode"]
+            self.assertTrue(can["url"].startswith("https://"), msg=can)
+            self.assertEqual(can["revision"], "dec12fa3f0d790cafa8414a4c2930ea71ab72ffd")
+            self.assertEqual(can["path"], "modules/lib/canopennode")
+            self.assertNotIn("remote", can)
+            self.assertNotIn("groups", can)
+            self.assertNotIn("import", can)
+            self.assertNotIn("import", frag["manifest"])
             self.assertIn("name: micropython", out)
             self.assertIn("url: https://github.com/micropython/micropython.git", out)
             self.assertIn("revision: v1.24.1", out)
