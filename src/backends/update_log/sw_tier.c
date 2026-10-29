@@ -65,7 +65,7 @@
 #endif
 #endif /* CONFIG_ALP_SDK_UPDATE_LOG_PERSIST */
 
-/* ---- RAM store (fallback mode; always compiled) ------------------- */
+/* ---- RAM store (RAM-only builds; the counter and test reset use g_sw always) --- */
 
 #define SW_SLOTS 32
 #define SW_BLOB  ULOG_ENTRY_WIRE_LEN
@@ -79,6 +79,8 @@ struct sw_state {
 	uint64_t counter;
 };
 static struct sw_state g_sw;
+
+#ifndef SW_TIER_NVS /* only the RAM-only build reads the store through these */
 
 static int sw_find(const char *key)
 {
@@ -139,6 +141,8 @@ static alp_status_t sw_ram_erase(const char *k)
 	g_sw.s[i].used = false;
 	return ALP_OK;
 }
+
+#endif /* !SW_TIER_NVS */
 
 /* ---- NVS-persistent store (opt-in mode) --------------------------- */
 
