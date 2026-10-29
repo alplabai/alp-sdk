@@ -178,6 +178,17 @@ Pre-1.0 the `pr-abi-snapshot` gate is informational (allowed to
 break the seal alongside a CHANGELOG entry).  Post-1.0 it's a
 hard gate.
 
+**What the server enforces today.**  The list above is the intended
+gate set; branch protection currently makes only a subset of these
+checks *required contexts*: `clang-format · diff-only`,
+`distro install · all` and `twister · native_sim/native/64` on `dev`,
+and `twister · native_sim/native/64` plus `clang-format · diff-only` on
+`main`.  The pytest battery (`python-smoke · all`) and the
+`check_*.py` gates run on every PR but are advisory, and
+`python-smoke` is skipped on `merge_group` (the queue does not re-run
+it on the rebased content).  Promoting them to required contexts is a
+repository-settings change, not a workflow edit.
+
 ### Merge method
 
 - **Feature branch → `dev`**: **merge commit with `--no-ff`** by

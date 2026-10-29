@@ -39,7 +39,8 @@ on:
     branches: [main, dev]
   push:
     branches: [main, dev]
-  # `clang-format · diff-only` is the fifth of `dev`'s required contexts, and
+  # `clang-format · diff-only` is one of `dev`'s required contexts (with
+  # `distro install · all` and `twister · native_sim/native/64`), and
   # GitHub raises `merge_group` -- not `push` or `pull_request` -- for a
   # merge-queue entry, so without this a queued PR waits on a check that can
   # never fire (#1415). Neither `clang-format-diff` nor `cppcheck` carries a
@@ -238,10 +239,8 @@ jobs:
   cppcheck:
     name: cppcheck · src + chips
     runs-on: ubuntu-latest
-    # #1477: not a required context, and its own run step already ends
-    # `|| true` with --error-exitcode=0 -- but it too had no ceiling
-    # (360-minute implicit default). Worst observed successful run 42s
-    # across 3 sampled runs; 15min gives headroom over that.
+    # #1477: worst observed successful run 42s across 3 sampled runs;
+    # 15min gives headroom over that.
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -264,6 +263,13 @@ jobs:
         # available).  We pass --suppress=missingIncludeSystem to
         # skip those rather than report them.  Real type-checking
         # arrives with the v0.2 clang-tidy job.
+        #
+        # Gating: cppcheck itself always exits 0 here (--error-exitcode=0,
+        # `|| true`) so the XML is written even when it finds something;
+        # the step then FAILS the job on any finding of severity="error"
+        # (nullPointer, arrayIndexOutOfBounds, uninitvar, ...). Style,
+        # warning, performance and portability findings stay informational
+        # -- without a build context they are too noisy to gate on.
         run: |
           cppcheck \
               --enable=warning,style,performance,portability \
@@ -280,7 +286,13 @@ jobs:
               src/ chips/ || true
           if [ -s cppcheck.xml ]; then
               n_errors=$(grep -c '<error ' cppcheck.xml || true)
-              echo "::notice::cppcheck reported $n_errors finding(s) (informational; v0.2 will gate)"
+              echo "::notice::cppcheck reported $n_errors finding(s) (severity=error findings fail this job)"
+              n_hard=$(grep -c 'severity="error"' cppcheck.xml || true)
+              if [ "${n_hard}" -gt 0 ]; then
+                  grep -B1 -A2 'severity="error"' cppcheck.xml | head -100
+                  echo "::error::cppcheck reported ${n_hard} severity=error finding(s) in src/ or chips/ (see cppcheck.xml artifact)"
+                  exit 1
+              fi
           fi
 
       - name: Upload cppcheck.xml
