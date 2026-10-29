@@ -41,9 +41,9 @@ The flat form runs a linear, stop-on-first-failure sequence:
 
    | value | meaning |
    |---|---|
-   | `pass` | `--execute`, a test was configured, it ran, it passed |
+   | `pass` | never recorded by this flow: it does not write the EEPROM, so no unit is verified end to end |
    | `fail` | `--execute`, a test was configured, it ran, it **failed** |
-   | `pending-hw` | everything else: dry-run, no test configured, or a test skipped under `--execute` |
+   | `pending-hw` | everything else: dry-run, no test configured, a test skipped under `--execute`, or a test that passed (the EEPROM write is HW-gated) |
 
    `fail` and `pending-hw` are distinct on purpose: "verified bad" and "not yet
    verified" are different states, and before #1305 both wrote `pending-hw`, so a
