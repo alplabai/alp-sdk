@@ -1,0 +1,3 @@
+### Fixed — `spi_dw_alif` DMA dummy buffers are one shared object per direction (#2910)
+
+**RX-only / TX-only and NULL-`buf` skip entries now use fixed-address DMA.** `spi_dw_dma_setup_rx_channel()` / `spi_dw_dma_setup_tx_channel()` compared their pointer against function-local `static dummy_rx` / `dummy_tx` that were different objects from the ones `spi_dw_dma_transceive()` passed, so the match never fired: the dummy was treated as a real buffer, DMA incremented through neighbouring `.bss` at burst > 1, and the RX path flushed and invalidated cache lines over it. The dummies are now single file-scope objects (`spi_dw_dma_dummy_tx` / `spi_dw_dma_dummy_rx`) used by every comparison.

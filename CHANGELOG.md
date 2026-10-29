@@ -7,10 +7,6 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
-### Fixed — `spi_dw_alif` DMA dummy buffers are one shared object per direction
-
-**RX-only / TX-only and NULL-`buf` skip entries now use fixed-address DMA.** `spi_dw_dma_setup_rx_channel()` / `spi_dw_dma_setup_tx_channel()` compared their pointer against function-local `static dummy_rx` / `dummy_tx` that were different objects from the ones `spi_dw_dma_transceive()` passed, so the match never fired: the dummy was treated as a real buffer, DMA incremented through neighbouring `.bss` at burst > 1, and the RX path flushed and invalidated cache lines over it. The dummies are now single file-scope objects (`spi_dw_dma_dummy_tx` / `spi_dw_dma_dummy_rx`) used by every comparison.
-
 ### Fixed — abidiff gate honesty (#2851)
 
 **The `abidiff` gate is advisory, and now says so.** It is not a required context and `pr-plain-cmake.yml` has no `merge_group:` trigger, so a red run blocks nothing (maintainer decision: stays advisory). The SONAME-rename suppression no longer masks an abidiff error (applied only when the exit status has no ABI_ERROR/USAGE bit), every skip (tool missing, no tag of the current minor) emits a `::warning::` in CI or under `--require-tool`, and a test covers the SONAME-only report shape against a synthetic fixture (hand-written in the shape `soname_only()` parses, not a real capture; a recorded `check_abidiff.py --baseline-tag v0.17.0-rc2 --keep` run on a host with abigail-tools is still pending, #2851).
