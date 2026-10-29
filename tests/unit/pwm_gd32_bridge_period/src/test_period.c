@@ -117,3 +117,65 @@ ZTEST(pwm_gd32_bridge_period, test_br_open_resolves_default_period_ns)
 	                  "br_open() left the default config's period_ns at 0 -- "
 	                  "every non-zero alp_pwm_set_duty() would fail ALP_ERR_INVAL");
 }
+
+extern unsigned stub_pwm_set_calls;
+extern uint32_t stub_pwm_set_last_period_ns;
+extern uint32_t stub_pwm_set_last_duty_ns;
+
+/* alp_pwm_set_period() resets the duty to 0 % (<alp/pwm.h>): the bridge must
+ * put duty 0 on the wire, not re-send the previous duty. */
+ZTEST(pwm_gd32_bridge_period, test_br_set_period_resets_duty_to_zero)
+{
+	const alp_backend_t *be  = alp_backend_select("pwm", "renesas:rzv2n:n44");
+	const alp_pwm_ops_t *ops = (const alp_pwm_ops_t *)be->ops;
+
+	const alp_pwm_config_t cfg  = { .channel_id = 2u, .period_ns = 1000000u };
+	struct alp_pwm         h    = { 0 };
+	alp_capabilities_t     caps = { 0 };
+	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
+	zassert_equal(ops->set_duty(&h.state, 900000u), ALP_OK);
+	zassert_equal(stub_pwm_set_last_duty_ns, 900000u);
+
+	zassert_equal(ops->set_period(&h.state, 2000000u), ALP_OK);
+	zassert_equal(stub_pwm_set_last_period_ns, 2000000u);
+	zassert_equal(stub_pwm_set_last_duty_ns, 0u, "set_period must send 0 duty, not the old duty");
+	ops->close(&h.state);
+}
+
+/* alp_pwm_open() starts the channel at 0 % duty, so the bridge programs it. */
+ZTEST(pwm_gd32_bridge_period, test_br_open_primes_zero_duty)
+{
+	const alp_backend_t *be  = alp_backend_select("pwm", "renesas:rzv2n:n44");
+	const alp_pwm_ops_t *ops = (const alp_pwm_ops_t *)be->ops;
+
+	const alp_pwm_config_t cfg  = { .channel_id = 3u, .period_ns = 1000000u };
+	struct alp_pwm         h    = { 0 };
+	alp_capabilities_t     caps = { 0 };
+
+	stub_pwm_set_calls          = 0u;
+	stub_pwm_set_last_duty_ns   = 123u;
+	stub_pwm_set_last_period_ns = 0u;
+	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
+	zassert_equal(stub_pwm_set_calls, 1u, "open did not program the channel");
+	zassert_equal(stub_pwm_set_last_duty_ns, 0u);
+	zassert_equal(stub_pwm_set_last_period_ns, 1000000u);
+	ops->close(&h.state);
+}
+
+/* The bridge has no polarity path: INVERTED is refused, NORMAL accepted. */
+ZTEST(pwm_gd32_bridge_period, test_br_open_polarity)
+{
+	const alp_backend_t *be  = alp_backend_select("pwm", "renesas:rzv2n:n44");
+	const alp_pwm_ops_t *ops = (const alp_pwm_ops_t *)be->ops;
+
+	alp_pwm_config_t   cfg  = { .channel_id = 4u,
+		                        .period_ns  = 1000000u,
+		                        .polarity   = ALP_PWM_POLARITY_INVERTED };
+	struct alp_pwm     h    = { 0 };
+	alp_capabilities_t caps = { 0 };
+	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_ERR_NOSUPPORT);
+
+	cfg.polarity = ALP_PWM_POLARITY_NORMAL;
+	zassert_equal(ops->open(&cfg, &h.state, &caps), ALP_OK);
+	ops->close(&h.state);
+}

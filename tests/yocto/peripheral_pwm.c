@@ -49,6 +49,7 @@ static int          g_call_count;
 static int          g_read_count;    /* # of fake_sysfs_read calls */
 static alp_status_t g_export_result; /* what the "export" write returns */
 static bool         g_fail_period;   /* force the "period" write to fail */
+static bool         g_fail_polarity; /* force the "polarity" write to fail */
 
 /* What the fake "npwm" sysfs read returns (#1635).  -1 == simulate a
  * read failure (chip not present), matching the real ENOENT case. */
@@ -66,6 +67,7 @@ static alp_status_t fake_sysfs_write(const char *path, const char *val)
 	if (is_export) return g_export_result;
 	if (is_unexport) return ALP_OK;
 	if (g_fail_period && strstr(path, "/period") != NULL) return ALP_ERR_IO;
+	if (g_fail_polarity && strstr(path, "/polarity") != NULL) return ALP_ERR_INVAL;
 	return ALP_OK;
 }
 
@@ -120,6 +122,7 @@ static void reset_fixture(void)
 	g_read_count                = 0;
 	g_export_result             = ALP_OK;
 	g_fail_period               = false;
+	g_fail_polarity             = false;
 	g_npwm                      = -1; /* no npwm info -- check skipped, mirrors "chip absent" */
 	g_pwm_test_sysfs_write_hook = fake_sysfs_write;
 	g_pwm_test_sysfs_read_hook  = fake_sysfs_read;
@@ -250,6 +253,41 @@ static void test_post_export_failure_already_exported_does_not_unexport(void)
 	ALP_ASSERT_TRUE(!saw_unexport());
 }
 
+/* A driver that rejects the "inversed" polarity write must fail open
+ * (not hand back a NORMAL-polarity channel) and release a fresh export. */
+static void test_inverted_polarity_write_failure_fails_open(void)
+{
+	reset_fixture();
+	g_fail_polarity = true;
+
+	struct alp_pwm h;
+	memset(&h, 0, sizeof(h));
+	alp_pwm_config_t cfg = {
+		.channel_id = 0u,
+		.period_ns  = 1000000u,
+		.polarity   = ALP_PWM_POLARITY_INVERTED,
+	};
+	alp_capabilities_t caps = { 0 };
+	alp_status_t       rc   = y_open(&cfg, &h.state, &caps);
+
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	ALP_ASSERT_TRUE(saw_unexport());
+}
+
+/* A rejected NORMAL write is only tolerated if the channel reads back
+ * "normal"; the fixture's polarity read fails, so open must fail. */
+static void test_normal_polarity_write_failure_fails_open_when_unverifiable(void)
+{
+	reset_fixture();
+	g_fail_polarity = true;
+
+	struct alp_pwm           h;
+	alp_pwm_backend_state_t *st;
+	alp_status_t             rc = open_handle(&h, &st);
+
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+}
+
 /* Regression for #1635: a channel_id outside the ABI's 0..7 space is a
  * malformed argument (ALP_ERR_INVAL), not a hardware limit -- and must
  * fail before any sysfs I/O happens (no export write). */
@@ -346,6 +384,8 @@ int main(void)
 	test_already_exported_open_configures_close_does_not_release();
 	test_post_export_failure_new_export_unexports();
 	test_post_export_failure_already_exported_does_not_unexport();
+	test_inverted_polarity_write_failure_fails_open();
+	test_normal_polarity_write_failure_fails_open_when_unverifiable();
 	test_channel_id_beyond_abi_space_returns_inval();
 	test_channel_id_beyond_chip_npwm_returns_out_of_range();
 	test_channel_id_within_chip_npwm_still_opens();

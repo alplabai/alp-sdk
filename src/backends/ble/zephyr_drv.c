@@ -299,11 +299,20 @@ struct ble_read_ctx {
 	size_t                    *out_len;
 };
 
+/* Largest GATT attribute value (Bluetooth Core Spec Vol 3 Part F 3.2.9: 512
+ * octets).  z_gatt_write() copies the caller's payload into the pool slot, so
+ * each slot carries this much storage. */
+#define BLE_WRITE_PAYLOAD_MAX 512u
+
 struct ble_write_ctx {
 	struct bt_gatt_write_params params; /* MUST be first: cb casts params -> ctx */
 	struct k_sem                done;
 	uint8_t                     state; /* BLE_PROC_*, stepped with alp_lifecycle_cas */
 	alp_status_t                result;
+	/* params.data points here, never at the caller's buffer: the host keeps
+	 * reading params.data for each prepare-write chunk (and for an
+	 * encryption-change retry) after a timeout has let the caller's frame go. */
+	uint8_t payload[BLE_WRITE_PAYLOAD_MAX];
 };
 
 static struct ble_read_ctx  _read_ctx_pool[CONFIG_ALP_SDK_BLE_MAX_GATT_PROCS];
@@ -1073,6 +1082,10 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
 	struct ble_conn_be *c = (struct ble_conn_be *)conn_st->be_data;
 	if (c == NULL || c->bt == NULL) return ALP_ERR_NOT_READY;
 
+	/* A GATT attribute value is at most 512 octets and the params length
+	 * field is 16 bits: refuse rather than silently truncate. */
+	if (data == NULL || len > BLE_WRITE_PAYLOAD_MAX) return ALP_ERR_INVAL;
+
 	/* Pool-owned for the same reason as the read above (issue #1620). */
 	struct ble_write_ctx *ctx = _write_ctx_alloc();
 	if (ctx == NULL) return ALP_ERR_BUSY;
@@ -1083,12 +1096,17 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
 		        .func   = ble_write_cb,
 		        .handle = handle,
 		        .offset = 0,
-		        .data   = data,
+		        .data   = NULL, /* ctx->payload, set below */
 		        .length = (uint16_t)len,
 		    },
 		.state  = BLE_PROC_LIVE,
 		.result = ALP_ERR_TIMEOUT,
 	};
+	/* Copy the payload into the pool slot: an abandoned procedure keeps
+	 * being serviced by the host after we return ALP_ERR_TIMEOUT, so it
+	 * must not read the caller's (by then reused) buffer. */
+	memcpy(ctx->payload, data, len);
+	ctx->params.data = ctx->payload;
 	k_sem_init(&ctx->done, 0, 1);
 
 	int err = bt_gatt_write(c->bt, &ctx->params);
@@ -1165,6 +1183,17 @@ alp_status_t alp_ble_test_gatt_read_busy(void)
 		_read_ctx_free(held[i]);
 	}
 	return rc;
+}
+
+/* Test-only seam: z_gatt_write() refuses a payload above the 512-octet GATT
+ * attribute limit with ALP_ERR_INVAL before touching the pool or the host. */
+alp_status_t alp_ble_test_gatt_write_oversize(void)
+{
+	struct ble_conn_be   fake_conn = { .bt = (struct bt_conn *)1 };
+	alp_ble_conn_state_t conn_st   = { .be_data = &fake_conn };
+	static const uint8_t data[BLE_WRITE_PAYLOAD_MAX + 1u];
+
+	return z_gatt_write(&conn_st, 0, data, sizeof(data), 0);
 }
 
 /* Test-only seam (issue #1939): the write counterpart of

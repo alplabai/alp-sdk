@@ -120,8 +120,15 @@ z_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 	struct alp_pwm *h = CONTAINER_OF(st, struct alp_pwm, state);
 	h->channel        = spec->channel;
 	h->period_ns      = (cfg->period_ns != 0u) ? cfg->period_ns : spec->period;
-	h->flags =
-	    (cfg->polarity == ALP_PWM_POLARITY_INVERTED) ? PWM_POLARITY_INVERTED : PWM_POLARITY_NORMAL;
+	/* Start from the devicetree flags: a carrier DT that marks the channel
+	 * PWM_POLARITY_INVERTED (active-low hardware) describes the wiring, so
+	 * it must survive.  The caller's INVERTED request is then applied on top
+	 * as a further inversion (XOR), so NORMAL keeps the DT sense and
+	 * INVERTED flips it. */
+	h->flags = spec->flags;
+	if (cfg->polarity == ALP_PWM_POLARITY_INVERTED) {
+		h->flags ^= PWM_POLARITY_INVERTED;
+	}
 
 	/* Initialise to 0 % duty (off). */
 	int err = pwm_set(spec->dev, h->channel, h->period_ns, 0u, h->flags);

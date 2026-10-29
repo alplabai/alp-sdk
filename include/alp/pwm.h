@@ -128,7 +128,16 @@ typedef struct {
  *         - @ref ALP_ERR_NOT_IMPLEMENTED — the selected backend has no
  *           `open` handler
  *         - @ref ALP_ERR_NOMEM — handle pool exhausted
- *         - a backend-mapped error if the hardware rejected the period
+ *         - ALP_ERR_NOSUPPORT -- @c polarity is @ref ALP_PWM_POLARITY_INVERTED
+ *           and the backend cannot apply it (the V2N GD32 bridge has no
+ *           polarity control)
+ *         - a backend-mapped error if the hardware rejected the period, or
+ *           (Yocto) rejected the requested polarity
+ *
+ * @note On Zephyr, @ref ALP_PWM_POLARITY_INVERTED is applied on top of any
+ *       @c PWM_POLARITY_INVERTED flag the devicetree `pwms` entry already
+ *       carries (the two combine by XOR), so a DT-inverted channel opened
+ *       with @ref ALP_PWM_POLARITY_NORMAL keeps its DT inversion.
  */
 alp_pwm_t *alp_pwm_open(const alp_pwm_config_t *cfg);
 
