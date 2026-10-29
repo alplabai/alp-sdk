@@ -35,6 +35,9 @@ struct stub_state {
 	uint32_t r2_first, r2_dropped;
 	uint8_t  r2_got;
 	uint16_t r2_codes[32];
+	unsigned read2_calls;
+	unsigned r2_busy_on_call; /* 1-based READ2 call that reports the discontinuity; 0 = never */
+	bool     chain_ok;        /* alp_dsp_chain_open() returns a non-NULL chain */
 
 	bool     gd32_stream_active[2]; /* the modelled GD32's per-slot state */
 	unsigned acquire_calls;

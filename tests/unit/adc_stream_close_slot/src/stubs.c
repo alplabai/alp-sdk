@@ -114,9 +114,15 @@ alp_status_t gd32g553_adc_stream_read2(gd32g553_t *ctx,
 	(void)ctx;
 	(void)stream_id;
 	g_stub.read2_last_max = max_samples;
-	*first_index          = g_stub.r2_first;
-	*dropped              = g_stub.r2_dropped;
-	*got                  = (g_stub.r2_got > max_samples) ? max_samples : g_stub.r2_got;
+	g_stub.read2_calls++;
+	*first_index = g_stub.r2_first;
+	if (g_stub.r2_busy_on_call != 0u && g_stub.read2_calls == g_stub.r2_busy_on_call) {
+		*dropped = 0xFFFFFFFFu; /* GD32G553_READ2_DROPPED_UNKNOWN */
+		*got     = 0u;
+		return ALP_OK;
+	}
+	*dropped = g_stub.r2_dropped;
+	*got     = (g_stub.r2_got > max_samples) ? max_samples : g_stub.r2_got;
 	for (uint8_t i = 0u; i < *got; ++i) {
 		codes[i] = g_stub.r2_codes[i];
 	}
@@ -137,7 +143,8 @@ alp_dsp_chain_t *alp_dsp_chain_open(const alp_dsp_stage_t *stages, size_t n_stag
 {
 	(void)stages;
 	(void)n_stages;
-	return NULL;
+	/* Opaque token: the chain is never dereferenced by peripheral_adc.c. */
+	return g_stub.chain_ok ? (alp_dsp_chain_t *)&g_stub : NULL;
 }
 
 alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,

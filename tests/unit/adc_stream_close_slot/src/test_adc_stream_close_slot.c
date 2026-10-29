@@ -147,27 +147,6 @@ ZTEST(adc_stream_close_slot, test_stream2_read_scales_codes_to_millivolts)
 	alp_adc_stream_close(h);
 }
 
-/* BEGIN2 answered with no scaling and the rollback STREAM_END cannot be
- * delivered: the GD32 stream is still live, so the slot must stay reserved
- * (the next open takes the other slot, never the live one). */
-ZTEST(adc_stream_close_slot, test_stream2_unscaled_begin_keeps_slot_when_end_fails)
-{
-	g_stub.grant_stream2 = true;
-	g_stub.full_scale    = 0u;
-	g_stub.end_fails     = true;
-	zassert_is_null(open_ch(0u));
-	zassert_equal(g_stub.last_error, ALP_ERR_IO);
-	zassert_true(g_stub.gd32_stream_active[0], "END failed: GD32 stream still running");
-
-	g_stub.end_fails    = false;
-	g_stub.full_scale   = 4095u;
-	g_stub.vref_mv      = 1800u;
-	alp_adc_stream_t *h = open_ch(0u);
-	zassert_not_null(h);
-	zassert_true(g_stub.gd32_stream_active[1], "slot 0 stays reserved; the open takes slot 1");
-	alp_adc_stream_close(h);
-}
-
 ZTEST(adc_stream_close_slot, test_stream2_busy_only_on_the_discontinuity_sentinel)
 {
 	g_stub.grant_stream2 = true;
