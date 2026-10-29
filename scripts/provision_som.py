@@ -230,24 +230,25 @@ def _power_on_test(cfg: Cfg) -> tuple[bool, Step]:
 
 
 def _record(cfg: Cfg, bundle: dict, manifest: Path, test_ran: bool, test_ok: bool) -> Step:
-    """Three-valued, one value per outcome (#1305):
+    """Record the unit in the ledger. This flow emits only `fail` and
+    `pending-hw` (#1305); `som_ledger.py` accepts three values:
 
       * `pass`        -- never from this flow (the EEPROM write is HW-gated).
       * `fail`        -- --execute, a test was configured, it ran, it FAILED.
-      * `pending-hw`  -- everything else: dry-run, no test configured, or a
-                         test skipped under --execute.
+      * `pending-hw`  -- everything else: dry-run, no test configured, a
+                         test skipped under --execute, or a test that
+                         passed (the EEPROM write is HW-gated).
 
     `test_ran` must mean the power-on test was actually configured and
     invoked -- a skipped test is not a passed test (#1276) -- so `test_ok`
-    only earns a `pass` when `test_ran` is also True.
+    is only consulted for `fail` when `test_ran` is also True.
 
     This flow never programs the EEPROM (`_eeprom` only builds and plans the
     manifest), so a unit it provisions is never verified end to end: even a
     passing power-on test records `pending-hw`, not `pass`. Only `fail` is
     recorded as such -- a failed test is bad regardless of the EEPROM.
 
-    `cfg.execute` gates the `fail` `pass` and `fail`, and that is load-bearing, not
-    symmetry for its own sake: `_power_on_test` returns `test_ran=True` in a
+    `cfg.execute` gates `fail`, and that is load-bearing: `_power_on_test` returns `test_ran=True` in a
     dry run too, because it still invokes the runner with `--validate` to
     check the spec. A spec that fails validation on a workstation with no
     board attached is not a unit that failed its power-on test, and must not
