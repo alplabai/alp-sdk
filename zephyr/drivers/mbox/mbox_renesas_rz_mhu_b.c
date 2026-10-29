@@ -48,12 +48,6 @@ const uint32_t *const __mhu_shmem_start = (uint32_t *)MHU_B_SHM_START_ADDR;
 /* FSP interrupt handler. */
 void mhu_b_ns_int_isr(void);
 
-static volatile uint32_t callback_msg;
-static void mhu_b_ns_callback(mhu_callback_args_t *p_args)
-{
-	callback_msg = p_args->msg;
-}
-
 struct mbox_rz_mhu_b_config {
 	const mhu_api_t *fsp_api;
 	uint16_t mhu_ch_size;
@@ -72,7 +66,24 @@ struct mbox_rz_mhu_b_data {
 	mbox_callback_t cb;
 	void *user_data;
 	uint32_t channel_id;
+	/* Message captured by the FSP sub-ISR for THIS instance.  Per instance
+	 * (reached through the FSP p_context), so two MHU-B nodes never see each
+	 * other's last message. */
+	uint32_t rx_msg;
+	/* Set by the FSP callback only when the sub-ISR saw a real status change;
+	 * cleared by the glue ISR before every dispatch. */
+	volatile bool rx_msg_valid;
+	/* false after mbox_set_enabled(false): the NVIC line is masked. */
+	bool rx_enabled;
 };
+
+static void mhu_b_ns_callback(mhu_callback_args_t *p_args)
+{
+	struct mbox_rz_mhu_b_data *data = (struct mbox_rz_mhu_b_data *)p_args->p_context;
+
+	data->rx_msg = p_args->msg;
+	data->rx_msg_valid = true;
+}
 
 /**
  * @brief Return true if the channel of the MBOX device is an inbound channel.
@@ -102,9 +113,16 @@ static void mbox_rz_mhu_b_isr(const struct device *dev)
 	struct mbox_rz_mhu_b_data *data = dev->data;
 	struct mbox_msg msg;
 
+	data->rx_msg_valid = false;
 	mhu_b_ns_int_isr();
-	if (data->cb && data->fsp_cfg->p_shared_memory) {
-		uint32_t local_msg = callback_msg;
+
+	/* Dispatch only when the FSP sub-ISR actually latched a message: a
+	 * spurious or re-entered IRQ with MSG_INT_STSn already clear must not
+	 * replay the previous one. */
+	if (data->rx_msg_valid && data->rx_enabled && data->cb && data->fsp_cfg->p_shared_memory) {
+		uint32_t local_msg = data->rx_msg;
+
+		data->rx_msg_valid = false;
 
 		msg.data = &local_msg;
 
@@ -125,7 +143,7 @@ static int mbox_rz_mhu_b_send(const struct device *dev, mbox_channel_id_t channe
 {
 	const struct mbox_rz_mhu_b_config *config = dev->config;
 	struct mbox_rz_mhu_b_data *data = dev->data;
-	fsp_err_t fsp_err = FSP_SUCCESS;
+	fsp_err_t fsp_err;
 
 	/* FSP driver implementation requires the message to be of type uint32_t */
 	uint32_t message = 0;
@@ -161,38 +179,42 @@ static int mbox_rz_mhu_b_send(const struct device *dev, mbox_channel_id_t channe
 		message = 0;
 	}
 
-	if (data->fsp_cfg->p_shared_memory) {
+	/* Without a shared-memory region nothing can be written or signalled;
+	 * report that instead of a silent success. */
+	if (!data->fsp_cfg->p_shared_memory) {
+		LOG_ERR("No shared-memory configured, cannot send");
+		return -ENOTSUP;
+	}
 
 #if CONFIG_MBOX_BUSY_WAIT_TIMEOUT_US > 0
-		/* The FSP MHU "msgSend" API continuously polls until the
-		 * previous message is consumed before sending a new one. To avoid
-		 * blocking indefinitely, we need to check if the remote clears the message
-		 * within the allowed time before sending a new one
-		 */
-		if (MHU_SEND_TYPE_MSG == data->fsp_ctrl->send_type) {
+	/* The FSP MHU "msgSend" API continuously polls until the
+	 * previous message is consumed before sending a new one. To avoid
+	 * blocking indefinitely, we need to check if the remote clears the message
+	 * within the allowed time before sending a new one
+	 */
+	if (MHU_SEND_TYPE_MSG == data->fsp_ctrl->send_type) {
+		if (data->fsp_ctrl->p_regs->MSG_INT_STSn != 0) {
+			k_busy_wait(CONFIG_MBOX_BUSY_WAIT_TIMEOUT_US);
 			if (data->fsp_ctrl->p_regs->MSG_INT_STSn != 0) {
-				k_busy_wait(CONFIG_MBOX_BUSY_WAIT_TIMEOUT_US);
-				if (data->fsp_ctrl->p_regs->MSG_INT_STSn != 0) {
-					LOG_ERR("Remote is busy");
-					return -EBUSY;
-				}
-			}
-		} else {
-			if (data->fsp_ctrl->p_regs->RSP_INT_STSn != 0) {
-				k_busy_wait(CONFIG_MBOX_BUSY_WAIT_TIMEOUT_US);
-				if (data->fsp_ctrl->p_regs->RSP_INT_STSn != 0) {
-					LOG_ERR("Remote is busy");
-					return -EBUSY;
-				}
+				LOG_ERR("Remote is busy");
+				return -EBUSY;
 			}
 		}
+	} else {
+		if (data->fsp_ctrl->p_regs->RSP_INT_STSn != 0) {
+			k_busy_wait(CONFIG_MBOX_BUSY_WAIT_TIMEOUT_US);
+			if (data->fsp_ctrl->p_regs->RSP_INT_STSn != 0) {
+				LOG_ERR("Remote is busy");
+				return -EBUSY;
+			}
+		}
+	}
 #endif
 
-		/* Send message to shared memory, this will also invoke interrupt on the receiving
-		 * core
-		 */
-		fsp_err = config->fsp_api->msgSend(data->fsp_ctrl, message);
-	}
+	/* Send message to shared memory, this will also invoke interrupt on the receiving
+	 * core
+	 */
+	fsp_err = config->fsp_api->msgSend(data->fsp_ctrl, message);
 
 	if (fsp_err) {
 		LOG_ERR("Message send failed");
@@ -273,7 +295,20 @@ static int mbox_rz_mhu_b_set_enabled(const struct device *dev, mbox_channel_id_t
 		return -ENOSYS;
 	}
 
-	ARG_UNUSED(enabled);
+	struct mbox_rz_mhu_b_data *data = dev->data;
+	unsigned int key = irq_lock();
+
+	/* Mask / unmask the receive NVIC line.  A message that arrives while
+	 * masked stays pending in the NVIC and is delivered on re-enable; while
+	 * masked no callback can run, so the consumer may free user_data. */
+	data->rx_enabled = enabled;
+	if (enabled) {
+		irq_enable(data->fsp_cfg->rx_irq);
+	} else {
+		irq_disable(data->fsp_cfg->rx_irq);
+	}
+
+	irq_unlock(key);
 	return 0;
 }
 
@@ -322,13 +357,14 @@ static DEVICE_API(mbox, mbox_rz_mhu_b_driver_api) = {
 /* No extended-cfg object: r_mhu_b_ns.c resolves both TX and RX registers itself from the
  * MHU-B pair-body table by channel number (see its file header) -- p_extend is unused. */
 #define MHU_B_RZ_INIT(idx)                                                                        \
+	static struct mbox_rz_mhu_b_data mbox_rz_mhu_b_data_##idx;                                 \
 	static mhu_b_ns_instance_ctrl_t g_mhu_b_ns##idx##_ctrl;                                    \
 	static mhu_cfg_t g_mhu_b_ns##idx##_cfg = {                                                 \
 		.channel = DT_INST_PROP(idx, channel),                                             \
 		.rx_ipl = DT_INST_IRQ_BY_NAME(idx, mhuns, priority),                               \
 		.rx_irq = DT_INST_IRQ_BY_NAME(idx, mhuns, irq),                                    \
 		.p_callback = mhu_b_ns_callback,                                                  \
-		.p_context = NULL,                                                                 \
+		.p_context = &mbox_rz_mhu_b_data_##idx,                                            \
 		.p_extend = NULL,                                                                  \
 		.p_shared_memory = (void *)COND_CODE_1(DT_INST_NODE_HAS_PROP(idx, shared_memory),  \
 		      (DT_REG_ADDR(DT_INST_PHANDLE(idx, shared_memory))), (NULL)),                 \
@@ -341,6 +377,7 @@ static DEVICE_API(mbox, mbox_rz_mhu_b_driver_api) = {
 		.rx_mask = DT_INST_PROP(idx, rx_mask),                                             \
 	};                                                                                         \
 	static struct mbox_rz_mhu_b_data mbox_rz_mhu_b_data_##idx = {                              \
+		.rx_enabled = true,                                                    \
 		.dev = DEVICE_DT_INST_GET(idx),                                                    \
 		.fsp_ctrl = &g_mhu_b_ns##idx##_ctrl,                                               \
 		.fsp_cfg = &g_mhu_b_ns##idx##_cfg,                                                 \
