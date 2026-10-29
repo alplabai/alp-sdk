@@ -6,7 +6,7 @@
 > benched.
 
 **The "why heterogeneous compute?" flagship.**  The A-cluster
-delegates a 1024-point FFT to its M-class peer over RPMsg and reads
+delegates a 64-point FFT to its M-class peer over RPMsg and reads
 back the magnitude spectrum.  Each core does what it's best at:
 
 | Side                    | Why this core?                                          |
@@ -38,11 +38,17 @@ shared `imu_fft.h`-style declaration inline in each main.c):
 
 | Method | Request                       | Response                       |
 |--------|-------------------------------|--------------------------------|
-| `fft`  | 1024 × `float32` (PCM samples)| 513 × `float32` (magnitudes)   |
+| `fft`  | 64 × `float32` (PCM samples)  | 33 × `float32` (magnitudes)    |
 
 The A55 calls `alp_rpc_call(ch, "fft", samples, sizeof samples, mags,
 &mags_len, /* timeout */ 1000u)` and blocks until the M33-SM has
 returned the magnitude spectrum.
+
+The transform is deliberately 64 points: one RPC frame (method name +
+NUL + payload) must fit a single RPMsg buffer (496 B usable on the V2N
+carve-out; the SDK TX cap `CONFIG_ALP_SDK_RPC_TX_FRAME_MAX` is 1024).
+The request is 256 B and the response 132 B.  A 1024-point FFT (4096 B
+request) cannot go in one frame -- chunk it across several calls.
 
 ## Memory map
 
@@ -87,12 +93,12 @@ After remoteproc brings up the M33 firmware:
 
 ```
 [m33_sm] FFT worker ready; waiting for 'fft' calls
-[a55]    generated 1024-sample @ 440 Hz sine, calling fft...
-[m33_sm] processing 1024-sample frame
-[a55]    fft returned; dominant bin=23 (~430.7 Hz)
-[a55]    generated 1024-sample @ 880 Hz sine, calling fft...
-[m33_sm] processing 1024-sample frame
-[a55]    fft returned; dominant bin=46 (~861.3 Hz)
+[a55]    generated 64-sample @ 400 Hz sine, calling fft...
+[m33_sm] processing 64-sample frame
+[a55]    fft returned; dominant bin=4 (~400.0 Hz)
+[a55]    generated 64-sample @ 800 Hz sine, calling fft...
+[m33_sm] processing 64-sample frame
+[a55]    fft returned; dominant bin=8 (~800.0 Hz)
 [heterogeneous-offload] done
 ```
 
