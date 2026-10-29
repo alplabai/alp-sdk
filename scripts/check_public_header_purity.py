@@ -80,7 +80,7 @@ def check_cxx(root: Path, cxx: str) -> list[str]:
             continue
         with tempfile.TemporaryDirectory() as td:
             tu = Path(td) / "tu.cpp"
-            tu.write_text("#include <" + rel + ">\n", encoding="utf-8")
+            tu.write_text("#include <" + rel + ">\n", encoding="utf-8", newline="")
             proc = subprocess.run(
                 [
                     cxx,
@@ -92,6 +92,7 @@ def check_cxx(root: Path, cxx: str) -> list[str]:
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
         if proc.returncode != 0:
             first = next(
