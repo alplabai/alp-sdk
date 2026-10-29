@@ -444,3 +444,28 @@ def test_security_psa_attestation_optiga_follows_population(
     msg = str(excinfo.value)
     assert "not assembled" in msg
     assert f"assembled: false in metadata/e1m_modules/{sku}.yaml" in msg
+
+
+def test_security_psa_attestation_optiga_accepted_when_fitted(
+    tmp_path: Path,
+) -> None:
+    """Accept path: E1M-V2N101 ships OPTIGA fitted (no `assembled: false`,
+    `capabilities.optiga_trust_m: true`), so an `optiga_trust_m` attestation
+    root loads and the TF-M overlay selects the OPTIGA bridge."""
+    path = _write_board(tmp_path, """
+        name: test-v2n101-optiga
+        som:
+          sku: E1M-V2N101
+        cores:
+          m33_sm:
+            os: zephyr
+            app: ./m33_sm
+        security:
+          psa:
+            attestation_root: optiga_trust_m
+            tfm: true
+    """)
+    project = load_board_yaml(path)
+    out = emit_tfm_sysbuild_conf(project)
+    assert "CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y" in out
+    assert "optiga_trust_m_bridge" in out
