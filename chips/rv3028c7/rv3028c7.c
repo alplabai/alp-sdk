@@ -358,6 +358,13 @@ alp_status_t rv3028c7_set_alarm(rv3028c7_t                   *ctx,
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (when == NULL || match == NULL) return ALP_ERR_INVAL;
+	/* Reject fields that would encode as invalid BCD or alias the AE bit. */
+	if (when->minute > 59 || when->hour > 23) return ALP_ERR_INVAL;
+	if (match->use_weekday) {
+		if (when->weekday > 6) return ALP_ERR_INVAL;
+	} else if (when->day < 1 || when->day > 31) {
+		return ALP_ERR_INVAL;
+	}
 
 	uint8_t buf[3];
 	/* AE bit = 1 disables that field's match comparison. */
