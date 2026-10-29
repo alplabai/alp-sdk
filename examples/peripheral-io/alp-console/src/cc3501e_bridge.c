@@ -111,6 +111,19 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
 	}
 	aen_lp_pads_enable_output();
+	/* Sample the supply gate BEFORE touching its direction.  High is only a HINT
+	 * that the chip may be powered -- an external pull-up on WIFI_EN would make every
+	 * power-on read high (whether the module has one is an OPEN QUESTION; the
+	 * netlist has not been checked), so the decision below also needs a PING. */
+	bool wifi_was_high = false;
+	/* A failed read leaves the level unknown: never take the supply-cycling cold path
+	 * on that alone -- go through the PING path below, which still ends in
+	 * cc3501e_reset() if the chip turns out to be silent. */
+	const bool wifi_unknown = alp_gpio_read(wifi_en, &wifi_was_high) != ALP_OK;
+	if (wifi_was_high) {
+		/* Latch the level in DR first so the direction change cannot glitch it low. */
+		aen_wifi_en_latch_high();
+	}
 	(void)alp_gpio_configure(wifi_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	(void)alp_gpio_configure(nrst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 
@@ -133,8 +146,11 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	}
 
 	/* 3. Bind the bus + control pins; attach the GPIO proxy (proxied E1M IOs then
-	 *    route over the bridge); run the power + reset sequence (TI SWRU626 + the
-	 *    Puya cold-boot hard-reset workaround).  Leaves WIFI_EN HIGH. */
+	 *    route over the bridge); run the warm-aware power + reset sequence: a cold
+	 *    start (WIFI_EN low) runs the full TI SWRU626 + Puya cold-boot sequence; a
+	 *    warm chip (WIFI_EN high and answering PING) gets an nRESET pulse only, and
+	 *    the supply is cycled only for a high-but-silent chip.  Leaves WIFI_EN HIGH
+	 *    on success; returns an error when the chip stays silent. */
 	(void)cc3501e_init(fw, spi);
 	fw->enable_pin = wifi_en;
 	fw->reset_pin  = nrst;
