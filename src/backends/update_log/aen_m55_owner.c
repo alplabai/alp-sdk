@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <zephyr/cache.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/barrier.h>
 #include <zephyr/sys/sys_io.h>
@@ -96,6 +97,30 @@ struct aen_ulog_rsp {
 	alp_update_log_verdict_t verdict;
 	alp_update_log_entry_t   entry;
 };
+
+_Static_assert(sizeof(struct aen_ulog_req) <= 0x100U, "request overruns the 0x02003000 slot");
+_Static_assert(sizeof(struct aen_ulog_rsp) <= 0x100U, "reply overruns the 0x02003100 slot");
+
+/* Cache maintenance for the SRAM0 mailbox. The two M55 cores do not share a
+ * D-cache, so with CONFIG_DCACHE=y a plain volatile store can sit in the
+ * writer's cache and a plain load can hit a stale line in the reader's.
+ * The writer cleans (flushes) what it wrote; the reader invalidates before
+ * it reads. With the D-cache off (or cache management not built) the
+ * sys_cache_data_* calls are no-ops, so the same code serves both builds.
+ * The mailbox slots are 0x100 apart and line-aligned, so a range never
+ * shares a cache line with the other direction's slot. A struct spans
+ * several lines and a flush writes them back in no fixed order, so the
+ * publisher flushes the payload first, fences, and only then writes and
+ * flushes the line that carries seq. */
+static inline void aen_mbox_flush(volatile void *p, size_t len)
+{
+	(void)sys_cache_data_flush_range((void *)p, len);
+}
+
+static inline void aen_mbox_invalidate(volatile void *p, size_t len)
+{
+	(void)sys_cache_data_invd_range((void *)p, len);
+}
 
 static void aen_mhu_ring(void)
 {
@@ -182,16 +207,20 @@ static alp_status_t client_call(enum aen_ulog_op              op,
 	} else {
 		memset((void *)&AEN_ULOG_REQ->entry, 0, sizeof(AEN_ULOG_REQ->entry));
 	}
+	aen_mbox_flush(AEN_ULOG_REQ, sizeof(*AEN_ULOG_REQ));
 	barrier_dmem_fence_full();
 	AEN_ULOG_REQ->seq = seq;
+	aen_mbox_flush(&AEN_ULOG_REQ->seq, sizeof(AEN_ULOG_REQ->seq));
 
 	aen_mhu_ring();
 
 	int64_t deadline = k_uptime_get() + CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_RPC_TIMEOUT_MS;
 	while (k_uptime_get() < deadline) {
 		aen_mhu_drain();
+		aen_mbox_invalidate(&AEN_ULOG_RSP->seq, sizeof(AEN_ULOG_RSP->seq));
 		if (AEN_ULOG_RSP->seq == seq) {
 			barrier_dmem_fence_full();
+			aen_mbox_invalidate(AEN_ULOG_RSP, sizeof(*AEN_ULOG_RSP));
 			if (AEN_ULOG_RSP->magic != AEN_ULOG_MAGIC ||
 			    AEN_ULOG_RSP->version != AEN_ULOG_VERSION) {
 				return ALP_ERR_IO;
@@ -329,8 +358,10 @@ static void owner_reply(uint32_t                      seq,
 	} else {
 		memset((void *)&AEN_ULOG_RSP->entry, 0, sizeof(AEN_ULOG_RSP->entry));
 	}
+	aen_mbox_flush(AEN_ULOG_RSP, sizeof(*AEN_ULOG_RSP));
 	barrier_dmem_fence_full();
 	AEN_ULOG_RSP->seq = seq;
+	aen_mbox_flush(&AEN_ULOG_RSP->seq, sizeof(AEN_ULOG_RSP->seq));
 	aen_mhu_ring();
 }
 
@@ -349,7 +380,15 @@ void update_log_aen_m55_owner_run(void)
 	uint32_t          last_seq = 0U;
 	uint32_t          served   = 0U;
 
-	AEN_ULOG_RSP->seq     = 0U;
+	/* Clear both directions of the mailbox. RSP->seq alone is not enough: a
+	 * request the previous owner already served stays in retained SRAM0
+	 * (REQ->seq != 0), and with last_seq reset to 0 it would be run again,
+	 * replaying its APPEND into the audit log. A request the client posts
+	 * before this point is dropped; the client times out and retries. */
+	AEN_ULOG_REQ->seq = 0U;
+	AEN_ULOG_RSP->seq = 0U;
+	aen_mbox_flush(&AEN_ULOG_REQ->seq, sizeof(AEN_ULOG_REQ->seq));
+	aen_mbox_flush(&AEN_ULOG_RSP->seq, sizeof(AEN_ULOG_RSP->seq));
 	AEN_ULOG_HP_BEACON[0] = AEN_ULOG_HP_BEACON_MAGIC;
 	AEN_ULOG_HP_BEACON[1] = (log != NULL) ? (uint32_t)ALP_OK : (uint32_t)ALP_ERR_NOT_READY;
 	AEN_ULOG_HP_BEACON[2] = 0U;
@@ -358,6 +397,7 @@ void update_log_aen_m55_owner_run(void)
 	for (;;) {
 		aen_mhu_drain();
 
+		aen_mbox_invalidate(&AEN_ULOG_REQ->seq, sizeof(AEN_ULOG_REQ->seq));
 		uint32_t seq = AEN_ULOG_REQ->seq;
 		if (seq == 0U || seq == last_seq) {
 			k_msleep(1);
@@ -365,6 +405,7 @@ void update_log_aen_m55_owner_run(void)
 		}
 		last_seq = seq;
 		barrier_dmem_fence_full();
+		aen_mbox_invalidate(AEN_ULOG_REQ, sizeof(*AEN_ULOG_REQ));
 
 		if (AEN_ULOG_REQ->magic != AEN_ULOG_MAGIC || AEN_ULOG_REQ->version != AEN_ULOG_VERSION) {
 			owner_reply(seq, ALP_ERR_VERSION, 0U, ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN, 0U, NULL);
