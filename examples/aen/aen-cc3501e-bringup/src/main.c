@@ -824,7 +824,7 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 	 * than the slave's reply-stall watchdog (firmware CC3501E_REPLY_STALL_MS = 250;
 	 * 320 ms here) and toggle NO pin -- then PING again, then a hard reset.  Do NOT
 	 * use cc3501e_sync() for this: its byte-walk PARKS the slave on the 4-byte
-	 * fixed-count lockstep (proven on silicon, chips/cc3501e/cc3501e_core.c:2504 --
+	 * lockstep (proven on silicon, chips/cc3501e/cc3501e_core.c:2504 --
 	 * reply_hdr stuck at 0xA5A5A5A5, link never recovers), which would fail p1 even
 	 * on a healthy CC35.  cc3501e_reset() is out too: it would drop nRESET and
 	 * WIFI_EN for 50 ms, a supply cold cycle in the middle of an OTA.  PING recovering
