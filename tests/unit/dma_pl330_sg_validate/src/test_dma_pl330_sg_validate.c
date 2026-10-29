@@ -108,16 +108,20 @@ ZTEST(dma_pl330_sg_validate, test_addr_adj_checked_on_every_block)
 ZTEST(dma_pl330_sg_validate, test_next_chunk_addr_m2p_dst_fixed)
 {
 	zassert_equal(dma_pl330_next_chunk_addr(0x20000000ULL, 65536U, DMA_ADDR_ADJ_INCREMENT),
-	              0x20010000ULL, "memory source advances");
+	              0x20010000ULL,
+	              "memory source advances");
 	zassert_equal(dma_pl330_next_chunk_addr(0x4A000010ULL, 65536U, DMA_ADDR_ADJ_NO_CHANGE),
-	              0x4A000010ULL, "peripheral FIFO destination stays fixed");
+	              0x4A000010ULL,
+	              "peripheral FIFO destination stays fixed");
 }
 
 /* P2M: mirrored. */
 ZTEST(dma_pl330_sg_validate, test_next_chunk_addr_p2m_src_fixed)
 {
 	zassert_equal(dma_pl330_next_chunk_addr(0x4A000020ULL, 512U, DMA_ADDR_ADJ_NO_CHANGE),
-	              0x4A000020ULL, "peripheral data register source stays fixed");
+	              0x4A000020ULL,
+	              "peripheral data register source stays fixed");
 	zassert_equal(dma_pl330_next_chunk_addr(0x20000000ULL, 512U, DMA_ADDR_ADJ_INCREMENT),
-	              0x20000200ULL, "memory destination advances");
+	              0x20000200ULL,
+	              "memory destination advances");
 }
