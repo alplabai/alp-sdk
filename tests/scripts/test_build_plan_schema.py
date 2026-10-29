@@ -250,7 +250,7 @@ security:
     its_storage: psa_its
     ps_storage: psa_ps
     tfm: true
-    attestation_root: optiga_trust_m
+    attestation_root: tfm_internal
 """
 
 
