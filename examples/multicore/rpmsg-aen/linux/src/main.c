@@ -97,6 +97,15 @@ int main(void)
 	}
 
 	alp_rpc_close(ch);
+	/* Exit status must reflect whether the demo worked: the producer fires
+	 * its samples without waiting for us to subscribe, so a late start
+	 * drops frames.  Report that as a failure (as rpmsg-v2n does) instead
+	 * of letting CI or systemd see success with zero messages. */
+	const unsigned received = atomic_load(&g_received);
+	if (received < DRAIN_COUNT) {
+		printf("[rpmsg-aen] only %u of %u samples received\n", received, DRAIN_COUNT);
+		return 1;
+	}
 	printf("[rpmsg-aen] done\n");
 	return 0;
 }
