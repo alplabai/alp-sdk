@@ -37,6 +37,15 @@
 
 ZTEST_SUITE(alp_power_registry, NULL, NULL, NULL, NULL, NULL);
 
+/* Test seam exported by src/backends/power/zephyr_pm_policy.c under CONFIG_ZTEST. */
+void alp_power_pm_policy_test_stop_wake_timer(void);
+
+static void _cancel_wake_timer_cb(struct k_timer *t)
+{
+	(void)t;
+	alp_power_pm_policy_test_stop_wake_timer();
+}
+
 /* ---------- Selector / priority tests ------------------------------- */
 
 ZTEST(alp_power_registry, test_pm_policy_picked_for_alif_e7)
@@ -166,6 +175,31 @@ ZTEST(alp_power_registry, test_power_request_sleep_with_timer_wakes)
 	/* slept_ms is best-effort; assert >= 0 (i.e. just non-negative
      * which is implicit in the uint32_t type) -- the exact value
      * depends on the scheduler tick + timer granularity. */
+
+	alp_power_close(h);
+}
+
+ZTEST(alp_power_registry, test_power_request_sleep_wake_timeout_reports_timeout)
+{
+	/* The backend's wake timer is cancelled (from a 3 ms timer) before its 10 ms
+	 * expiry, so the semaphore take times out: ALP_ERR_TIMEOUT, RUN, no wake source. */
+	if (!IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY)) {
+		ztest_test_skip();
+	}
+	alp_power_t *h = alp_power_open();
+	zassert_not_null(h);
+	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_TIMER), ALP_OK);
+
+	struct k_timer canceller;
+	k_timer_init(&canceller, _cancel_wake_timer_cb, NULL);
+	k_timer_start(&canceller, K_MSEC(3), K_NO_WAIT);
+
+	alp_power_wake_info_t info = { .realised_mode = ALP_POWER_MODE_SLEEP, .wake_source = 0xffu };
+	alp_status_t          rc   = alp_power_request_sleep(h, ALP_POWER_MODE_SLEEP, 10u, &info);
+	k_timer_stop(&canceller);
+	zassert_equal(rc, ALP_ERR_TIMEOUT);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+	zassert_equal(info.wake_source, 0u);
 
 	alp_power_close(h);
 }

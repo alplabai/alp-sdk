@@ -341,7 +341,9 @@ alp_status_t alp_power_configure_retention(alp_power_t *handle, const alp_power_
  *         @ref ALP_POWER_WAKE_RTC) / ALP_ERR_IO (backend transport
  *         failure mid-cycle) / ALP_ERR_BUSY (Alif STOP backend: a debugger
  *         is attached, or an armed wake source is already pending, so the
- *         sleep would not hold or would end at once).
+ *         sleep would not hold or would end at once) /
+ *         ALP_ERR_TIMEOUT (pm_policy backend: the timed wake did not fire
+ *         within wake_after_ms + 100 ms; info->realised_mode is RUN).
  */
 alp_status_t alp_power_request_sleep(alp_power_t           *handle,
                                      alp_power_mode_t       mode,

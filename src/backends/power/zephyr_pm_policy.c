@@ -275,6 +275,15 @@ static void _timer_expiry(struct k_timer *t)
 
 static K_TIMER_DEFINE(_wake_timer, _timer_expiry, NULL);
 
+#ifdef CONFIG_ZTEST
+/* Test seam: cancel the armed wake timer so the -EAGAIN take-timeout path can run. */
+void alp_power_pm_policy_test_stop_wake_timer(void);
+void alp_power_pm_policy_test_stop_wake_timer(void)
+{
+	k_timer_stop(&_wake_timer);
+}
+#endif
+
 static alp_status_t
 z_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out, uint32_t *wake_caps_out)
 {
@@ -363,8 +372,7 @@ static alp_status_t z_request_sleep(alp_power_backend_state_t *state,
 	_hold_all_locks(l);
 
 	if (info != NULL) {
-		/* A take timeout means the wake timer never fired: the idle thread did not
-		 * descend, so no sleep depth was reached. */
+		/* The wake timer did not fire in time; no sleep depth is claimed. */
 		info->realised_mode = (err == 0) ? _realised_mode(mode) : ALP_POWER_MODE_RUN;
 		info->wake_source   = (err == 0) ? (uint32_t)ALP_POWER_WAKE_TIMER : 0u;
 		info->slept_ms      = (uint32_t)((after > before) ? (after - before) : 0);

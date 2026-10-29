@@ -380,6 +380,12 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		return ALP_ERR_INVAL;
 	}
 
+	/* A CPU pin cannot honour a Vela model: the dispatcher contract is NOSUPPORT. */
+	if (cfg->backend == ALP_INFERENCE_BACKEND_CPU && model_uses_ethos_u(st->model)) {
+		delete st;
+		return ALP_ERR_NOSUPPORT;
+	}
+
 	/* Arena selection.  Dispatch onto the Ethos-U NPU is OP-driven, not
 	 * format-driven: a model routes to the NPU when it carries the "ethos-u"
 	 * custom op (model_uses_ethos_u), regardless of cfg->format -- a Vela model
@@ -419,9 +425,8 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		st->own_arena  = true;
 	}
 
-	/* A CPU pin must not offload: leave the Ethos-U op out of the resolver.  A Vela
-	 * model then fails AllocateTensors() (ALP_ERR_IO) rather than silently running
-	 * its subgraph on the NPU. */
+	/* A CPU pin must not offload: leave the Ethos-U op out of the resolver as a second
+	 * line of defence (a Vela model was already refused with NOSUPPORT above). */
 	register_default_ops(st->resolver, cfg->backend != ALP_INFERENCE_BACKEND_CPU);
 
 	st->interp = new (std::nothrow)
@@ -440,13 +445,14 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 	}
 
 	if (!all_tensor_ranks_fit(st->interp) || !all_tensor_dtypes_known(st->interp)) {
-		/* Also refuses a tensor type with no alp dtype (int64, bool, ...)
-		 * instead of reporting it as F32.  alp_inference_tensor_t's shape[] has exactly 4 slots; refuse the
-		 * model rather than let tflm_get_input()/tflm_get_output() hand
-		 * back a shape silently truncated to the first 4 dims (issue
-		 * #1729). NOSUPPORT, not IO: the model loaded and allocated fine,
-		 * it is this portable descriptor that has no slot for its rank --
-		 * same posture the ORT and DEEPX backends already take. */
+		/* alp_inference_tensor_t's shape[] has exactly 4 slots; refuse a model
+		 * rather than let tflm_get_input()/tflm_get_output() hand back a shape
+		 * silently truncated to the first 4 dims (issue #1729).
+		 * Also refuse a tensor type with no alp dtype (int64, bool, ...) instead
+		 * of reporting it as F32 (issue #2978).  NOSUPPORT, not IO: the model
+		 * loaded and allocated fine, it is this portable descriptor that has no
+		 * slot for the rank or dtype -- same posture the ORT and DEEPX backends
+		 * already take. */
 		delete st->interp;
 		if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
 		delete st;
