@@ -243,8 +243,11 @@ The validator (P2.3 rule 1) requires:
 
 When `provider: mender` and at least one Zephyr slice is present,
 the west-libraries emitter (`--emit west-libraries`) auto-adds a
-`mender-mcu-client` entry to the `name-allowlist:` so the customer's
-`west update` pulls the module without hand-edits.  Hawkbit and
+top-level `mender-mcu-client` west project (name / url / revision / path,
+the `mendersoftware/mender-mcu` client) so the customer's `west update`
+pulls the module without hand-edits.  It is a project entry, not a
+`name-allowlist:` entry: the allowlist only filters projects Zephyr's own
+west.yml defines, and Mender's client is not one of them.  Hawkbit and
 MCUmgr are upstream Zephyr modules so they don't need a west.yml
 entry.
 

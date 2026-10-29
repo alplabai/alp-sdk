@@ -235,11 +235,19 @@ _LIBRARY_WEST_MODULES: dict[str, str] = {
 }
 
 
-# OTA provider -> Zephyr module name the workspace's west.yml must
-# import.  Hawkbit and MCUmgr ship in Zephyr upstream so no entry --
-# only out-of-tree clients need a west.yml line.  See ADR 0009.
-_OTA_PROVIDER_WEST_MODULES: dict[str, str] = {
-    "mender":  "mender-mcu-client",
+# OTA provider -> standalone west project the workspace's west.yml must
+# carry.  Hawkbit and MCUmgr ship in Zephyr upstream so no entry --
+# only out-of-tree clients need one.  Mender's client is NOT defined by
+# Zephyr's own west.yml, so it is a top-level project (name/url/revision),
+# never a `name-allowlist:` entry (the allowlist only filters projects
+# Zephyr's manifest already defines).  See ADR 0009.
+_OTA_PROVIDER_WEST_PROJECTS: dict[str, dict[str, str]] = {
+    "mender": {
+        "name": "mender-mcu-client",
+        "url": "https://github.com/mendersoftware/mender-mcu.git",
+        "revision": "0.1.0",
+        "path": "modules/lib/mender-mcu-client",
+    },
     # hawkbit -- in Zephyr upstream
     # mcumgr  -- in Zephyr upstream
 }
@@ -329,7 +337,7 @@ def _emit_west_libraries(
             continue
         west = zephyr.get("west")
         if isinstance(west, dict):
-            add_west_project(lib, west)
+            add_west_project(f"libraries: '{lib}'", west)
             continue
         mod = zephyr.get("module")
         if isinstance(mod, str) and mod:
@@ -343,9 +351,9 @@ def _emit_west_libraries(
     ota = project.get("ota") or {}
     if isinstance(ota, dict):
         ota_provider = (ota.get("provider") or "").lower()
-        ota_mod = _OTA_PROVIDER_WEST_MODULES.get(ota_provider)
-        if ota_mod is not None:
-            modules.append((f"ota:{ota_provider}", ota_mod))
+        ota_west = _OTA_PROVIDER_WEST_PROJECTS.get(ota_provider)
+        if ota_west is not None:
+            add_west_project(f"ota.provider: '{ota_provider}'", ota_west)
 
     lines: list[str] = []
     lines.append("# SPDX-License-Identifier: Apache-2.0")
@@ -373,12 +381,12 @@ def _emit_west_libraries(
 
     if west_projects:
         lines.append("")
-        lines.append("    # ADR 0018 libraries not imported by Zephyr's own west.yml.")
+        lines.append("    # Libraries / OTA clients not defined by Zephyr's own west.yml.")
         for lib, west in west_projects:
             lines.append(f"    - name: {west['name']}")
             lines.append(f"      url: {west['url']}")
             lines.append(f"      revision: {west['revision']}")
-            lines.append(f"      path: {west['path']}        # board.yaml libraries: '{lib}'")
+            lines.append(f"      path: {west['path']}        # board.yaml {lib}")
 
     if unsupported:
         lines.append("")

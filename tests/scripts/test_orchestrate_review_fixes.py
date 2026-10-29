@@ -20,14 +20,16 @@ Run locally:
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from pathlib import Path
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import REPO, _write_board  # noqa: E402
 
-import alp_orchestrate.carveout as carveout_mod  # noqa: E402
 from alp_orchestrate import (  # noqa: E402
     emit_build_plan,
     load_board_yaml,
@@ -66,10 +68,38 @@ def test_blocked_carve_out_warns_in_build_plan(tmp_path):
     assert all("wild_chan" in w["message"] for w in warns)
 
 
-def test_unresolved_alif_aperture_refuses_ipc_carve_out(monkeypatch):
-    project = load_board_yaml(RPMSG_AEN_BOARD)
+def test_colliding_explicit_addresses_warn_for_both_endpoint_cores(tmp_path):
+    body = _V2N.replace(
+        "  - {name: wild_chan,",
+        "  - {name: chan_a, kind: raw_shmem, endpoints: [a55_cluster, m33_sm],"
+        " carve_out_kb: 64, address: 0x48000000}\n"
+        "  - {name: chan_b, kind: raw_shmem, endpoints: [a55_cluster, m33_sm],"
+        " carve_out_kb: 64, address: 0x48008000}\n"
+        "  - {name: wild_chan,")
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    carves = {c.name: c for c in resolve_carve_outs(project)}
+    blocked = [c for c in carves.values()
+               if c.status == "blocked" and "overlaps" in (c.reason or "")]
+    assert [c.name for c in blocked] == ["chan_b"]
+    assert carves["chan_a"].status == "ok"
+    plan = json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=tmp_path / "build"))
+    warns = [w for w in plan["warnings"] if w["code"] == "blocked-ipc-carveout"]
+    for c in blocked:
+        got = {w["coreId"] for w in warns if c.name in w["message"]}
+        assert got == {"a55_cluster", "m33_sm"}, c.name
+
+
+def test_unreadable_soc_json_refuses_alif_ipc_carve_out(tmp_path):
+    meta = tmp_path / "metadata"
+    shutil.copytree(REPO / "metadata", meta)
+    project = load_board_yaml(RPMSG_AEN_BOARD, metadata_root=meta)
     assert project.som_preset["silicon"].startswith("alif:")
-    monkeypatch.setattr(carveout_mod, "resolve_aperture", lambda *a, **k: None)
+    # A real metadata gap: the SoC JSON becomes unreadable after the
+    # project loaded, so the aperture resolver reaches None on its own.
+    (meta / "socs" / "alif" / "ensemble" / "e8.json").write_text(
+        "{ not json", encoding="utf-8")
     carves = resolve_carve_outs(project)
     assert carves
     for c in carves:
@@ -83,7 +113,17 @@ def test_west_libraries_emits_ota_provider_module():
     project = load_board_yaml(OTA_BOARD)
     assert project.ota.get("provider") == "mender"
     slice_ = next(s for s in project.cores.values() if s.os == "zephyr")
-    assert "mender-mcu-client" in _slice_west_libraries(project, slice_)
+    frag = _slice_west_libraries(project, slice_)
+    # A top-level west project, NOT a Zephyr name-allowlist entry (the
+    # allowlist only filters projects Zephyr's own west.yml defines).
+    doc = yaml.safe_load(frag)
+    projects = {p["name"]: p for p in doc["manifest"]["projects"]}
+    mender = projects["mender-mcu-client"]
+    assert mender["url"].startswith("https://github.com/mendersoftware/")
+    assert mender["revision"] and mender["path"]
+    allow = projects["zephyr"]["import"]["name-allowlist"]
+    assert "mender-mcu-client" not in (allow or [])
+    assert "libraries: 'ota" not in frag
 
 
 def _aen301_storage(body: str) -> str:
