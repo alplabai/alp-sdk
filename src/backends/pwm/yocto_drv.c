@@ -159,8 +159,9 @@ static alp_status_t (*g_pwm_test_sysfs_read_hook)(const char *path,
  *
  * Opens @p path read-only, reads up to @p buf_sz - 1 bytes, and NUL-
  * terminates.  A missing/unreadable attribute maps errno -> alp via the
- * shared @ref alp_status_from_posix_errno baseline; used only for the
- * `npwm` out-of-range probe in y_open() (#1635) today.
+ * shared @ref alp_status_from_posix_errno baseline; used by y_open() for
+ * the `npwm` out-of-range probe (#1635) and for the polarity read-back
+ * that decides whether a rejected NORMAL polarity write is tolerated.
  *
  * @param buf_sz  Size of @p buf.  Must be >= 1 -- a 0 would underflow to
  *                `(size_t)-1` in the `buf_sz - 1` read length below.

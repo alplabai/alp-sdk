@@ -1084,7 +1084,7 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
 
 	/* A GATT attribute value is at most 512 octets and the params length
 	 * field is 16 bits: refuse rather than silently truncate. */
-	if (data == NULL || len > BLE_WRITE_PAYLOAD_MAX) return ALP_ERR_INVAL;
+	if ((data == NULL && len > 0u) || len > BLE_WRITE_PAYLOAD_MAX) return ALP_ERR_INVAL;
 
 	/* Pool-owned for the same reason as the read above (issue #1620). */
 	struct ble_write_ctx *ctx = _write_ctx_alloc();
@@ -1105,7 +1105,7 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
 	/* Copy the payload into the pool slot: an abandoned procedure keeps
 	 * being serviced by the host after we return ALP_ERR_TIMEOUT, so it
 	 * must not read the caller's (by then reused) buffer. */
-	memcpy(ctx->payload, data, len);
+	if (len > 0u) memcpy(ctx->payload, data, len);
 	ctx->params.data = ctx->payload;
 	k_sem_init(&ctx->done, 0, 1);
 

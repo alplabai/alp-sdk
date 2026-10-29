@@ -55,6 +55,9 @@ static bool         g_fail_polarity; /* force the "polarity" write to fail */
  * read failure (chip not present), matching the real ENOENT case. */
 static int g_npwm = -1;
 
+/* What the fake "polarity" sysfs read returns; NULL == read failure. */
+static const char *g_polarity_readback;
+
 static alp_status_t fake_sysfs_write(const char *path, const char *val)
 {
 	if (g_call_count < MAX_CALLS) {
@@ -76,6 +79,11 @@ static alp_status_t fake_sysfs_write(const char *path, const char *val)
 static alp_status_t fake_sysfs_read(const char *path, char *buf, size_t buf_sz)
 {
 	++g_read_count;
+	if (strstr(path, "/polarity") != NULL) {
+		if (g_polarity_readback == NULL) return ALP_ERR_NOT_READY;
+		(void)snprintf(buf, buf_sz, "%s", g_polarity_readback);
+		return ALP_OK;
+	}
 	if (strstr(path, "/npwm") == NULL) return ALP_ERR_NOT_READY;
 	if (g_npwm < 0) return ALP_ERR_NOT_READY;
 	(void)snprintf(buf, buf_sz, "%d", g_npwm);
@@ -123,6 +131,7 @@ static void reset_fixture(void)
 	g_export_result             = ALP_OK;
 	g_fail_period               = false;
 	g_fail_polarity             = false;
+	g_polarity_readback         = NULL;
 	g_npwm                      = -1; /* no npwm info -- check skipped, mirrors "chip absent" */
 	g_pwm_test_sysfs_write_hook = fake_sysfs_write;
 	g_pwm_test_sysfs_read_hook  = fake_sysfs_read;
@@ -288,6 +297,35 @@ static void test_normal_polarity_write_failure_fails_open_when_unverifiable(void
 	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
 }
 
+/* A rejected NORMAL write is tolerated when the channel reads back
+ * "normal": open must succeed. */
+static void test_normal_polarity_write_failure_ok_when_readback_normal(void)
+{
+	reset_fixture();
+	g_fail_polarity     = true;
+	g_polarity_readback = "normal\n";
+
+	struct alp_pwm           h;
+	alp_pwm_backend_state_t *st;
+	alp_status_t             rc = open_handle(&h, &st);
+
+	ALP_ASSERT_EQ_INT(rc, ALP_OK);
+}
+
+/* A rejected NORMAL write with an "inversed" read-back must fail open. */
+static void test_normal_polarity_write_failure_fails_open_when_readback_inversed(void)
+{
+	reset_fixture();
+	g_fail_polarity     = true;
+	g_polarity_readback = "inversed\n";
+
+	struct alp_pwm           h;
+	alp_pwm_backend_state_t *st;
+	alp_status_t             rc = open_handle(&h, &st);
+
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+}
+
 /* Regression for #1635: a channel_id outside the ABI's 0..7 space is a
  * malformed argument (ALP_ERR_INVAL), not a hardware limit -- and must
  * fail before any sysfs I/O happens (no export write). */
@@ -386,6 +424,8 @@ int main(void)
 	test_post_export_failure_already_exported_does_not_unexport();
 	test_inverted_polarity_write_failure_fails_open();
 	test_normal_polarity_write_failure_fails_open_when_unverifiable();
+	test_normal_polarity_write_failure_ok_when_readback_normal();
+	test_normal_polarity_write_failure_fails_open_when_readback_inversed();
 	test_channel_id_beyond_abi_space_returns_inval();
 	test_channel_id_beyond_chip_npwm_returns_out_of_range();
 	test_channel_id_within_chip_npwm_still_opens();
