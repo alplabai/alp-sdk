@@ -207,16 +207,17 @@ when:
       docs/getting-started.md's `| CMake | X.Y+ |` prerequisites row.
       (Neither bootstrap script enforces a CMake version -- they only check
       `cmake` is on PATH -- so the doc row is the one copy this gate polices;
-      `tan doctor` is the runtime consumer.)
+      no runtime check consumes the floor yet.)
 
---fix propagates a changed `zephyr.version` OUT to every machine pin site
-this gate verifies above (points 2, 4, 5, 10, 14 -- west.yml, the CI
+--fix propagates a changed `zephyr.version` (and `halAlif.version`, point 16:
+the west.yml hal_alif revision, via `_WEST_YML_HAL_ALIF_RE`) OUT to every
+machine pin site this gate verifies above (points 2, 4, 5, 10, 14, 16 -- west.yml, the CI
 workflow `--mr`/cache-key pins, the README badge, every
 in-tree-Zephyr-subsystem library manifest's `version:` field, and the
 native-sim-container Containerfile's `ARG ZEPHYR_REV` default). It reuses
 the exact same compiled regexes/constants the verify-only checks read
 (`_WEST_YML_ZEPHYR_RE`, `_WEST_MR_RE`, `_CACHE_KEY_RE`, `_README_BADGE_RE`,
-`_LIBRARY_VERSION_RE`, `_CONTAINERFILE_ZEPHYR_REV_RE`) -- there is
+`_LIBRARY_VERSION_RE`, `_CONTAINERFILE_ZEPHYR_REV_RE`, `_WEST_YML_HAL_ALIF_RE`) -- there is
 deliberately no second, parallel pin map; that would just be a new flavour
 of the drift issue #917 exists to kill. Idempotent (a site already at
 zephyr.version is left untouched, byte-for-byte); a site the gate expects
@@ -1790,9 +1791,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1] if __doc__ else "")
     ap.add_argument(
         "--fix", action="store_true",
-        help="Rewrite west.yml, the CI workflow --mr/cache-key pins, the README badge, and "
+        help="Rewrite west.yml (zephyr and hal_alif revisions), the CI workflow --mr/cache-key pins, the README badge, and "
              "the native-sim-container Containerfile's ARG ZEPHYR_REV default FROM "
-             "metadata/bootstrap.json's zephyr.version instead of only verifying them. "
+             "metadata/bootstrap.json's zephyr.version / halAlif.version instead of only verifying them. "
              "Idempotent; run the gate without --fix afterwards to confirm.",
     )
     args = ap.parse_args()

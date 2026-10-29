@@ -205,7 +205,8 @@ def test_halalif_version_must_be_semver_tag(tmp_path, monkeypatch, capsys):
     _edit_manifest(tmp_path, lambda d: d["halAlif"].__setitem__("version", "main"))
     _point_gate_at(tmp_path, monkeypatch)
     assert gate.main() == 1
-    assert "halAlif" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "does not match" in err and "v[0-9]+" in err
 
 
 def test_cmake_floor_doc_disagreement_fails(tmp_path, monkeypatch, capsys):
