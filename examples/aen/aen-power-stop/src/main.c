@@ -64,7 +64,7 @@
  * One stable line per check, grep-able:
  *
  *     POWER_STOP: cycle<n> <check> <PASS|FAIL>
- *     POWER_STOP: SUMMARY cycles=<n> pass=<n> fail=<n>
+ *     POWER_STOP: SUMMARY cycles=<n> pass=<n> fail=<n> scope=last_boot
  *
  * checks per cycle, printed after the wake that ended it:
  *     record_valid  the SDK's wake record survived and decoded
@@ -98,8 +98,16 @@
  * STANDBY, TCM retention, the timing (wake-to-main() 92.6 ms) and the HP-running case are
  * bench-proven on the E1M-AEN803 (see the README).
  *
- * A cold power cycle (not a reset) starts the sequence over: the counter lives in
- * SRAM that a reset keeps and a power cycle loses.
+ * Where the cycle counter lives decides what restarts the sequence.  Bench build
+ * (BKRAM_BENCH_SCRATCH): the counter is in BKRAM, which a reset keeps and a power cycle loses,
+ * so a cold power cycle starts over.  Product build (variants/product-noscratch.conf): the
+ * counter is in RV-3028 User RAM 1 on the backup supply, so it survives a power cycle too; a
+ * counter with no wake record behind it is reported as record_valid FAIL and the sequence
+ * restarts from cycle 1 (see disarm_stale_alarm()).
+ *
+ * SUMMARY covers only the boot that printed it.  Every STOP wake is a cold boot, so pass and
+ * fail restart at 0 and the line counts the last cycle's verdicts; grep the per-cycle
+ * "POWER_STOP: cycleN <check> PASS|FAIL" lines to judge the whole run.
  */
 
 #include <stdbool.h>
@@ -282,8 +290,9 @@ static void print_knobs(void)
 
 /* Raw always-on registers, as evidence for the bench record.  The first boot after
  * the SE cold start is the baseline; the ones after a wake show what the SE left. */
-#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
-/* This core's own AON control register (M55-HP: AON_BASE + 0x00; the HE's sits at + 0x10). */
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP) || defined(CONFIG_SOC_AE402FA0E5597LE0_RTSS_HP)
+/* This core's own AON control register (M55-HP on the E8 and the E4: AON_BASE + 0x00; the
+ * HE's sits at + 0x10).  The backend selects it the same way (alif_se_power_hw.c). */
 #define CORE_CTRL_NAME "RTSS_HP_CTRL"
 #define CORE_CTRL_ADDR 0x1A604000u
 #else
@@ -894,6 +903,31 @@ static void check_clocks(unsigned cycle)
 }
 #endif
 
+/* Disarm and clear a stale RV-3028 alarm.  Call on every path that starts a fresh sequence
+ * (done == 0), not only when the counter read 0 at boot: the stale-counter and no-wake-record
+ * paths in main() also reset it to 0, and a power-cycled product build keeps both the counter
+ * and the alarm (User RAM 1 and AIE/AF are on the backup supply). */
+static void disarm_stale_alarm(void)
+{
+	/* A fresh run owns no alarm yet.  The RV-3028 is backup-powered, so an alarm this
+	 * app armed in a run that lost power mid-sleep keeps AIE and AF set across every
+	 * power cycle, and the backend then refuses each later RTC sleep at step 7
+	 * (rtc_wake_already_latched: it keeps a caller's alarm for WAKE_RTC sleeps).
+	 * Disarm and clear it here, before the first cycle.  A counter of 0 can also be a
+	 * failed counter read; that is still before this run arms anything, so the worst
+	 * case is disarming an alarm a lost run left behind. */
+	bool fired = false;
+
+	if (rv3028c7_alarm_int_enable(&g_rtc, false) != ALP_OK ||
+	    rv3028c7_alarm_check_and_clear(&g_rtc, &fired) != ALP_OK) {
+		printk("POWER_STOP: stale RV-3028 alarm clear FAIL err=%d (an RTC sleep may "
+		       "refuse rtc_wake_already_latched)\n",
+		       (int)alp_last_error());
+	} else if (fired) {
+		printk("POWER_STOP: stale RV-3028 alarm from an earlier run cleared\n");
+	}
+}
+
 int main(void)
 {
 #ifdef CONFIG_AEN_STOP_WAKE_TIMING
@@ -919,25 +953,6 @@ int main(void)
 	unsigned done = cycle_get();
 
 	printk("POWER_STOP: boot valid=%d counter=%u\n", (int)bi.valid, done);
-	if (done == 0u) {
-		/* A fresh run owns no alarm yet.  The RV-3028 is backup-powered, so an alarm this
-		 * app armed in a run that lost power mid-sleep keeps AIE and AF set across every
-		 * power cycle, and the backend then refuses each later RTC sleep at step 7
-		 * (rtc_wake_already_latched: it keeps a caller's alarm for WAKE_RTC sleeps).
-		 * Disarm and clear it here, before the first cycle.  A counter of 0 can also be a
-		 * failed counter read; that is still before this run arms anything, so the worst
-		 * case is disarming an alarm a lost run left behind. */
-		bool fired = false;
-
-		if (rv3028c7_alarm_int_enable(&g_rtc, false) != ALP_OK ||
-		    rv3028c7_alarm_check_and_clear(&g_rtc, &fired) != ALP_OK) {
-			printk("POWER_STOP: stale RV-3028 alarm clear FAIL err=%d (an RTC sleep may "
-			       "refuse rtc_wake_already_latched)\n",
-			       (int)alp_last_error());
-		} else if (fired) {
-			printk("POWER_STOP: stale RV-3028 alarm from an earlier run cleared\n");
-		}
-	}
 	print_ses_version();
 	print_regs();
 	/* BKRAM after the boot-time clock restore: served from the RAM shadow (live=0) means the
@@ -991,11 +1006,17 @@ int main(void)
 #endif
 	}
 
+	if (done == 0u) {
+		disarm_stale_alarm(); /* every fresh sequence, however the counter got to 0 */
+	}
+
 	if (done < N_CYCLES) {
 		start_cycle(done + 1u);
 	}
 
-	printk("POWER_STOP: SUMMARY cycles=%u pass=%u fail=%u\n", done, g_pass, g_fail);
+	/* pass/fail are .bss and restart at every cold-boot wake, so they judge this boot only
+	 * (the cycle that just ended); scope=last_boot says so on the line itself. */
+	printk("POWER_STOP: SUMMARY cycles=%u pass=%u fail=%u scope=last_boot\n", done, g_pass, g_fail);
 	for (;;) {
 		k_sleep(K_SECONDS(10));
 		printk("POWER_STOP: awake (done)\n");
