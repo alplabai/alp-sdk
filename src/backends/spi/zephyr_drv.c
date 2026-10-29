@@ -130,12 +130,22 @@ z_open(const alp_spi_config_t *cfg, alp_spi_backend_state_t *st, alp_capabilitie
 	s->zspi_cfg.operation = _to_spi_op(cfg);
 	s->zspi_cfg.slave     = 0;
 
-	if (cfg->cs_pin_id != ALP_SPI_NO_CS && alp_z_gpio_resolve(cfg->cs_pin_id, &s->cs_spec)) {
+	if (cfg->cs_pin_id != ALP_SPI_NO_CS) {
+		/* Fail closed: opening with no chip select would clock SCK/MOSI with CS
+		 * never asserted while every transfer still reported OK. */
+		if (!alp_z_gpio_resolve(cfg->cs_pin_id, &s->cs_spec)) {
+			_free_side(s);
+			return ALP_ERR_INVAL;
+		}
 		if (!device_is_ready(s->cs_spec.port)) {
 			_free_side(s);
 			return ALP_ERR_NOT_READY;
 		}
-		gpio_pin_configure_dt(&s->cs_spec, GPIO_OUTPUT_INACTIVE);
+		int cs_rc = gpio_pin_configure_dt(&s->cs_spec, GPIO_OUTPUT_INACTIVE);
+		if (cs_rc != 0) {
+			_free_side(s);
+			return _errno_to_alp(cs_rc);
+		}
 		s->cs_ctrl.gpio = s->cs_spec;
 		/* CS setup/hold window: spi_context busy-waits this long after
          * asserting and before deasserting CS.  Slaves that frame
