@@ -391,3 +391,39 @@ ZTEST(alp_testing_gpio_behavior, test_cb_reentrant_close_is_safe)
 	 * documented no-op (idempotent void close), not a double-free. */
 	alp_gpio_close(h);
 }
+
+/* A handle left open across alp_testing_reset_all() must not alias the
+ * slot's next occupant: ops fail instead of touching another pin. */
+ZTEST(alp_testing_gpio_behavior, test_stale_handle_after_reset_fails)
+{
+	alp_gpio_t *h = alp_gpio_open(3);
+	zassert_not_null(h, "alp_gpio_open(3) failed");
+
+	alp_testing_reset_all();
+	/* Binds the slot pin 3 used to occupy. */
+	zassert_equal(alp_testing_gpio_set_input(7, true), ALP_OK, "set_input(7) failed");
+
+	zassert_equal(alp_gpio_write(h, true), ALP_ERR_NOT_READY, "stale write must fail");
+	bool level = false;
+	zassert_equal(alp_gpio_read(h, &level), ALP_ERR_NOT_READY, "stale read must fail");
+	uint32_t n = 99;
+	zassert_equal(alp_testing_gpio_write_count(7, &n), ALP_OK, "write_count(7) failed");
+	zassert_equal(n, 0, "stale handle wrote through to pin 7");
+	alp_gpio_close(h);
+}
+
+static void clock_ts_cb(void *ctx)
+{
+	*(uint64_t *)ctx = alp_testing_clock_now_ms();
+}
+
+/* A virtual-clock callback sees its own timestamp, not the pre-advance now. */
+ZTEST(alp_testing_gpio_behavior, test_clock_callback_sees_own_timestamp)
+{
+	static uint64_t seen;
+	seen = 0;
+	zassert_equal(alp_testing_clock_schedule(5, clock_ts_cb, &seen), ALP_OK, "schedule failed");
+	zassert_equal(alp_testing_clock_advance_ms(10), ALP_OK, "advance failed");
+	zassert_equal(seen, 5, "callback saw now=%llu, expected 5", (unsigned long long)seen);
+	zassert_equal(alp_testing_clock_now_ms(), 10, "now must end at 10");
+}

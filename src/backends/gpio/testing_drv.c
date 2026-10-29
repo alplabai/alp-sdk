@@ -97,6 +97,17 @@ static void slot_reset(void *slot_v)
 	slot->armed_edge              = ALP_GPIO_EDGE_NONE;
 }
 
+/* Resolve the slot a handle may touch.  alp_testing_reset_all() clears
+ * the slot's owner (and may rebind the slot to another pin), so a handle
+ * left open across a reset no longer matches and its ops fail instead of
+ * reading/writing whichever pin reused the slot. */
+static alp_testing_gpio_slot_t *live_slot(alp_gpio_backend_state_t *st)
+{
+	alp_testing_gpio_slot_t *slot = (alp_testing_gpio_slot_t *)st->be_data;
+	if (slot == NULL || slot->owner != ALP_TESTING_OWNER_OF(st)) return NULL;
+	return slot;
+}
+
 /* Deferred-edge trampoline pool: alp_testing_clock_schedule() takes an
  * opaque ctx, so a pending edge_at() needs somewhere to park its
  * (pin_id, edge) pair between scheduling and firing.  Declared ahead
@@ -261,7 +272,7 @@ t_configure(alp_gpio_backend_state_t *st, alp_gpio_dir_t dir, alp_gpio_pull_t pu
 
 static alp_status_t t_write(alp_gpio_backend_state_t *st, bool level)
 {
-	alp_testing_gpio_slot_t *slot = (alp_testing_gpio_slot_t *)st->be_data;
+	alp_testing_gpio_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 	slot->output_level = level;
 	slot->write_count++;
@@ -270,7 +281,7 @@ static alp_status_t t_write(alp_gpio_backend_state_t *st, bool level)
 
 static alp_status_t t_read(alp_gpio_backend_state_t *st, bool *level)
 {
-	alp_testing_gpio_slot_t *slot = (alp_testing_gpio_slot_t *)st->be_data;
+	alp_testing_gpio_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 	*level = slot->input_level;
 	return ALP_OK;
@@ -279,7 +290,7 @@ static alp_status_t t_read(alp_gpio_backend_state_t *st, bool *level)
 static alp_status_t
 t_irq_enable(alp_gpio_backend_state_t *st, alp_gpio_edge_t edge, alp_gpio_cb_t cb, void *user)
 {
-	alp_testing_gpio_slot_t *slot = (alp_testing_gpio_slot_t *)st->be_data;
+	alp_testing_gpio_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 	slot->armed_edge = edge;
 	slot->cb         = cb;
@@ -289,7 +300,7 @@ t_irq_enable(alp_gpio_backend_state_t *st, alp_gpio_edge_t edge, alp_gpio_cb_t c
 
 static alp_status_t t_irq_disable(alp_gpio_backend_state_t *st)
 {
-	alp_testing_gpio_slot_t *slot = (alp_testing_gpio_slot_t *)st->be_data;
+	alp_testing_gpio_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 	slot->armed_edge = ALP_GPIO_EDGE_NONE;
 	slot->cb         = NULL;
@@ -299,8 +310,11 @@ static alp_status_t t_irq_disable(alp_gpio_backend_state_t *st)
 
 static void t_close(alp_gpio_backend_state_t *st)
 {
-	alp_testing_gpio_slot_t *slot = (alp_testing_gpio_slot_t *)st->be_data;
-	if (slot == NULL) return;
+	alp_testing_gpio_slot_t *slot = live_slot(st);
+	if (slot == NULL) {
+		st->be_data = NULL;
+		return;
+	}
 	/* Cut the callback wiring so an injection that arrives after
 	 * close (arm-then-close-then-inject) cannot call back into a
 	 * handle the dispatcher has already returned to the pool. */

@@ -40,11 +40,12 @@ float alp_pid_step(alp_pid_t *pid, float setpoint, float measurement, float dt_s
 	const float             err = setpoint - measurement;
 
 	/* Integrate the error, then clamp the accumulator (anti-windup).
-	 * integ_limit <= 0 auto-selects half the output span. */
+	 * integ_limit <= 0 auto-selects the limit at which the I term
+	 * (ki * integ) reaches half the output span, i.e. span / (2 * ki). */
 	pid->integ += err * dt_s;
 	float ilim = c->integ_limit;
-	if (ilim <= 0.0f) {
-		ilim = (c->out_max > c->out_min) ? ((c->out_max - c->out_min) * 0.5f) : 0.0f;
+	if (ilim <= 0.0f && c->ki > 0.0f && c->out_max > c->out_min) {
+		ilim = (c->out_max - c->out_min) * 0.5f / c->ki;
 	}
 	if (ilim > 0.0f) {
 		if (pid->integ > ilim) {

@@ -67,8 +67,13 @@ struct alp_amp_beacon {
 	uint32_t attach_epoch;
 };
 
+#if defined(__cplusplus)
+static_assert(sizeof(struct alp_amp_beacon) == ALP_AMP_BEACON_SIZE,
+              "alp_amp_beacon must be exactly the 16 bytes the A55 side reads");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(struct alp_amp_beacon) == ALP_AMP_BEACON_SIZE,
                "alp_amp_beacon must be exactly the 16 bytes the A55 side reads");
+#endif
 
 /** Beacon of the rsctbl page starting at `base` and `page_size` bytes long. */
 #define ALP_AMP_BEACON_AT(base, page_size) \
