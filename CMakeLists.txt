@@ -165,6 +165,16 @@ if(ALP_SOC)
             "ALP_SOC='${ALP_SOC}' must be a Kconfig-style SoC symbol "
             "such as ALP_SOC_RENESAS_RZV2N_N44 (see include/alp/soc_caps.h)")
     endif()
+    # Well-formed is not enough: a typo or stale symbol would define a
+    # CONFIG_ nothing in soc_caps.h tests, silently falling back to the
+    # permissive "unknown" profile.  Accept only symbols the #elif chain gates on.
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/alp/soc_caps.h" _alp_soc_lines
+         REGEX "defined\\(CONFIG_ALP_SOC_")
+    if(NOT _alp_soc_lines MATCHES "defined\\(CONFIG_${ALP_SOC}\\)")
+        message(FATAL_ERROR
+            "ALP_SOC='${ALP_SOC}' is not a SoC profile in include/alp/soc_caps.h "
+            "(known symbols are the CONFIG_ALP_SOC_* tests there)")
+    endif()
     target_compile_definitions(alp_sdk_headers INTERFACE CONFIG_${ALP_SOC}=1)
 endif()
 

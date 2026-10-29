@@ -115,3 +115,31 @@ def test_malformed_alp_soc_is_rejected(tmp_path):
     rv = _configure(tmp_path, "renesas:rzv2n:n44")
     assert rv.returncode != 0
     assert "ALP_SOC='renesas:rzv2n:n44' must be a Kconfig-style SoC symbol" in rv.stdout + rv.stderr
+
+
+@needs_cmake
+def test_unknown_but_well_formed_alp_soc_is_rejected(tmp_path):
+    rv = _configure(tmp_path, "ALP_SOC_RENESAS_RZV2N")
+    assert rv.returncode != 0
+    assert "ALP_SOC='ALP_SOC_RENESAS_RZV2N' is not a SoC profile" in rv.stdout + rv.stderr
+
+
+def test_machine_confs_default_alp_sdk_soc_to_the_preset_silicon():
+    """Plain `MACHINE=... bitbake` (no generated local.conf) must still get
+    the SoC profile; the conf default and the emitter share one source."""
+    import re
+
+    import yaml
+
+    from alp_project_loader import silicon_to_kconfig
+
+    metadata = REPO / "metadata"
+    confs = sorted((REPO / "meta-alp-sdk/conf/machine").glob("e1m-*.conf"))
+    assert len(confs) == 8
+    for conf in confs:
+        sku = conf.stem.rsplit("-", 1)[0].upper()  # e1m-v2n101 -> E1M-V2N101
+        preset = yaml.safe_load((metadata / "e1m_modules" / f"{sku}.yaml").read_text(encoding="utf-8"))
+        want = silicon_to_kconfig(preset["silicon"], metadata)
+        m = re.search(r'^ALP_SDK_SOC \?= "([^"]+)"', conf.read_text(encoding="utf-8"), re.M)
+        assert m, f"{conf.name}: no ALP_SDK_SOC ?= default"
+        assert m.group(1) == want, conf.name
