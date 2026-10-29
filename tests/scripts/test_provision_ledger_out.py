@@ -64,6 +64,10 @@ def test_ship_check():
     assert lo.ship_check({**ok, "known_defects": "cracked"}, CAT) == ["known_defects: cracked"]
     assert lo.ship_check({**ok, "provision_overrides": "tier_triangle: rework"}, CAT) ==         ["provision_overrides: tier_triangle: rework"]
     assert lo.ship_check({**ok, "rootfs_bundle_version": "build-dir:deploy"}, CAT)
+    # a bundle.json with no signature is as unsigned as a --build-dir
+    r = lo.ship_check({**ok, "rootfs_bundle_version": "unsigned:som-1.2.3"}, CAT)
+    assert len(r) == 1 and "unsigned" in r[0]
+    assert lo.ship_check({**ok, "rootfs_bundle_version": "som-1.2.3"}, CAT) == []
 
 
 DXM1 = ("dxm1_fw_uart_boot_md5", "dxm1_fw_md5", "dxm1_fw_version")

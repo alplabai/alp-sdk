@@ -47,6 +47,7 @@ from flash_backends import yocto_wic                # noqa: E402
 from flash_backends.yocto_wic import (             # noqa: E402
     YoctoWicFlash,
     _require_block_device,
+    _require_unused_device,
     _resolve_dev_root,
 )
 from flash_backends.zephyr_west_flash import (     # noqa: E402
@@ -70,6 +71,7 @@ def _patch_valid_dev_target():
         "flash_backends.yocto_wic",
         _resolve_dev_root=lambda target: (Path(target), None),
         _require_block_device=lambda resolved: None,
+        _require_unused_device=lambda resolved: None,
     )
 
 
@@ -342,6 +344,48 @@ def test_require_block_device_rejects_missing_target(tmp_path) -> None:
     err = _require_block_device(tmp_path / "does-not-exist")
     assert err is not None
     assert "cannot stat" in err
+
+
+def _fake_proc_mounts(tmp_path, text):
+    mounts = tmp_path / "mounts"
+    mounts.write_text(text, encoding="utf-8")
+    return patch.object(yocto_wic, "_PROC_MOUNTS", mounts)
+
+
+def test_require_unused_device_rejects_mounted_partition_of_target(tmp_path) -> None:
+    with _fake_proc_mounts(tmp_path, "/dev/sdb1 /mnt ext4 rw 0 0\n"), \
+         patch.object(yocto_wic, "_block_family",
+                      side_effect=lambda n, seen=None: {n, "sdb"}):
+        err = _require_unused_device(Path("/dev/sdb"))
+    assert err is not None and "mounted" in err
+
+
+def test_require_unused_device_rejects_host_root_disk(tmp_path) -> None:
+    with _fake_proc_mounts(tmp_path, "/dev/sda2 / ext4 rw 0 0\n"):
+        err = _require_unused_device(Path("/dev/sda2"))
+    assert err is not None
+
+
+def test_require_unused_device_allows_unrelated_disk(tmp_path) -> None:
+    with _fake_proc_mounts(
+            tmp_path, "proc /proc proc rw 0 0\n/dev/sda2 / ext4 rw 0 0\n"):
+        assert _require_unused_device(Path("/dev/sdb")) is None
+
+
+def test_yocto_wic_execution_refuses_mounted_device_before_running() -> None:
+    with patch.multiple(
+            "flash_backends.yocto_wic",
+            _resolve_dev_root=lambda target: (Path(target), None),
+            _require_block_device=lambda resolved: None,
+            _require_unused_device=lambda resolved: "yocto_wic: mounted"), \
+         patch("flash_backends.yocto_wic.shutil.which",
+               side_effect=lambda t: f"/usr/bin/{t}" if t == "dd" else None), \
+         patch("flash_backends.yocto_wic.subprocess.run") as run_mock:
+        result = YoctoWicFlash().flash(_ctx(
+            {"target": "/dev/sda", "confirm": True}, artefact="/tmp/image.wic"))
+    assert result.ok is False
+    assert "mounted" in result.message
+    assert run_mock.call_count == 0
 
 
 def test_require_block_device_accepts_valid_block_device(tmp_path) -> None:
@@ -653,10 +697,14 @@ def test_swd_probe_prefers_jlink_when_present() -> None:
                if t in ("JLinkExe", "openocd") else None), \
          patch("flash_backends.swd_probe.subprocess.run") as run_mock:
         result = backend.flash(_ctx(
-            {"base": "0x08000000"}, dry_run=True, artefact=artefact))
+            {"base": "0x08000000", "jlink_serial": "123456789"},
+            dry_run=True, artefact=artefact))
     assert result.ok is True
     assert run_mock.call_count == 0
     assert result.command[0].endswith("JLinkExe")
+    assert result.command[1:3] == ["-SelectEmuBySN", "123456789"]
+    assert "-AutoConnect" not in result.command
+    assert "exec DisableAutoUpdateFW\nconnect" in result.message
     assert "-device" in result.command and "GD32G553MEY7TR" in result.command
     assert "SWD" in " ".join(result.command)
     assert "loadfile" in result.message
@@ -669,12 +717,66 @@ def test_swd_probe_jlink_happy_path() -> None:
                side_effect=lambda t: "/usr/bin/JLinkExe"
                if t == "JLinkExe" else None), \
          patch("flash_backends.swd_probe.subprocess.run",
-               return_value=_proc(rc=0)) as run_mock:
+               return_value=_proc(rc=0, stdout=_JLINK_OK_LOG)) as run_mock:
         result = backend.flash(_ctx(
-            {"jlink_device": "GD32G553MEY7TR"}, artefact="/tmp/gd32-bridge.hex"))
+            {"jlink_device": "GD32G553MEY7TR", "jlink_serial": "123456789"},
+            artefact="/tmp/gd32-bridge.hex"))
     assert result.ok is True
     assert run_mock.call_count == 1
     assert run_mock.call_args[0][0][0].endswith("JLinkExe")
+
+
+_JLINK_OK_LOG = "Downloading file [x.hex]...\nJ-Link: Flash download: O.K.\n"
+
+
+@pytest.mark.parametrize("log", [
+    "Cannot connect to target.\n",                    # never reached the probe
+    "Downloading file...\nERROR: Could not download\n",
+    "J-Link Commander V9.46\n",                       # no programming confirmation
+])
+def test_swd_probe_jlink_rc0_with_bad_transcript_is_not_success(log) -> None:
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: "/usr/bin/JLinkExe"
+               if t == "JLinkExe" else None), \
+         patch("flash_backends.swd_probe.subprocess.run",
+               return_value=_proc(rc=0, stdout=log)):
+        result = SwdProbeFlash().flash(_ctx(
+            {"jlink_serial": "123456789"}, artefact="/tmp/gd32-bridge.hex"))
+    assert result.ok is False
+    assert "not reporting a flash" in result.message
+
+
+def test_swd_probe_jlink_requires_probe_serial(monkeypatch) -> None:
+    monkeypatch.delenv("ALP_JLINK_SERIAL", raising=False)
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: "/usr/bin/JLinkExe"
+               if t == "JLinkExe" else None), \
+         patch("flash_backends.swd_probe.subprocess.run") as run_mock:
+        result = SwdProbeFlash().flash(_ctx(artefact="/tmp/gd32-bridge.hex"))
+    assert result.ok is False
+    assert "jlink_serial" in result.message
+    assert run_mock.call_count == 0
+
+
+def test_swd_probe_jlink_serial_from_env(monkeypatch) -> None:
+    monkeypatch.setenv("ALP_JLINK_SERIAL", "000603000869")
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: "/usr/bin/JLinkExe"
+               if t == "JLinkExe" else None):
+        result = SwdProbeFlash().flash(_ctx(
+            dry_run=True, artefact="/tmp/gd32-bridge.hex"))
+    assert result.ok is True
+    assert result.command[1:3] == ["-SelectEmuBySN", "000603000869"]
+
+
+def test_swd_probe_jlink_rejects_non_numeric_serial() -> None:
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: "/usr/bin/JLinkExe"
+               if t == "JLinkExe" else None):
+        result = SwdProbeFlash().flash(_ctx(
+            {"jlink_serial": "1; exec x"}, dry_run=True,
+            artefact="/tmp/gd32-bridge.hex"))
+    assert result.ok is False
 
 
 def test_jlink_commander_script_hex_uses_loadfile() -> None:
@@ -702,7 +804,8 @@ def test_swd_probe_jlink_failure_returns_error_result() -> None:
                if t == "JLinkExe" else None), \
          patch("flash_backends.swd_probe.subprocess.run",
                return_value=_proc(rc=1, stderr="Cannot connect to target")):
-        result = backend.flash(_ctx(artefact="/tmp/gd32-bridge.hex"))
+        result = backend.flash(_ctx(
+            {"jlink_serial": "123456789"}, artefact="/tmp/gd32-bridge.hex"))
     assert result.ok is False
     assert "J-Link exited" in result.message
 
@@ -809,7 +912,7 @@ def test_swd_probe_jlink_handles_whitespace_bearing_path() -> None:
                if t == "JLinkExe" else None), \
          patch("flash_backends.swd_probe.subprocess.run") as run_mock:
         result = backend.flash(_ctx(
-            {"base": "0x08000000"},
+            {"base": "0x08000000", "jlink_serial": "123456789"},
             dry_run=True,
             artefact="/tmp/dir with spaces/gd32-bridge.hex"))
     assert result.ok is True

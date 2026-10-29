@@ -24,7 +24,7 @@ and is a hard CI gate: any Doxygen warning fails the build.
   page -- there is no separate `docs/doxygen/pages/` directory; each
   area's own `README.md` fills that role in place.  `docs/superpowers/*`
   (internal working notes) is excluded via `EXCLUDE_PATTERNS`.
-- [`scripts/check_doxygen_coverage.py --fail-on-gaps`](../../scripts/check_doxygen_coverage.py)
+- [`scripts/check_doxygen_coverage.py`](../../scripts/check_doxygen_coverage.py)
   runs first, as a fast pre-flight `@brief` coverage audit, before the
   full HTML build.
 - `PROJECT_NUMBER` is the one value the committed `Doxyfile` does

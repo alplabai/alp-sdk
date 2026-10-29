@@ -132,6 +132,16 @@ DEBUG_MODE_REASON = ("SoC is strapped to debug mode (MD_BOOT3 high, SYS_LSI_MODE
                      "a production SoM must boot in normal mode (MD_BOOT3 low)")
 
 
+# rootfs_bundle_version prefixes the Preflight step writes for a bundle that carries no release
+# signature: `build-dir:` (--build-dir, no bundle.json) and `unsigned:` (a bundle.json without a
+# `signature`). Neither can be SHIPPABLE: the artefact sha256s are the bundle's own claim.
+UNSIGNED_BUNDLE_PREFIXES = ("build-dir:", "unsigned:")
+
+
+def is_unsigned_bundle(bundle_version: str) -> bool:
+    return bundle_version.strip().startswith(UNSIGNED_BUNDLE_PREFIXES)
+
+
 def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "") -> list[str]:
     """Why this unit cannot ship; [] = shippable. Same rules as the private
     ledger_xlsx.py Ship check (minus its staged-manifest leg)."""
@@ -176,8 +186,9 @@ def ship_check(unit: dict[str, str], catalogue: dict[str, dict], family: str = "
     overrides = str(unit.get("provision_overrides", "")).strip()
     if overrides and overrides.lower() != "none":
         reasons.append(f"provision_overrides: {overrides}")
-    if str(unit.get("rootfs_bundle_version", "")).startswith("build-dir:"):
-        reasons.append("provisioned from an unsigned --build-dir, not a release bundle")
+    if is_unsigned_bundle(str(unit.get("rootfs_bundle_version", ""))):
+        reasons.append("provisioned from an unsigned bundle (--build-dir or a bundle.json "
+                       "with no signature), not a release-signed bundle")
     return reasons
 
 
