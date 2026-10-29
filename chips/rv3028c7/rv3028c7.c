@@ -191,6 +191,17 @@ static bool time_fields_in_range(const rv3028c7_time_t *t)
 	       t->day <= 31 && t->month >= 1 && t->month <= 12 && t->year >= 2000 && t->year <= 2099;
 }
 
+/* Alarm fields must encode as valid BCD and must not alias the AE bit of
+ * 07h..09h.  Only the field selected by match->use_weekday is checked for
+ * 09h.  Shared by set_alarm and alarm_arm so arm rejects a bad request
+ * before it disarms a previously armed alarm. */
+static bool alarm_fields_in_range(const rv3028c7_time_t *when, const rv3028c7_alarm_match_t *match)
+{
+	if (when->minute > 59 || when->hour > 23) return false;
+	if (match->use_weekday) return when->weekday <= 6;
+	return when->day >= 1 && when->day <= 31;
+}
+
 static alp_status_t rv3028_read(rv3028c7_t *ctx, uint8_t reg, uint8_t *buf, size_t len)
 {
 	return alp_i2c_write_read(ctx->bus, RV3028C7_I2C_ADDR, &reg, 1, buf, len);
@@ -359,12 +370,7 @@ alp_status_t rv3028c7_set_alarm(rv3028c7_t                   *ctx,
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (when == NULL || match == NULL) return ALP_ERR_INVAL;
 	/* Reject fields that would encode as invalid BCD or alias the AE bit. */
-	if (when->minute > 59 || when->hour > 23) return ALP_ERR_INVAL;
-	if (match->use_weekday) {
-		if (when->weekday > 6) return ALP_ERR_INVAL;
-	} else if (when->day < 1 || when->day > 31) {
-		return ALP_ERR_INVAL;
-	}
+	if (!alarm_fields_in_range(when, match)) return ALP_ERR_INVAL;
 
 	uint8_t buf[3];
 	/* AE bit = 1 disables that field's match comparison. */
@@ -892,6 +898,9 @@ alp_status_t rv3028c7_alarm_arm(rv3028c7_t                   *ctx,
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (when == NULL || match == NULL) return ALP_ERR_INVAL;
+	/* Validate before disarming: a bad request must leave a previously
+	 * armed alarm intact. */
+	if (!alarm_fields_in_range(when, match)) return ALP_ERR_INVAL;
 
 	/* AIE off and AF clear before touching the compare registers, so
      * a half-written alarm can never assert INT. */
