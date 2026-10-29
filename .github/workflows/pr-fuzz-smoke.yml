@@ -29,16 +29,22 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
 
       # gd32_bridge_frame links the bridge firmware's protocol.c; the
       # configure step refuses to proceed without a checkout of it.
       - name: Check out the GD32 bridge firmware
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
         with:
           repository: alplabai/gd32-bridge-firmware
           path: gd32-bridge-firmware
+          persist-credentials: false
 
       - name: Configure
+        timeout-minutes: 5
         run: |
           cmake -S . -B build-fuzz \
             -DCMAKE_C_COMPILER=clang \
@@ -47,6 +53,7 @@ jobs:
             -DALP_GD32_BRIDGE_FIRMWARE_DIR="$GITHUB_WORKSPACE/gd32-bridge-firmware"
 
       - name: Build every alp_fuzz_* target
+        timeout-minutes: 10
         run: |
           targets=$(cmake --build build-fuzz --target help \
             | sed -n 's/^\.\.\. \(alp_fuzz_[A-Za-z0-9_]*\).*/\1/p')
@@ -54,6 +61,7 @@ jobs:
           for t in $targets; do cmake --build build-fuzz --target "$t"; done
 
       - name: Run each harness for 20 s
+        timeout-minutes: 10
         run: |
           set -e
           for exe in $(find build-fuzz -type f -name 'alp_fuzz_*' -perm -u+x | sort); do
