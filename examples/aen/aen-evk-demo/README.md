@@ -256,7 +256,9 @@ consumes rather than re-deriving:
 | Green | `ALP_E1M_PWM3` | utimer10, driver A | P2_4 |
 
 Red and blue share one physical UTIMER block on its two independent driver
-outputs; green is a separate block. The PWM driver
+outputs but one counter and one period: both must be set to the same period
+(a different period while the sibling is active returns `-EINVAL`), and a duty
+update on one never restarts the other. Green is a separate block. The PWM driver
 (`zephyr/drivers/pwm/pwm_alif_utimer.c`) is marked INTERIM /
 BENCH-UNVERIFIED in its own file header -- this is the first app to load it
 on real silicon, which is why this phase verifies by register readback

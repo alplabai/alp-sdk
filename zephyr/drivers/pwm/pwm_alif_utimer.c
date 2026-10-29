@@ -110,6 +110,41 @@ struct pwm_alif_data {
 	DEVICE_MMIO_RAM;
 };
 
+/*
+ * Shared-counter bookkeeping.  Driver A and driver B of one UTIMER block are two
+ * Zephyr PWM devices (one per child node) but ONE hardware counter: the
+ * UTIMERn_CNTR counter, its reload register (the period) and the global
+ * start/stop bit (indexed by timer_id) are per timer; only COMPARE_A/COMPARE_B
+ * and COMPARE_CTRL_A/B are per driver.  So the two siblings must agree on the
+ * period and neither may stop or re-zero the counter while the other is driving
+ * its pad.  This table, indexed by timer_id, is the single place both devices
+ * see that shared state.
+ *
+ * Policy (also the contract callers get):
+ *   - A duty-only update (same period) touches only that channel's COMPARE_x /
+ *     COMPARE_CTRL_x; the counter keeps running.
+ *   - The period of a running counter is changed only when the calling channel
+ *     is the sole active one.  If the sibling is active with a different
+ *     period the request fails with -EINVAL and nothing is written.
+ *   - pulse == 0 switches off only the calling channel's output; the counter is
+ *     stopped only when no channel is left active.
+ *
+ * The compare write is not shadow-buffered here: the hal_alif header is not
+ * available to this tree, so no buffered-compare register is assumed.  A duty
+ * change on a running counter takes effect at the HW's own latch point, never
+ * by stopping the counter.
+ */
+#define UTIMER_MAX_TIMERS 16U
+
+struct pwm_alif_shared {
+	uint32_t period_cycles; /* reload value in effect; valid while the counter has run */
+	uint8_t  active_mask;   /* bit n set: driver n is outputting a PWM waveform */
+	bool     running;       /* counter started and not stopped */
+};
+
+static struct pwm_alif_shared pwm_alif_shared[UTIMER_MAX_TIMERS];
+static struct k_spinlock      pwm_alif_lock;
+
 static int pwm_alif_get_cycles_per_sec(const struct device *dev, uint32_t channel, uint64_t *cycles)
 {
 	const struct pwm_alif_config *config = dev->config;
@@ -120,47 +155,27 @@ static int pwm_alif_get_cycles_per_sec(const struct device *dev, uint32_t channe
 	return 0;
 }
 
-static int pwm_alif_set_cycles(const struct device *dev,
-                               uint32_t             channel,
-                               uint32_t             period_cycles,
-                               uint32_t             pulse_cycles,
-                               pwm_flags_t          flags)
+static int pwm_alif_set_cycles_locked(const struct device *dev,
+                                      uint32_t             channel,
+                                      uint32_t             period_cycles,
+                                      uint32_t             pulse_cycles,
+                                      pwm_flags_t          flags)
 {
 	const struct pwm_alif_config *config = dev->config;
+	struct pwm_alif_shared       *sh     = &pwm_alif_shared[config->timer_id];
 	/* The hal_alif UTIMER API takes raw 32-bit register bases; the UTIMER
 	 * window is within the 32-bit address space on the M55 cores. */
 	uint32_t timer_base = (uint32_t)DEVICE_MMIO_GET(dev);
 	uint32_t glb_base   = (uint32_t)config->global_base;
-	uint8_t  driver;
+	uint8_t  driver     = (uint8_t)channel;
+	uint8_t  self       = (uint8_t)BIT(driver);
+	uint8_t  others     = sh->active_mask & (uint8_t)~self;
 	uint32_t drv_cfg;
 
-	if (channel >= UTIMER_NUM_DRIVERS) {
-		return -EINVAL;
-	}
-	driver = (uint8_t)channel;
-
-	/* The UTIMER reload register is the period; the compare register is the
-	 * edge where the output flips.  A 0..period up-counter with the driver
-	 * starting LOW and flipping HIGH at the compare match would invert the
-	 * intended duty (high time = period - pulse).  We instead start the
-	 * cycle HIGH and drop LOW at the compare match, so compare = pulse gives
-	 * a HIGH time of `pulse` cycles.  PWM_POLARITY_INVERTED swaps the start
-	 * and match levels. */
-	const bool inverted = (flags & PWM_POLARITY_INVERTED) != 0;
-
-	/* Stop + re-program: the buffered reload/compare write is latched on the
-	 * next cycle boundary, but a clean stop keeps the first cycle correct on
-	 * a live frequency change. */
-	alif_utimer_stop_counter(glb_base, config->timer_id);
-
-	/* Ensure the per-timer clock + up-counter (sawtooth) direction. */
-	alif_utimer_enable_timer_clock(glb_base, config->timer_id);
-	alif_utimer_set_up_counter(timer_base);
-	alif_utimer_enable_soft_counter_ctrl(timer_base);
-
-	/* Full-off: pulse == 0 -> drive output to the inactive level and leave
-	 * the counter stopped.  Disable the driver output so the pad sits at the
-	 * disable level. */
+	/* Full-off: pulse == 0 -> disable only this driver's output so the pad
+	 * sits at the disable level.  The counter is shared, so it is stopped
+	 * only when this was the last active channel; otherwise the sibling keeps
+	 * its waveform. */
 	if (pulse_cycles == 0U) {
 		alif_utimer_disable_driver(timer_base, driver);
 
@@ -185,25 +200,67 @@ static int pwm_alif_set_cycles(const struct device *dev,
 		 */
 		sys_set_bit(UTIMER_GLB_DRIVER_OEN(glb_base),
 		            ((uint32_t)config->timer_id * 2U) + (uint32_t)driver);
+
+		sh->active_mask &= (uint8_t)~self;
+		if (sh->active_mask == 0U && sh->running) {
+			alif_utimer_stop_counter(glb_base, config->timer_id);
+			sh->running = false;
+		}
 		return 0;
 	}
 
-	/* Program period (reload) and duty (compare). */
-	alif_utimer_set_counter_reload_value(timer_base, period_cycles);
+	/* The reload register is shared: a sibling that is still driving its pad
+	 * with a different period cannot be retimed under it. */
+	if (others != 0U && sh->period_cycles != period_cycles) {
+		LOG_ERR("utimer%u: driver %u period %u conflicts with active sibling period %u",
+		        config->timer_id,
+		        driver,
+		        period_cycles,
+		        sh->period_cycles);
+		return -EINVAL;
+	}
 
-	/*
-     * Re-zero the counter.  HWRM 13.2.5.1's up-timer setup sequence is explicit:
-     * "1. Set the pointer value to UTIMERn_CNTR_PTR = 250. ... 2. Enable timer
-     * counter ... 3. Initialize the timer counter to 0 by writing the
-     * UTIMERn_CNTR = 0x0."  Step 3 was missing from this driver entirely, so a
-     * LIVE period change left CNTR wherever it happened to be: dropping from
-     * 1 kHz to 100 kHz at 100 MHz sets CNTR_PTR to 1000 while CNTR is still
-     * around 90000, already past the reset point, so the up-counter had to
-     * climb to 0xFFFFFFFF before it could wrap -- about 43 seconds of a dead
-     * pad (#1829).  13.2.6.3.32 requires this write happen while the counter is
-     * stopped, which the stop/start bracket around this block already provides.
-     */
-	alif_utimer_set_counter_value(timer_base, 0U);
+	/* Only the sole active channel may stop/reload/re-zero the counter: either
+	 * first start, or a live period change with nobody else on this timer. */
+	if (!sh->running || sh->period_cycles != period_cycles) {
+		if (sh->running) {
+			alif_utimer_stop_counter(glb_base, config->timer_id);
+			sh->running = false;
+		}
+
+		/* Ensure the per-timer clock + up-counter (sawtooth) direction. */
+		alif_utimer_enable_timer_clock(glb_base, config->timer_id);
+		alif_utimer_set_up_counter(timer_base);
+		alif_utimer_enable_soft_counter_ctrl(timer_base);
+
+		/* Program period (reload). */
+		alif_utimer_set_counter_reload_value(timer_base, period_cycles);
+
+		/*
+		 * Re-zero the counter.  HWRM 13.2.5.1's up-timer setup sequence is
+		 * explicit: "1. Set the pointer value to UTIMERn_CNTR_PTR = 250. ... 2.
+		 * Enable timer counter ... 3. Initialize the timer counter to 0 by
+		 * writing the UTIMERn_CNTR = 0x0."  Step 3 was missing from this driver
+		 * entirely, so a LIVE period change left CNTR wherever it happened to
+		 * be: dropping from 1 kHz to 100 kHz at 100 MHz sets CNTR_PTR to 1000
+		 * while CNTR is still around 90000, already past the reset point, so
+		 * the up-counter had to climb to 0xFFFFFFFF before it could wrap --
+		 * about 43 seconds of a dead pad (#1829).  13.2.6.3.32 requires this
+		 * write happen while the counter is stopped, which the stop above (or
+		 * the never-started state) provides.
+		 */
+		alif_utimer_set_counter_value(timer_base, 0U);
+		sh->period_cycles = period_cycles;
+	}
+
+	/* The UTIMER reload register is the period; the compare register is the
+	 * edge where the output flips.  A 0..period up-counter with the driver
+	 * starting LOW and flipping HIGH at the compare match would invert the
+	 * intended duty (high time = period - pulse).  We instead start the
+	 * cycle HIGH and drop LOW at the compare match, so compare = pulse gives
+	 * a HIGH time of `pulse` cycles.  PWM_POLARITY_INVERTED swaps the start
+	 * and match levels. */
+	const bool inverted = (flags & PWM_POLARITY_INVERTED) != 0;
 
 	/* Full-on: pulse >= period -> hold the active level for the whole cycle.
 	 * Clamp the compare to the period so the match never fires mid-cycle. */
@@ -234,12 +291,38 @@ static int pwm_alif_set_cycles(const struct device *dev,
 	alif_utimer_enable_compare_match(timer_base, driver);
 	alif_utimer_enable_driver(timer_base, driver);
 	alif_utimer_enable_driver_output(glb_base, driver, config->timer_id);
+	sh->active_mask |= self;
 
-	/* Arm the counter and start it from the global control block. */
-	alif_utimer_enable_counter(timer_base);
-	alif_utimer_start_counter(glb_base, config->timer_id);
+	/* Arm the counter and start it from the global control block -- only if
+	 * it is not already running for the sibling. */
+	if (!sh->running) {
+		alif_utimer_enable_counter(timer_base);
+		alif_utimer_start_counter(glb_base, config->timer_id);
+		sh->running = true;
+	}
 
 	return 0;
+}
+
+static int pwm_alif_set_cycles(const struct device *dev,
+                               uint32_t             channel,
+                               uint32_t             period_cycles,
+                               uint32_t             pulse_cycles,
+                               pwm_flags_t          flags)
+{
+	const struct pwm_alif_config *config = dev->config;
+	k_spinlock_key_t              key;
+	int                           ret;
+
+	if (channel >= UTIMER_NUM_DRIVERS || config->timer_id >= UTIMER_MAX_TIMERS) {
+		return -EINVAL;
+	}
+
+	key = k_spin_lock(&pwm_alif_lock);
+	ret = pwm_alif_set_cycles_locked(dev, channel, period_cycles, pulse_cycles, flags);
+	k_spin_unlock(&pwm_alif_lock, key);
+
+	return ret;
 }
 
 static DEVICE_API(pwm, pwm_alif_driver_api) = {
