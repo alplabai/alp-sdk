@@ -104,4 +104,22 @@ static inline uint32_t dma_pl330_chunk_split(uint32_t size, uint32_t max_chunk, 
 	return size - *chunk;
 }
 
+/**
+ * @brief Address the next chunk of a split block starts at on one side.
+ *
+ * Only an INCREMENT side walks through memory; a NO_CHANGE side is a FIFO or
+ * data register (M2P / P2M) and must stay put, otherwise chunk 2 would
+ * address register + chunk bytes.
+ *
+ * @param addr Address the chunk just moved started at.
+ * @param chunk Bytes that chunk moved.
+ * @param adj Zephyr DMA_ADDR_ADJ_* of this side.
+ *
+ * @return Address for the following chunk.
+ */
+static inline uint64_t dma_pl330_next_chunk_addr(uint64_t addr, uint32_t chunk, uint32_t adj)
+{
+	return (adj == DMA_ADDR_ADJ_INCREMENT) ? addr + chunk : addr;
+}
+
 #endif /* ZEPHYR_DRIVERS_DMA_DMA_PL330_SG_VALIDATE_H_ */

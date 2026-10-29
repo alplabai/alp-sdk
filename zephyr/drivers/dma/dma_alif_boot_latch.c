@@ -18,7 +18,7 @@
  * (CONFIG_DMA_INIT_PRIORITY).  The SYSTOP DMA0 latch runs on every core that
  * enables an alif,dma-pl330 node.  The DMA2 latch writes the M55-HE-LOCAL
  * M55HE_CFG block (the controller behind evtrtr2 that the HE-core
- * SPI/peripheral DMA uses), so it is built ONLY under CONFIG_RTSS_HE -- on an
+ * SPI/peripheral DMA uses), so it is built ONLY when the HE-local dma2 node is enabled in the DT -- on an
  * HP core those addresses belong to the other core's domain and are left alone.
  *
  * Known limit: DMA0 is shared SYSTOP hardware and this latch pulses its SW_RST
@@ -66,7 +66,7 @@ static int alp_alif_dma_boot_latch(void)
 	sys_write32(0u, CLKCTRL_PER_MST_DMA_PERIPH);
 	sys_set_bits(CLKCTRL_PER_MST_DMA_CTRL, BIT(16));
 
-#ifdef CONFIG_RTSS_HE
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(dma2))
 	/* DMA2 (M55-HE-local): ungate its clock (HE_CLK_ENA[4]) + same latch, for
 	 * completeness if an LP-peripheral DMA is wired to it.  HE core only: the
 	 * M55HE_CFG block is HE-domain state. */
@@ -75,7 +75,7 @@ static int alp_alif_dma_boot_latch(void)
 	sys_write32(0u, M55HE_CFG_HE_DMA_IRQ);
 	sys_write32(0u, M55HE_CFG_HE_DMA_PERIPH);
 	sys_set_bits(M55HE_CFG_HE_DMA_CTRL, BIT(16));
-#endif /* CONFIG_RTSS_HE */
+#endif /* DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(dma2)) */
 	return 0;
 }
 

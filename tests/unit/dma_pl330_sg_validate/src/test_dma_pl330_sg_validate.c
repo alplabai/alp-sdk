@@ -104,16 +104,20 @@ ZTEST(dma_pl330_sg_validate, test_addr_adj_checked_on_every_block)
 	             "INCREMENT/NO_CHANGE on every block is supported");
 }
 
-/* A block over the per-DMAGO maximum yields a chunk plus a non-zero remainder. */
-ZTEST(dma_pl330_sg_validate, test_chunk_split_leaves_remainder)
+/* M2P: the peripheral (dst, NO_CHANGE) must not move between chunks; the memory side walks. */
+ZTEST(dma_pl330_sg_validate, test_next_chunk_addr_m2p_dst_fixed)
 {
-	uint32_t chunk;
-	uint32_t rest = dma_pl330_chunk_split(100000U, 65536U, &chunk);
+	zassert_equal(dma_pl330_next_chunk_addr(0x20000000ULL, 65536U, DMA_ADDR_ADJ_INCREMENT),
+	              0x20010000ULL, "memory source advances");
+	zassert_equal(dma_pl330_next_chunk_addr(0x4A000010ULL, 65536U, DMA_ADDR_ADJ_NO_CHANGE),
+	              0x4A000010ULL, "peripheral FIFO destination stays fixed");
+}
 
-	zassert_equal(chunk, 65536U, "first chunk is the maximum");
-	zassert_equal(rest, 34464U, "remainder waits for chunk completion");
-
-	rest = dma_pl330_chunk_split(512U, 65536U, &chunk);
-	zassert_equal(chunk, 512U, "small block is a single chunk");
-	zassert_equal(rest, 0U, "no remainder");
+/* P2M: mirrored. */
+ZTEST(dma_pl330_sg_validate, test_next_chunk_addr_p2m_src_fixed)
+{
+	zassert_equal(dma_pl330_next_chunk_addr(0x4A000020ULL, 512U, DMA_ADDR_ADJ_NO_CHANGE),
+	              0x4A000020ULL, "peripheral data register source stays fixed");
+	zassert_equal(dma_pl330_next_chunk_addr(0x20000000ULL, 512U, DMA_ADDR_ADJ_INCREMENT),
+	              0x20000200ULL, "memory destination advances");
 }

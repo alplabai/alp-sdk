@@ -520,8 +520,18 @@ static int dma_pl330_stop_dma_ch(const struct device *dev,
 	k_spinlock_key_t key;
 	bool killed = false;
 
-	/* A stopped channel must not have its next chunk started by the ISR. */
+	/*
+	 * Fence the completion ISR first: under the lock, drop the pending chunk
+	 * remainder and the SG cursor, and mask the channel's INTEN bit so a
+	 * completion that raced the kill is ignored (the ISR works from INTMIS =
+	 * INTEN & status).  Only then DMAKILL; INTCLR is written after the wait.
+	 */
+	key = k_spin_lock(&dev_data->lock);
 	dev_data->channels[ch].rem_size = 0;
+	dev_data->channels[ch].current_block = NULL;
+	inten = sys_read32(reg_base + DMAC_PL330_INTEN);
+	sys_write32(inten & ~(1U << irq), reg_base + DMAC_PL330_INTEN);
+	k_spin_unlock(&dev_data->lock, key);
 
 	/*
 	 * Issue DMAKILL through the debug interface.  dev_data->lock (the lock
@@ -605,8 +615,8 @@ static int dma_pl330_xfer(const struct device *dev, uint64_t dst,
 	 * before the start so an immediate completion IRQ sees it.
 	 */
 	channel_cfg->rem_size = dma_pl330_chunk_split(size, max_size, &size);
-	channel_cfg->rem_dst = dst + size;
-	channel_cfg->rem_src = src + size;
+	channel_cfg->rem_dst = dma_pl330_next_chunk_addr(dst, size, channel_cfg->dst_addr_adj);
+	channel_cfg->rem_src = dma_pl330_next_chunk_addr(src, size, channel_cfg->src_addr_adj);
 	if (!channel_cfg->dma_callback && channel_cfg->rem_size) {
 		/* Polled: submit() loops, the channel is idle again by then. */
 		channel_cfg->rem_size = 0;
@@ -704,8 +714,8 @@ static int dma_pl330_submit(const struct device *dev, uint64_t dst,
 		}
 
 		size -= xfer_size;
-		dst += xfer_size;
-		src += xfer_size;
+		dst = dma_pl330_next_chunk_addr(dst, xfer_size, dev_data->channels[channel].dst_addr_adj);
+		src = dma_pl330_next_chunk_addr(src, xfer_size, dev_data->channels[channel].src_addr_adj);
 	}
 
 	return 0;
@@ -945,6 +955,21 @@ static int dma_pl330_transfer_stop(const struct device *dev, uint32_t channel)
 	}
 
 	if ((sys_read32(cs0_reg + channel * 8) & CH_STATUS_MASK) == 0) {
+		/*
+		 * Idle between chunks / blocks: nothing to kill, but the parked
+		 * remainder and SG cursor must go or the pending completion ISR
+		 * would carry on with the transfer the caller just stopped.
+		 */
+		k_spinlock_key_t key = k_spin_lock(&dev_data->lock);
+
+		dev_data->channels[channel].rem_size = 0;
+		dev_data->channels[channel].current_block = NULL;
+		sys_write32(sys_read32(reg_base + DMAC_PL330_INTEN) &
+				    ~(1U << dev_data->event_irq[channel]),
+			    reg_base + DMAC_PL330_INTEN);
+		k_spin_unlock(&dev_data->lock, key);
+		sys_write32(1U << dev_data->event_irq[channel], reg_base + DMAC_PL330_INTCLR);
+		atomic_set(&dev_data->channels[channel].channel_is_active, DMA_CHANNEL_IS_FREE);
 		return 0;
 	}
 

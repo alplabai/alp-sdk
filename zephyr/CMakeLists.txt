@@ -58,7 +58,7 @@ zephyr_sources_ifdef(CONFIG_DMA_ALIF_EVENT_ROUTER
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_alif_event_router.c)
 # Tier-1.5 glue: the PL330 boot-manager security latch the fork does in its
 # soc_init (DMA0 on any core; the M55-HE-local DMA2 half self-gates on
-# CONFIG_RTSS_HE; the whole file self-gates on an alif,dma-pl330 node).
+# the enabled HE-local &dma2 node; the whole file self-gates on an alif,dma-pl330 node).
 zephyr_sources_ifdef(CONFIG_DMA_PL330_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_alif_boot_latch.c)
 
