@@ -266,12 +266,13 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg);
  *  @c arena_bytes: the manifest never sizes a caller's buffer, and a
  *  zero size there is rejected with ALP_ERR_INVAL. */
 typedef struct {
-	const void             *data;        /**< Package bytes, or NULL to use @c path. */
-	size_t                  size;        /**< Byte count when @c data is set. */
-	const char             *path;        /**< Storage path (Linux), or NULL. */
-	alp_inference_backend_t backend;     /**< AUTO, or a forced backend. */
-	size_t                  arena_bytes; /**< 0 = size from the manifest (only when @c arena is NULL; INVAL with a caller arena). */
-	void                   *arena;       /**< Caller arena, or NULL for backend default. */
+	const void             *data;    /**< Package bytes, or NULL to use @c path. */
+	size_t                  size;    /**< Byte count when @c data is set. */
+	const char             *path;    /**< Storage path (Linux), or NULL. */
+	alp_inference_backend_t backend; /**< AUTO, or a forced backend. */
+	size_t
+	    arena_bytes; /**< 0 = size from the manifest (only when @c arena is NULL; INVAL with a caller arena). */
+	void *arena; /**< Caller arena, or NULL for backend default. */
 } alp_model_open_opts_t;
 
 /**
