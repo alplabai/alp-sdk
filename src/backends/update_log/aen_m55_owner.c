@@ -112,6 +112,10 @@ _Static_assert(sizeof(struct aen_ulog_rsp) <= 0x100U, "reply overruns the 0x0200
  * several lines and a flush writes them back in no fixed order, so the
  * publisher flushes the payload first, fences, and only then writes and
  * flushes the line that carries seq. */
+#if defined(CONFIG_DCACHE) && !defined(CONFIG_CACHE_MANAGEMENT)
+#error "AEN M55 update-log mailbox needs CONFIG_CACHE_MANAGEMENT when CONFIG_DCACHE=y"
+#endif
+
 static inline void aen_mbox_flush(volatile void *p, size_t len)
 {
 	(void)sys_cache_data_flush_range((void *)p, len);
@@ -384,7 +388,8 @@ void update_log_aen_m55_owner_run(void)
 	 * request the previous owner already served stays in retained SRAM0
 	 * (REQ->seq != 0), and with last_seq reset to 0 it would be run again,
 	 * replaying its APPEND into the audit log. A request the client posts
-	 * before this point is dropped; the client times out and retries. */
+	 * before this point is dropped: that in-flight call returns
+	 * ALP_ERR_TIMEOUT and the caller must retry it. */
 	AEN_ULOG_REQ->seq = 0U;
 	AEN_ULOG_RSP->seq = 0U;
 	aen_mbox_flush(&AEN_ULOG_REQ->seq, sizeof(AEN_ULOG_REQ->seq));
@@ -406,6 +411,13 @@ void update_log_aen_m55_owner_run(void)
 		last_seq = seq;
 		barrier_dmem_fence_full();
 		aen_mbox_invalidate(AEN_ULOG_REQ, sizeof(*AEN_ULOG_REQ));
+
+		/* The first open can fail transiently (flash/MRAM not ready at HP
+		 * start). Retry per request so that is not a permanent outage. */
+		if (log == NULL) {
+			log                   = alp_update_log_open();
+			AEN_ULOG_HP_BEACON[1] = (log != NULL) ? (uint32_t)ALP_OK : (uint32_t)ALP_ERR_NOT_READY;
+		}
 
 		if (AEN_ULOG_REQ->magic != AEN_ULOG_MAGIC || AEN_ULOG_REQ->version != AEN_ULOG_VERSION) {
 			owner_reply(seq, ALP_ERR_VERSION, 0U, ALP_UPDATE_LOG_VERIFY_CHAIN_BROKEN, 0U, NULL);
