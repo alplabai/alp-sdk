@@ -41,9 +41,10 @@ def test_aen_cross_table_conflict_detected(tmp_path, monkeypatch):
 
 
 def test_aen_allowlisted_sd_sdio_pad_passes(tmp_path, monkeypatch):
-    _aen_tree(tmp_path, "P13_0")
+    _aen_tree(tmp_path, "P2_0")
     _write(tmp_path, "aen/from-alif.tsv",
            "e1m_pad\te1m_function\talif_peripheral\talif_pad\nAG12\tSD_D0\tSD_D0\tP13_0\n")
+    _write(tmp_path, "aen/inter-chip.tsv", "signal\tr\tp\tar\talif_pad\nX\ta\tG\tb\tP13_0\n")
     monkeypatch.setattr(cpc, "MODULES", tmp_path)
     assert cpc._check_aen_alif_join() == []
 
