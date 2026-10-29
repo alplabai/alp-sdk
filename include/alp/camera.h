@@ -147,8 +147,10 @@ typedef struct {
  *         ALP_ERR_NOT_READY (yocto_drv: no `alp-camera<N>` DT alias,
  *         or no matching sensor/capture chain in any media device),
  *         ALP_ERR_NOSUPPORT (zephyr_video: MONO_VLSB / YUV420_PLANAR /
- *         NV12, which it cannot negotiate), ALP_ERR_NOSUPPORT (yocto_drv: colour pixel format, or the
- *         sensor offers no media-bus code for the requested format),
+ *         NV12, which it cannot negotiate -- note MONO_VLSB is the
+ *         zero value, so an unset format fails; yocto_drv: colour
+ *         pixel format, or the sensor offers no media-bus code for
+ *         the requested format),
  *         ALP_ERR_INVAL (yocto_drv: width/height is not a size the
  *         sensor produces natively, or a pipeline element adjusted the
  *         requested format; an out-of-range fps is NOT a failure, it

@@ -178,15 +178,18 @@ alif_e8_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capab
 		return ALP_ERR_IO;
 	}
 
-	/* Same reference rule as the portable zephyr_drv backend: the channel's
-	 * vref-mv when set, else the controller's internal reference.  If neither
-	 * is known, read_uv() would scale every sample to 0 uV with ALP_OK (a dead
-	 * rail to a battery/thermistor monitor), so refuse the open instead. */
+	/* Reference rule: the channel's vref-mv, else adc_ref_internal().  The
+	 * vendored adc_alif driver provides no internal reference (it never sets
+	 * ref_internal, so that call returns 0), which means a channel without
+	 * zephyr,vref-mv is rejected here.  Without a reference read_uv() would
+	 * scale every sample to 0 uV with ALP_OK (a dead rail to a battery or
+	 * thermistor monitor).  The device is ready; its devicetree configuration
+	 * is incomplete, hence NOSUPPORT rather than NOT_READY. */
 	uint32_t ref_mv =
 	    (spec->vref_mv != 0) ? (uint32_t)spec->vref_mv : (uint32_t)adc_ref_internal(spec->dev);
 	if (ref_mv == 0u) {
 		_free_state(s);
-		return ALP_ERR_NOT_READY;
+		return ALP_ERR_NOSUPPORT;
 	}
 
 	st->be_data         = s;

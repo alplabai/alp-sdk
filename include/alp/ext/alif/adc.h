@@ -59,13 +59,14 @@ typedef enum {
  *
  * @param h    Handle from @ref alp_adc_open opened against an Alif SoC.
  * @param src  Trigger source from @ref alp_alif_adc_trigger_t.
- * @note On alif:ensemble:e8 only @ref ALP_ALIF_ADC_TRIGGER_SOFTWARE is
+ * @note On alif:ensemble:e7 and alif:ensemble:e8 only
+ *       @ref ALP_ALIF_ADC_TRIGGER_SOFTWARE is
  *       accepted (every read is a software-started single-shot); any
  *       other source returns @ref ALP_ERR_NOSUPPORT and the backend does
  *       not advertise @ref ALP_ADC_CAP_HW_TRIGGER.
  *
  * @return  @ref ALP_OK / @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC /
- *          @ref ALP_ERR_INVAL / @ref ALP_ERR_NOSUPPORT (E8, non-software
+ *          @ref ALP_ERR_INVAL / @ref ALP_ERR_NOSUPPORT (E7/E8, non-software
  *          source) / @ref ALP_ERR_NOT_READY (closed handle).
  */
 alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h, alp_alif_adc_trigger_t src);
