@@ -84,9 +84,9 @@ alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
 	/* Backends select by priority, not by kind (littlefs 110 / flash 100 /
 	 * disk 80), so a backend that does not serve cfg->kind declines open()
 	 * with ALP_ERR_NOSUPPORT and the next one is tried (as security does).
-	 * littlefs outranks raw flash but only accepts an instance_id that
-	 * has a mounted /lfs<N> volume, so it never shadows (or is shadowed
-	 * by) the raw flash_area path for an unmounted partition. */
+	 * littlefs outranks raw flash but only accepts an instance_id whose
+	 * flash_area backs a mounted littlefs volume; zephyr_flash refuses
+	 * (ALP_ERR_BUSY) any flash_area that backs a mounted fs. */
 	alp_status_t rc = ALP_ERR_NOT_IMPLEMENTED;
 	for (; be != NULL; be = alp_backend_select_next("storage", ALP_SOC_REF_STR, be)) {
 		const alp_storage_ops_t *ops = (const alp_storage_ops_t *)be->ops;

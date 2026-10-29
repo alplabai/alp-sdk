@@ -7,7 +7,7 @@
  * Mount points are resolved by instance_id -- the SoC pack
  * registers fs_mount_t entries via FS_MNT macros and littlefs
  * mounts them at boot.  The backend keeps a per-handle file
- * pointer (`/lfs<N>/alp_storage.bin`) so reads / writes map
+ * pointer (`<mnt_point>/alp_storage.bin`) so reads / writes map
  * onto the open(2) / read(2) / write(2) shape rather than raw
  * partition I/O.
  *
@@ -21,17 +21,18 @@
  *
  * Registered as silicon_ref="*" at priority 110 -- ABOVE zephyr_flash
  * (100) -- but it only ACCEPTS an open when a littlefs volume is
- * actually mounted at /lfs<instance_id>; otherwise it declines with
- * ALP_ERR_NOSUPPORT and alp_storage_open() falls through to raw
- * flash.  Why both halves: a littlefs build always has FLASH_MAP on
+ * actually mounted on flash_area <instance_id> (alp_storage_mounts[]
+ * entry with storage_dev == instance_id and type FS_LITTLEFS, any
+ * mount-point name); otherwise it declines with ALP_ERR_NOSUPPORT and
+ * alp_storage_open() falls through to raw flash.  Why both halves: a littlefs build always has FLASH_MAP on
  * (FILE_SYSTEM_LITTLEFS depends on it), so zephyr_flash is always
  * linked too.  With littlefs ranked below flash it was never reached,
  * and the caller's instance_id was read as a raw flash_area ID -- a
  * write then overwrote the metadata of the mounted volume.  Ranking
  * littlefs first closes that hole, and the mount probe keeps raw
- * flash reachable for every partition that is NOT a mounted volume
- * (a mounted partition is, by design, no longer raw-addressable
- * through this API).
+ * flash reachable for every partition that is NOT a mounted volume.
+ * zephyr_flash refuses a flash_area that backs any mounted fs, so a
+ * mounted partition is not raw-addressable through this API.
  */
 
 #include <errno.h>
@@ -51,10 +52,13 @@
 #include "alp_checked_arith.h"
 #include "alp_slot_claim.h"
 #include "storage_ops.h"
+#include "zephyr_mounts.h"
+
+#define LFS_PATH_MAX 64
 
 typedef struct lfs_state {
 	struct fs_file_t file;
-	char             path[32];
+	char             path[LFS_PATH_MAX];
 	uint64_t         size_cache;
 	bool             open;
 } lfs_state_t;
@@ -130,21 +134,6 @@ static bool _lfs_range_representable(uint64_t offset, uint64_t len)
 	return true;
 }
 
-/* True when a filesystem is mounted at exactly "/lfs<instance_id>".
- * fs_readmount() walks the mount list without logging, unlike probing
- * with fs_stat()/fs_statvfs() which LOG_ERR on a missing mount. */
-static bool _lfs_volume_mounted(uint32_t instance_id)
-{
-	char want[16];
-	(void)snprintf(want, sizeof(want), "/lfs%u", (unsigned)instance_id);
-	int         idx  = 0;
-	const char *name = NULL;
-	while (fs_readmount(&idx, &name) == 0) {
-		if (name != NULL && strcmp(name, want) == 0) return true;
-	}
-	return false;
-}
-
 static alp_status_t lfs_open(const alp_storage_config_t  *cfg,
                              alp_storage_backend_state_t *st,
                              alp_capabilities_t          *caps_out)
@@ -155,19 +144,25 @@ static alp_status_t lfs_open(const alp_storage_config_t  *cfg,
      * routes to a different backend. */
 	if (cfg->kind == ALP_STORAGE_KIND_SD_MMC) return ALP_ERR_NOSUPPORT;
 
-	/* No volume mounted at /lfs<instance_id>: this instance is not ours.
-	 * Decline so the dispatcher tries the next backend (zephyr_flash,
-	 * raw flash_area <instance_id>).  Only a mounted volume is claimed. */
-	if (!_lfs_volume_mounted(cfg->instance_id)) return ALP_ERR_NOSUPPORT;
+	/* Claim instance_id N only when a littlefs volume whose backing
+	 * partition is flash_area N is mounted (alp_storage_mounts[] entry
+	 * with storage_dev == N), whatever its mount point is named.
+	 * Otherwise decline so the dispatcher tries the next backend; a
+	 * partition backing some OTHER mounted fs is refused by zephyr_flash. */
+	const struct fs_mount_t *m = alp_zmnt_find_mounted(cfg->instance_id);
+	if (m == NULL || m->type != FS_LITTLEFS) return ALP_ERR_NOSUPPORT;
+	char path[LFS_PATH_MAX];
+	int  n = snprintf(path, sizeof(path), "%s/alp_storage.bin", m->mnt_point);
+	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_OUT_OF_RANGE;
 
 	lfs_state_t *s = _lfs_alloc();
 	if (s == NULL) return ALP_ERR_NOMEM;
 
 	fs_file_t_init(&s->file);
-	/* Convention: /lfs<N>/alp_storage.bin under the FS_LITTLEFS
-     * mount that matches the instance_id.  Apps that want a
-     * different filename layer their own FS calls on top. */
-	(void)snprintf(s->path, sizeof(s->path), "/lfs%u/alp_storage.bin", (unsigned)cfg->instance_id);
+	/* <mnt_point>/alp_storage.bin under the FS_LITTLEFS mount backed by
+	 * flash_area <instance_id>.  Apps that want a different filename
+	 * layer their own FS calls on top. */
+	memcpy(s->path, path, (size_t)n + 1u);
 
 	fs_mode_t mode = FS_O_RDWR | FS_O_CREATE;
 	if (cfg->read_only) {
