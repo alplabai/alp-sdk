@@ -42,6 +42,7 @@ _CORPUS_RELPATHS = [
     "scripts/bootstrap.sh",
     "scripts/bootstrap.ps1",
     "README.md",
+    "docs/getting-started.md",
     ".github/workflows/pr-twister.yml",
     ".github/workflows/pr-tier-a-libraries.yml",
     ".github/workflows/pr-getting-started-aen801.yml",
@@ -71,6 +72,7 @@ def _point_gate_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gate, "BOOTSTRAP_SH", tmp_path / "scripts/bootstrap.sh")
     monkeypatch.setattr(gate, "BOOTSTRAP_PS1", tmp_path / "scripts/bootstrap.ps1")
     monkeypatch.setattr(gate, "README_MD", tmp_path / "README.md")
+    monkeypatch.setattr(gate, "GETTING_STARTED_MD", tmp_path / "docs/getting-started.md")
     monkeypatch.setattr(gate, "LIBRARIES_DIR", tmp_path / "metadata/libraries")
     monkeypatch.setattr(
         gate, "CONTAINERFILE", tmp_path / "tools/native-sim-container/Containerfile"
@@ -161,6 +163,69 @@ def test_west_yml_revision_disagreement_fails(tmp_path, monkeypatch, capsys):
     assert rv == 1
     assert "west.yml pins zephyr revision" in err
     assert "v4.5.0" in err
+
+
+def test_hal_alif_revision_disagreement_fails(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+    _replace(tmp_path / "west.yml", "revision: v2.3.0", "revision: v2.4.0")
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "west.yml pins hal_alif revision 'v2.4.0'" in err
+    assert "halAlif.version 'v2.3.0'" in err
+
+
+def test_hal_alif_pin_site_missing_fails(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+    _replace(tmp_path / "west.yml", "- name: hal_alif", "- name: hal_alif_renamed")
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    assert rv == 1
+    assert "under `- name: hal_alif`" in capsys.readouterr().err
+
+
+def test_fix_rewrites_hal_alif_revision_without_touching_zephyr(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["halAlif"].__setitem__("version", "v2.10.0"))
+    _point_gate_at(tmp_path, monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["check_bootstrap_manifest.py", "--fix"])
+    assert gate.main() == 0
+    out = capsys.readouterr().out
+    assert "v2.3.0 -> v2.10.0" in out
+    west = (tmp_path / "west.yml").read_text(encoding="utf-8")
+    assert gate._WEST_YML_HAL_ALIF_RE.search(west).group(1) == "v2.10.0"
+    assert "revision: v4.4.1" in west
+    monkeypatch.setattr(sys, "argv", ["check_bootstrap_manifest.py"])
+    assert gate.main() == 0, capsys.readouterr().err
+
+
+def test_halalif_version_must_be_semver_tag(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["halAlif"].__setitem__("version", "main"))
+    _point_gate_at(tmp_path, monkeypatch)
+    assert gate.main() == 1
+    assert "halAlif" in capsys.readouterr().err
+
+
+def test_cmake_floor_doc_disagreement_fails(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["prerequisites"].__setitem__("cmakeMinVersion", "3.30"))
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "docs/getting-started.md states CMake floor '3.28'" in err
+    assert "cmakeMinVersion '3.30'" in err
+
+
+def test_cmake_floor_doc_row_missing_fails(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+    _replace(tmp_path / "docs/getting-started.md", "| CMake       |", "| Cmk         |")
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    assert rv == 1
+    assert "CMake | X.Y+" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------

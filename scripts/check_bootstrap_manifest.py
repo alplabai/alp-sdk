@@ -196,6 +196,19 @@ when:
       this shape has proven itself) -- so its gate is "stays in lockstep
       with prerequisites.install", not "is read by bootstrap.sh/ps1".
 
+  16. `halAlif.version` disagrees with the `revision:` under `- name: hal_alif`
+      in west.yml. hal_alif is a top-level west project pinned from Alif's
+      GitHub (Zephyr's own west.yml does not carry it), so no Zephyr bump
+      moves it implicitly and it had no pin site here before -- it could
+      drift from docs/zephyr-version-policy.md unnoticed. Like
+      `zephyr.version`, the manifest is the source and --fix rewrites
+      west.yml from it.
+  17. `prerequisites.cmakeMinVersion` disagrees with the CMake floor stated in
+      docs/getting-started.md's `| CMake | X.Y+ |` prerequisites row.
+      (Neither bootstrap script enforces a CMake version -- they only check
+      `cmake` is on PATH -- so the doc row is the one copy this gate polices;
+      `tan doctor` is the runtime consumer.)
+
 --fix propagates a changed `zephyr.version` OUT to every machine pin site
 this gate verifies above (points 2, 4, 5, 10, 14 -- west.yml, the CI
 workflow `--mr`/cache-key pins, the README badge, every
@@ -255,6 +268,7 @@ WEST_YML = REPO / "west.yml"
 BOOTSTRAP_SH = REPO / "scripts" / "bootstrap.sh"
 BOOTSTRAP_PS1 = REPO / "scripts" / "bootstrap.ps1"
 README_MD = REPO / "README.md"
+GETTING_STARTED_MD = REPO / "docs" / "getting-started.md"
 LIBRARIES_DIR = REPO / "metadata" / "libraries"
 # The native_sim reproduction container's own Zephyr-revision pin (issue
 # #1458) -- see module docstring point 14.
@@ -280,7 +294,7 @@ CI_WORKFLOWS = [
 # gets policed (consumed by both scripts, or asserted equal to a hardcoded
 # copy). This is the generalisation past just zephyr.version (issue #917).
 KNOWN_KEYS = {
-    "_comment", "schemaVersion", "zephyr", "venv", "prerequisites",
+    "_comment", "schemaVersion", "zephyr", "halAlif", "venv", "prerequisites",
     "artifactProvenance", "west", "pip", "verdict", "env", "nativeLibHints",
     "manualInstallHints",
 }
@@ -290,6 +304,15 @@ KNOWN_KEYS = {
 # before --fix existed) specifically so `_run_fix` reuses this SAME compiled
 # pattern instead of a second, drift-prone copy of the same shape.
 _WEST_YML_ZEPHYR_RE = re.compile(r"-\s*name:\s*zephyr\s*\n\s*revision:\s*(\S+)")
+
+# The `revision:` line under `- name: hal_alif` in west.yml (point 16). The
+# `remote:` line between name and revision is optional so a remote-less entry
+# still matches; comment lines between them are not supported -- --fix fails
+# loudly ("not found") instead of guessing.
+_WEST_YML_HAL_ALIF_RE = re.compile(
+    r"-\s*name:\s*hal_alif\s*\n(?:\s*remote:\s*\S+\s*\n)?\s*revision:\s*(\S+)")
+# docs/getting-started.md's CMake prerequisites row (point 17): `| CMake | 3.28+ |`.
+_GETTING_STARTED_CMAKE_RE = re.compile(r"^\|\s*CMake\s*\|\s*(\d+\.\d+)\+", re.MULTILINE)
 
 _LIBRARY_VERSION_RE = re.compile(r'^version:\s*"([^"]*)"', re.MULTILINE)
 _WEST_MR_RE = re.compile(r"--mr\s+(v\d+\.\d+\.\d+)")
@@ -323,7 +346,7 @@ _GATE_ASSERTED_LEAF_PREFIX = "prerequisites."
 # `_check_zephyr_python_min_version`, not read at run time by bootstrap.sh
 # or bootstrap.ps1 (neither enforces a Zephyr-scoped floor today; that is
 # tan-cli's still-outstanding half of issue #1078).
-_GATE_ASSERTED_LEAVES = {"zephyr.pythonMinVersion"}
+_GATE_ASSERTED_LEAVES = {"zephyr.pythonMinVersion", "halAlif.version"}
 # `artifactProvenance.*` (issue #1574, module docstring point 15): producer-
 # only data with NO consumer in this repo yet -- neither bootstrap.sh nor
 # bootstrap.ps1 has any reason to read it, since it is ADR 0021 §3's
@@ -387,6 +410,34 @@ def _check_west_yml(manifest_version: str) -> list[str]:
     if west_version != manifest_version:
         return [f"west.yml pins zephyr revision {west_version!r}, "
                  f"metadata/bootstrap.json declares zephyr.version {manifest_version!r}"]
+    return []
+
+
+def _check_hal_alif_west_yml(manifest: dict) -> list[str]:
+    """Point 16: `halAlif.version` <-> west.yml's `- name: hal_alif` revision."""
+    if not WEST_YML.is_file():
+        return [f"missing {WEST_YML.relative_to(REPO).as_posix()}"]
+    m = _WEST_YML_HAL_ALIF_RE.search(WEST_YML.read_text(encoding="utf-8"))
+    if m is None:
+        return ["west.yml: could not find a `revision:` line under `- name: hal_alif`"]
+    declared = manifest["halAlif"]["version"]
+    if m.group(1) != declared:
+        return [f"west.yml pins hal_alif revision {m.group(1)!r}, "
+                 f"metadata/bootstrap.json declares halAlif.version {declared!r}"]
+    return []
+
+
+def _check_cmake_min_version_docs(manifest: dict) -> list[str]:
+    """Point 17: `prerequisites.cmakeMinVersion` <-> getting-started.md's CMake row."""
+    if not GETTING_STARTED_MD.is_file():
+        return [f"missing {GETTING_STARTED_MD.relative_to(REPO).as_posix()}"]
+    m = _GETTING_STARTED_CMAKE_RE.search(GETTING_STARTED_MD.read_text(encoding="utf-8"))
+    if m is None:
+        return ["docs/getting-started.md: could not find the `| CMake | X.Y+ |` prerequisites row"]
+    declared = manifest["prerequisites"]["cmakeMinVersion"]
+    if m.group(1) != declared:
+        return [f"docs/getting-started.md states CMake floor {m.group(1)!r}, "
+                 f"metadata/bootstrap.json declares prerequisites.cmakeMinVersion {declared!r}"]
     return []
 
 
@@ -681,14 +732,19 @@ def _fix_ci_workflow(path: Path, manifest_version: str) -> tuple[list[str], list
     return report, problems
 
 
-def _run_fix(manifest_version: str) -> int:
-    """--fix entry point: rewrite west.yml, every CI_WORKFLOWS pin, and the
-    README badge FROM manifest_version, then report what changed."""
+def _run_fix(manifest_version: str, hal_alif_version: str) -> int:
+    """--fix entry point: rewrite west.yml (zephyr AND hal_alif revisions),
+    every CI_WORKFLOWS pin, and the README badge FROM manifest_version, then report what changed."""
     report: list[str] = []
     problems: list[str] = []
 
     r, p = _apply_version_fix(WEST_YML, _WEST_YML_ZEPHYR_RE, manifest_version,
                                site_desc="the `revision:` line under `- name: zephyr`")
+    report += r
+    problems += p
+
+    r, p = _apply_version_fix(WEST_YML, _WEST_YML_HAL_ALIF_RE, hal_alif_version,
+                               site_desc="the `revision:` line under `- name: hal_alif`")
     report += r
     problems += p
 
@@ -1764,10 +1820,12 @@ def main() -> int:
     manifest_version = manifest["zephyr"]["version"]
 
     if args.fix:
-        return _run_fix(manifest_version)
+        return _run_fix(manifest_version, manifest["halAlif"]["version"])
 
     problems = []
     problems += _check_west_yml(manifest_version)
+    problems += _check_hal_alif_west_yml(manifest)
+    problems += _check_cmake_min_version_docs(manifest)
     problems += _check_no_hardcoded_literal(BOOTSTRAP_SH, manifest_version)
     problems += _check_no_hardcoded_literal(BOOTSTRAP_PS1, manifest_version)
     problems += _check_readme_badge(manifest_version)
