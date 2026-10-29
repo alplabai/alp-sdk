@@ -1608,11 +1608,19 @@ static int pdm_initialize(const struct device *dev)
 	return pdm_hw_bringup(dev, true);
 }
 
+#ifdef _dmic_ops
+static DEVICE_API(dmic, dmic_alif_pdm_api) = {
+	.configure = dmic_alif_pdm_configure,
+	.trigger = dmic_alif_pdm_trigger,
+	.read = dmic_alif_pdm_read,
+};
+#else
 static const struct _dmic_ops dmic_alif_pdm_api = {
 	.configure = dmic_alif_pdm_configure,
 	.trigger = dmic_alif_pdm_trigger,
 	.read = dmic_alif_pdm_read,
 };
+#endif
 
 #if defined(CONFIG_PM_DEVICE)
 
