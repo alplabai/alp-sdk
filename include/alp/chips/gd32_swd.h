@@ -181,12 +181,15 @@ alp_status_t gd32_swd_halt(gd32_swd_t *ctx);
  *
  * Address + size are rounded out to sector boundaries
  * (@ref GD32_SWD_FMC_SECTOR_BYTES).  Ranges outside the flash return
- * ALP_ERR_INVAL before any sector is touched.
+ * ALP_ERR_INVAL before any sector is touched.  A target running in
+ * dual-bank mode (FMC_OBCTL.DBS, 1 KiB pages) returns ALP_ERR_NOSUPPORT
+ * before the FMC is unlocked.
  */
 alp_status_t gd32_swd_flash_erase(gd32_swd_t *ctx, uint32_t addr, uint32_t size);
 
 /** Program @p len bytes from @p data into flash starting at @p addr.
- *  Destination must be erased.  Doubleword-aligned. */
+ *  Destination must be erased.  Doubleword-aligned.  Returns
+ *  ALP_ERR_NOSUPPORT on a dual-bank (FMC_OBCTL.DBS) target. */
 alp_status_t gd32_swd_flash_write(gd32_swd_t *ctx, uint32_t addr, const uint8_t *data, size_t len);
 
 /** Read @p len bytes from flash starting at @p addr and compare

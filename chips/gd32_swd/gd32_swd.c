@@ -74,10 +74,11 @@
  * FMC_CR_PNB_MASK is FMC_CTL.PNSEL = BITS(3,10): 8 bits, 256 pages of 2 KiB in
  * single-bank mode (vendors/gd32_firmware_library/.../gd32g5x3_fmc.h:
  * FMC_CTL_PNSEL, MAIN_FLASH_PAGE_SIZE_SBANK 0x800).  Dual-bank mode (OBCTL.DBS,
- * 1 KiB pages, FMC_CTL.BKSEL bit 12) is not supported by this driver. */
+ * 1 KiB pages, FMC_CTL.BKSEL bit 12) is refused with ALP_ERR_NOSUPPORT. */
 #define FMC_BASE            0x40022000u
 #define FMC_REG_KEYR        (FMC_BASE + 0x08u)
 #define FMC_REG_SR          (FMC_BASE + 0x10u)
+#define FMC_REG_OBCTL       (FMC_BASE + 0x20u)
 #define FMC_REG_CR          (FMC_BASE + 0x14u)
 #define FMC_KEY1            0x45670123u
 #define FMC_KEY2            0xCDEF89ABu
@@ -87,6 +88,7 @@
 #define FMC_CR_PNB_MASK     (0xFFu << FMC_CR_PNB_SHIFT)
 #define FMC_CR_STRT         (1u << 16)
 #define FMC_CR_LOCK         (1u << 31)
+#define FMC_OBCTL_DBS       (1u << 22)
 #define FMC_SR_BSY          (1u << 16)
 #define FMC_SR_PROGERR_MASK 0x000000F8u /* PROGERR | WRPERR | PGAERR | SIZERR | PGSERR */
 
@@ -650,6 +652,17 @@ static alp_status_t fmc_wait_busy(gd32_swd_t *ctx)
 	return ALP_ERR_TIMEOUT;
 }
 
+/* Dual-bank mode halves the page size and moves bank 1 behind BKSEL; this
+ * driver's sector geometry would then erase/program the wrong page and still
+ * report success, so refuse before touching the FMC. */
+static alp_status_t fmc_require_single_bank(gd32_swd_t *ctx)
+{
+	uint32_t     obctl = 0u;
+	alp_status_t s     = swd_mem_read32(ctx, FMC_REG_OBCTL, &obctl);
+	if (s != ALP_OK) return s;
+	return (obctl & FMC_OBCTL_DBS) ? ALP_ERR_NOSUPPORT : ALP_OK;
+}
+
 static alp_status_t fmc_unlock(gd32_swd_t *ctx)
 {
 	/* Two-step unlock sequence; bad keys latch the FMC into locked
@@ -698,6 +711,9 @@ alp_status_t gd32_swd_flash_erase(gd32_swd_t *ctx, uint32_t addr, uint32_t size)
 	 * never be masked onto a different page. */
 	if (end_sector_excl > GD32_SWD_FMC_SECTOR_COUNT) return ALP_ERR_INVAL;
 
+	s = fmc_require_single_bank(ctx);
+	if (s != ALP_OK) return s;
+
 	s = fmc_unlock(ctx);
 	if (s != ALP_OK) return s;
 
@@ -737,6 +753,8 @@ alp_status_t gd32_swd_flash_write(gd32_swd_t *ctx, uint32_t addr, const uint8_t 
 	alp_status_t s = flash_range_validate(addr, len);
 	if (s != ALP_OK) return s;
 
+	s = fmc_require_single_bank(ctx);
+	if (s != ALP_OK) return s;
 	s = fmc_unlock(ctx);
 	if (s != ALP_OK) return s;
 	s = swd_mem_write32(ctx, FMC_REG_CR, FMC_CR_PG);
