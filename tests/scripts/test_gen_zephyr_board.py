@@ -1529,6 +1529,18 @@ class TestEveryAenBoardSharesTheSomLevelDefaults(unittest.TestCase):
                             f"{p.name} uses {port} for a power domain but never enables it")
                 self.assertIn("alp-i2c0 = &i2c2;", text, f"{p.name} lacks alp-i2c0")
 
+    def test_mpu_table_cmake_gate_keeps_the_ensemble_family_guard(self) -> None:
+        """Upstream selects CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS on many non-Alif
+        SoCs; the symbol alone must never compile mpu_regions_e8.c (it reads MRAM
+        DT labels and defines a second mpu_config)."""
+        text = (REPO / "zephyr" / "CMakeLists.txt").read_text(encoding="utf-8")
+        m = re.search(
+            r"if\((?P<cond>[^)]*)\)\s*zephyr_sources_ifdef\(CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS"
+            r"\s*\$\{ZEPHYR_CURRENT_MODULE_DIR\}/zephyr/soc-bridge/alif/mpu_regions_e8\.c\)",
+            text)
+        self.assertIsNotNone(m, "mpu_regions_e8.c is not wrapped in an if() family guard")
+        self.assertIn("CONFIG_SOC_FAMILY_ENSEMBLE", m.group("cond"))
+
 
 if __name__ == "__main__":
     unittest.main()
