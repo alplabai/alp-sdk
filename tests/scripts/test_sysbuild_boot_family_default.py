@@ -227,7 +227,16 @@ def test_plan_passes_the_dev_key_as_an_absolute_sdk_anchored_define(tmp_path):
                for s in plan["slices"]), plan["slices"]
 
 
-def test_an_explicit_key_file_suppresses_the_default_define(tmp_path):
+def test_an_explicit_key_file_replaces_the_default_define_with_an_anchored_one(
+        tmp_path):
+    """board.schema.json: key_file is relative to the project root.  It must
+    reach sysbuild as a ${PROJECT_ROOT}-anchored -D, never bare-relative
+    (MCUboot and the signer would resolve it elsewhere), and the SDK dev key
+    must not also be passed."""
     board_yaml, project = _project(tmp_path, AEN_METHOD_OMITTED)
+    assert "SB_CONFIG_BOOT_SIGNATURE_KEY_FILE" not in emit_sysbuild_conf(project)
     plan = _plan(tmp_path, board_yaml, project)
-    assert "SB_CONFIG_BOOT_SIGNATURE_KEY_FILE=" not in json.dumps(plan["slices"])
+    cmds = json.dumps(plan["slices"]).replace('\\"', '"')
+    assert ('-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE='
+            '"${PROJECT_ROOT}/keys/dev_ecdsa_p256.pem"') in cmds
+    assert "mcuboot_shared_dev_ecdsa_p256" not in cmds

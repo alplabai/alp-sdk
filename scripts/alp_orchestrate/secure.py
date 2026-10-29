@@ -263,8 +263,9 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
     }.get(algo)
     if algo_kc:
         lines.append(algo_kc)
-    if sign.get("key_file"):
-        lines.append(f'SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="{sign["key_file"]}"')
+    # `signing.key_file` is NOT written here: a conf file cannot anchor a
+    # path (see sysbuild_default_signing_key).  The orchestrator resolves it
+    # against the board.yaml directory and passes an absolute -D instead.
     swap_explicit = boot.get("swap_algorithm")
     swap = (swap_explicit or "").lower()
     single_slot = _boot_target_is_single_slot(project)

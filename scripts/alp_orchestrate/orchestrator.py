@@ -479,8 +479,24 @@ def _slice_command(
                 # cannot hold an absolute path; a relative one resolves
                 # against MCUBOOT_DIR / WEST_TOPDIR, #2950), so pass the
                 # shared dev key as an absolute, SDK-anchored -D.
+                user_key = ((project.boot or {}).get("signing") or {}).get(
+                    "key_file")
                 default_key = sysbuild_default_signing_key(project)
-                if default_key is not None:
+                if user_key:
+                    # board.schema.json: key_file is relative to the project
+                    # root.  Resolve it against the board.yaml directory and
+                    # pass an anchored absolute -D (never a bare-relative
+                    # path, which MCUboot/the signer resolve elsewhere).
+                    key_path = Path(user_key)
+                    if not key_path.is_absolute():
+                        key_path = base_dir / key_path
+                    try:
+                        key_val = _tokenize(key_path, base_dir, REPO)
+                    except UnrootedPathError:
+                        key_val = key_path.as_posix()
+                    defines.append(
+                        f'-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="{key_val}"')
+                elif default_key is not None:
                     defines.append(
                         "-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="
                         f'"{_tokenize(default_key, base_dir, REPO)}"')

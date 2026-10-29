@@ -171,7 +171,8 @@ via `storage:` if you want it explicit.
    west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
        path/to/app \
        --sysbuild \
-       -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+       -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf \
+       -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="<abs-alp-sdk>/keys/mcuboot_shared_dev_ecdsa_p256.pem"
    ```
    (Or, if your `board.yaml` carries a `boot:` block, the loader's
    emitted overlay at `build/alp_sysbuild.conf` is the canonical

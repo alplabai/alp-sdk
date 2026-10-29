@@ -663,6 +663,13 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     args = z["command"]["args"]
     assert args[:2] == ["build", "-b"]
     assert "--sysbuild" in args
+    # The relative board.yaml `key_file` is passed as an anchored -D (#2950),
+    # not left bare-relative in the overlay; drop it to check the tail.
+    key_args = [a for a in args
+                if a.startswith("-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE=")]
+    assert len(key_args) == 1
+    assert "${PROJECT_ROOT}/keys/dev_rsa.pem" in key_args[0]
+    args = [a for a in args if a not in key_args]
 
     # Anchored on the board.yaml's own directory (`base_dir`, #596), never
     # the test-runner's CWD -- `_write_board` drops board.yaml straight

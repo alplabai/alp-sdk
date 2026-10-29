@@ -86,7 +86,10 @@ images.  Production key never enters this dir.
 Nothing to generate for a pre-provisioned module: the SDK commits a
 **shared development key**, `keys/mcuboot_shared_dev_ecdsa_p256.pem`,
 and the factory MCUboot trusts it (#2421).
-`zephyr/sysbuild/aen/sysbuild.conf` already signs with it. It is public,
+`tan build` passes it as an absolute `-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE`;
+a hand-run sysbuild must pass that -D itself (the curated
+`zephyr/sysbuild/aen/sysbuild.conf` carries no key, and without the -D the build
+signs with MCUboot's `root-ec-p256.pem`, which the factory MCUboot rejects). It is public,
 so it gives no security; it only makes day-one images boot.
 
 To practise with your own key, run `bash keys/generate_dev_key.sh`
@@ -155,7 +158,8 @@ python3 scripts/gen_example_alp_conf.py examples/peripheral-io/gpio-button-led
 west build -b alif_e7_dk_rtss_he \
     examples/peripheral-io/gpio-button-led \
     --sysbuild \
-    -- -Dgpio-button-led_EXTRA_CONF_FILE=generated/alp.conf -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+    -- -Dgpio-button-led_EXTRA_CONF_FILE=generated/alp.conf -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf \
+    -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="<abs-alp-sdk>/keys/mcuboot_shared_dev_ecdsa_p256.pem"
 ```
 
 Output artefacts under `build/`:
