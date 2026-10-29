@@ -7,10 +7,6 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
-### Fixed -- Alif UTIMER PWM: the two drivers of one block no longer disturb each other
-
-**`pwm_alif_utimer.c` keeps the shared counter running.** Driver A and B of a UTIMER share one counter and one reload register, but every `pwm_set_cycles()` stopped and re-zeroed that counter, so a duty change on one channel glitched its sibling, and a 0% duty request left the counter stopped and froze the sibling. A channel update now writes only that channel's compare and output control; the counter is stopped only when the last active channel goes to 0%, and the period is reprogrammed only by the sole active channel. A request whose period differs from an active sibling's returns `-EINVAL` and writes nothing. Bench-unverified (E8).
-
 ### Fixed — abidiff gate honesty (#2851)
 
 **The `abidiff` gate is advisory, and now says so.** It is not a required context and `pr-plain-cmake.yml` has no `merge_group:` trigger, so a red run blocks nothing (maintainer decision: stays advisory). The SONAME-rename suppression no longer masks an abidiff error (applied only when the exit status has no ABI_ERROR/USAGE bit), every skip (tool missing, no tag of the current minor) emits a `::warning::` in CI or under `--require-tool`, and a test covers the SONAME-only report shape against a synthetic fixture (hand-written in the shape `soname_only()` parses, not a real capture; a recorded `check_abidiff.py --baseline-tag v0.17.0-rc2 --keep` run on a host with abigail-tools is still pending, #2851).
