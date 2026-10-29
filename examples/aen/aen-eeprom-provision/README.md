@@ -117,6 +117,12 @@ migration — but it must be deliberate:
 
 and the reason belongs in the unit's record.
 
+`ALP_PROVISION_FORCE`, `ALP_SECURE_PAGE_BIN`, `ALP_LOCK_SECURE_PAGE` and
+`ALP_SECURE_PAGE_COLD_CYCLED` apply to **one configure only**: CMake drops them
+from the build directory's cache after reading them, so building the next unit
+in the same directory without repeating the `-D` leaves them off. Pass them again
+for every build that needs them.
+
 ## Verify independently
 
 Trust the reader, not this app's own read-back — a different binary exercising a

@@ -58,6 +58,28 @@ file(WRITE ${_blob_header}
 "static const uint8_t alp_manifest_blob[ALP_MANIFEST_BLOB_LEN] = { ${_blob_c} };\n")
 message(STATUS "aen-eeprom-provision: baked ${_blob_len}-byte manifest from ${ALP_MANIFEST_BIN}")
 
+# --- safety flags are consumed per configure, never sticky -------------------
+# ALP_PROVISION_FORCE, ALP_SECURE_PAGE_BIN, ALP_LOCK_SECURE_PAGE and
+# ALP_SECURE_PAGE_COLD_CYCLED are DELIBERATE, per-build decisions (overwrite an
+# existing identity, write one unit's Secure Data Page mirror, permanently lock
+# it, attest a cold power cycle).  A plain -D lands in CMakeCache.txt and
+# survives every later configure of the same build dir -- so after one deliberate
+# re-provision, the next unit built with only -DALP_MANIFEST_BIN=<next>.bin would
+# silently inherit FORCE (overwriting a good manifest) or the PREVIOUS unit's
+# secure-page blob.  So: take the value for THIS configure as a normal variable
+# and drop the cache entry.  A later configure that does not repeat the -D sees
+# the flag off.
+foreach(_alp_flag ALP_PROVISION_FORCE ALP_SECURE_PAGE_BIN ALP_LOCK_SECURE_PAGE
+        ALP_SECURE_PAGE_COLD_CYCLED)
+    if(DEFINED CACHE{${_alp_flag}})
+        set(_alp_flag_val "${${_alp_flag}}")
+        unset(${_alp_flag} CACHE)
+        set(${_alp_flag} "${_alp_flag_val}")
+        message(STATUS "aen-eeprom-provision: ${_alp_flag}=${_alp_flag_val} applies to this "
+                       "configure only (repeat the -D on the next build to keep it)")
+    endif()
+endforeach()
+
 # --- the Secure Data Page mirror blob (optional) ----------------------------
 # Same idea as the manifest blob above, for the SEPARATE 64-byte Secure Data
 # Page mirror at 0x58 selector 0x00 -- see include/alp/hw_info.h's
