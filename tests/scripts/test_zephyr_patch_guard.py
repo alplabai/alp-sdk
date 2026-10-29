@@ -27,12 +27,15 @@ PATCHES_YML = (ROOT / "zephyr" / "patches.yml").read_text(encoding="utf-8")
 
 _CALL = re.compile(
     r"_alp_pg_check\(\s*(?P<id>\S+)\s+(?P<module>\S+)\s+\"\$\{(?P<root>\w+)\}\"\s+"
-    r"(?P<file>\S+)\s+(?P<marker>\S+)\s+(?P<syms>(?:CONFIG_\w+\s*)+)\)"
+    r"(?P<file>\S+)\s+(?P<marker>\"[^\"]+\"|\S+)\s+(?P<all>ALL\s+)?"
+    r"(?P<syms>(?:(?:CONFIG_\w+|\$\{\w+\})\s*)+)\)"
 )
 
 
 def _entries():
     found = [m.groupdict() for m in _CALL.finditer(GUARD.read_text(encoding="utf-8"))]
+    for e in found:
+        e["marker"] = e["marker"].strip('"')
     assert found, "no _alp_pg_check entries parsed from the guard"
     return found
 
@@ -61,16 +64,19 @@ def test_marker_is_introduced_by_named_patch(e):
 needs_cmake = pytest.mark.skipif(shutil.which("cmake") is None, reason="cmake not installed")
 
 
-def _run(zephyr: Path, alif: Path, *defs: str):
+def _run(zephyr: Path, alif: Path, *defs: str, mcuboot: Path | None = None):
     cmd = ["cmake", f"-DZEPHYR_BASE={zephyr}", f"-DZEPHYR_ALIF_MODULE_DIR={alif}"]
+    if mcuboot is not None:
+        cmd.append(f"-DZEPHYR_MCUBOOT_MODULE_DIR={mcuboot}")
     cmd += [f"-D{d}" for d in defs] + ["-P", str(GUARD)]
     return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
 
 
 def _tree(tmp_path: Path, patched: bool):
-    z, a = tmp_path / "zephyr", tmp_path / "hal_alif"
+    z, a, m = tmp_path / "zephyr", tmp_path / "hal_alif", tmp_path / "mcuboot"
+    roots = {"ZEPHYR_BASE": z, "ZEPHYR_ALIF_MODULE_DIR": a, "ZEPHYR_MCUBOOT_MODULE_DIR": m}
     for e in _entries():
-        root = z if e["root"] == "ZEPHYR_BASE" else a
+        root = roots[e["root"]]
         f = root / e["file"]
         f.parent.mkdir(parents=True, exist_ok=True)
         # Several patches can touch one file, so accumulate markers.
@@ -118,3 +124,67 @@ def test_opt_out(tmp_path):
     z, a = _tree(tmp_path, patched=False)
     r = _run(z, a, "CONFIG_VIDEO_MIPI_CSI2_DW=y", "ALP_SKIP_PATCH_CHECK=ON")
     assert r.returncode == 0, r.stderr
+
+
+# --- #2949: patches whose absence is otherwise silent -----------------------
+
+_MCU = ("CONFIG_BOOTLOADER_MCUBOOT=y", "CONFIG_MRAM_FLASH_ALIF=y")
+
+
+def _mcuboot_dir(tmp_path: Path) -> Path:
+    return tmp_path / "mcuboot"
+
+
+@needs_cmake
+def test_every_silent_patch_is_covered():
+    """Patches that build clean without the fix must each have a guard entry;
+    the rest (build/link-time failures, sim-only regression tests) are listed."""
+    covered = {e["id"] for e in _entries()}
+    no_guard_needed = {
+        "mcuboot/0003", "mcuboot/0005",  # sim regression tests only
+        "zephyr/0002", "zephyr/0003",  # fail at build time when absent
+        "hal_alif/0001", "hal_alif/0002", "hal_alif/0015",  # se-service, link/build
+    }
+    listed = set(re.findall(r"path: (\w+/\d{4})-", PATCHES_YML))
+    assert listed - covered - no_guard_needed == set()
+
+
+@needs_cmake
+def test_unpatched_aen_mcuboot_build_fails_naming_the_patches(tmp_path):
+    z, a = _tree(tmp_path, patched=False)
+    r = _run(z, a, *_MCU, mcuboot=_mcuboot_dir(tmp_path))
+    assert r.returncode != 0
+    for pid in ("mcuboot/0001", "mcuboot/0002", "mcuboot/0004"):
+        assert pid in r.stderr
+    assert "west patch --dst-module mcuboot apply" in r.stderr
+
+
+@needs_cmake
+def test_patched_aen_mcuboot_build_passes(tmp_path):
+    z, a = _tree(tmp_path, patched=True)
+    r = _run(z, a, *_MCU, mcuboot=_mcuboot_dir(tmp_path))
+    assert r.returncode == 0, r.stderr
+
+
+@needs_cmake
+def test_mcuboot_without_alif_mram_is_not_blocked(tmp_path):
+    z, a = _tree(tmp_path, patched=False)
+    r = _run(z, a, "CONFIG_BOOTLOADER_MCUBOOT=y", mcuboot=_mcuboot_dir(tmp_path))
+    assert r.returncode == 0, r.stderr
+
+
+@needs_cmake
+def test_unpatched_tint_build_fails(tmp_path):
+    z, a = _tree(tmp_path, patched=False)
+    r = _run(z, a, "CONFIG_RENESAS_RZ_TINT_SUPPORT_STATUS_CLEAR_REG=y")
+    assert r.returncode != 0 and "zephyr/0005" in r.stderr
+
+
+@needs_cmake
+def test_unpatched_isp_build_fails(tmp_path):
+    z, a = _tree(tmp_path, patched=False)
+    r = _run(z, a, "CONFIG_VIDEO_ISP_VSI=y")
+    assert r.returncode != 0
+    for pid in ("hal_alif/0003", "hal_alif/0005", "hal_alif/0010", "hal_alif/0012"):
+        assert pid in r.stderr
+    assert "hal_alif/0011" not in r.stderr  # OV5647 calib not selected

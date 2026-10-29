@@ -49,19 +49,6 @@ config ALP_SDK_MAX_WDT_HANDLES
 # given Zephyr subsystem don't link the wrapper.  Each defaults on
 # when its underlying Zephyr driver class is enabled.
 
-config ALP_SDK_PERIPH_PWM
-	bool "Enable <alp/pwm.h> wrapper"
-	default y if PWM
-	depends on PWM
-	help
-	  Compile src/zephyr/peripheral_pwm.c.  Provides alp_pwm_*
-	  on top of Zephyr's pwm_* API.  Resolves channel_id via the
-	  alp-pwm0..alp-pwm7 DT aliases.  On V2N (CONFIG_ALP_SOC_RENESAS_RZV2N_N44),
-	  the wrapper instead dispatches through the GD32 supervisor
-	  singleton (CONFIG_ALP_SDK_V2N_SUPERVISOR) -- the Renesas
-	  RZ/V2N has no PWM peripherals per soc_caps; all eight E1M
-	  channels reach the GD32 IO-MCU.
-
 config ALP_SDK_PERIPH_ADC
 	bool "Enable <alp/adc.h> wrapper"
 	default y if ADC
@@ -157,76 +144,6 @@ config ALP_SDK_QENC_SW_FALLBACK
 	  Compiles a deterministic software quadrature-encoder backend
 	  that registers as a wildcard at priority 0.  get_position
 	  advances by +7 per call.  For native_sim build / test only.
-
-config ALP_SDK_PERIPH_COUNTER
-	bool "Enable <alp/counter.h> free-running counter wrapper"
-	default y if COUNTER
-	depends on COUNTER
-	help
-	  Legacy gating Kconfig for the <alp/counter.h> surface.  After
-	  Slice 4a the dispatcher (src/counter_dispatch.c) and its
-	  Zephyr backend (src/backends/counter/zephyr_drv.c) are compiled
-	  unconditionally; this symbol is retained for backwards
-	  compatibility with older build configs but has no effect on
-	  what gets linked.  See ALP_SDK_COUNTER_SW_FALLBACK for the
-	  software-backend opt-in.
-
-config ALP_SDK_PERIPH_QENC
-	bool "Enable <alp/counter.h> quadrature-decoder wrapper"
-	default y if SENSOR
-	depends on SENSOR
-	help
-	  Legacy gating Kconfig for the quadrature-decoder half of the
-	  <alp/counter.h> surface.  After Slice 4a the dispatcher
-	  (src/qenc_dispatch.c) and its Zephyr backend
-	  (src/backends/qenc/zephyr_drv.c) are compiled unconditionally;
-	  this symbol is retained for backwards compatibility with older
-	  build configs but has no effect on what gets linked.  See
-	  ALP_SDK_QENC_SW_FALLBACK for the software-backend opt-in.
-
-config ALP_SDK_PERIPH_I2S
-	bool "Enable <alp/i2s.h> wrapper"
-	default y if I2S
-	depends on I2S
-	help
-	  Compile src/zephyr/peripheral_i2s.c.  Provides alp_i2s_*
-	  on top of Zephyr's i2s_* API with a 2-block ping-pong
-	  memory slab.
-
-config ALP_SDK_PERIPH_CAN
-	bool "Enable <alp/can.h> wrapper (classic CAN + CAN-FD)"
-	default y if CAN
-	depends on CAN
-	help
-	  Compile src/zephyr/peripheral_can.c.  Provides alp_can_*
-	  on top of Zephyr's can_* API.  CAN-FD only when
-	  CONFIG_CAN_FD_MODE=y.
-
-config ALP_SDK_PERIPH_RTC
-	bool "Enable <alp/rtc.h> wrapper"
-	default y if RTC
-	depends on RTC
-	help
-	  Legacy gating Kconfig for the <alp/rtc.h> surface.  After
-	  Slice 4a the dispatcher (src/rtc_dispatch.c) and its
-	  Zephyr backend (src/backends/rtc/zephyr_drv.c) are compiled
-	  unconditionally; this symbol is retained for backwards
-	  compatibility with older build configs but has no effect on
-	  what gets linked.  See ALP_SDK_RTC_SW_FALLBACK for the
-	  software-backend opt-in.
-
-config ALP_SDK_PERIPH_WDT
-	bool "Enable <alp/wdt.h> wrapper"
-	default y if WATCHDOG
-	depends on WATCHDOG
-	help
-	  Legacy gating Kconfig for the <alp/wdt.h> surface.  After
-	  Slice 4a the dispatcher (src/wdt_dispatch.c) and its
-	  Zephyr backend (src/backends/wdt/zephyr_drv.c) are compiled
-	  unconditionally; this symbol is retained for backwards
-	  compatibility with older build configs but has no effect on
-	  what gets linked.  See ALP_SDK_WDT_SW_FALLBACK for the
-	  software-backend opt-in.
 
 config ALP_SDK_PERIPH_TMU
 	bool "Enable <alp/tmu.h> wrapper (CORDIC math accelerator surface)"

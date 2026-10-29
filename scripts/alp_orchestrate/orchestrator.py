@@ -22,7 +22,7 @@ from . import cameras as _cameras
 from .models import BoardProject, OrchestratorError, Slice
 from .paths import REPO
 from .secure import (emit_sysbuild_conf, emit_tfm_sysbuild_conf,
-                      sysbuild_family_base_conf)
+                      sysbuild_default_signing_key, sysbuild_family_base_conf)
 
 
 def iter_buildable_slices(project: BoardProject):
@@ -475,6 +475,15 @@ def _slice_command(
                     if family_base else [_tokenize(sb_conf, base_dir, REPO)]
                 )
                 defines.append(f"-DSB_CONF_FILE={';'.join(sb_conf_files)}")
+                # The curated base carries no signing key (a conf file
+                # cannot hold an absolute path; a relative one resolves
+                # against MCUBOOT_DIR / WEST_TOPDIR, #2950), so pass the
+                # shared dev key as an absolute, SDK-anchored -D.
+                default_key = sysbuild_default_signing_key(project)
+                if default_key is not None:
+                    defines.append(
+                        "-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="
+                        f'"{_tokenize(default_key, base_dir, REPO)}"')
         # Wire the slice's materialised per-core Kconfig fragment
         # (`_slice_config_artefact` -> build_dir/alp.conf, carried in the
         # plan's `configArtefacts`) into the build command via

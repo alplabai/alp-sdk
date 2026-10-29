@@ -190,3 +190,44 @@ def test_a_project_with_no_boot_block_is_unchanged(tmp_path):
           m55_hp: {os: zephyr, app: ./src}
     """)
     assert emit_sysbuild_conf(project) == ""
+
+
+# --------------------------------------------------------------------------
+# #2950: the curated AEN base ships no (relative) signing key
+# --------------------------------------------------------------------------
+
+# board.schema.json requires `key_file` whenever `signing:` is present, so
+# "no key" means a `boot:` block with no `signing:` at all.
+AEN_NO_KEY_FILE = """
+    som: {sku: E1M-AEN801, hw_rev: r2}
+    preset: e1m-evk
+    cores:
+      m55_hp: {os: zephyr, app: ./src}
+    boot:
+      method: mcuboot
+"""
+
+
+def test_curated_aen_base_has_no_relative_key_file():
+    """A conf file cannot name an absolute path; a relative one resolves
+    against MCUBOOT_DIR / WEST_TOPDIR, never the SDK checkout."""
+    base = (REPO / "zephyr" / "sysbuild" / "aen" / "sysbuild.conf").read_text(
+        encoding="utf-8")
+    live = [ln for ln in base.splitlines()
+            if ln.strip().startswith("SB_CONFIG_BOOT_SIGNATURE_KEY_FILE")]
+    assert not live, live
+
+
+def test_plan_passes_the_dev_key_as_an_absolute_sdk_anchored_define(tmp_path):
+    board_yaml, project = _project(tmp_path, AEN_NO_KEY_FILE)
+    plan = _plan(tmp_path, board_yaml, project)
+    want = ('-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE='
+            '"${SDK_ROOT}/keys/mcuboot_shared_dev_ecdsa_p256.pem"')
+    assert any(want in json.dumps(s["command"]).replace('\\"', '"')
+               for s in plan["slices"]), plan["slices"]
+
+
+def test_an_explicit_key_file_suppresses_the_default_define(tmp_path):
+    board_yaml, project = _project(tmp_path, AEN_METHOD_OMITTED)
+    plan = _plan(tmp_path, board_yaml, project)
+    assert "SB_CONFIG_BOOT_SIGNATURE_KEY_FILE=" not in json.dumps(plan["slices"])
