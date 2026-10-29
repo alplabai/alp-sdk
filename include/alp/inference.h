@@ -261,7 +261,10 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg);
 /** Options for loading a `.alpmodel` package (the fat multi-backend
  *  container).  Provide the bytes in-memory (@c data/@c size, MCU embed)
  *  or a storage @c path (Linux).  @c backend = AUTO lets the loader pick
- *  the best blob for the active SoM; pin a specific backend to force it. */
+ *  the best blob for the active SoM; pin a specific backend to force it.
+ *  A caller-owned @c arena (non-NULL) must come with a non-zero
+ *  @c arena_bytes: the manifest never sizes a caller's buffer, and a
+ *  zero size there is rejected with ALP_ERR_INVAL. */
 typedef struct {
 	const void             *data;        /**< Package bytes, or NULL to use @c path. */
 	size_t                  size;        /**< Byte count when @c data is set. */

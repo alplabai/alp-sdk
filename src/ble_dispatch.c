@@ -309,11 +309,15 @@ alp_ble_t *alp_ble_open(void)
 		return NULL;
 	}
 	h->cached_caps = caps;
-	/* First (and, until now, only) reference. Publish refcount before
-	 * lifecycle so a racing joiner's increment-if-nonzero CAS can only
-	 * ever see a fully-populated handle once it observes refcount != 0. */
-	__atomic_store_n(&h->refcount, 1u, __ATOMIC_RELEASE);
+	/* First (and, until now, only) reference. Publish lifecycle OPEN
+	 * before refcount: a joiner's increment-if-nonzero CAS can only
+	 * succeed once refcount != 0, so refcount > 0 always implies the
+	 * handle is fully populated AND OPEN. The reverse order let a joiner
+	 * that closed twice drive refcount to 0 while lifecycle was still
+	 * UNOPENED, failing begin_close and wedging the slot (in_use, refcount
+	 * 0) so every later alp_ble_open() spun forever. */
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
+	__atomic_store_n(&h->refcount, 1u, __ATOMIC_RELEASE);
 	return h;
 }
 
@@ -502,9 +506,9 @@ alp_status_t alp_ble_scan_start(alp_ble_t *h, bool active, alp_ble_scan_cb_t cb,
 		 * invoking op" first so close() can detect the reentrant
 		 * self-close and defer instead of deadlocking (see this file's
 		 * header comment). */
-		alp_handle_cb_enter(&h->cb_thread, &h->cb_active);
-		rc = h->state.ops->scan_start(&h->state, active, cb, user);
-		alp_handle_cb_leave(&h->cb_active);
+		bool cb_owner = alp_handle_cb_enter(&h->cb_thread, &h->cb_active);
+		rc            = h->state.ops->scan_start(&h->state, active, cb, user);
+		alp_handle_cb_leave(&h->cb_thread, &h->cb_active, cb_owner);
 	}
 	/* Dev-review follow-up on issue #756: consume close_pending BEFORE
 	 * op_leave, while this thread still holds its own counted op -- `h`

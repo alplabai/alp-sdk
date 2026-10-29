@@ -165,8 +165,15 @@ alp_status_t alp_camera_capture(alp_camera_t *h, alp_camera_frame_t *out, uint32
 	 * of busy-spinning (issue #1114: unsafe regardless of op duration) --
 	 * generalised from rpc_dispatch.c's _rpc_op_enter()/
 	 * _rpc_begin_close()/_rpc_drain() (GHSA-xhm8). A close() racing an
-	 * in-flight capture() can no longer tear down state underneath it. */
-	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+	 * in-flight capture() can no longer tear down state underneath it.
+	 *
+	 * A NULL handle is a caller bug and returns ALP_ERR_INVAL, as
+	 * <alp/camera.h> documents for capture(); a non-NULL handle that is
+	 * closed (or closing) is the state error ALP_ERR_NOT_READY. */
+	if (h == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (!alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
 	alp_status_t rc;

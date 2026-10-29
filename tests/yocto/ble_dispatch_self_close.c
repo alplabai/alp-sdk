@@ -510,6 +510,35 @@ static void test_concurrent_open_joins_in_flight_opener(void)
 	_free_radio(reclaimed);
 }
 
+/* ------------------------------------------------------------------ */
+/* 4c. Issue #2919: the self-close marker is owned by ONE thread. A    */
+/*     second overlapping caller must neither overwrite cb_thread nor  */
+/*     clear cb_active on its way out, or the owner's real self-close  */
+/*     is no longer recognised and close() deadlocks on its own count. */
+/* ------------------------------------------------------------------ */
+
+static void test_cb_marker_not_clobbered_by_second_caller(void)
+{
+	uintptr_t cb_thread = 0u;
+	bool      cb_active = false;
+
+	bool owner = alp_handle_cb_enter(&cb_thread, &cb_active);
+	ALP_ASSERT_TRUE(owner);
+	ALP_ASSERT_TRUE(cb_active);
+	ALP_ASSERT_TRUE(cb_thread == alp_thread_token_self());
+
+	/* Second (rejected/BUSY) caller: not the owner, leave is a no-op. */
+	bool other = alp_handle_cb_enter(&cb_thread, &cb_active);
+	ALP_ASSERT_TRUE(!other);
+	alp_handle_cb_leave(&cb_thread, &cb_active, other);
+	ALP_ASSERT_TRUE(cb_active);
+	ALP_ASSERT_TRUE(cb_thread == alp_thread_token_self());
+
+	alp_handle_cb_leave(&cb_thread, &cb_active, owner);
+	ALP_ASSERT_TRUE(!cb_active);
+	ALP_ASSERT_TRUE(cb_thread == 0u);
+}
+
 int main(void)
 {
 	/* Runs first, deliberately: scenario 3 below ends by permanently
@@ -518,6 +547,7 @@ int main(void)
 	 * _alloc_radio() again in this process. */
 	test_repeated_open_joins_singleton_and_close_tears_down_once();
 	test_concurrent_open_joins_in_flight_opener();
+	test_cb_marker_not_clobbered_by_second_caller();
 	test_self_close_from_scan_callback();
 	test_close_from_other_thread_while_scan_blocks();
 	test_close_from_other_thread_during_scan_vs_slot_reuse();
