@@ -85,7 +85,8 @@ class TestWestLibrariesEmit(unittest.TestCase):
 
     def test_top_level_industrial_scripting_libraries_emit_exact_west_projects(self) -> None:
         """CANopenNode and MicroPython carry exact west project pins: the
-        optional Zephyr module pin for CANopenNode and the not-in-tree
+        self-contained external-module pin for CANopenNode (independent of
+        Zephyr's optional.yaml, which v4.5 drops) and the not-in-tree
         upstream source pin for MicroPython."""
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), """

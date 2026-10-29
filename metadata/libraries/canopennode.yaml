@@ -2,8 +2,14 @@
 #
 # Tier-B industrial connectivity entry: CANopenNode implements the CANopen
 # application/protocol stack used by automation nodes on a CAN bus.  Zephyr
-# carries the integration glue in-tree, while the stack source is an optional
-# west module.
+# carries the integration glue in-tree (CONFIG_CANOPENNODE), while the stack
+# source is a separate west module.  Zephyr v4.4.x pinned that module in its
+# submanifests/optional.yaml; Zephyr v4.5 drops it from there (CANopenNode
+# becomes an external module).  This manifest therefore does NOT rely on
+# Zephyr's optional.yaml: `integration.zephyr.west` below is the
+# self-contained, exact project pin (url + SHA + path) that alp-sdk emits via
+# `--emit west-libraries`, and it stays valid on v4.4.1 and on v4.5.  The SHA
+# is the revision v4.4.x shipped, kept as the reproducible source pin.
 #
 # Grounding (pinned Zephyr v4.4.0 workspace):
 #   * optional west module `canopennode`, path modules/lib/canopennode,
