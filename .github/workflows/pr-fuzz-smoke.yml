@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builds every libFuzzer harness under tests/fuzz/ with clang and gives each
+# a short corpus run, so an overrun added to a parser they link is caught on
+# the PR instead of never.  Harnesses that link production sources (mproc
+# framing, update_log engine, GD32 bridge protocol) fuzz the real code.
+
+name: pr-fuzz-smoke
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/fuzz/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/pr-fuzz-smoke.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: fuzz-smoke · libFuzzer (clang, ASan+UBSan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      # gd32_bridge_frame links the bridge firmware's protocol.c; the
+      # configure step refuses to proceed without a checkout of it.
+      - name: Check out the GD32 bridge firmware
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: alplabai/gd32-bridge-firmware
+          path: gd32-bridge-firmware
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-fuzz \
+            -DCMAKE_C_COMPILER=clang \
+            -DALP_BUILD_FUZZ=ON \
+            -DALP_OS=yocto \
+            -DALP_GD32_BRIDGE_FIRMWARE_DIR="$GITHUB_WORKSPACE/gd32-bridge-firmware"
+
+      - name: Build every alp_fuzz_* target
+        run: |
+          targets=$(cmake --build build-fuzz --target help \
+            | sed -n 's/^\.\.\. \(alp_fuzz_[A-Za-z0-9_]*\).*/\1/p')
+          test -n "$targets"
+          for t in $targets; do cmake --build build-fuzz --target "$t"; done
+
+      - name: Run each harness for 20 s
+        run: |
+          set -e
+          for exe in $(find build-fuzz -type f -name 'alp_fuzz_*' -perm -u+x | sort); do
+            name=$(basename "$exe")
+            corpus="tests/fuzz/corpus/${name#alp_fuzz_}"
+            echo "::group::$name"
+            args=()
+            [ -d "$corpus" ] && args+=("$corpus")
+            "$exe" -max_total_time=20 -timeout=10 "${args[@]}"
+            echo "::endgroup::"
+          done

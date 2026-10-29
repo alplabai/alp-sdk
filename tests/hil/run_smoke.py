@@ -81,6 +81,8 @@ class SerialSpec:
     baud: int
     expect_contains: tuple[str, ...]
     expect_absent: tuple[str, ...]
+    runs_until_killed: bool = False  # ssh-run: example loops forever by
+    # design, so the bounded-run SIGTERM (rc 143) is the expected stop
 
 
 @dc.dataclass(frozen=True)
@@ -164,6 +166,7 @@ def _merge_serial(
         baud=int(baud),
         expect_contains=contains,
         expect_absent=absent,
+        runs_until_killed=bool(spec_serial.get("runs_until_killed", False)),
     )
 
 
@@ -569,11 +572,13 @@ def _run_ssh_spec(spec: SmokeSpec) -> SmokeResult:
                 f"ssh_files copy failed (rc={rc}): {out.strip()[:400]}",))
     # The remote shell exits with the example's status (see capture_command),
     # so a crash or abort after the expected banner still fails the spec.
-    # 143 (128+SIGTERM) is the bounded-run sleeper stopping an example that
-    # loops forever by design, so it is not a failure.
+    # 143 (128+SIGTERM) is the bounded-run sleeper stopping an example, and
+    # is only expected from one that declares `serial.runs_until_killed`;
+    # elsewhere it means the example hung and was killed.
     rc, out = _run(capture_command(spec))
     failures = assert_serial(spec, out)
-    if rc not in (0, _SIGTERM_RC):
+    ok_rcs = (0, _SIGTERM_RC) if spec.serial.runs_until_killed else (0,)
+    if rc not in ok_rcs:
         failures.append(f"example exited rc={rc}")
     return SmokeResult(spec, not failures, tuple(failures), out)
 

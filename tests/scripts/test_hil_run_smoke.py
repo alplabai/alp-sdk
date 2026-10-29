@@ -800,17 +800,45 @@ def test_ssh_run_binary_exit_code_feeds_verdict(tmp_path: Path, monkeypatch) -> 
     spec = dataclasses.replace(
         spec, ssh_host="root@board", artifact_dir=str(artifact_dir),
         serial=dataclasses.replace(spec.serial, expect_contains=("HIL_OK",), expect_absent=()))
+    forever = dataclasses.replace(
+        spec, serial=dataclasses.replace(spec.serial, runs_until_killed=True))
 
-    def run_with(final_rc: int):
+    def run_with(final_rc: int, which=spec):
         def fake(argv, **kw):
             is_capture = argv[0] == "ssh" and "wait $p" in argv[-1]
             return subprocess.CompletedProcess(
                 argv, final_rc if is_capture else 0, b"HIL_OK\n", b"")
         monkeypatch.setattr(run_smoke.subprocess, "run", fake)
-        return run_smoke.run_spec(spec)
+        return run_smoke.run_spec(which)
 
     assert run_with(0).ok
-    assert run_with(143).ok  # bounded-run sleeper stopped a forever-loop example
+    assert run_with(143, forever).ok  # bounded stop of a forever-loop example
+    hung = run_with(143)  # a hang killed by the sleeper is not a pass
+    assert not hung.ok
+    assert "rc=143" in hung.failures[0]
     bad = run_with(139)  # segfault after the banner
     assert not bad.ok
     assert "rc=139" in bad.failures[0]
+
+
+def test_ssh_run_wrapper_propagates_example_status(tmp_path: Path) -> None:
+    """The remote wrapper must exit with the example's status, not kill's."""
+    import dataclasses
+    import shutil
+    import subprocess
+
+    sh = shutil.which("sh")
+    if sh is None:
+        pytest.skip("no POSIX sh")
+    spec = dataclasses.replace(_args_files_spec(tmp_path), ssh_host="root@board")
+    argv = run_smoke.capture_command(spec)
+    wrapper = argv[-1]
+    assert "wait $p; rc=$?" in wrapper
+    assert wrapper.endswith("exit $rc; }")
+    # Run the wrapper body locally with a stub example that exits 139.
+    stub = tmp_path / "stub.sh"
+    stub.write_text("#!/bin/sh\nexit 139\n", encoding="utf-8")
+    stub.chmod(0o755)
+    body = wrapper.split("&& ", 1)[1].replace(f"/tmp/{run_smoke._artifact_name(spec)}", stub.as_posix())
+    res = subprocess.run([sh, "-c", body], capture_output=True, timeout=30)
+    assert res.returncode == 139
