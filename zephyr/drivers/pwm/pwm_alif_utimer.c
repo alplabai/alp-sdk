@@ -129,10 +129,15 @@ struct pwm_alif_data {
  *   - pulse == 0 switches off only the calling channel's output; the counter is
  *     stopped only when no channel is left active.
  *
- * The compare write is not shadow-buffered here: the hal_alif header is not
- * available to this tree, so no buffered-compare register is assumed.  A duty
- * change on a running counter takes effect at the HW's own latch point, never
- * by stopping the counter.
+ * The compare write is NOT shadow-buffered: alif_utimer_set_compare_value() is
+ * a plain store to COMPARE_A/B, so a duty change on a running counter takes
+ * effect immediately, without stopping the counter.  If the new compare is
+ * below the live CNTR while the old one is above it, that cycle's match is
+ * missed and the pad stays at the start level for one period (a one-cycle
+ * glitch).  The IP has UTIMER_BUF_OP_CTRL (0x94) and COMPARE_x_BUF1 (0xD4 /
+ * 0xE4) for buffered updates, but hal_alif defines no BUF_OP_CTRL bit fields
+ * and the buffer-enable/transfer semantics are bench-unverified on E8, so they
+ * are not used here.
  */
 #define UTIMER_MAX_TIMERS 16U
 
@@ -177,6 +182,19 @@ static int pwm_alif_set_cycles_locked(const struct device *dev,
 	 * only when this was the last active channel; otherwise the sibling keeps
 	 * its waveform. */
 	if (pulse_cycles == 0U) {
+		/* alp_pwm_open() and alp_pwm_set_period() both arrive here as
+		 * pwm_set(period, 0): report a period the active sibling cannot
+		 * follow now, before anything is written. */
+		if (others != 0U && sh->period_cycles != period_cycles) {
+			LOG_ERR("utimer%u: driver %u period %u conflicts with active sibling "
+			        "period %u",
+			        config->timer_id,
+			        driver,
+			        period_cycles,
+			        sh->period_cycles);
+			return -EINVAL;
+		}
+
 		alif_utimer_disable_driver(timer_base, driver);
 
 		/*
@@ -223,10 +241,13 @@ static int pwm_alif_set_cycles_locked(const struct device *dev,
 	/* Only the sole active channel may stop/reload/re-zero the counter: either
 	 * first start, or a live period change with nobody else on this timer. */
 	if (!sh->running || sh->period_cycles != period_cycles) {
-		if (sh->running) {
-			alif_utimer_stop_counter(glb_base, config->timer_id);
-			sh->running = false;
-		}
+		/* Stop unconditionally: the software flag starts false at boot, but a
+		 * previous image (J-Link RAM-run reload, warm M55 reset) can leave the
+		 * counter running, and the CNTR write below needs it stopped.  The
+		 * global stop bit is write-1-to-stop, harmless when already stopped,
+		 * and no sibling is active here (checked above). */
+		alif_utimer_stop_counter(glb_base, config->timer_id);
+		sh->running = false;
 
 		/* Ensure the per-timer clock + up-counter (sawtooth) direction. */
 		alif_utimer_enable_timer_clock(glb_base, config->timer_id);
@@ -246,8 +267,8 @@ static int pwm_alif_set_cycles_locked(const struct device *dev,
 		 * while CNTR is still around 90000, already past the reset point, so
 		 * the up-counter had to climb to 0xFFFFFFFF before it could wrap --
 		 * about 43 seconds of a dead pad (#1829).  13.2.6.3.32 requires this
-		 * write happen while the counter is stopped, which the stop above (or
-		 * the never-started state) provides.
+		 * write happen while the counter is stopped, which the unconditional stop
+		 * above provides.
 		 */
 		alif_utimer_set_counter_value(timer_base, 0U);
 		sh->period_cycles = period_cycles;
