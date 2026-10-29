@@ -37,13 +37,18 @@
 
 ZTEST_SUITE(alp_power_registry, NULL, NULL, NULL, NULL, NULL);
 
-/* Test seam exported by src/backends/power/zephyr_pm_policy.c under CONFIG_ZTEST. */
+#ifdef CONFIG_ALP_SDK_POWER_PM_POLICY
+/* Test seam exported by src/backends/power/zephyr_pm_policy.c under CONFIG_ZTEST;
+ * the backend (and so the seam) only exists on builds that link Zephyr PM. */
 void alp_power_pm_policy_test_stop_wake_timer(void);
+#endif
 
 static void _cancel_wake_timer_cb(struct k_timer *t)
 {
 	(void)t;
+#ifdef CONFIG_ALP_SDK_POWER_PM_POLICY
 	alp_power_pm_policy_test_stop_wake_timer();
+#endif
 }
 
 /* ---------- Selector / priority tests ------------------------------- */
