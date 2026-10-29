@@ -124,5 +124,6 @@ int main(void)
 
 	alp_rpc_close(ch);
 	printf("[heterogeneous-offload] done\n");
-	return 0;
+	/* The exit code reports offload failure so the HIL lane can tell it apart from success. */
+	return (rc != 0) ? 1 : 0;
 }
