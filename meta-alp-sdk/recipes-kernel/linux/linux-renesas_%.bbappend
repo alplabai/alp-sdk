@@ -399,15 +399,15 @@ do_configure:prepend() {
         fi
     fi
 
-    # Opt-in CAM0 sources (#1149, #2633): the wrapper dts + fragment must sit next
-    # to the board dts or the cam0 dtb has no rule to build.
+    # Opt-in CAM0 (#1149, #2633, #2963): U-Boot's alp_fdtfile forces the stock
+    # board dtb name on every boot, so the camera fragment is folded INTO that
+    # dtb (an #include appended to the staged board dts), not built as a second dtb.
     if [ -n "${ALP_CAMERA_CAM0}" ]; then
-        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAMERA_CAM0}.dtsi" \
-            "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
-        install -m 0644 \
-            "${WORKDIR}/e1m-v2n101-x-evk-cam0.dts" \
-            "${WORKDIR}/e1m-v2m101-x-evk-cam0.dts" \
-            "${ALP_DTS_DST}/"
+        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAMERA_CAM0}.dtsi"             "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
+        for board_dts in e1m-v2n101-x-evk.dts e1m-v2m101-x-evk.dts; do
+            printf '%s
+' '#include "e1m-x-evk-cam0-sensor.dtsi"'                 >> "${ALP_DTS_DST}/${board_dts}"
+        done
     fi
 
     # DRP1: branch on the variable, same reasoning as the DRPAI branch below.
@@ -501,12 +501,14 @@ SRC_URI:append = "${@' file://usb-gadget.cfg' if d.getVar('ALP_ENABLE_USB_GADGET
 SRC_URI:append = " file://camera-sensors.cfg"
 
 # Selecting a camera is one variable.  ALP_CAMERA_CAM0 = "<module_id>" (a file
-# stem in metadata/camera_modules/) builds renesas/e1m-v2{n,m}101-x-evk-cam0.dtb
-# in addition to the default dtb (which stays in KERNEL_DEVICETREE as the
-# fallback) from the generated fragment e1m-x-evk-cam0-<module_id>.dtsi; the
-# bootloader `fdtfile` must then name that dtb.  Unset (the default): the
-# shipped dtb is unchanged.  Adding a camera is a metadata-only change:
-# regenerate with scripts/gen_camera_dt.py.  See docs/v2n-camera-csi.md.
+# stem in metadata/camera_modules/) folds the generated fragment
+# e1m-x-evk-cam0-<module_id>.dtsi into the shipped e1m-v2{n,m}101-x-evk.dtb.
+# It is NOT a separate dtb: U-Boot's alp_fdtfile resets fdtfile to the stock
+# name from a fixed family table on every boot and fdtfile is not in the
+# writable env list, so no other dtb name could ever be selected (#2963).
+# Unset (the default): the shipped dtb is unchanged.  Adding a camera is a
+# metadata-only change: regenerate with scripts/gen_camera_dt.py.  See
+# docs/v2n-camera-csi.md.
 ALP_CAMERA_CAM0 ??= ""
 ALP_CAM_FRAGMENT_DIR := "${THISDIR}/${PN}"
 python () {
@@ -522,6 +524,4 @@ python () {
         bb.fatal("ALP_CAMERA_CAM0 = '%s' has no generated fragment; available module ids: %s"
                  % (sel, ', '.join(have)))
 }
-ALP_CAM0_DTB = "${@'e1m-v2m101-x-evk-cam0' if 'v2m' in d.getVar('MACHINE') else 'e1m-v2n101-x-evk-cam0'}"
-KERNEL_DEVICETREE:append = "${@' renesas/' + d.getVar('ALP_CAM0_DTB') + '.dtb' if d.getVar('ALP_CAMERA_CAM0') else ''}"
-SRC_URI += "${@' file://e1m-x-evk-cam0-' + d.getVar('ALP_CAMERA_CAM0') + '.dtsi file://e1m-v2n101-x-evk-cam0.dts file://e1m-v2m101-x-evk-cam0.dts' if d.getVar('ALP_CAMERA_CAM0') else ''}"
+SRC_URI += "${@' file://e1m-x-evk-cam0-' + d.getVar('ALP_CAMERA_CAM0') + '.dtsi' if d.getVar('ALP_CAMERA_CAM0') else ''}"

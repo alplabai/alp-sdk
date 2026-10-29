@@ -30,7 +30,7 @@ drifts from the metadata.
 |---|---|---|
 | Sensor + CSI-2 + CRU0 fragment, one per connector x module | `e1m-x-evk-cam0-<module_id>.dtsi` (generated) | `metadata/camera_modules/`, `metadata/chips/<chip>.yaml` `drivers.linux`, `metadata/boards/e1m-x-evk.yaml` `camera_connectors`, SoM `pad_routes`, SoC `linux_dt` |
 | Kernel config: CSI-2 receiver, CRU and every module's sensor driver, built in on every V2N/V2M machine | `camera-sensors.cfg` (generated) | SoC `linux_dt.CSI0.kconfig`, each chip's `drivers.linux.kconfig` |
-| Board dtbs = base board + fragment | `e1m-v2n101-x-evk-cam0.dts`, `e1m-v2m101-x-evk-cam0.dts` | hand-written |
+| Board dtb = base board + fragment | `#include` appended to the staged `e1m-v2{n,m}101-x-evk.dts` by the `linux-renesas` bbappend | `ALP_CAMERA_CAM0` |
 | Selection | `ALP_CAMERA_CAM0` in `linux-renesas_%.bbappend` | |
 
 What the generator derives for a module on `CAM0`: the sensor compatible,
@@ -80,9 +80,9 @@ ALP_CAMERA_CAM0 = "innomaker_cam_ov9281"
 ```
 
 An unknown id aborts the bake and lists the available ones. Bake as usual
-(`docs/build-yocto-v2n.md`). The cam0 dtb is built next to the stock one
-(`renesas/e1m-v2{n,m}101-x-evk-cam0.dtb`). Point the bootloader `fdtfile` at
-it to use it; the stock dtb stays the fallback. Unset (the default) leaves
+(`docs/build-yocto-v2n.md`). The fragment is folded into the stock
+`renesas/e1m-v2{n,m}101-x-evk.dtb`, the only name U-Boot's `alp_fdtfile`
+selects, so no `fdtfile` change is needed. Unset (the default) leaves
 the shipped dtb unchanged.
 
 A module only gets a fragment (and its sensor driver a line in
@@ -115,7 +115,7 @@ clock survives the driver swap.
 - RIIC2 (P34/P35) A55 claim is not recorded in
   `metadata/e1m_modules/v2n/core-ownership.yaml`, so
   `check_amp_pad_claims.py` cannot see a CM33 conflict on those pads.
-  Add a BENCH-PENDING entry once the cam0 dtb is bench-verified.
+  Add a BENCH-PENDING entry once the camera-enabled dtb is bench-verified.
 - CAM1: its control bus (E1M-X I2C3) terminates on the GD32 bridge; Linux
   reaches it as adapter `i2c3` through the bridge's I2C proxy (protocol >= 0.17).
 - Connector-to-receiver and lane mapping (CAM0 -> receiver 0, 2 lanes
@@ -127,12 +127,12 @@ clock survives the driver swap.
 
 0. Safety: the RIIC2 lines have no internal pull-up in the fragment.
    Confirm the CAM0 camera LDO is on (bridge GPIO, GD32-owned) before
-   booting the cam0 dtb, and check whether the carrier fits external
+   booting the camera-enabled dtb, and check whether the carrier fits external
    pull-ups; if it does not, add `bias-pull-up` back only after that.
 1. Before baking, diff the `csi20` / `cru0` labels and OF-graph in the
    fragment against the OV5645 nodes in the BSP's
    `r9a09g056n48-rzv2n-evk.dts`; correct the fragment if they differ.
-2. Boot the cam0 dtb (the image needs `i2c-tools` and `v4l-utils`; they
+2. Boot the camera-enabled dtb (the image needs `i2c-tools` and `v4l-utils`; they
    are not BusyBox applets), then:
    ```
    dmesg | grep -iE "imx219|csi|cru"

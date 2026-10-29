@@ -16,7 +16,7 @@ meta-alp-sdk/recipes-kernel/linux/linux-renesas/:
                                            sensor driver, built in
 
 The linux-renesas bbappend builds the fragment named by
-`ALP_CAMERA_CAM0 = "<module_id>"` into the cam0 dtb.
+`ALP_CAMERA_CAM0 = "<module_id>"` into the shipped board dtb.
 
 Inputs (nothing is restated here; every value is read):
 
