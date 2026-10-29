@@ -539,6 +539,95 @@ static void test_cb_marker_not_clobbered_by_second_caller(void)
 	ALP_ASSERT_TRUE(cb_thread == 0u);
 }
 
+/* ------------------------------------------------------------------ */
+/* 4d. Issue #2919, dispatcher level: thread A is inside scan_start()  */
+/*     (blocked in the backend); thread B issues a second, overlapping */
+/*     alp_ble_scan_start() that the backend rejects with BUSY.  A's   */
+/*     callback then self-closes.  B's BUSY return must not clear A's  */
+/*     marker, so the close is deferred; otherwise it drains on A's    */
+/*     own op count and hangs (this file's CTest TIMEOUT fails it).    */
+/* ------------------------------------------------------------------ */
+
+static atomic_int g_ov_calls;
+static atomic_int g_ov_a_in_mock;
+static atomic_int g_ov_release_a;
+static atomic_int g_ov_a_cb_returned;
+static atomic_int g_ov_teardowns;
+static alp_ble_t *g_ov_handle;
+
+static void ov_self_close_cb(const alp_ble_scan_result_t *r, void *user)
+{
+	(void)r;
+	(void)user;
+	alp_ble_close(g_ov_handle); /* must defer, not deadlock */
+	atomic_store(&g_ov_a_cb_returned, 1);
+}
+
+static alp_status_t
+fake_scan_start_overlap(alp_ble_radio_state_t *state, bool active, alp_ble_scan_cb_t cb, void *user)
+{
+	(void)state;
+	(void)active;
+	if (atomic_fetch_add(&g_ov_calls, 1) != 0) {
+		return ALP_ERR_BUSY; /* second overlapping scan */
+	}
+	atomic_store(&g_ov_a_in_mock, 1);
+	while (!atomic_load(&g_ov_release_a)) {
+		struct timespec ts = { .tv_sec = 0, .tv_nsec = 1000000L };
+		nanosleep(&ts, NULL);
+	}
+	alp_ble_scan_result_t r;
+	memset(&r, 0, sizeof(r));
+	cb(&r, user);
+	return ALP_OK;
+}
+
+static void fake_close_count_ov(alp_ble_radio_state_t *state)
+{
+	(void)state;
+	atomic_fetch_add(&g_ov_teardowns, 1);
+}
+
+static const alp_ble_ops_t fake_ops_overlap = {
+	.scan_start = fake_scan_start_overlap,
+	.close      = fake_close_count_ov,
+};
+
+static void *ov_owner_thread(void *arg)
+{
+	(void)arg;
+	(void)alp_ble_scan_start(g_ov_handle, true, ov_self_close_cb, NULL);
+	return NULL;
+}
+
+static void test_overlapping_scan_busy_then_owner_self_close(void)
+{
+	struct alp_ble *h = _alloc_radio();
+	ALP_ASSERT_TRUE(h != NULL);
+	h->state.ops = &fake_ops_overlap;
+	h->refcount  = 1u;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
+	g_ov_handle = h;
+
+	pthread_t t;
+	ALP_ASSERT_EQ_INT(pthread_create(&t, NULL, ov_owner_thread, NULL), 0);
+	ALP_ASSERT_TRUE(wait_until(&g_ov_a_in_mock, 1000));
+
+	/* Second scan on this thread: backend says BUSY. */
+	alp_status_t rc = alp_ble_scan_start(h, true, noop_scan_cb, NULL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_BUSY);
+
+	atomic_store(&g_ov_release_a, 1);
+	ALP_ASSERT_EQ_INT(pthread_join(t, NULL), 0);
+	ALP_ASSERT_TRUE(atomic_load(&g_ov_a_cb_returned));
+	ALP_ASSERT_EQ_INT(atomic_load(&g_ov_teardowns), 1);
+	ALP_ASSERT_EQ_INT(alp_lifecycle_get(&h->lifecycle), ALP_HANDLE_LC_UNOPENED);
+
+	struct alp_ble *reclaimed = _alloc_radio();
+	ALP_ASSERT_TRUE(reclaimed != NULL);
+	_free_radio(reclaimed);
+}
+
 int main(void)
 {
 	/* Runs first, deliberately: scenario 3 below ends by permanently
@@ -548,6 +637,7 @@ int main(void)
 	test_repeated_open_joins_singleton_and_close_tears_down_once();
 	test_concurrent_open_joins_in_flight_opener();
 	test_cb_marker_not_clobbered_by_second_caller();
+	test_overlapping_scan_busy_then_owner_self_close();
 	test_self_close_from_scan_callback();
 	test_close_from_other_thread_while_scan_blocks();
 	test_close_from_other_thread_during_scan_vs_slot_reuse();
