@@ -1,0 +1,3 @@
+### Fixed — zephyr-drivers: comparator pending, dac bypass, mdio lock, mhu-b enable, sdhc read cache (#2943, #2983)
+
+Zephyr drivers: comparator_alif trigger_is_pending() now honours the configured trigger and keeps edges that arrive before a callback is registered; dac_alif programs the bypass value once at init without an output glitch and dac_write_value() returns -ENOTSUP in bypass mode; mdio_dwmac_alif serialises MDIO reads and writes with a mutex; mbox_renesas_rz_mhu_b set_enabled() now masks the RX interrupt, keeps the received message per instance, only calls back on a real status change, and send returns -ENOTSUP without shared-memory; sdhc_dwc DMA reads flush and invalidate the buffer before the transfer starts.
