@@ -101,6 +101,12 @@ struct alp_gpio {
 	bool          irq_enabled; /* dispatcher tracks this slot if true */
 	alp_gpio_cb_t irq_cb;      /* invoked by dispatcher on edge event */
 	void         *irq_user;
+	uint64_t      irq_edge_flags; /* GPIO_V2_LINE_FLAG_EDGE_* while irq_enabled */
+	/* Bumped by pool_acquire() each time the slot is handed out.  The
+	 * dispatcher snapshots it with the fd so a close + reopen that lands
+	 * on the same slot AND the same (lowest-free) fd number is still
+	 * seen as a different owner. */
+	uint32_t generation;
 };
 
 static struct alp_gpio g_gpio_pool[ALP_SDK_YOCTO_MAX_GPIO_HANDLES];
@@ -129,9 +135,11 @@ static struct alp_gpio *pool_acquire(void)
 	pthread_mutex_lock(&g_irq.mu);
 	for (size_t i = 0; i < ARRAY_SIZE(g_gpio_pool); ++i) {
 		if (!g_gpio_pool[i].in_use) {
+			uint32_t gen = g_gpio_pool[i].generation + 1u;
 			memset(&g_gpio_pool[i], 0, sizeof(g_gpio_pool[i]));
-			g_gpio_pool[i].in_use  = true;
-			g_gpio_pool[i].line_fd = -1;
+			g_gpio_pool[i].generation = gen;
+			g_gpio_pool[i].in_use     = true;
+			g_gpio_pool[i].line_fd    = -1;
 			pthread_mutex_unlock(&g_irq.mu);
 			return &g_gpio_pool[i];
 		}
@@ -167,6 +175,8 @@ static uint64_t pull_to_flags(alp_gpio_pull_t pull)
 	}
 }
 
+static void irq_wake(void);
+
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {
 	uint16_t chip_idx    = (uint16_t)ALP_GPIO_PIN_CHIP(pin_id);
@@ -200,6 +210,16 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 	/* The line request owns its own fd; the chip fd is no longer
      * needed. */
 	(void)close(chip_fd);
+
+	/* Non-blocking, so the IRQ dispatcher's event read() returns EAGAIN
+	 * instead of parking the thread (and every later g_irq.mu taker) when
+	 * the line has no pending edge. */
+	int fl = fcntl(req.fd, F_GETFL);
+	if (fl < 0 || fcntl(req.fd, F_SETFL, fl | O_NONBLOCK) < 0) {
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
+		(void)close(req.fd);
+		return NULL;
+	}
 
 	struct alp_gpio *h = pool_acquire();
 	if (h == NULL) {
@@ -241,8 +261,32 @@ alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pu
 	if (pin == NULL || !pin->in_use) {
 		return ALP_ERR_NOT_READY;
 	}
+	/* Edge detection and OUTPUT are mutually exclusive in the kernel.  An
+	 * input reconfigure keeps the active edge flags so the IRQ keeps
+	 * firing; an output reconfigure disables the IRQ explicitly (same
+	 * state change as alp_gpio_irq_disable) rather than leaving
+	 * irq_enabled set on a line that can no longer deliver events. */
+	uint64_t edge_flags  = 0;
+	bool     irq_dropped = false;
+	pthread_mutex_lock(&g_irq.mu);
+	if (pin->irq_enabled) {
+		if (dir == ALP_GPIO_OUTPUT) {
+			pin->irq_enabled    = false;
+			pin->irq_cb         = NULL;
+			pin->irq_user       = NULL;
+			pin->irq_edge_flags = 0;
+			irq_dropped         = true;
+		} else {
+			edge_flags = pin->irq_edge_flags;
+		}
+	}
+	pthread_mutex_unlock(&g_irq.mu);
+	if (irq_dropped) {
+		irq_wake();
+	}
+
 	struct gpio_v2_line_config cfg = { 0 };
-	cfg.flags                      = pull_to_flags(pull);
+	cfg.flags                      = pull_to_flags(pull) | edge_flags;
 	if (dir == ALP_GPIO_OUTPUT) {
 		cfg.flags |= GPIO_V2_LINE_FLAG_OUTPUT;
 	} else {
@@ -341,6 +385,7 @@ static void *irq_dispatcher(void *arg)
 	(void)arg;
 	struct pollfd    fds[ALP_SDK_YOCTO_MAX_GPIO_HANDLES + 1];
 	struct alp_gpio *slot_pins[ALP_SDK_YOCTO_MAX_GPIO_HANDLES];
+	uint32_t         slot_gens[ALP_SDK_YOCTO_MAX_GPIO_HANDLES];
 	/* We deliberately drain only one event per slot per wake-up so a
      * pin that fires faster than we dispatch doesn't starve siblings;
      * the kernel queue keeps subsequent events buffered. */
@@ -363,6 +408,7 @@ static void *irq_dispatcher(void *arg)
 			fds[nfds].events    = POLLIN;
 			fds[nfds].revents   = 0;
 			slot_pins[nfds - 1] = p;
+			slot_gens[nfds - 1] = p->generation;
 			++nfds;
 		}
 		pthread_mutex_unlock(&g_irq.mu);
@@ -423,7 +469,8 @@ static void *irq_dispatcher(void *arg)
                  * excludes it from fds[]. */
 				struct alp_gpio *p = slot_pins[i - 1];
 				pthread_mutex_lock(&g_irq.mu);
-				if (p->in_use && p->irq_enabled && p->line_fd == fds[i].fd) {
+				if (p->in_use && p->irq_enabled && p->line_fd == fds[i].fd &&
+				    p->generation == slot_gens[i - 1]) {
 					p->irq_enabled = false;
 					p->irq_cb      = NULL;
 					p->irq_user    = NULL;
@@ -439,7 +486,12 @@ static void *irq_dispatcher(void *arg)
 			void            *user = NULL;
 
 			pthread_mutex_lock(&g_irq.mu);
-			if (p->in_use && p->irq_enabled && p->line_fd == fds[i].fd) {
+			/* line_fd is non-blocking (see alp_gpio_open), so this read
+			 * never parks the thread under g_irq.mu; the generation
+			 * check rejects a slot + fd number reused by another owner
+			 * since the poll() snapshot. */
+			if (p->in_use && p->irq_enabled && p->line_fd == fds[i].fd &&
+			    p->generation == slot_gens[i - 1]) {
 				ssize_t r = read(p->line_fd, &ev, sizeof(ev));
 				if (r == (ssize_t)sizeof(ev)) {
 					cb   = p->irq_cb;
@@ -555,10 +607,11 @@ alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, voi
 		(void)_gpio_set_config(pin->line_fd, &rollback_cfg);
 		return rc;
 	}
-	pin->irq_cb      = cb;
-	pin->irq_user    = user;
-	pin->irq_enabled = true;
-	pin->is_output   = false;
+	pin->irq_cb         = cb;
+	pin->irq_user       = user;
+	pin->irq_edge_flags = edge_flags;
+	pin->irq_enabled    = true;
+	pin->is_output      = false;
 	pthread_mutex_unlock(&g_irq.mu);
 
 	irq_wake();
@@ -573,9 +626,10 @@ alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin)
 		return ALP_ERR_NOT_READY;
 	}
 	pthread_mutex_lock(&g_irq.mu);
-	pin->irq_enabled = false;
-	pin->irq_cb      = NULL;
-	pin->irq_user    = NULL;
+	pin->irq_enabled    = false;
+	pin->irq_cb         = NULL;
+	pin->irq_user       = NULL;
+	pin->irq_edge_flags = 0;
 	pthread_mutex_unlock(&g_irq.mu);
 	irq_wake();
 

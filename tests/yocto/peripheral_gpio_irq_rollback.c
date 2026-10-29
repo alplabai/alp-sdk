@@ -144,11 +144,74 @@ static void test_success_path_enables_irq_without_rollback(void)
 	(void)close(pipe_fds[1]);
 }
 
+/* Issue #2980 (gpio): alp_gpio_configure() on an input with an IRQ
+ * enabled must keep the edge flags, or the kernel stops detecting edges
+ * while irq_enabled stays set. */
+static void test_configure_input_keeps_edge_flags(void)
+{
+	reset_fixture();
+	int              pipe_fds[2];
+	struct alp_gpio *pin = open_fake_pin(pipe_fds);
+	ALP_ASSERT_TRUE(pin != NULL);
+	ALP_ASSERT_EQ_INT(alp_gpio_irq_enable(pin, ALP_GPIO_EDGE_FALLING, noop_cb, NULL), ALP_OK);
+	g_cfg_call_count = 0;
+
+	ALP_ASSERT_EQ_INT(alp_gpio_configure(pin, ALP_GPIO_INPUT, ALP_GPIO_PULL_UP), ALP_OK);
+	ALP_ASSERT_EQ_INT(g_cfg_call_count, 1);
+	ALP_ASSERT_TRUE((g_cfg_flags[0] & GPIO_V2_LINE_FLAG_EDGE_FALLING) != 0);
+	ALP_ASSERT_TRUE((g_cfg_flags[0] & GPIO_V2_LINE_FLAG_BIAS_PULL_UP) != 0);
+	ALP_ASSERT_TRUE(pin->irq_enabled);
+
+	alp_gpio_close(pin);
+	(void)close(pipe_fds[1]);
+}
+
+/* Edge detection cannot coexist with OUTPUT: the IRQ is disabled
+ * explicitly and the request carries no edge bits. */
+static void test_configure_output_disables_irq(void)
+{
+	reset_fixture();
+	int              pipe_fds[2];
+	struct alp_gpio *pin = open_fake_pin(pipe_fds);
+	ALP_ASSERT_TRUE(pin != NULL);
+	ALP_ASSERT_EQ_INT(alp_gpio_irq_enable(pin, ALP_GPIO_EDGE_BOTH, noop_cb, NULL), ALP_OK);
+	g_cfg_call_count = 0;
+
+	ALP_ASSERT_EQ_INT(alp_gpio_configure(pin, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE), ALP_OK);
+	ALP_ASSERT_EQ_INT(g_cfg_call_count, 1);
+	ALP_ASSERT_EQ_INT(
+	    g_cfg_flags[0] & (GPIO_V2_LINE_FLAG_EDGE_RISING | GPIO_V2_LINE_FLAG_EDGE_FALLING), 0);
+	ALP_ASSERT_TRUE(!pin->irq_enabled);
+	ALP_ASSERT_TRUE(pin->irq_cb == NULL);
+
+	alp_gpio_close(pin);
+	(void)close(pipe_fds[1]);
+}
+
+/* A slot re-handed out after close gets a new generation, so the
+ * dispatcher can tell a reopened pin from the one it polled even when
+ * the kernel recycles the same fd number. */
+static void test_reacquired_slot_changes_generation(void)
+{
+	reset_fixture();
+	struct alp_gpio *a = pool_acquire();
+	ALP_ASSERT_TRUE(a != NULL);
+	uint32_t gen_a = a->generation;
+	pool_release(a);
+	struct alp_gpio *b = pool_acquire();
+	ALP_ASSERT_TRUE(b == a);
+	ALP_ASSERT_TRUE(b->generation != gen_a);
+	pool_release(b);
+}
+
 int main(void)
 {
 	test_eventfd_failure_rolls_back_to_plain_input();
 	test_pthread_create_failure_rolls_back_to_plain_input();
 	test_success_path_enables_irq_without_rollback();
+	test_configure_input_keeps_edge_flags();
+	test_configure_output_disables_irq();
+	test_reacquired_slot_changes_generation();
 
 	ALP_TEST_SUMMARY();
 }

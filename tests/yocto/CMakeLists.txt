@@ -841,7 +841,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # alp_internal_set_last_error(); pull in its one canonical
         # definition so the link is self-contained without alp::sdk.
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        # alp_i2c_close() drains in-flight ops via the shared close guard.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
     )
+    find_package(Threads REQUIRED)
+    target_link_libraries(alp_test_peripheral_i2c_closed_status PRIVATE Threads::Threads)
     target_include_directories(alp_test_peripheral_i2c_closed_status PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../../include
