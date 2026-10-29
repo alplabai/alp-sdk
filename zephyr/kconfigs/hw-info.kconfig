@@ -83,8 +83,11 @@ config ALP_SDK_HW_INFO_EEPROM_OFFSET
 
 config ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ
 	int "I2C bitrate for the EEPROM read (Hz)"
-	default 400000
+	default 100000
 	depends on ALP_SDK_HW_INFO && ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID >= 0
 	help
-	  Standard-mode 100 kHz, fast-mode 400 kHz, or fast-mode+ 1 MHz
-	  -- choose the highest the on-bus devices all support.
+	  Standard-mode 100 kHz, fast-mode 400 kHz, or fast-mode+ 1 MHz.
+	  The read goes through alp_i2c_open(), which reconfigures the
+	  shared controller and never restores it, so the default is the
+	  safe standard-mode rate (AEN's BRD_I2C has no external pull-ups).
+	  Raise it only if every device on that bus supports the higher rate.

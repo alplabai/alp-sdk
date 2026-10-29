@@ -62,6 +62,7 @@ alp_status_t gd32g553_adc_stream_end(gd32g553_t *ctx, uint8_t stream_id)
 {
 	(void)ctx;
 	g_stub.end_calls++;
+	if (g_stub.end_fails) return ALP_ERR_IO;
 	g_stub.gd32_stream_active[stream_id] = false;
 	return ALP_OK;
 }

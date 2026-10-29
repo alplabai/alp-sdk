@@ -40,6 +40,7 @@ struct stub_state {
 	unsigned acquire_calls;
 	unsigned release_calls;
 	unsigned end_calls;
+	bool     end_fails; /* STREAM_END undeliverable: the GD32 stream stays active */
 
 	alp_status_t last_error;
 };

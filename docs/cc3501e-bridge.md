@@ -651,10 +651,9 @@ Kconfig symbols needed for the manifest confirmation to succeed:
   I2C0 pads, bus id `0`). `< 0` (the default) disables the read path
   entirely, so the guard fails closed on every revision-dependent pad.
 - `CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ` -- the bitrate for that
-  read (default 400 kHz/fast-mode). If the SAME physical bus also
-  carries another device whose bench-validated rate is lower (e.g.
-  `examples/aen/aen-evk-demo`'s TAS2563 amps at 100 kHz), set this to
-  match -- `src/backends/i2c/zephyr_drv.c`'s backend reconfigures the
+  read (default 100 kHz/standard-mode, safe for AEN's pull-up-less
+  BRD_I2C). If the SAME physical bus also carries only devices that
+  support a higher rate, raise it -- `src/backends/i2c/zephyr_drv.c`'s backend reconfigures the
   shared controller's live bitrate on every `alp_i2c_open()` call and
   never restores it (`.close = NULL`), so a manifest read at a higher
   rate than a shared device supports leaves the bus misconfigured for
