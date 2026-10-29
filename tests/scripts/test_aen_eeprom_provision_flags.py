@@ -35,6 +35,7 @@ def _configure(src: Path, build: Path, *defs: str) -> str:
         ["cmake", "-S", str(src), "-B", str(build), *defs],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     return r.stdout

@@ -87,6 +87,8 @@
  * run still shows whether the link ever comes up). */
 #define CC3501E_PING_RETRIES 25u
 #define CC3501E_PING_GAP_MS  200u
+/* Idle time that lets the slave's reply-stall watchdog (250 ms) self-heal the link. */
+#define CC3501E_OTA_QUIET_RESYNC_MS 320u
 
 /* Poll-by-repeat budgets for the Wi-Fi helpers (firmware kicks off a worker
  * and answers BUSY until it finishes; the host re-issues until OK/timeout). */
@@ -818,22 +820,26 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 	 * durations are ALSO entirely explained by the HOST's own timers (361046 ms =
 	 * blind settle + confirm budget), i.e. the device contributes nothing -- it is
 	 * silent from the first moment, not slow.  So ask directly: after a failed
-	 * BEGIN, PING as-is, then do a HOST-ONLY resync (cc3501e_sync byte-walks the
-	 * SPI link to the slave's header boundary and toggles NO pin -- cc3501e_reset()
-	 * would drop nRESET and WIFI_EN for 50 ms, a supply cold cycle in the middle of
-	 * an OTA), then PING again, then a hard reset.  PING recovering after a
-	 * host-only step means the HOST's SPI desynced and the CC35 was healthy all
-	 * along -- a completely different bug from "the device crashes in psa_fwu". */
+	 * BEGIN, PING as-is, then give the link its own self-heal -- sit idle for longer
+	 * than the slave's reply-stall watchdog (firmware CC3501E_REPLY_STALL_MS = 250;
+	 * 320 ms here) and toggle NO pin -- then PING again, then a hard reset.  Do NOT
+	 * use cc3501e_sync() for this: its byte-walk PARKS the slave on the 4-byte
+	 * fixed-count lockstep (proven on silicon, chips/cc3501e/cc3501e_core.c:2504 --
+	 * reply_hdr stuck at 0xA5A5A5A5, link never recovers), which would fail p1 even
+	 * on a healthy CC35.  cc3501e_reset() is out too: it would drop nRESET and
+	 * WIFI_EN for 50 ms, a supply cold cycle in the middle of an OTA.  PING recovering
+	 * after the quiet wait means the HOST's SPI desynced and the CC35 was healthy
+	 * all along -- a completely different bug from "the device crashes in psa_fwu". */
 	if (s != ALP_OK) {
 		const alp_status_t p0 = cc3501e_ping(fw);
-		const alp_status_t r1 = cc3501e_sync(fw, 64u);
+		alp_delay_ms(CC3501E_OTA_QUIET_RESYNC_MS);
 		const alp_status_t p1 = cc3501e_ping(fw);
 		const alp_status_t r2 = cc3501e_hard_reset(fw);
 		const alp_status_t p2 = cc3501e_ping(fw);
-		printf("[cc3501e-bringup] OTA post-fail probe: ping=%d | sync=%d ping=%d | "
+		printf("[cc3501e-bringup] OTA post-fail probe: ping=%d | quiet_wait=%ums ping=%d | "
 		       "hard_reset=%d ping=%d\n",
 		       (int)p0,
-		       (int)r1,
+		       (unsigned)CC3501E_OTA_QUIET_RESYNC_MS,
 		       (int)p1,
 		       (int)r2,
 		       (int)p2);
