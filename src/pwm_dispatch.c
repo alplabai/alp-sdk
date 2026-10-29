@@ -140,10 +140,10 @@ alp_status_t alp_pwm_set_period(alp_pwm_t *pwm, uint32_t period_ns)
 		rc = ALP_ERR_NOSUPPORT;
 	} else {
 		/* <alp/pwm.h> promises the duty is reset to 0 % on a period
-		 * change.  Only zephyr_drv does so implicitly; the GD32 bridge
-		 * would re-send the old duty with the new period (driving the
-		 * load, or being rejected when duty > period).  Enforce the
-		 * reset here, before the period write, for every backend. */
+		 * change.  zephyr_drv and yocto_drv already reset the duty in
+		 * their own set_period; the GD32 bridge did not (it re-sent
+		 * bs->duty_ns), so the dispatcher now enforces the reset
+		 * before the period write for every backend. */
 		rc = ALP_OK;
 		if (pwm->state.ops->set_duty != NULL) {
 			rc = pwm->state.ops->set_duty(&pwm->state, 0u);

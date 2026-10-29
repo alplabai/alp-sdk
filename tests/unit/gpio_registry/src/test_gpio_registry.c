@@ -30,6 +30,7 @@
 #include <alp/peripheral.h>
 
 #include "../../../../src/backends/gpio/gpio_ops.h"
+#include "../../../../src/common/alp_slot_claim.h"
 
 ZTEST_SUITE(alp_gpio_registry, NULL, NULL, NULL, NULL, NULL);
 
