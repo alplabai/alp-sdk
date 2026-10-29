@@ -96,7 +96,6 @@ typedef struct alif_e8_adc_state {
 	uint8_t                   channel_id;
 	uint8_t                   resolution_bits;
 	uint16_t                  oversample_ratio; /* sourced from cfg->oversampling_ratio at open */
-	alp_alif_adc_trigger_t    trigger_source;
 	/* 32-bit sample word: the Alif adc_alif driver's check_buffer_size() requires
 	 * 4 bytes per channel (it stores a full 24-bit-capable sample), and rejects a
 	 * 2-byte buffer with -ENOMEM. A 16-bit buffer here makes adc_read() fail -> the
@@ -179,8 +178,19 @@ alif_e8_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capab
 		return ALP_ERR_IO;
 	}
 
+	/* Same reference rule as the portable zephyr_drv backend: the channel's
+	 * vref-mv when set, else the controller's internal reference.  If neither
+	 * is known, read_uv() would scale every sample to 0 uV with ALP_OK (a dead
+	 * rail to a battery/thermistor monitor), so refuse the open instead. */
+	uint32_t ref_mv =
+	    (spec->vref_mv != 0) ? (uint32_t)spec->vref_mv : (uint32_t)adc_ref_internal(spec->dev);
+	if (ref_mv == 0u) {
+		_free_state(s);
+		return ALP_ERR_NOT_READY;
+	}
+
 	st->be_data         = s;
-	st->reference_uv    = (uint32_t)spec->vref_mv * 1000u;
+	st->reference_uv    = ref_mv * 1000u;
 	st->resolution_bits = s->resolution_bits;
 
 	caps_out->max_resolution_bits = ALP_SOC_ADC_MAX_RESOLUTION_BITS;
@@ -246,13 +256,14 @@ static const alp_adc_ops_t alif_e8_ops = {
 	.close    = alif_e8_close,
 };
 
+/* No ALP_ADC_CAP_HW_TRIGGER: reads are software-started single-shot. */
 ALP_BACKEND_REGISTER(adc,
                      alif_e8,
                      {
                          .silicon_ref      = "alif:ensemble:e8",
                          .vendor           = "alif",
                          .base_caps        = (uint32_t)ALP_INSTANCE_CAP_REPORTED,
-                         .base_class_flags = (uint32_t)ALP_ADC_CAP_HW_TRIGGER,
+                         .base_class_flags = 0u,
                          .priority         = 100,
                          .ops              = &alif_e8_ops,
                          .probe            = NULL,
@@ -272,11 +283,16 @@ alp_status_t alp_alif_adc_set_trigger_source(alp_adc_t *h, alp_alif_adc_trigger_
 	if ((unsigned)src > (unsigned)ALP_ALIF_ADC_TRIGGER_EXT_PIN) {
 		return ALP_ERR_INVAL;
 	}
-	alif_e8_adc_state_t *s = (alif_e8_adc_state_t *)h->state.be_data;
-	/* NOTE: the source is RECORDED but the current read path (alif_e8_read_raw)
-	 * is software-triggered single-shot -- it does not yet wire an external HW
-	 * trigger, so a non-software src is stored for a future trigger-aware read
-	 * path, not applied now. No open tracking issue for this follow-up yet. */
-	s->trigger_source = src;
-	return ALP_OK;
+	/* The Alif adc_alif driver only offers software-started conversions: the
+	 * read path (alif_e8_read_raw) is a single-shot adc_read() and nothing here
+	 * wires a timer/pin trigger.  Accept the software source (it is what every
+	 * read already does) and refuse the rest instead of recording a value that
+	 * would never be applied.  Gate on the handle lifecycle so a closed handle
+	 * (be_data == NULL) is rejected rather than dereferenced. */
+	if (!alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc = (src == ALP_ALIF_ADC_TRIGGER_SOFTWARE) ? ALP_OK : ALP_ERR_NOSUPPORT;
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
 }
