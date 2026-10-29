@@ -86,6 +86,7 @@ static struct alp_gpio *open_fake_pin(int *pipe_fds)
 		return NULL;
 	}
 	h->line_fd = pipe_fds[0];
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
 

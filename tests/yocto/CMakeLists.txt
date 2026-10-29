@@ -880,7 +880,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(alp_test_peripheral_spi_closed_status
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi_closed_status.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
     )
+    find_package(Threads REQUIRED)
+    target_link_libraries(alp_test_peripheral_spi_closed_status PRIVATE Threads::Threads)
     target_include_directories(alp_test_peripheral_spi_closed_status PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../../include
@@ -915,7 +918,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(alp_test_peripheral_uart_closed_status
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart_closed_status.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
     )
+    find_package(Threads REQUIRED)
+    target_link_libraries(alp_test_peripheral_uart_closed_status PRIVATE Threads::Threads)
     target_include_directories(alp_test_peripheral_uart_closed_status PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../../include
@@ -935,6 +941,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(alp_test_peripheral_uart_flow_control
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart_flow_control.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
     )
     target_include_directories(alp_test_peripheral_uart_flow_control PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -952,6 +959,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(alp_test_peripheral_uart_resolve_path
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart_resolve_path.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
     )
     target_include_directories(alp_test_peripheral_uart_resolve_path PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
@@ -1109,6 +1117,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # alp_internal_set_last_error(); pull in its one canonical
         # definition so the link is self-contained without alp::sdk.
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
     )
     target_link_libraries(alp_test_peripheral_gpio_irq_rollback PRIVATE Threads::Threads)
     target_include_directories(alp_test_peripheral_gpio_irq_rollback PRIVATE
@@ -1140,6 +1149,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # alp_internal_set_last_error(); pull in its one canonical
         # definition so the link is self-contained without alp::sdk.
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
     )
     target_link_libraries(alp_test_peripheral_gpio_closed_pin_status PRIVATE Threads::Threads)
     target_include_directories(alp_test_peripheral_gpio_closed_pin_status PRIVATE
@@ -1655,6 +1665,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(alp_test_peripheral_gpio_self_close
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio_self_close.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
     )
     target_link_libraries(alp_test_peripheral_gpio_self_close PRIVATE Threads::Threads)
     target_include_directories(alp_test_peripheral_gpio_self_close PRIVATE

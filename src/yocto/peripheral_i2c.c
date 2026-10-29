@@ -65,10 +65,13 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
-/* in_use is the LAST member (issue #1115 round-2 dev review, mirrors
- * dsp/sw_fallback.c's struct dsp_be): pool_acquire() below memsets only
- * the bytes ahead of it, so the atomic claim is never transiently
- * undone by the reset. */
+/* pool_acquire() below memsets only the bytes ahead of in_use (issue
+ * #1115 round-2 dev review, mirrors dsp/sw_fallback.c's struct dsp_be),
+ * so the atomic claim is never transiently undone by the reset.
+ * in_use, lifecycle and active_ops sit AFTER that boundary on purpose:
+ * lifecycle and active_ops return to UNOPENED / 0 through the close
+ * protocol, and a late stale-handle op_enter() incrementing active_ops
+ * must not be wiped by a re-claim. */
 struct alp_i2c {
 	int      fd; /* /dev/i2c-N file descriptor */
 	uint32_t bus_id;
