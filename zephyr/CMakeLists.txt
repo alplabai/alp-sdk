@@ -103,20 +103,20 @@ if(CONFIG_SOC_SERIES_E8)
     zephyr_compile_definitions(CONFIG_FLASH_ADDRESS_IN_SINGLE_FIFO_LOCATION)
 endif()
 
-# Custom fixed MPU region table for the Ensemble E8 (mpu_regions_e8.c),
+# Custom fixed MPU region table for the AEN boards (mpu_regions_e8.c),
 # REPLACING arm_mpu_regions.c's generic FLASH_0/SRAM_0 fallback -- restores
 # the fork's MRAM exec/device split without the DT-node-append overlap bug
-# (see the file header for the full root cause). Gated on
-# CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS, which the E8 HE/HP boards'
-# hand-maintained `Kconfig` (not the generated Kconfig.alp_<board> /
-# Kconfig.defconfig) selects. Needed for ANY Ensemble-E8 build -- including
-# MCUboot itself, which never sets CONFIG_ALP_SDK -- so this is applied
-# before the CONFIG_ALP_SDK early-return, mirroring the GPIO clock-enable /
-# OSPI_XIP_SER precedents above.
-if(CONFIG_SOC_SERIES_E8)
-    zephyr_sources_ifdef(CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS
-        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mpu_regions_e8.c)
-endif()
+# (see the file header for the full root cause). Gated only on
+# CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS, which the AEN401 / AEN601 /
+# AEN801 / AEN803 boards' hand-maintained `Kconfig` (not the generated
+# Kconfig.alp_<board> / Kconfig.defconfig) sets: every one of them retargets
+# the MRAM flash controller and carries the same boot/slot0/storage/atoc
+# partition labels the table reads, so it is not tied to one SoC series. Needed
+# for ANY such build -- including MCUboot itself, which never sets
+# CONFIG_ALP_SDK -- so this is applied before the CONFIG_ALP_SDK early-return,
+# mirroring the GPIO clock-enable / OSPI_XIP_SER precedents above.
+zephyr_sources_ifdef(CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mpu_regions_e8.c)
 
 # Flex-IO bank 1.8 V mode (VBAT GPIO_CTRL bit 0), set only by boards whose
 # VDD_IO_FLEX is a 1.8 V rail.  A pad-level board fact, so applied before the

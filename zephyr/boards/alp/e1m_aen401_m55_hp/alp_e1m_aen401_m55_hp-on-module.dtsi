@@ -2,11 +2,12 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * E1M-AEN401 on-module devices: the BRD_I2C bus (RV-3028, TMP112) and the
- * alp,som-power node.  The AEN401 board tree is hand-written (the generator
- * cannot emit an E4 board yet, tests/scripts/test_gen_zephyr_board.py
- * NOT_EMITTABLE), but these two blocks are the generator's own output for this
- * SKU: scripts/gen_zephyr_board.py _aen_brd_i2c_dts(links, "E4") followed by
+ * E1M-AEN401 on-module devices: the BRD_I2C bus (RV-3028, TMP112), the E1M
+ * I2C0 bus (SoC I2C2, alp-i2c0) and the alp,som-power node.  The AEN401 board
+ * tree is hand-written (the generator cannot emit an E4 board yet,
+ * tests/scripts/test_gen_zephyr_board.py NOT_EMITTABLE), but these blocks are
+ * the generator's own output for this SKU: scripts/gen_zephyr_board.py
+ * _aen_brd_i2c_dts(links, "E4"), _aen_e1m_i2c0_dts(links) and
  * _aen_som_power_dts(E1M-AEN401 preset, ...).  DO NOT EDIT BY HAND --
  * test_gen_zephyr_board.py fails when this file and the generator disagree.
  */
@@ -96,6 +97,33 @@
 		alp-i2c2 = &i2c0;
 		rtc = &rv3028;
 		alp-temp0 = &tmp112;
+	};
+};
+
+/*
+ * e1m_i2c0 -- SoC I2C2 in its function-C muxing (P5_7 SDA / P5_6 SCL), portable
+ * alp-i2c0 (E1M edge bus 0).  Carries the SoM's own 24C128 manifest
+ * EEPROM; the same physical bus also reaches the EVK carrier's sensor bus
+ * once the pads leave the module (docs/bring-up-aen.md Sec 5.1).  Driven by
+ * UPSTREAM Zephyr i2c_dw ("snps,designware-i2c"), ADR 0017 Tier-1 -- no
+ * vendored code.
+ */
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+};
+
+/*
+ * Portable alias for e1m_i2c0.  alp_i2c_open(.bus_id = ALP_E1M_I2C0)
+ * resolves this via src/backends/i2c/zephyr_drv.c -> DT_ALIAS(alp_i2c0);
+ * matches the EEPROM manifest reader's own
+ * CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0 convention.
+ */
+/ {
+	aliases {
+		alp-i2c0 = &i2c2;
 	};
 };
 
@@ -256,4 +284,16 @@
 			alp,restore = "pin_release";
 		};
 	};
+};
+
+/*
+ * GPIO ports carrying a SoM power-domain pad (the SoC peripherals dtsi leaves
+ * them disabled).  Without them the SoM power layer cannot drive those pads.
+ */
+&gpio5 {
+	status = "okay";
+};
+
+&gpio11 {
+	status = "okay";
 };

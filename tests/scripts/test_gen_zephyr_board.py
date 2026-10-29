@@ -700,6 +700,7 @@ class TestAen401OnModuleDtsi(unittest.TestCase):
                 encoding="utf-8"))
         body = "\n".join(
             gzb._aen_brd_i2c_dts(links, "E4")
+            + gzb._aen_e1m_i2c0_dts(links)
             + gzb._aen_som_power_dts(
                 preset, gzb._load_aen_power_domains(METADATA_ROOT), links,
                 gzb._load_aen_wired_lpgpio_pads(METADATA_ROOT)))
@@ -1484,6 +1485,49 @@ class TestAenLogModeDefault(unittest.TestCase):
                     f"{defconfig} assigns the LOG_MODE choice symbol "
                     f"directly; use the Kconfig.defconfig `choice LOG_MODE / "
                     f"default LOG_MODE_MINIMAL` form instead (#1373)")
+
+
+class TestEveryAenBoardSharesTheSomLevelDefaults(unittest.TestCase):
+    """Facts of the shared E1M-AEN SoM PCB must hold on every AEN board tree,
+    not only the generated E8 ones (the hand-written AEN401 / AEN601 trees
+    drifted from them: MRAM MPU table, flex-IO 1.8 V, TMP112 guard, I2C0,
+    power-domain GPIO ports)."""
+
+    def _aen_board_dirs(self) -> list[Path]:
+        dirs = sorted(p for p in BOARDS_ROOT.glob("e1m_aen*") if p.is_dir())
+        self.assertTrue(dirs)
+        return dirs
+
+    def test_every_aen_board_sets_the_mram_mpu_table_and_flex_io_default(self) -> None:
+        for board_dir in self._aen_board_dirs():
+            text = (board_dir / "Kconfig").read_text(encoding="utf-8")
+            for sym in ("CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS", "ALIF_FLEX_IO_1V8"):
+                self.assertRegex(
+                    text, rf"config {sym}\n\tdefault y\n",
+                    f"{board_dir.name}/Kconfig does not default {sym} on")
+
+    def test_every_board_with_a_tmp112_node_guards_the_duplicate_driver(self) -> None:
+        for board_dir in self._aen_board_dirs():
+            nodes = "".join(p.read_text(encoding="utf-8")
+                            for p in list(board_dir.glob("*.dts")) + list(board_dir.glob("*.dtsi")))
+            if "ti,tmp112" not in nodes:
+                continue
+            text = (board_dir / "Kconfig.defconfig").read_text(encoding="utf-8")
+            self.assertIn("config TMP112\n\tdefault n\n", text,
+                          f"{board_dir.name} lacks the CONFIG_TMP112 duplicate-link guard (#2043)")
+
+    def test_every_board_with_som_power_enables_its_gpio_ports_and_i2c0(self) -> None:
+        for board_dir in self._aen_board_dirs():
+            for p in list(board_dir.glob("*.dts")) + list(board_dir.glob("*.dtsi")):
+                text = p.read_text(encoding="utf-8")
+                if "alp,som-power-domain" not in text:
+                    continue
+                for port in ("gpio5", "gpio11"):
+                    if f"<&{port} " in text:
+                        self.assertRegex(
+                            text, rf"&{port} \{{\n\tstatus = \"okay\";",
+                            f"{p.name} uses {port} for a power domain but never enables it")
+                self.assertIn("alp-i2c0 = &i2c2;", text, f"{p.name} lacks alp-i2c0")
 
 
 if __name__ == "__main__":
