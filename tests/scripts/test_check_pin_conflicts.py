@@ -54,3 +54,26 @@ def test_v2n_m1_reuse_of_base_pad_detected(tmp_path, monkeypatch):
     monkeypatch.setattr(cpc, "MODULES", tmp_path)
     errs = cpc._check_v2n_join()
     assert len(errs) == 1 and "'P10'" in errs[0]
+
+
+def test_alias_pad_forms_normalised(tmp_path, monkeypatch):
+    _aen_tree(tmp_path, "P4_1")
+    _write(tmp_path, "aen/from-alif.tsv",
+           "e1m_pad\te1m_function\talif_peripheral\talif_pad\n"
+           "A3\tJ\tJTAG0\tP4_1/JTAG0_TDATA1\nA4\tF\tX\tP15_0_FLEX\n")
+    monkeypatch.setattr(cpc, "MODULES", tmp_path)
+    assert len(cpc._check_aen_alif_join()) == 1
+    _aen_tree(tmp_path, "P15_0")
+    _write(tmp_path, "aen/from-alif.tsv",
+           "e1m_pad\te1m_function\talif_peripheral\talif_pad\nA4\tF\tX\tP15_0_FLEX\n")
+    assert len(cpc._check_aen_alif_join()) == 1
+
+
+def test_third_table_on_allowlisted_pad_detected(tmp_path, monkeypatch):
+    _aen_tree(tmp_path, "P13_0")
+    _write(tmp_path, "aen/from-alif.tsv",
+           "e1m_pad\te1m_function\talif_peripheral\talif_pad\nAG12\tSD_D0\tSD_D0\tP13_0\n")
+    _write(tmp_path, "aen/inter-chip.tsv", "signal\tr\tp\tar\talif_pad\nX\ta\tG\tb\tP13_0\n")
+    monkeypatch.setattr(cpc, "MODULES", tmp_path)
+    errs = cpc._check_aen_alif_join()
+    assert len(errs) == 1 and "alif-ospi.tsv" in errs[0]

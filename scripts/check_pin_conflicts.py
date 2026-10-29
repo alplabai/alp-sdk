@@ -37,6 +37,7 @@ CI wires this in `pr-metadata-validate.yml`.
 from __future__ import annotations
 
 import csv
+import re
 import sys
 from pathlib import Path
 from collections import defaultdict
@@ -92,14 +93,22 @@ V2N_JOIN_TSVS = (
 # through a board-level mux that time-shares the single Alif SDIO
 # controller; the CC3501E side is behind unpopulated 0 ohm links on
 # every board built to date.  See docs/cc3501e-bridge.md ("SDIO").
-CROSS_TABLE_ALLOWLIST: set[str] = {
-    "P13_0",
-    "P13_1",
-    "P13_2",
-    "P13_3",
-    "P14_0",
-    "P14_1",
+_SD_SDIO_TABLES = frozenset({"from-alif.tsv", "inter-chip.tsv"})
+CROSS_TABLE_ALLOWLIST: dict[str, frozenset[str]] = {
+    pad: _SD_SDIO_TABLES
+    for pad in ("P13_0", "P13_1", "P13_2", "P13_3", "P14_0", "P14_1")
 }
+
+_PAD_RE = re.compile(r"^P\d+_\d+")
+
+
+def _norm_pad(cell: str) -> str:
+    """Reduce an alias cell ('P4_1/JTAG0_TDATA1', 'P15_0_FLEX') to 'P4_1'."""
+    for tok in cell.split("/"):
+        m = _PAD_RE.match(tok.strip())
+        if m:
+            return re.sub(r"_FLEX$", "", tok.strip())
+    return cell.strip()
 
 
 def _read_rows(path: Path) -> list[list[str]]:
@@ -167,12 +176,13 @@ def _check_e1m_pad(rel: str) -> list[str]:
 
 
 def _join_errors(
-    claims: dict[str, list[tuple[str, str]]], allow: set[str]
+    claims: dict[str, list[tuple[str, str]]],
+    allow: dict[str, frozenset[str]],
 ) -> list[str]:
     errors: list[str] = []
     for pad, who in claims.items():
         files = {f for f, _ in who}
-        if len(files) > 1 and pad not in allow:
+        if len(files) > 1 and not files <= allow.get(pad, frozenset()):
             errors.append(
                 f"pad {pad!r} claimed across tables: "
                 + ", ".join(f"{f}:{sig!r}" for f, sig in who)
@@ -188,7 +198,7 @@ def _check_aen_alif_join() -> list[str]:
         for row in rows[1:] if has_header else rows:
             if len(row) <= pad_col:
                 continue
-            pad = row[pad_col].strip()
+            pad = _norm_pad(row[pad_col])
             if not pad or is_tbd(pad):
                 continue
             claims[pad].append((Path(rel).name, row[sig_col].strip()))
@@ -206,7 +216,7 @@ def _check_v2n_join() -> list[str]:
             if not pad or is_tbd(pad):
                 continue
             claims[pad].append((Path(rel).name, row[0].strip()))
-    return _join_errors(claims, set())
+    return _join_errors(claims, {})
 
 
 def main() -> int:
@@ -224,8 +234,9 @@ def main() -> int:
         print(
             f"\ncheck_pin_conflicts: {len(all_errors)} conflict(s).  "
             "If a row is a legitimate dual-source map, add the pad to "
-            "ALLOWLIST in scripts/check_pin_conflicts.py and update the "
-            "matching README to document the dual-source convention.",
+            "ALLOWLIST (single-table duplicates) or CROSS_TABLE_ALLOWLIST "
+            "('claimed across tables' errors) in scripts/check_pin_conflicts.py "
+            "and update the matching README to document the convention.",
             file=sys.stderr,
         )
         return 1
