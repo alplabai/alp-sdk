@@ -7,10 +7,6 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
-### Fixed — `gd32_swd` sector erase no longer wraps onto a lower page
-
-**`gd32_swd_flash_erase` masked the page number to 7 bits.** `FMC_CTL.PNSEL` is `BITS(3,10)` (8 bits, 256 pages of 2 KiB in single-bank mode, per the vendored `gd32g5x3_fmc.h`), but the driver masked with `0x7F << 3`, so erasing sector 128..255 erased sector N-128 instead and the target page stayed unerased. The mask is now `0xFF << 3`, the sector count is public (`GD32_SWD_FMC_FLASH_BYTES`, `GD32_SWD_FMC_SECTOR_COUNT`), and a defensive guard ties the sector count to the PNSEL width (ranges past the flash were already rejected by the range check). Erase and write now return `ALP_ERR_NOSUPPORT` on a dual-bank target (`FMC_OBCTL.DBS`, 1 KiB pages) instead of erasing the wrong page. `swd_read_ap()` now returns `ALP_ERR_TIMEOUT` when all `GD32_SWD_MAX_WAIT_RETRIES` attempts answer WAIT, instead of returning the previous AP read as the result. The `v2n-gd32-swd-flash` example derives its scratch sector from the driver geometry and skips the top sector, which `docs/ota-device-contract.md` reserves for the OTA metadata page (it now writes `0x0807F000`, not `0x0807F800`).
-
 ### Fixed — abidiff gate honesty (#2851)
 
 **The `abidiff` gate is advisory, and now says so.** It is not a required context and `pr-plain-cmake.yml` has no `merge_group:` trigger, so a red run blocks nothing (maintainer decision: stays advisory). The SONAME-rename suppression no longer masks an abidiff error (applied only when the exit status has no ABI_ERROR/USAGE bit), every skip (tool missing, no tag of the current minor) emits a `::warning::` in CI or under `--require-tool`, and a test covers the SONAME-only report shape against a synthetic fixture (hand-written in the shape `soname_only()` parses, not a real capture; a recorded `check_abidiff.py --baseline-tag v0.17.0-rc2 --keep` run on a host with abigail-tools is still pending, #2851).
