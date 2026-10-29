@@ -41,6 +41,7 @@
 #include <zephyr/drivers/usb/uhc.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/sys_io.h>
+#include <zephyr/version.h>
 #include <errno.h>
 #include <string.h>
 #include "uhc_common.h"
@@ -933,7 +934,15 @@ static int uhc_xhci_alif_ep_dequeue(const struct device *dev,
  * ---------------------------------------------------------------------------
  */
 
+/* Zephyr 4.5 migration guide (USB): struct uhc_api is renamed to
+ * struct uhc_driver_api with no alias, and the op table must be declared
+ * with DEVICE_API(uhc, ...). Zephyr 4.4.x (the current pin) still only has
+ * struct uhc_api. Delete the pre-4.5 branch once the pin moves to v4.5.0. */
+#if ZEPHYR_VERSION_CODE >= ZEPHYR_VERSION(4, 5, 0)
+static DEVICE_API(uhc, uhc_xhci_alif_api) = {
+#else
 static const struct uhc_api uhc_xhci_alif_api = {
+#endif
 	.lock        = uhc_xhci_alif_lock,
 	.unlock      = uhc_xhci_alif_unlock,
 	.init        = uhc_xhci_alif_init,
