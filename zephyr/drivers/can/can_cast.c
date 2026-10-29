@@ -529,6 +529,7 @@ static int can_cast_stop(const struct device *dev)
 	struct can_cast_data *data = DEV_DATA(dev);
 	uint32_t can_base;
 	uint32_t can_cnt_base;
+	unsigned int key;
 
 	can_base = DEVICE_MMIO_NAMED_GET(dev, can_reg);
 	can_cnt_base = DEVICE_MMIO_NAMED_GET(dev, can_cnt_reg);
@@ -560,11 +561,19 @@ static int can_cast_stop(const struct device *dev)
 
 	can_cast_clear_interrupts(can_base);
 
+	/* Stop CAN communication first: a sender or a completion callback that re-enters
+	 * can_send() from here on sees the core in reset and started == false and fails
+	 * instead of queueing a frame nothing will ever complete.
+	 */
+	can_cast_reset_enable(can_base);
+
+	key = irq_lock();
+	data->common.started = false;
+	data->err_state = CAN_STATE_STOPPED;
+	irq_unlock(key);
+
 	/* Complete every queued frame with -ENETDOWN so blocked senders wake up */
 	can_cast_flush_tx_queue(dev, -ENETDOWN);
-
-	/* Stop CAN communication */
-	can_cast_reset_enable(can_base);
 
 #if CONFIG_CAN_FD_MODE
 	if (data->common.mode & CAN_MODE_FD) {
@@ -577,8 +586,6 @@ static int can_cast_stop(const struct device *dev)
 	}
 #endif
 	/* common.mode is kept: start() re-applies it (only set_mode changes it) */
-	data->common.started = false;
-	data->err_state = CAN_STATE_STOPPED;
 
 	k_mutex_unlock(&data->inst_mutex);
 
@@ -1012,6 +1019,29 @@ static int can_cast_send(const struct device *dev, const struct can_frame *frame
 	 * (head == tail means empty), so a full queue is refused rather than read as empty.
 	 */
 	key = irq_lock();
+
+	/* Re-check under the same lock as the enqueue: can_stop() or a bus-off flush can run
+	 * between the unlocked checks above and here, and a frame queued after the flush
+	 * would never complete.
+	 */
+	if (!data->common.started) {
+		irq_unlock(key);
+		k_mutex_unlock(&data->inst_mutex);
+		return -ENETDOWN;
+	}
+
+	if (data->err_state == CAN_STATE_BUS_OFF) {
+		irq_unlock(key);
+		k_mutex_unlock(&data->inst_mutex);
+		return -ENETUNREACH;
+	}
+
+	if (sys_read8(can_base + CAN_CFG_STAT) & BIT(CAN_CFG_STAT_RESET)) {
+		irq_unlock(key);
+		k_mutex_unlock(&data->inst_mutex);
+		return -ENETDOWN;
+	}
+
 	if (callback && (((data->tx_queue.head + 1U) % CAN_MAX_STB_SLOTS) == data->tx_queue.tail)) {
 		irq_unlock(key);
 		k_mutex_unlock(&data->inst_mutex);
@@ -1507,8 +1537,10 @@ static void can_cast_handle_error(const struct device *dev, uint32_t event)
 {
 	struct can_cast_data *data = DEV_DATA(dev);
 	uint32_t can_base;
-	enum can_state state = data->err_state;
+	const enum can_state prev_state = data->err_state;
+	enum can_state state = prev_state;
 	struct can_bus_err_cnt err_cnt;
+	unsigned int key;
 
 	can_base = DEVICE_MMIO_NAMED_GET(dev, can_reg);
 
@@ -1544,6 +1576,11 @@ static void can_cast_handle_error(const struct device *dev, uint32_t event)
 			/* Abort all pending transmissions */
 			can_cast_abort_tx(can_base);
 
+			/* Publish bus-off before the flush so a sender cannot queue behind it */
+			key = irq_lock();
+			data->err_state = CAN_STATE_BUS_OFF;
+			irq_unlock(key);
+
 			/* Complete every queued frame with -ENETUNREACH (bus-off) */
 			can_cast_flush_tx_queue(dev, -ENETUNREACH);
 
@@ -1559,7 +1596,7 @@ static void can_cast_handle_error(const struct device *dev, uint32_t event)
 		can_cast_chk_last_err_code(dev, can_base);
 	}
 
-	if (data->err_state != state) {
+	if (prev_state != state) {
 		data->err_state = state;
 		if (data->common.state_change_cb) {
 			data->common.state_change_cb(dev, data->err_state, err_cnt,
