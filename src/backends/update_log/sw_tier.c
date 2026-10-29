@@ -65,7 +65,9 @@
 #endif
 #endif /* CONFIG_ALP_SDK_UPDATE_LOG_PERSIST */
 
-/* ---- RAM store (RAM-only builds; the counter and test reset use g_sw always) --- */
+/* ---- RAM store (RAM-only builds; the NVS build keeps no RAM state) --- */
+
+#ifndef SW_TIER_NVS
 
 #define SW_SLOTS 32
 #define SW_BLOB  ULOG_ENTRY_WIRE_LEN
@@ -79,8 +81,6 @@ struct sw_state {
 	uint64_t counter;
 };
 static struct sw_state g_sw;
-
-#ifndef SW_TIER_NVS /* only the RAM-only build reads the store through these */
 
 static int sw_find(const char *key)
 {
@@ -422,15 +422,15 @@ static const alp_monotonic_counter_if g_ctr   = { sw_cread, sw_cinc, NULL };
  * With wipe=true the NVS partition is cleared too (pristine store). */
 void alp_ulog_sw_tier_test_reset(bool wipe)
 {
+#ifndef SW_TIER_NVS
 	memset(&g_sw, 0, sizeof(g_sw));
-#ifdef SW_TIER_NVS
+	(void)wipe;
+#else
 	if (wipe && g_nvs_ok) {
 		(void)nvs_clear(&g_nvs); /* leaves fs unmounted */
 	}
 	g_nvs_ok              = false; /* force a fresh mount on next use */
 	g_nvs_test_fail_mount = false;
-#else
-	(void)wipe;
 #endif
 }
 
