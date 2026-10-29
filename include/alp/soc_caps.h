@@ -6,7 +6,8 @@
  * by scripts/gen_soc_caps.py.  DO NOT EDIT BY HAND — regenerate.
  *
  * Each SoC's capability macros are gated by CONFIG_ALP_SOC_{TOKEN}.
- * Apps select the active SoC via Kconfig.  When no SoC is
+ * Apps select the active SoC via Kconfig (Zephyr) or -DALP_SOC (plain
+ * CMake; the build plan emits it per SoM).  When no SoC is
  * selected the macros default to a permissive UINT16_MAX so
  * capability checks accept any config — apps that want runtime
  * validation must select a specific SoC.

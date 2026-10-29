@@ -111,6 +111,17 @@ option(ALP_SDK_STATUS_DESCRIPTIONS
     "Compile the alp_status_description() string table (src/status_strings.c)"
     ON)
 
+# Active SoC capability profile for plain-CMake (baremetal/yocto) builds:
+# the Kconfig symbol the Zephyr `choice` in zephyr/kconfigs/core.kconfig
+# would select, e.g. ALP_SOC_RENESAS_RZV2N_N44.  Plain CMake has no
+# Kconfig, so without this <alp/soc_caps.h> falls to its permissive
+# "unknown" branch: ALP_SOC_REF_STR is "unknown" (silicon_ref-exact
+# backends such as the V2N UIO/MHU rpc backend never match) and every
+# ALP_HAS() is true.  Generated per SoM into the build plan's cmake args
+# (`alp_project.py --emit cmake-args`) and local.conf (`ALP_SDK_SOC`).
+set(ALP_SOC "" CACHE STRING
+    "Active SoC profile, e.g. ALP_SOC_RENESAS_RZV2N_N44 (defines CONFIG_<it> for <alp/soc_caps.h>)")
+
 # Build libalp_sdk as a shared library and install it + the <alp/*>
 # headers.  Linux/Yocto consumers (e.g. the meta-alp-sdk recipe, ROS 2
 # nodes that link libalp_sdk.so) set this ON; embedded users who
@@ -145,6 +156,16 @@ if(ALP_HAS_LVGL)
 endif()
 if(ALP_HAS_CMSIS_DSP)
     target_compile_definitions(alp_sdk_headers INTERFACE ALP_HAS_CMSIS_DSP=1)
+endif()
+# INTERFACE (not PRIVATE): <alp/soc_caps.h> is a public header, so the
+# app's ALP_HAS() must see the same profile the SDK was built with.
+if(ALP_SOC)
+    if(NOT ALP_SOC MATCHES "^ALP_SOC_[A-Z0-9_]+$")
+        message(FATAL_ERROR
+            "ALP_SOC='${ALP_SOC}' must be a Kconfig-style SoC symbol "
+            "such as ALP_SOC_RENESAS_RZV2N_N44 (see include/alp/soc_caps.h)")
+    endif()
+    target_compile_definitions(alp_sdk_headers INTERFACE CONFIG_${ALP_SOC}=1)
 endif()
 
 # Convenience alias for downstream users (add_subdirectory() / build-tree

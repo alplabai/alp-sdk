@@ -20,8 +20,11 @@ if(NOT DEFINED ZEPHYR_BASE)
         # <alp/cap.h> auto-generated SoC capability table
         # (alp_has / alp_cap_name).  Pure C reading soc_caps.h; falls
         # back to the permissive "unknown SoC" branch when no
-        # CONFIG_ALP_SOC_* is defined (always true on plain CMake,
-        # which has no Kconfig).  Zephyr already compiles this
+        # CONFIG_ALP_SOC_* is defined.  Plain CMake has no Kconfig, so
+        # the top-level CMakeLists.txt defines it from -DALP_SOC (emitted
+        # per SoM by `alp_project.py --emit cmake-args` and local.conf
+        # ALP_SDK_SOC); a hand-rolled build omitting it gets the
+        # permissive branch.  Zephyr already compiles this
         # unconditionally (zephyr/CMakeLists.txt); baremetal/yocto
         # never did, leaving alp_has/alp_cap_name undefined (#593).
         ${CMAKE_CURRENT_SOURCE_DIR}/../cap.c
