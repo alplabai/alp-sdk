@@ -106,7 +106,8 @@
  * restarts from cycle 1 (see disarm_stale_alarm()).
  *
  * SUMMARY covers only the boot that printed it.  Every STOP wake is a cold boot, so pass and
- * fail restart at 0 and the line counts the last cycle's verdicts; grep the per-cycle
+ * fail restart at 0 and the line counts the verdicts printed on this boot (the cycle just
+ * judged, plus a refused request for the next one); grep the per-cycle
  * "POWER_STOP: cycleN <check> PASS|FAIL" lines to judge the whole run.
  */
 
@@ -1015,7 +1016,7 @@ int main(void)
 	}
 
 	/* pass/fail are .bss and restart at every cold-boot wake, so they judge this boot only
-	 * (the cycle that just ended); scope=last_boot says so on the line itself. */
+	 * (the cycle just judged, plus a refused request for the next one); scope=last_boot says so on the line itself. */
 	printk("POWER_STOP: SUMMARY cycles=%u pass=%u fail=%u scope=last_boot\n", done, g_pass, g_fail);
 	for (;;) {
 		k_sleep(K_SECONDS(10));
