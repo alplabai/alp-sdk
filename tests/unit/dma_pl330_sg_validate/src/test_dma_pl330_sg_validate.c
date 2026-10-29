@@ -81,3 +81,39 @@ ZTEST(dma_pl330_sg_validate, test_zero_count_against_nonempty_chain_rejects)
 
 	zassert_false(dma_pl330_sg_chain_matches(&b0, 0), "count 0 must not match a non-empty chain");
 }
+
+/* A later block with DECREMENT must be rejected, not only the head block. */
+ZTEST(dma_pl330_sg_validate, test_addr_adj_checked_on_every_block)
+{
+	struct dma_block_config b1 = {
+		.source_addr_adj = DMA_ADDR_ADJ_INCREMENT,
+		.dest_addr_adj   = DMA_ADDR_ADJ_DECREMENT,
+	};
+	struct dma_block_config b0 = {
+		.source_addr_adj = DMA_ADDR_ADJ_INCREMENT,
+		.dest_addr_adj   = DMA_ADDR_ADJ_NO_CHANGE,
+		.next_block      = &b1,
+	};
+
+	zassert_false(dma_pl330_sg_addr_adj_supported(&b0, 2), "DECREMENT on block 1 must be rejected");
+	zassert_true(dma_pl330_sg_addr_adj_supported(&b0, 1),
+	             "head block alone (INCREMENT/NO_CHANGE) is supported");
+
+	b1.dest_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
+	zassert_true(dma_pl330_sg_addr_adj_supported(&b0, 2),
+	             "INCREMENT/NO_CHANGE on every block is supported");
+}
+
+/* A block over the per-DMAGO maximum yields a chunk plus a non-zero remainder. */
+ZTEST(dma_pl330_sg_validate, test_chunk_split_leaves_remainder)
+{
+	uint32_t chunk;
+	uint32_t rest = dma_pl330_chunk_split(100000U, 65536U, &chunk);
+
+	zassert_equal(chunk, 65536U, "first chunk is the maximum");
+	zassert_equal(rest, 34464U, "remainder waits for chunk completion");
+
+	rest = dma_pl330_chunk_split(512U, 65536U, &chunk);
+	zassert_equal(chunk, 512U, "small block is a single chunk");
+	zassert_equal(rest, 0U, "no remainder");
+}

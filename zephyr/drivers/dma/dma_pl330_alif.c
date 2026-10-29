@@ -227,13 +227,9 @@ static void dma_pl330_config_channel(struct dma_pl330_ch_config *ch_cfg,
 	}
 
 
-	if (ch_cfg->src_addr_adj == DMA_ADDR_ADJ_INCREMENT) {
-		ch_handle->src_inc = 1;
-	}
-
-	if (ch_cfg->dst_addr_adj == DMA_ADDR_ADJ_INCREMENT) {
-		ch_handle->dst_inc = 1;
-	}
+	/* Set (or clear) per block: a later block may switch to NO_CHANGE. */
+	ch_handle->src_inc = (ch_cfg->src_addr_adj == DMA_ADDR_ADJ_INCREMENT) ? 1 : 0;
+	ch_handle->dst_inc = (ch_cfg->dst_addr_adj == DMA_ADDR_ADJ_INCREMENT) ? 1 : 0;
 }
 
 static inline uint32_t dma_pl330_gen_mov(mem_addr_t buf,
@@ -519,32 +515,51 @@ static int dma_pl330_stop_dma_ch(const struct device *dev,
 {
 	struct dma_pl330_dev_data *const dev_data = dev->data;
 	int ret;
-	uint32_t data, inten, count = 0U;
+	uint32_t inten, count = 0U;
 	uint32_t irq = dev_data->event_irq[ch];
+	k_spinlock_key_t key;
+	bool killed = false;
 
-	do {
-		data = sys_read32(reg_base + DMAC_PL330_DBGSTATUS);
-		if ((data & DATA_MASK) == 0) {
-			break;
+	/* A stopped channel must not have its next chunk started by the ISR. */
+	dev_data->channels[ch].rem_size = 0;
+
+	/*
+	 * Issue DMAKILL through the debug interface.  dev_data->lock (the lock
+	 * start_dma_ch() holds across its debug-instruction window) is taken
+	 * only around one idle check + the three register writes; the idle
+	 * wait spins with the lock dropped, so interrupts are never masked for
+	 * the up-to-DMA_TIMEOUT_US a wedged manager can take.
+	 */
+	while (!killed) {
+		key = k_spin_lock(&dev_data->lock);
+		if ((sys_read32(reg_base + DMAC_PL330_DBGSTATUS) & DATA_MASK) == 0) {
+			sys_write32(((OP_DMA_KILL << DMA_INTSR0_SHIFT) + (ch << DMA_CH_SHIFT) +
+				     DMA_DBG_CHN),
+				    reg_base + DMAC_PL330_DBGINST0);
+			sys_write32(0, reg_base + DMAC_PL330_DBGINST1);
+			sys_write32(0x0, reg_base + DMAC_PL330_DBGCMD);
+			killed = true;
 		}
+		k_spin_unlock(&dev_data->lock, key);
 
-		if (++count > DMA_TIMEOUT_US) {
-			return -ETIMEDOUT;
+		if (!killed) {
+			if (++count > DMA_TIMEOUT_US) {
+				return -ETIMEDOUT;
+			}
+			k_busy_wait(1);
 		}
-		k_busy_wait(1);
-	} while (1);
+	}
 
-	sys_write32(((OP_DMA_KILL << DMA_INTSR0_SHIFT) +
-		(ch << DMA_CH_SHIFT) + DMA_DBG_CHN),
-		reg_base + DMAC_PL330_DBGINST0);
-	sys_write32(0, reg_base + DMAC_PL330_DBGINST1);
-	sys_write32(0x0, reg_base + DMAC_PL330_DBGCMD);
-
+	/* Wait for the channel to stop with no lock held. */
 	ret = dma_pl330_wait(reg_base, ch);
+
+	/* INTEN is also read-modify-written by start_dma_ch(); keep that atomic. */
+	key = k_spin_lock(&dev_data->lock);
 	inten = sys_read32(reg_base + DMAC_PL330_INTEN);
 	inten = inten & ~(1U << irq);
 	sys_write32(inten, reg_base + DMAC_PL330_INTEN);
 	sys_write32((1 << irq), reg_base + DMAC_PL330_INTCLR);
+	k_spin_unlock(&dev_data->lock, key);
 
 	return ret;
 }
@@ -573,8 +588,28 @@ static int dma_pl330_xfer(const struct device *dev, uint64_t dst,
 	max_size = GET_MAX_DMA_SIZE((1 << ch_handle->src_burst_sz),
 				    ch_handle->src_burst_len);
 
-	if (size > max_size) {
-		size = max_size;
+#ifdef CONFIG_DMA_64BIT
+	/* A single run must not cross the 4 GB window the registers address. */
+	if (size > (PL330_MAX_OFFSET - (uint32_t)dst)) {
+		max_size = MIN(max_size, (uint32_t)(PL330_MAX_OFFSET - (uint32_t)dst));
+	}
+	if (size > (PL330_MAX_OFFSET - (uint32_t)src)) {
+		max_size = MIN(max_size, (uint32_t)(PL330_MAX_OFFSET - (uint32_t)src));
+	}
+#endif
+
+	/*
+	 * Callback mode: start ONE chunk and park the rest in rem_*; the
+	 * completion ISR starts the next chunk.  Starting it here would rewrite
+	 * the microcode of, and DMAGO, a channel that is still running.  Set
+	 * before the start so an immediate completion IRQ sees it.
+	 */
+	channel_cfg->rem_size = dma_pl330_chunk_split(size, max_size, &size);
+	channel_cfg->rem_dst = dst + size;
+	channel_cfg->rem_src = src + size;
+	if (!channel_cfg->dma_callback && channel_cfg->rem_size) {
+		/* Polled: submit() loops, the channel is idle again by then. */
+		channel_cfg->rem_size = 0;
 	}
 
 	LOG_DBG("DMA PL330: channel %d, src_addr: 0x%llx, "
@@ -615,85 +650,40 @@ static int dma_pl330_xfer(const struct device *dev, uint64_t dst,
 		ret = dma_pl330_wait(dev_cfg->reg_base, channel);
 		if (ret) {
 			LOG_ERR("Failed waiting to finish DMA PL330");
+			/* Still running or parked: kill it before the caller frees it. */
+			(void)dma_pl330_stop_dma_ch(dev, dev_cfg->reg_base, channel);
 			goto err;
 		}
 	}
 
 	*xfer_size = size;
 err:
+	if (ret) {
+		channel_cfg->rem_size = 0;
+	}
 	return ret;
 }
 
-#if CONFIG_DMA_64BIT
-static int dma_pl330_handle_boundary(const struct device *dev, uint64_t dst,
-				     uint64_t src, uint32_t channel,
-				     uint32_t size)
+/* Callback mode: start the next chunk of the current block, if one is pending. */
+static int dma_pl330_continue_block(const struct device *dev, uint32_t channel)
 {
-	uint32_t dst_low = (uint32_t)dst;
-	uint32_t src_low = (uint32_t)src;
-	uint32_t transfer_size;
-	int ret;
+	struct dma_pl330_dev_data *const dev_data = dev->data;
+	struct dma_pl330_ch_config *channel_cfg = &dev_data->channels[channel];
+	uint32_t xfer_size;
 
-	/*
-	 * Pl330 has only 32bit registers and supports 4GB memory.
-	 * 4GB memory window can be configured using DMAC_AXI_ADD_CONTROL
-	 * registers.
-	 * Divide the DMA operation in 2 parts, 1st DMA from given address
-	 * to boundary (0xffffffff) and 2nd DMA on remaining size.
-	 */
-
-	if (size > (PL330_MAX_OFFSET - dst_low)) {
-		transfer_size = PL330_MAX_OFFSET - dst_low;
-		ret = dma_pl330_submit(dev, dst, src, channel,
-				       transfer_size);
-		if (ret < 0) {
-			return ret;
-		}
-
-		dst += transfer_size;
-		src += transfer_size;
-		size -= transfer_size;
-		return dma_pl330_submit(dev, dst, src, channel, size);
-	}
-
-	if (size > (PL330_MAX_OFFSET - src_low)) {
-		transfer_size = PL330_MAX_OFFSET - src_low;
-		ret = dma_pl330_submit(dev, dst, src, channel, transfer_size);
-		if (ret < 0) {
-			return ret;
-		}
-
-		src += transfer_size;
-		dst += transfer_size;
-		size -= transfer_size;
-		return dma_pl330_submit(dev, dst, src, channel, size);
-	}
-
-	return 0;
+	return dma_pl330_xfer(dev, channel_cfg->rem_dst, channel_cfg->rem_src, channel_cfg->rem_size,
+			      channel, &xfer_size);
 }
-#endif
 
 static int dma_pl330_submit(const struct device *dev, uint64_t dst,
 			    uint64_t src,
 			    uint32_t channel, uint32_t size)
 {
+	struct dma_pl330_dev_data *const dev_data = dev->data;
+	const bool async = dev_data->channels[channel].dma_callback != NULL;
 	int ret;
 	uint32_t xfer_size;
 
-#if CONFIG_DMA_64BIT
-	/*
-	 * Pl330 has only 32bit registers and supports 4GB memory.
-	 * 4GB memory window can be configured using DMAC_AXI_ADD_CONTROL
-	 * registers. 32bit boundary (0xffffffff) should be check.
-	 * DMA on boundary condition is taken care in below function.
-	 */
-
-	if ((size > (PL330_MAX_OFFSET - (uint32_t)dst)) ||
-	    (size > (PL330_MAX_OFFSET - (uint32_t)src))) {
-		return dma_pl330_handle_boundary(dev, dst, src,
-						 channel, size);
-	}
-#endif
 	while (size) {
 		xfer_size = 0;
 		ret = dma_pl330_xfer(dev, dst, src, size,
@@ -704,6 +694,15 @@ static int dma_pl330_submit(const struct device *dev, uint64_t dst,
 		if (xfer_size > size) {
 			return -EFAULT;
 		}
+
+		/*
+		 * Callback mode: the first chunk is running; xfer() parked the
+		 * remainder and the completion ISR starts it.
+		 */
+		if (async) {
+			return 0;
+		}
+
 		size -= xfer_size;
 		dst += xfer_size;
 		src += xfer_size;
@@ -771,10 +770,8 @@ static int dma_pl330_configure(const struct device *dev, uint32_t channel,
 		return -EINVAL;
 	}
 
-	if ((cfg->head_block->source_addr_adj != DMA_ADDR_ADJ_INCREMENT &&
-	     cfg->head_block->source_addr_adj != DMA_ADDR_ADJ_NO_CHANGE) ||
-	    (cfg->head_block->dest_addr_adj != DMA_ADDR_ADJ_INCREMENT &&
-	     cfg->head_block->dest_addr_adj != DMA_ADDR_ADJ_NO_CHANGE)) {
+	/* start_block() applies the adjustment per block, so check every block. */
+	if (!dma_pl330_sg_addr_adj_supported(cfg->head_block, count)) {
 		return -ENOTSUP;
 	}
 
@@ -786,6 +783,7 @@ static int dma_pl330_configure(const struct device *dev, uint32_t channel,
 
 	ch_handle = &channel_cfg->internal;
 	memset(ch_handle, 0, sizeof(*ch_handle));
+	channel_cfg->rem_size = 0;
 
 	if ((cfg->channel_direction == PERIPHERAL_TO_MEMORY
 		|| cfg->channel_direction == MEMORY_TO_PERIPHERAL)
@@ -926,6 +924,7 @@ int dma_pl330_start_with_mcode(const struct device *dev,
 		ret = dma_pl330_wait(dev_cfg->reg_base, channel);
 		if (ret) {
 			LOG_ERR("Timeout waiting for DMA PL330 custom microcode");
+			(void)dma_pl330_stop_dma_ch(dev, dev_cfg->reg_base, channel);
 		}
 		atomic_set(&channel_cfg->channel_is_active, DMA_CHANNEL_IS_FREE);
 	}
@@ -939,7 +938,6 @@ static int dma_pl330_transfer_stop(const struct device *dev, uint32_t channel)
 	struct dma_pl330_dev_data *const dev_data = dev->data;
 	uint32_t reg_base = dev_cfg->reg_base;
 	uint32_t cs0_reg = reg_base + DMAC_PL330_CS0;
-	unsigned int irq_key;
 	int ret = 0;
 
 	if (channel >= dev_cfg->max_dma_channels) {
@@ -950,12 +948,10 @@ static int dma_pl330_transfer_stop(const struct device *dev, uint32_t channel)
 		return 0;
 	}
 
-	irq_key = irq_lock();
-
+	/* No irq_lock: stop_dma_ch() takes dev_data->lock only for its short register windows. */
 	ret = dma_pl330_stop_dma_ch(dev, reg_base, channel);
 	atomic_set(&dev_data->channels[channel].channel_is_active, DMA_CHANNEL_IS_FREE);
 
-	irq_unlock(irq_key);
 	return ret;
 }
 
@@ -1007,6 +1003,25 @@ static void dma_pl330_isr(const struct device *dev)
 				sys_write32((1 << ch), reg_base + DMAC_PL330_INTCLR);
 
 				channel_cfg = &dev_data->channels[ch];
+
+				/*
+				 * A block larger than one DMAGO can move runs as several
+				 * chunks; start the next one now that this chunk is done.
+				 */
+				if (channel_cfg->rem_size) {
+					if (dma_pl330_continue_block(dev, ch) == 0) {
+						continue;
+					}
+
+					atomic_set(&channel_cfg->channel_is_active,
+						   DMA_CHANNEL_IS_FREE);
+					if (channel_cfg->dma_callback) {
+						channel_cfg->dma_callback(dev,
+							channel_cfg->user_data,
+							ch, -EIO);
+					}
+					continue;
+				}
 
 				/*
 				 * Scatter-gather block chaining
