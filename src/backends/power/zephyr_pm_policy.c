@@ -353,8 +353,9 @@ static alp_status_t z_request_sleep(alp_power_backend_state_t *state,
      * requested pm_state happens inside the idle thread while this
      * take blocks. */
 	int64_t before = k_uptime_get();
-	int     err    = k_sem_take(&_wake_sem, K_MSEC(wake_after_ms + 100u));
-	int64_t after  = k_uptime_get();
+	/* 64-bit sum: wake_after_ms + 100u would wrap for wake_after_ms > UINT32_MAX - 100. */
+	int     err   = k_sem_take(&_wake_sem, K_MSEC((int64_t)wake_after_ms + 100));
+	int64_t after = k_uptime_get();
 	k_timer_stop(&_wake_timer);
 
 	/* Re-hold every lock so the system stays ACTIVE until the next
@@ -362,12 +363,17 @@ static alp_status_t z_request_sleep(alp_power_backend_state_t *state,
 	_hold_all_locks(l);
 
 	if (info != NULL) {
-		info->realised_mode = _realised_mode(mode);
+		/* A take timeout means the wake timer never fired: the idle thread did not
+		 * descend, so no sleep depth was reached. */
+		info->realised_mode = (err == 0) ? _realised_mode(mode) : ALP_POWER_MODE_RUN;
 		info->wake_source   = (err == 0) ? (uint32_t)ALP_POWER_WAKE_TIMER : 0u;
 		info->slept_ms      = (uint32_t)((after > before) ? (after - before) : 0);
 	}
 
-	if (err != 0 && err != -EAGAIN) {
+	if (err == -EAGAIN) {
+		return ALP_ERR_TIMEOUT;
+	}
+	if (err != 0) {
 		return ALP_ERR_IO;
 	}
 	return ALP_OK;
