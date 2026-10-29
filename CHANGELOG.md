@@ -7,6 +7,10 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
+### Fixed — CAN (`can_cast`) `can_stop()` and bus-off complete queued TX frames instead of dropping them
+
+**A blocking `can_send()` no longer hangs across `can_stop()` or bus-off.** `zephyr/drivers/can/can_cast.c` reset the TX callback queue without invoking the pending callbacks, so a `can_send()` with a NULL callback waited `K_FOREVER` on a semaphore only that callback could release. Every pending entry now completes with `-ENETDOWN` (stop) or `-ENETUNREACH` (bus-off), per the Zephyr CAN API. A single-shot frame that loses arbitration now reports `-EBUSY` instead of the positive status `1` (callers testing `ret < 0` counted it as sent), and `can_recover()` counts its microsecond budget down with the saturating helper so a timeout that is not a multiple of 100 us no longer wraps and polls forever. The driver API struct is declared with `DEVICE_API(can, ...)`.
+
 ### Fixed — abidiff gate honesty (#2851)
 
 **The `abidiff` gate is advisory, and now says so.** It is not a required context and `pr-plain-cmake.yml` has no `merge_group:` trigger, so a red run blocks nothing (maintainer decision: stays advisory). The SONAME-rename suppression no longer masks an abidiff error (applied only when the exit status has no ABI_ERROR/USAGE bit), every skip (tool missing, no tag of the current minor) emits a `::warning::` in CI or under `--require-tool`, and a test covers the SONAME-only report shape against a synthetic fixture (hand-written in the shape `soname_only()` parses, not a real capture; a recorded `check_abidiff.py --baseline-tag v0.17.0-rc2 --keep` run on a host with abigail-tools is still pending, #2851).
