@@ -138,6 +138,13 @@ static K_SEM_DEFINE(peer_sem, 0, 1);     /* first frame from the A55 seen */
  * touch the endpoint of a vdev that is being removed. */
 static atomic_t link_resetting;
 
+/* Serialises the sender against teardown.  rpmsg_link_send() holds it across
+ * the (non-blocking) send; link_reset() takes it before rpmsg_deinit_vdev(),
+ * so a publish already in flight drains first and a later one sees
+ * link_resetting under the lock.  Priority inheritance lifts the preempted
+ * sender above link_task while link_task waits. */
+static K_MUTEX_DEFINE(send_lock);
+
 static void mbox_rx_cb(const struct device *dev, mbox_channel_id_t ch, void *u, struct mbox_msg *m)
 {
 	ARG_UNUSED(dev);
@@ -325,6 +332,7 @@ static void link_reset(void)
 	 * rproc_virtio_remove_vdev() frees nothing. */
 	struct virtio_device *vdev = rvdev.vdev;
 
+	k_mutex_lock(&send_lock, K_FOREVER);
 	atomic_set(&link_resetting, 1);
 	/* An empty name skips the name-service destroy announcement
 	 * rpmsg_destroy_ept() would queue onto the old A55 ring (the A55 is
@@ -332,6 +340,7 @@ static void link_reset(void)
 	ept.name[0] = '\0';
 	rpmsg_deinit_vdev(&rvdev);
 	rproc_virtio_remove_vdev(vdev);
+	k_mutex_unlock(&send_lock);
 	/* vdev.status is deliberately NOT written: the A55 already wrote 0, and a
 	 * store from this side could overwrite a DRIVER_OK it has since set. */
 
@@ -427,12 +436,34 @@ size_t rpmsg_link_send(const uint8_t *data, size_t len)
 {
 	uint8_t frame[XRCE_METHOD_LEN + RPMSG_LINK_MTU];
 
-	if (len == 0 || len > RPMSG_LINK_MTU || atomic_get(&link_resetting) != 0) {
+	if (len == 0 || len > RPMSG_LINK_MTU) {
 		return 0;
 	}
 	memcpy(frame, XRCE_METHOD, XRCE_METHOD_LEN);
 	memcpy(frame + XRCE_METHOD_LEN, data, len);
-	return rpmsg_send(&ept, frame, XRCE_METHOD_LEN + len) > 0 ? len : 0;
+
+	/* rpmsg_trysend() never sleeps for a TX buffer, so the lock is held only
+	 * briefly and link_reset() is never stalled past the A55 attach ack
+	 * timeout.  Back-pressure is waited out here, outside the lock. */
+	for (int tries = 0; tries < 1500; tries++) {
+		int rc;
+
+		k_mutex_lock(&send_lock, K_FOREVER);
+		if (atomic_get(&link_resetting) != 0) {
+			k_mutex_unlock(&send_lock);
+			return 0;
+		}
+		rc = rpmsg_trysend(&ept, frame, XRCE_METHOD_LEN + len);
+		k_mutex_unlock(&send_lock);
+		if (rc > 0) {
+			return len;
+		}
+		if (rc != RPMSG_ERR_NO_BUFF) {
+			return 0;
+		}
+		k_msleep(10);
+	}
+	return 0;
 }
 
 size_t rpmsg_link_recv(uint8_t *buf, size_t cap, int timeout_ms)

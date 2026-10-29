@@ -183,7 +183,7 @@ State of this change, precisely:
   (`<alp/protocol/amp_beacon.h>`, beacon version 2): the A55 bridge's
   `yocto_uio_drv` backend refuses to open without the beacon and resets the
   link on every re-attach, so the M33 re-creates its virtio device then.
-  Build-checked only; not yet exercised on silicon.
+  Not yet compiled or exercised on silicon.
 - `metadata/libraries/micro-ros.yaml` stays Tier B: the Tier A bar also
   needs a CI lane and a bench result, neither of which exists yet.
 
