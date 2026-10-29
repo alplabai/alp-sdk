@@ -8,6 +8,18 @@
  * @brief Alp SDK persistent-storage abstraction (QSPI / OSPI / SD).
  *
  * Backends registered on Zephyr:
+ *   - **zephyr_littlefs** (silicon_ref `"*"`, priority 110, tried
+ *     FIRST): real littlefs-file-backed device
+ *     (`/lfs<instance_id>/alp_storage.bin`) for
+ *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH; erase is emulated by
+ *     overwriting the region with 0xFF.  It accepts an open ONLY when a
+ *     littlefs volume is mounted at `/lfs<instance_id>`; with no such
+ *     mount it declines with ALP_ERR_NOSUPPORT and `alp_storage_open`
+ *     falls through to zephyr_flash.  So a mounted partition is never
+ *     reachable as raw flash through this API (raw writes would corrupt
+ *     the volume), while every unmounted `instance_id` is a raw
+ *     flash-area ID.  Same SD_MMC / `configure_inline_aes`
+ *     ALP_ERR_NOSUPPORT posture as zephyr_flash.
  *   - **zephyr_flash** (silicon_ref `"*"`, priority 100): real
  *     `<zephyr/storage/flash_map.h>` `flash_area_*` backing for
  *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH (`kind`); `instance_id`
@@ -17,13 +29,6 @@
  *     zephyr_disk) and for `configure_inline_aes`
  *     (no inline-AES path on plain Zephyr flash -- a higher-priority
  *     vendor backend implements it once one lands).
- *   - **zephyr_littlefs** (silicon_ref `"*"`, priority 90): real
- *     littlefs-file-backed device
- *     (`/lfs<instance_id>/alp_storage.bin`) for
- *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH; erase is emulated by
- *     overwriting the region with 0xFF.  Same SD_MMC /
- *     `configure_inline_aes` ALP_ERR_NOSUPPORT posture as
- *     zephyr_flash.
  *   - **zephyr_disk** (silicon_ref `"*"`, priority 80): real
  *     `<zephyr/storage/disk_access.h>` backing for
  *     `ALP_STORAGE_KIND_SD_MMC`; byte-addressed read/write over the

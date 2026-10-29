@@ -166,7 +166,9 @@ config ALP_SDK_STORAGE_ZEPHYR_FLASH
 	  alp_storage_* surface through the <zephyr/storage/flash_map.h>
 	  API; the SoC pack supplies the fixed-partition DT entries that
 	  flash_area_open consumes.  instance_id maps directly to a
-	  flash-area ID.
+	  flash-area ID, unless a littlefs volume is mounted at
+	  /lfs<instance_id> and ALP_SDK_STORAGE_ZEPHYR_LITTLEFS is on:
+	  that backend is tried first and claims the instance_id.
 
 config ALP_SDK_STORAGE_ZEPHYR_LITTLEFS
 	bool "Zephyr littlefs backend for <alp/storage.h>"
@@ -176,9 +178,12 @@ config ALP_SDK_STORAGE_ZEPHYR_LITTLEFS
 	help
 	  Compiles src/backends/storage/zephyr_littlefs.c.  Wraps a
 	  mounted FS_LITTLEFS instance as an offset-addressed
-	  alp_storage device under /lfs<N>/alp_storage.bin.  Loses to
-	  zephyr_flash on priority when both are present; pick the
-	  storage_kind explicitly to force one over the other.
+	  alp_storage device under /lfs<N>/alp_storage.bin.  Outranks
+	  zephyr_flash (priority 110 vs 100) but only accepts an
+	  instance_id that has a littlefs volume mounted at /lfs<N>;
+	  any other instance_id falls through to raw flash_area N.  A
+	  mounted partition is therefore not raw-addressable through
+	  alp_storage_open().
 
 config ALP_SDK_STORAGE_ZEPHYR_DISK
 	bool "Zephyr disk_access backend for <alp/storage.h> (SD/MMC)"

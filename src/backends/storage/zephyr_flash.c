@@ -17,6 +17,9 @@
  * Registered as silicon_ref="*" at priority 100; the dispatcher's
  * selector picks this when CONFIG_FLASH_MAP is on and no vendor
  * extension claims a higher priority for the active silicon.
+ * zephyr_littlefs (110) is tried first and claims an instance_id
+ * only when a littlefs volume is mounted at /lfs<instance_id>; any
+ * other instance_id reaches this backend and is a raw flash_area ID.
  */
 
 #include <errno.h>

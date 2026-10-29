@@ -1,0 +1,3 @@
+### Fixed — `<alp/storage.h>` littlefs backend shadowed by raw flash on Zephyr
+
+`zephyr_littlefs` could never be selected on a littlefs build: it ranked below `zephyr_flash` (priority 90 vs 100) and both accepted the same kinds, so `alp_storage_open(instance_id=N)` opened raw `flash_area` N and writes could overwrite the metadata of the mounted `/lfs<N>` volume. `zephyr_littlefs` now registers at priority 110 and accepts an open only when a volume is mounted at `/lfs<instance_id>` (otherwise it declines with `ALP_ERR_NOSUPPORT` and the open falls through to raw flash). A mounted partition is no longer raw-addressable through `alp_storage_open`; unmounted `instance_id`s behave as before.

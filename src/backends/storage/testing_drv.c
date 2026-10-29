@@ -4,7 +4,7 @@
  * Storage test double.  Ordinary alp_storage_ops_t backend registered
  * at the reserved test-double priority (255, silicon_ref="*"), so with
  * CONFIG_ALP_SDK_TESTING_STORAGE=y it outranks every real/proxy/
- * fallback storage backend (zephyr_flash=100, zephyr_littlefs=90,
+ * fallback storage backend (zephyr_flash=100, zephyr_littlefs=110,
  * sw_fallback=0) and alp_storage_open() rides on it transparently --
  * see the priority note on ALP_BACKEND_REGISTER in <alp/backend.h>.
  *

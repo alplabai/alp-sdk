@@ -19,10 +19,19 @@
  * returns NOSUPPORT.  Vendor packs that wire a HW-encrypted
  * flash device under littlefs implement their own backend.
  *
- * Registered as silicon_ref="*" at priority 90 -- one tick below
- * zephyr_flash so raw flash wins by default unless the caller
- * explicitly selects ALP_STORAGE_KIND_SD_MMC or the active
- * silicon disables CONFIG_FLASH_MAP.
+ * Registered as silicon_ref="*" at priority 110 -- ABOVE zephyr_flash
+ * (100) -- but it only ACCEPTS an open when a littlefs volume is
+ * actually mounted at /lfs<instance_id>; otherwise it declines with
+ * ALP_ERR_NOSUPPORT and alp_storage_open() falls through to raw
+ * flash.  Why both halves: a littlefs build always has FLASH_MAP on
+ * (FILE_SYSTEM_LITTLEFS depends on it), so zephyr_flash is always
+ * linked too.  With littlefs ranked below flash it was never reached,
+ * and the caller's instance_id was read as a raw flash_area ID -- a
+ * write then overwrote the metadata of the mounted volume.  Ranking
+ * littlefs first closes that hole, and the mount probe keeps raw
+ * flash reachable for every partition that is NOT a mounted volume
+ * (a mounted partition is, by design, no longer raw-addressable
+ * through this API).
  */
 
 #include <errno.h>
@@ -121,6 +130,21 @@ static bool _lfs_range_representable(uint64_t offset, uint64_t len)
 	return true;
 }
 
+/* True when a filesystem is mounted at exactly "/lfs<instance_id>".
+ * fs_readmount() walks the mount list without logging, unlike probing
+ * with fs_stat()/fs_statvfs() which LOG_ERR on a missing mount. */
+static bool _lfs_volume_mounted(uint32_t instance_id)
+{
+	char want[16];
+	(void)snprintf(want, sizeof(want), "/lfs%u", (unsigned)instance_id);
+	int         idx  = 0;
+	const char *name = NULL;
+	while (fs_readmount(&idx, &name) == 0) {
+		if (name != NULL && strcmp(name, want) == 0) return true;
+	}
+	return false;
+}
+
 static alp_status_t lfs_open(const alp_storage_config_t  *cfg,
                              alp_storage_backend_state_t *st,
                              alp_capabilities_t          *caps_out)
@@ -130,6 +154,11 @@ static alp_status_t lfs_open(const alp_storage_config_t  *cfg,
      * QSPI / OSPI / INTERNAL_FLASH kinds make sense here.  SD/MMC
      * routes to a different backend. */
 	if (cfg->kind == ALP_STORAGE_KIND_SD_MMC) return ALP_ERR_NOSUPPORT;
+
+	/* No volume mounted at /lfs<instance_id>: this instance is not ours.
+	 * Decline so the dispatcher tries the next backend (zephyr_flash,
+	 * raw flash_area <instance_id>).  Only a mounted volume is claimed. */
+	if (!_lfs_volume_mounted(cfg->instance_id)) return ALP_ERR_NOSUPPORT;
 
 	lfs_state_t *s = _lfs_alloc();
 	if (s == NULL) return ALP_ERR_NOMEM;
@@ -274,7 +303,7 @@ ALP_BACKEND_REGISTER(storage,
                          .silicon_ref = "*",
                          .vendor      = "zephyr",
                          .base_caps   = 0u,
-                         .priority    = 90,
+                         .priority    = 110,
                          .ops         = &_ops,
                          .probe       = NULL,
                      });
