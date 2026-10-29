@@ -20,8 +20,8 @@
  * just orchestrates the GPIO pair.  See `blocks/README.md` for the
  * full block-vs-chip rationale.
  *
- * Wraps `<alp/peripheral.h>` GPIO calls; portable across all three
- * OS targets.
+ * Wraps `<alp/peripheral.h>` GPIO calls.  Built by the Zephyr module
+ * only; blocks/ is not part of the plain-CMake / Yocto libalp_chips.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      Caller-owned button+LED helper (`alp_button_led_*`).  See
