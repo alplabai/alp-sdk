@@ -56,15 +56,16 @@ def emit_ipc_contract_h(project: BoardProject) -> str:
             # consumer fail with `<macro> undeclared` long before the
             # NOSUPPORT runtime check could even fire.  Emit safe-zero
             # stubs + a #warning so the build is green and the gap is
-            # surfaced via the alp_rpc_open() ALP_ERR_NOSUPPORT path
-            # the backend already returns when it sees a zero
-            # mailbox_channel or empty mailbox controller.
+            # surfaced at plan time by a `blocked-ipc-carveout` build-plan
+            # warning and at runtime via the alp_rpc_open()
+            # ALP_ERR_NOSUPPORT path the backend already returns when it
+            # sees a zero mailbox_channel or empty mailbox controller.
             lines.append(f"/* BLOCKED: {c.reason or 'unknown reason'} */")
             # Surface the gap as a structured comment block rather than
             # a `#warning` (the slice builds under -Werror=cpp and an
             # actual warning would trip it).  The same reason text is
-            # also written into the build manifest by the orchestrator's
-            # fan-out step so reviewers see it.
+            # also written into the build manifest and the build plan's
+            # warnings so reviewers see it.
             lines.append(f"/* IPC channel '{c.name}' is blocked; "
                          "fix the SoM metadata before depending on this "
                          "channel at runtime. */")
@@ -112,8 +113,8 @@ def emit_dts_reservations(project: BoardProject) -> str:
         for c in carve_outs:
             if c.status == "blocked":
                 # Blocked carve-outs land as a comment so reviewers see
-                # the gap; the slice build trips elsewhere (the C
-                # header carries an #error directive).
+                # the gap; the build plan carries a
+                # `blocked-ipc-carveout` warning for it.
                 lines.append(f"        /* BLOCKED: {c.name} -- "
                              f"{c.reason or 'unknown reason'} */")
                 lines.append("")
