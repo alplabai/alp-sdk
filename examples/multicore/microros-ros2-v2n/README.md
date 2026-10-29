@@ -179,6 +179,11 @@ State of this change, precisely:
   `../rpmsg-v2n/m33_sm/src/main.c` so the bench-proven example stays
   untouched. Recommended follow-up: factor one shared platform file after
   this example is bench-proven.
+  It also carries the AMP beacon and attach-reset handshake
+  (`<alp/protocol/amp_beacon.h>`, beacon version 2): the A55 bridge's
+  `yocto_uio_drv` backend refuses to open without the beacon and resets the
+  link on every re-attach, so the M33 re-creates its virtio device then.
+  Build-checked only; not yet exercised on silicon.
 - `metadata/libraries/micro-ros.yaml` stays Tier B: the Tier A bar also
   needs a CI lane and a bench result, neither of which exists yet.
 
