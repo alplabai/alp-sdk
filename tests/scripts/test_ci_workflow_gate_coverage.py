@@ -135,7 +135,6 @@ def test_cppcheck_step_fails_on_error_severity(tmp_path: Path) -> None:
             [bash, "-c", tail],
             cwd=tmp_path,
             capture_output=True,
-            text=True,
             check=False,
         ).returncode
 
