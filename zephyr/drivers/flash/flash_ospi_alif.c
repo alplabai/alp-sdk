@@ -1303,7 +1303,7 @@ static int ospi_alif_sfdp_read(const struct device *dev, off_t offset, void *dat
 }
 #endif /* CONFIG_FLASH_JESD216_API */
 
-static const struct flash_driver_api ospi_alif_api = {
+static DEVICE_API(flash, ospi_alif_api) = {
 	.read           = ospi_alif_read,
 	.write          = ospi_alif_write,
 	.erase          = ospi_alif_erase,

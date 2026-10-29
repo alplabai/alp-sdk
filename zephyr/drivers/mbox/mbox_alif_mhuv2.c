@@ -420,7 +420,7 @@ static void mhuv2_poll_expiry(struct k_timer *t)
 	mhuv2_rx_dispatch(data->dev);
 }
 
-static const struct mbox_driver_api mhuv2_driver_api = {
+static DEVICE_API(mbox, mhuv2_driver_api) = {
 	.send              = mhuv2_send,
 	.register_callback = mhuv2_register_callback,
 	.mtu_get           = mhuv2_mtu_get,

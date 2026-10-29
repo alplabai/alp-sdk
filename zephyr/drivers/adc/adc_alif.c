@@ -1253,7 +1253,7 @@ static int adc_init(const struct device *dev)
 	return 0;
 }
 
-struct adc_driver_api alif_adc_api = {
+DEVICE_API(adc, alif_adc_api) = {
 	.channel_setup = &adc_channel_select,
 	.read = &adc_alif_read,
 };

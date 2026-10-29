@@ -1,0 +1,3 @@
+### Fixed — in-tree driver API tables use `DEVICE_API()` ahead of Zephyr 4.5
+
+The Alif ADC, LPTIMER and DW RTC counters, event-router DMA, MRAM and OSPI flash, DW I2S, MHUv2 IPM and mailbox, and QDEC drivers (plus the unit-test fake I2S, I2C and clock-control devices) declared their driver API table as a plain `struct <class>_driver_api`. Zephyr 4.5 makes `DEVICE_API()` mandatory and `DEVICE_API_GET()` asserts under `CONFIG_ASSERT`; they now use `DEVICE_API(<class>, name)`, which already exists on v4.4.1. The PDM driver and the fake DMIC test devices stay on `struct _dmic_ops` because the dmic class has no `dmic_driver_api` for the macro to name.

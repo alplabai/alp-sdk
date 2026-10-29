@@ -223,7 +223,7 @@ static uint32_t counter_dw_get_top_value(const struct device *dev)
 	return UINT32_MAX;
 }
 
-static const struct counter_driver_api counter_dw_api = {
+static DEVICE_API(counter, counter_dw_api) = {
 		.start = counter_dw_start,
 		.stop = counter_dw_stop,
 		.get_value = counter_dw_get_value,
