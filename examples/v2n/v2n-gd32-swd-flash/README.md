@@ -74,9 +74,12 @@ is still ahead — see `docs/v1.0-readiness.md` §1a and
 
 ## Safety
 
-The example writes to **the last 2 KiB sector** of the GD32G553's
-512 KB flash (`0x0807F800..0x0807FFFF`).  If your bridge firmware
-happens to live in that sector the write will trash it; reflash a
+The example writes to the **last non-reserved 2 KiB sector** of the
+GD32G553's 512 KB flash (sector 254, `0x0807F000..0x0807F7FF`), computed
+from the driver geometry.  The top sector (`0x0807F800..0x0807FFFF`) is
+skipped: `docs/ota-device-contract.md` reserves the top of flash for the OTA
+metadata page.  If your bridge firmware (or an OTA slot) happens to live in
+the written sector the write will trash it; reflash a
 fresh bridge image afterwards via either an external probe or this
 same SWD driver pointing at the right address.
 

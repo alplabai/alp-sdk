@@ -100,6 +100,12 @@ extern "C" {
 /** Sector size on the GD32G553 in bytes. */
 #define GD32_SWD_FMC_SECTOR_BYTES 2048u
 
+/** Main flash size of the GD32G553MEY7TR (512 KiB, single-bank mode). */
+#define GD32_SWD_FMC_FLASH_BYTES (512u * 1024u)
+
+/** Number of erase sectors (256); sector index = (addr - base) / sector size. */
+#define GD32_SWD_FMC_SECTOR_COUNT (GD32_SWD_FMC_FLASH_BYTES / GD32_SWD_FMC_SECTOR_BYTES)
+
 /** SRAM base, used internally to stage operations. */
 #define GD32_SWD_FMC_SRAM_BASE 0x20000000u
 
@@ -174,7 +180,8 @@ alp_status_t gd32_swd_halt(gd32_swd_t *ctx);
  *        covers @p addr .. @p addr + @p size - 1.
  *
  * Address + size are rounded out to sector boundaries
- * (@ref GD32_SWD_FMC_SECTOR_BYTES).
+ * (@ref GD32_SWD_FMC_SECTOR_BYTES).  Ranges outside the flash return
+ * ALP_ERR_INVAL before any sector is touched.
  */
 alp_status_t gd32_swd_flash_erase(gd32_swd_t *ctx, uint32_t addr, uint32_t size);
 

@@ -70,7 +70,11 @@
 #define CM_AIRCR_VECTKEY      0x05FA0000u
 #define CM_AIRCR_SYSRESETREQ  (1u << 2)
 
-/* GD32G553 FMC -- STM32G4-compatible register block @ 0x40022000. */
+/* GD32G553 FMC -- STM32G4-compatible register block @ 0x40022000.
+ * FMC_CR_PNB_MASK is FMC_CTL.PNSEL = BITS(3,10): 8 bits, 256 pages of 2 KiB in
+ * single-bank mode (vendors/gd32_firmware_library/.../gd32g5x3_fmc.h:
+ * FMC_CTL_PNSEL, MAIN_FLASH_PAGE_SIZE_SBANK 0x800).  Dual-bank mode (OBCTL.DBS,
+ * 1 KiB pages, FMC_CTL.BKSEL bit 12) is not supported by this driver. */
 #define FMC_BASE            0x40022000u
 #define FMC_REG_KEYR        (FMC_BASE + 0x08u)
 #define FMC_REG_SR          (FMC_BASE + 0x10u)
@@ -80,15 +84,15 @@
 #define FMC_CR_PG           (1u << 0)
 #define FMC_CR_PER          (1u << 1)
 #define FMC_CR_PNB_SHIFT    3u
-#define FMC_CR_PNB_MASK     (0x7Fu << FMC_CR_PNB_SHIFT)
+#define FMC_CR_PNB_MASK     (0xFFu << FMC_CR_PNB_SHIFT)
 #define FMC_CR_STRT         (1u << 16)
 #define FMC_CR_LOCK         (1u << 31)
 #define FMC_SR_BSY          (1u << 16)
 #define FMC_SR_PROGERR_MASK 0x000000F8u /* PROGERR | WRPERR | PGAERR | SIZERR | PGSERR */
 
-/* GD32G553MEY7TR carries 512 KiB flash.  Keep this local to the flash
- * helper implementation; the public API only needs base + sector size. */
-#define GD32_SWD_FMC_FLASH_BYTES (512u * 1024u)
+/* Sector count must fit the PNSEL field (256 sectors). */
+_Static_assert(GD32_SWD_FMC_SECTOR_COUNT <= (FMC_CR_PNB_MASK >> FMC_CR_PNB_SHIFT) + 1u,
+               "flash geometry exceeds the FMC_CTL.PNSEL page-number field");
 
 /* ------------------------------------------------------------------ */
 /* Pacing                                                              */
@@ -338,12 +342,19 @@ static alp_status_t swd_read_ap(gd32_swd_t *ctx, uint8_t a, uint32_t *out)
      * AP-read value.  Drain the value by reading DP.RDBUFF after the
      * dummy access. */
 	uint32_t dummy;
+	bool     accepted = false;
 	for (unsigned i = 0u; i < GD32_SWD_MAX_WAIT_RETRIES; ++i) {
 		gd32_swd_ack_t ack = swd_xfer(ctx, true, true, a, &dummy);
-		if (ack == GD32_SWD_ACK_OK) break;
+		if (ack == GD32_SWD_ACK_OK) {
+			accepted = true;
+			break;
+		}
 		if (ack == GD32_SWD_ACK_WAIT) continue;
 		return ALP_ERR_IO;
 	}
+	/* Every attempt answered WAIT: the read was never accepted, so RDBUFF
+	 * would hand back the PREVIOUS AP read as if it were this one. */
+	if (!accepted) return ALP_ERR_TIMEOUT;
 	return swd_read_dp(ctx, DP_REG_RDBUFF, out);
 }
 
@@ -681,6 +692,11 @@ alp_status_t gd32_swd_flash_erase(gd32_swd_t *ctx, uint32_t addr, uint32_t size)
 	const uint32_t start_sector    = start_offset / GD32_SWD_FMC_SECTOR_BYTES;
 	const uint32_t end_sector_excl =
 	    (end_offset_excl + GD32_SWD_FMC_SECTOR_BYTES - 1u) / GD32_SWD_FMC_SECTOR_BYTES;
+
+	/* flash_range_validate() already bounds the range to the flash size;
+	 * re-check against the PNSEL field so an out-of-range page number can
+	 * never be masked onto a different page. */
+	if (end_sector_excl > GD32_SWD_FMC_SECTOR_COUNT) return ALP_ERR_INVAL;
 
 	s = fmc_unlock(ctx);
 	if (s != ALP_OK) return s;
