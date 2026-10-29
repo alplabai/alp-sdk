@@ -403,10 +403,11 @@ do_configure:prepend() {
     # board dtb name on every boot, so the camera fragment is folded INTO that
     # dtb (an #include appended to the staged board dts), not built as a second dtb.
     if [ -n "${ALP_CAMERA_CAM0}" ]; then
-        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAMERA_CAM0}.dtsi"             "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
+        install -m 0644 "${WORKDIR}/e1m-x-evk-cam0-${ALP_CAMERA_CAM0}.dtsi" \
+            "${ALP_DTS_DST}/e1m-x-evk-cam0-sensor.dtsi"
         for board_dts in e1m-v2n101-x-evk.dts e1m-v2m101-x-evk.dts; do
-            printf '%s
-' '#include "e1m-x-evk-cam0-sensor.dtsi"'                 >> "${ALP_DTS_DST}/${board_dts}"
+            printf '%s\n' '#include "e1m-x-evk-cam0-sensor.dtsi"' \
+                >> "${ALP_DTS_DST}/${board_dts}"
         done
     fi
 

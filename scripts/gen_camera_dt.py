@@ -297,8 +297,8 @@ def render_fragment(ctx: Ctx, board_name: str, board: dict, conn: str, mod: dict
          f" * metadata/boards/{board_name}.yaml camera_connectors.{conn}, the E1M-V2N/V2M pad_routes,",
          f" * {SOC.as_posix()} linux_dt.",
          " *",
-         " * NOT part of the default dtb: the linux-renesas bbappend builds it into the",
-         f" * {pre} dtb when ALP_CAMERA_{conn} = \"{mod['module_id']}\".",
+         " * Not a standalone dtb: the linux-renesas bbappend folds it into the shipped",
+         f" * e1m-v2{{n,m}}101-x-evk.dtb when ALP_CAMERA_{conn} = \"{mod['module_id']}\".",
          f" * Link frequency, lanes, supplies and clock follow the {lx['compatible']} driver",
          f" * facts in metadata/chips/{chip}.yaml (drivers.linux).",
          ]
