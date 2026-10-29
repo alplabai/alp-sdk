@@ -48,7 +48,7 @@ if(CONFIG_ALP_SDK_TESTING)
     )
     # behavior_button_led.c snapshots state inside alp_gpio_irq_disable() to prove
     # the press-callback swap masks the IRQ first (#2987 item 149).
-    target_link_options(app PRIVATE -Wl,--wrap=alp_gpio_irq_disable)
+    zephyr_ld_options(-Wl,--wrap=alp_gpio_irq_disable)
 else()
     target_sources(app PRIVATE
         src/main.c
