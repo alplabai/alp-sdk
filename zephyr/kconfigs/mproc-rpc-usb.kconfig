@@ -101,9 +101,10 @@ config ALP_SDK_RPC
 	  ALP_SDK_RPC_SW_FALLBACK for the software-backend opt-in.
 
 	  The orchestrator (scripts/alp_orchestrate.py) generates
-	  <alp/system_ipc.h> + a per-board DT overlay under
-	  zephyr/boards/<sku>_<core>.overlay that wires up the
-	  carve-out, mailbox channel, and chosen { zephyr,ipc } node
+	  <alp/system_ipc.h> + a per-board DT reservations include
+	  (dts-reservations.dtsi) that, with the board tree's mailbox
+	  and chosen { zephyr,ipc } node, wires up the carve-out and
+	  mailbox channel
 	  so customer code calls alp_rpc_open(&(alp_rpc_config_t){...})
 	  without knowing the address layout.  Heterogeneous projects
 	  (board.yaml v2 with an ipc[] block) flip this on automatically

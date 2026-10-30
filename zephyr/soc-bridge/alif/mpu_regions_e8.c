@@ -128,8 +128,36 @@
 #define MRAM_EXEC_SIZE \
 	(MRAM_SLOT0_PARTITION_ADDR + MRAM_SLOT0_PARTITION_SIZE - MRAM_BOOT_PARTITION_ADDR - \
 	 MRAM_SECTOR_SIZE)
-#define MRAM_DEVICE_BASE_ADDR \
-	(MRAM_SLOT0_PARTITION_ADDR + MRAM_SLOT0_PARTITION_SIZE - MRAM_SECTOR_SIZE)
+/* The writable window must stay inside THIS core's own partitions. On the
+ * AMP boards the two cores' slot0 images sit back to back in the same MRAM
+ * (HE 0x10000..0x2b0000, HP 0x2b0000..0x550000), so one window running from
+ * this slot0's trailer sector to the end of storage would, on the HE, take
+ * the whole HP slot0 as privileged read-write and let a stray flash_erase()
+ * or flash_write() corrupt the other core's signed image. The window is
+ * therefore split: the trailer sector of this core's slot0, plus everything
+ * from `reserved_partition` (this core's headroom, the first partition after
+ * the neighbour's slot0) up to the end of storage. The span between this
+ * slot0 and `reserved_partition` belongs to the other core and is mapped
+ * read-only + non-executable (MRAM_OTHER_CORE below). A board whose
+ * `reserved_partition` follows slot0 directly (the HP) or has none keeps one
+ * contiguous window starting at the trailer. */
+#define MRAM_SLOT0_END_ADDR    (MRAM_SLOT0_PARTITION_ADDR + MRAM_SLOT0_PARTITION_SIZE)
+#define MRAM_TRAILER_BASE_ADDR (MRAM_SLOT0_END_ADDR - MRAM_SECTOR_SIZE)
+#if DT_NODE_EXISTS(DT_NODELABEL(reserved_partition))
+#define MRAM_OWN_TAIL_ADDR DT_FIXED_PARTITION_ADDR(DT_NODELABEL(reserved_partition))
+#else
+#define MRAM_OWN_TAIL_ADDR MRAM_SLOT0_END_ADDR
+#endif
+#if MRAM_OWN_TAIL_ADDR > MRAM_SLOT0_END_ADDR
+/* A neighbour's slot sits between this slot0 and the tail: split window. */
+#define MRAM_SPLIT_WINDOW     1
+#define MRAM_DEVICE_BASE_ADDR MRAM_OWN_TAIL_ADDR
+#define MRAM_OTHER_CORE_BASE  MRAM_SLOT0_END_ADDR
+#define MRAM_OTHER_CORE_SIZE  (MRAM_OWN_TAIL_ADDR - MRAM_SLOT0_END_ADDR)
+#else
+#define MRAM_SPLIT_WINDOW     0
+#define MRAM_DEVICE_BASE_ADDR MRAM_TRAILER_BASE_ADDR
+#endif
 #define MRAM_DEVICE_SIZE \
 	(MRAM_STORAGE_PARTITION_ADDR + MRAM_STORAGE_PARTITION_SIZE - MRAM_DEVICE_BASE_ADDR)
 #else
@@ -175,11 +203,11 @@
  * form this table uses, so spell it out rather than reshape the table. MAIR
  * stays MPU_MAIR_INDEX_FLASH: this span IS MRAM, and the index drives
  * cache-ability, not permissions. */
-#define REGION_MRAM_RESERVED_ATTR(base, size)                                  \
-	{                                                                      \
-		.rbar = NOT_EXEC | RO_Msk | NON_SHAREABLE_Msk, /* AP, XN, SH */ \
-		.mair_idx = MPU_MAIR_INDEX_FLASH,             /* Cache-ability */ \
-		.r_limit = REGION_LIMIT_ADDR(base, size),     /* Region Limit */  \
+#define REGION_MRAM_RESERVED_ATTR(base, size) \
+	{ \
+		.rbar     = NOT_EXEC | RO_Msk | NON_SHAREABLE_Msk, /* AP, XN, SH */ \
+		.mair_idx = MPU_MAIR_INDEX_FLASH,                  /* Cache-ability */ \
+		.r_limit  = REGION_LIMIT_ADDR(base, size),         /* Region Limit */ \
 	}
 
 /* Nested #if: DT_REG_ADDR() must not be expanded when sram0 is absent. */
@@ -217,6 +245,21 @@ static const struct arm_mpu_region mpu_regions[] = {
 	    "DTCM",
 	    DT_REG_ADDR(DT_NODELABEL(dtcm)),
 	    REGION_RAM_ATTR(DT_REG_ADDR(DT_NODELABEL(dtcm)), DT_REG_SIZE(DT_NODELABEL(dtcm)))),
+#if MRAM_SPLIT_WINDOW
+	/* Conditional (CONFIG_BOOTLOADER_MCUBOOT, AMP boards where the other
+	 * core's slot0 follows this one): the MCUboot trailer sector of this
+	 * core's slot0, the only part of slot0 the app writes. Split from
+	 * MRAM_DEVICE so the neighbour's slot is not inside the writable window. */
+	MPU_REGION_ENTRY("MRAM_TRAILER",
+	                 MRAM_TRAILER_BASE_ADDR,
+	                 REGION_DEVICE_ATTR(MRAM_TRAILER_BASE_ADDR, MRAM_SECTOR_SIZE)),
+	/* Conditional: the other core's slot0, between this slot0 and
+	 * `reserved_partition`. RO + XN: with no region it would fall through to
+	 * the ARMv8-M default map (privileged RW + executable). */
+	MPU_REGION_ENTRY("MRAM_OTHER_CORE",
+	                 MRAM_OTHER_CORE_BASE,
+	                 REGION_MRAM_RESERVED_ATTR(MRAM_OTHER_CORE_BASE, MRAM_OTHER_CORE_SIZE)),
+#endif
 #if MRAM_RESERVED_SIZE > 0
 	/* Region 4 (conditional): the part of mram_storage above MRAM_DEVICE
 	 * that boot/slot0/storage don't already reach -- see the comment on

@@ -339,6 +339,14 @@
 	 * status="disabled", matching every other block in this file; a board
 	 * enables the instances its firmware image uses.  vendor-ext,
 	 * BENCH-UNVERIFIED.
+	 *
+	 * M55-HE ONLY.  The IRQ numbers here are M55HE_IRQS[] vector-map lines
+	 * and the registers are the HE-local alias of the bank; this file is also
+	 * included by the M55-HP boards, but nothing below may be enabled on an
+	 * M55-HP image: the NVIC lines would not match the HP vector map, so the
+	 * interrupts would never fire (or hit an unrelated HP peripheral) with no
+	 * build-time error.  The same holds for dma2 (DMA2_SEC_BASE, M55-HE).
+	 * Only an M55-HE board or overlay may set these nodes to "okay".
 	 */
 
 	/*
@@ -1995,6 +2003,7 @@
 	 * A board enables this node (status="okay") + sets a real `microcode` address.
 	 * ADR 0017 Tier-1 (upstream-native), BENCH-UNVERIFIED.
 	 */
+	/* M55-HE ONLY -- see the "M55-HE ONLY" note on the LP bank above. */
 	dma2: dma@400c0000 {
 		compatible = "arm,dma-pl330";
 		reg = <0x400C0000 0x1000>; /* AE822 DFP rtss_he/soc.h: DMA2_SEC_BASE (M55-HE boots secure on the RAM-run) */
