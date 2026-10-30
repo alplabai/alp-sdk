@@ -56,7 +56,7 @@ versus the standard's max are:
 - **Boot strap** — E1M-X `BOOT3` (pad Y1) maps to Renesas
   `MD_BOOT4`, *not* `MD_BOOT3` (the chip has `MD_BOOT0/1/2/4`,
   no `MD_BOOT3`).  See
-  [`examples/alp-x-v2n-m1.som-manifest.json`](https://github.com/alplabai/e1m-spec/blob/main/examples/alp-x-v2n-m1.som-manifest.json)
+  [`examples/e1m-x-v2n-m1.som-manifest.json`](https://github.com/alplabai/e1m-spec/blob/main/examples/e1m-x-v2n-m1.som-manifest.json)
   in `e1m-spec`.
 
 ## On-module support silicon (informative)
