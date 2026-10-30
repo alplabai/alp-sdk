@@ -167,10 +167,23 @@ static bool ping_with_retry(void)
 #define GMAC_MDIO_DATA 0x48100204U
 #define PHY_ID_DP83825 0x2000a140U
 
+/*
+ * Bounded wait for GB (busy) to clear BEFORE issuing a transaction. Unbounded,
+ * a GMAC whose clock was never enabled (net_if_up skipped or failed) holds GB
+ * and hangs the caller before any result line prints. On timeout we fall
+ * through and issue anyway; the post-issue wait is bounded too, and the read
+ * then yields a non-PHY value that the scan/link checks report as a FAIL.
+ */
+static void mdio_wait_idle(void)
+{
+	for (int i = 0; i < 100000 && (sys_read32(GMAC_MDIO_ADDR) & BIT(0)) != 0U; i++) {
+		k_busy_wait(1);
+	}
+}
+
 static uint16_t mdio_read(uint8_t phy, uint8_t reg)
 {
-	while ((sys_read32(GMAC_MDIO_ADDR) & BIT(0)) != 0U) {
-	}
+	mdio_wait_idle();
 	sys_write32(((uint32_t)phy << 21) | ((uint32_t)reg << 16) | (0x4U << 8) | BIT(3) | BIT(2) |
 	                BIT(0),
 	            GMAC_MDIO_ADDR);
@@ -182,8 +195,7 @@ static uint16_t mdio_read(uint8_t phy, uint8_t reg)
 
 static void mdio_write(uint8_t phy, uint8_t reg, uint16_t val)
 {
-	while ((sys_read32(GMAC_MDIO_ADDR) & BIT(0)) != 0U) {
-	}
+	mdio_wait_idle();
 	sys_write32(val, GMAC_MDIO_DATA);
 	sys_write32(((uint32_t)phy << 21) | ((uint32_t)reg << 16) | (0x4U << 8) | BIT(2) | BIT(0),
 	            GMAC_MDIO_ADDR);
