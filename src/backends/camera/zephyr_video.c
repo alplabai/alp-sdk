@@ -84,8 +84,13 @@ typedef struct {
 	struct video_format  fmt;
 	struct video_buffer *vbufs[CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT];
 	uint8_t              vbuf_count;
-	bool                 streaming;
-	bool                 in_use;
+	/* held[i]: vbufs[i] was handed to the app by z_capture() and has not come
+	 * back through z_release() yet.  Guards z_release() against re-enqueuing a
+	 * node the driver already owns (double release), which would link the same
+	 * video_buffer into the driver FIFO twice. */
+	bool held[CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT];
+	bool streaming;
+	bool in_use;
 } alp_z_video_state_t;
 
 #ifndef CONFIG_ALP_SDK_MAX_CAMERA_HANDLES
@@ -126,8 +131,8 @@ static alp_status_t _errno_to_alp(int err)
 
 /** Whether @p fmt participates in FourCC negotiation at all.  MONO_VLSB /
  *  YUV420_PLANAR / NV12 have no Zephyr video FourCC this backend maps --
- *  a request for one of those leaves the sensor's default format in
- *  place (no set_format call), same as before raw formats existed. */
+ *  z_open() refuses a request for one of those with ALP_ERR_NOSUPPORT
+ *  rather than hand back frames in the sensor's default layout. */
 static bool _pixfmt_is_negotiable(alp_pixfmt_t fmt)
 {
 	switch (fmt) {
@@ -210,6 +215,9 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
 	}
+	if (!_pixfmt_is_negotiable(cfg->format)) {
+		return ALP_ERR_NOSUPPORT;
+	}
 	const struct device *dev = _devs[cfg->camera_id];
 	if (dev == NULL || !device_is_ready(dev)) {
 		return ALP_ERR_NOT_READY;
@@ -239,11 +247,10 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 
 	/* Walk the format_caps list -- accept the first entry whose
      * (pixelformat, width, height) bracket the requested config.
-     * If no portable FourCC is requested or the list is empty the
-     * sensor's default format stays in place. */
-	bool want_negotiation = _pixfmt_is_negotiable(cfg->format);
-	bool fmt_negotiated   = false;
-	if (want_negotiation && vcaps.format_caps != NULL) {
+     * If the driver reports no format list the sensor's default format
+     * stays in place. */
+	bool fmt_negotiated = false;
+	if (vcaps.format_caps != NULL) {
 		for (const struct video_format_cap *fc = vcaps.format_caps; fc->pixelformat != 0u; ++fc) {
 			if (!_fourcc_in_class(cfg->format, fc->pixelformat)) continue;
 			if (cfg->width < fc->width_min || cfg->width > fc->width_max) continue;
@@ -266,7 +273,7 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 			return ALP_ERR_OUT_OF_RANGE;
 		}
 	} else {
-		/* Caller didn't supply a portable format -- read back the
+		/* Driver advertises no format list -- read back the
 		 * sensor's default so our buffer allocations match.  get_format
 		 * reads the endpoint named by fmt.type, so set it first. */
 		st->fmt.type = VIDEO_BUF_TYPE_OUTPUT;
@@ -393,6 +400,12 @@ z_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t t
 	if (err != 0) return _errno_to_alp(err);
 	if (vb == NULL) return ALP_ERR_IO;
 
+	for (uint8_t i = 0; i < st->vbuf_count; ++i) {
+		if (st->vbufs[i] == vb) {
+			st->held[i] = true;
+			break;
+		}
+	}
 	out->data = vb->buffer;
 	out->size = vb->bytesused;
 	/* Zephyr's video_buffer timestamp is milliseconds; expose as
@@ -408,10 +421,18 @@ static alp_status_t z_release(alp_camera_backend_state_t *state, alp_camera_fram
 	if (st == NULL) return ALP_ERR_NOT_READY;
 	if (frame == NULL || frame->data == NULL) return ALP_ERR_INVAL;
 
-	/* Find the vbuf whose buffer pointer matches and re-enqueue it. */
+	/* Find the vbuf whose buffer pointer matches and re-enqueue it, but only
+	 * if the app actually holds it: a second release of the same frame must
+	 * not put a node the driver already owns back into its FIFO. */
 	for (uint8_t i = 0; i < st->vbuf_count; ++i) {
 		if (st->vbufs[i] != NULL && st->vbufs[i]->buffer == frame->data) {
+			if (!st->held[i]) {
+				return ALP_ERR_INVAL;
+			}
 			int err = video_enqueue(st->dev, st->vbufs[i]);
+			if (err == 0) {
+				st->held[i] = false;
+			}
 			return _errno_to_alp(err);
 		}
 	}
