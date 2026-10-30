@@ -3,7 +3,9 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * Alif Ensemble E8 flex-IO bank 1.8 V mode (CONFIG_ALIF_FLEX_IO_1V8).
+ * Alif Ensemble flex-IO bank 1.8 V mode (CONFIG_ALIF_FLEX_IO_1V8), enabled by
+ * default on the E1M-AEN401 / AEN601 (E4 / E6) and AEN801 / AEN803 (E8) boards.
+ * The E4 / E6 VBAT GPIO_CTRL bit 0 behaviour still needs bench confirmation.
  *
  * The flex-IO pads (GPIO7 pins 4..7 and the LPGPIO flex pins on AE822, per
  * the DFP's SOC_FEAT_GPIO7_FLEXIO_PIN_MASK / SOC_FEAT_LPGPIO_FLEXIO_PIN_MASK)

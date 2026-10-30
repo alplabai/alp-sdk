@@ -198,7 +198,9 @@ snapshots back and verifies them.
 
 **Every pad the layer drives needs its GPIO controller enabled in the devicetree**
 (`&gpio5` for the backlight enable, `&gpio11` for the PHY reset, `&lpgpio` for the
-P15_n pads); a disabled controller makes that domain's quiesce fail with
+P15_n pads).  The stock AEN801 / AEN803 / AEN401 board trees enable all three, so no
+per-app overlay is needed on a stock board; a custom board that omits one makes that
+domain's quiesce fail with
 `ALP_ERR_NOT_READY` and the sleep is refused (bench U8). Every refusal prints
 `alif_se_power: refuse step=<n> reason=<...> rc=<raw>` on the console.
 

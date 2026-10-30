@@ -1,0 +1,25 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Hand-maintained (see zephyr/boards/alp/e1m_aen801_m55_hp/Kconfig for why a
+# bare `Kconfig` in a board directory survives regeneration).
+#
+# Selects the custom MRAM MPU region table (zephyr/soc-bridge/alif/
+# mpu_regions_e8.c) in place of Zephyr's generic FLASH_0/SRAM_0 fallback: this
+# board retargets the same MRAM flash controller and carries the same
+# boot/slot0/storage/atoc partition map as AEN801, so flash_mram_alif needs
+# the MRAM_DEVICE read/write window over storage and the SE-owned ATOC span
+# needs the read-only, non-executable MRAM_RESERVED region.  Also defaults
+# ALIF_FLEX_IO_1V8: the SoM supplies VDD_IO_FLEX at 1.8 V on every AEN SKU
+# (zephyr/soc-bridge/alif/flex_io_1v8_e8.c), so the flex pads (RV-3028 /INT on
+# P15_0, E_WIFI_NRST on P15_1) read HIGH.
+
+if BOARD_ALP_E1M_AEN401_M55_HP
+
+config CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS
+	default y
+
+config ALIF_FLEX_IO_1V8
+	default y
+
+endif # BOARD_ALP_E1M_AEN401_M55_HP

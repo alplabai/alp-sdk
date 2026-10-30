@@ -233,8 +233,8 @@ static bool _pads_applied;
 static alp_status_t pin_assert(const struct gpio_dt_spec *s, bool asserted)
 {
 	if (s->port == NULL || !device_is_ready(s->port)) {
-		/* A pad whose GPIO controller is disabled in the devicetree: the board or the
-		 * app overlay must enable it (&gpio5 / &gpio11 for the backlight and PHY reset). */
+		/* A pad whose GPIO controller is disabled in the devicetree: the stock board
+		 * trees enable these ports (&gpio5 / &gpio11 for the backlight and PHY reset). */
 		printk("som_power: pad P?_%u unusable: GPIO controller %s\n",
 		       (unsigned)s->pin,
 		       (s->port == NULL) ? "disabled in the devicetree" : "not ready");
