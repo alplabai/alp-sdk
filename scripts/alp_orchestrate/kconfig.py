@@ -2259,6 +2259,13 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
     # (EXTRA_OECMAKE -> -DALP_SDK_INFERENCE_AUTO_ORDER); only the
     # .alpmodel selector (alp_model_select) consumes it, as a tiebreak.  Weak `?=` so a hand-edited
     # local.conf wins; emitted only for presets that declare it.
+    # Active SoC profile (recipe -> -DALP_SOC); without it the A55 build
+    # sees ALP_SOC_REF_STR "unknown" and silicon_ref-exact backends
+    # (e.g. the V2N UIO/MHU rpc backend) are never selected.
+    soc_symbol = silicon_to_kconfig(project.som_preset.get("silicon"),
+                                    project.effective_metadata_root())
+    if soc_symbol:
+        lines.append(f'ALP_SDK_SOC ?= "{soc_symbol}"')
     auto_order = _inference_auto_order(project.som_preset)
     if auto_order:
         lines.append(f'ALP_SDK_INFERENCE_AUTO_ORDER ?= "{",".join(auto_order)}"')
@@ -2327,6 +2334,14 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
     # so every unrestricted SKU's cmake-args output stays byte-identical.
     if som_unpopulated_capabilities(project.som_preset):
         lines.append(f"-DALP_SOM_{_som_define_slug(project.sku)}")
+    # Plain CMake has no Kconfig, so the SoC profile <alp/soc_caps.h> keys
+    # on (CONFIG_ALP_SOC_*) is handed over as -DALP_SOC=<symbol>; the
+    # top-level CMakeLists.txt turns it into CONFIG_<symbol>=1.  Same
+    # registry lookup as the Zephyr fragment's CONFIG_ALP_SOC_*=y line.
+    soc_symbol = silicon_to_kconfig(project.som_preset.get("silicon"),
+                                    project.effective_metadata_root())
+    if soc_symbol:
+        lines.append(f"-DALP_SOC={soc_symbol}")
     lines.append(f"-DALP_CORE_ID={slice_.core_id}")
     # Cross-EVK board facade selector (<alp/board.h>).
     # Emitted only when the project resolves to a named board preset
