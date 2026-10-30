@@ -131,9 +131,14 @@ boot:
   method: mcuboot                # mcuboot | none
   signing:
     algorithm: ecdsa_p256        # ecdsa_p256 | rsa2048 | rsa3072 | ed25519
-    key_file: keys/prod_ecdsa_p256.pub.pem
+    key_file: keys/prod_ecdsa_p256.pem
   swap_algorithm: scratch        # scratch | move | overwrite
 ```
+
+`key_file:` is relative to the directory holding `board.yaml`, must
+exist, and names a PRIVATE PEM (not a `.pub.pem`, which cannot sign). A
+missing file fails the plan with `OrchestratorError` naming the resolved
+path. Omit `signing:` to use the SDK-anchored default dev key.
 
 Project-wide (one bootloader per device).  The loader emits a
 sysbuild.conf overlay with the corresponding `SB_CONFIG_*` lines

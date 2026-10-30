@@ -6,6 +6,10 @@ MCUBOOT_DIR and the app signer against APPLICATION_CONFIG_DIR/WEST_TOPDIR,
 so neither side found the key. The base no longer carries it; the
 orchestrator passes the shared dev key as an absolute ${SDK_ROOT}-anchored
 -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE when board.yaml boot: names no key_file.
+An explicit boot.signing.key_file that is not a file (relative to the
+board.yaml directory) now fails the plan with OrchestratorError naming the
+resolved path. The iot-fleet-ota and production-deployment examples drop
+boot.signing and use the default key; their READMEs match.
 
 alp_patch_guard.cmake now also covers the patches whose absence builds clean
 and misbehaves at runtime: mcuboot/0001, 0002, 0004 (AEN MRAM), zephyr/0005
