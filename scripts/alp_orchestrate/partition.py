@@ -843,7 +843,10 @@ def resolve_storage_partitions(
     orchestrator").  Customers get reproducible per-rebuild addresses
     by declaring stable `name:` slugs; partitions stay at the same
     offset across rebuilds as long as their relative order doesn't
-    change.  Explicit `offset_kib:` is the escape hatch.
+    change.  Adding, renaming or removing an auto-placed partition
+    re-sorts the list and MOVES every later-sorting auto-placed one, so
+    a shipped (OTA'd) product must pin `offset_kib:` on every partition
+    whose contents must survive an update; pins never move.
     """
     if not project.storage:
         return []
