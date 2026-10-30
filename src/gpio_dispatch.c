@@ -225,10 +225,16 @@ alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin)
 	} else if (pin->state.ops->disable_irq == NULL) {
 		rc = ALP_ERR_NOSUPPORT;
 	} else {
-		rc           = pin->state.ops->disable_irq(&pin->state);
-		pin->edge    = ALP_GPIO_EDGE_NONE;
-		pin->cb      = NULL;
-		pin->cb_user = NULL;
+		rc = pin->state.ops->disable_irq(&pin->state);
+		/* Clear the cached edge/cb only once the backend confirmed the
+		 * interrupt is off: on failure it may still be armed in
+		 * hardware, and a retry must reach the backend again instead
+		 * of short-circuiting to ALP_OK on edge == NONE. */
+		if (rc == ALP_OK) {
+			pin->edge    = ALP_GPIO_EDGE_NONE;
+			pin->cb      = NULL;
+			pin->cb_user = NULL;
+		}
 	}
 	alp_handle_op_leave(&pin->active_ops);
 	return rc;
