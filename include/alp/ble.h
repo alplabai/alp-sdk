@@ -335,11 +335,13 @@ alp_status_t alp_ble_gatt_read(alp_ble_conn_t       *conn,
  * @param[in] timeout_ms  Max wait.
  *
  * @note Same non-cancellable timeout semantics as @ref alp_ble_gatt_read -- see
- *       its note.  In addition, the BT host may re-read @p data after this call
- *       returns: a long write (offset set, or @p len above ATT_MTU-1) is sent as
- *       a prepare-write sequence, and an encryption-change retry re-encodes the
- *       request even for a short write.  @p data must therefore stay valid until
- *       the procedure completes, which a timeout does not guarantee.
+ *       its note.  The BT host may re-read the payload after this call
+ *       returns (a long write is sent as a prepare-write sequence, and an
+ *       encryption-change retry re-encodes the request), so the Zephyr backend
+ *       copies @p data -- at most 512 octets, the GATT attribute limit; a
+ *       larger @p len returns ALP_ERR_INVAL -- into its own pool slot before
+ *       starting the procedure.  The caller's buffer may be reused as soon as
+ *       this call returns, even on ALP_ERR_TIMEOUT.
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
  *         ALP_ERR_IO / ALP_ERR_BUSY (every concurrent-procedure slot is held by

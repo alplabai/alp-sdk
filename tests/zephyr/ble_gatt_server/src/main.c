@@ -51,6 +51,7 @@ extern bool         alp_ble_test_read_ctx_pool_exhausts(size_t *claimed_out);
 extern bool         alp_ble_test_write_ctx_pool_exhausts(size_t *claimed_out);
 extern alp_status_t alp_ble_test_gatt_read_busy(void);
 extern alp_status_t alp_ble_test_gatt_write_busy(void);
+extern alp_status_t alp_ble_test_gatt_write_oversize(void);
 
 ZTEST_SUITE(alp_ble_gatt_server, NULL, NULL, NULL, NULL, NULL);
 
@@ -364,4 +365,13 @@ ZTEST(alp_ble_gatt_server, test_client_gatt_write_refuses_busy_when_pool_exhaust
 	zassert_equal(alp_ble_test_gatt_write_busy(),
 	              ALP_ERR_BUSY,
 	              "z_gatt_write() must refuse with ALP_ERR_BUSY once the ctx pool is exhausted");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_gatt_write_refuses_payload_above_attribute_limit)
+{
+	/* The payload is copied into pool storage sized for the 512-octet GATT
+	 * attribute limit; anything larger is refused, not truncated to uint16. */
+	zassert_equal(alp_ble_test_gatt_write_oversize(),
+	              ALP_ERR_INVAL,
+	              "z_gatt_write() must refuse a payload above 512 octets with ALP_ERR_INVAL");
 }
