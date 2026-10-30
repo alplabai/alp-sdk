@@ -234,9 +234,24 @@ def test_an_explicit_key_file_replaces_the_default_define_with_an_anchored_one(
     (MCUboot and the signer would resolve it elsewhere), and the SDK dev key
     must not also be passed."""
     board_yaml, project = _project(tmp_path, AEN_METHOD_OMITTED)
+    (tmp_path / "keys").mkdir()
+    (tmp_path / "keys" / "dev_ecdsa_p256.pem").write_text("pem", encoding="utf-8")
     assert "SB_CONFIG_BOOT_SIGNATURE_KEY_FILE" not in emit_sysbuild_conf(project)
     plan = _plan(tmp_path, board_yaml, project)
     cmds = json.dumps(plan["slices"]).replace('\\"', '"')
     assert ('-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE='
             '"${PROJECT_ROOT}/keys/dev_ecdsa_p256.pem"') in cmds
     assert "mcuboot_shared_dev_ecdsa_p256" not in cmds
+
+
+def test_a_missing_explicit_key_file_is_refused_naming_the_resolved_path(
+        tmp_path):
+    """key_file is resolved against the board.yaml directory.  A key that is
+    not there must fail the plan emit, not surface later as an imgtool or
+    CMake error."""
+    board_yaml, project = _project(tmp_path, AEN_METHOD_OMITTED)
+    with pytest.raises(OrchestratorError) as exc:
+        _plan(tmp_path, board_yaml, project)
+    msg = str(exc.value)
+    assert "keys/dev_ecdsa_p256.pem" in msg
+    assert "not a file" in msg

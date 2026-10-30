@@ -113,6 +113,14 @@ boot:
 """
 
 
+def _write_boot_board(tmp_path: Path, name: str = "board.yaml") -> Path:
+    """Write V2N_BOOT_MCUBOOT plus the key its `key_file:` names, since the
+    planner refuses a signing key that is not a file."""
+    (tmp_path / "keys").mkdir(exist_ok=True)
+    (tmp_path / "keys" / "dev_rsa.pem").write_text("pem", encoding="utf-8")
+    return _write_board(tmp_path, V2N_BOOT_MCUBOOT, name=name)
+
+
 V2N_OFF_AND_COMMANDLESS = """
 som:
   sku: E1M-V2N101
@@ -630,7 +638,7 @@ def test_emit_build_plan_carries_boot_sysbuild_conf(
     import json as _json
     from alp_orchestrate import emit_build_plan
 
-    path = _write_board(tmp_path, V2N_BOOT_MCUBOOT)
+    path = _write_boot_board(tmp_path)
     build_root = tmp_path / "build"
     plan = _json.loads(emit_build_plan(
         load_board_yaml(path), board_yaml=path, build_root=build_root))
@@ -655,7 +663,7 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     from alp_orchestrate import emit_build_plan
 
     # With boot: -> sysbuild overlay emitted -> command carries the flags.
-    path = _write_board(tmp_path, V2N_BOOT_MCUBOOT)
+    path = _write_boot_board(tmp_path)
     plan = _json.loads(emit_build_plan(
         load_board_yaml(path), board_yaml=path, build_root=Path("build")))
     z = next(s for s in plan["slices"]
@@ -741,7 +749,10 @@ def test_zephyr_slice_command_invents_no_west_flags(tmp_path: Path) -> None:
 
     for src, name in ((V2N_BOOT_MCUBOOT, "board-boot.yaml"),
                       (V2N_HAPPY, "board-noboot.yaml")):
-        path = _write_board(tmp_path, src, name=name)
+        if src is V2N_BOOT_MCUBOOT:
+            path = _write_boot_board(tmp_path, name=name)
+        else:
+            path = _write_board(tmp_path, src, name=name)
         plan = _json.loads(emit_build_plan(
             load_board_yaml(path), board_yaml=path,
             build_root=Path("build")))

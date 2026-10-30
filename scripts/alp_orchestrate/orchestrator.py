@@ -490,6 +490,12 @@ def _slice_command(
                     key_path = Path(user_key)
                     if not key_path.is_absolute():
                         key_path = base_dir / key_path
+                    if not key_path.is_file():
+                        raise OrchestratorError(
+                            "boot.signing.key_file resolves to "
+                            f"{key_path.as_posix()}, which is not a file; "
+                            "key_file is relative to the board.yaml "
+                            "directory (or give an absolute path)")
                     try:
                         key_val = _tokenize(key_path, base_dir, REPO)
                     except UnrootedPathError:

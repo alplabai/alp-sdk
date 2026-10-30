@@ -65,3 +65,17 @@ moved since 97ad481b) once imx93 r1 carries a buildable status.
 Note (alp-sdk#2781): the `multicore_rpmsg-imx93` fixture described above was
 removed together with E1M-NX9101 / the rpmsg-imx93 example; it is no longer
 in the corpus.
+
+Hand-reviewed field correction (alp-sdk#2949/#2950, "sysbuild signing-key
+path"): `connectivity_iot-fleet-ota.build-plan.json` slices[0]/[1]
+`command.args` gained `-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="<root>/keys/
+mcuboot_shared_dev_ecdsa_p256.pem"`, placed directly after `-DSB_CONF_FILE=...`.
+The curated AEN sysbuild base used to carry the key as a bare relative path,
+which MCUboot resolves against MCUBOOT_DIR and the app signer against
+APPLICATION_CONFIG_DIR/WEST_TOPDIR, so neither found the key. The planner now
+passes the committed shared dev key (it exists at `<root>/keys/`) as an
+absolute, SDK-anchored -D on the command line instead. The example's board.yaml
+no longer declares `boot.signing`, so the planner's default key applies. This
+corrects a source-level path bug, not a comparator allowance, same class as
+alp-sdk#862 above. These two args are the only fields touched; every other
+value in this fixture is untouched, still frozen at 97ad481b.
