@@ -132,12 +132,26 @@ typedef struct {
 	size_t          tx_count;
 
 	alp_can_state_t bus_state;
+	/* Handle state that opened this slot; cleared on close and by
+	 * alp_testing_reset_all() so stale handles are detected. */
+	const void *owner;
 } alp_testing_can_slot_t;
 
 static alp_testing_can_slot_t       g_slots[ALP_TESTING_CAN_MAX_BUSES];
 static alp_testing_slot_hdr_t       g_hdrs[ALP_TESTING_CAN_MAX_BUSES];
 static alp_testing_instance_table_t g_table;
 static bool                         g_table_ready;
+
+/* Resolve the slot a handle may touch.  alp_testing_reset_all() wipes
+ * the slot (owner included), so a handle left open across a reset, or
+ * whose slot a newer handle has since taken, no longer matches and its
+ * ops fail instead of touching the next occupant. */
+static alp_testing_can_slot_t *live_slot(alp_can_backend_state_t *st)
+{
+	alp_testing_can_slot_t *slot = (alp_testing_can_slot_t *)st->be_data;
+	if (slot == NULL || slot->owner != (const void *)st) return NULL;
+	return slot;
+}
 
 /* Every field's zero value IS the correct "never touched" state
  * (no filters in_use, empty TX ring, ALP_CAN_STATE_ERROR_ACTIVE == 0)
@@ -300,6 +314,7 @@ t_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 	st->dev     = NULL;
 	st->bus_id  = cfg->bus_id;
 	st->be_data = slot;
+	slot->owner = st;
 	return ALP_OK;
 }
 
@@ -319,7 +334,7 @@ static alp_status_t
 t_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame, uint32_t timeout_ms)
 {
 	(void)timeout_ms; /* the double's TX capture ring never blocks -- see file header. */
-	alp_testing_can_slot_t *slot = (alp_testing_can_slot_t *)st->be_data;
+	alp_testing_can_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 
 	if (slot->bus_state == ALP_CAN_STATE_BUS_OFF) return ALP_ERR_IO;
@@ -338,7 +353,7 @@ static alp_status_t t_add_filter(alp_can_backend_state_t *st,
                                  void                    *user,
                                  int32_t                 *filter_id_out)
 {
-	alp_testing_can_slot_t *slot = (alp_testing_can_slot_t *)st->be_data;
+	alp_testing_can_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 
 	int free_i = -1;
@@ -363,7 +378,7 @@ static alp_status_t t_add_filter(alp_can_backend_state_t *st,
 
 static alp_status_t t_remove_filter(alp_can_backend_state_t *st, int32_t filter_id)
 {
-	alp_testing_can_slot_t *slot = (alp_testing_can_slot_t *)st->be_data;
+	alp_testing_can_slot_t *slot = live_slot(st);
 	if (slot == NULL) return ALP_ERR_NOT_READY;
 
 	for (size_t i = 0; i < ALP_TESTING_CAN_MAX_FILTERS; ++i) {
@@ -378,14 +393,18 @@ static alp_status_t t_remove_filter(alp_can_backend_state_t *st, int32_t filter_
 
 static void t_close(alp_can_backend_state_t *st)
 {
-	alp_testing_can_slot_t *slot = (alp_testing_can_slot_t *)st->be_data;
-	if (slot == NULL) return;
+	alp_testing_can_slot_t *slot = live_slot(st);
+	if (slot == NULL) {
+		st->be_data = NULL;
+		return;
+	}
 	/* Cut the filter wiring so an injection that arrives after close
 	 * cannot call back into a handle the dispatcher has already
 	 * returned to the pool -- mirrors z_close()'s (zephyr_drv.c)
 	 * "unregister every filter still installed" + the GPIO double's
 	 * t_close(). */
 	clear_filters(slot);
+	slot->owner = NULL;
 	st->be_data = NULL;
 }
 

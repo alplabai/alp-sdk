@@ -41,6 +41,7 @@
 #include <stdint.h>
 
 #include <alp/protocol/amp_beacon.h>
+#include <alp/static_assert.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -113,13 +114,8 @@ typedef struct {
 	                              *   since start.  Rows >= 32 are not reported. */
 } alp_gd32_results_t;
 
-#ifdef __cplusplus
-static_assert(sizeof(alp_gd32_results_t) == ALP_GD32_RESULTS_WORDS * 4u,
-              "alp_gd32_results_t must stay 20 words");
-#else
-_Static_assert(sizeof(alp_gd32_results_t) == ALP_GD32_RESULTS_WORDS * 4u,
-               "alp_gd32_results_t must stay 20 words");
-#endif
+ALP_STATIC_ASSERT(sizeof(alp_gd32_results_t) == ALP_GD32_RESULTS_WORDS * 4u,
+                  "alp_gd32_results_t must stay 20 words");
 
 /** Byte offset of the fault block inside the `rsctbl` window. */
 #define ALP_GD32_FAULT_OFFSET 0xF50u
@@ -155,13 +151,8 @@ typedef struct {
 	uint32_t sp;          /**< Address of the exception frame (close to the faulting SP). */
 } alp_gd32_fault_t;
 
-#ifdef __cplusplus
-static_assert(sizeof(alp_gd32_fault_t) == ALP_GD32_FAULT_WORDS * 4u,
-              "alp_gd32_fault_t must stay 12 words");
-#else
-_Static_assert(sizeof(alp_gd32_fault_t) == ALP_GD32_FAULT_WORDS * 4u,
-               "alp_gd32_fault_t must stay 12 words");
-#endif
+ALP_STATIC_ASSERT(sizeof(alp_gd32_fault_t) == ALP_GD32_FAULT_WORDS * 4u,
+                  "alp_gd32_fault_t must stay 12 words");
 
 /** Byte offset of the liveness beacon inside the `rsctbl` window. */
 #define ALP_GD32_RESULTS_BEACON_OFFSET 0xFF0u

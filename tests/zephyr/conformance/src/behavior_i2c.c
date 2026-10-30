@@ -327,3 +327,24 @@ ZTEST(alp_testing_i2c_behavior, test_target_open_is_nosupport_on_this_double)
 	              "target_open() failure must surface ALP_ERR_NOSUPPORT (target_open left NULL "
 	              "in this double's ops table)");
 }
+
+/* A handle left open across alp_testing_reset_all() must not alias the
+ * slot's next occupant: ops fail instead of touching another instance. */
+ZTEST(alp_testing_i2c_behavior, test_stale_handle_after_reset_fails)
+{
+	alp_i2c_t *stale = open_bus(3);
+	zassert_not_null(stale, "i2c test double must open ANY instance");
+
+	alp_testing_reset_all();
+	/* Takes over the slot the stale handle used to occupy. */
+	alp_i2c_t *h = open_bus(4);
+	zassert_not_null(h, "re-open after reset_all() failed");
+
+	const uint8_t msg[] = { 0x01 };
+	zassert_equal(alp_i2c_write(stale, 0x50, msg, sizeof(msg)),
+	              ALP_ERR_NOT_READY,
+	              "stale handle op must fail");
+
+	alp_i2c_close(stale);
+	alp_i2c_close(h);
+}

@@ -30,6 +30,11 @@ extern "C" {
  * edges, callbacks, counters -- everything a test may have injected
  * or that a prior open() populated).  Call this in a test fixture's
  * setup/teardown so cases don't leak state into one another.
+ *
+ * A handle opened before the reset is invalidated: its operations
+ * return @ref ALP_ERR_NOT_READY afterwards (the wiped slot may since
+ * have been rebound to another instance), so re-open handles after
+ * each reset rather than holding one across cases.
  */
 void alp_testing_reset_all(void);
 

@@ -57,6 +57,12 @@ uint64_t alp_testing_clock_now_ms(void);
  * synchronously on the calling thread -- never on an ISR or a
  * separate thread, and this call never sleeps or blocks.
  *
+ * While an event's callback runs, @ref alp_testing_clock_now_ms
+ * returns that event's own timestamp (never earlier than the
+ * pre-advance now; an event armed in the past fires at the current
+ * time), and "now" ends at the advanced time.  Events the callback
+ * schedules at or before the new now fire within the same call.
+ *
  * @param[in] ms  Milliseconds to advance by.
  *
  * @return ALP_OK on success; ALP_ERR_INVAL if advancing would overflow

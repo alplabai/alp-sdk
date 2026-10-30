@@ -18,14 +18,13 @@
 #ifndef ALP_CHIPS_CC3501E_CORE_H
 #define ALP_CHIPS_CC3501E_CORE_H
 
-#include <assert.h> /* static_assert (C11) / _Static_assert fallback -- see the
-                      * cc3501e_link_log_entry_t size check below */
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
 
 #include "alp/peripheral.h"
 #include "alp/protocol/cc3501e.h"
+#include "alp/static_assert.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -168,10 +167,8 @@ typedef struct {
 	                                      *   doc comment. */
 } cc3501e_link_log_entry_t;
 
-#if defined(__cplusplus) || (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L)
-static_assert(sizeof(cc3501e_link_log_entry_t) == 20u,
-              "cc3501e_link_log_entry_t drifted from 20 bytes");
-#endif
+ALP_STATIC_ASSERT(sizeof(cc3501e_link_log_entry_t) == 20u,
+                  "cc3501e_link_log_entry_t drifted from 20 bytes");
 
 /** Value cc3501e_request_locked() (cc3501e_core.c) writes into
  *  @ref cc3501e::rx_scratch's byte 0 on every PRE-DECODE exit -- a failed

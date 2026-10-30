@@ -41,6 +41,8 @@
 
 #include <stdint.h>
 
+#include <alp/static_assert.h>
+
 #define ALP_AMP_BEACON_MAGIC 0xA10D0683u /* "Alp Lab, #683" */
 
 /** First beacon version whose firmware acknowledges an attach reset. */
@@ -67,8 +69,8 @@ struct alp_amp_beacon {
 	uint32_t attach_epoch;
 };
 
-_Static_assert(sizeof(struct alp_amp_beacon) == ALP_AMP_BEACON_SIZE,
-               "alp_amp_beacon must be exactly the 16 bytes the A55 side reads");
+ALP_STATIC_ASSERT(sizeof(struct alp_amp_beacon) == ALP_AMP_BEACON_SIZE,
+                  "alp_amp_beacon must be exactly the 16 bytes the A55 side reads");
 
 /** Beacon of the rsctbl page starting at `base` and `page_size` bytes long. */
 #define ALP_AMP_BEACON_AT(base, page_size) \

@@ -50,6 +50,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include <alp/static_assert.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1869,67 +1871,67 @@ typedef struct {
 /* (A) Directly-serialized command payloads -- struct-punned on both   */
 /*     sides (chips/cc3501e/cc3501e.c hands &struct to the SPI DMA;    */
 /*     cc3501e-bridge-firmware:src/protocol.c casts the wire buffer to T*).   */
-_Static_assert(sizeof(alp_cc3501e_gpio_configure_t) == 4u,
-               "gpio_configure wire header must stay 4 bytes / padding-free");
-_Static_assert(offsetof(alp_cc3501e_gpio_configure_t, cc3501e_gpio) == 0u, "gpio_configure @0");
-_Static_assert(offsetof(alp_cc3501e_gpio_configure_t, direction) == 1u,
-               "gpio_configure.direction @1");
-_Static_assert(offsetof(alp_cc3501e_gpio_configure_t, pull) == 2u, "gpio_configure.pull @2");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_gpio_configure_t) == 4u,
+                  "gpio_configure wire header must stay 4 bytes / padding-free");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_gpio_configure_t, cc3501e_gpio) == 0u, "gpio_configure @0");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_gpio_configure_t, direction) == 1u,
+                  "gpio_configure.direction @1");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_gpio_configure_t, pull) == 2u, "gpio_configure.pull @2");
 
-_Static_assert(sizeof(alp_cc3501e_gpio_write_t) == 4u,
-               "gpio_write wire header must stay 4 bytes / padding-free");
-_Static_assert(offsetof(alp_cc3501e_gpio_write_t, cc3501e_gpio) == 0u, "gpio_write @0");
-_Static_assert(offsetof(alp_cc3501e_gpio_write_t, level) == 1u, "gpio_write.level @1");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_gpio_write_t) == 4u,
+                  "gpio_write wire header must stay 4 bytes / padding-free");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_gpio_write_t, cc3501e_gpio) == 0u, "gpio_write @0");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_gpio_write_t, level) == 1u, "gpio_write.level @1");
 
-_Static_assert(sizeof(alp_cc3501e_gpio_set_interrupt_t) == 4u,
-               "gpio_set_interrupt wire header must stay 4 bytes / padding-free");
-_Static_assert(offsetof(alp_cc3501e_gpio_set_interrupt_t, cc3501e_gpio) == 0u, "gpio_irq @0");
-_Static_assert(offsetof(alp_cc3501e_gpio_set_interrupt_t, edge) == 1u, "gpio_irq.edge @1");
-_Static_assert(offsetof(alp_cc3501e_gpio_set_interrupt_t, enabled) == 2u, "gpio_irq.enabled @2");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_gpio_set_interrupt_t) == 4u,
+                  "gpio_set_interrupt wire header must stay 4 bytes / padding-free");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_gpio_set_interrupt_t, cc3501e_gpio) == 0u, "gpio_irq @0");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_gpio_set_interrupt_t, edge) == 1u, "gpio_irq.edge @1");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_gpio_set_interrupt_t, enabled) == 2u, "gpio_irq.enabled @2");
 
-_Static_assert(sizeof(alp_cc3501e_wifi_connect_t) == 4u,
-               "wifi_connect wire header must stay 4 bytes / padding-free");
-_Static_assert(offsetof(alp_cc3501e_wifi_connect_t, ssid_len) == 0u, "wifi_connect.ssid_len @0");
-_Static_assert(offsetof(alp_cc3501e_wifi_connect_t, psk_len) == 1u, "wifi_connect.psk_len @1");
-_Static_assert(offsetof(alp_cc3501e_wifi_connect_t, security) == 2u, "wifi_connect.security @2");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_wifi_connect_t) == 4u,
+                  "wifi_connect wire header must stay 4 bytes / padding-free");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_wifi_connect_t, ssid_len) == 0u, "wifi_connect.ssid_len @0");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_wifi_connect_t, psk_len) == 1u, "wifi_connect.psk_len @1");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_wifi_connect_t, security) == 2u, "wifi_connect.security @2");
 
 /* gpio_event is wire-shaped (async EVT_GPIO_INTERRUPT payload) and has a
  * uint32_t, so alignment -- not just tail padding -- pins its layout.
  * End-to-end async delivery is not wired yet (#130); guard it now so the
  * layout is locked when it is. */
-_Static_assert(sizeof(alp_cc3501e_gpio_event_t) == 8u, "gpio_event payload must stay 8 bytes");
-_Static_assert(offsetof(alp_cc3501e_gpio_event_t, timestamp_us) == 4u,
-               "gpio_event.timestamp_us @4");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_gpio_event_t) == 8u, "gpio_event payload must stay 8 bytes");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_gpio_event_t, timestamp_us) == 4u,
+                  "gpio_event.timestamp_us @4");
 
 /* (B) Schema structs whose sizeof() is the firmware's expected payload
  *     length for the socket ops (protocol.c handle_sock_*).  Field access
  *     is byte-offset on both sides; pin the size so a reorder can't move
  *     the length constant without failing the build. */
-_Static_assert(sizeof(alp_cc3501e_sock_open_t) == 4u, "sock_open wire length");
-_Static_assert(sizeof(alp_cc3501e_sock_handle_t) == 4u, "sock_handle wire length");
-_Static_assert(sizeof(alp_cc3501e_sock_connect_t) == 24u, "sock_connect wire length");
-_Static_assert(sizeof(alp_cc3501e_sock_send_t) == 8u, "sock_send wire header length");
-_Static_assert(sizeof(alp_cc3501e_sock_recv_t) == 4u, "sock_recv wire length");
-_Static_assert(sizeof(alp_cc3501e_sock_recv_resp_t) == 24u, "sock_recv_resp wire header length");
-_Static_assert(sizeof(alp_cc3501e_sock_close_t) == 4u, "sock_close wire length");
-_Static_assert(sizeof(alp_cc3501e_sock_addr_t) == 20u, "sock_addr wire length");
-_Static_assert(sizeof(alp_cc3501e_capabilities_t) == 8u, "capabilities wire length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_sock_open_t) == 4u, "sock_open wire length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_sock_handle_t) == 4u, "sock_handle wire length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_sock_connect_t) == 24u, "sock_connect wire length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_sock_send_t) == 8u, "sock_send wire header length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_sock_recv_t) == 4u, "sock_recv wire length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_sock_recv_resp_t) == 24u, "sock_recv_resp wire header length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_sock_close_t) == 4u, "sock_close wire length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_sock_addr_t) == 20u, "sock_addr wire length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_capabilities_t) == 8u, "capabilities wire length");
 /* MAJOR 0 is reserved to mean "firmware predates the MAJOR.MINOR scheme and is
  * answering with a raw v1..v9 integer" -- see the version block at the top.  A
  * release that shipped MAJOR 0 would be indistinguishable from that legacy
  * case, so the contract is pinned here rather than left to review. */
-_Static_assert(ALP_CC3501E_PROTOCOL_MAJOR >= 1, "MAJOR 0 is reserved for pre-scheme firmware");
-_Static_assert(ALP_CC3501E_PROTOCOL_MAJOR <= 255 && ALP_CC3501E_PROTOCOL_MINOR <= 255,
-               "each half of the wire version must fit its byte");
-_Static_assert(ALP_CC3501E_PROTOCOL_VERSION_MAJOR(ALP_CC3501E_PROTOCOL_VERSION) ==
-                   ALP_CC3501E_PROTOCOL_MAJOR,
-               "GET_VERSION encoding must round-trip MAJOR");
-_Static_assert(ALP_CC3501E_PROTOCOL_VERSION_MINOR(ALP_CC3501E_PROTOCOL_VERSION) ==
-                   ALP_CC3501E_PROTOCOL_MINOR,
-               "GET_VERSION encoding must round-trip MINOR");
+ALP_STATIC_ASSERT(ALP_CC3501E_PROTOCOL_MAJOR >= 1, "MAJOR 0 is reserved for pre-scheme firmware");
+ALP_STATIC_ASSERT(ALP_CC3501E_PROTOCOL_MAJOR <= 255 && ALP_CC3501E_PROTOCOL_MINOR <= 255,
+                  "each half of the wire version must fit its byte");
+ALP_STATIC_ASSERT(ALP_CC3501E_PROTOCOL_VERSION_MAJOR(ALP_CC3501E_PROTOCOL_VERSION) ==
+                      ALP_CC3501E_PROTOCOL_MAJOR,
+                  "GET_VERSION encoding must round-trip MAJOR");
+ALP_STATIC_ASSERT(ALP_CC3501E_PROTOCOL_VERSION_MINOR(ALP_CC3501E_PROTOCOL_VERSION) ==
+                      ALP_CC3501E_PROTOCOL_MINOR,
+                  "GET_VERSION encoding must round-trip MINOR");
 
-_Static_assert(sizeof(alp_cc3501e_sock_bind_t) == 24u, "sock_bind wire length");
-_Static_assert(sizeof(alp_cc3501e_sock_listen_t) == 4u, "sock_listen wire length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_sock_bind_t) == 24u, "sock_bind wire length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_sock_listen_t) == 4u, "sock_listen wire length");
 /* The accepted-connection event rides the firmware event ring, whose per-entry
  * payload is capped at @ref ALP_CC3501E_EVENT_PAYLOAD_MAX.  A payload over that
  * cap is CLAMPED by event_ring_push(), i.e. silently truncated on the wire, so
@@ -1937,29 +1939,29 @@ _Static_assert(sizeof(alp_cc3501e_sock_listen_t) == 4u, "sock_listen wire length
  * bench.  The second assert tests the CAP SYMBOL, not a repeated literal: the
  * firmware sizes its ring slots from the same constant, so resizing the ring
  * moves both sides together instead of leaving this pinning a stale 16. */
-_Static_assert(sizeof(alp_cc3501e_sock_accepted_evt_t) == 12u, "sock_accepted event length");
-_Static_assert(sizeof(alp_cc3501e_sock_accepted_evt_t) <= ALP_CC3501E_EVENT_PAYLOAD_MAX,
-               "sock_accepted must fit ALP_CC3501E_EVENT_PAYLOAD_MAX");
-_Static_assert(offsetof(alp_cc3501e_sock_accepted_evt_t, peer_addr) == 8u,
-               "sock_accepted.peer_addr @8");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_sock_accepted_evt_t) == 12u, "sock_accepted event length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_sock_accepted_evt_t) <= ALP_CC3501E_EVENT_PAYLOAD_MAX,
+                  "sock_accepted must fit ALP_CC3501E_EVENT_PAYLOAD_MAX");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_sock_accepted_evt_t, peer_addr) == 8u,
+                  "sock_accepted.peer_addr @8");
 
 /* (B) SPI1 host passthrough -- same deal as the socket ops: the firmware uses
  *     sizeof(T) as the expected header length and both sides byte-parse the
  *     wider fields, so pin the sizes AND the offsets a hand-rolled LE codec
  *     reads from. */
-_Static_assert(sizeof(alp_cc3501e_spi1_configure_t) == 8u, "spi1_configure wire length");
-_Static_assert(offsetof(alp_cc3501e_spi1_configure_t, mode) == 4u, "spi1_configure.mode @4");
-_Static_assert(offsetof(alp_cc3501e_spi1_configure_t, cs) == 6u, "spi1_configure.cs @6");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_spi1_configure_t) == 8u, "spi1_configure wire length");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_spi1_configure_t, mode) == 4u, "spi1_configure.mode @4");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_spi1_configure_t, cs) == 6u, "spi1_configure.cs @6");
 
-_Static_assert(sizeof(alp_cc3501e_spi1_config_resp_t) == 8u, "spi1_config_resp wire length");
-_Static_assert(offsetof(alp_cc3501e_spi1_config_resp_t, max_xfer) == 4u,
-               "spi1_config_resp.max_xfer @4");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_spi1_config_resp_t) == 8u, "spi1_config_resp wire length");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_spi1_config_resp_t, max_xfer) == 4u,
+                  "spi1_config_resp.max_xfer @4");
 
-_Static_assert(sizeof(alp_cc3501e_spi1_transfer_t) == 8u, "spi1_transfer wire header length");
-_Static_assert(offsetof(alp_cc3501e_spi1_transfer_t, flags) == 2u, "spi1_transfer.flags @2");
-_Static_assert(offsetof(alp_cc3501e_spi1_transfer_t, tx_fill) == 4u, "spi1_transfer.tx_fill @4");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_spi1_transfer_t) == 8u, "spi1_transfer wire header length");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_spi1_transfer_t, flags) == 2u, "spi1_transfer.flags @2");
+ALP_STATIC_ASSERT(offsetof(alp_cc3501e_spi1_transfer_t, tx_fill) == 4u, "spi1_transfer.tx_fill @4");
 
-_Static_assert(sizeof(alp_cc3501e_spi1_transfer_resp_t) == 4u, "spi1_transfer_resp wire length");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_spi1_transfer_resp_t) == 4u, "spi1_transfer_resp wire length");
 
 /* The chunk bound is arithmetic, not a taste call: pin it so widening a header
  * truncates the BUILD instead of the wire.  MAX_XFER saturates the request
@@ -1967,20 +1969,21 @@ _Static_assert(sizeof(alp_cc3501e_spi1_transfer_resp_t) == 4u, "spi1_transfer_re
  * alp_cc3501e_spi1_transfer_t without lowering MAX_XFER overflows the frame, and
  * these two asserts exist precisely to make that a compile error.  Do not delete
  * them to "fix" that build failure; lower MAX_XFER instead. */
-_Static_assert(sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER ==
-                   ALP_CC3501E_MAX_PAYLOAD,
-               "spi1 chunk must exactly saturate the request payload");
-_Static_assert(1u + sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER <=
-                   ALP_CC3501E_MAX_PAYLOAD,
-               "spi1 reply (status + header + rx, before pad) must fit the reply payload");
+ALP_STATIC_ASSERT(sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER ==
+                      ALP_CC3501E_MAX_PAYLOAD,
+                  "spi1 chunk must exactly saturate the request payload");
+ALP_STATIC_ASSERT(1u + sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER <=
+                      ALP_CC3501E_MAX_PAYLOAD,
+                  "spi1 reply (status + header + rx, before pad) must fit the reply payload");
 
 /* The canonical 7-byte-wire / 8-byte-struct case the issue calls out
  * (#733): alp_cc3501e_ble_adv_start_t is hand-packed to 7 bytes on both
  * sides PRECISELY because its C sizeof is 8 (tail pad after adv_data_len).
  * Assert the 8 so nobody "optimises" the hand-packing into a memcpy that
  * would ship the pad byte. */
-_Static_assert(sizeof(alp_cc3501e_ble_adv_start_t) == 8u,
-               "ble_adv_start struct is 8 bytes; wire header is hand-packed to 7 -- do NOT memcpy");
+ALP_STATIC_ASSERT(
+    sizeof(alp_cc3501e_ble_adv_start_t) == 8u,
+    "ble_adv_start struct is 8 bytes; wire header is hand-packed to 7 -- do NOT memcpy");
 
 /* ---- OTA firmware update (over-the-bridge PSA-FWU streaming) ---------------- */
 

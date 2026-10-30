@@ -4141,6 +4141,10 @@
       "header": "include/alp/soc_caps.h"
     },
     {
+      "functions": [],
+      "header": "include/alp/static_assert.h"
+    },
+    {
       "functions": [
         "alp_storage_capabilities",
         "alp_storage_close",

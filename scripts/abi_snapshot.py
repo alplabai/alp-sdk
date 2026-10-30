@@ -413,14 +413,14 @@ _TYPEDEF_ALIAS_RE = re.compile(
     r"^typedef\s+(?P<body>[A-Za-z_][\w\s*]*?)\s+(?P<name>[A-Za-z_]\w*)\s*;$"
 )
 
-# _Static_assert(...) / static_assert(...);  -- a compile-time-only
+# _Static_assert(...) / static_assert(...) / ALP_STATIC_ASSERT(...);  -- a compile-time-only
 # guard (e.g. hw_info.h's packing check on alp_hw_info_eeprom_t).  It
 # emits no symbol and isn't part of the callable/linkable surface, so
 # it is recognised and deliberately excluded from every category
 # rather than falling through to _FUNC_RE and being mis-recorded as a
 # bogus function (its "name" would be whatever token follows the
 # leading underscore).
-_STATIC_ASSERT_RE = re.compile(r"^(?:_Static_assert|static_assert)\s*\(.*\)\s*;$")
+_STATIC_ASSERT_RE = re.compile(r"^(?:_Static_assert|static_assert|ALP_STATIC_ASSERT)\s*\(.*\)\s*;$")
 
 # extern <type> <name>[<size>];  -- a public extern variable / array
 # declaration (e.g. a board-provided route table the app is expected to

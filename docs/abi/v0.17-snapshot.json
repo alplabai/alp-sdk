@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-21",
+  "generated": "2026-10-29",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -14903,6 +14903,17 @@
         "ALP_SOC_XSPI_DMA": {
           "hash": "750f4b5f44088a6f",
           "value": "UINT16_MAX"
+        }
+      },
+      "typedefs": {},
+      "variables": {}
+    },
+    "alp/static_assert.h": {
+      "functions": {},
+      "macros": {
+        "ALP_STATIC_ASSERT": {
+          "hash": "7533ad949187218e",
+          "value": "(cond, msg) extern int alp_static_assert_unused_"
         }
       },
       "typedefs": {},

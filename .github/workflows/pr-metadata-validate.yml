@@ -538,6 +538,8 @@ jobs:
 
       - name: Gate — root public headers stay chip-neutral
         run: python3 scripts/check_public_header_purity.py
+      - name: Gate — public headers compile as C++17
+        run: python3 scripts/check_public_header_purity.py --cxx --require-cxx
       - name: Gate — no hard-coded home-directory paths in build/exec files
         run: python3 scripts/check_local_paths.py
 
