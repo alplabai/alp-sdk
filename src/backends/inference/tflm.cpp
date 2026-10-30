@@ -130,7 +130,8 @@ constexpr size_t kDefaultArenaBytes = 128 * 1024;
 alignas(16) uint8_t g_default_arena[kDefaultArenaBytes];
 bool g_default_arena_in_use = false;
 
-/* Map a TFL data type onto the alp_inference dtype enum. */
+/* Map a TFL data type onto the alp_inference dtype enum.  Only types
+ * tfl_dtype_known() accepts reach here (tflm_open() refuses the rest). */
 alp_inference_dtype_t tfl_dtype_to_alp(TfLiteType t)
 {
 	switch (t) {
@@ -147,11 +148,29 @@ alp_inference_dtype_t tfl_dtype_to_alp(TfLiteType t)
 	case kTfLiteInt32:
 		return ALP_INFERENCE_DTYPE_INT32;
 	default:
-		return ALP_INFERENCE_DTYPE_F32;
+		return ALP_INFERENCE_DTYPE_F32; /* unreachable: refused by all_tensor_dtypes_known() */
 	}
 }
 
-void register_default_ops(tflite::MicroMutableOpResolver<32> &r)
+/* True when @p t has an alp_inference dtype.  int64, bool, int4, complex ...
+ * have none; reporting them as F32 made the app reinterpret 1- or 8-byte
+ * elements as floats. */
+bool tfl_dtype_known(TfLiteType t)
+{
+	switch (t) {
+	case kTfLiteFloat32:
+	case kTfLiteFloat16:
+	case kTfLiteInt8:
+	case kTfLiteUInt8:
+	case kTfLiteInt16:
+	case kTfLiteInt32:
+		return true;
+	default:
+		return false;
+	}
+}
+
+void register_default_ops(tflite::MicroMutableOpResolver<32> &r, bool allow_ethos_u)
 {
 	/* Minimum op set for the v0.2 reference MobileNetV2.  Vela-
      * compiled models replace the bulk of these with Ethos-U
@@ -174,7 +193,12 @@ void register_default_ops(tflite::MicroMutableOpResolver<32> &r)
 	r.AddRelu6();
 	r.AddLogistic();
 #if defined(ALP_INFERENCE_TFLM_HAS_ETHOS_U)
-	r.AddEthosU();
+	/* Skipped on an explicit BACKEND_CPU pin, so the pin cannot offload. */
+	if (allow_ethos_u) {
+		r.AddEthosU();
+	}
+#else
+	(void)allow_ethos_u;
 #endif
 }
 
@@ -221,6 +245,23 @@ bool all_tensor_ranks_fit(tflite::MicroInterpreter *interp)
 	}
 	for (size_t i = 0; i < interp->outputs_size(); ++i) {
 		if (interp->output(i)->dims->size > 4) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/** True when every input/output tensor's type has an alp_inference dtype
+ *  (see tfl_dtype_known()).  Called next to all_tensor_ranks_fit(). */
+bool all_tensor_dtypes_known(tflite::MicroInterpreter *interp)
+{
+	for (size_t i = 0; i < interp->inputs_size(); ++i) {
+		if (!tfl_dtype_known(interp->input(i)->type)) {
+			return false;
+		}
+	}
+	for (size_t i = 0; i < interp->outputs_size(); ++i) {
+		if (!tfl_dtype_known(interp->output(i)->type)) {
 			return false;
 		}
 	}
@@ -339,6 +380,12 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		return ALP_ERR_INVAL;
 	}
 
+	/* A CPU pin cannot honour a Vela model: the dispatcher contract is NOSUPPORT. */
+	if (cfg->backend == ALP_INFERENCE_BACKEND_CPU && model_uses_ethos_u(st->model)) {
+		delete st;
+		return ALP_ERR_NOSUPPORT;
+	}
+
 	/* Arena selection.  Dispatch onto the Ethos-U NPU is OP-driven, not
 	 * format-driven: a model routes to the NPU when it carries the "ethos-u"
 	 * custom op (model_uses_ethos_u), regardless of cfg->format -- a Vela model
@@ -378,7 +425,9 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		st->own_arena  = true;
 	}
 
-	register_default_ops(st->resolver);
+	/* A CPU pin must not offload: leave the Ethos-U op out of the resolver as a second
+	 * line of defence (a Vela model was already refused with NOSUPPORT above). */
+	register_default_ops(st->resolver, cfg->backend != ALP_INFERENCE_BACKEND_CPU);
 
 	st->interp = new (std::nothrow)
 	    tflite::MicroInterpreter(st->model, st->resolver, st->arena_buf, st->arena_size);
@@ -395,13 +444,15 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		return ALP_ERR_IO;
 	}
 
-	if (!all_tensor_ranks_fit(st->interp)) {
-		/* alp_inference_tensor_t's shape[] has exactly 4 slots; refuse the
-		 * model rather than let tflm_get_input()/tflm_get_output() hand
-		 * back a shape silently truncated to the first 4 dims (issue
-		 * #1729). NOSUPPORT, not IO: the model loaded and allocated fine,
-		 * it is this portable descriptor that has no slot for its rank --
-		 * same posture the ORT and DEEPX backends already take. */
+	if (!all_tensor_ranks_fit(st->interp) || !all_tensor_dtypes_known(st->interp)) {
+		/* alp_inference_tensor_t's shape[] has exactly 4 slots; refuse a model
+		 * rather than let tflm_get_input()/tflm_get_output() hand back a shape
+		 * silently truncated to the first 4 dims (issue #1729).
+		 * Also refuse a tensor type with no alp dtype (int64, bool, ...) instead
+		 * of reporting it as F32 (issue #2978).  NOSUPPORT, not IO: the model
+		 * loaded and allocated fine, it is this portable descriptor that has no
+		 * slot for the rank or dtype -- same posture the ORT and DEEPX backends
+		 * already take. */
 		delete st->interp;
 		if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
 		delete st;

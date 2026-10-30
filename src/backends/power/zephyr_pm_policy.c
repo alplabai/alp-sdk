@@ -275,6 +275,15 @@ static void _timer_expiry(struct k_timer *t)
 
 static K_TIMER_DEFINE(_wake_timer, _timer_expiry, NULL);
 
+#ifdef CONFIG_ZTEST
+/* Test seam: cancel the armed wake timer so the -EAGAIN take-timeout path can run. */
+void alp_power_pm_policy_test_stop_wake_timer(void);
+void alp_power_pm_policy_test_stop_wake_timer(void)
+{
+	k_timer_stop(&_wake_timer);
+}
+#endif
+
 static alp_status_t
 z_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out, uint32_t *wake_caps_out)
 {
@@ -353,8 +362,9 @@ static alp_status_t z_request_sleep(alp_power_backend_state_t *state,
      * requested pm_state happens inside the idle thread while this
      * take blocks. */
 	int64_t before = k_uptime_get();
-	int     err    = k_sem_take(&_wake_sem, K_MSEC(wake_after_ms + 100u));
-	int64_t after  = k_uptime_get();
+	/* 64-bit sum: wake_after_ms + 100u would wrap for wake_after_ms > UINT32_MAX - 100. */
+	int     err   = k_sem_take(&_wake_sem, K_MSEC((int64_t)wake_after_ms + 100));
+	int64_t after = k_uptime_get();
 	k_timer_stop(&_wake_timer);
 
 	/* Re-hold every lock so the system stays ACTIVE until the next
@@ -362,12 +372,16 @@ static alp_status_t z_request_sleep(alp_power_backend_state_t *state,
 	_hold_all_locks(l);
 
 	if (info != NULL) {
-		info->realised_mode = _realised_mode(mode);
+		/* The wake timer did not fire in time; no sleep depth is claimed. */
+		info->realised_mode = (err == 0) ? _realised_mode(mode) : ALP_POWER_MODE_RUN;
 		info->wake_source   = (err == 0) ? (uint32_t)ALP_POWER_WAKE_TIMER : 0u;
 		info->slept_ms      = (uint32_t)((after > before) ? (after - before) : 0);
 	}
 
-	if (err != 0 && err != -EAGAIN) {
+	if (err == -EAGAIN) {
+		return ALP_ERR_TIMEOUT;
+	}
+	if (err != 0) {
 		return ALP_ERR_IO;
 	}
 	return ALP_OK;

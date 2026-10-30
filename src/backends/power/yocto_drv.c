@@ -271,11 +271,13 @@ static alp_status_t y_request_sleep(alp_power_backend_state_t *state,
 	}
 
 	/* The /sys/power/state write blocks until resume -- time the
-     * write itself for slept_ms rather than estimating. */
+     * write itself for slept_ms rather than estimating.  CLOCK_BOOTTIME, not
+     * CLOCK_MONOTONIC: the latter stops during system suspend, so it would
+     * report only the entry/exit overhead. */
 	struct timespec before, after;
-	clock_gettime(CLOCK_MONOTONIC, &before);
+	clock_gettime(CLOCK_BOOTTIME, &before);
 	alp_status_t rc = _sysfs_write(ALP_YOCTO_POWER_STATE_PATH, _state_token(mode));
-	clock_gettime(CLOCK_MONOTONIC, &after);
+	clock_gettime(CLOCK_BOOTTIME, &after);
 
 	if (info != NULL) {
 		/* On a failed state write no sleep happened -- report RUN, not the
