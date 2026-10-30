@@ -385,7 +385,10 @@ int main(void)
 		       "local requester setup (mailboxes zeroed, sender link ready) OK\n",
 		       ROUND_TIMEOUT_MS);
 	} else {
-		printk("RESULT SKIP: dualcore-ipc -- HP served %u/%u round-trips (0 mismatches) "
+		/* HP answered some rounds and then went silent: the protocol died mid-run
+		 * (doorbell or seq race), which is a defect.  SKIP is reserved for the
+		 * never-saw-the-peer case above. */
+		printk("RESULT FAIL: dualcore-ipc -- HP served %u/%u round-trips (0 mismatches) "
 		       "then stopped replying (round %u timed out after %u ms)\n",
 		       completed,
 		       ROUND_TRIPS,

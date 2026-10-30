@@ -44,21 +44,22 @@
  */
 #define ALIF_LPGPIO_PADCTRL_BASE 0x42007000u
 #define ALIF_PAD_GPIO_OUTPUT     0x23u
-/* Latch WIFI_EN (P15_5) HIGH in the port's data register while the pad is still an
+/* Latch an LP-GPIO pin HIGH in the port's data register while the pad is still an
  * INPUT.  Switching the direction afterwards then drives the already-high level; the
  * other order (direction first, value second -- what gpio_dw's configure does even
- * with an init flag) drives whatever DR holds, and with DR bit 5 = 0 that glitches
- * the supply of a running chip low.  DR is written directly (read-modify-write, the
+ * with an init flag) drives whatever DR holds, and after an LP-GPIO reset that is 0:
+ * a glitch on WIFI_EN (P15_5, bit 5) drops the supply of a running chip, one on
+ * nRESET (P15_1, bit 1) asserts its reset.  DR is written directly (read-modify-write, the
  * same access gpio_dw's port_set_bits_raw makes) so this template stays on the
  * portable <alp/...> headers: SWPORTA_DR is offset 0x00 of the DesignWare GPIO block
  * (zephyr drivers/gpio/gpio_dw_registers.h), the block base is the `lpgpio` node's
  * reg, and the LP-GPIO clock is already on because alp_gpio_open() opened the pin. */
 #define DW_GPIO_SWPORTA_DR 0x00u
-static void aen_wifi_en_latch_high(void)
+static void aen_lp_gpio_latch_high(unsigned int bit)
 {
 	const mem_addr_t dr = DT_REG_ADDR(DT_NODELABEL(lpgpio)) + DW_GPIO_SWPORTA_DR;
 
-	sys_write32(sys_read32(dr) | (1u << 5), dr);
+	sys_write32(sys_read32(dr) | (1u << bit), dr);
 }
 
 static void aen_lp_pads_enable_output(void)
@@ -70,8 +71,9 @@ static void aen_lp_pads_enable_output(void)
 static inline void aen_lp_pads_enable_output(void)
 {
 }
-static inline void aen_wifi_en_latch_high(void)
+static inline void aen_lp_gpio_latch_high(unsigned int bit)
 {
+	(void)bit;
 }
 #endif
 
@@ -106,7 +108,14 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	const bool wifi_unknown = alp_gpio_read(wifi_en, &wifi_was_high) != ALP_OK;
 	if (wifi_was_high) {
 		/* Latch the level in DR first so the direction change cannot glitch it low. */
-		aen_wifi_en_latch_high();
+		aen_lp_gpio_latch_high(5u); /* P15_5 WIFI_EN */
+	}
+	/* Same for nRESET: a running chip has it released (high).  Without the latch the
+	 * direction change below drives DR bit 1 = 0 and holds the chip in reset, so the
+	 * warm PING always fails and the bring-up falls through to a WIFI_EN supply cycle. */
+	bool nrst_was_high = false;
+	if (alp_gpio_read(nrst, &nrst_was_high) == ALP_OK && nrst_was_high) {
+		aen_lp_gpio_latch_high(1u); /* P15_1 nRESET */
 	}
 	(void)alp_gpio_configure(wifi_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	(void)alp_gpio_configure(nrst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
