@@ -180,6 +180,10 @@ west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
   (`cc3501e_bridge_bringup`, copied into `src/cc3501e_bridge.{c,h}`) and hands the
   handle to the console — `alp companion …` then reaches Wi-Fi/BLE. Guarded by
   `CONFIG_ALP_SDK_CHIP_CC3501E`.
+  The bring-up is warm-aware: if WIFI_EN already reads high and the chip answers a
+  PING, only nRESET is pulsed (no supply cycle on a re-run); the WIFI_EN power cycle
+  runs only from WIFI_EN low or a silent chip. If the chip never answers,
+  `alp companion` reports "not registered".
 - **V2N:** the GD32 supervisor is a managed singleton inside the SDK — `main()`'s
   bind is a no-op and `alp companion` reaches the GD32 automatically (its
   `gpio` sub-commands replace the CC3501E `wifi`/`ble` ones).
