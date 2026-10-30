@@ -13,7 +13,9 @@
   stale required-context comment corrected. `.github/cppcheck/zephyr.cfg`
   (`--library`) defines the Zephyr Kconfig/devicetree `#if` macros so the 28
   src/backends and src/zephyr files cppcheck used to skip are now analysed
-  instead of being reported as syntax errors.
+  instead of being reported as syntax errors. The cfg defines those macros as
+  0, so cppcheck checks the inactive side only; code inside a DT/Kconfig
+  `#if` branch is still not analysed.
 - coverity: pass COVERITY_TOKEN through env instead of splicing it into the
   shell source.
 - cross-platform-zephyr: merge_group skip message no longer claims the queue
