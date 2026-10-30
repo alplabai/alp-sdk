@@ -10,7 +10,10 @@
   check_public_header_purity; check_test_coverage runs with --fail-on-gaps
   (ratchet, currently within budget).
 - pr-static-analysis: cppcheck fails the job on severity=error findings;
-  stale required-context comment corrected.
+  stale required-context comment corrected. `.github/cppcheck/zephyr.cfg`
+  (`--library`) defines the Zephyr Kconfig/devicetree `#if` macros so the 28
+  src/backends and src/zephyr files cppcheck used to skip are now analysed
+  instead of being reported as syntax errors.
 - coverity: pass COVERITY_TOKEN through env instead of splicing it into the
   shell source.
 - cross-platform-zephyr: merge_group skip message no longer claims the queue

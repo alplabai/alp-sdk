@@ -264,6 +264,17 @@ jobs:
         # skip those rather than report them.  Real type-checking
         # arrives with the v0.2 clang-tidy job.
         #
+        # Zephyr macros: .github/cppcheck/zephyr.cfg (--library) defines the
+        # Kconfig/devicetree function-like macros used in `#if` (IS_ENABLED,
+        # DT_NODE_HAS_STATUS_OKAY, ...) as 0, plus a few attribute/shell
+        # macros. Without it cppcheck cannot evaluate those conditions, SKIPS
+        # the whole file (28 `#if` skips in src/backends/** and src/zephyr/**
+        # at the time of writing) and reports the skip as severity=error --
+        # so a filter on that message would also hide that those files get no
+        # analysis. With the cfg they are analysed (inactive-branch view) and
+        # a new macro the cfg lacks fails this job instead of being hidden:
+        # add it to the cfg.
+        #
         # Baseline: syntaxError / unknownMacro / ctuOneDefinitionRuleViolation
         # / preprocessorErrorDirective only appear because there is no
         # Zephyr build context (IF_ENABLED, per-backend alp_inference
@@ -279,6 +290,7 @@ jobs:
         # -- without a build context they are too noisy to gate on.
         run: |
           cppcheck \
+              --library=.github/cppcheck/zephyr.cfg \
               --enable=warning,style,performance,portability \
               --inline-suppr \
               --suppress=missingInclude \
