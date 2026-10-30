@@ -1,0 +1,30 @@
+# board.yaml -- per-app project configuration for the
+# v2n-cm33-deepx-rail example.
+#
+# CM33-boot-mode DEEPX 0.75 V core-rail sequencer, run from the V2N-M1
+# Cortex-M33 system-manager.  ONLY correct in cm33_boot mode (RZ/V2N
+# BOOTSELCPU low -- RZ/V2N HW manual R01UH1071EJ0110 Rev.1.10 S1.9 Table
+# 1.9-1), and only until this app hands RIIC8/BRD_I2C off to the CA55 (see
+# README.md and metadata/e1m_modules/v2n/power-tree.yaml
+# boot_modes.cm33_boot).  In the DEFAULT AMP config (CA55 cold boot) this
+# app never runs -- U-Boot's board_late_init() 0004 patch owns the rail
+# instead, and the generated CM33 board files leave &i2c8 disabled; this
+# app's own boards/*.overlay re-enables it, scoped to this app only.
+som:
+  sku: E1M-V2M101  # V2N-M1: only SKU with the DEEPX DX-M1 CH2 0.75 V rail
+
+preset: e1m-x-evk
+cores:
+  a55_cluster:
+    os: "off"
+  m33_sm:
+    app: ./src
+    peripherals:
+      - i2c
+      - gpio
+
+chips:
+  - da9292
+
+diagnostics:
+  log_level: info
