@@ -30,8 +30,9 @@
  *   so we pass framing=false and each callback moves exactly one XRCE
  *   datagram.
  *
- * STATUS: builds on Zephyr 4.4.1 and boots past platform_init on an
- * E1M-V2M103 (2026-10-07; main() ran and wrote the resource table).  NOT
+ * STATUS: the platform_init path builds on Zephyr 4.4.1 and boots past platform_init on an
+ * E1M-V2M103 (2026-10-07; main() ran and wrote the resource table).  The AMP beacon and
+ * attach-reset code in rpmsg_link.c is not yet compiled.  NOT
  * proven: a ROS 2 topic round-trip with a micro-ROS agent.  See README.md
  * ("What is untested").
  */
