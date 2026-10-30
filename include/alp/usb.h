@@ -93,7 +93,9 @@ typedef struct {
  * the caller must always name one); @c vendor_id / @c product_id
  * default to 0x0000 as an explicit "you must set this" placeholder
  * (0x0000 is not a registered VID -- real enumeration needs a
- * genuine VID/PID pair, so override both before shipping), @c
+ * genuine VID/PID pair; on the Zephyr backend set it at build time with
+ * CONFIG_USB_DEVICE_VID / CONFIG_USB_DEVICE_PID, because overriding it
+ * here makes alp_usb_device_open() fail with ALP_ERR_NOSUPPORT), @c
  * bcd_device defaults to 0x0100 (the conventional "v1.00" encoding),
  * and the descriptor strings @c manufacturer / @c product / @c serial
  * default to NULL (valid per the USB spec -- omits that string
@@ -118,6 +120,12 @@ typedef struct {
  *        descriptor to the host on enumerate.
  *
  * @param[in] cfg  Device class + VID/PID + strings.  Must be non-NULL.
+ *            On the Zephyr backend the stack enumerates with the
+ *            compile-time descriptors (CONFIG_USB_DEVICE_VID /
+ *            CONFIG_USB_DEVICE_PID and the Kconfig strings); there is
+ *            no runtime overlay, so @p cfg must carry the
+ *            @ref ALP_USB_DEVICE_CONFIG_DEFAULT identity (zero
+ *            VID/PID, @c bcd_device 0x0100 or 0, NULL strings).
  *
  * @return Open handle on success; NULL with @ref alp_last_error set
  *         to one of ALP_ERR_INVAL (NULL cfg or out-of-range
@@ -126,7 +134,10 @@ typedef struct {
  *         ALP_ERR_NOT_IMPLEMENTED (registered backend has no
  *         dev_open hook), ALP_ERR_NOMEM (handle pool exhausted), or
  *         ALP_ERR_NOSUPPORT (backend built without USB device-stack
- *         support, e.g. CONFIG_ALP_SDK_USB=n).
+ *         support, e.g. CONFIG_ALP_SDK_USB=n, or -- on the Zephyr
+ *         backend -- a @p cfg with a non-default VID / PID /
+ *         @c bcd_device / manufacturer / product / serial, which the
+ *         backend cannot apply).
  */
 alp_usb_dev_t *alp_usb_device_open(const alp_usb_device_config_t *cfg);
 

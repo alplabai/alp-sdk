@@ -109,17 +109,22 @@ static alp_status_t z_dev_open(const alp_usb_device_config_t *cfg,
 	if (cfg == NULL) return ALP_ERR_INVAL;
 #if defined(CONFIG_ALP_SDK_USB)
 	if (cfg->device_class > ALP_USB_DEVICE_HID) return ALP_ERR_INVAL;
+	/* The stack enumerates with Zephyr's compile-time descriptors; no runtime
+	 * overlay of VID/PID/strings exists yet.  Refuse a request for non-default
+	 * descriptors instead of returning OK and enumerating with the wrong IDs.
+	 * Defaults (ALP_USB_DEVICE_CONFIG_DEFAULT): VID/PID 0, bcd 0x0100 (0 also
+	 * accepted as unset), NULL strings. */
+	if (cfg->vendor_id != 0u || cfg->product_id != 0u ||
+	    (cfg->bcd_device != 0u && cfg->bcd_device != 0x0100u) || cfg->manufacturer != NULL ||
+	    cfg->product != NULL || cfg->serial != NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
 	struct usb_dev_be *be = _be_alloc();
 	if (be == NULL) return ALP_ERR_NOMEM;
 	be->cls     = cfg->device_class;
 	be->enabled = false;
 	st->be_data = be;
-	/* The USB device stack reads its descriptor table from
-     * Zephyr's static device descriptors; v0.3.x adds a runtime
-     * patch that overlays cfg->vendor_id / product_id / strings
-     * into the descriptors before usb_enable.  For now open
-     * succeeds and enable() drives the stack with the
-     * compile-time descriptors. */
+	/* enable() drives the stack with the compile-time descriptors. */
 	return ALP_OK;
 #else
 	(void)st;
