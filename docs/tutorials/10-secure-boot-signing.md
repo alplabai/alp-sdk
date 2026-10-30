@@ -130,7 +130,10 @@ boot:
 `key_file:` is relative to the directory holding `board.yaml`, must
 exist, and names a PRIVATE PEM (not a `.pub.pem`, which cannot sign). A
 missing file fails the plan with `OrchestratorError` naming the resolved
-path. Omit `signing:` to use the SDK-anchored default dev key.
+path. On AEN (curated sysbuild base) with ECDSA-P256, omitting `signing:`
+uses the SDK-anchored default dev key `keys/mcuboot_shared_dev_ecdsa_p256.pem`;
+on other families or algorithms no key is passed unless `key_file:` is set,
+and sysbuild falls back to MCUboot's built-in key.
 
 `swap_algorithm:` is intentionally omitted above: it's optional, and
 the SDK's per-target default now follows the target's own `memory_map:`
