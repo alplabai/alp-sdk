@@ -54,8 +54,11 @@ jobs:
     steps:
       - name: Check for Coverity token
         id: token_check
+        # Env indirection: the secret never becomes part of the shell source.
+        env:
+          COV_TOKEN: ${{ secrets.COVERITY_TOKEN }}
         run: |
-          if [ -z "${{ secrets.COVERITY_TOKEN }}" ]; then
+          if [ -z "${COV_TOKEN}" ]; then
             echo "::notice::COVERITY_TOKEN secret is not configured. Skipping scan."
             echo "::notice::Provision the secret at Settings -> Secrets and variables -> Actions."
             echo "configured=false" >> $GITHUB_OUTPUT
