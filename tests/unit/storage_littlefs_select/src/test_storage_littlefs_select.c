@@ -4,7 +4,7 @@
  * (100) and zephyr_littlefs (110) are linked together, as on every
  * littlefs build.  The mount is laid out the way the SDK's own emitter
  * (scripts/alp_orchestrate/headers.py) lays it out: a board.yaml-style
- * mount point ("/lfs/settings"), `.storage_dev = FIXED_PARTITION_ID(..)`,
+ * mount point ("/lfs/settings"), `.storage_dev = <partition id>`,
  * published through alp_storage_mounts[].  The contract under test:
  *
  *   - a flash_area that backs a mounted littlefs volume is served by
@@ -28,8 +28,8 @@
 
 #include <alp/storage.h>
 
-#define LFS_ID FIXED_PARTITION_ID(storage_partition)
-#define RAW_ID FIXED_PARTITION_ID(slot1_partition)
+#define LFS_ID PARTITION_ID(storage_partition)
+#define RAW_ID PARTITION_ID(slot1_partition)
 
 #define PROD_MNT "/lfs/settings"
 
@@ -80,7 +80,7 @@ ZTEST(alp_storage_littlefs_select, test_production_mount_routes_to_littlefs_neve
 	 * and the partition size as total_bytes. */
 	zassert_equal(info.erase_size, 1u);
 	zassert_equal(info.block_size, 1u);
-	zassert_not_equal(info.total_bytes, FIXED_PARTITION_SIZE(storage_partition));
+	zassert_not_equal(info.total_bytes, PARTITION_SIZE(storage_partition));
 
 	uint8_t wr[16], rd[16] = { 0 };
 	for (size_t i = 0; i < sizeof(wr); ++i) {
@@ -120,7 +120,7 @@ ZTEST(alp_storage_littlefs_select, test_mount_index_differs_from_backing_flash_a
 	s = open_id(RAW_ID);
 	zassert_not_null(s);
 	zassert_equal(alp_storage_get_info(s, &info), ALP_OK);
-	zassert_equal(info.total_bytes, FIXED_PARTITION_SIZE(slot1_partition));
+	zassert_equal(info.total_bytes, PARTITION_SIZE(slot1_partition));
 	alp_storage_close(s);
 }
 
@@ -132,7 +132,7 @@ ZTEST(alp_storage_littlefs_select, test_unmounted_instance_falls_through_to_raw_
 	alp_storage_info_t info;
 	zassert_equal(alp_storage_get_info(s, &info), ALP_OK);
 	/* Raw flash_area: total_bytes is the partition size, not a file size. */
-	zassert_equal(info.total_bytes, FIXED_PARTITION_SIZE(slot1_partition));
+	zassert_equal(info.total_bytes, PARTITION_SIZE(slot1_partition));
 	alp_storage_close(s);
 }
 
@@ -144,6 +144,6 @@ ZTEST(alp_storage_littlefs_select, test_partition_is_raw_again_once_unmounted)
 	zassert_not_null(s);
 	alp_storage_info_t info;
 	zassert_equal(alp_storage_get_info(s, &info), ALP_OK);
-	zassert_equal(info.total_bytes, FIXED_PARTITION_SIZE(storage_partition));
+	zassert_equal(info.total_bytes, PARTITION_SIZE(storage_partition));
 	alp_storage_close(s);
 }
