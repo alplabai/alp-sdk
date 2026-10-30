@@ -15,8 +15,10 @@
  *   SOF(1) | CMD|STATUS(1) | PAYLOAD(N) | CRC16(2)
  *
  * Driven input is split into:
- *   byte[0]    = opcode (CMD_*)
- *   byte[1..]  = candidate payload that the dispatcher consumes
+ *   byte[0]    = transport link selector (low bit: SPI or I2C; the
+ *                dispatcher keeps per-link armed-feature state)
+ *   byte[1]    = opcode (CMD_*)
+ *   byte[2..]  = candidate payload that the dispatcher consumes
  *
  * What this harness catches:
  *   - Off-by-one on opcode-derived payload-length math in any
@@ -90,15 +92,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
      * The dispatcher's per-opcode handlers each have strict length
      * checks; mismatched lengths must reject with STATUS_INVAL, not
      * overrun the reply buffer. */
-	if (size < 1u) return 0;
-	const uint8_t  cmd         = data[0];
-	const uint8_t *payload     = data + 1;
-	const size_t   payload_len = size - 1u;
+	if (size < 2u) return 0;
+	const gd32_bridge_link_t link    = (data[0] & 1u) ? GD32_BRIDGE_LINK_I2C : GD32_BRIDGE_LINK_SPI;
+	const uint8_t            cmd     = data[1];
+	const uint8_t           *payload = data + 2;
+	const size_t             payload_len = size - 2u;
 
 	uint8_t reply_scratch[1u + (GD32_BRIDGE_ADC_MAX_SAMPLES * 2u)];
 	size_t  reply_len = 0u;
 	(void)protocol_dispatch(
-	    cmd, payload, payload_len, reply_scratch, sizeof reply_scratch, &reply_len);
+	    link, cmd, payload, payload_len, reply_scratch, sizeof reply_scratch, &reply_len);
 	/* Sanity: dispatcher must not claim more bytes than scratch had. */
 	if (reply_len > sizeof reply_scratch) abort();
 	return 0;

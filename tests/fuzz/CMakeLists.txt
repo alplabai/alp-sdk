@@ -92,6 +92,9 @@ endif()
 target_sources(alp_fuzz_gd32_bridge_frame PRIVATE
     ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/protocol.c
     ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/bootloader/bootloader.c
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/boot_config.c
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/ota.c
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/crc32.c
     ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/hal/bridge_hw_stub.c
 )
 target_include_directories(alp_fuzz_gd32_bridge_frame PRIVATE
