@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-21",
+  "generated": "2026-10-29",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -4282,9 +4282,17 @@
           "hash": "37487daca310bd65",
           "value": "0x08000000u"
         },
+        "GD32_SWD_FMC_FLASH_BYTES": {
+          "hash": "9aa02da11ddf460f",
+          "value": "(512u * 1024u)"
+        },
         "GD32_SWD_FMC_SECTOR_BYTES": {
           "hash": "6dfbbf65b00764e0",
           "value": "2048u"
+        },
+        "GD32_SWD_FMC_SECTOR_COUNT": {
+          "hash": "73194c71ea87db19",
+          "value": "(GD32_SWD_FMC_FLASH_BYTES / GD32_SWD_FMC_SECTOR_BYTES)"
         },
         "GD32_SWD_FMC_SRAM_BASE": {
           "hash": "7fc23683f5251981",

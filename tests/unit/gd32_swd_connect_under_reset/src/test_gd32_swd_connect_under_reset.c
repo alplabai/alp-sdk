@@ -85,6 +85,8 @@ static bool     g_missing_pad; /* the board does not publish the pads */
 static bool     g_no_halt;     /* the core ignores halt-on-reset */
 static bool     g_fail_mem;    /* the target FAULTs writes to g_fail_addr */
 static uint32_t g_fail_addr;
+static bool     g_dbs;     /* FMC_OBCTL reads back with DBS (bit 22) set */
+static bool     g_wait_ap; /* the target answers WAIT to every AP read */
 
 /* ---- bit-level SW-DP target -------------------------------------------------- */
 
@@ -137,6 +139,8 @@ static void decode_header(void)
 	T.ack  = 1u; /* OK */
 	if (T.ap && !T.rnw && T.addr == 0x0Cu && g_fail_mem && T.tar == g_fail_addr) T.ack = 4u;
 
+	if (T.rnw && T.ap && g_wait_ap) T.ack = 2u; /* WAIT */
+
 	if (T.rnw) {
 		if (!T.ap) {
 			T.rdata = (T.addr == 0x00u)   ? 0x6BA02477u
@@ -147,6 +151,7 @@ static void decode_header(void)
 			T.rdata = 0u; /* AP reads are pipelined: the real value comes via RDBUFF */
 			/* DHCSR reads S_HALT (bit 17) once the core stopped at the vector. */
 			T.rdbuff = (T.addr == 0x0Cu && T.tar == 0xE000EDF0u && T.halted) ? (1u << 17) | 1u : 0u;
+			if (T.addr == 0x0Cu && T.tar == 0x40022020u && g_dbs) T.rdbuff = 1u << 22;
 		}
 	}
 }
@@ -383,6 +388,8 @@ static void each_before(void *unused)
 	g_no_halt         = false;
 	g_fail_nrst_write = false;
 	g_fail_mem        = false;
+	g_dbs             = false;
+	g_wait_ap         = false;
 	memset(g_latch, 0, sizeof(g_latch));
 	memset(g_is_out, 0, sizeof(g_is_out));
 	g_latch[2]         = true; /* NRST: stale-high latch left by an older image */
@@ -567,4 +574,60 @@ ZTEST(gd32_swd_connect_under_reset, test_deinit_returns_the_pads_to_inputs_and_c
 	zassert_true(i_close > i_clk_in && i_close > i_dio_in, "pads closed after they are inputs");
 	zassert_true(i_end > i_close, "session closed last");
 	zassert_false(swd.initialised);
+}
+
+/* ---- GD32 FMC sector erase ------------------------------------------------------ */
+
+/* FMC_CTL.PNSEL is 8 bits (BITS(3,10)).  Sector 255 must put 0xFF in it; the
+ * old 7-bit mask turned it into sector 127. */
+ZTEST(gd32_swd_connect_under_reset, test_erase_of_sector_255_carries_all_eight_page_bits)
+{
+	gd32_swd_t swd;
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
+	zassert_equal(gd32_swd_connect(&swd), ALP_OK);
+	zassert_equal(gd32_swd_flash_erase(&swd, 0x0807F800u, 64u), ALP_OK);
+
+	const int i = find_memw(0x40022014u);
+	zassert_true(i >= 0, "FMC_CR written");
+	zassert_equal(g_ev[i].val, 0x7FAu, "PER | (255 << 3), got 0x%x", g_ev[i].val);
+	gd32_swd_deinit(&swd);
+}
+
+ZTEST(gd32_swd_connect_under_reset, test_erase_of_sector_127_does_not_alias_sector_255)
+{
+	gd32_swd_t swd;
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
+	zassert_equal(gd32_swd_connect(&swd), ALP_OK);
+	zassert_equal(gd32_swd_flash_erase(&swd, 0x0803F800u, 64u), ALP_OK);
+
+	const int i = find_memw(0x40022014u);
+	zassert_true(i >= 0, "FMC_CR written");
+	zassert_equal(g_ev[i].val, 0x3FAu, "PER | (127 << 3), got 0x%x", g_ev[i].val);
+	gd32_swd_deinit(&swd);
+}
+
+/* A dual-bank target has 1 KiB pages: refuse before the FMC is unlocked. */
+ZTEST(gd32_swd_connect_under_reset, test_erase_and_write_refuse_a_dual_bank_target)
+{
+	static const uint8_t data[8] = { 0 };
+	gd32_swd_t           swd;
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
+	zassert_equal(gd32_swd_connect(&swd), ALP_OK);
+	g_dbs = true;
+	zassert_equal(gd32_swd_flash_erase(&swd, 0x0807F800u, 64u), ALP_ERR_NOSUPPORT);
+	zassert_equal(gd32_swd_flash_write(&swd, 0x0807F000u, data, sizeof(data)), ALP_ERR_NOSUPPORT);
+	zassert_true(find_memw(0x40022008u) < 0, "FMC_KEYR never written");
+	zassert_true(find_memw(0x40022014u) < 0, "FMC_CR never written");
+	gd32_swd_deinit(&swd);
+}
+
+/* A WAIT on every AP read must not hand back the previous read as this one. */
+ZTEST(gd32_swd_connect_under_reset, test_ap_read_that_only_gets_wait_times_out)
+{
+	gd32_swd_t swd;
+	zassert_equal(gd32_swd_init(&swd), ALP_OK);
+	zassert_equal(gd32_swd_connect(&swd), ALP_OK);
+	g_wait_ap = true;
+	zassert_equal(gd32_swd_flash_erase(&swd, 0x0807F800u, 64u), ALP_ERR_TIMEOUT);
+	gd32_swd_deinit(&swd);
 }
