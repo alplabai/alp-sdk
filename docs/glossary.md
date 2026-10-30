@@ -248,7 +248,7 @@ deferred to v1.1 per [ADR 0009](adr/0009-mender-zephyr-client-deferred.md).
 capability profiles, per-SKU presets, schemas, templates.
 
 **OPTIGA Trust M** -- Infineon's secure-element IC populated on
-every E1M SoM.  Exposed via `<alp/chips/optiga_trust_m.h>` for
+the V2N/V2M SoMs and DNP (`assembled: false`) on the shared E1M-AEN PCB.  Exposed via `<alp/chips/optiga_trust_m.h>` for
 direct use, or via `<alp/security.h>` for MbedTLS PSA Crypto
 integration.
 

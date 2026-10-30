@@ -29,12 +29,18 @@ hw_revisions:
     changes:
       - "Initial release."
   r2:
-    min_sdk_version: ~
+    # 0.17.0 is the first release whose tree carries r2 as `production`
+    # (it was a `reserved` stub before that), so it is the oldest SDK
+    # that can build for it.
+    min_sdk_version: "0.17.0"
     max_sdk_version: ~
     status: production
     board_rev: "R2"
     summary: |
       Board rev `2625-R2`, provisioned from the 2026-W38 V2M103 batch onward.
+    changes:
+      - "Production respin of board 2625, provisioned from the 2026-W38 V2M103 batch onward."
+      - "No r1 -> r2 pin or chip delta is recorded in this tree, so no pad_route_overrides are declared; add them here when a delta is confirmed."
   r3:
     min_sdk_version: ~
     max_sdk_version: ~

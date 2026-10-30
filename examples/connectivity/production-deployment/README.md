@@ -93,9 +93,9 @@ to on-die MRAM: E1M-AEN801 has no OSPI flash fitted (`ospi0`/
 root is TF-M's internal secure storage: E1M-AEN801 lists the OPTIGA
 Trust M under `on_module:` but the part is not fitted (`assembled:
 false`), and the loader refuses `attestation_root: optiga_trust_m` on a
-SKU that does not carry it (#2316). On a SKU with OPTIGA fitted
-(E1M-AEN501/601/701), `optiga_trust_m` gives a hardware trust root
-shared with boot + OTA.
+SKU that does not carry it (#2316). Every E1M-AEN SKU shares one SoM
+PCB on which the OPTIGA is DNP (#2958), so `tfm_internal` is the
+attestation root on all of them.
 
 ### `storage:` -- explicit partition table
 

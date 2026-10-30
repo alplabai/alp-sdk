@@ -486,7 +486,9 @@ PSA Crypto runs entirely non-secure (mbedTLS-only) and the overlay is
 not written.
 
 `attestation_root: optiga_trust_m` only validates when the SoM preset
-physically ships OPTIGA Trust M (AEN family + V2N family today); the
+physically ships OPTIGA Trust M with the part fitted (V2N family today;
+every E1M-AEN SKU shares one SoM PCB on which OPTIGA IC1 is DNP, so the
+loader refuses it there with `assembled: false`); the
 emitter additionally surfaces `CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA=y`
 and a comment pointing at the `src/security/optiga_trust_m_bridge.c`
 PSA <-> OPTIGA bridge driver.

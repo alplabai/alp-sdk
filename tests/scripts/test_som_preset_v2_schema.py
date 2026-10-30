@@ -72,3 +72,29 @@ def test_derived_regions_carry_write_authority(alp_project, preset_name):
     regions = alp_project.resolve_memory_map(doc, METADATA)
     assert regions
     assert all("write_authority" in r for r in regions), regions
+
+
+def _first_i2c_device(doc):
+    for bus in doc["on_module"]["i2c_devices"].values():
+        return bus["devices"][0]
+    raise AssertionError("preset has no i2c_devices")
+
+
+@pytest.mark.parametrize("addr", ["0x80", "0xD2", "0xFF"])
+def test_8bit_i2c_address_rejected(validator, preset, addr):
+    doc = copy.deepcopy(preset)
+    _first_i2c_device(doc)["address_7bit"] = addr
+    assert list(validator.iter_errors(doc)) != []
+
+
+@pytest.mark.parametrize("addr", ["0x0", "0x7F", "0x69", "0x50", "TBD", "configurable"])
+def test_7bit_i2c_address_accepted(validator, preset, addr):
+    doc = copy.deepcopy(preset)
+    _first_i2c_device(doc)["address_7bit"] = addr
+    assert list(validator.iter_errors(doc)) == []
+
+
+def test_i2c_device_without_address_rejected(validator, preset):
+    doc = copy.deepcopy(preset)
+    del _first_i2c_device(doc)["address_7bit"]
+    assert any("address_7bit" in e.message for e in validator.iter_errors(doc))
