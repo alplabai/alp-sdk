@@ -181,7 +181,7 @@ instead -- see
 | Zephyr      | v4.4.1 (stable)  | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
 | Python      | 3.10+ for SDK bootstrap tools; 3.12+ for current Tan source and Zephyr builds | 3.10 is `bootstrap.sh`/`.ps1`'s and `pyproject.toml`'s support **floor**. The Python Tan port and Zephyr v4.4.1's `cmake/modules/python.cmake` require 3.12, so use 3.12+ for the documented end-to-end path; see [`docs/cross-platform-setup.md`](cross-platform-setup.md) §1.1. Dev/CI standardise on the repo-root `.python-version` **pin** (currently 3.12). |
 | Python deps | `pyyaml`, `jsonschema`, `imgtool` | All installed by `scripts/bootstrap.sh`; manual install: `pip install pyyaml jsonschema imgtool`. |
-| CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
+| CMake       | 3.28+            | Floor set for Zephyr 4.5 (`prerequisites.cmakeMinVersion` in `metadata/bootstrap.json`); v4.4.1 itself still configures with 3.20. Ubuntu 22.04's apt CMake is 3.22 -- use `pip install cmake` or the Kitware APT repo there. |
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |
 | west        | 1.2+             | `pip install west` if your distro doesn't ship it.       |
 
