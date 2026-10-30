@@ -65,3 +65,16 @@ moved since 97ad481b) once imx93 r1 carries a buildable status.
 Note (alp-sdk#2781): the `multicore_rpmsg-imx93` fixture described above was
 removed together with E1M-NX9101 / the rpmsg-imx93 example; it is no longer
 in the corpus.
+
+Hand-reviewed field correction (build-plan `blocked-ipc-carveout`
+warning): `multicore_rpmsg-aen.build-plan.json` `warnings` was extended with
+two `blocked-ipc-carveout` entries (coreId `a32_cluster` and `m55_hp`) next
+to the existing `yocto-machine-unbuildable` one. `E1M-AEN801`'s only
+memory_map region matching the `alp_default_rpmsg` ipc entry is `mram_main`,
+which is flash-class and so ineligible as an IPC carve-out; the carve-out is
+`blocked` and `alp/system_ipc.h` carries zero stubs for it. The planner now
+surfaces that in `warnings` (one per endpoint core), because the slice
+builds stay green while the channel fails at runtime. The fixture's
+`warnings` is the only field touched; `slices`, `command`, `env` and every
+other value are untouched, still frozen at 97ad481b. Content is covered
+byte-for-byte by `tests/fixtures/emit-snapshots/rpmsg-aen.build-plan.snap`.
