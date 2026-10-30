@@ -341,7 +341,7 @@ static void counter_alif_lptimer_isr(const struct device *dev)
 	}
 }
 
-static const struct counter_driver_api counter_alif_lptimer_api = {
+static DEVICE_API(counter, counter_alif_lptimer_api) = {
 	.start           = counter_alif_lptimer_start,
 	.stop            = counter_alif_lptimer_stop,
 	.get_value       = counter_alif_lptimer_get_value,

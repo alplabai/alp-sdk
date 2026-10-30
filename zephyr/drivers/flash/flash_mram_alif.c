@@ -474,7 +474,7 @@ flash_mram_get_parameters(const struct device *dev)
 	return &flash_mram_parameters;
 }
 
-static const struct flash_driver_api flash_mram_api = {
+static DEVICE_API(flash, flash_mram_api) = {
 	.read = flash_mram_read,
 	.write = flash_mram_write,
 	.erase = flash_mram_erase,
