@@ -51,6 +51,8 @@ max31855_read(max31855_t *dev, int32_t *tc_milli_c, int32_t *internal_milli_c, u
 		int32_t sx        = (int32_t)ic16 / 16; /* 12-bit signed shift */
 		*internal_milli_c = (sx * 1000) / 16;   /* 0.0625 C/LSB */
 	}
+	/* D16 set means OC / SCG / SCV: the TC field is not a temperature. */
+	if ((word & 0x10000u) != 0u) return ALP_ERR_IO;
 	return ALP_OK;
 }
 

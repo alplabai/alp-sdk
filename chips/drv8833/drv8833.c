@@ -39,16 +39,21 @@ alp_status_t drv8833_init(drv8833_t  *dev,
 	dev->in4    = in4;
 	dev->nsleep = nsleep;
 
+	/* Coast all four inputs FIRST, then wake the bridge, so a stale duty
+	 * from a previous session never drives the motor on wake-up. */
+	alp_status_t s = alp_pwm_set_duty(in1, 0u);
+	if (s != ALP_OK) return s;
+	s = alp_pwm_set_duty(in2, 0u);
+	if (s != ALP_OK) return s;
+	s = alp_pwm_set_duty(in3, 0u);
+	if (s != ALP_OK) return s;
+	s = alp_pwm_set_duty(in4, 0u);
+	if (s != ALP_OK) return s;
+
 	if (nsleep != NULL) {
-		alp_status_t s = alp_gpio_write(nsleep, true);
+		s = alp_gpio_write(nsleep, true);
 		if (s != ALP_OK) return s;
 	}
-
-	/* Coast both channels at start. */
-	(void)alp_pwm_set_duty(in1, 0u);
-	(void)alp_pwm_set_duty(in2, 0u);
-	(void)alp_pwm_set_duty(in3, 0u);
-	(void)alp_pwm_set_duty(in4, 0u);
 
 	dev->initialised = true;
 	return ALP_OK;

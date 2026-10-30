@@ -219,6 +219,63 @@ ZTEST(alp_chips, test_rv3028c7_timer_stop_and_read)
 	wake_end();
 }
 
+/* Out-of-range alarm fields: INVAL, and no write to 07h..09h (or anywhere). */
+static void alarm_expect_inval(const rv3028c7_time_t *when, bool use_weekday)
+{
+	rv3028c7_alarm_match_t match = { .match_minute         = true,
+		                             .match_hour           = true,
+		                             .match_day_or_weekday = true,
+		                             .use_weekday          = use_weekday };
+	fake_rv3028c7_wlog_reset();
+	zassert_equal(rv3028c7_set_alarm(&g_ctx, when, &match), ALP_ERR_INVAL);
+	zassert_equal(rv3028c7_alarm_arm(&g_ctx, when, &match), ALP_ERR_INVAL);
+	zassert_equal(wlog_find(R_ALARM_MIN, 0), -1);
+	zassert_equal(wlog_find(R_ALARM_HR, 0), -1);
+	zassert_equal(wlog_find(R_ALARM_WD, 0), -1);
+	/* alarm_arm validates before disarming: nothing at all was written. */
+	zassert_equal(fake_rv3028c7_wlog_len(), 0u);
+}
+
+ZTEST(alp_chips, test_rv3028c7_alarm_rejects_out_of_range_fields)
+{
+	wake_begin();
+
+	rv3028c7_time_t w = { .minute = 60, .hour = 7, .day = 15, .weekday = 1 };
+	alarm_expect_inval(&w, false);
+	w.minute = 80;
+	alarm_expect_inval(&w, false);
+	w.minute = 30;
+	w.hour   = 24;
+	alarm_expect_inval(&w, false);
+	w.hour = 7;
+	w.day  = 0;
+	alarm_expect_inval(&w, false);
+	w.day = 32;
+	alarm_expect_inval(&w, false);
+	w.day     = 15;
+	w.weekday = 7;
+	alarm_expect_inval(&w, true);
+
+	wake_end();
+}
+
+ZTEST(alp_chips, test_rv3028c7_alarm_arm_invalid_keeps_armed_alarm)
+{
+	wake_begin();
+	rv3028c7_time_t        ok    = { .minute = 30, .hour = 7, .day = 15 };
+	rv3028c7_alarm_match_t match = {
+		.match_minute = true, .match_hour = true, .match_day_or_weekday = true, .use_weekday = false
+	};
+	zassert_equal(rv3028c7_alarm_arm(&g_ctx, &ok, &match), ALP_OK);
+	zassert_equal(fake_rv3028c7_get_reg(R_CTRL2) & 0x08u, 0x08u);
+
+	rv3028c7_time_t bad = { .minute = 60, .hour = 7, .day = 15 };
+	zassert_equal(rv3028c7_alarm_arm(&g_ctx, &bad, &match), ALP_ERR_INVAL);
+	zassert_equal(fake_rv3028c7_get_reg(R_CTRL2) & 0x08u, 0x08u); /* AIE still on */
+	zassert_equal(fake_rv3028c7_get_reg(R_ALARM_MIN), 0x30u);
+	wake_end();
+}
+
 ZTEST(alp_chips, test_rv3028c7_alarm_arm_and_clear)
 {
 	wake_begin();
