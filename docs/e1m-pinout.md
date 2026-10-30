@@ -165,7 +165,7 @@ If you're adding support for a new SoM or board:
    [`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/)
    in this repo (the `pad_routes:` block, introduced as of slice 2
    of the metadata unification work).  See
-   [`e1m-spec/examples/alp-aen.som-manifest.json`](https://github.com/alplabai/e1m-spec/blob/main/examples/alp-aen.som-manifest.json)
+   [`e1m-spec/examples/e1m-aen.som-manifest.json`](https://github.com/alplabai/e1m-spec/blob/main/examples/e1m-aen.som-manifest.json)
    for the shape (the spec's JSON example translates 1:1 into the
    YAML block).
 2. The chip-level metadata (cores, peripherals, NPUs, packages,
