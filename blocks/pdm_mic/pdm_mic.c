@@ -4,11 +4,12 @@
  *
  * Generic PDM-microphone block helper.  See header.
  *
- * v0.2: the surface is declared so blocks can compile against it, but
- * the underlying alp_i2s_* peripheral abstraction lands alongside
- * <alp/audio.h> later in v0.2.  Until then alp_pdm_mic_open returns
- * NULL and alp_pdm_mic_read returns ALP_ERR_NOSUPPORT — same shape as
- * the v0.1 iot_stub.c contract for <alp/iot.h>.
+ * Permanent stub: the surface is declared so blocks can compile against it,
+ * but nothing is implemented on top of <alp/i2s.h> yet.  alp_pdm_mic_open
+ * returns NULL and alp_pdm_mic_read / alp_pdm_mic_set_gain return
+ * ALP_ERR_NOSUPPORT.
+ *
+ * @par Tracking: github.com/alplabai/alp-sdk/issues/2987
  */
 
 #include <stddef.h>

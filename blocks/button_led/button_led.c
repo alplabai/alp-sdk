@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Generic button + LED block helper.  Wraps <alp/peripheral.h>
- * GPIO calls; portable across all three OS targets.
+ * GPIO calls.  Built by the Zephyr module only (blocks/ is not part of the
+ * plain-CMake / Yocto libalp_chips).
  */
 
 #include <stddef.h>
@@ -91,14 +92,20 @@ alp_button_led_set_press_callback(alp_button_led_t *bl, alp_button_led_press_cb_
 {
 	if (bl == NULL || !bl->initialised) return ALP_ERR_NOT_READY;
 
+	/* The ISR reads press_cb and cb_user as a pair.  Mask the edge IRQ before
+	 * touching either so a press can never pair one registration's callback with
+	 * another's user pointer (or run a callback with a NULL user). */
+	alp_status_t ds = alp_gpio_irq_disable(bl->button);
+	if (ds != ALP_OK) return ds;
+
 	if (cb == NULL) {
 		bl->press_cb = NULL;
 		bl->cb_user  = NULL;
-		return alp_gpio_irq_disable(bl->button);
+		return ds;
 	}
 
-	bl->press_cb = cb;
 	bl->cb_user  = user;
+	bl->press_cb = cb;
 
 	/* For active-low buttons the press is the falling edge;
      * for active-high buttons the press is the rising edge. */
