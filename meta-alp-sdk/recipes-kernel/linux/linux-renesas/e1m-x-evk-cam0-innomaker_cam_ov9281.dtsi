@@ -8,8 +8,8 @@
  * metadata/boards/e1m-x-evk.yaml camera_connectors.CAM0, the E1M-V2N/V2M pad_routes,
  * metadata/socs/renesas/rzv2n/n44.json linux_dt.
  *
- * NOT part of the default dtb: the linux-renesas bbappend builds it into the
- * cam0 dtb when ALP_CAMERA_CAM0 = "innomaker_cam_ov9281".
+ * Not a standalone dtb: the linux-renesas bbappend folds it into the shipped
+ * e1m-v2{n,m}101-x-evk.dtb when ALP_CAMERA_CAM0 = "innomaker_cam_ov9281".
  * Link frequency, lanes, supplies and clock follow the ovti,ov9282 driver
  * facts in metadata/chips/ov9281.yaml (drivers.linux).
  *
