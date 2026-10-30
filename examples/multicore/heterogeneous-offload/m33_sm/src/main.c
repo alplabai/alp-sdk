@@ -4,9 +4,9 @@
  *
  * heterogeneous-offload -- Cortex-M33-SM / Zephyr FFT worker.
  *
- * Subscribes to the `fft` method.  Each inbound call carries 1024
- * float32 PCM samples; we run the CMSIS-DSP 1024-point real-FFT,
- * compute the magnitude spectrum (513 bins), and return it to the
+ * Subscribes to the `fft` method.  Each inbound call carries 64
+ * float32 PCM samples; we run the CMSIS-DSP 64-point real-FFT,
+ * compute the magnitude spectrum (33 bins), and return it to the
  * A55 caller via alp_rpc_send back on the same method name.
  *
  * Why M-class for this?  CMSIS-DSP carries hand-tuned ARMv8-M
@@ -15,8 +15,17 @@
  * Linux-scheduled threads aren't.
  *
  * Wire contract (both sides agree on):
- *   request : 1024 × float32 (4096 bytes)
- *   response: 513  × float32 (2052 bytes)
+ *   request : 64 × float32 (256 bytes)
+ *   response: 33 × float32 (132 bytes)
+ *
+ * Frame budget: one RPC frame is the method name + NUL ("fft" = 4 B)
+ * plus the payload, and it must fit a single RPMsg buffer (496 B
+ * usable on the V2N OpenAMP carve-out; the SDK TX cap,
+ * CONFIG_ALP_SDK_RPC_TX_FRAME_MAX / ALP_RPC_TX_FRAME_MAX, is 1024).
+ * 64 float32 samples = 256 B request, 33 magnitude bins = 132 B
+ * response -- both fit with room to spare.  A 1024-point FFT
+ * (4096 B request) would not; to offload a longer transform, split
+ * the request into several calls that each fit one frame.
  */
 
 #include <stdio.h>
@@ -37,7 +46,7 @@
 #define HAS_CMSIS_DSP 0
 #endif
 
-#define FFT_LEN  1024u
+#define FFT_LEN  64u
 #define MAGS_LEN (FFT_LEN / 2u + 1u)
 
 static float g_samples[FFT_LEN];
@@ -82,7 +91,7 @@ static void on_fft(const void *payload, size_t len, void *user)
 	}
 	memcpy(g_samples, payload, sizeof g_samples);
 
-	printf("[m33_sm] processing 1024-sample frame\n");
+	printf("[m33_sm] processing 64-sample frame\n");
 	run_fft();
 
 	/* alp_rpc_call() on the A55 side matches the reply by method name, not
