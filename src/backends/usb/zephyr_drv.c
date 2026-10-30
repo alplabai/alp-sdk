@@ -14,8 +14,10 @@
  * Host side: wired to Zephyr's usbh_* host stack behind
  * CONFIG_USB_HOST_STACK + an alif,xhci-uhc node (label zephyr_uhc0).
  * When either is absent the ops return NOSUPPORT so device-only
- * and native_sim builds are unaffected.  Live bring-up paths inside
- * the uhc_xhci_alif driver are bench-gated (TODO(aen401-bench)).
+ * and native_sim builds are unaffected.  The uhc_xhci_alif driver
+ * itself implements the full uhc_api (rings, transfers, bus ops,
+ * event-ring IRQ); only the first_light()/enable() bring-up path has
+ * been bench-run -- see issue #388 for the open bench checklist.
  *
  * Gated on CONFIG_ALP_SDK_USB -- when OFF the I/O ops return
  * NOSUPPORT but the registry entry still links so the dispatcher

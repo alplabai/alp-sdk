@@ -7,7 +7,8 @@
 #
 # USB host bring-up is bench-gated:
 #   - CONFIG_USB_HOST_STACK=y + CONFIG_UHC_XHCI_ALIF=y (in prj.conf)
-#   - xHCI register bring-up is TODO(aen401-bench) inside uhc_xhci_alif.c
+#   - uhc_xhci_alif.c implements the full uhc_api; end-to-end enumeration on
+#     this EVK needs a D+/D- signal-path fix + a bench pass (see issue #388)
 #   - The zephyr_uhc0 node in the board DTS carries the DFP-grounded 0x48200000 / IRQ 101
 som:
   sku: E1M-AEN401
