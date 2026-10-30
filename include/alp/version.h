@@ -152,7 +152,7 @@ extern "C" {
  * compile time may be older than the runtime).
  *
  * @return Pointer to a static NUL-terminated string identical to
- *         @ref ALP_VERSION_STRING: "MAJOR.MINOR.PATCH", or
+ *         @ref ALP_VERSION_STRING, i.e. "MAJOR.MINOR.PATCH", or
  *         "MAJOR.MINOR.PATCH-rcN" for a release-candidate build; never
  *         NULL.
  */
