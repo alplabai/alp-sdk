@@ -1,5 +1,5 @@
 {
-  "generated": "2026-10-21",
+  "generated": "2026-10-29",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -15300,6 +15300,10 @@
           "hash": "53b5910a7816d0e4",
           "value": "ALP_ABI_STABLE"
         },
+        "ALP_ABI_STATUS_AHRS": {
+          "hash": "4bca320be78fb635",
+          "value": "ALP_ABI_EXPERIMENTAL"
+        },
         "ALP_ABI_STATUS_AUDIO": {
           "hash": "d16f51f2c5c05f18",
           "value": "ALP_ABI_STABLE"
@@ -15360,9 +15364,17 @@
           "hash": "6f1a3d0822028ec2",
           "value": "ALP_ABI_STABLE"
         },
+        "ALP_ABI_STATUS_I2C_REGFILE": {
+          "hash": "819b4da642b5f646",
+          "value": "ALP_ABI_EXPERIMENTAL"
+        },
         "ALP_ABI_STATUS_I2S": {
           "hash": "28be2bb5c4e799b3",
           "value": "ALP_ABI_STABLE"
+        },
+        "ALP_ABI_STATUS_I3C": {
+          "hash": "bce5737b8a0ee7c8",
+          "value": "ALP_ABI_EXPERIMENTAL"
         },
         "ALP_ABI_STATUS_INFERENCE": {
           "hash": "95df4ec6dbeb42b8",
@@ -15372,6 +15384,10 @@
           "hash": "1c7c9a0588a95218",
           "value": "ALP_ABI_STABLE"
         },
+        "ALP_ABI_STATUS_JPEG": {
+          "hash": "5980e65b9c52c747",
+          "value": "ALP_ABI_EXPERIMENTAL"
+        },
         "ALP_ABI_STATUS_MODEL": {
           "hash": "f9b215efcb67cdf1",
           "value": "ALP_ABI_EXPERIMENTAL"
@@ -15379,6 +15395,10 @@
         "ALP_ABI_STATUS_MPROC": {
           "hash": "34c9e18deec9e499",
           "value": "ALP_ABI_STABLE"
+        },
+        "ALP_ABI_STATUS_PID": {
+          "hash": "091486185306a3d7",
+          "value": "ALP_ABI_EXPERIMENTAL"
         },
         "ALP_ABI_STATUS_POWER": {
           "hash": "d9f213393bd89b85",
