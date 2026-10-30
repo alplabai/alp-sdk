@@ -8,6 +8,25 @@
  * @brief Alp SDK persistent-storage abstraction (QSPI / OSPI / SD).
  *
  * Backends registered on Zephyr:
+ *   - **zephyr_littlefs** (silicon_ref `"*"`, priority 110, tried
+ *     FIRST): real littlefs-file-backed device
+ *     (`<mnt_point>/alp_storage.bin`) for
+ *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH; erase is emulated by
+ *     overwriting the region with 0xFF.  `instance_id` is the flash-area
+ *     ID of the partition.  The mount is found by its BACKING partition,
+ *     not its name: the generated `alp_storage_mounts[]` entry whose
+ *     `storage_dev == FIXED_PARTITION_ID(<name>_partition)` and whose
+ *     `mnt_point` is currently mounted (any board.yaml `mount:` such as
+ *     `/lfs/settings`).  It accepts an open only for a FS_LITTLEFS
+ *     mount; otherwise it declines with ALP_ERR_NOSUPPORT and
+ *     `alp_storage_open` falls through to zephyr_flash.  zephyr_flash
+ *     in turn returns ALP_ERR_BUSY for a flash-area that backs ANY
+ *     mounted filesystem listed in `alp_storage_mounts[]`, so such a
+ *     partition is never reachable as raw flash through this API (raw
+ *     writes would corrupt the volume).  A mount made by hand with
+ *     fs_mount() that is not in `alp_storage_mounts[]` is not detected.
+ *     Same SD_MMC / `configure_inline_aes` ALP_ERR_NOSUPPORT posture as
+ *     zephyr_flash.
  *   - **zephyr_flash** (silicon_ref `"*"`, priority 100): real
  *     `<zephyr/storage/flash_map.h>` `flash_area_*` backing for
  *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH (`kind`); `instance_id`
@@ -17,13 +36,6 @@
  *     zephyr_disk) and for `configure_inline_aes`
  *     (no inline-AES path on plain Zephyr flash -- a higher-priority
  *     vendor backend implements it once one lands).
- *   - **zephyr_littlefs** (silicon_ref `"*"`, priority 90): real
- *     littlefs-file-backed device
- *     (`/lfs<instance_id>/alp_storage.bin`) for
- *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH; erase is emulated by
- *     overwriting the region with 0xFF.  Same SD_MMC /
- *     `configure_inline_aes` ALP_ERR_NOSUPPORT posture as
- *     zephyr_flash.
  *   - **zephyr_disk** (silicon_ref `"*"`, priority 80): real
  *     `<zephyr/storage/disk_access.h>` backing for
  *     `ALP_STORAGE_KIND_SD_MMC`; byte-addressed read/write over the
