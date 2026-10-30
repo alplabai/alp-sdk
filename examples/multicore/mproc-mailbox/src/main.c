@@ -130,6 +130,18 @@ int main(void)
 	const size_t payload_len = strlen(PAYLOAD);
 	memcpy((uint8_t *)shmem_base + REQUEST_OFFSET, PAYLOAD, payload_len);
 
+	/* Register the receive callback BEFORE sending.  The Zephyr backend
+     * only enables the RX channel inside alp_mbox_set_callback(), and the
+     * peer replies from its mailbox IRQ within microseconds of our send;
+     * a callback registered after the send would drop that reply and
+     * report a healthy peer as dead.  The peer sends back via the same
+     * mbox; the callback drains the (offset, length) tuple naming the
+     * echo response. */
+	if (alp_mbox_set_callback(mbox, mbox_inbound, NULL) != ALP_OK) {
+		printf("[mproc]   set_callback failed\n");
+		goto teardown;
+	}
+
 	/* Send the mailbox notification.  Payload here is the
      * `(offset, length)` tuple that points at the staged bytes
      * in shmem; the peer reads the actual data through its own
@@ -143,15 +155,6 @@ int main(void)
 		goto teardown;
 	}
 	printf("[mproc] sending payload  \"%s\" (%u bytes)\n", PAYLOAD, (unsigned)payload_len);
-
-	/* Register the receive callback before waiting.  On real
-     * silicon the peer sends back via the same mbox; the
-     * callback drains the (offset, length) tuple naming the
-     * echo response. */
-	if (alp_mbox_set_callback(mbox, mbox_inbound, NULL) != ALP_OK) {
-		printf("[mproc]   set_callback failed\n");
-		goto teardown;
-	}
 
 #ifdef CONFIG_BOARD_NATIVE_SIM
 	printf("[mproc]   native_sim: no peer core; skipping reply wait\n");
@@ -168,11 +171,22 @@ int main(void)
 	}
 	printf("[mproc] HE replied via mbox callback\n");
 
-	if (g_state.reply_len > MAX_PAYLOAD) g_state.reply_len = MAX_PAYLOAD;
+	/* The (offset, length) tuple comes from the other core, so treat it as
+     * untrusted: a desynced peer image must not make us read outside the
+     * shared region.  Clamp the length first, then require the whole
+     * [offset, offset + len) window to sit inside shmem_size (written as a
+     * subtraction so offset + len cannot wrap). */
+	const size_t reply_offset = g_state.reply_offset;
+	size_t       reply_len    = g_state.reply_len;
+	if (reply_len > MAX_PAYLOAD) reply_len = MAX_PAYLOAD;
+	if (reply_offset > shmem_size || reply_len > shmem_size - reply_offset) {
+		printf("[mproc]   reply out of range (offset=%zu len=%zu)\n", reply_offset, reply_len);
+		goto teardown;
+	}
 	char reply_buf[MAX_PAYLOAD + 1];
-	memcpy(reply_buf, (uint8_t *)shmem_base + g_state.reply_offset, g_state.reply_len);
-	reply_buf[g_state.reply_len] = '\0';
-	printf("[mproc] HE replied       \"%s\" (%u bytes)\n", reply_buf, (unsigned)g_state.reply_len);
+	memcpy(reply_buf, (uint8_t *)shmem_base + reply_offset, reply_len);
+	reply_buf[reply_len] = '\0';
+	printf("[mproc] HE replied       \"%s\" (%u bytes)\n", reply_buf, (unsigned)reply_len);
 #endif
 
 teardown:
