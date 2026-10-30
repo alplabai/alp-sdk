@@ -28,12 +28,19 @@
  *   2. IO20 low                   mux on: the card is now wired to sdhc0
  *   3. fs_mount("/SD:")           first time the SD stack talks to the card
  *
- * The SD host driver never touches the card before step 3, so enabling sdhc0
- * in devicetree from boot is safe.
+ * The SD host driver never touches the card before step 3, but that only
+ * orders the SD *traffic*; it does not make the carrier safe (see below).
  *
- * Only enable the mux on a carrier whose U38/U39 are the reworked 74LV3257
- * bus switches. The stock 74LVC157 parts drive their outputs at all times
- * and fight the SoC's SD pins while /E is low.
+ * ==== CARRIER REQUIREMENT: REWORKED U38/U39 =========================
+ *
+ * Run this ONLY on a carrier whose U38/U39 are the reworked 74LV3257 bus
+ * switches. The stock 74LVC157 is unidirectional and always drives its Y
+ * outputs (the selected input when /E is low, forced LOW when /E is high),
+ * and those Y pins sit on the same nets as the SoC's own SD pads. So the
+ * stock part fights the SoC's SD drivers on EITHER /E state -- leaving the
+ * mux disabled is NOT safe (see include/alp/boards/alp_e1m_evk.h, "SD ...
+ * CAN NEVER WORK through the stock 74LVC157"). This example has no build
+ * or runtime gate for that: knowing your carrier is your responsibility.
  *
  * ==== DMA AND DTCM ==================================================
  *

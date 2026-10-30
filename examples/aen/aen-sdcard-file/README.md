@@ -68,9 +68,11 @@ scenarios in `testcase.yaml` build all five.
 ## Hardware
 
 - E1M-EVK 2626-R2 whose SDIO mux parts U38/U39 are the **reworked 74LV3257**
-  bus switches. The stock 74LVC157 parts drive their outputs at all times and
-  fight the SoC's SD pins while the mux is enabled; do not run this example
-  on an unreworked carrier.
+  bus switches. The stock 74LVC157 parts drive their outputs at all times
+  (the selected input when `/E` is low, forced LOW when `/E` is high) and fight
+  the SoC's SD pins on either `/E` state, so even the shield's boot-time
+  sdhc0 is not safe there; do not run this example on an unreworked carrier.
+  Nothing in the build gates this.
 - Header **P18 open** (selects the microSD slot, not the M.2 E-key card).
 - A microSD card in J7, FAT32 or exFAT. The example never formats the card;
   it creates `alp_sdcard_file.txt` and deletes it again.
