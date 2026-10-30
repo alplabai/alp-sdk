@@ -196,6 +196,13 @@ loops forever (`v2n-power-monitor`) still finishes; the pty keeps its
 stdout line-buffered, so nothing it printed is lost when it is stopped.  `--ssh-host` falls back to `ALP_HIL_SSH_HOST`; like the serial
 port, it has no default.
 
+The verdict is the `serial:` expectations on the output **and** the example's
+exit status: a non-zero exit fails the spec (a crash after the PASS banner no
+longer passes).  The one exception is rc 143 (SIGTERM from the bounded-run
+stop), accepted only when the spec sets `serial.runs_until_killed: true` -- use
+it for examples that loop forever by design (`v2n-power-monitor`).  Anywhere
+else 143 means the example hung and was killed, and fails.
+
 #### Passing argv and extra files (`ssh_args:` / `ssh_files:`)
 
 An `ssh-run` example that takes filename argv besides its own binary --
@@ -239,6 +246,11 @@ there is no binary to build.  A spec may carry `ssh_command:` instead of
 `--artifact-dir`, no scp.  `ssh_command` excludes `example`, `ssh_args`
 and `ssh_files`.  Print a marker (`echo HIL_..._OK`) from the command
 rather than matching the command's own text.
+
+The one-liner must also exit 0: a non-zero status fails the spec, as does an
+ssh connection failure (255).  End the script with a command that exits 0 -- a
+final `echo HIL_..._DONE` or `|| true` -- so a trailing `cond && echo MARKER`
+or `kill $pid` on an already-gone process does not fail on status alone.
 
 ```sh
 python tests/hil/run_smoke.py tests/hil/v2m103-x-evk --no-common --ssh-host root@<bench-host>

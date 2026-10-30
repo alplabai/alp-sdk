@@ -81,6 +81,8 @@ class SerialSpec:
     baud: int
     expect_contains: tuple[str, ...]
     expect_absent: tuple[str, ...]
+    runs_until_killed: bool = False  # ssh-run: example loops forever by
+    # design, so the bounded-run SIGTERM (rc 143) is the expected stop
 
 
 @dc.dataclass(frozen=True)
@@ -164,6 +166,7 @@ def _merge_serial(
         baud=int(baud),
         expect_contains=contains,
         expect_absent=absent,
+        runs_until_killed=bool(spec_serial.get("runs_until_killed", False)),
     )
 
 
@@ -433,7 +436,7 @@ def capture_command(spec: SmokeSpec) -> list[str]:
         return ["ssh", "-tt", host,
                 f"chmod +x {remote} && {{ {invocation} & p=$!; "
                 f"(sleep {secs}; kill $p) >/dev/null 2>&1 & w=$!; "
-                f"wait $p; kill $w 2>/dev/null; }}"]
+                f"wait $p; rc=$?; kill $w 2>/dev/null; exit $rc; }}"]
     port = spec.serial_port or "<unresolved: pass --serial-port or set ALP_HIL_SERIAL_PORT>"
     return [
         "/opt/alp-hil/capture-serial.sh",
@@ -533,6 +536,9 @@ def run_spec(spec: SmokeSpec, *, dry_run: bool = False) -> SmokeResult:
     return SmokeResult(spec, not failures, tuple(failures))
 
 
+_SIGTERM_RC = 143
+
+
 def _run_ssh_spec(spec: SmokeSpec) -> SmokeResult:
     """ssh-run: copy the prebuilt binary (+ any ssh_files: extra inputs),
     run it, assert on its output."""
@@ -540,8 +546,10 @@ def _run_ssh_spec(spec: SmokeSpec) -> SmokeResult:
         return SmokeResult(spec, False, (
             "no ssh host resolved -- pass --ssh-host or set ALP_HIL_SSH_HOST",))
     if spec.ssh_command:
-        _, out = _run(capture_command(spec), stdin=spec.ssh_command + "\n")
+        rc, out = _run(capture_command(spec), stdin=spec.ssh_command + "\n")
         failures = assert_serial(spec, out)
+        if rc != 0:
+            failures.append(f"ssh_command exited rc={rc}")
         return SmokeResult(spec, not failures, tuple(failures), out)
     artifact = Path(spec.artifact_dir) / _artifact_name(spec)
     if not spec.artifact_dir or not artifact.is_file():
@@ -562,10 +570,16 @@ def _run_ssh_spec(spec: SmokeSpec) -> SmokeResult:
         if rc != 0:
             return SmokeResult(spec, False, (
                 f"ssh_files copy failed (rc={rc}): {out.strip()[:400]}",))
-    # The example's exit code is not asserted: examples report PASS/FAIL
-    # on stdout, which the spec's expectations check.
-    _, out = _run(capture_command(spec))
+    # The remote shell exits with the example's status (see capture_command),
+    # so a crash or abort after the expected banner still fails the spec.
+    # 143 (128+SIGTERM) is the bounded-run sleeper stopping an example, and
+    # is only expected from one that declares `serial.runs_until_killed`;
+    # elsewhere it means the example hung and was killed.
+    rc, out = _run(capture_command(spec))
     failures = assert_serial(spec, out)
+    ok_rcs = (0, _SIGTERM_RC) if spec.serial.runs_until_killed else (0,)
+    if rc not in ok_rcs:
+        failures.append(f"example exited rc={rc}")
     return SmokeResult(spec, not failures, tuple(failures), out)
 
 

@@ -19,17 +19,19 @@
  *   - Crashing on a magic mismatch.
  *   - Underflowing length=0 / overflowing length=UINT32_MAX.
  *
- * The harness feeds the raw fuzz buffer into the same decoder
- * the production mproc_zephyr.c calls when a frame arrives on a
- * mailbox.  Any non-OK decoder return must produce an unmodified
- * out-pointer-state (or NULL); any OK return must produce a
- * payload_ptr within the input buffer and a payload_len that
- * fits within the remaining bytes.
+ * This harness links the PRODUCTION src/common/proto/alp_mproc_frame.c
+ * (see tests/fuzz/CMakeLists.txt), so it fuzzes the exact
+ * alp_mproc_frame_decode that src/backends/mproc/zephyr_drv.c calls on
+ * peer-supplied mailbox bytes -- there is no inline reference copy that
+ * could drift from it.  Any non-OK return must leave the outputs zeroed;
+ * any OK return must produce a payload pointer inside the input buffer
+ * and a payload length that fits in the remaining bytes.
  *
- * The harness also re-encodes the decoded payload + sequence +
- * a fixed-checksum-magic and asserts the round-trip matches a
- * prefix of the original input -- this catches asymmetric
- * encode/decode bugs.
+ * The harness also re-encodes the decoded payload + sequence with the
+ * production encoder and asserts the bytes match the original input
+ * prefix -- this catches asymmetric encode/decode bugs.  It also decodes
+ * with NULL output pointers, the form the Zephyr driver uses when it only
+ * needs the validation verdict.
  *
  * What it catches:
  *   - Header / payload-length disagreement (overrun if the
@@ -40,6 +42,7 @@
  *
  * Build:
  *   cmake -B build-fuzz -DALP_BUILD_FUZZ=ON -DALP_OS=yocto \
+ *         -DALP_GD32_BRIDGE_FIRMWARE_DIR=<gd32-bridge-firmware checkout> \
  *         -DCMAKE_C_COMPILER=clang
  *   cmake --build build-fuzz --target alp_fuzz_mproc_frame
  *
@@ -52,109 +55,33 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "alp/peripheral.h" /* for alp_status_t -- the decoder signature */
+#include "proto/alp_mproc_frame.h"
 
-/* ------------------------------------------------------------------- */
-/* Inline reference decoder mirroring src/common/proto/alp_mproc_frame.c.
- *
- * The harness keeps a copy of the decoder here instead of linking the
- * SDK target because the fuzz CMakeLists.txt only depends on
- * alp::sdk_headers; pulling the .c body in would require a wider
- * dependency graph than the fuzz harness should claim.  The two impls
- * MUST stay in sync; if the production decoder evolves, this reference
- * gets updated and the fuzz harness asserts the same outputs. */
-
-#define MPROC_FRAME_MAGIC      0x46504D41u /* 'A','M','P','F' LE */
-#define MPROC_FRAME_HEADER_LEN 12u
-
-typedef enum {
-	REF_OK            = 0,
-	REF_ERR_INVAL     = -1,
-	REF_ERR_TOO_SHORT = -2,
-	REF_ERR_BAD_MAGIC = -3,
-	REF_ERR_BAD_LEN   = -4,
-} ref_status_t;
-
-static uint32_t ref_le32(const uint8_t *p)
-{
-	return ((uint32_t)p[0]) | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
-	       ((uint32_t)p[3] << 24);
-}
-
-/* Decode: parse the 12-byte header + bound-check the declared
- * payload_len against the available buffer.  On REF_OK, *seq +
- * *payload_ptr + *payload_len are populated. */
-static ref_status_t ref_decode(const uint8_t  *buf,
-                               size_t          buf_len,
-                               uint32_t       *seq,
-                               const uint8_t **payload_ptr,
-                               uint32_t       *payload_len)
-{
-	if (buf == NULL || seq == NULL || payload_ptr == NULL || payload_len == NULL) {
-		return REF_ERR_INVAL;
-	}
-	if (buf_len < MPROC_FRAME_HEADER_LEN) {
-		return REF_ERR_TOO_SHORT;
-	}
-	const uint32_t magic = ref_le32(buf);
-	if (magic != MPROC_FRAME_MAGIC) {
-		return REF_ERR_BAD_MAGIC;
-	}
-	*seq         = ref_le32(buf + 4);
-	*payload_len = ref_le32(buf + 8);
-	/* Length-field bound check: payload must fit within the remaining
-     * input buffer.  Reject lengths that would overflow size_t when
-     * added to the header size (catches UINT32_MAX-style attacks
-     * against 32-bit-host fuzz runs). */
-	if (*payload_len > buf_len - MPROC_FRAME_HEADER_LEN) {
-		return REF_ERR_BAD_LEN;
-	}
-	*payload_ptr = buf + MPROC_FRAME_HEADER_LEN;
-	return REF_OK;
-}
-
-/* Encode: layout matches decode.  Used by the harness for the
- * round-trip assertion. */
-static void ref_encode(uint8_t *out, uint32_t seq, const uint8_t *payload, uint32_t payload_len)
-{
-	out[0]  = (uint8_t)(MPROC_FRAME_MAGIC);
-	out[1]  = (uint8_t)(MPROC_FRAME_MAGIC >> 8);
-	out[2]  = (uint8_t)(MPROC_FRAME_MAGIC >> 16);
-	out[3]  = (uint8_t)(MPROC_FRAME_MAGIC >> 24);
-	out[4]  = (uint8_t)(seq);
-	out[5]  = (uint8_t)(seq >> 8);
-	out[6]  = (uint8_t)(seq >> 16);
-	out[7]  = (uint8_t)(seq >> 24);
-	out[8]  = (uint8_t)(payload_len);
-	out[9]  = (uint8_t)(payload_len >> 8);
-	out[10] = (uint8_t)(payload_len >> 16);
-	out[11] = (uint8_t)(payload_len >> 24);
-	if (payload_len > 0u && payload != NULL) {
-		memcpy(out + MPROC_FRAME_HEADER_LEN, payload, payload_len);
-	}
-}
-
-/* ------------------------------------------------------------------- */
 /* libFuzzer entry point. */
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-	uint32_t       seq         = 0;
-	const uint8_t *payload_ptr = NULL;
-	uint32_t       payload_len = 0;
+	uint32_t       seq         = 0xA5A5A5A5u;
+	const uint8_t *payload_ptr = (const uint8_t *)(uintptr_t)1;
+	size_t         payload_len = 0xDEADu;
 
-	const ref_status_t s = ref_decode(data, size, &seq, &payload_ptr, &payload_len);
-	if (s != REF_OK) {
-		/* Any non-OK return MUST leave the in-caller state safe
-         * (the caller drops the frame).  The harness has nothing
-         * to assert beyond the fact that we returned cleanly --
-         * libFuzzer's sanitizer wrappers catch any UB the decoder
-         * leaked while computing the rejection. */
+	/* NULL outputs are legal (the Zephyr driver passes a NULL
+	 * sequence_out); the verdict must not depend on them. */
+	const alp_status_t sn = alp_mproc_frame_decode(data, size, NULL, NULL, NULL);
+
+	const alp_status_t s = alp_mproc_frame_decode(data, size, &seq, &payload_ptr, &payload_len);
+	if ((s == ALP_OK) != (sn == ALP_OK)) {
+		__builtin_trap();
+	}
+	if (s != ALP_OK) {
+		/* A rejected frame must not leak stale or partial outputs. */
+		if (seq != 0u || payload_ptr != NULL || payload_len != 0u) {
+			__builtin_trap();
+		}
 		return 0;
 	}
 
-	/* On REF_OK the payload pointer must lie inside the input
-     * buffer + the payload length must fit. */
+	/* On ALP_OK the payload must lie inside the input buffer. */
 	if (payload_ptr < data || payload_ptr > data + size) {
 		__builtin_trap(); /* libFuzzer reports a crash. */
 	}
@@ -162,25 +89,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 		__builtin_trap();
 	}
 
-	/* Round-trip: re-encode + decode + assert match.  Use a
-     * stack buffer sized to the input (libFuzzer caps inputs
-     * around 4 KiB by default; this is safe). */
+	/* Round-trip: re-encode with the production encoder and compare. */
 	if (size <= 4096u) {
 		uint8_t buf[4096];
-		ref_encode(buf, seq, payload_ptr, payload_len);
-
-		uint32_t           seq2         = 0;
-		const uint8_t     *payload_ptr2 = NULL;
-		uint32_t           payload_len2 = 0;
-		const ref_status_t s2           = ref_decode(
-		    buf, MPROC_FRAME_HEADER_LEN + payload_len, &seq2, &payload_ptr2, &payload_len2);
-		if (s2 != REF_OK) {
+		size_t  out_len = 0;
+		if (alp_mproc_frame_encode(seq, payload_ptr, payload_len, buf, sizeof(buf), &out_len) !=
+		    ALP_OK) {
 			__builtin_trap();
 		}
-		if (seq2 != seq || payload_len2 != payload_len) {
-			__builtin_trap();
-		}
-		if (payload_len > 0u && memcmp(payload_ptr2, payload_ptr, payload_len) != 0) {
+		if (out_len != ALP_MPROC_FRAME_HEADER_BYTES + payload_len ||
+		    memcmp(buf, data, out_len) != 0) {
 			__builtin_trap();
 		}
 	}

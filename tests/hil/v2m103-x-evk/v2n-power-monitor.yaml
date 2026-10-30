@@ -23,6 +23,7 @@ flash_method: ssh-run
 
 serial:
   duration_s: 8
+  runs_until_killed: true   # example loops forever; the bounded stop (rc 143) is expected
   expect_contains:
     - "rail     bus_V     I_mA       P_mW"
     - "  3V3 "
