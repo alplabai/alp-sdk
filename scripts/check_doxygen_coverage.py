@@ -23,8 +23,12 @@ Heuristic:
 
 Run from the repo root:
 
-    python3 scripts/check_doxygen_coverage.py         # informational
-    python3 scripts/check_doxygen_coverage.py --fail-on-gaps   # CI
+    python3 scripts/check_doxygen_coverage.py                # gate: exit 1 on any gap
+    python3 scripts/check_doxygen_coverage.py --report-only  # list gaps, always exit 0
+
+The gate fails by default because the quality registry and test-all.sh run
+every check script with no arguments; an opt-in failure flag would leave
+the local pre-push mirror green while pr-doxygen.yml is red.
 """
 
 from __future__ import annotations
@@ -142,8 +146,9 @@ def _block_has_brief(block: str) -> bool:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--fail-on-gaps", action="store_true",
-                        help="exit 1 if any public function is missing @brief")
+    parser.add_argument("--report-only", action="store_true",
+                        help="list gaps but exit 0 (default: exit 1 if any "
+                             "public function is missing @brief)")
     parser.add_argument("--verbose", action="store_true",
                         help="list every covered + uncovered function")
     args = parser.parse_args(argv)
@@ -178,7 +183,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         for rel, line_no, name in gaps:
             print(f"  {rel}:{line_no}  {name}")
 
-    if args.fail_on_gaps and gaps:
+    if gaps and not args.report_only:
         return 1
     return 0
 
