@@ -9,6 +9,9 @@ project(test_dma_pl330_sg_validate)
 # test needs only <zephyr/drivers/dma.h>'s struct dma_block_config, no
 # DEVICE_MMIO or a devicetree-instantiated DMA instance.
 #
+# Bench-required, NOT covered here: the async chunk continuation in the ISR and
+# the stop-vs-completion-ISR race (INTEN fence in dma_pl330_stop_dma_ch).
+#
 # KNOWN GAP (round-2 #1124 dev-review, not closed by this suite): this only
 # proves the header function itself is correct, not that dma_pl330_alif.c's
 # dma_pl330_configure() still calls it -- a mutation deleting that one call
