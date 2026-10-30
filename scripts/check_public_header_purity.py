@@ -24,7 +24,8 @@ Second check (C++ purity): every header under ``include/alp/`` must also
 parse as C++17 -- a bare ``_Static_assert`` or similar C-only construct
 breaks every C++ consumer (use ``ALP_STATIC_ASSERT`` from
 ``<alp/static_assert.h>``).  Each header is compiled with
-``g++ -std=c++17 -fsyntax-only``.  It runs only with ``--cxx`` (the
+``g++ -std=c++17 -fsyntax-only`` (clang-family drivers add
+``-Werror=c11-extensions`` so they reject ``_Static_assert`` like g++ does).  It runs only with ``--cxx`` (the
 default run stays hermetic for the quick profile); CI passes ``--cxx
 --require-cxx`` so a missing compiler fails instead of skipping.
 ALP_BOARD_E1M_EVK is defined so <alp/board.h> resolves.  Headers that
@@ -66,6 +67,26 @@ def find_cxx() -> str | None:
     return None
 
 
+def _cxx_strict_flags(cxx: str) -> list[str]:
+    """Extra flags that make a clang-family driver reject C-only constructs.
+
+    g++ rejects a bare ``_Static_assert`` in C++ outright, but clang (and
+    Apple clang, which is what ``c++`` is on macOS) accepts it as a C11
+    extension and only warns under ``-Wc11-extensions``.  Promote that one
+    warning to an error so every host enforces the same rule.  The flag is
+    clang-only: g++ errors out on an unknown ``-Werror=`` name.
+    """
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            [cxx, "--version"], capture_output=True, text=True, encoding="utf-8"
+        ).stdout
+    except OSError:
+        return []
+    return ["-Werror=c11-extensions"] if "clang" in out.lower() else []
+
+
 def check_cxx(root: Path, cxx: str) -> list[str]:
     """Compile every include/alp header as C++17 (syntax only)."""
     # Imported here, not at module level: the default (quick-profile) run of
@@ -73,6 +94,7 @@ def check_cxx(root: Path, cxx: str) -> list[str]:
     import subprocess
 
     inc = root / "include"
+    strict = _cxx_strict_flags(cxx)
     offenders: list[str] = []
     for header in sorted((inc / "alp").rglob("*.h")):
         rel = header.relative_to(inc).as_posix()
@@ -86,6 +108,7 @@ def check_cxx(root: Path, cxx: str) -> list[str]:
                     cxx,
                     "-std=c++17",
                     "-fsyntax-only",
+                    *strict,
                     "-DALP_BOARD_E1M_EVK",
                     f"-I{inc}",
                     str(tu),
