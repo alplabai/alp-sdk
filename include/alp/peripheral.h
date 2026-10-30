@@ -350,6 +350,17 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id);
  * @param[in] dir   Direction (@ref ALP_GPIO_INPUT / @ref ALP_GPIO_OUTPUT).
  * @param[in] pull  Pull-up / pull-down resistor selection.
  *
+ * @note Interaction with an enabled interrupt (@ref alp_gpio_irq_enable)
+ *       is backend-specific.  On the Yocto/Linux backend, edge detection
+ *       and output are mutually exclusive in the kernel: reconfiguring
+ *       to @ref ALP_GPIO_OUTPUT disables the IRQ and drops its callback
+ *       (only once the new configuration was applied; on error the IRQ
+ *       is left enabled), while reconfiguring to @ref ALP_GPIO_INPUT
+ *       keeps the active edge detection and callback.  The Zephyr
+ *       backend does not touch the interrupt configuration here, so
+ *       portable code that needs a deterministic state should call
+ *       @ref alp_gpio_irq_disable before switching a pin to output.
+ *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_NOSUPPORT.
  */

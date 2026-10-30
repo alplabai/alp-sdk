@@ -81,6 +81,7 @@
 #include "alp/peripheral.h"
 #include "alp_internal.h"
 #include "common/alp_errno.h"
+#include "common/alp_slot_claim.h"
 
 #ifndef ALP_SDK_YOCTO_MAX_GPIO_HANDLES
 #define ALP_SDK_YOCTO_MAX_GPIO_HANDLES 16
@@ -101,6 +102,17 @@ struct alp_gpio {
 	bool          irq_enabled; /* dispatcher tracks this slot if true */
 	alp_gpio_cb_t irq_cb;      /* invoked by dispatcher on edge event */
 	void         *irq_user;
+	uint64_t      irq_edge_flags; /* GPIO_V2_LINE_FLAG_EDGE_* while irq_enabled */
+	/* Bumped by pool_acquire() each time the slot is handed out.  The
+	 * dispatcher snapshots it with the fd so a close + reopen that lands
+	 * on the same slot AND the same (lowest-free) fd number is still
+	 * seen as a different owner. */
+	uint32_t generation;
+	/* Op/close guard (issue #629 pattern).  AFTER everything pool_acquire()
+	 * memsets: both return to UNOPENED / 0 through the close protocol, and
+	 * a late stale-handle op_enter() must not be wiped by a re-claim. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
 };
 
 static struct alp_gpio g_gpio_pool[ALP_SDK_YOCTO_MAX_GPIO_HANDLES];
@@ -129,9 +141,11 @@ static struct alp_gpio *pool_acquire(void)
 	pthread_mutex_lock(&g_irq.mu);
 	for (size_t i = 0; i < ARRAY_SIZE(g_gpio_pool); ++i) {
 		if (!g_gpio_pool[i].in_use) {
-			memset(&g_gpio_pool[i], 0, sizeof(g_gpio_pool[i]));
-			g_gpio_pool[i].in_use  = true;
-			g_gpio_pool[i].line_fd = -1;
+			uint32_t gen = g_gpio_pool[i].generation + 1u;
+			memset(&g_gpio_pool[i], 0, offsetof(struct alp_gpio, lifecycle));
+			g_gpio_pool[i].generation = gen;
+			g_gpio_pool[i].in_use     = true;
+			g_gpio_pool[i].line_fd    = -1;
 			pthread_mutex_unlock(&g_irq.mu);
 			return &g_gpio_pool[i];
 		}
@@ -151,6 +165,7 @@ static void pool_release(struct alp_gpio *h)
 		h->line_fd = -1;
 	}
 	h->in_use = false;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	pthread_mutex_unlock(&g_irq.mu);
 }
 
@@ -166,6 +181,20 @@ static uint64_t pull_to_flags(alp_gpio_pull_t pull)
 		return GPIO_V2_LINE_FLAG_BIAS_DISABLED;
 	}
 }
+
+/* Make the line-request fd non-blocking.  Shared by alp_gpio_open() and
+ * tests/yocto/peripheral_gpio_irq_rollback.c so the test exercises the
+ * exact code path the dispatcher's no-park guarantee depends on. */
+static int gpio_set_nonblock(int fd)
+{
+	int fl = fcntl(fd, F_GETFL);
+	if (fl < 0) {
+		return -1;
+	}
+	return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+}
+
+static void irq_wake(void);
 
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {
@@ -201,6 +230,15 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
      * needed. */
 	(void)close(chip_fd);
 
+	/* Non-blocking, so the IRQ dispatcher's event read() returns EAGAIN
+	 * instead of parking the thread (and every later g_irq.mu taker) when
+	 * the line has no pending edge. */
+	if (gpio_set_nonblock(req.fd) < 0) {
+		alp_internal_set_last_error(alp_status_from_posix_errno(errno));
+		(void)close(req.fd);
+		return NULL;
+	}
+
 	struct alp_gpio *h = pool_acquire();
 	if (h == NULL) {
 		alp_internal_set_last_error(ALP_ERR_NOMEM);
@@ -210,6 +248,7 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 	h->line_fd   = req.fd;
 	h->pin_id    = pin_id;
 	h->is_output = false;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	alp_internal_set_last_error(ALP_OK);
 	return h;
 }
@@ -233,48 +272,90 @@ static int _gpio_set_config(int line_fd, const struct gpio_v2_line_config *cfg)
 	return ioctl(line_fd, GPIO_V2_LINE_SET_CONFIG_IOCTL, cfg);
 }
 
+/* Test-only seam for the line GET/SET_VALUES ioctls (default NULL: the
+ * real ioctl), so tests/yocto/peripheral_gpio_irq_rollback.c can park an
+ * alp_gpio_read()/alp_gpio_write() in flight without a real line. */
+static int (*g_gpio_test_values_hook)(int line_fd, unsigned long req, void *vals) = NULL;
+
+static int _gpio_values_ioctl(int line_fd, unsigned long req, struct gpio_v2_line_values *vals)
+{
+	if (g_gpio_test_values_hook != NULL) return g_gpio_test_values_hook(line_fd, req, vals);
+	return ioctl(line_fd, req, vals);
+}
+
 alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pull_t pull)
 {
 	/* NULL-or-closed is a lifecycle condition, not a malformed
 	 * argument -- ALP_ERR_NOT_READY per ADR-0002's amendment,
 	 * matching every Zephyr dispatcher (issue #1734). */
-	if (pin == NULL || !pin->in_use) {
+	if (pin == NULL || !alp_handle_op_enter(&pin->lifecycle, &pin->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	/* Edge detection and OUTPUT are mutually exclusive in the kernel.  An
+	 * input reconfigure keeps the active edge flags so the IRQ keeps
+	 * firing; an output reconfigure disables the IRQ (same state change
+	 * as alp_gpio_irq_disable) but ONLY once the kernel accepted the new
+	 * config, so a failed SET_CONFIG leaves line and software state
+	 * consistent.  g_irq.mu is held across the (non-blocking) ioctl so
+	 * the edge-flag snapshot cannot go stale against a concurrent
+	 * alp_gpio_irq_enable()/alp_gpio_irq_disable(), which take the same
+	 * lock around their own SET_CONFIG. */
+	alp_status_t rc          = ALP_OK;
+	bool         irq_dropped = false;
+	pthread_mutex_lock(&g_irq.mu);
 	struct gpio_v2_line_config cfg = { 0 };
 	cfg.flags                      = pull_to_flags(pull);
 	if (dir == ALP_GPIO_OUTPUT) {
 		cfg.flags |= GPIO_V2_LINE_FLAG_OUTPUT;
 	} else {
 		cfg.flags |= GPIO_V2_LINE_FLAG_INPUT;
+		if (pin->irq_enabled) {
+			cfg.flags |= pin->irq_edge_flags;
+		}
 	}
 	if (_gpio_set_config(pin->line_fd, &cfg) < 0) {
-		return alp_status_from_posix_errno(errno);
+		rc = alp_status_from_posix_errno(errno);
+	} else {
+		pin->is_output = (dir == ALP_GPIO_OUTPUT);
+		if (dir == ALP_GPIO_OUTPUT && pin->irq_enabled) {
+			pin->irq_enabled    = false;
+			pin->irq_cb         = NULL;
+			pin->irq_user       = NULL;
+			pin->irq_edge_flags = 0;
+			irq_dropped         = true;
+		}
 	}
-	pin->is_output = (dir == ALP_GPIO_OUTPUT);
-	return ALP_OK;
+	pthread_mutex_unlock(&g_irq.mu);
+	if (irq_dropped) {
+		irq_wake();
+	}
+	alp_handle_op_leave(&pin->active_ops);
+	return rc;
 }
 
 alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
 {
 	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
 	 * matching every Zephyr dispatcher (issue #1734). */
-	if (pin == NULL || !pin->in_use) {
+	if (pin == NULL || !alp_handle_op_enter(&pin->lifecycle, &pin->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc = ALP_OK;
 	if (!pin->is_output) {
 		/* Writing to an input line is a configuration mistake;
          * the kernel would refuse the ioctl anyway. */
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+	} else {
+		struct gpio_v2_line_values vals = {
+			.bits = level ? 1ULL : 0ULL,
+			.mask = 1ULL, /* line 0 in this request */
+		};
+		if (_gpio_values_ioctl(pin->line_fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &vals) < 0) {
+			rc = alp_status_from_posix_errno(errno);
+		}
 	}
-	struct gpio_v2_line_values vals = {
-		.bits = level ? 1ULL : 0ULL,
-		.mask = 1ULL, /* line 0 in this request */
-	};
-	if (ioctl(pin->line_fd, GPIO_V2_LINE_SET_VALUES_IOCTL, &vals) < 0) {
-		return alp_status_from_posix_errno(errno);
-	}
-	return ALP_OK;
+	alp_handle_op_leave(&pin->active_ops);
+	return rc;
 }
 
 alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
@@ -283,21 +364,25 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
 	 * matching every Zephyr dispatcher (issue #1734).  A NULL @p level
 	 * is a malformed argument, not a lifecycle one -- ALP_ERR_INVAL,
 	 * checked only once the handle itself is known good. */
-	if (pin == NULL || !pin->in_use) {
+	if (pin == NULL || !alp_handle_op_enter(&pin->lifecycle, &pin->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc = ALP_OK;
 	if (level == NULL) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+	} else {
+		struct gpio_v2_line_values vals = {
+			.bits = 0,
+			.mask = 1ULL,
+		};
+		if (_gpio_values_ioctl(pin->line_fd, GPIO_V2_LINE_GET_VALUES_IOCTL, &vals) < 0) {
+			rc = alp_status_from_posix_errno(errno);
+		} else {
+			*level = (vals.bits & 1ULL) != 0;
+		}
 	}
-	struct gpio_v2_line_values vals = {
-		.bits = 0,
-		.mask = 1ULL,
-	};
-	if (ioctl(pin->line_fd, GPIO_V2_LINE_GET_VALUES_IOCTL, &vals) < 0) {
-		return alp_status_from_posix_errno(errno);
-	}
-	*level = (vals.bits & 1ULL) != 0;
-	return ALP_OK;
+	alp_handle_op_leave(&pin->active_ops);
+	return rc;
 }
 
 /* ================================================================== */
@@ -341,6 +426,7 @@ static void *irq_dispatcher(void *arg)
 	(void)arg;
 	struct pollfd    fds[ALP_SDK_YOCTO_MAX_GPIO_HANDLES + 1];
 	struct alp_gpio *slot_pins[ALP_SDK_YOCTO_MAX_GPIO_HANDLES];
+	uint32_t         slot_gens[ALP_SDK_YOCTO_MAX_GPIO_HANDLES];
 	/* We deliberately drain only one event per slot per wake-up so a
      * pin that fires faster than we dispatch doesn't starve siblings;
      * the kernel queue keeps subsequent events buffered. */
@@ -363,6 +449,7 @@ static void *irq_dispatcher(void *arg)
 			fds[nfds].events    = POLLIN;
 			fds[nfds].revents   = 0;
 			slot_pins[nfds - 1] = p;
+			slot_gens[nfds - 1] = p->generation;
 			++nfds;
 		}
 		pthread_mutex_unlock(&g_irq.mu);
@@ -423,7 +510,8 @@ static void *irq_dispatcher(void *arg)
                  * excludes it from fds[]. */
 				struct alp_gpio *p = slot_pins[i - 1];
 				pthread_mutex_lock(&g_irq.mu);
-				if (p->in_use && p->irq_enabled && p->line_fd == fds[i].fd) {
+				if (p->in_use && p->irq_enabled && p->line_fd == fds[i].fd &&
+				    p->generation == slot_gens[i - 1]) {
 					p->irq_enabled = false;
 					p->irq_cb      = NULL;
 					p->irq_user    = NULL;
@@ -439,7 +527,12 @@ static void *irq_dispatcher(void *arg)
 			void            *user = NULL;
 
 			pthread_mutex_lock(&g_irq.mu);
-			if (p->in_use && p->irq_enabled && p->line_fd == fds[i].fd) {
+			/* line_fd is non-blocking (see alp_gpio_open), so this read
+			 * never parks the thread under g_irq.mu; the generation
+			 * check rejects a slot + fd number reused by another owner
+			 * since the poll() snapshot. */
+			if (p->in_use && p->irq_enabled && p->line_fd == fds[i].fd &&
+			    p->generation == slot_gens[i - 1]) {
 				ssize_t r = read(p->line_fd, &ev, sizeof(ev));
 				if (r == (ssize_t)sizeof(ev)) {
 					cb   = p->irq_cb;
@@ -518,32 +611,39 @@ alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, voi
 	 * matching every Zephyr dispatcher (issue #1734).  A NULL @p cb is
 	 * a malformed argument, not a lifecycle one -- ALP_ERR_INVAL,
 	 * checked only once the handle itself is known good. */
-	if (pin == NULL || !pin->in_use) {
+	if (pin == NULL || !alp_handle_op_enter(&pin->lifecycle, &pin->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	alp_status_t rc         = ALP_OK;
+	uint64_t     edge_flags = edge_to_flags(edge);
 	if (cb == NULL) {
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+		goto out;
 	}
-	uint64_t edge_flags = edge_to_flags(edge);
 	if (edge_flags == 0) {
 		/* No edge selected -- caller must pick rising / falling /
          * both.  Treat NONE as a configuration mistake rather than
          * silently doing nothing. */
-		return ALP_ERR_INVAL;
+		rc = ALP_ERR_INVAL;
+		goto out;
 	}
 
 	/* Re-configure the line as input + edge-detect.  Output and
-     * edge-detect flags are mutually exclusive at the kernel layer. */
+     * edge-detect flags are mutually exclusive at the kernel layer.
+     * g_irq.mu is held across the (non-blocking) SET_CONFIG so it is
+     * serialised against alp_gpio_configure()/alp_gpio_irq_disable(),
+     * which also change the line config under it. */
 	struct gpio_v2_line_config cfg = { 0 };
 	cfg.flags                      = GPIO_V2_LINE_FLAG_INPUT | edge_flags;
+	pthread_mutex_lock(&g_irq.mu);
 	if (_gpio_set_config(pin->line_fd, &cfg) < 0) {
-		return alp_status_from_posix_errno(errno);
+		rc = alp_status_from_posix_errno(errno);
+		pthread_mutex_unlock(&g_irq.mu);
+		goto out;
 	}
 
-	pthread_mutex_lock(&g_irq.mu);
-	alp_status_t rc = irq_start_dispatcher_locked();
+	rc = irq_start_dispatcher_locked();
 	if (rc != ALP_OK) {
-		pthread_mutex_unlock(&g_irq.mu);
 		/* Roll back the edge-detect reconfigure above (#746): the
          * dispatcher never started, so nothing will ever read/clear
          * events off this line, and the line must not be left
@@ -553,39 +653,45 @@ alp_gpio_irq_enable(alp_gpio_t *pin, alp_gpio_edge_t edge, alp_gpio_cb_t cb, voi
 		struct gpio_v2_line_config rollback_cfg = { 0 };
 		rollback_cfg.flags                      = GPIO_V2_LINE_FLAG_INPUT;
 		(void)_gpio_set_config(pin->line_fd, &rollback_cfg);
-		return rc;
+		pthread_mutex_unlock(&g_irq.mu);
+		goto out;
 	}
-	pin->irq_cb      = cb;
-	pin->irq_user    = user;
-	pin->irq_enabled = true;
-	pin->is_output   = false;
+	pin->irq_cb         = cb;
+	pin->irq_user       = user;
+	pin->irq_edge_flags = edge_flags;
+	pin->irq_enabled    = true;
+	pin->is_output      = false;
 	pthread_mutex_unlock(&g_irq.mu);
 
 	irq_wake();
-	return ALP_OK;
+out:
+	alp_handle_op_leave(&pin->active_ops);
+	return rc;
 }
 
 alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin)
 {
 	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
 	 * matching every Zephyr dispatcher (issue #1734). */
-	if (pin == NULL || !pin->in_use) {
+	if (pin == NULL || !alp_handle_op_enter(&pin->lifecycle, &pin->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	pthread_mutex_lock(&g_irq.mu);
-	pin->irq_enabled = false;
-	pin->irq_cb      = NULL;
-	pin->irq_user    = NULL;
-	pthread_mutex_unlock(&g_irq.mu);
-	irq_wake();
-
 	/* Best-effort: reconfigure back to plain input so subsequent
      * read()s don't fight buffered edge events.  Failures here are
      * non-fatal -- the dispatcher already won't dispatch to this
-     * pin. */
+     * pin.  Done under g_irq.mu, with the state change, so it cannot
+     * interleave with alp_gpio_configure()/alp_gpio_irq_enable(). */
 	struct gpio_v2_line_config cfg = { 0 };
 	cfg.flags                      = GPIO_V2_LINE_FLAG_INPUT;
+	pthread_mutex_lock(&g_irq.mu);
+	pin->irq_enabled    = false;
+	pin->irq_cb         = NULL;
+	pin->irq_user       = NULL;
+	pin->irq_edge_flags = 0;
 	(void)_gpio_set_config(pin->line_fd, &cfg);
+	pthread_mutex_unlock(&g_irq.mu);
+	irq_wake();
+	alp_handle_op_leave(&pin->active_ops);
 	return ALP_OK;
 }
 
@@ -594,10 +700,18 @@ void alp_gpio_close(alp_gpio_t *pin)
 	if (pin == NULL) {
 		return;
 	}
+	/* Gate out new ops and wait for in-flight ones (all short,
+	 * non-blocking ioctls) to leave before line_fd is closed, so none
+	 * can hit a recycled fd number.  Drained WITHOUT g_irq.mu held:
+	 * in-flight ops take it themselves.  false means already
+	 * closed/closing -- a second close() stays a no-op. */
+	if (!alp_handle_begin_close_blocking(&pin->lifecycle, &pin->active_ops)) {
+		return;
+	}
 	/* Detach from the dispatcher before releasing the fd so the
      * dispatcher's next snapshot pass observes the cleared slot
      * before any subsequent reuse of the pool entry. */
-	if (pin->in_use && pin->irq_enabled) {
+	if (pin->irq_enabled) {
 		pthread_mutex_lock(&g_irq.mu);
 		pin->irq_enabled = false;
 		pin->irq_cb      = NULL;
