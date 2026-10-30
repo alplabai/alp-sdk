@@ -177,6 +177,9 @@ struct cmp_alif_data {
 	comparator_callback_t   callback;
 	void                   *user_data;
 	enum comparator_trigger trigger;
+	/* Edges latched while no callback was registered, already filtered by
+	 * the configured trigger; consumed by trigger_is_pending(). */
+	uint32_t                pending;
 };
 
 /* DEVICE_MMIO_NAMED_* expand through DEV_CFG()/DEV_DATA(); the driver must
@@ -193,6 +196,21 @@ static inline uintptr_t cmp_base(const struct device *dev)
 
 static int cmp_alif_trigger_is_pending(const struct device *dev);
 
+/* CMP_INTERRUPT_STATUS bits that count as an event for @p trigger. */
+static uint32_t cmp_alif_trigger_events(enum comparator_trigger trigger)
+{
+	switch (trigger) {
+	case COMPARATOR_TRIGGER_RISING_EDGE:
+		return CMP_INT_EVENT_RISING;
+	case COMPARATOR_TRIGGER_FALLING_EDGE:
+		return CMP_INT_EVENT_FALLING;
+	case COMPARATOR_TRIGGER_BOTH_EDGES:
+		return CMP_INT_EVENT_BOTH;
+	default:
+		return 0U;
+	}
+}
+
 static int cmp_alif_get_output(const struct device *dev)
 {
 	/* CMP_STATUS.CMP_VALUE -- 1 = positive input above negative input. */
@@ -206,6 +224,7 @@ static int cmp_alif_set_trigger(const struct device *dev, enum comparator_trigge
 	uintptr_t                     base   = cmp_base(dev);
 
 	data->trigger = trigger;
+	data->pending = 0U;
 
 	/* Gate the NVIC line FIRST -- the HSCMP analog compare is LIVE the moment
 	 * the comparator is enabled, so its event line can already be asserted (an
@@ -259,19 +278,27 @@ static int cmp_alif_set_trigger_callback(const struct device  *dev,
 
 static int cmp_alif_trigger_is_pending(const struct device *dev)
 {
-	uintptr_t base = cmp_base(dev);
+	struct cmp_alif_data *data = dev->data;
+	uintptr_t             base = cmp_base(dev);
+	unsigned int          key  = irq_lock();
 
+	/* Latched in hardware but not yet serviced, plus edges the ISR parked
+	 * because no callback was registered.  Only the configured trigger's
+	 * edges count: an opposite edge is not an event the caller asked for. */
 	uint32_t status = sys_read32(base + CMP_INTERRUPT_STATUS) & CMP_INT_EVENT_BOTH;
+	uint32_t events = (status | data->pending) & cmp_alif_trigger_events(data->trigger);
 
+	/* Clear exactly what was latched (class contract: reading pending
+	 * consumes it).  Testing bit 0 alone reported "not pending" for a pure
+	 * falling edge and left it latched (#1821). */
 	if (status != 0U) {
-		/* Pending: clear exactly what was latched and report it (class
-		 * contract).  Testing bit 0 alone reported "not pending" for a pure
-		 * falling edge and left it latched (#1821). */
 		sys_write32(status, base + CMP_INTERRUPT_STATUS);
-		return 1;
 	}
+	data->pending = 0U;
 
-	return 0;
+	irq_unlock(key);
+
+	return events != 0U ? 1 : 0;
 }
 
 static DEVICE_API(comparator, cmp_alif_driver_api) = {
@@ -297,28 +324,20 @@ static void cmp_alif_isr(const struct device *dev)
 	 * Re-reading CMP_STATUS instead raced a short pulse: by the time the ISR
 	 * ran, a live analog comparator could already have swung back, and a
 	 * RISING_EDGE subscriber silently lost the callback it was owed. */
-	if (data->callback == NULL || data->trigger == COMPARATOR_TRIGGER_NONE) {
+	uint32_t events = status & cmp_alif_trigger_events(data->trigger);
+
+	if (events == 0U) {
 		return;
 	}
 
-	switch (data->trigger) {
-	case COMPARATOR_TRIGGER_RISING_EDGE:
-		if (status & CMP_INT_EVENT_RISING) {
-			data->callback(dev, data->user_data);
-		}
-		break;
-	case COMPARATOR_TRIGGER_FALLING_EDGE:
-		if (status & CMP_INT_EVENT_FALLING) {
-			data->callback(dev, data->user_data);
-		}
-		break;
-	case COMPARATOR_TRIGGER_BOTH_EDGES:
-	default:
-		if (status != 0U) {
-			data->callback(dev, data->user_data);
-		}
-		break;
+	/* No callback yet: keep the event pending (class contract) so a later
+	 * set_trigger_callback() or trigger_is_pending() still sees it. */
+	if (data->callback == NULL) {
+		data->pending |= events;
+		return;
 	}
+
+	data->callback(dev, data->user_data);
 }
 
 static int cmp_alif_init(const struct device *dev)
