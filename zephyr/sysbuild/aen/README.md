@@ -135,7 +135,8 @@ pre-provisioned module.
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     path/to/app \
     --sysbuild \
-    -- -DSB_CONF_FILE=/abs/path/to/alp-sdk/zephyr/sysbuild/aen/sysbuild.conf
+    -- -DSB_CONF_FILE=/abs/path/to/alp-sdk/zephyr/sysbuild/aen/sysbuild.conf \
+    -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="/abs/path/to/alp-sdk/keys/mcuboot_shared_dev_ecdsa_p256.pem"
 
 # Produces:
 #   build/<app>/zephyr/zephyr.signed.bin  -- signed application image

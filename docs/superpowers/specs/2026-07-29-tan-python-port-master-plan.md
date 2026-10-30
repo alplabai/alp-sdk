@@ -62,7 +62,8 @@ The day-1 and rebuild loop is just:
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
-    --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+    --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf \
+    -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="<abs-alp-sdk>/keys/mcuboot_shared_dev_ecdsa_p256.pem"
 west flash
 ```
 

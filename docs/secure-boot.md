@@ -107,11 +107,19 @@ boot:
   method: mcuboot
   signing:
     algorithm: ecdsa_p256
-    key_file: keys/prod_ecdsa_p256.pub.pem
+    key_file: keys/prod_ecdsa_p256.pem
   swap_algorithm: scratch   # valid on a two-slot target; omit (or drop
                              # this line) on a single-slot target such
                              # as E1M-AEN801 -- see below, it errors.
 ```
+
+`key_file:` is relative to the directory holding `board.yaml`, must
+exist, and names a PRIVATE PEM (not a `.pub.pem`, which cannot sign). A
+missing file fails the plan with `OrchestratorError` naming the resolved
+path. On AEN (curated sysbuild base) with ECDSA-P256, omitting `signing:`
+uses the SDK-anchored default dev key `keys/mcuboot_shared_dev_ecdsa_p256.pem`;
+on other families or algorithms no key is passed unless `key_file:` is set,
+and sysbuild falls back to MCUboot's built-in key.
 
 See [`docs/board-config-features.md` §Bootloader](board-config-features.md#bootloader-boot----mcuboot)
 for the full field reference (including why there is no
@@ -171,7 +179,8 @@ via `storage:` if you want it explicit.
    west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
        path/to/app \
        --sysbuild \
-       -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+       -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf \
+       -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="<abs-alp-sdk>/keys/mcuboot_shared_dev_ecdsa_p256.pem"
    ```
    (Or, if your `board.yaml` carries a `boot:` block, the loader's
    emitted overlay at `build/alp_sysbuild.conf` is the canonical

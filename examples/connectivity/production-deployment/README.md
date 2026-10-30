@@ -27,13 +27,13 @@ production stance the SDK recommends for shipping product.
 ```yaml
 boot:
   method: mcuboot
-  signing:
-    algorithm: ecdsa_p256
-    key_file:  keys/mcuboot_shared_dev_ecdsa_p256.pem
 ```
 
-Drives sysbuild's MCUboot child image. ECDSA-P256 matches the
-production signing-key flow in `iot-fleet-ota` (on a SKU with the
+Drives sysbuild's MCUboot child image. `signing:` is intentionally
+omitted, so the SDK-anchored default dev key
+`keys/mcuboot_shared_dev_ecdsa_p256.pem` (ECDSA-P256) is passed to
+sysbuild; set `signing.key_file:` to use your own key. This matches the
+signing-key flow in `iot-fleet-ota` (on a SKU with the
 OPTIGA Trust M fitted, that key can live in the secure element; it is
 DNP on E1M-AEN801). `swap_algorithm:`
 is intentionally omitted: E1M-AEN801's disjoint-slot0 `memory_map:`

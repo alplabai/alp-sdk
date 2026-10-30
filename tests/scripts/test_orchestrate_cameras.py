@@ -232,9 +232,6 @@ def test_two_cameras_with_the_same_module_shield_rejected(tmp_path: Path) -> Non
 BOOT = """
     boot:
       method: mcuboot
-      signing:
-        algorithm: ecdsa_p256
-        key_file: keys/mcuboot_shared_dev_ecdsa_p256.pem
 """
 
 
