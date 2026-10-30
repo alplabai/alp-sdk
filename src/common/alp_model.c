@@ -109,7 +109,12 @@ alp_status_t alp_model_parse(const uint8_t *data, size_t size, alp_model_t *out)
 
 	if (tbl_off > size || blob_count > (size - tbl_off) / 8u) return ALP_ERR_INVAL;
 
-	uint32_t idx[ALP_MODEL_MAX_TARGETS] = { 0 };
+	/* UINT32_MAX = "no blob key seen": a target whose map omits "blob"
+	 * keeps it, and the blob_count bounds check below rejects it instead
+	 * of silently binding the target to blob 0. */
+	uint32_t idx[ALP_MODEL_MAX_TARGETS];
+	for (size_t i = 0; i < ALP_MODEL_MAX_TARGETS; i++)
+		idx[i] = UINT32_MAX;
 	/* Backup-state budget = n_states - 2.  The depth (8 states ~= 6
      * backups) covers the explicit decode nesting on this path: top map
      * -> targets list -> target map -> requires map = 4 backups, the

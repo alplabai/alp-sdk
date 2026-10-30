@@ -108,11 +108,12 @@ ZTEST(alp_camera_registry, test_camera_get_fps_guards)
 ZTEST(alp_camera_registry, test_camera_capture_release_close_null_safe)
 {
 	alp_camera_frame_t frame = { .data = NULL };
-	/* Every op on a NULL handle returns NOT_READY.  Close on NULL
-     * is a documented no-op. */
+	/* start/stop/release on a NULL handle return NOT_READY; capture()
+     * documents NULL handle as INVAL.  Close on NULL is a documented
+     * no-op. */
 	zassert_equal(alp_camera_start(NULL), ALP_ERR_NOT_READY);
 	zassert_equal(alp_camera_stop(NULL), ALP_ERR_NOT_READY);
-	zassert_equal(alp_camera_capture(NULL, &frame, 0), ALP_ERR_NOT_READY);
+	zassert_equal(alp_camera_capture(NULL, &frame, 0), ALP_ERR_INVAL);
 	zassert_equal(alp_camera_release(NULL, &frame), ALP_ERR_NOT_READY);
 	alp_camera_close(NULL);
 }

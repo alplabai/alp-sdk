@@ -111,7 +111,10 @@ alp_wifi_connect(alp_wifi_t *h, const alp_wifi_credentials_t *creds, uint32_t ti
 	 * rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/_rpc_drain()
 	 * (GHSA-xhm8). A close() racing an in-flight connect() can no longer
 	 * tear down state underneath it. */
-	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+	if (h == NULL) {
+		return ALP_ERR_INVAL;
+	}
+	if (!alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
 	alp_status_t rc;
