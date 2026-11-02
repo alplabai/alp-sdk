@@ -9,7 +9,7 @@ firmware as a first-class consumer.
 > [**docs.alplab.ai/sdk/introduction**](https://docs.alplab.ai/sdk/introduction).
 > This in-repo markdown is the source of truth; the site mirrors
 > it with cross-version navigation + search.  Stuck on something?
-> Ask on [**community.alplab.ai**](https://community.alplab.ai/).
+> Open a [GitHub issue](https://github.com/alplabai/alp-sdk/issues).
 
 > **One user CLI: `tan`.** The SDK's `board.yaml` remains the project source of
 > truth. Python Tan owns the normal in-process planner and executor; alp-sdk
