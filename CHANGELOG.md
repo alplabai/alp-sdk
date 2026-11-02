@@ -7,6 +7,10 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.18.0 candidate
 
+### Removed — community forum links
+
+**The community forum (`community.alplab.ai`) was shut down on 2026-11-02, so every link to it is gone.** README, CONTRIBUTING, getting-started, troubleshooting, bring-up-aen and the issue-template chooser now point to GitHub Issues or contact@alplab.ai.
+
 ### Fixed — abidiff gate honesty (#2851)
 
 **The `abidiff` gate is advisory, and now says so.** It is not a required context and `pr-plain-cmake.yml` has no `merge_group:` trigger, so a red run blocks nothing (maintainer decision: stays advisory). The SONAME-rename suppression no longer masks an abidiff error (applied only when the exit status has no ABI_ERROR/USAGE bit), every skip (tool missing, no tag of the current minor) emits a `::warning::` in CI or under `--require-tool`, and a test covers the SONAME-only report shape against a synthetic fixture (hand-written in the shape `soname_only()` parses, not a real capture; a recorded `check_abidiff.py --baseline-tag v0.17.0-rc2 --keep` run on a host with abigail-tools is still pending, #2851).

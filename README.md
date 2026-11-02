@@ -14,7 +14,6 @@ vendor's SDK on top of ARM CMSIS. Change `som.sku:` in a project's
 `board.yaml`, rebuild, ship — within a SoM family, no source changes.
 
 Rendered docs: [**docs.alplab.ai/sdk/introduction**](https://docs.alplab.ai/sdk/introduction) ·
-community: [**community.alplab.ai**](https://community.alplab.ai/) ·
 issues: [**github.com/alplabai/alp-sdk/issues**](https://github.com/alplabai/alp-sdk/issues)
 
 ## Quickstart
