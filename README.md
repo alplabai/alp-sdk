@@ -196,6 +196,32 @@ editing, a GUI configurator, and `tan` wrappers, install the
 [`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)
 extension (a separate repo).
 
+## Alp Platform releases
+
+![One platform version pins five owned components, records the upstream pins and lists the validated hardware](docs/images/platform-stack.svg)
+
+An **Alp Platform** release is one version number for a tested stack: the Alp
+SDK, [`tan`](https://github.com/alplabai/tan-cli), the
+[VS Code extension](https://github.com/alplabai/alp-sdk-vscode) and the GD32
+and CC3501E bridge firmware, built and bench-validated together on real
+modules. Each component keeps its own SemVer and gates; the SDK version below
+is unchanged by it.
+
+- **Version:** `YY.M.MICRO[-rcN]`, for example `26.11.0`. The month is never
+  zero-padded (`27.2`, not `27.02`). The first line is **26.11** (November
+  2026); a new line ships every one to two months.
+- **Pin a workspace:** tan 0.8.0, shipping with the 26.11 line, adds a
+  platform command that pins a workspace to a line; `tan doctor` then reports any
+  component that differs from the manifest.
+- **Lock file:** when a workspace is pinned, `alp.lock` records
+  `platform: {version, manifestSha256}` and `verify_lock` reports a changed pin
+  or an SDK version that differs from the pinned one. Without a pin the lock is
+  unchanged.
+- **Support:** the latest line gets every fix; the previous line gets security
+  and brick-risk fixes for three months after the next line ships.
+
+Pinning a platform never flashes firmware.
+
 ## Development hosts
 
 First-class on **Linux**, **macOS**, and **Windows 11/10** (native

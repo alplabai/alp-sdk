@@ -280,3 +280,133 @@ def test_dir_digest_dedups_overlapping_globs(tmp_path):
 
     assert (_dir_digest(tmp_path, "metadata", ("**/*.json", "**/*.json"))
             == _dir_digest(tmp_path, "metadata", "**/*.json"))
+
+
+# ---- Alp Platform pin (#3053) ----
+
+_PIN = ("schema: alp-platform-v1\nplatform: 27.2.0\nreleased: 2027-02-26\n"
+        "components:\n  alp-sdk: { version: 9.9.9 }\n")
+
+
+def _pin(d, text=_PIN):
+    (d / ".alp").mkdir(parents=True, exist_ok=True)
+    (d / ".alp" / "platform.yaml").write_text(text, encoding="utf-8")
+
+
+def test_no_pin_has_no_platform_key(tmp_path):
+    import alp_lock
+    import pytest
+    if any((p / ".west").is_dir() for p in tmp_path.parents):
+        pytest.skip("a .west/ above the temp dir changes the pin lookup")
+    ws = _fixture_ws(tmp_path)
+    lock = alp_lock.build_lock(ws)
+    assert "platform" not in lock
+    assert alp_lock.verify_lock(lock, ws) == []
+
+
+def test_pin_fallback_path(tmp_path):
+    import alp_lock
+    import pytest
+    if any((p / ".west").is_dir() for p in tmp_path.parents):
+        pytest.skip("a .west/ above the temp dir changes the pin lookup")
+    ws = _fixture_ws(tmp_path)
+    _pin(ws)
+    lock = alp_lock.build_lock(ws)
+    assert lock["platform"] == {
+        "version": "27.2.0",
+        "manifestSha256": hashlib.sha256(_PIN.encode()).hexdigest()}
+    jsonschema.validate(lock, json.loads(SCHEMA.read_text(encoding="utf-8")))
+    assert str(tmp_path) not in json.dumps(lock)
+
+
+def test_pin_found_via_west_topdir_walk(tmp_path):
+    import alp_lock
+    top = tmp_path / "top"
+    (top / ".west").mkdir(parents=True)
+    ws = _fixture_ws(top / "alp-sdk")
+    _pin(top)
+    assert alp_lock.build_lock(ws)["platform"]["version"] == "27.2.0"
+
+
+def test_pin_added_removed_changed_drift(tmp_path):
+    import alp_lock
+    ws = _fixture_ws(tmp_path)
+    bare = alp_lock.build_lock(ws)
+    _pin(ws)
+    pinned = alp_lock.build_lock(ws)
+    added = {d.path for d in alp_lock.verify_lock(bare, ws)}
+    assert {"platform.version", "platform.manifestSha256"} <= added
+    (ws / ".alp" / "platform.yaml").unlink()
+    removed = {d.path for d in alp_lock.verify_lock(pinned, ws)}
+    assert {"platform.version", "platform.manifestSha256"} <= removed
+    _pin(ws, _PIN.replace("27.2.0", "27.3.0"))
+    changed = {d.path for d in alp_lock.verify_lock(pinned, ws)}
+    assert "platform.version" in changed and "platform.manifestSha256" in changed
+
+
+def test_pin_sdk_version_mismatch_drift(tmp_path):
+    import alp_lock
+    ws = _fixture_ws(tmp_path)
+    _pin(ws, _PIN.replace("9.9.9", "v9.9.9"))  # leading v ignored
+    assert alp_lock.verify_lock(alp_lock.build_lock(ws), ws) == []
+    _pin(ws, _PIN.replace("9.9.9", "9.9.8"))
+    d = alp_lock.verify_lock(alp_lock.build_lock(ws), ws)
+    assert [x.path for x in d] == ["platform.components.alp-sdk"]
+
+
+def test_malformed_pin_refused(tmp_path):
+    import alp_lock
+    import pytest
+    ws = _fixture_ws(tmp_path)
+    for bad in ("a: [", "schema: other\nplatform: 27.2.0\n",
+                _PIN.replace("27.2.0", "v27.2.0")):
+        _pin(ws, bad)
+        with pytest.raises(alp_lock.LockError):
+            alp_lock.build_lock(ws)
+
+
+def test_zero_padded_month_refused(tmp_path):
+    import alp_lock
+    import pytest
+    ws = _fixture_ws(tmp_path)
+    _pin(ws, _PIN.replace("27.2.0", "27.02.0"))
+    with pytest.raises(alp_lock.LockError, match="27.2.0"):
+        alp_lock.build_lock(ws)
+
+
+def test_pin_yaml_alias_and_oversize_refused(tmp_path):
+    import alp_lock
+    import pytest
+    ws = _fixture_ws(tmp_path)
+    _pin(ws, _PIN + "x: &a [1, 2]\ny: *a\n")
+    with pytest.raises(alp_lock.LockError, match="alias"):
+        alp_lock.build_lock(ws)
+    _pin(ws, "x: " + "y" * (64 * 1024 + 1))
+    with pytest.raises(alp_lock.LockError, match="larger than"):
+        alp_lock.build_lock(ws)
+
+
+def test_pin_error_message_is_bounded(tmp_path):
+    import alp_lock
+    import pytest
+    ws = _fixture_ws(tmp_path)
+    for bad in ('"' + "9" * 5000 + '"', "9" * 5000):  # quoted string; over-long int
+        _pin(ws, _PIN.replace("27.2.0", bad))
+        with pytest.raises(alp_lock.LockError) as exc:
+            alp_lock.build_lock(ws)
+        assert len(str(exc.value)) < 400
+
+
+def test_pin_components_shape_and_nesting_refused(tmp_path):
+    import alp_lock
+    import pytest
+    ws = _fixture_ws(tmp_path)
+    _pin(ws, "schema: alp-platform-v1\nplatform: 26.11.0\ncomponents: [alp-sdk]\n")
+    with pytest.raises(alp_lock.LockError, match="components"):
+        alp_lock.build_lock(ws)
+    _pin(ws, "x: " + "[" * 20000)
+    with pytest.raises(alp_lock.LockError):
+        alp_lock.build_lock(ws)
+    _pin(ws, _PIN.replace("27.2.0", "\"27.2.0\\n\""))
+    with pytest.raises(alp_lock.LockError):
+        alp_lock.build_lock(ws)

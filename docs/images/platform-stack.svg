@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 476" width="960" height="476" role="img" aria-label="One platform version pins a tested set of components">
+<title>One platform version pins a tested set of components</title>
+<style>
+  .bg{fill:#ffffff;stroke:#d0d7de;stroke-width:1}
+  .t{font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;fill:#1f2328}
+  .q{fill:#59636e}
+  .h{font-weight:600}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .box{fill:#ffffff;stroke:#8c959f;stroke-width:1.25}
+  .acc{fill:#ddf4ff;stroke:#0969da;stroke-width:2}
+  .own{fill:#ffffff;stroke:#0969da;stroke-width:1.25}
+  .rec{fill:#f6f8fa;stroke:#8c959f;stroke-width:1;stroke-dasharray:4 3}
+  .hw{fill:#dafbe1;stroke:#1a7f37;stroke-width:1.25}
+  .warn{fill:#fff1e5;stroke:#bc4c00;stroke-width:1.5}
+  .ln{stroke:#8c959f;stroke-width:1.25;fill:none}
+  .lnacc{stroke:#0969da;stroke-width:1.5;fill:none}
+  .band1{fill:#0969da;fill-opacity:.22;stroke:#0969da;stroke-width:1.25}
+  .band2{fill:#bc4c00;fill-opacity:.16;stroke:#bc4c00;stroke-width:1.25}
+  .grid{stroke:#d0d7de;stroke-width:1}
+  .ah{fill:#8c959f}
+  .ahacc{fill:#0969da}
+  @media (prefers-color-scheme: dark){
+    .bg{fill:#0d1117;stroke:#30363d}
+    .t{fill:#e6edf3} .q{fill:#9198a1}
+    .box{fill:#161b22;stroke:#656c76}
+    .acc{fill:#0d2a4a;stroke:#4493f8}
+    .own{fill:#161b22;stroke:#4493f8}
+    .rec{fill:#151b23;stroke:#656c76}
+    .hw{fill:#0f2e1a;stroke:#3fb950}
+    .warn{fill:#341a00;stroke:#db6d28}
+    .ln{stroke:#656c76} .lnacc{stroke:#4493f8}
+    .band1{fill:#4493f8;stroke:#4493f8}
+    .band2{fill:#db6d28;stroke:#db6d28}
+    .grid{stroke:#30363d}
+    .ah{fill:#656c76} .ahacc{fill:#4493f8}
+  }
+</style>
+<defs>
+  <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0L10 5L0 10z"/></marker>
+  <marker id="aa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ahacc" d="M0 0L10 5L0 10z"/></marker>
+</defs>
+<rect class="bg" x="0.5" y="0.5" width="959" height="475" rx="12"/>
+<text class="t h" x="24" y="36" font-size="18" text-anchor="start">One platform version pins a tested set of components</text>
+<text class="t q" x="24" y="58" font-size="13" text-anchor="start">Example: Alp Platform 26.11.0 (versions illustrative)</text>
+<rect class="acc" x="24" y="76" width="912" height="56" rx="8"/>
+<text class="t h" x="480" y="101" font-size="17" text-anchor="middle">Alp Platform 26.11.0</text>
+<text class="t q" x="480" y="121" font-size="12" text-anchor="middle">CalVer · platform.yaml · tag platform-v26.11.0</text>
+<text class="t q h" x="24" y="162" font-size="11.5" text-anchor="start">OWNED — exact version pinned, each keeps its own SemVer</text>
+<rect class="own" x="24" y="174" width="168" height="104" rx="8"/>
+<text class="t h" x="108.0" y="200" font-size="12.5" text-anchor="middle">alp-sdk</text>
+<text class="t h mono" x="108.0" y="224" font-size="16" text-anchor="middle">0.18.0</text>
+<text class="t q" x="108.0" y="248" font-size="11.5" text-anchor="middle">C API · metadata</text>
+<text class="t q" x="108.0" y="266" font-size="11.5" text-anchor="middle">meta-alp-sdk layer</text>
+<rect class="own" x="210" y="174" width="168" height="104" rx="8"/>
+<text class="t h" x="294.0" y="200" font-size="12.5" text-anchor="middle">tan-cli</text>
+<text class="t h mono" x="294.0" y="224" font-size="16" text-anchor="middle">0.8.0</text>
+<text class="t q" x="294.0" y="248" font-size="11.5" text-anchor="middle">build + flash CLI</text>
+<text class="t q" x="294.0" y="266" font-size="11.5" text-anchor="middle">tan platform use</text>
+<rect class="own" x="396" y="174" width="168" height="104" rx="8"/>
+<text class="t h" x="480.0" y="200" font-size="12.5" text-anchor="middle">alp-sdk-vscode</text>
+<text class="t h mono" x="480.0" y="224" font-size="16" text-anchor="middle">0.8.0</text>
+<text class="t q" x="480.0" y="248" font-size="11.5" text-anchor="middle">VS Code extension</text>
+<text class="t q" x="480.0" y="266" font-size="11.5" text-anchor="middle">status bar + warnings</text>
+<rect class="own" x="582" y="174" width="168" height="104" rx="8"/>
+<text class="t h" x="666.0" y="200" font-size="11" text-anchor="middle">gd32-bridge-firmware</text>
+<text class="t h mono" x="666.0" y="224" font-size="16" text-anchor="middle">0.3.1</text>
+<text class="t q" x="666.0" y="248" font-size="11.5" text-anchor="middle">supervisor bridge</text>
+<text class="t q" x="666.0" y="266" font-size="11.5" text-anchor="middle">wire protocol 0.7</text>
+<rect class="own" x="768" y="174" width="168" height="104" rx="8"/>
+<text class="t h" x="852.0" y="200" font-size="11" text-anchor="middle">cc3501e-bridge-firmware</text>
+<text class="t h mono" x="852.0" y="224" font-size="16" text-anchor="middle">0.9.2</text>
+<text class="t q" x="852.0" y="248" font-size="11.5" text-anchor="middle">Wi-Fi / BLE bridge</text>
+<text class="t q" x="852.0" y="266" font-size="11.5" text-anchor="middle">GPE stamp &gt; floor</text>
+<text class="t q h" x="24" y="304" font-size="11.5" text-anchor="start">RECORDED — come in through an owned component, cross-checked by the gate</text>
+<rect class="rec" x="24" y="316" width="168" height="50" rx="8"/>
+<text class="t h" x="108.0" y="337" font-size="12" text-anchor="middle">Zephyr</text>
+<text class="t mono q" x="108.0" y="356" font-size="11.5" text-anchor="middle">v4.4.1</text>
+<rect class="rec" x="210" y="316" width="168" height="50" rx="8"/>
+<text class="t h" x="294.0" y="337" font-size="12" text-anchor="middle">hal_alif</text>
+<text class="t mono q" x="294.0" y="356" font-size="11.5" text-anchor="middle">v2.3.0</text>
+<rect class="rec" x="396" y="316" width="168" height="50" rx="8"/>
+<text class="t h" x="480.0" y="337" font-size="12" text-anchor="middle">Yocto</text>
+<text class="t mono q" x="480.0" y="356" font-size="11.5" text-anchor="middle">kirkstone · scarthgap</text>
+<rect class="rec" x="582" y="316" width="168" height="50" rx="8"/>
+<text class="t h" x="666.0" y="337" font-size="12" text-anchor="middle">Renesas BSP</text>
+<text class="t mono q" x="666.0" y="356" font-size="11.5" text-anchor="middle">v6.30</text>
+<rect class="rec" x="768" y="316" width="168" height="50" rx="8"/>
+<text class="t h" x="852.0" y="337" font-size="12" text-anchor="middle">Renesas AI SDK</text>
+<text class="t mono q" x="852.0" y="356" font-size="11.5" text-anchor="middle">7.1</text>
+<text class="t q h" x="24" y="400" font-size="11.5" text-anchor="start">VALIDATED HARDWARE — bench-run with exactly this set</text>
+<rect class="hw" x="24" y="412" width="260" height="44" rx="8"/>
+<text class="t h mono" x="154" y="439" font-size="13" text-anchor="middle">E1M-AEN801  2626-R2</text>
+<text class="t q" x="300" y="439" font-size="12" text-anchor="start">rev = EEPROM hw_rev form &lt;board_datecode&gt;-&lt;rev key&gt;, printed as on the PCB</text>
+</svg>

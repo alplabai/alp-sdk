@@ -680,6 +680,20 @@ worth reaching for between release tags, where many commits share one
 `include/`. The lock does not yet pin resolved commit SHAs or toolchain
 container identities (tracked follow-ups).
 
+**Alp Platform pin (optional).** When the workspace is pinned to an Alp
+Platform release with tan's platform command (tan 0.8.0 and later, shipping
+with the 26.11 platform line), the lock gains
+`"platform": {"version": "27.2.0", "manifestSha256": "<64 hex>"}`, the version
+and the sha256 of the pin file `<west topdir>/.alp/platform.yaml` (no `.west/`
+above the SDK: `<sdk root>/.alp/platform.yaml`). With no pin the key is absent
+and existing locks verify unchanged. `verify_lock` reports a pin that was
+added, removed or changed, plus a `platform.components.alp-sdk` entry when the
+pin's `alp-sdk` version differs from `sdk.version`. The pin path is never
+written into the lock, and a malformed pin (bad YAML, wrong `schema`, or a
+version not in `YY.M.MICRO[-rcN]` form, e.g. zero-padded `27.02.0`) is a
+`LockError`. Pinning a platform changes the SBOM serial, which is derived from
+the whole lock.
+
 To inspect a lock locally — e.g. to see what a release tarball would carry —
 run `west alp-lock` (or `python3 scripts/west_commands/alp_lock.py
 --workspace .`); it writes `./alp.lock`, which `.gitignore` keeps out of any
