@@ -295,6 +295,9 @@ def _pin(d, text=_PIN):
 
 def test_no_pin_has_no_platform_key(tmp_path):
     import alp_lock
+    import pytest
+    if any((p / ".west").is_dir() for p in tmp_path.parents):
+        pytest.skip("a .west/ above the temp dir changes the pin lookup")
     ws = _fixture_ws(tmp_path)
     lock = alp_lock.build_lock(ws)
     assert "platform" not in lock
@@ -303,6 +306,9 @@ def test_no_pin_has_no_platform_key(tmp_path):
 
 def test_pin_fallback_path(tmp_path):
     import alp_lock
+    import pytest
+    if any((p / ".west").is_dir() for p in tmp_path.parents):
+        pytest.skip("a .west/ above the temp dir changes the pin lookup")
     ws = _fixture_ws(tmp_path)
     _pin(ws)
     lock = alp_lock.build_lock(ws)
@@ -389,3 +395,18 @@ def test_pin_error_message_is_bounded(tmp_path):
         with pytest.raises(alp_lock.LockError) as exc:
             alp_lock.build_lock(ws)
         assert len(str(exc.value)) < 400
+
+
+def test_pin_components_shape_and_nesting_refused(tmp_path):
+    import alp_lock
+    import pytest
+    ws = _fixture_ws(tmp_path)
+    _pin(ws, "schema: alp-platform-v1\nplatform: 26.11.0\ncomponents: [alp-sdk]\n")
+    with pytest.raises(alp_lock.LockError, match="components"):
+        alp_lock.build_lock(ws)
+    _pin(ws, "x: " + "[" * 20000)
+    with pytest.raises(alp_lock.LockError):
+        alp_lock.build_lock(ws)
+    _pin(ws, _PIN.replace("27.2.0", "\"27.2.0\\n\""))
+    with pytest.raises(alp_lock.LockError):
+        alp_lock.build_lock(ws)

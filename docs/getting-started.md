@@ -681,7 +681,8 @@ worth reaching for between release tags, where many commits share one
 container identities (tracked follow-ups).
 
 **Alp Platform pin (optional).** When the workspace is pinned to an Alp
-Platform release by `tan platform use`, the lock gains
+Platform release by `tan platform use` (tan 0.8.0 and later, shipping with the
+26.11 platform line), the lock gains
 `"platform": {"version": "27.2.0", "manifestSha256": "<64 hex>"}`, the version
 and the sha256 of the pin file `<west topdir>/.alp/platform.yaml` (no `.west/`
 above the SDK: `<sdk root>/.alp/platform.yaml`). With no pin the key is absent

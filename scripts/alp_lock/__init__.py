@@ -59,7 +59,7 @@ def _sdk_identity(root: Path) -> dict:
     return {"version": _reject_local(m.group(1))}
 
 
-_PLATFORM_RE = re.compile(r"^(\d{2})\.([1-9]|1[0-2])\.(0|[1-9]\d*)(-rc[1-9]\d*)?$")
+_PLATFORM_RE = re.compile(r"([0-9]{2})\.([1-9]|1[0-2])\.(0|[1-9][0-9]*)(-rc[1-9][0-9]*)?")
 _PLATFORM_SCHEMA = "alp-platform-v1"
 
 
@@ -98,22 +98,26 @@ def _load_pin(root: Path) -> Optional[tuple[dict, str]]:
     f = _find_pin(root)
     if f is None:
         return None
-    raw = f.read_bytes()
+    with f.open("rb") as fh:  # bounded read: never load a huge file to refuse it
+        raw = fh.read(_PIN_MAX_BYTES + 1)
     if len(raw) > _PIN_MAX_BYTES:
         raise LockError(f"platform pin is larger than {_PIN_MAX_BYTES} bytes")
     try:
         doc = yaml.load(raw, Loader=_NoAliasLoader)  # SafeLoader subclass
-    except (yaml.YAMLError, ValueError) as e:  # ValueError: e.g. an over-long int
-        raise LockError(f"platform pin is not valid YAML: {e}") from e
+    except (yaml.YAMLError, ValueError, RecursionError) as e:  # over-long int, deep nesting
+        raise LockError(f"platform pin is not valid YAML: {str(e)[:200] or type(e).__name__}") from e
     if not isinstance(doc, dict) or doc.get("schema") != _PLATFORM_SCHEMA:
         raise LockError(f"platform pin: unsupported schema (supported: {_PLATFORM_SCHEMA!r})")
     ver = doc.get("platform")
-    if not isinstance(ver, str) or not _PLATFORM_RE.match(ver):
+    if not isinstance(ver, str) or not _PLATFORM_RE.fullmatch(ver):
         hint = ""
         if isinstance(ver, str) and re.match(r"^\d{2}\.0\d\.", ver):
             fixed = re.sub(r"^(\d{2})\.0", r"\1.", ver, count=1)
             hint = f"; the month is never zero-padded (use {_PIN_REPR.repr(fixed)})"
         raise LockError(f"platform pin: invalid platform version {_PIN_REPR.repr(ver)}{hint}")
+    comps = doc.get("components")
+    if not isinstance(comps, dict) or not isinstance(comps.get("alp-sdk"), dict):
+        raise LockError("platform pin: components must be a mapping with an alp-sdk entry")
     return doc, hashlib.sha256(raw).hexdigest()
 
 
@@ -357,8 +361,7 @@ def verify_lock(committed: dict, workspace_root: Path,
     # The pinned platform must ship the SDK it is being verified against.
     pin = _load_pin(Path(workspace_root))
     if pin is not None:
-        comp = (pin[0].get("components") or {}).get("alp-sdk")
-        pinned = comp.get("version") if isinstance(comp, dict) else None
+        pinned = pin[0]["components"]["alp-sdk"].get("version")
         sdk_v = actual["sdk"]["version"]
         if str(pinned).lstrip("v") != sdk_v.lstrip("v"):
             drifts.append(Drift("platform.components.alp-sdk", pinned, sdk_v))
