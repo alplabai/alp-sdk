@@ -210,8 +210,9 @@ is unchanged by it.
 - **Version:** `YY.M.MICRO[-rcN]`, for example `26.11.0`. The month is never
   zero-padded (`27.2`, not `27.02`). The first line is **26.11** (November
   2026); a new line ships every one to two months.
-- **Pin a workspace (from tan 0.8.0, shipping with 26.11):** `tan platform use
-  26.11`, then `tan doctor` reports any component that differs from the manifest.
+- **Pin a workspace:** tan 0.8.0, shipping with the 26.11 line, adds a
+  platform command that pins a workspace to a line; `tan doctor` then reports any
+  component that differs from the manifest.
 - **Lock file:** when a workspace is pinned, `alp.lock` records
   `platform: {version, manifestSha256}` and `verify_lock` reports a changed pin
   or an SDK version that differs from the pinned one. Without a pin the lock is
