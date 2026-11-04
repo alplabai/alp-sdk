@@ -366,3 +366,26 @@ def test_zero_padded_month_refused(tmp_path):
     _pin(ws, _PIN.replace("27.2.0", "27.02.0"))
     with pytest.raises(alp_lock.LockError, match="27.2.0"):
         alp_lock.build_lock(ws)
+
+
+def test_pin_yaml_alias_and_oversize_refused(tmp_path):
+    import alp_lock
+    import pytest
+    ws = _fixture_ws(tmp_path)
+    _pin(ws, _PIN + "x: &a [1, 2]\ny: *a\n")
+    with pytest.raises(alp_lock.LockError, match="alias"):
+        alp_lock.build_lock(ws)
+    _pin(ws, "x: " + "y" * (64 * 1024 + 1))
+    with pytest.raises(alp_lock.LockError, match="larger than"):
+        alp_lock.build_lock(ws)
+
+
+def test_pin_error_message_is_bounded(tmp_path):
+    import alp_lock
+    import pytest
+    ws = _fixture_ws(tmp_path)
+    for bad in ('"' + "9" * 5000 + '"', "9" * 5000):  # quoted string; over-long int
+        _pin(ws, _PIN.replace("27.2.0", bad))
+        with pytest.raises(alp_lock.LockError) as exc:
+            alp_lock.build_lock(ws)
+        assert len(str(exc.value)) < 400

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import reprlib
 from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
@@ -62,6 +63,22 @@ _PLATFORM_RE = re.compile(r"^(\d{2})\.([1-9]|1[0-2])\.(0|[1-9]\d*)(-rc[1-9]\d*)?
 _PLATFORM_SCHEMA = "alp-platform-v1"
 
 
+# A real pin is about 1 KiB.  It is a copy of a network-fetched manifest, so
+# refuse YAML aliases (alias-amplification inputs) and bound what error
+# messages echo back.
+_PIN_MAX_BYTES = 64 * 1024
+_PIN_REPR = reprlib.Repr()
+_PIN_REPR.maxstring = 80
+_PIN_REPR.maxother = 80
+
+
+class _NoAliasLoader(yaml.SafeLoader):
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            raise yaml.YAMLError("YAML aliases are not allowed in a platform pin")
+        return super().compose_node(parent, index)
+
+
 def _find_pin(root: Path) -> Optional[Path]:
     """Locate the workspace Alp Platform pin (`<west topdir>/.alp/platform.yaml`,
     written by `tan platform use`): walk up from the SDK root to the first dir
@@ -82,9 +99,11 @@ def _load_pin(root: Path) -> Optional[tuple[dict, str]]:
     if f is None:
         return None
     raw = f.read_bytes()
+    if len(raw) > _PIN_MAX_BYTES:
+        raise LockError(f"platform pin is larger than {_PIN_MAX_BYTES} bytes")
     try:
-        doc = yaml.safe_load(raw)
-    except yaml.YAMLError as e:
+        doc = yaml.load(raw, Loader=_NoAliasLoader)  # SafeLoader subclass
+    except (yaml.YAMLError, ValueError) as e:  # ValueError: e.g. an over-long int
         raise LockError(f"platform pin is not valid YAML: {e}") from e
     if not isinstance(doc, dict) or doc.get("schema") != _PLATFORM_SCHEMA:
         raise LockError(f"platform pin: unsupported schema (supported: {_PLATFORM_SCHEMA!r})")
@@ -93,8 +112,8 @@ def _load_pin(root: Path) -> Optional[tuple[dict, str]]:
         hint = ""
         if isinstance(ver, str) and re.match(r"^\d{2}\.0\d\.", ver):
             fixed = re.sub(r"^(\d{2})\.0", r"\1.", ver, count=1)
-            hint = f"; the month is never zero-padded (use {fixed!r})"
-        raise LockError(f"platform pin: invalid platform version {ver!r}{hint}")
+            hint = f"; the month is never zero-padded (use {_PIN_REPR.repr(fixed)})"
+        raise LockError(f"platform pin: invalid platform version {_PIN_REPR.repr(ver)}{hint}")
     return doc, hashlib.sha256(raw).hexdigest()
 
 
