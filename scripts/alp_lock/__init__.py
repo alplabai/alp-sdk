@@ -58,6 +58,53 @@ def _sdk_identity(root: Path) -> dict:
     return {"version": _reject_local(m.group(1))}
 
 
+_PLATFORM_RE = re.compile(r"^(\d{2})\.([1-9]|1[0-2])\.(0|[1-9]\d*)(-rc[1-9]\d*)?$")
+_PLATFORM_SCHEMA = "alp-platform-v1"
+
+
+def _find_pin(root: Path) -> Optional[Path]:
+    """Locate the workspace Alp Platform pin (`<west topdir>/.alp/platform.yaml`,
+    written by `tan platform use`): walk up from the SDK root to the first dir
+    holding `.west/`; with no west topdir, fall back to `<root>/.alp/`."""
+    start = root.resolve()
+    for d in (start, *start.parents):
+        if (d / ".west").is_dir():
+            cand = d / ".alp" / "platform.yaml"
+            return cand if cand.is_file() else None
+    cand = start / ".alp" / "platform.yaml"
+    return cand if cand.is_file() else None
+
+
+def _load_pin(root: Path) -> Optional[tuple[dict, str]]:
+    """Return (manifest doc, sha256 hex of the file bytes) or None when no pin.
+    Never exposes the pin path (it would be a local path in the lock)."""
+    f = _find_pin(root)
+    if f is None:
+        return None
+    raw = f.read_bytes()
+    try:
+        doc = yaml.safe_load(raw)
+    except yaml.YAMLError as e:
+        raise LockError(f"platform pin is not valid YAML: {e}") from e
+    if not isinstance(doc, dict) or doc.get("schema") != _PLATFORM_SCHEMA:
+        raise LockError(f"platform pin: unsupported schema (supported: {_PLATFORM_SCHEMA!r})")
+    ver = doc.get("platform")
+    if not isinstance(ver, str) or not _PLATFORM_RE.match(ver):
+        hint = ""
+        if isinstance(ver, str) and re.match(r"^\d{2}\.0\d\.", ver):
+            fixed = re.sub(r"^(\d{2})\.0", r"\1.", ver, count=1)
+            hint = f"; the month is never zero-padded (use {fixed!r})"
+        raise LockError(f"platform pin: invalid platform version {ver!r}{hint}")
+    return doc, hashlib.sha256(raw).hexdigest()
+
+
+def _platform(root: Path) -> Optional[dict]:
+    pin = _load_pin(root)
+    if pin is None:
+        return None
+    return {"version": _reject_local(pin[0]["platform"]), "manifestSha256": pin[1]}
+
+
 def _west_projects(root: Path) -> dict:
     doc = yaml.safe_load((root / "west.yml").read_text(encoding="utf-8")) or {}
     man = doc.get("manifest") or {}
@@ -195,7 +242,7 @@ def build_lock(workspace_root: Path, board_yaml: Optional[Path] = None) -> dict:
         som = (bdoc.get("som") or {})
         raw_board = som.get("sku") if isinstance(som, dict) else None
         board = _reject_local(str(raw_board)) if raw_board is not None else None
-    return {
+    lock = {
         "lockVersion": 1,
         "generatedBy": "west alp-lock",
         "sdk": _sdk_identity(root),
@@ -205,6 +252,10 @@ def build_lock(workspace_root: Path, board_yaml: Optional[Path] = None) -> dict:
         "digests": _digests(root),
         "resolution": {"board": board, "groupsEnabled": sorted(groups_enabled)},
     }
+    plat = _platform(root)
+    if plat is not None:  # key absent (not null) when no pin exists
+        lock["platform"] = plat
+    return lock
 
 
 from dataclasses import dataclass
@@ -284,4 +335,12 @@ def verify_lock(committed: dict, workspace_root: Path,
             continue
         if a.get(key) != b.get(key):
             drifts.append(Drift(key, a.get(key), b.get(key)))
+    # The pinned platform must ship the SDK it is being verified against.
+    pin = _load_pin(Path(workspace_root))
+    if pin is not None:
+        comp = (pin[0].get("components") or {}).get("alp-sdk")
+        pinned = comp.get("version") if isinstance(comp, dict) else None
+        sdk_v = actual["sdk"]["version"]
+        if str(pinned).lstrip("v") != sdk_v.lstrip("v"):
+            drifts.append(Drift("platform.components.alp-sdk", pinned, sdk_v))
     return drifts
