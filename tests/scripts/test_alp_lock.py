@@ -290,7 +290,7 @@ _PIN = ("schema: alp-platform-v1\nplatform: 27.2.0\nreleased: 2027-02-26\n"
 
 def _pin(d, text=_PIN):
     (d / ".alp").mkdir(parents=True, exist_ok=True)
-    (d / ".alp" / "platform.yaml").write_text(text, encoding="utf-8")
+    (d / ".alp" / "platform.yaml").write_bytes(text.encode("utf-8"))  # raw bytes: write_text gives CRLF on Windows
 
 
 def test_no_pin_has_no_platform_key(tmp_path):
