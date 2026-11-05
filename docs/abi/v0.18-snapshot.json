@@ -15457,8 +15457,8 @@
           "value": "0"
         },
         "ALP_VERSION_STRING": {
-          "hash": "e0a8c6aec8a9e72e",
-          "value": "\"0.18.0-rc1\""
+          "hash": "482c25a1d9a375c5",
+          "value": "\"0.18.0\""
         }
       },
       "typedefs": {},
