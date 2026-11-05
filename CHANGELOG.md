@@ -5,6 +5,8 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
+## [Unreleased] - v0.19.0 candidate
+
 ## [v0.18.0] - 2026-11-05
 
 ### Added — E1M EVK 2641-R3 on-board RP2040 debug probe docs (Refs #405)
